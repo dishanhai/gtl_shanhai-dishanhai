@@ -568,37 +568,6 @@ public class DShanhaiBigTagFilterStockBusMachine extends MEInputBusPartMachine
                 setChanged(true);
                 onContentsChanged();
             }
-            // 诊断：simulate 阶段有剩余未满足的 ingredient 时打印（每 40 tick 限流）
-            if (simulate && !ingredients.isEmpty()) {
-                long dtick = getOffsetTimer();
-                if (dtick % 40 == 0) {
-                    var sb = new StringBuilder();
-                    for (var leftIngr : ingredients) {
-                        long need2;
-                        if (leftIngr instanceof LongIngredient li2) need2 = li2.getActualAmount();
-                        else if (leftIngr instanceof SizedIngredient si2) need2 = si2.getAmount();
-                        else need2 = 1;
-                        // 该 ingredient 在 cachedKeys 里能匹配到几个 key、AE 实时总量多少
-                        long avail = 0; int matched = 0;
-                        for (AEItemKey k : cachedKeys) {
-                            if (k.matches(leftIngr)) {
-                                matched++;
-                                avail += storage.extract(k, Long.MAX_VALUE, Actionable.SIMULATE, actionSource);
-                            }
-                        }
-                        sb.append(String.format("[需=%d 匹配key数=%d AE可用=%d ingr=%s] ", need2, matched, avail, leftIngr.toString()));
-                    }
-                    // 打印 cachedKeys 里前若干物品，看总线到底装了什么
-                    var ksb = new StringBuilder();
-                    int kn = 0;
-                    for (AEItemKey k : cachedKeys) {
-                        if (kn++ >= 8) { ksb.append("..."); break; }
-                        ksb.append(k.getItem().builtInRegistryHolder().key().location()).append(" ");
-                    }
-                    LOG.warn("[供料不足] 剩余{}项 cachedKeys={}({}) 详情: {}",
-                            ingredients.size(), cachedKeys.size(), ksb.toString(), sb.toString());
-                }
-            }
             return ingredients.isEmpty() ? null : ingredients;
         }
 

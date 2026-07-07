@@ -220,7 +220,7 @@ public class ModuleLevelCondition extends RecipeCondition {
 
         boolean result = count >= requiredLevel;
         LOG.debug("[MLC] result={} (count={} >= {})", result, count, requiredLevel);
-        if (!result) LOG.warn("[ModuleLCond] FAIL {}: need {}x {} found {}", moduleId, requiredLevel, moduleId, count);
+        if (!result) LOG.debug("[ModuleLCond] FAIL {}: need {}x {} found {}", moduleId, requiredLevel, moduleId, count);
         return result;
     }
 

@@ -53,9 +53,10 @@ public class SuperDiskArrayInventory implements StorageCell {
     public static SuperDiskArrayInventory create(ItemStack stack, ISaveProvider saveProvider) {
         if (stack == null || stack.isEmpty() || !(stack.getItem() instanceof SuperDiskArrayItem)) return null;
         CompoundTag tag = stack.getOrCreateTag();
-        if (saveProvider != null && hasInlineCellNbt(tag) && !tag.getBoolean(TAG_RUNTIME_UUID)) {
-            tag.putUUID(TAG_UUID, UUID.randomUUID());
-            tag.putBoolean(TAG_RUNTIME_UUID, true);
+        // 取出即分家：任何被真实 AE 上下文访问（saveProvider≠null）的副本都认领独立所有权，
+        // 不再依赖 inline 态。避免同内容模板包共享确定性 UUID → 共用后端存储 → 互相溢出。
+        if (saveProvider != null) {
+            claimOwnership(stack);
         }
 
         // UUID 归一化：如果 NBT 中没有 UUID，基于内容生成确定性 UUID
@@ -75,6 +76,44 @@ public class SuperDiskArrayInventory implements StorageCell {
         SuperDiskArrayInventory inventory = new SuperDiskArrayInventory(stack, saveProvider, uuid);
         INVENTORY_CACHE.put(stack, inventory);
         return inventory;
+    }
+
+    /**
+     * 取出即分家：为一个被玩家真实持有/被 AE 访问的 SDA 副本认领独立随机 UUID，
+     * 使其拥有专属后端存储，避免与同内容的模板包（确定性 UUID）共享 backend 而互相溢出。
+     *
+     * <p>已认领（TAG_RUNTIME_UUID=true）的副本直接跳过，防止二次 fork。
+     * JEI ghost 不在真实世界、不 tick、不经 saveProvider≠null 的 create，因此保持确定性 UUID，
+     * 不影响 JEI 去重与子类型识别。
+     */
+    public static void claimOwnership(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || !(stack.getItem() instanceof SuperDiskArrayItem)) return;
+        CompoundTag tag = stack.getOrCreateTag();
+        if (tag.getBoolean(TAG_RUNTIME_UUID)) return; // 已认领，跳过
+
+        UUID newUuid = UUID.randomUUID();
+
+        if (hasInlineCellNbt(tag)) {
+            // inline 态：换成随机 UUID，inline 内容保留，首次 load() 时会迁进 backend[newUuid]
+            tag.putUUID(TAG_UUID, newUuid);
+            tag.putBoolean(TAG_RUNTIME_UUID, true);
+            return;
+        }
+
+        // 轻量态（已破坏的旧物品，内容在共享 backend）：需要服务器复制一份到独立 UUID
+        DShanhaiVirtualCellSavedData data = getSavedData();
+        if (data == null) return; // 服务器不可用（如客户端 tick）：暂不认领，下次 tick 重试
+
+        if (tag.hasUUID(TAG_UUID)) {
+            UUID oldUuid = tag.getUUID(TAG_UUID);
+            Map<AEKey, BigInteger> content = data.readCellBigAmounts(oldUuid);
+            if (!content.isEmpty()) {
+                data.updateCellBig(newUuid, "sda", SuperDiskArrayItem.TOTAL_BYTES, content);
+            }
+        }
+        tag.putUUID(TAG_UUID, newUuid);
+        tag.putBoolean(TAG_RUNTIME_UUID, true);
+        INVENTORY_CACHE.remove(stack); // 旧 UUID 的缓存作废
     }
 
     /**

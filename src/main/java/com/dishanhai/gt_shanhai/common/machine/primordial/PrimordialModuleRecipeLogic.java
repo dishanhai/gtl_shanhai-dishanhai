@@ -37,7 +37,6 @@ import java.util.Set;
 public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
 
     private static final long LOOKUP_CACHE_TICKS = 20L; // 延长到 20 tick（1秒）
-    private static final org.slf4j.Logger DIAG_LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai.PrimordialDiag");
 
     private long cachedLookupTick = Long.MIN_VALUE;
     private GTRecipeType cachedLookupForcedType;
@@ -245,39 +244,11 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         }
 
         Set<GTRecipe> result = lookupRecipeIteratorUncached(forcedType, selectedTypes);
-        if (result.isEmpty() && tick % 40 == 0) {
-            gtShanhai$diagEmptyLookup(selectedTypes);
-        }
         cachedLookupTick = tick;
         cachedLookupForcedType = forcedType;
         cachedLookupRecipes = result;
         cachedLookupRecipesHash = result.isEmpty() ? 0 : System.identityHashCode(result);
         return result;
-    }
-
-    /** 诊断：配方查找返回空时，逐项打印每个选中配方类型卡在哪个检查 */
-    private void gtShanhai$diagEmptyLookup(GTRecipeType[] selectedTypes) {
-        MetaMachine m = getMachine();
-        DIAG_LOG.warn("[空查找] 机器={} tier={} 选中类型数={}",
-                m.getClass().getSimpleName(), getMachine().getTier(),
-                selectedTypes == null ? 0 : selectedTypes.length);
-        if (selectedTypes == null) return;
-        for (GTRecipeType type : selectedTypes) {
-            if (type == null) continue;
-            String tn = type.registryName != null ? type.registryName.toString() : "null";
-            if (!isSelectedRecipeType(type)) { DIAG_LOG.warn("  [{}] 未选中", tn); continue; }
-            GTRecipe raw = type.getLookup().find(getMachine(), r -> true);
-            if (raw == null) { DIAG_LOG.warn("  [{}] find(全通过)=null 该类型无任何配方", tn); continue; }
-            String rid = raw.getId() != null ? raw.getId().toString() : "?";
-            boolean inMatch = matchRecipeInputHandlePartCache(raw);
-            boolean outMatch = RecipeRunnerHelper.matchRecipeOutput(getMachine(), raw);
-            boolean euOk = IGTRecipe.of(raw).getEuTier() <= getMachine().getTier();
-            boolean condOk = raw.checkConditions(this).isSuccess();
-            boolean modOk = checkModuleCondition(raw);
-            DIAG_LOG.warn("  [{}] recipe={} 输入料匹配={} 输出空间={} EU层级={}(需{}<=机{}) gt条件={} 模块条件={}",
-                    tn, rid, inMatch, outMatch, euOk,
-                    IGTRecipe.of(raw).getEuTier(), getMachine().getTier(), condOk, modOk);
-        }
     }
 
     private Set<GTRecipe> lookupRecipeIteratorUncached(GTRecipeType forcedType, GTRecipeType[] selectedTypes) {

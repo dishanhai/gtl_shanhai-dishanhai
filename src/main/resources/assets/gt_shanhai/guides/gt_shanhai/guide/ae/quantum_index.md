@@ -110,3 +110,16 @@ item_ids:
 * 外壳本身可以接线缆传频道，所以不必额外占用 ME 接口位。
 
 </Column>
+
+<Column gap="2" fullWidth={true}>
+
+### 经典 4×4×4 结构
+
+下方场景为正面结构。外壳由 <ItemLink id="gt_shanhai:quantum_structure" /> 围成，内部放置核心单元、存储单元和处理器。
+
+<GameScene zoom="4" background="transparent" interactive={true} fullWidth={true}>
+  <ImportStructure src="structures/quantum_computer.snbt" />
+  <IsometricCamera yaw="195" pitch="30" />
+</GameScene>
+
+</Column>

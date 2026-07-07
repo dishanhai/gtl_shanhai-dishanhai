@@ -118,7 +118,7 @@ public final class PatternRecipeTypeHelper {
         try {
             IPatternDetails details = PatternDetailsHelper.decodePattern(stack, level);
             if (!(details instanceof AEProcessingPattern pattern)) {
-                LOG.info("[inferRecipe] decodePattern 非 AEProcessingPattern: {}",
+                LOG.debug("[inferRecipe] decodePattern 非 AEProcessingPattern: {}",
                         details == null ? "null" : details.getClass().getName());
                 return null;
             }
@@ -127,7 +127,7 @@ public final class PatternRecipeTypeHelper {
             GTRecipe recipe = recipeTypeId == null || recipeTypeId.isEmpty()
                     ? VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out)
                     : VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out, recipeTypeId);
-            LOG.info("[inferRecipe] inputs={} outputs={} -> recipe={}",
+            LOG.debug("[inferRecipe] inputs={} outputs={} -> recipe={}",
                     describeStacks(in), describeStacks(out),
                     recipe == null ? "null"
                             : (recipe.recipeType == null || recipe.recipeType.registryName == null
