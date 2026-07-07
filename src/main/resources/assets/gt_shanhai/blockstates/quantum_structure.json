@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "formed=false,powered=false": { "model": "gt_shanhai:block/quantum_structure" },
+    "formed=false,powered=true": { "model": "gt_shanhai:block/quantum_structure" },
+    "formed=true,powered=false": { "model": "gt_shanhai:block/crafting/quantum_structure_formed" },
+    "formed=true,powered=true": { "model": "gt_shanhai:block/crafting/quantum_structure_formed" }
+  }
+}

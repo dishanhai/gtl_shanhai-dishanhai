@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "formed=false,powered=false": { "model": "gt_shanhai:block/quantum_crafting_storage" },
+    "formed=false,powered=true": { "model": "gt_shanhai:block/quantum_crafting_storage" },
+    "formed=true,powered=false": { "model": "gt_shanhai:block/crafting/quantum_crafting_storage_formed" },
+    "formed=true,powered=true": { "model": "gt_shanhai:block/crafting/quantum_crafting_storage_formed" }
+  }
+}

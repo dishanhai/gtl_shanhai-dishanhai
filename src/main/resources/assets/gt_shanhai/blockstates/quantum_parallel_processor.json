@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "formed=false,powered=false": { "model": "gt_shanhai:block/quantum_parallel_processor" },
+    "formed=false,powered=true": { "model": "gt_shanhai:block/quantum_parallel_processor" },
+    "formed=true,powered=false": { "model": "gt_shanhai:block/crafting/quantum_parallel_processor_formed" },
+    "formed=true,powered=true": { "model": "gt_shanhai:block/crafting/quantum_parallel_processor_formed" }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "parent": "gt_shanhai:eternal_gregtech_workshop/root",
+  "display": {
+    "icon": {
+      "item": "gt_shanhai:eternal_workshop_data_module"
+    },
+    "title": {
+      "translate": "advancements.gt_shanhai.eternal_gregtech_workshop.formed.title"
+    },
+    "description": {
+      "translate": "advancements.gt_shanhai.eternal_gregtech_workshop.formed.description"
+    },
+    "frame": "goal",
+    "show_toast": true,
+    "announce_to_chat": true,
+    "hidden": false
+  },
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "gt_shanhai:block/active_neutron_casing" }
+  }
+}

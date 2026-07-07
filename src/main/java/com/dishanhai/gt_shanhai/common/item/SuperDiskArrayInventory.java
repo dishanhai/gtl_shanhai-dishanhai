@@ -1,0 +1,291 @@
+package com.dishanhai.gt_shanhai.common.item;
+
+import com.dishanhai.gt_shanhai.api.ae.DShanhaiAEKeyCodec;
+import com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData;
+
+import appeng.api.config.Actionable;
+import appeng.api.networking.security.IActionSource;
+import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.AEKey;
+import appeng.api.stacks.KeyCounter;
+import appeng.api.storage.StorageCells;
+import appeng.api.storage.cells.CellState;
+import appeng.api.storage.cells.ISaveProvider;
+import appeng.api.storage.cells.StorageCell;
+
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.server.ServerLifecycleHooks;
+
+import java.math.BigInteger;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.WeakHashMap;
+import java.util.UUID;
+
+public class SuperDiskArrayInventory implements StorageCell {
+    public static final String TAG_UUID = "shanhai_sda_uuid";
+    public static final String TAG_TOTAL = "shanhai_sda_total";
+    public static final String TAG_TYPES = "shanhai_sda_types";
+    private static final String TAG_RUNTIME_UUID = "shanhai_sda_runtime_uuid";
+    private static final BigInteger LONG_MAX = BigInteger.valueOf(Long.MAX_VALUE);
+    private static final Map<ItemStack, SuperDiskArrayInventory> INVENTORY_CACHE = new WeakHashMap<>();
+
+    private final ItemStack stack;
+    private final ISaveProvider saveProvider;
+    private final UUID uuid;
+    private final Map<AEKey, BigInteger> amounts = new HashMap<>();
+    private BigInteger total = BigInteger.ZERO;
+    private boolean persisted = true;
+
+    private SuperDiskArrayInventory(ItemStack stack, ISaveProvider saveProvider, UUID uuid) {
+        this.stack = stack;
+        this.saveProvider = saveProvider;
+        this.uuid = uuid;
+        load();
+    }
+
+    public static SuperDiskArrayInventory create(ItemStack stack, ISaveProvider saveProvider) {
+        if (stack == null || stack.isEmpty() || !(stack.getItem() instanceof SuperDiskArrayItem)) return null;
+        CompoundTag tag = stack.getOrCreateTag();
+        if (saveProvider != null && hasInlineCellNbt(tag) && !tag.getBoolean(TAG_RUNTIME_UUID)) {
+            tag.putUUID(TAG_UUID, UUID.randomUUID());
+            tag.putBoolean(TAG_RUNTIME_UUID, true);
+        }
+
+        // UUID 归一化：如果 NBT 中没有 UUID，基于内容生成确定性 UUID
+        UUID uuid;
+        if (tag.hasUUID(TAG_UUID)) {
+            uuid = tag.getUUID(TAG_UUID);
+        } else {
+            // 基于 keys + amts + display.Name 计算确定性 UUID，确保相同内容的 SDA 使用相同 UUID
+            uuid = generateDeterministicUUID(tag);
+            tag.putUUID(TAG_UUID, uuid);
+        }
+
+        SuperDiskArrayInventory cached = INVENTORY_CACHE.get(stack);
+        if (cached != null && uuid.equals(cached.uuid) && cached.saveProvider == saveProvider) {
+            return cached;
+        }
+        SuperDiskArrayInventory inventory = new SuperDiskArrayInventory(stack, saveProvider, uuid);
+        INVENTORY_CACHE.put(stack, inventory);
+        return inventory;
+    }
+
+    /**
+     * 基于 NBT 内容生成确定性 UUID，确保相同内容的 SDA 包使用相同 UUID。
+     * 用于 JEI 注册和配方归一化，避免同一个包被识别为不同物品。
+     */
+    public static UUID generateDeterministicUUID(CompoundTag tag) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+
+            // 包含完整 keys，避免无限元件 record 不同但 id 相同导致 JEI 合并
+            if (tag.contains("keys", Tag.TAG_LIST)) {
+                ListTag keys = tag.getList("keys", Tag.TAG_COMPOUND);
+                for (int i = 0; i < keys.size(); i++) {
+                    CompoundTag keyTag = keys.getCompound(i);
+                    md.update(keyTag.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+
+            // 包含 amts（数量数组）
+            if (tag.contains("amts", Tag.TAG_LONG_ARRAY)) {
+                long[] amts = tag.getLongArray("amts");
+                java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(amts.length * 8);
+                for (long amt : amts) buffer.putLong(amt);
+                md.update(buffer.array());
+            }
+
+            // 包含 display.Name（包名称）
+            if (tag.contains("display", Tag.TAG_COMPOUND)) {
+                CompoundTag display = tag.getCompound("display");
+                if (display.contains("Name")) {
+                    md.update(display.getString("Name").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                if (display.contains("Lore", Tag.TAG_LIST)) {
+                    md.update(display.getList("Lore", Tag.TAG_STRING).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+
+            if (tag.contains("shanhai_fcs_lore", Tag.TAG_LIST)) {
+                md.update(tag.getList("shanhai_fcs_lore", Tag.TAG_STRING).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+
+            if (tag.contains(SuperDiskArrayItem.TAG_VIRTUAL_CELLS, Tag.TAG_LIST)) {
+                md.update(tag.getList(SuperDiskArrayItem.TAG_VIRTUAL_CELLS, Tag.TAG_COMPOUND).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+
+            byte[] hash = md.digest();
+            // 从 hash 的前 16 字节构造 UUID
+            java.nio.ByteBuffer bb = java.nio.ByteBuffer.wrap(hash);
+            long mostSigBits = bb.getLong();
+            long leastSigBits = bb.getLong();
+            return new UUID(mostSigBits, leastSigBits);
+        } catch (Exception e) {
+            // 如果哈希失败，返回基于时间戳的 UUID（兜底方案）
+            return UUID.randomUUID();
+        }
+    }
+
+    @Override
+    public CellState getStatus() {
+        return total.signum() <= 0 ? CellState.EMPTY : CellState.NOT_EMPTY;
+    }
+
+    @Override
+    public double getIdleDrain() {
+        return SuperDiskArrayItem.IDLE_DRAIN;
+    }
+
+    @Override
+    public void persist() {
+        if (persisted) return;
+        DShanhaiVirtualCellSavedData data = getSavedData();
+        if (data != null) {
+            data.updateCellBig(uuid, "sda", SuperDiskArrayItem.TOTAL_BYTES, amounts);
+        }
+        writeLightweightStats();
+        persisted = true;
+    }
+
+    @Override
+    public boolean canFitInsideCell() {
+        return amounts.isEmpty();
+    }
+
+    @Override
+    public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
+        if (what == null || amount <= 0 || !(what instanceof AEItemKey)) return 0L;
+        AEItemKey itemKey = (AEItemKey) what;
+        StorageCell nested = StorageCells.getCellInventory(itemKey.toStack(), null);
+        if (nested != null && !nested.canFitInsideCell()) return 0L;
+        if (mode == Actionable.MODULATE) {
+            BigInteger current = amounts.getOrDefault(what, BigInteger.ZERO);
+            BigInteger delta = BigInteger.valueOf(amount);
+            amounts.put(what, current.add(delta));
+            total = total.add(delta);
+            saveChanges();
+        }
+        return amount;
+    }
+
+    @Override
+    public long extract(AEKey what, long amount, Actionable mode, IActionSource source) {
+        if (what == null || amount <= 0) return 0L;
+        BigInteger current = amounts.getOrDefault(what, BigInteger.ZERO);
+        if (current.signum() <= 0) return 0L;
+        BigInteger requested = BigInteger.valueOf(amount);
+        BigInteger moved = current.min(requested);
+        if (mode == Actionable.MODULATE) {
+            BigInteger remaining = current.subtract(moved);
+            if (remaining.signum() <= 0) amounts.remove(what);
+            else amounts.put(what, remaining);
+            total = total.subtract(moved);
+            if (total.signum() < 0) total = BigInteger.ZERO;
+            saveChanges();
+        }
+        return moved.min(LONG_MAX).longValue();
+    }
+
+    @Override
+    public void getAvailableStacks(KeyCounter out) {
+        for (Map.Entry<AEKey, BigInteger> entry : amounts.entrySet()) {
+            BigInteger amount = entry.getValue();
+            if (amount == null || amount.signum() <= 0) continue;
+            if (amount.compareTo(LONG_MAX) > 0) out.set(entry.getKey(), Long.MAX_VALUE);
+            else out.add(entry.getKey(), amount.longValue());
+        }
+    }
+
+    @Override
+    public Component getDescription() {
+        return stack.getHoverName();
+    }
+
+    private void load() {
+        DShanhaiVirtualCellSavedData data = getSavedData();
+        boolean migratedInline = migrateInlineCellNbt();
+        if (!migratedInline && data != null) {
+            amounts.putAll(data.readCellBigAmounts(uuid));
+        }
+        recalculateTotal();
+        if (migratedInline) {
+            persist();
+            if (saveProvider != null) saveProvider.saveChanges();
+        } else {
+            writeLightweightStats();
+        }
+    }
+
+    private boolean migrateInlineCellNbt() {
+        CompoundTag tag = stack.getOrCreateTag();
+        if (!hasInlineCellNbt(tag)) return false;
+        amounts.clear();
+        ListTag keys = tag.getList("keys", Tag.TAG_COMPOUND);
+        long[] amts = tag.getLongArray("amts");
+        for (int i = 0; i < keys.size(); i++) {
+            long amount = i < amts.length ? amts[i] : 0L;
+            if (amount <= 0) continue;
+            CompoundTag keyTag = keys.getCompound(i);
+            AEKey key = DShanhaiAEKeyCodec.fromNormalizedTag(keyTag);
+            if (key == null) continue;
+            if (isInlineInfinityCellKey(keyTag)) {
+                amounts.putIfAbsent(key, BigInteger.ONE);
+            } else {
+                BigInteger current = amounts.getOrDefault(key, BigInteger.ZERO);
+                amounts.put(key, current.add(BigInteger.valueOf(amount)));
+            }
+        }
+        tag.remove("keys");
+        tag.remove("amts");
+        tag.remove("ic");
+        persisted = false;
+        return true;
+    }
+
+    private static boolean hasInlineCellNbt(CompoundTag tag) {
+        return tag.contains("keys", Tag.TAG_LIST) && tag.contains("amts", Tag.TAG_LONG_ARRAY);
+    }
+
+    private static boolean isInlineInfinityCellKey(CompoundTag keyTag) {
+        if (!"expatternprovider:infinity_cell".equals(keyTag.getString("id"))) return false;
+        if (!keyTag.contains("tag", Tag.TAG_COMPOUND)) return false;
+        CompoundTag tag = keyTag.getCompound("tag");
+        return tag.contains("record", Tag.TAG_COMPOUND) && tag.getCompound("record").contains("id", Tag.TAG_STRING);
+    }
+
+    private void saveChanges() {
+        persisted = false;
+        if (saveProvider != null) saveProvider.saveChanges();
+        else persist();
+    }
+
+    private void recalculateTotal() {
+        total = BigInteger.ZERO;
+        for (BigInteger amount : amounts.values()) {
+            if (amount != null && amount.signum() > 0) total = total.add(amount);
+        }
+    }
+
+    private void writeLightweightStats() {
+        CompoundTag tag = stack.getOrCreateTag();
+        tag.putUUID(TAG_UUID, uuid);
+        tag.putByteArray(TAG_TOTAL, total.toByteArray());
+        tag.putInt(TAG_TYPES, amounts.size());
+        tag.remove("keys");
+        tag.remove("amts");
+        tag.remove("ic");
+    }
+
+    private DShanhaiVirtualCellSavedData getSavedData() {
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return null;
+        return DShanhaiVirtualCellSavedData.get(server);
+    }
+}

@@ -1,0 +1,1 @@
+com.dishanhai.gt_shanhai.GTDishanhaiKubeJSPlugin

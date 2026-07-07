@@ -1,0 +1,15 @@
+{
+  "blackhole_activate": {
+    "sounds": [
+      "gt_shanhai:blackhole_activate"
+    ],
+    "subtitle": "gt_shanhai.subtitle.blackhole_activate"
+  },
+  "blackhole_loop": {
+    "sounds": [
+      "gt_shanhai:blackhole_loop"
+    ],
+    "stream": true,
+    "subtitle": "gt_shanhai.subtitle.blackhole_loop"
+  }
+}

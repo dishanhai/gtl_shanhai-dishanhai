@@ -1,0 +1,9 @@
+{
+  "loader": "forge:obj",
+  "model": "gt_shanhai:models/obj/blackhole.obj",
+  "flip-v": false,
+  "detectCullableFaces": false,
+  "textures": {
+    "material_0": "gt_shanhai:textures/model/blackhole"
+  }
+}

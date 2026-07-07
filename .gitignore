@@ -1,0 +1,69 @@
+NUL
+
+# === 黑名单策略：根目录排除分析文件，src/ 保留所有资源 ===
+
+# 构建输出和临时目录
+/build/
+/.gradle/
+/run/
+/gradle-install/
+
+# 库和源码参考
+/lib/
+/libs/
+/lib_source/
+/.idea/
+/tmp/
+/run/
+
+# IDE 和编辑器
+/.idea/
+/.codegraph/
+.venv/
+
+# 开发工具和临时文件
+/scripts/
+/tools/
+/tmp/
+/todo/
+/logs/
+
+# 项目私有配置
+/.claude/
+/.learnings/
+
+# 资源和文档
+/extracted_textures/
+/gregtech/
+/docs/
+/com/
+
+# 根目录的日志和分析文件（全局排除，不包括 src/）
+*.log
+*.log.gz
+*.txt
+*.py
+*.mb
+*.md
+*.json
+.DS_Store
+Thumbs.db
+*.stackdump
+
+# 但保留 src/ 内的所有资源文件
+!src/**/*.json
+!src/**/*.md
+!src/**/*.mb
+!src/**/*.txt
+
+# 保留根目录的关键构建文件和配置
+!.gitignore
+!build.gradle
+!settings.gradle
+!gradle.properties
+!build.bat
+!gradlew
+!gradlew.bat
+!CLAUDE.md
+!README.md
+!pack.mcmeta

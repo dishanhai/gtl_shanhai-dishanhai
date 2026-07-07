@@ -1,0 +1,10 @@
+Schematic: 246x270x255
+Cropped: 232x247x255 min=(0,0,0) max=(231,246,254)
+Blocks:
+  A = gtceu:hassium_block x1
+  H = gtlcore:dimensionally_transcendent_casing x8
+  B = gtlcore:power_core x744
+  C = minecraft:light_blue_stained_glass x14677
+  ~ = minecraft:oak_log x1
+  D = minecraft:polished_blackstone x10148
+  E = minecraft:sea_lantern x3591

@@ -1,0 +1,23 @@
+{
+  "display": {
+    "icon": {
+      "item": "gt_shanhai:eternal_workshop_data_module"
+    },
+    "title": {
+      "translate": "advancements.gt_shanhai.eternal_gregtech_workshop.root.title"
+    },
+    "description": {
+      "translate": "advancements.gt_shanhai.eternal_gregtech_workshop.root.description"
+    },
+    "background": "minecraft:textures/block/deepslate_tiles.png",
+    "frame": "task",
+    "show_toast": false,
+    "announce_to_chat": false,
+    "hidden": false
+  },
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  }
+}

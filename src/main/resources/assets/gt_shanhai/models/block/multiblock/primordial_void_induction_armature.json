@@ -1,0 +1,13 @@
+{
+  "parent": "gtceu:block/overlay/front",
+  "textures": {
+    "particle": "gtceu:block/casings/steam_machine_casing/side",
+    "base_down": "gtceu:block/casings/steam_machine_casing/bottom",
+    "base_up": "gtceu:block/casings/steam_machine_casing/top",
+    "base_north": "gtceu:block/casings/steam_machine_casing/side",
+    "base_south": "gtceu:block/casings/steam_machine_casing/side",
+    "base_east": "gtceu:block/casings/steam_machine_casing/side",
+    "base_west": "gtceu:block/casings/steam_machine_casing/side",
+    "overlay": "gt_shanhai:block/multiblock/primordial_void_induction_armature/overlay_front"
+  }
+}

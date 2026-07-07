@@ -1,0 +1,6 @@
+﻿{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "gt_shanhai:block/neutronium_frame"
+  }
+}
