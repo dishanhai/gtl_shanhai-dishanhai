@@ -67,30 +67,6 @@ public class DShanhaiBlocks {
         .build()
         .register();
 
-    public static final BlockEntry<Block> RADIATION_PROOF_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("radiation_proof_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> VACUUM_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("vacuum_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> VACUUM_CASING_MK2 = GTDishanhaiRegistration.REGISTRATE
-        .block("vacuum_casing_mk2", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
     public static final BlockEntry<Block> SHIELDED_ACCELERATOR_CASING = GTDishanhaiRegistration.REGISTRATE
         .block("shielded_accelerator_casing", Block::new)
         .initialProperties(() -> Blocks.IRON_BLOCK)
@@ -109,46 +85,6 @@ public class DShanhaiBlocks {
 
     public static final BlockEntry<Block> COOLANT_DELIVERY_CASING = GTDishanhaiRegistration.REGISTRATE
         .block("coolant_delivery_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> GLOW_BLOCK = GTDishanhaiRegistration.REGISTRATE
-        .block("glow_block", Block::new)
-        .initialProperties(() -> Blocks.SEA_LANTERN)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> HIGH_PRESSURE_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("high_pressure_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> PLASMA_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("plasma_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> NEUTRONIUM_PIPE_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("neutronium_pipe_casing", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
-    public static final BlockEntry<Block> COMPONENT_ASSEMBLY_CASING = GTDishanhaiRegistration.REGISTRATE
-        .block("component_assembly_casing", Block::new)
         .initialProperties(() -> Blocks.IRON_BLOCK)
         .addLayer(() -> RenderType::cutoutMipped)
         .item(BlockItem::new)

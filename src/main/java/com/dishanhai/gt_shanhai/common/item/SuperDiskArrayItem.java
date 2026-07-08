@@ -11,6 +11,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
@@ -86,6 +87,18 @@ public class SuperDiskArrayItem extends PortableCellItem {
     @Override
     public boolean isStorageCell(ItemStack stack) {
         return false;
+    }
+
+    /**
+     * 取出即分家：SDA 一旦进入真实玩家/实体的物品栏（服务端），立即认领独立随机 UUID，
+     * 使其拥有专属后端存储，避免同内容模板包共享确定性 UUID → 共用 backend → 互相溢出。
+     * JEI 展示用的 ghost 不在真实世界、不 tick，因此保持确定性 UUID，不影响 JEI 去重。
+     */
+    @Override
+    public void inventoryTick(ItemStack stack, Level level, Entity entity, int slot, boolean selected) {
+        super.inventoryTick(stack, level, entity, slot, selected);
+        if (level.isClientSide) return;
+        SuperDiskArrayInventory.claimOwnership(stack);
     }
 
     // ============ NBT 读写 ============

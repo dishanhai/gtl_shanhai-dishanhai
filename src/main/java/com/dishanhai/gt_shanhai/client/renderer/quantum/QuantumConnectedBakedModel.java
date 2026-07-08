@@ -131,16 +131,17 @@ public abstract class QuantumConnectedBakedModel implements IDynamicBakedModel {
 
         connect = modelData.get(CONNECT_STATE);
         if (connect == null) {
-            return Collections.emptyList();
+            connect = new ConnectionState();
+            connect.init(BlockPos.ZERO);
         }
 
         powered = state != null && shouldBeEmissive(state);
         quads = new ArrayList<BakedQuad>();
         if (renderType == null || this.renderTypes.contains(renderType)) {
-            if (renderType == this.faceRenderType) {
+            if (renderType == null || renderType == this.faceRenderType) {
                 addFaceQuad(quads, side, connect.getFace(side), powered);
             }
-            if (this.sides != null && renderType == this.sideRenderType) {
+            if (this.sides != null && (renderType == null || renderType == this.sideRenderType)) {
                 addSideQuads(quads, connect, side, powered, false);
                 if (this.renderOppositeSide) {
                     addSideQuads(quads, connect, side.getOpposite(), powered, true);

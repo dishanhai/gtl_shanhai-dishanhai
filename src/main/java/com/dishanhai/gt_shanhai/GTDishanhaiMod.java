@@ -158,6 +158,18 @@ public class GTDishanhaiMod {
                     }
                 });
 
+        // 服务端启动完成后自动同步所有 SDA 到 kubejs/data（彻底消除手动迁移需求）
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                (net.minecraftforge.event.server.ServerStartedEvent e) -> {
+                    try {
+                        com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData data =
+                                com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(e.getServer());
+                        data.syncAllSdaToContentStore();
+                    } catch (Exception ex) {
+                        LOGGER.warn("[SDA] 启动自动同步失败: {}", ex.getMessage());
+                    }
+                });
+
         // 客户端初始化推迟到 FMLClientSetupEvent（此时 RegistryObject 已可用）
         FMLJavaModLoadingContext.get().getModEventBus().addListener(
             (net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent event) -> {

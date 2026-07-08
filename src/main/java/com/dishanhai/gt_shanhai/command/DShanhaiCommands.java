@@ -122,7 +122,8 @@ public class DShanhaiCommands {
         var cmd = Commands.literal("shanhai")
                 .then(recipeCommand())
                 .then(gtQueryCommand())
-                .then(materialsCommand("materials"));
+                .then(materialsCommand("materials"))
+                .then(sdaCommand("sda"));
 
         event.getDispatcher().register(cmd);
         // 中文别名
@@ -445,7 +446,8 @@ public class DShanhaiCommands {
                         .requires(s -> s.hasPermission(2))
                         .then(cn配方)
                         .then(cnGT)
-                        .then(materialsCommand("材料")));    }
+                        .then(materialsCommand("材料"))
+                        .then(sdaCommand("SDA")));    }
 
     // ===== 材料统计 =====
 
@@ -852,6 +854,142 @@ public class DShanhaiCommands {
                 GSON.toJson(config, w);
             }
         } catch (Exception ignored) {}
+    }
+
+    // ===== SDA 命令 =====
+
+    /** 构造 SDA 命令节点，name 可为 "sda" 或 "SDA" */
+    private static LiteralArgumentBuilder<CommandSourceStack> sdaCommand(String name) {
+        return Commands.literal(name)
+                .requires(s -> s.hasPermission(2))
+                .then(Commands.literal("导出")
+                        .executes(ctx -> execSdaExport(ctx.getSource())))
+                .then(Commands.literal("任务导出")
+                        .executes(ctx -> execSdaExportFromQuests(ctx.getSource())))
+                .then(Commands.literal("移除")
+                        .executes(ctx -> execSdaRemove(ctx.getSource())))
+                .then(Commands.literal("列表")
+                        .executes(ctx -> execSdaList(ctx.getSource())));
+    }
+
+    /**
+     * 扫描 config/ftbquests/quests/chapters/*.snbt，提取所有 shanhai_sda_uuid，
+     * 仅将这些 UUID 对应的 world/data 内容写入 kubejs/data/sda_uuid_store/。
+     * 解决"集合存储器有500个SDA但只想导出任务奖励的那几个"问题。
+     */
+    private static int execSdaExportFromQuests(CommandSourceStack source) {
+        java.util.Set<java.util.UUID> questUuids =
+                com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.scanQuestSnbtUuids();
+        if (questUuids.isEmpty()) {
+            source.sendSuccess(msg("§7[山海] 未在 config/ftbquests/quests/chapters/ 中找到 SDA UUID"), false);
+            return 0;
+        }
+        com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData data =
+                com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(source.getServer());
+        int exported = 0;
+        int empty = 0;
+        for (java.util.UUID uuid : questUuids) {
+            java.util.Map<appeng.api.stacks.AEKey, java.math.BigInteger> amounts =
+                    data.readCellBigAmounts(uuid);
+            if (amounts.isEmpty()) {
+                // world/data 里该 UUID 无内容，跳过，不能删已有文件
+                empty++;
+                continue;
+            }
+            com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.persist(uuid, amounts);
+            exported++;
+        }
+        source.sendSuccess(msg("§b[山海] 任务导出完成 §7共扫描 §f" + questUuids.size()
+                + " §7个 UUID：§a" + exported + " §b个有内容已导出"
+                + (empty > 0 ? "§7，" + empty + " 个为空（已跳过）" : "")), false);
+        return exported > 0 ? 1 : 0;
+    }
+
+    /**
+     * 手动导出手持 SDA：将当前手持 SDA 的 UUID + 内容写入 kubejs/data/sda_uuid_store/。
+     * 只有通过此命令显式导出的 UUID 才会被保存，不会自动大量写入。
+     */
+    private static int execSdaExport(CommandSourceStack source) {
+        net.minecraft.server.level.ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendSuccess(msg("§c此命令须由玩家执行"), false);
+            return 0;
+        }
+        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
+        if (held.isEmpty() || !(held.getItem() instanceof
+                com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem)) {
+            source.sendSuccess(msg("§c请手持超级磁盘阵列（SDA）执行此命令"), false);
+            return 0;
+        }
+        net.minecraft.nbt.CompoundTag tag = held.getTag();
+        if (tag == null || !tag.hasUUID(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_UUID)) {
+            source.sendSuccess(msg("§c该 SDA 尚未初始化，请先放入驱动器触发一次读写"), false);
+            return 0;
+        }
+        java.util.UUID uuid = tag.getUUID(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_UUID);
+        com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData data =
+                com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(source.getServer());
+        java.util.Map<appeng.api.stacks.AEKey, java.math.BigInteger> amounts =
+                data.readCellBigAmounts(uuid);
+        com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.persist(uuid, amounts);
+        source.sendSuccess(msg("§b[山海] SDA 已导出 §7" + uuid.toString().substring(0, 8)
+                + "… §b共 §f" + amounts.size() + " §b种物品 → §7kubejs/data/sda_uuid_store/"), false);
+        return 1;
+    }
+
+    /**
+     * 从 ContentStore 移除手持 SDA 的导出文件（删除对应 uuid.json）。
+     */
+    private static int execSdaRemove(CommandSourceStack source) {
+        net.minecraft.server.level.ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendSuccess(msg("§c此命令须由玩家执行"), false);
+            return 0;
+        }
+        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
+        if (held.isEmpty() || !(held.getItem() instanceof
+                com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem)) {
+            source.sendSuccess(msg("§c请手持超级磁盘阵列（SDA）执行此命令"), false);
+            return 0;
+        }
+        net.minecraft.nbt.CompoundTag tag = held.getTag();
+        if (tag == null || !tag.hasUUID(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_UUID)) {
+            source.sendSuccess(msg("§c该 SDA 无 UUID"), false);
+            return 0;
+        }
+        java.util.UUID uuid = tag.getUUID(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_UUID);
+        boolean had = com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.hasStored(uuid);
+        if (had) {
+            com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.persist(uuid,
+                    java.util.Collections.emptyMap()); // 写空→触发删除文件
+            source.sendSuccess(msg("§b[山海] 已移除 SDA 导出 §7" + uuid.toString().substring(0, 8) + "…"), false);
+        } else {
+            source.sendSuccess(msg("§7[山海] 该 SDA 未导出，无需移除"), false);
+        }
+        return had ? 1 : 0;
+    }
+
+    /** 列出 world/data 中所有 SDA 单元的 UUID 和物品种类数 */
+    private static int execSdaList(CommandSourceStack source) {
+        net.minecraft.server.MinecraftServer server = source.getServer();
+        com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData data =
+                com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(server);
+        java.util.List<String[]> cells = data.listSdaCells();
+        if (cells.isEmpty()) {
+            source.sendSuccess(msg("§7[山海] 暂无 SDA 单元"), false);
+            return 0;
+        }
+        StringBuilder sb = new StringBuilder("§b[山海] SDA 单元列表 (§f")
+                .append(cells.size()).append("§b 个):\n");
+        for (String[] c : cells) {
+            // c[0]=uuid, c[1]=totalItems, c[2]=typeCount
+            String shortUuid = c[0].substring(0, 8) + "…";
+            sb.append("§7  ").append(shortUuid)
+              .append(" §7物品总数:§f").append(c[1])
+              .append(" §7种类:§f").append(c[2]).append("\n");
+        }
+        source.sendSuccess(msg(sb.toString()), false);
+        return 1;
     }
 
     private static Supplier<Component> msg(String text) {

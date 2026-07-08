@@ -71,17 +71,33 @@ public class SuperDiskArrayTooltipHandler {
         List<Entry> result = new ArrayList<>();
         CompoundTag root = stack.getTag();
         if (root == null) return result;
+
+        // 1. 内联 NBT（老格式兼容）
         readInlineEntries(root, resolveNameLimit, result);
         if (!result.isEmpty()) return result;
 
+        // 2. world/data（仅单人模式可用）
         MinecraftServer server = Minecraft.getInstance().getSingleplayerServer();
-        if (server == null) return result;
-        DShanhaiVirtualCellSavedData data = DShanhaiVirtualCellSavedData.get(server);
-        if (root.hasUUID(SuperDiskArrayInventory.TAG_UUID)) {
-            UUID uuid = root.getUUID(SuperDiskArrayInventory.TAG_UUID);
-            readExternalBigEntries(data.readCellBigAmounts(uuid), resolveNameLimit, result);
+        if (server != null) {
+            DShanhaiVirtualCellSavedData data = DShanhaiVirtualCellSavedData.get(server);
+            if (root.hasUUID(SuperDiskArrayInventory.TAG_UUID)) {
+                UUID uuid = root.getUUID(SuperDiskArrayInventory.TAG_UUID);
+                readExternalBigEntries(data.readCellBigAmounts(uuid), resolveNameLimit, result);
+            }
+            readExternalVirtualCellEntries(root, data, resolveNameLimit, result);
         }
-        readExternalVirtualCellEntries(root, data, resolveNameLimit, result);
+
+        // 3. ContentStore 兜底：SDA 刚从任务奖励领取、尚未放入驱动器时
+        //    world/data 为空但 kubejs/data/sda_uuid_store/ 已有导出文件
+        if (result.isEmpty() && root.hasUUID(SuperDiskArrayInventory.TAG_UUID)) {
+            UUID uuid = root.getUUID(SuperDiskArrayInventory.TAG_UUID);
+            Map<AEKey, BigInteger> stored =
+                    com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.restore(uuid);
+            if (!stored.isEmpty()) {
+                readExternalBigEntries(stored, resolveNameLimit, result);
+            }
+        }
+
         return result;
     }
 

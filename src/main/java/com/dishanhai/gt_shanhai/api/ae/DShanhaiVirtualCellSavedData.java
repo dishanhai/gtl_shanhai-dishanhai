@@ -152,6 +152,52 @@ public class DShanhaiVirtualCellSavedData extends SavedData {
         return result;
     }
 
+    /**
+     * 返回所有 SDA 单元的简要信息列表，供命令输出。
+     * 每项：[uuid字符串, 总物品数字符串, 物品种类数字符串]
+     */
+    public java.util.List<String[]> listSdaCells() {
+        java.util.List<String[]> result = new java.util.ArrayList<>();
+        for (Map.Entry<UUID, CellData> entry : cells.entrySet()) {
+            CellData cell = entry.getValue();
+            if (!"sda".equals(cell.type)) continue;
+            result.add(new String[]{
+                    entry.getKey().toString(),
+                    cell.itemCount.toString(),
+                    String.valueOf(cell.bigAmounts.isEmpty() ? cell.amounts.size() : cell.bigAmounts.size())
+            });
+        }
+        return result;
+    }
+
+    /**
+     * 启动时自动将所有 SDA 单元同步到 ContentStore（kubejs/data）。
+     * 每次服务器启动时调用，无需手动操作。
+     */
+    /**
+     * 启动时刷新：只更新 ContentStore 中已有文件的 SDA 单元。
+     * 不会为新 UUID 创建文件，导出需通过命令显式操作。
+     */
+    public void syncAllSdaToContentStore() {
+        int count = 0;
+        for (Map.Entry<UUID, CellData> entry : cells.entrySet()) {
+            CellData cell = entry.getValue();
+            if (!"sda".equals(cell.type)) continue;
+            if (cell.bigAmounts.isEmpty() && cell.amounts.isEmpty()) continue;
+            // 只刷新已显式导出过的 UUID，不自动创建新文件
+            if (!DShanhaiSdaContentStore.hasStored(entry.getKey())) continue;
+            Map<AEKey, java.math.BigInteger> amounts = readCellBigAmounts(entry.getKey());
+            if (!amounts.isEmpty()) {
+                DShanhaiSdaContentStore.persist(entry.getKey(), amounts);
+                count++;
+            }
+        }
+        if (count > 0) {
+            com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER.info(
+                    "[SDA] 启动刷新：已更新 {} 个已导出 SDA 单元", count);
+        }
+    }
+
     private AEKey getDecodedKey(String hash) {
         AEKey cached = decodedKeyCache.get(hash);
         if (cached != null) return cached;

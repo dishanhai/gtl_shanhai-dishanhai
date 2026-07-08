@@ -118,7 +118,70 @@ item_ids:
 下方场景为正面结构。外壳由 <ItemLink id="gt_shanhai:quantum_structure" /> 围成，内部放置核心单元、存储单元和处理器。
 
 <GameScene zoom="4" background="transparent" interactive={true} fullWidth={true}>
-  <ImportStructure src="structures/quantum_computer.snbt" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="0" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="0" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="0" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="0" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="0" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="0" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="0" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="0" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="0" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="0" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="0" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="0" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="0" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="0" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="0" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="0" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="1" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="1" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="1" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="1" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="1" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_parallel_processor" x="1" y="1" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_parallel_processor" x="2" y="1" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="1" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="1" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_parallel_processor" x="1" y="1" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_computer" x="2" y="1" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="1" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="1" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="1" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="1" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="1" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="2" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="2" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="2" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="2" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="2" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_computer_unit" x="1" y="2" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_computer_unit" x="2" y="2" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="2" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="2" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_crafting_storage" x="1" y="2" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_computer_unit" x="2" y="2" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="2" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="2" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="2" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="2" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="2" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="3" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="3" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="3" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="3" z="0" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="3" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="3" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="3" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="3" z="1" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="3" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="3" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="3" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="3" z="2" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="0" y="3" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="1" y="3" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="2" y="3" z="3" formed="true" powered="true" />
+  <Block id="gt_shanhai:quantum_structure" x="3" y="3" z="3" formed="true" powered="true" />
   <IsometricCamera yaw="195" pitch="30" />
 </GameScene>
 

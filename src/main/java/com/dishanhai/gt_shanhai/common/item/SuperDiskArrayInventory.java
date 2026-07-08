@@ -107,6 +107,16 @@ public class SuperDiskArrayInventory implements StorageCell {
         if (tag.hasUUID(TAG_UUID)) {
             UUID oldUuid = tag.getUUID(TAG_UUID);
             Map<AEKey, BigInteger> content = data.readCellBigAmounts(oldUuid);
+            // world/data 无内容时，尝试从 ContentStore（kubejs/data）兜底
+            // 适用于整合包分发场景：新服务器玩家首次领取 FTBQ 任务奖励
+            if (content.isEmpty()
+                    && com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.hasStored(oldUuid)) {
+                content = com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.restore(oldUuid);
+                if (!content.isEmpty()) {
+                    // 同步写入新 UUID 的 ContentStore，使 tooltip 第三级兜底也能读到
+                    com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.persist(newUuid, content);
+                }
+            }
             if (!content.isEmpty()) {
                 data.updateCellBig(newUuid, "sda", SuperDiskArrayItem.TOTAL_BYTES, content);
             }
@@ -189,7 +199,11 @@ public class SuperDiskArrayInventory implements StorageCell {
         if (data != null) {
             data.updateCellBig(uuid, "sda", SuperDiskArrayItem.TOTAL_BYTES, amounts);
         }
-        writeLightweightStats();
+        // 同步写入 kubejs/data 持久层：仅刷新已显式导出过的 UUID，不自动创建新文件
+        if (com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.hasStored(uuid)) {
+            com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.persist(uuid, amounts);
+        }
+        writeLightweightStatsInternal(true); // fromPersist=true：主动写入，结果可信
         persisted = true;
     }
 
@@ -253,6 +267,13 @@ public class SuperDiskArrayInventory implements StorageCell {
         if (!migratedInline && data != null) {
             amounts.putAll(data.readCellBigAmounts(uuid));
         }
+        // 兜底：若 world/data 里该 UUID 无内容，尝试从 kubejs/data 持久层还原
+        // 适用于新存档/世界重置/整合包分发场景
+        if (!migratedInline && amounts.isEmpty()
+                && com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.hasStored(uuid)) {
+            amounts.putAll(
+                    com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.restore(uuid));
+        }
         recalculateTotal();
         if (migratedInline) {
             persist();
@@ -313,16 +334,32 @@ public class SuperDiskArrayInventory implements StorageCell {
     }
 
     private void writeLightweightStats() {
+        writeLightweightStatsInternal(false);
+    }
+
+    /**
+     * 写入轻量态统计字段到 ItemStack NBT。
+     *
+     * @param fromPersist true = 从 persist() 调用（主动写入，结果可信），
+     *                    false = 从 load() 调用（读取时同步，可能因 world/data 临时为空而 amounts=0）。
+     *                    当 fromPersist=false 且 amounts 为空时，若 NBT 中已有非零 types，
+     *                    则保留原值，防止分发/新存档场景下把历史有效统计覆写为 0。
+     */
+    private void writeLightweightStatsInternal(boolean fromPersist) {
         CompoundTag tag = stack.getOrCreateTag();
         tag.putUUID(TAG_UUID, uuid);
-        tag.putByteArray(TAG_TOTAL, total.toByteArray());
-        tag.putInt(TAG_TYPES, amounts.size());
         tag.remove("keys");
         tag.remove("amts");
         tag.remove("ic");
+        if (!amounts.isEmpty() || fromPersist || tag.getInt(TAG_TYPES) == 0) {
+            // 内容非空：写实际值；fromPersist：主动写入，即使空也可信；原本为0：不存在历史数据，正常写
+            tag.putByteArray(TAG_TOTAL, total.toByteArray());
+            tag.putInt(TAG_TYPES, amounts.size());
+        }
+        // 否则：amounts 为空 + load 调用 + 已有非零 types → 保留现有统计，不覆盖
     }
 
-    private DShanhaiVirtualCellSavedData getSavedData() {
+    private static DShanhaiVirtualCellSavedData getSavedData() {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return null;
         return DShanhaiVirtualCellSavedData.get(server);
