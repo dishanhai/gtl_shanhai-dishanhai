@@ -27,12 +27,27 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class RecipeTypePatternSearchHelper {
 
     private RecipeTypePatternSearchHelper() {
     }
+
+    // ===== 反射缓存 =====
+    // 每个 Class 只走一次类层级搜索，后续 O(1) 命中。
+    // Optional.empty() 表示"确认不存在该方法/字段"，避免重复扫描。
+    private static final ConcurrentHashMap<Class<?>, ConcurrentHashMap<String, Optional<Method>>> METHOD_CACHE =
+            new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Class<?>, ConcurrentHashMap<String, Optional<Field>>> FIELD_CACHE =
+            new ConcurrentHashMap<>();
+    // findHandlerMachine 需要尝试 4 个混淆名，缓存每个 Class 哪个名字有效
+    private static final ConcurrentHashMap<Class<?>, String> HANDLER_MACHINE_METHOD_CACHE =
+            new ConcurrentHashMap<>();
+    private static final String[] HANDLER_MACHINE_CANDIDATES =
+            {"getMachine", "mo293getMachine", "mo292getMachine", "mo291getMachine"};
 
     public static Iterator<GTRecipe> searchRecipe(IRecipeLogicMachine machine) {
         if (machine == null) return Collections.emptyIterator();
@@ -245,13 +260,21 @@ public final class RecipeTypePatternSearchHelper {
 
     private static Object findHandlerMachine(Object handler) {
         Object current = unwrapProxyHandler(handler);
-        Object machine = invokeNoArg(current, "getMachine");
-        if (machine != null) return machine;
-        machine = invokeNoArg(current, "mo293getMachine");
-        if (machine != null) return machine;
-        machine = invokeNoArg(current, "mo292getMachine");
-        if (machine != null) return machine;
-        return invokeNoArg(current, "mo291getMachine");
+        if (current == null) return null;
+        // 缓存命中：直接调已知有效的方法名
+        String cached = HANDLER_MACHINE_METHOD_CACHE.get(current.getClass());
+        if (cached != null) {
+            return invokeNoArg(current, cached);
+        }
+        // 首次：尝试候选列表，记录哪个成功
+        for (String name : HANDLER_MACHINE_CANDIDATES) {
+            Object machine = invokeNoArg(current, name);
+            if (machine != null) {
+                HANDLER_MACHINE_METHOD_CACHE.put(current.getClass(), name);
+                return machine;
+            }
+        }
+        return null;
     }
 
     private static int[] readActiveSlots(Object handler) {
@@ -269,37 +292,77 @@ public final class RecipeTypePatternSearchHelper {
         return current;
     }
 
+    /**
+     * 带缓存的字段读取。第一次走类层级搜索并缓存 Field；
+     * 后续调用直接取缓存，Optional.empty() 表示已确认不存在。
+     */
     private static Object readField(Object target, String fieldName) {
         if (target == null) return null;
-        Class<?> type = target.getClass();
+        Class<?> startClass = target.getClass();
+        ConcurrentHashMap<String, Optional<Field>> classCache =
+                FIELD_CACHE.computeIfAbsent(startClass, k -> new ConcurrentHashMap<>());
+        Optional<Field> cached = classCache.get(fieldName);
+        if (cached != null) {
+            if (!cached.isPresent()) return null;
+            try {
+                return cached.get().get(target);
+            } catch (ReflectiveOperationException ignored) {
+                return null;
+            }
+        }
+        // 首次：走类层级搜索
+        Class<?> type = startClass;
         while (type != null) {
             try {
                 Field field = type.getDeclaredField(fieldName);
                 field.setAccessible(true);
+                classCache.put(fieldName, Optional.of(field));
                 return field.get(target);
             } catch (NoSuchFieldException ignored) {
                 type = type.getSuperclass();
             } catch (ReflectiveOperationException ignored) {
+                classCache.put(fieldName, Optional.empty());
                 return null;
             }
         }
+        classCache.put(fieldName, Optional.empty());
         return null;
     }
 
+    /**
+     * 带缓存的无参方法调用。第一次走类层级搜索并缓存 Method；
+     * 后续调用直接取缓存，Optional.empty() 表示已确认不存在。
+     */
     private static Object invokeNoArg(Object target, String methodName) {
         if (target == null) return null;
-        Class<?> type = target.getClass();
-        while (type != null) {
+        Class<?> startClass = target.getClass();
+        ConcurrentHashMap<String, Optional<Method>> classCache =
+                METHOD_CACHE.computeIfAbsent(startClass, k -> new ConcurrentHashMap<>());
+        Optional<Method> cached = classCache.get(methodName);
+        if (cached != null) {
+            if (!cached.isPresent()) return null;
             try {
-                Method method = type.getDeclaredMethod(methodName);
-                method.setAccessible(true);
-                return method.invoke(target);
-            } catch (NoSuchMethodException ignored) {
-                type = type.getSuperclass();
+                return cached.get().invoke(target);
             } catch (ReflectiveOperationException ignored) {
                 return null;
             }
         }
+        // 首次：走类层级搜索
+        Class<?> type = startClass;
+        while (type != null) {
+            try {
+                Method method = type.getDeclaredMethod(methodName);
+                method.setAccessible(true);
+                classCache.put(methodName, Optional.of(method));
+                return method.invoke(target);
+            } catch (NoSuchMethodException ignored) {
+                type = type.getSuperclass();
+            } catch (ReflectiveOperationException ignored) {
+                classCache.put(methodName, Optional.empty());
+                return null;
+            }
+        }
+        classCache.put(methodName, Optional.empty());
         return null;
     }
 

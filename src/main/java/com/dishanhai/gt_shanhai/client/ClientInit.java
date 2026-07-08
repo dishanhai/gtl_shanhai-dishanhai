@@ -23,6 +23,9 @@ import net.minecraftforge.common.MinecraftForge;
 public class ClientInit {
 
     public static void init() {
+        // 程序化注册 Guide（支持 config/gt_shanhai/guides/ 热重载）
+        GuideRegistration.register();
+
         ItemBlockRenderTypes.setRenderLayer(DShanhaiAE2Blocks.QUANTUM_COMPUTER.get(), RenderType.cutout());
         ItemBlockRenderTypes.setRenderLayer(DShanhaiAE2Blocks.QUANTUM_COMPUTER_UNIT.get(), RenderType.cutout());
         ItemBlockRenderTypes.setRenderLayer(DShanhaiAE2Blocks.QUANTUM_PARALLEL_PROCESSOR.get(), RenderType.cutout());

@@ -164,36 +164,37 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
 
         int bufferSize = buffer.size();
         int maxOperations = getMaxOperationsForBuffer(bufferSize);
-        int maxScans = getMaxScansForBuffer(bufferSize);
+        // 所有 flush 阶段共享同一扫描预算，避免 ITEMS_FIRST/FLUIDS_FIRST/SMALL_FIRST
+        // 模式下多次 flushByMode 各自独立拿满 maxScans 导致重复扫描缓冲区
+        int[] scanBudget = {getMaxScansForBuffer(bufferSize)};
         int operations = 0;
 
-        if (outputMode == OutputMode.SMALL_FIRST && flushSmallestCandidate(maxScans)) {
+        if (outputMode == OutputMode.SMALL_FIRST && flushSmallestCandidate(scanBudget)) {
             operations++;
         }
 
         boolean typePreferredMode = outputMode == OutputMode.ITEMS_FIRST || outputMode == OutputMode.FLUIDS_FIRST;
         if (typePreferredMode) {
-            operations += flushByMode(maxOperations - operations, maxScans, true);
+            operations += flushByMode(maxOperations - operations, scanBudget, true);
         }
         if (operations >= maxOperations) {
             return;
         }
 
-        operations += flushByMode(maxOperations - operations, maxScans, false);
+        operations += flushByMode(maxOperations - operations, scanBudget, false);
     }
 
-    private int flushByMode(int operationBudget, int maxScans, boolean preferredOnly) {
-        if (operationBudget <= 0) {
+    private int flushByMode(int operationBudget, int[] scanBudget, boolean preferredOnly) {
+        if (operationBudget <= 0 || scanBudget[0] <= 0) {
             return 0;
         }
         int operations = 0;
-        int scanned = 0;
         int consecutiveFailures = 0;
 
         ObjectIterator<Object2LongMap.Entry<AEKey>> it = Object2LongMaps.fastIterator(buffer);
-        while (it.hasNext() && operations < operationBudget && scanned < maxScans) {
+        while (it.hasNext() && operations < operationBudget && scanBudget[0] > 0) {
             Object2LongMap.Entry<AEKey> entry = it.next();
-            scanned++;
+            scanBudget[0]--;
             AEKey key = entry.getKey();
             long amount = entry.getLongValue();
             if (amount <= 0) {
@@ -237,15 +238,14 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
         return operations;
     }
 
-    private boolean flushSmallestCandidate(int maxScans) {
+    private boolean flushSmallestCandidate(int[] scanBudget) {
         AEKey smallestKey = null;
         long smallestAmount = Long.MAX_VALUE;
-        int scanned = 0;
 
         ObjectIterator<Object2LongMap.Entry<AEKey>> it = Object2LongMaps.fastIterator(buffer);
-        while (it.hasNext() && scanned < maxScans) {
+        while (it.hasNext() && scanBudget[0] > 0) {
             Object2LongMap.Entry<AEKey> entry = it.next();
-            scanned++;
+            scanBudget[0]--;
             AEKey key = entry.getKey();
             long amount = entry.getLongValue();
             if (amount <= 0 || amount >= smallestAmount) {
