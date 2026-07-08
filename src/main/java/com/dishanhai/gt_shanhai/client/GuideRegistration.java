@@ -2,7 +2,9 @@ package com.dishanhai.gt_shanhai.client;
 
 import guideme.Guide;
 import guideme.GuideItemSettings;
+import guideme.compiler.TagCompiler;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.api.guideme.RecipeCardTagCompiler;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import java.nio.file.Files;
@@ -43,6 +45,7 @@ public final class GuideRegistration {
             .developmentSources(DEV_GUIDES_DIR, GTDishanhaiMod.MOD_ID)
             .watchDevelopmentSources(true)                          // 自动启动文件监听
             .itemSettings(itemSettings)
+            .extension(TagCompiler.EXTENSION_POINT, new RecipeCardTagCompiler())
             .build();
 
         GTDishanhaiMod.LOGGER.info("[Guide] 已注册 Guide，支持从 {} 热重载", DEV_GUIDES_DIR.toAbsolutePath());
