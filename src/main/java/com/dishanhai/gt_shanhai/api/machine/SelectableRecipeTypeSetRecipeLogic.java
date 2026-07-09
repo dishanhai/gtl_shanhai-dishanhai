@@ -36,12 +36,6 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     
     // getGTRecipe 智能轮询缓存：优先查询上次成功的配方类型
     private GTRecipeType lastSuccessfulRecipeType = null;
-    
-    // getGTRecipe 返回值缓存：避免每 tick 重新轮询（配方执行阶段缓存）
-    private static final long RECIPE_RESULT_CACHE_TICKS = 10L; // 0.5秒缓存（比 lookup 短，快速响应输入变化）
-    private GTRecipe cachedGTRecipe = null;
-    private boolean cachedGTRecipeValid = false;
-    private long cachedGTRecipeTick = Long.MIN_VALUE;
 
     public SelectableRecipeTypeSetRecipeLogic(SelectableRecipeTypeSetMachine machine) {
         super(machine);
@@ -61,9 +55,6 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         cachedParallelLimit = -1L;
         cachedParallelRecipesHash = 0;
         lastSuccessfulRecipeType = null; // 清空配方类型缓存
-        cachedGTRecipe = null; // 清空配方结果缓存
-        cachedGTRecipeValid = false;
-        cachedGTRecipeTick = Long.MIN_VALUE;
     }
 
     @Override
@@ -80,15 +71,6 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             return false;
         }
         return super.checkMatchedRecipeAvailable(recipe);
-    }
-
-    @Override
-    public void handleRecipeWorking() {
-        super.handleRecipeWorking();
-        // 配方执行阶段结束，清空配方结果缓存（物品可能已消耗/生产，下次需重新查找）
-        cachedGTRecipe = null;
-        cachedGTRecipeValid = false;
-        cachedGTRecipeTick = Long.MIN_VALUE;
     }
 
     public void onRecipeTypeSelectionChanged() {
@@ -108,27 +90,20 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         if (!getMachine().hasSelectedRecipeTypes()) {
             return null;
         }
-        
-        // 超快路径：返回值缓存（配方执行阶段，物品输入未变时直接返回上次结果）
-        long tick = getMachine().getOffsetTimer();
-        if (cachedGTRecipeValid && tick - cachedGTRecipeTick >= 0
-                && tick - cachedGTRecipeTick < RECIPE_RESULT_CACHE_TICKS) {
-            return cachedGTRecipe;
-        }
-        
+
+        // 直接查找：getGTRecipe（经 super 链）会真实扣输入，属于有副作用的调用，
+        // 不能缓存其返回值（旧实现缓存 10 tick 会导致 duration=0 合成配方重复出货、
+        // 返回 null 时又延迟响应新物料）。该方法仅在启动/每轮结束时调用，非每 tick 热路径。
         GTRecipe recipe = super.getGTRecipe();
         if (recipe != null) {
             if (recipe.recipeType != null) {
                 lastSuccessfulRecipeType = recipe.recipeType;
             }
-            cachedGTRecipe = recipe;
-            cachedGTRecipeValid = true;
-            cachedGTRecipeTick = tick;
             return recipe;
         }
-        
-        // 快速路径：优先查询上次成功的配方类型（缓存命中率高时可避免全量轮询）
-        if (lastSuccessfulRecipeType != null 
+
+        // 快速路径：优先查询上次成功的配方类型（集合无法共同成料时的单类型回退）
+        if (lastSuccessfulRecipeType != null
                 && getMachine().isRecipeTypeSelected(lastSuccessfulRecipeType)) {
             getMachine().setForcedSearchRecipeType(lastSuccessfulRecipeType);
             try {
@@ -137,13 +112,10 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
                 getMachine().setForcedSearchRecipeType(null);
             }
             if (recipe != null) {
-                cachedGTRecipe = recipe;
-                cachedGTRecipeValid = true;
-                cachedGTRecipeTick = tick;
                 return recipe;
             }
         }
-        
+
         // 慢速路径：全量轮询所有配方类型
         for (GTRecipeType type : getMachine().getSelectedRecipeTypes()) {
             if (type == null || type == lastSuccessfulRecipeType) {
@@ -156,18 +128,11 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
                 getMachine().setForcedSearchRecipeType(null);
             }
             if (recipe != null) {
-                lastSuccessfulRecipeType = type; // 更新缓存
-                cachedGTRecipe = recipe;
-                cachedGTRecipeValid = true;
-                cachedGTRecipeTick = tick;
+                lastSuccessfulRecipeType = type; // 更新命中提示
                 return recipe;
             }
         }
-        
-        // 未找到配方，缓存 null 结果（避免下次 tick 重复轮询）
-        cachedGTRecipe = null;
-        cachedGTRecipeValid = true;
-        cachedGTRecipeTick = tick;
+
         return null;
     }
 

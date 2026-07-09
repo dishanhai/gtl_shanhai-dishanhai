@@ -34,6 +34,10 @@ public class DShanhaiRecipeEngine {
     // ====== 热缓存 ======
     private static final ConcurrentHashMap<String, net.minecraft.world.item.ItemStack> ITEM_CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, com.lowdragmc.lowdraglib.side.fluid.FluidStack> FLUID_ID_CACHE = new ConcurrentHashMap<>();
+    // 配方类型 → 该类型全部配方 的缓存。getRecipesOfType 遍历 GTRecipeType 的 lookup 树成本较高，
+    // 故按类型 memoize。配方随世界加载确定，客户端每次 RecipesUpdatedEvent 后须 clearRecipeCache() 失效，
+    // 否则缓存里的 GTRecipe 会指向旧 RecipeManager。
+    private static final ConcurrentHashMap<String, java.util.List<com.gregtechceu.gtceu.api.recipe.GTRecipe>> RECIPES_OF_TYPE_CACHE = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, TimerEntry> TIMERS = new ConcurrentHashMap<>();
     private static final AtomicLong CACHE_HIT = new AtomicLong(0);
     private static final AtomicLong CACHE_MISS = new AtomicLong(0);
@@ -233,19 +237,23 @@ public class DShanhaiRecipeEngine {
     }
 
     /**
-     * 返回指定配方类型的所有配方（有序列表）。
-     * <p>仅在游戏运行时调用（客户端需加载 RecipeManager）。
-     * 用于生成配方索引子页面。</p>
+     * 返回指定配方类型的所有配方（有序列表，只读）。
+     * <p>仅在游戏运行时调用（客户端需加载 RecipeManager）。用于生成配方索引子页面。</p>
+     * <p>结果按类型 memoize 到 {@link #RECIPES_OF_TYPE_CACHE}：首次遍历 lookup 树后缓存，
+     * 后续同类型直接返回。<b>配方重载后必须调 {@link #clearRecipeCache()} 失效</b>，
+     * 否则会返回指向旧 RecipeManager 的过期 GTRecipe。</p>
      *
-     * @param recipeType 配方类型字符串（如 "gtceu:primordial_matter_recombination"）
-     * @return 该类型的所有 GTRecipe 列表；找不到类型或无配方时返回空列表
+     * @param recipeType 配方类型字符串（如 "primordial_matter_recombination" 或 "gtceu:xxx"）
+     * @return 该类型的所有 GTRecipe 只读列表；找不到类型或无配方时返回空列表
      */
     public static java.util.List<com.gregtechceu.gtceu.api.recipe.GTRecipe> getRecipesOfType(String recipeType) {
-        java.util.List<com.gregtechceu.gtceu.api.recipe.GTRecipe> out = new ArrayList<>();
-        if (recipeType == null || recipeType.isEmpty()) return out;
+        if (recipeType == null || recipeType.isEmpty()) return java.util.Collections.emptyList();
 
+        java.util.List<com.gregtechceu.gtceu.api.recipe.GTRecipe> cached = RECIPES_OF_TYPE_CACHE.get(recipeType);
+        if (cached != null) return cached;
+
+        java.util.List<com.gregtechceu.gtceu.api.recipe.GTRecipe> out = new ArrayList<>();
         try {
-            // 解析类型 ID（兜底：裸名时补 gtceu 命名空间）
             String namespace = "gtceu";
             String path = recipeType;
             int colon = recipeType.indexOf(':');
@@ -253,17 +261,20 @@ public class DShanhaiRecipeEngine {
                 namespace = recipeType.substring(0, colon);
                 path = recipeType.substring(colon + 1);
             }
-            net.minecraft.resources.ResourceLocation typeId = new net.minecraft.resources.ResourceLocation(namespace, path);
 
-            // 从注册表查找类型
-            com.gregtechceu.gtceu.api.recipe.GTRecipeType gtrType = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES.get(typeId);
-            if (gtrType == null) return out;
+            // 从注册表查找类型；非 gtceu 命名空间取不到时兜底再试 gtceu:path（与 RecipeCard 的 findRecipeType 一致）。
+            com.gregtechceu.gtceu.api.recipe.GTRecipeType gtrType =
+                    com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES.get(new net.minecraft.resources.ResourceLocation(namespace, path));
+            if (gtrType == null && !"gtceu".equals(namespace)) {
+                gtrType = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES.get(new net.minecraft.resources.ResourceLocation("gtceu", path));
+            }
+            if (gtrType == null) return java.util.Collections.emptyList();
 
             // 枚举该类型的所有配方
             var lookup = gtrType.getLookup();
-            if (lookup == null) return out;
+            if (lookup == null) return java.util.Collections.emptyList();
             var branch = lookup.getLookup();
-            if (branch == null) return out;
+            if (branch == null) return java.util.Collections.emptyList();
 
             var recipes = branch.getRecipes(true);
             if (recipes != null) {
@@ -271,8 +282,20 @@ public class DShanhaiRecipeEngine {
             }
         } catch (Exception e) {
             LOG.warn("[DRE] getRecipesOfType({}) 失败: {}", recipeType, e.getMessage());
+            return java.util.Collections.emptyList();
         }
-        return out;
+
+        java.util.List<com.gregtechceu.gtceu.api.recipe.GTRecipe> result = java.util.Collections.unmodifiableList(out);
+        RECIPES_OF_TYPE_CACHE.put(recipeType, result);
+        return result;
+    }
+
+    /**
+     * 清空配方类型缓存。客户端每次 RecipesUpdatedEvent（配方同步/重载）后必须调用，
+     * 避免 {@link #getRecipesOfType} 返回指向旧 RecipeManager 的过期配方对象。
+     */
+    public static void clearRecipeCache() {
+        RECIPES_OF_TYPE_CACHE.clear();
     }
 
     public static void resetRecipeStats() {

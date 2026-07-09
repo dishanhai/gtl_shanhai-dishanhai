@@ -38,6 +38,9 @@ public class RecipeTypeSubPageGenerator {
      */
     @SubscribeEvent
     public static void onRecipesUpdated(RecipesUpdatedEvent event) {
+        // 配方已重新同步：清空按类型缓存的 GTRecipe（旧对象指向失效的 RecipeManager）。
+        // 放在 generated 判断之前——即使子页面本会话已生成过，缓存也必须随配方刷新。
+        DShanhaiRecipeEngine.clearRecipeCache();
         if (generated) return;
         // 只有存在山海配方统计时才生成（避免菜单界面等空数据场景）
         Map<String, Integer> counts = DShanhaiRecipeEngine.getRecipeTypeCounts();

@@ -42,17 +42,13 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     private GTRecipeType cachedLookupForcedType;
     private Set<GTRecipe> cachedLookupRecipes;
     private int cachedLookupRecipesHash = 0; // 配方集合指纹
-    private Set<GTRecipe> cachedNormalRecipes;
-    private int cachedNormalRecipesHash = 0; // normal 配方集合指纹
-    private final StableFilteredSetCache<GTRecipe> cachedNormalRecipeCandidates = new StableFilteredSetCache<>();
-    
-    // checkModuleCondition 缓存：避免每次都查静态注册表和遍历 conditions
-    // 注意：模块等级变化时需手动调用 onModuleLevelChanged() 清空此缓存
-    // true 永久缓存（靠 onModuleLevelChanged / 重选配方类型清空）；
-    // false 仅短期缓存 MODULE_CONDITION_FALSE_TTL tick，防止一次瞬时 false
-    //（host 未连接 / 模块槽未就绪 / 模块集空）被永久固化，导致配方永久待机、必须重选才恢复。
-    private final java.util.Map<GTRecipe, Boolean> moduleConditionCache = new java.util.HashMap<>();
+
+    // checkModuleCondition 缓存：避免每次都查静态注册表和遍历 conditions。
+    // true / false 均为短期缓存（各带 TTL），过期后重新检查，避免一次瞬时结果被永久固化。
+    // 模块等级变化时可主动调用 onModuleLevelChanged() 立即清空。
+    private final java.util.Map<GTRecipe, Long> moduleConditionTrueCache = new java.util.HashMap<>();
     private final java.util.Map<GTRecipe, Long> moduleConditionFalseCache = new java.util.HashMap<>();
+    private static final long MODULE_CONDITION_TRUE_TTL = 20L;
     private static final long MODULE_CONDITION_FALSE_TTL = 20L;
 
     public PrimordialModuleRecipeLogic(GTLAddWirelessWorkableElectricMultipleRecipesMachine machine) {
@@ -78,28 +74,22 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         cachedLookupForcedType = null;
         cachedLookupRecipes = null;
         cachedLookupRecipesHash = 0;
-        cachedNormalRecipes = null;
-        cachedNormalRecipesHash = 0;
-        cachedNormalRecipeCandidates.clear();
-        moduleConditionCache.clear();
+        moduleConditionTrueCache.clear();
         moduleConditionFalseCache.clear();
         invalidateLookupCache(); // 同时失效父类缓存
         interruptRecipe();
     }
-    
+
     /**
      * 模块等级变化时调用此方法清空缓存
      * 应该在模块升级/降级后调用，确保条件检查使用最新的模块等级
      */
     public void onModuleLevelChanged() {
-        moduleConditionCache.clear();
+        moduleConditionTrueCache.clear();
         moduleConditionFalseCache.clear();
         // 清空配方缓存，因为条件检查结果变化可能导致配方集合变化
         cachedLookupRecipes = null;
         cachedLookupRecipesHash = 0;
-        cachedNormalRecipes = null;
-        cachedNormalRecipesHash = 0;
-        cachedNormalRecipeCandidates.clear();
         invalidateLookupCache(); // 同时失效父类缓存
     }
 
@@ -262,11 +252,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             return result;
         }
 
-        Set<GTRecipe> cachedNormal = lookupCachedNormalRecipes();
-        if (cachedNormal != null) {
-            return cachedNormal;
-        }
-
+        // 每次未命中 20t 读缓存时都做全量重扫：确保因瞬时条件失败（host 短暂掉线 /
+        // 模块槽未就绪 / checkModuleCondition 瞬时 false 等）被剔除的配方能被重新发现。
+        // 旧实现走“只缩不增”的候选缓存（cachedNormalRecipeCandidates），一旦被抖动踢掉就
+        // 永久固化、必须重选配方类型才恢复——这是配方选择集卡住/不跑的根因，已移除。
         boolean conditionsPassed = true;
         for (GTRecipeType type : selectedTypes) {
             if (type == null) continue;
@@ -278,53 +267,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                 conditionsPassed = false;
             }
         }
-        cachedNormalRecipes = result.isEmpty() ? null : new ObjectOpenHashSet<>(result);
-        if (cachedNormalRecipes == null) {
-            cachedNormalRecipeCandidates.clear();
-            cachedNormalRecipesHash = 0;
-        } else {
-            cachedNormalRecipeCandidates.set(cachedNormalRecipes);
-            cachedNormalRecipesHash = System.identityHashCode(cachedNormalRecipes);
-        }
         if (conditionsPassed) mergePatternRecipes(result);
         return result;
-    }
-
-    private Set<GTRecipe> lookupCachedNormalRecipes() {
-        Set<GTRecipe> recipes = cachedNormalRecipeCandidates.get();
-        if (recipes == null || recipes.isEmpty()) return null;
-        Set<GTRecipe> stableRecipes = cachedNormalRecipeCandidates.retainIf(this::isCachedNormalRecipeStillCandidate);
-        if (stableRecipes == null || stableRecipes.isEmpty()) {
-            cachedNormalRecipes = null;
-            cachedNormalRecipesHash = 0;
-            return null;
-        }
-        cachedNormalRecipes = stableRecipes;
-        cachedNormalRecipesHash = System.identityHashCode(stableRecipes);
-        if (!hasDynamicPatternRecipeSources()) {
-            return stableRecipes;
-        }
-        Set<GTRecipe> merged = new ObjectOpenHashSet<>(stableRecipes);
-        mergePatternRecipes(merged);
-        return merged;
-    }
-
-    private boolean isCachedNormalRecipeStillCandidate(GTRecipe recipe) {
-        return recipe != null
-                && recipe.recipeType != null
-                && isSelectedRecipeType(recipe.recipeType)
-                && IGTRecipe.of(recipe).getEuTier() <= getMachine().getTier()
-                && recipe.checkConditions(this).isSuccess()
-                && checkModuleCondition(recipe);
-    }
-
-    private boolean hasDynamicPatternRecipeSources() {
-        MetaMachine machine = getMachine();
-        if (machine instanceof IRecipeCapabilityMachine recipeMachine
-                && !recipeMachine.getMEPatternRecipeHandleParts().isEmpty()) {
-            return true;
-        }
-        return hasHostPatternBuffers();
     }
 
     private boolean checkRecipeInKnownSelectedType(GTRecipe recipe) {
@@ -364,30 +308,26 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         return added;
     }
 
-    private boolean hasHostPatternBuffers() {
-        MetaMachine machine = getMachine();
-        if (!(machine instanceof PrimordialOmegaEngineModuleBase mod)) return false;
-        PrimordialOmegaEngineMachine host = mod.getHost();
-        if (host == null || !host.isFormed()) return false;
-        return !mod.getHostPatternBuffers().isEmpty();
-    }
-
     /** 手动检查模块条件——优先从静态注册表读（绕过 KubeJS 序列化类型丢失） */
     private boolean checkModuleCondition(GTRecipe recipe) {
         if (recipe == null) {
             return false;
         }
         
-        // 缓存命中：true 永久有效（靠 onModuleLevelChanged / 重选配方类型清空）
-        Boolean cached = moduleConditionCache.get(recipe);
-        if (Boolean.TRUE.equals(cached)) {
-            clearConditionError();
-            return true;
+        // 缓存命中：true / false 均为短期有效（各带 TTL），过期后重新检查，
+        // 避免一次瞬时结果被永久固化（true 永久缓存会在模块降级漏调 onModuleLevelChanged 时残留）。
+        long now = getMachine().getOffsetTimer();
+        Long trueUntil = moduleConditionTrueCache.get(recipe);
+        if (trueUntil != null) {
+            if (now < trueUntil) {
+                clearConditionError();
+                return true;
+            }
+            moduleConditionTrueCache.remove(recipe);
         }
-        // false 仅短期有效：过期后重新检查，避免一次瞬时 false 被永久固化
         Long falseUntil = moduleConditionFalseCache.get(recipe);
         if (falseUntil != null) {
-            if (getMachine().getOffsetTimer() < falseUntil) {
+            if (now < falseUntil) {
                 updateConditionErrorFromCache(recipe);
                 return false;
             }
@@ -445,11 +385,11 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     private void cacheModuleConditionTrue(GTRecipe recipe) {
         moduleConditionFalseCache.remove(recipe);
-        moduleConditionCache.put(recipe, Boolean.TRUE);
+        moduleConditionTrueCache.put(recipe, getMachine().getOffsetTimer() + MODULE_CONDITION_TRUE_TTL);
     }
 
     private void cacheModuleConditionFalse(GTRecipe recipe) {
-        moduleConditionCache.remove(recipe);
+        moduleConditionTrueCache.remove(recipe);
         moduleConditionFalseCache.put(recipe, getMachine().getOffsetTimer() + MODULE_CONDITION_FALSE_TTL);
     }
     
