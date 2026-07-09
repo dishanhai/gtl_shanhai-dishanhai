@@ -11,6 +11,7 @@ categories:
 这里是 gt_shanhai 的 GuideME 指南入口。当前第一部分先建立可跳转的索引层，后续再逐页补结构、配方和实机说明。
 
 * [机器索引](machine/machine_index.md)
+* [配方索引](recipe/recipe_index.md)
 * [AE2、物流与仓室](ae/index.md)
 * [通用说明](common_index.md)
 

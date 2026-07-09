@@ -211,6 +211,70 @@ public class DShanhaiRecipeEngine {
         return getRecipeStats().toString();
     }
 
+    /**
+     * 返回「配方类型 → 成功注册的配方数」的有序映射（按注册出现顺序）。
+     * <p>数据来源即 safeAddRecipe → recordRecipe 累积的 {@link #RECIPE_TYPE_STATS}，
+     * 所有 dishanhai: 配方都必经 safeAddRecipe，因此这是零遗漏的机器类型清单。
+     * 供 GuideME 的 &lt;RecipeTypeIndex /&gt; 标签在渲染时读取。</p>
+     * <p>只计入 success（实际生效的配方），跳过 unknown 占位类型与零成功类型。</p>
+     */
+    public static Map<String, Integer> getRecipeTypeCounts() {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        synchronized (RECIPE_TYPE_STATS) {
+            for (Map.Entry<String, TypeStats> entry : RECIPE_TYPE_STATS.entrySet()) {
+                String type = entry.getKey();
+                if (type == null || type.isEmpty() || "unknown".equals(type)) continue;
+                long success = entry.getValue().success;
+                if (success <= 0) continue;
+                out.put(type, Integer.valueOf((int) success));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 返回指定配方类型的所有配方（有序列表）。
+     * <p>仅在游戏运行时调用（客户端需加载 RecipeManager）。
+     * 用于生成配方索引子页面。</p>
+     *
+     * @param recipeType 配方类型字符串（如 "gtceu:primordial_matter_recombination"）
+     * @return 该类型的所有 GTRecipe 列表；找不到类型或无配方时返回空列表
+     */
+    public static java.util.List<com.gregtechceu.gtceu.api.recipe.GTRecipe> getRecipesOfType(String recipeType) {
+        java.util.List<com.gregtechceu.gtceu.api.recipe.GTRecipe> out = new ArrayList<>();
+        if (recipeType == null || recipeType.isEmpty()) return out;
+
+        try {
+            // 解析类型 ID（兜底：裸名时补 gtceu 命名空间）
+            String namespace = "gtceu";
+            String path = recipeType;
+            int colon = recipeType.indexOf(':');
+            if (colon >= 0) {
+                namespace = recipeType.substring(0, colon);
+                path = recipeType.substring(colon + 1);
+            }
+            net.minecraft.resources.ResourceLocation typeId = new net.minecraft.resources.ResourceLocation(namespace, path);
+
+            // 从注册表查找类型
+            com.gregtechceu.gtceu.api.recipe.GTRecipeType gtrType = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES.get(typeId);
+            if (gtrType == null) return out;
+
+            // 枚举该类型的所有配方
+            var lookup = gtrType.getLookup();
+            if (lookup == null) return out;
+            var branch = lookup.getLookup();
+            if (branch == null) return out;
+
+            var recipes = branch.getRecipes(true);
+            if (recipes != null) {
+                recipes.filter(java.util.Objects::nonNull).forEach(out::add);
+            }
+        } catch (Exception e) {
+            LOG.warn("[DRE] getRecipesOfType({}) 失败: {}", recipeType, e.getMessage());
+        }
+        return out;
+    }
+
     public static void resetRecipeStats() {
         RECIPE_TOTAL.set(0);
         RECIPE_SUCCESS.set(0);
@@ -268,6 +332,7 @@ public class DShanhaiRecipeEngine {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a💽 当前神人私货版本:v" + safeVersion(scriptVersion)));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a💽 当前gt_shanhai模组版本:v" + modVersion));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a💽 当前API总控系统版本为" + safeVersion(apiVersion)));
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("👌 你可以在Guime中查看配方引索,其会显示目前shanhai有哪些配方！"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$body_aurora-欢迎来到GTL寰宇联合重工巨企"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$body_moss-此成功信息回执由JAVA侧: DShanhaiRecipeEngine 生成"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$body_silver-老大我们这样熬夜写私货心脏真的不会自己先休息吗"));

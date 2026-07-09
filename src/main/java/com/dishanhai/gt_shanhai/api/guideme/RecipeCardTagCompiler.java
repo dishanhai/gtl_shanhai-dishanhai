@@ -33,9 +33,9 @@ public class RecipeCardTagCompiler extends BlockTagCompiler {
         boolean showEU = parseBoolean(mdxJsxElementFields, "showEU", true);
         boolean showDuration = parseBoolean(mdxJsxElementFields, "showDuration", true);
 
-        if (recipeTypeStr.isEmpty() || recipeIdStr.isEmpty()) {
+        if (recipeTypeStr.isEmpty()) {
             parent.append(compiler.createErrorBlock(
-                "RecipeCard: missing required attributes (recipeType and recipeId)",
+                "RecipeCard: missing required attribute (recipeType)",
                 mdxJsxElementFields
             ));
             return;
@@ -60,22 +60,34 @@ public class RecipeCardTagCompiler extends BlockTagCompiler {
                 return;
             }
 
-            ResourceLocation recipeId = ResourceLocation.tryParse(recipeIdStr);
-            if (recipeId == null) {
-                parent.append(compiler.createErrorBlock(
-                    "RecipeCard: invalid recipeId format: " + recipeIdStr,
-                    mdxJsxElementFields
-                ));
-                return;
-            }
-
-            GTRecipe recipe = findRecipe(recipeType, recipeId);
-            if (recipe == null) {
-                parent.append(compiler.createErrorBlock(
-                    "RecipeCard: recipe not found: " + recipeIdStr + " in type " + recipeTypeStr,
-                    mdxJsxElementFields
-                ));
-                return;
+            GTRecipe recipe;
+            if (recipeIdStr.isEmpty()) {
+                // 未指定 recipeId：显示该类型的第一个配方（便于测试/展示）
+                recipe = findFirstRecipe(recipeType);
+                if (recipe == null) {
+                    parent.append(compiler.createErrorBlock(
+                        "RecipeCard: no recipes found in type " + recipeTypeStr,
+                        mdxJsxElementFields
+                    ));
+                    return;
+                }
+            } else {
+                ResourceLocation recipeId = ResourceLocation.tryParse(recipeIdStr);
+                if (recipeId == null) {
+                    parent.append(compiler.createErrorBlock(
+                        "RecipeCard: invalid recipeId format: " + recipeIdStr,
+                        mdxJsxElementFields
+                    ));
+                    return;
+                }
+                recipe = findRecipe(recipeType, recipeId);
+                if (recipe == null) {
+                    parent.append(compiler.createErrorBlock(
+                        "RecipeCard: recipe not found: " + recipeIdStr + " in type " + recipeTypeStr,
+                        mdxJsxElementFields
+                    ));
+                    return;
+                }
             }
 
             LytBlock recipeCard = RecipeCardBlockFactory.createRecipeCardBlock(
@@ -93,7 +105,17 @@ public class RecipeCardTagCompiler extends BlockTagCompiler {
 
     @Nullable
     private GTRecipeType findRecipeType(ResourceLocation typeId) {
-        return GTRegistries.RECIPE_TYPES.get(typeId);
+        // 直接按写法查
+        GTRecipeType type = GTRegistries.RECIPE_TYPES.get(typeId);
+        if (type != null) {
+            return type;
+        }
+        // 兜底：山海配方类型经 GTRecipeTypes.register 注册，实际命名空间是 gtceu（GTCEu.id 强制）。
+        // 用户写 gt_shanhai:xxx 时，自动尝试 gtceu:xxx。
+        if (!"gtceu".equals(typeId.getNamespace())) {
+            return GTRegistries.RECIPE_TYPES.get(new ResourceLocation("gtceu", typeId.getPath()));
+        }
+        return null;
     }
 
     @Nullable
@@ -104,6 +126,28 @@ public class RecipeCardTagCompiler extends BlockTagCompiler {
                 return null;
             }
             return recipeType.getRecipe(recipeManager, recipeId);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // 从配方类型的内部查找表取第一个配方（与 DShanhaiGTRecipeQuery 一致的枚举方式）。
+    // GT 配方 ID 常由 KubeJS 自动生成、难以手查，故 recipeId 留空时用此兜底展示。
+    @Nullable
+    private GTRecipe findFirstRecipe(GTRecipeType recipeType) {
+        try {
+            var lookup = recipeType.getLookup();
+            if (lookup == null) {
+                return null;
+            }
+            var branch = lookup.getLookup();
+            if (branch == null) {
+                return null;
+            }
+            return branch.getRecipes(true)
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .orElse(null);
         } catch (Exception e) {
             return null;
         }

@@ -5,6 +5,8 @@ import guideme.GuideItemSettings;
 import guideme.compiler.TagCompiler;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.guideme.RecipeCardTagCompiler;
+import com.dishanhai.gt_shanhai.api.guideme.RecipeTypeIndexTagCompiler;
+import com.dishanhai.gt_shanhai.api.guideme.RecipeTypeIndexLinkedTagCompiler;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import java.nio.file.Files;
@@ -22,8 +24,14 @@ import java.util.Optional;
  */
 public final class GuideRegistration {
 
-    /** 游戏运行时相对路径（相对于游戏根目录） */
-    private static final Path DEV_GUIDES_DIR = Paths.get("config/gt_shanhai/guides");
+    /**
+     * 游戏运行时 dev sources 根目录（相对游戏根）。
+     * <p>必须对齐 jar 内 {@code folder("guides/gt_shanhai/guide")} 那一层，
+     * 因为 GuideME 的 pageId = sourceFolder.relativize(file) 去掉 .md。
+     * 这样 dev 文件 {@code .../gt_shanhai/guide/recipe/type/x.md}
+     * → pageId {@code gt_shanhai:recipe/type/x.md}，与 jar 资源一致。</p>
+     */
+    private static final Path DEV_GUIDES_DIR = Paths.get("config/gt_shanhai/guides/gt_shanhai/guide");
 
     private GuideRegistration() {}
 
@@ -46,6 +54,8 @@ public final class GuideRegistration {
             .watchDevelopmentSources(true)                          // 自动启动文件监听
             .itemSettings(itemSettings)
             .extension(TagCompiler.EXTENSION_POINT, new RecipeCardTagCompiler())
+            .extension(TagCompiler.EXTENSION_POINT, new RecipeTypeIndexTagCompiler())
+            .extension(TagCompiler.EXTENSION_POINT, new RecipeTypeIndexLinkedTagCompiler())
             .build();
 
         GTDishanhaiMod.LOGGER.info("[Guide] 已注册 Guide，支持从 {} 热重载", DEV_GUIDES_DIR.toAbsolutePath());
@@ -53,8 +63,11 @@ public final class GuideRegistration {
 
     private static void ensureDevDirExists() {
         try {
-            if (!Files.exists(DEV_GUIDES_DIR)) {
-                Files.createDirectories(DEV_GUIDES_DIR);
+            // 预建整棵目录树（含 recipe/type），确保 GuideME 文件监听器启动时
+            // 就能递归监听到该子目录，进世界后运行时生成的子页面才会被实时收录。
+            Path recipeTypeDir = DEV_GUIDES_DIR.resolve("recipe").resolve("type");
+            if (!Files.exists(recipeTypeDir)) {
+                Files.createDirectories(recipeTypeDir);
                 GTDishanhaiMod.LOGGER.info(
                     "[Guide] 已创建热重载目录: {} — 将此目录下的 .md 文件优先于 jar 内资源展示",
                     DEV_GUIDES_DIR.toAbsolutePath());

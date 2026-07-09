@@ -17,8 +17,7 @@ categories:
 
 ```
 <RecipeCard
-  recipeType="gt_shanhai:spacetime_distortion"
-  recipeId="gt_shanhai:some_recipe_id"
+  recipeType="gtceu:spacetime_distortion"
   title="配方标题"
   showEU={true}
   showDuration={true}
@@ -26,34 +25,59 @@ categories:
 ```
 
 属性：
-- `recipeType` — 配方类型的 ResourceLocation（必填）
-- `recipeId` — 配方 ID 的 ResourceLocation（必填）
+- `recipeType` — 配方类型的 ResourceLocation（**必填**）。山海配方类型实际注册在 `gtceu` 命名空间下（GTCEu 强制），写 `gt_shanhai:xxx` 会自动兜底为 `gtceu:xxx`。
+- `recipeId` — 配方 ID 的 ResourceLocation（**可选**）。留空时自动显示该类型的第一个配方，便于测试/展示。
 - `title` — 卡片标题，默认用 recipeId
 - `showEU` — 是否显示 EU/t，默认 true
 - `showDuration` — 是否显示耗时，默认 true
 
 ---
 
-## 错误处理示例（intentional）
+## 真实配方（自动显示第一个配方）
 
-以下卡片使用不存在的配方 ID，验证错误提示是否正常显示：
+只填 `recipeType`、不填 `recipeId`，自动显示该类型的第一个配方。用多个不同类型验证渲染：
+
+### 时空扭曲
 
 <RecipeCard
-  recipeType="gt_shanhai:spacetime_distortion"
-  recipeId="gt_shanhai:nonexistent_recipe"
-  title="应显示错误"
+  recipeType="gtceu:spacetime_distortion"
+  title="时空扭曲（首个配方）"
+  showEU={true}
+  showDuration={true}
+/>
+
+### 混沌合成
+
+<RecipeCard
+  recipeType="gtceu:chaos_crafting"
+  title="混沌合成（首个配方）"
+/>
+
+### 太虚熔炼
+
+<RecipeCard
+  recipeType="gtceu:taixu_smelting"
+  title="太虚熔炼（首个配方）"
 />
 
 ---
 
-## 真实配方（游戏内确认 ID 后替换）
+## 命名空间兜底测试
 
-将下方 `recipeId` 替换为游戏内实际存在的配方 ID，验证正常渲染：
+下方故意写 `gt_shanhai:` 前缀，验证自动兜底到 `gtceu:`：
 
 <RecipeCard
   recipeType="gt_shanhai:spacetime_distortion"
-  recipeId="gt_shanhai:replace_with_real_id"
-  title="时空扭曲配方示例"
-  showEU={true}
-  showDuration={true}
+  title="兜底测试（应正常渲染）"
+/>
+
+---
+
+## 错误处理示例（intentional）
+
+以下卡片使用不存在的配方类型，验证错误提示是否正常显示：
+
+<RecipeCard
+  recipeType="gtceu:totally_fake_type"
+  title="应显示错误"
 />

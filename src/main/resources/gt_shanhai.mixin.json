@@ -109,6 +109,8 @@
     "JEISdaElementDedupMixin",
     "RecipeSlotTooltipMixin",
     "WobbleFontMixin",
-    "GuiGraphicsCustomTooltipMixin"
+    "GuiGraphicsCustomTooltipMixin",
+    "GTLytSlotItemCountFormatMixin",
+    "GTLytSlotGridOverflowMixin"
   ]
 }
