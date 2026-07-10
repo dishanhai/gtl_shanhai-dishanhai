@@ -13,18 +13,30 @@ import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Predicate;
 
 public final class DShanhaiRuntimeRecipeCache {
 
     private static final Map<Key, CachedRecipe> CACHE = new ConcurrentHashMap<>();
 
+    // 运行期诊断计数器：仅在 DShanhaiConfig.COMMON.runtimeRecipeCacheDiagnostics 开启时自增，默认关闭不产生任何开销
+    private static final LongAdder HIT_COUNT = new LongAdder();
+    private static final LongAdder NEGATIVE_HIT_COUNT = new LongAdder();
+    private static final LongAdder MISS_COUNT = new LongAdder();
+    private static final LongAdder CLEAR_COUNT = new LongAdder();
+
     private DShanhaiRuntimeRecipeCache() {
+    }
+
+    private static boolean diagnosticsEnabled() {
+        return com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.runtimeRecipeCacheDiagnostics.get();
     }
 
     public static Key key(String recipeTypeId, IRecipeCapabilityHolder holder, String scope) {
@@ -38,12 +50,22 @@ public final class DShanhaiRuntimeRecipeCache {
 
     public static Optional<GTRecipe> get(Key key) {
         CachedRecipe cached = CACHE.get(key);
+        if (diagnosticsEnabled() && cached != null) {
+            if (cached.recipe == null) {
+                NEGATIVE_HIT_COUNT.increment();
+            } else {
+                HIT_COUNT.increment();
+            }
+        }
         return cached == null ? Optional.empty() : Optional.ofNullable(cached.recipe);
     }
 
     public static void put(Key key, GTRecipe recipe) {
         if (key != null) {
             CACHE.put(key, new CachedRecipe(recipe, null));
+            if (diagnosticsEnabled()) {
+                MISS_COUNT.increment();
+            }
         }
     }
 
@@ -60,12 +82,18 @@ public final class DShanhaiRuntimeRecipeCache {
             }
         }
         CACHE.put(key, new CachedRecipe(null, Collections.unmodifiableList(copy)));
+        if (diagnosticsEnabled()) {
+            MISS_COUNT.increment();
+        }
     }
 
     public static GTRecipe findFirstCandidate(Key key, Predicate<GTRecipe> predicate) {
         CachedRecipe cached = CACHE.get(key);
         if (cached == null || cached.candidates == null || predicate == null) {
             return null;
+        }
+        if (diagnosticsEnabled()) {
+            HIT_COUNT.increment();
         }
         for (GTRecipe recipe : cached.candidates) {
             if (predicate.test(recipe)) {
@@ -77,10 +105,32 @@ public final class DShanhaiRuntimeRecipeCache {
 
     public static void clear() {
         CACHE.clear();
+        if (diagnosticsEnabled()) {
+            CLEAR_COUNT.increment();
+        }
     }
 
     public static int size() {
         return CACHE.size();
+    }
+
+    /** 运行期诊断统计快照：仅在诊断开关开启时才有意义（关闭时计数器恒为 0，不产生统计开销）。 */
+    public static Map<String, Long> getDiagnosticsStats() {
+        Map<String, Long> stats = new LinkedHashMap<>();
+        stats.put("hit", HIT_COUNT.sum());
+        stats.put("negativeHit", NEGATIVE_HIT_COUNT.sum());
+        stats.put("miss", MISS_COUNT.sum());
+        stats.put("clear", CLEAR_COUNT.sum());
+        stats.put("cacheSize", (long) CACHE.size());
+        return stats;
+    }
+
+    /** 清零诊断计数器（不清空缓存本身）。 */
+    public static void resetDiagnosticsStats() {
+        HIT_COUNT.reset();
+        NEGATIVE_HIT_COUNT.reset();
+        MISS_COUNT.reset();
+        CLEAR_COUNT.reset();
     }
 
     private static String itemFingerprint(IRecipeCapabilityHolder holder) {

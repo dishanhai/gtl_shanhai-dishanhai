@@ -65,6 +65,10 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.IntValue recipeTypeRowsPerPage;
         /** 配方类型样板总成 — 最大页数 */
         public ForgeConfigSpec.IntValue recipeTypeMaxPages;
+        /** 山海商店 — 购买总量达到此阈值时打包成超级磁盘阵列（而非塞背包） */
+        public ForgeConfigSpec.LongValue shopSdaPackThreshold;
+        /** 运行期配方查找缓存 — 是否统计 hit/miss/negativeHit/clear 次数（默认关闭，避免每 tick 统计开销） */
+        public ForgeConfigSpec.BooleanValue runtimeRecipeCacheDiagnostics;
 
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("tag_filter_bus");
@@ -172,6 +176,21 @@ public final class DShanhaiConfig {
                              "总槽位 = patternsPerRow × rowsPerPage × maxPages",
                              "修改后需重新放置总成生效")
                     .defineInRange("maxPages", 3, 1, 64);
+            builder.pop();
+
+            builder.push("shop");
+            shopSdaPackThreshold = builder
+                    .comment("山海商店：非 AE 模式下，单次购买货物总量 ≥ 此阈值时打包成超级磁盘阵列赠送（而非塞背包）",
+                             "默认 1000。设很大则几乎总进背包；设 1 则任何购买都打包成 SDA")
+                    .defineInRange("sdaPackThreshold", 1000L, 1L, Long.MAX_VALUE);
+            builder.pop();
+
+            builder.push("runtime_recipe_cache");
+            runtimeRecipeCacheDiagnostics = builder
+                    .comment("是否统计运行期配方查找缓存的 hit/miss/negativeHit/clear 次数（默认关闭）",
+                             "仅用于排查缓存是否生效，不影响缓存本身的读写逻辑",
+                             "关闭时计数器不自增，无额外开销；开启后用 /shanhai cache stats 查看统计")
+                    .define("diagnosticsEnabled", false);
             builder.pop();
         }
     }

@@ -419,6 +419,7 @@
   "block.gt_shanhai.quantum_computer": "量子计算机",
   "gt_shanhai.machine.quantum_computer.name": "量子计算机",
   "item.gt_shanhai.guide_book": "山海的神人私货引索",
+  "item.gt_shanhai.wallet": "山海钱包",
   "gt_shanhai.guide_name": "山海的神人私货引索",
   "gt_shanhai.guide_tooltip": "打开 gt_shanhai GuideME 指南",
   "block.gt_shanhai.quantum_computer_unit": "量子计算单元",
@@ -455,6 +456,11 @@
   "gtceu.recipe_type.tianjie_navigation": "宇宙修改·天界领航",
   "recipe_type.tianjie_navigation": "宇宙修改·天界领航",
   "block.gt_shanhai.advanced_mass_fabricator": "进阶质量发生器",
-  "gt_shanhai.machine.advanced_mass_fabricator.name": "进阶质量发生器"
+  "gt_shanhai.machine.advanced_mass_fabricator.name": "进阶质量发生器",
+  "gt_shanhai.shop.editor.goods": "商品物品",
+  "gt_shanhai.shop.editor.count": "每份数量",
+  "gt_shanhai.shop.editor.currency": "结算货币",
+  "gt_shanhai.shop.editor.price": "单价",
+  "gt_shanhai.shop.editor.category": "分类"
 }
 

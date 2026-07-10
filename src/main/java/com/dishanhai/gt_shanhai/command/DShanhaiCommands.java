@@ -34,6 +34,7 @@ import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiGTRecipeQuery;
 import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 
@@ -123,7 +124,9 @@ public class DShanhaiCommands {
                 .then(recipeCommand())
                 .then(gtQueryCommand())
                 .then(materialsCommand("materials"))
-                .then(sdaCommand("sda"));
+                .then(sdaCommand("sda"))
+                .then(shopCommand("shop"))
+                .then(cacheCommand());
 
         event.getDispatcher().register(cmd);
         // 中文别名
@@ -447,7 +450,170 @@ public class DShanhaiCommands {
                         .then(cn配方)
                         .then(cnGT)
                         .then(materialsCommand("材料"))
-                        .then(sdaCommand("SDA")));    }
+                        .then(sdaCommand("SDA"))
+                        .then(shopEditPermCommand()));
+        // 商店对所有玩家开放（不加权限门槛）
+        event.getDispatcher().register(shopCommand("商店"));
+    }
+
+    // ===== 商店编辑权限（/山海 商店 授权|取消授权|授权列表）=====
+
+    /** 商店编辑白名单管理指令（OP 专用）。授予后非 OP 玩家亦可在界面内编辑商店。 */
+    private static LiteralArgumentBuilder<CommandSourceStack> shopEditPermCommand() {
+        return Commands.literal("商店")
+                .then(Commands.literal("授权")
+                        .then(Commands.argument("玩家", net.minecraft.commands.arguments.EntityArgument.player())
+                                .executes(ctx -> {
+                                    net.minecraft.server.level.ServerPlayer target =
+                                            net.minecraft.commands.arguments.EntityArgument.getPlayer(ctx, "玩家");
+                                    var perm = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.get(ctx.getSource().getServer());
+                                    boolean ok = perm.grant(target.getUUID());
+                                    ctx.getSource().sendSuccess(msg(ok
+                                            ? "§b[山海商店] §a已授予 §f" + target.getName().getString() + " §a编辑权限"
+                                            : "§7[山海商店] " + target.getName().getString() + " 已有编辑权限"), false);
+                                    return ok ? 1 : 0;
+                                })))
+                .then(Commands.literal("取消授权")
+                        .then(Commands.argument("玩家", net.minecraft.commands.arguments.EntityArgument.player())
+                                .executes(ctx -> {
+                                    net.minecraft.server.level.ServerPlayer target =
+                                            net.minecraft.commands.arguments.EntityArgument.getPlayer(ctx, "玩家");
+                                    var perm = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.get(ctx.getSource().getServer());
+                                    boolean ok = perm.revoke(target.getUUID());
+                                    ctx.getSource().sendSuccess(msg(ok
+                                            ? "§b[山海商店] §e已撤销 §f" + target.getName().getString() + " §e的编辑权限"
+                                            : "§7[山海商店] " + target.getName().getString() + " 本就无编辑权限"), false);
+                                    return ok ? 1 : 0;
+                                })))
+                .then(Commands.literal("授权列表")
+                        .executes(ctx -> {
+                            var perm = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.get(ctx.getSource().getServer());
+                            var ids = perm.all();
+                            if (ids.isEmpty()) {
+                                ctx.getSource().sendSuccess(msg("§7[山海商店] 白名单为空（仅 OP 可编辑）"), false);
+                                return 1;
+                            }
+                            var server = ctx.getSource().getServer();
+                            StringBuilder sb = new StringBuilder("§b[山海商店] 编辑白名单 (§f" + ids.size() + "§b):\n");
+                            for (java.util.UUID id : ids) {
+                                var prof = server.getProfileCache() != null ? server.getProfileCache().get(id).orElse(null) : null;
+                                sb.append("§7- §f").append(prof != null ? prof.getName() : id.toString()).append("\n");
+                            }
+                            ctx.getSource().sendSuccess(msg(sb.toString()), false);
+                            return 1;
+                        }));
+    }
+
+    // ===== 商店 =====
+
+    /** 构造商店命令节点。玩家执行时若手持/背包内有钱包则打开商店界面。
+     *  管理子命令（add/remove/reload）需 OP 权限。 */
+    private static LiteralArgumentBuilder<CommandSourceStack> shopCommand(String name) {
+        return Commands.literal(name)
+                .executes(ctx -> execOpenShop(ctx.getSource()))
+                // 新增商品：/商店 add <goods> <count> <currency> <price> [category]
+                .then(Commands.literal("add")
+                        .requires(s -> s.hasPermission(2))
+                        .then(Commands.argument("goods", StringArgumentType.string())
+                                .then(Commands.argument("count", IntegerArgumentType.integer(1))
+                                        .then(Commands.argument("currency", StringArgumentType.string())
+                                                .then(Commands.argument("price", IntegerArgumentType.integer(0))
+                                                        .executes(ctx -> execShopAdd(ctx.getSource(),
+                                                                StringArgumentType.getString(ctx, "goods"),
+                                                                IntegerArgumentType.getInteger(ctx, "count"),
+                                                                StringArgumentType.getString(ctx, "currency"),
+                                                                IntegerArgumentType.getInteger(ctx, "price"),
+                                                                com.dishanhai.gt_shanhai.common.shop.ShopEntry.DEFAULT_CATEGORY))
+                                                        .then(Commands.argument("category", StringArgumentType.string())
+                                                                .executes(ctx -> execShopAdd(ctx.getSource(),
+                                                                        StringArgumentType.getString(ctx, "goods"),
+                                                                        IntegerArgumentType.getInteger(ctx, "count"),
+                                                                        StringArgumentType.getString(ctx, "currency"),
+                                                                        IntegerArgumentType.getInteger(ctx, "price"),
+                                                                        StringArgumentType.getString(ctx, "category")))))))))
+                // 删除商品：/商店 remove <goods>（删除第一个匹配该 goods 的条目）
+                .then(Commands.literal("remove")
+                        .requires(s -> s.hasPermission(2))
+                        .then(Commands.argument("goods", StringArgumentType.string())
+                                .executes(ctx -> execShopRemove(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "goods")))))
+                // 重载：/商店 reload（从 shop.json 重新加载）
+                .then(Commands.literal("reload")
+                        .requires(s -> s.hasPermission(2))
+                        .executes(ctx -> execShopReload(ctx.getSource())));
+    }
+
+    private static int execShopAdd(CommandSourceStack source, String goods, int count,
+                                   String currency, int price, String category) {
+        try {
+            ResourceLocation goodsId = new ResourceLocation(goods);
+            ResourceLocation currencyId = new ResourceLocation(currency);
+            if (!net.minecraftforge.registries.ForgeRegistries.ITEMS.containsKey(goodsId)) {
+                source.sendSuccess(msg("§c商品物品不存在: " + goods), false);
+                return 0;
+            }
+            if (!net.minecraftforge.registries.ForgeRegistries.ITEMS.containsKey(currencyId)) {
+                source.sendSuccess(msg("§c货币物品不存在: " + currency), false);
+                return 0;
+            }
+            com.dishanhai.gt_shanhai.common.shop.ShopConfig.addEntry(
+                    new com.dishanhai.gt_shanhai.common.shop.ShopEntry(goodsId, count, currencyId, price, category));
+            source.sendSuccess(msg("§b[山海商店] §a已新增商品 §f" + count + "x " + goods
+                    + " §7@ §e" + price + " " + currency + " §7[" + category + "]"), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendSuccess(msg("§c新增失败: " + e.getMessage()), false);
+            return 0;
+        }
+    }
+
+    private static int execShopRemove(CommandSourceStack source, String goods) {
+        try {
+            ResourceLocation goodsId = new ResourceLocation(goods);
+            var target = com.dishanhai.gt_shanhai.common.shop.ShopConfig.getEntries().stream()
+                    .filter(e -> e.getGoodsId().equals(goodsId))
+                    .findFirst().orElse(null);
+            if (target == null) {
+                source.sendSuccess(msg("§c未找到商品: " + goods), false);
+                return 0;
+            }
+            boolean ok = com.dishanhai.gt_shanhai.common.shop.ShopConfig.removeEntry(target);
+            source.sendSuccess(msg(ok ? "§b[山海商店] §a已删除商品 §f" + goods
+                    : "§c删除失败: " + goods), false);
+            return ok ? 1 : 0;
+        } catch (Exception e) {
+            source.sendSuccess(msg("§c删除失败: " + e.getMessage()), false);
+            return 0;
+        }
+    }
+
+    private static int execShopReload(CommandSourceStack source) {
+        com.dishanhai.gt_shanhai.common.shop.ShopConfig.reload();
+        int n = com.dishanhai.gt_shanhai.common.shop.ShopConfig.getEntries().size();
+        source.sendSuccess(msg("§b[山海商店] §a已重载商品清单，共 §f" + n + " §a个"), false);
+        return 1;
+    }
+
+    private static int execOpenShop(CommandSourceStack source) {
+        net.minecraft.server.level.ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendSuccess(msg("§c此命令须由玩家执行"), false);
+            return 0;
+        }
+        // 优先主手，其次副手；命中钱包则发包让客户端打开 ShopScreen
+        boolean canEdit = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player);
+        for (net.minecraft.world.InteractionHand hand : net.minecraft.world.InteractionHand.values()) {
+            if (player.getItemInHand(hand).getItem()
+                    instanceof com.dishanhai.gt_shanhai.common.item.WalletItem) {
+                com.dishanhai.gt_shanhai.network.ShanhaiNetwork.CHANNEL.send(
+                        net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
+                        new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit));
+                return 1;
+            }
+        }
+        source.sendSuccess(msg("§c请先手持 §6山海钱包 §c再执行（/give @s gt_shanhai:wallet）"), false);
+        return 0;
+    }
 
     // ===== 材料统计 =====
 
@@ -531,6 +697,35 @@ public class DShanhaiCommands {
                                     String item = StringArgumentType.getString(ctx, "item");
                                     return gtSearchItem(ctx.getSource(), item);
                                 })));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> cacheCommand() {
+        return Commands.literal("cache")
+                .requires(s -> s.hasPermission(2))
+                .then(Commands.literal("stats")
+                        .executes(ctx -> cacheStats(ctx.getSource())))
+                .then(Commands.literal("reset")
+                        .executes(ctx -> cacheResetStats(ctx.getSource())));
+    }
+
+    private static int cacheStats(CommandSourceStack source) {
+        boolean enabled = DShanhaiConfig.COMMON.runtimeRecipeCacheDiagnostics.get();
+        var stats = com.dishanhai.gt_shanhai.api.DShanhaiRuntimeRecipeCache.getDiagnosticsStats();
+        var sb = new StringBuilder("§6===== 运行期配方查找缓存诊断 =====\n");
+        sb.append("§e诊断开关: ").append(enabled ? "§a开启" : "§c关闭（计数恒为 0，改配置 runtime_recipe_cache.diagnosticsEnabled 后重进世界生效）").append("\n");
+        sb.append("§7- §fhit(命中): §a").append(stats.get("hit")).append("\n");
+        sb.append("§7- §fnegativeHit(命中空结果): §e").append(stats.get("negativeHit")).append("\n");
+        sb.append("§7- §fmiss(未命中): §c").append(stats.get("miss")).append("\n");
+        sb.append("§7- §fclear(缓存清空次数): §7").append(stats.get("clear")).append("\n");
+        sb.append("§7- §f当前缓存条目数: §b").append(stats.get("cacheSize")).append("\n");
+        source.sendSuccess(msg(sb.toString()), false);
+        return 1;
+    }
+
+    private static int cacheResetStats(CommandSourceStack source) {
+        com.dishanhai.gt_shanhai.api.DShanhaiRuntimeRecipeCache.resetDiagnosticsStats();
+        source.sendSuccess(msg("§a已清零运行期配方查找缓存诊断计数（缓存内容本身未清空）"), false);
+        return 1;
     }
 
     private static int gtListTypes(CommandSourceStack source) {

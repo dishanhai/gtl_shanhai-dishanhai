@@ -65,6 +65,41 @@ public class ShanhaiNetwork {
                 FtbqSubmitterListResponsePacket::new,
                 FtbqSubmitterListResponsePacket::handle
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopActionPacket.class,
+                ShopActionPacket::encode,
+                ShopActionPacket::new,
+                ShopActionPacket::handle
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopOpenPacket.class,
+                ShopOpenPacket::encode,
+                ShopOpenPacket::new,
+                ShopOpenPacket::handle
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopEditPacket.class,
+                ShopEditPacket::encode,
+                ShopEditPacket::new,
+                ShopEditPacket::handle
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                CurrencyActionPacket.class,
+                CurrencyActionPacket::encode,
+                CurrencyActionPacket::new,
+                CurrencyActionPacket::handle
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                WalletAccountSyncPacket.class,
+                WalletAccountSyncPacket::encode,
+                WalletAccountSyncPacket::new,
+                WalletAccountSyncPacket::handle
+        );
         RecipeSyncPacket.init();
     }
 

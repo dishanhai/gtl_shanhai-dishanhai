@@ -28,6 +28,7 @@ import org.gtlcore.gtlcore.common.data.GTLRecipeTypes;
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.recipe.DShanhaiRecipeTypes;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.common.machine.primordial.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.caster.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.generator.*;
@@ -824,7 +825,10 @@ public class DShanhaiMachines {
                 GTDishanhaiRegistration.REGISTRATE,
                 "recipe_type_pattern_buffer",
                 MachineDefinition::createDefinition,
-                RecipeTypePatternBufferPartMachine::new,
+                holder -> new RecipeTypePatternBufferPartMachine(holder,
+                        DShanhaiConfig.COMMON.recipeTypePatternsPerRow.get(),
+                        DShanhaiConfig.COMMON.recipeTypeRowsPerPage.get(),
+                        DShanhaiConfig.COMMON.recipeTypeMaxPages.get()),
                 MetaMachineBlock::new,
                 MetaMachineItem::new,
                 MetaMachineBlockEntity::createBlockEntity

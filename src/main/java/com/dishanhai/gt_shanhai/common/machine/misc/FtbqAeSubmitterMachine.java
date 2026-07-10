@@ -722,6 +722,56 @@ public class FtbqAeSubmitterMachine extends MetaMachine
     public record SubmitterEntry(UUID id, String pos, int queueSize, boolean online) {
     }
 
+    // ===== 供山海商店 AE 模式复用：把物品注入"绑定该玩家队伍的在线提交器"所在 AE 网络 =====
+
+    /** 遍历绑定该玩家队伍的在线提交器,返回第一台其 AE 网络的 MEStorage(无则 null)。 */
+    private static MEStorage findBoundStorage(ServerPlayer player) {
+        if (player == null || ServerQuestFile.INSTANCE == null) return null;
+        TeamData data = ServerQuestFile.INSTANCE.getOrCreateTeamData(player);
+        UUID teamId = data.getTeamId();
+        for (FtbqAeSubmitterMachine machine : new ArrayList<>(LOADED_SUBMITTERS.values())) {
+            if (!machine.isOnline) continue;
+            if (!teamId.equals(machine.parseTeamId())) continue;
+            var grid = machine.getMainNode().getGrid();
+            if (grid == null) continue;
+            return grid.getStorageService().getInventory();
+        }
+        return null;
+    }
+
+    /** 是否存在能全额收下的绑定在线提交器(纯 SIMULATE,不改动网络)。 */
+    public static boolean canInjectForPlayer(ServerPlayer player, AEItemKey key, long amount) {
+        if (key == null || amount <= 0L) return false;
+        MEStorage storage = findBoundStorage(player);
+        if (storage == null) return false;
+        return storage.insert(key, amount, Actionable.SIMULATE, IActionSource.empty()) >= amount;
+    }
+
+    /**
+     * 把物品注入绑定该玩家队伍的在线提交器所在 AE 网络。
+     * 严格 SIMULATE→MODULATE:先模拟能否全额收下,能才真注入,防吞物品。
+     * @return 实际注入量(0 = 无可用提交器 / 网络收不下全部)
+     */
+    public static long injectForPlayer(ServerPlayer player, AEItemKey key, long amount) {
+        if (key == null || amount <= 0L) return 0L;
+        MEStorage storage = findBoundStorage(player);
+        if (storage == null) return 0L;
+        if (storage.insert(key, amount, Actionable.SIMULATE, IActionSource.empty()) < amount) return 0L;
+        return storage.insert(key, amount, Actionable.MODULATE, IActionSource.empty());
+    }
+
+    /**
+     * 从绑定该玩家队伍的在线提交器所在 AE 网络抽取物品（供山海商店货币 ATM 复用）。
+     * extract 天然不超抽,直接 MODULATE 取返回值即实抽量(可部分成交,网络不足则抽多少算多少)。
+     * @return 实际抽出量(0 = 无可用提交器 / 网络无此物)
+     */
+    public static long extractForPlayer(ServerPlayer player, AEItemKey key, long amount) {
+        if (key == null || amount <= 0L) return 0L;
+        MEStorage storage = findBoundStorage(player);
+        if (storage == null) return 0L;
+        return storage.extract(key, amount, Actionable.MODULATE, IActionSource.empty());
+    }
+
     public static MachineDefinition register() {
         MachineDefinition def = MachineBuilder.create(
                 GTDishanhaiRegistration.REGISTRATE,

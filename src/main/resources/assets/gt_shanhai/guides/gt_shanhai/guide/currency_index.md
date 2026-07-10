@@ -24,8 +24,8 @@ item_ids:
   - dishanhai:neutron_coin
   - dishanhai:eternity_coin
   - dishanhai:chaos_coin
-  - dishanhai:star_gate_crystal_slurry_coin
   - dishanhai:infinite_coin
+  - dishanhai:star_gate_crystal_slurry_coin
   - dishanhai:coin_secondary
   - dishanhai:stupid_coin
   - dishanhai:sadbapycat_token
@@ -83,8 +83,8 @@ item_ids:
 * <ItemLink id="dishanhai:neutron_coin" />：宇宙中子GT币
 * <ItemLink id="dishanhai:eternity_coin" />：永恒GT币
 * <ItemLink id="dishanhai:chaos_coin" />：混沌物质币
-* <ItemLink id="dishanhai:star_gate_crystal_slurry_coin" />：星门水晶浆币
 * <ItemLink id="dishanhai:infinite_coin" />：无尽GT币
+* <ItemLink id="dishanhai:star_gate_crystal_slurry_coin" />：星门水晶浆币（最高档）
 
 #### 其他代币
 

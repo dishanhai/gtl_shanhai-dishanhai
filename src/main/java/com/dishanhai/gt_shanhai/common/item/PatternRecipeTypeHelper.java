@@ -20,6 +20,10 @@ public final class PatternRecipeTypeHelper {
 
     public static final String TAG_RECIPE_TYPE = "gt_shanhai_recipe_type";
 
+    // gtlcore 自身编码样板时写入的兜底字段：gtlcore:{patternQuickUploadRecipeTypes:["gtceu:xxx", ...]}
+    private static final String GTLCORE_TAG = "gtlcore";
+    private static final String GTLCORE_QUICK_UPLOAD_TAG = "patternQuickUploadRecipeTypes";
+
     private PatternRecipeTypeHelper() {
     }
 
@@ -36,8 +40,28 @@ public final class PatternRecipeTypeHelper {
     public static String readRecipeTypeId(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "";
         CompoundTag tag = stack.getTag();
-        if (tag == null || !tag.contains(TAG_RECIPE_TYPE, 8)) return "";
-        return tag.getString(TAG_RECIPE_TYPE);
+        if (tag == null) return "";
+        if (tag.contains(TAG_RECIPE_TYPE, 8)) {
+            String id = tag.getString(TAG_RECIPE_TYPE);
+            if (!id.isEmpty()) return id;
+        }
+        return readGtlcoreQuickUploadRecipeTypeId(tag);
+    }
+
+    // gt_shanhai 自身字段缺失时，回退读取 gtlcore 编码样板时写入的配方类型列表（更健全，覆盖 gt_shanhai mixin 未拦截到的编码路径）。
+    // gtlcore 侧存在歧义（多个候选配方类型）时会直接不写或不去重写入多个值，因此这里仅当列表唯一去重后恰好一个元素时才采信，
+    // 有歧义则视为无结果，与 gtlcore 自身 PatternQuickUploadRecipeTypeResolver 遇歧义放弃的语义保持一致。
+    private static String readGtlcoreQuickUploadRecipeTypeId(CompoundTag tag) {
+        if (!tag.contains(GTLCORE_TAG, 10)) return "";
+        CompoundTag gtlcore = tag.getCompound(GTLCORE_TAG);
+        if (!gtlcore.contains(GTLCORE_QUICK_UPLOAD_TAG, 9)) return "";
+        net.minecraft.nbt.ListTag list = gtlcore.getList(GTLCORE_QUICK_UPLOAD_TAG, 8);
+        java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+        for (int i = 0; i < list.size(); i++) {
+            String id = list.getString(i);
+            if (!id.isEmpty()) ids.add(id);
+        }
+        return ids.size() == 1 ? ids.iterator().next() : "";
     }
 
     public static String ensureRecipeTypeId(ItemStack stack, Level level) {

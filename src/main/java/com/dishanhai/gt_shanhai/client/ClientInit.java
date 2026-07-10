@@ -26,6 +26,12 @@ public class ClientInit {
         // 程序化注册 Guide（支持 config/gt_shanhai/guides/ 热重载）
         GuideRegistration.register();
 
+        // 注册模组列表「配置」按钮的界面工厂（cloth-config，客户端专用）
+        net.minecraftforge.fml.ModLoadingContext.get().registerExtensionPoint(
+                net.minecraftforge.client.ConfigScreenHandler.ConfigScreenFactory.class,
+                () -> new net.minecraftforge.client.ConfigScreenHandler.ConfigScreenFactory(
+                        (mc, parent) -> com.dishanhai.gt_shanhai.client.config.DShanhaiConfigScreen.build(parent)));
+
         ItemBlockRenderTypes.setRenderLayer(DShanhaiAE2Blocks.QUANTUM_COMPUTER.get(), RenderType.cutout());
         ItemBlockRenderTypes.setRenderLayer(DShanhaiAE2Blocks.QUANTUM_COMPUTER_UNIT.get(), RenderType.cutout());
         ItemBlockRenderTypes.setRenderLayer(DShanhaiAE2Blocks.QUANTUM_PARALLEL_PROCESSOR.get(), RenderType.cutout());

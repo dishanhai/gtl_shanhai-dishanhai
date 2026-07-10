@@ -81,6 +81,12 @@ public class GTDishanhaiMod {
             .stacksTo(1)
             .rarity(Rarity.UNCOMMON)));
 
+    public static final RegistryObject<Item> WALLET = ITEMS.register(
+        "wallet",
+        () -> new com.dishanhai.gt_shanhai.common.item.WalletItem(new Item.Properties()
+            .stacksTo(1)
+            .rarity(Rarity.UNCOMMON)));
+
     /** 获取模组版本号，供 KubeJS 调用 */
     public static String getVersion() {
         return net.minecraftforge.fml.ModList.get().getModContainerById(MOD_ID)
@@ -138,6 +144,7 @@ public class GTDishanhaiMod {
         // 服务端就绪后应用剥离+替换规则（配方类型已注册，JEI 尚未初始化）
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                 (net.minecraftforge.event.server.ServerAboutToStartEvent e) -> {
+                    com.dishanhai.gt_shanhai.common.shop.ShopConfig.reload();
                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.runPatternCacheInvalidationBatch("server-about-to-start", () -> {
                         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.updateAllLookupRecipes();
                         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyAllReplaceRules();
