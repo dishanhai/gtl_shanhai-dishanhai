@@ -11,7 +11,6 @@ item_ids:
   - gt_shanhai:me_requestable_input_bus
   - gt_shanhai:me_requestable_input_hatch
   - gt_shanhai:input_dual_hatch
-  - gt_shanhai:recipe_type_pattern_buffer
 ---
 
 # 输入（含请求）

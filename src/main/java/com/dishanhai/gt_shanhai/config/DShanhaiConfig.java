@@ -65,8 +65,12 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.IntValue recipeTypeRowsPerPage;
         /** 配方类型样板总成 — 最大页数 */
         public ForgeConfigSpec.IntValue recipeTypeMaxPages;
+        /** 样板虚拟供料 — 每个样板槽位单次目标并行批量上限 */
+        public ForgeConfigSpec.LongValue patternVirtualSupplyBatchParallel;
         /** 山海商店 — 购买总量达到此阈值时打包成超级磁盘阵列（而非塞背包） */
         public ForgeConfigSpec.LongValue shopSdaPackThreshold;
+        /** 山海商店 — 奖励表模式（自选/随机/全部/FTBQ）单次购买最多独立随机抽取的次数 */
+        public ForgeConfigSpec.LongValue shopRewardRollCap;
         /** 运行期配方查找缓存 — 是否统计 hit/miss/negativeHit/clear 次数（默认关闭，避免每 tick 统计开销） */
         public ForgeConfigSpec.BooleanValue runtimeRecipeCacheDiagnostics;
 
@@ -176,6 +180,11 @@ public final class DShanhaiConfig {
                              "总槽位 = patternsPerRow × rowsPerPage × maxPages",
                              "修改后需重新放置总成生效")
                     .defineInRange("maxPages", 3, 1, 64);
+            patternVirtualSupplyBatchParallel = builder
+                    .comment("样板虚拟供料（首配路径）单个样板槽位单次从无线 ME 网络真实提取的目标并行批量上限（默认 65536）",
+                             "样板配方执行的并行数由这个批量与网络真实库存共同决定：取两者较小值，绝不会超过网络实际库存",
+                             "调大能让单个样板槽位吃到更高并行/吞吐，调小更保守；不影响配方类型选择集本身的机器最大并行上限")
+                    .defineInRange("virtualSupplyBatchParallel", 65536L, 1L, Long.MAX_VALUE);
             builder.pop();
 
             builder.push("shop");
@@ -183,6 +192,13 @@ public final class DShanhaiConfig {
                     .comment("山海商店：非 AE 模式下，单次购买货物总量 ≥ 此阈值时打包成超级磁盘阵列赠送（而非塞背包）",
                              "默认 1000。设很大则几乎总进背包；设 1 则任何购买都打包成 SDA")
                     .defineInRange("sdaPackThreshold", 1000L, 1L, Long.MAX_VALUE);
+            shopRewardRollCap = builder
+                    .comment("山海商店：奖励表模式（自选/随机/全部/FTBQ）单次购买最多独立随机抽取的次数（超出部分留到下次购买）",
+                             "⚠ 每次抽取都要单独跑一次随机数/聚合逻辑，且全部在服务端主线程同步跑完才返回——",
+                             "调大后玩家真输入一个天文数字一次性购买，会让服务端主线程卡死甚至触发看门狗（watchdog）强制崩服。",
+                             "上限开到 Long.MAX_VALUE 纯粹是不设防——调多大、会不会卡死/崩服，自己权衡自己兜底",
+                             "（FTBQ 模式受 FTBQ 自身 API 的 int 参数限制，实际单次仍会夹到 Integer.MAX_VALUE）")
+                    .defineInRange("rewardRollCap", 1_000_000L, 1L, Long.MAX_VALUE);
             builder.pop();
 
             builder.push("runtime_recipe_cache");

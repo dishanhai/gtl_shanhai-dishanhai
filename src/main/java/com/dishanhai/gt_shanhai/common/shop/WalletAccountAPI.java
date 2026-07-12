@@ -25,6 +25,17 @@ import java.util.UUID;
  */
 public final class WalletAccountAPI {
 
+    /**
+     * 星火（数字余额）作为"伪货币"的保留 ID。商店条目把结算货币填成此值即表示
+     * <b>用数字余额（星火）付款/收款</b>，而非某个实体币种。此 ID 不对应任何注册物品。
+     */
+    public static final ResourceLocation SPARK = new ResourceLocation("gt_shanhai", "spark");
+
+    /** 判断某货币 ID 是否为星火（数字余额伪货币）。 */
+    public static boolean isSpark(ResourceLocation id) {
+        return SPARK.equals(id);
+    }
+
     private WalletAccountAPI() {}
 
     private static WalletAccountSavedData data(MinecraftServer server) {
@@ -112,21 +123,18 @@ public final class WalletAccountAPI {
     }
 
     /**
-     * 数字余额 → 币种：按币值把数字余额换成整数枚币种，{@code coins = floor(digital / 币值)}，
-     * 只扣 {@code coins × 币值}（余数留在数字余额里）。币值≤0 或换不出整枚则不动，返回换得枚数。
+     * 数字余额 → 币种：花 {@code coinsWanted × 币值} 星火，换 <b>恰好</b> {@code coinsWanted} 枚币种
+     * （数量语义 = 想要的目标币数量，与其余 ATM 操作一致，非"花的星火数"）。
+     * 币值≤0（未配置）或星火不足则整体不动，返回 0。
      */
-    public static BigInteger convertDigitalToCurrency(MinecraftServer server, UUID uuid, ResourceLocation currency, BigInteger digital) {
-        if (digital == null || digital.signum() <= 0 || currency == null) return BigInteger.ZERO;
+    public static BigInteger convertDigitalToCurrency(MinecraftServer server, UUID uuid, ResourceLocation currency, BigInteger coinsWanted) {
+        if (coinsWanted == null || coinsWanted.signum() <= 0 || currency == null) return BigInteger.ZERO;
         long value = CurrencyRateConfig.getValue(currency);
         if (value <= 0L) return BigInteger.ZERO;
-        BigInteger v = BigInteger.valueOf(value);
-        BigInteger cap = getDigital(server, uuid).min(digital);          // 不超过实际数字余额
-        BigInteger coins = cap.divide(v);                                // floor
-        if (coins.signum() <= 0) return BigInteger.ZERO;
-        BigInteger spend = coins.multiply(v);
+        BigInteger spend = coinsWanted.multiply(BigInteger.valueOf(value));
         if (!tryDeductDigital(server, uuid, spend)) return BigInteger.ZERO;
-        addCurrency(server, uuid, currency, coins);
-        return coins;
+        addCurrency(server, uuid, currency, coinsWanted);
+        return coinsWanted;
     }
 
     // ===================== 客户端同步 =====================

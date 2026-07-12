@@ -136,11 +136,35 @@ public final class DShanhaiSdaContentStore {
     }
 
     /**
+     * {@code shanhai_sda_uuid} 的 int 数组正则：{@code [I;a,b,c,d]} / {@code [I; a b c d]} 都能匹配
+     * （FTBQ 手写 snbt 常见空格分隔，{@link net.minecraft.nbt.CompoundTag#toString()} 自动生成的是逗号分隔，
+     * 分隔符统一放宽成"逗号和/或空格皆可、可重复"）。
+     */
+    private static final java.util.regex.Pattern SDA_UUID_PATTERN = java.util.regex.Pattern.compile(
+            "shanhai_sda_uuid:\\s*\\[I;\\s*(-?\\d+)[,\\s]+(-?\\d+)[,\\s]+(-?\\d+)[,\\s]+(-?\\d+)\\s*\\]");
+
+    /**
+     * 在一段文本里扫描所有 shanhai_sda_uuid 出现，解出的 UUID 追加进 out（去重由调用方的 Set 保证）。
+     * Minecraft 以 int 数组形式存储 UUID：msb = ((long)a << 32) | (b & 0xFFFFFFFFL)，lsb 同理。
+     */
+    private static void scanUuidsInText(String text, java.util.Set<UUID> out) {
+        java.util.regex.Matcher m = SDA_UUID_PATTERN.matcher(text);
+        while (m.find()) {
+            try {
+                int a = Integer.parseInt(m.group(1));
+                int b = Integer.parseInt(m.group(2));
+                int c = Integer.parseInt(m.group(3));
+                int d = Integer.parseInt(m.group(4));
+                long msb = ((long) a << 32) | (b & 0xFFFFFFFFL);
+                long lsb = ((long) c << 32) | (d & 0xFFFFFFFFL);
+                out.add(new UUID(msb, lsb));
+            } catch (Exception ignored) {}
+        }
+    }
+
+    /**
      * 扫描 config/ftbquests/quests/chapters/ 下所有 .snbt 文件，
      * 提取其中引用的 shanhai_sda_uuid 字段，返回去重后的 UUID 集合。
-     *
-     * <p>Minecraft 以 int 数组形式存储 UUID：{@code shanhai_sda_uuid: [I; a, b, c, d]}
-     * 其中 msb = ((long)a << 32) | (b & 0xFFFFFFFFL)，lsb 同理。
      */
     public static java.util.Set<UUID> scanQuestSnbtUuids() {
         java.util.Set<UUID> result = new java.util.LinkedHashSet<>();
@@ -148,24 +172,32 @@ public final class DShanhaiSdaContentStore {
         if (!dir.isDirectory()) return result;
         java.io.File[] files = dir.listFiles((d, n) -> n.endsWith(".snbt"));
         if (files == null) return result;
-        java.util.regex.Pattern pat = java.util.regex.Pattern.compile(
-                "shanhai_sda_uuid:\\s*\\[I;\\s*(-?\\d+)\\s+(-?\\d+)\\s+(-?\\d+)\\s+(-?\\d+)\\s*\\]");
         for (java.io.File f : files) {
             try {
-                String text = new String(java.nio.file.Files.readAllBytes(f.toPath()),
-                        java.nio.charset.StandardCharsets.UTF_8);
-                java.util.regex.Matcher m = pat.matcher(text);
-                while (m.find()) {
-                    int a = Integer.parseInt(m.group(1));
-                    int b = Integer.parseInt(m.group(2));
-                    int c = Integer.parseInt(m.group(3));
-                    int d = Integer.parseInt(m.group(4));
-                    long msb = ((long) a << 32) | (b & 0xFFFFFFFFL);
-                    long lsb = ((long) c << 32) | (d & 0xFFFFFFFFL);
-                    result.add(new UUID(msb, lsb));
-                }
+                String text = new String(java.nio.file.Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
+                scanUuidsInText(text, result);
             } catch (Exception ignored) {}
         }
+        return result;
+    }
+
+    /**
+     * 扫描 config/gt_shanhai/shop.json，提取商品 goodsNbt 模板里写死的 shanhai_sda_uuid——
+     * 商品本体就是提前捕获的固定 SDA（管理员在编辑器里选中一个已有 SDA 作为「商品」）时会带这个字段，
+     * 与任务奖励同构（UUID 写死在可分发的配置文件里），复用同一套正则扫描。
+     *
+     * <p>注意：现场打包的动态 SDA（{@link com.dishanhai.gt_shanhai.common.shop.ShopPurchase#deliverItems}
+     * 超量阈值触发的 {@code packAsSda}）UUID 是运行时随机生成，不落在 shop.json 里，这里扫不到；
+     * 那类 SDA 靠 {@code /山海 SDA 全部导出}（直接读 world/data）兜底覆盖。</p>
+     */
+    public static java.util.Set<UUID> scanShopJsonUuids() {
+        java.util.Set<UUID> result = new java.util.LinkedHashSet<>();
+        java.io.File file = new java.io.File("config/gt_shanhai", "shop.json");
+        if (!file.isFile()) return result;
+        try {
+            String text = new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+            scanUuidsInText(text, result);
+        } catch (Exception ignored) {}
         return result;
     }
 }

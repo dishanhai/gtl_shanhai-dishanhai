@@ -4,9 +4,12 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
+import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
+import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
+import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopActionPacket;
@@ -84,21 +87,48 @@ public class ShopScreen extends ScaledScreen {
     private enum Mode { BUY, SELL }
 
     private Mode mode = Mode.BUY;
-    private String category;
+    private String selectedTop;       // 主分类页签
+    private String selectedSub = "";  // 子分类（"" = 全部）
     private ShopEntry selected;
     private long amount = 1L;      // 购买/出售次数，支持 Long.MAX
     private EditBox searchBox;
     private EditBox amountBox;      // AE 风格数量输入框
     // AE 模式：交付优先注入绑定的 AE 网络。静态=跨界面实例保留（重开钱包不重置），仅本机会话级
     private static boolean aeMode = false;
+    // 实时消息横幅：商店交互反馈镜像（来源见 ShopChatMirror）。静态=界面实例无关，仅本机会话级
+    private static String flashText;      // 含 § 颜色码，与聊天框一致
+    private static long flashUntil;       // System.currentTimeMillis() 到期时刻，超时后横幅消失
+
+    /** 由 {@link ShopChatMirror} 调用：把一条商店消息推入实时横幅，显示约 5 秒。 */
+    public static void showMessage(net.minecraft.network.chat.Component msg) {
+        if (msg == null) return;
+        flashText = msg.getString();
+        flashUntil = System.currentTimeMillis() + 5000L;
+    }
     private int scroll = 0; // 网格滚动像素
+    private boolean draggingGridScroll; // 正在拖拽网格右侧滚动条
     private final boolean canEdit; // 服务端下发的编辑权（OP 或白名单）：决定新增/编辑按钮显隐
+    public boolean canEdit() { return canEdit; } // 供子页（如 CurrencyAtmScreen）跳转兑换中心时透传编辑权
+    private String previewHoverName; // 详情页花费预览槽悬停名（drawDetail 暂存 → renderTooltips 消费）
+    private ItemStack detailHoverStack; // 详情页商品大图标悬停时暂存的真实 ItemStack（含 SDA 等实时解析 tooltip，drawDetail 暂存 → renderTooltips 消费）
+    private boolean descOverlayOpen; // 描述详情大图层（FTBQ 风格）开关
+    private int descOverlayScroll;   // 描述详情大图层滚动行数（超出面板高度时用）
+    private boolean draggingDescOverlayScroll; // 正在拖拽描述详情大图层右侧滚动条
+    // 「展开详情」按钮命中框：cursorY 依赖 drawCostPreview 的实际绘制结果（数据相关），故按 previewHoverName 同款约定，
+    // drawDetail 渲染时暂存坐标，universalMouseClicked 消费，避免在点击处理里重新跑一遍绘制逻辑求同一个 y。
+    private boolean descExpandVisible;
+    private int descExpandX, descExpandY, descExpandW, descExpandH;
+    // 「跳转」入口命中框（仿 FTBQ 隐藏任务跳转）：同上，drawDetail 渲染时暂存坐标，universalMouseClicked 消费
+    private boolean linkVisible;
+    private ShopEntry linkTarget;
+    private int linkX, linkY, linkW, linkH;
 
     // ===== 动态面板尺寸（每次 initScaled 重算）=====
     private int left, top, panelWidth, panelHeight;
 
     // 计算态
-    private List<String> categories = new ArrayList<>();
+    private List<String> categories = new ArrayList<>();     // 主分类页签
+    private List<String> subCategories = new ArrayList<>();  // 当前主分类下的子分类
     private List<ShopEntry> visibleEntries = new ArrayList<>();
 
     public ShopScreen() {
@@ -127,11 +157,23 @@ public class ShopScreen extends ScaledScreen {
     private int balanceY() { return top + 30; }
     private int balanceHeight() { return 18; }
 
-    /** 分类页签行 Y。 */
+    /** 主分类页签行 Y。 */
     private int tabsY() { return balanceY() + balanceHeight() + 4; }
 
-    /** 网格/详情内容区顶部 Y。 */
-    private int contentTop() { return tabsY() + TAB_H + 6; }
+    /** 子分类页签行 Y（主分类有子分类时才显示）。 */
+    private int subTabsY() { return tabsY() + TAB_H + 2; }
+
+    /** 当前主分类是否有子分类页签。 */
+    private boolean hasSubTabs() { return !subCategories.isEmpty(); }
+
+    /** 当前所在商店子页的完整分类名（"主/子"；子页选「全部」或无子分类则只有主）。供「新增商品」继承默认分类。 */
+    private String currentViewCategory() {
+        if (selectedTop == null || selectedTop.isEmpty()) return ShopEntry.DEFAULT_CATEGORY;
+        return selectedSub.isEmpty() ? selectedTop : selectedTop + "/" + selectedSub;
+    }
+
+    /** 网格/详情内容区顶部 Y（有子页签行则再下移一行）。 */
+    private int contentTop() { return tabsY() + TAB_H + 6 + (hasSubTabs() ? TAB_H + 2 : 0); }
 
     /** 内容区可见高度（撑到面板底部留边）。 */
     private int contentHeight() { return Math.max(60, (top + panelHeight - 8) - contentTop()); }
@@ -162,9 +204,15 @@ public class ShopScreen extends ScaledScreen {
     // 「货币中心」按钮：出售页签右侧，始终可见（打开 ATM 子页）
     private static final int CURRENCY_BTN_W = 64;
     private int currencyBtnX() { return sellTabX() + SELL_TAB_W + 6; }
-    // 「新增商品」按钮：货币中心右侧，仅编辑权玩家可见
+    // 「兑换中心」按钮：货币中心右侧，始终可见（打开兑换子页）
+    private static final int EXCHANGE_BTN_W = 64;
+    private int exchangeBtnX() { return currencyBtnX() + CURRENCY_BTN_W + 4; }
+    // 「新增商品」按钮：兑换中心右侧，仅编辑权玩家可见
     private static final int ADD_BTN_W = 64;
-    private int addBtnX() { return currencyBtnX() + CURRENCY_BTN_W + 4; }
+    private int addBtnX() { return exchangeBtnX() + EXCHANGE_BTN_W + 4; }
+    // 「商店设置」按钮：新增商品右侧，仅编辑权玩家可见（奖励抽取次数上限等运行期可调行为）
+    private static final int SETTINGS_BTN_W = 64;
+    private int settingsBtnX() { return addBtnX() + ADD_BTN_W + 4; }
 
     /** 供 CurrencyAtmScreen 读取当前 AE 模式（同包访问）。 */
     static boolean isAeMode() { return aeMode; }
@@ -177,6 +225,7 @@ public class ShopScreen extends ScaledScreen {
     // ===== 网格坐标单一真源（渲染/点击/tooltip 三处共用，杜绝错位）=====
     private static final int ROW_STRIDE = CELL_H + GRID_GAP;
     private static final int COL_STRIDE = CELL_W + GRID_GAP;
+    private static final int GRID_SCROLLBAR_W = 3;
 
     private int cellX(int col) { return listLeft() + col * COL_STRIDE; }
     private int cellY(int row) { return contentTop() + row * ROW_STRIDE - scroll; }
@@ -186,6 +235,12 @@ public class ShopScreen extends ScaledScreen {
         int cols = gridColumns();
         int rows = (visibleEntries.size() + cols - 1) / cols;
         return Math.max(0, rows * ROW_STRIDE - contentHeight());
+    }
+
+    /** 网格右侧滚动条轨道 x（紧贴列末端右侧，同 {@link #drawGrid} 原有算法）。 */
+    private int gridScrollbarX() {
+        int cols = gridColumns();
+        return listLeft() + Math.min(listWidth() - 4, cols * COL_STRIDE - GRID_GAP) + 1;
     }
 
     /** 在缩放坐标系下开启 scissor：enableScissor 吃物理像素，须手动换算（KE 做法）。 */
@@ -204,9 +259,13 @@ public class ShopScreen extends ScaledScreen {
         panelWidth = Math.max(700, vWidth - 8);
         panelHeight = Math.max(360, vHeight - 16);
 
-        categories = ShopConfig.getCategories();
-        if (category == null || !categories.contains(category)) {
-            category = categories.isEmpty() ? ShopEntry.DEFAULT_CATEGORY : categories.get(0);
+        categories = ShopConfig.getTopCategories();
+        if (selectedTop == null || !categories.contains(selectedTop)) {
+            selectedTop = categories.isEmpty() ? ShopEntry.DEFAULT_CATEGORY : categories.get(0);
+        }
+        subCategories = ShopConfig.getSubCategories(selectedTop);
+        if (!selectedSub.isEmpty() && !subCategories.contains(selectedSub)) {
+            selectedSub = ""; // 子分类已不存在 → 回退全部
         }
 
         // 搜索框（右侧详情列正上方）
@@ -251,17 +310,24 @@ public class ShopScreen extends ScaledScreen {
     private void recomputeVisible() {
         String q = searchBox != null ? searchBox.getValue() : "";
         List<ShopEntry> src = (q == null || q.isBlank())
-                ? ShopConfig.getEntriesOf(category)
+                ? ShopConfig.getEntriesOfGroup(selectedTop, selectedSub)
                 : ShopConfig.getEntries();
         visibleEntries = new ArrayList<>();
         for (ShopEntry e : src) {
             if (!e.isValid()) continue;
             if (q != null && !q.isBlank()) {
-                String hay = e.goodsDisplayName() + " " + e.getGoodsId();
-                if (!AdvancedSearchUtil.match(hay, q)) continue;
+                StringBuilder hay = new StringBuilder(e.goodsDisplayName()).append(' ').append(e.getGoodsId());
+                if (e.hasMultipleGoods()) {
+                    for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
+                        hay.append(' ').append(new ItemStack(gs.item()).getHoverName().getString());
+                    }
+                }
+                if (!AdvancedSearchUtil.match(hay.toString(), q)) continue;
             }
             visibleEntries.add(e);
         }
+        // 选中的条目若已被删除/替换（编辑），清空以免详情面板残留旧数据
+        if (selected != null && !ShopConfig.getEntries().contains(selected)) selected = null;
     }
 
     // ============ 渲染 ============
@@ -279,11 +345,13 @@ public class ShopScreen extends ScaledScreen {
         // 顶部买/卖页签
         drawTab(g, buyTabX(), top + 6, BUY_TAB_W, TOP_BAR_H, "购买", mode == Mode.BUY, mx, my);
         drawTab(g, sellTabX(), top + 6, SELL_TAB_W, TOP_BAR_H, "出售", mode == Mode.SELL, mx, my);
-        // 货币中心（始终可见）
+        // 货币中心 + 兑换中心（始终可见）
         drawButton(g, currencyBtnX(), top + 6, CURRENCY_BTN_W, TOP_BAR_H, "§6货币中心", mx, my);
-        // 新增商品（仅编辑权玩家）
+        drawButton(g, exchangeBtnX(), top + 6, EXCHANGE_BTN_W, TOP_BAR_H, "§d兑换中心", mx, my);
+        // 新增商品 + 商店设置（仅编辑权玩家）
         if (canEdit) {
             drawButton(g, addBtnX(), top + 6, ADD_BTN_W, TOP_BAR_H, "§a新增商品", mx, my);
+            drawButton(g, settingsBtnX(), top + 6, SETTINGS_BTN_W, TOP_BAR_H, "§b商店设置", mx, my);
         }
 
         // 顶栏右侧：AE模式 → 充值全部 → 关闭
@@ -300,15 +368,29 @@ public class ShopScreen extends ScaledScreen {
         renderBox(g, left + 14, by, balW, balanceHeight(), GOLD_DARK, BOX_BG);
         drawCurrencyBar(g, left + 14 + 6, by, balW - 12, mx, my);
 
-        // 分类页签行
+        // 主分类页签行
         int ty = tabsY();
         int tx = left + 14;
         int tabsRight = detailX() - 8; // 不越过搜索框列
         for (String cat : categories) {
             int tw = Math.max(30, this.font.width(cat) + 10);
             if (tx + tw > tabsRight) break; // 简单截断
-            drawTab(g, tx, ty, tw, TAB_H, cat, cat.equals(category), mx, my);
+            drawTab(g, tx, ty, tw, TAB_H, cat, cat.equals(selectedTop), mx, my);
             tx += tw + 3;
+        }
+        // 子分类页签行（当前主分类有子分类时）：先「全部」再各子分类
+        if (hasSubTabs()) {
+            int sty = subTabsY();
+            int stx = left + 14;
+            int aw = Math.max(30, this.font.width("全部") + 10);
+            drawTab(g, stx, sty, aw, TAB_H, "§7全部", selectedSub.isEmpty(), mx, my);
+            stx += aw + 3;
+            for (String sub : subCategories) {
+                int tw = Math.max(30, this.font.width(sub) + 10);
+                if (stx + tw > tabsRight) break;
+                drawTab(g, stx, sty, tw, TAB_H, sub, sub.equals(selectedSub), mx, my);
+                stx += tw + 3;
+            }
         }
 
         // 左侧网格背景
@@ -318,6 +400,118 @@ public class ShopScreen extends ScaledScreen {
 
         // 右侧详情面板
         drawDetail(g, mx, my);
+
+        // 实时消息横幅（商店交互反馈，5 秒后自动消失）：面板底部居中，覆盖在最上层
+        if (flashText != null && System.currentTimeMillis() < flashUntil) {
+            int flashW = this.font.width(flashText);
+            int bannerW = Math.min(panelWidth - 12, flashW + 16);
+            int bannerX = left + (panelWidth - bannerW) / 2;
+            int bannerY = top + panelHeight - 24;
+            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 16, 0xE0101010);   // 半透明黑底
+            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 1, 0xFF00C0C0);    // 顶部青线
+            g.drawCenteredString(this.font, flashText, left + panelWidth / 2, bannerY + 4, 0xFFFFFF);
+        }
+    }
+
+    private static final int DESC_OVERLAY_CLOSE_W = 16;
+    private static final int DESC_OVERLAY_CLOSE_H = 12;
+    private static final int DESC_OVERLAY_LINE_H = 10;
+    private static final int DESC_OVERLAY_SCROLLBAR_W = 3;
+
+    /** 描述详情大图层边界 {x, y, w, h}：居中于虚拟画布，四周留 20px 边距，超大画布下封顶 420×260。 */
+    private int[] descOverlayBounds() {
+        int ow = Math.min(vWidth - 40, 420);
+        int oh = Math.min(vHeight - 40, 260);
+        int ox = (vWidth - ow) / 2;
+        int oy = (vHeight - oh) / 2;
+        return new int[]{ox, oy, ow, oh};
+    }
+
+    private int descOverlayCloseX(int[] r) { return r[0] + r[2] - DESC_OVERLAY_CLOSE_W - 4; }
+    private int descOverlayCloseY(int[] r) { return r[1] + 4; }
+
+    /** 描述详情大图层：正文文本区域 {x, y, w, textLineH 可用行数}（供渲染/滚动/滚动条共用同一份换行结果）。 */
+    private List<net.minecraft.util.FormattedCharSequence> descOverlayLines(int[] r) {
+        if (selected == null) return java.util.List.of();
+        String desc = selected.getDescription();
+        if (desc == null) desc = "";
+        int wrapW = r[2] - 16 - DESC_OVERLAY_SCROLLBAR_W - 3;
+        return this.font.split(Component.literal("§f" + GuiRenderUtil.translateAmpCodes(desc)), wrapW);
+    }
+
+    private int descOverlayVisibleLines(int[] r) {
+        return Math.max(1, (r[3] - 32) / DESC_OVERLAY_LINE_H);
+    }
+
+    private int descOverlayMaxScroll(int[] r, int lineCount) {
+        return Math.max(0, lineCount - descOverlayVisibleLines(r));
+    }
+
+    /** 前景层（盖住所有控件）：描述详情大图层，FTBQ 风格全屏遮罩 + 居中面板 + 自动换行长文本，超出可视高度可滚动。 */
+    @Override
+    protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
+        if (!descOverlayOpen || selected == null) return;
+        int[] r = descOverlayBounds();
+        int ox = r[0], oy = r[1], ow = r[2];
+
+        g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
+        renderBox(g, ox, oy, ow, r[3], GOLD_DARK, PANEL_BG);
+
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font,
+                "§6" + selected.goodsDisplayName() + " §7— 描述详情", ow - DESC_OVERLAY_CLOSE_W - 20),
+                ox + 8, oy + 8, GOLD, true);
+        int closeX = descOverlayCloseX(r), closeY = descOverlayCloseY(r);
+        drawButton(g, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H, "§cX", mx, my);
+
+        List<net.minecraft.util.FormattedCharSequence> lines = descOverlayLines(r);
+        int visible = descOverlayVisibleLines(r);
+        int maxScroll = descOverlayMaxScroll(r, lines.size());
+        descOverlayScroll = Math.max(0, Math.min(maxScroll, descOverlayScroll));
+
+        int ty = oy + 24;
+        for (int i = descOverlayScroll; i < Math.min(lines.size(), descOverlayScroll + visible); i++) {
+            g.drawString(this.font, lines.get(i), ox + 8, ty, WHITE, true);
+            ty += DESC_OVERLAY_LINE_H;
+        }
+        drawDescOverlayScrollbar(g, r, maxScroll, mx, my);
+    }
+
+    /** 描述详情大图层右侧滚动条：轨道常驻绘制，超出可视行数时叠一段可拖拽把手（同 {@link #drawGridScrollbar} 风格）。 */
+    private void drawDescOverlayScrollbar(GuiGraphics g, int[] r, int maxScroll, int mx, int my) {
+        int barX = r[0] + r[2] - 6 - DESC_OVERLAY_SCROLLBAR_W;
+        int barY = r[1] + 22, barH = r[3] - 30;
+        g.fill(barX, barY, barX + DESC_OVERLAY_SCROLLBAR_W, barY + barH, NUMBER_BAR_BG);
+        if (maxScroll <= 0) return;
+        int visible = descOverlayVisibleLines(r);
+        int lineCount = visible + maxScroll;
+        int thumbH = Math.max(10, barH * visible / lineCount);
+        int thumbY = barY + (barH - thumbH) * descOverlayScroll / maxScroll;
+        boolean hv = draggingDescOverlayScroll || GuiRenderUtil.isHovering(mx, my, barX, thumbY, DESC_OVERLAY_SCROLLBAR_W, thumbH);
+        g.fill(barX, thumbY, barX + DESC_OVERLAY_SCROLLBAR_W, thumbY + thumbH, hv ? CYAN : GOLD);
+    }
+
+    /** 描述详情大图层滚动条点击/拖拽起手：命中整条轨道即可（不用精确点在把手上），随即按该点位置跳转。 */
+    private boolean descOverlayScrollbarClicked(double mx, double my, int[] r) {
+        int barX = r[0] + r[2] - 6 - DESC_OVERLAY_SCROLLBAR_W;
+        int barY = r[1] + 22, barH = r[3] - 30;
+        if (mx < barX || mx > barX + DESC_OVERLAY_SCROLLBAR_W || my < barY || my > barY + barH) return false;
+        draggingDescOverlayScroll = true;
+        updateDescOverlayScrollFromDrag(my);
+        return true;
+    }
+
+    /** 按拖拽点 Y 坐标反算描述详情大图层的滚动行数（把手中心跟随鼠标），无溢出时不生效。 */
+    private void updateDescOverlayScrollFromDrag(double my) {
+        int[] r = descOverlayBounds();
+        List<net.minecraft.util.FormattedCharSequence> lines = descOverlayLines(r);
+        int maxScroll = descOverlayMaxScroll(r, lines.size());
+        if (maxScroll <= 0) { descOverlayScroll = 0; return; }
+        int visible = descOverlayVisibleLines(r);
+        int barY = r[1] + 22, barH = r[3] - 30;
+        int thumbH = Math.max(10, barH * visible / lines.size());
+        double usable = Math.max(1, barH - thumbH);
+        double rel = (my - barY - thumbH / 2.0) / usable;
+        descOverlayScroll = (int) Math.round(Math.max(0.0, Math.min(1.0, rel)) * maxScroll);
     }
 
     private void drawGrid(GuiGraphics g, int mx, int my) {
@@ -335,17 +529,119 @@ public class ShopScreen extends ScaledScreen {
         }
         g.disableScissor();
 
-        // 滚动条（按像素比例）
+        drawGridScrollbar(g, gx, gy, gw, gh, cols, mx, my);
+    }
+
+    /**
+     * 网格右侧滚动条：轨道常驻绘制（哪怕当前条目还没溢出），为后续商品变多做好准备；
+     * 有溢出时轨道上叠一段可拖拽把手（按内容比例算高度），支持点击/拖拽跳转，不再只能滚轮翻页。
+     */
+    private void drawGridScrollbar(GuiGraphics g, int gx, int gy, int gw, int gh, int cols, int mx, int my) {
+        int barX = gridScrollbarX();
+        g.fill(barX, gy, barX + GRID_SCROLLBAR_W, gy + gh, NUMBER_BAR_BG);
         int maxScroll = maxGridScroll();
-        if (maxScroll > 0) {
-            int rows = (visibleEntries.size() + cols - 1) / cols;
-            int contentH = rows * ROW_STRIDE;
-            int barX = gx + Math.min(gw - 4, cols * COL_STRIDE - GRID_GAP) + 1;
-            int barH = Math.max(10, gh * gh / contentH);
-            int barY = gy + (gh - barH) * scroll / maxScroll;
-            g.fill(barX, gy, barX + 3, gy + gh, NUMBER_BAR_BG);
-            g.fill(barX, barY, barX + 3, barY + barH, GOLD);
+        if (maxScroll <= 0) return; // 未溢出：只留轨道底色占位，不画把手
+        int rows = (visibleEntries.size() + cols - 1) / cols;
+        int contentH = rows * ROW_STRIDE;
+        int barH = Math.max(10, gh * gh / contentH);
+        int barY = gy + (gh - barH) * scroll / maxScroll;
+        boolean hv = draggingGridScroll || GuiRenderUtil.isHovering(mx, my, barX, barY, GRID_SCROLLBAR_W, barH);
+        g.fill(barX, barY, barX + GRID_SCROLLBAR_W, barY + barH, hv ? CYAN : GOLD);
+    }
+
+    /** 网格滚动条点击/拖拽起手：命中整条轨道即可（不用精确点在把手上），随即按该点位置跳转。 */
+    private boolean gridScrollbarClicked(double mx, double my) {
+        int gy = contentTop(), gh = contentHeight();
+        int barX = gridScrollbarX();
+        if (mx < barX || mx > barX + GRID_SCROLLBAR_W || my < gy || my > gy + gh) return false;
+        draggingGridScroll = true;
+        updateGridScrollFromDrag(my);
+        return true;
+    }
+
+    /** 按拖拽点的 Y 坐标反算 scroll（把手中心跟随鼠标），无溢出时不生效。 */
+    private void updateGridScrollFromDrag(double my) {
+        int maxScroll = maxGridScroll();
+        if (maxScroll <= 0) { scroll = 0; return; }
+        int gy = contentTop(), gh = contentHeight();
+        int cols = gridColumns();
+        int rows = (visibleEntries.size() + cols - 1) / cols;
+        int contentH = rows * ROW_STRIDE;
+        int barH = Math.max(10, gh * gh / contentH);
+        double usable = Math.max(1, gh - barH);
+        double rel = (my - gy - barH / 2.0) / usable;
+        scroll = (int) Math.round(Math.max(0.0, Math.min(1.0, rel)) * maxScroll);
+    }
+
+    /**
+     * 网格格渲染缓存：{@link ShopEntry#goodsDisplayName}/{@link ShopEntry#makeGoodsStack}/成本主成分
+     * 文本+图标——这些每帧都在算但对同一个 ShopEntry 对象结果恒定，商品一多（几百上千条）逐帧重算就是
+     * 打开/滚动商店卡顿的元凶。按条目对象身份缓存一次即可；用 WeakHashMap 是因为编辑/新增商品在
+     * {@link ShopConfig} 里永远是造一个全新 ShopEntry 对象替换旧的（见 replaceEntry/addEntry），
+     * 新对象天然缓存未命中会自动重算，旧对象没了强引用后随 GC 自动清掉，不用手动失效。
+     * 静态字段=跨开关屏幕复用，不止省一帧。截断宽度对任意格恒定（cx 无关，见 {@link #buildCellCache}
+     * 推导），故可以脱离具体格坐标缓存。
+     */
+    private static final class CellCache {
+        final ItemStack goodsStack; // 无自定义显示图标时用；有自定义图标为 null（走 renderIconComposite）
+        final String trimmedName;
+        final String amtText;
+        final ItemStack costIcon;
+        final boolean sparkPrimary;
+        final boolean fluidPrimary;
+        final int extra;
+
+        CellCache(ItemStack goodsStack, String trimmedName, String amtText, ItemStack costIcon,
+                  boolean sparkPrimary, boolean fluidPrimary, int extra) {
+            this.goodsStack = goodsStack;
+            this.trimmedName = trimmedName;
+            this.amtText = amtText;
+            this.costIcon = costIcon;
+            this.sparkPrimary = sparkPrimary;
+            this.fluidPrimary = fluidPrimary;
+            this.extra = extra;
         }
+    }
+
+    private static final Map<ShopEntry, CellCache> CELL_CACHE = new java.util.WeakHashMap<>();
+
+    private CellCache cellCacheFor(ShopEntry entry) {
+        CellCache cached = CELL_CACHE.get(entry);
+        if (cached != null) return cached;
+        CellCache built = buildCellCache(entry);
+        CELL_CACHE.put(entry, built);
+        return built;
+    }
+
+    /** 截断宽度推导：rightX-textX = (cx+CELL_W-3)-(cx+3+23) = CELL_W-29，与格子的 cx 无关。 */
+    private CellCache buildCellCache(ShopEntry entry) {
+        ItemStack goodsStack = entry.effectiveIcons().isEmpty() ? entry.makeGoodsStack() : null;
+        String trimmedName = GuiRenderUtil.trimText(this.font, entry.goodsDisplayName(), CELL_W - 29);
+        ShopCost cost = entry.getCost();
+        String amtText;
+        ItemStack costIcon = null;
+        boolean sparkPrimary = false, fluidPrimary = false;
+        if (!cost.coins.isEmpty()) {
+            Map.Entry<ResourceLocation, java.math.BigInteger> c0 = cost.coins.entrySet().iterator().next();
+            amtText = formatBig(c0.getValue());
+            costIcon = currencyStack(c0.getKey());
+        } else if (cost.spark.signum() > 0) {
+            amtText = formatBig(cost.spark);
+            sparkPrimary = true;
+        } else if (!cost.physical.isEmpty()) {
+            ExchangeEntry.Ingredient in0 = cost.physical.get(0);
+            amtText = String.valueOf(in0.count);
+            if (in0.isFluid) {
+                fluidPrimary = true;
+            } else {
+                net.minecraft.world.item.Item it0 = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(in0.id);
+                if (it0 != null) costIcon = new ItemStack(it0);
+            }
+        } else {
+            amtText = "免";
+        }
+        int extra = cost.componentCount() - 1;
+        return new CellCache(goodsStack, trimmedName, amtText, costIcon, sparkPrimary, fluidPrimary, extra);
     }
 
     /** KE 风格横向格：左棋盘物品槽 + 右侧名称/状态 + 底部价格数字条 + 货币小图标。 */
@@ -357,28 +653,40 @@ public class ShopScreen extends ScaledScreen {
         renderBox(g, cx, cy, CELL_W, CELL_H, border, fill);
         if (sel) renderSelectionOutline(g, cx, cy, CELL_W, CELL_H);
 
-        // 棋盘物品槽（20x20）
+        CellCache cc = cellCacheFor(entry);
+
+        // 棋盘物品槽（20x20）：有自定义显示图标走组合渲染（1主+最多4附属角标），否则用缓存好的商品图标
         int slotX = cx + 3, slotY = cy + 3;
         renderItemCheckerSlot(g, slotX, slotY);
-        ItemStack stack = entry.makeGoodsStack();
-        g.renderItem(stack, slotX + 2, slotY + 2);
-        g.renderItemDecorations(this.font, stack, slotX + 2, slotY + 2);
+        List<ShopEntry.DisplayIcon> cellIcons = entry.effectiveIcons();
+        if (cellIcons.isEmpty()) {
+            g.renderItem(cc.goodsStack, slotX + 2, slotY + 2);
+            g.renderItemDecorations(this.font, cc.goodsStack, slotX + 2, slotY + 2);
+        } else {
+            renderIconComposite(g, cellIcons, slotX, slotY);
+        }
 
-        // 商品名（右上，截断）
+        // 商品名（右上，截断宽度对所有格恒定，缓存好的结果直接画）
         int textX = slotX + 23;
-        int rightX = cx + CELL_W - 3;
-        String name = GuiRenderUtil.trimText(this.font, entry.goodsDisplayName(), rightX - textX);
-        g.drawString(this.font, name, textX, cy + 4, WHITE, true);
+        g.drawString(this.font, cc.trimmedName, textX, cy + 4, WHITE, true);
 
-        // 底部价格数字条 + 货币图标
-        String price = String.valueOf(entry.getPrice());
+        // 底部成本数字条 + 主成分图标 +「+K」（多元成本取主成分：币种 > 星火 > 实物；全部缓存好）
         int numX = cx + 2;
         int numY = cy + CELL_H - 13;
-        int numW = Math.min(48, Math.max(22, this.font.width(price) + 8));
+        int numW = Math.min(48, Math.max(22, this.font.width(cc.amtText) + 8));
         renderNumberBar(g, numX, numY, numW);
-        g.drawString(this.font, price, numX + 4, numY + 2, NUMBER_BAR_TEXT, false);
-        // 货币小图标（价格条右侧，0.75x）
-        renderCurrencyItem(g, entry.makePriceStack(), numX + numW + 2, numY - 2);
+        g.drawString(this.font, cc.amtText, numX + 4, numY + 2, NUMBER_BAR_TEXT, false);
+        int iconX = numX + numW + 2;
+        if (cc.sparkPrimary) {
+            g.drawString(this.font, "§e★", iconX + 1, numY + 2, GOLD, false);
+        } else if (cc.fluidPrimary) {
+            g.drawString(this.font, "§b≈", iconX + 1, numY + 2, CYAN, false); // 流体主成分标记
+        } else if (cc.costIcon != null) {
+            renderCurrencyItem(g, cc.costIcon, iconX, numY - 2);
+        }
+        if (cc.extra > 0) {
+            g.drawString(this.font, "§7+" + cc.extra, iconX + 15, numY + 2, GRAY, false);
+        }
     }
 
     // ============ KE 风格原子绘制单元 ============
@@ -410,6 +718,46 @@ public class ShopScreen extends ScaledScreen {
     private static void renderNumberBar(GuiGraphics g, int x, int y, int w) {
         g.fill(x, y, x + w, y + 11, NUMBER_BAR_BORDER);
         g.fill(x + 1, y + 1, x + w - 1, y + 10, NUMBER_BAR_BG);
+    }
+
+    /** 四角角标位置（相对 20x20 图标槽左上角）：左上/右上/左下/右下。 */
+    private static final int[][] ICON_BADGE_CORNERS = {{0, 0}, {12, 0}, {0, 12}, {12, 12}};
+
+    /**
+     * 自定义显示图标组合渲染：1 主图标（正常大小居中）+ 最多 4 个附属角标（0.5x 缩放，叠在四角）。
+     * 用于「多元组合商品」（如生产核废料的无限盘）一眼看出成分，不必读容易被截断的长名字。
+     * 物品/贴图图标可混搭：物品走真实物品渲染，贴图走 letterbox blit。
+     * @param slotX/slotY 20x20 棋盘槽左上角坐标（同 {@link #renderItemCheckerSlot}）。
+     */
+    private void renderIconComposite(GuiGraphics g, List<ShopEntry.DisplayIcon> icons, int slotX, int slotY) {
+        ShopEntry.DisplayIcon main = icons.get(0);
+        renderIconAt(g, main, slotX + 2, slotY + 2, 16, true);
+        if (icons.size() == 1) return;
+        int badges = Math.min(icons.size() - 1, ICON_BADGE_CORNERS.length);
+        for (int i = 0; i < badges; i++) {
+            ShopEntry.DisplayIcon b = icons.get(1 + i);
+            renderIconAt(g, b, slotX + ICON_BADGE_CORNERS[i][0], slotY + ICON_BADGE_CORNERS[i][1], 8, false);
+        }
+    }
+
+    /** 单个显示图标渲染（物品/贴图二选一）。size 为目标像素边长，decorations 只对物品主图标生效（数量/耐久角标）。 */
+    private void renderIconAt(GuiGraphics g, ShopEntry.DisplayIcon icon, int x, int y, int size, boolean decorations) {
+        if (icon.isTexture()) {
+            EditorWidgets.textureThumb(g, x, y, size, icon.texture());
+            return;
+        }
+        ItemStack stack = icon.item();
+        if (size == 16) {
+            g.renderItem(stack, x, y);
+            if (decorations) g.renderItemDecorations(this.font, stack, x, y);
+            return;
+        }
+        float scale = size / 16f;
+        g.pose().pushPose();
+        g.pose().translate(x, y, 0);
+        g.pose().scale(scale, scale, 1f);
+        g.renderItem(stack, 0, 0);
+        g.pose().popPose();
     }
 
     /** 货币小图标（0.75x 缩放）。 */
@@ -461,7 +809,16 @@ public class ShopScreen extends ScaledScreen {
         return s.charAt(0) + "." + s.substring(1, Math.min(3, s.length())) + "e" + (s.length() - 1);
     }
 
+    /** 精确数量（带千分位，如 10,000）——供悬停 tooltip 显示具体数字，不做缩写。 */
+    private static String groupBig(java.math.BigInteger v) {
+        if (v == null || v.signum() < 0) return "0";
+        return String.format("%,d", v);
+    }
+
     private void drawDetail(GuiGraphics g, int mx, int my) {
+        previewHoverName = null; // 每帧先清，命中预览格再置
+        detailHoverStack = null; // 每帧先清，命中大图标再置
+        descExpandVisible = false; // 每帧先清，描述非空才置
         int dx = detailX();
         int dy = contentTop();
         int dh = contentHeight();
@@ -474,19 +831,28 @@ public class ShopScreen extends ScaledScreen {
         }
 
         int cx = dx + 8;
-        // 棋盘物品槽 + 图标
+        // 棋盘物品槽 + 图标（有自定义显示图标走组合渲染；悬停 tooltip 始终显示真实商品，不受显示图标影响）
         renderItemCheckerSlot(g, cx, dy + 10);
-        g.renderItem(selected.makeGoodsStack(), cx + 2, dy + 12);
-        g.renderItemDecorations(this.font, selected.makeGoodsStack(), cx + 2, dy + 12);
+        ItemStack goodsIcon = selected.makeGoodsStack();
+        List<ShopEntry.DisplayIcon> detailIcons = selected.effectiveIcons();
+        if (detailIcons.isEmpty()) {
+            g.renderItem(goodsIcon, cx + 2, dy + 12);
+            g.renderItemDecorations(this.font, goodsIcon, cx + 2, dy + 12);
+        } else {
+            renderIconComposite(g, detailIcons, cx, dy + 10);
+        }
+        if (GuiRenderUtil.isHovering(mx, my, cx, dy + 10, 20, 20)) detailHoverStack = goodsIcon;
         // 名称
         int textX = cx + 24;
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, selected.goodsDisplayName(), dx + DETAIL_W - 6 - textX),
                 textX, dy + 10, WHITE, true);
-        g.drawString(this.font, "§7每份 §f" + selected.getGoodsCount() + " §7个", textX, dy + 24, GRAY, true);
+        g.drawString(this.font, selected.hasMultipleGoods()
+                ? "§7组合商品 §f" + selected.getGoodsList().size() + " §7种"
+                : "§7每份 §f" + selected.getGoodsCount() + " §7个", textX, dy + 24, GRAY, true);
 
-        // 单价（青）
-        g.drawString(this.font, "§7单价: §e" + selected.getPrice() + " "
-                + ShopPurchase.coinName(selected.getCurrencyId()), cx, dy + 42, CYAN, true);
+        // 成本（多元，青）——超宽截断，全量见 tooltip / 预计行
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7成本: " + costInline(selected.getCost()),
+                dx + DETAIL_W - 6 - cx), cx, dy + 42, CYAN, true);
 
         // 数量标签 + AE 风格步进按钮（文本框 amountBox 由 initScaled 定位、super.render 绘制）
         g.drawString(this.font, (mode == Mode.BUY ? "§7购买次数（可输入）:" : "§7出售次数（可输入）:"), cx, dy + 56, WHITE, true);
@@ -500,27 +866,82 @@ public class ShopScreen extends ScaledScreen {
             drawButton(g, bx, stepY2, bw, 12, "§c-" + compactStep(steps[i]), mx, my);
         }
 
-        // 预计（BigInteger 防溢出，紧凑显示）
+        // 预计（BigInteger 防溢出，紧凑显示）；成本多元 → 显示整条成本 ×次数
         java.math.BigInteger amt = java.math.BigInteger.valueOf(amount);
-        java.math.BigInteger coin = java.math.BigInteger.valueOf(selected.getPrice()).multiply(amt);
         java.math.BigInteger total = java.math.BigInteger.valueOf(selected.getGoodsCount()).multiply(amt);
+        ShopCost dcost = selected.getCost();
         int py = dy + 114;
         g.drawString(this.font, "§7交易次数: §f" + formatBig(amt), cx, py, WHITE, true);
+        int costTrimW = dx + DETAIL_W - 6 - cx;
         if (mode == Mode.BUY) {
-            g.drawString(this.font, "§7预计消耗: §e" + formatBig(coin) + " §7" + ShopPurchase.coinName(selected.getCurrencyId()), cx, py + 12, CYAN, true);
-            g.drawString(this.font, "§7预计获得: §e" + formatBig(total) + " §7个", cx, py + 24, GREEN, true);
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, py + 12, CYAN, true);
+            ShopEntry.RewardMode rm = selected.getRewardMode();
+            String getLine = switch (rm) {
+                case CHOICE -> "§7预计获得: §d自选奖励 §7（购买前先选 1 项）";
+                case RANDOM -> "§7预计获得: §d随机奖励 §7（从 " + selected.getRewardPool().size() + " 项中按权重抽 1）";
+                case ALL -> "§7预计获得: §d全部奖励 §7（一次交付 " + selected.getRewardPool().size() + " 项全部）";
+                case FTBQ -> "§7预计获得: §9FTBQ奖励表 §7（按表内权重随机抽取）";
+                default -> selected.hasMultipleGoods()
+                        ? "§7预计获得: " + goodsInlineTimes(selected.getGoodsList(), amount)
+                        : "§7预计获得: §e" + formatBig(total) + " §7个";
+            };
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, getLine, costTrimW), cx, py + 24, GREEN, true);
+            if (dcost.hasPhysical()) g.drawString(this.font, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, py + 36, GRAY, true);
+        } else if (selected.hasMultipleGoods()) {
+            g.drawString(this.font, "§c组合商品，不支持出售", cx, py + 12, DEEP_RED, true);
         } else {
             g.drawString(this.font, "§7预计消耗: §e" + formatBig(total) + " §7个商品", cx, py + 12, CYAN, true);
-            g.drawString(this.font, "§7预计获得: §e" + formatBig(coin) + " §7" + ShopPurchase.coinName(selected.getCurrencyId()), cx, py + 24, GREEN, true);
+            if (dcost.hasPhysical()) {
+                g.drawString(this.font, "§c含实物成本，不支持出售", cx, py + 24, DEEP_RED, true);
+            } else {
+                g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计获得: " + costInlineTimes(dcost, amount), costTrimW), cx, py + 24, GREEN, true);
+            }
             int held = ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem());
             g.drawString(this.font, "§7背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, py + 36, held > 0 ? GREEN : DEEP_RED, true);
         }
 
         // 确认按钮（KE 风格 border+fill，颜色随可交易性）
         int btnY = dy + dh - 24;
+        // 跳转入口（仿 FTBQ 隐藏任务）：条目配了 linkTo 且能解析到目标商品才显示，占一行固定空间
+        linkVisible = false;
+        linkTarget = selected.hasLinkTarget() ? ShopConfig.findByLinkKey(selected.getLinkTo()) : null;
+        int linkRowH = linkTarget != null ? 12 : 0;
+        int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH; // 底部按钮上沿（编辑权多两排按钮，跳转行再让一行）
+
+        // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区
+        int cursorY = drawCostPreview(g, cx, py + 50, selected.getCost(), DETAIL_W - 16, lowerBottom, mx, my);
+
+        if (linkTarget != null) {
+            linkVisible = true;
+            linkX = cx; linkY = lowerBottom + 2; linkW = DETAIL_W - 16; linkH = 10;
+            boolean linkHover = GuiRenderUtil.isHovering(mx, my, linkX, linkY, linkW, linkH);
+            g.drawString(this.font, (linkHover ? "§b§n" : "§9§n") + "→ 跳转: " + linkTarget.goodsDisplayName(), linkX, linkY, linkHover ? CYAN : GOLD, true);
+        }
+
+        // 描述（玩家自定义，自动换行；接在预览下方）
+        String desc = selected.getDescription();
+        if (desc != null && !desc.isEmpty() && cursorY + 12 < lowerBottom) {
+            g.drawString(this.font, "§6描述:", cx, cursorY + 2, GOLD, true);
+            // 展开详情：FTBQ 风格大图层，描述较长被本地窄栏截断时用得上
+            int expandW = 52;
+            descExpandVisible = true;
+            descExpandX = cx + DETAIL_W - 16 - expandW;
+            descExpandY = cursorY - 1;
+            descExpandW = expandW;
+            descExpandH = 10;
+            drawButton(g, descExpandX, descExpandY, descExpandW, descExpandH, "§b展开详情", mx, my);
+            int ly = cursorY + 13;
+            for (net.minecraft.util.FormattedCharSequence line
+                    : this.font.split(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(desc)), DETAIL_W - 16)) {
+                if (ly + 9 > lowerBottom) break;
+                g.drawString(this.font, line, cx, ly, GRAY, true);
+                ly += 9;
+            }
+        }
         boolean canTrade = mode == Mode.BUY
-                ? ClientWalletAccount.getCurrency(selected.getCurrencyId()).compareTo(java.math.BigInteger.valueOf(selected.getPrice())) >= 0
-                : ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount();
+                ? canAffordClient(selected.getCost())
+                : (!selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
+                    && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, DETAIL_W - 16, 20);
         renderButton(g, cx, btnY, DETAIL_W - 16, 20, btnHover,
                 mode == Mode.BUY ? "§a确认购买" : "§e确认出售",
@@ -539,9 +960,25 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
-        // 顶部买/卖页签
-        if (hit(mx, my, buyTabX(), top + 6, BUY_TAB_W, TOP_BAR_H)) { mode = Mode.BUY; selected = null; return true; }
-        if (hit(mx, my, sellTabX(), top + 6, SELL_TAB_W, TOP_BAR_H)) { mode = Mode.SELL; selected = null; return true; }
+        // 描述详情大图层打开时拦截全部点击：点关闭按钮或图层外任意处都关闭，图层内右侧滚动条起手拖拽，其余点击原地吞掉
+        if (descOverlayOpen) {
+            int[] r = descOverlayBounds();
+            if (!hit(mx, my, r[0], r[1], r[2], r[3]) || hit(mx, my, descOverlayCloseX(r), descOverlayCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                descOverlayOpen = false;
+                return true;
+            }
+            if (descOverlayScrollbarClicked(mx, my, r)) return true;
+            return true;
+        }
+        // 顶部买/卖页签：切换时打一条本地横幅提示当前模式，光靠页签颜色区分不够醒目，容易买卖模式点混
+        if (hit(mx, my, buyTabX(), top + 6, BUY_TAB_W, TOP_BAR_H)) {
+            if (mode != Mode.BUY) showMessage(Component.literal("§b[山海商店] §a已切换至【购买】模式"));
+            mode = Mode.BUY; selected = null; return true;
+        }
+        if (hit(mx, my, sellTabX(), top + 6, SELL_TAB_W, TOP_BAR_H)) {
+            if (mode != Mode.SELL) showMessage(Component.literal("§e[山海商店] §a已切换至【出售】模式"));
+            mode = Mode.SELL; selected = null; return true;
+        }
 
         // 关闭
         if (hit(mx, my, closeBtnX(), top + 6, CLOSE_W, TOP_BAR_H)) {
@@ -563,13 +1000,23 @@ public class ShopScreen extends ScaledScreen {
             Minecraft.getInstance().setScreen(new CurrencyAtmScreen(this));
             return true;
         }
-        // 新增商品（仅编辑权）
+        // 兑换中心（打开兑换子页）
+        if (hit(mx, my, exchangeBtnX(), top + 6, EXCHANGE_BTN_W, TOP_BAR_H)) {
+            Minecraft.getInstance().setScreen(new ExchangeScreen(this, canEdit));
+            return true;
+        }
+        // 新增商品（仅编辑权）：分类默认继承当前所在子页（如「无限盘区/前期」）
         if (canEdit && hit(mx, my, addBtnX(), top + 6, ADD_BTN_W, TOP_BAR_H)) {
-            ShopEntryEditor.openNew(this);
+            ShopEntryEditor.openNew(this, currentViewCategory());
+            return true;
+        }
+        // 商店设置（仅编辑权）：奖励抽取次数上限等运行期可调行为
+        if (canEdit && hit(mx, my, settingsBtnX(), top + 6, SETTINGS_BTN_W, TOP_BAR_H)) {
+            Minecraft.getInstance().setScreen(new ShopSettingsScreen(this));
             return true;
         }
 
-        // 分类页签
+        // 主分类页签：切主分类 → 重置子分类为全部 → 重排（子页签行影响 contentTop）
         int ty = tabsY();
         int tx = left + 14;
         int tabsRight = detailX() - 8;
@@ -577,11 +1024,29 @@ public class ShopScreen extends ScaledScreen {
             int tw = Math.max(30, this.font.width(cat) + 10);
             if (tx + tw > tabsRight) break;
             if (hit(mx, my, tx, ty, tw, TAB_H)) {
-                category = cat; selected = null; scroll = 0; recomputeVisible();
+                selectedTop = cat; selectedSub = ""; selected = null; scroll = 0;
+                this.init(Minecraft.getInstance(), this.width, this.height);
                 return true;
             }
             tx += tw + 3;
         }
+        // 子分类页签（有子分类时）：先「全部」再各子分类
+        if (hasSubTabs()) {
+            int sty = subTabsY();
+            int stx = left + 14;
+            int aw = Math.max(30, this.font.width("全部") + 10);
+            if (hit(mx, my, stx, sty, aw, TAB_H)) { selectedSub = ""; selected = null; scroll = 0; recomputeVisible(); return true; }
+            stx += aw + 3;
+            for (String sub : subCategories) {
+                int tw = Math.max(30, this.font.width(sub) + 10);
+                if (stx + tw > tabsRight) break;
+                if (hit(mx, my, stx, sty, tw, TAB_H)) { selectedSub = sub; selected = null; scroll = 0; recomputeVisible(); return true; }
+                stx += tw + 3;
+            }
+        }
+
+        // 网格右侧滚动条（拖拽跳转，先于格子命中判定）
+        if (gridScrollbarClicked(mx, my)) return true;
 
         // 网格格子（像素滚动：用统一 cellX/cellY，且只命中网格矩形内的部分）
         int cols = gridColumns();
@@ -597,6 +1062,18 @@ public class ShopScreen extends ScaledScreen {
             }
         }
 
+        // 跳转入口（drawDetail 渲染时暂存的目标条目 + 命中框，点击直接切换详情页选中项）
+        if (linkVisible && linkTarget != null && hit(mx, my, linkX, linkY, linkW, linkH)) {
+            selected = linkTarget;
+            return true;
+        }
+        // 展开描述详情（drawDetail 渲染时暂存的按钮坐标，命中即开大图层）
+        if (descExpandVisible && hit(mx, my, descExpandX, descExpandY, descExpandW, descExpandH)) {
+            descOverlayOpen = true;
+            descOverlayScroll = 0;
+            return true;
+        }
+
         // 详情面板按钮
         if (selected != null) {
             int dx = detailX();
@@ -605,9 +1082,13 @@ public class ShopScreen extends ScaledScreen {
             int dh = contentHeight();
             int btnW = DETAIL_W - 16;
             int btnY = dy + dh - 24;
-            // 确认购买/出售
+            // 确认购买/出售：自选奖励（CHOICE）商品先弹选择界面，选完再发购买包；随机/全部/普通商品直接买
             if (hit(mx, my, cx, btnY, btnW, 20)) {
-                send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount);
+                if (mode == Mode.BUY && selected.getRewardMode() == ShopEntry.RewardMode.CHOICE) {
+                    Minecraft.getInstance().setScreen(new RewardChoiceScreen(this, selected, amount, aeMode));
+                } else {
+                    send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount);
+                }
                 return true;
             }
             // 删除（编辑权）
@@ -642,6 +1123,12 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
+        if (descOverlayOpen) {
+            int[] r = descOverlayBounds();
+            int maxScroll = descOverlayMaxScroll(r, descOverlayLines(r).size());
+            descOverlayScroll = Math.max(0, Math.min(maxScroll, descOverlayScroll - (int) d));
+            return true;
+        }
         int gx = listLeft(), gy = contentTop(), gh = contentHeight();
         if (GuiRenderUtil.isHovering(mx, my, gx, gy, listWidth(), gh)) {
             int maxScroll = maxGridScroll();
@@ -651,14 +1138,30 @@ public class ShopScreen extends ScaledScreen {
         return super.universalMouseScrolled(mx, my, d);
     }
 
+    @Override
+    protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
+        if (draggingDescOverlayScroll) { updateDescOverlayScrollFromDrag(my); return true; }
+        if (draggingGridScroll) { updateGridScrollFromDrag(my); return true; }
+        return super.universalMouseDragged(mx, my, btn, dx, dy);
+    }
+
+    @Override
+    protected boolean universalMouseReleased(double mx, double my, int btn) {
+        if (draggingDescOverlayScroll) { draggingDescOverlayScroll = false; return true; }
+        if (draggingGridScroll) { draggingGridScroll = false; return true; }
+        return super.universalMouseReleased(mx, my, btn);
+    }
+
     // ============ 工具 ============
 
     private void send(ShopActionPacket.Action action, ShopEntry entry, long times) {
         ResourceLocation gid = entry != null ? entry.getGoodsId() : null;
         String cat = entry != null ? entry.getCategory() : "";
+        // 精确索引：同物品不同 NBT 的多条目（各种超级磁盘阵列）goodsId 撞车，靠列表索引区分。-1=无
+        int idx = entry != null ? ShopConfig.getEntries().indexOf(entry) : -1;
         // 仅购买带 aeMode（AE 模式优先注入网络）
         boolean ae = action == ShopActionPacket.Action.BUY && aeMode;
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(action, gid, cat, times, ae));
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(action, gid, cat, times, ae, idx));
     }
 
     private void drawTab(GuiGraphics g, int x, int y, int w, int h, String label, boolean active, int mx, int my) {
@@ -679,30 +1182,44 @@ public class ShopScreen extends ScaledScreen {
         return GuiRenderUtil.isHovering(mx, my, x, y, w, h);
     }
 
-    /** KE 货币栏：「余额」标签 + 每种货币一格（物品图标 + 紧凑数字）。悬停显示货币全名。 */
+    /**
+     * 货币栏显示列表：各币种余额降序排，星火（数字余额，余额&gt;0 时）恒置顶。
+     * drawCurrencyBar 与 hoveredCurrency 共用此方法以保证格位一一对应。
+     */
+    private java.util.List<Map.Entry<ResourceLocation, java.math.BigInteger>> currencyBarList() {
+        Map<ResourceLocation, java.math.BigInteger> all = ClientWalletAccount.getAll();
+        java.util.List<Map.Entry<ResourceLocation, java.math.BigInteger>> list = new java.util.ArrayList<>(all.entrySet());
+        list.sort((a, b) -> b.getValue().compareTo(a.getValue()));
+        java.math.BigInteger spark = ClientWalletAccount.getDigital();
+        if (spark.signum() > 0) {
+            list.add(0, new java.util.AbstractMap.SimpleImmutableEntry<>(WalletAccountAPI.SPARK, spark));
+        }
+        return list;
+    }
+
+    /** KE 货币栏：「余额」标签 + 每种货币一格（物品图标/星火★ + 紧凑数字）。悬停显示货币全名。 */
     private void drawCurrencyBar(GuiGraphics g, int x, int y, int width, int mx, int my) {
         // 「余额」标签
         String label = "余额:";
         g.drawString(this.font, label, x, y + 4, CYAN, true);
         int cellStart = x + this.font.width(label) + 8;
 
-        Map<ResourceLocation, java.math.BigInteger> all = ClientWalletAccount.getAll();
-        if (all.isEmpty()) {
+        java.util.List<Map.Entry<ResourceLocation, java.math.BigInteger>> list = currencyBarList();
+        if (list.isEmpty()) {
             g.drawString(this.font, "§80（点右侧「充值全部」存入背包货币）", cellStart, y + 4, GRAY, true);
             return;
         }
-        // 按余额降序排，每格固定宽
-        java.util.List<Map.Entry<ResourceLocation, java.math.BigInteger>> list = new java.util.ArrayList<>(all.entrySet());
-        list.sort((a, b) -> b.getValue().compareTo(a.getValue()));
 
         int cellW = 66;
         int maxCells = Math.max(1, (width - (cellStart - x)) / cellW);
         for (int i = 0; i < list.size() && i < maxCells; i++) {
             Map.Entry<ResourceLocation, java.math.BigInteger> e = list.get(i);
             int cx = cellStart + i * cellW;
-            ItemStack coin = currencyStack(e.getKey());
-            // 图标（居中于 16px）
-            g.renderItem(coin, cx, y - 1);
+            if (WalletAccountAPI.isSpark(e.getKey())) {
+                g.drawString(this.font, "§e★", cx + 4, y + 4, GOLD, true); // 星火无物品图标，用金色★
+            } else {
+                g.renderItem(currencyStack(e.getKey()), cx, y - 1); // 图标（居中于 16px）
+            }
             // 紧凑数字
             g.drawString(this.font, formatBig(e.getValue()), cx + 18, y + 4, GOLD, true);
         }
@@ -717,17 +1234,205 @@ public class ShopScreen extends ScaledScreen {
         return item != null ? new ItemStack(item) : ItemStack.EMPTY;
     }
 
+    /** 实物成分的本地化显示名（物品→物品名、流体→流体名；缺失回退注册 path，杜绝英文键裸露）。 */
+    private static String ingredientName(ExchangeEntry.Ingredient in) {
+        if (in == null || in.id == null) return "?";
+        if (in.isFluid) {
+            net.minecraft.world.level.material.Fluid f = net.minecraftforge.registries.ForgeRegistries.FLUIDS.getValue(in.id);
+            if (f != null) {
+                try {
+                    return new net.minecraftforge.fluids.FluidStack(f, 1).getDisplayName().getString();
+                } catch (Exception ignored) {}
+            }
+            return in.id.getPath();
+        }
+        net.minecraft.world.item.Item it = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(in.id);
+        return it != null ? new ItemStack(it).getHoverName().getString() : in.id.getPath();
+    }
+
+    // ============ 图形化花费预览（图标 + 数量）============
+
+    /** 预览格：物品/货币（真图标）、流体（贴图）或星火（★），带数量与本地化名。 */
+    private static final class PreviewCell {
+        final ItemStack item;                                   // 物品/货币图标（非物品为 EMPTY）
+        final net.minecraft.world.level.material.Fluid fluid;   // 流体（非流体为 null）
+        final boolean spark;                                    // 星火（数字余额）
+        final String amount;                                    // 数量文本（缩写，槽位小标签；流体带 mB）
+        final String exact;                                     // 精确数量文本（带千分位，悬停 tooltip 用；流体带 mB）
+        final String name;                                      // 本地化名（悬停）
+        PreviewCell(ItemStack item, net.minecraft.world.level.material.Fluid fluid, boolean spark, String amount, String exact, String name) {
+            this.item = item; this.fluid = fluid; this.spark = spark; this.amount = amount; this.exact = exact; this.name = name;
+        }
+    }
+
+    /** 把成本拆成预览格：星火 → 币种 → 物品 → 流体（保序）。 */
+    private static java.util.List<PreviewCell> costCells(ShopCost cost) {
+        java.util.List<PreviewCell> cells = new java.util.ArrayList<>();
+        if (cost.spark.signum() > 0) {
+            cells.add(new PreviewCell(ItemStack.EMPTY, null, true, formatBig(cost.spark), groupBig(cost.spark), "★星火（数字余额）"));
+        }
+        for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
+            cells.add(new PreviewCell(currencyStack(c.getKey()), null, false,
+                    formatBig(c.getValue()), groupBig(c.getValue()), ShopPurchase.coinName(c.getKey())));
+        }
+        for (ExchangeEntry.Ingredient in : cost.items()) {
+            net.minecraft.world.item.Item it = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(in.id);
+            java.math.BigInteger cnt = java.math.BigInteger.valueOf(in.count);
+            cells.add(new PreviewCell(it != null ? new ItemStack(it) : ItemStack.EMPTY, null, false,
+                    formatBig(cnt), groupBig(cnt), ingredientName(in)));
+        }
+        for (ExchangeEntry.Ingredient in : cost.fluids()) {
+            net.minecraft.world.level.material.Fluid f = net.minecraftforge.registries.ForgeRegistries.FLUIDS.getValue(in.id);
+            java.math.BigInteger cnt = java.math.BigInteger.valueOf(in.count);
+            cells.add(new PreviewCell(ItemStack.EMPTY, f, false,
+                    formatBig(cnt) + "mB", groupBig(cnt) + "mB", ingredientName(in)));
+        }
+        return cells;
+    }
+
+    /** 渲染流体静态贴图（Forge 图集 sprite + tint），失败静默。 */
+    private static void renderFluidIcon(GuiGraphics g, int x, int y, int size, net.minecraft.world.level.material.Fluid fluid) {
+        if (fluid == null) return;
+        try {
+            var ext = net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions.of(fluid);
+            ResourceLocation still = ext.getStillTexture();
+            if (still == null) return;
+            net.minecraft.client.renderer.texture.TextureAtlasSprite sprite = Minecraft.getInstance()
+                    .getTextureAtlas(net.minecraft.world.inventory.InventoryMenu.BLOCK_ATLAS).apply(still);
+            int tint = ext.getTintColor();
+            float r = ((tint >> 16) & 0xFF) / 255f, gg = ((tint >> 8) & 0xFF) / 255f, b = (tint & 0xFF) / 255f;
+            float a = ((tint >>> 24) & 0xFF) / 255f;
+            if (a <= 0f) a = 1f; // 无 alpha 的 tint 视为不透明
+            com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+            com.mojang.blaze3d.systems.RenderSystem.setShaderColor(r, gg, b, a);
+            g.blit(x, y, 0, size, size, sprite);
+            com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+            com.mojang.blaze3d.systems.RenderSystem.disableBlend();
+        } catch (Exception ignored) {}
+    }
+
+    /** 单个预览格：棋盘槽底 + 图标 + 槽下数量。 */
+    private void drawPreviewSlot(GuiGraphics g, int x, int y, PreviewCell cell, boolean hover) {
+        EditorWidgets.checkerSlot(g, x, y, hover);
+        if (cell.spark) {
+            g.drawCenteredString(this.font, "§e★", x + 10, y + 6, -1);
+        } else if (cell.fluid != null) {
+            renderFluidIcon(g, x + 2, y + 2, 16, cell.fluid);
+        } else if (cell.item != null && !cell.item.isEmpty()) {
+            g.renderItem(cell.item, x + 2, y + 2);
+        }
+        g.drawCenteredString(this.font, "§f" + cell.amount, x + 10, y + 22, WHITE);
+    }
+
+    /**
+     * 图形化花费预览：一排图标槽（货币/物品真图标、流体贴图、星火★）+ 数量，超宽换行、超界省略。
+     * @return 预览区结束后的 y（供描述接续）。悬停格把本地化名写入 {@link #previewHoverName}。
+     */
+    private int drawCostPreview(GuiGraphics g, int x, int y, ShopCost cost, int maxW, int maxBottom, int mx, int my) {
+        g.drawString(this.font, "§6花费预览:", x, y, GOLD, true);
+        int sy = y + 12;
+        java.util.List<PreviewCell> cells = costCells(cost);
+        if (cells.isEmpty()) {
+            g.drawString(this.font, "§8免费", x, sy, GRAY, true);
+            return sy + 12;
+        }
+        int pitchX = 24, pitchY = 32;
+        int perRow = Math.max(1, (maxW + 2) / pitchX);
+        int endY = sy;
+        for (int i = 0; i < cells.size(); i++) {
+            int col = i % perRow, row = i / perRow;
+            int sx = x + col * pitchX + 1;
+            int syy = sy + row * pitchY + 1;
+            if (syy + 20 > maxBottom) { // 空间不足 → 省略剩余
+                g.drawString(this.font, "§7… 还有 " + (cells.size() - i) + " 项", x, syy + 2, GRAY, true);
+                endY = syy + 12;
+                break;
+            }
+            PreviewCell cell = cells.get(i);
+            boolean hv = GuiRenderUtil.isHovering(mx, my, sx, syy, 20, 20);
+            drawPreviewSlot(g, sx, syy, cell, hv);
+            if (hv) previewHoverName = "§f" + cell.name + " §7×" + cell.exact;
+            endY = syy + pitchY;
+        }
+        return endY;
+    }
+
+    /** 多元成本紧凑单行（星火/币种/物品/流体）。 */
+    private static String costInline(ShopCost cost) {
+        StringBuilder sb = new StringBuilder();
+        if (cost.spark.signum() > 0) sb.append("§e★").append(formatBig(cost.spark));
+        for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
+            if (sb.length() > 0) sb.append("§7, ");
+            sb.append("§6").append(formatBig(c.getValue())).append(ShopPurchase.coinName(c.getKey()));
+        }
+        for (ExchangeEntry.Ingredient in : cost.physical) {
+            if (sb.length() > 0) sb.append("§7, ");
+            String nm = ingredientName(in);
+            if (in.isFluid) sb.append("§b").append(in.count).append("mB ").append(nm);
+            else sb.append("§f").append(in.count).append("×").append(nm);
+        }
+        return sb.length() == 0 ? "§8免费" : sb.toString();
+    }
+
+    /** 多元成本 × times 的紧凑单行。 */
+    private static String costInlineTimes(ShopCost cost, long times) {
+        java.math.BigInteger t = java.math.BigInteger.valueOf(Math.max(1L, times));
+        StringBuilder sb = new StringBuilder();
+        if (cost.spark.signum() > 0) sb.append("§e★").append(formatBig(cost.spark.multiply(t)));
+        for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
+            if (sb.length() > 0) sb.append("§7, ");
+            sb.append("§6").append(formatBig(c.getValue().multiply(t))).append(ShopPurchase.coinName(c.getKey()));
+        }
+        for (ExchangeEntry.Ingredient in : cost.physical) {
+            if (sb.length() > 0) sb.append("§7, ");
+            String nm = ingredientName(in);
+            java.math.BigInteger cnt = java.math.BigInteger.valueOf(in.count).multiply(t);
+            if (in.isFluid) sb.append("§b").append(formatBig(cnt)).append("mB ").append(nm);
+            else sb.append("§f").append(formatBig(cnt)).append("×").append(nm);
+        }
+        return sb.length() == 0 ? "§8免费" : sb.toString();
+    }
+
+    /** 组合商品清单 × times 的紧凑单行（各项独立数量×次数），供详情页「预计获得」用。 */
+    private static String goodsInlineTimes(List<ShopEntry.GoodsStack> goods, long times) {
+        java.math.BigInteger t = java.math.BigInteger.valueOf(Math.max(1L, times));
+        StringBuilder sb = new StringBuilder();
+        for (ShopEntry.GoodsStack gs : goods) {
+            if (sb.length() > 0) sb.append("§7, ");
+            java.math.BigInteger cnt = java.math.BigInteger.valueOf(gs.count()).multiply(t);
+            sb.append("§e").append(formatBig(cnt)).append("×").append(new ItemStack(gs.item()).getHoverName().getString());
+        }
+        return sb.length() == 0 ? "§8无" : sb.toString();
+    }
+
+    /** 客户端粗略可购判定：星火/币种查钱包缓存、物品查背包；流体客户端无法查（服务端裁决）。 */
+    private boolean canAffordClient(ShopCost cost) {
+        if (cost.spark.signum() > 0 && ClientWalletAccount.getDigital().compareTo(cost.spark) < 0) return false;
+        for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
+            if (ClientWalletAccount.getCurrency(c.getKey()).compareTo(c.getValue()) < 0) return false;
+        }
+        var player = Minecraft.getInstance().player;
+        for (ExchangeEntry.Ingredient in : cost.physical) {
+            if (in.isFluid) continue; // 流体交给服务端裁决
+            net.minecraft.world.item.Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(in.id);
+            if (item == null || player == null) return false;
+            if (ShopPurchase.countItem(player, item) < in.count) return false;
+        }
+        return true;
+    }
+
     /** 悬停货币格返回其全名（供 tooltip）。坐标须与 drawCurrencyBar 完全一致。 */
     private ResourceLocation hoveredCurrency(int smx, int smy) {
         int x = left + 14 + 6;
         int by = balanceY();
         String label = "余额:";
         int cellStart = x + this.font.width(label) + 8;
-        Map<ResourceLocation, java.math.BigInteger> all = ClientWalletAccount.getAll();
-        java.util.List<Map.Entry<ResourceLocation, java.math.BigInteger>> list = new java.util.ArrayList<>(all.entrySet());
-        list.sort((a, b) -> b.getValue().compareTo(a.getValue()));
+        java.util.List<Map.Entry<ResourceLocation, java.math.BigInteger>> list = currencyBarList();
         int cellW = 66;
-        for (int i = 0; i < list.size(); i++) {
+        // 与 drawCurrencyBar 同一 width（panelWidth-40）算可见格数，超出的格没画出来（用 +N 省略），不响应悬停
+        int width = panelWidth - 40;
+        int maxCells = Math.max(1, (width - (cellStart - x)) / cellW);
+        for (int i = 0; i < list.size() && i < maxCells; i++) {
             int cx = cellStart + i * cellW;
             if (GuiRenderUtil.isHovering(smx, smy, cx, by, cellW - 4, balanceHeight())) {
                 return list.get(i).getKey();
@@ -757,14 +1462,27 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
+        if (descOverlayOpen) return; // 大图层盖住详情面板时，底层格子/图标的 tooltip 不该透出来
         // 悬停货币栏：显示货币全名 + 精确余额
         ResourceLocation cur = hoveredCurrency(smx, smy);
         if (cur != null) {
-            java.math.BigInteger bal = ClientWalletAccount.getCurrency(cur);
+            java.math.BigInteger bal = WalletAccountAPI.isSpark(cur)
+                    ? ClientWalletAccount.getDigital()
+                    : ClientWalletAccount.getCurrency(cur);
             List<Component> lines = new ArrayList<>();
             lines.add(Component.literal("§6" + ShopPurchase.coinName(cur)));
             lines.add(Component.literal("§7余额: §f" + bal.toString()));
             g.renderComponentTooltip(this.font, lines, mx, my);
+            return;
+        }
+        // 悬停详情页商品大图标：渲染真实物品 tooltip（含 appendHoverText/能力提示，如 SDA 实时解析内容）
+        if (detailHoverStack != null && !detailHoverStack.isEmpty()) {
+            g.renderTooltip(this.font, detailHoverStack, mx, my);
+            return;
+        }
+        // 悬停详情页花费预览格：显示本地化名 + 数量（drawDetail 每帧暂存）
+        if (previewHoverName != null) {
+            g.renderTooltip(this.font, Component.literal(previewHoverName), mx, my);
             return;
         }
         // 悬停商品格显示 tooltip（用统一 cellX/cellY，仅网格矩形内响应）
@@ -779,8 +1497,25 @@ public class ShopScreen extends ScaledScreen {
                 ShopEntry e = visibleEntries.get(idx);
                 List<Component> lines = new ArrayList<>();
                 lines.add(Component.literal("§f" + e.goodsDisplayName()));
-                lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
-                lines.add(Component.literal("§7单价 §e" + e.getPrice() + " " + ShopPurchase.coinName(e.getCurrencyId())));
+                if (e.hasMultipleGoods()) {
+                    StringBuilder gc = new StringBuilder("§7成分: §f");
+                    for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
+                        gc.append(gs.count()).append('×').append(new ItemStack(gs.item()).getHoverName().getString()).append(' ');
+                    }
+                    lines.add(Component.literal(gc.toString().trim()));
+                } else {
+                    lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
+                }
+                lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
+                if (e.getCost().hasPhysical()) lines.add(Component.literal("§8含实物：物品在背包 / 流体绑定 AE"));
+                if (!e.getDisplayIcons().isEmpty()) {
+                    StringBuilder ic = new StringBuilder("§7图标: §f");
+                    for (ShopEntry.DisplayIcon d : e.getDisplayIcons()) ic.append(d.displayName()).append(' ');
+                    lines.add(Component.literal(ic.toString().trim()));
+                }
+                if (e.getDescription() != null && !e.getDescription().isEmpty()) {
+                    lines.add(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(e.getDescription())));
+                }
                 g.renderComponentTooltip(this.font, lines, mx, my);
                 break;
             }

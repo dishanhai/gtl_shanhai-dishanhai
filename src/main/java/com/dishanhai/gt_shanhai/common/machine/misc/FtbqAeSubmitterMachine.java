@@ -740,7 +740,7 @@ public class FtbqAeSubmitterMachine extends MetaMachine
     }
 
     /** 是否存在能全额收下的绑定在线提交器(纯 SIMULATE,不改动网络)。 */
-    public static boolean canInjectForPlayer(ServerPlayer player, AEItemKey key, long amount) {
+    public static boolean canInjectForPlayer(ServerPlayer player, AEKey key, long amount) {
         if (key == null || amount <= 0L) return false;
         MEStorage storage = findBoundStorage(player);
         if (storage == null) return false;
@@ -752,7 +752,7 @@ public class FtbqAeSubmitterMachine extends MetaMachine
      * 严格 SIMULATE→MODULATE:先模拟能否全额收下,能才真注入,防吞物品。
      * @return 实际注入量(0 = 无可用提交器 / 网络收不下全部)
      */
-    public static long injectForPlayer(ServerPlayer player, AEItemKey key, long amount) {
+    public static long injectForPlayer(ServerPlayer player, AEKey key, long amount) {
         if (key == null || amount <= 0L) return 0L;
         MEStorage storage = findBoundStorage(player);
         if (storage == null) return 0L;
@@ -765,11 +765,19 @@ public class FtbqAeSubmitterMachine extends MetaMachine
      * extract 天然不超抽,直接 MODULATE 取返回值即实抽量(可部分成交,网络不足则抽多少算多少)。
      * @return 实际抽出量(0 = 无可用提交器 / 网络无此物)
      */
-    public static long extractForPlayer(ServerPlayer player, AEItemKey key, long amount) {
+    public static long extractForPlayer(ServerPlayer player, AEKey key, long amount) {
         if (key == null || amount <= 0L) return 0L;
         MEStorage storage = findBoundStorage(player);
         if (storage == null) return 0L;
         return storage.extract(key, amount, Actionable.MODULATE, IActionSource.empty());
+    }
+
+    /** 模拟绑定网络可抽取量（SIMULATE，不改动网络）；供兑换前算可成交量（尤其流体，无背包容器）。 */
+    public static long availableForPlayer(ServerPlayer player, AEKey key) {
+        if (key == null) return 0L;
+        MEStorage storage = findBoundStorage(player);
+        if (storage == null) return 0L;
+        return storage.extract(key, Long.MAX_VALUE, Actionable.SIMULATE, IActionSource.empty());
     }
 
     public static MachineDefinition register() {

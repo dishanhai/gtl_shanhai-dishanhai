@@ -1,4 +1,3 @@
 {
-  "parent": "minecraft:block/cube_all",
-  "textures": { "all": "gt_shanhai:block/crafting/quantum_structure_formed_face" }
+  "loader": "gt_shanhai:quantum_structure_formed"
 }

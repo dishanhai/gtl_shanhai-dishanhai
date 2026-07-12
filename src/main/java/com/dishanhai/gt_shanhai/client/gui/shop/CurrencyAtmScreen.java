@@ -62,6 +62,16 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
     private int left, top, panelWidth, panelHeight;
 
+    private static String flashText;      // 含 § 颜色码，与聊天框一致
+    private static long flashUntil;       // System.currentTimeMillis() 到期时刻
+
+    /** 把带 [货币中心] 前缀的系统消息镜像进本屏底部横幅（见 {@link ShopChatMirror}）。 */
+    public static void showMessage(Component msg) {
+        if (msg == null) return;
+        flashText = msg.getString();
+        flashUntil = System.currentTimeMillis() + 5000L;
+    }
+
     public CurrencyAtmScreen(ShopScreen parent) {
         super(Component.literal("货币中心"));
         this.parent = parent;
@@ -131,12 +141,24 @@ public class CurrencyAtmScreen extends ScaledScreen {
         g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
 
         g.drawString(this.font, "§6货币中心 §7- ATM", left + 10, top + 5, GOLD, true);
+        g.drawString(this.font, "§d星火 §e" + formatBig(ClientWalletAccount.getDigital()), left + 130, top + 5, WHITE, true);
         drawButton(g, backBtnX(), top + 4, BACK_W, TOP_BAR_H, "§e← 返回", mx, my);
         boolean ae = ShopScreen.isAeMode();
         g.drawString(this.font, ae ? "§aAE模式:开" : "§8AE模式:关", backBtnX() - 84, top + 5, ae ? GREEN : GRAY, true);
 
         drawList(g, mx, my);
         drawDetail(g, mx, my);
+
+        // 底部实时反馈横幅（[货币中心] 系统消息经 ShopChatMirror 镜像至此，聊天框仍保留）
+        if (flashText != null && System.currentTimeMillis() < flashUntil) {
+            int flashW = this.font.width(flashText);
+            int bannerW = Math.min(panelWidth - 12, flashW + 16);
+            int bannerX = left + (panelWidth - bannerW) / 2;
+            int bannerY = top + panelHeight - 24;
+            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 16, 0xE0101010);
+            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 1, 0xFF00C0C0);
+            g.drawCenteredString(this.font, flashText, left + panelWidth / 2, bannerY + 4, 0xFFFFFF);
+        }
     }
 
     private void drawList(GuiGraphics g, int mx, int my) {
@@ -175,7 +197,9 @@ public class CurrencyAtmScreen extends ScaledScreen {
         g.drawString(this.font, ShopPurchase.coinName(selected), cx + 22, dy + 8, WHITE, true);
         BigInteger bal = ClientWalletAccount.getCurrency(selected);
         g.drawString(this.font, "§7钱包余额: §e" + formatBig(bal), cx + 22, dy + 20, CYAN, true);
-        g.drawString(this.font, "§7币值: §f" + CurrencyRateConfig.getValue(selected), cx + 22, dy + 32, GRAY, true);
+        boolean special = CurrencyRateConfig.isSpecial(selected);
+        String valueLabel = special ? "§c特殊（不参与币值兑换）" : "§f" + CurrencyRateConfig.getValue(selected);
+        g.drawString(this.font, "§7币值: " + valueLabel, cx + 22, dy + 32, GRAY, true);
 
         // 提交全部
         drawButton(g, cx, dy + 48, detailW() - 16, 14, "§a提交全部（背包→钱包）", mx, my);
@@ -191,16 +215,34 @@ public class CurrencyAtmScreen extends ScaledScreen {
             drawButton(g, bx, dy + 118, bw, 12, "§c-" + compactStep(steps[i]), mx, my);
         }
 
+        // 百分比快填（读选中币种余额的百分比 → 数量框）
+        String[] plabels = {"全部", "75%", "50%", "25%", "10%"};
+        int pw = (detailW() - 16 - 12) / 5;
+        for (int i = 0; i < 5; i++) {
+            int px = cx + i * (pw + 3);
+            drawButton(g, px, dy + 132, pw, 12, "§b" + plabels[i], mx, my);
+        }
+
         // AE 抽取（仅 AE 模式）
         boolean ae = ShopScreen.isAeMode();
         if (ae) {
-            drawButton(g, cx, dy + 136, detailW() - 16, 14, "§b从 AE 抽取 " + formatBig(BigInteger.valueOf(amount)) + " 枚", mx, my);
+            drawButton(g, cx, dy + 150, detailW() - 16, 14, "§b从 AE 抽取 " + formatBig(BigInteger.valueOf(amount)) + " 枚", mx, my);
         } else {
-            g.drawString(this.font, "§8（开启 AE 模式后可从网络抽取）", cx, dy + 139, GRAY, true);
+            g.drawString(this.font, "§8（开启 AE 模式后可从网络抽取）", cx, dy + 153, GRAY, true);
         }
 
-        // 兑换区
-        int ey = dy + 158;
+        // 兑换区（特殊货币不参与币值兑换，改引导去兑换中心）
+        int ey = dy + 172;
+        if (special) {
+            g.drawString(this.font, "§c特殊货币，不参与比例兑换/星火互转", cx, ey, GRAY, true);
+            g.drawString(this.font, "§8请到「兑换中心」使用专属兑换表", cx, ey + 12, GRAY, true);
+            drawButton(g, cx, ey + 28, detailW() - 16, 14, "§9→ 前往兑换中心", mx, my);
+            // 提取实体币（钱包余额 → 背包实体币）
+            drawButton(g, cx, ey + 50, detailW() - 16, 14,
+                    bal.signum() > 0 ? "§6提取实体币 §7(钱包→背包，取 " + formatBig(BigInteger.valueOf(amount)) + " 枚)"
+                            : "§8提取实体币（钱包余额为0）", mx, my);
+            return;
+        }
         g.drawString(this.font, "§7兑换目标:", cx, ey, WHITE, true);
         ResourceLocation target = targetIdx >= 0 && targetIdx < currencies.size() ? currencies.get(targetIdx) : null;
         // ◀ 目标币 ▶
@@ -214,6 +256,30 @@ public class CurrencyAtmScreen extends ScaledScreen {
                 + (target == null ? "" : ShopPurchase.coinName(target)), cx, ey + 30, GREEN, true);
         drawButton(g, cx, ey + 42, detailW() - 16, 14,
                 gain > 0 ? "§a兑换" : "§8兑换（数量太小/无目标）", mx, my);
+
+        // 币种 ↔ 星火（自动币值）
+        long value = CurrencyRateConfig.getValue(selected);
+        BigInteger toSpark = value > 0L ? BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)) : BigInteger.ZERO;
+        drawButton(g, cx, ey + 62, detailW() - 16, 14,
+                value > 0L ? "§d转成星火 §7(付 " + formatBig(BigInteger.valueOf(amount)) + " → §e+" + formatBig(toSpark) + "星火§7)"
+                        : "§8转成星火（币值未配置）", mx, my);
+        // 星火转出：amount = 想要的目标币数量（非花的星火数），花费 = amount × 币值
+        BigInteger sparkNeeded = value > 0L ? BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)) : BigInteger.ZERO;
+        boolean canFromDigital = value > 0L && ClientWalletAccount.getDigital().compareTo(sparkNeeded) >= 0;
+        String fromDigitalLabel;
+        if (canFromDigital) {
+            fromDigitalLabel = "§d星火转出 §7(付 " + formatBig(sparkNeeded) + "星火 → §f+" + formatBig(BigInteger.valueOf(amount)) + "枚§7)";
+        } else if (value <= 0L) {
+            fromDigitalLabel = "§8星火转出（币值未配置）";
+        } else {
+            fromDigitalLabel = "§8星火转出（星火余额不足，需 " + formatBig(sparkNeeded) + "）";
+        }
+        drawButton(g, cx, ey + 78, detailW() - 16, 14, fromDigitalLabel, mx, my);
+
+        // 提取实体币（钱包余额 → 背包实体币，装不下打包超级磁盘阵列）
+        drawButton(g, cx, ey + 94, detailW() - 16, 14,
+                bal.signum() > 0 ? "§6提取实体币 §7(钱包→背包，取 " + formatBig(BigInteger.valueOf(amount)) + " 枚)"
+                        : "§8提取实体币（钱包余额为0）", mx, my);
     }
 
     /** 客户端预览兑换结果（服务端最终裁定）。 */
@@ -264,14 +330,37 @@ public class CurrencyAtmScreen extends ScaledScreen {
             if (GuiRenderUtil.isHovering(mx, my, bx, dy + 104, bw, 12)) { amount = addClamp(amount, steps[i]); syncBox(); return true; }
             if (GuiRenderUtil.isHovering(mx, my, bx, dy + 118, bw, 12)) { amount = addClamp(amount, -steps[i]); syncBox(); return true; }
         }
+        // 百分比快填（读选中币种余额百分比）
+        int[] pcts = {100, 75, 50, 25, 10};
+        int pw = (fullW - 12) / 5;
+        for (int i = 0; i < 5; i++) {
+            int px = cx + i * (pw + 3);
+            if (GuiRenderUtil.isHovering(mx, my, px, dy + 132, pw, 12)) { setAmountPct(pcts[i]); return true; }
+        }
         // AE 抽取
-        if (ShopScreen.isAeMode() && GuiRenderUtil.isHovering(mx, my, cx, dy + 136, fullW, 14)) {
+        if (ShopScreen.isAeMode() && GuiRenderUtil.isHovering(mx, my, cx, dy + 150, fullW, 14)) {
             send(CurrencyActionPacket.Op.AE_EXTRACT, selected, null, amount);
             ClientWalletAccount.optimisticAddCurrency(selected, BigInteger.valueOf(amount)); // 乐观预览：按输入量先加，服务端快照校正
             return true;
         }
+        // 兑换区（特殊货币：仅"前往兑换中心" + 提取实体币）
+        int ey = dy + 172;
+        if (CurrencyRateConfig.isSpecial(selected)) {
+            if (GuiRenderUtil.isHovering(mx, my, cx, ey + 28, fullW, 14)) {
+                Minecraft.getInstance().setScreen(new ExchangeScreen(parent, parent.canEdit()));
+                return true;
+            }
+            if (GuiRenderUtil.isHovering(mx, my, cx, ey + 50, fullW, 14)) {
+                send(CurrencyActionPacket.Op.WITHDRAW, selected, null, amount);
+                BigInteger curBal = ClientWalletAccount.getCurrency(selected);
+                if (curBal.signum() > 0) {
+                    ClientWalletAccount.optimisticAddCurrency(selected, curBal.min(BigInteger.valueOf(amount)).negate());
+                }
+                return true;
+            }
+            return super.universalMouseClicked(mx, my, btn);
+        }
         // 兑换目标切换 ◀ ▶
-        int ey = dy + 158;
         if (GuiRenderUtil.isHovering(mx, my, cx, ey + 12, 14, 14)) { cycleTarget(-1); return true; }
         if (GuiRenderUtil.isHovering(mx, my, cx + fullW - 14, ey + 12, 14, 14)) { cycleTarget(1); return true; }
         // 兑换
@@ -285,6 +374,37 @@ public class CurrencyAtmScreen extends ScaledScreen {
                     ClientWalletAccount.optimisticAddCurrency(selected, BigInteger.valueOf(amount).negate());
                     ClientWalletAccount.optimisticAddCurrency(target, BigInteger.valueOf(gain));
                 }
+            }
+            return true;
+        }
+        // 转成星火（币种 → 数字余额）
+        long value = CurrencyRateConfig.getValue(selected);
+        if (GuiRenderUtil.isHovering(mx, my, cx, ey + 62, fullW, 14)) {
+            send(CurrencyActionPacket.Op.TO_DIGITAL, selected, null, amount);
+            if (value > 0L && ClientWalletAccount.getCurrency(selected).compareTo(BigInteger.valueOf(amount)) >= 0) {
+                ClientWalletAccount.optimisticAddCurrency(selected, BigInteger.valueOf(amount).negate());
+                ClientWalletAccount.optimisticAddDigital(BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)));
+            }
+            return true;
+        }
+        // 星火转出（数字余额 → 币种，amount = 想要的目标币数量）
+        if (GuiRenderUtil.isHovering(mx, my, cx, ey + 78, fullW, 14)) {
+            send(CurrencyActionPacket.Op.FROM_DIGITAL, selected, null, amount);
+            if (value > 0L) {
+                BigInteger need = BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value));
+                if (ClientWalletAccount.getDigital().compareTo(need) >= 0) {
+                    ClientWalletAccount.optimisticAddDigital(need.negate());
+                    ClientWalletAccount.optimisticAddCurrency(selected, BigInteger.valueOf(amount));
+                }
+            }
+            return true;
+        }
+        // 提取实体币（钱包余额 → 背包）
+        if (GuiRenderUtil.isHovering(mx, my, cx, ey + 94, fullW, 14)) {
+            send(CurrencyActionPacket.Op.WITHDRAW, selected, null, amount);
+            BigInteger curBal = ClientWalletAccount.getCurrency(selected);
+            if (curBal.signum() > 0) {
+                ClientWalletAccount.optimisticAddCurrency(selected, curBal.min(BigInteger.valueOf(amount)).negate());
             }
             return true;
         }
@@ -318,6 +438,16 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
     private void syncBox() {
         if (amountBox != null) amountBox.setValue(Long.toString(amount));
+    }
+
+    /** 百分比快填：把数量设为选中币种余额的 pct%（BigInteger 算，超 long 夹到 Long.MAX）。 */
+    private void setAmountPct(int pct) {
+        if (selected == null) return;
+        BigInteger bal = ClientWalletAccount.getCurrency(selected);
+        BigInteger v = bal.multiply(BigInteger.valueOf(pct)).divide(BigInteger.valueOf(100));
+        amount = v.signum() <= 0 ? 1L : (v.bitLength() < 63 ? v.longValue() : Long.MAX_VALUE);
+        if (amount < 1L) amount = 1L;
+        syncBox();
     }
 
     private static long addClamp(long a, long delta) {

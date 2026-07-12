@@ -159,8 +159,27 @@ public class ProxyExecutorMachine extends SelectableRecipeTypeSetMachine {
                 textList.add(Component.literal("§7共鸣倍率: §f" + getBoostMultiplier() + "x"));
                 textList.add(Component.literal("§d跨配方线程: §f" + formatParallel(getAdditionalThread())));
             }
+            addRecipeDiagnosisDisplay(textList);
         }
         textList.add(Component.translatable("gt_shanhai.machine.proxy_executor.name").withStyle(ChatFormatting.GOLD));
+    }
+
+    /**
+     * 临时排障用：暴露配方查找失败原因/锁定状态/已选类型数量，供在游戏内直接观察卡产原因。
+     * 问题定位后应移除。
+     */
+    private void addRecipeDiagnosisDisplay(List<Component> textList) {
+        var logic = getRecipeLogic();
+        textList.add(Component.literal("§7[诊断] 已选类型: " + getSelectedRecipeTypeCount()
+                + " §7锁定: " + logic.isLock()));
+        var locked = logic.getLockRecipe();
+        if (locked != null) {
+            textList.add(Component.literal("§7[诊断] 锁定配方: " + locked.getId()));
+        }
+        var status = logic.getRecipeStatus();
+        if (status != null && !status.isSuccess() && status.reason() != null) {
+            textList.add(Component.literal("§c[诊断] 上次失败: ").append(status.reason()));
+        }
     }
 
     @Override

@@ -1,4 +1,8 @@
 ﻿{
+  "key.categories.gt_shanhai": "山海私货",
+  "key.gt_shanhai.open_shop": "打开山海商店（背包/饰品栏有钱包即可）",
+  "curios.identifier.wallet": "钱包",
+  "curios.wallet.name": "钱包",
   "gt_shanhai.fluid.photon_state": "光子态",
   "block.gt_shanhai.big_tag_filter_stock_bus": "山海特大号标签过滤库存总线",
   "block.gt_shanhai.spacetime_wave_matrix": "终焉创始现实修改矩阵",
@@ -460,6 +464,7 @@
   "gt_shanhai.shop.editor.goods": "商品物品",
   "gt_shanhai.shop.editor.count": "每份数量",
   "gt_shanhai.shop.editor.currency": "结算货币",
+  "gt_shanhai.shop.editor.use_spark": "用星火(数字余额)结算",
   "gt_shanhai.shop.editor.price": "单价",
   "gt_shanhai.shop.editor.category": "分类"
 }

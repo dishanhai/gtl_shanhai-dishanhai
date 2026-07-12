@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
@@ -22,11 +23,29 @@ import java.util.List;
  * （{@link com.dishanhai.gt_shanhai.common.shop.WalletCurrency}）。</p>
  *
  * <p>不再使用 LDLib ModularUI —— 商店界面已改用原版 Screen 体系的 ScaledScreen。</p>
+ *
+ * <p>实现 {@link top.theillusivec4.curios.api.type.capability.ICurioItem} 使其可装入
+ * Curios 专属"wallet"饰品槽（见 {@code data/curios/curios/slots/wallet.json} +
+ * {@code data/curios/tags/items/wallet.json}），全部方法用默认实现，无特殊装备逻辑。</p>
  */
-public class WalletItem extends Item {
+public class WalletItem extends Item implements top.theillusivec4.curios.api.type.capability.ICurioItem {
 
     public WalletItem(Properties properties) {
         super(properties);
+    }
+
+    /**
+     * 玩家背包（含盔甲栏/副手）或饰品栏任意位置是否携带钱包，供快捷键开店用（不要求手持）。
+     * 仅服务端调用。
+     */
+    public static boolean isCarrying(ServerPlayer player) {
+        var inv = player.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            if (inv.getItem(i).getItem() instanceof WalletItem) return true;
+        }
+        return top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player)
+                .map(handler -> handler.findFirstCurio(stack -> stack.getItem() instanceof WalletItem).isPresent())
+                .orElse(false);
     }
 
     @Override
@@ -50,5 +69,9 @@ public class WalletItem extends Item {
         tooltip.add(Component.literal("§7右键打开 §6山海商店"));
         // 余额已迁到玩家账户（按玩家UUID，钱跟人不跟物），不再存于本物品 NBT
         tooltip.add(Component.literal("§8余额跟随玩家账户 · 右键界面内查看"));
+        tooltip.add(Component.literal("§8可装入饰品栏，控制选项绑定快捷键后免手持开店"));
+        // 显示当前快捷键绑定：客户端专属（KeyMapping 只存在于客户端），DistExecutor 防止服务端加载客户端类
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
+                tooltip.add(com.dishanhai.gt_shanhai.client.ShanhaiKeyMappings.getOpenShopKeyTooltip()));
     }
 }

@@ -10,8 +10,6 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
@@ -19,8 +17,8 @@ import java.util.function.Supplier;
 /**
  * 商店动作包（C→S）：购买 / 出售 / 充值全部 / 删除条目。
  *
- * <p>服务端从发包玩家的主手/副手定位钱包 {@link WalletItem}，用钱包 NBT 虚拟余额结算
- * （{@link ShopPurchase}）。商品用 goodsId+category 定位到 {@link ShopEntry}。</p>
+ * <p>服务端校验发包玩家背包/饰品栏任意位置是否携带钱包 {@link WalletItem#isCarrying}，
+ * 用玩家账户虚拟余额结算（{@link ShopPurchase}）。商品用 goodsId+category 定位到 {@link ShopEntry}。</p>
  */
 public class ShopActionPacket {
 
@@ -31,17 +29,30 @@ public class ShopActionPacket {
     private final String category;            // 定位条目用（同 goods 可能跨分类）
     private final long times;                 // 购买/出售次数（支持 Long.MAX）
     private final boolean aeMode;             // AE 模式：交付优先注入玩家绑定的 AE 网络
+    private final int entryIndex;             // 条目在 ShopConfig.getEntries() 的精确索引（-1=未知则回退 goodsId+category 定位）
+    private final int chosenRewardIndex;      // 自选奖励模式：玩家在选择界面选中的 rewardPool 下标；-1=未选/不适用
 
     public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times) {
-        this(action, goodsId, category, times, false);
+        this(action, goodsId, category, times, false, -1);
     }
 
     public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times, boolean aeMode) {
+        this(action, goodsId, category, times, aeMode, -1);
+    }
+
+    public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times, boolean aeMode, int entryIndex) {
+        this(action, goodsId, category, times, aeMode, entryIndex, -1);
+    }
+
+    public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times, boolean aeMode,
+                            int entryIndex, int chosenRewardIndex) {
         this.action = action;
         this.goodsId = goodsId == null ? new ResourceLocation("minecraft:air") : goodsId;
         this.category = category == null ? "" : category;
         this.times = Math.max(1L, times);
         this.aeMode = aeMode;
+        this.entryIndex = entryIndex;
+        this.chosenRewardIndex = chosenRewardIndex;
     }
 
     public ShopActionPacket(FriendlyByteBuf buf) {
@@ -50,6 +61,8 @@ public class ShopActionPacket {
         this.category = buf.readUtf();
         this.times = buf.readVarLong();
         this.aeMode = buf.readBoolean();
+        this.entryIndex = buf.readInt();
+        this.chosenRewardIndex = buf.readInt();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -58,6 +71,8 @@ public class ShopActionPacket {
         buf.writeUtf(category);
         buf.writeVarLong(times);
         buf.writeBoolean(aeMode);
+        buf.writeInt(entryIndex);
+        buf.writeInt(chosenRewardIndex);
     }
 
     public static void handle(ShopActionPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -71,9 +86,8 @@ public class ShopActionPacket {
     }
 
     private static void apply(ShopActionPacket pkt, ServerPlayer player) {
-        ItemStack wallet = findWallet(player);
-        if (wallet.isEmpty()) {
-            player.sendSystemMessage(Component.literal("§c[山海商店] 需手持山海钱包"));
+        if (!WalletItem.isCarrying(player)) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 需持有山海钱包（背包/饰品栏任意位置都行）"));
             return;
         }
 
@@ -86,14 +100,14 @@ public class ShopActionPacket {
             return;
         }
 
-        ShopEntry entry = locate(pkt.goodsId, pkt.category);
+        ShopEntry entry = resolve(pkt);
         if (entry == null) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 商品不存在"));
             return;
         }
 
         switch (pkt.action) {
-            case BUY -> doBuy(player, entry, pkt.times, pkt.aeMode);
+            case BUY -> doBuy(player, entry, pkt.times, pkt.aeMode, pkt.chosenRewardIndex);
             case SELL -> doSell(player, entry, pkt.times);
             case DELETE -> {
                 if (!com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player)) {
@@ -101,6 +115,7 @@ public class ShopActionPacket {
                     return;
                 }
                 boolean ok = ShopConfig.removeEntry(entry);
+                ShopRefreshPacket.sendTo(player); // 回推刷新界面（实时）
                 player.sendSystemMessage(ok
                         ? Component.literal("§b[山海商店] §a已删除 §f" + entry.goodsDisplayName())
                         : Component.literal("§c[山海商店] 删除失败"));
@@ -109,27 +124,71 @@ public class ShopActionPacket {
         }
     }
 
-    private static void doBuy(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
-        ShopPurchase.BulkBuyResult r = ShopPurchase.buyBulk(player, entry, times, aeMode);
-        if (r.done() <= 0L) {
-            player.sendSystemMessage(Component.literal("§c[山海商店] 余额不足，先充值"));
+    private static void doBuy(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, int chosenRewardIndex) {
+        boolean cheat = com.dishanhai.gt_shanhai.common.shop.ShopCheatMode.isEnabled(player.getUUID());
+        if (!cheat && entry.isLimited() && entry.getRemainingUses() <= 0L) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 该商品限购次数已用完"));
             return;
         }
-        WalletAccountAPI.sync(player);
+        ShopPurchase.BulkBuyResult r;
+        switch (entry.getRewardMode()) {
+            case CHOICE -> {
+                var pool = entry.getRewardPool();
+                if (chosenRewardIndex < 0 || chosenRewardIndex >= pool.size()) {
+                    player.sendSystemMessage(Component.literal("§c[山海商店] 选择的奖励无效，请重新选择"));
+                    return;
+                }
+                ShopEntry.RewardOption chosen = pool.get(chosenRewardIndex);
+                r = cheat ? ShopPurchase.giveBulkChoice(player, entry, times, aeMode, chosen)
+                          : ShopPurchase.buyBulkChoice(player, entry, times, aeMode, chosen);
+            }
+            case RANDOM -> r = cheat ? ShopPurchase.giveBulkRandom(player, entry, times, aeMode)
+                                      : ShopPurchase.buyBulkRandom(player, entry, times, aeMode);
+            case ALL -> r = cheat ? ShopPurchase.giveBulkAll(player, entry, times, aeMode)
+                                   : ShopPurchase.buyBulkAll(player, entry, times, aeMode);
+            case FTBQ -> r = cheat ? ShopPurchase.giveBulkFtbq(player, entry, times, aeMode)
+                                    : ShopPurchase.buyBulkFtbq(player, entry, times, aeMode);
+            default -> r = cheat ? ShopPurchase.giveBulk(player, entry, times, aeMode)   // 作弊：不扣成本直取
+                                  : ShopPurchase.buyBulk(player, entry, times, aeMode);
+        }
+        if (r.done() <= 0L) {
+            player.sendSystemMessage(Component.literal(cheat
+                    ? "§c[山海商店] 商品无效，无法获取"
+                    : "§c[山海商店] 余额不足，先充值"));
+            return;
+        }
+        if (!cheat) WalletAccountAPI.sync(player); // 直取无扣款，无需同步余额
         String viaText = switch (r.via() == null ? "" : r.via()) {
             case "ae" -> " §7→ 已注入 AE 网络";
             case "sda" -> " §7→ 已打包为超级磁盘阵列";
             default -> " §7→ 已放入背包";
         };
         String amt = ShopPurchase.formatCount(r.done());
-        if (r.done() == times) {
+        // 奖励表模式（CHOICE/RANDOM/ALL/FTBQ）单次独立随机数受 rewardRollCap() 硬顶（防卡服），命中上限时
+        // done 恰好等于该顶值——这不是余额不够，是"这一下子买太多了，分批买"，消息不能说成"余额不足"误导玩家。
+        boolean rollCapped = entry.getRewardMode() != ShopEntry.RewardMode.NONE
+                && r.done() >= ShopPurchase.rewardRollCap() && times > r.done();
+        if (cheat) {
+            player.sendSystemMessage(Component.literal("§d[山海商店·作弊] §a直接获取 §f" + amt + " §a次 " + entry.goodsDisplayName() + viaText));
+        } else if (r.done() == times) {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a成功购买 §f" + amt + " §a次 " + entry.goodsDisplayName() + viaText));
+        } else if (rollCapped) {
+            player.sendSystemMessage(Component.literal("§b[山海商店] §a本次抽取 §f" + amt + " §a次 " + entry.goodsDisplayName()
+                    + " §7(单次最多抽 " + ShopPurchase.formatCount(ShopPurchase.rewardRollCap()) + " 次，再买一次继续)" + viaText));
         } else {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a购买 §f" + amt + "§7/§f" + ShopPurchase.formatCount(times) + " §a次后余额不足" + viaText));
         }
     }
 
     private static void doSell(ServerPlayer player, ShopEntry entry, long times) {
+        if (entry.getRewardMode() != ShopEntry.RewardMode.NONE) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 自选/随机/全部奖励商品不支持出售"));
+            return;
+        }
+        if (entry.isLimited() && entry.getRemainingUses() <= 0L) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 该商品限购次数已用完"));
+            return;
+        }
         long sold = ShopPurchase.sellBulk(player, entry, times);
         if (sold <= 0L) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 背包里没有足够的 " + entry.goodsDisplayName()));
@@ -144,18 +203,21 @@ public class ShopActionPacket {
         }
     }
 
-    /** 从主手/副手找钱包 ItemStack。 */
-    private static ItemStack findWallet(ServerPlayer player) {
-        for (InteractionHand hand : InteractionHand.values()) {
-            ItemStack s = player.getItemInHand(hand);
-            if (!s.isEmpty() && s.getItem() instanceof WalletItem) {
-                return s;
-            }
+    /**
+     * 精确定位条目：优先用客户端下发的 entryIndex —— 同物品不同 NBT 的多条目（如各种超级磁盘阵列）
+     * goodsId 会撞车，仅靠 {@link #locate} 的 goodsId+category 会误取到首个同物品条目。
+     * 索引越界或指向的条目 goodsId 对不上（列表漂移）时，回退按 goodsId+category 定位。
+     */
+    private static ShopEntry resolve(ShopActionPacket pkt) {
+        var all = ShopConfig.getEntries();
+        if (pkt.entryIndex >= 0 && pkt.entryIndex < all.size()) {
+            ShopEntry e = all.get(pkt.entryIndex);
+            if (e != null && e.getGoodsId().equals(pkt.goodsId)) return e; // 校验索引未漂移
         }
-        return ItemStack.EMPTY;
+        return locate(pkt.goodsId, pkt.category);
     }
 
-    /** 按 goodsId + category 定位商品条目。 */
+    /** 按 goodsId + category 定位商品条目（回退用；同物品多条目会撞车，优先走 {@link #resolve}）。 */
     private static ShopEntry locate(ResourceLocation goodsId, String category) {
         for (ShopEntry e : ShopConfig.getEntries()) {
             if (e.getGoodsId().equals(goodsId)

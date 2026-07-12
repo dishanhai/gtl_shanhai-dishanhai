@@ -61,6 +61,22 @@ public class SelectableRecipeTypeSetConfigurator implements IFancyUIProvider {
         int pageHeight = 170;
         page.setBackground(GuiTextures.BACKGROUND_INVERSE);
 
+        // 轮询检测服务端选择变化（服务端剪枝/其他玩家操作/数据包回执与本地乐观状态不一致），
+        // 同步串变化即重建页面，保证打开期间勾选状态始终跟随权威数据
+        page.addWidget(new Widget(0, 0, 0, 0) {
+            private String lastSeenSelection = machine.getSelectedRecipeTypesSyncValue();
+
+            @Override
+            public void updateScreen() {
+                super.updateScreen();
+                String now = machine.getSelectedRecipeTypesSyncValue();
+                if (!now.equals(lastSeenSelection)) {
+                    lastSeenSelection = now;
+                    rebuildPage();
+                }
+            }
+        });
+
         page.addWidget(new LabelWidget(5, 5, machine.getRecipeTypeSetHeaderText()));
         page.addWidget(new LabelWidget(5, 18, machine.getRecipeTypeSetDescriptionText()));
 

@@ -23,11 +23,16 @@ import java.util.Map;
  * 货币汇率 / 币值配置（山海署名）。
  *
  * <p>读取 {@code config/gt_shanhai/currency_rates.json}（可热改不重编译），格式：
- * <pre>{ "dishanhai:copper_coin": 1, "dishanhai:dog_coins": 1, ... }</pre>
+ * <pre>{ "dishanhai:copper_coin": 1, "dishanhai:dog_coins": -1, ... }</pre>
  * 每种货币映射到一个 <b>基准价值</b>（long，以 copper_coin=1 为锚）。</p>
  *
  * <p>用途：① ATM 币种清单（= 本表所有键）；② 币种兑换换算——
  * A→B 目标量 = floor(源量 × A币值 / B币值)。文件缺失时写出一份分档默认表。</p>
+ *
+ * <p><b>特殊货币</b>（值为负数，如 -1）：仍计入 ATM 币种清单（可充值/查看余额/提取实体币/
+ * 作商品定价货币），但 {@link #getValue} 对外一律返回 0——即自动禁用比例兑换、转成星火、
+ * 星火转出这些「正常币值」功能，逼这类货币走 {@code ExchangeScreen}（兑换中心）的自定义兑换表。
+ * 见 {@link #isSpecial}。</p>
  */
 public final class CurrencyRateConfig {
 
@@ -41,17 +46,24 @@ public final class CurrencyRateConfig {
 
     private CurrencyRateConfig() {}
 
-    /** 币值（未定义返回 0，视为不可兑换）。 */
+    /** 币值（未定义 / 特殊货币一律返回 0，视为不可按比例兑换）。 */
     public static long getValue(ResourceLocation currency) {
         ensureLoaded();
         Long v = currency == null ? null : RATES.get(currency);
-        return v == null ? 0L : v;
+        return (v == null || v < 0L) ? 0L : v;
     }
 
-    /** 是否已配置币值（可参与兑换 / 出现在 ATM）。 */
+    /** 是否已配置币值（可出现在 ATM；特殊货币也算已配置）。 */
     public static boolean has(ResourceLocation currency) {
         ensureLoaded();
         return currency != null && RATES.containsKey(currency);
+    }
+
+    /** 是否为「特殊货币」（配置值为负数）：仍是合法钱包货币，但不参与币值兑换/星火互转。 */
+    public static boolean isSpecial(ResourceLocation currency) {
+        ensureLoaded();
+        Long v = currency == null ? null : RATES.get(currency);
+        return v != null && v < 0L;
     }
 
     /** ATM 币种清单（= 配置里出现的所有币，保序）。 */
@@ -76,7 +88,7 @@ public final class CurrencyRateConfig {
             for (String key : root.keySet()) {
                 try {
                     long v = root.get(key).getAsLong();
-                    if (v > 0L) RATES.put(new ResourceLocation(key), v);
+                    if (v != 0L) RATES.put(new ResourceLocation(key), v); // 负数=特殊货币，正常存入
                 } catch (Exception ex) {
                     GTDishanhaiMod.LOGGER.warn("[CurrencyRate] 跳过非法条目 {}: {}", key, ex.getMessage());
                 }

@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
+import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 
@@ -8,21 +9,20 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkEvent;
 
+import java.math.BigInteger;
 import java.util.function.Supplier;
 
 /**
  * 货币 ATM 操作包（C→S）：单币提交 / 币种兑换 / AE 抽取。
  *
- * <p>服务端从发包玩家主/副手定位钱包 {@link WalletItem}，按 {@link Op} 派发到
- * {@link ShopPurchase} 的对应结算方法，全程原地改钱包 NBT（不换对象）。</p>
+ * <p>服务端校验发包玩家背包/饰品栏任意位置是否携带钱包 {@link WalletItem#isCarrying}，
+ * 按 {@link Op} 派发到 {@link ShopPurchase} 的对应结算方法，账户余额走玩家 UUID 账本。</p>
  */
 public class CurrencyActionPacket {
 
-    public enum Op { DEPOSIT, EXCHANGE, AE_EXTRACT }
+    public enum Op { DEPOSIT, EXCHANGE, AE_EXTRACT, TO_DIGITAL, FROM_DIGITAL, WITHDRAW }
 
     private final Op op;
     private final ResourceLocation currency;   // 源/操作币种
@@ -61,9 +61,8 @@ public class CurrencyActionPacket {
     }
 
     private static void apply(CurrencyActionPacket pkt, ServerPlayer player) {
-        ItemStack wallet = findWallet(player);
-        if (wallet.isEmpty()) {
-            player.sendSystemMessage(Component.literal("§c[货币中心] 需手持山海钱包"));
+        if (!WalletItem.isCarrying(player)) {
+            player.sendSystemMessage(Component.literal("§c[货币中心] 需持有山海钱包（背包/饰品栏任意位置都行）"));
             return;
         }
         switch (pkt.op) {
@@ -89,18 +88,34 @@ public class CurrencyActionPacket {
                             + ShopPurchase.coinName(pkt.currency) + " §7入钱包")
                         : Component.literal("§c[货币中心] AE 抽取失败（无绑定在线提交器 / 网络无此币）"));
             }
-        }
-        WalletAccountAPI.sync(player); // 回推账户快照，客户端界面即时刷新
-    }
-
-    /** 从主/副手找钱包 ItemStack。 */
-    private static ItemStack findWallet(ServerPlayer player) {
-        for (InteractionHand hand : InteractionHand.values()) {
-            ItemStack s = player.getItemInHand(hand);
-            if (!s.isEmpty() && s.getItem() instanceof WalletItem) {
-                return s;
+            case TO_DIGITAL -> {
+                long gained = ShopPurchase.toDigital(player, pkt.currency, pkt.amount);
+                player.sendSystemMessage(gained > 0L
+                        ? Component.literal("§b[货币中心] §a已把 §f" + ShopPurchase.formatCount(pkt.amount) + " "
+                            + ShopPurchase.coinName(pkt.currency) + " §a转成 §e" + ShopPurchase.formatCount(gained) + " 星火")
+                        : Component.literal("§c[货币中心] 转星火失败（余额不足 / 币值未配置）"));
+            }
+            case FROM_DIGITAL -> {
+                // pkt.amount 语义 = 想要的目标币数量（非花的星火数），花费 = amount × 币值
+                long coins = ShopPurchase.fromDigital(player, pkt.currency, pkt.amount);
+                if (coins > 0L) {
+                    long value = CurrencyRateConfig.getValue(pkt.currency);
+                    BigInteger spentBig = BigInteger.valueOf(coins).multiply(BigInteger.valueOf(value));
+                    long spent = spentBig.bitLength() < 63 ? spentBig.longValue() : Long.MAX_VALUE;
+                    player.sendSystemMessage(Component.literal("§b[货币中心] §a已花 §e" + ShopPurchase.formatCount(spent) + " 星火 §a换得 §f"
+                            + ShopPurchase.formatCount(coins) + " " + ShopPurchase.coinName(pkt.currency)));
+                } else {
+                    player.sendSystemMessage(Component.literal("§c[货币中心] 星火转出失败（星火余额不足 / 币值未配置）"));
+                }
+            }
+            case WITHDRAW -> {
+                long got = ShopPurchase.withdraw(player, pkt.currency, pkt.amount);
+                player.sendSystemMessage(got > 0L
+                        ? Component.literal("§b[货币中心] §a已提取 §f" + ShopPurchase.formatCount(got) + " §a枚 "
+                            + ShopPurchase.coinName(pkt.currency) + " §7到背包")
+                        : Component.literal("§c[货币中心] 提取失败（钱包余额不足）"));
             }
         }
-        return ItemStack.EMPTY;
+        WalletAccountAPI.sync(player); // 回推账户快照，客户端界面即时刷新
     }
 }

@@ -107,6 +107,22 @@ public final class PatternRecipeTypeHelper {
         return recipe;
     }
 
+    /**
+     * 只读解析样板对应的真实配方：与 {@link #ensureRecipe} 同源，但绝不写回 NBT 标记。
+     * 用于非星律的通用样板总成（GTLCore/GTLAdd 超级样板总成等）——这些样板同时在向 AE
+     * 网络提供样板服务，改动 NBT 会改变 AE 样板身份（AEItemKey 含 NBT），必须只读。
+     */
+    public static GTRecipe peekRecipe(ItemStack stack, Level level) {
+        if (stack == null || stack.isEmpty() || level == null) return null;
+        String existing = readRecipeTypeId(stack);
+        GTRecipe recipe = inferRecipe(stack, level, existing);
+        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) {
+            recipe = inferRecipe(stack, level, "");
+        }
+        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) return null;
+        return recipe;
+    }
+
     public static void writeRecipeTypeFromPattern(ItemStack stack, GenericStack[] inputs, GenericStack[] outputs) {
         if (stack == null || stack.isEmpty() || !readRecipeTypeId(stack).isEmpty()) return;
         GTRecipe recipe = VirtualPatternEncodingHelper.findMatchingRecipeForPattern(inputs, outputs);

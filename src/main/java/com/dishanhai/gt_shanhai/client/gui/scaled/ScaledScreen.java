@@ -86,8 +86,19 @@ public abstract class ScaledScreen extends Screen {
             } else {
                 super.render(g, smx, smy, pt);
             }
-            renderScaledForeground(g, smx, smy, pt);
-            g.pose().popPose();
+            // RenderType.gui() 用的是 LEQUAL 深度测试，同 Z（都是 0）时谁赢由实际提交顺序这种脆弱的
+            // 批次时机决定，光 flush() 治标不治本；vanilla 自己的 tooltip 渲染（GuiGraphics.renderTooltip）
+            // 就是靠 pose.translate(0,0,400) 把内容顶到更高 Z 层，深度测试直接稳赢，与批次顺序无关——
+            // 前景层（二级菜单遮罩/面板/描述等）照抄这个手法，才是根治背景网格物品图标+文字穿模的正解。
+            g.flush();
+            g.pose().pushPose();
+            try {
+                g.pose().translate(0.0f, 0.0f, 400.0f);
+                renderScaledForeground(g, smx, smy, pt);
+            } finally {
+                g.pose().popPose();
+            }
+            g.pose().popPose(); // 弹出最外层 offsetX/offsetY/guiScale 变换——漏弹会让 renderTooltips 的坐标被二次缩放/偏移，飘到错误位置
             renderTooltips(g, smx, smy, mx, my);
         } catch (Throwable th) {
             g.pose().popPose();

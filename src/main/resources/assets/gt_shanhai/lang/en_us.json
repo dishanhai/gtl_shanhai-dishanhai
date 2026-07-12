@@ -1,4 +1,8 @@
 {
+  "key.categories.gt_shanhai": "Dishanhai's Stuff",
+  "key.gt_shanhai.open_shop": "Open Shanhai Shop (wallet anywhere in inventory/curios)",
+  "curios.identifier.wallet": "Wallet",
+  "curios.wallet.name": "Wallet",
   "block.gt_shanhai.spacetime_wave_matrix": "Spacetime Wave Matrix",
   "gtceu.recipe_type.spacetime_distortion": "Quantized Reality Reconstruction",
   "gtceu.spacetime_distortion": "Quantized Reality Reconstruction",

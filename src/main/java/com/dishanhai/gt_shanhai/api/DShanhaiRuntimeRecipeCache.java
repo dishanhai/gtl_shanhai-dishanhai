@@ -36,7 +36,12 @@ public final class DShanhaiRuntimeRecipeCache {
     }
 
     private static boolean diagnosticsEnabled() {
-        return com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.runtimeRecipeCacheDiagnostics.get();
+        try {
+            return com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.runtimeRecipeCacheDiagnostics.get();
+        } catch (Throwable ignored) {
+            // 配置尚未加载（启动早期/单元测试环境）时视为关闭，诊断开关绝不能反过来破坏缓存主流程
+            return false;
+        }
     }
 
     public static Key key(String recipeTypeId, IRecipeCapabilityHolder holder, String scope) {

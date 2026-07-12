@@ -47,8 +47,6 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
 
     private final GTRecipeType recipeTypeSetWrapper;
     private final Set<String> selectedRecipeTypeNames = new LinkedHashSet<>();
-    private GTRecipeType forcedSearchRecipeType;
-    private GTRecipeType[] forcedSearchRecipeTypesCache;
 
     // 解析后的选中配方类型数组缓存：getRecipeTypes()/getSelectedRecipeTypes() 每 tick 被多次调用，
     // 原实现每次都新建 ArrayList + 对每个选中名做 O(全部类型) 的字符串匹配 + 装箱成数组，纯浪费。
@@ -150,6 +148,21 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
         return getAllSelectableRecipeTypes().length > 1;
     }
 
+    /**
+     * 保持 tick 订阅常驻。
+     * 本体系机器（AE 网络供料的原初引擎主机/模块、目标机器动态切换的代理执行者等）的输入来源
+     * 往往不走"物品栏变化 -> onContentsChanged"这条唤醒信号：AE 发料不触发机器自身 inventory
+     * 变化；代理执行者的实际产出能力依赖插槽里的目标机器定义，也不是标准物品栏事件。
+     * 默认 keepSubscribing()=false 时，配方类型选择变更触发的那一次重新订阅若恰好没查到配方，
+     * RecipeLogic 会在同一 tick 内立刻再次取消订阅、永久待机——UI 仍显示选中正常，但机器再也
+     * 不会主动尝试生产。此处统一覆写为 true，让 RecipeLogic 每 5 tick 主动轮询，从根上避免
+     * 子类各自遗漏（如 PrimordialOmegaEngineMachine 曾经漏过、ProxyExecutorMachine 一直没加）。
+     */
+    @Override
+    public boolean keepSubscribing() {
+        return true;
+    }
+
     public boolean isRecipeOutputAlwaysMatch(GTRecipe recipe) {
         return false;
     }
@@ -160,18 +173,12 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
 
     @Override
     public GTRecipeType[] getRecipeTypes() {
-        if (forcedSearchRecipeType != null) {
-            return forcedSearchRecipeTypesCache;
-        }
         ensureRecipeTypeSelectionInitialized();
         return getSelectedRecipeTypes();
     }
 
     @Override
     public GTRecipeType getRecipeType() {
-        if (forcedSearchRecipeType != null) {
-            return forcedSearchRecipeType;
-        }
         GTRecipeType selected = getPrimarySelectedRecipeType();
         return selected == null ? recipeTypeSetWrapper : selected;
     }
@@ -262,13 +269,6 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
         return !selectedRecipeTypeNames.isEmpty();
     }
 
-    void setForcedSearchRecipeType(GTRecipeType forcedSearchRecipeType) {
-        this.forcedSearchRecipeType = forcedSearchRecipeType;
-        this.forcedSearchRecipeTypesCache = forcedSearchRecipeType == null
-                ? null
-                : new GTRecipeType[] { forcedSearchRecipeType };
-    }
-
     public boolean isRecipeTypeSelected(GTRecipeType type) {
         applySyncedRecipeTypesIfNeeded();
         ensureRecipeTypeSelectionInitialized();
@@ -281,6 +281,11 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
 
     public int getSelectedRecipeTypeCount() {
         return getSelectedRecipeTypes().length;
+    }
+
+    /** 当前选中集合的同步串（换行分隔）。供 UI 轮询检测服务端选择变化。 */
+    public String getSelectedRecipeTypesSyncValue() {
+        return selectedRecipeTypesSync;
     }
 
     public boolean isRecipeTypeNameSelected(String name) {
@@ -340,8 +345,14 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
     public void retainAvailableRecipeTypeSelection(boolean selectFirstWhenEmpty) {
         applySyncedRecipeTypesIfNeeded();
         Set<String> valid = getSelectableRecipeTypeNames();
+        // 可选列表为空 = 目标机器暂时取出/槽位尚未加载（代理执行者动态列表），
+        // 此时不能把选中集清空——否则玩家的选择集在换手目标机器时被永久抹掉，只保留现状等列表恢复
+        if (valid.isEmpty()) {
+            refreshRecipeTypeSelection();
+            return;
+        }
         selectedRecipeTypeNames.removeIf(name -> !valid.contains(name));
-        if (selectedRecipeTypeNames.isEmpty() && !valid.isEmpty()) {
+        if (selectedRecipeTypeNames.isEmpty()) {
             if (selectFirstWhenEmpty) {
                 selectedRecipeTypeNames.add(valid.iterator().next());
             } else {
@@ -365,19 +376,55 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
         invalidateResolvedTypesCache();
         pruneMissingRecipeTypes();
         updateSelectedRecipeTypesSync();
+        if (getLevel() != null && getLevel().isClientSide) {
+            // 客户端只做本地乐观显示，权威状态由服务端 @DescSynced 回同步，不触碰配方逻辑
+            return;
+        }
         RecipeLogic logic = getRecipeLogic();
         if (logic != null) {
-            onRecipeTypeSelectionChanged(logic);
-            if (logic instanceof ILockRecipe lockRecipe) {
-                lockRecipe.setLockRecipe(null);
-            }
-            logic.resetRecipeLogic();
+            wakeRecipeLogic(logic);
         }
         markDirty();
-        if (getLevel() != null && !getLevel().isClientSide) {
-            notifyBlockUpdate();
-        }
+        notifyBlockUpdate();
         scheduleRenderUpdate();
+    }
+
+    /**
+     * 读档后唤醒 RecipeLogic：selectedRecipeTypeNames 本身在 loadCustomPersistedData() 里已经
+     * 从 NBT 正确还原（UI 看到的选中状态是对的），但唤醒 RecipeLogic 的这部分（解锁陈旧锁定配方、
+     * 退出闲置、重新订阅 tick）此前只写在 refreshRecipeTypeSelection() 里，只有玩家手动切一次
+     * 选择集才会触发。读档路径完全没走到这里，导致机器停留在读档时的旧订阅/锁定状态，必须手动
+     * 开关一次配方类型才能唤醒。onLoad() 时机在 NBT 反序列化之后，这里补上同一套唤醒逻辑。
+     */
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (getLevel() != null && getLevel().isClientSide) {
+            return;
+        }
+        RecipeLogic logic = getRecipeLogic();
+        if (logic != null) {
+            wakeRecipeLogic(logic);
+        }
+    }
+
+    private void wakeRecipeLogic(RecipeLogic logic) {
+        onRecipeTypeSelectionChanged(logic);
+        // 多配方合成逻辑在 setupRecipe 前就已真实扣除输入、产出在 onRecipeFinish 才给出，
+        // 运行中打断（interruptRecipe/resetRecipeLogic）= 已扣输入直接蒸发。
+        // 因此选择变更不打断正在运行/等待输出的配方，新选择在下一轮 lookup 自然生效；
+        // 锁定配方仅在其类型被取消选择时清锁，避免无关点选丢锁。
+        if (logic instanceof ILockRecipe lockRecipe) {
+            GTRecipe locked = lockRecipe.getLockRecipe();
+            if (locked != null && (locked.recipeType == null
+                    || !selectedRecipeTypeNames.contains(recipeTypeName(locked.recipeType)))) {
+                lockRecipe.setLockRecipe(null);
+            }
+        }
+        if (logic.isIdle()) {
+            logic.resetRecipeLogic();
+        }
+        logic.updateTickSubscription();
     }
 
     protected void onRecipeTypeSelectionChanged(RecipeLogic logic) {
@@ -436,12 +483,35 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
         updateSelectedRecipeTypesSync();
     }
 
+    // 客户端已应用过的同步串快照：用于检测 @DescSynced 字符串变化（服务端剪枝/他人操作/全空），
+    // 旧实现只在本地集合为空时应用一次，集合一旦非空就永远不再跟随服务端，UI 显示陈旧选择。
+    private String appliedSyncedSelection = null;
+
     private void applySyncedRecipeTypesIfNeeded() {
-        if (!selectedRecipeTypeNames.isEmpty() || selectedRecipeTypesSync.isEmpty()) {
+        String sync = selectedRecipeTypesSync;
+        if (getLevel() != null && getLevel().isClientSide) {
+            // 客户端：同步串一变就整体重建本地集合（含变空），服务端是唯一权威
+            if (sync.equals(appliedSyncedSelection)) {
+                return;
+            }
+            appliedSyncedSelection = sync;
+            selectedRecipeTypeNames.clear();
+            if (!sync.isEmpty()) {
+                for (String name : sync.split("\\n")) {
+                    if (isValidRecipeTypeName(name)) {
+                        selectedRecipeTypeNames.add(name);
+                    }
+                }
+            }
+            invalidateResolvedTypesCache();
+            pruneMissingRecipeTypes();
             return;
         }
-        String[] names = selectedRecipeTypesSync.split("\\n");
-        for (String name : names) {
+        // 服务端：仅保留读档顺序兜底——集合为空而持久化同步串非空时重建一次
+        if (!selectedRecipeTypeNames.isEmpty() || sync.isEmpty()) {
+            return;
+        }
+        for (String name : sync.split("\\n")) {
             if (isValidRecipeTypeName(name)) {
                 selectedRecipeTypeNames.add(name);
             }

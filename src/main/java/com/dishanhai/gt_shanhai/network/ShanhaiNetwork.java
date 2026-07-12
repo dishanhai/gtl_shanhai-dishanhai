@@ -100,6 +100,41 @@ public class ShanhaiNetwork {
                 WalletAccountSyncPacket::new,
                 WalletAccountSyncPacket::handle
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                ExchangePacket.class,
+                ExchangePacket::encode,
+                ExchangePacket::new,
+                ExchangePacket::handle
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ExchangeEditPacket.class,
+                ExchangeEditPacket::encode,
+                ExchangeEditPacket::new,
+                ExchangeEditPacket::handle
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopRefreshPacket.class,
+                ShopRefreshPacket::encode,
+                ShopRefreshPacket::new,
+                ShopRefreshPacket::handle
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                WalletOpenRequestPacket.class,
+                WalletOpenRequestPacket::encode,
+                WalletOpenRequestPacket::new,
+                WalletOpenRequestPacket::handle
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopSettingsPacket.class,
+                ShopSettingsPacket::encode,
+                ShopSettingsPacket::new,
+                ShopSettingsPacket::handle
+        );
         RecipeSyncPacket.init();
     }
 

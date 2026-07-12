@@ -6,6 +6,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.io.File;
 import java.io.OutputStreamWriter;
@@ -50,41 +51,103 @@ public final class ShopConfig {
         return Collections.unmodifiableList(ENTRIES);
     }
 
-    /** 获取所有被商店接受的货币 ID 集合（= 商品清单里出现过的 currency，去重、保序）。 */
+    /** 获取所有被商店接受的币种 ID 集合（= 各商品成本里出现过的 coins 键，去重、保序）。 */
     public static Set<ResourceLocation> getAcceptedCurrencies() {
         LinkedHashSet<ResourceLocation> set = new LinkedHashSet<>();
         for (ShopEntry entry : getEntries()) {
-            set.add(entry.getCurrencyId());
+            set.addAll(entry.getCost().coins.keySet());
         }
         return set;
     }
 
-    /** 获取所有分类名（= 商品清单里出现过的 category，去重、保序）。 */
+    /** 获取所有分类名（= 商品清单里出现过的 category 全名，去重、保序；隐藏商品不计入）。 */
     public static List<String> getCategories() {
         LinkedHashSet<String> set = new LinkedHashSet<>();
         for (ShopEntry entry : getEntries()) {
-            if (entry.isValid()) {
+            if (entry.isValid() && !entry.isHidden()) {
                 set.add(entry.getCategory());
             }
         }
         return new ArrayList<>(set);
     }
 
-    /** 按分类分组的有效商品（保序）。 */
+    /** 按跳转别名查找条目（含隐藏商品，供「跳转」入口解析目标用；未找到返回 null）。 */
+    public static ShopEntry findByLinkKey(String key) {
+        if (key == null || key.isBlank()) return null;
+        for (ShopEntry e : getEntries()) {
+            if (key.equals(e.getLinkKey())) return e;
+        }
+        return null;
+    }
+
+    // ==================== 两级分类：主/子（约定 category = "主" 或 "主/子"）====================
+
+    /** 取分类主名（"主/子" → "主"；无「/」→ 原样）。 */
+    public static String catTop(String category) {
+        if (category == null) return ShopEntry.DEFAULT_CATEGORY;
+        int i = category.indexOf('/');
+        return i < 0 ? category : category.substring(0, i);
+    }
+
+    /** 取分类子名（"主/子" → "子"；无「/」→ 空串）。 */
+    public static String catSub(String category) {
+        if (category == null) return "";
+        int i = category.indexOf('/');
+        return i < 0 ? "" : category.substring(i + 1);
+    }
+
+    /** 所有主分类（去重保序；隐藏商品不计入）。 */
+    public static List<String> getTopCategories() {
+        LinkedHashSet<String> set = new LinkedHashSet<>();
+        for (ShopEntry e : getEntries()) {
+            if (e.isValid() && !e.isHidden()) set.add(catTop(e.getCategory()));
+        }
+        return new ArrayList<>(set);
+    }
+
+    /** 某主分类下的子分类（去重保序，仅非空子名；隐藏商品不计入）。 */
+    public static List<String> getSubCategories(String top) {
+        LinkedHashSet<String> set = new LinkedHashSet<>();
+        for (ShopEntry e : getEntries()) {
+            if (!e.isValid() || e.isHidden()) continue;
+            if (catTop(e.getCategory()).equals(top)) {
+                String sub = catSub(e.getCategory());
+                if (!sub.isEmpty()) set.add(sub);
+            }
+        }
+        return new ArrayList<>(set);
+    }
+
+    /**
+     * 取某「主 + 子」分组下的有效商品；sub 为空 → 该主分类全部（含无子的与各子的）。
+     * 隐藏商品（{@link ShopEntry#isHidden}）不在此列，只能被其他条目的跳转入口（{@link ShopEntry#getLinkTo}）直达。
+     */
+    public static List<ShopEntry> getEntriesOfGroup(String top, String sub) {
+        List<ShopEntry> result = new ArrayList<>();
+        for (ShopEntry e : getEntries()) {
+            if (!e.isValid() || e.isHidden()) continue;
+            if (!catTop(e.getCategory()).equals(top)) continue;
+            if (sub != null && !sub.isEmpty() && !catSub(e.getCategory()).equals(sub)) continue;
+            result.add(e);
+        }
+        return result;
+    }
+
+    /** 按分类分组的有效商品（保序；隐藏商品不计入）。 */
     public static Map<String, List<ShopEntry>> getEntriesByCategory() {
         LinkedHashMap<String, List<ShopEntry>> map = new LinkedHashMap<>();
         for (ShopEntry entry : getEntries()) {
-            if (!entry.isValid()) continue;
+            if (!entry.isValid() || entry.isHidden()) continue;
             map.computeIfAbsent(entry.getCategory(), k -> new ArrayList<>()).add(entry);
         }
         return map;
     }
 
-    /** 取某分类下的有效商品。 */
+    /** 取某分类下的有效商品（隐藏商品不计入）。 */
     public static List<ShopEntry> getEntriesOf(String category) {
         List<ShopEntry> result = new ArrayList<>();
         for (ShopEntry entry : getEntries()) {
-            if (entry.isValid() && entry.getCategory().equals(category)) {
+            if (entry.isValid() && !entry.isHidden() && entry.getCategory().equals(category)) {
                 result.add(entry);
             }
         }
@@ -136,12 +199,44 @@ public final class ShopConfig {
                 JsonObject o = new JsonObject();
                 o.addProperty("goods", e.getGoodsId().toString());
                 o.addProperty("count", e.getGoodsCount());
-                o.addProperty("currency", e.getCurrencyId().toString());
-                o.addProperty("price", e.getPrice());
                 o.addProperty("category", e.getCategory());
+                if (e.getDescription() != null && !e.getDescription().isEmpty()) {
+                    o.addProperty("description", e.getDescription());
+                }
+                if (e.isLimited()) {
+                    o.addProperty("limit", e.getRemainingUses()); // 剩余次数，随成交实时扣减后一并存盘
+                }
+                o.add("cost", costToJson(e.getCost()));
                 net.minecraft.nbt.CompoundTag nbt = e.getGoodsNbt();
                 if (nbt != null && !nbt.isEmpty()) {
                     o.addProperty("nbt", nbt.toString()); // SNBT 文本，Gson 负责转义
+                }
+                if (e.hasMultipleGoods()) {
+                    // 组合商品（≥2 项）：goods/count/nbt 仍写首项兜底，goodsList 存完整清单，新代码优先读它
+                    o.add("goodsList", goodsListToJson(e.getGoodsList()));
+                }
+                if (e.hasCustomIcons()) {
+                    o.add("icons", iconsToJson(e.getDisplayIcons()));
+                }
+                if (e.getRewardMode() != ShopEntry.RewardMode.NONE) {
+                    o.addProperty("rewardMode", e.getRewardMode().name());
+                    if (e.getRewardMode() == ShopEntry.RewardMode.FTBQ) {
+                        o.addProperty("ftbqTableId", e.getFtbqTableId());
+                    } else {
+                        o.add("rewardPool", rewardPoolToJson(e.getRewardPool()));
+                    }
+                }
+                if (e.isHidden()) {
+                    o.addProperty("hidden", true);
+                }
+                if (e.hasLinkKey()) {
+                    o.addProperty("linkKey", e.getLinkKey());
+                }
+                if (e.hasLinkTarget()) {
+                    o.addProperty("linkTo", e.getLinkTo());
+                }
+                if (e.hasCustomName()) {
+                    o.addProperty("displayName", e.getDisplayName());
                 }
                 arr.add(o);
             }
@@ -183,10 +278,10 @@ public final class ShopConfig {
     private static ShopEntry parseEntry(JsonObject o) {
         try {
             String goods = o.get("goods").getAsString();
-            String currency = o.has("currency") ? o.get("currency").getAsString() : "dishanhai:dog_coins";
             int count = o.has("count") ? o.get("count").getAsInt() : 1;
-            int price = o.has("price") ? o.get("price").getAsInt() : 1;
             String category = o.has("category") ? o.get("category").getAsString() : ShopEntry.DEFAULT_CATEGORY;
+            String description = o.has("description") ? o.get("description").getAsString() : "";
+            long limit = o.has("limit") ? o.get("limit").getAsLong() : -1L; // 剩余次数，缺省 -1 = 不限
             // NBT（可选）：以 SNBT 文本存储，解析失败则忽略 NBT 而非丢弃整条
             net.minecraft.nbt.CompoundTag nbt = null;
             if (o.has("nbt")) {
@@ -199,11 +294,224 @@ public final class ShopConfig {
                     GTDishanhaiMod.LOGGER.warn("[Shop] 商品 {} 的 NBT 解析失败，按无 NBT 处理: {}", goods, ex.getMessage());
                 }
             }
-            return new ShopEntry(new ResourceLocation(goods), count, new ResourceLocation(currency), price, category, nbt);
+            // 成本：优先新格式 cost 对象；否则回退旧 currency+price 单币迁移
+            ShopCost cost;
+            if (o.has("cost") && o.get("cost").isJsonObject()) {
+                cost = parseCost(o.getAsJsonObject("cost"));
+            } else {
+                String currency = o.has("currency") ? o.get("currency").getAsString() : "dishanhai:dog_coins";
+                int price = o.has("price") ? o.get("price").getAsInt() : 1;
+                cost = ShopCost.singleCoin(new ResourceLocation(currency), price);
+            }
+            // 商品清单：优先新格式 goodsList（组合商品，≥2 项）；否则回退单商品 goods/count/nbt（旧格式 100% 兼容）
+            List<ShopEntry.GoodsStack> goodsList;
+            if (o.has("goodsList") && o.get("goodsList").isJsonArray()) {
+                goodsList = parseGoodsList(o.getAsJsonArray("goodsList"));
+                if (goodsList.isEmpty()) throw new RuntimeException("goodsList 解析为空");
+            } else {
+                goodsList = List.of(ShopEntry.GoodsStack.of(new ResourceLocation(goods), count, nbt));
+            }
+            List<ShopEntry.DisplayIcon> icons = o.has("icons") && o.get("icons").isJsonArray()
+                    ? parseIcons(o.getAsJsonArray("icons")) : null;
+            ShopEntry.RewardMode rewardMode = ShopEntry.RewardMode.NONE;
+            if (o.has("rewardMode")) {
+                try { rewardMode = ShopEntry.RewardMode.valueOf(o.get("rewardMode").getAsString()); }
+                catch (Exception ignored) {}
+            }
+            List<ShopEntry.RewardOption> rewardPool = o.has("rewardPool") && o.get("rewardPool").isJsonArray()
+                    ? parseRewardPool(o.getAsJsonArray("rewardPool")) : null;
+            boolean hidden = o.has("hidden") && o.get("hidden").getAsBoolean();
+            String linkKey = o.has("linkKey") ? o.get("linkKey").getAsString() : null;
+            String linkTo = o.has("linkTo") ? o.get("linkTo").getAsString() : null;
+            String displayName = o.has("displayName") ? o.get("displayName").getAsString() : null;
+            String ftbqTableId = o.has("ftbqTableId") ? o.get("ftbqTableId").getAsString() : null;
+            return new ShopEntry(goodsList, category, cost, description, limit,
+                    icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId);
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品条目: {}", e.getMessage());
             return null;
         }
+    }
+
+    /** 序列化多元成本：{ "spark":"N", "coins":{id:"N"}, "items":[{id,fluid,count}] }。 */
+    private static JsonObject costToJson(ShopCost cost) {
+        JsonObject co = new JsonObject();
+        co.addProperty("spark", cost.spark.toString());
+        JsonObject coins = new JsonObject();
+        for (Map.Entry<ResourceLocation, java.math.BigInteger> e : cost.coins.entrySet()) {
+            coins.addProperty(e.getKey().toString(), e.getValue().toString());
+        }
+        co.add("coins", coins);
+        JsonArray items = new JsonArray();
+        for (ExchangeEntry.Ingredient in : cost.physical) {
+            JsonObject io = new JsonObject();
+            io.addProperty("id", in.id == null ? "" : in.id.toString());
+            io.addProperty("fluid", in.isFluid);
+            io.addProperty("count", in.count);
+            items.add(io);
+        }
+        co.add("items", items);
+        return co;
+    }
+
+    /** 解析多元成本（缺失/空 → 全空成本）。 */
+    private static ShopCost parseCost(JsonObject co) {
+        java.math.BigInteger spark = java.math.BigInteger.ZERO;
+        LinkedHashMap<ResourceLocation, java.math.BigInteger> coins = new LinkedHashMap<>();
+        List<ExchangeEntry.Ingredient> physical = new ArrayList<>();
+        if (co != null) {
+            if (co.has("spark")) {
+                try { spark = new java.math.BigInteger(co.get("spark").getAsString()); } catch (Exception ignored) {}
+            }
+            if (co.has("coins") && co.get("coins").isJsonObject()) {
+                for (Map.Entry<String, JsonElement> e : co.getAsJsonObject("coins").entrySet()) {
+                    try {
+                        java.math.BigInteger amt = new java.math.BigInteger(e.getValue().getAsString());
+                        if (amt.signum() > 0) coins.put(new ResourceLocation(e.getKey()), amt);
+                    } catch (Exception ignored) {}
+                }
+            }
+            if (co.has("items")) {
+                for (JsonElement el : co.getAsJsonArray("items")) {
+                    if (!el.isJsonObject()) continue;
+                    JsonObject io = el.getAsJsonObject();
+                    String iid = io.has("id") ? io.get("id").getAsString() : "";
+                    if (iid.isEmpty()) continue;
+                    boolean fluid = io.has("fluid") && io.get("fluid").getAsBoolean();
+                    long c = io.has("count") ? io.get("count").getAsLong() : 1L;
+                    physical.add(new ExchangeEntry.Ingredient(new ResourceLocation(iid), fluid, c));
+                }
+            }
+        }
+        return new ShopCost(spark, coins, physical);
+    }
+
+    /** 序列化商品清单（组合商品专用）：[{ "id":"...", "count":N, "nbt":"..." }]，顺序即购买时交付顺序。 */
+    private static JsonArray goodsListToJson(List<ShopEntry.GoodsStack> list) {
+        JsonArray arr = new JsonArray();
+        for (ShopEntry.GoodsStack gs : list) {
+            if (gs == null || gs.id() == null) continue;
+            JsonObject io = new JsonObject();
+            io.addProperty("id", gs.id().toString());
+            io.addProperty("count", gs.count());
+            net.minecraft.nbt.CompoundTag gnbt = gs.nbt();
+            if (gnbt != null && !gnbt.isEmpty()) io.addProperty("nbt", gnbt.toString());
+            arr.add(io);
+        }
+        return arr;
+    }
+
+    /** 解析商品清单（非法/缺失 id 的条目跳过，不影响其余项；解析失败的 NBT 按无 NBT 处理）。 */
+    private static List<ShopEntry.GoodsStack> parseGoodsList(JsonArray arr) {
+        List<ShopEntry.GoodsStack> list = new ArrayList<>();
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject io = el.getAsJsonObject();
+            if (!io.has("id")) continue;
+            ResourceLocation id = new ResourceLocation(io.get("id").getAsString());
+            int count = io.has("count") ? Math.max(1, io.get("count").getAsInt()) : 1;
+            net.minecraft.nbt.CompoundTag gnbt = null;
+            if (io.has("nbt")) {
+                try {
+                    String snbt = io.get("nbt").getAsString();
+                    if (snbt != null && !snbt.isBlank()) gnbt = net.minecraft.nbt.TagParser.parseTag(snbt);
+                } catch (Exception ignored) {}
+            }
+            list.add(ShopEntry.GoodsStack.of(id, count, gnbt));
+        }
+        return list;
+    }
+
+    /**
+     * 序列化自定义显示图标：物品用 { "id":"...", "nbt":"..." }，贴图用 { "texture":"..." }。
+     * 顺序即主图标+角标顺序，最多 1 主 4 附属由渲染端限定。
+     */
+    private static JsonArray iconsToJson(List<ShopEntry.DisplayIcon> icons) {
+        JsonArray arr = new JsonArray();
+        for (ShopEntry.DisplayIcon d : icons) {
+            if (d == null) continue;
+            JsonObject io = new JsonObject();
+            if (d.isTexture()) {
+                io.addProperty("texture", d.texture().toString());
+            } else {
+                net.minecraft.world.item.ItemStack st = d.item();
+                if (st == null || st.isEmpty()) continue;
+                ResourceLocation id = ForgeRegistries.ITEMS.getKey(st.getItem());
+                if (id == null) continue;
+                io.addProperty("id", id.toString());
+                if (st.hasTag()) io.addProperty("nbt", st.getTag().toString());
+            }
+            arr.add(io);
+        }
+        return arr;
+    }
+
+    /** 解析自定义显示图标（非法/缺失物品的条目跳过，不影响其余项）。 */
+    private static List<ShopEntry.DisplayIcon> parseIcons(JsonArray arr) {
+        List<ShopEntry.DisplayIcon> icons = new ArrayList<>();
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject io = el.getAsJsonObject();
+            if (io.has("texture")) {
+                icons.add(ShopEntry.DisplayIcon.ofTexture(new ResourceLocation(io.get("texture").getAsString())));
+                continue;
+            }
+            if (!io.has("id")) continue;
+            var item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(io.get("id").getAsString()));
+            if (item == null) continue;
+            net.minecraft.world.item.ItemStack st = new net.minecraft.world.item.ItemStack(item);
+            if (io.has("nbt")) {
+                try { st.setTag(net.minecraft.nbt.TagParser.parseTag(io.get("nbt").getAsString())); } catch (Exception ignored) {}
+            }
+            icons.add(ShopEntry.DisplayIcon.ofItem(st));
+        }
+        return icons;
+    }
+
+    /**
+     * 序列化奖励池：[{ "id":"...", "count":N, "nbt":"...", "weight":N, "min":N, "max":N }]。
+     * weight 供 RANDOM 模式按占比加权抽取；min/max 为每次交付的独立随机数量区间（相等即固定数量）。
+     */
+    private static JsonArray rewardPoolToJson(List<ShopEntry.RewardOption> pool) {
+        JsonArray arr = new JsonArray();
+        for (ShopEntry.RewardOption opt : pool) {
+            if (opt == null) continue;
+            net.minecraft.world.item.ItemStack st = opt.item();
+            if (st == null || st.isEmpty()) continue;
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(st.getItem());
+            if (id == null) continue;
+            JsonObject io = new JsonObject();
+            io.addProperty("id", id.toString());
+            io.addProperty("count", st.getCount());
+            if (st.hasTag()) io.addProperty("nbt", st.getTag().toString());
+            io.addProperty("weight", opt.weight());
+            io.addProperty("min", opt.minCount());
+            io.addProperty("max", opt.maxCount());
+            arr.add(io);
+        }
+        return arr;
+    }
+
+    /** 解析奖励池（非法/缺失物品的条目跳过，不影响其余项）。 */
+    private static List<ShopEntry.RewardOption> parseRewardPool(JsonArray arr) {
+        List<ShopEntry.RewardOption> pool = new ArrayList<>();
+        for (JsonElement el : arr) {
+            if (!el.isJsonObject()) continue;
+            JsonObject io = el.getAsJsonObject();
+            if (!io.has("id")) continue;
+            var item = ForgeRegistries.ITEMS.getValue(new ResourceLocation(io.get("id").getAsString()));
+            if (item == null) continue;
+            int count = io.has("count") ? Math.max(1, io.get("count").getAsInt()) : 1;
+            net.minecraft.world.item.ItemStack st = new net.minecraft.world.item.ItemStack(item, count);
+            if (io.has("nbt")) {
+                try { st.setTag(net.minecraft.nbt.TagParser.parseTag(io.get("nbt").getAsString())); } catch (Exception ignored) {}
+            }
+            int weight = io.has("weight") ? Math.max(1, io.get("weight").getAsInt()) : 1;
+            int min = io.has("min") ? Math.max(1, io.get("min").getAsInt()) : count;
+            int max = io.has("max") ? Math.max(1, io.get("max").getAsInt()) : count;
+            pool.add(ShopEntry.RewardOption.of(st, weight, min, max));
+        }
+        return pool;
     }
 
     private static void writeDefault() {

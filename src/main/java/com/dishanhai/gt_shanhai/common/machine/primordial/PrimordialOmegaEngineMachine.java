@@ -68,6 +68,8 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         return Integer.MAX_VALUE;
     }
 
+    // keepSubscribing() 已上移至 SelectableRecipeTypeSetMachine 基类统一覆写
+
     // ========== 能量 ==========
 
     @Override
@@ -193,6 +195,25 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         return false;
     }
 
+    /**
+     * 临时排障用：暴露配方查找失败原因/锁定状态/已选类型数量，供在游戏内直接观察卡产原因，
+     * 而不必逐条猜测（isLock 卡在旧锁定配方 / 选择集为空 / 具体 FAIL_XXX 原因）。
+     * 问题定位后应移除。
+     */
+    private void addRecipeDiagnosisDisplay(List<Component> textList) {
+        var logic = getRecipeLogic();
+        textList.add(Component.literal("§7[诊断] 已选类型: " + getSelectedRecipeTypeCount()
+                + " §7锁定: " + logic.isLock()));
+        var locked = logic.getLockRecipe();
+        if (locked != null) {
+            textList.add(Component.literal("§7[诊断] 锁定配方: " + locked.getId()));
+        }
+        var status = logic.getRecipeStatus();
+        if (status != null && !status.isSuccess() && status.reason() != null) {
+            textList.add(Component.literal("§c[诊断] 上次失败: ").append(status.reason()));
+        }
+    }
+
     @Override
     public void addDisplayText(List<Component> textList) {
         if (isFormed()) {
@@ -206,6 +227,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
                 textList.add(Component.translatable("tooltip.gtlcore.installed_module_count", moduleCount)
                         .withStyle(ChatFormatting.AQUA));
             }
+            addRecipeDiagnosisDisplay(textList);
         } else {
             textList.add(Component.translatable("gtceu.multiblock.invalid_structure")
                     .withStyle(ChatFormatting.RED));

@@ -40,4 +40,28 @@ public class GuiRenderUtil {
     public static boolean isHovering(double mx, double my, int x, int y, int w, int h) {
         return mx >= x && mx <= x + w && my >= y && my <= y + h;
     }
+
+    /**
+     * 把 {@code &<格式码>} 转成 {@code §<格式码>}：FTBQ 用 {@code &} 代替 {@code §} 写格式化码，两者等价，
+     * 兼容玩家在自定义文本（如商店描述）里两种写法混用。非法字符后的 {@code &} 原样保留。
+     */
+    public static String translateAmpCodes(String s) {
+        if (s == null || s.isEmpty() || s.indexOf('&') < 0) return s;
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '&' && i + 1 < s.length() && isFormatChar(s.charAt(i + 1))) {
+                sb.append('§').append(s.charAt(i + 1));
+                i++;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static boolean isFormatChar(char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+                || (c >= 'k' && c <= 'o') || (c >= 'K' && c <= 'O') || c == 'r' || c == 'R';
+    }
 }

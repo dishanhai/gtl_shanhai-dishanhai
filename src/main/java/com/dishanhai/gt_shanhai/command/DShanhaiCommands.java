@@ -501,6 +501,19 @@ public class DShanhaiCommands {
                             }
                             ctx.getSource().sendSuccess(msg(sb.toString()), false);
                             return 1;
+                        }))
+                .then(Commands.literal("作弊")
+                        .executes(ctx -> {
+                            net.minecraft.server.level.ServerPlayer p = ctx.getSource().getPlayer();
+                            if (p == null) {
+                                ctx.getSource().sendSuccess(msg("§c此命令须由玩家执行"), false);
+                                return 0;
+                            }
+                            boolean on = com.dishanhai.gt_shanhai.common.shop.ShopCheatMode.toggle(p.getUUID());
+                            ctx.getSource().sendSuccess(msg(on
+                                    ? "§d[山海商店] §a已开启直接获取模式 §7（购买不扣成本、直接到手；重启后自动关闭）"
+                                    : "§d[山海商店] §e已关闭直接获取模式 §7（恢复正常扣费购买）"), false);
+                            return 1;
                         }));
     }
 
@@ -1061,6 +1074,10 @@ public class DShanhaiCommands {
                         .executes(ctx -> execSdaExport(ctx.getSource())))
                 .then(Commands.literal("任务导出")
                         .executes(ctx -> execSdaExportFromQuests(ctx.getSource())))
+                .then(Commands.literal("商店导出")
+                        .executes(ctx -> execSdaExportFromShop(ctx.getSource())))
+                .then(Commands.literal("全部导出")
+                        .executes(ctx -> execSdaExportAll(ctx.getSource())))
                 .then(Commands.literal("移除")
                         .executes(ctx -> execSdaRemove(ctx.getSource())))
                 .then(Commands.literal("列表")
@@ -1097,6 +1114,73 @@ public class DShanhaiCommands {
         source.sendSuccess(msg("§b[山海] 任务导出完成 §7共扫描 §f" + questUuids.size()
                 + " §7个 UUID：§a" + exported + " §b个有内容已导出"
                 + (empty > 0 ? "§7，" + empty + " 个为空（已跳过）" : "")), false);
+        return exported > 0 ? 1 : 0;
+    }
+
+    /**
+     * 扫描 config/gt_shanhai/shop.json，提取商品 goodsNbt 模板里写死的 shanhai_sda_uuid
+     * （商品本体就是提前捕获的固定 SDA 时会有此字段），仅导出这些 UUID 对应的内容——
+     * 精确对应「任务导出」在商店场景下的等价物。
+     */
+    private static int execSdaExportFromShop(CommandSourceStack source) {
+        java.util.Set<java.util.UUID> shopUuids =
+                com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.scanShopJsonUuids();
+        if (shopUuids.isEmpty()) {
+            source.sendSuccess(msg("§7[山海] 未在 config/gt_shanhai/shop.json 中找到 SDA UUID"), false);
+            return 0;
+        }
+        com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData data =
+                com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(source.getServer());
+        int exported = 0;
+        int empty = 0;
+        for (java.util.UUID uuid : shopUuids) {
+            java.util.Map<appeng.api.stacks.AEKey, java.math.BigInteger> amounts =
+                    data.readCellBigAmounts(uuid);
+            if (amounts.isEmpty()) {
+                empty++;
+                continue;
+            }
+            com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.persist(uuid, amounts);
+            exported++;
+        }
+        source.sendSuccess(msg("§b[山海] 商店导出完成 §7共扫描 §f" + shopUuids.size()
+                + " §7个 UUID：§a" + exported + " §b个有内容已导出"
+                + (empty > 0 ? "§7，" + empty + " 个为空（已跳过）" : "")), false);
+        return exported > 0 ? 1 : 0;
+    }
+
+    /**
+     * 批量导出 world/data 里<b>当前存在的全部</b> SDA 单元到 kubejs/data/sda_uuid_store/。
+     *
+     * <p>商店卖出的 SDA 用随机 UUID（{@code ShopPurchase#packAsSda}），不像任务奖励那样
+     * 写死在可扫描的配置文件里——shop.json 只存商品模板，不记录任何已成交的 UUID。
+     * 因此商店场景没有"正则匹配商店存储"这条路：{@link DShanhaiVirtualCellSavedData}
+     * （world/data）本身就是所有 SDA 单元的权威登记表，不分来源，直接全量导出即可覆盖商店、
+     * 任务、手搓等一切来源，天然比按来源过滤更完整。</p>
+     */
+    private static int execSdaExportAll(CommandSourceStack source) {
+        com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData data =
+                com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(source.getServer());
+        java.util.List<String[]> cells = data.listSdaCells();
+        if (cells.isEmpty()) {
+            source.sendSuccess(msg("§7[山海] world/data 中暂无 SDA 单元"), false);
+            return 0;
+        }
+        int exported = 0;
+        for (String[] cell : cells) {
+            java.util.UUID uuid;
+            try {
+                uuid = java.util.UUID.fromString(cell[0]);
+            } catch (Exception ex) {
+                continue;
+            }
+            java.util.Map<appeng.api.stacks.AEKey, java.math.BigInteger> amounts = data.readCellBigAmounts(uuid);
+            if (amounts.isEmpty()) continue;
+            com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.persist(uuid, amounts);
+            exported++;
+        }
+        source.sendSuccess(msg("§b[山海] 全部导出完成 §7共 §f" + cells.size()
+                + " §7个 SDA 单元，§a" + exported + " §b个已导出/刷新 → §7kubejs/data/sda_uuid_store/"), false);
         return exported > 0 ? 1 : 0;
     }
 
