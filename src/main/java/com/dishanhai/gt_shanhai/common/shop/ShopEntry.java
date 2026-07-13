@@ -275,7 +275,7 @@ public class ShopEntry {
                     copy.add(RewardOption.of(o.item(), o.weight(), o.minCount(), o.maxCount()));
                 }
             }
-ea         this.rewardPool = copy.isEmpty() ? java.util.Collections.emptyList() : java.util.Collections.unmodifiableList(copy);
+            this.rewardPool = copy.isEmpty() ? java.util.Collections.emptyList() : java.util.Collections.unmodifiableList(copy);
             this.rewardMode = this.rewardPool.isEmpty() ? RewardMode.NONE : (rewardMode == null ? RewardMode.NONE : rewardMode);
             this.ftbqTableId = "";
         }
