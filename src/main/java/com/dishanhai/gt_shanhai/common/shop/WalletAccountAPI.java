@@ -137,6 +137,33 @@ public final class WalletAccountAPI {
         return acc == null ? new LinkedHashMap<>() : acc.getPurchaseCounts();
     }
 
+    // ===================== 周期限购（每玩家独立计数，见 ShopPeriodLimiter） =====================
+
+    public static long getPeriodWindow(MinecraftServer server, UUID uuid, String key) {
+        WalletAccount acc = data(server).get(uuid);
+        return acc == null ? -1L : acc.getPeriodWindow(key);
+    }
+
+    public static long getPeriodUsed(MinecraftServer server, UUID uuid, String key) {
+        WalletAccount acc = data(server).get(uuid);
+        return acc == null ? 0L : acc.getPeriodUsed(key);
+    }
+
+    /** 覆盖写某商品条目 key 的周期窗口状态。 */
+    public static void setPeriodState(MinecraftServer server, UUID uuid, String key, long window, long used) {
+        if (key == null) return;
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.getOrCreate(uuid);
+        acc.setPeriodState(key, window, used);
+        d.setDirty();
+    }
+
+    /** 读全部 key 的开窗锚点（副本，保序），随账户快照一起推给客户端展示"剩余刷新倒计时"。 */
+    public static Map<String, Long> getAllPeriodAnchors(MinecraftServer server, UUID uuid) {
+        WalletAccount acc = data(server).get(uuid);
+        return acc == null ? new LinkedHashMap<>() : acc.getPeriodWindows();
+    }
+
     // ===================== 币值互转（阶段 B） =====================
 
     /**
@@ -179,6 +206,6 @@ public final class WalletAccountAPI {
         ShanhaiNetwork.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
                 new WalletAccountSyncPacket(getAllCurrencies(server, uuid), getDigital(server, uuid),
-                        getAllPurchaseCounts(server, uuid)));
+                        getAllPurchaseCounts(server, uuid), getAllPeriodAnchors(server, uuid)));
     }
 }

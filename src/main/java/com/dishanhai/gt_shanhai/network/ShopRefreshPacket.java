@@ -10,11 +10,9 @@ import net.minecraftforge.network.PacketDistributor;
 import java.util.function.Supplier;
 
 /**
- * 商店/兑换刷新包（S→C，山海署名）。
+ * 兑换刷新包（S→C，山海署名）。
  *
- * <p>商店/兑换条目在服务端<b>增 / 删 / 改</b>后回推给该玩家：客户端若正开着商店或兑换界面，
- * 就重排界面（重新读取已更新的清单），实现<b>实时刷新</b>。否则（C→S 编辑包异步处理）客户端会在
- * 服务端落地前就重排，看到旧数据，需退出重进才更新。</p>
+ * <p>兑换条目在服务端<b>增 / 删 / 改</b>后回推给该玩家，客户端若正开着兑换界面就重排。</p>
  */
 public class ShopRefreshPacket {
 
@@ -36,13 +34,12 @@ public class ShopRefreshPacket {
     private static void applyClient() {
         net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
         net.minecraft.client.gui.screens.Screen s = mc.screen;
-        if (s instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen
-                || s instanceof com.dishanhai.gt_shanhai.client.gui.shop.ExchangeScreen) {
+        if (s instanceof com.dishanhai.gt_shanhai.client.gui.shop.ExchangeScreen) {
             s.resize(mc, s.width, s.height); // 触发 init() 重排，重读已更新清单
         }
     }
 
-    /** 服务端便捷回推：告知该玩家刷新商店/兑换界面。 */
+    /** 服务端便捷回推：告知该玩家刷新兑换界面。 */
     public static void sendTo(ServerPlayer player) {
         if (player != null) {
             ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new ShopRefreshPacket());

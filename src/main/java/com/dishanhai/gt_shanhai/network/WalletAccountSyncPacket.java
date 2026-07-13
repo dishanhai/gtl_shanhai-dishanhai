@@ -23,12 +23,20 @@ public class WalletAccountSyncPacket {
     private final Map<ResourceLocation, BigInteger> currencies;
     private final BigInteger digital;
     private final Map<String, Long> purchaseCounts;
+    private final Map<String, Long> periodAnchors; // 周期限购各 key 的开窗锚点 gameTime，客户端算"剩余刷新倒计时"用
 
+    // ===== 兼容构造：无周期限购锚点（委托空表）=====
     public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
                                     Map<String, Long> purchaseCounts) {
+        this(currencies, digital, purchaseCounts, null);
+    }
+
+    public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
+                                    Map<String, Long> purchaseCounts, Map<String, Long> periodAnchors) {
         this.currencies = currencies != null ? currencies : new LinkedHashMap<>();
         this.digital = digital != null ? digital : BigInteger.ZERO;
         this.purchaseCounts = purchaseCounts != null ? purchaseCounts : new LinkedHashMap<>();
+        this.periodAnchors = periodAnchors != null ? periodAnchors : new LinkedHashMap<>();
     }
 
     public WalletAccountSyncPacket(FriendlyByteBuf buf) {
@@ -50,6 +58,14 @@ public class WalletAccountSyncPacket {
             pur.put(key, v);
         }
         this.purchaseCounts = pur;
+        int an = buf.readVarInt();
+        Map<String, Long> anchors = new LinkedHashMap<>();
+        for (int i = 0; i < an; i++) {
+            String key = buf.readUtf();
+            long v = buf.readVarLong();
+            anchors.put(key, v);
+        }
+        this.periodAnchors = anchors;
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -64,6 +80,11 @@ public class WalletAccountSyncPacket {
             buf.writeUtf(e.getKey());
             buf.writeVarLong(e.getValue() == null ? 0L : e.getValue());
         }
+        buf.writeVarInt(periodAnchors.size());
+        for (Map.Entry<String, Long> e : periodAnchors.entrySet()) {
+            buf.writeUtf(e.getKey());
+            buf.writeVarLong(e.getValue() == null ? -1L : e.getValue());
+        }
     }
 
     public static void handle(WalletAccountSyncPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -76,6 +97,6 @@ public class WalletAccountSyncPacket {
 
     @OnlyIn(Dist.CLIENT)
     private static void applyClient(WalletAccountSyncPacket pkt) {
-        com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.apply(pkt.currencies, pkt.digital, pkt.purchaseCounts);
+        com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.apply(pkt.currencies, pkt.digital, pkt.purchaseCounts, pkt.periodAnchors);
     }
 }

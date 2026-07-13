@@ -50,6 +50,10 @@ public class ShopEntry {
     private final String displayName;
     /** 交易方向限制：默认 BOTH（不限，兼容旧数据）。 */
     private final TradeMode tradeMode;
+    /** 周期限购的窗口长度（tick）；-1 = 不启用。与 {@link #remainingUses} 永久总量是两套独立机制，见 {@link ShopPeriodLimiter}。 */
+    private final long periodTicks;
+    /** 周期限购每窗口的额度（每玩家独立计数）；仅 periodTicks>0 时有意义，-1 = 不启用。 */
+    private final long periodLimit;
 
     /** 商品的交易方向限制。 */
     public enum TradeMode {
@@ -235,12 +239,23 @@ public class ShopEntry {
                 hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, TradeMode.BOTH);
     }
 
-    // ===== 新构造：多元商品清单 + 多元成本 + 描述 + 限购次数 + 自定义显示图标 + 奖励池/FTBQ表(+子模式) + 隐藏/跳转 + 自定义名称 + 交易方向限制 =====
+    // ===== 兼容构造：无周期限购（委托 -1/-1，即不启用）=====
     public ShopEntry(List<GoodsStack> goods, String category,
                      ShopCost cost, String description, long remainingUses,
                      List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
                      boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
                      RewardMode ftbqSubMode, TradeMode tradeMode) {
+        this(goods, category, cost, description, remainingUses, displayIcons, rewardMode, rewardPool,
+                hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode, -1L, -1L);
+    }
+
+    // ===== 新构造：多元商品清单 + 多元成本 + 描述 + 限购次数 + 自定义显示图标 + 奖励池/FTBQ表(+子模式)
+    //      + 隐藏/跳转 + 自定义名称 + 交易方向限制 + 周期限购（每玩家独立计数，见 ShopPeriodLimiter） =====
+    public ShopEntry(List<GoodsStack> goods, String category,
+                     ShopCost cost, String description, long remainingUses,
+                     List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
+                     boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
+                     RewardMode ftbqSubMode, TradeMode tradeMode, long periodTicks, long periodLimit) {
         this.goods = normalizeGoods(goods);
         // 只认 CHOICE/ALL 为有效子模式，其余（含 null/NONE/FTBQ 误传）一律退回默认 RANDOM
         this.ftbqSubMode = (ftbqSubMode == RewardMode.CHOICE || ftbqSubMode == RewardMode.ALL) ? ftbqSubMode : RewardMode.RANDOM;
@@ -284,6 +299,9 @@ public class ShopEntry {
         this.linkTo = linkTo == null ? "" : linkTo.trim();
         this.displayName = displayName == null ? "" : displayName.trim();
         this.tradeMode = tradeMode == null ? TradeMode.BOTH : tradeMode;
+        // 半残配置（只填了周期长度或只填了额度）一律归一成「不启用」，不留半吊子状态
+        this.periodTicks = (periodTicks > 0L && periodLimit >= 0L) ? periodTicks : -1L;
+        this.periodLimit = this.periodTicks > 0L ? periodLimit : -1L;
     }
 
     // ===== 兼容构造：无自定义名称/FTBQ表（委托空串）=====
@@ -379,6 +397,21 @@ public class ShopEntry {
     public void consumeUses(long amount) {
         if (remainingUses < 0L || amount <= 0L) return;
         remainingUses = Math.max(0L, remainingUses - amount);
+    }
+
+    /** 周期限购窗口长度（tick）；-1 = 不启用。与永久总量 {@link #getRemainingUses} 是两套独立机制。 */
+    public long getPeriodTicks() {
+        return periodTicks;
+    }
+
+    /** 周期限购每窗口额度（每玩家独立计数）；仅 {@link #isPeriodLimited} 为 true 时有意义。 */
+    public long getPeriodLimit() {
+        return periodLimit;
+    }
+
+    /** 是否启用了周期限购（见 {@link ShopPeriodLimiter}）。 */
+    public boolean isPeriodLimited() {
+        return periodTicks > 0L && periodLimit >= 0L;
     }
 
     /** 主商品（列表首项）NBT 快照（可空）。返回副本。 */

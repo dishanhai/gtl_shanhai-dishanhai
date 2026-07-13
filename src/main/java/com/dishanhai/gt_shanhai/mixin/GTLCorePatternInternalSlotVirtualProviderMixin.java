@@ -4,6 +4,7 @@ import appeng.api.stacks.AEKey;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 
+import com.dishanhai.gt_shanhai.common.item.PatternNotConsumableFilter;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
 
@@ -99,13 +100,43 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     @Unique
     private void gtShanhai$stripVirtualItems() {
         VirtualPatternBufferSlotState.removeVirtualTargets(itemInventory, gtShanhai$getItemCatalystInventory());
-        VirtualPatternBufferSlotState.stripVirtualTargets(itemInventory);
+        // 配方执行后剥离虚拟目标，但保留不消耗催化剂（chance==0）：让它撑住这一单的后续执行，
+        // 不再执行一次即被清空。退料/下单结束走无谓词版全清，不残留。
+        VirtualPatternBufferSlotState.stripVirtualTargets(itemInventory,
+                PatternNotConsumableFilter::isKeyNotConsumableForActiveRecipe);
+        gtShanhai$clearCatalystsIfDepleted();
     }
 
     @Unique
     private void gtShanhai$stripVirtualFluids() {
         VirtualPatternBufferSlotState.removeVirtualTargets(fluidInventory, gtShanhai$getFluidCatalystInventory());
-        VirtualPatternBufferSlotState.stripVirtualTargets(fluidInventory);
+        VirtualPatternBufferSlotState.stripVirtualTargets(fluidInventory,
+                PatternNotConsumableFilter::isKeyNotConsumableForActiveRecipe);
+        gtShanhai$clearCatalystsIfDepleted();
+    }
+
+    /**
+     * 收尾清理：若这个槽位的真实消耗料已全部耗尽（item/fluid 两仓减去虚拟目标后都为 0，即只剩催化剂
+     * 虚拟凑数），说明这一单已经做完，把常驻的催化剂虚拟目标也一并清空——否则催化剂会永久残留、
+     * 让 isActive() 恒真。执行期间只要还有一份真实消耗料没用完，就不会触发，催化剂照常保留在场。
+     */
+    @Unique
+    private void gtShanhai$clearCatalystsIfDepleted() {
+        if (gtShanhai$inventoryHasNoRealStock(itemInventory) && gtShanhai$inventoryHasNoRealStock(fluidInventory)) {
+            VirtualPatternBufferSlotState.stripVirtualTargets(itemInventory);
+            VirtualPatternBufferSlotState.stripVirtualTargets(fluidInventory);
+        }
+    }
+
+    @Unique
+    private <T extends AEKey> boolean gtShanhai$inventoryHasNoRealStock(Object2LongOpenHashMap<T> inventory) {
+        if (inventory.isEmpty()) return true;
+        Object2LongMap<T> targets = VirtualPatternBufferSlotState.getVirtualTargets(inventory);
+        for (Object2LongMap.Entry<T> entry : inventory.object2LongEntrySet()) {
+            long real = entry.getLongValue() - targets.getLong(entry.getKey());
+            if (real > 0) return false; // 尚有真实消耗料，这一单没做完，保留催化剂
+        }
+        return true;
     }
 
     @Shadow

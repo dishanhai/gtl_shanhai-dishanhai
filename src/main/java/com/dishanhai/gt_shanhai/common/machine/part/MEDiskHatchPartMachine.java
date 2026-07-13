@@ -2,13 +2,15 @@ package com.dishanhai.gt_shanhai.common.machine.part;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.api.DShanhaiNBTAPI;
+import com.dishanhai.gt_shanhai.api.gui.configurators.MEDiskHatchPriorityConfigurator;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
+import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory;
 import com.dishanhai.gt_shanhai.common.item.VirtualCellStorage;
 import com.dishanhai.gt_shanhai.common.machine.ae.DShanhaiAENetworkMachine;
-import com.dishanhai.gt_shanhai.mixin.KeyCounterAccessor;
-
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 
+import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -17,9 +19,11 @@ import java.util.EnumSet;
 import java.util.Set;
 import com.gregtechceu.gtceu.api.data.RotationState;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
 import com.gregtechceu.gtceu.api.item.MetaMachineItem;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MachineDefinition;
+import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.feature.IFancyUIMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IInteractedMachine;
 import com.gregtechceu.gtceu.api.machine.multiblock.part.MultiblockPartMachine;
@@ -34,6 +38,7 @@ import com.gregtechceu.gtceu.integration.ae2.machine.trait.GridNodeHolder;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
+import com.lowdragmc.lowdraglib.misc.ItemStackTransfer;
 import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
@@ -52,6 +57,8 @@ import appeng.api.storage.StorageCells;
 import appeng.api.storage.cells.CellState;
 import appeng.api.storage.cells.ISaveProvider;
 import appeng.api.storage.cells.StorageCell;
+import appeng.helpers.IPriorityHost;
+import appeng.menu.ISubMenu;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.BlockPos;
@@ -71,7 +78,8 @@ import static com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER;
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.MOD_ID;
 
 public class MEDiskHatchPartMachine extends MultiblockPartMachine
-        implements IInteractedMachine, IFancyUIMachine, DShanhaiAENetworkMachine, IStorageProvider, ISaveProvider {
+        implements IInteractedMachine, IFancyUIMachine, DShanhaiAENetworkMachine, IStorageProvider, ISaveProvider,
+        IPriorityHost {
 
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(MEDiskHatchPartMachine.class, MultiblockPartMachine.MANAGED_FIELD_HOLDER);
     public static final int DEFAULT_DISK_SLOT_COUNT = 108;
@@ -83,11 +91,18 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     @Persisted
     private final GridNodeHolder nodeHolder;
 
+    @Persisted
+    @DescSynced
+    private int priority;
+
     @DescSynced
     private boolean isOnline;
 
-    /** 每槽虚拟磁盘缓存 — flushDirty 时不调 onContentsChanged，避免递归 */
-    private transient Map<Integer, List<VirtualCellStorage>> cachedVirtualCells;
+    private final SlotRuntimeCache[] slotRuntimeCaches;
+    private final long[] slotGenerations;
+    private final BitSet dirtyCellSlots;
+    private transient TickableSubscription pendingPersistTick;
+    private long lastPersistGameTime = Long.MIN_VALUE;
 
     public MEDiskHatchPartMachine(IMachineBlockEntity holder) {
         super(holder);
@@ -95,13 +110,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         try {
             slots = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.meDiskHatchSlots.get();
         } catch (Throwable ignored) {}
-        this.diskSlots = new NotifiableItemStackHandler(this, slots, IO.BOTH);
-        this.diskSlots.storage.setOnContentsChanged(() -> {
-            if (!isRemote()) {
-                markDirty();
-                IStorageProvider.requestUpdate(getMainNode());
-            }
-        });
+        this.slotRuntimeCaches = new SlotRuntimeCache[slots];
+        this.slotGenerations = new long[slots];
+        this.dirtyCellSlots = new BitSet(slots);
+        this.diskSlots = new NotifiableItemStackHandler(
+                this, slots, IO.BOTH, IO.BOTH, DiskSlotTransfer::new);
         this.nodeHolder = new GridNodeHolder(this);
         exposeGridNodeOnAllSides();
         getMainNode().addService(IStorageProvider.class, this);
@@ -122,6 +135,164 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     }
 
     @Override
+    public void onUnload() {
+        if (!isRemote()) {
+            forcePersistAll();
+        }
+        if (pendingPersistTick != null) {
+            pendingPersistTick.unsubscribe();
+            pendingPersistTick = null;
+        }
+        for (int slot = 0; slot < slotRuntimeCaches.length; slot++) {
+            slotRuntimeCaches[slot] = null;
+        }
+        dirtyCellSlots.clear();
+        super.onUnload();
+    }
+
+    public void forcePersistAll() {
+        for (int slot = 0; slot < slotRuntimeCaches.length; slot++) {
+            forcePersistSlot(slot);
+        }
+        dirtyCellSlots.clear();
+    }
+
+    private void forcePersistSlot(int slot) {
+        if (slot < 0 || slot >= slotRuntimeCaches.length) return;
+        SlotRuntimeCache runtime = slotRuntimeCaches[slot];
+        if (runtime == null) return;
+        for (StorageCell cell : runtime.persistableCells) {
+            cell.persist();
+        }
+        if (!runtime.virtualCells.isEmpty()) {
+            SuperDiskArrayItem.flushVirtualCells(runtime.carrier, runtime.virtualCells);
+        }
+        dirtyCellSlots.clear(slot);
+    }
+
+    private void onCellContentsChanged(int slot, long generation) {
+        if (slot < 0 || slot >= slotGenerations.length || slotGenerations[slot] != generation) return;
+        if (!dirtyCellSlots.get(slot)) {
+            dirtyCellSlots.set(slot);
+            markDirty();
+            schedulePersistTick();
+        }
+    }
+
+    private void schedulePersistTick() {
+        if (isRemote() || pendingPersistTick != null) return;
+        pendingPersistTick = subscribeServerTick(pendingPersistTick, this::flushScheduledPersistence);
+    }
+
+    private void flushScheduledPersistence() {
+        Level level = getLevel();
+        if (level == null) return;
+        if (dirtyCellSlots.isEmpty()) {
+            if (pendingPersistTick != null) {
+                pendingPersistTick.unsubscribe();
+                pendingPersistTick = null;
+            }
+            return;
+        }
+        long gameTime = level.getGameTime();
+        if (lastPersistGameTime == gameTime) return;
+        lastPersistGameTime = gameTime;
+
+        for (int slot = dirtyCellSlots.nextSetBit(0);
+             slot >= 0;
+             slot = dirtyCellSlots.nextSetBit(slot + 1)) {
+            forcePersistSlot(slot);
+        }
+        markDirty();
+        if (dirtyCellSlots.isEmpty() && pendingPersistTick != null) {
+            pendingPersistTick.unsubscribe();
+            pendingPersistTick = null;
+        }
+    }
+
+    private void evictSlotRuntime(int slot) {
+        if (slot < 0 || slot >= slotRuntimeCaches.length) return;
+        SlotRuntimeCache runtime = slotRuntimeCaches[slot];
+        if (runtime != null) {
+            forcePersistSlot(slot);
+            slotRuntimeCaches[slot] = null;
+        }
+        dirtyCellSlots.clear(slot);
+        slotGenerations[slot]++;
+    }
+
+    private void reconcileSlotRuntimes() {
+        for (int slot = 0; slot < slotRuntimeCaches.length; slot++) {
+            SlotRuntimeCache runtime = slotRuntimeCaches[slot];
+            if (runtime != null && runtime.carrier != diskSlots.getStackInSlot(slot)) {
+                evictSlotRuntime(slot);
+            }
+        }
+    }
+
+    private void onDiskSlotContentsChanged(int slot) {
+        evictSlotRuntime(slot);
+        markDirty();
+        if (!isRemote()) {
+            IStorageProvider.requestUpdate(getMainNode());
+        }
+    }
+
+    private void onAllDiskSlotsContentsChanged() {
+        reconcileSlotRuntimes();
+        markDirty();
+        if (!isRemote()) {
+            IStorageProvider.requestUpdate(getMainNode());
+        }
+    }
+
+    private static final class SlotRuntimeCache {
+        private final ItemStack carrier;
+        private final long generation;
+        private final List<MEStorage> mounts = new ArrayList<>();
+        private final List<StorageCell> persistableCells = new ArrayList<>();
+        private List<VirtualCellStorage> virtualCells = List.of();
+        private int mountedCount;
+
+        private SlotRuntimeCache(ItemStack carrier, long generation) {
+            this.carrier = carrier;
+            this.generation = generation;
+        }
+    }
+
+    private final class DiskSlotTransfer extends ItemStackTransfer {
+        private DiskSlotTransfer(int size) {
+            super(size);
+        }
+
+        @Override
+        public ItemStack extractItem(int slot, int amount, boolean simulate, boolean notifyChanges) {
+            if (!simulate) {
+                forcePersistSlot(slot);
+            }
+            return super.extractItem(slot, amount, simulate, notifyChanges);
+        }
+
+        @Override
+        public CompoundTag serializeNBT() {
+            forcePersistAll();
+            return super.serializeNBT();
+        }
+
+        @Override
+        public void onContentsChanged(int slot) {
+            onDiskSlotContentsChanged(slot);
+            super.onContentsChanged();
+        }
+
+        @Override
+        public void onContentsChanged() {
+            onAllDiskSlotsContentsChanged();
+            super.onContentsChanged();
+        }
+    }
+
+    @Override
     public ManagedFieldHolder getFieldHolder() {
         return MANAGED_FIELD_HOLDER;
     }
@@ -130,8 +301,14 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
     @Override
     public void saveChanges() {
-        flushDirtyVirtualCells();
-        markDirty();
+        boolean scheduled = false;
+        for (int slot = 0; slot < slotRuntimeCaches.length; slot++) {
+            SlotRuntimeCache runtime = slotRuntimeCaches[slot];
+            if (runtime == null) continue;
+            onCellContentsChanged(slot, runtime.generation);
+            scheduled = true;
+        }
+        if (!scheduled) markDirty();
     }
 
     // ==================== IGridConnectedMachine ====================
@@ -174,40 +351,89 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         return count;
     }
 
+    // ==================== IPriorityHost ====================
+
+    @Override
+    public int getPriority() {
+        return priority;
+    }
+
+    @Override
+    public void setPriority(int newValue) {
+        if (priority == newValue) return;
+        priority = newValue;
+        markDirty();
+        if (!isRemote()) {
+            IStorageProvider.requestUpdate(getMainNode());
+        }
+    }
+
+    public void adjustPriority(int delta) {
+        setPriority(MEDiskHatchPriority.add(priority, delta));
+    }
+
+    @Override
+    public ItemStack getMainMenuIcon() {
+        return new ItemStack(getDefinition().getItem());
+    }
+
+    @Override
+    public void returnToMainMenu(Player player, ISubMenu subMenu) {
+        // Priority is configured through this machine's Fancy UI, not an AE2 submenu.
+    }
+
     // ==================== IStorageProvider ====================
 
     @Override
     public void mountInventories(IStorageMounts storageMounts) {
-        flushDirtyVirtualCells();
+        reconcileSlotRuntimes();
         int mounted = 0;
         int slots = diskSlots.getSlots();
-        List<NestedCellStorage> nestedStorages = new java.util.ArrayList<>();
-        List<MEStorage> pendingMounts = new java.util.ArrayList<>();
         for (int i = 0; i < slots; i++) {
             ItemStack stack = diskSlots.getStackInSlot(i);
             if (stack.isEmpty()) continue;
 
-            if (stack.getItem() instanceof SuperDiskArrayItem) {
-                mounted += collectSdaMounts(stack, i, pendingMounts, nestedStorages);
-            } else {
-                StorageCell cell = StorageCells.getCellInventory(stack, null);
-                if (cell != null) {
-                    pendingMounts.add(new NormalizedFluidKeyStorage(new PersistedCellStorage(cell, this)));
-                    mounted++;
-                }
+            SlotRuntimeCache runtime = getOrCreateSlotRuntime(i, stack);
+            mounted += runtime.mountedCount;
+            int slotPriority = MEDiskHatchPriority.forSlot(priority, i);
+            for (MEStorage storage : runtime.mounts) {
+                storageMounts.mount(storage, slotPriority);
             }
         }
-        if (!nestedStorages.isEmpty()) {
-            storageMounts.mount(new AggregatedNestedCellStorage(nestedStorages), 10);
-            mounted++;
-        }
-        for (MEStorage storage : pendingMounts) {
-            storageMounts.mount(storage, 10);
-        }
         if (LOGGER.isDebugEnabled()) {
-            LOGGER.debug("MEH mountInventories → {} cells, online={}, nodeOnline={}, nodeActive={}",
-                mounted, isOnline, getMainNode().isOnline(), getMainNode().isActive());
+            LOGGER.debug("MEH mountInventories → {} cells, priority={}, online={}, nodeOnline={}, nodeActive={}",
+                mounted, priority, isOnline, getMainNode().isOnline(), getMainNode().isActive());
         }
+    }
+
+    private SlotRuntimeCache getOrCreateSlotRuntime(int slot, ItemStack stack) {
+        SlotRuntimeCache cached = slotRuntimeCaches[slot];
+        if (cached != null && cached.carrier == stack) {
+            return cached;
+        }
+
+        evictSlotRuntime(slot);
+        long generation = ++slotGenerations[slot];
+        SlotRuntimeCache runtime = new SlotRuntimeCache(stack, generation);
+        slotRuntimeCaches[slot] = runtime;
+        ISaveProvider slotSaveProvider = () -> onCellContentsChanged(slot, generation);
+
+        StorageCell cell = StorageCells.getCellInventory(stack, slotSaveProvider);
+        if (cell == null) return runtime;
+        runtime.persistableCells.add(cell);
+
+        if (stack.getItem() instanceof SuperDiskArrayItem) {
+            List<NestedCellStorage> nestedStorages = new ArrayList<>();
+            collectSdaMounts(stack, slot, cell, slotSaveProvider, runtime, nestedStorages);
+            if (!nestedStorages.isEmpty()) {
+                runtime.mounts.add(new AggregatedNestedCellStorage(nestedStorages));
+                runtime.mountedCount++;
+            }
+        } else {
+            runtime.mounts.add(new NormalizedFluidKeyStorage(cell));
+            runtime.mountedCount++;
+        }
+        return runtime;
     }
 
     /**
@@ -216,12 +442,9 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
      * 2. SDA 自身 inventory 用 FilteredMEStorage 过滤掉子载体物品
      * 3. 额外挂载 virtual_cells NBT 定义的虚拟磁盘
      */
-    private int collectSdaMounts(ItemStack stack, int slot, List<MEStorage> pendingMounts,
-                                 List<NestedCellStorage> nestedStorages) {
-        StorageCell sdaCell = StorageCells.getCellInventory(stack, null);
-        if (sdaCell == null) return 0;
-        int count = 0;
-
+    private void collectSdaMounts(ItemStack stack, int slot, StorageCell sdaCell,
+                                  ISaveProvider slotSaveProvider, SlotRuntimeCache runtime,
+                                  List<NestedCellStorage> nestedStorages) {
         // 收集 SDA 内的子载体（infinity_cell 等）
         KeyCounter contents = new KeyCounter();
         sdaCell.getAvailableStacks(contents);
@@ -235,42 +458,48 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                 MEStorage directInfinityCell = createEaeInfinityCellStorage(innerStack);
                 if (directInfinityCell != null) {
                     carrierFilterState.add(key);
-                    pendingMounts.add(directInfinityCell);
-                    count++;
+                    runtime.mounts.add(directInfinityCell);
+                    runtime.mountedCount++;
                     continue;
                 }
-                StorageCell subCell = StorageCells.getCellInventory(innerStack, null);
+                StorageCell subCell = StorageCells.getCellInventory(innerStack, slotSaveProvider);
                 if (subCell != null) {
+                    // create() 可能在临时 innerStack 上认领 UUID；先完成子盘序列化，再把新 key
+                    // 原子提交回父 SDA。否则重挂载会重复 fork UUID，且父盘始终保留旧载体。
+                    subCell.persist();
+                    AEItemKey mountedCarrierKey = AEItemKey.of(innerStack);
+                    if (!key.equals(mountedCarrierKey)) {
+                        if (!(sdaCell instanceof SuperDiskArrayInventory parentSda)
+                                || !parentSda.replaceOneStoredKey(key, mountedCarrierKey)) {
+                            LOGGER.warn("MEH slot {} failed to commit claimed nested cell carrier {}",
+                                    slot, key);
+                            continue;
+                        }
+                    }
                     carrierFilterState.add(key);
+                    carrierFilterState.add(mountedCarrierKey);
                     nestedStorages.add(new NestedCellStorage(sdaCell,
-                            new NormalizedStorageCell(subCell), key, innerStack, carrierFilterState, this));
+                            new NormalizedStorageCell(subCell), mountedCarrierKey, innerStack, carrierFilterState,
+                            slotSaveProvider));
                 }
             }
         }
 
         // 挂载 SDA（过滤掉子载体物品）
-        MEStorage mountedSda = new PersistedCellStorage(sdaCell, this);
         if (carrierKeys.isEmpty()) {
-            pendingMounts.add(new NormalizedFluidKeyStorage(mountedSda));
+            runtime.mounts.add(new NormalizedFluidKeyStorage(sdaCell));
         } else {
-            pendingMounts.add(new NormalizedFluidKeyStorage(new FilteredMEStorage(mountedSda, carrierFilterState)));
+            runtime.mounts.add(new NormalizedFluidKeyStorage(new FilteredMEStorage(sdaCell, carrierFilterState)));
         }
-        count++;
+        runtime.mountedCount++;
 
         // 挂载 virtual_cells NBT 定义的虚拟磁盘
-        List<VirtualCellStorage> vcsList = cachedVirtualCells != null ? cachedVirtualCells.get(slot) : null;
-        if (vcsList == null) {
-            vcsList = SuperDiskArrayItem.readVirtualCells(stack, getLevel());
-            if (!vcsList.isEmpty()) {
-                if (cachedVirtualCells == null) cachedVirtualCells = new HashMap<>();
-                cachedVirtualCells.put(slot, vcsList);
-            }
+        runtime.virtualCells = SuperDiskArrayItem.readVirtualCells(stack, getLevel());
+        for (VirtualCellStorage virtualCell : runtime.virtualCells) {
+            runtime.mounts.add(new NormalizedFluidKeyStorage(
+                    new ChangeNotifyingStorage(virtualCell, slotSaveProvider)));
+            runtime.mountedCount++;
         }
-        for (var vcs : vcsList) {
-            pendingMounts.add(new NormalizedFluidKeyStorage(vcs));
-            count++;
-        }
-        return count;
     }
 
     public static void normalizeEaeInfinityCellRecord(ItemStack stack) {
@@ -354,430 +583,18 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     }
 
     private static final class KeyCounterSnapshot {
-        private static final java.lang.invoke.MethodHandle VARIANT_COUNTER_COPY = findVariantCounterMethod("copy");
-        private static final java.lang.invoke.MethodHandle VARIANT_COUNTER_ADD_ALL = findVariantCounterMethod("addAll");
-        private static final java.lang.invoke.MethodHandle VARIANT_COUNTER_ADD = findVariantCounterMethod("add");
-        private static final java.lang.invoke.MethodHandle VARIANT_COUNTER_GET_RECORDS = findVariantCounterMethod("getRecords");
-        private static final sun.misc.Unsafe UNSAFE = findUnsafe();
-        private static final Class<?> VARIANT_COUNTER_UNORDERED = findVariantCounterNestedClass("UnorderedVariantMap");
-        private static final Class<?> VARIANT_COUNTER_FUZZY = findVariantCounterNestedClass("FuzzyVariantMap");
-        private static final java.lang.invoke.MethodHandle VARIANT_COUNTER_UNORDERED_CTOR =
-                findVariantCounterConstructor(VARIANT_COUNTER_UNORDERED);
-        private static final java.lang.invoke.MethodHandle VARIANT_COUNTER_FUZZY_CTOR =
-                findVariantCounterConstructor(VARIANT_COUNTER_FUZZY);
-        private static final long VARIANT_COUNTER_UNORDERED_RECORDS_OFFSET = findFieldOffset(VARIANT_COUNTER_UNORDERED, "records");
-        private static final long VARIANT_COUNTER_FUZZY_RECORDS_OFFSET = findFieldOffset(VARIANT_COUNTER_FUZZY, "records");
-        private static final long OBJECT2LONG_OPEN_HASH_MAP_KEY_OFFSET =
-                findFieldOffset(it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap.class, "key");
-        private static final long OBJECT2LONG_OPEN_HASH_MAP_VALUE_OFFSET =
-                findFieldOffset(it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap.class, "value");
-        private static final long OBJECT2LONG_OPEN_HASH_MAP_MASK_OFFSET =
-                findFieldOffset(it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap.class, "mask");
-        private static final long OBJECT2LONG_OPEN_HASH_MAP_SIZE_OFFSET =
-                findFieldOffset(it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap.class, "size");
-        private static final long OBJECT2LONG_OPEN_HASH_MAP_MAX_FILL_OFFSET =
-                findFieldOffset(it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap.class, "maxFill");
-        private static final long OBJECT2LONG_OPEN_HASH_MAP_N_OFFSET =
-                findFieldOffset(it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap.class, "n");
-        private static final long OBJECT2LONG_OPEN_HASH_MAP_MIN_N_OFFSET =
-                findFieldOffset(it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap.class, "minN");
-        private static final long OBJECT2LONG_OPEN_HASH_MAP_CONTAINS_NULL_KEY_OFFSET =
-                findFieldOffset(it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap.class, "containsNullKey");
+        private final KeyCounter counter = new KeyCounter();
 
-        private final AEKey[] keys;
-        private final long[] amounts;
-        private final KeyCounter copiedCounter;
-
-        private KeyCounterSnapshot(KeyCounter counter) {
-            this(counter, true);
+        private KeyCounterSnapshot(KeyCounter source) {
+            counter.addAll(source);
         }
 
-        private KeyCounterSnapshot(KeyCounter counter, boolean preferCounterCopy) {
-            this.copiedCounter = preferCounterCopy ? copyCounter(counter) : null;
-            java.util.ArrayList<AEKey> keyList = new java.util.ArrayList<>(counter.size());
-            it.unimi.dsi.fastutil.longs.LongArrayList amountList = new it.unimi.dsi.fastutil.longs.LongArrayList(counter.size());
-            for (var entry : counter) {
-                long amount = entry.getLongValue();
-                if (amount <= 0) continue;
-                keyList.add(entry.getKey());
-                amountList.add(amount);
-            }
-            this.keys = keyList.toArray(new AEKey[0]);
-            this.amounts = amountList.toLongArray();
+        private KeyCounterSnapshot(KeyCounter source, boolean ignored) {
+            this(source);
         }
 
         private void addTo(KeyCounter out) {
-            if (copiedCounter != null && addCounterInto(copiedCounter, out)) {
-                return;
-            }
-            addFlatTo(out);
-        }
-
-        private void addToCopyNonConflicting(KeyCounter out) {
-            if (copiedCounter != null && addCounterIntoCopyNonConflicting(copiedCounter, out)) {
-                return;
-            }
-            addFlatTo(out);
-        }
-
-        private void addFlatTo(KeyCounter out) {
-            // 优化路径：按 AEKeyType 分组批量插入，减少 submap 查询
-            if (addFlatToBatched(out)) return;
-            // 回退：逐个插入
-            for (int i = 0; i < keys.length; i++) out.add(keys[i], amounts[i]);
-        }
-
-        private boolean addFlatToBatched(KeyCounter out) {
-            try {
-                var targetLists = ((KeyCounterAccessor) (Object) out).gtShanhai$getLists();
-                // 按 keyType 分组
-                java.util.Map<appeng.api.stacks.AEKeyType, java.util.List<Integer>> typeGroups = new java.util.HashMap<>();
-                for (int i = 0; i < keys.length; i++) {
-                    appeng.api.stacks.AEKeyType type = keys[i].getType();
-                    typeGroups.computeIfAbsent(type, k -> new java.util.ArrayList<>()).add(i);
-                }
-                // 批量插入每个类型
-                for (var entry : typeGroups.entrySet()) {
-                    appeng.api.stacks.AEKeyType type = entry.getKey();
-                    Object variant = targetLists.get(type);
-                    if (variant == null) {
-                        // 默认使用 unordered（精确匹配），AE2 大部分场景不需要 fuzzy
-                        variant = newVariantCounter(false);
-                        if (variant == null) return false;
-                        targetLists.put(type, variant);
-                    }
-                    for (int idx : entry.getValue()) {
-                        addVariantCounterEntry(variant, keys[idx], amounts[idx]);
-                    }
-                }
-                return true;
-            } catch (Throwable ignored) {
-                return false;
-            }
-        }
-
-        private static KeyCounter copyCounter(KeyCounter source) {
-            KeyCounter copy = new KeyCounter();
-            if (copyCounterInto(source, copy)) {
-                return copy;
-            }
-            return null;
-        }
-
-        private static boolean copyCounterInto(KeyCounter source, KeyCounter target) {
-            try {
-                var sourceLists = ((KeyCounterAccessor) (Object) source).gtShanhai$getLists();
-                var targetLists = ((KeyCounterAccessor) (Object) target).gtShanhai$getLists();
-                if (!target.isEmpty()) {
-                    return false;
-                }
-                targetLists.clear();
-                for (Object entryObject : sourceLists.reference2ObjectEntrySet()) {
-                    var entry = (it.unimi.dsi.fastutil.objects.Reference2ObjectMap.Entry) entryObject;
-                    targetLists.put(entry.getKey(), copyVariantCounter(entry.getValue()));
-                }
-                return true;
-            } catch (Throwable ignored) {
-                return false;
-            }
-        }
-
-        private static boolean addCounterInto(KeyCounter source, KeyCounter target) {
-            try {
-                var sourceLists = ((KeyCounterAccessor) (Object) source).gtShanhai$getLists();
-                var targetLists = ((KeyCounterAccessor) (Object) target).gtShanhai$getLists();
-                if (sourceLists.isEmpty()) return true;
-                if (targetLists.isEmpty() || target.isEmpty()) {
-                    targetLists.clear();
-                    for (Object entryObject : sourceLists.reference2ObjectEntrySet()) {
-                        var entry = (it.unimi.dsi.fastutil.objects.Reference2ObjectMap.Entry) entryObject;
-                        targetLists.put(entry.getKey(), copyVariantCounter(entry.getValue()));
-                    }
-                    return true;
-                }
-                for (Object entryObject : sourceLists.reference2ObjectEntrySet()) {
-                    var entry = (it.unimi.dsi.fastutil.objects.Reference2ObjectMap.Entry) entryObject;
-                    Object targetVariant = targetLists.get(entry.getKey());
-                    if (targetVariant == null) {
-                        targetLists.put(entry.getKey(), copyVariantCounter(entry.getValue()));
-                    } else {
-                        addVariantCounter(targetVariant, entry.getValue());
-                    }
-                }
-                return true;
-            } catch (Throwable ignored) {
-                return false;
-            }
-        }
-
-        private static boolean addCounterIntoCopyNonConflicting(KeyCounter source, KeyCounter target) {
-            try {
-                var sourceLists = ((KeyCounterAccessor) (Object) source).gtShanhai$getLists();
-                var targetLists = ((KeyCounterAccessor) (Object) target).gtShanhai$getLists();
-                if (sourceLists.isEmpty()) return true;
-                if (targetLists.isEmpty() || target.isEmpty()) {
-                    targetLists.clear();
-                    for (Object entryObject : sourceLists.reference2ObjectEntrySet()) {
-                        var entry = (it.unimi.dsi.fastutil.objects.Reference2ObjectMap.Entry) entryObject;
-                        targetLists.put(entry.getKey(), copyVariantCounter(entry.getValue()));
-                    }
-                    return true;
-                }
-                for (Object entryObject : sourceLists.reference2ObjectEntrySet()) {
-                    var entry = (it.unimi.dsi.fastutil.objects.Reference2ObjectMap.Entry) entryObject;
-                    Object targetVariant = targetLists.get(entry.getKey());
-                    if (targetVariant == null) {
-                        targetLists.put(entry.getKey(), copyVariantCounter(entry.getValue()));
-                    } else if (!addVariantCounterFlat(targetVariant, entry.getValue())) {
-                        return false;
-                    }
-                }
-                return true;
-            } catch (Throwable ignored) {
-                return false;
-            }
-        }
-
-        private static boolean addVariantCounterFlat(Object targetVariant, Object sourceVariant) throws Throwable {
-            Object sourceRecords = getVariantRecordsOrNull(sourceVariant);
-            Object targetRecords = getVariantRecordsOrNull(targetVariant);
-            if (sourceRecords instanceof it.unimi.dsi.fastutil.objects.Object2LongMap<?> sourceMap
-                    && targetRecords instanceof it.unimi.dsi.fastutil.objects.Object2LongMap<?> targetMap) {
-                addRecordMapFlat((it.unimi.dsi.fastutil.objects.Object2LongMap<AEKey>) targetMap,
-                        (it.unimi.dsi.fastutil.objects.Object2LongMap<AEKey>) sourceMap);
-                return true;
-            }
-            if (!(sourceVariant instanceof Iterable<?> entries)) return false;
-            for (Object entryObject : entries) {
-                var entry = (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<AEKey>) entryObject;
-                long amount = entry.getLongValue();
-                if (amount > 0) addVariantCounterEntry(targetVariant, entry.getKey(), amount);
-            }
-            return true;
-        }
-
-        private static Object getVariantRecordsOrNull(Object counter) {
-            try {
-                if (UNSAFE != null) {
-                    Class<?> type = counter.getClass();
-                    if (type == VARIANT_COUNTER_UNORDERED && VARIANT_COUNTER_UNORDERED_RECORDS_OFFSET >= 0L) {
-                        return UNSAFE.getObject(counter, VARIANT_COUNTER_UNORDERED_RECORDS_OFFSET);
-                    }
-                    if (type == VARIANT_COUNTER_FUZZY && VARIANT_COUNTER_FUZZY_RECORDS_OFFSET >= 0L) {
-                        return UNSAFE.getObject(counter, VARIANT_COUNTER_FUZZY_RECORDS_OFFSET);
-                    }
-                }
-                if (VARIANT_COUNTER_GET_RECORDS == null) return null;
-                return VARIANT_COUNTER_GET_RECORDS.invokeExact(counter);
-            } catch (Throwable ignored) {
-                return null;
-            }
-        }
-
-        private static void addRecordMapFlat(it.unimi.dsi.fastutil.objects.Object2LongMap<AEKey> target,
-                                             it.unimi.dsi.fastutil.objects.Object2LongMap<AEKey> source) {
-            var iterator = it.unimi.dsi.fastutil.objects.Object2LongMaps.fastIterator(source);
-            while (iterator.hasNext()) {
-                var entry = iterator.next();
-                long amount = entry.getLongValue();
-                if (amount > 0) addRecordAmount(target, entry.getKey(), amount);
-            }
-        }
-
-        private static void addRecordAmount(it.unimi.dsi.fastutil.objects.Object2LongMap<AEKey> target,
-                                            AEKey key, long amount) {
-            if (addOpenHashMapAmount(target, key, amount)) return;
-            long oldValue = target.getLong(key);
-            long newValue = oldValue + amount;
-            if (((oldValue ^ newValue) & (amount ^ newValue)) < 0) {
-                newValue = Long.MAX_VALUE;
-            }
-            target.put(key, newValue);
-        }
-
-        private static boolean addOpenHashMapAmount(it.unimi.dsi.fastutil.objects.Object2LongMap<AEKey> target,
-                                                    AEKey key, long amount) {
-            if (!(target instanceof it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<?>)) return false;
-            if (UNSAFE == null || key == null
-                    || OBJECT2LONG_OPEN_HASH_MAP_KEY_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_VALUE_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_MASK_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_SIZE_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_MAX_FILL_OFFSET < 0L) {
-                return false;
-            }
-            try {
-                Object[] keys = (Object[]) UNSAFE.getObject(target, OBJECT2LONG_OPEN_HASH_MAP_KEY_OFFSET);
-                long[] values = (long[]) UNSAFE.getObject(target, OBJECT2LONG_OPEN_HASH_MAP_VALUE_OFFSET);
-                int mask = UNSAFE.getInt(target, OBJECT2LONG_OPEN_HASH_MAP_MASK_OFFSET);
-                int pos = it.unimi.dsi.fastutil.HashCommon.mix(key.hashCode()) & mask;
-                Object current = keys[pos];
-                while (current != null) {
-                    if (key.equals(current)) {
-                        values[pos] = saturatedAddPositive(values[pos], amount);
-                        return true;
-                    }
-                    pos = (pos + 1) & mask;
-                    current = keys[pos];
-                }
-                int size = UNSAFE.getInt(target, OBJECT2LONG_OPEN_HASH_MAP_SIZE_OFFSET);
-                int maxFill = UNSAFE.getInt(target, OBJECT2LONG_OPEN_HASH_MAP_MAX_FILL_OFFSET);
-                if (size + 1 >= maxFill) return false;
-                keys[pos] = key;
-                values[pos] = amount;
-                UNSAFE.putInt(target, OBJECT2LONG_OPEN_HASH_MAP_SIZE_OFFSET, size + 1);
-                return true;
-            } catch (Throwable ignored) {}
-            return false;
-        }
-
-        private static long saturatedAddPositive(long oldValue, long amount) {
-            long newValue = oldValue + amount;
-            if (((oldValue ^ newValue) & (amount ^ newValue)) < 0) {
-                return Long.MAX_VALUE;
-            }
-            return newValue;
-        }
-
-        private static Object copyVariantCounter(Object counter) throws Throwable {
-            return VARIANT_COUNTER_COPY.invokeExact(counter);
-        }
-
-        private static Object copyVariantCounterOrNull(Object counter) {
-            try {
-                if (counter == null) return null;
-                return copyVariantCounter(counter);
-            } catch (Throwable ignored) {
-                return null;
-            }
-        }
-
-        private static Object copyVariantCounterTemplateOrNull(Object template) {
-            return copyVariantCounterOrNull(template);
-        }
-
-        private static Object newVariantCounter(boolean fuzzy) throws Throwable {
-            java.lang.invoke.MethodHandle constructor = fuzzy ? VARIANT_COUNTER_FUZZY_CTOR : VARIANT_COUNTER_UNORDERED_CTOR;
-            if (constructor == null) return null;
-            return constructor.invokeExact();
-        }
-
-        private static boolean copyOpenHashMapRecords(Object sourceVariant, Object targetVariant) {
-            Object sourceRecords = getVariantRecordsOrNull(sourceVariant);
-            Object targetRecords = getVariantRecordsOrNull(targetVariant);
-            if (!(sourceRecords instanceof it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<?>)
-                    || !(targetRecords instanceof it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<?>)) {
-                return false;
-            }
-            if (UNSAFE == null
-                    || OBJECT2LONG_OPEN_HASH_MAP_KEY_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_VALUE_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_MASK_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_SIZE_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_MAX_FILL_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_N_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_MIN_N_OFFSET < 0L
-                    || OBJECT2LONG_OPEN_HASH_MAP_CONTAINS_NULL_KEY_OFFSET < 0L) {
-                return false;
-            }
-            try {
-                Object[] keys = (Object[]) UNSAFE.getObject(sourceRecords, OBJECT2LONG_OPEN_HASH_MAP_KEY_OFFSET);
-                long[] values = (long[]) UNSAFE.getObject(sourceRecords, OBJECT2LONG_OPEN_HASH_MAP_VALUE_OFFSET);
-                UNSAFE.putObject(targetRecords, OBJECT2LONG_OPEN_HASH_MAP_KEY_OFFSET, keys.clone());
-                UNSAFE.putObject(targetRecords, OBJECT2LONG_OPEN_HASH_MAP_VALUE_OFFSET, values.clone());
-                UNSAFE.putInt(targetRecords, OBJECT2LONG_OPEN_HASH_MAP_MASK_OFFSET,
-                        UNSAFE.getInt(sourceRecords, OBJECT2LONG_OPEN_HASH_MAP_MASK_OFFSET));
-                UNSAFE.putInt(targetRecords, OBJECT2LONG_OPEN_HASH_MAP_SIZE_OFFSET,
-                        UNSAFE.getInt(sourceRecords, OBJECT2LONG_OPEN_HASH_MAP_SIZE_OFFSET));
-                UNSAFE.putInt(targetRecords, OBJECT2LONG_OPEN_HASH_MAP_MAX_FILL_OFFSET,
-                        UNSAFE.getInt(sourceRecords, OBJECT2LONG_OPEN_HASH_MAP_MAX_FILL_OFFSET));
-                UNSAFE.putInt(targetRecords, OBJECT2LONG_OPEN_HASH_MAP_N_OFFSET,
-                        UNSAFE.getInt(sourceRecords, OBJECT2LONG_OPEN_HASH_MAP_N_OFFSET));
-                UNSAFE.putInt(targetRecords, OBJECT2LONG_OPEN_HASH_MAP_MIN_N_OFFSET,
-                        UNSAFE.getInt(sourceRecords, OBJECT2LONG_OPEN_HASH_MAP_MIN_N_OFFSET));
-                UNSAFE.putBoolean(targetRecords, OBJECT2LONG_OPEN_HASH_MAP_CONTAINS_NULL_KEY_OFFSET,
-                        UNSAFE.getBoolean(sourceRecords, OBJECT2LONG_OPEN_HASH_MAP_CONTAINS_NULL_KEY_OFFSET));
-                return true;
-            } catch (Throwable ignored) {
-                return false;
-            }
-        }
-
-        private static void addVariantCounter(Object target, Object source) throws Throwable {
-            VARIANT_COUNTER_ADD_ALL.invokeExact(target, source);
-        }
-
-        private static void addVariantCounterEntry(Object target, AEKey key, long amount) throws Throwable {
-            VARIANT_COUNTER_ADD.invokeExact(target, key, amount);
-        }
-
-        private static java.lang.invoke.MethodHandle findVariantCounterMethod(String name) {
-            try {
-                Class<?> type = Class.forName("appeng.api.stacks.VariantCounter");
-                java.lang.reflect.Method method;
-                if (name.equals("addAll")) {
-                    method = type.getDeclaredMethod(name, type);
-                } else if (name.equals("add")) {
-                    method = type.getDeclaredMethod(name, AEKey.class, long.class);
-                } else {
-                    method = type.getDeclaredMethod(name);
-                }
-                method.setAccessible(true);
-                java.lang.invoke.MethodHandle handle = java.lang.invoke.MethodHandles.lookup().unreflect(method);
-                if (name.equals("copy")) {
-                    return handle.asType(java.lang.invoke.MethodType.methodType(Object.class, Object.class));
-                }
-                if (name.equals("add")) {
-                    return handle.asType(java.lang.invoke.MethodType.methodType(void.class, Object.class, AEKey.class, long.class));
-                }
-                if (name.equals("getRecords")) {
-                    return handle.asType(java.lang.invoke.MethodType.methodType(Object.class, Object.class));
-                }
-                return handle.asType(java.lang.invoke.MethodType.methodType(void.class, Object.class, Object.class));
-            } catch (Throwable ignored) {
-                return null;
-            }
-        }
-
-        private static sun.misc.Unsafe findUnsafe() {
-            try {
-                java.lang.reflect.Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
-                field.setAccessible(true);
-                return (sun.misc.Unsafe) field.get(null);
-            } catch (Throwable ignored) {
-                return null;
-            }
-        }
-
-        private static Class<?> findVariantCounterNestedClass(String simpleName) {
-            try {
-                return Class.forName("appeng.api.stacks.VariantCounter$" + simpleName);
-            } catch (Throwable ignored) {
-                return null;
-            }
-        }
-
-        private static java.lang.invoke.MethodHandle findVariantCounterConstructor(Class<?> type) {
-            try {
-                if (type == null) return null;
-                java.lang.reflect.Constructor<?> constructor = type.getDeclaredConstructor();
-                constructor.setAccessible(true);
-                return java.lang.invoke.MethodHandles.lookup().unreflectConstructor(constructor)
-                        .asType(java.lang.invoke.MethodType.methodType(Object.class));
-            } catch (Throwable ignored) {
-                return null;
-            }
-        }
-
-        private static long findFieldOffset(Class<?> type, String fieldName) {
-            try {
-                if (UNSAFE == null || type == null) return -1L;
-                java.lang.reflect.Field field = type.getDeclaredField(fieldName);
-                field.setAccessible(true);
-                return UNSAFE.objectFieldOffset(field);
-            } catch (Throwable ignored) {
-                return -1L;
-            }
+            out.addAll(counter);
         }
     }
 
@@ -1073,13 +890,39 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
     }
 
-    /** AE2 BasicCellInventory 在 container 为 null 时会自己写回 ItemStack。 */
+    /** 为没有 ISaveProvider 契约的 MEStorage 补宿主变更通知，不在热路径执行序列化。 */
+    public record ChangeNotifyingStorage(MEStorage delegate, ISaveProvider owner) implements MEStorage {
+        @Override
+        public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
+            long inserted = delegate.insert(what, amount, mode, src);
+            if (inserted > 0 && mode == Actionable.MODULATE) owner.saveChanges();
+            return inserted;
+        }
+
+        @Override
+        public long extract(AEKey what, long amount, Actionable mode, IActionSource src) {
+            long extracted = delegate.extract(what, amount, mode, src);
+            if (extracted > 0 && mode == Actionable.MODULATE) owner.saveChanges();
+            return extracted;
+        }
+
+        @Override
+        public void getAvailableStacks(KeyCounter out) {
+            delegate.getAvailableStacks(out);
+        }
+
+        @Override
+        public Component getDescription() {
+            return delegate.getDescription();
+        }
+    }
+
+    /** 高频存取只通知宿主标脏；实际序列化由宿主在合并后的安全落盘点执行。 */
     public record PersistedCellStorage(StorageCell delegate, ISaveProvider owner) implements MEStorage {
         @Override
         public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
             long inserted = delegate.insert(what, amount, mode, src);
             if (inserted > 0 && mode == Actionable.MODULATE) {
-                delegate.persist();
                 owner.saveChanges();
             }
             return inserted;
@@ -1088,7 +931,6 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         public long extract(AEKey what, long amount, Actionable mode, IActionSource src) {
             long extracted = delegate.extract(what, amount, mode, src);
             if (extracted > 0 && mode == Actionable.MODULATE) {
-                delegate.persist();
                 owner.saveChanges();
             }
             return extracted;
@@ -1246,19 +1088,19 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             long inserted = nested.insert(what, amount, mode, src);
             if (inserted > 0 && mode == Actionable.MODULATE) {
                 onNestedChanged(what, inserted);
-                persistCarrier(src);
+                persistCarrier();
             }
             return inserted;
         }
         @Override
         public long extract(AEKey what, long amount, Actionable mode, IActionSource src) {
-            if (mode == Actionable.MODULATE && parent.extract(currentCarrierKey, 1, Actionable.SIMULATE, src) <= 0) {
+            if (mode == Actionable.MODULATE && !canPersistCarrierChange(what, amount, false, src)) {
                 return 0;
             }
             long extracted = nested.extract(what, amount, mode, src);
             if (extracted > 0 && mode == Actionable.MODULATE) {
                 onNestedChanged(what, -extracted);
-                persistCarrier(src);
+                persistCarrier();
             }
             return extracted;
         }
@@ -1291,15 +1133,16 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             return nested.getDescription();
         }
 
-        private void persistCarrier(IActionSource src) {
+        private void persistCarrier() {
             nested.persist();
-            long removed = parent.extract(currentCarrierKey, 1, Actionable.MODULATE, src);
-            if (removed <= 0) return;
-            parent.persist();
             AEItemKey updatedCarrierKey = AEItemKey.of(carrierStack);
-            long inserted = parent.insert(updatedCarrierKey, 1, Actionable.MODULATE, src);
-            parent.persist();
-            if (inserted > 0) {
+            if (!currentCarrierKey.equals(updatedCarrierKey)) {
+                if (!(parent instanceof SuperDiskArrayInventory parentSda)
+                        || !parentSda.replaceOneStoredKey(currentCarrierKey, updatedCarrierKey)) {
+                    LOGGER.error("MEH failed to atomically update nested cell carrier {}", currentCarrierKey);
+                    owner.saveChanges();
+                    return;
+                }
                 filterState.replace(currentCarrierKey, updatedCarrierKey);
                 currentCarrierKey = updatedCarrierKey;
             }
@@ -1315,30 +1158,12 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
 
         private boolean canPersistCarrierChange(AEKey what, long amount, boolean insert, IActionSource src) {
-            ItemStack simulatedStack = carrierStack.copy();
-            StorageCell simulatedCell = StorageCells.getCellInventory(simulatedStack, null);
-            if (simulatedCell == null) return false;
+            if (!(parent instanceof SuperDiskArrayInventory)) return false;
+            if (parent.extract(currentCarrierKey, 1, Actionable.SIMULATE, src) <= 0) return false;
             long changed = insert
-                ? simulatedCell.insert(what, amount, Actionable.MODULATE, src)
-                : simulatedCell.extract(what, amount, Actionable.MODULATE, src);
-            if (changed <= 0) return false;
-            simulatedCell.persist();
-            StorageCell changedCarrierCell = StorageCells.getCellInventory(simulatedStack, null);
-            if (changedCarrierCell != null && !changedCarrierCell.canFitInsideCell()) return false;
-            return parent.extract(currentCarrierKey, 1, Actionable.SIMULATE, src) > 0;
-        }
-    }
-
-    private void flushDirtyVirtualCells() {
-        if (cachedVirtualCells == null || cachedVirtualCells.isEmpty()) return;
-        int slots = diskSlots.getSlots();
-        for (var entry : cachedVirtualCells.entrySet()) {
-            int slot = entry.getKey();
-            if (slot >= slots) continue;
-            ItemStack stack = diskSlots.getStackInSlot(slot);
-            if (stack.isEmpty() || !(stack.getItem() instanceof SuperDiskArrayItem)) continue;
-            SuperDiskArrayItem.flushVirtualCells(stack, entry.getValue());
-            for (var vc : entry.getValue()) vc.clearDirty();
+                    ? nested.insert(what, amount, Actionable.SIMULATE, src)
+                    : nested.extract(what, amount, Actionable.SIMULATE, src);
+            return changed > 0;
         }
     }
 
@@ -1347,6 +1172,12 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     @Override
     public boolean shouldOpenUI(Player player, InteractionHand hand, BlockHitResult hit) {
         return true;
+    }
+
+    @Override
+    public void attachSideTabs(TabsWidget tabsWidget) {
+        super.attachSideTabs(tabsWidget);
+        tabsWidget.attachSubTab(new MEDiskHatchPriorityConfigurator(this));
     }
 
     @Override

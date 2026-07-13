@@ -2,7 +2,7 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
-import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopActionPacket;
@@ -37,6 +37,8 @@ public class RewardChoiceScreen extends ScaledScreen {
 
     private final ShopScreen parent;
     private final ShopEntry entry;
+    private final long catalogRevision;
+    private final long entryKey;
     private final long times;
     private final boolean aeMode;
     private final boolean backpackMode;
@@ -50,6 +52,8 @@ public class RewardChoiceScreen extends ScaledScreen {
         super(Component.literal("选择奖励"));
         this.parent = parent;
         this.entry = entry;
+        this.catalogRevision = ClientShopCatalog.revision();
+        this.entryKey = ClientShopCatalog.keyOf(entry);
         this.times = times;
         this.aeMode = aeMode;
         this.backpackMode = backpackMode;
@@ -172,9 +176,9 @@ public class RewardChoiceScreen extends ScaledScreen {
 
     private void confirm() {
         if (selected < 0) return;
-        int entryIndex = ShopConfig.getEntries().indexOf(entry);
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(
-                ShopActionPacket.Action.BUY, entry.getGoodsId(), entry.getCategory(), times, aeMode, backpackMode, entryIndex, selected));
+                ShopActionPacket.Action.BUY, catalogRevision, entryKey,
+                times, aeMode, backpackMode, selected));
         Minecraft.getInstance().setScreen(parent);
     }
 

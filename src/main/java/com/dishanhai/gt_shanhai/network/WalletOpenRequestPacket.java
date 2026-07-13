@@ -30,7 +30,9 @@ public class WalletOpenRequestPacket {
                 return;
             }
             boolean canEdit = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player);
-            ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new ShopOpenPacket(canEdit));
+            ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                    new ShopOpenPacket(canEdit,
+                            com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
             // 打开商店即推账户快照，客户端界面/tooltip 立刻有余额
             com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
         });

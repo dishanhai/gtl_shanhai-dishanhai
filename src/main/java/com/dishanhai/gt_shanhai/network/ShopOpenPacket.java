@@ -14,33 +14,44 @@ import java.util.function.Supplier;
 public class ShopOpenPacket {
 
     private final boolean canEdit;
+    private final com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest manifest;
 
     public ShopOpenPacket() {
-        this(false);
+        this(false, com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.empty());
     }
 
     public ShopOpenPacket(boolean canEdit) {
+        this(canEdit, com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.empty());
+    }
+
+    public ShopOpenPacket(boolean canEdit, com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest manifest) {
         this.canEdit = canEdit;
+        this.manifest = manifest == null
+                ? com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.empty() : manifest;
     }
 
     public ShopOpenPacket(FriendlyByteBuf buf) {
         this.canEdit = buf.readBoolean();
+        this.manifest = ShopCatalogCodecs.readManifest(buf);
     }
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeBoolean(canEdit);
+        ShopCatalogCodecs.writeManifest(buf, manifest);
     }
 
     public static void handle(ShopOpenPacket pkt, Supplier<NetworkEvent.Context> ctx) {
         NetworkEvent.Context context = ctx.get();
         if (context.getDirection().getReceptionSide().isClient()) {
-            context.enqueueWork(() -> openClient(pkt.canEdit));
+            context.enqueueWork(() -> openClient(pkt.canEdit, pkt.manifest));
         }
         context.setPacketHandled(true);
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static void openClient(boolean canEdit) {
+    private static void openClient(boolean canEdit,
+                                   com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest manifest) {
+        com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog.applyManifest(manifest);
         com.dishanhai.gt_shanhai.client.gui.shop.ShopScreenOpener.open(canEdit);
     }
 }
