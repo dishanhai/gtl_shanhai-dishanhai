@@ -73,6 +73,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.LongValue shopRewardRollCap;
         /** 运行期配方查找缓存 — 是否统计 hit/miss/negativeHit/clear 次数（默认关闭，避免每 tick 统计开销） */
         public ForgeConfigSpec.BooleanValue runtimeRecipeCacheDiagnostics;
+        /** KJS 配方库磁盘缓存 — 是否启用启动期缓存优化 */
+        public ForgeConfigSpec.BooleanValue kjsRecipeLibraryCacheEnabled;
 
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("tag_filter_bus");
@@ -207,6 +209,15 @@ public final class DShanhaiConfig {
                              "仅用于排查缓存是否生效，不影响缓存本身的读写逻辑",
                              "关闭时计数器不自增，无额外开销；开启后用 /shanhai cache stats 查看统计")
                     .define("diagnosticsEnabled", false);
+            builder.pop();
+
+            builder.push("kjs_recipe_library_cache");
+            kjsRecipeLibraryCacheEnabled = builder
+                    .comment("是否启用 KJS 配方库启动期磁盘缓存优化（默认关闭）",
+                             "警告：开启此功能存在风险，一般仅用于开发环境加快游戏进入进程",
+                             "正常游玩或生产环境不建议开启；关闭时完整使用 KubeJS/Rhino 原始配方注册与原版配方库",
+                             "修改后需重启游戏或服务端生效")
+                    .define("enabled", false);
             builder.pop();
         }
     }

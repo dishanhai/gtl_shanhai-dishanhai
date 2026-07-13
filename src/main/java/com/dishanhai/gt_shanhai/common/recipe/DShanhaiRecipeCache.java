@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.recipe;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine;
 import com.dishanhai.gt_shanhai.common.misc.RecipeManagerReflectionUtil;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
@@ -66,6 +67,12 @@ public final class DShanhaiRecipeCache {
             java.util.regex.Pattern.compile("gtr\\.([a-zA-Z_][a-zA-Z0-9_]*)\\(\\s*(['\"])([^'\"]+)\\2");
 
     private DShanhaiRecipeCache() {}
+
+    /** 启动期 KJS 配方库磁盘缓存总开关；配置未加载时按关闭处理。 */
+    public static boolean isEnabled() {
+        return DShanhaiConfig.COMMON_SPEC.isLoaded()
+                && DShanhaiConfig.COMMON.kjsRecipeLibraryCacheEnabled.get();
+    }
 
     /**
      * 山海自己在 Java 侧注册的全部自定义 GTRecipeType（反射读 DShanhaiRecipeTypes 里所有
