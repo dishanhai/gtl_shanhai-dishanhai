@@ -164,28 +164,12 @@ public final class PatternRecipeTypeHelper {
             }
             GenericStack[] in = pattern.getSparseInputs();
             GenericStack[] out = pattern.getSparseOutputs();
-            GTRecipe recipe = recipeTypeId == null || recipeTypeId.isEmpty()
+            return recipeTypeId == null || recipeTypeId.isEmpty()
                     ? VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out)
                     : VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out, recipeTypeId);
-            LOG.debug("[inferRecipe] inputs={} outputs={} -> recipe={}",
-                    describeStacks(in), describeStacks(out),
-                    recipe == null ? "null"
-                            : (recipe.recipeType == null || recipe.recipeType.registryName == null
-                                    ? "无类型" : recipe.recipeType.registryName.toString()));
-            return recipe;
         } catch (RuntimeException e) {
             LOG.warn("[inferRecipe] 解析异常", e);
             return null;
         }
-    }
-
-    private static String describeStacks(GenericStack[] stacks) {
-        if (stacks == null) return "null";
-        StringBuilder sb = new StringBuilder("[");
-        for (GenericStack s : stacks) {
-            if (s == null || s.what() == null) continue;
-            sb.append(s.what()).append("x").append(s.amount()).append(", ");
-        }
-        return sb.append("]").toString();
     }
 }

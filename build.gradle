@@ -30,7 +30,7 @@ dependencies {
     implementation fileTree(dir: 'libs', include: '*.jar', excludes: ['spark-*.jar'])
     compileOnly fileTree(dir: 'libs', include: 'spark-*.jar')
     implementation files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/ftb-quests-forge-2001.4.8.jar')
-    implementation files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/ftb-teams-forge-2001.3.0.jar')
+    implementation files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/ftb-teams-forge-2001.3.2.jar')
     // cloth-config：模组列表「配置」按钮的 GUI（运行期整合包已提供，仅编译期引用）
     compileOnly files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/cloth-config-11.1.136-forge.jar')
 

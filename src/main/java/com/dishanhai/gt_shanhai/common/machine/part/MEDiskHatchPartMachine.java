@@ -450,6 +450,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         sdaCell.getAvailableStacks(contents);
         Set<AEKey> carrierKeys = new HashSet<>();
         CarrierKeyFilterState carrierFilterState = new CarrierKeyFilterState(carrierKeys);
+        List<EaeInfinityCellStorage> infinityCells = new ArrayList<>();
         for (var entry : contents) {
             AEKey key = entry.getKey();
             if (key instanceof AEItemKey itemKey) {
@@ -458,8 +459,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                 MEStorage directInfinityCell = createEaeInfinityCellStorage(innerStack);
                 if (directInfinityCell != null) {
                     carrierFilterState.add(key);
-                    runtime.mounts.add(directInfinityCell);
-                    runtime.mountedCount++;
+                    infinityCells.add((EaeInfinityCellStorage) directInfinityCell);
                     continue;
                 }
                 StorageCell subCell = StorageCells.getCellInventory(innerStack, slotSaveProvider);
@@ -483,6 +483,16 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                             slotSaveProvider));
                 }
             }
+        }
+
+        // 合并挂载本槽位内的所有无限盘：单个直接挂，多个合并成一个聚合挂载对象，
+        // 避免 AE 网络扫描时对每个无限盘单独派发 getAvailableStacks。
+        if (infinityCells.size() == 1) {
+            runtime.mounts.add(infinityCells.get(0));
+            runtime.mountedCount++;
+        } else if (infinityCells.size() > 1) {
+            runtime.mounts.add(new AggregatedInfinityCellStorage(infinityCells));
+            runtime.mountedCount++;
         }
 
         // 挂载 SDA（过滤掉子载体物品）
@@ -548,6 +558,56 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         @Override
         public Component getDescription() {
             return description;
+        }
+    }
+
+    /**
+     * 合并同一槽位内多个 EaeInfinityCellStorage（SDA 批量装无限盘时常见）为一个挂载对象。
+     * 每个无限盘内容构造后永不变化（record 不可变），聚合快照只需建立一次；
+     * 避免 AE 网络每次扫描库存都对该槽位内每个无限盘单独派发一次 getAvailableStacks
+     * （spark 剖析：单次 KeyCounter.set/getSubIndex 开销虽小，但按无限盘数量线性叠加，
+     * SDA 内无限盘越多、网络扫描越频繁就越明显）。insert/extract 逐个匹配 record 委派，
+     * 与原来 AE 网络自己逐个挂载点尝试的语义等价（同优先级内互相替代，不影响提取顺序）。
+     */
+    public static final class AggregatedInfinityCellStorage implements MEStorage {
+        private final List<EaeInfinityCellStorage> children;
+        private final KeyCounterSnapshot snapshot;
+
+        private AggregatedInfinityCellStorage(List<EaeInfinityCellStorage> children) {
+            this.children = children;
+            KeyCounter counter = new KeyCounter();
+            for (EaeInfinityCellStorage child : children) {
+                child.getAvailableStacks(counter);
+            }
+            this.snapshot = new KeyCounterSnapshot(counter);
+        }
+
+        @Override
+        public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
+            for (EaeInfinityCellStorage child : children) {
+                long inserted = child.insert(what, amount, mode, src);
+                if (inserted > 0) return inserted;
+            }
+            return 0L;
+        }
+
+        @Override
+        public long extract(AEKey what, long amount, Actionable mode, IActionSource src) {
+            for (EaeInfinityCellStorage child : children) {
+                long extracted = child.extract(what, amount, mode, src);
+                if (extracted > 0) return extracted;
+            }
+            return 0L;
+        }
+
+        @Override
+        public void getAvailableStacks(KeyCounter out) {
+            snapshot.addTo(out);
+        }
+
+        @Override
+        public Component getDescription() {
+            return Component.literal("Infinity Cells");
         }
     }
 

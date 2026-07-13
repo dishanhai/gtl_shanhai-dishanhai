@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ProgrammableHatchPartMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
@@ -105,6 +106,56 @@ public final class RecipeTypePatternSearchHelper {
         synchronized (PATTERN_PEEK_CACHE) {
             PATTERN_PEEK_CACHE.computeIfAbsent(buffer, b -> new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>())
                     .put(slot, new PatternPeekCacheEntry(stackHash, recipe));
+        }
+        return recipe;
+    }
+
+    // ===== 星律样板推断缓存（active/首配兜底共用）=====
+    // key: buffer 实例（弱引用）；value: slot -> (样板身份哈希, 缓存时的配方规则版本号, 推断出的 GTRecipe)。
+    // 与 peekRecipeCached 的区别：星律路径会写回 NBT（gtShanhai$getPatternRecipe 内部 ensureRecipe 写 TAG_RECIPE_TYPE），
+    // 且必须感知 DShanhaiRecipeModifierAPI 的配方修改规则（剥离/替换/删除）运行期变化——规则一变，旧缓存的匹配结果
+    // 可能不再是"当前"匹配到的配方，仅按样板身份哈希判断不够，还要比对 getPatternCacheRevision()。
+    private static final Map<MEPatternBufferPartMachineBase, it.unimi.dsi.fastutil.ints.Int2ObjectMap<MarkedRecipeCacheEntry>>
+            MARKED_RECIPE_CACHE = Collections.synchronizedMap(new WeakHashMap<>());
+
+    private static final class MarkedRecipeCacheEntry {
+        final int stackIdentityHash;
+        final long revision;
+        final GTRecipe recipe;
+        MarkedRecipeCacheEntry(int stackIdentityHash, long revision, GTRecipe recipe) {
+            this.stackIdentityHash = stackIdentityHash;
+            this.revision = revision;
+            this.recipe = recipe;
+        }
+    }
+
+    /**
+     * 星律 active 槽位路径（{@link #collectMarkedPatternRecipesFromMachine}）与首配兜底路径
+     * （{@link #collectFirstSparkPatternRecipes}）共用的缓存入口——昂贵的样板反推调用
+     * （AE2 样板 NBT 解码 + 配方全量匹配）只在缓存未命中时才触发一次。
+     */
+    private static GTRecipe getMarkedRecipeCached(MEPatternBufferPartMachineBase buffer, RecipeTypePatternSlotAccess access, int slot) {
+        int stackHash = 0;
+        if (buffer instanceof MEPatternBufferPartMachine mepbpm) {
+            var inventory = mepbpm.getPatternInventory();
+            if (inventory != null && slot >= 0 && slot < inventory.getSlots()) {
+                stackHash = System.identityHashCode(inventory.getStackInSlot(slot));
+            }
+        }
+        long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
+        synchronized (MARKED_RECIPE_CACHE) {
+            it.unimi.dsi.fastutil.ints.Int2ObjectMap<MarkedRecipeCacheEntry> slotCache = MARKED_RECIPE_CACHE.get(buffer);
+            if (slotCache != null) {
+                MarkedRecipeCacheEntry entry = slotCache.get(slot);
+                if (entry != null && entry.stackIdentityHash == stackHash && entry.revision == revision) {
+                    return entry.recipe;
+                }
+            }
+        }
+        GTRecipe recipe = access.gtShanhai$getPatternRecipe(slot);
+        synchronized (MARKED_RECIPE_CACHE) {
+            MARKED_RECIPE_CACHE.computeIfAbsent(buffer, b -> new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>())
+                    .put(slot, new MarkedRecipeCacheEntry(stackHash, revision, recipe));
         }
         return recipe;
     }
@@ -254,12 +305,12 @@ public final class RecipeTypePatternSearchHelper {
     private static void collectMarkedPatternRecipesFromMachine(IRecipeCapabilityMachine capabilityMachine,
             Object ownerMachine, Object patternMachine, int[] activeSlots, Set<GTRecipe> result) {
         if (!(patternMachine instanceof RecipeTypePatternSlotAccess access)
-                || !(patternMachine instanceof MEPatternBufferPartMachineBase)) {
+                || !(patternMachine instanceof MEPatternBufferPartMachineBase buffer)) {
             return;
         }
         if (activeSlots != null) {
             for (int slot : activeSlots) {
-                GTRecipe recipe = access.gtShanhai$getPatternRecipe(slot);
+                GTRecipe recipe = getMarkedRecipeCached(buffer, access, slot);
                 if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
                     activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                     result.add(recipe);
@@ -290,7 +341,7 @@ public final class RecipeTypePatternSearchHelper {
                 clearOrderFulfilled(buffer, slot); // 样板被取出：这一单彻底结束，下次放样板算新单
                 continue;
             }
-            GTRecipe recipe = access.gtShanhai$getPatternRecipe(slot);
+            GTRecipe recipe = getMarkedRecipeCached(buffer, access, slot);
             if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
                 topUpVirtualSupply(buffer, slot, inventory.getStackInSlot(slot), recipe);
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);

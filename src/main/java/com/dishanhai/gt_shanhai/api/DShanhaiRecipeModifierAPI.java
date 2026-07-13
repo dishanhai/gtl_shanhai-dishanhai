@@ -297,11 +297,9 @@ public class DShanhaiRecipeModifierAPI {
         var stripList = STRIP_RULES.get(typeId);
         if (stripList == null) return;
         String recipeId = recipe.getId() != null ? recipe.getId().toString() : "";
-        LOG.debug("[StripByType] type={} recipeId={} rules={}", typeId, recipeId, stripList.size());
         for (StripEntry rule : stripList) {
             if (!rule.recipeId.isEmpty()) {
                 boolean idMatch = recipeId.equals(rule.recipeId) || recipeId.contains(rule.recipeId);
-                LOG.debug("[StripByType]   rule recipeId={} vs actual={} match={}", rule.recipeId, recipeId, idMatch);
                 if (!idMatch) continue;
             }
             applyStrip(recipe, rule);
@@ -315,17 +313,14 @@ public class DShanhaiRecipeModifierAPI {
         var replaceList = REPLACE_RULES.get(typeId);
         if (replaceList == null || replaceList.isEmpty()) return;
         String rid = recipe.getId() != null ? recipe.getId().toString() : "";
-        LOG.debug("[ReplaceByType] type={} recipe={} rules={}", typeId, rid, replaceList.size());
         for (ReplaceEntry rule : replaceList) {
             if (!rule.recipeId.isEmpty()) {
                 if (!matchesRecipeId(rid, rule.recipeId)) continue;
             }
-            boolean found = false;
-            found |= replaceInMap(recipe.inputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
-            found |= replaceInMap(recipe.outputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
-            found |= replaceInMap(recipe.tickInputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
-            found |= replaceInMap(recipe.tickOutputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
-            LOG.debug("[ReplaceByType]   old={} new={} circuit={} found={}", rule.oldItem, rule.newItem, rule.circuitNumber, found);
+            replaceInMap(recipe.inputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
+            replaceInMap(recipe.outputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
+            replaceInMap(recipe.tickInputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
+            replaceInMap(recipe.tickOutputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
         }
     }
 
