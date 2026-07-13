@@ -46,6 +46,7 @@ public class ClientInit {
 
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientChatReceived);
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onMouseButtonPressed);
+        MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientLoggingOut);
         MinecraftForge.EVENT_BUS.addListener(ShanhaiKeyMappings::onClientTick);
     }
 
@@ -65,5 +66,10 @@ public class ClientInit {
         if (JeiChatLinkHelper.runSearchCommand(clickEvent.getValue())) {
             event.setCanceled(true);
         }
+    }
+
+    /** 不允许跨服务器复用相同 revision 的旧商品目录。 */
+    private static void onClientLoggingOut(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
+        com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog.clear();
     }
 }

@@ -42,12 +42,14 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     // 配方集合短缓存：只缓存"哪些配方是候选"，绝不缓存数量/并行/扣料。命中可省掉每配方周期
     // （~10t 一次的 onRecipeFinish 接续）对大型 AE 输入列表的 getContents() 物化重搜。
     // 三道保险确保缓存绝不"控死"配方：
-    //   1) 短窗口自愈——超时（LOOKUP_CACHE_TICKS）必重搜，任何陈旧最多存活 1 秒；
+    //   1) 短窗口自愈——超时必重搜；默认 1 秒，稳定的原初系逻辑可单独覆写；
     //   2) 空结果不缓存——机器空转/缺料时永远实时搜索，料一到立刻开工，杜绝"缓存空集守死不启动"；
     //   3) 选择集变更即时失效（invalidateLookupSetCache）+ 锁定态直接绕过。
-    // 数量/扣料/模块门控仍每周期实时算（见 calculateParallels / buildFinalWirelessRecipe / 模块 checkModuleCondition），
-    // 故缓存最坏只造成"网络新出现的可用配方延迟 ≤ 1 秒才被拾取"，不可能卡产/重复/串产/控死。
-    private static final long LOOKUP_CACHE_TICKS = 20L;
+    // 数量/扣料仍每周期实时算；模块门控由模块物品/数量变化即时失效（见 calculateParallels /
+    // buildFinalWirelessRecipe / 模块 refreshModuleConditionContext），
+    // 故缓存最坏只造成"网络新出现的可用配方延迟至对应逻辑的缓存窗口后才被拾取"，
+    // 不可能卡产/重复/串产/控死。
+    private static final long DEFAULT_LOOKUP_CACHE_TICKS = 20L;
     private long cachedLookupTick = Long.MIN_VALUE;
     private Set<GTRecipe> cachedLookupRecipes;
 
@@ -80,6 +82,14 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         cachedLookupRecipes = null;
     }
 
+    /**
+     * 非空候选集合的缓存时窗。普通选择集机器保持 20 tick；稳定运行的原初系逻辑可单独延长，
+     * 不影响代理执行者等动态目标机器。
+     */
+    protected long getLookupCacheTicks() {
+        return DEFAULT_LOOKUP_CACHE_TICKS;
+    }
+
     @Override
     public boolean checkMatchedRecipeAvailable(GTRecipe recipe) {
         if (recipe == null || recipe.recipeType == null || !isRecipeTypeSelected(recipe.recipeType)) {
@@ -102,7 +112,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
      * <p>
      * 结果集走短缓存（三道保险见字段注释），只缓存"候选是谁"、不缓存数量：锁定态绕过、空结果不缓存、
      * 超窗自愈；再叠加 {@link #calculateParallels()} 的"算不出可运行配方就立即失效缓存"——保证机器绝不会
-     * 守着陈旧候选集空转，缓存最坏只让新配方晚 ≤1 秒被拾取。
+     * 守着陈旧候选集空转。具体时窗由 {@link #getLookupCacheTicks()} 决定。
      */
     @Override
     protected Set<GTRecipe> lookupRecipeIterator() {
@@ -114,9 +124,11 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             return lookupLockedRecipe();
         }
         long tick = machine.getOffsetTimer();
+        long cacheTicks = getLookupCacheTicks();
         // 保险①短窗口自愈 + 保险②空结果不缓存（cachedLookupRecipes 非空才可能命中）
         if (cachedLookupRecipes != null
-                && tick - cachedLookupTick >= 0 && tick - cachedLookupTick < LOOKUP_CACHE_TICKS) {
+                && cacheTicks > 0L
+                && tick - cachedLookupTick >= 0 && tick - cachedLookupTick < cacheTicks) {
             return cachedLookupRecipes;
         }
         Set<GTRecipe> recipes = searchSelectedRecipeTypes(machine);

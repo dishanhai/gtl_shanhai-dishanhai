@@ -41,12 +41,17 @@ public final class ShopCatalogChunkRequestPacket {
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
             if (player == null || packet.requestId <= 0L || packet.chunkId < 0) return;
+            if (!ShopCatalogManifestPacket.allowChunkRequest(player)) return;
             ShopCatalogSnapshot snapshot = ShopConfig.snapshot();
-            if (snapshot.revision() != packet.revision) return;
+            if (snapshot.revision() != packet.revision) {
+                ShopCatalogManifestPacket.sendLatestIfAllowed(
+                        player, snapshot.manifest(), packet.revision);
+                return;
+            }
             ShanhaiNetwork.CHANNEL.send(
                     PacketDistributor.PLAYER.with(() -> player),
                     new ShopCatalogChunkPacket(snapshot.revision(), packet.requestId,
-                            packet.chunkId, snapshot.chunk(packet.chunkId)));
+                            packet.chunkId, ShopConfig.chunk(snapshot.revision(), packet.chunkId)));
         });
         context.setPacketHandled(true);
     }

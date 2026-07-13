@@ -7,6 +7,7 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientShopCatalogStateTest {
@@ -54,8 +55,77 @@ class ClientShopCatalogStateTest {
         assertTrue((long) request.invoke(state, 3) > 0L);
     }
 
+    @Test
+    void acceptsOnlyCurrentAbsoluteRemainingUsesWithoutIncreasing() throws Exception {
+        Class<?> type = Class.forName(
+                "com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog$State");
+        Object state = type.getConstructor().newInstance();
+        Method applyManifest = type.getMethod("applyManifest", ShopCatalogManifest.class);
+        Method applyRemaining = type.getMethod(
+                "applyRemainingUses", long.class, long.class, long.class);
+        Method remaining = type.getMethod("remainingUses", long.class);
+        applyManifest.invoke(state, manifest(10L));
+
+        assertFalse((boolean) applyRemaining.invoke(state, 9L, 0L, 8L));
+        assertFalse((boolean) applyRemaining.invoke(state, 10L, -1L, 8L));
+        assertFalse((boolean) applyRemaining.invoke(state, 10L, 0L, -1L));
+        assertTrue((boolean) applyRemaining.invoke(state, 10L, 0L, 8L));
+        assertFalse((boolean) applyRemaining.invoke(state, 10L, 0L, 9L));
+        assertFalse((boolean) applyRemaining.invoke(state, 10L, 0L, 8L));
+        assertTrue((boolean) applyRemaining.invoke(state, 10L, 0L, 3L));
+        assertEquals(3L, remaining.invoke(state, 0L));
+    }
+
+    @Test
+    void remainingStateCanPrecedeChunkAndSurvivesForgetUntilRevisionChanges() throws Exception {
+        Class<?> type = Class.forName(
+                "com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog$State");
+        Object state = type.getConstructor().newInstance();
+        Method applyManifest = type.getMethod("applyManifest", ShopCatalogManifest.class);
+        Method applyRemaining = type.getMethod(
+                "applyRemainingUses", long.class, long.class, long.class);
+        Method remaining = type.getMethod("remainingUses", long.class);
+        Method request = type.getMethod("beginRequest", int.class);
+        Method accept = type.getMethod("accept", long.class, long.class, int.class);
+        Method forget = type.getMethod("forgetChunk", int.class);
+        applyManifest.invoke(state, manifest(20L));
+
+        assertTrue((boolean) applyRemaining.invoke(state, 20L, 0L, 4L));
+        long requestId = (long) request.invoke(state, 3);
+        assertTrue((boolean) accept.invoke(state, 20L, requestId, 3));
+        forget.invoke(state, 3);
+        assertEquals(4L, remaining.invoke(state, 0L));
+
+        assertFalse((boolean) applyManifest.invoke(state, manifest(20L)));
+        assertEquals(4L, remaining.invoke(state, 0L));
+        assertTrue((boolean) applyManifest.invoke(state, manifest(21L)));
+        assertEquals(-1L, remaining.invoke(state, 0L));
+    }
+
+    @Test
+    void sameRevisionReadyChangesPreserveRemainingState() throws Exception {
+        Class<?> type = Class.forName(
+                "com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog$State");
+        Object state = type.getConstructor().newInstance();
+        Method applyManifest = type.getMethod("applyManifest", ShopCatalogManifest.class);
+        Method applyRemaining = type.getMethod(
+                "applyRemainingUses", long.class, long.class, long.class);
+        Method remaining = type.getMethod("remainingUses", long.class);
+        applyManifest.invoke(state, manifest(30L, true));
+        assertTrue((boolean) applyRemaining.invoke(state, 30L, 0L, 4L));
+
+        assertTrue((boolean) applyManifest.invoke(state, manifest(30L, false)));
+        assertEquals(4L, remaining.invoke(state, 0L));
+        assertTrue((boolean) applyManifest.invoke(state, manifest(30L, true)));
+        assertEquals(4L, remaining.invoke(state, 0L));
+    }
+
     private static ShopCatalogManifest manifest(long revision) {
-        return new ShopCatalogManifest(revision, true, List.of(
+        return manifest(revision, true);
+    }
+
+    private static ShopCatalogManifest manifest(long revision, boolean ready) {
+        return new ShopCatalogManifest(revision, ready, List.of(
                 new ShopCatalogManifest.Stub(0L, "杂货", "", false,
                         3, "", "", List.of("minecraft:stone"))));
     }

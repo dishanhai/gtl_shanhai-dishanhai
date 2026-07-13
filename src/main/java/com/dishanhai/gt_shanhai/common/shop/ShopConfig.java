@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.common.shop;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.network.ShopCatalogManifestPacket;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -75,7 +76,19 @@ public final class ShopConfig {
 
     public static List<ShopCatalogEntryPayload> chunk(long revision, int chunkId) {
         ShopCatalogSnapshot current = snapshot();
-        return current.revision() != revision ? List.of() : current.chunk(chunkId);
+        if (current.revision() != revision) return List.of();
+        List<ShopCatalogEntryPayload> frozen = current.chunk(chunkId);
+        int limit = Math.min(frozen.size(), ShopCatalogSnapshot.DEFAULT_MAX_CHUNK_ENTRIES);
+        List<ShopCatalogEntryPayload> live = new ArrayList<>(limit);
+        for (int i = 0; i < limit; i++) {
+            ShopCatalogEntryPayload payload = frozen.get(i);
+            ShopEntry entry = current.resolve(payload.entryKey());
+            if (entry != null) {
+                live.add(new ShopCatalogEntryPayload(
+                        payload.entryKey(), ShopEntryJsonCodec.toPayload(entry)));
+            }
+        }
+        return List.copyOf(live);
     }
 
     /** 获取所有被商店接受的币种 ID 集合（= 各商品成本里出现过的 coins 键，去重、保序）。 */
@@ -225,6 +238,7 @@ public final class ShopConfig {
         ShopCatalogSnapshot built = ShopCatalogSnapshot.build(nextRevision++, entries);
         snapshot = built;
         loaded = true;
+        ShopCatalogManifestPacket.broadcast(built.manifest());
     }
 
     private static final com.google.gson.Gson GSON =

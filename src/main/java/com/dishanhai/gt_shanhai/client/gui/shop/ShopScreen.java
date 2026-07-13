@@ -3,11 +3,13 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
 import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
+import com.dishanhai.gt_shanhai.common.shop.ShopGridViewport;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
@@ -91,6 +93,8 @@ public class ShopScreen extends ScaledScreen {
     private static String selectedTop;
     private static String selectedSub = "";
     private ShopEntry selected;
+    private long selectedEntryKey = -1L;
+    private long observedCatalogRevision = -1L;
     private long amount = 1L;      // 购买/出售次数，支持 Long.MAX
     private EditBox searchBox;
     private EditBox amountBox;      // AE 风格数量输入框
@@ -120,6 +124,21 @@ public class ShopScreen extends ScaledScreen {
     private boolean draggingGridScroll; // 正在拖拽网格右侧滚动条
     private final boolean canEdit; // 服务端下发的编辑权（OP 或白名单）：决定新增/编辑按钮显隐
     public boolean canEdit() { return canEdit; } // 供子页（如 CurrencyAtmScreen）跳转兑换中心时透传编辑权
+
+    private ShopEntry visibleEntry(int index) {
+        if (index < 0 || index >= visibleEntryKeys.size()) return null;
+        return ClientShopCatalog.get(visibleEntryKeys.get(index));
+    }
+
+    private void selectEntry(long entryKey, ShopEntry entry) {
+        selectedEntryKey = entry == null ? -1L : entryKey;
+        selected = entry;
+    }
+
+    private void clearSelection() {
+        selectedEntryKey = -1L;
+        selected = null;
+    }
     private String previewHoverName; // 详情页花费预览槽悬停名（drawDetail 暂存 → renderTooltips 消费）
     private ItemStack detailHoverStack; // 详情页商品大图标悬停时暂存的真实 ItemStack（含 SDA 等实时解析 tooltip，drawDetail 暂存 → renderTooltips 消费）
     private boolean descOverlayOpen; // 描述详情大图层（FTBQ 风格）开关
@@ -132,6 +151,7 @@ public class ShopScreen extends ScaledScreen {
     // 「跳转」入口命中框（仿 FTBQ 隐藏任务跳转）：同上，drawDetail 渲染时暂存坐标，universalMouseClicked 消费
     private boolean linkVisible;
     private ShopEntry linkTarget;
+    private long linkTargetKey = -1L;
     private int linkX, linkY, linkW, linkH;
     // GuideME 指南集成：商品清单里有物品登记了指南页就自动出现跳转入口，不需要编辑者手动配置。
     // guideHitsFor 缓存"上次是给哪个条目查的"，selected 没变就不用每帧重新扫描所有已装指南（见反馈：避免无谓开销）。
@@ -151,7 +171,7 @@ public class ShopScreen extends ScaledScreen {
     // 计算态
     private List<String> categories = new ArrayList<>();     // 主分类页签
     private List<String> subCategories = new ArrayList<>();  // 当前主分类下的子分类
-    private List<ShopEntry> visibleEntries = new ArrayList<>();
+    private List<Long> visibleEntryKeys = new ArrayList<>();
 
     public ShopScreen() {
         this(false);
@@ -255,10 +275,21 @@ public class ShopScreen extends ScaledScreen {
     private int cellX(int col) { return listLeft() + col * COL_STRIDE; }
     private int cellY(int row) { return contentTop() + row * ROW_STRIDE - scroll; }
 
+    private ShopGridViewport.Range visibleGridRange() {
+        return ShopGridViewport.visibleRange(
+                visibleEntryKeys.size(), gridColumns(), scroll, contentHeight(), ROW_STRIDE, 1);
+    }
+
+    private int entryIndexAt(double mouseX, double mouseY) {
+        return ShopGridViewport.indexAt(
+                visibleEntryKeys.size(), gridColumns(), COL_STRIDE, ROW_STRIDE, CELL_W, CELL_H,
+                listLeft(), contentTop(), listWidth(), contentHeight(), scroll, mouseX, mouseY);
+    }
+
     /** 最大滚动像素（内容总高 - 可见高，下限 0）。 */
     private int maxGridScroll() {
         int cols = gridColumns();
-        int rows = (visibleEntries.size() + cols - 1) / cols;
+        int rows = (visibleEntryKeys.size() + cols - 1) / cols;
         return Math.max(0, rows * ROW_STRIDE - contentHeight());
     }
 
@@ -277,6 +308,11 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void initScaled() {
+        if (observedCatalogRevision != ClientShopCatalog.revision()) {
+            observedCatalogRevision = ClientShopCatalog.revision();
+            clearSelection();
+            scroll = 0;
+        }
         // 动态面板铺满可用逻辑区（KE 原式）。maxScale=Float.MAX_VALUE 保证 vWidth×guiScale≡width，
         // 面板 panelWidth=vWidth-8 铺满恰好不溢出——这是 KE 的缩放不变式，勿再封顶 maxScale。
         left = 4;
@@ -284,11 +320,11 @@ public class ShopScreen extends ScaledScreen {
         panelWidth = Math.max(700, vWidth - 8);
         panelHeight = Math.max(360, vHeight - 16);
 
-        categories = ShopConfig.getTopCategories();
+        categories = ClientShopCatalog.topCategories();
         if (selectedTop == null || !categories.contains(selectedTop)) {
             selectedTop = categories.isEmpty() ? ShopEntry.DEFAULT_CATEGORY : categories.get(0);
         }
-        subCategories = ShopConfig.getSubCategories(selectedTop);
+        subCategories = ClientShopCatalog.subCategories(selectedTop);
         if (!selectedSub.isEmpty() && !subCategories.contains(selectedSub)) {
             selectedSub = ""; // 子分类已不存在 → 回退全部
         }
@@ -334,31 +370,29 @@ public class ShopScreen extends ScaledScreen {
 
     private void recomputeVisible() {
         String q = searchBox != null ? searchBox.getValue() : "";
-        List<ShopEntry> src = (q == null || q.isBlank())
-                ? ShopConfig.getEntriesOfGroup(selectedTop, selectedSub)
-                : ShopConfig.getEntries();
-        visibleEntries = new ArrayList<>();
-        for (ShopEntry e : src) {
-            if (!e.isStructurallyValid()) continue;
-            if (q != null && !q.isBlank()) {
-                StringBuilder hay = new StringBuilder(e.goodsDisplayName()).append(' ').append(e.getGoodsId());
-                if (e.hasMultipleGoods()) {
-                    for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
-                        hay.append(' ').append(new ItemStack(gs.item()).getHoverName().getString());
-                    }
-                }
-                if (!AdvancedSearchUtil.match(hay.toString(), q)) continue;
-            }
-            visibleEntries.add(e);
-        }
-        // 选中的条目若已被删除/替换（编辑），清空以免详情面板残留旧数据
-        if (selected != null && !ShopConfig.getEntries().contains(selected)) selected = null;
+        visibleEntryKeys = new ArrayList<>((q == null || q.isBlank())
+                ? ClientShopCatalog.keysOfGroup(selectedTop, selectedSub)
+                : ClientShopCatalog.searchKeys(q));
+        // 新 revision 已不含旧身份时清空详情，不能凭对象引用继续交易。
+        if (selectedEntryKey >= 0L && ClientShopCatalog.stub(selectedEntryKey) == null) clearSelection();
     }
 
     // ============ 渲染 ============
 
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        ClientShopCatalog.pumpMaterialization(1_500_000L);
+        ShopGridViewport.Range loadRange = visibleGridRange();
+        List<Long> neededKeys = new ArrayList<>();
+        for (int i = loadRange.fromInclusive(); i < loadRange.toExclusive(); i++) {
+            neededKeys.add(visibleEntryKeys.get(i));
+        }
+        if (selectedEntryKey >= 0L) neededKeys.add(selectedEntryKey);
+        if (selected != null && selected.hasLinkTarget()) {
+            long linked = ClientShopCatalog.linkedEntryKey(selected.getLinkTo());
+            if (linked >= 0L) neededKeys.add(linked);
+        }
+        ClientShopCatalog.ensureLoadedRange(neededKeys, 0, neededKeys.size());
         // 数量框仅在选中商品时可见（本方法在 super.render 画控件之前执行，故此处同步安全）
         if (amountBox != null) amountBox.setVisible(selected != null);
         // 整体面板（KE 风格 4 层嵌套：金边→金→暗背景→内层）
@@ -631,16 +665,35 @@ public class ShopScreen extends ScaledScreen {
 
         // 像素级平滑滚动：内容整体按 -scroll 平移，用 scissor 裁到网格矩形内。
         enableGridScissor(g, gx, gy, gx + gw, gy + gh);
-        for (int idx = 0; idx < visibleEntries.size(); idx++) {
+        ShopGridViewport.Range range = visibleGridRange();
+        for (int idx = range.fromInclusive(); idx < range.toExclusive(); idx++) {
             int col = idx % cols;
             int row = idx / cols;
             int cy = cellY(row);
             if (cy + CELL_H <= gy || cy >= gy + gh) continue; // 只画与网格相交的 cell
-            drawCell(g, visibleEntries.get(idx), cellX(col), cy, mx, my);
+            ShopEntry entry = visibleEntry(idx);
+            if (entry == null) drawLoadingCell(g, visibleEntryKeys.get(idx), cellX(col), cy);
+            else drawCell(g, entry, cellX(col), cy, mx, my);
         }
         g.disableScissor();
 
         drawGridScrollbar(g, gx, gy, gw, gh, cols, mx, my);
+    }
+
+    /** 未收到完整 JSON 时只画轻量占位，不提前创建 ItemStack 或访问物品模型。 */
+    private void drawLoadingCell(GuiGraphics g, long entryKey, int cx, int cy) {
+        renderBox(g, cx, cy, CELL_W, CELL_H, GREEN_DARK, ROW_BG);
+        int slotX = cx + 3, slotY = cy + 3;
+        renderItemCheckerSlot(g, slotX, slotY);
+        com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.Stub stub =
+                ClientShopCatalog.stub(entryKey);
+        String label = "加载中…";
+        if (stub != null && !stub.displayName().isEmpty()) label = stub.displayName();
+        else if (stub != null && !stub.goodsIds().isEmpty()) label = stub.goodsIds().get(0);
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font, label, CELL_W - 29),
+                slotX + 23, cy + 4, GRAY, true);
+        renderNumberBar(g, cx + 2, cy + CELL_H - 13, 34);
+        g.drawString(this.font, "§8加载中", cx + 5, cy + CELL_H - 11, GRAY, false);
     }
 
     /**
@@ -652,7 +705,7 @@ public class ShopScreen extends ScaledScreen {
         g.fill(barX, gy, barX + GRID_SCROLLBAR_W, gy + gh, NUMBER_BAR_BG);
         int maxScroll = maxGridScroll();
         if (maxScroll <= 0) return; // 未溢出：只留轨道底色占位，不画把手
-        int rows = (visibleEntries.size() + cols - 1) / cols;
+        int rows = (visibleEntryKeys.size() + cols - 1) / cols;
         int contentH = rows * ROW_STRIDE;
         int barH = Math.max(10, gh * gh / contentH);
         int barY = gy + (gh - barH) * scroll / maxScroll;
@@ -676,7 +729,7 @@ public class ShopScreen extends ScaledScreen {
         if (maxScroll <= 0) { scroll = 0; return; }
         int gy = contentTop(), gh = contentHeight();
         int cols = gridColumns();
-        int rows = (visibleEntries.size() + cols - 1) / cols;
+        int rows = (visibleEntryKeys.size() + cols - 1) / cols;
         int contentH = rows * ROW_STRIDE;
         int barH = Math.max(10, gh * gh / contentH);
         double usable = Math.max(1, gh - barH);
@@ -1060,7 +1113,9 @@ public class ShopScreen extends ScaledScreen {
         int guideRowH = guideHits.isEmpty() ? 0 : 12;
         // 跳转入口（仿 FTBQ 隐藏任务）：条目配了 linkTo 且能解析到目标商品才显示，占一行固定空间
         linkVisible = false;
-        linkTarget = selected.hasLinkTarget() ? ShopConfig.findByLinkKey(selected.getLinkTo()) : null;
+        linkTargetKey = selected.hasLinkTarget()
+                ? ClientShopCatalog.linkedEntryKey(selected.getLinkTo()) : -1L;
+        linkTarget = linkTargetKey >= 0L ? ClientShopCatalog.get(linkTargetKey) : null;
         int linkRowH = linkTarget != null ? 12 : 0;
         int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH - guideRowH; // 底部按钮上沿（编辑权多两排按钮，跳转/指南各让一行）
 
@@ -1188,11 +1243,11 @@ public class ShopScreen extends ScaledScreen {
         // 顶部买/卖页签：切换时打一条本地横幅提示当前模式，光靠页签颜色区分不够醒目，容易买卖模式点混
         if (hit(mx, my, buyTabX(), top + 6, BUY_TAB_W, TOP_BAR_H)) {
             if (mode != Mode.BUY) showMessage(Component.literal("§b[山海商店] §a已切换至【购买】模式"));
-            mode = Mode.BUY; selected = null; return true;
+            mode = Mode.BUY; clearSelection(); return true;
         }
         if (hit(mx, my, sellTabX(), top + 6, SELL_TAB_W, TOP_BAR_H)) {
             if (mode != Mode.SELL) showMessage(Component.literal("§e[山海商店] §a已切换至【出售】模式"));
-            mode = Mode.SELL; selected = null; return true;
+            mode = Mode.SELL; clearSelection(); return true;
         }
 
         // 关闭
@@ -1250,7 +1305,7 @@ public class ShopScreen extends ScaledScreen {
             int tw = Math.max(30, this.font.width(cat) + 10);
             if (tx + tw > tabsRight) break;
             if (hit(mx, my, tx, ty, tw, TAB_H)) {
-                selectedTop = cat; selectedSub = ""; selected = null; scroll = 0;
+                selectedTop = cat; selectedSub = ""; clearSelection(); scroll = 0;
                 this.init(Minecraft.getInstance(), this.width, this.height);
                 return true;
             }
@@ -1261,12 +1316,12 @@ public class ShopScreen extends ScaledScreen {
             int sty = subTabsY();
             int stx = left + 14;
             int aw = Math.max(30, this.font.width("全部") + 10);
-            if (hit(mx, my, stx, sty, aw, TAB_H)) { selectedSub = ""; selected = null; scroll = 0; recomputeVisible(); return true; }
+            if (hit(mx, my, stx, sty, aw, TAB_H)) { selectedSub = ""; clearSelection(); scroll = 0; recomputeVisible(); return true; }
             stx += aw + 3;
             for (String sub : subCategories) {
                 int tw = Math.max(30, this.font.width(sub) + 10);
                 if (stx + tw > tabsRight) break;
-                if (hit(mx, my, stx, sty, tw, TAB_H)) { selectedSub = sub; selected = null; scroll = 0; recomputeVisible(); return true; }
+                if (hit(mx, my, stx, sty, tw, TAB_H)) { selectedSub = sub; clearSelection(); scroll = 0; recomputeVisible(); return true; }
                 stx += tw + 3;
             }
         }
@@ -1274,23 +1329,17 @@ public class ShopScreen extends ScaledScreen {
         // 网格右侧滚动条（拖拽跳转，先于格子命中判定）
         if (gridScrollbarClicked(mx, my)) return true;
 
-        // 网格格子（像素滚动：用统一 cellX/cellY，且只命中网格矩形内的部分）
-        int cols = gridColumns();
-        int gy = contentTop(), gh = contentHeight();
-        for (int idx = 0; idx < visibleEntries.size(); idx++) {
-            int col = idx % cols, row = idx / cols;
-            int cy = cellY(row);
-            if (cy + CELL_H <= gy || cy >= gy + gh) continue; // 网格外不响应
-            if (my < gy || my > gy + gh) continue;            // 点击落在网格外亦不响应
-            if (hit(mx, my, cellX(col), cy, CELL_W, CELL_H)) {
-                selected = visibleEntries.get(idx);
-                return true;
-            }
+        // 网格格子：坐标直接反算索引，不再线性扫描当前分类全部商品。
+        int entryIndex = entryIndexAt(mx, my);
+        if (entryIndex >= 0) {
+            ShopEntry entry = visibleEntry(entryIndex);
+            if (entry != null) selectEntry(visibleEntryKeys.get(entryIndex), entry);
+            return true;
         }
 
         // 跳转入口（drawDetail 渲染时暂存的目标条目 + 命中框，点击直接切换详情页选中项）
         if (linkVisible && linkTarget != null && hit(mx, my, linkX, linkY, linkW, linkH)) {
-            selected = linkTarget;
+            selectEntry(linkTargetKey, linkTarget);
             return true;
         }
         // GuideME 指南跳转（单条命中直接开指南；多条命中开「指南详情」大图层）
@@ -1357,7 +1406,7 @@ public class ShopScreen extends ScaledScreen {
                 }
                 String delName = selected.goodsDisplayName();
                 send(ShopActionPacket.Action.DELETE, selected, 1L);
-                selected = null;
+                clearSelection();
                 pendingDeleteEntry = null;
                 showMessage(Component.literal("§b[山海商店] §a已删除：§f" + delName));
                 undoDeleteLabel = delName;
@@ -1457,15 +1506,13 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void send(ShopActionPacket.Action action, ShopEntry entry, long times) {
-        ResourceLocation gid = entry != null ? entry.getGoodsId() : null;
-        String cat = entry != null ? entry.getCategory() : "";
-        // 精确索引：同物品不同 NBT 的多条目（各种超级磁盘阵列）goodsId 撞车，靠列表索引区分。-1=无
-        int idx = entry != null ? ShopConfig.getEntries().indexOf(entry) : -1;
+        long entryKey = entry != null ? ClientShopCatalog.keyOf(entry) : -1L;
         // aeMode 仅购买用（AE 模式优先注入网络，出售货款走虚拟钱包账户不涉及实物投放）；
         // backpackMode 购买/出售都要带（出售时决定优先扣随身背包还是精妙背包，见 ShopPurchase#sellBulk）
         boolean ae = action == ShopActionPacket.Action.BUY && aeMode;
         boolean bp = backpackMode;
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(action, gid, cat, times, ae, bp, idx));
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(
+                action, ClientShopCatalog.revision(), entryKey, times, ae, bp));
     }
 
     private void drawTab(GuiGraphics g, int x, int y, int w, int h, String label, boolean active, int mx, int my) {
@@ -1788,41 +1835,36 @@ public class ShopScreen extends ScaledScreen {
             g.renderTooltip(this.font, Component.literal(previewHoverName), mx, my);
             return;
         }
-        // 悬停商品格显示 tooltip（用统一 cellX/cellY，仅网格矩形内响应）
-        int cols = gridColumns();
-        int gy = contentTop(), gh = contentHeight();
-        if (smy < gy || smy > gy + gh) return; // 网格外不弹 tooltip
-        for (int idx = 0; idx < visibleEntries.size(); idx++) {
-            int col = idx % cols, row = idx / cols;
-            int cy = cellY(row);
-            if (cy + CELL_H <= gy || cy >= gy + gh) continue;
-            if (GuiRenderUtil.isHovering(smx, smy, cellX(col), cy, CELL_W, CELL_H)) {
-                ShopEntry e = visibleEntries.get(idx);
-                List<Component> lines = new ArrayList<>();
-                lines.add(Component.literal("§f" + e.goodsDisplayName()));
-                if (e.hasMultipleGoods()) {
-                    StringBuilder gc = new StringBuilder("§7成分: §f");
-                    for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
-                        gc.append(gs.count()).append('×').append(new ItemStack(gs.item()).getHoverName().getString()).append(' ');
-                    }
-                    lines.add(Component.literal(gc.toString().trim()));
-                } else {
-                    lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
-                }
-                lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
-                if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
-                if (e.getCost().hasPhysical()) lines.add(Component.literal("§8含实物：物品在背包 / 流体绑定 AE"));
-                if (!e.getDisplayIcons().isEmpty()) {
-                    StringBuilder ic = new StringBuilder("§7图标: §f");
-                    for (ShopEntry.DisplayIcon d : e.getDisplayIcons()) ic.append(d.displayName()).append(' ');
-                    lines.add(Component.literal(ic.toString().trim()));
-                }
-                if (e.getDescription() != null && !e.getDescription().isEmpty()) {
-                    lines.add(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(e.getDescription())));
-                }
-                g.renderComponentTooltip(this.font, lines, mx, my);
-                break;
-            }
+        // 悬停商品格：坐标直接反算唯一索引，不再逐格扫描。
+        int idx = entryIndexAt(smx, smy);
+        if (idx < 0) return;
+        ShopEntry e = visibleEntry(idx);
+        if (e == null) {
+            g.renderTooltip(this.font, Component.literal("§8商品数据加载中…"), mx, my);
+            return;
         }
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal("§f" + e.goodsDisplayName()));
+        if (e.hasMultipleGoods()) {
+            StringBuilder gc = new StringBuilder("§7成分: §f");
+            for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
+                gc.append(gs.count()).append('×').append(new ItemStack(gs.item()).getHoverName().getString()).append(' ');
+            }
+            lines.add(Component.literal(gc.toString().trim()));
+        } else {
+            lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
+        }
+        lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
+        if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
+        if (e.getCost().hasPhysical()) lines.add(Component.literal("§8含实物：物品在背包 / 流体绑定 AE"));
+        if (!e.getDisplayIcons().isEmpty()) {
+            StringBuilder ic = new StringBuilder("§7图标: §f");
+            for (ShopEntry.DisplayIcon d : e.getDisplayIcons()) ic.append(d.displayName()).append(' ');
+            lines.add(Component.literal(ic.toString().trim()));
+        }
+        if (e.getDescription() != null && !e.getDescription().isEmpty()) {
+            lines.add(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(e.getDescription())));
+        }
+        g.renderComponentTooltip(this.font, lines, mx, my);
     }
 }

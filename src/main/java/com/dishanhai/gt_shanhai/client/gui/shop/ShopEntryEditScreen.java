@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
@@ -54,7 +55,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private final boolean isNew;
     private final ResourceLocation oldGoods;
     private final String oldCategory;
-    private final int oldEntryIndex;          // 原条目在 ShopConfig.getEntries() 的精确索引（同物品多条目防撞车）
+    private final long catalogRevision;       // 打开编辑器时的目录版本
+    private final long oldEntryKey;           // 待编辑条目身份；新增时=-1
 
     private final List<ItemStack> goodsList = new ArrayList<>(); // 商品清单（≥1 项；首项数量由 count/countBox 驱动，第2项起用各自槽位自带数量）
     private int count;
@@ -114,6 +116,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         this.useOffset = false;
         this.minScale = 0.1f;
         this.maxScale = Float.MAX_VALUE;
+        this.catalogRevision = ClientShopCatalog.revision();
+        this.oldEntryKey = entry == null ? -1L : ClientShopCatalog.keyOf(entry);
         if (entry != null) {
             for (ShopEntry.GoodsStack gs : entry.getGoodsList()) {
                 goodsList.add(gs.makeStack());
@@ -127,7 +131,6 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.periodCap = entry.isPeriodLimited() ? entry.getPeriodLimit() : -1L;
             this.oldGoods = entry.getGoodsId();
             this.oldCategory = entry.getCategory();
-            this.oldEntryIndex = com.dishanhai.gt_shanhai.common.shop.ShopConfig.getEntries().indexOf(entry);
             fillCost(entry.getCost());
             displayIcons.addAll(entry.getDisplayIcons());
             this.rewardMode = entry.getRewardMode();
@@ -146,7 +149,18 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.description = "";
             this.oldGoods = null;
             this.oldCategory = null;
-            this.oldEntryIndex = -1;
+        }
+    }
+
+    private boolean catalogSnapshotValid() {
+        return ClientShopCatalog.revision() == catalogRevision
+                && (isNew || (oldEntryKey >= 0L && ClientShopCatalog.stub(oldEntryKey) != null));
+    }
+
+    private void showCatalogSnapshotExpired() {
+        var player = Minecraft.getInstance().player;
+        if (player != null) {
+            player.displayClientMessage(Component.literal("§c[商店] 商品目录已更新，请关闭并重新打开编辑器"), false);
         }
     }
 
@@ -504,7 +518,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
         g.drawString(this.font, "§6" + (isNew ? "新增商品" : "编辑商品"), left + 10, top + 5, GOLD, true);
         drawBtn(g, cancelX(), top + 3, 56, 14, "§c取消", mx, my);
-        drawBtn(g, confirmX(), top + 3, 70, 14, "§a确认保存", mx, my);
+        drawBtn(g, confirmX(), top + 3, 70, 14,
+                catalogSnapshotValid() ? "§a确认保存" : "§8请重新打开", mx, my);
 
         int c = cx();
         // 商品（奖励模式启用且池非空时，交付内容完全由奖励池决定，主商品栏禁用手动选择、镜像池首项）
@@ -1065,6 +1080,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
             return true;
         }
         if (GuiRenderUtil.isHovering(mx, my, confirmX(), top + 3, 70, 14)) {
+            if (!catalogSnapshotValid()) {
+                showCatalogSnapshotExpired();
+                return true;
+            }
             submit();
             return true;
         }
@@ -1363,6 +1382,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
     }
 
     private void submit() {
+        if (!catalogSnapshotValid()) {
+            showCatalogSnapshotExpired();
+            return;
+        }
         capture();
         if (rewardMode == ShopEntry.RewardMode.FTBQ && ftbqTableId.isEmpty()) {
             var p = Minecraft.getInstance().player;
@@ -1398,9 +1421,9 @@ public class ShopEntryEditScreen extends ScaledScreen {
         long periodTicksToSend = periodSeconds > 0L ? periodSeconds * TICKS_PER_SECOND : -1L;
         ShopEditPacket pkt = new ShopEditPacket(
                 isNew ? ShopEditPacket.Action.ADD : ShopEditPacket.Action.EDIT,
-                goodsForSubmit, cat, desc, cost, oldGoods, oldCategory == null ? "" : oldCategory, oldEntryIndex, limit,
+                goodsForSubmit, cat, desc, cost, oldGoods, oldCategory == null ? "" : oldCategory, -1, limit,
                 displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode,
-                periodTicksToSend, periodCap);
+                periodTicksToSend, periodCap, catalogRevision, oldEntryKey);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

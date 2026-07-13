@@ -20,7 +20,7 @@ import java.util.function.Supplier;
  */
 public class ShanhaiNetwork {
 
-    private static final String PROTOCOL_VERSION = "2";
+    private static final String PROTOCOL_VERSION = "3";
     private static final ResourceLocation CHANNEL_NAME = new ResourceLocation(GTDishanhaiMod.MOD_ID, "main");
     private static int packetId = 0;
 
@@ -152,6 +152,22 @@ public class ShanhaiNetwork {
                 ShopCatalogChunkPacket::encode,
                 ShopCatalogChunkPacket::new,
                 ShopCatalogChunkPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCatalogManifestPacket.class,
+                ShopCatalogManifestPacket::encode,
+                ShopCatalogManifestPacket::new,
+                ShopCatalogManifestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCatalogStatePacket.class,
+                ShopCatalogStatePacket::encode,
+                ShopCatalogStatePacket::new,
+                ShopCatalogStatePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
         RecipeSyncPacket.init();

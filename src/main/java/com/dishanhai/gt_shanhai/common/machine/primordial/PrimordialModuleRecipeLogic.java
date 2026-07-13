@@ -34,6 +34,8 @@ import java.util.Set;
 
 public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
 
+    private static final long ACTIVE_LOOKUP_CACHE_TICKS = 100L;
+
     // checkModuleCondition 缓存：避免每次都查静态注册表和遍历 conditions。
     // true / false 均为短期缓存（各带 TTL），过期后重新检查，避免一次瞬时结果被永久固化。
     // 模块等级变化时可主动调用 onModuleLevelChanged() 立即清空。
@@ -42,6 +44,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     private final java.util.Map<Integer, Long> moduleConditionFalseCache = new java.util.HashMap<>();
     private static final long MODULE_CONDITION_TRUE_TTL = 20L;
     private static final long MODULE_CONDITION_FALSE_TTL = 20L;
+    private Set<GTRecipe> cachedModuleConditionSource;
+    private Set<GTRecipe> cachedModuleConditionRecipes;
+    private String cachedModuleItemId;
+    private int cachedModuleCount = Integer.MIN_VALUE;
 
     public PrimordialModuleRecipeLogic(GTLAddWirelessWorkableElectricMultipleRecipesMachine machine) {
         super((SelectableRecipeTypeSetMachine) machine);
@@ -62,13 +68,17 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     }
 
     @Override
+    protected long getLookupCacheTicks() {
+        return ACTIVE_LOOKUP_CACHE_TICKS;
+    }
+
+    @Override
     public void onRecipeTypeSelectionChanged() {
         // 先失效基类配方集合缓存（选中类型变了，候选集合必须立即重算，否则被取消选中的类型
         // 可能在缓存窗口内仍被执行——控死风险）。再清模块自己的等级门控缓存。
         // 不打断正在运行的配方（interruptRecipe 会让已扣输入蒸发），新选择下一轮 lookup 立即生效。
         super.onRecipeTypeSelectionChanged();
-        moduleConditionTrueCache.clear();
-        moduleConditionFalseCache.clear();
+        invalidateModuleConditionCaches();
     }
 
     /**
@@ -76,8 +86,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
      * 应该在模块升级/降级后调用，确保条件检查使用最新的模块等级
      */
     public void onModuleLevelChanged() {
-        moduleConditionTrueCache.clear();
-        moduleConditionFalseCache.clear();
+        invalidateModuleConditionCaches();
+        invalidateLookupSetCache();
     }
 
     @Override
@@ -175,22 +185,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         ObjectArrayList<Content> fluidOutputs = new ObjectArrayList<>(size);
         BigInteger accumulatedEu = BigInteger.ZERO;
         
-        // 预计算常量，避免循环内重复创建 BigDecimal
-        BigDecimal euMultiplierBD = BigDecimal.valueOf(euMultiplier);
-
         for (int i = 0; i < size; i++) {
             GTRecipe recipe = parallelData.getOriginRecipeList().get(i);
             long parallel = parallelData.getParallels()[i];
-            
-            // 优化：尽量用 long 运算，减少 BigInteger 创建
-            long recipeEUt = getWirelessRecipeEut(recipe);
-            long totalEUt = recipeEUt * parallel; // long 乘法，溢出风险低（EU 值通常不超过 Long.MAX_VALUE）
-            
-            // 计算 EU：duration * euMultiplier * totalEUt
-            BigDecimal nextEuDelta = BigDecimal.valueOf(recipe.duration)
-                    .multiply(euMultiplierBD)
-                    .multiply(BigDecimal.valueOf(totalEUt));
-            BigInteger nextEu = accumulatedEu.add(nextEuDelta.toBigInteger());
+            BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
 
             if (parallelData.getShouldProcess()) {
                 if (energyConsumer && nextEu.compareTo(maxTotalEu) > 0) {
@@ -229,16 +227,35 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         return buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
     }
 
+    private BigInteger calculateRecipeEu(GTRecipe recipe, long parallel, double euMultiplier) {
+        BigInteger parallelEu = BigInteger.valueOf(getWirelessRecipeEut(recipe));
+        if (parallel != 1L) {
+            parallelEu = parallelEu.multiply(BigInteger.valueOf(parallel));
+        }
+        if (euMultiplier == 1.0D) {
+            return parallelEu.multiply(BigInteger.valueOf(recipe.duration));
+        }
+        return BigDecimal.valueOf(recipe.duration)
+                .multiply(BigDecimal.valueOf(euMultiplier))
+                .multiply(new BigDecimal(parallelEu))
+                .toBigInteger();
+    }
+
     /**
      * 在基类"遍历选中类型原生查找"结果上，按模块等级门控逐一过滤——这是模块相对主机唯一的额外约束。
      * 样板总成发配槽的发现/执行已由 GTLCore 原生接管（见基类说明），本类不再自行扫描/合并样板配方。
-     * 不缓存：每轮实算，避免旧结果（含旧数量/旧等级判定）被固化。
+     * 同一份基类候选和同一模块物品/数量下复用过滤集合；并行数与库存数量仍由 calculateParallels
+     * 每轮实算。模块槽变化、选择集变化和候选集合刷新都会立即使本缓存失效。
      */
     @Override
     protected Set<GTRecipe> lookupRecipeIterator() {
+        refreshModuleConditionContext();
         Set<GTRecipe> base = super.lookupRecipeIterator();
         if (base.isEmpty()) {
             return base;
+        }
+        if (base == cachedModuleConditionSource && cachedModuleConditionRecipes != null) {
+            return cachedModuleConditionRecipes;
         }
         Set<GTRecipe> result = new ObjectOpenHashSet<>(base.size());
         for (GTRecipe recipe : base) {
@@ -246,7 +263,32 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                 result.add(recipe);
             }
         }
+        cachedModuleConditionSource = base;
+        cachedModuleConditionRecipes = result;
         return result;
+    }
+
+    private void refreshModuleConditionContext() {
+        MetaMachine machine = getMachine();
+        if (!(machine instanceof PrimordialOmegaEngineModuleBase mod)) {
+            return;
+        }
+        String moduleItemId = mod.getModuleItemId();
+        int moduleCount = mod.getModuleCount();
+        if (java.util.Objects.equals(cachedModuleItemId, moduleItemId) && cachedModuleCount == moduleCount) {
+            return;
+        }
+        invalidateModuleConditionCaches();
+        invalidateLookupSetCache();
+        cachedModuleItemId = moduleItemId;
+        cachedModuleCount = moduleCount;
+    }
+
+    private void invalidateModuleConditionCaches() {
+        moduleConditionTrueCache.clear();
+        moduleConditionFalseCache.clear();
+        cachedModuleConditionSource = null;
+        cachedModuleConditionRecipes = null;
     }
 
     private boolean matchRecipeInputHandlePartCache(GTRecipe recipe) {

@@ -29,16 +29,32 @@ public final class ClientShopCatalog {
         private long nextRequestId = 1L;
         private final Map<Integer, Long> requests = new LinkedHashMap<>();
         private final Set<Integer> receivedChunks = new LinkedHashSet<>();
+        private final Map<Long, Long> remainingUsesByEntry = new LinkedHashMap<>();
 
         public boolean applyManifest(ShopCatalogManifest manifest) {
             long newRevision = manifest == null ? 0L : manifest.revision();
             boolean newReady = manifest != null && manifest.ready();
             if (revision == newRevision && ready == newReady) return false;
+            boolean revisionChanged = revision != newRevision;
             revision = newRevision;
             ready = newReady;
             requests.clear();
             receivedChunks.clear();
+            if (revisionChanged) remainingUsesByEntry.clear();
             return true;
+        }
+
+        public boolean applyRemainingUses(long packetRevision, long entryKey, long remainingUses) {
+            if (!ready || revision != packetRevision || entryKey < 0L || remainingUses < 0L) return false;
+            Long current = remainingUsesByEntry.get(entryKey);
+            if (current != null && remainingUses >= current.longValue()) return false;
+            remainingUsesByEntry.put(entryKey, remainingUses);
+            return true;
+        }
+
+        public long remainingUses(long entryKey) {
+            Long remaining = remainingUsesByEntry.get(entryKey);
+            return remaining == null ? -1L : remaining.longValue();
         }
 
         public long beginRequest(int chunkId) {
@@ -96,7 +112,7 @@ public final class ClientShopCatalog {
 
     private ClientShopCatalog() {}
 
-    public static void applyManifest(ShopCatalogManifest next) {
+    public static boolean applyManifest(ShopCatalogManifest next) {
         ShopCatalogManifest safe = next == null ? ShopCatalogManifest.empty() : next;
         boolean changed = STATE.applyManifest(safe);
         manifest = safe;
@@ -108,6 +124,14 @@ public final class ClientShopCatalog {
             pinnedChunks = Set.of();
         }
         rebuildManifestIndexes();
+        return changed;
+    }
+
+    public static boolean applyRemainingUses(long revision, long entryKey, long remainingUses) {
+        if (!STATE.applyRemainingUses(revision, entryKey, remainingUses)) return false;
+        ShopEntry entry = entriesByKey.get(entryKey);
+        applyRemainingUses(entry, STATE.remainingUses(entryKey));
+        return true;
     }
 
     public static long revision() { return STATE.revision(); }
@@ -199,6 +223,8 @@ public final class ClientShopCatalog {
             ShopCatalogEntryPayload payload = pending.current();
             ShopEntry entry = ShopEntryJsonCodec.fromPayload(payload.json());
             if (entry != null && stubsByKey.containsKey(payload.entryKey())) {
+                long target = STATE.remainingUses(payload.entryKey());
+                applyRemainingUses(entry, target);
                 ShopEntry old = entriesByKey.put(payload.entryKey(), entry);
                 if (old != null) keysByEntry.remove(old);
                 keysByEntry.put(entry, payload.entryKey());
@@ -244,6 +270,12 @@ public final class ClientShopCatalog {
 
     private static void addGroupKey(String top, String sub, long key) {
         groupKeys.computeIfAbsent(groupKey(top, sub), ignored -> new ArrayList<>()).add(key);
+    }
+
+    private static void applyRemainingUses(ShopEntry entry, long target) {
+        if (entry == null || target < 0L) return;
+        long current = entry.getRemainingUses();
+        if (current >= 0L && target < current) entry.consumeUses(current - target);
     }
 
     private static String groupKey(String top, String sub) {

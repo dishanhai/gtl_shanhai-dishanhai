@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
+import com.dishanhai.gt_shanhai.common.shop.ShopCatalogSnapshot;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
@@ -8,7 +9,6 @@ import com.dishanhai.gt_shanhai.common.item.WalletItem;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -18,65 +18,61 @@ import java.util.function.Supplier;
  * 商店动作包（C→S）：购买 / 出售 / 充值全部 / 删除条目。
  *
  * <p>服务端校验发包玩家背包/饰品栏任意位置是否携带钱包 {@link WalletItem#isCarrying}，
- * 用玩家账户虚拟余额结算（{@link ShopPurchase}）。商品用 goodsId+category 定位到 {@link ShopEntry}。</p>
+ * 用玩家账户虚拟余额结算（{@link ShopPurchase}）。商品用目录版本与服务端条目身份精确定位。</p>
  */
 public class ShopActionPacket {
 
     public enum Action { BUY, SELL, DEPOSIT, DELETE, UNDO_DELETE }
 
     private final Action action;
-    private final ResourceLocation goodsId;   // DEPOSIT 时忽略
-    private final String category;            // 定位条目用（同 goods 可能跨分类）
+    private final long catalogRevision;       // 服务端目录结构版本，过期请求必须拒绝
+    private final long entryKey;              // 当前 revision 内的服务端商品身份；无商品动作=-1
     private final long times;                 // 购买/出售次数（支持 Long.MAX）
     private final boolean aeMode;             // AE 模式：交付优先注入玩家绑定的 AE 网络
     private final boolean backpackMode;       // 精妙背包模式：扣款/交付优先走随身穿戴的精妙背包
-    private final int entryIndex;             // 条目在 ShopConfig.getEntries() 的精确索引（-1=未知则回退 goodsId+category 定位）
     private final int chosenRewardIndex;      // 自选奖励模式：玩家在选择界面选中的 rewardPool 下标；-1=未选/不适用
 
-    public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times) {
-        this(action, goodsId, category, times, false, false, -1);
+    public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times) {
+        this(action, catalogRevision, entryKey, times, false, false, -1);
     }
 
-    public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times, boolean aeMode) {
-        this(action, goodsId, category, times, aeMode, false, -1);
+    public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times, boolean aeMode) {
+        this(action, catalogRevision, entryKey, times, aeMode, false, -1);
     }
 
-    public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times,
-                            boolean aeMode, boolean backpackMode, int entryIndex) {
-        this(action, goodsId, category, times, aeMode, backpackMode, entryIndex, -1);
+    public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times,
+                            boolean aeMode, boolean backpackMode) {
+        this(action, catalogRevision, entryKey, times, aeMode, backpackMode, -1);
     }
 
-    public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times, boolean aeMode,
-                            boolean backpackMode, int entryIndex, int chosenRewardIndex) {
+    public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times, boolean aeMode,
+                            boolean backpackMode, int chosenRewardIndex) {
         this.action = action;
-        this.goodsId = goodsId == null ? new ResourceLocation("minecraft:air") : goodsId;
-        this.category = category == null ? "" : category;
+        this.catalogRevision = catalogRevision;
+        this.entryKey = entryKey;
         this.times = Math.max(1L, times);
         this.aeMode = aeMode;
         this.backpackMode = backpackMode;
-        this.entryIndex = entryIndex;
         this.chosenRewardIndex = chosenRewardIndex;
     }
 
     public ShopActionPacket(FriendlyByteBuf buf) {
         this.action = buf.readEnum(Action.class);
-        this.goodsId = buf.readResourceLocation();
-        this.category = buf.readUtf();
+        this.catalogRevision = buf.readLong();
+        this.entryKey = buf.readLong();
         this.times = buf.readVarLong();
         this.aeMode = buf.readBoolean();
         this.backpackMode = buf.readBoolean();
-        this.entryIndex = buf.readInt();
         this.chosenRewardIndex = buf.readInt();
     }
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeEnum(action);
-        buf.writeResourceLocation(goodsId);
-        buf.writeUtf(category);
+        buf.writeLong(catalogRevision);
+        buf.writeLong(entryKey);
         buf.writeVarLong(times);
         buf.writeBoolean(aeMode);
         buf.writeBoolean(backpackMode);
-        buf.writeInt(entryIndex);
         buf.writeInt(chosenRewardIndex);
     }
 
@@ -91,6 +87,18 @@ public class ShopActionPacket {
     }
 
     private static void apply(ShopActionPacket pkt, ServerPlayer player) {
+        if (pkt.action != Action.DEPOSIT) {
+            ShopCatalogSnapshot current = ShopConfig.snapshot();
+            if (current.revision() != pkt.catalogRevision) {
+                ShopCatalogManifestPacket.sendLatestIfAllowed(
+                        player, current.manifest(), pkt.catalogRevision);
+                if (pkt.action != Action.UNDO_DELETE) {
+                    player.sendSystemMessage(Component.literal("§c[山海商店] 商品目录已更新，请重试"));
+                    return;
+                }
+            }
+        }
+
         if (!WalletItem.isCarrying(player)) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 需持有山海钱包（背包/饰品栏任意位置都行）"));
             return;
@@ -112,7 +120,6 @@ public class ShopActionPacket {
             }
             ShopEntry restored = ShopConfig.undoLastRemove();
             if (restored != null) {
-                ShopRefreshPacket.sendTo(player);
                 player.sendSystemMessage(Component.literal("§b[山海商店] §a已撤销删除 §f" + restored.goodsDisplayName()));
             } else {
                 player.sendSystemMessage(Component.literal("§c[山海商店] 没有可撤销的删除（已超时或已撤销过）"));
@@ -126,6 +133,7 @@ public class ShopActionPacket {
             return;
         }
 
+        long remainingUsesBefore = entry.getRemainingUses();
         switch (pkt.action) {
             case BUY -> doBuy(player, entry, pkt.times, pkt.aeMode, pkt.backpackMode, pkt.chosenRewardIndex);
             case SELL -> doSell(player, entry, pkt.times, pkt.backpackMode);
@@ -135,12 +143,18 @@ public class ShopActionPacket {
                     return;
                 }
                 boolean ok = ShopConfig.removeEntry(entry);
-                ShopRefreshPacket.sendTo(player); // 回推刷新界面（实时）
                 player.sendSystemMessage(ok
                         ? Component.literal("§b[山海商店] §a已删除 §f" + entry.goodsDisplayName())
                         : Component.literal("§c[山海商店] 删除失败"));
             }
             default -> {}
+        }
+        if ((pkt.action == Action.BUY || pkt.action == Action.SELL) && remainingUsesBefore >= 0L) {
+            long remainingUses = entry.getRemainingUses();
+            if (remainingUses >= 0L && remainingUses < remainingUsesBefore) {
+                ShopCatalogStatePacket.broadcast(
+                        ShopConfig.snapshot().revision(), ShopConfig.keyOf(entry), remainingUses);
+            }
         }
     }
 
@@ -286,28 +300,8 @@ public class ShopActionPacket {
         }
     }
 
-    /**
-     * 精确定位条目：优先用客户端下发的 entryIndex —— 同物品不同 NBT 的多条目（如各种超级磁盘阵列）
-     * goodsId 会撞车，仅靠 {@link #locate} 的 goodsId+category 会误取到首个同物品条目。
-     * 索引越界或指向的条目 goodsId 对不上（列表漂移）时，回退按 goodsId+category 定位。
-     */
+    /** 精确定位条目：版本过期或身份不存在时直接拒绝，不再回退到会碰撞的物品 ID。 */
     private static ShopEntry resolve(ShopActionPacket pkt) {
-        var all = ShopConfig.getEntries();
-        if (pkt.entryIndex >= 0 && pkt.entryIndex < all.size()) {
-            ShopEntry e = all.get(pkt.entryIndex);
-            if (e != null && e.getGoodsId().equals(pkt.goodsId)) return e; // 校验索引未漂移
-        }
-        return locate(pkt.goodsId, pkt.category);
-    }
-
-    /** 按 goodsId + category 定位商品条目（回退用；同物品多条目会撞车，优先走 {@link #resolve}）。 */
-    private static ShopEntry locate(ResourceLocation goodsId, String category) {
-        for (ShopEntry e : ShopConfig.getEntries()) {
-            if (e.getGoodsId().equals(goodsId)
-                    && (category.isEmpty() || e.getCategory().equals(category))) {
-                return e;
-            }
-        }
-        return null;
+        return ShopConfig.resolve(pkt.catalogRevision, pkt.entryKey);
     }
 }

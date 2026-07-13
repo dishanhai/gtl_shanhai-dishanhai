@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
+import com.dishanhai.gt_shanhai.common.shop.ShopCatalogSnapshot;
 import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEditPermission;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
@@ -37,7 +38,7 @@ public class ShopEditPacket {
     private final ShopCost cost;
     private final ResourceLocation oldGoods;
     private final String oldCategory;
-    private final int oldEntryIndex;          // 原条目在 ShopConfig.getEntries() 的精确索引（-1=回退 goods+category 定位）
+    private final int oldEntryIndex;          // 旧协议兼容字段，不再参与原条目解析
     private final long limit;                 // 限购次数（购买/出售共享）；-1=不限
     private final List<ShopEntry.DisplayIcon> displayIcons; // 自定义显示图标（1 主+最多4附属，物品/贴图二选一），空=用商品本身图标
     private final ShopEntry.RewardMode rewardMode; // 奖励模式：NONE=普通固定商品
@@ -51,6 +52,8 @@ public class ShopEditPacket {
     private final ShopEntry.TradeMode tradeMode; // 交易方向限制：BOTH/BUY_ONLY/SELL_ONLY
     private final long periodTicks; // 周期限购窗口长度（tick）；-1=不启用
     private final long periodLimit; // 周期限购每窗口额度（每玩家独立计数）；-1=不启用
+    private final long catalogRevision; // 打开编辑器时的服务端目录版本
+    private final long oldEntryKey; // 待编辑条目在该版本内的唯一身份；ADD=-1
 
     public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
                           ShopCost cost, ResourceLocation oldGoods, String oldCategory, int oldEntryIndex, long limit,
@@ -90,6 +93,18 @@ public class ShopEditPacket {
                           List<ShopEntry.RewardOption> rewardPool, boolean hidden, String linkKey, String linkTo,
                           String displayName, String ftbqTableId, ShopEntry.RewardMode ftbqSubMode,
                           ShopEntry.TradeMode tradeMode, long periodTicks, long periodLimit) {
+        this(action, goodsList, category, description, cost, oldGoods, oldCategory, oldEntryIndex, limit,
+                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId,
+                ftbqSubMode, tradeMode, periodTicks, periodLimit, 0L, -1L);
+    }
+
+    public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
+                          ShopCost cost, ResourceLocation oldGoods, String oldCategory, int oldEntryIndex, long limit,
+                          List<ShopEntry.DisplayIcon> displayIcons, ShopEntry.RewardMode rewardMode,
+                          List<ShopEntry.RewardOption> rewardPool, boolean hidden, String linkKey, String linkTo,
+                          String displayName, String ftbqTableId, ShopEntry.RewardMode ftbqSubMode,
+                          ShopEntry.TradeMode tradeMode, long periodTicks, long periodLimit,
+                          long catalogRevision, long oldEntryKey) {
         this.action = action;
         this.goodsList = (goodsList == null || goodsList.isEmpty())
                 ? List.of(ShopEntry.GoodsStack.of(new ResourceLocation("minecraft:air"), 1, null)) : goodsList;
@@ -113,6 +128,8 @@ public class ShopEditPacket {
         this.tradeMode = tradeMode == null ? ShopEntry.TradeMode.BOTH : tradeMode;
         this.periodTicks = periodTicks;
         this.periodLimit = periodLimit;
+        this.catalogRevision = catalogRevision;
+        this.oldEntryKey = oldEntryKey;
     }
 
     public ShopEditPacket(FriendlyByteBuf buf) {
@@ -159,6 +176,8 @@ public class ShopEditPacket {
         this.tradeMode = buf.readEnum(ShopEntry.TradeMode.class);
         this.periodTicks = buf.readLong();
         this.periodLimit = buf.readLong();
+        this.catalogRevision = buf.readLong();
+        this.oldEntryKey = buf.readLong();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -199,6 +218,8 @@ public class ShopEditPacket {
         buf.writeEnum(tradeMode);
         buf.writeLong(periodTicks);
         buf.writeLong(periodLimit);
+        buf.writeLong(catalogRevision);
+        buf.writeLong(oldEntryKey);
     }
 
     private static void writeCost(FriendlyByteBuf buf, ShopCost cost) {
@@ -252,6 +273,13 @@ public class ShopEditPacket {
             player.sendSystemMessage(Component.literal("§c[山海商店] 无编辑权限"));
             return;
         }
+        ShopCatalogSnapshot current = ShopConfig.snapshot();
+        if (current.revision() != pkt.catalogRevision) {
+            ShopCatalogManifestPacket.sendLatestIfAllowed(
+                    player, current.manifest(), pkt.catalogRevision);
+            player.sendSystemMessage(Component.literal("§c[山海商店] 商品目录已更新，请重新打开编辑器"));
+            return;
+        }
         for (ShopEntry.GoodsStack gs : pkt.goodsList) {
             if (!ForgeRegistries.ITEMS.containsKey(gs.id())) {
                 player.sendSystemMessage(Component.literal("§c[山海商店] 商品物品不存在: " + gs.id()));
@@ -268,8 +296,11 @@ public class ShopEditPacket {
         String limitTip = entry.isLimited() ? " §d(限" + entry.getRemainingUses() + "次)" : "";
 
         if (pkt.action == Action.ADD) {
+            if (pkt.oldEntryKey != -1L) {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 新增请求的原条目身份无效"));
+                return;
+            }
             ShopConfig.addEntry(entry);
-            ShopRefreshPacket.sendTo(player); // 回推刷新界面（实时）
             player.sendSystemMessage(Component.literal("§b[山海商店] §a已新增 §f"
                     + entry.getGoodsCount() + "x " + entry.goodsDisplayName() + " §7[" + pkt.category + "]" + limitTip));
             return;
@@ -281,34 +312,13 @@ public class ShopEditPacket {
             return;
         }
         boolean ok = ShopConfig.replaceEntry(old, entry);
-        ShopRefreshPacket.sendTo(player); // 回推刷新界面（实时）
         player.sendSystemMessage(ok
                 ? Component.literal("§b[山海商店] §a已更新 §f" + entry.goodsDisplayName() + limitTip)
                 : Component.literal("§c[山海商店] 更新失败"));
     }
 
-    /**
-     * 精确定位待编辑的原条目：优先用客户端下发的 oldEntryIndex —— 同物品不同 NBT 的多条目
-     * （如各种超级磁盘阵列，goodsId 都是 super_disk_array）仅靠 goods+category 会误取到首个同物品条目，
-     * 导致把更新写到别的条目上（你编辑的这条看着没变）。索引越界或指向条目 goodsId 对不上（列表漂移）时回退。
-     */
+    /** 只接受打开编辑器时捕获的版本与条目身份，过期时拒绝猜测。 */
     private static ShopEntry resolveOld(ShopEditPacket pkt) {
-        var all = ShopConfig.getEntries();
-        if (pkt.oldEntryIndex >= 0 && pkt.oldEntryIndex < all.size()) {
-            ShopEntry e = all.get(pkt.oldEntryIndex);
-            if (e != null && e.getGoodsId().equals(pkt.oldGoods)) return e; // 校验索引未漂移
-        }
-        return locate(pkt.oldGoods, pkt.oldCategory);
-    }
-
-    /** 按 goods+category 定位商品（category 为空则只按 goods；同物品多条目会撞车，优先走 {@link #resolveOld}）。 */
-    private static ShopEntry locate(ResourceLocation goods, String category) {
-        for (ShopEntry e : ShopConfig.getEntries()) {
-            if (e.getGoodsId().equals(goods)
-                    && (category.isEmpty() || e.getCategory().equals(category))) {
-                return e;
-            }
-        }
-        return null;
+        return ShopConfig.resolve(pkt.catalogRevision, pkt.oldEntryKey);
     }
 }
