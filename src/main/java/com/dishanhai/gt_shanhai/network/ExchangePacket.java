@@ -153,7 +153,7 @@ public class ExchangePacket {
                 ShopAeNetwork.injectForPlayer(player, AEFluidKey.of(fluid), totalBig.longValue());
             } else {
                 ItemStack unit = in.makeUnitStack();
-                if (!unit.isEmpty()) ShopPurchase.deliverItems(player, unit, totalBig, aeMode);
+                if (!unit.isEmpty()) ShopPurchase.deliverItems(player, unit, totalBig, aeMode, false); // 兑换台暂不接精妙背包模式，语义同之前
             }
         }
 

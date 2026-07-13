@@ -39,18 +39,20 @@ public class RewardChoiceScreen extends ScaledScreen {
     private final ShopEntry entry;
     private final long times;
     private final boolean aeMode;
+    private final boolean backpackMode;
     private int selected = -1;
     private int scroll = 0;
 
     private int left, top, panelWidth, panelHeight;
     private int listX, listY, listW, listH;
 
-    public RewardChoiceScreen(ShopScreen parent, ShopEntry entry, long times, boolean aeMode) {
+    public RewardChoiceScreen(ShopScreen parent, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         super(Component.literal("选择奖励"));
         this.parent = parent;
         this.entry = entry;
         this.times = times;
         this.aeMode = aeMode;
+        this.backpackMode = backpackMode;
         this.targetWidth = TARGET_W;
         this.targetHeight = TARGET_H;
         this.useOffset = false;
@@ -172,7 +174,7 @@ public class RewardChoiceScreen extends ScaledScreen {
         if (selected < 0) return;
         int entryIndex = ShopConfig.getEntries().indexOf(entry);
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(
-                ShopActionPacket.Action.BUY, entry.getGoodsId(), entry.getCategory(), times, aeMode, entryIndex, selected));
+                ShopActionPacket.Action.BUY, entry.getGoodsId(), entry.getCategory(), times, aeMode, backpackMode, entryIndex, selected));
         Minecraft.getInstance().setScreen(parent);
     }
 

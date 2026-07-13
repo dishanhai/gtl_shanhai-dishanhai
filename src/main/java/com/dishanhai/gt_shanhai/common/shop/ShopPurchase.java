@@ -142,6 +142,37 @@ public final class ShopPurchase {
         }
     }
 
+    /**
+     * 从随身背包 + 精妙背包（{@link ShopBackpack}）合计扣 amount，不碰 AE；backpackMode 决定先扣哪边——
+     * 关闭时随身背包优先（原有顺序），开启时精妙背包优先。返回两边加起来还是不够扣的余量，交给调用方走 AE 兜底。
+     */
+    private static long deductFromCarried(ServerPlayer player, Item item, net.minecraft.nbt.CompoundTag nbt, long amount, boolean backpackMode) {
+        if (amount <= 0L) return 0L;
+        long remaining = amount;
+        if (backpackMode) {
+            remaining = deductBackpack(player, item, nbt, remaining);
+            remaining = deductInventory(player, item, nbt, remaining);
+        } else {
+            remaining = deductInventory(player, item, nbt, remaining);
+            remaining = deductBackpack(player, item, nbt, remaining);
+        }
+        return remaining;
+    }
+
+    private static long deductInventory(ServerPlayer player, Item item, net.minecraft.nbt.CompoundTag nbt, long amount) {
+        if (amount <= 0L) return 0L;
+        long take = Math.min(amount, countItem(player, item, nbt));
+        if (take > 0) removeItems(player, item, (int) take, nbt);
+        return amount - take;
+    }
+
+    private static long deductBackpack(ServerPlayer player, Item item, net.minecraft.nbt.CompoundTag nbt, long amount) {
+        if (amount <= 0L) return 0L;
+        long take = Math.min(amount, ShopBackpack.countItem(player, item, nbt));
+        if (take > 0) ShopBackpack.removeItems(player, item, take, nbt);
+        return amount - take;
+    }
+
     /** 大数字紧凑显示（聊天提示用）：1234567 → "1,234,567"（保留精确值，加千分位）。 */
     public static String formatCount(long n) {
         return String.format(java.util.Locale.ROOT, "%,d", n);
@@ -159,10 +190,10 @@ public final class ShopPurchase {
      * 否则货物总量 ≥ 配置阈值 → 打包成超级磁盘阵列赠送
      * 否则进背包，背包也塞不下的余量再尝试塞进随身穿戴的精妙背包（见 {@link ShopBackpack}），最终还剩的打包成 SDA（阈值设过大也不会卡死）
      */
-    public static BulkBuyResult buyBulk(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
-        long affordable = affordAndDeduct(player, entry, times);
+    public static BulkBuyResult buyBulk(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
+        long affordable = affordAndDeduct(player, entry, times, backpackMode);
         if (affordable <= 0L) return new BulkBuyResult(0L, times, null);
-        String via = deliverGoodsList(player, entry, affordable, aeMode);
+        String via = deliverGoodsList(player, entry, affordable, aeMode, backpackMode);
         return new BulkBuyResult(affordable, times, via);
     }
 
@@ -170,7 +201,7 @@ public final class ShopPurchase {
      * 按商品清单逐项分层交付（单商品/组合商品统一走这条路，与 {@link #buyBulkAll} 相同的批量交付基建）：
      * 每项各自 count × times，聚合后一次 {@link #deliverItemBatch} 调用，需要打包的部分合并进同一片 SDA。
      */
-    private static String deliverGoodsList(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    private static String deliverGoodsList(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         java.math.BigInteger t = java.math.BigInteger.valueOf(times);
         java.util.List<ItemDelivery> deliveries = new java.util.ArrayList<>(entry.getGoodsList().size());
         for (ShopEntry.GoodsStack gs : entry.getGoodsList()) {
@@ -178,7 +209,7 @@ public final class ShopPurchase {
             unit.setCount(1);
             deliveries.add(new ItemDelivery(unit, java.math.BigInteger.valueOf(gs.count()).multiply(t)));
         }
-        return deliverItemBatch(player, deliveries, aeMode);
+        return deliverItemBatch(player, deliveries, aeMode, backpackMode);
     }
 
     /**
@@ -187,25 +218,25 @@ public final class ShopPurchase {
      * 其余成本结算与 {@link #buyBulk} 完全一致。chosen 须由调用方从 {@link ShopEntry#getRewardPool()}
      * 按服务端下发的索引解出（不可直接信任客户端传来的物品数据）。
      */
-    public static BulkBuyResult buyBulkChoice(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, ShopEntry.RewardOption chosen) {
+    public static BulkBuyResult buyBulkChoice(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode, ShopEntry.RewardOption chosen) {
         if (chosen == null) return new BulkBuyResult(0L, times, null);
         long cappedTimes = Math.min(times, rewardRollCap());
-        long affordable = affordAndDeduct(player, entry, cappedTimes);
+        long affordable = affordAndDeduct(player, entry, cappedTimes, backpackMode);
         if (affordable <= 0L) return new BulkBuyResult(0L, times, null);
         ItemStack unit = chosen.item().copy();
         unit.setCount(1);
         java.math.BigInteger goodsTotal = rollTotal(chosen, affordable);
-        String via = deliverItems(player, unit, goodsTotal, aeMode);
+        String via = deliverItems(player, unit, goodsTotal, aeMode, backpackMode);
         return new BulkBuyResult(affordable, times, via);
     }
 
     /** 随机（{@link ShopEntry.RewardMode#RANDOM}）购买：每次成交都按权重独立抽 1 项 + 独立随机数量，聚合后按物品类型分别交付。 */
-    public static BulkBuyResult buyBulkRandom(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult buyBulkRandom(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (entry == null) return new BulkBuyResult(0L, times, null);
         java.util.List<ShopEntry.RewardOption> pool = entry.getRewardPool();
         if (pool.isEmpty()) return new BulkBuyResult(0L, times, null);
         long cappedTimes = Math.min(times, rewardRollCap());
-        long affordable = affordAndDeduct(player, entry, cappedTimes);
+        long affordable = affordAndDeduct(player, entry, cappedTimes, backpackMode);
         if (affordable <= 0L) return new BulkBuyResult(0L, times, null);
         java.util.Map<ShopEntry.RewardOption, java.math.BigInteger> agg = new java.util.LinkedHashMap<>();
         for (long i = 0; i < affordable; i++) {
@@ -218,17 +249,17 @@ public final class ShopPurchase {
             unit.setCount(1);
             deliveries.add(new ItemDelivery(unit, e.getValue()));
         }
-        String via = deliverItemBatch(player, deliveries, aeMode);
+        String via = deliverItemBatch(player, deliveries, aeMode, backpackMode);
         return new BulkBuyResult(affordable, times, via);
     }
 
     /** 全部（{@link ShopEntry.RewardMode#ALL}）购买：一次性交付奖励池每一项，各项每次成交都独立随机数量。 */
-    public static BulkBuyResult buyBulkAll(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult buyBulkAll(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (entry == null) return new BulkBuyResult(0L, times, null);
         java.util.List<ShopEntry.RewardOption> pool = entry.getRewardPool();
         if (pool.isEmpty()) return new BulkBuyResult(0L, times, null);
         long cappedTimes = Math.min(times, rewardRollCap());
-        long affordable = affordAndDeduct(player, entry, cappedTimes);
+        long affordable = affordAndDeduct(player, entry, cappedTimes, backpackMode);
         if (affordable <= 0L) return new BulkBuyResult(0L, times, null);
         java.util.List<ItemDelivery> deliveries = new java.util.ArrayList<>();
         for (ShopEntry.RewardOption opt : pool) {
@@ -236,7 +267,7 @@ public final class ShopPurchase {
             unit.setCount(1);
             deliveries.add(new ItemDelivery(unit, rollTotal(opt, affordable)));
         }
-        String via = deliverItemBatch(player, deliveries, aeMode);
+        String via = deliverItemBatch(player, deliveries, aeMode, backpackMode);
         return new BulkBuyResult(affordable, times, via);
     }
 
@@ -253,26 +284,26 @@ public final class ShopPurchase {
      * 每份的随机数量（count + random_bonus）复用 {@code ItemReward.automatedClaimPre}，本处只负责按物品聚合后交付。
      * 只支持物品类奖励（{@code ItemReward}），表里其余奖励类型（经验/指令等）静默跳过。
      */
-    public static BulkBuyResult buyBulkFtbq(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult buyBulkFtbq(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (entry == null || !entry.hasFtbqTable()) return new BulkBuyResult(0L, times, null);
         dev.ftb.mods.ftbquests.quest.loot.RewardTable table = resolveFtbqTable(entry.getFtbqTableId());
         if (table == null) return new BulkBuyResult(0L, times, null);
         long cappedTimes = Math.min(times, rewardRollCap());
-        long affordable = affordAndDeduct(player, entry, cappedTimes);
+        long affordable = affordAndDeduct(player, entry, cappedTimes, backpackMode);
         if (affordable <= 0L) return new BulkBuyResult(0L, times, null);
-        String via = deliverFtbqDraws(player, table, clampFtbqRolls(affordable), aeMode);
+        String via = deliverFtbqDraws(player, table, clampFtbqRolls(affordable), aeMode, backpackMode);
         return new BulkBuyResult(affordable, times, via);
     }
 
     /** 直接获取（作弊）+ FTBQ：不结算成本，直接从表里抽 min(times, 抽取上限) 次并交付。 */
-    public static BulkBuyResult giveBulkFtbq(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult giveBulkFtbq(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (player == null || entry == null || times <= 0L || !entry.hasFtbqTable()) {
             return new BulkBuyResult(0L, times, null);
         }
         dev.ftb.mods.ftbquests.quest.loot.RewardTable table = resolveFtbqTable(entry.getFtbqTableId());
         if (table == null) return new BulkBuyResult(0L, times, null);
         long rolls = Math.min(times, rewardRollCap());
-        String via = deliverFtbqDraws(player, table, clampFtbqRolls(rolls), aeMode);
+        String via = deliverFtbqDraws(player, table, clampFtbqRolls(rolls), aeMode, backpackMode);
         return new BulkBuyResult(rolls, times, via);
     }
 
@@ -281,26 +312,26 @@ public final class ShopPurchase {
      * 绕开 FTBQ 自己的加权随机，一次性交付表内每一个物品类奖励，各自独立随机数量（× 购买次数），
      * 语义对齐本地 {@link #buyBulkAll}，只是奖励来源换成表内容。
      */
-    public static BulkBuyResult buyBulkFtbqAll(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult buyBulkFtbqAll(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (entry == null || !entry.hasFtbqTable()) return new BulkBuyResult(0L, times, null);
         dev.ftb.mods.ftbquests.quest.loot.RewardTable table = resolveFtbqTable(entry.getFtbqTableId());
         if (table == null) return new BulkBuyResult(0L, times, null);
         long cappedTimes = Math.min(times, rewardRollCap());
-        long affordable = affordAndDeduct(player, entry, cappedTimes);
+        long affordable = affordAndDeduct(player, entry, cappedTimes, backpackMode);
         if (affordable <= 0L) return new BulkBuyResult(0L, times, null);
-        String via = deliverFtbqAll(player, table, clampFtbqRolls(affordable), aeMode);
+        String via = deliverFtbqAll(player, table, clampFtbqRolls(affordable), aeMode, backpackMode);
         return new BulkBuyResult(affordable, times, via);
     }
 
     /** 直接获取（作弊）+ FTBQ 全部：不结算成本，直接把表内每项按 min(times, 抽取上限) 次交付。 */
-    public static BulkBuyResult giveBulkFtbqAll(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult giveBulkFtbqAll(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (player == null || entry == null || times <= 0L || !entry.hasFtbqTable()) {
             return new BulkBuyResult(0L, times, null);
         }
         dev.ftb.mods.ftbquests.quest.loot.RewardTable table = resolveFtbqTable(entry.getFtbqTableId());
         if (table == null) return new BulkBuyResult(0L, times, null);
         long rolls = Math.min(times, rewardRollCap());
-        String via = deliverFtbqAll(player, table, clampFtbqRolls(rolls), aeMode);
+        String via = deliverFtbqAll(player, table, clampFtbqRolls(rolls), aeMode, backpackMode);
         return new BulkBuyResult(rolls, times, via);
     }
 
@@ -311,21 +342,21 @@ public final class ShopPurchase {
      * {@link #resolveFtbqItemRewardByIndex}），须由调用方从客户端选择界面传来，服务端按此重新解出
      * 实际物品（不信任客户端物品数据）。
      */
-    public static BulkBuyResult buyBulkFtbqChoice(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, int chosenIndex) {
+    public static BulkBuyResult buyBulkFtbqChoice(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode, int chosenIndex) {
         if (entry == null || !entry.hasFtbqTable()) return new BulkBuyResult(0L, times, null);
         dev.ftb.mods.ftbquests.quest.loot.RewardTable table = resolveFtbqTable(entry.getFtbqTableId());
         if (table == null) return new BulkBuyResult(0L, times, null);
         dev.ftb.mods.ftbquests.quest.reward.ItemReward chosen = resolveFtbqItemRewardByIndex(table, chosenIndex);
         if (chosen == null) return new BulkBuyResult(0L, times, null);
         long cappedTimes = Math.min(times, rewardRollCap());
-        long affordable = affordAndDeduct(player, entry, cappedTimes);
+        long affordable = affordAndDeduct(player, entry, cappedTimes, backpackMode);
         if (affordable <= 0L) return new BulkBuyResult(0L, times, null);
-        String via = deliverFtbqChoice(player, chosen, clampFtbqRolls(affordable), aeMode);
+        String via = deliverFtbqChoice(player, chosen, clampFtbqRolls(affordable), aeMode, backpackMode);
         return new BulkBuyResult(affordable, times, via);
     }
 
     /** 直接获取（作弊）+ FTBQ 自选：不结算成本，直接把 chosenIndex 那一项按 min(times, 抽取上限) 次交付。 */
-    public static BulkBuyResult giveBulkFtbqChoice(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, int chosenIndex) {
+    public static BulkBuyResult giveBulkFtbqChoice(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode, int chosenIndex) {
         if (player == null || entry == null || times <= 0L || !entry.hasFtbqTable()) {
             return new BulkBuyResult(0L, times, null);
         }
@@ -334,7 +365,7 @@ public final class ShopPurchase {
         dev.ftb.mods.ftbquests.quest.reward.ItemReward chosen = resolveFtbqItemRewardByIndex(table, chosenIndex);
         if (chosen == null) return new BulkBuyResult(0L, times, null);
         long rolls = Math.min(times, rewardRollCap());
-        String via = deliverFtbqChoice(player, chosen, clampFtbqRolls(rolls), aeMode);
+        String via = deliverFtbqChoice(player, chosen, clampFtbqRolls(rolls), aeMode, backpackMode);
         return new BulkBuyResult(rolls, times, via);
     }
 
@@ -357,7 +388,7 @@ public final class ShopPurchase {
 
     /** 表内每一个物品类奖励各自独立随机 rolls 次数量（不经过表的加权随机），聚合后一次性交付。 */
     private static String deliverFtbqAll(ServerPlayer player, dev.ftb.mods.ftbquests.quest.loot.RewardTable table,
-                                         int rolls, boolean aeMode) {
+                                         int rolls, boolean aeMode, boolean backpackMode) {
         if (rolls <= 0) return null;
         java.util.List<ItemDelivery> deliveries = new java.util.ArrayList<>();
         java.util.List<ItemStack> tmp = new java.util.ArrayList<>(4);
@@ -378,12 +409,12 @@ public final class ShopPurchase {
             deliveries.add(new ItemDelivery(unit, java.math.BigInteger.valueOf(total)));
         }
         if (deliveries.isEmpty()) return null;
-        return deliverItemBatch(player, deliveries, aeMode);
+        return deliverItemBatch(player, deliveries, aeMode, backpackMode);
     }
 
     /** 单个物品类奖励独立随机 rolls 次数量并累加（仿每次开箱各自独立结算），交付这一项。 */
     private static String deliverFtbqChoice(ServerPlayer player, dev.ftb.mods.ftbquests.quest.reward.ItemReward chosen,
-                                            int rolls, boolean aeMode) {
+                                            int rolls, boolean aeMode, boolean backpackMode) {
         if (rolls <= 0) return null;
         long total = 0L;
         java.util.List<ItemStack> tmp = new java.util.ArrayList<>(4);
@@ -398,7 +429,7 @@ public final class ShopPurchase {
         if (total <= 0L) return null;
         ItemStack unit = chosen.getItem().copy();
         unit.setCount(1);
-        return deliverItems(player, unit, java.math.BigInteger.valueOf(total), aeMode);
+        return deliverItems(player, unit, java.math.BigInteger.valueOf(total), aeMode, backpackMode);
     }
 
     /** 按 FTBQ 表 ID（十六进制字符串）查活的服务端奖励表实例；未加载/ID 非法返回 null。 */
@@ -421,7 +452,7 @@ public final class ShopPurchase {
      * 白白 new 一次并丢弃）。两者都是百万次调用级别的纯浪费小对象分配，是主线程卡顿的直接来源。</p>
      */
     private static String deliverFtbqDraws(ServerPlayer player, dev.ftb.mods.ftbquests.quest.loot.RewardTable table,
-                                           int rolls, boolean aeMode) {
+                                           int rolls, boolean aeMode, boolean backpackMode) {
         if (rolls <= 0) return null;
         java.util.Collection<dev.ftb.mods.ftbquests.quest.loot.WeightedReward> drawn =
                 table.generateWeightedRandomRewards(player.getRandom(), rolls, false);
@@ -452,7 +483,7 @@ public final class ShopPurchase {
         for (var e : agg.entrySet()) {
             deliveries.add(new ItemDelivery(unitOf.get(e.getKey()), java.math.BigInteger.valueOf(e.getValue()[0])));
         }
-        return deliverItemBatch(player, deliveries, aeMode);
+        return deliverItemBatch(player, deliveries, aeMode, backpackMode);
     }
 
     /**
@@ -461,7 +492,7 @@ public final class ShopPurchase {
      * 只有随后交付什么内容不同。
      * @return 实际可成交次数（0 = 买不起/条目无效/参数非法，未做任何扣款）
      */
-    private static long affordAndDeduct(ServerPlayer player, ShopEntry entry, long times) {
+    private static long affordAndDeduct(ServerPlayer player, ShopEntry entry, long times, boolean backpackMode) {
         if (player == null || entry == null || !entry.isValid() || times <= 0L) return 0L;
         MinecraftServer server = player.getServer();
         if (server == null) return 0L;
@@ -526,13 +557,7 @@ public final class ShopPurchase {
             if (rem > 0) {
                 Item coin = ForgeRegistries.ITEMS.getValue(c.getKey());
                 if (coin != null) {
-                    long fromInv = Math.min(rem, countItem(player, coin)); // 先扣背包实体币
-                    if (fromInv > 0) removeItems(player, coin, (int) fromInv);
-                    long remAfterInv = rem - fromInv;
-                    long fromBackpack = remAfterInv > 0
-                            ? Math.min(remAfterInv, ShopBackpack.countItem(player, coin, null)) : 0L;
-                    if (fromBackpack > 0) ShopBackpack.removeItems(player, coin, fromBackpack, null); // 再扣精妙背包
-                    long fromAe = remAfterInv - fromBackpack;                // 不足再从绑定AE抽
+                    long fromAe = deductFromCarried(player, coin, null, rem, backpackMode); // 先扣背包/精妙背包（顺序看模式），不足再从绑定AE抽
                     if (fromAe > 0) {
                         appeng.api.stacks.AEItemKey ck = appeng.api.stacks.AEItemKey.of(new ItemStack(coin));
                         if (ck != null) ShopAeNetwork
@@ -549,13 +574,7 @@ public final class ShopPurchase {
                         .extractForPlayer(player, appeng.api.stacks.AEFluidKey.of(fluid), need);
             } else {
                 Item item = ForgeRegistries.ITEMS.getValue(in.id);
-                long fromInv = Math.min(need, countItem(player, item, in.nbt())); // 先扣背包
-                if (fromInv > 0) removeItems(player, item, (int) fromInv, in.nbt());
-                long remAfterInv = need - fromInv;
-                long fromBackpack = remAfterInv > 0
-                        ? Math.min(remAfterInv, ShopBackpack.countItem(player, item, in.nbt())) : 0L;
-                if (fromBackpack > 0) ShopBackpack.removeItems(player, item, fromBackpack, in.nbt()); // 再扣精妙背包
-                long fromAe = remAfterInv - fromBackpack;                // 不足再从绑定AE抽
+                long fromAe = deductFromCarried(player, item, in.nbt(), need, backpackMode); // 先扣背包/精妙背包（顺序看模式），不足再从绑定AE抽
                 if (fromAe > 0) {
                     appeng.api.stacks.AEItemKey aek = appeng.api.stacks.AEItemKey.of(in.makeUnitStack());
                     if (aek != null) ShopAeNetwork
@@ -576,16 +595,16 @@ public final class ShopPurchase {
      * 仅当 {@link ShopCheatMode#isEnabled} 为该玩家开启时，由 ShopActionPacket.doBuy 调用。
      * 交付走与购买同款分层逻辑（AE注入 / SDA打包 / 背包）。
      */
-    public static BulkBuyResult giveBulk(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult giveBulk(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (player == null || entry == null || !entry.isValid() || times <= 0L) {
             return new BulkBuyResult(0L, times, null);
         }
-        String via = deliverGoodsList(player, entry, times, aeMode);
+        String via = deliverGoodsList(player, entry, times, aeMode, backpackMode);
         return new BulkBuyResult(times, times, via);
     }
 
     /** 直接获取（作弊）+ 自选：不结算成本，交付 chosen 这一项，每次独立随机数量（× min(times, 抽取上限)）。 */
-    public static BulkBuyResult giveBulkChoice(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, ShopEntry.RewardOption chosen) {
+    public static BulkBuyResult giveBulkChoice(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode, ShopEntry.RewardOption chosen) {
         if (player == null || entry == null || !entry.isValid() || times <= 0L || chosen == null) {
             return new BulkBuyResult(0L, times, null);
         }
@@ -593,12 +612,12 @@ public final class ShopPurchase {
         ItemStack unit = chosen.item().copy();
         unit.setCount(1);
         java.math.BigInteger goodsTotal = rollTotal(chosen, rolls);
-        String via = deliverItems(player, unit, goodsTotal, aeMode);
+        String via = deliverItems(player, unit, goodsTotal, aeMode, backpackMode);
         return new BulkBuyResult(rolls, times, via);
     }
 
     /** 直接获取（作弊）+ 随机：每次独立按权重抽 1 项 + 独立随机数量，聚合后交付。 */
-    public static BulkBuyResult giveBulkRandom(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult giveBulkRandom(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (player == null || entry == null || !entry.isValid() || times <= 0L) return new BulkBuyResult(0L, times, null);
         java.util.List<ShopEntry.RewardOption> pool = entry.getRewardPool();
         if (pool.isEmpty()) return new BulkBuyResult(0L, times, null);
@@ -614,12 +633,12 @@ public final class ShopPurchase {
             unit.setCount(1);
             deliveries.add(new ItemDelivery(unit, e.getValue()));
         }
-        String via = deliverItemBatch(player, deliveries, aeMode);
+        String via = deliverItemBatch(player, deliveries, aeMode, backpackMode);
         return new BulkBuyResult(rolls, times, via);
     }
 
     /** 直接获取（作弊）+ 全部：一次性交付奖励池每一项，各项独立随机数量（× min(times, 抽取上限)）。 */
-    public static BulkBuyResult giveBulkAll(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
+    public static BulkBuyResult giveBulkAll(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         if (player == null || entry == null || !entry.isValid() || times <= 0L) return new BulkBuyResult(0L, times, null);
         java.util.List<ShopEntry.RewardOption> pool = entry.getRewardPool();
         if (pool.isEmpty()) return new BulkBuyResult(0L, times, null);
@@ -630,7 +649,7 @@ public final class ShopPurchase {
             unit.setCount(1);
             deliveries.add(new ItemDelivery(unit, rollTotal(opt, rolls)));
         }
-        String via = deliverItemBatch(player, deliveries, aeMode);
+        String via = deliverItemBatch(player, deliveries, aeMode, backpackMode);
         return new BulkBuyResult(rolls, times, via);
     }
 
@@ -642,7 +661,7 @@ public final class ShopPurchase {
      * @return 主交付方式 "ae"/"sda"/"inventory"（null = 参数无效）
      */
     public static String deliverItems(net.minecraft.server.level.ServerPlayer player, ItemStack unit,
-                                      java.math.BigInteger total, boolean aeMode) {
+                                      java.math.BigInteger total, boolean aeMode, boolean backpackMode) {
         if (player == null || unit == null || unit.isEmpty() || total == null || total.signum() <= 0) return null;
         appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(unit);
         long threshold = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopSdaPackThreshold.get();
@@ -663,7 +682,7 @@ public final class ShopPurchase {
                     .injectForPlayer(player, key, total.longValue());
             case "sda" -> packAsSda(player, key, total);
             default -> {
-                long leftover = deliverToInventory(player, unit, total); // 返回装不下的余量
+                long leftover = deliverToInventory(player, unit, total, backpackMode); // 返回装不下的余量
                 if (leftover > 0L && key != null) {
                     packAsSda(player, key, java.math.BigInteger.valueOf(leftover));
                 }
@@ -690,7 +709,7 @@ public final class ShopPurchase {
      *         /null（没有任何有效物品）
      */
     public static String deliverItemBatch(net.minecraft.server.level.ServerPlayer player,
-                                          java.util.List<ItemDelivery> deliveries, boolean aeMode) {
+                                          java.util.List<ItemDelivery> deliveries, boolean aeMode, boolean backpackMode) {
         if (player == null || deliveries == null || deliveries.isEmpty()) return null;
         long threshold = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopSdaPackThreshold.get();
         java.math.BigInteger grandTotal = java.math.BigInteger.ZERO;
@@ -716,7 +735,7 @@ public final class ShopPurchase {
             } else if (key != null && batchAtThreshold) {
                 sdaBatch.merge(key, total, java.math.BigInteger::add);
             } else {
-                long leftover = deliverToInventory(player, unit, total); // 返回装不下的余量
+                long leftover = deliverToInventory(player, unit, total, backpackMode); // 返回装不下的余量
                 anyInventory = true;
                 if (leftover > 0L && key != null) {
                     sdaBatch.merge(key, java.math.BigInteger.valueOf(leftover), java.math.BigInteger::add);
@@ -735,7 +754,7 @@ public final class ShopPurchase {
      * 批量出售。一次性结算，成交量受背包持有量（int 上限）天然约束。
      * @return 实际出售份数
      */
-    public static long sellBulk(ServerPlayer player, ShopEntry entry, long times) {
+    public static long sellBulk(ServerPlayer player, ShopEntry entry, long times, boolean backpackMode) {
         if (player == null || entry == null || !entry.isValid() || times <= 0L) {
             return 0L;
         }
@@ -747,11 +766,22 @@ public final class ShopPurchase {
         Item goods = entry.getGoodsItem();
         int per = entry.getGoodsCount();
         if (per <= 0) return 0L;
-        int held = countItem(player, goods);
-        long sell = Math.min(times, (long) (held / per));
+        // 出售的货源同购买成本一样，背包 + 精妙背包 + 绑定AE网络合计可用量，不再只认随身背包
+        long inv = countItem(player, goods);
+        long backpack = ShopBackpack.countItem(player, goods, null);
+        long invPlusBackpack = (inv > Long.MAX_VALUE - backpack) ? Long.MAX_VALUE : inv + backpack;
+        long ae = 0L;
+        appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(new ItemStack(goods));
+        if (key != null) ae = ShopAeNetwork.availableForPlayer(player, key);
+        long held = (invPlusBackpack > Long.MAX_VALUE - ae) ? Long.MAX_VALUE : invPlusBackpack + ae;
+        long sell = Math.min(times, held / per);
         sell = entry.clampByUses(sell); // 限购商品：出售与购买共享同一剩余次数
         if (sell <= 0L) return 0L;
-        removeItems(player, goods, (int) (sell * per)); // sell*per ≤ held ≤ int 上限，安全
+        long need = sell * per; // ≤ held，不溢出
+        long fromAe = deductFromCarried(player, goods, null, need, backpackMode); // 先扣背包/精妙背包（顺序看模式），不足再从绑定AE抽
+        if (fromAe > 0 && key != null) {
+            ShopAeNetwork.extractForPlayer(player, key, fromAe);
+        }
         // 退回纯钱包成本（星火 + 币种）× 份数
         BigInteger sellBig = BigInteger.valueOf(sell);
         UUID uuid = player.getUUID();
@@ -769,10 +799,24 @@ public final class ShopPurchase {
     }
 
     /**
-     * 尽量塞进背包，装不下的余量再尝试塞进随身穿戴的精妙背包（{@link ShopBackpack}），
-     * 最终还剩的交由调用方打包 SDA。只塞不丢，避免海量掉落卡顿。
+     * 随身背包 + 精妙背包（{@link ShopBackpack}）分层交付，backpackMode 决定先塞哪边——关闭时随身背包
+     * 优先（原有顺序），开启时精妙背包优先。两边都塞不下的余量交由调用方打包 SDA。只塞不丢，避免海量掉落卡顿。
      */
-    private static long deliverToInventory(net.minecraft.server.level.ServerPlayer player, ItemStack unit, java.math.BigInteger count) {
+    private static long deliverToInventory(net.minecraft.server.level.ServerPlayer player, ItemStack unit,
+                                           java.math.BigInteger count, boolean backpackMode) {
+        java.math.BigInteger remaining = count;
+        if (backpackMode) {
+            remaining = insertBackpack(player, unit, remaining);
+            remaining = insertInventory(player, unit, remaining);
+        } else {
+            remaining = insertInventory(player, unit, remaining);
+            remaining = insertBackpack(player, unit, remaining);
+        }
+        return remaining.bitLength() < 63 ? remaining.longValue() : Long.MAX_VALUE;
+    }
+
+    private static java.math.BigInteger insertInventory(net.minecraft.server.level.ServerPlayer player, ItemStack unit, java.math.BigInteger count) {
+        if (count.signum() <= 0) return java.math.BigInteger.ZERO;
         int max = Math.max(1, unit.getMaxStackSize());
         java.math.BigInteger remaining = count;
         java.math.BigInteger bigMax = java.math.BigInteger.valueOf(max);
@@ -786,10 +830,12 @@ public final class ShopPurchase {
             remaining = remaining.subtract(java.math.BigInteger.valueOf(actuallyAdded));
             if (!added || actuallyAdded <= 0) break; // 背包满
         }
-        if (remaining.signum() > 0) {
-            remaining = ShopBackpack.insert(player, unit, remaining); // 随身背包塞不下的（或未穿戴）→ 原样退回
-        }
-        return remaining.bitLength() < 63 ? remaining.longValue() : Long.MAX_VALUE;
+        return remaining;
+    }
+
+    private static java.math.BigInteger insertBackpack(net.minecraft.server.level.ServerPlayer player, ItemStack unit, java.math.BigInteger count) {
+        if (count.signum() <= 0) return java.math.BigInteger.ZERO;
+        return ShopBackpack.insert(player, unit, count); // 随身背包塞不下的（或未穿戴）→ 原样退回
     }
 
     /**
@@ -931,7 +977,7 @@ public final class ShopPurchase {
         BigInteger amt = bal.min(BigInteger.valueOf(amount));
         if (amt.signum() <= 0) return 0L;
         if (!WalletAccountAPI.tryDeductCurrency(server, uuid, currency, amt)) return 0L;
-        deliverItems(player, new ItemStack(coin), amt, false);
+        deliverItems(player, new ItemStack(coin), amt, false, false);
         return amt.bitLength() < 63 ? amt.longValue() : Long.MAX_VALUE;
     }
 }

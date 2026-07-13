@@ -239,6 +239,28 @@ public class DShanhaiRecipeEngine {
     }
 
     /**
+     * getRecipeTypeCounts() 的兜底：缓存命中时 山海的配方库.js 从头部直接 return，safeAddRecipe
+     * 根本没跑过，RECIPE_TYPE_STATS 是空的，GuideMe 配方索引页会误报"配方库尚未加载"。这里改用
+     * DShanhaiRecipeCache 反射出的山海自定义类型清单，配合下面 getRecipesOfType 已有的实时
+     * lookup 树枚举——不依赖 safeAddRecipe 是否执行过，缓存命中/未命中都能拿到准确数量。
+     */
+    public static Map<String, Integer> getRecipeTypeCountsLive() {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        try {
+            for (com.gregtechceu.gtceu.api.recipe.GTRecipeType type :
+                    com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.ownedRecipeTypes()) {
+                if (type == null || type.registryName == null) continue;
+                String key = type.registryName.toString();
+                int count = getRecipesOfType(key).size();
+                if (count > 0) out.put(key, count);
+            }
+        } catch (Exception e) {
+            LOG.warn("[DRE] getRecipeTypeCountsLive() 失败: {}", e.getMessage());
+        }
+        return out;
+    }
+
+    /**
      * 返回指定配方类型的所有配方（有序列表，只读）。
      * <p>仅在游戏运行时调用（客户端需加载 RecipeManager）。用于生成配方索引子页面。</p>
      * <p>结果按类型 memoize 到 {@link #RECIPES_OF_TYPE_CACHE}：首次遍历 lookup 树后缓存，

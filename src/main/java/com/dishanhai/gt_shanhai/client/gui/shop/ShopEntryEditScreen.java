@@ -76,6 +76,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private String linkKey = ""; // 本条目的跳转目标别名（供其他条目 linkTo 引用），可空
     private String linkTo = "";  // 跳转到：指向某条目 linkKey，可空，非空则详情页显示可点击跳转
     private String displayName = ""; // 自定义显示名称，可空 = 用商品本身的物品名
+    private ShopEntry.TradeMode tradeMode = ShopEntry.TradeMode.BOTH; // 交易方向限制：不限/仅购买/仅出售
 
     private EditBox countBox, catBox, sparkBox, descBox, limitBox, linkKeyBox, linkToBox, nameBox;
     private MultiLineTextArea descArea;       // 描述「展开编写」大图层里的多行编辑区（与 descBox 同源，双向同步）
@@ -120,6 +121,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.linkKey = entry.getLinkKey();
             this.linkTo = entry.getLinkTo();
             this.displayName = entry.getDisplayName();
+            this.tradeMode = entry.getTradeMode();
         } else {
             goodsList.add(ItemStack.EMPTY); // 新增商品不预填默认物品，留空槽等玩家自己选（submit() 已有空商品校验拦截）
             this.count = 1;
@@ -495,8 +497,9 @@ public class ShopEntryEditScreen extends ScaledScreen {
         drawRewardRow(g, rewardPoolY(), Math.min(MAX_REWARD_OPTIONS, rowMax()), mx, my);
 
         // 隐藏/跳转（仿 FTBQ 隐藏任务）：隐藏商品不进分类网格，只能被别的条目「跳转到」直达
-        g.drawString(this.font, "§6隐藏/跳转（隐藏商品不进分类网格，靠跳转直达）", c, hiddenY() - 10, GOLD, true);
+        g.drawString(this.font, "§6隐藏/跳转（隐藏商品不进分类网格，靠跳转直达）· 交易方向", c, hiddenY() - 10, GOLD, true);
         drawBtn(g, c, hiddenY(), 56, 14, hidden ? "§c隐藏中" : "§a未隐藏", mx, my);
+        drawBtn(g, c + 56 + 8, hiddenY(), 64, 14, tradeModeLabel(), mx, my);
         g.drawString(this.font, "§7别名", c, linkKeyY() + 2, GRAY, true);
         g.drawString(this.font, "§7跳转到", c, linkToY() + 2, GRAY, true);
 
@@ -815,6 +818,23 @@ public class ShopEntryEditScreen extends ScaledScreen {
         };
     }
 
+    /** 交易方向按钮文案（不限/仅购买/仅出售）。 */
+    private String tradeModeLabel() {
+        return switch (tradeMode) {
+            case BUY_ONLY -> "§b仅购买";
+            case SELL_ONLY -> "§e仅出售";
+            default -> "§a不限";
+        };
+    }
+
+    private void cycleTradeMode() {
+        tradeMode = switch (tradeMode) {
+            case BOTH -> ShopEntry.TradeMode.BUY_ONLY;
+            case BUY_ONLY -> ShopEntry.TradeMode.SELL_ONLY;
+            default -> ShopEntry.TradeMode.BOTH;
+        };
+    }
+
     // ===== 交互 =====
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
@@ -868,6 +888,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
         // 隐藏商品开关
         if (GuiRenderUtil.isHovering(mx, my, c, hiddenY(), 56, 14)) {
             hidden = !hidden;
+            return true;
+        }
+        // 交易方向循环按钮（不限/仅购买/仅出售）
+        if (GuiRenderUtil.isHovering(mx, my, c + 56 + 8, hiddenY(), 64, 14)) {
+            cycleTradeMode();
             return true;
         }
         return super.universalMouseClicked(mx, my, btn);
@@ -1152,7 +1177,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         ShopEditPacket pkt = new ShopEditPacket(
                 isNew ? ShopEditPacket.Action.ADD : ShopEditPacket.Action.EDIT,
                 goodsForSubmit, cat, desc, cost, oldGoods, oldCategory == null ? "" : oldCategory, oldEntryIndex, limit,
-                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode);
+                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

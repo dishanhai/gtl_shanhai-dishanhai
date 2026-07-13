@@ -266,6 +266,9 @@ public final class ShopConfig {
                 if (e.hasCustomName()) {
                     o.addProperty("displayName", e.getDisplayName());
                 }
+                if (e.getTradeMode() != ShopEntry.TradeMode.BOTH) {
+                    o.addProperty("tradeMode", e.getTradeMode().name());
+                }
                 arr.add(o);
             }
             root.add("entries", arr);
@@ -358,8 +361,13 @@ public final class ShopConfig {
                 try { ftbqSubMode = ShopEntry.RewardMode.valueOf(o.get("ftbqSubMode").getAsString()); }
                 catch (Exception ignored) {}
             }
+            ShopEntry.TradeMode tradeMode = ShopEntry.TradeMode.BOTH;
+            if (o.has("tradeMode")) {
+                try { tradeMode = ShopEntry.TradeMode.valueOf(o.get("tradeMode").getAsString()); }
+                catch (Exception ignored) {}
+            }
             return new ShopEntry(goodsList, category, cost, description, limit,
-                    icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode);
+                    icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode);
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品条目: {}", e.getMessage());
             return null;

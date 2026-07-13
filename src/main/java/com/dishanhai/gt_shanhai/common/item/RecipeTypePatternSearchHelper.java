@@ -226,7 +226,6 @@ public final class RecipeTypePatternSearchHelper {
         var level = buffer.getLevel();
         var inventory = buffer.getPatternInventory();
         if (level == null || inventory == null) return;
-        long parallelCeiling = getMachineParallelCeiling(machine);
         int slotCount = inventory.getSlots();
         for (int slot = 0; slot < slotCount; slot++) {
             var stack = inventory.getStackInSlot(slot);
@@ -236,7 +235,7 @@ public final class RecipeTypePatternSearchHelper {
             }
             GTRecipe recipe = peekRecipeCached(buffer, slot, stack, level);
             if (recipe == null || !isSelectedOnMachine(machine, recipe.recipeType)) continue;
-            topUpVirtualSupply(buffer, slot, stack, parallelCeiling);
+            topUpVirtualSupply(buffer, slot, stack);
             activatePatternRecipe(capabilityMachine, buffer, recipe, slot);
             result.add(recipe);
         }
@@ -282,7 +281,6 @@ public final class RecipeTypePatternSearchHelper {
         if (!(patternMachine instanceof MEPatternBufferPartMachine buffer)) return;
         var inventory = buffer.getPatternInventory();
         if (inventory == null) return;
-        long parallelCeiling = getMachineParallelCeiling(capabilityMachine);
         int slotCount = inventory.getSlots();
         for (int slot = 0; slot < slotCount; slot++) {
             if (containsSlot(activeSlots, slot)) continue; // 真实 AE2 下单已激活，走既有分支，不碰虚拟下单状态
@@ -292,49 +290,36 @@ public final class RecipeTypePatternSearchHelper {
             }
             GTRecipe recipe = access.gtShanhai$getPatternRecipe(slot);
             if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
-                topUpVirtualSupply(buffer, slot, inventory.getStackInSlot(slot), parallelCeiling);
+                topUpVirtualSupply(buffer, slot, inventory.getStackInSlot(slot));
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
             }
         }
     }
 
-    /** 消费机器自身的并行上限（如代理执行者的机器数量²×8×倍率、原初引擎主机的 MAX+16）；取不到时不设上限。 */
-    private static long getMachineParallelCeiling(Object machine) {
-        if (machine instanceof SelectableRecipeTypeSetMachine selectable) {
-            long ceiling = selectable.getRecipeLogicMaxParallel();
-            return ceiling > 0 ? ceiling : Long.MAX_VALUE;
-        }
-        return Long.MAX_VALUE;
-    }
-
     /**
      * 虚拟供料批量预填：GTLCore 原生 InternalSlot 只认"单次 AE 下单送进来多少"，对着无限并行主机
-     * 天然只够跑 1 份（LRN-20260705-015 早已验证过：不能直接把并行数放大到机器上限，否则一份订单
-     * 会被错误放大成机器满载产出）。这里换一种更安全的思路：不碰并行估算/扣料逻辑本身，只把
+     * 天然只够跑 1 份。这里换一种更安全的思路：不碰并行估算/扣料逻辑本身，只把
      * InternalSlot 这个"料仓"从无线 ME 网络按批量真实预填满——预填之后，GTLCore 原生的
      * IParallelLogic 并行估算和 MEPatternRecipeHandlePart 扣料就是在真实数量上工作，不需要
      * gt_shanhai 自己重新实现一套并行计算或提交逻辑。
      * <p>
      * 只在槽位当前真实库存已耗尽（itemInventory/fluidInventory 皆空）时才补一批，避免每次
      * lookup 都重复提取、无限增长；先对每个输入做 SIMULATE 探测网络真实可提取量，取瓶颈输入
-     * 换算出的批量上限（不超过 machineParallelCeiling 与配置 patternVirtualSupplyBatchParallel
-     * 两者中较小值），再统一按该批量做真实 MODULATE 提取——避免某个输入库存充裕、另一个稀缺时，
-     * 充裕的那份被无谓提走锁死在缓冲区里。
-     *
-     * @param machineParallelCeiling 消费机器自身的并行上限（如代理执行者的"机器数量²×8×倍率"、
-     *      原初引擎主机的 MAX+16 等）。预填批量不应超过这个值，否则会预填出机器这一轮实际吃不下
-     *      的量，白占网络库存、缓冲区长期半满不进不出。取不到时传 Long.MAX_VALUE，退化为只受全局
-     *      配置约束。
+     * 换算出的批量上限（不超过配置 patternVirtualSupplyBatchParallel，即"这一单"的目标总量，
+     * 与消费机器自身的并行上限无关——机器并行低时就多跑几轮/几 tick 消耗完这一整批，机器并行
+     * 高时一轮就能吃完，批量本身不因此被压缩），再统一按该批量做真实 MODULATE 提取——避免某个
+     * 输入库存充裕、另一个稀缺时，充裕的那份被无谓提走锁死在缓冲区里。虚拟物品只在这批真实
+     * MODULATE 提取时才被消耗（写入 InternalSlot 供配方扣料），用完即从网络中消失，不会额外
+     * 滞留或被重复计数。
      * <p>
      * <b>一次性下单</b>：本方法只在这个槽位这一次"放样板"里真正成功提取过一次才算下单完成
      * （见 {@link #ORDER_FULFILLED_SLOTS}），完成后不再重复触发，即使 InternalSlot 之后被
-     * 正常消费清空——这是刻意行为：并行只用来放大"这一单"内部的批量，不用来驱动无限期反复
-     * 重新下单（那样等于给样板装了个停不下来的自动合成循环，不是真实机器的正常运转方式）。
-     * 网络暂时没货时不标记完成，允许下一轮重试，直到真正抽到过一次为止。
+     * 正常消费清空——这是刻意行为：批量已经按"这一单"的目标总量一次性给足，不需要也不应该
+     * 再驱动无限期反复重新下单（那样等于给样板装了个停不下来的自动合成循环，不是真实机器的
+     * 正常运转方式）。网络暂时没货时不标记完成，允许下一轮重试，直到真正抽到过一次为止。
      */
-    private static void topUpVirtualSupply(MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
-            long machineParallelCeiling) {
+    private static void topUpVirtualSupply(MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack) {
         if (patternStack == null || patternStack.isEmpty()) return;
         if (isOrderFulfilled(buffer, slot)) return; // 这一单已经下过料，不再自动重下
         Level level = buffer.getLevel();
@@ -364,7 +349,7 @@ public final class RecipeTypePatternSearchHelper {
         if (!(actionSourceObj instanceof IActionSource actionSource)) return;
 
         MEStorage storage = grid.getStorageService().getInventory();
-        long achievable = Math.min(machineParallelCeiling, DShanhaiConfig.COMMON.patternVirtualSupplyBatchParallel.get());
+        long achievable = DShanhaiConfig.COMMON.patternVirtualSupplyBatchParallel.get();
         for (GenericStack in : inputs) {
             if (in == null || in.amount() <= 0) continue;
             long available = storage.extract(in.what(), Long.MAX_VALUE, Actionable.SIMULATE, actionSource);

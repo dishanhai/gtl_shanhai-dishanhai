@@ -60,6 +60,11 @@ public final class DShanhaiRecipeCache {
     private static final Map<String, GTRecipeType> TYPE_CACHE = new java.util.HashMap<>();
     private static java.util.Set<GTRecipeType> ownedTypesCache;
 
+    // 匹配 gtr.<type>('<id>') / gtr.<type>("<id>")——源码里真正调用注册的确切类型和 id，
+    // 写错了配方注册会直接失败，所以这个模式本身就是权威真值，供导出 Pass 3 兜底扫描用。
+    private static final java.util.regex.Pattern GTR_CALL_PATTERN =
+            java.util.regex.Pattern.compile("gtr\\.([a-zA-Z_][a-zA-Z0-9_]*)\\(\\s*(['\"])([^'\"]+)\\2");
+
     private DShanhaiRecipeCache() {}
 
     /**
@@ -71,7 +76,8 @@ public final class DShanhaiRecipeCache {
      * 不用每次手动排查漏了哪条。真正跨 mod 共用的类型（element_copying 之类）不在这份清单里，
      * 仍然走下面精确按 id 重建那条路径。
      */
-    private static java.util.Set<GTRecipeType> ownedRecipeTypes() {
+    /** 公开供 DShanhaiRecipeEngine.getRecipeTypeCountsLive() 复用，避免重复反射同一份类型清单。 */
+    public static java.util.Set<GTRecipeType> ownedRecipeTypes() {
         if (ownedTypesCache != null) return ownedTypesCache;
         java.util.Set<GTRecipeType> set = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         try {
@@ -179,6 +185,7 @@ public final class DShanhaiRecipeCache {
         cleanOldExport();
 
         int written = 0, missing = 0;
+        java.util.Set<ResourceLocation> exportedIds = new java.util.HashSet<>();
 
         // Pass 1：山海 Java 侧自己注册的自定义类型（DShanhaiRecipeTypes 反射得到），不管有没有
         // 被 safeAddRecipe 追踪到，整桶无条件导出——从根上兜住裸调用 gtr.xxx() 和声明id对不上的情况。
@@ -189,8 +196,10 @@ public final class DShanhaiRecipeCache {
             if (ofThisType == null || ofThisType.isEmpty()) continue;
             handledTypes.add(ownedType);
             for (Recipe<?> recipe : ofThisType.values()) {
-                if (recipe instanceof GTRecipe gtRecipe && exportOne(gtRecipe)) written++;
-                else missing++;
+                if (recipe instanceof GTRecipe gtRecipe && exportOne(gtRecipe)) {
+                    written++;
+                    exportedIds.add(gtRecipe.getId());
+                } else missing++;
             }
         }
         LOG.info("[DShanhaiRecipeCache] owned-type bulk export: {} types, {} recipes written so far", handledTypes.size(), written);
@@ -225,8 +234,10 @@ public final class DShanhaiRecipeCache {
                     // exclusively ours this run -- export every recipe RecipeManager has for it
                     // directly, no id reconstruction needed (robust against declared-id != actual-id typos).
                     for (Recipe<?> recipe : ofThisType.values()) {
-                        if (recipe instanceof GTRecipe gtRecipe && exportOne(gtRecipe)) written++;
-                        else missing++;
+                        if (recipe instanceof GTRecipe gtRecipe && exportOne(gtRecipe)) {
+                            written++;
+                            exportedIds.add(gtRecipe.getId());
+                        } else missing++;
                     }
                     continue;
                 }
@@ -239,6 +250,7 @@ public final class DShanhaiRecipeCache {
                     Recipe<?> recipe = byName.get(finalId);
                     if (recipe instanceof GTRecipe gtRecipe && exportOne(gtRecipe)) {
                         written++;
+                        exportedIds.add(gtRecipe.getId());
                     } else {
                         LOG.warn("[DShanhaiRecipeCache] {} not found in RecipeManager (tracked id={}, type={}), export skipped", finalId, rawId, type);
                         missing++;
@@ -246,6 +258,49 @@ public final class DShanhaiRecipeCache {
                 }
             }
         }
+
+        // Pass 3：兜底扫描 山海的配方库.js 源码文本里所有 gtr.<type>('<id>') 调用——这个模式本身
+        // 就是真正注册时用的确切类型和 id（写错了配方注册会直接失败/炸掉，不可能悄悄错着还能跑），
+        // 比 safeAddRecipe 声明的 bookkeeping 参数、比"独占类型"清单都更权威。专门补前两遍漏掉的：
+        // 完全没走 safeAddRecipe 的裸调用、或者类型既不在山海自定义清单里也不在本次 tracked 表里的。
+        int fallbackWritten = 0, fallbackMissing = 0;
+        try {
+            String source = Files.readString(RECIPE_LIB_JS, StandardCharsets.UTF_8);
+            java.util.regex.Matcher m = GTR_CALL_PATTERN.matcher(source);
+            java.util.Set<String> seenThisPass = new java.util.HashSet<>();
+            while (m.find()) {
+                String type = m.group(1);
+                String rawId = m.group(3);
+                if (!seenThisPass.add(type + '|' + rawId)) continue; // 去重（同一配方可能被匹配多次）
+                GTRecipeType recipeType = resolveRecipeType(type);
+                if (recipeType == null) {
+                    LOG.warn("[DShanhaiRecipeCache] source-scan: gtr.{}('{}') -- recipe type '{}' not found in GTRegistries.RECIPE_TYPES", type, rawId, type);
+                    fallbackMissing++;
+                    continue;
+                }
+                // Pass 1 已经把这个类型的整桶都无条件导出过了（不管 id 猜没猜对），这里再按
+                // baseResourceLocation() 猜的命名空间去比对只会因为猜错命名空间（比如裸 id
+                // 默认猜 dishanhai:，但 GTCEu 实际给的是 gtceu:）而误报"缺失"，直接跳过。
+                if (handledTypes.contains(recipeType)) continue;
+                ResourceLocation baseId = baseResourceLocation(rawId);
+                ResourceLocation finalId = new ResourceLocation(baseId.getNamespace(),
+                        recipeType.registryName.getPath() + "/" + baseId.getPath());
+                if (exportedIds.contains(finalId)) continue; // 前两遍已经导出过
+                Recipe<?> recipe = byName.get(finalId);
+                if (recipe instanceof GTRecipe gtRecipe && exportOne(gtRecipe)) {
+                    exportedIds.add(finalId);
+                    fallbackWritten++;
+                } else {
+                    LOG.warn("[DShanhaiRecipeCache] source-scan: gtr.{}('{}') -> expected {} NOT found in RecipeManager (registration likely failed or was filtered out this run, see server log around this recipe id for the real cause)", type, rawId, finalId);
+                    fallbackMissing++;
+                }
+            }
+        } catch (IOException e) {
+            LOG.warn("[DShanhaiRecipeCache] source-scan fallback failed to read 山海的配方库.js", e);
+        }
+        written += fallbackWritten;
+        missing += fallbackMissing;
+        LOG.info("[DShanhaiRecipeCache] source-scan fallback: written={} still-missing={}", fallbackWritten, fallbackMissing);
 
         // 注：山海的gtceujs优化.js（gtceu.js 的接管副本）不接这套缓存——它混了 gtr.xxx()（GTRecipe，
         // 能靠 GTRecipeSerializer.CODEC 导出）和 event.shapeless/shaped()（原版 ShapedRecipe/

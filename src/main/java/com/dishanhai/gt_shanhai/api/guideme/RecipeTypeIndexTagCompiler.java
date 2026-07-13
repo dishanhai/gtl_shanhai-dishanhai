@@ -47,6 +47,9 @@ public class RecipeTypeIndexTagCompiler extends BlockTagCompiler {
         Map<String, Integer> counts;
         try {
             counts = DShanhaiRecipeEngine.getRecipeTypeCounts();
+            if (counts == null || counts.isEmpty()) {
+                counts = DShanhaiRecipeEngine.getRecipeTypeCountsLive();
+            }
         } catch (Exception e) {
             parent.append(compiler.createErrorBlock(
                 "RecipeTypeIndex: 读取配方类型统计失败 - " + e.getMessage(), fields));

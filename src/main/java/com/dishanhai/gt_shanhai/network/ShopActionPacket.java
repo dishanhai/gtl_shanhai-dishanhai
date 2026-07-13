@@ -29,28 +29,31 @@ public class ShopActionPacket {
     private final String category;            // 定位条目用（同 goods 可能跨分类）
     private final long times;                 // 购买/出售次数（支持 Long.MAX）
     private final boolean aeMode;             // AE 模式：交付优先注入玩家绑定的 AE 网络
+    private final boolean backpackMode;       // 精妙背包模式：扣款/交付优先走随身穿戴的精妙背包
     private final int entryIndex;             // 条目在 ShopConfig.getEntries() 的精确索引（-1=未知则回退 goodsId+category 定位）
     private final int chosenRewardIndex;      // 自选奖励模式：玩家在选择界面选中的 rewardPool 下标；-1=未选/不适用
 
     public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times) {
-        this(action, goodsId, category, times, false, -1);
+        this(action, goodsId, category, times, false, false, -1);
     }
 
     public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times, boolean aeMode) {
-        this(action, goodsId, category, times, aeMode, -1);
+        this(action, goodsId, category, times, aeMode, false, -1);
     }
 
-    public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times, boolean aeMode, int entryIndex) {
-        this(action, goodsId, category, times, aeMode, entryIndex, -1);
+    public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times,
+                            boolean aeMode, boolean backpackMode, int entryIndex) {
+        this(action, goodsId, category, times, aeMode, backpackMode, entryIndex, -1);
     }
 
     public ShopActionPacket(Action action, ResourceLocation goodsId, String category, long times, boolean aeMode,
-                            int entryIndex, int chosenRewardIndex) {
+                            boolean backpackMode, int entryIndex, int chosenRewardIndex) {
         this.action = action;
         this.goodsId = goodsId == null ? new ResourceLocation("minecraft:air") : goodsId;
         this.category = category == null ? "" : category;
         this.times = Math.max(1L, times);
         this.aeMode = aeMode;
+        this.backpackMode = backpackMode;
         this.entryIndex = entryIndex;
         this.chosenRewardIndex = chosenRewardIndex;
     }
@@ -61,6 +64,7 @@ public class ShopActionPacket {
         this.category = buf.readUtf();
         this.times = buf.readVarLong();
         this.aeMode = buf.readBoolean();
+        this.backpackMode = buf.readBoolean();
         this.entryIndex = buf.readInt();
         this.chosenRewardIndex = buf.readInt();
     }
@@ -71,6 +75,7 @@ public class ShopActionPacket {
         buf.writeUtf(category);
         buf.writeVarLong(times);
         buf.writeBoolean(aeMode);
+        buf.writeBoolean(backpackMode);
         buf.writeInt(entryIndex);
         buf.writeInt(chosenRewardIndex);
     }
@@ -122,8 +127,8 @@ public class ShopActionPacket {
         }
 
         switch (pkt.action) {
-            case BUY -> doBuy(player, entry, pkt.times, pkt.aeMode, pkt.chosenRewardIndex);
-            case SELL -> doSell(player, entry, pkt.times);
+            case BUY -> doBuy(player, entry, pkt.times, pkt.aeMode, pkt.backpackMode, pkt.chosenRewardIndex);
+            case SELL -> doSell(player, entry, pkt.times, pkt.backpackMode);
             case DELETE -> {
                 if (!com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player)) {
                     player.sendSystemMessage(Component.literal("§c[山海商店] 无权限删除"));
@@ -139,12 +144,16 @@ public class ShopActionPacket {
         }
     }
 
-    private static void doBuy(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, int chosenRewardIndex) {
+    private static void doBuy(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode, int chosenRewardIndex) {
         boolean cheat = com.dishanhai.gt_shanhai.common.shop.ShopCheatMode.isEnabled(player.getUUID());
         if (entry.hasMissingItems()) {
             // 商品/成本引用的物品当前注册表里查不到（对应模组缺失/被卸载）：客户端按钮已经拦了，这里是兜底，
             // 消息要说清楚原因，别落到下面的"余额不足"分支误导玩家去充值。
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买"));
+            return;
+        }
+        if (!entry.allowsBuy()) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 该商品仅允许出售，不能购买"));
             return;
         }
         if (!cheat && entry.isLimited() && entry.getRemainingUses() <= 0L) {
@@ -163,31 +172,31 @@ public class ShopActionPacket {
                     return;
                 }
                 ShopEntry.RewardOption chosen = pool.get(chosenRewardIndex);
-                r = cheat ? ShopPurchase.giveBulkChoice(player, entry, times, aeMode, chosen)
-                          : ShopPurchase.buyBulkChoice(player, entry, times, aeMode, chosen);
+                r = cheat ? ShopPurchase.giveBulkChoice(player, entry, times, aeMode, backpackMode, chosen)
+                          : ShopPurchase.buyBulkChoice(player, entry, times, aeMode, backpackMode, chosen);
             }
-            case RANDOM -> r = cheat ? ShopPurchase.giveBulkRandom(player, entry, times, aeMode)
-                                      : ShopPurchase.buyBulkRandom(player, entry, times, aeMode);
-            case ALL -> r = cheat ? ShopPurchase.giveBulkAll(player, entry, times, aeMode)
-                                   : ShopPurchase.buyBulkAll(player, entry, times, aeMode);
+            case RANDOM -> r = cheat ? ShopPurchase.giveBulkRandom(player, entry, times, aeMode, backpackMode)
+                                      : ShopPurchase.buyBulkRandom(player, entry, times, aeMode, backpackMode);
+            case ALL -> r = cheat ? ShopPurchase.giveBulkAll(player, entry, times, aeMode, backpackMode)
+                                   : ShopPurchase.buyBulkAll(player, entry, times, aeMode, backpackMode);
             case FTBQ -> {
                 // FTBQ 表也支持自选/随机/全部三种子模式（见 ShopEntry#getFtbqSubMode），语义对齐本地奖励池，
                 // 只是奖励来源换成表内容；自选沿用同一个 chosenRewardIndex 字段，服务端按表内「仅物品类奖励」
                 // 子序列的下标重新解出实际物品（见 ShopPurchase#resolveFtbqItemRewardByIndex）。
                 r = switch (entry.getFtbqSubMode()) {
                     case CHOICE -> cheat
-                            ? ShopPurchase.giveBulkFtbqChoice(player, entry, times, aeMode, chosenRewardIndex)
-                            : ShopPurchase.buyBulkFtbqChoice(player, entry, times, aeMode, chosenRewardIndex);
+                            ? ShopPurchase.giveBulkFtbqChoice(player, entry, times, aeMode, backpackMode, chosenRewardIndex)
+                            : ShopPurchase.buyBulkFtbqChoice(player, entry, times, aeMode, backpackMode, chosenRewardIndex);
                     case ALL -> cheat
-                            ? ShopPurchase.giveBulkFtbqAll(player, entry, times, aeMode)
-                            : ShopPurchase.buyBulkFtbqAll(player, entry, times, aeMode);
+                            ? ShopPurchase.giveBulkFtbqAll(player, entry, times, aeMode, backpackMode)
+                            : ShopPurchase.buyBulkFtbqAll(player, entry, times, aeMode, backpackMode);
                     default -> cheat
-                            ? ShopPurchase.giveBulkFtbq(player, entry, times, aeMode)
-                            : ShopPurchase.buyBulkFtbq(player, entry, times, aeMode);
+                            ? ShopPurchase.giveBulkFtbq(player, entry, times, aeMode, backpackMode)
+                            : ShopPurchase.buyBulkFtbq(player, entry, times, aeMode, backpackMode);
                 };
             }
-            default -> r = cheat ? ShopPurchase.giveBulk(player, entry, times, aeMode)   // 作弊：不扣成本直取
-                                  : ShopPurchase.buyBulk(player, entry, times, aeMode);
+            default -> r = cheat ? ShopPurchase.giveBulk(player, entry, times, aeMode, backpackMode)   // 作弊：不扣成本直取
+                                  : ShopPurchase.buyBulk(player, entry, times, aeMode, backpackMode);
         }
         if (r.done() <= 0L) {
             player.sendSystemMessage(Component.literal(cheat
@@ -228,16 +237,20 @@ public class ShopActionPacket {
         }
     }
 
-    private static void doSell(ServerPlayer player, ShopEntry entry, long times) {
+    private static void doSell(ServerPlayer player, ShopEntry entry, long times, boolean backpackMode) {
         if (entry.getRewardMode() != ShopEntry.RewardMode.NONE) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 自选/随机/全部奖励商品不支持出售"));
+            return;
+        }
+        if (!entry.allowsSell()) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 该商品仅允许购买，不能出售"));
             return;
         }
         if (entry.isLimited() && entry.getRemainingUses() <= 0L) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品限购次数已用完"));
             return;
         }
-        long sold = ShopPurchase.sellBulk(player, entry, times);
+        long sold = ShopPurchase.sellBulk(player, entry, times, backpackMode);
         if (sold <= 0L) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 背包里没有足够的 " + entry.goodsDisplayName()));
             return;

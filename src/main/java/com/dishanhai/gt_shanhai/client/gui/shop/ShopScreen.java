@@ -86,15 +86,18 @@ public class ShopScreen extends ScaledScreen {
 
     private enum Mode { BUY, SELL }
 
-    private Mode mode = Mode.BUY;
-    private String selectedTop;       // 主分类页签
-    private String selectedSub = "";  // 子分类（"" = 全部）
+    // 购买/出售 tab + 主/子分类页签：静态=跨界面实例保留，关闭商店再打开继承上次浏览的页/子页，不再每次回到默认页
+    private static Mode mode = Mode.BUY;
+    private static String selectedTop;
+    private static String selectedSub = "";
     private ShopEntry selected;
     private long amount = 1L;      // 购买/出售次数，支持 Long.MAX
     private EditBox searchBox;
     private EditBox amountBox;      // AE 风格数量输入框
     // AE 模式：交付优先注入绑定的 AE 网络。静态=跨界面实例保留（重开钱包不重置），仅本机会话级
     private static boolean aeMode = false;
+    // 精妙背包模式：扣款/交付优先走随身穿戴的精妙背包（而不是随身背包），语义/生命周期对齐 aeMode
+    private static boolean backpackMode = false;
     // 实时消息横幅：商店交互反馈镜像（来源见 ShopChatMirror）。静态=界面实例无关，仅本机会话级
     private static String flashText;      // 含 § 颜色码，与聊天框一致
     private static long flashUntil;       // System.currentTimeMillis() 到期时刻，超时后横幅消失
@@ -229,6 +232,9 @@ public class ShopScreen extends ScaledScreen {
     // 「AE模式」切换：充值按钮左侧
     private static final int AE_BTN_W = 58;
     private int aeBtnX() { return rechargeBtnX() - 4 - AE_BTN_W; }
+    // 「精妙背包模式」切换：AE模式按钮左侧
+    private static final int BACKPACK_BTN_W = 78;
+    private int backpackBtnX() { return aeBtnX() - 4 - BACKPACK_BTN_W; }
 
     // ===== 网格坐标单一真源（渲染/点击/tooltip 三处共用，杜绝错位）=====
     private static final int ROW_STRIDE = CELL_H + GRID_GAP;
@@ -362,7 +368,8 @@ public class ShopScreen extends ScaledScreen {
             drawButton(g, settingsBtnX(), top + 6, SETTINGS_BTN_W, TOP_BAR_H, "§b商店设置", mx, my);
         }
 
-        // 顶栏右侧：AE模式 → 充值全部 → 关闭
+        // 顶栏右侧：精妙背包模式 → AE模式 → 充值全部 → 关闭
+        drawButton(g, backpackBtnX(), top + 6, BACKPACK_BTN_W, TOP_BAR_H, backpackMode ? "§a精妙背包:开" : "§8精妙背包:关", mx, my);
         drawButton(g, aeBtnX(), top + 6, AE_BTN_W, TOP_BAR_H, aeMode ? "§aAE模式:开" : "§8AE模式:关", mx, my);
         drawButton(g, rechargeBtnX(), top + 6, RECHARGE_W, TOP_BAR_H, "§b充值全部", mx, my);
         drawButton(g, closeBtnX(), top + 6, CLOSE_W, TOP_BAR_H, "§c关闭", mx, my);
@@ -906,7 +913,12 @@ public class ShopScreen extends ScaledScreen {
         long bought = ClientWalletAccount.getPurchaseCount(
                 WalletAccountAPI.purchaseKey(selected.getGoodsId(), selected.getCategory()));
         String txLine = "§7交易次数: §f" + formatBig(amt) + "  §7已购买: §6" + formatBig(java.math.BigInteger.valueOf(bought));
-        g.drawString(this.font, GuiRenderUtil.trimText(this.font, txLine, costTrimW), cx, py, WHITE, true);
+        String tradeModeTip = switch (selected.getTradeMode()) {
+            case BUY_ONLY -> "  §b[仅购买]";
+            case SELL_ONLY -> "  §e[仅出售]";
+            default -> "";
+        };
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font, txLine + tradeModeTip, costTrimW), cx, py, WHITE, true);
         if (mode == Mode.BUY) {
             g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, py + 12, CYAN, true);
             ShopEntry.RewardMode rm = selected.getRewardMode();
@@ -1048,6 +1060,14 @@ public class ShopScreen extends ScaledScreen {
                     : "§b[山海商店] §7AE 模式已关闭，交易走背包/超级磁盘阵列"));
             return true;
         }
+        // 精妙背包模式切换：开启后扣款/交付优先走随身穿戴的精妙背包（关闭则优先随身背包，跟原来一样）
+        if (hit(mx, my, backpackBtnX(), top + 6, BACKPACK_BTN_W, TOP_BAR_H)) {
+            backpackMode = !backpackMode;
+            showMessage(Component.literal(backpackMode
+                    ? "§b[山海商店] §a精妙背包模式已开启，交易优先从精妙背包扣款/交付"
+                    : "§b[山海商店] §7精妙背包模式已关闭，交易优先走随身背包"));
+            return true;
+        }
         // 充值全部
         if (hit(mx, my, rechargeBtnX(), top + 6, RECHARGE_W, TOP_BAR_H)) {
             send(ShopActionPacket.Action.DEPOSIT, null, 1L);
@@ -1147,13 +1167,21 @@ public class ShopScreen extends ScaledScreen {
                     showMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买"));
                     return true;
                 }
+                if (mode == Mode.BUY && !selected.allowsBuy()) {
+                    showMessage(Component.literal("§c[山海商店] 该商品仅允许出售，不能购买"));
+                    return true;
+                }
+                if (mode == Mode.SELL && !selected.allowsSell()) {
+                    showMessage(Component.literal("§c[山海商店] 该商品仅允许购买，不能出售"));
+                    return true;
+                }
                 boolean localChoice = selected.getRewardMode() == ShopEntry.RewardMode.CHOICE;
                 boolean ftbqChoice = selected.getRewardMode() == ShopEntry.RewardMode.FTBQ
                         && selected.getFtbqSubMode() == ShopEntry.RewardMode.CHOICE;
                 if (mode == Mode.BUY && localChoice) {
-                    Minecraft.getInstance().setScreen(new RewardChoiceScreen(this, selected, amount, aeMode));
+                    Minecraft.getInstance().setScreen(new RewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
                 } else if (mode == Mode.BUY && ftbqChoice) {
-                    Minecraft.getInstance().setScreen(new FtbqRewardChoiceScreen(this, selected, amount, aeMode));
+                    Minecraft.getInstance().setScreen(new FtbqRewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
                 } else {
                     send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount);
                 }
@@ -1250,9 +1278,11 @@ public class ShopScreen extends ScaledScreen {
         String cat = entry != null ? entry.getCategory() : "";
         // 精确索引：同物品不同 NBT 的多条目（各种超级磁盘阵列）goodsId 撞车，靠列表索引区分。-1=无
         int idx = entry != null ? ShopConfig.getEntries().indexOf(entry) : -1;
-        // 仅购买带 aeMode（AE 模式优先注入网络）
+        // aeMode 仅购买用（AE 模式优先注入网络，出售货款走虚拟钱包账户不涉及实物投放）；
+        // backpackMode 购买/出售都要带（出售时决定优先扣随身背包还是精妙背包，见 ShopPurchase#sellBulk）
         boolean ae = action == ShopActionPacket.Action.BUY && aeMode;
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(action, gid, cat, times, ae, idx));
+        boolean bp = backpackMode;
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(action, gid, cat, times, ae, bp, idx));
     }
 
     private void drawTab(GuiGraphics g, int x, int y, int w, int h, String label, boolean active, int mx, int my) {

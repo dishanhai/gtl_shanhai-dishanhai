@@ -48,6 +48,18 @@ public class ShopEntry {
     private final String linkTo;
     /** 自定义显示名称，可空 = 用商品本身的物品名（见 {@link #goodsDisplayName}）。 */
     private final String displayName;
+    /** 交易方向限制：默认 BOTH（不限，兼容旧数据）。 */
+    private final TradeMode tradeMode;
+
+    /** 商品的交易方向限制。 */
+    public enum TradeMode {
+        /** 购买、出售都允许（默认）。 */
+        BOTH,
+        /** 仅允许购买，玩家不能把这件商品卖回商店。 */
+        BUY_ONLY,
+        /** 仅允许出售，玩家不能从商店购买这件商品（只能卖入）。 */
+        SELL_ONLY
+    }
 
     /** 仿 FTBQuests 奖励表的三种交付方式，rewardPool 非空时才生效。 */
     public enum RewardMode {
@@ -213,12 +225,22 @@ public class ShopEntry {
                 hidden, linkKey, linkTo, displayName, ftbqTableId, RewardMode.RANDOM);
     }
 
-    // ===== 新构造：多元商品清单 + 多元成本 + 描述 + 限购次数 + 自定义显示图标 + 奖励池/FTBQ表(+子模式) + 隐藏/跳转 + 自定义名称 =====
+    // ===== 兼容构造：无交易方向限制（委托 BOTH，即原有行为）=====
     public ShopEntry(List<GoodsStack> goods, String category,
                      ShopCost cost, String description, long remainingUses,
                      List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
                      boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
                      RewardMode ftbqSubMode) {
+        this(goods, category, cost, description, remainingUses, displayIcons, rewardMode, rewardPool,
+                hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, TradeMode.BOTH);
+    }
+
+    // ===== 新构造：多元商品清单 + 多元成本 + 描述 + 限购次数 + 自定义显示图标 + 奖励池/FTBQ表(+子模式) + 隐藏/跳转 + 自定义名称 + 交易方向限制 =====
+    public ShopEntry(List<GoodsStack> goods, String category,
+                     ShopCost cost, String description, long remainingUses,
+                     List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
+                     boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
+                     RewardMode ftbqSubMode, TradeMode tradeMode) {
         this.goods = normalizeGoods(goods);
         // 只认 CHOICE/ALL 为有效子模式，其余（含 null/NONE/FTBQ 误传）一律退回默认 RANDOM
         this.ftbqSubMode = (ftbqSubMode == RewardMode.CHOICE || ftbqSubMode == RewardMode.ALL) ? ftbqSubMode : RewardMode.RANDOM;
@@ -253,7 +275,7 @@ public class ShopEntry {
                     copy.add(RewardOption.of(o.item(), o.weight(), o.minCount(), o.maxCount()));
                 }
             }
-            this.rewardPool = copy.isEmpty() ? java.util.Collections.emptyList() : java.util.Collections.unmodifiableList(copy);
+ea         this.rewardPool = copy.isEmpty() ? java.util.Collections.emptyList() : java.util.Collections.unmodifiableList(copy);
             this.rewardMode = this.rewardPool.isEmpty() ? RewardMode.NONE : (rewardMode == null ? RewardMode.NONE : rewardMode);
             this.ftbqTableId = "";
         }
@@ -261,6 +283,7 @@ public class ShopEntry {
         this.linkKey = linkKey == null ? "" : linkKey.trim();
         this.linkTo = linkTo == null ? "" : linkTo.trim();
         this.displayName = displayName == null ? "" : displayName.trim();
+        this.tradeMode = tradeMode == null ? TradeMode.BOTH : tradeMode;
     }
 
     // ===== 兼容构造：无自定义名称/FTBQ表（委托空串）=====
@@ -435,6 +458,21 @@ public class ShopEntry {
     /** 是否配置了自定义显示名称。 */
     public boolean hasCustomName() {
         return !displayName.isEmpty();
+    }
+
+    /** 交易方向限制（默认 BOTH，不限）。 */
+    public TradeMode getTradeMode() {
+        return tradeMode;
+    }
+
+    /** 是否允许玩家从商店购买这条目（SELL_ONLY 时禁止）。 */
+    public boolean allowsBuy() {
+        return tradeMode != TradeMode.SELL_ONLY;
+    }
+
+    /** 是否允许玩家把这条目卖回商店（BUY_ONLY 时禁止）。 */
+    public boolean allowsSell() {
+        return tradeMode != TradeMode.BUY_ONLY;
     }
 
     /** 主商品身份（列表首项）——同物品多条目定位、网格分类等场景仍按这个身份识别整条商品条目。 */
