@@ -105,6 +105,14 @@ public class ShopScreen extends ScaledScreen {
         flashText = msg.getString();
         flashUntil = System.currentTimeMillis() + 5000L;
     }
+    // 删除误触防护：需在窗口期内对同一条目再点一次「删除此商品」才真正执行；实例级=只跟当前这次打开的界面走
+    private ShopEntry pendingDeleteEntry;
+    private long pendingDeleteArmedAtMs;
+    private static final long DELETE_CONFIRM_WINDOW_MS = 3000L;
+    // 撤销上一次删除：静态=跨界面实例保留（删完手滑关掉界面也还能点），服务端另有独立 30 秒兜底窗口（见 ShopConfig#undoLastRemove）
+    private static String undoDeleteLabel;
+    private static long undoDeleteUntilMs;
+    private static final long UNDO_DELETE_UI_WINDOW_MS = 8000L;
     private int scroll = 0; // 网格滚动像素
     private boolean draggingGridScroll; // 正在拖拽网格右侧滚动条
     private final boolean canEdit; // 服务端下发的编辑权（OP 或白名单）：决定新增/编辑按钮显隐
@@ -314,7 +322,7 @@ public class ShopScreen extends ScaledScreen {
                 : ShopConfig.getEntries();
         visibleEntries = new ArrayList<>();
         for (ShopEntry e : src) {
-            if (!e.isValid()) continue;
+            if (!e.isStructurallyValid()) continue;
             if (q != null && !q.isBlank()) {
                 StringBuilder hay = new StringBuilder(e.goodsDisplayName()).append(' ').append(e.getGoodsId());
                 if (e.hasMultipleGoods()) {
@@ -403,6 +411,10 @@ public class ShopScreen extends ScaledScreen {
 
         // 实时消息横幅（商店交互反馈，5 秒后自动消失）：面板底部居中，覆盖在最上层
         if (flashText != null && System.currentTimeMillis() < flashUntil) {
+            // 物品图标走 GuiGraphics 的缓冲渲染层（renderItem，drawGrid/drawDetail 里画的），和 fill()/drawString()
+            // 这类立即绘制的 flat quad 不在同一批次；不强制 flush 会导致图标在批次刷新时"跳"到横幅上层，
+            // 盖住文字（同 ShopEntryEditScreen 描述展开编写大图层的穿模成因，见其 renderScaledBackground 注释）。
+            g.flush();
             int flashW = this.font.width(flashText);
             int bannerW = Math.min(panelWidth - 12, flashW + 16);
             int bannerX = left + (panelWidth - bannerW) / 2;
@@ -410,6 +422,21 @@ public class ShopScreen extends ScaledScreen {
             g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 16, 0xE0101010);   // 半透明黑底
             g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 1, 0xFF00C0C0);    // 顶部青线
             g.drawCenteredString(this.font, flashText, left + panelWidth / 2, bannerY + 4, 0xFFFFFF);
+        }
+
+        // 撤销删除按钮：删除后 8 秒内悬浮显示，点一下把刚删的条目加回来（服务端另有独立 30 秒兜底窗口）
+        if (undoDeleteLabel != null) {
+            if (System.currentTimeMillis() < undoDeleteUntilMs) {
+                g.flush(); // 同上，物品图标批次会晚于本次 fill/drawString 提交，先落盘防止盖字
+                int[] b = undoDeleteBtnBounds();
+                boolean hv = hit(mx, my, b[0], b[1], b[2], b[3]);
+                g.fill(b[0], b[1], b[0] + b[2], b[1] + b[3], hv ? 0xFF2A6E2A : 0xE0163016);
+                g.fill(b[0], b[1], b[0] + b[2], b[1] + 1, 0xFF33CC33);
+                g.drawCenteredString(this.font, "§a↩ 撤销删除【" + GuiRenderUtil.trimText(this.font, undoDeleteLabel, 70) + "】",
+                        b[0] + b[2] / 2, b[1] + 3, 0xFFFFFF);
+            } else {
+                undoDeleteLabel = null;
+            }
         }
     }
 
@@ -615,7 +642,7 @@ public class ShopScreen extends ScaledScreen {
 
     /** 截断宽度推导：rightX-textX = (cx+CELL_W-3)-(cx+3+23) = CELL_W-29，与格子的 cx 无关。 */
     private CellCache buildCellCache(ShopEntry entry) {
-        ItemStack goodsStack = entry.effectiveIcons().isEmpty() ? entry.makeGoodsStack() : null;
+        ItemStack goodsStack = entry.effectiveIcons().isEmpty() ? entry.displayGoodsStack() : null;
         String trimmedName = GuiRenderUtil.trimText(this.font, entry.goodsDisplayName(), CELL_W - 29);
         ShopCost cost = entry.getCost();
         String amtText;
@@ -634,8 +661,8 @@ public class ShopScreen extends ScaledScreen {
             if (in0.isFluid) {
                 fluidPrimary = true;
             } else {
-                net.minecraft.world.item.Item it0 = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(in0.id);
-                if (it0 != null) costIcon = new ItemStack(it0);
+                ItemStack unit0 = in0.makeUnitStack();
+                if (!unit0.isEmpty()) costIcon = unit0;
             }
         } else {
             amtText = "免";
@@ -833,7 +860,7 @@ public class ShopScreen extends ScaledScreen {
         int cx = dx + 8;
         // 棋盘物品槽 + 图标（有自定义显示图标走组合渲染；悬停 tooltip 始终显示真实商品，不受显示图标影响）
         renderItemCheckerSlot(g, cx, dy + 10);
-        ItemStack goodsIcon = selected.makeGoodsStack();
+        ItemStack goodsIcon = selected.displayGoodsStack();
         List<ShopEntry.DisplayIcon> detailIcons = selected.effectiveIcons();
         if (detailIcons.isEmpty()) {
             g.renderItem(goodsIcon, cx + 2, dy + 12);
@@ -846,9 +873,13 @@ public class ShopScreen extends ScaledScreen {
         int textX = cx + 24;
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, selected.goodsDisplayName(), dx + DETAIL_W - 6 - textX),
                 textX, dy + 10, WHITE, true);
-        g.drawString(this.font, selected.hasMultipleGoods()
+        String countLine = selected.hasMultipleGoods()
                 ? "§7组合商品 §f" + selected.getGoodsList().size() + " §7种"
-                : "§7每份 §f" + selected.getGoodsCount() + " §7个", textX, dy + 24, GRAY, true);
+                : "§7每份 §f" + selected.getGoodsCount() + " §7个";
+        if (selected.isLimited()) {
+            countLine += " §7剩§d" + formatBig(java.math.BigInteger.valueOf(selected.getRemainingUses())) + "§7次";
+        }
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font, countLine, dx + DETAIL_W - 6 - textX), textX, dy + 24, GRAY, true);
 
         // 成本（多元，青）——超宽截断，全量见 tooltip / 预计行
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7成本: " + costInline(selected.getCost()),
@@ -871,8 +902,11 @@ public class ShopScreen extends ScaledScreen {
         java.math.BigInteger total = java.math.BigInteger.valueOf(selected.getGoodsCount()).multiply(amt);
         ShopCost dcost = selected.getCost();
         int py = dy + 114;
-        g.drawString(this.font, "§7交易次数: §f" + formatBig(amt), cx, py, WHITE, true);
         int costTrimW = dx + DETAIL_W - 6 - cx;
+        long bought = ClientWalletAccount.getPurchaseCount(
+                WalletAccountAPI.purchaseKey(selected.getGoodsId(), selected.getCategory()));
+        String txLine = "§7交易次数: §f" + formatBig(amt) + "  §7已购买: §6" + formatBig(java.math.BigInteger.valueOf(bought));
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font, txLine, costTrimW), cx, py, WHITE, true);
         if (mode == Mode.BUY) {
             g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, py + 12, CYAN, true);
             ShopEntry.RewardMode rm = selected.getRewardMode();
@@ -880,7 +914,11 @@ public class ShopScreen extends ScaledScreen {
                 case CHOICE -> "§7预计获得: §d自选奖励 §7（购买前先选 1 项）";
                 case RANDOM -> "§7预计获得: §d随机奖励 §7（从 " + selected.getRewardPool().size() + " 项中按权重抽 1）";
                 case ALL -> "§7预计获得: §d全部奖励 §7（一次交付 " + selected.getRewardPool().size() + " 项全部）";
-                case FTBQ -> "§7预计获得: §9FTBQ奖励表 §7（按表内权重随机抽取）";
+                case FTBQ -> switch (selected.getFtbqSubMode()) {
+                    case CHOICE -> "§7预计获得: §9FTBQ表·自选 §7（购买前先选 1 项）";
+                    case ALL -> "§7预计获得: §9FTBQ表·全部 §7（一次交付表内所有物品奖励）";
+                    default -> "§7预计获得: §9FTBQ表·随机 §7（按表内权重随机抽取）";
+                };
                 default -> selected.hasMultipleGoods()
                         ? "§7预计获得: " + goodsInlineTimes(selected.getGoodsList(), amount)
                         : "§7预计获得: §e" + formatBig(total) + " §7个";
@@ -949,8 +987,15 @@ public class ShopScreen extends ScaledScreen {
 
         // 编辑/删除按钮（编辑权玩家）
         if (canEdit) {
+            // 误触防护：第一次点「删除此商品」只进入 3 秒确认窗口（按钮变金边+闪烁警示色），窗口内对同一条目
+            // 再点一次才真正发删除包；换条目/超时都会自动退回未确认态，见 universalMouseClicked 里的对应逻辑
+            boolean delArmed = pendingDeleteEntry == selected
+                    && System.currentTimeMillis() - pendingDeleteArmedAtMs < DELETE_CONFIRM_WINDOW_MS;
             boolean delHover = hit(mx, my, cx, btnY - 22, DETAIL_W - 16, 18);
-            renderButton(g, cx, btnY - 22, DETAIL_W - 16, 18, delHover, "§c删除此商品", RED_DARK, RED);
+            String delLabel = delArmed ? "§c⚠再点一次确认删除！" : "§c删除此商品";
+            int delBorder = delArmed ? GOLD : RED_DARK;
+            int delText = delArmed && (System.currentTimeMillis() / 300L % 2 == 0) ? WHITE : RED;
+            renderButton(g, cx, btnY - 22, DETAIL_W - 16, 18, delHover, delLabel, delBorder, delText);
             boolean editHover = hit(mx, my, cx, btnY - 44, DETAIL_W - 16, 18);
             renderButton(g, cx, btnY - 44, DETAIL_W - 16, 18, editHover, "§b编辑条目", GOLD_DARK, CYAN);
         }
@@ -970,6 +1015,16 @@ public class ShopScreen extends ScaledScreen {
             if (descOverlayScrollbarClicked(mx, my, r)) return true;
             return true;
         }
+        // 撤销删除按钮（悬浮在面板上，优先于其他点击判定）
+        if (undoDeleteLabel != null && System.currentTimeMillis() < undoDeleteUntilMs) {
+            int[] b = undoDeleteBtnBounds();
+            if (hit(mx, my, b[0], b[1], b[2], b[3])) {
+                send(ShopActionPacket.Action.UNDO_DELETE, null, 1L);
+                undoDeleteLabel = null;
+                return true;
+            }
+        }
+
         // 顶部买/卖页签：切换时打一条本地横幅提示当前模式，光靠页签颜色区分不够醒目，容易买卖模式点混
         if (hit(mx, my, buyTabX(), top + 6, BUY_TAB_W, TOP_BAR_H)) {
             if (mode != Mode.BUY) showMessage(Component.literal("§b[山海商店] §a已切换至【购买】模式"));
@@ -985,9 +1040,12 @@ public class ShopScreen extends ScaledScreen {
             onClose();
             return true;
         }
-        // AE 模式切换
+        // AE 模式切换：光靠按钮文字变色不够醒目，切换时打一条横幅明确告知当前状态
         if (hit(mx, my, aeBtnX(), top + 6, AE_BTN_W, TOP_BAR_H)) {
             aeMode = !aeMode;
+            showMessage(Component.literal(aeMode
+                    ? "§b[山海商店] §aAE 模式已开启，交易优先注入绑定的在线 AE 网络"
+                    : "§b[山海商店] §7AE 模式已关闭，交易走背包/超级磁盘阵列"));
             return true;
         }
         // 充值全部
@@ -1082,19 +1140,42 @@ public class ShopScreen extends ScaledScreen {
             int dh = contentHeight();
             int btnW = DETAIL_W - 16;
             int btnY = dy + dh - 24;
-            // 确认购买/出售：自选奖励（CHOICE）商品先弹选择界面，选完再发购买包；随机/全部/普通商品直接买
+            // 确认购买/出售：自选奖励（CHOICE，本地池或 FTBQ 表自选子模式）商品先弹选择界面，选完再发购买包；
+            // 随机/全部/普通商品直接买
             if (hit(mx, my, cx, btnY, btnW, 20)) {
-                if (mode == Mode.BUY && selected.getRewardMode() == ShopEntry.RewardMode.CHOICE) {
+                if (mode == Mode.BUY && selected.hasMissingItems()) {
+                    showMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买"));
+                    return true;
+                }
+                boolean localChoice = selected.getRewardMode() == ShopEntry.RewardMode.CHOICE;
+                boolean ftbqChoice = selected.getRewardMode() == ShopEntry.RewardMode.FTBQ
+                        && selected.getFtbqSubMode() == ShopEntry.RewardMode.CHOICE;
+                if (mode == Mode.BUY && localChoice) {
                     Minecraft.getInstance().setScreen(new RewardChoiceScreen(this, selected, amount, aeMode));
+                } else if (mode == Mode.BUY && ftbqChoice) {
+                    Minecraft.getInstance().setScreen(new FtbqRewardChoiceScreen(this, selected, amount, aeMode));
                 } else {
                     send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount);
                 }
                 return true;
             }
-            // 删除（编辑权）
+            // 删除（编辑权，二次确认防误触：3 秒内对同一条目再点一次「删除此商品」才真正执行）
             if (canEdit && hit(mx, my, cx, btnY - 22, btnW, 18)) {
+                boolean armed = pendingDeleteEntry == selected
+                        && System.currentTimeMillis() - pendingDeleteArmedAtMs < DELETE_CONFIRM_WINDOW_MS;
+                if (!armed) {
+                    pendingDeleteEntry = selected;
+                    pendingDeleteArmedAtMs = System.currentTimeMillis();
+                    showMessage(Component.literal("§e[山海商店] 再次点击「删除此商品」确认删除，3 秒内有效"));
+                    return true;
+                }
+                String delName = selected.goodsDisplayName();
                 send(ShopActionPacket.Action.DELETE, selected, 1L);
                 selected = null;
+                pendingDeleteEntry = null;
+                showMessage(Component.literal("§b[山海商店] §a已删除：§f" + delName));
+                undoDeleteLabel = delName;
+                undoDeleteUntilMs = System.currentTimeMillis() + UNDO_DELETE_UI_WINDOW_MS;
                 return true;
             }
             // 编辑条目（编辑权）
@@ -1153,6 +1234,16 @@ public class ShopScreen extends ScaledScreen {
     }
 
     // ============ 工具 ============
+
+    /** 撤销删除按钮的世界坐标（缩放后坐标系）：渲染和点击各调一次，保证坐标算法唯一，不重复算两遍。 */
+    private int[] undoDeleteBtnBounds() {
+        String label = "§a↩ 撤销删除【" + GuiRenderUtil.trimText(this.font, undoDeleteLabel, 70) + "】";
+        int w = this.font.width(label) + 12;
+        int h = 14;
+        int x = left + (panelWidth - w) / 2;
+        int y = top + panelHeight - 24 - h - 3; // 位于底部消息横幅正上方，避免遮挡
+        return new int[]{x, y, w, h};
+    }
 
     private void send(ShopActionPacket.Action action, ShopEntry entry, long times) {
         ResourceLocation gid = entry != null ? entry.getGoodsId() : null;
@@ -1228,10 +1319,10 @@ public class ShopScreen extends ScaledScreen {
         }
     }
 
-    /** 由货币 ID 构造展示用 ItemStack。 */
+    /** 由货币 ID 构造展示用 ItemStack；对应模组缺失时用 FTBQ 风格占位代替（不再显示成空气）。 */
     private static ItemStack currencyStack(ResourceLocation id) {
         var item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(id);
-        return item != null ? new ItemStack(item) : ItemStack.EMPTY;
+        return item != null ? new ItemStack(item) : ShopEntry.missingItemStack(id, 1);
     }
 
     /** 实物成分的本地化显示名（物品→物品名、流体→流体名；缺失回退注册 path，杜绝英文键裸露）。 */
@@ -1246,8 +1337,8 @@ public class ShopScreen extends ScaledScreen {
             }
             return in.id.getPath();
         }
-        net.minecraft.world.item.Item it = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(in.id);
-        return it != null ? new ItemStack(it).getHoverName().getString() : in.id.getPath();
+        ItemStack unit = in.makeUnitStack();
+        return !unit.isEmpty() ? unit.getHoverName().getString() : in.id.getPath();
     }
 
     // ============ 图形化花费预览（图标 + 数量）============
@@ -1276,9 +1367,8 @@ public class ShopScreen extends ScaledScreen {
                     formatBig(c.getValue()), groupBig(c.getValue()), ShopPurchase.coinName(c.getKey())));
         }
         for (ExchangeEntry.Ingredient in : cost.items()) {
-            net.minecraft.world.item.Item it = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(in.id);
             java.math.BigInteger cnt = java.math.BigInteger.valueOf(in.count);
-            cells.add(new PreviewCell(it != null ? new ItemStack(it) : ItemStack.EMPTY, null, false,
+            cells.add(new PreviewCell(in.makeUnitStack(), null, false,
                     formatBig(cnt), groupBig(cnt), ingredientName(in)));
         }
         for (ExchangeEntry.Ingredient in : cost.fluids()) {
@@ -1507,6 +1597,7 @@ public class ShopScreen extends ScaledScreen {
                     lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
                 }
                 lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
+                if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
                 if (e.getCost().hasPhysical()) lines.add(Component.literal("§8含实物：物品在背包 / 流体绑定 AE"));
                 if (!e.getDisplayIcons().isEmpty()) {
                     StringBuilder ic = new StringBuilder("§7图标: §f");

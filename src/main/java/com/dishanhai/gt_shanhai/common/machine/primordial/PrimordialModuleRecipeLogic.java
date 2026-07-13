@@ -19,8 +19,13 @@ import org.gtlcore.gtlcore.api.recipe.RecipeCacheStrategy;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import it.unimi.dsi.fastutil.objects.ObjectList;
+
+import org.jetbrains.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -107,6 +112,44 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                 && RecipeRunnerHelper.matchRecipeOutput(getMachine(), recipe)
                 && IGTRecipe.of(recipe).getEuTier() <= getMachine().getTier()
                 && recipe.checkConditions(this).isSuccess();
+    }
+
+    /**
+     * 原初模块的"高级产出"不做基类那种"总池按 recipes.size() 均分再水位填补"的公平分配——
+     * 同时选中多个配方类型时，每个配方各自独立吃满自己的 getMaxParallel(recipe, totalParallel)
+     * 上限（超限模式下即 Long.MAX_VALUE 级），互不挤占，而不是从一个共享池里分蛋糕。
+     */
+    @Override
+    @Nullable
+    protected ParallelData calculateParallels() {
+        Set<GTRecipe> recipes = lookupRecipeIterator();
+        if (recipes.isEmpty()) {
+            invalidateLookupSetCache();
+            return null;
+        }
+        long totalParallel = getTotalParallelLimit();
+        if (totalParallel <= 0L) {
+            invalidateLookupSetCache();
+            return null;
+        }
+        long[] parallels = new long[recipes.size()];
+        int index = 0;
+        ObjectArrayList<GTRecipe> recipeList = new ObjectArrayList<>(recipes.size());
+        for (GTRecipe recipe : recipes) {
+            long max = getMaxParallel(recipe, totalParallel);
+            if (max <= 0) {
+                continue;
+            }
+            recipeList.add(recipe);
+            parallels[index] = max;
+            index++;
+        }
+        if (recipeList.isEmpty()) {
+            invalidateLookupSetCache();
+            return null;
+        }
+        return RecipeCalculationHelper.INSTANCE.getFinalParallelData(
+                0L, parallels, new LongArrayList(), new IntArrayList(), (ObjectList<GTRecipe>) recipeList);
     }
 
     @Override

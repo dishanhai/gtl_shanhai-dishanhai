@@ -9,25 +9,35 @@ import java.util.Map;
 /**
  * 客户端钱包账户快照缓存（山海署名，仅客户端）。
  *
- * <p>余额已不在钱包 ItemStack NBT，服务端 {@code WalletAccountSyncPacket} 推送后写入这里，
- * 供 tooltip / ShopScreen / CurrencyAtmScreen 读取。只缓存当前玩家一份，后续同步覆盖。</p>
+ * 余额已不在钱包 ItemStack NBT，服务端 {@code WalletAccountSyncPacket} 推送后写入这里，
+ * 供 tooltip / ShopScreen / CurrencyAtmScreen 读取。只缓存当前玩家一份，后续同步覆盖。
  *
- * <p>{@link #optimisticAddCurrency}/{@link #optimisticAddDigital} 供界面按下即时改缓存做乐观预览，
+ * {@link #optimisticAddCurrency}/{@link #optimisticAddDigital} 供界面按下即时改缓存做乐观预览，
  * 服务端权威快照回来后整体覆盖校正。</p>
  */
 public final class ClientWalletAccount {
 
     private static Map<ResourceLocation, BigInteger> currencies = new LinkedHashMap<>();
     private static BigInteger digital = BigInteger.ZERO;
+    private static Map<String, Long> purchaseCounts = new LinkedHashMap<>();
     private static boolean synced = false;
 
     private ClientWalletAccount() {}
 
     /** 应用服务端全量快照（权威覆盖）。 */
-    public static void apply(Map<ResourceLocation, BigInteger> newCurrencies, BigInteger newDigital) {
+    public static void apply(Map<ResourceLocation, BigInteger> newCurrencies, BigInteger newDigital,
+                              Map<String, Long> newPurchaseCounts) {
         currencies = newCurrencies != null ? new LinkedHashMap<>(newCurrencies) : new LinkedHashMap<>();
         digital = newDigital != null ? newDigital : BigInteger.ZERO;
+        purchaseCounts = newPurchaseCounts != null ? new LinkedHashMap<>(newPurchaseCounts) : new LinkedHashMap<>();
         synced = true;
+    }
+
+    /** 某商品条目的已购买次数（key 见 {@code WalletAccountAPI#purchaseKey}），未同步/未买过为 0。 */
+    public static long getPurchaseCount(String key) {
+        if (key == null) return 0L;
+        Long v = purchaseCounts.get(key);
+        return v == null ? 0L : v;
     }
 
     public static boolean isSynced() {

@@ -47,12 +47,23 @@ public class ShopEditPacket {
     private final String linkTo;    // 跳转目标：指向某条目 linkKey，可空，非空则详情页显示可点击跳转
     private final String displayName; // 自定义显示名称，可空 = 用商品本身的物品名
     private final String ftbqTableId; // FTBQ 奖励表 ID（十六进制），仅 rewardMode==FTBQ 时有意义
+    private final ShopEntry.RewardMode ftbqSubMode; // FTBQ 表内交付子模式（CHOICE/RANDOM/ALL），仅 rewardMode==FTBQ 时有意义
 
     public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
                           ShopCost cost, ResourceLocation oldGoods, String oldCategory, int oldEntryIndex, long limit,
                           List<ShopEntry.DisplayIcon> displayIcons, ShopEntry.RewardMode rewardMode,
                           List<ShopEntry.RewardOption> rewardPool, boolean hidden, String linkKey, String linkTo,
                           String displayName, String ftbqTableId) {
+        this(action, goodsList, category, description, cost, oldGoods, oldCategory, oldEntryIndex, limit,
+                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId,
+                ShopEntry.RewardMode.RANDOM);
+    }
+
+    public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
+                          ShopCost cost, ResourceLocation oldGoods, String oldCategory, int oldEntryIndex, long limit,
+                          List<ShopEntry.DisplayIcon> displayIcons, ShopEntry.RewardMode rewardMode,
+                          List<ShopEntry.RewardOption> rewardPool, boolean hidden, String linkKey, String linkTo,
+                          String displayName, String ftbqTableId, ShopEntry.RewardMode ftbqSubMode) {
         this.action = action;
         this.goodsList = (goodsList == null || goodsList.isEmpty())
                 ? List.of(ShopEntry.GoodsStack.of(new ResourceLocation("minecraft:air"), 1, null)) : goodsList;
@@ -71,6 +82,8 @@ public class ShopEditPacket {
         this.linkTo = linkTo == null ? "" : linkTo.trim();
         this.displayName = displayName == null ? "" : displayName.trim();
         this.ftbqTableId = ftbqTableId == null ? "" : ftbqTableId.trim();
+        this.ftbqSubMode = (ftbqSubMode == ShopEntry.RewardMode.CHOICE || ftbqSubMode == ShopEntry.RewardMode.ALL)
+                ? ftbqSubMode : ShopEntry.RewardMode.RANDOM;
     }
 
     public ShopEditPacket(FriendlyByteBuf buf) {
@@ -113,6 +126,7 @@ public class ShopEditPacket {
         this.linkTo = buf.readUtf();
         this.displayName = buf.readUtf();
         this.ftbqTableId = buf.readUtf();
+        this.ftbqSubMode = buf.readEnum(ShopEntry.RewardMode.class);
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -149,6 +163,7 @@ public class ShopEditPacket {
         buf.writeUtf(linkTo);
         buf.writeUtf(displayName);
         buf.writeUtf(ftbqTableId);
+        buf.writeEnum(ftbqSubMode);
     }
 
     private static void writeCost(FriendlyByteBuf buf, ShopCost cost) {
@@ -163,6 +178,7 @@ public class ShopEditPacket {
             buf.writeResourceLocation(in.id);
             buf.writeBoolean(in.isFluid);
             buf.writeVarLong(in.count);
+            buf.writeNbt(in.nbt());
         }
     }
 
@@ -181,7 +197,7 @@ public class ShopEditPacket {
             ResourceLocation id = buf.readResourceLocation();
             boolean fluid = buf.readBoolean();
             long cnt = buf.readVarLong();
-            physical.add(new ExchangeEntry.Ingredient(id, fluid, cnt));
+            physical.add(new ExchangeEntry.Ingredient(id, fluid, cnt, buf.readNbt()));
         }
         return new ShopCost(spark, coins, physical);
     }
@@ -212,7 +228,8 @@ public class ShopEditPacket {
             return;
         }
         ShopEntry entry = new ShopEntry(pkt.goodsList, pkt.category, pkt.cost, pkt.description, pkt.limit,
-                pkt.displayIcons, pkt.rewardMode, pkt.rewardPool, pkt.hidden, pkt.linkKey, pkt.linkTo, pkt.displayName, pkt.ftbqTableId);
+                pkt.displayIcons, pkt.rewardMode, pkt.rewardPool, pkt.hidden, pkt.linkKey, pkt.linkTo, pkt.displayName,
+                pkt.ftbqTableId, pkt.ftbqSubMode);
         String limitTip = entry.isLimited() ? " §d(限" + entry.getRemainingUses() + "次)" : "";
 
         if (pkt.action == Action.ADD) {

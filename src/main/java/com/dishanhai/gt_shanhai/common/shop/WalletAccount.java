@@ -24,11 +24,14 @@ public class WalletAccount {
 
     private static final String TAG_CURRENCIES = "currencies";
     private static final String TAG_DIGITAL = "digital";
+    private static final String TAG_PURCHASES = "purchases";
 
     /** 币种 → 余额（BigInteger，保序）。 */
     private final Map<ResourceLocation, BigInteger> currencyBalances = new LinkedHashMap<>();
     /** 数字余额（星火）。 */
     private BigInteger digitalBalance = BigInteger.ZERO;
+    /** 商品条目 key（见 {@link WalletAccountAPI#purchaseKey}）→ 累计已购买次数，展示用，非结算依据。 */
+    private final Map<String, Long> purchaseCounts = new LinkedHashMap<>();
 
     // ===== 币种余额 =====
 
@@ -64,6 +67,27 @@ public class WalletAccount {
         digitalBalance = (value == null || value.signum() <= 0) ? BigInteger.ZERO : value;
     }
 
+    // ===== 已购买次数（展示用统计，不参与结算） =====
+
+    public long getPurchaseCount(String key) {
+        if (key == null) return 0L;
+        Long v = purchaseCounts.get(key);
+        return v == null ? 0L : v;
+    }
+
+    /** 原地累加（delta 可为负，理论上不会用到，封底到 0）；0 时移除该键保持干净。 */
+    public void addPurchaseCount(String key, long delta) {
+        if (key == null || delta == 0L) return;
+        long next = getPurchaseCount(key) + delta;
+        if (next <= 0L) purchaseCounts.remove(key);
+        else purchaseCounts.put(key, next);
+    }
+
+    /** 只读视图（副本）。 */
+    public Map<String, Long> getPurchaseCounts() {
+        return new LinkedHashMap<>(purchaseCounts);
+    }
+
     // ===== NBT =====
 
     public CompoundTag save() {
@@ -79,6 +103,11 @@ public class WalletAccount {
         if (digitalBalance.signum() > 0) {
             tag.putByteArray(TAG_DIGITAL, digitalBalance.toByteArray());
         }
+        CompoundTag pur = new CompoundTag();
+        for (Map.Entry<String, Long> e : purchaseCounts.entrySet()) {
+            if (e.getValue() != null && e.getValue() > 0L) pur.putLong(e.getKey(), e.getValue());
+        }
+        tag.put(TAG_PURCHASES, pur);
         return tag;
     }
 
@@ -98,6 +127,11 @@ public class WalletAccount {
                 BigInteger v = new BigInteger(bytes);
                 if (v.signum() > 0) acc.digitalBalance = v;
             }
+        }
+        CompoundTag pur = tag.getCompound(TAG_PURCHASES);
+        for (String key : pur.getAllKeys()) {
+            long v = pur.getLong(key);
+            if (v > 0L) acc.purchaseCounts.put(key, v);
         }
         return acc;
     }

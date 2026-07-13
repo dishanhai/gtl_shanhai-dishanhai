@@ -173,6 +173,7 @@ public final class ExchangeConfig {
             io.addProperty("id", in.id == null ? "" : in.id.toString());
             io.addProperty("fluid", in.isFluid);
             io.addProperty("count", in.count);
+            if (in.hasNbt()) io.addProperty("nbt", in.nbt().toString()); // 精确 NBT 匹配（仅物品；流体不支持）
             items.add(io);
         }
         so.add("items", items);
@@ -195,7 +196,14 @@ public final class ExchangeConfig {
                     if (iid.isEmpty()) continue;
                     boolean fluid = io.has("fluid") && io.get("fluid").getAsBoolean();
                     long count = io.has("count") ? io.get("count").getAsLong() : 1L;
-                    items.add(new ExchangeEntry.Ingredient(new ResourceLocation(iid), fluid, count));
+                    net.minecraft.nbt.CompoundTag inNbt = null;
+                    if (io.has("nbt")) {
+                        try {
+                            String snbt = io.get("nbt").getAsString();
+                            if (snbt != null && !snbt.isBlank()) inNbt = net.minecraft.nbt.TagParser.parseTag(snbt);
+                        } catch (Exception ignored) {}
+                    }
+                    items.add(new ExchangeEntry.Ingredient(new ResourceLocation(iid), fluid, count, inNbt));
                 }
             }
         }

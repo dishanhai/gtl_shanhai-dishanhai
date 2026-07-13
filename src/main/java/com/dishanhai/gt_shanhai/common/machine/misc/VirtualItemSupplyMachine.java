@@ -211,9 +211,11 @@ public class VirtualItemSupplyMachine extends MetaMachine
         long count = 0;
         for (int i = 0; i < providerSlots.getSlots(); i++) {
             ItemStack stack = providerSlots.getStackInSlot(i);
+            if (stack.isEmpty()) continue;
             ItemStack resolved = VirtualItemProviderHelper.resolveForRecipe(stack);
             if (!resolved.isEmpty() && VirtualItemProviderHelper.matchesTargetKey(AEItemKey.of(resolved), targetKey)) {
-                count += resolved.getCount();
+                // resolved 只用来比对身份（normalizeTarget 会把 count 强制归一），实际可用数量要用槽位里的真实堆叠数。
+                count += stack.getCount();
             }
         }
         return count;

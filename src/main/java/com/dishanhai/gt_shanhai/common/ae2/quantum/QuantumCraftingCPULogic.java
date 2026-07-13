@@ -12,6 +12,7 @@ import appeng.api.networking.crafting.ICraftingRequester;
 import appeng.api.networking.crafting.ICraftingSubmitResult;
 import appeng.api.networking.energy.IEnergyService;
 import appeng.api.networking.security.IActionSource;
+import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
@@ -35,6 +36,7 @@ import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 
 import org.jetbrains.annotations.Nullable;
@@ -120,13 +122,34 @@ public class QuantumCraftingCPULogic {
         int remainingOperations = (cpu.getCoProcessors() + 1) - usedOps[0] - usedOps[1] - usedOps[2];
         while (remainingOperations > 0) {
             int pushedPatterns = executeCrafting(remainingOperations, craftingService, energyService, cpu.getLevel());
-            if (pushedPatterns <= 0) break;
+            if (pushedPatterns <= 0) {
+                // 假合成收尾：对齐 gtlcore CraftingCpuLogicMixin.tickCraftingLogic 的原生行为——
+                // "自动填写样板"生成的假合成订单，最终产出是一本改名的成书占位物，永远不会有
+                // 真实合成把它插回来。样板全部发配完（tasks 空）就该在这里直接判定完成，
+                // 而不是让任务悬着、只能靠外部手动取消收场（手动取消会走 finishJob(false)，
+                // 已发配的原料不会再退，但也不该本该完成的订单被误判成"取消"）。
+                if (job != null && job.tasks.isEmpty() && isFakeCraftingOutput(getFinalJobOutput())) {
+                    cpu.updateOutput(null);
+                    finishJob(true);
+                }
+                break;
+            }
             usedOps[0] += pushedPatterns;
             remainingOperations -= pushedPatterns;
         }
         usedOps[2] = usedOps[1];
         usedOps[1] = usedOps[0];
         usedOps[0] = 0;
+    }
+
+    // gtlcore EncodePatternTransferHandlerMixin.multiBlockOutputImport 里，"自动填写样板"从多方块 JEI
+    // 页生成的假合成图纸，最终产出固定编码成一本带 display 标签（改名）的成书占位物（Items.WRITTEN_BOOK），
+    // 真实用途是把多方块建材通过 AE2 合成网络发配出去，不会有配方真的产出这本书。
+    private static boolean isFakeCraftingOutput(@Nullable GenericStack output) {
+        if (output == null) return false;
+        AEKey what = output.what();
+        if (!(what instanceof AEItemKey itemKey)) return false;
+        return itemKey.getItem() == Items.WRITTEN_BOOK && itemKey.hasTag() && itemKey.getTag().contains("display");
     }
 
     public int executeCrafting(int maxPatterns, CraftingService craftingService, IEnergyService energyService,
@@ -171,13 +194,9 @@ public class QuantumCraftingCPULogic {
                 if (energyService.extractAEPower(patternPower, Actionable.SIMULATE, PowerMultiplier.CONFIG) < patternPower - 0.01D) {
                     break;
                 }
-                KeyCounter[] refundInputs = (provider instanceof QuantumPatternBufferRefundAccess)
-                        ? copyInputs(craftingContainer)
-                        : null;
                 if (!provider.pushPattern(details, craftingContainer)) continue;
 
                 energyService.extractAEPower(patternPower, Actionable.MODULATE, PowerMultiplier.CONFIG);
-                recordPatternBufferPush(provider, details, refundInputs);
                 pushedPatterns++;
                 for (Object2LongMap.Entry<AEKey> output : expectedOutputs) {
                     job.waitingFor.insert(output.getKey(), output.getLongValue(), Actionable.MODULATE);
@@ -412,8 +431,10 @@ public class QuantumCraftingCPULogic {
         if (success) {
             job.link.markDone();
         } else {
+            // 取消时不倒退去样板总成里"抠"原料回来：原料一旦 pushPattern 出去就已花费
+            // （对齐原生 AE2 CraftingCpuLogic.finishJob），否则会和 gtlcore 建材供应侧的
+            // 交付认领重复记账，被刷取消/自动填样板可无限复制材料。
             job.link.cancel();
-            refundPatternBufferPushes();
         }
         job.waitingFor.clear();
         for (Map.Entry<IPatternDetails, QuantumExecutingCraftingJob.TaskProgress> entry : job.tasks.entrySet()) {
@@ -424,54 +445,6 @@ public class QuantumCraftingCPULogic {
         notifyJobOwner(job, success ? CraftingJobStatusPacket.Status.FINISHED : CraftingJobStatusPacket.Status.CANCELLED);
         job = null;
         storeItems();
-    }
-
-    private void recordPatternBufferPush(ICraftingProvider provider, IPatternDetails details, KeyCounter[] inputs) {
-        if (job == null || !(provider instanceof QuantumPatternBufferRefundAccess access)) {
-            return;
-        }
-        job.recordPatternBufferPush(access.gtShanhai$getQuantumRefundId(), details, inputs);
-    }
-
-    private static KeyCounter[] copyInputs(KeyCounter[] inputs) {
-        if (inputs == null) return null;
-        KeyCounter[] copy = new KeyCounter[inputs.length];
-        for (int i = 0; i < inputs.length; i++) {
-            copy[i] = new KeyCounter();
-            if (inputs[i] != null) {
-                copy[i].addAll(inputs[i]);
-            }
-        }
-        return copy;
-    }
-
-    private void refundPatternBufferPushes() {
-        if (job == null || job.patternBufferRefunds.isEmpty()) {
-            return;
-        }
-        IGrid grid = cpu.getGrid();
-        if (grid == null) {
-            return;
-        }
-        CraftingService craftingService = (CraftingService) grid.getCraftingService();
-        Iterator<QuantumExecutingCraftingJob.PatternBufferRefund> iterator = job.patternBufferRefunds.iterator();
-        while (iterator.hasNext()) {
-            QuantumExecutingCraftingJob.PatternBufferRefund refund = iterator.next();
-            if (refundPatternBufferPush(craftingService, refund)) {
-                iterator.remove();
-            }
-        }
-    }
-
-    private boolean refundPatternBufferPush(CraftingService craftingService,
-            QuantumExecutingCraftingJob.PatternBufferRefund refund) {
-        for (ICraftingProvider provider : craftingService.getProviders(refund.patternDetails)) {
-            if (provider instanceof QuantumPatternBufferRefundAccess access
-                    && refund.providerId.equals(access.gtShanhai$getQuantumRefundId())) {
-                return access.gtShanhai$refundQuantumPush(refund.patternDetails, refund.inputs);
-            }
-        }
-        return false;
     }
 
     private void postChange(AEKey what) {

@@ -106,6 +106,37 @@ public final class WalletAccountAPI {
         return true;
     }
 
+    // ===================== 已购买次数（展示用统计） =====================
+
+    /**
+     * 商品条目的稳定统计 key：goodsId+category（与 {@code ShopActionPacket#locate} 同一定位口径）。
+     * 同 goodsId 不同 NBT 的多条目（如各种超级磁盘阵列）会共享同一份统计，这是已知取舍——
+     * 展示"已购买次数"是给玩家看的参考数字，不追求逐条目精确到 NBT 级别。
+     */
+    public static String purchaseKey(ResourceLocation goodsId, String category) {
+        return goodsId + "|" + (category == null ? "" : category);
+    }
+
+    public static long getPurchaseCount(MinecraftServer server, UUID uuid, String key) {
+        WalletAccount acc = data(server).get(uuid);
+        return acc == null ? 0L : acc.getPurchaseCount(key);
+    }
+
+    /** 累加已购买次数（delta 通常为本次成交次数，见 {@code ShopActionPacket#doBuy}）。 */
+    public static void addPurchaseCount(MinecraftServer server, UUID uuid, String key, long delta) {
+        if (key == null || delta == 0L) return;
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.getOrCreate(uuid);
+        acc.addPurchaseCount(key, delta);
+        d.setDirty();
+    }
+
+    /** 读全部已购买次数统计（副本，保序）。 */
+    public static Map<String, Long> getAllPurchaseCounts(MinecraftServer server, UUID uuid) {
+        WalletAccount acc = data(server).get(uuid);
+        return acc == null ? new LinkedHashMap<>() : acc.getPurchaseCounts();
+    }
+
     // ===================== 币值互转（阶段 B） =====================
 
     /**
@@ -147,6 +178,7 @@ public final class WalletAccountAPI {
         UUID uuid = player.getUUID();
         ShanhaiNetwork.CHANNEL.send(
                 PacketDistributor.PLAYER.with(() -> player),
-                new WalletAccountSyncPacket(getAllCurrencies(server, uuid), getDigital(server, uuid)));
+                new WalletAccountSyncPacket(getAllCurrencies(server, uuid), getDigital(server, uuid),
+                        getAllPurchaseCounts(server, uuid)));
     }
 }

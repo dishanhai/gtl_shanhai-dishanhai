@@ -114,6 +114,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private List<ItemStack> invStacks = new ArrayList<>();  // 物品栏模式：玩家背包实物（含 NBT）
     private List<String> invNames = new ArrayList<>();
     private List<String> invTags = new ArrayList<>();
+    private List<Long> invCounts = new ArrayList<>();        // 与 invStacks 同下标：该物品+NBT 在背包+副手里的实际总数
     private List<ItemStack> restrictedStacks = new ArrayList<>(); // 受限模式：固定候选物品
     private List<String> restrictedNames = new ArrayList<>();
     private List<String> restrictedTags = new ArrayList<>();
@@ -316,11 +317,16 @@ public class MultiPickerScreen extends ScaledScreen {
         return t;
     }
 
-    /** 物品栏模式数据：玩家背包（主 + 副手）实物，按物品+NBT 去重，复制并保留 NBT。 */
+    /**
+     * 物品栏模式数据：玩家背包（主 + 副手）实物，按物品+NBT 去重，复制并保留 NBT，
+     * 同时按同下标累计该物品+NBT 在背包+副手里的实际总数（{@link #invCounts}），
+     * 供 {@link #addFromGrid} 把新加入项的初始数量自动填成玩家当前持有量，而不是恒为 1。
+     */
     private void buildInventory() {
         invStacks = new ArrayList<>();
         invNames = new ArrayList<>();
         invTags = new ArrayList<>();
+        invCounts = new ArrayList<>();
         var player = Minecraft.getInstance().player;
         if (player == null) return;
         List<ItemStack> src = new ArrayList<>();
@@ -328,17 +334,21 @@ public class MultiPickerScreen extends ScaledScreen {
         src.addAll(player.getInventory().offhand);
         for (ItemStack st : src) {
             if (st == null || st.isEmpty()) continue;
-            boolean dup = false;
-            for (ItemStack e : invStacks) {
-                if (ItemStack.isSameItemSameTags(e, st)) { dup = true; break; }
+            int dupIdx = -1;
+            for (int i = 0; i < invStacks.size(); i++) {
+                if (ItemStack.isSameItemSameTags(invStacks.get(i), st)) { dupIdx = i; break; }
             }
-            if (dup) continue;
+            if (dupIdx >= 0) {
+                invCounts.set(dupIdx, invCounts.get(dupIdx) + st.getCount());
+                continue;
+            }
             ItemStack copy = st.copy();
             copy.setCount(1);
             ResourceLocation id = ForgeRegistries.ITEMS.getKey(st.getItem());
             invStacks.add(copy);
             invNames.add((st.getHoverName().getString() + " " + id).toLowerCase(Locale.ROOT));
             invTags.add(tagStringOf(st.getItem()));
+            invCounts.add((long) st.getCount());
         }
     }
 
@@ -802,7 +812,10 @@ public class MultiPickerScreen extends ScaledScreen {
         } else {
             ItemStack proto = gridItem(resIdx).copy(); // 保留 NBT，独立于缓存/背包
             proto.setCount(1);
-            s = new Sel(false, ForgeRegistries.ITEMS.getKey(proto.getItem()), proto, null, 1L);
+            // 物品栏模式：初始数量自动填玩家当前实际持有量，而不是恒为 1（其余模式无"持有量"概念，仍默认 1）
+            long initCount = mode == Mode.INVENTORY && resIdx < invCounts.size()
+                    ? Math.max(1L, invCounts.get(resIdx)) : 1L;
+            s = new Sel(false, ForgeRegistries.ITEMS.getKey(proto.getItem()), proto, null, initCount);
         }
         selected.add(s);
         setActive(s);

@@ -36,6 +36,10 @@ public class ShopEntry {
     /** FTBQ 奖励表 ID（16 位十六进制字符串，见 {@link dev.ftb.mods.ftbquests.quest.QuestObjectBase#getCodeString}）。
      *  仅 rewardMode==FTBQ 时有意义；购买时直接读取 FTBQ 当前表内容（不做本地副本），表改了立即生效。 */
     private final String ftbqTableId;
+    /** FTBQ 表内的交付子模式（仅取 CHOICE/RANDOM/ALL 三值，仅 rewardMode==FTBQ 时有意义，默认 RANDOM）：
+     *  CHOICE=购买前从表内物品类奖励中选 1 项；RANDOM=复用 FTBQ 自身加权随机抽取（原有行为）；
+     *  ALL=一次性交付表内每一项物品类奖励。与本地奖励池的三种子模式语义对齐，只是奖励来源换成 FTBQ 表。 */
+    private final RewardMode ftbqSubMode;
     /** 隐藏商品：不出现在分类网格/枚举里，只能被另一条目的 {@link #linkTo} 直接跳转带达（仿 FTBQ 隐藏任务）。 */
     private final boolean hidden;
     /** 本条目的跳转目标别名（供其他条目的 {@link #linkTo} 引用），可空。仅需给「会被跳转到」的隐藏商品设置。 */
@@ -186,16 +190,38 @@ public class ShopEntry {
                      net.minecraft.nbt.CompoundTag goodsNbt, ShopCost cost, String description, long remainingUses,
                      List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
                      boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId) {
-        this(List.of(GoodsStack.of(goodsId, goodsCount, goodsNbt)), category, cost, description, remainingUses,
-                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId);
+        this(goodsId, goodsCount, category, goodsNbt, cost, description, remainingUses, displayIcons, rewardMode,
+                rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, RewardMode.RANDOM);
     }
 
-    // ===== 新构造：多元商品清单 + 多元成本 + 描述 + 限购次数 + 自定义显示图标 + 奖励池/FTBQ表 + 隐藏/跳转 + 自定义名称 =====
+    // ===== 单商品构造（含 FTBQ 子模式）：委托给多商品清单构造（包成 1 元素列表） =====
+    public ShopEntry(ResourceLocation goodsId, int goodsCount, String category,
+                     net.minecraft.nbt.CompoundTag goodsNbt, ShopCost cost, String description, long remainingUses,
+                     List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
+                     boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
+                     RewardMode ftbqSubMode) {
+        this(List.of(GoodsStack.of(goodsId, goodsCount, goodsNbt)), category, cost, description, remainingUses,
+                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode);
+    }
+
+    // ===== 兼容构造：无 FTBQ 子模式（委托默认 RANDOM，即原有行为）=====
     public ShopEntry(List<GoodsStack> goods, String category,
                      ShopCost cost, String description, long remainingUses,
                      List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
                      boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId) {
+        this(goods, category, cost, description, remainingUses, displayIcons, rewardMode, rewardPool,
+                hidden, linkKey, linkTo, displayName, ftbqTableId, RewardMode.RANDOM);
+    }
+
+    // ===== 新构造：多元商品清单 + 多元成本 + 描述 + 限购次数 + 自定义显示图标 + 奖励池/FTBQ表(+子模式) + 隐藏/跳转 + 自定义名称 =====
+    public ShopEntry(List<GoodsStack> goods, String category,
+                     ShopCost cost, String description, long remainingUses,
+                     List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
+                     boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
+                     RewardMode ftbqSubMode) {
         this.goods = normalizeGoods(goods);
+        // 只认 CHOICE/ALL 为有效子模式，其余（含 null/NONE/FTBQ 误传）一律退回默认 RANDOM
+        this.ftbqSubMode = (ftbqSubMode == RewardMode.CHOICE || ftbqSubMode == RewardMode.ALL) ? ftbqSubMode : RewardMode.RANDOM;
         this.category = (category == null || category.isBlank()) ? DEFAULT_CATEGORY : category;
         this.cost = cost == null ? new ShopCost(java.math.BigInteger.ZERO, null, null) : cost;
         this.description = description == null ? "" : description;
@@ -371,6 +397,11 @@ public class ShopEntry {
         return rewardMode == RewardMode.FTBQ && !ftbqTableId.isEmpty();
     }
 
+    /** FTBQ 表内的交付子模式（CHOICE/RANDOM/ALL，默认 RANDOM）。仅 {@link #getRewardMode} == FTBQ 时有意义。 */
+    public RewardMode getFtbqSubMode() {
+        return ftbqSubMode;
+    }
+
     /** 是否为隐藏商品（不出现在分类网格/枚举里，只能被跳转直达）。 */
     public boolean isHidden() {
         return hidden;
@@ -435,7 +466,7 @@ public class ShopEntry {
         return goods.isEmpty() ? net.minecraft.world.item.Items.AIR : goods.get(0).item();
     }
 
-    /** 商品清单非空、清单内每一项都已在当前注册表中存在 + 成本有效。 */
+    /** 商品清单非空、清单内每一项都已在当前注册表中存在 + 成本有效。购买结算拦截靠这个。 */
     public boolean isValid() {
         if (goods.isEmpty() || !cost.isValid()) return false;
         for (GoodsStack g : goods) {
@@ -444,16 +475,81 @@ public class ShopEntry {
         return true;
     }
 
+    /**
+     * 结构合法性：商品清单、成本都至少配置了 1 项，不检查物品是否仍在当前注册表里存在。
+     * 用于「要不要把这条目列进分类/网格」的判断——即使商品/成本引用的物品因为对应模组缺失查不到，
+     * 条目本身仍算结构合法，要展示出来（走 FTBQ 风格「缺失物品」占位提示玩家/编辑者），
+     * 真正拦购买的地方在 {@link #isValid}，两者刻意分开。
+     */
+    public boolean isStructurallyValid() {
+        return !goods.isEmpty() && !cost.isEmpty();
+    }
+
+    /** 商品清单里是否有任意一项已经不在当前物品注册表（模组被卸载/物品被移除）。仅用于展示判断。 */
+    public boolean hasMissingGoods() {
+        for (GoodsStack g : goods) {
+            if (g.id() != null && !ForgeRegistries.ITEMS.containsKey(g.id())) return true;
+        }
+        return false;
+    }
+
+    /** 商品或成本任一处引用了当前注册表里查不到的物品/流体（模组缺失）。仅用于展示判断，购买拦截见 {@link #isValid}。 */
+    public boolean hasMissingItems() {
+        return hasMissingGoods() || cost.hasMissingIngredient();
+    }
+
+    private static final ResourceLocation FTBQ_MISSING_ITEM_ID = new ResourceLocation("ftbquests", "missing_item");
+
+    /**
+     * 用 FTBQ 自带的「缺失物品」占位样式（问号图标 + 红字提示，悬停 tooltip 直接显示原始物品 ID）代表一个
+     * 查不到的物品引用，通常是配置该商品时用到的模组现在缺失/物品被移除。只用于渲染展示，不参与购买结算——
+     * 结算该拦的地方仍然拦在 {@link #isValid}/{@link ShopCost#isValid}。本模组硬依赖 FTBQ，
+     * {@code ftbquests:missing_item} 恒定存在，NBT 结构对齐 FTBQ 自己的 MissingItem 读取格式。
+     */
+    public static ItemStack missingItemStack(ResourceLocation id, int count) {
+        Item missing = ForgeRegistries.ITEMS.getValue(FTBQ_MISSING_ITEM_ID);
+        if (missing == null) return ItemStack.EMPTY;
+        ItemStack stack = new ItemStack(missing, Math.max(1, count));
+        net.minecraft.nbt.CompoundTag item = new net.minecraft.nbt.CompoundTag();
+        item.putString("id", id == null ? "minecraft:air" : id.toString());
+        item.putInt("Count", Math.max(1, count));
+        net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
+        tag.put("Item", item);
+        stack.setTag(tag);
+        return stack;
+    }
+
     /** 主商品（列表首项）的展示用 ItemStack，带上其 NBT 快照（若有）。 */
     public ItemStack makeGoodsStack() {
         if (goods.isEmpty()) return ItemStack.EMPTY;
         return goods.get(0).makeStack();
     }
 
-    /** 商品显示名：自定义名称优先；组合商品缺自定义名称时用「首项名称 等N种」提示这是个多物品条目。 */
+    /**
+     * 主商品（列表首项）的<b>展示用</b>图标：缺失时用 {@link #missingItemStack} 占位代替（避免网格/详情页
+     * 直接显示一个看起来像"卖空气"的空槽），否则等价于 {@link #makeGoodsStack}。
+     * 只给渲染用；真正参与购买结算走的仍是 {@link #makeGoodsStack}/{@link #getGoodsItem}，不受影响。
+     */
+    public ItemStack displayGoodsStack() {
+        if (goods.isEmpty()) return ItemStack.EMPTY;
+        GoodsStack primary = goods.get(0);
+        if (primary.id() != null && !ForgeRegistries.ITEMS.containsKey(primary.id())) {
+            return missingItemStack(primary.id(), primary.count());
+        }
+        return primary.makeStack();
+    }
+
+    /**
+     * 商品显示名：自定义名称优先；组合商品缺自定义名称时用「首项名称 等N种」提示这是个多物品条目。
+     * 首项物品缺失（模组缺失/被移除）时不显示成 makeGoodsStack() 兜底出来的字面「Air」，改用红字
+     * 「缺失物品:原始ID」，跟网格/详情页的 FTBQ 风格占位图标呼应，一眼就能看出是哪条模组物品缺了。
+     */
     public String goodsDisplayName() {
         if (hasCustomName()) return displayName;
-        String primary = makeGoodsStack().getHoverName().getString();
+        GoodsStack primaryGs = goods.isEmpty() ? null : goods.get(0);
+        boolean primaryMissing = primaryGs != null && primaryGs.id() != null
+                && !ForgeRegistries.ITEMS.containsKey(primaryGs.id());
+        String primary = primaryMissing ? "§c缺失物品:" + primaryGs.id() : makeGoodsStack().getHoverName().getString();
         return hasMultipleGoods() ? primary + " 等" + goods.size() + "种" : primary;
     }
 
@@ -467,7 +563,10 @@ public class ShopEntry {
         if (goods.size() <= 1) return java.util.Collections.emptyList();
         List<DisplayIcon> list = new java.util.ArrayList<>(Math.min(goods.size(), 5));
         for (int i = 0; i < goods.size() && i < 5; i++) {
-            list.add(DisplayIcon.ofItem(goods.get(i).makeStack()));
+            GoodsStack g = goods.get(i);
+            ItemStack st = (g.id() != null && !ForgeRegistries.ITEMS.containsKey(g.id()))
+                    ? missingItemStack(g.id(), g.count()) : g.makeStack();
+            list.add(DisplayIcon.ofItem(st));
         }
         return list;
     }

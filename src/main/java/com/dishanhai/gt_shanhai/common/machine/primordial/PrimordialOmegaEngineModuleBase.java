@@ -131,7 +131,11 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         var stack = threadBoostSlot.storage.getStackInSlot(0);
         if (!stack.isEmpty()) {
             long base = getThreadBoostForItem(stack.getItem());
-            cachedThreadBoost = base > 0 ? base * stack.getCount() : 0L;
+            // 饱和乘法：寰宇并行超限器的注册倍率就是 Long.MAX_VALUE，堆叠数量>1 时
+            // base*count 会 long 溢出成负数，导致下游并行直接归零，这里钳到 Long.MAX_VALUE。
+            cachedThreadBoost = base > 0 && base <= Long.MAX_VALUE / stack.getCount()
+                    ? base * stack.getCount()
+                    : (base > 0 ? Long.MAX_VALUE : 0L);
             return cachedThreadBoost;
         }
         cachedThreadBoost = 0L;
@@ -702,7 +706,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     @Override
     public Widget createUIWidget() {
         Widget widget = super.createUIWidget();
-        if (widget instanceof WidgetGroup group) {
+        if (widget instanceof WidgetGroup group && showsModuleAndThreadSlots()) {
             var size = group.getSize();
             // 物质模块槽（右上方）
             var modSlot = new SlotWidget(
@@ -732,6 +736,12 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             group.addWidget(thrSlot);
         }
         return widget;
+    }
+
+    /** 物质模块槽 / 线程倍率槽是否在 UI 中显示。部分模块（如零点能发生器，并行由编程电路
+     *  独立决定）对这两个槽位完全无感知，子类可覆写为 false 隐藏，避免误导玩家放物品。 */
+    protected boolean showsModuleAndThreadSlots() {
+        return true;
     }
 
     private class ExtraMountPageProvider implements IFancyUIProvider {
@@ -796,7 +806,9 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             }
         }
         // 物质模块搭载信息（所有子类的 addDisplayText 都调用了此方法，确保可见）
-        addModuleSlotDisplay(textList);
+        if (showsModuleAndThreadSlots()) {
+            addModuleSlotDisplay(textList);
+        }
     }
 
     /** 获取当前模块并行值（子类覆写返回模块等级对应的并行数，默认无限） */
@@ -903,6 +915,39 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                 .append(Component.literal("§6§l物质模块: "))
                 .append(DShanhaiTextUtil.createGoldenText(modName))
                 .append(Component.literal(" §7Lv." + level + countStr)));
+    }
+
+    /** 解析本模块所属的无线能源电网 UUID：优先用主机 UUID（整个原初引擎结构共用同一电网），
+     *  没连接主机时退回自己的 UUID。必须和 onWorking() 写入 WirelessEnergyManager 用的
+     *  解析逻辑保持一致，否则读到的就不是自己写进去的那份电网。 */
+    protected UUID resolveWirelessGridUuid() {
+        var host = getHost();
+        return host != null && host.getUuid() != null ? host.getUuid() : getUuid();
+    }
+
+    /**
+     * 覆写继承自 GTLAdd 基类的原生 addEnergyDisplay()：原版逻辑只认 getWirelessNetworkEnergyHandler()
+     * 和 long 类型的 energyContainer 电压，原初系机器两者都没有实现，只会一直显示写死的
+     * getMaxVoltage()=Long.MAX_VALUE 换算出来的"最大功率(MAX+16)"，是个永远不变的假数字。
+     * 原初系真正的经济体系是 com.hepdd.gtmthings 的 WirelessEnergyManager（UUID 记账的
+     * BigInteger 全局电网，见 onWorking()），这里直接读同一份电网余额显示，数值真实会变化。
+     */
+    @Override
+    protected void addEnergyDisplay(List<Component> textList) {
+        UUID uuid = resolveWirelessGridUuid();
+        if (uuid == null) return;
+        try {
+            Class<?> mgr = Class.forName("com.hepdd.gtmthings.api.misc.WirelessEnergyManager");
+            Object total = mgr.getMethod("getUserEU", UUID.class).invoke(null, uuid);
+            if (total instanceof java.math.BigInteger bigTotal) {
+                textList.add(Component.literal("")
+                        .append(DShanhaiTextUtil.createElectricText("电网能源总量: "))
+                        .append(Component.literal(com.gtladd.gtladditions.utils.CommonUtils.formatBigIntegerFixed(bigTotal) + " EU")
+                                .withStyle(ChatFormatting.AQUA)));
+            }
+        } catch (Exception ignored) {
+            // gtmthings 未加载或反射失败：安静跳过，不显示这行，不影响其余信息
+        }
     }
 
     @Override

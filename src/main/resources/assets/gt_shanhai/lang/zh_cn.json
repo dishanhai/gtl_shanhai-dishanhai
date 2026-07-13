@@ -169,6 +169,8 @@
   "gt_shanhai.machine.virtual_item_supply_machine.name": "虚拟物品供应机",
   "block.gt_shanhai.ftbq_ae_submitter": "FTBQ AE 自动提交器",
   "gt_shanhai.machine.ftbq_ae_submitter.name": "FTBQ AE 自动提交器",
+  "block.gt_shanhai.shop_terminal": "山海商店终端",
+  "gt_shanhai.machine.shop_terminal.name": "山海商店终端",
   "item.gt_shanhai.virtual_item_provider": "虚拟物品提供器",
   "block.gt_shanhai.logical_compute_hatch": "逻辑算力仓",
   "block.gt_shanhai.divergence_engine": "太初分歧引擎",

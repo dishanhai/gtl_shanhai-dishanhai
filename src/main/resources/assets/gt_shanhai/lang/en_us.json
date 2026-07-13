@@ -145,6 +145,8 @@
   "gt_shanhai.machine.virtual_item_supply_machine.name": "Virtual Item Supply Machine",
   "block.gt_shanhai.ftbq_ae_submitter": "FTBQ AE Submitter",
   "gt_shanhai.machine.ftbq_ae_submitter.name": "FTBQ AE Submitter",
+  "block.gt_shanhai.shop_terminal": "Shop Terminal",
+  "gt_shanhai.machine.shop_terminal.name": "Shop Terminal",
   "item.gt_shanhai.virtual_item_provider": "Virtual Item Provider",
   "block.gt_shanhai.super_parallel_core": "Super Parallel Core",
   "gt_shanhai.machine.super_parallel_core.name": "Super Parallel Core",

@@ -33,6 +33,7 @@ public class GTDishanhaiKubeJSPlugin extends KubeJSPlugin {
         event.add("DShanhaiRecipeRegistry", DShanhaiRecipeRegistry.class);
         event.add("DShanhaiPackRegistry", DShanhaiPackRegistry.class);
         event.add("DShanhaiRecipeEngine", DShanhaiRecipeEngine.class);
+        event.add("DShanhaiRecipeCache", com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.class);
         event.add("ShanhaiRecipes", DShanhaiRecipeKJSAPI.class);
         event.add("RecipeModAPI", DShanhaiRecipeModifierAPI.class);
     }

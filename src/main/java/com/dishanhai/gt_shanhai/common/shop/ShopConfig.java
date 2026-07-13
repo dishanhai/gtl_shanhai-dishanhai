@@ -64,7 +64,7 @@ public final class ShopConfig {
     public static List<String> getCategories() {
         LinkedHashSet<String> set = new LinkedHashSet<>();
         for (ShopEntry entry : getEntries()) {
-            if (entry.isValid() && !entry.isHidden()) {
+            if (entry.isStructurallyValid() && !entry.isHidden()) {
                 set.add(entry.getCategory());
             }
         }
@@ -100,7 +100,7 @@ public final class ShopConfig {
     public static List<String> getTopCategories() {
         LinkedHashSet<String> set = new LinkedHashSet<>();
         for (ShopEntry e : getEntries()) {
-            if (e.isValid() && !e.isHidden()) set.add(catTop(e.getCategory()));
+            if (e.isStructurallyValid() && !e.isHidden()) set.add(catTop(e.getCategory()));
         }
         return new ArrayList<>(set);
     }
@@ -109,7 +109,7 @@ public final class ShopConfig {
     public static List<String> getSubCategories(String top) {
         LinkedHashSet<String> set = new LinkedHashSet<>();
         for (ShopEntry e : getEntries()) {
-            if (!e.isValid() || e.isHidden()) continue;
+            if (!e.isStructurallyValid() || e.isHidden()) continue;
             if (catTop(e.getCategory()).equals(top)) {
                 String sub = catSub(e.getCategory());
                 if (!sub.isEmpty()) set.add(sub);
@@ -125,7 +125,7 @@ public final class ShopConfig {
     public static List<ShopEntry> getEntriesOfGroup(String top, String sub) {
         List<ShopEntry> result = new ArrayList<>();
         for (ShopEntry e : getEntries()) {
-            if (!e.isValid() || e.isHidden()) continue;
+            if (!e.isStructurallyValid() || e.isHidden()) continue;
             if (!catTop(e.getCategory()).equals(top)) continue;
             if (sub != null && !sub.isEmpty() && !catSub(e.getCategory()).equals(sub)) continue;
             result.add(e);
@@ -137,7 +137,7 @@ public final class ShopConfig {
     public static Map<String, List<ShopEntry>> getEntriesByCategory() {
         LinkedHashMap<String, List<ShopEntry>> map = new LinkedHashMap<>();
         for (ShopEntry entry : getEntries()) {
-            if (!entry.isValid() || entry.isHidden()) continue;
+            if (!entry.isStructurallyValid() || entry.isHidden()) continue;
             map.computeIfAbsent(entry.getCategory(), k -> new ArrayList<>()).add(entry);
         }
         return map;
@@ -147,7 +147,7 @@ public final class ShopConfig {
     public static List<ShopEntry> getEntriesOf(String category) {
         List<ShopEntry> result = new ArrayList<>();
         for (ShopEntry entry : getEntries()) {
-            if (entry.isValid() && !entry.isHidden() && entry.getCategory().equals(category)) {
+            if (entry.isStructurallyValid() && !entry.isHidden() && entry.getCategory().equals(category)) {
                 result.add(entry);
             }
         }
@@ -164,15 +164,42 @@ public final class ShopConfig {
         save();
     }
 
+    // 误删防护：记住最近一次被删除的条目 + 原始位置，30 秒内可用 undoLastRemove() 撤销一次
+    private static ShopEntry lastRemovedEntry;
+    private static int lastRemovedIndex = -1;
+    private static long lastRemovedAtMs;
+    private static final long UNDO_WINDOW_MS = 30_000L;
+
     /** 删除一个商品条目（按对象引用）并写回 shop.json；返回是否删除成功。 */
     public static synchronized boolean removeEntry(ShopEntry entry) {
         if (entry == null) return false;
         getEntries();
+        int idx = ENTRIES.indexOf(entry);
         boolean removed = ENTRIES.remove(entry);
         if (removed) {
+            lastRemovedEntry = entry;
+            lastRemovedIndex = idx;
+            lastRemovedAtMs = System.currentTimeMillis();
             save();
         }
         return removed;
+    }
+
+    /** 撤销最近一次删除（30 秒内有效，且只能撤销一次）；恢复成功返回该条目，否则 null（已超时/已撤销过）。 */
+    public static synchronized ShopEntry undoLastRemove() {
+        if (lastRemovedEntry == null) return null;
+        if (System.currentTimeMillis() - lastRemovedAtMs > UNDO_WINDOW_MS) {
+            lastRemovedEntry = null;
+            return null;
+        }
+        getEntries();
+        ShopEntry restored = lastRemovedEntry;
+        int idx = Math.max(0, Math.min(lastRemovedIndex, ENTRIES.size()));
+        ENTRIES.add(idx, restored);
+        save();
+        lastRemovedEntry = null;
+        lastRemovedIndex = -1;
+        return restored;
     }
 
     /** 用新条目替换旧条目并写回；返回是否替换成功。 */
@@ -222,6 +249,7 @@ public final class ShopConfig {
                     o.addProperty("rewardMode", e.getRewardMode().name());
                     if (e.getRewardMode() == ShopEntry.RewardMode.FTBQ) {
                         o.addProperty("ftbqTableId", e.getFtbqTableId());
+                        o.addProperty("ftbqSubMode", e.getFtbqSubMode().name());
                     } else {
                         o.add("rewardPool", rewardPoolToJson(e.getRewardPool()));
                     }
@@ -325,8 +353,13 @@ public final class ShopConfig {
             String linkTo = o.has("linkTo") ? o.get("linkTo").getAsString() : null;
             String displayName = o.has("displayName") ? o.get("displayName").getAsString() : null;
             String ftbqTableId = o.has("ftbqTableId") ? o.get("ftbqTableId").getAsString() : null;
+            ShopEntry.RewardMode ftbqSubMode = ShopEntry.RewardMode.RANDOM;
+            if (o.has("ftbqSubMode")) {
+                try { ftbqSubMode = ShopEntry.RewardMode.valueOf(o.get("ftbqSubMode").getAsString()); }
+                catch (Exception ignored) {}
+            }
             return new ShopEntry(goodsList, category, cost, description, limit,
-                    icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId);
+                    icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode);
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品条目: {}", e.getMessage());
             return null;
@@ -348,6 +381,7 @@ public final class ShopConfig {
             io.addProperty("id", in.id == null ? "" : in.id.toString());
             io.addProperty("fluid", in.isFluid);
             io.addProperty("count", in.count);
+            if (in.hasNbt()) io.addProperty("nbt", in.nbt().toString()); // 精确 NBT 匹配（仅物品；流体不支持）
             items.add(io);
         }
         co.add("items", items);
@@ -379,7 +413,14 @@ public final class ShopConfig {
                     if (iid.isEmpty()) continue;
                     boolean fluid = io.has("fluid") && io.get("fluid").getAsBoolean();
                     long c = io.has("count") ? io.get("count").getAsLong() : 1L;
-                    physical.add(new ExchangeEntry.Ingredient(new ResourceLocation(iid), fluid, c));
+                    net.minecraft.nbt.CompoundTag inNbt = null;
+                    if (io.has("nbt")) {
+                        try {
+                            String snbt = io.get("nbt").getAsString();
+                            if (snbt != null && !snbt.isBlank()) inNbt = net.minecraft.nbt.TagParser.parseTag(snbt);
+                        } catch (Exception ignored) {}
+                    }
+                    physical.add(new ExchangeEntry.Ingredient(new ResourceLocation(iid), fluid, c, inNbt));
                 }
             }
         }

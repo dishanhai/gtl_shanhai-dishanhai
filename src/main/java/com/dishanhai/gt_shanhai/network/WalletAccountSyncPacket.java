@@ -22,10 +22,13 @@ public class WalletAccountSyncPacket {
 
     private final Map<ResourceLocation, BigInteger> currencies;
     private final BigInteger digital;
+    private final Map<String, Long> purchaseCounts;
 
-    public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital) {
+    public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
+                                    Map<String, Long> purchaseCounts) {
         this.currencies = currencies != null ? currencies : new LinkedHashMap<>();
         this.digital = digital != null ? digital : BigInteger.ZERO;
+        this.purchaseCounts = purchaseCounts != null ? purchaseCounts : new LinkedHashMap<>();
     }
 
     public WalletAccountSyncPacket(FriendlyByteBuf buf) {
@@ -39,6 +42,14 @@ public class WalletAccountSyncPacket {
         this.currencies = map;
         byte[] db = buf.readByteArray();
         this.digital = db.length == 0 ? BigInteger.ZERO : new BigInteger(db);
+        int pn = buf.readVarInt();
+        Map<String, Long> pur = new LinkedHashMap<>();
+        for (int i = 0; i < pn; i++) {
+            String key = buf.readUtf();
+            long v = buf.readVarLong();
+            pur.put(key, v);
+        }
+        this.purchaseCounts = pur;
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -48,6 +59,11 @@ public class WalletAccountSyncPacket {
             buf.writeByteArray(e.getValue() == null ? new byte[0] : e.getValue().toByteArray());
         }
         buf.writeByteArray(digital.toByteArray());
+        buf.writeVarInt(purchaseCounts.size());
+        for (Map.Entry<String, Long> e : purchaseCounts.entrySet()) {
+            buf.writeUtf(e.getKey());
+            buf.writeVarLong(e.getValue() == null ? 0L : e.getValue());
+        }
     }
 
     public static void handle(WalletAccountSyncPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -60,6 +76,6 @@ public class WalletAccountSyncPacket {
 
     @OnlyIn(Dist.CLIENT)
     private static void applyClient(WalletAccountSyncPacket pkt) {
-        com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.apply(pkt.currencies, pkt.digital);
+        com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.apply(pkt.currencies, pkt.digital, pkt.purchaseCounts);
     }
 }

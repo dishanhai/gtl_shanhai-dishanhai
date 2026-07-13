@@ -8,8 +8,12 @@ import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.registries.ForgeRegistries;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 public class DShanhaiJS {
@@ -118,6 +122,43 @@ public class DShanhaiJS {
             arr[i] = m.count + "x " + m.itemId;
         }
         return arr;
+    }
+
+    // ===== 物品表按后缀/命名空间分桶 =====
+
+    /**
+     * 按物品 ID 路径后缀对全部已注册物品分桶，一次遍历 ForgeRegistries.ITEMS，按命名空间分组返回。
+     * <p>
+     * 用于替代 KubeJS 里"每个候选都对全物品表重新做一次 Ingredient.of(regex).getItemIds() 全量扫描"
+     * 的 O(候选数 × 全物品数) 反模式——改成先调用本方法一次性建好索引，再按命名空间查表。
+     * <p>
+     * 用法（KubeJS server_scripts 中）:
+     * <pre>
+     * var buckets = Java.loadClass('com.dishanhai.gt_shanhai.api.DShanhaiJS')
+     *     .groupItemIdsBySuffix(['_dust', '_ingot', '_crystal', '_gem']);
+     * var candidates = buckets.get('gtceu'); // Java List&lt;String&gt; 或 null
+     * if (candidates != null) candidates.forEach(function(id) { ... });
+     * </pre>
+     *
+     * @param suffixes 物品路径后缀列表，如 ["_dust", "_ingot"]
+     * @return {命名空间: [物品ID...]} 映射，只包含路径以任一后缀结尾的物品；suffixes 为空时返回空 map
+     */
+    public static Map<String, List<String>> groupItemIdsBySuffix(String[] suffixes) {
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        if (suffixes == null || suffixes.length == 0) return result;
+        for (ResourceLocation id : ForgeRegistries.ITEMS.getKeys()) {
+            String path = id.getPath();
+            boolean matched = false;
+            for (String suffix : suffixes) {
+                if (suffix != null && path.endsWith(suffix)) {
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) continue;
+            result.computeIfAbsent(id.getNamespace(), k -> new ArrayList<>()).add(id.toString());
+        }
+        return result;
     }
 
     private static MultiblockMachineDefinition findMultiblock(String machineId) {

@@ -76,6 +76,7 @@ public class ExchangeEditPacket {
             buf.writeResourceLocation(in.id == null ? new ResourceLocation("minecraft:air") : in.id);
             buf.writeBoolean(in.isFluid);
             buf.writeVarLong(in.count);
+            buf.writeNbt(in.nbt());
         }
     }
 
@@ -88,7 +89,7 @@ public class ExchangeEditPacket {
             ResourceLocation id = buf.readResourceLocation();
             boolean fluid = buf.readBoolean();
             long count = buf.readVarLong();
-            items.add(new ExchangeEntry.Ingredient(id, fluid, count));
+            items.add(new ExchangeEntry.Ingredient(id, fluid, count, buf.readNbt()));
         }
         return new ExchangeEntry.Side(spark, items);
     }

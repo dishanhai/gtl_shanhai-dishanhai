@@ -51,6 +51,8 @@ public class DShanhaiRecipeEngine {
     private static final int MAX_ERROR_ENTRIES = 512;
     private static volatile Map<String, Object> LAST_RECEIPT = Collections.emptyMap();
     private static final Map<String, TypeStats> RECIPE_TYPE_STATS = Collections.synchronizedMap(new LinkedHashMap<>());
+    // 配方ID去重记录（按 recipeId 全局去重，随 resetRecipeStats() 一起在每次 reload 时清空）
+    private static final Set<String> REGISTERED_RECIPE_IDS = ConcurrentHashMap.newKeySet();
 
     private static final class TimerEntry {
         final String name;
@@ -308,6 +310,42 @@ public class DShanhaiRecipeEngine {
         }
         clearErrors();
         clearLastReceipt();
+        REGISTERED_RECIPE_IDS.clear();
+        synchronized (RECIPE_TYPE_BY_ID) {
+            RECIPE_TYPE_BY_ID.clear();
+        }
+    }
+
+    // 供"配方库缓存"导出用：记录本次 reload 里 safeAddRecipe 成功注册的 (原始id -> 配方类型)，
+    // 随 resetRecipeStats() 清空。见 DShanhaiRecipeCache.exportIfNeeded()。
+    private static final Map<String, String> RECIPE_TYPE_BY_ID = new LinkedHashMap<>();
+
+    public static void trackRecipeForCache(String recipeType, String rawId) {
+        if (recipeType == null || rawId == null || rawId.isEmpty()) return;
+        synchronized (RECIPE_TYPE_BY_ID) {
+            RECIPE_TYPE_BY_ID.put(rawId, recipeType);
+        }
+    }
+
+    public static Map<String, String> getTrackedRecipesForCache() {
+        synchronized (RECIPE_TYPE_BY_ID) {
+            return new LinkedHashMap<>(RECIPE_TYPE_BY_ID);
+        }
+    }
+
+    /**
+     * 配方ID是否已注册过（本次 reload 周期内）。
+     */
+    public static boolean hasRegisteredRecipe(String recipeId) {
+        return recipeId != null && REGISTERED_RECIPE_IDS.contains(recipeId);
+    }
+
+    /**
+     * 记录一个配方ID为已注册。返回 true 表示这是首次注册，false 表示此前已注册过（本次调用未生效）。
+     */
+    public static boolean registerRecipe(String recipeId) {
+        if (recipeId == null || recipeId.isEmpty()) return false;
+        return REGISTERED_RECIPE_IDS.add(recipeId);
     }
 
     public static void printRecipeStats() {
@@ -344,7 +382,13 @@ public class DShanhaiRecipeEngine {
         String modVersion = getModVersion();
 
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$?body_golden-============= 山海私货配方统计 ============="));
-        if (total == 0L) {
+        if (total == 0L && com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.isCacheValid()) {
+            // 缓存命中时 山海的配方库.js 从头部直接 return，RECIPE_TOTAL 等计数器不会被跑到，
+            // 是正常现象，不是加载异常——配方本身已经从缓存 json 数据包原生加载完毕。
+            long cachedCount = com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.getCachedRecipeCount();
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§b🗃 配方库缓存命中，本次跳过 Rhino 注册统计"));
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a共 §e" + cachedCount + "§a 条配方从缓存数据包原生加载，非异常"));
+        } else if (total == 0L) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e⚠ 配方统计为空，可能加载异常"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e💡 请检查服务端日志"));
         } else if (failed == 0L) {

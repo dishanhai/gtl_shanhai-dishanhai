@@ -22,7 +22,7 @@ import java.util.function.Supplier;
  */
 public class ShopActionPacket {
 
-    public enum Action { BUY, SELL, DEPOSIT, DELETE }
+    public enum Action { BUY, SELL, DEPOSIT, DELETE, UNDO_DELETE }
 
     private final Action action;
     private final ResourceLocation goodsId;   // DEPOSIT 时忽略
@@ -100,6 +100,21 @@ public class ShopActionPacket {
             return;
         }
 
+        if (pkt.action == Action.UNDO_DELETE) {
+            if (!com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player)) {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 无权限撤销"));
+                return;
+            }
+            ShopEntry restored = ShopConfig.undoLastRemove();
+            if (restored != null) {
+                ShopRefreshPacket.sendTo(player);
+                player.sendSystemMessage(Component.literal("§b[山海商店] §a已撤销删除 §f" + restored.goodsDisplayName()));
+            } else {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 没有可撤销的删除（已超时或已撤销过）"));
+            }
+            return;
+        }
+
         ShopEntry entry = resolve(pkt);
         if (entry == null) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 商品不存在"));
@@ -126,10 +141,19 @@ public class ShopActionPacket {
 
     private static void doBuy(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, int chosenRewardIndex) {
         boolean cheat = com.dishanhai.gt_shanhai.common.shop.ShopCheatMode.isEnabled(player.getUUID());
+        if (entry.hasMissingItems()) {
+            // 商品/成本引用的物品当前注册表里查不到（对应模组缺失/被卸载）：客户端按钮已经拦了，这里是兜底，
+            // 消息要说清楚原因，别落到下面的"余额不足"分支误导玩家去充值。
+            player.sendSystemMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买"));
+            return;
+        }
         if (!cheat && entry.isLimited() && entry.getRemainingUses() <= 0L) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品限购次数已用完"));
             return;
         }
+        // 交易前的剩余限购次数：若本次成交后限购归零且未买够 times，说明是"次数用尽"而非"余额不足"，
+        // 消息要用这个数区分，见下方 limitExhausted 分支。
+        long remainingBeforeUses = entry.isLimited() ? entry.getRemainingUses() : -1L;
         ShopPurchase.BulkBuyResult r;
         switch (entry.getRewardMode()) {
             case CHOICE -> {
@@ -146,8 +170,22 @@ public class ShopActionPacket {
                                       : ShopPurchase.buyBulkRandom(player, entry, times, aeMode);
             case ALL -> r = cheat ? ShopPurchase.giveBulkAll(player, entry, times, aeMode)
                                    : ShopPurchase.buyBulkAll(player, entry, times, aeMode);
-            case FTBQ -> r = cheat ? ShopPurchase.giveBulkFtbq(player, entry, times, aeMode)
-                                    : ShopPurchase.buyBulkFtbq(player, entry, times, aeMode);
+            case FTBQ -> {
+                // FTBQ 表也支持自选/随机/全部三种子模式（见 ShopEntry#getFtbqSubMode），语义对齐本地奖励池，
+                // 只是奖励来源换成表内容；自选沿用同一个 chosenRewardIndex 字段，服务端按表内「仅物品类奖励」
+                // 子序列的下标重新解出实际物品（见 ShopPurchase#resolveFtbqItemRewardByIndex）。
+                r = switch (entry.getFtbqSubMode()) {
+                    case CHOICE -> cheat
+                            ? ShopPurchase.giveBulkFtbqChoice(player, entry, times, aeMode, chosenRewardIndex)
+                            : ShopPurchase.buyBulkFtbqChoice(player, entry, times, aeMode, chosenRewardIndex);
+                    case ALL -> cheat
+                            ? ShopPurchase.giveBulkFtbqAll(player, entry, times, aeMode)
+                            : ShopPurchase.buyBulkFtbqAll(player, entry, times, aeMode);
+                    default -> cheat
+                            ? ShopPurchase.giveBulkFtbq(player, entry, times, aeMode)
+                            : ShopPurchase.buyBulkFtbq(player, entry, times, aeMode);
+                };
+            }
             default -> r = cheat ? ShopPurchase.giveBulk(player, entry, times, aeMode)   // 作弊：不扣成本直取
                                   : ShopPurchase.buyBulk(player, entry, times, aeMode);
         }
@@ -157,7 +195,12 @@ public class ShopActionPacket {
                     : "§c[山海商店] 余额不足，先充值"));
             return;
         }
-        if (!cheat) WalletAccountAPI.sync(player); // 直取无扣款，无需同步余额
+        if (!cheat) {
+            // 已购买次数只统计真实付款的购买（作弊直取不算"买"），随账户快照一起推给客户端展示
+            WalletAccountAPI.addPurchaseCount(player.getServer(), player.getUUID(),
+                    WalletAccountAPI.purchaseKey(entry.getGoodsId(), entry.getCategory()), r.done());
+            WalletAccountAPI.sync(player);
+        }
         String viaText = switch (r.via() == null ? "" : r.via()) {
             case "ae" -> " §7→ 已注入 AE 网络";
             case "sda" -> " §7→ 已打包为超级磁盘阵列";
@@ -168,6 +211,8 @@ public class ShopActionPacket {
         // done 恰好等于该顶值——这不是余额不够，是"这一下子买太多了，分批买"，消息不能说成"余额不足"误导玩家。
         boolean rollCapped = entry.getRewardMode() != ShopEntry.RewardMode.NONE
                 && r.done() >= ShopPurchase.rewardRollCap() && times > r.done();
+        // 本次成交把限购额度用完了（而不是余额不够），提示要说"次数用完"而不是"余额不足"，免得误导玩家去充值。
+        boolean limitExhausted = !cheat && entry.isLimited() && entry.getRemainingUses() <= 0L;
         if (cheat) {
             player.sendSystemMessage(Component.literal("§d[山海商店·作弊] §a直接获取 §f" + amt + " §a次 " + entry.goodsDisplayName() + viaText));
         } else if (r.done() == times) {
@@ -175,6 +220,9 @@ public class ShopActionPacket {
         } else if (rollCapped) {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a本次抽取 §f" + amt + " §a次 " + entry.goodsDisplayName()
                     + " §7(单次最多抽 " + ShopPurchase.formatCount(ShopPurchase.rewardRollCap()) + " 次，再买一次继续)" + viaText));
+        } else if (limitExhausted) {
+            player.sendSystemMessage(Component.literal("§b[山海商店] §a达到购买次数 §f" + amt + " §a次后可购买次数不足§7，商品限制次数 §f"
+                    + ShopPurchase.formatCount(remainingBeforeUses) + viaText));
         } else {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a购买 §f" + amt + "§7/§f" + ShopPurchase.formatCount(times) + " §a次后余额不足" + viaText));
         }

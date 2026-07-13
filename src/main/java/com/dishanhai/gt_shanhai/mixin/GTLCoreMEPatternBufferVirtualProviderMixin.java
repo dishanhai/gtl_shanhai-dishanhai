@@ -7,16 +7,13 @@ import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.KeyCounter;
 
-import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumPatternBufferRefundAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase;
 import org.gtlcore.gtlcore.integration.ae2.handler.SlotCacheManager;
@@ -32,8 +29,7 @@ import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import java.lang.reflect.Method;
 
 @Mixin(value = MEPatternBufferPartMachineBase.class, remap = false)
-public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements QuantumPatternBufferRefundAccess,
-        VirtualPatternBufferMachineAccess {
+public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements VirtualPatternBufferMachineAccess {
 
     @Shadow
     protected Object2LongOpenHashMap<AEKey> buffer;
@@ -79,63 +75,6 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Quan
     }
 
     @Override
-    public String gtShanhai$getQuantumRefundId() {
-        Level level = gtShanhai$getLevel();
-        BlockPos pos = gtShanhai$getPos();
-        if (level == null || pos == null) {
-            return "";
-        }
-        return level.dimension().location() + "@" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
-    }
-
-    @Override
-    public boolean gtShanhai$refundQuantumPush(IPatternDetails patternDetails, KeyCounter inputs) {
-        if (patternDetails == null || inputs == null || inputs.isEmpty()) {
-            return false;
-        }
-        Integer slotIndex = getSlotIndexForPattern(patternDetails);
-        if (slotIndex == null || slotIndex < 0 || slotIndex >= getInternalSlotCount()) {
-            return false;
-        }
-        Object slot = gtShanhai$getInternalSlot(slotIndex);
-        if (slot == null) {
-            return false;
-        }
-        Object2LongOpenHashMap<AEItemKey> itemInventory = gtShanhai$getItemInventory(slot);
-        Object2LongOpenHashMap<AEFluidKey> fluidInventory = gtShanhai$getFluidInventory(slot);
-        if (itemInventory == null || fluidInventory == null) {
-            return false;
-        }
-
-        gtShanhai$stripVirtualTargetsFromCatalyst(itemInventory, fluidInventory);
-        VirtualPatternBufferSlotState.stripVirtualTargets(itemInventory);
-        VirtualPatternBufferSlotState.stripVirtualTargets(fluidInventory);
-        boolean didRefund = false;
-        for (Object2LongMap.Entry<AEKey> entry : inputs) {
-            long amount = entry.getLongValue();
-            if (amount <= 0) {
-                continue;
-            }
-            AEKey key = entry.getKey();
-            long refunded = 0;
-            if (key instanceof AEItemKey itemKey) {
-                refunded = gtShanhai$moveToRefundBuffer(itemInventory, itemKey, amount);
-            } else if (key instanceof AEFluidKey fluidKey) {
-                refunded = gtShanhai$moveToRefundBuffer(fluidInventory, fluidKey, amount);
-            }
-            if (refunded > 0) {
-                buffer.addTo(key, refunded);
-                didRefund = true;
-            }
-        }
-        if (didRefund) {
-            gtShanhai$notifySlotChanged(slot);
-            gtShanhai$notifySelfIO();
-        }
-        return didRefund;
-    }
-
-    @Override
     public boolean gtShanhai$stripVirtualTargetsInSlot(int slotIndex) {
         if (slotIndex < 0 || slotIndex >= getInternalSlotCount()) {
             return false;
@@ -148,22 +87,6 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Quan
         gtShanhai$notifySlotChanged(slot);
         gtShanhai$notifySelfIO();
         return true;
-    }
-
-    private <T extends AEKey> long gtShanhai$moveToRefundBuffer(Object2LongOpenHashMap<T> inventory, T key,
-            long requested) {
-        long current = inventory.getLong(key);
-        long refunded = Math.min(current, requested);
-        if (refunded <= 0) {
-            return 0;
-        }
-        long remaining = current - refunded;
-        if (remaining > 0) {
-            inventory.put(key, remaining);
-        } else {
-            inventory.removeLong(key);
-        }
-        return refunded;
     }
 
     @SuppressWarnings("unchecked")
@@ -203,30 +126,6 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Quan
             notify.invoke(trait);
         } catch (ReflectiveOperationException ignored) {
         }
-    }
-
-    private Level gtShanhai$getLevel() {
-        try {
-            Method method = gtShanhai$findMethod(this.getClass(), "getLevel");
-            Object level = method.invoke(this);
-            if (level instanceof Level levelValue) {
-                return levelValue;
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
-        return null;
-    }
-
-    private BlockPos gtShanhai$getPos() {
-        try {
-            Method method = gtShanhai$findMethod(this.getClass(), "getPos");
-            Object pos = method.invoke(this);
-            if (pos instanceof BlockPos blockPos) {
-                return blockPos;
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
-        return null;
     }
 
     private IManagedGridNode gtShanhai$getMainNode() {

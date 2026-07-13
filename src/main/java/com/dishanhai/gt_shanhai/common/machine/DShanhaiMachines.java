@@ -119,6 +119,7 @@ public class DShanhaiMachines {
     public static MachineDefinition ME_STARRAIL_OUTPUT_MATRIX;
     public static MachineDefinition VIRTUAL_ITEM_SUPPLY_MACHINE;
     public static MachineDefinition FTBQ_AE_SUBMITTER;
+    public static MachineDefinition SHOP_TERMINAL;
     public static MultiblockMachineDefinition NEBULA_SIPHON;
     public static MultiblockMachineDefinition TAIXU_SMELTING_FURNACE;
     public static MultiblockMachineDefinition WORLDLINE_CRACKING_HUB;
@@ -945,6 +946,9 @@ public class DShanhaiMachines {
 
         // ========== FTBQ AE 自动提交器 ==========
         FTBQ_AE_SUBMITTER = FtbqAeSubmitterMachine.register();
+
+        // ========== 山海商店终端（独立于提交器给商店供 AE 网络） ==========
+        SHOP_TERMINAL = ShopTerminalMachine.register();
 
         // ========== 逻辑算力仓 ==========
         LOGICAL_COMPUTE_HATCH = MachineBuilder.create(

@@ -86,7 +86,7 @@ public class CurrencyActionPacket {
                 player.sendSystemMessage(got > 0L
                         ? Component.literal("§b[货币中心] §a已从 AE 抽取 §f" + ShopPurchase.formatCount(got) + " §a枚 "
                             + ShopPurchase.coinName(pkt.currency) + " §7入钱包")
-                        : Component.literal("§c[货币中心] AE 抽取失败（无绑定在线提交器 / 网络无此币）"));
+                        : Component.literal("§c[货币中心] AE 抽取失败（无绑定在线 AE 网络 / 网络无此币）"));
             }
             case TO_DIGITAL -> {
                 long gained = ShopPurchase.toDigital(player, pkt.currency, pkt.amount);

@@ -76,11 +76,12 @@ public final class VirtualProviderSoftLocks {
         for (Map.Entry<AEKey, Long> entry : required.entrySet()) {
             long available = 0;
             for (VirtualItemSupplyMachine machine : grid.getMachines(VirtualItemSupplyMachine.class)) {
-                if (machine != null && machine.isOnline()) {
-                    available += machine.countProvidedTarget(entry.getKey());
-                    if (available >= entry.getValue()) {
-                        break;
-                    }
+                if (machine == null) continue;
+                // 只是直接读槽位数据做在场校验，不走 AE 通道传输物品，不该要求 isOnline()（有 channel）——
+                // 供应机没分到 channel 时 isOnline() 会是 false，导致明明放了实物也判定为缺失。
+                available += machine.countProvidedTarget(entry.getKey());
+                if (available >= entry.getValue()) {
+                    break;
                 }
             }
             if (available < entry.getValue()) {

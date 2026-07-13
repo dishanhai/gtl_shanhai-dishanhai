@@ -73,6 +73,19 @@ public final class ShopCost {
         return true;
     }
 
+    /** 币种/物品/流体成分里是否有任意一项已经不在当前注册表（模组缺失）。仅用于展示判断，购买拦截见 {@link #isValid}。 */
+    public boolean hasMissingIngredient() {
+        for (ResourceLocation id : coins.keySet()) {
+            if (!ForgeRegistries.ITEMS.containsKey(id)) return true;
+        }
+        for (ExchangeEntry.Ingredient in : physical) {
+            boolean ok = in.isFluid ? ForgeRegistries.FLUIDS.containsKey(in.id)
+                    : ForgeRegistries.ITEMS.containsKey(in.id);
+            if (!ok) return true;
+        }
+        return false;
+    }
+
     /** 是否含实物成本（物品/流体）。出售仅对纯钱包成本开放。 */
     public boolean hasPhysical() {
         return !physical.isEmpty();

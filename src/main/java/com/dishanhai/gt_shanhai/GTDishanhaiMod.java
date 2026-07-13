@@ -40,6 +40,11 @@ public class GTDishanhaiMod {
     public static final String NAME = "dishanhai";
     public static final Logger LOGGER = LogManager.getLogger(MOD_ID);
 
+    // SDA 启动自动同步的延迟触发 tick（-1 表示未安排）。首次访问 DShanhaiVirtualCellSavedData 会同步
+    // 加载+解析整个存档 NBT（大存档实测 9MB+ 解压后要 3 秒以上），不能直接放在 ServerStartedEvent 里做，
+    // 否则会卡住玩家登录；改成记录目标 tick，交给下面的 ServerTickEvent 延迟触发，登录流程不再等它。
+    private static long sdaAutoSyncTargetTick = -1;
+
     // 活性中子机械方块 (大明科技外壳)
     public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, MOD_ID);
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
@@ -108,6 +113,9 @@ public class GTDishanhaiMod {
 
         var bus = FMLJavaModLoadingContext.get().getModEventBus();
 
+        // 配方库缓存数据包：把 DShanhaiRecipeCache 落盘的 json 常驻注入成数据包，vanilla 原生加载
+        bus.addListener(com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipePackFinder::onAddPackFinders);
+
         BLOCKS.register(bus);
         ITEMS.register(bus);
         com.dishanhai.gt_shanhai.common.block.DShanhaiAE2Blocks.init(bus);
@@ -150,6 +158,10 @@ public class GTDishanhaiMod {
                         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyAllReplaceRules();
                         com.dishanhai.gt_shanhai.common.misc.MekanismFurnaceRecipeStripper.strip(e.getServer());
                     });
+                    // 配方库缓存：山海的配方库.js 源文件/gtlcore配置没变就跳过重导出；
+                    // 变了就把这次 Rhino 真实注册出的配方从 RecipeManager 取出，编码成标准数据包 json 落盘，
+                    // 交给 DShanhaiRecipePackFinder 常驻注入，下次开服直接走 vanilla 原生加载。
+                    com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.exportIfNeeded(e.getServer());
                 });
 
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
@@ -165,9 +177,20 @@ public class GTDishanhaiMod {
                     }
                 });
 
-        // 服务端启动完成后自动同步所有 SDA 到 kubejs/data（彻底消除手动迁移需求）
+        // 服务端启动完成后自动同步所有 SDA 到 kubejs/data（彻底消除手动迁移需求）。
+        // 不在 ServerStartedEvent 里同步做——只记录目标 tick，真正的加载+同步交给下面
+        // 的 ServerTickEvent 延迟 100 tick（约5秒）后执行，避免卡住玩家登录。
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                 (net.minecraftforge.event.server.ServerStartedEvent e) -> {
+                    sdaAutoSyncTargetTick = e.getServer().getTickCount() + 100;
+                });
+
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                (net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
+                    if (e.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+                    if (sdaAutoSyncTargetTick < 0) return;
+                    if (e.getServer().getTickCount() < sdaAutoSyncTargetTick) return;
+                    sdaAutoSyncTargetTick = -1;
                     try {
                         com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData data =
                                 com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(e.getServer());

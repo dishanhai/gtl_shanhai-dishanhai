@@ -99,7 +99,10 @@ public class ExchangeEditScreen extends ScaledScreen {
                 if (fluid != null) dst.fluids.add(FluidStack.create(fluid, Math.max(1L, in.count)));
             } else {
                 var item = ForgeRegistries.ITEMS.getValue(in.id);
-                if (item != null) dst.items.add(new ItemStack(item, (int) Math.max(1L, Math.min(Integer.MAX_VALUE, in.count))));
+                if (item == null) continue;
+                ItemStack st = new ItemStack(item, (int) Math.max(1L, Math.min(Integer.MAX_VALUE, in.count)));
+                if (in.hasNbt()) st.setTag(in.nbt());
+                dst.items.add(st);
             }
         }
     }
@@ -325,7 +328,7 @@ public class ExchangeEditScreen extends ScaledScreen {
         for (ItemStack st : s.items) {
             if (st == null || st.isEmpty()) continue;
             ResourceLocation rid = ForgeRegistries.ITEMS.getKey(st.getItem());
-            if (rid != null) ing.add(new ExchangeEntry.Ingredient(rid, false, Math.max(1, st.getCount())));
+            if (rid != null) ing.add(new ExchangeEntry.Ingredient(rid, false, Math.max(1, st.getCount()), st.getTag()));
         }
         for (FluidStack fs : s.fluids) {
             if (fs == null || fs.isEmpty()) continue;

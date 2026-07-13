@@ -19,16 +19,45 @@ import java.util.List;
  */
 public class ExchangeEntry {
 
-    /** 单项物料：物品或流体 + 每次数量（物品=个数；流体=mB）。 */
+    /**
+     * 单项物料：物品或流体 + 每次数量（物品=个数；流体=mB）+ 可选精确 NBT（仅物品；流体不支持）。
+     * nbt 非空时按 {@link net.minecraft.nbt.CompoundTag#equals} 精确匹配（同「无限盘」这类靠 NBT
+     * 区分实例的物品），nbt 为空则按物品注册表 ID 匹配、忽略 NBT（旧行为，兼容既有配方）。
+     */
     public static final class Ingredient {
         public final ResourceLocation id;
         public final boolean isFluid;
         public final long count;
+        private final net.minecraft.nbt.CompoundTag nbt;
 
         public Ingredient(ResourceLocation id, boolean isFluid, long count) {
+            this(id, isFluid, count, null);
+        }
+
+        public Ingredient(ResourceLocation id, boolean isFluid, long count, net.minecraft.nbt.CompoundTag nbt) {
             this.id = id;
             this.isFluid = isFluid;
             this.count = Math.max(1L, count);
+            this.nbt = (nbt == null || nbt.isEmpty()) ? null : nbt.copy();
+        }
+
+        /** 精确匹配用 NBT（可空）。返回副本。 */
+        public net.minecraft.nbt.CompoundTag nbt() {
+            return nbt == null ? null : nbt.copy();
+        }
+
+        public boolean hasNbt() {
+            return nbt != null;
+        }
+
+        /** 本物料对应的单件 ItemStack（count=1，带上 NBT，若有）；物品不存在/isFluid=true 返回 EMPTY。 */
+        public net.minecraft.world.item.ItemStack makeUnitStack() {
+            if (isFluid || id == null) return net.minecraft.world.item.ItemStack.EMPTY;
+            net.minecraft.world.item.Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(id);
+            if (item == null) return net.minecraft.world.item.ItemStack.EMPTY;
+            net.minecraft.world.item.ItemStack stack = new net.minecraft.world.item.ItemStack(item, 1);
+            if (nbt != null) stack.setTag(nbt.copy());
+            return stack;
         }
     }
 

@@ -214,6 +214,30 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         }
     }
 
+    /**
+     * 覆写继承自 GTLAdd 基类的原生 addEnergyDisplay()：宿主 getMaxVoltage() 同样写死
+     * Long.MAX_VALUE，原生逻辑只会显示永远不变的"最大功率(MAX+16)"假数字。真实经济体系是
+     * com.hepdd.gtmthings 的 WirelessEnergyManager（UUID 记账的 BigInteger 全局电网，
+     * 见 PrimordialOmegaEngineModuleBase.onWorking()），这里直接读同一份电网余额显示。
+     */
+    @Override
+    protected void addEnergyDisplay(List<Component> textList) {
+        UUID uuid = getUuid();
+        if (uuid == null) return;
+        try {
+            Class<?> mgr = Class.forName("com.hepdd.gtmthings.api.misc.WirelessEnergyManager");
+            Object total = mgr.getMethod("getUserEU", UUID.class).invoke(null, uuid);
+            if (total instanceof java.math.BigInteger bigTotal) {
+                textList.add(Component.literal("")
+                        .append(DShanhaiTextUtil.createElectricText("电网能源总量: "))
+                        .append(Component.literal(com.gtladd.gtladditions.utils.CommonUtils.formatBigIntegerFixed(bigTotal) + " EU")
+                                .withStyle(ChatFormatting.AQUA)));
+            }
+        } catch (Exception ignored) {
+            // gtmthings 未加载或反射失败：安静跳过，不显示这行，不影响其余信息
+        }
+    }
+
     @Override
     public void addDisplayText(List<Component> textList) {
         if (isFormed()) {

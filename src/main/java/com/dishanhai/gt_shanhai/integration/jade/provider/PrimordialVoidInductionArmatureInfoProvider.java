@@ -136,8 +136,14 @@ public enum PrimordialVoidInductionArmatureInfoProvider implements IBlockCompone
 
     private static String formatBig(java.math.BigInteger value) {
         if (value == null || value.signum() <= 0) return "0";
-        int digits = value.toString().length();
-        if (digits <= 18) return value.toString();
-        return "1.0E" + (digits - 1);
+        // 绝不对巨大 BigInteger 调用 toString()：高电路号下十进制位数可达千万级，
+        // toString() 是 O(n log n) 起步的高开销转换，Jade 每次悬停刷新都会调一次，直接卡死 tick。
+        // bitLength() 是廉价的位扫描，用它估算十进制位数（bitLength × log10(2)）来判断走哪条分支。
+        int bitLength = value.bitLength();
+        if (bitLength > 63) {
+            long digits = (long) (bitLength * 0.3010299956639812) + 1;
+            return "1.0E" + (digits - 1);
+        }
+        return value.toString();
     }
 }

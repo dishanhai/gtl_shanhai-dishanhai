@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.integration.jade.provider;
 
 import com.dishanhai.gt_shanhai.common.machine.ae.DShanhaiAENetworkMachine;
 import com.dishanhai.gt_shanhai.common.machine.misc.FtbqAeSubmitterMachine;
+import com.dishanhai.gt_shanhai.common.machine.misc.ShopTerminalMachine;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -62,6 +63,10 @@ public enum DShanhaiAENetworkInfoProvider implements IBlockComponentProvider, IS
                 tag.putString("queueDetail", submitter.getJadeQueueDetail());
                 tag.putBoolean("suppressToast", submitter.isJadeSuppressingCompletionToast());
                 tag.putBoolean("claimOnlyQueued", submitter.isJadeClaimingOnlyQueuedRewards());
+            }
+            if (machine instanceof ShopTerminalMachine terminal) {
+                tag.putBoolean("shopTerminal", true);
+                tag.putString("boundPlayer", terminal.getJadeBoundPlayerText());
             }
             data.put("dShanhaiAeNetwork", tag);
         } catch (Exception ignored) {}
@@ -148,6 +153,10 @@ public enum DShanhaiAENetworkInfoProvider implements IBlockComponentProvider, IS
                     ? "§7奖励领取: §a仅队列任务"
                     : "§7奖励领取: §e全部任务")));
             tooltip.add(helper.text(Component.literal("§7目标: §f" + data.getString("queueDetail"))));
+        }
+
+        if (data.getBoolean("shopTerminal")) {
+            tooltip.add(helper.text(Component.literal("§6商店终端 §7绑定玩家: §b" + data.getString("boundPlayer"))));
         }
     }
 

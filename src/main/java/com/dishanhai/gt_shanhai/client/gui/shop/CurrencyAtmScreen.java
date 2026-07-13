@@ -151,6 +151,9 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
         // 底部实时反馈横幅（[货币中心] 系统消息经 ShopChatMirror 镜像至此，聊天框仍保留）
         if (flashText != null && System.currentTimeMillis() < flashUntil) {
+            // drawList/drawDetail 里的物品图标走 GuiGraphics 缓冲渲染层，不强制 flush 会在批次刷新时
+            // "跳"到横幅上层盖住文字，同 ShopScreen 商店横幅一致的成因，见其对应注释。
+            g.flush();
             int flashW = this.font.width(flashText);
             int bannerW = Math.min(panelWidth - 12, flashW + 16);
             int bannerX = left + (panelWidth - bannerW) / 2;

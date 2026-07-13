@@ -16,7 +16,6 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.registries.ForgeRegistries;
 
@@ -72,6 +71,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private static final int MAX_REWARD_OPTIONS = 20;
     private ShopEntry.RewardOption hoverRewardOption; // 悬停奖励池槽位时暂存，renderTooltips 消费
     private String ftbqTableId = ""; // FTBQ 奖励表 ID（十六进制），仅 rewardMode==FTBQ 时有意义
+    private ShopEntry.RewardMode ftbqSubMode = ShopEntry.RewardMode.RANDOM; // FTBQ 表内交付子模式：自选/随机/全部
     private boolean hidden;   // 隐藏商品：不出现在分类网格/枚举里，只能被跳转直达（仿 FTBQ 隐藏任务）
     private String linkKey = ""; // 本条目的跳转目标别名（供其他条目 linkTo 引用），可空
     private String linkTo = "";  // 跳转到：指向某条目 linkKey，可空，非空则详情页显示可点击跳转
@@ -115,12 +115,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.rewardMode = entry.getRewardMode();
             rewardPool.addAll(entry.getRewardPool());
             this.ftbqTableId = entry.getFtbqTableId();
+            this.ftbqSubMode = entry.getFtbqSubMode();
             this.hidden = entry.isHidden();
             this.linkKey = entry.getLinkKey();
             this.linkTo = entry.getLinkTo();
             this.displayName = entry.getDisplayName();
         } else {
-            goodsList.add(new ItemStack(Items.DIAMOND));
+            goodsList.add(ItemStack.EMPTY); // 新增商品不预填默认物品，留空槽等玩家自己选（submit() 已有空商品校验拦截）
             this.count = 1;
             this.category = (defaultCategory == null || defaultCategory.isBlank()) ? ShopEntry.DEFAULT_CATEGORY : defaultCategory;
             this.description = "";
@@ -141,7 +142,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
         }
         for (ExchangeEntry.Ingredient in : cost.items()) {
             var item = ForgeRegistries.ITEMS.getValue(in.id);
-            if (item != null) items.add(new ItemStack(item, (int) Math.max(1L, Math.min(Integer.MAX_VALUE, in.count))));
+            if (item == null) continue;
+            ItemStack st = new ItemStack(item, (int) Math.max(1L, Math.min(Integer.MAX_VALUE, in.count)));
+            if (in.hasNbt()) st.setTag(in.nbt());
+            items.add(st);
         }
         for (ExchangeEntry.Ingredient in : cost.fluids()) {
             Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
@@ -483,6 +487,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
         // 奖励模式（仿 FTBQ 奖励表）：不启用=普通固定商品；自选=购买前选1项；随机=系统随机给1项；全部=一次性全给
         g.drawString(this.font, "§6奖励模式（自选/随机/全部/FTBQ表，非空才生效）", c, rewardModeY() - 10, GOLD, true);
         drawBtn(g, c, rewardModeY(), 56, 14, rewardModeLabel(), mx, my);
+        if (rewardMode == ShopEntry.RewardMode.FTBQ) {
+            // FTBQ 表本身也能像本地奖励池一样走自选/随机/全部三种交付方式，只是奖励来源换成表内容
+            g.drawString(this.font, "§7抽取方式:", c + 64, rewardModeY() + 3, GRAY, true);
+            drawBtn(g, c + 64 + 46, rewardModeY(), 44, 14, ftbqSubModeLabel(), mx, my);
+        }
         drawRewardRow(g, rewardPoolY(), Math.min(MAX_REWARD_OPTIONS, rowMax()), mx, my);
 
         // 隐藏/跳转（仿 FTBQ 隐藏任务）：隐藏商品不进分类网格，只能被别的条目「跳转到」直达
@@ -789,6 +798,23 @@ public class ShopEntryEditScreen extends ScaledScreen {
         };
     }
 
+    /** FTBQ 表交付子模式按钮文案（自选/随机/全部，与本地奖励池三种子模式同名同义）。 */
+    private String ftbqSubModeLabel() {
+        return switch (ftbqSubMode) {
+            case CHOICE -> "§d自选";
+            case ALL -> "§a全部";
+            default -> "§b随机"; // RANDOM 及任何异常值统一显示「随机」（构造器本就会把异常值归一成 RANDOM）
+        };
+    }
+
+    private void cycleFtbqSubMode() {
+        ftbqSubMode = switch (ftbqSubMode) {
+            case CHOICE -> ShopEntry.RewardMode.RANDOM;
+            case RANDOM -> ShopEntry.RewardMode.ALL;
+            default -> ShopEntry.RewardMode.CHOICE;
+        };
+    }
+
     // ===== 交互 =====
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
@@ -830,6 +856,12 @@ public class ShopEntryEditScreen extends ScaledScreen {
         // 奖励模式循环按钮
         if (GuiRenderUtil.isHovering(mx, my, c, rewardModeY(), 56, 14)) {
             cycleRewardMode();
+            return true;
+        }
+        // FTBQ 表交付子模式循环按钮（自选/随机/全部），只在 FTBQ 模式下显示/生效
+        if (rewardMode == ShopEntry.RewardMode.FTBQ
+                && GuiRenderUtil.isHovering(mx, my, c + 64 + 46, rewardModeY(), 44, 14)) {
+            cycleFtbqSubMode();
             return true;
         }
         if (rewardRowClicked(rewardPoolY(), Math.min(MAX_REWARD_OPTIONS, rowMax()), mx, my, btn)) return true;
@@ -1075,7 +1107,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         for (ItemStack st : items) {
             if (st == null || st.isEmpty()) continue;
             ResourceLocation id = ForgeRegistries.ITEMS.getKey(st.getItem());
-            if (id != null) physical.add(new ExchangeEntry.Ingredient(id, false, Math.max(1, st.getCount())));
+            if (id != null) physical.add(new ExchangeEntry.Ingredient(id, false, Math.max(1, st.getCount()), st.getTag()));
         }
         for (FluidStack fs : fluids) {
             if (fs == null || fs.isEmpty()) continue;
@@ -1120,7 +1152,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         ShopEditPacket pkt = new ShopEditPacket(
                 isNew ? ShopEditPacket.Action.ADD : ShopEditPacket.Action.EDIT,
                 goodsForSubmit, cat, desc, cost, oldGoods, oldCategory == null ? "" : oldCategory, oldEntryIndex, limit,
-                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId);
+                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

@@ -465,7 +465,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     /** 获取原始 long 线程值（突破 Integer.MAX_VALUE 限制） */
     public long getRawThreadCount() {
         if (!threadEnabled) return 0;
-        if (hasParallelOverdriver()) return 2147483647L;
+        if (hasParallelOverdriver()) return Long.MAX_VALUE;
         long multiplier = getThreadBoostFromSlot();
         long base = Math.min(threadCount, threadMax);
         long result = base * multiplier;
@@ -758,7 +758,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
                 Component.literal("§e§l线程增强"),
                 Component.literal("§7世线残片 — 倍率叠加至线程数"),
                 Component.literal("§7§6寰宇并行超限器 — 每个配方独立 MAX 并行"),
-                Component.literal("§7§6超限器同时锁定线程 ×2,147,483,647"));
+                Component.literal("§7§6超限器同时锁定线程为 Long.MAX_VALUE"));
         group.addWidget(boostSlotWidget);
 
         group.setBackground(GuiTextures.BACKGROUND_INVERSE);
@@ -815,7 +815,12 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         boolean isCompressed = "gtladditions:compressed_astral_array".equals(astralId);
         boolean isRegular = "gtladditions:astral_array".equals(astralId);
 
-        if (hasCreateMkModule()) {
+        if (hasParallelOverdriver()) {
+            // 超限器直接旁路"解锁物"门槛（getRawThreadCount 已经这么做了），这里的范围提示
+            // 之前没跟上，会显示"[0~0] 未放入解锁物"跟上面已经拉满的线程数自相矛盾。
+            threadInfo = "§7§6寰宇并行超限器 → 线程已解锁至 MAX";
+            displayThreadMax = Long.MAX_VALUE;
+        } else if (hasCreateMkModule()) {
             threadInfo = "§d◇ 创始现实修改模块 → 线程范围 0~4,294,967,294";
             displayThreadMax = 4294967294L;
         } else if (isTimeProto) {

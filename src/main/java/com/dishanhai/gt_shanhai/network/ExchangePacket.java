@@ -1,9 +1,9 @@
 package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
-import com.dishanhai.gt_shanhai.common.machine.misc.FtbqAeSubmitterMachine;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeConfig;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
+import com.dishanhai.gt_shanhai.common.shop.ShopAeNetwork;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 
@@ -100,11 +100,11 @@ public class ExchangePacket {
             if (in.isFluid) {
                 Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
                 if (fluid == null) { player.sendSystemMessage(Component.literal("§c[兑换] 未知流体 " + in.id)); return; }
-                available = FtbqAeSubmitterMachine.availableForPlayer(player, AEFluidKey.of(fluid));
+                available = ShopAeNetwork.availableForPlayer(player, AEFluidKey.of(fluid));
             } else {
                 Item item = ForgeRegistries.ITEMS.getValue(in.id);
                 if (item == null) { player.sendSystemMessage(Component.literal("§c[兑换] 未知物品 " + in.id)); return; }
-                available = ShopPurchase.countItem(player, item);
+                available = ShopPurchase.countItem(player, item, in.nbt());
             }
             doable = Math.min(doable, available / in.count);
             if (doable <= 0L) break;
@@ -121,8 +121,8 @@ public class ExchangePacket {
             if (fluid == null) { player.sendSystemMessage(Component.literal("§c[兑换] 未知流体 " + in.id)); return; }
             BigInteger needBig = BigInteger.valueOf(in.count).multiply(BigInteger.valueOf(doable));
             if (needBig.bitLength() >= 63
-                    || !FtbqAeSubmitterMachine.canInjectForPlayer(player, AEFluidKey.of(fluid), needBig.longValue())) {
-                player.sendSystemMessage(Component.literal("§c[兑换] AE 网络无法接收流体 " + in.id + "（需绑定在线提交器且容量足够）"));
+                    || !ShopAeNetwork.canInjectForPlayer(player, AEFluidKey.of(fluid), needBig.longValue())) {
+                player.sendSystemMessage(Component.literal("§c[兑换] AE 网络无法接收流体 " + in.id + "（需绑定在线 AE 网络且容量足够）"));
                 return;
             }
         }
@@ -135,10 +135,10 @@ public class ExchangePacket {
             long need = in.count * doable; // ≤ available，不溢出
             if (in.isFluid) {
                 Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
-                FtbqAeSubmitterMachine.extractForPlayer(player, AEFluidKey.of(fluid), need);
+                ShopAeNetwork.extractForPlayer(player, AEFluidKey.of(fluid), need);
             } else {
                 Item item = ForgeRegistries.ITEMS.getValue(in.id);
-                ShopPurchase.removeItems(player, item, (int) need);
+                ShopPurchase.removeItems(player, item, (int) need, in.nbt());
             }
         }
 
@@ -150,10 +150,10 @@ public class ExchangePacket {
             BigInteger totalBig = BigInteger.valueOf(in.count).multiply(BigInteger.valueOf(doable));
             if (in.isFluid) {
                 Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
-                FtbqAeSubmitterMachine.injectForPlayer(player, AEFluidKey.of(fluid), totalBig.longValue());
+                ShopAeNetwork.injectForPlayer(player, AEFluidKey.of(fluid), totalBig.longValue());
             } else {
-                Item item = ForgeRegistries.ITEMS.getValue(in.id);
-                if (item != null) ShopPurchase.deliverItems(player, new ItemStack(item), totalBig, aeMode);
+                ItemStack unit = in.makeUnitStack();
+                if (!unit.isEmpty()) ShopPurchase.deliverItems(player, unit, totalBig, aeMode);
             }
         }
 
