@@ -23,8 +23,12 @@ public final class DShanhaiRecipePackFinder {
 
     private DShanhaiRecipePackFinder() {}
 
+    static boolean shouldHandle(PackType packType) {
+        return packType == PackType.SERVER_DATA && DShanhaiRecipeCache.isEnabled();
+    }
+
     public static void onAddPackFinders(AddPackFindersEvent event) {
-        if (event.getPackType() != PackType.SERVER_DATA) return;
+        if (!shouldHandle(event.getPackType())) return;
 
         Path packRoot = DShanhaiRecipeCache.DATA_ROOT.getParent();
         if (!Files.isDirectory(packRoot) || !Files.exists(packRoot.resolve("pack.mcmeta"))) {

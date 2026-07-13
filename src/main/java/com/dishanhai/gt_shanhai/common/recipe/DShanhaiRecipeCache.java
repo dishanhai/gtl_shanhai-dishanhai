@@ -121,6 +121,7 @@ public final class DShanhaiRecipeCache {
 
     /** Called from 山海的配方库.js at the very top of ServerEvents.recipes: cache valid -> return early, skip the whole file. */
     public static boolean isCacheValid() {
+        if (!isEnabled()) return false;
         if (cacheValid == null) {
             cacheValid = computeCacheValid();
         }
@@ -174,7 +175,7 @@ public final class DShanhaiRecipeCache {
 
     /** Hooked to ServerAboutToStartEvent, after KubeJS's ServerEvents.recipes has fully run. */
     public static void exportIfNeeded(MinecraftServer server) {
-        if (server == null) return;
+        if (!isEnabled() || server == null) return;
         if (isCacheValid()) {
             LOG.info("[DShanhaiRecipeCache] cache hit this boot, skip export (山海的配方库.js / 山海的gtceujs优化.js 应该也跳过了注册)");
             return;
