@@ -20,16 +20,18 @@ public final class ClientWalletAccount {
     private static Map<ResourceLocation, BigInteger> currencies = new LinkedHashMap<>();
     private static BigInteger digital = BigInteger.ZERO;
     private static Map<String, Long> purchaseCounts = new LinkedHashMap<>();
+    private static Map<String, Long> periodAnchors = new LinkedHashMap<>();
     private static boolean synced = false;
 
     private ClientWalletAccount() {}
 
     /** 应用服务端全量快照（权威覆盖）。 */
     public static void apply(Map<ResourceLocation, BigInteger> newCurrencies, BigInteger newDigital,
-                              Map<String, Long> newPurchaseCounts) {
+                              Map<String, Long> newPurchaseCounts, Map<String, Long> newPeriodAnchors) {
         currencies = newCurrencies != null ? new LinkedHashMap<>(newCurrencies) : new LinkedHashMap<>();
         digital = newDigital != null ? newDigital : BigInteger.ZERO;
         purchaseCounts = newPurchaseCounts != null ? new LinkedHashMap<>(newPurchaseCounts) : new LinkedHashMap<>();
+        periodAnchors = newPeriodAnchors != null ? new LinkedHashMap<>(newPeriodAnchors) : new LinkedHashMap<>();
         synced = true;
     }
 
@@ -38,6 +40,13 @@ public final class ClientWalletAccount {
         if (key == null) return 0L;
         Long v = purchaseCounts.get(key);
         return v == null ? 0L : v;
+    }
+
+    /** 某商品条目周期限购窗口的开窗锚点 gameTime（见 ShopPeriodLimiter）；从未消费过/窗口未开返回 -1。 */
+    public static long getPeriodAnchor(String key) {
+        if (key == null) return -1L;
+        Long v = periodAnchors.get(key);
+        return v == null ? -1L : v;
     }
 
     public static boolean isSynced() {

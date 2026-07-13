@@ -64,11 +64,13 @@ public final class RecipeTypePatternSearchHelper {
     private static final String[] HANDLER_MACHINE_CANDIDATES =
             {"getMachine", "mo293getMachine", "mo292getMachine", "mo291getMachine"};
 
-    // ===== 虚拟供料"一次性下单"状态 =====
-    // 样板 = 下一次单：放进槽位触发一次抽料，抽到了就标记这单完成，之后不管缓冲区
-    // 被吃空多少次都不再自动补，直到样板被取出（clearOrderFulfilled）才允许下一单。
+    // ===== 虚拟供料"这一单还剩多少预算"状态 =====
+    // 样板 = 下一次单：每个槽位持有一个剩余预算（初始为配置 patternVirtualSupplyBatchParallel），
+    // 每次 top-up 按本轮实际补进去的量扣减预算，预算耗尽才算这一单彻底完成，之后不再自动补，
+    // 直到样板被取出（clearOrderFulfilled）才重置为满预算、开始下一单。
+    // -1 表示尚未初始化（等价于满预算，首次访问时会写入具体值）。
     // 弱引用外层 key（buffer 实例）：方块卸载/破坏后随 GC 自然回收，不需要手动清理。
-    private static final Map<MEPatternBufferPartMachineBase, boolean[]> ORDER_FULFILLED_SLOTS =
+    private static final Map<MEPatternBufferPartMachineBase, long[]> ORDER_REMAINING_BUDGET_SLOTS =
             Collections.synchronizedMap(new WeakHashMap<>());
 
     // ===== 样板推断缓存 =====
@@ -235,7 +237,7 @@ public final class RecipeTypePatternSearchHelper {
             }
             GTRecipe recipe = peekRecipeCached(buffer, slot, stack, level);
             if (recipe == null || !isSelectedOnMachine(machine, recipe.recipeType)) continue;
-            topUpVirtualSupply(buffer, slot, stack);
+            topUpVirtualSupply(buffer, slot, stack, recipe);
             activatePatternRecipe(capabilityMachine, buffer, recipe, slot);
             result.add(recipe);
         }
@@ -290,7 +292,7 @@ public final class RecipeTypePatternSearchHelper {
             }
             GTRecipe recipe = access.gtShanhai$getPatternRecipe(slot);
             if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
-                topUpVirtualSupply(buffer, slot, inventory.getStackInSlot(slot));
+                topUpVirtualSupply(buffer, slot, inventory.getStackInSlot(slot), recipe);
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
             }
@@ -298,39 +300,43 @@ public final class RecipeTypePatternSearchHelper {
     }
 
     /**
-     * 虚拟供料批量预填：GTLCore 原生 InternalSlot 只认"单次 AE 下单送进来多少"，对着无限并行主机
-     * 天然只够跑 1 份。这里换一种更安全的思路：不碰并行估算/扣料逻辑本身，只把
-     * InternalSlot 这个"料仓"从无线 ME 网络按批量真实预填满——预填之后，GTLCore 原生的
-     * IParallelLogic 并行估算和 MEPatternRecipeHandlePart 扣料就是在真实数量上工作，不需要
-     * gt_shanhai 自己重新实现一套并行计算或提交逻辑。
+     * 虚拟供料批量预填：消耗性输入的发配量本身不设上限，按"这一单"的剩余预算（见
+     * {@link #ORDER_REMAINING_BUDGET_SLOTS}）和 AE 网络真实库存尽量给足，不受宿主机器并行上限压缩——
+     * 这样机器并行低时也能一次拿到足够多轮消耗的量，不会执行一次就停。
      * <p>
-     * 只在槽位当前真实库存已耗尽（itemInventory/fluidInventory 皆空）时才补一批，避免每次
-     * lookup 都重复提取、无限增长；先对每个输入做 SIMULATE 探测网络真实可提取量，取瓶颈输入
-     * 换算出的批量上限（不超过配置 patternVirtualSupplyBatchParallel，即"这一单"的目标总量，
-     * 与消费机器自身的并行上限无关——机器并行低时就多跑几轮/几 tick 消耗完这一整批，机器并行
-     * 高时一轮就能吃完，批量本身不因此被压缩），再统一按该批量做真实 MODULATE 提取——避免某个
-     * 输入库存充裕、另一个稀缺时，充裕的那份被无谓提走锁死在缓冲区里。虚拟物品只在这批真实
-     * MODULATE 提取时才被消耗（写入 InternalSlot 供配方扣料），用完即从网络中消失，不会额外
-     * 滞留或被重复计数。
+     * <b>"不消耗"催化剂由扣料层保护，不在这里限制发配数量</b>：GTLCore/AE2 的样板扣料
+     * （{@code InternalSlot.handleItemInternal}/{@code handleFluidInternal}）不识别 GTCEu 的
+     * NotConsumable（{@code Content.chance==0}）标记，会把催化剂当消耗品扣。此问题在扣料层（配方层）
+     * 解决——见 {@link PatternNotConsumableFilter} 与两个
+     * {@code MEPatternBuffer*RecipeTypeFilterMixin}：真扣料阶段把 chance==0 的输入从待扣列表剔除，
+     * 催化剂永不被吞。因此这里对催化剂的处理只需保证"在场"：与消耗性输入同批量（achievable）供给，
+     * 不额外限制发配数量（避免高并行时 simulate 在场校验因催化剂份数不足而匹配失败），只是 InternalSlot
+     * 里已有该催化剂时就不再重复补（扣料层保护它常驻，重复补只会无谓叠加、占用网络库存）；催化剂不参与
+     * 消耗性批量的瓶颈计算（否则虚拟催化剂网络库存有限时会把整批 achievable 归零），也不占用"这一单"预算。
      * <p>
-     * <b>一次性下单</b>：本方法只在这个槽位这一次"放样板"里真正成功提取过一次才算下单完成
-     * （见 {@link #ORDER_FULFILLED_SLOTS}），完成后不再重复触发，即使 InternalSlot 之后被
-     * 正常消费清空——这是刻意行为：批量已经按"这一单"的目标总量一次性给足，不需要也不应该
-     * 再驱动无限期反复重新下单（那样等于给样板装了个停不下来的自动合成循环，不是真实机器的
-     * 正常运转方式）。网络暂时没货时不标记完成，允许下一轮重试，直到真正抽到过一次为止。
+     * <b>补料时机</b>：只在"消耗性输入已全部耗尽"时补一轮（见 {@link #hasConsumableStock}）。不能像
+     * 早先那样"整槽 itemInventory/fluidInventory 皆空才补"——因为催化剂被扣料层保护而常驻，槽位永远
+     * 非空，那样消耗性耗尽后也永远补不上，反而把机器卡死。先对每个消耗性输入 SIMULATE 探测网络真实
+     * 可提取量，取瓶颈换算批量，再统一 MODULATE 提取写入 InternalSlot。
+     * <p>
+     * <b>预算制"这一单"</b>：消耗性批量按剩余预算扣减，预算耗尽才算这一单彻底完成、不再自动补，
+     * 避免像 ERR-20260711-006 那样变成停不下来的自动重下单循环。网络暂时没货或本轮未提取到消耗性
+     * 货物时不扣减预算，允许下一轮重试。样板被取出（见调用点 {@code clearOrderFulfilled}）时预算
+     * 重置，下次放样板算新的一单。
      */
-    private static void topUpVirtualSupply(MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack) {
+    private static void topUpVirtualSupply(MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
+            GTRecipe recipe) {
         if (patternStack == null || patternStack.isEmpty()) return;
-        if (isOrderFulfilled(buffer, slot)) return; // 这一单已经下过料，不再自动重下
+        long remainingBudget = getRemainingBudget(buffer, slot);
+        if (remainingBudget <= 0) return; // 这一单预算已耗尽，不再自动补
         Level level = buffer.getLevel();
         if (level == null) return;
 
         // InternalSlot 是 GTLCore 内部类型（编译期不可见，只能整段走反射），下面全部以 Object 传递。
         Object internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
         if (internalSlot == null) return;
-        if (!isEmptyMap(invokeNoArg(internalSlot, "getItemStackInputMap"))
-                || !isEmptyMap(invokeNoArg(internalSlot, "getFluidStackInputMap"))) {
-            return; // 槽位还有真实库存没消费完，本轮不再补
+        if (hasConsumableStock(internalSlot, recipe)) {
+            return; // 消耗性输入还没用完，本轮不补（不消耗的催化剂常驻不算库存）
         }
 
         IGrid grid = buffer.getGrid();
@@ -349,59 +355,133 @@ public final class RecipeTypePatternSearchHelper {
         if (!(actionSourceObj instanceof IActionSource actionSource)) return;
 
         MEStorage storage = grid.getStorageService().getInventory();
-        long achievable = DShanhaiConfig.COMMON.patternVirtualSupplyBatchParallel.get();
-        for (GenericStack in : inputs) {
+        boolean[] notConsumable = new boolean[inputs.length];
+        long achievable = remainingBudget;
+        for (int i = 0; i < inputs.length; i++) {
+            GenericStack in = inputs[i];
             if (in == null || in.amount() <= 0) continue;
+            notConsumable[i] = recipe != null && isNotConsumableInput(recipe, in.what());
+            if (notConsumable[i]) continue; // 不消耗的催化剂不参与消耗性批量的瓶颈计算
             long available = storage.extract(in.what(), Long.MAX_VALUE, Actionable.SIMULATE, actionSource);
             achievable = Math.min(achievable, available / in.amount());
-            if (achievable <= 0) return;
         }
-        if (achievable <= 0) return;
+        if (achievable < 0) achievable = 0;
 
-        boolean extractedAny = false;
-        for (GenericStack in : inputs) {
+        if (achievable <= 0) return;
+        boolean consumableExtracted = false;
+        for (int i = 0; i < inputs.length; i++) {
+            GenericStack in = inputs[i];
             if (in == null || in.amount() <= 0) continue;
+            // 催化剂已在场则不重复补：扣料层保护它常驻，重复补只会无谓叠加、占用网络库存。
+            if (notConsumable[i] && getInternalAmount(internalSlot, in.what()) > 0) continue;
             long want = saturatedMultiply(in.amount(), achievable);
             long extracted = storage.extract(in.what(), want, Actionable.MODULATE, actionSource);
             if (extracted > 0) {
                 invokeAdd(internalSlot, in.what(), extracted);
-                extractedAny = true;
+                if (!notConsumable[i]) consumableExtracted = true;
             }
         }
-        if (extractedAny) {
-            markOrderFulfilled(buffer, slot); // 真正下过料了，这一单到此为止，不再自动重下
+        if (consumableExtracted) {
+            decrementBudget(buffer, slot, achievable); // 这一单预算扣减，耗尽前允许下一轮继续补
         }
     }
 
-    private static boolean isEmptyMap(Object mapObj) {
-        return !(mapObj instanceof Map<?, ?> map) || map.isEmpty();
+    /**
+     * 该 InternalSlot 里是否还有"消耗性"输入库存（排除被扣料层保护而常驻的 NotConsumable 催化剂）。
+     * 直接读 InternalSlot 的 {@code getItemInventory()}/{@code getFluidInventory()}（AEKey→amount，
+     * key 有可靠 equals/hashCode），对每个量 &gt;0 的 key 用 {@link #isNotConsumableInput} 判断，
+     * 只要有一个非催化剂的输入还有量就返回 true。
+     */
+    private static boolean hasConsumableStock(Object internalSlot, GTRecipe recipe) {
+        if (inventoryHasConsumable(invokeNoArg(internalSlot, "getItemInventory"), recipe)) return true;
+        return inventoryHasConsumable(invokeNoArg(internalSlot, "getFluidInventory"), recipe);
     }
 
-    private static boolean isOrderFulfilled(MEPatternBufferPartMachineBase buffer, int slot) {
-        boolean[] flags = ORDER_FULFILLED_SLOTS.get(buffer);
-        return flags != null && slot >= 0 && slot < flags.length && flags[slot];
+    private static boolean inventoryHasConsumable(Object inventoryObj, GTRecipe recipe) {
+        if (!(inventoryObj instanceof it.unimi.dsi.fastutil.objects.Object2LongMap<?> map)) return false;
+        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<?> entry : map.object2LongEntrySet()) {
+            if (entry.getKey() instanceof AEKey key && entry.getLongValue() > 0
+                    && !(recipe != null && isNotConsumableInput(recipe, key))) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    private static void markOrderFulfilled(MEPatternBufferPartMachineBase buffer, int slot) {
-        if (slot < 0) return;
-        synchronized (ORDER_FULFILLED_SLOTS) {
-            boolean[] flags = ORDER_FULFILLED_SLOTS.get(buffer);
-            if (flags == null || slot >= flags.length) {
-                boolean[] grown = new boolean[Math.max(slot + 1, flags == null ? 0 : flags.length)];
-                if (flags != null) {
-                    System.arraycopy(flags, 0, grown, 0, flags.length);
+    /** 读 InternalSlot 里某个 AEKey 当前的库存量（catalyst 常驻判断用），取不到返回 0。 */
+    @SuppressWarnings("unchecked")
+    private static long getInternalAmount(Object internalSlot, AEKey key) {
+        String method = key instanceof appeng.api.stacks.AEItemKey ? "getItemInventory" : "getFluidInventory";
+        Object inventoryObj = invokeNoArg(internalSlot, method);
+        if (inventoryObj instanceof it.unimi.dsi.fastutil.objects.Object2LongMap<?> map) {
+            return ((it.unimi.dsi.fastutil.objects.Object2LongMap<AEKey>) map).getLong(key);
+        }
+        return 0L;
+    }
+
+    /**
+     * 判断某个 AE 样板输入在已匹配的 {@code recipe} 里是否对应 {@code Content.chance==0}（GTCEu
+     * "不消耗"标记）的输入——这类输入只要求"在场"，不该被当作消耗性物料参与批量估算。
+     */
+    private static boolean isNotConsumableInput(GTRecipe recipe, AEKey key) {
+        if (key instanceof appeng.api.stacks.AEItemKey itemKey) {
+            ItemStack stack = itemKey.toStack();
+            for (Content content : recipe.getInputContents(
+                    com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability.CAP)) {
+                if (content.chance != 0) continue;
+                if (content.content instanceof net.minecraft.world.item.crafting.Ingredient ingredient
+                        && ingredient.test(stack)) {
+                    return true;
                 }
-                flags = grown;
-                ORDER_FULFILLED_SLOTS.put(buffer, flags);
             }
-            flags[slot] = true;
+        } else if (key instanceof appeng.api.stacks.AEFluidKey fluidKey) {
+            net.minecraft.world.level.material.Fluid fluid = fluidKey.getFluid();
+            for (Content content : recipe.getInputContents(
+                    com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability.CAP)) {
+                if (content.chance != 0) continue;
+                if (content.content instanceof com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient fi
+                        && fi.values != null) {
+                    for (com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient.Value value : fi.values) {
+                        if (value.getFluids().contains(fluid)) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static long getRemainingBudget(MEPatternBufferPartMachineBase buffer, int slot) {
+        long[] budgets = ORDER_REMAINING_BUDGET_SLOTS.get(buffer);
+        if (budgets == null || slot < 0 || slot >= budgets.length || budgets[slot] == -1L) {
+            return DShanhaiConfig.COMMON.patternVirtualSupplyBatchParallel.get(); // 尚未初始化，等价满预算
+        }
+        return budgets[slot];
+    }
+
+    private static void decrementBudget(MEPatternBufferPartMachineBase buffer, int slot, long amount) {
+        if (slot < 0 || amount <= 0) return;
+        synchronized (ORDER_REMAINING_BUDGET_SLOTS) {
+            long[] budgets = ORDER_REMAINING_BUDGET_SLOTS.get(buffer);
+            if (budgets == null || slot >= budgets.length) {
+                long[] grown = new long[Math.max(slot + 1, budgets == null ? 0 : budgets.length)];
+                java.util.Arrays.fill(grown, -1L);
+                if (budgets != null) {
+                    System.arraycopy(budgets, 0, grown, 0, budgets.length);
+                }
+                budgets = grown;
+                ORDER_REMAINING_BUDGET_SLOTS.put(buffer, budgets);
+            }
+            long current = budgets[slot] == -1L
+                    ? DShanhaiConfig.COMMON.patternVirtualSupplyBatchParallel.get()
+                    : budgets[slot];
+            budgets[slot] = Math.max(0L, current - amount);
         }
     }
 
     private static void clearOrderFulfilled(MEPatternBufferPartMachineBase buffer, int slot) {
-        boolean[] flags = ORDER_FULFILLED_SLOTS.get(buffer);
-        if (flags != null && slot >= 0 && slot < flags.length) {
-            flags[slot] = false;
+        long[] budgets = ORDER_REMAINING_BUDGET_SLOTS.get(buffer);
+        if (budgets != null && slot >= 0 && slot < budgets.length) {
+            budgets[slot] = -1L; // 重置为未初始化，下次 top-up 视为满预算的新一单
         }
     }
 

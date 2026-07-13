@@ -133,6 +133,17 @@ public class ShopScreen extends ScaledScreen {
     private boolean linkVisible;
     private ShopEntry linkTarget;
     private int linkX, linkY, linkW, linkH;
+    // GuideME 指南集成：商品清单里有物品登记了指南页就自动出现跳转入口，不需要编辑者手动配置。
+    // guideHitsFor 缓存"上次是给哪个条目查的"，selected 没变就不用每帧重新扫描所有已装指南（见反馈：避免无谓开销）。
+    private ShopEntry guideHitsFor;
+    private java.util.List<com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.GuideHit> guideHits = java.util.List.of();
+    private boolean guideLinkVisible; // 单条命中：直接给一行跳转，样式同上面的「跳转」
+    private com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.GuideHit guideLinkHit;
+    private int guideLinkX, guideLinkY, guideLinkW, guideLinkH;
+    private boolean guideDetailBtnVisible; // 2条以上命中：给「指南详情」按钮，点开大图层列出所有命中（仿描述详情大图层）
+    private int guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH;
+    private boolean guideOverlayOpen;
+    private int guideOverlayScroll;
 
     // ===== 动态面板尺寸（每次 initScaled 重算）=====
     private int left, top, panelWidth, panelHeight;
@@ -484,6 +495,10 @@ public class ShopScreen extends ScaledScreen {
     /** 前景层（盖住所有控件）：描述详情大图层，FTBQ 风格全屏遮罩 + 居中面板 + 自动换行长文本，超出可视高度可滚动。 */
     @Override
     protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
+        if (guideOverlayOpen && selected != null) {
+            renderGuideOverlay(g, mx, my);
+            return;
+        }
         if (!descOverlayOpen || selected == null) return;
         int[] r = descOverlayBounds();
         int ox = r[0], oy = r[1], ow = r[2];
@@ -522,6 +537,68 @@ public class ShopScreen extends ScaledScreen {
         int thumbY = barY + (barH - thumbH) * descOverlayScroll / maxScroll;
         boolean hv = draggingDescOverlayScroll || GuiRenderUtil.isHovering(mx, my, barX, thumbY, DESC_OVERLAY_SCROLLBAR_W, thumbH);
         g.fill(barX, thumbY, barX + DESC_OVERLAY_SCROLLBAR_W, thumbY + thumbH, hv ? CYAN : GOLD);
+    }
+
+    private static final int GUIDE_OVERLAY_ROW_H = 20;
+
+    /** GuideME「指南详情」大图层边界：按命中条数动态算高度（比描述详情矮很多，通常没几条），封顶同描述详情。 */
+    private int[] guideOverlayBounds() {
+        int ow = Math.min(vWidth - 40, 300);
+        int desiredH = 32 + guideHits.size() * GUIDE_OVERLAY_ROW_H;
+        int oh = Math.min(vHeight - 40, Math.max(60, Math.min(desiredH, 260)));
+        int ox = (vWidth - ow) / 2;
+        int oy = (vHeight - oh) / 2;
+        return new int[]{ox, oy, ow, oh};
+    }
+
+    private int guideOverlayCloseX(int[] r) { return r[0] + r[2] - DESC_OVERLAY_CLOSE_W - 4; }
+    private int guideOverlayCloseY(int[] r) { return r[1] + 4; }
+
+    private int guideOverlayVisibleRows(int[] r) {
+        return Math.max(1, (r[3] - 28) / GUIDE_OVERLAY_ROW_H);
+    }
+
+    private int guideOverlayMaxScroll(int[] r) {
+        return Math.max(0, guideHits.size() - guideOverlayVisibleRows(r));
+    }
+
+    /**
+     * GuideME「指南详情」大图层：一套多物品的商品若有 2 项以上各自登记了指南页（可能是同一份指南的不同页），
+     * 展开列出每一项，图标+物品名一行，点击直接打开该页并关闭图层（仿描述详情大图层的全屏遮罩+居中面板风格，
+     * 但内容是可点击的跳转行列表而非纯文本，所以不需要描述详情那套换行/拖拽滚动条，滚轮翻页即可）。
+     */
+    private void renderGuideOverlay(GuiGraphics g, int mx, int my) {
+        int[] r = guideOverlayBounds();
+        int ox = r[0], oy = r[1], ow = r[2];
+
+        g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
+        renderBox(g, ox, oy, ow, r[3], GOLD_DARK, PANEL_BG);
+
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font,
+                "§d" + selected.goodsDisplayName() + " §7— 指南详情", ow - DESC_OVERLAY_CLOSE_W - 20),
+                ox + 8, oy + 8, GOLD, true);
+        int closeX = guideOverlayCloseX(r), closeY = guideOverlayCloseY(r);
+        drawButton(g, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H, "§cX", mx, my);
+
+        int visible = guideOverlayVisibleRows(r);
+        int maxScroll = guideOverlayMaxScroll(r);
+        guideOverlayScroll = Math.max(0, Math.min(maxScroll, guideOverlayScroll));
+        int rowY0 = oy + 22;
+        for (int i = 0; i < visible; i++) {
+            int idx = guideOverlayScroll + i;
+            if (idx >= guideHits.size()) break;
+            com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.GuideHit hit = guideHits.get(idx);
+            int ry = rowY0 + i * GUIDE_OVERLAY_ROW_H;
+            boolean hover = GuiRenderUtil.isHovering(mx, my, ox + 6, ry, ow - 12, GUIDE_OVERLAY_ROW_H);
+            if (hover) g.fill(ox + 6, ry, ox + ow - 6, ry + GUIDE_OVERLAY_ROW_H, BUTTON_HOVER);
+            g.renderItem(hit.item(), ox + 8, ry + 2);
+            String name = GuiRenderUtil.trimText(this.font, hit.item().getHoverName().getString(), ow - 36);
+            g.drawString(this.font, (hover ? "§b§n" : "§9§n") + name, ox + 28, ry + 6, hover ? CYAN : GOLD, true);
+        }
+        if (maxScroll > 0) {
+            g.drawString(this.font, "§8滚轮翻页 " + (guideOverlayScroll + 1) + "-" + Math.min(guideHits.size(), guideOverlayScroll + visible)
+                    + "/" + guideHits.size(), ox + 8, oy + r[3] - 10, GRAY, false);
+        }
     }
 
     /** 描述详情大图层滚动条点击/拖拽起手：命中整条轨道即可（不用精确点在把手上），随即按该点位置跳转。 */
@@ -894,8 +971,8 @@ public class ShopScreen extends ScaledScreen {
 
         // 数量标签 + AE 风格步进按钮（文本框 amountBox 由 initScaled 定位、super.render 绘制）
         g.drawString(this.font, (mode == Mode.BUY ? "§7购买次数（可输入）:" : "§7出售次数（可输入）:"), cx, dy + 56, WHITE, true);
-        // 两排步进：+1 +10 +100 +1000 / -1 -10 -100 -1000
-        int stepY1 = dy + 82, stepY2 = dy + 96;
+        // 三排步进：+1 +10 +100 +1000 / -1 -10 -100 -1000 / ×10 ×100 ÷10 ÷100
+        int stepY1 = dy + 82, stepY2 = dy + 96, stepY3 = dy + 110;
         long[] steps = {1, 10, 100, 1000};
         int bw = (DETAIL_W - 16 - 9) / 4; // 4 按钮 + 3 间隙
         for (int i = 0; i < 4; i++) {
@@ -903,15 +980,20 @@ public class ShopScreen extends ScaledScreen {
             drawButton(g, bx, stepY1, bw, 12, "§a+" + compactStep(steps[i]), mx, my);
             drawButton(g, bx, stepY2, bw, 12, "§c-" + compactStep(steps[i]), mx, my);
         }
+        String[] scaleLabels = {"§b×10", "§b×100", "§6÷10", "§6÷100"};
+        for (int i = 0; i < 4; i++) {
+            int bx = cx + i * (bw + 3);
+            drawButton(g, bx, stepY3, bw, 12, scaleLabels[i], mx, my);
+        }
 
         // 预计（BigInteger 防溢出，紧凑显示）；成本多元 → 显示整条成本 ×次数
         java.math.BigInteger amt = java.math.BigInteger.valueOf(amount);
         java.math.BigInteger total = java.math.BigInteger.valueOf(selected.getGoodsCount()).multiply(amt);
         ShopCost dcost = selected.getCost();
-        int py = dy + 114;
+        int py = dy + 128;
         int costTrimW = dx + DETAIL_W - 6 - cx;
-        long bought = ClientWalletAccount.getPurchaseCount(
-                WalletAccountAPI.purchaseKey(selected.getGoodsId(), selected.getCategory()));
+        String key = WalletAccountAPI.purchaseKey(selected.getGoodsId(), selected.getCategory());
+        long bought = ClientWalletAccount.getPurchaseCount(key);
         String txLine = "§7交易次数: §f" + formatBig(amt) + "  §7已购买: §6" + formatBig(java.math.BigInteger.valueOf(bought));
         String tradeModeTip = switch (selected.getTradeMode()) {
             case BUY_ONLY -> "  §b[仅购买]";
@@ -919,8 +1001,26 @@ public class ShopScreen extends ScaledScreen {
             default -> "";
         };
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, txLine + tradeModeTip, costTrimW), cx, py, WHITE, true);
+        // 周期限购占两行：配置一行 + 倒计时一行。倒计时读的是服务端同步下来的「开窗锚点」（见 ShopPeriodLimiter），
+        // 锚点=-1（从没消费过/上一窗口已过期）就是"限额充足无需刷新"，不瞎算无意义的假倒计时。
+        int contentY = py;
+        if (selected.isPeriodLimited()) {
+            long periodTicks = selected.getPeriodTicks();
+            String periodCfgLine = "§d周期限购: §f" + (periodTicks / 20L) + "秒限" + formatBig(java.math.BigInteger.valueOf(selected.getPeriodLimit())) + "次";
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, periodCfgLine, costTrimW), cx, py + 12, WHITE, true);
+            long anchor = ClientWalletAccount.getPeriodAnchor(key);
+            net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
+            long gameTime = lvl != null ? lvl.getGameTime() : 0L;
+            long remainingTicks = anchor >= 0L ? anchor + periodTicks - gameTime : -1L;
+            if (remainingTicks > 0L) {
+                g.drawString(this.font, "§7剩余刷新: §f" + (remainingTicks / 20L) + "秒", cx, py + 24, WHITE, true);
+            } else {
+                g.drawString(this.font, "§a限额充足无需刷新", cx, py + 24, GREEN, true);
+            }
+            contentY = py + 24;
+        }
         if (mode == Mode.BUY) {
-            g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, py + 12, CYAN, true);
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, contentY + 12, CYAN, true);
             ShopEntry.RewardMode rm = selected.getRewardMode();
             String getLine = switch (rm) {
                 case CHOICE -> "§7预计获得: §d自选奖励 §7（购买前先选 1 项）";
@@ -935,37 +1035,63 @@ public class ShopScreen extends ScaledScreen {
                         ? "§7预计获得: " + goodsInlineTimes(selected.getGoodsList(), amount)
                         : "§7预计获得: §e" + formatBig(total) + " §7个";
             };
-            g.drawString(this.font, GuiRenderUtil.trimText(this.font, getLine, costTrimW), cx, py + 24, GREEN, true);
-            if (dcost.hasPhysical()) g.drawString(this.font, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, py + 36, GRAY, true);
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, getLine, costTrimW), cx, contentY + 24, GREEN, true);
+            if (dcost.hasPhysical()) g.drawString(this.font, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, contentY + 36, GRAY, true);
         } else if (selected.hasMultipleGoods()) {
-            g.drawString(this.font, "§c组合商品，不支持出售", cx, py + 12, DEEP_RED, true);
+            g.drawString(this.font, "§c组合商品，不支持出售", cx, contentY + 12, DEEP_RED, true);
         } else {
-            g.drawString(this.font, "§7预计消耗: §e" + formatBig(total) + " §7个商品", cx, py + 12, CYAN, true);
+            g.drawString(this.font, "§7预计消耗: §e" + formatBig(total) + " §7个商品", cx, contentY + 12, CYAN, true);
             if (dcost.hasPhysical()) {
-                g.drawString(this.font, "§c含实物成本，不支持出售", cx, py + 24, DEEP_RED, true);
+                g.drawString(this.font, "§c含实物成本，不支持出售", cx, contentY + 24, DEEP_RED, true);
             } else {
-                g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计获得: " + costInlineTimes(dcost, amount), costTrimW), cx, py + 24, GREEN, true);
+                g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计获得: " + costInlineTimes(dcost, amount), costTrimW), cx, contentY + 24, GREEN, true);
             }
             int held = ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem());
-            g.drawString(this.font, "§7背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, py + 36, held > 0 ? GREEN : DEEP_RED, true);
+            g.drawString(this.font, "§7背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, contentY + 36, held > 0 ? GREEN : DEEP_RED, true);
         }
 
         // 确认按钮（KE 风格 border+fill，颜色随可交易性）
         int btnY = dy + dh - 24;
+        // GuideME 集成：查一次商品清单是否有指南页命中，selected 没变就不重复扫描所有已装指南
+        if (guideHitsFor != selected) {
+            guideHitsFor = selected;
+            guideHits = com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.findGuideHits(selected.getGoodsList());
+        }
+        int guideRowH = guideHits.isEmpty() ? 0 : 12;
         // 跳转入口（仿 FTBQ 隐藏任务）：条目配了 linkTo 且能解析到目标商品才显示，占一行固定空间
         linkVisible = false;
         linkTarget = selected.hasLinkTarget() ? ShopConfig.findByLinkKey(selected.getLinkTo()) : null;
         int linkRowH = linkTarget != null ? 12 : 0;
-        int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH; // 底部按钮上沿（编辑权多两排按钮，跳转行再让一行）
+        int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH - guideRowH; // 底部按钮上沿（编辑权多两排按钮，跳转/指南各让一行）
 
-        // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区
-        int cursorY = drawCostPreview(g, cx, py + 50, selected.getCost(), DETAIL_W - 16, lowerBottom, mx, my);
+        // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区。
+        // 起点须跟着 contentY 走（原来硬编码 py+50，周期限购把上面内容顶下去后两者间距只剩 2px，字重叠成一坨，见反馈）
+        int cursorY = drawCostPreview(g, cx, contentY + 50, selected.getCost(), DETAIL_W - 16, lowerBottom, mx, my);
 
         if (linkTarget != null) {
             linkVisible = true;
             linkX = cx; linkY = lowerBottom + 2; linkW = DETAIL_W - 16; linkH = 10;
             boolean linkHover = GuiRenderUtil.isHovering(mx, my, linkX, linkY, linkW, linkH);
             g.drawString(this.font, (linkHover ? "§b§n" : "§9§n") + "→ 跳转: " + linkTarget.goodsDisplayName(), linkX, linkY, linkHover ? CYAN : GOLD, true);
+        }
+
+        // GuideME 跳转入口：1 条命中直接给跳转行（同「跳转」样式），2 条以上给「指南详情」按钮开大图层列出全部
+        guideLinkVisible = false;
+        guideDetailBtnVisible = false;
+        if (guideHits.size() == 1) {
+            com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.GuideHit hit = guideHits.get(0);
+            guideLinkVisible = true;
+            guideLinkHit = hit;
+            guideLinkX = cx; guideLinkY = lowerBottom + 2 + linkRowH; guideLinkW = DETAIL_W - 16; guideLinkH = 10;
+            boolean guideHover = GuiRenderUtil.isHovering(mx, my, guideLinkX, guideLinkY, guideLinkW, guideLinkH);
+            String guideLabel = "→ 指南: " + hit.item().getHoverName().getString();
+            g.drawString(this.font, (guideHover ? "§b§n" : "§9§n") + GuiRenderUtil.trimText(this.font, guideLabel, guideLinkW),
+                    guideLinkX, guideLinkY, guideHover ? CYAN : GOLD, true);
+        } else if (guideHits.size() > 1) {
+            guideDetailBtnVisible = true;
+            guideDetailBtnX = cx; guideDetailBtnY = lowerBottom + 2 + linkRowH; guideDetailBtnW = DETAIL_W - 16; guideDetailBtnH = 10;
+            drawButton(g, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH,
+                    "§d指南详情(" + guideHits.size() + ")", mx, my);
         }
 
         // 描述（玩家自定义，自动换行；接在预览下方）
@@ -1025,6 +1151,28 @@ public class ShopScreen extends ScaledScreen {
                 return true;
             }
             if (descOverlayScrollbarClicked(mx, my, r)) return true;
+            return true;
+        }
+        // GuideME「指南详情」大图层打开时同样拦截全部点击：点某一行直接打开该指南并关闭图层，
+        // 点关闭按钮或图层外关闭图层，其余点击原地吞掉
+        if (guideOverlayOpen) {
+            int[] r = guideOverlayBounds();
+            if (!hit(mx, my, r[0], r[1], r[2], r[3]) || hit(mx, my, guideOverlayCloseX(r), guideOverlayCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                guideOverlayOpen = false;
+                return true;
+            }
+            int visible = guideOverlayVisibleRows(r);
+            int rowY0 = r[1] + 22;
+            for (int i = 0; i < visible; i++) {
+                int idx = guideOverlayScroll + i;
+                if (idx >= guideHits.size()) break;
+                int ry = rowY0 + i * GUIDE_OVERLAY_ROW_H;
+                if (hit(mx, my, r[0] + 6, ry, r[2] - 12, GUIDE_OVERLAY_ROW_H)) {
+                    com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.open(Minecraft.getInstance().player, guideHits.get(idx));
+                    guideOverlayOpen = false;
+                    return true;
+                }
+            }
             return true;
         }
         // 撤销删除按钮（悬浮在面板上，优先于其他点击判定）
@@ -1145,6 +1293,16 @@ public class ShopScreen extends ScaledScreen {
             selected = linkTarget;
             return true;
         }
+        // GuideME 指南跳转（单条命中直接开指南；多条命中开「指南详情」大图层）
+        if (guideLinkVisible && guideLinkHit != null && hit(mx, my, guideLinkX, guideLinkY, guideLinkW, guideLinkH)) {
+            com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.open(Minecraft.getInstance().player, guideLinkHit);
+            return true;
+        }
+        if (guideDetailBtnVisible && hit(mx, my, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH)) {
+            guideOverlayOpen = true;
+            guideOverlayScroll = 0;
+            return true;
+        }
         // 展开描述详情（drawDetail 渲染时暂存的按钮坐标，命中即开大图层）
         if (descExpandVisible && hit(mx, my, descExpandX, descExpandY, descExpandW, descExpandH)) {
             descOverlayOpen = true;
@@ -1211,13 +1369,19 @@ public class ShopScreen extends ScaledScreen {
                 ShopEntryEditor.openEdit(this, selected);
                 return true;
             }
-            // AE 风格步进按钮（两排 +1/+10/+100/+1000 与 -1/-10/-100/-1000）
+            // AE 风格步进按钮（两排 +1/+10/+100/+1000 与 -1/-10/-100/-1000，第三排 ×10/×100/÷10/÷100）
             long[] steps = {1, 10, 100, 1000};
+            long[] scales = {10, 100, 10, 100};
             int bw = (DETAIL_W - 16 - 9) / 4;
             for (int i = 0; i < 4; i++) {
                 int bx = cx + i * (bw + 3);
                 if (hit(mx, my, bx, dy + 82, bw, 12)) { amount = addClamp(amount, steps[i]); syncAmountBox(); return true; }
                 if (hit(mx, my, bx, dy + 96, bw, 12)) { amount = addClamp(amount, -steps[i]); syncAmountBox(); return true; }
+                if (hit(mx, my, bx, dy + 110, bw, 12)) {
+                    amount = i < 2 ? mulClamp(amount, scales[i]) : divClamp(amount, scales[i]);
+                    syncAmountBox();
+                    return true;
+                }
             }
         }
 
@@ -1230,12 +1394,31 @@ public class ShopScreen extends ScaledScreen {
         return Math.max(1L, a + delta);
     }
 
+    /** 数量乘法夹取到 [1, Long.MAX]，防乘法溢出。 */
+    private static long mulClamp(long a, long factor) {
+        if (factor <= 0) return a;
+        if (a > Long.MAX_VALUE / factor) return Long.MAX_VALUE;
+        return Math.max(1L, a * factor);
+    }
+
+    /** 数量除法夹取到 [1, Long.MAX]（整除向下取整，最小 1）。 */
+    private static long divClamp(long a, long factor) {
+        if (factor <= 0) return a;
+        return Math.max(1L, a / factor);
+    }
+
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
         if (descOverlayOpen) {
             int[] r = descOverlayBounds();
             int maxScroll = descOverlayMaxScroll(r, descOverlayLines(r).size());
             descOverlayScroll = Math.max(0, Math.min(maxScroll, descOverlayScroll - (int) d));
+            return true;
+        }
+        if (guideOverlayOpen) {
+            int[] r = guideOverlayBounds();
+            int maxScroll = guideOverlayMaxScroll(r);
+            guideOverlayScroll = Math.max(0, Math.min(maxScroll, guideOverlayScroll - (int) d));
             return true;
         }
         int gx = listLeft(), gy = contentTop(), gh = contentHeight();
@@ -1582,7 +1765,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
-        if (descOverlayOpen) return; // 大图层盖住详情面板时，底层格子/图标的 tooltip 不该透出来
+        if (descOverlayOpen || guideOverlayOpen) return; // 大图层盖住详情面板时，底层格子/图标的 tooltip 不该透出来
         // 悬停货币栏：显示货币全名 + 精确余额
         ResourceLocation cur = hoveredCurrency(smx, smy);
         if (cur != null) {

@@ -60,11 +60,7 @@ public final class VirtualPatternEncodingHelper {
             return inputs;
         }
 
-        List<GenericStack> rewritten = createVirtualInputs(recipe);
-        if (rewritten.isEmpty()) {
-            return inputs;
-        }
-        return rewritten.toArray(new GenericStack[0]);
+        return rewriteInputsPreservingSelections(inputs, recipe);
     }
 
     public static boolean containsVirtualProviderInput(GenericStack[] inputs) {
@@ -543,6 +539,92 @@ public final class VirtualPatternEncodingHelper {
             }
         }
         return null;
+    }
+
+    private static GenericStack[] rewriteInputsPreservingSelections(GenericStack[] inputs, GTRecipe recipe) {
+        List<GenericStack> original = compactStacks(inputs);
+        if (original.size() != countRecipeInputs(recipe)) return inputs;
+
+        List<GenericStack> rewritten = new ArrayList<>(original);
+        boolean[] used = new boolean[original.size()];
+        if (!rewriteItemInputsPreservingSelections(
+                recipe.getInputContents(ItemRecipeCapability.CAP), original, rewritten, used)) {
+            return inputs;
+        }
+        if (!rewriteFluidInputsPreservingSelections(
+                recipe.getInputContents(FluidRecipeCapability.CAP), original, rewritten, used)) {
+            return inputs;
+        }
+        return rewritten.toArray(new GenericStack[0]);
+    }
+
+    private static boolean rewriteItemInputsPreservingSelections(List<Content> contents,
+            List<GenericStack> original, List<GenericStack> rewritten, boolean[] used) {
+        if (contents == null || contents.isEmpty()) return true;
+        for (Content content : contents) {
+            Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
+            if (ingredient == null || ingredient.isEmpty()) continue;
+            long amount = getItemAmount(content, firstItemStack(content));
+            int matchedIndex = -1;
+            ItemStack selected = ItemStack.EMPTY;
+            for (int i = 0; i < original.size(); i++) {
+                GenericStack input = original.get(i);
+                if (used[i] || input.amount() != amount || !(input.what() instanceof AEItemKey key)) continue;
+                ItemStack stack = key.toStack();
+                if (ingredient.test(stack)) {
+                    matchedIndex = i;
+                    selected = stack;
+                    break;
+                }
+            }
+            if (matchedIndex < 0) return false;
+            used[matchedIndex] = true;
+            if (!isNonConsumable(content)) continue;
+
+            selected.setCount((int) Math.min(Integer.MAX_VALUE, amount));
+            if (VirtualItemProviderHelper.isAutoWrapExcluded(selected)) {
+                rewritten.set(matchedIndex, new GenericStack(AEItemKey.of(selected), amount));
+                continue;
+            }
+            ItemStack provider = VirtualItemProviderHelper.createBoundProvider(selected);
+            if (provider.isEmpty()) return false;
+            rewritten.set(matchedIndex, new GenericStack(AEItemKey.of(provider), 1));
+        }
+        return true;
+    }
+
+    private static boolean rewriteFluidInputsPreservingSelections(List<Content> contents,
+            List<GenericStack> original, List<GenericStack> rewritten, boolean[] used) {
+        if (contents == null || contents.isEmpty()) return true;
+        for (Content content : contents) {
+            FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+            if (ingredient == null || ingredient.isEmpty()) continue;
+            com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
+            if (sample == null) return false;
+            long amount = sample.getAmount();
+            int matchedIndex = -1;
+            AEFluidKey selected = null;
+            for (int i = 0; i < original.size(); i++) {
+                GenericStack input = original.get(i);
+                if (used[i] || input.amount() != amount || !(input.what() instanceof AEFluidKey key)) continue;
+                Fluid fluid = (Fluid) key.getPrimaryKey();
+                CompoundTag tag = key.toTag();
+                com.lowdragmc.lowdraglib.side.fluid.FluidStack stack =
+                        com.lowdragmc.lowdraglib.side.fluid.FluidStack.create(
+                                fluid, amount, tag.contains("tag", 10) ? tag.getCompound("tag") : null);
+                if (ingredient.test(stack)) {
+                    matchedIndex = i;
+                    selected = key;
+                    break;
+                }
+            }
+            if (matchedIndex < 0) return false;
+            used[matchedIndex] = true;
+            if (isNonConsumable(content)) {
+                rewritten.set(matchedIndex, new GenericStack(selected, VIRTUAL_FLUID_MARKER_AMOUNT));
+            }
+        }
+        return true;
     }
 
     private static List<GenericStack> createVirtualInputs(GTRecipe recipe) {

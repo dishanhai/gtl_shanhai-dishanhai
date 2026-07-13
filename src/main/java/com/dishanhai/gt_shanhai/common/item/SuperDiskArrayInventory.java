@@ -212,6 +212,28 @@ public class SuperDiskArrayInventory implements StorageCell {
         return amounts.isEmpty();
     }
 
+    /**
+     * 原子替换父 SDA 中一个嵌套载体的 AEKey。
+     *
+     * <p>嵌套磁盘持久化后 NBT 会变化，必须在同一张数量表内把旧 key 的一个计数迁到新 key。
+     * 这里不能走 extract + insert：非空存储元件会被常规 insert 拒绝，先删后插会直接丢失载体。
+     */
+    public boolean replaceOneStoredKey(AEKey oldKey, AEKey newKey) {
+        if (oldKey == null || newKey == null) return false;
+        BigInteger oldAmount = amounts.get(oldKey);
+        if (oldAmount == null || oldAmount.signum() <= 0) return false;
+        if (oldKey.equals(newKey)) return true;
+
+        if (BigInteger.ONE.equals(oldAmount)) {
+            amounts.remove(oldKey);
+        } else {
+            amounts.put(oldKey, oldAmount.subtract(BigInteger.ONE));
+        }
+        amounts.put(newKey, amounts.getOrDefault(newKey, BigInteger.ZERO).add(BigInteger.ONE));
+        saveChanges();
+        return true;
+    }
+
     @Override
     public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
         if (what == null || amount <= 0 || !(what instanceof AEItemKey)) return 0L;

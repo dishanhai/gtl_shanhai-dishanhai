@@ -38,8 +38,9 @@ public final class ShopConfig {
     private static final String CONFIG_DIR = "config/gt_shanhai";
     private static final File SHOP_FILE = new File(CONFIG_DIR, "shop.json");
 
-    private static final List<ShopEntry> ENTRIES = new ArrayList<>();
-    private static boolean loaded = false;
+    private static volatile ShopCatalogSnapshot snapshot = ShopCatalogSnapshot.empty();
+    private static volatile boolean loaded = false;
+    private static long nextRevision = Math.max(1L, System.currentTimeMillis());
 
     private ShopConfig() {}
 
@@ -48,7 +49,33 @@ public final class ShopConfig {
         if (!loaded) {
             reload();
         }
-        return Collections.unmodifiableList(ENTRIES);
+        return snapshot.entries();
+    }
+
+    /** 当前完整目录快照；结构只会整体替换，不暴露半加载列表。 */
+    public static ShopCatalogSnapshot snapshot() {
+        if (!loaded) reload();
+        return snapshot;
+    }
+
+    /** 当前轻量目录清单，供打开商店与结构刷新包同步。 */
+    public static ShopCatalogManifest manifest() {
+        return snapshot().manifest();
+    }
+
+    /** 按服务端目录版本和条目身份精确解析；版本过期时拒绝猜测。 */
+    public static ShopEntry resolve(long revision, long entryKey) {
+        ShopCatalogSnapshot current = snapshot();
+        return current.revision() != revision ? null : current.resolve(entryKey);
+    }
+
+    public static long keyOf(ShopEntry entry) {
+        return snapshot().keyOf(entry);
+    }
+
+    public static List<ShopCatalogEntryPayload> chunk(long revision, int chunkId) {
+        ShopCatalogSnapshot current = snapshot();
+        return current.revision() != revision ? List.of() : current.chunk(chunkId);
     }
 
     /** 获取所有被商店接受的币种 ID 集合（= 各商品成本里出现过的 coins 键，去重、保序）。 */
@@ -73,11 +100,7 @@ public final class ShopConfig {
 
     /** 按跳转别名查找条目（含隐藏商品，供「跳转」入口解析目标用；未找到返回 null）。 */
     public static ShopEntry findByLinkKey(String key) {
-        if (key == null || key.isBlank()) return null;
-        for (ShopEntry e : getEntries()) {
-            if (key.equals(e.getLinkKey())) return e;
-        }
-        return null;
+        return snapshot().findByLinkKey(key);
     }
 
     // ==================== 两级分类：主/子（约定 category = "主" 或 "主/子"）====================
@@ -98,24 +121,12 @@ public final class ShopConfig {
 
     /** 所有主分类（去重保序；隐藏商品不计入）。 */
     public static List<String> getTopCategories() {
-        LinkedHashSet<String> set = new LinkedHashSet<>();
-        for (ShopEntry e : getEntries()) {
-            if (e.isStructurallyValid() && !e.isHidden()) set.add(catTop(e.getCategory()));
-        }
-        return new ArrayList<>(set);
+        return snapshot().topCategories();
     }
 
     /** 某主分类下的子分类（去重保序，仅非空子名；隐藏商品不计入）。 */
     public static List<String> getSubCategories(String top) {
-        LinkedHashSet<String> set = new LinkedHashSet<>();
-        for (ShopEntry e : getEntries()) {
-            if (!e.isStructurallyValid() || e.isHidden()) continue;
-            if (catTop(e.getCategory()).equals(top)) {
-                String sub = catSub(e.getCategory());
-                if (!sub.isEmpty()) set.add(sub);
-            }
-        }
-        return new ArrayList<>(set);
+        return snapshot().subCategories(top);
     }
 
     /**
@@ -123,14 +134,7 @@ public final class ShopConfig {
      * 隐藏商品（{@link ShopEntry#isHidden}）不在此列，只能被其他条目的跳转入口（{@link ShopEntry#getLinkTo}）直达。
      */
     public static List<ShopEntry> getEntriesOfGroup(String top, String sub) {
-        List<ShopEntry> result = new ArrayList<>();
-        for (ShopEntry e : getEntries()) {
-            if (!e.isStructurallyValid() || e.isHidden()) continue;
-            if (!catTop(e.getCategory()).equals(top)) continue;
-            if (sub != null && !sub.isEmpty() && !catSub(e.getCategory()).equals(sub)) continue;
-            result.add(e);
-        }
-        return result;
+        return snapshot().entriesOfGroup(top, sub);
     }
 
     /** 按分类分组的有效商品（保序；隐藏商品不计入）。 */
@@ -159,8 +163,9 @@ public final class ShopConfig {
     /** 新增一个商品条目并写回 shop.json。 */
     public static synchronized void addEntry(ShopEntry entry) {
         if (entry == null) return;
-        getEntries(); // 确保已加载
-        ENTRIES.add(entry);
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        updated.add(entry);
+        publish(updated);
         save();
     }
 
@@ -173,13 +178,14 @@ public final class ShopConfig {
     /** 删除一个商品条目（按对象引用）并写回 shop.json；返回是否删除成功。 */
     public static synchronized boolean removeEntry(ShopEntry entry) {
         if (entry == null) return false;
-        getEntries();
-        int idx = ENTRIES.indexOf(entry);
-        boolean removed = ENTRIES.remove(entry);
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int idx = updated.indexOf(entry);
+        boolean removed = updated.remove(entry);
         if (removed) {
             lastRemovedEntry = entry;
             lastRemovedIndex = idx;
             lastRemovedAtMs = System.currentTimeMillis();
+            publish(updated);
             save();
         }
         return removed;
@@ -192,10 +198,11 @@ public final class ShopConfig {
             lastRemovedEntry = null;
             return null;
         }
-        getEntries();
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
         ShopEntry restored = lastRemovedEntry;
-        int idx = Math.max(0, Math.min(lastRemovedIndex, ENTRIES.size()));
-        ENTRIES.add(idx, restored);
+        int idx = Math.max(0, Math.min(lastRemovedIndex, updated.size()));
+        updated.add(idx, restored);
+        publish(updated);
         save();
         lastRemovedEntry = null;
         lastRemovedIndex = -1;
@@ -205,12 +212,19 @@ public final class ShopConfig {
     /** 用新条目替换旧条目并写回；返回是否替换成功。 */
     public static synchronized boolean replaceEntry(ShopEntry oldEntry, ShopEntry newEntry) {
         if (oldEntry == null || newEntry == null) return false;
-        getEntries();
-        int idx = ENTRIES.indexOf(oldEntry);
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int idx = updated.indexOf(oldEntry);
         if (idx < 0) return false;
-        ENTRIES.set(idx, newEntry);
+        updated.set(idx, newEntry);
+        publish(updated);
         save();
         return true;
+    }
+
+    private static void publish(List<ShopEntry> entries) {
+        ShopCatalogSnapshot built = ShopCatalogSnapshot.build(nextRevision++, entries);
+        snapshot = built;
+        loaded = true;
     }
 
     private static final com.google.gson.Gson GSON =
@@ -222,71 +236,26 @@ public final class ShopConfig {
             new File(CONFIG_DIR).mkdirs();
             JsonObject root = new JsonObject();
             JsonArray arr = new JsonArray();
-            for (ShopEntry e : ENTRIES) {
-                JsonObject o = new JsonObject();
-                o.addProperty("goods", e.getGoodsId().toString());
-                o.addProperty("count", e.getGoodsCount());
-                o.addProperty("category", e.getCategory());
-                if (e.getDescription() != null && !e.getDescription().isEmpty()) {
-                    o.addProperty("description", e.getDescription());
-                }
-                if (e.isLimited()) {
-                    o.addProperty("limit", e.getRemainingUses()); // 剩余次数，随成交实时扣减后一并存盘
-                }
-                o.add("cost", costToJson(e.getCost()));
-                net.minecraft.nbt.CompoundTag nbt = e.getGoodsNbt();
-                if (nbt != null && !nbt.isEmpty()) {
-                    o.addProperty("nbt", nbt.toString()); // SNBT 文本，Gson 负责转义
-                }
-                if (e.hasMultipleGoods()) {
-                    // 组合商品（≥2 项）：goods/count/nbt 仍写首项兜底，goodsList 存完整清单，新代码优先读它
-                    o.add("goodsList", goodsListToJson(e.getGoodsList()));
-                }
-                if (e.hasCustomIcons()) {
-                    o.add("icons", iconsToJson(e.getDisplayIcons()));
-                }
-                if (e.getRewardMode() != ShopEntry.RewardMode.NONE) {
-                    o.addProperty("rewardMode", e.getRewardMode().name());
-                    if (e.getRewardMode() == ShopEntry.RewardMode.FTBQ) {
-                        o.addProperty("ftbqTableId", e.getFtbqTableId());
-                        o.addProperty("ftbqSubMode", e.getFtbqSubMode().name());
-                    } else {
-                        o.add("rewardPool", rewardPoolToJson(e.getRewardPool()));
-                    }
-                }
-                if (e.isHidden()) {
-                    o.addProperty("hidden", true);
-                }
-                if (e.hasLinkKey()) {
-                    o.addProperty("linkKey", e.getLinkKey());
-                }
-                if (e.hasLinkTarget()) {
-                    o.addProperty("linkTo", e.getLinkTo());
-                }
-                if (e.hasCustomName()) {
-                    o.addProperty("displayName", e.getDisplayName());
-                }
-                if (e.getTradeMode() != ShopEntry.TradeMode.BOTH) {
-                    o.addProperty("tradeMode", e.getTradeMode().name());
-                }
-                arr.add(o);
+            List<ShopEntry> entries = snapshot().entries();
+            for (ShopEntry e : entries) {
+                arr.add(ShopEntryJsonCodec.toJson(e));
             }
             root.add("entries", arr);
             try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(SHOP_FILE), StandardCharsets.UTF_8)) {
                 w.write(GSON.toJson(root));
             }
-            GTDishanhaiMod.LOGGER.info("[Shop] 已保存 {} 个商品到 shop.json", ENTRIES.size());
+            GTDishanhaiMod.LOGGER.info("[Shop] 已保存 {} 个商品到 shop.json", entries.size());
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 保存 shop.json 失败: {}", e.getMessage());
         }
     }
 
     /** 从磁盘重新加载商品清单；文件缺失时生成默认文件。 */
-    public static synchronized void reload() {        ENTRIES.clear();
-        loaded = true;
+    public static synchronized void reload() {
         if (!SHOP_FILE.exists()) {
             writeDefault();
         }
+        List<ShopEntry> parsedEntries = new ArrayList<>();
         // 必须显式 UTF-8：FileReader 用系统默认编码（Windows 为 GBK），会把 UTF-8 中文读成乱码
         try (java.io.Reader r = new java.io.InputStreamReader(
                 new java.io.FileInputStream(SHOP_FILE), StandardCharsets.UTF_8)) {
@@ -295,13 +264,15 @@ public final class ShopConfig {
             for (JsonElement el : arr) {
                 if (!el.isJsonObject()) continue;
                 JsonObject o = el.getAsJsonObject();
-                ShopEntry entry = parseEntry(o);
+                ShopEntry entry = ShopEntryJsonCodec.fromJson(o);
                 if (entry != null) {
-                    ENTRIES.add(entry);
+                    parsedEntries.add(entry);
                 }
             }
-            GTDishanhaiMod.LOGGER.info("[Shop] 已加载 {} 个商品", ENTRIES.size());
+            publish(parsedEntries);
+            GTDishanhaiMod.LOGGER.info("[Shop] 已加载 {} 个商品", parsedEntries.size());
         } catch (Exception e) {
+            loaded = true; // 保留最后一个完整快照，避免每次读取都重复冲击损坏文件
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop.json 失败: {}", e.getMessage());
         }
     }
@@ -366,8 +337,12 @@ public final class ShopConfig {
                 try { tradeMode = ShopEntry.TradeMode.valueOf(o.get("tradeMode").getAsString()); }
                 catch (Exception ignored) {}
             }
+            // 周期限购（每玩家独立计数，见 ShopPeriodLimiter）：两个字段必须同时存在才生效，缺省 -1/-1 = 不启用
+            long periodTicks = o.has("periodTicks") ? o.get("periodTicks").getAsLong() : -1L;
+            long periodLimit = o.has("periodLimit") ? o.get("periodLimit").getAsLong() : -1L;
             return new ShopEntry(goodsList, category, cost, description, limit,
-                    icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode);
+                    icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode,
+                    periodTicks, periodLimit);
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品条目: {}", e.getMessage());
             return null;

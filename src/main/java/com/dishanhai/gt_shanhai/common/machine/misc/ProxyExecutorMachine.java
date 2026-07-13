@@ -46,6 +46,8 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraftforge.registries.ForgeRegistries;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.MOD_ID;
@@ -71,6 +73,12 @@ public class ProxyExecutorMachine extends SelectableRecipeTypeSetMachine {
 
     @DescSynced
     private String cachedTargetId = "";
+
+    // 结构成型时一次性扫描白名单部件（维护仓/太初分歧引擎），此后每 tick 只读取缓存列表取值，
+    // 不再重新扫描 27 格位置——3x3x3 结构里这些部件的位置在成型期间固定不变，和"原始终焉引擎"
+    // 模块扫描/缓存宿主的思路（onStructureFormed 一次性 scanAndConnectModules）同构。
+    private List<DShanhaiMaintenanceHatchMachine> cachedWhitelistedHatches = Collections.emptyList();
+    private List<DShanhaiDivergenceEngineMachine> cachedWhitelistedEngines = Collections.emptyList();
 
     public ProxyExecutorMachine(IMachineBlockEntity holder, Object... args) {
         super(holder, DShanhaiRecipeTypes.PROXY_EXECUTION, args);
@@ -134,6 +142,45 @@ public class ProxyExecutorMachine extends SelectableRecipeTypeSetMachine {
     }
 
     @Override
+    public void onStructureFormed() {
+        super.onStructureFormed();
+        refreshWhitelistedParts();
+    }
+
+    @Override
+    public void onStructureInvalid() {
+        super.onStructureInvalid();
+        cachedWhitelistedHatches = Collections.emptyList();
+        cachedWhitelistedEngines = Collections.emptyList();
+    }
+
+    private void refreshWhitelistedParts() {
+        List<DShanhaiMaintenanceHatchMachine> hatches = new ArrayList<>();
+        List<DShanhaiDivergenceEngineMachine> engines = new ArrayList<>();
+        if (getLevel() != null) {
+            Direction front = getFrontFacing();
+            Direction back = front.getOpposite();
+            Direction right = front.getClockWise();
+            BlockPos origin = getPos();
+            for (int depth = 0; depth < 3; depth++) {
+                for (int x = -1; x <= 1; x++) {
+                    for (int y = -1; y <= 1; y++) {
+                        BlockPos pos = origin.relative(back, depth).relative(right, x).above(y);
+                        MetaMachine machine = MetaMachine.getMachine(getLevel(), pos);
+                        if (machine instanceof DShanhaiMaintenanceHatchMachine hatch) {
+                            hatches.add(hatch);
+                        } else if (machine instanceof DShanhaiDivergenceEngineMachine engine) {
+                            engines.add(engine);
+                        }
+                    }
+                }
+            }
+        }
+        cachedWhitelistedHatches = hatches;
+        cachedWhitelistedEngines = engines;
+    }
+
+    @Override
     public GTRecipeType[] getAllSelectableRecipeTypes() {
         MachineDefinition target = getTargetDefinition();
         if (target == null || target.getRecipeTypes() == null) {
@@ -159,27 +206,8 @@ public class ProxyExecutorMachine extends SelectableRecipeTypeSetMachine {
                 textList.add(Component.literal("§7共鸣倍率: §f" + getBoostMultiplier() + "x"));
                 textList.add(Component.literal("§d跨配方线程: §f" + formatParallel(getAdditionalThread())));
             }
-            addRecipeDiagnosisDisplay(textList);
         }
         textList.add(Component.translatable("gt_shanhai.machine.proxy_executor.name").withStyle(ChatFormatting.GOLD));
-    }
-
-    /**
-     * 临时排障用：暴露配方查找失败原因/锁定状态/已选类型数量，供在游戏内直接观察卡产原因。
-     * 问题定位后应移除。
-     */
-    private void addRecipeDiagnosisDisplay(List<Component> textList) {
-        var logic = getRecipeLogic();
-        textList.add(Component.literal("§7[诊断] 已选类型: " + getSelectedRecipeTypeCount()
-                + " §7锁定: " + logic.isLock()));
-        var locked = logic.getLockRecipe();
-        if (locked != null) {
-            textList.add(Component.literal("§7[诊断] 锁定配方: " + locked.getId()));
-        }
-        var status = logic.getRecipeStatus();
-        if (status != null && !status.isSuccess() && status.reason() != null) {
-            textList.add(Component.literal("§c[诊断] 上次失败: ").append(status.reason()));
-        }
     }
 
     @Override
@@ -304,31 +332,17 @@ public class ProxyExecutorMachine extends SelectableRecipeTypeSetMachine {
     }
 
     private long getWhitelistedPartParallel() {
-        if (getLevel() == null) {
-            return 1L;
-        }
         long parallel = 0;
-        Direction front = getFrontFacing();
-        Direction back = front.getOpposite();
-        Direction right = front.getClockWise();
-        BlockPos origin = getPos();
-        for (int depth = 0; depth < 3; depth++) {
-            for (int x = -1; x <= 1; x++) {
-                for (int y = -1; y <= 1; y++) {
-                    BlockPos pos = origin.relative(back, depth).relative(right, x).above(y);
-                    MetaMachine machine = MetaMachine.getMachine(getLevel(), pos);
-                    if (machine instanceof DShanhaiMaintenanceHatchMachine hatch) {
-                        long value = hatch.getRawParallel();
-                        if (value > 0) {
-                            parallel = saturatedAdd(parallel, value);
-                        }
-                    } else if (machine instanceof DShanhaiDivergenceEngineMachine hatch) {
-                        int value = hatch.getCurrentParallel();
-                        if (value > 0) {
-                            parallel = saturatedAdd(parallel, value);
-                        }
-                    }
-                }
+        for (DShanhaiMaintenanceHatchMachine hatch : cachedWhitelistedHatches) {
+            long value = hatch.getRawParallel();
+            if (value > 0) {
+                parallel = saturatedAdd(parallel, value);
+            }
+        }
+        for (DShanhaiDivergenceEngineMachine engine : cachedWhitelistedEngines) {
+            int value = engine.getCurrentParallel();
+            if (value > 0) {
+                parallel = saturatedAdd(parallel, value);
             }
         }
         return Math.max(1L, parallel);

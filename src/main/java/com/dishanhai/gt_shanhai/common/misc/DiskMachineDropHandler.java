@@ -40,6 +40,7 @@ public class DiskMachineDropHandler {
     }
 
     private static void dropDiskHatch(Level level, MEDiskHatchPartMachine hatch) {
+        hatch.forcePersistAll();
         int slots = hatch.getDiskSlots().getSlots();
         for (int i = 0; i < slots; i++) {
             ItemStack stack = hatch.getDiskSlots().getStackInSlot(i);

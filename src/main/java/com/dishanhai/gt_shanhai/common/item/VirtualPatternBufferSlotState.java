@@ -4,12 +4,15 @@ import appeng.api.stacks.AEKey;
 import appeng.api.stacks.AEItemKey;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongMaps;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Predicate;
 
 public final class VirtualPatternBufferSlotState {
 
@@ -93,6 +96,41 @@ public final class VirtualPatternBufferSlotState {
         }
         targets.clear();
         removeTargets(inventory);
+    }
+
+    /**
+     * 带"保留谓词"的剥离：{@code keep} 判定为 true 的虚拟目标（如不消耗催化剂）不剥离——既不从库存
+     * 扣减、也不移除其 target 登记，使其在配方多次执行间常驻在场。其余虚拟目标照常剥离。仅在 targets
+     * 被清空（无保留项）后才注销整条 target 登记，否则保留项下次执行仍能被识别并继续保留。
+     * <p>用于"配方执行后"的 strip（{@code handleItemInternal}/{@code meHandleRecipeInner} 的 RETURN）：
+     * 让虚拟催化剂支撑一整单的所有执行次数，不再执行一次即被清空。退料/下单结束走无谓词版全清，
+     * 保证不残留、不把虚拟物品泄漏回网络。
+     */
+    public static synchronized <T extends AEKey> void stripVirtualTargets(Object2LongOpenHashMap<T> inventory,
+            Predicate<AEKey> keep) {
+        if (keep == null) {
+            stripVirtualTargets(inventory);
+            return;
+        }
+        Object2LongOpenHashMap<T> targets = findTargets(inventory);
+        if (inventory == null || targets == null || targets.isEmpty()) return;
+        ObjectIterator<Object2LongMap.Entry<T>> it = Object2LongMaps.fastIterator(targets);
+        while (it.hasNext()) {
+            Object2LongMap.Entry<T> entry = it.next();
+            T key = entry.getKey();
+            if (keep.test(key)) continue; // 催化剂虚拟目标：执行后保留在场，不剥离
+            long current = inventory.getLong(key);
+            long remaining = current - entry.getLongValue();
+            if (remaining > 0) {
+                inventory.put(key, remaining);
+            } else {
+                inventory.removeLong(key);
+            }
+            it.remove();
+        }
+        if (targets.isEmpty()) {
+            removeTargets(inventory);
+        }
     }
 
     public static synchronized void setVirtualCircuit(Object2LongOpenHashMap<AEItemKey> inventory, int config) {

@@ -44,7 +44,9 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private static final int BTN_HOVER = -12303292;
 
     private static final int TARGET_W = 520;
-    private static final int TARGET_H = 400;
+    private static final int TARGET_H = 416;
+    /** 服务器正常速度下 1 现实秒 = 20 tick；周期限购的「周期(秒)」按此换算成 tick。 */
+    private static final long TICKS_PER_SECOND = 20L;
     private static final int SLOT = 20;
     private static final int PITCH = 24;
 
@@ -59,10 +61,17 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private String category;
     private String description;
     private long limit = -1L; // 限购次数（购买/出售共享）；-1 = 不限（默认）
+    private long periodSeconds = -1L; // 周期限购的周期长度（现实秒，服务器正常速度下 1秒=20tick）；-1 = 不启用（默认）
+    private long periodCap = -1L;  // 周期限购每周期额度（每玩家独立计数）；-1 = 不启用（默认），与 periodSeconds 须同时填写才生效
     // 多元成本草稿
     private BigInteger spark = BigInteger.ZERO;
-    private final List<ItemStack> coins = new ArrayList<>();   // 钱包币种（count = 数量）
-    private final List<ItemStack> items = new ArrayList<>();   // 实物物品
+    // 币种/物品：真实数量存 coinCounts/itemCounts（long），不再用 ItemStack.count（int，最多到 21 亿就截断，
+    // 见反馈——旧版本 fillCost/buildCost 靠 stack.getCount() 存取，超 int 上限的配方悄悄被截断成 2,147,483,647）。
+    // ItemStack 本身的 count 固定钉在 1（vanilla count!=1 才画数量角标，钉 1 就不会画出跟真实数量对不上的角标）。
+    private final List<ItemStack> coins = new ArrayList<>();   // 钱包币种（身份+NBT，count 恒为 1）
+    private final List<Long> coinCounts = new ArrayList<>();   // 与 coins 逐一对应的真实数量
+    private final List<ItemStack> items = new ArrayList<>();   // 实物物品（身份+NBT，count 恒为 1）
+    private final List<Long> itemCounts = new ArrayList<>();   // 与 items 逐一对应的真实数量
     private final List<FluidStack> fluids = new ArrayList<>(); // 实物流体
     private final List<ShopEntry.DisplayIcon> displayIcons = new ArrayList<>(); // 自定义显示图标（1主+最多4附属，物品/贴图二选一，不填=用商品本身图标）
     private static final int MAX_DISPLAY_ICONS = 5;
@@ -78,13 +87,19 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private String displayName = ""; // 自定义显示名称，可空 = 用商品本身的物品名
     private ShopEntry.TradeMode tradeMode = ShopEntry.TradeMode.BOTH; // 交易方向限制：不限/仅购买/仅出售
 
-    private EditBox countBox, catBox, sparkBox, descBox, limitBox, linkKeyBox, linkToBox, nameBox;
+    private EditBox countBox, catBox, sparkBox, descBox, limitBox, linkKeyBox, linkToBox, nameBox, periodSecondsBox, periodCapBox;
     private MultiLineTextArea descArea;       // 描述「展开编写」大图层里的多行编辑区（与 descBox 同源，双向同步）
     private boolean descEditorOpen;           // 描述展开编写大图层开关
     private int left, top, panelWidth, panelHeight;
     private boolean catPickerOpen;            // 分类下拉选择窗开关
     private int catPickerScroll;              // 下拉窗滚动偏移（分类较多时用滚轮翻页）
     private static final int CAT_ROW_H = 12;  // 下拉窗每行高
+
+    // 币种/物品「精确数量」小弹窗：绕开 FTBLib 选择器数量框的 int 上限，直接文本输入任意 long。
+    private EditBox qtyEditBox;
+    private boolean qtyEditorOpen;
+    private boolean qtyEditIsCoin; // true=编辑 coins/coinCounts，false=编辑 items/itemCounts
+    private int qtyEditIndex;
 
     /**
      * @param defaultCategory 新增商品时的默认分类（继承自打开时所在的商店子页，如「无限盘区/前期」）；
@@ -108,6 +123,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.category = entry.getCategory();
             this.description = entry.getDescription();
             this.limit = entry.getRemainingUses(); // 预填当前剩余次数；不动这个框就原样保留
+            this.periodSeconds = entry.isPeriodLimited() ? entry.getPeriodTicks() / TICKS_PER_SECOND : -1L;
+            this.periodCap = entry.isPeriodLimited() ? entry.getPeriodLimit() : -1L;
             this.oldGoods = entry.getGoodsId();
             this.oldCategory = entry.getCategory();
             this.oldEntryIndex = com.dishanhai.gt_shanhai.common.shop.ShopConfig.getEntries().indexOf(entry);
@@ -138,16 +155,18 @@ public class ShopEntryEditScreen extends ScaledScreen {
         for (var e : cost.coins.entrySet()) {
             var item = ForgeRegistries.ITEMS.getValue(e.getKey());
             if (item != null) {
-                int cnt = e.getValue().bitLength() < 31 ? e.getValue().intValue() : Integer.MAX_VALUE;
-                coins.add(new ItemStack(item, Math.max(1, cnt)));
+                coins.add(new ItemStack(item, 1));
+                java.math.BigInteger v = e.getValue();
+                coinCounts.add(v.bitLength() < 63 ? Math.max(1L, v.longValue()) : Long.MAX_VALUE);
             }
         }
         for (ExchangeEntry.Ingredient in : cost.items()) {
             var item = ForgeRegistries.ITEMS.getValue(in.id);
             if (item == null) continue;
-            ItemStack st = new ItemStack(item, (int) Math.max(1L, Math.min(Integer.MAX_VALUE, in.count)));
+            ItemStack st = new ItemStack(item, 1);
             if (in.hasNbt()) st.setTag(in.nbt());
             items.add(st);
+            itemCounts.add(Math.max(1L, in.count));
         }
         for (ExchangeEntry.Ingredient in : cost.fluids()) {
             Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
@@ -198,12 +217,14 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int cx() { return left + 14; }
     private int goodsY() { return top + 24; }
     private int fieldsY() { return top + 48; }
-    private int sparkY() { return top + 74; }
-    private int coinY() { return top + 92; }
-    private int itemY() { return top + 120; }
-    private int fluidY() { return top + 148; }
-    private int descY() { return top + 180; }
-    private int iconY() { return top + 230; }
+    /** 周期限购行：紧接「次数」行下方，新增独立于永久总量之外的第二套限购（见 ShopPeriodLimiter）。 */
+    private int periodY() { return fieldsY() + 16; }
+    private int sparkY() { return periodY() + 26; }
+    private int coinY() { return sparkY() + 18; }
+    private int itemY() { return coinY() + 28; }
+    private int fluidY() { return itemY() + 28; }
+    private int descY() { return fluidY() + 32; }
+    private int iconY() { return descY() + 50; }
     private int rewardModeY() { return iconY() + 34; }
     private int rewardPoolY() { return rewardModeY() + 20; }
     private int hiddenY() { return rewardPoolY() + 34; }
@@ -259,6 +280,14 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private static final int NAME_BOX_W = 160;
     private int nameBoxX() { return left + panelWidth - 12 - NAME_BOX_W; }
 
+    // ===== 周期限购行布局（次数行下方，独立于永久总量的第二套限购）=====
+    private static final int PERIOD_SECONDS_W = 46;
+    private static final int PERIOD_CAP_W = 70;
+    private int periodSecondsBoxX() { return cx() + 60; }
+    private int periodMidLabelX() { return periodSecondsBoxX() + PERIOD_SECONDS_W + 4; }   // "秒限"
+    private int periodCapBoxX() { return periodMidLabelX() + 20; }
+    private int periodHintX() { return periodCapBoxX() + PERIOD_CAP_W + 22; }         // "次" 标签后的说明文字
+
     @Override
     protected void initScaled() {
         left = Math.max(6, (vWidth - TARGET_W) / 2);
@@ -282,6 +311,22 @@ public class ShopEntryEditScreen extends ScaledScreen {
         limitBox.setHint(Component.literal("§8不限"));
         limitBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
         limitBox.setResponder(s -> limit = parseLimit(s));
+        periodSecondsBox = new EditBox(this.font, periodSecondsBoxX(), periodY(), PERIOD_SECONDS_W, 12, Component.literal("周期秒数"));
+        periodSecondsBox.setMaxLength(9);
+        periodSecondsBox.setValue(periodSeconds < 0L ? "" : Long.toString(periodSeconds));
+        periodSecondsBox.setBordered(true);
+        periodSecondsBox.setTextColor(0xFFFFFF);
+        periodSecondsBox.setHint(Component.literal("§8不限"));
+        periodSecondsBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        periodSecondsBox.setResponder(s -> periodSeconds = parseLimit(s));
+        periodCapBox = new EditBox(this.font, periodCapBoxX(), periodY(), PERIOD_CAP_W, 12, Component.literal("周期额度"));
+        periodCapBox.setMaxLength(19);
+        periodCapBox.setValue(periodCap < 0L ? "" : Long.toString(periodCap));
+        periodCapBox.setBordered(true);
+        periodCapBox.setTextColor(0xFFFFFF);
+        periodCapBox.setHint(Component.literal("§8不限"));
+        periodCapBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        periodCapBox.setResponder(s -> periodCap = parseLimit(s));
         sparkBox = new EditBox(this.font, slotsX(), sparkY(), 120, 12, Component.literal("星火"));
         sparkBox.setMaxLength(40); // 必须先设，否则 BigInteger 超 32 位数字会被 setValue 按默认长度截断
         sparkBox.setValue(spark.signum() > 0 ? spark.toString() : "");
@@ -330,14 +375,24 @@ public class ShopEntryEditScreen extends ScaledScreen {
         nameBox.setTextColor(0xFFFFFF);
         nameBox.setHint(Component.literal("§8留空=用商品名称"));
         nameBox.setResponder(s -> displayName = s);
+        int[] qb = qtyEditorBounds();
+        qtyEditBox = new EditBox(this.font, qb[0] + 8, qb[1] + 20, qb[2] - 16, 14, Component.literal("数量"));
+        qtyEditBox.setMaxLength(20);
+        qtyEditBox.setBordered(true);
+        qtyEditBox.setTextColor(0xFFFFFF);
+        qtyEditBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        qtyEditBox.setVisible(qtyEditorOpen);
         addRenderableWidget(countBox);
         addRenderableWidget(catBox);
         addRenderableWidget(limitBox);
+        addRenderableWidget(periodSecondsBox);
+        addRenderableWidget(periodCapBox);
         addRenderableWidget(sparkBox);
         addRenderableWidget(descBox);
         addRenderableWidget(linkKeyBox);
         addRenderableWidget(linkToBox);
         addRenderableWidget(nameBox);
+        addRenderableWidget(qtyEditBox);
     }
 
     private EditBox mkNumBox(int x, int y, int w, String val, int min, int max, java.util.function.IntConsumer setter) {
@@ -375,6 +430,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private void capture() {
         if (catBox != null) category = catBox.getValue();
         if (limitBox != null) limit = parseLimit(limitBox.getValue());
+        if (periodSecondsBox != null) periodSeconds = parseLimit(periodSecondsBox.getValue());
+        if (periodCapBox != null) periodCap = parseLimit(periodCapBox.getValue());
         if (sparkBox != null) spark = parseBig(sparkBox.getValue());
         if (descBox != null) description = descBox.getValue();
         if (linkKeyBox != null) linkKey = linkKeyBox.getValue();
@@ -427,16 +484,19 @@ public class ShopEntryEditScreen extends ScaledScreen {
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
         hoverRewardOption = null;
-        // 展开编写大图层打开时，原本的字段输入框全部隐藏（同帧同步，避免闪烁；本方法在 super.render 画控件前执行）
-        boolean editorOpen = descEditorOpen;
+        // 展开编写大图层/数量小弹窗打开时，原本的字段输入框全部隐藏（同帧同步，避免闪烁；本方法在 super.render 画控件前执行）
+        boolean editorOpen = descEditorOpen || qtyEditorOpen;
         if (countBox != null) countBox.setVisible(!editorOpen);
         if (catBox != null) catBox.setVisible(!editorOpen);
         if (limitBox != null) limitBox.setVisible(!editorOpen);
+        if (periodSecondsBox != null) periodSecondsBox.setVisible(!editorOpen);
+        if (periodCapBox != null) periodCapBox.setVisible(!editorOpen);
         if (sparkBox != null) sparkBox.setVisible(!editorOpen);
         if (descBox != null) descBox.setVisible(!editorOpen);
         if (linkKeyBox != null) linkKeyBox.setVisible(!editorOpen);
         if (linkToBox != null) linkToBox.setVisible(!editorOpen);
         if (nameBox != null) nameBox.setVisible(!editorOpen);
+        if (qtyEditBox != null) qtyEditBox.setVisible(qtyEditorOpen);
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
         g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
@@ -469,13 +529,18 @@ public class ShopEntryEditScreen extends ScaledScreen {
         // 限购次数（框由 super.render 绘制；空=不限，购买/出售共享同一计数）
         g.drawString(this.font, "§7次数", limitLabelX(), fieldsY() + 2, GRAY, true);
         g.drawString(this.font, "§8可填「主/子」建子分组", catHintX(), fieldsY() + 2, GRAY, true);
+        // 周期限购（框由 super.render 绘制；两框都空=不启用，独立于上面的永久总量，每玩家各自计数，到点自动刷新）
+        g.drawString(this.font, "§7周期限购", c, periodY() + 2, GRAY, true);
+        g.drawString(this.font, "§7秒限", periodMidLabelX(), periodY() + 2, GRAY, true);
+        g.drawString(this.font, "§7次", periodCapBoxX() + PERIOD_CAP_W + 4, periodY() + 2, GRAY, true);
+        g.drawString(this.font, "§8(现实秒；如填1000即每1000秒刷新，每玩家独立计数，留空=不启用)", periodHintX(), periodY() + 2, GRAY, true);
 
         // 成本区
         g.drawString(this.font, "§6成本（四通道可并存）", c, sparkY() - 10, GOLD, true);
         g.drawString(this.font, "§e★星火:", c, sparkY() + 2, GOLD, true);
         // 币种 / 物品 / 流体 三排
-        drawRow(g, "§7币种", coins, false, coinY(), rowMax(), mx, my);
-        drawRow(g, "§7物品", items, false, itemY(), rowMax(), mx, my);
+        drawCostIngredientRow(g, "§7币种", coins, coinCounts, coinY(), rowMax(), mx, my);
+        drawCostIngredientRow(g, "§7物品", items, itemCounts, itemY(), rowMax(), mx, my);
         drawFluidRow(g, fluidY(), mx, my);
 
         // 描述（框由 super.render 绘制）
@@ -528,6 +593,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
     protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
         if (descEditorOpen) {
             renderDescEditorForeground(g, mx, my);
+            return;
+        }
+        if (qtyEditorOpen) {
+            renderQtyEditorForeground(g, mx, my);
             return;
         }
         if (!catPickerOpen) return;
@@ -622,6 +691,62 @@ public class ShopEntryEditScreen extends ScaledScreen {
         return true;
     }
 
+    /** 精确数量小弹窗边界：居中，尺寸固定（单行输入，不用像描述详情那样按内容动态算高）。 */
+    private int[] qtyEditorBounds() {
+        int ow = Math.min(vWidth - 40, 200);
+        int oh = 56;
+        int ox = (vWidth - ow) / 2;
+        int oy = (vHeight - oh) / 2;
+        return new int[]{ox, oy, ow, oh};
+    }
+
+    /**
+     * 打开「精确数量」小弹窗：绕开 FTBLib 选择器数量框的 int 上限，直接文本框输入任意 long（见反馈：
+     * 币种/物品成本超过 21 亿会被旧逻辑悄悄截断成 Integer.MAX_VALUE）。isCoin 决定改 coinCounts 还是 itemCounts。
+     */
+    private void openQtyEditor(boolean isCoin, int index) {
+        catPickerOpen = false;
+        qtyEditIsCoin = isCoin;
+        qtyEditIndex = index;
+        long current = isCoin
+                ? (index < coinCounts.size() ? coinCounts.get(index) : 1L)
+                : (index < itemCounts.size() ? itemCounts.get(index) : 1L);
+        if (qtyEditBox != null) {
+            qtyEditBox.setValue(Long.toString(current));
+            qtyEditBox.setFocused(true);
+            setFocused(qtyEditBox); // 真实控件，走 Screen 级焦点，keyPressed/charTyped 自动路由过去，不用手动转发
+        }
+        qtyEditorOpen = true;
+    }
+
+    /** 关闭数量小弹窗；save=true 才把输入框内容解析写回对应的 counts 列表，非法输入回退 1，点关闭/点弹窗外都是丢弃改动。 */
+    private void closeQtyEditor(boolean save) {
+        if (save && qtyEditBox != null) {
+            long v;
+            try { v = Long.parseLong(qtyEditBox.getValue().trim()); } catch (Exception e) { v = 1L; }
+            v = Math.max(1L, v);
+            java.util.List<Long> target = qtyEditIsCoin ? coinCounts : itemCounts;
+            if (qtyEditIndex >= 0 && qtyEditIndex < target.size()) target.set(qtyEditIndex, v);
+        }
+        if (qtyEditBox != null) qtyEditBox.setFocused(false);
+        qtyEditorOpen = false;
+        setFocused(null);
+    }
+
+    /** 数量小弹窗前景：标题 + 关闭 X + 输入框（真实控件，由 super.render 画）+ 确认按钮。 */
+    private void renderQtyEditorForeground(GuiGraphics g, int mx, int my) {
+        int[] r = qtyEditorBounds();
+        int ox = r[0], oy = r[1], ow = r[2], oh = r[3];
+        g.fill(0, 0, vWidth, vHeight, 0xC0000000);
+        g.fill(ox - 1, oy - 1, ox + ow + 1, oy + oh + 1, GOLD_DARK);
+        g.fill(ox, oy, ox + ow, oy + oh, PANEL_BG);
+        g.drawString(this.font, "§6精确数量 §8(支持超大整数)", ox + 8, oy + 6, GOLD, true);
+        int closeX = ox + ow - EDITOR_CLOSE_W - 4, closeY = oy + 4;
+        drawBtn(g, closeX, closeY, EDITOR_CLOSE_W, EDITOR_CLOSE_H, "§cX", mx, my);
+        int confirmH = 16, confirmX = ox + 8, confirmY = oy + oh - confirmH - 6, confirmW = ow - 16;
+        drawBtn(g, confirmX, confirmY, confirmW, confirmH, "§a确认", mx, my);
+    }
+
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
         if (descEditorOpen) {
@@ -653,6 +778,84 @@ public class ShopEntryEditScreen extends ScaledScreen {
             int x = sx + list.size() * PITCH;
             EditorWidgets.plusSlot(g, this.font, x, y, hover(mx, my, x, y));
         }
+    }
+
+    /**
+     * 画币种/物品成本排：图标 + 槽下数量文字，数量取自并行的 counts 列表（long，不是 ItemStack.getCount()）。
+     * 槽位本身 count 恒为 1，vanilla 角标不会画（count==1 时 renderItemDecorations 不画数字），只有槽下这行文字是真数量。
+     */
+    private void drawCostIngredientRow(GuiGraphics g, String label, List<ItemStack> list, List<Long> counts, int y, int max, int mx, int my) {
+        int c = cx();
+        g.drawString(this.font, label, c, y + 6, GRAY, true);
+        int sx = slotsX();
+        for (int i = 0; i < list.size(); i++) {
+            int x = sx + i * PITCH;
+            EditorWidgets.itemSlot(g, this.font, x, y, list.get(i), hover(mx, my, x, y));
+            long cnt = i < counts.size() ? counts.get(i) : 1L;
+            g.drawCenteredString(this.font, compactQty(cnt), x + 10, y + 21, CYAN);
+        }
+        if (list.size() < max) {
+            int x = sx + list.size() * PITCH;
+            EditorWidgets.plusSlot(g, this.font, x, y, hover(mx, my, x, y));
+        }
+    }
+
+    /** 数量紧凑显示（同商店主界面的缩写风格，K/M/B/T），槽下 24px 窄条塞不下完整数字。 */
+    private static String compactQty(long v) {
+        long n = Math.max(0L, v);
+        if (n >= 1_000_000_000_000L) return (n / 1_000_000_000_000L) + "T+";
+        if (n >= 1_000_000_000L) return (n / 1_000_000_000L) + "B+";
+        if (n >= 1_000_000L) return (n / 1_000_000L) + "M+";
+        if (n >= 1_000L) return (n / 1_000L) + "K+";
+        return String.valueOf(n);
+    }
+
+    /**
+     * 币种/物品成本排点击：左键点图标——开 FTBLib 选择器改物品身份（数量不受它影响，仍是 counts 里的 long）；
+     * 左键点槽下数量文字——开精确数量小弹窗（绕开 FTBLib 数量框的 int 上限）；右键删除（连同 counts 同步删）；
+     * 点「+」开多选加新项。isCoin 决定弹窗写回 coinCounts 还是 itemCounts。
+     */
+    private boolean costIngredientRowClicked(List<ItemStack> list, List<Long> counts, int y, int max,
+                                             double mx, double my, int btn, Runnable onOpenAdd, boolean isCoin) {
+        int sx = slotsX();
+        for (int i = 0; i < list.size(); i++) {
+            int x = sx + i * PITCH;
+            if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
+                if (btn == 1) {
+                    list.remove(i);
+                    if (i < counts.size()) counts.remove(i);
+                    rebuild();
+                } else {
+                    final int idx = i;
+                    capture();
+                    EditorWidgets.openItemPicker(list.get(idx), st -> {
+                        if (st == null || st.isEmpty()) {
+                            list.remove(idx);
+                            if (idx < counts.size()) counts.remove(idx);
+                        } else {
+                            ItemStack template = st.copy();
+                            template.setCount(1); // 身份/NBT 换了没关系，数量仍是 counts 里存的那份，不吃选择器给的数量
+                            list.set(idx, template);
+                        }
+                    });
+                }
+                return true;
+            }
+            // 槽下数量文字命中框：跟图标同宽，紧贴图标下方一行
+            if (GuiRenderUtil.isHovering(mx, my, x, y + 21, SLOT, 9)) {
+                capture();
+                openQtyEditor(isCoin, i);
+                return true;
+            }
+        }
+        if (list.size() < max) {
+            int x = sx + list.size() * PITCH;
+            if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
+                if (onOpenAdd != null) onOpenAdd.run();
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -838,6 +1041,17 @@ public class ShopEntryEditScreen extends ScaledScreen {
     // ===== 交互 =====
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        // 精确数量小弹窗打开时优先接管：点关闭/点弹窗外=丢弃改动关闭，点确认=写回关闭，
+        // 点弹窗内其余位置（数量输入框本身）放行给正常控件点击，好定位光标（qtyEditBox 是真实控件，不用手动转发）
+        if (qtyEditorOpen) {
+            int[] r = qtyEditorBounds();
+            if (!GuiRenderUtil.isHovering(mx, my, r[0], r[1], r[2], r[3])) { closeQtyEditor(false); return true; }
+            int closeX = r[0] + r[2] - EDITOR_CLOSE_W - 4, closeY = r[1] + 4;
+            if (GuiRenderUtil.isHovering(mx, my, closeX, closeY, EDITOR_CLOSE_W, EDITOR_CLOSE_H)) { closeQtyEditor(false); return true; }
+            int confirmH = 16, confirmX = r[0] + 8, confirmY = r[1] + r[3] - confirmH - 6, confirmW = r[2] - 16;
+            if (GuiRenderUtil.isHovering(mx, my, confirmX, confirmY, confirmW, confirmH)) { closeQtyEditor(true); return true; }
+            return super.universalMouseClicked(mx, my, btn);
+        }
         // 描述展开编写大图层打开时优先接管，一律吞掉本次点击避免误触下层控件
         if (descEditorOpen) return handleDescEditorClick(mx, my);
         // 分类下拉窗打开时优先接管：点行选中，点窗外关闭；一律吞掉本次点击避免误触下层控件
@@ -869,8 +1083,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         int c = cx();
         // 商品排（奖励池接管时禁用，不响应点击）：左键选/重开选择器改数量，右键删（保底留 1 项），点「+」加新项
         if (!goodsLockedByReward() && goodsRowClicked(mx, my, btn)) return true;
-        if (itemRowClicked(coins, coinY(), rowMax(), mx, my, btn, this::openCurrencyPicker)) return true;
-        if (itemRowClicked(items, itemY(), rowMax(), mx, my, btn, () -> openMultiPicker(false))) return true;
+        if (costIngredientRowClicked(coins, coinCounts, coinY(), rowMax(), mx, my, btn, this::openCurrencyPicker, true)) return true;
+        if (costIngredientRowClicked(items, itemCounts, itemY(), rowMax(), mx, my, btn, () -> openMultiPicker(false), false)) return true;
         if (fluidRowClicked(fluidY(), mx, my, btn)) return true;
         if (iconRowClicked(iconY(), Math.min(MAX_DISPLAY_ICONS, rowMax()), mx, my, btn)) return true;
         // 奖励模式循环按钮
@@ -901,6 +1115,16 @@ public class ShopEntryEditScreen extends ScaledScreen {
     /** 描述大图层打开时拦住 ESC/Enter：ESC 丢弃改动关闭，Enter/Shift+Enter 确认保存关闭（单行框无需换行 Enter）。 */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // 数量小弹窗打开时拦住 ESC/Enter：ESC 丢弃改动关闭，Enter 确认写回关闭；qtyEditBox 是真实控件，
+        // 其余按键（数字输入/退格/方向键）走 super 走正常的 Screen 焦点路由，不用像 descArea 那样手动转发
+        if (qtyEditorOpen) {
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) { closeQtyEditor(false); return true; }
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+                closeQtyEditor(true);
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
         if (descEditorOpen) {
             if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) { closeDescEditor(false); return true; }
             // Ctrl+回车快速保存关闭；普通回车交给 descArea 当换行处理（真多行编辑区，回车不再等于确认）
@@ -931,28 +1155,6 @@ public class ShopEntryEditScreen extends ScaledScreen {
             return true;
         }
         return super.universalMouseDragged(mx, my, btn, dx, dy);
-    }
-
-    /** 物品型排（币种/物品）点击：左键选/编辑，右键删除。「+」点击交给 onOpenAdd 决定开哪种选择器。 */
-    private boolean itemRowClicked(List<ItemStack> list, int y, int max, double mx, double my, int btn, Runnable onOpenAdd) {
-        int sx = slotsX();
-        for (int i = 0; i < list.size(); i++) {
-            int x = sx + i * PITCH;
-            if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
-                if (btn == 1) { list.remove(i); rebuild(); }
-                else { final int idx = i; capture(); EditorWidgets.openItemPicker(list.get(idx),
-                        st -> { if (st == null || st.isEmpty()) list.remove(idx); else list.set(idx, st); }); }
-                return true;
-            }
-        }
-        if (list.size() < max) {
-            int x = sx + list.size() * PITCH;
-            if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
-                if (onOpenAdd != null) onOpenAdd.run();
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -998,7 +1200,14 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private void openMultiPicker(boolean browseFluid) {
         capture();
         Minecraft.getInstance().setScreen(new MultiPickerScreen(this, browseFluid,
-                st -> { if (st != null && !st.isEmpty()) items.add(st); },
+                st -> {
+                    if (st == null || st.isEmpty()) return;
+                    long cnt = Math.max(1L, (long) st.getCount());
+                    ItemStack template = st.copy();
+                    template.setCount(1); // 真实数量走 itemCounts，stack 本身钉 1（避免 vanilla 角标跟真实值对不上）
+                    items.add(template);
+                    itemCounts.add(cnt);
+                },
                 fs -> { if (fs != null && !fs.isEmpty()) fluids.add(fs); }));
     }
 
@@ -1021,7 +1230,14 @@ public class ShopEntryEditScreen extends ScaledScreen {
         capture();
         java.util.List<ResourceLocation> allowed = com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig.getCurrencies();
         Minecraft.getInstance().setScreen(new MultiPickerScreen(this, allowed,
-                st -> { if (st != null && !st.isEmpty()) coins.add(st); }));
+                st -> {
+                    if (st == null || st.isEmpty()) return;
+                    long cnt = Math.max(1L, (long) st.getCount());
+                    ItemStack template = st.copy();
+                    template.setCount(1);
+                    coins.add(template);
+                    coinCounts.add(cnt);
+                }));
     }
 
     /** 画显示图标排：物品/贴图混合渲染（贴图无数量角标）。 */
@@ -1123,16 +1339,20 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     private ShopCost buildCost() {
         LinkedHashMap<ResourceLocation, BigInteger> coinMap = new LinkedHashMap<>();
-        for (ItemStack st : coins) {
+        for (int i = 0; i < coins.size(); i++) {
+            ItemStack st = coins.get(i);
             if (st == null || st.isEmpty()) continue;
             ResourceLocation id = ForgeRegistries.ITEMS.getKey(st.getItem());
-            if (id != null) coinMap.merge(id, BigInteger.valueOf(Math.max(1, st.getCount())), BigInteger::add);
+            long cnt = i < coinCounts.size() ? Math.max(1L, coinCounts.get(i)) : 1L;
+            if (id != null) coinMap.merge(id, BigInteger.valueOf(cnt), BigInteger::add);
         }
         List<ExchangeEntry.Ingredient> physical = new ArrayList<>();
-        for (ItemStack st : items) {
+        for (int i = 0; i < items.size(); i++) {
+            ItemStack st = items.get(i);
             if (st == null || st.isEmpty()) continue;
             ResourceLocation id = ForgeRegistries.ITEMS.getKey(st.getItem());
-            if (id != null) physical.add(new ExchangeEntry.Ingredient(id, false, Math.max(1, st.getCount()), st.getTag()));
+            long cnt = i < itemCounts.size() ? Math.max(1L, itemCounts.get(i)) : 1L;
+            if (id != null) physical.add(new ExchangeEntry.Ingredient(id, false, cnt, st.getTag()));
         }
         for (FluidStack fs : fluids) {
             if (fs == null || fs.isEmpty()) continue;
@@ -1174,10 +1394,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
         }
         String cat = (category == null || category.isBlank()) ? ShopEntry.DEFAULT_CATEGORY : category.trim();
         String desc = description == null ? "" : description.trim();
+        // 周期限购的周期在 UI 层用现实秒，发包前换算成 tick；两框须都非空才生效（半填在 ShopEntry 构造器里会被归一成不启用）
+        long periodTicksToSend = periodSeconds > 0L ? periodSeconds * TICKS_PER_SECOND : -1L;
         ShopEditPacket pkt = new ShopEditPacket(
                 isNew ? ShopEditPacket.Action.ADD : ShopEditPacket.Action.EDIT,
                 goodsForSubmit, cat, desc, cost, oldGoods, oldCategory == null ? "" : oldCategory, oldEntryIndex, limit,
-                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode);
+                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode,
+                periodTicksToSend, periodCap);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

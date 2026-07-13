@@ -219,7 +219,10 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             index++;
         }
         if (recipeList.isEmpty()) {
-            // 缓存里的候选这轮全部并行为 0（料耗尽等）→ 机器要闲置：立即失效缓存，
+            // 实测回归：材料不足时若不失效 SET 缓存，会让机器在整个 20-tick 窗口内反复对同一批
+            // （可能很大的）候选 GTRecipe 逐个 getMaxParallel() 校验，比"偶尔全量重搜、多数情况下
+            // 直接命中空集快速返回"更贵——曾尝试去掉这里的失效，代理执行者延迟从 307μs 涨到 761μs，
+            // 已还原。缓存里的候选这轮全部并行为 0（料耗尽等）→ 机器要闲置：立即失效缓存，
             // 下轮重新实时搜索，避免守着已耗尽的陈旧候选集空转（控死保险）。
             invalidateLookupSetCache();
             return null;

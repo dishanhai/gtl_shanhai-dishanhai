@@ -123,6 +123,11 @@ public class BoxSystemCentralControllerMachine extends SelectableRecipeTypeSetMa
     private final List<BoxRouting> boxRoutings = new ArrayList<>();
     private BoxRecipePlan boxPlan = new BoxRecipePlan();
 
+    // 合成后的锁定配方只在路由/锁定状态变化时才重建（rebuildBoxPlan/NBT 读档），
+    // 每 tick 的 lookupRecipeIterator/getGTRecipe 只读缓存，不再对每条路由重扫整棵配方查找树。
+    private GTRecipe cachedLockedBoxRecipe;
+    private boolean lockedBoxRecipeDirty = true;
+
     public BoxSystemCentralControllerMachine(IMachineBlockEntity holder, Object... args) {
         super(holder, GTRecipeTypes.ASSEMBLER_RECIPES, args);
     }
@@ -189,6 +194,9 @@ public class BoxSystemCentralControllerMachine extends SelectableRecipeTypeSetMa
         } else {
             rebuildBoxPlan(false);
         }
+        // 读档时不立即重建缓存：RecipeManager 在方块实体加载阶段未必已就绪，延后到下一次
+        // buildLockedBoxRecipe() 调用（RecipeLogic 每 tick 都会调）时再懒计算，规避加载时序问题。
+        lockedBoxRecipeDirty = true;
     }
 
     @Override
@@ -349,9 +357,18 @@ public class BoxSystemCentralControllerMachine extends SelectableRecipeTypeSetMa
         }
         next.requiredModules.addAll(modules.keySet());
         boxPlan = next;
+        lockedBoxRecipeDirty = true;
     }
 
     private GTRecipe buildLockedBoxRecipe() {
+        if (lockedBoxRecipeDirty) {
+            cachedLockedBoxRecipe = computeLockedBoxRecipe();
+            lockedBoxRecipeDirty = false;
+        }
+        return cachedLockedBoxRecipe;
+    }
+
+    private GTRecipe computeLockedBoxRecipe() {
         if (!boxPlan.locked || boxRoutings.isEmpty()) {
             return null;
         }

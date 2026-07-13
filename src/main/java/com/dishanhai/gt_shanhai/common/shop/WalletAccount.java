@@ -25,6 +25,8 @@ public class WalletAccount {
     private static final String TAG_CURRENCIES = "currencies";
     private static final String TAG_DIGITAL = "digital";
     private static final String TAG_PURCHASES = "purchases";
+    private static final String TAG_PERIOD_WINDOW = "periodWindow";
+    private static final String TAG_PERIOD_USED = "periodUsed";
 
     /** 币种 → 余额（BigInteger，保序）。 */
     private final Map<ResourceLocation, BigInteger> currencyBalances = new LinkedHashMap<>();
@@ -32,6 +34,12 @@ public class WalletAccount {
     private BigInteger digitalBalance = BigInteger.ZERO;
     /** 商品条目 key（见 {@link WalletAccountAPI#purchaseKey}）→ 累计已购买次数，展示用，非结算依据。 */
     private final Map<String, Long> purchaseCounts = new LinkedHashMap<>();
+    /** 商品条目 key → 该玩家当前周期限购窗口的开窗锚点 gameTime（见 {@link ShopPeriodLimiter}），
+     *  在玩家<b>首次消费</b>该商品时打下，配合 {@link #periodUsed} 判断窗口是否还在有效期内；无锚点=从未开窗。 */
+    private final Map<String, Long> periodWindow = new LinkedHashMap<>();
+    /** 商品条目 key → 该玩家在 {@link #periodWindow} 锚点开出的窗口内已用掉的次数；窗口过期（当前 gameTime
+     *  超出 锚点+周期长度）就代表这份计数已作废，视为 0——不会主动清零，靠读取时判断过期，见 {@link ShopPeriodLimiter}。 */
+    private final Map<String, Long> periodUsed = new LinkedHashMap<>();
 
     // ===== 币种余额 =====
 
@@ -88,6 +96,39 @@ public class WalletAccount {
         return new LinkedHashMap<>(purchaseCounts);
     }
 
+    // ===== 周期限购（每玩家独立计数，见 ShopPeriodLimiter） =====
+
+    /** key 当前窗口的开窗锚点 gameTime；从未消费过该商品（或窗口从未开过）返回 -1。 */
+    public long getPeriodWindow(String key) {
+        if (key == null) return -1L;
+        Long v = periodWindow.get(key);
+        return v == null ? -1L : v;
+    }
+
+    /** key 在 {@link #getPeriodWindow} 所记窗口内已用掉的次数。 */
+    public long getPeriodUsed(String key) {
+        if (key == null) return 0L;
+        Long v = periodUsed.get(key);
+        return v == null ? 0L : v;
+    }
+
+    /** 全部 key 的开窗锚点（副本，保序），供客户端展示"剩余刷新倒计时"用（见 WalletAccountSyncPacket）。 */
+    public Map<String, Long> getPeriodWindows() {
+        return new LinkedHashMap<>(periodWindow);
+    }
+
+    /** 覆盖写某 key 的周期窗口状态（新窗口开始时 window 变了，used 从 0 重新计）；used≤0 时移除保持干净。 */
+    public void setPeriodState(String key, long window, long used) {
+        if (key == null) return;
+        if (used <= 0L) {
+            periodWindow.remove(key);
+            periodUsed.remove(key);
+        } else {
+            periodWindow.put(key, window);
+            periodUsed.put(key, used);
+        }
+    }
+
     // ===== NBT =====
 
     public CompoundTag save() {
@@ -108,6 +149,16 @@ public class WalletAccount {
             if (e.getValue() != null && e.getValue() > 0L) pur.putLong(e.getKey(), e.getValue());
         }
         tag.put(TAG_PURCHASES, pur);
+        CompoundTag pw = new CompoundTag();
+        for (Map.Entry<String, Long> e : periodWindow.entrySet()) {
+            pw.putLong(e.getKey(), e.getValue());
+        }
+        tag.put(TAG_PERIOD_WINDOW, pw);
+        CompoundTag pu = new CompoundTag();
+        for (Map.Entry<String, Long> e : periodUsed.entrySet()) {
+            if (e.getValue() != null && e.getValue() > 0L) pu.putLong(e.getKey(), e.getValue());
+        }
+        tag.put(TAG_PERIOD_USED, pu);
         return tag;
     }
 
@@ -132,6 +183,15 @@ public class WalletAccount {
         for (String key : pur.getAllKeys()) {
             long v = pur.getLong(key);
             if (v > 0L) acc.purchaseCounts.put(key, v);
+        }
+        CompoundTag pw = tag.getCompound(TAG_PERIOD_WINDOW);
+        CompoundTag pu = tag.getCompound(TAG_PERIOD_USED);
+        for (String key : pu.getAllKeys()) {
+            long used = pu.getLong(key);
+            if (used > 0L && pw.contains(key)) {
+                acc.periodWindow.put(key, pw.getLong(key));
+                acc.periodUsed.put(key, used);
+            }
         }
         return acc;
     }

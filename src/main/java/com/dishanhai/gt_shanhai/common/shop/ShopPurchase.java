@@ -541,6 +541,8 @@ public final class ShopPurchase {
         }
         long affordable = aff.signum() <= 0 ? 0L : (aff.bitLength() < 63 ? aff.longValue() : Long.MAX_VALUE);
         affordable = entry.clampByUses(affordable); // 限购商品：再夹到不超过剩余次数
+        String periodKey = WalletAccountAPI.purchaseKey(entry.getGoodsId(), entry.getCategory());
+        affordable = ShopPeriodLimiter.clamp(player, entry, periodKey, affordable); // 周期限购：再夹到不超过当前周期窗口剩余额度（每玩家独立）
         if (affordable <= 0L) return 0L;
 
         // 扣成本（affordable 已被各通道约束，各项必成，不溢出）
@@ -587,6 +589,7 @@ public final class ShopPurchase {
             entry.consumeUses(affordable);
             ShopConfig.save(); // 限购商品：剩余次数随成交即时存盘，重启不丢
         }
+        ShopPeriodLimiter.consume(player, entry, periodKey, affordable); // 周期限购：记账当前窗口已用量
         return affordable;
     }
 
@@ -700,10 +703,10 @@ public final class ShopPurchase {
      * 统一合并进<b>同一个</b>超级磁盘阵列，而不是每种物品各自开一个 SDA——避免大规模抽奖
      * （比如一次买 20 万次）炸出几十个「独立一片」的磁盘阵列，玩家还得一个个找。
      * 进 AE 的（有绑定在线网络且吃得下）仍各走各的，AE 网络本身就是统一存储，不受这个问题影响。
-     * <p>是否打包按<b>整批总量</b>（各物品 total 之和）判断，而非逐个物品各自的量——抽奖类商品
+     * 是否打包按<b>整批总量</b>（各物品 total 之和）判断，而非逐个物品各自的量——抽奖类商品
      * 常见「有的物品类型数量多、有的少」，若按单个物品各自判断阈值，总量早已达标的一批货里，
      * 数量没单独达标的类型会被漏判成散件塞进背包，同一批货一部分进 SDA、一部分散落背包，
-     * 观感上像是磁盘阵列"漏包"了一堆（见反馈）。整批达标就整批一起进 SDA，不再逐个物品判断。</p>
+     * 观感上像是磁盘阵列"漏包"了一堆（见反馈）。整批达标就整批一起进 SDA，不再逐个物品判断。
      * @return 主交付方式："sda"（只要有任意物品打了包就报这个，信息量最大）
      *         /"ae"（全部进了 AE，没有任何打包/进背包）/"inventory"（全部进了背包，没有任何 AE/打包）
      *         /null（没有任何有效物品）
@@ -776,6 +779,8 @@ public final class ShopPurchase {
         long held = (invPlusBackpack > Long.MAX_VALUE - ae) ? Long.MAX_VALUE : invPlusBackpack + ae;
         long sell = Math.min(times, held / per);
         sell = entry.clampByUses(sell); // 限购商品：出售与购买共享同一剩余次数
+        String periodKey = WalletAccountAPI.purchaseKey(entry.getGoodsId(), entry.getCategory());
+        sell = ShopPeriodLimiter.clamp(player, entry, periodKey, sell); // 周期限购：出售与购买共享同一周期窗口额度（每玩家独立）
         if (sell <= 0L) return 0L;
         long need = sell * per; // ≤ held，不溢出
         long fromAe = deductFromCarried(player, goods, null, need, backpackMode); // 先扣背包/精妙背包（顺序看模式），不足再从绑定AE抽
@@ -795,6 +800,7 @@ public final class ShopPurchase {
             entry.consumeUses(sell);
             ShopConfig.save(); // 限购商品：剩余次数随成交即时存盘，重启不丢
         }
+        ShopPeriodLimiter.consume(player, entry, periodKey, sell); // 周期限购：记账当前窗口已用量
         return sell;
     }
 
