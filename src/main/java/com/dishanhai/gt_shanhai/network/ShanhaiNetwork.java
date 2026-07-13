@@ -7,9 +7,11 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -18,7 +20,7 @@ import java.util.function.Supplier;
  */
 public class ShanhaiNetwork {
 
-    private static final String PROTOCOL_VERSION = "1";
+    private static final String PROTOCOL_VERSION = "2";
     private static final ResourceLocation CHANNEL_NAME = new ResourceLocation(GTDishanhaiMod.MOD_ID, "main");
     private static int packetId = 0;
 
@@ -134,6 +136,23 @@ public class ShanhaiNetwork {
                 ShopSettingsPacket::encode,
                 ShopSettingsPacket::new,
                 ShopSettingsPacket::handle
+        );
+        // 商店目录分块包必须追加注册，避免移动现有消息 ID；方向固定，阻止反向伪造。
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCatalogChunkRequestPacket.class,
+                ShopCatalogChunkRequestPacket::encode,
+                ShopCatalogChunkRequestPacket::new,
+                ShopCatalogChunkRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCatalogChunkPacket.class,
+                ShopCatalogChunkPacket::encode,
+                ShopCatalogChunkPacket::new,
+                ShopCatalogChunkPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
         RecipeSyncPacket.init();
     }

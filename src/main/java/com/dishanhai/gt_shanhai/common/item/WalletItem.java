@@ -57,7 +57,8 @@ public class WalletItem extends Item implements top.theillusivec4.curios.api.typ
             boolean canEdit = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(sp);
             com.dishanhai.gt_shanhai.network.ShanhaiNetwork.CHANNEL.send(
                     net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> sp),
-                    new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit));
+                    new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit,
+                            com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
             // 打开钱包即推账户快照，客户端界面/tooltip 立刻有余额（余额已不在 ItemStack NBT）
             com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(sp);
         }

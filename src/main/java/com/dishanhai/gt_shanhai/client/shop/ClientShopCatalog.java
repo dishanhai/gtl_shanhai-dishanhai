@@ -4,6 +4,8 @@ import com.dishanhai.gt_shanhai.common.shop.ShopCatalogEntryPayload;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntryJsonCodec;
+import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
+import com.dishanhai.gt_shanhai.network.ShopCatalogChunkRequestPacket;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -64,14 +66,20 @@ public final class ClientShopCatalog {
         public long revision() { return revision; }
         public boolean ready() { return ready; }
         public boolean hasChunk(int chunkId) { return receivedChunks.contains(chunkId); }
+
+        public void forgetChunk(int chunkId) {
+            receivedChunks.remove(chunkId);
+            requests.remove(chunkId);
+        }
     }
 
-    private record PendingChunk(List<ShopCatalogEntryPayload> entries, int index) {
-        PendingChunk advance() { return new PendingChunk(entries, index + 1); }
+    private record PendingChunk(int chunkId, List<ShopCatalogEntryPayload> entries, int index) {
+        PendingChunk advance() { return new PendingChunk(chunkId, entries, index + 1); }
         boolean done() { return index >= entries.size(); }
         ShopCatalogEntryPayload current() { return entries.get(index); }
     }
 
+    private static final int MAX_CACHED_CHUNKS = 8;
     private static final State STATE = new State();
     private static ShopCatalogManifest manifest = ShopCatalogManifest.empty();
     private static final Map<Long, ShopCatalogManifest.Stub> stubsByKey = new LinkedHashMap<>();
@@ -82,6 +90,9 @@ public final class ClientShopCatalog {
     private static final Map<Long, ShopEntry> entriesByKey = new LinkedHashMap<>();
     private static final IdentityHashMap<ShopEntry, Long> keysByEntry = new IdentityHashMap<>();
     private static final ArrayDeque<PendingChunk> pendingChunks = new ArrayDeque<>();
+    private static final LinkedHashMap<Integer, Set<Long>> cachedChunkKeys =
+            new LinkedHashMap<>(16, 0.75F, true);
+    private static Set<Integer> pinnedChunks = Set.of();
 
     private ClientShopCatalog() {}
 
@@ -93,6 +104,8 @@ public final class ClientShopCatalog {
             entriesByKey.clear();
             keysByEntry.clear();
             pendingChunks.clear();
+            cachedChunkKeys.clear();
+            pinnedChunks = Set.of();
         }
         rebuildManifestIndexes();
     }
@@ -139,10 +152,35 @@ public final class ClientShopCatalog {
         return STATE.beginRequest(chunkId);
     }
 
+    /** 请求可视范围涉及但尚未收到的 chunk，并把这些块固定在 LRU 中。 */
+    public static void ensureLoadedRange(List<Long> keys, int fromInclusive, int toExclusive) {
+        if (keys == null || keys.isEmpty() || !STATE.ready()) {
+            pinnedChunks = Set.of();
+            return;
+        }
+        int from = Math.max(0, Math.min(fromInclusive, keys.size()));
+        int to = Math.max(from, Math.min(toExclusive, keys.size()));
+        LinkedHashSet<Integer> needed = new LinkedHashSet<>();
+        for (int i = from; i < to; i++) {
+            ShopCatalogManifest.Stub stub = stubsByKey.get(keys.get(i));
+            if (stub != null && stub.chunkId() >= 0) needed.add(stub.chunkId());
+        }
+        pinnedChunks = Set.copyOf(needed);
+        for (Integer chunkId : needed) {
+            if (cachedChunkKeys.containsKey(chunkId)) cachedChunkKeys.get(chunkId); // access-order touch
+            long requestId = STATE.beginRequest(chunkId);
+            if (requestId > 0L) {
+                ShanhaiNetwork.CHANNEL.sendToServer(
+                        new ShopCatalogChunkRequestPacket(STATE.revision(), requestId, chunkId));
+            }
+        }
+        evictOverflow();
+    }
+
     public static boolean acceptChunk(long packetRevision, long requestId, int chunkId,
                                       List<ShopCatalogEntryPayload> payloads) {
         if (!STATE.accept(packetRevision, requestId, chunkId)) return false;
-        pendingChunks.addLast(new PendingChunk(
+        pendingChunks.addLast(new PendingChunk(chunkId,
                 payloads == null ? List.of() : List.copyOf(payloads), 0));
         return true;
     }
@@ -154,7 +192,10 @@ public final class ClientShopCatalog {
         int built = 0;
         while (!pendingChunks.isEmpty() && System.nanoTime() < deadline) {
             PendingChunk pending = pendingChunks.removeFirst();
-            if (pending.done()) continue;
+            if (pending.done()) {
+                finishChunk(pending);
+                continue;
+            }
             ShopCatalogEntryPayload payload = pending.current();
             ShopEntry entry = ShopEntryJsonCodec.fromPayload(payload.json());
             if (entry != null && stubsByKey.containsKey(payload.entryKey())) {
@@ -164,7 +205,8 @@ public final class ClientShopCatalog {
                 built++;
             }
             PendingChunk advanced = pending.advance();
-            if (!advanced.done()) pendingChunks.addFirst(advanced);
+            if (advanced.done()) finishChunk(advanced);
+            else pendingChunks.addFirst(advanced);
         }
         return built;
     }
@@ -206,5 +248,27 @@ public final class ClientShopCatalog {
 
     private static String groupKey(String top, String sub) {
         return (top == null ? "" : top) + '\u0000' + (sub == null ? "" : sub);
+    }
+
+    private static void finishChunk(PendingChunk pending) {
+        LinkedHashSet<Long> keys = new LinkedHashSet<>();
+        for (ShopCatalogEntryPayload payload : pending.entries()) keys.add(payload.entryKey());
+        cachedChunkKeys.put(pending.chunkId(), Set.copyOf(keys));
+        evictOverflow();
+    }
+
+    private static void evictOverflow() {
+        if (cachedChunkKeys.size() <= MAX_CACHED_CHUNKS) return;
+        var iterator = cachedChunkKeys.entrySet().iterator();
+        while (cachedChunkKeys.size() > MAX_CACHED_CHUNKS && iterator.hasNext()) {
+            Map.Entry<Integer, Set<Long>> eldest = iterator.next();
+            if (pinnedChunks.contains(eldest.getKey())) continue;
+            for (Long key : eldest.getValue()) {
+                ShopEntry removed = entriesByKey.remove(key);
+                if (removed != null) keysByEntry.remove(removed);
+            }
+            STATE.forgetChunk(eldest.getKey());
+            iterator.remove();
+        }
     }
 }

@@ -36,6 +36,24 @@ class ClientShopCatalogStateTest {
         assertFalse((boolean) accept.invoke(state, 1L, requestId, 3));
     }
 
+    @Test
+    void evictedChunkCanBeRequestedAgain() throws Exception {
+        Class<?> type = Class.forName(
+                "com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog$State");
+        Object state = type.getConstructor().newInstance();
+        Method apply = type.getMethod("applyManifest", ShopCatalogManifest.class);
+        Method request = type.getMethod("beginRequest", int.class);
+        Method accept = type.getMethod("accept", long.class, long.class, int.class);
+        Method forget = type.getMethod("forgetChunk", int.class);
+        apply.invoke(state, manifest(1L));
+        long requestId = (long) request.invoke(state, 3);
+        assertTrue((boolean) accept.invoke(state, 1L, requestId, 3));
+
+        forget.invoke(state, 3);
+
+        assertTrue((long) request.invoke(state, 3) > 0L);
+    }
+
     private static ShopCatalogManifest manifest(long revision) {
         return new ShopCatalogManifest(revision, true, List.of(
                 new ShopCatalogManifest.Stub(0L, "杂货", "", false,

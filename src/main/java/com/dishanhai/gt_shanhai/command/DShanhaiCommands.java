@@ -620,7 +620,8 @@ public class DShanhaiCommands {
                     instanceof com.dishanhai.gt_shanhai.common.item.WalletItem) {
                 com.dishanhai.gt_shanhai.network.ShanhaiNetwork.CHANNEL.send(
                         net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
-                        new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit));
+                        new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit,
+                                com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
                 return 1;
             }
         }
