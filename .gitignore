@@ -31,6 +31,7 @@ NUL
 # 项目私有配置
 /.claude/
 /.learnings/
+/.worktrees/
 
 # 资源和文档
 /extracted_textures/
