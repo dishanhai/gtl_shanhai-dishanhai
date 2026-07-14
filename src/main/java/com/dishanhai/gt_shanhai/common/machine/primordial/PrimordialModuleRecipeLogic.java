@@ -13,7 +13,6 @@ import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
-import org.gtlcore.gtlcore.api.recipe.IGTRecipe;
 import org.gtlcore.gtlcore.api.recipe.IParallelLogic;
 import org.gtlcore.gtlcore.api.recipe.RecipeCacheStrategy;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
@@ -120,7 +119,6 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                 && isSelectedRecipeType(recipe.recipeType)
                 && matchRecipeInputHandlePartCache(recipe)
                 && RecipeRunnerHelper.matchRecipeOutput(getMachine(), recipe)
-                && IGTRecipe.of(recipe).getEuTier() <= getMachine().getTier()
                 && recipe.checkConditions(this).isSuccess();
     }
 
