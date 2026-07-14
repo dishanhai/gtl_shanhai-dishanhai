@@ -25,6 +25,8 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.nbt.CompoundTag;
 
 import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -39,6 +41,7 @@ import java.util.function.BiConsumer;
  */
 public final class VirtualPatternEncodingHelper {
 
+    private static final Logger LOG = LoggerFactory.getLogger("VirtualPatternEncodingHelper");
     private static final long VIRTUAL_FLUID_MARKER_AMOUNT = 1L;
     private static final int PATTERN_ANALYSIS_CACHE_LIMIT = 4096;
     private static final Map<PatternKey, PatternAnalysis> PATTERN_ANALYSIS_CACHE = new LinkedHashMap<>(128, 0.75F, true) {
@@ -241,6 +244,11 @@ public final class VirtualPatternEncodingHelper {
                 continue;
             }
             if (matched != null) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("[VirtualPatternEncoding] 配方类型 {} 内输出 {} 匹配到多个配方（至少 {} 与 {}），"
+                            + "无法唯一识别，放弃虚拟供料改写/配方类型识别",
+                            recipeTypeId, outputBag, matched.getId(), recipe.getId());
+                }
                 return null;
             }
             matched = recipe;
@@ -355,6 +363,13 @@ public final class VirtualPatternEncodingHelper {
         for (GTRecipe recipe : candidates) {
             if (!matchesRecipe(recipe, inputs, inputBag, outputBag)) continue;
             if (matched != null) {
+                // 多个配方输入输出完全相同（仅电压等属性不同，GT 里不罕见）：无法唯一识别，放弃改写/
+                // 放弃识别配方类型。之前完全静默，玩家只会看到"这张样板不认/不省料"却毫无线索
+                // （ERR-20260714-009）。补一条 debug 日志，方便现场定位是不是撞上了这个歧义分支。
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("[VirtualPatternEncoding] 输出 {} 匹配到多个配方（至少 {} 与 {}），"
+                            + "无法唯一识别，放弃虚拟供料改写/配方类型识别", outputBag, matched.getId(), recipe.getId());
+                }
                 return null;
             }
             matched = recipe;
