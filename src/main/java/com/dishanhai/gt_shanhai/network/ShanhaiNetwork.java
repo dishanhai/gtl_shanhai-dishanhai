@@ -170,6 +170,22 @@ public class ShanhaiNetwork {
                 ShopCatalogStatePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCostPreviewRequestPacket.class,
+                ShopCostPreviewRequestPacket::encode,
+                ShopCostPreviewRequestPacket::new,
+                ShopCostPreviewRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCostPreviewPacket.class,
+                ShopCostPreviewPacket::encode,
+                ShopCostPreviewPacket::new,
+                ShopCostPreviewPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 

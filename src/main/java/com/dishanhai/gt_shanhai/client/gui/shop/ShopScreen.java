@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.shop.ClientCostPreview;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
@@ -15,6 +16,7 @@ import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopActionPacket;
+import com.dishanhai.gt_shanhai.network.ShopCostPreviewRequestPacket;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -140,6 +142,11 @@ public class ShopScreen extends ScaledScreen {
         selected = null;
     }
     private String previewHoverName; // 详情页花费预览槽悬停名（drawDetail 暂存 → renderTooltips 消费）
+    private String previewHoverExtra; // 悬停槽的"拥有/缺少"提示行（drawPreviewSlot 暂存 → renderTooltips 消费），无数据（未同步/加载中）为 null
+    private long previewRequestedKey = -1L;      // 花费预览最近一次发起请求时对应的商品；变了要重新请求
+    private boolean previewRequestedAeMode = false; // 花费预览最近一次发起请求时的 AE 模式状态；切换要重新请求
+    private long previewRequestedAtGameTime = Long.MIN_VALUE; // 最近一次发起请求的游戏刻，供周期性兜底刷新节流
+    private static final long PREVIEW_REFRESH_TICKS = 40L; // 花费预览周期兜底刷新间隔（2秒）：存量会随玩家操作背包/AE网络实时变化
     private ItemStack detailHoverStack; // 详情页商品大图标悬停时暂存的真实 ItemStack（含 SDA 等实时解析 tooltip，drawDetail 暂存 → renderTooltips 消费）
     private boolean descOverlayOpen; // 描述详情大图层（FTBQ 风格）开关
     private int descOverlayScroll;   // 描述详情大图层滚动行数（超出面板高度时用）
@@ -981,6 +988,7 @@ public class ShopScreen extends ScaledScreen {
 
     private void drawDetail(GuiGraphics g, int mx, int my) {
         previewHoverName = null; // 每帧先清，命中预览格再置
+        previewHoverExtra = null; // 每帧先清，命中预览格再置
         detailHoverStack = null; // 每帧先清，命中大图标再置
         descExpandVisible = false; // 每帧先清，描述非空才置
         int dx = detailX();
@@ -1121,7 +1129,8 @@ public class ShopScreen extends ScaledScreen {
 
         // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区。
         // 起点须跟着 contentY 走（原来硬编码 py+50，周期限购把上面内容顶下去后两者间距只剩 2px，字重叠成一坨，见反馈）
-        int cursorY = drawCostPreview(g, cx, contentY + 50, selected.getCost(), DETAIL_W - 16, lowerBottom, mx, my);
+        maybeRequestCostPreview(dcost);
+        int cursorY = drawCostPreview(g, cx, contentY + 50, dcost, amount, DETAIL_W - 16, lowerBottom, mx, my);
 
         if (linkTarget != null) {
             linkVisible = true;
@@ -1603,7 +1612,7 @@ public class ShopScreen extends ScaledScreen {
 
     // ============ 图形化花费预览（图标 + 数量）============
 
-    /** 预览格：物品/货币（真图标）、流体（贴图）或星火（★），带数量与本地化名。 */
+    /** 预览格：物品/货币（真图标）、流体（贴图）或星火（★），带数量、本地化名与「拥有量」（够不够判定用）。 */
     private static final class PreviewCell {
         final ItemStack item;                                   // 物品/货币图标（非物品为 EMPTY）
         final net.minecraft.world.level.material.Fluid fluid;   // 流体（非流体为 null）
@@ -1611,31 +1620,53 @@ public class ShopScreen extends ScaledScreen {
         final String amount;                                    // 数量文本（缩写，槽位小标签；流体带 mB）
         final String exact;                                     // 精确数量文本（带千分位，悬停 tooltip 用；流体带 mB）
         final String name;                                      // 本地化名（悬停）
-        PreviewCell(ItemStack item, net.minecraft.world.level.material.Fluid fluid, boolean spark, String amount, String exact, String name) {
-            this.item = item; this.fluid = fluid; this.spark = spark; this.amount = amount; this.exact = exact; this.name = name;
+        final java.math.BigInteger need;                        // 需要量（已 ×购买次数）
+        final java.math.BigInteger have;                        // 当前拥有量（null=未同步/加载中，不参与判定）
+        PreviewCell(ItemStack item, net.minecraft.world.level.material.Fluid fluid, boolean spark, String amount, String exact,
+                    String name, java.math.BigInteger need, java.math.BigInteger have) {
+            this.item = item; this.fluid = fluid; this.spark = spark; this.amount = amount; this.exact = exact;
+            this.name = name; this.need = need; this.have = have;
         }
     }
 
-    /** 把成本拆成预览格：星火 → 币种 → 物品 → 流体（保序）。 */
-    private static java.util.List<PreviewCell> costCells(ShopCost cost) {
+    /**
+     * 把成本拆成预览格：星火 → 币种 → 物品 → 流体（保序），数量按 times 展开。
+     * have 来源：星火直接读 {@link ClientWalletAccount} 数字余额（本地已同步，无需往返）；
+     * 币种/物品/流体走 {@link ClientCostPreview}（服务端 previewHave 往返，含背包+精妙背包+[AE模式]绑定AE），
+     * 未同步或对不上当前商品/AE模式时为 null——渲染端按"加载中"处理，不误判成"不够"。
+     */
+    private static java.util.List<PreviewCell> costCells(ShopCost cost, long times, long entryKeyForPreview, boolean aeModeForPreview) {
+        java.math.BigInteger t = java.math.BigInteger.valueOf(Math.max(1L, times));
         java.util.List<PreviewCell> cells = new java.util.ArrayList<>();
         if (cost.spark.signum() > 0) {
-            cells.add(new PreviewCell(ItemStack.EMPTY, null, true, formatBig(cost.spark), groupBig(cost.spark), "★星火（数字余额）"));
+            java.math.BigInteger need = cost.spark.multiply(t);
+            cells.add(new PreviewCell(ItemStack.EMPTY, null, true, formatBig(need), groupBig(need),
+                    "★星火（数字余额）", need, ClientWalletAccount.getDigital()));
         }
         for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
+            java.math.BigInteger need = c.getValue().multiply(t);
+            java.math.BigInteger have = ClientCostPreview.coinHave(entryKeyForPreview, aeModeForPreview, c.getKey());
             cells.add(new PreviewCell(currencyStack(c.getKey()), null, false,
-                    formatBig(c.getValue()), groupBig(c.getValue()), ShopPurchase.coinName(c.getKey())));
+                    formatBig(need), groupBig(need), ShopPurchase.coinName(c.getKey()), need, have));
         }
-        for (ExchangeEntry.Ingredient in : cost.items()) {
-            java.math.BigInteger cnt = java.math.BigInteger.valueOf(in.count);
+        java.util.List<ExchangeEntry.Ingredient> itemIns = cost.items();
+        for (int i = 0; i < itemIns.size(); i++) {
+            ExchangeEntry.Ingredient in = itemIns.get(i);
+            java.math.BigInteger need = java.math.BigInteger.valueOf(in.count).multiply(t);
+            Long haveL = ClientCostPreview.itemHave(entryKeyForPreview, aeModeForPreview, i);
+            java.math.BigInteger have = haveL != null ? java.math.BigInteger.valueOf(haveL) : null;
             cells.add(new PreviewCell(in.makeUnitStack(), null, false,
-                    formatBig(cnt), groupBig(cnt), ingredientName(in)));
+                    formatBig(need), groupBig(need), ingredientName(in), need, have));
         }
-        for (ExchangeEntry.Ingredient in : cost.fluids()) {
+        java.util.List<ExchangeEntry.Ingredient> fluidIns = cost.fluids();
+        for (int i = 0; i < fluidIns.size(); i++) {
+            ExchangeEntry.Ingredient in = fluidIns.get(i);
             net.minecraft.world.level.material.Fluid f = net.minecraftforge.registries.ForgeRegistries.FLUIDS.getValue(in.id);
-            java.math.BigInteger cnt = java.math.BigInteger.valueOf(in.count);
+            java.math.BigInteger need = java.math.BigInteger.valueOf(in.count).multiply(t);
+            Long haveL = ClientCostPreview.fluidHave(entryKeyForPreview, aeModeForPreview, i);
+            java.math.BigInteger have = haveL != null ? java.math.BigInteger.valueOf(haveL) : null;
             cells.add(new PreviewCell(ItemStack.EMPTY, f, false,
-                    formatBig(cnt) + "mB", groupBig(cnt) + "mB", ingredientName(in)));
+                    formatBig(need) + "mB", groupBig(need) + "mB", ingredientName(in), need, have));
         }
         return cells;
     }
@@ -1661,7 +1692,7 @@ public class ShopScreen extends ScaledScreen {
         } catch (Exception ignored) {}
     }
 
-    /** 单个预览格：棋盘槽底 + 图标 + 槽下数量。 */
+    /** 单个预览格：棋盘槽底 + 图标 + 槽下数量（够=绿，不够=红，未同步/加载中=白）。 */
     private void drawPreviewSlot(GuiGraphics g, int x, int y, PreviewCell cell, boolean hover) {
         EditorWidgets.checkerSlot(g, x, y, hover);
         if (cell.spark) {
@@ -1671,17 +1702,19 @@ public class ShopScreen extends ScaledScreen {
         } else if (cell.item != null && !cell.item.isEmpty()) {
             g.renderItem(cell.item, x + 2, y + 2);
         }
-        g.drawCenteredString(this.font, "§f" + cell.amount, x + 10, y + 22, WHITE);
+        String prefix = cell.have == null ? "§f" : (cell.have.compareTo(cell.need) >= 0 ? "§a" : "§c");
+        g.drawCenteredString(this.font, prefix + cell.amount, x + 10, y + 22, WHITE);
     }
 
     /**
      * 图形化花费预览：一排图标槽（货币/物品真图标、流体贴图、星火★）+ 数量，超宽换行、超界省略。
-     * @return 预览区结束后的 y（供描述接续）。悬停格把本地化名写入 {@link #previewHoverName}。
+     * 数量按 amount（购买次数）展开；格子颜色标出是否够（绿/红），未知（加载中）为白。
+     * @return 预览区结束后的 y（供描述接续）。悬停格把本地化名 + 拥有/缺少写入 {@link #previewHoverName}/{@link #previewHoverExtra}。
      */
-    private int drawCostPreview(GuiGraphics g, int x, int y, ShopCost cost, int maxW, int maxBottom, int mx, int my) {
+    private int drawCostPreview(GuiGraphics g, int x, int y, ShopCost cost, long times, int maxW, int maxBottom, int mx, int my) {
         g.drawString(this.font, "§6花费预览:", x, y, GOLD, true);
         int sy = y + 12;
-        java.util.List<PreviewCell> cells = costCells(cost);
+        java.util.List<PreviewCell> cells = costCells(cost, times, selectedEntryKey, aeMode);
         if (cells.isEmpty()) {
             g.drawString(this.font, "§8免费", x, sy, GRAY, true);
             return sy + 12;
@@ -1701,10 +1734,38 @@ public class ShopScreen extends ScaledScreen {
             PreviewCell cell = cells.get(i);
             boolean hv = GuiRenderUtil.isHovering(mx, my, sx, syy, 20, 20);
             drawPreviewSlot(g, sx, syy, cell, hv);
-            if (hv) previewHoverName = "§f" + cell.name + " §7×" + cell.exact;
+            if (hv) {
+                previewHoverName = "§f" + cell.name + " §7×" + cell.exact;
+                if (cell.have == null) {
+                    previewHoverExtra = "§7库存核对中…";
+                } else if (cell.have.compareTo(cell.need) >= 0) {
+                    previewHoverExtra = "§a拥有: " + groupBig(cell.have);
+                } else {
+                    previewHoverExtra = "§c拥有: " + groupBig(cell.have) + " §7(缺 " + groupBig(cell.need.subtract(cell.have)) + ")";
+                }
+            }
             endY = syy + pitchY;
         }
         return endY;
+    }
+
+    /**
+     * 花费预览「拥有量」的服务端往返节流：选中商品切换 / AE 模式切换立即重新请求，
+     * 之外每 {@link #PREVIEW_REFRESH_TICKS} 刻兜底刷新一次（玩家挖到/存入物品、AE网络存量变化不会主动推送）。
+     * 纯星火成本（无币种/无实物）不用往返——{@link ClientWalletAccount} 本地已同步，见 {@link #costCells}。
+     */
+    private void maybeRequestCostPreview(ShopCost cost) {
+        if (cost.coins.isEmpty() && cost.physical.isEmpty()) return;
+        net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
+        long gameTime = lvl != null ? lvl.getGameTime() : 0L;
+        boolean stale = selectedEntryKey != previewRequestedKey || aeMode != previewRequestedAeMode
+                || gameTime - previewRequestedAtGameTime >= PREVIEW_REFRESH_TICKS;
+        if (!stale) return;
+        previewRequestedKey = selectedEntryKey;
+        previewRequestedAeMode = aeMode;
+        previewRequestedAtGameTime = gameTime;
+        ShanhaiNetwork.CHANNEL.sendToServer(
+                new ShopCostPreviewRequestPacket(ClientShopCatalog.revision(), selectedEntryKey, aeMode));
     }
 
     /** 多元成本紧凑单行（星火/币种/物品/流体）。 */
@@ -1830,9 +1891,16 @@ public class ShopScreen extends ScaledScreen {
             g.renderTooltip(this.font, detailHoverStack, mx, my);
             return;
         }
-        // 悬停详情页花费预览格：显示本地化名 + 数量（drawDetail 每帧暂存）
+        // 悬停详情页花费预览格：显示本地化名 + 数量，外加拥有/缺少（drawCostPreview 每帧暂存）
         if (previewHoverName != null) {
-            g.renderTooltip(this.font, Component.literal(previewHoverName), mx, my);
+            if (previewHoverExtra != null) {
+                List<Component> lines = new ArrayList<>();
+                lines.add(Component.literal(previewHoverName));
+                lines.add(Component.literal(previewHoverExtra));
+                g.renderComponentTooltip(this.font, lines, mx, my);
+            } else {
+                g.renderTooltip(this.font, Component.literal(previewHoverName), mx, my);
+            }
             return;
         }
         // 悬停商品格：坐标直接反算唯一索引，不再逐格扫描。

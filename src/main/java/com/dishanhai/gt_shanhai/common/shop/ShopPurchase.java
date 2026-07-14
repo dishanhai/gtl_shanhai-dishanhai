@@ -594,6 +594,67 @@ public final class ShopPurchase {
     }
 
     /**
+     * 花费预览用只读余量（{@code SIMULATE}，不扣任何东西）：币种/物品/流体各自「当前可用总量」，
+     * 供客户端「花费预览」格子显示玩家是否够、缺多少，供货渠道与 {@link #affordAndDeduct} 的 aff 计算一致——
+     * 币种含账户虚拟余额+背包+精妙背包，物品含背包+精妙背包，流体只走 AE（无背包容器概念）；
+     * AE 网络那部分只在 aeMode 为真时才计入，对齐商店顶栏「AE模式」开关的玩家预期（该开关平时只管交付去向，
+     * 这里额外用它来控制预览是否把 AE 存量算进"够不够"，避免没开 AE 模式却显示"够"实际却买不到的错觉）。
+     * 不含星火——星火纯数字账户余额，客户端已有 {@link WalletAccountAPI} 同步的快照可直接比对，不必打这趟往返。
+     * @return coins 按 {@link ShopCost#coins} 同 key；items/fluids 顺序对齐 {@link ShopCost#items()}/{@link ShopCost#fluids()}
+     */
+    public static CostPreview previewHave(ServerPlayer player, ShopCost cost, boolean aeMode) {
+        java.util.Map<ResourceLocation, BigInteger> coinsHave = new java.util.LinkedHashMap<>();
+        java.util.List<Long> itemsHave = new java.util.ArrayList<>();
+        java.util.List<Long> fluidsHave = new java.util.ArrayList<>();
+        if (player == null || cost == null) return new CostPreview(coinsHave, itemsHave, fluidsHave);
+        MinecraftServer server = player.getServer();
+        UUID uuid = player.getUUID();
+
+        for (java.util.Map.Entry<ResourceLocation, BigInteger> c : cost.coins.entrySet()) {
+            BigInteger have = server != null ? WalletAccountAPI.getCurrency(server, uuid, c.getKey()) : BigInteger.ZERO;
+            Item coin = ForgeRegistries.ITEMS.getValue(c.getKey());
+            if (coin != null) {
+                have = have.add(BigInteger.valueOf(countItem(player, coin)));
+                have = have.add(BigInteger.valueOf(ShopBackpack.countItem(player, coin, null)));
+                if (aeMode) {
+                    appeng.api.stacks.AEItemKey ck = appeng.api.stacks.AEItemKey.of(new ItemStack(coin));
+                    if (ck != null) have = have.add(BigInteger.valueOf(ShopAeNetwork.availableForPlayer(player, ck)));
+                }
+            }
+            coinsHave.put(c.getKey(), have);
+        }
+        for (ExchangeEntry.Ingredient in : cost.items()) {
+            Item item = ForgeRegistries.ITEMS.getValue(in.id);
+            long have = 0L;
+            if (item != null) {
+                long inv = countItem(player, item, in.nbt());
+                long backpack = ShopBackpack.countItem(player, item, in.nbt());
+                have = (inv > Long.MAX_VALUE - backpack) ? Long.MAX_VALUE : inv + backpack;
+                if (aeMode) {
+                    appeng.api.stacks.AEItemKey aek = appeng.api.stacks.AEItemKey.of(in.makeUnitStack());
+                    if (aek != null) {
+                        long ae = ShopAeNetwork.availableForPlayer(player, aek);
+                        have = (have > Long.MAX_VALUE - ae) ? Long.MAX_VALUE : have + ae;
+                    }
+                }
+            }
+            itemsHave.add(have);
+        }
+        for (ExchangeEntry.Ingredient in : cost.fluids()) {
+            long have = 0L;
+            if (aeMode) {
+                net.minecraft.world.level.material.Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
+                if (fluid != null) have = ShopAeNetwork.availableForPlayer(player, appeng.api.stacks.AEFluidKey.of(fluid));
+            }
+            fluidsHave.add(have);
+        }
+        return new CostPreview(coinsHave, itemsHave, fluidsHave);
+    }
+
+    /** {@link #previewHave} 的返回值：coins 按币种 ID，items/fluids 按 {@link ShopCost#items()}/{@link ShopCost#fluids()} 下标对齐。 */
+    public record CostPreview(java.util.Map<ResourceLocation, BigInteger> coins, java.util.List<Long> items, java.util.List<Long> fluids) {}
+
+    /**
      * 直接获取（作弊模式）：不结算任何成本，直接把 times 份商品交付给玩家。
      * 仅当 {@link ShopCheatMode#isEnabled} 为该玩家开启时，由 ShopActionPacket.doBuy 调用。
      * 交付走与购买同款分层逻辑（AE注入 / SDA打包 / 背包）。

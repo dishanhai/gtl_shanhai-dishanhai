@@ -172,18 +172,26 @@ public class QuantumCraftingCPULogic {
             expectedContainerItems.reset();
             KeyCounter[] craftingContainer = null;
             boolean needsExtraction = true;
+            // 抽取容器时锁定的口径：是否按 gtlcore 批量方式抽取、抽取时对应的整批份数。
+            // 之后无论这个容器最终被推给哪个 provider，扣任务计数都必须用抽取时锁定的这两个值，
+            // 不能用当前遍历到的 provider 重新算的口径——否则同一样板挂了多个 provider（比如
+            // 普通 provider 排前面、gtlcore 批量 provider 排后面）时，容器只按前者抽了一份原料，
+            // 却会被当作后者的整批份数直接把任务清零，造成"几乎不扣料却整批完成"的复制漏洞。
+            boolean extractedAsBulk = false;
+            long extractedBulkAmount = 0L;
             for (ICraftingProvider provider : craftingService.getProviders(details)) {
                 boolean gtlCoreBulkProvider = processingPattern
                         && (provider instanceof IMEPatternPartMachine || provider instanceof IMECraftIOPart);
-                // 批量样式（gtlCore ME 模式总线）：一次 pushPattern 把整批 task.value 全部发出，
-                // 与 GTLcore 原生 executeCrafting 行为一致（extractForProcessingPattern 的 multiplier
-                // = 整批份数），这是高发配量的来源。进度可见性由菜单 broadcastChanges 同步通道负责，
-                // 不再靠分片推送（分片会把发配量掐成涓流，见 LRN-029）。
-                long bulkThisPush = gtlCoreBulkProvider ? task.getValue().value : 0L;
                 if (needsExtraction) {
+                    // 批量样式（gtlCore ME 模式总线）：一次 pushPattern 把整批 task.value 全部发出，
+                    // 与 GTLcore 原生 executeCrafting 行为一致（extractForProcessingPattern 的 multiplier
+                    // = 整批份数），这是高发配量的来源。进度可见性由菜单 broadcastChanges 同步通道负责，
+                    // 不再靠分片推送（分片会把发配量掐成涓流，见 LRN-029）。
+                    extractedAsBulk = gtlCoreBulkProvider;
+                    extractedBulkAmount = gtlCoreBulkProvider ? task.getValue().value : 0L;
                     craftingContainer = gtlCoreBulkProvider
                             ? AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory,
-                                    expectedOutputs, bulkThisPush)
+                                    expectedOutputs, extractedBulkAmount)
                             : CraftingCpuHelper.extractPatternInputs(details, inventory, level,
                                     expectedOutputs, expectedContainerItems);
                     needsExtraction = false;
@@ -208,10 +216,18 @@ public class QuantumCraftingCPULogic {
                     postChange(containerItem.getKey());
                 }
                 cpu.markDirty();
-                if (gtlCoreBulkProvider) {
+                // pushPattern 成功后，容器里的原料所有权已经转移给 provider（对应的真实扣料已经在
+                // 上面 extractForProcessingPattern/extractPatternInputs 里从 inventory 扣掉了）。
+                // 这里必须立刻置空 craftingContainer，否则跳出 for 循环后"craftingContainer != null
+                // 就 reinject 把原料退回 inventory"的收尾逻辑会把已经成功发配、provider 已经照单产出的
+                // 原料重新塞回去——变成扣了料又把料退回，provider 那边却已经产出了，等于凭空复制一份。
+                // 这个坑是从 gtlcore 原生 CraftingCpuLogicMixin.executeCrafting 抄过来的，原生代码同样
+                // 只在"同一 task 还要继续推下一份"的分支里置空，success 后其余 break 路径都没置空。
+                craftingContainer = null;
+                if (extractedAsBulk) {
                     postTaskOutputsChanged(details);
-                    // 整批一次发配完成：本次推送了 bulkThisPush(=整批) 份，task 归零并移除。
-                    task.getValue().value -= bulkThisPush;
+                    // 整批一次发配完成：本次推送了抽取时锁定的 extractedBulkAmount(=整批) 份，与实际扣料量一致。
+                    task.getValue().value -= extractedBulkAmount;
                     if (task.getValue().value <= 0) {
                         iterator.remove();
                     }
@@ -229,7 +245,6 @@ public class QuantumCraftingCPULogic {
                 }
                 expectedOutputs.reset();
                 expectedContainerItems.reset();
-                craftingContainer = null;
                 needsExtraction = true;
             }
             if (craftingContainer != null) {

@@ -16,7 +16,9 @@ import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -53,6 +55,28 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     private long cachedLookupTick = Long.MIN_VALUE;
     private Set<GTRecipe> cachedLookupRecipes;
 
+    // 按配方类型拆分的子缓存 + 稳态自适应退避：解决"选中多个配方类型时，每次真正重搜（整集缓存过期/
+    // 结果变化）都要对每个选中类型各调一次昂贵的 type.getLookup().getRecipeIterator()"的开销。
+    // 每个类型独立记录自己的候选集与过期窗口——未变化的类型不必跟着"某一个类型的候选变了"陪绑重搜。
+    // 窗口本身会退避：连续 STABLE_HITS_TO_GROW 次重搜结果都和上次完全一致（同一批 GTRecipe），
+    // 说明这个类型的候选面处于稳态，窗口翻倍（封顶 MAX_LOOKUP_CACHE_TICKS）；结果一变或本次为空
+    // 立刻打回基础窗口，绝不让"退避到很久之后才重搜"发生在候选面真的在变化的类型上。
+    // 与整集缓存的关系：只是整集缓存 miss 后、逐类型重搜阶段的加速层，不改变整集缓存本身的任何
+    // 失效触发点（选择集变更 invalidateLookupSetCache 会连同这里一起清空；calculateParallels 因
+    // 材料不足触发的失效同样会清空——完整保留"材料不足时必须能快速重搜命中空集"这条已验证过的
+    // 保险，退避只发生在"持续稳定产出"的路径上，不会重现 307μs→761μs 那次回归）。
+    private static final long MAX_LOOKUP_CACHE_TICKS = 200L;
+    private static final int STABLE_HITS_TO_GROW = 2;
+
+    private static final class TypeCacheEntry {
+        long cachedTick = Long.MIN_VALUE;
+        long cacheWindow = DEFAULT_LOOKUP_CACHE_TICKS;
+        int stableHits = 0;
+        Set<GTRecipe> recipes = Collections.emptySet();
+    }
+
+    private final Map<GTRecipeType, TypeCacheEntry> perTypeLookupCache = new HashMap<>();
+
     public SelectableRecipeTypeSetRecipeLogic(SelectableRecipeTypeSetMachine machine) {
         super(machine);
     }
@@ -80,6 +104,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     protected void invalidateLookupSetCache() {
         cachedLookupTick = Long.MIN_VALUE;
         cachedLookupRecipes = null;
+        perTypeLookupCache.clear();
     }
 
     /**
@@ -143,23 +168,64 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     }
 
     private Set<GTRecipe> searchSelectedRecipeTypes(SelectableRecipeTypeSetMachine machine) {
+        long tick = machine.getOffsetTimer();
         Set<GTRecipe> recipes = new ObjectOpenHashSet<>();
         for (GTRecipeType type : machine.getRecipeTypes()) {
             if (type == null) {
                 continue;
             }
-            Iterator<GTRecipe> iterator = type.getLookup().getRecipeIterator(machine, this::checkRecipe);
-            if (iterator == null) {
-                continue;
-            }
+            recipes.addAll(searchOneRecipeTypeCached(type, machine, tick));
+        }
+        return recipes;
+    }
+
+    /**
+     * 单个配方类型的子缓存查找 + 稳态自适应退避，详见字段注释。命中直接返回上次候选集，
+     * 不命中才真正调用一次 {@code type.getLookup().getRecipeIterator()}。
+     */
+    private Set<GTRecipe> searchOneRecipeTypeCached(GTRecipeType type, SelectableRecipeTypeSetMachine machine, long tick) {
+        TypeCacheEntry entry = perTypeLookupCache.get(type);
+        if (entry != null
+                && !entry.recipes.isEmpty()
+                && tick - entry.cachedTick >= 0 && tick - entry.cachedTick < entry.cacheWindow) {
+            return entry.recipes;
+        }
+        Set<GTRecipe> found = new ObjectOpenHashSet<>();
+        Iterator<GTRecipe> iterator = type.getLookup().getRecipeIterator(machine, this::checkRecipe);
+        if (iterator != null) {
             while (iterator.hasNext()) {
                 GTRecipe recipe = iterator.next();
                 if (recipe != null) {
-                    recipes.add(recipe);
+                    found.add(recipe);
                 }
             }
         }
-        return recipes;
+        if (entry == null) {
+            entry = new TypeCacheEntry();
+            perTypeLookupCache.put(type, entry);
+        }
+        if (found.isEmpty()) {
+            // 空结果不缓存/不退避：和整集缓存同款保险，类型暂无候选时保持基础窗口，料一到立刻重搜。
+            entry.cachedTick = Long.MIN_VALUE;
+            entry.cacheWindow = DEFAULT_LOOKUP_CACHE_TICKS;
+            entry.stableHits = 0;
+            entry.recipes = Collections.emptySet();
+            return entry.recipes;
+        }
+        if (found.equals(entry.recipes)) {
+            entry.stableHits++;
+            if (entry.stableHits >= STABLE_HITS_TO_GROW) {
+                entry.cacheWindow = Math.min(MAX_LOOKUP_CACHE_TICKS, entry.cacheWindow * 2);
+                entry.stableHits = 0;
+            }
+        } else {
+            // 候选集变了：说明这个类型的可选面并不稳定，打回基础窗口重新起算退避。
+            entry.stableHits = 0;
+            entry.cacheWindow = DEFAULT_LOOKUP_CACHE_TICKS;
+        }
+        entry.cachedTick = tick;
+        entry.recipes = found;
+        return entry.recipes;
     }
 
     private Set<GTRecipe> lookupLockedRecipe() {
