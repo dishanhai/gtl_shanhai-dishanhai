@@ -16,6 +16,7 @@ import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongMaps;
 import it.unimi.dsi.fastutil.objects.ObjectIterator;
 
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 
@@ -67,7 +68,13 @@ public final class PatternNotConsumableFilter {
             return isItemNotConsumable(recipe, itemKey.toStack());
         }
         if (key instanceof AEFluidKey fluidKey) {
-            return isFluidNotConsumable(recipe, FluidStack.create(fluidKey.getFluid(), 1L));
+            // 必须带上 AEFluidKey 自身的 NBT/tag（与本库其它流体匹配处一致，如
+            // VirtualPatternEncodingHelper#matchFluidContents），否则带 NBT 的流体催化剂在这里
+            // 会被当成"裸流体"测试，配方的 FluidIngredient 若依赖该 NBT 判断就会误判成消耗性输入，
+            // 执行后被 strip 清空——这正是本方法要防止的那类 bug，只是换到了流体这一侧。
+            CompoundTag tag = fluidKey.toTag();
+            CompoundTag nbt = tag.contains("tag", 10) ? tag.getCompound("tag") : null;
+            return isFluidNotConsumable(recipe, FluidStack.create(fluidKey.getFluid(), 1L, nbt));
         }
         return false;
     }

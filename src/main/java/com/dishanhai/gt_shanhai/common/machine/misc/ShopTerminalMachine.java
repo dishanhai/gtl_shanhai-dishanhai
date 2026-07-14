@@ -132,6 +132,11 @@ public class ShopTerminalMachine extends MetaMachine
         return grid == null ? null : grid.getStorageService().getInventory();
     }
 
+    @Override
+    public appeng.api.networking.IGrid grid() {
+        return getMainNode().getGrid();
+    }
+
     public String getJadeBoundPlayerText() {
         if (boundPlayerId == null) return "未绑定";
         return boundPlayerName == null || boundPlayerName.isBlank() ? boundPlayerId.toString() : boundPlayerName;

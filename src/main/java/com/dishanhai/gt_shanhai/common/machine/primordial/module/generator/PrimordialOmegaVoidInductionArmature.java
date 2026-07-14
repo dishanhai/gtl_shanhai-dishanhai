@@ -291,6 +291,9 @@ public class PrimordialOmegaVoidInductionArmature extends PrimordialOmegaEngineM
         return getCircuitParallel();
     }
 
+    @Override
+    public long getCurrentParallel() { return getMaxParallel(); }
+
     private int getCircuitParallel() {
         if (circuitNumber <= 0) return 0;
         if (circuitNumber >= 16) return Integer.MAX_VALUE;

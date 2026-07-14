@@ -174,6 +174,11 @@ public class FtbqAeSubmitterMachine extends MetaMachine
     }
 
     @Override
+    public appeng.api.networking.IGrid grid() {
+        return getMainNode().getGrid();
+    }
+
+    @Override
     public IManagedGridNode getMainNode() {
         return nodeHolder.getMainNode();
     }

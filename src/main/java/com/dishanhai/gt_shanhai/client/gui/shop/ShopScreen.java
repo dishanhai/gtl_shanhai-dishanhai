@@ -171,6 +171,9 @@ public class ShopScreen extends ScaledScreen {
     private int guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH;
     private boolean guideOverlayOpen;
     private int guideOverlayScroll;
+    // 「补齐全部缺口」按钮：花费预览格有确定不够的项、且开着 AE 模式才出现，跟链接/指南同一套暂存坐标+点击消费的路数
+    private boolean autoCraftBtnVisible;
+    private int autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH;
 
     // ===== 动态面板尺寸（每次 initScaled 重算）=====
     private int left, top, panelWidth, panelHeight;
@@ -1125,7 +1128,11 @@ public class ShopScreen extends ScaledScreen {
                 ? ClientShopCatalog.linkedEntryKey(selected.getLinkTo()) : -1L;
         linkTarget = linkTargetKey >= 0L ? ClientShopCatalog.get(linkTargetKey) : null;
         int linkRowH = linkTarget != null ? 12 : 0;
-        int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH - guideRowH; // 底部按钮上沿（编辑权多两排按钮，跳转/指南各让一行）
+        // 「补齐全部缺口」：只在确定（非"加载中"）有不够的项、且开着 AE 模式时出现——AE 自动合成只对着 AE 网络补，
+        // 关了 AE 模式点这个没意义（缺口判定本身也不含 AE 那部分，见 hasCostShortfall）。
+        boolean showAutoCraftBtn = mode == Mode.BUY && aeMode && hasCostShortfall(dcost, amount, selectedEntryKey, aeMode);
+        int autoCraftRowH = showAutoCraftBtn ? 12 : 0;
+        int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH - guideRowH - autoCraftRowH; // 底部按钮上沿（编辑权多两排按钮，跳转/指南/补齐缺口各让一行）
 
         // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区。
         // 起点须跟着 contentY 走（原来硬编码 py+50，周期限购把上面内容顶下去后两者间距只剩 2px，字重叠成一坨，见反馈）
@@ -1158,6 +1165,13 @@ public class ShopScreen extends ScaledScreen {
                     "§d指南详情(" + guideHits.size() + ")", mx, my);
         }
 
+        // 「补齐全部缺口」：花费预览格有确定缺口时出现，点了向服务端起一轮 AE 自动合成计算
+        autoCraftBtnVisible = showAutoCraftBtn;
+        if (showAutoCraftBtn) {
+            autoCraftBtnX = cx; autoCraftBtnY = lowerBottom + 2 + linkRowH + guideRowH; autoCraftBtnW = DETAIL_W - 16; autoCraftBtnH = 10;
+            drawButton(g, autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH, "§b⚙ 补齐全部缺口（AE自动合成）", mx, my);
+        }
+
         // 描述（玩家自定义，自动换行；接在预览下方）
         String desc = selected.getDescription();
         if (desc != null && !desc.isEmpty() && cursorY + 12 < lowerBottom) {
@@ -1179,7 +1193,7 @@ public class ShopScreen extends ScaledScreen {
             }
         }
         boolean canTrade = mode == Mode.BUY
-                ? canAffordClient(selected.getCost())
+                ? canAffordClient(selected.getCost(), amount)
                 : (!selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
                     && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, DETAIL_W - 16, 20);
@@ -1359,6 +1373,13 @@ public class ShopScreen extends ScaledScreen {
         if (guideDetailBtnVisible && hit(mx, my, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH)) {
             guideOverlayOpen = true;
             guideOverlayScroll = 0;
+            return true;
+        }
+        // 「补齐全部缺口」：向服务端起一轮 AE 自动合成计算，算完服务端会推确认框
+        if (autoCraftBtnVisible && selected != null && hit(mx, my, autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH)) {
+            long entryKey = ClientShopCatalog.keyOf(selected);
+            ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
+                    ClientShopCatalog.revision(), entryKey, amount, aeMode));
             return true;
         }
         // 展开描述详情（drawDetail 渲染时暂存的按钮坐标，命中即开大图层）
@@ -1816,20 +1837,61 @@ public class ShopScreen extends ScaledScreen {
         return sb.length() == 0 ? "§8无" : sb.toString();
     }
 
-    /** 客户端粗略可购判定：星火/币种查钱包缓存、物品查背包；流体客户端无法查（服务端裁决）。 */
-    private boolean canAffordClient(ShopCost cost) {
-        if (cost.spark.signum() > 0 && ClientWalletAccount.getDigital().compareTo(cost.spark) < 0) return false;
+    /**
+     * 客户端可购判定（按钮变色的视觉提示，不是硬门槛——点击不看这个，服务端 {@code affordAndDeduct} 才是权威裁决，
+     * 见 universalMouseClicked 里确认购买直接 send，不查 canTrade）。
+     * 口径必须和「花费预览」格子一致：星火走 {@link ClientWalletAccount} 数字余额；币种/物品/流体都走
+     * {@link ClientCostPreview}（服务端 previewHave 往返，含背包+精妙背包+[AE模式]绑定AE）——否则会出现预览格
+     * 全绿、按钮却仍显示红的观感割裂（见反馈）。往返数据还没同步回来时保守按"不够"处理，数据到位自动转绿。
+     */
+    private boolean canAffordClient(ShopCost cost, long times) {
+        java.math.BigInteger t = java.math.BigInteger.valueOf(Math.max(1L, times));
+        if (cost.spark.signum() > 0 && ClientWalletAccount.getDigital().compareTo(cost.spark.multiply(t)) < 0) return false;
         for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
-            if (ClientWalletAccount.getCurrency(c.getKey()).compareTo(c.getValue()) < 0) return false;
+            java.math.BigInteger need = c.getValue().multiply(t);
+            java.math.BigInteger have = ClientCostPreview.coinHave(selectedEntryKey, aeMode, c.getKey());
+            if (have == null || have.compareTo(need) < 0) return false;
         }
-        var player = Minecraft.getInstance().player;
-        for (ExchangeEntry.Ingredient in : cost.physical) {
-            if (in.isFluid) continue; // 流体交给服务端裁决
-            net.minecraft.world.item.Item item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(in.id);
-            if (item == null || player == null) return false;
-            if (ShopPurchase.countItem(player, item) < in.count) return false;
+        java.util.List<ExchangeEntry.Ingredient> itemIns = cost.items();
+        for (int i = 0; i < itemIns.size(); i++) {
+            java.math.BigInteger need = java.math.BigInteger.valueOf(itemIns.get(i).count).multiply(t);
+            Long have = ClientCostPreview.itemHave(selectedEntryKey, aeMode, i);
+            if (have == null || java.math.BigInteger.valueOf(have).compareTo(need) < 0) return false;
+        }
+        java.util.List<ExchangeEntry.Ingredient> fluidIns = cost.fluids();
+        for (int i = 0; i < fluidIns.size(); i++) {
+            java.math.BigInteger need = java.math.BigInteger.valueOf(fluidIns.get(i).count).multiply(t);
+            Long have = ClientCostPreview.fluidHave(selectedEntryKey, aeMode, i);
+            if (have == null || java.math.BigInteger.valueOf(have).compareTo(need) < 0) return false;
         }
         return true;
+    }
+
+    /**
+     * 是否存在「确定」不够的成本项（have 已同步且 < need）——只用来决定「补齐全部缺口」按钮出不出现，
+     * 跟 {@link #canAffordClient} 的区别是：未同步（have==null）这里不算缺口，避免刚切商品/切AE模式那一瞬间
+     * 按钮闪现又消失。
+     */
+    private static boolean hasCostShortfall(ShopCost cost, long times, long entryKeyForPreview, boolean aeModeForPreview) {
+        java.math.BigInteger t = java.math.BigInteger.valueOf(Math.max(1L, times));
+        for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
+            java.math.BigInteger need = c.getValue().multiply(t);
+            java.math.BigInteger have = ClientCostPreview.coinHave(entryKeyForPreview, aeModeForPreview, c.getKey());
+            if (have != null && have.compareTo(need) < 0) return true;
+        }
+        java.util.List<ExchangeEntry.Ingredient> itemIns = cost.items();
+        for (int i = 0; i < itemIns.size(); i++) {
+            java.math.BigInteger need = java.math.BigInteger.valueOf(itemIns.get(i).count).multiply(t);
+            Long have = ClientCostPreview.itemHave(entryKeyForPreview, aeModeForPreview, i);
+            if (have != null && java.math.BigInteger.valueOf(have).compareTo(need) < 0) return true;
+        }
+        java.util.List<ExchangeEntry.Ingredient> fluidIns = cost.fluids();
+        for (int i = 0; i < fluidIns.size(); i++) {
+            java.math.BigInteger need = java.math.BigInteger.valueOf(fluidIns.get(i).count).multiply(t);
+            Long have = ClientCostPreview.fluidHave(entryKeyForPreview, aeModeForPreview, i);
+            if (have != null && java.math.BigInteger.valueOf(have).compareTo(need) < 0) return true;
+        }
+        return false;
     }
 
     /** 悬停货币格返回其全名（供 tooltip）。坐标须与 drawCurrencyBar 完全一致。 */

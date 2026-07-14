@@ -164,6 +164,17 @@ public class GTDishanhaiMod {
                     com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.exportIfNeeded(e.getServer());
                 });
 
+        // 样板身份/输出识别缓存（VirtualPatternEncodingHelper 的 PATTERN_ANALYSIS_CACHE/recipeOutputIndex、
+        // MEPatternBufferRecipeCacheRevisionMixin 的槽位配方缓存）只在本模组自己的配方修改 API
+        // （剥离/替换/删除等）调用时才失效，此前不随原版 /reload（数据包重载）更新——会话中执行
+        // /reload 后这些缓存会继续持有旧 RecipeManager 的 GTRecipe 引用，新增配方识别不到、
+        // 被删配方仍会命中，直到重启前不自愈（ERR-20260714-009）。OnDatapackSyncEvent 在服务端
+        // 数据包重载完成、同步给客户端前触发，覆盖 /reload 与玩家加入两种场景。
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                (net.minecraftforge.event.OnDatapackSyncEvent event) -> {
+                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.invalidatePatternCaches("datapack-sync");
+                });
+
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                 net.minecraftforge.eventbus.api.EventPriority.HIGHEST,
                 (net.minecraftforge.event.entity.player.PlayerInteractEvent.RightClickBlock event) -> {

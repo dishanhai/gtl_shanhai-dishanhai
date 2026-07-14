@@ -75,13 +75,37 @@ public final class PatternIdentityMatcher {
     // 故这里只要求配方的主产物（首个物品输出 / 首个流体输出）落在样板输出集合中。
     // ---------------------------------------------------------------------
 
+    /**
+     * 只校验"样板里实际保留的那条产物线"，不是物品线和流体线各自独立校验再 AND/OR。
+     * {@code keepByProduct=false} 时样板的稀疏输出只保留了"首个"产物——可能是物品也可能是流体，
+     * 另一种类型在样板里天然是空集，不代表"配方没有这种产物"，只代表"这种产物被剥离、无法验证"。
+     * <p>
+     * 原实现是 {@code primaryItemOutputMatches && primaryFluidOutputMatches}：对同时有物品输出和
+     * 流体输出的配方（GT 里很常见：电解、离心、化学反应等），两条线都要求命中，但样板永远只保留
+     * 其中一条，被剥离的那条对着空的样板输出集合必然判不通过——导致这类配方连自己那一槽都被拒绝
+     * 执行，全槽罢工（ERR-20260714-007）。
+     * <p>
+     * 正确语义：先看样板实际保留的输出是物品还是流体，只用配方对应类型的输出去匹配那一条线；
+     * 若配方压根没有这种类型的输出（比如样板留的是物品，但候选配方是纯流体产出），直接判不匹配——
+     * 不能像原来两个 helper 方法里"该类型无输出时真空为真"那样放过，否则会把明显对不上的配方也
+     * 判定为匹配。
+     */
     private static boolean matchesOutputs(GTRecipe recipe, IPatternDetails pattern) {
         Set<Item> patternItems = new HashSet<>();
         Set<Fluid> patternFluids = new HashSet<>();
         collectPatternStacks(pattern.getOutputs(), patternItems, patternFluids);
 
-        return primaryItemOutputMatches(recipe.getOutputContents(ItemRecipeCapability.CAP), patternItems)
-                && primaryFluidOutputMatches(recipe.getOutputContents(FluidRecipeCapability.CAP), patternFluids);
+        if (!patternItems.isEmpty()) {
+            var itemContents = recipe.getOutputContents(ItemRecipeCapability.CAP);
+            return itemContents != null && !itemContents.isEmpty()
+                    && primaryItemOutputMatches(itemContents, patternItems);
+        }
+        if (!patternFluids.isEmpty()) {
+            var fluidContents = recipe.getOutputContents(FluidRecipeCapability.CAP);
+            return fluidContents != null && !fluidContents.isEmpty()
+                    && primaryFluidOutputMatches(fluidContents, patternFluids);
+        }
+        return true; // 样板没有可比对的输出指纹（异常情况），不阻断
     }
 
     /**

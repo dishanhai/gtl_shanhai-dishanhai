@@ -1,6 +1,8 @@
 package com.dishanhai.gt_shanhai.common.shop;
 
 import appeng.api.config.Actionable;
+import appeng.api.networking.IGrid;
+import appeng.api.networking.security.IActionHost;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
 import appeng.api.storage.MEStorage;
@@ -18,12 +20,21 @@ public final class ShopAeNetwork {
 
     private ShopAeNetwork() {}
 
-    public interface Provider {
+    /**
+     * 继承 {@link IActionHost}：两个现有实现（商店终端、FTBQ提交器）本来就通过
+     * {@code DShanhaiAENetworkMachine → IGridConnectedMachine → IGridConnectedBlockEntity} 链路
+     * 天然满足 {@code getActionableNode()}，这里显式声明只是把这个身份暴露给 {@link #findBoundHost}——
+     * 自动合成下单要用真实机器身份构造 {@link IActionSource}，不能用匿名/纯玩家来源（见 ShopAutoCraft 注释，
+     * 之前用匿名/无机器来源提交会被本模组自己的虚拟供给改写层判定为"看不见"，样板报自己缺失）。
+     */
+    public interface Provider extends IActionHost {
         boolean isOnline();
         /** 这台设备当前是否给该玩家提供 AE 网络（提交器按 FTBQ 队伍匹配，商店终端按放置者 UUID 匹配）。 */
         boolean servesPlayer(ServerPlayer player);
         /** 拿这台设备所在 AE 网络的存储；未连接网络返回 null。 */
         MEStorage storage();
+        /** 拿这台设备所在 AE 网格（供一键下单缺口用 {@code ICraftingService} 自动合成）；未连接网络返回 null。 */
+        IGrid grid();
     }
 
     private static final List<Provider> PROVIDERS = new CopyOnWriteArrayList<>();
@@ -87,5 +98,32 @@ public final class ShopAeNetwork {
         MEStorage storage = findBoundStorage(player);
         if (storage == null) return 0L;
         return storage.extract(key, Long.MAX_VALUE, Actionable.SIMULATE, IActionSource.empty());
+    }
+
+    /** 遍历所有已注册的绑定源，返回第一个在线且匹配该玩家的 AE 网格（供 {@link ShopAutoCraft} 提交自动合成）。 */
+    public static IGrid findBoundGrid(ServerPlayer player) {
+        if (player == null) return null;
+        for (Provider provider : PROVIDERS) {
+            if (!provider.isOnline()) continue;
+            if (!provider.servesPlayer(player)) continue;
+            IGrid grid = provider.grid();
+            if (grid != null) return grid;
+        }
+        return null;
+    }
+
+    /**
+     * 同 {@link #findBoundGrid} 但返回提供网络的那台设备本身（作为 {@link IActionHost}），
+     * 供 {@link ShopAutoCraft} 构造带机器身份的 {@link IActionSource#ofPlayer(net.minecraft.world.entity.player.Player, IActionHost)}——
+     * 跟 AE2 原生 ME 终端（{@code PlayerSource(player, actionHost)}）用同一套构造方式，不能只给玩家身份不给机器。
+     */
+    public static IActionHost findBoundHost(ServerPlayer player) {
+        if (player == null) return null;
+        for (Provider provider : PROVIDERS) {
+            if (!provider.isOnline()) continue;
+            if (!provider.servesPlayer(player)) continue;
+            if (provider.grid() != null) return provider;
+        }
+        return null;
     }
 }

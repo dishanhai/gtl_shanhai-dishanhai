@@ -279,6 +279,7 @@ public final class RecipeTypePatternSearchHelper {
         var level = buffer.getLevel();
         var inventory = buffer.getPatternInventory();
         if (level == null || inventory == null) return;
+        long parallelCeiling = getMachineParallelCeiling(machine);
         int slotCount = inventory.getSlots();
         for (int slot = 0; slot < slotCount; slot++) {
             var stack = inventory.getStackInSlot(slot);
@@ -288,7 +289,7 @@ public final class RecipeTypePatternSearchHelper {
             }
             GTRecipe recipe = peekRecipeCached(buffer, slot, stack, level);
             if (recipe == null || !isSelectedOnMachine(machine, recipe.recipeType)) continue;
-            topUpVirtualSupply(buffer, slot, stack, recipe);
+            topUpVirtualSupply(buffer, slot, stack, recipe, parallelCeiling);
             activatePatternRecipe(capabilityMachine, buffer, recipe, slot);
             result.add(recipe);
         }
@@ -334,6 +335,7 @@ public final class RecipeTypePatternSearchHelper {
         if (!(patternMachine instanceof MEPatternBufferPartMachine buffer)) return;
         var inventory = buffer.getPatternInventory();
         if (inventory == null) return;
+        long parallelCeiling = getMachineParallelCeiling(capabilityMachine);
         int slotCount = inventory.getSlots();
         for (int slot = 0; slot < slotCount; slot++) {
             if (containsSlot(activeSlots, slot)) continue; // 真实 AE2 下单已激活，走既有分支，不碰虚拟下单状态
@@ -343,7 +345,7 @@ public final class RecipeTypePatternSearchHelper {
             }
             GTRecipe recipe = getMarkedRecipeCached(buffer, access, slot);
             if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
-                topUpVirtualSupply(buffer, slot, inventory.getStackInSlot(slot), recipe);
+                topUpVirtualSupply(buffer, slot, inventory.getStackInSlot(slot), recipe, parallelCeiling);
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
             }
@@ -351,44 +353,78 @@ public final class RecipeTypePatternSearchHelper {
     }
 
     /**
-     * 虚拟供料批量预填：消耗性输入的发配量本身不设上限，按"这一单"的剩余预算（见
-     * {@link #ORDER_REMAINING_BUDGET_SLOTS}）和 AE 网络真实库存尽量给足，不受宿主机器并行上限压缩——
-     * 这样机器并行低时也能一次拿到足够多轮消耗的量，不会执行一次就停。
+     * "取不到并行信息"时的兜底单轮批量——不能用 {@code Long.MAX_VALUE}（等于不设上限，ERR-20260714-006
+     * 的老 bug 会在这些机器上原样复现）。取原初系列模块"无加速物品插件时"的默认并行 {@code DEFAULT_PARALLEL}
+     * 作为保守基准（该家族约十几个模块类各自独立定义同名常量，均为 64L）。
+     */
+    private static final long UNKNOWN_HOST_FALLBACK_CEILING = 64L;
+
+    /**
+     * 消费机器自身的并行上限（如代理执行者的机器数量²×8×倍率、原初引擎主机的 MAX+16）。
+     * 只有 {@link SelectableRecipeTypeSetMachine} 才暴露这个接口——原生 GTCEu/GTLCore 多方块（星律样板
+     * 总成作为部件挂在非山海机器上，见 {@code collectNativeVirtualRecipes} 传入 null）没有对应接口可查，
+     * 取不到时不能退化成"不设上限"，否则批量会被 {@code remainingBudget}（默认65536）直接顶满，一次性
+     * 抽空玩家仓库（ERR-20260714-006）。退化为保守的 {@link #UNKNOWN_HOST_FALLBACK_CEILING}。
+     */
+    private static long getMachineParallelCeiling(Object machine) {
+        if (machine instanceof SelectableRecipeTypeSetMachine selectable) {
+            long ceiling = selectable.getRecipeLogicMaxParallel();
+            return ceiling > 0 ? ceiling : UNKNOWN_HOST_FALLBACK_CEILING;
+        }
+        return UNKNOWN_HOST_FALLBACK_CEILING;
+    }
+
+    /**
+     * 虚拟供料批量预填：这条路径在样板刚放进槽位、还未被真实 AE2 下单激活时就会触发（"首配"发现路径），
+     * 目的只是让配方能被发现/激活，<b>不代表玩家的真实订单量</b>——真实订单量由 AE2 的正式合成任务
+     * 走另一条 activeSlots 分支处理。
      * <p>
-     * <b>"不消耗"催化剂由扣料层保护，不在这里限制发配数量</b>：GTLCore/AE2 的样板扣料
-     * （{@code InternalSlot.handleItemInternal}/{@code handleFluidInternal}）不识别 GTCEu 的
-     * NotConsumable（{@code Content.chance==0}）标记，会把催化剂当消耗品扣。此问题在扣料层（配方层）
-     * 解决——见 {@link PatternNotConsumableFilter} 与两个
+     * <b>单轮批量必须按宿主机器并行上限封顶（ERR-20260714-004 教训）</b>：本方法早先把批量直接等于
+     * "这一单"剩余预算（默认配置 65536），实测导致玩家刚把样板放进槽位、还没提交任何合成请求，
+     * 系统就一次性把网络仓库里的消耗性材料按 65536 倍拉走——玩家实际只想要 10 个，却被抽走上万份。
+     * 现在改为 {@code achievable = min(remainingBudget, machineParallelCeiling)}：单轮只填机器这一轮
+     * 实际吃得下的量，"这一单"的总预算靠多轮反复补给（见下方"预算制"）慢慢用完，不会一次性掏空仓库。
+     * <p>
+     * <b>"不消耗"催化剂由扣料层保护，只需保证最小在场量（ERR-20260714-008 教训）</b>：GTLCore/AE2
+     * 的样板扣料（{@code InternalSlot.handleItemInternal}/{@code handleFluidInternal}）不识别
+     * GTCEu 的 NotConsumable（{@code Content.chance==0}）标记，会把催化剂当消耗品扣。此问题在
+     * 扣料层（配方层）解决——见 {@link PatternNotConsumableFilter} 与两个
      * {@code MEPatternBuffer*RecipeTypeFilterMixin}：真扣料阶段把 chance==0 的输入从待扣列表剔除，
-     * 催化剂永不被吞。因此这里对催化剂的处理只需保证"在场"：与消耗性输入同批量（achievable）供给，
-     * 不额外限制发配数量（避免高并行时 simulate 在场校验因催化剂份数不足而匹配失败），只是 InternalSlot
-     * 里已有该催化剂时就不再重复补（扣料层保护它常驻，重复补只会无谓叠加、占用网络库存）；催化剂不参与
-     * 消耗性批量的瓶颈计算（否则虚拟催化剂网络库存有限时会把整批 achievable 归零），也不占用"这一单"预算。
+     * 催化剂永不被吞。因此这里对催化剂只需保证"在场"，每次只补恰好 1 份（{@code in.amount()}，
+     * 不乘 achievable）——早先按消耗性同批量供给，会把网络里存量有限的稀缺催化剂一次性整批吸进
+     * 单个槽位；不参与消耗性批量的瓶颈计算（否则虚拟催化剂网络库存有限时会把整批 achievable 归零），
+     * 也不占用"这一单"预算（催化剂不是"这一单"要给完的目标物）。
      * <p>
-     * <b>补料时机</b>：只在"消耗性输入已全部耗尽"时补一轮（见 {@link #hasConsumableStock}）。不能像
-     * 早先那样"整槽 itemInventory/fluidInventory 皆空才补"——因为催化剂被扣料层保护而常驻，槽位永远
-     * 非空，那样消耗性耗尽后也永远补不上，反而把机器卡死。先对每个消耗性输入 SIMULATE 探测网络真实
-     * 可提取量，取瓶颈换算批量，再统一 MODULATE 提取写入 InternalSlot。
+     * <b>催化剂在场校验独立于消耗性库存补料闸门</b>：早先催化剂和消耗性材料共用同一个入口闸门
+     * "消耗性输入已耗尽才补一轮"（见 {@link #hasConsumableStock}）——如果某一轮消耗性材料成功补进
+     * 去了、但网络里恰好暂时没有催化剂（还在合成/还在进货）导致催化剂提取失败，之后 InternalSlot
+     * 里就变成"有消耗料、无催化剂"：催化剂缺席会让 simulate 在场校验永远失败，机器永远跑不起来，
+     * 消耗料也就永远不会被吃掉，`hasConsumableStock` 于是恒为 true，`topUpVirtualSupply` 每轮都
+     * 在闸门处直接返回，永远没有机会重新尝试补齐催化剂——变成一个自己把自己锁死的死局。现在催化剂
+     * 的补料完全独立于这个闸门，每轮都会检查、缺席就补，不受"消耗性输入是否耗尽"影响。
+     * <p>
+     * <b>消耗性材料补料时机</b>：只在"消耗性输入已全部耗尽"时补一轮（见 {@link #hasConsumableStock}）。
+     * 不能像早先那样"整槽 itemInventory/fluidInventory 皆空才补"——因为催化剂常驻，槽位永远非空，
+     * 那样消耗性耗尽后也永远补不上，反而把机器卡死。先对每个消耗性输入 SIMULATE 探测网络真实可提取
+     * 量，取瓶颈换算批量，再统一 MODULATE 提取写入 InternalSlot。
      * <p>
      * <b>预算制"这一单"</b>：消耗性批量按剩余预算扣减，预算耗尽才算这一单彻底完成、不再自动补，
-     * 避免像 ERR-20260711-006 那样变成停不下来的自动重下单循环。网络暂时没货或本轮未提取到消耗性
-     * 货物时不扣减预算，允许下一轮重试。样板被取出（见调用点 {@code clearOrderFulfilled}）时预算
-     * 重置，下次放样板算新的一单。
+     * 避免像 ERR-20260711-006 那样变成停不下来的自动重下单循环——预算耗尽后连催化剂也不再补
+     * （订单已经结束，不该再有任何自动供料）。网络暂时没货或本轮未提取到消耗性货物时不扣减预算，
+     * 允许下一轮重试。样板被取出（见调用点 {@code clearOrderFulfilled}）时预算重置，下次放样板算
+     * 新的一单。
      */
     private static void topUpVirtualSupply(MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
-            GTRecipe recipe) {
+            GTRecipe recipe, long machineParallelCeiling) {
         if (patternStack == null || patternStack.isEmpty()) return;
         long remainingBudget = getRemainingBudget(buffer, slot);
-        if (remainingBudget <= 0) return; // 这一单预算已耗尽，不再自动补
+        if (remainingBudget <= 0) return; // 这一单预算已耗尽，彻底结束，不再自动补任何东西
         Level level = buffer.getLevel();
         if (level == null) return;
 
         // InternalSlot 是 GTLCore 内部类型（编译期不可见，只能整段走反射），下面全部以 Object 传递。
         Object internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
         if (internalSlot == null) return;
-        if (hasConsumableStock(internalSlot, recipe)) {
-            return; // 消耗性输入还没用完，本轮不补（不消耗的催化剂常驻不算库存）
-        }
 
         IGrid grid = buffer.getGrid();
         if (grid == null) return;
@@ -407,29 +443,46 @@ public final class RecipeTypePatternSearchHelper {
 
         MEStorage storage = grid.getStorageService().getInventory();
         boolean[] notConsumable = new boolean[inputs.length];
-        long achievable = remainingBudget;
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
-            if (in == null || in.amount() <= 0) continue;
-            notConsumable[i] = recipe != null && isNotConsumableInput(recipe, in.what());
-            if (notConsumable[i]) continue; // 不消耗的催化剂不参与消耗性批量的瓶颈计算
+            if (in != null && in.amount() > 0) {
+                notConsumable[i] = recipe != null && isNotConsumableInput(recipe, in.what());
+            }
+        }
+
+        // 催化剂在场补给：独立于下面的消耗性库存闸门，每轮都尝试，缺席就补 1 份，避免死锁。
+        for (int i = 0; i < inputs.length; i++) {
+            GenericStack in = inputs[i];
+            if (in == null || in.amount() <= 0 || !notConsumable[i]) continue;
+            if (getInternalAmount(internalSlot, in.what()) > 0) continue; // 已在场，不重复补
+            long extracted = storage.extract(in.what(), in.amount(), Actionable.MODULATE, actionSource);
+            if (extracted > 0) {
+                invokeAdd(internalSlot, in.what(), extracted);
+            }
+        }
+
+        if (hasConsumableStock(internalSlot, recipe)) {
+            return; // 消耗性输入还没用完，本轮不补消耗性材料（催化剂已在上面独立补过，不受此闸门影响）
+        }
+
+        long achievable = Math.min(remainingBudget, machineParallelCeiling);
+        for (int i = 0; i < inputs.length; i++) {
+            GenericStack in = inputs[i];
+            if (in == null || in.amount() <= 0 || notConsumable[i]) continue;
             long available = storage.extract(in.what(), Long.MAX_VALUE, Actionable.SIMULATE, actionSource);
             achievable = Math.min(achievable, available / in.amount());
         }
-        if (achievable < 0) achievable = 0;
-
         if (achievable <= 0) return;
+
         boolean consumableExtracted = false;
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
-            if (in == null || in.amount() <= 0) continue;
-            // 催化剂已在场则不重复补：扣料层保护它常驻，重复补只会无谓叠加、占用网络库存。
-            if (notConsumable[i] && getInternalAmount(internalSlot, in.what()) > 0) continue;
+            if (in == null || in.amount() <= 0 || notConsumable[i]) continue;
             long want = saturatedMultiply(in.amount(), achievable);
             long extracted = storage.extract(in.what(), want, Actionable.MODULATE, actionSource);
             if (extracted > 0) {
                 invokeAdd(internalSlot, in.what(), extracted);
-                if (!notConsumable[i]) consumableExtracted = true;
+                consumableExtracted = true;
             }
         }
         if (consumableExtracted) {
