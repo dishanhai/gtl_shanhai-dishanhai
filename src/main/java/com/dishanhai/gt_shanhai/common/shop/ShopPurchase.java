@@ -191,25 +191,62 @@ public final class ShopPurchase {
      * 否则进背包，背包也塞不下的余量再尝试塞进随身穿戴的精妙背包（见 {@link ShopBackpack}），最终还剩的打包成 SDA（阈值设过大也不会卡死）
      */
     public static BulkBuyResult buyBulk(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
-        long affordable = affordAndDeduct(player, entry, times, backpackMode);
+        long capped = capByFluidGoodsCapacity(player, entry, times);
+        if (capped <= 0L) return new BulkBuyResult(0L, times, null);
+        long affordable = affordAndDeduct(player, entry, capped, backpackMode);
         if (affordable <= 0L) return new BulkBuyResult(0L, times, null);
         String via = deliverGoodsList(player, entry, affordable, aeMode, backpackMode);
         return new BulkBuyResult(affordable, times, via);
     }
 
     /**
+     * 商品清单里流体部分按当前绑定 AE 网络的可注入余量把 times 降量（只会调小，不会调大）——流体没有背包/
+     * 精妙背包容器可落地，网络余量不够全额时按余量降量成交，而不是整单卡死不能买；无流体商品/网络余量充足
+     * 原样返回 times。流体本身缺失（对应模组被卸载）直接判 0，整单不可交付。调用方须确保开启 AE 模式才走到
+     * 这里（{@link ShopEntry#hasFluidGoods} 非空必须 aeMode=true，见 ShopActionPacket#doBuy 的前置拦截）。
+     */
+    private static long capByFluidGoodsCapacity(ServerPlayer player, ShopEntry entry, long times) {
+        if (times <= 0L || entry == null || !entry.hasFluidGoods()) return times;
+        long cap = times;
+        for (ShopEntry.GoodsStack gs : entry.getGoodsList()) {
+            if (!gs.isFluid()) continue;
+            net.minecraft.world.level.material.Fluid fluid = gs.fluid();
+            if (fluid == net.minecraft.world.level.material.Fluids.EMPTY) return 0L;
+            appeng.api.stacks.AEFluidKey key = appeng.api.stacks.AEFluidKey.of(fluid);
+            long capacity = key == null ? 0L : ShopAeNetwork.simulateInjectCapacityForPlayer(player, key);
+            long capTimes = gs.count() <= 0 ? 0L : capacity / gs.count();
+            cap = Math.min(cap, capTimes);
+            if (cap <= 0L) return 0L;
+        }
+        return cap;
+    }
+
+    /**
      * 按商品清单逐项分层交付（单商品/组合商品统一走这条路，与 {@link #buyBulkAll} 相同的批量交付基建）：
-     * 每项各自 count × times，聚合后一次 {@link #deliverItemBatch} 调用，需要打包的部分合并进同一片 SDA。
+     * 每项各自 count × times，物品聚合后一次 {@link #deliverItemBatch} 调用，需要打包的部分合并进同一片 SDA；
+     * 流体项直接注入绑定 AE 网络（{@link #capByFluidGoodsCapacity} 已保证不会超额，这里 SIMULATE→MODULATE 兜底防吞）。
      */
     private static String deliverGoodsList(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         java.math.BigInteger t = java.math.BigInteger.valueOf(times);
         java.util.List<ItemDelivery> deliveries = new java.util.ArrayList<>(entry.getGoodsList().size());
+        boolean fluidDelivered = false;
         for (ShopEntry.GoodsStack gs : entry.getGoodsList()) {
+            if (gs.isFluid()) {
+                net.minecraft.world.level.material.Fluid fluid = gs.fluid();
+                if (fluid == net.minecraft.world.level.material.Fluids.EMPTY) continue;
+                appeng.api.stacks.AEFluidKey key = appeng.api.stacks.AEFluidKey.of(fluid);
+                if (key == null) continue;
+                java.math.BigInteger needBig = java.math.BigInteger.valueOf(gs.count()).multiply(t);
+                long need = needBig.bitLength() < 63 ? needBig.longValue() : Long.MAX_VALUE;
+                if (ShopAeNetwork.injectForPlayer(player, key, need) > 0L) fluidDelivered = true;
+                continue;
+            }
             ItemStack unit = gs.makeStack();
             unit.setCount(1);
             deliveries.add(new ItemDelivery(unit, java.math.BigInteger.valueOf(gs.count()).multiply(t)));
         }
-        return deliverItemBatch(player, deliveries, aeMode, backpackMode);
+        String via = deliveries.isEmpty() ? null : deliverItemBatch(player, deliveries, aeMode, backpackMode);
+        return via == null && fluidDelivered ? "ae" : via;
     }
 
     /**
@@ -663,8 +700,10 @@ public final class ShopPurchase {
         if (player == null || entry == null || !entry.isValid() || times <= 0L) {
             return new BulkBuyResult(0L, times, null);
         }
-        String via = deliverGoodsList(player, entry, times, aeMode, backpackMode);
-        return new BulkBuyResult(times, times, via);
+        long capped = capByFluidGoodsCapacity(player, entry, times);
+        if (capped <= 0L) return new BulkBuyResult(0L, times, null);
+        String via = deliverGoodsList(player, entry, capped, aeMode, backpackMode);
+        return new BulkBuyResult(capped, times, via);
     }
 
     /** 直接获取（作弊）+ 自选：不结算成本，交付 chosen 这一项，每次独立随机数量（× min(times, 抽取上限)）。 */

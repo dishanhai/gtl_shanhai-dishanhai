@@ -64,4 +64,26 @@ public class GuiRenderUtil {
         return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
                 || (c >= 'k' && c <= 'o') || (c >= 'K' && c <= 'O') || c == 'r' || c == 'R';
     }
+
+    /**
+     * 弹入动画进度 [0,1]：{@code atMs} 为动画起始时刻（{@code System.currentTimeMillis()}），
+     * {@code atMs<=0} 视为"没有进行中的动画"直接返回 1（已完成）。跟 {@link #popScaleAt} 配套使用，
+     * 是本模组商店/货币中心系列界面统一的弹入节奏（原属 ShopScreen，抽到这里供多个界面复用）。
+     */
+    public static float popAnimProgress(long atMs, long durationMs) {
+        if (atMs <= 0L) return 1f;
+        return Math.min(1f, (System.currentTimeMillis() - atMs) / (float) durationMs);
+    }
+
+    /**
+     * 以 (cx,cy) 为锚点做一次缩放弹入（0.94→1.0，ease-out：先快后慢，比线性更有"弹"的感觉）。
+     * 调用方须自行 pushPose/popPose 包住这次调用和后续的绘制调用。
+     */
+    public static void popScaleAt(GuiGraphics g, float cx, float cy, float t) {
+        float eased = 1f - (1f - t) * (1f - t);
+        float scale = 0.94f + 0.06f * eased;
+        g.pose().translate(cx, cy, 0);
+        g.pose().scale(scale, scale, 1f);
+        g.pose().translate(-cx, -cy, 0);
+    }
 }

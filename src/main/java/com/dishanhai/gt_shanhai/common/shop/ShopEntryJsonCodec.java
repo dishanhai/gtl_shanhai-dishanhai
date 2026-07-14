@@ -80,6 +80,10 @@ public final class ShopEntryJsonCodec {
             out.addProperty("periodTicks", entry.getPeriodTicks());
             out.addProperty("periodLimit", entry.getPeriodLimit());
         }
+        if (entry.hasPrerequisiteQuest()) {
+            out.addProperty("prerequisiteQuestId", entry.getPrerequisiteQuestId());
+        }
+        out.addProperty("stableId", entry.getStableId());
         return out;
     }
 
@@ -141,14 +145,21 @@ public final class ShopEntryJsonCodec {
                     ShopEntry.TradeMode.class, json, "tradeMode", ShopEntry.TradeMode.BOTH);
             long periodTicks = json.has("periodTicks") ? json.get("periodTicks").getAsLong() : -1L;
             long periodLimit = json.has("periodLimit") ? json.get("periodLimit").getAsLong() : -1L;
+            String prerequisiteQuestId = stringOrNull(json, "prerequisiteQuestId");
+            String stableId = stringOrNull(json, "stableId"); // 旧存档缺失时 ShopEntry 构造器自动生成新 UUID
 
             return new ShopEntry(goodsList, category, cost, description, limit,
                     icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName,
-                    ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit);
+                    ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit, prerequisiteQuestId, stableId);
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品条目: {}", e.getMessage());
             return null;
         }
+    }
+
+    /** 原始 JSON 是否已带 stableId（供 {@link ShopConfig#reload} 判断是否需要迁移写回磁盘）。 */
+    public static boolean hasStableId(JsonObject json) {
+        return json.has("stableId") && !json.get("stableId").getAsString().isBlank();
     }
 
     private static String stringOrNull(JsonObject json, String key) {
@@ -231,6 +242,7 @@ public final class ShopEntryJsonCodec {
             if (stack == null || stack.id() == null) continue;
             JsonObject item = new JsonObject();
             item.addProperty("id", stack.id().toString());
+            item.addProperty("fluid", stack.isFluid());
             item.addProperty("count", stack.count());
             net.minecraft.nbt.CompoundTag nbt = stack.nbt();
             if (nbt != null && !nbt.isEmpty()) item.addProperty("nbt", nbt.toString());
@@ -246,8 +258,9 @@ public final class ShopEntryJsonCodec {
             JsonObject item = element.getAsJsonObject();
             if (!item.has("id")) continue;
             ResourceLocation id = new ResourceLocation(item.get("id").getAsString());
+            boolean fluid = item.has("fluid") && item.get("fluid").getAsBoolean();
             int count = item.has("count") ? Math.max(1, item.get("count").getAsInt()) : 1;
-            goods.add(ShopEntry.GoodsStack.of(id, count, parseNbt(item, "nbt")));
+            goods.add(fluid ? ShopEntry.GoodsStack.ofFluid(id, count) : ShopEntry.GoodsStack.of(id, count, parseNbt(item, "nbt")));
         }
         return goods;
     }

@@ -54,6 +54,15 @@ public class ShopEntry {
     private final long periodTicks;
     /** 周期限购每窗口的额度（每玩家独立计数）；仅 periodTicks>0 时有意义，-1 = 不启用。 */
     private final long periodLimit;
+    /** 前置 FTBQ 任务 ID（16 位十六进制字符串，见 {@link dev.ftb.mods.ftbquests.quest.QuestObjectBase#getCodeString}）。
+     *  可空 = 不要求前置。非空时玩家须先完成该任务才能购买本商品，详情页显示可点击跳转到该任务；
+     *  跟 {@link #ftbqTableId} 一样不做本地副本，直接按 ID 现查 FTBQ 当前任务数据。 */
+    private final String prerequisiteQuestId;
+    /** 稳定身份 ID（UUID 字符串），跟 {@link ShopCatalogSnapshot} 每次 publish 都会重排的 entryKey 不是一回事——
+     *  entryKey 只是当前快照里的数组下标，加/删/排序/编辑任何一条都会让全部 entryKey 集体错位；stableId 只在
+     *  新增/复制（生成新的）或编辑（沿用旧的）时才会变，专供需要跨快照/跨重登引用同一条目的场景使用
+     *  （例如购物车、收藏）。旧 shop.json 缺这个字段的条目由 {@link ShopConfig} 加载时补发并写回磁盘固化。 */
+    private final String stableId;
 
     /** 商品的交易方向限制。 */
     public enum TradeMode {
@@ -123,26 +132,36 @@ public class ShopEntry {
         }
     }
 
-    /** 自定义显示图标：物品图标或任意贴图路径二选一（不绑定注册表物品，可用来展示纯装饰性贴图）。 */
+    /** 自定义显示图标：物品图标/流体图标/任意贴图路径三选一（不绑定注册表物品时可用来展示纯装饰性贴图）。 */
     public static final class DisplayIcon {
-        private final ItemStack item;           // null = 贴图图标
-        private final ResourceLocation texture; // null = 物品图标
+        private final ItemStack item;           // null = 非物品图标
+        private final ResourceLocation texture; // null = 非贴图图标
+        private final net.minecraft.world.level.material.Fluid fluid; // null = 非流体图标
 
-        private DisplayIcon(ItemStack item, ResourceLocation texture) {
+        private DisplayIcon(ItemStack item, ResourceLocation texture, net.minecraft.world.level.material.Fluid fluid) {
             this.item = item;
             this.texture = texture;
+            this.fluid = fluid;
         }
 
         public static DisplayIcon ofItem(ItemStack stack) {
-            return new DisplayIcon(stack.copy(), null);
+            return new DisplayIcon(stack.copy(), null, null);
         }
 
         public static DisplayIcon ofTexture(ResourceLocation tex) {
-            return new DisplayIcon(null, tex);
+            return new DisplayIcon(null, tex, null);
+        }
+
+        public static DisplayIcon ofFluid(net.minecraft.world.level.material.Fluid fluid) {
+            return new DisplayIcon(null, null, fluid);
         }
 
         public boolean isTexture() {
             return texture != null;
+        }
+
+        public boolean isFluid() {
+            return fluid != null;
         }
 
         public ItemStack item() {
@@ -153,38 +172,68 @@ public class ShopEntry {
             return texture;
         }
 
-        /** 悬停/tooltip 展示名：物品用本地化名，贴图用资源路径。 */
+        public net.minecraft.world.level.material.Fluid fluid() {
+            return fluid;
+        }
+
+        /** 悬停/tooltip 展示名：物品用本地化名，流体用流体名，贴图用资源路径。 */
         public String displayName() {
-            return isTexture() ? texture.toString() : item.getHoverName().getString();
+            if (isTexture()) return texture.toString();
+            if (isFluid()) {
+                try {
+                    return new net.minecraftforge.fluids.FluidStack(fluid, 1).getDisplayName().getString();
+                } catch (Exception ignored) {
+                    return fluid.toString();
+                }
+            }
+            return item.getHoverName().getString();
         }
     }
 
-    /** 商品清单单项：物品 + 数量 + NBT（可空）。{@link #goods} 列表 ≥2 项即「组合商品」，购买时一次性交付每一项。 */
+    /** 商品清单单项：物品/流体（isFluid） + 数量（流体=mB） + NBT（仅物品，流体不支持，同 {@link ExchangeEntry.Ingredient}）。
+     *  {@link #goods} 列表 ≥2 项即「组合商品」，购买时一次性交付每一项。 */
     public static final class GoodsStack {
         private final ResourceLocation id;
+        private final boolean isFluid;
         private final int count;
         private final net.minecraft.nbt.CompoundTag nbt;
 
-        private GoodsStack(ResourceLocation id, int count, net.minecraft.nbt.CompoundTag nbt) {
+        private GoodsStack(ResourceLocation id, boolean isFluid, int count, net.minecraft.nbt.CompoundTag nbt) {
             this.id = id;
+            this.isFluid = isFluid;
             this.count = Math.max(1, count);
-            this.nbt = (nbt == null || nbt.isEmpty()) ? null : nbt.copy();
+            this.nbt = isFluid || nbt == null || nbt.isEmpty() ? null : nbt.copy();
         }
 
         public static GoodsStack of(ResourceLocation id, int count, net.minecraft.nbt.CompoundTag nbt) {
-            return new GoodsStack(id, count, nbt);
+            return new GoodsStack(id, false, count, nbt);
+        }
+
+        /** 流体商品：count 为 mB，不支持 NBT。购买交付强制走绑定 AE 网络注入，见 {@link ShopPurchase}。 */
+        public static GoodsStack ofFluid(ResourceLocation id, int amountMb) {
+            return new GoodsStack(id, true, amountMb, null);
         }
 
         public ResourceLocation id() { return id; }
+        public boolean isFluid() { return isFluid; }
         public int count() { return count; }
         public net.minecraft.nbt.CompoundTag nbt() { return nbt == null ? null : nbt.copy(); }
 
         public Item item() {
+            if (isFluid) return net.minecraft.world.item.Items.AIR;
             Item item = id == null ? null : ForgeRegistries.ITEMS.getValue(id);
             return item != null ? item : net.minecraft.world.item.Items.AIR;
         }
 
+        /** 流体身份，非流体商品/缺失流体返回 {@code Fluids.EMPTY}。 */
+        public net.minecraft.world.level.material.Fluid fluid() {
+            net.minecraft.world.level.material.Fluid f = !isFluid || id == null ? null : ForgeRegistries.FLUIDS.getValue(id);
+            return f != null ? f : net.minecraft.world.level.material.Fluids.EMPTY;
+        }
+
+        /** 流体商品无 ItemStack 表达，返回 EMPTY；调用方须先判 {@link #isFluid} 走流体专属渲染/交付路径。 */
         public ItemStack makeStack() {
+            if (isFluid) return ItemStack.EMPTY;
             ItemStack stack = new ItemStack(item(), count);
             if (nbt != null) stack.setTag(nbt.copy());
             return stack;
@@ -249,13 +298,38 @@ public class ShopEntry {
                 hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode, -1L, -1L);
     }
 
-    // ===== 新构造：多元商品清单 + 多元成本 + 描述 + 限购次数 + 自定义显示图标 + 奖励池/FTBQ表(+子模式)
-    //      + 隐藏/跳转 + 自定义名称 + 交易方向限制 + 周期限购（每玩家独立计数，见 ShopPeriodLimiter） =====
+    // ===== 兼容构造：无前置任务（委托空串 = 不要求前置）=====
     public ShopEntry(List<GoodsStack> goods, String category,
                      ShopCost cost, String description, long remainingUses,
                      List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
                      boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
                      RewardMode ftbqSubMode, TradeMode tradeMode, long periodTicks, long periodLimit) {
+        this(goods, category, cost, description, remainingUses, displayIcons, rewardMode, rewardPool,
+                hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit, null);
+    }
+
+    // ===== 兼容构造：无稳定 ID（委托 null，自动生成新 UUID；仅新增/复制场景会走到这里，
+    //      编辑场景须显式传入旧条目的 stableId 沿用，见 ShopEditPacket#apply）=====
+    public ShopEntry(List<GoodsStack> goods, String category,
+                     ShopCost cost, String description, long remainingUses,
+                     List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
+                     boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
+                     RewardMode ftbqSubMode, TradeMode tradeMode, long periodTicks, long periodLimit,
+                     String prerequisiteQuestId) {
+        this(goods, category, cost, description, remainingUses, displayIcons, rewardMode, rewardPool,
+                hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit,
+                prerequisiteQuestId, null);
+    }
+
+    // ===== 新构造：多元商品清单 + 多元成本 + 描述 + 限购次数 + 自定义显示图标 + 奖励池/FTBQ表(+子模式)
+    //      + 隐藏/跳转 + 自定义名称 + 交易方向限制 + 周期限购（每玩家独立计数，见 ShopPeriodLimiter）
+    //      + 前置 FTBQ 任务 + 稳定身份 ID（可空=自动生成新 UUID，见 {@link #stableId}） =====
+    public ShopEntry(List<GoodsStack> goods, String category,
+                     ShopCost cost, String description, long remainingUses,
+                     List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
+                     boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
+                     RewardMode ftbqSubMode, TradeMode tradeMode, long periodTicks, long periodLimit,
+                     String prerequisiteQuestId, String stableId) {
         this.goods = normalizeGoods(goods);
         // 只认 CHOICE/ALL 为有效子模式，其余（含 null/NONE/FTBQ 误传）一律退回默认 RANDOM
         this.ftbqSubMode = (ftbqSubMode == RewardMode.CHOICE || ftbqSubMode == RewardMode.ALL) ? ftbqSubMode : RewardMode.RANDOM;
@@ -302,6 +376,8 @@ public class ShopEntry {
         // 半残配置（只填了周期长度或只填了额度）一律归一成「不启用」，不留半吊子状态
         this.periodTicks = (periodTicks > 0L && periodLimit >= 0L) ? periodTicks : -1L;
         this.periodLimit = this.periodTicks > 0L ? periodLimit : -1L;
+        this.prerequisiteQuestId = prerequisiteQuestId == null ? "" : prerequisiteQuestId.trim();
+        this.stableId = (stableId == null || stableId.isBlank()) ? java.util.UUID.randomUUID().toString() : stableId.trim();
     }
 
     // ===== 兼容构造：无自定义名称/FTBQ表（委托空串）=====
@@ -412,6 +488,21 @@ public class ShopEntry {
     /** 是否启用了周期限购（见 {@link ShopPeriodLimiter}）。 */
     public boolean isPeriodLimited() {
         return periodTicks > 0L && periodLimit >= 0L;
+    }
+
+    /** 前置 FTBQ 任务 ID（16 位十六进制字符串，可能为空串 = 不要求前置）。 */
+    public String getPrerequisiteQuestId() {
+        return prerequisiteQuestId;
+    }
+
+    /** 是否配置了前置任务（购买前必须先完成该 FTBQ 任务）。 */
+    public boolean hasPrerequisiteQuest() {
+        return !prerequisiteQuestId.isEmpty();
+    }
+
+    /** 稳定身份 ID（UUID 字符串，恒非空）；见 {@link #stableId} 字段注释。 */
+    public String getStableId() {
+        return stableId;
     }
 
     /** 主商品（列表首项）NBT 快照（可空）。返回副本。 */
@@ -537,13 +628,31 @@ public class ShopEntry {
         return goods.isEmpty() ? net.minecraft.world.item.Items.AIR : goods.get(0).item();
     }
 
-    /** 商品清单非空、清单内每一项都已在当前注册表中存在 + 成本有效。购买结算拦截靠这个。 */
+    /** 商品清单非空、清单内每一项都已在当前注册表中存在（物品查 ITEMS，流体查 FLUIDS） + 成本有效。购买结算拦截靠这个。 */
     public boolean isValid() {
         if (goods.isEmpty() || !cost.isValid()) return false;
         for (GoodsStack g : goods) {
-            if (!ForgeRegistries.ITEMS.containsKey(g.id())) return false;
+            boolean ok = g.isFluid() ? ForgeRegistries.FLUIDS.containsKey(g.id()) : ForgeRegistries.ITEMS.containsKey(g.id());
+            if (!ok) return false;
         }
         return true;
+    }
+
+    /** 商品清单里是否有任意一项是流体。流体商品没有背包/精妙背包容器可落地，购买交付强制要求开启 AE 模式
+     *  且绑定在线 AE 网络能全额收下，否则整单拒绝，见 {@link ShopPurchase#buyBulk}。 */
+    public boolean hasFluidGoods() {
+        for (GoodsStack g : goods) if (g.isFluid()) return true;
+        return false;
+    }
+
+    /** 主商品（列表首项）是否为流体；流体主商品的图标走 {@link #primaryGoodsFluid()}，不走 {@link #makeGoodsStack}/{@link #displayGoodsStack}。 */
+    public boolean isPrimaryGoodsFluid() {
+        return !goods.isEmpty() && goods.get(0).isFluid();
+    }
+
+    /** 主商品（列表首项）流体身份；非流体主商品/缺失流体返回 {@code Fluids.EMPTY}。 */
+    public net.minecraft.world.level.material.Fluid primaryGoodsFluid() {
+        return goods.isEmpty() ? net.minecraft.world.level.material.Fluids.EMPTY : goods.get(0).fluid();
     }
 
     /**
@@ -556,10 +665,12 @@ public class ShopEntry {
         return !goods.isEmpty() && !cost.isEmpty();
     }
 
-    /** 商品清单里是否有任意一项已经不在当前物品注册表（模组被卸载/物品被移除）。仅用于展示判断。 */
+    /** 商品清单里是否有任意一项已经不在当前物品/流体注册表（模组被卸载/物品被移除）。仅用于展示判断。 */
     public boolean hasMissingGoods() {
         for (GoodsStack g : goods) {
-            if (g.id() != null && !ForgeRegistries.ITEMS.containsKey(g.id())) return true;
+            if (g.id() == null) continue;
+            boolean ok = g.isFluid() ? ForgeRegistries.FLUIDS.containsKey(g.id()) : ForgeRegistries.ITEMS.containsKey(g.id());
+            if (!ok) return true;
         }
         return false;
     }
@@ -604,6 +715,7 @@ public class ShopEntry {
     public ItemStack displayGoodsStack() {
         if (goods.isEmpty()) return ItemStack.EMPTY;
         GoodsStack primary = goods.get(0);
+        if (primary.isFluid()) return ItemStack.EMPTY; // 流体主商品无 ItemStack 表达，调用方须先查 isPrimaryGoodsFluid()
         if (primary.id() != null && !ForgeRegistries.ITEMS.containsKey(primary.id())) {
             return missingItemStack(primary.id(), primary.count());
         }
@@ -618,9 +730,23 @@ public class ShopEntry {
     public String goodsDisplayName() {
         if (hasCustomName()) return displayName;
         GoodsStack primaryGs = goods.isEmpty() ? null : goods.get(0);
-        boolean primaryMissing = primaryGs != null && primaryGs.id() != null
-                && !ForgeRegistries.ITEMS.containsKey(primaryGs.id());
-        String primary = primaryMissing ? "§c缺失物品:" + primaryGs.id() : makeGoodsStack().getHoverName().getString();
+        String primary;
+        if (primaryGs != null && primaryGs.isFluid()) {
+            net.minecraft.world.level.material.Fluid f = primaryGs.fluid();
+            if (f == net.minecraft.world.level.material.Fluids.EMPTY) {
+                primary = "§c缺失流体:" + primaryGs.id();
+            } else {
+                try {
+                    primary = new net.minecraftforge.fluids.FluidStack(f, 1).getDisplayName().getString();
+                } catch (Exception ignored) {
+                    primary = primaryGs.id().getPath();
+                }
+            }
+        } else {
+            boolean primaryMissing = primaryGs != null && primaryGs.id() != null
+                    && !ForgeRegistries.ITEMS.containsKey(primaryGs.id());
+            primary = primaryMissing ? "§c缺失物品:" + primaryGs.id() : makeGoodsStack().getHoverName().getString();
+        }
         return hasMultipleGoods() ? primary + " 等" + goods.size() + "种" : primary;
     }
 
@@ -635,6 +761,12 @@ public class ShopEntry {
         List<DisplayIcon> list = new java.util.ArrayList<>(Math.min(goods.size(), 5));
         for (int i = 0; i < goods.size() && i < 5; i++) {
             GoodsStack g = goods.get(i);
+            if (g.isFluid()) {
+                net.minecraft.world.level.material.Fluid f = g.fluid();
+                list.add(f == net.minecraft.world.level.material.Fluids.EMPTY
+                        ? DisplayIcon.ofItem(missingItemStack(g.id(), 1)) : DisplayIcon.ofFluid(f));
+                continue;
+            }
             ItemStack st = (g.id() != null && !ForgeRegistries.ITEMS.containsKey(g.id()))
                     ? missingItemStack(g.id(), g.count()) : g.makeStack();
             list.add(DisplayIcon.ofItem(st));

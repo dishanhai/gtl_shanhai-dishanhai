@@ -108,6 +108,7 @@ public class DShanhaiRecipeEngine {
         HANDLERS.put("chancedInputs",     (m, v) -> applyChanced(m, v, true));
         HANDLERS.put("stationResearch",   DShanhaiRecipeEngine::applyResearch);
         HANDLERS.put("conditions",        DShanhaiRecipeEngine::applyConditions);
+        HANDLERS.put("notes",             DShanhaiRecipeEngine::applyNotes);
     }
 
     // ====== 热缓存预热（并行） ======
@@ -1043,6 +1044,15 @@ public class DShanhaiRecipeEngine {
         } else {
             callMethod(m, "addCondition", s);
         }
+    }
+    /** 配方备注：.notes("任意文本") 或 .notes(["第一行", "第二行"])，纯展示，不解析、不拆分逗号。 */
+    public static void applyNotes(Object m, Object v) {
+        forEachArg(v, item -> {
+            if (item == null) return;
+            String text = String.valueOf(item);
+            if (text.isEmpty()) return;
+            callMethod(m, "addCondition", new com.dishanhai.gt_shanhai.api.RecipeNoteCondition(text));
+        });
     }
     public static void applyItemInputs(Object m, Object v) {
         if (m instanceof dev.latvian.mods.kubejs.recipe.RecipeJS r && v instanceof List<?> list) {

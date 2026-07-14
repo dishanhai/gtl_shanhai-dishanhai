@@ -11,6 +11,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.network.PacketDistributor;
 
 import java.util.function.Supplier;
 
@@ -31,22 +32,28 @@ public class ShopActionPacket {
     private final boolean aeMode;             // AE 模式：交付优先注入玩家绑定的 AE 网络
     private final boolean backpackMode;       // 精妙背包模式：扣款/交付优先走随身穿戴的精妙背包
     private final int chosenRewardIndex;      // 自选奖励模式：玩家在选择界面选中的 rewardPool 下标；-1=未选/不适用
+    private final boolean fromCart;           // 购物车结算发起的 BUY：服务端处理完额外回一个结构化结果包（见 ShopCartPurchaseResultPacket）
 
     public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times) {
-        this(action, catalogRevision, entryKey, times, false, false, -1);
+        this(action, catalogRevision, entryKey, times, false, false, -1, false);
     }
 
     public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times, boolean aeMode) {
-        this(action, catalogRevision, entryKey, times, aeMode, false, -1);
+        this(action, catalogRevision, entryKey, times, aeMode, false, -1, false);
     }
 
     public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times,
                             boolean aeMode, boolean backpackMode) {
-        this(action, catalogRevision, entryKey, times, aeMode, backpackMode, -1);
+        this(action, catalogRevision, entryKey, times, aeMode, backpackMode, -1, false);
     }
 
     public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times, boolean aeMode,
                             boolean backpackMode, int chosenRewardIndex) {
+        this(action, catalogRevision, entryKey, times, aeMode, backpackMode, chosenRewardIndex, false);
+    }
+
+    public ShopActionPacket(Action action, long catalogRevision, long entryKey, long times, boolean aeMode,
+                            boolean backpackMode, int chosenRewardIndex, boolean fromCart) {
         this.action = action;
         this.catalogRevision = catalogRevision;
         this.entryKey = entryKey;
@@ -54,6 +61,7 @@ public class ShopActionPacket {
         this.aeMode = aeMode;
         this.backpackMode = backpackMode;
         this.chosenRewardIndex = chosenRewardIndex;
+        this.fromCart = fromCart;
     }
 
     public ShopActionPacket(FriendlyByteBuf buf) {
@@ -64,6 +72,7 @@ public class ShopActionPacket {
         this.aeMode = buf.readBoolean();
         this.backpackMode = buf.readBoolean();
         this.chosenRewardIndex = buf.readInt();
+        this.fromCart = buf.readBoolean();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -74,6 +83,7 @@ public class ShopActionPacket {
         buf.writeBoolean(aeMode);
         buf.writeBoolean(backpackMode);
         buf.writeInt(chosenRewardIndex);
+        buf.writeBoolean(fromCart);
     }
 
     public static void handle(ShopActionPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -94,6 +104,7 @@ public class ShopActionPacket {
                         player, current.manifest(), pkt.catalogRevision);
                 if (pkt.action != Action.UNDO_DELETE) {
                     player.sendSystemMessage(Component.literal("§c[山海商店] 商品目录已更新，请重试"));
+                    sendCartResult(player, pkt, 0L, "商品目录已更新，请重试");
                     return;
                 }
             }
@@ -101,6 +112,7 @@ public class ShopActionPacket {
 
         if (!WalletItem.isCarrying(player)) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 需持有山海钱包（背包/饰品栏任意位置都行）"));
+            sendCartResult(player, pkt, 0L, "需持有山海钱包");
             return;
         }
 
@@ -130,12 +142,13 @@ public class ShopActionPacket {
         ShopEntry entry = resolve(pkt);
         if (entry == null) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 商品不存在"));
+            sendCartResult(player, pkt, 0L, "商品不存在");
             return;
         }
 
         long remainingUsesBefore = entry.getRemainingUses();
         switch (pkt.action) {
-            case BUY -> doBuy(player, entry, pkt.times, pkt.aeMode, pkt.backpackMode, pkt.chosenRewardIndex);
+            case BUY -> doBuy(player, entry, pkt);
             case SELL -> doSell(player, entry, pkt.times, pkt.backpackMode);
             case DELETE -> {
                 if (!com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player)) {
@@ -158,20 +171,34 @@ public class ShopActionPacket {
         }
     }
 
-    private static void doBuy(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode, int chosenRewardIndex) {
+    private static void doBuy(ServerPlayer player, ShopEntry entry, ShopActionPacket pkt) {
+        long times = pkt.times;
+        boolean aeMode = pkt.aeMode;
+        boolean backpackMode = pkt.backpackMode;
+        int chosenRewardIndex = pkt.chosenRewardIndex;
         boolean cheat = com.dishanhai.gt_shanhai.common.shop.ShopCheatMode.isEnabled(player.getUUID());
         if (entry.hasMissingItems()) {
             // 商品/成本引用的物品当前注册表里查不到（对应模组缺失/被卸载）：客户端按钮已经拦了，这里是兜底，
             // 消息要说清楚原因，别落到下面的"余额不足"分支误导玩家去充值。
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买"));
+            sendCartResult(player, pkt, 0L, "商品引用的物品缺失，无法购买");
             return;
         }
         if (!entry.allowsBuy()) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品仅允许出售，不能购买"));
+            sendCartResult(player, pkt, 0L, "该商品仅允许出售");
+            return;
+        }
+        // 流体商品没有背包/精妙背包容器可落地，只能注入绑定的在线 AE 网络，购买前必须显式开启顶栏「AE模式」——
+        // 不像成本流体那样静默兜底走 AE，这里要求玩家自己确认，避免没注意到就被动往 AE 里塞货物。
+        if (entry.hasFluidGoods() && !aeMode) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 该商品含流体，须先开启顶栏「AE模式」才能购买（流体商品只能注入绑定的在线 AE 网络）"));
+            sendCartResult(player, pkt, 0L, "含流体商品，需开启 AE 模式");
             return;
         }
         if (!cheat && entry.isLimited() && entry.getRemainingUses() <= 0L) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品限购次数已用完"));
+            sendCartResult(player, pkt, 0L, "限购次数已用完");
             return;
         }
         // 交易前的剩余限购次数：若本次成交后限购归零且未买够 times，说明是"次数用尽"而非"余额不足"，
@@ -183,7 +210,23 @@ public class ShopActionPacket {
                 ? com.dishanhai.gt_shanhai.common.shop.ShopPeriodLimiter.remaining(player, entry, periodKey) : -1L;
         if (!cheat && entry.isPeriodLimited() && remainingPeriodBefore <= 0L) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品本周期购买额度已用完，下个周期自动刷新"));
+            sendCartResult(player, pkt, 0L, "本周期购买额度已用完");
             return;
+        }
+        if (!cheat && entry.hasPrerequisiteQuest()) {
+            dev.ftb.mods.ftbquests.quest.Quest prereq = resolvePrerequisiteQuest(entry);
+            if (prereq == null) {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 前置任务未找到（配置错误或 FTBQ 未加载），无法购买"));
+                sendCartResult(player, pkt, 0L, "前置任务未找到");
+                return;
+            }
+            dev.ftb.mods.ftbquests.quest.TeamData teamData =
+                    dev.ftb.mods.ftbquests.quest.ServerQuestFile.INSTANCE.getOrCreateTeamData(player);
+            if (teamData == null || !teamData.isCompleted(prereq)) {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 需要先完成前置任务才能购买: §f" + prereq.getRawTitle()));
+                sendCartResult(player, pkt, 0L, "需要先完成前置任务: " + prereq.getRawTitle());
+                return;
+            }
         }
         ShopPurchase.BulkBuyResult r;
         switch (entry.getRewardMode()) {
@@ -191,6 +234,7 @@ public class ShopActionPacket {
                 var pool = entry.getRewardPool();
                 if (chosenRewardIndex < 0 || chosenRewardIndex >= pool.size()) {
                     player.sendSystemMessage(Component.literal("§c[山海商店] 选择的奖励无效，请重新选择"));
+                    sendCartResult(player, pkt, 0L, "选择的奖励无效");
                     return;
                 }
                 ShopEntry.RewardOption chosen = pool.get(chosenRewardIndex);
@@ -224,6 +268,7 @@ public class ShopActionPacket {
             player.sendSystemMessage(Component.literal(cheat
                     ? "§c[山海商店] 商品无效，无法获取"
                     : "§c[山海商店] 余额不足，先充值"));
+            sendCartResult(player, pkt, 0L, cheat ? "商品无效，无法获取" : "余额不足");
             return;
         }
         if (!cheat) {
@@ -249,21 +294,43 @@ public class ShopActionPacket {
                 && com.dishanhai.gt_shanhai.common.shop.ShopPeriodLimiter.remaining(player, entry, periodKey) <= 0L;
         if (cheat) {
             player.sendSystemMessage(Component.literal("§d[山海商店·作弊] §a直接获取 §f" + amt + " §a次 " + entry.goodsDisplayName() + viaText));
+            sendCartResult(player, pkt, r.done(), "作弊直接获取 " + amt + " 次");
         } else if (r.done() == times) {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a成功购买 §f" + amt + " §a次 " + entry.goodsDisplayName() + viaText));
+            sendCartResult(player, pkt, r.done(), "购买成功");
         } else if (rollCapped) {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a本次抽取 §f" + amt + " §a次 " + entry.goodsDisplayName()
                     + " §7(单次最多抽 " + ShopPurchase.formatCount(ShopPurchase.rewardRollCap()) + " 次，再买一次继续)" + viaText));
+            sendCartResult(player, pkt, r.done(), "已购 " + amt + " 次，单次抽取上限，再结算一次继续");
         } else if (limitExhausted) {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a达到购买次数 §f" + amt + " §a次后可购买次数不足§7，商品限制次数 §f"
                     + ShopPurchase.formatCount(remainingBeforeUses) + viaText));
+            sendCartResult(player, pkt, r.done(), "已购 " + amt + " 次，限购次数已用完");
         } else if (periodExhausted) {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a购买 §f" + amt + " §a次后触发周期限购§7，本周期（每 "
                     + (entry.getPeriodTicks() / 20L) + " 秒）限 " + ShopPurchase.formatCount(entry.getPeriodLimit())
                     + " 次§7，下个周期自动刷新" + viaText));
+            sendCartResult(player, pkt, r.done(), "已购 " + amt + " 次，触发周期限购");
         } else {
             player.sendSystemMessage(Component.literal("§b[山海商店] §a购买 §f" + amt + "§7/§f" + ShopPurchase.formatCount(times) + " §a次后余额不足" + viaText));
+            sendCartResult(player, pkt, r.done(), "已购 " + amt + " 次，余额不足，剩余未购部分保留在购物车");
         }
+    }
+
+    /** 购物车结算发起的 BUY 才回执（{@code pkt.fromCart}），把成交结果结构化推回客户端购物车 UI；非购物车来源/非 BUY 动作不发。 */
+    private static void sendCartResult(ServerPlayer player, ShopActionPacket pkt, long done, String reason) {
+        if (!pkt.fromCart || pkt.action != Action.BUY) return;
+        ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new ShopCartPurchaseResultPacket(pkt.entryKey, pkt.times, done, reason));
+    }
+
+    /** 按 {@link ShopEntry#getPrerequisiteQuestId} 查服务端当前 FTBQ 任务数据（未配置/未同步/ID 非法返回 null）。 */
+    private static dev.ftb.mods.ftbquests.quest.Quest resolvePrerequisiteQuest(ShopEntry entry) {
+        if (!entry.hasPrerequisiteQuest()) return null;
+        dev.ftb.mods.ftbquests.quest.ServerQuestFile file = dev.ftb.mods.ftbquests.quest.ServerQuestFile.INSTANCE;
+        if (file == null) return null;
+        long id = dev.ftb.mods.ftbquests.quest.QuestObjectBase.parseCodeString(entry.getPrerequisiteQuestId());
+        return id == 0L ? null : file.getQuest(id);
     }
 
     private static void doSell(ServerPlayer player, ShopEntry entry, long times, boolean backpackMode) {

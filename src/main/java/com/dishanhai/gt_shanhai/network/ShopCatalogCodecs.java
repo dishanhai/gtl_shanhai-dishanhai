@@ -21,6 +21,7 @@ public final class ShopCatalogCodecs {
     public static final int MAX_LINK_KEY_CHARS = 256;
     public static final int MAX_DISPLAY_NAME_CHARS = 1024;
     public static final int MAX_RESOURCE_ID_CHARS = 256;
+    public static final int MAX_STABLE_ID_CHARS = 64;
 
     private ShopCatalogCodecs() {}
 
@@ -46,6 +47,7 @@ public final class ShopCatalogCodecs {
             for (String goodsId : stub.goodsIds()) {
                 buf.writeUtf(goodsId == null ? "" : goodsId, MAX_RESOURCE_ID_CHARS);
             }
+            buf.writeUtf(stub.stableId(), MAX_STABLE_ID_CHARS);
         }
     }
 
@@ -66,8 +68,9 @@ public final class ShopCatalogCodecs {
             int goodsCount = readBoundedCount(buf, "stub goods", MAX_GOODS_PER_STUB);
             List<String> goodsIds = new ArrayList<>(goodsCount);
             for (int g = 0; g < goodsCount; g++) goodsIds.add(buf.readUtf(MAX_RESOURCE_ID_CHARS));
+            String stableId = buf.readUtf(MAX_STABLE_ID_CHARS);
             stubs.add(new ShopCatalogManifest.Stub(
-                    entryKey, top, sub, hidden, chunkId, linkKey, displayName, goodsIds));
+                    entryKey, top, sub, hidden, chunkId, linkKey, displayName, goodsIds, stableId));
         }
         return new ShopCatalogManifest(revision, ready, stubs);
     }

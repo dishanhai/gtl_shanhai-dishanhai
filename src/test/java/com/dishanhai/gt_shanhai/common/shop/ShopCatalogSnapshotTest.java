@@ -16,11 +16,11 @@ class ShopCatalogSnapshotTest {
         Class<?> descriptorType = Class.forName(
                 "com.dishanhai.gt_shanhai.common.shop.ShopCatalogSnapshot$Descriptor");
         Constructor<?> constructor = descriptorType.getConstructor(
-                String.class, boolean.class, String.class, String.class, List.class, int.class);
+                String.class, boolean.class, String.class, String.class, List.class, int.class, String.class);
         List<Object> descriptors = List.of(
-                constructor.newInstance("无限盘区/前期", false, "a", "", List.of("mod:a"), 30),
-                constructor.newInstance("无限盘区/前期", false, "b", "a", List.of("mod:b"), 30),
-                constructor.newInstance("隐藏", true, "secret", "", List.of("mod:c"), 30));
+                constructor.newInstance("无限盘区/前期", false, "a", "", List.of("mod:a"), 30, "stable-a"),
+                constructor.newInstance("无限盘区/前期", false, "b", "a", List.of("mod:b"), 30, "stable-b"),
+                constructor.newInstance("隐藏", true, "secret", "", List.of("mod:c"), 30, "stable-c"));
 
         Class<?> snapshotType = Class.forName(
                 "com.dishanhai.gt_shanhai.common.shop.ShopCatalogSnapshot");

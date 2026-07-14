@@ -35,6 +35,8 @@ public class WalletOpenRequestPacket {
                             com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
             // 打开商店即推账户快照，客户端界面/tooltip 立刻有余额
             com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
+            // 购物车跨重登保留（见反馈），同一时机推回去，客户端一开店就能看到之前留下的候选
+            com.dishanhai.gt_shanhai.common.shop.ShopCartAPI.sync(player);
         });
         context.setPacketHandled(true);
     }

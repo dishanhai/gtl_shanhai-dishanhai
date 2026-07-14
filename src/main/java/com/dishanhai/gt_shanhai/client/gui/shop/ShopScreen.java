@@ -4,6 +4,7 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientCostPreview;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopCart;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
@@ -97,22 +98,103 @@ public class ShopScreen extends ScaledScreen {
     private ShopEntry selected;
     private long selectedEntryKey = -1L;
     private long observedCatalogRevision = -1L;
+    // 切页/切卡片切换动画：记下"数据集刚换过"的时刻，渲染时按经过时间算一个插值，
+    // 纯几何变换（PoseStack translate/scale，不碰颜色/透明度），对物品图标渲染同样生效，不用担心改样式。
+    private long gridSwitchAtMs;   // 主/子分类切页（网格数据集变了）触发；0=从未触发，视为动画已完成
+    private long cardSwitchAtMs;   // 选中商品切换（详情面板内容变了）触发；0=从未触发，视为动画已完成
+    private int gridSlideDir = 1;  // 切页左右滑入方向：+1=新页在右侧滑入（切到的页签在原页签右边），-1=左侧滑入
+    private static final long TAB_SWITCH_ANIM_MS = 150L;
+    private static final long CARD_SWITCH_ANIM_MS = 150L;
+    private static final float TAB_SLIDE_DIST = 32f; // 切页横切滑入距离（约半个商品格宽，彰显"切"的方向感）
     private long amount = 1L;      // 购买/出售次数，支持 Long.MAX
     private EditBox searchBox;
-    private EditBox amountBox;      // AE 风格数量输入框
+    private AnimatableEditBox amountBox; // AE 风格数量输入框，可被切卡片动画进度控制
     // AE 模式：交付优先注入绑定的 AE 网络。静态=跨界面实例保留（重开钱包不重置），仅本机会话级
     private static boolean aeMode = false;
     // 精妙背包模式：扣款/交付优先走随身穿戴的精妙背包（而不是随身背包），语义/生命周期对齐 aeMode
     private static boolean backpackMode = false;
-    // 实时消息横幅：商店交互反馈镜像（来源见 ShopChatMirror）。静态=界面实例无关，仅本机会话级
-    private static String flashText;      // 含 § 颜色码，与聊天框一致
-    private static long flashUntil;       // System.currentTimeMillis() 到期时刻，超时后横幅消失
+    /**
+     * 实时消息横幅队列：商店交互反馈镜像（来源见 ShopChatMirror）。静态=界面实例无关，仅本机会话级。
+     * 原先是单槽位，连续快速操作（比如连续两次购买）新消息会瞬间顶掉上一条，容易漏看（见反馈）。
+     * 改成最多同时显示 {@link #FLASH_MAX_VISIBLE} 条的队列：新消息从底部滑入，槽位不够时挤开最旧的一条
+     * （不是瞬间消失，也走同一套滑出动画再摘除，见 tickFlash）；自然到期同样先滑出再摘除。
+     */
+    private static final class FlashMsg {
+        String text;
+        long expireAtMs;          // 队列里正常展示的到期时刻（leaving 阶段不再看这个，看 leaveDeadlineMs）
+        long leaveDeadlineMs;     // 滑出动画播完、可以彻底摘除的时刻，仅 leaving 阶段有意义
+        int fromSlot, toSlot;     // 动画起止槽位：0=最新（贴底），数值越大越靠上；-1=从底部滑入前的起点
+        long slotChangedAtMs;     // 上次目标槽位变化的时刻，供滑动插值用
+    }
 
-    /** 由 {@link ShopChatMirror} 调用：把一条商店消息推入实时横幅，显示约 5 秒。 */
+    private static final java.util.List<FlashMsg> flashActive = new java.util.ArrayList<>();  // 当前占着槽位的（≤FLASH_MAX_VISIBLE 条）
+    private static final java.util.List<FlashMsg> flashLeaving = new java.util.ArrayList<>();  // 正在滑出动画中的，播完即摘除
+    private static final int FLASH_MAX_VISIBLE = 3;
+    private static final long FLASH_DISPLAY_MS = 5000L;
+    private static final long FLASH_SLIDE_MS = 180L;   // 滑动过渡时长
+    private static final int FLASH_ROW_H = 17;          // 每行高度（含 1px 行间隙）
+
+    /** 由 {@link ShopChatMirror} 调用：推入一条商店消息，最多同时显示 {@link #FLASH_MAX_VISIBLE} 条。 */
     public static void showMessage(net.minecraft.network.chat.Component msg) {
         if (msg == null) return;
-        flashText = msg.getString();
-        flashUntil = System.currentTimeMillis() + 5000L;
+        long now = System.currentTimeMillis();
+        tickFlash(now); // 先处理一遍自然到期，避免同一帧"到期"和"被挤"重复触发滑出
+        if (flashActive.size() >= FLASH_MAX_VISIBLE) {
+            beginLeave(flashActive.remove(flashActive.size() - 1), now); // 挤开槽位最靠上（最旧）的一条
+        }
+        FlashMsg m = new FlashMsg();
+        m.text = msg.getString();
+        m.expireAtMs = now + FLASH_DISPLAY_MS;
+        m.fromSlot = -1; // 从底部（比槽位0更低一层）滑入
+        m.toSlot = 0;
+        m.slotChangedAtMs = now;
+        flashActive.add(0, m);
+        resyncFlashSlots(now);
+    }
+
+    /** 消息离开 active 队列（自然到期或被挤）：改往上滑出可见区域，进 leaving 表播完动画再摘除。 */
+    private static void beginLeave(FlashMsg m, long now) {
+        m.fromSlot = m.toSlot;
+        m.toSlot = FLASH_MAX_VISIBLE;
+        m.slotChangedAtMs = now;
+        m.leaveDeadlineMs = now + FLASH_SLIDE_MS;
+        flashLeaving.add(m);
+    }
+
+    /** active 队列结构变化后，把每条消息的目标槽位（=当前下标）同步到最新结构；槽位没变的不打断其动画。 */
+    private static void resyncFlashSlots(long now) {
+        for (int i = 0; i < flashActive.size(); i++) {
+            FlashMsg m = flashActive.get(i);
+            if (m.toSlot != i) {
+                m.fromSlot = m.toSlot;
+                m.toSlot = i;
+                m.slotChangedAtMs = now;
+            }
+        }
+    }
+
+    /** 每帧调用：把自然到期的消息从 active 挪进 leaving（触发滑出动画），并摘除已经播完滑出动画的。 */
+    private static void tickFlash(long now) {
+        boolean changed = false;
+        java.util.Iterator<FlashMsg> it = flashActive.iterator();
+        while (it.hasNext()) {
+            FlashMsg m = it.next();
+            if (now > m.expireAtMs) {
+                it.remove();
+                beginLeave(m, now);
+                changed = true;
+            }
+        }
+        if (changed) resyncFlashSlots(now);
+        flashLeaving.removeIf(m -> now > m.leaveDeadlineMs);
+    }
+
+    /** 按动画起止槽位做 ease-out 插值，算出这条消息当前该画在哪一行（世界坐标 Y）。 */
+    private static int flashRowY(FlashMsg m, long now, int baseY) {
+        float t = FLASH_SLIDE_MS <= 0 ? 1f : Math.min(1f, (now - m.slotChangedAtMs) / (float) FLASH_SLIDE_MS);
+        float eased = 1f - (1f - t) * (1f - t);
+        float slot = m.fromSlot + (m.toSlot - m.fromSlot) * eased;
+        return (int) (baseY - slot * FLASH_ROW_H);
     }
     // 删除误触防护：需在窗口期内对同一条目再点一次「删除此商品」才真正执行；实例级=只跟当前这次打开的界面走
     private ShopEntry pendingDeleteEntry;
@@ -122,6 +204,11 @@ public class ShopScreen extends ScaledScreen {
     private static String undoDeleteLabel;
     private static long undoDeleteUntilMs;
     private static final long UNDO_DELETE_UI_WINDOW_MS = 8000L;
+    // 撤销上一次排序（前移/后移/置顶）：同上一套静态悬浮按钮写法，服务端另有独立 30 秒兜底窗口（见 ShopConfig#undoLastMove）。
+    // 置顶没有对称的反向操作，不靠这个的话点错了只能一路点「后移」手动挪回去，见反馈。
+    private static String undoReorderLabel;
+    private static long undoReorderUntilMs;
+    private static final long UNDO_REORDER_UI_WINDOW_MS = 8000L;
     private int scroll = 0; // 网格滚动像素
     private boolean draggingGridScroll; // 正在拖拽网格右侧滚动条
     private final boolean canEdit; // 服务端下发的编辑权（OP 或白名单）：决定新增/编辑按钮显隐
@@ -133,7 +220,9 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void selectEntry(long entryKey, ShopEntry entry) {
-        selectedEntryKey = entry == null ? -1L : entryKey;
+        long newKey = entry == null ? -1L : entryKey;
+        if (newKey != selectedEntryKey) cardSwitchAtMs = System.currentTimeMillis(); // 真换了商品才弹一下，重复点同一张卡不重播
+        selectedEntryKey = newKey;
         selected = entry;
     }
 
@@ -174,6 +263,33 @@ public class ShopScreen extends ScaledScreen {
     // 「补齐全部缺口」按钮：花费预览格有确定不够的项、且开着 AE 模式才出现，跟链接/指南同一套暂存坐标+点击消费的路数
     private boolean autoCraftBtnVisible;
     private int autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH;
+    // 「前置任务」跳转行：条目配了 prerequisiteQuestId 才出现，点击跳到 FTBQ 任务书对应任务，样式同「跳转」
+    private boolean prereqLinkVisible;
+    private dev.ftb.mods.ftbquests.quest.Quest prereqQuest;
+    private boolean prereqQuestCompleted;
+    private int prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH;
+    // 网格卡片右键快捷菜单：导航跳转合集 + 管理效率（编辑权），条目变了/权限变了菜单项动态重算，不用固定坐标+布尔位那一套
+    private boolean ctxMenuOpen;
+    private long ctxMenuEntryKey = -1L;
+    private int ctxMenuX, ctxMenuY, ctxMenuW;
+    private List<ContextMenuItem> ctxMenuItems = List.of();
+    private static final int CTX_MENU_ROW_H = 12;
+    /** 一条右键菜单项：命中即执行 action 并收起菜单；separatorBefore=true 时上方先画一道分隔线（分组用）。 */
+    private record ContextMenuItem(String label, boolean separatorBefore, Runnable action) {}
+
+    // 购物车：顶栏微缩按键展开的独立大图层；Ctrl+左键网格卡片加入候选，按 stableId 引用条目（跨快照/跨重登有效，
+    // 见 ClientShopCart），数量可调、可单独删除，结算=按候选清单逐项各自发起购买（异步、互不阻塞）。
+    private boolean cartOverlayOpen;
+    private long cartOverlayOpenAtMs; // 打开瞬间的时间戳，驱动展开弹入动画（见 renderScaledForeground）
+    private int cartOverlayScroll;
+    private final Map<Long, Long> cartPreviewRequestedAtGameTime = new java.util.HashMap<>();
+    private boolean cartPreviewRequestedAeMode;
+    private static final long OVERLAY_POP_ANIM_MS = 150L;
+    // 结算批次：点「结算购物车」时把当次涉及的 stableId 快照进来，底部按钮区在批次未全部回执前
+    // 变成进度条（X/总数），全部回执后改回按钮，但已回执的行状态（成功戳记覆盖控件/失败原因）
+    // 一直留到关闭购物车面板才清（见反馈：进度跑完要能直接在面板里看到哪些成功哪些失败）。
+    private final List<String> cartSettleBatch = new ArrayList<>();
+    private long cartSettleBatchStartedAtMs;
 
     // ===== 动态面板尺寸（每次 initScaled 重算）=====
     private int left, top, panelWidth, panelHeight;
@@ -276,6 +392,9 @@ public class ShopScreen extends ScaledScreen {
     // 「精妙背包模式」切换：AE模式按钮左侧
     private static final int BACKPACK_BTN_W = 78;
     private int backpackBtnX() { return aeBtnX() - 4 - BACKPACK_BTN_W; }
+    // 购物车微缩按键：精妙背包按钮左侧，比其余顶栏按钮窄，非空时标题带数量角标
+    private static final int CART_BTN_W = 48;
+    private int cartBtnX() { return backpackBtnX() - 4 - CART_BTN_W; }
 
     // ===== 网格坐标单一真源（渲染/点击/tooltip 三处共用，杜绝错位）=====
     private static final int ROW_STRIDE = CELL_H + GRID_GAP;
@@ -350,7 +469,7 @@ public class ShopScreen extends ScaledScreen {
         addRenderableWidget(searchBox);
 
         // 数量输入框（AE 风格，详情区数量位；仅选中商品时可见）
-        amountBox = new EditBox(this.font, detailX() + 8, contentTop() + 66, DETAIL_W - 16, 12, Component.literal("数量"));
+        amountBox = new AnimatableEditBox(this.font, detailX() + 8, contentTop() + 66, DETAIL_W - 16, 12, Component.literal("数量"));
         amountBox.setValue(Long.toString(Math.max(1L, amount)));
         amountBox.setBordered(true);
         amountBox.setTextColor(0xFFFFFF);
@@ -402,9 +521,22 @@ public class ShopScreen extends ScaledScreen {
             long linked = ClientShopCatalog.linkedEntryKey(selected.getLinkTo());
             if (linked >= 0L) neededKeys.add(linked);
         }
+        if (cartOverlayOpen) {
+            for (String stableId : ClientShopCart.getAll().keySet()) {
+                long k = ClientShopCatalog.keyOfStableId(stableId);
+                if (k >= 0L) neededKeys.add(k);
+            }
+        }
         ClientShopCatalog.ensureLoadedRange(neededKeys, 0, neededKeys.size());
-        // 数量框仅在选中商品时可见（本方法在 super.render 画控件之前执行，故此处同步安全）
-        if (amountBox != null) amountBox.setVisible(selected != null);
+        // 数量框仅在选中商品时可见（本方法在 super.render 画控件之前执行，故此处同步安全）。
+        // amountBox 现在是 AnimatableEditBox：自己在 renderWidget 里套用跟 drawDetail 同一套
+        // 锚点/缓动公式做 PoseStack 缩放，这里只需每帧把动画进度源和锚点告诉它即可，不用再
+        // 手动 setX/setY/setWidth 去追坐标（见反馈：改成可被控制的组件，而不是动画期间藏起来）。
+        float cardT = GuiRenderUtil.popAnimProgress(cardSwitchAtMs, CARD_SWITCH_ANIM_MS);
+        if (amountBox != null) {
+            amountBox.setVisible(selected != null);
+            amountBox.setAnim(this::cardAnimProgress, detailX() + DETAIL_W / 2f, contentTop() + contentHeight() / 2f);
+        }
         // 整体面板（KE 风格 4 层嵌套：金边→金→暗背景→内层）
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
@@ -423,7 +555,10 @@ public class ShopScreen extends ScaledScreen {
             drawButton(g, settingsBtnX(), top + 6, SETTINGS_BTN_W, TOP_BAR_H, "§b商店设置", mx, my);
         }
 
-        // 顶栏右侧：精妙背包模式 → AE模式 → 充值全部 → 关闭
+        // 顶栏右侧：购物车 → 精妙背包模式 → AE模式 → 充值全部 → 关闭
+        int cartCount = ClientShopCart.size();
+        drawButton(g, cartBtnX(), top + 6, CART_BTN_W, TOP_BAR_H,
+                cartCount > 0 ? "§e购物车§6(" + cartCount + ")" : "§e购物车", mx, my);
         drawButton(g, backpackBtnX(), top + 6, BACKPACK_BTN_W, TOP_BAR_H, backpackMode ? "§a精妙背包:开" : "§8精妙背包:关", mx, my);
         drawButton(g, aeBtnX(), top + 6, AE_BTN_W, TOP_BAR_H, aeMode ? "§aAE模式:开" : "§8AE模式:关", mx, my);
         drawButton(g, rechargeBtnX(), top + 6, RECHARGE_W, TOP_BAR_H, "§b充值全部", mx, my);
@@ -463,27 +598,45 @@ public class ShopScreen extends ScaledScreen {
             }
         }
 
-        // 左侧网格背景
+        // 左侧网格背景（切页横切滑入：纯 PoseStack 平移，方向按页签左右顺序走，彰显"切"的方向感，
+        // 见反馈：切页不该用缩放弹入，要左右横切；drawGrid 内部自带 scissor 裁到 gx..gx+gw，
+        // 滑入途中溢出的部分会被天然裁掉，不会盖到旁边的页签/详情栏）
         int gx = listLeft(), gy = contentTop(), gw = listWidth(), gh = contentHeight();
         g.fill(gx, gy, gx + gw, gy + gh, BOX_BG);
-        drawGrid(g, mx, my);
+        float gridT = GuiRenderUtil.popAnimProgress(gridSwitchAtMs, TAB_SWITCH_ANIM_MS);
+        if (gridT < 1f) {
+            g.pose().pushPose();
+            slideInX(g, gridSlideDir, gridT);
+            drawGrid(g, mx, my);
+            g.pose().popPose();
+        } else {
+            drawGrid(g, mx, my);
+        }
 
-        // 右侧详情面板
-        drawDetail(g, mx, my);
+        // 右侧详情面板（同上，锚点换成详情列自己的中心；cardT 已在上面算过，amountBox 同步过了）
+        if (cardT < 1f) {
+            g.pose().pushPose();
+            GuiRenderUtil.popScaleAt(g, detailX() + DETAIL_W / 2f, gy + gh / 2f, cardT);
+            drawDetail(g, mx, my);
+            g.pose().popPose();
+        } else {
+            drawDetail(g, mx, my);
+        }
 
-        // 实时消息横幅（商店交互反馈，5 秒后自动消失）：面板底部居中，覆盖在最上层
-        if (flashText != null && System.currentTimeMillis() < flashUntil) {
-            // 物品图标走 GuiGraphics 的缓冲渲染层（renderItem，drawGrid/drawDetail 里画的），和 fill()/drawString()
-            // 这类立即绘制的 flat quad 不在同一批次；不强制 flush 会导致图标在批次刷新时"跳"到横幅上层，
-            // 盖住文字（同 ShopEntryEditScreen 描述展开编写大图层的穿模成因，见其 renderScaledBackground 注释）。
-            g.flush();
-            int flashW = this.font.width(flashText);
-            int bannerW = Math.min(panelWidth - 12, flashW + 16);
-            int bannerX = left + (panelWidth - bannerW) / 2;
-            int bannerY = top + panelHeight - 24;
-            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 16, 0xE0101010);   // 半透明黑底
-            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 1, 0xFF00C0C0);    // 顶部青线
-            g.drawCenteredString(this.font, flashText, left + panelWidth / 2, bannerY + 4, 0xFFFFFF);
+        // 实时消息横幅队列（商店交互反馈，5 秒后自动滑出消失）：面板底部居中，覆盖在最上层，
+        // 最多同时显示 FLASH_MAX_VISIBLE 条，新消息从底部滑入，挤开的/到期的都走同一套滑出动画再摘除
+        {
+            long now = System.currentTimeMillis();
+            tickFlash(now);
+            if (!flashActive.isEmpty() || !flashLeaving.isEmpty()) {
+                // 物品图标走 GuiGraphics 的缓冲渲染层（renderItem，drawGrid/drawDetail 里画的），和 fill()/drawString()
+                // 这类立即绘制的 flat quad 不在同一批次；不强制 flush 会导致图标在批次刷新时"跳"到横幅上层，
+                // 盖住文字（同 ShopEntryEditScreen 描述展开编写大图层的穿模成因，见其 renderScaledBackground 注释）。
+                g.flush();
+                int baseY = top + panelHeight - 24;
+                for (FlashMsg m : flashLeaving) drawFlashRow(g, m, now, baseY);
+                for (FlashMsg m : flashActive) drawFlashRow(g, m, now, baseY);
+            }
         }
 
         // 撤销删除按钮：删除后 8 秒内悬浮显示，点一下把刚删的条目加回来（服务端另有独立 30 秒兜底窗口）
@@ -500,6 +653,48 @@ public class ShopScreen extends ScaledScreen {
                 undoDeleteLabel = null;
             }
         }
+
+        // 撤销排序按钮：前移/后移/置顶后 8 秒内悬浮显示，点一下把该条目挪回移动前的位置（服务端另有独立 30 秒兜底窗口）
+        if (undoReorderLabel != null) {
+            if (System.currentTimeMillis() < undoReorderUntilMs) {
+                g.flush();
+                int[] b = undoReorderBtnBounds();
+                boolean hv = hit(mx, my, b[0], b[1], b[2], b[3]);
+                g.fill(b[0], b[1], b[0] + b[2], b[1] + b[3], hv ? 0xFF2A6E2A : 0xE0163016);
+                g.fill(b[0], b[1], b[0] + b[2], b[1] + 1, 0xFF33CC33);
+                g.drawCenteredString(this.font, "§a↩ 撤销排序【" + GuiRenderUtil.trimText(this.font, undoReorderLabel, 70) + "】",
+                        b[0] + b[2] / 2, b[1] + 3, 0xFFFFFF);
+            } else {
+                undoReorderLabel = null;
+            }
+        }
+    }
+
+    /** 弹入动画进度 [0,1]（1=已播完）；atMs<=0（从未触发过）视为已播完，不做任何变换。 */
+    /**
+     * 切页横切滑入（dir&gt;0 从右侧滑入 / dir&lt;0 从左侧滑入，ease-out）：单纯水平平移，不缩放，
+     * 彰显"切"到下一页的方向感（而非弹入的"内容出现"感）。调用方须自行 pushPose/popPose 包住。
+     */
+    private static void slideInX(GuiGraphics g, int dir, float t) {
+        float eased = 1f - (1f - t) * (1f - t);
+        float offset = dir * TAB_SLIDE_DIST * (1f - eased);
+        g.pose().translate(offset, 0, 0);
+    }
+
+    /** 详情面板切卡片弹入动画进度 [0,1]；供 amountBox（AnimatableEditBox）作为动画驱动源读取。 */
+    private float cardAnimProgress() {
+        return GuiRenderUtil.popAnimProgress(cardSwitchAtMs, CARD_SWITCH_ANIM_MS);
+    }
+
+    /** 画一条消息横幅：按其动画槽位算出当前 Y，宽度随文字自适应，样式跟原先的单槽横幅一致。 */
+    private void drawFlashRow(GuiGraphics g, FlashMsg m, long now, int baseY) {
+        int y = flashRowY(m, now, baseY);
+        int w = this.font.width(m.text);
+        int bannerW = Math.min(panelWidth - 12, w + 16);
+        int bannerX = left + (panelWidth - bannerW) / 2;
+        g.fill(bannerX, y, bannerX + bannerW, y + 16, 0xE0101010);   // 半透明黑底
+        g.fill(bannerX, y, bannerX + bannerW, y + 1, 0xFF00C0C0);    // 顶部青线
+        g.drawCenteredString(this.font, m.text, left + panelWidth / 2, y + 4, 0xFFFFFF);
     }
 
     private static final int DESC_OVERLAY_CLOSE_W = 16;
@@ -539,8 +734,26 @@ public class ShopScreen extends ScaledScreen {
     /** 前景层（盖住所有控件）：描述详情大图层，FTBQ 风格全屏遮罩 + 居中面板 + 自动换行长文本，超出可视高度可滚动。 */
     @Override
     protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
+        if (ctxMenuOpen) {
+            drawContextMenu(g, mx, my);
+            return;
+        }
         if (guideOverlayOpen && selected != null) {
             renderGuideOverlay(g, mx, my);
+            return;
+        }
+        if (cartOverlayOpen) {
+            // 展开弹入：跟切页/切卡片同一套锚点缩放公式，锚点换成购物车面板自己的中心（见反馈：需要动画补充）
+            int[] cr = cartOverlayBounds();
+            float cartT = GuiRenderUtil.popAnimProgress(cartOverlayOpenAtMs, OVERLAY_POP_ANIM_MS);
+            if (cartT < 1f) {
+                g.pose().pushPose();
+                GuiRenderUtil.popScaleAt(g, cr[0] + cr[2] / 2f, cr[1] + cr[3] / 2f, cartT);
+                renderCartOverlay(g, mx, my);
+                g.pose().popPose();
+            } else {
+                renderCartOverlay(g, mx, my);
+            }
             return;
         }
         if (!descOverlayOpen || selected == null) return;
@@ -643,6 +856,280 @@ public class ShopScreen extends ScaledScreen {
             g.drawString(this.font, "§8滚轮翻页 " + (guideOverlayScroll + 1) + "-" + Math.min(guideHits.size(), guideOverlayScroll + visible)
                     + "/" + guideHits.size(), ox + 8, oy + r[3] - 10, GRAY, false);
         }
+    }
+
+    // ============ 购物车大图层 ============
+
+    private static final int CART_ROW_H = 26;
+    private static final int CART_STEP_W = 16;
+    private static final int CART_QTY_W = 42;
+    private static final int CART_REMOVE_W = 20;
+    private static final int CART_CTRL_BLOCK_W = CART_STEP_W + 2 + CART_QTY_W + 2 + CART_STEP_W + 4 + CART_REMOVE_W;
+    private static final int CART_SETTLE_BTN_H = 22;
+    private static final int CART_SETTLE_BTN_W = 100;
+
+    /** 购物车面板展示清单：当前购物车实际内容 ∪ 最近一次结算批次里已回执成功而被移出购物车的项——
+     * 结算批次没被关闭面板清掉之前，成功戳记的行还要能继续显示（见需求：进度跑完直接在面板里看成功/失败）。 */
+    private List<String> cartDisplayIds() {
+        List<String> ids = new ArrayList<>(ClientShopCart.getAll().keySet());
+        for (String id : cartSettleBatch) if (!ids.contains(id)) ids.add(id);
+        return ids;
+    }
+
+    /** 该 stableId 是否是本结算批次里已回执「全部成交」的行——这类行不画数量步进/删除，改画成功戳记覆盖那块区域。 */
+    private boolean cartRowSettledSuccess(String stableId) {
+        if (!cartSettleBatch.contains(stableId)) return false;
+        ClientShopCart.Result r = ClientShopCart.getResult(stableId);
+        return r != null && r.atMs >= cartSettleBatchStartedAtMs && r.ok();
+    }
+
+    /** 本结算批次里已回执（成功/部分/失败）的行——用于给行状态着色，不再是客户端猜的缺口符号。 */
+    private ClientShopCart.Result cartRowSettledResult(String stableId) {
+        if (!cartSettleBatch.contains(stableId)) return null;
+        ClientShopCart.Result r = ClientShopCart.getResult(stableId);
+        return (r != null && r.atMs >= cartSettleBatchStartedAtMs) ? r : null;
+    }
+
+    /** 当前结算批次进度：[已回执件数, 批次总件数]；无批次时返回 [0,0]。 */
+    private int[] cartBatchProgress() {
+        if (cartSettleBatch.isEmpty()) return new int[]{0, 0};
+        int resolved = 0;
+        for (String id : cartSettleBatch) {
+            ClientShopCart.Result r = ClientShopCart.getResult(id);
+            if (r != null && r.atMs >= cartSettleBatchStartedAtMs) resolved++;
+        }
+        return new int[]{resolved, cartSettleBatch.size()};
+    }
+
+    /** 购物车大图层边界：比描述/指南详情宽（要放数量步进+删除按钮），高度按候选条数动态算，封顶同其余大图层。 */
+    private int[] cartOverlayBounds() {
+        int ow = Math.min(vWidth - 40, 620);
+        int count = cartDisplayIds().size();
+        int desiredH = 56 + count * CART_ROW_H;
+        int oh = Math.min(vHeight - 40, Math.max(110, Math.min(desiredH, 420)));
+        int ox = (vWidth - ow) / 2;
+        int oy = (vHeight - oh) / 2;
+        return new int[]{ox, oy, ow, oh};
+    }
+
+    private int cartOverlayVisibleRows(int[] r) {
+        return Math.max(1, (r[3] - 22 - (CART_SETTLE_BTN_H + 10)) / CART_ROW_H);
+    }
+
+    private int cartOverlayMaxScroll(int[] r, int count) {
+        return Math.max(0, count - cartOverlayVisibleRows(r));
+    }
+
+    private int cartCtrlBlockX(int[] r) {
+        return r[0] + r[2] - 8 - CART_CTRL_BLOCK_W;
+    }
+
+    /** 购物车条目行的花费预览请求节流：跟详情页那套（previewRequestedKey 单槽）各自独立，
+     * 允许购物车里的多件商品同时各自发起请求（见 ClientCostPreview 已扩成按 entryKey 多槽缓存）。 */
+    private void maybeRequestCartCostPreview(long entryKey, ShopCost cost) {
+        if (entryKey < 0L || cost == null || (cost.coins.isEmpty() && cost.physical.isEmpty())) return;
+        net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
+        long gameTime = lvl != null ? lvl.getGameTime() : 0L;
+        Long last = cartPreviewRequestedAtGameTime.get(entryKey);
+        boolean stale = last == null || cartPreviewRequestedAeMode != aeMode || gameTime - last >= PREVIEW_REFRESH_TICKS;
+        if (!stale) return;
+        cartPreviewRequestedAtGameTime.put(entryKey, gameTime);
+        cartPreviewRequestedAeMode = aeMode;
+        ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopCostPreviewRequestPacket(
+                ClientShopCatalog.revision(), entryKey, aeMode));
+    }
+
+    /** null=未同步（数据还没回来，按"未知"处理）；否则=按当前已知余量确定的够/不够（含 AE/精妙背包口径）。 */
+    private Boolean cartRowShortfall(long entryKey, ShopCost cost, long times) {
+        if (entryKey < 0L || !ClientCostPreview.matches(entryKey, aeMode)) return null;
+        return hasCostShortfall(cost, times, entryKey, aeMode);
+    }
+
+    /** 购物车大图层：候选清单（图标+名称+缺口状态+数量步进+删除）+ 底部汇总消耗与结算按钮。 */
+    private void renderCartOverlay(GuiGraphics g, int mx, int my) {
+        int[] r = cartOverlayBounds();
+        int ox = r[0], oy = r[1], ow = r[2], oh = r[3];
+        g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
+        renderBox(g, ox, oy, ow, oh, GOLD_DARK, PANEL_BG);
+
+        Map<String, Long> cartMap = ClientShopCart.getAll();
+        List<String> stableIds = new ArrayList<>(cartMap.keySet());
+
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font,
+                "§6购物车 §7(" + stableIds.size() + " 件候选)", ow - DESC_OVERLAY_CLOSE_W - 20), ox + 8, oy + 8, GOLD, true);
+        int closeX = ox + ow - DESC_OVERLAY_CLOSE_W - 4, closeY = oy + 4;
+        drawButton(g, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H, "§cX", mx, my);
+
+        if (stableIds.isEmpty()) {
+            g.drawCenteredString(this.font, "§7购物车是空的——Ctrl+左键网格商品加入候选", ox + ow / 2, oy + oh / 2 - 4, GRAY);
+            return;
+        }
+
+        int visible = cartOverlayVisibleRows(r);
+        int maxScroll = cartOverlayMaxScroll(r, stableIds.size());
+        cartOverlayScroll = Math.max(0, Math.min(maxScroll, cartOverlayScroll));
+
+        int rowY0 = oy + 22;
+        boolean anyConfirmedShortfall = false;
+        java.math.BigInteger totalSpark = java.math.BigInteger.ZERO;
+        Map<ResourceLocation, java.math.BigInteger> totalCoins = new java.util.LinkedHashMap<>();
+        int ctrlX = cartCtrlBlockX(r);
+
+        for (int i = 0; i < visible; i++) {
+            int idx = cartOverlayScroll + i;
+            if (idx >= stableIds.size()) break;
+            String stableId = stableIds.get(idx);
+            long qty = cartMap.getOrDefault(stableId, 0L);
+            int ry = rowY0 + i * CART_ROW_H;
+            int textY = ry + (CART_ROW_H - 2 - 8) / 2;
+            int iconY = ry + (CART_ROW_H - 2 - 16) / 2;
+            boolean rowHover = GuiRenderUtil.isHovering(mx, my, ox + 6, ry, ow - 12, CART_ROW_H - 2);
+            if (rowHover) g.fill(ox + 6, ry, ox + ow - 6, ry + CART_ROW_H - 2, BUTTON_HOVER);
+
+            long entryKey = ClientShopCatalog.keyOfStableId(stableId);
+            ShopEntry entry = entryKey >= 0L ? ClientShopCatalog.get(entryKey) : null;
+            int nameMaxW = Math.max(10, ctrlX - (ox + 26) - 6);
+            ClientShopCart.Result settled = cartRowSettledResult(stableId);
+            boolean settledSuccess = settled != null && settled.ok();
+            if (entry == null) {
+                g.drawString(this.font, "§8[已下架/加载中] " + stableId.substring(0, Math.min(8, stableId.length())),
+                        ox + 8, textY, GRAY, true);
+            } else {
+                if (entry.isPrimaryGoodsFluid()) {
+                    renderFluidIcon(g, ox + 8, iconY, 16, entry.primaryGoodsFluid());
+                } else {
+                    g.renderItem(entry.displayGoodsStack(), ox + 8, iconY);
+                }
+                ShopCost cost = entry.getCost();
+                String label;
+                if (settled != null) {
+                    // 本结算批次已回执：直接按服务端结果着色+附原因，不再用客户端猜的缺口符号（见反馈：结算后要看清成败）
+                    String tag = settled.ok() ? "§a✓ " : (settled.partial() ? "§e~ " : "§c✗ ");
+                    label = tag + "§f" + entry.goodsDisplayName() + " §7(" + settled.reason + ")";
+                } else {
+                    maybeRequestCartCostPreview(entryKey, cost);
+                    Boolean shortfall = cartRowShortfall(entryKey, cost, qty);
+                    String status = shortfall == null ? "§7? " : (shortfall ? "§c✗ " : "§a✓ ");
+                    if (Boolean.TRUE.equals(shortfall)) anyConfirmedShortfall = true;
+                    label = status + "§f" + entry.goodsDisplayName();
+                }
+                g.drawString(this.font, GuiRenderUtil.trimText(this.font, label, nameMaxW), ox + 26, textY, WHITE, true);
+                totalSpark = totalSpark.add(cost.spark.multiply(java.math.BigInteger.valueOf(qty)));
+                for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
+                    totalCoins.merge(c.getKey(), c.getValue().multiply(java.math.BigInteger.valueOf(qty)), java.math.BigInteger::add);
+                }
+            }
+
+            // 数量步进：− qty +（默认±1，Shift±10，Ctrl±100，点击时判定），再右边删除；本批次已全部成交回执的行
+            // 改画成功戳记覆盖这块区域（复用同一块地方，不再可调），见需求：成功行用控件区域盖成戳记
+            int minusX = ctrlX, qtyTextX = minusX + CART_STEP_W + 2, plusX = qtyTextX + CART_QTY_W + 2,
+                    removeX = plusX + CART_STEP_W + 4;
+            if (settledSuccess) {
+                String stamp = "§a✓ 已购买 " + formatBig(java.math.BigInteger.valueOf(settled.done)) + " 次";
+                g.drawString(this.font, GuiRenderUtil.trimText(this.font, stamp, CART_CTRL_BLOCK_W), ctrlX, textY, WHITE, true);
+            } else {
+                drawButton(g, minusX, ry, CART_STEP_W, CART_ROW_H - 2, "§c-", mx, my);
+                g.drawCenteredString(this.font, "§f" + formatBig(java.math.BigInteger.valueOf(qty)),
+                        qtyTextX + CART_QTY_W / 2, ry + (CART_ROW_H - 2 - 8) / 2, WHITE);
+                drawButton(g, plusX, ry, CART_STEP_W, CART_ROW_H - 2, "§a+", mx, my);
+                drawButton(g, removeX, ry, CART_REMOVE_W, CART_ROW_H - 2, "§c×", mx, my);
+            }
+        }
+        if (maxScroll > 0) {
+            g.drawString(this.font, "§8滚轮翻页 " + (cartOverlayScroll + 1) + "-"
+                    + Math.min(stableIds.size(), cartOverlayScroll + visible) + "/" + stableIds.size(),
+                    ox + 8, oy + oh - 24, GRAY, false);
+        }
+
+        // 底部：汇总预计消耗（星火/币种，客户端已知数据直接加总，无需额外往返）+ 结算按钮/结算进度条
+        ShopCost aggCost = new ShopCost(totalSpark, totalCoins, List.of());
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7合计预计消耗: " + costInline(aggCost), ow - CART_SETTLE_BTN_W - 16),
+                ox + 8, oy + oh - 14, CYAN, true);
+        int settleW = CART_SETTLE_BTN_W, settleX = ox + ow - 8 - settleW, settleY = oy + oh - CART_SETTLE_BTN_H - 2;
+        int[] progress = cartBatchProgress();
+        boolean settling = progress[1] > 0 && progress[0] < progress[1];
+        if (settling) {
+            // 结算批次还没全部回执：这块区域改画进度条（浮在面板最底下），全部回执前不再接受新的结算点击
+            renderBox(g, settleX, settleY, settleW, CART_SETTLE_BTN_H, GOLD_DARK, PANEL_BG);
+            float prog = (float) progress[0] / progress[1];
+            int fillW = Math.max(0, Math.round((settleW - 2) * prog));
+            if (fillW > 0) g.fill(settleX + 1, settleY + 1, settleX + 1 + fillW, settleY + CART_SETTLE_BTN_H - 1, CYAN);
+            g.drawCenteredString(this.font, "§f结算中 " + progress[0] + "/" + progress[1],
+                    settleX + settleW / 2, settleY + (CART_SETTLE_BTN_H - 8) / 2, WHITE);
+        } else {
+            boolean settleHover = hit(mx, my, settleX, settleY, settleW, CART_SETTLE_BTN_H);
+            renderButton(g, settleX, settleY, settleW, CART_SETTLE_BTN_H, settleHover, "§a结算购物车",
+                    anyConfirmedShortfall ? DEEP_RED : GREEN_DARK, anyConfirmedShortfall ? DEEP_RED : GREEN);
+        }
+    }
+
+    /** 购物车大图层点击：关闭 / 图层外点击关闭 / 数量步进 / 删除 / 结算，命中任意一处都吞掉点击不下穿。 */
+    private boolean handleCartOverlayClick(double mx, double my) {
+        int[] r = cartOverlayBounds();
+        int ox = r[0], oy = r[1], ow = r[2], oh = r[3];
+        int closeX = ox + ow - DESC_OVERLAY_CLOSE_W - 4, closeY = oy + 4;
+        if (!hit(mx, my, ox, oy, ow, oh) || hit(mx, my, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+            cartOverlayOpen = false;
+            // 结算结果不因关闭面板清掉——玩家结算后经常会先切出去看聊天栏/背包再切回来看结果，
+            // 批次要撑到下一次点「结算购物车」才被替换（见反馈：关了一下再打开就看不到回执了）
+            return true;
+        }
+        Map<String, Long> cartMap = ClientShopCart.getAll();
+        List<String> stableIds = cartDisplayIds(); // 必须跟 renderCartOverlay 用同一份清单，行索引才对得上
+        if (!stableIds.isEmpty()) {
+            int visible = cartOverlayVisibleRows(r);
+            int rowY0 = oy + 22;
+            int ctrlX = cartCtrlBlockX(r);
+            int minusX = ctrlX, qtyTextX = minusX + CART_STEP_W + 2, plusX = qtyTextX + CART_QTY_W + 2,
+                    removeX = plusX + CART_STEP_W + 4;
+            long step = net.minecraft.client.gui.screens.Screen.hasControlDown() ? 100L
+                    : (net.minecraft.client.gui.screens.Screen.hasShiftDown() ? 10L : 1L);
+            for (int i = 0; i < visible; i++) {
+                int idx = cartOverlayScroll + i;
+                if (idx >= stableIds.size()) break;
+                String stableId = stableIds.get(idx);
+                if (cartRowSettledSuccess(stableId)) continue; // 该行画的是成功戳记，不是数量步进/删除，不接受这块点击
+                int ry = rowY0 + i * CART_ROW_H;
+                if (hit(mx, my, minusX, ry, CART_STEP_W, CART_ROW_H - 2)) {
+                    long cur = cartMap.getOrDefault(stableId, 1L);
+                    ClientShopCart.setAmount(stableId, Math.max(1L, cur - step));
+                    return true;
+                }
+                if (hit(mx, my, plusX, ry, CART_STEP_W, CART_ROW_H - 2)) {
+                    long cur = cartMap.getOrDefault(stableId, 1L);
+                    ClientShopCart.setAmount(stableId, addClamp(cur, step));
+                    return true;
+                }
+                if (hit(mx, my, removeX, ry, CART_REMOVE_W, CART_ROW_H - 2)) {
+                    ClientShopCart.remove(stableId);
+                    return true;
+                }
+            }
+        }
+        int settleW = CART_SETTLE_BTN_W, settleX = ox + ow - 8 - settleW, settleY = oy + oh - CART_SETTLE_BTN_H - 2;
+        int[] progress = cartBatchProgress();
+        boolean settling = progress[1] > 0 && progress[0] < progress[1];
+        if (!settling && hit(mx, my, settleX, settleY, settleW, CART_SETTLE_BTN_H)) {
+            cartSettleBatch.clear();
+            cartSettleBatchStartedAtMs = System.currentTimeMillis();
+            int fired = 0;
+            for (Map.Entry<String, Long> e : cartMap.entrySet()) {
+                String stableId = e.getKey();
+                long entryKey = ClientShopCatalog.keyOfStableId(stableId);
+                ShopEntry entry = entryKey >= 0L ? ClientShopCatalog.get(entryKey) : null;
+                if (entry == null) continue; // 已下架/尚未加载完成，留在购物车里，不动它
+                long qty = e.getValue() == null ? 0L : e.getValue();
+                if (qty <= 0L) continue;
+                sendCartBuy(entry, qty); // 逐项各自发起购买，异步、互不阻塞；成交结果由 ShopCartPurchaseResultPacket 回执驱动行状态，见反馈
+                cartSettleBatch.add(stableId);
+                fired++;
+            }
+            showMessage(Component.literal(fired > 0
+                    ? "§b[山海商店] §a已对 " + fired + " 件候选逐项发起结算，稍候在购物车面板查看每项结果"
+                    : "§c[山海商店] 购物车里的商品都还没加载完，稍后再试"));
+            return true;
+        }
+        return true; // 图层内其余点击原地吞掉，不下穿到网格/详情
     }
 
     /** 描述详情大图层滚动条点击/拖拽起手：命中整条轨道即可（不用精确点在把手上），随即按该点位置跳转。 */
@@ -757,7 +1244,8 @@ public class ShopScreen extends ScaledScreen {
      * 推导），故可以脱离具体格坐标缓存。
      */
     private static final class CellCache {
-        final ItemStack goodsStack; // 无自定义显示图标时用；有自定义图标为 null（走 renderIconComposite）
+        final ItemStack goodsStack; // 无自定义显示图标、主商品非流体时用；否则为 null（流体走 goodsFluid，组合/自定义走 renderIconComposite）
+        final net.minecraft.world.level.material.Fluid goodsFluid; // 主商品是流体时非空（同 renderFluidIcon 配套）
         final String trimmedName;
         final String amtText;
         final ItemStack costIcon;
@@ -765,9 +1253,10 @@ public class ShopScreen extends ScaledScreen {
         final boolean fluidPrimary;
         final int extra;
 
-        CellCache(ItemStack goodsStack, String trimmedName, String amtText, ItemStack costIcon,
-                  boolean sparkPrimary, boolean fluidPrimary, int extra) {
+        CellCache(ItemStack goodsStack, net.minecraft.world.level.material.Fluid goodsFluid, String trimmedName,
+                  String amtText, ItemStack costIcon, boolean sparkPrimary, boolean fluidPrimary, int extra) {
             this.goodsStack = goodsStack;
+            this.goodsFluid = goodsFluid;
             this.trimmedName = trimmedName;
             this.amtText = amtText;
             this.costIcon = costIcon;
@@ -789,7 +1278,9 @@ public class ShopScreen extends ScaledScreen {
 
     /** 截断宽度推导：rightX-textX = (cx+CELL_W-3)-(cx+3+23) = CELL_W-29，与格子的 cx 无关。 */
     private CellCache buildCellCache(ShopEntry entry) {
-        ItemStack goodsStack = entry.effectiveIcons().isEmpty() ? entry.displayGoodsStack() : null;
+        boolean noCustomIcons = entry.effectiveIcons().isEmpty();
+        ItemStack goodsStack = noCustomIcons && !entry.isPrimaryGoodsFluid() ? entry.displayGoodsStack() : null;
+        net.minecraft.world.level.material.Fluid goodsFluid = noCustomIcons && entry.isPrimaryGoodsFluid() ? entry.primaryGoodsFluid() : null;
         String trimmedName = GuiRenderUtil.trimText(this.font, entry.goodsDisplayName(), CELL_W - 29);
         ShopCost cost = entry.getCost();
         String amtText;
@@ -815,7 +1306,7 @@ public class ShopScreen extends ScaledScreen {
             amtText = "免";
         }
         int extra = cost.componentCount() - 1;
-        return new CellCache(goodsStack, trimmedName, amtText, costIcon, sparkPrimary, fluidPrimary, extra);
+        return new CellCache(goodsStack, goodsFluid, trimmedName, amtText, costIcon, sparkPrimary, fluidPrimary, extra);
     }
 
     /** KE 风格横向格：左棋盘物品槽 + 右侧名称/状态 + 底部价格数字条 + 货币小图标。 */
@@ -833,11 +1324,13 @@ public class ShopScreen extends ScaledScreen {
         int slotX = cx + 3, slotY = cy + 3;
         renderItemCheckerSlot(g, slotX, slotY);
         List<ShopEntry.DisplayIcon> cellIcons = entry.effectiveIcons();
-        if (cellIcons.isEmpty()) {
+        if (!cellIcons.isEmpty()) {
+            renderIconComposite(g, cellIcons, slotX, slotY);
+        } else if (cc.goodsFluid != null) {
+            renderFluidIcon(g, slotX + 2, slotY + 2, 16, cc.goodsFluid);
+        } else {
             g.renderItem(cc.goodsStack, slotX + 2, slotY + 2);
             g.renderItemDecorations(this.font, cc.goodsStack, slotX + 2, slotY + 2);
-        } else {
-            renderIconComposite(g, cellIcons, slotX, slotY);
         }
 
         // 商品名（右上，截断宽度对所有格恒定，缓存好的结果直接画）
@@ -914,10 +1407,14 @@ public class ShopScreen extends ScaledScreen {
         }
     }
 
-    /** 单个显示图标渲染（物品/贴图二选一）。size 为目标像素边长，decorations 只对物品主图标生效（数量/耐久角标）。 */
+    /** 单个显示图标渲染（物品/流体/贴图三选一）。size 为目标像素边长，decorations 只对物品主图标生效（数量/耐久角标）。 */
     private void renderIconAt(GuiGraphics g, ShopEntry.DisplayIcon icon, int x, int y, int size, boolean decorations) {
         if (icon.isTexture()) {
             EditorWidgets.textureThumb(g, x, y, size, icon.texture());
+            return;
+        }
+        if (icon.isFluid()) {
+            renderFluidIcon(g, x, y, size, icon.fluid());
             return;
         }
         ItemStack stack = icon.item();
@@ -1006,15 +1503,17 @@ public class ShopScreen extends ScaledScreen {
         }
 
         int cx = dx + 8;
-        // 棋盘物品槽 + 图标（有自定义显示图标走组合渲染；悬停 tooltip 始终显示真实商品，不受显示图标影响）
+        // 棋盘物品槽 + 图标（有自定义显示图标走组合渲染；流体主商品无 ItemStack 悬停 tooltip，见下方）
         renderItemCheckerSlot(g, cx, dy + 10);
         ItemStack goodsIcon = selected.displayGoodsStack();
         List<ShopEntry.DisplayIcon> detailIcons = selected.effectiveIcons();
-        if (detailIcons.isEmpty()) {
+        if (!detailIcons.isEmpty()) {
+            renderIconComposite(g, detailIcons, cx, dy + 10);
+        } else if (selected.isPrimaryGoodsFluid()) {
+            renderFluidIcon(g, cx + 2, dy + 12, 16, selected.primaryGoodsFluid());
+        } else {
             g.renderItem(goodsIcon, cx + 2, dy + 12);
             g.renderItemDecorations(this.font, goodsIcon, cx + 2, dy + 12);
-        } else {
-            renderIconComposite(g, detailIcons, cx, dy + 10);
         }
         if (GuiRenderUtil.isHovering(mx, my, cx, dy + 10, 20, 20)) detailHoverStack = goodsIcon;
         // 名称
@@ -1132,7 +1631,12 @@ public class ShopScreen extends ScaledScreen {
         // 关了 AE 模式点这个没意义（缺口判定本身也不含 AE 那部分，见 hasCostShortfall）。
         boolean showAutoCraftBtn = mode == Mode.BUY && aeMode && hasCostShortfall(dcost, amount, selectedEntryKey, aeMode);
         int autoCraftRowH = showAutoCraftBtn ? 12 : 0;
-        int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH - guideRowH - autoCraftRowH; // 底部按钮上沿（编辑权多两排按钮，跳转/指南/补齐缺口各让一行）
+        // 前置任务跳转行：条目配了前置任务就占一行（无论能否解析到，未同步/已删都要给玩家一个可见提示）
+        prereqQuest = selected.hasPrerequisiteQuest()
+                ? com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.resolve(selected.getPrerequisiteQuestId()) : null;
+        prereqQuestCompleted = com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.isCompleted(prereqQuest);
+        int prereqRowH = selected.hasPrerequisiteQuest() ? 12 : 0;
+        int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH - guideRowH - autoCraftRowH - prereqRowH; // 底部按钮上沿（编辑权多两排按钮，跳转/指南/补齐缺口/前置任务各让一行）
 
         // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区。
         // 起点须跟着 contentY 走（原来硬编码 py+50，周期限购把上面内容顶下去后两者间距只剩 2px，字重叠成一坨，见反馈）
@@ -1172,6 +1676,19 @@ public class ShopScreen extends ScaledScreen {
             drawButton(g, autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH, "§b⚙ 补齐全部缺口（AE自动合成）", mx, my);
         }
 
+        // 前置任务：条目配了前置任务才显示，点击跳到 FTBQ 任务书对应任务；已完成显示绿字，未完成/未解析到显示红字
+        prereqLinkVisible = selected.hasPrerequisiteQuest();
+        if (prereqLinkVisible) {
+            prereqLinkX = cx; prereqLinkY = lowerBottom + 2 + linkRowH + guideRowH + autoCraftRowH; prereqLinkW = DETAIL_W - 16; prereqLinkH = 10;
+            boolean prereqHover = GuiRenderUtil.isHovering(mx, my, prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH);
+            String prereqLabel = prereqQuest == null
+                    ? "→ 前置任务: §c未找到/未同步 #" + selected.getPrerequisiteQuestId()
+                    : "→ 前置任务: " + (prereqQuestCompleted ? "§a[已完成] " : "§c[未完成] ") + prereqQuest.getRawTitle();
+            int prereqColor = prereqQuest == null ? DEEP_RED : (prereqQuestCompleted ? (prereqHover ? CYAN : GREEN) : (prereqHover ? CYAN : GOLD));
+            g.drawString(this.font, (prereqHover ? "§n" : "") + GuiRenderUtil.trimText(this.font, prereqLabel, prereqLinkW),
+                    prereqLinkX, prereqLinkY, prereqColor, true);
+        }
+
         // 描述（玩家自定义，自动换行；接在预览下方）
         String desc = selected.getDescription();
         if (desc != null && !desc.isEmpty() && cursorY + 12 < lowerBottom) {
@@ -1192,8 +1709,11 @@ public class ShopScreen extends ScaledScreen {
                 ly += 9;
             }
         }
+        // 前置任务未配置视为满足；配置了则须客户端已解析到且已完成——跟服务端 doBuy 的门槛口径一致（见反馈：
+        // 花费预览格全绿时按钮不能还显示红，前置任务同理，不能光看成本够不够）
+        boolean prereqSatisfiedClient = !selected.hasPrerequisiteQuest() || prereqQuestCompleted;
         boolean canTrade = mode == Mode.BUY
-                ? canAffordClient(selected.getCost(), amount)
+                ? (canAffordClient(selected.getCost(), amount) && prereqSatisfiedClient)
                 : (!selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
                     && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, DETAIL_W - 16, 20);
@@ -1221,6 +1741,14 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        // 右键快捷菜单打开时拦截全部点击：点某一行执行该动作并关闭，点菜单外任意处只关闭，不冒泡给下层控件
+        if (ctxMenuOpen) {
+            return handleContextMenuClick(mx, my);
+        }
+        // 购物车大图层打开时拦截全部点击：关闭/数量步进/删除/结算，其余点击原地吞掉，不下穿到网格/详情
+        if (cartOverlayOpen) {
+            return handleCartOverlayClick(mx, my);
+        }
         // 描述详情大图层打开时拦截全部点击：点关闭按钮或图层外任意处都关闭，图层内右侧滚动条起手拖拽，其余点击原地吞掉
         if (descOverlayOpen) {
             int[] r = descOverlayBounds();
@@ -1262,6 +1790,16 @@ public class ShopScreen extends ScaledScreen {
                 return true;
             }
         }
+        // 撤销排序按钮（悬浮在面板上，优先于其他点击判定）
+        if (undoReorderLabel != null && System.currentTimeMillis() < undoReorderUntilMs) {
+            int[] b = undoReorderBtnBounds();
+            if (hit(mx, my, b[0], b[1], b[2], b[3])) {
+                ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopReorderPacket(
+                        com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.UNDO, ClientShopCatalog.revision(), -1L));
+                undoReorderLabel = null;
+                return true;
+            }
+        }
 
         // 顶部买/卖页签：切换时打一条本地横幅提示当前模式，光靠页签颜色区分不够醒目，容易买卖模式点混
         if (hit(mx, my, buyTabX(), top + 6, BUY_TAB_W, TOP_BAR_H)) {
@@ -1276,6 +1814,14 @@ public class ShopScreen extends ScaledScreen {
         // 关闭
         if (hit(mx, my, closeBtnX(), top + 6, CLOSE_W, TOP_BAR_H)) {
             onClose();
+            return true;
+        }
+        // 购物车：点开/收起大图层
+        if (hit(mx, my, cartBtnX(), top + 6, CART_BTN_W, TOP_BAR_H)) {
+            cartOverlayOpen = !cartOverlayOpen;
+            if (cartOverlayOpen) cartOverlayOpenAtMs = System.currentTimeMillis();
+            // 结算结果不因收起面板清掉，见 handleCartOverlayClick 关闭分支同款说明
+            cartOverlayScroll = 0;
             return true;
         }
         // AE 模式切换：光靠按钮文字变色不够醒目，切换时打一条横幅明确告知当前状态
@@ -1328,7 +1874,10 @@ public class ShopScreen extends ScaledScreen {
             int tw = Math.max(30, this.font.width(cat) + 10);
             if (tx + tw > tabsRight) break;
             if (hit(mx, my, tx, ty, tw, TAB_H)) {
+                // 滑入方向按页签左右顺序走：切到右边的主分类从右侧滑入，切到左边的从左侧滑入
+                gridSlideDir = categories.indexOf(cat) >= categories.indexOf(selectedTop) ? 1 : -1;
                 selectedTop = cat; selectedSub = ""; clearSelection(); scroll = 0;
+                gridSwitchAtMs = System.currentTimeMillis();
                 this.init(Minecraft.getInstance(), this.width, this.height);
                 return true;
             }
@@ -1339,12 +1888,28 @@ public class ShopScreen extends ScaledScreen {
             int sty = subTabsY();
             int stx = left + 14;
             int aw = Math.max(30, this.font.width("全部") + 10);
-            if (hit(mx, my, stx, sty, aw, TAB_H)) { selectedSub = ""; clearSelection(); scroll = 0; recomputeVisible(); return true; }
+            if (hit(mx, my, stx, sty, aw, TAB_H)) {
+                // 「全部」固定在最左（index 0），从当前子页签切过来只会是往左切（或原地，方向无所谓）
+                int oldSubIdx = selectedSub.isEmpty() ? 0 : 1 + subCategories.indexOf(selectedSub);
+                gridSlideDir = oldSubIdx <= 0 ? 1 : -1;
+                selectedSub = ""; clearSelection(); scroll = 0;
+                gridSwitchAtMs = System.currentTimeMillis();
+                recomputeVisible();
+                return true;
+            }
             stx += aw + 3;
             for (String sub : subCategories) {
                 int tw = Math.max(30, this.font.width(sub) + 10);
                 if (stx + tw > tabsRight) break;
-                if (hit(mx, my, stx, sty, tw, TAB_H)) { selectedSub = sub; clearSelection(); scroll = 0; recomputeVisible(); return true; }
+                if (hit(mx, my, stx, sty, tw, TAB_H)) {
+                    int oldSubIdx = selectedSub.isEmpty() ? 0 : 1 + subCategories.indexOf(selectedSub);
+                    int newSubIdx = 1 + subCategories.indexOf(sub);
+                    gridSlideDir = newSubIdx >= oldSubIdx ? 1 : -1;
+                    selectedSub = sub; clearSelection(); scroll = 0;
+                    gridSwitchAtMs = System.currentTimeMillis();
+                    recomputeVisible();
+                    return true;
+                }
                 stx += tw + 3;
             }
         }
@@ -1352,11 +1917,24 @@ public class ShopScreen extends ScaledScreen {
         // 网格右侧滚动条（拖拽跳转，先于格子命中判定）
         if (gridScrollbarClicked(mx, my)) return true;
 
-        // 网格格子：坐标直接反算索引，不再线性扫描当前分类全部商品。
+        // 网格格子：坐标直接反算索引，不再线性扫描当前分类全部商品。左键=选中打开详情页，右键=快捷菜单。
         int entryIndex = entryIndexAt(mx, my);
         if (entryIndex >= 0) {
             ShopEntry entry = visibleEntry(entryIndex);
-            if (entry != null) selectEntry(visibleEntryKeys.get(entryIndex), entry);
+            if (entry != null) {
+                if (btn == 1) {
+                    openContextMenu(entry, visibleEntryKeys.get(entryIndex), (int) mx, (int) my);
+                } else if (btn == 0 && net.minecraft.client.gui.screens.Screen.hasControlDown()) {
+                    // Ctrl+左键：加入购物车候选（不影响详情页选中），已在购物车里则忽略，去购物车面板调数量
+                    boolean already = ClientShopCart.contains(entry.getStableId());
+                    ClientShopCart.add(entry.getStableId(), 1L);
+                    showMessage(Component.literal(already
+                            ? "§b[山海商店] §7已在购物车里: §f" + entry.goodsDisplayName()
+                            : "§b[山海商店] §a已加入购物车: §f" + entry.goodsDisplayName()));
+                } else {
+                    selectEntry(visibleEntryKeys.get(entryIndex), entry);
+                }
+            }
             return true;
         }
 
@@ -1380,6 +1958,11 @@ public class ShopScreen extends ScaledScreen {
             long entryKey = ClientShopCatalog.keyOf(selected);
             ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
                     ClientShopCatalog.revision(), entryKey, amount, aeMode));
+            return true;
+        }
+        // 前置任务跳转：打开 FTBQ 任务书并定位到该任务（未解析到时点了也没用，命中框本身照样给，方便玩家复制ID反馈）
+        if (prereqLinkVisible && selected != null && hit(mx, my, prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH)) {
+            com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.open(selected.getPrerequisiteQuestId());
             return true;
         }
         // 展开描述详情（drawDetail 渲染时暂存的按钮坐标，命中即开大图层）
@@ -1500,6 +2083,12 @@ public class ShopScreen extends ScaledScreen {
             guideOverlayScroll = Math.max(0, Math.min(maxScroll, guideOverlayScroll - (int) d));
             return true;
         }
+        if (cartOverlayOpen) {
+            int[] r = cartOverlayBounds();
+            int maxScroll = cartOverlayMaxScroll(r, ClientShopCart.size());
+            cartOverlayScroll = Math.max(0, Math.min(maxScroll, cartOverlayScroll - (int) d));
+            return true;
+        }
         int gx = listLeft(), gy = contentTop(), gh = contentHeight();
         if (GuiRenderUtil.isHovering(mx, my, gx, gy, listWidth(), gh)) {
             int maxScroll = maxGridScroll();
@@ -1525,13 +2114,32 @@ public class ShopScreen extends ScaledScreen {
 
     // ============ 工具 ============
 
+    /**
+     * 消息横幅队列固定预留的最大高度（哪怕当前没占满 3 条也按满员留白，避免撤销按钮跟着队列条数上下跳动）。
+     * 撤销删除/撤销排序两个悬浮按钮都锚定在这块预留区域的正上方。
+     */
+    private int flashStackTopY() {
+        return top + panelHeight - 24 - FLASH_ROW_H * FLASH_MAX_VISIBLE;
+    }
+
     /** 撤销删除按钮的世界坐标（缩放后坐标系）：渲染和点击各调一次，保证坐标算法唯一，不重复算两遍。 */
     private int[] undoDeleteBtnBounds() {
         String label = "§a↩ 撤销删除【" + GuiRenderUtil.trimText(this.font, undoDeleteLabel, 70) + "】";
         int w = this.font.width(label) + 12;
         int h = 14;
         int x = left + (panelWidth - w) / 2;
-        int y = top + panelHeight - 24 - h - 3; // 位于底部消息横幅正上方，避免遮挡
+        int y = flashStackTopY() - h - 3; // 位于消息横幅队列预留区正上方，避免遮挡
+        return new int[]{x, y, w, h};
+    }
+
+    /** 撤销排序按钮的世界坐标：跟撤销删除同一条基准线，两者同时悬浮时本按钮让到上面一行，不叠字。 */
+    private int[] undoReorderBtnBounds() {
+        String label = "§a↩ 撤销排序【" + GuiRenderUtil.trimText(this.font, undoReorderLabel, 70) + "】";
+        int w = this.font.width(label) + 12;
+        int h = 14;
+        int x = left + (panelWidth - w) / 2;
+        boolean deleteBannerActive = undoDeleteLabel != null && System.currentTimeMillis() < undoDeleteUntilMs;
+        int y = flashStackTopY() - h - 3 - (deleteBannerActive ? (h + 3) : 0);
         return new int[]{x, y, w, h};
     }
 
@@ -1543,6 +2151,155 @@ public class ShopScreen extends ScaledScreen {
         boolean bp = backpackMode;
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(
                 action, ClientShopCatalog.revision(), entryKey, times, ae, bp));
+    }
+
+    /** 购物车结算专用发包：标记 fromCart=true，服务端处理完会额外回一个 ShopCartPurchaseResultPacket
+     * 结构化结果，供购物车面板逐行显示成功/部分/失败（见 send，跟普通详情页购买共用同一个 ShopActionPacket）。 */
+    private void sendCartBuy(ShopEntry entry, long times) {
+        long entryKey = entry != null ? ClientShopCatalog.keyOf(entry) : -1L;
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(
+                ShopActionPacket.Action.BUY, ClientShopCatalog.revision(), entryKey, times,
+                aeMode, backpackMode, -1, true));
+    }
+
+    // ============ 网格卡片右键快捷菜单 ============
+
+    /** 打开右键菜单：按该条目内容 + 当前权限现算菜单项，空菜单（无任何可用项）不弹出。 */
+    private void openContextMenu(ShopEntry entry, long entryKey, int x, int y) {
+        if (entry == null) return;
+        List<ContextMenuItem> items = buildContextMenuItems(entry, entryKey);
+        if (items.isEmpty()) return;
+        ctxMenuItems = items;
+        ctxMenuEntryKey = entryKey;
+        ctxMenuX = x;
+        ctxMenuY = y;
+        ctxMenuW = 130;
+        ctxMenuOpen = true;
+    }
+
+    private void closeContextMenu() {
+        ctxMenuOpen = false;
+        ctxMenuItems = List.of();
+        ctxMenuEntryKey = -1L;
+    }
+
+    /**
+     * 菜单项按「导航跳转合集」+「管理效率」（仅 canEdit）两组现算：条目没配的跳转类项直接不出现，
+     * 管理类整组只有编辑权玩家才追加。同 {@link #drawDetail} 里的跳转判定逻辑保持口径一致（复用同一批
+     * {@link ClientShopCatalog}/{@link com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup} 查询）。
+     */
+    private List<ContextMenuItem> buildContextMenuItems(ShopEntry entry, long entryKey) {
+        List<ContextMenuItem> items = new ArrayList<>();
+        items.add(new ContextMenuItem("§f查看详情", false, () -> selectEntry(entryKey, entry)));
+
+        if (entry.hasLinkTarget()) {
+            long targetKey = ClientShopCatalog.linkedEntryKey(entry.getLinkTo());
+            ShopEntry target = targetKey >= 0L ? ClientShopCatalog.get(targetKey) : null;
+            if (target != null) {
+                items.add(new ContextMenuItem("§9→ 跳转商品", false, () -> selectEntry(targetKey, target)));
+            }
+        }
+        if (entry.hasPrerequisiteQuest()) {
+            items.add(new ContextMenuItem("§9→ 前置任务", false, () ->
+                    com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.open(entry.getPrerequisiteQuestId())));
+        }
+        List<com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.GuideHit> hits =
+                com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.findGuideHits(entry.getGoodsList());
+        if (hits.size() == 1) {
+            com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.GuideHit hit = hits.get(0);
+            items.add(new ContextMenuItem("§9→ 查看指南", false, () ->
+                    com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.open(Minecraft.getInstance().player, hit)));
+        } else if (hits.size() > 1) {
+            items.add(new ContextMenuItem("§d指南详情(" + hits.size() + ")", false, () -> {
+                selectEntry(entryKey, entry);
+                guideHitsFor = entry;
+                guideHits = hits;
+                guideOverlayOpen = true;
+                guideOverlayScroll = 0;
+            }));
+        }
+
+        if (canEdit) {
+            items.add(new ContextMenuItem("§b编辑条目", true, () -> ShopEntryEditor.openEdit(this, entry)));
+            items.add(new ContextMenuItem("§a复制为新条目", false, () -> ShopEntryEditor.openDuplicate(this, entry)));
+            items.add(new ContextMenuItem(entry.isHidden() ? "§a取消隐藏" : "§c设为隐藏", false, () -> toggleHidden(entry)));
+            items.add(new ContextMenuItem("§e▲ 前移", false, () ->
+                    sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.UP)));
+            items.add(new ContextMenuItem("§e▼ 后移", false, () ->
+                    sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.DOWN)));
+            items.add(new ContextMenuItem("§6⤒ 置顶", false, () ->
+                    sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.TOP)));
+            items.add(new ContextMenuItem("§c删除此商品", true, () -> {
+                selectEntry(entryKey, entry);
+                pendingDeleteEntry = entry;
+                pendingDeleteArmedAtMs = System.currentTimeMillis();
+                showMessage(Component.literal("§e[山海商店] 已选中，再点一次详情页「删除此商品」确认删除，3 秒内有效"));
+            }));
+        }
+        return items;
+    }
+
+    /**
+     * 排序：全服唯一展示顺序，只跟同分类最近相邻条目交换位置/挪最前，见 {@link ShopConfig#moveEntry}。
+     * 发完顺手挂一个「撤销排序」悬浮按钮（乐观 UI，不等服务端确认——即便这次已经顶到边界没挪动，
+     * 悬浮按钮空点一次顶多收到服务端"没有可撤销"的提示，不会误操作，成本可以忽略，见反馈：置顶点错了
+     * 没法退回原位，必须给撤销出口）。
+     */
+    private void sendReorder(ShopEntry entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action action) {
+        long entryKey = ClientShopCatalog.keyOf(entry);
+        ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopReorderPacket(
+                action, ClientShopCatalog.revision(), entryKey));
+        undoReorderLabel = entry.goodsDisplayName();
+        undoReorderUntilMs = System.currentTimeMillis() + UNDO_REORDER_UI_WINDOW_MS;
+    }
+
+    /** 一键切换隐藏：其余字段原样带回去，走跟编辑器提交同一条 EDIT 通路，不新开一套网络包。 */
+    private void toggleHidden(ShopEntry entry) {
+        long entryKey = ClientShopCatalog.keyOf(entry);
+        ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopEditPacket(
+                com.dishanhai.gt_shanhai.network.ShopEditPacket.Action.EDIT,
+                entry.getGoodsList(), entry.getCategory(), entry.getDescription(), entry.getCost(),
+                entry.getGoodsId(), entry.getCategory(), -1, entry.getRemainingUses(),
+                entry.getDisplayIcons(), entry.getRewardMode(), entry.getRewardPool(), !entry.isHidden(),
+                entry.getLinkKey(), entry.getLinkTo(), entry.getDisplayName(), entry.getFtbqTableId(),
+                entry.getFtbqSubMode(), entry.getTradeMode(), entry.getPeriodTicks(), entry.getPeriodLimit(),
+                entry.getPrerequisiteQuestId(), ClientShopCatalog.revision(), entryKey));
+    }
+
+    /** 菜单命中判定：逐行按渲染时同一套坐标累加复算，命中就关菜单+执行动作；菜单外任意点击只关菜单。 */
+    private boolean handleContextMenuClick(double mx, double my) {
+        int ry = ctxMenuY + 2;
+        for (ContextMenuItem item : ctxMenuItems) {
+            if (item.separatorBefore()) ry += 3;
+            if (hit(mx, my, ctxMenuX, ry, ctxMenuW, CTX_MENU_ROW_H)) {
+                Runnable action = item.action();
+                closeContextMenu();
+                action.run();
+                return true;
+            }
+            ry += CTX_MENU_ROW_H;
+        }
+        closeContextMenu();
+        return true;
+    }
+
+    /** 菜单渲染：贴右/下边界时自动往左/往上收，避免弹到窗口外。 */
+    private void drawContextMenu(GuiGraphics g, int mx, int my) {
+        if (ctxMenuItems.isEmpty()) return;
+        int totalH = 4;
+        for (ContextMenuItem item : ctxMenuItems) totalH += item.separatorBefore() ? CTX_MENU_ROW_H + 3 : CTX_MENU_ROW_H;
+        if (ctxMenuX + ctxMenuW > vWidth - 4) ctxMenuX = Math.max(4, vWidth - 4 - ctxMenuW);
+        if (ctxMenuY + totalH > vHeight - 4) ctxMenuY = Math.max(4, vHeight - 4 - totalH);
+        g.fill(ctxMenuX - 1, ctxMenuY - 1, ctxMenuX + ctxMenuW + 1, ctxMenuY + totalH + 1, GOLD_DARK);
+        g.fill(ctxMenuX, ctxMenuY, ctxMenuX + ctxMenuW, ctxMenuY + totalH, PANEL_BG);
+        int ry = ctxMenuY + 2;
+        for (ContextMenuItem item : ctxMenuItems) {
+            if (item.separatorBefore()) { g.fill(ctxMenuX + 4, ry + 1, ctxMenuX + ctxMenuW - 4, ry + 2, GOLD_DARK); ry += 3; }
+            boolean hv = GuiRenderUtil.isHovering(mx, my, ctxMenuX, ry, ctxMenuW, CTX_MENU_ROW_H);
+            if (hv) g.fill(ctxMenuX + 1, ry, ctxMenuX + ctxMenuW - 1, ry + CTX_MENU_ROW_H, ROW_BG);
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, item.label(), ctxMenuW - 8), ctxMenuX + 4, ry + 2, WHITE, true);
+            ry += CTX_MENU_ROW_H;
+        }
     }
 
     private void drawTab(GuiGraphics g, int x, int y, int w, int h, String label, boolean active, int mx, int my) {
@@ -1935,7 +2692,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
-        if (descOverlayOpen || guideOverlayOpen) return; // 大图层盖住详情面板时，底层格子/图标的 tooltip 不该透出来
+        if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
         // 悬停货币栏：显示货币全名 + 精确余额
         ResourceLocation cur = hoveredCurrency(smx, smy);
         if (cur != null) {

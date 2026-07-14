@@ -816,6 +816,15 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         return Long.MAX_VALUE;
     }
 
+    /** 按模块并行槽堆叠数量计算并行倍率：每满 16 个翻一倍（1个=1x，16个=2x，32个=3x...），
+     *  乘法溢出时钳到 Long.MAX_VALUE。供各原初模块子类的 scanBoostItem() 统一调用。 */
+    protected static long applyModuleCountParallelMultiplier(long baseParallel, int count) {
+        if (baseParallel <= 0 || count <= 1) return baseParallel;
+        long multiplier = 1L + (count / 16);
+        if (multiplier <= 1L) return baseParallel;
+        return baseParallel > Long.MAX_VALUE / multiplier ? Long.MAX_VALUE : baseParallel * multiplier;
+    }
+
     @Override
     protected void addParallelDisplay(List<Component> textList) {
         long parallel = getCurrentParallel();

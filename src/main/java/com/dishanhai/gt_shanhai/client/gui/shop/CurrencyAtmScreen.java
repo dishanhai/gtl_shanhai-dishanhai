@@ -11,7 +11,6 @@ import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -51,16 +50,21 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private static final int LIST_W = 220;
     private static final int ROW_H = 20;
     private static final int BACK_W = 60;
+    // 弹入动画节奏：跟 ShopScreen 系列界面统一（150ms ease-out），见 GuiRenderUtil#popScaleAt/popAnimProgress
+    private static final long POP_ANIM_MS = 150L;
 
     private final ShopScreen parent;
     private List<ResourceLocation> currencies = new ArrayList<>();
     private ResourceLocation selected;
     private int targetIdx = -1;   // 兑换目标币在 currencies 里的下标
     private long amount = 1L;
-    private EditBox amountBox;
+    private AnimatableEditBox amountBox;
     private int scroll = 0;
 
     private int left, top, panelWidth, panelHeight;
+
+    private final long screenOpenAtMs = System.currentTimeMillis(); // 整个面板打开那一下的弹入动画起点
+    private long detailSwitchAtMs;        // 切换选中货币那一下，右侧详情面板的弹入动画起点
 
     private static String flashText;      // 含 § 颜色码，与聊天框一致
     private static long flashUntil;       // System.currentTimeMillis() 到期时刻
@@ -104,7 +108,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
         if (targetIdx < 0 && currencies.size() > 1) targetIdx = firstDifferent(0);
 
         int cx = detailX() + 8;
-        amountBox = new EditBox(this.font, cx, detailY(88), detailW() - 16, 12, Component.literal("数量"));
+        amountBox = new AnimatableEditBox(this.font, cx, detailY(88), detailW() - 16, 12, Component.literal("数量"));
         amountBox.setValue(Long.toString(Math.max(1L, amount)));
         amountBox.setBordered(true);
         amountBox.setTextColor(0xFFFFFF);
@@ -134,6 +138,19 @@ public class CurrencyAtmScreen extends ScaledScreen {
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
         if (amountBox != null) amountBox.setVisible(selected != null);
+        // 整个面板打开那一下弹入一次（跟 ShopScreen 系列大图层同一套节奏，见 GuiRenderUtil#popScaleAt）
+        float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS);
+        if (openT < 1f) {
+            g.pose().pushPose();
+            GuiRenderUtil.popScaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openT);
+            renderPanel(g, mx, my);
+            g.pose().popPose();
+        } else {
+            renderPanel(g, mx, my);
+        }
+    }
+
+    private void renderPanel(GuiGraphics g, int mx, int my) {
         // 面板
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
@@ -147,7 +164,21 @@ public class CurrencyAtmScreen extends ScaledScreen {
         g.drawString(this.font, ae ? "§aAE模式:开" : "§8AE模式:关", backBtnX() - 84, top + 5, ae ? GREEN : GRAY, true);
 
         drawList(g, mx, my);
-        drawDetail(g, mx, my);
+        // 右侧详情面板：切换选中货币那一下弹入一次，同 ShopScreen 详情卡片切换的同一套手法——
+        // amountBox 是 AnimatableEditBox，自己在 renderWidget 里套用同一锚点/进度做 PoseStack 缩放，
+        // 这里只需每帧把动画进度源和锚点告诉它，不用再手动 setY/setAlpha 去追它（那套做法两次都出了
+        // 布局错位，见反馈）。锚点须和 drawDetail 外面这层 popScaleAt 用同一个，视觉才同步。
+        float detailT = GuiRenderUtil.popAnimProgress(detailSwitchAtMs, POP_ANIM_MS);
+        float anchorCx = detailX() + detailW() / 2f, anchorCy = listTop() + listHeight() / 2f;
+        if (amountBox != null) amountBox.setAnim(() -> detailT, anchorCx, anchorCy);
+        if (detailT < 1f) {
+            g.pose().pushPose();
+            GuiRenderUtil.popScaleAt(g, anchorCx, anchorCy, detailT);
+            drawDetail(g, mx, my);
+            g.pose().popPose();
+        } else {
+            drawDetail(g, mx, my);
+        }
 
         // 底部实时反馈横幅（[货币中心] 系统消息经 ShopChatMirror 镜像至此，聊天框仍保留）
         if (flashText != null && System.currentTimeMillis() < flashUntil) {
@@ -190,6 +221,11 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private void drawDetail(GuiGraphics g, int mx, int my) {
         int dx = detailX(), dy = listTop(), dw = detailW(), dh = listHeight();
         g.fill(dx, dy, dx + dw, dy + dh, BOX_BG);
+        // 背景大块填充和后面的图标/文字/按钮走不同 RenderType（fill 用 positioncolor，物品图标/文字各自一套），
+        // GuiGraphics 按类型分桶缓冲，实际提交 GPU 的顺序不一定等于调用顺序——不在这里强制 flush，深色背景块
+        // 有几率在批次刷新时"晚于"图标/文字提交，同 Z（都是 0）下 LEQUAL 深度测试直接把内容盖成空白
+        // （同 renderPanel 里 flashText 横幅注释描述的成因，那边靠 flush()+Z 平移根治，这里量级小只需 flush()）。
+        g.flush();
         if (selected == null) {
             g.drawCenteredString(this.font, "§7← 选择货币", dx + dw / 2, dy + 18, GRAY);
             return;
@@ -309,7 +345,9 @@ public class CurrencyAtmScreen extends ScaledScreen {
                 int ry = ly + 2 + i * ROW_H - scroll;
                 if (ry + ROW_H <= ly || ry >= ly + lh) continue;
                 if (GuiRenderUtil.isHovering(mx, my, lx + 1, ry, lw - 2, ROW_H - 1)) {
+                    ResourceLocation prev = selected;
                     selected = currencies.get(i);
+                    if (!selected.equals(prev)) detailSwitchAtMs = System.currentTimeMillis(); // 换了不同货币才重播弹入
                     if (targetIdx < 0 || currencies.get(targetIdx).equals(selected)) targetIdx = firstDifferent(i);
                     return true;
                 }

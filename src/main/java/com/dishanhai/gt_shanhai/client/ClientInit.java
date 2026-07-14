@@ -47,6 +47,7 @@ public class ClientInit {
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientChatReceived);
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onMouseButtonPressed);
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientLoggingOut);
+        MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientLoggingIn);
         MinecraftForge.EVENT_BUS.addListener(ShanhaiKeyMappings::onClientTick);
     }
 
@@ -71,5 +72,20 @@ public class ClientInit {
     /** 不允许跨服务器复用相同 revision 的旧商品目录。 */
     private static void onClientLoggingOut(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
         com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog.clear();
+    }
+
+    /**
+     * 软依赖提醒（山海署名，非强制）：装了 JEI 但没装 JEI Optimize 时，进世界提示一句可选装。
+     * JEI Optimize 是 All Rights Reserved 协议，gt_shanhai 不能内嵌分发，只能这样提醒玩家自行安装。
+     * 只在 {@code ClientPlayerNetworkEvent.LoggingIn}（每次连接服务器/进世界各触发一次，不含重生/换维度）
+     * 提一次，不做持久化抑制——不打扰、也不用额外状态管理。
+     */
+    private static void onClientLoggingIn(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingIn event) {
+        var modList = net.minecraftforge.fml.ModList.get();
+        if (!modList.isLoaded("jei") || modList.isLoaded("jei_optimize")) return;
+        var player = event.getPlayer();
+        if (player == null) return;
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "§b[山海] §7检测到装了 JEI 但没装 §fJEI Optimize§7，建议自行搜索安装以加速 JEI 首次索引构建（可选，不影响正常游玩）"));
     }
 }

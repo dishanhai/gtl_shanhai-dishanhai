@@ -52,6 +52,7 @@ public class ShopEditPacket {
     private final ShopEntry.TradeMode tradeMode; // 交易方向限制：BOTH/BUY_ONLY/SELL_ONLY
     private final long periodTicks; // 周期限购窗口长度（tick）；-1=不启用
     private final long periodLimit; // 周期限购每窗口额度（每玩家独立计数）；-1=不启用
+    private final String prerequisiteQuestId; // 前置 FTBQ 任务 ID（十六进制），可空=不要求前置
     private final long catalogRevision; // 打开编辑器时的服务端目录版本
     private final long oldEntryKey; // 待编辑条目在该版本内的唯一身份；ADD=-1
 
@@ -87,6 +88,7 @@ public class ShopEditPacket {
                 ftbqSubMode, tradeMode, -1L, -1L);
     }
 
+    // ===== 兼容构造：无前置任务（委托空串 = 不要求前置）=====
     public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
                           ShopCost cost, ResourceLocation oldGoods, String oldCategory, int oldEntryIndex, long limit,
                           List<ShopEntry.DisplayIcon> displayIcons, ShopEntry.RewardMode rewardMode,
@@ -95,7 +97,7 @@ public class ShopEditPacket {
                           ShopEntry.TradeMode tradeMode, long periodTicks, long periodLimit) {
         this(action, goodsList, category, description, cost, oldGoods, oldCategory, oldEntryIndex, limit,
                 displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId,
-                ftbqSubMode, tradeMode, periodTicks, periodLimit, 0L, -1L);
+                ftbqSubMode, tradeMode, periodTicks, periodLimit, "", 0L, -1L);
     }
 
     public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
@@ -104,7 +106,7 @@ public class ShopEditPacket {
                           List<ShopEntry.RewardOption> rewardPool, boolean hidden, String linkKey, String linkTo,
                           String displayName, String ftbqTableId, ShopEntry.RewardMode ftbqSubMode,
                           ShopEntry.TradeMode tradeMode, long periodTicks, long periodLimit,
-                          long catalogRevision, long oldEntryKey) {
+                          String prerequisiteQuestId, long catalogRevision, long oldEntryKey) {
         this.action = action;
         this.goodsList = (goodsList == null || goodsList.isEmpty())
                 ? List.of(ShopEntry.GoodsStack.of(new ResourceLocation("minecraft:air"), 1, null)) : goodsList;
@@ -128,6 +130,7 @@ public class ShopEditPacket {
         this.tradeMode = tradeMode == null ? ShopEntry.TradeMode.BOTH : tradeMode;
         this.periodTicks = periodTicks;
         this.periodLimit = periodLimit;
+        this.prerequisiteQuestId = prerequisiteQuestId == null ? "" : prerequisiteQuestId.trim();
         this.catalogRevision = catalogRevision;
         this.oldEntryKey = oldEntryKey;
     }
@@ -138,8 +141,10 @@ public class ShopEditPacket {
         List<ShopEntry.GoodsStack> gl = new ArrayList<>(ng);
         for (int i = 0; i < ng; i++) {
             ResourceLocation gid = buf.readResourceLocation();
+            boolean gfluid = buf.readBoolean();
             int gcount = buf.readVarInt();
-            gl.add(ShopEntry.GoodsStack.of(gid, gcount, buf.readNbt()));
+            net.minecraft.nbt.CompoundTag gnbt = buf.readNbt();
+            gl.add(gfluid ? ShopEntry.GoodsStack.ofFluid(gid, gcount) : ShopEntry.GoodsStack.of(gid, gcount, gnbt));
         }
         this.goodsList = gl;
         this.category = buf.readUtf();
@@ -176,6 +181,7 @@ public class ShopEditPacket {
         this.tradeMode = buf.readEnum(ShopEntry.TradeMode.class);
         this.periodTicks = buf.readLong();
         this.periodLimit = buf.readLong();
+        this.prerequisiteQuestId = buf.readUtf();
         this.catalogRevision = buf.readLong();
         this.oldEntryKey = buf.readLong();
     }
@@ -185,6 +191,7 @@ public class ShopEditPacket {
         buf.writeVarInt(goodsList.size());
         for (ShopEntry.GoodsStack gs : goodsList) {
             buf.writeResourceLocation(gs.id());
+            buf.writeBoolean(gs.isFluid());
             buf.writeVarInt(gs.count());
             buf.writeNbt(gs.nbt());
         }
@@ -218,6 +225,7 @@ public class ShopEditPacket {
         buf.writeEnum(tradeMode);
         buf.writeLong(periodTicks);
         buf.writeLong(periodLimit);
+        buf.writeUtf(prerequisiteQuestId);
         buf.writeLong(catalogRevision);
         buf.writeLong(oldEntryKey);
     }
@@ -281,8 +289,9 @@ public class ShopEditPacket {
             return;
         }
         for (ShopEntry.GoodsStack gs : pkt.goodsList) {
-            if (!ForgeRegistries.ITEMS.containsKey(gs.id())) {
-                player.sendSystemMessage(Component.literal("§c[山海商店] 商品物品不存在: " + gs.id()));
+            boolean ok = gs.isFluid() ? ForgeRegistries.FLUIDS.containsKey(gs.id()) : ForgeRegistries.ITEMS.containsKey(gs.id());
+            if (!ok) {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 商品" + (gs.isFluid() ? "流体" : "物品") + "不存在: " + gs.id()));
                 return;
             }
         }
@@ -290,9 +299,17 @@ public class ShopEditPacket {
             player.sendSystemMessage(Component.literal("§c[山海商店] 成本无效（需至少一项有效的星火/币种/物品/流体）"));
             return;
         }
+        // 稳定身份 ID：EDIT 必须沿用旧条目的，不能让每次编辑都换一个新身份（购物车等跨快照引用会失效）；
+        // ADD（含「复制为新条目」，client 端已把 oldEntryKey 强制置 -1）传 null 让 ShopEntry 自动生成新的。
+        ShopEntry old = pkt.action == Action.EDIT ? resolveOld(pkt) : null;
+        if (pkt.action == Action.EDIT && old == null) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 待编辑的原条目不存在"));
+            return;
+        }
         ShopEntry entry = new ShopEntry(pkt.goodsList, pkt.category, pkt.cost, pkt.description, pkt.limit,
                 pkt.displayIcons, pkt.rewardMode, pkt.rewardPool, pkt.hidden, pkt.linkKey, pkt.linkTo, pkt.displayName,
-                pkt.ftbqTableId, pkt.ftbqSubMode, pkt.tradeMode, pkt.periodTicks, pkt.periodLimit);
+                pkt.ftbqTableId, pkt.ftbqSubMode, pkt.tradeMode, pkt.periodTicks, pkt.periodLimit, pkt.prerequisiteQuestId,
+                old != null ? old.getStableId() : null);
         String limitTip = entry.isLimited() ? " §d(限" + entry.getRemainingUses() + "次)" : "";
 
         if (pkt.action == Action.ADD) {
@@ -306,11 +323,6 @@ public class ShopEditPacket {
             return;
         }
 
-        ShopEntry old = resolveOld(pkt);
-        if (old == null) {
-            player.sendSystemMessage(Component.literal("§c[山海商店] 待编辑的原条目不存在"));
-            return;
-        }
         boolean ok = ShopConfig.replaceEntry(old, entry);
         player.sendSystemMessage(ok
                 ? Component.literal("§b[山海商店] §a已更新 §f" + entry.goodsDisplayName() + limitTip)

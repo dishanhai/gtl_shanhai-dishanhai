@@ -19,13 +19,14 @@ public final class ShopCatalogSnapshot {
     public static final int MAX_ENTRY_BYTES = 1024 * 1024;
 
     public record Descriptor(String category, boolean hidden, String linkKey,
-                             String displayName, List<String> goodsIds, int payloadBytes) {
+                             String displayName, List<String> goodsIds, int payloadBytes, String stableId) {
         public Descriptor {
             category = category == null || category.isBlank() ? ShopEntry.DEFAULT_CATEGORY : category;
             linkKey = linkKey == null ? "" : linkKey;
             displayName = displayName == null ? "" : displayName;
             goodsIds = goodsIds == null ? List.of() : List.copyOf(goodsIds);
             payloadBytes = Math.max(1, payloadBytes);
+            stableId = stableId == null ? "" : stableId;
         }
     }
 
@@ -73,6 +74,7 @@ public final class ShopCatalogSnapshot {
     private final List<ShopEntry> entries;
     private final Map<Long, ShopEntry> entriesByKey;
     private final IdentityHashMap<ShopEntry, Long> keysByEntry;
+    private final Map<String, ShopEntry> entriesByStableId;
     private final Layout layout;
     private final ShopCatalogManifest manifest;
     private final Map<Integer, List<ShopCatalogEntryPayload>> payloadChunks;
@@ -80,6 +82,7 @@ public final class ShopCatalogSnapshot {
     private ShopCatalogSnapshot(long revision, boolean ready, List<ShopEntry> entries,
                                 Map<Long, ShopEntry> entriesByKey,
                                 IdentityHashMap<ShopEntry, Long> keysByEntry,
+                                Map<String, ShopEntry> entriesByStableId,
                                 Layout layout, ShopCatalogManifest manifest,
                                 Map<Integer, List<ShopCatalogEntryPayload>> payloadChunks) {
         this.revision = revision;
@@ -87,6 +90,7 @@ public final class ShopCatalogSnapshot {
         this.entries = List.copyOf(entries);
         this.entriesByKey = Map.copyOf(entriesByKey);
         this.keysByEntry = new IdentityHashMap<>(keysByEntry);
+        this.entriesByStableId = Map.copyOf(entriesByStableId);
         this.layout = layout;
         this.manifest = manifest;
         Map<Integer, List<ShopCatalogEntryPayload>> chunks = new LinkedHashMap<>();
@@ -99,7 +103,7 @@ public final class ShopCatalogSnapshot {
     public static ShopCatalogSnapshot empty() {
         Layout layout = layout(List.of(), DEFAULT_CHUNK_BYTES, DEFAULT_MAX_CHUNK_ENTRIES);
         return new ShopCatalogSnapshot(0L, false, List.of(), Map.of(), new IdentityHashMap<>(),
-                layout, ShopCatalogManifest.empty(), Map.of());
+                Map.of(), layout, ShopCatalogManifest.empty(), Map.of());
     }
 
     public static ShopCatalogSnapshot build(long revision, List<ShopEntry> source) {
@@ -108,6 +112,7 @@ public final class ShopCatalogSnapshot {
         List<Descriptor> descriptors = new ArrayList<>(entries.size());
         Map<Long, ShopEntry> byKey = new LinkedHashMap<>();
         IdentityHashMap<ShopEntry, Long> byEntry = new IdentityHashMap<>();
+        Map<String, ShopEntry> byStableId = new LinkedHashMap<>();
 
         for (int index = 0; index < entries.size(); index++) {
             long key = index;
@@ -123,9 +128,10 @@ public final class ShopCatalogSnapshot {
             }
             payloads.add(payload);
             descriptors.add(new Descriptor(entry.getCategory(), entry.isHidden() || !entry.isStructurallyValid(), entry.getLinkKey(),
-                    entry.hasCustomName() ? entry.getDisplayName() : "", goodsIds, payload.estimatedUtf8Bytes()));
+                    entry.hasCustomName() ? entry.getDisplayName() : "", goodsIds, payload.estimatedUtf8Bytes(), entry.getStableId()));
             byKey.put(key, entry);
             byEntry.put(entry, key);
+            byStableId.put(entry.getStableId(), entry);
         }
 
         Layout layout = layout(descriptors, DEFAULT_CHUNK_BYTES, DEFAULT_MAX_CHUNK_ENTRIES);
@@ -138,7 +144,7 @@ public final class ShopCatalogSnapshot {
             chunks.put(chunkId, chunk);
         }
         ShopCatalogManifest manifest = new ShopCatalogManifest(revision, true, layout.stubs());
-        return new ShopCatalogSnapshot(revision, true, entries, byKey, byEntry, layout, manifest, chunks);
+        return new ShopCatalogSnapshot(revision, true, entries, byKey, byEntry, byStableId, layout, manifest, chunks);
     }
 
     public static Layout layout(List<Descriptor> descriptors, int maxChunkBytes, int maxChunkEntries) {
@@ -175,7 +181,8 @@ public final class ShopCatalogSnapshot {
             String top = categoryTop(descriptor.category());
             String sub = categorySub(descriptor.category());
             stubs.add(new ShopCatalogManifest.Stub(key, top, sub, descriptor.hidden(),
-                    chunkByKey.getOrDefault(key, -1), descriptor.linkKey(), descriptor.displayName(), descriptor.goodsIds()));
+                    chunkByKey.getOrDefault(key, -1), descriptor.linkKey(), descriptor.displayName(), descriptor.goodsIds(),
+                    descriptor.stableId()));
             if (!descriptor.linkKey().isEmpty()) links.putIfAbsent(descriptor.linkKey(), key);
             if (descriptor.hidden()) continue;
             tops.add(top);
@@ -212,6 +219,12 @@ public final class ShopCatalogSnapshot {
         if (linkKey == null || linkKey.isBlank()) return null;
         Long key = layout.linkKeyToEntryKey().get(linkKey);
         return key == null ? null : resolve(key);
+    }
+
+    /** 按稳定身份 ID 查找条目（跨快照有效，见 {@link ShopEntry#getStableId}）；未找到返回 null。 */
+    public ShopEntry resolveByStableId(String stableId) {
+        if (stableId == null || stableId.isBlank()) return null;
+        return entriesByStableId.get(stableId);
     }
 
     public List<ShopEntry> entriesOfGroup(String top, String sub) {

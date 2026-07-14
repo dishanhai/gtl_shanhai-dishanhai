@@ -116,6 +116,11 @@ public final class ShopConfig {
         return snapshot().findByLinkKey(key);
     }
 
+    /** 按稳定身份 ID 查找条目（跨快照/跨重登有效，供购物车等场景解析当前 entryKey；未找到返回 null）。 */
+    public static ShopEntry resolveByStableId(String stableId) {
+        return snapshot().resolveByStableId(stableId);
+    }
+
     // ==================== 两级分类：主/子（约定 category = "主" 或 "主/子"）====================
 
     /** 取分类主名（"主/子" → "主"；无「/」→ 原样）。 */
@@ -234,6 +239,112 @@ public final class ShopConfig {
         return true;
     }
 
+    // 撤销上一次排序（前移/后移/置顶）：记住移动前"紧邻在它前面的那个条目"（身份锚点，不是数字下标），
+    // 30 秒内可用 undoLastMove() 挪回去；只保留最近一次，跟 lastRemovedEntry 的删除撤销是两套独立状态。
+    // 用身份锚点而不是原始下标的原因：撤销窗口内如果有别的增删/排序动作把列表整体挪了位，记死的下标会失效
+    // （复原到错误位置甚至越界），身份锚点会跟着锚点条目本身重新定位，天然不受这些中间变更影响；
+    // 锚点条目如果在窗口内被删掉了，退化成"补到列表最后一位"（保底，见 undoLastMove 注释）。
+    private static ShopEntry lastMovedEntry;
+    private static ShopEntry lastMovedAnchorEntry; // 移动前紧邻在 lastMovedEntry 前面的条目；null=移动前它就是全局第一个
+    private static long lastMovedAtMs;
+    private static final long UNDO_MOVE_WINDOW_MS = 30_000L;
+
+    /**
+     * 商品展示顺序 = shop.json 数组的物理顺序（全服唯一，非玩家个人视图）。前移/后移只跟同分类
+     * （{@link ShopEntry#getCategory} 完全相同）的最近相邻条目交换位置，不打扰其他分类条目的相对顺序；
+     * 已经是同分类首/尾时返回 false（无法再移）。direction: -1=前移，+1=后移。
+     */
+    public static synchronized boolean moveEntry(ShopEntry entry, int direction) {
+        if (entry == null) return false;
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int idx = updated.indexOf(entry);
+        if (idx < 0) return false;
+        String cat = entry.getCategory();
+        int swapIdx = -1;
+        if (direction < 0) {
+            for (int i = idx - 1; i >= 0; i--) {
+                if (cat.equals(updated.get(i).getCategory())) { swapIdx = i; break; }
+            }
+        } else {
+            for (int i = idx + 1; i < updated.size(); i++) {
+                if (cat.equals(updated.get(i).getCategory())) { swapIdx = i; break; }
+            }
+        }
+        if (swapIdx < 0) return false;
+        ShopEntry anchor = idx > 0 ? updated.get(idx - 1) : null;
+        Collections.swap(updated, idx, swapIdx);
+        publish(updated);
+        save();
+        rememberMove(entry, anchor);
+        return true;
+    }
+
+    /** 挪到同分类最前（其余分类条目的相对顺序不变）；已经是同分类第一个时返回 false。 */
+    public static synchronized boolean moveEntryToTop(ShopEntry entry) {
+        if (entry == null) return false;
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int idx = updated.indexOf(entry);
+        if (idx < 0) return false;
+        String cat = entry.getCategory();
+        int firstIdx = -1;
+        for (int i = 0; i < updated.size(); i++) {
+            if (cat.equals(updated.get(i).getCategory())) { firstIdx = i; break; }
+        }
+        if (firstIdx < 0 || firstIdx >= idx) return false;
+        ShopEntry anchor = idx > 0 ? updated.get(idx - 1) : null;
+        updated.remove(idx);
+        updated.add(firstIdx, entry);
+        publish(updated);
+        save();
+        rememberMove(entry, anchor);
+        return true;
+    }
+
+    private static void rememberMove(ShopEntry entry, ShopEntry anchor) {
+        lastMovedEntry = entry;
+        lastMovedAnchorEntry = anchor;
+        lastMovedAtMs = System.currentTimeMillis();
+    }
+
+    /**
+     * 撤销最近一次排序操作（前移/后移/置顶通用，30 秒内有效，只能撤销一次）：把条目插回"紧邻在锚点条目
+     * 后面"的位置——锚点是移动前紧邻在它前面的那个条目本身（身份，不是下标），窗口期内哪怕锚点自己也被
+     * 挪了位，重新定位一次锚点当前位置就能跟着复原，不受这段时间内其他增删/排序动作影响。
+     * 锚点为 null（原本就是全局第一个）→ 插回最前；锚点在窗口期内被删掉、找不到了 → 退化成追加到列表
+     * 最后一位（保底；因为分类归属只看 category 字段不看物理位置，追加到最后天然等价于"排到本分类末尾"）。
+     */
+    public static synchronized boolean undoLastMove() {
+        if (lastMovedEntry == null) return false;
+        if (System.currentTimeMillis() - lastMovedAtMs > UNDO_MOVE_WINDOW_MS) {
+            lastMovedEntry = null;
+            lastMovedAnchorEntry = null;
+            return false;
+        }
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int curIdx = updated.indexOf(lastMovedEntry);
+        if (curIdx < 0) {
+            lastMovedEntry = null;
+            lastMovedAnchorEntry = null;
+            return false;
+        }
+        updated.remove(curIdx);
+        if (lastMovedAnchorEntry == null) {
+            updated.add(0, lastMovedEntry);
+        } else {
+            int anchorIdx = updated.indexOf(lastMovedAnchorEntry);
+            if (anchorIdx < 0) {
+                updated.add(lastMovedEntry); // 保底：锚点已不在，追加到最后
+            } else {
+                updated.add(anchorIdx + 1, lastMovedEntry);
+            }
+        }
+        publish(updated);
+        save();
+        lastMovedEntry = null;
+        lastMovedAnchorEntry = null;
+        return true;
+    }
+
     private static void publish(List<ShopEntry> entries) {
         ShopCatalogSnapshot built = ShopCatalogSnapshot.build(nextRevision++, entries);
         snapshot = built;
@@ -270,6 +381,7 @@ public final class ShopConfig {
             writeDefault();
         }
         List<ShopEntry> parsedEntries = new ArrayList<>();
+        boolean needsStableIdMigration = false;
         // 必须显式 UTF-8：FileReader 用系统默认编码（Windows 为 GBK），会把 UTF-8 中文读成乱码
         try (java.io.Reader r = new java.io.InputStreamReader(
                 new java.io.FileInputStream(SHOP_FILE), StandardCharsets.UTF_8)) {
@@ -281,10 +393,17 @@ public final class ShopConfig {
                 ShopEntry entry = ShopEntryJsonCodec.fromJson(o);
                 if (entry != null) {
                     parsedEntries.add(entry);
+                    if (!ShopEntryJsonCodec.hasStableId(o)) needsStableIdMigration = true;
                 }
             }
             publish(parsedEntries);
             GTDishanhaiMod.LOGGER.info("[Shop] 已加载 {} 个商品", parsedEntries.size());
+            // 旧 shop.json 缺 stableId 的条目在上面 fromJson 时已由 ShopEntry 构造器补发新 UUID，
+            // 这里立刻写回磁盘固化，否则下次重启又会各生成一个新的，购物车等跨重登引用就全部失效。
+            if (needsStableIdMigration) {
+                save();
+                GTDishanhaiMod.LOGGER.info("[Shop] 已为缺失 stableId 的旧商品条目补发身份并写回 shop.json");
+            }
         } catch (Exception e) {
             loaded = true; // 保留最后一个完整快照，避免每次读取都重复冲击损坏文件
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop.json 失败: {}", e.getMessage());

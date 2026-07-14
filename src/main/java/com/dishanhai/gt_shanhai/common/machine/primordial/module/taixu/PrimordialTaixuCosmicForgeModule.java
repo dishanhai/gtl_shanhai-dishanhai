@@ -140,8 +140,9 @@ public class PrimordialTaixuCosmicForgeModule extends PrimordialOmegaEngineModul
     }
 
     private void scanBoostItem() {
-        Item item = machineStorage.storage.getStackInSlot(0).getItem();
-        currentParallel = ITEM_PARALLEL_MAP.getOrDefault(item, DEFAULT_PARALLEL);
+        var stack = machineStorage.storage.getStackInSlot(0);
+        long base = ITEM_PARALLEL_MAP.getOrDefault(stack.getItem(), DEFAULT_PARALLEL);
+        currentParallel = applyModuleCountParallelMultiplier(base, stack.getCount());
     }
 
     @Override

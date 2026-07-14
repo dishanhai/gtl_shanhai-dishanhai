@@ -6,13 +6,14 @@ import java.util.List;
 public final class ShopCatalogManifest {
 
     public record Stub(long entryKey, String top, String sub, boolean hidden,
-                       int chunkId, String linkKey, String displayName, List<String> goodsIds) {
+                       int chunkId, String linkKey, String displayName, List<String> goodsIds, String stableId) {
         public Stub {
             top = top == null ? "" : top;
             sub = sub == null ? "" : sub;
             linkKey = linkKey == null ? "" : linkKey;
             displayName = displayName == null ? "" : displayName;
             goodsIds = goodsIds == null ? List.of() : List.copyOf(goodsIds);
+            stableId = stableId == null ? "" : stableId;
         }
     }
 

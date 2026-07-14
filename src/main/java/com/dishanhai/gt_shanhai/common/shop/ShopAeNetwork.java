@@ -100,6 +100,15 @@ public final class ShopAeNetwork {
         return storage.extract(key, Long.MAX_VALUE, Actionable.SIMULATE, IActionSource.empty());
     }
 
+    /** 模拟绑定网络还能收下多少（SIMULATE，不改动网络）；供流体商品购买前算「这次最多能买几份」，
+     *  比 {@link #canInjectForPlayer} 的全有全无判定更细——网络还有余量但不够全额时，能按余量降量成交。 */
+    public static long simulateInjectCapacityForPlayer(ServerPlayer player, AEKey key) {
+        if (key == null) return 0L;
+        MEStorage storage = findBoundStorage(player);
+        if (storage == null) return 0L;
+        return storage.insert(key, Long.MAX_VALUE, Actionable.SIMULATE, IActionSource.empty());
+    }
+
     /** 遍历所有已注册的绑定源，返回第一个在线且匹配该玩家的 AE 网格（供 {@link ShopAutoCraft} 提交自动合成）。 */
     public static IGrid findBoundGrid(ServerPlayer player) {
         if (player == null) return null;

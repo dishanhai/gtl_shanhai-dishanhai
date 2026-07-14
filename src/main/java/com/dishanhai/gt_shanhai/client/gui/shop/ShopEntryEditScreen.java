@@ -45,7 +45,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private static final int BTN_HOVER = -12303292;
 
     private static final int TARGET_W = 520;
-    private static final int TARGET_H = 416;
+    private static final int TARGET_H = 436;
     /** 服务器正常速度下 1 现实秒 = 20 tick；周期限购的「周期(秒)」按此换算成 tick。 */
     private static final long TICKS_PER_SECOND = 20L;
     private static final int SLOT = 20;
@@ -58,7 +58,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private final long catalogRevision;       // 打开编辑器时的目录版本
     private final long oldEntryKey;           // 待编辑条目身份；新增时=-1
 
-    private final List<ItemStack> goodsList = new ArrayList<>(); // 商品清单（≥1 项；首项数量由 count/countBox 驱动，第2项起用各自槽位自带数量）
+    private final List<ItemStack> goodsList = new ArrayList<>(); // 商品清单-物品部分（首项数量由 count/countBox 驱动，第2项起用各自槽位自带数量）
+    // 商品清单-流体部分：紧接 goodsList 之后共享同一排槽位（同「商品排」交互），槽下数字为 mB，自带数量独立编辑。
+    // 流体商品没有背包容器可落地，购买交付强制要求开启 AE 模式且绑定在线 AE 网络能全额收下，见 ShopPurchase#buyBulk。
+    private final List<FluidStack> goodsFluids = new ArrayList<>();
     private int count;
     private String category;
     private String description;
@@ -88,6 +91,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private String linkTo = "";  // 跳转到：指向某条目 linkKey，可空，非空则详情页显示可点击跳转
     private String displayName = ""; // 自定义显示名称，可空 = 用商品本身的物品名
     private ShopEntry.TradeMode tradeMode = ShopEntry.TradeMode.BOTH; // 交易方向限制：不限/仅购买/仅出售
+    private String prerequisiteQuestId = ""; // 前置 FTBQ 任务 ID（十六进制），可空 = 不要求前置
 
     private EditBox countBox, catBox, sparkBox, descBox, limitBox, linkKeyBox, linkToBox, nameBox, periodSecondsBox, periodCapBox;
     private MultiLineTextArea descArea;       // 描述「展开编写」大图层里的多行编辑区（与 descBox 同源，双向同步）
@@ -117,13 +121,26 @@ public class ShopEntryEditScreen extends ScaledScreen {
         this.minScale = 0.1f;
         this.maxScale = Float.MAX_VALUE;
         this.catalogRevision = ClientShopCatalog.revision();
-        this.oldEntryKey = entry == null ? -1L : ClientShopCatalog.keyOf(entry);
+        // isNew=true 时恒为 -1：entry!=null && isNew==true 是「复制为新条目」场景（预填字段但不关联旧条目身份），
+        // 否则 submit() 会按 EDIT 语义误把 oldEntryKey 一起发出去，服务端 apply() 的 ADD 分支会直接拒绝。
+        this.oldEntryKey = (entry == null || isNew) ? -1L : ClientShopCatalog.keyOf(entry);
         if (entry != null) {
+            int firstItemCount = 1;
+            boolean sawFirstItem = false;
             for (ShopEntry.GoodsStack gs : entry.getGoodsList()) {
-                goodsList.add(gs.makeStack());
+                if (gs.isFluid()) {
+                    Fluid fluid = gs.fluid();
+                    if (fluid != net.minecraft.world.level.material.Fluids.EMPTY) {
+                        goodsFluids.add(FluidStack.create(fluid, Math.max(1L, gs.count())));
+                    }
+                } else {
+                    goodsList.add(gs.makeStack());
+                    if (!sawFirstItem) { firstItemCount = gs.count(); sawFirstItem = true; }
+                }
             }
-            goodsList.get(0).setCount(1); // 首项数量由独立的 count/countBox 驱动，槽位图标本身只画 1（不叠数量角标）
-            this.count = entry.getGoodsCount();
+            if (goodsList.isEmpty() && goodsFluids.isEmpty()) goodsList.add(ItemStack.EMPTY); // 保底占位，避免整单商品全空
+            if (!goodsList.isEmpty()) goodsList.get(0).setCount(1); // 首项数量由独立的 count/countBox 驱动，槽位图标本身只画 1（不叠数量角标）
+            this.count = firstItemCount;
             this.category = entry.getCategory();
             this.description = entry.getDescription();
             this.limit = entry.getRemainingUses(); // 预填当前剩余次数；不动这个框就原样保留
@@ -138,10 +155,12 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.ftbqTableId = entry.getFtbqTableId();
             this.ftbqSubMode = entry.getFtbqSubMode();
             this.hidden = entry.isHidden();
-            this.linkKey = entry.getLinkKey();
+            // 复制模式不继承别名：linkKey 是「供其他条目跳转引用」的身份标识，照抄会出现两条目认领同一别名
+            this.linkKey = isNew ? "" : entry.getLinkKey();
             this.linkTo = entry.getLinkTo();
             this.displayName = entry.getDisplayName();
             this.tradeMode = entry.getTradeMode();
+            this.prerequisiteQuestId = entry.getPrerequisiteQuestId();
         } else {
             goodsList.add(ItemStack.EMPTY); // 新增商品不预填默认物品，留空槽等玩家自己选（submit() 已有空商品校验拦截）
             this.count = 1;
@@ -216,6 +235,16 @@ public class ShopEntryEditScreen extends ScaledScreen {
         return file.getRewardTable(id);
     }
 
+    /** 按 {@link #prerequisiteQuestId} 查客户端已同步的 FTBQ 任务实例（未装 FTBQ / 未选 / 未同步返回 null）。 */
+    private dev.ftb.mods.ftbquests.quest.Quest resolveClientPrerequisiteQuest() {
+        if (prerequisiteQuestId == null || prerequisiteQuestId.isEmpty()) return null;
+        dev.ftb.mods.ftbquests.client.ClientQuestFile file = dev.ftb.mods.ftbquests.client.ClientQuestFile.INSTANCE;
+        if (file == null) return null;
+        long id = dev.ftb.mods.ftbquests.quest.QuestObjectBase.parseCodeString(prerequisiteQuestId);
+        if (id == 0L) return null;
+        return file.getQuest(id);
+    }
+
     /** 表内第一个物品类奖励的图标（没有则空）。 */
     private static ItemStack firstFtbqItemIcon(dev.ftb.mods.ftbquests.quest.loot.RewardTable table) {
         for (dev.ftb.mods.ftbquests.quest.loot.WeightedReward wr : table.getWeightedRewards()) {
@@ -244,6 +273,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int hiddenY() { return rewardPoolY() + 34; }
     private int linkKeyY() { return hiddenY() + 20; }
     private int linkToY() { return linkKeyY() + 18; }
+    private int prereqQuestY() { return linkToY() + 18; }
     private int slotsX() { return cx() + 36; }
     private int confirmX() { return left + panelWidth - 12 - 70; }
     private int cancelX() { return confirmX() - 6 - 56; }
@@ -534,7 +564,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
                     + " §8(奖励池接管)";
             g.drawString(this.font, goodsLabel, slotsX() + 26, goodsY() + 6, WHITE, true);
         } else {
-            drawRow(g, "§7商品", goodsList, false, goodsY(), goodsRowMax(), mx, my);
+            drawGoodsRow(g, goodsY(), goodsRowMax(), mx, my);
         }
         // 数量 / 分类（框由 super.render 绘制）
         g.drawString(this.font, "§7每份数量", c, fieldsY() + 2, GRAY, true);
@@ -582,6 +612,9 @@ public class ShopEntryEditScreen extends ScaledScreen {
         drawBtn(g, c + 56 + 8, hiddenY(), 64, 14, tradeModeLabel(), mx, my);
         g.drawString(this.font, "§7别名", c, linkKeyY() + 2, GRAY, true);
         g.drawString(this.font, "§7跳转到", c, linkToY() + 2, GRAY, true);
+
+        // 前置任务（可选）：购买前须先完成的 FTBQ 任务，单槽选择器，样式同上面的 FTBQ 表槽位
+        drawPrerequisiteQuestSlot(g, prereqQuestY(), mx, my);
 
         g.drawString(this.font, "§8币种=钱包余额扣 · 物品=背包扣 · 流体=绑定AE抽 · 星火=数字余额", c, top + panelHeight - 14, GRAY, true);
 
@@ -748,7 +781,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
         setFocused(null);
     }
 
-    /** 数量小弹窗前景：标题 + 关闭 X + 输入框（真实控件，由 super.render 画）+ 确认按钮。 */
+    /**
+     * 数量小弹窗前景：标题 + 关闭 X + 输入框 + 确认按钮。qtyEditBox 是真实控件，但只靠 addRenderableWidget
+     * 走 super.render() 在 Z=0 画一次是不够的——这整个前景层（含遮罩+面板背景）是在 renderScaledForeground
+     * 里画的，被顶到 Z=400（比 Z=0 高，LEQUAL 深度测试直接赢），遮罩+面板背景会整个盖住 Z=0 画好的输入框，
+     * 导致弹窗打开后输入框看不见也点不到。必须在这里（同一 Z=400 层）显式再画一次 qtyEditBox，同
+     * descArea 在 renderDescEditorForeground 里的处理方式一致（见其注释）。
+     */
     private void renderQtyEditorForeground(GuiGraphics g, int mx, int my) {
         int[] r = qtyEditorBounds();
         int ox = r[0], oy = r[1], ow = r[2], oh = r[3];
@@ -758,6 +797,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         g.drawString(this.font, "§6精确数量 §8(支持超大整数)", ox + 8, oy + 6, GOLD, true);
         int closeX = ox + ow - EDITOR_CLOSE_W - 4, closeY = oy + 4;
         drawBtn(g, closeX, closeY, EDITOR_CLOSE_W, EDITOR_CLOSE_H, "§cX", mx, my);
+        if (qtyEditBox != null) qtyEditBox.render(g, mx, my, 0f);
         int confirmH = 16, confirmX = ox + 8, confirmY = oy + oh - confirmH - 6, confirmW = ow - 16;
         drawBtn(g, confirmX, confirmY, confirmW, confirmH, "§a确认", mx, my);
     }
@@ -780,17 +820,27 @@ public class ShopEntryEditScreen extends ScaledScreen {
         return super.universalMouseScrolled(mx, my, d);
     }
 
-    /** 画一排物品型槽位（币种/物品共用），返回无。 */
-    private void drawRow(GuiGraphics g, String label, List<ItemStack> list, boolean unused, int y, int max, int mx, int my) {
+    /**
+     * 画商品排：物品槽（{@link #goodsList}）+ 流体槽（{@link #goodsFluids}，紧接物品槽后，共享同一排/同一点位
+     * 预算 max）+「+」。流体槽下方显示 mB 数量（同成本流体排风格），流体商品交付强制走 AE，见 ShopPurchase。
+     */
+    private void drawGoodsRow(GuiGraphics g, int y, int max, int mx, int my) {
         int c = cx();
-        g.drawString(this.font, label, c, y + 6, GRAY, true);
+        g.drawString(this.font, "§7商品", c, y + 6, GRAY, true);
         int sx = slotsX();
-        for (int i = 0; i < list.size(); i++) {
+        int itemN = goodsList.size();
+        for (int i = 0; i < itemN; i++) {
             int x = sx + i * PITCH;
-            EditorWidgets.itemSlot(g, this.font, x, y, list.get(i), hover(mx, my, x, y));
+            EditorWidgets.itemSlot(g, this.font, x, y, goodsList.get(i), hover(mx, my, x, y));
         }
-        if (list.size() < max) {
-            int x = sx + list.size() * PITCH;
+        for (int j = 0; j < goodsFluids.size(); j++) {
+            int x = sx + (itemN + j) * PITCH;
+            EditorWidgets.fluidSlot(g, this.font, x, y, goodsFluids.get(j), hover(mx, my, x, y));
+            g.drawCenteredString(this.font, goodsFluids.get(j).getAmount() + "mB", x + 10, y + 21, CYAN);
+        }
+        int total = itemN + goodsFluids.size();
+        if (total < max) {
+            int x = sx + total * PITCH;
             EditorWidgets.plusSlot(g, this.font, x, y, hover(mx, my, x, y));
         }
     }
@@ -949,6 +999,45 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private void openFtbqTablePicker() {
         capture();
         Minecraft.getInstance().setScreen(new FtbqTableSelectScreen(this, id -> ftbqTableId = id));
+    }
+
+    /** 「前置任务」行：单槽显示所选任务标题（+所属章节），点击打开选择器，右键清空。样式仿 {@link #drawFtbqTableRow}。 */
+    private void drawPrerequisiteQuestSlot(GuiGraphics g, int y, int mx, int my) {
+        int c = cx();
+        g.drawString(this.font, "§7前置任务", c, y + 6, GRAY, true);
+        int sx = slotsX();
+        dev.ftb.mods.ftbquests.quest.Quest quest = resolveClientPrerequisiteQuest();
+        boolean hv = hover(mx, my, sx, y);
+        if (quest != null) {
+            EditorWidgets.checkerSlot(g, sx, y, hv);
+            String title = quest.getRawTitle().isEmpty()
+                    ? ("#" + dev.ftb.mods.ftbquests.quest.QuestObjectBase.getCodeString(quest)) : quest.getRawTitle();
+            dev.ftb.mods.ftbquests.quest.Chapter chapter = quest.getChapter();
+            String chapterTip = chapter == null ? "" : " §8[" + chapter.getRawTitle() + "]";
+            g.drawString(this.font, "§f" + GuiRenderUtil.trimText(this.font, title, 130) + chapterTip, sx + 24, y + 6, WHITE, true);
+        } else {
+            EditorWidgets.plusSlot(g, this.font, sx, y, hv);
+            String tip = prerequisiteQuestId.isEmpty() ? "§8留空=不要求前置" : "§c任务未同步/不存在 #" + prerequisiteQuestId;
+            g.drawString(this.font, tip, sx + 24, y + 6, GRAY, true);
+        }
+    }
+
+    /** 「前置任务」行的单槽点击：左键打开任务选择器，右键清空已选任务。 */
+    private boolean prerequisiteQuestRowClicked(int y, double mx, double my, int btn) {
+        int sx = slotsX();
+        if (GuiRenderUtil.isHovering(mx, my, sx, y, SLOT, SLOT)) {
+            if (btn == 1) { prerequisiteQuestId = ""; return true; }
+            capture();
+            openPrerequisiteQuestPicker();
+            return true;
+        }
+        return false;
+    }
+
+    /** 打开 FTBQ 任务选择器：选中即回填 {@link #prerequisiteQuestId}。 */
+    private void openPrerequisiteQuestPicker() {
+        capture();
+        Minecraft.getInstance().setScreen(new FtbqQuestSelectScreen(this, id -> prerequisiteQuestId = id));
     }
 
     /** 奖励池排点击：左键开权重/数量区间编辑器，右键直接删除，点「+」开多选选择器。 */
@@ -1128,6 +1217,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             cycleTradeMode();
             return true;
         }
+        if (prerequisiteQuestRowClicked(prereqQuestY(), mx, my, btn)) return true;
         return super.universalMouseClicked(mx, my, btn);
     }
 
@@ -1177,17 +1267,18 @@ public class ShopEntryEditScreen extends ScaledScreen {
     }
 
     /**
-     * 商品排点击：左键选/重开选择器改数量，右键删除（保底留 1 项，最后一项不响应右键，防清空商品），
-     * 点「+」开多选选择器加新项。语义同 {@link #itemRowClicked}，多一条「不能删空」的保底。
+     * 商品排点击：物品槽/流体槽左键选/重开选择器改身份（流体额外可改 mB），右键删除（保底留 1 项，
+     * 物品+流体总数收缩到 1 时最后一项不响应右键，防清空商品），点「+」开多选选择器加新项（物品/流体均可）。
      */
     private boolean goodsRowClicked(double mx, double my, int btn) {
         int y = goodsY(), max = goodsRowMax();
         int sx = slotsX();
-        for (int i = 0; i < goodsList.size(); i++) {
+        int itemN = goodsList.size();
+        for (int i = 0; i < itemN; i++) {
             int x = sx + i * PITCH;
             if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
                 if (btn == 1) {
-                    if (goodsList.size() > 1) { goodsList.remove(i); rebuild(); }
+                    if (itemN + goodsFluids.size() > 1) { goodsList.remove(i); rebuild(); }
                 } else {
                     final int idx = i;
                     capture();
@@ -1197,8 +1288,23 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 return true;
             }
         }
-        if (goodsList.size() < max) {
-            int x = sx + goodsList.size() * PITCH;
+        for (int j = 0; j < goodsFluids.size(); j++) {
+            int x = sx + (itemN + j) * PITCH;
+            if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
+                if (btn == 1) {
+                    if (itemN + goodsFluids.size() > 1) { goodsFluids.remove(j); rebuild(); }
+                } else {
+                    final int jdx = j;
+                    capture();
+                    EditorWidgets.openFluidPicker(goodsFluids.get(jdx),
+                            fs -> { if (fs == null || fs.isEmpty()) goodsFluids.remove(jdx); else goodsFluids.set(jdx, fs); });
+                }
+                return true;
+            }
+        }
+        int total = itemN + goodsFluids.size();
+        if (total < max) {
+            int x = sx + total * PITCH;
             if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
                 openGoodsPicker();
                 return true;
@@ -1207,12 +1313,12 @@ public class ShopEntryEditScreen extends ScaledScreen {
         return false;
     }
 
-    /** 打开商品多选选择器：加入 goodsList 排（只收物品，商品不支持流体）。 */
+    /** 打开商品多选选择器：物品加入 goodsList 排、流体加入 goodsFluids 排（同一次会话可混选，见 MultiPickerScreen）。 */
     private void openGoodsPicker() {
         capture();
         Minecraft.getInstance().setScreen(new MultiPickerScreen(this, false,
                 st -> { if (st != null && !st.isEmpty()) goodsList.add(st); },
-                fs -> {}));
+                fs -> { if (fs != null && !fs.isEmpty()) goodsFluids.add(fs); }));
     }
 
     /** 打开自建多选选择器：物品加入 items 排、流体加入 fluids 排（一次会话可混选）。 */
@@ -1394,7 +1500,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         }
         // 商品清单：奖励池接管时只镜像池首项（身份占位，非空校验/兜底图标用）；否则用编辑器里的商品排——
         // 首项数量吃独立的 count/countBox（与改造前单商品行为一致），第2项起用各自槽位自带数量（点槽位重开选择器改）
-        List<ItemStack> sourceStacks = goodsLockedByReward() ? java.util.List.of(lockedGoodsDisplay()) : goodsList;
+        boolean goodsLocked = goodsLockedByReward();
+        List<ItemStack> sourceStacks = goodsLocked ? java.util.List.of(lockedGoodsDisplay()) : goodsList;
         List<ShopEntry.GoodsStack> goodsForSubmit = new ArrayList<>();
         for (int i = 0; i < sourceStacks.size(); i++) {
             ItemStack st = sourceStacks.get(i);
@@ -1403,6 +1510,15 @@ public class ShopEntryEditScreen extends ScaledScreen {
             if (id == null) continue;
             int cnt = (i == 0) ? Math.max(1, count) : Math.max(1, st.getCount());
             goodsForSubmit.add(ShopEntry.GoodsStack.of(id, cnt, st.getTag()));
+        }
+        if (!goodsLocked) { // 奖励池接管时商品身份纯占位，不含流体（流体商品只在普通固定商品模式生效）
+            for (FluidStack fs : goodsFluids) {
+                if (fs == null || fs.isEmpty()) continue;
+                ResourceLocation id = ForgeRegistries.FLUIDS.getKey(fs.getFluid());
+                if (id == null) continue;
+                long amt = Math.max(1L, fs.getAmount());
+                goodsForSubmit.add(ShopEntry.GoodsStack.ofFluid(id, amt > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) amt));
+            }
         }
         if (goodsForSubmit.isEmpty()) {
             var p = Minecraft.getInstance().player;
@@ -1423,7 +1539,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 isNew ? ShopEditPacket.Action.ADD : ShopEditPacket.Action.EDIT,
                 goodsForSubmit, cat, desc, cost, oldGoods, oldCategory == null ? "" : oldCategory, -1, limit,
                 displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode,
-                periodTicksToSend, periodCap, catalogRevision, oldEntryKey);
+                periodTicksToSend, periodCap, prerequisiteQuestId, catalogRevision, oldEntryKey);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

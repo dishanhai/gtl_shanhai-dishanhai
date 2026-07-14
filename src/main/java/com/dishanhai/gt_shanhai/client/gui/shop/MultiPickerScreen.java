@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.gt_shanhai.client.gui.scaled.PinyinSearchBridge;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 
 import dev.architectury.fluid.FluidStack;
@@ -61,6 +62,13 @@ public class MultiPickerScreen extends ScaledScreen {
     private static final int PITCH = 22;
     private static final int SEL_ROW_H = 20;
     private static final int SCROLLBAR_W = 4;
+    // 数量框快速填写：跟 ShopScreen 购买页同款三排步进按钮（+1/+10/+100/+1k、-1/-10/-100/-1k、×10/×100/÷10/÷100），
+    // 对当前激活（顶部数量框绑定）的已选项直接改 count，见反馈：补上购买页的快速数字填写
+    private static final int COUNT_BOX_W = 140;
+    private static final int COUNT_STEP_H = 12;
+    private static final long[] COUNT_STEPS = {1, 10, 100, 1000};
+    private static final long[] COUNT_SCALES = {10, 100, 10, 100};
+    private static final String[] COUNT_SCALE_LABELS = {"§b×10", "§b×100", "§6÷10", "§6÷100"};
 
     /** 搜索框悬停提示：语法说明（同 JEI 习惯的 @/#/$/* 前缀）。 */
     private static final List<Component> SEARCH_HELP = List.of(
@@ -126,6 +134,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private int selScroll;                        // 已选清单行偏移
     private boolean suppressCount;                // 切换激活项时抑制数量框回调
     private boolean draggingScroll;                // 正在拖拽网格滚动条
+    private boolean itemCacheAppliedOnce;          // 本次开屏后台物品缓存建完那一刻，只强制刷新一次过滤结果
 
     private EditBox searchBox, countBox;
     private int left, top, panelWidth, panelHeight;
@@ -205,41 +214,16 @@ public class MultiPickerScreen extends ScaledScreen {
         }
     }
 
-    // ===== 注册表缓存构建（一次性） =====
+    // 全物品缓存构建状态：数量大（两万+条目，还要逐个算显示名/标签字符串），放主线程会在首次
+    // 打开时卡一下，改到后台线程建（见 ensureCache/buildItemCacheAsync），画面在没建完前显示占位。
+    private static volatile boolean itemCacheReady = false;
+    private static volatile boolean itemCacheLoading = false;
+
+    // ===== 注册表缓存构建 =====
     private static void ensureCache() {
-        if (ALL_ITEMS == null) {
-            List<ItemStack> items = new ArrayList<>();
-            List<String> names = new ArrayList<>();
-            List<String> tags = new ArrayList<>();
-            Set<Item> seen = new HashSet<>();
-            // 先按创造模式「搜索」栏的聚合顺序排（= 原版 E 键搜索/JEI 默认列表同一份数据）：
-            // 各模组按自己的注册顺序把物品塞进创造栏，GTCEu 电路板等天然按电压等级排好，
-            // 不用自己写一套电压等级比较器。见 CreativeModeTabs.SEARCH 的 build 逻辑。
-            CreativeModeTab searchTab = BuiltInRegistries.CREATIVE_MODE_TAB.getOrThrow(CreativeModeTabs.SEARCH);
-            for (ItemStack proto : searchTab.getSearchTabDisplayItems()) {
-                Item it = proto.getItem();
-                if (!seen.add(it)) continue;
-                ItemStack st = new ItemStack(it);
-                if (st.isEmpty()) continue;
-                ResourceLocation id = ForgeRegistries.ITEMS.getKey(it);
-                items.add(st);
-                names.add((st.getHoverName().getString() + " " + id).toLowerCase(Locale.ROOT));
-                tags.add(tagStringOf(it));
-            }
-            // 兜底：没进任何创造栏的物品（个别模组内部/隐藏物品）追加在最后，保证仍可选中
-            for (Item it : ForgeRegistries.ITEMS.getValues()) {
-                if (!seen.add(it)) continue;
-                ItemStack st = new ItemStack(it);
-                if (st.isEmpty()) continue;
-                ResourceLocation id = ForgeRegistries.ITEMS.getKey(it);
-                items.add(st);
-                names.add((st.getHoverName().getString() + " " + id).toLowerCase(Locale.ROOT));
-                tags.add(tagStringOf(it));
-            }
-            ALL_ITEMS = items;
-            ALL_ITEM_NAMES = names;
-            ALL_ITEM_TAGS = tags;
-            ALL_ITEM_TOOLTIP = new String[items.size()];
+        if (!itemCacheReady && !itemCacheLoading) {
+            itemCacheLoading = true;
+            net.minecraft.Util.backgroundExecutor().execute(MultiPickerScreen::buildItemCacheAsync);
         }
         if (ALL_FLUIDS == null) {
             List<Fluid> fluids = new ArrayList<>();
@@ -257,6 +241,59 @@ public class MultiPickerScreen extends ScaledScreen {
             ALL_FLUIDS = fluids;
             ALL_FLUID_NAMES = names;
             ALL_FLUID_TAGS = tags;
+        }
+    }
+
+    /**
+     * 全物品缓存实际构建（后台线程执行，不阻塞打开界面那一下）。
+     * 优先用 JEI 已排好序 + 已过滤隐藏黑名单 + 含本模组额外注册摄取物（如 SDA 包）的列表
+     * （见 {@link JeiItemOrderHolder}，来自 {@code ShanhaiJEIPlugin#onRuntimeAvailable}）；
+     * 没装 JEI / 还没就绪时该列表为 null，走原有创造栏聚合顺序 + 全注册表兜底（跟改动前一致）。
+     * 单个物品名称/标签解析异常不该拖垮整批构建，逐项吞掉跳过即可。
+     */
+    private static void buildItemCacheAsync() {
+        List<ItemStack> items = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        List<String> tags = new ArrayList<>();
+        try {
+            Set<Item> seen = new HashSet<>();
+            List<ItemStack> jeiOrder = JeiItemOrderHolder.get();
+            if (jeiOrder != null) {
+                for (ItemStack proto : jeiOrder) {
+                    addItemToCache(proto == null ? null : proto.getItem(), items, names, tags, seen);
+                }
+            }
+            // 先按创造模式「搜索」栏的聚合顺序补漏（JEI 未装，或 JEI 列表里没有但仍在创造栏的物品）
+            CreativeModeTab searchTab = BuiltInRegistries.CREATIVE_MODE_TAB.getOrThrow(CreativeModeTabs.SEARCH);
+            for (ItemStack proto : searchTab.getSearchTabDisplayItems()) {
+                addItemToCache(proto.getItem(), items, names, tags, seen);
+            }
+            // 兜底：没进任何创造栏/JEI 列表的物品（个别模组内部/隐藏物品）追加在最后，保证仍可选中
+            for (Item it : ForgeRegistries.ITEMS.getValues()) {
+                addItemToCache(it, items, names, tags, seen);
+            }
+        } catch (Throwable t) {
+            dev.latvian.mods.kubejs.KubeJS.LOGGER.warn("[山海多选资源] 后台构建物品缓存异常，已降级为已收集到的部分列表", t);
+        }
+        ALL_ITEMS = items;
+        ALL_ITEM_NAMES = names;
+        ALL_ITEM_TAGS = tags;
+        ALL_ITEM_TOOLTIP = new String[items.size()];
+        itemCacheReady = true; // 必须在上面四行赋值之后置 true——MultiPickerScreen 靠这个 volatile 标记安全发布
+        itemCacheLoading = false;
+    }
+
+    private static void addItemToCache(Item it, List<ItemStack> items, List<String> names, List<String> tags, Set<Item> seen) {
+        if (it == null || !seen.add(it)) return;
+        try {
+            ItemStack st = new ItemStack(it);
+            if (st.isEmpty()) return;
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(it);
+            items.add(st);
+            names.add((st.getHoverName().getString() + " " + id).toLowerCase(Locale.ROOT));
+            tags.add(tagStringOf(it));
+        } catch (Throwable ignored) {
+            // 单个物品名称/标签解析异常不该拖垮整批缓存构建，跳过这一项即可
         }
     }
 
@@ -370,7 +407,7 @@ public class MultiPickerScreen extends ScaledScreen {
         searchBox.setFocused(true);
         setFocused(searchBox);
 
-        int cbW = 80;
+        int cbW = COUNT_BOX_W;
         countBox = new EditBox(this.font, left + panelWidth - 12 - cbW, top + 22, cbW, 14, Component.literal("数量"));
         countBox.setMaxLength(12);
         countBox.setBordered(true);
@@ -385,7 +422,7 @@ public class MultiPickerScreen extends ScaledScreen {
         addRenderableWidget(searchBox);
         addRenderableWidget(countBox);
 
-        // 几何：左网格 / 右清单
+        // 几何：左网格 / 右清单。已选清单列顶部要给数量框下面的三排快速步进按钮让位，网格不用（见 countStepX/Y）
         gridX = left + 12;
         gridY = top + 44;
         gridBottom = top + panelHeight - 28;
@@ -393,7 +430,7 @@ public class MultiPickerScreen extends ScaledScreen {
         gridW = panelWidth - 24 - selW - 8;
         gridCols = Math.max(1, (gridW + 2) / PITCH);
         selX = gridX + gridW + 8;
-        selY = gridY;
+        selY = countStepY(0) + 3 * (COUNT_STEP_H + 2) + 4;
 
         rebuildFilter();
     }
@@ -405,7 +442,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private List<String> curNames() {
         if (restrictedMode) return restrictedNames;
         return switch (mode) {
-            case ITEM -> ALL_ITEM_NAMES;
+            case ITEM -> itemCacheReady ? ALL_ITEM_NAMES : List.of(); // 后台还没建完时按"暂无条目"处理，见 buildItemCacheAsync
             case INVENTORY -> invNames;
             case FLUID -> ALL_FLUID_NAMES;
             case TEXTURE -> ALL_TEXTURE_NAMES;
@@ -418,14 +455,45 @@ public class MultiPickerScreen extends ScaledScreen {
         return (mode == Mode.INVENTORY ? invStacks : ALL_ITEMS).get(resIdx);
     }
 
+    // 过滤结果缓存（会话内，按「浏览模式+查询串」为键）：同一查询反复出现（回退重打/来回切模式再切回）
+    // 直接复用，不用重新扫一遍全量；LRU 封顶，避免长时间搜索会话无限增长。见反馈：补缓存键降低重复轮询卡顿。
+    private final java.util.Map<String, List<Integer>> filterResultCache =
+            new java.util.LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, List<Integer>> eldest) {
+                    return size() > 24;
+                }
+            };
+    private String lastFilterQuery;
+    private List<Integer> lastFilterResult;
+
     private void rebuildFilter() {
-        String q = searchBox != null ? searchBox.getValue().trim() : "";
-        int n = curNames().size();
+        String q = (searchBox != null ? searchBox.getValue().trim() : "").toLowerCase(Locale.ROOT);
+        String cacheKey = mode.name() + " " + q;
+        List<Integer> cached = filterResultCache.get(cacheKey);
+        if (cached != null) {
+            filtered = cached;
+            gridScroll = 0;
+            return;
+        }
+        List<String> names = curNames();
+        int n = names.size();
         List<Integer> out = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            if (matchIndex(i, q)) out.add(i);
+        // 增量收窄：新查询是在上次查询末尾接着打字打出来的（同模式、纯前缀扩展），且没启用拼音兜底
+        // （contains 语义下严格单调收窄：能匹配更长的串，必然也匹配它的前缀，见 AdvancedSearchUtil），
+        // 直接在上次结果集里再筛一遍，不用从全量重新扫描；拼音匹配不保证这个单调性，禁用时才走这条捷径。
+        boolean canNarrow = lastFilterResult != null && lastFilterQuery != null && !q.isEmpty()
+                && q.startsWith(lastFilterQuery) && q.length() > lastFilterQuery.length()
+                && !PinyinSearchBridge.available();
+        if (canNarrow) {
+            for (int i : lastFilterResult) if (matchIndex(i, q)) out.add(i);
+        } else {
+            for (int i = 0; i < n; i++) if (matchIndex(i, q)) out.add(i);
         }
         filtered = out;
+        filterResultCache.put(cacheKey, out);
+        lastFilterQuery = q;
+        lastFilterResult = out;
         gridScroll = 0;
     }
 
@@ -517,6 +585,15 @@ public class MultiPickerScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        // 后台物品缓存刚建完的那一帧：之前按"暂无条目"缓存的过滤结果已经过期，必须清掉重算一次，
+        // 否则加载完成后如果搜索框内容没变，会一直卡在建缓存前算出来的空结果上（见反馈修复）。
+        if (itemCacheReady && !itemCacheAppliedOnce) {
+            itemCacheAppliedOnce = true;
+            filterResultCache.clear();
+            lastFilterQuery = null;
+            lastFilterResult = null;
+            rebuildFilter();
+        }
         hoverItem = null;
         hoverFluidTip = null;
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
@@ -533,7 +610,8 @@ public class MultiPickerScreen extends ScaledScreen {
         int modeX = left + 12 + 200 + 8;
         if (!restrictedMode) drawBtn(g, modeX, top + 21, 70, 16, modeLabel(), mx, my);
         // 数量框标签
-        g.drawString(this.font, active != null && active.isFluid ? "§7mB:" : "§7数量:", left + panelWidth - 12 - 80 - 30, top + 25, GRAY, true);
+        g.drawString(this.font, active != null && active.isFluid ? "§7mB:" : "§7数量:", left + panelWidth - 12 - COUNT_BOX_W - 30, top + 25, GRAY, true);
+        drawCountSteps(g, mx, my);
 
         drawGrid(g, mx, my);
         drawGridScrollbar(g, mx, my);
@@ -553,12 +631,90 @@ public class MultiPickerScreen extends ScaledScreen {
         };
     }
 
+    private int countStepX() { return left + panelWidth - 12 - COUNT_BOX_W; }
+    private int countStepY(int row) { return top + 38 + row * (COUNT_STEP_H + 2); }
+    private int countStepW() { return (COUNT_BOX_W - 9) / 4; }
+
+    /** 数量快速填写：三排步进按钮（+1/+10/+100/+1k、-1/-10/-100/-1k、×10/×100/÷10/÷100），
+     * 对当前激活的已选项直接改 count；没有激活项/激活项是贴图（无数量概念）时不画。 */
+    private void drawCountSteps(GuiGraphics g, int mx, int my) {
+        if (active == null || active.isTexture) return;
+        int bx0 = countStepX(), bw = countStepW();
+        for (int i = 0; i < 4; i++) {
+            int bx = bx0 + i * (bw + 3);
+            drawBtn(g, bx, countStepY(0), bw, COUNT_STEP_H, "§a+" + compactStep(COUNT_STEPS[i]), mx, my);
+            drawBtn(g, bx, countStepY(1), bw, COUNT_STEP_H, "§c-" + compactStep(COUNT_STEPS[i]), mx, my);
+            drawBtn(g, bx, countStepY(2), bw, COUNT_STEP_H, COUNT_SCALE_LABELS[i], mx, my);
+        }
+    }
+
+    /** 数量快速填写按钮点击；命中即改 active.count + 回写数量框，未命中返回 false。 */
+    private boolean countStepsClicked(double mx, double my) {
+        if (active == null || active.isTexture) return false;
+        int bx0 = countStepX(), bw = countStepW();
+        for (int i = 0; i < 4; i++) {
+            int bx = bx0 + i * (bw + 3);
+            if (GuiRenderUtil.isHovering(mx, my, bx, countStepY(0), bw, COUNT_STEP_H)) {
+                active.count = addClamp(active.count, COUNT_STEPS[i]);
+                syncCountBox();
+                return true;
+            }
+            if (GuiRenderUtil.isHovering(mx, my, bx, countStepY(1), bw, COUNT_STEP_H)) {
+                active.count = addClamp(active.count, -COUNT_STEPS[i]);
+                syncCountBox();
+                return true;
+            }
+            if (GuiRenderUtil.isHovering(mx, my, bx, countStepY(2), bw, COUNT_STEP_H)) {
+                active.count = i < 2 ? mulClamp(active.count, COUNT_SCALES[i]) : divClamp(active.count, COUNT_SCALES[i]);
+                syncCountBox();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void syncCountBox() {
+        if (countBox == null || active == null) return;
+        suppressCount = true;
+        countBox.setValue(Long.toString(active.count));
+        suppressCount = false;
+    }
+
+    private static String compactStep(long step) {
+        return step >= 1000 ? (step / 1000) + "k" : String.valueOf(step);
+    }
+
+    /** 数量加减夹取到 [1, Long.MAX]，防加法溢出。 */
+    private static long addClamp(long a, long delta) {
+        if (delta > 0 && a > Long.MAX_VALUE - delta) return Long.MAX_VALUE;
+        return Math.max(1L, a + delta);
+    }
+
+    /** 数量乘法夹取到 [1, Long.MAX]，防乘法溢出。 */
+    private static long mulClamp(long a, long factor) {
+        if (factor <= 0) return a;
+        if (a > Long.MAX_VALUE / factor) return Long.MAX_VALUE;
+        return Math.max(1L, a * factor);
+    }
+
+    /** 数量除法夹取到 [1, Long.MAX]（整除向下取整，最小 1）。 */
+    private static long divClamp(long a, long factor) {
+        if (factor <= 0) return a;
+        return Math.max(1L, a / factor);
+    }
+
     private int confirmX() { return left + panelWidth - 12 - 90; }
     private int cancelX() { return confirmX() - 6 - 56; }
     private int clearAllX() { return selX + selW - 32; }
     private int syncAllX() { return clearAllX() - 32 - 2; }
 
     private void drawGrid(GuiGraphics g, int mx, int my) {
+        if (mode == Mode.ITEM && !itemCacheReady) {
+            // 物品模式且后台缓存还没建完：给个明确的"加载中"占位，别让玩家误以为搜索没结果
+            g.drawCenteredString(this.font, "§e正在后台构建物品列表…", gridX + gridW / 2, gridY + (gridBottom - gridY) / 2 - 4, GRAY);
+            g.drawString(this.font, "§8物品列表加载中，请稍候…", gridX, gridBottom + 2, GRAY, true);
+            return;
+        }
         int cols = gridCols;
         int rows = gridRows();
         int total = filtered.size();
@@ -706,6 +862,8 @@ public class MultiPickerScreen extends ScaledScreen {
             rebuildFilter();
             return true;
         }
+        // 数量快速填写三排步进按钮
+        if (countStepsClicked(mx, my)) return true;
         // 已选清单「同步」：把顶部数量框当前值套用到全部已选项目
         if (!selected.isEmpty() && GuiRenderUtil.isHovering(mx, my, syncAllX(), selY - 1, 32, 10)) {
             syncAllCounts();

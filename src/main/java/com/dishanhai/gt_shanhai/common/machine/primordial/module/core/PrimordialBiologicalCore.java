@@ -104,7 +104,9 @@ public class PrimordialBiologicalCore extends PrimordialOmegaEngineModuleBase {
     }
 
     private void scanBoostItem() {
-        currentParallel = ITEM_PARALLEL_MAP.getOrDefault(machineStorage.storage.getStackInSlot(0).getItem(), DEFAULT_PARALLEL);
+        var stack = machineStorage.storage.getStackInSlot(0);
+        long base = ITEM_PARALLEL_MAP.getOrDefault(stack.getItem(), DEFAULT_PARALLEL);
+        currentParallel = applyModuleCountParallelMultiplier(base, stack.getCount());
     }
 
     @Override

@@ -24,4 +24,9 @@ public final class ShopEntryEditor {
     public static void openEdit(ShopScreen parent, ShopEntry entry) {
         Minecraft.getInstance().setScreen(new ShopEntryEditScreen(parent, entry, false, null));
     }
+
+    /** 打开「复制为新条目」编辑屏：预填现有条目的全部字段，但按新增提交（不关联旧条目身份，别名不继承）。 */
+    public static void openDuplicate(ShopScreen parent, ShopEntry entry) {
+        Minecraft.getInstance().setScreen(new ShopEntryEditScreen(parent, entry, true, null));
+    }
 }

@@ -101,6 +101,7 @@ public final class ClientShopCatalog {
     private static final Map<Long, ShopCatalogManifest.Stub> stubsByKey = new LinkedHashMap<>();
     private static final Map<String, List<Long>> groupKeys = new LinkedHashMap<>();
     private static final Map<String, Long> linkKeys = new LinkedHashMap<>();
+    private static final Map<String, Long> stableIdToKey = new LinkedHashMap<>();
     private static final List<String> topCategories = new ArrayList<>();
     private static final Map<String, List<String>> subCategories = new LinkedHashMap<>();
     private static final Map<Long, ShopEntry> entriesByKey = new LinkedHashMap<>();
@@ -170,6 +171,12 @@ public final class ClientShopCatalog {
     public static long linkedEntryKey(String linkKey) {
         if (linkKey == null || linkKey.isBlank()) return -1L;
         return linkKeys.getOrDefault(linkKey, -1L);
+    }
+
+    /** 按稳定身份 ID 查找该条目在当前快照里的 entryKey（跨快照有效，未找到返回 -1；供购物车解析用）。 */
+    public static long keyOfStableId(String stableId) {
+        if (stableId == null || stableId.isBlank()) return -1L;
+        return stableIdToKey.getOrDefault(stableId, -1L);
     }
 
     public static long beginChunkRequest(int chunkId) {
@@ -245,6 +252,7 @@ public final class ClientShopCatalog {
         stubsByKey.clear();
         groupKeys.clear();
         linkKeys.clear();
+        stableIdToKey.clear();
         topCategories.clear();
         subCategories.clear();
         LinkedHashSet<String> tops = new LinkedHashSet<>();
@@ -252,6 +260,7 @@ public final class ClientShopCatalog {
         for (ShopCatalogManifest.Stub stub : manifest.stubs()) {
             stubsByKey.put(stub.entryKey(), stub);
             if (!stub.linkKey().isEmpty()) linkKeys.putIfAbsent(stub.linkKey(), stub.entryKey());
+            if (!stub.stableId().isEmpty()) stableIdToKey.put(stub.stableId(), stub.entryKey());
             if (stub.hidden()) continue;
             tops.add(stub.top());
             subs.computeIfAbsent(stub.top(), ignored -> new LinkedHashSet<>());

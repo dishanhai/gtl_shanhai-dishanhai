@@ -210,6 +210,38 @@ public class ShanhaiNetwork {
                 ShopAutoCraftConfirmPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopReorderPacket.class,
+                ShopReorderPacket::encode,
+                ShopReorderPacket::new,
+                ShopReorderPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCartEditPacket.class,
+                ShopCartEditPacket::encode,
+                ShopCartEditPacket::new,
+                ShopCartEditPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCartSyncPacket.class,
+                ShopCartSyncPacket::encode,
+                ShopCartSyncPacket::new,
+                ShopCartSyncPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCartPurchaseResultPacket.class,
+                ShopCartPurchaseResultPacket::encode,
+                ShopCartPurchaseResultPacket::new,
+                ShopCartPurchaseResultPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 
