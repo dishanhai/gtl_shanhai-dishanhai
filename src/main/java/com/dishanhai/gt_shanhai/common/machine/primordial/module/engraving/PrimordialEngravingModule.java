@@ -127,9 +127,6 @@ public class PrimordialEngravingModule extends PrimordialOmegaEngineModuleBase {
     }
 
     @Override
-    public long getCurrentParallel() { return currentParallel; }
-
-    @Override
     public long getMaxVoltage() { return Long.MAX_VALUE; }
 
     @Override
