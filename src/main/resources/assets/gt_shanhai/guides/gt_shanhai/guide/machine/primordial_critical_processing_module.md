@@ -2,7 +2,7 @@
 navigation:
   title: 原初临界加工模块
   parent: machine/primordial_index.md
-  position: 11
+  position: 14
 categories:
   - gt_shanhai
   - primordial
