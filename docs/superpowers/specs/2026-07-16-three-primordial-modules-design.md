@@ -2,7 +2,7 @@
 
 ## 目标
 
-新增三个可安装到原初终焉引擎 `J` 位的原初加工模块，并新增 `gt_shanhai:primordial_stellar_reaction` 配方类型。三个模块继续使用 `PrimordialModuleRecipeLogic` 的选配方、多配方并行、模块等级、无线供电与线程倍率体系。
+新增三个可安装到原初终焉引擎 `J` 位的原初加工模块，并新增 `gtceu:primordial_stellar_reaction` 配方类型。三个模块继续使用 `PrimordialModuleRecipeLogic` 的选配方、多配方并行、模块等级、无线供电与线程倍率体系。
 
 ## 共用机器基类
 
@@ -36,14 +36,14 @@
 
 新增配方类型 `PRIMORDIAL_STELLAR_REACTION`：
 
-- 注册路径：`gt_shanhai:primordial_stellar_reaction`。
+- 注册路径：`gtceu:primordial_stellar_reaction`。
 - 类型：`multiblock`。
 - 最大物品输入/输出：`5 / 3`。
 - 最大流体输入/输出：`5 / 3`。
 - 能源方向：输入。
 - 使用聚变进度条、从左到右填充、聚变音效，并开启聚变类型的电压文本偏移。
 
-`GTRecipeTypes.register(...)` 固定使用 `gtceu` 命名空间，因此不能用于这个新类型。`DShanhaiRecipeTypes` 将增加山海命名空间注册辅助方法：以 `gt_shanhai:primordial_stellar_reaction` 构造 `GTRecipeType`，同步注册原版 `RECIPE_TYPE`、`RECIPE_SERIALIZER` 与 `GTRegistries.RECIPE_TYPES`，再配置上述 IO 和 UI 属性。
+该类型由 `gt_shanhai` 项目维护，但遵循 GTCEu 配方类型的默认 `gtceu` 命名空间；直接在 `DShanhaiRecipeTypes.init()` 中调用现有 `GTRecipeTypes.register("primordial_stellar_reaction", "multiblock")`，再配置上述 IO 和 UI 属性。
 
 本次只创建配方类型入口，不添加具体原初恒星反应配方。
 
