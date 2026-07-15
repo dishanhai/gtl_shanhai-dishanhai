@@ -19,6 +19,7 @@ item_ids:
   - gt_shanhai:primordial_divergence_generator
   - gt_shanhai:primordial_matter_caster
   - gt_shanhai:primordial_assembly_line_module
+  - gt_shanhai:primordial_critical_processing_module
   - gt_shanhai:primordial_engraving_module
   - gt_shanhai:primordial_coin_forge
   - gt_shanhai:taixu_smelting_furnace
@@ -91,6 +92,7 @@ item_ids:
 #### 专用产线
 
 * [<ItemLink id="gt_shanhai:primordial_assembly_line_module" />](primordial_assembly_line_module.md)：把装配线纳入原初引擎的并行体系，适合大批量组装。
+* [<ItemLink id="gt_shanhai:primordial_critical_processing_module" />](primordial_critical_processing_module.md)：整合卫星工厂 MK-1 至 MK-4 的 35 种基础加工配方。
 * [<ItemLink id="gt_shanhai:primordial_engraving_module" />](primordial_engraving_module.md)：面向电路制造的专用模块，适合蚀刻和精密加工。
 * [<ItemLink id="gt_shanhai:primordial_coin_forge" />](primordial_coin_forge.md)：专门负责把原初物质铸成 GT 币。
 * [<ItemLink id="gt_shanhai:taixu_smelting_furnace" />](taixu_smelting_furnace.md)：太虚熔炼炉，必须装在运行中的原初引擎上，适合熔炼和合金处理。
@@ -136,6 +138,7 @@ item_ids:
 ### 产线模块
 
 * [<ItemLink id="gt_shanhai:primordial_assembly_line_module" />](primordial_assembly_line_module.md)：把装配线纳入原初引擎的并行体系，适合大批量组装。
+* [<ItemLink id="gt_shanhai:primordial_critical_processing_module" />](primordial_critical_processing_module.md)：整合卫星工厂 MK-1 至 MK-4 的 35 种基础加工配方。
 * [<ItemLink id="gt_shanhai:primordial_engraving_module" />](primordial_engraving_module.md)：面向电路制造的专用模块，适合蚀刻和精密加工。
 * [<ItemLink id="gt_shanhai:primordial_coin_forge" />](primordial_coin_forge.md)：专门负责把原初物质铸成 GT 币。
 * [<ItemLink id="gt_shanhai:taixu_smelting_furnace" />](taixu_smelting_furnace.md)：太虚熔炼炉，必须装在运行中的原初引擎上，适合熔炼和合金处理。
