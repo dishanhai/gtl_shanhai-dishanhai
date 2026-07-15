@@ -89,4 +89,13 @@ public class ShopEditPermission extends SavedData {
         if (server == null) return false;
         return get(server).isGranted(player.getUUID());
     }
+
+    /**
+     * 玩家是否可以新增/编辑/删除商品条目：在 {@link #canEdit} 基础上还须额外开启
+     * {@link ShopEditMode}（{@code /山海 商店 编辑} 切换）。商店设置、隐藏切换、
+     * 排序等非破坏性操作不走这个口子，只看 {@link #canEdit}。
+     */
+    public static boolean canEditCatalog(ServerPlayer player) {
+        return canEdit(player) && ShopEditMode.isEnabled(player.getUUID());
+    }
 }

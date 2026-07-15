@@ -63,6 +63,12 @@ public class ShopEntry {
      *  新增/复制（生成新的）或编辑（沿用旧的）时才会变，专供需要跨快照/跨重登引用同一条目的场景使用
      *  （例如购物车、收藏）。旧 shop.json 缺这个字段的条目由 {@link ShopConfig} 加载时补发并写回磁盘固化。 */
     private final String stableId;
+    /** 限时折扣百分比（1-90，0=不打折）；见 {@link #isDiscountActive}/{@link #getEffectiveCost}。 */
+    private final int discountPercent;
+    /** 折扣生效窗口起点（{@link System#currentTimeMillis} 绝对时间戳）；discountPercent=0 时为 -1。 */
+    private final long discountStartMs;
+    /** 折扣生效窗口终点（同上）；discountPercent=0 时为 -1。 */
+    private final long discountEndMs;
 
     /** 商品的交易方向限制。 */
     public enum TradeMode {
@@ -330,6 +336,19 @@ public class ShopEntry {
                      boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
                      RewardMode ftbqSubMode, TradeMode tradeMode, long periodTicks, long periodLimit,
                      String prerequisiteQuestId, String stableId) {
+        this(goods, category, cost, description, remainingUses, displayIcons, rewardMode, rewardPool,
+                hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit,
+                prerequisiteQuestId, stableId, 0, -1L, -1L);
+    }
+
+    // ===== 新构造：叠加限时折扣（折扣百分比 + 生效窗口起止时间戳，见 discountPercent 字段注释）=====
+    public ShopEntry(List<GoodsStack> goods, String category,
+                     ShopCost cost, String description, long remainingUses,
+                     List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
+                     boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
+                     RewardMode ftbqSubMode, TradeMode tradeMode, long periodTicks, long periodLimit,
+                     String prerequisiteQuestId, String stableId,
+                     int discountPercent, long discountStartMs, long discountEndMs) {
         this.goods = normalizeGoods(goods);
         // 只认 CHOICE/ALL 为有效子模式，其余（含 null/NONE/FTBQ 误传）一律退回默认 RANDOM
         this.ftbqSubMode = (ftbqSubMode == RewardMode.CHOICE || ftbqSubMode == RewardMode.ALL) ? ftbqSubMode : RewardMode.RANDOM;
@@ -378,6 +397,11 @@ public class ShopEntry {
         this.periodLimit = this.periodTicks > 0L ? periodLimit : -1L;
         this.prerequisiteQuestId = prerequisiteQuestId == null ? "" : prerequisiteQuestId.trim();
         this.stableId = (stableId == null || stableId.isBlank()) ? java.util.UUID.randomUUID().toString() : stableId.trim();
+        // 半残配置（百分比没填/窗口非法）一律归一成「不启用」，不留半吊子状态；封顶 90% 避免出现事实上免费的商品
+        boolean discountValid = discountPercent > 0 && discountStartMs > 0L && discountEndMs > discountStartMs;
+        this.discountPercent = discountValid ? Math.min(discountPercent, 90) : 0;
+        this.discountStartMs = this.discountPercent > 0 ? discountStartMs : -1L;
+        this.discountEndMs = this.discountPercent > 0 ? discountEndMs : -1L;
     }
 
     // ===== 兼容构造：无自定义名称/FTBQ表（委托空串）=====
@@ -449,6 +473,55 @@ public class ShopEntry {
         return cost;
     }
 
+    /** 限时折扣百分比（1-90）；0 = 未配置折扣（不代表当前不生效，生效判断见 {@link #isDiscountActive}）。 */
+    public int getDiscountPercent() {
+        return discountPercent;
+    }
+
+    /** 折扣生效窗口起点（绝对时间戳）；未配置折扣时为 -1。 */
+    public long getDiscountStartMs() {
+        return discountStartMs;
+    }
+
+    /** 折扣生效窗口终点（绝对时间戳）；未配置折扣时为 -1。 */
+    public long getDiscountEndMs() {
+        return discountEndMs;
+    }
+
+    /** 折扣当前是否生效：配置了折扣且当前时间落在 [start,end) 窗口内。 */
+    public boolean isDiscountActive() {
+        if (discountPercent <= 0) return false;
+        long now = System.currentTimeMillis();
+        return now >= discountStartMs && now < discountEndMs;
+    }
+
+    /** 折扣剩余毫秒数；未生效返回 -1。 */
+    public long discountRemainingMs() {
+        return isDiscountActive() ? Math.max(0L, discountEndMs - System.currentTimeMillis()) : -1L;
+    }
+
+    /**
+     * 折扣生效时的折后成本：只打折星火/币种两条钱包通道，物品/流体实物成本原样不变
+     * （数量打折会出现取整歧义，如「3个铁锭打8折」无法表达，直接排除在折扣范围外）。
+     * 有原价的通道折后至少保留 1（避免折扣把某条通道直接打到 0 变相免费）。
+     * 未生效时原样返回 {@link #getCost}，调用方无需先判断 {@link #isDiscountActive}。
+     */
+    public ShopCost getEffectiveCost() {
+        if (!isDiscountActive()) return cost;
+        java.math.BigInteger mul = java.math.BigInteger.valueOf(100 - discountPercent);
+        java.math.BigInteger hundred = java.math.BigInteger.valueOf(100);
+        java.math.BigInteger newSpark = cost.spark.signum() > 0
+                ? cost.spark.multiply(mul).divide(hundred).max(java.math.BigInteger.ONE) : java.math.BigInteger.ZERO;
+        java.util.LinkedHashMap<ResourceLocation, java.math.BigInteger> newCoins = new java.util.LinkedHashMap<>();
+        for (java.util.Map.Entry<ResourceLocation, java.math.BigInteger> e : cost.coins.entrySet()) {
+            newCoins.put(e.getKey(), e.getValue().multiply(mul).divide(hundred).max(java.math.BigInteger.ONE));
+        }
+        // EU 同星火/币种一样是纯钱包型通道（无取整歧义），一并打折；实物成本（物品/流体）不受影响
+        java.math.BigInteger newEu = cost.eu.signum() > 0
+                ? cost.eu.multiply(mul).divide(hundred).max(java.math.BigInteger.ONE) : java.math.BigInteger.ZERO;
+        return new ShopCost(newSpark, newCoins, cost.physical, newEu);
+    }
+
     /** 商品描述（可能为空串）。 */
     public String getDescription() {
         return description;
@@ -473,6 +546,16 @@ public class ShopEntry {
     public void consumeUses(long amount) {
         if (remainingUses < 0L || amount <= 0L) return;
         remainingUses = Math.max(0L, remainingUses - amount);
+    }
+
+    /**
+     * 用存档里记录的剩余次数覆盖当前内存值（不限商品忽略）；仅供 {@link ShopConfig#syncLimitsFromSave}
+     * 在服务端启动/重载时按 {@link ShopLimitSavedData} 回填，不走这个口子的地方（如客户端）永远只看
+     * shop.json 解析出的原始值。见 {@link #stableId} 字段注释——存档按这个身份索引，不受 entryKey 影响。
+     */
+    void overrideRemainingUses(long value) {
+        if (remainingUses < 0L) return;
+        remainingUses = Math.max(0L, value);
     }
 
     /** 周期限购窗口长度（tick）；-1 = 不启用。与永久总量 {@link #getRemainingUses} 是两套独立机制。 */

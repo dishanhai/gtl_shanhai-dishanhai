@@ -68,8 +68,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private long limit = -1L; // 限购次数（购买/出售共享）；-1 = 不限（默认）
     private long periodSeconds = -1L; // 周期限购的周期长度（现实秒，服务器正常速度下 1秒=20tick）；-1 = 不启用（默认）
     private long periodCap = -1L;  // 周期限购每周期额度（每玩家独立计数）；-1 = 不启用（默认），与 periodSeconds 须同时填写才生效
+    private int discountPercent;   // 限时折扣百分比（1-90）；0 = 不打折（默认）
+    private long discountMinutes = -1L; // UI 层「持续多少分钟」暂存，-1 = 不启用；提交时按「从现在开始」换算成绝对起止时间戳
     // 多元成本草稿
     private BigInteger spark = BigInteger.ZERO;
+    private BigInteger eu = BigInteger.ZERO; // 无线电网 EU 成本（第5通道，gtladditions/gtmthings，见 ShopWirelessEu）
     // 币种/物品：真实数量存 coinCounts/itemCounts（long），不再用 ItemStack.count（int，最多到 21 亿就截断，
     // 见反馈——旧版本 fillCost/buildCost 靠 stack.getCount() 存取，超 int 上限的配方悄悄被截断成 2,147,483,647）。
     // ItemStack 本身的 count 固定钉在 1（vanilla count!=1 才画数量角标，钉 1 就不会画出跟真实数量对不上的角标）。
@@ -93,7 +96,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private ShopEntry.TradeMode tradeMode = ShopEntry.TradeMode.BOTH; // 交易方向限制：不限/仅购买/仅出售
     private String prerequisiteQuestId = ""; // 前置 FTBQ 任务 ID（十六进制），可空 = 不要求前置
 
-    private EditBox countBox, catBox, sparkBox, descBox, limitBox, linkKeyBox, linkToBox, nameBox, periodSecondsBox, periodCapBox;
+    private EditBox countBox, catBox, sparkBox, euBox, descBox, limitBox, linkKeyBox, linkToBox, nameBox, periodSecondsBox, periodCapBox;
+    private EditBox discountPercentBox, discountMinutesBox;
     private MultiLineTextArea descArea;       // 描述「展开编写」大图层里的多行编辑区（与 descBox 同源，双向同步）
     private boolean descEditorOpen;           // 描述展开编写大图层开关
     private int left, top, panelWidth, panelHeight;
@@ -146,6 +150,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.limit = entry.getRemainingUses(); // 预填当前剩余次数；不动这个框就原样保留
             this.periodSeconds = entry.isPeriodLimited() ? entry.getPeriodTicks() / TICKS_PER_SECOND : -1L;
             this.periodCap = entry.isPeriodLimited() ? entry.getPeriodLimit() : -1L;
+            // 折扣生效中才预填：按剩余时间倒推「持续分钟数」，原样提交约等于保留原定结束时间；
+            // 已过期/未配置一律显示不启用，不把历史起止时间戳当当前状态展示
+            this.discountPercent = entry.isDiscountActive() ? entry.getDiscountPercent() : 0;
+            this.discountMinutes = entry.isDiscountActive()
+                    ? Math.max(1L, (entry.discountRemainingMs() + 59_999L) / 60_000L) : -1L;
             this.oldGoods = entry.getGoodsId();
             this.oldCategory = entry.getCategory();
             fillCost(entry.getCost());
@@ -185,6 +194,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     private void fillCost(ShopCost cost) {
         this.spark = cost.spark;
+        this.eu = cost.eu;
         for (var e : cost.coins.entrySet()) {
             var item = ForgeRegistries.ITEMS.getValue(e.getKey());
             if (item != null) {
@@ -262,7 +272,9 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int fieldsY() { return top + 48; }
     /** 周期限购行：紧接「次数」行下方，新增独立于永久总量之外的第二套限购（见 ShopPeriodLimiter）。 */
     private int periodY() { return fieldsY() + 16; }
-    private int sparkY() { return periodY() + 26; }
+    /** 限时折扣行：紧接周期限购下方，独立于两套限购机制之外的第三套（打折不减次数）。 */
+    private int discountY() { return periodY() + 16; }
+    private int sparkY() { return discountY() + 26; }
     private int coinY() { return sparkY() + 18; }
     private int itemY() { return coinY() + 28; }
     private int fluidY() { return itemY() + 28; }
@@ -275,6 +287,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int linkToY() { return linkKeyY() + 18; }
     private int prereqQuestY() { return linkToY() + 18; }
     private int slotsX() { return cx() + 36; }
+    // EU 成本行：紧跟星火框右侧，同一行（星火/EU 都是纯钱包型通道，物品/流体排另起行）
+    private static final int EU_BOX_W = 110;
+    private int euLabelX() { return slotsX() + 120 + 10; }
+    private int euBoxX() { return euLabelX() + 32; }
     private int confirmX() { return left + panelWidth - 12 - 70; }
     private int cancelX() { return confirmX() - 6 - 56; }
 
@@ -332,6 +348,14 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int periodCapBoxX() { return periodMidLabelX() + 20; }
     private int periodHintX() { return periodCapBoxX() + PERIOD_CAP_W + 22; }         // "次" 标签后的说明文字
 
+    // ===== 限时折扣行布局（周期限购行下方）=====
+    private static final int DISCOUNT_PERCENT_W = 30;
+    private static final int DISCOUNT_MINUTES_W = 50;
+    private int discountPercentBoxX() { return cx() + 60; }
+    private int discountMidLabelX() { return discountPercentBoxX() + DISCOUNT_PERCENT_W + 4; }   // "%持续"
+    private int discountMinutesBoxX() { return discountMidLabelX() + 30; }
+    private int discountHintX() { return discountMinutesBoxX() + DISCOUNT_MINUTES_W + 22; }        // "分钟" 标签后的说明文字
+
     @Override
     protected void initScaled() {
         left = Math.max(6, (vWidth - TARGET_W) / 2);
@@ -378,6 +402,14 @@ public class ShopEntryEditScreen extends ScaledScreen {
         sparkBox.setTextColor(0xFFFF55);
         sparkBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
         sparkBox.setResponder(s -> spark = parseBig(s));
+        euBox = new EditBox(this.font, euBoxX(), sparkY(), EU_BOX_W, 12, Component.literal("EU"));
+        euBox.setMaxLength(40); // 同星火框，BigInteger 超 32 位数字需先设最大长度再 setValue
+        euBox.setValue(eu.signum() > 0 ? eu.toString() : "");
+        euBox.setBordered(true);
+        euBox.setTextColor(0xFF55FF);
+        euBox.setHint(Component.literal("§8留空=不用EU支付"));
+        euBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        euBox.setResponder(s -> eu = parseBig(s));
         int descW = Math.max(120, panelWidth - (cx() - left) - 14);
         descBox = new EditBox(this.font, cx(), descY() + 10, descW, 14, Component.literal("描述"));
         // 必须先设最大长度再 setValue——setValue 按“当前” maxLength 截断，默认 32，晚设等于白设。
@@ -432,6 +464,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         addRenderableWidget(periodSecondsBox);
         addRenderableWidget(periodCapBox);
         addRenderableWidget(sparkBox);
+        addRenderableWidget(euBox);
         addRenderableWidget(descBox);
         addRenderableWidget(linkKeyBox);
         addRenderableWidget(linkToBox);
@@ -477,6 +510,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         if (periodSecondsBox != null) periodSeconds = parseLimit(periodSecondsBox.getValue());
         if (periodCapBox != null) periodCap = parseLimit(periodCapBox.getValue());
         if (sparkBox != null) spark = parseBig(sparkBox.getValue());
+        if (euBox != null) eu = parseBig(euBox.getValue());
         if (descBox != null) description = descBox.getValue();
         if (linkKeyBox != null) linkKey = linkKeyBox.getValue();
         if (linkToBox != null) linkTo = linkToBox.getValue();
@@ -536,6 +570,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         if (periodSecondsBox != null) periodSecondsBox.setVisible(!editorOpen);
         if (periodCapBox != null) periodCapBox.setVisible(!editorOpen);
         if (sparkBox != null) sparkBox.setVisible(!editorOpen);
+        if (euBox != null) euBox.setVisible(!editorOpen);
         if (descBox != null) descBox.setVisible(!editorOpen);
         if (linkKeyBox != null) linkKeyBox.setVisible(!editorOpen);
         if (linkToBox != null) linkToBox.setVisible(!editorOpen);
@@ -581,8 +616,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
         g.drawString(this.font, "§8(现实秒；如填1000即每1000秒刷新，每玩家独立计数，留空=不启用)", periodHintX(), periodY() + 2, GRAY, true);
 
         // 成本区
-        g.drawString(this.font, "§6成本（四通道可并存）", c, sparkY() - 10, GOLD, true);
+        g.drawString(this.font, "§6成本（五通道可并存）", c, sparkY() - 10, GOLD, true);
         g.drawString(this.font, "§e★星火:", c, sparkY() + 2, GOLD, true);
+        // EU（无线电网，见 ShopWirelessEu）：星火框右侧同一行，纯钱包型通道，不需要单独占一排
+        g.drawString(this.font, "§d⚡EU:", euLabelX(), sparkY() + 2, GOLD, true);
         // 币种 / 物品 / 流体 三排
         drawCostIngredientRow(g, "§7币种", coins, coinCounts, coinY(), rowMax(), mx, my);
         drawCostIngredientRow(g, "§7物品", items, itemCounts, itemY(), rowMax(), mx, my);
@@ -1484,7 +1521,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             ResourceLocation id = ForgeRegistries.FLUIDS.getKey(fs.getFluid());
             if (id != null) physical.add(new ExchangeEntry.Ingredient(id, true, Math.max(1L, fs.getAmount())));
         }
-        return new ShopCost(spark, coinMap, physical);
+        return new ShopCost(spark, coinMap, physical, eu);
     }
 
     private void submit() {
@@ -1535,11 +1572,16 @@ public class ShopEntryEditScreen extends ScaledScreen {
         String desc = description == null ? "" : description.trim();
         // 周期限购的周期在 UI 层用现实秒，发包前换算成 tick；两框须都非空才生效（半填在 ShopEntry 构造器里会被归一成不启用）
         long periodTicksToSend = periodSeconds > 0L ? periodSeconds * TICKS_PER_SECOND : -1L;
+        // 折扣「持续分钟数」在 UI 层是相对时长，发包前按「从现在开始」换算成绝对起止时间戳（ShopEntry 构造器按
+        // discountPercent<=0 或窗口非法一律归一成不启用，这里未启用时随便填 -1/-1 也安全）
+        long discountStartMs = discountPercent > 0 && discountMinutes > 0L ? System.currentTimeMillis() : -1L;
+        long discountEndMs = discountStartMs > 0L ? discountStartMs + discountMinutes * 60_000L : -1L;
         ShopEditPacket pkt = new ShopEditPacket(
                 isNew ? ShopEditPacket.Action.ADD : ShopEditPacket.Action.EDIT,
                 goodsForSubmit, cat, desc, cost, oldGoods, oldCategory == null ? "" : oldCategory, -1, limit,
                 displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode,
-                periodTicksToSend, periodCap, prerequisiteQuestId, catalogRevision, oldEntryKey);
+                periodTicksToSend, periodCap, prerequisiteQuestId, catalogRevision, oldEntryKey,
+                discountPercent, discountStartMs, discountEndMs);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

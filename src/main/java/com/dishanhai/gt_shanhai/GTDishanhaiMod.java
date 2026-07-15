@@ -164,6 +164,15 @@ public class GTDishanhaiMod {
                     com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.exportIfNeeded(e.getServer());
                 });
 
+        // 限购总量剩余次数按存档隔离回填/初始化，见 ShopLimitSavedData（不能再等 shop.json 里
+        // 那份跨存档共享的数字说了算，否则不同存档会互相"继承"彼此的购买消耗，见反馈）。
+        // 必须放 ServerStartingEvent 而不是上面的 ServerAboutToStartEvent——后者此时世界还没加载，
+        // server.overworld() 是 null，ShopLimitSavedData.get() 里调 getDataStorage() 会直接 NPE 崩服。
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                (net.minecraftforge.event.server.ServerStartingEvent e) -> {
+                    com.dishanhai.gt_shanhai.common.shop.ShopConfig.syncLimitsFromSave(e.getServer());
+                });
+
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                 net.minecraftforge.eventbus.api.EventPriority.HIGHEST,
                 (net.minecraftforge.event.entity.player.PlayerInteractEvent.RightClickBlock event) -> {

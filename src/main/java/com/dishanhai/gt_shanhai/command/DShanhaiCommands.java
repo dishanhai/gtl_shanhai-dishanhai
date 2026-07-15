@@ -514,6 +514,19 @@ public class DShanhaiCommands {
                                     ? "§d[山海商店] §a已开启直接获取模式 §7（购买不扣成本、直接到手；重启后自动关闭）"
                                     : "§d[山海商店] §e已关闭直接获取模式 §7（恢复正常扣费购买）"), false);
                             return 1;
+                        }))
+                .then(Commands.literal("编辑")
+                        .executes(ctx -> {
+                            net.minecraft.server.level.ServerPlayer p = ctx.getSource().getPlayer();
+                            if (p == null) {
+                                ctx.getSource().sendSuccess(msg("§c此命令须由玩家执行"), false);
+                                return 0;
+                            }
+                            boolean on = com.dishanhai.gt_shanhai.common.shop.ShopEditMode.toggle(p.getUUID());
+                            ctx.getSource().sendSuccess(msg(on
+                                    ? "§b[山海商店] §a已开启编辑模式 §7（可新增/删除商品；重启后自动关闭）"
+                                    : "§b[山海商店] §e已关闭编辑模式 §7（新增/删除商品按钮将隐藏）"), false);
+                            return 1;
                         }));
     }
 
@@ -602,6 +615,7 @@ public class DShanhaiCommands {
 
     private static int execShopReload(CommandSourceStack source) {
         com.dishanhai.gt_shanhai.common.shop.ShopConfig.reload();
+        com.dishanhai.gt_shanhai.common.shop.ShopConfig.syncLimitsFromSave(source.getServer());
         int n = com.dishanhai.gt_shanhai.common.shop.ShopConfig.getEntries().size();
         source.sendSuccess(msg("§b[山海商店] §a已重载商品清单，共 §f" + n + " §a个"), false);
         return 1;
@@ -615,12 +629,13 @@ public class DShanhaiCommands {
         }
         // 优先主手，其次副手；命中钱包则发包让客户端打开 ShopScreen
         boolean canEdit = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player);
+        boolean catalogEditUnlocked = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(player);
         for (net.minecraft.world.InteractionHand hand : net.minecraft.world.InteractionHand.values()) {
             if (player.getItemInHand(hand).getItem()
                     instanceof com.dishanhai.gt_shanhai.common.item.WalletItem) {
                 com.dishanhai.gt_shanhai.network.ShanhaiNetwork.CHANNEL.send(
                         net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
-                        new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit,
+                        new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit, catalogEditUnlocked,
                                 com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
                 return 1;
             }

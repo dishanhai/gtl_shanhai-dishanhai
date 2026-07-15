@@ -30,13 +30,16 @@ public class WalletOpenRequestPacket {
                 return;
             }
             boolean canEdit = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player);
+            boolean catalogEditUnlocked = com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEditCatalog(player);
             ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                    new ShopOpenPacket(canEdit,
+                    new ShopOpenPacket(canEdit, catalogEditUnlocked,
                             com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
             // 打开商店即推账户快照，客户端界面/tooltip 立刻有余额
             com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
             // 购物车跨重登保留（见反馈），同一时机推回去，客户端一开店就能看到之前留下的候选
             com.dishanhai.gt_shanhai.common.shop.ShopCartAPI.sync(player);
+            // 收藏同样跨重登保留，同一时机推回去，客户端一开店就能看到之前收藏的角标/筛选状态
+            com.dishanhai.gt_shanhai.common.shop.ShopFavoriteAPI.sync(player);
         });
         context.setPacketHandled(true);
     }

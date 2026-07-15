@@ -46,7 +46,7 @@ public final class ShopEntryJsonCodec {
         if (nbt != null && !nbt.isEmpty()) {
             out.addProperty("nbt", nbt.toString());
         }
-        if (entry.hasMultipleGoods()) {
+        if (entry.hasMultipleGoods() || entry.hasFluidGoods()) {
             out.add("goodsList", goodsListToJson(entry.getGoodsList()));
         }
         if (entry.hasCustomIcons()) {
@@ -82,6 +82,11 @@ public final class ShopEntryJsonCodec {
         }
         if (entry.hasPrerequisiteQuest()) {
             out.addProperty("prerequisiteQuestId", entry.getPrerequisiteQuestId());
+        }
+        if (entry.getDiscountPercent() > 0) {
+            out.addProperty("discountPercent", entry.getDiscountPercent());
+            out.addProperty("discountStartMs", entry.getDiscountStartMs());
+            out.addProperty("discountEndMs", entry.getDiscountEndMs());
         }
         out.addProperty("stableId", entry.getStableId());
         return out;
@@ -125,7 +130,12 @@ public final class ShopEntryJsonCodec {
                 goodsList = parseGoodsList(json.getAsJsonArray("goodsList"));
                 if (goodsList.isEmpty()) throw new IllegalArgumentException("goodsList 解析为空");
             } else {
-                goodsList = List.of(ShopEntry.GoodsStack.of(new ResourceLocation(goods), count, nbt));
+                // 旧格式单件商品没有 fluid 标记；物品注册表查不到但流体注册表查得到时自愈为流体商品
+                ResourceLocation goodsId = new ResourceLocation(goods);
+                boolean fluidOnly = !ForgeRegistries.ITEMS.containsKey(goodsId) && ForgeRegistries.FLUIDS.containsKey(goodsId);
+                goodsList = List.of(fluidOnly
+                        ? ShopEntry.GoodsStack.ofFluid(goodsId, count)
+                        : ShopEntry.GoodsStack.of(goodsId, count, nbt));
             }
 
             List<ShopEntry.DisplayIcon> icons = json.has("icons") && json.get("icons").isJsonArray()
@@ -147,10 +157,14 @@ public final class ShopEntryJsonCodec {
             long periodLimit = json.has("periodLimit") ? json.get("periodLimit").getAsLong() : -1L;
             String prerequisiteQuestId = stringOrNull(json, "prerequisiteQuestId");
             String stableId = stringOrNull(json, "stableId"); // 旧存档缺失时 ShopEntry 构造器自动生成新 UUID
+            int discountPercent = json.has("discountPercent") ? json.get("discountPercent").getAsInt() : 0;
+            long discountStartMs = json.has("discountStartMs") ? json.get("discountStartMs").getAsLong() : -1L;
+            long discountEndMs = json.has("discountEndMs") ? json.get("discountEndMs").getAsLong() : -1L;
 
             return new ShopEntry(goodsList, category, cost, description, limit,
                     icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName,
-                    ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit, prerequisiteQuestId, stableId);
+                    ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit, prerequisiteQuestId, stableId,
+                    discountPercent, discountStartMs, discountEndMs);
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品条目: {}", e.getMessage());
             return null;
@@ -188,6 +202,9 @@ public final class ShopEntryJsonCodec {
     private static JsonObject costToJson(ShopCost cost) {
         JsonObject out = new JsonObject();
         out.addProperty("spark", cost.spark.toString());
+        if (cost.eu.signum() > 0) {
+            out.addProperty("eu", cost.eu.toString());
+        }
         JsonObject coins = new JsonObject();
         for (Map.Entry<ResourceLocation, BigInteger> entry : cost.coins.entrySet()) {
             coins.addProperty(entry.getKey().toString(), entry.getValue().toString());
@@ -208,10 +225,14 @@ public final class ShopEntryJsonCodec {
 
     private static ShopCost parseCost(JsonObject json) {
         BigInteger spark = BigInteger.ZERO;
+        BigInteger eu = BigInteger.ZERO;
         LinkedHashMap<ResourceLocation, BigInteger> coins = new LinkedHashMap<>();
         List<ExchangeEntry.Ingredient> physical = new ArrayList<>();
         if (json.has("spark")) {
             try { spark = new BigInteger(json.get("spark").getAsString()); } catch (Exception ignored) {}
+        }
+        if (json.has("eu")) {
+            try { eu = new BigInteger(json.get("eu").getAsString()); } catch (Exception ignored) {}
         }
         if (json.has("coins") && json.get("coins").isJsonObject()) {
             for (Map.Entry<String, JsonElement> entry : json.getAsJsonObject("coins").entrySet()) {
@@ -233,7 +254,7 @@ public final class ShopEntryJsonCodec {
                         new ResourceLocation(id), fluid, amount, parseNbt(item, "nbt")));
             }
         }
-        return new ShopCost(spark, coins, physical);
+        return new ShopCost(spark, coins, physical, eu);
     }
 
     private static JsonArray goodsListToJson(List<ShopEntry.GoodsStack> goods) {

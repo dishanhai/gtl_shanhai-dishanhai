@@ -242,6 +242,30 @@ public class ShanhaiNetwork {
                 ShopCartPurchaseResultPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopFavoriteEditPacket.class,
+                ShopFavoriteEditPacket::encode,
+                ShopFavoriteEditPacket::new,
+                ShopFavoriteEditPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopFavoriteSyncPacket.class,
+                ShopFavoriteSyncPacket::encode,
+                ShopFavoriteSyncPacket::new,
+                ShopFavoriteSyncPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopToggleHiddenPacket.class,
+                ShopToggleHiddenPacket::encode,
+                ShopToggleHiddenPacket::new,
+                ShopToggleHiddenPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         RecipeSyncPacket.init();
     }
 

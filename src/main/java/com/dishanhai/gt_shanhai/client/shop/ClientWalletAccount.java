@@ -21,17 +21,20 @@ public final class ClientWalletAccount {
     private static BigInteger digital = BigInteger.ZERO;
     private static Map<String, Long> purchaseCounts = new LinkedHashMap<>();
     private static Map<String, Long> periodAnchors = new LinkedHashMap<>();
+    private static BigInteger wirelessEu = BigInteger.ZERO; // 玩家绑定的无线电网 EU 余额（gtladditions/gtmthings）
     private static boolean synced = false;
 
     private ClientWalletAccount() {}
 
     /** 应用服务端全量快照（权威覆盖）。 */
     public static void apply(Map<ResourceLocation, BigInteger> newCurrencies, BigInteger newDigital,
-                              Map<String, Long> newPurchaseCounts, Map<String, Long> newPeriodAnchors) {
+                              Map<String, Long> newPurchaseCounts, Map<String, Long> newPeriodAnchors,
+                              BigInteger newWirelessEu) {
         currencies = newCurrencies != null ? new LinkedHashMap<>(newCurrencies) : new LinkedHashMap<>();
         digital = newDigital != null ? newDigital : BigInteger.ZERO;
         purchaseCounts = newPurchaseCounts != null ? new LinkedHashMap<>(newPurchaseCounts) : new LinkedHashMap<>();
         periodAnchors = newPeriodAnchors != null ? new LinkedHashMap<>(newPeriodAnchors) : new LinkedHashMap<>();
+        wirelessEu = newWirelessEu != null ? newWirelessEu : BigInteger.ZERO;
         synced = true;
     }
 
@@ -63,6 +66,11 @@ public final class ClientWalletAccount {
         return digital;
     }
 
+    /** 玩家绑定的无线电网 EU 余额（gtladditions/gtmthings，见 ShopWirelessEu），未同步为 0。 */
+    public static BigInteger getWirelessEu() {
+        return wirelessEu;
+    }
+
     /** 全部币种余额（副本，保序）。 */
     public static Map<ResourceLocation, BigInteger> getAll() {
         return new LinkedHashMap<>(currencies);
@@ -81,5 +89,11 @@ public final class ClientWalletAccount {
         if (delta == null || delta.signum() == 0) return;
         BigInteger next = digital.add(delta);
         digital = next.signum() < 0 ? BigInteger.ZERO : next;
+    }
+
+    public static void optimisticAddWirelessEu(BigInteger delta) {
+        if (delta == null || delta.signum() == 0) return;
+        BigInteger next = wirelessEu.add(delta);
+        wirelessEu = next.signum() < 0 ? BigInteger.ZERO : next;
     }
 }

@@ -534,12 +534,18 @@ public final class ShopPurchase {
         MinecraftServer server = player.getServer();
         if (server == null) return 0L;
         UUID uuid = player.getUUID();
-        ShopCost cost = entry.getCost();
+        // 买价按限时折扣结算（见 ShopEntry#getEffectiveCost，仅打折星火/币种，实物成本原价不变）；
+        // 出售价（sellBulk）不走这个口子，折扣只影响买入价，不影响卖出收益。
+        ShopCost cost = entry.getEffectiveCost();
 
-        // affordable = min(times, 各成本通道约束)：星火/币种走钱包余额，物品走背包+精妙背包+绑定AE兜底，流体走绑定 AE
+        // affordable = min(times, 各成本通道约束)：星火/币种走钱包余额，EU走无线电网余额，
+        // 物品走背包+精妙背包+绑定AE兜底，流体走绑定 AE
         BigInteger aff = BigInteger.valueOf(times);
         if (cost.spark.signum() > 0) {
             aff = aff.min(WalletAccountAPI.getDigital(server, uuid).divide(cost.spark));
+        }
+        if (cost.eu.signum() > 0) {
+            aff = aff.min(ShopWirelessEu.getBalance(player).divide(cost.eu));
         }
         for (java.util.Map.Entry<ResourceLocation, BigInteger> c : cost.coins.entrySet()) {
             BigInteger have = WalletAccountAPI.getCurrency(server, uuid, c.getKey()); // 账户余额
@@ -587,6 +593,9 @@ public final class ShopPurchase {
         if (cost.spark.signum() > 0) {
             WalletAccountAPI.tryDeductDigital(server, uuid, cost.spark.multiply(affBig));
         }
+        if (cost.eu.signum() > 0) {
+            ShopWirelessEu.tryDeduct(player, cost.eu.multiply(affBig));
+        }
         for (java.util.Map.Entry<ResourceLocation, BigInteger> c : cost.coins.entrySet()) {
             BigInteger need = c.getValue().multiply(affBig);
             BigInteger fromAcct = need.min(WalletAccountAPI.getCurrency(server, uuid, c.getKey())); // 先扣账户
@@ -624,7 +633,8 @@ public final class ShopPurchase {
 
         if (entry.isLimited()) {
             entry.consumeUses(affordable);
-            ShopConfig.save(); // 限购商品：剩余次数随成交即时存盘，重启不丢
+            // 限购总量按存档隔离，见 ShopLimitSavedData——不再写回 shop.json（全局配置目录，会跨存档"继承"消耗）
+            ShopLimitSavedData.get(server).set(entry.getStableId(), entry.getRemainingUses());
         }
         ShopPeriodLimiter.consume(player, entry, periodKey, affordable); // 周期限购：记账当前窗口已用量
         return affordable;
@@ -887,18 +897,22 @@ public final class ShopPurchase {
         if (fromAe > 0 && key != null) {
             ShopAeNetwork.extractForPlayer(player, key, fromAe);
         }
-        // 退回纯钱包成本（星火 + 币种）× 份数
+        // 退回纯钱包成本（星火 + 币种 + EU）× 份数
         BigInteger sellBig = BigInteger.valueOf(sell);
         UUID uuid = player.getUUID();
         if (cost.spark.signum() > 0) {
             WalletAccountAPI.addDigital(server, uuid, cost.spark.multiply(sellBig));
+        }
+        if (cost.eu.signum() > 0) {
+            ShopWirelessEu.add(player, cost.eu.multiply(sellBig));
         }
         for (java.util.Map.Entry<ResourceLocation, BigInteger> c : cost.coins.entrySet()) {
             WalletAccountAPI.addCurrency(server, uuid, c.getKey(), c.getValue().multiply(sellBig));
         }
         if (entry.isLimited()) {
             entry.consumeUses(sell);
-            ShopConfig.save(); // 限购商品：剩余次数随成交即时存盘，重启不丢
+            // 限购总量按存档隔离，见 ShopLimitSavedData——不再写回 shop.json（全局配置目录，会跨存档"继承"消耗）
+            ShopLimitSavedData.get(server).set(entry.getStableId(), entry.getRemainingUses());
         }
         ShopPeriodLimiter.consume(player, entry, periodKey, sell); // 周期限购：记账当前窗口已用量
         return sell;

@@ -6,6 +6,7 @@ import com.dishanhai.gt_shanhai.common.shop.ShopCatalogSnapshot;
 import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEditPermission;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
+import com.dishanhai.gt_shanhai.common.shop.ShopLimitSavedData;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -55,6 +56,9 @@ public class ShopEditPacket {
     private final String prerequisiteQuestId; // 前置 FTBQ 任务 ID（十六进制），可空=不要求前置
     private final long catalogRevision; // 打开编辑器时的服务端目录版本
     private final long oldEntryKey; // 待编辑条目在该版本内的唯一身份；ADD=-1
+    private final int discountPercent; // 限时折扣百分比（1-90）；0=不打折
+    private final long discountStartMs; // 折扣生效窗口起点（绝对时间戳）；discountPercent=0 时无意义
+    private final long discountEndMs; // 折扣生效窗口终点（绝对时间戳）；discountPercent=0 时无意义
 
     public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
                           ShopCost cost, ResourceLocation oldGoods, String oldCategory, int oldEntryIndex, long limit,
@@ -97,7 +101,7 @@ public class ShopEditPacket {
                           ShopEntry.TradeMode tradeMode, long periodTicks, long periodLimit) {
         this(action, goodsList, category, description, cost, oldGoods, oldCategory, oldEntryIndex, limit,
                 displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId,
-                ftbqSubMode, tradeMode, periodTicks, periodLimit, "", 0L, -1L);
+                ftbqSubMode, tradeMode, periodTicks, periodLimit, "", 0L, -1L, 0, -1L, -1L);
     }
 
     public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
@@ -106,7 +110,8 @@ public class ShopEditPacket {
                           List<ShopEntry.RewardOption> rewardPool, boolean hidden, String linkKey, String linkTo,
                           String displayName, String ftbqTableId, ShopEntry.RewardMode ftbqSubMode,
                           ShopEntry.TradeMode tradeMode, long periodTicks, long periodLimit,
-                          String prerequisiteQuestId, long catalogRevision, long oldEntryKey) {
+                          String prerequisiteQuestId, long catalogRevision, long oldEntryKey,
+                          int discountPercent, long discountStartMs, long discountEndMs) {
         this.action = action;
         this.goodsList = (goodsList == null || goodsList.isEmpty())
                 ? List.of(ShopEntry.GoodsStack.of(new ResourceLocation("minecraft:air"), 1, null)) : goodsList;
@@ -133,6 +138,9 @@ public class ShopEditPacket {
         this.prerequisiteQuestId = prerequisiteQuestId == null ? "" : prerequisiteQuestId.trim();
         this.catalogRevision = catalogRevision;
         this.oldEntryKey = oldEntryKey;
+        this.discountPercent = discountPercent;
+        this.discountStartMs = discountStartMs;
+        this.discountEndMs = discountEndMs;
     }
 
     public ShopEditPacket(FriendlyByteBuf buf) {
@@ -184,6 +192,9 @@ public class ShopEditPacket {
         this.prerequisiteQuestId = buf.readUtf();
         this.catalogRevision = buf.readLong();
         this.oldEntryKey = buf.readLong();
+        this.discountPercent = buf.readVarInt();
+        this.discountStartMs = buf.readLong();
+        this.discountEndMs = buf.readLong();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -228,10 +239,14 @@ public class ShopEditPacket {
         buf.writeUtf(prerequisiteQuestId);
         buf.writeLong(catalogRevision);
         buf.writeLong(oldEntryKey);
+        buf.writeVarInt(discountPercent);
+        buf.writeLong(discountStartMs);
+        buf.writeLong(discountEndMs);
     }
 
     private static void writeCost(FriendlyByteBuf buf, ShopCost cost) {
         buf.writeByteArray(cost.spark.toByteArray());
+        buf.writeByteArray(cost.eu.toByteArray());
         buf.writeVarInt(cost.coins.size());
         for (Map.Entry<ResourceLocation, BigInteger> c : cost.coins.entrySet()) {
             buf.writeResourceLocation(c.getKey());
@@ -248,6 +263,7 @@ public class ShopEditPacket {
 
     private static ShopCost readCost(FriendlyByteBuf buf) {
         BigInteger spark = new BigInteger(buf.readByteArray());
+        BigInteger eu = new BigInteger(buf.readByteArray());
         int nc = buf.readVarInt();
         LinkedHashMap<ResourceLocation, BigInteger> coins = new LinkedHashMap<>();
         for (int i = 0; i < nc; i++) {
@@ -263,7 +279,7 @@ public class ShopEditPacket {
             long cnt = buf.readVarLong();
             physical.add(new ExchangeEntry.Ingredient(id, fluid, cnt, buf.readNbt()));
         }
-        return new ShopCost(spark, coins, physical);
+        return new ShopCost(spark, coins, physical, eu);
     }
 
     public static void handle(ShopEditPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -279,6 +295,12 @@ public class ShopEditPacket {
     private static void apply(ShopEditPacket pkt, ServerPlayer player) {
         if (!ShopEditPermission.canEdit(player)) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 无编辑权限"));
+            return;
+        }
+        // 新增/编辑（含「复制为新条目」）都折进了编辑模式；「设为隐藏」已拆到 ShopToggleHiddenPacket，
+        // 不走这里，不受此校验影响，见 ShopEditMode 类注释。
+        if (!com.dishanhai.gt_shanhai.common.shop.ShopEditMode.isEnabled(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 请先执行 /山海 商店 编辑 开启编辑模式"));
             return;
         }
         ShopCatalogSnapshot current = ShopConfig.snapshot();
@@ -309,7 +331,7 @@ public class ShopEditPacket {
         ShopEntry entry = new ShopEntry(pkt.goodsList, pkt.category, pkt.cost, pkt.description, pkt.limit,
                 pkt.displayIcons, pkt.rewardMode, pkt.rewardPool, pkt.hidden, pkt.linkKey, pkt.linkTo, pkt.displayName,
                 pkt.ftbqTableId, pkt.ftbqSubMode, pkt.tradeMode, pkt.periodTicks, pkt.periodLimit, pkt.prerequisiteQuestId,
-                old != null ? old.getStableId() : null);
+                old != null ? old.getStableId() : null, pkt.discountPercent, pkt.discountStartMs, pkt.discountEndMs);
         String limitTip = entry.isLimited() ? " §d(限" + entry.getRemainingUses() + "次)" : "";
 
         if (pkt.action == Action.ADD) {
@@ -318,12 +340,16 @@ public class ShopEditPacket {
                 return;
             }
             ShopConfig.addEntry(entry);
+            // 限购总量按存档隔离（见 ShopLimitSavedData），编辑器里管理员显式改的次数要在当前存档立即生效，
+            // 不能等下次 syncLimitsFromSave 时才回填——那时存档里可能已有旧记录，会把这次改动悄悄吃掉。
+            if (entry.isLimited()) ShopLimitSavedData.get(player.getServer()).set(entry.getStableId(), entry.getRemainingUses());
             player.sendSystemMessage(Component.literal("§b[山海商店] §a已新增 §f"
                     + entry.getGoodsCount() + "x " + entry.goodsDisplayName() + " §7[" + pkt.category + "]" + limitTip));
             return;
         }
 
         boolean ok = ShopConfig.replaceEntry(old, entry);
+        if (ok && entry.isLimited()) ShopLimitSavedData.get(player.getServer()).set(entry.getStableId(), entry.getRemainingUses());
         player.sendSystemMessage(ok
                 ? Component.literal("§b[山海商店] §a已更新 §f" + entry.goodsDisplayName() + limitTip)
                 : Component.literal("§c[山海商店] 更新失败"));

@@ -155,6 +155,10 @@ public class ShopActionPacket {
                     player.sendSystemMessage(Component.literal("§c[山海商店] 无权限删除"));
                     return;
                 }
+                if (!com.dishanhai.gt_shanhai.common.shop.ShopEditMode.isEnabled(player.getUUID())) {
+                    player.sendSystemMessage(Component.literal("§c[山海商店] 请先执行 /山海 商店 编辑 开启编辑模式后再删除商品"));
+                    return;
+                }
                 boolean ok = ShopConfig.removeEntry(entry);
                 player.sendSystemMessage(ok
                         ? Component.literal("§b[山海商店] §a已删除 §f" + entry.goodsDisplayName())

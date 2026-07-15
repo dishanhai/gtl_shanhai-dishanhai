@@ -6,6 +6,7 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientCostPreview;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCart;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopFavorites;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
@@ -65,6 +66,7 @@ public class ShopScreen extends ScaledScreen {
     private static final int SELL_TAB_W = 58;
     private static final int RECHARGE_W = 64;
     private static final int CLOSE_W = 60;
+    private static final int FAV_BTN_W = 52;
 
     // 配色（取自 kineticaddons CurrencyWalletShopScreen）
     private static final int GOLD = -22016;
@@ -113,6 +115,9 @@ public class ShopScreen extends ScaledScreen {
     private static boolean aeMode = false;
     // 精妙背包模式：扣款/交付优先走随身穿戴的精妙背包（而不是随身背包），语义/生命周期对齐 aeMode
     private static boolean backpackMode = false;
+    // 只看收藏筛选：开启后网格只显示已收藏商品（跟主/子分类、搜索一起收窄 visibleEntryKeys）。
+    // 静态=跨界面实例保留，语义/生命周期对齐 aeMode/backpackMode。
+    private static boolean favoritesOnly = false;
     /**
      * 实时消息横幅队列：商店交互反馈镜像（来源见 ShopChatMirror）。静态=界面实例无关，仅本机会话级。
      * 原先是单槽位，连续快速操作（比如连续两次购买）新消息会瞬间顶掉上一条，容易漏看（见反馈）。
@@ -211,8 +216,10 @@ public class ShopScreen extends ScaledScreen {
     private static final long UNDO_REORDER_UI_WINDOW_MS = 8000L;
     private int scroll = 0; // 网格滚动像素
     private boolean draggingGridScroll; // 正在拖拽网格右侧滚动条
-    private final boolean canEdit; // 服务端下发的编辑权（OP 或白名单）：决定新增/编辑按钮显隐
+    private final boolean canEdit; // 服务端下发的编辑权（OP 或白名单）：决定编辑条目/商店设置/排序等按钮显隐
     public boolean canEdit() { return canEdit; } // 供子页（如 CurrencyAtmScreen）跳转兑换中心时透传编辑权
+    // 服务端下发：canEdit 基础上是否还开了 /山海 商店 编辑 编辑模式，决定新增/删除商品这类目录增删按钮显隐
+    private final boolean catalogEditUnlocked;
 
     private ShopEntry visibleEntry(int index) {
         if (index < 0 || index >= visibleEntryKeys.size()) return null;
@@ -300,12 +307,13 @@ public class ShopScreen extends ScaledScreen {
     private List<Long> visibleEntryKeys = new ArrayList<>();
 
     public ShopScreen() {
-        this(false);
+        this(false, false);
     }
 
-    public ShopScreen(boolean canEdit) {
+    public ShopScreen(boolean canEdit, boolean catalogEditUnlocked) {
         super(Component.literal("山海商店"));
         this.canEdit = canEdit;
+        this.catalogEditUnlocked = catalogEditUnlocked;
         this.targetWidth = TARGET_W;
         this.targetHeight = TARGET_H;
         this.useOffset = false; // KE 风格：不居中黑边，面板动态铺满
@@ -375,12 +383,12 @@ public class ShopScreen extends ScaledScreen {
     // 「兑换中心」按钮：货币中心右侧，始终可见（打开兑换子页）
     private static final int EXCHANGE_BTN_W = 64;
     private int exchangeBtnX() { return currencyBtnX() + CURRENCY_BTN_W + 4; }
-    // 「新增商品」按钮：兑换中心右侧，仅编辑权玩家可见
+    // 「新增商品」按钮：兑换中心右侧，仅编辑权玩家且开了编辑模式（catalogEditUnlocked）才可见
     private static final int ADD_BTN_W = 64;
     private int addBtnX() { return exchangeBtnX() + EXCHANGE_BTN_W + 4; }
-    // 「商店设置」按钮：新增商品右侧，仅编辑权玩家可见（奖励抽取次数上限等运行期可调行为）
+    // 「商店设置」按钮：仅编辑权玩家可见，不受编辑模式开关限制；新增商品隐藏时顶上来补位，不留空档
     private static final int SETTINGS_BTN_W = 64;
-    private int settingsBtnX() { return addBtnX() + ADD_BTN_W + 4; }
+    private int settingsBtnX() { return catalogEditUnlocked ? addBtnX() + ADD_BTN_W + 4 : addBtnX(); }
 
     /** 供 CurrencyAtmScreen 读取当前 AE 模式（同包访问）。 */
     static boolean isAeMode() { return aeMode; }
@@ -395,6 +403,8 @@ public class ShopScreen extends ScaledScreen {
     // 购物车微缩按键：精妙背包按钮左侧，比其余顶栏按钮窄，非空时标题带数量角标
     private static final int CART_BTN_W = 48;
     private int cartBtnX() { return backpackBtnX() - 4 - CART_BTN_W; }
+
+    private int favBtnX() { return cartBtnX() - 4 - FAV_BTN_W; }
 
     // ===== 网格坐标单一真源（渲染/点击/tooltip 三处共用，杜绝错位）=====
     private static final int ROW_STRIDE = CELL_H + GRID_GAP;
@@ -499,9 +509,19 @@ public class ShopScreen extends ScaledScreen {
 
     private void recomputeVisible() {
         String q = searchBox != null ? searchBox.getValue() : "";
-        visibleEntryKeys = new ArrayList<>((q == null || q.isBlank())
+        List<Long> keys = (q == null || q.isBlank())
                 ? ClientShopCatalog.keysOfGroup(selectedTop, selectedSub)
-                : ClientShopCatalog.searchKeys(q));
+                : ClientShopCatalog.searchKeys(q);
+        // 只看收藏：在分类/搜索结果之上再收窄一层，按 stub 里的 stableId 判断（不需要等完整 ShopEntry 加载）。
+        if (favoritesOnly) {
+            List<Long> filtered = new ArrayList<>(keys.size());
+            for (Long key : keys) {
+                var stub = ClientShopCatalog.stub(key);
+                if (stub != null && ClientShopFavorites.contains(stub.stableId())) filtered.add(key);
+            }
+            keys = filtered;
+        }
+        visibleEntryKeys = new ArrayList<>(keys);
         // 新 revision 已不含旧身份时清空详情，不能凭对象引用继续交易。
         if (selectedEntryKey >= 0L && ClientShopCatalog.stub(selectedEntryKey) == null) clearSelection();
     }
@@ -549,9 +569,11 @@ public class ShopScreen extends ScaledScreen {
         // 货币中心 + 兑换中心（始终可见）
         drawButton(g, currencyBtnX(), top + 6, CURRENCY_BTN_W, TOP_BAR_H, "§6货币中心", mx, my);
         drawButton(g, exchangeBtnX(), top + 6, EXCHANGE_BTN_W, TOP_BAR_H, "§d兑换中心", mx, my);
-        // 新增商品 + 商店设置（仅编辑权玩家）
-        if (canEdit) {
+        // 新增商品（编辑权 + 开了编辑模式）、商店设置（仅编辑权，不受编辑模式限制）
+        if (catalogEditUnlocked) {
             drawButton(g, addBtnX(), top + 6, ADD_BTN_W, TOP_BAR_H, "§a新增商品", mx, my);
+        }
+        if (canEdit) {
             drawButton(g, settingsBtnX(), top + 6, SETTINGS_BTN_W, TOP_BAR_H, "§b商店设置", mx, my);
         }
 
@@ -559,6 +581,8 @@ public class ShopScreen extends ScaledScreen {
         int cartCount = ClientShopCart.size();
         drawButton(g, cartBtnX(), top + 6, CART_BTN_W, TOP_BAR_H,
                 cartCount > 0 ? "§e购物车§6(" + cartCount + ")" : "§e购物车", mx, my);
+        drawButton(g, favBtnX(), top + 6, FAV_BTN_W, TOP_BAR_H,
+                favoritesOnly ? "§e★收藏" : "§7☆收藏", mx, my);
         drawButton(g, backpackBtnX(), top + 6, BACKPACK_BTN_W, TOP_BAR_H, backpackMode ? "§a精妙背包:开" : "§8精妙背包:关", mx, my);
         drawButton(g, aeBtnX(), top + 6, AE_BTN_W, TOP_BAR_H, aeMode ? "§aAE模式:开" : "§8AE模式:关", mx, my);
         drawButton(g, rechargeBtnX(), top + 6, RECHARGE_W, TOP_BAR_H, "§b充值全部", mx, my);
@@ -972,6 +996,7 @@ public class ShopScreen extends ScaledScreen {
         int rowY0 = oy + 22;
         boolean anyConfirmedShortfall = false;
         java.math.BigInteger totalSpark = java.math.BigInteger.ZERO;
+        java.math.BigInteger totalEu = java.math.BigInteger.ZERO;
         Map<ResourceLocation, java.math.BigInteger> totalCoins = new java.util.LinkedHashMap<>();
         int ctrlX = cartCtrlBlockX(r);
 
@@ -1000,7 +1025,7 @@ public class ShopScreen extends ScaledScreen {
                 } else {
                     g.renderItem(entry.displayGoodsStack(), ox + 8, iconY);
                 }
-                ShopCost cost = entry.getCost();
+                ShopCost cost = entry.getEffectiveCost(); // 购物车只买不卖，折扣按买价口径结算
                 String label;
                 if (settled != null) {
                     // 本结算批次已回执：直接按服务端结果着色+附原因，不再用客户端猜的缺口符号（见反馈：结算后要看清成败）
@@ -1015,6 +1040,7 @@ public class ShopScreen extends ScaledScreen {
                 }
                 g.drawString(this.font, GuiRenderUtil.trimText(this.font, label, nameMaxW), ox + 26, textY, WHITE, true);
                 totalSpark = totalSpark.add(cost.spark.multiply(java.math.BigInteger.valueOf(qty)));
+                totalEu = totalEu.add(cost.eu.multiply(java.math.BigInteger.valueOf(qty)));
                 for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
                     totalCoins.merge(c.getKey(), c.getValue().multiply(java.math.BigInteger.valueOf(qty)), java.math.BigInteger::add);
                 }
@@ -1041,8 +1067,8 @@ public class ShopScreen extends ScaledScreen {
                     ox + 8, oy + oh - 24, GRAY, false);
         }
 
-        // 底部：汇总预计消耗（星火/币种，客户端已知数据直接加总，无需额外往返）+ 结算按钮/结算进度条
-        ShopCost aggCost = new ShopCost(totalSpark, totalCoins, List.of());
+        // 底部：汇总预计消耗（星火/EU/币种，客户端已知数据直接加总，无需额外往返）+ 结算按钮/结算进度条
+        ShopCost aggCost = new ShopCost(totalSpark, totalCoins, List.of(), totalEu);
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7合计预计消耗: " + costInline(aggCost), ow - CART_SETTLE_BTN_W - 16),
                 ox + 8, oy + oh - 14, CYAN, true);
         int settleW = CART_SETTLE_BTN_W, settleX = ox + ow - 8 - settleW, settleY = oy + oh - CART_SETTLE_BTN_H - 2;
@@ -1189,6 +1215,9 @@ public class ShopScreen extends ScaledScreen {
         else if (stub != null && !stub.goodsIds().isEmpty()) label = stub.goodsIds().get(0);
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, label, CELL_W - 29),
                 slotX + 23, cy + 4, GRAY, true);
+        if (stub != null && ClientShopFavorites.contains(stub.stableId())) {
+            g.drawString(this.font, "§e★", cx + CELL_W - 10, cy + 14, GOLD, false);
+        }
         renderNumberBar(g, cx + 2, cy + CELL_H - 13, 34);
         g.drawString(this.font, "§8加载中", cx + 5, cy + CELL_H - 11, GRAY, false);
     }
@@ -1250,17 +1279,19 @@ public class ShopScreen extends ScaledScreen {
         final String amtText;
         final ItemStack costIcon;
         final boolean sparkPrimary;
+        final boolean euPrimary;
         final boolean fluidPrimary;
         final int extra;
 
         CellCache(ItemStack goodsStack, net.minecraft.world.level.material.Fluid goodsFluid, String trimmedName,
-                  String amtText, ItemStack costIcon, boolean sparkPrimary, boolean fluidPrimary, int extra) {
+                  String amtText, ItemStack costIcon, boolean sparkPrimary, boolean euPrimary, boolean fluidPrimary, int extra) {
             this.goodsStack = goodsStack;
             this.goodsFluid = goodsFluid;
             this.trimmedName = trimmedName;
             this.amtText = amtText;
             this.costIcon = costIcon;
             this.sparkPrimary = sparkPrimary;
+            this.euPrimary = euPrimary;
             this.fluidPrimary = fluidPrimary;
             this.extra = extra;
         }
@@ -1285,7 +1316,7 @@ public class ShopScreen extends ScaledScreen {
         ShopCost cost = entry.getCost();
         String amtText;
         ItemStack costIcon = null;
-        boolean sparkPrimary = false, fluidPrimary = false;
+        boolean sparkPrimary = false, euPrimary = false, fluidPrimary = false;
         if (!cost.coins.isEmpty()) {
             Map.Entry<ResourceLocation, java.math.BigInteger> c0 = cost.coins.entrySet().iterator().next();
             amtText = formatBig(c0.getValue());
@@ -1293,6 +1324,9 @@ public class ShopScreen extends ScaledScreen {
         } else if (cost.spark.signum() > 0) {
             amtText = formatBig(cost.spark);
             sparkPrimary = true;
+        } else if (cost.eu.signum() > 0) {
+            amtText = formatBig(cost.eu);
+            euPrimary = true;
         } else if (!cost.physical.isEmpty()) {
             ExchangeEntry.Ingredient in0 = cost.physical.get(0);
             amtText = String.valueOf(in0.count);
@@ -1306,14 +1340,17 @@ public class ShopScreen extends ScaledScreen {
             amtText = "免";
         }
         int extra = cost.componentCount() - 1;
-        return new CellCache(goodsStack, goodsFluid, trimmedName, amtText, costIcon, sparkPrimary, fluidPrimary, extra);
+        return new CellCache(goodsStack, goodsFluid, trimmedName, amtText, costIcon, sparkPrimary, euPrimary, fluidPrimary, extra);
     }
 
     /** KE 风格横向格：左棋盘物品槽 + 右侧名称/状态 + 底部价格数字条 + 货币小图标。 */
     private void drawCell(GuiGraphics g, ShopEntry entry, int cx, int cy, int mx, int my) {
         boolean sel = selected == entry;
         boolean hover = GuiRenderUtil.isHovering(mx, my, cx, cy, CELL_W, CELL_H);
-        int border = sel ? GOLD : GREEN_DARK;
+        // 限时折扣：格子太小塞不下额外文字（见 CurrencyAtmScreen 教训，不硬挤新元素），改用边框/价格变色示意，
+        // 具体折扣%和倒计时留给悬浮 tooltip（buildTooltip）和详情页（drawDetail）精确显示
+        boolean onSale = entry.isDiscountActive();
+        int border = sel ? GOLD : (onSale ? RED_DARK : GREEN_DARK);
         int fill = sel ? SELECT_BG : (hover ? ROW_HOVER : ROW_BG);
         renderBox(g, cx, cy, CELL_W, CELL_H, border, fill);
         if (sel) renderSelectionOutline(g, cx, cy, CELL_W, CELL_H);
@@ -1337,15 +1374,22 @@ public class ShopScreen extends ScaledScreen {
         int textX = slotX + 23;
         g.drawString(this.font, cc.trimmedName, textX, cy + 4, WHITE, true);
 
+        // 收藏角标（名称行与底部价格条之间的空白带，右对齐，不挤占任何已有元素）
+        if (ClientShopFavorites.contains(entry.getStableId())) {
+            g.drawString(this.font, "§e★", cx + CELL_W - 10, cy + 14, GOLD, false);
+        }
+
         // 底部成本数字条 + 主成分图标 +「+K」（多元成本取主成分：币种 > 星火 > 实物；全部缓存好）
         int numX = cx + 2;
         int numY = cy + CELL_H - 13;
         int numW = Math.min(48, Math.max(22, this.font.width(cc.amtText) + 8));
         renderNumberBar(g, numX, numY, numW);
-        g.drawString(this.font, cc.amtText, numX + 4, numY + 2, NUMBER_BAR_TEXT, false);
+        g.drawString(this.font, cc.amtText, numX + 4, numY + 2, onSale ? RED : NUMBER_BAR_TEXT, false);
         int iconX = numX + numW + 2;
         if (cc.sparkPrimary) {
             g.drawString(this.font, "§e★", iconX + 1, numY + 2, GOLD, false);
+        } else if (cc.euPrimary) {
+            g.drawString(this.font, "§d⚡", iconX + 1, numY + 2, GOLD, false);
         } else if (cc.fluidPrimary) {
             g.drawString(this.font, "§b≈", iconX + 1, numY + 2, CYAN, false); // 流体主成分标记
         } else if (cc.costIcon != null) {
@@ -1528,8 +1572,13 @@ public class ShopScreen extends ScaledScreen {
         }
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, countLine, dx + DETAIL_W - 6 - textX), textX, dy + 24, GRAY, true);
 
-        // 成本（多元，青）——超宽截断，全量见 tooltip / 预计行
-        g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7成本: " + costInline(selected.getCost()),
+        // 成本（多元，青）——超宽截断，全量见 tooltip / 预计行。限时折扣生效时原价→折后价+倒计时挤进同一行，
+        // 不另起一行（详情页下面一串固定 Y 坐标的内容，插一行要连带改一串偏移，风险不值得，见 CurrencyAtmScreen 的教训）
+        String costLabel = selected.isDiscountActive()
+                ? "§7成本: §8" + costInline(selected.getCost()) + " §a→ " + costInline(selected.getEffectiveCost())
+                        + " §6(-" + selected.getDiscountPercent() + "% 剩" + formatDuration(selected.discountRemainingMs() / 1000L) + ")"
+                : "§7成本: " + costInline(selected.getCost());
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font, costLabel,
                 dx + DETAIL_W - 6 - cx), cx, dy + 42, CYAN, true);
 
         // 数量标签 + AE 风格步进按钮（文本框 amountBox 由 initScaled 定位、super.render 绘制）
@@ -1552,7 +1601,8 @@ public class ShopScreen extends ScaledScreen {
         // 预计（BigInteger 防溢出，紧凑显示）；成本多元 → 显示整条成本 ×次数
         java.math.BigInteger amt = java.math.BigInteger.valueOf(amount);
         java.math.BigInteger total = java.math.BigInteger.valueOf(selected.getGoodsCount()).multiply(amt);
-        ShopCost dcost = selected.getCost();
+        // 折扣只影响买价预览，不影响出售能拿回多少（出售不是「反向打折」，见 ShopPurchase#affordAndDeduct 同一口径）
+        ShopCost dcost = mode == Mode.BUY ? selected.getEffectiveCost() : selected.getCost();
         int py = dy + 128;
         int costTrimW = dx + DETAIL_W - 6 - cx;
         String key = WalletAccountAPI.purchaseKey(selected.getGoodsId(), selected.getCategory());
@@ -1636,7 +1686,9 @@ public class ShopScreen extends ScaledScreen {
                 ? com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.resolve(selected.getPrerequisiteQuestId()) : null;
         prereqQuestCompleted = com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.isCompleted(prereqQuest);
         int prereqRowH = selected.hasPrerequisiteQuest() ? 12 : 0;
-        int lowerBottom = btnY - (canEdit ? 48 : 6) - linkRowH - guideRowH - autoCraftRowH - prereqRowH; // 底部按钮上沿（编辑权多两排按钮，跳转/指南/补齐缺口/前置任务各让一行）
+        // 编辑/删除按钮行数：编辑条目、删除此商品都折进了编辑模式，catalogEditUnlocked 时一起出 2 行
+        int editRowsOffset = catalogEditUnlocked ? 48 : 6;
+        int lowerBottom = btnY - editRowsOffset - linkRowH - guideRowH - autoCraftRowH - prereqRowH; // 底部按钮上沿（跳转/指南/补齐缺口/前置任务各让一行）
 
         // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区。
         // 起点须跟着 contentY 走（原来硬编码 py+50，周期限购把上面内容顶下去后两者间距只剩 2px，字重叠成一坨，见反馈）
@@ -1713,7 +1765,7 @@ public class ShopScreen extends ScaledScreen {
         // 花费预览格全绿时按钮不能还显示红，前置任务同理，不能光看成本够不够）
         boolean prereqSatisfiedClient = !selected.hasPrerequisiteQuest() || prereqQuestCompleted;
         boolean canTrade = mode == Mode.BUY
-                ? (canAffordClient(selected.getCost(), amount) && prereqSatisfiedClient)
+                ? (canAffordClient(selected.getEffectiveCost(), amount) && prereqSatisfiedClient)
                 : (!selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
                     && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, DETAIL_W - 16, 20);
@@ -1721,8 +1773,10 @@ public class ShopScreen extends ScaledScreen {
                 mode == Mode.BUY ? "§a确认购买" : "§e确认出售",
                 canTrade ? GREEN_DARK : DEEP_RED, canTrade ? (mode == Mode.BUY ? GREEN : GOLD) : DEEP_RED);
 
-        // 编辑/删除按钮（编辑权玩家）
-        if (canEdit) {
+        // 编辑/删除按钮：都折进了编辑模式（catalogEditUnlocked），没开时两行一起隐藏
+        if (catalogEditUnlocked) {
+            boolean editHover = hit(mx, my, cx, btnY - 44, DETAIL_W - 16, 18);
+            renderButton(g, cx, btnY - 44, DETAIL_W - 16, 18, editHover, "§b编辑条目", GOLD_DARK, CYAN);
             // 误触防护：第一次点「删除此商品」只进入 3 秒确认窗口（按钮变金边+闪烁警示色），窗口内对同一条目
             // 再点一次才真正发删除包；换条目/超时都会自动退回未确认态，见 universalMouseClicked 里的对应逻辑
             boolean delArmed = pendingDeleteEntry == selected
@@ -1732,8 +1786,6 @@ public class ShopScreen extends ScaledScreen {
             int delBorder = delArmed ? GOLD : RED_DARK;
             int delText = delArmed && (System.currentTimeMillis() / 300L % 2 == 0) ? WHITE : RED;
             renderButton(g, cx, btnY - 22, DETAIL_W - 16, 18, delHover, delLabel, delBorder, delText);
-            boolean editHover = hit(mx, my, cx, btnY - 44, DETAIL_W - 16, 18);
-            renderButton(g, cx, btnY - 44, DETAIL_W - 16, 18, editHover, "§b编辑条目", GOLD_DARK, CYAN);
         }
     }
 
@@ -1824,6 +1876,16 @@ public class ShopScreen extends ScaledScreen {
             cartOverlayScroll = 0;
             return true;
         }
+        // 只看收藏筛选：跟主/子分类、搜索一起收窄网格，切换后立即重算可见列表
+        if (hit(mx, my, favBtnX(), top + 6, FAV_BTN_W, TOP_BAR_H)) {
+            favoritesOnly = !favoritesOnly;
+            scroll = 0;
+            recomputeVisible();
+            showMessage(Component.literal(favoritesOnly
+                    ? "§b[山海商店] §a已切换至【只看收藏】"
+                    : "§b[山海商店] §7已取消只看收藏筛选"));
+            return true;
+        }
         // AE 模式切换：光靠按钮文字变色不够醒目，切换时打一条横幅明确告知当前状态
         if (hit(mx, my, aeBtnX(), top + 6, AE_BTN_W, TOP_BAR_H)) {
             aeMode = !aeMode;
@@ -1855,12 +1917,12 @@ public class ShopScreen extends ScaledScreen {
             Minecraft.getInstance().setScreen(new ExchangeScreen(this, canEdit));
             return true;
         }
-        // 新增商品（仅编辑权）：分类默认继承当前所在子页（如「无限盘区/前期」）
-        if (canEdit && hit(mx, my, addBtnX(), top + 6, ADD_BTN_W, TOP_BAR_H)) {
+        // 新增商品（编辑权 + 开了编辑模式）：分类默认继承当前所在子页（如「无限盘区/前期」）
+        if (catalogEditUnlocked && hit(mx, my, addBtnX(), top + 6, ADD_BTN_W, TOP_BAR_H)) {
             ShopEntryEditor.openNew(this, currentViewCategory());
             return true;
         }
-        // 商店设置（仅编辑权）：奖励抽取次数上限等运行期可调行为
+        // 商店设置（仅编辑权，不受编辑模式限制）：奖励抽取次数上限等运行期可调行为
         if (canEdit && hit(mx, my, settingsBtnX(), top + 6, SETTINGS_BTN_W, TOP_BAR_H)) {
             Minecraft.getInstance().setScreen(new ShopSettingsScreen(this));
             return true;
@@ -2007,8 +2069,8 @@ public class ShopScreen extends ScaledScreen {
                 }
                 return true;
             }
-            // 删除（编辑权，二次确认防误触：3 秒内对同一条目再点一次「删除此商品」才真正执行）
-            if (canEdit && hit(mx, my, cx, btnY - 22, btnW, 18)) {
+            // 删除（编辑权 + 开了编辑模式，二次确认防误触：3 秒内对同一条目再点一次「删除此商品」才真正执行）
+            if (catalogEditUnlocked && hit(mx, my, cx, btnY - 22, btnW, 18)) {
                 boolean armed = pendingDeleteEntry == selected
                         && System.currentTimeMillis() - pendingDeleteArmedAtMs < DELETE_CONFIRM_WINDOW_MS;
                 if (!armed) {
@@ -2026,8 +2088,8 @@ public class ShopScreen extends ScaledScreen {
                 undoDeleteUntilMs = System.currentTimeMillis() + UNDO_DELETE_UI_WINDOW_MS;
                 return true;
             }
-            // 编辑条目（编辑权）
-            if (canEdit && hit(mx, my, cx, btnY - 44, btnW, 18)) {
+            // 编辑条目（编辑权 + 开了编辑模式）
+            if (catalogEditUnlocked && hit(mx, my, cx, btnY - 44, btnW, 18)) {
                 ShopEntryEditor.openEdit(this, selected);
                 return true;
             }
@@ -2191,6 +2253,12 @@ public class ShopScreen extends ScaledScreen {
     private List<ContextMenuItem> buildContextMenuItems(ShopEntry entry, long entryKey) {
         List<ContextMenuItem> items = new ArrayList<>();
         items.add(new ContextMenuItem("§f查看详情", false, () -> selectEntry(entryKey, entry)));
+        // 收藏对所有玩家开放（不受 canEdit 限制）：纯个人标记，不影响商店目录本身，见 ClientShopFavorites。
+        boolean favored = ClientShopFavorites.contains(entry.getStableId());
+        items.add(new ContextMenuItem(favored ? "§e★取消收藏" : "§7☆收藏", false, () -> {
+            ClientShopFavorites.toggle(entry.getStableId());
+            if (favoritesOnly) recomputeVisible(); // 筛选中时取消收藏要立刻从网格消失，不用等下次切页/搜索
+        }));
 
         if (entry.hasLinkTarget()) {
             long targetKey = ClientShopCatalog.linkedEntryKey(entry.getLinkTo());
@@ -2220,8 +2288,11 @@ public class ShopScreen extends ScaledScreen {
         }
 
         if (canEdit) {
-            items.add(new ContextMenuItem("§b编辑条目", true, () -> ShopEntryEditor.openEdit(this, entry)));
-            items.add(new ContextMenuItem("§a复制为新条目", false, () -> ShopEntryEditor.openDuplicate(this, entry)));
+            // 编辑条目/复制为新条目/删除都折进了编辑模式；隐藏/排序不受编辑模式限制，仍只看 canEdit
+            if (catalogEditUnlocked) {
+                items.add(new ContextMenuItem("§b编辑条目", true, () -> ShopEntryEditor.openEdit(this, entry)));
+                items.add(new ContextMenuItem("§a复制为新条目", false, () -> ShopEntryEditor.openDuplicate(this, entry)));
+            }
             items.add(new ContextMenuItem(entry.isHidden() ? "§a取消隐藏" : "§c设为隐藏", false, () -> toggleHidden(entry)));
             items.add(new ContextMenuItem("§e▲ 前移", false, () ->
                     sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.UP)));
@@ -2229,12 +2300,14 @@ public class ShopScreen extends ScaledScreen {
                     sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.DOWN)));
             items.add(new ContextMenuItem("§6⤒ 置顶", false, () ->
                     sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.TOP)));
-            items.add(new ContextMenuItem("§c删除此商品", true, () -> {
-                selectEntry(entryKey, entry);
-                pendingDeleteEntry = entry;
-                pendingDeleteArmedAtMs = System.currentTimeMillis();
-                showMessage(Component.literal("§e[山海商店] 已选中，再点一次详情页「删除此商品」确认删除，3 秒内有效"));
-            }));
+            if (catalogEditUnlocked) {
+                items.add(new ContextMenuItem("§c删除此商品", true, () -> {
+                    selectEntry(entryKey, entry);
+                    pendingDeleteEntry = entry;
+                    pendingDeleteArmedAtMs = System.currentTimeMillis();
+                    showMessage(Component.literal("§e[山海商店] 已选中，再点一次详情页「删除此商品」确认删除，3 秒内有效"));
+                }));
+            }
         }
         return items;
     }
@@ -2256,14 +2329,8 @@ public class ShopScreen extends ScaledScreen {
     /** 一键切换隐藏：其余字段原样带回去，走跟编辑器提交同一条 EDIT 通路，不新开一套网络包。 */
     private void toggleHidden(ShopEntry entry) {
         long entryKey = ClientShopCatalog.keyOf(entry);
-        ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopEditPacket(
-                com.dishanhai.gt_shanhai.network.ShopEditPacket.Action.EDIT,
-                entry.getGoodsList(), entry.getCategory(), entry.getDescription(), entry.getCost(),
-                entry.getGoodsId(), entry.getCategory(), -1, entry.getRemainingUses(),
-                entry.getDisplayIcons(), entry.getRewardMode(), entry.getRewardPool(), !entry.isHidden(),
-                entry.getLinkKey(), entry.getLinkTo(), entry.getDisplayName(), entry.getFtbqTableId(),
-                entry.getFtbqSubMode(), entry.getTradeMode(), entry.getPeriodTicks(), entry.getPeriodLimit(),
-                entry.getPrerequisiteQuestId(), ClientShopCatalog.revision(), entryKey));
+        ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopToggleHiddenPacket(
+                ClientShopCatalog.revision(), entryKey));
     }
 
     /** 菜单命中判定：逐行按渲染时同一套坐标累加复算，命中就关菜单+执行动作；菜单外任意点击只关菜单。 */
@@ -2563,6 +2630,17 @@ public class ShopScreen extends ScaledScreen {
         return sb.length() == 0 ? "§8免费" : sb.toString();
     }
 
+    /** 秒数转紧凑中文时长（限时折扣倒计时用），按量级只取最粗的两档，不做满位 HH:MM:SS。 */
+    private static String formatDuration(long totalSeconds) {
+        if (totalSeconds < 60L) return totalSeconds + "秒";
+        long totalMinutes = totalSeconds / 60L;
+        if (totalMinutes < 60L) return totalMinutes + "分" + (totalSeconds % 60L) + "秒";
+        long totalHours = totalMinutes / 60L;
+        if (totalHours < 24L) return totalHours + "时" + (totalMinutes % 60L) + "分";
+        long days = totalHours / 24L;
+        return days + "天" + (totalHours % 24L) + "时";
+    }
+
     /** 多元成本 × times 的紧凑单行。 */
     private static String costInlineTimes(ShopCost cost, long times) {
         java.math.BigInteger t = java.math.BigInteger.valueOf(Math.max(1L, times));
@@ -2741,7 +2819,12 @@ public class ShopScreen extends ScaledScreen {
         } else {
             lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
         }
-        lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
+        if (e.isDiscountActive()) {
+            lines.add(Component.literal("§7成本 §8" + costInline(e.getCost()) + " §a→ " + costInline(e.getEffectiveCost())));
+            lines.add(Component.literal("§6限时特惠 -" + e.getDiscountPercent() + "% §7剩" + formatDuration(e.discountRemainingMs() / 1000L)));
+        } else {
+            lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
+        }
         if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
         if (e.getCost().hasPhysical()) lines.add(Component.literal("§8含实物：物品在背包 / 流体绑定 AE"));
         if (!e.getDisplayIcons().isEmpty()) {

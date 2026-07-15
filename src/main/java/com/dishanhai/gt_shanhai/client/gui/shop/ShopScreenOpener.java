@@ -11,7 +11,7 @@ public final class ShopScreenOpener {
 
     private ShopScreenOpener() {}
 
-    public static void open(boolean canEdit) {
-        Minecraft.getInstance().setScreen(new ShopScreen(canEdit));
+    public static void open(boolean canEdit, boolean catalogEditUnlocked) {
+        Minecraft.getInstance().setScreen(new ShopScreen(canEdit, catalogEditUnlocked));
     }
 }
