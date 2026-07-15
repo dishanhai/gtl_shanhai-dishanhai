@@ -38,6 +38,7 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.module.core.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.collector.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.assembly.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.processing.*;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.implosion.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.engraving.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.cutter.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.*;
@@ -99,6 +100,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_MATTER_CASTER;
     public static MultiblockMachineDefinition PRIMORDIAL_ASSEMBLY_LINE_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_CRITICAL_PROCESSING_MODULE;
+    public static MultiblockMachineDefinition PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_ENGRAVING_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_REALITY_ANCHOR_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_COIN_FORGE;
@@ -583,6 +585,33 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7MK-2：碎岩 / 洗矿 / 离心 / 电解 / 筛选 / 研磨 / 脱水 / 热力离心 / 电磁选矿"));
             tooltips.add(Component.literal("§7MK-3：蒸发 / 高压釜 / 提取 / 酿造 / 发酵 / 蒸馏室 / 蒸馏塔 / 流体加热 / 流体固化 / 化学浸洗"));
             tooltips.add(Component.literal("§7MK-4：装罐 / 电弧炉 / 闪电处理 / 组装 / 精密组装 / 电路组装"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位"));
+            tooltips.add(Component.literal("")
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(Component.literal("§f，直接从电网取电")));
+        });
+
+        // ── 原初多维聚爆核心 ────────────────────────────────────────
+        PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_multidimensional_implosion_core",
+                        PrimordialMultidimensionalImplosionCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(
+                        GTLRecipeTypes.ELECTRIC_IMPLOSION_COMPRESSOR_RECIPES,
+                        GTRecipeTypes.IMPLOSION_RECIPES)
+                .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                .register();
+
+        PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createFireText("多维聚爆——以电力聚爆为主轴压缩物质结构"));
+            tooltips.add(DShanhaiTextUtil.createElectricText("电力聚爆压缩机是普通聚爆压缩机的升级工艺"));
+            tooltips.add(Component.literal("§7兼容配方类型：电力聚爆压缩机 / 聚爆压缩机"));
+            tooltips.add(Component.literal("§7两个配方类型相互独立，普通聚爆用于补全最大兼容性"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
