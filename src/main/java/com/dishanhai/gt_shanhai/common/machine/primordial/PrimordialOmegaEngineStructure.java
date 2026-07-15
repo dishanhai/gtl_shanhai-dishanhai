@@ -45,6 +45,8 @@ public class PrimordialOmegaEngineStructure {
                 new ResourceLocation("gt_shanhai", "primordial_world_fragments_collector"));
         Block assemblyLineModule = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_assembly_line_module"));
+        Block criticalProcessingModule = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_critical_processing_module"));
         Block engravingModule = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_engraving_module"));
         Block taixuSmeltingFurnace = ForgeRegistries.BLOCKS.getValue(
@@ -102,6 +104,7 @@ public class PrimordialOmegaEngineStructure {
                         .or(Predicates.blocks(singularityInversionCore))
                         .or(Predicates.blocks(worldFragmentsCollector))
                         .or(Predicates.blocks(assemblyLineModule))
+                        .or(Predicates.blocks(criticalProcessingModule))
                         .or(Predicates.blocks(taixuSmeltingFurnace))
                         .or(Predicates.blocks(antiEntropyCondensationCore))
                         .or(Predicates.blocks(divergenceGenerator))

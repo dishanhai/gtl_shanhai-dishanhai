@@ -37,6 +37,7 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.module.furnace.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.core.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.collector.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.assembly.*;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.processing.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.engraving.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.cutter.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.*;
@@ -97,6 +98,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_DIVERGENCE_GENERATOR;
     public static MultiblockMachineDefinition PRIMORDIAL_MATTER_CASTER;
     public static MultiblockMachineDefinition PRIMORDIAL_ASSEMBLY_LINE_MODULE;
+    public static MultiblockMachineDefinition PRIMORDIAL_CRITICAL_PROCESSING_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_ENGRAVING_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_REALITY_ANCHOR_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_COIN_FORGE;
@@ -521,6 +523,67 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createAuroraText("从普通装配到电路装配到部件装配——万物皆可流水线"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("§7配方类型：装配线 / 电路装配线 / 部件装配线"));
+            tooltips.add(Component.literal("")
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(Component.literal("§f，直接从电网取电")));
+        });
+
+        // ── 原初临界加工模块 ────────────────────────────────────────
+        PRIMORDIAL_CRITICAL_PROCESSING_MODULE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_critical_processing_module",
+                        PrimordialCriticalProcessingModule::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(
+                        GTRecipeTypes.LATHE_RECIPES,
+                        GTRecipeTypes.BENDER_RECIPES,
+                        GTRecipeTypes.COMPRESSOR_RECIPES,
+                        GTRecipeTypes.FORGE_HAMMER_RECIPES,
+                        GTRecipeTypes.CUTTER_RECIPES,
+                        GTRecipeTypes.EXTRUDER_RECIPES,
+                        GTRecipeTypes.MIXER_RECIPES,
+                        GTRecipeTypes.WIREMILL_RECIPES,
+                        GTRecipeTypes.FORMING_PRESS_RECIPES,
+                        GTRecipeTypes.POLARIZER_RECIPES,
+                        GTRecipeTypes.ROCK_BREAKER_RECIPES,
+                        GTRecipeTypes.ORE_WASHER_RECIPES,
+                        GTRecipeTypes.CENTRIFUGE_RECIPES,
+                        GTRecipeTypes.ELECTROLYZER_RECIPES,
+                        GTRecipeTypes.SIFTER_RECIPES,
+                        GTRecipeTypes.MACERATOR_RECIPES,
+                        GTLRecipeTypes.DEHYDRATOR_RECIPES,
+                        GTRecipeTypes.THERMAL_CENTRIFUGE_RECIPES,
+                        GTRecipeTypes.ELECTROMAGNETIC_SEPARATOR_RECIPES,
+                        GTRecipeTypes.EVAPORATION_RECIPES,
+                        GTRecipeTypes.AUTOCLAVE_RECIPES,
+                        GTRecipeTypes.EXTRACTOR_RECIPES,
+                        GTRecipeTypes.BREWING_RECIPES,
+                        GTRecipeTypes.FERMENTING_RECIPES,
+                        GTRecipeTypes.DISTILLERY_RECIPES,
+                        GTRecipeTypes.DISTILLATION_RECIPES,
+                        GTRecipeTypes.FLUID_HEATER_RECIPES,
+                        GTRecipeTypes.FLUID_SOLIDFICATION_RECIPES,
+                        GTRecipeTypes.CHEMICAL_BATH_RECIPES,
+                        GTRecipeTypes.CANNER_RECIPES,
+                        GTRecipeTypes.ARC_FURNACE_RECIPES,
+                        GTLRecipeTypes.LIGHTNING_PROCESSOR_RECIPES,
+                        GTRecipeTypes.ASSEMBLER_RECIPES,
+                        GTLRecipeTypes.PRECISION_ASSEMBLER_RECIPES,
+                        GTRecipeTypes.CIRCUIT_ASSEMBLER_RECIPES)
+                .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                .register();
+
+        PRIMORDIAL_CRITICAL_PROCESSING_MODULE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createFireText("临界整合——将四级卫星工厂的基础加工能力压缩为一台原初模块"));
+            tooltips.add(Component.literal("§7MK-1：车床 / 卷板 / 压缩 / 锻造锤 / 切割 / 压模 / 搅拌 / 线材轧制 / 冲压 / 极化"));
+            tooltips.add(Component.literal("§7MK-2：碎岩 / 洗矿 / 离心 / 电解 / 筛选 / 研磨 / 脱水 / 热力离心 / 电磁选矿"));
+            tooltips.add(Component.literal("§7MK-3：蒸发 / 高压釜 / 提取 / 酿造 / 发酵 / 蒸馏室 / 蒸馏塔 / 流体加热 / 流体固化 / 化学浸洗"));
+            tooltips.add(Component.literal("§7MK-4：装罐 / 电弧炉 / 闪电处理 / 组装 / 精密组装 / 电路组装"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
                     .append(Component.literal("§f，直接从电网取电")));
