@@ -39,6 +39,9 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.module.collector.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.assembly.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.processing.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.implosion.*;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.matter.*;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.reactor.*;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.rift.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.engraving.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.cutter.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.*;
@@ -101,6 +104,9 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_ASSEMBLY_LINE_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_CRITICAL_PROCESSING_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE;
+    public static MultiblockMachineDefinition PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE;
+    public static MultiblockMachineDefinition PRIMORDIAL_COSMIC_REACTOR;
+    public static MultiblockMachineDefinition PRIMORDIAL_MOLECULAR_RIFT_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_ENGRAVING_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_REALITY_ANCHOR_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_COIN_FORGE;
@@ -616,6 +622,54 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
                     .append(Component.literal("§f，直接从电网取电")));
+        });
+
+        PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_supercritical_matter_generation_core", PrimordialSupercriticalMatterGenerationCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(GTLRecipeTypes.SPS_CRAFTING_RECIPES, GTLRecipeTypes.MATTER_FABRICATOR_RECIPES,
+                        GTLRecipeTypes.MASS_FABRICATOR_RECIPES)
+                .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                .register();
+        PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createAuroraText("统合超临界合成、物质生成与质量发生"));
+            tooltips.add(Component.literal("§7配方类型：超临界合成 / 物质生成机 / 质量发生器"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位，按模块等级并行并直接从电网取电"));
+        });
+
+        PRIMORDIAL_COSMIC_REACTOR = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_cosmic_reactor", PrimordialCosmicReactor::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(GTLRecipeTypes.SUPER_PARTICLE_COLLIDER_RECIPES, GTRecipeTypes.FUSION_RECIPES,
+                        DShanhaiRecipeTypes.PRIMORDIAL_STELLAR_REACTION)
+                .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                .register();
+        PRIMORDIAL_COSMIC_REACTOR.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createFireText("在粒子对撞与核聚变之上点燃原初恒星反应"));
+            tooltips.add(Component.literal("§7配方类型：粒子对撞 / 核聚变反应堆 / 原初恒星反应"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位，按模块等级并行并直接从电网取电"));
+        });
+
+        PRIMORDIAL_MOLECULAR_RIFT_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_molecular_rift_core", PrimordialMolecularRiftCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(GTLRecipeTypes.DISTORT_RECIPES, GTRecipeTypes.LARGE_CHEMICAL_RECIPES,
+                        GTRecipeTypes.CHEMICAL_BATH_RECIPES)
+                .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                .register();
+        PRIMORDIAL_MOLECULAR_RIFT_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createMagicText("撕开分子裂隙，统一深度扭曲与大型化学处理"));
+            tooltips.add(Component.literal("§7配方类型：深度化学扭曲 / 大型化学反应釜 / 化学浸洗机"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位，按模块等级并行并直接从电网取电"));
         });
 
         // 原初激光蚀刻模块

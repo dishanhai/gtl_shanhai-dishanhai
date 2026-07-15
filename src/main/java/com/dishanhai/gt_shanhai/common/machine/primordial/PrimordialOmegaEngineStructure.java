@@ -49,6 +49,12 @@ public class PrimordialOmegaEngineStructure {
                 new ResourceLocation("gt_shanhai", "primordial_critical_processing_module"));
         Block multidimensionalImplosionCore = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_multidimensional_implosion_core"));
+        Block supercriticalMatterGenerationCore = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_supercritical_matter_generation_core"));
+        Block cosmicReactor = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_cosmic_reactor"));
+        Block molecularRiftCore = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_molecular_rift_core"));
         Block engravingModule = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_engraving_module"));
         Block taixuSmeltingFurnace = ForgeRegistries.BLOCKS.getValue(
@@ -108,6 +114,9 @@ public class PrimordialOmegaEngineStructure {
                         .or(Predicates.blocks(assemblyLineModule))
                         .or(Predicates.blocks(criticalProcessingModule))
                         .or(Predicates.blocks(multidimensionalImplosionCore))
+                        .or(Predicates.blocks(supercriticalMatterGenerationCore))
+                        .or(Predicates.blocks(cosmicReactor))
+                        .or(Predicates.blocks(molecularRiftCore))
                         .or(Predicates.blocks(taixuSmeltingFurnace))
                         .or(Predicates.blocks(antiEntropyCondensationCore))
                         .or(Predicates.blocks(divergenceGenerator))

@@ -4,6 +4,7 @@ import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
+import com.gregtechceu.gtceu.common.data.GTSoundEntries;
 
 import com.gtladd.gtladditions.common.modify.GTLAddSoundEntries;
 
@@ -37,6 +38,7 @@ public class DShanhaiRecipeTypes {
     public static GTRecipeType WL_BOARD_CIRCUIT_ASSEMBLY;
     public static GTRecipeType WL_BOARD_WAFER_ETCHING;
     public static GTRecipeType PRIMORDIAL_ENERGY_ABSORPTION;
+    public static GTRecipeType PRIMORDIAL_STELLAR_REACTION;
     public static GTRecipeType WORLDLINE_PROBABILITY_CRACKING;
     public static GTRecipeType WORLDLINE_MATTER_RECURRENCE;
     public static GTRecipeType WORLDLINE_SAMPLING;
@@ -85,6 +87,14 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
+
+        PRIMORDIAL_STELLAR_REACTION = GTRecipeTypes.register("primordial_stellar_reaction", "multiblock")
+                .setMaxIOSize(5, 3, 5, 3)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_FUSION, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
+                .setSound(GTSoundEntries.ARC)
+                .setOffsetVoltageText(true);
 
         PRIMORDIAL_BIOLOGICAL_CORE = GTRecipeTypes.register("primordial_biological_core", "multiblock")
                 .setMaxIOSize(6, 3, 3, 3)
