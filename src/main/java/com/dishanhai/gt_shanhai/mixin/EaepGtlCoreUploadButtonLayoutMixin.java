@@ -1,11 +1,9 @@
 package com.dishanhai.gt_shanhai.mixin;
 
-import appeng.client.gui.AEBaseScreen;
 import appeng.client.gui.me.items.PatternEncodingTermScreen;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 
 import org.spongepowered.asm.mixin.Mixin;
@@ -16,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.lang.reflect.Field;
 
-@Mixin(AEBaseScreen.class)
+@Mixin(value = PatternEncodingTermScreen.class, priority = 100)
 public abstract class EaepGtlCoreUploadButtonLayoutMixin {
 
     @Unique
@@ -37,25 +35,30 @@ public abstract class EaepGtlCoreUploadButtonLayoutMixin {
     @Unique
     private static boolean gtShanhai$reflectionUnavailable;
 
-    @Inject(
-            method = "render",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lappeng/client/gui/AEBaseScreen;updateBeforeRender()V",
-                    shift = At.Shift.AFTER,
-                    remap = false))
-    private void gtShanhai$moveUndoButtonAfterPositionUpdates(
-            GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
-        if (!((Object) this instanceof PatternEncodingTermScreen<?>)) {
-            return;
-        }
+    @Unique
+    private static boolean gtShanhai$missingButtonLogged;
+
+    @Unique
+    private static boolean gtShanhai$moveLogged;
+
+    @Inject(method = "updateBeforeRender", at = @At("TAIL"), remap = false)
+    private void gtShanhai$moveUndoButtonAfterEaep(CallbackInfo ci) {
         AbstractWidget eaepButton = gtShanhai$getButton(this, "eap$uploadBtn", 0);
         AbstractWidget quickUploadButton = gtShanhai$getButton(this, "gtlcore$quickUploadButton", 1);
         AbstractWidget undoButton = gtShanhai$getButton(this, "gtlcore$quickUploadUndoButton", 2);
-        if (eaepButton == null || quickUploadButton == null || undoButton == null
-                || !gtShanhai$overlaps(eaepButton, undoButton)) {
+        if (eaepButton == null || quickUploadButton == null || undoButton == null) {
+            if (!gtShanhai$missingButtonLogged && !gtShanhai$reflectionUnavailable) {
+                gtShanhai$missingButtonLogged = true;
+                GTDishanhaiMod.LOGGER.warn(
+                        "[EAEP布局] 编码终端按钮未就绪: eaep={}, upload={}, undo={}",
+                        eaepButton != null,
+                        quickUploadButton != null,
+                        undoButton != null);
+            }
             return;
         }
+        int oldX = undoButton.getX();
+        int oldY = undoButton.getY();
         int targetX = quickUploadButton.getX();
         int targetY = quickUploadButton.getY() + quickUploadButton.getHeight() + 2;
         if (!gtShanhai$setUndoHitPosition(this, targetX, targetY)) {
@@ -63,6 +66,23 @@ public abstract class EaepGtlCoreUploadButtonLayoutMixin {
         }
         undoButton.setX(targetX);
         undoButton.setY(targetY);
+        if (!gtShanhai$moveLogged) {
+            gtShanhai$moveLogged = true;
+            GTDishanhaiMod.LOGGER.info(
+                    "[EAEP布局] 已移动 GTLCore 回收按钮: ({}, {}) -> ({}, {}), EAEP=({}, {}, {}x{}), 上传=({}, {}, {}x{})",
+                    oldX,
+                    oldY,
+                    targetX,
+                    targetY,
+                    eaepButton.getX(),
+                    eaepButton.getY(),
+                    eaepButton.getWidth(),
+                    eaepButton.getHeight(),
+                    quickUploadButton.getX(),
+                    quickUploadButton.getY(),
+                    quickUploadButton.getWidth(),
+                    quickUploadButton.getHeight());
+        }
     }
 
     @Unique
@@ -94,14 +114,6 @@ public abstract class EaepGtlCoreUploadButtonLayoutMixin {
             gtShanhai$disableReflection(fieldName, exception);
             return null;
         }
-    }
-
-    @Unique
-    private static boolean gtShanhai$overlaps(AbstractWidget left, AbstractWidget right) {
-        return left.getX() < right.getX() + right.getWidth()
-                && left.getX() + left.getWidth() > right.getX()
-                && left.getY() < right.getY() + right.getHeight()
-                && left.getY() + left.getHeight() > right.getY();
     }
 
     @Unique
