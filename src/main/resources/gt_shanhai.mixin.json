@@ -67,6 +67,8 @@
     "MEPatternBufferItemRecipeTypeFilterMixin",
     "MEPatternBufferFluidRecipeTypeFilterMixin",
     "EaeInfinityCellRecordMixin",
+    "EaepProvidersListRecipeTypesMixin",
+    "EaepRequestProvidersListRecipeTypesMixin",
     "MEPatternBufferCacheInvalidationMixin",
     "MEPatternBufferRecipeCacheRevisionMixin",
     "MEStorageMenuBroadcastOptimizationMixin",
@@ -113,6 +115,7 @@
     "WobbleFontMixin",
     "GuiGraphicsCustomTooltipMixin",
     "GTLytSlotItemCountFormatMixin",
-    "GTLytSlotGridOverflowMixin"
+    "GTLytSlotGridOverflowMixin",
+    "EaepProviderSelectScreenRecipeTypeMixin"
   ]
 }
