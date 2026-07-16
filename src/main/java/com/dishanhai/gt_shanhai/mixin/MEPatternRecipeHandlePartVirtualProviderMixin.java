@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -22,7 +23,7 @@ public class MEPatternRecipeHandlePartVirtualProviderMixin {
     private void gtShanhai$stripVirtualTargetsAfterPatternRecipe(GTRecipe recipe,
             Reference2ObjectMap<RecipeCapability<?>, List<Object>> contents, boolean simulate, boolean setSlotCache,
             CallbackInfoReturnable<Integer> cir) {
-        if (simulate || cir.getReturnValueI() < 0) {
+        if (simulate || cir.getReturnValueI() < 0 || PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) {
             return;
         }
         VirtualPatternBufferMachineAccess access = gtShanhai$getPatternBufferAccess();

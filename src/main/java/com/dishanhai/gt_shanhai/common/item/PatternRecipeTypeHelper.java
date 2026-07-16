@@ -123,6 +123,13 @@ public final class PatternRecipeTypeHelper {
         return recipe;
     }
 
+    /** 直接从已解码处理样板推断 GT 配方，供通配符展开后的动态样板使用。 */
+    public static GTRecipe findRecipe(IPatternDetails details) {
+        if (!(details instanceof AEProcessingPattern pattern)) return null;
+        return VirtualPatternEncodingHelper.findMatchingRecipeForPattern(
+                pattern.getSparseInputs(), pattern.getSparseOutputs());
+    }
+
     public static void writeRecipeTypeFromPattern(ItemStack stack, GenericStack[] inputs, GenericStack[] outputs) {
         if (stack == null || stack.isEmpty() || !readRecipeTypeId(stack).isEmpty()) return;
         GTRecipe recipe = VirtualPatternEncodingHelper.findMatchingRecipeForPattern(inputs, outputs);

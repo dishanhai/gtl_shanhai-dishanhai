@@ -1,29 +1,75 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import appeng.api.crafting.IPatternDetails;
+import appeng.api.inventories.InternalInventory;
+import appeng.api.stacks.AEFluidKey;
+import appeng.api.stacks.AEItemKey;
+
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
+import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
+import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSlotAccess;
+import com.dishanhai.gt_shanhai.common.item.WildcardPatternBridge;
+import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
+import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
 import com.gregtechceu.gtceu.utils.FormattingUtil;
+import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
+import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
+import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
+import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
+import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
+import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
+import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
+import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
+import com.lowdragmc.lowdraglib.misc.ItemStackTransfer;
+import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 
+import it.unimi.dsi.fastutil.ints.Int2ReferenceMap;
+import it.unimi.dsi.fastutil.ints.Int2ReferenceMaps;
+import it.unimi.dsi.fastutil.ints.Int2ReferenceOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntConsumer;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import it.unimi.dsi.fastutil.objects.ObjectArraySet;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+import it.unimi.dsi.fastutil.objects.ObjectSet;
+
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.TickTask;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 
 import org.gtlcore.gtlcore.api.gui.MEPatternCatalystUIManager;
 import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigWidget;
+import org.gtlcore.gtlcore.client.gui.widget.PatternCycleWidget;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.PaginationUIManager;
+import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase;
+import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTrait;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine;
+import org.gtlcore.gtlcore.integration.ae2.AEUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 星律样板总成：在 GTLCore 库存ME样板总成（MEStockingPatternBufferPartMachine）基础上叠加配方类型过滤。
@@ -36,11 +82,30 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public static final int DEFAULT_ROWS_PER_PAGE = 6;
     public static final int DEFAULT_MAX_PAGES = 3;
     public static final int DEFAULT_PATTERN_COUNT = DEFAULT_PATTERNS_PER_ROW * DEFAULT_ROWS_PER_PAGE * DEFAULT_MAX_PAGES;
+    public static final int WILDCARD_PATTERN_SLOT_COUNT = 5;
+    private static final IGuiTexture STOCK_INPUT_ICON =
+            new ResourceTexture("gt_shanhai:textures/gui/stock_input_panel.png");
+    private static final IGuiTexture WILDCARD_INPUT_ICON = new TextTexture("*");
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             RecipeTypePatternBufferPartMachine.class, MEStockingPatternBufferPartMachine.MANAGED_FIELD_HOLDER);
 
     private final PaginationUIManager paginationUIManager;
     private final String[] patternRecipeTypeIds;
+
+    @Persisted
+    private final ItemStackTransfer wildcardPatternInventory;
+    private final List<IPatternDetails> wildcardPatterns;
+    private final List<ItemStack> wildcardPatternStacks;
+    private final List<MEPatternBufferPartMachineBase.InternalSlot> wildcardInternalSlots;
+    private final List<GTRecipe> wildcardResolvedRecipes;
+    private final List<String> wildcardAssignedRecipeTypeIds;
+    private final Object2IntMap<IPatternDetails> wildcardPatternToSlot;
+    private final Int2ReferenceMap<GTRecipe> wildcardRecipeCache;
+    private final RecipeTypePatternWildcardPersistence wildcardPersistence;
+    private final InternalInventory combinedTerminalPatternInventory;
+    private IntConsumer wildcardRemoveSlotFromMap;
+    private boolean rebuildingWildcardPatterns;
+    private int selectedWildcardMotherSlot;
 
     public RecipeTypePatternBufferPartMachine(@Nullable IMachineBlockEntity holder) {
         this(holder, DEFAULT_PATTERNS_PER_ROW, DEFAULT_ROWS_PER_PAGE, DEFAULT_MAX_PAGES);
@@ -51,6 +116,19 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         super(holder, patternsPerRow * rowsPerPage * maxPages, IO.BOTH);
         this.patternRecipeTypeIds = new String[patternsPerRow * rowsPerPage * maxPages];
         Arrays.fill(this.patternRecipeTypeIds, "");
+        this.wildcardPatterns = new ObjectArrayList<>();
+        this.wildcardPatternStacks = new ObjectArrayList<>();
+        this.wildcardInternalSlots = new ObjectArrayList<>();
+        this.wildcardResolvedRecipes = new ObjectArrayList<>();
+        this.wildcardAssignedRecipeTypeIds = new ObjectArrayList<>();
+        this.wildcardPatternToSlot = new Object2IntOpenHashMap<>();
+        this.wildcardPatternToSlot.defaultReturnValue(-1);
+        this.wildcardRecipeCache = new Int2ReferenceOpenHashMap<>();
+        this.wildcardPersistence = new RecipeTypePatternWildcardPersistence();
+        this.wildcardPatternInventory = new ItemStackTransfer(WILDCARD_PATTERN_SLOT_COUNT);
+        this.wildcardPatternInventory.setFilter(WildcardPatternBridge::isWildcardPattern);
+        this.wildcardPatternInventory.setOnContentsChanged(this::onWildcardPatternInventoryChanged);
+        this.combinedTerminalPatternInventory = createCombinedTerminalPatternInventory(super.getTerminalPatternInventory());
 
         int uiWidth = Math.max(patternsPerRow * 18 + 16, 106);
         int uiHeight = rowsPerPage * 18 + 28;
@@ -61,9 +139,17 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     }
 
     @Override
+    protected MEPatternBufferRecipeHandlerTrait createRecipeHandler(IO io) {
+        return new RecipeTypePatternRecipeHandler(this, io);
+    }
+
+    @Override
     public void onLoad() {
         super.onLoad();
         refreshPatternRecipeTypes();
+        if (getLevel() instanceof ServerLevel serverLevel) {
+            serverLevel.getServer().tell(new TickTask(1, () -> refreshWildcardPatterns(true)));
+        }
     }
 
     @Override
@@ -76,6 +162,39 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     protected void refreshAllByProduct() {
         super.refreshAllByProduct();
         refreshPatternRecipeTypes();
+        refreshWildcardRecipeTypes();
+    }
+
+    @Override
+    protected void invalidateRecipeCaches() {
+        super.invalidateRecipeCaches();
+        clearWildcardRecipeCache();
+    }
+
+    @Override
+    public void onMachineRemoved() {
+        rebuildingWildcardPatterns = true;
+        refundWildcardSlots();
+        clearInventory(wildcardPatternInventory);
+        clearWildcardPatternData(true);
+        rebuildingWildcardPatterns = false;
+        super.onMachineRemoved();
+    }
+
+    @Override
+    public void saveCustomPersistedData(@NotNull CompoundTag tag, boolean forDrop) {
+        super.saveCustomPersistedData(tag, forDrop);
+        List<CompoundTag> internalSlotData = new ArrayList<>(wildcardInternalSlots.size());
+        for (MEPatternBufferPartMachineBase.InternalSlot internalSlot : wildcardInternalSlots) {
+            internalSlotData.add(internalSlot.isActive() ? internalSlot.serializeNBT() : null);
+        }
+        wildcardPersistence.save(tag, maxPatternCount, wildcardPatternStacks, internalSlotData, wildcardRecipeCache);
+    }
+
+    @Override
+    public void loadCustomPersistedData(@NotNull CompoundTag tag) {
+        super.loadCustomPersistedData(tag);
+        wildcardPersistence.load(tag);
     }
 
     @Override
@@ -94,13 +213,27 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Override
     public String gtShanhai$getPatternRecipeTypeId(int slot) {
-        if (slot < 0 || slot >= patternRecipeTypeIds.length) return "";
-        String typeId = patternRecipeTypeIds[slot];
+        if (slot < 0) return "";
+        String typeId;
+        if (slot < patternRecipeTypeIds.length) {
+            typeId = patternRecipeTypeIds[slot];
+        } else {
+            int localSlot = slot - maxPatternCount;
+            if (localSlot < 0 || localSlot >= wildcardResolvedRecipes.size()) return "";
+            GTRecipe recipe = wildcardResolvedRecipes.get(localSlot);
+            typeId = recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null
+                    ? "" : recipe.recipeType.registryName.toString();
+        }
         return typeId == null ? "" : typeId;
     }
 
     @Override
     public GTRecipe gtShanhai$getPatternRecipe(int slot) {
+        if (slot >= maxPatternCount) {
+            int localSlot = slot - maxPatternCount;
+            return localSlot >= 0 && localSlot < wildcardResolvedRecipes.size()
+                    ? wildcardResolvedRecipes.get(localSlot) : null;
+        }
         if (slot < 0 || slot >= patternRecipeTypeIds.length || slot >= getPatternInventory().getSlots()) return null;
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
         GTRecipe recipe = PatternRecipeTypeHelper.ensureRecipe(stack, getLevel());
@@ -115,11 +248,85 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Override
     public boolean gtShanhai$slotAllowsRecipe(int slot, GTRecipe recipe) {
+        if (slot >= maxPatternCount && gtShanhai$getPatternRecipe(slot) == null) return false;
+        if (PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) return true;
         return PatternRecipeTypeHelper.recipeMatchesTypeId(recipe, gtShanhai$getPatternRecipeTypeId(slot));
     }
 
     @Override
+    public int gtShanhai$getPatternSlotCount() {
+        return maxPatternCount + wildcardPatternStacks.size();
+    }
+
+    @Override
+    public ItemStack gtShanhai$getPatternStack(int slot) {
+        if (slot >= 0 && slot < maxPatternCount) {
+            return getPatternInventory().getStackInSlot(slot);
+        }
+        int localSlot = slot - maxPatternCount;
+        return localSlot >= 0 && localSlot < wildcardPatternStacks.size()
+                ? wildcardPatternStacks.get(localSlot) : ItemStack.EMPTY;
+    }
+
+    @Override
+    protected @Nullable Integer getSlotIndexForPattern(IPatternDetails pattern) {
+        Integer normalSlot = super.getSlotIndexForPattern(pattern);
+        if (normalSlot != null) return normalSlot;
+        if (wildcardPatternToSlot == null) return null;
+        int slot = wildcardPatternToSlot.getInt(pattern);
+        return slot >= 0 ? slot : null;
+    }
+
+    @Override
+    protected int getInternalSlotCount() {
+        return maxPatternCount + (wildcardInternalSlots == null ? 0 : wildcardInternalSlots.size());
+    }
+
+    @Override
+    protected MEPatternBufferPartMachineBase.InternalSlot getInternalSlot(int slot) {
+        if (slot >= 0 && slot < maxPatternCount) return super.getInternalSlot(slot);
+        int localSlot = slot - maxPatternCount;
+        if (wildcardInternalSlots != null && localSlot >= 0 && localSlot < wildcardInternalSlots.size()) {
+            return wildcardInternalSlots.get(localSlot);
+        }
+        throw new IndexOutOfBoundsException("Wildcard pattern slot: " + slot);
+    }
+
+    @Override
+    protected boolean hasRecipeCacheInSlot(int slot) {
+        if (slot >= 0 && slot < maxPatternCount) return super.hasRecipeCacheInSlot(slot);
+        return wildcardRecipeCache != null && wildcardRecipeCache.containsKey(slot);
+    }
+
+    @Override
+    protected boolean hasPatternInSlot(int slot) {
+        if (slot >= 0 && slot < maxPatternCount) return super.hasPatternInSlot(slot);
+        int localSlot = slot - maxPatternCount;
+        return wildcardPatterns != null && localSlot >= 0 && localSlot < wildcardPatterns.size();
+    }
+
+    @Override
+    public List<IPatternDetails> getAvailablePatterns() {
+        List<IPatternDetails> patterns = new ArrayList<>(super.getAvailablePatterns());
+        if (wildcardPatterns != null) patterns.addAll(wildcardPatterns);
+        return List.copyOf(patterns);
+    }
+
+    @Override
+    public InternalInventory getTerminalPatternInventory() {
+        return combinedTerminalPatternInventory == null
+                ? super.getTerminalPatternInventory() : combinedTerminalPatternInventory;
+    }
+
+    @Override
+    protected @NotNull MEPatternTrait createMETrait() {
+        return new CombinedPatternTrait();
+    }
+
+    @Override
     public void attachConfigurators(@NotNull ConfiguratorPanel configuratorPanel) {
+        configuratorPanel.attachConfigurators(new StockInputConfigurator());
+        configuratorPanel.attachConfigurators(new WildcardPatternConfigurator());
         super.attachConfigurators(configuratorPanel);
     }
 
@@ -127,9 +334,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public @NotNull Widget createUIWidget() {
         int width = this.paginationUIManager.getUiWidth();
         int patternBottom = this.paginationUIManager.getUiHeight();
-        int stockLabelY = patternBottom + 6;
-        int stockWidgetY = stockLabelY + 12;
-        WidgetGroup group = new WidgetGroup(0, 0, width, stockWidgetY + 95);
+        WidgetGroup group = new WidgetGroup(0, 0, width, patternBottom);
         group.addWidget(new LabelWidget(8, 2, () -> this.isOnline ? "gtceu.gui.me_network.online" : "gtceu.gui.me_network.offline"));
         group.addWidget(new AETextInputButtonWidget(width - 78, 2, 70, 10)
                 .setText(this.customName)
@@ -139,17 +344,442 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                 this.catalystItems, this.catalystFluids, this.cacheRecipeCount, this::removeSlotFromGTRecipeCache);
         group.waitToAdded(catalystUIManager);
         group.addWidget(this.paginationUIManager.createPaginationUI(catalystUIManager::toggleFor));
-
-        group.addWidget(new LabelWidget(8, stockLabelY, () -> Component.translatable("gui.gtlcore.stock_input_config").getString()));
-        group.addWidget(new LabelWidget(width - 30, stockLabelY, () ->
-                FormattingUtil.formatNumbers(countConfiguredStockSlots()) + " / 32"));
-        group.addWidget(new AEDualConfigWidget((width - 144) / 2, stockWidgetY, this.stockItemHandler, this.stockFluidHandler, this::setPage, this.page));
         return group;
     }
 
     @Override
     public @NotNull ManagedFieldHolder getFieldHolder() {
         return MANAGED_FIELD_HOLDER;
+    }
+
+    private class StockInputConfigurator implements IFancyConfigurator {
+
+        @Override
+        public Component getTitle() {
+            return Component.translatable("gui.gtlcore.stock_input_config");
+        }
+
+        @Override
+        public IGuiTexture getIcon() {
+            return STOCK_INPUT_ICON;
+        }
+
+        @Override
+        public Widget createConfigurator() {
+            WidgetGroup group = new WidgetGroup(0, 0, 160, 109);
+            group.addWidget(new LabelWidget(8, 2,
+                    () -> Component.translatable("gui.gtlcore.stock_input_config").getString()));
+            group.addWidget(new LabelWidget(130, 2,
+                    () -> FormattingUtil.formatNumbers(countConfiguredStockSlots()) + " / 32"));
+            group.addWidget(new AEDualConfigWidget(8, 14, stockItemHandler, stockFluidHandler,
+                    RecipeTypePatternBufferPartMachine.this::setPage, page));
+            return group;
+        }
+    }
+
+    private class WildcardPatternConfigurator implements IFancyConfigurator {
+
+        private WidgetGroup configuratorPage;
+        private DraggableScrollableWidgetGroup recipeTypeList;
+
+        @Override
+        public Component getTitle() {
+            return Component.translatable("gui.gt_shanhai.wildcard_pattern_config");
+        }
+
+        @Override
+        public IGuiTexture getIcon() {
+            return WILDCARD_INPUT_ICON;
+        }
+
+        @Override
+        public Widget createConfigurator() {
+            configuratorPage = new WidgetGroup(0, 0, 160, 155);
+            fillConfigurator(configuratorPage);
+            return configuratorPage;
+        }
+
+        private void fillConfigurator(WidgetGroup group) {
+            List<GTRecipeType> hostTypes =
+                    WildcardPatternRecipeTypeBinding.collectHostRecipeTypes(getControllers());
+            group.addWidget(new LabelWidget(8, 2,
+                    () -> Component.translatable("gui.gt_shanhai.wildcard_pattern_config").getString()));
+            for (int slot = 0; slot < WILDCARD_PATTERN_SLOT_COUNT; slot++) {
+                int motherSlot = slot;
+                group.addWidget(new SlotWidget(wildcardPatternInventory, slot, 34 + slot * 18, 14)
+                        .setBackground(new IGuiTexture[]{com.gregtechceu.gtceu.api.gui.GuiTextures.SLOT,
+                                com.gregtechceu.gtceu.api.gui.GuiTextures.PATTERN_OVERLAY}));
+                String slotText = (selectedWildcardMotherSlot == slot ? "§a" : "§7") + (slot + 1);
+                group.addWidget(new ButtonWidget(35 + slot * 18, 33, 16, 10,
+                        new TextTexture(slotText, -1), clickData -> {
+                            selectedWildcardMotherSlot = motherSlot;
+                            rebuildConfigurator();
+                        }));
+            }
+            group.addWidget(new LabelWidget(8, 46,
+                    () -> Component.translatable("gui.gt_shanhai.wildcard_pattern_slot",
+                            selectedWildcardMotherSlot + 1, currentWildcardRecipeTypeText(hostTypes)).getString()));
+            group.addWidget(new LabelWidget(8, 59,
+                    () -> Component.translatable("gui.gt_shanhai.wildcard_pattern_expanded",
+                            wildcardPatterns.size()).getString()));
+            group.addWidget(new PatternCycleWidget(8, 71, 142, 36, () -> wildcardPatterns));
+
+            recipeTypeList = new DraggableScrollableWidgetGroup(8, 111, 142, 42);
+            recipeTypeList.setBackground(com.gregtechceu.gtceu.api.gui.GuiTextures.DISPLAY);
+            recipeTypeList.setYScrollBarWidth(4).setYBarStyle(
+                    new ColorRectTexture(0xFF3F4252),
+                    new ColorRectTexture(0xFFE0E2EA).setRadius(2));
+            group.addWidget(recipeTypeList);
+            addRecipeTypeButtons(hostTypes);
+        }
+
+        private void addRecipeTypeButtons(List<GTRecipeType> hostTypes) {
+            String assignedTypeId = currentWildcardRecipeTypeId();
+            int y = 2;
+            String autoText = (assignedTypeId.isEmpty() ? "§a> " : "§7")
+                    + Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString();
+            recipeTypeList.addWidget(new ButtonWidget(2, y, 134, 16,
+                    new TextTexture(autoText, -1), clickData -> {
+                        clearWildcardRecipeType(selectedWildcardMotherSlot);
+                        rebuildConfigurator();
+                    }));
+            y += 18;
+
+            if (hostTypes.isEmpty()) {
+                recipeTypeList.addWidget(new ImageWidget(2, y, 134, 16,
+                        new TextTexture(Component.translatable(
+                                "gui.gt_shanhai.wildcard_pattern_no_host_types").getString(), -1)));
+                return;
+            }
+
+            for (GTRecipeType type : hostTypes) {
+                if (type == null || type.registryName == null) continue;
+                boolean selected = type.registryName.toString().equals(assignedTypeId);
+                String text = (selected ? "§a> " : "§f") + wildcardRecipeTypeDisplayName(type);
+                recipeTypeList.addWidget(new ButtonWidget(2, y, 134, 16,
+                        new TextTexture(text, -1), clickData -> {
+                            assignWildcardRecipeType(selectedWildcardMotherSlot, type);
+                            rebuildConfigurator();
+                        }));
+                y += 18;
+            }
+        }
+
+        private void rebuildConfigurator() {
+            if (configuratorPage == null) return;
+            int scrollY = recipeTypeList == null ? 0 : recipeTypeList.getScrollYOffset();
+            configuratorPage.clearAllWidgets();
+            fillConfigurator(configuratorPage);
+            if (recipeTypeList != null) recipeTypeList.setScrollYOffset(scrollY);
+        }
+    }
+
+    private String currentWildcardRecipeTypeId() {
+        if (selectedWildcardMotherSlot < 0 || selectedWildcardMotherSlot >= WILDCARD_PATTERN_SLOT_COUNT) return "";
+        return PatternRecipeTypeHelper.readRecipeTypeId(
+                wildcardPatternInventory.getStackInSlot(selectedWildcardMotherSlot));
+    }
+
+    private String currentWildcardRecipeTypeText(List<GTRecipeType> hostTypes) {
+        String typeId = currentWildcardRecipeTypeId();
+        if (typeId.isEmpty()) {
+            return Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString();
+        }
+        for (GTRecipeType type : hostTypes) {
+            if (type != null && type.registryName != null && typeId.equals(type.registryName.toString())) {
+                return wildcardRecipeTypeDisplayName(type);
+            }
+        }
+        return Component.translatable("gui.gt_shanhai.wildcard_pattern_unavailable_type", typeId).getString();
+    }
+
+    private void assignWildcardRecipeType(int slot, GTRecipeType type) {
+        if (slot < 0 || slot >= WILDCARD_PATTERN_SLOT_COUNT || type == null || type.registryName == null) return;
+        ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
+        if (stack.isEmpty()) return;
+        wildcardPatternInventory.setStackInSlot(slot,
+                WildcardPatternRecipeTypeBinding.assign(stack, type.registryName.toString()));
+    }
+
+    private void clearWildcardRecipeType(int slot) {
+        if (slot < 0 || slot >= WILDCARD_PATTERN_SLOT_COUNT) return;
+        ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
+        if (stack.isEmpty()) return;
+        wildcardPatternInventory.setStackInSlot(slot, WildcardPatternRecipeTypeBinding.clear(stack));
+    }
+
+    private static String wildcardRecipeTypeDisplayName(GTRecipeType type) {
+        if (type == null || type.registryName == null) return "unknown";
+        String namespace = type.registryName.getNamespace();
+        String path = type.registryName.getPath();
+        String[] keys = {
+                type.registryName.toLanguageKey(),
+                "gtceu." + path,
+                "gtceu.recipe_type." + path,
+                "recipe_type." + path,
+                "gtceu.recipe_type." + namespace + "." + path
+        };
+        for (String key : keys) {
+            String translated = Component.translatable(key).getString();
+            if (!translated.equals(key)) return translated;
+        }
+        return path;
+    }
+
+    private class CombinedPatternTrait extends MEPatternTrait {
+
+        CombinedPatternTrait() {
+            super(RecipeTypePatternBufferPartMachine.this);
+        }
+
+        @Override
+        public RecipeTypePatternBufferPartMachine getMachine() {
+            return RecipeTypePatternBufferPartMachine.this;
+        }
+
+        @Override
+        public @NotNull ObjectSet<GTRecipe> getCachedGTRecipe() {
+            ObjectOpenHashSet<GTRecipe> result = new ObjectOpenHashSet<>();
+            for (Int2ReferenceMap.Entry<ObjectSet<GTRecipe>> entry : Int2ReferenceMaps.fastIterable(recipeMultipleCacheMap)) {
+                int slot = entry.getIntKey();
+                if (slot >= 0 && slot < maxPatternCount && cacheRecipe[slot]
+                        && internalInventory[slot].isActive()) {
+                    result.addAll(entry.getValue());
+                }
+            }
+            if (wildcardRecipeCache != null && wildcardInternalSlots != null) {
+                for (Int2ReferenceMap.Entry<GTRecipe> entry : Int2ReferenceMaps.fastIterable(wildcardRecipeCache)) {
+                    int slot = entry.getIntKey() - maxPatternCount;
+                    if (slot >= 0 && slot < wildcardInternalSlots.size()
+                            && wildcardInternalSlots.get(slot).isActive()) {
+                        result.add(entry.getValue());
+                    }
+                }
+            }
+            return result;
+        }
+
+        @Override
+        public void setSlotCacheRecipe(int index, GTRecipe recipe) {
+            if (index < maxPatternCount) {
+                if (recipe != null && recipe.recipeType != GTRecipeTypes.DUMMY_RECIPES) {
+                    ObjectSet<GTRecipe> recipes = recipeMultipleCacheMap.computeIfAbsent(index,
+                            ignored -> new ObjectArraySet<>());
+                    if (recipes.add(recipe)) {
+                        cacheRecipe[index] = recipes.size() >= cacheRecipeCount[index];
+                    }
+                }
+                return;
+            }
+            if (recipe != null && recipe.recipeType != GTRecipeTypes.DUMMY_RECIPES
+                    && wildcardInternalSlots != null && wildcardRecipeCache != null
+                    && index >= maxPatternCount
+                    && index < maxPatternCount + wildcardInternalSlots.size()) {
+                wildcardRecipeCache.put(index, recipe);
+                int localSlot = index - maxPatternCount;
+                wildcardResolvedRecipes.set(localSlot, recipe);
+                ItemStack stack = wildcardPatternStacks.get(localSlot);
+                PatternRecipeTypeHelper.writeRecipeType(stack, recipe);
+            }
+        }
+
+        @Override
+        public @NotNull Int2ReferenceMap<ObjectSet<GTRecipe>> getSlot2RecipesCache() {
+            Int2ReferenceMap<ObjectSet<GTRecipe>> result = new Int2ReferenceOpenHashMap<>();
+            result.putAll(recipeMultipleCacheMap);
+            if (wildcardRecipeCache != null) {
+                for (Int2ReferenceMap.Entry<GTRecipe> entry : Int2ReferenceMaps.fastIterable(wildcardRecipeCache)) {
+                    ObjectSet<GTRecipe> recipes = new ObjectArraySet<>();
+                    recipes.add(entry.getValue());
+                    result.put(entry.getIntKey(), recipes);
+                }
+            }
+            return result;
+        }
+
+        @Override
+        public void setOnPatternChange(IntConsumer removeMapOnSlot) {
+            wildcardRemoveSlotFromMap = removeMapOnSlot;
+            RecipeTypePatternBufferPartMachine.this.removeSlotFromMap = removeMapOnSlot;
+        }
+
+        @Override
+        public boolean hasCacheInSlot(int slot) {
+            return slot >= 0 && slot < maxPatternCount ? cacheRecipe[slot]
+                    : wildcardRecipeCache != null && wildcardRecipeCache.containsKey(slot);
+        }
+    }
+
+    private InternalInventory createCombinedTerminalPatternInventory(InternalInventory normalInventory) {
+        return new InternalInventory() {
+
+            @Override
+            public int size() {
+                return normalInventory.size() + WILDCARD_PATTERN_SLOT_COUNT;
+            }
+
+            @Override
+            public ItemStack getStackInSlot(int slot) {
+                if (slot < normalInventory.size()) return normalInventory.getStackInSlot(slot);
+                int wildcardSlot = slot - normalInventory.size();
+                return wildcardSlot >= 0 && wildcardSlot < WILDCARD_PATTERN_SLOT_COUNT
+                        ? wildcardPatternInventory.getStackInSlot(wildcardSlot) : ItemStack.EMPTY;
+            }
+
+            @Override
+            public void setItemDirect(int slot, ItemStack stack) {
+                if (slot < normalInventory.size()) {
+                    normalInventory.setItemDirect(slot, stack);
+                    return;
+                }
+                int wildcardSlot = slot - normalInventory.size();
+                if (wildcardSlot >= 0 && wildcardSlot < WILDCARD_PATTERN_SLOT_COUNT) {
+                    wildcardPatternInventory.setStackInSlot(wildcardSlot, stack);
+                    wildcardPatternInventory.onContentsChanged(wildcardSlot);
+                }
+            }
+
+            @Override
+            public boolean isItemValid(int slot, ItemStack stack) {
+                if (slot < normalInventory.size()) return normalInventory.isItemValid(slot, stack);
+                int wildcardSlot = slot - normalInventory.size();
+                return wildcardSlot >= 0 && wildcardSlot < WILDCARD_PATTERN_SLOT_COUNT
+                        && WildcardPatternBridge.isWildcardPattern(stack);
+            }
+        };
+    }
+
+    private void onWildcardPatternInventoryChanged() {
+        if (rebuildingWildcardPatterns || isRemote() || getLevel() == null) return;
+        rebuildingWildcardPatterns = true;
+        refundWildcardSlots();
+        clearWildcardPatternData(true);
+        rebuildingWildcardPatterns = false;
+        refreshWildcardPatterns(false);
+    }
+
+    private void refreshWildcardPatterns(boolean restorePersistedData) {
+        if (isRemote() || getLevel() == null) return;
+        rebuildingWildcardPatterns = true;
+        clearWildcardPatternData(false);
+
+        Map<CompoundTag, ExpandedWildcardPattern> uniquePatterns = new LinkedHashMap<>();
+        for (int motherSlot = 0; motherSlot < WILDCARD_PATTERN_SLOT_COUNT; motherSlot++) {
+            ItemStack wildcardStack = wildcardPatternInventory.getStackInSlot(motherSlot);
+            String assignedTypeId = PatternRecipeTypeHelper.readRecipeTypeId(wildcardStack);
+            for (IPatternDetails pattern : WildcardPatternBridge.expandPatterns(wildcardStack, getLevel())) {
+                ItemStack patternStack = pattern.getDefinition().toStack();
+                if (patternStack.isEmpty()) continue;
+                GTRecipe recipe = WildcardPatternRecipeTypeBinding.findRecipe(pattern, assignedTypeId);
+                if (!assignedTypeId.isEmpty() && recipe == null) continue;
+                if (recipe != null) PatternRecipeTypeHelper.writeRecipeType(patternStack, recipe);
+                uniquePatterns.putIfAbsent(patternStack.serializeNBT(),
+                        new ExpandedWildcardPattern(pattern, patternStack, recipe, assignedTypeId));
+            }
+        }
+
+        for (ExpandedWildcardPattern expanded : uniquePatterns.values()) {
+            int localSlot = wildcardPatterns.size();
+            int globalSlot = maxPatternCount + localSlot;
+            MEPatternBufferPartMachineBase.InternalSlot internalSlot =
+                    new StockingPatternBufferInternalSlot(globalSlot);
+            internalSlot.setOnContentsChanged(
+                    () -> ((RecipeTypePatternRecipeHandler) recipeHandler).notifyPatternListeners());
+            wildcardPatterns.add(expanded.pattern());
+            wildcardPatternStacks.add(expanded.stack());
+            wildcardResolvedRecipes.add(expanded.recipe());
+            wildcardAssignedRecipeTypeIds.add(expanded.assignedTypeId());
+            wildcardInternalSlots.add(internalSlot);
+            wildcardPatternToSlot.put(expanded.pattern(), globalSlot);
+        }
+
+        if (restorePersistedData) {
+            wildcardPersistence.restore(maxPatternCount, wildcardPatternStacks, wildcardInternalSlots.size(),
+                    (slot, slotData) -> wildcardInternalSlots.get(slot).deserializeNBT(slotData),
+                    wildcardResolvedRecipes, wildcardRecipeCache, this::refundPersistedWildcardSlots);
+        }
+        rebuildingWildcardPatterns = false;
+        RecipeTypePatternSearchHelper.clearPatternState(this);
+        needPatternSync = true;
+    }
+
+    private void refreshWildcardRecipeTypes() {
+        if (wildcardPatterns == null) return;
+        clearWildcardRecipeCache();
+        for (int i = 0; i < wildcardPatterns.size(); i++) {
+            String assignedTypeId = i < wildcardAssignedRecipeTypeIds.size()
+                    ? wildcardAssignedRecipeTypeIds.get(i) : "";
+            GTRecipe recipe = WildcardPatternRecipeTypeBinding.findRecipe(wildcardPatterns.get(i), assignedTypeId);
+            wildcardResolvedRecipes.set(i, recipe);
+            ItemStack stack = wildcardPatterns.get(i).getDefinition().toStack();
+            if (recipe != null) PatternRecipeTypeHelper.writeRecipeType(stack, recipe);
+            wildcardPatternStacks.set(i, stack);
+        }
+        RecipeTypePatternSearchHelper.clearPatternState(this);
+        needPatternSync = true;
+    }
+
+    private void clearWildcardPatternData(boolean clearPendingPersistence) {
+        if (wildcardPatterns != null) {
+            for (int localSlot = 0; localSlot < wildcardPatterns.size(); localSlot++) {
+                int globalSlot = maxPatternCount + localSlot;
+                if (wildcardRemoveSlotFromMap != null) wildcardRemoveSlotFromMap.accept(globalSlot);
+                notifyProxySlotRemoved(globalSlot);
+            }
+        }
+        if (wildcardRecipeCache != null) wildcardRecipeCache.clear();
+        if (wildcardPatterns != null) wildcardPatterns.clear();
+        if (wildcardPatternStacks != null) wildcardPatternStacks.clear();
+        if (wildcardInternalSlots != null) wildcardInternalSlots.clear();
+        if (wildcardResolvedRecipes != null) wildcardResolvedRecipes.clear();
+        if (wildcardAssignedRecipeTypeIds != null) wildcardAssignedRecipeTypeIds.clear();
+        if (wildcardPatternToSlot != null) wildcardPatternToSlot.clear();
+        if (clearPendingPersistence && wildcardPersistence != null) wildcardPersistence.clearPending();
+        RecipeTypePatternSearchHelper.clearPatternState(this);
+    }
+
+    private void clearWildcardRecipeCache() {
+        if (wildcardRecipeCache == null || wildcardRecipeCache.isEmpty()) return;
+        for (int slot : wildcardRecipeCache.keySet().toIntArray()) {
+            if (wildcardRemoveSlotFromMap != null) wildcardRemoveSlotFromMap.accept(slot);
+            notifyProxySlotRemoved(slot);
+        }
+        wildcardRecipeCache.clear();
+    }
+
+    private void refundWildcardSlots() {
+        if (wildcardInternalSlots == null) return;
+        for (MEPatternBufferPartMachineBase.InternalSlot slot : wildcardInternalSlots) {
+            refundSlot(slot.getItemInventory(), slot.getFluidInventory());
+        }
+        if (!buffer.isEmpty()) AEUtils.reFunds(buffer, getMainNode().getGrid(), actionSource);
+    }
+
+    private void refundPersistedWildcardSlots(List<CompoundTag> slotDataList) {
+        Object2LongOpenHashMap<AEItemKey> itemInventory = new Object2LongOpenHashMap<>();
+        Object2LongOpenHashMap<AEFluidKey> fluidInventory = new Object2LongOpenHashMap<>();
+        for (CompoundTag slotData : slotDataList) {
+            AEUtils.appendPersistedInventory(slotData.getList("inventory", Tag.TAG_COMPOUND),
+                    AEItemKey::fromTag, itemInventory);
+            AEUtils.appendPersistedInventory(slotData.getList("fluidInventory", Tag.TAG_COMPOUND),
+                    AEFluidKey::fromTag, fluidInventory);
+        }
+        refundSlot(itemInventory, fluidInventory);
+    }
+
+    private record ExpandedWildcardPattern(IPatternDetails pattern, ItemStack stack, GTRecipe recipe,
+                                           String assignedTypeId) {}
+
+    private static final class RecipeTypePatternRecipeHandler extends MEPatternBufferRecipeHandlerTrait {
+
+        RecipeTypePatternRecipeHandler(RecipeTypePatternBufferPartMachine machine, IO io) {
+            super(machine, io);
+        }
+
+        void notifyPatternListeners() {
+            getMeFluidHandler().notifyListeners();
+            getMeItemHandler().notifyListeners();
+        }
     }
 
     /** 统计已配置的库存输入格数（物品+流体），用于 UI 上的 "X / 32" 显示。 */

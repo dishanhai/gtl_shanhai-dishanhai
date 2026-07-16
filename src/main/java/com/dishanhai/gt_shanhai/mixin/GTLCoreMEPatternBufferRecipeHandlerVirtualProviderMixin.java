@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 
@@ -25,7 +26,8 @@ public abstract class GTLCoreMEPatternBufferRecipeHandlerVirtualProviderMixin {
     @Inject(method = "meHandleRecipeInner", at = @At("RETURN"), remap = false)
     private void gtShanhai$stripVirtualTargetsAfterRecipe(GTRecipe recipe, Object2LongMap<Ingredient> left,
             boolean simulate, int trySlot, CallbackInfoReturnable<Boolean> cir) {
-        if (simulate || !Boolean.TRUE.equals(cir.getReturnValue())) {
+        if (simulate || !Boolean.TRUE.equals(cir.getReturnValue())
+                || PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) {
             return;
         }
         Object slot = gtShanhai$getInternalSlotOrNull(trySlot);

@@ -76,7 +76,8 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     @Inject(method = "handleItemInternal", at = @At("RETURN"), remap = false)
     private void gtShanhai$restoreVirtualItems(Object2LongMap<Ingredient> ingredients, int circuitConfig,
             boolean simulate, CallbackInfoReturnable<Boolean> cir) {
-        if (!simulate && Boolean.TRUE.equals(cir.getReturnValue())) {
+        if (!simulate && Boolean.TRUE.equals(cir.getReturnValue())
+                && !PatternNotConsumableFilter.isActiveRecipeAuxiliaryIO()) {
             gtShanhai$stripVirtualItems();
         }
         gtShanhai$itemVirtualSnapshot = null;
@@ -91,7 +92,8 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     @Inject(method = "handleFluidInternal", at = @At("RETURN"), remap = false)
     private void gtShanhai$restoreVirtualFluids(Object2LongMap<FluidIngredient> ingredients,
             boolean simulate, CallbackInfoReturnable<Boolean> cir) {
-        if (!simulate && Boolean.TRUE.equals(cir.getReturnValue())) {
+        if (!simulate && Boolean.TRUE.equals(cir.getReturnValue())
+                && !PatternNotConsumableFilter.isActiveRecipeAuxiliaryIO()) {
             gtShanhai$stripVirtualFluids();
         }
         gtShanhai$fluidVirtualSnapshot = null;

@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.EnumSet;
 import java.util.Set;
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import com.gregtechceu.gtceu.api.data.RotationState;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
@@ -654,7 +655,9 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
 
         private void addTo(KeyCounter out) {
-            out.addAll(counter);
+            for (Object2LongMap.Entry<AEKey> entry : counter) {
+                out.add(entry.getKey(), entry.getLongValue());
+            }
         }
     }
 

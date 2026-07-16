@@ -345,6 +345,11 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         return "dishanhai:time_reversal_protocol".equals(id);
     }
 
+    /** 配方概率绕过是否已解锁且由玩家启用。 */
+    public boolean isChanceBypassEnabled() {
+        return bypassChance && isChanceBypassUnlocked();
+    }
+
     /** 获取当前产出倍率（解锁且启用时有效，否则返回1.0） */
     public float getOutputMultiplier() {
         if (!isOutputUnlocked() || !outputMultiplierEnabled) return 1.0f;
@@ -534,7 +539,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
             recipe.data.remove("ebf_temp");
             recipe.data.remove("blastFurnaceTemp");
         }
-        if (bypassChance && isChanceBypassUnlocked()) {
+        if (isChanceBypassEnabled()) {
             // 产出概率强制 100%（必定产出），输入概率强制 0%（永不消耗）
             recipe.outputs.values().forEach(list -> {
                 if (list != null) for (var c : list) if (c != null && c.chance != c.maxChance) c.chance = c.maxChance;

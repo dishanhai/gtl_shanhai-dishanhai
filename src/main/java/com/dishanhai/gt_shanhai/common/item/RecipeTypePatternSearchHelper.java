@@ -135,13 +135,7 @@ public final class RecipeTypePatternSearchHelper {
      * （AE2 样板 NBT 解码 + 配方全量匹配）只在缓存未命中时才触发一次。
      */
     private static GTRecipe getMarkedRecipeCached(MEPatternBufferPartMachineBase buffer, RecipeTypePatternSlotAccess access, int slot) {
-        int stackHash = 0;
-        if (buffer instanceof MEPatternBufferPartMachine mepbpm) {
-            var inventory = mepbpm.getPatternInventory();
-            if (inventory != null && slot >= 0 && slot < inventory.getSlots()) {
-                stackHash = System.identityHashCode(inventory.getStackInSlot(slot));
-            }
-        }
+        int stackHash = System.identityHashCode(access.gtShanhai$getPatternStack(slot));
         long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         synchronized (MARKED_RECIPE_CACHE) {
             it.unimi.dsi.fastutil.ints.Int2ObjectMap<MarkedRecipeCacheEntry> slotCache = MARKED_RECIPE_CACHE.get(buffer);
@@ -158,6 +152,20 @@ public final class RecipeTypePatternSearchHelper {
                     .put(slot, new MarkedRecipeCacheEntry(stackHash, revision, recipe));
         }
         return recipe;
+    }
+
+    /** 清理星律动态槽重建时的首配缓存和虚拟供料预算。 */
+    public static void clearPatternState(MEPatternBufferPartMachineBase buffer) {
+        if (buffer == null) return;
+        synchronized (ORDER_REMAINING_BUDGET_SLOTS) {
+            ORDER_REMAINING_BUDGET_SLOTS.remove(buffer);
+        }
+        synchronized (PATTERN_PEEK_CACHE) {
+            PATTERN_PEEK_CACHE.remove(buffer);
+        }
+        synchronized (MARKED_RECIPE_CACHE) {
+            MARKED_RECIPE_CACHE.remove(buffer);
+        }
     }
 
     public static Iterator<GTRecipe> searchRecipe(IRecipeLogicMachine machine) {
@@ -331,19 +339,18 @@ public final class RecipeTypePatternSearchHelper {
     private static void collectFirstSparkPatternRecipes(IRecipeCapabilityMachine capabilityMachine,
             Object ownerMachine, Object patternMachine, RecipeTypePatternSlotAccess access,
             int[] activeSlots, Set<GTRecipe> result) {
-        if (!(patternMachine instanceof MEPatternBufferPartMachine buffer)) return;
-        var inventory = buffer.getPatternInventory();
-        if (inventory == null) return;
-        int slotCount = inventory.getSlots();
+        if (!(patternMachine instanceof MEPatternBufferPartMachineBase buffer)) return;
+        int slotCount = access.gtShanhai$getPatternSlotCount();
         for (int slot = 0; slot < slotCount; slot++) {
             if (containsSlot(activeSlots, slot)) continue; // 真实 AE2 下单已激活，走既有分支，不碰虚拟下单状态
-            if (inventory.getStackInSlot(slot).isEmpty()) {
+            ItemStack patternStack = access.gtShanhai$getPatternStack(slot);
+            if (patternStack.isEmpty()) {
                 clearOrderFulfilled(buffer, slot); // 样板被取出：这一单彻底结束，下次放样板算新单
                 continue;
             }
             GTRecipe recipe = getMarkedRecipeCached(buffer, access, slot);
             if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
-                topUpVirtualSupply(buffer, slot, inventory.getStackInSlot(slot), recipe);
+                topUpVirtualSupply(buffer, slot, patternStack, recipe);
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
             }

@@ -54,6 +54,10 @@ public final class PatternNotConsumableFilter {
         ACTIVE_RECIPE.set(recipe);
     }
 
+    public static boolean isActiveRecipeAuxiliaryIO() {
+        return PatternRecipeExecutionGuard.isAuxiliaryIORecipe(ACTIVE_RECIPE.get());
+    }
+
     /**
      * 某个 AEKey 是否是"当前扣料配方"里的不消耗（chance==0）输入。虚拟目标 strip 的 keep 谓词——
      * 返回 true 表示这是催化剂虚拟目标，配方执行后要保留在场（不剥离），支撑同一单的后续执行。

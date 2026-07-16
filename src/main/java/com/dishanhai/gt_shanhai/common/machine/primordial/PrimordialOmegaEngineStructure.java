@@ -55,6 +55,18 @@ public class PrimordialOmegaEngineStructure {
                 new ResourceLocation("gt_shanhai", "primordial_cosmic_reactor"));
         Block molecularRiftCore = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_molecular_rift_core"));
+        Block tianqiongAssemblyCore = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_tianqiong_assembly_core"));
+        Block eternalSmeltingFurnace = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_eternal_smelting_furnace"));
+        Block worldlineTraversalMatrix = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_worldline_traversal_matrix"));
+        Block quantumDistortionMatrix = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_quantum_distortion_matrix"));
+        Block shaoguangAggregationCore = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_shaoguang_aggregation_core"));
+        Block weiyangReconstructionModule = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_weiyang_reconstruction_module"));
         Block engravingModule = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_engraving_module"));
         Block taixuSmeltingFurnace = ForgeRegistries.BLOCKS.getValue(
@@ -117,6 +129,12 @@ public class PrimordialOmegaEngineStructure {
                         .or(Predicates.blocks(supercriticalMatterGenerationCore))
                         .or(Predicates.blocks(cosmicReactor))
                         .or(Predicates.blocks(molecularRiftCore))
+                        .or(Predicates.blocks(tianqiongAssemblyCore))
+                        .or(Predicates.blocks(eternalSmeltingFurnace))
+                        .or(Predicates.blocks(worldlineTraversalMatrix))
+                        .or(Predicates.blocks(quantumDistortionMatrix))
+                        .or(Predicates.blocks(shaoguangAggregationCore))
+                        .or(Predicates.blocks(weiyangReconstructionModule))
                         .or(Predicates.blocks(taixuSmeltingFurnace))
                         .or(Predicates.blocks(antiEntropyCondensationCore))
                         .or(Predicates.blocks(divergenceGenerator))

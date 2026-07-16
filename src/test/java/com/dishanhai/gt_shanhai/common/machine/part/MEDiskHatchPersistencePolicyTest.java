@@ -16,6 +16,8 @@ class MEDiskHatchPersistencePolicyTest {
     private static final Path DROP_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "misc", "DiskMachineDropHandler.java");
     private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
+    private static final Path STORAGE_SERVICE_DELTA_CACHE_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "mixin", "StorageServiceDeltaCacheMixin.java");
 
     @Test
     void mountedCellsAlwaysReceiveAHostSaveProvider() throws IOException {
@@ -45,6 +47,20 @@ class MEDiskHatchPersistencePolicyTest {
 
         assertFalse(mixinConfig.contains("StorageServiceFastClearMixin"),
                 "AE2 NetworkStorage 不是线程安全容器，不能从后台线程全量扫描");
+    }
+
+    @Test
+    void storageServiceKeepsMenuCacheWarmWhenNoWatcherExists() throws IOException {
+        String source = Files.readString(STORAGE_SERVICE_DELTA_CACHE_MIXIN);
+
+        assertTrue(source.contains("method = \"onServerEndTick\""),
+                "无 watcher 的 AE2 StorageService tick 必须由山海缓存逻辑接管");
+        assertTrue(source.contains("this.interestManager.isEmpty()"),
+                "只接管原版 watcher 为空时的无条件判脏分支");
+        assertTrue(source.contains("if (!this.cachedStacksNeedUpdate)"),
+                "外部显式 invalidateCache 后仍必须保留下一次全量同步");
+        assertTrue(source.contains("ci.cancel();"),
+                "接管分支必须阻止原版每 tick 把 cachedStacksNeedUpdate 重新置 true");
     }
 
     @Test

@@ -24,6 +24,12 @@ item_ids:
   - gt_shanhai:primordial_supercritical_matter_generation_core
   - gt_shanhai:primordial_cosmic_reactor
   - gt_shanhai:primordial_molecular_rift_core
+  - gt_shanhai:primordial_tianqiong_assembly_core
+  - gt_shanhai:primordial_eternal_smelting_furnace
+  - gt_shanhai:primordial_worldline_traversal_matrix
+  - gt_shanhai:primordial_quantum_distortion_matrix
+  - gt_shanhai:primordial_shaoguang_aggregation_core
+  - gt_shanhai:primordial_weiyang_reconstruction_module
   - gt_shanhai:primordial_engraving_module
   - gt_shanhai:primordial_coin_forge
   - gt_shanhai:taixu_smelting_furnace
@@ -101,6 +107,12 @@ item_ids:
 * [<ItemLink id="gt_shanhai:primordial_supercritical_matter_generation_core" />](primordial_supercritical_matter_generation_core.md)：统合超临界合成、物质生成与质量发生。
 * [<ItemLink id="gt_shanhai:primordial_cosmic_reactor" />](primordial_cosmic_reactor.md)：处理粒子对撞、核聚变与原初恒星反应。
 * [<ItemLink id="gt_shanhai:primordial_molecular_rift_core" />](primordial_molecular_rift_core.md)：统合深度化学扭曲、大型化学反应和化学浸洗。
+* [<ItemLink id="gt_shanhai:primordial_tianqiong_assembly_core" />](primordial_tianqiong_assembly_core.md)：统合太空组装与超时空装配线。
+* [<ItemLink id="gt_shanhai:primordial_eternal_smelting_furnace" />](primordial_eternal_smelting_furnace.md)：统合超维熔炼、终极物质锻造、分子解构与混沌炼金。
+* [<ItemLink id="gt_shanhai:primordial_worldline_traversal_matrix" />](primordial_worldline_traversal_matrix.md)：处理魔力生成、宇宙探测、衰变、中子活化与基岩采掘。
+* [<ItemLink id="gt_shanhai:primordial_quantum_distortion_matrix" />](primordial_quantum_distortion_matrix.md)：处理量子操纵、奇点压缩、纳米制造与精密材料加工。
+* [<ItemLink id="gt_shanhai:primordial_shaoguang_aggregation_core" />](primordial_shaoguang_aggregation_core.md)：统合聚合核心、龙脉结晶与创造聚合。
+* [<ItemLink id="gt_shanhai:primordial_weiyang_reconstruction_module" />](primordial_weiyang_reconstruction_module.md)：处理物质异化、梦魇合成、电磁共振、地脉断层与虚空聚流。
 * [<ItemLink id="gt_shanhai:primordial_engraving_module" />](primordial_engraving_module.md)：面向电路制造的专用模块，适合蚀刻和精密加工。
 * [<ItemLink id="gt_shanhai:primordial_coin_forge" />](primordial_coin_forge.md)：专门负责把原初物质铸成 GT 币。
 * [<ItemLink id="gt_shanhai:taixu_smelting_furnace" />](taixu_smelting_furnace.md)：太虚熔炼炉，必须装在运行中的原初引擎上，适合熔炼和合金处理。
@@ -151,6 +163,12 @@ item_ids:
 * [<ItemLink id="gt_shanhai:primordial_supercritical_matter_generation_core" />](primordial_supercritical_matter_generation_core.md)：统合超临界合成、物质生成与质量发生。
 * [<ItemLink id="gt_shanhai:primordial_cosmic_reactor" />](primordial_cosmic_reactor.md)：处理粒子对撞、核聚变与原初恒星反应。
 * [<ItemLink id="gt_shanhai:primordial_molecular_rift_core" />](primordial_molecular_rift_core.md)：统合深度化学扭曲、大型化学反应和化学浸洗。
+* [<ItemLink id="gt_shanhai:primordial_tianqiong_assembly_core" />](primordial_tianqiong_assembly_core.md)：统合太空组装与超时空装配线。
+* [<ItemLink id="gt_shanhai:primordial_eternal_smelting_furnace" />](primordial_eternal_smelting_furnace.md)：统合超维熔炼、终极物质锻造、分子解构与混沌炼金。
+* [<ItemLink id="gt_shanhai:primordial_worldline_traversal_matrix" />](primordial_worldline_traversal_matrix.md)：处理魔力生成、宇宙探测、衰变、中子活化与基岩采掘。
+* [<ItemLink id="gt_shanhai:primordial_quantum_distortion_matrix" />](primordial_quantum_distortion_matrix.md)：处理量子操纵、奇点压缩、纳米制造与精密材料加工。
+* [<ItemLink id="gt_shanhai:primordial_shaoguang_aggregation_core" />](primordial_shaoguang_aggregation_core.md)：统合聚合核心、龙脉结晶与创造聚合。
+* [<ItemLink id="gt_shanhai:primordial_weiyang_reconstruction_module" />](primordial_weiyang_reconstruction_module.md)：处理物质异化、梦魇合成、电磁共振、地脉断层与虚空聚流。
 * [<ItemLink id="gt_shanhai:primordial_engraving_module" />](primordial_engraving_module.md)：面向电路制造的专用模块，适合蚀刻和精密加工。
 * [<ItemLink id="gt_shanhai:primordial_coin_forge" />](primordial_coin_forge.md)：专门负责把原初物质铸成 GT 币。
 * [<ItemLink id="gt_shanhai:taixu_smelting_furnace" />](taixu_smelting_furnace.md)：太虚熔炼炉，必须装在运行中的原初引擎上，适合熔炼和合金处理。

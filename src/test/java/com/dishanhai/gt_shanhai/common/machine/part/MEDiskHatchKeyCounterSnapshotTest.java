@@ -18,15 +18,20 @@ import java.io.InputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class MEDiskHatchKeyCounterSnapshotTest {
 
     private static final String KEY_COUNTER = "appeng.api.stacks.KeyCounter";
     private static final String SNAPSHOT = MEDiskHatchPartMachine.class.getName() + "$KeyCounterSnapshot";
+    private static final Path HATCH_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "machine", "part", "MEDiskHatchPartMachine.java");
     private static final AEKeyType TEST_KEY_TYPE = new AEKeyType(
             new ResourceLocation("gt_shanhai", "snapshot_test"), TestKey.class, Component.literal("snapshot test")) {
         @Override
@@ -77,6 +82,16 @@ public class MEDiskHatchKeyCounterSnapshotTest {
         assertSame(backingIndex, backingIndex(out, key));
         assertEquals(11L, get(counterType, out, key));
         assertEquals(1, size(counterType, out));
+    }
+
+    @Test
+    void snapshotReplayAvoidsBulkCopyingVariantSubmaps() throws IOException {
+        String source = Files.readString(HATCH_SOURCE);
+
+        assertEquals(-1, source.indexOf("out.addAll(counter)"),
+                "KeyCounterSnapshot.addTo 不能整表 addAll，否则空输出计数器会触发 VariantCounter.copy()");
+        assertTrue(source.contains("out.add(entry.getKey(), entry.getLongValue())"),
+                "KeyCounterSnapshot.addTo 应逐条回放，避开 AE2 子表 copy 热点");
     }
 
     private static Object newCounter(Class<?> counterType) throws Exception {

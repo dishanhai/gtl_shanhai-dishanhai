@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.api;
 
 import appeng.api.crafting.IPatternDetails;
 
+import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -22,6 +23,9 @@ public final class PatternIdentityGuard {
     }
 
     public static boolean slotRejectsRecipe(MetaMachine handlerMachine, GTRecipe recipe, int trySlot) {
+        if (PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) {
+            return false;
+        }
         if (!(handlerMachine instanceof RecipeTypePatternBufferPartMachine)) {
             return false;
         }
