@@ -116,6 +116,7 @@
     "GuiGraphicsCustomTooltipMixin",
     "GTLytSlotItemCountFormatMixin",
     "GTLytSlotGridOverflowMixin",
-    "EaepProviderSelectScreenRecipeTypeMixin"
+    "EaepProviderSelectScreenRecipeTypeMixin",
+    "EaepGtlCoreUploadButtonLayoutMixin"
   ]
 }
