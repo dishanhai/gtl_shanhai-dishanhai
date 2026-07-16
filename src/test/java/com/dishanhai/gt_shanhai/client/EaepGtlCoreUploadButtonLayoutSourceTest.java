@@ -23,9 +23,14 @@ class EaepGtlCoreUploadButtonLayoutSourceTest {
 
         assertTrue(config.contains("\"EaepGtlCoreUploadButtonLayoutMixin\""),
                 "布局兼容 Mixin 必须注册在客户端列表");
-        assertTrue(source.contains("priority = 900")
-                        && source.contains("method = \"updateBeforeRender\""),
-                "必须在 GTLCore 每帧更新坐标后执行");
+        assertTrue(source.contains("method = \"render\"")
+                        && source.contains("target = \"Lappeng/client/gui/AEBaseScreen;updateBeforeRender()V\"")
+                        && source.contains("shift = At.Shift.AFTER"),
+                "必须等所有模组完成 updateBeforeRender 后再调整布局");
+        assertTrue(source.contains("\"eap$uploadBtn\"")
+                        && source.contains("\"gtlcore$quickUploadButton\"")
+                        && source.contains("\"gtlcore$quickUploadUndoButton\""),
+                "必须通过已注入字段取得按钮，不能依赖匿名内部类运行时名称");
         assertTrue(source.contains("gtShanhai$overlaps"),
                 "没有发生按钮重叠时不得改变 GTLCore 原布局");
         assertTrue(source.contains("quickUploadButton.getY() + quickUploadButton.getHeight() + 2"),
