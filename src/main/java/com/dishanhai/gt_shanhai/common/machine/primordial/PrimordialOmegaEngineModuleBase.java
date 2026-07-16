@@ -966,6 +966,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             addEnergyDisplay(textList);
             addParallelDisplay(textList);
             addWorkingStatus(textList);
+            addRecipeDiagnosisDisplay(textList);
             if (lastModuleConditionError != null) {
                 textList.add(Component.literal(lastModuleConditionError));
             }
@@ -975,5 +976,24 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         }
         textList.add(Component.translatable("gt_shanhai.machine.primordial_omega_module.name")
                 .withStyle(ChatFormatting.GOLD));
+    }
+
+    /**
+     * 临时排障用：暴露本模块配方查找失败原因/锁定状态，供在游戏内直接观察卡产原因
+     * （同款诊断此前只挂在主机 PrimordialOmegaEngineMachine 上，模块自身的锁定状态一直不可见）。
+     * 问题定位后应移除。
+     */
+    private void addRecipeDiagnosisDisplay(List<Component> textList) {
+        var logic = getRecipeLogic();
+        textList.add(Component.literal("§7[诊断] 已选类型: " + getSelectedRecipeTypeCount()
+                + " §7锁定: " + logic.isLock()));
+        var locked = logic.getLockRecipe();
+        if (locked != null) {
+            textList.add(Component.literal("§7[诊断] 锁定配方: " + locked.getId()));
+        }
+        var status = logic.getRecipeStatus();
+        if (status != null && !status.isSuccess() && status.reason() != null) {
+            textList.add(Component.literal("§c[诊断] 上次失败: ").append(status.reason()));
+        }
     }
 }

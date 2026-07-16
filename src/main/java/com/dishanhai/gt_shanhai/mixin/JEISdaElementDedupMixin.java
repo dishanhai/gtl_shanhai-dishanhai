@@ -47,8 +47,6 @@ public class JEISdaElementDedupMixin {
         if (itemId == null || !"gt_shanhai:super_disk_array".equals(itemId.toString())) return null;
 
         var tag = stack.getTag();
-        if (tag == null) return "empty";
-        if (tag.hasUUID(SuperDiskArrayInventory.TAG_UUID)) return tag.getUUID(SuperDiskArrayInventory.TAG_UUID).toString();
-        return SuperDiskArrayInventory.generateDeterministicUUID(tag).toString();
+        return SuperDiskArrayInventory.getJeiSubtypeKey(tag);
     }
 }

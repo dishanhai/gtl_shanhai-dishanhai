@@ -75,6 +75,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue runtimeRecipeCacheDiagnostics;
         /** KJS 配方库磁盘缓存 — 是否启用启动期缓存优化 */
         public ForgeConfigSpec.BooleanValue kjsRecipeLibraryCacheEnabled;
+        /** AE 网络库存增量刷新缓存 — 是否启用性能优化 */
+        public ForgeConfigSpec.BooleanValue aeStorageDeltaCacheEnabled;
 
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("tag_filter_bus");
@@ -218,6 +220,15 @@ public final class DShanhaiConfig {
                              "正常游玩或生产环境不建议开启；关闭时完整使用 KubeJS/Rhino 原始配方注册与原版配方库",
                              "修改后需重启游戏或服务端生效")
                     .define("enabled", false);
+            builder.pop();
+
+            builder.push("ae_storage_delta_cache");
+            aeStorageDeltaCacheEnabled = builder
+                    .comment("AE 网络库存增量刷新缓存优化（默认开启）",
+                             "true=仅当 NetworkStorage.insert/extract 记录到库存变化时才做全量重扫，其余 tick 跳过重扫（性能更好）",
+                             "false=关闭该优化，每次都强制全量重扫库存，保证 ME 输出仓室返回、取出物品、取出磁盘等",
+                             "不经过 insert/extract 记录路径的变化也能被及时刷新（性能开销恢复为未优化前水平）")
+                    .define("enabled", true);
             builder.pop();
         }
     }

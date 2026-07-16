@@ -30,6 +30,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.List;
 import java.util.Set;
+import java.util.function.LongPredicate;
 
 public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
 
@@ -186,17 +187,21 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         for (int i = 0; i < size; i++) {
             GTRecipe recipe = parallelData.getOriginRecipeList().get(i);
             long parallel = parallelData.getParallels()[i];
-            BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
 
             if (parallelData.getShouldProcess()) {
+                GTRecipe scaledRecipe = findMatchableScaledRecipe(recipe, parallel);
+                if (scaledRecipe == null) {
+                    continue;
+                }
+                parallel = ((org.gtlcore.gtlcore.api.recipe.IGTRecipe) scaledRecipe).getRealParallels();
+                BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
                 if (energyConsumer && nextEu.compareTo(maxTotalEu) > 0) {
                     if (accumulatedEu.signum() == 0) {
                         RecipeResult.of(getMachine(), RecipeResult.FAIL_NO_ENOUGH_EU_IN);
                     }
                     continue;
                 }
-                GTRecipe processed = IParallelLogic.getRecipeOutputChance(machine,
-                        RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel));
+                GTRecipe processed = IParallelLogic.getRecipeOutputChance(machine, scaledRecipe);
                 if (matchRecipeInputHandlePartCache(processed)
                         && handleRecipeInputHandlePartCache(processed)) {
                     accumulatedEu = nextEu;
@@ -205,6 +210,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                             (List<Content>) fluidOutputs);
                 }
             } else {
+                BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
                 accumulatedEu = nextEu;
                 List<GTRecipe> processedRecipes = parallelData.getProcessedRecipeList();
                 if (processedRecipes != null) {
@@ -223,6 +229,47 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             return null;
         }
         return buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
+    }
+
+    private GTRecipe findMatchableScaledRecipe(GTRecipe recipe, long requestedParallel) {
+        long parallel = findHighestMatchableParallel(requestedParallel, candidate ->
+                matchRecipeInputHandlePartCache(
+                        RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, candidate)));
+        if (parallel <= 0L) {
+            return null;
+        }
+        return RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel);
+    }
+
+    static long findHighestMatchableParallel(long requestedParallel, LongPredicate canMatch) {
+        if (requestedParallel <= 0L || canMatch == null) {
+            return 0L;
+        }
+        if (canMatch.test(requestedParallel)) {
+            return requestedParallel;
+        }
+        if (requestedParallel == 1L) {
+            return 0L;
+        }
+
+        long oneLess = requestedParallel - 1L;
+        if (canMatch.test(oneLess)) {
+            return oneLess;
+        }
+
+        long low = 1L;
+        long high = requestedParallel - 2L;
+        long best = 0L;
+        while (low <= high) {
+            long middle = low + ((high - low) >>> 1);
+            if (canMatch.test(middle)) {
+                best = middle;
+                low = middle + 1L;
+            } else {
+                high = middle - 1L;
+            }
+        }
+        return best;
     }
 
     private BigInteger calculateRecipeEu(GTRecipe recipe, long parallel, double euMultiplier) {

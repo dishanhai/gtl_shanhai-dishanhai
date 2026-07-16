@@ -1,8 +1,11 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import appeng.api.networking.IGridNode;
+import appeng.api.networking.security.IActionHost;
 import appeng.api.networking.storage.IStorageService;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.KeyCounter;
+import appeng.api.storage.ITerminalHost;
 import appeng.api.storage.MEStorage;
 import appeng.menu.AEBaseMenu;
 import appeng.menu.me.common.IncrementalUpdateHelper;
@@ -30,7 +33,8 @@ import java.util.Set;
 public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu {
 
     @Shadow @Nullable protected MEStorage storage;
-    @Shadow @Nullable private appeng.api.networking.IGridNode networkNode;
+    @Shadow @Nullable private IGridNode networkNode;
+    @Shadow @Final private ITerminalHost host;
     @Shadow @Final private IncrementalUpdateHelper updateHelper;
     @Shadow private KeyCounter previousAvailableStacks;
 
@@ -101,7 +105,7 @@ public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu
         return this.gtShanhai$currentChangedKeys;
     }
 
-    @Inject(method = "m_38946_", at = @At("TAIL"), remap = false, require = 0)
+    @Inject(method = "m_38946_", at = @At("TAIL"), remap = false)
     private void gtShanhai$rememberRevisionAfterBroadcast(CallbackInfo ci) {
         if (!isServerSide()) {
             return;
@@ -118,8 +122,12 @@ public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu
     @Unique
     @Nullable
     private IStorageService gtShanhai$getStorageService() {
-        if (this.networkNode == null) return null;
-        var grid = this.networkNode.getGrid();
+        IGridNode node = this.networkNode;
+        if (node == null && this.host instanceof IActionHost actionHost) {
+            node = actionHost.getActionableNode();
+        }
+        if (node == null) return null;
+        var grid = node.getGrid();
         if (grid == null) return null;
         return grid.getStorageService();
     }

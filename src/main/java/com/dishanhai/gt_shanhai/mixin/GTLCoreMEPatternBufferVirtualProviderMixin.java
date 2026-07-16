@@ -5,8 +5,10 @@ import appeng.api.networking.IManagedGridNode;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
 
+import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
@@ -40,30 +42,81 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
     @Shadow
     protected abstract int getInternalSlotCount();
 
+    @Override
+    public void gtShanhai$restoreVirtualTargetsFromPatterns(Iterable<IPatternDetails> patterns) {
+        if (patterns == null) return;
+        for (IPatternDetails details : patterns) {
+            if (!VirtualPatternEncodingHelper.containsVirtualProviderPattern(details)) continue;
+            Integer slotIndex = getSlotIndexForPattern(details);
+            if (slotIndex == null || slotIndex < 0 || slotIndex >= getInternalSlotCount()) continue;
+            Object slot = gtShanhai$getInternalSlot(slotIndex);
+            if (!(slot instanceof VirtualPatternBufferSlotAccess access)) continue;
+            for (IPatternDetails.IInput input : details.getInputs()) {
+                if (!VirtualPatternEncodingHelper.isPresenceInput(input)) continue;
+                GenericStack[] possible = input.getPossibleInputs();
+                if (possible != null && possible.length > 0 && possible[0] != null) {
+                    AEKey key = possible[0].what();
+                    if (!access.gtShanhai$hasVirtualTarget(key)) {
+                        access.gtShanhai$restoreVirtualTarget(key, Long.MAX_VALUE);
+                    }
+                }
+            }
+            access.gtShanhai$syncVirtualTargetsToCatalyst();
+        }
+    }
+
     @Inject(method = "pushPattern", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$pushVirtualProviderPattern(IPatternDetails patternDetails, KeyCounter[] inputHolder,
             CallbackInfoReturnable<Boolean> cir) {
         if (!VirtualPatternEncodingHelper.containsVirtualProviderPattern(patternDetails)) {
+            QuantumDiagnostics.hit("patternBuffer.pushPattern.notVirtual",
+                    "machine=" + gtShanhai$describeSelf() + " pattern=" + patternDetails);
             return;
         }
         Integer slotIndex = getSlotIndexForPattern(patternDetails);
         IManagedGridNode mainNode = gtShanhai$getMainNode();
         if (mainNode == null || !mainNode.isActive() || slotIndex == null || slotIndex < 0
                 || slotIndex >= getInternalSlotCount()) {
+            QuantumDiagnostics.hit("patternBuffer.pushPattern.rejected",
+                    "machine=" + gtShanhai$describeSelf() + " mainNodeNull=" + (mainNode == null)
+                            + " mainNodeActive=" + (mainNode != null && mainNode.isActive())
+                            + " slotIndex=" + slotIndex + " slotCount=" + getInternalSlotCount()
+                            + " pattern=" + patternDetails);
             cir.setReturnValue(false);
             return;
         }
 
         Object slot = gtShanhai$getInternalSlot(slotIndex);
         if (slot == null) {
+            QuantumDiagnostics.hit("patternBuffer.pushPattern.slotNull",
+                    "machine=" + gtShanhai$describeSelf() + " slotIndex=" + slotIndex);
             cir.setReturnValue(false);
             return;
         }
-        VirtualPatternEncodingHelper.pushPatternInputsIncludingVirtual(patternDetails, inputHolder,
-                (what, amount) -> gtShanhai$addToSlot(slot, what, amount),
-                (what, amount) -> gtShanhai$addVirtualTargetToSlot(slot, what, amount));
+        try {
+            VirtualPatternEncodingHelper.pushPatternInputsIncludingVirtual(patternDetails, inputHolder,
+                    (what, amount) -> gtShanhai$addToSlot(slot, what, amount),
+                    (what, amount) -> gtShanhai$addVirtualTargetToSlot(slot, what, amount));
+        } catch (RuntimeException e) {
+            QuantumDiagnostics.hit("patternBuffer.pushPattern.throw",
+                    "machine=" + gtShanhai$describeSelf() + " slotIndex=" + slotIndex
+                            + " pattern=" + patternDetails + " error=" + e);
+            cir.setReturnValue(false);
+            return;
+        }
         gtShanhai$notifySlotChanged(slot);
+        QuantumDiagnostics.hit("patternBuffer.pushPattern.success",
+                "machine=" + gtShanhai$describeSelf() + " slotIndex=" + slotIndex + " pattern=" + patternDetails);
         cir.setReturnValue(true);
+    }
+
+    private String gtShanhai$describeSelf() {
+        try {
+            return String.valueOf(((Object) this).getClass().getSimpleName()) + "@"
+                    + Integer.toHexString(System.identityHashCode(this));
+        } catch (RuntimeException ignored) {
+            return "?";
+        }
     }
 
     @Inject(method = "refundSlot", at = @At("HEAD"), remap = false)

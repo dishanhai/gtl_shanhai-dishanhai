@@ -5,15 +5,18 @@ import appeng.api.inventories.InternalInventory;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 
+import com.dishanhai.gt_shanhai.api.gui.configurators.FancyConfiguratorSidebarPage;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSlotAccess;
+import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternBridge;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
+import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
@@ -57,7 +60,6 @@ import net.minecraft.world.item.ItemStack;
 import org.gtlcore.gtlcore.api.gui.MEPatternCatalystUIManager;
 import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigWidget;
 import org.gtlcore.gtlcore.client.gui.widget.PatternCycleWidget;
-import org.gtlcore.gtlcore.common.machine.multiblock.part.PaginationUIManager;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTrait;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine;
@@ -86,10 +88,19 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private static final IGuiTexture STOCK_INPUT_ICON =
             new ResourceTexture("gt_shanhai:textures/gui/stock_input_panel.png");
     private static final IGuiTexture WILDCARD_INPUT_ICON = new TextTexture("*");
+    private static final int[] NO_ACTIVE_UNCACHED_SLOTS = new int[0];
+    private static final int PARENT_REFUND = 0;
+    private static final int PARENT_SHARED_ITEM = 1;
+    private static final int PARENT_SHARED_FLUID = 2;
+    private static final int PARENT_SHARED_CIRCUIT = 3;
+    private static final int PARENT_BYPRODUCT = 4;
+    private static final int PARENT_TERMINAL_VISIBILITY = 5;
+    private static final int PARENT_PATTERN_CIRCUIT = 6;
+    private static final int PARENT_ADVANCED_ME = 7;
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             RecipeTypePatternBufferPartMachine.class, MEStockingPatternBufferPartMachine.MANAGED_FIELD_HOLDER);
 
-    private final PaginationUIManager paginationUIManager;
+    private final CachedPatternPaginationUIManager paginationUIManager;
     private final String[] patternRecipeTypeIds;
 
     @Persisted
@@ -106,6 +117,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private IntConsumer wildcardRemoveSlotFromMap;
     private boolean rebuildingWildcardPatterns;
     private int selectedWildcardMotherSlot;
+    private int[] activeUncachedSlotsScratch;
 
     public RecipeTypePatternBufferPartMachine(@Nullable IMachineBlockEntity holder) {
         this(holder, DEFAULT_PATTERNS_PER_ROW, DEFAULT_ROWS_PER_PAGE, DEFAULT_MAX_PAGES);
@@ -114,6 +126,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public RecipeTypePatternBufferPartMachine(@Nullable IMachineBlockEntity holder, int patternsPerRow,
             int rowsPerPage, int maxPages) {
         super(holder, patternsPerRow * rowsPerPage * maxPages, IO.BOTH);
+        this.activeUncachedSlotsScratch =
+                new int[patternsPerRow * rowsPerPage * maxPages + WILDCARD_PATTERN_SLOT_COUNT];
         this.patternRecipeTypeIds = new String[patternsPerRow * rowsPerPage * maxPages];
         Arrays.fill(this.patternRecipeTypeIds, "");
         this.wildcardPatterns = new ObjectArrayList<>();
@@ -132,7 +146,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
         int uiWidth = Math.max(patternsPerRow * 18 + 16, 106);
         int uiHeight = rowsPerPage * 18 + 28;
-        this.paginationUIManager = new PaginationUIManager(patternsPerRow, rowsPerPage, maxPages, uiWidth, uiHeight,
+        this.paginationUIManager = new CachedPatternPaginationUIManager(
+                patternsPerRow, rowsPerPage, maxPages, uiWidth, uiHeight,
                 this::onPatternChange,
                 slot -> Boolean.valueOf(slot != null && slot >= 0 && slot < this.cacheRecipe.length && this.cacheRecipe[slot]),
                 getPatternInventory());
@@ -146,6 +161,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @Override
     public void onLoad() {
         super.onLoad();
+        if ((Object) this instanceof VirtualPatternBufferMachineAccess access) {
+            access.gtShanhai$restoreVirtualTargetsFromPatterns(getAvailablePatterns());
+        }
         refreshPatternRecipeTypes();
         if (getLevel() instanceof ServerLevel serverLevel) {
             serverLevel.getServer().tell(new TickTask(1, () -> refreshWildcardPatterns(true)));
@@ -293,6 +311,25 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     }
 
     @Override
+    protected int[] getActiveAndUnCachedSlots() {
+        int slotCount = getInternalSlotCount();
+        if (activeUncachedSlotsScratch.length < slotCount) {
+            activeUncachedSlotsScratch = Arrays.copyOf(activeUncachedSlotsScratch, slotCount);
+        }
+
+        int activeCount = 0;
+        for (int slotIndex = 0; slotIndex < slotCount; slotIndex++) {
+            MEPatternBufferPartMachineBase.InternalSlot internalSlot = getInternalSlot(slotIndex);
+            if (internalSlot.isActive() && !hasRecipeCacheInSlot(slotIndex)) {
+                activeUncachedSlotsScratch[activeCount++] = slotIndex;
+            }
+        }
+        return activeCount == 0
+                ? NO_ACTIVE_UNCACHED_SLOTS
+                : Arrays.copyOf(activeUncachedSlotsScratch, activeCount);
+    }
+
+    @Override
     protected boolean hasRecipeCacheInSlot(int slot) {
         if (slot >= 0 && slot < maxPatternCount) return super.hasRecipeCacheInSlot(slot);
         return wildcardRecipeCache != null && wildcardRecipeCache.containsKey(slot);
@@ -325,9 +362,60 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Override
     public void attachConfigurators(@NotNull ConfiguratorPanel configuratorPanel) {
-        configuratorPanel.attachConfigurators(new StockInputConfigurator());
-        configuratorPanel.attachConfigurators(new WildcardPatternConfigurator());
-        super.attachConfigurators(configuratorPanel);
+        List<IFancyConfigurator> parentConfigurators = collectParentConfigurators();
+        if (PARENT_REFUND < parentConfigurators.size()) {
+            configuratorPanel.attachConfigurators(parentConfigurators.get(PARENT_REFUND));
+        }
+    }
+
+    @Override
+    public void attachSideTabs(TabsWidget sideTabs) {
+        super.attachSideTabs(sideTabs);
+        List<IFancyConfigurator> parentConfigurators = collectParentConfigurators();
+        sideTabs.attachSubTab(createStockInputSidebarPage(parentConfigurators));
+        sideTabs.attachSubTab(FancyConfiguratorSidebarPage.single(new WildcardPatternConfigurator()));
+        sideTabs.attachSubTab(createGroupedSidebarPage(
+                "gui.gt_shanhai.pattern_buffer_shared_inputs", 2, parentConfigurators,
+                PARENT_SHARED_ITEM, PARENT_SHARED_FLUID, PARENT_SHARED_CIRCUIT));
+        sideTabs.attachSubTab(createGroupedSidebarPage(
+                "gui.gt_shanhai.pattern_buffer_pattern_behavior", 1, parentConfigurators,
+                PARENT_BYPRODUCT, PARENT_TERMINAL_VISIBILITY, PARENT_PATTERN_CIRCUIT));
+    }
+
+    private List<IFancyConfigurator> collectParentConfigurators() {
+        List<IFancyConfigurator> result = new ArrayList<>();
+        ConfiguratorPanel collector = new ConfiguratorPanel(0, 0) {
+            @Override
+            public void attachConfigurators(IFancyConfigurator... configurators) {
+                result.addAll(Arrays.asList(configurators));
+            }
+        };
+        super.attachConfigurators(collector);
+        return result;
+    }
+
+    private FancyConfiguratorSidebarPage createStockInputSidebarPage(List<IFancyConfigurator> configurators) {
+        StockInputConfigurator stockInput = new StockInputConfigurator();
+        List<IFancyConfigurator> selected = new ArrayList<>(2);
+        selected.add(stockInput);
+        if (PARENT_ADVANCED_ME < configurators.size()) {
+            selected.add(configurators.get(PARENT_ADVANCED_ME));
+        }
+        return new FancyConfiguratorSidebarPage(stockInput.getTitle(), stockInput.getIcon(),
+                stockInput.getTooltips(), selected);
+    }
+
+    private FancyConfiguratorSidebarPage createGroupedSidebarPage(
+            String titleKey, int firstRowColumns, List<IFancyConfigurator> configurators, int... indices) {
+        List<IFancyConfigurator> selected = new ArrayList<>(indices.length);
+        for (int index : indices) {
+            if (index >= 0 && index < configurators.size()) {
+                selected.add(configurators.get(index));
+            }
+        }
+        Component title = Component.translatable(titleKey);
+        IGuiTexture icon = selected.isEmpty() ? IGuiTexture.EMPTY : selected.get(selected.size() - 1).getIcon();
+        return new FancyConfiguratorSidebarPage(title, icon, List.of(title), selected, firstRowColumns);
     }
 
     @Override

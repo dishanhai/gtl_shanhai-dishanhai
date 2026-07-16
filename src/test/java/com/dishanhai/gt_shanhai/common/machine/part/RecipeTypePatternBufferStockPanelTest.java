@@ -15,21 +15,22 @@ class RecipeTypePatternBufferStockPanelTest {
             "gt_shanhai", "common", "machine", "part", "RecipeTypePatternBufferPartMachine.java");
 
     @Test
-    void stockInputsUseTheFirstDedicatedConfiguratorInsteadOfTheMainUi() throws IOException {
+    void stockInputsUseTheFirstDedicatedSideTabInsteadOfTheMainUi() throws IOException {
         String source = Files.readString(SOURCE);
-        int attachStart = source.indexOf("public void attachConfigurators");
+        int attachStart = source.indexOf("public void attachSideTabs");
+        assertTrue(attachStart >= 0, "库存拉取入口必须迁移到连续侧栏");
         int mainUiStart = source.indexOf("public @NotNull Widget createUIWidget()", attachStart);
         int fieldHolderStart = source.indexOf("public @NotNull ManagedFieldHolder getFieldHolder()", mainUiStart);
         String attachMethod = source.substring(attachStart, mainUiStart);
         String mainUiMethod = source.substring(mainUiStart, fieldHolderStart);
 
-        int stockConfigurator = attachMethod.indexOf("attachConfigurators(new StockInputConfigurator())");
-        int parentConfigurators = attachMethod.indexOf("super.attachConfigurators(configuratorPanel)");
+        int stockConfigurator = attachMethod.indexOf("sideTabs.attachSubTab(");
+        int wildcardConfigurator = attachMethod.indexOf("new WildcardPatternConfigurator()", stockConfigurator);
 
         assertTrue(source.contains("class StockInputConfigurator implements IFancyConfigurator"),
-                "库存拉取槽应由独立 Fancy 配置器承载");
-        assertTrue(stockConfigurator >= 0 && stockConfigurator < parentConfigurators,
-                "库存拉取按钮必须先注册，才能位于左侧配置栏首位");
+                "库存拉取槽应继续由独立 Fancy 配置器承载");
+        assertTrue(stockConfigurator >= 0 && stockConfigurator < wildcardConfigurator,
+                "库存拉取页面必须位于连续侧栏第一项");
         assertTrue(source.contains("gt_shanhai:textures/gui/stock_input_panel.png"),
                 "库存拉取按钮必须使用专用自绘图标");
         assertTrue(source.contains("new AEDualConfigWidget") && source.contains("countConfiguredStockSlots()"),

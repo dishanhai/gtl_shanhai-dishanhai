@@ -1,0 +1,8 @@
+{
+  "parent": "gtceu:block/overlay/front_emissive",
+  "textures": {
+    "particle": "gt_shanhai:block/machine/part/cosmic_clean_gravity_maintenance_hatch",
+    "overlay": "gt_shanhai:block/machine/part/cosmic_clean_gravity_maintenance_hatch",
+    "overlay_emissive": "gt_shanhai:block/machine/part/cosmic_clean_gravity_maintenance_hatch_emissive"
+  }
+}

@@ -19,6 +19,9 @@ import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
+
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -75,26 +78,45 @@ public final class VirtualPatternEncodingHelper {
     }
 
     public static boolean containsVirtualProviderPattern(IPatternDetails details) {
-        return containsVirtualInput(getSparseInputs(details), getSparseOutputs(details));
+        if (details == null || details.getInputs() == null) return false;
+        for (IPatternDetails.IInput input : details.getInputs()) {
+            if (isPresenceInput(input)) return true;
+        }
+        return false;
     }
 
-    public static List<GenericStack> getPresenceCheckTargets(ICraftingPlan plan) {
-        Map<AEKey, GenericStack> targets = new LinkedHashMap<>();
-        if (plan == null || plan.patternTimes() == null || plan.patternTimes().isEmpty()) {
-            return List.of();
-        }
+    public static boolean isPresenceInput(IPatternDetails.IInput input) {
+        return input instanceof PresenceInput;
+    }
+
+    public static boolean containsPresenceInputs(ICraftingPlan plan) {
+        if (plan == null || plan.patternTimes() == null) return false;
         for (IPatternDetails details : plan.patternTimes().keySet()) {
-            GenericStack[] sparseInputs = getSparseInputs(details);
-            if (sparseInputs == null) continue;
-            PatternAnalysis analysis = getPatternAnalysis(sparseInputs, getSparseOutputs(details));
-            for (GenericStack input : sparseInputs) {
-                GenericStack target = analysis.targetFor(input);
-                if (target != null) {
-                    targets.putIfAbsent(target.what(), target);
-                }
+            if (containsVirtualProviderPattern(details)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Presence inputs are reusable within a plan. Their initial ownership is therefore the
+     * largest amount required by any pattern, not the sum of every planned execution.
+     */
+    public static Object2LongMap<AEKey> collectPresenceRequirements(ICraftingPlan plan) {
+        Object2LongOpenHashMap<AEKey> requirements = new Object2LongOpenHashMap<>();
+        requirements.defaultReturnValue(0L);
+        if (plan == null || plan.patternTimes() == null) return requirements;
+        for (IPatternDetails details : plan.patternTimes().keySet()) {
+            if (details == null || details.getInputs() == null) continue;
+            for (IPatternDetails.IInput input : details.getInputs()) {
+                if (!isPresenceInput(input)) continue;
+                GenericStack[] possibleInputs = input.getPossibleInputs();
+                if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) continue;
+                AEKey key = possibleInputs[0].what();
+                long amount = Math.max(1L, input.getMultiplier());
+                if (amount > requirements.getLong(key)) requirements.put(key, amount);
             }
         }
-        return new ArrayList<>(targets.values());
+        return requirements;
     }
 
     public static IPatternDetails.IInput[] createPlanningInputs(GenericStack[] sparseInputs) {
@@ -103,23 +125,29 @@ public final class VirtualPatternEncodingHelper {
 
     public static IPatternDetails.IInput[] createPlanningInputs(GenericStack[] sparseInputs, GenericStack[] sparseOutputs) {
         Map<AEKey, Long> condensed = new LinkedHashMap<>();
+        Map<AEKey, Long> presenceTargets = new LinkedHashMap<>();
         PatternAnalysis analysis = getPatternAnalysis(sparseInputs, sparseOutputs);
         if (sparseInputs != null) {
             for (GenericStack input : sparseInputs) {
                 if (input == null || input.what() == null || input.amount() <= 0) continue;
                 AEKey key = input.what();
                 long amount = input.amount();
-                if (analysis.targetFor(input) != null) {
+                GenericStack presenceTarget = analysis.targetFor(input);
+                if (presenceTarget != null) {
+                    presenceTargets.merge(presenceTarget.what(), Math.max(1L, presenceTarget.amount()), Math::max);
                     continue;
                 }
                 Long old = condensed.get(key);
                 condensed.put(key, old == null ? amount : old + amount);
             }
         }
-        IPatternDetails.IInput[] result = new IPatternDetails.IInput[condensed.size()];
+        IPatternDetails.IInput[] result = new IPatternDetails.IInput[condensed.size() + presenceTargets.size()];
         int index = 0;
         for (Map.Entry<AEKey, Long> entry : condensed.entrySet()) {
             result[index++] = new PlanningInput(entry.getKey(), entry.getValue());
+        }
+        for (Map.Entry<AEKey, Long> entry : presenceTargets.entrySet()) {
+            result[index++] = new PresenceInput(entry.getKey(), entry.getValue());
         }
         return result;
     }
@@ -155,7 +183,7 @@ public final class VirtualPatternEncodingHelper {
             GenericStack virtualTarget = analysis.targetFor(input);
             if (virtualTarget != null) {
                 if (virtualTargetSink != null) {
-                    virtualTargetSink.accept(virtualTarget.what(), multiplyAmount(Math.max(1L, virtualTarget.amount()), patternMultiplier));
+                    virtualTargetSink.accept(virtualTarget.what(), Math.max(1L, virtualTarget.amount()));
                 }
                 continue;
             }
@@ -809,8 +837,8 @@ public final class VirtualPatternEncodingHelper {
         }
     }
 
-    private static final class PlanningInput implements IPatternDetails.IInput {
-        private final GenericStack[] template;
+    private static class PlanningInput implements IPatternDetails.IInput {
+        protected final GenericStack[] template;
         private final long multiplier;
 
         private PlanningInput(AEKey key, long multiplier) {
@@ -836,6 +864,18 @@ public final class VirtualPatternEncodingHelper {
         @Override
         public AEKey getRemainingKey(AEKey template) {
             return null;
+        }
+    }
+
+    private static final class PresenceInput extends PlanningInput {
+
+        private PresenceInput(AEKey key, long multiplier) {
+            super(key, multiplier);
+        }
+
+        @Override
+        public AEKey getRemainingKey(AEKey ignored) {
+            return template[0].what();
         }
     }
 

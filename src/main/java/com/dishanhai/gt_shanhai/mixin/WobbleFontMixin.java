@@ -24,7 +24,6 @@ import java.util.List;
 public class WobbleFontMixin {
 
     private static final Logger LOG = LoggerFactory.getLogger("gt_shanhai.wobble");
-    private static final Logger CURVE_LOG = LoggerFactory.getLogger("gt_shanhai.curve");
     private static final ThreadLocal<Boolean> RENDERING_CHAR = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> CALC_WIDTH = ThreadLocal.withInitial(() -> false);
 
@@ -49,7 +48,6 @@ public class WobbleFontMixin {
             try {
                 int w = self.width(pr.cleanText);
                 if (w > 0) {
-                    LOG.info("[Wobble] widthFCS fix: \"{}\" → {} (clean=\"{}\")", raw, w, pr.cleanText);
                     cir.setReturnValue(w);
                 }
             } finally {
@@ -103,7 +101,6 @@ public class WobbleFontMixin {
             try {
                 int w = self.width(pr.cleanText);
                 if (w > 0) {
-                    LOG.info("[Wobble] widthStr fix: \"{}\" → {} (clean=\"{}\")", text, w, pr.cleanText);
                     cir.setReturnValue(w);
                 }
             } finally {
@@ -181,13 +178,8 @@ public class WobbleFontMixin {
         // txt = cleanText = prefix + actualText
         int cleanW = self.width(txt);
         float offset = (rawW - cleanW) / 2.0f;
-        if (txt.contains("中央有限曲线")) {
-            CURVE_LOG.warn("[中央有限曲线] m_272077_ rawW={} cleanW={} offset={} x={} y={} pxLen={} fcsLen={}",
-                    rawW, cleanW, offset, x, y, pxLen, fcsLen);
-        }
         // 只在小范围内修正，防止偏移过大
         if (offset > 20 || offset < -20) {
-            CURVE_LOG.warn("[Wobble] 宽度差过大: rawW={} cleanW={} offset={} txt=\"{}\"", rawW, cleanW, offset, txt);
             offset = 0;
         }
         float curX = x + offset;
@@ -440,10 +432,6 @@ public class WobbleFontMixin {
             if (containerWidth > 0 && !centerTargets.isEmpty()) {
                 for (String target : centerTargets) {
                     if (target.equals(centerMatch)) {
-                        if (displayText.contains("中央有限曲线") || centerMatch.contains("中央有限曲线")) {
-                            CURVE_LOG.warn("[中央有限曲线] CENTER m_272191_ 触发 centerOffset={} containerWidth={} centerWidth={} centerMatch=\"{}\"",
-                                    Math.max(0, (containerWidth - centerWidth) / 2f), containerWidth, centerWidth, centerMatch);
-                        }
                         centerOffset = Math.max(0, (containerWidth - centerWidth) / 2f);
                         break;
                     }

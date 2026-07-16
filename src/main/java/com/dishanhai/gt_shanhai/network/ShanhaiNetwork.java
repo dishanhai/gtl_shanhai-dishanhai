@@ -266,6 +266,22 @@ public class ShanhaiNetwork {
                 ShopToggleHiddenPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                CurrencyAeBalanceRequestPacket.class,
+                CurrencyAeBalanceRequestPacket::encode,
+                CurrencyAeBalanceRequestPacket::new,
+                CurrencyAeBalanceRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                CurrencyAeBalancePacket.class,
+                CurrencyAeBalancePacket::encode,
+                CurrencyAeBalancePacket::new,
+                CurrencyAeBalancePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 

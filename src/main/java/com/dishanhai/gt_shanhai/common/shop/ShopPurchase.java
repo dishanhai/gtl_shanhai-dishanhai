@@ -1014,27 +1014,35 @@ public final class ShopPurchase {
         return total;
     }
 
+    /** 币种兑换结果：实际消耗的源币量 consumed（显示用）+ 实际换得的目标币量 gained（0 = 兑换失败）。 */
+    public record ExchangeResult(long consumed, long gained) {
+        public static final ExchangeResult FAIL = new ExchangeResult(0L, 0L);
+    }
+
     /**
-     * 币种兑换：把账户里 amount 个 from 币按汇率换成 to 币。
-     * 目标量 = floor(amount × from币值 / to币值)，BigInteger 全程无损；
-     * 目标量≤0 或余额不足或币值未配置 → 返回 0（不动账户）。账户加满额目标量，返回值仅为聊天显示截断到 Long.MAX。
-     * @return 换得的 to 币数量（显示用，可能截断）
+     * 币种兑换：把账户里最多 amount 个 from 币按汇率换成 to 币。
+     * 请求量超过账户余额时按<b>余额封顶</b>成交（而非要求精确匹配整体失败）；
+     * 目标量 = floor(consumed × from币值 / to币值)，BigInteger 全程无损；
+     * 封顶后源量≤0、目标量≤0 或币值未配置 → 返回 {@link ExchangeResult#FAIL}（不动账户）。
+     * @return 实际消耗/换得（显示用，可能截断到 Long.MAX）
      */
-    public static long exchange(ServerPlayer player, ResourceLocation from, ResourceLocation to, long amount) {
-        if (player == null || from == null || to == null || from.equals(to) || amount <= 0L) return 0L;
+    public static ExchangeResult exchange(ServerPlayer player, ResourceLocation from, ResourceLocation to, long amount) {
+        if (player == null || from == null || to == null || from.equals(to) || amount <= 0L) return ExchangeResult.FAIL;
         MinecraftServer server = player.getServer();
-        if (server == null) return 0L;
+        if (server == null) return ExchangeResult.FAIL;
         UUID uuid = player.getUUID();
         long fromValue = CurrencyRateConfig.getValue(from);
         long toValue = CurrencyRateConfig.getValue(to);
-        if (fromValue <= 0L || toValue <= 0L) return 0L; // 未配置币值不可兑换
-        BigInteger amt = BigInteger.valueOf(amount);
-        if (WalletAccountAPI.getCurrency(server, uuid, from).compareTo(amt) < 0) return 0L;
+        if (fromValue <= 0L || toValue <= 0L) return ExchangeResult.FAIL; // 未配置币值不可兑换
+        BigInteger amt = WalletAccountAPI.getCurrency(server, uuid, from).min(BigInteger.valueOf(amount)); // 余额不足按余额最大值成交
+        if (amt.signum() <= 0) return ExchangeResult.FAIL;
         BigInteger dst = amt.multiply(BigInteger.valueOf(fromValue)).divide(BigInteger.valueOf(toValue));
-        if (dst.signum() <= 0) return 0L; // 源量太小，换不出 1 个目标币
-        if (!WalletAccountAPI.tryDeductCurrency(server, uuid, from, amt)) return 0L;
+        if (dst.signum() <= 0) return ExchangeResult.FAIL; // 源量太小，换不出 1 个目标币
+        if (!WalletAccountAPI.tryDeductCurrency(server, uuid, from, amt)) return ExchangeResult.FAIL;
         WalletAccountAPI.addCurrency(server, uuid, to, dst);
-        return dst.bitLength() < 63 ? dst.longValue() : Long.MAX_VALUE;
+        long consumed = amt.bitLength() < 63 ? amt.longValue() : Long.MAX_VALUE;
+        long gained = dst.bitLength() < 63 ? dst.longValue() : Long.MAX_VALUE;
+        return new ExchangeResult(consumed, gained);
     }
 
     /**
@@ -1057,7 +1065,22 @@ public final class ShopPurchase {
     }
 
     /**
-     * 币种 → 星火（数字余额）：按币值把 coins 枚 currency 换成星火。
+     * 查询绑定该玩家的在线 AE 网络当前有多少枚 currency 可抽（纯 SIMULATE，不改动网络），
+     * 供 ATM 界面「从 AE 抽取」前预览，好让玩家知道该输多少而不用试错。
+     * @return 可抽枚数（0 = 无绑定在线网络 / 网络无此币）
+     */
+    public static long aeAvailableCoin(ServerPlayer player, ResourceLocation currency) {
+        if (player == null || currency == null) return 0L;
+        Item coin = ForgeRegistries.ITEMS.getValue(currency);
+        if (coin == null) return 0L;
+        appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(new ItemStack(coin));
+        if (key == null) return 0L;
+        return ShopAeNetwork.availableForPlayer(player, key);
+    }
+
+    /**
+     * 币种 → 星火（数字余额）：按币值把最多 coins 枚 currency 换成星火，
+     * 请求量超过账户余额时按余额封顶成交（见 {@link WalletAccountAPI#convertCurrencyToDigital}）。
      * @return 换得的星火数（显示用，可能截断到 Long.MAX）
      */
     public static long toDigital(ServerPlayer player, ResourceLocation currency, long coins) {
@@ -1069,8 +1092,9 @@ public final class ShopPurchase {
     }
 
     /**
-     * 星火（数字余额）→ 币种：花 {@code coins × 币值} 星火，换恰好 coins 枚 currency
-     * （数量语义 = 想要的目标币数量，非花的星火数）。星火不足则整体不动。
+     * 星火（数字余额）→ 币种：花 {@code coins × 币值} 星火，换 coins 枚 currency
+     * （数量语义 = 想要的目标币数量，非花的星火数）；想要的数量超过星火余额能兑的上限时
+     * 按星火余额封顶成交（见 {@link WalletAccountAPI#convertDigitalToCurrency}）。
      * @return 实际换得的币数（0 = 失败，显示用，可能截断到 Long.MAX）
      */
     public static long fromDigital(ServerPlayer player, ResourceLocation currency, long coins) {

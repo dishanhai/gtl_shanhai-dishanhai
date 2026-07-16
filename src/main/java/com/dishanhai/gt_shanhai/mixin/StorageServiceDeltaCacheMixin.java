@@ -3,11 +3,11 @@ package com.dishanhai.gt_shanhai.mixin;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.KeyCounter;
 import appeng.me.helpers.InterestManager;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.api.ae2.INetworkStorageDeltaSink;
 import com.dishanhai.gt_shanhai.api.ae2.IStorageServiceDeltaRecorder;
 import com.dishanhai.gt_shanhai.api.ae2.IStorageServiceRevisionAccess;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
-import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -32,17 +32,12 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
     @Shadow protected abstract void postWatcherUpdate(AEKey what, long newAmount);
 
     @Unique
-    private Object2LongOpenHashMap<AEKey> gtShanhai$pendingDeltas;
-    @Unique
     private long gtShanhai$inventoryRevision;
     @Unique
     private Set<AEKey> gtShanhai$lastChangedKeys;
 
     @Unique
     private void gtShanhai$ensureState() {
-        if (this.gtShanhai$pendingDeltas == null) {
-            this.gtShanhai$pendingDeltas = new Object2LongOpenHashMap<>();
-        }
         if (this.gtShanhai$lastChangedKeys == null) {
             this.gtShanhai$lastChangedKeys = Collections.emptySet();
         }
@@ -63,12 +58,12 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
             return;
         }
 
+        if (!DShanhaiConfig.COMMON.aeStorageDeltaCacheEnabled.get()) {
+            return;
+        }
+
         if (!this.cachedStacksNeedUpdate) {
-            if (!gtShanhai$pendingDeltas.isEmpty()) {
-                gtShanhai$applyPendingDeltas();
-            } else {
-                gtShanhai$publishRevision(null);
-            }
+            gtShanhai$publishRevision(null);
         }
         ci.cancel();
     }
@@ -76,17 +71,13 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
     @Inject(method = "updateCachedStacks", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$updateCachedStacksIncrementally(CallbackInfo ci) {
         gtShanhai$ensureState();
-        if (this.cachedStacksNeedUpdate) {
+        if (this.cachedStacksNeedUpdate || !DShanhaiConfig.COMMON.aeStorageDeltaCacheEnabled.get()) {
             gtShanhai$fullSyncUpdate();
             ci.cancel();
             return;
         }
 
-        if (!gtShanhai$pendingDeltas.isEmpty()) {
-            gtShanhai$applyPendingDeltas();
-        } else {
-            gtShanhai$publishRevision(null);
-        }
+        gtShanhai$publishRevision(null);
         ci.cancel();
     }
 
@@ -94,9 +85,6 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
     private void gtShanhai$fullSyncUpdate() {
         gtShanhai$ensureState();
         this.cachedStacksNeedUpdate = false;
-        synchronized (gtShanhai$pendingDeltas) {
-            gtShanhai$pendingDeltas.clear();
-        }
 
         this.cachedAvailableStacks.clear();
         this.storage.getAvailableStacks(this.cachedAvailableStacks);
@@ -129,59 +117,11 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
         gtShanhai$publishRevision(changedKeys);
     }
 
-    @Unique
-    private void gtShanhai$applyPendingDeltas() {
-        gtShanhai$ensureState();
-        LinkedHashSet<AEKey> changedKeys = null;
-        synchronized (gtShanhai$pendingDeltas) {
-            for (Object2LongMap.Entry<AEKey> entry : gtShanhai$pendingDeltas.object2LongEntrySet()) {
-                AEKey what = entry.getKey();
-                long oldAmount = this.cachedAvailableAmounts.getLong(what);
-                long newAmount = gtShanhai$saturatedAdd(oldAmount, entry.getLongValue());
-                if (newAmount == oldAmount) continue;
-
-                if (newAmount > 0L) {
-                    this.cachedAvailableAmounts.put(what, newAmount);
-                    this.cachedAvailableStacks.set(what, newAmount);
-                } else {
-                    this.cachedAvailableAmounts.removeLong(what);
-                    this.cachedAvailableStacks.remove(what);
-                }
-
-                if (changedKeys == null) changedKeys = new LinkedHashSet<>();
-                changedKeys.add(what);
-                postWatcherUpdate(what, newAmount);
-            }
-            gtShanhai$pendingDeltas.clear();
-        }
-        gtShanhai$publishRevision(changedKeys);
-    }
-
-    @Unique
-    private static long gtShanhai$saturatedAdd(long a, long b) {
-        long result = a + b;
-        if (((a ^ result) & (b ^ result)) < 0) {
-            return b > 0L ? Long.MAX_VALUE : 0L;
-        }
-        return Math.max(0L, result);
-    }
-
     @Override
     public void gtShanhai$recordDelta(AEKey key, long delta) {
         if (key == null || delta == 0L) return;
         gtShanhai$ensureState();
-        synchronized (gtShanhai$pendingDeltas) {
-            gtShanhai$pendingDeltas.mergeLong(key, delta, StorageServiceDeltaCacheMixin::gtShanhai$saturatedDeltaMerge);
-        }
-    }
-
-    @Unique
-    private static long gtShanhai$saturatedDeltaMerge(long a, long b) {
-        long result = a + b;
-        if (((a ^ result) & (b ^ result)) < 0) {
-            return b > 0L ? Long.MAX_VALUE : Long.MIN_VALUE;
-        }
-        return result;
+        this.cachedStacksNeedUpdate = true;
     }
 
     @Unique

@@ -74,10 +74,10 @@ public class CurrencyActionPacket {
                         : Component.literal("§c[货币中心] 背包里没有 " + ShopPurchase.coinName(pkt.currency)));
             }
             case EXCHANGE -> {
-                long gain = ShopPurchase.exchange(player, pkt.currency, pkt.target, pkt.amount);
-                player.sendSystemMessage(gain > 0L
-                        ? Component.literal("§b[货币中心] §a已兑换 §f" + ShopPurchase.formatCount(pkt.amount) + " "
-                            + ShopPurchase.coinName(pkt.currency) + " §7→ §f" + ShopPurchase.formatCount(gain) + " "
+                ShopPurchase.ExchangeResult r = ShopPurchase.exchange(player, pkt.currency, pkt.target, pkt.amount);
+                player.sendSystemMessage(r.gained() > 0L
+                        ? Component.literal("§b[货币中心] §a已兑换 §f" + ShopPurchase.formatCount(r.consumed()) + " "
+                            + ShopPurchase.coinName(pkt.currency) + " §7→ §f" + ShopPurchase.formatCount(r.gained()) + " "
                             + ShopPurchase.coinName(pkt.target))
                         : Component.literal("§c[货币中心] 兑换失败（余额不足 / 数量太小 / 币值未配置）"));
             }
@@ -89,11 +89,20 @@ public class CurrencyActionPacket {
                         : Component.literal("§c[货币中心] AE 抽取失败（无绑定在线 AE 网络 / 网络无此币）"));
             }
             case TO_DIGITAL -> {
+                // pkt.amount 语义 = 想要转出的源币数量，实际可能因余额不足被 toDigital 内部封顶；
+                // 消耗量直接拿转换前后的账户余额差（BigInteger 精确，不靠 gained÷币值反推——
+                // gained 是显示用 long，数额巨大到截断 Long.MAX 时反推除法会算错真实消耗量）
+                BigInteger before = WalletAccountAPI.getCurrency(player.getServer(), player.getUUID(), pkt.currency);
                 long gained = ShopPurchase.toDigital(player, pkt.currency, pkt.amount);
-                player.sendSystemMessage(gained > 0L
-                        ? Component.literal("§b[货币中心] §a已把 §f" + ShopPurchase.formatCount(pkt.amount) + " "
-                            + ShopPurchase.coinName(pkt.currency) + " §a转成 §e" + ShopPurchase.formatCount(gained) + " 星火")
-                        : Component.literal("§c[货币中心] 转星火失败（余额不足 / 币值未配置）"));
+                if (gained > 0L) {
+                    BigInteger after = WalletAccountAPI.getCurrency(player.getServer(), player.getUUID(), pkt.currency);
+                    BigInteger consumedBig = before.subtract(after);
+                    long consumed = consumedBig.bitLength() < 63 ? consumedBig.longValue() : Long.MAX_VALUE;
+                    player.sendSystemMessage(Component.literal("§b[货币中心] §a已把 §f" + ShopPurchase.formatCount(consumed) + " "
+                            + ShopPurchase.coinName(pkt.currency) + " §a转成 §e" + ShopPurchase.formatCount(gained) + " 星火"));
+                } else {
+                    player.sendSystemMessage(Component.literal("§c[货币中心] 转星火失败（余额不足 / 币值未配置）"));
+                }
             }
             case FROM_DIGITAL -> {
                 // pkt.amount 语义 = 想要的目标币数量（非花的星火数），花费 = amount × 币值

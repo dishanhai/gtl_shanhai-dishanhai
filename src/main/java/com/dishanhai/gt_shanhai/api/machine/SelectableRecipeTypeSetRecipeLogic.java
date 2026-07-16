@@ -200,6 +200,17 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
                 }
             }
         }
+        if ("gtceu:nightmare_crafting".equals(type.registryName == null ? null : type.registryName.toString())) {
+            boolean isCapMachine = machine instanceof org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine;
+            int mePartCount = -1;
+            if (isCapMachine) {
+                mePartCount = ((org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine) machine)
+                        .getMEPatternRecipeHandleParts().size();
+            }
+            com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("selectableSet.nightmareCraftingLookup",
+                    "machine=" + machine.getClass().getName() + " isCapMachine=" + isCapMachine
+                            + " mePatternHandlePartCount=" + mePartCount + " foundCount=" + found.size());
+        }
         if (entry == null) {
             entry = new TypeCacheEntry();
             perTypeLookupCache.put(type, entry);

@@ -28,6 +28,7 @@ import appeng.crafting.pattern.AEProcessingPattern;
 import appeng.hooks.ticking.TickHandler;
 import appeng.me.service.CraftingService;
 import com.google.common.base.Preconditions;
+import com.dishanhai.gt_shanhai.common.item.VirtualCraftingPresenceState;
 import org.gtlcore.gtlcore.api.machine.trait.AECraft.IMECraftIOPart;
 import org.gtlcore.gtlcore.api.machine.trait.MEPart.IMEPatternPartMachine;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
@@ -292,8 +293,8 @@ public class QuantumCraftingCPULogic {
                 postChange(what);
                 job.remainingAmount = Math.max(0, job.remainingAmount - amount);
                 QuantumDiagnostics.hit("logic.insert.finalOutput",
-                        "what=" + what + " amount=" + amount + " remaining=" + job.remainingAmount
-                                + " type=" + type);
+                        "what=" + what + " amount=" + amount + " inserted=" + inserted
+                                + " remaining=" + job.remainingAmount + " type=" + type);
                 if (job.remainingAmount <= 0) {
                     finishJob(true);
                     cpu.updateOutput(null);
@@ -315,6 +316,7 @@ public class QuantumCraftingCPULogic {
 
     public void storeItems() {
         Preconditions.checkState(job == null, "CPU should not have a job while dumping items");
+        VirtualCraftingPresenceState.clear(inventory);
         IGrid grid = cpu.getGrid();
         if (inventory.list.isEmpty() || grid == null) return;
         MEStorage storage = grid.getStorageService().getInventory();
@@ -346,6 +348,7 @@ public class QuantumCraftingCPULogic {
 
     public void readFromNBT(CompoundTag data) {
         inventory.readFromNBT(data.getList("inventory", 10));
+        VirtualCraftingPresenceState.readFromNBT(inventory, data);
         if (data.contains("job")) {
             job = new QuantumExecutingCraftingJob(data.getCompound("job"), this::postChange, this);
             if (job.finalOutput == null) {
@@ -360,6 +363,7 @@ public class QuantumCraftingCPULogic {
 
     public void writeToNBT(CompoundTag data) {
         data.put("inventory", inventory.writeToNBT());
+        VirtualCraftingPresenceState.writeToNBT(inventory, data);
         if (job != null) {
             data.put("job", job.writeToNBT());
         }

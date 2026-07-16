@@ -36,11 +36,11 @@ public class ParallelProviderOverrideMixin {
             var machine = mbe.getMetaMachine();
 
             if (machine instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase module) {
+                // 注意：不能在这里 return——下面"parallel/threads >= Integer.MAX_VALUE 就换成无限标记"
+                // 的保险必须继续跑，否则原初模块（太虚锻炉等）的并行/线程数只会停在饱和后的
+                // 2147483647，永远显示不出"无限"。
                 data.putLong("threads", Math.max(1L, module.getAdditionalThread()));
-                return;
-            }
-
-            if (machine instanceof IMultiController controller && controller.isFormed()) {
+            } else if (machine instanceof IMultiController controller && controller.isFormed()) {
                 for (IMultiPart part : controller.getParts()) {
                     if (part instanceof com.gtladd.gtladditions.api.machine.feature.IThreadModifierPart tp) {
                         int t = tp.getThreadCount();

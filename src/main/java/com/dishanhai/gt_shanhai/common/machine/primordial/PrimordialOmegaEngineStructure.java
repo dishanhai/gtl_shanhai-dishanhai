@@ -31,6 +31,8 @@ public class PrimordialOmegaEngineStructure {
                 new ResourceLocation("gtceu", "bronze_brick_casing"));
         Block voidInductionArmature = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_void_induction_armature"));
+        Block massEnergyCore = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_mass_energy_core"));
         Block biologicalCore = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_biological_core"));
         Block chaoticEphemeralFurnace = ForgeRegistries.BLOCKS.getValue(
@@ -140,7 +142,8 @@ public class PrimordialOmegaEngineStructure {
                         .or(Predicates.blocks(divergenceGenerator))
                         .or(Predicates.blocks(matterCaster))
                         .or(Predicates.blocks(engravingModule))
-                        .or(Predicates.blocks(coinForge)))
+                        .or(Predicates.blocks(coinForge))
+                        .or(Predicates.blocks(massEnergyCore)))
                 // K: 内部填充 — 青铜砖块（不再与 A 冲突）
                 .where('K', Predicates.blocks(bronzeBrickCasing))
                 .where('~', Predicates.controller(Predicates.blocks(definition.getBlock())))

@@ -1,7 +1,10 @@
 package com.dishanhai.gt_shanhai.common.item;
 
 import appeng.api.stacks.AEKey;
+import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
+
+import org.gtlcore.gtlcore.integration.ae2.AEUtils;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongMaps;
@@ -14,8 +17,15 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.function.Predicate;
 
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+
 public final class VirtualPatternBufferSlotState {
 
+    private static final String TAG_VIRTUAL_ITEMS = "gtShanhaiVirtualItems";
+    private static final String TAG_VIRTUAL_FLUIDS = "gtShanhaiVirtualFluids";
+    private static final String TAG_VIRTUAL_CIRCUIT = "gtShanhaiVirtualCircuit";
     private static final List<Entry> VIRTUAL_TARGETS = new ArrayList<>();
     private static final List<CircuitEntry> VIRTUAL_CIRCUITS = new ArrayList<>();
 
@@ -24,6 +34,54 @@ public final class VirtualPatternBufferSlotState {
         if (inventory == null || key == null || amount <= 0) return;
         Object2LongOpenHashMap<T> targets = getOrCreateTargets(inventory);
         targets.addTo(key, amount);
+    }
+
+    /** Rebuilds virtual identity without increasing the persisted inventory amount. */
+    public static synchronized <T extends AEKey> void registerVirtualTarget(Object2LongOpenHashMap<T> inventory,
+            T key, long amount) {
+        if (inventory == null || key == null || amount <= 0L) return;
+        long present = inventory.getLong(key);
+        if (present <= 0L) return;
+        Object2LongOpenHashMap<T> targets = getOrCreateTargets(inventory);
+        long registered = Math.min(present, amount);
+        if (registered > targets.getLong(key)) targets.put(key, registered);
+    }
+
+    public static synchronized void writeVirtualTargets(Object2LongOpenHashMap<AEItemKey> itemInventory,
+            Object2LongOpenHashMap<AEFluidKey> fluidInventory, CompoundTag tag) {
+        Object2LongOpenHashMap<AEItemKey> itemTargets = findTargets(itemInventory);
+        if (itemTargets != null && !itemTargets.isEmpty()) {
+            ListTag items = AEUtils.createListTag(AEItemKey::toTag, itemTargets);
+            if (!items.isEmpty()) tag.put(TAG_VIRTUAL_ITEMS, items);
+        }
+        Object2LongOpenHashMap<AEFluidKey> fluidTargets = findTargets(fluidInventory);
+        if (fluidTargets != null && !fluidTargets.isEmpty()) {
+            ListTag fluids = AEUtils.createListTag(AEFluidKey::toTag, fluidTargets);
+            if (!fluids.isEmpty()) tag.put(TAG_VIRTUAL_FLUIDS, fluids);
+        }
+        int circuit = getVirtualCircuit(itemInventory);
+        if (circuit >= 0) tag.putInt(TAG_VIRTUAL_CIRCUIT, circuit);
+    }
+
+    public static synchronized void readVirtualTargets(Object2LongOpenHashMap<AEItemKey> itemInventory,
+            Object2LongOpenHashMap<AEFluidKey> fluidInventory, CompoundTag tag) {
+        removeTargets(itemInventory);
+        removeTargets(fluidInventory);
+        clearVirtualCircuit(itemInventory);
+
+        Object2LongOpenHashMap<AEItemKey> itemTargets = new Object2LongOpenHashMap<>();
+        Object2LongOpenHashMap<AEFluidKey> fluidTargets = new Object2LongOpenHashMap<>();
+        AEUtils.loadInventory(tag.getList(TAG_VIRTUAL_ITEMS, Tag.TAG_COMPOUND), AEItemKey::fromTag, itemTargets);
+        AEUtils.loadInventory(tag.getList(TAG_VIRTUAL_FLUIDS, Tag.TAG_COMPOUND), AEFluidKey::fromTag, fluidTargets);
+        for (Object2LongMap.Entry<AEItemKey> entry : itemTargets.object2LongEntrySet()) {
+            registerVirtualTarget(itemInventory, entry.getKey(), entry.getLongValue());
+        }
+        for (Object2LongMap.Entry<AEFluidKey> entry : fluidTargets.object2LongEntrySet()) {
+            registerVirtualTarget(fluidInventory, entry.getKey(), entry.getLongValue());
+        }
+        if (tag.contains(TAG_VIRTUAL_CIRCUIT, Tag.TAG_INT)) {
+            setVirtualCircuit(itemInventory, tag.getInt(TAG_VIRTUAL_CIRCUIT));
+        }
     }
 
     public static synchronized <T extends AEKey> Object2LongMap<T> getVirtualTargets(Object2LongOpenHashMap<T> inventory) {

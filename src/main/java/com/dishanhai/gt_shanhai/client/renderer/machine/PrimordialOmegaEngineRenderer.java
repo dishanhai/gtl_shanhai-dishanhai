@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.client.renderer.machine;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.Direction;
@@ -66,6 +67,8 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
                                         float smoothTick, boolean isWorking,
                                         Direction facing,
                                         PoseStack poseStack, MultiBufferSource buffer) {
+        if (Minecraft.getInstance().screen != null) return;
+
         Vec3 centerPos = CommonUtils.INSTANCE.getRotatedRenderPosition(
                 Direction.EAST, facing, -122.0, 0.0, 0.0);
 

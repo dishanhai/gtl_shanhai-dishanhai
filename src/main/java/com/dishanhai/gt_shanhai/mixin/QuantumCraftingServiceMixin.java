@@ -20,8 +20,6 @@ import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingBlockEntity;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPU;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPUCluster;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics;
-import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
-import com.dishanhai.gt_shanhai.common.item.VirtualProviderSoftLocks;
 import com.google.common.collect.ImmutableSet;
 
 import net.minecraft.nbt.CompoundTag;
@@ -40,7 +38,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.UUID;
 
 @Mixin(value = CraftingService.class, remap = false)
 public abstract class QuantumCraftingServiceMixin {
@@ -55,12 +52,6 @@ public abstract class QuantumCraftingServiceMixin {
 
     @Unique
     private boolean gtShanhai$quantumClustersDirty = true;
-
-    @Unique
-    private VirtualProviderSoftLocks.Reservation gtShanhai$pendingVirtualReservation;
-
-    @Unique
-    private Set<UUID> gtShanhai$craftIdsBeforeSubmit = Set.of();
 
     @Shadow @Final private Set<CraftingCPUCluster> craftingCPUClusters;
     @Shadow @Final private IGrid grid;
@@ -158,7 +149,6 @@ public abstract class QuantumCraftingServiceMixin {
         if (latestChange > lastProcessedCraftingLogicChangeTick) {
             lastProcessedCraftingLogicChangeTick = -1L;
         }
-        VirtualProviderSoftLocks.cleanup(this, gtShanhai$getLiveCraftIds());
         if (QuantumDiagnostics.ENABLED) {
             QuantumDiagnostics.slow("service.onServerEndTick.quantum", start,
                     "clusters=" + clusters + " active=" + active + " latestChange=" + latestChange);
@@ -170,14 +160,6 @@ public abstract class QuantumCraftingServiceMixin {
             boolean prioritizePower, IActionSource src, CallbackInfoReturnable<ICraftingSubmitResult> cir) {
         if (job.simulation()) return;
         gtShanhai$refreshQuantumClusters("submitJob");
-        VirtualProviderSoftLocks.Reservation reservation = VirtualProviderSoftLocks.tryReserve(this, grid,
-                VirtualPatternEncodingHelper.getPresenceCheckTargets(job), src);
-        if (reservation.missing() != null) {
-            cir.setReturnValue(CraftingSubmitResult.missingIngredient(reservation.missing()));
-            return;
-        }
-        gtShanhai$pendingVirtualReservation = reservation;
-        gtShanhai$craftIdsBeforeSubmit = gtShanhai$getLiveCraftIds();
         if (target instanceof QuantumCraftingCPU) {
             QuantumCraftingCPU cpu = (QuantumCraftingCPU) target;
             gtShanhai$setQuantumSubmitResult(cir, cpu.getCluster().submitJob(grid, job, src, requestingMachine));
@@ -197,39 +179,10 @@ public abstract class QuantumCraftingServiceMixin {
         }
     }
 
-    @Inject(method = "submitJob", at = @At("RETURN"))
-    private void gtShanhai$finishVirtualProviderReservation(ICraftingPlan job, ICraftingRequester requestingMachine,
-            ICraftingCPU target, boolean prioritizePower, IActionSource src,
-            CallbackInfoReturnable<ICraftingSubmitResult> cir) {
-        gtShanhai$finishReservation(cir.getReturnValue());
-    }
-
     @Unique
     private void gtShanhai$setQuantumSubmitResult(CallbackInfoReturnable<ICraftingSubmitResult> cir,
             ICraftingSubmitResult result) {
         cir.setReturnValue(result);
-        gtShanhai$finishReservation(result);
-    }
-
-    @Unique
-    private void gtShanhai$finishReservation(ICraftingSubmitResult result) {
-        VirtualProviderSoftLocks.Reservation reservation = gtShanhai$pendingVirtualReservation;
-        gtShanhai$pendingVirtualReservation = null;
-        if (reservation == null || reservation.isEmpty()) return;
-
-        if (result == null || !result.successful()) {
-            VirtualProviderSoftLocks.release(reservation);
-            gtShanhai$craftIdsBeforeSubmit = Set.of();
-            return;
-        }
-
-        UUID craftId = result.link() == null ? gtShanhai$findNewLiveCraftId() : result.link().getCraftingID();
-        gtShanhai$craftIdsBeforeSubmit = Set.of();
-        if (craftId == null) {
-            VirtualProviderSoftLocks.release(reservation);
-            return;
-        }
-        VirtualProviderSoftLocks.bind(reservation, craftId);
     }
 
     @Overwrite
@@ -296,38 +249,6 @@ public abstract class QuantumCraftingServiceMixin {
                 }
             }
         }
-    }
-
-    @Unique
-    private Set<UUID> gtShanhai$getLiveCraftIds() {
-        HashSet<UUID> liveCraftIds = new HashSet<>();
-        for (CraftingCPUCluster cpu : craftingCPUClusters) {
-            gtShanhai$addLiveCraftId(liveCraftIds, cpu.craftingLogic.getLastLink());
-        }
-        for (QuantumCraftingCPUCluster cluster : gtShanhai$getQuantumClusters()) {
-            for (QuantumCraftingCPU cpu : cluster.getActiveCPUSnapshot()) {
-                gtShanhai$addLiveCraftId(liveCraftIds, cpu.craftingLogic.getLastLink());
-            }
-        }
-        return liveCraftIds;
-    }
-
-    @Unique
-    private UUID gtShanhai$findNewLiveCraftId() {
-        Set<UUID> liveCraftIds = gtShanhai$getLiveCraftIds();
-        Set<UUID> beforeSubmit = gtShanhai$craftIdsBeforeSubmit == null ? Set.of() : gtShanhai$craftIdsBeforeSubmit;
-        for (UUID craftId : liveCraftIds) {
-            if (!beforeSubmit.contains(craftId)) {
-                return craftId;
-            }
-        }
-        return null;
-    }
-
-    @Unique
-    private void gtShanhai$addLiveCraftId(Set<UUID> liveCraftIds, ICraftingLink link) {
-        if (link == null || link.isCanceled() || link.isDone()) return;
-        liveCraftIds.add(link.getCraftingID());
     }
 
     @Unique

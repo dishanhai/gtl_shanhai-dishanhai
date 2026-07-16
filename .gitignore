@@ -57,6 +57,7 @@ Thumbs.db
 !src/**/*.md
 !src/**/*.mb
 !src/**/*.txt
+!src/test/python/generate_cosmic_clean_gravity_hatch_texture.py
 
 # 保留根目录的关键构建文件和配置
 !.gitignore

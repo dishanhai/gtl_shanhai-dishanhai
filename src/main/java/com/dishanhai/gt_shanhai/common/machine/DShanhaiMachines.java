@@ -19,6 +19,7 @@ import com.gregtechceu.gtceu.api.registry.registrate.MachineBuilder;
 import com.gregtechceu.gtceu.api.block.MetaMachineBlock;
 import com.gregtechceu.gtceu.api.blockentity.MetaMachineBlockEntity;
 import com.gregtechceu.gtceu.client.renderer.machine.MachineRenderer;
+import com.gregtechceu.gtceu.client.renderer.machine.MaintenanceHatchPartRenderer;
 import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRenderer;
 import com.gregtechceu.gtceu.common.data.GCyMRecipeTypes;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
@@ -66,6 +67,7 @@ import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
 import com.dishanhai.gt_shanhai.common.item.DShanhaiMaintenanceHatchItem;
 import com.dishanhai.gt_shanhai.common.item.SeventyTwoChangesItem;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.CosmicCleanGravityMaintenanceHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiDivergenceEngineMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiOverclockHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.LogicalComputeHatchMachine;
@@ -92,6 +94,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition SPACETIME_WAVE_MATRIX;
     public static MultiblockMachineDefinition PRIMORDIAL_OMEGA_ENGINE;
     public static MultiblockMachineDefinition PRIMORDIAL_VOID_INDUCTION_ARMATURE;
+    public static MultiblockMachineDefinition PRIMORDIAL_MASS_ENERGY_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_BIOLOGICAL_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_CHAOTIC_EPHEMERAL_DECONSTRUCTION_CRYSTALLIZATION_FURNACE;
     public static MultiblockMachineDefinition WORLD_LINE_STRIPPING_OSCILLATION_GENERATOR;
@@ -124,6 +127,7 @@ public class DShanhaiMachines {
     public static MachineDefinition ME_REQUESTABLE_INPUT_HATCH;
     public static MachineDefinition INPUT_DUAL_HATCH;
     public static MachineDefinition MAINTENANCE_HATCH;
+    public static MachineDefinition COSMIC_CLEAN_GRAVITY_MAINTENANCE_HATCH;
     public static MachineDefinition[] PROGRAMMABLE_HATCH = new MachineDefinition[GTValues.MAX + 1];
     public static MachineDefinition[] OVERCLOCK_HATCH = new MachineDefinition[GTValues.MAX + 1];
     public static MachineDefinition LOGICAL_COMPUTE_HATCH;
@@ -259,6 +263,29 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("§7配方类型：原初发电协议"));
             tooltips.add(DShanhaiTextUtil.createUltimateRainbow("并行与线程随电路幕级增长"));
+        });
+
+        PRIMORDIAL_MASS_ENERGY_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_mass_energy_core", PrimordialMassEnergyCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(GTRecipeTypes.DUMMY_RECIPES)
+                .pattern(PrimordialMassEnergyCoreStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                .register();
+
+        PRIMORDIAL_MASS_ENERGY_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("以质能方程将物质本身直接兑现为能量"));
+            tooltips.add(Component.literal("§b质量不是终点，是压缩到极致的能量——核心只是撬动这层压缩的杠杆"));
+            tooltips.add(Component.literal("§b与真空零点能截然不同的路径：不取巧于量子涨落，只依赖物质本身的当量"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位"));
+            tooltips.add(Component.literal("§7不走配方系统，纯 Tick 驱动直接产电"));
+            tooltips.add(Component.literal("§b一半发电量自动广播给全服已加载的可受电 GTCEu 机器，另一半连同剩余部分写入无线电网"));
+            tooltips.add(Component.literal("§7UI 内三个按钮可切换输出模式：全电网 / 半网半广播（默认）/ 完全广播"));
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("插入物质模块即产电，不消耗任何物品"));
         });
 
         PRIMORDIAL_BIOLOGICAL_CORE = GTDishanhaiRegistration.REGISTRATE
@@ -1058,6 +1085,31 @@ public class DShanhaiMachines {
                     "{body_silver}都从这里{/}{water}流出又流回{/}{body_silver}——{/}"));
             tooltips.add(DShanhaiTextUtil.createRainbowText(
                     "枢纽不决策，枢纽只是让决策变得毫无阻力。"));
+        });
+
+        // ========== 寰宇洁净重力维护仓 ==========
+        COSMIC_CLEAN_GRAVITY_MAINTENANCE_HATCH = MachineBuilder.create(
+                GTDishanhaiRegistration.REGISTRATE,
+                "cosmic_clean_gravity_maintenance_hatch",
+                MachineDefinition::createDefinition,
+                CosmicCleanGravityMaintenanceHatchMachine::new,
+                MetaMachineBlock::new,
+                MetaMachineItem::new,
+                MetaMachineBlockEntity::createBlockEntity
+        )
+                .rotationState(RotationState.ALL)
+                .renderer(() -> new MaintenanceHatchPartRenderer(
+                        12, new ResourceLocation(MOD_ID,
+                                "block/machine/part/cosmic_clean_gravity_maintenance_hatch")))
+                .register();
+
+        COSMIC_CLEAN_GRAVITY_MAINTENANCE_HATCH.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(Component.literal("§7提供全自动维护，不产生维护故障"));
+            tooltips.add(Component.literal("§b提供普通、无菌与法则洁净环境"));
+            tooltips.add(Component.literal("§d同时满足无重力与强重力配方条件"));
+            tooltips.add(Component.literal("§e可映射维护仓、物品输入仓与流体输入仓结构位置"));
+            tooltips.add(Component.literal("§8仅作结构兼容，不提供实际物品或流体容量"));
+            tooltips.add(Component.literal("§8不包含终焉聚合枢纽的高级功能"));
         });
 
         // ========== 可编程仓（虚拟不消耗物品槽） ==========
@@ -1860,6 +1912,12 @@ public class DShanhaiMachines {
             com.gregtechceu.gtceu.api.machine.multiblock.PartAbility.IMPORT_FLUIDS.register(0, hatchBlock);
             com.gregtechceu.gtceu.api.machine.multiblock.PartAbility.EXPORT_FLUIDS.register(0, hatchBlock);
             // 结构检测工具过滤由 StructureDetectFilterMixin 处理
+        }
+        if (COSMIC_CLEAN_GRAVITY_MAINTENANCE_HATCH != null) {
+            var cosmicHatchBlock = COSMIC_CLEAN_GRAVITY_MAINTENANCE_HATCH.getBlock();
+            PartAbility.MAINTENANCE.register(0, cosmicHatchBlock);
+            PartAbility.IMPORT_ITEMS.register(0, cosmicHatchBlock);
+            PartAbility.IMPORT_FLUIDS.register(0, cosmicHatchBlock);
         }
         for (int tier = GTValues.ULV; tier <= GTValues.MAX; tier++) {
             if (PROGRAMMABLE_HATCH[tier] != null) {

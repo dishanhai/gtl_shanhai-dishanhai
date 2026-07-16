@@ -168,31 +168,38 @@ public final class WalletAccountAPI {
 
     /**
      * 币种 → 数字余额：扣 count 枚币种，加 {@code count × 币值} 数字余额。
-     * 币值≤0（未配置）或余额不足则不动，返回加得的数字余额（0 表示失败）。
+     * 请求量超过账户余额时按<b>余额封顶</b>成交（而非要求精确匹配整体失败），
+     * 封顶后仍为 0 或币值≤0（未配置）才返回 0。
      */
     public static BigInteger convertCurrencyToDigital(MinecraftServer server, UUID uuid, ResourceLocation currency, BigInteger count) {
         if (count == null || count.signum() <= 0 || currency == null) return BigInteger.ZERO;
         long value = CurrencyRateConfig.getValue(currency);
         if (value <= 0L) return BigInteger.ZERO;
-        if (!tryDeductCurrency(server, uuid, currency, count)) return BigInteger.ZERO;
-        BigInteger gain = count.multiply(BigInteger.valueOf(value));
+        BigInteger amt = getCurrency(server, uuid, currency).min(count); // 余额不足按余额最大值成交
+        if (amt.signum() <= 0) return BigInteger.ZERO;
+        if (!tryDeductCurrency(server, uuid, currency, amt)) return BigInteger.ZERO;
+        BigInteger gain = amt.multiply(BigInteger.valueOf(value));
         addDigital(server, uuid, gain);
         return gain;
     }
 
     /**
-     * 数字余额 → 币种：花 {@code coinsWanted × 币值} 星火，换 <b>恰好</b> {@code coinsWanted} 枚币种
+     * 数字余额 → 币种：花 {@code coins × 币值} 星火，换 {@code coins} 枚币种
      * （数量语义 = 想要的目标币数量，与其余 ATM 操作一致，非"花的星火数"）。
-     * 币值≤0（未配置）或星火不足则整体不动，返回 0。
+     * 想要的数量超过星火余额能兑的上限时按<b>星火余额封顶</b>成交（而非要求精确匹配整体失败），
+     * 封顶后仍为 0 或币值≤0（未配置）才返回 0。
      */
     public static BigInteger convertDigitalToCurrency(MinecraftServer server, UUID uuid, ResourceLocation currency, BigInteger coinsWanted) {
         if (coinsWanted == null || coinsWanted.signum() <= 0 || currency == null) return BigInteger.ZERO;
         long value = CurrencyRateConfig.getValue(currency);
         if (value <= 0L) return BigInteger.ZERO;
-        BigInteger spend = coinsWanted.multiply(BigInteger.valueOf(value));
+        BigInteger affordable = getDigital(server, uuid).divide(BigInteger.valueOf(value)); // 星火余额最多能换的币数
+        BigInteger coins = coinsWanted.min(affordable); // 星火不足按余额最大值成交
+        if (coins.signum() <= 0) return BigInteger.ZERO;
+        BigInteger spend = coins.multiply(BigInteger.valueOf(value));
         if (!tryDeductDigital(server, uuid, spend)) return BigInteger.ZERO;
-        addCurrency(server, uuid, currency, coinsWanted);
-        return coinsWanted;
+        addCurrency(server, uuid, currency, coins);
+        return coins;
     }
 
     // ===================== 客户端同步 =====================

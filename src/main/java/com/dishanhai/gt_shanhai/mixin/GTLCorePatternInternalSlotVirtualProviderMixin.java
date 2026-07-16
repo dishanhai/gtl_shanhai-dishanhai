@@ -11,6 +11,7 @@ import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import org.spongepowered.asm.mixin.Final;
@@ -19,6 +20,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
@@ -50,6 +52,26 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     }
 
     @Override
+    public void gtShanhai$restoreVirtualTarget(AEKey key, long amount) {
+        if (key instanceof AEItemKey itemKey) {
+            VirtualPatternBufferSlotState.registerVirtualTarget(itemInventory, itemKey, amount);
+        } else if (key instanceof AEFluidKey fluidKey) {
+            VirtualPatternBufferSlotState.registerVirtualTarget(fluidInventory, fluidKey, amount);
+        }
+    }
+
+    @Override
+    public boolean gtShanhai$hasVirtualTarget(AEKey key) {
+        if (key instanceof AEItemKey itemKey) {
+            return VirtualPatternBufferSlotState.getVirtualTargets(itemInventory).containsKey(itemKey);
+        }
+        if (key instanceof AEFluidKey fluidKey) {
+            return VirtualPatternBufferSlotState.getVirtualTargets(fluidInventory).containsKey(fluidKey);
+        }
+        return false;
+    }
+
+    @Override
     public void gtShanhai$syncVirtualTargetsToCatalyst() {
         VirtualPatternBufferSlotState.copyVirtualTargets(itemInventory, gtShanhai$getItemCatalystInventory());
         VirtualPatternBufferSlotState.copyVirtualTargets(fluidInventory, gtShanhai$getFluidCatalystInventory());
@@ -65,6 +87,17 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     public void gtShanhai$stripVirtualTargets() {
         gtShanhai$stripVirtualItems();
         gtShanhai$stripVirtualFluids();
+    }
+
+    @Inject(method = "serializeNBT", at = @At("RETURN"), remap = false)
+    private void gtShanhai$saveVirtualIdentity(CallbackInfoReturnable<CompoundTag> cir) {
+        VirtualPatternBufferSlotState.writeVirtualTargets(itemInventory, fluidInventory, cir.getReturnValue());
+    }
+
+    @Inject(method = "deserializeNBT", at = @At("RETURN"), remap = false)
+    private void gtShanhai$loadVirtualIdentity(CompoundTag tag, CallbackInfo ci) {
+        VirtualPatternBufferSlotState.readVirtualTargets(itemInventory, fluidInventory, tag);
+        gtShanhai$syncVirtualTargetsToCatalyst();
     }
 
     @Inject(method = "handleItemInternal", at = @At("HEAD"), remap = false)

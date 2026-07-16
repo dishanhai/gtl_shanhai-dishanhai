@@ -24,6 +24,13 @@ public final class PatternRecipeTypeHelper {
     private static final String GTLCORE_TAG = "gtlcore";
     private static final String GTLCORE_QUICK_UPLOAD_TAG = "patternQuickUploadRecipeTypes";
 
+    // 编码时（Ae2GtmProcessingPatternMixin）已知确切来源 GTRecipe、零歧义写入的权威标记：
+    // 一旦置位，ensureRecipeTypeId/ensureRecipe 永不再重新推断/覆盖——避免"同一输入输出恰好
+    // 也能匹配到另一配方类型"（如材质自动生成的电炉配方与手写的反熵冷凝配方撞了同一输入输出）
+    // 时，仅按类型域搜索的自愈确认对两边都能"确认成功"，被某次瞬时失配（配方被
+    // DShanhaiRecipeModifierAPI 规则临时剥离/替换）触发误改判后一直来回横跳。
+    private static final String TAG_RECIPE_TYPE_AUTHORITATIVE = "gt_shanhai_recipe_type_authoritative";
+
     private PatternRecipeTypeHelper() {
     }
 
@@ -35,6 +42,22 @@ public final class PatternRecipeTypeHelper {
     public static void writeRecipeType(ItemStack stack, GTRecipeType recipeType) {
         if (stack == null || stack.isEmpty() || recipeType == null || recipeType.registryName == null) return;
         stack.getOrCreateTag().putString(TAG_RECIPE_TYPE, recipeType.registryName.toString());
+    }
+
+    /**
+     * 编码时权威写入：仅供已经拿到确切来源 {@link GTRecipe}（玩家实际选中/上传的那一个，零歧义）
+     * 的调用点使用，如 {@code Ae2GtmProcessingPatternMixin}。写入后该样板永久跳过自愈重推断。
+     */
+    public static void writeAuthoritativeRecipeType(ItemStack stack, GTRecipe recipe) {
+        if (stack == null || stack.isEmpty() || recipe == null) return;
+        writeRecipeType(stack, recipe);
+        stack.getOrCreateTag().putBoolean(TAG_RECIPE_TYPE_AUTHORITATIVE, true);
+    }
+
+    private static boolean isAuthoritative(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        CompoundTag tag = stack.getTag();
+        return tag != null && tag.getBoolean(TAG_RECIPE_TYPE_AUTHORITATIVE);
     }
 
     public static String readRecipeTypeId(ItemStack stack) {
@@ -68,13 +91,25 @@ public final class PatternRecipeTypeHelper {
         String existing = readRecipeTypeId(stack);
         if (stack == null || stack.isEmpty() || level == null) return existing;
 
+        // 编码时权威写入：零歧义来源，永久信任，跳过下面一切重推断/覆盖判断。
+        if (!existing.isEmpty() && isAuthoritative(stack)) {
+            return existing;
+        }
+
         // 如果已有配方类型ID，先验证是否匹配虚拟配方
         if (!existing.isEmpty()) {
             GTRecipe recipe = inferRecipe(stack, level, existing);
             if (recipe != null && recipeMatchesTypeId(recipe, existing)) {
                 return existing;  // 现有ID正确，直接返回
             }
-            // 现有ID不匹配或无法推断配方，清空重新推断
+            // 现有ID对应的配方表如果还没加载好（常见于世界刚加载时），不能当作"这个样板
+            // 换配方类型了"——下面的全局兜底搜索精度更低，容易把简单的 1进1出配方误配到
+            // 不相关类型（如 electric_furnace）上，一旦写回 NBT 就永久覆盖掉正确值，
+            // 只能靠玩家重新编码样板才能修复。只有确认该类型配方表已就绪、确实匹配不上时，
+            // 才允许下面重新推断纠正（自愈已经写错的标记）。
+            if (!isRecipeTypeLookupPopulated(existing)) {
+                return existing;
+            }
         }
 
         // 推断配方并写入配方类型
@@ -89,22 +124,45 @@ public final class PatternRecipeTypeHelper {
 
     public static GTRecipe ensureRecipe(ItemStack stack, Level level) {
         if (stack == null || stack.isEmpty() || level == null) return null;
-        
+
         String existing = readRecipeTypeId(stack);
-        GTRecipe recipe = inferRecipe(stack, level, existing);
-        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) {
-            recipe = inferRecipe(stack, level, "");
+
+        // 编码时权威写入：零歧义来源，永久信任，只在权威类型域内解析，绝不回退全局重推断/覆盖。
+        // 类型表暂未就绪时返回 null（调用方下次再试），而不是当作"类型变了"去改判。
+        if (!existing.isEmpty() && isAuthoritative(stack)) {
+            return inferRecipe(stack, level, existing);
         }
-        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) return null;
-        
-        // 如果已有ID，验证是否匹配
-        if (!existing.isEmpty() && recipeMatchesTypeId(recipe, existing)) {
+
+        GTRecipe recipe = inferRecipe(stack, level, existing);
+        if (recipe != null && recipe.recipeType != null && recipe.recipeType.registryName != null
+                && (existing.isEmpty() || recipeMatchesTypeId(recipe, existing))) {
             return recipe;  // 匹配，直接返回
         }
-        
-        // 不匹配或无ID，写入正确的配方类型
+
+        // 同上：配方表还没就绪时不下结论，也不覆盖现有标记，等下次再验证。
+        if (!existing.isEmpty() && !isRecipeTypeLookupPopulated(existing)) {
+            return null;
+        }
+
+        // 不匹配或无ID，全局重新推断并写入正确的配方类型
+        recipe = inferRecipe(stack, level, "");
+        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) return null;
+
         writeRecipeType(stack, recipe);
         return recipe;
+    }
+
+    /**
+     * 判断某配方类型自身的配方表是否已经加载就绪（是否至少有一条配方）。世界刚加载时
+     * 部分自定义配方类型的 lookup 可能还没建好，此时任何"在该类型内找不到匹配"的结果
+     * 都是不可信的，不能据此判定样板真的换了配方类型。
+     */
+    private static boolean isRecipeTypeLookupPopulated(String recipeTypeId) {
+        GTRecipeType recipeType = resolveRecipeType(recipeTypeId);
+        if (recipeType == null || recipeType.getLookup() == null || recipeType.getLookup().getLookup() == null) {
+            return false;
+        }
+        return recipeType.getLookup().getLookup().getRecipes(true).iterator().hasNext();
     }
 
     /**

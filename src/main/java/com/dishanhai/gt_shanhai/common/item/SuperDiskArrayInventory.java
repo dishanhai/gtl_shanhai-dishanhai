@@ -39,41 +39,54 @@ public class SuperDiskArrayInventory implements StorageCell {
     private final ItemStack stack;
     private final ISaveProvider saveProvider;
     private final UUID uuid;
+    private final boolean readOnlyTemplate;
     private final Map<AEKey, BigInteger> amounts = new HashMap<>();
     private BigInteger total = BigInteger.ZERO;
     private boolean persisted = true;
 
-    private SuperDiskArrayInventory(ItemStack stack, ISaveProvider saveProvider, UUID uuid) {
+    private SuperDiskArrayInventory(
+            ItemStack stack, ISaveProvider saveProvider, UUID uuid, boolean readOnlyTemplate) {
         this.stack = stack;
         this.saveProvider = saveProvider;
         this.uuid = uuid;
-        load();
+        this.readOnlyTemplate = readOnlyTemplate;
+        if (readOnlyTemplate) {
+            loadReadOnly();
+        } else {
+            load();
+        }
     }
 
     public static SuperDiskArrayInventory create(ItemStack stack, ISaveProvider saveProvider) {
         if (stack == null || stack.isEmpty() || !(stack.getItem() instanceof SuperDiskArrayItem)) return null;
-        CompoundTag tag = stack.getOrCreateTag();
+        CompoundTag tag = stack.getTag();
+        boolean readOnlyTemplate = saveProvider == null && (tag == null || !tag.hasUUID(TAG_UUID));
         // 取出即分家：任何被真实 AE 上下文访问（saveProvider≠null）的副本都认领独立所有权，
         // 不再依赖 inline 态。避免同内容模板包共享确定性 UUID → 共用后端存储 → 互相溢出。
         if (saveProvider != null) {
             claimOwnership(stack);
+            tag = stack.getTag();
         }
 
-        // UUID 归一化：如果 NBT 中没有 UUID，基于内容生成确定性 UUID
+        // 无保存器的 UUID-less 栈只使用内存中的确定性身份，不得因 JEI/探测读取而认领所有权。
         UUID uuid;
-        if (tag.hasUUID(TAG_UUID)) {
+        if (tag != null && tag.hasUUID(TAG_UUID)) {
             uuid = tag.getUUID(TAG_UUID);
         } else {
-            // 基于 keys + amts + display.Name 计算确定性 UUID，确保相同内容的 SDA 使用相同 UUID
-            uuid = generateDeterministicUUID(tag);
-            tag.putUUID(TAG_UUID, uuid);
+            CompoundTag identityTag = tag == null ? new CompoundTag() : tag;
+            uuid = generateDeterministicUUID(identityTag);
+            if (!readOnlyTemplate) {
+                stack.getOrCreateTag().putUUID(TAG_UUID, uuid);
+            }
         }
 
         SuperDiskArrayInventory cached = INVENTORY_CACHE.get(stack);
-        if (cached != null && uuid.equals(cached.uuid) && cached.saveProvider == saveProvider) {
+        if (cached != null && uuid.equals(cached.uuid) && cached.saveProvider == saveProvider
+                && cached.readOnlyTemplate == readOnlyTemplate) {
             return cached;
         }
-        SuperDiskArrayInventory inventory = new SuperDiskArrayInventory(stack, saveProvider, uuid);
+        SuperDiskArrayInventory inventory =
+                new SuperDiskArrayInventory(stack, saveProvider, uuid, readOnlyTemplate);
         INVENTORY_CACHE.put(stack, inventory);
         return inventory;
     }
@@ -83,8 +96,8 @@ public class SuperDiskArrayInventory implements StorageCell {
      * 使其拥有专属后端存储，避免与同内容的模板包（确定性 UUID）共享 backend 而互相溢出。
      *
      * <p>已认领（TAG_RUNTIME_UUID=true）的副本直接跳过，防止二次 fork。
-     * JEI ghost 不在真实世界、不 tick、不经 saveProvider≠null 的 create，因此保持确定性 UUID，
-     * 不影响 JEI 去重与子类型识别。
+     * JEI ghost 不在真实世界、不 tick、不经 saveProvider≠null 的 create，
+     * 因此只使用内存中的确定性身份，不把 UUID 写回展示栈。
      */
     public static void claimOwnership(ItemStack stack) {
         if (stack == null || stack.isEmpty() || !(stack.getItem() instanceof SuperDiskArrayItem)) return;
@@ -182,6 +195,22 @@ public class SuperDiskArrayInventory implements StorageCell {
         }
     }
 
+    /**
+     * JEI 子类型身份：真实 SDA 只按 UUID 区分；无 UUID 的展示模板额外按电量区分。
+     * 这样动态电量不会拆分玩家物品，同时保留默认、空电和满电三种基础展示项。
+     */
+    public static String getJeiSubtypeKey(CompoundTag tag) {
+        if (tag != null && tag.hasUUID(TAG_UUID)) {
+            return tag.getUUID(TAG_UUID).toString();
+        }
+        CompoundTag identityTag = tag == null ? new CompoundTag() : tag;
+        String baseKey = "template:" + generateDeterministicUUID(identityTag);
+        if (tag == null || !tag.contains("internalCurrentPower", Tag.TAG_ANY_NUMERIC)) {
+            return baseKey + ":power=absent";
+        }
+        return baseKey + ":power=" + Double.toString(tag.getDouble("internalCurrentPower"));
+    }
+
     @Override
     public CellState getStatus() {
         return total.signum() <= 0 ? CellState.EMPTY : CellState.NOT_EMPTY;
@@ -194,6 +223,7 @@ public class SuperDiskArrayInventory implements StorageCell {
 
     @Override
     public void persist() {
+        if (readOnlyTemplate) return;
         if (persisted) return;
         DShanhaiVirtualCellSavedData data = getSavedData();
         if (data != null) {
@@ -219,6 +249,7 @@ public class SuperDiskArrayInventory implements StorageCell {
      * 这里不能走 extract + insert：非空存储元件会被常规 insert 拒绝，先删后插会直接丢失载体。
      */
     public boolean replaceOneStoredKey(AEKey oldKey, AEKey newKey) {
+        if (readOnlyTemplate) return false;
         if (oldKey == null || newKey == null) return false;
         BigInteger oldAmount = amounts.get(oldKey);
         if (oldAmount == null || oldAmount.signum() <= 0) return false;
@@ -237,6 +268,7 @@ public class SuperDiskArrayInventory implements StorageCell {
     @Override
     public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
         if (what == null || amount <= 0 || !(what instanceof AEItemKey)) return 0L;
+        if (readOnlyTemplate && mode == Actionable.MODULATE) return 0L;
         AEItemKey itemKey = (AEItemKey) what;
         StorageCell nested = StorageCells.getCellInventory(itemKey.toStack(), null);
         if (nested != null && !nested.canFitInsideCell()) return 0L;
@@ -253,6 +285,7 @@ public class SuperDiskArrayInventory implements StorageCell {
     @Override
     public long extract(AEKey what, long amount, Actionable mode, IActionSource source) {
         if (what == null || amount <= 0) return 0L;
+        if (readOnlyTemplate && mode == Actionable.MODULATE) return 0L;
         BigInteger current = amounts.getOrDefault(what, BigInteger.ZERO);
         if (current.signum() <= 0) return 0L;
         BigInteger requested = BigInteger.valueOf(amount);
@@ -283,6 +316,20 @@ public class SuperDiskArrayInventory implements StorageCell {
         return stack.getHoverName();
     }
 
+    private void loadReadOnly() {
+        DShanhaiVirtualCellSavedData data = getSavedData();
+        boolean hasInline = readInlineCellNbt();
+        if (!hasInline && data != null) {
+            amounts.putAll(data.readCellBigAmounts(uuid));
+        }
+        if (!hasInline && amounts.isEmpty()
+                && com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.hasStored(uuid)) {
+            amounts.putAll(
+                    com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.restore(uuid));
+        }
+        recalculateTotal();
+    }
+
     private void load() {
         DShanhaiVirtualCellSavedData data = getSavedData();
         boolean migratedInline = migrateInlineCellNbt();
@@ -306,8 +353,18 @@ public class SuperDiskArrayInventory implements StorageCell {
     }
 
     private boolean migrateInlineCellNbt() {
+        if (!readInlineCellNbt()) return false;
         CompoundTag tag = stack.getOrCreateTag();
-        if (!hasInlineCellNbt(tag)) return false;
+        tag.remove("keys");
+        tag.remove("amts");
+        tag.remove("ic");
+        persisted = false;
+        return true;
+    }
+
+    private boolean readInlineCellNbt() {
+        CompoundTag tag = stack.getTag();
+        if (tag == null || !hasInlineCellNbt(tag)) return false;
         amounts.clear();
         ListTag keys = tag.getList("keys", Tag.TAG_COMPOUND);
         long[] amts = tag.getLongArray("amts");
@@ -324,10 +381,6 @@ public class SuperDiskArrayInventory implements StorageCell {
                 amounts.put(key, current.add(BigInteger.valueOf(amount)));
             }
         }
-        tag.remove("keys");
-        tag.remove("amts");
-        tag.remove("ic");
-        persisted = false;
         return true;
     }
 

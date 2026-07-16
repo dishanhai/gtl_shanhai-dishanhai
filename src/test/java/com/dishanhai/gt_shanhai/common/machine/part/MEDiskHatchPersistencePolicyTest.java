@@ -18,6 +18,8 @@ class MEDiskHatchPersistencePolicyTest {
     private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path STORAGE_SERVICE_DELTA_CACHE_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "StorageServiceDeltaCacheMixin.java");
+    private static final Path ME_STORAGE_MENU_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "mixin", "MEStorageMenuBroadcastOptimizationMixin.java");
 
     @Test
     void mountedCellsAlwaysReceiveAHostSaveProvider() throws IOException {
@@ -61,6 +63,30 @@ class MEDiskHatchPersistencePolicyTest {
                 "外部显式 invalidateCache 后仍必须保留下一次全量同步");
         assertTrue(source.contains("ci.cancel();"),
                 "接管分支必须阻止原版每 tick 把 cachedStacksNeedUpdate 重新置 true");
+    }
+
+    @Test
+    void storageMutationsInvalidateInsteadOfApplyingUnsafeArithmeticDeltas() throws IOException {
+        String source = Files.readString(STORAGE_SERVICE_DELTA_CACHE_MIXIN);
+
+        assertTrue(source.contains("this.cachedStacksNeedUpdate = true;"),
+                "真实存取后必须把 AE2 可用库存缓存标脏");
+        assertFalse(source.contains("gtShanhai$applyPendingDeltas"),
+                "无限盘和创造存储的返回量不代表库存变化量，不能直接增减缓存");
+        assertFalse(source.contains("gtShanhai$saturatedAdd"),
+                "不得继续用算术 delta 修补特殊存储的可用数量");
+    }
+
+    @Test
+    void wirelessTerminalMenuUsesItsActionHostToReachStorageServiceCache() throws IOException {
+        String source = Files.readString(ME_STORAGE_MENU_MIXIN);
+
+        assertTrue(source.contains("@Shadow @Final private ITerminalHost host;"),
+                "菜单必须保留无线终端 host，不能只依赖构造器未设置的 networkNode");
+        assertTrue(source.contains("this.host instanceof IActionHost actionHost"),
+                "IPortableTerminal 同时实现 IActionHost 时必须从 host 获取网格节点");
+        assertTrue(source.contains("node = actionHost.getActionableNode();"),
+                "无线终端必须通过 actionable node 进入 StorageService 缓存");
     }
 
     @Test

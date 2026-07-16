@@ -53,7 +53,7 @@ public class Ae2GtmProcessingPatternMixin {
                 inputs.toArray(new GenericStack[0]),
                 outputs.toArray(new GenericStack[0]));
         if (pattern == null || pattern.isEmpty()) return;
-        PatternRecipeTypeHelper.writeRecipeType(pattern, recipe);
+        PatternRecipeTypeHelper.writeAuthoritativeRecipeType(pattern, recipe);
 
         cir.setReturnValue(new Ae2GtmProcessingPattern(pattern, player, recipe));
     }
