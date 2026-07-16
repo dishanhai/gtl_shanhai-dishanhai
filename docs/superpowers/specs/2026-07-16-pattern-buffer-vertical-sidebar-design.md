@@ -8,20 +8,19 @@ ME 星轨输出矩阵使用 `attachSideTabs(TabsWidget)` 注册 `IFancyUIProvide
 
 ## 目标
 
-- 将星律红框内全部配置入口迁移到星轨同款连续贴边侧栏。
-- 主页面不再注册 `ConfiguratorPanel` 悬浮按钮。
+- 将星律常规配置入口迁移到星轨同款连续贴边侧栏。
+- “将共享库存返还到 AE2”保留为唯一 `ConfiguratorPanel` 独立悬浮入口。
 - 保留现有库存、通配符、共享输入、样板电路、行为开关、刷新周期和返还功能。
 - 不修改配方执行、库存同步、样板缓存、NBT 或网络语义。
 
 ## 侧栏结构
 
-星律主页面高度为 144 像素。`VerticalTabsWidget` 每个页签占 24 像素，因此除主页面外固定注册 5 个子页签，恰好连续填满主页面高度：
+星律主页面高度为 144 像素。`VerticalTabsWidget` 每个页签占 24 像素，除主页面外固定注册 4 个连续子页签，不在功能页之间插入空页：
 
-1. **拉取库存**：复用 `StockInputConfigurator` 的物品/流体库存配置与页码。
+1. **拉取库存**：复用 `StockInputConfigurator` 的物品/流体库存配置与页码，并在同页下方显示高级拉取设置。
 2. **通配符样板**：复用 5 个母槽、展开预览、配方类型滚动列表和槽位独立分配行为。
 3. **共享输入**：共享物品与共享流体配置器在首行左右并排，共享编程电路配置器在下一行居中。
 4. **样板行为**：集中副产物开关、终端可见性以及样板电路批量配置。
-5. **ME 操作**：集中库存同步周期与“返还共享库存到 AE2”操作。
 
 所有页签使用原配置器图标或现有山海图标，显示原有悬停说明。侧栏顺序固定，不按状态动态增删，避免按钮位置变化。
 
@@ -29,9 +28,11 @@ ME 星轨输出矩阵使用 `attachSideTabs(TabsWidget)` 注册 `IFancyUIProvide
 
 ### 页面注册
 
-`RecipeTypePatternBufferPartMachine.attachSideTabs` 先调用父类实现，再按上述顺序注册 5 个 `IFancyUIProvider`。
+`RecipeTypePatternBufferPartMachine.attachSideTabs` 先调用父类实现，再按上述顺序注册 4 个 `IFancyUIProvider`。
 
-`RecipeTypePatternBufferPartMachine.attachConfigurators` 不再调用父类，也不再注册山海配置器，从而清空星律页面的悬浮配置按钮。该行为仅作用于星律类，不修改 GTLCore 原版样板总成。
+`RecipeTypePatternBufferPartMachine.attachConfigurators` 通过收集型面板取得父类配置器，但只把“将共享库存返还到 AE2”注册回真实 `ConfiguratorPanel`。该行为仅作用于星律类，不修改 GTLCore 原版样板总成。
+
+高级拉取设置不注册独立侧栏页，而是和 `StockInputConfigurator` 组合为同一个 `FancyConfiguratorSidebarPage`；两者保持单列，库存输入在上、高级拉取设置在下。
 
 ### 配置器适配
 
@@ -49,7 +50,7 @@ ME 星轨输出矩阵使用 `attachSideTabs(TabsWidget)` 注册 `IFancyUIProvide
 
 - 页面内容使用固定宽度并以 `GuiTextures.BACKGROUND_INVERSE` 作为内部工作区背景。
 - 页面高度由内容决定；切换到较高页面时沿用 `FancyMachineUIWidget` 的既有动态尺寸逻辑。
-- 主页面仍维持 144 像素，5 个子页签不会溢出或进入玩家背包区域。
+- 主页面仍维持 144 像素，4 个子页签连续排列且不会溢出或进入玩家背包区域。
 
 ### 共享输入布局
 
@@ -57,20 +58,21 @@ ME 星轨输出矩阵使用 `attachSideTabs(TabsWidget)` 注册 `IFancyUIProvide
 - 共享物品与共享流体配置器保留原始槽位尺寸，标题和配置区域顶部对齐，中间使用固定间距。
 - 首行高度取两个配置器高度的最大值，避免任一配置器把下一行顶入同一水平区域。
 - 共享编程电路配置器在双列首行下方独占一行并水平居中。
-- 库存拉取、通配符、样板行为和 ME 操作页面继续使用单列布局，不受该能力影响。
+- 库存拉取、通配符和样板行为页面继续使用单列布局，不受该能力影响。
 
 ## 行为边界
 
-- 不保留无法证明必要的悬浮配置入口；当前检查未发现必须留在 `ConfiguratorPanel` 的项目。
-- 返还操作保留为显式命令，避免仅打开页签就触发库存变更。
+- 返还共享库存是唯一保留的悬浮配置入口；其他父类配置器不回到 `ConfiguratorPanel`。
+- 返还操作保留为显式命令，避免打开任一侧栏页就触发库存变更。
 - 切换页面不修改任何机器配置，只有页面内控件点击才提交变化。
 - 不更改通配符母样板 NBT、库存拉取槽数据或共享输入存储。
 
 ## 验证
 
-- 源码契约测试确认使用 `attachSideTabs` 注册 5 个固定页面。
-- 测试确认星律 `attachConfigurators` 不再调用父类或注册任何悬浮入口。
+- 源码契约测试确认使用 `attachSideTabs` 注册 4 个固定页面。
+- 测试确认星律 `attachConfigurators` 不直接调用父类，只注册返还共享库存这一项悬浮入口。
+- 测试确认高级拉取设置与库存输入位于同一侧栏页，不再存在独立 ME 操作页。
 - 测试确认适配器转发完整 `IFancyConfigurator` 同步生命周期。
 - 测试确认共享输入页将前两个配置器放入同一横排，第三个配置器位于下一行。
 - 运行星律 UI 定向测试、相关通配符/库存回归测试和完整 `clean build`。
-- 部署后实机检查：侧栏按钮连续无间隔、没有旧悬浮按钮、所有 5 页可打开且原功能可操作。
+- 部署后实机检查：4 个侧栏按钮连续无间隔、只有返还共享库存悬浮入口、所有页面及原功能可操作。
