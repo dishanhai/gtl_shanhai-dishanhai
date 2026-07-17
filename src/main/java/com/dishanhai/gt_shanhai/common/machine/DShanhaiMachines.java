@@ -122,6 +122,8 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_REALITY_ANCHOR_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_COIN_FORGE;
     public static MultiblockMachineDefinition PRIMORDIAL_FLAME_CRACKING_KILN;
+    public static MultiblockMachineDefinition PRIMORDIAL_ABYSSAL_REFINERY;
+    public static MultiblockMachineDefinition PRIMORDIAL_COSMIC_ORIGIN_CORE;
 
     public static MachineDefinition BIG_TAG_FILTER_STOCK_BUS;
     public static MachineDefinition ME_REQUESTABLE_INPUT_BUS;
@@ -371,6 +373,63 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("§b从燧人取火到工业焦炉，每一道裂解与冶炼都是文明对热的驯服"));
             tooltips.add(Component.literal("§7配方类型：热解炉 / 裂化炉 / 土高炉 / 熔岩炉 / 焦炉"));
+            tooltips.add(Component.literal("")
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
+                    .append(Component.literal("§f并行，直接从电网取电")));
+        });
+
+        PRIMORDIAL_ABYSSAL_REFINERY = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_abyssal_refinery", PrimordialAbyssalRefinery::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(
+                        GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES,
+                        GTLRecipeTypes.PETROCHEMICAL_PLANT_RECIPES,
+                        GTLRecipeTypes.WOOD_DISTILLATION_RECIPES,
+                        GTLRecipeTypes.FISHING_GROUND_RECIPES,
+                        GTLRecipeTypes.DISSOLUTION_TREATMENT,
+                        GTLRecipeTypes.DIGESTION_TREATMENT,
+                        GTLRecipeTypes.DESULFURIZER_RECIPES)
+                .pattern(PrimordialAbyssalRefineryStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                .register();
+
+        PRIMORDIAL_ABYSSAL_REFINERY.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("渊薮不涸，万物归流——虚空之下，皆是待炼之料"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位"));
+            tooltips.add(Component.literal("§b从虚空钻探到深海渔场，从石化裂解到煮解脱硫，七源归一"));
+            tooltips.add(Component.literal("§7配方类型：虚空流体钻机 / 石化工厂 / 木材干馏 / 渔场 / 溶解 / 煮解 / 脱硫"));
+            tooltips.add(Component.literal("")
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
+                    .append(Component.literal("§f并行，直接从电网取电")));
+        });
+
+        PRIMORDIAL_COSMIC_ORIGIN_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_cosmic_origin_core", PrimordialCosmicOriginCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(
+                        GTLRecipeTypes.ATOMIC_ENERGY_EXCITATION_RECIPES,
+                        GTLAddRecipesTypes.INSTANCE.getSTAR_CORE_STRIPPER(),
+                        GTLAddRecipesTypes.CHAOS_WEAVE,
+                        GTLRecipeTypes.WORLD_DATA_SCANNER_RECIPES,
+                        GTLRecipeTypes.SPACE_PROBE_SURFACE_RECEPTION_RECIPES,
+                        GTLRecipeTypes.RARE_EARTH_CENTRIFUGAL_RECIPES)
+                .pattern(PrimordialCosmicOriginCoreStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                .register();
+
+        PRIMORDIAL_COSMIC_ORIGIN_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("寰宇无垠，探源不止——剥离星核，编织混沌，窥测万物之本"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位"));
+            tooltips.add(Component.literal("§b原子被激发，星辰被剥离，世界线被扫描，稀土被离析"));
+            tooltips.add(Component.literal("§7配方类型：原子能激发 / 星核剥离 / 混沌编织 / 世界信息扫描 / 宇宙探测 / 稀土离心"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f并行，直接从电网取电")));

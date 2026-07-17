@@ -128,7 +128,7 @@ public final class ShopCatalogSnapshot {
             }
             payloads.add(payload);
             descriptors.add(new Descriptor(entry.getCategory(), entry.isHidden() || !entry.isStructurallyValid(), entry.getLinkKey(),
-                    entry.hasCustomName() ? entry.getDisplayName() : "", goodsIds, payload.estimatedUtf8Bytes(), entry.getStableId()));
+                    entry.goodsDisplayName(), goodsIds, payload.estimatedUtf8Bytes(), entry.getStableId()));
             byKey.put(key, entry);
             byEntry.put(entry, key);
             byStableId.put(entry.getStableId(), entry);

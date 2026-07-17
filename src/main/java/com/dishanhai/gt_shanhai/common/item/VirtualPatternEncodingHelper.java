@@ -63,10 +63,19 @@ public final class VirtualPatternEncodingHelper {
 
         GTRecipe recipe = findMatchingRecipe(inputs, outputs);
         if (recipe == null) {
+            LOG.info("[VirtualPatternEncoding] no unique recipe matched for outputs={}, wrap skipped, inputs left raw",
+                    StackBag.of(outputs));
             return inputs;
         }
 
-        return rewriteInputsPreservingSelections(inputs, recipe);
+        GenericStack[] rewritten = rewriteInputsPreservingSelections(inputs, recipe);
+        if (rewritten == inputs) {
+            LOG.info("[VirtualPatternEncoding] recipe={} matched but rewrite was rejected (slot count or ingredient mismatch), inputs left raw",
+                    recipe.getId());
+        } else {
+            LOG.info("[VirtualPatternEncoding] recipe={} matched, inputs rewritten with virtual providers", recipe.getId());
+        }
+        return rewritten;
     }
 
     public static boolean containsVirtualProviderInput(GenericStack[] inputs) {
@@ -393,11 +402,9 @@ public final class VirtualPatternEncodingHelper {
             if (matched != null) {
                 // 多个配方输入输出完全相同（仅电压等属性不同，GT 里不罕见）：无法唯一识别，放弃改写/
                 // 放弃识别配方类型。之前完全静默，玩家只会看到"这张样板不认/不省料"却毫无线索
-                // （ERR-20260714-009）。补一条 debug 日志，方便现场定位是不是撞上了这个歧义分支。
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("[VirtualPatternEncoding] 输出 {} 匹配到多个配方（至少 {} 与 {}），"
-                            + "无法唯一识别，放弃虚拟供料改写/配方类型识别", outputBag, matched.getId(), recipe.getId());
-                }
+                // （ERR-20260714-009）。补一条日志，方便现场定位是不是撞上了这个歧义分支。
+                LOG.info("[VirtualPatternEncoding] outputs={} matched multiple recipes (at least {} and {}), "
+                        + "ambiguous, wrap/recipe-type lookup abandoned", outputBag, matched.getId(), recipe.getId());
                 return null;
             }
             matched = recipe;
@@ -586,16 +593,23 @@ public final class VirtualPatternEncodingHelper {
 
     private static GenericStack[] rewriteInputsPreservingSelections(GenericStack[] inputs, GTRecipe recipe) {
         List<GenericStack> original = compactStacks(inputs);
-        if (original.size() != countRecipeInputs(recipe)) return inputs;
+        int expected = countRecipeInputs(recipe);
+        if (original.size() != expected) {
+            LOG.info("[VirtualPatternEncoding] recipe={} slot count mismatch: pattern has {}, recipe expects {}, wrap skipped",
+                    recipe.getId(), original.size(), expected);
+            return inputs;
+        }
 
         List<GenericStack> rewritten = new ArrayList<>(original);
         boolean[] used = new boolean[original.size()];
         if (!rewriteItemInputsPreservingSelections(
                 recipe.getInputContents(ItemRecipeCapability.CAP), original, rewritten, used)) {
+            LOG.info("[VirtualPatternEncoding] recipe={} item ingredient match failed, wrap skipped", recipe.getId());
             return inputs;
         }
         if (!rewriteFluidInputsPreservingSelections(
                 recipe.getInputContents(FluidRecipeCapability.CAP), original, rewritten, used)) {
+            LOG.info("[VirtualPatternEncoding] recipe={} fluid ingredient match failed, wrap skipped", recipe.getId());
             return inputs;
         }
         return rewritten.toArray(new GenericStack[0]);
@@ -620,7 +634,10 @@ public final class VirtualPatternEncodingHelper {
                     break;
                 }
             }
-            if (matchedIndex < 0) return false;
+            if (matchedIndex < 0) {
+                LOG.info("[VirtualPatternEncoding] no pattern slot matches recipe item ingredient (amount={})", amount);
+                return false;
+            }
             used[matchedIndex] = true;
             if (!isNonConsumable(content)) continue;
 
@@ -630,7 +647,10 @@ public final class VirtualPatternEncodingHelper {
                 continue;
             }
             ItemStack provider = VirtualItemProviderHelper.createBoundProvider(selected);
-            if (provider.isEmpty()) return false;
+            if (provider.isEmpty()) {
+                LOG.warn("[VirtualPatternEncoding] item={} createBoundProvider returned EMPTY", selected.getItem());
+                return false;
+            }
             rewritten.set(matchedIndex, new GenericStack(AEItemKey.of(provider), 1));
         }
         return true;

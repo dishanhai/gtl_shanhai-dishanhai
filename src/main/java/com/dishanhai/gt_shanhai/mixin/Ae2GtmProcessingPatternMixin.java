@@ -58,6 +58,8 @@ public class Ae2GtmProcessingPatternMixin {
         cir.setReturnValue(new Ae2GtmProcessingPattern(pattern, player, recipe));
     }
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai:pattern_encode");
+
     private static void appendItemInputs(GTRecipe recipe, List<GenericStack> inputs) {
         List<Content> contents = recipe.getInputContents(ItemRecipeCapability.CAP);
         if (contents == null || contents.isEmpty()) return;
@@ -67,13 +69,21 @@ public class Ae2GtmProcessingPatternMixin {
             if (stack.isEmpty()) continue;
 
             if (isNonConsumable(content)) {
-                if (VirtualItemProviderHelper.isAutoWrapExcluded(stack)) {
+                boolean excluded = VirtualItemProviderHelper.isAutoWrapExcluded(stack);
+                if (excluded) {
+                    LOG.info("[encode] recipe={} item={} chance={} -> excluded, kept raw",
+                            recipe.id, stack.getItem(), content.chance);
                     inputs.add(new GenericStack(AEItemKey.of(stack.copy()), getItemAmount(content, stack)));
                     continue;
                 }
                 ItemStack provider = VirtualItemProviderHelper.createBoundProvider(stack);
                 if (!provider.isEmpty()) {
+                    LOG.info("[encode] recipe={} item={} chance={} -> wrapped as provider",
+                            recipe.id, stack.getItem(), content.chance);
                     inputs.add(new GenericStack(AEItemKey.of(provider), 1));
+                } else {
+                    LOG.warn("[encode] recipe={} item={} chance={} -> createBoundProvider returned EMPTY, input dropped entirely",
+                            recipe.id, stack.getItem(), content.chance);
                 }
                 continue;
             }
