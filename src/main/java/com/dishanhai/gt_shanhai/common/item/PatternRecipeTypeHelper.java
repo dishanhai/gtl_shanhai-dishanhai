@@ -64,14 +64,22 @@ public final class PatternRecipeTypeHelper {
         if (stack == null || stack.isEmpty()) return "";
         CompoundTag tag = stack.getTag();
         if (tag == null) return "";
+
+        // gtlcore 编码样板时用 PatternQuickUploadRecipeTypeResolver 写入的字段优先：它在编码那一刻
+        // 就知道确切来源配方（或者按类型域扫描+遇歧义直接放弃，不去重写多个候选），比 gt_shanhai
+        // 自己事后单靠物品堆叠反查全配方表要可靠得多——反查在"不同配方类型凑巧输入输出堆叠一样"
+        // 时必然会猜错（如 0.144B液态铁+1铁粉，"分子解构"和"提取机"都能匹配），之前顺序反了，
+        // gt_shanhai 自己猜错的字段优先显示，篡改了样板本该显示的正确配方类型。
+        String gtlcoreId = readGtlcoreQuickUploadRecipeTypeId(tag);
+        if (!gtlcoreId.isEmpty()) return gtlcoreId;
+
         if (tag.contains(TAG_RECIPE_TYPE, 8)) {
             String id = tag.getString(TAG_RECIPE_TYPE);
             if (!id.isEmpty()) return id;
         }
-        return readGtlcoreQuickUploadRecipeTypeId(tag);
+        return "";
     }
 
-    // gt_shanhai 自身字段缺失时，回退读取 gtlcore 编码样板时写入的配方类型列表（更健全，覆盖 gt_shanhai mixin 未拦截到的编码路径）。
     // gtlcore 侧存在歧义（多个候选配方类型）时会直接不写或不去重写入多个值，因此这里仅当列表唯一去重后恰好一个元素时才采信，
     // 有歧义则视为无结果，与 gtlcore 自身 PatternQuickUploadRecipeTypeResolver 遇歧义放弃的语义保持一致。
     private static String readGtlcoreQuickUploadRecipeTypeId(CompoundTag tag) {

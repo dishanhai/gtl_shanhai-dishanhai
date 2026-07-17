@@ -51,6 +51,8 @@ public class ShanhaiJEIPlugin implements IModPlugin {
         } catch (Throwable t) {
             // JEI API 版本差异/未知异常：静默降级，MultiPickerScreen 走原有创造栏顺序兜底
         }
+        // 塞运行时引用给书签桥接（见 JeiBookmarkBridge），供 MultiPickerScreen 的「JEI书签」浏览模式反射读取
+        JeiBookmarkBridge.setRuntime(runtime);
     }
 
     @Override

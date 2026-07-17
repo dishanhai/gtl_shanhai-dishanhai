@@ -98,6 +98,13 @@ public final class DShanhaiConfigScreen {
                 .setDefaultValue(108).setMin(1).setMax(256)
                 .setTooltip(tip("默认 108，修改后需重新放置仓室生效"))
                 .setSaveConsumer(cfg.meDiskHatchSlots::set).build());
+        machine.addEntry(e.startBooleanToggle(Component.literal("AE 库存增量刷新缓存"), cfg.aeStorageDeltaCacheEnabled.get())
+                .setDefaultValue(true)
+                .setTooltip(tip("true=仅当 NetworkStorage.insert/extract 记录到变化时才全量重扫库存（省一个 tick 的重扫开销）",
+                        "false=每 tick 强制全量重扫，保证取出磁盘、无限盘挂载等不走 insert/extract 的变化也及时刷新",
+                        "⚠ 无限盘/ExtendedAE 库存闪烁、下单误报“材料不足”时请关闭此项",
+                        "改动后需重进存档生效"))
+                .setSaveConsumer(cfg.aeStorageDeltaCacheEnabled::set).build());
 
         // ===== 虚拟物品提供器 =====
         ConfigCategory vip = builder.getOrCreateCategory(Component.literal("虚拟物品提供器"));

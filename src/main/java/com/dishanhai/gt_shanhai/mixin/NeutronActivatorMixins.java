@@ -22,14 +22,6 @@ public final class NeutronActivatorMixins {
 
     private NeutronActivatorMixins() {}
 
-    private static boolean hasVoltageBypassHub(IMultiController controller) {
-        if (!controller.isFormed()) return false;
-        for (IMultiPart part : controller.getParts()) {
-            if (part instanceof IMaintenanceBypassPart bp && bp.isVoltageBypassEnabled()) return true;
-        }
-        return false;
-    }
-
     @Mixin(value = NeutronActivatorMachine.class, remap = false)
     public interface EvAccessor {
 
@@ -51,7 +43,7 @@ public final class NeutronActivatorMixins {
         @Inject(method = "neutronEnergyUpdate", at = @At("RETURN"))
         private void gtShanhai$maintainEv(CallbackInfo ci) {
             if (!((Object) this instanceof IMultiController controller)) return;
-            if (!hasVoltageBypassHub(controller)) return;
+            if (!IMaintenanceBypassPart.anyVoltageBypassEnabled(controller)) return;
             if (eV < 500_000_000) {
                 eV = 1_000_000_000;
             }
@@ -61,7 +53,7 @@ public final class NeutronActivatorMixins {
         private static void gtShanhai$adjustEvForRecipe(MetaMachine machine, GTRecipe recipe,
                                                          CallbackInfoReturnable<GTRecipe> cir) {
             if (!(machine instanceof IMultiController controller)) return;
-            if (!hasVoltageBypassHub(controller)) return;
+            if (!IMaintenanceBypassPart.anyVoltageBypassEnabled(controller)) return;
 
             if (machine instanceof NeutronActivatorMachine nam) {
                 int evMax = recipe.data.getInt("ev_max") * 1_000_000;
@@ -79,7 +71,7 @@ public final class NeutronActivatorMixins {
 
         @Inject(method = "working", at = @At("HEAD"), cancellable = true, remap = false)
         private void gtShanhai$bypassEv(CallbackInfoReturnable<Boolean> cir) {
-            if ((Object) this instanceof IMultiController controller && hasVoltageBypassHub(controller)) {
+            if ((Object) this instanceof IMultiController controller && IMaintenanceBypassPart.anyVoltageBypassEnabled(controller)) {
                 cir.setReturnValue(true);
             }
         }

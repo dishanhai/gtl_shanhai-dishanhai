@@ -60,6 +60,7 @@
     "NuclearParallelMixin",
     "PatternModifierMixins",
     "PatternDetailsHelperMixin",
+    "PatternWrapControlMenuMixin",
     "Ae2GtmProcessingPatternMixin",
     "AEProcessingPatternVirtualProviderMixin",
     "GTLCoreMEPatternBufferVirtualProviderMixin",
@@ -127,6 +128,8 @@
     "EaepGtlCoreUploadButtonLayoutMixin",
     "CraftingStatusTableRendererTooltipMixin",
     "CraftingCPUScreenPatternSourceMixin",
-    "AEBaseScreenPatternSourceClickMixin"
+    "AEBaseScreenPatternSourceClickMixin",
+    "PatternWrapMarkClickMixin",
+    "PatternWrapControlScreenMixin"
   ]
 }

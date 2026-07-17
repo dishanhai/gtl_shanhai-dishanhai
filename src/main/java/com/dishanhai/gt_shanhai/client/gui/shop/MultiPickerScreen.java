@@ -4,6 +4,7 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.PinyinSearchBridge;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.jei.JeiBookmarkBridge;
 
 import dev.architectury.fluid.FluidStack;
 
@@ -32,8 +33,9 @@ import java.util.function.Consumer;
 /**
  * 多选资源选择器（山海署名，客户端，自建）。
  *
- * <p>三种浏览模式：<b>物品</b>（全注册表）、<b>物品栏</b>（玩家背包实物，<b>保留 NBT</b>，
- * 便捷取手上带 NBT 的物品）、<b>流体</b>（全注册表）。右侧「已选清单」每项独立数量。
+ * <p>浏览模式：<b>物品</b>（全注册表）、<b>物品栏</b>（玩家背包实物，<b>保留 NBT</b>，
+ * 便捷取手上带 NBT 的物品）、<b>JEI书签</b>（当前 JEI 书签列表里的物品类条目，见 {@link JeiBookmarkBridge}，
+ * 未装 JEI 时为空）、<b>流体</b>（全注册表）。右侧「已选清单」每项独立数量。
  * 左键网格=加入/选中，右键网格=加入/移除切换。物品与流体同一会话可混选；确认按类型分发：
  * 物品→{@code onAddItem}（保 NBT），流体→{@code onAddFluid}。</p>
  *
@@ -42,7 +44,7 @@ import java.util.function.Consumer;
  */
 public class MultiPickerScreen extends ScaledScreen {
 
-    private enum Mode { ITEM, INVENTORY, FLUID, TEXTURE }
+    private enum Mode { ITEM, INVENTORY, BOOKMARK, FLUID, TEXTURE }
 
     // 配色（沿用编辑器面板风格）
     private static final int GOLD = -22016;
@@ -123,6 +125,9 @@ public class MultiPickerScreen extends ScaledScreen {
     private List<String> invNames = new ArrayList<>();
     private List<String> invTags = new ArrayList<>();
     private List<Long> invCounts = new ArrayList<>();        // 与 invStacks 同下标：该物品+NBT 在背包+副手里的实际总数
+    private List<ItemStack> bookmarkStacks = new ArrayList<>(); // JEI书签模式：当前书签列表里的物品类条目（见 JeiBookmarkBridge）
+    private List<String> bookmarkNames = new ArrayList<>();
+    private List<String> bookmarkTags = new ArrayList<>();
     private List<ItemStack> restrictedStacks = new ArrayList<>(); // 受限模式：固定候选物品
     private List<String> restrictedNames = new ArrayList<>();
     private List<String> restrictedTags = new ArrayList<>();
@@ -389,6 +394,24 @@ public class MultiPickerScreen extends ScaledScreen {
         }
     }
 
+    /**
+     * JEI书签模式数据：读取 JEI 当前书签列表里的物品类条目（{@link JeiBookmarkBridge}，纯反射，
+     * 未装 JEI/书签为空时恒返回空列表）。跟物品栏模式一样只在开屏时读一次快照，不追踪会话内的
+     * 书签增删——真要看最新书签，关屏重开即可，跟物品栏模式的取舍一致。
+     */
+    private void buildBookmarks() {
+        bookmarkStacks = new ArrayList<>();
+        bookmarkNames = new ArrayList<>();
+        bookmarkTags = new ArrayList<>();
+        for (ItemStack st : JeiBookmarkBridge.getBookmarkedItemStacks()) {
+            if (st == null || st.isEmpty()) continue;
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(st.getItem());
+            bookmarkStacks.add(st);
+            bookmarkNames.add((st.getHoverName().getString() + " " + id).toLowerCase(Locale.ROOT));
+            bookmarkTags.add(tagStringOf(st.getItem()));
+        }
+    }
+
     @Override
     protected void initScaled() {
         left = Math.max(6, (vWidth - TARGET_W) / 2);
@@ -396,7 +419,7 @@ public class MultiPickerScreen extends ScaledScreen {
         panelWidth = Math.min(TARGET_W, vWidth - 12);
         panelHeight = Math.min(TARGET_H, vHeight - 16);
 
-        if (!restrictedMode) buildInventory();
+        if (!restrictedMode) { buildInventory(); buildBookmarks(); }
 
         // 顶部：搜索框 + 数量框
         searchBox = new EditBox(this.font, left + 12, top + 22, 200, 14, Component.literal("搜索"));
@@ -444,15 +467,20 @@ public class MultiPickerScreen extends ScaledScreen {
         return switch (mode) {
             case ITEM -> itemCacheReady ? ALL_ITEM_NAMES : List.of(); // 后台还没建完时按"暂无条目"处理，见 buildItemCacheAsync
             case INVENTORY -> invNames;
+            case BOOKMARK -> bookmarkNames;
             case FLUID -> ALL_FLUID_NAMES;
             case TEXTURE -> ALL_TEXTURE_NAMES;
         };
     }
 
-    /** 当前模式下网格第 resIdx 项的物品原型（仅物品/物品栏/受限模式有效）。 */
+    /** 当前模式下网格第 resIdx 项的物品原型（仅物品/物品栏/JEI书签/受限模式有效）。 */
     private ItemStack gridItem(int resIdx) {
         if (restrictedMode) return restrictedStacks.get(resIdx);
-        return (mode == Mode.INVENTORY ? invStacks : ALL_ITEMS).get(resIdx);
+        return switch (mode) {
+            case INVENTORY -> invStacks.get(resIdx);
+            case BOOKMARK -> bookmarkStacks.get(resIdx);
+            default -> ALL_ITEMS.get(resIdx);
+        };
     }
 
     // 过滤结果缓存（会话内，按「浏览模式+查询串」为键）：同一查询反复出现（回退重打/来回切模式再切回）
@@ -539,6 +567,7 @@ public class MultiPickerScreen extends ScaledScreen {
         return switch (mode) {
             case ITEM -> ALL_ITEM_TAGS.get(i);
             case INVENTORY -> invTags.get(i);
+            case BOOKMARK -> bookmarkTags.get(i);
             case FLUID -> ALL_FLUID_TAGS.get(i);
             case TEXTURE -> "";
         };
@@ -626,6 +655,7 @@ public class MultiPickerScreen extends ScaledScreen {
         return switch (mode) {
             case ITEM -> "§a物品▾";
             case INVENTORY -> "§e物品栏▾";
+            case BOOKMARK -> "§6书签▾";
             case FLUID -> "§b流体▾";
             case TEXTURE -> "§d贴图▾";
         };
@@ -849,12 +879,13 @@ public class MultiPickerScreen extends ScaledScreen {
         // 底部按钮
         if (GuiRenderUtil.isHovering(mx, my, confirmX(), top + panelHeight - 24, 90, 16)) { confirm(); return true; }
         if (GuiRenderUtil.isHovering(mx, my, cancelX(), top + panelHeight - 24, 56, 16)) { Minecraft.getInstance().setScreen(parent); return true; }
-        // 浏览模式切换（循环：物品→物品栏→流体→[贴图，仅 allowTexture]；受限模式无此按钮）
+        // 浏览模式切换（循环：物品→物品栏→JEI书签→流体→[贴图，仅 allowTexture]；受限模式无此按钮）
         int modeX = left + 12 + 200 + 8;
         if (!restrictedMode && GuiRenderUtil.isHovering(mx, my, modeX, top + 21, 70, 16)) {
             mode = switch (mode) {
                 case ITEM -> Mode.INVENTORY;
-                case INVENTORY -> Mode.FLUID;
+                case INVENTORY -> Mode.BOOKMARK;
+                case BOOKMARK -> Mode.FLUID;
                 case FLUID -> allowTexture ? Mode.TEXTURE : Mode.ITEM;
                 case TEXTURE -> Mode.ITEM;
             };

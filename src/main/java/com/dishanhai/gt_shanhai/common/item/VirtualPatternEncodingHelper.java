@@ -18,6 +18,7 @@ import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
+import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
@@ -37,6 +38,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 /**
@@ -57,25 +59,73 @@ public final class VirtualPatternEncodingHelper {
     private static RecipeOutputIndex allRecipeOutputIndex;
 
     public static GenericStack[] rewriteInputsForVirtualProviders(GenericStack[] inputs, GenericStack[] outputs) {
-        if (inputs == null || outputs == null || containsVirtualInput(inputs, outputs)) {
+        if (inputs == null || outputs == null) {
             return inputs;
         }
 
-        GTRecipe recipe = findMatchingRecipe(inputs, outputs);
-        if (recipe == null) {
-            LOG.info("[VirtualPatternEncoding] no unique recipe matched for outputs={}, wrap skipped, inputs left raw",
-                    StackBag.of(outputs));
+        PatternEncodeOverride override = PatternEncodeOverride.current();
+        PatternEncodeOverride.WrapMode mode = override == null ? PatternEncodeOverride.WrapMode.AUTO : override.mode;
+
+        if (mode == PatternEncodeOverride.WrapMode.FORCE_NO_WRAP) {
+            PatternEncodeOverride.setLastDiagnostic("wrap forced OFF, pattern encoded raw");
             return inputs;
         }
 
-        GenericStack[] rewritten = rewriteInputsPreservingSelections(inputs, recipe);
-        if (rewritten == inputs) {
-            LOG.info("[VirtualPatternEncoding] recipe={} matched but rewrite was rejected (slot count or ingredient mismatch), inputs left raw",
-                    recipe.getId());
+        GenericStack[] result;
+        String autoDiagnostic = null;
+        if (mode == PatternEncodeOverride.WrapMode.FORCE_WRAP) {
+            result = inputs.clone();
+            autoDiagnostic = "auto-match skipped (force-wrap mode)";
+        } else if (containsVirtualInput(inputs, outputs)) {
+            result = inputs;
         } else {
-            LOG.info("[VirtualPatternEncoding] recipe={} matched, inputs rewritten with virtual providers", recipe.getId());
+            GTRecipe recipe = findMatchingRecipe(inputs, outputs);
+            if (recipe == null) {
+                LOG.info("[VirtualPatternEncoding] no unique recipe matched for outputs={}, wrap skipped, inputs left raw",
+                        StackBag.of(outputs));
+                result = inputs;
+                autoDiagnostic = "no unique recipe matched";
+            } else {
+                GenericStack[] rewritten = rewriteInputsPreservingSelections(inputs, recipe);
+                if (rewritten == inputs) {
+                    LOG.info("[VirtualPatternEncoding] recipe={} matched but rewrite was rejected (slot count or ingredient mismatch), inputs left raw",
+                            recipe.getId());
+                    autoDiagnostic = "recipe " + recipe.getId() + " matched but wrap rejected";
+                } else {
+                    LOG.info("[VirtualPatternEncoding] recipe={} matched, inputs rewritten with virtual providers", recipe.getId());
+                    autoDiagnostic = "recipe " + recipe.getId() + " matched, wrapped";
+                }
+                result = rewritten;
+            }
         }
-        return rewritten;
+
+        Set<Integer> forcedSlots = override == null ? null : override.forcedSlots;
+        int manuallyWrapped = 0;
+        if (forcedSlots != null && !forcedSlots.isEmpty()) {
+            for (Integer slot : forcedSlots) {
+                if (slot == null || slot < 0 || slot >= inputs.length) continue;
+                GenericStack raw = inputs[slot];
+                if (raw == null || !(raw.what() instanceof AEItemKey key)) continue;
+                ItemStack rawStack = key.toStack((int) Math.min(Integer.MAX_VALUE, Math.max(1L, raw.amount())));
+                if (VirtualItemProviderHelper.isProviderItem(rawStack) || VirtualItemProviderHelper.isAutoWrapExcluded(rawStack)) continue;
+                ItemStack provider = VirtualItemProviderHelper.createBoundProvider(rawStack);
+                if (provider.isEmpty()) continue;
+                if (result == inputs) result = inputs.clone();
+                result[slot] = new GenericStack(AEItemKey.of(provider), 1);
+                manuallyWrapped++;
+            }
+        }
+
+        String diagnostic = autoDiagnostic == null ? "" : autoDiagnostic;
+        if (manuallyWrapped > 0) {
+            LOG.info("[VirtualPatternEncoding] {} slot(s) force-wrapped by manual mark", manuallyWrapped);
+            diagnostic = diagnostic.isEmpty() ? (manuallyWrapped + " slot(s) manually marked, wrapped")
+                    : diagnostic + "; " + manuallyWrapped + " manually marked slot(s) also wrapped";
+        }
+        if (!diagnostic.isEmpty()) {
+            PatternEncodeOverride.setLastDiagnostic(diagnostic);
+        }
+        return result;
     }
 
     public static boolean containsVirtualProviderInput(GenericStack[] inputs) {
@@ -332,6 +382,14 @@ public final class VirtualPatternEncodingHelper {
         return new GenericStack(AEItemKey.of(target), Math.max(1L, target.getCount()));
     }
 
+    // 裸编程电路(未被包裹的集成电路)识别为"自映射虚拟目标"：目标就是电路自身、数量恒为 1。
+    // 不创建 virtual provider 物品，交给样板总成的虚拟电路机制处理（见 analyzePattern 注释）。
+    private static GenericStack getIntegratedCircuitTarget(GenericStack stack) {
+        if (stack == null || !(stack.what() instanceof AEItemKey key)) return null;
+        if (!IntCircuitBehaviour.isIntegratedCircuit(key.toStack())) return null;
+        return new GenericStack(stack.what(), 1);
+    }
+
     private static boolean isVirtualFluidInput(GenericStack stack, GenericStack[] inputs, GenericStack[] outputs) {
         return getVirtualFluidTarget(stack, inputs, outputs) != null;
     }
@@ -362,6 +420,17 @@ public final class VirtualPatternEncodingHelper {
                 GenericStack providerTarget = getVirtualProviderTarget(input);
                 if (providerTarget != null) {
                     targets.put(new Entry(input.what(), input.amount()), providerTarget);
+                    continue;
+                }
+                GenericStack circuitTarget = getIntegratedCircuitTarget(input);
+                if (circuitTarget != null) {
+                    // 编程电路(集成电路)是 GT 非消耗配置物，本就该交给样板总成的虚拟电路机制，
+                    // 而不是包裹成 virtual provider。识别为"自映射虚拟目标"后下游全自动闭环：
+                    // 求解层走 PresenceInput，被 CraftingTreeNodeVirtualPresenceMixin 封顶到
+                    // multiplier(=1)、不再按合成批次放大；总成层 pushPattern 命中虚拟目标路径，
+                    // 由 gtShanhai$cacheVirtualCircuit 把电路 config 交给 SlotCacheManager，
+                    // 执行时总成用缓存 config 提供电路。电路保持自身身份，config NBT 精确保留。
+                    targets.put(new Entry(input.what(), input.amount()), circuitTarget);
                     continue;
                 }
                 if (input != null && input.what() instanceof AEFluidKey && outputs != null) {
@@ -395,21 +464,27 @@ public final class VirtualPatternEncodingHelper {
             return null;
         }
 
-        GTRecipe matched = null;
+        List<GTRecipe> matches = new ArrayList<>();
         List<GTRecipe> candidates = index.candidates(outputBag);
         for (GTRecipe recipe : candidates) {
-            if (!matchesRecipe(recipe, inputs, inputBag, outputBag)) continue;
-            if (matched != null) {
-                // 多个配方输入输出完全相同（仅电压等属性不同，GT 里不罕见）：无法唯一识别，放弃改写/
-                // 放弃识别配方类型。之前完全静默，玩家只会看到"这张样板不认/不省料"却毫无线索
-                // （ERR-20260714-009）。补一条日志，方便现场定位是不是撞上了这个歧义分支。
-                LOG.info("[VirtualPatternEncoding] outputs={} matched multiple recipes (at least {} and {}), "
-                        + "ambiguous, wrap/recipe-type lookup abandoned", outputBag, matched.getId(), recipe.getId());
-                return null;
+            if (matchesRecipe(recipe, inputs, inputBag, outputBag)) {
+                matches.add(recipe);
             }
-            matched = recipe;
         }
-        return matched;
+        if (matches.isEmpty()) return null;
+        if (matches.size() > 1) {
+            // 纯靠物品/流体堆叠反查配方，天然靠不住：不同配方类型完全可能凑巧输入输出堆叠一样
+            // （比如 0.144B 液态铁 + 1 铁粉，"分子解构"和"提取机"两个毫不相干的配方类型都能匹配上，
+            // 根本不是"同一配方在不同机器复制"）。之前试过"物品内容+是否不消耗签名相同就任选其一"，
+            // 结果样板 tooltip 上会显示错的配方类型（篡改），比"识别不出来"更糟——反查在有歧义时
+            // 唯一安全的做法就是直接放弃，宁可什么都不显示，也不能瞎猜。
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("[VirtualPatternEncoding] outputs={} matched {} candidate recipes, ambiguous, "
+                        + "wrap/recipe-type lookup abandoned", outputBag, matches.size());
+            }
+            return null;
+        }
+        return matches.get(0);
     }
 
     private static RecipeOutputIndex getAllRecipeOutputIndex() {
