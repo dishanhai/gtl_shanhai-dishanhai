@@ -282,6 +282,22 @@ public class ShanhaiNetwork {
                 CurrencyAeBalancePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                PatternSourceRequestPacket.class,
+                PatternSourceRequestPacket::encode,
+                PatternSourceRequestPacket::decode,
+                PatternSourceRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                PatternSourceResponsePacket.class,
+                PatternSourceResponsePacket::encode,
+                PatternSourceResponsePacket::decode,
+                PatternSourceResponsePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 

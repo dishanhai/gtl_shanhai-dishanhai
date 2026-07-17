@@ -71,6 +71,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.LongValue shopSdaPackThreshold;
         /** 山海商店 — 奖励表模式（自选/随机/全部/FTBQ）单次购买最多独立随机抽取的次数 */
         public ForgeConfigSpec.LongValue shopRewardRollCap;
+        /** 山海商店 — AE 模式下是否禁止把购买/兑换得到的物品注入 AE（只拉取/检索，不注入） */
+        public ForgeConfigSpec.BooleanValue shopAeDeliverDisabled;
         /** 运行期配方查找缓存 — 是否统计 hit/miss/negativeHit/clear 次数（默认关闭，避免每 tick 统计开销） */
         public ForgeConfigSpec.BooleanValue runtimeRecipeCacheDiagnostics;
         /** KJS 配方库磁盘缓存 — 是否启用启动期缓存优化 */
@@ -203,6 +205,11 @@ public final class DShanhaiConfig {
                              "上限开到 Long.MAX_VALUE 纯粹是不设防——调多大、会不会卡死/崩服，自己权衡自己兜底",
                              "（FTBQ 模式受 FTBQ 自身 API 的 int 参数限制，实际单次仍会夹到 Integer.MAX_VALUE）")
                     .defineInRange("rewardRollCap", 1_000_000L, 1L, Long.MAX_VALUE);
+            shopAeDeliverDisabled = builder
+                    .comment("山海商店：AE 模式下是否禁止把购买/兑换得到的物品注入 AE 网络（默认 false = 原行为，能注入就注入）",
+                             "true = AE 模式只用来拉取材料付款/检索库存，购买完成后物品一律正常交付给玩家",
+                             "（进背包，装不下或总量达标按 sdaPackThreshold 打包超级磁盘阵列——SDA 打包规则不受此项影响）")
+                    .define("aeDeliverDisabled", false);
             builder.pop();
 
             builder.push("runtime_recipe_cache");

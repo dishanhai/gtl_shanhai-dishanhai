@@ -81,6 +81,8 @@ public class PrimordialOmegaEngineStructure {
                 new ResourceLocation("gt_shanhai", "primordial_matter_caster"));
         Block coinForge = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_coin_forge"));
+        Block flameCrackingKiln = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_flame_cracking_kiln"));
         // 山海多合一仓（不注册到标准 PartAbility 避免污染 JEI 预览）
         Block maintenanceHatch = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "maintenance_hatch"));
@@ -143,7 +145,8 @@ public class PrimordialOmegaEngineStructure {
                         .or(Predicates.blocks(matterCaster))
                         .or(Predicates.blocks(engravingModule))
                         .or(Predicates.blocks(coinForge))
-                        .or(Predicates.blocks(massEnergyCore)))
+                        .or(Predicates.blocks(massEnergyCore))
+                        .or(Predicates.blocks(flameCrackingKiln)))
                 // K: 内部填充 — 青铜砖块（不再与 A 冲突）
                 .where('K', Predicates.blocks(bronzeBrickCasing))
                 .where('~', Predicates.controller(Predicates.blocks(definition.getBlock())))

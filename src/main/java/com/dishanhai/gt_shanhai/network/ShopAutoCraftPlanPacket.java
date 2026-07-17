@@ -52,7 +52,14 @@ public class ShopAutoCraftPlanPacket {
     private static void writeLines(FriendlyByteBuf buf, List<String> lines) {
         int n = Math.min(lines.size(), MAX_LINES);
         buf.writeVarInt(n);
-        for (int i = 0; i < n; i++) buf.writeUtf(lines.get(i), 256);
+        // writeUtf(String, 256) 对超过 256 字符的输入直接抛 EncoderException；调用方拼接的行
+        // （如缺料明细）一旦失控变长且未捕获，会把整个 ServerTick 事件链路带崩、直接停服。
+        // 这里兜底按字符截断到 256 以内，宁可显示不全也不能崩服务器。
+        for (int i = 0; i < n; i++) {
+            String line = lines.get(i);
+            if (line.length() > 256) line = line.substring(0, 253) + "...";
+            buf.writeUtf(line, 256);
+        }
     }
 
     public static void handle(ShopAutoCraftPlanPacket pkt, Supplier<NetworkEvent.Context> ctx) {

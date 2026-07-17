@@ -254,14 +254,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         }
         if (slot < 0 || slot >= patternRecipeTypeIds.length || slot >= getPatternInventory().getSlots()) return null;
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
-        GTRecipe recipe = PatternRecipeTypeHelper.ensureRecipe(stack, getLevel());
-        if (recipe != null) {
-            patternRecipeTypeIds[slot] = PatternRecipeTypeHelper.readRecipeTypeId(stack);
-            if (!patternRecipeTypeIds[slot].isEmpty()) {
-                getPatternInventory().setStackInSlot(slot, stack);
-            }
-        }
-        return recipe;
+        // 只读：本槽同时在向 AE 网络供货，绝不能像过去那样借"自愈"之机悄悄改写 NBT
+        // （AEItemKey 含 NBT，改动即变身份，见 PatternRecipeTypeHelper.peekRecipe 文档）。
+        return PatternRecipeTypeHelper.peekRecipe(stack, getLevel());
     }
 
     @Override
@@ -891,9 +886,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private void refreshPatternRecipeType(int slot) {
         if (slot < 0 || slot >= patternRecipeTypeIds.length || slot >= getPatternInventory().getSlots()) return;
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
-        patternRecipeTypeIds[slot] = PatternRecipeTypeHelper.ensureRecipeTypeId(stack, getLevel());
-        if (!patternRecipeTypeIds[slot].isEmpty()) {
-            getPatternInventory().setStackInSlot(slot, stack);
-        }
+        // 只读：本槽同时在向 AE 网络供货，刷新本地过滤缓存不得改写样板 NBT（见
+        // PatternRecipeTypeHelper.peekRecipeTypeId 文档——AEItemKey 含 NBT，改动即变身份）。
+        patternRecipeTypeIds[slot] = PatternRecipeTypeHelper.peekRecipeTypeId(stack, getLevel());
     }
 }

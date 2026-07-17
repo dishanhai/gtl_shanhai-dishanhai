@@ -19,6 +19,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(targets = "org.gtlcore.gtlcore.api.machine.trait.MEPatternRecipeHandlePart", remap = false)
 public class MEPatternRecipeHandlePartVirtualProviderMixin {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai:virtual_pattern");
+
     @Inject(method = "handleRecipe", at = @At("RETURN"), remap = false)
     private void gtShanhai$stripVirtualTargetsAfterPatternRecipe(GTRecipe recipe,
             Reference2ObjectMap<RecipeCapability<?>, List<Object>> contents, boolean simulate, boolean setSlotCache,
@@ -43,7 +45,10 @@ public class MEPatternRecipeHandlePartVirtualProviderMixin {
             if (machine instanceof VirtualPatternBufferMachineAccess access) {
                 return access;
             }
-        } catch (ReflectiveOperationException ignored) {
+        } catch (ReflectiveOperationException e) {
+            // GTLCore 内部字段/方法名变化导致反射失配：配方执行后虚拟目标(催化剂)不会被剥离，
+            // 静默失败会让问题很难定位，这里至少留一条 debug 日志。
+            LOG.debug("[VirtualPatternProvider] 反射获取样板总成失败", e);
         }
         return null;
     }

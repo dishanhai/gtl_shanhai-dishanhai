@@ -32,7 +32,7 @@ public class SuperDiskArrayInventory implements StorageCell {
     public static final String TAG_UUID = "shanhai_sda_uuid";
     public static final String TAG_TOTAL = "shanhai_sda_total";
     public static final String TAG_TYPES = "shanhai_sda_types";
-    private static final String TAG_RUNTIME_UUID = "shanhai_sda_runtime_uuid";
+    public static final String TAG_RUNTIME_UUID = "shanhai_sda_runtime_uuid";
     private static final BigInteger LONG_MAX = BigInteger.valueOf(Long.MAX_VALUE);
     private static final Map<ItemStack, SuperDiskArrayInventory> INVENTORY_CACHE = new WeakHashMap<>();
 

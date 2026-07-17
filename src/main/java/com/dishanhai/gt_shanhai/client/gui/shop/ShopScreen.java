@@ -1632,24 +1632,33 @@ public class ShopScreen extends ScaledScreen {
             }
             contentY = py + 24;
         }
+        // 组合商品（非奖励表模式）用图形化「获得预览」替代原来一行会截断的文字列表（见反馈）；
+        // 固定占一行的高度（drawRewardPreview 自身保证），后面 hasPhysical 提示行/花费预览起始 Y 按此整体下移
+        boolean comboRewardPreview = mode == Mode.BUY && selected.getRewardMode() == ShopEntry.RewardMode.NONE
+                && selected.hasMultipleGoods();
         if (mode == Mode.BUY) {
             g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, contentY + 12, CYAN, true);
             ShopEntry.RewardMode rm = selected.getRewardMode();
-            String getLine = switch (rm) {
-                case CHOICE -> "§7预计获得: §d自选奖励 §7（购买前先选 1 项）";
-                case RANDOM -> "§7预计获得: §d随机奖励 §7（从 " + selected.getRewardPool().size() + " 项中按权重抽 1）";
-                case ALL -> "§7预计获得: §d全部奖励 §7（一次交付 " + selected.getRewardPool().size() + " 项全部）";
-                case FTBQ -> switch (selected.getFtbqSubMode()) {
-                    case CHOICE -> "§7预计获得: §9FTBQ表·自选 §7（购买前先选 1 项）";
-                    case ALL -> "§7预计获得: §9FTBQ表·全部 §7（一次交付表内所有物品奖励）";
-                    default -> "§7预计获得: §9FTBQ表·随机 §7（按表内权重随机抽取）";
+            int physicalHintY;
+            if (comboRewardPreview) {
+                drawRewardPreview(g, cx, contentY + 24, selected.getGoodsList(), amount, DETAIL_W - 16, mx, my);
+                physicalHintY = contentY + 66;
+            } else {
+                String getLine = switch (rm) {
+                    case CHOICE -> "§7预计获得: §d自选奖励 §7（购买前先选 1 项）";
+                    case RANDOM -> "§7预计获得: §d随机奖励 §7（从 " + selected.getRewardPool().size() + " 项中按权重抽 1）";
+                    case ALL -> "§7预计获得: §d全部奖励 §7（一次交付 " + selected.getRewardPool().size() + " 项全部）";
+                    case FTBQ -> switch (selected.getFtbqSubMode()) {
+                        case CHOICE -> "§7预计获得: §9FTBQ表·自选 §7（购买前先选 1 项）";
+                        case ALL -> "§7预计获得: §9FTBQ表·全部 §7（一次交付表内所有物品奖励）";
+                        default -> "§7预计获得: §9FTBQ表·随机 §7（按表内权重随机抽取）";
+                    };
+                    default -> "§7预计获得: §e" + formatBig(total) + " §7个"; // hasMultipleGoods() 已被上面 comboRewardPreview 分流
                 };
-                default -> selected.hasMultipleGoods()
-                        ? "§7预计获得: " + goodsInlineTimes(selected.getGoodsList(), amount)
-                        : "§7预计获得: §e" + formatBig(total) + " §7个";
-            };
-            g.drawString(this.font, GuiRenderUtil.trimText(this.font, getLine, costTrimW), cx, contentY + 24, GREEN, true);
-            if (dcost.hasPhysical()) g.drawString(this.font, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, contentY + 36, GRAY, true);
+                g.drawString(this.font, GuiRenderUtil.trimText(this.font, getLine, costTrimW), cx, contentY + 24, GREEN, true);
+                physicalHintY = contentY + 36;
+            }
+            if (dcost.hasPhysical()) g.drawString(this.font, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, physicalHintY, GRAY, true);
         } else if (selected.hasMultipleGoods()) {
             g.drawString(this.font, "§c组合商品，不支持出售", cx, contentY + 12, DEEP_RED, true);
         } else {
@@ -1691,9 +1700,11 @@ public class ShopScreen extends ScaledScreen {
         int lowerBottom = btnY - editRowsOffset - linkRowH - guideRowH - autoCraftRowH - prereqRowH; // 底部按钮上沿（跳转/指南/补齐缺口/前置任务各让一行）
 
         // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区。
-        // 起点须跟着 contentY 走（原来硬编码 py+50，周期限购把上面内容顶下去后两者间距只剩 2px，字重叠成一坨，见反馈）
+        // 起点须跟着 contentY 走（原来硬编码 py+50，周期限购把上面内容顶下去后两者间距只剩 2px，字重叠成一坨，见反馈）；
+        // 组合商品用了图形化「获得预览」多占一整行高度，起点要再往下让一行（见 comboRewardPreview）
         maybeRequestCostPreview(dcost);
-        int cursorY = drawCostPreview(g, cx, contentY + 50, dcost, amount, DETAIL_W - 16, lowerBottom, mx, my);
+        int costPreviewY = contentY + (comboRewardPreview ? 80 : 50);
+        int cursorY = drawCostPreview(g, cx, costPreviewY, dcost, amount, DETAIL_W - 16, lowerBottom, mx, my);
 
         if (linkTarget != null) {
             linkVisible = true;
@@ -1888,6 +1899,13 @@ public class ShopScreen extends ScaledScreen {
         }
         // AE 模式切换：光靠按钮文字变色不够醒目，切换时打一条横幅明确告知当前状态
         if (hit(mx, my, aeBtnX(), top + 6, AE_BTN_W, TOP_BAR_H)) {
+            // 关闭方向永远放行；开启方向须先有绑定的在线 AE 网络（商店终端/FTBQ提交器），
+            // 否则玩家会误以为交易走了 AE，实际却被静默降级到背包/SDA（见反馈）。
+            if (!aeMode && !ClientWalletAccount.hasBoundAeNetwork()) {
+                showMessage(Component.literal(
+                        "§c[山海商店] 未检测到已绑定的在线 AE 网络（需先放置并绑定商店终端或 FTBQ 提交器），无法开启 AE 模式"));
+                return true;
+            }
             aeMode = !aeMode;
             showMessage(Component.literal(aeMode
                     ? "§b[山海商店] §aAE 模式已开启，交易优先注入绑定的在线 AE 网络"
@@ -2613,6 +2631,64 @@ public class ShopScreen extends ScaledScreen {
                 new ShopCostPreviewRequestPacket(ClientShopCatalog.revision(), selectedEntryKey, aeMode));
     }
 
+    // ============ 图形化获得预览（组合商品，图标 + 数量）============
+
+    /** 获得预览格：物品/流体图标 + 数量，纯展示（不比对拥有量，跟花费预览的核心区别）。 */
+    private record RewardCell(ItemStack item, net.minecraft.world.level.material.Fluid fluid, String amount, String exact, String name) {}
+
+    /** 把组合商品清单拆成获得预览格，数量按 times 展开（各项独立数量 × times）。 */
+    private static java.util.List<RewardCell> goodsRewardCells(List<ShopEntry.GoodsStack> goods, long times) {
+        java.math.BigInteger t = java.math.BigInteger.valueOf(Math.max(1L, times));
+        java.util.List<RewardCell> cells = new java.util.ArrayList<>();
+        for (ShopEntry.GoodsStack gs : goods) {
+            java.math.BigInteger need = java.math.BigInteger.valueOf(gs.count()).multiply(t);
+            if (gs.isFluid()) {
+                net.minecraft.world.level.material.Fluid f = gs.fluid();
+                String name = "?";
+                try { name = new net.minecraftforge.fluids.FluidStack(f, 1).getDisplayName().getString(); } catch (Exception ignored) {}
+                cells.add(new RewardCell(ItemStack.EMPTY, f, formatBig(need) + "mB", groupBig(need) + "mB", name));
+            } else {
+                ItemStack unit = gs.makeStack();
+                cells.add(new RewardCell(unit, null, formatBig(need), groupBig(need), unit.getHoverName().getString()));
+            }
+        }
+        return cells;
+    }
+
+    /**
+     * 图形化获得预览：组合商品用，跟「花费预览」同款槽位样式（真图标/流体贴图 + 数量），
+     * 但固定只占一行——组合商品清单通常就几种（见「等N种」命名），超出一行的按「+N」收尾，
+     * 不像花费预览那样按剩余高度动态换行/截断（这里在 getLine 那行原地展开，后面 cost 预览
+     * 的起始 Y 只需整体下移固定量，不用像 CurrencyAtmScreen 教训里那样牵连一串后续坐标）。
+     * @return 预览区结束后的 y（供调用方续接布局）。悬停格把名+精确数量写入 {@link #previewHoverName}。
+     */
+    private int drawRewardPreview(GuiGraphics g, int x, int y, List<ShopEntry.GoodsStack> goods, long times, int maxW, int mx, int my) {
+        g.drawString(this.font, "§6预计获得:", x, y, GOLD, true);
+        int sy = y + 12;
+        java.util.List<RewardCell> cells = goodsRewardCells(goods, times);
+        if (cells.isEmpty()) {
+            g.drawString(this.font, "§8无", x, sy, GRAY, true);
+            return sy + 12;
+        }
+        int pitchX = 24;
+        int perRow = Math.max(1, (maxW + 2) / pitchX);
+        int shown = Math.min(cells.size(), perRow); // 固定一行，多余的收成「+N」，不动态换行
+        for (int i = 0; i < shown; i++) {
+            int sx = x + i * pitchX + 1;
+            RewardCell cell = cells.get(i);
+            boolean hv = GuiRenderUtil.isHovering(mx, my, sx, sy, 20, 20);
+            EditorWidgets.checkerSlot(g, sx, sy, hv);
+            if (cell.fluid() != null) renderFluidIcon(g, sx + 2, sy + 2, 16, cell.fluid());
+            else if (cell.item() != null && !cell.item().isEmpty()) g.renderItem(cell.item(), sx + 2, sy + 2);
+            g.drawCenteredString(this.font, "§f" + cell.amount(), sx + 10, sy + 22, WHITE);
+            if (hv) previewHoverName = "§f" + cell.name() + " §7×" + cell.exact();
+        }
+        if (cells.size() > shown) {
+            g.drawString(this.font, "§7+" + (cells.size() - shown), x + shown * pitchX + 3, sy + 6, GRAY, true);
+        }
+        return sy + 30;
+    }
+
     /** 多元成本紧凑单行（星火/币种/物品/流体）。 */
     private static String costInline(ShopCost cost) {
         StringBuilder sb = new StringBuilder();
@@ -2658,18 +2734,6 @@ public class ShopScreen extends ScaledScreen {
             else sb.append("§f").append(formatBig(cnt)).append("×").append(nm);
         }
         return sb.length() == 0 ? "§8免费" : sb.toString();
-    }
-
-    /** 组合商品清单 × times 的紧凑单行（各项独立数量×次数），供详情页「预计获得」用。 */
-    private static String goodsInlineTimes(List<ShopEntry.GoodsStack> goods, long times) {
-        java.math.BigInteger t = java.math.BigInteger.valueOf(Math.max(1L, times));
-        StringBuilder sb = new StringBuilder();
-        for (ShopEntry.GoodsStack gs : goods) {
-            if (sb.length() > 0) sb.append("§7, ");
-            java.math.BigInteger cnt = java.math.BigInteger.valueOf(gs.count()).multiply(t);
-            sb.append("§e").append(formatBig(cnt)).append("×").append(new ItemStack(gs.item()).getHoverName().getString());
-        }
-        return sb.length() == 0 ? "§8无" : sb.toString();
     }
 
     /**

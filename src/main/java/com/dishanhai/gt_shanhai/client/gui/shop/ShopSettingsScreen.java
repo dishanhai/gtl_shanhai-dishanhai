@@ -37,6 +37,7 @@ public class ShopSettingsScreen extends ScaledScreen {
     private final ShopScreen parent;
     private String rollCap;
     private String sdaThreshold;
+    private boolean aeDeliverDisabled;
     private EditBox rollCapBox;
     private EditBox sdaThresholdBox;
     private int left, top, panelWidth, panelHeight;
@@ -51,6 +52,7 @@ public class ShopSettingsScreen extends ScaledScreen {
         this.maxScale = Float.MAX_VALUE;
         this.rollCap = Long.toString(DShanhaiConfig.COMMON.shopRewardRollCap.get());
         this.sdaThreshold = Long.toString(DShanhaiConfig.COMMON.shopSdaPackThreshold.get());
+        this.aeDeliverDisabled = DShanhaiConfig.COMMON.shopAeDeliverDisabled.get();
     }
 
     @Override
@@ -93,12 +95,22 @@ public class ShopSettingsScreen extends ScaledScreen {
                 left + 12, top + 58, WHITE, true);
         g.drawString(this.font, "§c调太大可能让服务端主线程卡死/崩溃，自己权衡", left + 12, top + 86, GRAY, true);
 
+        // AE 禁止注入：开启后 AE 模式只拉取材料付款/检索库存，购买/兑换得到的物品一律正常交付（进背包/SDA），不再注入 AE
+        drawBtn(g, left + 12, top + 100, panelWidth - 24, 16,
+                aeDeliverDisabled ? "§aAE 禁止注入: 开（购买物品正常给到背包/SDA）"
+                        : "§8AE 禁止注入: 关（原行为，能注入就注入 AE）",
+                mx, my);
+
         drawBtn(g, left + 12, top + panelHeight - 22, 60, 14, "§c取消", mx, my);
         drawBtn(g, left + panelWidth - 12 - 70, top + panelHeight - 22, 70, 14, "§a确认保存", mx, my);
     }
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        if (GuiRenderUtil.isHovering(mx, my, left + 12, top + 100, panelWidth - 24, 16)) {
+            aeDeliverDisabled = !aeDeliverDisabled;
+            return true;
+        }
         if (GuiRenderUtil.isHovering(mx, my, left + 12, top + panelHeight - 22, 60, 14)) {
             Minecraft.getInstance().setScreen(parent);
             return true;
@@ -117,7 +129,7 @@ public class ShopSettingsScreen extends ScaledScreen {
         long sda;
         try { sda = sdaThreshold == null || sdaThreshold.isEmpty() ? 1L : Long.parseLong(sdaThreshold); }
         catch (NumberFormatException e) { sda = 1L; }
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda)));
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda), aeDeliverDisabled));
         Minecraft.getInstance().setScreen(parent);
     }
 

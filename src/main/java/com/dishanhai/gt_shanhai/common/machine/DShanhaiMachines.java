@@ -121,6 +121,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_ENGRAVING_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_REALITY_ANCHOR_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_COIN_FORGE;
+    public static MultiblockMachineDefinition PRIMORDIAL_FLAME_CRACKING_KILN;
 
     public static MachineDefinition BIG_TAG_FILTER_STOCK_BUS;
     public static MachineDefinition ME_REQUESTABLE_INPUT_BUS;
@@ -343,6 +344,33 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§b来自混沌的蜉蝣在晶格中凝固，每一粒原子都刻写着宇宙的矿脉图谱"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("§7配方类型：蜉蝣选矿，湿法研磨，天基矿石处理，集成矿石处理，虚空采矿，虚空矿脉洗矿，太空采矿"));
+            tooltips.add(Component.literal("")
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
+                    .append(Component.literal("§f并行，直接从电网取电")));
+        });
+
+        PRIMORDIAL_FLAME_CRACKING_KILN = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_flame_cracking_kiln", PrimordialFlameCrackingKiln::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(
+                        GTRecipeTypes.PYROLYSE_RECIPES,
+                        GTRecipeTypes.CRACKING_RECIPES,
+                        GTRecipeTypes.PRIMITIVE_BLAST_FURNACE_RECIPES,
+                        GTLRecipeTypes.LAVA_FURNACE_RECIPES,
+                        GTRecipeTypes.COKE_OVEN_RECIPES)
+                .pattern(PrimordialFlameCrackingKilnStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                .register();
+
+        PRIMORDIAL_FLAME_CRACKING_KILN.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("薪火不熄，古法不绝——以炽焰统合五道原始热处理工序"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位"));
+            tooltips.add(Component.literal("§b从燧人取火到工业焦炉，每一道裂解与冶炼都是文明对热的驯服"));
+            tooltips.add(Component.literal("§7配方类型：热解炉 / 裂化炉 / 土高炉 / 熔岩炉 / 焦炉"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f并行，直接从电网取电")));
@@ -611,7 +639,9 @@ public class DShanhaiMachines {
                         GTLRecipeTypes.LIGHTNING_PROCESSOR_RECIPES,
                         GTRecipeTypes.ASSEMBLER_RECIPES,
                         GTLRecipeTypes.PRECISION_ASSEMBLER_RECIPES,
-                        GTRecipeTypes.CIRCUIT_ASSEMBLER_RECIPES)
+                        GTRecipeTypes.CIRCUIT_ASSEMBLER_RECIPES,
+                        GTRecipeTypes.PACKER_RECIPES
+                )
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
@@ -626,6 +656,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7MK-2：碎岩 / 洗矿 / 离心 / 电解 / 筛选 / 研磨 / 脱水 / 热力离心 / 电磁选矿"));
             tooltips.add(Component.literal("§7MK-3：蒸发 / 高压釜 / 提取 / 酿造 / 发酵 / 蒸馏室 / 蒸馏塔 / 流体加热 / 流体固化 / 化学浸洗"));
             tooltips.add(Component.literal("§7MK-4：装罐 / 电弧炉 / 闪电处理 / 组装 / 精密组装 / 电路组装"));
+            tooltips.add(Component.literal("§7MK-5：打包机"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))

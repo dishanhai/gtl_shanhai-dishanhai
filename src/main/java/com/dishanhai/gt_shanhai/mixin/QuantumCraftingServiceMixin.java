@@ -110,7 +110,13 @@ public abstract class QuantumCraftingServiceMixin {
                 }
             }
         }
-        if (machines > 0 || cachedClusters.isEmpty()) {
+        // machines 只是扫到的方块实体个数，multiblock 结构重新校验期间 blockEntity.getCluster()
+        // 会短暂返回 null——machines>0 但 refreshedClusters 是空的。原判断条件用 machines>0 当"这轮扫描
+        // 可信"的依据，会在这种瞬时 null 上把本来非空的缓存直接清空，导致 getCpus()/findSuitableQuantumCpu
+        // 那一次调用完全看不到任何量子CPU（合成计划界面表现为"可存储：N/A：并行处理单元：N/A"闪现，
+        // 或者明明摘要里样板都齐了却整体报"材料不足"）。改成看 refreshedClusters 是否为空：只有真的
+        // 解析出集群才覆盖缓存，一轮全部返回 null 时保留上一次的有效缓存，避免结构重校验的瞬间抖动。
+        if (!refreshedClusters.isEmpty() || cachedClusters.isEmpty()) {
             cachedClusters.clear();
             cachedClusters.addAll(refreshedClusters);
             gtShanhai$quantumClustersDirty = false;

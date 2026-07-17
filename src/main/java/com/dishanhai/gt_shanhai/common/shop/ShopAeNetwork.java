@@ -47,6 +47,14 @@ public final class ShopAeNetwork {
         PROVIDERS.remove(provider);
     }
 
+    /**
+     * 该玩家当前是否有绑定的在线 AE 网络（商店终端/FTBQ提交器等 Provider 任一命中）。
+     * 供商店 UI 校验「AE模式」开关——没有绑定源时禁止开启，避免玩家误以为交易会走 AE 实际却静默落地到别的交付方式。
+     */
+    public static boolean hasBoundNetwork(ServerPlayer player) {
+        return findBoundStorage(player) != null;
+    }
+
     /** 遍历所有已注册的绑定源，返回第一个在线且匹配该玩家的 AE 网络存储（无则 null）。 */
     private static MEStorage findBoundStorage(ServerPlayer player) {
         if (player == null) return null;

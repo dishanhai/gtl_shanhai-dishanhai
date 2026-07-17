@@ -214,6 +214,6 @@ public final class WalletAccountAPI {
                 PacketDistributor.PLAYER.with(() -> player),
                 new WalletAccountSyncPacket(getAllCurrencies(server, uuid), getDigital(server, uuid),
                         getAllPurchaseCounts(server, uuid), getAllPeriodAnchors(server, uuid),
-                        ShopWirelessEu.getBalance(player)));
+                        ShopWirelessEu.getBalance(player), ShopAeNetwork.hasBoundNetwork(player)));
     }
 }

@@ -124,6 +124,9 @@
     "GTLytSlotItemCountFormatMixin",
     "GTLytSlotGridOverflowMixin",
     "EaepProviderSelectScreenRecipeTypeMixin",
-    "EaepGtlCoreUploadButtonLayoutMixin"
+    "EaepGtlCoreUploadButtonLayoutMixin",
+    "CraftingStatusTableRendererTooltipMixin",
+    "CraftingCPUScreenPatternSourceMixin",
+    "AEBaseScreenPatternSourceClickMixin"
   ]
 }

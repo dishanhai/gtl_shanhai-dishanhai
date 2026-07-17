@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.common.machine.misc;
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.api.DShanhaiMBParser;
 import com.dishanhai.gt_shanhai.common.block.DShanhaiBlocks;
+import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
 import com.dishanhai.gt_shanhai.common.item.VirtualCellStorage;
 import com.dishanhai.gt_shanhai.common.machine.ShanhaiPartAbility;
@@ -59,6 +60,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import static com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER;
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.MOD_ID;
 
 public class SingularityDataHubMachine extends MultiblockControllerMachine
@@ -135,6 +137,10 @@ public class SingularityDataHubMachine extends MultiblockControllerMachine
     @Override
     public void saveChanges() {
         flushDirtyVirtualCells();
+        // 取出即分家依赖真实 saveProvider（见 getSdaCell）；saveProvider 不再是 null 后，
+        // SDA 自身的 persist() 不会被 SuperDiskArrayInventory 内部兜底自动调用，需在此显式触发。
+        StorageCell sdaCell = getSdaCell();
+        if (sdaCell != null) sdaCell.persist();
         markDirty();
     }
 
@@ -143,7 +149,10 @@ public class SingularityDataHubMachine extends MultiblockControllerMachine
     private StorageCell getSdaCell() {
         var stack = diskArraySlot.getStackInSlot(0);
         if (stack.isEmpty()) return null;
-        return StorageCells.getCellInventory(stack, null);
+        // 必须传真实 saveProvider（this），而非 null——否则 SuperDiskArrayInventory.create()
+        // 会跳过"取出即分家"认领逻辑，插入的 SDA 若仍带着商店/任务模板的固定 UUID，
+        // 会直接读写共享 backend，导致不同玩家的磁盘阵列互相串内容。
+        return StorageCells.getCellInventory(stack, this);
     }
 
     private List<VirtualCellStorage> getOrCreateVirtualCells() {
@@ -207,12 +216,25 @@ public class SingularityDataHubMachine extends MultiblockControllerMachine
                         mounts.mount(directInfinityCell, 10);
                         continue;
                     }
-                    StorageCell subCell = StorageCells.getCellInventory(innerStack, null);
+                    StorageCell subCell = StorageCells.getCellInventory(innerStack, this);
                     if (subCell != null) {
+                        // create() 可能在临时 innerStack 上认领 UUID；先完成子盘序列化，再把新 key
+                        // 原子提交回父 SDA。否则重挂载会重复 fork UUID，且父盘始终保留旧载体。
+                        // （与 MEDiskHatchPartMachine#collectSdaMounts 保持同一套逻辑）
+                        subCell.persist();
+                        AEItemKey mountedCarrierKey = AEItemKey.of(innerStack);
+                        if (!key.equals(mountedCarrierKey)) {
+                            if (!(sdaCell instanceof SuperDiskArrayInventory parentSda)
+                                    || !parentSda.replaceOneStoredKey(key, mountedCarrierKey)) {
+                                LOGGER.warn("SDH failed to commit claimed nested cell carrier {}", key);
+                                continue;
+                            }
+                        }
                         carrierFilterState.add(key);
+                        carrierFilterState.add(mountedCarrierKey);
                         mounts.mount(new MEDiskHatchPartMachine.NestedCellStorage(
                             sdaCell, new MEDiskHatchPartMachine.NormalizedStorageCell(subCell),
-                            key, innerStack, carrierFilterState, this), 10);
+                            mountedCarrierKey, innerStack, carrierFilterState, this), 10);
                     }
                 }
             }

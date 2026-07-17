@@ -776,6 +776,9 @@ public final class ShopPurchase {
     public static String deliverItems(net.minecraft.server.level.ServerPlayer player, ItemStack unit,
                                       java.math.BigInteger total, boolean aeMode, boolean backpackMode) {
         if (player == null || unit == null || unit.isEmpty() || total == null || total.signum() <= 0) return null;
+        stripSdaClaim(unit); // 商品模板若是从已认领的 SDA 实例捕获的，须清掉标记才能让买家副本独立分家
+        // 「AE 禁止注入」开启时，AE 模式只管拉取材料付款/检索库存，交付一律走 SDA/背包（见商店设置）
+        if (com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopAeDeliverDisabled.get()) aeMode = false;
         appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(unit);
         long threshold = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopSdaPackThreshold.get();
         boolean fitsLong = total.bitLength() < 63; // ≤ Long.MAX_VALUE，AE/背包按 long 处理
@@ -824,10 +827,13 @@ public final class ShopPurchase {
     public static String deliverItemBatch(net.minecraft.server.level.ServerPlayer player,
                                           java.util.List<ItemDelivery> deliveries, boolean aeMode, boolean backpackMode) {
         if (player == null || deliveries == null || deliveries.isEmpty()) return null;
+        // 「AE 禁止注入」开启时，AE 模式只管拉取材料付款/检索库存，交付一律走 SDA/背包（见商店设置）
+        if (com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopAeDeliverDisabled.get()) aeMode = false;
         long threshold = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopSdaPackThreshold.get();
         java.math.BigInteger grandTotal = java.math.BigInteger.ZERO;
         for (ItemDelivery d : deliveries) {
             if (d.unit() == null || d.unit().isEmpty() || d.total() == null || d.total().signum() <= 0) continue;
+            stripSdaClaim(d.unit()); // 商品模板若是从已认领的 SDA 实例捕获的，须清掉标记才能让买家副本独立分家
             grandTotal = grandTotal.add(d.total());
         }
         boolean batchAtThreshold = grandTotal.compareTo(java.math.BigInteger.valueOf(threshold)) >= 0;
@@ -956,6 +962,20 @@ public final class ShopPurchase {
     private static java.math.BigInteger insertBackpack(net.minecraft.server.level.ServerPlayer player, ItemStack unit, java.math.BigInteger count) {
         if (count.signum() <= 0) return java.math.BigInteger.ZERO;
         return ShopBackpack.insert(player, unit, count); // 随身背包塞不下的（或未穿戴）→ 原样退回
+    }
+
+    /**
+     * 交付前清掉 SDA 的"已认领"标记（{@code shanhai_sda_runtime_uuid}）。
+     * 商品/奖励模板可能是管理员从一个已经"取出即分家"过的 SDA 实例捕获的，若原样带着该标记交付，
+     * {@code SuperDiskArrayInventory.claimOwnership()} 会误判"已认领"而跳过分家，
+     * 导致所有买家的副本共享同一份后端存储、互相串内容。交付前清掉标记，
+     * 让每份新副本都能在买家首次真实访问（放入 AE 网络/奇点数据中枢等）时独立分家。
+     */
+    private static void stripSdaClaim(ItemStack stack) {
+        if (stack == null || stack.isEmpty()
+                || !(stack.getItem() instanceof com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem)) return;
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        if (tag != null) tag.remove(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_RUNTIME_UUID);
     }
 
     /**

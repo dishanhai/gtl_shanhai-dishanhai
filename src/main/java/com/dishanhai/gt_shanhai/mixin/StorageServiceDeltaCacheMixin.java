@@ -124,6 +124,47 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
         this.cachedStacksNeedUpdate = true;
     }
 
+    // addNode/removeNode/refresh*StorageProvider 改变的是挂载的 MEStorage 拓扑结构，不是单个 key 的数量——
+    // NetworkStorageDeltaTrackerMixin 只盯 insert/extract，挂载变化不会翻动 cachedStacksNeedUpdate，
+    // getCachedInventory() 就会一直吐挂载变化之前的旧快照（AE2 的 NetworkCraftingSimulationState
+    // 直接拿 getCachedInventory() 播种合成计划计算，这就是"材料不足"要等别的操作恰好触发一次
+    // delta 才会消失的根因）。
+    @Inject(method = "addNode", at = @At("TAIL"), remap = false)
+    private void gtShanhai$dirtyOnAddNode(CallbackInfo ci) {
+        gtShanhai$ensureState();
+        this.cachedStacksNeedUpdate = true;
+    }
+
+    @Inject(method = "removeNode", at = @At("TAIL"), remap = false)
+    private void gtShanhai$dirtyOnRemoveNode(CallbackInfo ci) {
+        gtShanhai$ensureState();
+        this.cachedStacksNeedUpdate = true;
+    }
+
+    @Inject(method = "refreshNodeStorageProvider", at = @At("TAIL"), remap = false)
+    private void gtShanhai$dirtyOnRefreshNodeProvider(CallbackInfo ci) {
+        gtShanhai$ensureState();
+        this.cachedStacksNeedUpdate = true;
+    }
+
+    @Inject(method = "refreshGlobalStorageProvider", at = @At("TAIL"), remap = false)
+    private void gtShanhai$dirtyOnRefreshGlobalProvider(CallbackInfo ci) {
+        gtShanhai$ensureState();
+        this.cachedStacksNeedUpdate = true;
+    }
+
+    @Inject(method = "addGlobalStorageProvider", at = @At("TAIL"), remap = false)
+    private void gtShanhai$dirtyOnAddGlobalProvider(CallbackInfo ci) {
+        gtShanhai$ensureState();
+        this.cachedStacksNeedUpdate = true;
+    }
+
+    @Inject(method = "removeGlobalStorageProvider", at = @At("TAIL"), remap = false)
+    private void gtShanhai$dirtyOnRemoveGlobalProvider(CallbackInfo ci) {
+        gtShanhai$ensureState();
+        this.cachedStacksNeedUpdate = true;
+    }
+
     @Unique
     private void gtShanhai$publishRevision(Set<AEKey> changedKeys) {
         gtShanhai$ensureState();

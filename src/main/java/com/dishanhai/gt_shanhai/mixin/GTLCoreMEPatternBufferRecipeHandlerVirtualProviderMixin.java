@@ -20,6 +20,8 @@ import java.lang.reflect.Method;
 @Mixin(targets = "org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTraitBase$MEItemInputHandlerBase", remap = false)
 public abstract class GTLCoreMEPatternBufferRecipeHandlerVirtualProviderMixin {
 
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai:virtual_pattern");
+
     @Shadow
     public abstract MEPatternBufferPartMachineBase getMachine();
 
@@ -42,7 +44,10 @@ public abstract class GTLCoreMEPatternBufferRecipeHandlerVirtualProviderMixin {
             Method method = MEPatternBufferPartMachineBase.class.getDeclaredMethod("getInternalSlotOrNull", int.class);
             method.setAccessible(true);
             return method.invoke(machine, trySlot);
-        } catch (ReflectiveOperationException ignored) {
+        } catch (ReflectiveOperationException e) {
+            // GTLCore 内部方法签名变化导致反射失配：配方执行后虚拟目标(催化剂)不会被剥离，
+            // 静默失败会让问题很难定位，这里至少留一条 debug 日志。
+            LOG.debug("[VirtualPatternProvider] 反射获取 InternalSlot 失败", e);
             return null;
         }
     }

@@ -10,7 +10,7 @@ public final class QuantumDiagnostics {
      * 排查"合成CPU显示100%完成但产出未回填样板总成"问题临时开启，输出到 logs/latest.log，
      * 搜索 "[QuantumDiag]" 前缀即可；排查完须改回 false，调用点非常多，长期开启会刷屏日志。
      */
-    public static final boolean ENABLED = true;
+    public static final boolean ENABLED = false;
 
     public static long start() {
         return ENABLED ? System.nanoTime() : 0L;

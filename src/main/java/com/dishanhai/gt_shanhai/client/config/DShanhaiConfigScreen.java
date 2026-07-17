@@ -138,6 +138,10 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("非 AE 模式下，单次购买货物总量 ≥ 此值时打包成超级磁盘阵列赠送（而非塞背包）",
                         "默认 1000；设 1 则任何购买都给 SDA"))
                 .setSaveConsumer(cfg.shopSdaPackThreshold::set).build());
+        shop.addEntry(e.startBooleanToggle(Component.literal("AE 模式禁止注入"), cfg.shopAeDeliverDisabled.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("开启后 AE 模式只用来拉取材料付款/检索库存，购买/兑换得到的物品一律正常交付（进背包/按 SDA 打包阈值打包），不再注入 AE 网络"))
+                .setSaveConsumer(cfg.shopAeDeliverDisabled::set).build());
 
         return builder.build();
     }

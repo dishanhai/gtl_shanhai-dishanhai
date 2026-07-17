@@ -85,6 +85,13 @@ public class PrimordialMassEnergyCore extends PrimordialOmegaEngineModuleBase {
     }
 
     @Override
+    protected boolean showsModuleAndThreadSlots() {
+        // 质能档位完全由自己的 machineStorage 槽决定，基类自带的物质模块槽/线程倍率槽
+        // 对本模块没有任何效果，只会跟 machineStorage 槽重叠、误导玩家。
+        return false;
+    }
+
+    @Override
     public Widget createUIWidget() {
         Widget w = super.createUIWidget();
         if (w instanceof WidgetGroup g) {

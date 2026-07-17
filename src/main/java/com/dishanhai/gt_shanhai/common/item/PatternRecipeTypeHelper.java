@@ -173,12 +173,38 @@ public final class PatternRecipeTypeHelper {
     public static GTRecipe peekRecipe(ItemStack stack, Level level) {
         if (stack == null || stack.isEmpty() || level == null) return null;
         String existing = readRecipeTypeId(stack);
+
+        // 权威标记：零歧义来源，只在其类型域内解析，绝不回退全局搜索给出不同答案
+        // （否则某次瞬时失配就会让只读预览也跟着抖一下，虽不写 NBT 但仍是不必要的不一致）。
+        if (!existing.isEmpty() && isAuthoritative(stack)) {
+            return inferRecipe(stack, level, existing);
+        }
+
         GTRecipe recipe = inferRecipe(stack, level, existing);
         if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) {
             recipe = inferRecipe(stack, level, "");
         }
         if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) return null;
         return recipe;
+    }
+
+    /**
+     * 只读解析样板对应的配方类型ID：与 {@link #peekRecipe} 同源，只读不写。供星律样板总成给
+     * 自己正在向 AE 网络供货的槽位刷新本地过滤缓存用——这类槽位必须遵守和其它样板总成同样的
+     * "AE2身份只读"纪律，不能每次刷新都可能悄悄改写 NBT（AEItemKey 含 NBT，改动即变身份）。
+     * 推断失败（配方表暂未就绪等）时保留现有 NBT 值而非清空，避免过滤条件被临时空标签放行一切。
+     */
+    public static String peekRecipeTypeId(ItemStack stack, Level level) {
+        long start = System.nanoTime();
+        GTRecipe recipe = peekRecipe(stack, level);
+        long elapsed = System.nanoTime() - start;
+        String existing = readRecipeTypeId(stack);
+        String result = recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null
+                ? existing : recipe.recipeType.registryName.toString();
+        if (elapsed > 5_000_000) { // 5ms 以上打印
+            LOG.warn("[peekRecipeTypeId] elapsedMs={} existing={} inferred={}", elapsed / 1_000_000.0, existing, result);
+        }
+        return result;
     }
 
     /** 直接从已解码处理样板推断 GT 配方，供通配符展开后的动态样板使用。 */
@@ -223,7 +249,7 @@ public final class PatternRecipeTypeHelper {
         try {
             IPatternDetails details = PatternDetailsHelper.decodePattern(stack, level);
             if (!(details instanceof AEProcessingPattern pattern)) {
-                LOG.debug("[inferRecipe] decodePattern 非 AEProcessingPattern: {}",
+                LOG.debug("[inferRecipe] decodePattern not AEProcessingPattern: {}",
                         details == null ? "null" : details.getClass().getName());
                 return null;
             }
@@ -233,7 +259,7 @@ public final class PatternRecipeTypeHelper {
                     ? VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out)
                     : VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out, recipeTypeId);
         } catch (RuntimeException e) {
-            LOG.warn("[inferRecipe] 解析异常", e);
+            LOG.warn("[inferRecipe] parse exception", e);
             return null;
         }
     }

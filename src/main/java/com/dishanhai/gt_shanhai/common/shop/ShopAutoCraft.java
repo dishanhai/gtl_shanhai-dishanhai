@@ -236,11 +236,21 @@ public final class ShopAutoCraft {
                 continue;
             }
             if (pi.result.simulation()) {
+                // missingItems() 种类数不定，逐个拼接没有上限；缺料种类一多整行轻松突破网络包
+                // writeUtf 的 256 字符硬上限，writeUtf 遇超长字符串直接抛 EncoderException，
+                // 未捕获会把整个 ServerTick 事件链路带崩、直接停服。这里限定最多展示 6 种，
+                // 超出的合并成"等共 N 种"，从源头保证这行文本不会失控增长。
                 StringBuilder missing = new StringBuilder();
+                int shown = 0;
+                int total = 0;
                 for (var e : pi.result.missingItems()) {
+                    total++;
+                    if (shown >= 6) continue;
                     if (missing.length() > 0) missing.append("§7, ");
                     missing.append(e.getKey().getDisplayName().getString()).append(" §7×").append(e.getLongValue());
+                    shown++;
                 }
+                if (total > shown) missing.append("§7 等共").append(total).append("种");
                 lines.add("§7⚠ " + pi.displayName + " §c基础材料不足，还缺: §f" + missing);
                 continue;
             }

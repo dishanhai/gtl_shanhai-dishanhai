@@ -467,10 +467,30 @@ public class DShanhaiItemTooltipAPI {
         }
     }
 
+    // 悬停无权威 NBT 标记的样板（如通配符样板）时，peekRecipeTypeId 要重新 decodePattern+配方匹配，
+    // 单次 5~13ms；ItemTooltipEvent 每帧都会触发，不缓存会把渲染线程钉在个位数帧率上（"卡死"）。
+    // 按物品+NBT 内容做 key，同一样板只算一次；容量上限防止长会话里样板种类堆积无限增长。
+    private static final int PATTERN_TYPE_CACHE_LIMIT = 128;
+    private static final Map<Long, String> PATTERN_TYPE_TOOLTIP_CACHE =
+            new java.util.LinkedHashMap<Long, String>(PATTERN_TYPE_CACHE_LIMIT, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Long, String> eldest) {
+                    return size() > PATTERN_TYPE_CACHE_LIMIT;
+                }
+            };
+
     private static void addPatternRecipeTypeTooltip(ItemStack stack, List<Component> tooltip, Level level) {
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
         if (recipeTypeId.isEmpty() && level != null) {
-            recipeTypeId = PatternRecipeTypeHelper.ensureRecipeTypeId(stack, level);
+            int tagHash = stack.getTag() == null ? 0 : stack.getTag().hashCode();
+            long cacheKey = ((long) System.identityHashCode(stack.getItem()) << 32) | (tagHash & 0xFFFFFFFFL);
+            String cached = PATTERN_TYPE_TOOLTIP_CACHE.get(cacheKey);
+            if (cached != null) {
+                recipeTypeId = cached;
+            } else {
+                recipeTypeId = PatternRecipeTypeHelper.peekRecipeTypeId(stack, level);
+                PATTERN_TYPE_TOOLTIP_CACHE.put(cacheKey, recipeTypeId);
+            }
         }
         if (recipeTypeId.isEmpty()) return;
         tooltip.add(Component.literal("§b配方类型：§f" + recipeTypeDisplayName(recipeTypeId))
