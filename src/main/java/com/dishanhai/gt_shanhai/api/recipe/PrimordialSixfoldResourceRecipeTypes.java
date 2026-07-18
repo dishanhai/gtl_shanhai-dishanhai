@@ -12,10 +12,10 @@ public final class PrimordialSixfoldResourceRecipeTypes {
     public static final ResourceLocation LARGE_VOID_PUMP_ID = new ResourceLocation("gtceu:large_void_pump");
 
     public static GTRecipeType requireLargeVoidPump() {
-        return requireResolved(id -> GTRegistries.RECIPE_TYPES.get(id));
+        return requireLargeVoidPump(id -> GTRegistries.RECIPE_TYPES.get(id));
     }
 
-    static <T> T requireResolved(Function<ResourceLocation, T> lookup) {
+    static <T> T requireLargeVoidPump(Function<ResourceLocation, T> lookup) {
         T resolved = lookup.apply(LARGE_VOID_PUMP_ID);
         if (resolved == null) {
             throw new IllegalStateException("缺少运行时配方类型: " + LARGE_VOID_PUMP_ID);

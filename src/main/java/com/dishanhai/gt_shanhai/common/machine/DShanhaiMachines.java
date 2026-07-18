@@ -456,14 +456,12 @@ public class DShanhaiMachines {
                 .register();
 
         PRIMORDIAL_SIXFOLD_RESOURCE_CORE.setTooltipBuilder((stack, tooltips) -> {
-            tooltips.add(DShanhaiTextUtil.createAuroraText("统御六源，汇聚元素、星海与虚空资源"));
-            tooltips.add(Component.literal("§7配方类型：元素复制 / 太空钻井 / 大型虚空泵"));
-            tooltips.add(Component.literal("§7创造之门 / 裂变反应堆 / 大型集气室"));
-            tooltips.add(Component.literal("§7只提供原初模块通用并行加工，不模拟裂变堆专属机制"));
-            tooltips.add(Component.literal("§7需安装在引擎模块位"));
-            tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
-                    .append(Component.literal("§f并行，直接从电网取电")));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.0"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.1"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.2"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.3"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.4"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.5"));
         });
 
         // ── I级 原初物质重组核心 ──────────────────────────────────────────
