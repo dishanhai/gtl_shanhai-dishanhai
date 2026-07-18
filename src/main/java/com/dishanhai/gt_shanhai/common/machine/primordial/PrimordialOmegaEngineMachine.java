@@ -26,6 +26,7 @@ import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -99,7 +100,9 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     @Override
     public Set<IModularMachineModule<PrimordialOmegaEngineMachine, ?>> getModuleSet() {
-        return modules;
+        synchronized (outputMultiplierCache) {
+            return Collections.unmodifiableSet(new ReferenceOpenHashSet<>(modules));
+        }
     }
 
     @Override
@@ -123,7 +126,9 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         // 环隐藏由 FOTC 渲染器每帧处理（见 AbstractRingRenderer）
         safeClearModules();
         scanAndConnectModules();
-        hasModules = !modules.isEmpty();
+        synchronized (outputMultiplierCache) {
+            hasModules = !modules.isEmpty();
+        }
     }
 
     @Override
@@ -131,8 +136,10 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         super.onStructureInvalid();
         // 环恢复由 FOTC 渲染器每帧处理
         safeClearModules();
-        hasModules = false;
-        outputMultiplierCache.invalidate();
+        synchronized (outputMultiplierCache) {
+            hasModules = false;
+            outputMultiplierCache.invalidate();
+        }
     }
 
     /**
@@ -142,12 +149,17 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
      */
     @Override
     public void safeClearModules() {
-        var snapshot = new ArrayList<>(getModules());
+        List<IModularMachineModule<PrimordialOmegaEngineMachine, ?>> snapshot;
+        synchronized (outputMultiplierCache) {
+            snapshot = new ArrayList<>(modules);
+        }
         for (var module : snapshot) {
             module.removeFromHost(this);
         }
-        getModuleSet().clear();
-        outputMultiplierCache.invalidate();
+        synchronized (outputMultiplierCache) {
+            modules.clear();
+            outputMultiplierCache.invalidate();
+        }
     }
 
     @Override
@@ -162,18 +174,22 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     @Override
     public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void addModule(M module) {
-        if (getModuleSet().add(module)) {
-            outputMultiplierCache.invalidate();
+        synchronized (outputMultiplierCache) {
+            if (modules.add(module)) {
+                outputMultiplierCache.invalidate();
+            }
+            hasModules = true;
         }
-        hasModules = true;
     }
 
     @Override
     public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void removeModule(M module) {
-        if (getModuleSet().remove(module)) {
-            outputMultiplierCache.invalidate();
+        synchronized (outputMultiplierCache) {
+            if (modules.remove(module)) {
+                outputMultiplierCache.invalidate();
+            }
+            hasModules = !modules.isEmpty();
         }
-        hasModules = !getModuleSet().isEmpty();
     }
 
     public int getMountedOutputMultiplier() {
@@ -185,30 +201,51 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         private long cachedTick = Long.MIN_VALUE;
         private int cachedValue = 1;
         private boolean valid;
+        private long generation;
 
         int get(long tick, Iterable<?> modules) {
-            if (valid && cachedTick == tick) {
-                return cachedValue;
+            while (true) {
+                List<Object> snapshot = new ArrayList<>();
+                long observedGeneration;
+                synchronized (this) {
+                    if (valid && cachedTick == tick) {
+                        return cachedValue;
+                    }
+                    observedGeneration = generation;
+                    for (Object module : modules) {
+                        snapshot.add(module);
+                    }
+                }
+                int multiplier = calculateMultiplier(snapshot);
+                synchronized (this) {
+                    if (generation != observedGeneration) {
+                        continue;
+                    }
+                    cachedTick = tick;
+                    cachedValue = multiplier;
+                    valid = true;
+                    return multiplier;
+                }
             }
+        }
+
+        private static int calculateMultiplier(Iterable<?> modules) {
             int multiplier = 1;
             for (Object module : modules) {
                 if (module instanceof IPrimordialOutputMultiplierModule outputModule) {
-                    multiplier = Math.max(multiplier, outputModule.getCurrentOutputMultiplier());
+                    int moduleMultiplier = Math.max(1,
+                            Math.min(1000, outputModule.getCurrentOutputMultiplier()));
+                    multiplier = Math.max(multiplier, moduleMultiplier);
                     if (multiplier >= 1000) {
                         break;
                     }
                 }
             }
-            cachedTick = tick;
-            cachedValue = multiplier;
-            valid = true;
             return multiplier;
         }
 
-        void invalidate() {
-            if (!valid && cachedTick == Long.MIN_VALUE && cachedValue == 1) {
-                return;
-            }
+        synchronized void invalidate() {
+            generation++;
             cachedTick = Long.MIN_VALUE;
             cachedValue = 1;
             valid = false;
@@ -293,7 +330,10 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             addParallelDisplay(textList);
             addWorkingStatus(textList);
             // 显示已安装模块数
-            int moduleCount = modules.size();
+            int moduleCount;
+            synchronized (outputMultiplierCache) {
+                moduleCount = modules.size();
+            }
             if (moduleCount > 0) {
                 textList.add(Component.translatable("tooltip.gtlcore.installed_module_count", moduleCount)
                         .withStyle(ChatFormatting.AQUA));
