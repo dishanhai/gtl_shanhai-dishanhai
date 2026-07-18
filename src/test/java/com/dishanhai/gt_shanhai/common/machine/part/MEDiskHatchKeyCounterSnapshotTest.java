@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,13 +55,14 @@ public class MEDiskHatchKeyCounterSnapshotTest {
         add(counterType, source, key, 4L);
         add(counterType, source, key, 3L);
 
-        Object snapshot = newSnapshot(loader, counterType, source, false);
+        Object snapshot = newSnapshot(loader, counterType, source);
         Object out = newCounter(counterType);
         addSnapshot(loader, counterType, snapshot, out);
 
         assertEquals(1, size(counterType, out));
         assertEquals(7L, iteratedAmount(out));
         assertEquals(7L, get(counterType, out, key));
+        assertEquals(7L, getSnapshotAmount(loader, snapshot, key));
     }
 
     @Test
@@ -70,7 +72,7 @@ public class MEDiskHatchKeyCounterSnapshotTest {
         TestKey key = new TestKey("reuse");
         Object source = newCounter(counterType);
         add(counterType, source, key, 11L);
-        Object snapshot = newSnapshot(loader, counterType, source, true);
+        Object snapshot = newSnapshot(loader, counterType, source);
 
         Object out = newCounter(counterType);
         add(counterType, out, key, 1L);
@@ -85,25 +87,52 @@ public class MEDiskHatchKeyCounterSnapshotTest {
     }
 
     @Test
+    void snapshotSaturatesDuplicateInfiniteContributions() throws Exception {
+        MixinAwareClassLoader loader = new MixinAwareClassLoader(getClass().getClassLoader());
+        Class<?> counterType = loader.loadClass(KEY_COUNTER);
+        TestKey key = new TestKey("infinite");
+        Object source = newCounter(counterType);
+        add(counterType, source, key, Long.MAX_VALUE);
+        Object snapshot = newSnapshot(loader, counterType, source);
+
+        Object out = newCounter(counterType);
+        add(counterType, out, key, Long.MAX_VALUE);
+        addSnapshot(loader, counterType, snapshot, out);
+
+        assertEquals(Long.MAX_VALUE, get(counterType, out, key));
+    }
+
+    @Test
     void snapshotReplayAvoidsBulkCopyingVariantSubmaps() throws IOException {
         String source = Files.readString(HATCH_SOURCE);
 
         assertEquals(-1, source.indexOf("out.addAll(counter)"),
                 "KeyCounterSnapshot.addTo 不能整表 addAll，否则空输出计数器会触发 VariantCounter.copy()");
-        assertTrue(source.contains("out.add(entry.getKey(), entry.getLongValue())"),
-                "KeyCounterSnapshot.addTo 应逐条回放，避开 AE2 子表 copy 热点");
+        assertTrue(source.contains("AeStorageAmountMath.mergeSaturated(out, counter)"),
+                "KeyCounterSnapshot.addTo 必须饱和回放，避免重复无限量溢出");
+    }
+
+    @Test
+    void nestedAggregationUsesOneSnapshotState() throws IOException {
+        String source = Files.readString(HATCH_SOURCE);
+
+        assertFalse(source.contains("private KeyCounter aggregateCounter"),
+                "嵌套盘聚合不能同时维护 counter 和 snapshot 两份库存状态");
+        assertFalse(source.contains("System.identityHashCode(aggregateCounter)"),
+                "聚合缓存不能用对象地址充当库存版本");
+        assertTrue(source.contains("Math.min(amount, getAggregateSnapshot().get(what))"),
+                "模拟提取和网络库存输出必须读取同一份聚合快照");
     }
 
     private static Object newCounter(Class<?> counterType) throws Exception {
         return counterType.getConstructor().newInstance();
     }
 
-    private static Object newSnapshot(ClassLoader loader, Class<?> counterType, Object source,
-                                      boolean preferCounterCopy) throws Exception {
+    private static Object newSnapshot(ClassLoader loader, Class<?> counterType, Object source) throws Exception {
         Class<?> snapshotType = loader.loadClass(SNAPSHOT);
-        Constructor<?> constructor = snapshotType.getDeclaredConstructor(counterType, boolean.class);
+        Constructor<?> constructor = snapshotType.getDeclaredConstructor(counterType);
         constructor.setAccessible(true);
-        return constructor.newInstance(source, preferCounterCopy);
+        return constructor.newInstance(source);
     }
 
     private static void addSnapshot(ClassLoader loader, Class<?> counterType, Object snapshot, Object out)
@@ -111,6 +140,12 @@ public class MEDiskHatchKeyCounterSnapshotTest {
         Method addTo = loader.loadClass(SNAPSHOT).getDeclaredMethod("addTo", counterType);
         addTo.setAccessible(true);
         addTo.invoke(snapshot, out);
+    }
+
+    private static long getSnapshotAmount(ClassLoader loader, Object snapshot, AEKey key) throws Exception {
+        Method get = loader.loadClass(SNAPSHOT).getDeclaredMethod("get", AEKey.class);
+        get.setAccessible(true);
+        return (long) get.invoke(snapshot, key);
     }
 
     private static void add(Class<?> counterType, Object counter, AEKey key, long amount) throws Exception {
@@ -144,6 +179,7 @@ public class MEDiskHatchKeyCounterSnapshotTest {
         private static final String SNAPSHOT_OWNER = MEDiskHatchPartMachine.class.getName();
         private static final String VARIANT_COUNTER = "appeng.api.stacks.VariantCounter";
         private static final String KEY_LONG_MAP = "appeng.api.stacks.AEKey2LongMap";
+        private static final String AMOUNT_MATH = "com.dishanhai.gt_shanhai.api.ae2.AeStorageAmountMath";
 
         private MixinAwareClassLoader(ClassLoader parent) {
             super(parent);
@@ -183,6 +219,7 @@ public class MEDiskHatchKeyCounterSnapshotTest {
                     || name.startsWith(VARIANT_COUNTER + "$")
                     || name.equals(KEY_LONG_MAP)
                     || name.startsWith(KEY_LONG_MAP + "$")
+                    || name.equals(AMOUNT_MATH)
                     || name.equals(SNAPSHOT_OWNER)
                     || name.startsWith(SNAPSHOT_OWNER + "$");
         }

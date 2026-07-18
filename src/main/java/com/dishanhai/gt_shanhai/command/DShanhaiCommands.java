@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
@@ -566,7 +567,105 @@ public class DShanhaiCommands {
                 // 重载：/商店 reload（从 shop.json 重新加载）
                 .then(Commands.literal("reload")
                         .requires(s -> s.hasPermission(2))
-                        .executes(ctx -> execShopReload(ctx.getSource())));
+                        .executes(ctx -> execShopReload(ctx.getSource())))
+                // 银行：查询/存款/取款/贷款/还款（见 WalletAccountAPI#bank*、ShopBank 计息、ShopMembership 累计消费另计）
+                .then(Commands.literal("银行").executes(ctx -> execBankQuery(ctx.getSource())))
+                .then(Commands.literal("存款")
+                        .then(Commands.argument("数量", LongArgumentType.longArg(1))
+                                .executes(ctx -> execBankDeposit(ctx.getSource(), LongArgumentType.getLong(ctx, "数量")))))
+                .then(Commands.literal("取款")
+                        .then(Commands.argument("数量", LongArgumentType.longArg(1))
+                                .executes(ctx -> execBankWithdraw(ctx.getSource(), LongArgumentType.getLong(ctx, "数量")))))
+                .then(Commands.literal("贷款")
+                        .then(Commands.argument("数量", LongArgumentType.longArg(1))
+                                .executes(ctx -> execBankBorrow(ctx.getSource(), LongArgumentType.getLong(ctx, "数量")))))
+                .then(Commands.literal("还款")
+                        .then(Commands.argument("数量", LongArgumentType.longArg(1))
+                                .executes(ctx -> execBankRepay(ctx.getSource(), LongArgumentType.getLong(ctx, "数量")))));
+    }
+
+    // ===== 商店银行：定期存款 / 贷款（山海署名，见 WalletAccountAPI / ShopBank / ShopMembership）=====
+
+    private static int execBankQuery(CommandSourceStack source) {
+        net.minecraft.server.level.ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendSuccess(msg("§c此命令须由玩家执行"), false);
+            return 0;
+        }
+        net.minecraft.server.MinecraftServer server = source.getServer();
+        java.util.UUID uuid = player.getUUID();
+        java.math.BigInteger deposit = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.getBankDeposit(server, uuid);
+        java.math.BigInteger debt = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.getBankDebt(server, uuid);
+        int tierIdx = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.getMemberTier(server, uuid);
+        String tier = com.dishanhai.gt_shanhai.common.shop.ShopMembership.tierNameForTier(tierIdx);
+        int pct = com.dishanhai.gt_shanhai.common.shop.ShopMembership.discountPercentForTier(tierIdx);
+        source.sendSuccess(msg("§b=== 山海银行 ==="), false);
+        source.sendSuccess(msg("§7定期存款: §a" + deposit + " §7星火"), false);
+        source.sendSuccess(msg("§7欠款: §c" + debt + " §7星火"), false);
+        source.sendSuccess(msg(tier.isEmpty()
+                ? "§7会员: §8未购买 §7（前往「会员中心」购买解锁折扣）"
+                : "§7会员: §d[" + tier + " -" + pct + "%]"), false);
+        return 1;
+    }
+
+    private static int execBankDeposit(CommandSourceStack source, long amount) {
+        net.minecraft.server.level.ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendSuccess(msg("§c此命令须由玩家执行"), false);
+            return 0;
+        }
+        java.math.BigInteger took = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankDeposit(
+                source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
+        com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
+        source.sendSuccess(msg(took.signum() > 0
+                ? "§b[山海银行] §a已存入 §f" + took + " §a星火（星火余额不足按余额封顶）"
+                : "§c星火余额不足，未能存入"), false);
+        return took.signum() > 0 ? 1 : 0;
+    }
+
+    private static int execBankWithdraw(CommandSourceStack source, long amount) {
+        net.minecraft.server.level.ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendSuccess(msg("§c此命令须由玩家执行"), false);
+            return 0;
+        }
+        java.math.BigInteger got = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankWithdraw(
+                source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
+        com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
+        source.sendSuccess(msg(got.signum() > 0
+                ? "§b[山海银行] §a已取出 §f" + got + " §a星火（含利息，存款不足按存款封顶）"
+                : "§c定期存款为空，未能取出"), false);
+        return got.signum() > 0 ? 1 : 0;
+    }
+
+    private static int execBankBorrow(CommandSourceStack source, long amount) {
+        net.minecraft.server.level.ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendSuccess(msg("§c此命令须由玩家执行"), false);
+            return 0;
+        }
+        java.math.BigInteger got = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankBorrow(
+                source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
+        com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
+        source.sendSuccess(msg(got.signum() > 0
+                ? "§b[山海银行] §e已借出 §f" + got + " §e星火（持续计息，记得还款；已到欠款上限按上限封顶）"
+                : "§c已达欠款上限，无法再借"), false);
+        return got.signum() > 0 ? 1 : 0;
+    }
+
+    private static int execBankRepay(CommandSourceStack source, long amount) {
+        net.minecraft.server.level.ServerPlayer player = source.getPlayer();
+        if (player == null) {
+            source.sendSuccess(msg("§c此命令须由玩家执行"), false);
+            return 0;
+        }
+        java.math.BigInteger paid = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankRepay(
+                source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
+        com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
+        source.sendSuccess(msg(paid.signum() > 0
+                ? "§b[山海银行] §a已还款 §f" + paid + " §a星火"
+                : "§c星火余额不足或没有欠款，未能还款"), false);
+        return paid.signum() > 0 ? 1 : 0;
     }
 
     private static int execShopAdd(CommandSourceStack source, String goods, int count,

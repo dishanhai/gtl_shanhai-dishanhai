@@ -38,10 +38,17 @@ public final class ShopConfig {
 
     private static final String CONFIG_DIR = "config/gt_shanhai";
     private static final File SHOP_FILE = new File(CONFIG_DIR, "shop.json");
+    private static final File CATEGORY_ORDER_FILE = new File(CONFIG_DIR, "shop_category_order.json");
 
     private static volatile ShopCatalogSnapshot snapshot = ShopCatalogSnapshot.empty();
     private static volatile boolean loaded = false;
     private static long nextRevision = Math.max(1L, System.currentTimeMillis());
+    /**
+     * 分类页签显式排序（拖拽排序页签后落地，见 {@link #moveCategoryTo}）：key=父路径（"/"拼接，""=顶级页签自身），
+     * value=该层已知分类的排序结果，缺失的分类按发现顺序追加在末尾（见客户端 ClientShopCatalog#applyOrder）。
+     * 随 shop_category_order.json 持久化，独立于 shop.json（不影响商品本身的排序/存档）。
+     */
+    private static volatile Map<String, List<String>> categoryOrder = new LinkedHashMap<>();
 
     private ShopConfig() {}
 
@@ -300,6 +307,44 @@ public final class ShopConfig {
         return true;
     }
 
+    /**
+     * 把条目拖拽挪到同分类下的第 newLocalIndex 位（0-based，只数同分类，跟其余分类条目的相对顺序不变）：
+     * 先把该条目从物理数组里摘掉，在"摘掉后"的同分类子序列里定位插入点，再插回物理数组——这样目标下标
+     * 天然就是"去掉被拖条目本身之后"的语义，跟客户端 {@link com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen}
+     * 里拖拽换算下标时的处理（按下标是否大于原下标决定要不要 -1）完全对齐。落点跟原位置一致时返回 false。
+     */
+    public static synchronized boolean moveEntryToIndex(ShopEntry entry, int newLocalIndex) {
+        if (entry == null) return false;
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int idx = updated.indexOf(entry);
+        if (idx < 0) return false;
+        String cat = entry.getCategory();
+        List<Integer> localIndices = new ArrayList<>();
+        for (int i = 0; i < updated.size(); i++) {
+            if (cat.equals(updated.get(i).getCategory())) localIndices.add(i);
+        }
+        int oldLocal = localIndices.indexOf(idx);
+        int clampedNew = Math.max(0, Math.min(newLocalIndex, localIndices.size() - 1));
+        if (clampedNew == oldLocal) return false;
+
+        ShopEntry anchor = idx > 0 ? updated.get(idx - 1) : null;
+        updated.remove(idx);
+        List<Integer> remaining = new ArrayList<>();
+        for (int i = 0; i < updated.size(); i++) {
+            if (cat.equals(updated.get(i).getCategory())) remaining.add(i);
+        }
+        int insertAt;
+        if (remaining.isEmpty()) insertAt = updated.size();
+        else if (clampedNew <= 0) insertAt = remaining.get(0);
+        else if (clampedNew >= remaining.size()) insertAt = remaining.get(remaining.size() - 1) + 1;
+        else insertAt = remaining.get(clampedNew);
+        updated.add(insertAt, entry);
+        publish(updated);
+        save();
+        rememberMove(entry, anchor);
+        return true;
+    }
+
     private static void rememberMove(ShopEntry entry, ShopEntry anchor) {
         lastMovedEntry = entry;
         lastMovedAnchorEntry = anchor;
@@ -346,7 +391,7 @@ public final class ShopConfig {
     }
 
     private static void publish(List<ShopEntry> entries) {
-        ShopCatalogSnapshot built = ShopCatalogSnapshot.build(nextRevision++, entries);
+        ShopCatalogSnapshot built = ShopCatalogSnapshot.build(nextRevision++, entries, categoryOrder);
         snapshot = built;
         loaded = true;
         ShopCatalogManifestPacket.broadcast(built.manifest());
@@ -375,6 +420,80 @@ public final class ShopConfig {
         }
     }
 
+    /** 读取 shop_category_order.json（缺失 = 尚未有任何拖拽排序，留空 Map，全部按发现顺序显示）。 */
+    private static synchronized void loadCategoryOrder() {
+        categoryOrder = new LinkedHashMap<>();
+        if (!CATEGORY_ORDER_FILE.exists()) return;
+        try (java.io.Reader r = new java.io.InputStreamReader(
+                new java.io.FileInputStream(CATEGORY_ORDER_FILE), StandardCharsets.UTF_8)) {
+            JsonObject root = JsonParser.parseReader(r).getAsJsonObject();
+            for (Map.Entry<String, JsonElement> e : root.entrySet()) {
+                if (!e.getValue().isJsonArray()) continue;
+                List<String> values = new ArrayList<>();
+                for (JsonElement el : e.getValue().getAsJsonArray()) values.add(el.getAsString());
+                categoryOrder.put(e.getKey(), values);
+            }
+        } catch (Exception e) {
+            GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop_category_order.json 失败: {}", e.getMessage());
+        }
+    }
+
+    private static synchronized void saveCategoryOrder() {
+        try {
+            new File(CONFIG_DIR).mkdirs();
+            JsonObject root = new JsonObject();
+            for (Map.Entry<String, List<String>> e : categoryOrder.entrySet()) {
+                JsonArray arr = new JsonArray();
+                for (String v : e.getValue()) arr.add(v);
+                root.add(e.getKey(), arr);
+            }
+            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(CATEGORY_ORDER_FILE), StandardCharsets.UTF_8)) {
+                w.write(GSON.toJson(root));
+            }
+        } catch (Exception e) {
+            GTDishanhaiMod.LOGGER.warn("[Shop] 保存 shop_category_order.json 失败: {}", e.getMessage());
+        }
+    }
+
+    /** 某父路径下当前实际存在的分类（按发现顺序；隐藏商品不计入），parentPath="" = 顶级页签自身。 */
+    private static List<String> discoveredCategoriesAt(String parentPath) {
+        if (parentPath == null || parentPath.isEmpty()) return snapshot().topCategories();
+        String[] parts = parentPath.split("/", 3);
+        if (parts.length == 1) return snapshot().subCategories(parts[0]);
+        if (parts.length == 2) return snapshot().subCategories2(parts[0], parts[1]);
+        return snapshot().subCategories3(parts[0], parts[1], parts[2]);
+    }
+
+    /**
+     * 把 parentPath 下的 category 页签拖拽挪到新下标（0..size，含末尾）：先取当前排序（已持久化的排序
+     * 优先，否则用发现顺序打底），跟当前实际存在的分类做一次"求交集+补新增"的自愈合并（避免陈旧持久化
+     * 数据跟 shop.json 最新分类脱节——分类被删了就跟着从排序表里消失，新出现的分类追加到末尾），
+     * 再把 category 挪到目标位置、持久化、重新发布 manifest 广播给所有客户端。
+     */
+    public static synchronized boolean moveCategoryTo(String parentPath, String category, int newIndex) {
+        if (category == null || category.isEmpty()) return false;
+        String key = parentPath == null ? "" : parentPath;
+        List<String> discovered = discoveredCategoriesAt(key);
+        if (!discovered.contains(category)) return false;
+        List<String> persisted = categoryOrder.get(key);
+        List<String> working = new ArrayList<>();
+        if (persisted != null) {
+            for (String c : persisted) if (discovered.contains(c) && !working.contains(c)) working.add(c);
+        }
+        for (String c : discovered) if (!working.contains(c)) working.add(c); // 新分类兜底追加到末尾
+
+        int oldIndex = working.indexOf(category);
+        working.remove(oldIndex);
+        int clamped = Math.max(0, Math.min(newIndex, working.size()));
+        working.add(clamped, category);
+        if (working.equals(persisted)) return false; // 落点和原位置一致，视为无变化
+
+        categoryOrder.put(key, List.copyOf(working));
+        saveCategoryOrder();
+        publish(new ArrayList<>(getEntries())); // 商品本身不变，只是要把新排序塞进新 manifest 广播出去
+        return true;
+    }
+
     /**
      * 限购总量剩余次数按存档隔离（见 {@link ShopLimitSavedData}）：从当前存档回填/初始化每个限购
      * 商品的剩余次数——存档里已经记过账（这个存档消费过）就用存档的值覆盖 shop.json 解析出的值；
@@ -398,6 +517,7 @@ public final class ShopConfig {
 
     /** 从磁盘重新加载商品清单；文件缺失时生成默认文件。 */
     public static synchronized void reload() {
+        loadCategoryOrder(); // 先加载分类排序，publish() 建 manifest 时才能一并带上
         if (!SHOP_FILE.exists()) {
             writeDefault();
         }

@@ -209,6 +209,10 @@ public class SingularityDataHubMachine extends MultiblockControllerMachine
                 AEKey key = entry.getKey();
                 if (key instanceof AEItemKey itemKey) {
                     ItemStack innerStack = itemKey.toStack();
+                    if (innerStack.getItem() instanceof SuperDiskArrayItem) {
+                        // 已存在的嵌套 SDA 只作为普通物品保留，不能递归挂载其内部库存。
+                        continue;
+                    }
                     MEDiskHatchPartMachine.normalizeEaeInfinityCellRecord(innerStack);
                     MEStorage directInfinityCell = MEDiskHatchPartMachine.createEaeInfinityCellStorage(innerStack);
                     if (directInfinityCell != null) {

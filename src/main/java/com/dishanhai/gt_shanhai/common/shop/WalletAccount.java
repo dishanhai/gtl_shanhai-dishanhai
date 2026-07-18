@@ -27,11 +27,26 @@ public class WalletAccount {
     private static final String TAG_PURCHASES = "purchases";
     private static final String TAG_PERIOD_WINDOW = "periodWindow";
     private static final String TAG_PERIOD_USED = "periodUsed";
+    private static final String TAG_MEMBER_TIER = "memberTier";
+    private static final String TAG_BANK_DEPOSIT = "bankDeposit";
+    private static final String TAG_BANK_DEPOSIT_MS = "bankDepositMs";
+    private static final String TAG_BANK_DEBT = "bankDebt";
+    private static final String TAG_BANK_DEBT_MS = "bankDebtMs";
 
     /** 币种 → 余额（BigInteger，保序）。 */
     private final Map<ResourceLocation, BigInteger> currencyBalances = new LinkedHashMap<>();
     /** 数字余额（星火）。 */
     private BigInteger digitalBalance = BigInteger.ZERO;
+    /** 付费会员档位（-1=未购买任何档位，0/1/2=青铜/白银/黄金），永久买断，见 {@link ShopMembership}/{@link WalletAccountAPI#buyMemberTier}。 */
+    private int memberTier = -1;
+    /** 定期存款本金（含已结算利息，见 {@link ShopBank}）。 */
+    private BigInteger bankDeposit = BigInteger.ZERO;
+    /** 定期存款上次结息时刻（{@link System#currentTimeMillis}）；0=从未记账。 */
+    private long bankDepositLastMs = 0L;
+    /** 贷款欠款本金（含已结算利息）。 */
+    private BigInteger bankDebt = BigInteger.ZERO;
+    /** 贷款欠款上次结息时刻；0=从未记账。 */
+    private long bankDebtLastMs = 0L;
     /** 商品条目 key（见 {@link WalletAccountAPI#purchaseKey}）→ 累计已购买次数，展示用，非结算依据。 */
     private final Map<String, Long> purchaseCounts = new LinkedHashMap<>();
     /** 商品条目 key → 该玩家当前周期限购窗口的开窗锚点 gameTime（见 {@link ShopPeriodLimiter}），
@@ -73,6 +88,50 @@ public class WalletAccount {
 
     public void setDigital(BigInteger value) {
         digitalBalance = (value == null || value.signum() <= 0) ? BigInteger.ZERO : value;
+    }
+
+    // ===== 付费会员档位（永久买断，见 ShopMembership） =====
+
+    public int getMemberTier() {
+        return memberTier;
+    }
+
+    public void setMemberTier(int value) {
+        memberTier = value;
+    }
+
+    // ===== 银行：定期存款 / 贷款（见 ShopBank） =====
+
+    public BigInteger getBankDeposit() {
+        return bankDeposit;
+    }
+
+    public void setBankDeposit(BigInteger value) {
+        bankDeposit = (value == null || value.signum() <= 0) ? BigInteger.ZERO : value;
+    }
+
+    public long getBankDepositLastMs() {
+        return bankDepositLastMs;
+    }
+
+    public void setBankDepositLastMs(long value) {
+        bankDepositLastMs = value;
+    }
+
+    public BigInteger getBankDebt() {
+        return bankDebt;
+    }
+
+    public void setBankDebt(BigInteger value) {
+        bankDebt = (value == null || value.signum() <= 0) ? BigInteger.ZERO : value;
+    }
+
+    public long getBankDebtLastMs() {
+        return bankDebtLastMs;
+    }
+
+    public void setBankDebtLastMs(long value) {
+        bankDebtLastMs = value;
     }
 
     // ===== 已购买次数（展示用统计，不参与结算） =====
@@ -144,6 +203,17 @@ public class WalletAccount {
         if (digitalBalance.signum() > 0) {
             tag.putByteArray(TAG_DIGITAL, digitalBalance.toByteArray());
         }
+        if (memberTier >= 0) {
+            tag.putInt(TAG_MEMBER_TIER, memberTier);
+        }
+        if (bankDeposit.signum() > 0) {
+            tag.putByteArray(TAG_BANK_DEPOSIT, bankDeposit.toByteArray());
+            tag.putLong(TAG_BANK_DEPOSIT_MS, bankDepositLastMs);
+        }
+        if (bankDebt.signum() > 0) {
+            tag.putByteArray(TAG_BANK_DEBT, bankDebt.toByteArray());
+            tag.putLong(TAG_BANK_DEBT_MS, bankDebtLastMs);
+        }
         CompoundTag pur = new CompoundTag();
         for (Map.Entry<String, Long> e : purchaseCounts.entrySet()) {
             if (e.getValue() != null && e.getValue() > 0L) pur.putLong(e.getKey(), e.getValue());
@@ -177,6 +247,29 @@ public class WalletAccount {
             if (bytes.length > 0) {
                 BigInteger v = new BigInteger(bytes);
                 if (v.signum() > 0) acc.digitalBalance = v;
+            }
+        }
+        if (tag.contains(TAG_MEMBER_TIER)) {
+            acc.memberTier = tag.getInt(TAG_MEMBER_TIER);
+        }
+        if (tag.contains(TAG_BANK_DEPOSIT)) {
+            byte[] bytes = tag.getByteArray(TAG_BANK_DEPOSIT);
+            if (bytes.length > 0) {
+                BigInteger v = new BigInteger(bytes);
+                if (v.signum() > 0) {
+                    acc.bankDeposit = v;
+                    acc.bankDepositLastMs = tag.getLong(TAG_BANK_DEPOSIT_MS);
+                }
+            }
+        }
+        if (tag.contains(TAG_BANK_DEBT)) {
+            byte[] bytes = tag.getByteArray(TAG_BANK_DEBT);
+            if (bytes.length > 0) {
+                BigInteger v = new BigInteger(bytes);
+                if (v.signum() > 0) {
+                    acc.bankDebt = v;
+                    acc.bankDebtLastMs = tag.getLong(TAG_BANK_DEBT_MS);
+                }
             }
         }
         CompoundTag pur = tag.getCompound(TAG_PURCHASES);

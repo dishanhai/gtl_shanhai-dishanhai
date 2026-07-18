@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import com.dishanhai.gt_shanhai.api.ae2.AeStorageAmountMath;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -47,12 +49,6 @@ final class EquivalentKeySnapshotCache<K> {
         snapshot = Snapshot.from(entries, normalizer);
     }
 
-    synchronized void recordChange(K rawKey, long delta) {
-        if (snapshot != null) {
-            snapshot.recordChange(rawKey, normalizer.apply(rawKey), delta);
-        }
-    }
-
     synchronized void invalidate() {
         snapshot = null;
     }
@@ -80,7 +76,6 @@ final class EquivalentKeySnapshotCache<K> {
 
     private static final class Snapshot<K> {
         private final Map<K, Long> normalizedAmounts = new LinkedHashMap<>();
-        private final Map<K, Long> rawAmounts = new LinkedHashMap<>();
         private final Map<K, ArrayList<K>> rawKeysByNormalized = new LinkedHashMap<>();
 
         private static <K> Snapshot<K> from(Iterable<Entry<K>> entries, Function<K, K> normalizer) {
@@ -89,7 +84,7 @@ final class EquivalentKeySnapshotCache<K> {
                 if (entry == null || entry.key() == null || entry.amount() <= 0L) {
                     continue;
                 }
-                snapshot.recordChange(entry.key(), normalizer.apply(entry.key()), entry.amount());
+                snapshot.add(entry.key(), normalizer.apply(entry.key()), entry.amount());
             }
             return snapshot;
         }
@@ -116,48 +111,19 @@ final class EquivalentKeySnapshotCache<K> {
             }
         }
 
-        private void recordChange(K rawKey, K normalizedKey, long delta) {
-            if (rawKey == null || normalizedKey == null || delta == 0L) {
+        private void add(K rawKey, K normalizedKey, long amount) {
+            if (rawKey == null || normalizedKey == null || amount <= 0L) {
                 return;
             }
 
-            long oldRaw = getOrZero(rawAmounts, rawKey);
-            long newRaw = oldRaw + delta;
-            if (newRaw < 0L) {
-                newRaw = 0L;
-            }
-            long actualDelta = newRaw - oldRaw;
-            if (actualDelta == 0L) {
-                return;
+            ArrayList<K> keys = rawKeysByNormalized.computeIfAbsent(normalizedKey, ignored -> new ArrayList<>());
+            if (!keys.contains(rawKey)) {
+                keys.add(rawKey);
             }
 
-            if (newRaw > 0L) {
-                rawAmounts.put(rawKey, newRaw);
-                ArrayList<K> keys = rawKeysByNormalized.get(normalizedKey);
-                if (keys == null) {
-                    keys = new ArrayList<>();
-                    rawKeysByNormalized.put(normalizedKey, keys);
-                }
-                if (!keys.contains(rawKey)) {
-                    keys.add(rawKey);
-                }
-            } else {
-                rawAmounts.remove(rawKey);
-                ArrayList<K> keys = rawKeysByNormalized.get(normalizedKey);
-                if (keys != null) {
-                    keys.remove(rawKey);
-                    if (keys.isEmpty()) {
-                        rawKeysByNormalized.remove(normalizedKey);
-                    }
-                }
-            }
-
-            long newNormalized = getOrZero(normalizedAmounts, normalizedKey) + actualDelta;
-            if (newNormalized > 0L) {
-                normalizedAmounts.put(normalizedKey, newNormalized);
-            } else {
-                normalizedAmounts.remove(normalizedKey);
-            }
+            long normalizedAmount = AeStorageAmountMath.saturatedAdd(
+                    getOrZero(normalizedAmounts, normalizedKey), amount);
+            normalizedAmounts.put(normalizedKey, normalizedAmount);
         }
 
         private static <K> long getOrZero(Map<K, Long> values, K key) {

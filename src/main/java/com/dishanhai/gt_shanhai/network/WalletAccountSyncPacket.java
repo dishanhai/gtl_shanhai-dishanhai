@@ -26,6 +26,7 @@ public class WalletAccountSyncPacket {
     private final Map<String, Long> periodAnchors; // 周期限购各 key 的开窗锚点 gameTime，客户端算"剩余刷新倒计时"用
     private final BigInteger wirelessEu; // 玩家绑定的无线电网 EU 余额（gtladditions/gtmthings，见 ShopWirelessEu）
     private final boolean hasBoundAeNetwork; // 玩家当前是否有绑定的在线 AE 网络（商店终端/FTBQ提交器，见 ShopAeNetwork），供「AE模式」开关校验用
+    private final int memberTier; // 付费会员档位（-1=未购买，0/1/2=青铜/白银/黄金），永久买断，见 ShopMembership/WalletAccountAPI#buyMemberTier
 
     // ===== 兼容构造：无周期限购锚点（委托空表）=====
     public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
@@ -45,15 +46,23 @@ public class WalletAccountSyncPacket {
         this(currencies, digital, purchaseCounts, periodAnchors, wirelessEu, false);
     }
 
+    // ===== 兼容构造：无会员档位（委托 -1=未购买）=====
     public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
                                     Map<String, Long> purchaseCounts, Map<String, Long> periodAnchors, BigInteger wirelessEu,
                                     boolean hasBoundAeNetwork) {
+        this(currencies, digital, purchaseCounts, periodAnchors, wirelessEu, hasBoundAeNetwork, -1);
+    }
+
+    public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
+                                    Map<String, Long> purchaseCounts, Map<String, Long> periodAnchors, BigInteger wirelessEu,
+                                    boolean hasBoundAeNetwork, int memberTier) {
         this.currencies = currencies != null ? currencies : new LinkedHashMap<>();
         this.digital = digital != null ? digital : BigInteger.ZERO;
         this.purchaseCounts = purchaseCounts != null ? purchaseCounts : new LinkedHashMap<>();
         this.periodAnchors = periodAnchors != null ? periodAnchors : new LinkedHashMap<>();
         this.wirelessEu = wirelessEu != null ? wirelessEu : BigInteger.ZERO;
         this.hasBoundAeNetwork = hasBoundAeNetwork;
+        this.memberTier = memberTier;
     }
 
     public WalletAccountSyncPacket(FriendlyByteBuf buf) {
@@ -86,6 +95,7 @@ public class WalletAccountSyncPacket {
         byte[] eb = buf.readByteArray();
         this.wirelessEu = eb.length == 0 ? BigInteger.ZERO : new BigInteger(eb);
         this.hasBoundAeNetwork = buf.readBoolean();
+        this.memberTier = buf.readVarInt();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -107,6 +117,7 @@ public class WalletAccountSyncPacket {
         }
         buf.writeByteArray(wirelessEu.toByteArray());
         buf.writeBoolean(hasBoundAeNetwork);
+        buf.writeVarInt(memberTier);
     }
 
     public static void handle(WalletAccountSyncPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -120,6 +131,7 @@ public class WalletAccountSyncPacket {
     @OnlyIn(Dist.CLIENT)
     private static void applyClient(WalletAccountSyncPacket pkt) {
         com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.apply(
-                pkt.currencies, pkt.digital, pkt.purchaseCounts, pkt.periodAnchors, pkt.wirelessEu, pkt.hasBoundAeNetwork);
+                pkt.currencies, pkt.digital, pkt.purchaseCounts, pkt.periodAnchors, pkt.wirelessEu, pkt.hasBoundAeNetwork,
+                pkt.memberTier);
     }
 }

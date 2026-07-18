@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.machine.part;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.api.DShanhaiNBTAPI;
+import com.dishanhai.gt_shanhai.api.ae2.AeStorageAmountMath;
 import com.dishanhai.gt_shanhai.api.gui.configurators.MEDiskHatchPriorityConfigurator;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory;
@@ -17,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.EnumSet;
 import java.util.Set;
-import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import com.gregtechceu.gtceu.api.data.RotationState;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
@@ -456,6 +456,10 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             AEKey key = entry.getKey();
             if (key instanceof AEItemKey itemKey) {
                 ItemStack innerStack = itemKey.toStack();
+                if (innerStack.getItem() instanceof SuperDiskArrayItem) {
+                    // 已存在的嵌套 SDA 保留为普通物品；禁止把它再次解析成子库存，避免自引用挂载。
+                    continue;
+                }
                 normalizeEaeInfinityCellRecord(innerStack);
                 MEStorage directInfinityCell = createEaeInfinityCellStorage(innerStack);
                 if (directInfinityCell != null) {
@@ -576,11 +580,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         private AggregatedInfinityCellStorage(List<EaeInfinityCellStorage> children) {
             this.children = children;
-            KeyCounter counter = new KeyCounter();
-            for (EaeInfinityCellStorage child : children) {
-                child.getAvailableStacks(counter);
-            }
-            this.snapshot = new KeyCounterSnapshot(counter);
+            this.snapshot = KeyCounterSnapshot.aggregate(children);
         }
 
         @Override
@@ -647,17 +647,26 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         private final KeyCounter counter = new KeyCounter();
 
         private KeyCounterSnapshot(KeyCounter source) {
-            counter.addAll(source);
+            AeStorageAmountMath.mergeSaturated(counter, source);
         }
 
-        private KeyCounterSnapshot(KeyCounter source, boolean ignored) {
-            this(source);
+        private static KeyCounterSnapshot aggregate(Iterable<? extends MEStorage> storages) {
+            KeyCounter merged = new KeyCounter();
+            KeyCounter contribution = new KeyCounter();
+            for (MEStorage storage : storages) {
+                contribution.clear();
+                storage.getAvailableStacks(contribution);
+                AeStorageAmountMath.mergeSaturated(merged, contribution);
+            }
+            return new KeyCounterSnapshot(merged);
+        }
+
+        private long get(AEKey key) {
+            return counter.get(key);
         }
 
         private void addTo(KeyCounter out) {
-            for (Object2LongMap.Entry<AEKey> entry : counter) {
-                out.add(entry.getKey(), entry.getLongValue());
-            }
+            AeStorageAmountMath.mergeSaturated(out, counter);
         }
     }
 
@@ -676,7 +685,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
             long inserted = delegate.insert(normalizeFluidKey(what), amount, mode, src);
             if (inserted > 0 && mode == Actionable.MODULATE) {
-                equivalentKeyCache.recordChange(normalizeFluidKey(what), inserted);
+                equivalentKeyCache.invalidate();
                 clearAvailableSnapshot();
             }
             return inserted;
@@ -701,14 +710,15 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             if (cached == null || cachedDelegateVersion != version) {
                 if (equivalentKeyCache.hasSnapshot() && cachedDelegateVersion == version) {
                     KeyCounter normalized = new KeyCounter();
-                    equivalentKeyCache.forEachNormalized((key, amount) -> normalized.add(key, amount));
+                    equivalentKeyCache.forEachNormalized(
+                            (key, amount) -> AeStorageAmountMath.addSaturated(normalized, key, amount));
                     cached = new KeyCounterSnapshot(normalized);
                 } else {
                     java.util.ArrayList<EquivalentKeySnapshotCache.Entry<AEKey>> entries = loadEquivalentEntries();
                     equivalentKeyCache.replace(entries);
                     KeyCounter normalized = new KeyCounter();
                     for (EquivalentKeySnapshotCache.Entry<AEKey> entry : entries) {
-                        normalized.add(normalizeFluidKey(entry.key()), entry.amount());
+                        AeStorageAmountMath.addSaturated(normalized, normalizeFluidKey(entry.key()), entry.amount());
                     }
                     cached = new KeyCounterSnapshot(normalized);
                 }
@@ -761,7 +771,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
             long inserted = delegate.insert(normalizeFluidKey(what), amount, mode, src);
             if (inserted > 0 && mode == Actionable.MODULATE) {
-                equivalentKeyCache.recordChange(normalizeFluidKey(what), inserted);
+                equivalentKeyCache.invalidate();
                 cachedAvailableStacks = null;
             }
             return inserted;
@@ -779,14 +789,15 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             if (cached == null) {
                 if (equivalentKeyCache.hasSnapshot()) {
                     KeyCounter normalized = new KeyCounter();
-                    equivalentKeyCache.forEachNormalized((key, amount) -> normalized.add(key, amount));
+                    equivalentKeyCache.forEachNormalized(
+                            (key, amount) -> AeStorageAmountMath.addSaturated(normalized, key, amount));
                     cached = new KeyCounterSnapshot(normalized);
                 } else {
                     java.util.ArrayList<EquivalentKeySnapshotCache.Entry<AEKey>> entries = loadEquivalentEntries();
                     equivalentKeyCache.replace(entries);
                     KeyCounter normalized = new KeyCounter();
                     for (EquivalentKeySnapshotCache.Entry<AEKey> entry : entries) {
-                        normalized.add(normalizeFluidKey(entry.key()), entry.amount());
+                        AeStorageAmountMath.addSaturated(normalized, normalizeFluidKey(entry.key()), entry.amount());
                     }
                     cached = new KeyCounterSnapshot(normalized);
                 }
@@ -854,7 +865,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         if (!(normalized instanceof AEFluidKey)) {
             long extracted = delegate.extract(normalized, amount, mode, src);
             if (extracted > 0 && mode == Actionable.MODULATE) {
-                cache.recordChange(normalized, -extracted);
+                cache.invalidate();
                 onChanged.run();
             }
             return extracted;
@@ -875,7 +886,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         if (rawKeys.size() == 1 && normalized.equals(rawKeys.get(0))) {
             long extracted = delegate.extract(normalized, Math.min(amount, available), mode, src);
             if (extracted > 0) {
-                cache.recordChange(normalized, -extracted);
+                cache.invalidate();
                 onChanged.run();
             }
             return extracted;
@@ -888,9 +899,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             long moved = delegate.extract(rawKey, remaining, mode, src);
             if (moved <= 0L) continue;
             total += moved;
-            cache.recordChange(rawKey, -moved);
         }
-        if (total > 0L) onChanged.run();
+        if (total > 0L) {
+            cache.invalidate();
+            onChanged.run();
+        }
         return total;
     }
 
@@ -1011,10 +1024,8 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     public static final class AggregatedNestedCellStorage implements MEStorage {
         private final List<NestedCellStorage> children;
         private final Map<AEKey, Integer> preferredExtractChild = new HashMap<>();
-        // 懒建立聚合计数；子盘真实变更后失效重建，保留无限/BigInteger 子盘语义。
-        private KeyCounter aggregateCounter;
+        // 查询与网络输出读取同一份状态，子盘真实变更后整体失效。
         private KeyCounterSnapshot aggregateSnapshot;
-        private int aggregateSnapshotVersion = -1;
 
         private AggregatedNestedCellStorage(List<NestedCellStorage> children) {
             this.children = children;
@@ -1037,7 +1048,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         public long extract(AEKey what, long amount, Actionable mode, IActionSource src) {
             if (amount <= 0) return 0;
             if (mode == Actionable.SIMULATE) {
-                return Math.min(amount, getCachedAvailableAmount(what));
+                return Math.min(amount, getAggregateSnapshot().get(what));
             }
             long extracted = 0;
             int preferredIndex = preferredExtractChild.getOrDefault(what, -1);
@@ -1065,47 +1076,23 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             return extracted;
         }
 
-        private long getCachedAvailableAmount(AEKey what) {
-            // 直接 O(1) 哈希查找，绕开快照的线性扫描
-            return getAggregateCounter().get(what);
-        }
-
         @Override
         public void getAvailableStacks(KeyCounter out) {
+            getAggregateSnapshot().addTo(out);
+        }
+
+        private KeyCounterSnapshot getAggregateSnapshot() {
             KeyCounterSnapshot snapshot = aggregateSnapshot;
-            int version = getAggregateVersion();
-            if (snapshot == null || aggregateSnapshotVersion != version) {
-                KeyCounter counter = getAggregateCounter();
-                snapshot = new KeyCounterSnapshot(counter, false);
+            if (snapshot == null) {
+                snapshot = KeyCounterSnapshot.aggregate(children);
                 aggregateSnapshot = snapshot;
-                aggregateSnapshotVersion = version;
             }
-            snapshot.addTo(out);
-        }
-
-        // 首次访问时建立聚合基线；子盘变更后由 invalidateAggregateCache 触发下一次重建。
-        private KeyCounter getAggregateCounter() {
-            KeyCounter counter = aggregateCounter;
-            if (counter == null) {
-                counter = new KeyCounter();
-                for (NestedCellStorage child : children) {
-                    child.addAvailableStacksTo(counter);
-                }
-                counter.removeZeros();
-                aggregateCounter = counter;
-            }
-            return counter;
-        }
-
-        private int getAggregateVersion() {
-            return aggregateCounter != null ? System.identityHashCode(aggregateCounter) : 0;
+            return snapshot;
         }
 
         // 子盘可能是无限/BigInteger 语义，extract 返回值不一定等于可用量 delta。
         private void invalidateAggregateCache() {
-            aggregateCounter = null;
             aggregateSnapshot = null;
-            aggregateSnapshotVersion = -1;
         }
 
         @Override
@@ -1125,7 +1112,6 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         private final CarrierKeyFilterState filterState;
         private final ISaveProvider owner;
         private AEKey currentCarrierKey;
-        private KeyCounterSnapshot cachedAvailableStacks;
         private Runnable aggregateInvalidationSink;
 
         public NestedCellStorage(StorageCell parent, StorageCell nested, AEKey carrierKey, ItemStack carrierStack,
@@ -1150,7 +1136,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             }
             long inserted = nested.insert(what, amount, mode, src);
             if (inserted > 0 && mode == Actionable.MODULATE) {
-                onNestedChanged(what, inserted);
+                onNestedChanged();
                 persistCarrier();
             }
             return inserted;
@@ -1162,28 +1148,13 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             }
             long extracted = nested.extract(what, amount, mode, src);
             if (extracted > 0 && mode == Actionable.MODULATE) {
-                onNestedChanged(what, -extracted);
+                onNestedChanged();
                 persistCarrier();
             }
             return extracted;
         }
         @Override
         public void getAvailableStacks(KeyCounter out) {
-            addAvailableStacksTo(out);
-        }
-
-        private void addAvailableStacksTo(KeyCounter out) {
-            KeyCounterSnapshot cached = cachedAvailableStacks;
-            if (cached == null) {
-                KeyCounter counter = new KeyCounter();
-                addRawAvailableStacksTo(counter);
-                cached = new KeyCounterSnapshot(counter);
-                cachedAvailableStacks = cached;
-            }
-            cached.addTo(out);
-        }
-
-        private void addRawAvailableStacksTo(KeyCounter out) {
             nested.getAvailableStacks(out);
         }
 
@@ -1212,10 +1183,9 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             owner.saveChanges();
         }
 
-        // 本层清空自身快照；聚合层重建以尊重无限/BigInteger 子盘自己的库存语义。
-        private void onNestedChanged(AEKey what, long delta) {
-            cachedAvailableStacks = null;
-            if (aggregateInvalidationSink != null && delta != 0) {
+        // 聚合层重建以尊重无限/BigInteger 子盘自己的库存语义。
+        private void onNestedChanged() {
+            if (aggregateInvalidationSink != null) {
                 aggregateInvalidationSink.run();
             }
         }

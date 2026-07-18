@@ -42,6 +42,12 @@ public final class ShopPurchase {
         return v > 0L ? v : 5000L; // 配置异常兜底，不至于变成 0/负数导致每次都抽不到
     }
 
+    /** 出售回收价占买价的百分比（价差，见 config「shop.sellRatioPercent」），配置异常兜底 70。 */
+    public static int sellRatioPercent() {
+        int v = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopSellRatioPercent.get();
+        return v >= 1 && v <= 100 ? v : 70;
+    }
+
     /** FTBQ 抽取次数夹到 int（FTBQ 自身 {@code generateWeightedRandomRewards} 的 nAttempts 是 int 参数，硬限制）。 */
     private static int clampFtbqRolls(long v) {
         return v > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) v;
@@ -534,9 +540,9 @@ public final class ShopPurchase {
         MinecraftServer server = player.getServer();
         if (server == null) return 0L;
         UUID uuid = player.getUUID();
-        // 买价按限时折扣结算（见 ShopEntry#getEffectiveCost，仅打折星火/币种，实物成本原价不变）；
-        // 出售价（sellBulk）不走这个口子，折扣只影响买入价，不影响卖出收益。
-        ShopCost cost = entry.getEffectiveCost();
+        // 买价按限时折扣 + 会员累计消费折扣叠加结算（见 ShopEntry#getEffectiveCost(int)/ShopMembership，
+        // 仅打折星火/币种/EU，实物成本原价不变）；出售价（sellBulk）不走这个口子，走独立的价差折价。
+        ShopCost cost = entry.getEffectiveCost(ShopMembership.discountPercent(server, uuid));
 
         // affordable = min(times, 各成本通道约束)：星火/币种走钱包余额，EU走无线电网余额，
         // 物品走背包+精妙背包+绑定AE兜底，流体走绑定 AE
@@ -903,16 +909,18 @@ public final class ShopPurchase {
         if (fromAe > 0 && key != null) {
             ShopAeNetwork.extractForPlayer(player, key, fromAe);
         }
-        // 退回纯钱包成本（星火 + 币种 + EU）× 份数
+        // 退回纯钱包成本（星火 + 币种 + EU）× 份数，按出售价差折价（回收价=买价×sellRatioPercent%，
+        // 防止「买了立刻卖回零损耗」的套利，见 config「shop.sellRatioPercent」）
+        ShopCost sellCost = cost.scaledTo(sellRatioPercent());
         BigInteger sellBig = BigInteger.valueOf(sell);
         UUID uuid = player.getUUID();
-        if (cost.spark.signum() > 0) {
-            WalletAccountAPI.addDigital(server, uuid, cost.spark.multiply(sellBig));
+        if (sellCost.spark.signum() > 0) {
+            WalletAccountAPI.addDigital(server, uuid, sellCost.spark.multiply(sellBig));
         }
-        if (cost.eu.signum() > 0) {
-            ShopWirelessEu.add(player, cost.eu.multiply(sellBig));
+        if (sellCost.eu.signum() > 0) {
+            ShopWirelessEu.add(player, sellCost.eu.multiply(sellBig));
         }
-        for (java.util.Map.Entry<ResourceLocation, BigInteger> c : cost.coins.entrySet()) {
+        for (java.util.Map.Entry<ResourceLocation, BigInteger> c : sellCost.coins.entrySet()) {
             WalletAccountAPI.addCurrency(server, uuid, c.getKey(), c.getValue().multiply(sellBig));
         }
         if (entry.isLimited()) {

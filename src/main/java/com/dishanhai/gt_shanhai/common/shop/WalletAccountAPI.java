@@ -106,6 +106,146 @@ public final class WalletAccountAPI {
         return true;
     }
 
+    // ===================== 会员（付费直购，永久买断，见 ShopMembership） =====================
+
+    /** 当前会员档位（-1=未购买任何档位，0/1/2=青铜/白银/黄金）。 */
+    public static int getMemberTier(MinecraftServer server, UUID uuid) {
+        WalletAccount acc = data(server).get(uuid);
+        return acc == null ? -1 : acc.getMemberTier();
+    }
+
+    /**
+     * 购买/升级会员档位：永久买断，直接付目标档位全价（见 {@link ShopMembership#priceOf}），
+     * 不退旧档位已花的钱、不补差价；已拥有档位 ≥ 目标档位时拒绝（防降级/重复花钱）；
+     * 星火余额不足同样拒绝，不扣款。
+     * @return 是否购买成功
+     */
+    public static boolean buyMemberTier(MinecraftServer server, UUID uuid, int targetTier) {
+        if (targetTier < 0 || targetTier >= ShopMembership.tierCount()) return false;
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.getOrCreate(uuid);
+        if (acc.getMemberTier() >= targetTier) return false;
+        BigInteger price = BigInteger.valueOf(ShopMembership.priceOf(targetTier));
+        if (acc.getDigital().compareTo(price) < 0) return false;
+        acc.setDigital(acc.getDigital().subtract(price));
+        acc.setMemberTier(targetTier);
+        d.setDirty();
+        return true;
+    }
+
+    // ===================== 银行：定期存款（利滚利，见 ShopBank） =====================
+
+    /** 结算存款利息（折进本金、刷新计息起点），账户有变动才标脏，返回是否有变动。 */
+    private static boolean settleDeposit(WalletAccount acc) {
+        long now = System.currentTimeMillis();
+        long rate = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopBankDepositRateBpPerHour.get();
+        BigInteger interest = ShopBank.accrue(acc.getBankDeposit(), rate, now - acc.getBankDepositLastMs());
+        if (interest.signum() <= 0) {
+            if (acc.getBankDepositLastMs() <= 0L) acc.setBankDepositLastMs(now); // 首次记账起点，不算变动不标脏
+            return false;
+        }
+        acc.setBankDeposit(acc.getBankDeposit().add(interest));
+        acc.setBankDepositLastMs(now);
+        return true;
+    }
+
+    /** 读当前定期存款本息合计（惰性结算最新利息）；无存档返回 0。 */
+    public static BigInteger getBankDeposit(MinecraftServer server, UUID uuid) {
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.get(uuid);
+        if (acc == null) return BigInteger.ZERO;
+        if (settleDeposit(acc)) d.setDirty();
+        return acc.getBankDeposit();
+    }
+
+    /** 存入：数字余额（星火）→ 定期存款本金。返回实际存入量（余额不足按余额封顶，0=没存进去）。 */
+    public static BigInteger bankDeposit(MinecraftServer server, UUID uuid, BigInteger amount) {
+        if (amount == null || amount.signum() <= 0) return BigInteger.ZERO;
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.getOrCreate(uuid);
+        settleDeposit(acc);
+        BigInteger take = acc.getDigital().min(amount);
+        if (take.signum() <= 0) return BigInteger.ZERO;
+        acc.setDigital(acc.getDigital().subtract(take));
+        acc.setBankDeposit(acc.getBankDeposit().add(take));
+        if (acc.getBankDepositLastMs() <= 0L) acc.setBankDepositLastMs(System.currentTimeMillis());
+        d.setDirty();
+        return take;
+    }
+
+    /** 取出：定期存款本息 → 数字余额（星火）。返回实际取出量（存款不足按存款封顶，0=没取到）。 */
+    public static BigInteger bankWithdraw(MinecraftServer server, UUID uuid, BigInteger amount) {
+        if (amount == null || amount.signum() <= 0) return BigInteger.ZERO;
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.getOrCreate(uuid);
+        settleDeposit(acc);
+        BigInteger take = acc.getBankDeposit().min(amount);
+        if (take.signum() <= 0) return BigInteger.ZERO;
+        acc.setBankDeposit(acc.getBankDeposit().subtract(take));
+        acc.setDigital(acc.getDigital().add(take));
+        d.setDirty();
+        return take;
+    }
+
+    // ===================== 银行：贷款（复利越滚越多，见 ShopBank） =====================
+
+    private static boolean settleDebt(WalletAccount acc) {
+        long now = System.currentTimeMillis();
+        long rate = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopBankLoanRateBpPerHour.get();
+        BigInteger interest = ShopBank.accrue(acc.getBankDebt(), rate, now - acc.getBankDebtLastMs());
+        if (interest.signum() <= 0) {
+            if (acc.getBankDebtLastMs() <= 0L) acc.setBankDebtLastMs(now);
+            return false;
+        }
+        acc.setBankDebt(acc.getBankDebt().add(interest));
+        acc.setBankDebtLastMs(now);
+        return true;
+    }
+
+    /** 读当前欠款本息合计（惰性结算最新利息）；无存档返回 0。 */
+    public static BigInteger getBankDebt(MinecraftServer server, UUID uuid) {
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.get(uuid);
+        if (acc == null) return BigInteger.ZERO;
+        if (settleDebt(acc)) d.setDirty();
+        return acc.getBankDebt();
+    }
+
+    /**
+     * 借款：新增欠款本金 + 等额加进数字余额（星火），受配置最大欠款上限约束（见
+     * {@code DShanhaiConfig.COMMON.shopBankMaxLoanSpark}）。返回实际借到的量（0=已到上限/无效请求）。
+     * 无强制追讨/抵押没收机制——欠款只会持续计息累积，靠数字倒逼玩家自觉还款。
+     */
+    public static BigInteger bankBorrow(MinecraftServer server, UUID uuid, BigInteger amount) {
+        if (amount == null || amount.signum() <= 0) return BigInteger.ZERO;
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.getOrCreate(uuid);
+        settleDebt(acc);
+        BigInteger cap = BigInteger.valueOf(com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopBankMaxLoanSpark.get());
+        BigInteger room = cap.subtract(acc.getBankDebt());
+        if (room.signum() <= 0) return BigInteger.ZERO;
+        BigInteger take = room.min(amount);
+        acc.setBankDebt(acc.getBankDebt().add(take));
+        if (acc.getBankDebtLastMs() <= 0L) acc.setBankDebtLastMs(System.currentTimeMillis());
+        acc.setDigital(acc.getDigital().add(take));
+        d.setDirty();
+        return take;
+    }
+
+    /** 还款：数字余额（星火）→ 冲抵欠款。返回实际还款量（余额/欠款取小者封顶，0=没还成）。 */
+    public static BigInteger bankRepay(MinecraftServer server, UUID uuid, BigInteger amount) {
+        if (amount == null || amount.signum() <= 0) return BigInteger.ZERO;
+        WalletAccountSavedData d = data(server);
+        WalletAccount acc = d.getOrCreate(uuid);
+        settleDebt(acc);
+        BigInteger pay = acc.getDigital().min(acc.getBankDebt()).min(amount);
+        if (pay.signum() <= 0) return BigInteger.ZERO;
+        acc.setDigital(acc.getDigital().subtract(pay));
+        acc.setBankDebt(acc.getBankDebt().subtract(pay));
+        d.setDirty();
+        return pay;
+    }
+
     // ===================== 已购买次数（展示用统计） =====================
 
     /**
@@ -214,6 +354,7 @@ public final class WalletAccountAPI {
                 PacketDistributor.PLAYER.with(() -> player),
                 new WalletAccountSyncPacket(getAllCurrencies(server, uuid), getDigital(server, uuid),
                         getAllPurchaseCounts(server, uuid), getAllPeriodAnchors(server, uuid),
-                        ShopWirelessEu.getBalance(player), ShopAeNetwork.hasBoundNetwork(player)));
+                        ShopWirelessEu.getBalance(player), ShopAeNetwork.hasBoundNetwork(player),
+                        getMemberTier(server, uuid)));
     }
 }

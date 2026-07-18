@@ -30,7 +30,12 @@ public final class ShopCatalogSnapshot {
         }
     }
 
-    /** 不依赖注册表和 ItemStack 的纯布局结果，供单测、客户端清单和服务端快照共用。 */
+    /**
+     * 不依赖注册表和 ItemStack 的纯布局结果，供单测、客户端清单和服务端快照共用。
+     * 分类最多嵌套 4 级（top/sub/sub2/sub3，见 {@link #splitCategoryPath}）；subCategories2/3 按父路径
+     * （NUL 拼接，见 {@link #pathKey}）索引子层选项，groupKeys 对每个非空前缀都建了一份聚合分组
+     * （"全部" 语义：选中某层不选更深层 = 该层及以下全部条目），生成方式见 {@link #layout}。
+     */
     public static final class Layout {
         private final List<ShopCatalogManifest.Stub> stubs;
         private final Map<String, List<Long>> groupKeys;
@@ -38,13 +43,17 @@ public final class ShopCatalogSnapshot {
         private final Map<String, Long> linkKeyToEntryKey;
         private final List<String> topCategories;
         private final Map<String, List<String>> subCategories;
+        private final Map<String, List<String>> subCategories2;
+        private final Map<String, List<String>> subCategories3;
 
         private Layout(List<ShopCatalogManifest.Stub> stubs,
                        Map<String, List<Long>> groupKeys,
                        List<List<Long>> chunks,
                        Map<String, Long> linkKeyToEntryKey,
                        List<String> topCategories,
-                       Map<String, List<String>> subCategories) {
+                       Map<String, List<String>> subCategories,
+                       Map<String, List<String>> subCategories2,
+                       Map<String, List<String>> subCategories3) {
             this.stubs = List.copyOf(stubs);
             this.groupKeys = immutableListMap(groupKeys);
             List<List<Long>> chunkCopy = new ArrayList<>(chunks.size());
@@ -53,6 +62,8 @@ public final class ShopCatalogSnapshot {
             this.linkKeyToEntryKey = Map.copyOf(linkKeyToEntryKey);
             this.topCategories = List.copyOf(topCategories);
             this.subCategories = immutableStringListMap(subCategories);
+            this.subCategories2 = immutableStringListMap(subCategories2);
+            this.subCategories3 = immutableStringListMap(subCategories3);
         }
 
         public List<ShopCatalogManifest.Stub> stubs() { return stubs; }
@@ -60,12 +71,20 @@ public final class ShopCatalogSnapshot {
         public Map<String, Long> linkKeyToEntryKey() { return linkKeyToEntryKey; }
         public List<String> topCategories() { return topCategories; }
 
-        public List<Long> groupKeys(String top, String sub) {
-            return groupKeys.getOrDefault(groupKey(top, sub), List.of());
+        public List<Long> groupKeys(String top, String sub, String sub2, String sub3) {
+            return groupKeys.getOrDefault(groupKey(top, sub, sub2, sub3), List.of());
         }
 
         public List<String> subCategories(String top) {
             return subCategories.getOrDefault(top == null ? "" : top, List.of());
+        }
+
+        public List<String> subCategories2(String top, String sub) {
+            return subCategories2.getOrDefault(pathKey(top, sub), List.of());
+        }
+
+        public List<String> subCategories3(String top, String sub, String sub2) {
+            return subCategories3.getOrDefault(pathKey(top, sub, sub2), List.of());
         }
     }
 
@@ -106,7 +125,7 @@ public final class ShopCatalogSnapshot {
                 Map.of(), layout, ShopCatalogManifest.empty(), Map.of());
     }
 
-    public static ShopCatalogSnapshot build(long revision, List<ShopEntry> source) {
+    public static ShopCatalogSnapshot build(long revision, List<ShopEntry> source, Map<String, List<String>> categoryOrder) {
         List<ShopEntry> entries = source == null ? List.of() : List.copyOf(source);
         List<ShopCatalogEntryPayload> payloads = new ArrayList<>(entries.size());
         List<Descriptor> descriptors = new ArrayList<>(entries.size());
@@ -143,7 +162,7 @@ public final class ShopCatalogSnapshot {
             for (Long key : layout.chunks().get(chunkId)) chunk.add(payloadByKey.get(key));
             chunks.put(chunkId, chunk);
         }
-        ShopCatalogManifest manifest = new ShopCatalogManifest(revision, true, layout.stubs());
+        ShopCatalogManifest manifest = new ShopCatalogManifest(revision, true, layout.stubs(), categoryOrder);
         return new ShopCatalogSnapshot(revision, true, entries, byKey, byEntry, byStableId, layout, manifest, chunks);
     }
 
@@ -174,13 +193,15 @@ public final class ShopCatalogSnapshot {
         Map<String, List<Long>> groups = new LinkedHashMap<>();
         Map<String, Long> links = new LinkedHashMap<>();
         Set<String> tops = new LinkedHashSet<>();
-        Map<String, LinkedHashSet<String>> subs = new LinkedHashMap<>();
+        Map<String, LinkedHashSet<String>> subs = new LinkedHashMap<>();   // key=top          -> 二级选项
+        Map<String, LinkedHashSet<String>> subs2 = new LinkedHashMap<>();  // key=top\0sub      -> 三级选项
+        Map<String, LinkedHashSet<String>> subs3 = new LinkedHashMap<>();  // key=top\0sub\0sub2-> 四级选项
         for (int index = 0; index < safe.size(); index++) {
             long key = index;
             Descriptor descriptor = safe.get(index);
-            String top = categoryTop(descriptor.category());
-            String sub = categorySub(descriptor.category());
-            stubs.add(new ShopCatalogManifest.Stub(key, top, sub, descriptor.hidden(),
+            String[] path = splitCategoryPath(descriptor.category());
+            String top = path[0], sub = path[1], sub2 = path[2], sub3 = path[3];
+            stubs.add(new ShopCatalogManifest.Stub(key, top, sub, sub2, sub3, descriptor.hidden(),
                     chunkByKey.getOrDefault(key, -1), descriptor.linkKey(), descriptor.displayName(), descriptor.goodsIds(),
                     descriptor.stableId()));
             if (!descriptor.linkKey().isEmpty()) links.putIfAbsent(descriptor.linkKey(), key);
@@ -188,15 +209,27 @@ public final class ShopCatalogSnapshot {
             tops.add(top);
             subs.computeIfAbsent(top, ignored -> new LinkedHashSet<>());
             if (!sub.isEmpty()) subs.get(top).add(sub);
-            addGroupKey(groups, top, "", key);
-            if (!sub.isEmpty()) addGroupKey(groups, top, sub, key);
+            subs2.computeIfAbsent(pathKey(top, sub), ignored -> new LinkedHashSet<>());
+            if (!sub.isEmpty() && !sub2.isEmpty()) subs2.get(pathKey(top, sub)).add(sub2);
+            subs3.computeIfAbsent(pathKey(top, sub, sub2), ignored -> new LinkedHashSet<>());
+            if (!sub.isEmpty() && !sub2.isEmpty() && !sub3.isEmpty()) subs3.get(pathKey(top, sub, sub2)).add(sub3);
+            // "全部" 语义：每个非空前缀都单独建一份聚合分组，选中某层不选更深层即命中该层及以下全部条目
+            addGroupKey(groups, top, "", "", "", key);
+            if (!sub.isEmpty()) addGroupKey(groups, top, sub, "", "", key);
+            if (!sub.isEmpty() && !sub2.isEmpty()) addGroupKey(groups, top, sub, sub2, "", key);
+            if (!sub.isEmpty() && !sub2.isEmpty() && !sub3.isEmpty()) addGroupKey(groups, top, sub, sub2, sub3, key);
         }
 
-        Map<String, List<String>> subLists = new LinkedHashMap<>();
-        for (Map.Entry<String, LinkedHashSet<String>> entry : subs.entrySet()) {
-            subLists.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        return new Layout(stubs, groups, chunks, links, new ArrayList<>(tops),
+                toListMap(subs), toListMap(subs2), toListMap(subs3));
+    }
+
+    private static Map<String, List<String>> toListMap(Map<String, LinkedHashSet<String>> source) {
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        for (Map.Entry<String, LinkedHashSet<String>> entry : source.entrySet()) {
+            result.put(entry.getKey(), new ArrayList<>(entry.getValue()));
         }
-        return new Layout(stubs, groups, chunks, links, new ArrayList<>(tops), subLists);
+        return result;
     }
 
     public long revision() { return revision; }
@@ -205,6 +238,8 @@ public final class ShopCatalogSnapshot {
     public ShopCatalogManifest manifest() { return manifest; }
     public List<String> topCategories() { return layout.topCategories(); }
     public List<String> subCategories(String top) { return layout.subCategories(top); }
+    public List<String> subCategories2(String top, String sub) { return layout.subCategories2(top, sub); }
+    public List<String> subCategories3(String top, String sub, String sub2) { return layout.subCategories3(top, sub, sub2); }
 
     public ShopEntry resolve(long entryKey) {
         return entriesByKey.get(entryKey);
@@ -228,7 +263,7 @@ public final class ShopCatalogSnapshot {
     }
 
     public List<ShopEntry> entriesOfGroup(String top, String sub) {
-        List<Long> keys = layout.groupKeys(top, sub);
+        List<Long> keys = layout.groupKeys(top, sub, "", "");
         if (keys.isEmpty()) return List.of();
         List<ShopEntry> result = new ArrayList<>(keys.size());
         for (Long key : keys) {
@@ -242,22 +277,34 @@ public final class ShopCatalogSnapshot {
         return payloadChunks.getOrDefault(chunkId, List.of());
     }
 
-    private static void addGroupKey(Map<String, List<Long>> groups, String top, String sub, long key) {
-        groups.computeIfAbsent(groupKey(top, sub), ignored -> new ArrayList<>()).add(key);
+    private static void addGroupKey(Map<String, List<Long>> groups, String top, String sub, String sub2, String sub3, long key) {
+        groups.computeIfAbsent(groupKey(top, sub, sub2, sub3), ignored -> new ArrayList<>()).add(key);
     }
 
-    private static String groupKey(String top, String sub) {
+    private static String groupKey(String top, String sub, String sub2, String sub3) {
+        return (top == null ? "" : top) + '\u0000' + (sub == null ? "" : sub)
+                + '\u0000' + (sub2 == null ? "" : sub2) + '\u0000' + (sub3 == null ? "" : sub3);
+    }
+
+    private static String pathKey(String top, String sub) {
         return (top == null ? "" : top) + '\u0000' + (sub == null ? "" : sub);
     }
 
-    private static String categoryTop(String category) {
-        int split = category == null ? -1 : category.indexOf('/');
-        return split < 0 ? (category == null ? ShopEntry.DEFAULT_CATEGORY : category) : category.substring(0, split);
+    private static String pathKey(String top, String sub, String sub2) {
+        return pathKey(top, sub) + '\u0000' + (sub2 == null ? "" : sub2);
     }
 
-    private static String categorySub(String category) {
-        int split = category == null ? -1 : category.indexOf('/');
-        return split < 0 ? "" : category.substring(split + 1);
+    /**
+     * 分类字符串按 "/" 最多拆 4 级：{@code category.split("/", 4)}，第 4 段吸收更深层剩余的全部文本
+     * （含其中的 "/"）——嵌套上限 4 层是本次需求的硬约束，超出的部分不再继续拆分，整体并入第 4 级标签。
+     * 返回定长 4 元数组，多余层级补空串；category 为空/空白按 {@link ShopEntry#DEFAULT_CATEGORY} 处理。
+     */
+    private static String[] splitCategoryPath(String category) {
+        String c = (category == null || category.isBlank()) ? ShopEntry.DEFAULT_CATEGORY : category;
+        String[] parts = c.split("/", 4);
+        String[] path = new String[4];
+        for (int i = 0; i < 4; i++) path[i] = i < parts.length ? parts[i] : "";
+        return path;
     }
 
     private static Map<String, List<Long>> immutableListMap(Map<String, List<Long>> source) {

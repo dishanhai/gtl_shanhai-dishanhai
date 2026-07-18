@@ -298,6 +298,48 @@ public class ShanhaiNetwork {
                 PatternSourceResponsePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        // 会员中心（会员购买 + 银行存/贷）追加注册，避免移动现有消息 ID
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopMembershipBuyPacket.class,
+                ShopMembershipBuyPacket::encode,
+                ShopMembershipBuyPacket::new,
+                ShopMembershipBuyPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopBankActionPacket.class,
+                ShopBankActionPacket::encode,
+                ShopBankActionPacket::new,
+                ShopBankActionPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopBankQueryRequestPacket.class,
+                ShopBankQueryRequestPacket::encode,
+                ShopBankQueryRequestPacket::new,
+                ShopBankQueryRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopBankQueryPacket.class,
+                ShopBankQueryPacket::encode,
+                ShopBankQueryPacket::new,
+                ShopBankQueryPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        // 分类页签拖拽排序追加注册，避免移动现有消息 ID
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopCategoryReorderPacket.class,
+                ShopCategoryReorderPacket::encode,
+                ShopCategoryReorderPacket::new,
+                ShopCategoryReorderPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         RecipeSyncPacket.init();
     }
 

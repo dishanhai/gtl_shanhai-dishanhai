@@ -73,6 +73,14 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.LongValue shopRewardRollCap;
         /** 山海商店 — AE 模式下是否禁止把购买/兑换得到的物品注入 AE（只拉取/检索，不注入） */
         public ForgeConfigSpec.BooleanValue shopAeDeliverDisabled;
+        /** 山海商店 — 出售回收价占买价的百分比（价差，防买卖零损耗套利） */
+        public ForgeConfigSpec.IntValue shopSellRatioPercent;
+        /** 山海商店银行 — 定期存款每小时计息基点（万分之N，10000=100%/小时） */
+        public ForgeConfigSpec.IntValue shopBankDepositRateBpPerHour;
+        /** 山海商店银行 — 贷款每小时计息基点（万分之N） */
+        public ForgeConfigSpec.IntValue shopBankLoanRateBpPerHour;
+        /** 山海商店银行 — 单玩家最大欠款上限（星火） */
+        public ForgeConfigSpec.LongValue shopBankMaxLoanSpark;
         /** 运行期配方查找缓存 — 是否统计 hit/miss/negativeHit/clear 次数（默认关闭，避免每 tick 统计开销） */
         public ForgeConfigSpec.BooleanValue runtimeRecipeCacheDiagnostics;
         /** KJS 配方库磁盘缓存 — 是否启用启动期缓存优化 */
@@ -210,6 +218,24 @@ public final class DShanhaiConfig {
                              "true = AE 模式只用来拉取材料付款/检索库存，购买完成后物品一律正常交付给玩家",
                              "（进背包，装不下或总量达标按 sdaPackThreshold 打包超级磁盘阵列——SDA 打包规则不受此项影响）")
                     .define("aeDeliverDisabled", false);
+            shopSellRatioPercent = builder
+                    .comment("山海商店：出售商品能拿回买价的百分比（默认 70，即卖出价=买价×70%）",
+                             "买卖价差防止「买了立刻卖回零损耗」的套利；100=无价差（等价旧行为）")
+                    .defineInRange("sellRatioPercent", 70, 1, 100);
+            builder.pop();
+
+            builder.push("shop_bank");
+            shopBankDepositRateBpPerHour = builder
+                    .comment("山海商店银行：定期存款每小时计息基点（万分之N，默认 5 ≈ 0.05%/小时，约 1.2%/天）",
+                             "线性单利，按 System.currentTimeMillis() 惰性结算（存/取/查询时结一次，无独立 tick 调度器）")
+                    .defineInRange("depositRateBpPerHour", 5, 0, 10_000);
+            shopBankLoanRateBpPerHour = builder
+                    .comment("山海商店银行：贷款每小时计息基点（万分之N，默认 15 ≈ 0.15%/小时，约 3.6%/天）",
+                             "刻意高于存款利率吃利差；欠款只会累积，本模组不做强制追讨/抵押没收，靠数字倒逼玩家自觉还款")
+                    .defineInRange("loanRateBpPerHour", 15, 0, 10_000);
+            shopBankMaxLoanSpark = builder
+                    .comment("山海商店银行：单玩家最大欠款上限（星火），达到上限后借不出新的（默认 1亿）")
+                    .defineInRange("maxLoanSpark", 100_000_000L, 0L, Long.MAX_VALUE);
             builder.pop();
 
             builder.push("runtime_recipe_cache");

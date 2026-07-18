@@ -9,8 +9,9 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 /**
- * 客户端聊天镜像：把带商店/货币中心前缀（{@code [山海商店]} / {@code [商店]} / {@code [货币中心]}）
- * 的系统消息，按前缀路由镜像进对应屏幕（{@link ShopScreen} / {@link CurrencyAtmScreen}）的实时横幅。
+ * 客户端聊天镜像：把带商店/货币中心/会员中心前缀（{@code [山海商店]} / {@code [商店]} /
+ * {@code [货币中心]} / {@code [会员中心]} / {@code [山海银行]}）的系统消息，按前缀路由镜像进
+ * 对应屏幕（{@link ShopScreen} / {@link CurrencyAtmScreen} / {@link ShopMembershipScreen}）的实时横幅。
  * 聊天框照常保留，横幅仅在对应界面打开时可见。
  *
  * <p>零改服务端：反馈消息本就带统一前缀，这里用前缀匹配统一接管，一处不漏。
@@ -32,6 +33,8 @@ public final class ShopChatMirror {
             ShopScreen.showMessage(msg);
         } else if (plain.contains("[货币中心]")) {
             CurrencyAtmScreen.showMessage(msg);
+        } else if (plain.contains("[会员中心]") || plain.contains("[山海银行]")) {
+            ShopMembershipScreen.showMessage(msg);
         }
     }
 }

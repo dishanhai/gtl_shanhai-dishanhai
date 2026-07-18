@@ -23,6 +23,7 @@ public final class ClientWalletAccount {
     private static Map<String, Long> periodAnchors = new LinkedHashMap<>();
     private static BigInteger wirelessEu = BigInteger.ZERO; // 玩家绑定的无线电网 EU 余额（gtladditions/gtmthings）
     private static boolean hasBoundAeNetwork = false; // 玩家当前是否有绑定的在线 AE 网络（商店终端/FTBQ提交器，见 ShopAeNetwork）
+    private static int memberTier = -1; // 付费会员档位（-1=未购买），永久买断，见 ShopMembership
     private static boolean synced = false;
 
     private ClientWalletAccount() {}
@@ -30,14 +31,20 @@ public final class ClientWalletAccount {
     /** 应用服务端全量快照（权威覆盖）。 */
     public static void apply(Map<ResourceLocation, BigInteger> newCurrencies, BigInteger newDigital,
                               Map<String, Long> newPurchaseCounts, Map<String, Long> newPeriodAnchors,
-                              BigInteger newWirelessEu, boolean newHasBoundAeNetwork) {
+                              BigInteger newWirelessEu, boolean newHasBoundAeNetwork, int newMemberTier) {
         currencies = newCurrencies != null ? new LinkedHashMap<>(newCurrencies) : new LinkedHashMap<>();
         digital = newDigital != null ? newDigital : BigInteger.ZERO;
         purchaseCounts = newPurchaseCounts != null ? new LinkedHashMap<>(newPurchaseCounts) : new LinkedHashMap<>();
         periodAnchors = newPeriodAnchors != null ? new LinkedHashMap<>(newPeriodAnchors) : new LinkedHashMap<>();
         wirelessEu = newWirelessEu != null ? newWirelessEu : BigInteger.ZERO;
         hasBoundAeNetwork = newHasBoundAeNetwork;
+        memberTier = newMemberTier;
         synced = true;
+    }
+
+    /** 付费会员档位（-1=未购买任何档位），见 {@link com.dishanhai.gt_shanhai.common.shop.ShopMembership}。 */
+    public static int getMemberTier() {
+        return memberTier;
     }
 
     /** 某商品条目的已购买次数（key 见 {@code WalletAccountAPI#purchaseKey}），未同步/未买过为 0。 */

@@ -15,18 +15,20 @@ item_ids:
   - dishanhai:osmium_coin
   - dishanhai:naquadah_coin
   - dishanhai:neutronium_coin
-  - dishanhai:magmatter_coin
-  - dishanhai:magnetohydrodynamicallyconstrainedstarmatter_coin
-  - dishanhai:primordialmatter_coin
+  - dishanhai:degenerate_rhenium_coin
+  - dishanhai:vibranium_coin
   - dishanhai:spacetime_coin
-  - dishanhai:transcendentmetal_coin
-  - dishanhai:cosmic_coin
-  - dishanhai:neutron_coin
-  - dishanhai:eternity_coin
-  - dishanhai:chaos_coin
-  - dishanhai:infinite_coin
-  - dishanhai:star_gate_crystal_slurry_coin
   - dishanhai:coin_secondary
+  - dishanhai:neutron_coin
+  - dishanhai:infinite_coin
+  - dishanhai:transcendentmetal_coin
+  - dishanhai:chaos_coin
+  - dishanhai:cosmic_coin
+  - dishanhai:magmatter_coin
+  - dishanhai:primordialmatter_coin
+  - dishanhai:eternity_coin
+  - dishanhai:magnetohydrodynamicallyconstrainedstarmatter_coin
+  - dishanhai:star_gate_crystal_slurry_coin
   - dishanhai:stupid_coin
   - dishanhai:sadbapycat_token
 ---
@@ -74,21 +76,23 @@ item_ids:
 * <ItemLink id="dishanhai:osmium_coin" />：锇GT币
 * <ItemLink id="dishanhai:naquadah_coin" />：硅岩GT币
 * <ItemLink id="dishanhai:neutronium_coin" />：中子GT币
-* <ItemLink id="dishanhai:magmatter_coin" />：磁物质GT币
-* <ItemLink id="dishanhai:magnetohydrodynamicallyconstrainedstarmatter_coin" />：磁流体约束恒星物质GT币
-* <ItemLink id="dishanhai:primordialmatter_coin" />：流体本源物质币
+* <ItemLink id="dishanhai:degenerate_rhenium_coin" />：简并态铼GT币（UHV）
+* <ItemLink id="dishanhai:vibranium_coin" />：振金GT币（UEV）
 * <ItemLink id="dishanhai:spacetime_coin" />：时空GT币
-* <ItemLink id="dishanhai:transcendentmetal_coin" />：超维度GT币
-* <ItemLink id="dishanhai:cosmic_coin" />：宇宙GT币
+* <ItemLink id="dishanhai:coin_secondary" />：虚无GT币
 * <ItemLink id="dishanhai:neutron_coin" />：宇宙中子GT币
-* <ItemLink id="dishanhai:eternity_coin" />：永恒GT币
-* <ItemLink id="dishanhai:chaos_coin" />：混沌物质币
 * <ItemLink id="dishanhai:infinite_coin" />：无尽GT币
+* <ItemLink id="dishanhai:transcendentmetal_coin" />：超维度GT币
+* <ItemLink id="dishanhai:chaos_coin" />：混沌物质币
+* <ItemLink id="dishanhai:cosmic_coin" />：宇宙GT币
+* <ItemLink id="dishanhai:magmatter_coin" />：磁物质GT币
+* <ItemLink id="dishanhai:primordialmatter_coin" />：流体本源物质币
+* <ItemLink id="dishanhai:eternity_coin" />：永恒GT币
+* <ItemLink id="dishanhai:magnetohydrodynamicallyconstrainedstarmatter_coin" />：磁流体约束恒星物质GT币
 * <ItemLink id="dishanhai:star_gate_crystal_slurry_coin" />：星门水晶浆币（最高档）
 
 #### 其他代币
 
-* <ItemLink id="dishanhai:coin_secondary" />：虚无GT币
 * <ItemLink id="dishanhai:stupid_coin" />：蠢民币
 * <ItemLink id="dishanhai:sadbapycat_token" />：SadBapyCat 代币
 

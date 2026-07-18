@@ -24,6 +24,8 @@ public class ShopEntry {
     private final ShopCost cost;
     /** 商品描述（玩家自定义文案，可空；详情页 / 悬停显示）。 */
     private final String description;
+    /** 配置态限购基准值；-1 = 不限。序列化写这个，不写运行中被扣减后的余量。 */
+    private final long configuredRemainingUses;
     /** 剩余可交易（购买/出售共享）次数；-1 = 不限。非 final：随成交在服务端原地扣减，见 {@link #consumeUses}。 */
     private long remainingUses;
     /** 自定义显示图标（可空/空表列表 = 用商品本身图标）。网格格/详情页取代 {@link #makeGoodsStack} 的图标，
@@ -355,7 +357,9 @@ public class ShopEntry {
         this.category = (category == null || category.isBlank()) ? DEFAULT_CATEGORY : category;
         this.cost = cost == null ? new ShopCost(java.math.BigInteger.ZERO, null, null) : cost;
         this.description = description == null ? "" : description;
-        this.remainingUses = remainingUses < 0L ? -1L : remainingUses;
+        long normalizedRemainingUses = remainingUses < 0L ? -1L : remainingUses;
+        this.configuredRemainingUses = normalizedRemainingUses;
+        this.remainingUses = normalizedRemainingUses;
         if (displayIcons == null || displayIcons.isEmpty()) {
             this.displayIcons = java.util.Collections.emptyList();
         } else {
@@ -507,19 +511,19 @@ public class ShopEntry {
      * 未生效时原样返回 {@link #getCost}，调用方无需先判断 {@link #isDiscountActive}。
      */
     public ShopCost getEffectiveCost() {
-        if (!isDiscountActive()) return cost;
-        java.math.BigInteger mul = java.math.BigInteger.valueOf(100 - discountPercent);
-        java.math.BigInteger hundred = java.math.BigInteger.valueOf(100);
-        java.math.BigInteger newSpark = cost.spark.signum() > 0
-                ? cost.spark.multiply(mul).divide(hundred).max(java.math.BigInteger.ONE) : java.math.BigInteger.ZERO;
-        java.util.LinkedHashMap<ResourceLocation, java.math.BigInteger> newCoins = new java.util.LinkedHashMap<>();
-        for (java.util.Map.Entry<ResourceLocation, java.math.BigInteger> e : cost.coins.entrySet()) {
-            newCoins.put(e.getKey(), e.getValue().multiply(mul).divide(hundred).max(java.math.BigInteger.ONE));
-        }
-        // EU 同星火/币种一样是纯钱包型通道（无取整歧义），一并打折；实物成本（物品/流体）不受影响
-        java.math.BigInteger newEu = cost.eu.signum() > 0
-                ? cost.eu.multiply(mul).divide(hundred).max(java.math.BigInteger.ONE) : java.math.BigInteger.ZERO;
-        return new ShopCost(newSpark, newCoins, cost.physical, newEu);
+        return isDiscountActive() ? cost.scaledTo(100 - discountPercent) : cost;
+    }
+
+    /**
+     * 在限时折扣基础上叠加一档额外折扣（会员累计消费折扣，见 {@link ShopMembership}）：先套用限时折扣，
+     * 再对结果按 {@code extraDiscountPercent} 二次打折——两档折扣顺序相乘而非相加，比单一合并百分比更简单
+     * 也更符合直觉（"7折的基础上再打9折"），封顶 90% 避免叠加出变相免费。
+     * @param extraDiscountPercent 额外折扣百分比（≤0 时等价于 {@link #getEffectiveCost()}，不二次打折）
+     */
+    public ShopCost getEffectiveCost(int extraDiscountPercent) {
+        ShopCost base = getEffectiveCost();
+        if (extraDiscountPercent <= 0) return base;
+        return base.scaledTo(100 - Math.min(extraDiscountPercent, 90));
     }
 
     /** 商品描述（可能为空串）。 */
@@ -530,6 +534,11 @@ public class ShopEntry {
     /** 剩余可交易次数；-1 = 不限。 */
     public long getRemainingUses() {
         return remainingUses;
+    }
+
+    /** 配置文件里的初始限购值；-1 = 不限。 */
+    public long getConfiguredRemainingUses() {
+        return configuredRemainingUses;
     }
 
     /** 是否为限次商品（购买/出售共享同一计数）。 */
@@ -833,26 +842,100 @@ public class ShopEntry {
         return hasMultipleGoods() ? primary + " 等" + goods.size() + "种" : primary;
     }
 
+    /** ExtendedAE 无限元件注册 ID，见 {@link #infinityCellContentIcon(GoodsStack)}。 */
+    private static final ResourceLocation INFINITY_CELL_ID = new ResourceLocation("expatternprovider", "infinity_cell");
+
     /**
-     * 渲染用图标源：配了自定义显示图标优先用它；否则组合商品（≥2 项）取清单前 5 项组成物品图标
-     * （复用 {@link DisplayIcon} 组合渲染，1 主+最多4 附属角标），单商品条目返回空列表——
-     * 调用方按老规矩用 {@link #makeGoodsStack} 走单图标渲染路径，行为与改造前完全一致。
+     * 无限盘（expatternprovider:infinity_cell）内容物解析：从 NBT record 标签读出盘内绑定的物品/流体
+     * 并转成 {@link DisplayIcon}（口径同 {@link com.dishanhai.gt_shanhai.common.misc.SuperDiskArrayTooltipHandler#resolveEntry}），
+     * 不含盘本身角标——单纯"这个盘装的是什么"。非无限盘商品 / 无 record 标签 / 内容物已缺失，返回 null。
+     */
+    private static DisplayIcon infinityCellContentIcon(GoodsStack g) {
+        if (g.isFluid() || !INFINITY_CELL_ID.equals(g.id())) return null;
+        net.minecraft.nbt.CompoundTag nbt = g.nbt();
+        if (nbt == null || !nbt.contains("record", net.minecraft.nbt.Tag.TAG_COMPOUND)) return null;
+        net.minecraft.nbt.CompoundTag record = nbt.getCompound("record");
+        ResourceLocation targetId = ResourceLocation.tryParse(record.getString("id"));
+        if (targetId == null) return null;
+        if ("ae2:f".equals(record.getString("#c"))) {
+            net.minecraft.world.level.material.Fluid fluid = ForgeRegistries.FLUIDS.getValue(targetId);
+            return fluid == null || fluid == net.minecraft.world.level.material.Fluids.EMPTY ? null : DisplayIcon.ofFluid(fluid);
+        }
+        Item item = ForgeRegistries.ITEMS.getValue(targetId);
+        return item == null ? null : DisplayIcon.ofItem(new ItemStack(item));
+    }
+
+    /**
+     * 商品清单单项的展示图标：无限盘（见 {@link #infinityCellContentIcon(GoodsStack)}）解析出内容物图标；
+     * 流体商品用流体图标；普通物品商品保留 NBT 用自身图标；物品缺失（模组卸载）用 FTBQ 缺失占位。
+     * 给「预计获得」预览格、「成分」提示行等按单项展示的场景复用，跟 {@link #effectiveIcons()} 组合渲染
+     * 是同一套 record 解析口径，避免各处各写一套、无限盘图标/名称各自为政（见反馈：组合商品里的无限盘
+     * 之前只有主商品那一项走了内容解析，清单第 2 项起还是显示盘本身通用图标+通用名）。
+     */
+    public static DisplayIcon resolveGoodsContentIcon(GoodsStack g) {
+        if (g.isFluid()) {
+            net.minecraft.world.level.material.Fluid f = g.fluid();
+            return f == net.minecraft.world.level.material.Fluids.EMPTY
+                    ? DisplayIcon.ofItem(missingItemStack(g.id(), 1)) : DisplayIcon.ofFluid(f);
+        }
+        DisplayIcon infinity = infinityCellContentIcon(g);
+        if (infinity != null) return infinity;
+        ItemStack st = (g.id() != null && !ForgeRegistries.ITEMS.containsKey(g.id()))
+                ? missingItemStack(g.id(), g.count()) : g.makeStack();
+        return DisplayIcon.ofItem(st);
+    }
+
+    /**
+     * 商品清单单项的<b>完整</b>展示图标（供「预计获得」这类每项独立占一格、有空间展示细节的场景）：
+     * 无限盘 = 内容物主图标 + 盘本身角标（同 {@link #effectiveIcons()} 单件分支，跟单件详情页一致，
+     * 一眼看出"这是个装了什么的无限元件"而不只是孤零零的内容物）；普通物品/流体 = 单元素列表。
+     * 跟 {@link #resolveGoodsContentIcon(GoodsStack)} 的区别：后者只取内容物这一半，给拼在同一个
+     * 20x20 槽里的多项组合图标（1 主+4 角标）用，容不下再叠一层盘角标。
+     */
+    public static List<DisplayIcon> goodsSlotIcons(GoodsStack g) {
+        DisplayIcon infinity = infinityCellContentIcon(g);
+        return infinity != null ? List.of(infinity, DisplayIcon.ofItem(new ItemStack(g.item())))
+                : List.of(resolveGoodsContentIcon(g));
+    }
+
+    /**
+     * 商品清单单项的展示名：物品保留 NBT 用自身动态 hoverName（无限盘的物品名本就含内容物，会显示成
+     * "无限水元件"这类，不是孤零零的"水"）；流体用流体显示名；缺失（模组卸载）用红字提示，
+     * 口径同 {@link #goodsDisplayName()} 对主商品缺失的处理。供「预计获得」「成分」等按单项展示复用。
+     */
+    public static String goodsSlotDisplayName(GoodsStack g) {
+        if (g.isFluid()) {
+            net.minecraft.world.level.material.Fluid f = g.fluid();
+            if (f == net.minecraft.world.level.material.Fluids.EMPTY) return "§c缺失流体:" + g.id();
+            try {
+                return new net.minecraftforge.fluids.FluidStack(f, 1).getDisplayName().getString();
+            } catch (Exception ignored) {
+                return g.id() == null ? "?" : g.id().getPath();
+            }
+        }
+        if (g.id() != null && !ForgeRegistries.ITEMS.containsKey(g.id())) return "§c缺失物品:" + g.id();
+        return g.makeStack().getHoverName().getString();
+    }
+
+    /**
+     * 渲染用图标源：配了自定义显示图标优先用它；单商品条目若是无限盘，主图标用
+     * {@link #resolveGoodsContentIcon(GoodsStack)} 解析出的内容物、角标用盘本身材质；
+     * 否则组合商品（≥2 项）取清单前 5 项，每项都过 {@link #resolveGoodsContentIcon(GoodsStack)}
+     * 组成物品图标（复用 {@link DisplayIcon} 组合渲染，1 主+最多4 附属角标），都不满足时返回空列表——
+     * 调用方按老规矩用 {@link #makeGoodsStack} 走单图标渲染路径。
      */
     public List<DisplayIcon> effectiveIcons() {
         if (hasCustomIcons()) return displayIcons;
-        if (goods.size() <= 1) return java.util.Collections.emptyList();
+        if (goods.isEmpty()) return java.util.Collections.emptyList();
+        if (goods.size() == 1) {
+            GoodsStack g = goods.get(0);
+            DisplayIcon content = infinityCellContentIcon(g);
+            return content == null ? java.util.Collections.emptyList()
+                    : List.of(content, DisplayIcon.ofItem(new ItemStack(g.item())));
+        }
         List<DisplayIcon> list = new java.util.ArrayList<>(Math.min(goods.size(), 5));
         for (int i = 0; i < goods.size() && i < 5; i++) {
-            GoodsStack g = goods.get(i);
-            if (g.isFluid()) {
-                net.minecraft.world.level.material.Fluid f = g.fluid();
-                list.add(f == net.minecraft.world.level.material.Fluids.EMPTY
-                        ? DisplayIcon.ofItem(missingItemStack(g.id(), 1)) : DisplayIcon.ofFluid(f));
-                continue;
-            }
-            ItemStack st = (g.id() != null && !ForgeRegistries.ITEMS.containsKey(g.id()))
-                    ? missingItemStack(g.id(), g.count()) : g.makeStack();
-            list.add(DisplayIcon.ofItem(st));
+            list.add(resolveGoodsContentIcon(goods.get(i)));
         }
         return list;
     }

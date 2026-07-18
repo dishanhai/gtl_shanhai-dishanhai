@@ -39,7 +39,7 @@ public final class ShopEntryJsonCodec {
             out.addProperty("description", entry.getDescription());
         }
         if (entry.isLimited()) {
-            out.addProperty("limit", entry.getRemainingUses());
+            out.addProperty("limit", entry.getConfiguredRemainingUses());
         }
         out.add("cost", costToJson(entry.getCost()));
         net.minecraft.nbt.CompoundTag nbt = entry.getGoodsNbt();

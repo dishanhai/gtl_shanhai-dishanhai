@@ -22,8 +22,8 @@ class ShopCatalogCodecsTest {
         Method write = codecs.getMethod("writeManifest", FriendlyByteBuf.class, ShopCatalogManifest.class);
         Method read = codecs.getMethod("readManifest", FriendlyByteBuf.class);
         ShopCatalogManifest source = new ShopCatalogManifest(42L, true, List.of(
-                new ShopCatalogManifest.Stub(7L, "无限盘区", "前期", false,
-                        3, "disk", "超级磁盘", List.of("mod:disk"), "stable-7")));
+                new ShopCatalogManifest.Stub(7L, "无限盘区", "前期", "", "", false,
+                        3, "disk", "超级磁盘", List.of("mod:disk"), "stable-7")), java.util.Map.of());
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
 
         write.invoke(null, buffer, source);

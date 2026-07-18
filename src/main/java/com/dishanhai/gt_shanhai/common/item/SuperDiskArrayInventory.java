@@ -239,7 +239,8 @@ public class SuperDiskArrayInventory implements StorageCell {
 
     @Override
     public boolean canFitInsideCell() {
-        return amounts.isEmpty();
+        // SDA 是顶层容器，不能再作为另一个存储单元的子载体；否则挂载扫描会形成递归库存。
+        return false;
     }
 
     /**
@@ -270,6 +271,7 @@ public class SuperDiskArrayInventory implements StorageCell {
         if (what == null || amount <= 0 || !(what instanceof AEItemKey)) return 0L;
         if (readOnlyTemplate && mode == Actionable.MODULATE) return 0L;
         AEItemKey itemKey = (AEItemKey) what;
+        if (itemKey.getItem() instanceof SuperDiskArrayItem) return 0L;
         StorageCell nested = StorageCells.getCellInventory(itemKey.toStack(), null);
         if (nested != null && !nested.canFitInsideCell()) return 0L;
         if (mode == Actionable.MODULATE) {

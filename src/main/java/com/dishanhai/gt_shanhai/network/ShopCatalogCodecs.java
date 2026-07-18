@@ -7,7 +7,9 @@ import io.netty.handler.codec.EncoderException;
 import net.minecraft.network.FriendlyByteBuf;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** 山海商店目录网络格式与解码硬上限；本类只搬运纯字符串/数字，不创建 Minecraft 物品对象。 */
 public final class ShopCatalogCodecs {
@@ -22,6 +24,9 @@ public final class ShopCatalogCodecs {
     public static final int MAX_DISPLAY_NAME_CHARS = 1024;
     public static final int MAX_RESOURCE_ID_CHARS = 256;
     public static final int MAX_STABLE_ID_CHARS = 64;
+    public static final int MAX_CATEGORY_ORDER_KEYS = 4096;
+    public static final int MAX_CATEGORY_ORDER_VALUES = 4096;
+    public static final int MAX_CATEGORY_ORDER_KEY_CHARS = 1024;
 
     private ShopCatalogCodecs() {}
 
@@ -38,6 +43,8 @@ public final class ShopCatalogCodecs {
             buf.writeVarLong(stub.entryKey());
             buf.writeUtf(stub.top(), MAX_CATEGORY_CHARS);
             buf.writeUtf(stub.sub(), MAX_CATEGORY_CHARS);
+            buf.writeUtf(stub.sub2(), MAX_CATEGORY_CHARS);
+            buf.writeUtf(stub.sub3(), MAX_CATEGORY_CHARS);
             buf.writeBoolean(stub.hidden());
             buf.writeVarInt(stub.chunkId());
             buf.writeUtf(stub.linkKey(), MAX_LINK_KEY_CHARS);
@@ -49,6 +56,32 @@ public final class ShopCatalogCodecs {
             }
             buf.writeUtf(stub.stableId(), MAX_STABLE_ID_CHARS);
         }
+        writeCategoryOrder(buf, manifest == null ? Map.of() : manifest.categoryOrder());
+    }
+
+    private static void writeCategoryOrder(FriendlyByteBuf buf, Map<String, List<String>> order) {
+        requireEncodeSize("category order keys", order.size(), MAX_CATEGORY_ORDER_KEYS);
+        buf.writeVarInt(order.size());
+        for (Map.Entry<String, List<String>> entry : order.entrySet()) {
+            buf.writeUtf(entry.getKey() == null ? "" : entry.getKey(), MAX_CATEGORY_ORDER_KEY_CHARS);
+            List<String> values = entry.getValue() == null ? List.of() : entry.getValue();
+            requireEncodeSize("category order values", values.size(), MAX_CATEGORY_ORDER_VALUES);
+            buf.writeVarInt(values.size());
+            for (String v : values) buf.writeUtf(v == null ? "" : v, MAX_CATEGORY_CHARS);
+        }
+    }
+
+    private static Map<String, List<String>> readCategoryOrder(FriendlyByteBuf buf) {
+        int keyCount = readBoundedCount(buf, "category order keys", MAX_CATEGORY_ORDER_KEYS);
+        Map<String, List<String>> order = new LinkedHashMap<>();
+        for (int i = 0; i < keyCount; i++) {
+            String key = buf.readUtf(MAX_CATEGORY_ORDER_KEY_CHARS);
+            int valueCount = readBoundedCount(buf, "category order values", MAX_CATEGORY_ORDER_VALUES);
+            List<String> values = new ArrayList<>(valueCount);
+            for (int v = 0; v < valueCount; v++) values.add(buf.readUtf(MAX_CATEGORY_CHARS));
+            order.put(key, values);
+        }
+        return order;
     }
 
     public static ShopCatalogManifest readManifest(FriendlyByteBuf buf) {
@@ -60,6 +93,8 @@ public final class ShopCatalogCodecs {
             long entryKey = buf.readVarLong();
             String top = buf.readUtf(MAX_CATEGORY_CHARS);
             String sub = buf.readUtf(MAX_CATEGORY_CHARS);
+            String sub2 = buf.readUtf(MAX_CATEGORY_CHARS);
+            String sub3 = buf.readUtf(MAX_CATEGORY_CHARS);
             boolean hidden = buf.readBoolean();
             int chunkId = buf.readVarInt();
             String linkKey = buf.readUtf(MAX_LINK_KEY_CHARS);
@@ -70,9 +105,10 @@ public final class ShopCatalogCodecs {
             for (int g = 0; g < goodsCount; g++) goodsIds.add(buf.readUtf(MAX_RESOURCE_ID_CHARS));
             String stableId = buf.readUtf(MAX_STABLE_ID_CHARS);
             stubs.add(new ShopCatalogManifest.Stub(
-                    entryKey, top, sub, hidden, chunkId, linkKey, displayName, goodsIds, stableId));
+                    entryKey, top, sub, sub2, sub3, hidden, chunkId, linkKey, displayName, goodsIds, stableId));
         }
-        return new ShopCatalogManifest(revision, ready, stubs);
+        Map<String, List<String>> categoryOrder = readCategoryOrder(buf);
+        return new ShopCatalogManifest(revision, ready, stubs, categoryOrder);
     }
 
     public static void writePayloads(FriendlyByteBuf buf, List<ShopCatalogEntryPayload> payloads) {

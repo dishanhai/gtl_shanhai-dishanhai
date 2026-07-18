@@ -27,12 +27,13 @@ class ShopCatalogSnapshotTest {
         Method layoutMethod = snapshotType.getMethod("layout", List.class, int.class, int.class);
         Object layout = layoutMethod.invoke(null, descriptors, 50, 2);
 
-        Method groupKeys = layout.getClass().getMethod("groupKeys", String.class, String.class);
+        Method groupKeys = layout.getClass().getMethod("groupKeys",
+                String.class, String.class, String.class, String.class);
         Method chunks = layout.getClass().getMethod("chunks");
         Method linkKeys = layout.getClass().getMethod("linkKeyToEntryKey");
 
-        assertEquals(List.of(0L, 1L), groupKeys.invoke(layout, "无限盘区", "前期"));
-        assertEquals(List.of(), groupKeys.invoke(layout, "隐藏", ""));
+        assertEquals(List.of(0L, 1L), groupKeys.invoke(layout, "无限盘区", "前期", "", ""));
+        assertEquals(List.of(), groupKeys.invoke(layout, "隐藏", "", "", ""));
         assertEquals(3, ((List<?>) chunks.invoke(layout)).size());
         assertEquals(0L, ((Map<?, ?>) linkKeys.invoke(layout)).get("a"));
     }

@@ -104,14 +104,17 @@ public final class CurrencyRateConfig {
         // 基础货币
         long[] tierBase = {1, 1, 4, 16, 64, 256};
         String[] base = {"dog_coins", "copper_coin", "cupronickel_coin", "silver_coin", "gold_coin", "platinum_coin"};
-        // 高阶货币（自 osmium 起 ×4 阶梯）
-        // 注意：星门水晶浆币为最高档，排在最后（无尽币退到它前一档）
-        String[] high = {"osmium_coin", "naquadah_coin", "neutronium_coin", "magmatter_coin",
-                "magnetohydrodynamicallyconstrainedstarmatter_coin", "primordialmatter_coin", "spacetime_coin",
-                "transcendentmetal_coin", "cosmic_coin", "neutron_coin", "eternity_coin", "chaos_coin",
-                "infinite_coin", "star_gate_crystal_slurry_coin"};
-        // 其他代币（默认 1）
-        String[] other = {"coin_secondary", "stupid_coin", "sadbapycat_token"};
+        // 高阶货币（自 osmium 起 ×4 阶梯，顺序按用户指定的最终排列；星门水晶浆币为最高档）
+        // UHV/UEV 补档（简并态铼/振金）插在 neutronium(中子GT币) 与 spacetime(时空GT币) 之间；
+        // 虚无GT币(coin_secondary) 从"其他代币"并入主阶梯，排在时空GT币之后
+        String[] high = {"osmium_coin", "naquadah_coin", "neutronium_coin",
+                "degenerate_rhenium_coin", "vibranium_coin",
+                "spacetime_coin", "coin_secondary", "neutron_coin", "infinite_coin",
+                "transcendentmetal_coin", "chaos_coin", "cosmic_coin", "magmatter_coin",
+                "primordialmatter_coin", "eternity_coin",
+                "magnetohydrodynamicallyconstrainedstarmatter_coin", "star_gate_crystal_slurry_coin"};
+        // 其他代币（默认 1，纯彩蛋/无经济价值）
+        String[] other = {"stupid_coin", "sadbapycat_token"};
 
         JsonObject root = new JsonObject();
         for (int i = 0; i < base.length; i++) root.addProperty("dishanhai:" + base[i], tierBase[i]);

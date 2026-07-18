@@ -54,8 +54,8 @@ class ShopCatalogPacketCodecTest {
         Class<?> type = Class.forName(
                 "com.dishanhai.gt_shanhai.network.ShopCatalogManifestPacket");
         ShopCatalogManifest manifest = new ShopCatalogManifest(15L, true, List.of(
-                new ShopCatalogManifest.Stub(7L, "材料", "矿物", false,
-                        2, "iron", "铁锭", List.of("minecraft:iron_ingot"), "stable-7")));
+                new ShopCatalogManifest.Stub(7L, "材料", "矿物", "", "", false,
+                        2, "iron", "铁锭", List.of("minecraft:iron_ingot"), "stable-7")), java.util.Map.of());
         Object source = type.getConstructor(ShopCatalogManifest.class).newInstance(manifest);
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
         type.getMethod("encode", FriendlyByteBuf.class).invoke(source, buffer);

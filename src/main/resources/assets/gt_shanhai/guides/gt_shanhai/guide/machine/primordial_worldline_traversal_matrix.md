@@ -1,12 +1,12 @@
 ---
 navigation:
-  title: 原初世线穿矩阵
+  title: 原初世线穿刺矩阵
   parent: machine/primordial_index.md
   position: 21
 categories: [gt_shanhai, primordial]
 item_ids: [gt_shanhai:primordial_worldline_traversal_matrix]
 ---
-# 原初世线穿矩阵
+# 原初世线穿刺矩阵
 > <ItemLink id="gt_shanhai:primordial_worldline_traversal_matrix" />\
 > 处理魔力生成、宇宙探测、衰变、中子活化与基岩采掘配方。沿用原初引擎的模块并行、线程倍率与无线供电体系。
 

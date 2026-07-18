@@ -34,10 +34,12 @@ import java.util.function.Consumer;
  * 多选资源选择器（山海署名，客户端，自建）。
  *
  * <p>浏览模式：<b>物品</b>（全注册表）、<b>物品栏</b>（玩家背包实物，<b>保留 NBT</b>，
- * 便捷取手上带 NBT 的物品）、<b>JEI书签</b>（当前 JEI 书签列表里的物品类条目，见 {@link JeiBookmarkBridge}，
- * 未装 JEI 时为空）、<b>流体</b>（全注册表）。右侧「已选清单」每项独立数量。
- * 左键网格=加入/选中，右键网格=加入/移除切换。物品与流体同一会话可混选；确认按类型分发：
- * 物品→{@code onAddItem}（保 NBT），流体→{@code onAddFluid}。</p>
+ * 便捷取手上带 NBT 的物品）、<b>JEI书签</b>（当前 JEI 书签列表，物品+流体混在同一页不分流，
+ * 见 {@link JeiBookmarkBridge}，未装 JEI 时为空）、<b>流体</b>（全注册表）。右侧「已选清单」每项独立数量。
+ * 左键网格=加入/选中，右键网格=加入/移除切换，<b>Ctrl+Shift+左键</b>=直接把指向该资源的「无限胞」
+ * （{@code expatternprovider:infinity_cell}，record NBT 绑定物品/流体 id，参考 JEI 内 Ctrl+左键"作弊获取无限胞"
+ * 的目标构造方式）写入已选清单（见 {@link #addInfinityCellFromGrid}；不走 JEI 给予协议，纯本地构造）。
+ * 物品与流体同一会话可混选；确认按类型分发：物品→{@code onAddItem}（保 NBT），流体→{@code onAddFluid}。</p>
  *
  * <p>由 {@link ShopEntryEditScreen} 的「物品排 +」「流体排 +」打开，取代原 FTBLib 单选。
  * 关屏后返回编辑器（其 init 重新按草稿布局，显示新加入项）。</p>
@@ -62,6 +64,8 @@ public class MultiPickerScreen extends ScaledScreen {
     private static final int TARGET_H = 380;
     private static final int SLOT = 20;
     private static final int PITCH = 22;
+    /** ExtendedAE 无限胞物品 id：Ctrl+Shift+左键网格时直接写入已选清单的目标物品，见 addInfinityCellFromGrid。 */
+    private static final ResourceLocation INFINITY_CELL_ID = ResourceLocation.tryParse("expatternprovider:infinity_cell");
     private static final int SEL_ROW_H = 20;
     private static final int SCROLLBAR_W = 4;
     // 数量框快速填写：跟 ShopScreen 购买页同款三排步进按钮（+1/+10/+100/+1k、-1/-10/-100/-1k、×10/×100/÷10/÷100），
@@ -125,7 +129,11 @@ public class MultiPickerScreen extends ScaledScreen {
     private List<String> invNames = new ArrayList<>();
     private List<String> invTags = new ArrayList<>();
     private List<Long> invCounts = new ArrayList<>();        // 与 invStacks 同下标：该物品+NBT 在背包+副手里的实际总数
-    private List<ItemStack> bookmarkStacks = new ArrayList<>(); // JEI书签模式：当前书签列表里的物品类条目（见 JeiBookmarkBridge）
+    // JEI书签模式：物品+流体混在同一页，不分流——索引空间按"先物品后流体"拼接：
+    // [0, bookmarkStacks.size()) 是物品，[bookmarkStacks.size(), bookmarkStacks.size()+bookmarkFluids.size()) 是流体，
+    // 见 buildBookmarks/isBookmarkFluidIndex/curFluid。bookmarkNames/bookmarkTags 是两段拼接后的合并列表。
+    private List<ItemStack> bookmarkStacks = new ArrayList<>();
+    private List<Fluid> bookmarkFluids = new ArrayList<>();
     private List<String> bookmarkNames = new ArrayList<>();
     private List<String> bookmarkTags = new ArrayList<>();
     private List<ItemStack> restrictedStacks = new ArrayList<>(); // 受限模式：固定候选物品
@@ -399,8 +407,14 @@ public class MultiPickerScreen extends ScaledScreen {
      * 未装 JEI/书签为空时恒返回空列表）。跟物品栏模式一样只在开屏时读一次快照，不追踪会话内的
      * 书签增删——真要看最新书签，关屏重开即可，跟物品栏模式的取舍一致。
      */
+    /**
+     * JEI书签模式数据：物品+流体混在同一页，不分流。索引空间按"先物品后流体"拼接
+     * （见字段注释/{@link #isBookmarkFluidIndex}/{@link #curFluid}），bookmarkNames/bookmarkTags
+     * 是两段拼接后的合并列表，跟 bookmarkStacks+bookmarkFluids 顺序对齐。
+     */
     private void buildBookmarks() {
         bookmarkStacks = new ArrayList<>();
+        bookmarkFluids = new ArrayList<>();
         bookmarkNames = new ArrayList<>();
         bookmarkTags = new ArrayList<>();
         for (ItemStack st : JeiBookmarkBridge.getBookmarkedItemStacks()) {
@@ -410,6 +424,25 @@ public class MultiPickerScreen extends ScaledScreen {
             bookmarkNames.add((st.getHoverName().getString() + " " + id).toLowerCase(Locale.ROOT));
             bookmarkTags.add(tagStringOf(st.getItem()));
         }
+        for (Fluid f : JeiBookmarkBridge.getBookmarkedFluids()) {
+            if (f == null || f == Fluids.EMPTY) continue;
+            ResourceLocation id = ForgeRegistries.FLUIDS.getKey(f);
+            String nm = FluidStack.create(f, 1000).getName().getString();
+            bookmarkFluids.add(f);
+            bookmarkNames.add((nm + " " + id).toLowerCase(Locale.ROOT));
+            bookmarkTags.add(tagStringOf(f));
+        }
+    }
+
+    /** BOOKMARK 模式下第 i 项是否落在流体段（书签列表"先物品后流体"拼接，见 buildBookmarks）。 */
+    private boolean isBookmarkFluidIndex(int i) {
+        return mode == Mode.BOOKMARK && i >= bookmarkStacks.size();
+    }
+
+    /** 当前索引对应的流体："流体"模式直接查全注册表；BOOKMARK 模式落在流体段时查 bookmarkFluids 对应偏移。 */
+    private Fluid curFluid(int resIdx) {
+        if (isBookmarkFluidIndex(resIdx)) return bookmarkFluids.get(resIdx - bookmarkStacks.size());
+        return ALL_FLUIDS.get(resIdx);
     }
 
     @Override
@@ -467,18 +500,18 @@ public class MultiPickerScreen extends ScaledScreen {
         return switch (mode) {
             case ITEM -> itemCacheReady ? ALL_ITEM_NAMES : List.of(); // 后台还没建完时按"暂无条目"处理，见 buildItemCacheAsync
             case INVENTORY -> invNames;
-            case BOOKMARK -> bookmarkNames;
+            case BOOKMARK -> bookmarkNames; // 物品+流体合并列表，见 buildBookmarks
             case FLUID -> ALL_FLUID_NAMES;
             case TEXTURE -> ALL_TEXTURE_NAMES;
         };
     }
 
-    /** 当前模式下网格第 resIdx 项的物品原型（仅物品/物品栏/JEI书签/受限模式有效）。 */
+    /** 当前模式下网格第 resIdx 项的物品原型（仅物品/物品栏/受限模式，或 BOOKMARK 模式落在物品段时有效）。 */
     private ItemStack gridItem(int resIdx) {
         if (restrictedMode) return restrictedStacks.get(resIdx);
         return switch (mode) {
             case INVENTORY -> invStacks.get(resIdx);
-            case BOOKMARK -> bookmarkStacks.get(resIdx);
+            case BOOKMARK -> bookmarkStacks.get(resIdx); // 调用方须先用 isBookmarkFluidIndex 排除流体段
             default -> ALL_ITEMS.get(resIdx);
         };
     }
@@ -548,7 +581,7 @@ public class MultiPickerScreen extends ScaledScreen {
                 return tags != null && tags.contains(rest);
             }
             case '$': { // 提示文本（流体/贴图无 tooltip 概念，退化为按名）
-                if (mode == Mode.FLUID || mode == Mode.TEXTURE) return name.contains(rest);
+                if (mode == Mode.FLUID || mode == Mode.TEXTURE || isBookmarkFluidIndex(i)) return name.contains(rest);
                 String tip = curTooltip(i);
                 return tip != null && tip.contains(rest);
             }
@@ -567,7 +600,7 @@ public class MultiPickerScreen extends ScaledScreen {
         return switch (mode) {
             case ITEM -> ALL_ITEM_TAGS.get(i);
             case INVENTORY -> invTags.get(i);
-            case BOOKMARK -> bookmarkTags.get(i);
+            case BOOKMARK -> bookmarkTags.get(i); // 物品+流体合并列表，见 buildBookmarks
             case FLUID -> ALL_FLUID_TAGS.get(i);
             case TEXTURE -> "";
         };
@@ -575,15 +608,15 @@ public class MultiPickerScreen extends ScaledScreen {
 
     /** 第 i 项的提示文本（小写，仅物品）。全注册表走静态懒缓存，物品栏/受限模式列表小，会话内缓存即可。 */
     private String curTooltip(int i) {
-        if (mode == Mode.FLUID || mode == Mode.TEXTURE) return null;
+        if (mode == Mode.FLUID || mode == Mode.TEXTURE || isBookmarkFluidIndex(i)) return null;
         if (!restrictedMode && mode == Mode.ITEM) return allItemTooltip(i);
         return tooltipCache.computeIfAbsent(i, idx -> tooltipOf(gridItem(idx)));
     }
 
     /** 第 i 项的物品/流体/贴图 id（不含显示名，小写）。 */
     private String curIdOnly(int i) {
-        if (mode == Mode.FLUID) {
-            ResourceLocation id = ForgeRegistries.FLUIDS.getKey(ALL_FLUIDS.get(i));
+        if (mode == Mode.FLUID || isBookmarkFluidIndex(i)) {
+            ResourceLocation id = ForgeRegistries.FLUIDS.getKey(curFluid(i));
             return id == null ? "" : id.toString().toLowerCase(Locale.ROOT);
         }
         if (mode == Mode.TEXTURE) {
@@ -632,7 +665,7 @@ public class MultiPickerScreen extends ScaledScreen {
 
         String headerHint = restrictedMode
                 ? "§6多选货币  §7左键=加入/选中 · 右键=加入/移除 · 仅列出已配置货币"
-                : "§6多选资源  §7左键=加入/选中 · 右键=加入/移除 · 物品栏模式取实物(带NBT)";
+                : "§6多选资源  §7左键=加入/选中 · 右键=加入/移除 · 物品栏模式取实物(带NBT) · Ctrl+Shift+左键=无限胞";
         g.drawString(this.font, headerHint, left + 10, top + 5, GOLD, true);
 
         // 浏览模式切换按钮（搜索框右侧，点一下循环：物品→物品栏→流体；受限模式无此按钮）
@@ -655,7 +688,7 @@ public class MultiPickerScreen extends ScaledScreen {
         return switch (mode) {
             case ITEM -> "§a物品▾";
             case INVENTORY -> "§e物品栏▾";
-            case BOOKMARK -> "§6书签▾";
+            case BOOKMARK -> "§6书签▾"; // 物品+流体混在同一页，不分流
             case FLUID -> "§b流体▾";
             case TEXTURE -> "§d贴图▾";
         };
@@ -751,7 +784,6 @@ public class MultiPickerScreen extends ScaledScreen {
         int maxScroll = Math.max(0, (int) Math.ceil(total / (double) cols) - rows);
         if (gridScroll > maxScroll) gridScroll = maxScroll;
         int start = gridScroll * cols;
-        boolean fluidMode = mode == Mode.FLUID;
         boolean textureMode = mode == Mode.TEXTURE;
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
@@ -760,11 +792,13 @@ public class MultiPickerScreen extends ScaledScreen {
                 int x = gridX + c * PITCH;
                 int y = gridY + r * PITCH;
                 int resIdx = filtered.get(idx);
+                // BOOKMARK 模式物品+流体混页不分流，每格单独判断落在哪一段（见 isBookmarkFluidIndex）
+                boolean fluidHere = mode == Mode.FLUID || isBookmarkFluidIndex(resIdx);
                 boolean hv = GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT);
                 boolean chosen = findSelected(resIdx) >= 0;
                 EditorWidgets.checkerSlot(g, x, y, hv);
-                if (fluidMode) {
-                    EditorWidgets.fluidIcon(g, x + 2, y + 2, 16, ALL_FLUIDS.get(resIdx));
+                if (fluidHere) {
+                    EditorWidgets.fluidIcon(g, x + 2, y + 2, 16, curFluid(resIdx));
                 } else if (textureMode) {
                     EditorWidgets.textureThumb(g, x + 2, y + 2, 16, ALL_TEXTURES.get(resIdx));
                 } else {
@@ -779,7 +813,7 @@ public class MultiPickerScreen extends ScaledScreen {
                     g.drawString(this.font, "§a✔", x + 13, y + 1, WHITE, false);
                 }
                 if (hv) {
-                    if (fluidMode) hoverFluidTip = List.of(Component.literal(fluidName(ALL_FLUIDS.get(resIdx))));
+                    if (fluidHere) hoverFluidTip = List.of(Component.literal(fluidName(curFluid(resIdx))));
                     else if (textureMode) hoverFluidTip = List.of(Component.literal(ALL_TEXTURES.get(resIdx).toString()));
                     else hoverItem = gridItem(resIdx);
                 }
@@ -971,7 +1005,12 @@ public class MultiPickerScreen extends ScaledScreen {
                 if (idx >= total) return false;
                 int x = gridX + c * PITCH, y = gridY + r * PITCH;
                 if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
-                    onGridPick(filtered.get(idx), btn == 1);
+                    int resIdx = filtered.get(idx);
+                    if (btn == 0 && Screen.hasControlDown() && Screen.hasShiftDown()) {
+                        addInfinityCellFromGrid(resIdx);
+                    } else {
+                        onGridPick(resIdx, btn == 1);
+                    }
                     return true;
                 }
             }
@@ -993,8 +1032,8 @@ public class MultiPickerScreen extends ScaledScreen {
 
     private void addFromGrid(int resIdx) {
         Sel s;
-        if (mode == Mode.FLUID) {
-            Fluid f = ALL_FLUIDS.get(resIdx);
+        if (mode == Mode.FLUID || isBookmarkFluidIndex(resIdx)) {
+            Fluid f = curFluid(resIdx);
             s = new Sel(true, ForgeRegistries.FLUIDS.getKey(f), null, f, 1000L);
         } else if (mode == Mode.TEXTURE) {
             s = Sel.texture(ALL_TEXTURES.get(resIdx));
@@ -1011,6 +1050,56 @@ public class MultiPickerScreen extends ScaledScreen {
         // 新增项滚到可见底部
         int visible = selVisibleRows();
         if (selected.size() > visible) selScroll = selected.size() - visible;
+    }
+
+    /**
+     * Ctrl+Shift+左键网格：不走常规加入/选中，直接把「指向该资源的无限胞」（expatternprovider:infinity_cell，
+     * record NBT 绑定物品/流体 id，构造方式对照 JEI 内 Ctrl+左键"作弊获取无限胞"，见 JeiCopyShortcutHelper#
+     * buildInfinityCellTag）写入已选清单——不走 JEI 的作弊给予协议，纯本地构造一个带 NBT 的真实物品条目，
+     * 跟"物品栏模式取实物"复用同一条已选清单管线。贴图模式没有对应资源 id，直接跳过；ExtendedAE 未装
+     * （registry 查不到该物品）时提示一句，不写入。
+     */
+    private void addInfinityCellFromGrid(int resIdx) {
+        if (mode == Mode.TEXTURE) return;
+        Item cellItem = INFINITY_CELL_ID == null ? null : ForgeRegistries.ITEMS.getValue(INFINITY_CELL_ID);
+        if (cellItem == null) {
+            showClientMessage("§c[山海] 未找到无限胞物品（需要 ExtendedAE），无法写入已选清单");
+            return;
+        }
+
+        net.minecraft.nbt.CompoundTag record = new net.minecraft.nbt.CompoundTag();
+        String displayName;
+        if (mode == Mode.FLUID || isBookmarkFluidIndex(resIdx)) {
+            Fluid f = curFluid(resIdx);
+            ResourceLocation id = ForgeRegistries.FLUIDS.getKey(f);
+            if (id == null) return;
+            record.putString("#c", "ae2:f");
+            record.putString("id", id.toString());
+            displayName = fluidName(f);
+        } else {
+            ItemStack proto = gridItem(resIdx);
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(proto.getItem());
+            if (id == null) return;
+            record.putString("#c", "ae2:i");
+            record.putString("id", id.toString());
+            displayName = proto.getHoverName().getString();
+        }
+        net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
+        tag.put("record", record);
+        ItemStack cellStack = new ItemStack(cellItem);
+        cellStack.setTag(tag);
+
+        Sel s = new Sel(false, ForgeRegistries.ITEMS.getKey(cellItem), cellStack, null, 1L);
+        selected.add(s);
+        setActive(s);
+        int visible = selVisibleRows();
+        if (selected.size() > visible) selScroll = selected.size() - visible;
+        showClientMessage("§a[山海] 已写入已选清单: §e" + cellStack.getHoverName().getString() + "§7（" + displayName + "）");
+    }
+
+    private static void showClientMessage(String message) {
+        var player = Minecraft.getInstance().player;
+        if (player != null) player.displayClientMessage(Component.literal(message), true);
     }
 
     private boolean selListClicked(double mx, double my, int btn) {
@@ -1042,8 +1131,8 @@ public class MultiPickerScreen extends ScaledScreen {
 
     /** 在已选清单里找网格第 resIdx 项：物品按物品+NBT，流体按流体 id，贴图按贴图路径。 */
     private int findSelected(int resIdx) {
-        if (mode == Mode.FLUID) {
-            ResourceLocation id = ForgeRegistries.FLUIDS.getKey(ALL_FLUIDS.get(resIdx));
+        if (mode == Mode.FLUID || isBookmarkFluidIndex(resIdx)) {
+            ResourceLocation id = ForgeRegistries.FLUIDS.getKey(curFluid(resIdx));
             for (int i = 0; i < selected.size(); i++) {
                 Sel s = selected.get(i);
                 if (s.isFluid && s.id != null && s.id.equals(id)) return i;

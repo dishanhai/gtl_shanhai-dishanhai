@@ -13,6 +13,7 @@ import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
 import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopGridViewport;
+import com.dishanhai.gt_shanhai.common.shop.ShopMembership;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
@@ -93,10 +94,38 @@ public class ShopScreen extends ScaledScreen {
 
     private enum Mode { BUY, SELL }
 
-    // 购买/出售 tab + 主/子分类页签：静态=跨界面实例保留，关闭商店再打开继承上次浏览的页/子页，不再每次回到默认页
+    // 购买/出售 tab + 主/子/子子/子子子分类页签（最多嵌套 4 层）：静态=跨界面实例保留，关闭商店再打开继承上次浏览的页/子页，不再每次回到默认页
     private static Mode mode = Mode.BUY;
     private static String selectedTop;
     private static String selectedSub = "";
+    private static String selectedSub2 = "";
+    private static String selectedSub3 = "";
+    // 记住每个父路径下最后浏览的子分类（key=父路径拼接，见 pathKey）：切到别的主分类再切回来，
+    // 恢复原来停留的子页而不是回到全部；见反馈：切页要能带回原子页，不要求全部塌陷
+    private static final Map<String, String> lastChildByPath = new java.util.HashMap<>();
+
+    // 分类页签拖拽排序（仅 canEdit 才能触发，见 beginTabAction）：按下页签先记起点，越过阈值才算
+    // "长按脱离"进入真正的拖拽视觉态，松开时按落点算目标下标发包持久化，见反馈：要能拖到任意位置，
+    // 不只是前移/后移。非拖拽（未越过阈值）松开 = 当普通点击处理，行为等同原来的立即切换。
+    private int dragTabLevel = -1;         // 0=主分类,1=二级,2=三级,3=四级；-1=当前未在拖拽/按下追踪中
+    private String dragTabCategory;        // 正在拖拽/追踪的页签名
+    private double dragTabStartX, dragTabStartY; // 按下时坐标，用于判断是否越过拖拽阈值
+    private boolean dragTabMoving;         // 是否已越过阈值，进入真正拖拽视觉态（页签跟随鼠标、原位置塌陷）
+    private double dragTabMx, dragTabMy;   // 拖拽中的实时鼠标坐标
+    private static final double DRAG_TAB_THRESHOLD = 5.0;
+
+    // 商品卡片拖拽排序（仅 canEdit + 停在具体叶子分类视图 + 未搜索时可用，见 isLeafCategoryView）：
+    // 跟页签拖拽同一套按下/阈值/松开判定，但网格是虚拟滚动视口，做"原位置塌陷+其余格子实时补位"的
+    // 完整重排渲染成本较高，改成更轻量的视觉：原格子照常显示，拖拽中额外画一个跟随光标的浮动图标 +
+    // 高亮当前悬停的目标格子，松开按目标格子换算成"去掉被拖商品后的本地插入下标"发包，
+    // 见 sendCardReorder/ShopConfig#moveEntryToIndex。
+    private long dragCardEntryKey = -1L;   // -1 = 当前未在拖拽/按下追踪中
+    private ShopEntry dragCardEntry;
+    private int dragCardOldIndex = -1;     // 按下时 entryIndexAt 算出的 visibleEntryKeys 下标（未去除自身前）
+    private double dragCardStartX, dragCardStartY;
+    private boolean dragCardMoving;
+    private double dragCardMx, dragCardMy;
+
     private ShopEntry selected;
     private long selectedEntryKey = -1L;
     private long observedCatalogRevision = -1L;
@@ -284,6 +313,17 @@ public class ShopScreen extends ScaledScreen {
     /** 一条右键菜单项：命中即执行 action 并收起菜单；separatorBefore=true 时上方先画一道分隔线（分组用）。 */
     private record ContextMenuItem(String label, boolean separatorBefore, Runnable action) {}
 
+    // 快速分组（右键菜单「⇄ 快速分组」/ 卡片拖到某个分类页签上松开）：列出当前已知的完整分类树供选择，
+    // 选中即把该商品的 category 换成那条路径。跟「编辑条目」走同一个 ShopEditPacket EDIT 协议，只改
+    // category 一个字段（见 sendQuickRegroup），因此同样要求 catalogEditUnlocked（编辑模式），
+    // 比单纯排序（前移/后移/置顶/网格内拖拽）门槛更高——这是结构性改动，不只是视觉顺序。
+    private boolean groupPickerOpen;
+    private ShopEntry groupPickerEntry;
+    private long groupPickerEntryKey = -1L;
+    private int groupPickerScroll;
+    private List<String> groupPickerOptions = List.of();
+    private static final int GROUP_PICKER_ROW_H = 14;
+
     // 购物车：顶栏微缩按键展开的独立大图层；Ctrl+左键网格卡片加入候选，按 stableId 引用条目（跨快照/跨重登有效，
     // 见 ClientShopCart），数量可调、可单独删除，结算=按候选清单逐项各自发起购买（异步、互不阻塞）。
     private boolean cartOverlayOpen;
@@ -303,7 +343,9 @@ public class ShopScreen extends ScaledScreen {
 
     // 计算态
     private List<String> categories = new ArrayList<>();     // 主分类页签
-    private List<String> subCategories = new ArrayList<>();  // 当前主分类下的子分类
+    private List<String> subCategories = new ArrayList<>();  // 当前主分类下的二级分类
+    private List<String> subCategories2 = new ArrayList<>(); // 当前二级分类下的三级分类
+    private List<String> subCategories3 = new ArrayList<>(); // 当前三级分类下的四级分类
     private List<Long> visibleEntryKeys = new ArrayList<>();
 
     public ShopScreen() {
@@ -336,20 +378,374 @@ public class ShopScreen extends ScaledScreen {
     /** 主分类页签行 Y。 */
     private int tabsY() { return balanceY() + balanceHeight() + 4; }
 
-    /** 子分类页签行 Y（主分类有子分类时才显示）。 */
+    /** 二级分类页签行 Y（主分类有二级分类时才显示）。 */
     private int subTabsY() { return tabsY() + TAB_H + 2; }
+    /** 三级分类页签行 Y（选中了具体二级分类、且其下还有三级分类时才显示，紧跟二级页签行）。 */
+    private int subTabs2Y() { return subTabsY() + TAB_H + 2; }
+    /** 四级分类页签行 Y（选中了具体三级分类、且其下还有四级分类时才显示，紧跟三级页签行）。 */
+    private int subTabs3Y() { return subTabs2Y() + TAB_H + 2; }
 
-    /** 当前主分类是否有子分类页签。 */
+    /** 当前主分类是否有二级分类页签。 */
     private boolean hasSubTabs() { return !subCategories.isEmpty(); }
+    /** 当前二级分类选中了具体项（非「全部」）且其下是否还有三级分类页签。 */
+    private boolean hasSubTabs2() { return !selectedSub.isEmpty() && !subCategories2.isEmpty(); }
+    /** 当前三级分类选中了具体项（非「全部」）且其下是否还有四级分类页签。 */
+    private boolean hasSubTabs3() { return !selectedSub2.isEmpty() && !subCategories3.isEmpty(); }
 
-    /** 当前所在商店子页的完整分类名（"主/子"；子页选「全部」或无子分类则只有主）。供「新增商品」继承默认分类。 */
-    private String currentViewCategory() {
-        if (selectedTop == null || selectedTop.isEmpty()) return ShopEntry.DEFAULT_CATEGORY;
-        return selectedSub.isEmpty() ? selectedTop : selectedTop + "/" + selectedSub;
+    /**
+     * 当前视图是否精确对应唯一一个分类字符串（每一层要么没有子页签，要么选中了具体项而非「全部」）。
+     * 只有叶子视图下 visibleEntryKeys 里的商品才保证全部共享同一个 {@code entry.getCategory()}，
+     * 商品卡片拖拽排序（本地下标语义按该字符串的同分类子序列算）才有意义，见 beginCardDrag。
+     */
+    private boolean isLeafCategoryView() {
+        if (hasSubTabs() && selectedSub.isEmpty()) return false;
+        if (hasSubTabs2() && selectedSub2.isEmpty()) return false;
+        if (hasSubTabs3() && selectedSub3.isEmpty()) return false;
+        return true;
     }
 
-    /** 网格/详情内容区顶部 Y（有子页签行则再下移一行）。 */
-    private int contentTop() { return tabsY() + TAB_H + 6 + (hasSubTabs() ? TAB_H + 2 : 0); }
+    /** 当前所在商店子页的完整分类名（"主/子/子子/子子子"，选「全部」的层级及更深层不拼入）。供「新增商品」继承默认分类。 */
+    private String currentViewCategory() {
+        if (selectedTop == null || selectedTop.isEmpty()) return ShopEntry.DEFAULT_CATEGORY;
+        StringBuilder sb = new StringBuilder(selectedTop);
+        if (selectedSub.isEmpty()) return sb.toString();
+        sb.append('/').append(selectedSub);
+        if (selectedSub2.isEmpty()) return sb.toString();
+        sb.append('/').append(selectedSub2);
+        if (selectedSub3.isEmpty()) return sb.toString();
+        sb.append('/').append(selectedSub3);
+        return sb.toString();
+    }
+
+    private static String[] splitCardCategoryPath(String category) {
+        String c = (category == null || category.isBlank()) ? ShopEntry.DEFAULT_CATEGORY : category.trim();
+        String[] raw = c.split("/", 4);
+        String[] parts = {"", "", "", ""};
+        for (int i = 0; i < raw.length && i < parts.length; i++) {
+            parts[i] = raw[i] == null ? "" : raw[i].trim();
+        }
+        return parts;
+    }
+
+    private static int currentCategoryDepth() {
+        if (selectedTop == null || selectedTop.isEmpty()) return 0;
+        if (selectedSub.isEmpty()) return 1;
+        if (selectedSub2.isEmpty()) return 2;
+        if (selectedSub3.isEmpty()) return 3;
+        return 4;
+    }
+
+    private static boolean cardCategoryMatchesCurrentPrefix(String[] parts, int depth) {
+        if (depth <= 0) return true;
+        if (!parts[0].equals(selectedTop == null ? "" : selectedTop)) return false;
+        if (depth >= 2 && !parts[1].equals(selectedSub)) return false;
+        if (depth >= 3 && !parts[2].equals(selectedSub2)) return false;
+        return depth < 4 || parts[3].equals(selectedSub3);
+    }
+
+    /**
+     * 商品卡片上的小分类字段：当前页停在父分类时，显示该商品的下一层分类。
+     * 例如当前页是「无限盘区/前期」，条目属于「无限盘区/前期/ulv」时显示「ulv」。
+     */
+    private static String cardCategoryBadge(ShopEntry entry) {
+        if (entry == null) return "";
+        String[] parts = splitCardCategoryPath(entry.getCategory());
+        int depth = currentCategoryDepth();
+        if (cardCategoryMatchesCurrentPrefix(parts, depth)) {
+            for (int i = depth; i < parts.length; i++) {
+                if (!parts[i].isEmpty()) return parts[i];
+            }
+            return "";
+        }
+        for (int i = parts.length - 1; i >= 0; i--) {
+            if (!parts[i].isEmpty()) return parts[i];
+        }
+        return "";
+    }
+
+    /** 网格/详情内容区顶部 Y（每显示一行子页签就再下移一行）。 */
+    private int contentTop() {
+        int rows = (hasSubTabs() ? 1 : 0) + (hasSubTabs2() ? 1 : 0) + (hasSubTabs3() ? 1 : 0);
+        return tabsY() + TAB_H + 6 + rows * (TAB_H + 2);
+    }
+
+    // ===== 分类切换：切页 + 记忆恢复（见反馈：切走再切回要带回原子页，不要求全部塌陷）=====
+
+    private static String pathKey(String... parts) {
+        StringBuilder sb = new StringBuilder();
+        for (String p : parts) sb.append(p == null ? "" : p).append('#');
+        return sb.toString();
+    }
+
+    private static String rememberedChild(String parentKey) {
+        String v = lastChildByPath.get(parentKey);
+        return v == null ? "" : v;
+    }
+
+    private static void rememberChild(String parentKey, String child) {
+        lastChildByPath.put(parentKey, child);
+    }
+
+    /** 切主分类：从记忆恢复该主分类下完整的子路径（sub/sub2/sub3），而不是重置为全部。 */
+    private static void switchTop(String cat) {
+        selectedTop = cat;
+        selectedSub = rememberedChild(pathKey(selectedTop));
+        selectedSub2 = selectedSub.isEmpty() ? "" : rememberedChild(pathKey(selectedTop, selectedSub));
+        selectedSub3 = selectedSub2.isEmpty() ? "" : rememberedChild(pathKey(selectedTop, selectedSub, selectedSub2));
+    }
+
+    /** 切二级分类（sub=""=全部）：记住这次选择，并从记忆恢复/折叠更深层级。 */
+    private static void switchSub(String sub) {
+        selectedSub = sub;
+        rememberChild(pathKey(selectedTop), sub);
+        selectedSub2 = sub.isEmpty() ? "" : rememberedChild(pathKey(selectedTop, sub));
+        selectedSub3 = selectedSub2.isEmpty() ? "" : rememberedChild(pathKey(selectedTop, sub, selectedSub2));
+    }
+
+    /** 切三级分类（sub2=""=全部）：记住这次选择，并从记忆恢复/折叠四级。 */
+    private static void switchSub2(String sub2) {
+        selectedSub2 = sub2;
+        rememberChild(pathKey(selectedTop, selectedSub), sub2);
+        selectedSub3 = sub2.isEmpty() ? "" : rememberedChild(pathKey(selectedTop, selectedSub, sub2));
+    }
+
+    /** 切四级分类（sub3=""=全部，最深一级，没有更深层要恢复/折叠）：只记住这次选择。 */
+    private static void switchSub3(String sub3) {
+        selectedSub3 = sub3;
+        rememberChild(pathKey(selectedTop, selectedSub, selectedSub2), sub3);
+    }
+
+    // ===== 分类页签行的统一描述（level 0..3 = 主/二级/三级/四级）：渲染、点击、拖拽排序四层结构完全
+    // 一致，只是数据来源不同，统一走这一套 rowXxx/switchAt/performTabSwitch，不再四份重复代码。=====
+
+    private List<String> rowItems(int level) {
+        return switch (level) {
+            case 0 -> categories;
+            case 1 -> subCategories;
+            case 2 -> subCategories2;
+            default -> subCategories3;
+        };
+    }
+
+    private void applyRowItems(int level, List<String> items) {
+        switch (level) {
+            case 0 -> categories = items;
+            case 1 -> subCategories = items;
+            case 2 -> subCategories2 = items;
+            default -> subCategories3 = items;
+        }
+    }
+
+    private String rowSelected(int level) {
+        return switch (level) {
+            case 0 -> selectedTop;
+            case 1 -> selectedSub;
+            case 2 -> selectedSub2;
+            default -> selectedSub3;
+        };
+    }
+
+    private int rowY(int level) {
+        return switch (level) {
+            case 0 -> tabsY();
+            case 1 -> subTabsY();
+            case 2 -> subTabs2Y();
+            default -> subTabs3Y();
+        };
+    }
+
+    private boolean rowVisible(int level) {
+        return switch (level) {
+            case 0 -> true;
+            case 1 -> hasSubTabs();
+            case 2 -> hasSubTabs2();
+            default -> hasSubTabs3();
+        };
+    }
+
+    /** 第 level 层排序落地用的父路径（"/"拼接，跟 ShopConfig#discoveredCategoriesAt 的切分格式一致）。 */
+    private String rowOrderParentPath(int level) {
+        return switch (level) {
+            case 0 -> "";
+            case 1 -> selectedTop;
+            case 2 -> selectedTop + "/" + selectedSub;
+            default -> selectedTop + "/" + selectedSub + "/" + selectedSub2;
+        };
+    }
+
+    private void switchAt(int level, String value) {
+        switch (level) {
+            case 0 -> switchTop(value);
+            case 1 -> switchSub(value);
+            case 2 -> switchSub2(value);
+            default -> switchSub3(value);
+        }
+    }
+
+    /**
+     * 真正切页（不是拖拽排序）：普通点击「全部」或非编辑者点任意页签都走这条——保留原来的滑入方向
+     * 判定 + 动画触发；level 3（四级，最深层）点击不影响更深层是否显示，沿用轻量 recomputeVisible，
+     * 其余层级点击可能改变更深层页签是否显示，需要 this.init() 重排（同原有分层逻辑）。
+     */
+    private void performTabSwitch(int level, String value) {
+        List<String> items = rowItems(level);
+        String current = rowSelected(level);
+        if (level == 0) {
+            gridSlideDir = items.indexOf(value) >= items.indexOf(current) ? 1 : -1;
+        } else {
+            int oldIdx = current.isEmpty() ? 0 : 1 + items.indexOf(current);
+            int newIdx = value.isEmpty() ? 0 : 1 + items.indexOf(value);
+            gridSlideDir = newIdx >= oldIdx ? 1 : -1;
+        }
+        switchAt(level, value);
+        clearSelection();
+        scroll = 0;
+        gridSwitchAtMs = System.currentTimeMillis();
+        if (level == 3) recomputeVisible();
+        else this.init(Minecraft.getInstance(), this.width, this.height);
+    }
+
+    /**
+     * 按下页签：value=""（「全部」伪页签，不可拖拽）或没有编辑权限时直接按原逻辑立即切页；
+     * 否则先记录按下起点，进入「潜在拖拽」追踪，真正是点击还是拖拽要等 mouseReleased 才知道
+     * （见 universalMouseDragged 的阈值判定、universalMouseReleased 的分支）。
+     */
+    private void beginTabAction(int level, String value, double mx, double my) {
+        if (value.isEmpty() || !canEdit) {
+            performTabSwitch(level, value);
+            return;
+        }
+        dragTabLevel = level;
+        dragTabCategory = value;
+        dragTabStartX = mx;
+        dragTabStartY = my;
+        dragTabMx = mx;
+        dragTabMy = my;
+        dragTabMoving = false;
+    }
+
+    /** 命中检测某一层页签行；命中即消费掉这次点击并进入 beginTabAction。 */
+    private boolean tabRowClicked(double mx, double my, int level) {
+        if (!rowVisible(level)) return false;
+        int y = rowY(level);
+        int x = left + 14;
+        int tabsRight = detailX() - 8;
+        if (level > 0) {
+            int aw = Math.max(30, this.font.width("全部") + 10);
+            if (hit(mx, my, x, y, aw, TAB_H)) {
+                beginTabAction(level, "", mx, my);
+                return true;
+            }
+            x += aw + 3;
+        }
+        for (String item : rowItems(level)) {
+            int tw = Math.max(30, this.font.width(item) + 10);
+            if (x + tw > tabsRight) break;
+            if (hit(mx, my, x, y, tw, TAB_H)) {
+                beginTabAction(level, item, mx, my);
+                return true;
+            }
+            x += tw + 3;
+        }
+        return false;
+    }
+
+    /**
+     * 按当前鼠标 X 换算目标下标：跟服务端 {@link com.dishanhai.gt_shanhai.common.shop.ShopConfig#moveCategoryTo}
+     * 的下标语义一致——是"去掉拖拽项之后的列表"里的插入位置，不含「全部」伪页签（它不参与排序）。
+     * 逐项比较到鼠标落在某一项左半边为止，落在所有项右侧则挪到最后。
+     */
+    private int computeTabDropIndex(int level, double mx) {
+        int x = left + 14;
+        if (level > 0) {
+            int aw = Math.max(30, this.font.width("全部") + 10);
+            x += aw + 3;
+        }
+        int index = 0;
+        for (String item : rowItems(level)) {
+            if (item.equals(dragTabCategory)) continue;
+            int tw = Math.max(30, this.font.width(item) + 10);
+            double mid = x + tw / 2.0;
+            if (mx < mid) return index;
+            x += tw + 3;
+            index++;
+        }
+        return index;
+    }
+
+    /**
+     * 商品卡片拖拽松开时如果落在某个分类页签的具体格子上，返回该页签对应的完整分类路径，供
+     * {@link #sendQuickRegroup} 用；没落在任何页签上返回 null（走网格内重排那条路）。落在「全部」
+     * 伪页签上 = 挪到这一层的父路径本身、不细分这一层，跟点击「全部」看到的聚合范围语义一致
+     * （例如拖到 前期＞全部 = 分类改成裸的 "前期"，仍会出现在 前期＞全部 视图里，只是不挂任何子页）。
+     */
+    private String cardDropCategoryPath(double mx, double my) {
+        for (int level = 0; level < 4; level++) {
+            if (!rowVisible(level)) continue;
+            int y = rowY(level);
+            if (my < y || my >= y + TAB_H) continue;
+            int x = left + 14;
+            int tabsRight = detailX() - 8;
+            String parentPath = rowOrderParentPath(level);
+            if (level > 0) {
+                int aw = Math.max(30, this.font.width("全部") + 10);
+                if (hit(mx, my, x, y, aw, TAB_H)) return parentPath;
+                x += aw + 3;
+            }
+            for (String item : rowItems(level)) {
+                int tw = Math.max(30, this.font.width(item) + 10);
+                if (x + tw > tabsRight) break;
+                if (hit(mx, my, x, y, tw, TAB_H)) {
+                    return parentPath.isEmpty() ? item : parentPath + "/" + item;
+                }
+                x += tw + 3;
+            }
+            return null; // 落在这一行的 Y 范围内但没对上任何具体格子
+        }
+        return null;
+    }
+
+    /**
+     * 发排序包 + 乐观本地重排：网络包到服务端广播回新 manifest 之间有延迟，先在本地把这层列表挪到
+     * 目标位置，避免松手瞬间页签"弹回原位"又跳到新位置的观感；服务端广播的新 manifest 到达后
+     * initScaled 会用权威顺序覆盖这份乐观结果，不会长期不一致。
+     */
+    private void sendTabReorder(int level, String category, int newIndex) {
+        String parentPath = rowOrderParentPath(level);
+        ShanhaiNetwork.CHANNEL.sendToServer(
+                new com.dishanhai.gt_shanhai.network.ShopCategoryReorderPacket(parentPath, category, newIndex));
+        List<String> items = new ArrayList<>(rowItems(level));
+        items.remove(category);
+        int clamped = Math.max(0, Math.min(newIndex, items.size()));
+        items.add(clamped, category);
+        applyRowItems(level, items);
+    }
+
+    /** 渲染某一层页签行：拖拽中的页签本身不占位（原位置塌陷），改画成跟随鼠标的浮动块（高亮态）。 */
+    private void renderTabRow(GuiGraphics g, int level, int mx, int my) {
+        int y = rowY(level);
+        int x = left + 14;
+        int tabsRight = detailX() - 8;
+        boolean dragging = dragTabLevel == level && dragTabMoving;
+        String selected = rowSelected(level);
+        if (level > 0) {
+            int aw = Math.max(30, this.font.width("全部") + 10);
+            drawTab(g, x, y, aw, TAB_H, "§7全部", selected.isEmpty(), mx, my);
+            x += aw + 3;
+        }
+        for (String item : rowItems(level)) {
+            if (dragging && item.equals(dragTabCategory)) continue;
+            int tw = Math.max(30, this.font.width(item) + 10);
+            if (x + tw > tabsRight) break;
+            drawTab(g, x, y, tw, TAB_H, item, item.equals(selected), mx, my);
+            x += tw + 3;
+        }
+        if (dragging) {
+            int tw = Math.max(30, this.font.width(dragTabCategory) + 10);
+            int fx = (int) dragTabMx - tw / 2;
+            drawTab(g, fx, y, tw, TAB_H, dragTabCategory, true, mx, my);
+        }
+    }
 
     /** 内容区可见高度（撑到面板底部留边）。 */
     private int contentHeight() { return Math.max(60, (top + panelHeight - 8) - contentTop()); }
@@ -383,9 +779,12 @@ public class ShopScreen extends ScaledScreen {
     // 「兑换中心」按钮：货币中心右侧，始终可见（打开兑换子页）
     private static final int EXCHANGE_BTN_W = 64;
     private int exchangeBtnX() { return currencyBtnX() + CURRENCY_BTN_W + 4; }
-    // 「新增商品」按钮：兑换中心右侧，仅编辑权玩家且开了编辑模式（catalogEditUnlocked）才可见
+    // 「会员中心」按钮：兑换中心右侧，始终可见（打开会员购买+银行子页，见 ShopMembershipScreen）
+    private static final int MEMBER_BTN_W = 64;
+    private int memberBtnX() { return exchangeBtnX() + EXCHANGE_BTN_W + 4; }
+    // 「新增商品」按钮：会员中心右侧，仅编辑权玩家且开了编辑模式（catalogEditUnlocked）才可见
     private static final int ADD_BTN_W = 64;
-    private int addBtnX() { return exchangeBtnX() + EXCHANGE_BTN_W + 4; }
+    private int addBtnX() { return memberBtnX() + MEMBER_BTN_W + 4; }
     // 「商店设置」按钮：仅编辑权玩家可见，不受编辑模式开关限制；新增商品隐藏时顶上来补位，不留空档
     private static final int SETTINGS_BTN_W = 64;
     private int settingsBtnX() { return catalogEditUnlocked ? addBtnX() + ADD_BTN_W + 4 : addBtnX(); }
@@ -463,9 +862,19 @@ public class ShopScreen extends ScaledScreen {
         if (selectedTop == null || !categories.contains(selectedTop)) {
             selectedTop = categories.isEmpty() ? ShopEntry.DEFAULT_CATEGORY : categories.get(0);
         }
+        // 以下只做「有效性收紧」，不做记忆恢复——记忆恢复只在 switchTop/switchSub/switchSub2 显式切换时触发一次
+        // （见这几个方法），否则每次 initScaled 都会把用户刚点的「全部」重新拉回记忆值，永远选不中全部。
         subCategories = ClientShopCatalog.subCategories(selectedTop);
         if (!selectedSub.isEmpty() && !subCategories.contains(selectedSub)) {
             selectedSub = ""; // 子分类已不存在 → 回退全部
+        }
+        subCategories2 = selectedSub.isEmpty() ? List.of() : ClientShopCatalog.subCategories2(selectedTop, selectedSub);
+        if (!selectedSub2.isEmpty() && !subCategories2.contains(selectedSub2)) {
+            selectedSub2 = "";
+        }
+        subCategories3 = selectedSub2.isEmpty() ? List.of() : ClientShopCatalog.subCategories3(selectedTop, selectedSub, selectedSub2);
+        if (!selectedSub3.isEmpty() && !subCategories3.contains(selectedSub3)) {
+            selectedSub3 = "";
         }
 
         // 搜索框（右侧详情列正上方）
@@ -510,7 +919,7 @@ public class ShopScreen extends ScaledScreen {
     private void recomputeVisible() {
         String q = searchBox != null ? searchBox.getValue() : "";
         List<Long> keys = (q == null || q.isBlank())
-                ? ClientShopCatalog.keysOfGroup(selectedTop, selectedSub)
+                ? ClientShopCatalog.keysOfGroup(selectedTop, selectedSub, selectedSub2, selectedSub3)
                 : ClientShopCatalog.searchKeys(q);
         // 只看收藏：在分类/搜索结果之上再收窄一层，按 stub 里的 stableId 判断（不需要等完整 ShopEntry 加载）。
         if (favoritesOnly) {
@@ -569,6 +978,7 @@ public class ShopScreen extends ScaledScreen {
         // 货币中心 + 兑换中心（始终可见）
         drawButton(g, currencyBtnX(), top + 6, CURRENCY_BTN_W, TOP_BAR_H, "§6货币中心", mx, my);
         drawButton(g, exchangeBtnX(), top + 6, EXCHANGE_BTN_W, TOP_BAR_H, "§d兑换中心", mx, my);
+        drawButton(g, memberBtnX(), top + 6, MEMBER_BTN_W, TOP_BAR_H, "§b会员中心", mx, my);
         // 新增商品（编辑权 + 开了编辑模式）、商店设置（仅编辑权，不受编辑模式限制）
         if (catalogEditUnlocked) {
             drawButton(g, addBtnX(), top + 6, ADD_BTN_W, TOP_BAR_H, "§a新增商品", mx, my);
@@ -597,29 +1007,10 @@ public class ShopScreen extends ScaledScreen {
         renderBox(g, left + 14, by, balW, balanceHeight(), GOLD_DARK, BOX_BG);
         drawCurrencyBar(g, left + 14 + 6, by, balW - 12, mx, my);
 
-        // 主分类页签行
-        int ty = tabsY();
-        int tx = left + 14;
-        int tabsRight = detailX() - 8; // 不越过搜索框列
-        for (String cat : categories) {
-            int tw = Math.max(30, this.font.width(cat) + 10);
-            if (tx + tw > tabsRight) break; // 简单截断
-            drawTab(g, tx, ty, tw, TAB_H, cat, cat.equals(selectedTop), mx, my);
-            tx += tw + 3;
-        }
-        // 子分类页签行（当前主分类有子分类时）：先「全部」再各子分类
-        if (hasSubTabs()) {
-            int sty = subTabsY();
-            int stx = left + 14;
-            int aw = Math.max(30, this.font.width("全部") + 10);
-            drawTab(g, stx, sty, aw, TAB_H, "§7全部", selectedSub.isEmpty(), mx, my);
-            stx += aw + 3;
-            for (String sub : subCategories) {
-                int tw = Math.max(30, this.font.width(sub) + 10);
-                if (stx + tw > tabsRight) break;
-                drawTab(g, stx, sty, tw, TAB_H, sub, sub.equals(selectedSub), mx, my);
-                stx += tw + 3;
-            }
+        // 分类页签（主/二级/三级/四级，见 rowXxx/renderTabRow 统一实现；拖拽排序时被拖的页签
+        // 会画成跟随鼠标的浮动块，由 renderTabRow 内部处理，这里只要按层级挨个调用）
+        for (int level = 0; level < 4; level++) {
+            if (rowVisible(level)) renderTabRow(g, level, mx, my);
         }
 
         // 左侧网格背景（切页横切滑入：纯 PoseStack 平移，方向按页签左右顺序走，彰显"切"的方向感，
@@ -766,6 +1157,10 @@ public class ShopScreen extends ScaledScreen {
             renderGuideOverlay(g, mx, my);
             return;
         }
+        if (groupPickerOpen && groupPickerEntry != null) {
+            renderGroupPicker(g, mx, my);
+            return;
+        }
         if (cartOverlayOpen) {
             // 展开弹入：跟切页/切卡片同一套锚点缩放公式，锚点换成购物车面板自己的中心（见反馈：需要动画补充）
             int[] cr = cartOverlayBounds();
@@ -879,6 +1274,88 @@ public class ShopScreen extends ScaledScreen {
         if (maxScroll > 0) {
             g.drawString(this.font, "§8滚轮翻页 " + (guideOverlayScroll + 1) + "-" + Math.min(guideHits.size(), guideOverlayScroll + visible)
                     + "/" + guideHits.size(), ox + 8, oy + r[3] - 10, GRAY, false);
+        }
+    }
+
+    // ============ 快速分组大图层 ============
+
+    /** 快速分组大图层边界：按选项条数动态算高度，封顶同「指南详情」。 */
+    private int[] groupPickerBounds() {
+        int ow = Math.min(vWidth - 40, 260);
+        int desiredH = 32 + groupPickerOptions.size() * GROUP_PICKER_ROW_H;
+        int oh = Math.min(vHeight - 40, Math.max(80, Math.min(desiredH, 300)));
+        int ox = (vWidth - ow) / 2;
+        int oy = (vHeight - oh) / 2;
+        return new int[]{ox, oy, ow, oh};
+    }
+
+    private int groupPickerCloseX(int[] r) { return r[0] + r[2] - DESC_OVERLAY_CLOSE_W - 4; }
+    private int groupPickerCloseY(int[] r) { return r[1] + 4; }
+    private int groupPickerVisibleRows(int[] r) { return Math.max(1, (r[3] - 28) / GROUP_PICKER_ROW_H); }
+    private int groupPickerMaxScroll(int[] r) { return Math.max(0, groupPickerOptions.size() - groupPickerVisibleRows(r)); }
+
+    /** 打开快速分组：枚举整棵分类树（主/二/三/四级所有已知组合，含中间节点不止叶子）供选择。 */
+    private void openGroupPicker(ShopEntry entry, long entryKey) {
+        List<String> options = new ArrayList<>();
+        for (String top : ClientShopCatalog.topCategories()) {
+            options.add(top);
+            for (String sub : ClientShopCatalog.subCategories(top)) {
+                String subPath = top + "/" + sub;
+                options.add(subPath);
+                for (String sub2 : ClientShopCatalog.subCategories2(top, sub)) {
+                    String sub2Path = subPath + "/" + sub2;
+                    options.add(sub2Path);
+                    for (String sub3 : ClientShopCatalog.subCategories3(top, sub, sub2)) {
+                        options.add(sub2Path + "/" + sub3);
+                    }
+                }
+            }
+        }
+        groupPickerOptions = options;
+        groupPickerEntry = entry;
+        groupPickerEntryKey = entryKey;
+        groupPickerScroll = 0;
+        groupPickerOpen = true;
+    }
+
+    /** 快速分组大图层：树形列表（按 "/" 段数缩进），当前分组高亮，点一行直接分组并关闭图层。 */
+    private void renderGroupPicker(GuiGraphics g, int mx, int my) {
+        int[] r = groupPickerBounds();
+        int ox = r[0], oy = r[1], ow = r[2];
+
+        g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
+        renderBox(g, ox, oy, ow, r[3], GOLD_DARK, PANEL_BG);
+
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font,
+                "§b" + groupPickerEntry.goodsDisplayName() + " §7— 快速分组", ow - DESC_OVERLAY_CLOSE_W - 20),
+                ox + 8, oy + 8, GOLD, true);
+        int closeX = groupPickerCloseX(r), closeY = groupPickerCloseY(r);
+        drawButton(g, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H, "§cX", mx, my);
+
+        int visible = groupPickerVisibleRows(r);
+        int maxScroll = groupPickerMaxScroll(r);
+        groupPickerScroll = Math.max(0, Math.min(maxScroll, groupPickerScroll));
+        String current = groupPickerEntry.getCategory();
+        int rowY0 = oy + 22;
+        for (int i = 0; i < visible; i++) {
+            int idx = groupPickerScroll + i;
+            if (idx >= groupPickerOptions.size()) break;
+            String path = groupPickerOptions.get(idx);
+            int depth = 0;
+            for (int c = 0; c < path.length(); c++) if (path.charAt(c) == '/') depth++;
+            int ry = rowY0 + i * GROUP_PICKER_ROW_H;
+            boolean hover = GuiRenderUtil.isHovering(mx, my, ox + 6, ry, ow - 12, GROUP_PICKER_ROW_H);
+            boolean isCurrent = path.equals(current);
+            if (hover) g.fill(ox + 6, ry, ox + ow - 6, ry + GROUP_PICKER_ROW_H, BUTTON_HOVER);
+            String leaf = path.substring(path.lastIndexOf('/') + 1);
+            String indent = "  ".repeat(depth);
+            String prefix = isCurrent ? "§e● " : (hover ? "§b" : "§7");
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, prefix + indent + leaf, ow - 20),
+                    ox + 8, ry + 3, isCurrent ? GOLD : (hover ? CYAN : WHITE), true);
+        }
+        if (maxScroll > 0) {
+            g.drawString(this.font, "§8滚轮翻页 " + (groupPickerScroll + 1) + "-" + Math.min(groupPickerOptions.size(), groupPickerScroll + visible)
+                    + "/" + groupPickerOptions.size(), ox + 8, oy + r[3] - 10, GRAY, false);
         }
     }
 
@@ -1025,7 +1502,8 @@ public class ShopScreen extends ScaledScreen {
                 } else {
                     g.renderItem(entry.displayGoodsStack(), ox + 8, iconY);
                 }
-                ShopCost cost = entry.getEffectiveCost(); // 购物车只买不卖，折扣按买价口径结算
+                // 购物车只买不卖，折扣按买价口径结算（限时折扣 + 会员折扣叠加，见 ShopMembership）
+                ShopCost cost = entry.getEffectiveCost(ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier()));
                 String label;
                 if (settled != null) {
                     // 本结算批次已回执：直接按服务端结果着色+附原因，不再用客户端猜的缺口符号（见反馈：结算后要看清成败）
@@ -1198,9 +1676,35 @@ public class ShopScreen extends ScaledScreen {
             if (entry == null) drawLoadingCell(g, visibleEntryKeys.get(idx), cellX(col), cy);
             else drawCell(g, entry, cellX(col), cy, mx, my);
         }
+        // 商品卡片拖拽中：高亮当前悬停的目标格子（原格子照常显示，不做实时重排，见 dragCardEntryKey 注释）
+        if (dragCardEntryKey != -1L && dragCardMoving) {
+            int targetIdx = entryIndexAt(dragCardMx, dragCardMy);
+            if (targetIdx >= 0) {
+                int tcol = targetIdx % cols;
+                int trow = targetIdx / cols;
+                int tcy = cellY(trow);
+                if (tcy + CELL_H > gy && tcy < gy + gh) {
+                    renderOutline(g, cellX(tcol) - 1, tcy - 1, CELL_W + 2, CELL_H + 2, GOLD);
+                }
+            }
+        }
         g.disableScissor();
 
+        // 跟随鼠标的浮动图标（画在 scissor 外，避免拖出网格边界时被裁掉）
+        if (dragCardEntryKey != -1L && dragCardMoving && dragCardEntry != null) {
+            ItemStack floatIcon = dragCardEntry.displayGoodsStack();
+            if (!floatIcon.isEmpty()) g.renderItem(floatIcon, (int) dragCardMx - 8, (int) dragCardMy - 8);
+        }
+
         drawGridScrollbar(g, gx, gy, gw, gh, cols, mx, my);
+    }
+
+    /** 1px 空心高亮框（不覆盖内容，只描边），供拖拽目标格子指示用。 */
+    private static void renderOutline(GuiGraphics g, int x, int y, int w, int h, int color) {
+        g.fill(x, y, x + w, y + 1, color);
+        g.fill(x, y + h - 1, x + w, y + h, color);
+        g.fill(x, y, x + 1, y + h, color);
+        g.fill(x + w - 1, y, x + w, y + h, color);
     }
 
     /** 未收到完整 JSON 时只画轻量占位，不提前创建 ItemStack 或访问物品模型。 */
@@ -1373,6 +1877,13 @@ public class ShopScreen extends ScaledScreen {
         // 商品名（右上，截断宽度对所有格恒定，缓存好的结果直接画）
         int textX = slotX + 23;
         g.drawString(this.font, cc.trimmedName, textX, cy + 4, WHITE, true);
+
+        String categoryBadge = cardCategoryBadge(entry);
+        if (!categoryBadge.isEmpty()) {
+            int badgeMaxW = CELL_W - 29 - (ClientShopFavorites.contains(entry.getStableId()) ? 12 : 0);
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, categoryBadge, badgeMaxW),
+                    textX, cy + 15, CYAN, false);
+        }
 
         // 收藏角标（名称行与底部价格条之间的空白带，右对齐，不挤占任何已有元素）
         if (ClientShopFavorites.contains(entry.getStableId())) {
@@ -1572,11 +2083,17 @@ public class ShopScreen extends ScaledScreen {
         }
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, countLine, dx + DETAIL_W - 6 - textX), textX, dy + 24, GRAY, true);
 
-        // 成本（多元，青）——超宽截断，全量见 tooltip / 预计行。限时折扣生效时原价→折后价+倒计时挤进同一行，
-        // 不另起一行（详情页下面一串固定 Y 坐标的内容，插一行要连带改一串偏移，风险不值得，见 CurrencyAtmScreen 的教训）
-        String costLabel = selected.isDiscountActive()
-                ? "§7成本: §8" + costInline(selected.getCost()) + " §a→ " + costInline(selected.getEffectiveCost())
-                        + " §6(-" + selected.getDiscountPercent() + "% 剩" + formatDuration(selected.discountRemainingMs() / 1000L) + ")"
+        // 成本（多元，青）——超宽截断，全量见 tooltip / 预计行。限时折扣 + 会员折扣（见 ShopMembership）生效时
+        // 原价→折后价+各自标注挤进同一行，不另起一行（详情页下面一串固定 Y 坐标的内容，插一行要连带改一串
+        // 偏移，风险不值得，见 CurrencyAtmScreen 的教训）
+        int memberTier = ClientWalletAccount.getMemberTier();
+        int memberPct = ShopMembership.discountPercentForTier(memberTier);
+        boolean anyDiscount = selected.isDiscountActive() || memberPct > 0;
+        String saleTag = selected.isDiscountActive()
+                ? " §6(限时-" + selected.getDiscountPercent() + "% 剩" + formatDuration(selected.discountRemainingMs() / 1000L) + ")" : "";
+        String memberTag = memberPct > 0 ? " §d[会员" + ShopMembership.tierNameForTier(memberTier) + "-" + memberPct + "%]" : "";
+        String costLabel = anyDiscount
+                ? "§7成本: §8" + costInline(selected.getCost()) + " §a→ " + costInline(selected.getEffectiveCost(memberPct)) + saleTag + memberTag
                 : "§7成本: " + costInline(selected.getCost());
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, costLabel,
                 dx + DETAIL_W - 6 - cx), cx, dy + 42, CYAN, true);
@@ -1601,8 +2118,11 @@ public class ShopScreen extends ScaledScreen {
         // 预计（BigInteger 防溢出，紧凑显示）；成本多元 → 显示整条成本 ×次数
         java.math.BigInteger amt = java.math.BigInteger.valueOf(amount);
         java.math.BigInteger total = java.math.BigInteger.valueOf(selected.getGoodsCount()).multiply(amt);
-        // 折扣只影响买价预览，不影响出售能拿回多少（出售不是「反向打折」，见 ShopPurchase#affordAndDeduct 同一口径）
-        ShopCost dcost = mode == Mode.BUY ? selected.getEffectiveCost() : selected.getCost();
+        // 买价：限时折扣 + 会员折扣叠加（见 ShopMembership）；出售：按价差折价拿回（见 ShopPurchase#sellRatioPercent），
+        // 出售不是「反向打折」，走独立的口径，不受买价折扣影响
+        ShopCost dcost = mode == Mode.BUY
+                ? selected.getEffectiveCost(ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier()))
+                : selected.getCost().scaledTo(ShopPurchase.sellRatioPercent());
         int py = dy + 128;
         int costTrimW = dx + DETAIL_W - 6 - cx;
         String key = WalletAccountAPI.purchaseKey(selected.getGoodsId(), selected.getCategory());
@@ -1776,7 +2296,7 @@ public class ShopScreen extends ScaledScreen {
         // 花费预览格全绿时按钮不能还显示红，前置任务同理，不能光看成本够不够）
         boolean prereqSatisfiedClient = !selected.hasPrerequisiteQuest() || prereqQuestCompleted;
         boolean canTrade = mode == Mode.BUY
-                ? (canAffordClient(selected.getEffectiveCost(), amount) && prereqSatisfiedClient)
+                ? (canAffordClient(dcost, amount) && prereqSatisfiedClient) // dcost 已含限时折扣+会员折扣（BUY 分支同一个值）
                 : (!selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
                     && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, DETAIL_W - 16, 20);
@@ -1839,6 +2359,27 @@ public class ShopScreen extends ScaledScreen {
                 if (hit(mx, my, r[0] + 6, ry, r[2] - 12, GUIDE_OVERLAY_ROW_H)) {
                     com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.open(Minecraft.getInstance().player, guideHits.get(idx));
                     guideOverlayOpen = false;
+                    return true;
+                }
+            }
+            return true;
+        }
+        // 快速分组大图层打开时同样拦截全部点击：点某一行直接分组并关闭图层
+        if (groupPickerOpen) {
+            int[] r = groupPickerBounds();
+            if (!hit(mx, my, r[0], r[1], r[2], r[3]) || hit(mx, my, groupPickerCloseX(r), groupPickerCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                groupPickerOpen = false;
+                return true;
+            }
+            int visible = groupPickerVisibleRows(r);
+            int rowY0 = r[1] + 22;
+            for (int i = 0; i < visible; i++) {
+                int idx = groupPickerScroll + i;
+                if (idx >= groupPickerOptions.size()) break;
+                int ry = rowY0 + i * GROUP_PICKER_ROW_H;
+                if (hit(mx, my, r[0] + 6, ry, r[2] - 12, GROUP_PICKER_ROW_H)) {
+                    sendQuickRegroup(groupPickerEntry, groupPickerEntryKey, groupPickerOptions.get(idx));
+                    groupPickerOpen = false;
                     return true;
                 }
             }
@@ -1935,6 +2476,11 @@ public class ShopScreen extends ScaledScreen {
             Minecraft.getInstance().setScreen(new ExchangeScreen(this, canEdit));
             return true;
         }
+        // 会员中心（打开会员购买+银行子页）
+        if (hit(mx, my, memberBtnX(), top + 6, MEMBER_BTN_W, TOP_BAR_H)) {
+            Minecraft.getInstance().setScreen(new ShopMembershipScreen(this));
+            return true;
+        }
         // 新增商品（编辑权 + 开了编辑模式）：分类默认继承当前所在子页（如「无限盘区/前期」）
         if (catalogEditUnlocked && hit(mx, my, addBtnX(), top + 6, ADD_BTN_W, TOP_BAR_H)) {
             ShopEntryEditor.openNew(this, currentViewCategory());
@@ -1946,52 +2492,10 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
 
-        // 主分类页签：切主分类 → 重置子分类为全部 → 重排（子页签行影响 contentTop）
-        int ty = tabsY();
-        int tx = left + 14;
-        int tabsRight = detailX() - 8;
-        for (String cat : categories) {
-            int tw = Math.max(30, this.font.width(cat) + 10);
-            if (tx + tw > tabsRight) break;
-            if (hit(mx, my, tx, ty, tw, TAB_H)) {
-                // 滑入方向按页签左右顺序走：切到右边的主分类从右侧滑入，切到左边的从左侧滑入
-                gridSlideDir = categories.indexOf(cat) >= categories.indexOf(selectedTop) ? 1 : -1;
-                selectedTop = cat; selectedSub = ""; clearSelection(); scroll = 0;
-                gridSwitchAtMs = System.currentTimeMillis();
-                this.init(Minecraft.getInstance(), this.width, this.height);
-                return true;
-            }
-            tx += tw + 3;
-        }
-        // 子分类页签（有子分类时）：先「全部」再各子分类
-        if (hasSubTabs()) {
-            int sty = subTabsY();
-            int stx = left + 14;
-            int aw = Math.max(30, this.font.width("全部") + 10);
-            if (hit(mx, my, stx, sty, aw, TAB_H)) {
-                // 「全部」固定在最左（index 0），从当前子页签切过来只会是往左切（或原地，方向无所谓）
-                int oldSubIdx = selectedSub.isEmpty() ? 0 : 1 + subCategories.indexOf(selectedSub);
-                gridSlideDir = oldSubIdx <= 0 ? 1 : -1;
-                selectedSub = ""; clearSelection(); scroll = 0;
-                gridSwitchAtMs = System.currentTimeMillis();
-                recomputeVisible();
-                return true;
-            }
-            stx += aw + 3;
-            for (String sub : subCategories) {
-                int tw = Math.max(30, this.font.width(sub) + 10);
-                if (stx + tw > tabsRight) break;
-                if (hit(mx, my, stx, sty, tw, TAB_H)) {
-                    int oldSubIdx = selectedSub.isEmpty() ? 0 : 1 + subCategories.indexOf(selectedSub);
-                    int newSubIdx = 1 + subCategories.indexOf(sub);
-                    gridSlideDir = newSubIdx >= oldSubIdx ? 1 : -1;
-                    selectedSub = sub; clearSelection(); scroll = 0;
-                    gridSwitchAtMs = System.currentTimeMillis();
-                    recomputeVisible();
-                    return true;
-                }
-                stx += tw + 3;
-            }
+        // 分类页签（主/二级/三级/四级）：命中即消费，具体是切页还是进入拖拽追踪由 beginTabAction 判定
+        // （见 rowXxx/tabRowClicked 统一实现，取代原来四份重复的页签点击处理）
+        for (int level = 0; level < 4; level++) {
+            if (tabRowClicked(mx, my, level)) return true;
         }
 
         // 网格右侧滚动条（拖拽跳转，先于格子命中判定）
@@ -2011,6 +2515,17 @@ public class ShopScreen extends ScaledScreen {
                     showMessage(Component.literal(already
                             ? "§b[山海商店] §7已在购物车里: §f" + entry.goodsDisplayName()
                             : "§b[山海商店] §a已加入购物车: §f" + entry.goodsDisplayName()));
+                } else if (btn == 0 && canEdit
+                        && (searchBox == null || searchBox.getValue().isBlank())) {
+                    // 开始潜在拖拽追踪；是否真正进入拖拽由 universalMouseDragged 阈值判定（见 dragCardEntryKey 注释）。
+                    // 非叶子（聚合"全部"）视图下也允许起手：落到页签上走跨分类分组不需要叶子视图，
+                    // 只有落回网格格子的「同分类内重排」才在下面按 isLeafCategoryView() 收窄。
+                    dragCardEntryKey = visibleEntryKeys.get(entryIndex);
+                    dragCardEntry = entry;
+                    dragCardOldIndex = entryIndex;
+                    dragCardStartX = mx; dragCardStartY = my;
+                    dragCardMx = mx; dragCardMy = my;
+                    dragCardMoving = false;
                 } else {
                     selectEntry(visibleEntryKeys.get(entryIndex), entry);
                 }
@@ -2163,6 +2678,12 @@ public class ShopScreen extends ScaledScreen {
             guideOverlayScroll = Math.max(0, Math.min(maxScroll, guideOverlayScroll - (int) d));
             return true;
         }
+        if (groupPickerOpen) {
+            int[] r = groupPickerBounds();
+            int maxScroll = groupPickerMaxScroll(r);
+            groupPickerScroll = Math.max(0, Math.min(maxScroll, groupPickerScroll - (int) d));
+            return true;
+        }
         if (cartOverlayOpen) {
             int[] r = cartOverlayBounds();
             int maxScroll = cartOverlayMaxScroll(r, ClientShopCart.size());
@@ -2180,6 +2701,22 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
+        if (dragTabLevel != -1) {
+            dragTabMx = mx;
+            dragTabMy = my;
+            if (!dragTabMoving && Math.hypot(mx - dragTabStartX, my - dragTabStartY) >= DRAG_TAB_THRESHOLD) {
+                dragTabMoving = true;
+            }
+            return true;
+        }
+        if (dragCardEntryKey != -1L) {
+            dragCardMx = mx;
+            dragCardMy = my;
+            if (!dragCardMoving && Math.hypot(mx - dragCardStartX, my - dragCardStartY) >= DRAG_TAB_THRESHOLD) {
+                dragCardMoving = true;
+            }
+            return true;
+        }
         if (draggingDescOverlayScroll) { updateDescOverlayScrollFromDrag(my); return true; }
         if (draggingGridScroll) { updateGridScrollFromDrag(my); return true; }
         return super.universalMouseDragged(mx, my, btn, dx, dy);
@@ -2187,6 +2724,53 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseReleased(double mx, double my, int btn) {
+        if (dragTabLevel != -1) {
+            int level = dragTabLevel;
+            String category = dragTabCategory;
+            boolean moved = dragTabMoving;
+            dragTabLevel = -1;
+            dragTabCategory = null;
+            dragTabMoving = false;
+            if (moved) sendTabReorder(level, category, computeTabDropIndex(level, mx));
+            else performTabSwitch(level, category); // 没越过拖拽阈值 = 普通点击，按原逻辑切页
+            return true;
+        }
+        if (dragCardEntryKey != -1L) {
+            long entryKey = dragCardEntryKey;
+            ShopEntry entry = dragCardEntry;
+            int oldIndex = dragCardOldIndex;
+            boolean moved = dragCardMoving;
+            dragCardEntryKey = -1L;
+            dragCardEntry = null;
+            dragCardOldIndex = -1;
+            dragCardMoving = false;
+            if (entry == null) {
+                // 拖拽期间目录可能刷新导致条目失效，静默丢弃这次操作
+            } else if (moved) {
+                // 落在某个分类页签上 = 跨分类快速分组；落在网格格子上 = 同分类内重排；两者互斥，见 cardDropCategoryPath
+                String dropCategory = cardDropCategoryPath(mx, my);
+                if (dropCategory != null) {
+                    if (!catalogEditUnlocked) {
+                        showMessage(Component.literal("§c[山海商店] 拖到页签快速分组需要先开启编辑模式（/山海 商店 编辑）"));
+                    } else {
+                        sendQuickRegroup(entry, entryKey, dropCategory);
+                    }
+                } else if (isLeafCategoryView()) {
+                    // 同分类内重排要求叶子视图：聚合「全部」视图里 visibleEntryKeys 混着多个真实分类，
+                    // 网格下标不对应任何单一分类下的本地序号，落回网格格子在聚合视图下不触发重排。
+                    int targetIndex = entryIndexAt(mx, my);
+                    if (targetIndex >= 0) {
+                        // 落点下标是"未去除自身"的 visibleEntryKeys 下标，落在原位置之后要 -1 才是
+                        // ShopConfig#moveEntryToIndex 期望的"去掉自身之后"的本地下标语义
+                        int localIndex = targetIndex > oldIndex ? targetIndex - 1 : targetIndex;
+                        sendCardReorder(entry, entryKey, localIndex);
+                    }
+                }
+            } else {
+                selectEntry(entryKey, entry); // 没越过拖拽阈值 = 普通点击，按原逻辑打开详情
+            }
+            return true;
+        }
         if (draggingDescOverlayScroll) { draggingDescOverlayScroll = false; return true; }
         if (draggingGridScroll) { draggingGridScroll = false; return true; }
         return super.universalMouseReleased(mx, my, btn);
@@ -2310,6 +2894,7 @@ public class ShopScreen extends ScaledScreen {
             if (catalogEditUnlocked) {
                 items.add(new ContextMenuItem("§b编辑条目", true, () -> ShopEntryEditor.openEdit(this, entry)));
                 items.add(new ContextMenuItem("§a复制为新条目", false, () -> ShopEntryEditor.openDuplicate(this, entry)));
+                items.add(new ContextMenuItem("§d⇄ 快速分组", false, () -> openGroupPicker(entry, entryKey)));
             }
             items.add(new ContextMenuItem(entry.isHidden() ? "§a取消隐藏" : "§c设为隐藏", false, () -> toggleHidden(entry)));
             items.add(new ContextMenuItem("§e▲ 前移", false, () ->
@@ -2342,6 +2927,35 @@ public class ShopScreen extends ScaledScreen {
                 action, ClientShopCatalog.revision(), entryKey));
         undoReorderLabel = entry.goodsDisplayName();
         undoReorderUntilMs = System.currentTimeMillis() + UNDO_REORDER_UI_WINDOW_MS;
+    }
+
+    /** 商品卡片拖拽排序：TO_INDEX 变体，见 {@link #sendReorder} 同一套「撤销排序」悬浮按钮乐观 UI。 */
+    private void sendCardReorder(ShopEntry entry, long entryKey, int localIndex) {
+        ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopReorderPacket(
+                com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.TO_INDEX,
+                ClientShopCatalog.revision(), entryKey, localIndex));
+        undoReorderLabel = entry.goodsDisplayName();
+        undoReorderUntilMs = System.currentTimeMillis() + UNDO_REORDER_UI_WINDOW_MS;
+    }
+
+    /**
+     * 快速分组：只改 category 一个字段，其余字段原样带回去，走跟「编辑条目」提交同一个 ShopEditPacket
+     * EDIT 协议（见 {@link ShopEntryEditScreen} 提交逻辑），不新开一套网络包。目标分类跟当前分类相同时
+     * 不发包（无变化）。stableId/限购剩余次数由服务端按 oldEntryKey 解析原条目续用，这里不用管。
+     */
+    private void sendQuickRegroup(ShopEntry entry, long entryKey, String newCategory) {
+        if (entry == null || newCategory == null || newCategory.equals(entry.getCategory())) return;
+        com.dishanhai.gt_shanhai.network.ShopEditPacket pkt = new com.dishanhai.gt_shanhai.network.ShopEditPacket(
+                com.dishanhai.gt_shanhai.network.ShopEditPacket.Action.EDIT,
+                entry.getGoodsList(), newCategory, entry.getDescription(), entry.getCost(),
+                entry.getGoodsId(), entry.getCategory(), -1, entry.getRemainingUses(),
+                entry.getDisplayIcons(), entry.getRewardMode(), entry.getRewardPool(), entry.isHidden(),
+                entry.getLinkKey(), entry.getLinkTo(), entry.getDisplayName(), entry.getFtbqTableId(), entry.getFtbqSubMode(),
+                entry.getTradeMode(), entry.getPeriodTicks(), entry.getPeriodLimit(), entry.getPrerequisiteQuestId(),
+                ClientShopCatalog.revision(), entryKey,
+                entry.getDiscountPercent(), entry.getDiscountStartMs(), entry.getDiscountEndMs());
+        ShanhaiNetwork.CHANNEL.sendToServer(pkt);
+        showMessage(Component.literal("§b[山海商店] §a已把 §f" + entry.goodsDisplayName() + " §a分组到 §e" + newCategory));
     }
 
     /** 一键切换隐藏：其余字段原样带回去，走跟编辑器提交同一条 EDIT 通路，不新开一套网络包。 */
@@ -2633,8 +3247,8 @@ public class ShopScreen extends ScaledScreen {
 
     // ============ 图形化获得预览（组合商品，图标 + 数量）============
 
-    /** 获得预览格：物品/流体图标 + 数量，纯展示（不比对拥有量，跟花费预览的核心区别）。 */
-    private record RewardCell(ItemStack item, net.minecraft.world.level.material.Fluid fluid, String amount, String exact, String name) {}
+    /** 获得预览格：完整展示图标（无限盘=内容物主图标+盘本身角标，见 {@link ShopEntry#goodsSlotIcons}）+ 数量，纯展示（不比对拥有量，跟花费预览的核心区别）。 */
+    private record RewardCell(List<ShopEntry.DisplayIcon> icons, String amount, String exact, String name) {}
 
     /** 把组合商品清单拆成获得预览格，数量按 times 展开（各项独立数量 × times）。 */
     private static java.util.List<RewardCell> goodsRewardCells(List<ShopEntry.GoodsStack> goods, long times) {
@@ -2642,15 +3256,9 @@ public class ShopScreen extends ScaledScreen {
         java.util.List<RewardCell> cells = new java.util.ArrayList<>();
         for (ShopEntry.GoodsStack gs : goods) {
             java.math.BigInteger need = java.math.BigInteger.valueOf(gs.count()).multiply(t);
-            if (gs.isFluid()) {
-                net.minecraft.world.level.material.Fluid f = gs.fluid();
-                String name = "?";
-                try { name = new net.minecraftforge.fluids.FluidStack(f, 1).getDisplayName().getString(); } catch (Exception ignored) {}
-                cells.add(new RewardCell(ItemStack.EMPTY, f, formatBig(need) + "mB", groupBig(need) + "mB", name));
-            } else {
-                ItemStack unit = gs.makeStack();
-                cells.add(new RewardCell(unit, null, formatBig(need), groupBig(need), unit.getHoverName().getString()));
-            }
+            String unit = gs.isFluid() ? "mB" : "";
+            cells.add(new RewardCell(ShopEntry.goodsSlotIcons(gs), formatBig(need) + unit, groupBig(need) + unit,
+                    ShopEntry.goodsSlotDisplayName(gs)));
         }
         return cells;
     }
@@ -2678,8 +3286,7 @@ public class ShopScreen extends ScaledScreen {
             RewardCell cell = cells.get(i);
             boolean hv = GuiRenderUtil.isHovering(mx, my, sx, sy, 20, 20);
             EditorWidgets.checkerSlot(g, sx, sy, hv);
-            if (cell.fluid() != null) renderFluidIcon(g, sx + 2, sy + 2, 16, cell.fluid());
-            else if (cell.item() != null && !cell.item().isEmpty()) g.renderItem(cell.item(), sx + 2, sy + 2);
+            renderIconComposite(g, cell.icons(), sx, sy);
             g.drawCenteredString(this.font, "§f" + cell.amount(), sx + 10, sy + 22, WHITE);
             if (hv) previewHoverName = "§f" + cell.name() + " §7×" + cell.exact();
         }
@@ -2834,7 +3441,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
-        if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
+        if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
         // 悬停货币栏：显示货币全名 + 精确余额
         ResourceLocation cur = hoveredCurrency(smx, smy);
         if (cur != null) {
@@ -2877,7 +3484,7 @@ public class ShopScreen extends ScaledScreen {
         if (e.hasMultipleGoods()) {
             StringBuilder gc = new StringBuilder("§7成分: §f");
             for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
-                gc.append(gs.count()).append('×').append(new ItemStack(gs.item()).getHoverName().getString()).append(' ');
+                gc.append(gs.count()).append('×').append(ShopEntry.goodsSlotDisplayName(gs)).append(' ');
             }
             lines.add(Component.literal(gc.toString().trim()));
         } else {

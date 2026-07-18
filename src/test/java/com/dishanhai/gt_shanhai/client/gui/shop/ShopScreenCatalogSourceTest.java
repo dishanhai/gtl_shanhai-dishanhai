@@ -22,6 +22,8 @@ class ShopScreenCatalogSourceTest {
                 () -> assertTrue(source.contains("ShopGridViewport.visibleRange")),
                 () -> assertTrue(source.contains("ShopGridViewport.indexAt")),
                 () -> assertTrue(source.contains("drawLoadingCell")),
+                () -> assertTrue(source.contains("cardCategoryBadge")),
+                () -> assertTrue(source.contains("GuiRenderUtil.trimText(this.font, categoryBadge")),
                 () -> assertFalse(source.contains("ShopConfig.getTopCategories")),
                 () -> assertFalse(source.contains("ShopConfig.getSubCategories")),
                 () -> assertFalse(source.contains("ShopConfig.getEntriesOfGroup")));

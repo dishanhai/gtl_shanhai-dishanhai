@@ -129,4 +129,22 @@ public final class ShopCost {
         for (ExchangeEntry.Ingredient in : physical) if (in.isFluid) r.add(in);
         return r;
     }
+
+    /**
+     * 按保留百分比整体缩放钱包通道（星火/币种/EU）；实物成本（{@link #physical}）原样不变，
+     * 数量打折有取整歧义（如「3个铁锭打8折」无法表达），跟 {@link ShopEntry#getEffectiveCost} 同一口径。
+     * 有原值的通道折后至少保留 1（避免变相免费/变相白送）。供限时折扣、会员折扣、出售价差等场景复用。
+     * @param keepPercent 保留百分比，应在 [1,100]，调用方自行夹范围（越界不做防御，纯计算工具）
+     */
+    public ShopCost scaledTo(int keepPercent) {
+        BigInteger mul = BigInteger.valueOf(keepPercent);
+        BigInteger hundred = BigInteger.valueOf(100);
+        BigInteger newSpark = spark.signum() > 0 ? spark.multiply(mul).divide(hundred).max(BigInteger.ONE) : BigInteger.ZERO;
+        LinkedHashMap<ResourceLocation, BigInteger> newCoins = new LinkedHashMap<>();
+        for (Map.Entry<ResourceLocation, BigInteger> e : coins.entrySet()) {
+            newCoins.put(e.getKey(), e.getValue().multiply(mul).divide(hundred).max(BigInteger.ONE));
+        }
+        BigInteger newEu = eu.signum() > 0 ? eu.multiply(mul).divide(hundred).max(BigInteger.ONE) : BigInteger.ZERO;
+        return new ShopCost(newSpark, newCoins, physical, newEu);
+    }
 }
