@@ -4,9 +4,9 @@
 
 **Goal:** 新增原初万象衍生核心，以空闲 10x、二级晋升 100x、一级晋升 1000x 的非叠加阶梯倍率，统一放大原始终焉引擎挂载模块的全部配方输出并强制满概率。
 
-**Architecture:** 核心实现窄接口并从自身实际运行配方解析当前阶段；宿主按 tick 扫描已连接模块并缓存最高倍率；`PrimordialModuleRecipeLogic` 在输出容量预检和最终无线输出构建时分别创建一次放大副本。两个晋升配方类型由山海署名 KubeJS startup script 注册，Java 只按 `gtceu` ID 查表。
+**Architecture:** 核心实现窄接口并从自身实际运行配方解析当前阶段；宿主按 tick 扫描已连接模块并缓存最高倍率；`PrimordialModuleRecipeLogic` 在输出容量预检和最终无线输出构建时分别创建一次放大副本。两个晋升配方类型由 `DShanhaiRecipeTypes.init()` 在 Java 注册链正式注册。
 
-**Tech Stack:** Java 17、Forge 1.20.1、GTCEu 1.4.4、GTLCore 1.2.3.0-fix9、GTLAdditions、KubeJS Rhino、JUnit 5、Gradle 8.8。
+**Tech Stack:** Java 17、Forge 1.20.1、GTCEu 1.4.4、GTLCore 1.2.3.0-fix9、GTLAdditions、JUnit 5、Gradle 8.8。
 
 ---
 
@@ -15,130 +15,70 @@
 **新增：**
 
 - `src/main/java/com/dishanhai/gt_shanhai/api/machine/primordial/IPrimordialOutputMultiplierModule.java`：功能模块倍率接口。
-- `src/main/java/com/dishanhai/gt_shanhai/api/recipe/PrimordialMyriadRecipeTypes.java`：两个启动期配方类型的 ID 与严格查表入口。
+- `src/main/java/com/dishanhai/gt_shanhai/api/recipe/PrimordialMyriadRecipeTypes.java`：两个 Java 注册配方类型的稳定 ID 与字段访问入口。
 - `src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/PrimordialRecipeOutputAmplifier.java`：只负责输出倍率和概率满值的配方副本变换。
 - `src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/module/core/PrimordialMyriadProliferationCore.java`：核心机器及阶段状态。
 - `src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/module/core/PrimordialMyriadProliferationCoreLogic.java`：核心自身的双配方类型运行逻辑。
 - `src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/module/core/PrimordialMyriadProliferationCoreStructure.java`：仅要求物品/流体输入能力的标准原初模块结构。
 - `src/test/java/com/dishanhai/gt_shanhai/common/machine/primordial/module/core/PrimordialMyriadProliferationCoreTest.java`：阶段、非叠加与输出变换回归。
-- `D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/kubejs/startup_scripts/山海的原初万象晋升配方类型.js`：Rhino/IIFE 启动期配方类型注册。
 
 **修改：**
 
 - `src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/PrimordialOmegaEngineMachine.java`：聚合并缓存最高挂载倍率。
 - `src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/PrimordialOmegaEngineModuleBase.java`：向模块逻辑暴露宿主倍率。
 - `src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/PrimordialModuleRecipeLogic.java`：接入放大后的容量检查与输出构建。
+- `src/main/java/com/dishanhai/gt_shanhai/api/recipe/DShanhaiRecipeTypes.java`：正式注册两个晋升配方类型。
 - `src/main/java/com/dishanhai/gt_shanhai/common/machine/DShanhaiMachines.java`：注册核心机器、结构、配方类型和 tooltip。
 - `src/main/resources/assets/gt_shanhai/lang/zh_cn.json`：中文机器、模式和配方类型文本。
 - `src/main/resources/assets/gt_shanhai/lang/en_us.json`：英文机器、模式和配方类型文本。
 
 ---
 
-### Task 1: 注册两个启动期晋升配方类型
+### Task 1: 在 Java 注册两个晋升配方类型
 
 **Files:**
-- Create: `D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/kubejs/startup_scripts/山海的原初万象晋升配方类型.js`
 - Create: `src/main/java/com/dishanhai/gt_shanhai/api/recipe/PrimordialMyriadRecipeTypes.java`
-- Test: `src/test/java/com/dishanhai/gt_shanhai/common/machine/primordial/module/core/PrimordialMyriadProliferationCoreTest.java`
+- Modify: `src/main/java/com/dishanhai/gt_shanhai/api/recipe/DShanhaiRecipeTypes.java`
+- Test: `src/test/java/com/dishanhai/gt_shanhai/api/recipe/PrimordialMyriadRecipeTypesTest.java`
 
-- [ ] **Step 1: 写配方类型契约失败测试**
+- [ ] **Step 1: 写 Java 注册契约失败测试**
 
-在测试中读取 Java 查表类，固定两个完整 ID，并禁止 `GTRecipeTypes.register`：
-
-```java
-@Test
-void ascensionRecipeTypesAreLookedUpWithoutJavaRegistration() throws Exception {
-    String source = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/api/recipe/PrimordialMyriadRecipeTypes.java"));
-    assertTrue(source.contains("gtceu:primordial_myriad_ascension_tier_2"));
-    assertTrue(source.contains("gtceu:primordial_myriad_ascension_tier_1"));
-    assertTrue(source.contains("GTRegistries.RECIPE_TYPES.get"));
-    assertFalse(source.contains("GTRecipeTypes.register"));
-}
-```
+测试固定两个完整 ID，要求 `DShanhaiRecipeTypes` 声明对应字段，并在 `init()` 中以 `multiblock` 类型和 `setMaxIOSize(4, 0, 4, 0)` 正式注册。
 
 - [ ] **Step 2: 运行测试确认失败**
 
 Run:
 
 ```powershell
-.\gradle-install\gradle-8.8\bin\gradle.bat test --tests "com.dishanhai.gt_shanhai.common.machine.primordial.module.core.PrimordialMyriadProliferationCoreTest" --no-daemon
+.\gradle-install\gradle-8.8\bin\gradle.bat test --tests "com.dishanhai.gt_shanhai.api.recipe.PrimordialMyriadRecipeTypesTest" --no-daemon
 ```
 
-Expected: FAIL，提示 `PrimordialMyriadRecipeTypes.java` 不存在。
+Expected: FAIL，提示 `DShanhaiRecipeTypes` 缺少两个晋升类型字段。
 
-- [ ] **Step 3: 新建 Rhino/IIFE startup script**
+- [ ] **Step 3: 在 `DShanhaiRecipeTypes.init()` 注册类型**
 
-```javascript
-(function () {
-    'use strict';
+两个字段均使用 `GTRecipeTypes.register(..., "multiblock")`，最大 IO 为 `4, 0, 4, 0`，EU 方向为输入，并沿用现有进度条、槽位覆盖和声音配置。
 
-    GTCEuStartupEvents.registry('gtceu:recipe_type', function (event) {
-        function createAscensionType(id) {
-            event.create(id, 'basic')
-                .category('multiblock')
-                .setMaxIOSize(4, 0, 4, 0)
-                .setEUIO(IO.IN)
-                .setMaxTooltips(4)
-                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
-                .setSlotOverlay(false, false, GuiTextures.DUST_OVERLAY)
-                .setSlotOverlay(false, true, GuiTextures.FLUID_SLOT)
-                .setSound(GTSoundEntries.ARC);
-        }
+- [ ] **Step 4: 新建 Java 字段访问类**
 
-        createAscensionType('gtceu:primordial_myriad_ascension_tier_2');
-        createAscensionType('gtceu:primordial_myriad_ascension_tier_1');
-    });
-})();
-```
+`PrimordialMyriadRecipeTypes` 保留两个 `gtceu` ID，`requireTier2()` / `requireTier1()` 直接返回 `DShanhaiRecipeTypes` 的正式注册字段，不使用 `GTRegistries` 查表。
 
-- [ ] **Step 4: 新建严格 Java 查表类**
-
-```java
-public final class PrimordialMyriadRecipeTypes {
-    public static final ResourceLocation TIER_2_ID =
-            new ResourceLocation("gtceu", "primordial_myriad_ascension_tier_2");
-    public static final ResourceLocation TIER_1_ID =
-            new ResourceLocation("gtceu", "primordial_myriad_ascension_tier_1");
-
-    public static GTRecipeType requireTier2() {
-        return require(TIER_2_ID);
-    }
-
-    public static GTRecipeType requireTier1() {
-        return require(TIER_1_ID);
-    }
-
-    private static GTRecipeType require(ResourceLocation id) {
-        GTRecipeType type = GTRegistries.RECIPE_TYPES.get(id);
-        if (type == null) {
-            throw new IllegalStateException("缺少启动期配方类型: " + id);
-        }
-        return type;
-    }
-
-    private PrimordialMyriadRecipeTypes() {}
-}
-```
-
-- [ ] **Step 5: 验证脚本语法和 Java 测试**
+- [ ] **Step 5: 验证 Java 测试与编译**
 
 Run:
 
 ```powershell
-Select-String -LiteralPath "D:\minecraft\gtl\.minecraft\versions\八周目\.minecraft\versions\GTL九周目\.minecraft\versions\GTL九周目\kubejs\startup_scripts\山海的原初万象晋升配方类型.js" -Pattern "=>|\bconst\b|\blet\b|GTRecipeTypes.register"
-.\gradle-install\gradle-8.8\bin\gradle.bat test --tests "com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialMyriadProliferationCoreTest" --no-daemon
+.\gradle-install\gradle-8.8\bin\gradle.bat test --tests "com.dishanhai.gt_shanhai.api.recipe.PrimordialMyriadRecipeTypesTest" compileJava --rerun-tasks --no-daemon
 ```
 
-Expected: `Select-String` 无输出；测试进入下一项失败而不是配方类型契约失败。
+Expected: `BUILD SUCCESSFUL`，Java 注册契约测试通过。
 
 - [ ] **Step 6: 提交配方类型**
 
 ```powershell
-git add src/main/java/com/dishanhai/gt_shanhai/api/recipe/PrimordialMyriadRecipeTypes.java src/test/java/com/dishanhai/gt_shanhai/common/machine/primordial/module/core/PrimordialMyriadProliferationCoreTest.java
-git commit -m "feat(primordial): 添加万象衍生晋升配方类型引用"
+git add src/main/java/com/dishanhai/gt_shanhai/api/recipe/DShanhaiRecipeTypes.java src/main/java/com/dishanhai/gt_shanhai/api/recipe/PrimordialMyriadRecipeTypes.java src/test/java/com/dishanhai/gt_shanhai/api/recipe/PrimordialMyriadRecipeTypesTest.java
+git commit -m "fix(primordial): 在Java注册万象晋升配方类型"
 ```
-
-游戏端 startup script 不属于模组仓库提交，但必须保留在九周目真实 KubeJS 路径。
 
 ### Task 2: 添加功能接口和宿主最高倍率聚合
 
@@ -509,11 +449,11 @@ jar tf build\libs\gt_shanhai.jar | Select-String "PrimordialMyriad|primordial_my
 Get-FileHash -Algorithm SHA256 build\libs\gt_shanhai.jar
 ```
 
-Expected: 核心、逻辑、结构、接口、查表类和 Lang 均在 Jar；记录 SHA256。
+Expected: 核心、逻辑、结构、接口、配方类型字段访问类和 Lang 均在 Jar；记录 SHA256。
 
 - [ ] **Step 4: 启动期与实机验证**
 
-启动九周目后检查 `latest.log` 无配方类型缺失、重复注册或 KubeJS startup 错误。依次验证：
+启动九周目后检查 `latest.log` 无 Java 配方类型缺失或重复注册错误。依次验证：
 
 1. 无核心时原模块 1x。
 2. 核心空闲时 10x 且概率产物必出。

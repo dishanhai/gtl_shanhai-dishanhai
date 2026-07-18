@@ -15,6 +15,8 @@ public class DShanhaiRecipeTypes {
     public static GTRecipeType SPACETIME_DISTORTION;
     public static GTRecipeType KU_MING_YUAN_YANG;
     public static GTRecipeType PRIMORDIAL_POWER_GENERATOR;
+    public static GTRecipeType PRIMORDIAL_MYRIAD_ASCENSION_TIER_2;
+    public static GTRecipeType PRIMORDIAL_MYRIAD_ASCENSION_TIER_1;
     public static GTRecipeType PRIMORDIAL_BIOLOGICAL_CORE;
     public static GTRecipeType PRIMORDIAL_MATTER_RECOMBINATION;
     public static GTRecipeType PRIMORDIAL_CAUSAL_WEAVING;
@@ -87,6 +89,24 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
+
+        PRIMORDIAL_MYRIAD_ASCENSION_TIER_2 = GTRecipeTypes.register("primordial_myriad_ascension_tier_2", "multiblock")
+                .setMaxIOSize(4, 0, 4, 0)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
+                .setSlotOverlay(false, false, true, GuiTextures.FLUID_SLOT)
+                .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
+                .setSound(GTSoundEntries.ARC);
+
+        PRIMORDIAL_MYRIAD_ASCENSION_TIER_1 = GTRecipeTypes.register("primordial_myriad_ascension_tier_1", "multiblock")
+                .setMaxIOSize(4, 0, 4, 0)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
+                .setSlotOverlay(false, false, true, GuiTextures.FLUID_SLOT)
+                .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
+                .setSound(GTSoundEntries.ARC);
 
         PRIMORDIAL_STELLAR_REACTION = GTRecipeTypes.register("primordial_stellar_reaction", "multiblock")
                 .setMaxIOSize(5, 3, 5, 3)

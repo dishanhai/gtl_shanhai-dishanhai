@@ -12,18 +12,17 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PrimordialMyriadRecipeTypesTest {
 
     private static final Path RECIPE_TYPES_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "api", "recipe", "PrimordialMyriadRecipeTypes.java");
+    private static final Path DISHANHAI_RECIPE_TYPES_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "api", "recipe", "DShanhaiRecipeTypes.java");
 
     @Test
     void recipeTypeApiKeepsRequiredVisibilityAndSignatures() throws ReflectiveOperationException {
@@ -40,47 +39,30 @@ class PrimordialMyriadRecipeTypesTest {
         assertRecipeTypeAccessor(type.getMethod("requireTier2"));
         assertRecipeTypeAccessor(type.getMethod("requireTier1"));
 
-        Method require = type.getDeclaredMethod("require", ResourceLocation.class);
-        assertTrue(Modifier.isPrivate(require.getModifiers()));
-        assertTrue(Modifier.isStatic(require.getModifiers()));
-        assertEquals(GTRecipeType.class, require.getReturnType());
-
         Constructor<?>[] constructors = type.getDeclaredConstructors();
         assertEquals(1, constructors.length);
         assertTrue(Modifier.isPrivate(constructors[0].getModifiers()));
     }
 
     @Test
-    void javaDoesNotRegisterRecipeTypes() throws IOException {
-        String source = Files.readString(RECIPE_TYPES_SOURCE);
+    void myriadAscensionTypesAreRegisteredInJava() throws IOException, ReflectiveOperationException {
+        Field tier2 = DShanhaiRecipeTypes.class.getField("PRIMORDIAL_MYRIAD_ASCENSION_TIER_2");
+        Field tier1 = DShanhaiRecipeTypes.class.getField("PRIMORDIAL_MYRIAD_ASCENSION_TIER_1");
+        assertEquals(GTRecipeType.class, tier2.getType());
+        assertEquals(GTRecipeType.class, tier1.getType());
 
-        assertFalse(source.contains("GTRecipeTypes.register"));
-    }
+        String registrations = Files.readString(DISHANHAI_RECIPE_TYPES_SOURCE).replace("\r\n", "\n");
+        assertTrue(registrations.contains(
+                "PRIMORDIAL_MYRIAD_ASCENSION_TIER_2 = GTRecipeTypes.register(\"primordial_myriad_ascension_tier_2\", \"multiblock\")\n" +
+                        "                .setMaxIOSize(4, 0, 4, 0)"));
+        assertTrue(registrations.contains(
+                "PRIMORDIAL_MYRIAD_ASCENSION_TIER_1 = GTRecipeTypes.register(\"primordial_myriad_ascension_tier_1\", \"multiblock\")\n" +
+                        "                .setMaxIOSize(4, 0, 4, 0)"));
 
-    @Test
-    void requireResolvedUsesRequestedIdAndReturnsLookupResult() {
-        Object token = new Object();
-        AtomicReference<ResourceLocation> lookedUpId = new AtomicReference<>();
-
-        Object result = PrimordialMyriadRecipeTypes.requireResolved(
-                PrimordialMyriadRecipeTypes.TIER_2_ID,
-                id -> {
-                    lookedUpId.set(id);
-                    return token;
-                });
-
-        assertEquals(PrimordialMyriadRecipeTypes.TIER_2_ID, lookedUpId.get());
-        assertSame(token, result);
-    }
-
-    @Test
-    void requireResolvedRejectsMissingRecipeTypeWithFullId() {
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> PrimordialMyriadRecipeTypes.requireResolved(
-                        PrimordialMyriadRecipeTypes.TIER_1_ID,
-                        id -> null));
-
-        assertEquals("缺少启动期配方类型: " + PrimordialMyriadRecipeTypes.TIER_1_ID, error.getMessage());
+        String accessors = Files.readString(RECIPE_TYPES_SOURCE);
+        assertTrue(accessors.contains("return DShanhaiRecipeTypes.PRIMORDIAL_MYRIAD_ASCENSION_TIER_2;"));
+        assertTrue(accessors.contains("return DShanhaiRecipeTypes.PRIMORDIAL_MYRIAD_ASCENSION_TIER_1;"));
+        assertFalse(accessors.contains("GTRegistries"));
     }
 
     private static void assertRecipeTypeIdField(Field field, ResourceLocation expected) throws IllegalAccessException {

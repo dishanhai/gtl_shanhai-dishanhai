@@ -47,13 +47,11 @@
 - 最大流体输入：4
 - 最大流体输出：0
 
-两个配方类型均为耗能多方块配方。配方本身没有输出，只有在真实匹配输入、扣除输入并持续推进进度时才提供高阶段倍率。具体配方内容由后续 KubeJS 配方脚本定义，本模组只提供类型和运行语义。
+两个配方类型均为耗能多方块配方。配方本身没有输出，只有在真实匹配输入、扣除输入并持续推进进度时才提供高阶段倍率。本模组负责类型注册和运行语义，具体配方内容可通过正常数据包配方注册链提供。
 
 ### 注册时机
 
-两个类型由九周目游戏端山海署名的 startup script 在 `GTCEuStartupEvents.registry('gtceu:recipe_type')` 中注册，脚本保持 IIFE 包裹并只使用 Rhino 兼容语法。Java 侧禁止再次调用 `GTRecipeTypes.register` 创建同名类型，只通过 `GTRegistries.RECIPE_TYPES.get(new ResourceLocation('gtceu', id))` 查表引用，确保 KubeJS 启动期和 JEI 都能稳定看见类型。
-
-若任一类型在机器注册阶段仍未找到，机器注册必须明确记录缺失 ID 并拒绝用其他配方类型替代，避免一级、二级阶段被错误映射。
+两个类型在 Java 模组的 `DShanhaiRecipeTypes.init()` 中通过 `GTRecipeTypes.register(...)` 正式注册，沿用现有山海配方类型注册事件和生命周期。机器直接引用 `DShanhaiRecipeTypes` 字段，不依赖任何外部 KubeJS startup script 或运行时查表兜底。
 
 ## 模块结构与注册
 
