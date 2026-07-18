@@ -11,6 +11,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 public class PrimordialMyriadProliferationCore extends PrimordialOmegaEngineModuleBase
         implements IPrimordialOutputMultiplierModule {
@@ -31,15 +33,25 @@ public class PrimordialMyriadProliferationCore extends PrimordialOmegaEngineModu
 
     @Override
     public int getCurrentOutputMultiplier() {
-        boolean attached = isFormed() && isHostConnected();
-        if (!attached) {
-            return resolveOutputMultiplier(false, false, null);
-        }
-
         PrimordialMyriadProliferationCoreLogic logic = getRecipeLogic();
-        boolean working = logic.isWorking();
-        ResourceLocation recipeTypeId = working ? getRecipeTypeId(logic.getLastRecipe()) : null;
-        return resolveOutputMultiplier(true, working, recipeTypeId);
+        return resolveOutputMultiplier(
+                isFormed(),
+                this::isHostConnected,
+                logic::isWorking,
+                () -> getRecipeTypeId(logic.getLastRecipe()));
+    }
+
+    static int resolveOutputMultiplier(boolean formed,
+                                       BooleanSupplier hostConnected,
+                                       BooleanSupplier working,
+                                       Supplier<ResourceLocation> recipeTypeId) {
+        if (!formed || !hostConnected.getAsBoolean()) {
+            return 1;
+        }
+        if (!working.getAsBoolean()) {
+            return 10;
+        }
+        return resolveOutputMultiplier(true, true, recipeTypeId.get());
     }
 
     static int resolveOutputMultiplier(boolean attached, boolean working,

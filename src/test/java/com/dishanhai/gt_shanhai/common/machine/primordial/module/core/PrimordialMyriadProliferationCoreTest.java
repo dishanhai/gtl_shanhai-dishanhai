@@ -14,6 +14,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -39,6 +40,88 @@ class PrimordialMyriadProliferationCoreTest {
         assertEquals(10, PrimordialMyriadProliferationCore.resolveOutputMultiplier(
                 true, true, new ResourceLocation("gtceu:electric_furnace")));
         assertEquals(10, PrimordialMyriadProliferationCore.resolveOutputMultiplier(true, true, null));
+    }
+
+    @Test
+    void runtimeStateShortCircuitsBeforeReadingUnavailableState() {
+        AtomicInteger hostReads = new AtomicInteger();
+        assertEquals(1, PrimordialMyriadProliferationCore.resolveOutputMultiplier(
+                false,
+                () -> {
+                    hostReads.incrementAndGet();
+                    return true;
+                },
+                () -> {
+                    throw new AssertionError("未形成时不得读取工作状态");
+                },
+                () -> {
+                    throw new AssertionError("未形成时不得读取 lastRecipe");
+                }));
+        assertEquals(0, hostReads.get(), "未形成时不得尝试连接宿主");
+
+        AtomicInteger workingReads = new AtomicInteger();
+        assertEquals(1, PrimordialMyriadProliferationCore.resolveOutputMultiplier(
+                true,
+                () -> false,
+                () -> {
+                    workingReads.incrementAndGet();
+                    return true;
+                },
+                () -> {
+                    throw new AssertionError("未连接宿主时不得读取 lastRecipe");
+                }));
+        assertEquals(0, workingReads.get(), "未连接宿主时不得读取工作状态");
+    }
+
+    @Test
+    void idleRuntimeStateDoesNotReadStaleLastRecipe() {
+        AtomicInteger recipeReads = new AtomicInteger();
+
+        int multiplier = PrimordialMyriadProliferationCore.resolveOutputMultiplier(
+                true,
+                () -> true,
+                () -> false,
+                () -> {
+                    recipeReads.incrementAndGet();
+                    return PrimordialMyriadRecipeTypes.TIER_1_ID;
+                });
+
+        assertEquals(10, multiplier);
+        assertEquals(0, recipeReads.get(), "working=false 时不得读取缓存的一级配方");
+    }
+
+    @Test
+    void activeRuntimeStateReadsCurrentRecipeTypeExactlyOnce() {
+        AtomicInteger recipeReads = new AtomicInteger();
+
+        int multiplier = PrimordialMyriadProliferationCore.resolveOutputMultiplier(
+                true,
+                () -> true,
+                () -> true,
+                () -> {
+                    recipeReads.incrementAndGet();
+                    return PrimordialMyriadRecipeTypes.TIER_2_ID;
+                });
+
+        assertEquals(100, multiplier);
+        assertEquals(1, recipeReads.get());
+    }
+
+    @Test
+    void publicMultiplierEntryPointDelegatesToTheLazyRuntimeStateResolver() throws Exception {
+        String method = extractBlock(Files.readString(CORE_SOURCE),
+                "public int getCurrentOutputMultiplier() {");
+
+        assertEquals(normalizeWhitespace("""
+                {
+                    PrimordialMyriadProliferationCoreLogic logic = getRecipeLogic();
+                    return resolveOutputMultiplier(
+                            isFormed(),
+                            this::isHostConnected,
+                            logic::isWorking,
+                            () -> getRecipeTypeId(logic.getLastRecipe()));
+                }
+                """), normalizeWhitespace(method));
     }
 
     @Test
@@ -71,6 +154,15 @@ class PrimordialMyriadProliferationCoreTest {
                 "public static BlockPattern createPattern(MultiblockMachineDefinition definition) {");
         assertEquals(1, countExact(method,
                 "MultiBlockStructure.INSTANCE.getFORGE_OF_THE_ANTICHRIST_MODULE()"));
+        assertEquals(2, countExact(method, "Predicates.abilities("),
+                "整个结构只能声明物品输入与流体输入两种能力");
+        assertEquals(1, countExact(method,
+                "Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1)"));
+        assertEquals(1, countExact(method,
+                "Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1)"));
+        assertFalse(method.contains("EXPORT_ITEMS"));
+        assertFalse(method.contains("EXPORT_FLUIDS"));
+
         String inputAbilitySlot = extractBetween(method, ".where('B',", ".where('C',");
         assertEquals(1, countExact(inputAbilitySlot,
                 "Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1)"));
@@ -133,5 +225,9 @@ class PrimordialMyriadProliferationCoreTest {
             offset += expected.length();
         }
         return count;
+    }
+
+    private static String normalizeWhitespace(String value) {
+        return value.replaceAll("\\s+", " ").trim();
     }
 }
