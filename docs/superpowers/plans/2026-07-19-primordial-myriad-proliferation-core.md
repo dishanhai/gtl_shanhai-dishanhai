@@ -272,9 +272,10 @@ git commit -m "feat(primordial): 实现万象衍生核心晋升状态"
 void amplificationCopiesOnlyOutputsAndForcesNormalAndTickChance() throws Exception {
     String amplifier = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/PrimordialRecipeOutputAmplifier.java"));
     String logic = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/machine/primordial/PrimordialModuleRecipeLogic.java"));
-    assertTrue(amplifier.contains("recipe.copy(ContentModifier.multiplier(multiplier), false)"));
-    assertTrue(amplifier.contains("forceFullChance(copy.outputs)"));
-    assertTrue(amplifier.contains("forceFullChance(copy.tickOutputs)"));
+    assertTrue(amplifier.contains("GTRecipe copy = recipe.copy()"));
+    assertTrue(amplifier.contains("amplifyAndForceFullChance(copy.outputs"));
+    assertTrue(amplifier.contains("amplifyAndForceFullChance(copy.tickOutputs"));
+    assertFalse(amplifier.contains("recipe.copy(ContentModifier.multiplier(multiplier)"));
     assertTrue(amplifier.contains("content.chance = 10000"));
     assertTrue(amplifier.contains("content.maxChance = 10000"));
     assertTrue(logic.contains("amplifyForMountedCore(recipe)"));
@@ -292,17 +293,23 @@ Expected: FAIL，输出变换类不存在。
 final class PrimordialRecipeOutputAmplifier {
     static GTRecipe apply(GTRecipe recipe, int multiplier) {
         if (recipe == null || multiplier <= 1) return recipe;
-        GTRecipe copy = recipe.copy(ContentModifier.multiplier(multiplier), false);
-        forceFullChance(copy.outputs);
-        forceFullChance(copy.tickOutputs);
+        GTRecipe copy = recipe.copy();
+        ContentModifier modifier = ContentModifier.multiplier(multiplier);
+        amplifyAndForceFullChance(copy.outputs, modifier);
+        amplifyAndForceFullChance(copy.tickOutputs, modifier);
         return copy;
     }
 
-    private static void forceFullChance(Map<?, List<Content>> contentsMap) {
-        for (List<Content> contents : contentsMap.values()) {
-            for (Content content : contents) {
+    private static void amplifyAndForceFullChance(
+            Map<RecipeCapability<?>, List<Content>> contentsMap,
+            ContentModifier modifier) {
+        for (var entry : contentsMap.entrySet()) {
+            List<Content> contents = entry.getValue();
+            for (int i = 0; i < contents.size(); i++) {
+                Content content = contents.get(i);
                 content.chance = 10000;
                 content.maxChance = 10000;
+                contents.set(i, content.copy(entry.getKey(), modifier));
             }
         }
     }
@@ -310,6 +317,8 @@ final class PrimordialRecipeOutputAmplifier {
     private PrimordialRecipeOutputAmplifier() {}
 }
 ```
+
+禁止使用 `GTRecipe.copy(modifier, false)`：GTCEu 1.4.4 的该重载会同时修改 `inputs`、`outputs`、`tickInputs` 与 `tickOutputs`，布尔参数只控制是否修改时长。测试必须验证普通输入和持续输入在放大前后内容及数量完全不变。
 
 - [ ] **Step 4: 在逻辑中添加唯一宿主变换入口**
 
