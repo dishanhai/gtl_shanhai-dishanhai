@@ -24,8 +24,8 @@ public final class PinyinSearchBridge {
         Method m = null;
         try {
             Class<?> matchClass = Class.forName("me.towdium.jecharacters.utils.Match");
-            // public static boolean contains(String source, CharSequence pattern)
-            m = matchClass.getMethod("contains", String.class, CharSequence.class);
+            // public static boolean contains(CharSequence source, CharSequence pattern)
+            m = matchClass.getMethod("contains", CharSequence.class, CharSequence.class);
         } catch (Throwable ignored) {
             // 未装 JECharacters 或 API 变动 —— 静默降级
         }

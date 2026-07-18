@@ -99,6 +99,12 @@ class EaepProviderRecipeTypeBridgeSourceTest {
                 "超过最大类型数量必须截断，避免按钮文本溢出");
         assertTrue(bridge.contains("new LinkedHashSet<>()"),
                 "同名 provider 合并配方类型时必须保留星律收集顺序");
+        assertTrue(bridge.contains("PinyinSearchBridge.contains"),
+                "配方类型匹配必须复用拼音桥接，不能只做普通字符串包含");
+        String pinyinBridge = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "client", "gui", "scaled", "PinyinSearchBridge.java"));
+        assertTrue(pinyinBridge.contains("getMethod(\"contains\", CharSequence.class, CharSequence.class)"),
+                "JECharacters Match.contains 的两个参数都必须按 CharSequence 反射");
     }
 
     private static void assertOrder(String source, String first, String second, String message) {

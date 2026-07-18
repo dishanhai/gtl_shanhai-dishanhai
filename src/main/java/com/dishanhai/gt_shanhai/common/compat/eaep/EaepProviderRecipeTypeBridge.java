@@ -4,6 +4,7 @@ import appeng.helpers.patternprovider.PatternContainer;
 
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.client.gui.scaled.PinyinSearchBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -111,12 +112,12 @@ public final class EaepProviderRecipeTypeBridge {
             return;
         }
         indices.sort((left, right) -> {
-            boolean leftMatches = providerMatchesRecipeType(names.get(left), recipeTypesByName, query);
-            boolean rightMatches = providerMatchesRecipeType(names.get(right), recipeTypesByName, query);
-            if (leftMatches == rightMatches) {
-                return Integer.compare(left, right);
+            int leftScore = providerRecipeTypeMatchScore(names.get(left), recipeTypesByName, query);
+            int rightScore = providerRecipeTypeMatchScore(names.get(right), recipeTypesByName, query);
+            if (leftScore != rightScore) {
+                return Integer.compare(rightScore, leftScore);
             }
-            return leftMatches ? -1 : 1;
+            return Integer.compare(left, right);
         });
         reorder(ids, indices);
         reorder(names, indices);
@@ -176,28 +177,46 @@ public final class EaepProviderRecipeTypeBridge {
         }
         Map<String, String> mappings = loadRecipeTypeNameMappings();
         for (String typeId : typeIds) {
-            if (recipeTypeMatchesQuery(typeId, normalizedQuery, mappings)) {
+            if (recipeTypeMatchScore(typeId, normalizedQuery, mappings) > 0) {
                 return true;
             }
         }
         return false;
     }
 
+    private static int providerRecipeTypeMatchScore(
+            String providerName, Map<String, Set<String>> recipeTypesByName, String query) {
+        Set<String> typeIds = recipeTypesByName.get(providerName);
+        if (typeIds == null || typeIds.isEmpty()) {
+            return 0;
+        }
+        String normalizedQuery = normalize(query);
+        if (normalizedQuery.isEmpty()) {
+            return 0;
+        }
+        Map<String, String> mappings = loadRecipeTypeNameMappings();
+        int bestScore = 0;
+        for (String typeId : typeIds) {
+            bestScore = Math.max(bestScore, recipeTypeMatchScore(typeId, normalizedQuery, mappings));
+        }
+        return bestScore;
+    }
+
     private static boolean recipeTypeMatchesQuery(String typeId, String query, Map<String, String> mappings) {
-        if (typeId == null || typeId.isBlank()) {
-            return false;
+        return recipeTypeMatchScore(typeId, query, mappings) > 0;
+    }
+
+    private static int recipeTypeMatchScore(String typeId, String query, Map<String, String> mappings) {
+        if (typeId == null || typeId.isBlank() || query == null || query.isBlank()) {
+            return 0;
         }
         String id = normalize(typeId);
         String path = id.contains(":") ? id.substring(id.indexOf(':') + 1) : id;
-        if (tokenMatches(id, query) || tokenMatches(path, query)) {
-            return true;
-        }
+        int bestScore = Math.max(tokenMatchScore(id, query), tokenMatchScore(path, query));
         String mappedById = mappings.get(id);
-        if (tokenMatches(mappedById, query)) {
-            return true;
-        }
+        bestScore = Math.max(bestScore, tokenMatchScore(mappedById, query));
         String mappedByPath = mappings.get(path);
-        return tokenMatches(mappedByPath, query);
+        return Math.max(bestScore, tokenMatchScore(mappedByPath, query));
     }
 
     private static String displayRecipeType(String typeId, Map<String, String> mappings) {
@@ -218,11 +237,27 @@ public final class EaepProviderRecipeTypeBridge {
     }
 
     private static boolean tokenMatches(String token, String query) {
+        return tokenMatchScore(token, query) > 0;
+    }
+
+    private static int tokenMatchScore(String token, String query) {
         if (token == null || token.isBlank()) {
-            return false;
+            return 0;
         }
         String normalized = normalize(token);
-        return normalized.equals(query) || normalized.contains(query) || query.contains(normalized);
+        if (normalized.equals(query)) {
+            return 100;
+        }
+        if (PinyinSearchBridge.contains(token, query)) {
+            return 90;
+        }
+        if (normalized.contains(query)) {
+            return 60;
+        }
+        if (query.contains(normalized)) {
+            return 20;
+        }
+        return 0;
     }
 
     private static synchronized Map<String, String> loadRecipeTypeNameMappings() {
