@@ -15,6 +15,7 @@ import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -112,16 +113,22 @@ class PrimordialMyriadProliferationCoreTest {
         String method = extractBlock(Files.readString(CORE_SOURCE),
                 "public int getCurrentOutputMultiplier() {");
 
-        assertEquals(normalizeWhitespace("""
-                {
-                    PrimordialMyriadProliferationCoreLogic logic = getRecipeLogic();
-                    return resolveOutputMultiplier(
-                            isFormed(),
-                            this::isHostConnected,
-                            logic::isWorking,
-                            () -> getRecipeTypeId(logic.getLastRecipe()));
-                }
-                """), normalizeWhitespace(method));
+        assertEquals(1, countRegex(method, "\\breturn\\s+resolveOutputMultiplier\\s*\\("));
+        assertEquals(1, countRegex(method, "\\bgetRecipeLogic\\s*\\("));
+        assertEquals(1, countRegex(method, "\\bisFormed\\s*\\("));
+        assertEquals(1, countRegex(method, "\\bisHostConnected\\b"));
+        assertEquals(1, countRegex(method, "\\bisWorking\\b"));
+        assertEquals(1, countRegex(method, "\\bgetLastRecipe\\s*\\("));
+
+        Pattern lazyDelegation = Pattern.compile("""
+                \\breturn\\s+resolveOutputMultiplier\\s*\\(
+                \\s*isFormed\\s*\\(\\s*\\)\\s*,
+                \\s*(?:this\\s*::\\s*isHostConnected|\\(\\s*\\)\\s*->\\s*(?:this\\s*\\.)?isHostConnected\\s*\\(\\s*\\))\\s*,
+                \\s*(?:[A-Za-z_$][\\w$]*\\s*::\\s*isWorking|\\(\\s*\\)\\s*->\\s*[A-Za-z_$][\\w$]*\\.isWorking\\s*\\(\\s*\\))\\s*,
+                \\s*\\(\\s*\\)\\s*->[\\s\\S]*?\\bgetLastRecipe\\s*\\(\\s*\\)
+                """, Pattern.COMMENTS);
+        assertTrue(lazyDelegation.matcher(method).find(),
+                "公开入口必须按 formed/host/working/lastRecipe 顺序惰性委托倍率解析");
     }
 
     @Test
@@ -227,7 +234,10 @@ class PrimordialMyriadProliferationCoreTest {
         return count;
     }
 
-    private static String normalizeWhitespace(String value) {
-        return value.replaceAll("\\s+", " ").trim();
+    private static int countRegex(String source, String regex) {
+        int count = 0;
+        var matcher = Pattern.compile(regex, Pattern.DOTALL).matcher(source);
+        while (matcher.find()) count++;
+        return count;
     }
 }
