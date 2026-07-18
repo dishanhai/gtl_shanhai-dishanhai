@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Function;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,9 +80,13 @@ class PrimordialSixfoldResourceRecipeTypesTest {
     void publicAccessorDelegatesRegistryLookupToTheTestedResolver() throws Exception {
         String source = Files.readString(SOURCE);
         String body = extractBlock(source, "public static GTRecipeType requireLargeVoidPump() {");
+        Pattern registryDelegation = Pattern.compile("""
+                return\\s+requireLargeVoidPump\\(\\s*id\\s*->\\s*
+                GTRegistries\\.RECIPE_TYPES\\.get\\(id\\)\\s*\\)\\s*;
+                """, Pattern.COMMENTS);
 
-        assertEquals("{ return requireLargeVoidPump(id -> GTRegistries.RECIPE_TYPES.get(id)); }",
-                normalizeWhitespace(body));
+        assertTrue(registryDelegation.matcher(body).find(),
+                "公开入口必须把 GT recipe type 注册表查找委托给可注入 resolver");
     }
 
     private static String extractBlock(String source, String declaration) {
@@ -95,9 +100,5 @@ class PrimordialSixfoldResourceRecipeTypesTest {
             if (current == '}' && --depth == 0) return source.substring(openBrace, i + 1);
         }
         throw new AssertionError("方法体未闭合: " + declaration);
-    }
-
-    private static String normalizeWhitespace(String value) {
-        return value.replaceAll("\\s+", " ").trim();
     }
 }

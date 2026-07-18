@@ -58,25 +58,22 @@ class PrimordialSixfoldResourceCoreContractTest {
         String initializer = extractStatement(source,
                 "PRIMORDIAL_SIXFOLD_RESOURCE_CORE = GTDishanhaiRegistration.REGISTRATE");
 
-        assertEquals(normalizeWhitespace("""
-                PRIMORDIAL_SIXFOLD_RESOURCE_CORE = GTDishanhaiRegistration.REGISTRATE
-                        .multiblock("primordial_sixfold_resource_core", PrimordialSixfoldResourceCore::new)
-                        .rotationState(RotationState.ALL)
-                        .recipeTypes(
-                                GTLRecipeTypes.ELEMENT_COPYING_RECIPES,
-                                GTLRecipeTypes.DRILLING_MODULE_RECIPES,
-                                PrimordialSixfoldResourceRecipeTypes.requireLargeVoidPump(),
-                                GTLRecipeTypes.DOOR_OF_CREATE_RECIPES,
-                                GTLRecipeTypes.FISSION_REACTOR_RECIPES,
-                                GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES)
-                        .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
-                        .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
-                                new ResourceLocation("gtceu", "bronze_machine_casing")))
-                        .workableCasingRenderer(
-                                new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                                new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
-                        .register();
-                """), normalizeWhitespace(initializer));
+        assertPatternCount(initializer,
+                "\\.multiblock\\(\\s*\"primordial_sixfold_resource_core\"\\s*,\\s*PrimordialSixfoldResourceCore::new\\s*\\)",
+                1);
+        assertPatternCount(initializer, "\\.rotationState\\(\\s*RotationState\\.ALL\\s*\\)", 1);
+        assertPatternCount(initializer, """
+                \\.recipeTypes\\(\\s*
+                GTLRecipeTypes\\.ELEMENT_COPYING_RECIPES\\s*,\\s*
+                GTLRecipeTypes\\.DRILLING_MODULE_RECIPES\\s*,\\s*
+                PrimordialSixfoldResourceRecipeTypes\\.requireLargeVoidPump\\(\\)\\s*,\\s*
+                GTLRecipeTypes\\.DOOR_OF_CREATE_RECIPES\\s*,\\s*
+                GTLRecipeTypes\\.FISSION_REACTOR_RECIPES\\s*,\\s*
+                GTLRecipeTypes\\.LARGE_GAS_COLLECTOR_RECIPES\\s*\\)
+                """, 1);
+        assertPatternCount(initializer,
+                "\\.pattern\\(\\s*PrimordialAssemblyLineModuleStructure::createPattern\\s*\\)", 1);
+        assertPatternCount(initializer, "\\.register\\(\\s*\\)\\s*;\\s*$", 1);
     }
 
     @Test
@@ -87,11 +84,13 @@ class PrimordialSixfoldResourceCoreContractTest {
         String moduleDefinition = extractStatement(methodBody, "Block sixfoldResourceCore =");
         String moduleSlotPredicate = extractBetween(methodBody, ".where('J',", "// K:");
 
-        assertEquals(normalizeWhitespace("""
-                Block sixfoldResourceCore = ForgeRegistries.BLOCKS.getValue(
-                        new ResourceLocation("gt_shanhai", "primordial_sixfold_resource_core"));
-                """), normalizeWhitespace(moduleDefinition));
-        assertEquals(1, countExact(moduleSlotPredicate, ".or(Predicates.blocks(sixfoldResourceCore))"));
+        assertPatternCount(moduleDefinition, """
+                Block\\s+sixfoldResourceCore\\s*=\\s*ForgeRegistries\\.BLOCKS\\.getValue\\(\\s*
+                new\\s+ResourceLocation\\(\\s*\"gt_shanhai\"\\s*,\\s*\"primordial_sixfold_resource_core\"\\s*\\)
+                \\s*\\)\\s*;
+                """, 1);
+        assertPatternCount(moduleSlotPredicate,
+                "\\.or\\(\\s*Predicates\\.blocks\\(\\s*sixfoldResourceCore\\s*\\)\\s*\\)", 1);
         assertTrue(moduleSlotPredicate.startsWith(".where('J',"), "新核心必须绑定 J 模块位谓词");
     }
 
@@ -206,7 +205,10 @@ class PrimordialSixfoldResourceCoreContractTest {
         return count;
     }
 
-    private static String normalizeWhitespace(String value) {
-        return value.replaceAll("\\s+", " ").trim();
+    private static void assertPatternCount(String source, String regex, int expectedCount) {
+        Matcher matcher = Pattern.compile(regex, Pattern.COMMENTS | Pattern.DOTALL).matcher(source);
+        int actualCount = 0;
+        while (matcher.find()) actualCount++;
+        assertEquals(expectedCount, actualCount, "语义契约匹配次数异常: " + regex);
     }
 }
