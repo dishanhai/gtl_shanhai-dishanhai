@@ -29,6 +29,7 @@ import org.gtlcore.gtlcore.common.data.GTLRecipeTypes;
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.recipe.DShanhaiRecipeTypes;
+import com.dishanhai.gt_shanhai.api.recipe.PrimordialSixfoldResourceRecipeTypes;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.common.machine.primordial.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.caster.*;
@@ -124,6 +125,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_FLAME_CRACKING_KILN;
     public static MultiblockMachineDefinition PRIMORDIAL_ABYSSAL_REFINERY;
     public static MultiblockMachineDefinition PRIMORDIAL_COSMIC_ORIGIN_CORE;
+    public static MultiblockMachineDefinition PRIMORDIAL_SIXFOLD_RESOURCE_CORE;
 
     public static MachineDefinition BIG_TAG_FILTER_STOCK_BUS;
     public static MachineDefinition ME_REQUESTABLE_INPUT_BUS;
@@ -430,6 +432,35 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("§b原子被激发，星辰被剥离，世界线被扫描，稀土被离析"));
             tooltips.add(Component.literal("§7配方类型：原子能激发 / 星核剥离 / 混沌编织 / 世界信息扫描 / 宇宙探测 / 稀土离心"));
+            tooltips.add(Component.literal("")
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
+                    .append(Component.literal("§f并行，直接从电网取电")));
+        });
+
+        PRIMORDIAL_SIXFOLD_RESOURCE_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_sixfold_resource_core", PrimordialSixfoldResourceCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(
+                        GTLRecipeTypes.ELEMENT_COPYING_RECIPES,
+                        GTLRecipeTypes.DRILLING_MODULE_RECIPES,
+                        PrimordialSixfoldResourceRecipeTypes.requireLargeVoidPump(),
+                        GTLRecipeTypes.DOOR_OF_CREATE_RECIPES,
+                        GTLRecipeTypes.FISSION_REACTOR_RECIPES,
+                        GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES)
+                .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                .register();
+
+        PRIMORDIAL_SIXFOLD_RESOURCE_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createAuroraText("统御六源，汇聚元素、星海与虚空资源"));
+            tooltips.add(Component.literal("§7配方类型：元素复制 / 太空钻井 / 大型虚空泵"));
+            tooltips.add(Component.literal("§7创造之门 / 裂变反应堆 / 大型集气室"));
+            tooltips.add(Component.literal("§7只提供原初模块通用并行加工，不模拟裂变堆专属机制"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f并行，直接从电网取电")));
