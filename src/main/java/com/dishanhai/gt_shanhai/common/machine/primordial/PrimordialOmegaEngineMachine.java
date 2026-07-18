@@ -13,6 +13,7 @@ import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
+import com.dishanhai.gt_shanhai.api.machine.primordial.IPrimordialOutputMultiplierModule;
 
 import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
 
@@ -43,6 +44,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     }
 
     private final Set<IModularMachineModule<PrimordialOmegaEngineMachine, ?>> modules = new ReferenceOpenHashSet<>();
+    private final OutputMultiplierCache outputMultiplierCache = new OutputMultiplierCache();
 
     /** volatile 标志，供渲染线程安全读取，避免模块集竞态死锁 */
     public volatile boolean hasModules;
@@ -130,6 +132,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         // 环恢复由 FOTC 渲染器每帧处理
         safeClearModules();
         hasModules = false;
+        outputMultiplierCache.invalidate();
     }
 
     /**
@@ -144,6 +147,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             module.removeFromHost(this);
         }
         getModuleSet().clear();
+        outputMultiplierCache.invalidate();
     }
 
     @Override
@@ -158,14 +162,57 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     @Override
     public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void addModule(M module) {
-        getModuleSet().add(module);
+        if (getModuleSet().add(module)) {
+            outputMultiplierCache.invalidate();
+        }
         hasModules = true;
     }
 
     @Override
     public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void removeModule(M module) {
-        getModuleSet().remove(module);
+        if (getModuleSet().remove(module)) {
+            outputMultiplierCache.invalidate();
+        }
         hasModules = !getModuleSet().isEmpty();
+    }
+
+    public int getMountedOutputMultiplier() {
+        return outputMultiplierCache.get(getOffsetTimer(), modules);
+    }
+
+    static final class OutputMultiplierCache {
+
+        private long cachedTick = Long.MIN_VALUE;
+        private int cachedValue = 1;
+        private boolean valid;
+
+        int get(long tick, Iterable<?> modules) {
+            if (valid && cachedTick == tick) {
+                return cachedValue;
+            }
+            int multiplier = 1;
+            for (Object module : modules) {
+                if (module instanceof IPrimordialOutputMultiplierModule outputModule) {
+                    multiplier = Math.max(multiplier, outputModule.getCurrentOutputMultiplier());
+                    if (multiplier >= 1000) {
+                        break;
+                    }
+                }
+            }
+            cachedTick = tick;
+            cachedValue = multiplier;
+            valid = true;
+            return multiplier;
+        }
+
+        void invalidate() {
+            if (!valid && cachedTick == Long.MIN_VALUE && cachedValue == 1) {
+                return;
+            }
+            cachedTick = Long.MIN_VALUE;
+            cachedValue = 1;
+            valid = false;
+        }
     }
 
     // ========== 显示 ==========
@@ -250,6 +297,11 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             if (moduleCount > 0) {
                 textList.add(Component.translatable("tooltip.gtlcore.installed_module_count", moduleCount)
                         .withStyle(ChatFormatting.AQUA));
+            }
+            int outputMultiplier = getMountedOutputMultiplier();
+            if (outputMultiplier > 1) {
+                textList.add(Component.literal("万象衍生倍率: " + outputMultiplier + "x")
+                        .withStyle(ChatFormatting.LIGHT_PURPLE));
             }
             addRecipeDiagnosisDisplay(textList);
         } else {
