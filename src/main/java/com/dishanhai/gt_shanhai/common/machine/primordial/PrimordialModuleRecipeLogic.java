@@ -164,9 +164,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     @Override
     public long getMaxParallel(GTRecipe recipe, long limit) {
         if (recipe == null || limit <= 0L) return 0L;
-        long max = IParallelLogic.getMaxParallel(getMachine(), recipe, limit);
+        GTRecipe amplified = amplifyForMountedCore(recipe);
+        long max = IParallelLogic.getMaxParallel(getMachine(), amplified, limit);
         if (max <= 0L) return 0L;
-        return RecipeRunnerHelper.matchRecipeOutput(getMachine(), recipe) ? max : 0L;
+        return RecipeRunnerHelper.matchRecipeOutput(getMachine(), amplified) ? max : 0L;
     }
 
     @Override
@@ -189,7 +190,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             long parallel = parallelData.getParallels()[i];
 
             if (parallelData.getShouldProcess()) {
-                GTRecipe scaledRecipe = findMatchableScaledRecipe(recipe, parallel);
+                GTRecipe amplifiedRecipe = amplifyForMountedCore(recipe);
+                GTRecipe scaledRecipe = findMatchableScaledRecipe(amplifiedRecipe, parallel);
                 if (scaledRecipe == null) {
                     continue;
                 }
@@ -212,12 +214,12 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             } else {
                 BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
                 accumulatedEu = nextEu;
-                List<GTRecipe> processedRecipes = parallelData.getProcessedRecipeList();
-                if (processedRecipes != null) {
-                    RecipeCalculationHelper.INSTANCE.collectOutputs(processedRecipes.get(i),
-                            (List<Content>) itemOutputs,
-                            (List<Content>) fluidOutputs);
-                }
+                GTRecipe amplifiedOutputRecipe = amplifyForMountedCore(recipe);
+                GTRecipe scaledOutputRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(
+                        amplifiedOutputRecipe, parallel);
+                RecipeCalculationHelper.INSTANCE.collectOutputs(scaledOutputRecipe,
+                        (List<Content>) itemOutputs,
+                        (List<Content>) fluidOutputs);
             }
         }
 
@@ -229,6 +231,14 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             return null;
         }
         return buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
+    }
+
+    private GTRecipe amplifyForMountedCore(GTRecipe recipe) {
+        MetaMachine machine = getMachine();
+        if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
+            return recipe;
+        }
+        return PrimordialRecipeOutputAmplifier.apply(recipe, module.getHostOutputMultiplier());
     }
 
     private GTRecipe findMatchableScaledRecipe(GTRecipe recipe, long requestedParallel) {
