@@ -341,7 +341,7 @@ return max > 0L && RecipeRunnerHelper.matchRecipeOutput(getMachine(), amplified)
 修改 `buildFinalWirelessRecipe`：
 
 - `shouldProcess` 分支将 `amplifyForMountedCore(recipe)` 传入 `findMatchableScaledRecipe`，再执行 `getRecipeOutputChance`。
-- `processedRecipeList` 分支在 `collectOutputs` 前调用 `amplifyForMountedCore(processedRecipes.get(i))`。
+- `processedRecipeList` 分支不得直接使用已做过概率抽取的 `processedRecipes.get(i)`；应先对当前原始 `recipe` 调用 `amplifyForMountedCore(...)`，再用 `parallel` 构造仅用于收集输出的并行副本并直接 `collectOutputs`。顺序不能反转：GTCEu 对 `chance == 0` 的 Content 不应用并行 modifier，必须先提升到满概率，才能得到完整的 `阶段倍率 × 并行数` 产出；该分支不重复处理输入。
 - EU 计算始终继续使用未放大的 `recipe`。
 
 - [ ] **Step 5: 运行定向测试与现有并行容量测试**
