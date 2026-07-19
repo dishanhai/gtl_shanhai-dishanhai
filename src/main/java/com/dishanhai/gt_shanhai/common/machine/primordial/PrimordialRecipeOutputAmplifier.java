@@ -19,6 +19,8 @@ final class PrimordialRecipeOutputAmplifier {
         GTRecipe copy = recipe.copy();
         copy.parallels = recipe.parallels;
         copy.ocTier = recipe.ocTier;
+        // GTLCore 将 SizedIngredient 提升为 LongIngredient，FluidIngredient 数量原生为 long；
+        // 这里必须保留 long 数量路径，不能把大配方输出钳回 Integer.MAX_VALUE。
         ContentModifier modifier = ContentModifier.multiplier(multiplier);
         int fullChance = ChanceLogic.getMaxChancedValue();
         ContentScaler scaler = (capability, content, contentModifier) ->

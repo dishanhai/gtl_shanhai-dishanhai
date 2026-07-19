@@ -165,9 +165,11 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     public long getMaxParallel(GTRecipe recipe, long limit) {
         if (recipe == null || limit <= 0L) return 0L;
         GTRecipe amplified = amplifyForMountedCore(recipe);
-        long max = IParallelLogic.getMaxParallel(getMachine(), amplified, limit);
-        if (max <= 0L) return 0L;
-        return RecipeRunnerHelper.matchRecipeOutput(getMachine(), amplified) ? max : 0L;
+        long inputMax = IParallelLogic.getMaxParallel(getMachine(), amplified, limit);
+        if (inputMax <= 0L) return 0L;
+        long outputMax = IParallelLogic.getMinParallel(getMachine(), amplified, inputMax);
+        if (outputMax <= 0L) return 0L;
+        return findHighestMatchableParallel(outputMax, candidate -> matchesScaledRecipe(amplified, candidate));
     }
 
     @Override
@@ -242,13 +244,18 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     }
 
     private GTRecipe findMatchableScaledRecipe(GTRecipe recipe, long requestedParallel) {
-        long parallel = findHighestMatchableParallel(requestedParallel, candidate ->
-                matchRecipeInputHandlePartCache(
-                        RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, candidate)));
+        long parallel = findHighestMatchableParallel(requestedParallel,
+                candidate -> matchesScaledRecipe(recipe, candidate));
         if (parallel <= 0L) {
             return null;
         }
         return RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel);
+    }
+
+    private boolean matchesScaledRecipe(GTRecipe recipe, long parallel) {
+        GTRecipe scaledRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel);
+        return matchRecipeInputHandlePartCache(scaledRecipe)
+                && RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe);
     }
 
     static long findHighestMatchableParallel(long requestedParallel, LongPredicate canMatch) {

@@ -18,4 +18,14 @@ class PrimordialModuleParallelCapacitySourceTest {
                         requestedParallel,
                         parallel -> (long) (5_000D * parallel) <= availableFluid));
     }
+
+    @Test
+    void tenTimesOutputCapacityReducesOneHundredInputParallelsToTen() {
+        long outputCapacity = 100L;
+        long amplifiedOutputPerParallel = 10L;
+
+        assertEquals(10L, PrimordialModuleRecipeLogic.findHighestMatchableParallel(
+                100L,
+                parallel -> parallel * amplifiedOutputPerParallel <= outputCapacity));
+    }
 }
