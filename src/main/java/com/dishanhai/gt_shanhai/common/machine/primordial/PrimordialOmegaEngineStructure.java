@@ -89,6 +89,8 @@ public class PrimordialOmegaEngineStructure {
                 new ResourceLocation("gt_shanhai", "primordial_cosmic_origin_core"));
         Block sixfoldResourceCore = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_sixfold_resource_core"));
+        Block myriadProliferationCore = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_myriad_proliferation_core"));
         // 山海多合一仓（不注册到标准 PartAbility 避免污染 JEI 预览）
         Block maintenanceHatch = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "maintenance_hatch"));
@@ -155,7 +157,8 @@ public class PrimordialOmegaEngineStructure {
                         .or(Predicates.blocks(flameCrackingKiln))
                         .or(Predicates.blocks(abyssalRefinery))
                         .or(Predicates.blocks(cosmicOriginCore))
-                        .or(Predicates.blocks(sixfoldResourceCore)))
+                        .or(Predicates.blocks(sixfoldResourceCore))
+                        .or(Predicates.blocks(myriadProliferationCore)))
                 // K: 内部填充 — 青铜砖块（不再与 A 冲突）
                 .where('K', Predicates.blocks(bronzeBrickCasing))
                 .where('~', Predicates.controller(Predicates.blocks(definition.getBlock())))

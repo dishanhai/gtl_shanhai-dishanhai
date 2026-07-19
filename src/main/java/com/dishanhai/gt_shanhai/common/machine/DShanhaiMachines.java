@@ -126,6 +126,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_ABYSSAL_REFINERY;
     public static MultiblockMachineDefinition PRIMORDIAL_COSMIC_ORIGIN_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_SIXFOLD_RESOURCE_CORE;
+    public static MultiblockMachineDefinition PRIMORDIAL_MYRIAD_PROLIFERATION_CORE;
 
     public static MachineDefinition BIG_TAG_FILTER_STOCK_BUS;
     public static MachineDefinition ME_REQUESTABLE_INPUT_BUS;
@@ -462,6 +463,30 @@ public class DShanhaiMachines {
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.3"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.4"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.5"));
+        });
+
+        PRIMORDIAL_MYRIAD_PROLIFERATION_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_myriad_proliferation_core", PrimordialMyriadProliferationCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(
+                        DShanhaiRecipeTypes.PRIMORDIAL_MYRIAD_ASCENSION_TIER_2,
+                        DShanhaiRecipeTypes.PRIMORDIAL_MYRIAD_ASCENSION_TIER_1)
+                .pattern(PrimordialMyriadProliferationCoreStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                .register();
+
+        PRIMORDIAL_MYRIAD_PROLIFERATION_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.0"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.1"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.2"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.3"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.4"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.5"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.6"));
         });
 
         // ── I级 原初物质重组核心 ──────────────────────────────────────────
