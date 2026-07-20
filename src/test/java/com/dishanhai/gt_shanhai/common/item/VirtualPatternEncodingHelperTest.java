@@ -21,6 +21,56 @@ public class VirtualPatternEncodingHelperTest {
     }
 
     @Test
+    void encodingRestoresNonConsumableInputsOmittedByGtceu() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+
+        assertTrue(source.contains("findMatchingRecipeForEncoding(inputs, outputs)"),
+                "普通样板编码必须使用允许 GTCEu 省略不消耗输入的专用反查路径");
+        assertTrue(source.contains("allowOmittedNonConsumables"),
+                "编码反查和星律运行时严格反推必须显式隔离");
+        assertTrue(source.contains("GenericStack missingInput = createVirtualItemInput(sample, amount)"));
+        assertTrue(source.contains("rewritten.add(missingInput)"),
+                "编码器删除的模具等不消耗物品必须主动补成虚拟供应器");
+        assertTrue(source.contains("rewritten.add(new GenericStack(fluidKeyOf(sample), VIRTUAL_FLUID_MARKER_AMOUNT))"),
+                "编码器删除的不消耗流体必须主动补成虚拟标记");
+    }
+
+    @Test
+    void omittedIntegratedCircuitIsRestoredRawAndNeverWrapped() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+
+        assertTrue(source.contains("IntCircuitBehaviour.isIntegratedCircuit(sample)"),
+                "缺失编程电路必须有独立分支");
+        assertTrue(source.contains("return new GenericStack(AEItemKey.of(sample), amount)"),
+                "编程电路只能按原物品补回样板");
+        assertFalse(source.contains("createBoundProvider(sample)"),
+                "编程电路在任何情况下都不得直接传入供应器创建逻辑");
+    }
+
+    @Test
+    void existingVirtualFluidMarkerRemainsIdempotentDuringReencoding() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+
+        assertTrue(source.contains("isNonConsumable(content)\n"
+                        + "                        && input.amount() == VIRTUAL_FLUID_MARKER_AMOUNT"),
+                "已编码的不消耗流体标记必须能再次匹配原配方，不能追加重复标记后拒绝改写");
+    }
+
+    @Test
+    void untypedEncodingRejectsCandidatesFromDifferentRecipeTypes() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+
+        assertTrue(source.contains("haveMultipleRecipeTypes(matches)"),
+                "没有类型上下文时不能在不同配方类型之间按注册顺序猜测");
+        assertTrue(source.contains("encoding type context required"),
+                "跨配方类型歧义必须记录为需要类型上下文，而不是改变供应器目标");
+    }
+
+    @Test
     void virtualTargetsRemainReusablePlanningDependencies() throws IOException {
         String source = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));

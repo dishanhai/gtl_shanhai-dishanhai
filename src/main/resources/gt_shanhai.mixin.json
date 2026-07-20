@@ -60,6 +60,7 @@
     "NuclearParallelMixin",
     "PatternDetailsHelperMixin",
     "PatternWrapControlMenuMixin",
+    "PatternEncodingRecipeTypeContextMixin",
     "Ae2GtmProcessingPatternMixin",
     "Ae2wtlibTerminalRegistrationMixin",
     "AEProcessingPatternVirtualProviderMixin",

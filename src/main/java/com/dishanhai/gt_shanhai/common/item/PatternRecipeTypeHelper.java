@@ -31,6 +31,7 @@ public final class PatternRecipeTypeHelper {
     // DShanhaiRecipeModifierAPI 规则临时剥离/替换）触发误改判后一直来回横跳。
     private static final String TAG_RECIPE_TYPE_AUTHORITATIVE = "gt_shanhai_recipe_type_authoritative";
     private static final ThreadLocal<GTRecipe> AUTHORITATIVE_ENCODING_RECIPE = new ThreadLocal<>();
+    private static final ThreadLocal<String> ENCODING_RECIPE_TYPE_ID = new ThreadLocal<>();
 
     private PatternRecipeTypeHelper() {
     }
@@ -71,6 +72,23 @@ public final class PatternRecipeTypeHelper {
 
     public static GTRecipe currentAuthoritativeEncodingRecipe() {
         return AUTHORITATIVE_ENCODING_RECIPE.get();
+    }
+
+    public static void pushEncodingRecipeType(String recipeTypeId) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty()) {
+            ENCODING_RECIPE_TYPE_ID.remove();
+        } else {
+            ENCODING_RECIPE_TYPE_ID.set(recipeTypeId);
+        }
+    }
+
+    public static void popEncodingRecipeType() {
+        ENCODING_RECIPE_TYPE_ID.remove();
+    }
+
+    public static String currentEncodingRecipeTypeId() {
+        String recipeTypeId = ENCODING_RECIPE_TYPE_ID.get();
+        return recipeTypeId == null ? "" : recipeTypeId;
     }
 
     public static String readRecipeTypeId(ItemStack stack) {
@@ -261,6 +279,12 @@ public final class PatternRecipeTypeHelper {
             writeAuthoritativeRecipeType(stack, authoritativeRecipe);
             return;
         }
+        String encodingRecipeTypeId = currentEncodingRecipeTypeId();
+        GTRecipeType encodingRecipeType = resolveRecipeType(encodingRecipeTypeId);
+        if (encodingRecipeType != null) {
+            writeAuthoritativeRecipeType(stack, encodingRecipeType);
+            return;
+        }
         if (stack == null || stack.isEmpty() || !readRecipeTypeId(stack).isEmpty()) return;
         GTRecipe recipe = VirtualPatternEncodingHelper.findMatchingRecipeForPattern(inputs, outputs);
         if (recipe != null) {
@@ -293,6 +317,12 @@ public final class PatternRecipeTypeHelper {
 
     private static GTRecipe inferRecipe(ItemStack stack, Level level, String recipeTypeId) {
         return inferRecipe(stack, level, recipeTypeId, null);
+    }
+
+    private static void writeAuthoritativeRecipeType(ItemStack stack, GTRecipeType recipeType) {
+        if (stack == null || stack.isEmpty() || recipeType == null) return;
+        writeRecipeType(stack, recipeType);
+        stack.getOrCreateTag().putBoolean(TAG_RECIPE_TYPE_AUTHORITATIVE, true);
     }
 
     private static GTRecipe inferRecipe(ItemStack stack, Level level, String recipeTypeId,

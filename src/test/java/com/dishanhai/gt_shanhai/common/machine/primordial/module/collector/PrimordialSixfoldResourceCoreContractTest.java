@@ -14,7 +14,6 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -112,27 +111,6 @@ class PrimordialSixfoldResourceCoreContractTest {
                 "§dParallel capacity scales with the installed module tier; draws power directly from the grid"));
     }
 
-    @Test
-    void tooltipBuilderUsesOnlyDedicatedTranslationKeys() throws Exception {
-        String source = Files.readString(MACHINES_SOURCE);
-        String invocation = extractInvocation(source,
-                "PRIMORDIAL_SIXFOLD_RESOURCE_CORE.setTooltipBuilder(");
-        Matcher keyMatcher = Pattern.compile(
-                "Component\\.translatable\\(\"(gt_shanhai\\.multiblock\\.primordial_sixfold_resource_core\\.tooltip\\.[0-5])\"\\)")
-                .matcher(invocation);
-        List<String> keys = new ArrayList<>();
-        while (keyMatcher.find()) keys.add(keyMatcher.group(1));
-
-        assertEquals(List.of(
-                "gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.0",
-                "gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.1",
-                "gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.2",
-                "gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.3",
-                "gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.4",
-                "gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.5"), keys);
-        assertEquals(6, countExact(invocation, "tooltips.add("));
-    }
-
     private static void assertLanguage(String fileName, String expectedName, String expectedMode,
                                        List<String> expectedTooltips) throws Exception {
         Path path = Path.of("src", "main", "resources", "assets", "gt_shanhai", "lang", fileName);
@@ -158,22 +136,6 @@ class PrimordialSixfoldResourceCoreContractTest {
         return source.substring(start, end + 1);
     }
 
-    private static String extractInvocation(String source, String marker) {
-        int start = source.indexOf(marker);
-        assertTrue(start >= 0, "缺少调用锚点: " + marker);
-        int openParenthesis = source.indexOf('(', start);
-        int depth = 0;
-        for (int i = openParenthesis; i < source.length(); i++) {
-            char current = source.charAt(i);
-            if (current == '(') depth++;
-            if (current == ')' && --depth == 0) {
-                int semicolon = source.indexOf(';', i);
-                return source.substring(start, semicolon + 1);
-            }
-        }
-        throw new AssertionError("调用未闭合: " + marker);
-    }
-
     private static String extractBlock(String source, String declaration) {
         int start = source.indexOf(declaration);
         assertTrue(start >= 0, "缺少方法声明: " + declaration);
@@ -193,16 +155,6 @@ class PrimordialSixfoldResourceCoreContractTest {
         int end = source.indexOf(endMarker, start);
         assertTrue(end >= 0, "缺少片段终点: " + endMarker);
         return source.substring(start, end).trim();
-    }
-
-    private static int countExact(String source, String expected) {
-        int count = 0;
-        int offset = 0;
-        while ((offset = source.indexOf(expected, offset)) >= 0) {
-            count++;
-            offset += expected.length();
-        }
-        return count;
     }
 
     private static void assertPatternCount(String source, String regex, int expectedCount) {

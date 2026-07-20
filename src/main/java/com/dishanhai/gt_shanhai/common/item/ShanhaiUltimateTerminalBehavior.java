@@ -132,7 +132,8 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         }
 
         ShanhaiTerminalCraftingManager.Phase phase = ShanhaiTerminalCraftingManager.phase(terminal);
-        if (phase == ShanhaiTerminalCraftingManager.Phase.CALCULATING) {
+        if (phase == ShanhaiTerminalCraftingManager.Phase.CALCULATING
+                || phase == ShanhaiTerminalCraftingManager.Phase.RETRY_CALCULATING) {
             serverPlayer.sendSystemMessage(Component.literal("§e[山海终端] AE 合成方案仍在计算"));
             return InteractionResult.SUCCESS;
         }

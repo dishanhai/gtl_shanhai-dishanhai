@@ -78,8 +78,6 @@ public class DShanhaiBigTagFilterStockBusMachine extends MEInputBusPartMachine
     private static int getMaxPages() {
         return com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.tagBusMaxPages.get();
     }
-    /** 单次刷新最多扫描 AE 物品数，防卡顿 */
-    private static final int MAX_SCAN_ITEMS = 1024;
     private static final long FILTER_CACHE_TICKS = 10L;
     private static final ResourceTexture TEXTURE = new ResourceTexture("gtceu:textures/gui/list.png");
 
@@ -353,17 +351,16 @@ public class DShanhaiBigTagFilterStockBusMachine extends MEInputBusPartMachine
         filteredItemCacheHash = hash;
         filteredItemCacheTick = tick;
 
-        var storage = grid.getStorageService().getInventory();
+        var storageService = grid.getStorageService();
+        var storage = storageService.getInventory();
         if (storage == null) return filteredItemCache;
 
         SimpleTagFilter filter = getCachedTagFilter();
-        int scanned = 0;
         int accepted = 0;
         int maxAccepted = Math.max(1, getSlotCount());
-        var available = storage.getAvailableStacks();
-        for (var it = available.iterator(); it.hasNext() && scanned < MAX_SCAN_ITEMS && accepted < maxAccepted; ) {
+        var available = storageService.getCachedInventory();
+        for (var it = available.iterator(); it.hasNext() && accepted < maxAccepted; ) {
             var entry = it.next();
-            scanned++;
             var key = entry.getKey();
             long amount = entry.getLongValue();
             if (amount <= 0 || !(key instanceof AEItemKey aeKey)) continue;

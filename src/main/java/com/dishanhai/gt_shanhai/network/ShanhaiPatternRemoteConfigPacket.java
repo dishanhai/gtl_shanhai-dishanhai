@@ -12,7 +12,8 @@ public final class ShanhaiPatternRemoteConfigPacket {
 
     public enum Operation {
         OPEN_SLOT_CATALYST,
-        OPEN_STOCK_INPUT
+        OPEN_STOCK_INPUT,
+        OPEN_FULL_PATTERN
     }
 
     private final int menuId;
@@ -61,8 +62,10 @@ public final class ShanhaiPatternRemoteConfigPacket {
             if (!stellar.isValidRemotePatternSlot(packet.slot)) return;
             ShanhaiStellarRemoteUIFactory.INSTANCE.openSlot(
                     player, stellar, menu.getWirelessHost(), packet.slot);
-        } else {
+        } else if (packet.operation == Operation.OPEN_STOCK_INPUT) {
             ShanhaiStellarRemoteUIFactory.INSTANCE.openStock(player, stellar, menu.getWirelessHost());
+        } else {
+            ShanhaiStellarRemoteUIFactory.INSTANCE.openPattern(player, stellar, menu.getWirelessHost());
         }
     }
 }

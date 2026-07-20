@@ -27,6 +27,10 @@ class PatternRecipeLookupPerformanceSourceTest {
             "gt_shanhai", "api", "DShanhaiRecipeModifierAPI.java");
     private static final Path PATTERN_BUFFER_MACHINE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "machine", "part", "RecipeTypePatternBufferPartMachine.java");
+    private static final Path SELECTABLE_RECIPE_LOGIC = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "api", "machine", "SelectableRecipeTypeSetRecipeLogic.java");
+    private static final Path PRIMORDIAL_MODULE_LOGIC = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "machine", "primordial", "PrimordialModuleRecipeLogic.java");
     private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
 
     @Test
@@ -43,6 +47,32 @@ class PatternRecipeLookupPerformanceSourceTest {
                 "一次星律候选收集只能快照一次库存上下文，不能逐槽重复分配");
         assertEquals(1, occurrences(source, "access.gtShanhai$getPatternRecipe(slot, inferenceInputs)"),
                 "昂贵的样板反推只能保留在缓存未命中的加载路径");
+    }
+
+    @Test
+    void activeMarkedRecipeMergeOnlyCachesWithinTheSameServerTick() throws IOException {
+        String source = Files.readString(SELECTABLE_RECIPE_LOGIC);
+
+        assertTrue(source.contains("cachedMarkedRecipeTick"));
+        assertTrue(source.contains("if (tick == cachedMarkedRecipeTick)"));
+        assertTrue(source.contains("RecipeTypePatternSearchHelper.collectActiveMarkedPatternRecipes(machine)"));
+        assertFalse(source.contains("tick - cachedMarkedRecipeTick"),
+                "active scoped 槽状态只能同 tick 复用，不能跨 tick 缓存导致 AE 下单状态延迟");
+    }
+
+    @Test
+    void primordialModulesUseALongerRecipeSetCacheWithoutCachingParallelData() throws IOException {
+        String selectable = Files.readString(SELECTABLE_RECIPE_LOGIC);
+        String primordial = Files.readString(PRIMORDIAL_MODULE_LOGIC);
+
+        assertTrue(selectable.contains("protected long getMaxLookupCacheTicks()"));
+        assertTrue(selectable.contains("Math.min(getMaxLookupCacheTicks(), entry.cacheWindow * 2)"));
+        assertTrue(primordial.contains("private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;"));
+        assertTrue(primordial.contains("protected long getMaxLookupCacheTicks()"));
+        assertTrue(primordial.contains("return ACTIVE_LOOKUP_CACHE_TICKS;"));
+        assertTrue(primordial.contains("Set<GTRecipe> recipes = lookupRecipeIterator();"));
+        assertTrue(primordial.contains("findMaxMatchableScaledRecipe(recipe, totalParallel)"),
+                "并行和输入输出容量仍必须每轮实时计算，不能随 recipe 集合缓存一起缓存");
     }
 
     @Test

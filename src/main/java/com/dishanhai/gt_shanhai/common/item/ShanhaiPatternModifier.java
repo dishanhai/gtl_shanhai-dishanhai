@@ -69,10 +69,13 @@ public final class ShanhaiPatternModifier {
             if (inputs == null || outputs == null) return ItemStack.EMPTY;
 
             ItemStack replacement;
+            PatternRecipeTypeHelper.pushEncodingRecipeType(originalRecipeType);
             try {
                 replacement = PatternDetailsHelper.encodeProcessingPattern(inputs, outputs);
             } catch (RuntimeException exception) {
                 return ItemStack.EMPTY;
+            } finally {
+                PatternRecipeTypeHelper.popEncodingRecipeType();
             }
             if (replacement == null || replacement.isEmpty()) return ItemStack.EMPTY;
 

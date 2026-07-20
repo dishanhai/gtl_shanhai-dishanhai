@@ -174,6 +174,24 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(config.contains("\"EaepOpenProviderUiStellarMixin\""));
     }
 
+    @Test
+    void sameGroupStellarProvidersExposeDistinctServerIdRemoteUiButtons() throws Exception {
+        String screen = read("client/gui/terminal/ShanhaiPatternManagementScreen.java");
+        String packet = read("network/ShanhaiPatternRemoteConfigPacket.java");
+
+        assertTrue(screen.contains("patternSlot.getMachineInv().getServerId()"));
+        assertTrue(screen.contains("drawnProviders.add(serverId)"));
+        assertTrue(screen.contains("new RemoteUiButtonTarget(serverId"));
+        assertTrue(screen.contains("hideEaepGroupUiButtons()"));
+        assertTrue(screen.contains("EAEP_OPEN_UI_BUTTONS_FIELD"));
+        assertTrue(screen.contains("Operation.OPEN_FULL_PATTERN"));
+        assertFalse(screen.contains("collectStellarServerIds"));
+        assertFalse(screen.contains("GuiExPatternTerminalGroupHeaderRowAccessor"));
+        assertFalse(screen.contains("containers.iterator().next()"));
+        assertTrue(packet.contains("OPEN_FULL_PATTERN"));
+        assertTrue(packet.contains("ShanhaiStellarRemoteUIFactory.INSTANCE.openPattern"));
+    }
+
     private static String read(String relative) throws Exception {
         return Files.readString(ROOT.resolve(relative.replace('/', java.io.File.separatorChar)));
     }

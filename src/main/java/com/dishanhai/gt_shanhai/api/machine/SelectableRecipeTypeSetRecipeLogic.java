@@ -76,6 +76,8 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     }
 
     private final Map<GTRecipeType, TypeCacheEntry> perTypeLookupCache = new HashMap<>();
+    private long cachedMarkedRecipeTick = Long.MIN_VALUE;
+    private Set<GTRecipe> cachedMarkedRecipes = Collections.emptySet();
 
     public SelectableRecipeTypeSetRecipeLogic(SelectableRecipeTypeSetMachine machine) {
         super(machine);
@@ -105,6 +107,8 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         cachedLookupTick = Long.MIN_VALUE;
         cachedLookupRecipes = null;
         perTypeLookupCache.clear();
+        cachedMarkedRecipeTick = Long.MIN_VALUE;
+        cachedMarkedRecipes = Collections.emptySet();
     }
 
     /**
@@ -113,6 +117,10 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
      */
     protected long getLookupCacheTicks() {
         return DEFAULT_LOOKUP_CACHE_TICKS;
+    }
+
+    protected long getMaxLookupCacheTicks() {
+        return MAX_LOOKUP_CACHE_TICKS;
     }
 
     @Override
@@ -175,7 +183,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     }
 
     private Set<GTRecipe> mergeMarkedPatternRecipes(SelectableRecipeTypeSetMachine machine, Set<GTRecipe> base) {
-        Set<GTRecipe> marked = RecipeTypePatternSearchHelper.collectActiveMarkedPatternRecipes(machine);
+        Set<GTRecipe> marked = collectActiveMarkedPatternRecipesCached(machine);
         if (marked.isEmpty()) {
             return base;
         }
@@ -196,6 +204,17 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         }
         merged.addAll(marked);
         return merged;
+    }
+
+    private Set<GTRecipe> collectActiveMarkedPatternRecipesCached(SelectableRecipeTypeSetMachine machine) {
+        long tick = machine.getOffsetTimer();
+        if (tick == cachedMarkedRecipeTick) {
+            return cachedMarkedRecipes;
+        }
+        Set<GTRecipe> marked = RecipeTypePatternSearchHelper.collectActiveMarkedPatternRecipes(machine);
+        cachedMarkedRecipeTick = tick;
+        cachedMarkedRecipes = marked == null ? Collections.emptySet() : marked;
+        return cachedMarkedRecipes;
     }
 
     private Set<GTRecipe> searchSelectedRecipeTypes(SelectableRecipeTypeSetMachine machine) {
@@ -257,7 +276,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         if (found.equals(entry.recipes)) {
             entry.stableHits++;
             if (entry.stableHits >= STABLE_HITS_TO_GROW) {
-                entry.cacheWindow = Math.min(MAX_LOOKUP_CACHE_TICKS, entry.cacheWindow * 2);
+                entry.cacheWindow = Math.min(getMaxLookupCacheTicks(), entry.cacheWindow * 2);
                 entry.stableHits = 0;
             }
         } else {

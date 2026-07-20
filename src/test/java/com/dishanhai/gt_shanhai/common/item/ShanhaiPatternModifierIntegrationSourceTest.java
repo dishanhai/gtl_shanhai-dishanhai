@@ -47,6 +47,24 @@ class ShanhaiPatternModifierIntegrationSourceTest {
     }
 
     @Test
+    void modifierLocksEncodingToTheSourceRecipeTypeBeforeRewritingInputs() throws Exception {
+        String source = Files.readString(MODIFIER);
+        String helper = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "item", "PatternRecipeTypeHelper.java"));
+        String virtual = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "item", "VirtualPatternEncodingHelper.java"));
+
+        assertTrue(source.contains("pushEncodingRecipeType(originalRecipeType)"),
+                "修改样板前必须把源样板类型传入编码上下文");
+        assertTrue(source.contains("popEncodingRecipeType()"),
+                "修改样板编码上下文必须在 finally 中清理");
+        assertTrue(helper.contains("currentEncodingRecipeTypeId()"),
+                "编码类型限制必须是线程上下文，不能依赖编码完成后复制的 NBT");
+        assertTrue(virtual.contains("PatternRecipeTypeHelper.resolveRecipeType(encodingRecipeTypeId)"),
+                "虚拟供应器反查必须在源样板配方类型域内进行");
+    }
+
+    @Test
     void inPlaceModificationEmulatesRemovalAndReinsertionToRefreshPatternBuffers() throws Exception {
         String source = Files.readString(MODIFIER);
 

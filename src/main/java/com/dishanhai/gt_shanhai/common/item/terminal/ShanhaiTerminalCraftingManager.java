@@ -31,6 +31,7 @@ public final class ShanhaiTerminalCraftingManager {
 
     public enum Phase {
         CALCULATING,
+        RETRY_CALCULATING,
         READY_TO_SUBMIT,
         SUBMITTED,
         READY_TO_BUILD
@@ -44,6 +45,7 @@ public final class ShanhaiTerminalCraftingManager {
         final String displayName;
         Future<ICraftingPlan> future;
         ICraftingPlan plan;
+        boolean submitted;
 
         WorkItem(AEKey key, long amount, String displayName) {
             this.key = key;
@@ -134,10 +136,12 @@ public final class ShanhaiTerminalCraftingManager {
         int submitted = 0;
         List<String> failed = new ArrayList<>();
         for (WorkItem item : session.items) {
+            if (item.submitted) continue;
             if (item.plan == null || item.plan.simulation()) continue;
             ICraftingSubmitResult result = ae.grid().getCraftingService().submitJob(
                     item.plan, null, null, true, ae.source());
             if (result.successful()) {
+                item.submitted = true;
                 submitted++;
             } else {
                 failed.add(item.displayName + "(" + result.errorCode() + ")");
@@ -147,8 +151,8 @@ public final class ShanhaiTerminalCraftingManager {
             player.sendSystemMessage(Component.literal(
                     "§c[山海终端] 部分合成提交失败: §f" + String.join("、", failed)));
         }
-        if (submitted == 0) return false;
         session.phase = Phase.SUBMITTED;
+        if (submitted == 0) return false;
         player.sendSystemMessage(Component.literal(
                 "§b[山海终端] 已提交 §f" + submitted + " §b项任务；材料到齐后再次右击控制器"));
         return true;
@@ -160,6 +164,10 @@ public final class ShanhaiTerminalCraftingManager {
         Session session = validSession(player, terminal, currentPlan);
         if (session == null || session.phase != Phase.SUBMITTED || ae == null) return false;
         if (!currentPlan.fingerprint().equals(session.planFingerprint)) return false;
+        if (hasPendingItems(session)) {
+            startPendingCalculations(session, player, ae);
+            return false;
+        }
         if (!materials.shortages(currentPlan, player, ae).isEmpty()) return false;
         session.phase = Phase.READY_TO_BUILD;
         player.sendSystemMessage(Component.literal(
@@ -184,7 +192,7 @@ public final class ShanhaiTerminalCraftingManager {
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || SESSIONS.isEmpty()) return;
         for (Session session : new ArrayList<>(SESSIONS.values())) {
-            if (session.phase != Phase.CALCULATING) continue;
+            if (session.phase != Phase.CALCULATING && session.phase != Phase.RETRY_CALCULATING) continue;
             session.ticks++;
             if (session.ticks > CALC_TIMEOUT_TICKS) {
                 SESSIONS.remove(session.terminalId);
@@ -193,11 +201,18 @@ public final class ShanhaiTerminalCraftingManager {
                 if (player != null) player.sendSystemMessage(Component.literal("§c[山海终端] 合成方案计算超时"));
                 continue;
             }
-            if (session.items.stream().anyMatch(item -> !item.future.isDone())) continue;
+            if (session.items.stream().anyMatch(item -> !item.submitted
+                    && item.future != null && !item.future.isDone())) continue;
             int usable = 0;
             List<String> failures = new ArrayList<>();
             for (WorkItem item : session.items) {
+                if (item.submitted) continue;
                 try {
+                    if (item.future == null) {
+                        item.plan = null;
+                        failures.add(item.displayName + " 当前无可用合成流程");
+                        continue;
+                    }
                     item.plan = item.future.get();
                     if (item.plan != null && !item.plan.simulation()) {
                         usable++;
@@ -210,6 +225,15 @@ public final class ShanhaiTerminalCraftingManager {
                 }
             }
             ServerPlayer player = findPlayer(session.playerId);
+            if (session.phase == Phase.RETRY_CALCULATING) {
+                session.phase = usable == 0 ? Phase.SUBMITTED : Phase.READY_TO_SUBMIT;
+                if (player != null) {
+                    player.sendSystemMessage(Component.literal(usable == 0
+                            ? "§e[山海终端] 失败任务暂时仍不可提交；材料或配方就绪后再次普通右击重试"
+                            : "§e[山海终端] 失败任务的合成方案已就绪；再次右击控制器确认补单"));
+                }
+                continue;
+            }
             if (usable == 0) {
                 SESSIONS.remove(session.terminalId);
                 if (player != null) player.sendSystemMessage(Component.literal(
@@ -221,6 +245,31 @@ public final class ShanhaiTerminalCraftingManager {
                     "§e[山海终端] 合成方案已就绪；再次右击同一控制器确认下单"
                             + (failures.isEmpty() ? "" : " §7（跳过 " + failures.size() + " 项）")));
         }
+    }
+
+    private static boolean hasPendingItems(Session session) {
+        for (WorkItem item : session.items) {
+            if (!item.submitted) return true;
+        }
+        return false;
+    }
+
+    private static boolean startPendingCalculations(Session session, ServerPlayer player, Context ae) {
+        if (session.phase == Phase.RETRY_CALCULATING) return true;
+        ICraftingService crafting = ae.grid().getCraftingService();
+        boolean started = false;
+        for (WorkItem item : session.items) {
+            if (item.submitted || !crafting.isCraftable(item.key)) continue;
+            item.future = crafting.beginCraftingCalculation(
+                    player.level(), ae::source, item.key, item.amount,
+                    CalculationStrategy.REPORT_MISSING_ITEMS);
+            started = true;
+        }
+        if (!started) return false;
+        session.phase = Phase.RETRY_CALCULATING;
+        session.ticks = 0;
+        player.sendSystemMessage(Component.literal("§e[山海终端] 正在重试之前失败的合成任务"));
+        return true;
     }
 
     private static String describeFailedPlan(WorkItem item) {

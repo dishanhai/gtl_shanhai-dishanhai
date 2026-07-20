@@ -128,6 +128,16 @@ public class PrimordialEngravingModule extends PrimordialOmegaEngineModuleBase {
     }
 
     @Override
+    public PrimordialEngravingModuleLogic createRecipeLogic(Object... args) {
+        return new PrimordialEngravingModuleLogic(this);
+    }
+
+    @Override
+    public PrimordialEngravingModuleLogic getRecipeLogic() {
+        return (PrimordialEngravingModuleLogic) recipeLogic;
+    }
+
+    @Override
     public long getMaxVoltage() { return Long.MAX_VALUE; }
 
     @Override

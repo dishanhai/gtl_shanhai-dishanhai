@@ -7,6 +7,7 @@ import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 
+import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.api.gui.configurators.FancyConfiguratorSidebarPage;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
@@ -16,6 +17,7 @@ import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternBridge;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
+import com.dishanhai.gt_shanhai.mixin.MEPatternBufferSlot2PatternAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
 import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
@@ -52,6 +54,7 @@ import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 import it.unimi.dsi.fastutil.ints.Int2ReferenceMap;
 import it.unimi.dsi.fastutil.ints.Int2ReferenceMaps;
 import it.unimi.dsi.fastutil.ints.Int2ReferenceOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.IntConsumer;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
@@ -87,6 +90,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 星律样板总成：在 GTLCore 库存ME样板总成（MEStockingPatternBufferPartMachine）基础上叠加配方类型过滤。
@@ -134,6 +138,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private final List<String> wildcardAssignedRecipeTypeIds;
     private final Object2IntMap<IPatternDetails> wildcardPatternToSlot;
     private final Int2ReferenceMap<GTRecipe> wildcardRecipeCache;
+    private final Int2ReferenceMap<OutputMultiplierPatternCacheEntry> outputMultiplierPatternCache;
     private final RecipeTypePatternWildcardPersistence wildcardPersistence;
     private final InternalInventory combinedTerminalPatternInventory;
     private IntConsumer wildcardRemoveSlotFromMap;
@@ -160,6 +165,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         this.wildcardPatternToSlot = new Object2IntOpenHashMap<>();
         this.wildcardPatternToSlot.defaultReturnValue(-1);
         this.wildcardRecipeCache = new Int2ReferenceOpenHashMap<>();
+        this.outputMultiplierPatternCache = new Int2ReferenceOpenHashMap<>();
         this.wildcardPersistence = new RecipeTypePatternWildcardPersistence();
         this.wildcardPatternInventory = new ItemStackTransfer(WILDCARD_PATTERN_SLOT_COUNT);
         this.wildcardPatternInventory.setFilter(WildcardPatternBridge::isWildcardPattern);
@@ -194,8 +200,10 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Override
     protected void onPatternChange(int index) {
+        clearOutputMultiplierPatternCache();
         super.onPatternChange(index);
         if (!isRemote()) {
+            refreshVisibleOutputMultiplierPattern(index, true);
             RecipeTypePatternSearchHelper.clearPatternSlotState(this, index);
         }
         refreshPatternRecipeType(index);
@@ -203,13 +211,16 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Override
     protected void refreshAllByProduct() {
+        clearOutputMultiplierPatternCache();
         super.refreshAllByProduct();
+        refreshVisibleOutputMultiplierPatterns(true);
         refreshPatternRecipeTypes();
         refreshWildcardRecipeTypes();
     }
 
     @Override
     protected void invalidateRecipeCaches() {
+        clearOutputMultiplierPatternCache();
         super.invalidateRecipeCaches();
         clearWildcardRecipeCache();
     }
@@ -323,8 +334,19 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     public IPatternDetails gtShanhai$applyOutputMultiplier(IPatternDetails pattern, ItemStack stack) {
         if (!outputMultiplierModeEnabled || pattern == null || getLevel() == null) return pattern;
-        return VirtualPatternEncodingHelper.rewritePatternOutputMultiplier(
-                pattern, getLevel(), PatternRecipeTypeHelper.readRecipeTypeId(stack), patternOutputMultiplier);
+        String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
+        int multiplier = getPatternOutputMultiplier();
+        long recipeRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
+        int cacheKey = makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, recipeRevision);
+        OutputMultiplierPatternCacheEntry cached = outputMultiplierPatternCache.get(cacheKey);
+        if (cached != null && cached.matches(pattern, stack, recipeTypeId, multiplier, recipeRevision)) {
+            return cached.pattern();
+        }
+        IPatternDetails rewritten = VirtualPatternEncodingHelper.rewritePatternOutputMultiplier(
+                pattern, getLevel(), recipeTypeId, multiplier);
+        outputMultiplierPatternCache.put(cacheKey,
+                new OutputMultiplierPatternCacheEntry(pattern, stack, recipeTypeId, multiplier, recipeRevision, rewritten));
+        return rewritten;
     }
 
     public boolean isOutputMultiplierModeEnabled() {
@@ -417,13 +439,99 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         RecipeTypePatternSearchHelper.clearPatternState(this);
     }
 
+    private void refreshVisibleOutputMultiplierPatterns(boolean resetSlotCaches) {
+        if (isRemote() || !outputMultiplierModeEnabled) return;
+        boolean changed = false;
+        for (int slot = 0; slot < getPatternInventory().getSlots() && slot < maxPatternCount; slot++) {
+            if (refreshVisibleOutputMultiplierPattern(slot, resetSlotCaches)) {
+                changed = true;
+            }
+        }
+        if (changed) {
+            reCalculatePatternSlotMap();
+            needPatternSync = true;
+        }
+    }
+
+    private boolean refreshVisibleOutputMultiplierPattern(int slot, boolean resetSlotCaches) {
+        if (isRemote() || !outputMultiplierModeEnabled) return false;
+        if (slot < 0 || slot >= maxPatternCount || slot >= getPatternInventory().getSlots()) return false;
+        ItemStack patternStack = getPatternInventory().getStackInSlot(slot);
+        if (patternStack.isEmpty()) return false;
+        if (!((Object) this instanceof MEPatternBufferSlot2PatternAccessor access)) return false;
+
+        Int2ObjectMap<IPatternDetails> slot2PatternMap = access.gtShanhai$getSlot2PatternMap();
+        IPatternDetails currentPattern = slot2PatternMap.get(slot);
+        IPatternDetails basePattern = createOutputMultiplierBasePattern(slot, patternStack);
+        if (basePattern == null) return false;
+        IPatternDetails effectivePattern = gtShanhai$applyOutputMultiplier(basePattern, patternStack);
+        if (effectivePattern == null || samePatternDefinition(currentPattern, effectivePattern)) return false;
+
+        slot2PatternMap.put(slot, effectivePattern);
+        if (resetSlotCaches) {
+            MEPatternBufferPartMachineBase.InternalSlot internalSlot = getInternalSlot(slot);
+            internalSlot.getCacheManager().clearAllCaches();
+            removeSlotFromGTRecipeCache(slot);
+            if ((Object) this instanceof VirtualPatternBufferMachineAccess virtualAccess) {
+                virtualAccess.gtShanhai$indexRefundSlot(internalSlot,
+                        internalSlot.getItemInventory(), internalSlot.getFluidInventory());
+            }
+            refundSlot(internalSlot.getItemInventory(), internalSlot.getFluidInventory());
+            if (!buffer.isEmpty()) AEUtils.reFunds(buffer, getMainNode().getGrid(), actionSource);
+        }
+        reCalculatePatternSlotMap();
+        needPatternSync = true;
+        return true;
+    }
+
+    private IPatternDetails createOutputMultiplierBasePattern(int slot, ItemStack patternStack) {
+        if (getLevel() == null || patternStack.isEmpty()) return null;
+        MEPatternBufferPartMachineBase.InternalSlot internalSlot = getInternalSlot(slot);
+        return realPatternHelper.processPatternWithCircuit(patternStack,
+                circuit -> internalSlot.getCacheManager().setCircuitCache(circuit),
+                getLevel(), keepByProduct);
+    }
+
+    private static boolean samePatternDefinition(IPatternDetails first, IPatternDetails second) {
+        return first == second || Objects.equals(
+                first == null ? null : first.getDefinition(),
+                second == null ? null : second.getDefinition());
+    }
+
     private void applyOutputMultiplierSettings(boolean enabled, int multiplier) {
         int clamped = Math.max(1, Math.min(1000, multiplier));
         if (outputMultiplierModeEnabled == enabled && patternOutputMultiplier == clamped) return;
         outputMultiplierModeEnabled = enabled;
         patternOutputMultiplier = clamped;
+        clearOutputMultiplierPatternCache();
         markDirty();
         refreshOutputMultiplierPatterns();
+    }
+
+    private int makeOutputMultiplierPatternCacheKey(IPatternDetails pattern, ItemStack stack,
+            String recipeTypeId, int multiplier, long recipeRevision) {
+        int result = 31 + patternDefinitionHash(pattern);
+        result = 31 * result + stackKeyHash(stack);
+        result = 31 * result + Objects.hashCode(recipeTypeId);
+        result = 31 * result + multiplier;
+        result = 31 * result + Long.hashCode(recipeRevision);
+        return result;
+    }
+
+    private void clearOutputMultiplierPatternCache() {
+        outputMultiplierPatternCache.clear();
+    }
+
+    private static int stackKeyHash(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0;
+        int result = 31 + Objects.hashCode(stack.getItem());
+        result = 31 * result + stack.getDamageValue();
+        result = 31 * result + Objects.hashCode(stack.getTag());
+        return result;
+    }
+
+    private static int patternDefinitionHash(IPatternDetails pattern) {
+        return pattern == null ? 0 : Objects.hashCode(pattern.getDefinition());
     }
 
     @Override
@@ -506,6 +614,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Override
     public List<IPatternDetails> getAvailablePatterns() {
+        refreshVisibleOutputMultiplierPatterns(false);
         List<IPatternDetails> patterns = new ArrayList<>(super.getAvailablePatterns());
         if (wildcardPatterns != null) patterns.addAll(wildcardPatterns);
         return List.copyOf(patterns);
@@ -1029,6 +1138,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         if (wildcardResolvedRecipes != null) wildcardResolvedRecipes.clear();
         if (wildcardAssignedRecipeTypeIds != null) wildcardAssignedRecipeTypeIds.clear();
         if (wildcardPatternToSlot != null) wildcardPatternToSlot.clear();
+        if ((Object) this instanceof VirtualPatternBufferMachineAccess access) {
+            access.gtShanhai$invalidateRefundSlotIndex();
+        }
         if (clearPendingPersistence && wildcardPersistence != null) wildcardPersistence.clearPending();
         RecipeTypePatternSearchHelper.clearPatternState(this);
     }
@@ -1045,6 +1157,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private void refundWildcardSlots() {
         if (wildcardInternalSlots == null) return;
         for (MEPatternBufferPartMachineBase.InternalSlot slot : wildcardInternalSlots) {
+            if ((Object) this instanceof VirtualPatternBufferMachineAccess access) {
+                access.gtShanhai$indexRefundSlot(slot, slot.getItemInventory(), slot.getFluidInventory());
+            }
             refundSlot(slot.getItemInventory(), slot.getFluidInventory());
         }
         if (!buffer.isEmpty()) AEUtils.reFunds(buffer, getMainNode().getGrid(), actionSource);
@@ -1173,5 +1288,29 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         // 只读：本槽同时在向 AE 网络供货，刷新本地过滤缓存不得改写样板 NBT（见
         // PatternRecipeTypeHelper.peekRecipeTypeId 文档——AEItemKey 含 NBT，改动即变身份）。
         patternRecipeTypeIds[slot] = PatternRecipeTypeHelper.peekRecipeTypeId(stack, getLevel());
+    }
+
+    private record OutputMultiplierPatternCacheEntry(
+            int sourcePatternDefinitionHash,
+            int sourceStackHash,
+            String recipeTypeId,
+            int multiplier,
+            long recipeRevision,
+            IPatternDetails pattern) {
+
+        OutputMultiplierPatternCacheEntry(IPatternDetails sourcePattern, ItemStack sourceStack,
+                String recipeTypeId, int multiplier, long recipeRevision, IPatternDetails pattern) {
+            this(patternDefinitionHash(sourcePattern), stackKeyHash(sourceStack),
+                    recipeTypeId, multiplier, recipeRevision, pattern);
+        }
+
+        boolean matches(IPatternDetails sourcePattern, ItemStack sourceStack,
+                String recipeTypeId, int multiplier, long recipeRevision) {
+            return sourcePatternDefinitionHash == patternDefinitionHash(sourcePattern)
+                    && sourceStackHash == stackKeyHash(sourceStack)
+                    && Objects.equals(this.recipeTypeId, recipeTypeId)
+                    && this.multiplier == multiplier
+                    && this.recipeRevision == recipeRevision;
+        }
     }
 }

@@ -179,7 +179,7 @@ class VirtualCraftingPresenceInputSourceTest {
                 "AE2 LEGACY 与 GTLCore 三种快速计算模式必须使用同一语义");
         assertTrue(nodeMixin.contains("this.parentInput.getMultiplier()"),
                 "批量规划时虚拟在场输入只请求自身需求量，不得乘下单次数");
-        assertTrue(nodeMixin.contains("priority = 900"),
+        assertTrue(nodeMixin.contains("priority = 1500"),
                 "节点修正必须晚于 GTLCore 默认优先级 Mixin 才能覆盖其新增方法");
         assertFalse(processMixin.contains("java.lang.reflect") || nodeMixin.contains("java.lang.reflect"),
                 "下单热点路径不得使用反射");

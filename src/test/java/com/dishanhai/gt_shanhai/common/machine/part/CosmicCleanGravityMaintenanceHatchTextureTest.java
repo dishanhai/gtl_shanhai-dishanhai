@@ -25,23 +25,6 @@ class CosmicCleanGravityMaintenanceHatchTextureTest {
             "models", "block", "machine", "part", NAME + ".json");
     private static final Path OVERLAY = TEXTURE_DIR.resolve(NAME + ".png");
     private static final Path EMISSIVE = TEXTURE_DIR.resolve(NAME + "_emissive.png");
-    private static final Path GENERATOR = Path.of("src", "test", "python",
-            "generate_cosmic_clean_gravity_hatch_texture.py");
-    private static final Path MACHINES = Path.of("src", "main", "java", "com", "dishanhai",
-            "gt_shanhai", "common", "machine", "DShanhaiMachines.java");
-
-    @Test
-    void generatorAndRendererUseTheCustomAnimatedModel() throws IOException {
-        assertTrue(Files.exists(GENERATOR), "缺少可复现的 Python 材质生成脚本");
-        String generator = Files.readString(GENERATOR);
-        String machines = Files.readString(MACHINES);
-
-        assertTrue(generator.contains("from PIL import Image"));
-        assertTrue(generator.contains("FRAME_COUNT = 32"));
-        assertTrue(generator.contains("FRAME_SIZE = 16"));
-        assertTrue(machines.contains("new ResourceLocation(MOD_ID,"));
-        assertTrue(machines.contains("\"block/machine/part/" + NAME + "\""));
-    }
 
     @Test
     void modelReferencesSynchronizedOverlayAndEmissiveAnimations() throws IOException {

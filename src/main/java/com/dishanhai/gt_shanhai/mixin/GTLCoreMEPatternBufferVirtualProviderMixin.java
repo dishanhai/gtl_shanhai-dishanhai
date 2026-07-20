@@ -21,6 +21,7 @@ import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPart
 import org.gtlcore.gtlcore.integration.ae2.handler.SlotCacheManager;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -29,6 +30,8 @@ import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import java.lang.reflect.Method;
+import java.util.IdentityHashMap;
+import java.util.Map;
 
 @Mixin(value = MEPatternBufferPartMachineBase.class, remap = false)
 public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements VirtualPatternBufferMachineAccess {
@@ -41,6 +44,17 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
 
     @Shadow
     protected abstract int getInternalSlotCount();
+
+    @Unique
+    private final Map<Object2LongOpenHashMap<AEItemKey>, Object>
+            gtShanhai$slotByItemInventory = new IdentityHashMap<>();
+
+    @Unique
+    private final Map<Object2LongOpenHashMap<AEFluidKey>, Object>
+            gtShanhai$slotByFluidInventory = new IdentityHashMap<>();
+
+    @Unique
+    private Method gtShanhai$getInternalSlotMethod;
 
     @Override
     public void gtShanhai$restoreVirtualTargetsFromPatterns(Iterable<IPatternDetails> patterns) {
@@ -122,9 +136,32 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
     @Inject(method = "refundSlot", at = @At("HEAD"), remap = false)
     private void gtShanhai$stripVirtualTargetsBeforeRefund(Object2LongOpenHashMap<AEItemKey> itemInventory,
             Object2LongOpenHashMap<AEFluidKey> fluidInventory, org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
+        if (!gtShanhai$hasVirtualRefundState(itemInventory, fluidInventory)) return;
         gtShanhai$stripVirtualTargetsFromCatalyst(itemInventory, fluidInventory);
         VirtualPatternBufferSlotState.stripVirtualTargets(itemInventory);
         VirtualPatternBufferSlotState.stripVirtualTargets(fluidInventory);
+    }
+
+    @Unique
+    private boolean gtShanhai$hasVirtualRefundState(Object2LongOpenHashMap<AEItemKey> itemInventory,
+            Object2LongOpenHashMap<AEFluidKey> fluidInventory) {
+        return VirtualPatternBufferSlotState.hasVirtualTargets(itemInventory)
+                || VirtualPatternBufferSlotState.hasVirtualTargets(fluidInventory)
+                || VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory) >= 0;
+    }
+
+    @Override
+    public void gtShanhai$indexRefundSlot(Object slot, Object2LongOpenHashMap<AEItemKey> itemInventory,
+            Object2LongOpenHashMap<AEFluidKey> fluidInventory) {
+        if (slot == null) return;
+        if (itemInventory != null) gtShanhai$slotByItemInventory.put(itemInventory, slot);
+        if (fluidInventory != null) gtShanhai$slotByFluidInventory.put(fluidInventory, slot);
+    }
+
+    @Override
+    public void gtShanhai$invalidateRefundSlotIndex() {
+        gtShanhai$slotByItemInventory.clear();
+        gtShanhai$slotByFluidInventory.clear();
     }
 
     @Override
@@ -195,8 +232,12 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
 
     private Object gtShanhai$getInternalSlot(int slotIndex) {
         try {
-            Method method = MEPatternBufferPartMachineBase.class.getDeclaredMethod("getInternalSlot", int.class);
-            method.setAccessible(true);
+            Method method = gtShanhai$getInternalSlotMethod;
+            if (method == null) {
+                method = MEPatternBufferPartMachineBase.class.getDeclaredMethod("getInternalSlot", int.class);
+                method.setAccessible(true);
+                gtShanhai$getInternalSlotMethod = method;
+            }
             return method.invoke(this, slotIndex);
         } catch (ReflectiveOperationException ignored) {
             return null;
@@ -311,14 +352,24 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
 
     private Object gtShanhai$findSlotByInventories(Object2LongOpenHashMap<AEItemKey> itemInventory,
             Object2LongOpenHashMap<AEFluidKey> fluidInventory) {
+        Object slot = gtShanhai$slotByItemInventory.get(itemInventory);
+        if (slot != null && gtShanhai$slotByFluidInventory.get(fluidInventory) == slot) {
+            return slot;
+        }
+        gtShanhai$rebuildSlotInventoryIndex();
+        slot = gtShanhai$slotByItemInventory.get(itemInventory);
+        return slot != null && gtShanhai$slotByFluidInventory.get(fluidInventory) == slot ? slot : null;
+    }
+
+    @Unique
+    private void gtShanhai$rebuildSlotInventoryIndex() {
+        gtShanhai$slotByItemInventory.clear();
+        gtShanhai$slotByFluidInventory.clear();
         for (int i = 0; i < getInternalSlotCount(); i++) {
             Object slot = gtShanhai$getInternalSlot(i);
-            if (slot != null && gtShanhai$getItemInventory(slot) == itemInventory
-                    && gtShanhai$getFluidInventory(slot) == fluidInventory) {
-                return slot;
-            }
+            if (slot == null) continue;
+            gtShanhai$indexRefundSlot(slot, gtShanhai$getItemInventory(slot), gtShanhai$getFluidInventory(slot));
         }
-        return null;
     }
 
     private void gtShanhai$notifySlotChanged(Object slot) {

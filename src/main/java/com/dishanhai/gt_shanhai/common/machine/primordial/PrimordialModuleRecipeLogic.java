@@ -34,7 +34,7 @@ import java.util.function.LongPredicate;
 
 public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
 
-    private static final long ACTIVE_LOOKUP_CACHE_TICKS = 100L;
+    private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;
 
     // checkModuleCondition 缓存：避免每次都查静态注册表和遍历 conditions。
     // true / false 均为短期缓存（各带 TTL），过期后重新检查，避免一次瞬时结果被永久固化。
@@ -73,6 +73,11 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     @Override
     protected long getLookupCacheTicks() {
+        return ACTIVE_LOOKUP_CACHE_TICKS;
+    }
+
+    @Override
+    protected long getMaxLookupCacheTicks() {
         return ACTIVE_LOOKUP_CACHE_TICKS;
     }
 
