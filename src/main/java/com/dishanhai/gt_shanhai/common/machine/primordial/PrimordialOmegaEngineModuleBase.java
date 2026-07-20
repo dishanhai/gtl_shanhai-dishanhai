@@ -316,6 +316,13 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         return currentHost.getMountedOutputMultiplier();
     }
 
+    public void invalidateHostOutputMultiplierCache() {
+        var currentHost = getHost();
+        if (currentHost != null) {
+            currentHost.invalidateMountedOutputMultiplier();
+        }
+    }
+
     @Override
     public void setHost(PrimordialOmegaEngineMachine host) {
         this.host = host;

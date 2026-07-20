@@ -16,6 +16,11 @@ import net.minecraftforge.common.MinecraftForge;
 public class ClientInit {
 
     public static void init() {
+        appeng.init.client.InitScreens.register(
+                com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu.TYPE,
+                com.dishanhai.gt_shanhai.client.gui.terminal.ShanhaiPatternManagementScreen::new,
+                "/screens/shanhai_wireless_pattern_management.json");
+
         // 程序化注册 Guide（支持 config/gt_shanhai/guides/ 热重载）
         GuideRegistration.register();
 

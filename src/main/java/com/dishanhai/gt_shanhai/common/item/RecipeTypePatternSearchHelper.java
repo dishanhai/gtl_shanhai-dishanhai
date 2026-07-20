@@ -25,6 +25,7 @@ import appeng.crafting.pattern.AEProcessingPattern;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine;
@@ -121,10 +122,13 @@ public final class RecipeTypePatternSearchHelper {
     private static final class MarkedRecipeCacheEntry {
         final int stackIdentityHash;
         final long revision;
+        final long inferenceInventoryFingerprint;
         final GTRecipe recipe;
-        MarkedRecipeCacheEntry(int stackIdentityHash, long revision, GTRecipe recipe) {
+        MarkedRecipeCacheEntry(int stackIdentityHash, long revision,
+                long inferenceInventoryFingerprint, GTRecipe recipe) {
             this.stackIdentityHash = stackIdentityHash;
             this.revision = revision;
+            this.inferenceInventoryFingerprint = inferenceInventoryFingerprint;
             this.recipe = recipe;
         }
     }
@@ -134,24 +138,44 @@ public final class RecipeTypePatternSearchHelper {
      * （{@link #collectFirstSparkPatternRecipes}）共用的缓存入口——昂贵的样板反推调用
      * （AE2 样板 NBT 解码 + 配方全量匹配）只在缓存未命中时才触发一次。
      */
-    private static GTRecipe getMarkedRecipeCached(MEPatternBufferPartMachineBase buffer, RecipeTypePatternSlotAccess access, int slot) {
+    private static GTRecipe getMarkedRecipeCached(MEPatternBufferPartMachineBase buffer,
+            RecipeTypePatternSlotAccess access, int slot, GenericStack[] inferenceInputs,
+            long inferenceInventoryFingerprint) {
         int stackHash = System.identityHashCode(access.gtShanhai$getPatternStack(slot));
         long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         synchronized (MARKED_RECIPE_CACHE) {
             it.unimi.dsi.fastutil.ints.Int2ObjectMap<MarkedRecipeCacheEntry> slotCache = MARKED_RECIPE_CACHE.get(buffer);
             if (slotCache != null) {
                 MarkedRecipeCacheEntry entry = slotCache.get(slot);
-                if (entry != null && entry.stackIdentityHash == stackHash && entry.revision == revision) {
+                if (entry != null && entry.stackIdentityHash == stackHash && entry.revision == revision
+                        && entry.inferenceInventoryFingerprint == inferenceInventoryFingerprint) {
                     return entry.recipe;
                 }
             }
         }
-        GTRecipe recipe = access.gtShanhai$getPatternRecipe(slot);
+        GTRecipe recipe = access.gtShanhai$getPatternRecipe(slot, inferenceInputs);
+        if (recipe != null) {
+            ResourceLocation dimensionId = buffer.getLevel() == null
+                    ? null : buffer.getLevel().dimension().location();
+            recipe = PatternSlotScopedRecipe.scope(recipe, dimensionId, buffer.getPos(), slot);
+        }
         synchronized (MARKED_RECIPE_CACHE) {
             MARKED_RECIPE_CACHE.computeIfAbsent(buffer, b -> new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>())
-                    .put(slot, new MarkedRecipeCacheEntry(stackHash, revision, recipe));
+                    .put(slot, new MarkedRecipeCacheEntry(
+                            stackHash, revision, inferenceInventoryFingerprint, recipe));
         }
         return recipe;
+    }
+
+    private static long fingerprintInferenceInputs(GenericStack[] inputs) {
+        long hash = 1L;
+        if (inputs == null) return hash;
+        for (GenericStack input : inputs) {
+            if (input == null || input.what() == null || input.amount() <= 0L) continue;
+            hash = 31L * hash + input.what().hashCode();
+            hash = 31L * hash + Long.hashCode(input.amount());
+        }
+        return hash;
     }
 
     /** 清理星律动态槽重建时的首配缓存和虚拟供料预算。 */
@@ -165,6 +189,27 @@ public final class RecipeTypePatternSearchHelper {
         }
         synchronized (MARKED_RECIPE_CACHE) {
             MARKED_RECIPE_CACHE.remove(buffer);
+        }
+    }
+
+    /** 样板槽内容变化时同步失效该槽，避免同 tick 清空并写回时旧订单预算继续沿用。 */
+    public static void clearPatternSlotState(MEPatternBufferPartMachineBase buffer, int slot) {
+        if (buffer == null || slot < 0) return;
+        synchronized (ORDER_REMAINING_BUDGET_SLOTS) {
+            long[] budgets = ORDER_REMAINING_BUDGET_SLOTS.get(buffer);
+            if (budgets != null && slot < budgets.length) {
+                budgets[slot] = -1L;
+            }
+        }
+        synchronized (PATTERN_PEEK_CACHE) {
+            it.unimi.dsi.fastutil.ints.Int2ObjectMap<PatternPeekCacheEntry> slotCache =
+                    PATTERN_PEEK_CACHE.get(buffer);
+            if (slotCache != null) slotCache.remove(slot);
+        }
+        synchronized (MARKED_RECIPE_CACHE) {
+            it.unimi.dsi.fastutil.ints.Int2ObjectMap<MarkedRecipeCacheEntry> slotCache =
+                    MARKED_RECIPE_CACHE.get(buffer);
+            if (slotCache != null) slotCache.remove(slot);
         }
     }
 
@@ -187,6 +232,15 @@ public final class RecipeTypePatternSearchHelper {
     }
 
     public static Set<GTRecipe> collectMarkedPatternRecipes(IRecipeLogicMachine machine) {
+        return collectMarkedPatternRecipes(machine, true);
+    }
+
+    /** 仅收集 AE 已真实激活的样板槽，不扫描未下单槽位，也不主动从网络预填原料。 */
+    public static Set<GTRecipe> collectActiveMarkedPatternRecipes(IRecipeLogicMachine machine) {
+        return collectMarkedPatternRecipes(machine, false);
+    }
+
+    private static Set<GTRecipe> collectMarkedPatternRecipes(IRecipeLogicMachine machine, boolean includeFirstSpark) {
         LinkedHashSet<GTRecipe> result = new LinkedHashSet<>();
         if (!(machine instanceof IRecipeCapabilityMachine capabilityMachine)) return result;
 
@@ -197,11 +251,11 @@ public final class RecipeTypePatternSearchHelper {
                 Object[] handlers = part.getMERecipeHandlers();
                 if (handlers == null) continue;
                 for (Object handler : handlers) {
-                    collectMarkedPatternRecipesFromHandler(capabilityMachine, handler, result);
+                    collectMarkedPatternRecipesFromHandler(capabilityMachine, handler, result, includeFirstSpark);
                 }
             }
         }
-        collectMarkedPatternRecipesFromParts(machine, capabilityMachine, result);
+        collectMarkedPatternRecipesFromParts(machine, capabilityMachine, result, includeFirstSpark);
         return applyRecipeTypeSwitch(machine, result);
     }
 
@@ -219,7 +273,7 @@ public final class RecipeTypePatternSearchHelper {
             Object patternMachine = resolvePatternBuffer(part);
             if (patternMachine == null) continue;
             collectMarkedPatternRecipesFromMachine(null, part, patternMachine,
-                    readActiveSlots(patternMachine), result);
+                    readActiveSlots(patternMachine), result, true);
         }
         return applyRecipeTypeSwitch(machine, result);
     }
@@ -229,7 +283,7 @@ public final class RecipeTypePatternSearchHelper {
         IRecipeCapabilityMachine capabilityMachine = machine instanceof IRecipeCapabilityMachine
                 ? (IRecipeCapabilityMachine) machine
                 : null;
-        collectMarkedPatternRecipesFromMachine(capabilityMachine, buffer, buffer, readActiveSlots(buffer), result);
+        collectMarkedPatternRecipesFromMachine(capabilityMachine, buffer, buffer, readActiveSlots(buffer), result, true);
         return applyRecipeTypeSwitch(machine, result);
     }
 
@@ -252,22 +306,24 @@ public final class RecipeTypePatternSearchHelper {
     }
 
     private static void collectMarkedPatternRecipesFromHandler(IRecipeCapabilityMachine capabilityMachine, Object handler,
-            Set<GTRecipe> result) {
+            Set<GTRecipe> result, boolean includeFirstSpark) {
         Object ownerMachine = findHandlerMachine(handler);
         collectMarkedPatternRecipesFromMachine(capabilityMachine, ownerMachine, resolvePatternBuffer(ownerMachine),
-                readActiveSlots(handler), result);
+                readActiveSlots(handler), result, includeFirstSpark);
     }
 
     private static void collectMarkedPatternRecipesFromParts(IRecipeLogicMachine machine,
-            IRecipeCapabilityMachine capabilityMachine, Set<GTRecipe> result) {
+            IRecipeCapabilityMachine capabilityMachine, Set<GTRecipe> result, boolean includeFirstSpark) {
         if (!(machine instanceof IMultiController controller)) return;
         for (IMultiPart part : controller.getParts()) {
             if (part == null) continue;
             Object patternMachine = resolvePatternBuffer(part);
             Object slotSource = patternMachine == null ? part : patternMachine;
             collectMarkedPatternRecipesFromMachine(capabilityMachine, part, patternMachine,
-                    readActiveSlots(slotSource), result);
-            collectPlainPatternRecipesFromPart(machine, capabilityMachine, part, result);
+                    readActiveSlots(slotSource), result, includeFirstSpark);
+            if (includeFirstSpark) {
+                collectPlainPatternRecipesFromPart(machine, capabilityMachine, part, result);
+            }
         }
     }
 
@@ -311,11 +367,14 @@ public final class RecipeTypePatternSearchHelper {
     }
 
     private static void collectMarkedPatternRecipesFromMachine(IRecipeCapabilityMachine capabilityMachine,
-            Object ownerMachine, Object patternMachine, int[] activeSlots, Set<GTRecipe> result) {
+            Object ownerMachine, Object patternMachine, int[] activeSlots, Set<GTRecipe> result,
+            boolean includeFirstSpark) {
         if (!(patternMachine instanceof RecipeTypePatternSlotAccess access)
                 || !(patternMachine instanceof MEPatternBufferPartMachineBase buffer)) {
             return;
         }
+        GenericStack[] inferenceInputs = access.gtShanhai$getPatternInferenceInputs();
+        long inferenceInventoryFingerprint = fingerprintInferenceInputs(inferenceInputs);
         if (activeSlots != null && activeSlots.length > 0) {
             com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activeSlots",
                     "buffer=" + buffer.getClass().getSimpleName() + "@" + Integer.toHexString(System.identityHashCode(buffer))
@@ -323,7 +382,8 @@ public final class RecipeTypePatternSearchHelper {
         }
         if (activeSlots != null) {
             for (int slot : activeSlots) {
-                GTRecipe recipe = getMarkedRecipeCached(buffer, access, slot);
+                GTRecipe recipe = getMarkedRecipeCached(
+                        buffer, access, slot, inferenceInputs, inferenceInventoryFingerprint);
                 if (recipe == null || !access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
                     com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activeSlot.skipped",
                             "slot=" + slot + " recipeNull=" + (recipe == null)
@@ -334,7 +394,10 @@ public final class RecipeTypePatternSearchHelper {
                 result.add(recipe);
             }
         }
-        collectFirstSparkPatternRecipes(capabilityMachine, ownerMachine, patternMachine, access, activeSlots, result);
+        if (includeFirstSpark) {
+            collectFirstSparkPatternRecipes(capabilityMachine, ownerMachine, patternMachine, access,
+                    activeSlots, result, inferenceInputs, inferenceInventoryFingerprint);
+        }
     }
 
     /**
@@ -347,7 +410,8 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static void collectFirstSparkPatternRecipes(IRecipeCapabilityMachine capabilityMachine,
             Object ownerMachine, Object patternMachine, RecipeTypePatternSlotAccess access,
-            int[] activeSlots, Set<GTRecipe> result) {
+            int[] activeSlots, Set<GTRecipe> result, GenericStack[] inferenceInputs,
+            long inferenceInventoryFingerprint) {
         if (!(patternMachine instanceof MEPatternBufferPartMachineBase buffer)) return;
         int slotCount = access.gtShanhai$getPatternSlotCount();
         for (int slot = 0; slot < slotCount; slot++) {
@@ -357,7 +421,8 @@ public final class RecipeTypePatternSearchHelper {
                 clearOrderFulfilled(buffer, slot); // 样板被取出：这一单彻底结束，下次放样板算新单
                 continue;
             }
-            GTRecipe recipe = getMarkedRecipeCached(buffer, access, slot);
+            GTRecipe recipe = getMarkedRecipeCached(
+                    buffer, access, slot, inferenceInputs, inferenceInventoryFingerprint);
             if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
                 topUpVirtualSupply(buffer, slot, patternStack, recipe);
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
@@ -663,13 +728,16 @@ public final class RecipeTypePatternSearchHelper {
             return;
         }
         MEPatternRecipeHandlePart handlePart = MEPatternRecipeHandlePart.of((IMEPatternPartMachine) ownerMachine);
-        int handledSlot = handlePart.handleRecipe(recipe, copyRecipeContents(recipe.inputs), true, true);
-        if (handledSlot < 0) {
+        handlePart.setLastRecipe2Slot(recipe, slot);
+        int handledSlot = handlePart.handleRecipe(recipe, copyRecipeContents(recipe.inputs), true, false);
+        if (handledSlot != slot) {
             com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activate.handleRecipeRejected",
-                    "slot=" + slot + " recipeId=" + recipe.getId() + " ownerMachine=" + ownerMachine.getClass().getName());
+                    "slot=" + slot + " handledSlot=" + handledSlot + " recipeId=" + recipe.getId()
+                            + " ownerMachine=" + ownerMachine.getClass().getName());
             return;
         }
-        capabilityMachine.tryAddAndActiveMERhp(handlePart, recipe, handledSlot);
+        ((IMEPatternPartMachine) ownerMachine).getMETrait().setSlotCacheRecipe(slot, recipe);
+        capabilityMachine.tryAddAndActiveMERhp(handlePart, recipe, slot);
         com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activate.success",
                 "slot=" + slot + " handledSlot=" + handledSlot + " recipeId=" + recipe.getId());
     }

@@ -164,6 +164,16 @@ public class PrimordialTaixuCosmicForgeModule extends PrimordialOmegaEngineModul
     }
 
     @Override
+    public PrimordialTaixuCosmicForgeModuleLogic createRecipeLogic(Object... args) {
+        return new PrimordialTaixuCosmicForgeModuleLogic(this);
+    }
+
+    @Override
+    public PrimordialTaixuCosmicForgeModuleLogic getRecipeLogic() {
+        return (PrimordialTaixuCosmicForgeModuleLogic) recipeLogic;
+    }
+
+    @Override
     public int getMaxParallel() {
         return Ints.saturatedCast(currentParallel);
     }

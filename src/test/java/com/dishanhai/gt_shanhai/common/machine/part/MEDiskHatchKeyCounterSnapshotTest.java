@@ -108,8 +108,12 @@ public class MEDiskHatchKeyCounterSnapshotTest {
 
         assertEquals(-1, source.indexOf("out.addAll(counter)"),
                 "KeyCounterSnapshot.addTo 不能整表 addAll，否则空输出计数器会触发 VariantCounter.copy()");
-        assertTrue(source.contains("AeStorageAmountMath.mergeSaturated(out, counter)"),
-                "KeyCounterSnapshot.addTo 必须饱和回放，避免重复无限量溢出");
+        assertTrue(source.contains("private final AEKey[] keys;"),
+                "KeyCounterSnapshot 必须把稳定快照压平成数组，避免每次回放遍历 KeyCounter 内部结构");
+        assertTrue(source.contains("AeStorageAmountMath.addSaturated(out, keys[i], amounts[i])"),
+                "KeyCounterSnapshot.addTo 必须逐项饱和回放，避免重复无限量溢出");
+        assertEquals(-1, source.indexOf("AeStorageAmountMath.mergeSaturated(out, counter)"),
+                "KeyCounterSnapshot.addTo 不能再回到 mergeSaturated 热路径");
     }
 
     @Test

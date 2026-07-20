@@ -30,6 +30,7 @@ public final class PatternRecipeTypeHelper {
     // 时，仅按类型域搜索的自愈确认对两边都能"确认成功"，被某次瞬时失配（配方被
     // DShanhaiRecipeModifierAPI 规则临时剥离/替换）触发误改判后一直来回横跳。
     private static final String TAG_RECIPE_TYPE_AUTHORITATIVE = "gt_shanhai_recipe_type_authoritative";
+    private static final ThreadLocal<GTRecipe> AUTHORITATIVE_ENCODING_RECIPE = new ThreadLocal<>();
 
     private PatternRecipeTypeHelper() {
     }
@@ -60,10 +61,27 @@ public final class PatternRecipeTypeHelper {
         return tag != null && tag.getBoolean(TAG_RECIPE_TYPE_AUTHORITATIVE);
     }
 
+    public static void pushAuthoritativeEncodingRecipe(GTRecipe recipe) {
+        AUTHORITATIVE_ENCODING_RECIPE.set(recipe);
+    }
+
+    public static void popAuthoritativeEncodingRecipe() {
+        AUTHORITATIVE_ENCODING_RECIPE.remove();
+    }
+
+    public static GTRecipe currentAuthoritativeEncodingRecipe() {
+        return AUTHORITATIVE_ENCODING_RECIPE.get();
+    }
+
     public static String readRecipeTypeId(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "";
         CompoundTag tag = stack.getTag();
         if (tag == null) return "";
+
+        if (tag.getBoolean(TAG_RECIPE_TYPE_AUTHORITATIVE) && tag.contains(TAG_RECIPE_TYPE, 8)) {
+            String id = tag.getString(TAG_RECIPE_TYPE);
+            if (!id.isEmpty()) return id;
+        }
 
         // gtlcore 编码样板时用 PatternQuickUploadRecipeTypeResolver 写入的字段优先：它在编码那一刻
         // 就知道确切来源配方（或者按类型域扫描+遇歧义直接放弃，不去重写多个候选），比 gt_shanhai
@@ -87,12 +105,17 @@ public final class PatternRecipeTypeHelper {
         CompoundTag gtlcore = tag.getCompound(GTLCORE_TAG);
         if (!gtlcore.contains(GTLCORE_QUICK_UPLOAD_TAG, 9)) return "";
         net.minecraft.nbt.ListTag list = gtlcore.getList(GTLCORE_QUICK_UPLOAD_TAG, 8);
-        java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+        String uniqueId = "";
         for (int i = 0; i < list.size(); i++) {
             String id = list.getString(i);
-            if (!id.isEmpty()) ids.add(id);
+            if (id.isEmpty()) continue;
+            if (uniqueId.isEmpty()) {
+                uniqueId = id;
+            } else if (!uniqueId.equals(id)) {
+                return "";
+            }
         }
-        return ids.size() == 1 ? ids.iterator().next() : "";
+        return uniqueId;
     }
 
     public static String ensureRecipeTypeId(ItemStack stack, Level level) {
@@ -179,21 +202,34 @@ public final class PatternRecipeTypeHelper {
      * 网络提供样板服务，改动 NBT 会改变 AE 样板身份（AEItemKey 含 NBT），必须只读。
      */
     public static GTRecipe peekRecipe(ItemStack stack, Level level) {
+        return peekRecipe(stack, level, (GenericStack[]) null);
+    }
+
+    public static GTRecipe peekRecipe(ItemStack stack, Level level, GenericStack[] availableCatalystInputs) {
         if (stack == null || stack.isEmpty() || level == null) return null;
         String existing = readRecipeTypeId(stack);
+        return peekRecipe(stack, level, existing, availableCatalystInputs);
+    }
+
+    private static GTRecipe peekRecipe(ItemStack stack, Level level, String existing) {
+        return peekRecipe(stack, level, existing, null);
+    }
+
+    private static GTRecipe peekRecipe(ItemStack stack, Level level, String existing,
+            GenericStack[] availableCatalystInputs) {
 
         // 权威标记：零歧义来源，只在其类型域内解析，绝不回退全局搜索给出不同答案
         // （否则某次瞬时失配就会让只读预览也跟着抖一下，虽不写 NBT 但仍是不必要的不一致）。
         if (!existing.isEmpty() && isAuthoritative(stack)) {
-            return inferRecipe(stack, level, existing);
+            return inferRecipe(stack, level, existing, availableCatalystInputs);
         }
 
-        GTRecipe recipe = inferRecipe(stack, level, existing);
+        GTRecipe recipe = inferRecipe(stack, level, existing, availableCatalystInputs);
         if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) {
-            recipe = inferRecipe(stack, level, "");
+            recipe = inferRecipe(stack, level, "", availableCatalystInputs);
         }
-        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) return null;
-        return recipe;
+        return recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null
+                ? null : recipe;
     }
 
     /**
@@ -203,15 +239,12 @@ public final class PatternRecipeTypeHelper {
      * 推断失败（配方表暂未就绪等）时保留现有 NBT 值而非清空，避免过滤条件被临时空标签放行一切。
      */
     public static String peekRecipeTypeId(ItemStack stack, Level level) {
-        long start = System.nanoTime();
-        GTRecipe recipe = peekRecipe(stack, level);
-        long elapsed = System.nanoTime() - start;
         String existing = readRecipeTypeId(stack);
+        if (stack == null || stack.isEmpty() || level == null) return existing;
+        if (!existing.isEmpty() && isAuthoritative(stack)) return existing;
+        GTRecipe recipe = peekRecipe(stack, level, existing);
         String result = recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null
                 ? existing : recipe.recipeType.registryName.toString();
-        if (elapsed > 5_000_000) { // 5ms 以上打印
-            LOG.warn("[peekRecipeTypeId] elapsedMs={} existing={} inferred={}", elapsed / 1_000_000.0, existing, result);
-        }
         return result;
     }
 
@@ -223,6 +256,11 @@ public final class PatternRecipeTypeHelper {
     }
 
     public static void writeRecipeTypeFromPattern(ItemStack stack, GenericStack[] inputs, GenericStack[] outputs) {
+        GTRecipe authoritativeRecipe = currentAuthoritativeEncodingRecipe();
+        if (authoritativeRecipe != null) {
+            writeAuthoritativeRecipeType(stack, authoritativeRecipe);
+            return;
+        }
         if (stack == null || stack.isEmpty() || !readRecipeTypeId(stack).isEmpty()) return;
         GTRecipe recipe = VirtualPatternEncodingHelper.findMatchingRecipeForPattern(inputs, outputs);
         if (recipe != null) {
@@ -254,6 +292,11 @@ public final class PatternRecipeTypeHelper {
     }
 
     private static GTRecipe inferRecipe(ItemStack stack, Level level, String recipeTypeId) {
+        return inferRecipe(stack, level, recipeTypeId, null);
+    }
+
+    private static GTRecipe inferRecipe(ItemStack stack, Level level, String recipeTypeId,
+            GenericStack[] availableCatalystInputs) {
         try {
             IPatternDetails details = PatternDetailsHelper.decodePattern(stack, level);
             if (!(details instanceof AEProcessingPattern pattern)) {
@@ -264,8 +307,9 @@ public final class PatternRecipeTypeHelper {
             GenericStack[] in = pattern.getSparseInputs();
             GenericStack[] out = pattern.getSparseOutputs();
             return recipeTypeId == null || recipeTypeId.isEmpty()
-                    ? VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out)
-                    : VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out, recipeTypeId);
+                    ? VirtualPatternEncodingHelper.findMatchingRecipeForPattern(in, out, availableCatalystInputs)
+                    : VirtualPatternEncodingHelper.findMatchingRecipeForPattern(
+                            in, out, recipeTypeId, availableCatalystInputs);
         } catch (RuntimeException e) {
             LOG.warn("[inferRecipe] parse exception", e);
             return null;

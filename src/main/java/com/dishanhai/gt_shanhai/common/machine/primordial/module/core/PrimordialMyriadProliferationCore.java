@@ -4,9 +4,9 @@ import com.dishanhai.gt_shanhai.api.machine.primordial.IPrimordialOutputMultipli
 import com.dishanhai.gt_shanhai.api.recipe.PrimordialMyriadRecipeTypes;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
-import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
@@ -16,6 +16,8 @@ import java.util.function.Supplier;
 
 public class PrimordialMyriadProliferationCore extends PrimordialOmegaEngineModuleBase
         implements IPrimordialOutputMultiplierModule {
+
+    private static final String KEY_ACTIVE_RECIPE_TYPE_ID = "sh_myriad_active_recipe_type";
 
     public PrimordialMyriadProliferationCore(IMachineBlockEntity holder, Object... args) {
         super(holder, args);
@@ -32,13 +34,18 @@ public class PrimordialMyriadProliferationCore extends PrimordialOmegaEngineModu
     }
 
     @Override
+    public long getCurrentParallel() {
+        return 1L;
+    }
+
+    @Override
     public int getCurrentOutputMultiplier() {
         PrimordialMyriadProliferationCoreLogic logic = getRecipeLogic();
         return resolveOutputMultiplier(
                 isFormed(),
                 this::isHostConnected,
-                logic::isWorking,
-                () -> getRecipeTypeId(logic.getLastRecipe()));
+                logic::isOutputMultiplierActive,
+                logic::getActiveRecipeTypeId);
     }
 
     static int resolveOutputMultiplier(boolean formed,
@@ -73,11 +80,30 @@ public class PrimordialMyriadProliferationCore extends PrimordialOmegaEngineModu
 
     private ResourceLocation getActiveRecipeTypeId() {
         PrimordialMyriadProliferationCoreLogic logic = getRecipeLogic();
-        return logic.isWorking() ? getRecipeTypeId(logic.getLastRecipe()) : null;
+        return logic.isOutputMultiplierActive() ? logic.getActiveRecipeTypeId() : null;
     }
 
-    private static ResourceLocation getRecipeTypeId(GTRecipe recipe) {
-        return recipe == null || recipe.recipeType == null ? null : recipe.recipeType.registryName;
+    @Override
+    public void saveCustomPersistedData(CompoundTag tag, boolean forSyncing) {
+        super.saveCustomPersistedData(tag, forSyncing);
+        if (forSyncing) return;
+        ResourceLocation activeRecipeTypeId = getRecipeLogic().getActiveRecipeTypeId();
+        if (activeRecipeTypeId != null) {
+            tag.putString(KEY_ACTIVE_RECIPE_TYPE_ID, activeRecipeTypeId.toString());
+        }
+    }
+
+    @Override
+    public void loadCustomPersistedData(CompoundTag tag) {
+        super.loadCustomPersistedData(tag);
+        if (tag.contains(KEY_ACTIVE_RECIPE_TYPE_ID)) {
+            try {
+                getRecipeLogic().restoreActiveRecipeTypeId(new ResourceLocation(
+                        tag.getString(KEY_ACTIVE_RECIPE_TYPE_ID)));
+            } catch (Exception ignored) {
+                getRecipeLogic().restoreActiveRecipeTypeId(null);
+            }
+        }
     }
 
     @Override

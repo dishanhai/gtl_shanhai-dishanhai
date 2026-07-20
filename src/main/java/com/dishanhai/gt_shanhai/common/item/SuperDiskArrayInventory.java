@@ -266,14 +266,23 @@ public class SuperDiskArrayInventory implements StorageCell {
         return true;
     }
 
+    boolean restoreExtractedKey(AEKey key) {
+        if (readOnlyTemplate || key == null) return false;
+        amounts.put(key, amounts.getOrDefault(key, BigInteger.ZERO).add(BigInteger.ONE));
+        total = total.add(BigInteger.ONE);
+        saveChanges();
+        return true;
+    }
+
     @Override
     public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
-        if (what == null || amount <= 0 || !(what instanceof AEItemKey)) return 0L;
+        if (what == null || amount <= 0) return 0L;
         if (readOnlyTemplate && mode == Actionable.MODULATE) return 0L;
-        AEItemKey itemKey = (AEItemKey) what;
-        if (itemKey.getItem() instanceof SuperDiskArrayItem) return 0L;
-        StorageCell nested = StorageCells.getCellInventory(itemKey.toStack(), null);
-        if (nested != null && !nested.canFitInsideCell()) return 0L;
+        if (what instanceof AEItemKey itemKey) {
+            if (itemKey.getItem() instanceof SuperDiskArrayItem) return 0L;
+            StorageCell nested = StorageCells.getCellInventory(itemKey.toStack(), null);
+            if (nested != null && !nested.canFitInsideCell()) return 0L;
+        }
         if (mode == Actionable.MODULATE) {
             BigInteger current = amounts.getOrDefault(what, BigInteger.ZERO);
             BigInteger delta = BigInteger.valueOf(amount);

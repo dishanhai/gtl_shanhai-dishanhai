@@ -196,6 +196,12 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         return outputMultiplierCache.get(getOffsetTimer(), modules);
     }
 
+    public void invalidateMountedOutputMultiplier() {
+        synchronized (outputMultiplierCache) {
+            outputMultiplierCache.invalidate();
+        }
+    }
+
     static final class OutputMultiplierCache {
 
         private long cachedTick = Long.MIN_VALUE;

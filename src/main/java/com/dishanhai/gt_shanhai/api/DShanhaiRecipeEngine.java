@@ -1045,14 +1045,138 @@ public class DShanhaiRecipeEngine {
             callMethod(m, "addCondition", s);
         }
     }
-    /** 配方备注：.notes("任意文本") 或 .notes(["第一行", "第二行"])，纯展示，不解析、不拆分逗号。 */
+    /** 配方备注：.notes("任意文本")、.notes(["第一行", "第二行"])，或字符串分组 "[ '第一行',], ['第二行,仍同一行']"。 */
     public static void applyNotes(Object m, Object v) {
-        forEachArg(v, item -> {
-            if (item == null) return;
-            String text = String.valueOf(item);
+        for (String text : parseNoteLines(v)) {
             if (text.isEmpty()) return;
             callMethod(m, "addCondition", new com.dishanhai.gt_shanhai.api.RecipeNoteCondition(text));
+        }
+    }
+
+    static List<String> parseNoteLines(Object value) {
+        if (value == null) {
+            return Collections.emptyList();
+        }
+        if (value instanceof CharSequence text) {
+            String raw = text.toString();
+            List<String> grouped = parseBracketedNoteLines(raw);
+            if (!grouped.isEmpty()) {
+                return grouped;
+            }
+            return raw.isEmpty() ? Collections.emptyList() : Collections.singletonList(raw);
+        }
+
+        List<String> lines = new ArrayList<>();
+        forEachArg(value, item -> {
+            if (item == null) return;
+            String text = String.valueOf(item);
+            if (!text.isEmpty()) lines.add(text);
         });
+        return lines;
+    }
+
+    private static List<String> parseBracketedNoteLines(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty() || text.charAt(0) != '[') {
+            return Collections.emptyList();
+        }
+
+        List<String> lines = new ArrayList<>();
+        int index = 0;
+        while (index < text.length()) {
+            char current = text.charAt(index);
+            if (Character.isWhitespace(current) || current == ',') {
+                index++;
+                continue;
+            }
+            if (current != '[') {
+                return Collections.emptyList();
+            }
+
+            int end = findBracketGroupEnd(text, index);
+            if (end < 0) {
+                return Collections.emptyList();
+            }
+            String line = parseNoteGroup(text.substring(index + 1, end));
+            if (!line.isEmpty()) {
+                lines.add(line);
+            }
+            index = end + 1;
+        }
+        return lines;
+    }
+
+    private static int findBracketGroupEnd(String text, int start) {
+        char quote = 0;
+        boolean escape = false;
+        for (int i = start + 1; i < text.length(); i++) {
+            char current = text.charAt(i);
+            if (quote != 0) {
+                if (escape) {
+                    escape = false;
+                } else if (current == '\\') {
+                    escape = true;
+                } else if (current == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (current == '\'' || current == '"') {
+                quote = current;
+            } else if (current == ']') {
+                return i;
+            } else if (current == '[') {
+                return -1;
+            }
+        }
+        return -1;
+    }
+
+    private static String parseNoteGroup(String group) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        char quote = 0;
+        boolean escape = false;
+        boolean quotedToken = false;
+
+        for (int i = 0; i < group.length(); i++) {
+            char c = group.charAt(i);
+            if (quote != 0) {
+                if (escape) {
+                    current.append(c);
+                    escape = false;
+                } else if (c == '\\') {
+                    escape = true;
+                } else if (c == quote) {
+                    quote = 0;
+                    quotedToken = true;
+                } else {
+                    current.append(c);
+                }
+                continue;
+            }
+            if (c == '\'' || c == '"') {
+                quote = c;
+                quotedToken = true;
+                continue;
+            }
+            if (c == ',') {
+                addNoteToken(tokens, current, quotedToken);
+                quotedToken = false;
+                continue;
+            }
+            current.append(c);
+        }
+        addNoteToken(tokens, current, quotedToken);
+        return String.join(",", tokens);
+    }
+
+    private static void addNoteToken(List<String> tokens, StringBuilder current, boolean quotedToken) {
+        String token = current.toString().trim();
+        current.setLength(0);
+        if (!token.isEmpty()) {
+            tokens.add(token);
+        }
     }
     public static void applyItemInputs(Object m, Object v) {
         if (m instanceof dev.latvian.mods.kubejs.recipe.RecipeJS r && v instanceof List<?> list) {

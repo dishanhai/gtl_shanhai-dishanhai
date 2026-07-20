@@ -1,0 +1,11 @@
+{
+  "type": "ae2wtlib:combine",
+  "terminalA": {
+    "item": "gt_shanhai:wireless_pattern_management_terminal"
+  },
+  "terminalB": {
+    "item": "ae2wtlib:wireless_pattern_access_terminal"
+  },
+  "terminalAName": "shanhai_pattern_management",
+  "terminalBName": "pattern_access"
+}

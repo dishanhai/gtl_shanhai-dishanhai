@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.api;
 import appeng.api.crafting.IPatternDetails;
 
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
+import com.dishanhai.gt_shanhai.common.item.PatternSlotScopedRecipe;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -26,6 +27,12 @@ public final class PatternIdentityGuard {
         if (PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) {
             return false;
         }
+        if (scopedSourceRejects(handlerMachine, recipe, trySlot)) {
+            return true;
+        }
+        if (PatternSlotScopedRecipe.isScoped(recipe)) {
+            return false;
+        }
         if (!(handlerMachine instanceof RecipeTypePatternBufferPartMachine)) {
             return false;
         }
@@ -44,6 +51,18 @@ public final class PatternIdentityGuard {
             return false;
         }
         return !PatternIdentityMatcher.matches(recipe, pattern);
+    }
+
+    public static boolean scopedSourceRejects(MetaMachine handlerMachine, GTRecipe recipe, int trySlot) {
+        if (!(handlerMachine instanceof RecipeTypePatternBufferPartMachine) || recipe == null) {
+            return false;
+        }
+        if (PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) {
+            return false;
+        }
+        var level = handlerMachine.getLevel();
+        var dimensionId = level == null ? null : level.dimension().location();
+        return !PatternSlotScopedRecipe.matchesSource(recipe, dimensionId, handlerMachine.getPos(), trySlot);
     }
 
     @SuppressWarnings("unchecked")

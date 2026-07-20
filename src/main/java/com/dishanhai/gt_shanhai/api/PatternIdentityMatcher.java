@@ -71,8 +71,8 @@ public final class PatternIdentityMatcher {
     // ---------------------------------------------------------------------
     // 输出指纹：配方「主产物」∈ 样板输出
     //
-    // GTLCore 默认（keepByProduct=false）样板只保留主产物，副产物被剥离，
-    // 故这里只要求配方的主产物（首个物品输出 / 首个流体输出）落在样板输出集合中。
+    // GTLCore 默认（keepByProduct=false）只保留跨 capability 的第一个主产物，副产物被剥离。
+    // 样板保留物品时只校验物品主产物，保留流体时只校验流体主产物。
     // ---------------------------------------------------------------------
 
     private static boolean matchesOutputs(GTRecipe recipe, IPatternDetails pattern) {
@@ -80,16 +80,19 @@ public final class PatternIdentityMatcher {
         Set<Fluid> patternFluids = new HashSet<>();
         collectPatternStacks(pattern.getOutputs(), patternItems, patternFluids);
 
-        return primaryItemOutputMatches(recipe.getOutputContents(ItemRecipeCapability.CAP), patternItems)
-                && primaryFluidOutputMatches(recipe.getOutputContents(FluidRecipeCapability.CAP), patternFluids);
+        boolean itemMatches = !patternItems.isEmpty() && primaryItemOutputMatches(
+                recipe.getOutputContents(ItemRecipeCapability.CAP), patternItems);
+        boolean fluidMatches = !patternFluids.isEmpty() && primaryFluidOutputMatches(
+                recipe.getOutputContents(FluidRecipeCapability.CAP), patternFluids);
+        return itemMatches || fluidMatches;
     }
 
     /**
-     * 校验配方首个物品输出是否被样板输出覆盖。配方无物品输出时视为通过（可能是纯流体产出配方）。
+     * 校验配方首个物品输出是否被样板输出覆盖。配方无物品输出时不匹配物品样板。
      */
     private static boolean primaryItemOutputMatches(java.util.List<Content> contents, Set<Item> patternItems) {
         if (contents == null || contents.isEmpty()) {
-            return true;
+            return false;
         }
         for (Content content : contents) {
             if (content == null) {
@@ -102,15 +105,15 @@ public final class PatternIdentityMatcher {
             // 首个可解析的物品输出即主产物：要求它至少有一个候选落在样板输出中
             return ingredientCoveredByItems(ingredient, patternItems);
         }
-        return true;
+        return false;
     }
 
     /**
-     * 校验配方首个流体输出是否被样板输出覆盖。配方无流体输出时视为通过。
+     * 校验配方首个流体输出是否被样板输出覆盖。配方无流体输出时不匹配流体样板。
      */
     private static boolean primaryFluidOutputMatches(java.util.List<Content> contents, Set<Fluid> patternFluids) {
         if (contents == null || contents.isEmpty()) {
-            return true;
+            return false;
         }
         for (Content content : contents) {
             if (content == null) {
@@ -122,7 +125,7 @@ public final class PatternIdentityMatcher {
             }
             return fluidIngredientCoveredByFluids(fluidIngredient, patternFluids);
         }
-        return true;
+        return false;
     }
 
     // ---------------------------------------------------------------------

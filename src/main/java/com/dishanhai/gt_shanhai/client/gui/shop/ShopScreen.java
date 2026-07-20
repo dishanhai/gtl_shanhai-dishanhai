@@ -245,6 +245,9 @@ public class ShopScreen extends ScaledScreen {
     private static final long UNDO_REORDER_UI_WINDOW_MS = 8000L;
     private int scroll = 0; // 网格滚动像素
     private boolean draggingGridScroll; // 正在拖拽网格右侧滚动条
+    private int detailScroll = 0; // 详情页中段内容滚动像素
+    private int detailScrollMax = 0; // drawDetail 每帧按真实内容高度回填
+    private boolean draggingDetailScroll; // 正在拖拽详情页中段滚动条
     private final boolean canEdit; // 服务端下发的编辑权（OP 或白名单）：决定编辑条目/商店设置/排序等按钮显隐
     public boolean canEdit() { return canEdit; } // 供子页（如 CurrencyAtmScreen）跳转兑换中心时透传编辑权
     // 服务端下发：canEdit 基础上是否还开了 /山海 商店 编辑 编辑模式，决定新增/删除商品这类目录增删按钮显隐
@@ -257,7 +260,11 @@ public class ShopScreen extends ScaledScreen {
 
     private void selectEntry(long entryKey, ShopEntry entry) {
         long newKey = entry == null ? -1L : entryKey;
-        if (newKey != selectedEntryKey) cardSwitchAtMs = System.currentTimeMillis(); // 真换了商品才弹一下，重复点同一张卡不重播
+        if (newKey != selectedEntryKey) {
+            cardSwitchAtMs = System.currentTimeMillis(); // 真换了商品才弹一下，重复点同一张卡不重播
+            detailScroll = 0;
+            detailScrollMax = 0;
+        }
         selectedEntryKey = newKey;
         selected = entry;
     }
@@ -265,6 +272,8 @@ public class ShopScreen extends ScaledScreen {
     private void clearSelection() {
         selectedEntryKey = -1L;
         selected = null;
+        detailScroll = 0;
+        detailScrollMax = 0;
     }
     private String previewHoverName; // 详情页花费预览槽悬停名（drawDetail 暂存 → renderTooltips 消费）
     private String previewHoverExtra; // 悬停槽的"拥有/缺少"提示行（drawPreviewSlot 暂存 → renderTooltips 消费），无数据（未同步/加载中）为 null
@@ -809,6 +818,7 @@ public class ShopScreen extends ScaledScreen {
     private static final int ROW_STRIDE = CELL_H + GRID_GAP;
     private static final int COL_STRIDE = CELL_W + GRID_GAP;
     private static final int GRID_SCROLLBAR_W = 3;
+    private static final int DETAIL_SCROLLBAR_W = 3;
 
     private int cellX(int col) { return listLeft() + col * COL_STRIDE; }
     private int cellY(int row) { return contentTop() + row * ROW_STRIDE - scroll; }
@@ -1767,6 +1777,56 @@ public class ShopScreen extends ScaledScreen {
         scroll = (int) Math.round(Math.max(0.0, Math.min(1.0, rel)) * maxScroll);
     }
 
+    private int detailViewportTop() { return contentTop() + 126; }
+
+    private int detailViewportBottom() {
+        int btnY = contentTop() + contentHeight() - 24;
+        return Math.max(detailViewportTop() + 24, catalogEditUnlocked ? btnY - 48 : btnY - 4);
+    }
+
+    private int detailViewportHeight() { return detailViewportBottom() - detailViewportTop(); }
+
+    private int detailScrollbarX() { return detailX() + DETAIL_W - 6 - DETAIL_SCROLLBAR_W; }
+
+    private int clampDetailScroll(int value) {
+        return Math.max(0, Math.min(detailScrollMax, value));
+    }
+
+    private void drawDetailScrollbar(GuiGraphics g, int mx, int my) {
+        int top = detailViewportTop();
+        int h = detailViewportHeight();
+        if (h <= 0) return;
+        int barX = detailScrollbarX();
+        g.fill(barX, top, barX + DETAIL_SCROLLBAR_W, top + h, NUMBER_BAR_BG);
+        if (detailScrollMax <= 0) return;
+        int contentH = h + detailScrollMax;
+        int barH = Math.max(10, h * h / Math.max(1, contentH));
+        int barY = top + (h - barH) * detailScroll / Math.max(1, detailScrollMax);
+        boolean hv = draggingDetailScroll || GuiRenderUtil.isHovering(mx, my, barX, barY, DETAIL_SCROLLBAR_W, barH);
+        g.fill(barX, barY, barX + DETAIL_SCROLLBAR_W, barY + barH, hv ? CYAN : GOLD);
+    }
+
+    private boolean detailScrollbarClicked(double mx, double my) {
+        int top = detailViewportTop();
+        int h = detailViewportHeight();
+        int barX = detailScrollbarX();
+        if (detailScrollMax <= 0 || mx < barX || mx > barX + DETAIL_SCROLLBAR_W || my < top || my > top + h) return false;
+        draggingDetailScroll = true;
+        updateDetailScrollFromDrag(my);
+        return true;
+    }
+
+    private void updateDetailScrollFromDrag(double my) {
+        if (detailScrollMax <= 0) { detailScroll = 0; return; }
+        int top = detailViewportTop();
+        int h = detailViewportHeight();
+        int contentH = h + detailScrollMax;
+        int barH = Math.max(10, h * h / Math.max(1, contentH));
+        double usable = Math.max(1, h - barH);
+        double rel = (my - top - barH / 2.0) / usable;
+        detailScroll = (int) Math.round(Math.max(0.0, Math.min(1.0, rel)) * detailScrollMax);
+    }
+
     /**
      * 网格格渲染缓存：{@link ShopEntry#goodsDisplayName}/{@link ShopEntry#makeGoodsStack}/成本主成分
      * 文本+图标——这些每帧都在算但对同一个 ShopEntry 对象结果恒定，商品一多（几百上千条）逐帧重算就是
@@ -2124,9 +2184,40 @@ public class ShopScreen extends ScaledScreen {
                 ? selected.getEffectiveCost(ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier()))
                 : selected.getCost().scaledTo(ShopPurchase.sellRatioPercent());
         int py = dy + 128;
-        int costTrimW = dx + DETAIL_W - 6 - cx;
+        int costTrimW = dx + DETAIL_W - 10 - cx;
         String key = WalletAccountAPI.purchaseKey(selected.getGoodsId(), selected.getCategory());
         long bought = ClientWalletAccount.getPurchaseCount(key);
+        int btnY = dy + dh - 24;
+        // GuideME 集成：查一次商品清单是否有指南页命中，selected 没变就不重复扫描所有已装指南
+        if (guideHitsFor != selected) {
+            guideHitsFor = selected;
+            guideHits = com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.findGuideHits(selected.getGoodsList());
+        }
+        // 跳转入口（仿 FTBQ 隐藏任务）：条目配了 linkTo 且能解析到目标商品才显示，占一行固定空间
+        linkVisible = false;
+        linkTargetKey = selected.hasLinkTarget()
+                ? ClientShopCatalog.linkedEntryKey(selected.getLinkTo()) : -1L;
+        linkTarget = linkTargetKey >= 0L ? ClientShopCatalog.get(linkTargetKey) : null;
+        guideLinkVisible = false;
+        guideDetailBtnVisible = false;
+        // 「补齐全部缺口」：只在确定（非"加载中"）有不够的项、且开着 AE 模式时出现——AE 自动合成只对着 AE 网络补，
+        // 关了 AE 模式点这个没意义（缺口判定本身也不含 AE 那部分，见 hasCostShortfall）。
+        boolean showAutoCraftBtn = mode == Mode.BUY && aeMode && hasCostShortfall(dcost, amount, selectedEntryKey, aeMode);
+        // 前置任务跳转行：条目配了前置任务就占一行（无论能否解析到，未同步/已删都要给玩家一个可见提示）
+        prereqQuest = selected.hasPrerequisiteQuest()
+                ? com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.resolve(selected.getPrerequisiteQuestId()) : null;
+        prereqQuestCompleted = com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.isCompleted(prereqQuest);
+        int viewportTop = detailViewportTop();
+        int viewportBottom = detailViewportBottom();
+        int viewportH = Math.max(1, viewportBottom - viewportTop);
+        detailScroll = clampDetailScroll(detailScroll);
+        int hoverMy = my + detailScroll;
+        int contentEndY = py;
+
+        enableGridScissor(g, dx + 2, viewportTop, dx + DETAIL_W - 2, viewportBottom);
+        g.pose().pushPose();
+        g.pose().translate(0.0f, -detailScroll, 0.0f);
+
         String txLine = "§7交易次数: §f" + formatBig(amt) + "  §7已购买: §6" + formatBig(java.math.BigInteger.valueOf(bought));
         String tradeModeTip = switch (selected.getTradeMode()) {
             case BUY_ONLY -> "  §b[仅购买]";
@@ -2134,8 +2225,6 @@ public class ShopScreen extends ScaledScreen {
             default -> "";
         };
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, txLine + tradeModeTip, costTrimW), cx, py, WHITE, true);
-        // 周期限购占两行：配置一行 + 倒计时一行。倒计时读的是服务端同步下来的「开窗锚点」（见 ShopPeriodLimiter），
-        // 锚点=-1（从没消费过/上一窗口已过期）就是"限额充足无需刷新"，不瞎算无意义的假倒计时。
         int contentY = py;
         if (selected.isPeriodLimited()) {
             long periodTicks = selected.getPeriodTicks();
@@ -2152,8 +2241,6 @@ public class ShopScreen extends ScaledScreen {
             }
             contentY = py + 24;
         }
-        // 组合商品（非奖励表模式）用图形化「获得预览」替代原来一行会截断的文字列表（见反馈）；
-        // 固定占一行的高度（drawRewardPreview 自身保证），后面 hasPhysical 提示行/花费预览起始 Y 按此整体下移
         boolean comboRewardPreview = mode == Mode.BUY && selected.getRewardMode() == ShopEntry.RewardMode.NONE
                 && selected.hasMultipleGoods();
         if (mode == Mode.BUY) {
@@ -2161,7 +2248,7 @@ public class ShopScreen extends ScaledScreen {
             ShopEntry.RewardMode rm = selected.getRewardMode();
             int physicalHintY;
             if (comboRewardPreview) {
-                drawRewardPreview(g, cx, contentY + 24, selected.getGoodsList(), amount, DETAIL_W - 16, mx, my);
+                drawRewardPreview(g, cx, contentY + 24, selected.getGoodsList(), amount, DETAIL_W - 16, mx, hoverMy);
                 physicalHintY = contentY + 66;
             } else {
                 String getLine = switch (rm) {
@@ -2173,7 +2260,7 @@ public class ShopScreen extends ScaledScreen {
                         case ALL -> "§7预计获得: §9FTBQ表·全部 §7（一次交付表内所有物品奖励）";
                         default -> "§7预计获得: §9FTBQ表·随机 §7（按表内权重随机抽取）";
                     };
-                    default -> "§7预计获得: §e" + formatBig(total) + " §7个"; // hasMultipleGoods() 已被上面 comboRewardPreview 分流
+                    default -> "§7预计获得: §e" + formatBig(total) + " §7个";
                 };
                 g.drawString(this.font, GuiRenderUtil.trimText(this.font, getLine, costTrimW), cx, contentY + 24, GREEN, true);
                 physicalHintY = contentY + 36;
@@ -2192,106 +2279,82 @@ public class ShopScreen extends ScaledScreen {
             g.drawString(this.font, "§7背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, contentY + 36, held > 0 ? GREEN : DEEP_RED, true);
         }
 
-        // 确认按钮（KE 风格 border+fill，颜色随可交易性）
-        int btnY = dy + dh - 24;
-        // GuideME 集成：查一次商品清单是否有指南页命中，selected 没变就不重复扫描所有已装指南
-        if (guideHitsFor != selected) {
-            guideHitsFor = selected;
-            guideHits = com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.findGuideHits(selected.getGoodsList());
-        }
-        int guideRowH = guideHits.isEmpty() ? 0 : 12;
-        // 跳转入口（仿 FTBQ 隐藏任务）：条目配了 linkTo 且能解析到目标商品才显示，占一行固定空间
-        linkVisible = false;
-        linkTargetKey = selected.hasLinkTarget()
-                ? ClientShopCatalog.linkedEntryKey(selected.getLinkTo()) : -1L;
-        linkTarget = linkTargetKey >= 0L ? ClientShopCatalog.get(linkTargetKey) : null;
-        int linkRowH = linkTarget != null ? 12 : 0;
-        // 「补齐全部缺口」：只在确定（非"加载中"）有不够的项、且开着 AE 模式时出现——AE 自动合成只对着 AE 网络补，
-        // 关了 AE 模式点这个没意义（缺口判定本身也不含 AE 那部分，见 hasCostShortfall）。
-        boolean showAutoCraftBtn = mode == Mode.BUY && aeMode && hasCostShortfall(dcost, amount, selectedEntryKey, aeMode);
-        int autoCraftRowH = showAutoCraftBtn ? 12 : 0;
-        // 前置任务跳转行：条目配了前置任务就占一行（无论能否解析到，未同步/已删都要给玩家一个可见提示）
-        prereqQuest = selected.hasPrerequisiteQuest()
-                ? com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.resolve(selected.getPrerequisiteQuestId()) : null;
-        prereqQuestCompleted = com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.isCompleted(prereqQuest);
-        int prereqRowH = selected.hasPrerequisiteQuest() ? 12 : 0;
-        // 编辑/删除按钮行数：编辑条目、删除此商品都折进了编辑模式，catalogEditUnlocked 时一起出 2 行
-        int editRowsOffset = catalogEditUnlocked ? 48 : 6;
-        int lowerBottom = btnY - editRowsOffset - linkRowH - guideRowH - autoCraftRowH - prereqRowH; // 底部按钮上沿（跳转/指南/补齐缺口/前置任务各让一行）
-
-        // 图形化花费预览（图标 + 数量）占步进/预计与底部按钮之间的空白区。
-        // 起点须跟着 contentY 走（原来硬编码 py+50，周期限购把上面内容顶下去后两者间距只剩 2px，字重叠成一坨，见反馈）；
-        // 组合商品用了图形化「获得预览」多占一整行高度，起点要再往下让一行（见 comboRewardPreview）
         maybeRequestCostPreview(dcost);
         int costPreviewY = contentY + (comboRewardPreview ? 80 : 50);
-        int cursorY = drawCostPreview(g, cx, costPreviewY, dcost, amount, DETAIL_W - 16, lowerBottom, mx, my);
-
+        int cursorY = drawCostPreview(g, cx, costPreviewY, dcost, amount, DETAIL_W - 16, py + viewportH + 2048, mx, hoverMy);
+        contentEndY = Math.max(contentEndY, cursorY);
+        int actionY = cursorY + 2;
         if (linkTarget != null) {
             linkVisible = true;
-            linkX = cx; linkY = lowerBottom + 2; linkW = DETAIL_W - 16; linkH = 10;
-            boolean linkHover = GuiRenderUtil.isHovering(mx, my, linkX, linkY, linkW, linkH);
-            g.drawString(this.font, (linkHover ? "§b§n" : "§9§n") + "→ 跳转: " + linkTarget.goodsDisplayName(), linkX, linkY, linkHover ? CYAN : GOLD, true);
+            linkX = cx; linkY = actionY - detailScroll; linkW = DETAIL_W - 16; linkH = 10;
+            boolean linkHover = GuiRenderUtil.isHovering(mx, hoverMy, cx, actionY, linkW, linkH);
+            g.drawString(this.font, (linkHover ? "§b§n" : "§9§n") + GuiRenderUtil.trimText(this.font, "→ 跳转: " + linkTarget.goodsDisplayName(), linkW),
+                    cx, actionY, linkHover ? CYAN : GOLD, true);
+            actionY += 12;
         }
-
-        // GuideME 跳转入口：1 条命中直接给跳转行（同「跳转」样式），2 条以上给「指南详情」按钮开大图层列出全部
-        guideLinkVisible = false;
-        guideDetailBtnVisible = false;
         if (guideHits.size() == 1) {
             com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.GuideHit hit = guideHits.get(0);
             guideLinkVisible = true;
             guideLinkHit = hit;
-            guideLinkX = cx; guideLinkY = lowerBottom + 2 + linkRowH; guideLinkW = DETAIL_W - 16; guideLinkH = 10;
-            boolean guideHover = GuiRenderUtil.isHovering(mx, my, guideLinkX, guideLinkY, guideLinkW, guideLinkH);
+            guideLinkX = cx; guideLinkY = actionY - detailScroll; guideLinkW = DETAIL_W - 16; guideLinkH = 10;
+            boolean guideHover = GuiRenderUtil.isHovering(mx, hoverMy, cx, actionY, guideLinkW, guideLinkH);
             String guideLabel = "→ 指南: " + hit.item().getHoverName().getString();
             g.drawString(this.font, (guideHover ? "§b§n" : "§9§n") + GuiRenderUtil.trimText(this.font, guideLabel, guideLinkW),
-                    guideLinkX, guideLinkY, guideHover ? CYAN : GOLD, true);
+                    cx, actionY, guideHover ? CYAN : GOLD, true);
+            actionY += 12;
         } else if (guideHits.size() > 1) {
             guideDetailBtnVisible = true;
-            guideDetailBtnX = cx; guideDetailBtnY = lowerBottom + 2 + linkRowH; guideDetailBtnW = DETAIL_W - 16; guideDetailBtnH = 10;
-            drawButton(g, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH,
-                    "§d指南详情(" + guideHits.size() + ")", mx, my);
+            guideDetailBtnX = cx; guideDetailBtnY = actionY - detailScroll; guideDetailBtnW = DETAIL_W - 16; guideDetailBtnH = 10;
+            drawButton(g, cx, actionY, guideDetailBtnW, guideDetailBtnH, "§d指南详情(" + guideHits.size() + ")", mx, hoverMy);
+            actionY += 12;
         }
-
-        // 「补齐全部缺口」：花费预览格有确定缺口时出现，点了向服务端起一轮 AE 自动合成计算
         autoCraftBtnVisible = showAutoCraftBtn;
         if (showAutoCraftBtn) {
-            autoCraftBtnX = cx; autoCraftBtnY = lowerBottom + 2 + linkRowH + guideRowH; autoCraftBtnW = DETAIL_W - 16; autoCraftBtnH = 10;
-            drawButton(g, autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH, "§b⚙ 补齐全部缺口（AE自动合成）", mx, my);
+            autoCraftBtnX = cx; autoCraftBtnY = actionY - detailScroll; autoCraftBtnW = DETAIL_W - 16; autoCraftBtnH = 10;
+            drawButton(g, cx, actionY, autoCraftBtnW, autoCraftBtnH, "§b⚙ 补齐全部缺口（AE自动合成）", mx, hoverMy);
+            actionY += 12;
         }
-
-        // 前置任务：条目配了前置任务才显示，点击跳到 FTBQ 任务书对应任务；已完成显示绿字，未完成/未解析到显示红字
         prereqLinkVisible = selected.hasPrerequisiteQuest();
         if (prereqLinkVisible) {
-            prereqLinkX = cx; prereqLinkY = lowerBottom + 2 + linkRowH + guideRowH + autoCraftRowH; prereqLinkW = DETAIL_W - 16; prereqLinkH = 10;
-            boolean prereqHover = GuiRenderUtil.isHovering(mx, my, prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH);
+            prereqLinkX = cx; prereqLinkY = actionY - detailScroll; prereqLinkW = DETAIL_W - 16; prereqLinkH = 10;
+            boolean prereqHover = GuiRenderUtil.isHovering(mx, hoverMy, cx, actionY, prereqLinkW, prereqLinkH);
             String prereqLabel = prereqQuest == null
                     ? "→ 前置任务: §c未找到/未同步 #" + selected.getPrerequisiteQuestId()
                     : "→ 前置任务: " + (prereqQuestCompleted ? "§a[已完成] " : "§c[未完成] ") + prereqQuest.getRawTitle();
             int prereqColor = prereqQuest == null ? DEEP_RED : (prereqQuestCompleted ? (prereqHover ? CYAN : GREEN) : (prereqHover ? CYAN : GOLD));
             g.drawString(this.font, (prereqHover ? "§n" : "") + GuiRenderUtil.trimText(this.font, prereqLabel, prereqLinkW),
-                    prereqLinkX, prereqLinkY, prereqColor, true);
+                    cx, actionY, prereqColor, true);
+            actionY += 12;
         }
 
-        // 描述（玩家自定义，自动换行；接在预览下方）
         String desc = selected.getDescription();
-        if (desc != null && !desc.isEmpty() && cursorY + 12 < lowerBottom) {
-            g.drawString(this.font, "§6描述:", cx, cursorY + 2, GOLD, true);
-            // 展开详情：FTBQ 风格大图层，描述较长被本地窄栏截断时用得上
+        if (desc != null && !desc.isEmpty()) {
+            int descY = actionY + 2;
+            g.drawString(this.font, "§6描述:", cx, descY, GOLD, true);
             int expandW = 52;
             descExpandVisible = true;
             descExpandX = cx + DETAIL_W - 16 - expandW;
-            descExpandY = cursorY - 1;
+            descExpandY = descY - 3 - detailScroll;
             descExpandW = expandW;
             descExpandH = 10;
-            drawButton(g, descExpandX, descExpandY, descExpandW, descExpandH, "§b展开详情", mx, my);
-            int ly = cursorY + 13;
+            drawButton(g, descExpandX, descY - 3, descExpandW, descExpandH, "§b展开详情", mx, hoverMy);
+            int ly = descY + 11;
             for (net.minecraft.util.FormattedCharSequence line
                     : this.font.split(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(desc)), DETAIL_W - 16)) {
-                if (ly + 9 > lowerBottom) break;
                 g.drawString(this.font, line, cx, ly, GRAY, true);
                 ly += 9;
             }
+            actionY = ly;
         }
+        contentEndY = Math.max(contentEndY, actionY + 2);
+
+        g.pose().popPose();
+        g.disableScissor();
+        detailScrollMax = Math.max(0, contentEndY - viewportBottom);
+        detailScroll = clampDetailScroll(detailScroll);
+        drawDetailScrollbar(g, mx, my);
+
+        // 确认按钮（KE 风格 border+fill，颜色随可交易性）
         // 前置任务未配置视为满足；配置了则须客户端已解析到且已完成——跟服务端 doBuy 的门槛口径一致（见反馈：
         // 花费预览格全绿时按钮不能还显示红，前置任务同理，不能光看成本够不够）
         boolean prereqSatisfiedClient = !selected.hasPrerequisiteQuest() || prereqQuestCompleted;
@@ -2498,6 +2561,9 @@ public class ShopScreen extends ScaledScreen {
             if (tabRowClicked(mx, my, level)) return true;
         }
 
+        // 详情页中段滚动条（交易次数/预计/花费预览/描述/跳转），优先于详情内链接命中。
+        if (detailScrollbarClicked(mx, my)) return true;
+
         // 网格右侧滚动条（拖拽跳转，先于格子命中判定）
         if (gridScrollbarClicked(mx, my)) return true;
 
@@ -2534,34 +2600,35 @@ public class ShopScreen extends ScaledScreen {
         }
 
         // 跳转入口（drawDetail 渲染时暂存的目标条目 + 命中框，点击直接切换详情页选中项）
-        if (linkVisible && linkTarget != null && hit(mx, my, linkX, linkY, linkW, linkH)) {
+        boolean inDetailViewport = hit(mx, my, detailX(), detailViewportTop(), DETAIL_W, detailViewportHeight());
+        if (inDetailViewport && linkVisible && linkTarget != null && hit(mx, my, linkX, linkY, linkW, linkH)) {
             selectEntry(linkTargetKey, linkTarget);
             return true;
         }
         // GuideME 指南跳转（单条命中直接开指南；多条命中开「指南详情」大图层）
-        if (guideLinkVisible && guideLinkHit != null && hit(mx, my, guideLinkX, guideLinkY, guideLinkW, guideLinkH)) {
+        if (inDetailViewport && guideLinkVisible && guideLinkHit != null && hit(mx, my, guideLinkX, guideLinkY, guideLinkW, guideLinkH)) {
             com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.open(Minecraft.getInstance().player, guideLinkHit);
             return true;
         }
-        if (guideDetailBtnVisible && hit(mx, my, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH)) {
+        if (inDetailViewport && guideDetailBtnVisible && hit(mx, my, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH)) {
             guideOverlayOpen = true;
             guideOverlayScroll = 0;
             return true;
         }
         // 「补齐全部缺口」：向服务端起一轮 AE 自动合成计算，算完服务端会推确认框
-        if (autoCraftBtnVisible && selected != null && hit(mx, my, autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH)) {
+        if (inDetailViewport && autoCraftBtnVisible && selected != null && hit(mx, my, autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH)) {
             long entryKey = ClientShopCatalog.keyOf(selected);
             ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
                     ClientShopCatalog.revision(), entryKey, amount, aeMode));
             return true;
         }
         // 前置任务跳转：打开 FTBQ 任务书并定位到该任务（未解析到时点了也没用，命中框本身照样给，方便玩家复制ID反馈）
-        if (prereqLinkVisible && selected != null && hit(mx, my, prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH)) {
+        if (inDetailViewport && prereqLinkVisible && selected != null && hit(mx, my, prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH)) {
             com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.open(selected.getPrerequisiteQuestId());
             return true;
         }
         // 展开描述详情（drawDetail 渲染时暂存的按钮坐标，命中即开大图层）
-        if (descExpandVisible && hit(mx, my, descExpandX, descExpandY, descExpandW, descExpandH)) {
+        if (inDetailViewport && descExpandVisible && hit(mx, my, descExpandX, descExpandY, descExpandW, descExpandH)) {
             descOverlayOpen = true;
             descOverlayScroll = 0;
             return true;
@@ -2690,6 +2757,10 @@ public class ShopScreen extends ScaledScreen {
             cartOverlayScroll = Math.max(0, Math.min(maxScroll, cartOverlayScroll - (int) d));
             return true;
         }
+        if (selected != null && GuiRenderUtil.isHovering(mx, my, detailX(), detailViewportTop(), DETAIL_W, detailViewportHeight())) {
+            detailScroll = clampDetailScroll(detailScroll - (int) d * 18);
+            return true;
+        }
         int gx = listLeft(), gy = contentTop(), gh = contentHeight();
         if (GuiRenderUtil.isHovering(mx, my, gx, gy, listWidth(), gh)) {
             int maxScroll = maxGridScroll();
@@ -2718,6 +2789,7 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         if (draggingDescOverlayScroll) { updateDescOverlayScrollFromDrag(my); return true; }
+        if (draggingDetailScroll) { updateDetailScrollFromDrag(my); return true; }
         if (draggingGridScroll) { updateGridScrollFromDrag(my); return true; }
         return super.universalMouseDragged(mx, my, btn, dx, dy);
     }
@@ -2772,6 +2844,7 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         if (draggingDescOverlayScroll) { draggingDescOverlayScroll = false; return true; }
+        if (draggingDetailScroll) { draggingDetailScroll = false; return true; }
         if (draggingGridScroll) { draggingGridScroll = false; return true; }
         return super.universalMouseReleased(mx, my, btn);
     }

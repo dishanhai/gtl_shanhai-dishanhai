@@ -16,7 +16,7 @@ class SuperDiskArrayReadOnlyTemplateSourceTest {
 
     @Test
     void uuidLessNullProviderAccessUsesSideEffectFreeTemplateLoad() throws IOException {
-        String source = Files.readString(SOURCE);
+        String source = Files.readString(SOURCE).replace("\r\n", "\n");
 
         assertTrue(source.contains("boolean readOnlyTemplate = saveProvider == null && (tag == null || !tag.hasUUID(TAG_UUID));"),
                 "无 UUID 且无保存器的访问必须被识别为 JEI/探测用只读模板");

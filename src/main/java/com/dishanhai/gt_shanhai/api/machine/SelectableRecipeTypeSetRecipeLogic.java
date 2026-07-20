@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.api.machine;
 
+import com.dishanhai.gt_shanhai.common.item.PatternSlotScopedRecipe;
+import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
@@ -18,6 +20,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -25,14 +28,11 @@ import java.util.function.Predicate;
 /**
  * 多配方类型选择集配方逻辑（薄层）。
  * <p>
- * <b>唯一职责</b>：把 GTLAdd 原生"单一 {@code getRecipeType()} 搜索"扩展为"遍历玩家选中的多个
- * 配方类型搜索"。除此之外的一切——并行计算、扣料、出货、链式接续，以及<b>样板总成发配槽的发现
- * 与执行</b>——全部沿用 GTLAdd/GTLCore 原生逻辑。
+ * <b>主要职责</b>：把 GTLAdd 原生"单一 {@code getRecipeType()} 搜索"扩展为"遍历玩家选中的多个
+ * 配方类型搜索"，并补齐本覆写绕过父类 RETURN Mixin 后缺失的星律槽位候选合并。
  * <p>
- * 样板总成（星律/超级/库存 等）是被动的：只暴露玩家 AE 下单推进来的发配槽 + 存对应原料，怎么用
- * 是主机配方逻辑的事。GTLCore 的 {@code GTRecipeLookupMixin} 会在 {@code getLookup().getRecipeIterator/find}
- * 时自动把发配槽（已激活/已缓存）的内容并入搜索——所以只要老老实实按选中类型走原生查找，样板配方
- * 就会被原生发现、执行、缓存、消费一次、随料耗尽退出激活而停止，全程无需本层插手。
+ * GTLCore 原生查找仍负责普通候选；星律槽位副本由山海显式追加。副本存在时移除同一真实配方的
+ * 未分槽候选，避免相同配方 ID 的多张 AE 主产物样板重新争抢第一个槽；副本解析失败时保留原始候选回退。
  * <p>
  * <b>只缓存"配方集合"（哪些配方是候选），绝不缓存数量/并行/扣料</b>：数量类结果每轮 calculateParallels
  * 实算、buildFinal* 每轮重验扣料，杜绝"缓存上一次配方数量"造成的扣料错配、串产、卡产（历史教训
@@ -154,17 +154,48 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         if (cachedLookupRecipes != null
                 && cacheTicks > 0L
                 && tick - cachedLookupTick >= 0 && tick - cachedLookupTick < cacheTicks) {
-            return cachedLookupRecipes;
+            return mergeMarkedPatternRecipes(machine, cachedLookupRecipes);
         }
         Set<GTRecipe> recipes = searchSelectedRecipeTypes(machine);
-        if (recipes.isEmpty()) {
+        Set<GTRecipe> merged = mergeMarkedPatternRecipes(machine, recipes);
+        if (merged.isEmpty()) {
             // 空结果不写缓存：机器空转/缺料时永远实时搜索，料一到立刻开工，杜绝"缓存空集守死不启动"。
             invalidateLookupSetCache();
-            return recipes;
+            return merged;
+        }
+        if (recipes.isEmpty()) {
+            // 次要输出样板可能让未作用域基础候选被第一输出指纹拒绝，但 active scoped 槽仍是有效候选。
+            // 不缓存空基础集；当前轮直接返回已合并的槽位候选，下一轮继续实时确认 active 状态。
+            invalidateLookupSetCache();
+            return merged;
         }
         cachedLookupTick = tick;
         cachedLookupRecipes = recipes;
-        return recipes;
+        return merged;
+    }
+
+    private Set<GTRecipe> mergeMarkedPatternRecipes(SelectableRecipeTypeSetMachine machine, Set<GTRecipe> base) {
+        Set<GTRecipe> marked = RecipeTypePatternSearchHelper.collectActiveMarkedPatternRecipes(machine);
+        if (marked.isEmpty()) {
+            return base;
+        }
+        LinkedHashSet<GTRecipe> merged = new LinkedHashSet<>();
+        if (base != null) {
+            for (GTRecipe candidate : base) {
+                boolean shadowed = false;
+                for (GTRecipe scoped : marked) {
+                    if (PatternSlotScopedRecipe.represents(scoped, candidate)) {
+                        shadowed = true;
+                        break;
+                    }
+                }
+                if (!shadowed) {
+                    merged.add(candidate);
+                }
+            }
+        }
+        merged.addAll(marked);
+        return merged;
     }
 
     private Set<GTRecipe> searchSelectedRecipeTypes(SelectableRecipeTypeSetMachine machine) {

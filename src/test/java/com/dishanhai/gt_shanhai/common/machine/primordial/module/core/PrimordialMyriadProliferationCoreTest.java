@@ -24,7 +24,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PrimordialMyriadProliferationCoreTest {
 
     private static final Path CORE_SOURCE = sourcePath("PrimordialMyriadProliferationCore.java");
+    private static final Path LOGIC_SOURCE = sourcePath("PrimordialMyriadProliferationCoreLogic.java");
     private static final Path STRUCTURE_SOURCE = sourcePath("PrimordialMyriadProliferationCoreStructure.java");
+    private static final Path BASE_LOGIC_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "machine", "primordial", "PrimordialModuleRecipeLogic.java");
 
     @Test
     void stageRequiresAnAttachedCoreAndActivelyRunningRecipe() {
@@ -117,18 +120,20 @@ class PrimordialMyriadProliferationCoreTest {
         assertEquals(1, countRegex(method, "\\bgetRecipeLogic\\s*\\("));
         assertEquals(1, countRegex(method, "\\bisFormed\\s*\\("));
         assertEquals(1, countRegex(method, "\\bisHostConnected\\b"));
-        assertEquals(1, countRegex(method, "\\bisWorking\\b"));
-        assertEquals(1, countRegex(method, "\\bgetLastRecipe\\s*\\("));
+        assertEquals(1, countRegex(method, "\\bisOutputMultiplierActive\\b"));
+        assertEquals(1, countRegex(method, "\\bgetActiveRecipeTypeId\\b"));
+        assertEquals(0, countRegex(method, "\\bgetLastRecipe\\s*\\("),
+                "无线任务的 lastRecipe 是 gtceu:dummy，不得用于判断晋升等级");
 
         Pattern lazyDelegation = Pattern.compile("""
                 \\breturn\\s+resolveOutputMultiplier\\s*\\(
                 \\s*isFormed\\s*\\(\\s*\\)\\s*,
                 \\s*(?:this\\s*::\\s*isHostConnected|\\(\\s*\\)\\s*->\\s*(?:this\\s*\\.)?isHostConnected\\s*\\(\\s*\\))\\s*,
-                \\s*(?:[A-Za-z_$][\\w$]*\\s*::\\s*isWorking|\\(\\s*\\)\\s*->\\s*[A-Za-z_$][\\w$]*\\.isWorking\\s*\\(\\s*\\))\\s*,
-                \\s*\\(\\s*\\)\\s*->[\\s\\S]*?\\bgetLastRecipe\\s*\\(\\s*\\)
+                \\s*(?:[A-Za-z_$][\\w$]*\\s*::\\s*isOutputMultiplierActive|\\(\\s*\\)\\s*->\\s*[A-Za-z_$][\\w$]*\\.isOutputMultiplierActive\\s*\\(\\s*\\))\\s*,
+                \\s*(?:[A-Za-z_$][\\w$]*\\s*::\\s*getActiveRecipeTypeId|\\(\\s*\\)\\s*->\\s*[A-Za-z_$][\\w$]*\\.getActiveRecipeTypeId\\s*\\(\\s*\\))
                 """, Pattern.COMMENTS);
         assertTrue(lazyDelegation.matcher(method).find(),
-                "公开入口必须按 formed/host/working/lastRecipe 顺序惰性委托倍率解析");
+                "公开入口必须按 formed/host/活动倍率状态/真实配方类型 顺序惰性委托倍率解析");
     }
 
     @Test
@@ -139,14 +144,78 @@ class PrimordialMyriadProliferationCoreTest {
                 PrimordialMyriadProliferationCore.class));
         assertEquals(PrimordialModuleRecipeLogic.class,
                 PrimordialMyriadProliferationCoreLogic.class.getSuperclass());
-        assertEquals(0, PrimordialMyriadProliferationCoreLogic.class.getDeclaredMethods().length,
-                "晋升逻辑不得覆写配方搜索、并行、概率、时长或 EU 行为");
+        assertTrue(PrimordialMyriadProliferationCoreLogic.class.getDeclaredMethods().length >= 7,
+                "晋升逻辑必须维护本轮活动类型、构建期状态和持久化恢复入口");
 
         Method createLogic = PrimordialMyriadProliferationCore.class
                 .getMethod("createRecipeLogic", Object[].class);
         assertEquals(PrimordialMyriadProliferationCoreLogic.class, createLogic.getReturnType());
         Method getLogic = PrimordialMyriadProliferationCore.class.getMethod("getRecipeLogic");
         assertEquals(PrimordialMyriadProliferationCoreLogic.class, getLogic.getReturnType());
+    }
+
+    @Test
+    void ascensionRecipesAreHardLimitedToOneParallel() throws Exception {
+        Method getCurrentParallel = PrimordialMyriadProliferationCore.class
+                .getMethod("getCurrentParallel");
+        assertEquals(PrimordialMyriadProliferationCore.class, getCurrentParallel.getDeclaringClass(),
+                "晋升核心必须覆写基类的无限并行");
+
+        String method = extractBlock(Files.readString(CORE_SOURCE),
+                "public long getCurrentParallel() {");
+        assertEquals(1, countRegex(method, "\\breturn\\s+1L\\s*;"),
+                "晋升核心的配方并行必须硬编码为 1");
+    }
+
+    @Test
+    void promotionLogicExplicitlyAllowsItsOutputlessControlRecipes() throws Exception {
+        String method = extractBlock(Files.readString(LOGIC_SOURCE),
+                "protected boolean allowsEmptyRecipeOutputs() {");
+
+        assertEquals(1, countRegex(method, "\\breturn\\s+true\\s*;"));
+        Method hook = PrimordialMyriadProliferationCoreLogic.class
+                .getDeclaredMethod("allowsEmptyRecipeOutputs");
+        assertTrue(Modifier.isProtected(hook.getModifiers()));
+        assertEquals(boolean.class, hook.getReturnType());
+    }
+
+    @Test
+    void promotionLogicMarksActiveRecipeTypeBeforeBuildingWirelessRecipe() throws Exception {
+        String method = extractBlock(Files.readString(LOGIC_SOURCE),
+                "protected WirelessGTRecipe buildFinalWirelessRecipe(");
+        String normalized = method.replaceAll("\\s+", " ");
+
+        int selectIndex = normalized.indexOf("ResourceLocation selected = selectActiveRecipeTypeId(parallelData);");
+        int stateIndex = normalized.indexOf("setOutputMultiplierState(selected, true);");
+        int superIndex = normalized.indexOf("result = super.buildFinalWirelessRecipe(parallelData, wirelessTrait);");
+
+        assertTrue(selectIndex >= 0, "构建最终配方前必须先解析本轮晋升配方类型");
+        assertTrue(stateIndex > selectIndex, "本轮晋升配方类型必须先写入活动状态");
+        assertTrue(superIndex > stateIndex, "super 构建期间必须能读到本轮活动倍率");
+        assertTrue(normalized.contains("setOutputMultiplierState(result == null ? null : selected, false);"),
+                "构建失败必须清空活动类型，构建成功必须退出构建期状态");
+    }
+
+    @Test
+    void activeRecipeTypeIsPersistedAcrossWorldReloads() throws Exception {
+        String source = Files.readString(CORE_SOURCE);
+
+        assertTrue(source.contains("KEY_ACTIVE_RECIPE_TYPE_ID"));
+        assertTrue(source.contains("tag.putString(KEY_ACTIVE_RECIPE_TYPE_ID, activeRecipeTypeId.toString())"));
+        assertTrue(source.contains("getRecipeLogic().restoreActiveRecipeTypeId(new ResourceLocation("));
+    }
+
+    @Test
+    void emptyOutputOptInStillRequiresAProcessedRecipe() throws Exception {
+        String method = extractBlock(Files.readString(BASE_LOGIC_SOURCE),
+                "protected WirelessGTRecipe buildFinalWirelessRecipe(");
+        String normalized = method.replaceAll("\\s+", " ");
+
+        assertEquals(1, countExact(method, "boolean processedRecipe = false;"));
+        assertEquals(2, countExact(method, "processedRecipe = true;"));
+        assertTrue(normalized.contains("if (energyConsumer && !processedRecipe)"));
+        assertTrue(normalized.contains("if (energyConsumer && !allowsEmptyRecipeOutputs() "
+                + "&& !RecipeCalculationHelper.INSTANCE.hasOutputs(itemOutputs, fluidOutputs))"));
     }
 
     @Test

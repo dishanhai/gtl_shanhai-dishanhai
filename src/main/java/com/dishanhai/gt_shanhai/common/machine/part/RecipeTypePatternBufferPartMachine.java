@@ -1,9 +1,11 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
 import appeng.api.crafting.IPatternDetails;
+import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.inventories.InternalInventory;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.GenericStack;
 
 import com.dishanhai.gt_shanhai.api.gui.configurators.FancyConfiguratorSidebarPage;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
@@ -11,22 +13,29 @@ import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSlotAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
+import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternBridge;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
+import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
 import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
+import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.gregtechceu.gtceu.api.gui.UITemplate;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
+import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
 import com.gregtechceu.gtceu.utils.FormattingUtil;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
+import com.lowdragmc.lowdraglib.gui.modular.IUIHolder;
+import com.lowdragmc.lowdraglib.gui.modular.ModularUI;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
 import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
 import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
@@ -35,6 +44,8 @@ import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.misc.ItemStackTransfer;
+import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
+import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 
@@ -55,6 +66,8 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
 import org.gtlcore.gtlcore.api.gui.MEPatternCatalystUIManager;
@@ -64,6 +77,8 @@ import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPart
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTrait;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineMachine;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -105,6 +120,13 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Persisted
     private final ItemStackTransfer wildcardPatternInventory;
+    @Persisted
+    private boolean outputMultiplierModeEnabled;
+    @Persisted
+    private int patternOutputMultiplier = 1;
+    @DescSynced
+    @Persisted
+    private int cachedHostOutputMultiplier = 1;
     private final List<IPatternDetails> wildcardPatterns;
     private final List<ItemStack> wildcardPatternStacks;
     private final List<MEPatternBufferPartMachineBase.InternalSlot> wildcardInternalSlots;
@@ -173,6 +195,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @Override
     protected void onPatternChange(int index) {
         super.onPatternChange(index);
+        if (!isRemote()) {
+            RecipeTypePatternSearchHelper.clearPatternSlotState(this, index);
+        }
         refreshPatternRecipeType(index);
     }
 
@@ -247,6 +272,11 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Override
     public GTRecipe gtShanhai$getPatternRecipe(int slot) {
+        return gtShanhai$getPatternRecipe(slot, gtShanhai$getPatternInferenceInputs());
+    }
+
+    @Override
+    public GTRecipe gtShanhai$getPatternRecipe(int slot, GenericStack[] availableCatalystInputs) {
         if (slot >= maxPatternCount) {
             int localSlot = slot - maxPatternCount;
             return localSlot >= 0 && localSlot < wildcardResolvedRecipes.size()
@@ -256,7 +286,144 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
         // 只读：本槽同时在向 AE 网络供货，绝不能像过去那样借"自愈"之机悄悄改写 NBT
         // （AEItemKey 含 NBT，改动即变身份，见 PatternRecipeTypeHelper.peekRecipe 文档）。
-        return PatternRecipeTypeHelper.peekRecipe(stack, getLevel());
+        return PatternRecipeTypeHelper.peekRecipe(stack, getLevel(), availableCatalystInputs);
+    }
+
+    @Override
+    public GenericStack[] gtShanhai$getPatternInferenceInputs() {
+        List<GenericStack> inputs = new ArrayList<>();
+        appendVisibleStock(inputs, stockItemHandler);
+        appendVisibleStock(inputs, stockFluidHandler);
+        for (int slot = 0; slot < getSharedCatalystInventory().getSlots(); slot++) {
+            ItemStack stack = getSharedCatalystInventory().getStackInSlot(slot);
+            if (!stack.isEmpty()) {
+                inputs.add(new GenericStack(AEItemKey.of(stack), stack.getCount()));
+            }
+        }
+        for (int tank = 0; tank < getSharedCatalystTank().getTanks(); tank++) {
+            FluidStack stack = getSharedCatalystTank().getFluidInTank(tank);
+            if (stack == null || stack.isEmpty()) continue;
+            AEFluidKey key = stack.getTag() == null
+                    ? AEFluidKey.of(stack.getFluid())
+                    : AEFluidKey.of(stack.getFluid(), stack.getTag());
+            inputs.add(new GenericStack(key, stack.getAmount()));
+        }
+        return inputs.toArray(GenericStack[]::new);
+    }
+
+    private static void appendVisibleStock(List<GenericStack> inputs,
+            com.gregtechceu.gtceu.integration.ae2.slot.IConfigurableSlotList handler) {
+        for (int slot = 0; slot < handler.getConfigurableSlots(); slot++) {
+            GenericStack stock = handler.getConfigurableSlot(slot).getStock();
+            if (stock != null && stock.what() != null && stock.amount() > 0L) {
+                inputs.add(stock);
+            }
+        }
+    }
+
+    public IPatternDetails gtShanhai$applyOutputMultiplier(IPatternDetails pattern, ItemStack stack) {
+        if (!outputMultiplierModeEnabled || pattern == null || getLevel() == null) return pattern;
+        return VirtualPatternEncodingHelper.rewritePatternOutputMultiplier(
+                pattern, getLevel(), PatternRecipeTypeHelper.readRecipeTypeId(stack), patternOutputMultiplier);
+    }
+
+    public boolean isOutputMultiplierModeEnabled() {
+        return outputMultiplierModeEnabled;
+    }
+
+    public int getPatternOutputMultiplier() {
+        return Math.max(1, Math.min(1000, patternOutputMultiplier));
+    }
+
+    public void setOutputMultiplierModeEnabled(boolean enabled) {
+        applyOutputMultiplierSettings(enabled, patternOutputMultiplier);
+    }
+
+    public void setPatternOutputMultiplier(int multiplier) {
+        applyOutputMultiplierSettings(outputMultiplierModeEnabled, multiplier);
+    }
+
+    public int getConnectedHostOutputMultiplier() {
+        if (isRemote()) return getCachedHostOutputMultiplier();
+        int multiplier = resolveConnectedHostOutputMultiplier();
+        updateCachedHostOutputMultiplier(multiplier);
+        return getCachedHostOutputMultiplier();
+    }
+
+    private int resolveConnectedHostOutputMultiplier() {
+        int multiplier = 1;
+        for (var controller : getControllers()) {
+            multiplier = Math.max(multiplier, readControllerHostOutputMultiplier(controller));
+        }
+        return clampOutputMultiplier(multiplier);
+    }
+
+    private static int readControllerHostOutputMultiplier(Object controller) {
+        if (controller instanceof PrimordialOmegaEngineMachine host) {
+            return host.getMountedOutputMultiplier();
+        }
+        if (controller instanceof PrimordialOmegaEngineModuleBase module) {
+            return module.getHostOutputMultiplier();
+        }
+        return 1;
+    }
+
+    private int getCachedHostOutputMultiplier() {
+        return clampOutputMultiplier(cachedHostOutputMultiplier);
+    }
+
+    private void updateCachedHostOutputMultiplier(int multiplier) {
+        int clamped = clampOutputMultiplier(multiplier);
+        if (cachedHostOutputMultiplier == clamped) return;
+        cachedHostOutputMultiplier = clamped;
+        markDirty();
+    }
+
+    private static int clampOutputMultiplier(int multiplier) {
+        return Math.max(1, Math.min(1000, multiplier));
+    }
+
+    public void syncOutputMultiplierFromHost() {
+        if (isRemote()) return;
+        int multiplier = resolveConnectedHostOutputMultiplier();
+        updateCachedHostOutputMultiplier(multiplier);
+        applyOutputMultiplierSettings(true, multiplier);
+    }
+
+    public void syncOutputMultiplierFromPattern() {
+        if (getLevel() == null) return;
+        for (int slot = 0; slot < getPatternInventory().getSlots(); slot++) {
+            ItemStack stack = getPatternInventory().getStackInSlot(slot);
+            if (stack.isEmpty()) continue;
+            IPatternDetails pattern = PatternDetailsHelper.decodePattern(stack, getLevel());
+            int multiplier = VirtualPatternEncodingHelper.detectPatternOutputMultiplier(
+                    pattern, PatternRecipeTypeHelper.readRecipeTypeId(stack));
+            if (multiplier > 0) {
+                applyOutputMultiplierSettings(true, multiplier);
+                return;
+            }
+        }
+    }
+
+    public void refreshOutputMultiplierPatterns() {
+        if (isRemote()) return;
+        for (int slot = 0; slot < getPatternInventory().getSlots(); slot++) {
+            if (!getPatternInventory().getStackInSlot(slot).isEmpty()) {
+                onPatternChange(slot);
+            }
+        }
+        onWildcardPatternInventoryChanged();
+        invalidateRecipeCaches();
+        RecipeTypePatternSearchHelper.clearPatternState(this);
+    }
+
+    private void applyOutputMultiplierSettings(boolean enabled, int multiplier) {
+        int clamped = Math.max(1, Math.min(1000, multiplier));
+        if (outputMultiplierModeEnabled == enabled && patternOutputMultiplier == clamped) return;
+        outputMultiplierModeEnabled = enabled;
+        patternOutputMultiplier = clamped;
+        markDirty();
+        refreshOutputMultiplierPatterns();
     }
 
     @Override
@@ -369,6 +536,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         List<IFancyConfigurator> parentConfigurators = collectParentConfigurators();
         sideTabs.attachSubTab(createStockInputSidebarPage(parentConfigurators));
         sideTabs.attachSubTab(FancyConfiguratorSidebarPage.single(new WildcardPatternConfigurator()));
+        sideTabs.attachSubTab(FancyConfiguratorSidebarPage.single(new OutputMultiplierConfigurator()));
         sideTabs.attachSubTab(createGroupedSidebarPage(
                 "gui.gt_shanhai.pattern_buffer_shared_inputs", 2, parentConfigurators,
                 PARENT_SHARED_ITEM, PARENT_SHARED_FLUID, PARENT_SHARED_CIRCUIT));
@@ -456,6 +624,47 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                     () -> FormattingUtil.formatNumbers(countConfiguredStockSlots()) + " / 32"));
             group.addWidget(new AEDualConfigWidget(8, 14, stockItemHandler, stockFluidHandler,
                     RecipeTypePatternBufferPartMachine.this::setPage, page));
+            return group;
+        }
+    }
+
+    private class OutputMultiplierConfigurator implements IFancyConfigurator {
+
+        @Override
+        public Component getTitle() {
+            return Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.foa_config.title");
+        }
+
+        @Override
+        public IGuiTexture getIcon() {
+            return new TextTexture("x");
+        }
+
+        @Override
+        public Widget createConfigurator() {
+            WidgetGroup group = new WidgetGroup(0, 0, 160, 100);
+            group.addWidget(new LabelWidget(6, 4, () -> outputMultiplierModeEnabled
+                    ? "§a" + Component.translatable(
+                            "gt_shanhai.machine.recipe_type_pattern_buffer.foa_mode.enabled").getString()
+                    : "§7" + Component.translatable(
+                            "gt_shanhai.machine.recipe_type_pattern_buffer.foa_mode.disabled").getString()));
+            group.addWidget(new LabelWidget(6, 22, () -> Component.translatable(
+                    "gt_shanhai.machine.recipe_type_pattern_buffer.foa_host_multiplier",
+                    getConnectedHostOutputMultiplier()).getString()));
+            group.addWidget(new LabelWidget(6, 40,
+                    Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.foa_multiplier").getString()));
+            group.addWidget(new IntInputWidget(78, 35, 76, 18,
+                    RecipeTypePatternBufferPartMachine.this::getPatternOutputMultiplier,
+                    RecipeTypePatternBufferPartMachine.this::setPatternOutputMultiplier)
+                    .setMin(1).setMax(1000));
+            group.addWidget(new ButtonWidget(6, 58, 46, 16, new TextTexture("§f开关", -1),
+                    click -> setOutputMultiplierModeEnabled(!outputMultiplierModeEnabled)));
+            group.addWidget(new ButtonWidget(56, 58, 46, 16, new TextTexture("§b读宿主", -1),
+                    click -> syncOutputMultiplierFromHost()));
+            group.addWidget(new ButtonWidget(106, 58, 48, 16, new TextTexture("§d读样板", -1),
+                    click -> syncOutputMultiplierFromPattern()));
+            group.addWidget(new ButtonWidget(6, 78, 148, 16, new TextTexture("§e刷新内部样板", -1),
+                    click -> refreshOutputMultiplierPatterns()));
             return group;
         }
     }
@@ -756,8 +965,11 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                 GTRecipe recipe = WildcardPatternRecipeTypeBinding.findRecipe(pattern, assignedTypeId);
                 if (!assignedTypeId.isEmpty() && recipe == null) continue;
                 if (recipe != null) PatternRecipeTypeHelper.writeRecipeType(patternStack, recipe);
-                uniquePatterns.putIfAbsent(patternStack.serializeNBT(),
-                        new ExpandedWildcardPattern(pattern, patternStack, recipe, assignedTypeId));
+                IPatternDetails effectivePattern = gtShanhai$applyOutputMultiplier(pattern, patternStack);
+                ItemStack effectiveStack = effectivePattern.getDefinition().toStack();
+                if (recipe != null) PatternRecipeTypeHelper.writeRecipeType(effectiveStack, recipe);
+                uniquePatterns.putIfAbsent(effectiveStack.serializeNBT(),
+                        new ExpandedWildcardPattern(effectivePattern, effectiveStack, recipe, assignedTypeId));
             }
         }
 
@@ -863,6 +1075,78 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             getMeFluidHandler().notifyListeners();
             getMeItemHandler().notifyListeners();
         }
+    }
+
+    public RecipeTypePatternBufferPartMachine resolveRemotePatternOwner() {
+        return this;
+    }
+
+    public boolean isValidRemotePatternSlot(int slot) {
+        return slot >= 0 && slot < this.maxPatternCount;
+    }
+
+    public ModularUI createRemotePatternUI(Player player, IUIHolder holder) {
+        return new ModularUI(176, 166, holder, player)
+                .widget(new FancyMachineUIWidget(this, 176, 166));
+    }
+
+    public ModularUI createRemoteSlotCatalystUI(Player player, int slot, IUIHolder holder) {
+        if (!isValidRemotePatternSlot(slot)) return null;
+
+        WidgetGroup root = new WidgetGroup(0, 0, 176, 180);
+        root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
+                "gui.gt_shanhai.remote_pattern_catalyst", slot + 1).getString()));
+        MEPatternCatalystUIManager manager = new MEPatternCatalystUIManager(
+                8, this.catalystItems, this.catalystFluids,
+                this.cacheRecipeCount, this::removeSlotFromGTRecipeCache);
+        root.addWidget(manager);
+        manager.toggleFor(slot);
+        layoutRemoteCatalystContainers(manager);
+        root.addWidget(new ButtonWidget(112, 158, 56, 16, new TextTexture(
+                Component.translatable("gui.gt_shanhai.remote_pattern_return").getString()), click -> {
+                    if (player instanceof ServerPlayer serverPlayer) {
+                        com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper
+                                .openFirst(serverPlayer);
+                    }
+                }));
+        return new ModularUI(176, 266, holder, player)
+                .widget(root)
+                .widget(UITemplate.bindPlayerInventory(player.getInventory(), GuiTextures.SLOT, 7, 184, true))
+                .background(GuiTextures.BACKGROUND);
+    }
+
+    private static void layoutRemoteCatalystContainers(MEPatternCatalystUIManager manager) {
+        if (manager.widgets.size() < 3) return;
+        Widget itemContainer = manager.widgets.get(1);
+        Widget fluidContainer = manager.widgets.get(2);
+        fluidContainer.setSelfPosition(
+                itemContainer.getPositionX() + itemContainer.getSizeWidth() + 4,
+                itemContainer.getPositionY());
+        manager.setSize(
+                Math.max(manager.widgets.get(0).getSizeWidth(),
+                        fluidContainer.getPositionX() + fluidContainer.getSizeWidth()),
+                Math.max(itemContainer.getPositionY() + itemContainer.getSizeHeight(),
+                        fluidContainer.getPositionY() + fluidContainer.getSizeHeight()));
+    }
+
+    public ModularUI createRemoteStockInputUI(Player player, IUIHolder holder) {
+        WidgetGroup root = new WidgetGroup(0, 0, 176, 132);
+        root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
+                "gui.gtlcore.stock_input_config").getString()));
+        root.addWidget(new LabelWidget(138, 4,
+                () -> FormattingUtil.formatNumbers(countConfiguredStockSlots()) + " / 32"));
+        root.addWidget(new AEDualConfigWidget(16, 18, this.stockItemHandler, this.stockFluidHandler,
+                this::setPage, this.page));
+        root.addWidget(new ButtonWidget(112, 112, 56, 16, new TextTexture(
+                Component.translatable("gui.gt_shanhai.remote_pattern_return").getString()), click -> {
+                    if (player instanceof ServerPlayer serverPlayer) {
+                        com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper
+                                .openFirst(serverPlayer);
+                    }
+                }));
+        return new ModularUI(176, 132, holder, player)
+                .widget(root)
+                .background(GuiTextures.BACKGROUND);
     }
 
     /** 统计已配置的库存输入格数（物品+流体），用于 UI 上的 "X / 32" 显示。 */

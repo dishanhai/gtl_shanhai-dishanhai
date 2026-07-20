@@ -48,6 +48,11 @@ public class GTDishanhaiMod {
     // 活性中子机械方块 (大明科技外壳)
     public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, MOD_ID);
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
+    public static final DeferredRegister<net.minecraft.world.inventory.MenuType<?>> MENUS =
+            DeferredRegister.create(ForgeRegistries.MENU_TYPES, MOD_ID);
+    public static final RegistryObject<net.minecraft.world.inventory.MenuType<?>> WIRELESS_PATTERN_MANAGEMENT_MENU =
+            MENUS.register("wireless_pattern_management_terminal",
+                    () -> com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu.TYPE);
     public static final RegistryObject<Block> ACTIVE_NEUTRON_CASING = BLOCKS.register(
         "active_neutron_casing",
         () -> new Block(BlockBehaviour.Properties.of()
@@ -118,6 +123,7 @@ public class GTDishanhaiMod {
 
         BLOCKS.register(bus);
         ITEMS.register(bus);
+        MENUS.register(bus);
         com.dishanhai.gt_shanhai.common.block.DShanhaiAE2Blocks.init(bus);
 
         GTDishanhaiRegistration.REGISTRATE.registerRegistrate();

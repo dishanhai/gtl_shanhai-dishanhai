@@ -25,16 +25,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 由于 {@code isItemActive/isFluidActive} 被强制置 true（见 {@code MEPatternBufferInternalSlotActiveMixin}），
  * 串配方风险更高。
  *
- * <p>修复：拦截基类 {@code meHandleRecipeInner} 的模拟匹配阶段（simulate=true），
- * 校验候选配方是否与 {@code trySlot} 槽当前样板的输入 / 输出指纹一致，不一致则直接判定该槽不可执行该配方。
- * 由此把匹配从「库存驱动」纠正为「样板身份驱动」，从根上杜绝串配方。
+ * <p>修复：模拟匹配阶段校验候选配方是否与 {@code trySlot} 槽当前样板的输入 / 输出指纹一致；
+ * 实际扣料阶段继续执行轻量的来源总成与槽号校验，防止 GTLCore 在来源槽瞬间不足时回退其他重复样板槽。
+ * 由此把匹配从「库存驱动」纠正为「样板槽身份驱动」。
  *
  * <p>作用域：仅对 {@link RecipeTypePatternBufferPartMachine}（星律样板总成）生效，
  * 原版 GTLCore 样板总成行为零改动。
  *
- * <p>性能：仅在 simulate 阶段（配方查找）执行；实际扣料阶段（simulate=false）不介入。
- * 每次校验按 trySlot 从 {@code slot2PatternMap} 直接取样板，指纹在 {@link PatternIdentityMatcher} 内即时计算，
- * 集合规模等于单张样板的输入 / 输出条目数，代价可控。
+ * <p>性能：完整指纹只在 simulate 阶段执行；实际扣料阶段仅比较维度、总成坐标和槽号。
+ * 指纹校验按 trySlot 从 {@code slot2PatternMap} 直接取样板，集合规模等于单张样板的输入 / 输出条目数。
  */
 public final class PatternIdentityGuardMixin {
 
@@ -50,16 +49,20 @@ public final class PatternIdentityGuardMixin {
 
         @Inject(method = "meHandleRecipeInner", at = @At("HEAD"), cancellable = true, remap = false)
         private void gtShanhai$guardItemSlotIdentity(GTRecipe recipe, Object2LongMap<Ingredient> left,
-                                                     boolean simulate, int trySlot,
+            boolean simulate, int trySlot,
                                                      CallbackInfoReturnable<Boolean> cir) {
+            MetaMachine machine = ((MachineTrait) (Object) this).getMachine();
             if (!simulate) {
+                if (PatternIdentityGuard.scopedSourceRejects(machine, recipe, trySlot)) {
+                    cir.setReturnValue(false);
+                }
                 return;
             }
-            MetaMachine machine = ((MachineTrait) (Object) this).getMachine();
             if (PatternIdentityGuard.slotRejectsRecipe(machine, recipe, trySlot)) {
                 cir.setReturnValue(false);
             }
         }
+
     }
 
     /**
@@ -71,15 +74,19 @@ public final class PatternIdentityGuardMixin {
 
         @Inject(method = "meHandleRecipeInner", at = @At("HEAD"), cancellable = true, remap = false)
         private void gtShanhai$guardFluidSlotIdentity(GTRecipe recipe, Object2LongMap<FluidIngredient> left,
-                                                      boolean simulate, int trySlot,
+            boolean simulate, int trySlot,
                                                       CallbackInfoReturnable<Boolean> cir) {
+            MetaMachine machine = ((MachineTrait) (Object) this).getMachine();
             if (!simulate) {
+                if (PatternIdentityGuard.scopedSourceRejects(machine, recipe, trySlot)) {
+                    cir.setReturnValue(false);
+                }
                 return;
             }
-            MetaMachine machine = ((MachineTrait) (Object) this).getMachine();
             if (PatternIdentityGuard.slotRejectsRecipe(machine, recipe, trySlot)) {
                 cir.setReturnValue(false);
             }
         }
+
     }
 }

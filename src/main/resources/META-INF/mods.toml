@@ -56,5 +56,11 @@ description="Shanhai's private stash - Spacetime Wave Matrix"
     versionRange="[20.1.14,)"
     ordering="AFTER"
     side="BOTH"
+[[mods.dependencies]]
+    modId="ae2wtlib"
+    mandatory=true
+    versionRange="[15.3.3,)"
+    ordering="AFTER"
+    side="BOTH"
 [mixins]
 config="gt_shanhai.mixin.json"

@@ -2,18 +2,23 @@ package com.dishanhai.gt_shanhai.common.item;
 
 import com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData;
 
+import appeng.api.inventories.InternalInventory;
 import appeng.api.stacks.AEKeyType;
 import appeng.items.storage.StorageTier;
 import appeng.items.tools.powered.PortableCellItem;
 import appeng.menu.me.common.MEStorageMenu;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.server.level.ServerLevel;
 
@@ -44,7 +49,7 @@ public class SuperDiskArrayItem extends PortableCellItem {
 
     public static final int TOTAL_BYTES = Integer.MAX_VALUE - 1;
     public static final int BYTES_PER_TYPE = 2;
-    public static final int TOTAL_TYPES = 9999;
+    public static final int TOTAL_TYPES = Integer.MAX_VALUE;
     public static final double IDLE_DRAIN = 0.1;
 
     public SuperDiskArrayItem(Properties props) {
@@ -69,6 +74,7 @@ public class SuperDiskArrayItem extends PortableCellItem {
         tooltips.add(Component.literal("§d§l超级磁盘阵列 §r§7- 便携式存储"));
         tooltips.add(Component.literal(""));
         tooltips.add(Component.literal("§7右键打开 §d便携式终端"));
+        tooltips.add(Component.literal("§7右击样板供应器或样板总成可转移内部样板"));
         tooltips.add(Component.literal("§7放入磁盘仓室后自动接入 AE 网络"));
         var vc = getVirtualCellCount(stack);
         if (vc > 0) {
@@ -99,6 +105,37 @@ public class SuperDiskArrayItem extends PortableCellItem {
         super.inventoryTick(stack, level, entity, slot, selected);
         if (level.isClientSide) return;
         SuperDiskArrayInventory.claimOwnership(stack);
+    }
+
+    @Override
+    public InteractionResult useOn(UseOnContext context) {
+        InternalInventory target = PatternInventoryTargetHelper.find(context);
+        if (target == null) return super.useOn(context);
+        if (!(context.getPlayer() instanceof ServerPlayer serverPlayer)) {
+            return InteractionResult.SUCCESS;
+        }
+
+        ItemStack stack = context.getItemInHand();
+        SuperDiskArrayInventory.claimOwnership(stack);
+        SuperDiskArrayInventory source = SuperDiskArrayInventory.create(stack, null);
+        ShanhaiSdaPatternTransfer.TransferResult result =
+                ShanhaiSdaPatternTransfer.transfer(source, target);
+        if (!result.foundPattern()) {
+            serverPlayer.displayClientMessage(Component.translatable(
+                    "gt_shanhai.message.sda_pattern_transfer.no_patterns")
+                    .withStyle(ChatFormatting.YELLOW), true);
+        } else if (result.transferred() == 0) {
+            serverPlayer.displayClientMessage(Component.translatable(
+                    "gt_shanhai.message.sda_pattern_transfer.target_full")
+                    .withStyle(ChatFormatting.YELLOW), true);
+        } else {
+            serverPlayer.displayClientMessage(Component.translatable(
+                    "gt_shanhai.message.sda_pattern_transfer.transferred",
+                    result.transferred(), result.failed())
+                    .withStyle(result.failed() == 0
+                            ? ChatFormatting.GREEN : ChatFormatting.YELLOW), true);
+        }
+        return InteractionResult.SUCCESS;
     }
 
     // ============ NBT 读写 ============

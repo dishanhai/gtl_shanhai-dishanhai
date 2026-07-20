@@ -48,6 +48,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     private Set<GTRecipe> cachedModuleConditionRecipes;
     private String cachedModuleItemId;
     private int cachedModuleCount = Integer.MIN_VALUE;
+    private final java.util.IdentityHashMap<GTRecipe, AmplifiedRecipeCacheEntry> amplifiedRecipeCache =
+            new java.util.IdentityHashMap<>();
+    private final java.util.IdentityHashMap<GTRecipe, MatchableScaledRecipe> matchableScaledRecipeCache =
+            new java.util.IdentityHashMap<>();
 
     public PrimordialModuleRecipeLogic(GTLAddWirelessWorkableElectricMultipleRecipesMachine machine) {
         super((SelectableRecipeTypeSetMachine) machine);
@@ -79,6 +83,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         // 不打断正在运行的配方（interruptRecipe 会让已扣输入蒸发），新选择下一轮 lookup 立即生效。
         super.onRecipeTypeSelectionChanged();
         invalidateModuleConditionCaches();
+        amplifiedRecipeCache.clear();
+        matchableScaledRecipeCache.clear();
     }
 
     /**
@@ -88,6 +94,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     public void onModuleLevelChanged() {
         invalidateModuleConditionCaches();
         invalidateLookupSetCache();
+        amplifiedRecipeCache.clear();
+        matchableScaledRecipeCache.clear();
     }
 
     @Override
@@ -131,6 +139,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     @Override
     @Nullable
     protected ParallelData calculateParallels() {
+        matchableScaledRecipeCache.clear();
         Set<GTRecipe> recipes = lookupRecipeIterator();
         if (recipes.isEmpty()) {
             invalidateLookupSetCache();
@@ -145,12 +154,13 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         int index = 0;
         ObjectArrayList<GTRecipe> recipeList = new ObjectArrayList<>(recipes.size());
         for (GTRecipe recipe : recipes) {
-            long max = getMaxParallel(recipe, totalParallel);
-            if (max <= 0) {
+            MatchableScaledRecipe matchable = findMaxMatchableScaledRecipe(recipe, totalParallel);
+            if (matchable == null) {
                 continue;
             }
             recipeList.add(recipe);
-            parallels[index] = max;
+            parallels[index] = matchable.parallel;
+            matchableScaledRecipeCache.put(recipe, matchable);
             index++;
         }
         if (recipeList.isEmpty()) {
@@ -163,76 +173,106 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     @Override
     public long getMaxParallel(GTRecipe recipe, long limit) {
-        if (recipe == null || limit <= 0L) return 0L;
+        MatchableScaledRecipe matchable = findMaxMatchableScaledRecipe(recipe, limit);
+        return matchable == null ? 0L : matchable.parallel;
+    }
+
+    private MatchableScaledRecipe findMaxMatchableScaledRecipe(GTRecipe recipe, long limit) {
+        if (recipe == null || limit <= 0L) return null;
         GTRecipe amplified = amplifyForMountedCore(recipe);
         long inputMax = IParallelLogic.getMaxParallel(getMachine(), amplified, limit);
-        if (inputMax <= 0L) return 0L;
+        if (inputMax <= 0L) return null;
         long outputMax = IParallelLogic.getMinParallel(getMachine(), amplified, inputMax);
-        if (outputMax <= 0L) return 0L;
-        return findHighestMatchableParallel(outputMax, candidate -> matchesScaledRecipe(amplified, candidate));
+        if (outputMax <= 0L) return null;
+        return findMatchableScaledRecipe(amplified, outputMax);
+    }
+
+    protected boolean allowsEmptyRecipeOutputs() {
+        return false;
     }
 
     @Override
     protected WirelessGTRecipe buildFinalWirelessRecipe(ParallelData parallelData, IWirelessNetworkEnergyHandler wirelessTrait) {
-        if (parallelData == null || wirelessTrait == null || !wirelessTrait.isOnline()) return null;
+        if (parallelData == null || wirelessTrait == null || !wirelessTrait.isOnline()) {
+            matchableScaledRecipeCache.clear();
+            return null;
+        }
 
-        IRecipeCapabilityHolder machine = getMachine();
-        BigInteger maxTotalEu = wirelessTrait.getMaxAvailableEnergy();
-        double euMultiplier = getEuMultiplier();
-        boolean energyConsumer = isEnergyConsumer();
-        
-        int size = parallelData.getOriginRecipeList().size();
-        // 预分配容量，减少 ArrayList 扩容开销（假设每个配方平均 2 个输出）
-        ObjectArrayList<Content> itemOutputs = new ObjectArrayList<>(size * 2);
-        ObjectArrayList<Content> fluidOutputs = new ObjectArrayList<>(size);
-        BigInteger accumulatedEu = BigInteger.ZERO;
-        
-        for (int i = 0; i < size; i++) {
-            GTRecipe recipe = parallelData.getOriginRecipeList().get(i);
-            long parallel = parallelData.getParallels()[i];
+        try {
+            IRecipeCapabilityHolder machine = getMachine();
+            BigInteger maxTotalEu = wirelessTrait.getMaxAvailableEnergy();
+            double euMultiplier = getEuMultiplier();
+            boolean energyConsumer = isEnergyConsumer();
 
-            if (parallelData.getShouldProcess()) {
-                GTRecipe amplifiedRecipe = amplifyForMountedCore(recipe);
-                GTRecipe scaledRecipe = findMatchableScaledRecipe(amplifiedRecipe, parallel);
-                if (scaledRecipe == null) {
-                    continue;
-                }
-                parallel = ((org.gtlcore.gtlcore.api.recipe.IGTRecipe) scaledRecipe).getRealParallels();
-                BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
-                if (energyConsumer && nextEu.compareTo(maxTotalEu) > 0) {
-                    if (accumulatedEu.signum() == 0) {
-                        RecipeResult.of(getMachine(), RecipeResult.FAIL_NO_ENOUGH_EU_IN);
+            int size = parallelData.getOriginRecipeList().size();
+            // 预分配容量，减少 ArrayList 扩容开销（假设每个配方平均 2 个输出）
+            ObjectArrayList<Content> itemOutputs = new ObjectArrayList<>(size * 2);
+            ObjectArrayList<Content> fluidOutputs = new ObjectArrayList<>(size);
+            BigInteger accumulatedEu = BigInteger.ZERO;
+            boolean processedRecipe = false;
+
+            for (int i = 0; i < size; i++) {
+                GTRecipe recipe = parallelData.getOriginRecipeList().get(i);
+                long parallel = parallelData.getParallels()[i];
+
+                if (parallelData.getShouldProcess()) {
+                    MatchableScaledRecipe matchable = matchableScaledRecipeCache.remove(recipe);
+                    if (matchable == null || matchable.parallel != parallel) {
+                        GTRecipe amplifiedRecipe = amplifyForMountedCore(recipe);
+                        matchable = findMatchableScaledRecipe(amplifiedRecipe, parallel);
                     }
-                    continue;
-                }
-                GTRecipe processed = IParallelLogic.getRecipeOutputChance(machine, scaledRecipe);
-                if (matchRecipeInputHandlePartCache(processed)
-                        && handleRecipeInputHandlePartCache(processed)) {
+                    if (matchable == null) {
+                        continue;
+                    }
+                    GTRecipe scaledRecipe = matchable.scaledRecipe;
+                    parallel = matchable.parallel;
+                    BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
+                    if (energyConsumer && nextEu.compareTo(maxTotalEu) > 0) {
+                        if (accumulatedEu.signum() == 0) {
+                            RecipeResult.of(getMachine(), RecipeResult.FAIL_NO_ENOUGH_EU_IN);
+                        }
+                        continue;
+                    }
+                    GTRecipe processed = IParallelLogic.getRecipeOutputChance(machine, scaledRecipe);
+                    if (matchRecipeInputHandlePartCache(processed)
+                            && handleRecipeInputHandlePartCache(processed)) {
+                        accumulatedEu = nextEu;
+                        processedRecipe = true;
+                        RecipeCalculationHelper.INSTANCE.collectOutputs(processed,
+                                (List<Content>) itemOutputs,
+                                (List<Content>) fluidOutputs);
+                    }
+                } else {
+                    BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
                     accumulatedEu = nextEu;
-                    RecipeCalculationHelper.INSTANCE.collectOutputs(processed,
+                    processedRecipe = true;
+                    GTRecipe amplifiedOutputRecipe = amplifyForMountedCore(recipe);
+                    GTRecipe scaledOutputRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(
+                            amplifiedOutputRecipe, parallel);
+                    RecipeCalculationHelper.INSTANCE.collectOutputs(scaledOutputRecipe,
                             (List<Content>) itemOutputs,
                             (List<Content>) fluidOutputs);
                 }
-            } else {
-                BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
-                accumulatedEu = nextEu;
-                GTRecipe amplifiedOutputRecipe = amplifyForMountedCore(recipe);
-                GTRecipe scaledOutputRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(
-                        amplifiedOutputRecipe, parallel);
-                RecipeCalculationHelper.INSTANCE.collectOutputs(scaledOutputRecipe,
-                        (List<Content>) itemOutputs,
-                        (List<Content>) fluidOutputs);
             }
-        }
 
-        BigInteger totalEu = energyConsumer ? accumulatedEu : accumulatedEu.negate();
-        if (isEnergyConsumer() && !RecipeCalculationHelper.INSTANCE.hasOutputs(itemOutputs, fluidOutputs)) {
-            if (getRecipeStatus() == null || getRecipeStatus().isSuccess()) {
-                RecipeResult.of(getMachine(), RecipeResult.FAIL_FIND);
+            BigInteger totalEu = energyConsumer ? accumulatedEu : accumulatedEu.negate();
+            if (energyConsumer && !processedRecipe) {
+                if (getRecipeStatus() == null || getRecipeStatus().isSuccess()) {
+                    RecipeResult.of(getMachine(), RecipeResult.FAIL_FIND);
+                }
+                return null;
             }
-            return null;
+            if (energyConsumer && !allowsEmptyRecipeOutputs()
+                    && !RecipeCalculationHelper.INSTANCE.hasOutputs(itemOutputs, fluidOutputs)) {
+                if (getRecipeStatus() == null || getRecipeStatus().isSuccess()) {
+                    RecipeResult.of(getMachine(), RecipeResult.FAIL_FIND);
+                }
+                return null;
+            }
+            return buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
+        } finally {
+            matchableScaledRecipeCache.clear();
         }
-        return buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
     }
 
     private GTRecipe amplifyForMountedCore(GTRecipe recipe) {
@@ -240,22 +280,65 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
             return recipe;
         }
-        return PrimordialRecipeOutputAmplifier.apply(recipe, module.getHostOutputMultiplier());
+        int multiplier = module.getHostOutputMultiplier();
+        if (multiplier <= 1) {
+            return recipe;
+        }
+        AmplifiedRecipeCacheEntry cached = amplifiedRecipeCache.get(recipe);
+        if (cached != null && cached.multiplier == multiplier) {
+            return cached.recipe;
+        }
+        GTRecipe amplified = PrimordialRecipeOutputAmplifier.apply(recipe, multiplier);
+        amplifiedRecipeCache.put(recipe, new AmplifiedRecipeCacheEntry(multiplier, amplified));
+        return amplified;
     }
 
-    private GTRecipe findMatchableScaledRecipe(GTRecipe recipe, long requestedParallel) {
-        long parallel = findHighestMatchableParallel(requestedParallel,
-                candidate -> matchesScaledRecipe(recipe, candidate));
+    private MatchableScaledRecipe findMatchableScaledRecipe(GTRecipe recipe, long requestedParallel) {
+        final long[] matchedParallel = new long[1];
+        final GTRecipe[] matchedRecipe = new GTRecipe[1];
+        long parallel = findHighestMatchableParallel(requestedParallel, candidate -> {
+            GTRecipe scaledRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, candidate);
+            if (matchRecipeInputHandlePartCache(scaledRecipe)
+                    && RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe)) {
+                matchedParallel[0] = candidate;
+                matchedRecipe[0] = scaledRecipe;
+                return true;
+            }
+            return false;
+        });
         if (parallel <= 0L) {
             return null;
         }
-        return RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel);
+        if (matchedParallel[0] == parallel && matchedRecipe[0] != null) {
+            return new MatchableScaledRecipe(parallel, matchedRecipe[0]);
+        }
+        return new MatchableScaledRecipe(parallel, RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel));
     }
 
     private boolean matchesScaledRecipe(GTRecipe recipe, long parallel) {
         GTRecipe scaledRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel);
         return matchRecipeInputHandlePartCache(scaledRecipe)
                 && RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe);
+    }
+
+    private static final class MatchableScaledRecipe {
+        private final long parallel;
+        private final GTRecipe scaledRecipe;
+
+        private MatchableScaledRecipe(long parallel, GTRecipe scaledRecipe) {
+            this.parallel = parallel;
+            this.scaledRecipe = scaledRecipe;
+        }
+    }
+
+    private static final class AmplifiedRecipeCacheEntry {
+        private final int multiplier;
+        private final GTRecipe recipe;
+
+        private AmplifiedRecipeCacheEntry(int multiplier, GTRecipe recipe) {
+            this.multiplier = multiplier;
+            this.recipe = recipe;
+        }
     }
 
     static long findHighestMatchableParallel(long requestedParallel, LongPredicate canMatch) {

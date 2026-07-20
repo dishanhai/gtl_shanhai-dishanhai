@@ -24,6 +24,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import appeng.api.crafting.IPatternDetails;
 import appeng.api.crafting.PatternDetailsHelper;
@@ -33,7 +34,7 @@ import appeng.api.stacks.AEItemKey;
  * 自动样板配方类型匹配。
  * 样板变更时解码输出物品，匹配模块支持的配方类型，自动切换。
  */
-@Mixin(value = MEPatternBufferPartMachine.class, remap = false)
+@Mixin(value = MEPatternBufferPartMachine.class, priority = 900, remap = false)
 public abstract class SuperPatternAutoMatchMixin {
 
     @Shadow(remap = false)
@@ -49,6 +50,14 @@ public abstract class SuperPatternAutoMatchMixin {
 
         serverLevel.getServer().tell(new TickTask(1, () -> this.gtShanhai$refreshLoadedPatternBuffer(self)));
         serverLevel.getServer().tell(new TickTask(20, () -> this.gtShanhai$refreshLoadedPatternBuffer(self)));
+    }
+
+    @Inject(method = "getRealPattern", at = @At("RETURN"), cancellable = true, remap = false)
+    private void gtShanhai$rewriteStellarPatternMultiplier(int slot, ItemStack stack,
+            CallbackInfoReturnable<IPatternDetails> cir) {
+        MEPatternBufferPartMachine self = (MEPatternBufferPartMachine) (Object) this;
+        if (!(self instanceof RecipeTypePatternBufferPartMachine stellar)) return;
+        cir.setReturnValue(stellar.gtShanhai$applyOutputMultiplier(cir.getReturnValue(), stack));
     }
 
     private void gtShanhai$refreshLoadedPatternBuffer(MEPatternBufferPartMachine self) {

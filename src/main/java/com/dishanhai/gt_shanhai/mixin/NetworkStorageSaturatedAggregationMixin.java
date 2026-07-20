@@ -18,8 +18,6 @@ public abstract class NetworkStorageSaturatedAggregationMixin {
     @Redirect(method = "getAvailableStacks", at = @At(value = "INVOKE",
             target = "Lappeng/api/storage/MEStorage;getAvailableStacks(Lappeng/api/stacks/KeyCounter;)V"), remap = false)
     private void gtShanhai$mergeProviderSaturated(MEStorage provider, KeyCounter output) {
-        this.gtShanhai$providerContribution.clear();
-        provider.getAvailableStacks(this.gtShanhai$providerContribution);
-        AeStorageAmountMath.mergeSaturated(output, this.gtShanhai$providerContribution);
+        AeStorageAmountMath.getAvailableStacksSaturated(provider, output, this.gtShanhai$providerContribution);
     }
 }

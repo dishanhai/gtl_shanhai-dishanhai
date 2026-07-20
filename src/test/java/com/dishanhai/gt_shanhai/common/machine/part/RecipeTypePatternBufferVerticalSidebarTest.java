@@ -18,7 +18,7 @@ class RecipeTypePatternBufferVerticalSidebarTest {
             "api", "gui", "configurators", "FancyConfiguratorSidebarPage.java");
 
     @Test
-    void patternBufferUsesFourSideTabsAndKeepsRefundAsOnlyFloatingControl() throws IOException {
+    void patternBufferUsesFiveSideTabsAndKeepsRefundAsOnlyFloatingControl() throws IOException {
         String machine = Files.readString(MACHINE);
         int configuratorsStart = machine.indexOf("public void attachConfigurators");
         int sideTabsStart = machine.indexOf("public void attachSideTabs", configuratorsStart);
@@ -26,8 +26,10 @@ class RecipeTypePatternBufferVerticalSidebarTest {
 
         assertTrue(machine.contains("public void attachSideTabs"),
                 "星律必须通过 VerticalTabsWidget 的 attachSideTabs 注册配置入口");
-        assertEquals(4, countOccurrences(machine, "sideTabs.attachSubTab("),
-                "合并高级拉取设置后，主页面之外必须固定注册四个连续侧栏页面");
+        assertEquals(5, countOccurrences(machine, "sideTabs.attachSubTab("),
+                "新增产出倍率页后，主页面之外必须固定注册五个连续侧栏页面");
+        assertTrue(machine.contains("new OutputMultiplierConfigurator()"),
+                "星律必须提供独立的样板产出倍率侧栏页");
         assertTrue(machine.contains("collectParentConfigurators()"),
                 "父类配置器必须先收集后迁移，不能复制私有配置逻辑");
         assertFalse(configurators.contains("super.attachConfigurators"),
@@ -84,6 +86,36 @@ class RecipeTypePatternBufferVerticalSidebarTest {
         assertEquals(1, countOccurrences(machine, "pattern_buffer_shared_inputs\", 2,"));
     }
 
+    @Test
+    void remoteCatalystScreenBindsPlayerInventoryBelowCatalystSlots() throws IOException {
+        String machine = Files.readString(MACHINE);
+        String method = extractBlock(machine, "public ModularUI createRemoteSlotCatalystUI(");
+
+        assertTrue(method.contains("UITemplate.bindPlayerInventory(player.getInventory(), GuiTextures.SLOT, 7, 184, true)"),
+                "远程催化剂槽界面必须显示玩家背包，否则无法把手里物品放进催化剂槽");
+        assertTrue(method.contains("new ModularUI(176, 266, holder, player)"),
+                "窗口高度必须容纳上方催化剂面板和下方玩家背包");
+        assertTrue(method.contains("new WidgetGroup(0, 0, 176, 180)"),
+                "催化剂面板原尺寸保持不变，避免影响槽位坐标");
+        assertTrue(method.contains("layoutRemoteCatalystContainers(manager)"),
+                "远程页面必须把流体催化剂容器移到物品容器右侧");
+    }
+
+    @Test
+    void remoteCatalystContainersArePlacedSideBySideAndManagerBoundsAreUpdated() throws IOException {
+        String machine = Files.readString(MACHINE);
+        String method = extractBlock(machine, "private static void layoutRemoteCatalystContainers(");
+
+        assertTrue(method.contains("manager.widgets.size() < 3"));
+        assertTrue(method.contains("Widget itemContainer = manager.widgets.get(1)"));
+        assertTrue(method.contains("Widget fluidContainer = manager.widgets.get(2)"));
+        assertTrue(method.contains("fluidContainer.setSelfPosition("));
+        assertTrue(method.contains("itemContainer.getPositionX() + itemContainer.getSizeWidth() + 4"));
+        assertTrue(method.contains("itemContainer.getPositionY()"));
+        assertTrue(method.contains("manager.setSize("),
+                "移动子控件后必须同步收紧管理器命中边界");
+    }
+
     private static int countOccurrences(String source, String token) {
         int count = 0;
         int index = 0;
@@ -92,5 +124,20 @@ class RecipeTypePatternBufferVerticalSidebarTest {
             index += token.length();
         }
         return count;
+    }
+
+    private static String extractBlock(String source, String declaration) {
+        int start = source.indexOf(declaration);
+        assertTrue(start >= 0, "缺少方法声明: " + declaration);
+        int openBrace = source.indexOf('{', start);
+        int depth = 0;
+        for (int i = openBrace; i < source.length(); i++) {
+            char current = source.charAt(i);
+            if (current == '{') depth++;
+            if (current == '}' && --depth == 0) {
+                return source.substring(openBrace, i + 1);
+            }
+        }
+        throw new AssertionError("方法体未闭合: " + declaration);
     }
 }

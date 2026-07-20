@@ -340,6 +340,38 @@ public class ShanhaiNetwork {
                 ShopCategoryReorderPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShanhaiStructureHighlightPacket.class,
+                ShanhaiStructureHighlightPacket::encode,
+                ShanhaiStructureHighlightPacket::new,
+                ShanhaiStructureHighlightPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShanhaiPatternContainerMetadataPacket.class,
+                ShanhaiPatternContainerMetadataPacket::encode,
+                ShanhaiPatternContainerMetadataPacket::decode,
+                ShanhaiPatternContainerMetadataPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShanhaiPatternRemoteConfigPacket.class,
+                ShanhaiPatternRemoteConfigPacket::encode,
+                ShanhaiPatternRemoteConfigPacket::decode,
+                ShanhaiPatternRemoteConfigPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShanhaiPatternTerminalOpenRequestPacket.class,
+                ShanhaiPatternTerminalOpenRequestPacket::encode,
+                ShanhaiPatternTerminalOpenRequestPacket::decode,
+                ShanhaiPatternTerminalOpenRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         RecipeSyncPacket.init();
     }
 

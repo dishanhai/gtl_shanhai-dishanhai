@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.common.machine.part;
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.api.DShanhaiNBTAPI;
 import com.dishanhai.gt_shanhai.api.ae2.AeStorageAmountMath;
+import com.dishanhai.gt_shanhai.api.ae2.ISaturatedAvailableStacksProvider;
 import com.dishanhai.gt_shanhai.api.gui.configurators.MEDiskHatchPriorityConfigurator;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory;
@@ -60,6 +61,7 @@ import appeng.api.storage.cells.ISaveProvider;
 import appeng.api.storage.cells.StorageCell;
 import appeng.helpers.IPriorityHost;
 import appeng.menu.ISubMenu;
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.BlockPos;
@@ -536,7 +538,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         return new EaeInfinityCellStorage(normalizeFluidKey(record), stack.getHoverName());
     }
 
-    public static final class EaeInfinityCellStorage implements MEStorage {
+    public static final class EaeInfinityCellStorage implements MEStorage, ISaturatedAvailableStacksProvider {
         private final AEKey record;
         private final Component description;
 
@@ -557,6 +559,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         @Override
         public void getAvailableStacks(KeyCounter out) {
+            gtShanhai$getAvailableStacksSaturated(out);
+        }
+
+        @Override
+        public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {
             out.set(record, Long.MAX_VALUE);
         }
 
@@ -574,7 +581,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
      * SDA 内无限盘越多、网络扫描越频繁就越明显）。insert/extract 逐个匹配 record 委派，
      * 与原来 AE 网络自己逐个挂载点尝试的语义等价（同优先级内互相替代，不影响提取顺序）。
      */
-    public static final class AggregatedInfinityCellStorage implements MEStorage {
+    public static final class AggregatedInfinityCellStorage implements MEStorage, ISaturatedAvailableStacksProvider {
         private final List<EaeInfinityCellStorage> children;
         private final KeyCounterSnapshot snapshot;
 
@@ -603,6 +610,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         @Override
         public void getAvailableStacks(KeyCounter out) {
+            gtShanhai$getAvailableStacksSaturated(out);
+        }
+
+        @Override
+        public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {
             snapshot.addTo(out);
         }
 
@@ -645,18 +657,27 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
     private static final class KeyCounterSnapshot {
         private final KeyCounter counter = new KeyCounter();
+        private final AEKey[] keys;
+        private final long[] amounts;
 
         private KeyCounterSnapshot(KeyCounter source) {
             AeStorageAmountMath.mergeSaturated(counter, source);
+            int size = counter.size();
+            this.keys = new AEKey[size];
+            this.amounts = new long[size];
+            int index = 0;
+            for (Object2LongMap.Entry<AEKey> entry : counter) {
+                keys[index] = entry.getKey();
+                amounts[index] = entry.getLongValue();
+                index++;
+            }
         }
 
         private static KeyCounterSnapshot aggregate(Iterable<? extends MEStorage> storages) {
             KeyCounter merged = new KeyCounter();
             KeyCounter contribution = new KeyCounter();
             for (MEStorage storage : storages) {
-                contribution.clear();
-                storage.getAvailableStacks(contribution);
-                AeStorageAmountMath.mergeSaturated(merged, contribution);
+                AeStorageAmountMath.getAvailableStacksSaturated(storage, merged, contribution);
             }
             return new KeyCounterSnapshot(merged);
         }
@@ -666,11 +687,13 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
 
         private void addTo(KeyCounter out) {
-            AeStorageAmountMath.mergeSaturated(out, counter);
+            for (int i = 0; i < keys.length; i++) {
+                AeStorageAmountMath.addSaturated(out, keys[i], amounts[i]);
+            }
         }
     }
 
-    public static final class NormalizedFluidKeyStorage implements MEStorage {
+    public static final class NormalizedFluidKeyStorage implements MEStorage, ISaturatedAvailableStacksProvider {
         private final MEStorage delegate;
         private final EquivalentKeySnapshotCache<AEKey> equivalentKeyCache =
                 new EquivalentKeySnapshotCache<>(MEDiskHatchPartMachine::normalizeFluidKey);
@@ -705,6 +728,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         @Override
         public void getAvailableStacks(KeyCounter out) {
+            gtShanhai$getAvailableStacksSaturated(out);
+        }
+
+        @Override
+        public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {
             KeyCounterSnapshot cached = cachedAvailableStacks;
             int version = delegateSnapshotVersion();
             if (cached == null || cachedDelegateVersion != version) {
@@ -908,7 +936,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     }
 
     /** 包装 MEStorage，在 getAvailableStacks 中过滤指定 key */
-    public static final class FilteredMEStorage implements MEStorage {
+    public static final class FilteredMEStorage implements MEStorage, ISaturatedAvailableStacksProvider {
         private final MEStorage delegate;
         private final CarrierKeyFilterState filterState;
         private KeyCounterSnapshot cachedAvailableStacks;
@@ -939,6 +967,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
         @Override
         public void getAvailableStacks(KeyCounter out) {
+            gtShanhai$getAvailableStacksSaturated(out);
+        }
+
+        @Override
+        public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {
             KeyCounterSnapshot cached = cachedAvailableStacks;
             int version = filterState.version();
             if (cached == null || cachedFilterVersion != version) {
@@ -967,7 +1000,8 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     }
 
     /** 为没有 ISaveProvider 契约的 MEStorage 补宿主变更通知，不在热路径执行序列化。 */
-    public record ChangeNotifyingStorage(MEStorage delegate, ISaveProvider owner) implements MEStorage {
+    public record ChangeNotifyingStorage(MEStorage delegate, ISaveProvider owner)
+            implements MEStorage, ISaturatedAvailableStacksProvider {
         @Override
         public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
             long inserted = delegate.insert(what, amount, mode, src);
@@ -984,7 +1018,12 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         @Override
         public void getAvailableStacks(KeyCounter out) {
-            delegate.getAvailableStacks(out);
+            gtShanhai$getAvailableStacksSaturated(out);
+        }
+
+        @Override
+        public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {
+            AeStorageAmountMath.getAvailableStacksSaturated(delegate, out, null);
         }
 
         @Override
@@ -994,7 +1033,8 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     }
 
     /** 高频存取只通知宿主标脏；实际序列化由宿主在合并后的安全落盘点执行。 */
-    public record PersistedCellStorage(StorageCell delegate, ISaveProvider owner) implements MEStorage {
+    public record PersistedCellStorage(StorageCell delegate, ISaveProvider owner)
+            implements MEStorage, ISaturatedAvailableStacksProvider {
         @Override
         public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
             long inserted = delegate.insert(what, amount, mode, src);
@@ -1013,7 +1053,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
         @Override
         public void getAvailableStacks(KeyCounter out) {
-            delegate.getAvailableStacks(out);
+            gtShanhai$getAvailableStacksSaturated(out);
+        }
+        @Override
+        public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {
+            AeStorageAmountMath.getAvailableStacksSaturated(delegate, out, null);
         }
         @Override
         public Component getDescription() {
@@ -1021,7 +1065,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
     }
 
-    public static final class AggregatedNestedCellStorage implements MEStorage {
+    public static final class AggregatedNestedCellStorage implements MEStorage, ISaturatedAvailableStacksProvider {
         private final List<NestedCellStorage> children;
         private final Map<AEKey, Integer> preferredExtractChild = new HashMap<>();
         // 查询与网络输出读取同一份状态，子盘真实变更后整体失效。
@@ -1078,6 +1122,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         @Override
         public void getAvailableStacks(KeyCounter out) {
+            gtShanhai$getAvailableStacksSaturated(out);
+        }
+
+        @Override
+        public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {
             getAggregateSnapshot().addTo(out);
         }
 
@@ -1105,7 +1154,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
      * SDA 内联 cell 来自父 SDA 的物品条目，不能裸挂临时 ItemStack。
      * 修改后必须把旧载体从父 SDA 移除，再插入带新 NBT 的载体。
      */
-    public static final class NestedCellStorage implements MEStorage {
+    public static final class NestedCellStorage implements MEStorage, ISaturatedAvailableStacksProvider {
         private final StorageCell parent;
         private final StorageCell nested;
         private final ItemStack carrierStack;
@@ -1155,7 +1204,12 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
         @Override
         public void getAvailableStacks(KeyCounter out) {
-            nested.getAvailableStacks(out);
+            gtShanhai$getAvailableStacksSaturated(out);
+        }
+
+        @Override
+        public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {
+            AeStorageAmountMath.getAvailableStacksSaturated(nested, out, null);
         }
 
         private void setAggregateInvalidationSink(Runnable aggregateInvalidationSink) {

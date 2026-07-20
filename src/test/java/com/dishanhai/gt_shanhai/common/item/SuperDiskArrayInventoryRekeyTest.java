@@ -2,6 +2,8 @@ package com.dishanhai.gt_shanhai.common.item;
 
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.AEKeyType;
+import appeng.api.stacks.KeyCounter;
+import appeng.api.config.Actionable;
 import appeng.api.storage.cells.ISaveProvider;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -72,6 +74,30 @@ class SuperDiskArrayInventoryRekeyTest {
         assertEquals(before, amounts);
         assertEquals(BigInteger.valueOf(6), readTotal(inventory));
         assertEquals(0, ownerNotifications.get());
+    }
+
+    @Test
+    void nonItemKeysCanBeInsertedAndBigAmountsSaturateAeView() throws Exception {
+        TestKey fluidLikeKey = new TestKey("fluid_like");
+        Map<AEKey, BigInteger> amounts = new HashMap<>();
+        AtomicInteger ownerNotifications = new AtomicInteger();
+        SuperDiskArrayInventory inventory = newInventory(
+                amounts, BigInteger.ZERO, ownerNotifications::incrementAndGet);
+
+        assertEquals(12L, inventory.insert(fluidLikeKey, 12L, Actionable.SIMULATE, null));
+        assertEquals(BigInteger.ZERO, readTotal(inventory), "模拟插入不得改变 BigInteger 总量");
+
+        assertEquals(12L, inventory.insert(fluidLikeKey, 12L, Actionable.MODULATE, null));
+        assertEquals(BigInteger.valueOf(12L), amounts.get(fluidLikeKey));
+        assertEquals(BigInteger.valueOf(12L), readTotal(inventory));
+        assertEquals(1, ownerNotifications.get());
+
+        amounts.put(fluidLikeKey, BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE));
+        KeyCounter visible = new KeyCounter();
+        inventory.getAvailableStacks(visible);
+
+        assertEquals(Long.MAX_VALUE, visible.get(fluidLikeKey),
+                "AE2 long 视图必须对 BigInteger 超大数量做饱和输出");
     }
 
     private static SuperDiskArrayInventory newInventory(

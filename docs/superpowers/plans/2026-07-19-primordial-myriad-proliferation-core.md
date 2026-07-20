@@ -330,12 +330,12 @@ private GTRecipe amplifyForMountedCore(GTRecipe recipe) {
 }
 ```
 
-修改 `getMaxParallel`：先对单份原配方创建容量预检副本，再交给 `IParallelLogic.getMaxParallel` 和 `matchRecipeOutput`。
+修改 `getMaxParallel`：先对单份原配方创建容量预检副本；`IParallelLogic.getMaxParallel` 只计算输入上限，必须继续调用 `IParallelLogic.getMinParallel` 以放大后的输出反推可容纳并行数。最终候选检查也必须对 `放大配方 × 候选并行` 调用 `matchRecipeOutput`，不能只检查单份输出。
 
 ```java
 GTRecipe amplified = amplifyForMountedCore(recipe);
-long max = IParallelLogic.getMaxParallel(getMachine(), amplified, limit);
-return max > 0L && RecipeRunnerHelper.matchRecipeOutput(getMachine(), amplified) ? max : 0L;
+long inputMax = IParallelLogic.getMaxParallel(getMachine(), amplified, limit);
+return inputMax > 0L ? IParallelLogic.getMinParallel(getMachine(), amplified, inputMax) : 0L;
 ```
 
 修改 `buildFinalWirelessRecipe`：

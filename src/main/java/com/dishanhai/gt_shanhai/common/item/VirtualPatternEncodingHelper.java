@@ -6,6 +6,7 @@ import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
 import appeng.api.crafting.IPatternDetails;
+import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.crafting.pattern.AEProcessingPattern;
 
@@ -19,6 +20,7 @@ import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
+import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
@@ -27,14 +29,18 @@ import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
+import org.gtlcore.gtlcore.utils.NumberUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -55,11 +61,13 @@ public final class VirtualPatternEncodingHelper {
             return size() > PATTERN_ANALYSIS_CACHE_LIMIT;
         }
     };
-    private static RecipeOutputIndex recipeOutputIndex;
-    private static RecipeOutputIndex allRecipeOutputIndex;
+    private static RecipeOutputIndexes recipeOutputIndexes;
 
     public static GenericStack[] rewriteInputsForVirtualProviders(GenericStack[] inputs, GenericStack[] outputs) {
         if (inputs == null || outputs == null) {
+            return inputs;
+        }
+        if (PatternRecipeTypeHelper.currentAuthoritativeEncodingRecipe() != null) {
             return inputs;
         }
 
@@ -76,26 +84,36 @@ public final class VirtualPatternEncodingHelper {
         if (mode == PatternEncodeOverride.WrapMode.FORCE_WRAP) {
             result = inputs.clone();
             autoDiagnostic = "auto-match skipped (force-wrap mode)";
-        } else if (containsVirtualInput(inputs, outputs)) {
-            result = inputs;
         } else {
-            GTRecipe recipe = findMatchingRecipe(inputs, outputs);
-            if (recipe == null) {
-                LOG.info("[VirtualPatternEncoding] no unique recipe matched for outputs={}, wrap skipped, inputs left raw",
-                        StackBag.of(outputs));
+            PatternAnalysis analysis = getPatternAnalysis(inputs, outputs);
+            if (analysis.containsVirtualInput()) {
                 result = inputs;
-                autoDiagnostic = "no unique recipe matched";
             } else {
-                GenericStack[] rewritten = rewriteInputsPreservingSelections(inputs, recipe);
-                if (rewritten == inputs) {
-                    LOG.info("[VirtualPatternEncoding] recipe={} matched but rewrite was rejected (slot count or ingredient mismatch), inputs left raw",
-                            recipe.getId());
-                    autoDiagnostic = "recipe " + recipe.getId() + " matched but wrap rejected";
+                GTRecipe recipe = analysis.matchingRecipe(inputs, outputs);
+                if (recipe == null) {
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("[VirtualPatternEncoding] no unique recipe matched for outputs={}, wrap skipped, inputs left raw",
+                                StackBag.of(outputs));
+                    }
+                    result = inputs;
+                    autoDiagnostic = "no unique recipe matched";
                 } else {
-                    LOG.info("[VirtualPatternEncoding] recipe={} matched, inputs rewritten with virtual providers", recipe.getId());
-                    autoDiagnostic = "recipe " + recipe.getId() + " matched, wrapped";
+                    GenericStack[] rewritten = rewriteInputsPreservingSelections(inputs, recipe);
+                    if (rewritten == inputs) {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("[VirtualPatternEncoding] recipe={} matched but rewrite was rejected, inputs left raw",
+                                    recipe.getId());
+                        }
+                        autoDiagnostic = "recipe " + recipe.getId() + " matched but wrap rejected";
+                    } else {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("[VirtualPatternEncoding] recipe={} matched, inputs rewritten with virtual providers",
+                                    recipe.getId());
+                        }
+                        autoDiagnostic = "recipe " + recipe.getId() + " matched, wrapped";
+                    }
+                    result = rewritten;
                 }
-                result = rewritten;
             }
         }
 
@@ -118,7 +136,9 @@ public final class VirtualPatternEncodingHelper {
 
         String diagnostic = autoDiagnostic == null ? "" : autoDiagnostic;
         if (manuallyWrapped > 0) {
-            LOG.info("[VirtualPatternEncoding] {} slot(s) force-wrapped by manual mark", manuallyWrapped);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("[VirtualPatternEncoding] {} slot(s) force-wrapped by manual mark", manuallyWrapped);
+            }
             diagnostic = diagnostic.isEmpty() ? (manuallyWrapped + " slot(s) manually marked, wrapped")
                     : diagnostic + "; " + manuallyWrapped + " manually marked slot(s) also wrapped";
         }
@@ -311,36 +331,87 @@ public final class VirtualPatternEncodingHelper {
     }
 
     public static GTRecipe findMatchingRecipeForPattern(GenericStack[] inputs, GenericStack[] outputs) {
-        return findMatchingRecipe(inputs, outputs, getAllRecipeOutputIndex());
+        return findMatchingRecipe(inputs, outputs, getAllRecipeOutputIndex(), null, StackBag.EMPTY);
+    }
+
+    public static GTRecipe findMatchingRecipeForPattern(GenericStack[] inputs, GenericStack[] outputs,
+            GenericStack[] availableCatalystInputs) {
+        return findMatchingRecipe(inputs, outputs, getAllRecipeOutputIndex(), null,
+                StackBag.of(availableCatalystInputs));
     }
 
     public static GTRecipe findMatchingRecipeForPattern(GenericStack[] inputs, GenericStack[] outputs, String recipeTypeId) {
+        return findMatchingRecipeForPattern(inputs, outputs, recipeTypeId, null);
+    }
+
+    public static GTRecipe findMatchingRecipeForPattern(GenericStack[] inputs, GenericStack[] outputs,
+            String recipeTypeId, GenericStack[] availableCatalystInputs) {
         GTRecipeType recipeType = PatternRecipeTypeHelper.resolveRecipeType(recipeTypeId);
         if (recipeType == null || recipeType.getLookup() == null || recipeType.getLookup().getLookup() == null) {
-            return findMatchingRecipeForPattern(inputs, outputs);
+            return findMatchingRecipe(inputs, outputs, getAllRecipeOutputIndex(), null,
+                    StackBag.of(availableCatalystInputs));
         }
-        StackBag inputBag = StackBag.of(inputs);
-        StackBag outputBag = StackBag.of(outputs);
-        if (inputBag.isEmpty() || outputBag.isEmpty()) {
-            return null;
-        }
-        GTRecipe matched = null;
-        Iterable<GTRecipe> recipes = recipeType.getLookup().getLookup().getRecipes(true)::iterator;
-        for (GTRecipe recipe : recipes) {
-            if (recipe == null || !matchesRecipe(recipe, inputs, inputBag, outputBag)) {
+        return findMatchingRecipe(inputs, outputs, getAllRecipeOutputIndex(), recipeType,
+                StackBag.of(availableCatalystInputs));
+    }
+
+    public static int detectPatternOutputMultiplier(IPatternDetails pattern, String recipeTypeId) {
+        if (!(pattern instanceof AEProcessingPattern processingPattern)) return 0;
+        GenericStack[] inputs = processingPattern.getSparseInputs();
+        GenericStack[] outputs = processingPattern.getSparseOutputs();
+        GTRecipe recipe = findMatchingRecipeForPattern(inputs, outputs, recipeTypeId);
+        if (recipe == null) return 0;
+        long multiplier = detectRecipeOutputMultiplier(recipe, StackBag.of(outputs));
+        return multiplier <= 0L ? 0 : (int) Math.min(1000L, multiplier);
+    }
+
+    public static IPatternDetails rewritePatternOutputMultiplier(IPatternDetails pattern, Level level,
+            String recipeTypeId, int requestedMultiplier) {
+        if (!(pattern instanceof AEProcessingPattern processingPattern) || level == null) return pattern;
+        GenericStack[] inputs = processingPattern.getSparseInputs();
+        GenericStack[] outputs = processingPattern.getSparseOutputs();
+        GTRecipe recipe = findMatchingRecipeForPattern(inputs, outputs, recipeTypeId);
+        if (recipe == null) return pattern;
+
+        long currentMultiplier = detectRecipeOutputMultiplier(recipe, StackBag.of(outputs));
+        if (currentMultiplier <= 0L) return pattern;
+        int targetMultiplier = Math.max(1, Math.min(1000, requestedMultiplier));
+        GenericStack[] rewrittenInputs = rewriteCycleContainerInputs(
+                inputs, currentMultiplier, targetMultiplier);
+        if (rewrittenInputs == null) return pattern;
+        GenericStack[] rewrittenOutputs = createScaledRecipeOutputs(recipe, targetMultiplier);
+        IPatternDetails rewritten = PatternDetailsHelper.decodePattern(
+                PatternDetailsHelper.encodeProcessingPattern(rewrittenInputs, rewrittenOutputs), level);
+        return rewritten == null ? pattern : rewritten;
+    }
+
+    private static GenericStack[] rewriteCycleContainerInputs(GenericStack[] inputs,
+            long currentMultiplier, long targetMultiplier) {
+        if (inputs == null) return null;
+        GenericStack[] rewritten = new GenericStack[inputs.length];
+        for (int i = 0; i < inputs.length; i++) {
+            GenericStack input = inputs[i];
+            if (input == null || !isRecipeCycleContainerKey(input.what())) {
+                rewritten[i] = input;
                 continue;
             }
-            if (matched != null) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("[VirtualPatternEncoding] 配方类型 {} 内输出 {} 匹配到多个配方（至少 {} 与 {}），"
-                            + "无法唯一识别，放弃虚拟供料改写/配方类型识别",
-                            recipeTypeId, outputBag, matched.getId(), recipe.getId());
-                }
-                return null;
-            }
-            matched = recipe;
+            if (input.amount() <= 0L || input.amount() % currentMultiplier != 0L) return null;
+            long baseAmount = input.amount() / currentMultiplier;
+            rewritten[i] = new GenericStack(input.what(), NumberUtils.saturatedMultiply(baseAmount, targetMultiplier));
         }
-        return matched;
+        return rewritten;
+    }
+
+    private static GenericStack[] createScaledRecipeOutputs(GTRecipe recipe, long targetMultiplier) {
+        List<GenericStack> outputs = createRecipeOutputs(recipe);
+        GenericStack[] rewritten = new GenericStack[outputs.size()];
+        for (int i = 0; i < outputs.size(); i++) {
+            GenericStack output = outputs.get(i);
+            long amount = isRecipeCycleContainerKey(output.what())
+                    ? output.amount() : NumberUtils.saturatedMultiply(output.amount(), targetMultiplier);
+            rewritten[i] = new GenericStack(output.what(), amount);
+        }
+        return rewritten;
     }
 
     private static GenericStack[] getSparseInputs(IPatternDetails details) {
@@ -376,7 +447,7 @@ public final class VirtualPatternEncodingHelper {
     private static GenericStack getVirtualProviderTarget(GenericStack stack) {
         if (stack == null || !(stack.what() instanceof AEItemKey key)) return null;
         ItemStack provider = key.toStack();
-        if (!VirtualItemProviderHelper.isBoundProvider(provider)) return null;
+        if (!VirtualItemProviderHelper.isProviderItem(provider)) return null;
         ItemStack target = VirtualItemProviderHelper.getTarget(provider);
         if (target.isEmpty()) return null;
         return new GenericStack(AEItemKey.of(target), Math.max(1L, target.getCount()));
@@ -415,6 +486,8 @@ public final class VirtualPatternEncodingHelper {
     private static PatternAnalysis analyzePattern(GenericStack[] inputs, GenericStack[] outputs) {
         Map<Entry, GenericStack> targets = new LinkedHashMap<>();
         boolean hasFluidCandidate = false;
+        GTRecipe matchingRecipe = null;
+        boolean matchingRecipeResolved = false;
         if (inputs != null) {
             for (GenericStack input : inputs) {
                 GenericStack providerTarget = getVirtualProviderTarget(input);
@@ -439,18 +512,19 @@ public final class VirtualPatternEncodingHelper {
             }
         }
         if (hasFluidCandidate) {
-            GTRecipe recipe = findMatchingRecipe(inputs, outputs);
-            if (recipe != null) {
+            matchingRecipe = findMatchingRecipe(inputs, outputs);
+            matchingRecipeResolved = true;
+            if (matchingRecipe != null) {
                 for (GenericStack input : inputs) {
                     if (input == null || !(input.what() instanceof AEFluidKey)) continue;
-                    GenericStack virtualFluidTarget = getNonConsumableFluidTarget(recipe, input);
+                    GenericStack virtualFluidTarget = getNonConsumableFluidTarget(matchingRecipe, input);
                     if (virtualFluidTarget != null) {
                         targets.put(new Entry(input.what(), input.amount()), virtualFluidTarget);
                     }
                 }
             }
         }
-        return new PatternAnalysis(targets);
+        return new PatternAnalysis(targets, matchingRecipe, matchingRecipeResolved);
     }
 
     private static GTRecipe findMatchingRecipe(GenericStack[] inputs, GenericStack[] outputs) {
@@ -458,97 +532,323 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private static GTRecipe findMatchingRecipe(GenericStack[] inputs, GenericStack[] outputs, RecipeOutputIndex index) {
+        return findMatchingRecipe(inputs, outputs, index, null, StackBag.EMPTY);
+    }
+
+    private static GTRecipe findMatchingRecipe(GenericStack[] inputs, GenericStack[] outputs,
+            RecipeOutputIndex index, GTRecipeType requiredType, StackBag availableCatalystInputs) {
         StackBag inputBag = StackBag.of(inputs);
         StackBag outputBag = StackBag.of(outputs);
         if (inputBag.isEmpty() || outputBag.isEmpty()) {
             return null;
         }
 
-        List<GTRecipe> matches = new ArrayList<>();
-        List<GTRecipe> candidates = index.candidates(outputBag);
-        for (GTRecipe recipe : candidates) {
-            if (matchesRecipe(recipe, inputs, inputBag, outputBag)) {
-                matches.add(recipe);
-            }
+        RecipeSelection exactSelection = selectRecipeCandidate(
+                index.candidates(outputBag), inputs, outputs, inputBag, outputBag,
+                availableCatalystInputs, requiredType, false);
+        if (exactSelection.recipe != null) {
+            return exactSelection.recipe;
         }
-        if (matches.isEmpty()) return null;
-        if (matches.size() > 1) {
-            // 纯靠物品/流体堆叠反查配方，天然靠不住：不同配方类型完全可能凑巧输入输出堆叠一样
-            // （比如 0.144B 液态铁 + 1 铁粉，"分子解构"和"提取机"两个毫不相干的配方类型都能匹配上，
-            // 根本不是"同一配方在不同机器复制"）。之前试过"物品内容+是否不消耗签名相同就任选其一"，
-            // 结果样板 tooltip 上会显示错的配方类型（篡改），比"识别不出来"更糟——反查在有歧义时
-            // 唯一安全的做法就是直接放弃，宁可什么都不显示，也不能瞎猜。
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("[VirtualPatternEncoding] outputs={} matched {} candidate recipes, ambiguous, "
-                        + "wrap/recipe-type lookup abandoned", outputBag, matches.size());
-            }
+        if (exactSelection.ambiguous) {
             return null;
         }
-        return matches.get(0);
+
+        RecipeSelection scaledSelection = selectRecipeCandidate(
+                index.scaledCandidates(outputBag), inputs, outputs, inputBag, outputBag,
+                availableCatalystInputs, requiredType, true);
+        if (scaledSelection.recipe != null) {
+            return scaledSelection.recipe;
+        }
+        if (scaledSelection.ambiguous) {
+            return null;
+        }
+
+        if (requiredType != null) {
+            RecipeSelection partialSelection = selectPartialTypeScopedCandidate(
+                    index.partialCandidates(outputBag), inputs, inputBag, outputBag,
+                    availableCatalystInputs, requiredType);
+            return partialSelection.ambiguous ? null : partialSelection.recipe;
+        }
+        return null;
+    }
+
+    private static RecipeSelection selectRecipeCandidate(List<GTRecipe> candidates,
+            GenericStack[] patternInputs, GenericStack[] patternOutputs, StackBag inputBag, StackBag outputBag,
+            StackBag availableCatalystInputs, GTRecipeType requiredType, boolean scaledOnly) {
+        List<RecipeCandidate> matches = new ArrayList<>();
+        for (GTRecipe recipe : candidates) {
+            if (recipe == null || (requiredType != null && (recipe.recipeType == null
+                    || !Objects.equals(recipe.recipeType.registryName, requiredType.registryName)))) {
+                continue;
+            }
+            long multiplier = detectRecipeOutputMultiplier(recipe, outputBag);
+            if ((scaledOnly && multiplier <= 1L) || (!scaledOnly && multiplier != 1L)) continue;
+            if (!matchesRecipeInputsAtMultiplier(
+                    recipe, patternInputs, inputBag, multiplier, availableCatalystInputs)) continue;
+            matches.add(new RecipeCandidate(recipe, multiplier));
+        }
+        if (matches.isEmpty()) {
+            return RecipeSelection.NONE;
+        }
+        if (matches.size() == 1) {
+            return new RecipeSelection(matches.get(0).recipe, false);
+        }
+        if (requiredType != null) {
+            GTRecipe reference = matches.get(0).recipe;
+            for (int i = 1; i < matches.size(); i++) {
+                if (!haveEquivalentRecipeInputsAndOutputs(reference, matches.get(i).recipe)) {
+                    return RecipeSelection.AMBIGUOUS;
+                }
+            }
+            return selectCanonicalTypeScopedCandidate(matches);
+        }
+
+        GTRecipe orderedMatch = null;
+        for (RecipeCandidate candidate : matches) {
+            if (!matchesOrderedRecipeOutputs(candidate.recipe, patternOutputs, candidate.multiplier)) continue;
+            if (orderedMatch != null) {
+                logAmbiguousOutput(outputBag, orderedMatch, candidate.recipe, requiredType);
+                return RecipeSelection.AMBIGUOUS;
+            }
+            orderedMatch = candidate.recipe;
+        }
+        if (orderedMatch != null) return new RecipeSelection(orderedMatch, false);
+
+        logAmbiguousOutput(outputBag, matches.get(0).recipe, matches.get(1).recipe, requiredType);
+        return RecipeSelection.AMBIGUOUS;
+    }
+
+    private static RecipeSelection selectCanonicalTypeScopedCandidate(List<RecipeCandidate> matches) {
+        RecipeCandidate canonical = matches.get(0);
+        String canonicalId = canonical.recipe.getId().toString();
+        for (int i = 1; i < matches.size(); i++) {
+            RecipeCandidate candidate = matches.get(i);
+            String candidateId = candidate.recipe.getId().toString();
+            if (candidateId.compareTo(canonicalId) < 0) {
+                canonical = candidate;
+                canonicalId = candidateId;
+            }
+        }
+        return new RecipeSelection(canonical.recipe, false);
+    }
+
+    private static RecipeSelection selectPartialTypeScopedCandidate(List<GTRecipe> candidates,
+            GenericStack[] patternInputs, StackBag inputBag, StackBag outputBag,
+            StackBag availableCatalystInputs, GTRecipeType requiredType) {
+        List<RecipeCandidate> matches = new ArrayList<>();
+        for (GTRecipe recipe : candidates) {
+            if (recipe == null || recipe.recipeType == null
+                    || !Objects.equals(recipe.recipeType.registryName, requiredType.registryName)) {
+                continue;
+            }
+            long multiplier = detectPartialRecipeOutputMultiplier(recipe, outputBag);
+            if (multiplier <= 0L) continue;
+            if (!matchesRecipeInputsAtMultiplier(
+                    recipe, patternInputs, inputBag, multiplier, availableCatalystInputs)) continue;
+            matches.add(new RecipeCandidate(recipe, multiplier));
+        }
+        if (matches.isEmpty()) {
+            return RecipeSelection.NONE;
+        }
+
+        GTRecipe reference = matches.get(0).recipe;
+        for (int i = 1; i < matches.size(); i++) {
+            if (!haveEquivalentRecipeInputsAndOutputs(reference, matches.get(i).recipe)) {
+                return RecipeSelection.AMBIGUOUS;
+            }
+        }
+        return selectCanonicalTypeScopedCandidate(matches);
+    }
+
+    private static void logAmbiguousOutput(StackBag outputBag, GTRecipe first, GTRecipe second,
+            GTRecipeType requiredType) {
+        if (!LOG.isDebugEnabled()) return;
+        LOG.debug("[VirtualPatternEncoding] recipeType={} outputs={} matched multiple recipes (at least {} and {}), "
+                        + "ordered outputs could not identify one candidate",
+                requiredType == null ? "*" : requiredType.registryName, outputBag, first.getId(), second.getId());
+    }
+
+    private static long detectRecipeOutputMultiplier(GTRecipe recipe, StackBag patternOutputs) {
+        StackBag baseOutputs = StackBag.of(createRecipeOutputs(recipe));
+        Set<AEKey> unscaledKeys = new HashSet<>();
+        for (AEKey key : baseOutputs.keys()) {
+            if (isRecipeCycleContainerKey(key)) unscaledKeys.add(key);
+        }
+        return UniformOutputMultiplier.detect(baseOutputs.amounts(), patternOutputs.amounts(), unscaledKeys);
+    }
+
+    private static long detectPartialRecipeOutputMultiplier(GTRecipe recipe, StackBag patternOutputs) {
+        Map<AEKey, Long> recipeAmounts = StackBag.of(createRecipeOutputs(recipe)).amounts();
+        Map<AEKey, Long> patternAmounts = patternOutputs.amounts();
+        if (recipeAmounts.isEmpty() || patternAmounts.isEmpty()) return 0L;
+
+        Map<AEKey, Long> matchingRecipeAmounts = new HashMap<>();
+        Set<AEKey> unscaledKeys = new HashSet<>();
+        for (AEKey key : patternAmounts.keySet()) {
+            Long amount = recipeAmounts.get(key);
+            if (amount == null || amount.longValue() <= 0L) return 0L;
+            matchingRecipeAmounts.put(key, amount);
+            if (isRecipeCycleContainerKey(key)) unscaledKeys.add(key);
+        }
+        return UniformOutputMultiplier.detect(matchingRecipeAmounts, patternAmounts, unscaledKeys);
+    }
+
+    private static boolean haveEquivalentRecipeInputsAndOutputs(GTRecipe first, GTRecipe second) {
+        return first != null && second != null
+                && StackBag.of(createRecipeInputs(first)).equals(StackBag.of(createRecipeInputs(second)))
+                && StackBag.of(createRecipeOutputs(first)).equals(StackBag.of(createRecipeOutputs(second)));
+    }
+
+    private static boolean matchesRecipeInputsAtMultiplier(GTRecipe recipe, GenericStack[] patternInputs,
+            StackBag inputBag, long multiplier, StackBag availableCatalystInputs) {
+        if (matchesIndexedRecipe(recipe, patternInputs, inputBag, availableCatalystInputs)) return true;
+        if (multiplier <= 1L || patternInputs == null) return false;
+
+        GenericStack[] normalized = new GenericStack[patternInputs.length];
+        for (int i = 0; i < patternInputs.length; i++) {
+            GenericStack input = patternInputs[i];
+            if (input == null || !isRecipeCycleContainerKey(input.what())) {
+                normalized[i] = input;
+                continue;
+            }
+            if (input.amount() <= 0L || input.amount() % multiplier != 0L) return false;
+            normalized[i] = new GenericStack(input.what(), input.amount() / multiplier);
+        }
+        return patternInputsMatchRecipe(recipe, normalized, availableCatalystInputs);
+    }
+
+    private static boolean matchesOrderedRecipeOutputs(GTRecipe recipe, GenericStack[] patternOutputs,
+            long multiplier) {
+        List<GenericStack> base = createRecipeOutputs(recipe);
+        List<GenericStack> pattern = compactStacks(patternOutputs);
+        if (base.size() != pattern.size()) return false;
+
+        for (int i = 0; i < base.size(); i++) {
+            GenericStack baseStack = base.get(i);
+            GenericStack patternStack = pattern.get(i);
+            if (!Objects.equals(baseStack.what(), patternStack.what())) return false;
+            long expected = isRecipeCycleContainerKey(baseStack.what())
+                    ? baseStack.amount() : NumberUtils.saturatedMultiply(baseStack.amount(), multiplier);
+            if (patternStack.amount() != expected) return false;
+        }
+        return true;
+    }
+
+    private static boolean isRecipeCycleContainerKey(AEKey key) {
+        return key instanceof AEItemKey itemKey
+                && RecipeCalculationHelper.INSTANCE.isRecipeCycleContainerItem(itemKey.getItem());
+    }
+
+    private static RecipeOutputIndexes getRecipeOutputIndexes() {
+        long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
+        RecipeOutputIndexes indexes = recipeOutputIndexes;
+        if (indexes != null && indexes.revision == revision) return indexes;
+        synchronized (VirtualPatternEncodingHelper.class) {
+            indexes = recipeOutputIndexes;
+            if (indexes == null || indexes.revision != revision) {
+                indexes = buildRecipeOutputIndexes(revision);
+                recipeOutputIndexes = indexes;
+            }
+        }
+        return indexes;
     }
 
     private static RecipeOutputIndex getAllRecipeOutputIndex() {
-        long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
-        RecipeOutputIndex index = allRecipeOutputIndex;
-        if (index != null && index.revision == revision) return index;
-        synchronized (VirtualPatternEncodingHelper.class) {
-            index = allRecipeOutputIndex;
-            if (index == null || index.revision != revision) {
-                index = buildRecipeOutputIndex(revision, false);
-                allRecipeOutputIndex = index;
-            }
-        }
-        return index;
+        return getRecipeOutputIndexes().allRecipes;
     }
 
     private static RecipeOutputIndex getRecipeOutputIndex() {
-        long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
-        RecipeOutputIndex index = recipeOutputIndex;
-        if (index != null && index.revision == revision) return index;
-        synchronized (VirtualPatternEncodingHelper.class) {
-            index = recipeOutputIndex;
-            if (index == null || index.revision != revision) {
-                index = buildRecipeOutputIndex(revision, true);
-                recipeOutputIndex = index;
-            }
-        }
-        return index;
+        return getRecipeOutputIndexes().nonConsumableRecipes;
     }
 
-    private static RecipeOutputIndex buildRecipeOutputIndex(long revision, boolean requireNonConsumableInput) {
-        Map<StackBag, List<GTRecipe>> byOutput = new HashMap<>();
+    private static RecipeOutputIndexes buildRecipeOutputIndexes(long revision) {
+        Map<StackBag, List<GTRecipe>> allByOutput = new HashMap<>();
+        Map<StackBag, List<GTRecipe>> nonConsumableByOutput = new HashMap<>();
+        Map<Set<AEKey>, List<GTRecipe>> allByOutputShape = new HashMap<>();
+        Map<Set<AEKey>, List<GTRecipe>> nonConsumableByOutputShape = new HashMap<>();
+        Map<AEKey, List<GTRecipe>> allByOutputKey = new HashMap<>();
+        Map<AEKey, List<GTRecipe>> nonConsumableByOutputKey = new HashMap<>();
         for (GTRecipeType type : GTRegistries.RECIPE_TYPES) {
             if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) continue;
             Iterable<GTRecipe> recipes = type.getLookup().getLookup().getRecipes(true)::iterator;
             for (GTRecipe recipe : recipes) {
-                if (recipe == null || (requireNonConsumableInput && !hasNonConsumableInput(recipe))) continue;
+                if (recipe == null) continue;
                 StackBag outputBag = StackBag.of(createRecipeOutputs(recipe));
                 if (outputBag.isEmpty()) continue;
-                byOutput.computeIfAbsent(outputBag, key -> new ArrayList<>()).add(recipe);
+                allByOutput.computeIfAbsent(outputBag, key -> new ArrayList<>()).add(recipe);
+                allByOutputShape.computeIfAbsent(outputBag.keys(), key -> new ArrayList<>()).add(recipe);
+                for (AEKey outputKey : outputBag.keys()) {
+                    allByOutputKey.computeIfAbsent(outputKey, key -> new ArrayList<>()).add(recipe);
+                }
+                if (hasNonConsumableInput(recipe)) {
+                    nonConsumableByOutput.computeIfAbsent(outputBag, key -> new ArrayList<>()).add(recipe);
+                    nonConsumableByOutputShape.computeIfAbsent(outputBag.keys(), key -> new ArrayList<>()).add(recipe);
+                    for (AEKey outputKey : outputBag.keys()) {
+                        nonConsumableByOutputKey.computeIfAbsent(outputKey, key -> new ArrayList<>()).add(recipe);
+                    }
+                }
             }
         }
-        return new RecipeOutputIndex(revision, byOutput);
+        return new RecipeOutputIndexes(revision,
+                new RecipeOutputIndex(allByOutput, allByOutputShape, allByOutputKey),
+                new RecipeOutputIndex(nonConsumableByOutput, nonConsumableByOutputShape,
+                        nonConsumableByOutputKey));
     }
 
-    private static boolean matchesRecipe(GTRecipe recipe, GenericStack[] patternInputs, StackBag inputs, StackBag outputs) {
-        if (!StackBag.of(createRecipeOutputs(recipe)).equals(outputs)) return false;
+    private static boolean matchesIndexedRecipe(GTRecipe recipe, GenericStack[] patternInputs, StackBag inputs,
+            StackBag availableCatalystInputs) {
         return StackBag.of(createRecipeInputs(recipe)).equals(inputs)
                 || StackBag.of(createVirtualInputs(recipe)).equals(inputs)
-                || patternInputsMatchRecipe(recipe, patternInputs);
+                || patternInputsMatchRecipe(recipe, patternInputs, availableCatalystInputs);
     }
 
     private static boolean patternInputsMatchRecipe(GTRecipe recipe, GenericStack[] patternInputs) {
+        return patternInputsMatchRecipe(recipe, patternInputs, StackBag.EMPTY);
+    }
+
+    private static boolean patternInputsMatchRecipe(GTRecipe recipe, GenericStack[] patternInputs,
+            StackBag availableCatalystInputs) {
         List<GenericStack> inputs = compactStacks(patternInputs);
-        int contentCount = countRecipeInputs(recipe);
-        if (inputs.size() != contentCount) return false;
+        int requiredCount = countRequiredPatternInputs(recipe, availableCatalystInputs);
+        int totalCount = countRecipeInputs(recipe);
+        if (inputs.size() < requiredCount || inputs.size() > totalCount) return false;
 
         boolean[] used = new boolean[inputs.size()];
-        if (!matchItemContents(recipe.getInputContents(ItemRecipeCapability.CAP), inputs, used)) return false;
-        if (!matchFluidContents(recipe.getInputContents(FluidRecipeCapability.CAP), inputs, used)) return false;
+        if (!matchItemContents(recipe.getInputContents(ItemRecipeCapability.CAP), inputs, used,
+                availableCatalystInputs)) return false;
+        if (!matchFluidContents(recipe.getInputContents(FluidRecipeCapability.CAP), inputs, used,
+                availableCatalystInputs)) return false;
         for (boolean matched : used) {
             if (!matched) return false;
         }
         return true;
+    }
+
+    private static int countRequiredPatternInputs(GTRecipe recipe, StackBag availableCatalystInputs) {
+        int count = 0;
+        List<Content> itemContents = recipe.getInputContents(ItemRecipeCapability.CAP);
+        if (itemContents != null) {
+            for (Content content : itemContents) {
+                Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
+                if (ingredient != null && !ingredient.isEmpty()
+                        && (!isOmittablePatternCatalyst(content)
+                                || !availableInputMatchesItemCatalyst(content, availableCatalystInputs))) {
+                    count++;
+                }
+            }
+        }
+        List<Content> fluidContents = recipe.getInputContents(FluidRecipeCapability.CAP);
+        if (fluidContents != null) {
+            for (Content content : fluidContents) {
+                FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+                if (ingredient != null && !ingredient.isEmpty()
+                        && (!isNonConsumable(content)
+                                || !availableInputMatchesFluidCatalyst(content, availableCatalystInputs))) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private static List<GenericStack> compactStacks(GenericStack[] stacks) {
@@ -580,39 +880,57 @@ public final class VirtualPatternEncodingHelper {
         return count;
     }
 
-    private static boolean matchItemContents(List<Content> contents, List<GenericStack> inputs, boolean[] used) {
+    private static boolean matchItemContents(List<Content> contents, List<GenericStack> inputs, boolean[] used,
+            StackBag availableCatalystInputs) {
         if (contents == null || contents.isEmpty()) return true;
         for (Content content : contents) {
             Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
             if (ingredient == null || ingredient.isEmpty()) continue;
             long amount = getItemAmount(content, firstItemStack(content));
+            boolean optional = isOmittablePatternCatalyst(content);
             boolean matched = false;
             for (int i = 0; i < inputs.size(); i++) {
                 GenericStack input = inputs.get(i);
-                if (used[i] || input.amount() != amount || !(input.what() instanceof AEItemKey key)) continue;
-                ItemStack stack = key.toStack();
-                if (ingredient.test(stack)) {
+                if (used[i] || !(input.what() instanceof AEItemKey key)) continue;
+                if (itemInputMatchesIngredient(input, key, ingredient, amount, optional)) {
                     used[i] = true;
                     matched = true;
                     break;
                 }
             }
-            if (!matched) return false;
+            if (!matched && (!optional
+                    || !availableInputMatchesItemCatalyst(content, availableCatalystInputs))) return false;
         }
         return true;
     }
 
-    private static boolean matchFluidContents(List<Content> contents, List<GenericStack> inputs, boolean[] used) {
+    private static boolean itemInputMatchesIngredient(GenericStack input, AEItemKey key,
+            Ingredient ingredient, long expectedAmount, boolean optional) {
+        ItemStack stack = key.toStack();
+        if (input.amount() == expectedAmount && ingredient.test(stack)) return true;
+        if (!optional || input.amount() != 1L || !VirtualItemProviderHelper.isProviderItem(stack)) return false;
+        ItemStack target = VirtualItemProviderHelper.getTarget(stack);
+        if (target.isEmpty() || !ingredient.test(target)) return false;
+        long encodedAmount = Math.max(1L, target.getCount());
+        return encodedAmount == Math.min((long) Integer.MAX_VALUE, expectedAmount);
+    }
+
+    private static boolean matchFluidContents(List<Content> contents, List<GenericStack> inputs, boolean[] used,
+            StackBag availableCatalystInputs) {
         if (contents == null || contents.isEmpty()) return true;
         for (Content content : contents) {
             FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
             if (ingredient == null || ingredient.isEmpty()) continue;
             com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
             long amount = sample == null ? 0 : sample.getAmount();
+            boolean optional = isNonConsumable(content);
             boolean matched = false;
             for (int i = 0; i < inputs.size(); i++) {
                 GenericStack input = inputs.get(i);
-                if (used[i] || input.amount() != amount || !(input.what() instanceof AEFluidKey key)) continue;
+                if (used[i] || !(input.what() instanceof AEFluidKey key)
+                        || input.amount() != amount && !(optional && input.amount() == VIRTUAL_FLUID_MARKER_AMOUNT)) {
+                    continue;
+                }
                 Fluid fluid = (Fluid) key.getPrimaryKey();
                 CompoundTag tag = key.toTag();
                 com.lowdragmc.lowdraglib.side.fluid.FluidStack stack = com.lowdragmc.lowdraglib.side.fluid.FluidStack.create(
@@ -625,9 +943,47 @@ public final class VirtualPatternEncodingHelper {
                     break;
                 }
             }
-            if (!matched) return false;
+            if (!matched && (!optional
+                    || !availableInputMatchesFluidCatalyst(content, availableCatalystInputs))) return false;
         }
         return true;
+    }
+
+    private static boolean availableInputMatchesItemCatalyst(Content content, StackBag availableCatalystInputs) {
+        if (!isOmittablePatternCatalyst(content) || availableCatalystInputs == null
+                || availableCatalystInputs.isEmpty()) return false;
+        Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
+        ItemStack sample = firstItemStack(content);
+        long expectedAmount = getItemAmount(content, sample);
+        for (Map.Entry<AEKey, Long> entry : availableCatalystInputs.amounts().entrySet()) {
+            if (entry.getValue() < expectedAmount || !(entry.getKey() instanceof AEItemKey key)) continue;
+            if (ingredient.test(key.toStack())) return true;
+        }
+        return false;
+    }
+
+    private static boolean availableInputMatchesFluidCatalyst(Content content, StackBag availableCatalystInputs) {
+        if (!isNonConsumable(content) || availableCatalystInputs == null
+                || availableCatalystInputs.isEmpty()) return false;
+        FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+        com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
+        long expectedAmount = sample == null ? 0L : sample.getAmount();
+        for (Map.Entry<AEKey, Long> entry : availableCatalystInputs.amounts().entrySet()) {
+            if (entry.getValue() < expectedAmount || !(entry.getKey() instanceof AEFluidKey key)) continue;
+            CompoundTag keyTag = key.toTag();
+            com.lowdragmc.lowdraglib.side.fluid.FluidStack stack =
+                    com.lowdragmc.lowdraglib.side.fluid.FluidStack.create(
+                            key.getFluid(), expectedAmount,
+                            keyTag.contains("tag", 10) ? keyTag.getCompound("tag") : null);
+            if (ingredient.test(stack)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isOmittablePatternCatalyst(Content content) {
+        if (!isNonConsumable(content)) return false;
+        ItemStack stack = firstItemStack(content);
+        return !stack.isEmpty() && !IntCircuitBehaviour.isIntegratedCircuit(stack);
     }
 
     private static boolean hasNonConsumableInput(GTRecipe recipe) {
@@ -670,8 +1026,10 @@ public final class VirtualPatternEncodingHelper {
         List<GenericStack> original = compactStacks(inputs);
         int expected = countRecipeInputs(recipe);
         if (original.size() != expected) {
-            LOG.info("[VirtualPatternEncoding] recipe={} slot count mismatch: pattern has {}, recipe expects {}, wrap skipped",
-                    recipe.getId(), original.size(), expected);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("[VirtualPatternEncoding] recipe={} slot count mismatch: pattern has {}, recipe expects {}, wrap skipped",
+                        recipe.getId(), original.size(), expected);
+            }
             return inputs;
         }
 
@@ -679,12 +1037,16 @@ public final class VirtualPatternEncodingHelper {
         boolean[] used = new boolean[original.size()];
         if (!rewriteItemInputsPreservingSelections(
                 recipe.getInputContents(ItemRecipeCapability.CAP), original, rewritten, used)) {
-            LOG.info("[VirtualPatternEncoding] recipe={} item ingredient match failed, wrap skipped", recipe.getId());
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("[VirtualPatternEncoding] recipe={} item ingredient match failed, wrap skipped", recipe.getId());
+            }
             return inputs;
         }
         if (!rewriteFluidInputsPreservingSelections(
                 recipe.getInputContents(FluidRecipeCapability.CAP), original, rewritten, used)) {
-            LOG.info("[VirtualPatternEncoding] recipe={} fluid ingredient match failed, wrap skipped", recipe.getId());
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("[VirtualPatternEncoding] recipe={} fluid ingredient match failed, wrap skipped", recipe.getId());
+            }
             return inputs;
         }
         return rewritten.toArray(new GenericStack[0]);
@@ -710,7 +1072,9 @@ public final class VirtualPatternEncodingHelper {
                 }
             }
             if (matchedIndex < 0) {
-                LOG.info("[VirtualPatternEncoding] no pattern slot matches recipe item ingredient (amount={})", amount);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("[VirtualPatternEncoding] no pattern slot matches recipe item ingredient (amount={})", amount);
+                }
                 return false;
             }
             used[matchedIndex] = true;
@@ -876,9 +1240,14 @@ public final class VirtualPatternEncodingHelper {
 
     private static final class PatternAnalysis {
         private final Map<Entry, GenericStack> targets;
+        private GTRecipe matchingRecipe;
+        private boolean matchingRecipeResolved;
 
-        private PatternAnalysis(Map<Entry, GenericStack> targets) {
+        private PatternAnalysis(Map<Entry, GenericStack> targets, GTRecipe matchingRecipe,
+                boolean matchingRecipeResolved) {
             this.targets = targets;
+            this.matchingRecipe = matchingRecipe;
+            this.matchingRecipeResolved = matchingRecipeResolved;
         }
 
         private boolean containsVirtualInput() {
@@ -889,20 +1258,74 @@ public final class VirtualPatternEncodingHelper {
             if (stack == null || stack.what() == null || stack.amount() <= 0) return null;
             return targets.get(new Entry(stack.what(), stack.amount()));
         }
+
+        private synchronized GTRecipe matchingRecipe(GenericStack[] inputs, GenericStack[] outputs) {
+            if (!matchingRecipeResolved) {
+                matchingRecipe = findMatchingRecipe(inputs, outputs);
+                matchingRecipeResolved = true;
+            }
+            return matchingRecipe;
+        }
+    }
+
+    private static final class RecipeOutputIndexes {
+        private final long revision;
+        private final RecipeOutputIndex allRecipes;
+        private final RecipeOutputIndex nonConsumableRecipes;
+
+        private RecipeOutputIndexes(long revision, RecipeOutputIndex allRecipes,
+                RecipeOutputIndex nonConsumableRecipes) {
+            this.revision = revision;
+            this.allRecipes = allRecipes;
+            this.nonConsumableRecipes = nonConsumableRecipes;
+        }
     }
 
     private static final class RecipeOutputIndex {
-        private final long revision;
         private final Map<StackBag, List<GTRecipe>> byOutput;
+        private final Map<Set<AEKey>, List<GTRecipe>> byOutputShape;
+        private final Map<AEKey, List<GTRecipe>> byOutputKey;
 
-        private RecipeOutputIndex(long revision, Map<StackBag, List<GTRecipe>> byOutput) {
-            this.revision = revision;
+        private RecipeOutputIndex(Map<StackBag, List<GTRecipe>> byOutput,
+                Map<Set<AEKey>, List<GTRecipe>> byOutputShape,
+                Map<AEKey, List<GTRecipe>> byOutputKey) {
             this.byOutput = byOutput;
+            this.byOutputShape = byOutputShape;
+            this.byOutputKey = byOutputKey;
         }
 
         private List<GTRecipe> candidates(StackBag outputBag) {
             List<GTRecipe> candidates = byOutput.get(outputBag);
             return candidates == null ? List.of() : candidates;
+        }
+
+        private List<GTRecipe> scaledCandidates(StackBag outputBag) {
+            List<GTRecipe> candidates = byOutputShape.get(outputBag.keys());
+            return candidates == null ? List.of() : candidates;
+        }
+
+        private List<GTRecipe> partialCandidates(StackBag outputBag) {
+            LinkedHashSet<GTRecipe> candidates = new LinkedHashSet<>();
+            for (AEKey outputKey : outputBag.keys()) {
+                List<GTRecipe> keyed = byOutputKey.get(outputKey);
+                if (keyed != null) candidates.addAll(keyed);
+            }
+            return candidates.isEmpty() ? List.of() : new ArrayList<>(candidates);
+        }
+    }
+
+    private record RecipeCandidate(GTRecipe recipe, long multiplier) {}
+
+    private static final class RecipeSelection {
+        private static final RecipeSelection NONE = new RecipeSelection(null, false);
+        private static final RecipeSelection AMBIGUOUS = new RecipeSelection(null, true);
+
+        private final GTRecipe recipe;
+        private final boolean ambiguous;
+
+        private RecipeSelection(GTRecipe recipe, boolean ambiguous) {
+            this.recipe = recipe;
+            this.ambiguous = ambiguous;
         }
     }
 
@@ -928,7 +1351,9 @@ public final class VirtualPatternEncodingHelper {
 
         @Override
         public int hashCode() {
-            return Objects.hash(inputs, outputs, revision);
+            int result = inputs.hashCode();
+            result = 31 * result + outputs.hashCode();
+            return 31 * result + Long.hashCode(revision);
         }
     }
 
@@ -975,6 +1400,7 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private static final class StackBag {
+        private static final StackBag EMPTY = new StackBag(Map.of());
         private final Map<Entry, Integer> entries;
 
         private StackBag(Map<Entry, Integer> entries) {
@@ -1005,6 +1431,23 @@ public final class VirtualPatternEncodingHelper {
             return entries.isEmpty();
         }
 
+        Set<AEKey> keys() {
+            Set<AEKey> keys = new HashSet<>();
+            for (Entry entry : entries.keySet()) {
+                keys.add(entry.key);
+            }
+            return Set.copyOf(keys);
+        }
+
+        Map<AEKey, Long> amounts() {
+            Map<AEKey, Long> amounts = new HashMap<>();
+            for (Map.Entry<Entry, Integer> entry : entries.entrySet()) {
+                long total = NumberUtils.saturatedMultiply(entry.getKey().amount, entry.getValue().longValue());
+                amounts.merge(entry.getKey().key, total, NumberUtils::saturatedAdd);
+            }
+            return amounts;
+        }
+
         private static void add(Map<Entry, Integer> entries, GenericStack stack) {
             if (stack == null || stack.what() == null || stack.amount() <= 0) return;
             Entry entry = new Entry(stack.what(), stack.amount());
@@ -1021,6 +1464,11 @@ public final class VirtualPatternEncodingHelper {
         @Override
         public int hashCode() {
             return entries.hashCode();
+        }
+
+        @Override
+        public String toString() {
+            return entries.toString();
         }
     }
 
@@ -1042,7 +1490,7 @@ public final class VirtualPatternEncodingHelper {
 
         @Override
         public int hashCode() {
-            return Objects.hash(key, amount);
+            return 31 * key.hashCode() + Long.hashCode(amount);
         }
     }
 }

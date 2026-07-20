@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.client;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.WalletOpenRequestPacket;
+import com.dishanhai.gt_shanhai.network.ShanhaiPatternTerminalOpenRequestPacket;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
@@ -25,12 +26,17 @@ public class ShanhaiKeyMappings {
     private static final String CATEGORY = "key.categories." + GTDishanhaiMod.MOD_ID;
 
     public static KeyMapping OPEN_SHOP;
+    public static KeyMapping OPEN_PATTERN_MANAGEMENT;
 
     @SubscribeEvent
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         OPEN_SHOP = new KeyMapping("key." + GTDishanhaiMod.MOD_ID + ".open_shop",
                 InputConstants.Type.KEYSYM, org.lwjgl.glfw.GLFW.GLFW_KEY_COMMA, CATEGORY);
         event.register(OPEN_SHOP);
+        OPEN_PATTERN_MANAGEMENT = new KeyMapping(
+                "key." + GTDishanhaiMod.MOD_ID + ".open_pattern_management",
+                InputConstants.Type.KEYSYM, org.lwjgl.glfw.GLFW.GLFW_KEY_N, CATEGORY);
+        event.register(OPEN_PATTERN_MANAGEMENT);
     }
 
     /** 由 {@link ClientInit} 注册到 Forge 事件总线（RegisterKeyMappingsEvent 是 MOD 总线，需分开监听）。 */
@@ -39,6 +45,13 @@ public class ShanhaiKeyMappings {
         while (OPEN_SHOP.consumeClick()) {
             if (Minecraft.getInstance().player != null) {
                 ShanhaiNetwork.CHANNEL.sendToServer(new WalletOpenRequestPacket());
+            }
+        }
+        if (OPEN_PATTERN_MANAGEMENT != null) {
+            while (OPEN_PATTERN_MANAGEMENT.consumeClick()) {
+                if (Minecraft.getInstance().player != null) {
+                    ShanhaiNetwork.CHANNEL.sendToServer(new ShanhaiPatternTerminalOpenRequestPacket());
+                }
             }
         }
     }

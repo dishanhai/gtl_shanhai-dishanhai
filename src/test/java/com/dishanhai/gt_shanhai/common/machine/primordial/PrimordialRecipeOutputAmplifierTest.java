@@ -105,9 +105,9 @@ class PrimordialRecipeOutputAmplifierTest {
     @Test
     void moduleLogicUsesAmplifiedRecipesForCapacityAndBothWirelessOutputPaths() throws Exception {
         String source = Files.readString(LOGIC_SOURCE);
-        String maxParallel = extractBlock(source, "public long getMaxParallel(GTRecipe recipe, long limit) {");
+        String maxParallel = extractBlock(source, "private MatchableScaledRecipe findMaxMatchableScaledRecipe(");
         String wireless = extractBlock(source, "protected WirelessGTRecipe buildFinalWirelessRecipe(");
-        String scaledMatch = extractBlock(source, "private boolean matchesScaledRecipe(");
+        String scaledMatch = extractBlock(source, "private MatchableScaledRecipe findMatchableScaledRecipe(");
         String normalizedWireless = wireless.replaceAll("\\s+", " ");
 
         assertTrue(maxParallel.contains("GTRecipe amplified = amplifyForMountedCore(recipe);"));
@@ -116,13 +116,14 @@ class PrimordialRecipeOutputAmplifierTest {
                         + "\\s*amplified\\s*,\\s*[A-Za-z_$][\\w$]*\\s*\\)")
                 .matcher(maxParallel).find(), "输出容量必须限制输入可提供的最大并行");
 
-        assertEquals(1, countExact(scaledMatch, "RecipeCalculationHelper.INSTANCE.multipleRecipe("),
-                "每个二分候选只构造一次完整并行配方");
+        assertEquals(2, countExact(scaledMatch, "RecipeCalculationHelper.INSTANCE.multipleRecipe("),
+                "二分命中路径复用已构造的 scaledRecipe，仅保留一次防御性兜底重建");
+        assertTrue(scaledMatch.contains("matchedRecipe[0] = scaledRecipe"));
         assertTrue(scaledMatch.contains("matchRecipeInputHandlePartCache(scaledRecipe)"));
         assertTrue(scaledMatch.contains("RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe)"));
 
-        assertTrue(wireless.contains("GTRecipe amplifiedRecipe = amplifyForMountedCore(recipe);"));
-        assertTrue(wireless.contains("findMatchableScaledRecipe(amplifiedRecipe, parallel)"));
+        assertTrue(wireless.contains("matchableScaledRecipeCache.remove(recipe)"));
+        assertTrue(wireless.contains("matchable = findMatchableScaledRecipe(amplifiedRecipe, parallel)"));
         assertTrue(wireless.contains("IParallelLogic.getRecipeOutputChance(machine, scaledRecipe)"));
         assertTrue(wireless.contains("GTRecipe amplifiedOutputRecipe = amplifyForMountedCore(recipe);"));
         assertTrue(normalizedWireless.contains("multipleRecipe( amplifiedOutputRecipe, parallel)"),

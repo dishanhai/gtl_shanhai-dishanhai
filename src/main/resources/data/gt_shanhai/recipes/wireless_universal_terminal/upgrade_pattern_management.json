@@ -1,0 +1,7 @@
+{
+  "type": "ae2wtlib:upgrade",
+  "terminal": {
+    "item": "gt_shanhai:wireless_pattern_management_terminal"
+  },
+  "terminalName": "shanhai_pattern_management"
+}

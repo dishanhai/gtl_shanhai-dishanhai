@@ -19,7 +19,7 @@ class NetworkStorageSaturatedAggregationSourceTest {
         String source = Files.readString(MIXIN);
         assertTrue(Files.readString(CONFIG).contains("NetworkStorageSaturatedAggregationMixin"));
         assertTrue(source.contains("MEStorage;getAvailableStacks"));
-        assertTrue(source.contains("mergeSaturated"));
+        assertTrue(source.contains("getAvailableStacksSaturated"));
         assertTrue(source.contains("providerContribution"));
     }
 }
