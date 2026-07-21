@@ -41,8 +41,8 @@ class RecipeTypePatternBufferWildcardIntegrationTest {
         assertTrue(machine.contains("new WidgetGroup(0, 0, 160, 155)")
                         && machine.contains("new PatternCycleWidget(8, 71, 142, 36, () -> wildcardPatterns)"),
                 "通配符配置页必须使用原版展开样板轮播预览");
-        assertTrue(machine.contains("new StockingPatternBufferInternalSlot(globalSlot)"),
-                "展开样板必须使用库存型内部槽");
+        assertTrue(machine.contains("new StellarPatternBufferInternalSlot(globalSlot)"),
+                "展开样板必须使用支持残留库存继续匹配的星律库存型内部槽");
         assertTrue(machine.contains("protected int getInternalSlotCount()")
                         && machine.contains("getSlotIndexForPattern(IPatternDetails pattern)"),
                 "星律必须合并普通槽与通配符动态槽");

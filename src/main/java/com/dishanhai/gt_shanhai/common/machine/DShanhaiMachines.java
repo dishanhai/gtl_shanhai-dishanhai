@@ -83,6 +83,7 @@ import com.dishanhai.gt_shanhai.client.renderer.machine.PrimordialOmegaEngineRen
 import com.dishanhai.gt_shanhai.client.renderer.machine.SpacetimeWaveMatrixRenderer;
 import com.gtladd.gtladditions.utils.CommonUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.MOD_ID;
@@ -172,6 +173,26 @@ public class DShanhaiMachines {
     // ===== 基础单方块机器 (ULV~ZPM, 索引=电压等级) =====
     public static MachineDefinition[] ZERO_POINT_CONVERSION = new MachineDefinition[3];
     public static MachineDefinition[] PHOTON_SIPHON = new MachineDefinition[3];
+
+    private static GTRecipeType[] buildSixfoldResourceRecipeTypes() {
+        List<GTRecipeType> types = new ArrayList<>();
+        types.add(GTLRecipeTypes.ELEMENT_COPYING_RECIPES);
+        types.add(GTLRecipeTypes.DRILLING_MODULE_RECIPES);
+
+        GTRecipeType largeVoidPump = PrimordialSixfoldResourceRecipeTypes.findLargeVoidPumpIfExtendLoaded();
+        if (largeVoidPump != null) {
+            types.add(largeVoidPump);
+        } else {
+            GTDishanhaiMod.LOGGER.warn(
+                    "gtl_extend is not loaded; optional recipe type {} is isolated and the primordial sixfold resource core will use five recipe types",
+                    PrimordialSixfoldResourceRecipeTypes.LARGE_VOID_PUMP_ID);
+        }
+
+        types.add(GTLRecipeTypes.DOOR_OF_CREATE_RECIPES);
+        types.add(GTLRecipeTypes.FISSION_REACTOR_RECIPES);
+        types.add(GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES);
+        return types.toArray(new GTRecipeType[0]);
+    }
 
     public static void init() {
         // ========== GTNL 移植机器 ==========
@@ -441,13 +462,7 @@ public class DShanhaiMachines {
         PRIMORDIAL_SIXFOLD_RESOURCE_CORE = GTDishanhaiRegistration.REGISTRATE
                 .multiblock("primordial_sixfold_resource_core", PrimordialSixfoldResourceCore::new)
                 .rotationState(RotationState.ALL)
-                .recipeTypes(
-                        GTLRecipeTypes.ELEMENT_COPYING_RECIPES,
-                        GTLRecipeTypes.DRILLING_MODULE_RECIPES,
-                        PrimordialSixfoldResourceRecipeTypes.requireLargeVoidPump(),
-                        GTLRecipeTypes.DOOR_OF_CREATE_RECIPES,
-                        GTLRecipeTypes.FISSION_REACTOR_RECIPES,
-                        GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES)
+                .recipeTypes(buildSixfoldResourceRecipeTypes())
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
@@ -1351,7 +1366,7 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createElectricText("星律样板总成"));
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§7基于 GTLCore ME 样板总成，保留分页样板槽与输入能力"));
-            tooltips.add(Component.literal("§a当前保留基础样板总成行为，不追加跨配方类型虚拟执行链"));
+            tooltips.add(Component.literal("§a拥有跨配方类型虚拟执行链，多类型直接运行不阻塞主配方类型"));
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§6继承能力:"));
             tooltips.add(Component.literal("§7· 各样板槽位库存§f真·完全隔离§7，互不串料"));

@@ -44,4 +44,19 @@ class ShanhaiTerminalCraftingSourceTest {
         assertTrue(source.contains("session.phase = Phase.READY_TO_BUILD"));
         assertTrue(source.contains("ShanhaiUltimateTerminalConfig.getTerminalUuid"));
     }
+
+    @Test
+    void structureFingerprintMustNotDependOnCandidatePriority() throws Exception {
+        String source = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "item", "terminal", "ShanhaiStructurePlan.java"));
+
+        assertTrue(source.contains("entry.pos().asLong()"));
+        assertTrue(source.contains("entry.kind()"));
+        assertTrue(source.contains("entry.chamberCapable()"));
+        assertTrue(source.contains("machineId"));
+        assertTrue(source.contains("mirrored"));
+        assertTrue(source.contains("repeatCount"));
+        assertTrue(!source.contains("desiredId"),
+                "结构指纹不能依赖候选物品 ID，否则 AE 候选优先级变化会让同一结构反复失配");
+    }
 }

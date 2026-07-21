@@ -15,6 +15,7 @@ import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingBlockEntity;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPU;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPUCluster;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPULogic;
+import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingRedispatchMenu;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics;
 import com.google.common.collect.ImmutableList;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
@@ -22,6 +23,7 @@ import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.MenuType;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.level.Level;
 
 import org.spongepowered.asm.mixin.Final;
@@ -37,7 +39,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 @Mixin(value = CraftingCPUMenu.class, remap = false)
-public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu {
+public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements QuantumCraftingRedispatchMenu {
 
     @Shadow @Final private IncrementalUpdateHelper incrementalUpdateHelper;
     @Shadow private CraftingCPUCluster cpu;
@@ -63,6 +65,7 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu {
 
     @Inject(method = "<init>", at = @At("TAIL"))
     private void gtShanhai$initQuantumCpu(MenuType<?> menuType, int id, Inventory inventory, Object host, CallbackInfo ci) {
+        registerClientAction("gtShanhaiRedispatch", this::gtShanhai$redispatch);
         if (host instanceof QuantumCraftingBlockEntity) {
             QuantumCraftingCPUCluster cluster = ((QuantumCraftingBlockEntity) host).getCluster();
             if (cluster == null) return;
@@ -73,6 +76,45 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu {
                 setCPU(active.get(0));
             }
         }
+    }
+
+    @Override
+    @Unique
+    public void gtShanhai$redispatch() {
+        if (isClientSide()) {
+            sendClientAction("gtShanhaiRedispatch");
+            return;
+        }
+        Player player = getPlayer();
+        QuantumCraftingCPU quantumCpu = gtShanhai$resolveExplicitSelectedQuantumCpu();
+        if (quantumCpu == null) {
+            player.displayClientMessage(Component.literal("§c[量子 CPU] 当前未选择运行中的量子 CPU"), false);
+            return;
+        }
+        QuantumCraftingCPULogic.RedispatchResult result = quantumCpu.craftingLogic.retryRemainingDispatch();
+        Component message = switch (result.state()) {
+            case NO_JOB -> Component.literal("§e[量子 CPU] 当前没有待重发配任务");
+            case GRID_OFFLINE -> Component.literal("§c[量子 CPU] AE 网络离线，无法补取原料");
+            case MATERIAL_UNAVAILABLE -> Component.literal(
+                    "§c[量子 CPU] 未从网络取到缺失原料；仍缺 " + result.missingKinds() + " 类");
+            case RETRIGGERED -> Component.literal("§a[量子 CPU] 原料已在 CPU，已重新触发发配");
+            case REFILLED -> Component.literal("§a[量子 CPU] 已补取 " + result.extractedKinds()
+                    + "/" + result.missingKinds() + " 类原料，下一 tick 继续发配");
+        };
+        player.displayClientMessage(message, false);
+    }
+
+    @Unique
+    private QuantumCraftingCPU gtShanhai$resolveExplicitSelectedQuantumCpu() {
+        if ((Object) this instanceof CraftingStatusMenuAccessor accessor) {
+            ICraftingCPU selected = accessor.gtShanhai$getSelectedCpuRaw();
+            if (selected instanceof QuantumCraftingCPU quantumCpu && quantumCpu.isBusy()) {
+                gtShanhai$quantumCpu = quantumCpu;
+                return quantumCpu;
+            }
+            return null;
+        }
+        return gtShanhai$quantumCpu != null && gtShanhai$quantumCpu.isBusy() ? gtShanhai$quantumCpu : null;
     }
 
     @Inject(method = "setCPU", at = @At("HEAD"), cancellable = true)

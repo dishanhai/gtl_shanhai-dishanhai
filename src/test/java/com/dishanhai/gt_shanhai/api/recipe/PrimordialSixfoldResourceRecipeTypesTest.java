@@ -12,11 +12,13 @@ import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Function;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,12 +42,13 @@ class PrimordialSixfoldResourceRecipeTypesTest {
         assertEquals(ResourceLocation.class, id.getType());
         assertEquals(new ResourceLocation("gtceu:large_void_pump"), id.get(null));
 
-        Method accessor = type.getMethod("requireLargeVoidPump");
+        Method accessor = type.getMethod("findLargeVoidPumpIfExtendLoaded");
         assertTrue(Modifier.isPublic(accessor.getModifiers()));
         assertTrue(Modifier.isStatic(accessor.getModifiers()));
         assertEquals(GTRecipeType.class, accessor.getReturnType());
 
-        Method injectableAccessor = type.getDeclaredMethod("requireLargeVoidPump", Function.class);
+        Method injectableAccessor = type.getDeclaredMethod(
+                "findLargeVoidPumpIfExtendLoaded", boolean.class, Function.class);
         assertTrue(Modifier.isStatic(injectableAccessor.getModifiers()));
         assertFalse(Modifier.isPublic(injectableAccessor.getModifiers()));
 
@@ -55,11 +58,11 @@ class PrimordialSixfoldResourceRecipeTypesTest {
     }
 
     @Test
-    void injectableRequireLargeVoidPumpLooksUpTheExactGtceuIdAndReturnsTheResolvedType() {
+    void loadedExtendLooksUpTheExactGtceuIdAndReturnsTheResolvedType() {
         Object token = new Object();
         AtomicReference<ResourceLocation> lookedUpId = new AtomicReference<>();
 
-        Object result = PrimordialSixfoldResourceRecipeTypes.requireLargeVoidPump(id -> {
+        Object result = PrimordialSixfoldResourceRecipeTypes.findLargeVoidPumpIfExtendLoaded(true, id -> {
             lookedUpId.set(id);
             return token;
         });
@@ -69,19 +72,34 @@ class PrimordialSixfoldResourceRecipeTypesTest {
     }
 
     @Test
-    void injectableRequireLargeVoidPumpRejectsMissingTypeInsteadOfReturningNull() {
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> PrimordialSixfoldResourceRecipeTypes.requireLargeVoidPump(id -> null));
+    void absentExtendSkipsRecipeTypeLookupEntirely() {
+        AtomicBoolean lookupCalled = new AtomicBoolean();
 
-        assertEquals("缺少运行时配方类型: gtceu:large_void_pump", error.getMessage());
+        Object result = PrimordialSixfoldResourceRecipeTypes.findLargeVoidPumpIfExtendLoaded(false, id -> {
+            lookupCalled.set(true);
+            return new Object();
+        });
+
+        assertNull(result);
+        assertFalse(lookupCalled.get());
+    }
+
+    @Test
+    void loadedExtendRejectsMissingOwnedRecipeType() {
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> PrimordialSixfoldResourceRecipeTypes.findLargeVoidPumpIfExtendLoaded(true, id -> null));
+
+        assertEquals("gtl_extend 已加载但缺少运行时配方类型: gtceu:large_void_pump", error.getMessage());
     }
 
     @Test
     void publicAccessorDelegatesRegistryLookupToTheTestedResolver() throws Exception {
         String source = Files.readString(SOURCE);
-        String body = extractBlock(source, "public static GTRecipeType requireLargeVoidPump() {");
+        String body = extractBlock(source, "public static GTRecipeType findLargeVoidPumpIfExtendLoaded() {");
         Pattern registryDelegation = Pattern.compile("""
-                return\\s+requireLargeVoidPump\\(\\s*id\\s*->\\s*
+                return\\s+findLargeVoidPumpIfExtendLoaded\\(\\s*
+                ModList\\.get\\(\\)\\.isLoaded\\(\"gtl_extend\"\\)\\s*,\\s*
+                id\\s*->\\s*
                 GTRegistries\\.RECIPE_TYPES\\.get\\(id\\)\\s*\\)\\s*;
                 """, Pattern.COMMENTS);
 

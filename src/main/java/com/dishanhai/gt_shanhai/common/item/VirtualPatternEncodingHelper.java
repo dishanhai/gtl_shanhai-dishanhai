@@ -193,6 +193,34 @@ public final class VirtualPatternEncodingHelper {
         return requirements;
     }
 
+    /**
+     * Upper bounds for ordinary consumable inputs in the plan. AE may merge a reusable presence
+     * requirement with an ordinary requirement of the same key in {@code usedItems()}, so the
+     * initial extractor must identify the ordinary portion from the actual pattern tasks instead
+     * of subtracting the presence amount from the already-merged value.
+     */
+    public static Object2LongMap<AEKey> collectConsumableRequirements(ICraftingPlan plan) {
+        Object2LongOpenHashMap<AEKey> requirements = new Object2LongOpenHashMap<>();
+        requirements.defaultReturnValue(0L);
+        if (plan == null || plan.patternTimes() == null) return requirements;
+        for (Map.Entry<IPatternDetails, Long> task : plan.patternTimes().entrySet()) {
+            IPatternDetails details = task.getKey();
+            long times = task.getValue() == null ? 0L : Math.max(0L, task.getValue());
+            if (details == null || details.getInputs() == null || times <= 0L) continue;
+            for (IPatternDetails.IInput input : details.getInputs()) {
+                if (isPresenceInput(input)) continue;
+                GenericStack[] possibleInputs = input.getPossibleInputs();
+                if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) continue;
+                long perPattern = Math.max(0L, input.getMultiplier());
+                long total = NumberUtils.saturatedMultiply(perPattern, times);
+                if (total <= 0L) continue;
+                AEKey key = possibleInputs[0].what();
+                requirements.put(key, NumberUtils.saturatedAdd(requirements.getLong(key), total));
+            }
+        }
+        return requirements;
+    }
+
     public static IPatternDetails.IInput[] createPlanningInputs(GenericStack[] sparseInputs) {
         return createPlanningInputs(sparseInputs, null);
     }

@@ -187,6 +187,28 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     }
 
     @Override
+    protected MEPatternBufferPartMachineBase.InternalSlot createInternalSlot(int slotIndex) {
+        return new StellarPatternBufferInternalSlot(slotIndex);
+    }
+
+    private final class StellarPatternBufferInternalSlot extends StockingPatternBufferInternalSlot {
+
+        private StellarPatternBufferInternalSlot(int slotIndex) {
+            super(slotIndex);
+        }
+
+        @Override
+        public boolean isItemActive(boolean simulate) {
+            return hasPatternInSlot(getSlotIndex());
+        }
+
+        @Override
+        public boolean isFluidActive(boolean simulate) {
+            return hasPatternInSlot(getSlotIndex());
+        }
+    }
+
+    @Override
     public void onLoad() {
         super.onLoad();
         if ((Object) this instanceof VirtualPatternBufferMachineAccess access) {
@@ -1086,7 +1108,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             int localSlot = wildcardPatterns.size();
             int globalSlot = maxPatternCount + localSlot;
             MEPatternBufferPartMachineBase.InternalSlot internalSlot =
-                    new StockingPatternBufferInternalSlot(globalSlot);
+                    new StellarPatternBufferInternalSlot(globalSlot);
             internalSlot.setOnContentsChanged(
                     () -> ((RecipeTypePatternRecipeHandler) recipeHandler).notifyPatternListeners());
             wildcardPatterns.add(expanded.pattern());

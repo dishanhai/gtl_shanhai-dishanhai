@@ -372,6 +372,23 @@ public class ShanhaiNetwork {
                 ShanhaiPatternTerminalOpenRequestPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        // 量子 CPU 状态提示追加注册，避免移动现有消息 ID。
+        CHANNEL.registerMessage(
+                packetId++,
+                QuantumCraftingStatusRequestPacket.class,
+                QuantumCraftingStatusRequestPacket::encode,
+                QuantumCraftingStatusRequestPacket::decode,
+                QuantumCraftingStatusRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                QuantumCraftingStatusResponsePacket.class,
+                QuantumCraftingStatusResponsePacket::encode,
+                QuantumCraftingStatusResponsePacket::decode,
+                QuantumCraftingStatusResponsePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 

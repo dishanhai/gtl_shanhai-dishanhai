@@ -23,6 +23,8 @@ public final class VirtualCraftingInitialItemExtractor {
             IActionSource src) {
         MEStorage storage = grid.getStorageService().getInventory();
         Object2LongMap<AEKey> requirements = VirtualPatternEncodingHelper.collectPresenceRequirements(plan);
+        Object2LongMap<AEKey> consumableRequirements =
+                VirtualPatternEncodingHelper.collectConsumableRequirements(plan);
         Object2LongOpenHashMap<AEKey> externalPresence = new Object2LongOpenHashMap<>();
         externalPresence.defaultReturnValue(0L);
 
@@ -39,8 +41,7 @@ public final class VirtualCraftingInitialItemExtractor {
         for (Object2LongMap.Entry<AEKey> entry : plan.usedItems()) {
             AEKey what = entry.getKey();
             long usedAmount = entry.getLongValue();
-            long virtualAmount = Math.min(usedAmount, externalPresence.getLong(what));
-            long realAmount = usedAmount - virtualAmount;
+            long realAmount = realInitialAmount(usedAmount, consumableRequirements.getLong(what));
             if (realAmount <= 0L) continue;
 
             long extracted = storage.extract(what, realAmount, Actionable.MODULATE, src);
@@ -52,6 +53,10 @@ public final class VirtualCraftingInitialItemExtractor {
             }
         }
         return null;
+    }
+
+    static long realInitialAmount(long usedAmount, long consumableRequirement) {
+        return Math.min(Math.max(0L, usedAmount), Math.max(0L, consumableRequirement));
     }
 
     private static void rollback(MEStorage storage, ListCraftingInventory inventory, IActionSource source) {

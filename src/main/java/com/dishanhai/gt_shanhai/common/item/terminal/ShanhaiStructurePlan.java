@@ -103,8 +103,6 @@ public final class ShanhaiStructurePlan {
                 .append('|').append(machineId).append('|').append(mirrored).append('|').append(repeatCount);
         for (Entry entry : entries) {
             value.append(';').append(entry.pos().asLong()).append(':').append(entry.kind());
-            var desiredId = ForgeRegistries.ITEMS.getKey(entry.desired().getItem());
-            if (desiredId != null) value.append(':').append(desiredId);
             value.append(':').append(entry.chamberCapable());
         }
         return Integer.toUnsignedString(value.toString().hashCode(), 16);

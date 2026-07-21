@@ -29,10 +29,13 @@ import appeng.hooks.ticking.TickHandler;
 import appeng.me.service.CraftingService;
 import com.google.common.base.Preconditions;
 import com.dishanhai.gt_shanhai.common.item.VirtualCraftingPresenceState;
+import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import org.gtlcore.gtlcore.api.machine.trait.AECraft.IMECraftIOPart;
 import org.gtlcore.gtlcore.api.machine.trait.MEPart.IMEPatternPartMachine;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
+import org.gtlcore.gtlcore.integration.ae2.crafting.CraftingPatternPower;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.MinecraftServer;
@@ -180,30 +183,113 @@ public class QuantumCraftingCPULogic {
             // 却会被当作后者的整批份数直接把任务清零，造成"几乎不扣料却整批完成"的复制漏洞。
             boolean extractedAsBulk = false;
             long extractedBulkAmount = 0L;
+            String diagnosticTask = QuantumDiagnostics.ENABLED ? Integer.toHexString(details.hashCode()) : null;
+            if (QuantumDiagnostics.ENABLED) {
+                QuantumDiagnostics.hitEvery("dispatch.task." + diagnosticTask, 1_000L,
+                        "remaining=" + task.getValue().value
+                                + " processing=" + processingPattern
+                                + " inputs=" + describePatternInputs(details)
+                                + " outputs=" + describePatternOutputs(details)
+                                + " cpuInventory=" + describeCounter(inventory.list));
+            }
             for (ICraftingProvider provider : craftingService.getProviders(details)) {
                 boolean gtlCoreBulkProvider = processingPattern
                         && (provider instanceof IMEPatternPartMachine || provider instanceof IMECraftIOPart);
+                String providerName = provider.getClass().getName();
                 if (needsExtraction) {
-                    // 批量样式（gtlCore ME 模式总线）：一次 pushPattern 把整批 task.value 全部发出，
-                    // 与 GTLcore 原生 executeCrafting 行为一致（extractForProcessingPattern 的 multiplier
-                    // = 整批份数），这是高发配量的来源。进度可见性由菜单 broadcastChanges 同步通道负责，
-                    // 不再靠分片推送（分片会把发配量掐成涓流，见 LRN-029）。
                     extractedAsBulk = gtlCoreBulkProvider;
-                    extractedBulkAmount = gtlCoreBulkProvider ? task.getValue().value : 0L;
+                    // 有完整原料时仍一次发完整 task；递归中间料只到了一部分时，先发当前能执行的最大整批。
+                    // 这不是固定分片限速，批次只受 CPU 里真实可用原料限制。
+                    extractedBulkAmount = gtlCoreBulkProvider
+                            ? findAvailableBulkAmount((AEProcessingPattern) details, inventory, task.getValue().value)
+                            : 0L;
                     craftingContainer = gtlCoreBulkProvider
-                            ? AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory,
-                                    expectedOutputs, extractedBulkAmount)
+                            ? (extractedBulkAmount > 0L
+                                    ? AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory,
+                                            expectedOutputs, extractedBulkAmount)
+                                    : null)
                             : CraftingCpuHelper.extractPatternInputs(details, inventory, level,
-                                    expectedOutputs, expectedContainerItems);
+                                     expectedOutputs, expectedContainerItems);
                     needsExtraction = false;
+                    if (QuantumDiagnostics.ENABLED) {
+                        QuantumDiagnostics.hitEvery("dispatch.extract." + diagnosticTask, 1_000L,
+                                "provider=" + providerName
+                                        + " bulk=" + extractedAsBulk
+                                        + " bulkAmount=" + extractedBulkAmount
+                                        + " result=" + (craftingContainer == null ? "null" : describeCounters(craftingContainer))
+                                        + " expectedOutputs=" + describeCounter(expectedOutputs)
+                                        + " cpuInventoryAfter=" + describeCounter(inventory.list));
+                    }
                 }
-                if (craftingContainer == null) break;
-                if (provider.isBusy()) continue;
-                double patternPower = CraftingCpuHelper.calculatePatternPower(craftingContainer);
-                if (energyService.extractAEPower(patternPower, Actionable.SIMULATE, PowerMultiplier.CONFIG) < patternPower - 0.01D) {
+                if (craftingContainer == null) {
+                    if (QuantumDiagnostics.DISPATCH_ENABLED) {
+                        String diagnosticKey = "dispatch.blocked.extract.cpu."
+                                + Integer.toHexString(System.identityHashCode(cpu));
+                        if (QuantumDiagnostics.claimEvery(diagnosticKey, 2_000L)) {
+                            QuantumDiagnostics.dispatch("dispatch.blocked.extract",
+                                    "cpu=" + Integer.toHexString(System.identityHashCode(cpu))
+                                            + " final=" + getFinalJobOutput()
+                                            + " task=" + Integer.toHexString(details.hashCode())
+                                            + " remaining=" + task.getValue().value
+                                            + " bulkAmount=" + extractedBulkAmount
+                                            + " bottleneck=" + (processingPattern
+                                                    ? describeBulkBottleneck((AEProcessingPattern) details,
+                                                            inventory, task.getValue().value)
+                                                    : "non-processing")
+                                            + " provider=" + providerName
+                                            + " inputs=" + describePatternInputs(details));
+                        }
+                    }
+                    if (QuantumDiagnostics.ENABLED) {
+                        QuantumDiagnostics.hitEvery("dispatch.blocked.extract." + diagnosticTask, 1_000L,
+                                "provider=" + providerName + " bulk=" + extractedAsBulk
+                                        + " bulkAmount=" + extractedBulkAmount);
+                    }
                     break;
                 }
-                if (!provider.pushPattern(details, craftingContainer)) continue;
+                if (provider.isBusy()) {
+                    if (QuantumDiagnostics.ENABLED) {
+                        QuantumDiagnostics.hitEvery("dispatch.blocked.busy." + diagnosticTask, 1_000L,
+                                "provider=" + providerName);
+                    }
+                    continue;
+                }
+                double patternPower = CraftingPatternPower.forCpu(
+                        CraftingCpuHelper.calculatePatternPower(craftingContainer),
+                        extractedAsBulk, extractedBulkAmount);
+                double availablePower = energyService.extractAEPower(
+                        patternPower, Actionable.SIMULATE, PowerMultiplier.CONFIG);
+                if (availablePower < patternPower - 0.01D) {
+                    if (QuantumDiagnostics.ENABLED) {
+                        QuantumDiagnostics.hitEvery("dispatch.blocked.power." + diagnosticTask, 1_000L,
+                                "provider=" + providerName + " required=" + patternPower
+                                        + " available=" + availablePower + " bulkAmount=" + extractedBulkAmount);
+                    }
+                    break;
+                }
+                boolean accepted = provider.pushPattern(details, craftingContainer);
+                if (QuantumDiagnostics.DISPATCH_ENABLED) {
+                    String diagnosticKey = "dispatch.push.cpu."
+                            + Integer.toHexString(System.identityHashCode(cpu));
+                    if (QuantumDiagnostics.claimEvery(diagnosticKey, 2_000L)) {
+                        QuantumDiagnostics.dispatch("dispatch.push",
+                                "cpu=" + Integer.toHexString(System.identityHashCode(cpu))
+                                        + " final=" + getFinalJobOutput()
+                                        + " task=" + Integer.toHexString(details.hashCode())
+                                        + " remainingBefore=" + task.getValue().value
+                                        + " bulkAmount=" + extractedBulkAmount
+                                        + " accepted=" + accepted
+                                        + " provider=" + providerName
+                                        + " outputs=" + describePatternOutputs(details));
+                    }
+                }
+                if (QuantumDiagnostics.ENABLED) {
+                    QuantumDiagnostics.hitEvery("dispatch.push." + diagnosticTask, 1_000L,
+                            "provider=" + providerName + " accepted=" + accepted
+                                    + " bulk=" + extractedAsBulk + " bulkAmount=" + extractedBulkAmount
+                                    + " power=" + patternPower);
+                }
+                if (!accepted) continue;
 
                 energyService.extractAEPower(patternPower, Actionable.MODULATE, PowerMultiplier.CONFIG);
                 pushedPatterns++;
@@ -256,6 +342,171 @@ public class QuantumCraftingCPULogic {
             }
         }
         return pushedPatterns;
+    }
+
+    private static long findAvailableBulkAmount(AEProcessingPattern details, ListCraftingInventory sourceInv,
+            long requestedAmount) {
+        long availableBulkAmount = Math.max(0L, requestedAmount);
+        KeyCounter requiredPerPattern = new KeyCounter();
+        for (IPatternDetails.IInput input : details.getInputs()) {
+            if (VirtualPatternEncodingHelper.isPresenceInput(input)) continue;
+            GenericStack[] possibleInputs = input.getPossibleInputs();
+            if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) return 0L;
+            long requiredAmount = input.getMultiplier();
+            if (requiredAmount > 0L) {
+                requiredPerPattern.add(possibleInputs[0].what(), requiredAmount);
+            }
+        }
+        for (Object2LongMap.Entry<AEKey> input : requiredPerPattern) {
+            long availableAmount = sourceInv.extract(input.getKey(), Long.MAX_VALUE, Actionable.SIMULATE);
+            availableBulkAmount = limitBulkAmount(
+                    availableBulkAmount, availableAmount, input.getLongValue());
+            if (availableBulkAmount == 0L) break;
+        }
+        return availableBulkAmount;
+    }
+
+    static long limitBulkAmount(long requestedAmount, long availableAmount, long requiredPerPattern) {
+        if (requestedAmount <= 0L) return 0L;
+        if (requiredPerPattern <= 0L) return requestedAmount;
+        return Math.min(requestedAmount, Math.max(0L, availableAmount) / requiredPerPattern);
+    }
+
+    static QuantumCraftingStatus.State classifyCraftingStatus(long runnablePatterns,
+            boolean hasProvider, boolean hasFreeProvider, long waitingForInput, long pendingInput) {
+        if (runnablePatterns <= 0L) {
+            return waitingForInput > 0L || pendingInput > 0L
+                    ? QuantumCraftingStatus.State.WAITING_UPSTREAM
+                    : QuantumCraftingStatus.State.MISSING_INPUT;
+        }
+        if (!hasProvider) return QuantumCraftingStatus.State.NO_PROVIDER;
+        if (!hasFreeProvider) return QuantumCraftingStatus.State.PROVIDER_BUSY;
+        return QuantumCraftingStatus.State.READY_TO_DISPATCH;
+    }
+
+    private StatusInputBottleneck inspectStatusBottleneck(IPatternDetails details, long requestedAmount) {
+        KeyCounter requiredPerPattern = new KeyCounter();
+        for (IPatternDetails.IInput input : details.getInputs()) {
+            if (VirtualPatternEncodingHelper.isPresenceInput(input)) continue;
+            GenericStack[] possibleInputs = input.getPossibleInputs();
+            if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) {
+                return StatusInputBottleneck.INVALID;
+            }
+            if (input.getMultiplier() > 0L) {
+                requiredPerPattern.add(possibleInputs[0].what(), input.getMultiplier());
+            }
+        }
+
+        AEKey bottleneck = null;
+        long bottleneckAvailable = 0L;
+        long bottleneckRequired = 0L;
+        long runnablePatterns = Math.max(0L, requestedAmount);
+        for (Object2LongMap.Entry<AEKey> input : requiredPerPattern) {
+            long available = inventory.extract(input.getKey(), Long.MAX_VALUE, Actionable.SIMULATE);
+            long runnable = limitBulkAmount(requestedAmount, available, input.getLongValue());
+            if (bottleneck == null || runnable < runnablePatterns) {
+                bottleneck = input.getKey();
+                bottleneckAvailable = available;
+                bottleneckRequired = input.getLongValue();
+                runnablePatterns = runnable;
+            }
+        }
+        return new StatusInputBottleneck(true, bottleneck, bottleneckAvailable,
+                bottleneckRequired, runnablePatterns);
+    }
+
+    private String describeBulkBottleneck(AEProcessingPattern details, ListCraftingInventory sourceInv,
+            long requestedAmount) {
+        KeyCounter requiredPerPattern = new KeyCounter();
+        int presenceInputs = 0;
+        for (IPatternDetails.IInput input : details.getInputs()) {
+            if (VirtualPatternEncodingHelper.isPresenceInput(input)) {
+                presenceInputs++;
+                continue;
+            }
+            GenericStack[] possibleInputs = input.getPossibleInputs();
+            if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) {
+                return "invalid-input presenceInputs=" + presenceInputs;
+            }
+            if (input.getMultiplier() > 0L) {
+                requiredPerPattern.add(possibleInputs[0].what(), input.getMultiplier());
+            }
+        }
+
+        AEKey bottleneck = null;
+        long bottleneckAvailable = 0L;
+        long bottleneckRequired = 0L;
+        long bottleneckBatches = Math.max(0L, requestedAmount);
+        for (Object2LongMap.Entry<AEKey> input : requiredPerPattern) {
+            long available = sourceInv.extract(input.getKey(), Long.MAX_VALUE, Actionable.SIMULATE);
+            long batches = limitBulkAmount(requestedAmount, available, input.getLongValue());
+            if (bottleneck == null || batches < bottleneckBatches) {
+                bottleneck = input.getKey();
+                bottleneckAvailable = available;
+                bottleneckRequired = input.getLongValue();
+                bottleneckBatches = batches;
+            }
+        }
+        return "key=" + bottleneck
+                + " available=" + bottleneckAvailable
+                + " perPattern=" + bottleneckRequired
+                + " maxBatch=" + bottleneckBatches
+                + " waitingFor=" + (bottleneck == null ? 0L : getWaitingFor(bottleneck))
+                + " pendingOutputs=" + (bottleneck == null ? 0L : getPendingOutputs(bottleneck))
+                + " presenceInputs=" + presenceInputs;
+    }
+
+    private static String describePatternInputs(IPatternDetails details) {
+        StringBuilder result = new StringBuilder("[");
+        IPatternDetails.IInput[] inputs = details.getInputs();
+        for (int i = 0; i < inputs.length; i++) {
+            if (i > 0) result.append(", ");
+            IPatternDetails.IInput input = inputs[i];
+            GenericStack[] possible = input.getPossibleInputs();
+            result.append(i).append(':').append(input.getMultiplier()).append('x');
+            if (possible == null || possible.length == 0 || possible[0] == null) {
+                result.append("?");
+            } else {
+                result.append(possible[0].what()).append('@').append(possible[0].amount());
+            }
+        }
+        return result.append(']').toString();
+    }
+
+    private static String describePatternOutputs(IPatternDetails details) {
+        StringBuilder result = new StringBuilder("[");
+        GenericStack[] outputs = details.getOutputs();
+        for (int i = 0; i < outputs.length; i++) {
+            if (i > 0) result.append(", ");
+            GenericStack output = outputs[i];
+            result.append(output == null ? "?" : output.what() + "@" + output.amount());
+        }
+        return result.append(']').toString();
+    }
+
+    private static String describeCounters(KeyCounter[] counters) {
+        StringBuilder result = new StringBuilder("[");
+        for (int i = 0; i < counters.length; i++) {
+            if (i > 0) result.append(" | ");
+            result.append(i).append(':').append(describeCounter(counters[i]));
+        }
+        return result.append(']').toString();
+    }
+
+    private static String describeCounter(KeyCounter counter) {
+        if (counter == null) return "null";
+        StringBuilder result = new StringBuilder("{");
+        int count = 0;
+        for (Object2LongMap.Entry<AEKey> entry : counter) {
+            if (count > 0) result.append(", ");
+            if (count >= 12) {
+                result.append("...");
+                break;
+            }
+            result.append(entry.getKey()).append('=').append(entry.getLongValue());
+            count++;
+        }
+        return result.append('}').toString();
     }
 
     private void postTaskOutputsChanged(IPatternDetails details) {
@@ -412,6 +663,141 @@ public class QuantumCraftingCPULogic {
             }
         }
         return count;
+    }
+
+    public QuantumCraftingStatus getCraftingStatus(AEKey output, CraftingService craftingService) {
+        long waitingForOutput = getWaitingFor(output);
+        long pendingOutput = getPendingOutputs(output);
+        if (job == null) {
+            QuantumCraftingStatus.State state = waitingForOutput > 0L
+                    ? QuantumCraftingStatus.State.WAITING_MACHINE
+                    : QuantumCraftingStatus.State.PLANNED;
+            return new QuantumCraftingStatus(state, null, 0L, 0L, 0L, 0L,
+                    0L, 0L, waitingForOutput, pendingOutput);
+        }
+
+        for (Map.Entry<IPatternDetails, QuantumExecutingCraftingJob.TaskProgress> task : job.tasks.entrySet()) {
+            long remainingPatterns = task.getValue().value;
+            if (remainingPatterns <= 0L || !hasOutput(task.getKey(), output)) continue;
+
+            StatusInputBottleneck bottleneck = inspectStatusBottleneck(task.getKey(), remainingPatterns);
+            if (!bottleneck.valid()) {
+                return new QuantumCraftingStatus(QuantumCraftingStatus.State.INVALID_PATTERN,
+                        null, 0L, 0L, 0L, remainingPatterns,
+                        0L, 0L, waitingForOutput, pendingOutput);
+            }
+
+            long waitingForInput = bottleneck.key() == null ? 0L : getWaitingFor(bottleneck.key());
+            long pendingInput = bottleneck.key() == null ? 0L : getPendingOutputs(bottleneck.key());
+            boolean hasProvider = false;
+            boolean hasFreeProvider = false;
+            for (ICraftingProvider provider : craftingService.getProviders(task.getKey())) {
+                hasProvider = true;
+                if (!provider.isBusy()) {
+                    hasFreeProvider = true;
+                    break;
+                }
+            }
+            QuantumCraftingStatus.State state = classifyCraftingStatus(
+                    bottleneck.runnablePatterns(), hasProvider, hasFreeProvider,
+                    waitingForInput, pendingInput);
+            AEKey blockingInput = bottleneck.runnablePatterns() <= 0L ? bottleneck.key() : null;
+            return new QuantumCraftingStatus(state, blockingInput,
+                    bottleneck.available(), bottleneck.requiredPerPattern(),
+                    bottleneck.runnablePatterns(), remainingPatterns,
+                    waitingForInput, pendingInput, waitingForOutput, pendingOutput);
+        }
+
+        QuantumCraftingStatus.State state = waitingForOutput > 0L
+                ? QuantumCraftingStatus.State.WAITING_MACHINE
+                : QuantumCraftingStatus.State.PLANNED;
+        return new QuantumCraftingStatus(state, null, 0L, 0L, 0L, 0L,
+                0L, 0L, waitingForOutput, pendingOutput);
+    }
+
+    public RedispatchResult retryRemainingDispatch() {
+        if (job == null) return new RedispatchResult(RedispatchState.NO_JOB, 0, 0);
+        IGrid grid = cpu.getGrid();
+        if (grid == null) return new RedispatchResult(RedispatchState.GRID_OFFLINE, 0, 0);
+
+        Object2LongOpenHashMap<AEKey> requiredInputs = new Object2LongOpenHashMap<>();
+        requiredInputs.defaultReturnValue(0L);
+        for (Map.Entry<IPatternDetails, QuantumExecutingCraftingJob.TaskProgress> task : job.tasks.entrySet()) {
+            long remainingPatterns = Math.max(0L, task.getValue().value);
+            if (remainingPatterns <= 0L) continue;
+            for (IPatternDetails.IInput input : task.getKey().getInputs()) {
+                if (VirtualPatternEncodingHelper.isPresenceInput(input)) continue;
+                GenericStack[] possibleInputs = input.getPossibleInputs();
+                if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) continue;
+                long required = saturatedMultiplyPositive(input.getMultiplier(), remainingPatterns);
+                if (required <= 0L) continue;
+                AEKey key = possibleInputs[0].what();
+                requiredInputs.put(key, saturatedAddPositive(requiredInputs.getLong(key), required));
+            }
+        }
+
+        MEStorage storage = grid.getStorageService().getInventory();
+        int missingKinds = 0;
+        int extractedKinds = 0;
+        for (Object2LongMap.Entry<AEKey> input : requiredInputs.object2LongEntrySet()) {
+            long available = inventory.extract(input.getKey(), Long.MAX_VALUE, Actionable.SIMULATE);
+            long missing = Math.max(0L, input.getLongValue() - Math.min(input.getLongValue(), available));
+            if (missing <= 0L) continue;
+            missingKinds++;
+            long extracted = storage.extract(input.getKey(), missing, Actionable.MODULATE, cpu.getSrc());
+            if (extracted <= 0L) continue;
+            inventory.insert(input.getKey(), extracted, Actionable.MODULATE);
+            extractedKinds++;
+            postChange(input.getKey());
+        }
+
+        java.util.Arrays.fill(usedOps, 0);
+        for (Map.Entry<IPatternDetails, QuantumExecutingCraftingJob.TaskProgress> task : job.tasks.entrySet()) {
+            postTaskOutputsChanged(task.getKey());
+        }
+        cpu.markDirty();
+        if (missingKinds == 0) {
+            return new RedispatchResult(RedispatchState.RETRIGGERED, 0, 0);
+        }
+        if (extractedKinds == 0) {
+            return new RedispatchResult(RedispatchState.MATERIAL_UNAVAILABLE, missingKinds, 0);
+        }
+        return new RedispatchResult(RedispatchState.REFILLED, missingKinds, extractedKinds);
+    }
+
+    private static long saturatedMultiplyPositive(long left, long right) {
+        if (left <= 0L || right <= 0L) return 0L;
+        return left > Long.MAX_VALUE / right ? Long.MAX_VALUE : left * right;
+    }
+
+    private static long saturatedAddPositive(long left, long right) {
+        if (left <= 0L) return Math.max(0L, right);
+        if (right <= 0L) return left;
+        return left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
+    }
+
+    public enum RedispatchState {
+        NO_JOB,
+        GRID_OFFLINE,
+        REFILLED,
+        MATERIAL_UNAVAILABLE,
+        RETRIGGERED
+    }
+
+    public record RedispatchResult(RedispatchState state, int missingKinds, int extractedKinds) {}
+
+    private static boolean hasOutput(IPatternDetails details, AEKey output) {
+        for (GenericStack patternOutput : details.getOutputs()) {
+            if (patternOutput != null && output.matches(patternOutput)) return true;
+        }
+        return false;
+    }
+
+    private record StatusInputBottleneck(boolean valid, @Nullable AEKey key, long available,
+                                         long requiredPerPattern, long runnablePatterns) {
+
+        private static final StatusInputBottleneck INVALID =
+                new StatusInputBottleneck(false, null, 0L, 0L, 0L);
     }
 
     public void getAllItems(KeyCounter out) {

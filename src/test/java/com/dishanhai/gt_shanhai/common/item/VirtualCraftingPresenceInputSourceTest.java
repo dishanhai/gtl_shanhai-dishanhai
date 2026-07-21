@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -98,14 +99,24 @@ class VirtualCraftingPresenceInputSourceTest {
 
         assertTrue(mixin.contains("tryExtractInitialItems"), "普通、批量和量子 CPU 必须共用 AE 初始抽取入口");
         assertTrue(extractor.contains("VirtualPatternEncodingHelper.collectPresenceRequirements(plan)"));
-        assertTrue(extractor.contains("long virtualAmount = Math.min(usedAmount, externalPresence.getLong(what));"),
-                "同 key 的正常耗材与虚拟份额必须精确拆分");
+        assertTrue(extractor.contains("VirtualPatternEncodingHelper.collectConsumableRequirements(plan)"),
+                "必须从 patternTimes 单独计算普通耗材上限，不能从 usedItems 再减虚拟份额");
         assertTrue(extractor.contains("storage.extract(key, needed, Actionable.SIMULATE, src)"),
                 "虚拟份额只允许检查网络存在性");
-        assertTrue(extractor.contains("long realAmount = usedAmount - virtualAmount;"),
-                "正常耗材份额仍需进入真实抽取流程");
+        assertTrue(extractor.contains("realInitialAmount(usedAmount, consumableRequirements.getLong(what))"),
+                "同 key 合并后，usedItems 中属于普通耗材上限内的数量必须全部真实抽取");
         assertFalse(extractor.contains("storage.extract(what, virtualAmount, Actionable.MODULATE, src)"),
                 "虚拟份额不得从网络转移所有权到 CPU");
+    }
+
+    @Test
+    void sameKeyPresenceMustNotReduceOrdinaryInitialMaterialsTwice() {
+        assertEquals(3L, VirtualCraftingInitialItemExtractor.realInitialAmount(3L, 300L),
+                "3 个已合并的 usedItems 仍全部属于普通耗材，不能因另有 1 个同 key presence 再减成 2");
+        assertEquals(3L, VirtualCraftingInitialItemExtractor.realInitialAmount(4L, 3L),
+                "usedItems 明确包含额外 presence 时，只抽取普通耗材上限");
+        assertEquals(0L, VirtualCraftingInitialItemExtractor.realInitialAmount(1L, 0L),
+                "纯 presence 输入不得转移到 CPU");
     }
 
     @Test

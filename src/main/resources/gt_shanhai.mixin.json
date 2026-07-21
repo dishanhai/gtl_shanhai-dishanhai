@@ -137,6 +137,7 @@
     "EaepGtlCoreUploadButtonLayoutMixin",
     "CraftingStatusTableRendererTooltipMixin",
     "CraftingCPUScreenPatternSourceMixin",
+    "CraftingCPUScreenRedispatchMixin",
     "AEBaseScreenPatternSourceClickMixin",
     "PatternWrapMarkClickMixin",
     "PatternWrapControlScreenMixin"

@@ -5,6 +5,7 @@ import com.dishanhai.gt_shanhai.api.ae2.AeStorageAmountMath;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -76,7 +77,7 @@ final class EquivalentKeySnapshotCache<K> {
 
     private static final class Snapshot<K> {
         private final Map<K, Long> normalizedAmounts = new LinkedHashMap<>();
-        private final Map<K, ArrayList<K>> rawKeysByNormalized = new LinkedHashMap<>();
+        private final Map<K, LinkedHashSet<K>> rawKeysByNormalized = new LinkedHashMap<>();
 
         private static <K> Snapshot<K> from(Iterable<Entry<K>> entries, Function<K, K> normalizer) {
             Snapshot<K> snapshot = new Snapshot<>();
@@ -95,7 +96,7 @@ final class EquivalentKeySnapshotCache<K> {
         }
 
         private List<K> getEquivalentRawKeys(K normalizedKey) {
-            ArrayList<K> keys = rawKeysByNormalized.get(normalizedKey);
+            LinkedHashSet<K> keys = rawKeysByNormalized.get(normalizedKey);
             if (keys == null || keys.isEmpty()) {
                 return Collections.emptyList();
             }
@@ -116,10 +117,9 @@ final class EquivalentKeySnapshotCache<K> {
                 return;
             }
 
-            ArrayList<K> keys = rawKeysByNormalized.computeIfAbsent(normalizedKey, ignored -> new ArrayList<>());
-            if (!keys.contains(rawKey)) {
-                keys.add(rawKey);
-            }
+            LinkedHashSet<K> keys = rawKeysByNormalized.computeIfAbsent(normalizedKey,
+                    ignored -> new LinkedHashSet<>());
+            keys.add(rawKey);
 
             long normalizedAmount = AeStorageAmountMath.saturatedAdd(
                     getOrZero(normalizedAmounts, normalizedKey), amount);

@@ -33,6 +33,10 @@ public final class AeStorageAmountMath {
         if (target == null || source == null) {
             return;
         }
+        if (target.isEmpty()) {
+            target.addAll(source);
+            return;
+        }
         Object sourceObject = source;
         if (sourceObject instanceof KeyCounterListsAccessor accessor && mergeSaturatedFast(target, accessor)) {
             return;

@@ -52,24 +52,29 @@ class PrimordialSixfoldResourceCoreContractTest {
     }
 
     @Test
-    void registrationWiresTheSixRequiredRecipeTypesInOrder() throws Exception {
+    void registrationWiresRequiredTypesAndOptionalLargeVoidPumpInOrder() throws Exception {
         String source = Files.readString(MACHINES_SOURCE);
         String initializer = extractStatement(source,
                 "PRIMORDIAL_SIXFOLD_RESOURCE_CORE = GTDishanhaiRegistration.REGISTRATE");
+        String recipeTypesFactory = extractBlock(source,
+                "private static GTRecipeType[] buildSixfoldResourceRecipeTypes() {");
 
         assertPatternCount(initializer,
                 "\\.multiblock\\(\\s*\"primordial_sixfold_resource_core\"\\s*,\\s*PrimordialSixfoldResourceCore::new\\s*\\)",
                 1);
         assertPatternCount(initializer, "\\.rotationState\\(\\s*RotationState\\.ALL\\s*\\)", 1);
-        assertPatternCount(initializer, """
-                \\.recipeTypes\\(\\s*
-                GTLRecipeTypes\\.ELEMENT_COPYING_RECIPES\\s*,\\s*
-                GTLRecipeTypes\\.DRILLING_MODULE_RECIPES\\s*,\\s*
-                PrimordialSixfoldResourceRecipeTypes\\.requireLargeVoidPump\\(\\)\\s*,\\s*
-                GTLRecipeTypes\\.DOOR_OF_CREATE_RECIPES\\s*,\\s*
-                GTLRecipeTypes\\.FISSION_REACTOR_RECIPES\\s*,\\s*
-                GTLRecipeTypes\\.LARGE_GAS_COLLECTOR_RECIPES\\s*\\)
-                """, 1);
+        assertPatternCount(initializer,
+                "\\.recipeTypes\\(\\s*buildSixfoldResourceRecipeTypes\\(\\)\\s*\\)", 1);
+        assertTrue(recipeTypesFactory.indexOf("GTLRecipeTypes.ELEMENT_COPYING_RECIPES")
+                < recipeTypesFactory.indexOf("GTLRecipeTypes.DRILLING_MODULE_RECIPES"));
+        assertTrue(recipeTypesFactory.indexOf("GTLRecipeTypes.DRILLING_MODULE_RECIPES")
+                < recipeTypesFactory.indexOf("PrimordialSixfoldResourceRecipeTypes.findLargeVoidPumpIfExtendLoaded()"));
+        assertTrue(recipeTypesFactory.indexOf("PrimordialSixfoldResourceRecipeTypes.findLargeVoidPumpIfExtendLoaded()")
+                < recipeTypesFactory.indexOf("GTLRecipeTypes.DOOR_OF_CREATE_RECIPES"));
+        assertTrue(recipeTypesFactory.contains("if (largeVoidPump != null)"));
+        assertTrue(recipeTypesFactory.contains("types.add(largeVoidPump);"));
+        assertTrue(recipeTypesFactory.contains("GTLRecipeTypes.FISSION_REACTOR_RECIPES"));
+        assertTrue(recipeTypesFactory.contains("GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES"));
         assertPatternCount(initializer,
                 "\\.pattern\\(\\s*PrimordialAssemblyLineModuleStructure::createPattern\\s*\\)", 1);
         assertPatternCount(initializer, "\\.register\\(\\s*\\)\\s*;\\s*$", 1);

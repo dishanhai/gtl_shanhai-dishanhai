@@ -2,7 +2,6 @@ package com.dishanhai.gt_shanhai.client.renderer.machine;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -12,18 +11,15 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
-import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRenderer;
 
 import com.gtladd.gtladditions.utils.CommonUtils;
 
-import org.gtlcore.gtlcore.client.ClientUtil;
 import org.gtlcore.gtlcore.utils.RenderUtil;
 
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineMachine;
 
 import org.joml.Quaternionf;
 
-import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -34,16 +30,6 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
 
     private static final ResourceLocation SPACE_MODEL = new ResourceLocation("gtlcore", "obj/space");
     private static final ResourceLocation STAR_MODEL = new ResourceLocation("gtlcore", "obj/star");
-    private static final List<ResourceLocation> ORBIT_OBJECTS = List.of(
-            new ResourceLocation("gtlcore", "obj/the_nether"),
-            new ResourceLocation("gtlcore", "obj/overworld"),
-            new ResourceLocation("gtlcore", "obj/the_end")
-    );
-
-    private static final int FIXED_COLOR = 0xFFFFFF;
-    private static final float R = ((FIXED_COLOR >> 16) & 0xFF) / 255f;
-    private static final float G = ((FIXED_COLOR >> 8) & 0xFF) / 255f;
-    private static final float B = (FIXED_COLOR & 0xFF) / 255f;
 
     public PrimordialOmegaEngineRenderer(ResourceLocation baseCasing, ResourceLocation workableModel) {
         super(baseCasing, workableModel);
@@ -75,9 +61,20 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
         poseStack.pushPose();
         poseStack.translate(centerPos.x, centerPos.y, centerPos.z);
 
-        renderStar(smoothTick, poseStack, buffer);
-        renderOrbitObjects(smoothTick, poseStack, buffer);
-        renderOuterSpaceShell(poseStack, buffer);
+        VertexBuffer[] modelBuffers = PrimordialOmegaEngineModelBuffers.getBuffers();
+        if (modelBuffers == null) {
+            poseStack.popPose();
+            return;
+        }
+
+        PrimordialOmegaEngineModelBuffers.beginRender();
+        try {
+            renderStar(smoothTick, poseStack, modelBuffers[PrimordialOmegaEngineModelBuffers.STAR]);
+            renderOrbitObjects(smoothTick, poseStack, modelBuffers);
+            renderOuterSpaceShell(poseStack, modelBuffers[PrimordialOmegaEngineModelBuffers.SPACE]);
+        } finally {
+            PrimordialOmegaEngineModelBuffers.endRender();
+        }
 
         poseStack.popPose();
     }
@@ -86,32 +83,23 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
     protected void registerAdditionalModels(Consumer<ResourceLocation> registry) {
         registry.accept(SPACE_MODEL);
         registry.accept(STAR_MODEL);
-        for (ResourceLocation obj : ORBIT_OBJECTS) {
-            registry.accept(obj);
-        }
+        registry.accept(new ResourceLocation("gtlcore", "obj/the_nether"));
+        registry.accept(new ResourceLocation("gtlcore", "obj/overworld"));
+        registry.accept(new ResourceLocation("gtlcore", "obj/the_end"));
     }
 
     // ========== 鸿蒙微型宇宙 ==========
 
-    private static void renderStar(float smoothTick, PoseStack poseStack, MultiBufferSource buffer) {
+    private static void renderStar(float smoothTick, PoseStack poseStack, VertexBuffer buffer) {
         poseStack.pushPose();
         poseStack.scale(0.02f, 0.02f, 0.02f);
         poseStack.mulPose(new Quaternionf().fromAxisAngleDeg(0, 1, 1, smoothTick / 200f * 360f % 360f));
-        ClientUtil.modelRenderer().renderModel(
-                poseStack.last(),
-                buffer.getBuffer(RenderType.solid()),
-                null,
-                ClientUtil.getBakedModel(STAR_MODEL),
-                R, G, B, 15728880,
-                net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
-                net.minecraftforge.client.model.data.ModelData.EMPTY,
-                RenderType.solid()
-        );
+        PrimordialOmegaEngineModelBuffers.draw(buffer, poseStack);
         poseStack.popPose();
     }
 
-    private void renderOrbitObjects(float smoothTick, PoseStack poseStack, MultiBufferSource buffer) {
-        for (int i = 0; i < ORBIT_OBJECTS.size(); i++) {
+    private void renderOrbitObjects(float smoothTick, PoseStack poseStack, VertexBuffer[] buffers) {
+        for (int i = 0; i < 3; i++) {
             float scale = 0.007f + i * 0.003f;
             double distance = 100 + i * 160
                     + Math.sin(smoothTick / 100f * 1.5f / (i + 1) + 0.4) * 40;
@@ -121,34 +109,17 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
             poseStack.mulPose(new Quaternionf().fromAxisAngleDeg(1, 0, 1,
                     smoothTick / 100f * 1.5f / (i + 1) * 360f % 360f));
             poseStack.translate(distance, 0, 0);
-            ClientUtil.modelRenderer().renderModel(
-                    poseStack.last(),
-                    buffer.getBuffer(RenderType.solid()),
-                    null,
-                    ClientUtil.getBakedModel(ORBIT_OBJECTS.get(i)),
-                    R, G, B, 15728880,
-                    net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
-                    net.minecraftforge.client.model.data.ModelData.EMPTY,
-                    RenderType.solid()
-            );
+            PrimordialOmegaEngineModelBuffers.draw(
+                    buffers[PrimordialOmegaEngineModelBuffers.ORBIT_START + i], poseStack);
             poseStack.popPose();
         }
     }
 
-    private static void renderOuterSpaceShell(PoseStack poseStack, MultiBufferSource buffer) {
+    private static void renderOuterSpaceShell(PoseStack poseStack, VertexBuffer buffer) {
         float scale = 0.175f;
         poseStack.pushPose();
         poseStack.scale(scale, scale, scale);
-        ClientUtil.modelRenderer().renderModel(
-                poseStack.last(),
-                buffer.getBuffer(RenderType.solid()),
-                null,
-                ClientUtil.getBakedModel(SPACE_MODEL),
-                R, G, B, 15728880,
-                net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY,
-                net.minecraftforge.client.model.data.ModelData.EMPTY,
-                RenderType.solid()
-        );
+        PrimordialOmegaEngineModelBuffers.draw(buffer, poseStack);
         poseStack.popPose();
     }
 }
