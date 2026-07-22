@@ -6,7 +6,12 @@ import appeng.api.networking.security.IActionHost;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
 import appeng.api.storage.MEStorage;
+import appeng.api.storage.StorageCells;
+import appeng.api.storage.cells.StorageCell;
+import com.dishanhai.gt_shanhai.common.machine.part.MEDiskHatchPartMachine;
+import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -38,6 +43,7 @@ public final class ShopAeNetwork {
     }
 
     private static final List<Provider> PROVIDERS = new CopyOnWriteArrayList<>();
+    private static final List<MEDiskHatchPartMachine> DISK_HATCHES = new CopyOnWriteArrayList<>();
 
     public static void register(Provider provider) {
         if (provider != null) PROVIDERS.add(provider);
@@ -45,6 +51,14 @@ public final class ShopAeNetwork {
 
     public static void unregister(Provider provider) {
         PROVIDERS.remove(provider);
+    }
+
+    public static void registerDiskHatch(MEDiskHatchPartMachine hatch) {
+        if (hatch != null && !DISK_HATCHES.contains(hatch)) DISK_HATCHES.add(hatch);
+    }
+
+    public static void unregisterDiskHatch(MEDiskHatchPartMachine hatch) {
+        DISK_HATCHES.remove(hatch);
     }
 
     /**
@@ -86,6 +100,41 @@ public final class ShopAeNetwork {
         if (storage == null) return 0L;
         if (storage.insert(key, amount, Actionable.SIMULATE, IActionSource.empty()) < amount) return 0L;
         return storage.insert(key, amount, Actionable.MODULATE, IActionSource.empty());
+    }
+
+    /**
+     * 把一份 SDA 直接插入「该玩家绑定源」同一个 AE 网络里的 ME 磁盘仓室。
+     * 只从 FTBQ AE提交器/商店终端等 {@link Provider} 的网格出发匹配磁盘仓室，不能跨网络拿任意仓室。
+     */
+    public static boolean injectSdaIntoBoundDiskHatch(ServerPlayer player, ItemStack sda) {
+        if (player == null || sda == null || sda.isEmpty()) return false;
+        for (Provider provider : PROVIDERS) {
+            if (!provider.isOnline()) continue;
+            if (!provider.servesPlayer(player)) continue;
+            IGrid grid = provider.grid();
+            if (grid == null) continue;
+            for (MEDiskHatchPartMachine hatch : DISK_HATCHES) {
+                if (hatch == null || !hatch.isOnline()) continue;
+                if (hatch.getMainNode().getGrid() != grid) continue;
+                if (insertSdaIntoDiskHatch(hatch, sda)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean insertSdaIntoDiskHatch(MEDiskHatchPartMachine hatch, ItemStack sda) {
+        if (hatch == null || sda == null || sda.isEmpty()) return false;
+        if (StorageCells.getCellInventory(sda, hatch) == null
+                && MEDiskHatchPartMachine.createEaeInfinityCellStorage(sda) == null) return false;
+        NotifiableItemStackHandler diskSlots = hatch.getDiskSlots();
+        int slots = diskSlots.getSlots();
+        for (int slot = 0; slot < slots; slot++) {
+            if (!diskSlots.getStackInSlot(slot).isEmpty()) continue;
+            diskSlots.storage.setStackInSlot(slot, sda.copyWithCount(1));
+            diskSlots.storage.onContentsChanged();
+            return true;
+        }
+        return false;
     }
 
     /**

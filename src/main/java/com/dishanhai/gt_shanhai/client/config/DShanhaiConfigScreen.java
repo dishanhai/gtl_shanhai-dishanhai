@@ -123,8 +123,14 @@ public final class DShanhaiConfigScreen {
         pattern.addEntry(e.startEnumSelector(Component.literal("主机配方类型联动模式"), RecipeTypePatternSwitchMode.class, cfg.recipeTypePatternSwitchMode.get())
                 .setDefaultValue(RecipeTypePatternSwitchMode.VIRTUAL_ACTIVE_TYPE)
                 .setTooltip(tip("PROGRAMMABLE_HATCH_REQUIRED=需可编程仓随主机成型才切类型",
-                        "VIRTUAL_ACTIVE_TYPE=下单时按虚拟目标类型直接切主机 activeRecipeType"))
+                        "VIRTUAL_ACTIVE_TYPE=不要求可编程仓，但默认只执行宿主支持的类型"))
                 .setSaveConsumer(cfg.recipeTypePatternSwitchMode::set).build());
+        pattern.addEntry(e.startBooleanToggle(Component.literal("允许执行宿主不支持的虚拟配方类型"),
+                        cfg.recipeTypePatternAllowUnsupportedHostRecipeTypes.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("默认关闭：样板类型必须存在于主机当前配方类型集合",
+                        "开启后恢复旧行为，允许完整 GTRecipe 绕过主机配方类型限制直接执行"))
+                .setSaveConsumer(cfg.recipeTypePatternAllowUnsupportedHostRecipeTypes::set).build());
         pattern.addEntry(e.startIntField(Component.literal("每行样板槽位数"), cfg.recipeTypePatternsPerRow.get())
                 .setDefaultValue(9).setMin(1).setMax(16)
                 .setTooltip(tip("默认 9，修改后需重新放置总成生效"))
@@ -149,6 +155,11 @@ public final class DShanhaiConfigScreen {
                 .setDefaultValue(false)
                 .setTooltip(tip("开启后 AE 模式只用来拉取材料付款/检索库存，购买/兑换得到的物品一律正常交付（进背包/按 SDA 打包阈值打包），不再注入 AE 网络"))
                 .setSaveConsumer(cfg.shopAeDeliverDisabled::set).build());
+        shop.addEntry(e.startBooleanToggle(Component.literal("将SDA直接注入磁盘仓室"), cfg.shopSdaDirectDiskHatchInject.get())
+                .setDefaultValue(true)
+                .setTooltip(tip("开启后有内容 SDA 会优先放入同网 ME 磁盘仓室直接挂载",
+                        "磁盘仓室必须与 FTBQ AE提交器或商店终端在同一 AE 网络；空 SDA 商品不挂载"))
+                .setSaveConsumer(cfg.shopSdaDirectDiskHatchInject::set).build());
 
         return builder.build();
     }

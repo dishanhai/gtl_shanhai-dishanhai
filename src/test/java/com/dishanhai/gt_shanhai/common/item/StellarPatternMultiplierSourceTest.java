@@ -37,6 +37,22 @@ class StellarPatternMultiplierSourceTest {
     }
 
     @Test
+    void stellarBufferAutoDetectsHostMultiplierEveryTwoSecondsOnlyOnChange() throws IOException {
+        String source = Files.readString(MACHINE);
+        String poll = extractBlock(source, "private void pollOutputMultiplierHostState()");
+
+        assertTrue(source.contains("OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 40L"));
+        assertTrue(source.contains("outputMultiplierHostSyncSubscription"));
+        assertTrue(source.contains("outputMultiplierHostSyncSubscription = subscribeServerTick("));
+        assertTrue(source.contains("this::pollOutputMultiplierHostState"));
+        assertTrue(poll.contains("if (!outputMultiplierModeEnabled) return;"));
+        assertTrue(poll.contains("getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L"));
+        assertTrue(poll.contains("if (detected == lastDetectedHostOutputMultiplier) return;"),
+                "宿主倍率未变化时必须零刷新");
+        assertTrue(poll.contains("applyOutputMultiplierSettings(true, detected)"));
+    }
+
+    @Test
     void realPatternReturnIsRewrittenOnlyForStellarBuffer() throws IOException {
         String source = Files.readString(MIXIN);
 

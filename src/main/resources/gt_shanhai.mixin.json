@@ -51,6 +51,7 @@
     "MolecularAssemblerMixins$GtlAddController",
     "MolecularAssemblerMixins$RecipesLogic",
     "MolecularAssemblerMixins$GtlAddInfinityRecipeLogic",
+    "MolecularAssemblerPortOutputMultiplierMixin",
     "RecipeTemperatureBypassMixin",
     "SearchRecipeTempMixin",
     "CoilTypeOverrideMixin",

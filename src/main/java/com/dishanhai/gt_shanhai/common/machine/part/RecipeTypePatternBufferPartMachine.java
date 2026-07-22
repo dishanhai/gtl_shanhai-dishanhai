@@ -26,6 +26,7 @@ import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.UITemplate;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
+import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
@@ -107,6 +108,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private static final IGuiTexture STOCK_INPUT_ICON =
             new ResourceTexture("gt_shanhai:textures/gui/stock_input_panel.png");
     private static final IGuiTexture WILDCARD_INPUT_ICON = new TextTexture("*");
+    private static final long OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 40L;
     private static final int[] NO_ACTIVE_UNCACHED_SLOTS = new int[0];
     private static final int PARENT_REFUND = 0;
     private static final int PARENT_SHARED_ITEM = 1;
@@ -131,6 +133,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @DescSynced
     @Persisted
     private int cachedHostOutputMultiplier = 1;
+    private int lastDetectedHostOutputMultiplier = Integer.MIN_VALUE;
+    @Nullable
+    private TickableSubscription outputMultiplierHostSyncSubscription;
     private final List<IPatternDetails> wildcardPatterns;
     private final List<ItemStack> wildcardPatternStacks;
     private final List<MEPatternBufferPartMachineBase.InternalSlot> wildcardInternalSlots;
@@ -218,6 +223,16 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         if (getLevel() instanceof ServerLevel serverLevel) {
             serverLevel.getServer().tell(new TickTask(1, () -> refreshWildcardPatterns(true)));
         }
+        updateOutputMultiplierHostSyncSubscription();
+    }
+
+    @Override
+    public void onUnload() {
+        if (outputMultiplierHostSyncSubscription != null) {
+            outputMultiplierHostSyncSubscription.unsubscribe();
+            outputMultiplierHostSyncSubscription = null;
+        }
+        super.onUnload();
     }
 
     @Override
@@ -380,6 +395,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     }
 
     public void setOutputMultiplierModeEnabled(boolean enabled) {
+        if (enabled && !outputMultiplierModeEnabled) {
+            lastDetectedHostOutputMultiplier = Integer.MIN_VALUE;
+        }
         applyOutputMultiplierSettings(enabled, patternOutputMultiplier);
     }
 
@@ -430,6 +448,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public void syncOutputMultiplierFromHost() {
         if (isRemote()) return;
         int multiplier = resolveConnectedHostOutputMultiplier();
+        lastDetectedHostOutputMultiplier = multiplier;
         updateCachedHostOutputMultiplier(multiplier);
         applyOutputMultiplierSettings(true, multiplier);
     }
@@ -528,6 +547,28 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         clearOutputMultiplierPatternCache();
         markDirty();
         refreshOutputMultiplierPatterns();
+        updateOutputMultiplierHostSyncSubscription();
+    }
+
+    private void updateOutputMultiplierHostSyncSubscription() {
+        if (isRemote()) return;
+        if (outputMultiplierModeEnabled) {
+            outputMultiplierHostSyncSubscription = subscribeServerTick(
+                    outputMultiplierHostSyncSubscription, this::pollOutputMultiplierHostState);
+        } else if (outputMultiplierHostSyncSubscription != null) {
+            outputMultiplierHostSyncSubscription.unsubscribe();
+            outputMultiplierHostSyncSubscription = null;
+        }
+    }
+
+    private void pollOutputMultiplierHostState() {
+        if (!outputMultiplierModeEnabled) return;
+        if (getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L) return;
+        int detected = resolveConnectedHostOutputMultiplier();
+        if (detected == lastDetectedHostOutputMultiplier) return;
+        lastDetectedHostOutputMultiplier = detected;
+        updateCachedHostOutputMultiplier(detected);
+        applyOutputMultiplierSettings(true, detected);
     }
 
     private int makeOutputMultiplierPatternCacheKey(IPatternDetails pattern, ItemStack stack,

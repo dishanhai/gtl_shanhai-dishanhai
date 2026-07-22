@@ -1,11 +1,14 @@
 package com.dishanhai.gt_shanhai.common.item;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiChamberClassifier;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiModuleClassifier;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStructureExecutor;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStructureBuildHeightValidator;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStructurePlan;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStructurePlanner;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalAeBinding;
@@ -37,6 +40,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -55,6 +59,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
     public static final ShanhaiUltimateTerminalBehavior INSTANCE = new ShanhaiUltimateTerminalBehavior();
     private static final int MAX_HIGHLIGHTS = 256;
     private static final int MAX_DETAIL_LINES = 12;
+    private static final int MODULE_HIGHLIGHT_COLOR = 0x00FFFF;
 
     private final ShanhaiTerminalMaterialService materials = new ShanhaiTerminalMaterialService();
     private final ShanhaiStructureExecutor executor = new ShanhaiStructureExecutor(materials);
@@ -86,7 +91,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             return InteractionResult.SUCCESS;
         }
 
-        ShanhaiTerminalAeBinding.Context ae = ShanhaiTerminalAeBinding.resolve(serverPlayer, terminal);
+        ShanhaiTerminalAeBinding.Context ae = resolveAeContext(serverPlayer, terminal);
         ShanhaiStructurePlan plan;
         try {
             plan = scanPlan(serverPlayer, terminal, context.getClickedPos(), ae);
@@ -103,8 +108,11 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         }
 
         if (serverPlayer.isCreative()) {
+            if (rejectOutOfBuildHeight(serverPlayer, terminal, plan)) {
+                return InteractionResult.FAIL;
+            }
             ShanhaiTerminalCraftingManager.clear(terminal);
-            ShanhaiStructureExecutor.Result result = executor.executeCreative(serverPlayer, plan);
+            ShanhaiStructureExecutor.Result result = executor.executeCreative(serverPlayer, plan, ae);
             serverPlayer.sendSystemMessage(Component.literal(
                     (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
                             + "，变更 " + result.changed() + " 处"));
@@ -112,6 +120,9 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         }
 
         if (player.isShiftKeyDown()) {
+            if (rejectOutOfBuildHeight(serverPlayer, terminal, plan)) {
+                return InteractionResult.FAIL;
+            }
             if (!ShanhaiTerminalCraftingManager.consumeBuildConfirmation(serverPlayer, terminal, plan)) {
                 serverPlayer.sendSystemMessage(Component.literal("§e[山海终端] 请先普通右击扫描并准备施工计划"));
                 return InteractionResult.SUCCESS;
@@ -129,6 +140,10 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
                     (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
                             + "，回收 " + result.changed() + " 处"));
             return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+        }
+
+        if (rejectOutOfBuildHeight(serverPlayer, terminal, plan)) {
+            return InteractionResult.FAIL;
         }
 
         ShanhaiTerminalCraftingManager.Phase phase = ShanhaiTerminalCraftingManager.phase(terminal);
@@ -155,14 +170,14 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             return InteractionResult.SUCCESS;
         }
 
-        var preflight = materials.preflight(plan, serverPlayer,
-                ShanhaiUltimateTerminalConfig.isAeRequestMode(terminal) ? ae : null);
+        var preflight = materials.preflight(plan, serverPlayer, ae);
         if (preflight.success()) {
             boolean hasReplacement = plan.entries().stream()
-                    .anyMatch(entry -> entry.kind() == ShanhaiStructurePlan.Kind.REPLACE);
+                    .anyMatch(entry -> entry.kind() == ShanhaiStructurePlan.Kind.REPLACE
+                            || entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE);
             if (hasReplacement) {
                 ShanhaiTerminalCraftingManager.armDirectBuild(serverPlayer, terminal, plan);
-                serverPlayer.sendSystemMessage(Component.literal("§e[山海终端] 功能部件升级计划已准备；潜行右击确认替换"));
+                serverPlayer.sendSystemMessage(Component.literal("§e[山海终端] 替换计划已准备；潜行右击确认施工"));
                 return InteractionResult.SUCCESS;
             }
             ShanhaiStructureExecutor.Result result = executor.execute(serverPlayer, plan, ae);
@@ -172,8 +187,8 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
         }
 
-        if (!ShanhaiUltimateTerminalConfig.isAeRequestMode(terminal)) {
-            serverPlayer.sendSystemMessage(Component.literal("§c[山海终端] 材料不足；开启 AE 请求模式可下单补齐"));
+        if (!ShanhaiUltimateTerminalConfig.isAeMode(terminal)) {
+            serverPlayer.sendSystemMessage(Component.literal("§c[山海终端] 材料不足；开启 AE 模式可使用网络库存并下单补齐"));
             return InteractionResult.SUCCESS;
         }
         if (ae == null) {
@@ -187,11 +202,15 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
     }
 
     public boolean scanOnly(ServerPlayer player, ItemStack terminal, BlockPos pos) {
-        ShanhaiTerminalAeBinding.Context ae = ShanhaiTerminalAeBinding.resolve(player, terminal);
+        ShanhaiTerminalAeBinding.Context ae = resolveAeContext(player, terminal);
         try {
             ShanhaiStructurePlan plan = scanPlan(player, terminal, pos, ae);
             if (plan == null) return false;
-            reportPlan(player, plan);
+            if (ShanhaiUltimateTerminalConfig.isModuleCheckMode(terminal)) {
+                reportModulePositions(player, plan);
+            } else {
+                reportPlan(player, plan);
+            }
         } catch (RuntimeException e) {
             player.sendSystemMessage(Component.literal("§c[山海终端] 结构读取失败: " + e.getMessage()));
         }
@@ -203,13 +222,44 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         MetaMachine machine = MetaMachine.getMachine(player.level(), pos);
         if (!(machine instanceof IMultiController controller)) return null;
         return ShanhaiStructurePlanner.scan(controller, terminal,
-                materials.prioritizer(player,
-                        ShanhaiUltimateTerminalConfig.isAeRequestMode(terminal) ? ae : null));
+                materials.prioritizer(player, ae));
+    }
+
+    private ShanhaiTerminalAeBinding.Context resolveAeContext(ServerPlayer player, ItemStack terminal) {
+        if (!ShanhaiUltimateTerminalConfig.isAeMode(terminal)) return null;
+        return ShanhaiTerminalAeBinding.resolve(player, terminal);
+    }
+
+    private boolean rejectOutOfBuildHeight(ServerPlayer player, ItemStack terminal,
+                                           ShanhaiStructurePlan plan) {
+        if (player.getServer() == null) return false;
+        ServerLevel level = player.getServer().getLevel(plan.target().dimension());
+        if (level == null) return false;
+        ShanhaiStructureBuildHeightValidator.Result result =
+                ShanhaiStructureBuildHeightValidator.validateForGtceu(
+                        plan, level.getMinBuildHeight(), level.getMaxBuildHeight());
+        if (result.valid()) return false;
+
+        ShanhaiTerminalCraftingManager.clear(terminal);
+        if (level.getMaxBuildHeight() > result.maxBuildHeight() && result.upperLimitExceeded()) {
+            player.sendSystemMessage(Component.translatable(
+                    "message.gt_shanhai.ultimate_terminal.gtceu_height_exceeded",
+                    plan.target().pos().toShortString(), level.getMaxBuildHeight() - 1,
+                    result.maxBuildY(), result.violationCount(),
+                    result.firstViolation().toShortString()));
+        } else {
+            player.sendSystemMessage(Component.translatable(
+                    "message.gt_shanhai.ultimate_terminal.build_height_exceeded",
+                    plan.target().pos().toShortString(), result.minBuildHeight(), result.maxBuildY(),
+                    result.violationCount(), result.firstViolation().toShortString()));
+        }
+        return true;
     }
 
     private void reportPlan(ServerPlayer player, ShanhaiStructurePlan plan) {
         long place = count(plan, ShanhaiStructurePlan.Kind.PLACE);
-        long replace = count(plan, ShanhaiStructurePlan.Kind.REPLACE);
+        long replace = count(plan, ShanhaiStructurePlan.Kind.REPLACE)
+                + count(plan, ShanhaiStructurePlan.Kind.FORCE_REPLACE);
         long blocked = count(plan, ShanhaiStructurePlan.Kind.BLOCKED);
         long manual = count(plan, ShanhaiStructurePlan.Kind.MANUAL);
         long chambers = plan.entries().stream().filter(ShanhaiStructurePlan.Entry::chamberCapable).count();
@@ -225,6 +275,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
                     || entry.chamberCapable();
             boolean actionable = entry.kind() == ShanhaiStructurePlan.Kind.PLACE
                     || entry.kind() == ShanhaiStructurePlan.Kind.REPLACE
+                    || entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE
                     || entry.kind() == ShanhaiStructurePlan.Kind.BLOCKED
                     || entry.kind() == ShanhaiStructurePlan.Kind.MANUAL;
             if (!actionable && !chamberHint) continue;
@@ -251,6 +302,34 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
                 player, plan.target().dimension(), expiry, highlights);
     }
 
+    private void reportModulePositions(ServerPlayer player, ShanhaiStructurePlan plan) {
+        MetaMachine targetMachine = MetaMachine.getMachine(player.level(), plan.target().pos());
+        LinkedHashSet<BlockPos> modulePositions = new LinkedHashSet<>(
+                ShanhaiModuleClassifier.hostModulePositions(targetMachine));
+        for (ShanhaiStructurePlan.Entry entry : plan.entries()) {
+            if (!ShanhaiModuleClassifier.isModulePosition(entry.candidates())) continue;
+            modulePositions.add(entry.pos());
+        }
+
+        List<ShanhaiStructureHighlightPacket.Marker> highlights = new ArrayList<>();
+        for (BlockPos pos : modulePositions) {
+            if (highlights.size() < MAX_HIGHLIGHTS) {
+                highlights.add(new ShanhaiStructureHighlightPacket.Marker(
+                        pos, MODULE_HIGHLIGHT_COLOR));
+            }
+        }
+
+        if (modulePositions.isEmpty()) {
+            player.sendSystemMessage(Component.translatable(
+                    "message.gt_shanhai.ultimate_terminal.module_positions_none"));
+            return;
+        }
+        player.sendSystemMessage(Component.translatable(
+                "message.gt_shanhai.ultimate_terminal.module_positions", modulePositions.size()));
+        ShanhaiStructureHighlightPacket.sendTo(player, plan.target().dimension(),
+                System.currentTimeMillis() + 15000, highlights);
+    }
+
     private static long count(ShanhaiStructurePlan plan, ShanhaiStructurePlan.Kind kind) {
         return plan.entries().stream().filter(entry -> entry.kind() == kind).count();
     }
@@ -264,6 +343,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         return switch (kind) {
             case PLACE -> 0x55FF55;
             case REPLACE -> 0xFFAA00;
+            case FORCE_REPLACE -> 0xFF5500;
             case BLOCKED -> 0xFF3333;
             case MANUAL -> 0xFFFFFF;
             case CHAMBER_HINT, SATISFIED -> 0xFFFFFF;
@@ -298,15 +378,23 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         settings.addWidget(toggle(terminal, 83, "gui.gt_shanhai.ultimate_terminal.replace",
                 ShanhaiUltimateTerminalConfig.isReplaceMode(terminal),
                 value -> ShanhaiUltimateTerminalConfig.setReplaceMode(terminal, value)));
-        settings.addWidget(toggle(terminal, 103, "gui.gt_shanhai.ultimate_terminal.ae_request",
-                ShanhaiUltimateTerminalConfig.isAeRequestMode(terminal),
-                value -> ShanhaiUltimateTerminalConfig.setAeRequestMode(terminal, value)));
-        settings.addWidget(toggle(terminal, 123, "gui.gt_shanhai.ultimate_terminal.no_chamber",
+        settings.addWidget(toggle(terminal, 103, "gui.gt_shanhai.ultimate_terminal.absolute_replace",
+                ShanhaiUltimateTerminalConfig.isAbsoluteReplaceMode(terminal),
+                value -> ShanhaiUltimateTerminalConfig.setAbsoluteReplaceMode(terminal, value)));
+        settings.addWidget(toggle(terminal, 123, "gui.gt_shanhai.ultimate_terminal.ae_mode",
+                ShanhaiUltimateTerminalConfig.isAeMode(terminal), value -> {
+                    ShanhaiUltimateTerminalConfig.setAeMode(terminal, value);
+                    if (!value) ShanhaiTerminalCraftingManager.clear(terminal);
+                }));
+        settings.addWidget(toggle(terminal, 143, "gui.gt_shanhai.ultimate_terminal.no_chamber",
                 ShanhaiUltimateTerminalConfig.isNoChamberMode(terminal),
                 value -> ShanhaiUltimateTerminalConfig.setNoChamberMode(terminal, value)));
-        settings.addWidget(toggle(terminal, 143, "gui.gt_shanhai.ultimate_terminal.dismantle",
+        settings.addWidget(toggle(terminal, 163, "gui.gt_shanhai.ultimate_terminal.dismantle",
                 ShanhaiUltimateTerminalConfig.isDismantleMode(terminal),
                 value -> ShanhaiUltimateTerminalConfig.setDismantleMode(terminal, value)));
+        settings.addWidget(toggle(terminal, 183, "gui.gt_shanhai.ultimate_terminal.module_check",
+                ShanhaiUltimateTerminalConfig.isModuleCheckMode(terminal),
+                value -> ShanhaiUltimateTerminalConfig.setModuleCheckMode(terminal, value)));
 
         ExtendLabelWidget replacement = new ExtendLabelWidget(47, 26, replacementLabel(terminal));
         BlockMapSelectorWidget selector = new BlockMapSelectorWidget(

@@ -52,10 +52,14 @@ class PatternRecipeLookupPerformanceSourceTest {
     @Test
     void activeMarkedRecipeMergeOnlyCachesWithinTheSameServerTick() throws IOException {
         String source = Files.readString(SELECTABLE_RECIPE_LOGIC);
+        String searchHelper = Files.readString(SEARCH_HELPER);
 
         assertTrue(source.contains("cachedMarkedRecipeTick"));
         assertTrue(source.contains("if (tick == cachedMarkedRecipeTick)"));
         assertTrue(source.contains("RecipeTypePatternSearchHelper.collectActiveMarkedPatternRecipes(machine)"));
+        assertTrue(searchHelper.indexOf("if (!includeFirstSpark && (activeSlots == null || activeSlots.length == 0))")
+                        < searchHelper.indexOf("GenericStack[] inferenceInputs = access.gtShanhai$getPatternInferenceInputs()"),
+                "active-only 候选收集没有 active 槽时必须提前返回，不能每 tick 快照推断输入");
         assertFalse(source.contains("tick - cachedMarkedRecipeTick"),
                 "active scoped 槽状态只能同 tick 复用，不能跨 tick 缓存导致 AE 下单状态延迟");
     }
@@ -65,20 +69,29 @@ class PatternRecipeLookupPerformanceSourceTest {
         String selectable = Files.readString(SELECTABLE_RECIPE_LOGIC);
         String primordial = Files.readString(PRIMORDIAL_MODULE_LOGIC);
 
+        assertTrue(selectable.contains("cachedMergedLookupTick"));
+        assertTrue(selectable.contains("if (base == cachedMergedLookupBase && tick == cachedMergedLookupTick"),
+                "同一 tick 内重复 lookup 不应重复构造 active scoped 合并集合");
         assertTrue(selectable.contains("protected long getMaxLookupCacheTicks()"));
         assertTrue(selectable.contains("Math.min(getMaxLookupCacheTicks(), entry.cacheWindow * 2)"));
         assertTrue(primordial.contains("private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;"));
         assertTrue(primordial.contains("protected long getMaxLookupCacheTicks()"));
         assertTrue(primordial.contains("return ACTIVE_LOOKUP_CACHE_TICKS;"));
+        assertTrue(selectable.contains("protected boolean shouldInvalidateLookupCacheWhenNoRunnableRecipe()"));
+        assertTrue(primordial.contains("protected boolean shouldInvalidateLookupCacheWhenNoRunnableRecipe()"));
+        assertTrue(primordial.contains("return false;"));
         assertTrue(primordial.contains("Set<GTRecipe> recipes = lookupRecipeIterator();"));
         assertTrue(primordial.contains("findMaxMatchableScaledRecipe(recipe, totalParallel)"),
                 "并行和输入输出容量仍必须每轮实时计算，不能随 recipe 集合缓存一起缓存");
+        assertFalse(primordial.contains("base.equals(cachedModuleConditionSource)"),
+                "模块等级过滤缓存不得每 tick 对大候选 Set 做 equals；应由基类合并阶段减少重复集合构造");
     }
 
     @Test
     void avoidsPerCandidateDebugFileLoggingInPatternLookupHotPath() throws IOException {
         String patternHelper = Files.readString(PATTERN_HELPER);
         String modifierApi = Files.readString(MODIFIER_API);
+        String selectable = Files.readString(SELECTABLE_RECIPE_LOGIC);
 
         assertFalse(patternHelper.contains("LOG.debug(\"[inferRecipe] inputs="),
                 "样板反推不得为每次匹配拼接并写入调试详情");
@@ -86,6 +99,8 @@ class PatternRecipeLookupPerformanceSourceTest {
                 "Branch 遍历不得为每个剥离候选写调试日志");
         assertFalse(modifierApi.contains("LOG.debug(\"[ReplaceByType]"),
                 "Branch 遍历不得为每个替换候选写调试日志");
+        assertTrue(selectable.contains("if (QuantumDiagnostics.ENABLED"),
+                "配方类型搜索热路径诊断必须在调用点用 static final 开关包裹，避免 detail 字符串先拼接");
     }
 
     @Test

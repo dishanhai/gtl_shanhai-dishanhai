@@ -69,13 +69,35 @@ class ShanhaiSdaPatternTransferTest {
         assertEquals(BigInteger.ONE, readTotal(source));
     }
 
+    @Test
+    void flushesSdaSaveProviderOnceForBatchTransfer() throws Exception {
+        TestKey patternKey = new TestKey("pattern", "gtceu:chaos_alchemy");
+        Map<AEKey, BigInteger> amounts = new HashMap<>();
+        amounts.put(patternKey, BigInteger.valueOf(2));
+        CountingSaveProvider saveProvider = new CountingSaveProvider();
+        SuperDiskArrayInventory source = newInventory(amounts, BigInteger.valueOf(2), saveProvider);
+        CapturingTarget target = new CapturingTarget(patternKey, 2, true);
+
+        ShanhaiSdaPatternTransfer.TransferResult result =
+                ShanhaiSdaPatternTransfer.transfer(source, target);
+
+        assertEquals(2, result.transferred());
+        assertEquals(1, saveProvider.saveCalls);
+    }
+
     private static SuperDiskArrayInventory newInventory(
             Map<AEKey, BigInteger> amounts, BigInteger total) throws ReflectiveOperationException {
+        return newInventory(amounts, total, (ISaveProvider) () -> {});
+    }
+
+    private static SuperDiskArrayInventory newInventory(
+            Map<AEKey, BigInteger> amounts, BigInteger total, ISaveProvider saveProvider)
+            throws ReflectiveOperationException {
         SuperDiskArrayInventory inventory =
                 (SuperDiskArrayInventory) UNSAFE.allocateInstance(SuperDiskArrayInventory.class);
         writeObjectField(inventory, "amounts", amounts);
         writeObjectField(inventory, "total", total);
-        writeObjectField(inventory, "saveProvider", (ISaveProvider) () -> {});
+        writeObjectField(inventory, "saveProvider", saveProvider);
         writeBooleanField(inventory, "persisted", true);
         return inventory;
     }
@@ -106,6 +128,15 @@ class ShanhaiSdaPatternTransferTest {
             return (Unsafe) field.get(null);
         } catch (ReflectiveOperationException exception) {
             throw new ExceptionInInitializerError(exception);
+        }
+    }
+
+    private static final class CountingSaveProvider implements ISaveProvider {
+        private int saveCalls;
+
+        @Override
+        public void saveChanges() {
+            saveCalls++;
         }
     }
 

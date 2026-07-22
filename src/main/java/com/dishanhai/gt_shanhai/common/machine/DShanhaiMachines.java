@@ -50,6 +50,7 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.module.engraving.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.cutter.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.taixu.*;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.crafting.*;
 import com.dishanhai.gt_shanhai.common.machine.wave.*;
 import com.dishanhai.gt_shanhai.common.machine.nebula.*;
 import com.dishanhai.gt_shanhai.common.machine.worldline_cracking.WorldlineCrackingHubMachine;
@@ -121,6 +122,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_ENGRAVING_MODULE;
+    public static MultiblockMachineDefinition PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_REALITY_ANCHOR_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_COIN_FORGE;
     public static MultiblockMachineDefinition PRIMORDIAL_FLAME_CRACKING_KILN;
@@ -1043,6 +1045,27 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
                     .append(Component.literal("§f，直接从电网取电")));
+        });
+
+        // 原初分子操纵模块：复用 GTLCore 的 AE 分子订单协议
+        PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_molecular_assembler_module",
+                        PrimordialMolecularAssemblerModule::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(GTLRecipeTypes.MOLECULAR_ASSEMBLER)
+                .pattern(PrimordialMolecularAssemblerModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                .register();
+
+        PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createElectricText("将分子操纵者的 AE 样板订单接入原初终焉引擎"));
+            tooltips.add(DShanhaiTextUtil.createAuroraText("支持普通合成、锻造台与切石机样板"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位，并搭载分子操纵者 IO 与样板矩阵"));
+            tooltips.add(Component.literal("§7产出倍率、无限并行、无限线程"));
         });
 
         // ========== 原初铸币工厂 ==========

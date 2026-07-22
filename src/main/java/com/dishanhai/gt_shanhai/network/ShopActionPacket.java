@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.network;
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogSnapshot;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
+import com.dishanhai.gt_shanhai.common.shop.ShopMaterialPurchase;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
@@ -23,7 +24,7 @@ import java.util.function.Supplier;
  */
 public class ShopActionPacket {
 
-    public enum Action { BUY, SELL, DEPOSIT, DELETE, UNDO_DELETE }
+    public enum Action { BUY, SELL, BUY_MATERIALS, DEPOSIT, DELETE, UNDO_DELETE }
 
     private final Action action;
     private final long catalogRevision;       // 服务端目录结构版本，过期请求必须拒绝
@@ -150,6 +151,7 @@ public class ShopActionPacket {
         switch (pkt.action) {
             case BUY -> doBuy(player, entry, pkt);
             case SELL -> doSell(player, entry, pkt.times, pkt.backpackMode);
+            case BUY_MATERIALS -> doBuyMaterials(player, entry, pkt);
             case DELETE -> {
                 if (!com.dishanhai.gt_shanhai.common.shop.ShopEditPermission.canEdit(player)) {
                     player.sendSystemMessage(Component.literal("§c[山海商店] 无权限删除"));
@@ -173,6 +175,34 @@ public class ShopActionPacket {
                         ShopConfig.snapshot().revision(), ShopConfig.keyOf(entry), remainingUses);
             }
         }
+    }
+
+    private static void doBuyMaterials(ServerPlayer player, ShopEntry entry, ShopActionPacket pkt) {
+        if (entry.hasMissingItems()) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失，无法购买原料"));
+            return;
+        }
+        if (!entry.allowsBuy()) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 该商品不能购买，不处理原料"));
+            return;
+        }
+        ShopMaterialPurchase.Result result = ShopMaterialPurchase.buyMissingMaterials(player, entry, pkt.times, pkt.aeMode, pkt.backpackMode);
+        if (!result.hasMissing()) {
+            player.sendSystemMessage(Component.literal("§b[山海商店] §a当前购买次数所需物品原料已足够"));
+            return;
+        }
+        if (!result.hasPurchasable()) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 缺少物品原料，但没有可购买的商店原料条目"));
+            return;
+        }
+        if (!result.boughtAny()) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 原料商品余额不足，未能购买"));
+            return;
+        }
+        WalletAccountAPI.sync(player);
+        player.sendSystemMessage(Component.literal("§b[山海商店] §a已购买前置原料 §f"
+                + ShopPurchase.formatCount(result.purchasedItems()) + " §a个"
+                + " §7(下单 " + ShopPurchase.formatCount(result.orders()) + " 次)"));
     }
 
     private static void doBuy(ServerPlayer player, ShopEntry entry, ShopActionPacket pkt) {
@@ -283,6 +313,7 @@ public class ShopActionPacket {
         }
         String viaText = switch (r.via() == null ? "" : r.via()) {
             case "ae" -> " §7→ 已注入 AE 网络";
+            case "disk_hatch" -> " §7→ 已注入磁盘仓室";
             case "sda" -> " §7→ 已打包为超级磁盘阵列";
             default -> " §7→ 已放入背包";
         };

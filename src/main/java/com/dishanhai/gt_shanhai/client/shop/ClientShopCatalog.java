@@ -172,6 +172,7 @@ public final class ClientShopCatalog {
 
     public static ShopEntry get(long entryKey) { return entriesByKey.get(entryKey); }
     public static ShopCatalogManifest.Stub stub(long entryKey) { return stubsByKey.get(entryKey); }
+    public static List<ShopCatalogManifest.Stub> stubs() { return manifest.stubs(); }
 
     public static long keyOf(ShopEntry entry) {
         Long key = keysByEntry.get(entry);

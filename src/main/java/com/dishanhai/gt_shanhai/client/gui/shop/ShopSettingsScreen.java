@@ -14,7 +14,8 @@ import net.minecraft.network.chat.Component;
 /**
  * 商店设置（山海署名，客户端，自建）。仅编辑权玩家可见入口（见 {@link ShopScreen} 顶栏「商店设置」按钮）。
  *
- * <p>运行期可调的商店行为：「奖励抽取次数上限」「SDA 打包阈值」两项（对应 {@link ShopSettingsPacket}/
+ * <p>运行期可调的商店行为：「奖励抽取次数上限」「SDA 打包阈值」「AE 模式禁止注入」
+ * 「将SDA直接注入磁盘仓室」（对应 {@link ShopSettingsPacket}/
  * config「shop.rewardRollCap」「shop.sdaPackThreshold」）；显示值直接读本地 {@link DShanhaiConfig}
  * （单机/联机同一 JVM 场景下与服务端权威值一致，仿 {@link CurrencyAtmScreen} 直接读
  * {@code CurrencyRateConfig} 那套既有做法），确认后发包让服务端写回并落盘（服务端才是权威，见
@@ -32,12 +33,13 @@ public class ShopSettingsScreen extends ScaledScreen {
     private static final int BTN_HOVER = -12303292;
 
     private static final int TARGET_W = 340;
-    private static final int TARGET_H = 190;
+    private static final int TARGET_H = 212;
 
     private final ShopScreen parent;
     private String rollCap;
     private String sdaThreshold;
     private boolean aeDeliverDisabled;
+    private boolean sdaDirectDiskHatchInject;
     private EditBox rollCapBox;
     private EditBox sdaThresholdBox;
     private int left, top, panelWidth, panelHeight;
@@ -53,6 +55,7 @@ public class ShopSettingsScreen extends ScaledScreen {
         this.rollCap = Long.toString(DShanhaiConfig.COMMON.shopRewardRollCap.get());
         this.sdaThreshold = Long.toString(DShanhaiConfig.COMMON.shopSdaPackThreshold.get());
         this.aeDeliverDisabled = DShanhaiConfig.COMMON.shopAeDeliverDisabled.get();
+        this.sdaDirectDiskHatchInject = DShanhaiConfig.COMMON.shopSdaDirectDiskHatchInject.get();
     }
 
     @Override
@@ -100,6 +103,12 @@ public class ShopSettingsScreen extends ScaledScreen {
                 aeDeliverDisabled ? "§aAE 禁止注入: 开（购买物品正常给到背包/SDA）"
                         : "§8AE 禁止注入: 关（原行为，能注入就注入 AE）",
                 mx, my);
+        drawBtn(g, left + 12, top + 120, panelWidth - 24, 16,
+                sdaDirectDiskHatchInject ? "§a将SDA直接注入磁盘仓室: 开"
+                        : "§8将SDA直接注入磁盘仓室: 关",
+                mx, my);
+        g.drawString(this.font, "§7仅挂载同网 FTBQ AE提交器/商店终端可见的有内容 SDA；空 SDA 不挂载",
+                left + 12, top + 140, GRAY, true);
 
         drawBtn(g, left + 12, top + panelHeight - 22, 60, 14, "§c取消", mx, my);
         drawBtn(g, left + panelWidth - 12 - 70, top + panelHeight - 22, 70, 14, "§a确认保存", mx, my);
@@ -109,6 +118,10 @@ public class ShopSettingsScreen extends ScaledScreen {
     protected boolean universalMouseClicked(double mx, double my, int btn) {
         if (GuiRenderUtil.isHovering(mx, my, left + 12, top + 100, panelWidth - 24, 16)) {
             aeDeliverDisabled = !aeDeliverDisabled;
+            return true;
+        }
+        if (GuiRenderUtil.isHovering(mx, my, left + 12, top + 120, panelWidth - 24, 16)) {
+            sdaDirectDiskHatchInject = !sdaDirectDiskHatchInject;
             return true;
         }
         if (GuiRenderUtil.isHovering(mx, my, left + 12, top + panelHeight - 22, 60, 14)) {
@@ -129,7 +142,8 @@ public class ShopSettingsScreen extends ScaledScreen {
         long sda;
         try { sda = sdaThreshold == null || sdaThreshold.isEmpty() ? 1L : Long.parseLong(sdaThreshold); }
         catch (NumberFormatException e) { sda = 1L; }
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda), aeDeliverDisabled));
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
+                aeDeliverDisabled, sdaDirectDiskHatchInject));
         Minecraft.getInstance().setScreen(parent);
     }
 

@@ -14,7 +14,6 @@ import net.minecraft.network.chat.Component;
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineHost;
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
 
-import java.util.HashSet;
 import java.util.Set;
 import java.util.Map;
 import java.util.List;
@@ -57,34 +56,26 @@ public class ModuleLevelCondition extends RecipeCondition {
         REQUIREMENTS.computeIfAbsent(recipeId, k -> new ArrayList<>()).add(cond);
     }
 
-    /** 运行时查询配方模块条件（模糊匹配 ID） */
-    public static List<ModuleLevelCondition> getRequirements(String recipeId) {
-        if (recipeId == null || recipeId.isEmpty()) return null;
-        // 精确匹配
-        List<ModuleLevelCondition> exact = REQUIREMENTS.get(recipeId);
-        if (exact != null) return exact;
-        // 提取注册 ID 和 GTRecipe ID 的公共后缀做模糊匹配（如 kubejs:xxx vs gtceu:type/xxx）
-        String suffix = lastSegment(recipeId);
-        for (var entry : REQUIREMENTS.entrySet()) {
-            String keySuffix = lastSegment(entry.getKey());
-            if (!suffix.isEmpty() && (suffix.equals(keySuffix) || suffix.contains(keySuffix) || keySuffix.contains(suffix))) {
-                return entry.getValue();
-            }
-            if (recipeId.contains(entry.getKey()) || entry.getKey().contains(recipeId)) {
-                return entry.getValue();
-            }
-        }
-        return null;
+    /** 每次配方重载前清空上一轮条件，避免修改后的旧需求继续残留。 */
+    public static void clearRequirements() {
+        REQUIREMENTS.clear();
     }
 
-    /** 提取 ID 最后一段（去命名空间和路径前缀） */
-    private static String lastSegment(String id) {
-        if (id == null || id.isEmpty()) return "";
-        // 先取 / 最后一段，再取 : 最后一段
-        int slash = id.lastIndexOf('/');
-        int colon = id.lastIndexOf(':');
-        int start = Math.max(slash, colon);
-        return start >= 0 && start < id.length() - 1 ? id.substring(start + 1) : id;
+    /** 运行时按完整配方 ID 精确查询，禁止相似配方之间串条件。 */
+    public static List<ModuleLevelCondition> getRequirements(String recipeId) {
+        if (recipeId == null || recipeId.isEmpty()) return null;
+        return REQUIREMENTS.get(recipeId);
+    }
+
+    /** 等级差 0~3 时逐级翻倍；高出要求 4 级或以上时直接视为无限等效量。 */
+    public static long calculateEquivalentCount(int installedLevel, int installedCount, int requiredModuleLevel) {
+        return ModuleLevelEquivalence.calculateEquivalentCount(installedLevel, installedCount, requiredModuleLevel);
+    }
+
+    public static boolean isRequirementSatisfied(int installedLevel, int installedCount,
+                                                  int requiredModuleLevel, int requiredCount) {
+        return ModuleLevelEquivalence.isRequirementSatisfied(
+                installedLevel, installedCount, requiredModuleLevel, requiredCount);
     }
 
     public ModuleLevelCondition(String moduleId, int level) {
@@ -153,11 +144,9 @@ public class ModuleLevelCondition extends RecipeCondition {
                     mb.getClass().getSimpleName(), slotId, requiredLv, requiredLevel);
             if (slotId == null) return false;
             int slotLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
-            if (slotLv < requiredLv) return false;
-            int multiplier = slotLv - requiredLv + 1;
-            int count = mb.getModuleCount() * multiplier;
-            LOG.debug("[MLC]   slotLv={} multiplier={}x stackCount={} -> count={}", slotLv, multiplier, mb.getModuleCount(), count);
-            return count >= requiredLevel;
+            long count = calculateEquivalentCount(slotLv, mb.getModuleCount(), requiredLv);
+            LOG.debug("[MLC]   slotLv={} stackCount={} -> equivalent={}", slotLv, mb.getModuleCount(), count);
+            return isRequirementSatisfied(slotLv, mb.getModuleCount(), requiredLv, requiredLevel);
         }
 
         // 主机路径：遍历所有模块
@@ -175,17 +164,20 @@ public class ModuleLevelCondition extends RecipeCondition {
 
         int requiredLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(moduleId);
         LOG.debug("[MLC] check host: requiredLv={} needCount={} hostModules={}", requiredLv, requiredLevel, modules.size());
-        int count = 0;
+        long count = 0L;
         for (Object mod : modules) {
             if (!(mod instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase mb)) continue;
             String slotId = mb.getModuleItemId();
             if (slotId == null) continue;
             int slotLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
             if (slotLv >= requiredLv) {
-                count += mb.getModuleCount() * (slotLv - requiredLv + 1);
+                long equivalent = calculateEquivalentCount(slotLv, mb.getModuleCount(), requiredLv);
+                if (equivalent == Long.MAX_VALUE || count > Long.MAX_VALUE - equivalent) return true;
+                count += equivalent;
+                if (count >= requiredLevel) return true;
             }
         }
-        return count >= requiredLevel;
+        return false;
     }
 
     @Override
@@ -207,14 +199,20 @@ public class ModuleLevelCondition extends RecipeCondition {
 
         int requiredLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(moduleId);
         LOG.debug("[MLC] check {}: requiredLv={} needCount={} hostModules={}", moduleId, requiredLv, requiredLevel, modules.size());
-        int count = 0;
+        long count = 0L;
         for (Object mod : modules) {
             if (!(mod instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase mb)) continue;
             String slotId = mb.getModuleItemId();
             if (slotId == null) continue;
             int slotLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
             if (slotLv >= requiredLv) {
-                count += mb.getModuleCount() * (slotLv - requiredLv + 1);
+                long equivalent = calculateEquivalentCount(slotLv, mb.getModuleCount(), requiredLv);
+                if (equivalent == Long.MAX_VALUE || count > Long.MAX_VALUE - equivalent) {
+                    count = Long.MAX_VALUE;
+                    break;
+                }
+                count += equivalent;
+                if (count >= requiredLevel) break;
             }
         }
 

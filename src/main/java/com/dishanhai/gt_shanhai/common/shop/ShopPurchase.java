@@ -184,6 +184,11 @@ public final class ShopPurchase {
         return String.format(java.util.Locale.ROOT, "%,d", n);
     }
 
+    public static String formatCount(java.math.BigInteger n) {
+        if (n == null) return "0";
+        return String.format(java.util.Locale.ROOT, "%,d", n);
+    }
+
     // ==================== 批量购买 / 分层交付（AE注入 / SDA打包 / 背包）====================
 
     /** 批量购买结果：实际成交次数 done、请求次数 requested、主交付方式 via（"ae"/"sda"/"inventory"/null=没买成）。 */
@@ -777,12 +782,19 @@ public final class ShopPurchase {
      * aeMode 且绑定在线 AE 能全额收下 → 注入 AE 网络（SIMULATE→MODULATE 防吞）
      * 否则总量 ≥ 配置阈值 → 打包超级磁盘阵列赠送
      * 否则进背包，装不下的余量再打包 SDA
-     * @return 主交付方式 "ae"/"sda"/"inventory"（null = 参数无效）
+     * @return 主交付方式 "ae"/"disk_hatch"/"sda"/"inventory"（null = 参数无效）
      */
     public static String deliverItems(net.minecraft.server.level.ServerPlayer player, ItemStack unit,
                                       java.math.BigInteger total, boolean aeMode, boolean backpackMode) {
         if (player == null || unit == null || unit.isEmpty() || total == null || total.signum() <= 0) return null;
         stripSdaClaim(unit); // 商品模板若是从已认领的 SDA 实例捕获的，须清掉标记才能让买家副本独立分家
+        boolean directSdaGoods = isSdaItem(unit);
+        boolean directInfinityCellGoods = isInfinityCellItem(unit);
+        boolean directMountableGoods = directSdaGoods || directInfinityCellGoods;
+        java.math.BigInteger directSdaLeftover = tryDeliverDirectSdaToDiskHatch(player, unit, total);
+        boolean anyDirectSdaMounted = directSdaLeftover.compareTo(total) < 0;
+        if (directSdaLeftover.signum() <= 0) return "disk_hatch";
+        total = directSdaLeftover;
         // 「AE 禁止注入」开启时，AE 模式只管拉取材料付款/检索库存，交付一律走 SDA/背包（见商店设置）
         if (com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopAeDeliverDisabled.get()) aeMode = false;
         appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(unit);
@@ -794,7 +806,7 @@ public final class ShopPurchase {
                 && ShopAeNetwork
                         .canInjectForPlayer(player, key, total.longValue())) {
             via = "ae";
-        } else if (key != null && atThreshold) {
+        } else if (!directMountableGoods && key != null && atThreshold) {
             via = "sda";
         } else {
             via = "inventory";
@@ -802,14 +814,19 @@ public final class ShopPurchase {
         switch (via) {
             case "ae" -> ShopAeNetwork
                     .injectForPlayer(player, key, total.longValue());
-            case "sda" -> packAsSda(player, key, total);
+            case "sda" -> {
+                if (packAsSda(player, key, total)) via = "disk_hatch";
+            }
             default -> {
                 long leftover = deliverToInventory(player, unit, total, backpackMode); // 返回装不下的余量
-                if (leftover > 0L && key != null) {
-                    packAsSda(player, key, java.math.BigInteger.valueOf(leftover));
+                if (!directMountableGoods && leftover > 0L && key != null) {
+                    if (packAsSda(player, key, java.math.BigInteger.valueOf(leftover))) via = "disk_hatch";
+                } else if (directMountableGoods && leftover > 0L) {
+                    dropDirectItemCopies(player, unit, leftover);
                 }
             }
         }
+        if (anyDirectSdaMounted) return "disk_hatch";
         return via;
     }
 
@@ -826,7 +843,8 @@ public final class ShopPurchase {
      * 常见「有的物品类型数量多、有的少」，若按单个物品各自判断阈值，总量早已达标的一批货里，
      * 数量没单独达标的类型会被漏判成散件塞进背包，同一批货一部分进 SDA、一部分散落背包，
      * 观感上像是磁盘阵列"漏包"了一堆（见反馈）。整批达标就整批一起进 SDA，不再逐个物品判断。
-     * @return 主交付方式："sda"（只要有任意物品打了包就报这个，信息量最大）
+     * @return 主交付方式："disk_hatch"（有任意物品直注入磁盘仓室）
+     *         /"sda"（只要有任意物品打了包就报这个，信息量最大）
      *         /"ae"（全部进了 AE，没有任何打包/进背包）/"inventory"（全部进了背包，没有任何 AE/打包）
      *         /null（没有任何有效物品）
      */
@@ -845,10 +863,19 @@ public final class ShopPurchase {
         boolean batchAtThreshold = grandTotal.compareTo(java.math.BigInteger.valueOf(threshold)) >= 0;
         java.util.Map<appeng.api.stacks.AEKey, java.math.BigInteger> sdaBatch = new java.util.LinkedHashMap<>();
         boolean anyAe = false, anyInventory = false;
+        boolean anySda = false;
+        boolean anyDiskHatch = false;
         for (ItemDelivery d : deliveries) {
             ItemStack unit = d.unit();
             java.math.BigInteger total = d.total();
             if (unit == null || unit.isEmpty() || total == null || total.signum() <= 0) continue;
+            boolean directSdaGoods = isSdaItem(unit);
+            boolean directInfinityCellGoods = isInfinityCellItem(unit);
+            boolean directMountableGoods = directSdaGoods || directInfinityCellGoods;
+            java.math.BigInteger directSdaLeftover = tryDeliverDirectSdaToDiskHatch(player, unit, total);
+            if (directSdaLeftover.compareTo(total) < 0) anyDiskHatch = true;
+            if (directSdaLeftover.signum() <= 0) continue;
+            total = directSdaLeftover;
             appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(unit);
             boolean fitsLong = total.bitLength() < 63;
             if (aeMode && key != null && fitsLong
@@ -857,18 +884,24 @@ public final class ShopPurchase {
                 ShopAeNetwork
                         .injectForPlayer(player, key, total.longValue());
                 anyAe = true;
-            } else if (key != null && batchAtThreshold) {
+            } else if (!directMountableGoods && key != null && batchAtThreshold) {
                 sdaBatch.merge(key, total, java.math.BigInteger::add);
             } else {
                 long leftover = deliverToInventory(player, unit, total, backpackMode); // 返回装不下的余量
                 anyInventory = true;
-                if (leftover > 0L && key != null) {
+                if (!directMountableGoods && leftover > 0L && key != null) {
                     sdaBatch.merge(key, java.math.BigInteger.valueOf(leftover), java.math.BigInteger::add);
+                } else if (directMountableGoods && leftover > 0L) {
+                    dropDirectItemCopies(player, unit, leftover);
                 }
             }
         }
-        boolean anySda = !sdaBatch.isEmpty();
-        if (anySda) packAsSdaBatch(player, sdaBatch);
+        boolean packedToDiskHatch = false;
+        if (!sdaBatch.isEmpty()) {
+            anySda = true;
+            packedToDiskHatch = packAsSdaBatch(player, sdaBatch);
+        }
+        if (anyDiskHatch || packedToDiskHatch) return "disk_hatch";
         if (anySda) return "sda";
         if (anyAe) return "ae";
         if (anyInventory) return "inventory";
@@ -986,16 +1019,70 @@ public final class ShopPurchase {
         if (tag != null) tag.remove(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_RUNTIME_UUID);
     }
 
+    private static boolean isSdaItem(ItemStack stack) {
+        return stack != null && !stack.isEmpty()
+                && stack.getItem() instanceof com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
+    }
+
+    private static boolean isInfinityCellItem(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return id != null && "expatternprovider:infinity_cell".equals(id.toString());
+    }
+
+    private static java.math.BigInteger tryDeliverDirectSdaToDiskHatch(net.minecraft.server.level.ServerPlayer player,
+                                                                       ItemStack unit,
+                                                                       java.math.BigInteger total) {
+        if (!com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopSdaDirectDiskHatchInject.get()) return total;
+        if (!hasDirectMountableSdaContent(player, unit)) return total;
+        java.math.BigInteger remaining = total;
+        while (remaining.signum() > 0) {
+            ItemStack sda = unit.copyWithCount(1);
+            if (!ShopAeNetwork.injectSdaIntoBoundDiskHatch(player, sda)) break;
+            remaining = remaining.subtract(java.math.BigInteger.ONE);
+        }
+        return remaining;
+    }
+
+    private static boolean hasDirectMountableSdaContent(net.minecraft.server.level.ServerPlayer player, ItemStack stack) {
+        if (!isSdaItem(stack)) {
+            return isInfinityCellItem(stack)
+                    && com.dishanhai.gt_shanhai.common.machine.part.MEDiskHatchPartMachine
+                            .createEaeInfinityCellStorage(stack) != null;
+        }
+        net.minecraft.nbt.CompoundTag tag = stack.getTag();
+        if (tag == null) return false;
+        if (tag.contains("keys", net.minecraft.nbt.Tag.TAG_LIST)
+                && tag.contains("amts", net.minecraft.nbt.Tag.TAG_LONG_ARRAY)) return true;
+        String TAG_TYPES = com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_TYPES;
+        if (tag.getInt(TAG_TYPES) > 0) return true;
+        if (com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem.getVirtualCellCount(stack) > 0) return true;
+        if (!tag.hasUUID(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_UUID)) return false;
+        java.util.UUID uuid = tag.getUUID(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_UUID);
+        net.minecraft.server.MinecraftServer server = player == null ? null : player.getServer();
+        if (server != null && !com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(server)
+                .readCellBigAmounts(uuid).isEmpty()) return true;
+        return com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.hasStored(uuid)
+                && !com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.restore(uuid).isEmpty();
+    }
+
+    private static void dropDirectItemCopies(net.minecraft.server.level.ServerPlayer player, ItemStack unit, long count) {
+        long remaining = count;
+        while (remaining-- > 0L) {
+            player.drop(unit.copyWithCount(1), false);
+        }
+    }
+
     /**
      * 打包成一个预装 amount 个 key 的超级磁盘阵列，发给玩家（装不下则掉落）。
      * 直接写服务端 backend（BigInteger 无上限）；玩家首 tick 由 SDA "取出即分家" 自动认领私有 UUID。
      */
-    private static void packAsSda(net.minecraft.server.level.ServerPlayer player,
-                                  appeng.api.stacks.AEItemKey key, java.math.BigInteger amount) {
-        if (key == null || amount.signum() <= 0) return;
+    private static boolean packAsSda(net.minecraft.server.level.ServerPlayer player,
+                                     appeng.api.stacks.AEItemKey key, java.math.BigInteger amount) {
+        if (key == null || amount.signum() <= 0) return false;
         java.util.Map<appeng.api.stacks.AEKey, java.math.BigInteger> amounts = new java.util.LinkedHashMap<>();
         amounts.put(key, amount);
-        packAsSdaBatch(player, amounts);
+        return packAsSdaBatch(player, amounts);
     }
 
     /**
@@ -1003,17 +1090,20 @@ public final class ShopPurchase {
      * {@link #packAsSda} 单物品版就是套一层这个方法；{@link #deliverItemBatch} 靠这个把一次
      * 抽奖里所有需要打包的物品合并进同一片磁盘，不再一种物品一个磁盘阵列。
      */
-    private static void packAsSdaBatch(net.minecraft.server.level.ServerPlayer player,
-                                       java.util.Map<appeng.api.stacks.AEKey, java.math.BigInteger> amounts) {
-        if (player == null || amounts == null || amounts.isEmpty()) return;
+    private static boolean packAsSdaBatch(net.minecraft.server.level.ServerPlayer player,
+                                          java.util.Map<appeng.api.stacks.AEKey, java.math.BigInteger> amounts) {
+        if (player == null || amounts == null || amounts.isEmpty()) return false;
         net.minecraft.server.MinecraftServer server = player.getServer();
-        if (server == null) return;
+        if (server == null) return false;
         java.util.UUID uuid = java.util.UUID.randomUUID();
         ItemStack sda = new ItemStack(com.dishanhai.gt_shanhai.GTDishanhaiMod.SUPER_DISK_ARRAY.get());
         sda.getOrCreateTag().putUUID(com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory.TAG_UUID, uuid);
         com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData.get(server)
                 .updateCellBig(uuid, "sda", com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem.TOTAL_BYTES, amounts);
+        if (com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopSdaDirectDiskHatchInject.get()
+                && ShopAeNetwork.injectSdaIntoBoundDiskHatch(player, sda)) return true;
         if (!player.getInventory().add(sda)) player.drop(sda, false);
+        return false;
     }
 
     // ==================== 货币 ATM：单币提交 / 币种兑换 / AE 抽取 ====================

@@ -59,6 +59,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.ConfigValue<List<? extends String>> virtualProviderAutoWrapExclusions;
         /** 配方类型样板总成 — 主机配方类型联动模式 */
         public ForgeConfigSpec.EnumValue<RecipeTypePatternSwitchMode> recipeTypePatternSwitchMode;
+        /** 配方类型样板总成 — 是否允许虚拟执行宿主当前不支持的配方类型 */
+        public ForgeConfigSpec.BooleanValue recipeTypePatternAllowUnsupportedHostRecipeTypes;
         /** 配方类型样板总成 — UI 每行样板槽位数 */
         public ForgeConfigSpec.IntValue recipeTypePatternsPerRow;
         /** 配方类型样板总成 — UI 每页行数 */
@@ -73,6 +75,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.LongValue shopRewardRollCap;
         /** 山海商店 — AE 模式下是否禁止把购买/兑换得到的物品注入 AE（只拉取/检索，不注入） */
         public ForgeConfigSpec.BooleanValue shopAeDeliverDisabled;
+        /** 山海商店 — 是否把有内容 SDA 直接注入同网 ME 磁盘仓室 */
+        public ForgeConfigSpec.BooleanValue shopSdaDirectDiskHatchInject;
         /** 山海商店 — 出售回收价占买价的百分比（价差，防买卖零损耗套利） */
         public ForgeConfigSpec.IntValue shopSellRatioPercent;
         /** 山海商店银行 — 定期存款每小时计息基点（万分之N，10000=100%/小时） */
@@ -179,8 +183,13 @@ public final class DShanhaiConfig {
             recipeTypePatternSwitchMode = builder
                     .comment("配方类型识别 ME 样板总成联动主机配方类型的模式",
                              "PROGRAMMABLE_HATCH_REQUIRED = 必须有山海可编程仓随主机成型，由可编程仓实际切换主机配方类型；无可编程仓时不运行虚拟类型样板",
-                             "VIRTUAL_ACTIVE_TYPE = 不要求可编程仓；样板下单时按虚拟目标类型直接切主机 activeRecipeType，但不写入可编程仓选择状态")
+                             "VIRTUAL_ACTIVE_TYPE = 不要求可编程仓；样板配方可直接加入宿主执行队列，默认仍要求宿主当前支持该配方类型")
                     .defineEnum("switchMode", RecipeTypePatternSwitchMode.VIRTUAL_ACTIVE_TYPE);
+            recipeTypePatternAllowUnsupportedHostRecipeTypes = builder
+                    .comment("是否允许星律虚拟执行宿主当前不支持的配方类型（默认 false）",
+                             "false = 样板配方类型必须存在于宿主 machine.getRecipeTypes()，否则不进入执行队列",
+                             "true = 保留旧兼容行为，允许完整 GTRecipe 跨宿主配方类型虚拟直跑；可能绕过机器配方类型限制")
+                    .define("allowUnsupportedHostRecipeTypes", false);
             recipeTypePatternsPerRow = builder
                     .comment("星律样板总成 UI 每行样板槽位数（默认 9）",
                              "修改后需重新放置总成生效")
@@ -218,6 +227,11 @@ public final class DShanhaiConfig {
                              "true = AE 模式只用来拉取材料付款/检索库存，购买完成后物品一律正常交付给玩家",
                              "（进背包，装不下或总量达标按 sdaPackThreshold 打包超级磁盘阵列——SDA 打包规则不受此项影响）")
                     .define("aeDeliverDisabled", false);
+            shopSdaDirectDiskHatchInject = builder
+                    .comment("山海商店：将SDA直接注入磁盘仓室（默认 true）",
+                             "开启后，兑换/购买得到的有内容 SDA、以及超限自动打包出的 SDA，会优先放入同一 AE 网络内可用的 ME 磁盘仓室并直接挂载存储",
+                             "磁盘仓室必须与 FTBQ AE提交器或商店终端处在同一个 AE 网络；空 SDA 商品不会自动挂载")
+                    .define("sdaDirectDiskHatchInject", true);
             shopSellRatioPercent = builder
                     .comment("山海商店：出售商品能拿回买价的百分比（默认 70，即卖出价=买价×70%）",
                              "买卖价差防止「买了立刻卖回零损耗」的套利；100=无价差（等价旧行为）")

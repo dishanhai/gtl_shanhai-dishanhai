@@ -7,6 +7,7 @@ import java.util.Objects;
 import org.jetbrains.annotations.Nullable;
 
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.content.ContentModifier;
 
 import net.minecraft.core.BlockPos;
@@ -92,13 +93,30 @@ public final class PatternSlotScopedRecipe extends GTRecipe {
                 || recipe != null && decodeScope(recipe.id) != null;
     }
 
-    public static boolean represents(GTRecipe scopedRecipe, GTRecipe candidate) {
-        if (!(scopedRecipe instanceof PatternSlotScopedRecipe scoped)
-                || candidate == null || isScoped(candidate)) {
-            return false;
+    public record ShadowKey(GTRecipeType recipeType, ResourceLocation recipeId) {}
+
+    public static ShadowKey shadowKeyForScoped(GTRecipe recipe) {
+        if (recipe instanceof PatternSlotScopedRecipe scoped) {
+            return scoped.originalId == null
+                    ? null : new ShadowKey(scoped.recipeType, scoped.originalId);
         }
-        return scoped.recipeType == candidate.recipeType
-                && Objects.equals(scoped.originalId, candidate.id);
+        ScopeData encodedScope = recipe == null ? null : decodeScope(recipe.id);
+        if (recipe == null || encodedScope == null || encodedScope.originalId == null) {
+            return null;
+        }
+        return new ShadowKey(recipe.recipeType, encodedScope.originalId);
+    }
+
+    public static ShadowKey unscopedShadowKey(GTRecipe recipe) {
+        if (recipe == null || recipe.id == null || isScoped(recipe)) {
+            return null;
+        }
+        return new ShadowKey(recipe.recipeType, recipe.id);
+    }
+
+    public static boolean represents(GTRecipe scopedRecipe, GTRecipe candidate) {
+        ShadowKey scoped = shadowKeyForScoped(scopedRecipe);
+        return scoped != null && scoped.equals(unscopedShadowKey(candidate));
     }
 
     private static ResourceLocation createScopedId(ResourceLocation originalId, ResourceLocation dimensionId,

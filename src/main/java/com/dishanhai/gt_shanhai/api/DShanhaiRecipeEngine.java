@@ -334,6 +334,7 @@ public class DShanhaiRecipeEngine {
         clearErrors();
         clearLastReceipt();
         REGISTERED_RECIPE_IDS.clear();
+        ModuleLevelCondition.clearRequirements();
         synchronized (RECIPE_TYPE_BY_ID) {
             RECIPE_TYPE_BY_ID.clear();
         }

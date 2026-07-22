@@ -229,10 +229,10 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                     reqName, requiredLv, curName != null ? curName : "未知", slotLv))
                 .getString();
         }
-        // 等级够了但数量不够
-        int multiplier = slotLv - requiredLv + 1;
-        int count = getModuleCount() * multiplier;
-        if (count < requiredLevel) {
+        long count = com.dishanhai.gt_shanhai.api.ModuleLevelCondition.calculateEquivalentCount(
+                slotLv, getModuleCount(), requiredLv);
+        if (!com.dishanhai.gt_shanhai.api.ModuleLevelCondition.isRequirementSatisfied(
+                slotLv, getModuleCount(), requiredLv, requiredLevel)) {
             return Component.literal(
                 String.format("§c✗ 模块数量不足: %s§c 需 ×%d(等效)，当前 ×%d",
                     reqName, requiredLevel, count))

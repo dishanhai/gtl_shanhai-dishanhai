@@ -251,7 +251,7 @@ public final class RecipeTypePatternSearchHelper {
                 Object[] handlers = part.getMERecipeHandlers();
                 if (handlers == null) continue;
                 for (Object handler : handlers) {
-                    collectMarkedPatternRecipesFromHandler(capabilityMachine, handler, result, includeFirstSpark);
+                    collectMarkedPatternRecipesFromHandler(machine, capabilityMachine, handler, result, includeFirstSpark);
                 }
             }
         }
@@ -272,7 +272,7 @@ public final class RecipeTypePatternSearchHelper {
             if (part == null) continue;
             Object patternMachine = resolvePatternBuffer(part);
             if (patternMachine == null) continue;
-            collectMarkedPatternRecipesFromMachine(null, part, patternMachine,
+            collectMarkedPatternRecipesFromMachine(machine, null, part, patternMachine,
                     readActiveSlots(patternMachine), result, true);
         }
         return applyRecipeTypeSwitch(machine, result);
@@ -283,7 +283,8 @@ public final class RecipeTypePatternSearchHelper {
         IRecipeCapabilityMachine capabilityMachine = machine instanceof IRecipeCapabilityMachine
                 ? (IRecipeCapabilityMachine) machine
                 : null;
-        collectMarkedPatternRecipesFromMachine(capabilityMachine, buffer, buffer, readActiveSlots(buffer), result, true);
+        collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, buffer, buffer,
+                readActiveSlots(buffer), result, true);
         return applyRecipeTypeSwitch(machine, result);
     }
 
@@ -305,11 +306,12 @@ public final class RecipeTypePatternSearchHelper {
         return result;
     }
 
-    private static void collectMarkedPatternRecipesFromHandler(IRecipeCapabilityMachine capabilityMachine, Object handler,
-            Set<GTRecipe> result, boolean includeFirstSpark) {
+    private static void collectMarkedPatternRecipesFromHandler(IRecipeLogicMachine machine,
+            IRecipeCapabilityMachine capabilityMachine, Object handler, Set<GTRecipe> result,
+            boolean includeFirstSpark) {
         Object ownerMachine = findHandlerMachine(handler);
-        collectMarkedPatternRecipesFromMachine(capabilityMachine, ownerMachine, resolvePatternBuffer(ownerMachine),
-                readActiveSlots(handler), result, includeFirstSpark);
+        collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, ownerMachine,
+                resolvePatternBuffer(ownerMachine), readActiveSlots(handler), result, includeFirstSpark);
     }
 
     private static void collectMarkedPatternRecipesFromParts(IRecipeLogicMachine machine,
@@ -319,7 +321,7 @@ public final class RecipeTypePatternSearchHelper {
             if (part == null) continue;
             Object patternMachine = resolvePatternBuffer(part);
             Object slotSource = patternMachine == null ? part : patternMachine;
-            collectMarkedPatternRecipesFromMachine(capabilityMachine, part, patternMachine,
+            collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, part, patternMachine,
                     readActiveSlots(slotSource), result, includeFirstSpark);
             if (includeFirstSpark) {
                 collectPlainPatternRecipesFromPart(machine, capabilityMachine, part, result);
@@ -351,7 +353,8 @@ public final class RecipeTypePatternSearchHelper {
                 continue;
             }
             GTRecipe recipe = peekRecipeCached(buffer, slot, stack, level);
-            if (recipe == null || !isSelectedOnMachine(machine, recipe.recipeType)) continue;
+            if (recipe == null || !isSelectedOnMachine(machine, recipe.recipeType)
+                    || !hostAllowsVirtualRecipeType(machine, recipe.recipeType)) continue;
             topUpVirtualSupply(buffer, slot, stack, recipe);
             activatePatternRecipe(capabilityMachine, buffer, recipe, slot);
             result.add(recipe);
@@ -366,11 +369,25 @@ public final class RecipeTypePatternSearchHelper {
         return true;
     }
 
-    private static void collectMarkedPatternRecipesFromMachine(IRecipeCapabilityMachine capabilityMachine,
-            Object ownerMachine, Object patternMachine, int[] activeSlots, Set<GTRecipe> result,
-            boolean includeFirstSpark) {
+    private static boolean hostAllowsVirtualRecipeType(IRecipeLogicMachine machine, GTRecipeType recipeType) {
+        if (DShanhaiConfig.COMMON.recipeTypePatternAllowUnsupportedHostRecipeTypes.get()) return true;
+        if (machine == null || recipeType == null) return false;
+        GTRecipeType[] hostTypes = machine.getRecipeTypes();
+        if (hostTypes == null) return false;
+        for (GTRecipeType hostType : hostTypes) {
+            if (recipeTypeEquals(hostType, recipeType)) return true;
+        }
+        return false;
+    }
+
+    private static void collectMarkedPatternRecipesFromMachine(IRecipeLogicMachine machine,
+            IRecipeCapabilityMachine capabilityMachine, Object ownerMachine, Object patternMachine,
+            int[] activeSlots, Set<GTRecipe> result, boolean includeFirstSpark) {
         if (!(patternMachine instanceof RecipeTypePatternSlotAccess access)
                 || !(patternMachine instanceof MEPatternBufferPartMachineBase buffer)) {
+            return;
+        }
+        if (!includeFirstSpark && (activeSlots == null || activeSlots.length == 0)) {
             return;
         }
         GenericStack[] inferenceInputs = access.gtShanhai$getPatternInferenceInputs();
@@ -384,10 +401,12 @@ public final class RecipeTypePatternSearchHelper {
             for (int slot : activeSlots) {
                 GTRecipe recipe = getMarkedRecipeCached(
                         buffer, access, slot, inferenceInputs, inferenceInventoryFingerprint);
-                if (recipe == null || !access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
+                boolean hostAllows = recipe != null && hostAllowsVirtualRecipeType(machine, recipe.recipeType);
+                if (recipe == null || !access.gtShanhai$slotAllowsRecipe(slot, recipe) || !hostAllows) {
                     com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activeSlot.skipped",
                             "slot=" + slot + " recipeNull=" + (recipe == null)
-                                    + " allowsRecipe=" + (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)));
+                                    + " allowsRecipe=" + (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe))
+                                    + " hostAllowsType=" + hostAllows);
                     continue;
                 }
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
@@ -395,7 +414,7 @@ public final class RecipeTypePatternSearchHelper {
             }
         }
         if (includeFirstSpark) {
-            collectFirstSparkPatternRecipes(capabilityMachine, ownerMachine, patternMachine, access,
+            collectFirstSparkPatternRecipes(machine, capabilityMachine, ownerMachine, patternMachine, access,
                     activeSlots, result, inferenceInputs, inferenceInventoryFingerprint);
         }
     }
@@ -408,10 +427,10 @@ public final class RecipeTypePatternSearchHelper {
      * 自身这条路径从未修（2026-07-11 补齐）。直接只读解码样板物品本身、按槽位规则校验后走同一激活链，
      * AE2 网络没有对应物料时 activatePatternRecipe 内部 handleRecipe 会返回负数自然跳过，不会绕过真实供料校验。
      */
-    private static void collectFirstSparkPatternRecipes(IRecipeCapabilityMachine capabilityMachine,
-            Object ownerMachine, Object patternMachine, RecipeTypePatternSlotAccess access,
-            int[] activeSlots, Set<GTRecipe> result, GenericStack[] inferenceInputs,
-            long inferenceInventoryFingerprint) {
+    private static void collectFirstSparkPatternRecipes(IRecipeLogicMachine machine,
+            IRecipeCapabilityMachine capabilityMachine, Object ownerMachine, Object patternMachine,
+            RecipeTypePatternSlotAccess access, int[] activeSlots, Set<GTRecipe> result,
+            GenericStack[] inferenceInputs, long inferenceInventoryFingerprint) {
         if (!(patternMachine instanceof MEPatternBufferPartMachineBase buffer)) return;
         int slotCount = access.gtShanhai$getPatternSlotCount();
         for (int slot = 0; slot < slotCount; slot++) {
@@ -423,7 +442,8 @@ public final class RecipeTypePatternSearchHelper {
             }
             GTRecipe recipe = getMarkedRecipeCached(
                     buffer, access, slot, inferenceInputs, inferenceInventoryFingerprint);
-            if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)) {
+            if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)
+                    && hostAllowsVirtualRecipeType(machine, recipe.recipeType)) {
                 topUpVirtualSupply(buffer, slot, patternStack, recipe);
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
@@ -786,10 +806,29 @@ public final class RecipeTypePatternSearchHelper {
                     : Collections.emptySet();
         }
 
-        // 纯虚拟注入（默认 VIRTUAL_ACTIVE_TYPE）：不校验宿主是否原生支持该配方类型，
-        // 也不切换宿主 activeRecipeType。样板配方已作为完整 GTRecipe 通过 MEPatternRecipeHandlePart
-        // 挂载并入执行队列，执行不依赖宿主原生类型，故跨配方类型样板可虚拟直跑，且支持多类型混装。
-        return recipes;
+        // 虚拟模式不切换宿主 activeRecipeType，但默认仍以宿主当前实际配方类型集合为安全边界。
+        // 只有显式开启兼容配置，才保留完整 GTRecipe 跨类型直跑的旧行为。
+        if (DShanhaiConfig.COMMON.recipeTypePatternAllowUnsupportedHostRecipeTypes.get()) {
+            return recipes;
+        }
+        return retainHostSupportedRecipes(machine, recipes);
+    }
+
+    private static Set<GTRecipe> retainHostSupportedRecipes(IRecipeLogicMachine machine, Set<GTRecipe> recipes) {
+        GTRecipeType[] hostTypes = machine.getRecipeTypes();
+        if (hostTypes == null || hostTypes.length == 0) return Collections.emptySet();
+
+        LinkedHashSet<GTRecipe> supported = new LinkedHashSet<>();
+        for (GTRecipe recipe : recipes) {
+            if (recipe == null || recipe.recipeType == null) continue;
+            for (GTRecipeType hostType : hostTypes) {
+                if (recipeTypeEquals(hostType, recipe.recipeType)) {
+                    supported.add(recipe);
+                    break;
+                }
+            }
+        }
+        return supported;
     }
 
     private static GTRecipeType getUniqueRecipeType(Set<GTRecipe> recipes) {

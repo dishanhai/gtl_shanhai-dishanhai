@@ -308,6 +308,9 @@ public class ShopScreen extends ScaledScreen {
     // 「补齐全部缺口」按钮：花费预览格有确定不够的项、且开着 AE 模式才出现，跟链接/指南同一套暂存坐标+点击消费的路数
     private boolean autoCraftBtnVisible;
     private int autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH;
+    // 「购买原料」按钮：当前商品成本含商店可购买的物品原料时出现，服务端按实际缺口购买。
+    private boolean buyMaterialsBtnVisible;
+    private int buyMaterialsBtnX, buyMaterialsBtnY, buyMaterialsBtnW, buyMaterialsBtnH;
     // 「前置任务」跳转行：条目配了 prerequisiteQuestId 才出现，点击跳到 FTBQ 任务书对应任务，样式同「跳转」
     private boolean prereqLinkVisible;
     private dev.ftb.mods.ftbquests.quest.Quest prereqQuest;
@@ -2203,6 +2206,8 @@ public class ShopScreen extends ScaledScreen {
         // 「补齐全部缺口」：只在确定（非"加载中"）有不够的项、且开着 AE 模式时出现——AE 自动合成只对着 AE 网络补，
         // 关了 AE 模式点这个没意义（缺口判定本身也不含 AE 那部分，见 hasCostShortfall）。
         boolean showAutoCraftBtn = mode == Mode.BUY && aeMode && hasCostShortfall(dcost, amount, selectedEntryKey, aeMode);
+        buyMaterialsBtnVisible = false;
+        boolean showBuyMaterialsBtn = mode == Mode.BUY && hasShopPurchasableMaterialCost(dcost);
         // 前置任务跳转行：条目配了前置任务就占一行（无论能否解析到，未同步/已删都要给玩家一个可见提示）
         prereqQuest = selected.hasPrerequisiteQuest()
                 ? com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.resolve(selected.getPrerequisiteQuestId()) : null;
@@ -2312,6 +2317,12 @@ public class ShopScreen extends ScaledScreen {
         if (showAutoCraftBtn) {
             autoCraftBtnX = cx; autoCraftBtnY = actionY - detailScroll; autoCraftBtnW = DETAIL_W - 16; autoCraftBtnH = 10;
             drawButton(g, cx, actionY, autoCraftBtnW, autoCraftBtnH, "§b⚙ 补齐全部缺口（AE自动合成）", mx, hoverMy);
+            actionY += 12;
+        }
+        buyMaterialsBtnVisible = showBuyMaterialsBtn;
+        if (showBuyMaterialsBtn) {
+            buyMaterialsBtnX = cx; buyMaterialsBtnY = actionY - detailScroll; buyMaterialsBtnW = DETAIL_W - 16; buyMaterialsBtnH = 10;
+            drawButton(g, cx, actionY, buyMaterialsBtnW, buyMaterialsBtnH, "§a购买原料", mx, hoverMy);
             actionY += 12;
         }
         prereqLinkVisible = selected.hasPrerequisiteQuest();
@@ -2622,6 +2633,11 @@ public class ShopScreen extends ScaledScreen {
                     ClientShopCatalog.revision(), entryKey, amount, aeMode));
             return true;
         }
+        if (inDetailViewport && buyMaterialsBtnVisible && selected != null
+                && hit(mx, my, buyMaterialsBtnX, buyMaterialsBtnY, buyMaterialsBtnW, buyMaterialsBtnH)) {
+            send(ShopActionPacket.Action.BUY_MATERIALS, selected, amount);
+            return true;
+        }
         // 前置任务跳转：打开 FTBQ 任务书并定位到该任务（未解析到时点了也没用，命中框本身照样给，方便玩家复制ID反馈）
         if (inDetailViewport && prereqLinkVisible && selected != null && hit(mx, my, prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH)) {
             com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.open(selected.getPrerequisiteQuestId());
@@ -2884,7 +2900,7 @@ public class ShopScreen extends ScaledScreen {
         long entryKey = entry != null ? ClientShopCatalog.keyOf(entry) : -1L;
         // aeMode 仅购买用（AE 模式优先注入网络，出售货款走虚拟钱包账户不涉及实物投放）；
         // backpackMode 购买/出售都要带（出售时决定优先扣随身背包还是精妙背包，见 ShopPurchase#sellBulk）
-        boolean ae = action == ShopActionPacket.Action.BUY && aeMode;
+        boolean ae = (action == ShopActionPacket.Action.BUY || action == ShopActionPacket.Action.BUY_MATERIALS) && aeMode;
         boolean bp = backpackMode;
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(
                 action, ClientShopCatalog.revision(), entryKey, times, ae, bp));
@@ -3469,6 +3485,23 @@ public class ShopScreen extends ScaledScreen {
             java.math.BigInteger need = java.math.BigInteger.valueOf(fluidIns.get(i).count).multiply(t);
             Long have = ClientCostPreview.fluidHave(entryKeyForPreview, aeModeForPreview, i);
             if (have != null && java.math.BigInteger.valueOf(have).compareTo(need) < 0) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasShopPurchasableMaterialCost(ShopCost cost) {
+        if (cost == null || cost.items().isEmpty()) return false;
+        for (ExchangeEntry.Ingredient ingredient : cost.items()) {
+            if (ingredient != null && hasShopGoodsId(ingredient.id)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasShopGoodsId(ResourceLocation id) {
+        if (id == null) return false;
+        String needle = id.toString();
+        for (com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest.Stub stub : ClientShopCatalog.stubs()) {
+            if (stub.goodsIds().size() == 1 && stub.goodsIds().contains(needle)) return true;
         }
         return false;
     }

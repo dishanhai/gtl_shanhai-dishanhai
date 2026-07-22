@@ -116,7 +116,9 @@ public final class ShanhaiStructurePlanner {
         } else if (currentState.isAir()) {
             kind = desired.isEmpty() ? ShanhaiStructurePlan.Kind.MANUAL : ShanhaiStructurePlan.Kind.PLACE;
         } else {
-            kind = ShanhaiStructurePlan.Kind.BLOCKED;
+            kind = ShanhaiUltimateTerminalConfig.isAbsoluteReplaceMode(terminal) && !desired.isEmpty()
+                    ? ShanhaiStructurePlan.Kind.FORCE_REPLACE
+                    : ShanhaiStructurePlan.Kind.BLOCKED;
         }
         return new ShanhaiStructurePlan.Entry(pos, kind, desired, current, allCandidates, chamberCapable);
     }

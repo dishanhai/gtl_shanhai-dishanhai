@@ -41,10 +41,14 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
     private static final int MAX_CONSECUTIVE_FAILURES = 16;
     private static final int FULL_NETWORK_COOLDOWN_TICKS = 20;
     private static final int FAILED_KEY_COOLDOWN_TICKS = 10;
+    private static final int COOLING_SCAN_BACKOFF_TICKS = 5;
     private int fullNetworkCooldown;
     private long starRailTick;
     private boolean lastFlushDidWork;
     private boolean lastFlushHitFailureLimit;
+    private int lastFlushScannedKeys;
+    private int lastFlushCoolingSkippedKeys;
+    private long lastFlushMinCoolingRemaining;
     private final Object2LongOpenHashMap<AEKey> failedKeyCooldownUntil = new Object2LongOpenHashMap<>();
     private OutputMode outputMode = OutputMode.BALANCED;
     private IGrid cachedGrid;
@@ -150,6 +154,8 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
             flushStarRailBuffer();
             if (!lastFlushDidWork && lastFlushHitFailureLimit) {
                 fullNetworkCooldown = FULL_NETWORK_COOLDOWN_TICKS;
+            } else if (!lastFlushDidWork && shouldBackoffCoolingOnlyScan()) {
+                fullNetworkCooldown = coolingOnlyBackoffTicks();
             }
             return lastFlushDidWork ? TickRateModulation.URGENT : TickRateModulation.SLOWER;
         }
@@ -158,6 +164,9 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
     private void flushStarRailBuffer() {
         lastFlushDidWork = false;
         lastFlushHitFailureLimit = false;
+        lastFlushScannedKeys = 0;
+        lastFlushCoolingSkippedKeys = 0;
+        lastFlushMinCoolingRemaining = Long.MAX_VALUE;
         if (buffer.isEmpty() || !refreshCachedAeServices()) {
             return;
         }
@@ -195,6 +204,7 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
         while (it.hasNext() && operations < operationBudget && scanBudget[0] > 0) {
             Object2LongMap.Entry<AEKey> entry = it.next();
             scanBudget[0]--;
+            lastFlushScannedKeys++;
             AEKey key = entry.getKey();
             long amount = entry.getLongValue();
             if (amount <= 0) {
@@ -205,6 +215,7 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
             long cooldownUntil = failedKeyCooldownUntil.getLong(key);
             if (cooldownUntil != 0L) {
                 if (cooldownUntil > starRailTick) {
+                    recordCoolingSkip(cooldownUntil);
                     continue;
                 }
                 failedKeyCooldownUntil.removeLong(key);
@@ -246,12 +257,15 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
         while (it.hasNext() && scanBudget[0] > 0) {
             Object2LongMap.Entry<AEKey> entry = it.next();
             scanBudget[0]--;
+            lastFlushScannedKeys++;
             AEKey key = entry.getKey();
             long amount = entry.getLongValue();
             if (amount <= 0 || amount >= smallestAmount) {
                 continue;
             }
-            if (failedKeyCooldownUntil.getLong(key) > starRailTick) {
+            long cooldownUntil = failedKeyCooldownUntil.getLong(key);
+            if (cooldownUntil > starRailTick) {
+                recordCoolingSkip(cooldownUntil);
                 continue;
             }
             smallestKey = key;
@@ -275,6 +289,28 @@ public class StarRailMEOutputMatrixPartMachine extends ReliableMEAsyncOutputPart
         }
         failedKeyCooldownUntil.put(smallestKey, starRailTick + FAILED_KEY_COOLDOWN_TICKS);
         return false;
+    }
+
+    private void recordCoolingSkip(long cooldownUntil) {
+        lastFlushCoolingSkippedKeys++;
+        long remaining = cooldownUntil - starRailTick;
+        if (remaining > 0L && remaining < lastFlushMinCoolingRemaining) {
+            lastFlushMinCoolingRemaining = remaining;
+        }
+    }
+
+    private boolean shouldBackoffCoolingOnlyScan() {
+        return lastFlushScannedKeys > 0
+                && lastFlushCoolingSkippedKeys >= lastFlushScannedKeys
+                && failedKeyCooldownUntil.size() >= buffer.size();
+    }
+
+    private int coolingOnlyBackoffTicks() {
+        if (lastFlushMinCoolingRemaining == Long.MAX_VALUE) {
+            return COOLING_SCAN_BACKOFF_TICKS;
+        }
+        long ticks = Math.min(COOLING_SCAN_BACKOFF_TICKS, lastFlushMinCoolingRemaining);
+        return (int) Math.max(1L, ticks);
     }
 
     private int getMaxOperationsForBuffer(int bufferSize) {

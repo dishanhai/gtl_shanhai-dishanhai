@@ -43,6 +43,8 @@ public class SuperDiskArrayInventory implements StorageCell {
     private final Map<AEKey, BigInteger> amounts = new HashMap<>();
     private BigInteger total = BigInteger.ZERO;
     private boolean persisted = true;
+    private int batchChangeDepth = 0;
+    private boolean batchSavePending = false;
 
     private SuperDiskArrayInventory(
             ItemStack stack, ISaveProvider saveProvider, UUID uuid, boolean readOnlyTemplate) {
@@ -274,6 +276,19 @@ public class SuperDiskArrayInventory implements StorageCell {
         return true;
     }
 
+    void beginBatchChanges() {
+        batchChangeDepth++;
+    }
+
+    void endBatchChanges() {
+        if (batchChangeDepth <= 0) return;
+        batchChangeDepth--;
+        if (batchChangeDepth == 0 && batchSavePending) {
+            batchSavePending = false;
+            flushSaveChanges();
+        }
+    }
+
     @Override
     public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
         if (what == null || amount <= 0) return 0L;
@@ -408,6 +423,14 @@ public class SuperDiskArrayInventory implements StorageCell {
 
     private void saveChanges() {
         persisted = false;
+        if (batchChangeDepth > 0) {
+            batchSavePending = true;
+            return;
+        }
+        flushSaveChanges();
+    }
+
+    private void flushSaveChanges() {
         if (saveProvider != null) saveProvider.saveChanges();
         else persist();
     }

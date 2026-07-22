@@ -86,6 +86,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(MEDiskHatchPartMachine.class, MultiblockPartMachine.MANAGED_FIELD_HOLDER);
     public static final int DEFAULT_DISK_SLOT_COUNT = 108;
+    private static final long PERSIST_DELAY_TICKS = 20L;
 
     @Persisted
     @DescSynced
@@ -106,6 +107,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     private final BitSet dirtyCellSlots;
     private transient TickableSubscription pendingPersistTick;
     private long lastPersistGameTime = Long.MIN_VALUE;
+    private long pendingPersistFirstDirtyTick = Long.MIN_VALUE;
 
     public MEDiskHatchPartMachine(IMachineBlockEntity holder) {
         super(holder);
@@ -131,6 +133,9 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     public void onLoad() {
         super.onLoad();
         exposeGridNodeOnAllSides();
+        if (!isRemote()) {
+            com.dishanhai.gt_shanhai.common.shop.ShopAeNetwork.registerDiskHatch(this);
+        }
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("MEH onLoad server={}, diskSlots[0]={}, nodeOnline={}",
                 !isRemote(), diskSlots.getStackInSlot(0), getMainNode().isOnline());
@@ -140,6 +145,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     @Override
     public void onUnload() {
         if (!isRemote()) {
+            com.dishanhai.gt_shanhai.common.shop.ShopAeNetwork.unregisterDiskHatch(this);
             forcePersistAll();
         }
         if (pendingPersistTick != null) {
@@ -150,6 +156,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             slotRuntimeCaches[slot] = null;
         }
         dirtyCellSlots.clear();
+        pendingPersistFirstDirtyTick = Long.MIN_VALUE;
         super.onUnload();
     }
 
@@ -158,6 +165,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             forcePersistSlot(slot);
         }
         dirtyCellSlots.clear();
+        pendingPersistFirstDirtyTick = Long.MIN_VALUE;
     }
 
     private void forcePersistSlot(int slot) {
@@ -177,6 +185,10 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         if (slot < 0 || slot >= slotGenerations.length || slotGenerations[slot] != generation) return;
         if (!dirtyCellSlots.get(slot)) {
             dirtyCellSlots.set(slot);
+            if (pendingPersistFirstDirtyTick == Long.MIN_VALUE) {
+                Level level = getLevel();
+                pendingPersistFirstDirtyTick = level == null ? 0L : level.getGameTime();
+            }
             markDirty();
             schedulePersistTick();
         }
@@ -195,10 +207,17 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                 pendingPersistTick.unsubscribe();
                 pendingPersistTick = null;
             }
+            pendingPersistFirstDirtyTick = Long.MIN_VALUE;
             return;
         }
         long gameTime = level.getGameTime();
         if (lastPersistGameTime == gameTime) return;
+        if (pendingPersistFirstDirtyTick == Long.MIN_VALUE) {
+            pendingPersistFirstDirtyTick = gameTime;
+        }
+        if (gameTime - pendingPersistFirstDirtyTick < PERSIST_DELAY_TICKS) {
+            return;
+        }
         lastPersistGameTime = gameTime;
 
         for (int slot = dirtyCellSlots.nextSetBit(0);
@@ -210,6 +229,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         if (dirtyCellSlots.isEmpty() && pendingPersistTick != null) {
             pendingPersistTick.unsubscribe();
             pendingPersistTick = null;
+            pendingPersistFirstDirtyTick = Long.MIN_VALUE;
         }
     }
 
@@ -221,6 +241,9 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             slotRuntimeCaches[slot] = null;
         }
         dirtyCellSlots.clear(slot);
+        if (dirtyCellSlots.isEmpty()) {
+            pendingPersistFirstDirtyTick = Long.MIN_VALUE;
+        }
         slotGenerations[slot]++;
     }
 
@@ -421,8 +444,18 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         slotRuntimeCaches[slot] = runtime;
         ISaveProvider slotSaveProvider = () -> onCellContentsChanged(slot, generation);
 
+        normalizeEaeInfinityCellRecord(stack);
+        MEStorage directInfinityCell = createEaeInfinityCellStorage(stack);
+        if (directInfinityCell != null) {
+            runtime.mounts.add(directInfinityCell);
+            runtime.mountedCount++;
+            return runtime;
+        }
+
         StorageCell cell = StorageCells.getCellInventory(stack, slotSaveProvider);
-        if (cell == null) return runtime;
+        if (cell == null) {
+            return runtime;
+        }
         runtime.persistableCells.add(cell);
 
         if (stack.getItem() instanceof SuperDiskArrayItem) {
@@ -688,7 +721,11 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         private void addTo(KeyCounter out) {
             for (int i = 0; i < keys.length; i++) {
-                AeStorageAmountMath.addSaturated(out, keys[i], amounts[i]);
+                if (amounts[i] == Long.MAX_VALUE) {
+                    out.set(keys[i], Long.MAX_VALUE);
+                } else {
+                    AeStorageAmountMath.addSaturated(out, keys[i], amounts[i]);
+                }
             }
         }
     }
@@ -742,13 +779,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                             (key, amount) -> AeStorageAmountMath.addSaturated(normalized, key, amount));
                     cached = new KeyCounterSnapshot(normalized);
                 } else {
-                    java.util.ArrayList<EquivalentKeySnapshotCache.Entry<AEKey>> entries = loadEquivalentEntries();
-                    equivalentKeyCache.replace(entries);
-                    KeyCounter normalized = new KeyCounter();
-                    for (EquivalentKeySnapshotCache.Entry<AEKey> entry : entries) {
-                        AeStorageAmountMath.addSaturated(normalized, normalizeFluidKey(entry.key()), entry.amount());
-                    }
-                    cached = new KeyCounterSnapshot(normalized);
+                    cached = loadNormalizedAvailableStacksSnapshot();
                 }
                 cachedAvailableStacks = cached;
                 cachedDelegateVersion = version;
@@ -771,6 +802,18 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                 entries.add(new EquivalentKeySnapshotCache.Entry<>(entry.getKey(), amount));
             }
             return entries;
+        }
+
+        private KeyCounterSnapshot loadNormalizedAvailableStacksSnapshot() {
+            KeyCounter raw = new KeyCounter();
+            delegate.getAvailableStacks(raw);
+            KeyCounter normalized = new KeyCounter();
+            for (var entry : raw) {
+                long amount = entry.getLongValue();
+                if (amount <= 0L) continue;
+                AeStorageAmountMath.addSaturated(normalized, normalizeFluidKey(entry.getKey()), amount);
+            }
+            return new KeyCounterSnapshot(normalized);
         }
 
         private void clearAvailableSnapshot() {
@@ -821,13 +864,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                             (key, amount) -> AeStorageAmountMath.addSaturated(normalized, key, amount));
                     cached = new KeyCounterSnapshot(normalized);
                 } else {
-                    java.util.ArrayList<EquivalentKeySnapshotCache.Entry<AEKey>> entries = loadEquivalentEntries();
-                    equivalentKeyCache.replace(entries);
-                    KeyCounter normalized = new KeyCounter();
-                    for (EquivalentKeySnapshotCache.Entry<AEKey> entry : entries) {
-                        AeStorageAmountMath.addSaturated(normalized, normalizeFluidKey(entry.key()), entry.amount());
-                    }
-                    cached = new KeyCounterSnapshot(normalized);
+                    cached = loadNormalizedAvailableStacksSnapshot();
                 }
                 cachedAvailableStacks = cached;
             }
@@ -869,6 +906,18 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                 entries.add(new EquivalentKeySnapshotCache.Entry<>(entry.getKey(), amount));
             }
             return entries;
+        }
+
+        private KeyCounterSnapshot loadNormalizedAvailableStacksSnapshot() {
+            KeyCounter raw = new KeyCounter();
+            delegate.getAvailableStacks(raw);
+            KeyCounter normalized = new KeyCounter();
+            for (var entry : raw) {
+                long amount = entry.getLongValue();
+                if (amount <= 0L) continue;
+                AeStorageAmountMath.addSaturated(normalized, normalizeFluidKey(entry.getKey()), amount);
+            }
+            return new KeyCounterSnapshot(normalized);
         }
 
         private void clearAvailableSnapshot() {
@@ -1294,8 +1343,9 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     public InteractionResult onUse(BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
         ItemStack held = player.getItemInHand(hand);
         if (held.isEmpty()) return InteractionResult.PASS;
+        normalizeEaeInfinityCellRecord(held);
         StorageCell cell = StorageCells.getCellInventory(held, this);
-        if (cell == null) return InteractionResult.PASS;
+        if (cell == null && createEaeInfinityCellStorage(held) == null) return InteractionResult.PASS;
         if (level.isClientSide) return InteractionResult.SUCCESS;
         int slots = diskSlots.getSlots();
         for (int i = 0; i < slots; i++) {

@@ -33,6 +33,47 @@ public final class ShanhaiTerminalMaterialService {
     public record Preflight(boolean success, Map<String, Long> missing, String reason) {}
     public record RequestTarget(AEKey key, long amount, String displayName) {}
 
+    public final class BuildBatch {
+        private final Map<AEItemKey, ReservedMaterial> reserved;
+        private boolean closed;
+
+        private BuildBatch(Map<AEItemKey, ReservedMaterial> reserved) {
+            this.reserved = reserved;
+        }
+
+        public ItemStack takeOne(ItemStack wanted) {
+            if (closed) return ItemStack.EMPTY;
+            AEItemKey key = AEItemKey.of(wanted);
+            if (key == null) return ItemStack.EMPTY;
+            ReservedMaterial material = reserved.get(key);
+            if (material == null || material.remaining <= 0) return ItemStack.EMPTY;
+            material.remaining--;
+            return material.representative.copyWithCount(1);
+        }
+
+        public boolean refundRemaining(ServerPlayer player, Context ae) {
+            if (closed) return true;
+            closed = true;
+            for (ReservedMaterial material : reserved.values()) {
+                if (material.remaining <= 0) continue;
+                long remaining = material.remaining;
+                material.remaining = 0;
+                if (!refundAmount(player, ae, material.representative, remaining)) return false;
+            }
+            return true;
+        }
+    }
+
+    private static final class ReservedMaterial {
+        private final ItemStack representative;
+        private long remaining;
+
+        private ReservedMaterial(ItemStack representative, long remaining) {
+            this.representative = representative.copyWithCount(1);
+            this.remaining = remaining;
+        }
+    }
+
     public Preflight preflight(ShanhaiStructurePlan plan, ServerPlayer player, Context ae) {
         Map<String, Long> missing = new LinkedHashMap<>();
         for (Map.Entry<AEKey, Long> entry : shortages(plan, player, ae).entrySet()) {
@@ -96,15 +137,62 @@ public final class ShanhaiTerminalMaterialService {
         };
     }
 
+    public BuildBatch prepareBuildBatch(ServerPlayer player, Context ae, ShanhaiStructurePlan plan) {
+        Map<AEItemKey, Long> required = new LinkedHashMap<>();
+        Map<AEItemKey, ItemStack> representatives = new LinkedHashMap<>();
+        for (ShanhaiStructurePlan.Entry entry : plan.entries()) {
+            if (!entry.requiresMaterial()) continue;
+            AEItemKey key = AEItemKey.of(entry.desired());
+            if (key == null) continue;
+            required.merge(key, 1L, ShanhaiTerminalMaterialService::saturatedAdd);
+            representatives.putIfAbsent(key, entry.desired());
+        }
+        Map<AEItemKey, ReservedMaterial> reserved = new LinkedHashMap<>();
+        for (Map.Entry<AEItemKey, Long> entry : required.entrySet()) {
+            ItemStack representative = representatives.get(entry.getKey());
+            long need = entry.getValue();
+            long fromPlayer = extractFromPlayer(player, representative, need);
+            long fromAe = bulkExtractFromAe(ae, representative, need - fromPlayer);
+            long total = saturatedAdd(fromPlayer, fromAe);
+            if (total > 0) {
+                reserved.put(entry.getKey(), new ReservedMaterial(representative, total));
+            }
+            if (total < need) {
+                new BuildBatch(reserved).refundRemaining(player, ae);
+                return null;
+            }
+        }
+        return new BuildBatch(reserved);
+    }
+
     public ItemStack takeOne(ServerPlayer player, Context ae, ItemStack wanted) {
         ItemStack fromPlayer = extractFromPlayer(player, wanted);
         if (!fromPlayer.isEmpty()) return fromPlayer;
         return extractFromAe(ae, wanted);
     }
 
+    private long extractFromPlayer(ServerPlayer player, ItemStack wanted, long amount) {
+        long extracted = 0;
+        while (extracted < amount) {
+            ItemStack stack = extractFromPlayer(player, wanted);
+            if (stack.isEmpty()) break;
+            extracted = saturatedAdd(extracted, stack.getCount());
+        }
+        return Math.min(extracted, amount);
+    }
+
     private ItemStack extractFromPlayer(ServerPlayer player, ItemStack wanted) {
         IItemHandler root = player.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
         return extractRecursive(root, wanted, Collections.newSetFromMap(new IdentityHashMap<>()));
+    }
+
+    private long bulkExtractFromAe(Context ae, ItemStack wanted, long amount) {
+        if (ae == null || amount <= 0) return 0;
+        AEItemKey key = AEItemKey.of(wanted);
+        if (key == null) return 0;
+        long available = ae.storage().extract(key, amount, Actionable.SIMULATE, ae.source());
+        if (available < amount) return 0;
+        return ae.storage().extract(key, amount, Actionable.MODULATE, ae.source());
     }
 
     private ItemStack extractFromAe(Context ae, ItemStack wanted) {
@@ -204,6 +292,17 @@ public final class ShanhaiTerminalMaterialService {
         ItemStack remainder = stack.copy();
         remainder.shrink((int) Math.min(inserted, remainder.getCount()));
         return remainder;
+    }
+
+    private boolean refundAmount(ServerPlayer player, Context ae, ItemStack representative, long amount) {
+        long remaining = amount;
+        int maxStackSize = Math.max(1, representative.getMaxStackSize());
+        while (remaining > 0) {
+            int count = (int) Math.min(remaining, maxStackSize);
+            if (!refund(player, ae, representative.copyWithCount(count))) return false;
+            remaining -= count;
+        }
+        return true;
     }
 
     private boolean canInsertAllToAe(Context ae, Map<AEItemKey, Long> amounts) {

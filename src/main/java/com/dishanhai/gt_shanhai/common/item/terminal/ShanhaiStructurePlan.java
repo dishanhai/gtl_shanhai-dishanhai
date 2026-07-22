@@ -15,6 +15,7 @@ public final class ShanhaiStructurePlan {
         SATISFIED,
         PLACE,
         REPLACE,
+        FORCE_REPLACE,
         CHAMBER_HINT,
         BLOCKED,
         MANUAL
@@ -42,7 +43,8 @@ public final class ShanhaiStructurePlan {
         }
 
         public boolean requiresMaterial() {
-            return (kind == Kind.PLACE || kind == Kind.REPLACE) && !desired.isEmpty();
+            return (kind == Kind.PLACE || kind == Kind.REPLACE || kind == Kind.FORCE_REPLACE)
+                    && !desired.isEmpty();
         }
     }
 

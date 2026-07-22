@@ -41,11 +41,12 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     // 模块等级变化时可主动调用 onModuleLevelChanged() 立即清空。
     // 优化：使用 System.identityHashCode(recipe) 作为快速键，减少 HashMap 对象装箱开销。
     private final java.util.Map<Integer, Long> moduleConditionTrueCache = new java.util.HashMap<>();
-    private final java.util.Map<Integer, Long> moduleConditionFalseCache = new java.util.HashMap<>();
+    private final java.util.Map<Integer, CachedModuleConditionFailure> moduleConditionFalseCache = new java.util.HashMap<>();
     private static final long MODULE_CONDITION_TRUE_TTL = 20L;
     private static final long MODULE_CONDITION_FALSE_TTL = 20L;
     private Set<GTRecipe> cachedModuleConditionSource;
     private Set<GTRecipe> cachedModuleConditionRecipes;
+    private String cachedModuleConditionError;
     private String cachedModuleItemId;
     private int cachedModuleCount = Integer.MIN_VALUE;
     private final java.util.IdentityHashMap<GTRecipe, AmplifiedRecipeCacheEntry> amplifiedRecipeCache =
@@ -79,6 +80,11 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     @Override
     protected long getMaxLookupCacheTicks() {
         return ACTIVE_LOOKUP_CACHE_TICKS;
+    }
+
+    @Override
+    protected boolean shouldInvalidateLookupCacheWhenNoRunnableRecipe() {
+        return false;
     }
 
     @Override
@@ -402,16 +408,32 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         refreshModuleConditionContext();
         Set<GTRecipe> base = super.lookupRecipeIterator();
         if (base.isEmpty()) {
+            cachedModuleConditionError = null;
+            clearConditionError();
             return base;
         }
         if (base == cachedModuleConditionSource && cachedModuleConditionRecipes != null) {
+            applyCachedModuleConditionError();
             return cachedModuleConditionRecipes;
         }
         Set<GTRecipe> result = new ObjectOpenHashSet<>(base.size());
+        boolean moduleConditionFailed = false;
+        String firstConditionError = null;
         for (GTRecipe recipe : base) {
             if (checkModuleCondition(recipe)) {
                 result.add(recipe);
+            } else {
+                moduleConditionFailed = true;
+                if (firstConditionError == null) {
+                    firstConditionError = readConditionError();
+                }
             }
+        }
+        cachedModuleConditionError = firstConditionError;
+        if (!moduleConditionFailed) {
+            clearConditionError();
+        } else if (firstConditionError != null) {
+            setConditionError(firstConditionError);
         }
         cachedModuleConditionSource = base;
         cachedModuleConditionRecipes = result;
@@ -439,6 +461,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         moduleConditionFalseCache.clear();
         cachedModuleConditionSource = null;
         cachedModuleConditionRecipes = null;
+        cachedModuleConditionError = null;
+        clearConditionError();
     }
 
     private boolean matchRecipeInputHandlePartCache(GTRecipe recipe) {
@@ -466,35 +490,32 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         Long trueUntil = moduleConditionTrueCache.get(recipeHash);
         if (trueUntil != null) {
             if (now < trueUntil) {
-                clearConditionError();
                 return true;
             }
             moduleConditionTrueCache.remove(recipeHash);
         }
-        Long falseUntil = moduleConditionFalseCache.get(recipeHash);
-        if (falseUntil != null) {
-            if (now < falseUntil) {
-                updateConditionErrorFromCache(recipe);
+        CachedModuleConditionFailure cachedFailure = moduleConditionFalseCache.get(recipeHash);
+        if (cachedFailure != null) {
+            if (now < cachedFailure.expiresAt) {
+                setConditionError(cachedFailure.message);
                 return false;
             }
             moduleConditionFalseCache.remove(recipeHash);
         }
         
         MetaMachine machine = getMachine();
-        clearConditionError(); // 每 tick 重置，防止状态残留
         String recipeId = recipe.getId() != null ? recipe.getId().toString() : "";
 
-        // 1. 优先从静态注册表查（模糊匹配 ID）
+        // 1. 优先从本轮重载的静态注册表按完整配方 ID 精确查询
         java.util.List<com.dishanhai.gt_shanhai.api.ModuleLevelCondition> staticReqs =
                 com.dishanhai.gt_shanhai.api.ModuleLevelCondition.getRequirements(recipeId);
         if (staticReqs != null && !staticReqs.isEmpty()) {
             for (var mlc : staticReqs) {
                 if (!mlc.checkModuleLevel(machine)) {
-                    setError(machine, mlc.getFailTooltip().getString(), mlc.moduleId, mlc.requiredLevel);
-                    cacheModuleConditionFalse(recipe);
+                    String error = setError(machine, mlc.getFailTooltip().getString(), mlc.moduleId, mlc.requiredLevel);
+                    cacheModuleConditionFalse(recipe, error);
                     return false;
                 }
-                setError(machine, mlc.getPassTooltip().getString(), mlc.moduleId, mlc.requiredLevel);
             }
             cacheModuleConditionTrue(recipe);
             return true;
@@ -508,21 +529,19 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         for (var cond : recipe.conditions) {
             if (cond instanceof com.dishanhai.gt_shanhai.api.ModuleLevelCondition mlc) {
                 if (!mlc.checkModuleLevel(machine)) {
-                    setError(machine, mlc.getFailTooltip().getString(), mlc.moduleId, mlc.requiredLevel);
-                    cacheModuleConditionFalse(recipe);
+                    String error = setError(machine, mlc.getFailTooltip().getString(), mlc.moduleId, mlc.requiredLevel);
+                    cacheModuleConditionFalse(recipe, error);
                     return false;
                 }
-                setError(machine, mlc.getPassTooltip().getString(), mlc.moduleId, mlc.requiredLevel);
                 continue;
             }
             var type = cond.getType();
             if (type == com.dishanhai.gt_shanhai.api.ModuleLevelCondition.TYPE && cond instanceof com.dishanhai.gt_shanhai.api.ModuleLevelCondition mlc2) {
                 if (!mlc2.checkModuleLevel(machine)) {
-                    setError(machine, mlc2.getFailTooltip().getString(), mlc2.moduleId, mlc2.requiredLevel);
-                    cacheModuleConditionFalse(recipe);
+                    String error = setError(machine, mlc2.getFailTooltip().getString(), mlc2.moduleId, mlc2.requiredLevel);
+                    cacheModuleConditionFalse(recipe, error);
                     return false;
                 }
-                setError(machine, mlc2.getPassTooltip().getString(), mlc2.moduleId, mlc2.requiredLevel);
             }
         }
         cacheModuleConditionTrue(recipe);
@@ -535,26 +554,52 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         moduleConditionTrueCache.put(recipeHash, getMachine().getOffsetTimer() + MODULE_CONDITION_TRUE_TTL);
     }
 
-    private void cacheModuleConditionFalse(GTRecipe recipe) {
+    private void cacheModuleConditionFalse(GTRecipe recipe, String message) {
         int recipeHash = System.identityHashCode(recipe);
         moduleConditionTrueCache.remove(recipeHash);
-        moduleConditionFalseCache.put(recipeHash, getMachine().getOffsetTimer() + MODULE_CONDITION_FALSE_TTL);
+        moduleConditionFalseCache.put(recipeHash, new CachedModuleConditionFailure(
+                getMachine().getOffsetTimer() + MODULE_CONDITION_FALSE_TTL, message));
     }
-    
-    private void updateConditionErrorFromCache(GTRecipe recipe) {
-        // 简化版：缓存失败时不重新查询详细错误信息
-        // 如需完整错误信息可保留原逻辑，但会降低缓存效果
-        MetaMachine machine = getMachine();
-        if (machine instanceof PrimordialOmegaEngineModuleBase mod) {
-            mod.setModuleConditionError("配方条件未满足");
+
+    private static final class CachedModuleConditionFailure {
+        private final long expiresAt;
+        private final String message;
+
+        private CachedModuleConditionFailure(long expiresAt, String message) {
+            this.expiresAt = expiresAt;
+            this.message = message;
         }
     }
 
-    private void setError(MetaMachine machine, String msg, String moduleId, int requiredLevel) {
+    private String setError(MetaMachine machine, String msg, String moduleId, int requiredLevel) {
         if (machine instanceof PrimordialOmegaEngineModuleBase mod) {
             // 模块侧用详细诊断替代通用错误信息
             String diag = mod.getModuleConditionDiagnosis(moduleId, requiredLevel);
-            mod.setModuleConditionError(diag != null ? diag : msg);
+            String error = diag != null ? diag : msg;
+            mod.setModuleConditionError(error);
+            return error;
+        }
+        return msg;
+    }
+
+    private String readConditionError() {
+        MetaMachine machine = getMachine();
+        return machine instanceof PrimordialOmegaEngineModuleBase mod
+                ? mod.getModuleConditionError() : null;
+    }
+
+    private void setConditionError(String message) {
+        MetaMachine machine = getMachine();
+        if (machine instanceof PrimordialOmegaEngineModuleBase mod) {
+            mod.setModuleConditionError(message);
+        }
+    }
+
+    private void applyCachedModuleConditionError() {
+        if (cachedModuleConditionError == null) {
+            clearConditionError();
+        } else {
+            setConditionError(cachedModuleConditionError);
         }
     }
 

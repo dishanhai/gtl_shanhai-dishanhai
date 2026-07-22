@@ -49,33 +49,38 @@ public final class ShanhaiSdaPatternTransfer {
         int failed = 0;
         boolean foundPattern = false;
 
-        for (Object2LongMap.Entry<AEKey> entry : available) {
-            AEKey key = entry.getKey();
-            long remaining = entry.getLongValue();
-            while (remaining-- > 0L) {
-                TransferDecision decision = target.simulate(key);
-                if (decision == TransferDecision.IGNORE) break;
-                foundPattern = true;
-                if (decision == TransferDecision.REJECT) break;
+        source.beginBatchChanges();
+        try {
+            for (Object2LongMap.Entry<AEKey> entry : available) {
+                AEKey key = entry.getKey();
+                long remaining = entry.getLongValue();
+                while (remaining-- > 0L) {
+                    TransferDecision decision = target.simulate(key);
+                    if (decision == TransferDecision.IGNORE) break;
+                    foundPattern = true;
+                    if (decision == TransferDecision.REJECT) break;
 
-                long extracted = source.extract(
-                        key, 1L, Actionable.MODULATE, IActionSource.empty());
-                if (extracted != 1L) {
+                    long extracted = source.extract(
+                            key, 1L, Actionable.MODULATE, IActionSource.empty());
+                    if (extracted != 1L) {
+                        failed++;
+                        break;
+                    }
+
+                    if (target.insert(key)) {
+                        transferred++;
+                        continue;
+                    }
+
+                    source.restoreExtractedKey(key);
                     failed++;
                     break;
                 }
-
-                if (target.insert(key)) {
-                    transferred++;
-                    continue;
-                }
-
-                source.restoreExtractedKey(key);
-                failed++;
-                break;
             }
+            return new TransferResult(transferred, failed, foundPattern);
+        } finally {
+            source.endBatchChanges();
         }
-        return new TransferResult(transferred, failed, foundPattern);
     }
 
     public record TransferResult(int transferred, int failed, boolean foundPattern) {}

@@ -112,8 +112,47 @@ public class MEDiskHatchKeyCounterSnapshotTest {
                 "KeyCounterSnapshot 必须把稳定快照压平成数组，避免每次回放遍历 KeyCounter 内部结构");
         assertTrue(source.contains("AeStorageAmountMath.addSaturated(out, keys[i], amounts[i])"),
                 "KeyCounterSnapshot.addTo 必须逐项饱和回放，避免重复无限量溢出");
+        assertTrue(source.contains("if (amounts[i] == Long.MAX_VALUE)")
+                        && source.contains("out.set(keys[i], Long.MAX_VALUE)"),
+                "无限量快照回放应直接 set，避免每次 addSaturated 先 get 再 set");
         assertEquals(-1, source.indexOf("AeStorageAmountMath.mergeSaturated(out, counter)"),
                 "KeyCounterSnapshot.addTo 不能再回到 mergeSaturated 热路径");
+    }
+
+    @Test
+    void standaloneEaeInfinityCellsBypassExternalBigIntegerInventory() throws IOException {
+        String source = Files.readString(HATCH_SOURCE);
+        String runtime = extractBlock(source, "private SlotRuntimeCache getOrCreateSlotRuntime(");
+
+        int direct = runtime.indexOf("MEStorage directInfinityCell = createEaeInfinityCellStorage(stack)");
+        int storageCell = runtime.indexOf("StorageCell cell = StorageCells.getCellInventory(stack, slotSaveProvider)");
+        assertTrue(direct >= 0, "单槽无限元件必须先构造山海轻量直接存储");
+        assertTrue(storageCell >= 0, "磁盘仓室仍需要保留普通 StorageCell 挂载路径");
+        assertTrue(direct < storageCell,
+                "EAE 无限元件必须在 StorageCells.getCellInventory 之前被山海直接挂载，避免进入 InfinityBigIntegerCellInventory.getAvailableStacks");
+        assertTrue(runtime.contains("runtime.mounts.add(directInfinityCell)"),
+                "直接无限元件不应再包一层 NormalizedFluidKeyStorage");
+    }
+
+    @Test
+    void normalizedAvailableStackSnapshotsDoNotRebuildEquivalentRawKeyCache() throws IOException {
+        String source = Files.readString(HATCH_SOURCE);
+        String normalizedFluid = extractBlock(source, "public void gtShanhai$getAvailableStacksSaturated(KeyCounter out) {");
+        int storageCellStart = source.indexOf("public static final class NormalizedStorageCell");
+        assertTrue(storageCellStart >= 0, "缺少 NormalizedStorageCell");
+        String normalizedCell = extractBlock(source.substring(storageCellStart),
+                "public void getAvailableStacks(KeyCounter out) {");
+
+        assertTrue(source.contains("private KeyCounterSnapshot loadNormalizedAvailableStacksSnapshot()"),
+                "库存展示路径需要直接构建归一化快照，避免先构建等价 raw-key 缓存");
+        assertFalse(normalizedFluid.contains("loadEquivalentEntries()"),
+                "NormalizedFluidKeyStorage 展示库存不应重建 extract 专用 raw-key 映射");
+        assertFalse(normalizedFluid.contains("equivalentKeyCache.replace"),
+                "NormalizedFluidKeyStorage 展示库存不应写入 extract 专用 raw-key 映射");
+        assertFalse(normalizedCell.contains("loadEquivalentEntries()"),
+                "NormalizedStorageCell 展示库存不应重建 extract 专用 raw-key 映射");
+        assertFalse(normalizedCell.contains("equivalentKeyCache.replace"),
+                "NormalizedStorageCell 展示库存不应写入 extract 专用 raw-key 映射");
     }
 
     @Test
@@ -128,8 +167,37 @@ public class MEDiskHatchKeyCounterSnapshotTest {
                 "模拟提取和网络库存输出必须读取同一份聚合快照");
     }
 
+    @Test
+    void scheduledPersistenceIsDebouncedAcrossServerTicks() throws IOException {
+        String source = Files.readString(HATCH_SOURCE);
+
+        assertTrue(source.contains("PERSIST_DELAY_TICKS"),
+                "磁盘仓室运行中落盘必须有短防抖，避免每 tick 写 SavedData");
+        assertTrue(source.contains("pendingPersistFirstDirtyTick"));
+        assertTrue(source.contains("gameTime - pendingPersistFirstDirtyTick < PERSIST_DELAY_TICKS"),
+                "未到防抖窗口时应继续等待，不得立即 forcePersistSlot");
+        assertTrue(source.contains("pendingPersistFirstDirtyTick = Long.MIN_VALUE"));
+        assertTrue(source.contains("forcePersistAll()"),
+                "卸载、取出、序列化等边界仍必须保留强制落盘入口");
+    }
+
     private static Object newCounter(Class<?> counterType) throws Exception {
         return counterType.getConstructor().newInstance();
+    }
+
+    private static String extractBlock(String source, String declaration) {
+        int start = source.indexOf(declaration);
+        assertTrue(start >= 0, "缺少方法声明: " + declaration);
+        int openBrace = source.indexOf('{', start);
+        int depth = 0;
+        for (int i = openBrace; i < source.length(); i++) {
+            char current = source.charAt(i);
+            if (current == '{') depth++;
+            if (current == '}' && --depth == 0) {
+                return source.substring(openBrace, i + 1);
+            }
+        }
+        throw new AssertionError("方法体未闭合: " + declaration);
     }
 
     private static Object newSnapshot(ClassLoader loader, Class<?> counterType, Object source) throws Exception {

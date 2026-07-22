@@ -108,8 +108,12 @@ class PatternRecipeSlotIsolationSourceTest {
 
         assertTrue(source.contains("RecipeTypePatternSearchHelper.collectActiveMarkedPatternRecipes(machine)"),
                 "山海选择集逻辑只能收集 AE 已真实激活的槽，不得给所有未下单样板自动补料");
-        assertTrue(source.contains("PatternSlotScopedRecipe.represents(scoped, candidate)"),
-                "槽位副本存在时必须移除同一真实配方的未分槽候选");
+        assertTrue(source.contains("PatternSlotScopedRecipe.shadowKeyForScoped(scoped)"),
+                "槽位副本存在时必须先建立 shadow key 集合，避免候选×槽位嵌套匹配");
+        assertTrue(source.contains("shadowedRecipeKeys.contains(PatternSlotScopedRecipe.unscopedShadowKey(candidate))"),
+                "未分槽候选应通过 O(1) shadow key 判断是否被槽位副本覆盖");
+        assertFalse(source.contains("PatternSlotScopedRecipe.represents(scoped, candidate)"),
+                "热点路径不得保留候选×槽位的嵌套 represents 扫描");
         assertFalse(guard.contains("if (!PatternSlotScopedRecipe.isScoped(recipe))"),
                 "输入守卫不得全局拒绝未分槽候选，槽位解析失败时必须保留兼容回退");
     }
@@ -131,7 +135,7 @@ class PatternRecipeSlotIsolationSourceTest {
     void activeScopedCandidatesAreMergedBeforeEmptyBaseCandidatesReturn() throws IOException {
         String source = Files.readString(SELECTABLE_RECIPE_LOGIC);
         int search = source.indexOf("Set<GTRecipe> recipes = searchSelectedRecipeTypes(machine);");
-        int merge = source.indexOf("Set<GTRecipe> merged = mergeMarkedPatternRecipes(machine, recipes);", search);
+        int merge = source.indexOf("Set<GTRecipe> merged = mergeMarkedPatternRecipesCached(machine, recipes);", search);
         int emptyCheck = source.indexOf("if (merged.isEmpty())", merge);
 
         assertTrue(search >= 0 && merge > search && emptyCheck > merge,

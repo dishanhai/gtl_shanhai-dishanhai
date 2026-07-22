@@ -9,9 +9,9 @@ import com.gregtechceu.gtceu.api.recipe.content.ContentModifier;
 import java.util.List;
 import java.util.Map;
 
-final class PrimordialRecipeOutputAmplifier {
+public final class PrimordialRecipeOutputAmplifier {
 
-    static GTRecipe apply(GTRecipe recipe, int multiplier) {
+    public static GTRecipe apply(GTRecipe recipe, int multiplier) {
         if (recipe == null || multiplier <= 1) {
             return recipe;
         }

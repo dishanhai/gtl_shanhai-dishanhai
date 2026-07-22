@@ -14,15 +14,18 @@ import net.minecraft.world.level.Level;
 public final class ShanhaiUltimateTerminalConfig {
 
     public static final String ROOT_KEY = "gt_shanhai_terminal";
-    public static final int CONFIG_VERSION = 2;
+    public static final int CONFIG_VERSION = 4;
     private static final String VERSION_KEY = "Version";
     private static final String UUID_KEY = "TerminalUuid";
     private static final String REPEAT_KEY = "RepeatCount";
     private static final String MIRROR_KEY = "MirrorMode";
     private static final String REPLACE_KEY = "ReplaceMode";
-    private static final String AE_REQUEST_KEY = "AeRequestMode";
+    private static final String ABSOLUTE_REPLACE_KEY = "AbsoluteReplaceMode";
+    private static final String AE_MODE_KEY = "AeMode";
+    private static final String LEGACY_AE_REQUEST_KEY = "AeRequestMode";
     private static final String NO_CHAMBER_KEY = "NoChamberMode";
     private static final String DISMANTLE_KEY = "DismantleMode";
+    private static final String MODULE_CHECK_KEY = "ModuleCheckMode";
     private static final String BOUND_AE_KEY = "BoundAE";
     private static final String REPLACEMENT_FAMILY_KEY = "ReplacementFamily";
     private static final String REPLACEMENT_TIER_KEY = "ReplacementTier";
@@ -36,6 +39,10 @@ public final class ShanhaiUltimateTerminalConfig {
         config.putInt(VERSION_KEY, CONFIG_VERSION);
         if (!config.hasUUID(UUID_KEY)) {
             config.putUUID(UUID_KEY, UUID.randomUUID());
+        }
+        if (!config.contains(AE_MODE_KEY) && config.contains(LEGACY_AE_REQUEST_KEY)) {
+            config.putBoolean(AE_MODE_KEY, config.getBoolean(LEGACY_AE_REQUEST_KEY));
+            config.remove(LEGACY_AE_REQUEST_KEY);
         }
         root.put(ROOT_KEY, config);
         return config;
@@ -69,12 +76,20 @@ public final class ShanhaiUltimateTerminalConfig {
         get(stack).putBoolean(REPLACE_KEY, replaceMode);
     }
 
-    public static boolean isAeRequestMode(ItemStack stack) {
-        return get(stack).getBoolean(AE_REQUEST_KEY);
+    public static boolean isAbsoluteReplaceMode(ItemStack stack) {
+        return get(stack).getBoolean(ABSOLUTE_REPLACE_KEY);
     }
 
-    public static void setAeRequestMode(ItemStack stack, boolean aeRequestMode) {
-        get(stack).putBoolean(AE_REQUEST_KEY, aeRequestMode);
+    public static void setAbsoluteReplaceMode(ItemStack stack, boolean absoluteReplaceMode) {
+        get(stack).putBoolean(ABSOLUTE_REPLACE_KEY, absoluteReplaceMode);
+    }
+
+    public static boolean isAeMode(ItemStack stack) {
+        return get(stack).getBoolean(AE_MODE_KEY);
+    }
+
+    public static void setAeMode(ItemStack stack, boolean aeMode) {
+        get(stack).putBoolean(AE_MODE_KEY, aeMode);
     }
 
     public static boolean isNoChamberMode(ItemStack stack) {
@@ -92,6 +107,14 @@ public final class ShanhaiUltimateTerminalConfig {
 
     public static void setDismantleMode(ItemStack stack, boolean dismantleMode) {
         get(stack).putBoolean(DISMANTLE_KEY, dismantleMode);
+    }
+
+    public static boolean isModuleCheckMode(ItemStack stack) {
+        return get(stack).getBoolean(MODULE_CHECK_KEY);
+    }
+
+    public static void setModuleCheckMode(ItemStack stack, boolean moduleCheckMode) {
+        get(stack).putBoolean(MODULE_CHECK_KEY, moduleCheckMode);
     }
 
     public static String getReplacementFamily(ItemStack stack) {

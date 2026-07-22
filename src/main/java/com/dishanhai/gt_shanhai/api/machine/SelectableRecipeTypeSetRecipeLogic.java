@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.api.machine;
 
 import com.dishanhai.gt_shanhai.common.item.PatternSlotScopedRecipe;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
+import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
@@ -78,6 +79,9 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     private final Map<GTRecipeType, TypeCacheEntry> perTypeLookupCache = new HashMap<>();
     private long cachedMarkedRecipeTick = Long.MIN_VALUE;
     private Set<GTRecipe> cachedMarkedRecipes = Collections.emptySet();
+    private long cachedMergedLookupTick = Long.MIN_VALUE;
+    private Set<GTRecipe> cachedMergedLookupBase;
+    private Set<GTRecipe> cachedMergedLookupRecipes;
 
     public SelectableRecipeTypeSetRecipeLogic(SelectableRecipeTypeSetMachine machine) {
         super(machine);
@@ -109,6 +113,9 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         perTypeLookupCache.clear();
         cachedMarkedRecipeTick = Long.MIN_VALUE;
         cachedMarkedRecipes = Collections.emptySet();
+        cachedMergedLookupTick = Long.MIN_VALUE;
+        cachedMergedLookupBase = null;
+        cachedMergedLookupRecipes = null;
     }
 
     /**
@@ -121,6 +128,14 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
 
     protected long getMaxLookupCacheTicks() {
         return MAX_LOOKUP_CACHE_TICKS;
+    }
+
+    /**
+     * 候选集合非空但本轮算不出可运行并行时，普通选择集机器继续清缓存：这能让代理执行者等动态输入机器
+     * 快速回到实时搜索。稳定原初模块会覆写为 false，避免 100x 倍率场景把配方类型候选缓存反复打掉。
+     */
+    protected boolean shouldInvalidateLookupCacheWhenNoRunnableRecipe() {
+        return true;
     }
 
     @Override
@@ -162,10 +177,10 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         if (cachedLookupRecipes != null
                 && cacheTicks > 0L
                 && tick - cachedLookupTick >= 0 && tick - cachedLookupTick < cacheTicks) {
-            return mergeMarkedPatternRecipes(machine, cachedLookupRecipes);
+            return mergeMarkedPatternRecipesCached(machine, cachedLookupRecipes);
         }
         Set<GTRecipe> recipes = searchSelectedRecipeTypes(machine);
-        Set<GTRecipe> merged = mergeMarkedPatternRecipes(machine, recipes);
+        Set<GTRecipe> merged = mergeMarkedPatternRecipesCached(machine, recipes);
         if (merged.isEmpty()) {
             // 空结果不写缓存：机器空转/缺料时永远实时搜索，料一到立刻开工，杜绝"缓存空集守死不启动"。
             invalidateLookupSetCache();
@@ -182,22 +197,36 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         return merged;
     }
 
+    private Set<GTRecipe> mergeMarkedPatternRecipesCached(SelectableRecipeTypeSetMachine machine, Set<GTRecipe> base) {
+        long tick = machine.getOffsetTimer();
+        if (base == cachedMergedLookupBase && tick == cachedMergedLookupTick
+                && cachedMergedLookupRecipes != null) {
+            return cachedMergedLookupRecipes;
+        }
+        Set<GTRecipe> merged = mergeMarkedPatternRecipes(machine, base);
+        cachedMergedLookupBase = base;
+        cachedMergedLookupTick = tick;
+        cachedMergedLookupRecipes = merged;
+        return merged;
+    }
+
     private Set<GTRecipe> mergeMarkedPatternRecipes(SelectableRecipeTypeSetMachine machine, Set<GTRecipe> base) {
         Set<GTRecipe> marked = collectActiveMarkedPatternRecipesCached(machine);
         if (marked.isEmpty()) {
             return base;
         }
+        ObjectOpenHashSet<PatternSlotScopedRecipe.ShadowKey> shadowedRecipeKeys =
+                new ObjectOpenHashSet<>(marked.size());
+        for (GTRecipe scoped : marked) {
+            PatternSlotScopedRecipe.ShadowKey key = PatternSlotScopedRecipe.shadowKeyForScoped(scoped);
+            if (key != null) {
+                shadowedRecipeKeys.add(key);
+            }
+        }
         LinkedHashSet<GTRecipe> merged = new LinkedHashSet<>();
         if (base != null) {
             for (GTRecipe candidate : base) {
-                boolean shadowed = false;
-                for (GTRecipe scoped : marked) {
-                    if (PatternSlotScopedRecipe.represents(scoped, candidate)) {
-                        shadowed = true;
-                        break;
-                    }
-                }
-                if (!shadowed) {
+                if (!shadowedRecipeKeys.contains(PatternSlotScopedRecipe.unscopedShadowKey(candidate))) {
                     merged.add(candidate);
                 }
             }
@@ -250,14 +279,15 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
                 }
             }
         }
-        if ("gtceu:nightmare_crafting".equals(type.registryName == null ? null : type.registryName.toString())) {
+        if (QuantumDiagnostics.ENABLED
+                && "gtceu:nightmare_crafting".equals(type.registryName == null ? null : type.registryName.toString())) {
             boolean isCapMachine = machine instanceof org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine;
             int mePartCount = -1;
             if (isCapMachine) {
                 mePartCount = ((org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine) machine)
                         .getMEPatternRecipeHandleParts().size();
             }
-            com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("selectableSet.nightmareCraftingLookup",
+            QuantumDiagnostics.hit("selectableSet.nightmareCraftingLookup",
                     "machine=" + machine.getClass().getName() + " isCapMachine=" + isCapMachine
                             + " mePatternHandlePartCount=" + mePartCount + " foundCount=" + found.size());
         }
@@ -363,7 +393,9 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             // 直接命中空集快速返回"更贵——曾尝试去掉这里的失效，代理执行者延迟从 307μs 涨到 761μs，
             // 已还原。缓存里的候选这轮全部并行为 0（料耗尽等）→ 机器要闲置：立即失效缓存，
             // 下轮重新实时搜索，避免守着已耗尽的陈旧候选集空转（控死保险）。
-            invalidateLookupSetCache();
+            if (shouldInvalidateLookupCacheWhenNoRunnableRecipe()) {
+                invalidateLookupSetCache();
+            }
             return null;
         }
         return RecipeCalculationHelper.INSTANCE.getFinalParallelData(
