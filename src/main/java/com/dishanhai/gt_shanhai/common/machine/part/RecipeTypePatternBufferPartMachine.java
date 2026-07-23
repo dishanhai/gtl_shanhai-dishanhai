@@ -146,6 +146,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private final Int2ReferenceMap<OutputMultiplierPatternCacheEntry> outputMultiplierPatternCache;
     private final RecipeTypePatternWildcardPersistence wildcardPersistence;
     private final InternalInventory combinedTerminalPatternInventory;
+    private boolean outputMultiplierPatternsRefreshNeeded = true;
     private IntConsumer wildcardRemoveSlotFromMap;
     private boolean rebuildingWildcardPatterns;
     private int selectedWildcardMotherSlot;
@@ -240,9 +241,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         clearOutputMultiplierPatternCache();
         super.onPatternChange(index);
         if (!isRemote()) {
-            refreshVisibleOutputMultiplierPattern(index, true);
             RecipeTypePatternSearchHelper.clearPatternSlotState(this, index);
         }
+        outputMultiplierPatternsRefreshNeeded = false;
         refreshPatternRecipeType(index);
     }
 
@@ -482,12 +483,14 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     private void refreshVisibleOutputMultiplierPatterns(boolean resetSlotCaches) {
         if (isRemote() || !outputMultiplierModeEnabled) return;
+        if (!resetSlotCaches && !outputMultiplierPatternsRefreshNeeded) return;
         boolean changed = false;
         for (int slot = 0; slot < getPatternInventory().getSlots() && slot < maxPatternCount; slot++) {
             if (refreshVisibleOutputMultiplierPattern(slot, resetSlotCaches)) {
                 changed = true;
             }
         }
+        outputMultiplierPatternsRefreshNeeded = false;
         if (changed) {
             reCalculatePatternSlotMap();
             needPatternSync = true;
@@ -520,7 +523,6 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             refundSlot(internalSlot.getItemInventory(), internalSlot.getFluidInventory());
             if (!buffer.isEmpty()) AEUtils.reFunds(buffer, getMainNode().getGrid(), actionSource);
         }
-        reCalculatePatternSlotMap();
         needPatternSync = true;
         return true;
     }
@@ -678,9 +680,12 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @Override
     public List<IPatternDetails> getAvailablePatterns() {
         refreshVisibleOutputMultiplierPatterns(false);
-        List<IPatternDetails> patterns = new ArrayList<>(super.getAvailablePatterns());
-        if (wildcardPatterns != null) patterns.addAll(wildcardPatterns);
-        return List.copyOf(patterns);
+        List<IPatternDetails> patterns = super.getAvailablePatterns();
+        if (wildcardPatterns == null || wildcardPatterns.isEmpty()) return patterns;
+        List<IPatternDetails> combined = new ArrayList<>(patterns.size() + wildcardPatterns.size());
+        combined.addAll(patterns);
+        combined.addAll(wildcardPatterns);
+        return List.copyOf(combined);
     }
 
     @Override

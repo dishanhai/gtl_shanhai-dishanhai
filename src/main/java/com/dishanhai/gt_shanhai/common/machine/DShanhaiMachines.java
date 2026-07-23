@@ -68,6 +68,7 @@ import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
 import com.dishanhai.gt_shanhai.common.item.DShanhaiMaintenanceHatchItem;
 import com.dishanhai.gt_shanhai.common.item.SeventyTwoChangesItem;
+import com.dishanhai.gt_shanhai.common.block.DShanhaiBlocks;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.CosmicCleanGravityMaintenanceHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiDivergenceEngineMachine;
@@ -1849,8 +1850,7 @@ public class DShanhaiMachines {
         }
 
             // ========== 零点光子转换器（HV 多方块） ==========
-            Block zpCasing = ForgeRegistries.BLOCKS.getValue(
-                    new ResourceLocation("gtceu", "hv_machine_casing"));
+            Block zpCasing = DShanhaiBlocks.CASING_ZERO_PHOTON.get();
 
             ZERO_PHOTON_CONDENSER = GTDishanhaiRegistration.REGISTRATE
                     .multiblock("zero_photon_condenser",
@@ -1861,7 +1861,7 @@ public class DShanhaiMachines {
                     .pattern(ZeroPhotonCondenserMachine::createPattern)
                     .appearanceBlock(() -> zpCasing)
                     .workableCasingRenderer(
-                            new ResourceLocation("gtceu", "block/casings/hv_machine_casing"),
+                            new ResourceLocation(MOD_ID, "block/casing_zero_photon"),
                             new ResourceLocation(MOD_ID, "block/multiblock/zero_photon_condenser"))
                     .register();
 
@@ -1873,6 +1873,7 @@ public class DShanhaiMachines {
                 tooltips.add(Component.literal("§7● 处理零点转换与光子虹吸两类配方"));
                 tooltips.add(Component.literal("§7● 输入：物品 + 流体 ｜ 输出：物品 + 流体"));
                 tooltips.add(Component.literal("§7● 支持并行仓与分歧引擎扩展"));
+                tooltips.add(Component.literal("§7● 基础并行：4；并行仓可继续提升"));
                 tooltips.add(Component.literal(""));
                 tooltips.add(Component.literal("§73×3×3 紧凑结构，HV机壳搭建"));
                 tooltips.add(Component.literal("§7"));

@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -21,19 +23,58 @@ public class VirtualPatternEncodingHelperTest {
     }
 
     @Test
-    void encodingRestoresNonConsumableInputsOmittedByGtceu() throws IOException {
+    void omittedNonConsumablesAreOnlyRestoredWhenForceWrapIsEnabled() throws IOException {
         String source = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+        String config = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/config/DShanhaiConfig.java"));
+        String configScreen = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/client/config/DShanhaiConfigScreen.java"));
 
         assertTrue(source.contains("findMatchingRecipeForEncoding(inputs, outputs)"),
                 "普通样板编码必须使用允许 GTCEu 省略不消耗输入的专用反查路径");
         assertTrue(source.contains("allowOmittedNonConsumables"),
                 "编码反查和星律运行时严格反推必须显式隔离");
+        assertTrue(config.contains("public ForgeConfigSpec.BooleanValue virtualProviderForceWrapOmittedNonConsumables;"),
+                "必须提供缺失不消耗输入强制包裹开关");
+        assertTrue(config.contains(".define(\"forceWrapOmittedNonConsumables\", false)"),
+                "强制补回缺失不消耗输入必须默认关闭");
+        assertFalse(DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.getDefault(),
+                "强制补回缺失不消耗输入的运行时默认值必须关闭");
+        String guard = "if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get())";
+        assertTrue(source.indexOf(guard) >= 0 && source.indexOf(guard, source.indexOf(guard) + guard.length()) >= 0,
+                "物品和流体缺失分支都必须尊重强制包裹配置");
         assertTrue(source.contains("GenericStack missingInput = createVirtualItemInput(sample, amount)"));
         assertTrue(source.contains("rewritten.add(missingInput)"),
-                "编码器删除的模具等不消耗物品必须主动补成虚拟供应器");
+                "开启配置后仍需保留旧的物品补回能力");
         assertTrue(source.contains("rewritten.add(new GenericStack(fluidKeyOf(sample), VIRTUAL_FLUID_MARKER_AMOUNT))"),
-                "编码器删除的不消耗流体必须主动补成虚拟标记");
+                "开启配置后仍需保留旧的流体补回能力");
+        assertTrue(configScreen.contains("cfg.virtualProviderForceWrapOmittedNonConsumables.get()"),
+                "配置界面必须显示强制包裹开关");
+    }
+
+    @Test
+    void encodingCanRecoverWhenAllVisibleInputsWereOmitted() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/mixin/PatternWrapControlMenuMixin.java"));
+
+        assertTrue(source.contains("at = @At(\"RETURN\"), cancellable = true"),
+                "必须等 AE 原始编码返回 null 后再恢复，保留配方类型与包裹上下文");
+        assertTrue(source.contains("priority = 900"),
+                "恢复编码必须先于配方类型上下文的 RETURN pop 执行");
+        assertTrue(source.contains("if (cir.getReturnValue() == null)"));
+        assertTrue(source.contains("gtShanhai$encodeVirtualOnlyPattern()"));
+        assertTrue(source.contains("VirtualPatternEncodingHelper.encodeProcessingPatternRecoveringVirtualInputs(inputs, outputs)"));
+        assertTrue(source.contains("cir.setReturnValue(recovered)"));
+
+        String helper = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+        assertTrue(helper.contains("public static ItemStack encodeProcessingPatternRecoveringVirtualInputs"),
+                "全虚拟输入恢复应集中在 helper 中，供其它编码入口复用");
+        assertTrue(helper.contains("rewriteInputsForVirtualProviders(inputs, outputs)"));
+        assertTrue(helper.contains("if (!hasAnyInput(rewritten))"));
+        assertTrue(helper.contains("catch (IllegalArgumentException ignored)"),
+                "AE 底层空输入保护异常不能继续打断菜单编码");
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import appeng.api.stacks.GenericStack;
 import appeng.api.storage.ITerminalHost;
 import appeng.helpers.IPatternTerminalMenuHost;
 import appeng.menu.me.common.MEStorageMenu;
@@ -8,6 +9,7 @@ import appeng.util.ConfigInventory;
 
 import com.dishanhai.gt_shanhai.common.item.PatternEncodeOverride;
 import com.dishanhai.gt_shanhai.common.item.PatternWrapControlMenu;
+import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
@@ -32,12 +34,16 @@ import java.util.Set;
  * 歧义放弃/槽位数量不符等静默失败（ERR/LRN 20260718 无法包裹排查）。
  * 与 GTLCore 自己的 PatternEncodingTermMenuMixin 共存，方法名不冲突。
  */
-@Mixin(value = PatternEncodingTermMenu.class, remap = false)
+@Mixin(value = PatternEncodingTermMenu.class, priority = 900, remap = false)
 public abstract class PatternWrapControlMenuMixin extends MEStorageMenu implements PatternWrapControlMenu {
 
     @Shadow(remap = false)
     @Final
     private ConfigInventory encodedInputsInv;
+
+    @Shadow(remap = false)
+    @Final
+    private ConfigInventory encodedOutputsInv;
 
     // getPlayer() 是从 MEStorageMenu 继承来的具体方法（不是 PatternEncodingTermMenu 自己声明的），
     // 直接靠 extends MEStorageMenu 的编译期继承就能拿到，@Shadow 它反而会报"target 类里找不到"
@@ -103,14 +109,43 @@ public abstract class PatternWrapControlMenuMixin extends MEStorageMenu implemen
         PatternEncodeOverride.push(new PatternEncodeOverride(this.gtShanhai$wrapMode, this.gtShanhai$markedSlots));
     }
 
-    @Inject(method = "encodeProcessingPattern", at = @At("RETURN"), remap = false)
+    @Inject(method = "encodeProcessingPattern", at = @At("RETURN"), cancellable = true, remap = false)
     private void gtShanhai$popWrapOverride(CallbackInfoReturnable<ItemStack> cir) {
-        String diagnostic = PatternEncodeOverride.consumeLastDiagnostic();
-        PatternEncodeOverride.pop();
+        String diagnostic;
+        try {
+            if (cir.getReturnValue() == null) {
+                ItemStack recovered = gtShanhai$encodeVirtualOnlyPattern();
+                if (!recovered.isEmpty()) {
+                    PatternEncodeOverride.setLastDiagnostic(
+                            "all visible inputs omitted; restored virtual non-consumables");
+                    cir.setReturnValue(recovered);
+                }
+            }
+            diagnostic = PatternEncodeOverride.consumeLastDiagnostic();
+        } finally {
+            PatternEncodeOverride.pop();
+        }
         if (diagnostic == null || diagnostic.isEmpty()) return;
         Player player = getPlayer();
         if (player != null) {
             player.displayClientMessage(Component.literal("[虚拟供应] " + diagnostic), true);
         }
+    }
+
+    @Unique
+    private ItemStack gtShanhai$encodeVirtualOnlyPattern() {
+        GenericStack[] inputs = new GenericStack[this.encodedInputsInv.size()];
+        for (int slot = 0; slot < inputs.length; slot++) {
+            inputs[slot] = this.encodedInputsInv.getStack(slot);
+            if (inputs[slot] != null) return ItemStack.EMPTY;
+        }
+
+        GenericStack[] outputs = new GenericStack[this.encodedOutputsInv.size()];
+        for (int slot = 0; slot < outputs.length; slot++) {
+            outputs[slot] = this.encodedOutputsInv.getStack(slot);
+        }
+        if (outputs.length == 0 || outputs[0] == null) return ItemStack.EMPTY;
+
+        return VirtualPatternEncodingHelper.encodeProcessingPatternRecoveringVirtualInputs(inputs, outputs);
     }
 }

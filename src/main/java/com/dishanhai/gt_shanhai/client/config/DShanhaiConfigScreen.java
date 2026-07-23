@@ -117,6 +117,12 @@ public final class DShanhaiConfigScreen {
                 .setDefaultValue(List.of("gtceu:programmed_circuit"))
                 .setTooltip(tip("这些物品写样板时不包裹为虚拟提供器，按原物品直接写入保留 NBT"))
                 .setSaveConsumer(list -> cfg.virtualProviderAutoWrapExclusions.set(list)).build());
+        vip.addEntry(e.startBooleanToggle(Component.literal("缺失不消耗输入时强制包裹"),
+                        cfg.virtualProviderForceWrapOmittedNonConsumables.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("关闭：尊重玩家删除不消耗输入的操作，不主动补回虚拟供应器/流体标记",
+                        "开启：反查配方缺失不消耗输入时，自动补回旧版虚拟供应器/流体标记"))
+                .setSaveConsumer(cfg.virtualProviderForceWrapOmittedNonConsumables::set).build());
 
         // ===== 配方类型样板总成 =====
         ConfigCategory pattern = builder.getOrCreateCategory(Component.literal("配方类型样板总成"));

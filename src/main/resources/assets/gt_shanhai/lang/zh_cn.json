@@ -329,6 +329,7 @@
   "block.gt_shanhai.mv_zero_point_conversion": "MV零点转换器",
   "block.gt_shanhai.mv_photon_siphon": "MV光子虹吸炉",
   "block.gt_shanhai.zero_photon_condenser": "零点光子转换器",
+  "block.gt_shanhai.casing_zero_photon": "零点光子转换器外壳",
   "gtceu.zero_photon_condenser": "零点光子转换器",
   "gtceu.recipe_type.zero_photon_condenser": "零点光子转换器",
   "gtceu.recipe_type.zero_point_conversion": "零点转换",

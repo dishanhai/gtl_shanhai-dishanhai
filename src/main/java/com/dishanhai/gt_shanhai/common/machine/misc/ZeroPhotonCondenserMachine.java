@@ -9,6 +9,7 @@ import com.gregtechceu.gtceu.api.pattern.util.RelativeDirection;
 import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.machine.multiblock.PartAbility;
 import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
+import org.gtlcore.gtlcore.common.data.GTLRecipeModifiers;
 
 import net.minecraft.world.level.block.Block;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -27,7 +28,8 @@ public class ZeroPhotonCondenserMachine extends GTLAddWirelessWorkableElectricMu
 
     @Override
     public int getMaxParallel() {
-        return 4;
+        int hatchParallel = GTLRecipeModifiers.getHatchParallel(this);
+        return Math.max(4, hatchParallel);
     }
 
     public static BlockPattern createPattern(MultiblockMachineDefinition definition) {
@@ -44,7 +46,8 @@ public class ZeroPhotonCondenserMachine extends GTLAddWirelessWorkableElectricMu
                         .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
                         .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
                         .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1))
-                        .or(Predicates.abilities(PartAbility.INPUT_ENERGY).setPreviewCount(1)))
+                        .or(Predicates.abilities(PartAbility.INPUT_ENERGY).setPreviewCount(1))
+                        .or(Predicates.abilities(PartAbility.PARALLEL_HATCH).setPreviewCount(1)))
                 .build();
     }
 }

@@ -57,6 +57,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.EnumValue<VirtualProviderMode> virtualProviderMode;
         /** 虚拟物品提供器 — 自动包裹排除物品 ID */
         public ForgeConfigSpec.ConfigValue<List<? extends String>> virtualProviderAutoWrapExclusions;
+        /** 虚拟物品提供器 — 编码器缺失不消耗输入时是否强行补回 */
+        public ForgeConfigSpec.BooleanValue virtualProviderForceWrapOmittedNonConsumables;
         /** 配方类型样板总成 — 主机配方类型联动模式 */
         public ForgeConfigSpec.EnumValue<RecipeTypePatternSwitchMode> recipeTypePatternSwitchMode;
         /** 配方类型样板总成 — 是否允许虚拟执行宿主当前不支持的配方类型 */
@@ -177,6 +179,11 @@ public final class DShanhaiConfig {
                     .comment("自动写样板时不包裹为虚拟物品提供器的物品 ID 列表",
                              "例：gtceu:programmed_circuit。被排除物品会按原物品直接写入样板，保留自身 NBT")
                     .defineList("autoWrapExclusions", List.of("gtceu:programmed_circuit"), value -> value instanceof String);
+            virtualProviderForceWrapOmittedNonConsumables = builder
+                    .comment("编码器反查到不消耗输入但玩家未放入时，是否强行补回虚拟供应器/流体标记",
+                             "false=尊重玩家删除输入的操作，不包裹该缺失项（默认）",
+                             "true=保留旧行为，自动补回缺失的不消耗物品或流体")
+                    .define("forceWrapOmittedNonConsumables", false);
             builder.pop();
 
             builder.push("recipe_type_pattern_buffer");

@@ -11,6 +11,7 @@ import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.crafting.pattern.AEProcessingPattern;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -141,6 +142,34 @@ public final class VirtualPatternEncodingHelper {
             PatternEncodeOverride.setLastDiagnostic(diagnostic);
         }
         return result;
+    }
+
+    public static ItemStack encodeProcessingPatternRecoveringVirtualInputs(GenericStack[] inputs, GenericStack[] outputs) {
+        if (inputs == null || outputs == null || outputs.length == 0 || outputs[0] == null) {
+            return ItemStack.EMPTY;
+        }
+        GenericStack[] rewritten = rewriteInputsForVirtualProviders(inputs, outputs);
+        if (!hasAnyInput(rewritten)) {
+            return ItemStack.EMPTY;
+        }
+        try {
+            ItemStack encoded = PatternDetailsHelper.encodeProcessingPattern(rewritten, outputs);
+            return encoded == null ? ItemStack.EMPTY : encoded;
+        } catch (IllegalArgumentException ignored) {
+            return ItemStack.EMPTY;
+        } catch (NullPointerException ignored) {
+            return ItemStack.EMPTY;
+        }
+    }
+
+    private static boolean hasAnyInput(GenericStack[] inputs) {
+        if (inputs == null) return false;
+        for (GenericStack input : inputs) {
+            if (input != null && input.what() != null && input.amount() > 0L) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static boolean containsVirtualProviderInput(GenericStack[] inputs) {
@@ -1199,6 +1228,9 @@ public final class VirtualPatternEncodingHelper {
                 return false;
             }
             if (matchedIndex < 0) {
+                if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) {
+                    continue;
+                }
                 ItemStack sample = firstItemStack(content);
                 GenericStack missingInput = createVirtualItemInput(sample, amount);
                 if (missingInput == null) return false;
@@ -1262,6 +1294,9 @@ public final class VirtualPatternEncodingHelper {
             }
             if (matchedIndex < 0 && !isNonConsumable(content)) return false;
             if (matchedIndex < 0) {
+                if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) {
+                    continue;
+                }
                 rewritten.add(new GenericStack(fluidKeyOf(sample), VIRTUAL_FLUID_MARKER_AMOUNT));
                 continue;
             }

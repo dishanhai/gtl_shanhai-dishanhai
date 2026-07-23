@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -118,6 +119,23 @@ class StellarPatternMultiplierSourceTest {
         assertTrue(source.contains("needPatternSync = true;"));
         assertTrue(available.contains("refreshVisibleOutputMultiplierPatterns(false)"),
                 "AE 查询可用样板前要自校正一次，防止加载后先暴露旧 1x pattern");
+    }
+
+    @Test
+    void availablePatternRefreshAvoidsRepeatedFullScansAndMapRebuilds() throws IOException {
+        String source = Files.readString(MACHINE);
+        String refreshOne = extractBlock(source, "private boolean refreshVisibleOutputMultiplierPattern(");
+        String onChange = extractBlock(source, "protected void onPatternChange(int index)");
+        String available = extractBlock(source, "public List<IPatternDetails> getAvailablePatterns()");
+
+        assertTrue(source.contains("outputMultiplierPatternsRefreshNeeded"),
+                "倍率样板全量校正必须有脏标记，不能每次 AE 查询都重解码全部槽位");
+        assertTrue(available.contains("wildcardPatterns.isEmpty()) return patterns"),
+                "无通配样板时必须直接复用父类不可变列表，避免重复复制");
+        assertFalse(refreshOne.contains("reCalculatePatternSlotMap();"),
+                "单槽倍率刷新不能重复执行父类已经完成的全局槽位映射重算");
+        assertFalse(onChange.contains("refreshVisibleOutputMultiplierPattern(index, true)"),
+                "父类 getRealPattern 已完成单槽倍率改写，子类不得再次解码同一张样板");
     }
 
     @Test

@@ -103,6 +103,8 @@ categories:
 > `mode` - 默认 `AE_TARGET_CHECK`\
 > 虚拟物品提供器模式。`AE_TARGET_CHECK` 按 AE 下单时的真实目标物检查网络；`SUPPLY_MACHINE` 则检查同网络虚拟物品供应机槽内是否存在目标物。\
 > `autoWrapExclusions` - 默认 `gtceu:programmed_circuit`\
-> 自动写样板时不包裹成虚拟物品提供器的物品 ID 列表。被排除物品会按原物品写入样板，保留自身 NBT。
+> 自动写样板时不包裹成虚拟物品提供器的物品 ID 列表。被排除物品会按原物品写入样板，保留自身 NBT。\
+> `forceWrapOmittedNonConsumables` - 默认 `false`\
+> 编码器反查到不消耗输入但玩家未放入时，`false` 尊重玩家删除输入的操作，不主动补回虚拟供应器或流体标记；`true` 保留旧行为，自动补回缺失的不消耗输入。
 
 </Column>
