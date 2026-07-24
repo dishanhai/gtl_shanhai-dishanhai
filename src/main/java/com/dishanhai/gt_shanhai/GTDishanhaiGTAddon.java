@@ -37,9 +37,6 @@ public class GTDishanhaiGTAddon implements IGTAddon {
         // BHC 条件暂禁用排查崩溃: GTRegistries.RECIPE_CONDITIONS.register("bhc_recipe", BHCRecipeCondition.TYPE);
         GTRegistries.RECIPE_CONDITIONS.freeze();
 
-        // 注册方块（需在机器之前，机器结构引用方块）
-        com.dishanhai.gt_shanhai.common.block.DShanhaiBlocks.init();
-
         GTRegistries.MACHINES.unfreeze();
         DShanhaiMachines.init();
         GTRegistries.MACHINES.freeze();

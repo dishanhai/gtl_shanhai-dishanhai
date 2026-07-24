@@ -402,8 +402,11 @@
   "message.gt_shanhai.ultimate_terminal.gtceu_height_exceeded": "§c[Shanhai Terminal] Build blocked: controller %s; this dimension allows Y=%s, but GTCEu multiblocks are limited to Y=%s; %s positions out of bounds, first at %s",
   "item.gt_shanhai.wireless_pattern_management_terminal": "Shanhai Wireless Pattern Management Terminal",
   "key.gt_shanhai.open_pattern_management": "Open Shanhai Wireless Pattern Management Terminal",
+  "key.gt_shanhai.ae_terminal_favorite": "Toggle AE Terminal Favorite",
   "gui.gt_shanhai.remote_pattern_catalyst": "Stellar Pattern Slot %s Catalysts",
   "gui.gt_shanhai.remote_pattern_return": "Return to Terminal",
-  "gui.gt_shanhai.remote_stock_input": "Stellar Stock Input"
+  "gui.gt_shanhai.remote_stock_input": "Stellar Stock Input",
+  "gui.gt_shanhai.crafting_plan.virtual_presence": "Virtual Presence",
+  "gui.gt_shanhai.crafting_plan.virtual_presence.detail": "This entry includes a virtual requirement: the virtual portion is not consumed and only checks whether the target exists in the network"
 }
 

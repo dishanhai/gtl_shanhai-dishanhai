@@ -68,7 +68,6 @@ import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
 import com.dishanhai.gt_shanhai.common.item.DShanhaiMaintenanceHatchItem;
 import com.dishanhai.gt_shanhai.common.item.SeventyTwoChangesItem;
-import com.dishanhai.gt_shanhai.common.block.DShanhaiBlocks;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.CosmicCleanGravityMaintenanceHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiDivergenceEngineMachine;
@@ -1850,8 +1849,6 @@ public class DShanhaiMachines {
         }
 
             // ========== 零点光子转换器（HV 多方块） ==========
-            Block zpCasing = DShanhaiBlocks.CASING_ZERO_PHOTON.get();
-
             ZERO_PHOTON_CONDENSER = GTDishanhaiRegistration.REGISTRATE
                     .multiblock("zero_photon_condenser",
                             ZeroPhotonCondenserMachine::new)
@@ -1859,7 +1856,7 @@ public class DShanhaiMachines {
                     .recipeTypes(DShanhaiRecipeTypes.ZERO_POINT_CONVERSION,
                             DShanhaiRecipeTypes.PHOTON_SIPHON)
                     .pattern(ZeroPhotonCondenserMachine::createPattern)
-                    .appearanceBlock(() -> zpCasing)
+                    .appearanceBlock(GTDishanhaiMod.ZERO_PHOTON_CASING::get)
                     .workableCasingRenderer(
                             new ResourceLocation(MOD_ID, "block/casing_zero_photon"),
                             new ResourceLocation(MOD_ID, "block/multiblock/zero_photon_condenser"))
@@ -1875,7 +1872,7 @@ public class DShanhaiMachines {
                 tooltips.add(Component.literal("§7● 支持并行仓与分歧引擎扩展"));
                 tooltips.add(Component.literal("§7● 基础并行：4；并行仓可继续提升"));
                 tooltips.add(Component.literal(""));
-                tooltips.add(Component.literal("§73×3×3 紧凑结构，HV机壳搭建"));
+                tooltips.add(Component.literal("§73×3×3 紧凑结构，零点光子外壳搭建"));
                 tooltips.add(Component.literal("§7"));
                 tooltips.add(Component.literal("§8「每一个光子都是从虚无中索取的能量。」"));
             });

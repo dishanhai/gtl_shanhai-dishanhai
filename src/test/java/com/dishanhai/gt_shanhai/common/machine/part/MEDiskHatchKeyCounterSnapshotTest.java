@@ -103,6 +103,61 @@ public class MEDiskHatchKeyCounterSnapshotTest {
     }
 
     @Test
+    void snapshotAddsFiniteContributionAndSaturatesOnlyOnOverflow() throws Exception {
+        MixinAwareClassLoader loader = new MixinAwareClassLoader(getClass().getClassLoader());
+        Class<?> counterType = loader.loadClass(KEY_COUNTER);
+        TestKey key = new TestKey("finite_replay");
+        Object source = newCounter(counterType);
+        add(counterType, source, key, 7L);
+        Object snapshot = newSnapshot(loader, counterType, source);
+
+        Object out = newCounter(counterType);
+        add(counterType, out, key, 5L);
+        addSnapshot(loader, counterType, snapshot, out);
+        assertEquals(12L, get(counterType, out, key));
+
+        Object overflowSource = newCounter(counterType);
+        add(counterType, overflowSource, key, Long.MAX_VALUE - 5L);
+        Object overflowSnapshot = newSnapshot(loader, counterType, overflowSource);
+        Object overflowOut = newCounter(counterType);
+        add(counterType, overflowOut, key, 10L);
+        addSnapshot(loader, counterType, overflowSnapshot, overflowOut);
+        assertEquals(Long.MAX_VALUE, get(counterType, overflowOut, key));
+    }
+
+    @Test
+    void snapshotAppliesFiniteDeltasWithoutRebuilding() throws Exception {
+        MixinAwareClassLoader loader = new MixinAwareClassLoader(getClass().getClassLoader());
+        Class<?> counterType = loader.loadClass(KEY_COUNTER);
+        TestKey key = new TestKey("finite_delta");
+        Object source = newCounter(counterType);
+        add(counterType, source, key, 10L);
+        Object snapshot = newSnapshot(loader, counterType, source);
+
+        assertTrue(updateSnapshotAmount(loader, snapshot, "addAmount", key, 5L));
+        assertTrue(updateSnapshotAmount(loader, snapshot, "removeAmount", key, 4L));
+
+        Object out = newCounter(counterType);
+        addSnapshot(loader, counterType, snapshot, out);
+        assertEquals(11L, get(counterType, out, key));
+        assertEquals(11L, getSnapshotAmount(loader, snapshot, key));
+    }
+
+    @Test
+    void snapshotRejectsIncrementalExtractionFromSaturatedAmount() throws Exception {
+        MixinAwareClassLoader loader = new MixinAwareClassLoader(getClass().getClassLoader());
+        Class<?> counterType = loader.loadClass(KEY_COUNTER);
+        TestKey key = new TestKey("saturated_delta");
+        Object source = newCounter(counterType);
+        add(counterType, source, key, Long.MAX_VALUE);
+        Object snapshot = newSnapshot(loader, counterType, source);
+
+        assertFalse(updateSnapshotAmount(loader, snapshot, "removeAmount", key, 1L),
+                "Long.MAX_VALUE 只是饱和值，无法据此推断 BigInteger 提取后的真实余量");
+        assertEquals(Long.MAX_VALUE, getSnapshotAmount(loader, snapshot, key));
+    }
+
+    @Test
     void snapshotReplayAvoidsBulkCopyingVariantSubmaps() throws IOException {
         String source = Files.readString(HATCH_SOURCE);
 
@@ -110,9 +165,13 @@ public class MEDiskHatchKeyCounterSnapshotTest {
                 "KeyCounterSnapshot.addTo 不能整表 addAll，否则空输出计数器会触发 VariantCounter.copy()");
         assertTrue(source.contains("private final AEKey[] keys;"),
                 "KeyCounterSnapshot 必须把稳定快照压平成数组，避免每次回放遍历 KeyCounter 内部结构");
-        assertTrue(source.contains("AeStorageAmountMath.addSaturated(out, keys[i], amounts[i])"),
-                "KeyCounterSnapshot.addTo 必须逐项饱和回放，避免重复无限量溢出");
-        assertTrue(source.contains("if (amounts[i] == Long.MAX_VALUE)")
+        assertFalse(source.contains("AeStorageAmountMath.addSaturated(out, keys[i], amounts[i])"),
+                "已知非空有限快照不得再走通用空值检查与第二次 KeyCounter.set 定位");
+        assertTrue(source.contains("out.add(keys[i], amount)"),
+                "有限量无溢出时应使用 KeyCounter.add 一次完成累加");
+        assertTrue(source.contains("amount > Long.MAX_VALUE - current"),
+                "重复有限贡献仍必须在真正溢出时饱和为 Long.MAX_VALUE");
+        assertTrue(source.contains("if (amount == Long.MAX_VALUE)")
                         && source.contains("out.set(keys[i], Long.MAX_VALUE)"),
                 "无限量快照回放应直接 set，避免每次 addSaturated 先 get 再 set");
         assertEquals(-1, source.indexOf("AeStorageAmountMath.mergeSaturated(out, counter)"),
@@ -153,6 +212,10 @@ public class MEDiskHatchKeyCounterSnapshotTest {
                 "NormalizedStorageCell 展示库存不应重建 extract 专用 raw-key 映射");
         assertFalse(normalizedCell.contains("equivalentKeyCache.replace"),
                 "NormalizedStorageCell 展示库存不应写入 extract 专用 raw-key 映射");
+        assertTrue(source.contains("cached.addAmount(normalized, inserted)"),
+                "成功插入已有有限 key 后应增量更新库存快照，不能立即全量重扫 BigInteger 盘");
+        assertTrue(source.contains("cached.removeAmount(normalized, extracted)"),
+                "成功提取已有有限 key 后应增量更新库存快照，不能立即全量重扫 BigInteger 盘");
     }
 
     @Test
@@ -218,6 +281,13 @@ public class MEDiskHatchKeyCounterSnapshotTest {
         Method get = loader.loadClass(SNAPSHOT).getDeclaredMethod("get", AEKey.class);
         get.setAccessible(true);
         return (long) get.invoke(snapshot, key);
+    }
+
+    private static boolean updateSnapshotAmount(ClassLoader loader, Object snapshot, String methodName,
+                                                AEKey key, long amount) throws Exception {
+        Method method = loader.loadClass(SNAPSHOT).getDeclaredMethod(methodName, AEKey.class, long.class);
+        method.setAccessible(true);
+        return (boolean) method.invoke(snapshot, key, amount);
     }
 
     private static void add(Class<?> counterType, Object counter, AEKey key, long amount) throws Exception {

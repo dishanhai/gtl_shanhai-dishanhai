@@ -3,14 +3,25 @@ package com.dishanhai.gt_shanhai.client;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.block.DShanhaiAE2Blocks;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
+import com.dishanhai.gt_shanhai.client.ae.AeTerminalFavorites;
+import com.dishanhai.gt_shanhai.mixin.AeTerminalFavoritesScreenAccessor;
+
+import appeng.client.gui.AEBaseScreen;
+import appeng.client.gui.me.common.MEStorageScreen;
+import appeng.client.gui.me.common.RepoSlot;
+import appeng.menu.me.common.GridInventoryEntry;
+
+import com.mojang.blaze3d.platform.InputConstants;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.world.inventory.Slot;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import net.minecraftforge.client.event.ScreenEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.common.MinecraftForge;
 
 public class ClientInit {
@@ -51,6 +62,7 @@ public class ClientInit {
 
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientChatReceived);
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onMouseButtonPressed);
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.HIGHEST, ClientInit::onAeTerminalFavoriteKey);
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientLoggingOut);
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientLoggingIn);
         MinecraftForge.EVENT_BUS.addListener(ShanhaiKeyMappings::onClientTick);
@@ -72,6 +84,23 @@ public class ClientInit {
         if (JeiChatLinkHelper.runSearchCommand(clickEvent.getValue())) {
             event.setCanceled(true);
         }
+    }
+
+    private static void onAeTerminalFavoriteKey(ScreenEvent.KeyPressed.Pre event) {
+        if (!(event.getScreen() instanceof MEStorageScreen<?> screen)
+                || ShanhaiKeyMappings.AE_TERMINAL_FAVORITE == null
+                || !ShanhaiKeyMappings.AE_TERMINAL_FAVORITE.isActiveAndMatches(
+                        InputConstants.getKey(event.getKeyCode(), event.getScanCode()))) {
+            return;
+        }
+        Slot slot = ((AEBaseScreen<?>) screen).getSlotUnderMouse();
+        if (!(slot instanceof RepoSlot repoSlot)) return;
+        GridInventoryEntry entry = repoSlot.getEntry();
+        if (entry == null || !AeTerminalFavorites.isSupported(entry.getWhat())) return;
+
+        AeTerminalFavorites.toggle(entry.getWhat());
+        ((AeTerminalFavoritesScreenAccessor) screen).gtShanhai$getRepo().updateView();
+        event.setCanceled(true);
     }
 
     /** 不允许跨服务器复用相同 revision 的旧商品目录。 */

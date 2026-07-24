@@ -7,11 +7,14 @@ import appeng.api.stacks.AEItemKey;
 import com.dishanhai.gt_shanhai.common.item.PatternNotConsumableFilter;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
+import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
+import org.gtlcore.gtlcore.integration.ae2.handler.SlotCacheManager;
 
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import org.spongepowered.asm.mixin.Final;
@@ -89,6 +92,11 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
         gtShanhai$stripVirtualFluids();
     }
 
+    @Override
+    public void gtShanhai$clearVirtualTargetsIfDepleted() {
+        gtShanhai$clearCatalystsIfDepleted();
+    }
+
     @Inject(method = "serializeNBT", at = @At("RETURN"), remap = false)
     private void gtShanhai$saveVirtualIdentity(CallbackInfoReturnable<CompoundTag> cir) {
         VirtualPatternBufferSlotState.writeVirtualTargets(itemInventory, fluidInventory, cir.getReturnValue());
@@ -158,9 +166,31 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     @Unique
     private void gtShanhai$clearCatalystsIfDepleted() {
         if (gtShanhai$inventoryHasNoRealStock(itemInventory) && gtShanhai$inventoryHasNoRealStock(fluidInventory)) {
+            gtShanhai$stripVirtualTargetsFromCatalyst();
+            gtShanhai$clearVirtualCircuitCache();
             VirtualPatternBufferSlotState.stripVirtualTargets(itemInventory);
             VirtualPatternBufferSlotState.stripVirtualTargets(fluidInventory);
         }
+    }
+
+    @Unique
+    private void gtShanhai$clearVirtualCircuitCache() {
+        if (VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory) < 0
+                && !gtShanhai$hasVirtualCircuitTarget()) return;
+        SlotCacheManager cacheManager = getCacheManager();
+        if (cacheManager instanceof SlotCacheManagerAccessor accessor) {
+            accessor.gtShanhai$setCircuitCacheRaw(-1);
+            accessor.gtShanhai$setCircuitStackRaw(ItemStack.EMPTY);
+        }
+        VirtualPatternBufferSlotState.clearVirtualCircuit(itemInventory);
+    }
+
+    @Unique
+    private boolean gtShanhai$hasVirtualCircuitTarget() {
+        for (AEItemKey key : VirtualPatternBufferSlotState.getVirtualTargets(itemInventory).keySet()) {
+            if (key != null && IntCircuitBehaviour.isIntegratedCircuit(key.toStack())) return true;
+        }
+        return false;
     }
 
     @Unique
@@ -181,6 +211,11 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Shadow
     public Object2LongMap<AEFluidKey> getFluidCatalystInventory() {
+        throw new AssertionError();
+    }
+
+    @Shadow
+    public SlotCacheManager getCacheManager() {
         throw new AssertionError();
     }
 

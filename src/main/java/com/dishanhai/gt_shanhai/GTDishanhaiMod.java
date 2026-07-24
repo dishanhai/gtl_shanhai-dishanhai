@@ -61,6 +61,14 @@ public class GTDishanhaiMod {
     public static final RegistryObject<Item> ACTIVE_NEUTRON_CASING_ITEM = ITEMS.register(
         "active_neutron_casing",
         () -> new BlockItem(ACTIVE_NEUTRON_CASING.get(), new Item.Properties()));
+    public static final RegistryObject<Block> ZERO_PHOTON_CASING = BLOCKS.register(
+        "casing_zero_photon",
+        () -> new Block(BlockBehaviour.Properties.of()
+            .mapColor(MapColor.METAL).strength(5.0f, 6.0f)
+            .sound(SoundType.METAL).requiresCorrectToolForDrops()));
+    public static final RegistryObject<Item> ZERO_PHOTON_CASING_ITEM = ITEMS.register(
+        "casing_zero_photon",
+        () -> new BlockItem(ZERO_PHOTON_CASING.get(), new Item.Properties()));
     public static final RegistryObject<Item> ETERNAL_WORKSHOP_DATA_MODULE = ITEMS.register(
         "eternal_workshop_data_module",
         () -> new EternalGregTechWorkshopDataModuleItem(new Item.Properties()

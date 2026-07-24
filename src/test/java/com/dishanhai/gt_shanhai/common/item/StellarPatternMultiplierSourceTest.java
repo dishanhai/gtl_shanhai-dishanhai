@@ -66,6 +66,27 @@ class StellarPatternMultiplierSourceTest {
     }
 
     @Test
+    void stellarLifecycleMixinDoesNotChangeSuperPatternBufferBehavior() throws IOException {
+        String source = Files.readString(MIXIN);
+        String onLoad = extractBlock(source, "private void gtShanhai$refreshLoadedPatternCache(");
+
+        assertTrue(onLoad.contains("if (!(self instanceof RecipeTypePatternBufferPartMachine)) return;"),
+                "共享父类 onLoad 注入必须先限定为星律，不能让超级样板总成执行山海重建任务");
+        assertTrue(onLoad.contains("new TickTask(1, () -> this.gtShanhai$refreshControllers(self))"),
+                "父类已完成样板解码与 AE 同步，第 1 tick 只能恢复控制器");
+        assertTrue(onLoad.contains("new TickTask(20, () -> this.gtShanhai$refreshControllers(self))"),
+                "第 20 tick 只应补做控制器恢复，不得再次全量扫描并解码样板");
+        assertFalse(source.contains("gtShanhai$refreshLoadedPatternBuffer"),
+                "父类 onLoad 已解码并发布全部样板，不得保留延迟逐槽扫描");
+        assertFalse(source.contains("gtShanhai$resetLoadedPatternSlot"),
+                "不得在父类写入电路缓存后再次清空槽缓存");
+        assertFalse(source.contains("gtShanhai$autoMatchRecipeType"),
+                "不得再向非星律样板总成注入配方类型自动匹配");
+        assertFalse(source.contains("if (self instanceof RecipeTypePatternBufferPartMachine) return;"),
+                "禁止保留专门修改非星律实例的反向类型守卫");
+    }
+
+    @Test
     void rewriteStartsFromBaseRecipeInsteadOfMultiplyingCurrentOutputsAgain() throws IOException {
         String source = Files.readString(HELPER);
 
@@ -126,6 +147,8 @@ class StellarPatternMultiplierSourceTest {
         String source = Files.readString(MACHINE);
         String refreshOne = extractBlock(source, "private boolean refreshVisibleOutputMultiplierPattern(");
         String onChange = extractBlock(source, "protected void onPatternChange(int index)");
+        String onLoad = extractBlock(source, "public void onLoad()");
+        String refreshAll = extractBlock(source, "protected void refreshAllByProduct()");
         String available = extractBlock(source, "public List<IPatternDetails> getAvailablePatterns()");
 
         assertTrue(source.contains("outputMultiplierPatternsRefreshNeeded"),
@@ -136,6 +159,11 @@ class StellarPatternMultiplierSourceTest {
                 "单槽倍率刷新不能重复执行父类已经完成的全局槽位映射重算");
         assertFalse(onChange.contains("refreshVisibleOutputMultiplierPattern(index, true)"),
                 "父类 getRealPattern 已完成单槽倍率改写，子类不得再次解码同一张样板");
+        assertTrue(onLoad.indexOf("outputMultiplierPatternsRefreshNeeded = false;")
+                        < onLoad.indexOf("getAvailablePatterns()"),
+                "父类加载已发布倍率样板，虚拟物品恢复前必须跳过重复的全槽倍率解码");
+        assertFalse(refreshAll.contains("refreshVisibleOutputMultiplierPatterns(true)"),
+                "父类 refreshAllByProduct 已经通过 getRealPattern 重建倍率样板，不得紧接着再全量解码");
     }
 
     @Test

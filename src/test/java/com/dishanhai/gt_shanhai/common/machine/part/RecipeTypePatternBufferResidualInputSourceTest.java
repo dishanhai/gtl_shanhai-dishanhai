@@ -26,4 +26,19 @@ class RecipeTypePatternBufferResidualInputSourceTest {
         assertTrue(source.contains("return hasPatternInSlot(getSlotIndex())"),
                 "星律活动槽应由样板身份决定是否参与匹配，库存非空不能反向禁用槽位");
     }
+
+    @Test
+    void jadeMergedInventoryExcludesVirtualPresenceAndItsCatalystMirror() throws IOException {
+        String source = Files.readString(MACHINE);
+
+        assertTrue(source.contains("public Pair<Object2LongOpenHashMap<Item>, Object2LongOpenHashMap<Fluid>> getMergedInternalSlot()"),
+                "星律必须覆盖 GTLCore Jade 合并结果");
+        assertTrue(source.contains("VirtualPatternBufferSlotState"));
+        assertTrue(source.contains("getVirtualTargets(internalSlot.getItemInventory())"));
+        assertTrue(source.contains("getVirtualTargets(internalSlot.getFluidInventory())"));
+        assertTrue(source.contains("internalSlot.getItemCatalystInventory().getLong(key)"),
+                "虚拟物品同时存在于内部库存和催化镜像，两份都必须从 Jade 结果扣除");
+        assertTrue(source.contains("internalSlot.getFluidCatalystInventory().getLong(key)"));
+        assertTrue(source.contains("gtShanhai$subtractMergedAmount"));
+    }
 }

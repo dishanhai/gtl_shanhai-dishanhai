@@ -31,6 +31,10 @@ class VirtualCraftingPresenceInputSourceTest {
             "gt_shanhai", "mixin", "GTLCoreMEPatternBufferVirtualProviderMixin.java");
     private static final Path RECIPE_TYPE_PATTERN_MACHINE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "machine", "part", "RecipeTypePatternBufferPartMachine.java");
+    private static final Path RECIPE_TYPE_PATTERN_SEARCH = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "item", "RecipeTypePatternSearchHelper.java");
+    private static final Path PATTERN_MACHINE_ACCESS = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "item", "VirtualPatternBufferMachineAccess.java");
     private static final Path AE_UTILS_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "AeUtilsVirtualPatternInputsMixin.java");
     private static final Path OLD_INITIAL_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
@@ -155,6 +159,41 @@ class VirtualCraftingPresenceInputSourceTest {
                 "旧存档恢复必须从星律样板总成实际存在的 onLoad 生命周期触发");
         assertFalse(machineMixin.contains("@Shadow\n    public abstract List<IPatternDetails> getAvailablePatterns();"),
                 "GTLCore 基类没有 getAvailablePatterns，不能声明错误的 shadow");
+    }
+
+    @Test
+    void automaticStellarTopUpNeverExtractsReusableInputsAsRealStock() throws IOException {
+        String helper = Files.readString(ENCODING_HELPER);
+        String search = Files.readString(RECIPE_TYPE_PATTERN_SEARCH);
+        String machineAccess = Files.readString(PATTERN_MACHINE_ACCESS);
+        String machineMixin = Files.readString(PATTERN_MACHINE_MIXIN);
+        String slotMixin = Files.readString(PATTERN_SLOT_MIXIN);
+        int topUpStart = search.indexOf("private static void topUpVirtualSupply");
+        int topUpEnd = search.indexOf("private static boolean hasConsumableStock", topUpStart);
+        String topUp = search.substring(topUpStart, topUpEnd);
+
+        assertTrue(helper.contains("public static GenericStack resolveVirtualTargetForPatternInput(GenericStack input, GTRecipe recipe)"),
+                "自动补料必须用权威配方解析虚拟目标，不能直接处理供应器外壳");
+        assertTrue(search.contains("resolveVirtualTargetForPatternInput(in, recipe)"),
+                "星律已有权威配方，虚拟目标解析不得重新全局反推并串配方类型");
+        assertTrue(search.contains("gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what()"),
+                "不消耗输入应写成一份带身份的虚拟在场目标");
+        assertFalse(search.contains("if (notConsumable[i] && getInternalAmount(internalSlot, in.what()) > 0) continue;"),
+                "旧逻辑会把不消耗输入按 achievable 从 AE 真实抽入并永久残留");
+        int presenceBranch = topUp.indexOf("GenericStack presenceTarget = presenceTargets[i];");
+        int leavePresenceBranch = topUp.indexOf("continue;", presenceBranch);
+        int realExtraction = topUp.indexOf("Actionable.MODULATE", presenceBranch);
+        assertTrue(presenceBranch >= 0 && leavePresenceBranch > presenceBranch && realExtraction > leavePresenceBranch,
+                "虚拟在场分支必须在任何真实 AE 抽取前结束");
+        assertTrue(machineAccess.contains("gtShanhai$addVirtualTargetToSlot"));
+        assertTrue(machineMixin.contains("public boolean gtShanhai$addVirtualTargetToSlot"));
+        assertTrue(slotMixin.contains("gtShanhai$clearVirtualTargetsIfDepleted"),
+                "旧存档只剩虚拟目标时必须允许加载阶段立即清理");
+        assertTrue(slotMixin.contains("VirtualPatternBufferSlotState.clearVirtualCircuit(itemInventory)"),
+                "清理虚拟电路时必须同步清掉电路身份和缓存");
+        assertTrue(slotMixin.contains("IntCircuitBehaviour.isIntegratedCircuit(key.toStack())"),
+                "旧存档没有虚拟电路标记时也必须从虚拟目标识别并清理缓存");
+        assertTrue(machineMixin.contains("access.gtShanhai$clearVirtualTargetsIfDepleted()"));
     }
 
     @Test

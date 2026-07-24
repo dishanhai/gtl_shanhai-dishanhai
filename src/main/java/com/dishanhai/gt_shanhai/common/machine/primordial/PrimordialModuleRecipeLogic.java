@@ -305,31 +305,15 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     }
 
     private MatchableScaledRecipe findMatchableScaledRecipe(GTRecipe recipe, long requestedParallel) {
-        final long[] matchedParallel = new long[1];
-        final GTRecipe[] matchedRecipe = new GTRecipe[1];
-        long parallel = findHighestMatchableParallel(requestedParallel, candidate -> {
-            GTRecipe scaledRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, candidate);
-            if (matchRecipeInputHandlePartCache(scaledRecipe)
-                    && RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe)) {
-                matchedParallel[0] = candidate;
-                matchedRecipe[0] = scaledRecipe;
-                return true;
-            }
-            return false;
-        });
+        ScaledRecipeMatchContext context = new ScaledRecipeMatchContext(recipe);
+        long parallel = findHighestMatchableParallel(requestedParallel, context);
         if (parallel <= 0L) {
             return null;
         }
-        if (matchedParallel[0] == parallel && matchedRecipe[0] != null) {
-            return new MatchableScaledRecipe(parallel, matchedRecipe[0]);
+        if (context.matchedParallel == parallel && context.matchedRecipe != null) {
+            return new MatchableScaledRecipe(parallel, context.matchedRecipe);
         }
         return new MatchableScaledRecipe(parallel, RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel));
-    }
-
-    private boolean matchesScaledRecipe(GTRecipe recipe, long parallel) {
-        GTRecipe scaledRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel);
-        return matchRecipeInputHandlePartCache(scaledRecipe)
-                && RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe);
     }
 
     private static final class MatchableScaledRecipe {
@@ -349,6 +333,28 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         private AmplifiedRecipeCacheEntry(int multiplier, GTRecipe recipe) {
             this.multiplier = multiplier;
             this.recipe = recipe;
+        }
+    }
+
+    private final class ScaledRecipeMatchContext implements LongPredicate {
+        private final GTRecipe recipe;
+        private long matchedParallel;
+        private GTRecipe matchedRecipe;
+
+        private ScaledRecipeMatchContext(GTRecipe recipe) {
+            this.recipe = recipe;
+        }
+
+        @Override
+        public boolean test(long candidate) {
+            GTRecipe scaledRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, candidate);
+            if (matchRecipeInputHandlePartCache(scaledRecipe)
+                    && RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe)) {
+                matchedParallel = candidate;
+                matchedRecipe = scaledRecipe;
+                return true;
+            }
+            return false;
         }
     }
 

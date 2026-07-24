@@ -27,14 +27,6 @@ public class DShanhaiBlocks {
         .build()
         .register();
 
-    public static final BlockEntry<Block> CASING_ZERO_PHOTON = GTDishanhaiRegistration.REGISTRATE
-        .block("casing_zero_photon", Block::new)
-        .initialProperties(() -> Blocks.IRON_BLOCK)
-        .addLayer(() -> RenderType::cutoutMipped)
-        .item(BlockItem::new)
-        .build()
-        .register();
-
     public static final BlockEntry<Block> CASING_TRANSCENDENT = GTDishanhaiRegistration.REGISTRATE
         .block("casing_transcendent", Block::new)
         .initialProperties(() -> Blocks.IRON_BLOCK)

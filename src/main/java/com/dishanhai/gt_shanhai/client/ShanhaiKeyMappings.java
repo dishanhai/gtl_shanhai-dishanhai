@@ -27,6 +27,7 @@ public class ShanhaiKeyMappings {
 
     public static KeyMapping OPEN_SHOP;
     public static KeyMapping OPEN_PATTERN_MANAGEMENT;
+    public static KeyMapping AE_TERMINAL_FAVORITE;
 
     @SubscribeEvent
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
@@ -37,6 +38,10 @@ public class ShanhaiKeyMappings {
                 "key." + GTDishanhaiMod.MOD_ID + ".open_pattern_management",
                 InputConstants.Type.KEYSYM, org.lwjgl.glfw.GLFW.GLFW_KEY_N, CATEGORY);
         event.register(OPEN_PATTERN_MANAGEMENT);
+        AE_TERMINAL_FAVORITE = new KeyMapping(
+                "key." + GTDishanhaiMod.MOD_ID + ".ae_terminal_favorite",
+                InputConstants.Type.KEYSYM, org.lwjgl.glfw.GLFW.GLFW_KEY_Q, CATEGORY);
+        event.register(AE_TERMINAL_FAVORITE);
     }
 
     /** 由 {@link ClientInit} 注册到 Forge 事件总线（RegisterKeyMappingsEvent 是 MOD 总线，需分开监听）。 */

@@ -10,10 +10,9 @@ import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.machine.multiblock.PartAbility;
 import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
 import org.gtlcore.gtlcore.common.data.GTLRecipeModifiers;
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 
 import net.minecraft.world.level.block.Block;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraft.resources.ResourceLocation;
 
 public class ZeroPhotonCondenserMachine extends GTLAddWirelessWorkableElectricMultipleRecipesMachine {
 
@@ -33,8 +32,7 @@ public class ZeroPhotonCondenserMachine extends GTLAddWirelessWorkableElectricMu
     }
 
     public static BlockPattern createPattern(MultiblockMachineDefinition definition) {
-        Block casing = ForgeRegistries.BLOCKS.getValue(
-                new ResourceLocation("gtceu", "hv_machine_casing"));
+        Block casing = GTDishanhaiMod.ZERO_PHOTON_CASING.get();
 
         return FactoryBlockPattern.start(RelativeDirection.RIGHT, RelativeDirection.UP, RelativeDirection.BACK)
                 .aisle("BBB", "B~B", "BBB")

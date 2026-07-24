@@ -61,6 +61,7 @@ import appeng.api.storage.cells.ISaveProvider;
 import appeng.api.storage.cells.StorageCell;
 import appeng.helpers.IPriorityHost;
 import appeng.menu.ISubMenu;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 
 import net.minecraft.nbt.CompoundTag;
@@ -689,21 +690,25 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     }
 
     private static final class KeyCounterSnapshot {
-        private final KeyCounter counter = new KeyCounter();
+        private final Object2IntOpenHashMap<AEKey> keyIndexes;
         private final AEKey[] keys;
         private final long[] amounts;
+        private final int size;
 
         private KeyCounterSnapshot(KeyCounter source) {
-            AeStorageAmountMath.mergeSaturated(counter, source);
-            int size = counter.size();
-            this.keys = new AEKey[size];
-            this.amounts = new long[size];
+            int capacity = source.size();
+            this.keyIndexes = new Object2IntOpenHashMap<>(capacity);
+            this.keyIndexes.defaultReturnValue(-1);
+            this.keys = new AEKey[capacity];
+            this.amounts = new long[capacity];
             int index = 0;
-            for (Object2LongMap.Entry<AEKey> entry : counter) {
+            for (Object2LongMap.Entry<AEKey> entry : source) {
                 keys[index] = entry.getKey();
                 amounts[index] = entry.getLongValue();
+                keyIndexes.put(keys[index], index);
                 index++;
             }
+            this.size = index;
         }
 
         private static KeyCounterSnapshot aggregate(Iterable<? extends MEStorage> storages) {
@@ -716,15 +721,42 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
 
         private long get(AEKey key) {
-            return counter.get(key);
+            int index = keyIndexes.getInt(key);
+            return index < 0 ? 0L : amounts[index];
+        }
+
+        private boolean addAmount(AEKey key, long amount) {
+            if (key == null || amount <= 0L) return true;
+            int index = keyIndexes.getInt(key);
+            if (index < 0) return false;
+            amounts[index] = AeStorageAmountMath.saturatedAdd(amounts[index], amount);
+            return true;
+        }
+
+        private boolean removeAmount(AEKey key, long amount) {
+            if (key == null || amount <= 0L) return true;
+            int index = keyIndexes.getInt(key);
+            if (index < 0) return false;
+            long current = amounts[index];
+            if (current == Long.MAX_VALUE || amount > current) return false;
+            amounts[index] = current - amount;
+            return true;
         }
 
         private void addTo(KeyCounter out) {
-            for (int i = 0; i < keys.length; i++) {
-                if (amounts[i] == Long.MAX_VALUE) {
+            for (int i = 0; i < size; i++) {
+                long amount = amounts[i];
+                if (amount <= 0L) continue;
+                if (amount == Long.MAX_VALUE) {
+                    out.set(keys[i], Long.MAX_VALUE);
+                    continue;
+                }
+                long current = out.get(keys[i]);
+                if (current == Long.MAX_VALUE) continue;
+                if (amount > Long.MAX_VALUE - current) {
                     out.set(keys[i], Long.MAX_VALUE);
                 } else {
-                    AeStorageAmountMath.addSaturated(out, keys[i], amounts[i]);
+                    out.add(keys[i], amount);
                 }
             }
         }
@@ -743,10 +775,14 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         @Override
         public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
-            long inserted = delegate.insert(normalizeFluidKey(what), amount, mode, src);
+            AEKey normalized = normalizeFluidKey(what);
+            long inserted = delegate.insert(normalized, amount, mode, src);
             if (inserted > 0 && mode == Actionable.MODULATE) {
                 equivalentKeyCache.invalidate();
-                clearAvailableSnapshot();
+                KeyCounterSnapshot cached = cachedAvailableStacks;
+                if (cached == null || !cached.addAmount(normalized, inserted)) {
+                    clearAvailableSnapshot();
+                }
             }
             return inserted;
         }
@@ -759,8 +795,16 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                 cachedAvailableStacks = null;
                 cachedDelegateVersion = version;
             }
-            return extractNormalizedFluidKey(delegate, what, amount, mode, src, equivalentKeyCache,
-                    this::loadEquivalentEntries, this::clearAvailableSnapshot);
+            AEKey normalized = normalizeFluidKey(what);
+            long extracted = extractNormalizedFluidKey(delegate, normalized, amount, mode, src, equivalentKeyCache,
+                    this::loadEquivalentEntries, null);
+            if (extracted > 0L && mode == Actionable.MODULATE) {
+                KeyCounterSnapshot cached = cachedAvailableStacks;
+                if (cached == null || !cached.removeAmount(normalized, extracted)) {
+                    clearAvailableSnapshot();
+                }
+            }
+            return extracted;
         }
 
         @Override
@@ -943,7 +987,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             long extracted = delegate.extract(normalized, amount, mode, src);
             if (extracted > 0 && mode == Actionable.MODULATE) {
                 cache.invalidate();
-                onChanged.run();
+                if (onChanged != null) onChanged.run();
             }
             return extracted;
         }
@@ -964,7 +1008,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             long extracted = delegate.extract(normalized, Math.min(amount, available), mode, src);
             if (extracted > 0) {
                 cache.invalidate();
-                onChanged.run();
+                if (onChanged != null) onChanged.run();
             }
             return extracted;
         }
@@ -979,7 +1023,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
         if (total > 0L) {
             cache.invalidate();
-            onChanged.run();
+            if (onChanged != null) onChanged.run();
         }
         return total;
     }

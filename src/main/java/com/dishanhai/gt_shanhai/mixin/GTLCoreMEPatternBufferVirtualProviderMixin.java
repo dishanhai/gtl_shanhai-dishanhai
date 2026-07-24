@@ -76,6 +76,7 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
                 }
             }
             access.gtShanhai$syncVirtualTargetsToCatalyst();
+            access.gtShanhai$clearVirtualTargetsIfDepleted();
         }
     }
 
@@ -177,6 +178,27 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
         gtShanhai$notifySlotChanged(slot);
         gtShanhai$notifySelfIO();
         return true;
+    }
+
+    @Override
+    public boolean gtShanhai$addVirtualTargetToSlot(int slotIndex, AEKey key, long amount) {
+        if (slotIndex < 0 || slotIndex >= getInternalSlotCount() || key == null || amount <= 0) {
+            return false;
+        }
+        Object slot = gtShanhai$getInternalSlot(slotIndex);
+        if (!(slot instanceof VirtualPatternBufferSlotAccess access)) return false;
+        if (access.gtShanhai$hasVirtualTarget(key)) return true;
+
+        access.gtShanhai$restoreVirtualTarget(key, Long.MAX_VALUE);
+        if (!access.gtShanhai$hasVirtualTarget(key)) {
+            gtShanhai$addVirtualTargetToSlot(slot, key, amount);
+        } else {
+            access.gtShanhai$syncVirtualTargetsToCatalyst();
+            if (key instanceof AEItemKey itemKey) gtShanhai$cacheVirtualCircuit(slot, itemKey);
+        }
+        gtShanhai$notifySlotChanged(slot);
+        gtShanhai$notifySelfIO();
+        return access.gtShanhai$hasVirtualTarget(key);
     }
 
     @SuppressWarnings("unchecked")

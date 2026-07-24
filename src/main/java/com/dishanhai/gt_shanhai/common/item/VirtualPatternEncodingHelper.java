@@ -524,6 +524,15 @@ public final class VirtualPatternEncodingHelper {
         return getPatternAnalysis(inputs, outputs).targetFor(stack);
     }
 
+    public static GenericStack resolveVirtualTargetForPatternInput(GenericStack input, GTRecipe recipe) {
+        if (input == null || input.what() == null || input.amount() <= 0) return null;
+        GenericStack providerTarget = getVirtualProviderTarget(input);
+        if (providerTarget != null) return providerTarget;
+        GenericStack circuitTarget = getIntegratedCircuitTarget(input);
+        if (circuitTarget != null) return circuitTarget;
+        return recipe == null ? null : getNonConsumableFluidTarget(recipe, input);
+    }
+
     private static GenericStack getVirtualProviderTarget(GenericStack stack) {
         if (stack == null || !(stack.what() instanceof AEItemKey key)) return null;
         ItemStack provider = key.toStack();

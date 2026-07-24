@@ -14,6 +14,7 @@ import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSlotAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
+import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternBridge;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
@@ -51,7 +52,6 @@ import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
-
 import it.unimi.dsi.fastutil.ints.Int2ReferenceMap;
 import it.unimi.dsi.fastutil.ints.Int2ReferenceMaps;
 import it.unimi.dsi.fastutil.ints.Int2ReferenceOpenHashMap;
@@ -59,11 +59,13 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.IntConsumer;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectArraySet;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
+import it.unimi.dsi.fastutil.Pair;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -72,7 +74,9 @@ import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluid;
 
 import org.gtlcore.gtlcore.api.gui.MEPatternCatalystUIManager;
 import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigWidget;
@@ -215,8 +219,50 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     }
 
     @Override
+    public Pair<Object2LongOpenHashMap<Item>, Object2LongOpenHashMap<Fluid>> getMergedInternalSlot() {
+        Pair<Object2LongOpenHashMap<Item>, Object2LongOpenHashMap<Fluid>> merged = super.getMergedInternalSlot();
+        Object2LongOpenHashMap<Item> items = merged.left();
+        Object2LongOpenHashMap<Fluid> fluids = merged.right();
+        for (int slot = 0; slot < getInternalSlotCount(); slot++) {
+            MEPatternBufferPartMachineBase.InternalSlot internalSlot = getInternalSlot(slot);
+            boolean active = internalSlot.isActive();
+            for (Object2LongMap.Entry<AEItemKey> entry : VirtualPatternBufferSlotState
+                    .getVirtualTargets(internalSlot.getItemInventory()).object2LongEntrySet()) {
+                AEItemKey key = entry.getKey();
+                long internalAmount = active
+                        ? Math.min(entry.getLongValue(), internalSlot.getItemInventory().getLong(key)) : 0L;
+                long catalystAmount = Math.min(entry.getLongValue(),
+                        internalSlot.getItemCatalystInventory().getLong(key));
+                gtShanhai$subtractMergedAmount(items, key.toStack().getItem(), internalAmount + catalystAmount);
+            }
+            for (Object2LongMap.Entry<AEFluidKey> entry : VirtualPatternBufferSlotState
+                    .getVirtualTargets(internalSlot.getFluidInventory()).object2LongEntrySet()) {
+                AEFluidKey key = entry.getKey();
+                long internalAmount = active
+                        ? Math.min(entry.getLongValue(), internalSlot.getFluidInventory().getLong(key)) : 0L;
+                long catalystAmount = Math.min(entry.getLongValue(),
+                        internalSlot.getFluidCatalystInventory().getLong(key));
+                gtShanhai$subtractMergedAmount(fluids, key.getFluid(), internalAmount + catalystAmount);
+            }
+        }
+        return merged;
+    }
+
+    private static <T> void gtShanhai$subtractMergedAmount(Object2LongOpenHashMap<T> merged, T key, long amount) {
+        if (key == null || amount <= 0L) return;
+        long remaining = merged.getLong(key) - amount;
+        if (remaining > 0L) {
+            merged.put(key, remaining);
+        } else {
+            merged.removeLong(key);
+        }
+    }
+
+    @Override
     public void onLoad() {
         super.onLoad();
+        // 父类 onLoad 已通过 getRealPattern 构造并发布倍率样板，无需在首次 AE 查询时再解码一遍。
+        outputMultiplierPatternsRefreshNeeded = false;
         if ((Object) this instanceof VirtualPatternBufferMachineAccess access) {
             access.gtShanhai$restoreVirtualTargetsFromPatterns(getAvailablePatterns());
         }
@@ -251,7 +297,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     protected void refreshAllByProduct() {
         clearOutputMultiplierPatternCache();
         super.refreshAllByProduct();
-        refreshVisibleOutputMultiplierPatterns(true);
+        outputMultiplierPatternsRefreshNeeded = false;
         refreshPatternRecipeTypes();
         refreshWildcardRecipeTypes();
     }

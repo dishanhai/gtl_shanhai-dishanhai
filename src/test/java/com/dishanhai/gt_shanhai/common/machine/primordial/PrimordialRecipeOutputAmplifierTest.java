@@ -116,11 +116,13 @@ class PrimordialRecipeOutputAmplifierTest {
                         + "\\s*amplified\\s*,\\s*[A-Za-z_$][\\w$]*\\s*\\)")
                 .matcher(maxParallel).find(), "输出容量必须限制输入可提供的最大并行");
 
-        assertEquals(2, countExact(scaledMatch, "RecipeCalculationHelper.INSTANCE.multipleRecipe("),
-                "二分命中路径复用已构造的 scaledRecipe，仅保留一次防御性兜底重建");
-        assertTrue(scaledMatch.contains("matchedRecipe[0] = scaledRecipe"));
-        assertTrue(scaledMatch.contains("matchRecipeInputHandlePartCache(scaledRecipe)"));
-        assertTrue(scaledMatch.contains("RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe)"));
+        assertEquals(1, countExact(scaledMatch, "RecipeCalculationHelper.INSTANCE.multipleRecipe("),
+                "findMatchableScaledRecipe 只保留防御性兜底重建，二分命中路径由上下文复用 scaledRecipe");
+        assertTrue(scaledMatch.contains("context.matchedRecipe"));
+        assertTrue(source.contains("private final class ScaledRecipeMatchContext implements LongPredicate"));
+        assertTrue(source.contains("matchedRecipe = scaledRecipe"));
+        assertTrue(source.contains("matchRecipeInputHandlePartCache(scaledRecipe)"));
+        assertTrue(source.contains("RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe)"));
 
         assertTrue(wireless.contains("matchableScaledRecipeCache.remove(recipe)"));
         assertTrue(wireless.contains("matchable = findMatchableScaledRecipe(amplifiedRecipe, parallel)"));

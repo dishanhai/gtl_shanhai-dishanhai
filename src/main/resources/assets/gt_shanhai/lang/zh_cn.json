@@ -634,8 +634,11 @@
   "message.gt_shanhai.ultimate_terminal.gtceu_height_exceeded": "§c[山海终端] 已阻止建造：目标控制器 %s；当前维度允许到 Y=%s，但 GTCEu 多方块固定最高只能到 Y=%s；越界 %s 处，首个位置 %s",
   "item.gt_shanhai.wireless_pattern_management_terminal": "山海无线样板管理终端",
   "key.gt_shanhai.open_pattern_management": "打开山海无线样板管理终端",
+  "key.gt_shanhai.ae_terminal_favorite": "AE 终端收藏/取消收藏",
   "gui.gt_shanhai.remote_pattern_catalyst": "星律样板槽 %s 催化剂",
   "gui.gt_shanhai.remote_pattern_return": "返回终端",
-  "gui.gt_shanhai.remote_stock_input": "星律库存拉取"
+  "gui.gt_shanhai.remote_stock_input": "星律库存拉取",
+  "gui.gt_shanhai.crafting_plan.virtual_presence": "虚拟在场",
+  "gui.gt_shanhai.crafting_plan.virtual_presence.detail": "此条目包含虚拟需求：虚拟部分不会消耗，仅检查网络中是否存在目标物"
 }
 

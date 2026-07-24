@@ -84,6 +84,8 @@
     "MEStorageMenuBroadcastOptimizationMixin",
     "CraftingTreeNodeVirtualPresenceMixin",
     "CraftingTreeProcessVirtualPresenceMixin",
+    "CraftingPlanVirtualMarkerMixins$Entry",
+    "CraftingPlanVirtualMarkerMixins$Summary",
     "CraftingCpuHelperVirtualPatternInputsMixin",
     "CraftingCpuLogicVirtualPresenceMixin",
     "AeUtilsVirtualPatternInputsMixin",
@@ -137,10 +139,14 @@
     "EaepProviderSelectScreenRecipeTypeMixin",
     "EaepGtlCoreUploadButtonLayoutMixin",
     "CraftingStatusTableRendererTooltipMixin",
+    "CraftConfirmTableRendererVirtualMarkerMixin",
     "CraftingCPUScreenPatternSourceMixin",
     "CraftingCPUScreenRedispatchMixin",
     "AEBaseScreenPatternSourceClickMixin",
     "PatternWrapMarkClickMixin",
-    "PatternWrapControlScreenMixin"
+    "PatternWrapControlScreenMixin",
+    "AeTerminalRepoFavoritesMixin",
+    "AeTerminalFavoritesScreenMixin",
+    "AeTerminalFavoritesScreenAccessor"
   ]
 }

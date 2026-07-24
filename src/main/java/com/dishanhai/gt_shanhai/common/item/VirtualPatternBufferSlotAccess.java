@@ -15,4 +15,6 @@ public interface VirtualPatternBufferSlotAccess {
     void gtShanhai$stripVirtualTargetsFromCatalyst();
 
     void gtShanhai$stripVirtualTargets();
+
+    void gtShanhai$clearVirtualTargetsIfDepleted();
 }

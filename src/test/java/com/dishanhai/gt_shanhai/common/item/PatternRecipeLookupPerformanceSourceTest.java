@@ -57,6 +57,10 @@ class PatternRecipeLookupPerformanceSourceTest {
         assertTrue(source.contains("cachedMarkedRecipeTick"));
         assertTrue(source.contains("if (tick == cachedMarkedRecipeTick)"));
         assertTrue(source.contains("RecipeTypePatternSearchHelper.collectActiveMarkedPatternRecipes(machine)"));
+        assertTrue(searchHelper.contains("ACTIVE_MARKED_RECIPE_CACHE"),
+                "同一机器同一 tick 的 active-only 样板扫描结果必须在 helper 层复用，避免多模块重复扫部件");
+        assertTrue(searchHelper.contains("if (!includeFirstSpark && scannedRecipeHandlers)"),
+                "active-only 路径通过 MERecipeHandler 扫过后不得再重复扫描整台多方块部件");
         assertTrue(searchHelper.indexOf("if (!includeFirstSpark && (activeSlots == null || activeSlots.length == 0))")
                         < searchHelper.indexOf("GenericStack[] inferenceInputs = access.gtShanhai$getPatternInferenceInputs()"),
                 "active-only 候选收集没有 active 槽时必须提前返回，不能每 tick 快照推断输入");

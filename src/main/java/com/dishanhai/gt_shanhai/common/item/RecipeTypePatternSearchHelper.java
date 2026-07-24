@@ -5,6 +5,7 @@ import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ProgrammableHatchPartMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
+import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
@@ -118,6 +119,9 @@ public final class RecipeTypePatternSearchHelper {
     // 可能不再是"当前"匹配到的配方，仅按样板身份哈希判断不够，还要比对 getPatternCacheRevision()。
     private static final Map<MEPatternBufferPartMachineBase, it.unimi.dsi.fastutil.ints.Int2ObjectMap<MarkedRecipeCacheEntry>>
             MARKED_RECIPE_CACHE = Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<IRecipeLogicMachine, ActiveMarkedRecipeCacheEntry> ACTIVE_MARKED_RECIPE_CACHE =
+            Collections.synchronizedMap(new WeakHashMap<>());
+    private static long patternStateRevision;
 
     private static final class MarkedRecipeCacheEntry {
         final int stackIdentityHash;
@@ -130,6 +134,20 @@ public final class RecipeTypePatternSearchHelper {
             this.revision = revision;
             this.inferenceInventoryFingerprint = inferenceInventoryFingerprint;
             this.recipe = recipe;
+        }
+    }
+
+    private static final class ActiveMarkedRecipeCacheEntry {
+        final long tick;
+        final long patternRevision;
+        final long recipeRevision;
+        final Set<GTRecipe> recipes;
+
+        ActiveMarkedRecipeCacheEntry(long tick, long patternRevision, long recipeRevision, Set<GTRecipe> recipes) {
+            this.tick = tick;
+            this.patternRevision = patternRevision;
+            this.recipeRevision = recipeRevision;
+            this.recipes = recipes;
         }
     }
 
@@ -190,6 +208,7 @@ public final class RecipeTypePatternSearchHelper {
         synchronized (MARKED_RECIPE_CACHE) {
             MARKED_RECIPE_CACHE.remove(buffer);
         }
+        invalidateActiveMarkedRecipeCache();
     }
 
     /** 样板槽内容变化时同步失效该槽，避免同 tick 清空并写回时旧订单预算继续沿用。 */
@@ -210,6 +229,14 @@ public final class RecipeTypePatternSearchHelper {
             it.unimi.dsi.fastutil.ints.Int2ObjectMap<MarkedRecipeCacheEntry> slotCache =
                     MARKED_RECIPE_CACHE.get(buffer);
             if (slotCache != null) slotCache.remove(slot);
+        }
+        invalidateActiveMarkedRecipeCache();
+    }
+
+    private static void invalidateActiveMarkedRecipeCache() {
+        patternStateRevision++;
+        synchronized (ACTIVE_MARKED_RECIPE_CACHE) {
+            ACTIVE_MARKED_RECIPE_CACHE.clear();
         }
     }
 
@@ -237,7 +264,27 @@ public final class RecipeTypePatternSearchHelper {
 
     /** 仅收集 AE 已真实激活的样板槽，不扫描未下单槽位，也不主动从网络预填原料。 */
     public static Set<GTRecipe> collectActiveMarkedPatternRecipes(IRecipeLogicMachine machine) {
-        return collectMarkedPatternRecipes(machine, false);
+        if (!(machine instanceof MetaMachine metaMachine)) {
+            return collectMarkedPatternRecipes(machine, false);
+        }
+        long tick = metaMachine.getOffsetTimer();
+        long recipeRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
+        long currentPatternRevision = patternStateRevision;
+        synchronized (ACTIVE_MARKED_RECIPE_CACHE) {
+            ActiveMarkedRecipeCacheEntry cached = ACTIVE_MARKED_RECIPE_CACHE.get(machine);
+            if (cached != null
+                    && cached.tick == tick
+                    && cached.patternRevision == currentPatternRevision
+                    && cached.recipeRevision == recipeRevision) {
+                return cached.recipes;
+            }
+        }
+        Set<GTRecipe> recipes = collectMarkedPatternRecipes(machine, false);
+        synchronized (ACTIVE_MARKED_RECIPE_CACHE) {
+            ACTIVE_MARKED_RECIPE_CACHE.put(machine, new ActiveMarkedRecipeCacheEntry(
+                    tick, currentPatternRevision, recipeRevision, recipes));
+        }
+        return recipes;
     }
 
     private static Set<GTRecipe> collectMarkedPatternRecipes(IRecipeLogicMachine machine, boolean includeFirstSpark) {
@@ -245,15 +292,20 @@ public final class RecipeTypePatternSearchHelper {
         if (!(machine instanceof IRecipeCapabilityMachine capabilityMachine)) return result;
 
         List<MEPatternRecipeHandlePart> parts = capabilityMachine.getMEPatternRecipeHandleParts();
+        boolean scannedRecipeHandlers = false;
         if (parts != null && !parts.isEmpty()) {
             for (MEPatternRecipeHandlePart part : parts) {
                 if (part == null) continue;
                 Object[] handlers = part.getMERecipeHandlers();
                 if (handlers == null) continue;
                 for (Object handler : handlers) {
+                    scannedRecipeHandlers = true;
                     collectMarkedPatternRecipesFromHandler(machine, capabilityMachine, handler, result, includeFirstSpark);
                 }
             }
+        }
+        if (!includeFirstSpark && scannedRecipeHandlers) {
+            return applyRecipeTypeSwitch(machine, result);
         }
         collectMarkedPatternRecipesFromParts(machine, capabilityMachine, result, includeFirstSpark);
         return applyRecipeTypeSwitch(machine, result);
@@ -456,15 +508,9 @@ public final class RecipeTypePatternSearchHelper {
      * {@link #ORDER_REMAINING_BUDGET_SLOTS}）和 AE 网络真实库存尽量给足，不受宿主机器并行上限压缩——
      * 这样机器并行低时也能一次拿到足够多轮消耗的量，不会执行一次就停。
      * <p>
-     * <b>"不消耗"催化剂由扣料层保护，不在这里限制发配数量</b>：GTLCore/AE2 的样板扣料
-     * （{@code InternalSlot.handleItemInternal}/{@code handleFluidInternal}）不识别 GTCEu 的
-     * NotConsumable（{@code Content.chance==0}）标记，会把催化剂当消耗品扣。此问题在扣料层（配方层）
-     * 解决——见 {@link PatternNotConsumableFilter} 与两个
-     * {@code MEPatternBuffer*RecipeTypeFilterMixin}：真扣料阶段把 chance==0 的输入从待扣列表剔除，
-     * 催化剂永不被吞。因此这里对催化剂的处理只需保证"在场"：与消耗性输入同批量（achievable）供给，
-     * 不额外限制发配数量（避免高并行时 simulate 在场校验因催化剂份数不足而匹配失败），只是 InternalSlot
-     * 里已有该催化剂时就不再重复补（扣料层保护它常驻，重复补只会无谓叠加、占用网络库存）；催化剂不参与
-     * 消耗性批量的瓶颈计算（否则虚拟催化剂网络库存有限时会把整批 achievable 归零），也不占用"这一单"预算。
+     * <b>不消耗输入只建立虚拟在场目标</b>：供应器目标、编程电路和配方 {@code chance==0} 输入都不进入
+     * {@link MEStorage#extract}。每槽只保留一份带虚拟身份的目标，供模拟匹配和电路缓存使用；不能按
+     * {@code achievable} 批量抽入真实库存，否则订单结束后会留下没有虚拟身份、无法剥离的催化剂。
      * <p>
      * <b>补料时机</b>：只在"消耗性输入已全部耗尽"时补一轮（见 {@link #hasConsumableStock}）。不能像
      * 早先那样"整槽 itemInventory/fluidInventory 皆空才补"——因为催化剂被扣料层保护而常驻，槽位永远
@@ -507,13 +553,17 @@ public final class RecipeTypePatternSearchHelper {
         if (!(actionSourceObj instanceof IActionSource actionSource)) return;
 
         MEStorage storage = grid.getStorageService().getInventory();
-        boolean[] notConsumable = new boolean[inputs.length];
+        GenericStack[] presenceTargets = new GenericStack[inputs.length];
         long achievable = remainingBudget;
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
             if (in == null || in.amount() <= 0) continue;
-            notConsumable[i] = recipe != null && isNotConsumableInput(recipe, in.what());
-            if (notConsumable[i]) continue; // 不消耗的催化剂不参与消耗性批量的瓶颈计算
+            GenericStack presenceTarget = VirtualPatternEncodingHelper.resolveVirtualTargetForPatternInput(in, recipe);
+            if (presenceTarget == null && recipe != null && isNotConsumableInput(recipe, in.what())) {
+                presenceTarget = new GenericStack(in.what(), Math.max(1L, in.amount()));
+            }
+            presenceTargets[i] = presenceTarget;
+            if (presenceTarget != null) continue;
             long available = storage.extract(in.what(), Long.MAX_VALUE, Actionable.SIMULATE, actionSource);
             achievable = Math.min(achievable, available / in.amount());
         }
@@ -524,13 +574,19 @@ public final class RecipeTypePatternSearchHelper {
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
             if (in == null || in.amount() <= 0) continue;
-            // 催化剂已在场则不重复补：扣料层保护它常驻，重复补只会无谓叠加、占用网络库存。
-            if (notConsumable[i] && getInternalAmount(internalSlot, in.what()) > 0) continue;
+            GenericStack presenceTarget = presenceTargets[i];
+            if (presenceTarget != null) {
+                if (buffer instanceof VirtualPatternBufferMachineAccess access) {
+                    access.gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what(),
+                            Math.max(1L, presenceTarget.amount()));
+                }
+                continue;
+            }
             long want = saturatedMultiply(in.amount(), achievable);
             long extracted = storage.extract(in.what(), want, Actionable.MODULATE, actionSource);
             if (extracted > 0) {
                 invokeAdd(internalSlot, in.what(), extracted);
-                if (!notConsumable[i]) consumableExtracted = true;
+                consumableExtracted = true;
             }
         }
         if (consumableExtracted) {
@@ -558,17 +614,6 @@ public final class RecipeTypePatternSearchHelper {
             }
         }
         return false;
-    }
-
-    /** 读 InternalSlot 里某个 AEKey 当前的库存量（catalyst 常驻判断用），取不到返回 0。 */
-    @SuppressWarnings("unchecked")
-    private static long getInternalAmount(Object internalSlot, AEKey key) {
-        String method = key instanceof appeng.api.stacks.AEItemKey ? "getItemInventory" : "getFluidInventory";
-        Object inventoryObj = invokeNoArg(internalSlot, method);
-        if (inventoryObj instanceof it.unimi.dsi.fastutil.objects.Object2LongMap<?> map) {
-            return ((it.unimi.dsi.fastutil.objects.Object2LongMap<AEKey>) map).getLong(key);
-        }
-        return 0L;
     }
 
     /**
