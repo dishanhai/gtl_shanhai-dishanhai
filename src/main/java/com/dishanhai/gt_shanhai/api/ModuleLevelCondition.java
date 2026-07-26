@@ -6,7 +6,6 @@ import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.RecipeCondition;
 import com.gregtechceu.gtceu.api.recipe.condition.RecipeConditionType;
-import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.network.FriendlyByteBuf;
@@ -20,8 +19,6 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * 配方模块条件：.ml("moduleId", level)
@@ -140,16 +137,12 @@ public class ModuleLevelCondition extends RecipeCondition {
         if (machine instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase mb) {
             String slotId = mb.getModuleItemId();
             int requiredLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(moduleId);
-            LOG.debug("[MLC] check self {}: slotId={} requiredLv={} needCount={}",
-                    mb.getClass().getSimpleName(), slotId, requiredLv, requiredLevel);
             if (slotId == null) return false;
             int slotLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
-            long count = calculateEquivalentCount(slotLv, mb.getModuleCount(), requiredLv);
-            LOG.debug("[MLC]   slotLv={} stackCount={} -> equivalent={}", slotLv, mb.getModuleCount(), count);
             return isRequirementSatisfied(slotLv, mb.getModuleCount(), requiredLv, requiredLevel);
         }
 
-        // 主机路径：遍历所有模块
+        // 主机路径：走主机每 tick 一次的等级聚合缓存，替代逐候选遍历全部模块
         IModularMachineHost host = null;
         if (machine instanceof IModularMachineHost h) {
             host = h;
@@ -157,13 +150,24 @@ public class ModuleLevelCondition extends RecipeCondition {
             Object h2 = mod.getHost();
             if (h2 instanceof IModularMachineHost h3) host = h3;
         }
-        if (host == null || !host.isFormed()) return false;
+        return hostEquivalentCountSatisfies(host);
+    }
 
+    /**
+     * 主机聚合判定统一实现：原初主机走 {@code getEquivalentModuleCountForLevel}（每 tick 一次
+     * 等级聚合 + O(等级数) 查询），其他 IModularMachineHost 实现回退逐模块遍历。语义与旧遍历一致。
+     */
+    @SuppressWarnings("rawtypes")
+    private boolean hostEquivalentCountSatisfies(IModularMachineHost host) {
+        if (host == null || !host.isFormed()) return false;
+        int requiredLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(moduleId);
+        if (host instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineMachine engine) {
+            Set modules = engine.getModuleSet();
+            if (modules == null || modules.isEmpty()) return false;
+            return engine.getEquivalentModuleCountForLevel(requiredLv) >= requiredLevel;
+        }
         Set modules = host.getModuleSet();
         if (modules == null || modules.isEmpty()) return false;
-
-        int requiredLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(moduleId);
-        LOG.debug("[MLC] check host: requiredLv={} needCount={} hostModules={}", requiredLv, requiredLevel, modules.size());
         long count = 0L;
         for (Object mod : modules) {
             if (!(mod instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase mb)) continue;
@@ -177,11 +181,11 @@ public class ModuleLevelCondition extends RecipeCondition {
                 if (count >= requiredLevel) return true;
             }
         }
-        return false;
+        return count >= requiredLevel;
     }
 
     @Override
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    @SuppressWarnings("rawtypes")
     public boolean test(GTRecipe recipe, RecipeLogic recipeLogic) {
         MetaMachine machine = recipeLogic.getMachine();
         IModularMachineHost host = null;
@@ -191,35 +195,8 @@ public class ModuleLevelCondition extends RecipeCondition {
             Object h2 = mod.getHost();
             if (h2 instanceof IModularMachineHost h3) host = h3;
         }
-        if (host == null || !host.isFormed()) return false;
-
-        @SuppressWarnings("rawtypes")
-        Set modules = host.getModuleSet();
-        if (modules == null || modules.isEmpty()) return false;
-
-        int requiredLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(moduleId);
-        LOG.debug("[MLC] check {}: requiredLv={} needCount={} hostModules={}", moduleId, requiredLv, requiredLevel, modules.size());
-        long count = 0L;
-        for (Object mod : modules) {
-            if (!(mod instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase mb)) continue;
-            String slotId = mb.getModuleItemId();
-            if (slotId == null) continue;
-            int slotLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
-            if (slotLv >= requiredLv) {
-                long equivalent = calculateEquivalentCount(slotLv, mb.getModuleCount(), requiredLv);
-                if (equivalent == Long.MAX_VALUE || count > Long.MAX_VALUE - equivalent) {
-                    count = Long.MAX_VALUE;
-                    break;
-                }
-                count += equivalent;
-                if (count >= requiredLevel) break;
-            }
-        }
-
-        boolean result = count >= requiredLevel;
-        LOG.debug("[MLC] result={} (count={} >= {})", result, count, requiredLevel);
-        if (!result) LOG.debug("[ModuleLCond] FAIL {}: need {}x {} found {}", moduleId, requiredLevel, moduleId, count);
-        return result;
+        // 每候选配方都会走到这里，判定统一走主机等级聚合缓存（热路径禁止逐模块遍历与调试日志）。
+        return hostEquivalentCountSatisfies(host);
     }
 
     @Override
@@ -256,5 +233,4 @@ public class ModuleLevelCondition extends RecipeCondition {
         super.fromNetwork(buf);
         return new ModuleLevelCondition(buf.readUtf(), buf.readVarInt());
     }
-    private static final Logger LOG = LoggerFactory.getLogger("ModuleLCond");
 }
