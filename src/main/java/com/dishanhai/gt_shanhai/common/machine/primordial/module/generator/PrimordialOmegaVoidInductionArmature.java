@@ -10,7 +10,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
-import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
@@ -50,6 +49,11 @@ public class PrimordialOmegaVoidInductionArmature extends PrimordialOmegaEngineM
     private static final byte RISK_DECLINED = 2;
     private static final String KEY_RISK_DECISION = "sh_risk_decision";
     private byte riskDecision = RISK_UNDECIDED;
+
+    // 高电路号下 2^(128·2^(N-1)) 是数百万字节的 BigInteger，禁止每工作 tick 重新构造——按电路号缓存。
+    private int cachedEuCircuitNumber = Integer.MIN_VALUE;
+    private BigInteger cachedTheoreticalParallel = BigInteger.ZERO;
+    private BigInteger cachedGeneratedEuPerTick = BigInteger.ZERO;
 
     public PrimordialOmegaVoidInductionArmature(IMachineBlockEntity holder, Object... args) {
         super(holder, args);
@@ -222,10 +226,10 @@ public class PrimordialOmegaVoidInductionArmature extends PrimordialOmegaEngineM
         if (targetUuid == null) return working;
 
         try {
-            BigInteger eu = getGeneratedEuPerTick();
-            Class<?> mgr = Class.forName("com.hepdd.gtmthings.api.misc.WirelessEnergyManager");
-            mgr.getMethod("addEUToGlobalEnergyMap", UUID.class, BigInteger.class, MetaMachine.class)
-                .invoke(null, targetUuid, eu, this);
+            // 与 PrimordialMassEnergyCore 同款直接调用——gtmthings 是编译期硬依赖，
+            // 此前的 Class.forName+getMethod+invoke 每工作 tick 全套反射纯属遗留。
+            com.hepdd.gtmthings.api.misc.WirelessEnergyManager
+                    .addEUToGlobalEnergyMap(targetUuid, getGeneratedEuPerTick(), this);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -252,11 +256,25 @@ public class PrimordialOmegaVoidInductionArmature extends PrimordialOmegaEngineM
         return isFormed() && hasProxies() && canModuleWork() && circuitOrFallback;
     }
 
-    /** 理论并行值（BigInteger），仅用于显示 */
+    /** 理论并行值（BigInteger），按电路号缓存——高电路号下每次构造都是数百万字节的分配。 */
     public BigInteger getTheoreticalParallel() {
-        if (circuitNumber <= 0) return BigInteger.ZERO;
-        int exponent = 128 * (1 << (circuitNumber - 1));
-        return BigInteger.ONE.shiftLeft(exponent);
+        refreshCachedEuIfCircuitChanged();
+        return cachedTheoreticalParallel;
+    }
+
+    private void refreshCachedEuIfCircuitChanged() {
+        int circuit = circuitNumber;
+        if (circuit == cachedEuCircuitNumber) return;
+        if (circuit <= 0) {
+            cachedTheoreticalParallel = BigInteger.ZERO;
+            cachedGeneratedEuPerTick = BigInteger.ZERO;
+        } else {
+            int exponent = 128 * (1 << (circuit - 1));
+            cachedTheoreticalParallel = BigInteger.ONE.shiftLeft(exponent);
+            cachedGeneratedEuPerTick =
+                    cachedTheoreticalParallel.multiply(BigInteger.valueOf(EU_PER_THEORETICAL_PARALLEL));
+        }
+        cachedEuCircuitNumber = circuit;
     }
 
     private static final java.math.BigDecimal LOG10_2 =
@@ -275,7 +293,8 @@ public class PrimordialOmegaVoidInductionArmature extends PrimordialOmegaEngineM
     }
 
     public BigInteger getGeneratedEuPerTick() {
-        return getTheoreticalParallel().multiply(BigInteger.valueOf(EU_PER_THEORETICAL_PARALLEL));
+        refreshCachedEuIfCircuitChanged();
+        return cachedGeneratedEuPerTick;
     }
 
     public BigInteger getGeneratedEuPerCycle() {

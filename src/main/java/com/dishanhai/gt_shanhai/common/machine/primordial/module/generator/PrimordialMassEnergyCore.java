@@ -294,9 +294,15 @@ public class PrimordialMassEnergyCore extends PrimordialOmegaEngineModuleBase {
         return budgetEu.subtract(totalUsed).max(BigInteger.ZERO);
     }
 
+    // 维度串 → ResourceKey 解析缓存：broadcastEuToTerminals 每 tick 对每个终端解析一次，
+    // 维度集合在服务器生命周期内稳定，没必要每次 new ResourceLocation+ResourceKey.create。
+    private static final java.util.concurrent.ConcurrentHashMap<String, ResourceKey<Level>> DIMENSION_KEY_CACHE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     private static ServerLevel resolveLevel(MinecraftServer server, String dimension) {
         try {
-            ResourceKey<Level> key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(dimension));
+            ResourceKey<Level> key = DIMENSION_KEY_CACHE.computeIfAbsent(dimension,
+                    dim -> ResourceKey.create(Registries.DIMENSION, new ResourceLocation(dim)));
             return server.getLevel(key);
         } catch (Exception e) {
             return null;
