@@ -153,12 +153,15 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         matchableScaledRecipeCache.clear();
         Set<GTRecipe> recipes = lookupRecipeIterator();
         if (recipes.isEmpty()) {
-            invalidateLookupSetCache();
+            // 与父类 calculateParallels 同款语义：是否清缓存必须先问 shouldInvalidateLookupCacheWhenNoRunnableRecipe()。
+            // 此前三处无条件 invalidate 把模块的 200-tick 稳态缓存和该开关整体架空——空闲模块每 5 tick
+            // 全量重跑 getRecipeIterator（AE 内容物化+全子树枚举）后清空全部缓存，正是 322µs/tick 的主源。
+            invalidateLookupSetCacheIfConfigured();
             return null;
         }
         long totalParallel = getTotalParallelLimit();
         if (totalParallel <= 0L) {
-            invalidateLookupSetCache();
+            invalidateLookupSetCacheIfConfigured();
             return null;
         }
         long[] parallels = new long[recipes.size()];
@@ -175,11 +178,17 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             index++;
         }
         if (recipeList.isEmpty()) {
-            invalidateLookupSetCache();
+            invalidateLookupSetCacheIfConfigured();
             return null;
         }
         return RecipeCalculationHelper.INSTANCE.getFinalParallelData(
                 0L, parallels, new LongArrayList(), new IntArrayList(), (ObjectList<GTRecipe>) recipeList);
+    }
+
+    private void invalidateLookupSetCacheIfConfigured() {
+        if (shouldInvalidateLookupCacheWhenNoRunnableRecipe()) {
+            invalidateLookupSetCache();
+        }
     }
 
     @Override
