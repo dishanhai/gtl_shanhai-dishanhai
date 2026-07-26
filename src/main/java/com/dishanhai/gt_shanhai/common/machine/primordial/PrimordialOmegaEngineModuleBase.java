@@ -21,15 +21,11 @@ import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
-import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 
-import org.gtlcore.gtlcore.api.machine.trait.MEPart.IMEPatternPartMachine;
-import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase;
 
 import com.gtladd.gtladditions.api.machine.IThreadModifierMachine;
-import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
 import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
 
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
@@ -62,8 +58,6 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     private PrimordialOmegaEngineMachine host;
     private boolean hostConnected;
     private TickableSubscription hostScanSubs;
-    private final java.util.List<MEPatternBufferPartMachineBase> hostPatternBuffers = new java.util.ArrayList<>();
-    private int lastHostPatternBufferCount = -1;
     private String lastModuleConditionError;
     private GTRecipeType[] cachedRecipeTypesRef;
     private Set<String> cachedRecipeTypeNames = Collections.emptySet();
@@ -73,7 +67,6 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     private int cachedExtraMountMask;
     private long cachedCanWorkTick = Long.MIN_VALUE;
     private boolean cachedCanWork;
-    private long lastHostPatternSyncTick = Long.MIN_VALUE;
     private Item cachedModuleItem = Items.AIR;
     private int cachedModuleCount = -1;
     private String cachedModuleItemId;
@@ -339,8 +332,8 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     }
 
     // ========== 生命周期 ==========
-
-    private TickableSubscription hostPatternSyncSubs;
+    // 注：曾有一条 hostPatternSyncSubs 订阅每 100/20 tick 遍历主机全部部件同步 hostPatternBuffers，
+    // 但该列表没有任何消费者（样板配方的发现走 GTLCore 原生 lookup + marked 路径），整套已删除。
 
     @Override
     public void onStructureFormed() {
@@ -358,11 +351,6 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         } else {
             hostConnected = true;
         }
-        hostPatternSyncSubs = subscribeServerTick(hostPatternSyncSubs, () -> {
-            if (getOffsetTimer() % 100 == 0 && host != null) {
-                syncHostPatternHandlers(host, false);
-            }
-        });
     }
 
     @Override
@@ -374,16 +362,9 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             hostConnected = false;
         }
         cachedCanWorkTick = Long.MIN_VALUE;
-        lastHostPatternSyncTick = Long.MIN_VALUE;
-        hostPatternBuffers.clear();
-        lastHostPatternBufferCount = -1;
         if (hostScanSubs != null) {
             hostScanSubs.unsubscribe();
             hostScanSubs = null;
-        }
-        if (hostPatternSyncSubs != null) {
-            hostPatternSyncSubs.unsubscribe();
-            hostPatternSyncSubs = null;
         }
     }
 
@@ -408,47 +389,11 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                     setHostPosition(pos);
                     cachedCanWorkTick = Long.MIN_VALUE;
                     onConnected(engine);
-                    syncHostPatternHandlers(engine, true);
                     return true;
                 }
             }
         }
         return false;
-    }
-
-    /** 同步主机样板总成列表；不要把样板 handler 注入模块能力，避免触发样板隔离。 */
-    private void syncHostPatternHandlers(PrimordialOmegaEngineMachine host, boolean force) {
-        if (host == null || !host.isFormed()) return;
-        long tick = getOffsetTimer();
-        if (!force && lastHostPatternSyncTick == tick) return;
-        lastHostPatternSyncTick = tick;
-
-        java.util.List<IMEPatternPartMachine> buffers = new java.util.ArrayList<>();
-        for (IMultiPart part : host.getParts()) {
-            if (part instanceof IMEPatternPartMachine patternPart) {
-                buffers.add(patternPart);
-            }
-        }
-
-        if (!force && lastHostPatternBufferCount == buffers.size()) {
-            return;
-        }
-
-        hostPatternBuffers.clear();
-        lastHostPatternBufferCount = buffers.size();
-
-        for (IMEPatternPartMachine buffer : buffers) {
-            if (buffer instanceof MEPatternBufferPartMachineBase patternBuffer) {
-                hostPatternBuffers.add(patternBuffer);
-            }
-        }
-
-        getRecipeLogic().markLastRecipeDirty();
-        getRecipeLogic().updateTickSubscription();
-    }
-
-    public List<MEPatternBufferPartMachineBase> getHostPatternBuffers() {
-        return hostPatternBuffers;
     }
 
     public Set<String> getRecipeTypeNameSet() {
@@ -486,9 +431,6 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         }
         cachedCanWorkTick = tick;
         if (hasLiveHost()) {
-            if (tick % 20 == 0) {
-                syncHostPatternHandlers(host, false);
-            }
             cachedCanWork = true;
             return cachedCanWork;
         }
@@ -981,7 +923,6 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             addEnergyDisplay(textList);
             addParallelDisplay(textList);
             addWorkingStatus(textList);
-            addRecipeDiagnosisDisplay(textList);
             if (lastModuleConditionError != null) {
                 textList.add(Component.literal(lastModuleConditionError));
             }
@@ -993,22 +934,4 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                 .withStyle(ChatFormatting.GOLD));
     }
 
-    /**
-     * 临时排障用：暴露本模块配方查找失败原因/锁定状态，供在游戏内直接观察卡产原因
-     * （同款诊断此前只挂在主机 PrimordialOmegaEngineMachine 上，模块自身的锁定状态一直不可见）。
-     * 问题定位后应移除。
-     */
-    private void addRecipeDiagnosisDisplay(List<Component> textList) {
-        var logic = getRecipeLogic();
-        textList.add(Component.literal("§7[诊断] 已选类型: " + getSelectedRecipeTypeCount()
-                + " §7锁定: " + logic.isLock()));
-        var locked = logic.getLockRecipe();
-        if (locked != null) {
-            textList.add(Component.literal("§7[诊断] 锁定配方: " + locked.getId()));
-        }
-        var status = logic.getRecipeStatus();
-        if (status != null && !status.isSuccess() && status.reason() != null) {
-            textList.add(Component.literal("§c[诊断] 上次失败: ").append(status.reason()));
-        }
-    }
 }

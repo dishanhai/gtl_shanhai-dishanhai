@@ -123,7 +123,6 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_ENGRAVING_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE;
-    public static MultiblockMachineDefinition PRIMORDIAL_REALITY_ANCHOR_MODULE;
     public static MultiblockMachineDefinition PRIMORDIAL_COIN_FORGE;
     public static MultiblockMachineDefinition PRIMORDIAL_FLAME_CRACKING_KILN;
     public static MultiblockMachineDefinition PRIMORDIAL_ABYSSAL_REFINERY;
@@ -154,7 +153,6 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition NEBULA_SIPHON;
     public static MultiblockMachineDefinition TAIXU_SMELTING_FURNACE;
     public static MultiblockMachineDefinition WORLDLINE_CRACKING_HUB;
-    public static MultiblockMachineDefinition PRIMORDIAL_WORLDLINE_CUTTING_CORE;
     public static MultiblockMachineDefinition ZERO_PHOTON_CONDENSER;
     public static MultiblockMachineDefinition SHANHAI_NINE_INDUSTRIAL;  // 大明科技
     public static MultiblockMachineDefinition BLACK_HOLE_CONTAINMENT;   // 亚稳态黑洞遏制场

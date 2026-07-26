@@ -351,25 +351,6 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     }
 
     /**
-     * 临时排障用：暴露配方查找失败原因/锁定状态/已选类型数量，供在游戏内直接观察卡产原因，
-     * 而不必逐条猜测（isLock 卡在旧锁定配方 / 选择集为空 / 具体 FAIL_XXX 原因）。
-     * 问题定位后应移除。
-     */
-    private void addRecipeDiagnosisDisplay(List<Component> textList) {
-        var logic = getRecipeLogic();
-        textList.add(Component.literal("§7[诊断] 已选类型: " + getSelectedRecipeTypeCount()
-                + " §7锁定: " + logic.isLock()));
-        var locked = logic.getLockRecipe();
-        if (locked != null) {
-            textList.add(Component.literal("§7[诊断] 锁定配方: " + locked.getId()));
-        }
-        var status = logic.getRecipeStatus();
-        if (status != null && !status.isSuccess() && status.reason() != null) {
-            textList.add(Component.literal("§c[诊断] 上次失败: ").append(status.reason()));
-        }
-    }
-
-    /**
      * 覆写继承自 GTLAdd 基类的原生 addEnergyDisplay()：宿主 getMaxVoltage() 同样写死
      * Long.MAX_VALUE，原生逻辑只会显示永远不变的"最大功率(MAX+16)"假数字。真实经济体系是
      * com.hepdd.gtmthings 的 WirelessEnergyManager（UUID 记账的 BigInteger 全局电网，
@@ -400,11 +381,8 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             addMachineModeDisplay(textList);
             addParallelDisplay(textList);
             addWorkingStatus(textList);
-            // 显示已安装模块数
-            int moduleCount;
-            synchronized (outputMultiplierCache) {
-                moduleCount = modules.size();
-            }
+            // 显示已安装模块数（读不可变快照，免锁）
+            int moduleCount = moduleSnapshot.size();
             if (moduleCount > 0) {
                 textList.add(Component.translatable("tooltip.gtlcore.installed_module_count", moduleCount)
                         .withStyle(ChatFormatting.AQUA));
@@ -414,7 +392,6 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
                 textList.add(Component.literal("万象衍生倍率: " + outputMultiplier + "x")
                         .withStyle(ChatFormatting.LIGHT_PURPLE));
             }
-            addRecipeDiagnosisDisplay(textList);
         } else {
             textList.add(Component.translatable("gtceu.multiblock.invalid_structure")
                     .withStyle(ChatFormatting.RED));
