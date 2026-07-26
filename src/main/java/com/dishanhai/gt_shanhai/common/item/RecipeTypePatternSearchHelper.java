@@ -449,7 +449,8 @@ public final class RecipeTypePatternSearchHelper {
         }
         GenericStack[] inferenceInputs = access.gtShanhai$getPatternInferenceInputs();
         long inferenceInventoryFingerprint = fingerprintInferenceInputs(inferenceInputs);
-        if (activeSlots != null && activeSlots.length > 0) {
+        if (com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.ENABLED
+                && activeSlots != null && activeSlots.length > 0) {
             com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activeSlots",
                     "buffer=" + buffer.getClass().getSimpleName() + "@" + Integer.toHexString(System.identityHashCode(buffer))
                             + " activeSlots=" + java.util.Arrays.toString(activeSlots));
@@ -460,10 +461,12 @@ public final class RecipeTypePatternSearchHelper {
                         buffer, access, slot, inferenceInputs, inferenceInventoryFingerprint);
                 boolean hostAllows = recipe != null && hostAllowsVirtualRecipeType(machine, recipe.recipeType);
                 if (recipe == null || !access.gtShanhai$slotAllowsRecipe(slot, recipe) || !hostAllows) {
-                    com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activeSlot.skipped",
-                            "slot=" + slot + " recipeNull=" + (recipe == null)
-                                    + " allowsRecipe=" + (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe))
-                                    + " hostAllowsType=" + hostAllows);
+                    if (com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.ENABLED) {
+                        com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activeSlot.skipped",
+                                "slot=" + slot + " recipeNull=" + (recipe == null)
+                                        + " allowsRecipe=" + (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe))
+                                        + " hostAllowsType=" + hostAllows);
+                    }
                     continue;
                 }
                 Object internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
@@ -858,26 +861,32 @@ public final class RecipeTypePatternSearchHelper {
             GTRecipe recipe, int slot) {
         boolean guardFail = capabilityMachine == null || recipe == null || !(ownerMachine instanceof IMEPatternPartMachine);
         if (guardFail) {
-            com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activate.guardFail",
-                    "slot=" + slot + " capabilityMachineNull=" + (capabilityMachine == null)
-                            + " recipeNull=" + (recipe == null)
-                            + " ownerMachine=" + (ownerMachine == null ? "null" : ownerMachine.getClass().getName())
-                            + " recipeId=" + (recipe == null ? "?" : recipe.getId()));
+            if (com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.ENABLED) {
+                com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activate.guardFail",
+                        "slot=" + slot + " capabilityMachineNull=" + (capabilityMachine == null)
+                                + " recipeNull=" + (recipe == null)
+                                + " ownerMachine=" + (ownerMachine == null ? "null" : ownerMachine.getClass().getName())
+                                + " recipeId=" + (recipe == null ? "?" : recipe.getId()));
+            }
             return;
         }
         MEPatternRecipeHandlePart handlePart = MEPatternRecipeHandlePart.of((IMEPatternPartMachine) ownerMachine);
         handlePart.setLastRecipe2Slot(recipe, slot);
         int handledSlot = handlePart.handleRecipe(recipe, copyRecipeContents(recipe.inputs), true, false);
         if (handledSlot != slot) {
-            com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activate.handleRecipeRejected",
-                    "slot=" + slot + " handledSlot=" + handledSlot + " recipeId=" + recipe.getId()
-                            + " ownerMachine=" + ownerMachine.getClass().getName());
+            if (com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.ENABLED) {
+                com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activate.handleRecipeRejected",
+                        "slot=" + slot + " handledSlot=" + handledSlot + " recipeId=" + recipe.getId()
+                                + " ownerMachine=" + ownerMachine.getClass().getName());
+            }
             return;
         }
         ((IMEPatternPartMachine) ownerMachine).getMETrait().setSlotCacheRecipe(slot, recipe);
         capabilityMachine.tryAddAndActiveMERhp(handlePart, recipe, slot);
-        com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activate.success",
-                "slot=" + slot + " handledSlot=" + handledSlot + " recipeId=" + recipe.getId());
+        if (com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.ENABLED) {
+            com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics.hit("patternSearch.activate.success",
+                    "slot=" + slot + " handledSlot=" + handledSlot + " recipeId=" + recipe.getId());
+        }
     }
 
     /**
