@@ -32,8 +32,11 @@ import java.util.Set;
  * 所以不能按 isCapMachine 过滤（否则 StorageMachine 永远被跳过）。
  * GTLAdditions 机器走 GTLAddMultipleRecipesLogic，不走 RecipeLogic.findAndHandleRecipe，
  * 故此处仅按 IMultiController 过滤即可，不会重复处理。
+ *
+ * <p>priority 必须高于 GTLCore RecipeLogicMixin(默认1000)：其对 findAndHandleRecipe 是 @Overwrite，
+ * 同优先级时应用顺序不定——山海先应用则 HEAD 注入被整体替换掉。显式 1500 保证落在改写后的方法体上。
  */
-@Mixin(value = RecipeLogic.class, remap = false)
+@Mixin(value = RecipeLogic.class, priority = 1500, remap = false)
 public abstract class NativeVirtualFindHandleRecipeMixin {
 
     @Shadow(remap = false)
