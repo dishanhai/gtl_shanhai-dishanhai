@@ -87,7 +87,12 @@ public class ExchangeScreen extends ScaledScreen {
         panelWidth = Math.max(600, vWidth - 8);
         panelHeight = Math.max(380, vHeight - 16);
 
-        ExchangeConfig.reload();
+        // 只在本次打开首次 init 时读盘：initScaled 每次 resize 都会重跑，无条件 reload 既反复走文件 IO，
+        // 又会生成新的 ExchangeEntry 实例（引用相等比对），把 resize 前选中的条目重置掉
+        if (!exchangeLoadedOnce) {
+            ExchangeConfig.reload();
+            exchangeLoadedOnce = true;
+        }
         refreshEntries();
         if (selected != null && !entries.contains(selected)) selected = null;
         if (selected == null && !entries.isEmpty()) selected = entries.get(0);
@@ -221,7 +226,7 @@ public class ExchangeScreen extends ScaledScreen {
         for (ExchangeEntry.Ingredient in : side.ingredients) {
             if (in.isFluid) {
                 Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
-                String fname = fluid == null ? in.id.getPath() : in.id.getPath();
+                String fname = fluid == null ? in.id.getPath() : fluid.getFluidType().getDescription().getString();
                 String s = "§b" + in.count + "×" + fname;
                 g.drawString(this.font, s, px, y + 4, CYAN, true);
                 px += this.font.width(in.count + "×" + fname) + 10;
@@ -313,6 +318,7 @@ public class ExchangeScreen extends ScaledScreen {
 
     // 兑换是非幂等操作且点击后不关屏：300ms 内的第二次点击按误触双击吞掉，防止双击变两笔
     private long lastMoneySendAtMs;
+    private boolean exchangeLoadedOnce; // 打开后只读一次盘（initScaled 每次 resize 都重跑，见其注释）
 
     private void send(String entryId, boolean reverse) {
         long now = System.currentTimeMillis();

@@ -452,7 +452,13 @@ public class MultiPickerScreen extends ScaledScreen {
         panelWidth = Math.min(TARGET_W, vWidth - 12);
         panelHeight = Math.min(TARGET_H, vHeight - 16);
 
+        String keepQuery = searchBox != null ? searchBox.getValue() : ""; // resize 不丢已输入的搜索词
         if (!restrictedMode) { buildInventory(); buildBookmarks(); }
+        // INVENTORY/BOOKMARK 底层清单刚重建，过滤缓存和增量收窄状态记的都是重建前的下标——
+        // 清单变短时命中陈旧下标会在 gridItem() 越界崩溃，必须整体失效，随后由 setValue 触发重算
+        filterResultCache.clear();
+        lastFilterQuery = null;
+        lastFilterResult = null;
 
         // 顶部：搜索框 + 数量框
         searchBox = new EditBox(this.font, left + 12, top + 22, 200, 14, Component.literal("搜索"));
@@ -460,6 +466,7 @@ public class MultiPickerScreen extends ScaledScreen {
         searchBox.setBordered(true);
         searchBox.setTextColor(0xFFFFFF);
         searchBox.setResponder(s -> rebuildFilter());
+        searchBox.setValue(keepQuery); // 触发 responder → 用重建后的清单+干净缓存重算 filtered
         searchBox.setFocused(true);
         setFocused(searchBox);
 

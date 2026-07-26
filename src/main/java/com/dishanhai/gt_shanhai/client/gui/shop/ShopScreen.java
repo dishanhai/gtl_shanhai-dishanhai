@@ -2209,7 +2209,7 @@ public class ShopScreen extends ScaledScreen {
         // 关了 AE 模式点这个没意义（缺口判定本身也不含 AE 那部分，见 hasCostShortfall）。
         boolean showAutoCraftBtn = mode == Mode.BUY && aeMode && hasCostShortfall(dcost, amount, selectedEntryKey, aeMode);
         buyMaterialsBtnVisible = false;
-        boolean showBuyMaterialsBtn = mode == Mode.BUY && hasShopPurchasableMaterialCost(dcost);
+        boolean showBuyMaterialsBtn = mode == Mode.BUY && hasShopPurchasableMaterialCostCached(selected, dcost);
         // 前置任务跳转行：条目配了前置任务就占一行（无论能否解析到，未同步/已删都要给玩家一个可见提示）
         prereqQuest = selected.hasPrerequisiteQuest()
                 ? com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.resolve(selected.getPrerequisiteQuestId()) : null;
@@ -2938,6 +2938,19 @@ public class ShopScreen extends ScaledScreen {
         ctxMenuEntryKey = -1L;
     }
 
+    /** Esc 分层关闭：跟「点图层外关闭」同语义，先关最上层的右键菜单/大图层，全都没开才关整个商店。 */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == 256) {
+            if (ctxMenuOpen) { closeContextMenu(); return true; }
+            if (groupPickerOpen) { groupPickerOpen = false; return true; }
+            if (cartOverlayOpen) { cartOverlayOpen = false; return true; } // 结算批次不清，见 handleCartOverlayClick 关闭分支
+            if (descOverlayOpen) { descOverlayOpen = false; return true; }
+            if (guideOverlayOpen) { guideOverlayOpen = false; return true; }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
     /**
      * 菜单项按「导航跳转合集」+「管理效率」（仅 canEdit）两组现算：条目没配的跳转类项直接不出现，
      * 管理类整组只有编辑权玩家才追加。同 {@link #drawDetail} 里的跳转判定逻辑保持口径一致（复用同一批
@@ -3489,6 +3502,22 @@ public class ShopScreen extends ScaledScreen {
             if (have != null && java.math.BigInteger.valueOf(have).compareTo(need) < 0) return true;
         }
         return false;
+    }
+
+    // 详情页每帧都要问「成本里有没有可在商店买到的实物」，而 hasShopGoodsId 是对全部 stub 的线性扫描
+    // （O(实物原料数×商品总数)）——按选中条目+目录 revision 缓存一格，选中不变、目录不变就不再重扫
+    private ShopEntry buyMatsCachedFor;
+    private long buyMatsCachedRevision = -1L;
+    private boolean buyMatsCachedResult;
+
+    private boolean hasShopPurchasableMaterialCostCached(ShopEntry entry, ShopCost cost) {
+        long rev = ClientShopCatalog.revision();
+        if (buyMatsCachedFor != entry || buyMatsCachedRevision != rev) {
+            buyMatsCachedFor = entry;
+            buyMatsCachedRevision = rev;
+            buyMatsCachedResult = hasShopPurchasableMaterialCost(cost);
+        }
+        return buyMatsCachedResult;
     }
 
     private static boolean hasShopPurchasableMaterialCost(ShopCost cost) {
