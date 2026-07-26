@@ -21,8 +21,9 @@ class PatternEncodingRecipeTypeContextSourceTest {
         String config = Files.readString(CONFIG);
         String helper = Files.readString(HELPER);
 
-        assertTrue(source.contains("priority = 800"),
-                "类型桥必须晚于 GTLCore priority=900 菜单 Mixin 应用");
+        assertTrue(source.contains("priority = 1500"),
+                "类型桥必须晚于 GTLCore priority=900 菜单 Mixin 应用——Mixin 按 priority 升序应用,"
+                        + "晚于=数值必须>900;800 会先应用,此时 gTLCore$ 目标方法还不存在,require=0 静默失效");
         assertTrue(source.contains("gTLCore$setQuickUploadRecipeType"),
                 "必须捕获 JEI/REI 选中的配方类型");
         assertTrue(source.contains("gTLCore$setQuickUploadRecipeTypeFromClient"),

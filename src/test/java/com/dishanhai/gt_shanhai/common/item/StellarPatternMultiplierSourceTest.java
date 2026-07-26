@@ -57,8 +57,9 @@ class StellarPatternMultiplierSourceTest {
     void realPatternReturnIsRewrittenOnlyForStellarBuffer() throws IOException {
         String source = Files.readString(MIXIN);
 
-        assertTrue(source.contains("priority = 900"),
-                "山海注入必须晚于 GTLAdd 对 getRealPattern 的默认优先级 Overwrite");
+        assertTrue(source.contains("priority = 1500"),
+                "山海注入必须晚于 GTLAdd 对 getRealPattern 的默认优先级(1000) Overwrite 应用——"
+                        + "Mixin 按 priority 升序应用,晚于=数值更大;900 会先应用并被 Overwrite 连同旧方法体抹掉");
         assertTrue(source.contains("method = \"getRealPattern\""));
         assertTrue(source.contains("at = @At(\"RETURN\")"));
         assertTrue(source.contains("self instanceof RecipeTypePatternBufferPartMachine stellar"));
