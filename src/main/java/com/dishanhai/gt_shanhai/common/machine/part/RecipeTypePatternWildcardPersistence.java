@@ -95,6 +95,26 @@ final class RecipeTypePatternWildcardPersistence {
         pendingSlots.clear();
     }
 
+    boolean hasPending() {
+        return !pendingSlots.isEmpty();
+    }
+
+    /**
+     * 恢复尚未执行（onLoad 后延迟 1 tick 的窗口内）时存档：内存列表还是空的，
+     * 必须把未消费的 pendingSlots 原样回写，否则这次保存会把存档里的通配符槽数据抹掉。
+     */
+    void writePending(CompoundTag root) {
+        ListTag entries = new ListTag();
+        for (PendingSlot pending : pendingSlots) {
+            CompoundTag entry = new CompoundTag();
+            entry.put(PATTERN_KEY, pending.pattern().serializeNBT());
+            if (pending.slotData() != null) entry.put(SLOT_KEY, pending.slotData());
+            if (pending.recipeId() != null) entry.putString(RECIPE_ID_KEY, pending.recipeId().toString());
+            entries.add(entry);
+        }
+        if (!entries.isEmpty()) root.put(ROOT_KEY, entries);
+    }
+
     private static int findMatchingPattern(List<ItemStack> patterns, ItemStack expected, boolean[] used) {
         for (int i = 0; i < patterns.size(); i++) {
             if (!used[i] && ItemStack.isSameItemSameTags(patterns.get(i), expected)) return i;

@@ -373,6 +373,12 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @Override
     public void saveCustomPersistedData(@NotNull CompoundTag tag, boolean forDrop) {
         super.saveCustomPersistedData(tag, forDrop);
+        if (wildcardPersistence.hasPending()) {
+            // onLoad 后延迟 1 tick 的恢复还没执行，内存列表是空的：直接回写未消费的
+            // pendingSlots，避免这次保存把存档里的通配符槽数据抹掉（保存+崩服组合会永久丢料）。
+            wildcardPersistence.writePending(tag);
+            return;
+        }
         List<CompoundTag> internalSlotData = new ArrayList<>(wildcardInternalSlots.size());
         for (MEPatternBufferPartMachineBase.InternalSlot internalSlot : wildcardInternalSlots) {
             internalSlotData.add(internalSlot.isActive() ? internalSlot.serializeNBT() : null);
