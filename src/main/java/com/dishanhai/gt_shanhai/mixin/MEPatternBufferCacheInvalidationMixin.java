@@ -16,7 +16,12 @@ public class MEPatternBufferCacheInvalidationMixin {
         DShanhaiRecipeModifierAPI.registerPatternCacheOwner(this);
     }
 
-    @Inject(method = "onUnload", at = @At("HEAD"), remap = false, require = 0)
+    /**
+     * 注销挂在 onMachineRemoved（目标类确有覆写）而非 onUnload——MEPatternBufferPartMachine
+     * 及其 base 类都未声明 onUnload，注它会静默 no-op。区块卸载场景由 owner 表的
+     * WeakReference 语义兜底，拆除场景在此主动注销。require 缺省为强制，失配时启动报错而非静默。
+     */
+    @Inject(method = "onMachineRemoved", at = @At("HEAD"), remap = false)
     private void gtShanhai$unregisterRecipeModifierCacheOwner(CallbackInfo ci) {
         DShanhaiRecipeModifierAPI.unregisterPatternCacheOwner(this);
     }
