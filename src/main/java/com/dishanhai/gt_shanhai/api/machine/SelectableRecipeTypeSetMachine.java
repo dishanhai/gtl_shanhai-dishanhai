@@ -52,12 +52,17 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
     // 原实现每次都新建 ArrayList + 对每个选中名做 O(全部类型) 的字符串匹配 + 装箱成数组，纯浪费。
     // 仅在选中集合真正变化时失效重建。
     private GTRecipeType[] resolvedSelectedTypesCache;
+    // 选中名集合的 ResourceLocation 视图：isRecipeTypeSelected 每候选配方被调多次，
+    // 原实现每次 registryName.toString() 分配一个 String 再做字符串 contains——
+    // 预转成 ResourceLocation 集合后按 registryName 直接查询，语义等价（名字即 toString）且零分配。
+    private Set<ResourceLocation> selectedTypeIdsCache;
     // 是否已对当前选中集合做过"剔除失效类型"。定义的可选类型列表运行时不变，
     // 故只需在加载/选择变更后剪枝一次，避免热路径每次调用都新建 valid 名称集合。
     private boolean recipeTypeSelectionPruned;
 
     private void invalidateResolvedTypesCache() {
         resolvedSelectedTypesCache = null;
+        selectedTypeIdsCache = null;
         recipeTypeSelectionPruned = false;
     }
 
@@ -254,14 +259,10 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
     }
 
     public GTRecipeType getPrimarySelectedRecipeType() {
-        ensureRecipeTypeSelectionInitialized();
-        for (String name : selectedRecipeTypeNames) {
-            GTRecipeType type = findSelectableRecipeType(name);
-            if (type != null) {
-                return type;
-            }
-        }
-        return null;
+        // 复用 getSelectedRecipeTypes 的解析缓存：本方法在 RecipeLogic.needFuel 里每工作 tick
+        // 被调用，原实现每次对每个选中名重新做字符串解析（1..K 个 String 分配）。
+        GTRecipeType[] selected = getSelectedRecipeTypes();
+        return selected.length > 0 ? selected[0] : null;
     }
 
     public boolean hasSelectedRecipeTypes() {
@@ -272,11 +273,21 @@ public class SelectableRecipeTypeSetMachine extends GTLAddWirelessWorkableElectr
     public boolean isRecipeTypeSelected(GTRecipeType type) {
         applySyncedRecipeTypesIfNeeded();
         ensureRecipeTypeSelectionInitialized();
-        String name = recipeTypeName(type);
-        if (name == null) {
+        if (type == null || type.registryName == null) {
             return false;
         }
-        return selectedRecipeTypeNames.contains(name);
+        Set<ResourceLocation> ids = selectedTypeIdsCache;
+        if (ids == null) {
+            ids = new java.util.HashSet<>(selectedRecipeTypeNames.size());
+            for (String name : selectedRecipeTypeNames) {
+                ResourceLocation id = ResourceLocation.tryParse(name);
+                if (id != null) {
+                    ids.add(id);
+                }
+            }
+            selectedTypeIdsCache = ids;
+        }
+        return ids.contains(type.registryName);
     }
 
     public int getSelectedRecipeTypeCount() {
