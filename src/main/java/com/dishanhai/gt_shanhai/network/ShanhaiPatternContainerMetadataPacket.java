@@ -28,6 +28,9 @@ public final class ShanhaiPatternContainerMetadataPacket {
     public static ShanhaiPatternContainerMetadataPacket decode(FriendlyByteBuf buffer) {
         int menuId = buffer.readVarInt();
         int size = buffer.readVarInt();
+        if (size < 0 || size > 4096) {
+            throw new io.netty.handler.codec.DecoderException("ShanhaiPatternContainerMetadataPacket size out of range: " + size);
+        }
         Set<Long> ids = new HashSet<>(size);
         for (int i = 0; i < size; i++) {
             ids.add(buffer.readLong());

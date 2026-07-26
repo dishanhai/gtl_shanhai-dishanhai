@@ -18,6 +18,9 @@ import java.util.function.Supplier;
  */
 public class PatternSourceRequestPacket {
 
+    /** 单包条目上限：合法请求只发详情页可见的未缓存 AEKey，远低于此值；防恶意 varint 预分配 OOM。 */
+    static final int MAX_ENTRIES = 4096;
+
     private final List<AEKey> keys;
 
     public PatternSourceRequestPacket(List<AEKey> keys) {
@@ -33,6 +36,9 @@ public class PatternSourceRequestPacket {
 
     public static PatternSourceRequestPacket decode(FriendlyByteBuf buf) {
         int count = buf.readVarInt();
+        if (count < 0 || count > MAX_ENTRIES) {
+            throw new io.netty.handler.codec.DecoderException("PatternSourceRequestPacket entry count out of range: " + count);
+        }
         List<AEKey> keys = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             AEKey key = AEKey.readKey(buf);

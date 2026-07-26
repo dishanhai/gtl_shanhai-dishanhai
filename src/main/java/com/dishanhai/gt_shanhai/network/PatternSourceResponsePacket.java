@@ -36,6 +36,9 @@ public class PatternSourceResponsePacket {
 
     public static PatternSourceResponsePacket decode(FriendlyByteBuf buf) {
         int count = buf.readVarInt();
+        if (count < 0 || count > PatternSourceRequestPacket.MAX_ENTRIES) {
+            throw new io.netty.handler.codec.DecoderException("PatternSourceResponsePacket entry count out of range: " + count);
+        }
         List<AEKey> keys = new ArrayList<>(count);
         List<BlockPos> positions = new ArrayList<>(count);
         List<String> recipeTypeIds = new ArrayList<>(count);
