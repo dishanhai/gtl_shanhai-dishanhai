@@ -24,8 +24,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * "合成状态"详情页物品溯源：给一批 AEKey，找出玩家当前打开的合成状态菜单绑定的量子CPU
@@ -42,10 +46,20 @@ public final class PatternSourceLookupHelper {
 
     private static final Logger LOG = LoggerFactory.getLogger("gt_shanhai:pattern_source");
 
+    /** 同一玩家两次全网扫描的最小间隔（毫秒）——扫描在主线程同步执行，必须限频防刷。 */
+    private static final long PER_PLAYER_COOLDOWN_MS = 250L;
+
+    private static final Map<UUID, Long> LAST_QUERY_MS = new ConcurrentHashMap<>();
+
     private PatternSourceLookupHelper() {
     }
 
     public static void resolveAndReply(ServerPlayer player, List<AEKey> keys) {
+        long now = System.currentTimeMillis();
+        Long last = LAST_QUERY_MS.get(player.getUUID());
+        if (last != null && now - last < PER_PLAYER_COOLDOWN_MS) return;
+        LAST_QUERY_MS.put(player.getUUID(), now);
+
         long queryStart = System.nanoTime();
         if (!(player.containerMenu instanceof CraftingStatusMenu statusMenu)) return;
         ICraftingCPU cpu = ((CraftingStatusMenuAccessor) statusMenu).gtShanhai$getSelectedCpuRaw();
@@ -54,6 +68,8 @@ public final class PatternSourceLookupHelper {
         Level level = quantumCpu.getLevel();
         if (grid == null || level == null) return;
 
+        Set<AEKey> wantedKeys = new HashSet<>(keys);
+        Set<AEKey> foundSet = new HashSet<>();
         List<AEKey> foundKeys = new ArrayList<>();
         List<BlockPos> foundPositions = new ArrayList<>();
         List<String> foundTypes = new ArrayList<>();
@@ -61,7 +77,7 @@ public final class PatternSourceLookupHelper {
         long bufferStart = System.nanoTime();
         Set<MEPatternBufferPartMachineBase> buffers = grid.getMachines(MEPatternBufferPartMachineBase.class);
         long bufferElapsed = System.nanoTime() - bufferStart;
-        LOG.info("[PatternSource] request={} buffersFound={} discoverMs={}",
+        LOG.debug("[PatternSource] request={} buffersFound={} discoverMs={}",
                 keys.size(), buffers.size(), bufferElapsed / 1_000_000.0);
 
         for (MEPatternBufferPartMachineBase buffer : buffers) {
@@ -76,11 +92,12 @@ public final class PatternSourceLookupHelper {
                 for (GenericStack output : outputs) {
                     if (output == null || output.what() == null) continue;
                     AEKey what = output.what();
-                    if (foundKeys.contains(what) || !keys.contains(what)) continue;
+                    if (foundSet.contains(what) || !wantedKeys.contains(what)) continue;
                     ItemStack patternStack = pattern.getDefinition().toStack();
                     String typeId = PatternRecipeTypeHelper.peekRecipeTypeId(patternStack, level);
                     if (typeId.isEmpty()) continue;
-                    LOG.info("[PatternSource] match what={} pos={} type={}", what, buffer.getPos(), typeId);
+                    LOG.debug("[PatternSource] match what={} pos={} type={}", what, buffer.getPos(), typeId);
+                    foundSet.add(what);
                     foundKeys.add(what);
                     foundPositions.add(buffer.getPos());
                     foundTypes.add(typeId);
@@ -90,11 +107,11 @@ public final class PatternSourceLookupHelper {
         }
 
         if (foundKeys.isEmpty()) {
-            LOG.warn("[PatternSource] no match found");
+            LOG.debug("[PatternSource] no match found");
             return;
         }
         long totalElapsed = System.nanoTime() - queryStart;
-        LOG.info("[PatternSource] done totalMs={} replied={}", totalElapsed / 1_000_000.0, foundKeys.size());
+        LOG.debug("[PatternSource] done totalMs={} replied={}", totalElapsed / 1_000_000.0, foundKeys.size());
         ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                 new PatternSourceResponsePacket(foundKeys, foundPositions, foundTypes));
     }
