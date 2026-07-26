@@ -79,9 +79,20 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     private final Map<GTRecipeType, TypeCacheEntry> perTypeLookupCache = new HashMap<>();
     private long cachedMarkedRecipeTick = Long.MIN_VALUE;
     private Set<GTRecipe> cachedMarkedRecipes = Collections.emptySet();
-    private long cachedMergedLookupTick = Long.MIN_VALUE;
+    // merged 缓存按 (base 实例, marked 实例) 身份对命中，而非 tick 键：
+    // marked 集合实例在 revision 未变时是稳定的（见 collectActiveMarkedPatternRecipes 的实例复用），
+    // 两个输入都没换实例时合并结果必然不变——跨 tick 直接复用，消除每 tick 的 ShadowKey 解码+全量复制。
+    private Set<GTRecipe> cachedMergedLookupMarked;
     private Set<GTRecipe> cachedMergedLookupBase;
     private Set<GTRecipe> cachedMergedLookupRecipes;
+
+    // 空结果退避：候选集为空（通常是缺料/无有效样板）时，spark 实测每 5 tick 一次的全量
+    // getRecipeIterator 重搜（AE 内容物化+dive 全子树枚举）是空闲模块的最大稳态开销。
+    // 在退避窗口内直接返回空集不重搜；任何仓室内容变化（GTCEu 在 handler 变更时回调
+    // updateTickSubscription，见 WorkableMultiblockMachine 的 addChangedListener 注册）、
+    // 选择集变化、模块等级变化都会立即解除退避——"料一到立刻开工"的原有保证不变，
+    // 只有"什么都没变的空转机器"被降频。默认 0（普通机器行为完全不变），稳态模块覆写窗口。
+    private long emptyLookupUntilTick = Long.MIN_VALUE;
 
     public SelectableRecipeTypeSetRecipeLogic(SelectableRecipeTypeSetMachine machine) {
         super(machine);
@@ -113,9 +124,26 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         perTypeLookupCache.clear();
         cachedMarkedRecipeTick = Long.MIN_VALUE;
         cachedMarkedRecipes = Collections.emptySet();
-        cachedMergedLookupTick = Long.MIN_VALUE;
+        cachedMergedLookupMarked = null;
         cachedMergedLookupBase = null;
         cachedMergedLookupRecipes = null;
+        emptyLookupUntilTick = Long.MIN_VALUE;
+    }
+
+    /** 空结果退避窗口（tick）。默认 0 = 不退避（与历史行为一致）；稳态机器可覆写。 */
+    protected long getEmptyLookupBackoffTicks() {
+        return 0L;
+    }
+
+    /**
+     * GTCEu 在任何输入/输出仓内容变化时回调本方法（WorkableMultiblockMachine 对每个 handler
+     * addChangedListener 注册）——借它做空结果退避的事件失效点：内容一变立即恢复实时搜索。
+     * 其他调用路径（初始化/状态变化）多清一次退避无害，方向安全（宁可多搜）。
+     */
+    @Override
+    public void updateTickSubscription() {
+        emptyLookupUntilTick = Long.MIN_VALUE;
+        super.updateTickSubscription();
     }
 
     /**
@@ -172,6 +200,10 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             return lookupLockedRecipe();
         }
         long tick = machine.getOffsetTimer();
+        // 空结果退避窗口内不重搜：仓室内容一有变化 updateTickSubscription 立即解除（见字段注释）。
+        if (tick < emptyLookupUntilTick) {
+            return Collections.emptySet();
+        }
         long cacheTicks = getLookupCacheTicks();
         // 保险①短窗口自愈 + 保险②空结果不缓存（cachedLookupRecipes 非空才可能命中）
         if (cachedLookupRecipes != null
@@ -183,7 +215,12 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         Set<GTRecipe> merged = mergeMarkedPatternRecipesCached(machine, recipes);
         if (merged.isEmpty()) {
             // 空结果不写缓存：机器空转/缺料时永远实时搜索，料一到立刻开工，杜绝"缓存空集守死不启动"。
+            // 稳态机器（getEmptyLookupBackoffTicks>0）例外：进入事件驱动退避，内容变化即恢复实时搜索。
             invalidateLookupSetCache();
+            long backoff = getEmptyLookupBackoffTicks();
+            if (backoff > 0L) {
+                emptyLookupUntilTick = tick + backoff;
+            }
             return merged;
         }
         if (recipes.isEmpty()) {
@@ -198,20 +235,21 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     }
 
     private Set<GTRecipe> mergeMarkedPatternRecipesCached(SelectableRecipeTypeSetMachine machine, Set<GTRecipe> base) {
-        long tick = machine.getOffsetTimer();
-        if (base == cachedMergedLookupBase && tick == cachedMergedLookupTick
+        Set<GTRecipe> marked = collectActiveMarkedPatternRecipesCached(machine);
+        // (base, marked) 两个输入实例都没变 → 合并结果必然不变，跨 tick 复用（marked 实例在
+        // revision 未变时由 collectActiveMarkedPatternRecipes 保持稳定）。
+        if (base == cachedMergedLookupBase && marked == cachedMergedLookupMarked
                 && cachedMergedLookupRecipes != null) {
             return cachedMergedLookupRecipes;
         }
-        Set<GTRecipe> merged = mergeMarkedPatternRecipes(machine, base);
+        Set<GTRecipe> merged = mergeMarkedPatternRecipes(base, marked);
         cachedMergedLookupBase = base;
-        cachedMergedLookupTick = tick;
+        cachedMergedLookupMarked = marked;
         cachedMergedLookupRecipes = merged;
         return merged;
     }
 
-    private Set<GTRecipe> mergeMarkedPatternRecipes(SelectableRecipeTypeSetMachine machine, Set<GTRecipe> base) {
-        Set<GTRecipe> marked = collectActiveMarkedPatternRecipesCached(machine);
+    private Set<GTRecipe> mergeMarkedPatternRecipes(Set<GTRecipe> base, Set<GTRecipe> marked) {
         if (marked.isEmpty()) {
             return base;
         }

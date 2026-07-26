@@ -286,6 +286,12 @@ public final class RecipeTypePatternSearchHelper {
         }
         Set<GTRecipe> recipes = collectMarkedPatternRecipes(machine, false);
         synchronized (ACTIVE_MARKED_RECIPE_CACHE) {
+            // 实例稳定化：重建结果与上一轮内容相同时复用旧实例——下游 merged 缓存按实例身份
+            // 判断"输入没变"，实例稳定才能让它跨 tick 命中，消除每 tick 的合并复制。
+            ActiveMarkedRecipeCacheEntry prev = ACTIVE_MARKED_RECIPE_CACHE.get(machine);
+            if (prev != null && recipes.equals(prev.recipes)) {
+                recipes = prev.recipes;
+            }
             ACTIVE_MARKED_RECIPE_CACHE.put(machine, new ActiveMarkedRecipeCacheEntry(
                     tick, currentPatternRevision, recipeRevision, recipes));
         }
