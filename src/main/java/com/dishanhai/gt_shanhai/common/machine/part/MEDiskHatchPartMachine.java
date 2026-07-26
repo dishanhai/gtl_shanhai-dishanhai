@@ -691,24 +691,25 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
     private static final class KeyCounterSnapshot {
         private final Object2IntOpenHashMap<AEKey> keyIndexes;
-        private final AEKey[] keys;
-        private final long[] amounts;
-        private final int size;
+        private AEKey[] keys;
+        private long[] amounts;
+        private int size;
 
         private KeyCounterSnapshot(KeyCounter source) {
-            int capacity = source.size();
+            this(source, null);
+        }
+
+        private KeyCounterSnapshot(KeyCounter source, java.util.function.UnaryOperator<AEKey> normalizer) {
+            this(source.size());
+            AeStorageAmountMath.forEachEntry(source, (key, amount) ->
+                    addAmount(normalizer == null ? key : normalizer.apply(key), amount));
+        }
+
+        private KeyCounterSnapshot(int capacity) {
             this.keyIndexes = new Object2IntOpenHashMap<>(capacity);
             this.keyIndexes.defaultReturnValue(-1);
             this.keys = new AEKey[capacity];
             this.amounts = new long[capacity];
-            int index = 0;
-            for (Object2LongMap.Entry<AEKey> entry : source) {
-                keys[index] = entry.getKey();
-                amounts[index] = entry.getLongValue();
-                keyIndexes.put(keys[index], index);
-                index++;
-            }
-            this.size = index;
         }
 
         private static KeyCounterSnapshot aggregate(Iterable<? extends MEStorage> storages) {
@@ -728,9 +729,23 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         private boolean addAmount(AEKey key, long amount) {
             if (key == null || amount <= 0L) return true;
             int index = keyIndexes.getInt(key);
-            if (index < 0) return false;
-            amounts[index] = AeStorageAmountMath.saturatedAdd(amounts[index], amount);
+            if (index < 0) {
+                ensureCapacity(size + 1);
+                keyIndexes.put(key, size);
+                keys[size] = key;
+                amounts[size] = amount;
+                size++;
+            } else {
+                amounts[index] = AeStorageAmountMath.saturatedAdd(amounts[index], amount);
+            }
             return true;
+        }
+
+        private void ensureCapacity(int required) {
+            if (required <= keys.length) return;
+            int capacity = Math.max(required, Math.max(4, keys.length + (keys.length >> 1)));
+            keys = java.util.Arrays.copyOf(keys, capacity);
+            amounts = java.util.Arrays.copyOf(amounts, capacity);
         }
 
         private boolean removeAmount(AEKey key, long amount) {
@@ -744,6 +759,13 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         }
 
         private void addTo(KeyCounter out) {
+            if (out.isEmpty()) {
+                for (int i = 0; i < size; i++) {
+                    long amount = amounts[i];
+                    if (amount > 0L) out.set(keys[i], amount);
+                }
+                return;
+            }
             for (int i = 0; i < size; i++) {
                 long amount = amounts[i];
                 if (amount <= 0L) continue;
@@ -759,6 +781,13 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                     out.add(keys[i], amount);
                 }
             }
+        }
+
+        private static KeyCounterSnapshot fromNormalized(
+                EquivalentKeySnapshotCache<AEKey> equivalentKeyCache) {
+            KeyCounterSnapshot snapshot = new KeyCounterSnapshot(16);
+            equivalentKeyCache.forEachNormalized(snapshot::addAmount);
+            return snapshot;
         }
     }
 
@@ -818,10 +847,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             int version = delegateSnapshotVersion();
             if (cached == null || cachedDelegateVersion != version) {
                 if (equivalentKeyCache.hasSnapshot() && cachedDelegateVersion == version) {
-                    KeyCounter normalized = new KeyCounter();
-                    equivalentKeyCache.forEachNormalized(
-                            (key, amount) -> AeStorageAmountMath.addSaturated(normalized, key, amount));
-                    cached = new KeyCounterSnapshot(normalized);
+                    cached = KeyCounterSnapshot.fromNormalized(equivalentKeyCache);
                 } else {
                     cached = loadNormalizedAvailableStacksSnapshot();
                 }
@@ -851,13 +877,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         private KeyCounterSnapshot loadNormalizedAvailableStacksSnapshot() {
             KeyCounter raw = new KeyCounter();
             delegate.getAvailableStacks(raw);
-            KeyCounter normalized = new KeyCounter();
-            for (var entry : raw) {
-                long amount = entry.getLongValue();
-                if (amount <= 0L) continue;
-                AeStorageAmountMath.addSaturated(normalized, normalizeFluidKey(entry.getKey()), amount);
-            }
-            return new KeyCounterSnapshot(normalized);
+            return new KeyCounterSnapshot(raw, MEDiskHatchPartMachine::normalizeFluidKey);
         }
 
         private void clearAvailableSnapshot() {
@@ -903,10 +923,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             KeyCounterSnapshot cached = cachedAvailableStacks;
             if (cached == null) {
                 if (equivalentKeyCache.hasSnapshot()) {
-                    KeyCounter normalized = new KeyCounter();
-                    equivalentKeyCache.forEachNormalized(
-                            (key, amount) -> AeStorageAmountMath.addSaturated(normalized, key, amount));
-                    cached = new KeyCounterSnapshot(normalized);
+                    cached = KeyCounterSnapshot.fromNormalized(equivalentKeyCache);
                 } else {
                     cached = loadNormalizedAvailableStacksSnapshot();
                 }
@@ -955,13 +972,7 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         private KeyCounterSnapshot loadNormalizedAvailableStacksSnapshot() {
             KeyCounter raw = new KeyCounter();
             delegate.getAvailableStacks(raw);
-            KeyCounter normalized = new KeyCounter();
-            for (var entry : raw) {
-                long amount = entry.getLongValue();
-                if (amount <= 0L) continue;
-                AeStorageAmountMath.addSaturated(normalized, normalizeFluidKey(entry.getKey()), amount);
-            }
-            return new KeyCounterSnapshot(normalized);
+            return new KeyCounterSnapshot(raw, MEDiskHatchPartMachine::normalizeFluidKey);
         }
 
         private void clearAvailableSnapshot() {

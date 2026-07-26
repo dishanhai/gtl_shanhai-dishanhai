@@ -91,14 +91,12 @@ public class VirtualCellStorage implements MEStorage {
             return;
         }
         ListTag keys = new ListTag();
-        ListTag hashes = new ListTag();
         java.util.ArrayList<Long> amountList = new java.util.ArrayList<>();
         for (var entry : storage.entrySet()) {
             BigInteger amount = entry.getValue();
             if (amount.signum() <= 0) continue;
             AEKey key = entry.getKey();
             keys.add(DShanhaiAEKeyCodec.toNormalizedTag(key));
-            hashes.add(net.minecraft.nbt.StringTag.valueOf(DShanhaiAEKeyCodec.stableHash(key)));
             amountList.add(amount.longValue());
         }
         long[] amounts = new long[amountList.size()];
@@ -107,7 +105,8 @@ public class VirtualCellStorage implements MEStorage {
         }
         target.remove(TAG_ITEMS);
         target.put(TAG_KEYS, keys);
-        target.put(TAG_HASHES, hashes);
+        // 历史冗余字段：loadKeyedFormat 从不读取 hashes，停止写入并顺手清掉旧数据
+        target.remove(TAG_HASHES);
         target.putLongArray(TAG_AMTS, amounts);
     }
 

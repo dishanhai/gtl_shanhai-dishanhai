@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 
 /**
@@ -873,6 +874,31 @@ public final class VirtualPatternEncodingHelper {
     private static boolean isRecipeCycleContainerKey(AEKey key) {
         return key instanceof AEItemKey itemKey
                 && RecipeCalculationHelper.INSTANCE.isRecipeCycleContainerItem(itemKey.getItem());
+    }
+
+    private static final AtomicBoolean INDEX_PREWARM_RUNNING = new AtomicBoolean(false);
+
+    /**
+     * 后台预热配方输出索引。buildRecipeOutputIndexes 是类锁内的全量配方扫描（GTL 体量下可达秒级），
+     * 若等到第一次样板编码 / AE 规划时才惰性构建，会卡住主线程或合成计算线程。
+     * 服务器启动完成后（延迟 tick 里）调用一次即可；revision 未变时重复调用是空操作，无害。
+     */
+    public static void prewarmRecipeOutputIndexesAsync(String reason) {
+        if (!INDEX_PREWARM_RUNNING.compareAndSet(false, true)) return;
+        Thread thread = new Thread(() -> {
+            try {
+                long start = System.currentTimeMillis();
+                getRecipeOutputIndexes();
+                LOG.info("[VirtualPatternEncoding] 配方输出索引预热完成，耗时 {} ms ({})",
+                        System.currentTimeMillis() - start, reason);
+            } catch (Throwable t) {
+                LOG.warn("[VirtualPatternEncoding] 配方输出索引预热失败 ({})", reason, t);
+            } finally {
+                INDEX_PREWARM_RUNNING.set(false);
+            }
+        }, "gtshanhai-recipe-index-prewarm");
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private static RecipeOutputIndexes getRecipeOutputIndexes() {

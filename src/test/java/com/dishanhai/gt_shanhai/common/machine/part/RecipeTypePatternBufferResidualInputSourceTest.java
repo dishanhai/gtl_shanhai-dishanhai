@@ -41,4 +41,16 @@ class RecipeTypePatternBufferResidualInputSourceTest {
         assertTrue(source.contains("internalSlot.getFluidCatalystInventory().getLong(key)"));
         assertTrue(source.contains("gtShanhai$subtractMergedAmount"));
     }
+
+    @Test
+    void jadeFallsBackToPersistedVirtualCircuitIdentity() throws IOException {
+        String source = Files.readString(MACHINE);
+
+        assertTrue(source.contains("VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory)"),
+                "历史槽只有虚拟电路标记时，Jade 仍必须识别该电路");
+        assertTrue(source.contains("IntCircuitBehaviour.stack(virtualCircuit)"),
+                "必须按持久化配置构造精确的编程电路 key");
+        assertTrue(source.contains("!itemTargets.containsKey(circuitKey)"),
+                "目标表已有电路时不得重复扣除");
+    }
 }

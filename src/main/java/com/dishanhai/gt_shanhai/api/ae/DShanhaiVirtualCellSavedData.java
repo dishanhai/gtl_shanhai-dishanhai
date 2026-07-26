@@ -83,8 +83,23 @@ public class DShanhaiVirtualCellSavedData extends SavedData {
         return cells.get(uuid);
     }
 
+    /**
+     * 以 long 视图整体覆盖写入单元。
+     * ⚠️ 与 {@link #updateCellBig} 共用 UUID 空间且互为整体覆盖：现行约定是
+     * "sda" 类型单元只走 updateCellBig/readCellBigAmounts（BigInteger 大数），
+     * 虚拟磁盘 "item"/"fluid" 单元只走本方法与 readCellAmounts。
+     * 对同一 UUID 混用两套接口会丢数据（long 视图读不到超 long 的条目）。
+     */
     public void updateCell(UUID uuid, String type, long bytes, Map<AEKey, Long> amounts) {
         if (uuid == null) return;
+        CellData previous = cells.get(uuid);
+        if (previous != null && !previous.bigAmounts.isEmpty()
+                && previous.amounts.size() != previous.bigAmounts.size()) {
+            // 埋雷警戒线：long 写入方正在覆盖一个含超 long 大数的单元（见 2026-07 体检）
+            com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER.warn(
+                    "[VirtualCell] updateCell 正以 long 视图覆盖含超 long 大数的单元 {}（type={}），超出部分将丢失",
+                    uuid, previous.type);
+        }
         CellData cell = new CellData(type, bytes);
         for (Map.Entry<AEKey, Long> entry : amounts.entrySet()) {
             long amount = entry.getValue() != null ? entry.getValue() : 0L;
@@ -101,6 +116,10 @@ public class DShanhaiVirtualCellSavedData extends SavedData {
         setDirty();
     }
 
+    /**
+     * 以 BigInteger 大数视图整体覆盖写入单元（"sda" 内容单元专用）。
+     * UUID 空间约定见 {@link #updateCell} 的注释，混用会丢数据。
+     */
     public void updateCellBig(UUID uuid, String type, long bytes, Map<AEKey, java.math.BigInteger> amounts) {
         if (uuid == null) return;
         CellData cell = new CellData(type, bytes);
@@ -128,6 +147,12 @@ public class DShanhaiVirtualCellSavedData extends SavedData {
         Map<AEKey, Long> result = new LinkedHashMap<>();
         CellData cell = cells.get(uuid);
         if (cell == null) return result;
+        if (!cell.bigAmounts.isEmpty() && cell.amounts.size() != cell.bigAmounts.size()) {
+            // 埋雷警戒线：long 视图读不到该单元的全部条目，调用方应改用 readCellBigAmounts
+            com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER.warn(
+                    "[VirtualCell] readCellAmounts({}) 读到含大数的单元（type={}），{} 个条目未包含在 long 视图中",
+                    uuid, cell.type, cell.bigAmounts.size() - cell.amounts.size());
+        }
         for (Map.Entry<String, Long> entry : cell.amounts.entrySet()) {
             AEKey key = getDecodedKey(entry.getKey());
             long amount = entry.getValue() != null ? entry.getValue() : 0L;

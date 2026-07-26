@@ -12,6 +12,7 @@ import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
+import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 
 import appeng.api.config.Actionable;
 import appeng.api.crafting.IPatternDetails;
@@ -19,15 +20,19 @@ import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
+import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 import appeng.api.storage.MEStorage;
 import appeng.crafting.pattern.AEProcessingPattern;
 
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 import org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine;
 import org.gtlcore.gtlcore.api.machine.trait.MEPart.IMEPatternPartMachine;
@@ -461,6 +466,11 @@ public final class RecipeTypePatternSearchHelper {
                                     + " hostAllowsType=" + hostAllows);
                     continue;
                 }
+                Object internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
+                if (activeSlotNeedsCircuitRepair(internalSlot, recipe)) {
+                    ItemStack patternStack = access.gtShanhai$getPatternStack(slot);
+                    topUpVirtualSupply(buffer, slot, patternStack, recipe);
+                }
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
             }
@@ -525,20 +535,16 @@ public final class RecipeTypePatternSearchHelper {
     private static void topUpVirtualSupply(MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
             GTRecipe recipe) {
         if (patternStack == null || patternStack.isEmpty()) return;
-        long remainingBudget = getRemainingBudget(buffer, slot);
-        if (remainingBudget <= 0) return; // 这一单预算已耗尽，不再自动补
         Level level = buffer.getLevel();
         if (level == null) return;
 
         // InternalSlot 是 GTLCore 内部类型（编译期不可见，只能整段走反射），下面全部以 Object 传递。
         Object internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
         if (internalSlot == null) return;
-        if (hasConsumableStock(internalSlot, recipe)) {
-            return; // 消耗性输入还没用完，本轮不补（不消耗的催化剂常驻不算库存）
-        }
+        boolean consumableStockPresent = hasConsumableStock(internalSlot, recipe);
+        long remainingBudget = getRemainingBudget(buffer, slot);
+        if (!consumableStockPresent && remainingBudget <= 0) return;
 
-        IGrid grid = buffer.getGrid();
-        if (grid == null) return;
         IPatternDetails details;
         try {
             details = PatternDetailsHelper.decodePattern(patternStack, level);
@@ -549,12 +555,7 @@ public final class RecipeTypePatternSearchHelper {
         GenericStack[] inputs = pattern.getSparseInputs();
         if (inputs == null || inputs.length == 0) return;
 
-        Object actionSourceObj = readField(buffer, "actionSource");
-        if (!(actionSourceObj instanceof IActionSource actionSource)) return;
-
-        MEStorage storage = grid.getStorageService().getInventory();
         GenericStack[] presenceTargets = new GenericStack[inputs.length];
-        long achievable = remainingBudget;
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
             if (in == null || in.amount() <= 0) continue;
@@ -563,7 +564,24 @@ public final class RecipeTypePatternSearchHelper {
                 presenceTarget = new GenericStack(in.what(), Math.max(1L, in.amount()));
             }
             presenceTargets[i] = presenceTarget;
-            if (presenceTarget != null) continue;
+            if (presenceTarget != null && buffer instanceof VirtualPatternBufferMachineAccess access) {
+                access.gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what(),
+                        Math.max(1L, presenceTarget.amount()));
+            }
+        }
+        if (consumableStockPresent) {
+            return;
+        }
+
+        IGrid grid = buffer.getGrid();
+        if (grid == null) return;
+        Object actionSourceObj = readField(buffer, "actionSource");
+        if (!(actionSourceObj instanceof IActionSource actionSource)) return;
+        MEStorage storage = grid.getStorageService().getInventory();
+        long achievable = remainingBudget;
+        for (int i = 0; i < inputs.length; i++) {
+            GenericStack in = inputs[i];
+            if (in == null || in.amount() <= 0 || presenceTargets[i] != null) continue;
             long available = storage.extract(in.what(), Long.MAX_VALUE, Actionable.SIMULATE, actionSource);
             achievable = Math.min(achievable, available / in.amount());
         }
@@ -576,10 +594,6 @@ public final class RecipeTypePatternSearchHelper {
             if (in == null || in.amount() <= 0) continue;
             GenericStack presenceTarget = presenceTargets[i];
             if (presenceTarget != null) {
-                if (buffer instanceof VirtualPatternBufferMachineAccess access) {
-                    access.gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what(),
-                            Math.max(1L, presenceTarget.amount()));
-                }
                 continue;
             }
             long want = saturatedMultiply(in.amount(), achievable);
@@ -592,6 +606,48 @@ public final class RecipeTypePatternSearchHelper {
         if (consumableExtracted) {
             decrementBudget(buffer, slot, achievable); // 这一单预算扣减，耗尽前允许下一轮继续补
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean activeSlotNeedsCircuitRepair(Object internalSlot, GTRecipe recipe) {
+        if (internalSlot == null || recipe == null) return false;
+        int requiredCircuit = findRecipeCircuitConfiguration(recipe);
+        if (requiredCircuit <= 0) return false;
+
+        Object cacheManager = invokeNoArg(internalSlot, "getCacheManager");
+        Object cachedValue = invokeNoArg(cacheManager, "getCircuitCache");
+        int cachedCircuit = cachedValue instanceof Number number ? number.intValue() : -1;
+        Object itemInventoryObject = invokeNoArg(internalSlot, "getItemInventory");
+        if (!(itemInventoryObject instanceof Object2LongOpenHashMap<?> rawItemInventory)) return true;
+        Object2LongOpenHashMap<AEItemKey> itemInventory =
+                (Object2LongOpenHashMap<AEItemKey>) rawItemInventory;
+        AEItemKey circuitKey = AEItemKey.of(IntCircuitBehaviour.stack(requiredCircuit));
+        long internalAmount = itemInventory.getLong(circuitKey);
+        long catalystAmount = getStoredAmount(invokeNoArg(internalSlot, "getItemCatalystInventory"), circuitKey);
+        int virtualCircuit = VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory);
+        return cachedCircuit != requiredCircuit || virtualCircuit != requiredCircuit
+                || (internalAmount <= 0L && catalystAmount <= 0L);
+    }
+
+    private static int findRecipeCircuitConfiguration(GTRecipe recipe) {
+        for (Content content : recipe.getInputContents(
+                com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability.CAP)) {
+            if (!(content.getContent() instanceof Ingredient ingredient)) continue;
+            for (ItemStack stack : ingredient.getItems()) {
+                if (stack != null && !stack.isEmpty() && IntCircuitBehaviour.isIntegratedCircuit(stack)) {
+                    return IntCircuitBehaviour.getCircuitConfiguration(stack);
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static long getStoredAmount(Object inventory, AEItemKey key) {
+        if (!(inventory instanceof Object2LongMap<?> map) || key == null) return 0L;
+        for (Object2LongMap.Entry<?> entry : map.object2LongEntrySet()) {
+            if (key.equals(entry.getKey())) return entry.getLongValue();
+        }
+        return 0L;
     }
 
     /**

@@ -56,6 +56,31 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
     @Unique
     private Method gtShanhai$getInternalSlotMethod;
 
+    @Unique
+    private Method gtShanhai$getMainNodeMethod;
+
+    @Unique
+    private Method gtShanhai$getMETraitMethod;
+
+    @Unique
+    private Method gtShanhai$notifySelfIOMethod;
+
+    @Unique
+    private boolean gtShanhai$reflectionWarned;
+
+    /**
+     * 机器级反射兜底失败时的一次性警告。槽位级访问已全部改走
+     * {@link VirtualPatternBufferSlotAccess} 桥接接口，不再有静默吞异常的问题；
+     * 剩余的机器级反射（getInternalSlot/getMainNode/getMETrait）失败必须可见。
+     */
+    @Unique
+    private void gtShanhai$warnReflectionFailure(String site, ReflectiveOperationException e) {
+        if (gtShanhai$reflectionWarned) return;
+        gtShanhai$reflectionWarned = true;
+        com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER.warn(
+                "[VirtualProvider] 反射调用 {} 失败，虚拟供料链路可能失效（GTLCore 版本变动？）", site, e);
+    }
+
     @Override
     public void gtShanhai$restoreVirtualTargetsFromPatterns(Iterable<IPatternDetails> patterns) {
         if (patterns == null) return;
@@ -102,16 +127,18 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
         }
 
         Object slot = gtShanhai$getInternalSlot(slotIndex);
-        if (slot == null) {
+        if (!(slot instanceof VirtualPatternBufferSlotAccess access)) {
+            // 槽位为 null 或槽位 mixin 未生效：宁可下单失败，也不能让配料被静默吃掉
             QuantumDiagnostics.hit("patternBuffer.pushPattern.slotNull",
-                    "machine=" + gtShanhai$describeSelf() + " slotIndex=" + slotIndex);
+                    "machine=" + gtShanhai$describeSelf() + " slotIndex=" + slotIndex
+                            + " slotClass=" + (slot == null ? "null" : slot.getClass().getName()));
             cir.setReturnValue(false);
             return;
         }
         try {
             VirtualPatternEncodingHelper.pushPatternInputsIncludingVirtual(patternDetails, inputHolder,
-                    (what, amount) -> gtShanhai$addToSlot(slot, what, amount),
-                    (what, amount) -> gtShanhai$addVirtualTargetToSlot(slot, what, amount));
+                    access::gtShanhai$add,
+                    (what, amount) -> gtShanhai$addVirtualTargetToSlot(access, what, amount));
         } catch (RuntimeException e) {
             QuantumDiagnostics.hit("patternBuffer.pushPattern.throw",
                     "machine=" + gtShanhai$describeSelf() + " slotIndex=" + slotIndex
@@ -119,7 +146,7 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
             cir.setReturnValue(false);
             return;
         }
-        gtShanhai$notifySlotChanged(slot);
+        gtShanhai$notifySlotChanged(access);
         QuantumDiagnostics.hit("patternBuffer.pushPattern.success",
                 "machine=" + gtShanhai$describeSelf() + " slotIndex=" + slotIndex + " pattern=" + patternDetails);
         cir.setReturnValue(true);
@@ -175,7 +202,7 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
             return false;
         }
         access.gtShanhai$stripVirtualTargets();
-        gtShanhai$notifySlotChanged(slot);
+        gtShanhai$notifySlotChanged(access);
         gtShanhai$notifySelfIO();
         return true;
     }
@@ -187,67 +214,61 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
         }
         Object slot = gtShanhai$getInternalSlot(slotIndex);
         if (!(slot instanceof VirtualPatternBufferSlotAccess access)) return false;
-        if (access.gtShanhai$hasVirtualTarget(key)) return true;
+        if (access.gtShanhai$hasVirtualTarget(key)) {
+            access.gtShanhai$syncVirtualTargetsToCatalyst();
+            if (key instanceof AEItemKey itemKey) gtShanhai$cacheVirtualCircuit(access, itemKey);
+            gtShanhai$notifySlotChanged(access);
+            gtShanhai$notifySelfIO();
+            return true;
+        }
 
         access.gtShanhai$restoreVirtualTarget(key, Long.MAX_VALUE);
         if (!access.gtShanhai$hasVirtualTarget(key)) {
-            gtShanhai$addVirtualTargetToSlot(slot, key, amount);
+            gtShanhai$addVirtualTargetToSlot(access, key, amount);
         } else {
             access.gtShanhai$syncVirtualTargetsToCatalyst();
-            if (key instanceof AEItemKey itemKey) gtShanhai$cacheVirtualCircuit(slot, itemKey);
+            if (key instanceof AEItemKey itemKey) gtShanhai$cacheVirtualCircuit(access, itemKey);
         }
-        gtShanhai$notifySlotChanged(slot);
+        gtShanhai$notifySlotChanged(access);
         gtShanhai$notifySelfIO();
         return access.gtShanhai$hasVirtualTarget(key);
     }
 
-    @SuppressWarnings("unchecked")
-    private Object2LongOpenHashMap<AEItemKey> gtShanhai$getItemInventory(Object slot) {
-        try {
-            Method method = gtShanhai$findMethod(slot.getClass(), "getItemInventory");
-            Object inventory = method.invoke(slot);
-            if (inventory instanceof Object2LongOpenHashMap<?>) {
-                return (Object2LongOpenHashMap<AEItemKey>) inventory;
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
-        return null;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Object2LongOpenHashMap<AEFluidKey> gtShanhai$getFluidInventory(Object slot) {
-        try {
-            Method method = gtShanhai$findMethod(slot.getClass(), "getFluidInventory");
-            Object inventory = method.invoke(slot);
-            if (inventory instanceof Object2LongOpenHashMap<?>) {
-                return (Object2LongOpenHashMap<AEFluidKey>) inventory;
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
-        return null;
-    }
-
     private void gtShanhai$notifySelfIO() {
         try {
-            Method getTrait = gtShanhai$findMethod(this.getClass(), "getMETrait");
+            Method getTrait = gtShanhai$getMETraitMethod;
+            if (getTrait == null) {
+                getTrait = gtShanhai$findMethod(this.getClass(), "getMETrait");
+                gtShanhai$getMETraitMethod = getTrait;
+            }
             Object trait = getTrait.invoke(this);
             if (trait == null) {
                 return;
             }
-            Method notify = gtShanhai$findMethod(trait.getClass(), "notifySelfIO");
+            Method notify = gtShanhai$notifySelfIOMethod;
+            if (notify == null) {
+                notify = gtShanhai$findMethod(trait.getClass(), "notifySelfIO");
+                gtShanhai$notifySelfIOMethod = notify;
+            }
             notify.invoke(trait);
-        } catch (ReflectiveOperationException ignored) {
+        } catch (ReflectiveOperationException e) {
+            gtShanhai$warnReflectionFailure("notifySelfIO", e);
         }
     }
 
     private IManagedGridNode gtShanhai$getMainNode() {
         try {
-            Method method = gtShanhai$findMethod(this.getClass(), "getMainNode");
+            Method method = gtShanhai$getMainNodeMethod;
+            if (method == null) {
+                method = gtShanhai$findMethod(this.getClass(), "getMainNode");
+                gtShanhai$getMainNodeMethod = method;
+            }
             Object node = method.invoke(this);
             if (node instanceof IManagedGridNode managedGridNode) {
                 return managedGridNode;
             }
-        } catch (ReflectiveOperationException ignored) {
+        } catch (ReflectiveOperationException e) {
+            gtShanhai$warnReflectionFailure("getMainNode", e);
         }
         return null;
     }
@@ -261,38 +282,31 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
                 gtShanhai$getInternalSlotMethod = method;
             }
             return method.invoke(this, slotIndex);
-        } catch (ReflectiveOperationException ignored) {
+        } catch (ReflectiveOperationException e) {
+            gtShanhai$warnReflectionFailure("getInternalSlot", e);
             return null;
         }
     }
 
-    private void gtShanhai$addToSlot(Object slot, AEKey what, long amount) {
-        try {
-            Method method = gtShanhai$findMethod(slot.getClass(), "add", AEKey.class, long.class);
-            method.invoke(slot, what, amount);
-        } catch (ReflectiveOperationException ignored) {
-        }
-    }
-
-    private void gtShanhai$addVirtualTargetToSlot(Object slot, AEKey what, long amount) {
-        gtShanhai$addToSlot(slot, what, amount);
+    private void gtShanhai$addVirtualTargetToSlot(VirtualPatternBufferSlotAccess access, AEKey what, long amount) {
+        access.gtShanhai$add(what, amount);
         if (what instanceof AEItemKey itemKey) {
-            Object2LongOpenHashMap<AEItemKey> itemInventory = gtShanhai$getItemInventory(slot);
+            Object2LongOpenHashMap<AEItemKey> itemInventory = access.gtShanhai$itemInventory();
             if (itemInventory != null) {
                 VirtualPatternBufferSlotState.addVirtualTarget(itemInventory, itemKey, amount);
-                VirtualPatternBufferSlotState.copyVirtualTargets(itemInventory, gtShanhai$getItemCatalystInventory(slot));
-                gtShanhai$cacheVirtualCircuit(slot, itemKey);
+                VirtualPatternBufferSlotState.copyVirtualTargets(itemInventory, access.gtShanhai$itemCatalystInventory());
+                gtShanhai$cacheVirtualCircuit(access, itemKey);
             }
         } else if (what instanceof AEFluidKey fluidKey) {
-            Object2LongOpenHashMap<AEFluidKey> fluidInventory = gtShanhai$getFluidInventory(slot);
+            Object2LongOpenHashMap<AEFluidKey> fluidInventory = access.gtShanhai$fluidInventory();
             if (fluidInventory != null) {
                 VirtualPatternBufferSlotState.addVirtualTarget(fluidInventory, fluidKey, amount);
-                VirtualPatternBufferSlotState.copyVirtualTargets(fluidInventory, gtShanhai$getFluidCatalystInventory(slot));
+                VirtualPatternBufferSlotState.copyVirtualTargets(fluidInventory, access.gtShanhai$fluidCatalystInventory());
             }
         }
     }
 
-    private void gtShanhai$cacheVirtualCircuit(Object slot, AEItemKey itemKey) {
+    private void gtShanhai$cacheVirtualCircuit(VirtualPatternBufferSlotAccess access, AEItemKey itemKey) {
         ItemStack stack = itemKey.toStack();
         if (!IntCircuitBehaviour.isIntegratedCircuit(stack)) {
             return;
@@ -301,44 +315,35 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
         if (config < 0 || config > IntCircuitBehaviour.CIRCUIT_MAX) {
             return;
         }
-        SlotCacheManager cacheManager = gtShanhai$getCacheManager(slot);
+        SlotCacheManager cacheManager = access.gtShanhai$cacheManager();
         if (cacheManager instanceof SlotCacheManagerAccessor accessor) {
             accessor.gtShanhai$setCircuitCacheRaw(config);
             accessor.gtShanhai$setCircuitStackRaw(IntCircuitBehaviour.stack(config));
-            Object2LongOpenHashMap<AEItemKey> itemInventory = gtShanhai$getItemInventory(slot);
+            Object2LongOpenHashMap<AEItemKey> itemInventory = access.gtShanhai$itemInventory();
             if (itemInventory != null) {
                 VirtualPatternBufferSlotState.setVirtualCircuit(itemInventory, config);
             }
         }
     }
 
-    private SlotCacheManager gtShanhai$getCacheManager(Object slot) {
-        try {
-            Method method = gtShanhai$findMethod(slot.getClass(), "getCacheManager");
-            Object cacheManager = method.invoke(slot);
-            if (cacheManager instanceof SlotCacheManager manager) {
-                return manager;
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
-        return null;
-    }
-
     private void gtShanhai$stripVirtualTargetsFromCatalyst(Object2LongOpenHashMap<AEItemKey> itemInventory,
             Object2LongOpenHashMap<AEFluidKey> fluidInventory) {
-        Object slot = gtShanhai$findSlotByInventories(itemInventory, fluidInventory);
-        if (slot != null) {
-            VirtualPatternBufferSlotState.removeVirtualTargets(itemInventory, gtShanhai$getItemCatalystInventory(slot));
-            VirtualPatternBufferSlotState.removeVirtualTargets(fluidInventory, gtShanhai$getFluidCatalystInventory(slot));
-            gtShanhai$clearVirtualCircuitCache(slot, itemInventory);
+        if (gtShanhai$findSlotByInventories(itemInventory, fluidInventory)
+                instanceof VirtualPatternBufferSlotAccess access) {
+            VirtualPatternBufferSlotState.removeVirtualTargets(itemInventory, access.gtShanhai$itemCatalystInventory());
+            VirtualPatternBufferSlotState.removeVirtualTargets(fluidInventory, access.gtShanhai$fluidCatalystInventory());
+            gtShanhai$clearVirtualCircuitCache(access, itemInventory);
         }
     }
 
-    private void gtShanhai$clearVirtualCircuitCache(Object slot, Object2LongOpenHashMap<AEItemKey> itemInventory) {
-        if (VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory) < 0) {
+    private void gtShanhai$clearVirtualCircuitCache(VirtualPatternBufferSlotAccess access,
+            Object2LongOpenHashMap<AEItemKey> itemInventory) {
+        int config = VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory);
+        if (config < 0) {
             return;
         }
-        SlotCacheManager cacheManager = gtShanhai$getCacheManager(slot);
+        gtShanhai$removeVirtualCircuitPresence(access, itemInventory, config);
+        SlotCacheManager cacheManager = access.gtShanhai$cacheManager();
         if (cacheManager instanceof SlotCacheManagerAccessor accessor) {
             accessor.gtShanhai$setCircuitCacheRaw(-1);
             accessor.gtShanhai$setCircuitStackRaw(ItemStack.EMPTY);
@@ -346,30 +351,22 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
         VirtualPatternBufferSlotState.clearVirtualCircuit(itemInventory);
     }
 
-    @SuppressWarnings("unchecked")
-    private Object2LongMap<AEItemKey> gtShanhai$getItemCatalystInventory(Object slot) {
-        try {
-            Method method = gtShanhai$findMethod(slot.getClass(), "getItemCatalystInventory");
-            Object inventory = method.invoke(slot);
-            if (inventory instanceof Object2LongMap<?>) {
-                return (Object2LongMap<AEItemKey>) inventory;
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
-        return null;
+    private void gtShanhai$removeVirtualCircuitPresence(VirtualPatternBufferSlotAccess access,
+            Object2LongOpenHashMap<AEItemKey> itemInventory, int config) {
+        if (config < 0 || config > IntCircuitBehaviour.CIRCUIT_MAX) return;
+        AEItemKey circuitKey = AEItemKey.of(IntCircuitBehaviour.stack(config));
+        gtShanhai$subtractAmount(itemInventory, circuitKey, 1L);
+        gtShanhai$subtractAmount(access.gtShanhai$itemCatalystInventory(), circuitKey, 1L);
     }
 
-    @SuppressWarnings("unchecked")
-    private Object2LongMap<AEFluidKey> gtShanhai$getFluidCatalystInventory(Object slot) {
-        try {
-            Method method = gtShanhai$findMethod(slot.getClass(), "getFluidCatalystInventory");
-            Object inventory = method.invoke(slot);
-            if (inventory instanceof Object2LongMap<?>) {
-                return (Object2LongMap<AEFluidKey>) inventory;
-            }
-        } catch (ReflectiveOperationException ignored) {
+    private static <T> void gtShanhai$subtractAmount(Object2LongMap<T> inventory, T key, long amount) {
+        if (inventory == null || key == null || amount <= 0L) return;
+        long remaining = inventory.getLong(key) - amount;
+        if (remaining > 0L) {
+            inventory.put(key, remaining);
+        } else {
+            inventory.removeLong(key);
         }
-        return null;
     }
 
     private Object gtShanhai$findSlotByInventories(Object2LongOpenHashMap<AEItemKey> itemInventory,
@@ -389,20 +386,13 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
         gtShanhai$slotByFluidInventory.clear();
         for (int i = 0; i < getInternalSlotCount(); i++) {
             Object slot = gtShanhai$getInternalSlot(i);
-            if (slot == null) continue;
-            gtShanhai$indexRefundSlot(slot, gtShanhai$getItemInventory(slot), gtShanhai$getFluidInventory(slot));
+            if (!(slot instanceof VirtualPatternBufferSlotAccess access)) continue;
+            gtShanhai$indexRefundSlot(slot, access.gtShanhai$itemInventory(), access.gtShanhai$fluidInventory());
         }
     }
 
-    private void gtShanhai$notifySlotChanged(Object slot) {
-        try {
-            Method method = gtShanhai$findMethod(slot.getClass(), "getOnContentsChanged");
-            Object callback = method.invoke(slot);
-            if (callback instanceof Runnable runnable) {
-                runnable.run();
-            }
-        } catch (ReflectiveOperationException ignored) {
-        }
+    private void gtShanhai$notifySlotChanged(VirtualPatternBufferSlotAccess access) {
+        access.gtShanhai$notifyContentsChanged();
     }
 
     private Method gtShanhai$findMethod(Class<?> type, String name, Class<?>... parameterTypes)

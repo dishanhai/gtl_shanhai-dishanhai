@@ -31,6 +31,7 @@ import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
+import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
 import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
 import com.gregtechceu.gtceu.utils.FormattingUtil;
@@ -226,14 +227,27 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         for (int slot = 0; slot < getInternalSlotCount(); slot++) {
             MEPatternBufferPartMachineBase.InternalSlot internalSlot = getInternalSlot(slot);
             boolean active = internalSlot.isActive();
-            for (Object2LongMap.Entry<AEItemKey> entry : VirtualPatternBufferSlotState
-                    .getVirtualTargets(internalSlot.getItemInventory()).object2LongEntrySet()) {
+            Object2LongMap<AEItemKey> itemTargets = VirtualPatternBufferSlotState
+                    .getVirtualTargets(internalSlot.getItemInventory());
+            for (Object2LongMap.Entry<AEItemKey> entry : itemTargets.object2LongEntrySet()) {
                 AEItemKey key = entry.getKey();
                 long internalAmount = active
                         ? Math.min(entry.getLongValue(), internalSlot.getItemInventory().getLong(key)) : 0L;
                 long catalystAmount = Math.min(entry.getLongValue(),
                         internalSlot.getItemCatalystInventory().getLong(key));
                 gtShanhai$subtractMergedAmount(items, key.toStack().getItem(), internalAmount + catalystAmount);
+            }
+            Object2LongOpenHashMap<AEItemKey> itemInventory = internalSlot.getItemInventory();
+            int virtualCircuit = VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory);
+            if (virtualCircuit >= 0 && virtualCircuit <= IntCircuitBehaviour.CIRCUIT_MAX) {
+                AEItemKey circuitKey = AEItemKey.of(IntCircuitBehaviour.stack(virtualCircuit));
+                if (!itemTargets.containsKey(circuitKey)) {
+                    long internalAmount = active ? Math.min(1L, itemInventory.getLong(circuitKey)) : 0L;
+                    long catalystAmount = Math.min(1L,
+                            internalSlot.getItemCatalystInventory().getLong(circuitKey));
+                    gtShanhai$subtractMergedAmount(items, circuitKey.toStack().getItem(),
+                            internalAmount + catalystAmount);
+                }
             }
             for (Object2LongMap.Entry<AEFluidKey> entry : VirtualPatternBufferSlotState
                     .getVirtualTargets(internalSlot.getFluidInventory()).object2LongEntrySet()) {

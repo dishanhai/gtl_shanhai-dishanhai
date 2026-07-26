@@ -221,6 +221,11 @@ public class GTDishanhaiMod {
                     } catch (Exception ex) {
                         LOGGER.warn("[SDA] 启动自动同步失败: {}", ex.getMessage());
                     }
+                    // 顺路后台预热虚拟样板编码的配方输出索引（全量扫描、GTL 体量下秒级）。
+                    // 放这里而不是 ServerStartedEvent：启动期的配方剥离规则/缓存失效此时已全部落定，
+                    // 预热到的就是最终 revision；异步守护线程执行，不卡登录。
+                    com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper
+                            .prewarmRecipeOutputIndexesAsync("server started +100t");
                 });
 
         // 客户端初始化推迟到 FMLClientSetupEvent（此时 RegistryObject 已可用）

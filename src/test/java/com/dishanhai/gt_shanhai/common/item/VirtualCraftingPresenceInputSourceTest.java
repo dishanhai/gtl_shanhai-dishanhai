@@ -35,6 +35,8 @@ class VirtualCraftingPresenceInputSourceTest {
             "gt_shanhai", "common", "item", "RecipeTypePatternSearchHelper.java");
     private static final Path PATTERN_MACHINE_ACCESS = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "item", "VirtualPatternBufferMachineAccess.java");
+    private static final Path VIRTUAL_SLOT_STATE = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "item", "VirtualPatternBufferSlotState.java");
     private static final Path AE_UTILS_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "AeUtilsVirtualPatternInputsMixin.java");
     private static final Path OLD_INITIAL_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
@@ -162,6 +164,38 @@ class VirtualCraftingPresenceInputSourceTest {
     }
 
     @Test
+    void persistedIdentityCanBeRecoveredFromCatalystMirror() throws IOException {
+        String slotMixin = Files.readString(PATTERN_SLOT_MIXIN);
+        String state = Files.readString(VIRTUAL_SLOT_STATE);
+        String machineMixin = Files.readString(PATTERN_MACHINE_MIXIN);
+
+        assertTrue(slotMixin.contains("readVirtualTargets(itemInventory, fluidInventory, tag,"),
+                "反序列化必须把催化镜像交给虚拟身份恢复器");
+        assertTrue(state.contains("Object2LongMap<T> fallbackPresence"),
+                "主库存为空时必须允许催化镜像提供历史 Presence 证据");
+        assertTrue(machineMixin.contains(
+                "if (!VirtualPatternEncodingHelper.containsVirtualProviderPattern(details)) continue;"),
+                "加载恢复只能收尾明确含虚拟供应器的槽，不能清掉普通样板的原生电路缓存");
+        assertFalse(machineMixin.contains(
+                "for (int slotIndex = 0; slotIndex < getInternalSlotCount(); slotIndex++)"),
+                "全槽加载清理会在 GTLCore processPatternWithCircuit 后再次清空有效 circuitCache");
+        assertTrue(machineMixin.contains("access.gtShanhai$clearVirtualTargetsIfDepleted()"));
+    }
+
+    @Test
+    void clearingVirtualCircuitAlsoRemovesItsPresenceCopies() throws IOException {
+        String slotMixin = Files.readString(PATTERN_SLOT_MIXIN);
+        String machineMixin = Files.readString(PATTERN_MACHINE_MIXIN);
+
+        assertTrue(slotMixin.contains("gtShanhai$removeVirtualCircuitPresence(config)"),
+                "清除虚拟电路标记时必须同步清理内部库存和催化镜像");
+        assertTrue(slotMixin.contains("gtShanhai$subtractAmount(itemInventory, circuitKey, 1L)"));
+        assertTrue(slotMixin.contains("gtShanhai$subtractAmount(gtShanhai$getItemCatalystInventory(), circuitKey, 1L)"));
+        assertTrue(machineMixin.contains("gtShanhai$removeVirtualCircuitPresence(slot, itemInventory, config)"),
+                "refundSlot 路径也必须清理仅剩电路标记的历史镜像");
+    }
+
+    @Test
     void automaticStellarTopUpNeverExtractsReusableInputsAsRealStock() throws IOException {
         String helper = Files.readString(ENCODING_HELPER);
         String search = Files.readString(RECIPE_TYPE_PATTERN_SEARCH);
@@ -178,6 +212,17 @@ class VirtualCraftingPresenceInputSourceTest {
                 "星律已有权威配方，虚拟目标解析不得重新全局反推并串配方类型");
         assertTrue(search.contains("gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what()"),
                 "不消耗输入应写成一份带身份的虚拟在场目标");
+        int activeStart = search.indexOf("if (activeSlots != null) {");
+        int activeEnd = search.indexOf("if (includeFirstSpark)", activeStart);
+        String activePath = search.substring(activeStart, activeEnd);
+        int repairCheck = activePath.indexOf("activeSlotNeedsCircuitRepair(internalSlot, recipe)");
+        int activeTopUp = activePath.indexOf("topUpVirtualSupply(buffer, slot, patternStack, recipe)");
+        int activeRun = activePath.indexOf("activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot)");
+        assertTrue(repairCheck >= 0 && activeTopUp > repairCheck && activeRun > activeTopUp,
+                "活动槽缺失电路缓存或 Presence 时必须先定向补齐，再进入配方模拟校验");
+        assertTrue(search.contains("getCircuitCache") && search.contains("getVirtualCircuit")
+                        && search.contains("getItemCatalystInventory"),
+                "活动槽修复判定必须同时核对缓存、虚拟标记和两处 Presence，完整槽不得重复解码");
         assertFalse(search.contains("if (notConsumable[i] && getInternalAmount(internalSlot, in.what()) > 0) continue;"),
                 "旧逻辑会把不消耗输入按 achievable 从 AE 真实抽入并永久残留");
         int presenceBranch = topUp.indexOf("GenericStack presenceTarget = presenceTargets[i];");
@@ -185,8 +230,28 @@ class VirtualCraftingPresenceInputSourceTest {
         int realExtraction = topUp.indexOf("Actionable.MODULATE", presenceBranch);
         assertTrue(presenceBranch >= 0 && leavePresenceBranch > presenceBranch && realExtraction > leavePresenceBranch,
                 "虚拟在场分支必须在任何真实 AE 抽取前结束");
+        int presenceInjection = topUp.indexOf("gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what()");
+        int stockedReturn = topUp.indexOf("if (consumableStockPresent)");
+        assertTrue(presenceInjection >= 0 && stockedReturn > presenceInjection,
+                "AE 已先推入真实耗材时仍必须先建立电路 Presence，再跳过真实补料");
+        assertTrue(topUp.contains("if (!consumableStockPresent && remainingBudget <= 0) return;"),
+                "预算耗尽只能阻止新一轮抽料，不能阻止已有耗材订单补齐 Presence");
         assertTrue(machineAccess.contains("gtShanhai$addVirtualTargetToSlot"));
         assertTrue(machineMixin.contains("public boolean gtShanhai$addVirtualTargetToSlot"));
+        int addTargetStart = machineMixin.indexOf("public boolean gtShanhai$addVirtualTargetToSlot");
+        int addTargetEnd = machineMixin.indexOf("private Object2LongOpenHashMap<AEItemKey> gtShanhai$getItemInventory",
+                addTargetStart);
+        String addTargetMethod = machineMixin.substring(addTargetStart, addTargetEnd);
+        assertFalse(addTargetMethod.contains("if (access.gtShanhai$hasVirtualTarget(key)) return true;"),
+                "已有虚拟标记不能直接返回，否则损坏的催化镜像和 circuitCache 无法自愈");
+        int existingTargetBranch = addTargetMethod.indexOf("if (access.gtShanhai$hasVirtualTarget(key)) {");
+        int existingTargetSync = addTargetMethod.indexOf("access.gtShanhai$syncVirtualTargetsToCatalyst();",
+                existingTargetBranch);
+        int existingTargetCache = addTargetMethod.indexOf("gtShanhai$cacheVirtualCircuit(slot, itemKey);",
+                existingTargetBranch);
+        assertTrue(existingTargetBranch >= 0 && existingTargetSync > existingTargetBranch
+                        && existingTargetCache > existingTargetSync,
+                "幂等补齐必须重新同步催化镜像并重建电路缓存");
         assertTrue(slotMixin.contains("gtShanhai$clearVirtualTargetsIfDepleted"),
                 "旧存档只剩虚拟目标时必须允许加载阶段立即清理");
         assertTrue(slotMixin.contains("VirtualPatternBufferSlotState.clearVirtualCircuit(itemInventory)"),

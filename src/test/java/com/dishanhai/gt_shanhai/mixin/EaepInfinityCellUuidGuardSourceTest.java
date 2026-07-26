@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class EaepInfinityCellUuidGuardSourceTest {
 
@@ -23,5 +24,18 @@ class EaepInfinityCellUuidGuardSourceTest {
         assertTrue(source.contains("InfinityConstants.INFINITY_CELL_UUID"));
         assertTrue(source.contains("putUUID"));
         assertTrue(Files.readString(CONFIG).contains("EaepInfinityCellUuidGuardMixin"));
+    }
+
+    @Test
+    void routineInsertAndExtractUpdateTotalsWithoutFullMapScan() throws IOException {
+        String source = Files.readString(SOURCE);
+
+        assertTrue(source.contains("@Redirect(method = \"insert\""));
+        assertTrue(source.contains("@Redirect(method = \"extract\""));
+        assertTrue(source.contains("AeStorageAmountMath.afterBigIntegerInsert"));
+        assertTrue(source.contains("AeStorageAmountMath.afterBigIntegerExtract"));
+        assertTrue(source.contains("gtShanhai$markChanged"));
+        assertFalse(source.contains("@Overwrite"),
+                "只能绕过常规存取后的全表重算，persist 与数据修复仍须保留 EAEP 原始实现");
     }
 }

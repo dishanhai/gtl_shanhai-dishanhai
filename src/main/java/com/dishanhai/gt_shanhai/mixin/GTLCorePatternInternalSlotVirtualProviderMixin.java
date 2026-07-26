@@ -57,9 +57,11 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     @Override
     public void gtShanhai$restoreVirtualTarget(AEKey key, long amount) {
         if (key instanceof AEItemKey itemKey) {
-            VirtualPatternBufferSlotState.registerVirtualTarget(itemInventory, itemKey, amount);
+            VirtualPatternBufferSlotState.registerVirtualTarget(
+                    itemInventory, itemKey, amount, gtShanhai$getItemCatalystInventory());
         } else if (key instanceof AEFluidKey fluidKey) {
-            VirtualPatternBufferSlotState.registerVirtualTarget(fluidInventory, fluidKey, amount);
+            VirtualPatternBufferSlotState.registerVirtualTarget(
+                    fluidInventory, fluidKey, amount, gtShanhai$getFluidCatalystInventory());
         }
     }
 
@@ -104,7 +106,8 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Inject(method = "deserializeNBT", at = @At("RETURN"), remap = false)
     private void gtShanhai$loadVirtualIdentity(CompoundTag tag, CallbackInfo ci) {
-        VirtualPatternBufferSlotState.readVirtualTargets(itemInventory, fluidInventory, tag);
+        VirtualPatternBufferSlotState.readVirtualTargets(itemInventory, fluidInventory, tag,
+                gtShanhai$getItemCatalystInventory(), gtShanhai$getFluidCatalystInventory());
         gtShanhai$syncVirtualTargetsToCatalyst();
     }
 
@@ -175,14 +178,37 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Unique
     private void gtShanhai$clearVirtualCircuitCache() {
-        if (VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory) < 0
+        int config = VirtualPatternBufferSlotState.getVirtualCircuit(itemInventory);
+        if (config < 0
                 && !gtShanhai$hasVirtualCircuitTarget()) return;
+        if (config >= 0) {
+            gtShanhai$removeVirtualCircuitPresence(config);
+        }
         SlotCacheManager cacheManager = getCacheManager();
         if (cacheManager instanceof SlotCacheManagerAccessor accessor) {
             accessor.gtShanhai$setCircuitCacheRaw(-1);
             accessor.gtShanhai$setCircuitStackRaw(ItemStack.EMPTY);
         }
         VirtualPatternBufferSlotState.clearVirtualCircuit(itemInventory);
+    }
+
+    @Unique
+    private void gtShanhai$removeVirtualCircuitPresence(int config) {
+        if (config < 0 || config > IntCircuitBehaviour.CIRCUIT_MAX) return;
+        AEItemKey circuitKey = AEItemKey.of(IntCircuitBehaviour.stack(config));
+        gtShanhai$subtractAmount(itemInventory, circuitKey, 1L);
+        gtShanhai$subtractAmount(gtShanhai$getItemCatalystInventory(), circuitKey, 1L);
+    }
+
+    @Unique
+    private static <T> void gtShanhai$subtractAmount(Object2LongMap<T> inventory, T key, long amount) {
+        if (inventory == null || key == null || amount <= 0L) return;
+        long remaining = inventory.getLong(key) - amount;
+        if (remaining > 0L) {
+            inventory.put(key, remaining);
+        } else {
+            inventory.removeLong(key);
+        }
     }
 
     @Unique
@@ -217,6 +243,54 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     @Shadow
     public SlotCacheManager getCacheManager() {
         throw new AssertionError();
+    }
+
+    @Shadow
+    public void add(AEKey what, long amount) {
+        throw new AssertionError();
+    }
+
+    @Shadow
+    public Runnable getOnContentsChanged() {
+        throw new AssertionError();
+    }
+
+    // ===== 槽位成员桥接实现：机器级 mixin 经此访问，取代反射 =====
+
+    @Override
+    public Object2LongOpenHashMap<AEItemKey> gtShanhai$itemInventory() {
+        return itemInventory;
+    }
+
+    @Override
+    public Object2LongOpenHashMap<AEFluidKey> gtShanhai$fluidInventory() {
+        return fluidInventory;
+    }
+
+    @Override
+    public Object2LongMap<AEItemKey> gtShanhai$itemCatalystInventory() {
+        return getItemCatalystInventory();
+    }
+
+    @Override
+    public Object2LongMap<AEFluidKey> gtShanhai$fluidCatalystInventory() {
+        return getFluidCatalystInventory();
+    }
+
+    @Override
+    public SlotCacheManager gtShanhai$cacheManager() {
+        return getCacheManager();
+    }
+
+    @Override
+    public void gtShanhai$add(AEKey what, long amount) {
+        add(what, amount);
+    }
+
+    @Override
+    public void gtShanhai$notifyContentsChanged() {
+        Runnable callback = getOnContentsChanged();
+        if (callback != null) callback.run();
     }
 
     @Unique

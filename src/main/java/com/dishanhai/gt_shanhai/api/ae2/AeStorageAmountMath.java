@@ -7,6 +7,9 @@ import com.dishanhai.gt_shanhai.mixin.KeyCounterListsAccessor;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Reference2ObjectMap;
 
+import java.math.BigInteger;
+import java.util.function.ObjLongConsumer;
+
 /** AE2 long 数量边界工具：存储源可以无限，但 AE2 接口只能表达 long。 */
 public final class AeStorageAmountMath {
 
@@ -27,6 +30,20 @@ public final class AeStorageAmountMath {
             return Long.MAX_VALUE;
         }
         return current + amount;
+    }
+
+    public static BigInteger afterBigIntegerInsert(BigInteger total, long inserted) {
+        BigInteger current = total == null || total.signum() < 0 ? BigInteger.ZERO : total;
+        return inserted == 0L ? current : current.add(BigInteger.valueOf(inserted));
+    }
+
+    public static BigInteger afterBigIntegerExtract(BigInteger total, BigInteger storedBefore, long requested) {
+        BigInteger current = total == null || total.signum() < 0 ? BigInteger.ZERO : total;
+        if (storedBefore == null || storedBefore.signum() <= 0 || requested <= 0L) return current;
+        BigInteger request = BigInteger.valueOf(requested);
+        BigInteger removed = request.compareTo(storedBefore) >= 0 ? storedBefore : request;
+        BigInteger remaining = current.subtract(removed);
+        return remaining.signum() < 0 ? BigInteger.ZERO : remaining;
     }
 
     public static void mergeSaturated(KeyCounter target, KeyCounter source) {
@@ -59,6 +76,35 @@ public final class AeStorageAmountMath {
         }
         provider.getAvailableStacks(scratch);
         mergeSaturated(output, scratch);
+    }
+
+    public static void forEachEntry(KeyCounter source, ObjLongConsumer<AEKey> consumer) {
+        if (source == null || consumer == null) {
+            return;
+        }
+        Object sourceObject = source;
+        if (sourceObject instanceof KeyCounterListsAccessor accessor) {
+            Reference2ObjectMap<Object, Object> lists = accessor.gtShanhai$getListsRaw();
+            boolean direct = true;
+            for (Object subIndex : lists.values()) {
+                if (!(subIndex instanceof Iterable<?>)) {
+                    direct = false;
+                    break;
+                }
+            }
+            if (direct) {
+                for (Object subIndex : lists.values()) {
+                    for (Object rawEntry : (Iterable<?>) subIndex) {
+                        Object2LongMap.Entry<AEKey> entry = asEntry(rawEntry);
+                        consumer.accept(entry.getKey(), entry.getLongValue());
+                    }
+                }
+                return;
+            }
+        }
+        for (Object2LongMap.Entry<AEKey> entry : source) {
+            consumer.accept(entry.getKey(), entry.getLongValue());
+        }
     }
 
     private static boolean mergeSaturatedFast(KeyCounter target, KeyCounterListsAccessor source) {

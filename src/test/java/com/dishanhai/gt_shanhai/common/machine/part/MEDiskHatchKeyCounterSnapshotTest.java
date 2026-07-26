@@ -144,6 +144,26 @@ public class MEDiskHatchKeyCounterSnapshotTest {
     }
 
     @Test
+    void snapshotAppendsNewKeysWithoutRebuilding() throws Exception {
+        MixinAwareClassLoader loader = new MixinAwareClassLoader(getClass().getClassLoader());
+        Class<?> counterType = loader.loadClass(KEY_COUNTER);
+        TestKey existing = new TestKey("existing");
+        TestKey appended = new TestKey("appended");
+        Object source = newCounter(counterType);
+        add(counterType, source, existing, 3L);
+        Object snapshot = newSnapshot(loader, counterType, source);
+
+        assertTrue(updateSnapshotAmount(loader, snapshot, "addAmount", appended, 5L),
+                "新 key 应直接扩展快照，不能清空缓存后全量重扫底层磁盘");
+
+        Object out = newCounter(counterType);
+        addSnapshot(loader, counterType, snapshot, out);
+        assertEquals(3L, get(counterType, out, existing));
+        assertEquals(5L, get(counterType, out, appended));
+        assertEquals(2, size(counterType, out));
+    }
+
+    @Test
     void snapshotRejectsIncrementalExtractionFromSaturatedAmount() throws Exception {
         MixinAwareClassLoader loader = new MixinAwareClassLoader(getClass().getClassLoader());
         Class<?> counterType = loader.loadClass(KEY_COUNTER);
@@ -163,14 +183,17 @@ public class MEDiskHatchKeyCounterSnapshotTest {
 
         assertEquals(-1, source.indexOf("out.addAll(counter)"),
                 "KeyCounterSnapshot.addTo 不能整表 addAll，否则空输出计数器会触发 VariantCounter.copy()");
-        assertTrue(source.contains("private final AEKey[] keys;"),
-                "KeyCounterSnapshot 必须把稳定快照压平成数组，避免每次回放遍历 KeyCounter 内部结构");
+        assertTrue(source.contains("private AEKey[] keys;"),
+                "KeyCounterSnapshot 必须保持扁平数组，允许新增 key 时扩容但不能退回遍历 KeyCounter");
         assertFalse(source.contains("AeStorageAmountMath.addSaturated(out, keys[i], amounts[i])"),
                 "已知非空有限快照不得再走通用空值检查与第二次 KeyCounter.set 定位");
         assertTrue(source.contains("out.add(keys[i], amount)"),
                 "有限量无溢出时应使用 KeyCounter.add 一次完成累加");
         assertTrue(source.contains("amount > Long.MAX_VALUE - current"),
                 "重复有限贡献仍必须在真正溢出时饱和为 Long.MAX_VALUE");
+        assertTrue(source.contains("if (out.isEmpty())")
+                        && source.contains("out.set(keys[i], amount)"),
+                "空输出计数器必须直接写入快照，避免每个 key 先执行 KeyCounter.get");
         assertTrue(source.contains("if (amount == Long.MAX_VALUE)")
                         && source.contains("out.set(keys[i], Long.MAX_VALUE)"),
                 "无限量快照回放应直接 set，避免每次 addSaturated 先 get 再 set");
@@ -216,6 +239,12 @@ public class MEDiskHatchKeyCounterSnapshotTest {
                 "成功插入已有有限 key 后应增量更新库存快照，不能立即全量重扫 BigInteger 盘");
         assertTrue(source.contains("cached.removeAmount(normalized, extracted)"),
                 "成功提取已有有限 key 后应增量更新库存快照，不能立即全量重扫 BigInteger 盘");
+        assertTrue(source.contains("keys = java.util.Arrays.copyOf(keys"),
+                "新 key 必须扩展扁平快照，不能令下一次库存查询全量重建");
+        assertFalse(source.contains("KeyCounter normalized = new KeyCounter();"),
+                "归一化快照必须直接从 raw 构建，不能维护中间 KeyCounter 再二次遍历");
+        assertTrue(source.contains("new KeyCounterSnapshot(raw, MEDiskHatchPartMachine::normalizeFluidKey)"),
+                "流体归一化应在快照构造阶段一次完成");
     }
 
     @Test

@@ -39,8 +39,17 @@ public final class VirtualPatternBufferSlotState {
     /** Rebuilds virtual identity without increasing the persisted inventory amount. */
     public static synchronized <T extends AEKey> void registerVirtualTarget(Object2LongOpenHashMap<T> inventory,
             T key, long amount) {
+        registerVirtualTarget(inventory, key, amount, null);
+    }
+
+    /** Rebuilds identity from either the main inventory or its persisted catalyst mirror. */
+    public static synchronized <T extends AEKey> void registerVirtualTarget(Object2LongOpenHashMap<T> inventory,
+            T key, long amount, Object2LongMap<T> fallbackPresence) {
         if (inventory == null || key == null || amount <= 0L) return;
         long present = inventory.getLong(key);
+        if (fallbackPresence != null) {
+            present = Math.max(present, fallbackPresence.getLong(key));
+        }
         if (present <= 0L) return;
         Object2LongOpenHashMap<T> targets = getOrCreateTargets(inventory);
         long registered = Math.min(present, amount);
@@ -65,6 +74,13 @@ public final class VirtualPatternBufferSlotState {
 
     public static synchronized void readVirtualTargets(Object2LongOpenHashMap<AEItemKey> itemInventory,
             Object2LongOpenHashMap<AEFluidKey> fluidInventory, CompoundTag tag) {
+        readVirtualTargets(itemInventory, fluidInventory, tag, null, null);
+    }
+
+    public static synchronized void readVirtualTargets(Object2LongOpenHashMap<AEItemKey> itemInventory,
+            Object2LongOpenHashMap<AEFluidKey> fluidInventory, CompoundTag tag,
+            Object2LongMap<AEItemKey> itemFallbackPresence,
+            Object2LongMap<AEFluidKey> fluidFallbackPresence) {
         removeTargets(itemInventory);
         removeTargets(fluidInventory);
         clearVirtualCircuit(itemInventory);
@@ -74,10 +90,10 @@ public final class VirtualPatternBufferSlotState {
         AEUtils.loadInventory(tag.getList(TAG_VIRTUAL_ITEMS, Tag.TAG_COMPOUND), AEItemKey::fromTag, itemTargets);
         AEUtils.loadInventory(tag.getList(TAG_VIRTUAL_FLUIDS, Tag.TAG_COMPOUND), AEFluidKey::fromTag, fluidTargets);
         for (Object2LongMap.Entry<AEItemKey> entry : itemTargets.object2LongEntrySet()) {
-            registerVirtualTarget(itemInventory, entry.getKey(), entry.getLongValue());
+            registerVirtualTarget(itemInventory, entry.getKey(), entry.getLongValue(), itemFallbackPresence);
         }
         for (Object2LongMap.Entry<AEFluidKey> entry : fluidTargets.object2LongEntrySet()) {
-            registerVirtualTarget(fluidInventory, entry.getKey(), entry.getLongValue());
+            registerVirtualTarget(fluidInventory, entry.getKey(), entry.getLongValue(), fluidFallbackPresence);
         }
         if (tag.contains(TAG_VIRTUAL_CIRCUIT, Tag.TAG_INT)) {
             setVirtualCircuit(itemInventory, tag.getInt(TAG_VIRTUAL_CIRCUIT));
