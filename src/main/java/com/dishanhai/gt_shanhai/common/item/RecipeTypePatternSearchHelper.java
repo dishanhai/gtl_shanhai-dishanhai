@@ -538,10 +538,23 @@ public final class RecipeTypePatternSearchHelper {
         Level level = buffer.getLevel();
         if (level == null) return;
 
-        // InternalSlot 是 GTLCore 内部类型（编译期不可见，只能整段走反射），下面全部以 Object 传递。
-        Object internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
-        if (internalSlot == null) return;
-        boolean consumableStockPresent = hasConsumableStock(internalSlot, recipe);
+        // InternalSlot 是 GTLCore 的 protected 内部类型：星律实例走宿主子类桥接接口直调
+        // （类体内部访问 protected 类型合法，见 RecipeTypePatternSlotAccess 桥接方法）；
+        // 非本模组的通用/超级样板总成保留反射兜底，以 Object 传递。
+        RecipeTypePatternSlotAccess bridge =
+                buffer instanceof RecipeTypePatternSlotAccess access ? access : null;
+        Object internalSlot = null;
+        boolean consumableStockPresent;
+        if (bridge != null) {
+            Object slotItems = bridge.gtShanhai$getSlotItemInventory(slot);
+            if (slotItems == null) return;
+            consumableStockPresent = inventoryHasConsumable(slotItems, recipe)
+                    || inventoryHasConsumable(bridge.gtShanhai$getSlotFluidInventory(slot), recipe);
+        } else {
+            internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
+            if (internalSlot == null) return;
+            consumableStockPresent = hasConsumableStock(internalSlot, recipe);
+        }
         long remainingBudget = getRemainingBudget(buffer, slot);
         if (!consumableStockPresent && remainingBudget <= 0) return;
 
@@ -599,7 +612,11 @@ public final class RecipeTypePatternSearchHelper {
             long want = saturatedMultiply(in.amount(), achievable);
             long extracted = storage.extract(in.what(), want, Actionable.MODULATE, actionSource);
             if (extracted > 0) {
-                invokeAdd(internalSlot, in.what(), extracted);
+                if (bridge != null) {
+                    bridge.gtShanhai$addToSlot(slot, in.what(), extracted);
+                } else {
+                    invokeAdd(internalSlot, in.what(), extracted);
+                }
                 consumableExtracted = true;
             }
         }

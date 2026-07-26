@@ -5,6 +5,7 @@ import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.inventories.InternalInventory;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
@@ -218,6 +219,29 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         public boolean isFluidActive(boolean simulate) {
             return hasPatternInSlot(getSlotIndex());
         }
+    }
+
+    /**
+     * 虚拟供料桥接实现：InternalSlot 是父类 protected 内部类型，类体内部直接访问合法，
+     * 供 {@code RecipeTypePatternSearchHelper.topUpVirtualSupply} 星律路径绕开反射。
+     */
+    @Override
+    public Object2LongMap<AEItemKey> gtShanhai$getSlotItemInventory(int slot) {
+        if (slot < 0 || slot >= getInternalSlotCount()) return null;
+        return getInternalSlot(slot).getItemInventory();
+    }
+
+    @Override
+    public Object2LongMap<AEFluidKey> gtShanhai$getSlotFluidInventory(int slot) {
+        if (slot < 0 || slot >= getInternalSlotCount()) return null;
+        return getInternalSlot(slot).getFluidInventory();
+    }
+
+    @Override
+    public boolean gtShanhai$addToSlot(int slot, AEKey key, long amount) {
+        if (slot < 0 || slot >= getInternalSlotCount() || key == null || amount <= 0) return false;
+        getInternalSlot(slot).add(key, amount);
+        return true;
     }
 
     @Override
