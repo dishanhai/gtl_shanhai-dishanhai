@@ -14,8 +14,13 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Keeps GTLCore's JEI/REI recipe-type selection available during the later AE encoding click. */
-@Mixin(value = PatternEncodingTermMenu.class, priority = 800, remap = false)
+/**
+ * Keeps GTLCore's JEI/REI recipe-type selection available during the later AE encoding click.
+ *
+ * <p>priority 必须高于 GTLCore PatternEncodingTermMenuMixin(900)：注入目标 gTLCore$setQuickUploadRecipeType(FromClient)
+ * 是该 mixin 用 @Unique 新增的方法，且 encode() 被其 @Overwrite——山海必须在其之后应用，否则注入静默失效。
+ */
+@Mixin(value = PatternEncodingTermMenu.class, priority = 1500, remap = false)
 public class PatternEncodingRecipeTypeContextMixin {
 
     @Unique
