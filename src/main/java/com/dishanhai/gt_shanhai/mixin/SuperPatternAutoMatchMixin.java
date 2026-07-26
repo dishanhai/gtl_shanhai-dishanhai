@@ -23,8 +23,11 @@ import appeng.api.crafting.IPatternDetails;
 /**
  * 星律样板总成的父类私有方法桥接。
  * 所有行为入口必须先限定为 RecipeTypePatternBufferPartMachine，不能改变同父类的超级样板总成。
+ *
+ * <p>priority 必须高于 gtladditions MEPatternBufferPartMachineMixin(默认1000)：其对 getRealPattern
+ * 是 @Overwrite，山海的 RETURN 注入必须在其之后应用，否则会随旧方法体一起被丢弃而静默失效。
  */
-@Mixin(value = MEPatternBufferPartMachine.class, priority = 900, remap = false)
+@Mixin(value = MEPatternBufferPartMachine.class, priority = 1500, remap = false)
 public abstract class SuperPatternAutoMatchMixin {
 
     @Inject(method = "onLoad", at = @At("TAIL"), remap = false)
