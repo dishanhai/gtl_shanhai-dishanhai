@@ -46,8 +46,8 @@ public abstract class GTLCoreMEPatternBufferRecipeHandlerVirtualProviderMixin {
             return method.invoke(machine, trySlot);
         } catch (ReflectiveOperationException e) {
             // GTLCore 内部方法签名变化导致反射失配：配方执行后虚拟目标(催化剂)不会被剥离，
-            // 静默失败会让问题很难定位，这里至少留一条 debug 日志。
-            LOG.debug("[VirtualPatternProvider] 反射获取 InternalSlot 失败", e);
+            // 会直接复现"主机永不执行/物品闪现"级回归，必须可见告警而非 debug 静默。
+            LOG.warn("[VirtualPatternProvider] 反射获取 InternalSlot 失败，虚拟目标将无法剥离（GTLCore 方法签名可能已变化）", e);
             return null;
         }
     }
