@@ -758,6 +758,17 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
             return true;
         }
 
+        /** 单键精确回写（供包装层"对不上账"时用探测值修正单条目，代替整体清快照触发全量重扫）。 */
+        private void setAmount(AEKey key, long amount) {
+            if (key == null) return;
+            int index = keyIndexes.getInt(key);
+            if (index >= 0) {
+                amounts[index] = Math.max(0L, amount);
+            } else if (amount > 0L) {
+                addAmount(key, amount);
+            }
+        }
+
         private void addTo(KeyCounter out) {
             if (out.isEmpty()) {
                 for (int i = 0; i < size; i++) {
@@ -829,8 +840,12 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                     this::loadEquivalentEntries, null);
             if (extracted > 0L && mode == Actionable.MODULATE) {
                 KeyCounterSnapshot cached = cachedAvailableStacks;
-                if (cached == null || !cached.removeAmount(normalized, extracted)) {
-                    clearAvailableSnapshot();
+                if (cached != null && !cached.removeAmount(normalized, extracted)) {
+                    // 饱和/对不上账时 removeAmount 拒改（Long.MAX 推不出 BigInteger 真实余量，见其单测），
+                    // 但可以直接问 delegate：SIMULATE 满额提取返回 min(真实余量, Long.MAX)，恰是快照该存的
+                    // 钳制值，单键探测 O(1)。此前这里整体清快照，无限盘每被提取一次就全量重扫一遍
+                    // （spark 实测 ~4% 服务端线程）。罕见的空 NBT 变体共存时探测值会略低（只测清洁键），可接受。
+                    cached.setAmount(normalized, delegate.extract(normalized, Long.MAX_VALUE, Actionable.SIMULATE, src));
                 }
             }
             return extracted;
