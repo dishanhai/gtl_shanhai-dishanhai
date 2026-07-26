@@ -103,9 +103,16 @@ public class ClientInit {
         event.setCanceled(true);
     }
 
-    /** 不允许跨服务器复用相同 revision 的旧商品目录。 */
+    /** 不允许跨服务器复用旧商店数据：目录 + 钱包/购物车/收藏/银行/花费预览/AE余额全部清空，
+     *  否则切存档后、下一次同步到达前会短暂展示上一个存档的余额/账目（财务数字尤其扎眼）。 */
     private static void onClientLoggingOut(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
         com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientShopCart.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientShopFavorites.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientShopBank.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientCostPreview.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientAeCurrencyBalance.clear();
     }
 
     /**

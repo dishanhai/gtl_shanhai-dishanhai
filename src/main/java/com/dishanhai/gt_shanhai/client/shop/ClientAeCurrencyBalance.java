@@ -17,6 +17,11 @@ public final class ClientAeCurrencyBalance {
 
     private ClientAeCurrencyBalance() {}
 
+    /** 退出世界/换服时清空回「未知」，避免跨存档展示旧网络余量（见 ClientInit 登出钩子）。 */
+    public static void clear() {
+        balances.clear();
+    }
+
     public static void apply(ResourceLocation currency, long available) {
         if (currency == null) return;
         balances.put(currency, available);

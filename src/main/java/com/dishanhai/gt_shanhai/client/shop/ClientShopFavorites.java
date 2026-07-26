@@ -23,6 +23,11 @@ public final class ClientShopFavorites {
 
     private ClientShopFavorites() {}
 
+    /** 退出世界/换服时清空，避免跨存档残留（见 ClientInit 登出钩子）。 */
+    public static void clear() {
+        stableIds = new LinkedHashSet<>();
+    }
+
     /** 应用服务端全量快照（权威覆盖）。 */
     public static void apply(Set<String> newIds) {
         stableIds = newIds != null ? new LinkedHashSet<>(newIds) : new LinkedHashSet<>();

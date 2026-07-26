@@ -53,7 +53,8 @@ public class ShopMembershipScreen extends ScaledScreen {
     private long amount = 10000L;
     private AnimatableEditBox amountBox;
 
-    private long bankRequestedAtGameTime = Long.MIN_VALUE;
+    // 初值不能用 Long.MIN_VALUE：gameTime - MIN_VALUE 会溢出成巨负数，恒 < 刷新间隔导致首发请求永远发不出去
+    private long bankRequestedAtGameTime = -BANK_REFRESH_TICKS;
     private final long screenOpenAtMs = System.currentTimeMillis();
 
     private static String flashText;
@@ -245,7 +246,14 @@ public class ShopMembershipScreen extends ScaledScreen {
         return super.universalMouseClicked(mx, my, btn);
     }
 
+    // 存/取/借/还都是非幂等的资金操作且点击后不关屏：300ms 内的第二次点击按误触双击吞掉，
+    // 防止手滑一次双击变成两笔交易（借两倍款）；正常连续操作不受影响
+    private long lastMoneySendAtMs;
+
     private void send(ShopBankActionPacket.Op op) {
+        long now = System.currentTimeMillis();
+        if (now - lastMoneySendAtMs < 300L) return;
+        lastMoneySendAtMs = now;
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopBankActionPacket(op, amount));
     }
 

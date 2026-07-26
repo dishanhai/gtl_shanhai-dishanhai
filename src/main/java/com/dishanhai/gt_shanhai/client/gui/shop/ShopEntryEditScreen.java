@@ -480,6 +480,24 @@ public class ShopEntryEditScreen extends ScaledScreen {
         periodCapBox.setHint(Component.literal("§8不限"));
         periodCapBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
         periodCapBox.setResponder(s -> periodCap = parseLimit(s));
+        // 限时折扣行（第三套机制，独立于两套限购）：百分比 + 持续分钟两框都非空才生效，
+        // submit() 按「从保存时起算」换算绝对起止时间戳，ShopEntry 构造器对半填/非法窗口归一成不启用
+        discountPercentBox = new EditBox(this.font, discountPercentBoxX(), discountY(), DISCOUNT_PERCENT_W, 12, Component.literal("折扣百分比"));
+        discountPercentBox.setMaxLength(2);
+        discountPercentBox.setValue(discountPercent > 0 ? Integer.toString(discountPercent) : "");
+        discountPercentBox.setBordered(true);
+        discountPercentBox.setTextColor(0xFFFFFF);
+        discountPercentBox.setHint(Component.literal("§8无"));
+        discountPercentBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        discountPercentBox.setResponder(s -> discountPercent = parseDiscountPercent(s));
+        discountMinutesBox = new EditBox(this.font, discountMinutesBoxX(), discountY(), DISCOUNT_MINUTES_W, 12, Component.literal("持续分钟"));
+        discountMinutesBox.setMaxLength(9);
+        discountMinutesBox.setValue(discountMinutes < 0L ? "" : Long.toString(discountMinutes));
+        discountMinutesBox.setBordered(true);
+        discountMinutesBox.setTextColor(0xFFFFFF);
+        discountMinutesBox.setHint(Component.literal("§8不启用"));
+        discountMinutesBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        discountMinutesBox.setResponder(s -> discountMinutes = parseLimit(s));
         sparkBox = new EditBox(this.font, slotsX(), sparkY(), 120, 12, Component.literal("星火"));
         sparkBox.setMaxLength(40); // 必须先设，否则 BigInteger 超 32 位数字会被 setValue 按默认长度截断
         sparkBox.setValue(spark.signum() > 0 ? spark.toString() : "");
@@ -512,9 +530,14 @@ public class ShopEntryEditScreen extends ScaledScreen {
         // 底部要留够「行数提示」这一行（渲染在 y+h+1 处，约 10px 高）+ 确认保存按钮（18px + 6px 间隙）
         // 的空间，原先只留 50px 不够塞下两者，行数提示会被确认保存按钮盖住一截——留 64px 兜底。
         int descAreaH = Math.max(90, eb[3] - 64);
+        // resize 会经 init() 重跑到这里：大编辑区开着时旧 descArea 里可能有未保存的输入，
+        // 必须先取现场内容再重建，否则 resize 一下未保存的编辑就静默丢了；焦点也要跟着带过去
+        String liveDesc = descEditorOpen && descArea != null ? descArea.getValue()
+                : (description == null ? "" : description);
         descArea = new MultiLineTextArea(this.font, descAreaW);
         descArea.setBounds(eb[0] + 8, eb[1] + 20, descAreaW, descAreaH);
-        descArea.setValue(description == null ? "" : description);
+        descArea.setValue(liveDesc);
+        descArea.setFocused(descEditorOpen);
         linkKeyBox = new EditBox(this.font, cx() + 60, linkKeyY(), 140, 12, Component.literal("别名"));
         linkKeyBox.setMaxLength(32);
         linkKeyBox.setValue(linkKey == null ? "" : linkKey);
@@ -537,17 +560,25 @@ public class ShopEntryEditScreen extends ScaledScreen {
         nameBox.setHint(Component.literal("§8留空=用商品名称"));
         nameBox.setResponder(s -> displayName = s);
         int[] qb = qtyEditorBounds();
+        // 同 descArea：数量小弹窗开着时 resize 重建，要把旧框里已输入的数字和焦点带过去
+        String liveQty = qtyEditorOpen && qtyEditBox != null ? qtyEditBox.getValue() : null;
         qtyEditBox = new EditBox(this.font, qb[0] + 8, qb[1] + 20, qb[2] - 16, 14, Component.literal("数量"));
         qtyEditBox.setMaxLength(20);
         qtyEditBox.setBordered(true);
         qtyEditBox.setTextColor(0xFFFFFF);
         qtyEditBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
         qtyEditBox.setVisible(qtyEditorOpen);
+        if (liveQty != null) {
+            qtyEditBox.setValue(liveQty);
+            qtyEditBox.setFocused(true);
+        }
         addRenderableWidget(countBox);
         addRenderableWidget(catBox);
         addRenderableWidget(limitBox);
         addRenderableWidget(periodSecondsBox);
         addRenderableWidget(periodCapBox);
+        addRenderableWidget(discountPercentBox);
+        addRenderableWidget(discountMinutesBox);
         addRenderableWidget(sparkBox);
         addRenderableWidget(euBox);
         addRenderableWidget(descBox);
@@ -578,15 +609,22 @@ public class ShopEntryEditScreen extends ScaledScreen {
         try { return new BigInteger(s); } catch (NumberFormatException e) { return BigInteger.ZERO; }
     }
 
-    /** 空串 = 不限（-1）；否则解析为剩余次数，非法输入回退不限。 */
+    /** 空串 = 不限（-1）；否则解析为剩余次数，非法输入回退不限；
+     *  纯数字但超 Long.MAX 的输入按 Long.MAX 封顶——不能回退 -1，否则「限购」会被静默反转成「不限」。 */
     private static long parseLimit(String s) {
         if (s == null || s.isBlank()) return -1L;
         try {
             long v = Long.parseLong(s.trim());
             return v < 0L ? -1L : v;
         } catch (NumberFormatException e) {
-            return -1L;
+            return s.trim().matches("\\d+") ? Long.MAX_VALUE : -1L;
         }
+    }
+
+    /** 空串/非法 = 不打折（0）；否则解析折扣百分比并夹到 1-90（与 ShopEntry 构造器同口径）。 */
+    private static int parseDiscountPercent(String s) {
+        long v = parseLimit(s);
+        return v <= 0L ? 0 : (int) Math.min(90L, v);
     }
 
     private void capture() {
@@ -594,6 +632,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         if (limitBox != null) limit = parseLimit(limitBox.getValue());
         if (periodSecondsBox != null) periodSeconds = parseLimit(periodSecondsBox.getValue());
         if (periodCapBox != null) periodCap = parseLimit(periodCapBox.getValue());
+        if (discountPercentBox != null) discountPercent = parseDiscountPercent(discountPercentBox.getValue());
+        if (discountMinutesBox != null) discountMinutes = parseLimit(discountMinutesBox.getValue());
         if (sparkBox != null) spark = parseBig(sparkBox.getValue());
         if (euBox != null) eu = parseBig(euBox.getValue());
         if (descBox != null) description = descBox.getValue();
@@ -699,6 +739,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
         g.drawString(this.font, "§7秒限", periodMidLabelX(), periodY() + 2, GRAY, true);
         g.drawString(this.font, "§7次", periodCapBoxX() + PERIOD_CAP_W + 4, periodY() + 2, GRAY, true);
         g.drawString(this.font, "§8(现实秒；如填1000即每1000秒刷新，每玩家独立计数，留空=不启用)", periodHintX(), periodY() + 2, GRAY, true);
+        // 限时折扣（框由 super.render 绘制；两框都填才生效，从保存时起算，只打折星火/币种/EU 不动实物成本）
+        g.drawString(this.font, "§7限时折扣", c, discountY() + 2, GRAY, true);
+        g.drawString(this.font, "§7%持续", discountMidLabelX(), discountY() + 2, GRAY, true);
+        g.drawString(this.font, "§7分钟", discountMinutesBoxX() + DISCOUNT_MINUTES_W + 4, discountY() + 2, GRAY, true);
+        g.drawString(this.font, "§8(1-90%；两框都填才生效，保存后重新编辑=按剩余时间续算)", discountHintX(), discountY() + 2, GRAY, true);
 
         // 成本区
         g.drawString(this.font, "§6成本（五通道可并存）", c, sparkY() - 10, GOLD, true);
@@ -889,11 +934,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
         qtyEditorOpen = true;
     }
 
-    /** 关闭数量小弹窗；save=true 才把输入框内容解析写回对应的 counts 列表，非法输入回退 1，点关闭/点弹窗外都是丢弃改动。 */
+    /** 关闭数量小弹窗；save=true 才把输入框内容解析写回对应的 counts 列表，非法输入回退 1，点关闭/点弹窗外都是丢弃改动。
+     *  纯数字但超 Long.MAX 的输入按 Long.MAX 封顶——回退 1 会把「天价成本」静默改成 1，方向完全反了。 */
     private void closeQtyEditor(boolean save) {
         if (save && qtyEditBox != null) {
+            String raw = qtyEditBox.getValue().trim();
             long v;
-            try { v = Long.parseLong(qtyEditBox.getValue().trim()); } catch (Exception e) { v = 1L; }
+            try { v = Long.parseLong(raw); } catch (Exception e) { v = raw.matches("\\d+") ? Long.MAX_VALUE : 1L; }
             v = Math.max(1L, v);
             java.util.List<Long> target = qtyEditIsCoin ? coinCounts : itemCounts;
             if (qtyEditIndex >= 0 && qtyEditIndex < target.size()) target.set(qtyEditIndex, v);

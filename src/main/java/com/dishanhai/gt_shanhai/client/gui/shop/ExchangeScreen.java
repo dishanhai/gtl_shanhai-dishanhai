@@ -311,7 +311,13 @@ public class ExchangeScreen extends ScaledScreen {
         return super.universalMouseScrolled(mx, my, delta);
     }
 
+    // 兑换是非幂等操作且点击后不关屏：300ms 内的第二次点击按误触双击吞掉，防止双击变两笔
+    private long lastMoneySendAtMs;
+
     private void send(String entryId, boolean reverse) {
+        long now = System.currentTimeMillis();
+        if (now - lastMoneySendAtMs < 300L) return;
+        lastMoneySendAtMs = now;
         ShanhaiNetwork.CHANNEL.sendToServer(new ExchangePacket(entryId, times, reverse, ShopScreen.isAeMode()));
     }
 

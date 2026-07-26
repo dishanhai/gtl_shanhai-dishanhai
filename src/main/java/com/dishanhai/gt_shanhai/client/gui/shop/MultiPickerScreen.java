@@ -874,10 +874,11 @@ public class MultiPickerScreen extends ScaledScreen {
                 String amt = groupLong(s.count) + (s.isFluid ? "mB" : "");
                 g.drawString(this.font, (s == active ? "§e" : "§b") + amt, selX + selW - 60, ry + 2, CYAN, true);
             }
-            // ✕ 移除
+            // ✕ 移除：字形必须画在命中框（selListClicked 的 ry+1 起 12×12）内部，
+            // 之前画在 ry+11 时可见的 ✕ 几乎整个落在命中框下方，点它会误触「设为激活」
             int rmX = selX + selW - 12;
-            boolean rmHv = GuiRenderUtil.isHovering(mx, my, rmX, ry + 1, 10, 10);
-            g.drawString(this.font, rmHv ? "§c§l✕" : "§7✕", rmX, ry + 11, WHITE, false);
+            boolean rmHv = GuiRenderUtil.isHovering(mx, my, rmX, ry + 1, 12, 12);
+            g.drawString(this.font, rmHv ? "§c§l✕" : "§7✕", rmX, ry + 2, WHITE, false);
         }
         if (selected.isEmpty()) {
             g.drawString(this.font, "§8点左侧网格加入…", selX + 4, baseY + 2, GRAY, true);

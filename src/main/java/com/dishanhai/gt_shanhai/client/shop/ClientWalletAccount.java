@@ -28,6 +28,18 @@ public final class ClientWalletAccount {
 
     private ClientWalletAccount() {}
 
+    /** 退出世界/换服时清空，避免上一个存档的余额在下一次同步到达前被短暂展示（见 ClientInit 登出钩子）。 */
+    public static void clear() {
+        currencies = new LinkedHashMap<>();
+        digital = BigInteger.ZERO;
+        purchaseCounts = new LinkedHashMap<>();
+        periodAnchors = new LinkedHashMap<>();
+        wirelessEu = BigInteger.ZERO;
+        hasBoundAeNetwork = false;
+        memberTier = -1;
+        synced = false;
+    }
+
     /** 应用服务端全量快照（权威覆盖）。 */
     public static void apply(Map<ResourceLocation, BigInteger> newCurrencies, BigInteger newDigital,
                               Map<String, Long> newPurchaseCounts, Map<String, Long> newPeriodAnchors,

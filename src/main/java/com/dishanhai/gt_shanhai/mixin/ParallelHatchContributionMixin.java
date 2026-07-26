@@ -7,6 +7,7 @@ import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMach
 import com.gregtechceu.gtceu.api.capability.IParallelHatch;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
+import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
@@ -129,22 +130,23 @@ public class ParallelHatchContributionMixin {
                 || part instanceof DShanhaiDivergenceEngineMachine;
     }
 
-    /** 检测是否为由主机供应并行的模块机器 */
+    /**
+     * 检测是否为由主机供应并行的模块机器。
+     * <p>
+     * 本 Mixin 目标列表里所有带 {@code getHost()} 的机器（primordial 模块、gtladditions
+     * 的 AdvancedSpaceElevatorModuleMachine / DimensionFocusInfinityCraftingArray）都实现了
+     * {@link IModularMachineModule}，直接走接口即可——原先的
+     * {@code getClass().getMethod("getHost")} 对占绝大多数的非模块机器每次都要抛
+     * NoSuchMethodException，而本方法位于 getAdditionalThread 的配方组装路径上。
+     */
     private static boolean gtShanhai$isModuleMachine(IMultiController controller) {
-        try {
-            var m = controller.getClass().getMethod("getHost");
-            return m.invoke(controller) != null;
-        } catch (NoSuchMethodException e) {
-            return false;
-        } catch (Exception e) {
-            return false;
-        }
+        return controller instanceof IModularMachineModule<?, ?> module && module.getHost() != null;
     }
 
     private static boolean gtShanhai$isGTLAddExternalMachine(IMultiController controller) {
-        String name = controller.getClass().getName();
-        return name.startsWith("com.gtladd.gtladditions.common.machine.multiblock.controller.")
-                || name.startsWith("com.gtladd.gtladditions.common.machine.multiblock.controller.mutable.");
+        // ...controller.mutable. 本身就以 ...controller. 开头，无需单独再判一次
+        return controller.getClass().getName()
+                .startsWith("com.gtladd.gtladditions.common.machine.multiblock.controller.");
     }
 
     // ========== 线程注入（RETURN 累加模式） ==========
@@ -170,8 +172,6 @@ public class ParallelHatchContributionMixin {
                 long total = (long) original + extra;
                 int result = total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
                 cir.setReturnValue(result);
-                /* LOG.info("[getAdditionalThread] {} original={} extra={} → {}",
-                        getClass().getSimpleName(), original, extra, result); */
             }
         } catch (Exception e) {
             LOG.error("[getAdditionalThread] 异常", e);
@@ -193,10 +193,7 @@ public class ParallelHatchContributionMixin {
                 }
             }
             if (maxVoltage > 0) {
-                long original = cir.getReturnValue();
                 cir.setReturnValue(maxVoltage);
-                /* LOG.info("[getMaxVoltage] {} original={} bypass={}",
-                        getClass().getSimpleName(), original, maxVoltage); */
             }
         } catch (Exception ignored) {}
     }
@@ -214,10 +211,7 @@ public class ParallelHatchContributionMixin {
                 }
             }
             if (maxVoltage > 0) {
-                long original = cir.getReturnValue();
                 cir.setReturnValue(maxVoltage);
-                /* LOG.info("[getOverclockVoltage] {} original={} bypass={}",
-                        getClass().getSimpleName(), original, maxVoltage); */
             }
         } catch (Exception ignored) {}
     }

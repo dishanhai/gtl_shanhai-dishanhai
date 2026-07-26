@@ -92,8 +92,10 @@ public class VirtualPatternEncodingHelperTest {
 
     @Test
     void existingVirtualFluidMarkerRemainsIdempotentDuringReencoding() throws IOException {
+        // 归一化行尾：工作区可能是 CRLF 检出，多行裸 \n 断言会环境性误判
         String source = Files.readString(Path.of(
-                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"))
+                .replace("\r\n", "\n");
 
         assertTrue(source.contains("isNonConsumable(content)\n"
                         + "                        && input.amount() == VIRTUAL_FLUID_MARKER_AMOUNT"),

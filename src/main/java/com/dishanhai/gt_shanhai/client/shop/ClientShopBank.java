@@ -13,6 +13,12 @@ public final class ClientShopBank {
 
     private ClientShopBank() {}
 
+    /** 退出世界/换服时清空回「未同步」（null=界面显示"查询中"），避免跨存档展示旧账目（见 ClientInit 登出钩子）。 */
+    public static void clear() {
+        deposit = null;
+        debt = null;
+    }
+
     public static void apply(BigInteger newDeposit, BigInteger newDebt) {
         deposit = newDeposit == null ? BigInteger.ZERO : newDeposit;
         debt = newDebt == null ? BigInteger.ZERO : newDebt;

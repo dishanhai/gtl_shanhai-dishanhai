@@ -918,7 +918,10 @@ public final class ShopPurchase {
         }
         MinecraftServer server = player.getServer();
         if (server == null) return 0L;
-        ShopCost cost = entry.getCost();
+        UUID uuid = player.getUUID();
+        // 回收基准必须跟当前买价同口径（限时折扣+会员折扣后的有效价，见 affordAndDeduct:550），
+        // 否则限时折扣 > (100-sellRatioPercent)% 期间「折后买入→原价基准卖回」是稳赚的刷钱循环
+        ShopCost cost = entry.getEffectiveCost(ShopMembership.discountPercent(server, uuid));
         if (cost.hasPhysical()) return 0L; // 含实物成本的商品不支持出售（反向退实物语义不清）
         if (entry.hasMultipleGoods()) return 0L; // 组合商品不支持出售（反向该退哪几种、退多少语义不清）
         Item goods = entry.getGoodsItem();
@@ -946,7 +949,6 @@ public final class ShopPurchase {
         // 防止「买了立刻卖回零损耗」的套利，见 config「shop.sellRatioPercent」）
         ShopCost sellCost = cost.scaledTo(sellRatioPercent());
         BigInteger sellBig = BigInteger.valueOf(sell);
-        UUID uuid = player.getUUID();
         if (sellCost.spark.signum() > 0) {
             WalletAccountAPI.addDigital(server, uuid, sellCost.spark.multiply(sellBig));
         }

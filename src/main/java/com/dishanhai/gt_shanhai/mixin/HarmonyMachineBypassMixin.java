@@ -19,7 +19,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import java.lang.reflect.Field;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 绕过 HarmonyMachine 的氢/氦消耗检查。
@@ -55,20 +59,40 @@ public class HarmonyMachineBypassMixin {
         gtShanhai$setLongField(machine, "helium", GT_SHANHAI_LOCKED_HARMONY_FLUID);
     }
 
+    /**
+     * 反射字段缓存。recipeModifier 是每次配方组装都会走的路径，而 {@code getDeclaredField}
+     * 每次调用都要复制一份新的 Field 对象、并逐级爬继承链，{@code setAccessible} 也另有开销。
+     * 这里按 (类, 字段名) 缓存解析结果；查不到的组合缓存空值，避免反复重查整条继承链。
+     */
+    private static final Map<Class<?>, Map<String, Optional<Field>>> GT_SHANHAI_FIELD_CACHE = new ConcurrentHashMap<>();
+
+    private static Field gtShanhai$resolveField(Class<?> type, String name) {
+        return GT_SHANHAI_FIELD_CACHE
+                .computeIfAbsent(type, k -> new ConcurrentHashMap<>())
+                .computeIfAbsent(name, n -> {
+                    Class<?> cls = type;
+                    while (cls != null) {
+                        try {
+                            Field f = cls.getDeclaredField(n);
+                            f.setAccessible(true);
+                            return Optional.of(f);
+                        } catch (NoSuchFieldException e) {
+                            cls = cls.getSuperclass();
+                        } catch (Exception ignored) {
+                            return Optional.empty();
+                        }
+                    }
+                    return Optional.empty();
+                })
+                .orElse(null);
+    }
+
     private static void gtShanhai$setLongField(Object target, String name, long value) {
-        Class<?> cls = target.getClass();
-        while (cls != null) {
-            try {
-                var field = cls.getDeclaredField(name);
-                field.setAccessible(true);
-                field.setLong(target, value);
-                return;
-            } catch (NoSuchFieldException e) {
-                cls = cls.getSuperclass();
-            } catch (Exception ignored) {
-                return;
-            }
-        }
+        Field field = gtShanhai$resolveField(target.getClass(), name);
+        if (field == null) return;
+        try {
+            field.setLong(target, value);
+        } catch (Exception ignored) {}
     }
 
     @Inject(method = "StartupUpdate", at = @At("TAIL"), require = 0)
@@ -156,26 +180,19 @@ public class HarmonyMachineBypassMixin {
             gtShanhai$lockHarmonyFluids(machine);
 
             // 原方法因氢/氦不足返回 null → 枢纽绕过限制
+            // oc 字段在 HarmonyMachine 及其父类中查找，解析结果走上面的缓存
             int oc = 1;
-            try {
-                // 在 HarmonyMachine 及其父类中查找 oc 字段
-                Class<?> cls = machine.getClass();
-                while (cls != null) {
-                    try {
-                        var df = cls.getDeclaredField("oc");
-                        df.setAccessible(true);
-                        oc = df.getInt(machine);
-                        break;
-                    } catch (NoSuchFieldException e) {
-                        cls = cls.getSuperclass();
-                    }
-                }
-                if (oc <= 0) oc = 1;
-            } catch (Exception ignored) {}
+            Field ocField = gtShanhai$resolveField(machine.getClass(), "oc");
+            if (ocField != null) {
+                try {
+                    oc = ocField.getInt(machine);
+                } catch (Exception ignored) {}
+            }
+            if (oc <= 0) oc = 1;
             var copied = recipe.copy();
             copied.duration = Math.max(1, (int) (4800.0 / Math.pow(2.0, oc)));
             cir.setReturnValue(copied);
-            gtShanhai$lockHarmonyFluids(machine);
+            // 上面已 lockHarmonyFluids 过，其间 recipe.copy()/字段读取都不碰 hydrogen/helium，无需重复上锁
         } catch (Exception e) {
             LOG.error("[bypassHarmony] 异常", e);
         }

@@ -161,6 +161,7 @@ class MultiLineTextArea {
 
     boolean mouseClicked(double mx, double my) {
         if (!isHovering(mx, my)) return false;
+        focused = true; // 点中即取得焦点（同 EditBox 行为）；resize 重建后焦点丢失也能靠再点一下恢复
         field.setSelecting(Screen.hasShiftDown());
         double localX = mx - x;
         double localY = (my - y) + (double) scrollLine * LINE_H;

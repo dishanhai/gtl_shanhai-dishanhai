@@ -191,7 +191,7 @@ class VirtualCraftingPresenceInputSourceTest {
                 "清除虚拟电路标记时必须同步清理内部库存和催化镜像");
         assertTrue(slotMixin.contains("gtShanhai$subtractAmount(itemInventory, circuitKey, 1L)"));
         assertTrue(slotMixin.contains("gtShanhai$subtractAmount(gtShanhai$getItemCatalystInventory(), circuitKey, 1L)"));
-        assertTrue(machineMixin.contains("gtShanhai$removeVirtualCircuitPresence(slot, itemInventory, config)"),
+        assertTrue(machineMixin.contains("gtShanhai$removeVirtualCircuitPresence(access, itemInventory, config)"),
                 "refundSlot 路径也必须清理仅剩电路标记的历史镜像");
     }
 
@@ -238,8 +238,9 @@ class VirtualCraftingPresenceInputSourceTest {
                 "预算耗尽只能阻止新一轮抽料，不能阻止已有耗材订单补齐 Presence");
         assertTrue(machineAccess.contains("gtShanhai$addVirtualTargetToSlot"));
         assertTrue(machineMixin.contains("public boolean gtShanhai$addVirtualTargetToSlot"));
+        // 2026-07 反射整改后，方法区间的结束锚点从已删除的反射 helper 改为 notifySelfIO
         int addTargetStart = machineMixin.indexOf("public boolean gtShanhai$addVirtualTargetToSlot");
-        int addTargetEnd = machineMixin.indexOf("private Object2LongOpenHashMap<AEItemKey> gtShanhai$getItemInventory",
+        int addTargetEnd = machineMixin.indexOf("private void gtShanhai$notifySelfIO()",
                 addTargetStart);
         String addTargetMethod = machineMixin.substring(addTargetStart, addTargetEnd);
         assertFalse(addTargetMethod.contains("if (access.gtShanhai$hasVirtualTarget(key)) return true;"),
@@ -247,7 +248,7 @@ class VirtualCraftingPresenceInputSourceTest {
         int existingTargetBranch = addTargetMethod.indexOf("if (access.gtShanhai$hasVirtualTarget(key)) {");
         int existingTargetSync = addTargetMethod.indexOf("access.gtShanhai$syncVirtualTargetsToCatalyst();",
                 existingTargetBranch);
-        int existingTargetCache = addTargetMethod.indexOf("gtShanhai$cacheVirtualCircuit(slot, itemKey);",
+        int existingTargetCache = addTargetMethod.indexOf("gtShanhai$cacheVirtualCircuit(access, itemKey);",
                 existingTargetBranch);
         assertTrue(existingTargetBranch >= 0 && existingTargetSync > existingTargetBranch
                         && existingTargetCache > existingTargetSync,

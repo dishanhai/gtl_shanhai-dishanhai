@@ -46,6 +46,12 @@ public final class ClientCostPreview {
 
     private ClientCostPreview() {}
 
+    /** 整体失效：登出/换服（ClientInit）与目录 revision 变更（ClientShopCatalog.applyManifest）时调用。
+     *  entryKey 是快照内的位置下标，revision 一变就可能换主，旧槽位的「拥有/缺少」不能套在新商品上。 */
+    public static void clear() {
+        slots.clear();
+    }
+
     public static void apply(long entryKey, boolean aeMode, Map<ResourceLocation, BigInteger> newCoins,
                               List<Long> newItems, List<Long> newFluids) {
         slots.put(entryKey, new Slot(aeMode,

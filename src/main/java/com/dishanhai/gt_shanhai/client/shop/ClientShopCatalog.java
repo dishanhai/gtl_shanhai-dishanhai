@@ -24,10 +24,15 @@ public final class ClientShopCatalog {
 
     /** 纯 revision/requestId/chunk 状态机，不依赖 Minecraft 对象。 */
     public static final class State {
+        /** 在途 chunk 请求超过这个时长仍无回包（如被服务端限流静默丢弃）就允许换新 requestId 重发，
+         *  否则该 chunk 会永久滞留在 requests 里、格子空白到下一次 revision 变更才自愈。 */
+        private static final long PENDING_RETRY_MS = 5_000L;
+
         private long revision;
         private boolean ready;
         private long nextRequestId = 1L;
         private final Map<Integer, Long> requests = new LinkedHashMap<>();
+        private final Map<Integer, Long> requestedAtMs = new LinkedHashMap<>();
         private final Set<Integer> receivedChunks = new LinkedHashSet<>();
         private final Map<Long, Long> remainingUsesByEntry = new LinkedHashMap<>();
 
@@ -39,6 +44,7 @@ public final class ClientShopCatalog {
             revision = newRevision;
             ready = newReady;
             requests.clear();
+            requestedAtMs.clear();
             receivedChunks.clear();
             if (revisionChanged) remainingUsesByEntry.clear();
             return true;
@@ -57,9 +63,22 @@ public final class ClientShopCatalog {
             return remaining == null ? -1L : remaining.longValue();
         }
 
+        /** 无时钟版本（测试/兼容）：在途请求永不判超时，保持原「同 chunk 只发一次」语义。 */
         public long beginRequest(int chunkId) {
-            if (!ready || chunkId < 0 || requests.containsKey(chunkId) || receivedChunks.contains(chunkId)) {
+            return beginRequest(chunkId, Long.MIN_VALUE);
+        }
+
+        /** @param nowMillis 调用方注入的单调毫秒时钟（Long.MIN_VALUE = 无时钟，不做超时重发） */
+        public long beginRequest(int chunkId, long nowMillis) {
+            if (!ready || chunkId < 0 || receivedChunks.contains(chunkId)) {
                 return -1L;
+            }
+            if (requests.containsKey(chunkId)) {
+                Long at = requestedAtMs.get(chunkId);
+                boolean timedOut = nowMillis != Long.MIN_VALUE && at != null
+                        && at.longValue() != Long.MIN_VALUE && nowMillis - at.longValue() >= PENDING_RETRY_MS;
+                if (!timedOut) return -1L;
+                // 超时重发：换新 requestId 覆盖，迟到的旧回包会因 requestId 不匹配被 accept() 拒收
             }
             long requestId = nextRequestId++;
             if (requestId <= 0L) {
@@ -67,6 +86,7 @@ public final class ClientShopCatalog {
                 requestId = 1L;
             }
             requests.put(chunkId, requestId);
+            requestedAtMs.put(chunkId, nowMillis);
             return requestId;
         }
 
@@ -75,6 +95,7 @@ public final class ClientShopCatalog {
             Long expected = requests.get(chunkId);
             if (expected == null || expected.longValue() != requestId) return false;
             requests.remove(chunkId);
+            requestedAtMs.remove(chunkId);
             receivedChunks.add(chunkId);
             return true;
         }
@@ -86,6 +107,7 @@ public final class ClientShopCatalog {
         public void forgetChunk(int chunkId) {
             receivedChunks.remove(chunkId);
             requests.remove(chunkId);
+            requestedAtMs.remove(chunkId);
         }
     }
 
@@ -125,6 +147,9 @@ public final class ClientShopCatalog {
             pendingChunks.clear();
             cachedChunkKeys.clear();
             pinnedChunks = Set.of();
+            // entryKey 是快照内位置下标，revision 一变就可能换主：旧 revision 的花费预览槽位
+            // 不能留给新商品顶用（服务端对过期 revision 的预览请求已静默丢弃，这里清掉即闭环）
+            ClientCostPreview.clear();
         }
         rebuildManifestIndexes();
         return changed;
@@ -210,7 +235,7 @@ public final class ClientShopCatalog {
         pinnedChunks = Set.copyOf(needed);
         for (Integer chunkId : needed) {
             if (cachedChunkKeys.containsKey(chunkId)) cachedChunkKeys.get(chunkId); // access-order touch
-            long requestId = STATE.beginRequest(chunkId);
+            long requestId = STATE.beginRequest(chunkId, net.minecraft.Util.getMillis());
             if (requestId > 0L) {
                 ShanhaiNetwork.CHANNEL.sendToServer(
                         new ShopCatalogChunkRequestPacket(STATE.revision(), requestId, chunkId));

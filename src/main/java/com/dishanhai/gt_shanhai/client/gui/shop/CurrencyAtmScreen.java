@@ -62,6 +62,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private List<ResourceLocation> currencies = new ArrayList<>();
     private ResourceLocation selected;
     private int targetIdx = -1;   // 兑换目标币在 currencies 里的下标
+    private boolean ratesLoadedOnce; // 打开后只读一次盘（initScaled 每次 resize 都重跑，见其注释）
     private long amount = 1L;
     private AnimatableEditBox amountBox;
     private int scroll = 0;
@@ -112,10 +113,14 @@ public class CurrencyAtmScreen extends ScaledScreen {
         panelWidth = Math.max(560, vWidth - 8);
         panelHeight = Math.max(360, vHeight - 16);
 
-        CurrencyRateConfig.reload();
+        // 只在本次打开首次 init 时读盘：initScaled 每次 resize 都会重跑，无条件 reload 等于 resize 反复走文件 IO
+        if (!ratesLoadedOnce) {
+            CurrencyRateConfig.reload();
+            ratesLoadedOnce = true;
+        }
         currencies = CurrencyRateConfig.getCurrencies();
         if (selected == null && !currencies.isEmpty()) selected = currencies.get(0);
-        if (targetIdx < 0 && currencies.size() > 1) targetIdx = firstDifferent(0);
+        if ((targetIdx < 0 || targetIdx >= currencies.size()) && currencies.size() > 1) targetIdx = firstDifferent(0);
 
         int cx = detailX() + 8;
         amountBox = new AnimatableEditBox(this.font, cx, detailY(88), detailW() - 16, 12, Component.literal("数量"));
@@ -400,7 +405,9 @@ public class CurrencyAtmScreen extends ScaledScreen {
                     ResourceLocation prev = selected;
                     selected = currencies.get(i);
                     if (!selected.equals(prev)) detailSwitchAtMs = System.currentTimeMillis(); // 换了不同货币才重播弹入
-                    if (targetIdx < 0 || currencies.get(targetIdx).equals(selected)) targetIdx = firstDifferent(i);
+                    // targetIdx 上界也要挡：resize 重载 currency_rates.json 后 currencies 可能变短，残留旧下标会越界
+                    if (targetIdx < 0 || targetIdx >= currencies.size()
+                            || currencies.get(targetIdx).equals(selected)) targetIdx = firstDifferent(i);
                     return true;
                 }
             }
@@ -547,7 +554,14 @@ public class CurrencyAtmScreen extends ScaledScreen {
         }
     }
 
+    // 兑换/转换/提取都是非幂等的资金操作且点击后不关屏：300ms 内的第二次点击按误触双击吞掉，
+    // 防止手滑一次双击变成两笔交易；正常连续操作不受影响
+    private long lastMoneySendAtMs;
+
     private void send(CurrencyActionPacket.Op op, ResourceLocation currency, ResourceLocation target, long amt) {
+        long now = System.currentTimeMillis();
+        if (now - lastMoneySendAtMs < 300L) return;
+        lastMoneySendAtMs = now;
         ShanhaiNetwork.CHANNEL.sendToServer(new CurrencyActionPacket(op, currency, target, amt));
     }
 

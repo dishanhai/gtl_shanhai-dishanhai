@@ -1467,10 +1467,12 @@ public class ShopScreen extends ScaledScreen {
         renderBox(g, ox, oy, ow, oh, GOLD_DARK, PANEL_BG);
 
         Map<String, Long> cartMap = ClientShopCart.getAll();
-        List<String> stableIds = new ArrayList<>(cartMap.keySet());
+        // 必须跟 cartOverlayBounds/handleCartOverlayClick 用同一份清单（购物车 ∪ 结算批次）：
+        // 全部成交的行会被移出购物车 map 但仍要留在面板里画成功戳记，行索引三处才对得上
+        List<String> stableIds = cartDisplayIds();
 
         g.drawString(this.font, GuiRenderUtil.trimText(this.font,
-                "§6购物车 §7(" + stableIds.size() + " 件候选)", ow - DESC_OVERLAY_CLOSE_W - 20), ox + 8, oy + 8, GOLD, true);
+                "§6购物车 §7(" + cartMap.size() + " 件候选)", ow - DESC_OVERLAY_CLOSE_W - 20), ox + 8, oy + 8, GOLD, true);
         int closeX = ox + ow - DESC_OVERLAY_CLOSE_W - 4, closeY = oy + 4;
         drawButton(g, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H, "§cX", mx, my);
 
@@ -2769,7 +2771,7 @@ public class ShopScreen extends ScaledScreen {
         }
         if (cartOverlayOpen) {
             int[] r = cartOverlayBounds();
-            int maxScroll = cartOverlayMaxScroll(r, ClientShopCart.size());
+            int maxScroll = cartOverlayMaxScroll(r, cartDisplayIds().size()); // 跟渲染/点击同一份清单口径
             cartOverlayScroll = Math.max(0, Math.min(maxScroll, cartOverlayScroll - (int) d));
             return true;
         }

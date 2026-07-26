@@ -168,9 +168,6 @@ public final class ShopAutoCraft {
             return;
         }
 
-        // 临时诊断：打开 AE2 自己的合成计算调试日志（appeng.core.AELog#craftingLogEnabled），排查"样板明明存在
-        // 却被判定整批缺失"这个问题——只影响日志输出，不改配置文件，不需要重启，问题定位完就应该删掉这行。
-        appeng.core.AELog.setCraftingLogEnabled(true);
         var level = player.level();
         // 实测确认：光绑玩家身份（IActionSource.ofPlayer(player)，不带机器）还是会把目标报成"自己缺自己"。
         // AE2 原生 ME 终端（CraftConfirmMenu）用的是 PlayerSource(player, actionHost)——机器身份也带上了；

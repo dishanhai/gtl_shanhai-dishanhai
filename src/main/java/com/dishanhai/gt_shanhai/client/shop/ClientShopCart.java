@@ -50,6 +50,13 @@ public final class ClientShopCart {
 
     private ClientShopCart() {}
 
+    /** 退出世界/换服时清空（含结算结果戳记），避免跨存档残留（见 ClientInit 登出钩子）。 */
+    public static void clear() {
+        items = new LinkedHashMap<>();
+        results.clear();
+        synced = false;
+    }
+
     /** 应用服务端全量快照（权威覆盖）。 */
     public static void apply(Map<String, Long> newItems) {
         items = newItems != null ? new LinkedHashMap<>(newItems) : new LinkedHashMap<>();

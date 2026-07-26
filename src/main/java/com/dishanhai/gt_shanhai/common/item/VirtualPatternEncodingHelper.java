@@ -10,6 +10,7 @@ import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.crafting.pattern.AEProcessingPattern;
 
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
@@ -889,10 +890,11 @@ public final class VirtualPatternEncodingHelper {
             try {
                 long start = System.currentTimeMillis();
                 getRecipeOutputIndexes();
-                LOG.info("[VirtualPatternEncoding] 配方输出索引预热完成，耗时 {} ms ({})",
+                // 走 lifecycle 日志通道：编码器自己的 LOG 按契约不写 INFO（热路径防刷屏）
+                GTDishanhaiMod.LOGGER.info("[VirtualPatternEncodingIndex] 配方输出索引预热完成，耗时 {} ms ({})",
                         System.currentTimeMillis() - start, reason);
             } catch (Throwable t) {
-                LOG.warn("[VirtualPatternEncoding] 配方输出索引预热失败 ({})", reason, t);
+                GTDishanhaiMod.LOGGER.warn("[VirtualPatternEncodingIndex] 配方输出索引预热失败 ({})", reason, t);
             } finally {
                 INDEX_PREWARM_RUNNING.set(false);
             }
