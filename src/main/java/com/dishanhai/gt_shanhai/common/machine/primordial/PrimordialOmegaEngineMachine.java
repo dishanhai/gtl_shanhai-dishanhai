@@ -47,6 +47,20 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     private final Set<IModularMachineModule<PrimordialOmegaEngineMachine, ?>> modules = new ReferenceOpenHashSet<>();
     private final OutputMultiplierCache outputMultiplierCache = new OutputMultiplierCache();
 
+    /**
+     * modules 的不可变快照（copy-on-write）：只在模块增删时于锁内重建一次。
+     * getModuleSet() 曾经每次调用都「synchronized + 全量复制 65 元素集合」，而它被
+     * 每模块每 tick（hasLiveHost）和每候选配方（ModuleLevelCondition）调用——65 模块下
+     * 每 tick 数千次元素拷贝 + 同一把锁的争用。快照化后读路径零锁零分配。
+     */
+    private volatile Set<IModularMachineModule<PrimordialOmegaEngineMachine, ?>> moduleSnapshot =
+            Collections.emptySet();
+
+    /** 每 tick 一次的模块等级聚合（下标 = 模块等级，值 = 该等级堆叠总数，饱和加）。 */
+    private volatile long moduleLevelCountsTick = Long.MIN_VALUE;
+    private volatile long[] moduleLevelCounts = new long[MODULE_LEVEL_ARRAY_SIZE];
+    private static final int MODULE_LEVEL_ARRAY_SIZE = 32;
+
     /** volatile 标志，供渲染线程安全读取，避免模块集竞态死锁 */
     public volatile boolean hasModules;
 
@@ -100,9 +114,59 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     @Override
     public Set<IModularMachineModule<PrimordialOmegaEngineMachine, ?>> getModuleSet() {
-        synchronized (outputMultiplierCache) {
-            return Collections.unmodifiableSet(new ReferenceOpenHashSet<>(modules));
+        return moduleSnapshot;
+    }
+
+    /** 必须在 synchronized (outputMultiplierCache) 内调用。 */
+    private void rebuildModuleSnapshot() {
+        moduleSnapshot = modules.isEmpty()
+                ? Collections.emptySet()
+                : Collections.unmodifiableSet(new ReferenceOpenHashSet<>(modules));
+        moduleLevelCountsTick = Long.MIN_VALUE;
+    }
+
+    /**
+     * 主机级等效模块数量：requiredLv 及以上等级的全部模块按等级差换算后的饱和总和。
+     * 等级聚合每 tick 最多重建一次，替代「每模块 × 每候选配方」各自遍历全部模块的旧路径。
+     */
+    public long getEquivalentModuleCountForLevel(int requiredLv) {
+        if (requiredLv <= 0) return Long.MAX_VALUE;
+        long[] counts = moduleLevelCountsSnapshot();
+        long total = 0L;
+        for (int lv = requiredLv; lv < counts.length; lv++) {
+            long stackCount = counts[lv];
+            if (stackCount <= 0L) continue;
+            int cappedCount = stackCount > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) stackCount;
+            long equivalent = com.dishanhai.gt_shanhai.api.ModuleLevelCondition
+                    .calculateEquivalentCount(lv, cappedCount, requiredLv);
+            if (equivalent == Long.MAX_VALUE || total > Long.MAX_VALUE - equivalent) {
+                return Long.MAX_VALUE;
+            }
+            total += equivalent;
         }
+        return total;
+    }
+
+    private long[] moduleLevelCountsSnapshot() {
+        long tick = getOffsetTimer();
+        if (moduleLevelCountsTick == tick) {
+            return moduleLevelCounts;
+        }
+        long[] counts = new long[MODULE_LEVEL_ARRAY_SIZE];
+        for (IModularMachineModule<PrimordialOmegaEngineMachine, ?> module : moduleSnapshot) {
+            if (!(module instanceof PrimordialOmegaEngineModuleBase mb)) continue;
+            String slotId = mb.getModuleItemId();
+            if (slotId == null) continue;
+            int lv = PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
+            if (lv <= 0 || lv >= counts.length) continue;
+            int stackCount = mb.getModuleCount();
+            if (stackCount <= 0) continue;
+            long next = counts[lv] + stackCount;
+            counts[lv] = next < counts[lv] ? Long.MAX_VALUE : next;
+        }
+        moduleLevelCounts = counts;
+        moduleLevelCountsTick = tick;
+        return counts;
     }
 
     @Override
@@ -158,6 +222,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         }
         synchronized (outputMultiplierCache) {
             modules.clear();
+            rebuildModuleSnapshot();
             outputMultiplierCache.invalidate();
         }
     }
@@ -176,6 +241,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void addModule(M module) {
         synchronized (outputMultiplierCache) {
             if (modules.add(module)) {
+                rebuildModuleSnapshot();
                 outputMultiplierCache.invalidate();
             }
             hasModules = true;
@@ -186,6 +252,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void removeModule(M module) {
         synchronized (outputMultiplierCache) {
             if (modules.remove(module)) {
+                rebuildModuleSnapshot();
                 outputMultiplierCache.invalidate();
             }
             hasModules = !modules.isEmpty();
@@ -193,7 +260,8 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     }
 
     public int getMountedOutputMultiplier() {
-        return outputMultiplierCache.get(getOffsetTimer(), modules);
+        // 传不可变快照：缓存未命中时可在锁外安全遍历，get() 不再需要锁内复制一份集合。
+        return outputMultiplierCache.get(getOffsetTimer(), moduleSnapshot);
     }
 
     public void invalidateMountedOutputMultiplier() {
@@ -210,19 +278,16 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         private long generation;
 
         int get(long tick, Iterable<?> modules) {
+            // 入参必须是不可变快照——锁外遍历安全，命中与未命中路径都零复制零分配。
             while (true) {
-                List<Object> snapshot = new ArrayList<>();
                 long observedGeneration;
                 synchronized (this) {
                     if (valid && cachedTick == tick) {
                         return cachedValue;
                     }
                     observedGeneration = generation;
-                    for (Object module : modules) {
-                        snapshot.add(module);
-                    }
                 }
-                int multiplier = calculateMultiplier(snapshot);
+                int multiplier = calculateMultiplier(modules);
                 synchronized (this) {
                     if (generation != observedGeneration) {
                         continue;
