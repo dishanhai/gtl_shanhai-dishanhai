@@ -73,9 +73,17 @@ class PatternRecipeLookupPerformanceSourceTest {
         String selectable = Files.readString(SELECTABLE_RECIPE_LOGIC);
         String primordial = Files.readString(PRIMORDIAL_MODULE_LOGIC);
 
-        assertTrue(selectable.contains("cachedMergedLookupTick"));
-        assertTrue(selectable.contains("if (base == cachedMergedLookupBase && tick == cachedMergedLookupTick"),
-                "同一 tick 内重复 lookup 不应重复构造 active scoped 合并集合");
+        assertTrue(selectable.contains("cachedMergedLookupMarked"));
+        assertTrue(selectable.contains("if (base == cachedMergedLookupBase && marked == cachedMergedLookupMarked"),
+                "合并集合必须按 (base, marked) 身份对缓存——两个输入实例都没变时不得重复构造（含跨 tick）");
+        assertTrue(Files.readString(SEARCH_HELPER).contains("recipes = prev.recipes;"),
+                "marked 集合重建结果与旧值相同时必须复用旧实例，否则身份对缓存永不跨 tick 命中");
+        // 空结果退避必须是"可解除"的：内容变化回调与缓存失效两条路径都要清退避，
+        // 否则空转降频会退化成"补料后卡住不开工"级别的回归。
+        assertTrue(selectable.contains("public void updateTickSubscription() {"));
+        assertTrue(selectable.contains("emptyLookupUntilTick = Long.MIN_VALUE;\n        super.updateTickSubscription();")
+                || selectable.contains("emptyLookupUntilTick = Long.MIN_VALUE;\r\n        super.updateTickSubscription();"),
+                "updateTickSubscription（GTCEu 仓室内容变更回调）必须先解除空结果退避");
         assertTrue(selectable.contains("protected long getMaxLookupCacheTicks()"));
         assertTrue(selectable.contains("Math.min(getMaxLookupCacheTicks(), entry.cacheWindow * 2)"));
         assertTrue(primordial.contains("private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;"));
