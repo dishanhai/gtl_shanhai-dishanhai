@@ -77,6 +77,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.material.Fluid;
 
 import org.gtlcore.gtlcore.api.gui.MEPatternCatalystUIManager;
@@ -272,8 +273,44 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         }
     }
 
+    /**
+     * 存档槽位数与当前配置对账。patternsPerRow/rowsPerPage/maxPages 在放置后被改小时：
+     * patternInventory 反序列化按存档旧 Size 重建，而父类 hasPatternArray 等定长数组按当前配置分配，
+     * 父类 onLoad 按 patternInventory.getSlots() 遍历并写 hasPatternArray[i]，越界直接 AIOOBE 崩服。
+     * 必须在父类 onLoad 之前收缩库存；越界槽的样板延迟 1 tick 掉落在机器位置（此时 AE 网络未就绪无法退回）。
+     * 被裁槽位的内部缓冲料在父类反序列化阶段已按新长度截断，此处无法挽回。
+     */
+    private void gtShanhai$reconcilePatternInventorySize() {
+        ItemStackTransfer inv = getPatternInventory();
+        int expected = maxPatternCount;
+        int actual = inv.getSlots();
+        if (actual == expected) return;
+        int keptCount = Math.min(actual, expected);
+        List<ItemStack> kept = new ArrayList<>(keptCount);
+        for (int i = 0; i < keptCount; i++) {
+            kept.add(inv.getStackInSlot(i));
+        }
+        List<ItemStack> overflow = new ArrayList<>();
+        for (int i = expected; i < actual; i++) {
+            ItemStack stack = inv.getStackInSlot(i);
+            if (!stack.isEmpty()) overflow.add(stack.copy());
+        }
+        inv.setSize(expected);
+        for (int i = 0; i < keptCount; i++) {
+            inv.setStackInSlot(i, kept.get(i));
+        }
+        if (!overflow.isEmpty() && getLevel() instanceof ServerLevel serverLevel) {
+            serverLevel.getServer().tell(new TickTask(1, () -> {
+                for (ItemStack stack : overflow) {
+                    Block.popResource(serverLevel, getPos(), stack);
+                }
+            }));
+        }
+    }
+
     @Override
     public void onLoad() {
+        gtShanhai$reconcilePatternInventorySize();
         super.onLoad();
         // 父类 onLoad 已通过 getRealPattern 构造并发布倍率样板，无需在首次 AE 查询时再解码一遍。
         outputMultiplierPatternsRefreshNeeded = false;
@@ -352,6 +389,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @Override
     public boolean pasteFromTag(net.minecraft.nbt.CompoundTag tag) {
         boolean result = super.pasteFromTag(tag);
+        // 数据棒可能从不同槽位配置的总成复制而来，同样存在尺寸错配。
+        gtShanhai$reconcilePatternInventorySize();
         refreshPatternRecipeTypes();
         return result;
     }
