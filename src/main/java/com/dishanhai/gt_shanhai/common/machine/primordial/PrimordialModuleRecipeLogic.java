@@ -39,9 +39,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     // checkModuleCondition 缓存：避免每次都查静态注册表和遍历 conditions。
     // true / false 均为短期缓存（各带 TTL），过期后重新检查，避免一次瞬时结果被永久固化。
     // 模块等级变化时可主动调用 onModuleLevelChanged() 立即清空。
-    // 优化：使用 System.identityHashCode(recipe) 作为快速键，减少 HashMap 对象装箱开销。
-    private final java.util.Map<Integer, Long> moduleConditionTrueCache = new java.util.HashMap<>();
-    private final java.util.Map<Integer, CachedModuleConditionFailure> moduleConditionFalseCache = new java.util.HashMap<>();
+    // 键用 IdentityHashMap 按 recipe 引用本身——曾用 identityHashCode 当 Integer 键，
+    // 两个不同配方哈希碰撞时会串判定结果。配方重载后的旧引用由既有失效点清理。
+    private final java.util.IdentityHashMap<GTRecipe, Long> moduleConditionTrueCache = new java.util.IdentityHashMap<>();
+    private final java.util.IdentityHashMap<GTRecipe, CachedModuleConditionFailure> moduleConditionFalseCache = new java.util.IdentityHashMap<>();
     private static final long MODULE_CONDITION_TRUE_TTL = 20L;
     private static final long MODULE_CONDITION_FALSE_TTL = 20L;
     private Set<GTRecipe> cachedModuleConditionSource;
@@ -500,22 +501,21 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             return false;
         }
 
-        int recipeHash = System.identityHashCode(recipe);
         long now = getMachine().getOffsetTimer();
-        Long trueUntil = moduleConditionTrueCache.get(recipeHash);
+        Long trueUntil = moduleConditionTrueCache.get(recipe);
         if (trueUntil != null) {
             if (now < trueUntil) {
                 return true;
             }
-            moduleConditionTrueCache.remove(recipeHash);
+            moduleConditionTrueCache.remove(recipe);
         }
-        CachedModuleConditionFailure cachedFailure = moduleConditionFalseCache.get(recipeHash);
+        CachedModuleConditionFailure cachedFailure = moduleConditionFalseCache.get(recipe);
         if (cachedFailure != null) {
             if (now < cachedFailure.expiresAt) {
                 setConditionError(cachedFailure.message);
                 return false;
             }
-            moduleConditionFalseCache.remove(recipeHash);
+            moduleConditionFalseCache.remove(recipe);
         }
         
         MetaMachine machine = getMachine();
@@ -564,15 +564,13 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     }
 
     private void cacheModuleConditionTrue(GTRecipe recipe) {
-        int recipeHash = System.identityHashCode(recipe);
-        moduleConditionFalseCache.remove(recipeHash);
-        moduleConditionTrueCache.put(recipeHash, getMachine().getOffsetTimer() + MODULE_CONDITION_TRUE_TTL);
+        moduleConditionFalseCache.remove(recipe);
+        moduleConditionTrueCache.put(recipe, getMachine().getOffsetTimer() + MODULE_CONDITION_TRUE_TTL);
     }
 
     private void cacheModuleConditionFalse(GTRecipe recipe, String message) {
-        int recipeHash = System.identityHashCode(recipe);
-        moduleConditionTrueCache.remove(recipeHash);
-        moduleConditionFalseCache.put(recipeHash, new CachedModuleConditionFailure(
+        moduleConditionTrueCache.remove(recipe);
+        moduleConditionFalseCache.put(recipe, new CachedModuleConditionFailure(
                 getMachine().getOffsetTimer() + MODULE_CONDITION_FALSE_TTL, message));
     }
 
