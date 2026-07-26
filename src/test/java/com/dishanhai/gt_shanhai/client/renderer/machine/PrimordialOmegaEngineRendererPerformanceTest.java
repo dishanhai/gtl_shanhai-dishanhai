@@ -10,8 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PrimordialOmegaEngineRendererPerformanceTest {
 
+    // 宇宙球体的绘制在重构后归 PrimordialUniverseSphereRenderer 所有，
+    // 派发器 PrimordialOmegaEngineRenderer 不再直接碰模型缓冲。
     private static final Path RENDERER_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
-            "gt_shanhai", "client", "renderer", "machine", "PrimordialOmegaEngineRenderer.java");
+            "gt_shanhai", "client", "renderer", "machine", "PrimordialUniverseSphereRenderer.java");
     private static final Path BUFFER_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "client", "renderer", "machine", "PrimordialOmegaEngineModelBuffers.java");
 

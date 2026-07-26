@@ -42,10 +42,16 @@ public abstract class AbstractRingRenderer extends WorkableCasingMachineRenderer
     /** 子类提供环缓冲区 */
     protected abstract VertexBuffer[] getRingBuffers(MetaMachine machine);
 
-    /** 子类渲染特殊效果（环渲染之后、完全自定义） */
+    /**
+     * 子类渲染特殊效果（环渲染之后、完全自定义）。
+     * <p>
+     * smoothTick 沿用「停机即 0」的哨兵语义（isWorking 就是由它推导的），所以它<b>不是</b>连续时钟：
+     * 工作状态翻转时会在 0 与大数值之间硬跳。常驻可见的特效若把它当累积角度用会看到突兀的弹跳，
+     * 这类子类应改用 partialTick 自行取连续时钟（{@code RenderUtil.getSmoothTick}）。
+     */
     protected abstract void renderSpecialEffects(MetaMachine machine, BlockEntity blockEntity,
                                                   float smoothTick, boolean isWorking,
-                                                  Direction facing,
+                                                  Direction facing, float partialTick,
                                                   PoseStack poseStack, MultiBufferSource buffer);
 
     /** 子类计算平滑 tick，用于环旋转动画 */
@@ -99,7 +105,7 @@ public abstract class AbstractRingRenderer extends WorkableCasingMachineRenderer
         renderAllRings(getRingBuffers(meta), facing, smoothTick, isWorking, poseStack);
 
         // 特殊效果（由子类自行处理 centerPos 定位）
-        renderSpecialEffects(meta, blockEntity, smoothTick, isWorking, facing, poseStack, buffer);
+        renderSpecialEffects(meta, blockEntity, smoothTick, isWorking, facing, partialTick, poseStack, buffer);
     }
 
     // ========== 轨道环渲染（共享） ==========

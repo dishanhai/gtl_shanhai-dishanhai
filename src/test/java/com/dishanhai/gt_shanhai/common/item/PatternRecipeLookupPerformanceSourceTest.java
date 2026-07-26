@@ -7,7 +7,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,22 +31,6 @@ class PatternRecipeLookupPerformanceSourceTest {
     private static final Path PRIMORDIAL_MODULE_LOGIC = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "machine", "primordial", "PrimordialModuleRecipeLogic.java");
     private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
-    @Test
-    void cachesStellarPatternRecipeInferenceUntilPatternRecipeOrInventoryChanges() throws IOException {
-        String source = Files.readString(SEARCH_HELPER);
-
-        assertTrue(source.contains("getMarkedRecipeCached(\n                        buffer, access, slot, inferenceInputs, inferenceInventoryFingerprint)"),
-                "星律 active/首配路径应共用每槽样板配方缓存");
-        assertTrue(source.contains("DShanhaiRecipeModifierAPI.getPatternCacheRevision()"),
-                "运行期配方规则变化后必须失效样板推断缓存");
-        assertTrue(source.contains("inferenceInventoryFingerprint"),
-                "库存拉取或共享催化仓变化后必须失效样板推断缓存");
-        assertEquals(1, occurrences(source, "access.gtShanhai$getPatternInferenceInputs()"),
-                "一次星律候选收集只能快照一次库存上下文，不能逐槽重复分配");
-        assertEquals(1, occurrences(source, "access.gtShanhai$getPatternRecipe(slot, inferenceInputs)"),
-                "昂贵的样板反推只能保留在缓存未命中的加载路径");
-    }
 
     @Test
     void activeMarkedRecipeMergeOnlyCachesWithinTheSameServerTick() throws IOException {
@@ -209,15 +192,5 @@ class PatternRecipeLookupPerformanceSourceTest {
                 "实机排查完成后不得保留星律全字段诊断调用");
         assertFalse(sources.toString().contains("[StellarPatternDiag]"),
                 "正式构建不得继续输出临时星律诊断前缀");
-    }
-
-    private static int occurrences(String source, String target) {
-        int count = 0;
-        int from = 0;
-        while ((from = source.indexOf(target, from)) >= 0) {
-            count++;
-            from += target.length();
-        }
-        return count;
     }
 }

@@ -5,6 +5,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 
+import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
+import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfiguratorButton;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
@@ -14,6 +17,7 @@ import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.primordial.IPrimordialOutputMultiplierModule;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 
 import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
 
@@ -22,6 +26,8 @@ import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
 
 import com.google.common.primitives.Ints;
 
+import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
+import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
@@ -63,6 +69,14 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     /** volatile 标志，供渲染线程安全读取，避免模块集竞态死锁 */
     public volatile boolean hasModules;
+
+    /**
+     * 球体渲染风格（{@link PrimordialSphereStyle} 的 ordinal）。
+     * TESR 只跑在客户端，所以必须 @DescSynced 才能让玩家在 GUI 里的切换实时反映到渲染。
+     */
+    @Persisted
+    @DescSynced
+    private int sphereStyle = PrimordialSphereStyle.UNIVERSE.ordinal();
 
     public PrimordialOmegaEngineMachine(IMachineBlockEntity holder) {
         super(holder, GTRecipeTypes.FURNACE_RECIPES);
@@ -321,6 +335,57 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             cachedValue = 1;
             valid = false;
         }
+    }
+
+    // ========== 球体渲染风格 ==========
+
+    public PrimordialSphereStyle getSphereStyle() {
+        return PrimordialSphereStyle.byIndex(sphereStyle);
+    }
+
+    public void setSphereStyle(PrimordialSphereStyle style) {
+        if (style == null || sphereStyle == style.ordinal()) return;
+        sphereStyle = style.ordinal();
+        notifyBlockUpdate();
+    }
+
+    @Override
+    protected void attachCleanConfigurators(ConfiguratorPanel panel) {
+        super.attachCleanConfigurators(panel);
+        panel.attachConfigurators(new IFancyConfiguratorButton.Toggle(
+                GuiTextures.BUTTON_SWITCH_VIEW.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D),
+                GuiTextures.BUTTON_SWITCH_VIEW.getSubTexture(0.0D, 0.5D, 1.0D, 0.5D),
+                () -> getSphereStyle() == PrimordialSphereStyle.NEUTRON_STAR,
+                (clickData, pressed) -> setSphereStyle(pressed.booleanValue()
+                        ? PrimordialSphereStyle.NEUTRON_STAR
+                        : PrimordialSphereStyle.UNIVERSE))
+                .setTooltipsSupplier(PrimordialOmegaEngineMachine::sphereStyleTooltips));
+    }
+
+    /**
+     * tooltip 只在客户端求值，所以这里读客户端本地的 COMMON 配置是安全的。
+     * 全局覆盖生效时必须明说：这颗钮改的仍是所有人都看得到的机器状态，但<b>你自己</b>的画面不会变。
+     * 否则它在覆盖者眼里就是一颗按了没反应的假开关。
+     */
+    private static List<Component> sphereStyleTooltips(boolean pressed) {
+        List<Component> tooltips = new ArrayList<>(3);
+        tooltips.add(Component.translatable("gt_shanhai.gui.sphere_style")
+                .withStyle(ChatFormatting.YELLOW)
+                .append(Component.translatable(pressed
+                        ? "gt_shanhai.gui.sphere_style.neutron_star"
+                        : "gt_shanhai.gui.sphere_style.universe")));
+        tooltips.add(Component.translatable("gt_shanhai.gui.sphere_style.info"));
+        if (isSphereStyleOverridden()) {
+            tooltips.add(Component.translatable("gt_shanhai.gui.sphere_style.overridden")
+                    .withStyle(ChatFormatting.GOLD));
+        }
+        return tooltips;
+    }
+
+    private static boolean isSphereStyleOverridden() {
+        return DShanhaiConfig.COMMON_SPEC.isLoaded()
+                && DShanhaiConfig.COMMON.primordialSphereStyle.get()
+                        != DShanhaiConfig.ConfigValues.SphereStyleOverride.FOLLOW_MACHINE;
     }
 
     // ========== 显示 ==========

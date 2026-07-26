@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.api;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-import com.dishanhai.gt_shanhai.api.CosmicItemRegistry;
 import com.dishanhai.gt_shanhai.api.recipe.DShanhaiRecipeTypes;
 import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
@@ -32,18 +31,73 @@ public class DShanhaiJS {
 
     /**
      * 将物品标记为宇宙渲染（Cosmic Effect）。
-     * 物品在 GUI/世界中会显示黑色星云旋转边框。
+     * <p>
+     * 原独立的星云边框渲染链路从未注册事件（休眠代码），已由 Halo 系统取代删除。
+     * 本方法保留为 KubeJS 兼容入口，内部委托 {@link #makeHalo}：
+     * 深空黑底暈 + 星云紫旋转星芒，视觉上近似原设计的"黑色星云旋转边框"。
+     *
+     * @param itemId 物品 ID，格式 "modid:item_name"
+     * @deprecated 新脚本请直接使用 {@link #makeHalo(String, String, String, String)} 自定义样式
+     */
+    @Deprecated
+    public static void makeCosmic(String itemId) {
+        makeHalo(itemId, "halo+rays", "#050507", "#7B4FD8");
+    }
+
+    /**
+     * 为物品添加 Avaritia 风格光环渲染（默认底暈样式 + 呼吸脉冲）。
+     * GUI/地面/手持均生效，光环会溢出物品槽边界。
      * <p>
      * 用法（KubeJS startup_scripts 中）:
      * <pre>
-     * DShanhaiJS.makeCosmic("kubejs:my_item")
-     * DShanhaiJS.makeCosmic("gtceu:infinity_ingot")
+     * DShanhaiJS.makeHalo("dishanhai:magmatter_coin", "#050507")
      * </pre>
      *
-     * @param itemId 物品 ID，格式 "modid:item_name"
+     * @param itemId       物品 ID，格式 "modid:item_name"
+     * @param coreColorHex 底暈颜色 "#RRGGBB" / "#AARRGGBB"，"rainbow" 为彩虹循环
      */
-    public static void makeCosmic(String itemId) {
-        CosmicItemRegistry.markCosmic(itemId);
+    public static void makeHalo(String itemId, String coreColorHex) {
+        makeHalo(itemId, "halo", coreColorHex, coreColorHex);
+    }
+
+    /**
+     * 为物品添加指定样式的光环渲染。
+     * <p>
+     * 样式（可用 + 组合）: "halo" 底暈 / "ring" 冕环 / "eclipse" = halo+ring 日食 / "rays" 旋转星芒。
+     * <pre>
+     * DShanhaiJS.makeHalo("dishanhai:magmatter_coin", "eclipse", "#050507", "#FF7A1A")
+     * DShanhaiJS.makeHalo("dishanhai:infinite_coin", "halo+rays", "#FFFFFF", "#FFFFFF")
+     * </pre>
+     *
+     * @param itemId       物品 ID
+     * @param styleSpec    样式串
+     * @param coreColorHex 底暈颜色；"rainbow" 为彩虹循环
+     * @param rimColorHex  冕环/星芒颜色；"rainbow" 为彩虹循环
+     */
+    public static void makeHalo(String itemId, String styleSpec, String coreColorHex, String rimColorHex) {
+        makeHaloEx(itemId, styleSpec, coreColorHex, rimColorHex, 1.55D, true, 1400, 0.03D);
+    }
+
+    /**
+     * 光环渲染完整参数版。
+     *
+     * @param itemId        物品 ID（仅适用平面物品模型 item/generated 类；方块物品与自定义渲染物品无效）
+     * @param styleSpec     样式串，见 {@link #makeHalo(String, String, String, String)}
+     * @param coreColorHex  底暈颜色；"rainbow" 为该通道彩虹循环（另一通道保持固定色）
+     * @param rimColorHex   冕环/星芒颜色；"rainbow" 同上
+     * @param scale         光环直径相对物品尺寸倍数（默认 1.55）
+     * @param pulse         是否呼吸脉冲
+     * @param pulsePeriodMs 脉冲周期毫秒（默认 1400；中子星风格可给 700）
+     * @param rotateSpeed   星芒转速 转/秒，负数逆时针（默认 0.03）
+     */
+    public static void makeHaloEx(String itemId, String styleSpec, String coreColorHex, String rimColorHex,
+                                  double scale, boolean pulse, int pulsePeriodMs, double rotateSpeed) {
+        HaloItemRegistry.register(itemId, new HaloSettings(
+                HaloSettings.parseStyle(styleSpec),
+                HaloSettings.parseColor(coreColorHex),
+                HaloSettings.parseColor(rimColorHex),
+                (float) scale, pulse, pulsePeriodMs, (float) rotateSpeed,
+                HaloSettings.isRainbow(coreColorHex), HaloSettings.isRainbow(rimColorHex)));
     }
 
     /**

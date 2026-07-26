@@ -673,7 +673,7 @@ public class QuantumCraftingCPULogic {
                     ? QuantumCraftingStatus.State.WAITING_MACHINE
                     : QuantumCraftingStatus.State.PLANNED;
             return new QuantumCraftingStatus(state, null, 0L, 0L, 0L, 0L,
-                    0L, 0L, waitingForOutput, pendingOutput);
+                    0L, 0L, waitingForOutput, pendingOutput, 0L, 0, 0, false);
         }
 
         for (Map.Entry<IPatternDetails, QuantumExecutingCraftingJob.TaskProgress> task : job.tasks.entrySet()) {
@@ -684,35 +684,46 @@ public class QuantumCraftingCPULogic {
             if (!bottleneck.valid()) {
                 return new QuantumCraftingStatus(QuantumCraftingStatus.State.INVALID_PATTERN,
                         null, 0L, 0L, 0L, remainingPatterns,
-                        0L, 0L, waitingForOutput, pendingOutput);
+                        0L, 0L, waitingForOutput, pendingOutput, 0L, 0, 0, false);
             }
 
             long waitingForInput = bottleneck.key() == null ? 0L : getWaitingFor(bottleneck.key());
             long pendingInput = bottleneck.key() == null ? 0L : getPendingOutputs(bottleneck.key());
-            boolean hasProvider = false;
-            boolean hasFreeProvider = false;
+            int providerCount = 0;
+            int freeProviderCount = 0;
             for (ICraftingProvider provider : craftingService.getProviders(task.getKey())) {
-                hasProvider = true;
-                if (!provider.isBusy()) {
-                    hasFreeProvider = true;
-                    break;
-                }
+                providerCount++;
+                if (!provider.isBusy()) freeProviderCount++;
             }
             QuantumCraftingStatus.State state = classifyCraftingStatus(
-                    bottleneck.runnablePatterns(), hasProvider, hasFreeProvider,
+                    bottleneck.runnablePatterns(), providerCount > 0, freeProviderCount > 0,
                     waitingForInput, pendingInput);
             AEKey blockingInput = bottleneck.runnablePatterns() <= 0L ? bottleneck.key() : null;
+            long networkAvailableInput = 0L;
+            boolean blockingInputCraftable = false;
+            if (blockingInput != null) {
+                networkAvailableInput = getNetworkAvailable(blockingInput);
+                blockingInputCraftable = craftingService.isCraftable(blockingInput);
+            }
             return new QuantumCraftingStatus(state, blockingInput,
                     bottleneck.available(), bottleneck.requiredPerPattern(),
                     bottleneck.runnablePatterns(), remainingPatterns,
-                    waitingForInput, pendingInput, waitingForOutput, pendingOutput);
+                    waitingForInput, pendingInput, waitingForOutput, pendingOutput,
+                    networkAvailableInput, providerCount, freeProviderCount, blockingInputCraftable);
         }
 
         QuantumCraftingStatus.State state = waitingForOutput > 0L
                 ? QuantumCraftingStatus.State.WAITING_MACHINE
                 : QuantumCraftingStatus.State.PLANNED;
         return new QuantumCraftingStatus(state, null, 0L, 0L, 0L, 0L,
-                0L, 0L, waitingForOutput, pendingOutput);
+                0L, 0L, waitingForOutput, pendingOutput, 0L, 0, 0, false);
+    }
+
+    /** ME 网络存储里该原料的现存数量；只读缓存查询，供状态提示判断「能否手动重发配补救」。 */
+    private long getNetworkAvailable(AEKey key) {
+        IGrid grid = cpu.getGrid();
+        if (grid == null) return 0L;
+        return Math.max(0L, grid.getStorageService().getCachedInventory().get(key));
     }
 
     public RedispatchResult retryRemainingDispatch() {

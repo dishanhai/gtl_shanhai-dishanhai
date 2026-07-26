@@ -44,11 +44,20 @@ public final class FOTCMixins {
             }
         }
 
-        @Inject(method = "updateRunningSecs", at = @At("HEAD"), cancellable = true)
+        // 只凍結计时数值，不得 cancel 整个方法：
+        // updateRunningSecs 内部还负责 starRitual.handleStarRitualLogic()（星辰仪式收集/坍缩）
+        // 与 stasisAnchoredActive 更新，取消会直接阻断星辰仪式入口。
+        @Inject(method = "updateRunningSecs", at = @At("HEAD"))
         private void gtShanhai$freezeRunningSecs(CallbackInfo ci) {
             if (hasMaintenanceHatch()) {
                 runningSecs = LOCKED_SECS;
-                ci.cancel();
+            }
+        }
+
+        @Inject(method = "updateRunningSecs", at = @At("TAIL"))
+        private void gtShanhai$restoreRunningSecs(CallbackInfo ci) {
+            if (hasMaintenanceHatch()) {
+                runningSecs = LOCKED_SECS;
             }
         }
 

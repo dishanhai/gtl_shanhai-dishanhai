@@ -18,3 +18,5 @@ categories:
 * [存储系统(SDA)](storage_index.md)
 * [量子计算机](quantum_index.md)
 * [终焉枢纽专项](special_index.md)
+* [山海终极终端](ultimate_terminal.md)
+* [山海配方样板调试工具](debug_pattern_test.md)

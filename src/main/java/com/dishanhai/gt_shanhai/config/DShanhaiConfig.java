@@ -28,6 +28,22 @@ public final class DShanhaiConfig {
             VIRTUAL_ACTIVE_TYPE
         }
 
+        /**
+         * 原始终焉引擎球体渲染风格的客户端显示覆盖。
+         * <p>
+         * 刻意不复用 {@code PrimordialSphereStyle}：后者的 ordinal 是机器 NBT 持久化/DescSynced 值，
+         * 其 javadoc 明写禁止插入中间项；且本枚举多一个 FOLLOW_MACHINE 语义——它不是机器状态，是观看者偏好。
+         * 两者职责正交：机器上的值是「建造者选的世界状态」，本项是「我自己想看到什么」。
+         */
+        public enum SphereStyleOverride {
+            /** 跟随机器 GUI 侧栏的切换按钮（默认）。 */
+            FOLLOW_MACHINE,
+            /** 强制渲染成鸿蒙微型宇宙。 */
+            UNIVERSE,
+            /** 强制渲染成中子星。 */
+            NEUTRON_STAR
+        }
+
         /** 特大号标签过滤总线 — UI 每页显示槽位数 */
         public ForgeConfigSpec.IntValue tagBusSlotsPerPage;
         /** 特大号标签过滤总线 — 最大页数 */
@@ -53,6 +69,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue recursiveReverseArrayBypassModuleRestrictions;
         /** ME 磁盘仓室 — 槽位数 */
         public ForgeConfigSpec.IntValue meDiskHatchSlots;
+        /** 原始终焉引擎 — 球体渲染风格客户端显示覆盖 */
+        public ForgeConfigSpec.EnumValue<SphereStyleOverride> primordialSphereStyle;
         /** 虚拟物品提供器 — AE 下单校验模式 */
         public ForgeConfigSpec.EnumValue<VirtualProviderMode> virtualProviderMode;
         /** 虚拟物品提供器 — 自动包裹排除物品 ID */
@@ -167,6 +185,17 @@ public final class DShanhaiConfig {
                     .comment("ME 磁盘仓室的槽位数（默认 108）",
                              "修改后需重新放置仓室生效")
                     .defineInRange("slots", 108, 1, 256);
+            builder.pop();
+
+            builder.push("primordial_omega_engine");
+            primordialSphereStyle = builder
+                    .comment("原始终焉引擎中心球体的渲染风格覆盖（纯客户端显示偏好）",
+                             "COMMON 配置不同步：多人环境下各玩家读自己本地的 gt_shanhai-common.toml，只影响自己的画面",
+                             "FOLLOW_MACHINE = 跟随每台机器 GUI 侧栏的切换按钮（默认）",
+                             "UNIVERSE = 强制全部渲染成鸿蒙微型宇宙，忽略机器上的设定",
+                             "NEUTRON_STAR = 强制全部渲染成中子星，忽略机器上的设定",
+                             "本项不改写机器的持久化状态，切回 FOLLOW_MACHINE 即恢复各机器原设定")
+                    .defineEnum("sphereStyle", SphereStyleOverride.FOLLOW_MACHINE);
             builder.pop();
 
             builder.push("virtual_item_provider");

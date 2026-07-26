@@ -1,0 +1,7 @@
+{
+  "sources": [
+    {"type": "minecraft:single", "resource": "gt_shanhai:render_fx/halo"},
+    {"type": "minecraft:single", "resource": "gt_shanhai:render_fx/halo_ring"},
+    {"type": "minecraft:single", "resource": "gt_shanhai:render_fx/halo_rays"}
+  ]
+}

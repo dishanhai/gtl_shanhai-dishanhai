@@ -37,6 +37,10 @@ public class QuantumCraftingStatusResponsePacket {
         buf.writeVarLong(status.pendingInput());
         buf.writeVarLong(status.waitingForOutput());
         buf.writeVarLong(status.pendingOutput());
+        buf.writeVarLong(status.networkAvailableInput());
+        buf.writeVarInt(status.providerCount());
+        buf.writeVarInt(status.freeProviderCount());
+        buf.writeBoolean(status.blockingInputCraftable());
     }
 
     public static QuantumCraftingStatusResponsePacket decode(FriendlyByteBuf buf) {
@@ -53,7 +57,11 @@ public class QuantumCraftingStatusResponsePacket {
                 buf.readVarLong(),
                 buf.readVarLong(),
                 buf.readVarLong(),
-                buf.readVarLong());
+                buf.readVarLong(),
+                buf.readVarLong(),
+                buf.readVarInt(),
+                buf.readVarInt(),
+                buf.readBoolean());
         return new QuantumCraftingStatusResponsePacket(key, status);
     }
 

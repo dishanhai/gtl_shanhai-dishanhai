@@ -71,12 +71,36 @@ public class CraftingStatusTableRendererTooltipMixin {
                     + blockingInput.formatAmount(status.availableInput(), AmountFormat.FULL)
                     + " §7/ §f"
                     + blockingInput.formatAmount(status.requiredInputPerPattern(), AmountFormat.FULL)));
+            long shortfall = status.shortfallInput();
+            if (shortfall > 0L) {
+                lines.add(Component.literal("§c本项缺口：§f"
+                        + blockingInput.formatAmount(shortfall, AmountFormat.FULL)
+                        + " §8("
+                        + blockingInput.formatAmount(status.requiredInputPerPattern(), AmountFormat.SLOT)
+                        + " × " + status.remainingPatterns() + " 份)"));
+            }
             if (status.waitingForInput() > 0L || status.pendingInput() > 0L) {
                 lines.add(Component.literal("§7上游返还中 / 未发计划：§f"
                         + blockingInput.formatAmount(status.waitingForInput(), AmountFormat.FULL)
                         + " §7/ §f"
                         + blockingInput.formatAmount(status.pendingInput(), AmountFormat.FULL)));
             }
+            if (status.recoverableByRedispatch()) {
+                lines.add(Component.literal("§a✔ 网络中现存 "
+                        + blockingInput.formatAmount(status.networkAvailableInput(), AmountFormat.FULL)
+                        + " 个可补 §7— 点界面右下「重发配」抽料"));
+            }
+            if (status.deadlocked()) {
+                lines.add(Component.literal("§4⚠ 上游已断链：无返还、无未发计划、网络无现货、且该原料无任何样板"));
+                lines.add(Component.literal("§4   本任务将永久卡死，请补样板或手动投料后再重发配"));
+            }
+        }
+        if (status.providerCount() > 0) {
+            lines.add(Component.literal("§b样板提供器：§f" + status.providerCount() + " 个 §7("
+                    + "§a" + status.freeProviderCount() + " 空闲§7 / "
+                    + "§c" + (status.providerCount() - status.freeProviderCount()) + " 忙碌§7)"));
+        } else if (status.remainingPatterns() > 0L) {
+            lines.add(Component.literal("§4⚠ 无样板提供器 — 该任务永远不会执行"));
         }
         if (status.state() == QuantumCraftingStatus.State.READY_TO_DISPATCH) {
             lines.add(Component.literal("§7当前可发 / 剩余样板份数：§f"

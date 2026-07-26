@@ -55,8 +55,9 @@ public class SpacetimeWaveMatrixRenderer extends AbstractRingRenderer {
     @Override
     protected void renderSpecialEffects(MetaMachine machine, BlockEntity blockEntity,
                                         float smoothTick, boolean isWorking,
-                                        Direction facing,
+                                        Direction facing, float partialTick,
                                         PoseStack poseStack, MultiBufferSource buffer) {
+        // 停机即不渲染，不存在常驻可见时的时钟跳变问题，故不需要 partialTick
         if (!isWorking) return;
 
         var swm = (SpacetimeWaveMatrixMachine) machine;

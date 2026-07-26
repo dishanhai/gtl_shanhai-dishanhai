@@ -44,7 +44,8 @@ import java.util.Map;
 public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         implements IMaintenanceBypassPart, IMachineLife,
                    IAutoConfigurationMaintenanceHatch, IMaintenanceMachine,
-                   IParallelHatch, IThreadModifierPart, IDataAccessHatch {
+                   IParallelHatch, IThreadModifierPart, IDataAccessHatch,
+                   com.dishanhai.gt_shanhai.api.machine.IDShanhaiBatchToggle {
 
     private static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             DShanhaiMaintenanceHatchMachine.class, MultiblockPartMachine.MANAGED_FIELD_HOLDER);
@@ -126,6 +127,8 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         return GTValues.VN[tier];
     }
     @Persisted private boolean threadEnabled = true;
+    // 批处理：装本枢纽的多方块，<20t 配方在修饰链尾合并为 ≥20t（DShanhaiBatchPartMixin 消费）
+    @Persisted private boolean batchEnabled = true;
 
     private long threadCount = 0;  // threadCount long 支持 > int 上限
     private long threadMax = 0;  // 线程上限
@@ -514,6 +517,9 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
 
     // ========== IMaintenanceBypassPart 覆写（读取 UI 开关状态） ==========
 
+    @Override public boolean isBatchModeEnabled() { return batchEnabled; }
+    @Override public void setBatchModeEnabled(boolean enabled) { this.batchEnabled = enabled; }
+
     @Override public boolean isVoltageBypassEnabled() { return bypassVoltage; }
     @Override public boolean isConditionBypassEnabled() { return bypassConditions; }
     @Override public long getBypassVoltage() { return getTierVoltage(energyTier); }
@@ -589,6 +595,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         tag.putBoolean("BypassChance", bypassChance);
         tag.putBoolean("BypassTemperature", bypassTemperature);
         tag.putBoolean("ThreadEnabled", threadEnabled);
+        tag.putBoolean("BatchEnabled", batchEnabled);
         tag.putLong("ThreadCount", threadCount);
         tag.putLong("ThreadMax", threadMax);
         tag.putBoolean("OutputMultiplierEnabled", outputMultiplierEnabled);
@@ -622,6 +629,9 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         }
         if (tag.contains("BypassResearch")) {
             bypassResearch = tag.getBoolean("BypassResearch");
+        }
+        if (tag.contains("BatchEnabled")) {
+            batchEnabled = tag.getBoolean("BatchEnabled");
         }
         if (tag.contains("BypassChance")) {
             bypassChance = tag.getBoolean("BypassChance");
@@ -720,6 +730,9 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
                     break;
                 case "bypass_temp":
                     bypassTemperature = !bypassTemperature;
+                    break;
+                case "batch_toggle":
+                    batchEnabled = !batchEnabled;
                     break;
                 case "volt_up":
                     if (energyTier < 15) energyTier++;
@@ -964,6 +977,11 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         tempLine.append(ComponentPanelWidget.withButton(
                 Component.literal(bypassTemperature ? "§c[关]" : "§a[开]"), "bypass_temp"));
         list.add(tempLine);
+        // 批处理（<20t 配方合并为 ≥20t，功率产出不变，省每秒配方结算次数）
+        var batchLine = Component.literal(" §7批处理: " + (batchEnabled ? "§a●开" : "§8○关") + "  ");
+        batchLine.append(ComponentPanelWidget.withButton(
+                Component.literal(batchEnabled ? "§c[关]" : "§a[开]"), "batch_toggle"));
+        list.add(batchLine);
         // 配方概率
         if (isChanceBypassUnlocked()) {
             var chLine = Component.literal(" §7配方概率: " + (bypassChance ? "§a●开" : "§8○关") + "  ");

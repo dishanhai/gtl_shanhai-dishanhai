@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.client.config;
 
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.RecipeTypePatternSwitchMode;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.SphereStyleOverride;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.VirtualProviderMode;
 
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
@@ -105,6 +106,15 @@ public final class DShanhaiConfigScreen {
                         "⚠ 无限盘/ExtendedAE 库存闪烁、下单误报“材料不足”时请关闭此项",
                         "改动后需重进存档生效"))
                 .setSaveConsumer(cfg.aeStorageDeltaCacheEnabled::set).build());
+        machine.addEntry(e.startEnumSelector(Component.literal("原始终焉引擎球体渲染风格"),
+                        SphereStyleOverride.class, cfg.primordialSphereStyle.get())
+                .setDefaultValue(SphereStyleOverride.FOLLOW_MACHINE)
+                .setTooltip(tip("FOLLOW_MACHINE=跟随每台机器 GUI 侧栏的切换按钮（默认）",
+                        "UNIVERSE=强制全部渲染成鸿蒙微型宇宙",
+                        "NEUTRON_STAR=强制全部渲染成中子星",
+                        "纯客户端显示偏好：只影响你自己看到的画面，不改写机器状态，也不影响其他玩家",
+                        "保存后即时生效，无需重进存档"))
+                .setSaveConsumer(cfg.primordialSphereStyle::set).build());
 
         // ===== 虚拟物品提供器 =====
         ConfigCategory vip = builder.getOrCreateCategory(Component.literal("虚拟物品提供器"));

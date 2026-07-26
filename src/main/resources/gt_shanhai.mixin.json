@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_17",
   "mixins": [
     "DShanhaiAutoPowerRegistryMixin",
+    "DShanhaiBatchPartMixin",
     "ParallelProviderOverrideMixin",
     "MaintenanceBypassMixin",
     "GravityConditionMaintenanceMixin",
@@ -85,6 +86,7 @@
     "CraftingTreeProcessVirtualPresenceMixin",
     "CraftingPlanVirtualMarkerMixins$Entry",
     "CraftingPlanVirtualMarkerMixins$Summary",
+    "CraftConfirmMenuOverflowGuardMixin",
     "CraftingCpuHelperVirtualPatternInputsMixin",
     "CraftingCpuLogicVirtualPresenceMixin",
     "AeUtilsVirtualPatternInputsMixin",
@@ -140,6 +142,7 @@
     "EaepGtlCoreUploadButtonLayoutMixin",
     "CraftingStatusTableRendererTooltipMixin",
     "CraftConfirmTableRendererVirtualMarkerMixin",
+    "CraftConfirmScreenOverflowGuardMixin",
     "CraftingCPUScreenPatternSourceMixin",
     "CraftingCPUScreenRedispatchMixin",
     "AEBaseScreenPatternSourceClickMixin",
