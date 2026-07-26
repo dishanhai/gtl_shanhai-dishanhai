@@ -8,7 +8,6 @@ import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.side.item.IItemTransfer;
-import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 
 import net.minecraft.network.chat.Component;
 
@@ -32,7 +31,8 @@ public final class CachedPatternPaginationUIManager {
     private final Function<Integer, Boolean> isCached;
     private final IntConsumer onPatternChange;
 
-    @DescSynced
+    // 注意：本类不是机器的 managed field holder，LDLib 不会扫描这里的同步注解——
+    // 页码只在各端本地维护，槽位内容本身由 patternInventory 的同步机制保证一致。
     private int currentPageIndex;
 
     private WidgetGroup paginationUI;
