@@ -125,13 +125,14 @@ item_ids:
 星律样板总成默认使用 9×6×3 配置。如果需要修改：
 
 ```
-需要配置项名称来自 DShanhaiConfig.java
-- DShanhaiConfig.RECIPE_TYPE_PATTERN_BUFFER_PATTERN_PER_ROW（默认 9）
-- DShanhaiConfig.RECIPE_TYPE_PATTERN_BUFFER_ROWS_PER_PAGE（默认 6）
-- DShanhaiConfig.RECIPE_TYPE_PATTERN_BUFFER_MAX_PAGES（默认 3）
+配置文件 gt_shanhai-common.toml 的 recipe_type_pattern_buffer 段：
+- patternsPerRow（默认 9）
+- rowsPerPage（默认 6）
+- maxPages（默认 3）
 ```
 
-在 Minecraft config 目录编辑配置文件后重启游戏，新放置的星律样板总成即采用新配置。
+在 Minecraft config 目录编辑配置文件后重启游戏。**已放置的总成也会在下次区块加载时采用新配置**；
+调小配置会裁剪槽位，被裁槽位里的样板会掉落在机器位置（内部缓冲料无法保留），改小前请先清空高位槽的样板。
 
 </Column>
 

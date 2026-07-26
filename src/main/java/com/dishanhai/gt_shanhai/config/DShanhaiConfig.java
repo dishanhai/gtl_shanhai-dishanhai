@@ -199,16 +199,17 @@ public final class DShanhaiConfig {
                     .define("allowUnsupportedHostRecipeTypes", false);
             recipeTypePatternsPerRow = builder
                     .comment("星律样板总成 UI 每行样板槽位数（默认 9）",
-                             "修改后需重新放置总成生效")
+                             "修改后重启生效：已放置的总成在下次区块加载时即采用新配置",
+                             "调小会裁剪槽位——被裁槽位里的样板会掉落在机器位置，内部缓冲料无法保留，改小前请先清空高位槽")
                     .defineInRange("patternsPerRow", 9, 1, 16);
             recipeTypeRowsPerPage = builder
                     .comment("星律样板总成 UI 每页行数（默认 6）",
-                             "修改后需重新放置总成生效")
+                             "生效方式与裁剪风险同 patternsPerRow")
                     .defineInRange("rowsPerPage", 6, 1, 16);
             recipeTypeMaxPages = builder
                     .comment("星律样板总成最大页数（默认 3）",
                              "总槽位 = patternsPerRow × rowsPerPage × maxPages",
-                             "修改后需重新放置总成生效")
+                             "生效方式与裁剪风险同 patternsPerRow")
                     .defineInRange("maxPages", 3, 1, 64);
             patternVirtualSupplyBatchParallel = builder
                     .comment("样板虚拟供料（首配路径）单个样板槽位单次从无线 ME 网络真实提取的目标并行批量上限（默认 65536）",
