@@ -1,9 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
-import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine;
+import com.dishanhai.gt_shanhai.common.util.HubMachineHelper;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
-import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
-import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gtladd.gtladditions.common.machine.multiblock.controller.ArcanicAstrograph;
 import org.spongepowered.asm.mixin.Mixin;
@@ -23,7 +21,16 @@ public class ArcanicAstrographHubCompressionMixin {
         if (!(meta instanceof ArcanicAstrograph machine)) {
             return;
         }
-        if (!gtShanhai$hasHub(machine)) {
+        // 节流必须放在 hasHub 之前：hasHub 要完整遍历 getParts()，而本方法挂在 MetaMachine#serverTick
+        // 上，原先每 tick 都扫一遍。两个工作间隔是 10 与 600，600 % 10 == 0，所以用 10 做统一闸门
+        // 不会漏掉 finishCompression 的时机。
+        // 行为差异：工作被关闭时 resetCompression 由每 tick 一次变为每 10 tick 一次——它本身是幂等复位，
+        // 且压缩推进本来就只发生在 %10 的 tick 上，不影响结果。
+        long timer = machine.getOffsetTimer();
+        if (timer % GT_SHANHAI_COMPRESSION_COLLECT_INTERVAL != 0L) {
+            return;
+        }
+        if (!HubMachineHelper.hasHub(machine)) {
             return;
         }
         RecipeLogic logic = machine.getRecipeLogic();
@@ -32,26 +39,9 @@ public class ArcanicAstrographHubCompressionMixin {
             return;
         }
 
-        long timer = machine.getOffsetTimer();
-        if (timer % GT_SHANHAI_COMPRESSION_COLLECT_INTERVAL == 0L) {
-            machine.getAstralArrayCompression().handleCompressionWorking();
-        }
+        machine.getAstralArrayCompression().handleCompressionWorking();
         if (timer % GT_SHANHAI_COMPRESSION_FINISH_INTERVAL == 0L) {
             machine.getAstralArrayCompression().finishCompression();
         }
-    }
-
-    private static boolean gtShanhai$hasHub(IMultiController controller) {
-        try {
-            if (controller == null || !controller.isFormed()) {
-                return false;
-            }
-            for (IMultiPart part : controller.getParts()) {
-                if (part instanceof DShanhaiMaintenanceHatchMachine) {
-                    return true;
-                }
-            }
-        } catch (Exception ignored) {}
-        return false;
     }
 }

@@ -1,15 +1,10 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.api.machine.part.IMaintenanceBypassPart;
-import com.gregtechceu.gtceu.api.capability.IParallelHatch;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
-import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
-import com.gtladd.gtladditions.api.machine.feature.IThreadModifierPart;
 import org.gtlcore.gtlcore.common.machine.multiblock.noenergy.NeutronActivatorMachine;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.gen.Accessor;
@@ -34,8 +29,6 @@ public final class NeutronActivatorMixins {
 
     @Mixin(value = NeutronActivatorMachine.class, remap = false)
     public static class Controller {
-
-        private static final Logger LOG = LoggerFactory.getLogger("gt_shanhai:neutron");
 
         @Shadow
         private int eV;
@@ -69,43 +62,14 @@ public final class NeutronActivatorMixins {
             }
         }
 
-        @Inject(method = "working", at = @At("HEAD"), cancellable = true, remap = false)
-        private void gtShanhai$bypassEv(CallbackInfoReturnable<Boolean> cir) {
-            if ((Object) this instanceof IMultiController controller && IMaintenanceBypassPart.anyVoltageBypassEnabled(controller)) {
-                cir.setReturnValue(true);
-            }
-        }
-
-        @Inject(method = "getMaxParallel", at = @At("RETURN"), cancellable = true)
-        private void gtShanhai$boostNeutronParallel(CallbackInfoReturnable<Integer> cir) {
-            try {
-                if (!((Object) this instanceof IMultiController controller)) return;
-                if (!controller.isFormed()) return;
-
-                long hatchParallel = 0;
-                long threadExtra = 0;
-                for (IMultiPart part : controller.getParts()) {
-                    if (part instanceof IParallelHatch hatch) {
-                        int parallel = hatch.getCurrentParallel();
-                        if (parallel > 0) hatchParallel += parallel;
-                    }
-                    if (part instanceof IThreadModifierPart threadModifier) {
-                        int threads = threadModifier.getThreadCount();
-                        if (threads > 0) threadExtra += threads - 1;
-                    }
-                }
-
-                if (hatchParallel > 0) {
-                    long threads = Math.max(0, threadExtra) + 1;
-                    long effective = hatchParallel * threads;
-                    int result = effective > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) effective;
-                    cir.setReturnValue(result);
-                    LOG.info("[boostNeutronParallel] original={} hatch={} threads={} → {} (×线程)",
-                            cir.getReturnValue(), hatchParallel, threads, result);
-                }
-            } catch (Exception e) {
-                LOG.error("[boostNeutronParallel] 异常", e);
-            }
-        }
+        // 这里曾有 gtShanhai$bypassEv(method="working") 与 gtShanhai$boostNeutronParallel(method="getMaxParallel")，
+        // 两个注入目标在 NeutronActivatorMachine 上**都不存在**——该类只有 onWorking()，并且完全没有
+        // getMaxParallel()（javap/反编译源均确认）。由于 gt_shanhai.mixin.json 未设置 injectors.defaultRequire，
+        // 二者只是静默失效，从未生效过，已删除。对应能力其实早有正确的落点：
+        //   · eV 门槛：recipeModifier 要求 ev_min < eV < ev_max，上面的 gtShanhai$adjustEvForRecipe
+        //     已在其 HEAD 把 eV 调进区间，配合 gtShanhai$maintainEv 兜底；
+        //   · 并行：NeutronActivatorMachine#recipeModifier 走的是
+        //     GTRecipeModifiers.accurateParallel(..., GTLRecipeModifiers.getHatchParallel(nMachine), false)，
+        //     已被 AccurateParallelOverrideMixin 覆盖，且枢纽实现了 IParallelHatch 本就会被 getHatchParallel 计入。
     }
 }

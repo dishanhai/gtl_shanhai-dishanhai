@@ -60,6 +60,14 @@ public enum ModuleBaseInfoProvider implements IBlockComponentProvider, IServerDa
             // 主机连接
             tag.putBoolean("hostConnected", mod.isHostConnected());
 
+            // 产出倍率（主机聚合万物增殖核心，1 倍时不写，客户端少一行噪音）
+            int outputMultiplier = mod.getHostOutputMultiplier();
+            if (outputMultiplier > 1) tag.putInt("outputMultiplier", outputMultiplier);
+
+            // 无线电网余额：服务端读 gtmthings 账本，格式化后再下发，避免把巨大 BigInteger 塞进网络包
+            java.math.BigInteger gridEu = mod.getWirelessGridEnergy();
+            if (gridEu != null) tag.putString("gridEu", formatBigSafe(gridEu));
+
             // 独立模式
             tag.putBoolean("canWorkAlone", mod.canWorkWithoutHost());
 
@@ -122,10 +130,38 @@ public enum ModuleBaseInfoProvider implements IBlockComponentProvider, IServerDa
             tooltip.add(helper.text(Component.literal("§d超稳态黑洞种子: §f输出堵塞时吞噬溢出产物")));
         }
 
+        // 产出倍率（万物增殖核心）
+        int outputMultiplier = data.getInt("outputMultiplier");
+        if (outputMultiplier > 1) {
+            tooltip.add(helper.text(Component.literal("§6产出倍率: §f×" + outputMultiplier)));
+        }
+
+        // 电网电力详情
+        if (data.contains("gridEu")) {
+            tooltip.add(helper.text(Component.literal("§3电网能源总量: §b" + data.getString("gridEu") + " EU")));
+        }
+
         // 条件错误
         if (data.contains("condErr")) {
             tooltip.add(helper.text(Component.literal(data.getString("condErr"))));
         }
+    }
+
+    /**
+     * 安全格式化电网余额。绝不对巨大 BigInteger 直接调 toString()：零点能发生器灌满后十进制
+     * 位数可达千万级，toString() 是 O(n log n) 起步的高开销转换，Jade 每次刷新都调一次会卡 tick。
+     * 这里用廉价的 bitLength() + 高 64 位取尾数换算科学计数法。
+     */
+    private static String formatBigSafe(java.math.BigInteger value) {
+        if (value == null || value.signum() <= 0) return "0";
+        int bits = value.bitLength();
+        if (bits <= 62) return formatNum(value.longValue());
+        double mantissa = value.shiftRight(bits - 64).doubleValue();
+        double log10 = Math.log10(mantissa) + (bits - 64) * 0.30102999566398120;
+        int exp = (int) Math.floor(log10);
+        double lead = Math.pow(10.0, log10 - exp);
+        if (lead >= 10.0) { lead /= 10.0; exp++; }
+        return String.format("%.2fE%d", lead, exp);
     }
 
     private static String formatNum(long n) {

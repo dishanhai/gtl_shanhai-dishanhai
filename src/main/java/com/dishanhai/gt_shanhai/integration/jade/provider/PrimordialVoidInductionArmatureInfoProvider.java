@@ -45,6 +45,10 @@ public enum PrimordialVoidInductionArmatureInfoProvider implements IBlockCompone
             tag.putString("euPerCycle", formatBig(armature.getGeneratedEuPerCycle()));
             tag.putLong("threadBoost", armature.getThreadBoost());
 
+            // 无线电网余额：本机就是往这份账本里注能的，显示注入前后的实时总量
+            java.math.BigInteger gridEu = armature.getWirelessGridEnergy();
+            if (gridEu != null) tag.putString("gridEu", formatBig(gridEu));
+
             String moduleName = armature.getModuleDisplayName();
             if (moduleName != null) {
                 tag.putString("moduleName", moduleName);
@@ -98,6 +102,10 @@ public enum PrimordialVoidInductionArmatureInfoProvider implements IBlockCompone
             tooltip.add(helper.text(Component.literal("§d◆ 单周期产能: §f" + data.getString("euPerCycle") + " EU")));
         }
 
+        if (data.contains("gridEu")) {
+            tooltip.add(helper.text(Component.literal("§3◆ 电网能源总量: §b" + data.getString("gridEu") + " EU")));
+        }
+
         long threadBoost = data.getLong("threadBoost");
         if (threadBoost > 0) {
             tooltip.add(helper.text(Component.literal("§5◆ 跨配方线程: §f" + formatLong(threadBoost))));
@@ -140,10 +148,15 @@ public enum PrimordialVoidInductionArmatureInfoProvider implements IBlockCompone
         // toString() 是 O(n log n) 起步的高开销转换，Jade 每次悬停刷新都会调一次，直接卡死 tick。
         // bitLength() 是廉价的位扫描，用它估算十进制位数（bitLength × log10(2)）来判断走哪条分支。
         int bitLength = value.bitLength();
-        if (bitLength > 63) {
-            long digits = (long) (bitLength * 0.3010299956639812) + 1;
-            return "1.0E" + (digits - 1);
+        if (bitLength > 62) {
+            // 取高 64 位当尾数换算科学计数法，比只报位数（尾数恒为 1.0）精确得多，代价仍是 O(1)
+            double mantissa = value.shiftRight(bitLength - 64).doubleValue();
+            double log10 = Math.log10(mantissa) + (bitLength - 64) * 0.3010299956639812;
+            int exp = (int) Math.floor(log10);
+            double lead = Math.pow(10.0, log10 - exp);
+            if (lead >= 10.0) { lead /= 10.0; exp++; }
+            return String.format("%.2fE%d", lead, exp);
         }
-        return value.toString();
+        return formatLong(value.longValue());
     }
 }

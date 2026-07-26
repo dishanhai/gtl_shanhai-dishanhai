@@ -55,13 +55,18 @@ final class EditorWidgets {
         }
     }
 
-    /** 流体槽：棋盘底 + 青色覆层 + 名字首字，数量另在槽下标注（Forge 下 getAmount() 即 mB）。 */
+    /**
+     * 流体槽：棋盘底 + 真实流体材质（图集 sprite + tint，同 {@link #fluidIcon}/商店详情页画法）。
+     * sprite 拿不到（个别流体没注册 still 贴图）时才退回旧的青色覆层 + 名字前 3 字占位——
+     * 旧版无条件画占位，编辑页所有流体都成了「rub/ytt」棋盘格，与商店页显示对不上。
+     */
     static void fluidSlot(GuiGraphics g, Font font, int x, int y, FluidStack fs, boolean hover) {
         checkerSlot(g, x, y, hover);
         if (fs != null && !fs.isEmpty()) {
-            g.fill(x + 2, y + 2, x + 18, y + 18, FLUID_TINT);
-            String tag = fluidShort(fs);
-            g.drawString(font, tag, x + 2, y + 7, -1, true);
+            if (!fluidIcon(g, x + 2, y + 2, 16, fs.getFluid())) {
+                g.fill(x + 2, y + 2, x + 18, y + 18, FLUID_TINT);
+                g.drawString(font, fluidShort(fs), x + 2, y + 7, -1, true);
+            }
         }
     }
 
@@ -210,13 +215,13 @@ final class EditorWidgets {
         return new TexInfo(frameW, frameH, imgW, imgH, frameOrder, frameTicks, interpolate);
     }
 
-    /** 渲染流体真实静态贴图（Forge 图集 sprite + tint），失败静默。供多选选择器网格/清单用。 */
-    static void fluidIcon(GuiGraphics g, int x, int y, int size, net.minecraft.world.level.material.Fluid fluid) {
-        if (fluid == null) return;
+    /** 渲染流体真实静态贴图（Forge 图集 sprite + tint），返回是否成功（失败静默，调用方可退占位画法）。供多选选择器网格/清单与编辑器槽位用。 */
+    static boolean fluidIcon(GuiGraphics g, int x, int y, int size, net.minecraft.world.level.material.Fluid fluid) {
+        if (fluid == null) return false;
         try {
             var ext = net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions.of(fluid);
             ResourceLocation still = ext.getStillTexture();
-            if (still == null) return;
+            if (still == null) return false;
             net.minecraft.client.renderer.texture.TextureAtlasSprite sprite = net.minecraft.client.Minecraft.getInstance()
                     .getTextureAtlas(net.minecraft.world.inventory.InventoryMenu.BLOCK_ATLAS).apply(still);
             int tint = ext.getTintColor();
@@ -228,7 +233,8 @@ final class EditorWidgets {
             g.blit(x, y, 0, size, size, sprite);
             com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
             com.mojang.blaze3d.systems.RenderSystem.disableBlend();
-        } catch (Exception ignored) {}
+            return true;
+        } catch (Exception ignored) { return false; }
     }
 
     /**

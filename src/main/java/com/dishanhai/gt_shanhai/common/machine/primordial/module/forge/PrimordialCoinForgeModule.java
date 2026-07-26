@@ -162,9 +162,7 @@ public class PrimordialCoinForgeModule extends PrimordialOmegaEngineModuleBase {
     @Override
     protected void addParallelDisplay(List<Component> textList) {
         var stack = machineStorage.storage.getStackInSlot(0);
-        var itemName = stack.isEmpty()
-            ? Component.translatable("gt_shanhai.machine.module_slot.empty").withStyle(ChatFormatting.GRAY)
-            : stack.getHoverName().copy().withStyle(ChatFormatting.AQUA);
+        var itemName = moduleSlotItemName(stack);
 
         textList.add(Component.literal("")
             .append(DShanhaiTextUtil.createElectricText("已安装: "))

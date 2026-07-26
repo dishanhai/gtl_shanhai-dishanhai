@@ -9,16 +9,10 @@ import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 
-import com.dishanhai.gt_shanhai.api.machine.part.IMaintenanceBypassPart;
 import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 
 import com.gregtechceu.gtceu.api.recipe.content.ContentModifier;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import org.gtlcore.gtlcore.common.machine.multiblock.part.maintenance.IAutoConfigurationMaintenanceHatch;
 
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -33,42 +27,36 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * 注意：不使用 @Shadow 访问 GTRecipe 字段（可能有 final 泛型字段 Shadow 绑定问题），
  * 而是通过方法参数 recipe 直接访问其 public 字段。
  */
-@Mixin(value = RecipeLogic.class, remap = false)
+// priority 必须高于 gtlcore RecipeLogicMixin(默认 1000)：其对 setupRecipe / handleSearchingRecipes /
+// checkMatchedRecipeAvailable / findAndHandleRecipe 全部是 @Overwrite，同优先级时应用顺序不定——
+// 山海先应用则注入落在 GTCEu 原方法体上、随后被整体替换掉，表现为「枢纽插上去完全不生效」且无任何日志。
+// 显式 1500 保证落在改写后的方法体上。与 NativeVirtualFindHandleRecipeMixin 保持一致。
+@Mixin(value = RecipeLogic.class, priority = 1500, remap = false)
 public class MaintenanceBypassRecipeMixin {
-
-    private static final Logger LOG = LoggerFactory.getLogger("gt_shanhai:mixin");
 
     @Shadow
     @Final
     public com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine machine;
 
-    // ========== checkMatchedRecipeAvailable：匹配前清除 EU，解除电压等级限制 ==========
-
-    @Inject(method = "checkMatchedRecipeAvailable", at = @At("HEAD"))
-    private void gtShanhai$stripEUBeforeMatch(GTRecipe recipe, CallbackInfoReturnable<Boolean> cir) {
-        if (!DShanhaiConfig.COMMON.maintenanceHatchEnabled.get()) return;
-
-        try {
-            DShanhaiMaintenanceHatchMachine hatch = gtShanhai$getHatch();
-            if (hatch == null || !hatch.isVoltageBypassEnabled()) return;
-
-            boolean hasEU = recipe.inputs.containsKey(EURecipeCapability.CAP)
-                    || recipe.tickInputs.containsKey(EURecipeCapability.CAP);
-            recipe.inputs.remove(EURecipeCapability.CAP);
-            recipe.tickInputs.remove(EURecipeCapability.CAP);
-            recipe.tickInputs.remove(CWURecipeCapability.CAP);
-            if (hasEU) {
-                LOG.info("[山海] stripEU: 已清除EU, recipe=" + recipe.hashCode());
-            }
-        } catch (Exception e) {
-            LOG.info("[山海] stripEU异常: " + e.getClass().getSimpleName() + " " + e.getMessage());
-        }
-    }
+    // ========== 关于「匹配前清除 EU」：绝不能在 checkMatchedRecipeAvailable 的 HEAD 做 ==========
+    //
+    // 这里曾有一个 gtShanhai$stripEUBeforeMatch，注入 checkMatchedRecipeAvailable 的 @At("HEAD")
+    // 并直接 recipe.inputs.remove(EURecipeCapability.CAP)。那是错的，会永久污染全局配方注册表：
+    //
+    //   gtlcore RecipeLogicMixin#checkMatchedRecipeAvailable(GTRecipe match) {
+    //       GTRecipe modified = this.machine.fullModifyRecipe(match.copy(), ...);   // copy 在方法体内
+    //   }
+    //
+    // copy() 发生在方法体内，@At("HEAD") 跑在它之前，拿到的 match 就是 RecipeIterator 从查找树里
+    // 直接吐出来的注册表实例（gtlcore$searchRecipe 与 RecipeIterator#next 全程无 copy）。
+    // 于是机器每搜索一轮，所有候选配方的 EU/算力需求就被永久删掉一批，波及全服所有同类机器与 JEI，
+    // 只有 /reload 或重启才能恢复。
+    //
+    // 正确做法已经存在：VoltageBypassMixin 注入 WorkableMultiblockMachine#doModifyRecipe 的 HEAD，
+    // 对 fullModifyRecipe 传进去的**副本**做完全相同的三行剥除。而 checkMatchedRecipeAvailable 的
+    // HEAD 与 fullModifyRecipe 之间没有任何其它语句，两处时机对结果等价——所以这里不需要任何注入。
 
     // ========== setupRecipe：免去 EU 消耗和应用可调耗时倍率 ==========
-
-    /** ThreadLocal 传递枢纽计算的目标耗时，供 TAIL 注入覆写 gtlcore 的倍率 */
-    private static final ThreadLocal<Integer> HUB_TARGET_DURATION = new ThreadLocal<>();
 
     @Inject(method = "setupRecipe", at = @At("HEAD"))
     private void gtShanhai$bypassRecipe(GTRecipe recipe, CallbackInfo ci) {
@@ -87,7 +75,6 @@ public class MaintenanceBypassRecipeMixin {
             if (multiplier != 1.0f) {
                 recipe.duration = Math.max(1, (int) (recipe.duration * multiplier));
             }
-            HUB_TARGET_DURATION.set(recipe.duration);
 
             // 清除 EU/CWU 消耗（受电压开关控制）
             if (hatch.isVoltageBypassEnabled()) {
@@ -116,15 +103,16 @@ public class MaintenanceBypassRecipeMixin {
         } catch (Exception ignored) {}
     }
 
-    /** TAIL 注入：在所有 setupRecipe 逻辑完成后覆写 duration */
-    @Inject(method = "setupRecipe", at = @At(value = "RETURN", ordinal = 0))
-    private void gtShanhai$forceHubDuration(GTRecipe recipe, CallbackInfo ci) {
-        Integer target = HUB_TARGET_DURATION.get();
-        HUB_TARGET_DURATION.remove();
-        if (target != null && target > 0) {
-            recipe.duration = target;
-        }
-    }
+    // 这里曾有一个 gtShanhai$forceHubDuration，注入 setupRecipe 的 @At(value="RETURN", ordinal=0)，
+    // 试图在 gtlcore 改完 duration 后再覆写回枢纽的目标值。三个问题，已整体移除：
+    //   1. gtlcore 覆写后的 setupRecipe 有两个 RETURN，ordinal=0 指的是字节码顺序第一个——
+    //      即 beforeWorking() 失败的提早返回分支，正常成功路径永远不会执行到这个 handler。
+    //   2. 因此 HUB_TARGET_DURATION.remove() 在成功路径上从不调用，ThreadLocal 常驻主线程；
+    //      等到某台机器 beforeWorking 失败触发本 handler 时，读到的是另一台无关机器的残留值。
+    //   3. 即便改成 ordinal=1，gtlcore 的 this.duration = recipe.duration 也已在 if 块内赋值完毕，
+    //      事后再改 recipe.duration 影响不到 this.duration。
+    // 倍率已在上面 HEAD 注入里写进 recipe.duration，gtlcore 的 this.duration = recipe.duration
+    // 自然会读到，无需事后覆写。
 
     /**
      * 从机器部件中查找天球分歧引擎（IThreadModifierPart）的线程数。
@@ -218,30 +206,6 @@ public class MaintenanceBypassRecipeMixin {
 
     // ========== 辅助：检测多方块主机是否安装了维护仓 ==========
 
-    private int bypassLogSkip = 0;
-
-    private boolean gtShanhai$hasBypassPart() {
-        try {
-            var metaMachine = (MetaMachine) ((IMachineFeature) machine).self();
-            if (!(metaMachine instanceof IMultiController controller)) return false;
-            if (!controller.isFormed()) return false;
-
-            for (IMultiPart part : controller.getParts()) {
-                if (part instanceof DShanhaiMaintenanceHatchMachine) {
-                    if (++bypassLogSkip % 10 == 0) {
-                        LOG.info("[山海] 找到维护仓! controller="
-                                + controller.getClass().getSimpleName()
-                                + " parts=" + controller.getParts().size());
-                    }
-                    return true;
-                }
-            }
-        } catch (Exception e) {
-            LOG.info("[山海] hasBypassPart异常: " + e.getClass().getSimpleName());
-        }
-        return false;
-    }
-
     private DShanhaiMaintenanceHatchMachine gtShanhai$getHatch() {
         try {
             var metaMachine = (MetaMachine) ((IMachineFeature) machine).self();
@@ -254,33 +218,4 @@ public class MaintenanceBypassRecipeMixin {
         return null;
     }
 
-    /**
-     * 从维护仓读取可调耗时倍率，默认 1.0（不影响原耗时）
-     */
-    private float gtShanhai$getDurationMultiplier() {
-        DShanhaiMaintenanceHatchMachine hatch = gtShanhai$getHatch();
-        if (hatch != null) return hatch.getDurationMultiplier();
-        return 1.0f;
-    }
-
-    /**
-     * 从维护仓读取产出倍率（创造模块/大反冲解锁），默认 1.0。
-     * 矩阵上固定将自带的 15x 覆写为 20x（乘 20/15，不叠加）。
-     */
-    private float gtShanhai$getOutputMultiplier() {
-        DShanhaiMaintenanceHatchMachine hatch = gtShanhai$getHatch();
-        if (hatch == null) return 1.0f;
-        float baseMul = hatch.getOutputMultiplier();
-        if (baseMul <= 1.0f) return 1.0f;
-        // 矩阵上：15x 自带倍率 → 覆写为 20x（不叠加）
-        if (gtShanhai$getHatch() != null) {
-            try {
-                var metaMachine = (MetaMachine) ((IMachineFeature) machine).self();
-                if (metaMachine instanceof com.dishanhai.gt_shanhai.common.machine.spacetime.SpacetimeWaveMatrixMachine) {
-                    return 20.0f / 15.0f;
-                }
-            } catch (Exception ignored) {}
-        }
-        return baseMul;
-    }
 }

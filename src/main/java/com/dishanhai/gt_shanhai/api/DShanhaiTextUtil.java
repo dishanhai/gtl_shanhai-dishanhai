@@ -700,6 +700,33 @@ public class DShanhaiTextUtil {
         return createUltimateRainbow(text);
     }
 
+    /** 字符串版 FCS 剥离：文本含 &$theme- 码时返回净文本，否则原样返回。
+     *  判定以「解析出 $ 主题名」为准，避免误剥普通含 &/- 的文本（如 "R&D-x"）。 */
+    public static String stripFcsString(String raw) {
+        if (raw == null || raw.isEmpty() || !TextFormatParser.containsSpecialFormatting(raw)) return raw;
+        TextFormatParser.ParseResult pr = TextFormatParser.parseFormatting(raw);
+        if (pr.flags != null && pr.flags.gradientTheme != null && !pr.cleanText.isEmpty()) {
+            return pr.cleanText;
+        }
+        return raw;
+    }
+
+    /** 物品悬浮名 FCS 剥离：名字含 &$theme- 码时返回净文本并按主题色板逐字重新上色。
+     *  直接把 getHoverName() 塞进显示面板会让 wrapComponents 按含幽灵字符的胖宽度断行，
+     *  渲染层剥码后实际画瘦文本，两套宽度打架导致错行/溢出。
+     *  无 & 码或解析不出主题时返回原名（套 fallback 颜色）。 */
+    public static Component stripFcsName(Component name, ChatFormatting fallback) {
+        if (name == null) return Component.literal("");
+        String raw = name.getString();
+        if (TextFormatParser.containsSpecialFormatting(raw)) {
+            TextFormatParser.ParseResult pr = TextFormatParser.parseFormatting(raw);
+            if (pr.flags != null && pr.flags.gradientTheme != null && !pr.cleanText.isEmpty()) {
+                return createStyled(pr.cleanText, pr.flags.gradientTheme);
+            }
+        }
+        return fallback != null ? name.copy().withStyle(fallback) : name.copy();
+    }
+
     // ========== 呼吸动画 ==========
 
     private static Component perCharGradientRGBBreathe(String text, int[] rgb, boolean isBody) {

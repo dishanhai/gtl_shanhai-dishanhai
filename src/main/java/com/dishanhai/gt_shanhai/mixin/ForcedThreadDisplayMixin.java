@@ -13,13 +13,6 @@ import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 
-import net.minecraft.network.chat.Component;
-
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-
 import java.util.List;
 
 /**

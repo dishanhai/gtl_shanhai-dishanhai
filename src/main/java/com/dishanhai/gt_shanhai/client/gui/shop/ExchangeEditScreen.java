@@ -269,7 +269,7 @@ public class ExchangeEditScreen extends ScaledScreen {
             if (GuiRenderUtil.isHovering(mx, my, x, iy, SLOT, SLOT)) {
                 capture();
                 Minecraft.getInstance().setScreen(new MultiPickerScreen(this, false,
-                        st -> { if (st != null && !st.isEmpty() && side.items.size() < ITEM_MAX) side.items.add(st); },
+                        (st, cnt) -> { if (st != null && !st.isEmpty() && side.items.size() < ITEM_MAX) side.items.add(st); },
                         fs -> {}));
                 return true;
             }
@@ -290,7 +290,7 @@ public class ExchangeEditScreen extends ScaledScreen {
             if (GuiRenderUtil.isHovering(mx, my, x, fy, SLOT, SLOT)) {
                 capture();
                 Minecraft.getInstance().setScreen(new MultiPickerScreen(this, true,
-                        st -> {},
+                        (st, cnt) -> {},
                         fs -> { if (fs != null && !fs.isEmpty() && side.fluids.size() < FLUID_MAX) side.fluids.add(fs); }));
                 return true;
             }

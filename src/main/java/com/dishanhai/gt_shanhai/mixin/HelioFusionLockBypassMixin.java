@@ -1,10 +1,9 @@
 package com.dishanhai.gt_shanhai.mixin;
 
-import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiMaintenanceHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ProgrammableHatchPartMachine;
+import com.dishanhai.gt_shanhai.common.util.HubMachineHelper;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
-import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gtladd.gtladditions.api.machine.logic.GTLAddMultipleWirelessRecipesLogic;
 import com.gtladd.gtladditions.common.machine.multiblock.controller.ForgeOfTheAntichrist;
@@ -108,10 +107,10 @@ public class HelioFusionLockBypassMixin {
         try {
             var machine = (HelioFusionExoticizer) ((GTLAddMultipleWirelessRecipesLogic) (Object) this).getMachine();
             Object rawHost = machine.getHost();
+            // 走 HubMachineHelper 而非本地再抄一遍遍历：配置开关 maintenance_hatch.enabled
+            // 收在那里统一生效，此前这里漏读，管理员关掉开关后太虚锻炉仍然不锁定配方。
             if (rawHost instanceof ForgeOfTheAntichrist host) {
-                for (IMultiPart part : host.getParts()) {
-                    if (part instanceof DShanhaiMaintenanceHatchMachine) return true;
-                }
+                return HubMachineHelper.hasHub(host);
             }
         } catch (Exception ignored) {}
         return false;

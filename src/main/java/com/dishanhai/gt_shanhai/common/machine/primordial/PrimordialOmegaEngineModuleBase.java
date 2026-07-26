@@ -89,6 +89,20 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     private static final int EXTRA_MOUNT_ANNIHILATION = 2;
     private static final int EXTRA_MOUNT_BLACK_HOLE_SEED = 4;
 
+    /** gtmthings 无线电网账本查询方法，类加载时解析一次；gtmthings 缺失时为 null。
+     *  放在静态块里初始化，避免每次显示刷新都走 Class.forName + getMethod 的反射查找。 */
+    private static final java.lang.reflect.Method WIRELESS_GET_USER_EU;
+    static {
+        java.lang.reflect.Method method = null;
+        try {
+            method = Class.forName("com.hepdd.gtmthings.api.misc.WirelessEnergyManager")
+                    .getMethod("getUserEU", UUID.class);
+        } catch (Exception ignored) {
+            // gtmthings 未加载：保持 null，所有调用方安静降级
+        }
+        WIRELESS_GET_USER_EU = method;
+    }
+
     /** KubeJS 可调用：注册线程倍率物品 */
     public static void registerThreadBoostItem(String itemId, long boost) {
         GLOBAL_THREAD_BOOST_IDS.put(itemId, boost);
@@ -276,7 +290,9 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(item);
         cachedModuleItemId = key == null ? null : key.toString();
         cachedModuleLevel = getModuleLevelById(cachedModuleItemId);
-        cachedModuleDisplayName = stack.getHoverName().getString();
+        // 剥离 FCS & 码：原始物品名形如 "&$ultimateRainbow-现实锚点模块"，
+        // 幽灵字符会让显示面板/Jade 按胖宽度断行导致错行溢出
+        cachedModuleDisplayName = DShanhaiTextUtil.stripFcsString(stack.getHoverName().getString());
     }
 
     /** 是否允许脱离主机独立运行 */
@@ -883,6 +899,15 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                 .append(Component.literal(" §7Lv." + level + countStr)));
     }
 
+    /** 模块槽物品名通用显示组件：剥离 FCS & 码后按物品自身主题逐字上色，空槽显示灰色占位。
+     *  供各模块 addParallelDisplay 的「已安装:」行统一调用，替代直塞 getHoverName()。 */
+    protected static Component moduleSlotItemName(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return Component.translatable("gt_shanhai.machine.module_slot.empty").withStyle(ChatFormatting.GRAY);
+        }
+        return DShanhaiTextUtil.stripFcsName(stack.getHoverName(), ChatFormatting.AQUA);
+    }
+
     /** 解析本模块所属的无线能源电网 UUID：优先用主机 UUID（整个原初引擎结构共用同一电网），
      *  没连接主机时退回自己的 UUID。必须和 onWorking() 写入 WirelessEnergyManager 用的
      *  解析逻辑保持一致，否则读到的就不是自己写进去的那份电网。 */
@@ -898,22 +923,30 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
      * 原初系真正的经济体系是 com.hepdd.gtmthings 的 WirelessEnergyManager（UUID 记账的
      * BigInteger 全局电网，见 onWorking()），这里直接读同一份电网余额显示，数值真实会变化。
      */
+    /**
+     * 读取本模块所属无线电网（gtmthings UUID 账本）的当前余额，供 GUI 与 Jade 共用同一份数据。
+     * gtmthings 未加载、UUID 未解析或反射失败时返回 null，调用方直接跳过该行显示。
+     */
+    public java.math.BigInteger getWirelessGridEnergy() {
+        if (WIRELESS_GET_USER_EU == null) return null;
+        UUID uuid = resolveWirelessGridUuid();
+        if (uuid == null) return null;
+        try {
+            Object total = WIRELESS_GET_USER_EU.invoke(null, uuid);
+            return total instanceof java.math.BigInteger bigTotal ? bigTotal : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     @Override
     protected void addEnergyDisplay(List<Component> textList) {
-        UUID uuid = resolveWirelessGridUuid();
-        if (uuid == null) return;
-        try {
-            Class<?> mgr = Class.forName("com.hepdd.gtmthings.api.misc.WirelessEnergyManager");
-            Object total = mgr.getMethod("getUserEU", UUID.class).invoke(null, uuid);
-            if (total instanceof java.math.BigInteger bigTotal) {
-                textList.add(Component.literal("")
-                        .append(DShanhaiTextUtil.createElectricText("电网能源总量: "))
-                        .append(Component.literal(com.gtladd.gtladditions.utils.CommonUtils.formatBigIntegerFixed(bigTotal) + " EU")
-                                .withStyle(ChatFormatting.AQUA)));
-            }
-        } catch (Exception ignored) {
-            // gtmthings 未加载或反射失败：安静跳过，不显示这行，不影响其余信息
-        }
+        java.math.BigInteger total = getWirelessGridEnergy();
+        if (total == null) return;
+        textList.add(Component.literal("")
+                .append(DShanhaiTextUtil.createElectricText("电网能源总量: "))
+                .append(Component.literal(com.gtladd.gtladditions.utils.CommonUtils.formatBigIntegerFixed(total) + " EU")
+                        .withStyle(ChatFormatting.AQUA)));
     }
 
     @Override

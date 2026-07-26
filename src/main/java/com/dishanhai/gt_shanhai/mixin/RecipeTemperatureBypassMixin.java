@@ -15,7 +15,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * RecipeLogic + MultipleRecipesLogic: findAndHandleRecipe 前设 bypass flag
  * searchRecipe 拦截在 SearchRecipeTempMixin 单独处理（因 MultipleRecipesLogic 无此方法）
  */
-@Mixin(value = {RecipeLogic.class, MultipleRecipesLogic.class})
+// priority 1500：gtlcore RecipeLogicMixin(默认 1000) 对 findAndHandleRecipe 是 @Overwrite，
+// 同优先级时应用顺序不定，山海先应用则本注入被整体替换掉、温度绕过静默失效。
+@Mixin(value = {RecipeLogic.class, MultipleRecipesLogic.class}, priority = 1500, remap = false)
 public class RecipeTemperatureBypassMixin {
 
     @Inject(method = "findAndHandleRecipe", at = @At("HEAD"), remap = false)

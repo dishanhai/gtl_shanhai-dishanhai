@@ -36,6 +36,9 @@ public enum PrimordialOmegaEngineInfoProvider implements IBlockComponentProvider
             tag.putBoolean("hasModules", engine.hasModules);
             tag.putInt("moduleCount", engine.getModuleSet().size());
             tag.putBoolean("overdriver", engine.hasOverdriverInstalled());
+            // 产出倍率：主机对全部已连接模块取最大值（万物增殖核心），1 倍时不写
+            int outputMultiplier = engine.getMountedOutputMultiplier();
+            if (outputMultiplier > 1) tag.putInt("outputMultiplier", outputMultiplier);
             data.put("primordialOmegaEngine", tag);
         } catch (Exception ignored) {}
     }
@@ -68,6 +71,11 @@ public enum PrimordialOmegaEngineInfoProvider implements IBlockComponentProvider
 
         if (data.getBoolean("overdriver")) {
             tooltip.add(helper.text(Component.literal("§d◆ 超限模式 · 已激活")));
+        }
+
+        int outputMultiplier = data.getInt("outputMultiplier");
+        if (outputMultiplier > 1) {
+            tooltip.add(helper.text(Component.literal("§6◆ 产出倍率: §f×" + outputMultiplier)));
         }
     }
 }

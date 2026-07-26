@@ -118,7 +118,10 @@ public class MultiPickerScreen extends ScaledScreen {
     }
 
     private final Screen parent;
-    private final Consumer<ItemStack> onAddItem;
+    // 物品确认回调带精确 long 数量：ItemStack.setCount 物理上限是 int，光靠 stack 传数量会把
+    // 100000000000 这类输入悄悄夹成 2147483647（消费方再 getCount() 反推 long 等于白存）。
+    // stack 照旧带 int 夹值（角标/兼容用），需要真实数量的消费方（成本排 List<Long>）读第二参。
+    private final java.util.function.ObjLongConsumer<ItemStack> onAddItem;
     private final Consumer<FluidStack> onAddFluid;
     private final Consumer<ResourceLocation> onAddTexture; // 贴图模式确认回调；非 allowTexture 场景为 null
     private final boolean restrictedMode;         // true = 仅限固定候选列表（如已配置货币），无模式切换/物品栏/流体
@@ -158,7 +161,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private ItemStack hoverItem;                  // 悬停网格物品（renderTooltips 消费）
     private List<Component> hoverFluidTip;        // 悬停网格流体名
 
-    public MultiPickerScreen(Screen parent, boolean browseFluid, Consumer<ItemStack> onAddItem, Consumer<FluidStack> onAddFluid) {
+    public MultiPickerScreen(Screen parent, boolean browseFluid, java.util.function.ObjLongConsumer<ItemStack> onAddItem, Consumer<FluidStack> onAddFluid) {
         super(Component.literal("多选资源"));
         this.parent = parent;
         this.restrictedMode = false;
@@ -179,7 +182,7 @@ public class MultiPickerScreen extends ScaledScreen {
      * 显示图标选择器：允许切到「贴图」浏览模式（读全资源包任意 PNG 路径，非物品图标）+ 物品模式（可选多个物品当图标）。
      * 与前两个构造器（物品排/流体排/币种排「+」）完全独立，不影响它们的行为。
      */
-    public MultiPickerScreen(Screen parent, Consumer<ItemStack> onAddItem, Consumer<ResourceLocation> onAddTexture) {
+    public MultiPickerScreen(Screen parent, java.util.function.ObjLongConsumer<ItemStack> onAddItem, Consumer<ResourceLocation> onAddTexture) {
         super(Component.literal("多选显示图标"));
         this.parent = parent;
         this.restrictedMode = false;
@@ -200,7 +203,7 @@ public class MultiPickerScreen extends ScaledScreen {
      * 受限模式：仅从 allowedIds 里选（如商店已配置货币），无模式切换、无物品栏/流体浏览——
      * 避免在两万多条全注册表里大海捞针（见 {@link ShopEntryEditScreen} 币种排「+」）。
      */
-    public MultiPickerScreen(Screen parent, java.util.Collection<ResourceLocation> allowedIds, Consumer<ItemStack> onAddItem) {
+    public MultiPickerScreen(Screen parent, java.util.Collection<ResourceLocation> allowedIds, java.util.function.ObjLongConsumer<ItemStack> onAddItem) {
         super(Component.literal("多选货币"));
         this.parent = parent;
         this.restrictedMode = true;
@@ -1189,8 +1192,9 @@ public class MultiPickerScreen extends ScaledScreen {
                 if (s.textureId != null && onAddTexture != null) onAddTexture.accept(s.textureId);
             } else if (s.itemIcon != null && !s.itemIcon.isEmpty() && onAddItem != null) {
                 ItemStack st = s.itemIcon.copy(); // 保留 NBT
-                st.setCount((int) Math.max(1L, Math.min(Integer.MAX_VALUE, s.count)));
-                onAddItem.accept(st);
+                long exact = Math.max(1L, s.count);
+                st.setCount((int) Math.min(Integer.MAX_VALUE, exact)); // stack 只能装 int，精确值走第二参
+                onAddItem.accept(st, exact);
             }
         }
         Minecraft.getInstance().setScreen(parent);

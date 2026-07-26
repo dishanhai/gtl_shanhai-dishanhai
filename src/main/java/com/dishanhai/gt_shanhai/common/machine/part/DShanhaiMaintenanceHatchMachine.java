@@ -246,7 +246,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
             // 仅当上限变化（模块新插入）时才拉满，NBT 加载时不覆盖用户设置的值
             if (threadMax != oldMax) {
                 threadCount = threadMax;
-                THREAD_LOG.info("updateThreadCount: create_mk 模块激活, threadCount={} threadMax={}", threadCount, threadMax);
+                THREAD_LOG.debug("updateThreadCount: create_mk 模块激活, threadCount={} threadMax={}", threadCount, threadMax);
             } else if (threadCount > threadMax) {
                 threadCount = threadMax;
             }
@@ -255,7 +255,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
 
         ItemStack stack = astralSlot.getStackInSlot(0);
         int count = stack.getCount();
-        THREAD_LOG.info("updateThreadCount: isEmpty={} count={} item={}",
+        THREAD_LOG.debug("updateThreadCount: isEmpty={} count={} item={}",
                 stack.isEmpty(), count,
                 stack.isEmpty() ? "空" : BuiltInRegistries.ITEM.getKey(stack.getItem()));
         if (stack.isEmpty() || count == 0) {
@@ -280,7 +280,7 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         } else {
             if (threadCount > threadMax) threadCount = threadMax;
         }
-        THREAD_LOG.info("updateThreadCount: threadCount={} threadMax={}", threadCount, threadMax);
+        THREAD_LOG.debug("updateThreadCount: threadCount={} threadMax={}", threadCount, threadMax);
     }
 
     // ========== 大反冲槽 ==========
@@ -493,8 +493,23 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         super.removedFromController(controller);
         if (controller instanceof IThreadModifierMachine tm && tm.getThreadPartMachine() == this) {
             tm.setThreadPartMachine(null);
-            THREAD_LOG.info("已移除线程修改器注册");
+            THREAD_LOG.debug("已移除线程修改器注册");
         }
+    }
+
+    /**
+     * 四个槽都是裸 {@link ItemStackTransfer}（不是 NotifiableItemStackHandler），GTCEu 基类不会
+     * 自动掉落它们。原先只靠 DiskMachineDropHandler 监听 BlockEvent.BreakEvent，而爆炸、/fill、
+     * WorldEdit、机械钻头等移除路径都**不触发**该事件——创始模块/大反冲/世线信标这类顶级材料会静默蒸发。
+     * 这里比照 ProxyExecutorMachine#onMachineRemoved 补上兜底（BreakEvent 路径已先清空槽位，
+     * 此时读到的是空槽，不会重复掉落）。
+     */
+    @Override
+    public void onMachineRemoved() {
+        clearInventory(moduleSlot);
+        clearInventory(astralSlot);
+        clearInventory(tearSlot);
+        clearInventory(threadBoostSlot);
     }
 
     // ========== IMaintenanceBypassPart 覆写（读取 UI 开关状态） ==========
@@ -523,19 +538,21 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     @Override public void setMaintenanceProblems(byte problems) {}
     @Override public int getTimeActive() { return 0; }
     @Override public void setTimeActive(int time) {}
-    private int modLogSkip = 0;
     @Override public GTRecipe modifyRecipe(GTRecipe recipe) {
         if (bypassVoltage) {
-            boolean hadEU = recipe.inputs.containsKey(EURecipeCapability.CAP);
             recipe.inputs.remove(EURecipeCapability.CAP);
             recipe.tickInputs.remove(EURecipeCapability.CAP);
             recipe.tickInputs.remove(CWURecipeCapability.CAP);
-            if (hadEU && ++modLogSkip % 5 == 0) {
-                THREAD_LOG.info("modifyRecipe 已清EU! bypassVoltage={}", bypassVoltage);
-            }
         }
-        if (bypassTemperature) {
-            // 抹掉配方温度需求，绕过所有机器的温度检查
+        if (bypassTemperature
+                && (recipe.data.contains("ebf_temp") || recipe.data.contains("blastFurnaceTemp"))) {
+            // 抹掉配方温度需求，绕过所有机器的温度检查。
+            // 必须先换成自己的一份 data：GTRecipe.copy() 对 inputs/outputs 都做了 copyContents 新建，
+            // 唯独 data 是**按引用**直接传给新对象（GTRecipe.java:122 → 构造器 this.data = data），
+            // 所以传进来的这个「副本」与注册表里的原始配方共用同一个 CompoundTag。
+            // 直接 remove 会永久抹掉全服该配方的温度需求：原版 GTRecipeModifiers.ebfOverclock 判的是
+            // !data.contains("ebf_temp") → 直接 return null，所有电弧炉从此拒绝该配方。
+            recipe.data = recipe.data.copy();
             recipe.data.remove("ebf_temp");
             recipe.data.remove("blastFurnaceTemp");
         }
