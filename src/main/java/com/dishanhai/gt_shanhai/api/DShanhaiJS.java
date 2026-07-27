@@ -101,6 +101,37 @@ public class DShanhaiJS {
     }
 
     /**
+     * 不稳定抖动：物品模型持续颤动，附带 RGB 色差残影（红/青错位描边）。
+     * 可与光环叠加——对同一物品分别调用 makeHalo 与 makeShake 即可，参数按通道自动合并，顺序无关。
+     * <p>
+     * 模式: "quiver" 平滑高频颤抖 / "glitch" 故障式跳位（离散瞬跳+失稳尖峰，
+     * 尖峰时位移放大、急促滚转、光环同步胀大）。
+     * 抖动逐帧烘进模型 quad，背包/手持/地面/展示框/JEI 列表全部生效。
+     *
+     * @param itemId    物品 ID（仅平面物品模型，同 makeHalo 的限制）
+     * @param mode      "quiver" / "glitch"
+     * @param amplitude 抖动幅度，相对物品尺寸（建议 0.01~0.05；0.03 在 GUI 里约半像素）
+     */
+    public static void makeShake(String itemId, String mode, double amplitude) {
+        int m = HaloSettings.parseShakeMode(mode);
+        makeShakeEx(itemId, mode, amplitude, m == HaloSettings.SHAKE_GLITCH ? 110 : 90, amplitude);
+    }
+
+    /**
+     * 不稳定抖动完整参数版。
+     *
+     * @param itemId    物品 ID
+     * @param mode      "quiver" / "glitch"，见 {@link #makeShake(String, String, double)}
+     * @param amplitude 抖动幅度，相对物品尺寸
+     * @param periodMs  quiver=振动周期毫秒（默认 90，越小越急）；glitch=跳位保持间隔毫秒（默认 110）
+     * @param chromaAmp RGB 色差残影错位幅度，相对物品尺寸；0 = 关闭残影
+     */
+    public static void makeShakeEx(String itemId, String mode, double amplitude, int periodMs, double chromaAmp) {
+        HaloItemRegistry.register(itemId, HaloSettings.shakeOnly(
+                HaloSettings.parseShakeMode(mode), (float) amplitude, periodMs, (float) chromaAmp));
+    }
+
+    /**
      * 为物品设置动态显示名称。
      * 使用 & 格式化码在 displayName 中直接编写（推荐），此方法保留作为兼容。
      * <p>

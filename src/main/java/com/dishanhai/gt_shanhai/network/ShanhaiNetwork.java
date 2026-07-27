@@ -389,6 +389,23 @@ public class ShanhaiNetwork {
                 QuantumCraftingStatusResponsePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        // 「任务 → 商店商品」手动绑定：同样追加在末尾，不动上面任何现有消息 ID
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopQuestLinkSyncPacket.class,
+                ShopQuestLinkSyncPacket::encode,
+                ShopQuestLinkSyncPacket::new,
+                ShopQuestLinkSyncPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopQuestLinkEditPacket.class,
+                ShopQuestLinkEditPacket::encode,
+                ShopQuestLinkEditPacket::new,
+                ShopQuestLinkEditPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         RecipeSyncPacket.init();
     }
 

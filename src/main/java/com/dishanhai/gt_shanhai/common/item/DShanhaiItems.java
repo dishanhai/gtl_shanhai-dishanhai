@@ -13,6 +13,8 @@ public final class DShanhaiItems {
 
     public static ItemEntry<ComponentItem> DEBUG_PATTERN_TEST;
     public static ItemEntry<ComponentItem> ULTIMATE_TERMINAL;
+    public static ItemEntry<ComponentItem> ADVANCED_PATTERN_BOX;
+    public static ItemEntry<ComponentItem> PATTERN_BUFFER_TOOLKIT;
     public static ItemEntry<ShanhaiWirelessPatternManagementTerminalItem> WIRELESS_PATTERN_MANAGEMENT_TERMINAL;
 
     public static void init() {
@@ -23,6 +25,16 @@ public final class DShanhaiItems {
         ULTIMATE_TERMINAL = REGISTRATE.item("ultimate_terminal", ComponentItem::create)
                 .properties(properties -> properties.stacksTo(1))
                 .onRegister(GTItems.attach(ShanhaiUltimateTerminalBehavior.INSTANCE))
+                .model(NonNullBiConsumer.noop())
+                .register();
+        ADVANCED_PATTERN_BOX = REGISTRATE.item("advanced_pattern_box", ComponentItem::create)
+                .properties(properties -> properties.stacksTo(1))
+                .onRegister(GTItems.attach(AdvancedPatternBoxBehavior.INSTANCE))
+                .model(NonNullBiConsumer.noop())
+                .register();
+        PATTERN_BUFFER_TOOLKIT = REGISTRATE.item("pattern_buffer_toolkit", ComponentItem::create)
+                .properties(properties -> properties.stacksTo(1))
+                .onRegister(GTItems.attach(PatternBufferToolkitBehavior.INSTANCE))
                 .model(NonNullBiConsumer.noop())
                 .register();
         WIRELESS_PATTERN_MANAGEMENT_TERMINAL = REGISTRATE

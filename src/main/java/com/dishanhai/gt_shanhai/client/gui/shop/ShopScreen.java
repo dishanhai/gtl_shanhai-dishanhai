@@ -9,6 +9,7 @@ import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopFavorites;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
+import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
 import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
@@ -129,6 +130,17 @@ public class ShopScreen extends ScaledScreen {
     private ShopEntry selected;
     private long selectedEntryKey = -1L;
     private long observedCatalogRevision = -1L;
+    // 从 FTBQ 任务书「前往商店」跳过来的待定位商品（见 FtbViewQuestPanelShopButtonMixin）：开店是异步的
+    // （客户端发 WalletOpenRequestPacket → 服务端回 ShopOpenPacket 才 new 出本界面），跨实例交接只能走静态位。
+    // 主键用 stableId 而非 entryKey：这中间服务端可能重发新 revision，entryKey 是快照下标会集体错位（见 ShopEntry#stableId）。
+    private static String pendingFocusStableId;
+    private static long pendingFocusFallbackKey = -1L;
+    // 记录时刻；开店请求可能被服务端拒（没带钱包），此时待定位会残留下来，超时作废免得污染下一次手动开店
+    private static long pendingFocusAtMs;
+    private static final long PENDING_FOCUS_TTL_MS = 10_000L;
+    // initScaled 已切好分类、但该商品所在 chunk 还没到（entriesByKey 里还没有实体）时挂在这里，
+    // 由 renderScaledBackground 每帧重试，chunk 一到就选中。-1 = 没有待选中的商品。
+    private long pendingSelectEntryKey = -1L;
     // 切页/切卡片切换动画：记下"数据集刚换过"的时刻，渲染时按经过时间算一个插值，
     // 纯几何变换（PoseStack translate/scale，不碰颜色/透明度），对物品图标渲染同样生效，不用担心改样式。
     private long gridSwitchAtMs;   // 主/子分类切页（网格数据集变了）触发；0=从未触发，视为动画已完成
@@ -822,6 +834,14 @@ public class ShopScreen extends ScaledScreen {
     private static final int COL_STRIDE = CELL_W + GRID_GAP;
     private static final int GRID_SCROLLBAR_W = 3;
     private static final int DETAIL_SCROLLBAR_W = 3;
+    /**
+     * 详情列滚动条与正文之间的留白。详情列正文按左右各 8px 内缩（cx = detailX()+8、宽 DETAIL_W-16），
+     * 右缘因此落在 detailX()+DETAIL_W-8；而滚动条轨道是常驻绘制、且在 disableScissor 之后才画的，
+     * 起点必须越过这个右缘——否则轨道底色会正好盖掉整列满宽按钮（跳转/指南详情/展开详情/补齐缺口……）
+     * 最右那一列边框像素，表现为按钮被竖线切掉一条边；顺带也解决点击优先级：轨道命中判定排在按钮之前，
+     * 重叠时按钮最右一列会变成拖拽滚动条的死区。
+     */
+    private static final int DETAIL_SCROLLBAR_GAP = 2;
 
     private int cellX(int col) { return listLeft() + col * COL_STRIDE; }
     private int cellY(int row) { return contentTop() + row * ROW_STRIDE - scroll; }
@@ -864,6 +884,8 @@ public class ShopScreen extends ScaledScreen {
             clearSelection();
             scroll = 0;
         }
+        // 任务书跳转：先把分类切到目标商品所在页，后面的「有效性收紧」和 recomputeVisible 才会算在对的页上。
+        long focusKey = consumePendingFocus();
         // 动态面板铺满可用逻辑区（KE 原式）。maxScale=Float.MAX_VALUE 保证 vWidth×guiScale≡width，
         // 面板 panelWidth=vWidth-8 铺满恰好不溢出——这是 KE 的缩放不变式，勿再封顶 maxScale。
         left = 4;
@@ -920,6 +942,57 @@ public class ShopScreen extends ScaledScreen {
         addRenderableWidget(amountBox);
 
         recomputeVisible();
+        if (focusKey >= 0L) focusOnEntry(focusKey);
+    }
+
+    /**
+     * 任务书「前往商店」跳转入口：记下待定位商品，下一个开出来的商店界面会自动切到它所在分类页并选中详情。
+     *
+     * @param stableId       跨快照稳定身份（首选，见 {@link ShopEntry#getStableId}）
+     * @param fallbackEntryKey 记录时刻的 entryKey，仅在 stableId 缺失/解析不到时兜底
+     */
+    public static void requestFocus(String stableId, long fallbackEntryKey) {
+        pendingFocusStableId = stableId == null || stableId.isBlank() ? null : stableId;
+        pendingFocusFallbackKey = fallbackEntryKey;
+        pendingFocusAtMs = net.minecraft.Util.getMillis();
+    }
+
+    /** 取出并清空待定位商品，同时把分类页签切到它所在的那一页；返回 -1 = 没有待定位/已失效。 */
+    private static long consumePendingFocus() {
+        String stableId = pendingFocusStableId;
+        long fallbackKey = pendingFocusFallbackKey;
+        long requestedAtMs = pendingFocusAtMs;
+        pendingFocusStableId = null;
+        pendingFocusFallbackKey = -1L;
+        pendingFocusAtMs = 0L;
+        if (stableId == null && fallbackKey < 0L) return -1L;
+        if (net.minecraft.Util.getMillis() - requestedAtMs > PENDING_FOCUS_TTL_MS) return -1L;
+        long key = stableId == null ? -1L : ClientShopCatalog.keyOfStableId(stableId);
+        if (key < 0L) key = fallbackKey;
+        ShopCatalogManifest.Stub stub = key < 0L ? null : ClientShopCatalog.stub(key);
+        if (stub == null) return -1L;
+        // 顺序不能反：switchTop 会从记忆恢复子路径，后面三层再逐级覆盖成目标商品的真实路径。
+        switchTop(stub.top());
+        switchSub(stub.sub());
+        switchSub2(stub.sub2());
+        switchSub3(stub.sub3());
+        return key;
+    }
+
+    /** 把网格滚到该商品所在行并选中它；商品实体还没加载就先挂起，等 chunk 到了再选（见 pendingSelectEntryKey）。 */
+    private void focusOnEntry(long entryKey) {
+        int index = visibleEntryKeys.indexOf(entryKey);
+        if (index >= 0) {
+            int row = index / gridColumns();
+            scroll = Math.max(0, Math.min(maxGridScroll(), row * ROW_STRIDE));
+        }
+        ShopEntry entry = ClientShopCatalog.get(entryKey);
+        if (entry != null) {
+            selectEntry(entryKey, entry);
+            pendingSelectEntryKey = -1L;
+        } else {
+            pendingSelectEntryKey = entryKey;
+        }
     }
 
     /** 同步数量到文本框（步进按钮改 amount 后调用，避免触发 responder 递归）。 */
@@ -959,6 +1032,16 @@ public class ShopScreen extends ScaledScreen {
             neededKeys.add(visibleEntryKeys.get(i));
         }
         if (selectedEntryKey >= 0L) neededKeys.add(selectedEntryKey);
+        // 任务书跳转挂起的商品：拉它所在 chunk，到货即选中（本帧 pump 刚好可能把它实体化出来）
+        if (pendingSelectEntryKey >= 0L) {
+            ShopEntry pending = ClientShopCatalog.get(pendingSelectEntryKey);
+            if (pending != null) {
+                selectEntry(pendingSelectEntryKey, pending);
+                pendingSelectEntryKey = -1L;
+            } else {
+                neededKeys.add(pendingSelectEntryKey);
+            }
+        }
         if (selected != null && selected.hasLinkTarget()) {
             long linked = ClientShopCatalog.linkedEntryKey(selected.getLinkTo());
             if (linked >= 0L) neededKeys.add(linked);
@@ -1791,7 +1874,8 @@ public class ShopScreen extends ScaledScreen {
 
     private int detailViewportHeight() { return detailViewportBottom() - detailViewportTop(); }
 
-    private int detailScrollbarX() { return detailX() + DETAIL_W - 6 - DETAIL_SCROLLBAR_W; }
+    /** 详情列滚动条 X：从正文右缘 detailX()+DETAIL_W-8 再让出 DETAIL_SCROLLBAR_GAP，整条落在右侧 8px 内缩带里。 */
+    private int detailScrollbarX() { return detailX() + DETAIL_W - 8 + DETAIL_SCROLLBAR_GAP; }
 
     private int clampDetailScroll(int value) {
         return Math.max(0, Math.min(detailScrollMax, value));

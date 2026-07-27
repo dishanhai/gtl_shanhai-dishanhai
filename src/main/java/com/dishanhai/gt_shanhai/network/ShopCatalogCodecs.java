@@ -24,6 +24,8 @@ public final class ShopCatalogCodecs {
     public static final int MAX_DISPLAY_NAME_CHARS = 1024;
     public static final int MAX_RESOURCE_ID_CHARS = 256;
     public static final int MAX_STABLE_ID_CHARS = 64;
+    /** FTBQ 任务 ID 是十六进制 long 字符串（≤16 字符），留一倍余量兜异常配置。 */
+    public static final int MAX_QUEST_ID_CHARS = 32;
     public static final int MAX_CATEGORY_ORDER_KEYS = 4096;
     public static final int MAX_CATEGORY_ORDER_VALUES = 4096;
     public static final int MAX_CATEGORY_ORDER_KEY_CHARS = 1024;
@@ -55,6 +57,7 @@ public final class ShopCatalogCodecs {
                 buf.writeUtf(goodsId == null ? "" : goodsId, MAX_RESOURCE_ID_CHARS);
             }
             buf.writeUtf(stub.stableId(), MAX_STABLE_ID_CHARS);
+            buf.writeUtf(stub.prereqQuestId(), MAX_QUEST_ID_CHARS);
         }
         writeCategoryOrder(buf, manifest == null ? Map.of() : manifest.categoryOrder());
     }
@@ -104,8 +107,10 @@ public final class ShopCatalogCodecs {
             List<String> goodsIds = new ArrayList<>(goodsCount);
             for (int g = 0; g < goodsCount; g++) goodsIds.add(buf.readUtf(MAX_RESOURCE_ID_CHARS));
             String stableId = buf.readUtf(MAX_STABLE_ID_CHARS);
+            String prereqQuestId = buf.readUtf(MAX_QUEST_ID_CHARS);
             stubs.add(new ShopCatalogManifest.Stub(
-                    entryKey, top, sub, sub2, sub3, hidden, chunkId, linkKey, displayName, goodsIds, stableId));
+                    entryKey, top, sub, sub2, sub3, hidden, chunkId, linkKey, displayName, goodsIds, stableId,
+                    prereqQuestId));
         }
         Map<String, List<String>> categoryOrder = readCategoryOrder(buf);
         return new ShopCatalogManifest(revision, ready, stubs, categoryOrder);

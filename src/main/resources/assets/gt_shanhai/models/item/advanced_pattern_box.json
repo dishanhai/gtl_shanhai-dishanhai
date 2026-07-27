@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "gt_shanhai:item/advanced_pattern_box"
+  }
+}

@@ -147,6 +147,14 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("默认关闭：样板类型必须存在于主机当前配方类型集合",
                         "开启后恢复旧行为，允许完整 GTRecipe 绕过主机配方类型限制直接执行"))
                 .setSaveConsumer(cfg.recipeTypePatternAllowUnsupportedHostRecipeTypes::set).build());
+        pattern.addEntry(e.startStrList(Component.literal("星律共享搜索集"),
+                        new ArrayList<>(cfg.recipeTypeSharedSearchSets.get()))
+                .setDefaultValue(List.of("gtceu:chemical_reactor,gtceu:large_chemical_reactor"))
+                .setTooltip(tip("每条 = 一组逗号分隔的配方类型ID（带命名空间），同组类型互相视为可共同搜索/执行",
+                        "例：gtceu:chemical_reactor,gtceu:large_chemical_reactor",
+                        "化反样板可在大型化反宿主执行、反之亦然；按组精确授权，不同于上面的全放开开关",
+                        "空列表 = 保持严格隔离"))
+                .setSaveConsumer(list -> cfg.recipeTypeSharedSearchSets.set(list)).build());
         pattern.addEntry(e.startIntField(Component.literal("每行样板槽位数"), cfg.recipeTypePatternsPerRow.get())
                 .setDefaultValue(9).setMin(1).setMax(16)
                 .setTooltip(tip("默认 9，修改后需重新放置总成生效"))

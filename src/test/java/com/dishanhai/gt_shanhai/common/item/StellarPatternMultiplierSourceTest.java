@@ -48,8 +48,10 @@ class StellarPatternMultiplierSourceTest {
         assertTrue(source.contains("this::pollOutputMultiplierHostState"));
         assertTrue(poll.contains("if (!outputMultiplierModeEnabled) return;"));
         assertTrue(poll.contains("getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L"));
-        assertTrue(poll.contains("if (detected == lastDetectedHostOutputMultiplier) return;"),
+        assertTrue(poll.contains("if (detected == lastDetectedHostOutputMultiplier)"),
                 "宿主倍率未变化时必须零刷新");
+        assertTrue(poll.contains("detected != pendingDetectedHostOutputMultiplier"),
+                "宿主倍率变化必须经连续两次轮询确认（防抖），瞬时跳变不得触发全量样板重编码");
         assertTrue(poll.contains("applyOutputMultiplierSettings(true, detected)"));
     }
 

@@ -185,18 +185,13 @@ public class MEDiskHatchKeyCounterSnapshotTest {
                 "KeyCounterSnapshot.addTo 不能整表 addAll，否则空输出计数器会触发 VariantCounter.copy()");
         assertTrue(source.contains("private AEKey[] keys;"),
                 "KeyCounterSnapshot 必须保持扁平数组，允许新增 key 时扩容但不能退回遍历 KeyCounter");
-        assertFalse(source.contains("AeStorageAmountMath.addSaturated(out, keys[i], amounts[i])"),
-                "已知非空有限快照不得再走通用空值检查与第二次 KeyCounter.set 定位");
-        assertTrue(source.contains("out.add(keys[i], amount)"),
-                "有限量无溢出时应使用 KeyCounter.add 一次完成累加");
-        assertTrue(source.contains("amount > Long.MAX_VALUE - current"),
-                "重复有限贡献仍必须在真正溢出时饱和为 Long.MAX_VALUE");
+        assertTrue(source.contains("AeStorageAmountMath.addSaturated(out, keys[i], amount)"),
+                "非空输出必须走 addSaturated 单查找直达通道（内部 records.addTo 一次读改写并钳制溢出）");
+        assertEquals(-1, source.indexOf("out.get(keys[i])"),
+                "快照回放不得再对每个 key 先 KeyCounter.get 探测、再 add/set 二次定位（双重哈希查找热点）");
         assertTrue(source.contains("if (out.isEmpty())")
                         && source.contains("out.set(keys[i], amount)"),
                 "空输出计数器必须直接写入快照，避免每个 key 先执行 KeyCounter.get");
-        assertTrue(source.contains("if (amount == Long.MAX_VALUE)")
-                        && source.contains("out.set(keys[i], Long.MAX_VALUE)"),
-                "无限量快照回放应直接 set，避免每次 addSaturated 先 get 再 set");
         assertEquals(-1, source.indexOf("AeStorageAmountMath.mergeSaturated(out, counter)"),
                 "KeyCounterSnapshot.addTo 不能再回到 mergeSaturated 热路径");
     }
@@ -255,8 +250,10 @@ public class MEDiskHatchKeyCounterSnapshotTest {
                 "嵌套盘聚合不能同时维护 counter 和 snapshot 两份库存状态");
         assertFalse(source.contains("System.identityHashCode(aggregateCounter)"),
                 "聚合缓存不能用对象地址充当库存版本");
-        assertTrue(source.contains("Math.min(amount, getAggregateSnapshot().get(what))"),
-                "模拟提取和网络库存输出必须读取同一份聚合快照");
+        assertTrue(source.contains("Math.min(amount, getAggregateSnapshot().get(normalized))"),
+                "模拟提取和网络库存输出必须读取同一份聚合快照，且查询键必须先正规化——"
+                        + "快照由 NormalizedStorageCell 输出、键已正规化，原始键（空 tag 流体变体）查表"
+                        + "得 0 会让 AE 合成规划器 SIMULATE 误判无库存而拒绝排程");
     }
 
     @Test

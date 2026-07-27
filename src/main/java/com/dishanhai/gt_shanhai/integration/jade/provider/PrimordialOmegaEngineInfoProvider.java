@@ -75,7 +75,7 @@ public enum PrimordialOmegaEngineInfoProvider implements IBlockComponentProvider
 
         int outputMultiplier = data.getInt("outputMultiplier");
         if (outputMultiplier > 1) {
-            tooltip.add(helper.text(Component.literal("§6◆ 产出倍率: §f×" + outputMultiplier)));
+            tooltip.add(helper.text(Component.literal("§6☆ 产出倍率: §f×" + outputMultiplier)));
         }
     }
 }

@@ -217,6 +217,9 @@ item_ids:
 ### Q: 为什么装入的样板一直不执行，明明配方本身没问题？
 **A:** 默认配置下，样板配方类型必须出现在宿主的配方类型列表（`machine.getRecipeTypes()`）里才会进入执行队列。确认宿主原生支持该类型；如果确实需要跨类型虚拟直跑，可在配置文件里开启 `recipeTypePatternAllowUnsupportedHostRecipeTypes`（会绕过类型限制，请自行评估风险）。
 
+### Q: 化学反应釜样板放进大型化学反应釜宿主为什么不跑？（配方明明一样）
+**A:** 用**星律共享搜索集**（配置 `sharedSearchSets`，模组配置界面「配方类型样板总成」分类同名条目）。每条填一组逗号分隔的配方类型 ID，同组类型互相视为可共同搜索/执行——默认已自带 `gtceu:chemical_reactor,gtceu:large_chemical_reactor` 这一组，化反样板可在大型化反宿主执行、反之亦然。这是按组精确授权，比全放开的 `recipeTypePatternAllowUnsupportedHostRecipeTypes` 更安全；样板自身的配方解析仍按其编码类型进行。留空列表则恢复严格隔离。
+
 ### Q: 能否混合多个样板总成（星律 + 通用）？
 **A:** 可以。两种样板总成在同一宿主内会一起参与配方搜索。星律样板总成做类型过滤，通用样板总成不做过滤，两者互补。
 

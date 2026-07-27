@@ -19,4 +19,7 @@ categories:
 * [量子计算机](quantum_index.md)
 * [终焉枢纽专项](special_index.md)
 * [山海终极终端](ultimate_terminal.md)
+* [样板总成工具箱](pattern_buffer_toolkit.md)
+* [山海无线样板管理终端](wireless_pattern_management_terminal.md)
+* [高级样板包装箱](advanced_pattern_box.md)
 * [山海配方样板调试工具](debug_pattern_test.md)

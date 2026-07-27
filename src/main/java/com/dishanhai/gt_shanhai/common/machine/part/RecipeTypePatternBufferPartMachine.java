@@ -1,12 +1,17 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import appeng.api.config.Actionable;
 import appeng.api.crafting.IPatternDetails;
 import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.inventories.InternalInventory;
+import appeng.api.networking.IGrid;
+import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
+import appeng.api.stacks.KeyCounter;
+import appeng.api.storage.MEStorage;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.api.gui.configurators.FancyConfiguratorSidebarPage;
@@ -14,6 +19,7 @@ import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSlotAccess;
+import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
@@ -31,9 +37,12 @@ import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
+import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidSlot;
+import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemSlot;
 import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
 import com.gregtechceu.gtceu.utils.FormattingUtil;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
@@ -78,6 +87,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.material.Fluid;
 
@@ -88,6 +98,7 @@ import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPart
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTrait;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
+import org.gtlcore.gtlcore.utils.NumberUtils;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineMachine;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import org.jetbrains.annotations.NotNull;
@@ -102,7 +113,8 @@ import java.util.Objects;
 
 /**
  * 星律样板总成：在 GTLCore 库存ME样板总成（MEStockingPatternBufferPartMachine）基础上叠加配方类型过滤。
- * 库存输入区域的"只模拟提取判断存在、真扣料时才提取"逻辑完全继承自父类，本类不重复实现。
+ * 库存输入区域"真扣料时才实时提取"的消耗语义继承父类；周期同步与配方模拟阶段的可用量查询
+ * 改走 StorageService 增量缓存（syncStockInput / findStock*Key 覆写），不再对全网做模拟提取遍历。
  */
 public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferPartMachine
         implements RecipeTypePatternSlotAccess {
@@ -141,6 +153,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @Persisted
     private int cachedHostOutputMultiplier = 1;
     private int lastDetectedHostOutputMultiplier = Integer.MIN_VALUE;
+    private int pendingDetectedHostOutputMultiplier = Integer.MIN_VALUE;
     @Nullable
     private TickableSubscription outputMultiplierHostSyncSubscription;
     private final List<IPatternDetails> wildcardPatterns;
@@ -355,6 +368,142 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             outputMultiplierHostSyncSubscription = null;
         }
         super.onUnload();
+    }
+
+    // ==== 库存输入 AE 查询降载：同步/模拟走 StorageService 增量缓存，真扣料保持父类实时 ====
+
+    /**
+     * 只读缓存视图：extract(SIMULATE) 直接返回缓存计数，喂给父类 syncStock 复用其槽位/stockMap 回写。
+     * 父类原实现对每个已配置条目做 extract(key, Long.MAX_VALUE, SIMULATE)——请求量永远凑不满，
+     * NetworkStorage 必然遍历全网全部挂载存储（性能监测实测单次 syncStockInput ~3ms，
+     * 摊成 Jade 平均延迟 73µs）。StorageService 缓存有 watcher 时每 tick 末刷新，
+     * 无 watcher 时按需每 tick 至多重建一次，最多旧 1 tick。
+     */
+    private static final class CachedNetworkAmountView implements MEStorage {
+
+        private static final Component DESCRIPTION = Component.literal("gt_shanhai:cached_stock_view");
+
+        private final KeyCounter cached;
+
+        private CachedNetworkAmountView(KeyCounter cached) {
+            this.cached = cached;
+        }
+
+        @Override
+        public Component getDescription() {
+            return DESCRIPTION;
+        }
+
+        @Override
+        public long extract(AEKey what, long amount, Actionable mode, IActionSource source) {
+            // 视图背后没有真实存储，MODULATE 一律拒绝，防止被误当可扣料库存
+            if (mode != Actionable.SIMULATE) return 0L;
+            long available = cached.get(what);
+            return available <= 0L ? 0L : Math.min(available, amount);
+        }
+    }
+
+    @Nullable
+    private KeyCounter gtShanhai$cachedNetworkInventory() {
+        IGrid grid = getMainNode().getGrid();
+        return grid == null ? null : grid.getStorageService().getCachedInventory();
+    }
+
+    @Override
+    protected void syncStockInput() {
+        KeyCounter cached = gtShanhai$cachedNetworkInventory();
+        if (cached == null) {
+            stockItemHandler.clearStocks();
+            stockFluidHandler.clearStocks();
+            return;
+        }
+        MEStorage view = new CachedNetworkAmountView(cached);
+        stockItemHandler.syncStock(view);
+        stockFluidHandler.syncStock(view);
+    }
+
+    /** 已配置条目才允许由库存输入区供料（对齐父类 getAvailableAmount 的 configList 门控）。 */
+    private long gtShanhai$cachedConfiguredItemAmount(KeyCounter cached, AEItemKey key) {
+        for (ExportOnlyAEItemSlot slot : stockItemHandler.getInventory()) {
+            GenericStack config = slot.getConfig();
+            if (config != null && key.equals(config.what())) {
+                return Math.max(0L, cached.get(key));
+            }
+        }
+        return 0L;
+    }
+
+    private long gtShanhai$cachedConfiguredFluidAmount(KeyCounter cached, AEFluidKey key) {
+        for (ExportOnlyAEFluidSlot slot : stockFluidHandler.getInventory()) {
+            GenericStack config = slot.getConfig();
+            if (config != null && key.equals(config.what())) {
+                return Math.max(0L, cached.get(key));
+            }
+        }
+        return 0L;
+    }
+
+    /**
+     * includeCatalyst=true 恰为配方搜索的模拟阶段（handleItemInternal 把 simulate 原样传入）：
+     * 每原料一次的全网 Long.MAX_VALUE 模拟提取改为缓存 O(1)。缓存高估会在真扣料阶段被父类
+     * 实时复查拦下（check 循环先于消耗，最多浪费一次尝试，不会部分消耗后吞料）；
+     * 低估最多 1 tick 后自愈。includeCatalyst=false 是真扣料阶段：委托父类实时查询，不走缓存。
+     */
+    @Override
+    @Nullable
+    protected AEItemKey findStockItemKey(Ingredient ingredient, Object2LongMap<AEItemKey> internal,
+            Object2LongMap<AEItemKey> catalyst, long needAmount, boolean includeCatalyst) {
+        KeyCounter cached = includeCatalyst ? gtShanhai$cachedNetworkInventory() : null;
+        if (cached == null) {
+            return super.findStockItemKey(ingredient, internal, catalyst, needAmount, includeCatalyst);
+        }
+        for (ItemStack item : ingredient.getItems()) {
+            if (item.isEmpty()) continue;
+            AEItemKey key = AEItemKey.of(item);
+            long amount = NumberUtils.saturatedAdd(internal.getLong(key),
+                    gtShanhai$cachedConfiguredItemAmount(cached, key));
+            amount = NumberUtils.saturatedAdd(amount, catalyst.getLong(key));
+            if (amount >= needAmount) return key;
+        }
+        for (ExportOnlyAEItemSlot slot : stockItemHandler.getInventory()) {
+            GenericStack config = slot.getConfig();
+            if (config == null || !(config.what() instanceof AEItemKey key) || !key.matches(ingredient)) {
+                continue;
+            }
+            long amount = NumberUtils.saturatedAdd(internal.getLong(key), Math.max(0L, cached.get(key)));
+            amount = NumberUtils.saturatedAdd(amount, catalyst.getLong(key));
+            if (amount >= needAmount) return key;
+        }
+        return null;
+    }
+
+    @Override
+    @Nullable
+    protected AEFluidKey findStockFluidKey(FluidIngredient ingredient, Object2LongMap<AEFluidKey> internal,
+            Object2LongMap<AEFluidKey> catalyst, long needAmount, boolean includeCatalyst) {
+        KeyCounter cached = includeCatalyst ? gtShanhai$cachedNetworkInventory() : null;
+        if (cached == null) {
+            return super.findStockFluidKey(ingredient, internal, catalyst, needAmount, includeCatalyst);
+        }
+        for (FluidStack stack : ingredient.getStacks()) {
+            if (stack.isEmpty()) continue;
+            AEFluidKey key = AEFluidKey.of(stack.getFluid());
+            long amount = NumberUtils.saturatedAdd(internal.getLong(key),
+                    gtShanhai$cachedConfiguredFluidAmount(cached, key));
+            amount = NumberUtils.saturatedAdd(amount, catalyst.getLong(key));
+            if (amount >= needAmount) return key;
+        }
+        for (ExportOnlyAEFluidSlot slot : stockFluidHandler.getInventory()) {
+            GenericStack config = slot.getConfig();
+            if (config == null || !(config.what() instanceof AEFluidKey key)
+                    || !AEUtils.testFluidIngredient(ingredient, key)) {
+                continue;
+            }
+            long amount = NumberUtils.saturatedAdd(internal.getLong(key), Math.max(0L, cached.get(key)));
+            amount = NumberUtils.saturatedAdd(amount, catalyst.getLong(key));
+            if (amount >= needAmount) return key;
+        }
+        return null;
     }
 
     @Override
@@ -579,6 +728,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         if (isRemote()) return;
         int multiplier = resolveConnectedHostOutputMultiplier();
         lastDetectedHostOutputMultiplier = multiplier;
+        pendingDetectedHostOutputMultiplier = multiplier;
         updateCachedHostOutputMultiplier(multiplier);
         applyOutputMultiplierSettings(true, multiplier);
     }
@@ -696,7 +846,20 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         if (!outputMultiplierModeEnabled) return;
         if (getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L) return;
         int detected = resolveConnectedHostOutputMultiplier();
-        if (detected == lastDetectedHostOutputMultiplier) return;
+        if (detected == lastDetectedHostOutputMultiplier) {
+            // 读值回落到已应用值时必须复位 pending，否则交替翻转会被残留的旧 pending 误"确认"
+            pendingDetectedHostOutputMultiplier = detected;
+            return;
+        }
+        // 防抖：宿主倍率在模块工作↔空闲转换间会瞬时跳变（如增殖核心 idle=10 / working=1000），
+        // 每次跳变都触发全量样板重编码（spark 实测单窗口累计 930ms+ 的尖峰热点）。
+        // 除首次同步外，要求连续两次轮询读到同一新值才应用；交替翻转永不满足，彻底静音。
+        if (lastDetectedHostOutputMultiplier != Integer.MIN_VALUE
+                && detected != pendingDetectedHostOutputMultiplier) {
+            pendingDetectedHostOutputMultiplier = detected;
+            return;
+        }
+        pendingDetectedHostOutputMultiplier = detected;
         lastDetectedHostOutputMultiplier = detected;
         updateCachedHostOutputMultiplier(detected);
         applyOutputMultiplierSettings(true, detected);
@@ -732,7 +895,12 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public boolean gtShanhai$slotAllowsRecipe(int slot, GTRecipe recipe) {
         if (slot >= maxPatternCount && gtShanhai$getPatternRecipe(slot) == null) return false;
         if (PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) return true;
-        return PatternRecipeTypeHelper.recipeMatchesTypeId(recipe, gtShanhai$getPatternRecipeTypeId(slot));
+        String taggedTypeId = gtShanhai$getPatternRecipeTypeId(slot);
+        if (PatternRecipeTypeHelper.recipeMatchesTypeId(recipe, taggedTypeId)) return true;
+        // 星律共享搜索集：宿主原生搜索命中同组类型的等价配方（如大型化反命中化反槽）时也允许从本槽扣料；
+        // 样板身份指纹校验（PatternIdentityMatcher）不受影响，跨槽串配方仍会被拦。
+        return recipe != null && recipe.recipeType != null && recipe.recipeType.registryName != null
+                && RecipeTypeSharedSearchSets.isShared(taggedTypeId, recipe.recipeType.registryName.toString());
     }
 
     @Override

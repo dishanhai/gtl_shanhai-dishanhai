@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.machine.primordial;
 
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
+import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
@@ -636,7 +637,9 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     private boolean isSelectedRecipeType(GTRecipeType type) {
         MetaMachine machine = getMachine();
         if (machine instanceof PrimordialOmegaEngineModuleBase mod) {
-            return mod.isRecipeTypeSelected(type);
+            // 星律共享搜索集：与任一选中类型同组的配方类型视为选中（精确判断先行，共享集兜底）
+            return mod.isRecipeTypeSelected(type)
+                    || RecipeTypeSharedSearchSets.isSharedWithAny(type, mod.getSelectedRecipeTypes());
         }
         return true;
     }

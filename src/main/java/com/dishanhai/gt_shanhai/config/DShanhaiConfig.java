@@ -81,6 +81,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.EnumValue<RecipeTypePatternSwitchMode> recipeTypePatternSwitchMode;
         /** 配方类型样板总成 — 是否允许虚拟执行宿主当前不支持的配方类型 */
         public ForgeConfigSpec.BooleanValue recipeTypePatternAllowUnsupportedHostRecipeTypes;
+        /** 配方类型样板总成 — 星律共享搜索集（同组配方类型互认，按组放行而非全放开） */
+        public ForgeConfigSpec.ConfigValue<List<? extends String>> recipeTypeSharedSearchSets;
         /** 配方类型样板总成 — UI 每行样板槽位数 */
         public ForgeConfigSpec.IntValue recipeTypePatternsPerRow;
         /** 配方类型样板总成 — UI 每页行数 */
@@ -89,6 +91,14 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.IntValue recipeTypeMaxPages;
         /** 样板虚拟供料 — 每个样板槽位单次目标并行批量上限 */
         public ForgeConfigSpec.LongValue patternVirtualSupplyBatchParallel;
+        /** 高级样板包装箱 — UI 每行样板槽位数 */
+        public ForgeConfigSpec.IntValue advancedPatternBoxPatternsPerRow;
+        /** 高级样板包装箱 — UI 每页行数 */
+        public ForgeConfigSpec.IntValue advancedPatternBoxRowsPerPage;
+        /** 高级样板包装箱 — 最大页数 */
+        public ForgeConfigSpec.IntValue advancedPatternBoxMaxPages;
+        /** 样板总成工具箱 — 剪贴板面板最多渲染的样板数 */
+        public ForgeConfigSpec.IntValue patternBufferToolkitPreviewLimit;
         /** 山海商店 — 购买总量达到此阈值时打包成超级磁盘阵列（而非塞背包） */
         public ForgeConfigSpec.LongValue shopSdaPackThreshold;
         /** 山海商店 — 奖励表模式（自选/随机/全部/FTBQ）单次购买最多独立随机抽取的次数 */
@@ -111,6 +121,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue kjsRecipeLibraryCacheEnabled;
         /** AE 网络库存增量刷新缓存 — 是否启用性能优化 */
         public ForgeConfigSpec.BooleanValue aeStorageDeltaCacheEnabled;
+        /** AE 网络库存增量刷新缓存 — 强制全量重扫安全网间隔（tick） */
+        public ForgeConfigSpec.IntValue aeStorageForceRescanTicks;
 
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("tag_filter_bus");
@@ -226,6 +238,15 @@ public final class DShanhaiConfig {
                              "false = 样板配方类型必须存在于宿主 machine.getRecipeTypes()，否则不进入执行队列",
                              "true = 保留旧兼容行为，允许完整 GTRecipe 跨宿主配方类型虚拟直跑；可能绕过机器配方类型限制")
                     .define("allowUnsupportedHostRecipeTypes", false);
+            recipeTypeSharedSearchSets = builder
+                    .comment("星律共享搜索集：每个条目是一组以逗号分隔的配方类型ID（需带命名空间），同组类型互相视为可共同搜索/执行",
+                             "例：\"gtceu:chemical_reactor,gtceu:large_chemical_reactor\" 表示化反样板可在大型化反宿主执行、反之亦然",
+                             "生效范围：虚拟执行的宿主类型校验、配方类型选择集机器的选中校验、样板槽扣料的类型匹配",
+                             "样板自身的配方解析仍按其编码类型域进行；与 allowUnsupportedHostRecipeTypes（全放开）相比这是按组精确授权",
+                             "空列表 = 保持严格隔离")
+                    .defineList("sharedSearchSets",
+                            List.of("gtceu:chemical_reactor,gtceu:large_chemical_reactor"),
+                            value -> value instanceof String);
             recipeTypePatternsPerRow = builder
                     .comment("星律样板总成 UI 每行样板槽位数（默认 9）",
                              "修改后重启生效：已放置的总成在下次区块加载时即采用新配置",
@@ -245,6 +266,31 @@ public final class DShanhaiConfig {
                              "样板配方执行的并行数由这个批量与网络真实库存共同决定：取两者较小值，绝不会超过网络实际库存",
                              "调大能让单个样板槽位吃到更高并行/吞吐，调小更保守；不影响配方类型选择集本身的机器最大并行上限")
                     .defineInRange("virtualSupplyBatchParallel", 65536L, 1L, Long.MAX_VALUE);
+            builder.pop();
+
+            builder.push("advanced_pattern_box");
+            advancedPatternBoxPatternsPerRow = builder
+                    .comment("高级样板包装箱 UI 每行样板槽位数（默认 9）",
+                             "总容量 = patternsPerRow × rowsPerPage × maxPages（默认 9×6×4 = 216）")
+                    .defineInRange("patternsPerRow", 9, 1, 16);
+            advancedPatternBoxRowsPerPage = builder
+                    .comment("高级样板包装箱 UI 每页行数（默认 6）",
+                             "调大会撑高 GUI，小分辨率/大 GUI 缩放下可能超出屏幕，按自己屏幕权衡")
+                    .defineInRange("rowsPerPage", 6, 1, 8);
+            advancedPatternBoxMaxPages = builder
+                    .comment("高级样板包装箱最大页数（默认 4）",
+                             "调大立即生效：下次打开/使用包装箱时按新容量扩容",
+                             "调小不会丢样板：已存到高位槽的样板会把箱子实际槽位撑在原尺寸，直到这些槽被清空才缩回")
+                    .defineInRange("maxPages", 4, 1, 64);
+            builder.pop();
+
+            builder.push("pattern_buffer_toolkit");
+            patternBufferToolkitPreviewLimit = builder
+                    .comment("样板总成工具箱剪贴板面板最多渲染的样板数（默认 270 = 9 列 × 30 行，面板内滚动查看）",
+                             "只影响面板预览，不限制剪贴板实际容量：超出部分照常复制/剪切/套用，只是不在面板里画出来",
+                             "每个预览格都是一个真实容器槽，开面板时要整份同步给客户端——",
+                             "剪贴板动辄上千个样板，调太大会让开面板卡顿甚至撑爆数据包，慎调")
+                    .defineInRange("previewLimit", 270, 9, 2048);
             builder.pop();
 
             builder.push("shop");
@@ -313,6 +359,12 @@ public final class DShanhaiConfig {
                              "false=关闭该优化，每次都强制全量重扫库存，保证 ME 输出仓室返回、取出物品、取出磁盘等",
                              "不经过 insert/extract 记录路径的变化也能被及时刷新（性能开销恢复为未优化前水平）")
                     .define("enabled", true);
+            aeStorageForceRescanTicks = builder
+                    .comment("强制全量重扫安全网间隔（tick，默认 40 = 2 秒，仅在 enabled=true 时生效）",
+                             "存储总线背后的外部容器（箱子/机器）被管道、漏斗、玩家直接改动时，",
+                             "不经过 AE 的 insert/extract 记录路径，增量缓存无法感知——原版 AE2 靠每 tick 全扫兜底",
+                             "此安全网保证这类变化最迟 N tick 内被看见，把陈旧窗口从无界压到有界")
+                    .defineInRange("forceRescanTicks", 40, 10, 1200);
             builder.pop();
         }
     }

@@ -23,7 +23,8 @@ class ShopCatalogCodecsTest {
         Method read = codecs.getMethod("readManifest", FriendlyByteBuf.class);
         ShopCatalogManifest source = new ShopCatalogManifest(42L, true, List.of(
                 new ShopCatalogManifest.Stub(7L, "无限盘区", "前期", "", "", false,
-                        3, "disk", "超级磁盘", List.of("mod:disk"), "stable-7")), java.util.Map.of());
+                        3, "disk", "超级磁盘", List.of("mod:disk"), "stable-7",
+                        "00000000000004D2")), java.util.Map.of());
         FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
 
         write.invoke(null, buffer, source);
@@ -32,6 +33,7 @@ class ShopCatalogCodecsTest {
         assertEquals(42L, decoded.revision());
         assertEquals(1, decoded.stubs().size());
         assertEquals("mod:disk", decoded.stubs().get(0).goodsIds().get(0));
+        assertEquals("00000000000004D2", decoded.stubs().get(0).prereqQuestId());
     }
 
     @Test

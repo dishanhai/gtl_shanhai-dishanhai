@@ -113,6 +113,7 @@ public class ClientInit {
         com.dishanhai.gt_shanhai.client.shop.ClientShopBank.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientCostPreview.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientAeCurrencyBalance.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientShopQuestLinks.clear();
     }
 
     /**

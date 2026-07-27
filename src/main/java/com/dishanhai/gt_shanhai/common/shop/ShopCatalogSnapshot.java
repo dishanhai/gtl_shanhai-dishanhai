@@ -19,7 +19,8 @@ public final class ShopCatalogSnapshot {
     public static final int MAX_ENTRY_BYTES = 1024 * 1024;
 
     public record Descriptor(String category, boolean hidden, String linkKey,
-                             String displayName, List<String> goodsIds, int payloadBytes, String stableId) {
+                             String displayName, List<String> goodsIds, int payloadBytes, String stableId,
+                             String prereqQuestId) {
         public Descriptor {
             category = category == null || category.isBlank() ? ShopEntry.DEFAULT_CATEGORY : category;
             linkKey = linkKey == null ? "" : linkKey;
@@ -27,6 +28,7 @@ public final class ShopCatalogSnapshot {
             goodsIds = goodsIds == null ? List.of() : List.copyOf(goodsIds);
             payloadBytes = Math.max(1, payloadBytes);
             stableId = stableId == null ? "" : stableId;
+            prereqQuestId = prereqQuestId == null ? "" : prereqQuestId;
         }
     }
 
@@ -147,7 +149,8 @@ public final class ShopCatalogSnapshot {
             }
             payloads.add(payload);
             descriptors.add(new Descriptor(entry.getCategory(), entry.isHidden() || !entry.isStructurallyValid(), entry.getLinkKey(),
-                    entry.goodsDisplayName(), goodsIds, payload.estimatedUtf8Bytes(), entry.getStableId()));
+                    entry.goodsDisplayName(), goodsIds, payload.estimatedUtf8Bytes(), entry.getStableId(),
+                    entry.getPrerequisiteQuestId()));
             byKey.put(key, entry);
             byEntry.put(entry, key);
             byStableId.put(entry.getStableId(), entry);
@@ -203,7 +206,7 @@ public final class ShopCatalogSnapshot {
             String top = path[0], sub = path[1], sub2 = path[2], sub3 = path[3];
             stubs.add(new ShopCatalogManifest.Stub(key, top, sub, sub2, sub3, descriptor.hidden(),
                     chunkByKey.getOrDefault(key, -1), descriptor.linkKey(), descriptor.displayName(), descriptor.goodsIds(),
-                    descriptor.stableId()));
+                    descriptor.stableId(), descriptor.prereqQuestId()));
             if (!descriptor.linkKey().isEmpty()) links.putIfAbsent(descriptor.linkKey(), key);
             if (descriptor.hidden()) continue;
             tops.add(top);

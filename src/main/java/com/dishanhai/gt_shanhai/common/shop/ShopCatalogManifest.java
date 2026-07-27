@@ -7,9 +7,16 @@ import java.util.Map;
 /** 供客户端先建立分类、滚动高度和轻量搜索索引的山海商店目录清单。 */
 public final class ShopCatalogManifest {
 
-    /** top/sub/sub2/sub3：分类路径按 "/" 最多拆 4 级（第 4 级吸收更深的剩余部分），见 ShopCatalogSnapshot#splitCategoryPath。 */
+    /**
+     * top/sub/sub2/sub3：分类路径按 "/" 最多拆 4 级（第 4 级吸收更深的剩余部分），见 ShopCatalogSnapshot#splitCategoryPath。
+     *
+     * <p>{@code prereqQuestId} 是该商品配置的前置 FTBQ 任务（十六进制 ID，空=没配）。放在 stub 而不是
+     * 只留在完整 {@link ShopEntry} 里，是因为任务书那侧要反查「这个任务对应哪些商品」——完整条目按
+     * chunk 惰性加载，没逛过的分类查不到；stub 是全量的，反查才不漏。</p>
+     */
     public record Stub(long entryKey, String top, String sub, String sub2, String sub3, boolean hidden,
-                       int chunkId, String linkKey, String displayName, List<String> goodsIds, String stableId) {
+                       int chunkId, String linkKey, String displayName, List<String> goodsIds, String stableId,
+                       String prereqQuestId) {
         public Stub {
             top = top == null ? "" : top;
             sub = sub == null ? "" : sub;
@@ -19,6 +26,7 @@ public final class ShopCatalogManifest {
             displayName = displayName == null ? "" : displayName;
             goodsIds = goodsIds == null ? List.of() : List.copyOf(goodsIds);
             stableId = stableId == null ? "" : stableId;
+            prereqQuestId = prereqQuestId == null ? "" : prereqQuestId;
         }
     }
 

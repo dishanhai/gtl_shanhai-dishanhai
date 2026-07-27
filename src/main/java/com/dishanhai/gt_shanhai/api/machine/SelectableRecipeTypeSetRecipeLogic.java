@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.api.machine;
 
 import com.dishanhai.gt_shanhai.common.item.PatternSlotScopedRecipe;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
+import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
@@ -463,6 +464,13 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     }
 
     private boolean isRecipeTypeSelected(GTRecipeType type) {
-        return type != null && getMachine().isRecipeTypeSelected(type);
+        if (type == null) {
+            return false;
+        }
+        SelectableRecipeTypeSetMachine machine = getMachine();
+        // 星律共享搜索集：与任一选中类型同组的配方类型视为选中——只放宽虚拟样板候选；
+        // 原生 lookup 候选本就只来自选中类型，精确判断先行、共享集兜底，热路径零额外开销。
+        return machine.isRecipeTypeSelected(type)
+                || RecipeTypeSharedSearchSets.isSharedWithAny(type, machine.getSelectedRecipeTypes());
     }
 }

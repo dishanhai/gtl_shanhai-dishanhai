@@ -53,6 +53,10 @@ public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu
     @Unique
     private Set<AEKey> gtShanhai$currentChangedKeys = Collections.emptySet();
 
+    /** revision 跳号回退原版全量 diff 时，待本轮 diff 完成后重新对齐的目标 revision */
+    @Unique
+    private long gtShanhai$pendingResyncRevision = Long.MIN_VALUE;
+
     protected MEStorageMenuBroadcastOptimizationMixin(MenuType<?> menuType, int id, Inventory playerInventory, Object host) {
         super(menuType, id, playerInventory, host);
     }
@@ -60,20 +64,38 @@ public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu
     @Redirect(method = "m_38946_", at = @At(value = "INVOKE", target = "Lappeng/api/storage/MEStorage;getAvailableStacks()Lappeng/api/stacks/KeyCounter;"), remap = false)
     private KeyCounter gtShanhai$useCachedInventory(MEStorage storage) {
         IStorageService service = gtShanhai$getStorageService();
-        if (service instanceof IStorageServiceRevisionAccess revisionAccess) {
+        // storage 身份断言：ME 储存箱等 host 接电网但 getInventory() 是单颗元件而非网络存储，
+        // 用网络级缓存顶替会让单元件 GUI 显示整个网络的内容（含第三方终端变体同险）
+        if (service instanceof IStorageServiceRevisionAccess revisionAccess
+                && storage == service.getInventory()) {
             KeyCounter cachedInventory = service.getCachedInventory();
             if (cachedInventory != null) {
-                this.gtShanhai$useRevisionOptimization = true;
-                this.gtShanhai$currentAvailableStacks = cachedInventory;
-                this.gtShanhai$currentInventoryRevision = revisionAccess.gtShanhai$getInventoryRevision();
+                long revision = revisionAccess.gtShanhai$getInventoryRevision();
                 if (this.updateHelper.isFullUpdate()) {
+                    this.gtShanhai$useRevisionOptimization = true;
+                    this.gtShanhai$currentAvailableStacks = cachedInventory;
+                    this.gtShanhai$currentInventoryRevision = revision;
                     this.gtShanhai$currentChangedKeys = cachedInventory.keySet();
-                } else if (this.gtShanhai$currentInventoryRevision != this.gtShanhai$lastInventoryRevision) {
-                    this.gtShanhai$currentChangedKeys = revisionAccess.gtShanhai$getLastChangedKeys();
-                } else {
-                    this.gtShanhai$currentChangedKeys = Collections.emptySet();
+                    return cachedInventory;
                 }
-                return cachedInventory;
+                if (revision == this.gtShanhai$lastInventoryRevision) {
+                    this.gtShanhai$useRevisionOptimization = true;
+                    this.gtShanhai$currentAvailableStacks = cachedInventory;
+                    this.gtShanhai$currentInventoryRevision = revision;
+                    this.gtShanhai$currentChangedKeys = Collections.emptySet();
+                    return cachedInventory;
+                }
+                if (revision - this.gtShanhai$lastInventoryRevision == 1) {
+                    this.gtShanhai$useRevisionOptimization = true;
+                    this.gtShanhai$currentAvailableStacks = cachedInventory;
+                    this.gtShanhai$currentInventoryRevision = revision;
+                    this.gtShanhai$currentChangedKeys = revisionAccess.gtShanhai$getLastChangedKeys();
+                    return cachedInventory;
+                }
+                // revision 跳号：lastChangedKeys 是单槽信箱，一 tick 多次重扫时中间变更集已被
+                // 覆写丢弃，只应用最后一份会让终端数量静默失同步。本轮退回原版全量 diff 重新
+                // 对齐，diff 完成后在 TAIL 把 lastInventoryRevision 推进到当前值恢复增量模式。
+                this.gtShanhai$pendingResyncRevision = revision;
             }
         }
 
@@ -113,7 +135,11 @@ public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu
         if (this.gtShanhai$useRevisionOptimization) {
             this.gtShanhai$lastInventoryRevision = this.gtShanhai$currentInventoryRevision;
             this.previousAvailableStacks = new KeyCounter();
+        } else if (this.gtShanhai$pendingResyncRevision != Long.MIN_VALUE) {
+            // 跳号回退的原版全量 diff 已把客户端完整对齐，可安全推进 revision 恢复增量模式
+            this.gtShanhai$lastInventoryRevision = this.gtShanhai$pendingResyncRevision;
         }
+        this.gtShanhai$pendingResyncRevision = Long.MIN_VALUE;
         this.gtShanhai$useRevisionOptimization = false;
         this.gtShanhai$currentAvailableStacks = null;
         this.gtShanhai$currentChangedKeys = Collections.emptySet();

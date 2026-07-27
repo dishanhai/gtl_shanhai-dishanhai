@@ -430,7 +430,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             Object total = mgr.getMethod("getUserEU", UUID.class).invoke(null, uuid);
             if (total instanceof java.math.BigInteger bigTotal) {
                 textList.add(Component.literal("")
-                        .append(DShanhaiTextUtil.createElectricText("电网能源总量: "))
+                        .append(DShanhaiTextUtil.createElectricText("⚡️ 电网能源总量: "))
                         .append(Component.literal(com.gtladd.gtladditions.utils.CommonUtils.formatBigIntegerFixed(bigTotal) + " EU")
                                 .withStyle(ChatFormatting.AQUA)));
             }

@@ -777,20 +777,12 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                 }
                 return;
             }
+            // 非空输出：addSaturated 内部直达 KeyCounter 底层 records.addTo 单查找完成
+            // 累加与溢出/无限量钳制，替代此前每 key 先 get 探测再 add/set 的双重哈希查找
+            // （spark：网络扫描期 KeyCounter.get 占 0.94% 服务端线程）。
             for (int i = 0; i < size; i++) {
                 long amount = amounts[i];
-                if (amount <= 0L) continue;
-                if (amount == Long.MAX_VALUE) {
-                    out.set(keys[i], Long.MAX_VALUE);
-                    continue;
-                }
-                long current = out.get(keys[i]);
-                if (current == Long.MAX_VALUE) continue;
-                if (amount > Long.MAX_VALUE - current) {
-                    out.set(keys[i], Long.MAX_VALUE);
-                } else {
-                    out.add(keys[i], amount);
-                }
+                if (amount > 0L) AeStorageAmountMath.addSaturated(out, keys[i], amount);
             }
         }
 
@@ -1210,11 +1202,16 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         @Override
         public long extract(AEKey what, long amount, Actionable mode, IActionSource src) {
             if (amount <= 0) return 0;
+            // 聚合快照由 NormalizedStorageCell 输出、键已正规化；SIMULATE 若用原始键
+            // （如空 tag 流体变体）查表会得 0，而 MODULATE 经子盘正规化却能成功——
+            // AE 合成规划器先 SIMULATE 后 MODULATE，误判"没有库存"直接拒绝排程。
+            // preferredExtractChild 同理用正规化键，避免同一流体两个变体各占一条记录。
+            AEKey normalized = normalizeFluidKey(what);
             if (mode == Actionable.SIMULATE) {
-                return Math.min(amount, getAggregateSnapshot().get(what));
+                return Math.min(amount, getAggregateSnapshot().get(normalized));
             }
             long extracted = 0;
-            int preferredIndex = preferredExtractChild.getOrDefault(what, -1);
+            int preferredIndex = preferredExtractChild.getOrDefault(normalized, -1);
             if (preferredIndex >= 0 && preferredIndex < children.size()) {
                 extracted = children.get(preferredIndex).extract(what, amount, mode, src);
                 if (extracted >= amount) {
@@ -1232,9 +1229,9 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                 extracted += moved;
             }
             if (successfulIndex >= 0) {
-                preferredExtractChild.put(what, successfulIndex);
+                preferredExtractChild.put(normalized, successfulIndex);
             } else if (preferredIndex >= 0) {
-                preferredExtractChild.remove(what);
+                preferredExtractChild.remove(normalized);
             }
             return extracted;
         }

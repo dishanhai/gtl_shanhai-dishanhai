@@ -124,6 +124,9 @@ public final class ClientShopCatalog {
     private static final Map<String, List<Long>> groupKeys = new LinkedHashMap<>();
     private static final Map<String, Long> linkKeys = new LinkedHashMap<>();
     private static final Map<String, Long> stableIdToKey = new LinkedHashMap<>();
+    // 前置任务反向索引：FTBQ 任务 ID（十六进制）→ 以它为前置的商品 entryKey 列表（保持 manifest 顺序）。
+    // 供任务书那侧的「前往商店」按钮反查（见 FtbViewQuestPanelShopButtonMixin）；隐藏条目不入索引。
+    private static final Map<String, List<Long>> prereqQuestKeys = new LinkedHashMap<>();
     private static final List<String> topCategories = new ArrayList<>();
     private static final Map<String, List<String>> subCategories = new LinkedHashMap<>();   // key=top          -> 二级选项
     private static final Map<String, List<String>> subCategories2 = new LinkedHashMap<>();  // key=top\0sub      -> 三级选项
@@ -209,6 +212,15 @@ public final class ClientShopCatalog {
         return linkKeys.getOrDefault(linkKey, -1L);
     }
 
+    /**
+     * 反查以该 FTBQ 任务为前置的商品 entryKey 列表（按 manifest 顺序，无命中返回空表）。
+     * 只依赖全量 stub，不要求对应 chunk 已加载，所以玩家没逛过的分类也查得到。
+     */
+    public static List<Long> keysOfPrerequisiteQuest(String questHexId) {
+        if (questHexId == null || questHexId.isBlank()) return List.of();
+        return prereqQuestKeys.getOrDefault(questHexId.trim(), List.of());
+    }
+
     /** 按稳定身份 ID 查找该条目在当前快照里的 entryKey（跨快照有效，未找到返回 -1；供购物车解析用）。 */
     public static long keyOfStableId(String stableId) {
         if (stableId == null || stableId.isBlank()) return -1L;
@@ -289,6 +301,7 @@ public final class ClientShopCatalog {
         groupKeys.clear();
         linkKeys.clear();
         stableIdToKey.clear();
+        prereqQuestKeys.clear();
         topCategories.clear();
         subCategories.clear();
         subCategories2.clear();
@@ -302,6 +315,10 @@ public final class ClientShopCatalog {
             if (!stub.linkKey().isEmpty()) linkKeys.putIfAbsent(stub.linkKey(), stub.entryKey());
             if (!stub.stableId().isEmpty()) stableIdToKey.put(stub.stableId(), stub.entryKey());
             if (stub.hidden()) continue;
+            if (!stub.prereqQuestId().isEmpty()) {
+                prereqQuestKeys.computeIfAbsent(stub.prereqQuestId(), ignored -> new ArrayList<>())
+                        .add(stub.entryKey());
+            }
             String top = stub.top(), sub = stub.sub(), sub2 = stub.sub2(), sub3 = stub.sub3();
             tops.add(top);
             subs.computeIfAbsent(top, ignored -> new LinkedHashSet<>());
@@ -329,6 +346,9 @@ public final class ClientShopCatalog {
         }
         for (Map.Entry<String, List<Long>> entry : new ArrayList<>(groupKeys.entrySet())) {
             groupKeys.put(entry.getKey(), List.copyOf(entry.getValue()));
+        }
+        for (Map.Entry<String, List<Long>> entry : new ArrayList<>(prereqQuestKeys.entrySet())) {
+            prereqQuestKeys.put(entry.getKey(), List.copyOf(entry.getValue()));
         }
     }
 

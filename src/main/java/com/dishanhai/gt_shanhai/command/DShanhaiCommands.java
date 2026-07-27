@@ -715,6 +715,9 @@ public class DShanhaiCommands {
     private static int execShopReload(CommandSourceStack source) {
         com.dishanhai.gt_shanhai.common.shop.ShopConfig.reload();
         com.dishanhai.gt_shanhai.common.shop.ShopConfig.syncLimitsFromSave(source.getServer());
+        // 「任务 → 商店商品」绑定表跟商品清单同一次重载：手改过 shop_quest_links.json 也能不重启生效
+        com.dishanhai.gt_shanhai.common.shop.ShopQuestLinkConfig.reload();
+        com.dishanhai.gt_shanhai.network.ShopQuestLinkSyncPacket.broadcast();
         int n = com.dishanhai.gt_shanhai.common.shop.ShopConfig.getEntries().size();
         source.sendSuccess(msg("§b[山海商店] §a已重载商品清单，共 §f" + n + " §a个"), false);
         return 1;

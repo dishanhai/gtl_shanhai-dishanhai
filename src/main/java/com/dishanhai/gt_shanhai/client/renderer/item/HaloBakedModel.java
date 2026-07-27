@@ -16,6 +16,8 @@ import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.client.model.IDynamicBakedModel;
+import net.minecraftforge.client.model.data.ModelData;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -37,8 +39,9 @@ import java.util.List;
  * </ul>
  * 每帧重建特效 quad 实现旋转/脉冲/彩虹动画；每物品仅 ≤6 个特效面，开销可忽略。
  * 特效quad 同时生成正反两个绕序，保证 GUI（y 翻转）与地面实体两种上下文各有一面通过背面剔除。
+ * 另支持不稳定抖动（逐帧烘进 quad 顶点）与 RGB 色差残影（本体主面复制错位），见下方分节。
  */
-public class HaloBakedModel implements BakedModel {
+public class HaloBakedModel implements IDynamicBakedModel {
 
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("gt_shanhai/halo");
     /** 全局一次性：首次成功解析贴图时打 INFO，便于在日志里确认渲染链路已就绪 */
@@ -68,15 +71,28 @@ public class HaloBakedModel implements BakedModel {
         this.phase = (seed % 100000L + 100000L) % 100000L;
     }
 
+    /**
+     * 动态模型入口（IDynamicBakedModel）。实现该接口的关键作用：JEI 的
+     * ForgeLimitedQuadItemModel.wrap 对 IDynamicBakedModel 直接跳过包装（免 quad 缓存、
+     * 免 SOUTH 单面过滤），JEI 批渲染因此每帧走到这里——光环动画/抖动/色差在 JEI 列表全部活动。
+     * 抖动直接烘进 quad 顶点而非注入 applyTransform：下游包装壳的 applyTransform
+     * 转发链字节码虽完整但整合包实测冻结，"每帧重建 quad"才是已验证的可靠动画通道。
+     */
     @Override
     public List<BakedQuad> getQuads(@Nullable BlockState state,
                                     @Nullable Direction direction,
-                                    RandomSource random) {
-        List<BakedQuad> base = wrapped.getQuads(state, direction, random);
+                                    RandomSource random,
+                                    ModelData modelData,
+                                    @Nullable RenderType renderType) {
+        List<BakedQuad> base = wrapped.getQuads(state, direction, random, modelData, renderType);
         if (state != null || direction != null || base.isEmpty()) return base;
 
-        resolveSprites();
-        if (haloSprite == null && ringSprite == null && raysSprite == null) return base;
+        boolean wantHalo = settings.style != 0;
+        if (wantHalo) resolveSprites();
+        boolean haveSprite = haloSprite != null || ringSprite != null || raysSprite != null;
+        boolean wantChroma = settings.chromaAmp > 0;
+        boolean wantShake = settings.shakeMode != HaloSettings.SHAKE_NONE && settings.shakeAmp > 0;
+        if (!(wantHalo && haveSprite) && !wantChroma && !wantShake) return base;
 
         // 实测被包装模型边界，自适应任意坐标空间
         float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
@@ -102,6 +118,15 @@ public class HaloBakedModel implements BakedModel {
         float eps = size * 0.03F;
 
         long t = System.currentTimeMillis() + phase;
+        // 抖动向量烘进本帧全部 quad；glitch 失稳尖峰同帧联动光环胀大，"整体炸开"
+        float jx = 0.0F, jy = 0.0F, roll = 0.0F, unstable = 1.0F;
+        if (wantShake) {
+            float[] j = computeJitter(t);
+            jx = j[0] * size;
+            jy = j[1] * size;
+            roll = j[2];
+            unstable = j[3];
+        }
         // ⚠ 所有相位必须先对周期取模再乘 2π：epoch 毫秒 ~1.8e12，直接乘系数后
         //   float ulp 达数十弧度、每帧增量远小于 ulp，旋转/呼吸会完全冻结（sin 为 2π 周期，取模后跨界无缝）
         double pulsePhase = phaseOf(t, settings.pulsePeriodMs);
@@ -124,8 +149,8 @@ public class HaloBakedModel implements BakedModel {
         List<BakedQuad> out = new ArrayList<>(base.size() + 6);
 
         if ((settings.style & HaloSettings.STYLE_HALO) != 0 && haloSprite != null) {
-            addEffectQuads(out, haloSprite, cx, cy, minZ - 3 * eps, maxZ + 3 * eps,
-                    half * scalePulse, 0.0F, withAlpha(core, alphaPulse));
+            addEffectQuads(out, haloSprite, cx + jx, cy + jy, minZ - 3 * eps, maxZ + 3 * eps,
+                    half * scalePulse * unstable, 0.0F, withAlpha(core, alphaPulse));
         }
         if ((settings.style & HaloSettings.STYLE_RAYS) != 0 && raysSprite != null) {
             float rot = 0.0F;
@@ -134,19 +159,26 @@ public class HaloBakedModel implements BakedModel {
                 long p = Math.max(1L, (long) periodMs);
                 rot = (float) (2.0 * Math.PI * ((t % p) / periodMs) * Math.signum(settings.rotateSpeed));
             }
-            addEffectQuads(out, raysSprite, cx, cy, minZ - 2 * eps, maxZ + 2 * eps,
-                    half * 1.05F * scalePulse, rot, withAlpha(rim, alphaPulse));
+            addEffectQuads(out, raysSprite, cx + jx, cy + jy, minZ - 2 * eps, maxZ + 2 * eps,
+                    half * 1.05F * scalePulse * unstable, rot, withAlpha(rim, alphaPulse));
         }
         if ((settings.style & HaloSettings.STYLE_RING) != 0 && ringSprite != null) {
             // 冕环用错频闪烁，与底暈呼吸相位脱开，模拟日冕的不安定感
             float flicker = settings.pulse
                     ? 0.78F + 0.22F * (float) Math.sin(phaseOf(t, (int) (settings.pulsePeriodMs / 1.64)) + 2.1)
                     : 1.0F;
-            addEffectQuads(out, ringSprite, cx, cy, minZ - eps, maxZ + eps,
+            addEffectQuads(out, ringSprite, cx + jx, cy + jy, minZ - eps, maxZ + eps,
                     half * 0.92F, 0.0F, withAlpha(rim, flicker));
         }
 
-        out.addAll(base);
+        // 色差残影在本体之前提交：重叠区被后绘的本体覆盖，只在轮廓边缘露出红/青错位描边
+        if (wantChroma) addChromaGhosts(out, base, t, size, minZ, maxZ, jx, jy);
+        if (wantShake) {
+            // 本体 quad 平移/滚转副本（顶点数组与被包装模型共享，不可原地改）
+            for (BakedQuad quad : base) out.add(shiftedQuad(quad, jx, jy, roll, cx, cy));
+        } else {
+            out.addAll(base);
+        }
         return out;
     }
 
@@ -217,10 +249,14 @@ public class HaloBakedModel implements BakedModel {
         int abgr = toAbgr(argb);
         int[] front = new int[VERTEX_SIZE * 4];
         int[] back = new int[VERTEX_SIZE * 4];
+        // ⚠ 绕序以原版 FaceInfo.SOUTH（左上→左下→右下→右上，几何法线 +z）为准：
+        //   corners 数组是 左下,左上,右上,右下 —— 逆序遍历(3-i)恰好等价该 CCW 绕序。
+        //   JEI 物品列表只保留标记 SOUTH 的 quad 再交给 GPU 背面剔除，
+        //   绕序若与标记不符，光环在 JEI 中会被整张剔除（普通 GUI 因正反成对而侥幸可见）。
         for (int i = 0; i < 4; i++) {
-            putVertex(front, i, xs[i], ys[i], zFront, us[i], vs[i], abgr, 127);
             int j = 3 - i;
-            putVertex(back, i, xs[j], ys[j], zBack, us[j], vs[j], abgr, -127);
+            putVertex(front, i, xs[j], ys[j], zFront, us[j], vs[j], abgr, 127);
+            putVertex(back, i, xs[i], ys[i], zBack, us[i], vs[i], abgr, -127);
         }
         out.add(new BakedQuad(front, -1, Direction.SOUTH, sprite, false));
         out.add(new BakedQuad(back, -1, Direction.NORTH, sprite, false));
@@ -245,6 +281,125 @@ public class HaloBakedModel implements BakedModel {
         v[o + 5] = Float.floatToRawIntBits(tv);
         v[o + 6] = FULL_BRIGHT;
         v[o + 7] = (normalZ & 0xFF) << 16;
+    }
+
+    // ===== 不稳定抖动（烘进 quad 顶点，所有逐帧取 quad 的渲染路径生效） =====
+
+    /**
+     * 本体 quad 的抖动副本：整体平移 (ox, oy)，roll != 0 时绕物品中心 (cx, cy) 滚转。
+     * ⚠ 曾用 applyTransform 位姿注入实现——字节码上 JEI 批渲染每帧应转发到位，
+     *   但整合包实测冻结（断点未定位），故改烘 quad：与光环共用同一条已验证的动画通道。
+     * 顶点法线不随滚转重算（≤3.5°，视觉无感）。
+     */
+    private static BakedQuad shiftedQuad(BakedQuad src, float ox, float oy, float roll, float cx, float cy) {
+        int[] v = src.getVertices().clone();
+        float cos = roll == 0.0F ? 1.0F : (float) Math.cos(roll);
+        float sin = roll == 0.0F ? 0.0F : (float) Math.sin(roll);
+        for (int i = 0; i + 7 < v.length; i += VERTEX_SIZE) {
+            float x = Float.intBitsToFloat(v[i]);
+            float y = Float.intBitsToFloat(v[i + 1]);
+            if (roll != 0.0F) {
+                float dx = x - cx, dy = y - cy;
+                x = cx + dx * cos - dy * sin;
+                y = cy + dx * sin + dy * cos;
+            }
+            v[i] = Float.floatToRawIntBits(x + ox);
+            v[i + 1] = Float.floatToRawIntBits(y + oy);
+        }
+        return new BakedQuad(v, src.getTintIndex(), src.getDirection(), src.getSprite(), src.isShade());
+    }
+
+    /**
+     * 抖动向量 {dx, dy, roll弧度, 光环尺寸系数}。
+     * quiver：双正弦叠频（周期互相错开），x/y 独立相位，平滑 Lissajous 式颤动；
+     * glitch：按保持间隔离散取哈希伪随机位移，1/8 概率失稳尖峰（位移×2.6+急促滚转+光环×1.18）。
+     * 全部相位先取模再入三角函数（epoch 大数 float 精度教训，同 phaseOf）。
+     */
+    private float[] computeJitter(long t) {
+        float amp = settings.shakeAmp;
+        if (settings.shakeMode == HaloSettings.SHAKE_GLITCH) {
+            long hold = Math.max(30L, settings.shakePeriodMs);
+            long h = hash(t / hold);
+            boolean spike = (h & 0x7L) == 0L;
+            float k = spike ? 2.6F : 1.0F;
+            return new float[]{
+                    amp * k * unit(h >>> 8),
+                    amp * k * unit(h >>> 24),
+                    spike ? 0.06F * unit(h >>> 40) : 0.0F,
+                    spike ? 1.18F : 1.0F};
+        }
+        int p = Math.max(30, settings.shakePeriodMs);
+        float dx = amp * (float) (0.62 * Math.sin(phaseOf(t, p))
+                + 0.38 * Math.sin(phaseOf(t, (int) (p * 1.618) + 7) + 1.7));
+        float dy = amp * (float) (0.62 * Math.sin(phaseOf(t, (int) (p * 0.83) + 3) + 0.9)
+                + 0.38 * Math.sin(phaseOf(t, (int) (p * 2.09) + 11) + 2.6));
+        return new float[]{dx, dy, 0.0F, 1.0F};
+    }
+
+    /** splitmix64 变体，混入实例相位使同类物品不同步跳位 */
+    private long hash(long x) {
+        long h = x * 0x9E3779B97F4A7C15L + phase * 0x632BE59BD9B4E019L;
+        h ^= h >>> 27;
+        h *= 0x94D049BB133111EBL;
+        return h ^ (h >>> 31);
+    }
+
+    /** 取 16 位映射到 [-1, 1] */
+    private static float unit(long bits) {
+        return ((bits & 0xFFFFL) / 32767.5F) - 1.0F;
+    }
+
+    // ===== RGB 色差残影 =====
+
+    /**
+     * 把本体 SOUTH/NORTH 主面各复制红/青两张，反向错位、深度推到本体面之后：
+     * 重叠区被本体覆盖（残影先绘、本体后绘），只在轮廓边缘露出红/青撕裂描边。
+     * 1px 侧棱不复制。物品渲染是半透明系 + alpha<0.1 discard，本体透明像素
+     * 不写深度，描边不会被空像素挡住。SOUTH 残影沿用原标签，可通过 JEI 的
+     * 单面过滤（JEI 缓存 quad，残影错位量在列表里定格，属预期）。
+     */
+    private void addChromaGhosts(List<BakedQuad> out, List<BakedQuad> base,
+                                 long t, float size, float minZ, float maxZ, float jx, float jy) {
+        float[] sep = chromaOffset(t);
+        float sx = sep[0] * size, sy = sep[1] * size;
+        if (Math.abs(sx) + Math.abs(sy) < size * 0.0015F) return;
+        float gz = Math.max((maxZ - minZ) * 0.25F, size * 0.004F);
+        int red = toAbgr(0xB4FF3232);
+        int cyan = toAbgr(0xB432E0FF);
+        for (BakedQuad quad : base) {
+            Direction dir = quad.getDirection();
+            if (dir != Direction.SOUTH && dir != Direction.NORTH) continue;
+            // SOUTH 面朝 +z，残影往 -z 退到本体之后；NORTH 相反。红青深度错开防互相 z-fight
+            // (jx, jy) 是本体抖动位移：残影跟随本体、错位量叠加其上
+            float dz = dir == Direction.SOUTH ? -gz : gz;
+            out.add(ghostOf(quad, jx + sx, jy + sy, dz, red));
+            out.add(ghostOf(quad, jx - sx, jy - sy, dz * 2.0F, cyan));
+        }
+    }
+
+    /** 残影错位向量：抖动开启时与抖动同向联动（幅值换 chromaAmp），否则做慢速圆周漂移 */
+    private float[] chromaOffset(long t) {
+        if (settings.shakeMode != HaloSettings.SHAKE_NONE && settings.shakeAmp > 0) {
+            float[] j = computeJitter(t);
+            float k = settings.chromaAmp / settings.shakeAmp;
+            return new float[]{j[0] * k, j[1] * k};
+        }
+        double a = phaseOf(t, 2400);
+        return new float[]{settings.chromaAmp * (float) Math.cos(a),
+                settings.chromaAmp * (float) Math.sin(a)};
+    }
+
+    /** 复制 quad：平移顶点、覆写顶点色为残影色、拉满亮度；tintIndex 置 -1 防物品染色器二次上色 */
+    private static BakedQuad ghostOf(BakedQuad src, float ox, float oy, float oz, int abgr) {
+        int[] v = src.getVertices().clone();
+        for (int i = 0; i + 7 < v.length; i += VERTEX_SIZE) {
+            v[i] = Float.floatToRawIntBits(Float.intBitsToFloat(v[i]) + ox);
+            v[i + 1] = Float.floatToRawIntBits(Float.intBitsToFloat(v[i + 1]) + oy);
+            v[i + 2] = Float.floatToRawIntBits(Float.intBitsToFloat(v[i + 2]) + oz);
+            v[i + 3] = abgr;
+            v[i + 6] = FULL_BRIGHT;
+        }
+        return new BakedQuad(v, -1, src.getDirection(), src.getSprite(), src.isShade());
     }
 
     // ===== 委托 BakedModel / Forge 扩展 =====

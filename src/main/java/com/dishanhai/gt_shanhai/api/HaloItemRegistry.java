@@ -49,11 +49,12 @@ public class HaloItemRegistry {
         if (ForgeRegistries.ITEMS.containsKey(id)) {
             Item item = ForgeRegistries.ITEMS.getValue(id);
             if (item != null && item != Items.AIR) {
-                HALO_ITEMS.put(item, settings);
+                // merge：同一物品可分次注册光环与抖动，通道级合并（见 HaloSettings.merge）
+                HALO_ITEMS.merge(item, settings, HaloSettings::merge);
                 return;
             }
         }
-        PENDING.put(itemId, settings);
+        PENDING.merge(itemId, settings, HaloSettings::merge);
     }
 
     /** 获取物品的光环参数；未注册返回 null */
@@ -85,7 +86,7 @@ public class HaloItemRegistry {
             if (ForgeRegistries.ITEMS.containsKey(id)) {
                 Item item = ForgeRegistries.ITEMS.getValue(id);
                 if (item != null && item != Items.AIR) {
-                    HALO_ITEMS.put(item, entry.getValue());
+                    HALO_ITEMS.merge(item, entry.getValue(), HaloSettings::merge);
                 }
             } else {
                 // 拼错的 ID 走到这里；不打日志的话玩家排查不到光环为何没出现

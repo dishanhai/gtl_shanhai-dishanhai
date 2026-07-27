@@ -133,7 +133,7 @@ public enum ModuleBaseInfoProvider implements IBlockComponentProvider, IServerDa
         // 产出倍率（万物增殖核心）
         int outputMultiplier = data.getInt("outputMultiplier");
         if (outputMultiplier > 1) {
-            tooltip.add(helper.text(Component.literal("§6产出倍率: §f×" + outputMultiplier)));
+            tooltip.add(helper.text(Component.literal("§6☆ 产出倍率: §f×" + outputMultiplier)));
         }
 
         // 电网电力详情

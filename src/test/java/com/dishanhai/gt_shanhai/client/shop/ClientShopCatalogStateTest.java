@@ -127,6 +127,6 @@ class ClientShopCatalogStateTest {
     private static ShopCatalogManifest manifest(long revision, boolean ready) {
         return new ShopCatalogManifest(revision, ready, List.of(
                 new ShopCatalogManifest.Stub(0L, "杂货", "", "", "", false,
-                        3, "", "", List.of("minecraft:stone"), "stable-0")), java.util.Map.of());
+                        3, "", "", List.of("minecraft:stone"), "stable-0", "")), java.util.Map.of());
     }
 }

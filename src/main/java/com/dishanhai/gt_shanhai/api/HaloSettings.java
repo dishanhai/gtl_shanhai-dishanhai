@@ -17,6 +17,13 @@ public final class HaloSettings {
     /** 旋转星芒 */
     public static final int STYLE_RAYS = 4;
 
+    /** 不抖动 */
+    public static final int SHAKE_NONE = 0;
+    /** 平滑高频颤抖（双正弦叠频，无跳变） */
+    public static final int SHAKE_QUIVER = 1;
+    /** 故障式跳位：位移离散保持后瞬跳，带随机失稳尖峰（位移放大+急促滚转+光环胀大） */
+    public static final int SHAKE_GLITCH = 2;
+
     public final int style;
     /** 底暈颜色 ARGB */
     public final int coreColor;
@@ -34,11 +41,29 @@ public final class HaloSettings {
     public final boolean hueCore;
     /** 环/星芒彩虹色相循环（仅 rim 通道） */
     public final boolean hueRim;
+    /** 抖动模式：{@link #SHAKE_NONE}/{@link #SHAKE_QUIVER}/{@link #SHAKE_GLITCH} */
+    public final int shakeMode;
+    /** 抖动幅度，相对物品尺寸（0.03 ≈ GUI 半像素）；0 = 关 */
+    public final float shakeAmp;
+    /** quiver=振动周期毫秒；glitch=跳位保持间隔毫秒 */
+    public final int shakePeriodMs;
+    /** RGB 色差残影错位幅度，相对物品尺寸；0 = 关 */
+    public final float chromaAmp;
 
     public HaloSettings(int style, int coreColor, int rimColor, float scale,
                         boolean pulse, int pulsePeriodMs, float rotateSpeed,
                         boolean hueCore, boolean hueRim) {
-        this.style = style == 0 ? STYLE_HALO : style;
+        this(style == 0 ? STYLE_HALO : style, coreColor, rimColor, scale,
+                pulse, pulsePeriodMs, rotateSpeed, hueCore, hueRim,
+                SHAKE_NONE, 0.0F, 90, 0.0F);
+    }
+
+    /** 完整构造：style 允许为 0（纯抖动、无光环面） */
+    private HaloSettings(int style, int coreColor, int rimColor, float scale,
+                         boolean pulse, int pulsePeriodMs, float rotateSpeed,
+                         boolean hueCore, boolean hueRim,
+                         int shakeMode, float shakeAmp, int shakePeriodMs, float chromaAmp) {
+        this.style = style;
         this.coreColor = coreColor;
         this.rimColor = rimColor;
         this.scale = scale <= 0 ? 1.55F : scale;
@@ -47,6 +72,31 @@ public final class HaloSettings {
         this.rotateSpeed = rotateSpeed;
         this.hueCore = hueCore;
         this.hueRim = hueRim;
+        this.shakeMode = shakeMode;
+        this.shakeAmp = Math.max(0.0F, shakeAmp);
+        this.shakePeriodMs = shakePeriodMs <= 0 ? 90 : shakePeriodMs;
+        this.chromaAmp = Math.max(0.0F, chromaAmp);
+    }
+
+    /** 纯抖动设置（无光环面），供 makeShake 使用；可与光环注册合并 */
+    public static HaloSettings shakeOnly(int shakeMode, float shakeAmp, int shakePeriodMs, float chromaAmp) {
+        return new HaloSettings(0, 0, 0, 1.55F, false, 1400, 0.0F, false, false,
+                shakeMode, shakeAmp, shakePeriodMs, chromaAmp);
+    }
+
+    /**
+     * 合并同一物品的两次注册：新注册中显式给出的通道覆盖旧值，未给出的保留。
+     * 光环通道以 style != 0 为显式标志，抖动通道以 shakeMode != NONE 或 chromaAmp > 0 为显式标志。
+     * 使脚本可对同一物品先 makeHalo 再 makeShake（顺序无关）。
+     */
+    public static HaloSettings merge(HaloSettings oldS, HaloSettings newS) {
+        if (oldS == null) return newS;
+        if (newS == null) return oldS;
+        HaloSettings h = newS.style != 0 ? newS : oldS;
+        HaloSettings s = (newS.shakeMode != SHAKE_NONE || newS.chromaAmp > 0) ? newS : oldS;
+        return new HaloSettings(h.style, h.coreColor, h.rimColor, h.scale,
+                h.pulse, h.pulsePeriodMs, h.rotateSpeed, h.hueCore, h.hueRim,
+                s.shakeMode, s.shakeAmp, s.shakePeriodMs, s.chromaAmp);
     }
 
     /**
@@ -88,6 +138,15 @@ public final class HaloSettings {
             if (Character.digit(s.charAt(i), 16) < 0) return false;
         }
         return true;
+    }
+
+    /** 解析抖动模式："glitch"/"故障" → 跳位；"none"/"off" → 关；其余（含 "quiver"/"颤抖"）→ 平滑颤抖 */
+    public static int parseShakeMode(String spec) {
+        return switch (spec == null ? "" : spec.trim().toLowerCase()) {
+            case "glitch", "故障" -> SHAKE_GLITCH;
+            case "none", "off" -> SHAKE_NONE;
+            default -> SHAKE_QUIVER;
+        };
     }
 
     /** 颜色串是否表示彩虹模式 */

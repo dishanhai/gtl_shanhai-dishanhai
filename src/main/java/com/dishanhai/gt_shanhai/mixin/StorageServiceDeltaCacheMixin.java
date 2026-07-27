@@ -35,6 +35,15 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
     private long gtShanhai$inventoryRevision;
     @Unique
     private Set<AEKey> gtShanhai$lastChangedKeys;
+    /** 本网格经历的服务端 tick 数（onServerEndTick 每 tick 自增），供 per-tick 去抖比对 */
+    @Unique
+    private long gtShanhai$tickCounter;
+    /** 最近一次全量重扫发生在哪个 tick（去抖：同 tick 内至多一次全扫，向原版语义收敛） */
+    @Unique
+    private long gtShanhai$lastFullSyncTick = Long.MIN_VALUE;
+    /** 强制全扫安全网倒计时（覆盖存储总线外部容器等不经 insert/extract 的变化） */
+    @Unique
+    private int gtShanhai$forceRescanCountdown;
 
     @Unique
     private void gtShanhai$ensureState() {
@@ -54,11 +63,22 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
     @Inject(method = "onServerEndTick", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$keepCacheWarmWithoutWatchers(CallbackInfo ci) {
         gtShanhai$ensureState();
+        gtShanhai$tickCounter++;
+
+        boolean enabled = DShanhaiConfig.COMMON.aeStorageDeltaCacheEnabled.get();
+        // 强制全扫安全网：存储总线背后的外部容器被管道/漏斗/玩家直改时不经 insert/extract
+        // 记录路径，增量缓存无法感知（原版 AE2 靠每 tick 全扫兜底、被本 mixin 取消）。
+        // 每 N tick 无条件标脏一次，把陈旧窗口从无界压到 N tick。
+        if (enabled && ++gtShanhai$forceRescanCountdown >= DShanhaiConfig.COMMON.aeStorageForceRescanTicks.get()) {
+            gtShanhai$forceRescanCountdown = 0;
+            this.cachedStacksNeedUpdate = true;
+        }
+
         if (!this.interestManager.isEmpty()) {
             return;
         }
 
-        if (!DShanhaiConfig.COMMON.aeStorageDeltaCacheEnabled.get()) {
+        if (!enabled) {
             return;
         }
 
@@ -71,7 +91,17 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
     @Inject(method = "updateCachedStacks", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$updateCachedStacksIncrementally(CallbackInfo ci) {
         gtShanhai$ensureState();
-        if (this.cachedStacksNeedUpdate || !DShanhaiConfig.COMMON.aeStorageDeltaCacheEnabled.get()) {
+        boolean enabled = DShanhaiConfig.COMMON.aeStorageDeltaCacheEnabled.get();
+        if (this.cachedStacksNeedUpdate || !enabled) {
+            // per-tick 去抖：AE2 部件普遍在循环内读写交错（如输出总线逐槽 读→extract→读），
+            // 事件驱动标脏会把全量重扫放大到 O(部件数×槽位数)/tick。同 tick 内已扫过就直接
+            // 返回既有快照（脏标记保留，下一 tick 首次读取时重扫）——tick 内陈旧与原版语义
+            // 一致（原版同样每 tick 至多一次全扫）。配置关闭时不去抖，行为完全回归原版。
+            if (enabled && gtShanhai$lastFullSyncTick == gtShanhai$tickCounter) {
+                ci.cancel();
+                return;
+            }
+            gtShanhai$lastFullSyncTick = gtShanhai$tickCounter;
             gtShanhai$fullSyncUpdate();
             ci.cancel();
             return;
@@ -120,6 +150,9 @@ public abstract class StorageServiceDeltaCacheMixin implements IStorageServiceDe
     @Override
     public void gtShanhai$recordDelta(AEKey key, long delta) {
         if (key == null || delta == 0L) return;
+        // 配置关闭时必须不标脏：原版本来就每 tick 末标脏一次，这里再按写入频率标脏
+        // 会让"关闭优化"比原版更慢（每次读写交错都触发全扫），管理员无法有效回滚
+        if (!DShanhaiConfig.COMMON.aeStorageDeltaCacheEnabled.get()) return;
         gtShanhai$ensureState();
         this.cachedStacksNeedUpdate = true;
     }

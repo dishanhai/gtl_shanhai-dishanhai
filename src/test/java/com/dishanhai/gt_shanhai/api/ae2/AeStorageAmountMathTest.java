@@ -2,12 +2,28 @@ package com.dishanhai.gt_shanhai.api.ae2;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.math.BigInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class AeStorageAmountMathTest {
+
+    /**
+     * 直达通道解析失败时 addSaturated 会静默回退双查找慢路径，行为测试照样全绿——
+     * 只有这里能暴露 AE2 升级把 KeyCounter.lists / VariantCounter.records 改名的退化。
+     */
+    @Test
+    void directRecordsChannelResolvesAgainstCurrentAe2() throws Exception {
+        for (String fieldName : new String[] {
+                "KEY_COUNTER_LISTS_GETTER", "UNORDERED_RECORDS_GETTER", "FUZZY_RECORDS_GETTER" }) {
+            Field field = AeStorageAmountMath.class.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            assertNotNull(field.get(null), fieldName + " 未解析：单查找直达通道已退化为每 key 双哈希查找");
+        }
+    }
 
     @Test
     void saturatesWhenTwoInfiniteSourcesAreMerged() {

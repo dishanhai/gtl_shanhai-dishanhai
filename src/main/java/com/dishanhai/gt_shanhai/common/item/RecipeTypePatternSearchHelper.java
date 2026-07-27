@@ -427,7 +427,9 @@ public final class RecipeTypePatternSearchHelper {
     private static boolean isSelectedOnMachine(IRecipeLogicMachine machine, GTRecipeType type) {
         if (type == null) return false;
         if (machine instanceof SelectableRecipeTypeSetMachine selectable) {
-            return selectable.isRecipeTypeSelected(type);
+            // 星律共享搜索集：与任一选中类型同组的配方类型视为选中（如选中大型化反时放行化反样板）
+            return selectable.isRecipeTypeSelected(type)
+                    || RecipeTypeSharedSearchSets.isSharedWithAny(type, selectable.getSelectedRecipeTypes());
         }
         return true;
     }
@@ -440,7 +442,8 @@ public final class RecipeTypePatternSearchHelper {
         for (GTRecipeType hostType : hostTypes) {
             if (recipeTypeEquals(hostType, recipeType)) return true;
         }
-        return false;
+        // 星律共享搜索集：与宿主任一类型同组的虚拟配方类型放行（按组授权，不同于全放开的兼容开关）
+        return RecipeTypeSharedSearchSets.isSharedWithAny(recipeType, hostTypes);
     }
 
     private static void collectMarkedPatternRecipesFromMachine(IRecipeLogicMachine machine,
@@ -954,11 +957,16 @@ public final class RecipeTypePatternSearchHelper {
         LinkedHashSet<GTRecipe> supported = new LinkedHashSet<>();
         for (GTRecipe recipe : recipes) {
             if (recipe == null || recipe.recipeType == null) continue;
+            boolean allowed = false;
             for (GTRecipeType hostType : hostTypes) {
                 if (recipeTypeEquals(hostType, recipe.recipeType)) {
-                    supported.add(recipe);
+                    allowed = true;
                     break;
                 }
+            }
+            // 星律共享搜索集：与宿主任一类型同组的配方同样保留
+            if (allowed || RecipeTypeSharedSearchSets.isSharedWithAny(recipe.recipeType, hostTypes)) {
+                supported.add(recipe);
             }
         }
         return supported;
