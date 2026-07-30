@@ -330,6 +330,7 @@ public final class RecipeTypePatternSearchHelper {
      */
     public static Set<GTRecipe> collectNativeVirtualRecipes(IRecipeLogicMachine machine) {
         LinkedHashSet<GTRecipe> result = new LinkedHashSet<>();
+        if (!allowCheatVirtualExecution()) return result;
         if (!(machine instanceof IMultiController controller)) return result;
         for (IMultiPart part : controller.getParts()) {
             if (part == null) continue;
@@ -403,6 +404,7 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static void collectPlainPatternRecipesFromPart(IRecipeLogicMachine machine,
             IRecipeCapabilityMachine capabilityMachine, Object part, Set<GTRecipe> result) {
+        if (!allowCheatVirtualExecution()) return;
         if (part instanceof RecipeTypePatternSlotAccess) return; // 星律走专属路径，不重复处理
         if (!(part instanceof MEPatternBufferPartMachine buffer)) return;
         var level = buffer.getLevel();
@@ -505,6 +507,7 @@ public final class RecipeTypePatternSearchHelper {
             IRecipeCapabilityMachine capabilityMachine, Object ownerMachine, Object patternMachine,
             RecipeTypePatternSlotAccess access, int[] activeSlots, Set<GTRecipe> result,
             GenericStack[] inferenceInputs, long inferenceInventoryFingerprint) {
+        if (!allowCheatVirtualExecution()) return;
         if (!(patternMachine instanceof MEPatternBufferPartMachineBase buffer)) return;
         int slotCount = access.gtShanhai$getPatternSlotCount();
         for (int slot = 0; slot < slotCount; slot++) {
@@ -546,6 +549,7 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static void topUpVirtualSupply(MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
             GTRecipe recipe) {
+        if (!allowCheatVirtualExecution()) return;
         if (patternStack == null || patternStack.isEmpty()) return;
         Level level = buffer.getLevel();
         if (level == null) return;
@@ -1121,6 +1125,10 @@ public final class RecipeTypePatternSearchHelper {
     private static boolean recipeTypeEquals(GTRecipeType left, GTRecipeType right) {
         return left == right || (left != null && right != null && left.registryName != null
                 && left.registryName.equals(right.registryName));
+    }
+
+    private static boolean allowCheatVirtualExecution() {
+        return DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get();
     }
 
     private static final class AppendingRecipeIterator implements Iterator<GTRecipe> {

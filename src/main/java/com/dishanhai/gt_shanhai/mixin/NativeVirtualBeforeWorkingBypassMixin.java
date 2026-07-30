@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.common.item.NativeVirtualSetupState;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.machine.multiblock.WorkableMultiblockMachine;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import org.jetbrains.annotations.Nullable;
@@ -26,6 +27,7 @@ public class NativeVirtualBeforeWorkingBypassMixin {
     @Inject(method = "beforeWorking", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$bypassBeforeWorkingForVirtual(
             @Nullable GTRecipe recipe, CallbackInfoReturnable<Boolean> cir) {
+        if (!DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get()) return;
         if (!NativeVirtualSetupState.isVirtualExecution()) return;
         // 虚拟跨类型配方：跳过宿主模式校验，直接放行
         cir.setReturnValue(true);

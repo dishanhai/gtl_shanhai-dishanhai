@@ -81,6 +81,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.EnumValue<RecipeTypePatternSwitchMode> recipeTypePatternSwitchMode;
         /** 配方类型样板总成 — 是否允许虚拟执行宿主当前不支持的配方类型 */
         public ForgeConfigSpec.BooleanValue recipeTypePatternAllowUnsupportedHostRecipeTypes;
+        /** 配方类型样板总成 — 是否允许星律主动虚拟执行链破除宿主限制 */
+        public ForgeConfigSpec.BooleanValue recipeTypePatternAllowCheatVirtualExecution;
         /** 配方类型样板总成 — 星律共享搜索集（同组配方类型互认，按组放行而非全放开） */
         public ForgeConfigSpec.ConfigValue<List<? extends String>> recipeTypeSharedSearchSets;
         /** 配方类型样板总成 — 样板原料下发后未被主机取用的告警延迟（秒） */
@@ -238,8 +240,14 @@ public final class DShanhaiConfig {
             recipeTypePatternAllowUnsupportedHostRecipeTypes = builder
                     .comment("是否允许星律虚拟执行宿主当前不支持的配方类型（默认 false）",
                              "false = 样板配方类型必须存在于宿主 machine.getRecipeTypes()，否则不进入执行队列",
-                             "true = 保留旧兼容行为，允许完整 GTRecipe 跨宿主配方类型虚拟直跑；可能绕过机器配方类型限制")
+                             "true = ⚠ 作弊/破限兼容：保留旧行为，允许完整 GTRecipe 跨宿主配方类型虚拟直跑；可能绕过机器配方类型限制")
                     .define("allowUnsupportedHostRecipeTypes", false);
+            recipeTypePatternAllowCheatVirtualExecution = builder
+                    .comment("是否允许星律主动虚拟执行链破除宿主限制（默认 false）",
+                             "false = 关闭作弊执行链：未下单槽位不会主动从 AE 网络预填原料；原生多方块不会走星律虚拟直跑；不跳过宿主 beforeWorking/part 检查",
+                             "true = ⚠ 作弊/破限兼容：恢复旧版星律虚拟执行链，可能绕过宿主并行、内部小机器槽、模式/维护/part 条件等机器原生限制",
+                             "仅用于旧存档兼容或明确允许作弊的服务器；正常平衡环境请保持关闭")
+                    .define("allowCheatVirtualExecution", false);
             recipeTypeSharedSearchSets = builder
                     .comment("星律共享搜索集：每个条目是一组以逗号分隔的配方类型ID（需带命名空间），同组类型互相视为可共同搜索/执行",
                              "例：\"gtceu:chemical_reactor,gtceu:large_chemical_reactor\" 表示化反样板可在大型化反宿主执行、反之亦然",

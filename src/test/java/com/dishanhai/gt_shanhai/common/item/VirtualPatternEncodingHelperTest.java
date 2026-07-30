@@ -201,7 +201,7 @@ public class VirtualPatternEncodingHelperTest {
     }
 
     @Test
-    void stellarRecipeInferenceUsesAvailableInventoryForOmittedCatalysts() throws IOException {
+    void stellarRecipeInferenceUsesOnlyExplicitSharedCatalystsForOmittedInputs() throws IOException {
         String helperSource = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
         String machineSource = Files.readString(Path.of(
@@ -220,11 +220,22 @@ public class VirtualPatternEncodingHelperTest {
         assertTrue(helperSource.contains("VirtualItemProviderHelper.getTarget"),
                 "样板写入虚拟供应器时，反推器必须按其目标物品匹配原配方催化剂");
         assertTrue(machineSource.contains("gtShanhai$getPatternInferenceInputs"),
-                "星律必须把库存拉取和共享催化仓内容传给反推器");
-        assertTrue(machineSource.contains("getStock()"),
-                "库存上下文必须读取当前真实可见库存，而不是只读取配置键");
+                "星律必须显式提供反推上下文");
+        int methodStart = machineSource.indexOf("public GenericStack[] gtShanhai$getPatternInferenceInputs()");
+        int methodEnd = machineSource.indexOf("\n    public IPatternDetails", methodStart);
+        String method = machineSource.substring(methodStart, methodEnd);
+        assertTrue(method.contains("getSharedCatalystInventory()"),
+                "反推上下文必须保留共享催化仓");
+        assertTrue(method.contains("getSharedCatalystTank()"),
+                "反推上下文必须保留共享催化罐");
+        assertFalse(method.contains("appendVisibleStock"),
+                "反推上下文不得读取 stock 可见库存，避免把主机并行池当 presence");
+        assertFalse(method.contains(".getStock()"),
+                "反推上下文不得直接读取库存拉取槽 getStock()");
+        assertFalse(method.contains("getConfigurableSlot"),
+                "反推上下文不得从库存配置槽绕路读取主机并行池");
         assertTrue(searchSource.contains("inferenceInventoryFingerprint"),
-                "反推缓存必须感知库存变化，补入模块后才能重新推断");
+                "反推缓存必须感知显式共享催化内容变化，补入模块后才能重新推断");
     }
 
     @Test

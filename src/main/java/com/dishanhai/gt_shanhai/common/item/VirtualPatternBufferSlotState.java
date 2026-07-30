@@ -53,7 +53,14 @@ public final class VirtualPatternBufferSlotState {
         if (present <= 0L) return;
         Object2LongOpenHashMap<T> targets = getOrCreateTargets(inventory);
         long registered = Math.min(present, amount);
-        if (registered > targets.getLong(key)) targets.put(key, registered);
+        long previous = targets.getLong(key);
+        if (previous > registered && inventory.getLong(key) > registered) {
+            inventory.put(key, registered);
+        }
+        if (fallbackPresence != null && fallbackPresence.getLong(key) > registered) {
+            fallbackPresence.put(key, registered);
+        }
+        targets.put(key, registered);
     }
 
     public static synchronized void writeVirtualTargets(Object2LongOpenHashMap<AEItemKey> itemInventory,
