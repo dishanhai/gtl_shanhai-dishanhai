@@ -9,12 +9,19 @@ import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.ResourceLocationArgument;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -35,7 +42,9 @@ import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiGTRecipeQuery;
 import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
+import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 
@@ -127,6 +136,7 @@ public class DShanhaiCommands {
                 .then(materialsCommand("materials"))
                 .then(sdaCommand("sda"))
                 .then(shopCommand("shop"))
+                .then(stellarTeleportCommand())
                 .then(cacheCommand());
 
         event.getDispatcher().register(cmd);
@@ -837,6 +847,46 @@ public class DShanhaiCommands {
                         .executes(ctx -> cacheStats(ctx.getSource())))
                 .then(Commands.literal("reset")
                         .executes(ctx -> cacheResetStats(ctx.getSource())));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> stellarTeleportCommand() {
+        return Commands.literal("stellar_tp")
+                .requires(source -> source.hasPermission(0))
+                .then(Commands.argument("dimension", ResourceLocationArgument.id())
+                        .then(Commands.argument("x", IntegerArgumentType.integer())
+                                .then(Commands.argument("y", IntegerArgumentType.integer())
+                                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                .executes(ctx -> execStellarTeleport(
+                                                        ctx.getSource(),
+                                                        ResourceLocationArgument.getId(ctx, "dimension"),
+                                                        IntegerArgumentType.getInteger(ctx, "x"),
+                                                        IntegerArgumentType.getInteger(ctx, "y"),
+                                                        IntegerArgumentType.getInteger(ctx, "z")))))));
+    }
+
+    private static int execStellarTeleport(CommandSourceStack source, ResourceLocation dimension,
+            int x, int y, int z) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        ResourceKey<Level> levelKey = ResourceKey.create(Registries.DIMENSION, dimension);
+        ServerLevel level = source.getServer().getLevel(levelKey);
+        if (level == null) {
+            source.sendFailure(Component.literal("§c[山海] 目标维度不存在: " + dimension));
+            return 0;
+        }
+
+        BlockPos pos = new BlockPos(x, y, z);
+        if (!level.hasChunkAt(pos)) {
+            source.sendFailure(Component.literal("§c[山海] 目标区块未加载，拒绝传送: " + dimension + " " + pos.toShortString()));
+            return 0;
+        }
+        if (!(MetaMachine.getMachine(level, pos) instanceof RecipeTypePatternBufferPartMachine)) {
+            source.sendFailure(Component.literal("§c[山海] 目标位置已经不是星律样板总成，拒绝传送"));
+            return 0;
+        }
+
+        player.teleportTo(level, x + 0.5D, y + 1.0D, z + 0.5D, player.getYRot(), player.getXRot());
+        source.sendSuccess(msg("§a[山海] 已传送至星律样板总成: " + dimension + " " + pos.toShortString()), false);
+        return 1;
     }
 
     private static int cacheStats(CommandSourceStack source) {

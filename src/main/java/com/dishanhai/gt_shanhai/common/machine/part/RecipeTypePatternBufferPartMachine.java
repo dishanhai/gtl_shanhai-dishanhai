@@ -223,6 +223,25 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         return new StellarPatternBufferInternalSlot(slotIndex);
     }
 
+    @Override
+    public boolean pushPattern(IPatternDetails patternDetails, KeyCounter[] inputHolder) {
+        Integer slotIndex = getSlotIndexForPattern(patternDetails);
+        boolean accepted = super.pushPattern(patternDetails, inputHolder);
+        if (accepted && slotIndex != null && slotIndex >= 0 && slotIndex < maxPatternCount && !isRemote()) {
+            int slot = slotIndex;
+            StellarPatternStuckWatch.schedule(
+                    this,
+                    slot,
+                    patternDetails,
+                    gtShanhai$getSlotItemInventory(slot),
+                    gtShanhai$getSlotFluidInventory(slot),
+                    gtShanhai$hostRecipeTypeIds(),
+                    gtShanhai$getPatternRecipeTypeId(slot),
+                    StellarPatternCraftingContext.currentAePlayerId());
+        }
+        return accepted;
+    }
+
     private final class StellarPatternBufferInternalSlot extends StockingPatternBufferInternalSlot {
 
         private StellarPatternBufferInternalSlot(int slotIndex) {

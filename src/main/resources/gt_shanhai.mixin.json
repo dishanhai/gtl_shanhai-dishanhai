@@ -91,6 +91,8 @@
     "CraftConfirmMenuOverflowGuardMixin",
     "CraftingCpuHelperVirtualPatternInputsMixin",
     "CraftingCpuLogicVirtualPresenceMixin",
+    "CraftingCpuLogicStellarContextMixin",
+    "CraftingCpuLogicStellarContextMixin$ExecutingCraftingJobAccessor",
     "AeUtilsVirtualPatternInputsMixin",
     "KeyCounterListsAccessor",
     "NetworkStorageDeltaTrackerMixin",

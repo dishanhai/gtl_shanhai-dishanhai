@@ -83,6 +83,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue recipeTypePatternAllowUnsupportedHostRecipeTypes;
         /** 配方类型样板总成 — 星律共享搜索集（同组配方类型互认，按组放行而非全放开） */
         public ForgeConfigSpec.ConfigValue<List<? extends String>> recipeTypeSharedSearchSets;
+        /** 配方类型样板总成 — 样板原料下发后未被主机取用的告警延迟（秒） */
+        public ForgeConfigSpec.IntValue recipeTypePatternStuckWarningSeconds;
         /** 配方类型样板总成 — UI 每行样板槽位数 */
         public ForgeConfigSpec.IntValue recipeTypePatternsPerRow;
         /** 配方类型样板总成 — UI 每页行数 */
@@ -247,6 +249,11 @@ public final class DShanhaiConfig {
                     .defineList("sharedSearchSets",
                             List.of("gtceu:chemical_reactor,gtceu:large_chemical_reactor"),
                             value -> value instanceof String);
+            recipeTypePatternStuckWarningSeconds = builder
+                    .comment("星律样板总成卡死告警延迟（秒）",
+                             "样板槽收到 AE 下单原料后，若延迟结束时这些原料仍完整停留在该槽内，则向附近玩家与 AE 下单玩家广播",
+                             "默认 10 秒，用于避开主机低并行/低吞吐刚开始吃料时的误报")
+                    .defineInRange("stuckWarningSeconds", 10, 1, 3600);
             recipeTypePatternsPerRow = builder
                     .comment("星律样板总成 UI 每行样板槽位数（默认 9）",
                              "修改后重启生效：已放置的总成在下次区块加载时即采用新配置",

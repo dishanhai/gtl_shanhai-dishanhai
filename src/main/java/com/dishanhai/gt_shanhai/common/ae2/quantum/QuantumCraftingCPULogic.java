@@ -28,6 +28,7 @@ import appeng.crafting.pattern.AEProcessingPattern;
 import appeng.hooks.ticking.TickHandler;
 import appeng.me.service.CraftingService;
 import com.google.common.base.Preconditions;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarPatternCraftingContext;
 import com.dishanhai.gt_shanhai.common.item.VirtualCraftingPresenceState;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import org.gtlcore.gtlcore.api.machine.trait.AECraft.IMECraftIOPart;
@@ -267,7 +268,13 @@ public class QuantumCraftingCPULogic {
                     }
                     break;
                 }
-                boolean accepted = provider.pushPattern(details, craftingContainer);
+                StellarPatternCraftingContext.push(job == null ? null : job.playerId);
+                boolean accepted;
+                try {
+                    accepted = provider.pushPattern(details, craftingContainer);
+                } finally {
+                    StellarPatternCraftingContext.pop();
+                }
                 if (QuantumDiagnostics.DISPATCH_ENABLED) {
                     String diagnosticKey = "dispatch.push.cpu."
                             + Integer.toHexString(System.identityHashCode(cpu));
