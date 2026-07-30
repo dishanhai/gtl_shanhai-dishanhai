@@ -6,6 +6,8 @@ import appeng.menu.me.items.PatternEncodingTermMenu;
 
 import com.dishanhai.gt_shanhai.common.compat.eaep.EaepProviderRecipeTypeBridge;
 import com.dishanhai.gt_shanhai.common.compat.eaep.EaepProviderRecipeTypesPacketAccess;
+import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
+import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.extendedae_plus.init.ModNetwork;
 import com.extendedae_plus.network.provider.ProvidersListS2CPacket;
 import com.extendedae_plus.network.provider.RequestProvidersListC2SPacket;
@@ -14,6 +16,7 @@ import com.extendedae_plus.util.PatternTerminalUtil;
 import com.extendedae_plus.util.uploadPattern.ProviderUploadUtil;
 
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -39,29 +42,33 @@ public class EaepRequestProvidersListRecipeTypesMixin {
                 return;
             }
             if (ProviderUploadUtil.hasPendingCtrlQPattern(player)) {
+                ItemStack uploadPattern = EaepProviderUploadPatternAccessor.gtShanhai$getPendingCtrlQPattern(player);
                 List<PatternContainer> containers = ProviderUploadUtil.listAvailableProvidersFromPlayerNetwork(player);
-                sendIndexedContainers(player, containers);
+                sendIndexedContainers(player, containers, uploadPattern);
                 return;
             }
             if (player.containerMenu instanceof PatternEncodingTermMenu encMenu) {
                 PatternAccessTermMenu accessMenu = PatternTerminalUtil.getPatternAccessMenu(player);
                 if (accessMenu != null) {
-                    sendPatternAccessProviders(player, accessMenu);
+                    sendPatternAccessProviders(player, accessMenu, ItemStack.EMPTY);
                     return;
                 }
-                sendIndexedContainers(player, PatternTerminalUtil.listAvailableProvidersFromGrid(encMenu));
+                sendIndexedContainers(player, PatternTerminalUtil.listAvailableProvidersFromGrid(encMenu),
+                        ItemStack.EMPTY);
             }
         });
         ctx.setPacketHandled(true);
         ci.cancel();
     }
 
-    private static void sendPatternAccessProviders(ServerPlayer player, PatternAccessTermMenu accessMenu) {
+    private static void sendPatternAccessProviders(ServerPlayer player, PatternAccessTermMenu accessMenu,
+            ItemStack uploadPattern) {
         List<Long> ids = PatternTerminalUtil.getAllProviderIds(accessMenu);
         List<Long> filteredIds = new ArrayList<>();
         List<String> names = new ArrayList<>();
         List<Integer> slots = new ArrayList<>();
         List<List<String>> recipeTypes = new ArrayList<>();
+        List<Boolean> stellarProviders = new ArrayList<>();
         for (Long id : ids) {
             if (id == null || !PatternProviderDataUtil.isProviderAvailable(id, accessMenu)) {
                 continue;
@@ -75,15 +82,18 @@ public class EaepRequestProvidersListRecipeTypesMixin {
             names.add(PatternProviderDataUtil.getProviderDisplayName(id, accessMenu));
             slots.add(empty);
             recipeTypes.add(EaepProviderRecipeTypeBridge.collectProviderRecipeTypeIds(container));
+            stellarProviders.add(container instanceof RecipeTypePatternBufferPartMachine);
         }
-        sendProviders(player, filteredIds, names, slots, recipeTypes);
+        sendProviders(player, filteredIds, names, slots, recipeTypes, stellarProviders, uploadPattern);
     }
 
-    private static void sendIndexedContainers(ServerPlayer player, List<PatternContainer> containers) {
+    private static void sendIndexedContainers(ServerPlayer player, List<PatternContainer> containers,
+            ItemStack uploadPattern) {
         List<Long> ids = new ArrayList<>();
         List<String> names = new ArrayList<>();
         List<Integer> slots = new ArrayList<>();
         List<List<String>> recipeTypes = new ArrayList<>();
+        List<Boolean> stellarProviders = new ArrayList<>();
         for (int i = 0; i < containers.size(); i++) {
             PatternContainer container = containers.get(i);
             if (container == null) {
@@ -97,14 +107,21 @@ public class EaepRequestProvidersListRecipeTypesMixin {
             names.add(PatternProviderDataUtil.getProviderDisplayName(container));
             slots.add(empty);
             recipeTypes.add(EaepProviderRecipeTypeBridge.collectProviderRecipeTypeIds(container));
+            stellarProviders.add(container instanceof RecipeTypePatternBufferPartMachine);
         }
-        sendProviders(player, ids, names, slots, recipeTypes);
+        sendProviders(player, ids, names, slots, recipeTypes, stellarProviders, uploadPattern);
     }
 
     private static void sendProviders(ServerPlayer player, List<Long> ids, List<String> names, List<Integer> slots,
-            List<List<String>> recipeTypes) {
+            List<List<String>> recipeTypes, List<Boolean> stellarProviders, ItemStack uploadPattern) {
         ProvidersListS2CPacket packet = new ProvidersListS2CPacket(ids, names, slots);
-        ((EaepProviderRecipeTypesPacketAccess) packet).gtShanhai$setProviderRecipeTypeIds(recipeTypes);
+        EaepProviderRecipeTypesPacketAccess access = (EaepProviderRecipeTypesPacketAccess) packet;
+        access.gtShanhai$setProviderRecipeTypeIds(recipeTypes);
+        access.gtShanhai$setStellarProviders(stellarProviders);
+        if (uploadPattern != null && !uploadPattern.isEmpty()) {
+            access.gtShanhai$setUploadRecipeTypeId(PatternRecipeTypeHelper.readRecipeTypeId(uploadPattern));
+            access.gtShanhai$setWarningMetadataKnown(true);
+        }
         ModNetwork.CHANNEL.sendTo(packet, player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
     }
 }

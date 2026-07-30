@@ -76,6 +76,7 @@
     "PatternIdentityGuardMixin$FluidHandler",
     "EaeInfinityCellRecordMixin",
     "EaepInfinityCellUuidGuardMixin",
+    "EaepProviderUploadPatternAccessor",
     "EaepProvidersListRecipeTypesMixin",
     "EaepRequestProvidersListRecipeTypesMixin",
     "EaepOpenProviderUiStellarMixin",

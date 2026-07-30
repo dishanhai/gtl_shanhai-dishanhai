@@ -30,6 +30,9 @@ public final class EaepProviderRecipeTypeBridge {
     private static final String EAEP_RECIPE_TYPE_NAMES = "extendedae_plus/recipe_type_names.json";
     private static final Gson GSON = new Gson();
     private static final ThreadLocal<List<List<String>>> INCOMING_PROVIDER_RECIPE_TYPES = new ThreadLocal<>();
+    private static final ThreadLocal<List<Boolean>> INCOMING_STELLAR_PROVIDERS = new ThreadLocal<>();
+    private static final ThreadLocal<String> INCOMING_UPLOAD_RECIPE_TYPE_ID = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> INCOMING_WARNING_METADATA_KNOWN = new ThreadLocal<>();
     private static Map<String, String> recipeTypeNameCache = Collections.emptyMap();
     private static long recipeTypeNameCacheTime = Long.MIN_VALUE;
 
@@ -57,14 +60,35 @@ public final class EaepProviderRecipeTypeBridge {
         INCOMING_PROVIDER_RECIPE_TYPES.set(copyNested(recipeTypeIds));
     }
 
+    public static void setIncomingProviderWarningMetadata(List<List<String>> recipeTypeIds,
+            List<Boolean> stellarProviders, String uploadRecipeTypeId, boolean metadataKnown) {
+        INCOMING_PROVIDER_RECIPE_TYPES.set(copyNested(recipeTypeIds));
+        INCOMING_STELLAR_PROVIDERS.set(copyBooleanList(stellarProviders));
+        INCOMING_UPLOAD_RECIPE_TYPE_ID.set(uploadRecipeTypeId == null ? "" : uploadRecipeTypeId);
+        INCOMING_WARNING_METADATA_KNOWN.set(metadataKnown);
+    }
+
     public static List<List<String>> consumeIncomingProviderRecipeTypes() {
         List<List<String>> result = INCOMING_PROVIDER_RECIPE_TYPES.get();
         INCOMING_PROVIDER_RECIPE_TYPES.remove();
         return result == null ? List.of() : result;
     }
 
+    public static IncomingProviderWarningMetadata consumeIncomingProviderWarningMetadata() {
+        List<List<String>> recipeTypes = INCOMING_PROVIDER_RECIPE_TYPES.get();
+        List<Boolean> stellarProviders = INCOMING_STELLAR_PROVIDERS.get();
+        String uploadRecipeTypeId = INCOMING_UPLOAD_RECIPE_TYPE_ID.get();
+        Boolean metadataKnown = INCOMING_WARNING_METADATA_KNOWN.get();
+        clearIncomingProviderRecipeTypes();
+        return new IncomingProviderWarningMetadata(recipeTypes, stellarProviders, uploadRecipeTypeId,
+                Boolean.TRUE.equals(metadataKnown));
+    }
+
     public static void clearIncomingProviderRecipeTypes() {
         INCOMING_PROVIDER_RECIPE_TYPES.remove();
+        INCOMING_STELLAR_PROVIDERS.remove();
+        INCOMING_UPLOAD_RECIPE_TYPE_ID.remove();
+        INCOMING_WARNING_METADATA_KNOWN.remove();
     }
 
     public static Map<String, Set<String>> buildRecipeTypeMapByProviderName(
@@ -324,6 +348,10 @@ public final class EaepProviderRecipeTypeBridge {
         return result;
     }
 
+    private static List<Boolean> copyBooleanList(List<Boolean> source) {
+        return source == null || source.isEmpty() ? List.of() : List.copyOf(source);
+    }
+
     private static <T> void reorder(List<T> list, List<Integer> indices) {
         List<T> sorted = new ArrayList<>(list.size());
         for (Integer index : indices) {
@@ -331,5 +359,15 @@ public final class EaepProviderRecipeTypeBridge {
         }
         list.clear();
         list.addAll(sorted);
+    }
+
+    public record IncomingProviderWarningMetadata(List<List<String>> providerRecipeTypeIds,
+            List<Boolean> stellarProviders, String uploadRecipeTypeId, boolean metadataKnown) {
+
+        public IncomingProviderWarningMetadata {
+            providerRecipeTypeIds = copyNested(providerRecipeTypeIds);
+            stellarProviders = copyBooleanList(stellarProviders);
+            uploadRecipeTypeId = uploadRecipeTypeId == null ? "" : uploadRecipeTypeId;
+        }
     }
 }
