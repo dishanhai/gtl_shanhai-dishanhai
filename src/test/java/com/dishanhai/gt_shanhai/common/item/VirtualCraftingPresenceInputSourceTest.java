@@ -216,7 +216,7 @@ class VirtualCraftingPresenceInputSourceTest {
         int activeEnd = search.indexOf("if (includeFirstSpark)", activeStart);
         String activePath = search.substring(activeStart, activeEnd);
         int repairCheck = activePath.indexOf("activeSlotNeedsCircuitRepair(internalSlot, recipe)");
-        int activeTopUp = activePath.indexOf("topUpVirtualSupply(buffer, slot, patternStack, recipe)");
+        int activeTopUp = activePath.indexOf("topUpVirtualSupply(machine, buffer, slot, patternStack, recipe)");
         int activeRun = activePath.indexOf("activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot)");
         assertTrue(repairCheck >= 0 && activeTopUp > repairCheck && activeRun > activeTopUp,
                 "活动槽缺失电路缓存或 Presence 时必须先定向补齐，再进入配方模拟校验");

@@ -20,6 +20,7 @@ import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
+import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 import appeng.api.storage.MEStorage;
@@ -420,7 +421,7 @@ public final class RecipeTypePatternSearchHelper {
             GTRecipe recipe = peekRecipeCached(buffer, slot, stack, level);
             if (recipe == null || !isSelectedOnMachine(machine, recipe.recipeType)
                     || !hostAllowsVirtualRecipeType(machine, recipe.recipeType)) continue;
-            topUpVirtualSupply(buffer, slot, stack, recipe);
+            topUpVirtualSupply(machine, buffer, slot, stack, recipe);
             activatePatternRecipe(capabilityMachine, buffer, recipe, slot);
             result.add(recipe);
         }
@@ -483,7 +484,7 @@ public final class RecipeTypePatternSearchHelper {
                 Object internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
                 if (activeSlotNeedsCircuitRepair(internalSlot, recipe)) {
                     ItemStack patternStack = access.gtShanhai$getPatternStack(slot);
-                    topUpVirtualSupply(buffer, slot, patternStack, recipe);
+                    topUpVirtualSupply(machine, buffer, slot, patternStack, recipe);
                 }
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
@@ -521,7 +522,7 @@ public final class RecipeTypePatternSearchHelper {
                     buffer, access, slot, inferenceInputs, inferenceInventoryFingerprint);
             if (recipe != null && access.gtShanhai$slotAllowsRecipe(slot, recipe)
                     && hostAllowsVirtualRecipeType(machine, recipe.recipeType)) {
-                topUpVirtualSupply(buffer, slot, patternStack, recipe);
+                topUpVirtualSupply(machine, buffer, slot, patternStack, recipe);
                 activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot);
                 result.add(recipe);
             }
@@ -529,9 +530,10 @@ public final class RecipeTypePatternSearchHelper {
     }
 
     /**
-     * 虚拟供料批量预填：消耗性输入的发配量本身不设上限，按"这一单"的剩余预算（见
-     * {@link #ORDER_REMAINING_BUDGET_SLOTS}）和 AE 网络真实库存尽量给足，不受宿主机器并行上限压缩——
-     * 这样机器并行低时也能一次拿到足够多轮消耗的量，不会执行一次就停。
+     * 虚拟供料批量预填：消耗性输入的发配量按"这一单"的剩余预算（见
+     * {@link #ORDER_REMAINING_BUDGET_SLOTS}）、AE 网络真实库存和宿主本体并行共同夹限。不能把
+     * GTLCore 基类的 {@code Integer.MAX_VALUE} 默认并行当成可用量，否则普通样板会一次灌入
+     * 远超宿主实际能力的输入并被合并执行。
      * <p>
      * <b>不消耗输入只建立虚拟在场目标</b>：供应器目标、编程电路和配方 {@code chance==0} 输入都不进入
      * {@link MEStorage#extract}。每槽只保留一份带虚拟身份的目标，供模拟匹配和电路缓存使用；不能按
@@ -547,7 +549,7 @@ public final class RecipeTypePatternSearchHelper {
      * 货物时不扣减预算，允许下一轮重试。样板被取出（见调用点 {@code clearOrderFulfilled}）时预算
      * 重置，下次放样板算新的一单。
      */
-    private static void topUpVirtualSupply(MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
+    private static void topUpVirtualSupply(IRecipeLogicMachine machine, MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
             GTRecipe recipe) {
         if (!allowCheatVirtualExecution()) return;
         if (patternStack == null || patternStack.isEmpty()) return;
@@ -560,16 +562,23 @@ public final class RecipeTypePatternSearchHelper {
         RecipeTypePatternSlotAccess bridge =
                 buffer instanceof RecipeTypePatternSlotAccess access ? access : null;
         Object internalSlot = null;
+        Object2LongMap<AEItemKey> itemInventory;
+        Object2LongMap<AEFluidKey> fluidInventory;
         boolean consumableStockPresent;
         if (bridge != null) {
-            Object slotItems = bridge.gtShanhai$getSlotItemInventory(slot);
-            if (slotItems == null) return;
-            consumableStockPresent = inventoryHasConsumable(slotItems, recipe)
-                    || inventoryHasConsumable(bridge.gtShanhai$getSlotFluidInventory(slot), recipe);
+            itemInventory = bridge.gtShanhai$getSlotItemInventory(slot);
+            fluidInventory = bridge.gtShanhai$getSlotFluidInventory(slot);
+            if (itemInventory == null || fluidInventory == null) return;
+            consumableStockPresent = inventoryHasConsumable(itemInventory, recipe)
+                    || inventoryHasConsumable(fluidInventory, recipe);
         } else {
             internalSlot = invokeWithInt(buffer, "getInternalSlot", slot);
             if (internalSlot == null) return;
-            consumableStockPresent = hasConsumableStock(internalSlot, recipe);
+            itemInventory = castItemInventory(invokeNoArg(internalSlot, "getItemInventory"));
+            fluidInventory = castFluidInventory(invokeNoArg(internalSlot, "getFluidInventory"));
+            if (itemInventory == null || fluidInventory == null) return;
+            consumableStockPresent = inventoryHasConsumable(itemInventory, recipe)
+                    || inventoryHasConsumable(fluidInventory, recipe);
         }
         long remainingBudget = getRemainingBudget(buffer, slot);
         if (!consumableStockPresent && remainingBudget <= 0) return;
@@ -584,6 +593,7 @@ public final class RecipeTypePatternSearchHelper {
         GenericStack[] inputs = pattern.getSparseInputs();
         if (inputs == null || inputs.length == 0) return;
 
+        long hostParallelLimit = resolveHostParallelLimit(machine);
         GenericStack[] presenceTargets = new GenericStack[inputs.length];
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
@@ -596,6 +606,12 @@ public final class RecipeTypePatternSearchHelper {
             if (presenceTarget != null && buffer instanceof VirtualPatternBufferMachineAccess access) {
                 access.gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what(),
                         Math.max(1L, presenceTarget.amount()));
+            } else if (in.what() instanceof AEItemKey) {
+                clampInventoryAmount(itemInventory, (AEItemKey) in.what(),
+                        saturatedMultiply(in.amount(), hostParallelLimit));
+            } else if (in.what() instanceof AEFluidKey) {
+                clampInventoryAmount(fluidInventory, (AEFluidKey) in.what(),
+                        saturatedMultiply(in.amount(), hostParallelLimit));
             }
         }
         if (consumableStockPresent) {
@@ -607,7 +623,7 @@ public final class RecipeTypePatternSearchHelper {
         Object actionSourceObj = readField(buffer, "actionSource");
         if (!(actionSourceObj instanceof IActionSource actionSource)) return;
         MEStorage storage = grid.getStorageService().getInventory();
-        long achievable = remainingBudget;
+        long achievable = Math.min(remainingBudget, hostParallelLimit);
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
             if (in == null || in.amount() <= 0 || presenceTargets[i] != null) continue;
@@ -638,6 +654,52 @@ public final class RecipeTypePatternSearchHelper {
         }
         if (consumableExtracted) {
             decrementBudget(buffer, slot, achievable); // 这一单预算扣减，耗尽前允许下一轮继续补
+        }
+    }
+
+    static long resolveHostParallelLimit(Object machine) {
+        if (machine == null) return 1L;
+
+        long limit = normalizeHostParallelLimit(resolvePositiveLong(invokeNoArg(machine, "getRecipeLogicMaxParallel")));
+        if (limit > 0L) return limit;
+
+        limit = normalizeHostParallelLimit(resolvePositiveLong(invokeNoArg(machine, "getMaxParallel")));
+        if (limit > 0L) return limit;
+
+        return 1L;
+    }
+
+    private static long normalizeHostParallelLimit(long limit) {
+        if (limit <= 0L) return -1L;
+        if (limit >= Integer.MAX_VALUE) return 1L;
+        return limit;
+    }
+
+    private static long resolvePositiveLong(Object value) {
+        if (value instanceof Number number) {
+            return Math.max(0L, number.longValue());
+        }
+        return -1L;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object2LongMap<AEItemKey> castItemInventory(Object inventory) {
+        return inventory instanceof Object2LongMap ? (Object2LongMap<AEItemKey>) inventory : null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object2LongMap<AEFluidKey> castFluidInventory(Object inventory) {
+        return inventory instanceof Object2LongMap ? (Object2LongMap<AEFluidKey>) inventory : null;
+    }
+
+    private static <T> void clampInventoryAmount(Object2LongMap<T> inventory, T key, long maxAmount) {
+        if (inventory == null || key == null) return;
+        long current = inventory.getLong(key);
+        if (current <= maxAmount) return;
+        if (maxAmount <= 0L) {
+            inventory.removeLong(key);
+        } else {
+            inventory.put(key, maxAmount);
         }
     }
 
