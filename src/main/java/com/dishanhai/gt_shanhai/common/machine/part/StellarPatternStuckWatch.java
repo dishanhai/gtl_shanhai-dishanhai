@@ -92,10 +92,11 @@ public final class StellarPatternStuckWatch {
         Object2LongMap<AEFluidKey> currentFluids = machine.gtShanhai$getSlotFluidInventory(watch.slot);
         if (!stillContainsAll(snapshot.items, currentItems)
                 || !stillContainsAll(snapshot.fluids, currentFluids)) {
+            machine.gtShanhai$clearPatternSlotRuntimeWarning(watch.slot);
             return;
         }
 
-        machine.gtShanhai$setPatternSlotWarning(watch.slot, true);
+        machine.gtShanhai$setPatternSlotStuckWarning(watch.slot, snapshot.items, snapshot.fluids);
         StellarPatternStuckNotifier.notifyStuck(level, watch.pos, watch.slot, watch.aePlayerId,
                 collectStuckReason(machine),
                 watch.stuckInputs, watch.stuckOutputs, watch.hostRecipeTypeIds, watch.patternRecipeTypeId);

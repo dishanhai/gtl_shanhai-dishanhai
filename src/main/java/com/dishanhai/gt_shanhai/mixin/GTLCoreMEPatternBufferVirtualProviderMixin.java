@@ -95,9 +95,7 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
                 GenericStack[] possible = input.getPossibleInputs();
                 if (possible != null && possible.length > 0 && possible[0] != null) {
                     AEKey key = possible[0].what();
-                    if (!access.gtShanhai$hasVirtualTarget(key)) {
-                        access.gtShanhai$restoreVirtualTarget(key, Long.MAX_VALUE);
-                    }
+                    access.gtShanhai$restoreVirtualTarget(key, gtShanhai$presenceAmount(input));
                 }
             }
             access.gtShanhai$syncVirtualTargetsToCatalyst();
@@ -214,6 +212,8 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
         }
         Object slot = gtShanhai$getInternalSlot(slotIndex);
         if (!(slot instanceof VirtualPatternBufferSlotAccess access)) return false;
+        long presenceAmount = gtShanhai$presenceAmount(amount);
+        access.gtShanhai$restoreVirtualTarget(key, presenceAmount);
         if (access.gtShanhai$hasVirtualTarget(key)) {
             access.gtShanhai$syncVirtualTargetsToCatalyst();
             if (key instanceof AEItemKey itemKey) gtShanhai$cacheVirtualCircuit(access, itemKey);
@@ -222,9 +222,8 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
             return true;
         }
 
-        access.gtShanhai$restoreVirtualTarget(key, Long.MAX_VALUE);
         if (!access.gtShanhai$hasVirtualTarget(key)) {
-            gtShanhai$addVirtualTargetToSlot(access, key, amount);
+            gtShanhai$addVirtualTargetToSlot(access, key, presenceAmount);
         } else {
             access.gtShanhai$syncVirtualTargetsToCatalyst();
             if (key instanceof AEItemKey itemKey) gtShanhai$cacheVirtualCircuit(access, itemKey);
@@ -289,21 +288,30 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
     }
 
     private void gtShanhai$addVirtualTargetToSlot(VirtualPatternBufferSlotAccess access, AEKey what, long amount) {
-        access.gtShanhai$add(what, amount);
+        long presenceAmount = gtShanhai$presenceAmount(amount);
+        access.gtShanhai$add(what, presenceAmount);
         if (what instanceof AEItemKey itemKey) {
             Object2LongOpenHashMap<AEItemKey> itemInventory = access.gtShanhai$itemInventory();
             if (itemInventory != null) {
-                VirtualPatternBufferSlotState.addVirtualTarget(itemInventory, itemKey, amount);
+                VirtualPatternBufferSlotState.addVirtualTarget(itemInventory, itemKey, presenceAmount);
                 VirtualPatternBufferSlotState.copyVirtualTargets(itemInventory, access.gtShanhai$itemCatalystInventory());
                 gtShanhai$cacheVirtualCircuit(access, itemKey);
             }
         } else if (what instanceof AEFluidKey fluidKey) {
             Object2LongOpenHashMap<AEFluidKey> fluidInventory = access.gtShanhai$fluidInventory();
             if (fluidInventory != null) {
-                VirtualPatternBufferSlotState.addVirtualTarget(fluidInventory, fluidKey, amount);
+                VirtualPatternBufferSlotState.addVirtualTarget(fluidInventory, fluidKey, presenceAmount);
                 VirtualPatternBufferSlotState.copyVirtualTargets(fluidInventory, access.gtShanhai$fluidCatalystInventory());
             }
         }
+    }
+
+    private long gtShanhai$presenceAmount(IPatternDetails.IInput input) {
+        return input == null ? 1L : gtShanhai$presenceAmount(input.getMultiplier());
+    }
+
+    private long gtShanhai$presenceAmount(long amount) {
+        return amount <= 0L ? 1L : amount;
     }
 
     private void gtShanhai$cacheVirtualCircuit(VirtualPatternBufferSlotAccess access, AEItemKey itemKey) {

@@ -145,8 +145,15 @@ public final class DShanhaiConfigScreen {
                         cfg.recipeTypePatternAllowUnsupportedHostRecipeTypes.get())
                 .setDefaultValue(false)
                 .setTooltip(tip("默认关闭：样板类型必须存在于主机当前配方类型集合",
-                        "开启后恢复旧行为，允许完整 GTRecipe 绕过主机配方类型限制直接执行"))
+                        "⚠ 作弊/破限兼容：开启后恢复旧行为，允许完整 GTRecipe 绕过主机配方类型限制直接执行"))
                 .setSaveConsumer(cfg.recipeTypePatternAllowUnsupportedHostRecipeTypes::set).build());
+        pattern.addEntry(e.startBooleanToggle(Component.literal("作弊：允许星律虚拟执行链破限"),
+                        cfg.recipeTypePatternAllowCheatVirtualExecution.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("默认关闭：未下单槽位不会主动从 AE 网络预填原料",
+                        "默认关闭：原生多方块不会走星律虚拟直跑，也不会跳过宿主 beforeWorking/part 检查",
+                        "⚠ 作弊/破限兼容：开启后恢复旧版虚拟执行入口，可能绕过内部小机器槽、模式/维护条件；普通耗材仍按宿主并行夹限"))
+                .setSaveConsumer(cfg.recipeTypePatternAllowCheatVirtualExecution::set).build());
         pattern.addEntry(e.startStrList(Component.literal("星律共享搜索集"),
                         new ArrayList<>(cfg.recipeTypeSharedSearchSets.get()))
                 .setDefaultValue(List.of("gtceu:chemical_reactor,gtceu:large_chemical_reactor"))

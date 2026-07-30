@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.common.item.NativeVirtualSetupState;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
@@ -72,6 +73,7 @@ public abstract class NativeVirtualFindHandleRecipeMixin {
 
     @Inject(method = "findAndHandleRecipe", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$nativeVirtualFind(CallbackInfo ci) {
+        if (!DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get()) return;
         // 仅处理多方块宿主
         if (!(machine instanceof IMultiController)) return;
 

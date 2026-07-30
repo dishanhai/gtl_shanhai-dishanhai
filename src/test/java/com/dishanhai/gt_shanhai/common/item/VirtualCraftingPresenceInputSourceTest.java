@@ -153,10 +153,10 @@ class VirtualCraftingPresenceInputSourceTest {
                 "读档后必须恢复虚拟身份，退换时才能剥离而不返还");
         assertTrue(machineMixin.contains("restoreVirtualTargetsFromPatterns"),
                 "旧存档缺少标记时，应从本槽样板的 PresenceInput 恢复身份");
-        assertTrue(machineMixin.contains("access.gtShanhai$hasVirtualTarget"),
-                "已有精确 NBT 标记时不得被旧存档迁移逻辑放大");
-        assertTrue(machineMixin.contains("Long.MAX_VALUE"),
-                "旧实现按批量次数放大的纯虚拟残留必须整项认回虚拟身份");
+        assertTrue(machineMixin.contains("gtShanhai$presenceAmount(input)"),
+                "旧存档迁移只能按样板 PresenceInput 的有限数量恢复身份");
+        assertFalse(machineMixin.contains("restoreVirtualTarget(key, Long.MAX_VALUE)"),
+                "读档恢复不得再把虚拟 presence 认成 Long.MAX_VALUE 级库存");
         assertTrue(patternMachine.contains("gtShanhai$restoreVirtualTargetsFromPatterns(getAvailablePatterns())"),
                 "旧存档恢复必须从星律样板总成实际存在的 onLoad 生命周期触发");
         assertFalse(machineMixin.contains("@Shadow\n    public abstract List<IPatternDetails> getAvailablePatterns();"),
@@ -216,7 +216,7 @@ class VirtualCraftingPresenceInputSourceTest {
         int activeEnd = search.indexOf("if (includeFirstSpark)", activeStart);
         String activePath = search.substring(activeStart, activeEnd);
         int repairCheck = activePath.indexOf("activeSlotNeedsCircuitRepair(internalSlot, recipe)");
-        int activeTopUp = activePath.indexOf("topUpVirtualSupply(buffer, slot, patternStack, recipe)");
+        int activeTopUp = activePath.indexOf("topUpVirtualSupply(machine, buffer, slot, patternStack, recipe)");
         int activeRun = activePath.indexOf("activatePatternRecipe(capabilityMachine, ownerMachine, recipe, slot)");
         assertTrue(repairCheck >= 0 && activeTopUp > repairCheck && activeRun > activeTopUp,
                 "活动槽缺失电路缓存或 Presence 时必须先定向补齐，再进入配方模拟校验");

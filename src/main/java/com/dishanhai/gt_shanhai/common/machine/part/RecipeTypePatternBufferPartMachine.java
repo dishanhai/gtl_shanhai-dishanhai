@@ -147,6 +147,11 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private String warningSlots = "";
     private BitSet cachedWarningSlots = new BitSet();
     private String cachedWarningSlotsEncoded = "";
+    private final BitSet stuckRuntimeWarningSlots = new BitSet();
+    private final Int2ReferenceOpenHashMap<Object2LongMap<AEItemKey>> stuckRuntimeItemSnapshots =
+            new Int2ReferenceOpenHashMap<>();
+    private final Int2ReferenceOpenHashMap<Object2LongMap<AEFluidKey>> stuckRuntimeFluidSnapshots =
+            new Int2ReferenceOpenHashMap<>();
 
     @Persisted
     private final ItemStackTransfer wildcardPatternInventory;
@@ -230,6 +235,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         boolean accepted = super.pushPattern(patternDetails, inputHolder);
         if (accepted && slotIndex != null && slotIndex >= 0 && slotIndex < maxPatternCount && !isRemote()) {
             int slot = slotIndex;
+            gtShanhai$clearPatternSlotRuntimeWarning(slot);
             StellarPatternStuckWatch.schedule(
                     this,
                     slot,
@@ -646,8 +652,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @Override
     public GenericStack[] gtShanhai$getPatternInferenceInputs() {
         List<GenericStack> inputs = new ArrayList<>();
-        appendVisibleStock(inputs, stockItemHandler);
-        appendVisibleStock(inputs, stockFluidHandler);
+        // 反推缺省催化剂只能看玩家显式放入的共享催化仓/罐。
+        // stockItemHandler/stockFluidHandler 的 getStock() 会混入 AE 可见库存、主机并行池或运行中缓存，
+        // 用它做 presence 会把当前任务原料误当成可省略输入，导致误缓存和误红框。
         for (int slot = 0; slot < getSharedCatalystInventory().getSlots(); slot++) {
             ItemStack stack = getSharedCatalystInventory().getStackInSlot(slot);
             if (!stack.isEmpty()) {
@@ -663,16 +670,6 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             inputs.add(new GenericStack(key, stack.getAmount()));
         }
         return inputs.toArray(GenericStack[]::new);
-    }
-
-    private static void appendVisibleStock(List<GenericStack> inputs,
-            com.gregtechceu.gtceu.integration.ae2.slot.IConfigurableSlotList handler) {
-        for (int slot = 0; slot < handler.getConfigurableSlots(); slot++) {
-            GenericStack stock = handler.getConfigurableSlot(slot).getStock();
-            if (stock != null && stock.what() != null && stock.amount() > 0L) {
-                inputs.add(stock);
-            }
-        }
     }
 
     public IPatternDetails gtShanhai$applyOutputMultiplier(IPatternDetails pattern, ItemStack stack) {
@@ -962,8 +959,31 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         }
     }
 
+    public void gtShanhai$setPatternSlotStuckWarning(int slot,
+            Object2LongMap<AEItemKey> itemSnapshot, Object2LongMap<AEFluidKey> fluidSnapshot) {
+        if (slot < 0 || slot >= maxPatternCount) return;
+        Object2LongMap<AEItemKey> items = gtShanhai$copyPositiveSnapshot(itemSnapshot);
+        Object2LongMap<AEFluidKey> fluids = gtShanhai$copyPositiveSnapshot(fluidSnapshot);
+        if (items.isEmpty() && fluids.isEmpty()) {
+            gtShanhai$clearPatternSlotRuntimeWarning(slot);
+            return;
+        }
+        stuckRuntimeWarningSlots.set(slot);
+        stuckRuntimeItemSnapshots.put(slot, items);
+        stuckRuntimeFluidSnapshots.put(slot, fluids);
+        gtShanhai$setPatternSlotWarning(slot, true);
+    }
+
+    public void gtShanhai$clearPatternSlotRuntimeWarning(int slot) {
+        if (slot < 0 || slot >= maxPatternCount) return;
+        gtShanhai$clearPatternSlotRuntimeSnapshot(slot);
+        gtShanhai$refreshPatternSlotWarning(slot);
+    }
+
     public void gtShanhai$clearPatternSlotWarnings() {
-        if (warningSlots == null || warningSlots.isEmpty()) return;
+        boolean hadWarnings = warningSlots != null && !warningSlots.isEmpty();
+        gtShanhai$clearPatternSlotRuntimeSnapshots();
+        if (!hadWarnings) return;
         warningSlots = "";
         cachedWarningSlots = new BitSet();
         cachedWarningSlotsEncoded = "";
@@ -998,6 +1018,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     @Override
     protected int[] getActiveAndUnCachedSlots() {
+        gtShanhai$clearResolvedRuntimeWarnings();
         int slotCount = getInternalSlotCount();
         if (activeUncachedSlotsScratch.length < slotCount) {
             activeUncachedSlotsScratch = Arrays.copyOf(activeUncachedSlotsScratch, slotCount);
@@ -1013,6 +1034,12 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         return activeCount == 0
                 ? NO_ACTIVE_UNCACHED_SLOTS
                 : Arrays.copyOf(activeUncachedSlotsScratch, activeCount);
+    }
+
+    @Override
+    protected int[] getActiveSlots() {
+        gtShanhai$clearResolvedRuntimeWarnings();
+        return super.getActiveSlots();
     }
 
     @Override
@@ -1713,6 +1740,13 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         if (isRemote() || slot < 0 || slot >= maxPatternCount || slot >= getPatternInventory().getSlots()) return;
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
         if (stack.isEmpty()) {
+            gtShanhai$clearPatternSlotRuntimeSnapshot(slot);
+            gtShanhai$setPatternSlotWarning(slot, false);
+            return;
+        }
+        List<String> hostRecipeTypeIds = gtShanhai$hostRecipeTypeIds();
+        if (hostRecipeTypeIds.isEmpty()) {
+            gtShanhai$clearPatternSlotRuntimeSnapshot(slot);
             gtShanhai$setPatternSlotWarning(slot, false);
             return;
         }
@@ -1727,6 +1761,63 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                 true,
                 hostRecipeTypeIds,
                 RecipeTypeSharedSearchSets::isShared));
+    }
+
+    private void gtShanhai$clearResolvedRuntimeWarnings() {
+        if (isRemote() || stuckRuntimeWarningSlots.isEmpty()) return;
+        BitSet slots = (BitSet) stuckRuntimeWarningSlots.clone();
+        for (int slot = slots.nextSetBit(0); slot >= 0; slot = slots.nextSetBit(slot + 1)) {
+            if (gtShanhai$isRuntimeWarningResolved(slot)) {
+                gtShanhai$clearPatternSlotRuntimeWarning(slot);
+            }
+        }
+    }
+
+    private boolean gtShanhai$isRuntimeWarningResolved(int slot) {
+        if (slot < 0 || slot >= maxPatternCount || slot >= getInternalSlotCount()) return true;
+        Object2LongMap<AEItemKey> itemSnapshot = stuckRuntimeItemSnapshots.get(slot);
+        Object2LongMap<AEFluidKey> fluidSnapshot = stuckRuntimeFluidSnapshots.get(slot);
+        if ((itemSnapshot == null || itemSnapshot.isEmpty()) && (fluidSnapshot == null || fluidSnapshot.isEmpty())) {
+            return true;
+        }
+        MEPatternBufferPartMachineBase.InternalSlot internalSlot = getInternalSlot(slot);
+        return !gtShanhai$stillContainsAll(itemSnapshot, internalSlot.getItemInventory())
+                || !gtShanhai$stillContainsAll(fluidSnapshot, internalSlot.getFluidInventory());
+    }
+
+    private void gtShanhai$clearPatternSlotRuntimeSnapshot(int slot) {
+        stuckRuntimeWarningSlots.clear(slot);
+        stuckRuntimeItemSnapshots.remove(slot);
+        stuckRuntimeFluidSnapshots.remove(slot);
+    }
+
+    private void gtShanhai$clearPatternSlotRuntimeSnapshots() {
+        stuckRuntimeWarningSlots.clear();
+        stuckRuntimeItemSnapshots.clear();
+        stuckRuntimeFluidSnapshots.clear();
+    }
+
+    private static <T> Object2LongOpenHashMap<T> gtShanhai$copyPositiveSnapshot(@Nullable Object2LongMap<T> source) {
+        Object2LongOpenHashMap<T> result = new Object2LongOpenHashMap<>();
+        if (source == null) return result;
+        for (Object2LongMap.Entry<T> entry : source.object2LongEntrySet()) {
+            if (entry.getLongValue() > 0L) {
+                result.put(entry.getKey(), entry.getLongValue());
+            }
+        }
+        return result;
+    }
+
+    private static <T> boolean gtShanhai$stillContainsAll(@Nullable Object2LongMap<T> snapshot,
+            @Nullable Object2LongMap<T> current) {
+        if (snapshot == null || snapshot.isEmpty()) return true;
+        if (current == null) return false;
+        for (Object2LongMap.Entry<T> entry : snapshot.object2LongEntrySet()) {
+            if (current.getLong(entry.getKey()) < entry.getLongValue()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private List<String> gtShanhai$hostRecipeTypeIds() {

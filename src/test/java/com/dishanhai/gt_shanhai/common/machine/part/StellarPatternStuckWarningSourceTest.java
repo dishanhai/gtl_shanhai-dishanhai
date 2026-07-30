@@ -43,6 +43,7 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(machine.contains("public boolean pushPattern(IPatternDetails patternDetails, KeyCounter[] inputHolder)"));
         assertTrue(machine.contains("super.pushPattern(patternDetails, inputHolder)"));
         assertTrue(machine.contains("StellarPatternCraftingContext.currentAePlayerId()"));
+        assertTrue(machine.contains("gtShanhai$clearPatternSlotRuntimeWarning(slot)"));
         assertTrue(machine.contains("StellarPatternStuckWatch.schedule("));
         assertTrue(machine.contains("gtShanhai$getSlotItemInventory(slot)"));
         assertTrue(machine.contains("gtShanhai$getSlotFluidInventory(slot)"));
@@ -57,12 +58,31 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(watch.contains("DShanhaiConfig.COMMON.recipeTypePatternStuckWarningSeconds.get()"));
         assertTrue(watch.contains("level.hasChunkAt(watch.pos)"));
         assertTrue(watch.contains("MetaMachine.getMachine(level, watch.pos) instanceof RecipeTypePatternBufferPartMachine"));
-        assertTrue(watch.contains("gtShanhai$setPatternSlotWarning(watch.slot, true)"));
+        assertTrue(watch.contains("gtShanhai$setPatternSlotStuckWarning(watch.slot, snapshot.items, snapshot.fluids)"));
+        assertTrue(watch.contains("gtShanhai$clearPatternSlotRuntimeWarning(watch.slot)"));
         assertTrue(watch.contains("stillContainsAll(snapshot.items"));
         assertTrue(watch.contains("stillContainsAll(snapshot.fluids"));
         assertTrue(watch.contains("appendRecipeLogicState(result, logicMachine)"));
         assertTrue(watch.contains("!logicMachine.isWorkingEnabled()"));
         assertTrue(watch.contains("工作=已暂停工作"));
+    }
+
+    @Test
+    void runtimeStuckWarningClearsWhenSlotInputsAreConsumedOrReduced() throws IOException {
+        String machine = Files.readString(MACHINE);
+
+        assertTrue(machine.contains("private final BitSet stuckRuntimeWarningSlots"),
+                "卡死红框必须单独保存 runtime 快照，不能只靠最终 warning bit");
+        assertTrue(machine.contains("gtShanhai$setPatternSlotStuckWarning"));
+        assertTrue(machine.contains("stuckRuntimeItemSnapshots.put(slot, items)"));
+        assertTrue(machine.contains("stuckRuntimeFluidSnapshots.put(slot, fluids)"));
+        assertTrue(machine.contains("private void gtShanhai$clearResolvedRuntimeWarnings()"));
+        assertTrue(machine.contains("protected int[] getActiveSlots()"));
+        assertTrue(machine.contains("gtShanhai$clearResolvedRuntimeWarnings();"));
+        assertTrue(machine.contains("!gtShanhai$stillContainsAll(itemSnapshot, internalSlot.getItemInventory())"));
+        assertTrue(machine.contains("!gtShanhai$stillContainsAll(fluidSnapshot, internalSlot.getFluidInventory())"));
+        assertTrue(machine.contains("gtShanhai$refreshPatternSlotWarning(slot)"),
+                "清理卡死红框后必须回到错主机配方类型判定，而不是盲目清空红框");
     }
 
     @Test
