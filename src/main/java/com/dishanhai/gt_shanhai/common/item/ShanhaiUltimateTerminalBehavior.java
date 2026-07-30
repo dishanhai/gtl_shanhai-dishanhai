@@ -147,58 +147,28 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         }
 
         ShanhaiTerminalCraftingManager.Phase phase = ShanhaiTerminalCraftingManager.phase(terminal);
-        if (phase == ShanhaiTerminalCraftingManager.Phase.CALCULATING
-                || phase == ShanhaiTerminalCraftingManager.Phase.RETRY_CALCULATING) {
-            serverPlayer.sendSystemMessage(Component.literal("§e[山海终端] AE 合成方案仍在计算"));
-            return InteractionResult.SUCCESS;
-        }
-        if (phase == ShanhaiTerminalCraftingManager.Phase.READY_TO_SUBMIT) {
-            if (!ShanhaiTerminalCraftingManager.confirmSubmit(serverPlayer, terminal, plan, ae)) {
-                serverPlayer.sendSystemMessage(Component.literal("§c[山海终端] 下单确认失败，结构或绑定已变化"));
-            }
-            return InteractionResult.SUCCESS;
-        }
-        if (phase == ShanhaiTerminalCraftingManager.Phase.SUBMITTED) {
-            if (!ShanhaiTerminalCraftingManager.refreshBuildReadiness(
-                    serverPlayer, terminal, plan, ae, materials)) {
-                serverPlayer.sendSystemMessage(Component.literal("§e[山海终端] AE 材料尚未全部到齐"));
-            }
-            return InteractionResult.SUCCESS;
-        }
         if (phase == ShanhaiTerminalCraftingManager.Phase.READY_TO_BUILD) {
             serverPlayer.sendSystemMessage(Component.literal("§a[山海终端] 潜行右击同一控制器确认施工"));
             return InteractionResult.SUCCESS;
         }
 
+        boolean hasReplacement = plan.entries().stream()
+                .anyMatch(entry -> entry.kind() == ShanhaiStructurePlan.Kind.REPLACE
+                        || entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE);
         var preflight = materials.preflight(plan, serverPlayer, ae);
-        if (preflight.success()) {
-            boolean hasReplacement = plan.entries().stream()
-                    .anyMatch(entry -> entry.kind() == ShanhaiStructurePlan.Kind.REPLACE
-                            || entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE);
-            if (hasReplacement) {
-                ShanhaiTerminalCraftingManager.armDirectBuild(serverPlayer, terminal, plan);
-                serverPlayer.sendSystemMessage(Component.literal("§e[山海终端] 替换计划已准备；潜行右击确认施工"));
-                return InteractionResult.SUCCESS;
-            }
-            ShanhaiStructureExecutor.Result result = executor.execute(serverPlayer, plan, ae);
-            serverPlayer.sendSystemMessage(Component.literal(
-                    (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
-                            + "，变更 " + result.changed() + " 处"));
-            return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+        if (hasReplacement) {
+            ShanhaiTerminalCraftingManager.armDirectBuild(serverPlayer, terminal, plan);
+            serverPlayer.sendSystemMessage(Component.literal(preflight.success()
+                    ? "§e[山海终端] 替换计划已准备；潜行右击确认施工"
+                    : "§e[山海终端] 部分施工计划已准备；潜行右击会按现有材料施工，缺材料位置跳过"));
+            return InteractionResult.SUCCESS;
         }
 
-        if (!ShanhaiUltimateTerminalConfig.isAeMode(terminal)) {
-            serverPlayer.sendSystemMessage(Component.literal("§c[山海终端] 材料不足；开启 AE 模式可使用网络库存并下单补齐"));
-            return InteractionResult.SUCCESS;
-        }
-        if (ae == null) {
-            serverPlayer.sendSystemMessage(Component.literal("§c[山海终端] 绑定的 AE 节点离线或无效"));
-            return InteractionResult.SUCCESS;
-        }
-        if (!ShanhaiTerminalCraftingManager.begin(serverPlayer, terminal, plan, ae, materials)) {
-            serverPlayer.sendSystemMessage(Component.literal("§c[山海终端] 没有可提交的材料合成请求"));
-        }
-        return InteractionResult.SUCCESS;
+        ShanhaiStructureExecutor.Result result = executor.execute(serverPlayer, plan, ae);
+        serverPlayer.sendSystemMessage(Component.literal(
+                (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
+                        + "，变更 " + result.changed() + " 处"));
+        return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
     }
 
     public boolean scanOnly(ServerPlayer player, ItemStack terminal, BlockPos pos) {

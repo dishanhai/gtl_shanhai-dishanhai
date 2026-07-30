@@ -214,9 +214,9 @@ public final class ShopAutoCraft {
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || CALCULATING.isEmpty()) return;
-        for (UUID uuid : new ArrayList<>(CALCULATING.keySet())) {
-            Session session = CALCULATING.get(uuid);
-            if (session == null) continue;
+        for (Map.Entry<UUID, Session> entry : CALCULATING.entrySet()) {
+            UUID uuid = entry.getKey();
+            Session session = entry.getValue();
             session.ticksWaited++;
             boolean allDone = true;
             for (PlanItem pi : session.items) {
@@ -224,14 +224,14 @@ public final class ShopAutoCraft {
             }
             if (!allDone) {
                 if (session.ticksWaited > CALC_TIMEOUT_TICKS) {
-                    CALCULATING.remove(uuid);
-                    cancelSession(session);
-                    ServerPlayer player = findPlayer(uuid);
-                    if (player != null) player.sendSystemMessage(Component.literal("§c[山海商店] 合成方案计算超时，已取消"));
+                    if (CALCULATING.remove(uuid, session)) {
+                        cancelSession(session);
+                        ServerPlayer player = findPlayer(uuid);
+                        if (player != null) player.sendSystemMessage(Component.literal("§c[山海商店] 合成方案计算超时，已取消"));
+                    }
                 }
                 continue;
             }
-            CALCULATING.remove(uuid);
             for (PlanItem pi : session.items) {
                 try {
                     pi.result = pi.future.get();
@@ -241,11 +241,11 @@ public final class ShopAutoCraft {
             }
             ServerPlayer player = findPlayer(uuid);
             if (player != null && expandShopDependencies(player, session)) {
-                CALCULATING.put(uuid, session);
                 player.sendSystemMessage(Component.literal("§b[山海商店] §7发现递归商店依赖，继续计算第 "
                         + session.expansionRound + " 轮（共 " + session.items.size() + " 项）…"));
                 continue;
             }
+            if (!CALCULATING.remove(uuid, session)) continue;
             READY.put(uuid, session);
             if (player != null) sendPlanToClient(player, session);
         }

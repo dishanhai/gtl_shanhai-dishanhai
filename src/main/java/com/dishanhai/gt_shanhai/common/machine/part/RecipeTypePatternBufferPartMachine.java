@@ -210,7 +210,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                 this::onPatternChange,
                 slot -> Boolean.valueOf(slot != null && slot >= 0 && slot < this.cacheRecipe.length && this.cacheRecipe[slot]),
                 this::gtShanhai$isPatternSlotWarning,
-                getPatternInventory());
+                getPatternInventory(),
+                this::getLevel);
     }
 
     @Override
@@ -1697,7 +1698,6 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private void refreshPatternRecipeTypes() {
         for (int slot = 0; slot < patternRecipeTypeIds.length; slot++) {
             refreshPatternRecipeType(slot);
-            gtShanhai$refreshPatternSlotWarning(slot);
         }
     }
 
@@ -1716,11 +1716,16 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             gtShanhai$setPatternSlotWarning(slot, false);
             return;
         }
+        List<String> hostRecipeTypeIds = gtShanhai$hostRecipeTypeIds();
+        if (hostRecipeTypeIds.isEmpty()) {
+            gtShanhai$setPatternSlotWarning(slot, false);
+            return;
+        }
         gtShanhai$setPatternSlotWarning(slot, StellarPatternWarningPolicy.isWrongHost(
                 gtShanhai$getPatternRecipeTypeId(slot),
                 true,
                 true,
-                gtShanhai$hostRecipeTypeIds(),
+                hostRecipeTypeIds,
                 RecipeTypeSharedSearchSets::isShared));
     }
 

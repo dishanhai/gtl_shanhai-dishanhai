@@ -47,6 +47,24 @@ class RecipeTypePatternBufferRenderPerformanceSourceTest {
                 "槽位变化回调必须主动清理专用槽位缓存");
     }
 
+    @Test
+    void commonPatternSlotDoesNotLinkClientLevel() throws IOException {
+        String machine = Files.readString(MACHINE);
+        String pagination = Files.readString(PAGINATION);
+        String slot = Files.readString(SLOT);
+
+        assertFalse(slot.contains("net.minecraft.client.Minecraft")
+                        || slot.contains("Minecraft.getInstance()"),
+                "common 槽位不得透过 Minecraft 单例链接 ClientLevel");
+        assertTrue(machine.contains("this::getLevel"),
+                "机器必须把通用 Level 提供给分页管理器");
+        assertTrue(pagination.contains("Supplier<Level> levelSupplier"),
+                "分页管理器必须继续传递通用 Level");
+        assertTrue(slot.contains("Supplier<Level> levelSupplier")
+                        && slot.contains("Level level = levelSupplier.get();"),
+                "槽位解码样板时必须使用注入的通用 Level");
+    }
+
     private static int countOccurrences(String source, String token) {
         int count = 0;
         int index = 0;

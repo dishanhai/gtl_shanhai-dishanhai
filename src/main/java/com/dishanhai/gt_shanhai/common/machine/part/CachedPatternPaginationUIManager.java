@@ -10,11 +10,13 @@ import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.side.item.IItemTransfer;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.Level;
 
 import org.jetbrains.annotations.Nullable;
 
 import java.util.function.Function;
 import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 
 /**
  * 星律专用分页 UI。缓存每个槽位的样板输出，避免渲染时每帧重复解码样板 NBT。
@@ -31,6 +33,7 @@ public final class CachedPatternPaginationUIManager {
     private final Function<Integer, Boolean> isCached;
     private final Function<Integer, Boolean> isWarning;
     private final IntConsumer onPatternChange;
+    private final Supplier<Level> levelSupplier;
 
     // 注意：本类不是机器的 managed field holder，LDLib 不会扫描这里的同步注解——
     // 页码只在各端本地维护，槽位内容本身由 patternInventory 的同步机制保证一致。
@@ -46,7 +49,8 @@ public final class CachedPatternPaginationUIManager {
                                             IntConsumer onPatternChange,
                                             Function<Integer, Boolean> isCached,
                                             Function<Integer, Boolean> isWarning,
-                                            IItemTransfer patternInventory) {
+                                            IItemTransfer patternInventory,
+                                            Supplier<Level> levelSupplier) {
         this.patternsPerRow = patternsPerRow;
         this.rowsPerPage = rowsPerPage;
         this.maxPages = maxPages;
@@ -57,6 +61,7 @@ public final class CachedPatternPaginationUIManager {
         this.isCached = isCached;
         this.isWarning = isWarning == null ? slot -> Boolean.FALSE : isWarning;
         this.patternInventory = patternInventory;
+        this.levelSupplier = levelSupplier;
     }
 
     public int getUiWidth() {
@@ -98,7 +103,8 @@ public final class CachedPatternPaginationUIManager {
 
             CachedPatternSlotWidget slot = new CachedPatternSlotWidget(
                     patternInventory, slotIndex, x, y,
-                    () -> Boolean.TRUE.equals(isWarning.apply(finalSlot)));
+                    () -> Boolean.TRUE.equals(isWarning.apply(finalSlot)),
+                    levelSupplier);
             slot.setOnPatternSlotChanged(() -> {
                 slot.invalidatePatternCache();
                 onPatternChange.accept(finalSlot);

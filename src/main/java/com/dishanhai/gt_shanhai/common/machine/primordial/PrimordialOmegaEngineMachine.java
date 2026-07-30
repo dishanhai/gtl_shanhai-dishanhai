@@ -10,6 +10,7 @@ import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfiguratorButton;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
+import com.gregtechceu.gtceu.api.machine.feature.IMachineLife;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.pattern.MultiblockWorldSavedData;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
@@ -18,6 +19,8 @@ import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.primordial.IPrimordialOutputMultiplierModule;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
+import com.dishanhai.gt_shanhai.network.SHideRingPacket;
+import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 
 import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
 
@@ -38,7 +41,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMachine
-        implements IModularMachineHost<PrimordialOmegaEngineMachine> {
+        implements IModularMachineHost<PrimordialOmegaEngineMachine>, IMachineLife {
 
     private static final long MAX_PARALLEL = 9223372036854775807L;
 
@@ -201,7 +204,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     @Override
     public void onStructureFormed() {
         super.onStructureFormed();
-        // 环隐藏由 FOTC 渲染器每帧处理（见 AbstractRingRenderer）
+        syncRingVisibility(true);
         safeClearModules();
         scanAndConnectModules();
         synchronized (outputMultiplierCache) {
@@ -212,11 +215,23 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     @Override
     public void onStructureInvalid() {
         super.onStructureInvalid();
-        // 环恢复由 FOTC 渲染器每帧处理
+        syncRingVisibility(false);
         safeClearModules();
         synchronized (outputMultiplierCache) {
             hasModules = false;
             outputMultiplierCache.invalidate();
+        }
+    }
+
+    @Override
+    public void onMachineRemoved() {
+        syncRingVisibility(false);
+    }
+
+    private void syncRingVisibility(boolean hide) {
+        if (getLevel() instanceof ServerLevel serverLevel) {
+            ShanhaiNetwork.sendHideRingToClients(serverLevel,
+                    new SHideRingPacket(getPos(), getFrontFacing(), hide));
         }
     }
 

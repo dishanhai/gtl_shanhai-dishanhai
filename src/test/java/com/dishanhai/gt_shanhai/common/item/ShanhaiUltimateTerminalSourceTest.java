@@ -95,8 +95,9 @@ class ShanhaiUltimateTerminalSourceTest {
         assertTrue(behavior.contains("MetaMachine.getMachine"));
         assertTrue(behavior.contains("ShanhaiStructurePlanner.scan"));
         assertTrue(behavior.contains("ShanhaiStructureHighlightPacket"));
-        assertTrue(behavior.contains("confirmSubmit"));
-        assertTrue(behavior.contains("refreshBuildReadiness"));
+        assertFalse(behavior.contains("ShanhaiTerminalCraftingManager.begin"));
+        assertFalse(behavior.contains("confirmSubmit"));
+        assertFalse(behavior.contains("refreshBuildReadiness"));
         assertTrue(behavior.contains("consumeBuildConfirmation"));
         assertTrue(behavior.contains("player.isShiftKeyDown()"));
     }

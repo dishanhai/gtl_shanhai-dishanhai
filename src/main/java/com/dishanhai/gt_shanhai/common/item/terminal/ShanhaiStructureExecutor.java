@@ -2,9 +2,10 @@ package com.dishanhai.gt_shanhai.common.item.terminal;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
+import appeng.api.stacks.AEItemKey;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalAeBinding.Context;
-import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalMaterialService.Preflight;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 
 import net.minecraft.core.Direction;
@@ -40,35 +41,40 @@ public final class ShanhaiStructureExecutor {
         }
         Result heightFailure = validateBuildHeight(level, plan);
         if (heightFailure != null) return heightFailure;
-        Preflight preflight = materials.preflight(plan, player, ae);
-        if (!preflight.success()) return new Result(false, 0, preflight.reason());
-        List<ItemStack> replacementReturns = plan.entries().stream()
-                .filter(entry -> entry.kind() == ShanhaiStructurePlan.Kind.REPLACE)
-                .map(ShanhaiStructurePlan.Entry::current).filter(stack -> !stack.isEmpty()).toList();
+        ShanhaiTerminalMaterialService.BuildBatch buildBatch = materials.prepareBuildBatch(player, ae, plan);
+
+        Map<AEItemKey, Long> availablePreview = buildBatch.availableAmounts();
+        List<ItemStack> replacementReturns = new ArrayList<>();
+        List<ItemStack> forcedReturnCandidates = new ArrayList<>();
+        for (ShanhaiStructurePlan.Entry entry : plan.entries()) {
+            if (!entry.requiresMaterial()) continue;
+            if (!reservePreviewMaterial(availablePreview, entry.desired())) continue;
+            if (entry.current().isEmpty()) continue;
+            if (entry.kind() == ShanhaiStructurePlan.Kind.REPLACE) {
+                replacementReturns.add(entry.current());
+            } else if (entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE) {
+                forcedReturnCandidates.add(entry.current());
+            }
+        }
         if (!materials.canReturnAll(player, ae, replacementReturns)) {
+            buildBatch.refundRemaining(player, ae);
             return new Result(false, 0, "旧部件无回收空间");
         }
-        List<ItemStack> forcedReturns = new ArrayList<>(plan.entries().stream()
-                .filter(entry -> entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE)
-                .map(ShanhaiStructurePlan.Entry::current).filter(stack -> !stack.isEmpty()).toList());
-        if (!materials.canStoreDismantled(player, ae, forcedReturns)) {
+        if (!materials.canStoreDismantled(player, ae, forcedReturnCandidates)) {
+            buildBatch.refundRemaining(player, ae);
             return new Result(false, 0, "阻挡方块无回收空间");
         }
-        forcedReturns.clear();
-        ShanhaiTerminalMaterialService.BuildBatch buildBatch = materials.prepareBuildBatch(player, ae, plan);
-        if (buildBatch == null) return new Result(false, 0, "施工期间材料发生变化");
 
         int changed = 0;
+        int skippedMissing = 0;
         List<ShanhaiStructurePlan.Entry> changedEntries = new ArrayList<>();
+        List<ItemStack> forcedReturns = new ArrayList<>();
         for (ShanhaiStructurePlan.Entry entry : plan.entries()) {
             if (!entry.requiresMaterial()) continue;
             ItemStack material = buildBatch.takeOne(entry.desired());
             if (material.isEmpty()) {
-                buildBatch.refundRemaining(player, ae);
-                if (!materials.storeDismantled(player, ae, forcedReturns)) {
-                    return new Result(false, changed, "材料变化且已替换方块回收失败");
-                }
-                return new Result(false, changed, "施工期间材料发生变化");
+                skippedMissing++;
+                continue;
             }
             ItemStack removed = ItemStack.EMPTY;
             boolean forced = entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE;
@@ -104,10 +110,12 @@ public final class ShanhaiStructureExecutor {
         if (!buildBatch.refundRemaining(player, ae)) {
             return new Result(false, changed, "剩余材料回收失败");
         }
+        if (changed == 0) return new Result(false, 0, "材料不足");
         orientPlacedBlocks(level, plan, changedEntries);
-        return new Result(true, changed, forcedReturns.isEmpty()
-                ? "施工完成"
-                : "施工完成，回收 " + forcedReturns.size() + " 个阻挡方块");
+        String message = skippedMissing == 0 ? "施工完成"
+                : "部分施工完成，缺材料跳过 " + skippedMissing + " 处";
+        if (!forcedReturns.isEmpty()) message += "，回收 " + forcedReturns.size() + " 个阻挡方块";
+        return new Result(true, changed, message);
     }
 
     public Result executeCreative(ServerPlayer player, ShanhaiStructurePlan plan, Context ae) {
@@ -201,6 +209,19 @@ public final class ShanhaiStructureExecutor {
         return new Result(false, 0, "结构超出世界高度范围 Y="
                 + result.minBuildHeight() + ".." + result.maxBuildY()
                 + "，首个越界位置: " + result.firstViolation().toShortString());
+    }
+
+    private static boolean reservePreviewMaterial(Map<AEItemKey, Long> available, ItemStack wanted) {
+        AEItemKey key = AEItemKey.of(wanted);
+        if (key == null) return false;
+        Long amount = available.get(key);
+        if (amount == null || amount <= 0) return false;
+        if (amount == 1) {
+            available.remove(key);
+        } else {
+            available.put(key, amount - 1);
+        }
+        return true;
     }
 
     private ItemStack removeExisting(ServerLevel level, ShanhaiStructurePlan.Entry entry) {

@@ -17,17 +17,18 @@ import com.lowdragmc.lowdraglib.utils.Position;
 import com.lowdragmc.lowdraglib.utils.Size;
 import com.mojang.blaze3d.systems.RenderSystem;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.integration.ae2.widget.AEPatternViewExtendSlotWidget;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nonnull;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * 星律样板槽。覆写完整绘制路径，避免第三方基类 Mixin 每帧重复解码样板。
@@ -43,15 +44,27 @@ public final class CachedPatternSlotWidget extends AEPatternViewExtendSlotWidget
     private String cachedPatternOutputText = "";
     private AEKey cachedPatternOutputKey;
     private final BooleanSupplier warningSupplier;
+    private final Supplier<Level> levelSupplier;
 
     public CachedPatternSlotWidget(IItemTransfer inventory, int slotIndex, int xPosition, int yPosition) {
-        this(inventory, slotIndex, xPosition, yPosition, () -> false);
+        this(inventory, slotIndex, xPosition, yPosition, () -> false, () -> null);
     }
 
     public CachedPatternSlotWidget(IItemTransfer inventory, int slotIndex, int xPosition, int yPosition,
             BooleanSupplier warningSupplier) {
+        this(inventory, slotIndex, xPosition, yPosition, warningSupplier, () -> null);
+    }
+
+    public CachedPatternSlotWidget(IItemTransfer inventory, int slotIndex, int xPosition, int yPosition,
+            Supplier<Level> levelSupplier) {
+        this(inventory, slotIndex, xPosition, yPosition, () -> false, levelSupplier);
+    }
+
+    public CachedPatternSlotWidget(IItemTransfer inventory, int slotIndex, int xPosition, int yPosition,
+            BooleanSupplier warningSupplier, Supplier<Level> levelSupplier) {
         super(inventory, slotIndex, xPosition, yPosition);
         this.warningSupplier = warningSupplier == null ? () -> false : warningSupplier;
+        this.levelSupplier = levelSupplier == null ? () -> null : levelSupplier;
     }
 
     public void invalidatePatternCache() {
@@ -155,12 +168,15 @@ public final class CachedPatternSlotWidget extends AEPatternViewExtendSlotWidget
         cachedDisplayStack = stack;
         cachedPatternOutputText = "";
         cachedPatternOutputKey = null;
-        if (stack.isEmpty() || Minecraft.getInstance().level == null) {
+        if (stack.isEmpty()) {
+            return;
+        }
+        Level level = levelSupplier.get();
+        if (level == null) {
             return;
         }
 
-        IPatternDetails details = PatternDetailsHelper.decodePattern(
-                stack, Minecraft.getInstance().level, false);
+        IPatternDetails details = PatternDetailsHelper.decodePattern(stack, level, false);
         if (details == null || details.getOutputs().length == 0) {
             return;
         }

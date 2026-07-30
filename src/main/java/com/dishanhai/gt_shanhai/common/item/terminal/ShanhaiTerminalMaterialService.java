@@ -51,6 +51,17 @@ public final class ShanhaiTerminalMaterialService {
             return material.representative.copyWithCount(1);
         }
 
+        public Map<AEItemKey, Long> availableAmounts() {
+            Map<AEItemKey, Long> result = new LinkedHashMap<>();
+            if (closed) return result;
+            for (Map.Entry<AEItemKey, ReservedMaterial> entry : reserved.entrySet()) {
+                if (entry.getValue().remaining > 0) {
+                    result.put(entry.getKey(), entry.getValue().remaining);
+                }
+            }
+            return result;
+        }
+
         public boolean refundRemaining(ServerPlayer player, Context ae) {
             if (closed) return true;
             closed = true;
@@ -157,10 +168,6 @@ public final class ShanhaiTerminalMaterialService {
             if (total > 0) {
                 reserved.put(entry.getKey(), new ReservedMaterial(representative, total));
             }
-            if (total < need) {
-                new BuildBatch(reserved).refundRemaining(player, ae);
-                return null;
-            }
         }
         return new BuildBatch(reserved);
     }
@@ -191,8 +198,10 @@ public final class ShanhaiTerminalMaterialService {
         AEItemKey key = AEItemKey.of(wanted);
         if (key == null) return 0;
         long available = ae.storage().extract(key, amount, Actionable.SIMULATE, ae.source());
-        if (available < amount) return 0;
-        return ae.storage().extract(key, amount, Actionable.MODULATE, ae.source());
+        if (available <= 0) return 0;
+        long extracted = ae.storage().extract(key, Math.min(available, amount),
+                Actionable.MODULATE, ae.source());
+        return Math.min(extracted, amount);
     }
 
     private ItemStack extractFromAe(Context ae, ItemStack wanted) {

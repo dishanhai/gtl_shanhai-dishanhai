@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.common.shop;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -17,6 +18,7 @@ class ShopAutoCraftRecursiveDependencySourceTest {
     void autoCraftExpandsRecursiveShopGoodsDependencies() throws Exception {
         String source = Files.readString(SOURCE);
         String expand = extractBlock(source, "private static boolean expandShopDependencies(");
+        String tick = extractBlock(source, "public static void onServerTick(");
 
         assertAll(
                 () -> assertTrue(source.contains("MAX_DEPENDENCY_EXPANSION_ROUNDS"),
@@ -33,8 +35,9 @@ class ShopAutoCraftRecursiveDependencySourceTest {
                         "同一种中间物已计划数量足够时不能重复追加"),
                 () -> assertTrue(expand.contains("session.expansionRound++"),
                         "追加递归项后必须重新进入下一轮计算"),
-                () -> assertTrue(source.contains("CALCULATING.put(uuid, session);"),
-                        "发现递归依赖后应回到计算阶段，而不是直接弹确认框"));
+                () -> assertTrue(tick.indexOf("expandShopDependencies(player, session)")
+                                < tick.lastIndexOf("CALCULATING.remove(uuid, session)"),
+                        "发现递归依赖后应留在计算阶段，而不是先移除再重新加入"));
     }
 
     @Test
@@ -72,6 +75,22 @@ class ShopAutoCraftRecursiveDependencySourceTest {
                         "排序必须递归地先加入底层依赖"),
                 () -> assertTrue(dfs.contains("if (state[index] == 1)"),
                         "依赖图成环时必须有访问状态保护"));
+    }
+
+    @Test
+    void calculatingSessionsArePolledWithoutPerTickSnapshotAllocation() throws Exception {
+        String source = Files.readString(SOURCE);
+        String tick = extractBlock(source, "public static void onServerTick(");
+
+        assertTrue(tick.contains("for (Map.Entry<UUID, Session> entry : CALCULATING.entrySet())"),
+                "计算会话应直接使用 ConcurrentHashMap 的弱一致性迭代器");
+        assertFalse(tick.contains("new ArrayList<>(CALCULATING.keySet())"),
+                "等待 AE 计划期间不得每 tick 分配 UUID 快照");
+        assertTrue(tick.contains("CALCULATING.remove(uuid, session)"),
+                "结束计算时必须按 Session 身份移除，避免误删新会话");
+        assertTrue(tick.indexOf("expandShopDependencies(player, session)")
+                        < tick.lastIndexOf("CALCULATING.remove(uuid, session)"),
+                "发现递归依赖时 Session 应留在计算表中，不能先移除再重新加入");
     }
 
     private static String extractBlock(String source, String declaration) {

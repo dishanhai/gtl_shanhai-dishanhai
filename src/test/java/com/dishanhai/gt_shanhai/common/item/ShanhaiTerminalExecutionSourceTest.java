@@ -55,12 +55,16 @@ class ShanhaiTerminalExecutionSourceTest {
     }
 
     @Test
-    void executorPreflightsBeforeRemovingExistingParts() throws Exception {
+    void executorBuildsAvailableMaterialsWithoutFullPreflight() throws Exception {
         String source = Files.readString(EXECUTOR);
 
-        assertTrue(source.contains("preflight(plan"));
-        assertTrue(source.contains("if (!preflight.success())"));
-        assertTrue(source.indexOf("if (!preflight.success())") < source.indexOf("removeExisting"));
+        assertFalse(source.contains("if (!preflight.success())"),
+                "生存施工不得再用全量材料预检阻塞部分施工");
+        assertTrue(source.contains("BuildBatch buildBatch = materials.prepareBuildBatch(player, ae, plan)"));
+        assertTrue(source.contains("Map<AEItemKey, Long> availablePreview = buildBatch.availableAmounts()"));
+        assertTrue(source.indexOf("availablePreview") < source.indexOf("removeExisting"));
+        assertTrue(source.contains("skippedMissing++"));
+        assertTrue(source.contains("部分施工完成，缺材料跳过"));
         assertTrue(source.contains("refund"));
     }
 
@@ -78,8 +82,11 @@ class ShanhaiTerminalExecutionSourceTest {
         assertTrue(survivalBuild.indexOf("prepareBuildBatch") < survivalBuild.indexOf("removeExisting"));
 
         assertTrue(materials.contains("bulkExtractFromAe"));
-        assertTrue(materials.contains("ae.storage().extract(key, amount, Actionable.SIMULATE"));
-        assertTrue(materials.contains("ae.storage().extract(key, amount, Actionable.MODULATE"));
+        int bulk = materials.indexOf("private long bulkExtractFromAe");
+        String bulkSource = materials.substring(bulk);
+        assertTrue(bulkSource.contains("Actionable.SIMULATE"));
+        assertTrue(bulkSource.contains("Math.min(available, amount)"));
+        assertTrue(bulkSource.contains("Actionable.MODULATE"));
     }
 
     @Test
@@ -182,10 +189,10 @@ class ShanhaiTerminalExecutionSourceTest {
         int creative = executor.indexOf("public Result executeCreative(");
         String survivalBuild = executor.substring(execute, creative);
         assertTrue(survivalBuild.contains("entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE"));
-        assertTrue(survivalBuild.contains("canStoreDismantled(player, ae, forcedReturns)"));
+        assertTrue(survivalBuild.contains("canStoreDismantled(player, ae, forcedReturnCandidates)"));
         assertTrue(survivalBuild.contains("storeDismantled(player, ae, forcedReturns)"));
         assertTrue(survivalBuild.contains("forcedReturns.size()"));
-        assertTrue(survivalBuild.indexOf("canStoreDismantled(player, ae, forcedReturns)")
+        assertTrue(survivalBuild.indexOf("canStoreDismantled(player, ae, forcedReturnCandidates)")
                 < survivalBuild.indexOf("removeExisting"));
 
         String creativeBuild = executor.substring(creative, executor.indexOf("public Result dismantle("));

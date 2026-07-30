@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -36,12 +37,14 @@ class ShanhaiTerminalCraftingSourceTest {
     }
 
     @Test
-    void buildReadinessRequiresARescanAndMatchingFingerprint() throws Exception {
+    void buildReadinessRequiresARescanAndThenAllowsPartialBuild() throws Exception {
         String source = Files.readString(MANAGER);
 
         assertTrue(source.contains("currentPlan.fingerprint().equals(session.planFingerprint)"));
-        assertTrue(source.contains("materials.shortages(currentPlan"));
+        assertFalse(source.contains("materials.shortages(currentPlan"),
+                "AE 下单后不得再用全量材料缺口阻塞施工确认");
         assertTrue(source.contains("session.phase = Phase.READY_TO_BUILD"));
+        assertTrue(source.contains("缺材料位置跳过"));
         assertTrue(source.contains("ShanhaiUltimateTerminalConfig.getTerminalUuid"));
     }
 

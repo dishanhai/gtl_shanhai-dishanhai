@@ -76,6 +76,7 @@ public final class ShanhaiTerminalCraftingManager {
     }
 
     private static final Map<UUID, Session> SESSIONS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Session> ACTIVE_CALCULATIONS = new ConcurrentHashMap<>();
 
     private ShanhaiTerminalCraftingManager() {}
 
@@ -105,10 +106,13 @@ public final class ShanhaiTerminalCraftingManager {
         }
         if (items.isEmpty()) return false;
         UUID terminalId = ShanhaiUltimateTerminalConfig.getTerminalUuid(terminal);
-        Session previous = SESSIONS.put(terminalId, new Session(
+        Session session = new Session(
                 player.getUUID(), terminalId, plan.target(),
-                ShanhaiUltimateTerminalConfig.getBoundAe(terminal), plan.fingerprint(), items));
+                ShanhaiUltimateTerminalConfig.getBoundAe(terminal), plan.fingerprint(), items);
+        Session previous = SESSIONS.put(terminalId, session);
+        if (previous != null) ACTIVE_CALCULATIONS.remove(terminalId, previous);
         cancel(previous);
+        ACTIVE_CALCULATIONS.put(terminalId, session);
         player.sendSystemMessage(Component.literal(
                 "§b[山海终端] 正在计算 §f" + items.size() + " §b项 AE 合成方案"));
         return true;
@@ -125,7 +129,9 @@ public final class ShanhaiTerminalCraftingManager {
         Session session = new Session(player.getUUID(), terminalId, plan.target(),
                 ShanhaiUltimateTerminalConfig.getBoundAe(terminal), plan.fingerprint(), List.of());
         session.phase = Phase.READY_TO_BUILD;
-        cancel(SESSIONS.put(terminalId, session));
+        Session previous = SESSIONS.put(terminalId, session);
+        if (previous != null) ACTIVE_CALCULATIONS.remove(terminalId, previous);
+        cancel(previous);
     }
 
     public static boolean confirmSubmit(ServerPlayer player, ItemStack terminal,
@@ -151,10 +157,14 @@ public final class ShanhaiTerminalCraftingManager {
             player.sendSystemMessage(Component.literal(
                     "§c[山海终端] 部分合成提交失败: §f" + String.join("、", failed)));
         }
-        session.phase = Phase.SUBMITTED;
-        if (submitted == 0) return false;
+        session.phase = Phase.READY_TO_BUILD;
+        if (submitted == 0) {
+            player.sendSystemMessage(Component.literal(
+                    "§e[山海终端] 未成功提交 AE 合成任务；可潜行施工现有材料，缺材料位置跳过"));
+            return true;
+        }
         player.sendSystemMessage(Component.literal(
-                "§b[山海终端] 已提交 §f" + submitted + " §b项任务；材料到齐后再次右击控制器"));
+                "§b[山海终端] 已提交 §f" + submitted + " §b项任务；可潜行施工现有材料，缺材料位置跳过"));
         return true;
     }
 
@@ -164,14 +174,9 @@ public final class ShanhaiTerminalCraftingManager {
         Session session = validSession(player, terminal, currentPlan);
         if (session == null || session.phase != Phase.SUBMITTED || ae == null) return false;
         if (!currentPlan.fingerprint().equals(session.planFingerprint)) return false;
-        if (hasPendingItems(session)) {
-            startPendingCalculations(session, player, ae);
-            return false;
-        }
-        if (!materials.shortages(currentPlan, player, ae).isEmpty()) return false;
         session.phase = Phase.READY_TO_BUILD;
         player.sendSystemMessage(Component.literal(
-                "§a[山海终端] 材料已齐；潜行右击同一控制器确认施工"));
+                "§a[山海终端] 可施工；会按当前背包/AE库存放置，缺材料位置跳过"));
         return true;
     }
 
@@ -180,29 +185,38 @@ public final class ShanhaiTerminalCraftingManager {
         Session session = validSession(player, terminal, currentPlan);
         if (session == null || session.phase != Phase.READY_TO_BUILD) return false;
         if (!currentPlan.fingerprint().equals(session.planFingerprint)) return false;
-        SESSIONS.remove(session.terminalId);
+        SESSIONS.remove(session.terminalId, session);
+        ACTIVE_CALCULATIONS.remove(session.terminalId, session);
         return true;
     }
 
     public static void clear(ItemStack terminal) {
-        cancel(SESSIONS.remove(ShanhaiUltimateTerminalConfig.getTerminalUuid(terminal)));
+        UUID terminalId = ShanhaiUltimateTerminalConfig.getTerminalUuid(terminal);
+        Session session = SESSIONS.remove(terminalId);
+        if (session != null) ACTIVE_CALCULATIONS.remove(terminalId, session);
+        cancel(session);
     }
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || SESSIONS.isEmpty()) return;
-        for (Session session : new ArrayList<>(SESSIONS.values())) {
-            if (session.phase != Phase.CALCULATING && session.phase != Phase.RETRY_CALCULATING) continue;
+        if (event.phase != TickEvent.Phase.END || ACTIVE_CALCULATIONS.isEmpty()) return;
+        for (Map.Entry<UUID, Session> entry : ACTIVE_CALCULATIONS.entrySet()) {
+            Session session = entry.getValue();
+            if (session.phase != Phase.CALCULATING && session.phase != Phase.RETRY_CALCULATING) {
+                ACTIVE_CALCULATIONS.remove(entry.getKey(), session);
+                continue;
+            }
             session.ticks++;
             if (session.ticks > CALC_TIMEOUT_TICKS) {
-                SESSIONS.remove(session.terminalId);
+                ACTIVE_CALCULATIONS.remove(session.terminalId, session);
+                SESSIONS.remove(session.terminalId, session);
                 cancel(session);
                 ServerPlayer player = findPlayer(session.playerId);
                 if (player != null) player.sendSystemMessage(Component.literal("§c[山海终端] 合成方案计算超时"));
                 continue;
             }
-            if (session.items.stream().anyMatch(item -> !item.submitted
-                    && item.future != null && !item.future.isDone())) continue;
+            if (hasPendingCalculation(session)) continue;
+            ACTIVE_CALCULATIONS.remove(session.terminalId, session);
             int usable = 0;
             List<String> failures = new ArrayList<>();
             for (WorkItem item : session.items) {
@@ -235,7 +249,7 @@ public final class ShanhaiTerminalCraftingManager {
                 continue;
             }
             if (usable == 0) {
-                SESSIONS.remove(session.terminalId);
+                SESSIONS.remove(session.terminalId, session);
                 if (player != null) player.sendSystemMessage(Component.literal(
                         "§c[山海终端] 合成方案均不可提交: §f" + summarize(failures)));
                 continue;
@@ -254,6 +268,14 @@ public final class ShanhaiTerminalCraftingManager {
         return false;
     }
 
+    private static boolean hasPendingCalculation(Session session) {
+        for (WorkItem item : session.items) {
+            if (!item.submitted
+                    && item.future != null && !item.future.isDone()) return true;
+        }
+        return false;
+    }
+
     private static boolean startPendingCalculations(Session session, ServerPlayer player, Context ae) {
         if (session.phase == Phase.RETRY_CALCULATING) return true;
         ICraftingService crafting = ae.grid().getCraftingService();
@@ -268,6 +290,7 @@ public final class ShanhaiTerminalCraftingManager {
         if (!started) return false;
         session.phase = Phase.RETRY_CALCULATING;
         session.ticks = 0;
+        ACTIVE_CALCULATIONS.put(session.terminalId, session);
         player.sendSystemMessage(Component.literal("§e[山海终端] 正在重试之前失败的合成任务"));
         return true;
     }
