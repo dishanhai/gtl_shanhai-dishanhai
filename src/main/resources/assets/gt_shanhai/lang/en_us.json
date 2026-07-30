@@ -451,6 +451,9 @@
   "message.gt_shanhai.pattern_buffer_toolkit.cut": "Cut %s patterns and their config",
   "message.gt_shanhai.pattern_buffer_toolkit.cut_failed": "Nothing to cut in the target",
   "message.gt_shanhai.pattern_buffer_toolkit.pasted": "Pasted %s patterns and their config",
-  "message.gt_shanhai.pattern_buffer_toolkit.paste_failed": "Clipboard empty, or not enough free slots in the target"
+  "message.gt_shanhai.pattern_buffer_toolkit.paste_failed": "Clipboard empty, or not enough free slots in the target",
+  "gui.gt_shanhai.eaep_wrong_host_confirm.title": "Stellar pattern host mismatch",
+  "gui.gt_shanhai.eaep_wrong_host_confirm.message": "This pattern is typed as %s, but target %s does not support it. Host supports: %s. Upload anyway?",
+  "gui.gt_shanhai.eaep_wrong_host_confirm.no_host_types": "no recognized recipe types"
 }
 

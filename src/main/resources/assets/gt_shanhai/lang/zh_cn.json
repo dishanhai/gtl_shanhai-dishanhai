@@ -683,6 +683,9 @@
   "message.gt_shanhai.pattern_buffer_toolkit.cut": "已剪切 %s 个样板及其配置",
   "message.gt_shanhai.pattern_buffer_toolkit.cut_failed": "目标里没有可剪切的内容",
   "message.gt_shanhai.pattern_buffer_toolkit.pasted": "已粘贴 %s 个样板及其配置",
-  "message.gt_shanhai.pattern_buffer_toolkit.paste_failed": "剪贴板为空，或目标空槽不足"
+  "message.gt_shanhai.pattern_buffer_toolkit.paste_failed": "剪贴板为空，或目标空槽不足",
+  "gui.gt_shanhai.eaep_wrong_host_confirm.title": "星律样板主机不匹配",
+  "gui.gt_shanhai.eaep_wrong_host_confirm.message": "本次样板类型为 %s，但目标 %s 不支持该类型。主机支持：%s。确认仍要上传吗？",
+  "gui.gt_shanhai.eaep_wrong_host_confirm.no_host_types": "无可识别配方类型"
 }
 

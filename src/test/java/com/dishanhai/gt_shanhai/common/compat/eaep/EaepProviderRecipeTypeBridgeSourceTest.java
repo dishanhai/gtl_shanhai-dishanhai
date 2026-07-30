@@ -40,8 +40,8 @@ class EaepProviderRecipeTypeBridgeSourceTest {
                 "S2C provider 列表必须追加每个 provider 的配方类型");
         assertTrue(packetMixin.contains("gtShanhai$setProviderRecipeTypeIds(providerTypes)"),
                 "客户端 decode 后必须恢复配方类型列表");
-        assertTrue(packetMixin.contains("setIncomingProviderRecipeTypes"),
-                "打开 EAEP 选择界面前必须暂存配方类型");
+        assertTrue(packetMixin.contains("setIncomingProviderWarningMetadata"),
+                "打开 EAEP 选择界面前必须暂存配方类型与告警元数据");
         assertTrue(packetMixin.contains("clearIncomingProviderRecipeTypes"),
                 "界面创建完成后必须清理暂存，避免污染下一次打开");
     }
