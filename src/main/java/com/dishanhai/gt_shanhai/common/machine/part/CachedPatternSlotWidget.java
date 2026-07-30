@@ -27,20 +27,31 @@ import org.gtlcore.gtlcore.integration.ae2.widget.AEPatternViewExtendSlotWidget;
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nonnull;
+import java.util.function.BooleanSupplier;
 
 /**
  * 星律样板槽。覆写完整绘制路径，避免第三方基类 Mixin 每帧重复解码样板。
  */
 public final class CachedPatternSlotWidget extends AEPatternViewExtendSlotWidget {
 
+    private static final int WARNING_BORDER_WIDTH = 2;
+    private static final int WARNING_BORDER_COLOR = 0xFFFF3030;
+
     private ItemStack cachedPatternStack;
     private CompoundTag cachedPatternTag;
     private ItemStack cachedDisplayStack;
     private String cachedPatternOutputText = "";
     private AEKey cachedPatternOutputKey;
+    private final BooleanSupplier warningSupplier;
 
     public CachedPatternSlotWidget(IItemTransfer inventory, int slotIndex, int xPosition, int yPosition) {
+        this(inventory, slotIndex, xPosition, yPosition, () -> false);
+    }
+
+    public CachedPatternSlotWidget(IItemTransfer inventory, int slotIndex, int xPosition, int yPosition,
+            BooleanSupplier warningSupplier) {
         super(inventory, slotIndex, xPosition, yPosition);
+        this.warningSupplier = warningSupplier == null ? () -> false : warningSupplier;
     }
 
     public void invalidatePatternCache() {
@@ -100,6 +111,9 @@ public final class CachedPatternSlotWidget extends AEPatternViewExtendSlotWidget
             }
         }
 
+        if (warningSupplier.getAsBoolean()) {
+            gtShanhai$drawWarningBorder(graphics, pos.x, pos.y, getSize().width, getSize().height);
+        }
         drawOverlay(graphics, mouseX, mouseY, partialTicks);
         if (drawHoverOverlay && isMouseOverElement(mouseX, mouseY) && getHoverElement(mouseX, mouseY) == this) {
             RenderSystem.colorMask(true, true, true, false);
@@ -119,6 +133,15 @@ public final class CachedPatternSlotWidget extends AEPatternViewExtendSlotWidget
         if (cachedPatternOutputKey != null && ClientPatternHighlightStore.hasHighlight(cachedPatternOutputKey)) {
             GuiUtil.drawSlotRainbowHighlight(graphics, pos.x + 1, pos.y + 1);
         }
+    }
+
+    private static void gtShanhai$drawWarningBorder(GuiGraphics graphics, int x, int y, int width, int height) {
+        DrawerHelper.drawSolidRect(graphics, x, y, width, WARNING_BORDER_WIDTH, WARNING_BORDER_COLOR);
+        DrawerHelper.drawSolidRect(graphics, x, y + height - WARNING_BORDER_WIDTH,
+                width, WARNING_BORDER_WIDTH, WARNING_BORDER_COLOR);
+        DrawerHelper.drawSolidRect(graphics, x, y, WARNING_BORDER_WIDTH, height, WARNING_BORDER_COLOR);
+        DrawerHelper.drawSolidRect(graphics, x + width - WARNING_BORDER_WIDTH, y,
+                WARNING_BORDER_WIDTH, height, WARNING_BORDER_COLOR);
     }
 
     private void refreshPatternCache(ItemStack stack) {

@@ -29,6 +29,7 @@ public final class CachedPatternPaginationUIManager {
     private final int maxPatternCount;
     private final IItemTransfer patternInventory;
     private final Function<Integer, Boolean> isCached;
+    private final Function<Integer, Boolean> isWarning;
     private final IntConsumer onPatternChange;
 
     // 注意：本类不是机器的 managed field holder，LDLib 不会扫描这里的同步注解——
@@ -44,6 +45,7 @@ public final class CachedPatternPaginationUIManager {
                                             int uiWidth, int uiHeight,
                                             IntConsumer onPatternChange,
                                             Function<Integer, Boolean> isCached,
+                                            Function<Integer, Boolean> isWarning,
                                             IItemTransfer patternInventory) {
         this.patternsPerRow = patternsPerRow;
         this.rowsPerPage = rowsPerPage;
@@ -53,6 +55,7 @@ public final class CachedPatternPaginationUIManager {
         this.uiHeight = uiHeight;
         this.onPatternChange = onPatternChange;
         this.isCached = isCached;
+        this.isWarning = isWarning == null ? slot -> Boolean.FALSE : isWarning;
         this.patternInventory = patternInventory;
     }
 
@@ -94,7 +97,8 @@ public final class CachedPatternPaginationUIManager {
             int y = row * 18;
 
             CachedPatternSlotWidget slot = new CachedPatternSlotWidget(
-                    patternInventory, slotIndex, x, y);
+                    patternInventory, slotIndex, x, y,
+                    () -> Boolean.TRUE.equals(isWarning.apply(finalSlot)));
             slot.setOnPatternSlotChanged(() -> {
                 slot.invalidatePatternCache();
                 onPatternChange.accept(finalSlot);

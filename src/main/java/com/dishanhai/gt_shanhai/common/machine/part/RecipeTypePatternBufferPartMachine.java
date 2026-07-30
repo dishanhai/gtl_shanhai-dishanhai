@@ -106,6 +106,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -142,6 +143,10 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     private final CachedPatternPaginationUIManager paginationUIManager;
     private final String[] patternRecipeTypeIds;
+    @DescSynced
+    private String warningSlots = "";
+    private BitSet cachedWarningSlots = new BitSet();
+    private String cachedWarningSlotsEncoded = "";
 
     @Persisted
     private final ItemStackTransfer wildcardPatternInventory;
@@ -204,6 +209,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                 patternsPerRow, rowsPerPage, maxPages, uiWidth, uiHeight,
                 this::onPatternChange,
                 slot -> Boolean.valueOf(slot != null && slot >= 0 && slot < this.cacheRecipe.length && this.cacheRecipe[slot]),
+                this::gtShanhai$isPatternSlotWarning,
                 getPatternInventory());
     }
 
@@ -515,6 +521,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         }
         outputMultiplierPatternsRefreshNeeded = false;
         refreshPatternRecipeType(index);
+        gtShanhai$refreshPatternSlotWarning(index);
     }
 
     @Override
@@ -916,6 +923,33 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         int localSlot = slot - maxPatternCount;
         return localSlot >= 0 && localSlot < wildcardPatternStacks.size()
                 ? wildcardPatternStacks.get(localSlot) : ItemStack.EMPTY;
+    }
+
+    public boolean gtShanhai$isPatternSlotWarning(int slot) {
+        return slot >= 0 && gtShanhai$warningSlotSet().get(slot);
+    }
+
+    public void gtShanhai$setPatternSlotWarning(int slot, boolean warning) {
+        if (slot < 0 || slot >= maxPatternCount) return;
+        BitSet slots = (BitSet) gtShanhai$warningSlotSet().clone();
+        if (slots.get(slot) == warning) return;
+        slots.set(slot, warning);
+        warningSlots = StellarPatternWarningPolicy.encodeWarningSlots(slots);
+        cachedWarningSlots = (BitSet) slots.clone();
+        cachedWarningSlotsEncoded = warningSlots;
+        if (!isRemote()) {
+            markDirty();
+        }
+    }
+
+    public void gtShanhai$clearPatternSlotWarnings() {
+        if (warningSlots == null || warningSlots.isEmpty()) return;
+        warningSlots = "";
+        cachedWarningSlots = new BitSet();
+        cachedWarningSlotsEncoded = "";
+        if (!isRemote()) {
+            markDirty();
+        }
     }
 
     @Override
@@ -1644,6 +1678,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private void refreshPatternRecipeTypes() {
         for (int slot = 0; slot < patternRecipeTypeIds.length; slot++) {
             refreshPatternRecipeType(slot);
+            gtShanhai$refreshPatternSlotWarning(slot);
         }
     }
 
@@ -1653,6 +1688,44 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         // 只读：本槽同时在向 AE 网络供货，刷新本地过滤缓存不得改写样板 NBT（见
         // PatternRecipeTypeHelper.peekRecipeTypeId 文档——AEItemKey 含 NBT，改动即变身份）。
         patternRecipeTypeIds[slot] = PatternRecipeTypeHelper.peekRecipeTypeId(stack, getLevel());
+    }
+
+    private void gtShanhai$refreshPatternSlotWarning(int slot) {
+        if (isRemote() || slot < 0 || slot >= maxPatternCount || slot >= getPatternInventory().getSlots()) return;
+        ItemStack stack = getPatternInventory().getStackInSlot(slot);
+        if (stack.isEmpty()) {
+            gtShanhai$setPatternSlotWarning(slot, false);
+            return;
+        }
+        gtShanhai$setPatternSlotWarning(slot, StellarPatternWarningPolicy.isWrongHost(
+                gtShanhai$getPatternRecipeTypeId(slot),
+                true,
+                true,
+                gtShanhai$hostRecipeTypeIds(),
+                RecipeTypeSharedSearchSets::isShared));
+    }
+
+    private List<String> gtShanhai$hostRecipeTypeIds() {
+        List<GTRecipeType> hostTypes = WildcardPatternRecipeTypeBinding.collectHostRecipeTypes(getControllers());
+        if (hostTypes.isEmpty()) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>(hostTypes.size());
+        for (GTRecipeType type : hostTypes) {
+            if (type != null && type.registryName != null) {
+                result.add(type.registryName.toString());
+            }
+        }
+        return result;
+    }
+
+    private BitSet gtShanhai$warningSlotSet() {
+        String encoded = warningSlots == null ? "" : warningSlots;
+        if (!Objects.equals(cachedWarningSlotsEncoded, encoded)) {
+            cachedWarningSlots = StellarPatternWarningPolicy.decodeWarningSlots(encoded);
+            cachedWarningSlotsEncoded = encoded;
+        }
+        return cachedWarningSlots;
     }
 
     private record OutputMultiplierPatternCacheEntry(
