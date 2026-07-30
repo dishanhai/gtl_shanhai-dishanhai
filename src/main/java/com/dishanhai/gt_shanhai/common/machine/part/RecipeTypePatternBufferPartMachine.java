@@ -1750,11 +1750,6 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             gtShanhai$setPatternSlotWarning(slot, false);
             return;
         }
-        List<String> hostRecipeTypeIds = gtShanhai$hostRecipeTypeIds();
-        if (hostRecipeTypeIds.isEmpty()) {
-            gtShanhai$setPatternSlotWarning(slot, false);
-            return;
-        }
         gtShanhai$setPatternSlotWarning(slot, StellarPatternWarningPolicy.isWrongHost(
                 gtShanhai$getPatternRecipeTypeId(slot),
                 true,
