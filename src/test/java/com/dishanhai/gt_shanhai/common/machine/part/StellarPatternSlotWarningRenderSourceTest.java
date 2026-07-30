@@ -54,4 +54,17 @@ class StellarPatternSlotWarningRenderSourceTest {
         assertTrue(machine.contains("RecipeTypeSharedSearchSets::isShared"));
         assertTrue(machine.contains("gtShanhai$refreshPatternSlotWarning(index)"));
     }
+
+    @Test
+    void bulkRecipeTypeRefreshDoesNotMarkSlotsWhenHostMetadataIsStillInitializing() throws IOException {
+        String machine = Files.readString(MACHINE);
+        int refreshAllStart = machine.indexOf("private void refreshPatternRecipeTypes()");
+        int refreshOneStart = machine.indexOf("private void refreshPatternRecipeType", refreshAllStart + 1);
+        String refreshAllBody = machine.substring(refreshAllStart, refreshOneStart);
+
+        assertTrue(!refreshAllBody.contains("gtShanhai$refreshPatternSlotWarning"),
+                "onLoad 批量刷新配方类型时不得把未恢复的主机元数据当成错主机");
+        assertTrue(machine.contains("hostRecipeTypeIds.isEmpty()"));
+        assertTrue(machine.contains("gtShanhai$setPatternSlotWarning(slot, false);"));
+    }
 }

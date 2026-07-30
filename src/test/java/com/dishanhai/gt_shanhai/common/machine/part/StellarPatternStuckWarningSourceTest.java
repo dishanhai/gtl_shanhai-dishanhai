@@ -60,6 +60,9 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(watch.contains("gtShanhai$setPatternSlotWarning(watch.slot, true)"));
         assertTrue(watch.contains("stillContainsAll(snapshot.items"));
         assertTrue(watch.contains("stillContainsAll(snapshot.fluids"));
+        assertTrue(watch.contains("appendRecipeLogicState(result, logicMachine)"));
+        assertTrue(watch.contains("!logicMachine.isWorkingEnabled()"));
+        assertTrue(watch.contains("工作=已暂停工作"));
     }
 
     @Test

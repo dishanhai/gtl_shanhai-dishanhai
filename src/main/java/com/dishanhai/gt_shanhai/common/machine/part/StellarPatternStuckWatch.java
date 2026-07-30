@@ -149,11 +149,21 @@ public final class StellarPatternStuckWatch {
         List<String> result = new ArrayList<>();
         for (IMultiController controller : machine.getControllers()) {
             if (!(controller.self() instanceof IRecipeLogicMachine logicMachine)) continue;
-            if (!(logicMachine.getRecipeLogic() instanceof IRecipeStatus status)) continue;
-            appendStatus(result, "配方", status.getRecipeStatus());
-            appendStatus(result, "工作", status.getWorkingStatus());
+            appendRecipeLogicState(result, logicMachine);
+            if (logicMachine.getRecipeLogic() instanceof IRecipeStatus status) {
+                appendStatus(result, "配方", status.getRecipeStatus());
+                appendStatus(result, "工作", status.getWorkingStatus());
+            }
         }
         return result;
+    }
+
+    private static void appendRecipeLogicState(List<String> result, IRecipeLogicMachine logicMachine) {
+        if (!logicMachine.isWorkingEnabled()) {
+            result.add("工作=已暂停工作");
+        } else if (!logicMachine.isActive()) {
+            result.add("工作=未运行");
+        }
     }
 
     private static void appendStatus(List<String> result, String label, @Nullable RecipeResult status) {
