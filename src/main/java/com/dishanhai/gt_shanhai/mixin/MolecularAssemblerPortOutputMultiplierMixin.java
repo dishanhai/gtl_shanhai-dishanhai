@@ -5,8 +5,7 @@ import appeng.api.networking.crafting.ICraftingProvider;
 
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
-import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineMachine;
-import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
+import com.dishanhai.gt_shanhai.common.machine.output.OutputMultiplierResolver;
 import com.google.common.collect.BiMap;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
@@ -61,7 +60,7 @@ public abstract class MolecularAssemblerPortOutputMultiplierMixin {
     @Unique
     @DescSynced
     @Persisted
-    private int gtShanhai$cachedHostOutputMultiplier = 1;
+    private long gtShanhai$cachedHostOutputMultiplier = 1L;
 
     @Unique
     private final Map<IPatternDetails, IPatternDetails> gtShanhai$effectiveToSource =
@@ -78,12 +77,12 @@ public abstract class MolecularAssemblerPortOutputMultiplierMixin {
     private List<IPatternDetails> gtShanhai$effectivePatternCache = List.of();
 
     @Unique
-    private int gtShanhai$cachedViewMultiplier = -1;
+    private long gtShanhai$cachedViewMultiplier = -1L;
 
     @Inject(method = "getAvailablePatterns", at = @At("RETURN"), cancellable = true)
     private void gtShanhai$publishOutputMultiplierView(
             CallbackInfoReturnable<List<IPatternDetails>> cir) {
-        if (!gtShanhai$outputMultiplierModeEnabled || gtShanhai$cachedHostOutputMultiplier <= 1) {
+        if (!gtShanhai$outputMultiplierModeEnabled || gtShanhai$cachedHostOutputMultiplier <= 1L) {
             gtShanhai$invalidateEffectivePatterns();
             return;
         }
@@ -139,7 +138,7 @@ public abstract class MolecularAssemblerPortOutputMultiplierMixin {
         MEMolecularAssemblerIOPartMachine self = (MEMolecularAssemblerIOPartMachine) (Object) this;
         if (!gtShanhai$outputMultiplierModeEnabled || self.isRemote()
                 || self.getOffsetTimer() % 40L != 0L) return;
-        int detected = gtShanhai$resolveHostOutputMultiplier(self);
+        long detected = gtShanhai$resolveHostOutputMultiplier(self);
         if (detected == gtShanhai$cachedHostOutputMultiplier) return;
         gtShanhai$cachedHostOutputMultiplier = detected;
         gtShanhai$invalidateEffectivePatterns();
@@ -195,17 +194,10 @@ public abstract class MolecularAssemblerPortOutputMultiplierMixin {
     }
 
     @Unique
-    private static int gtShanhai$resolveHostOutputMultiplier(
+    private static long gtShanhai$resolveHostOutputMultiplier(
             MEMolecularAssemblerIOPartMachine self) {
-        int multiplier = 1;
-        for (var controller : self.getControllers()) {
-            if (controller instanceof PrimordialOmegaEngineModuleBase module) {
-                multiplier = Math.max(multiplier, module.getHostOutputMultiplier());
-            } else if (controller instanceof PrimordialOmegaEngineMachine host) {
-                multiplier = Math.max(multiplier, host.getMountedOutputMultiplier());
-            }
-        }
-        return Math.max(1, Math.min(1000, multiplier));
+        return OutputMultiplierResolver.resolveHostOutputMultiplier(
+                self.getControllers(), self.getLevel(), self.getPos());
     }
 
     @Unique
@@ -237,7 +229,7 @@ public abstract class MolecularAssemblerPortOutputMultiplierMixin {
         gtShanhai$effectiveDefinitionToSource.clear();
         gtShanhai$sourceSnapshot = List.of();
         gtShanhai$effectivePatternCache = List.of();
-        gtShanhai$cachedViewMultiplier = -1;
+        gtShanhai$cachedViewMultiplier = -1L;
     }
 
     @Unique

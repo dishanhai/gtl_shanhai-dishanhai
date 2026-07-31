@@ -36,13 +36,15 @@ class MolecularAssemblerPortOutputMultiplierSourceTest {
 
         assertTrue(source.contains("getOffsetTimer() % 40L"));
         assertTrue(source.contains("if (detected == gtShanhai$cachedHostOutputMultiplier) return;"));
-        assertTrue(source.contains("module.getHostOutputMultiplier()"));
+        assertTrue(source.contains("OutputMultiplierResolver.resolveHostOutputMultiplier("));
         assertTrue(source.contains("ICraftingProvider.requestUpdate"));
         assertTrue(source.contains("gtShanhai$outputMultiplierModeEnabled"));
         assertTrue(source.contains("gtShanhai$toggleOutputMultiplierMode"));
         assertTrue(source.contains("gtShanhai$refreshOutputMultiplierNow"));
         assertFalse(source.contains("IntInputWidget"),
                 "分子端口倍率只能读取万象核心，不允许手动输入");
+        assertFalse(source.contains("module.getHostOutputMultiplier()"),
+                "分子端口倍率必须走通用 resolver，不允许硬编码原初主机读取路径");
     }
 
     @Test

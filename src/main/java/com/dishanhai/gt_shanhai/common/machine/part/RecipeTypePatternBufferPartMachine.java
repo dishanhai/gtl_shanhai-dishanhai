@@ -43,7 +43,7 @@ import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidSlot;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemSlot;
-import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
+import com.gregtechceu.gtceu.api.gui.widget.LongInputWidget;
 import com.gregtechceu.gtceu.utils.FormattingUtil;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
@@ -99,8 +99,7 @@ import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferReci
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
 import org.gtlcore.gtlcore.utils.NumberUtils;
-import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineMachine;
-import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
+import com.dishanhai.gt_shanhai.common.machine.output.OutputMultiplierResolver;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -158,12 +157,12 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     @Persisted
     private boolean outputMultiplierModeEnabled;
     @Persisted
-    private int patternOutputMultiplier = 1;
+    private long patternOutputMultiplier = 1L;
     @DescSynced
     @Persisted
-    private int cachedHostOutputMultiplier = 1;
-    private int lastDetectedHostOutputMultiplier = Integer.MIN_VALUE;
-    private int pendingDetectedHostOutputMultiplier = Integer.MIN_VALUE;
+    private long cachedHostOutputMultiplier = 1L;
+    private long lastDetectedHostOutputMultiplier = Long.MIN_VALUE;
+    private long pendingDetectedHostOutputMultiplier = Long.MIN_VALUE;
     @Nullable
     private TickableSubscription outputMultiplierHostSyncSubscription;
     private final List<IPatternDetails> wildcardPatterns;
@@ -675,7 +674,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public IPatternDetails gtShanhai$applyOutputMultiplier(IPatternDetails pattern, ItemStack stack) {
         if (!outputMultiplierModeEnabled || pattern == null || getLevel() == null) return pattern;
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
-        int multiplier = getPatternOutputMultiplier();
+        long multiplier = getPatternOutputMultiplier();
         long recipeRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         int cacheKey = makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, recipeRevision);
         OutputMultiplierPatternCacheEntry cached = outputMultiplierPatternCache.get(cacheKey);
@@ -693,64 +692,51 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         return outputMultiplierModeEnabled;
     }
 
-    public int getPatternOutputMultiplier() {
-        return Math.max(1, Math.min(1000, patternOutputMultiplier));
+    public long getPatternOutputMultiplier() {
+        return clampOutputMultiplier(patternOutputMultiplier);
     }
 
     public void setOutputMultiplierModeEnabled(boolean enabled) {
         if (enabled && !outputMultiplierModeEnabled) {
-            lastDetectedHostOutputMultiplier = Integer.MIN_VALUE;
+            lastDetectedHostOutputMultiplier = Long.MIN_VALUE;
         }
         applyOutputMultiplierSettings(enabled, patternOutputMultiplier);
     }
 
-    public void setPatternOutputMultiplier(int multiplier) {
+    public void setPatternOutputMultiplier(long multiplier) {
         applyOutputMultiplierSettings(outputMultiplierModeEnabled, multiplier);
     }
 
-    public int getConnectedHostOutputMultiplier() {
+    public long getConnectedHostOutputMultiplier() {
         if (isRemote()) return getCachedHostOutputMultiplier();
-        int multiplier = resolveConnectedHostOutputMultiplier();
+        long multiplier = resolveConnectedHostOutputMultiplier();
         updateCachedHostOutputMultiplier(multiplier);
         return getCachedHostOutputMultiplier();
     }
 
-    private int resolveConnectedHostOutputMultiplier() {
-        int multiplier = 1;
-        for (var controller : getControllers()) {
-            multiplier = Math.max(multiplier, readControllerHostOutputMultiplier(controller));
-        }
-        return clampOutputMultiplier(multiplier);
+    private long resolveConnectedHostOutputMultiplier() {
+        return clampOutputMultiplier(OutputMultiplierResolver.resolveHostOutputMultiplier(
+                getControllers(), getLevel(), getPos()));
     }
 
-    private static int readControllerHostOutputMultiplier(Object controller) {
-        if (controller instanceof PrimordialOmegaEngineMachine host) {
-            return host.getMountedOutputMultiplier();
-        }
-        if (controller instanceof PrimordialOmegaEngineModuleBase module) {
-            return module.getHostOutputMultiplier();
-        }
-        return 1;
-    }
-
-    private int getCachedHostOutputMultiplier() {
+    private long getCachedHostOutputMultiplier() {
         return clampOutputMultiplier(cachedHostOutputMultiplier);
     }
 
-    private void updateCachedHostOutputMultiplier(int multiplier) {
-        int clamped = clampOutputMultiplier(multiplier);
+    private void updateCachedHostOutputMultiplier(long multiplier) {
+        long clamped = clampOutputMultiplier(multiplier);
         if (cachedHostOutputMultiplier == clamped) return;
         cachedHostOutputMultiplier = clamped;
         markDirty();
     }
 
-    private static int clampOutputMultiplier(int multiplier) {
-        return Math.max(1, Math.min(1000, multiplier));
+    private static long clampOutputMultiplier(long multiplier) {
+        return multiplier <= 1L ? 1L : multiplier;
     }
 
     public void syncOutputMultiplierFromHost() {
         if (isRemote()) return;
-        int multiplier = resolveConnectedHostOutputMultiplier();
+        long multiplier = resolveConnectedHostOutputMultiplier();
         lastDetectedHostOutputMultiplier = multiplier;
         pendingDetectedHostOutputMultiplier = multiplier;
         updateCachedHostOutputMultiplier(multiplier);
@@ -763,7 +749,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             ItemStack stack = getPatternInventory().getStackInSlot(slot);
             if (stack.isEmpty()) continue;
             IPatternDetails pattern = PatternDetailsHelper.decodePattern(stack, getLevel());
-            int multiplier = VirtualPatternEncodingHelper.detectPatternOutputMultiplier(
+            long multiplier = VirtualPatternEncodingHelper.detectPatternOutputMultiplier(
                     pattern, PatternRecipeTypeHelper.readRecipeTypeId(stack));
             if (multiplier > 0) {
                 applyOutputMultiplierSettings(true, multiplier);
@@ -844,8 +830,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                 second == null ? null : second.getDefinition());
     }
 
-    private void applyOutputMultiplierSettings(boolean enabled, int multiplier) {
-        int clamped = Math.max(1, Math.min(1000, multiplier));
+    private void applyOutputMultiplierSettings(boolean enabled, long multiplier) {
+        long clamped = clampOutputMultiplier(multiplier);
         if (outputMultiplierModeEnabled == enabled && patternOutputMultiplier == clamped) return;
         outputMultiplierModeEnabled = enabled;
         patternOutputMultiplier = clamped;
@@ -869,7 +855,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private void pollOutputMultiplierHostState() {
         if (!outputMultiplierModeEnabled) return;
         if (getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L) return;
-        int detected = resolveConnectedHostOutputMultiplier();
+        long detected = resolveConnectedHostOutputMultiplier();
         if (detected == lastDetectedHostOutputMultiplier) {
             // 读值回落到已应用值时必须复位 pending，否则交替翻转会被残留的旧 pending 误"确认"
             pendingDetectedHostOutputMultiplier = detected;
@@ -878,7 +864,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         // 防抖：宿主倍率在模块工作↔空闲转换间会瞬时跳变（如增殖核心 idle=10 / working=1000），
         // 每次跳变都触发全量样板重编码（spark 实测单窗口累计 930ms+ 的尖峰热点）。
         // 除首次同步外，要求连续两次轮询读到同一新值才应用；交替翻转永不满足，彻底静音。
-        if (lastDetectedHostOutputMultiplier != Integer.MIN_VALUE
+        if (lastDetectedHostOutputMultiplier != Long.MIN_VALUE
                 && detected != pendingDetectedHostOutputMultiplier) {
             pendingDetectedHostOutputMultiplier = detected;
             return;
@@ -890,11 +876,11 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     }
 
     private int makeOutputMultiplierPatternCacheKey(IPatternDetails pattern, ItemStack stack,
-            String recipeTypeId, int multiplier, long recipeRevision) {
+            String recipeTypeId, long multiplier, long recipeRevision) {
         int result = 31 + patternDefinitionHash(pattern);
         result = 31 * result + stackKeyHash(stack);
         result = 31 * result + Objects.hashCode(recipeTypeId);
-        result = 31 * result + multiplier;
+        result = 31 * result + Long.hashCode(multiplier);
         result = 31 * result + Long.hashCode(recipeRevision);
         return result;
     }
@@ -944,6 +930,14 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
 
     public boolean gtShanhai$isPatternSlotWarning(int slot) {
         return slot >= 0 && gtShanhai$warningSlotSet().get(slot);
+    }
+
+    public int gtShanhai$getWarningSlotCount() {
+        return gtShanhai$warningSlotSet().cardinality();
+    }
+
+    public int gtShanhai$getStuckWarningSlotCount() {
+        return stuckRuntimeWarningSlots.cardinality();
     }
 
     public void gtShanhai$setPatternSlotWarning(int slot, boolean warning) {
@@ -1208,10 +1202,10 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                     getConnectedHostOutputMultiplier()).getString()));
             group.addWidget(new LabelWidget(6, 40,
                     Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.foa_multiplier").getString()));
-            group.addWidget(new IntInputWidget(78, 35, 76, 18,
+            group.addWidget(new LongInputWidget(78, 35, 76, 18,
                     RecipeTypePatternBufferPartMachine.this::getPatternOutputMultiplier,
                     RecipeTypePatternBufferPartMachine.this::setPatternOutputMultiplier)
-                    .setMin(1).setMax(1000));
+                    .setMin(1L).setMax(Long.MAX_VALUE));
             group.addWidget(new ButtonWidget(6, 58, 46, 16, new TextTexture("§f开关", -1),
                     click -> setOutputMultiplierModeEnabled(!outputMultiplierModeEnabled)));
             group.addWidget(new ButtonWidget(56, 58, 46, 16, new TextTexture("§b读宿主", -1),
@@ -1842,18 +1836,18 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
             int sourcePatternDefinitionHash,
             int sourceStackHash,
             String recipeTypeId,
-            int multiplier,
+            long multiplier,
             long recipeRevision,
             IPatternDetails pattern) {
 
         OutputMultiplierPatternCacheEntry(IPatternDetails sourcePattern, ItemStack sourceStack,
-                String recipeTypeId, int multiplier, long recipeRevision, IPatternDetails pattern) {
+                String recipeTypeId, long multiplier, long recipeRevision, IPatternDetails pattern) {
             this(patternDefinitionHash(sourcePattern), stackKeyHash(sourceStack),
                     recipeTypeId, multiplier, recipeRevision, pattern);
         }
 
         boolean matches(IPatternDetails sourcePattern, ItemStack sourceStack,
-                String recipeTypeId, int multiplier, long recipeRevision) {
+                String recipeTypeId, long multiplier, long recipeRevision) {
             return sourcePatternDefinitionHash == patternDefinitionHash(sourcePattern)
                     && sourceStackHash == stackKeyHash(sourceStack)
                     && Objects.equals(this.recipeTypeId, recipeTypeId)

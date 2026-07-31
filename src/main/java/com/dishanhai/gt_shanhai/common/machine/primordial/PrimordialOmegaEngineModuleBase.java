@@ -10,6 +10,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
+import com.dishanhai.gt_shanhai.api.machine.output.IOutputMultiplierSource;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
@@ -52,7 +53,7 @@ import java.util.UUID;
  */
 public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRecipeTypeSetMachine
         implements IModularMachineModule<PrimordialOmegaEngineMachine, PrimordialOmegaEngineModuleBase>,
-                   IThreadModifierMachine {
+                   IThreadModifierMachine, IOutputMultiplierSource {
 
     private BlockPos hostPosition;
     private PrimordialOmegaEngineMachine host;
@@ -323,6 +324,20 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             return 1;
         }
         return currentHost.getMountedOutputMultiplier();
+    }
+
+    @Override
+    public Object getOutputMultiplierSourceKey() {
+        var currentHost = getHost();
+        if (currentHost != null) {
+            return currentHost.getOutputMultiplierSourceKey();
+        }
+        return hostPosition == null ? getPos() : hostPosition;
+    }
+
+    @Override
+    public long getOutputMultiplierContribution() {
+        return getHostOutputMultiplier();
     }
 
     public void invalidateHostOutputMultiplierCache() {

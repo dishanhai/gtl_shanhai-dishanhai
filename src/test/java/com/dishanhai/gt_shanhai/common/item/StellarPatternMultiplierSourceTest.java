@@ -25,13 +25,14 @@ class StellarPatternMultiplierSourceTest {
         String source = Files.readString(MACHINE);
 
         assertTrue(source.contains("@Persisted\n    private boolean outputMultiplierModeEnabled"));
-        assertTrue(source.contains("@Persisted\n    private int patternOutputMultiplier"));
-        assertTrue(source.contains("@DescSynced\n    @Persisted\n    private int cachedHostOutputMultiplier = 1"),
+        assertTrue(source.contains("@Persisted\n    private long patternOutputMultiplier = 1L"));
+        assertTrue(source.contains("@DescSynced\n    @Persisted\n    private long cachedHostOutputMultiplier = 1L"),
                 "读宿主结果必须缓存并同步到客户端 UI，不能让显示端重新按客户端控制器状态算 1x");
-        assertTrue(source.contains("host.getMountedOutputMultiplier()"));
-        assertTrue(source.contains("controller instanceof PrimordialOmegaEngineModuleBase module"),
-                "星律在原初模块结构里时，控制器是模块而不是万象主机，必须经模块读取宿主倍率");
-        assertTrue(source.contains("module.getHostOutputMultiplier()"));
+        assertTrue(source.contains("OutputMultiplierResolver.resolveHostOutputMultiplier("));
+        assertTrue(source.contains("LongInputWidget"));
+        assertFalse(source.contains("IntInputWidget"));
+        assertFalse(source.contains("controller instanceof PrimordialOmegaEngineModuleBase module"),
+                "星律下单倍率必须走通用聚合器，不得回退到原初专用硬编码分支");
         assertTrue(source.contains("new OutputMultiplierConfigurator()"));
         assertTrue(source.contains("syncOutputMultiplierFromHost"));
         assertTrue(source.contains("syncOutputMultiplierFromPattern"));

@@ -7,6 +7,7 @@ import com.dishanhai.gt_shanhai.integration.jade.provider.InfiniteParallelProvid
 import com.dishanhai.gt_shanhai.integration.jade.provider.DShanhaiAENetworkInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.MatterCopierInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.ModuleBaseInfoProvider;
+import com.dishanhai.gt_shanhai.integration.jade.provider.RecipeTypePatternBufferInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.NineIndustrialInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.PrimordialOmegaEngineInfoProvider;
 import com.dishanhai.gt_shanhai.integration.jade.provider.PrimordialVoidInductionArmatureInfoProvider;
@@ -33,6 +34,7 @@ public class DShanhaiJadePlugin implements IWailaPlugin {
         reg.registerBlockDataProvider(EternalGregTechWorkshopInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
         reg.registerBlockDataProvider(DShanhaiAENetworkInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
         reg.registerBlockDataProvider(MatterCopierInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
+        reg.registerBlockDataProvider(RecipeTypePatternBufferInfoProvider.INSTANCE, MetaMachineBlockEntity.class);
     }
 
     @Override
@@ -46,5 +48,6 @@ public class DShanhaiJadePlugin implements IWailaPlugin {
         reg.registerBlockComponent(EternalGregTechWorkshopInfoProvider.INSTANCE, MetaMachineBlock.class);
         reg.registerBlockComponent(DShanhaiAENetworkInfoProvider.INSTANCE, MetaMachineBlock.class);
         reg.registerBlockComponent(MatterCopierInfoProvider.INSTANCE, MetaMachineBlock.class);
+        reg.registerBlockComponent(RecipeTypePatternBufferInfoProvider.INSTANCE, MetaMachineBlock.class);
     }
 }

@@ -29,11 +29,11 @@ class RecipeTypePatternBufferHostMultiplierDebounceSourceTest {
         int pollEnd = source.indexOf("private int makeOutputMultiplierPatternCacheKey", pollStart);
         String poll = source.substring(pollStart, pollEnd);
 
-        assertTrue(source.contains("private int pendingDetectedHostOutputMultiplier = Integer.MIN_VALUE;"),
+        assertTrue(source.contains("private long pendingDetectedHostOutputMultiplier = Long.MIN_VALUE;"),
                 "防抖 pending 字段必须存在");
         assertTrue(poll.contains("detected != pendingDetectedHostOutputMultiplier"),
                 "新值必须先进 pending，第二次轮询确认后才应用（连续两次一致）");
-        assertTrue(poll.contains("lastDetectedHostOutputMultiplier != Integer.MIN_VALUE"),
+        assertTrue(poll.contains("lastDetectedHostOutputMultiplier != Long.MIN_VALUE"),
                 "首次同步必须绕过防抖立即应用，保持模式开启时的即时性");
         int equalBranch = poll.indexOf("detected == lastDetectedHostOutputMultiplier");
         int equalBranchEnd = poll.indexOf("return;", equalBranch);

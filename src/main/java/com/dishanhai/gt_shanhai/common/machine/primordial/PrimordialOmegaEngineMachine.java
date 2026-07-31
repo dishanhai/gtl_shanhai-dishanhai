@@ -17,6 +17,7 @@ import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
+import com.dishanhai.gt_shanhai.api.machine.output.IOutputMultiplierSource;
 import com.dishanhai.gt_shanhai.api.machine.primordial.IPrimordialOutputMultiplierModule;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.network.SHideRingPacket;
@@ -41,7 +42,8 @@ import java.util.Set;
 import java.util.UUID;
 
 public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMachine
-        implements IModularMachineHost<PrimordialOmegaEngineMachine>, IMachineLife {
+        implements IModularMachineHost<PrimordialOmegaEngineMachine>, IMachineLife,
+                   IOutputMultiplierSource {
 
     private static final long MAX_PARALLEL = 9223372036854775807L;
 
@@ -297,6 +299,16 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         synchronized (outputMultiplierCache) {
             outputMultiplierCache.invalidate();
         }
+    }
+
+    @Override
+    public Object getOutputMultiplierSourceKey() {
+        return getPos();
+    }
+
+    @Override
+    public long getOutputMultiplierContribution() {
+        return getMountedOutputMultiplier();
     }
 
     static final class OutputMultiplierCache {

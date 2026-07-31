@@ -330,6 +330,10 @@ public class GravitationalWaveAntennaTransmitter extends GTLAddWirelessWorkableE
         return Math.min(100, tier * 10 + 10);
     }
 
+    private int getBroadcastOutputMultiplier() {
+        return lensCount > 0 ? 3 : 2;
+    }
+
     public long getBroadcastEuConsumption() {
         int tier = Math.max(1, getTier());
         return (long) Math.pow(4, Math.min(tier, 12)) * 64L;
@@ -389,11 +393,12 @@ public class GravitationalWaveAntennaTransmitter extends GTLAddWirelessWorkableE
         }
         if (!sourceRegistered) {
             GravitationalWaveBroadcastManager.INSTANCE.addSource(
-                serverLevel, getPos(), getBroadcastRadius(), getBoostLevel(), lensCount);
+                serverLevel, getPos(), getBroadcastRadius(), getBoostLevel(), lensCount,
+                getBroadcastOutputMultiplier());
             lastLensCount = lensCount;
             sourceRegistered = true;
-            LOG.info(">>> Broadcast REGISTERED at {}, radius={}, power={}, lenses={}",
-                    getPos(), getBroadcastRadius(), getBoostLevel(), lensCount);
+            LOG.info(">>> Broadcast REGISTERED at {}, radius={}, power={}, lenses={}, multiplier={}",
+                    getPos(), getBroadcastRadius(), getBoostLevel(), lensCount, getBroadcastOutputMultiplier());
         }
     }
 

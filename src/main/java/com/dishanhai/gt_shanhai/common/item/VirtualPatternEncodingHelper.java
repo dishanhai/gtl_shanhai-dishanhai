@@ -409,18 +409,18 @@ public final class VirtualPatternEncodingHelper {
                 StackBag.of(availableCatalystInputs));
     }
 
-    public static int detectPatternOutputMultiplier(IPatternDetails pattern, String recipeTypeId) {
-        if (!(pattern instanceof AEProcessingPattern processingPattern)) return 0;
+    public static long detectPatternOutputMultiplier(IPatternDetails pattern, String recipeTypeId) {
+        if (!(pattern instanceof AEProcessingPattern processingPattern)) return 0L;
         GenericStack[] inputs = processingPattern.getSparseInputs();
         GenericStack[] outputs = processingPattern.getSparseOutputs();
         GTRecipe recipe = findMatchingRecipeForPattern(inputs, outputs, recipeTypeId);
-        if (recipe == null) return 0;
+        if (recipe == null) return 0L;
         long multiplier = detectRecipeOutputMultiplier(recipe, StackBag.of(outputs));
-        return multiplier <= 0L ? 0 : (int) Math.min(1000L, multiplier);
+        return multiplier <= 0L ? 0L : multiplier;
     }
 
     public static IPatternDetails rewritePatternOutputMultiplier(IPatternDetails pattern, Level level,
-            String recipeTypeId, int requestedMultiplier) {
+            String recipeTypeId, long requestedMultiplier) {
         if (!(pattern instanceof AEProcessingPattern processingPattern) || level == null) return pattern;
         GenericStack[] inputs = processingPattern.getSparseInputs();
         GenericStack[] outputs = processingPattern.getSparseOutputs();
@@ -433,7 +433,7 @@ public final class VirtualPatternEncodingHelper {
         if (currentMultiplier <= 0L) {
             return rewritePatternOutputMultiplierDirect(processingPattern, level, requestedMultiplier);
         }
-        int targetMultiplier = Math.max(1, Math.min(1000, requestedMultiplier));
+        long targetMultiplier = Math.max(1L, requestedMultiplier);
         GenericStack[] rewrittenInputs = rewriteCycleContainerInputs(
                 inputs, currentMultiplier, targetMultiplier);
         if (rewrittenInputs == null) return pattern;
@@ -444,8 +444,8 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private static IPatternDetails rewritePatternOutputMultiplierDirect(AEProcessingPattern pattern, Level level,
-            int requestedMultiplier) {
-        int targetMultiplier = Math.max(1, Math.min(1000, requestedMultiplier));
+            long requestedMultiplier) {
+        long targetMultiplier = Math.max(1L, requestedMultiplier);
         if (targetMultiplier <= 1) return pattern;
         GenericStack[] rewrittenInputs = multiplyCycleContainerStacks(pattern.getSparseInputs(), targetMultiplier, true);
         GenericStack[] rewrittenOutputs = multiplyCycleContainerStacks(pattern.getSparseOutputs(), targetMultiplier, false);

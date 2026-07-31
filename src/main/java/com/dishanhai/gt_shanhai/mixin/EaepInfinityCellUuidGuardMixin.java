@@ -51,9 +51,6 @@ public abstract class EaepInfinityCellUuidGuardMixin {
     private boolean isPersisted;
 
     @Shadow
-    private Object2ObjectMap<AEKey, BigInteger> AEKey2AmountsMap;
-
-    @Shadow
     private Object2ObjectMap<AEKey, BigInteger> getCellStoredMap() {
         throw new AssertionError();
     }
@@ -61,26 +58,22 @@ public abstract class EaepInfinityCellUuidGuardMixin {
     @Shadow
     public abstract void persist();
 
-    @Shadow
-    public abstract boolean hasUUID();
-
-    @Shadow
-    public abstract BigInteger getTotalAEKey2Amounts();
-
     @Unique
     private BigInteger gtShanhai$storedBeforeExtract;
 
     @Inject(method = "persist", at = @At("HEAD"), remap = false)
     private void gtShanhai$ensureUuidBeforePersist(CallbackInfo ci) {
-        BigInteger total = getTotalAEKey2Amounts();
-        if (self == null || self.isEmpty() || hasUUID() || total == null || total.signum() <= 0) {
+        BigInteger total = totalAEKey2Amounts;
+        if (self == null || self.isEmpty() || total == null || total.signum() <= 0) {
             return;
         }
 
         CompoundTag tag = self.getOrCreateTag();
-        if (!tag.hasUUID(InfinityConstants.INFINITY_CELL_UUID)) {
-            tag.putUUID(InfinityConstants.INFINITY_CELL_UUID, UUID.randomUUID());
+        if (tag.hasUUID(InfinityConstants.INFINITY_CELL_UUID)) {
+            return;
         }
+
+        tag.putUUID(InfinityConstants.INFINITY_CELL_UUID, UUID.randomUUID());
     }
 
     @Inject(method = "extract", at = @At("HEAD"), remap = false)
@@ -112,7 +105,8 @@ public abstract class EaepInfinityCellUuidGuardMixin {
 
     @Unique
     private void gtShanhai$markChanged(BigInteger newTotal) {
-        totalAEKeyType = AEKey2AmountsMap.size();
+        Object2ObjectMap<AEKey, BigInteger> stored = getCellStoredMap();
+        totalAEKeyType = stored == null ? 0 : stored.size();
         totalAEKey2Amounts = newTotal;
         isPersisted = false;
         if (container != null) {

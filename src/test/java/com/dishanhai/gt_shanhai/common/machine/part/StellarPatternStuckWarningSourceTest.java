@@ -126,6 +126,7 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(context.contains("ThreadLocal<Integer>"));
         assertTrue(context.contains("currentAePlayerId()"));
         assertTrue(mixin.contains("ExecutingCraftingJob"));
+        assertTrue(mixin.contains("@Mixin(value = CraftingCpuLogic.class, priority = 1500, remap = false)"));
         assertTrue(mixin.contains("@Accessor(\"playerId\")"));
         assertTrue(mixin.contains("StellarPatternCraftingContext.push"));
         assertTrue(mixin.contains("StellarPatternCraftingContext.pop"));

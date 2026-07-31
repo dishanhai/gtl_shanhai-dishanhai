@@ -20,6 +20,7 @@ import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMaintenanceMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.machine.multiblock.part.MultiblockPartMachine;
 
+import com.dishanhai.gt_shanhai.api.machine.output.IOutputMultiplierSource;
 import com.dishanhai.gt_shanhai.api.machine.part.IMaintenanceBypassPart;
 import com.dishanhai.gt_shanhai.common.machine.trait.InfiniteCWUContainer;
 import com.gregtechceu.gtceu.api.GTValues;
@@ -45,7 +46,8 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
         implements IMaintenanceBypassPart, IMachineLife,
                    IAutoConfigurationMaintenanceHatch, IMaintenanceMachine,
                    IParallelHatch, IThreadModifierPart, IDataAccessHatch,
-                   com.dishanhai.gt_shanhai.api.machine.IDShanhaiBatchToggle {
+                   com.dishanhai.gt_shanhai.api.machine.IDShanhaiBatchToggle,
+                   IOutputMultiplierSource {
 
     private static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             DShanhaiMaintenanceHatchMachine.class, MultiblockPartMachine.MANAGED_FIELD_HOLDER);
@@ -357,6 +359,24 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     public float getOutputMultiplier() {
         if (!isOutputUnlocked() || !outputMultiplierEnabled) return 1.0f;
         return outputMultiplier;
+    }
+
+    @Override
+    public Object getOutputMultiplierSourceKey() {
+        return getPos();
+    }
+
+    @Override
+    public long getOutputMultiplierContribution() {
+        long multiplier = Math.max(1L, (long) getOutputMultiplier());
+        return hasCreateRealityModifierModule() ? multiplier * 2L : multiplier;
+    }
+
+    private boolean hasCreateRealityModifierModule() {
+        ItemStack moduleStack = moduleSlot.getStackInSlot(0);
+        if (moduleStack.isEmpty()) return false;
+        String moduleId = BuiltInRegistries.ITEM.getKey(moduleStack.getItem()).toString();
+        return "dishanhai:create_mk".equals(moduleId);
     }
 
     private void updateRangeFromModule() {
