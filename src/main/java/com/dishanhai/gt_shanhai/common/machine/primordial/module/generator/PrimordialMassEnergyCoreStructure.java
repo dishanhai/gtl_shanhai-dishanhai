@@ -24,8 +24,7 @@ public class PrimordialMassEnergyCoreStructure {
         Block industrialSteamCasing = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gtceu", "industrial_steam_casing"));
 
-        var blocks = Predicates.blocks(
-                bronzeCasing, industrialSteamCasing);
+        var blocks = Predicates.blocks(bronzeCasing);
 
         return MultiBlockStructure.INSTANCE.getFORGE_OF_THE_ANTICHRIST_MODULE()
                 .where('A', blocks)
@@ -35,7 +34,7 @@ public class PrimordialMassEnergyCoreStructure {
                         .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
                         .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1)))
                 .where('C', blocks)
-                .where('D', blocks)
+                .where('D', Predicates.blocks(industrialSteamCasing))
                 .where('E', blocks)
                 .where('F', blocks)
                 .where('G', blocks)

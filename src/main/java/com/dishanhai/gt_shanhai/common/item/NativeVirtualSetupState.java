@@ -4,9 +4,9 @@ package com.dishanhai.gt_shanhai.common.item;
  * 原生虚拟配方执行的跨类状态标记。
  * 非 mixin 类，可安全持有 static 字段。
  *
- * <p>用途：NativeVirtualFindHandleRecipeMixin 在调用 setupRecipe 之前
+ * <p>用途：仅在作弊破限配置开启时，NativeVirtualFindHandleRecipeMixin 在调用 setupRecipe 之前
  * 通过 beginVirtualExecution() 激活标记；NativeVirtualBeforeWorkingBypassMixin
- * 检测到此标记后对 beforeWorking 直接返回 true，使跨类型配方不被宿主机器模式拒绝。
+ * 检测到此标记后对 beforeWorking 直接返回 true。正常模式不设置标记，保留宿主机器检查。
  */
 public final class NativeVirtualSetupState {
 

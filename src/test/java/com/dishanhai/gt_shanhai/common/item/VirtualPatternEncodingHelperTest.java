@@ -201,13 +201,15 @@ public class VirtualPatternEncodingHelperTest {
     }
 
     @Test
-    void stellarRecipeInferenceUsesOnlyExplicitSharedCatalystsForOmittedInputs() throws IOException {
+    void stellarRecipeInferenceUsesExplicitSharedAndCurrentSlotCatalystsForOmittedInputs() throws IOException {
         String helperSource = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
         String machineSource = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/machine/part/RecipeTypePatternBufferPartMachine.java"));
         String searchSource = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/item/RecipeTypePatternSearchHelper.java"));
+        String accessSource = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/RecipeTypePatternSlotAccess.java"));
 
         assertTrue(helperSource.contains("availableCatalystInputs"),
                 "反推器必须显式接收星律当前可用库存，不能无条件省略催化剂");
@@ -228,6 +230,12 @@ public class VirtualPatternEncodingHelperTest {
                 "反推上下文必须保留共享催化仓");
         assertTrue(method.contains("getSharedCatalystTank()"),
                 "反推上下文必须保留共享催化罐");
+        assertTrue(machineSource.contains("gtShanhai$mergePatternInferenceInputs(slot, availableCatalystInputs)"),
+                "反推当前样板时必须合并该槽右侧的独立催化剂槽");
+        assertTrue(machineSource.contains("this.catalystItems[slot]"),
+                "物品反推必须读取当前样板槽的实体物品催化剂，不能只读共享仓");
+        assertTrue(machineSource.contains("this.catalystFluids[slot]"),
+                "流体反推必须读取当前样板槽的实体流体催化剂，不能只读共享罐");
         assertFalse(method.contains("appendVisibleStock"),
                 "反推上下文不得读取 stock 可见库存，避免把主机并行池当 presence");
         assertFalse(method.contains(".getStock()"),
@@ -236,6 +244,10 @@ public class VirtualPatternEncodingHelperTest {
                 "反推上下文不得从库存配置槽绕路读取主机并行池");
         assertTrue(searchSource.contains("inferenceInventoryFingerprint"),
                 "反推缓存必须感知显式共享催化内容变化，补入模块后才能重新推断");
+        assertTrue(accessSource.contains("gtShanhai$getPatternInferenceFingerprint(int slot, long sharedFingerprint)"),
+                "槽位接口必须提供当前样板催化剂指纹，避免不同槽位共享错误缓存");
+        assertTrue(searchSource.contains("access.gtShanhai$getPatternInferenceFingerprint("),
+                "反推缓存命中判断必须混入当前槽催化剂内容");
     }
 
     @Test

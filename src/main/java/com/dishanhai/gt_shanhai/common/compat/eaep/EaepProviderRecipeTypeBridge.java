@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.compat.eaep;
 
 import appeng.helpers.patternprovider.PatternContainer;
 
+import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.dishanhai.gt_shanhai.client.gui.scaled.PinyinSearchBridge;
@@ -234,6 +235,9 @@ public final class EaepProviderRecipeTypeBridge {
         if (typeId == null || typeId.isBlank() || query == null || query.isBlank()) {
             return 0;
         }
+        if (PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(typeId, query)) {
+            return 100;
+        }
         String id = normalize(typeId);
         String path = id.contains(":") ? id.substring(id.indexOf(':') + 1) : id;
         int bestScore = Math.max(tokenMatchScore(id, query), tokenMatchScore(path, query));
@@ -294,12 +298,16 @@ public final class EaepProviderRecipeTypeBridge {
             }
             recipeTypeNameCacheTime = modified;
             if (modified == Long.MIN_VALUE) {
-                recipeTypeNameCache = Collections.emptyMap();
+                Map<String, String> loaded = new HashMap<>();
+                addBuiltinRecipeTypeNameMappings(loaded);
+                recipeTypeNameCache = loaded;
                 return recipeTypeNameCache;
             }
             JsonObject obj = GSON.fromJson(Files.readString(cfgPath), JsonObject.class);
             if (obj == null) {
-                recipeTypeNameCache = Collections.emptyMap();
+                Map<String, String> loaded = new HashMap<>();
+                addBuiltinRecipeTypeNameMappings(loaded);
+                recipeTypeNameCache = loaded;
                 return recipeTypeNameCache;
             }
             Map<String, String> loaded = new HashMap<>();
@@ -309,12 +317,21 @@ public final class EaepProviderRecipeTypeBridge {
                     loaded.put(normalize(entry.getKey()), normalize(value.getAsString()));
                 }
             }
+            addBuiltinRecipeTypeNameMappings(loaded);
             recipeTypeNameCache = loaded;
             return recipeTypeNameCache;
         } catch (Throwable ignored) {
-            recipeTypeNameCache = Collections.emptyMap();
+            Map<String, String> loaded = new HashMap<>();
+            addBuiltinRecipeTypeNameMappings(loaded);
+            recipeTypeNameCache = loaded;
             return recipeTypeNameCache;
         }
+    }
+
+    private static void addBuiltinRecipeTypeNameMappings(Map<String, String> mappings) {
+        if (mappings == null) return;
+        mappings.putIfAbsent("gtceu:electric_furnace", "熔炉");
+        mappings.putIfAbsent("electric_furnace", "熔炉");
     }
 
     private static String deserializeComponentName(String name) {

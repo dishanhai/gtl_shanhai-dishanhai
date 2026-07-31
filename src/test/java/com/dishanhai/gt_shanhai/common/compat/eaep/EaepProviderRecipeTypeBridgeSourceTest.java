@@ -95,6 +95,12 @@ class EaepProviderRecipeTypeBridgeSourceTest {
         assertTrue(bridge.contains("preferred.add(displayName)") && bridge.contains("others.add(displayName)")
                         && bridge.contains("ordered.addAll(preferred)") && bridge.contains("ordered.addAll(others)"),
                 "多类型主机必须先显示本次上传样板匹配类型，再显示其他类型");
+        assertTrue(bridge.contains("PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(typeId, query)"),
+                "EAEP 上传普通熔炉样板时必须把 minecraft:smelting 映射到 GTCEu 电炉宿主");
+        assertTrue(bridge.contains("addBuiltinRecipeTypeNameMappings")
+                        && bridge.contains("\"gtceu:electric_furnace\"")
+                        && bridge.contains("\"electric_furnace\""),
+                "EAEP 右侧配方类型提示必须内建电炉的中文 fallback，不能裸显示 electric_furnace");
         assertTrue(bridge.contains("ordered.subList(0, maxTypes)"),
                 "超过最大类型数量必须截断，避免按钮文本溢出");
         assertTrue(bridge.contains("new LinkedHashSet<>()"),

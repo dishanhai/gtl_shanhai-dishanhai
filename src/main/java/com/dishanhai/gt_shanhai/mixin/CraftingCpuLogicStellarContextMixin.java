@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-@Mixin(value = CraftingCpuLogic.class, remap = false)
+@Mixin(value = CraftingCpuLogic.class, priority = 1500, remap = false)
 public abstract class CraftingCpuLogicStellarContextMixin {
 
     @Shadow

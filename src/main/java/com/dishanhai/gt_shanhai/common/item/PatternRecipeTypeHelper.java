@@ -14,11 +14,16 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
+import java.util.Locale;
+
 public final class PatternRecipeTypeHelper {
 
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai:recipe_type");
 
     public static final String TAG_RECIPE_TYPE = "gt_shanhai_recipe_type";
+    private static final String VANILLA_SMELTING_RECIPE_TYPE_ID = "minecraft:smelting";
+    private static final String VANILLA_SMELTING_RECIPE_TYPE_PATH = "smelting";
+    private static final String GTCEU_ELECTRIC_FURNACE_RECIPE_TYPE_ID = "gtceu:electric_furnace";
 
     // gtlcore 自身编码样板时写入的兜底字段：gtlcore:{patternQuickUploadRecipeTypes:["gtceu:xxx", ...]}
     private static final String GTLCORE_TAG = "gtlcore";
@@ -297,18 +302,41 @@ public final class PatternRecipeTypeHelper {
     }
 
     public static GTRecipeType resolveRecipeType(String recipeTypeId) {
-        if (recipeTypeId == null || recipeTypeId.isEmpty()) return null;
+        String canonicalId = canonicalRecipeTypeId(recipeTypeId);
+        if (canonicalId.isEmpty()) return null;
         try {
-            return GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
+            return GTRegistries.RECIPE_TYPES.get(new ResourceLocation(canonicalId));
         } catch (RuntimeException ignored) {
             return null;
         }
     }
 
     public static boolean recipeMatchesTypeId(GTRecipe recipe, String recipeTypeId) {
-        if (recipeTypeId == null || recipeTypeId.isEmpty()) return true;
+        String expectedId = canonicalRecipeTypeId(recipeTypeId);
+        if (expectedId.isEmpty()) return true;
         if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) return false;
-        return recipeTypeId.equals(recipe.recipeType.registryName.toString());
+        return expectedId.equals(canonicalRecipeTypeId(recipe.recipeType.registryName.toString()));
+    }
+
+    public static boolean areRecipeTypeIdsEquivalent(String left, String right) {
+        String leftId = normalizeRecipeTypeId(left);
+        String rightId = normalizeRecipeTypeId(right);
+        if (leftId.isEmpty() || rightId.isEmpty()) return false;
+        if (leftId.equals(rightId)) return true;
+        return canonicalRecipeTypeId(leftId).equals(canonicalRecipeTypeId(rightId));
+    }
+
+    public static String canonicalRecipeTypeId(String recipeTypeId) {
+        String normalized = normalizeRecipeTypeId(recipeTypeId);
+        if (VANILLA_SMELTING_RECIPE_TYPE_ID.equals(normalized)
+                || VANILLA_SMELTING_RECIPE_TYPE_PATH.equals(normalized)) {
+            return GTCEU_ELECTRIC_FURNACE_RECIPE_TYPE_ID;
+        }
+        return normalized;
+    }
+
+    public static String normalizeRecipeTypeId(String recipeTypeId) {
+        return recipeTypeId == null ? "" : recipeTypeId.trim().toLowerCase(Locale.ROOT);
     }
 
     private static GTRecipe inferRecipe(ItemStack stack, Level level) {

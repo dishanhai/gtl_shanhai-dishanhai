@@ -164,7 +164,9 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static GTRecipe getMarkedRecipeCached(MEPatternBufferPartMachineBase buffer,
             RecipeTypePatternSlotAccess access, int slot, GenericStack[] inferenceInputs,
-            long inferenceInventoryFingerprint) {
+            long sharedInferenceFingerprint) {
+        long inferenceInventoryFingerprint =
+                access.gtShanhai$getPatternInferenceFingerprint(slot, sharedInferenceFingerprint);
         int stackHash = System.identityHashCode(access.gtShanhai$getPatternStack(slot));
         long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         synchronized (MARKED_RECIPE_CACHE) {
@@ -331,7 +333,6 @@ public final class RecipeTypePatternSearchHelper {
      */
     public static Set<GTRecipe> collectNativeVirtualRecipes(IRecipeLogicMachine machine) {
         LinkedHashSet<GTRecipe> result = new LinkedHashSet<>();
-        if (!allowCheatVirtualExecution()) return result;
         if (!(machine instanceof IMultiController controller)) return result;
         for (IMultiPart part : controller.getParts()) {
             if (part == null) continue;
@@ -551,7 +552,6 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static void topUpVirtualSupply(IRecipeLogicMachine machine, MEPatternBufferPartMachineBase buffer, int slot, ItemStack patternStack,
             GTRecipe recipe) {
-        if (!allowCheatVirtualExecution()) return;
         if (patternStack == null || patternStack.isEmpty()) return;
         Level level = buffer.getLevel();
         if (level == null) return;

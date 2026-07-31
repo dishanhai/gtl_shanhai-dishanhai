@@ -19,7 +19,7 @@ public final class PrimordialMolecularAssemblerModuleStructure {
                 new ResourceLocation("gtceu", "bronze_machine_casing"));
         Block industrialSteamCasing = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gtceu", "industrial_steam_casing"));
-        var casings = Predicates.blocks(bronzeCasing, industrialSteamCasing);
+        var casings = Predicates.blocks(bronzeCasing);
         var io = Predicates.blocks(GTLMachines.GTAEMachines.ME_MOLECULAR_ASSEMBLER_IO.get())
                 .setExactLimit(1)
                 .setPreviewCount(1);
@@ -37,7 +37,7 @@ public final class PrimordialMolecularAssemblerModuleStructure {
                         .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
                         .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1)))
                 .where('C', casings)
-                .where('D', casings)
+                .where('D', Predicates.blocks(industrialSteamCasing))
                 .where('E', casings)
                 .where('F', casings)
                 .where('G', casings)

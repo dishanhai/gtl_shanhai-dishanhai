@@ -73,7 +73,6 @@ public abstract class NativeVirtualFindHandleRecipeMixin {
 
     @Inject(method = "findAndHandleRecipe", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$nativeVirtualFind(CallbackInfo ci) {
-        if (!DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get()) return;
         // 仅处理多方块宿主
         if (!(machine instanceof IMultiController)) return;
 
@@ -91,12 +90,16 @@ public abstract class NativeVirtualFindHandleRecipeMixin {
                     && modified.checkConditions(machine.getRecipeLogic()).isSuccess();
             if (!match) continue;
 
-            // 调用 setupRecipe，同时激活 beforeWorking 绕过标记（宿主模式校验会拒绝跨类型配方）
-            NativeVirtualSetupState.beginVirtualExecution();
+            boolean bypassHostLimits = DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get();
+            if (bypassHostLimits) {
+                NativeVirtualSetupState.beginVirtualExecution();
+            }
             try {
                 setupRecipe(modified);
             } finally {
-                NativeVirtualSetupState.endVirtualExecution();
+                if (bypassHostLimits) {
+                    NativeVirtualSetupState.endVirtualExecution();
+                }
             }
 
             if (lastRecipe != null && getStatus() == RecipeLogic.Status.WORKING) {

@@ -77,6 +77,24 @@ class RecipeTypeSharedSearchSetsTest {
     }
 
     @Test
+    void vanillaSmeltingIsBuiltInAliasForElectricFurnace() {
+        assertTrue(RecipeTypeSharedSearchSets.isShared("minecraft:smelting", "gtceu:electric_furnace"),
+                "普通熔炉样板必须内建兼容 GTCEu 电炉宿主");
+        assertTrue(RecipeTypeSharedSearchSets.isShared("gtceu:electric_furnace", "minecraft:smelting"),
+                "内建别名必须双向生效，供上传映射和槽位扣料共用");
+    }
+
+    @Test
+    void parseGroupsCanonicalizesBuiltInAliases() {
+        Map<String, Set<String>> groups = RecipeTypeSharedSearchSets.parseGroups(List.of(
+                "minecraft:smelting, gtceu:assembler"));
+
+        assertEquals(Set.of("gtceu:electric_furnace", "gtceu:assembler"),
+                groups.get("gtceu:electric_furnace"),
+                "配置共享集里写普通熔炉 ID 时必须落到 GTCEu 电炉 canonical ID");
+    }
+
+    @Test
     void defaultConfigShipsTheChemicalReactorPair() {
         List<? extends String> defaults = DShanhaiConfig.COMMON.recipeTypeSharedSearchSets.getDefault();
 

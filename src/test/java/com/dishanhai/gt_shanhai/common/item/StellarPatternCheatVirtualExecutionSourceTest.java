@@ -41,23 +41,26 @@ class StellarPatternCheatVirtualExecutionSourceTest {
         assertTrue(config.contains("recipeTypePatternAllowCheatVirtualExecution"));
         assertTrue(config.contains(".define(\"allowCheatVirtualExecution\", false)"));
         assertTrue(config.contains("作弊/破限"));
+        assertTrue(config.contains("未下单槽位不会主动从 AE 网络预填原料"));
         assertTrue(screen.contains("作弊：允许星律虚拟执行链破限"));
         assertTrue(screen.contains("recipeTypePatternAllowCheatVirtualExecution::set"));
     }
 
     @Test
-    void firstSparkNativeVirtualAndTopUpAreCheatGated() throws IOException {
+    void normalVirtualSupplyAndExecutionAreNotCheatGated() throws IOException {
         String source = Files.readString(SEARCH_HELPER);
+        String find = Files.readString(NATIVE_FIND_MIXIN);
 
-        assertMethodContains(source, "public static Set<GTRecipe> collectNativeVirtualRecipes",
+        assertMethodDoesNotContain(source, "public static Set<GTRecipe> collectNativeVirtualRecipes",
                 "if (!allowCheatVirtualExecution()) return result;");
         assertMethodContains(source, "private static void collectPlainPatternRecipesFromPart",
                 "if (!allowCheatVirtualExecution()) return;");
         assertMethodContains(source, "private static void collectFirstSparkPatternRecipes",
                 "if (!allowCheatVirtualExecution()) return;");
-        assertMethodContains(source, "private static void topUpVirtualSupply",
+        assertMethodDoesNotContain(source, "private static void topUpVirtualSupply",
                 "if (!allowCheatVirtualExecution()) return;");
-        assertTrue(source.contains("DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get()"));
+        assertFalse(find.contains("if (!DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get()) return;"),
+                "关闭作弊开关时仍必须进入宿主限制内的正常虚拟执行链");
     }
 
     @Test
@@ -66,7 +69,9 @@ class StellarPatternCheatVirtualExecutionSourceTest {
         String beforeWorking = Files.readString(BEFORE_WORKING_MIXIN);
 
         assertTrue(find.contains("recipeTypePatternAllowCheatVirtualExecution.get()"),
-                "原生多方块虚拟直跑必须受作弊开关控制");
+                "只有宿主限制绕过状态必须受作弊开关控制");
+        assertTrue(find.contains("if (bypassHostLimits)"),
+                "配置开启时才允许激活宿主限制绕过状态");
         assertTrue(beforeWorking.contains("recipeTypePatternAllowCheatVirtualExecution.get()"),
                 "跳过宿主 beforeWorking/part 检查必须受作弊开关控制");
     }
@@ -86,7 +91,17 @@ class StellarPatternCheatVirtualExecutionSourceTest {
                 "旧存档中的超大虚拟 presence 必须能被后续有限恢复量压回去");
     }
 
+    private static void assertMethodDoesNotContain(String source, String methodStartText, String unexpected) {
+        String method = extractMethod(source, methodStartText);
+        assertFalse(method.contains(unexpected), "正常执行路径不应受作弊开关阻断: " + methodStartText);
+    }
+
     private static void assertMethodContains(String source, String methodStartText, String expected) {
+        String method = extractMethod(source, methodStartText);
+        assertTrue(method.contains(expected), "未下单首配路径必须受作弊开关控制: " + methodStartText);
+    }
+
+    private static String extractMethod(String source, String methodStartText) {
         int methodStart = source.indexOf(methodStartText);
         assertTrue(methodStart >= 0, "未找到方法: " + methodStartText);
         int methodEnd = source.indexOf("\n    private static", methodStart + methodStartText.length());
@@ -96,7 +111,6 @@ class StellarPatternCheatVirtualExecutionSourceTest {
         if (methodEnd < 0) {
             methodEnd = source.length();
         }
-        String method = source.substring(methodStart, methodEnd);
-        assertTrue(method.contains(expected), "方法缺少预期守卫: " + methodStartText);
+        return source.substring(methodStart, methodEnd);
     }
 }

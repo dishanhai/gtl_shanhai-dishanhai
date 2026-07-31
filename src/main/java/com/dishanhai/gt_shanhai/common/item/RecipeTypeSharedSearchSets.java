@@ -7,7 +7,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -47,10 +46,12 @@ public final class RecipeTypeSharedSearchSets {
 
     /** 两个配方类型 ID 是否同组（同 ID 恒为共享）。入参为 registryName 全称，如 "gtceu:chemical_reactor"。 */
     public static boolean isShared(String typeIdA, String typeIdB) {
-        if (typeIdA == null || typeIdA.isEmpty() || typeIdB == null || typeIdB.isEmpty()) return false;
-        if (typeIdA.equals(typeIdB)) return true;
-        Set<String> group = currentGroups().get(typeIdA);
-        return group != null && group.contains(typeIdB);
+        if (PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(typeIdA, typeIdB)) return true;
+        String canonicalA = PatternRecipeTypeHelper.canonicalRecipeTypeId(typeIdA);
+        String canonicalB = PatternRecipeTypeHelper.canonicalRecipeTypeId(typeIdB);
+        if (canonicalA.isEmpty() || canonicalB.isEmpty()) return false;
+        Set<String> group = currentGroups().get(canonicalA);
+        return group != null && group.contains(canonicalB);
     }
 
     /** {@code type} 是否与候选数组中任一类型同组。候选为空或无组配置时返回 false（保持严格隔离）。 */
@@ -58,11 +59,13 @@ public final class RecipeTypeSharedSearchSets {
         if (type == null || type.registryName == null || candidates == null || candidates.length == 0) {
             return false;
         }
-        Set<String> group = currentGroups().get(type.registryName.toString());
+        String typeId = PatternRecipeTypeHelper.canonicalRecipeTypeId(type.registryName.toString());
+        Set<String> group = currentGroups().get(typeId);
         if (group == null) return false;
         for (GTRecipeType candidate : candidates) {
             if (candidate == null || candidate.registryName == null) continue;
-            if (group.contains(candidate.registryName.toString())) return true;
+            String candidateId = PatternRecipeTypeHelper.canonicalRecipeTypeId(candidate.registryName.toString());
+            if (group.contains(candidateId)) return true;
         }
         return false;
     }
@@ -94,7 +97,7 @@ public final class RecipeTypeSharedSearchSets {
             if (entry == null) continue;
             LinkedHashSet<String> members = new LinkedHashSet<>();
             for (String raw : entry.split("[,;\\s]+")) {
-                String id = raw.trim().toLowerCase(Locale.ROOT);
+                String id = PatternRecipeTypeHelper.canonicalRecipeTypeId(raw);
                 if (!id.isEmpty()) {
                     members.add(id);
                 }

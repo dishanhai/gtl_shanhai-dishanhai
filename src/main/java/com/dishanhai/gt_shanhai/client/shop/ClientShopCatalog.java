@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.client.shop;
 
+import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogEntryPayload;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
@@ -191,9 +192,9 @@ public final class ClientShopCatalog {
         List<Long> result = new ArrayList<>();
         for (ShopCatalogManifest.Stub stub : manifest.stubs()) {
             if (stub.hidden()) continue;
-            StringBuilder haystack = new StringBuilder(stub.displayName()).append(' ');
-            for (String goodsId : stub.goodsIds()) haystack.append(goodsId).append(' ');
-            if (haystack.toString().toLowerCase(Locale.ROOT).contains(normalized)) result.add(stub.entryKey());
+            StringBuilder searchText = new StringBuilder(stub.displayName()).append(' ');
+            for (String goodsId : stub.goodsIds()) searchText.append(goodsId).append(' ');
+            if (AdvancedSearchUtil.match(searchText.toString(), normalized)) result.add(stub.entryKey());
         }
         return List.copyOf(result);
     }

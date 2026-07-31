@@ -20,8 +20,7 @@ public class PrimordialDivergenceGeneratorStructure {
         Block industrialSteamCasing = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gtceu", "industrial_steam_casing"));
 
-        var blocks = Predicates.blocks(
-                bronzeCasing, industrialSteamCasing);
+        var blocks = Predicates.blocks(bronzeCasing);
 
         return MultiBlockStructure.INSTANCE.getFORGE_OF_THE_ANTICHRIST_MODULE()
                 .where('A', blocks)
@@ -29,7 +28,7 @@ public class PrimordialDivergenceGeneratorStructure {
                         .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
                         .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
                         .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1)))
-                .where('C', blocks).where('D', blocks).where('E', blocks).where('F', blocks)
+                .where('C', blocks).where('D', Predicates.blocks(industrialSteamCasing)).where('E', blocks).where('F', blocks)
                 .where('G', blocks).where('H', blocks).where('I', blocks).where('J', blocks)
                 .where('K', blocks).where('L', blocks).where('M', blocks).where('N', blocks)
                 .where('O', blocks).where('P', blocks).where('Q', blocks).where('S', blocks)

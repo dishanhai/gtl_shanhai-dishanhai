@@ -25,6 +25,10 @@ public interface RecipeTypePatternSlotAccess {
         return new GenericStack[0];
     }
 
+    default long gtShanhai$getPatternInferenceFingerprint(int slot, long sharedFingerprint) {
+        return sharedFingerprint;
+    }
+
     boolean gtShanhai$slotAllowsRecipe(int slot, GTRecipe recipe);
 
     int gtShanhai$getPatternSlotCount();

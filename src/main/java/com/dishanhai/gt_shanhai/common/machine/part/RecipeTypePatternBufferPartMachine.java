@@ -645,7 +645,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
         // 只读：本槽同时在向 AE 网络供货，绝不能像过去那样借"自愈"之机悄悄改写 NBT
         // （AEItemKey 含 NBT，改动即变身份，见 PatternRecipeTypeHelper.peekRecipe 文档）。
-        return PatternRecipeTypeHelper.peekRecipe(stack, getLevel(), availableCatalystInputs);
+        return PatternRecipeTypeHelper.peekRecipe(
+                stack, getLevel(), gtShanhai$mergePatternInferenceInputs(slot, availableCatalystInputs));
     }
 
     @Override
@@ -663,12 +664,60 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         for (int tank = 0; tank < getSharedCatalystTank().getTanks(); tank++) {
             FluidStack stack = getSharedCatalystTank().getFluidInTank(tank);
             if (stack == null || stack.isEmpty()) continue;
-            AEFluidKey key = stack.getTag() == null
-                    ? AEFluidKey.of(stack.getFluid())
-                    : AEFluidKey.of(stack.getFluid(), stack.getTag());
-            inputs.add(new GenericStack(key, stack.getAmount()));
+            inputs.add(new GenericStack(gtShanhai$fluidKey(stack), stack.getAmount()));
         }
         return inputs.toArray(GenericStack[]::new);
+    }
+
+    @Override
+    public long gtShanhai$getPatternInferenceFingerprint(int slot, long sharedFingerprint) {
+        long hash = sharedFingerprint;
+        if (slot < 0 || slot >= maxPatternCount) return hash;
+        for (int i = 0; i < this.catalystItems[slot].getSlots(); i++) {
+            ItemStack stack = this.catalystItems[slot].getStackInSlot(i);
+            if (stack.isEmpty()) continue;
+            hash = 31L * hash + AEItemKey.of(stack).hashCode();
+            hash = 31L * hash + Long.hashCode(stack.getCount());
+        }
+        for (int tank = 0; tank < this.catalystFluids[slot].getTanks(); tank++) {
+            FluidStack stack = this.catalystFluids[slot].getFluidInTank(tank);
+            if (stack == null || stack.isEmpty()) continue;
+            hash = 31L * hash + gtShanhai$fluidKey(stack).hashCode();
+            hash = 31L * hash + Long.hashCode(stack.getAmount());
+        }
+        return hash;
+    }
+
+    private GenericStack[] gtShanhai$mergePatternInferenceInputs(int slot,
+            @Nullable GenericStack[] sharedInputs) {
+        int sharedCount = sharedInputs == null ? 0 : sharedInputs.length;
+        List<GenericStack> inputs = new ArrayList<>(sharedCount + 18);
+        if (sharedInputs != null) {
+            for (GenericStack input : sharedInputs) {
+                if (input != null && input.what() != null && input.amount() > 0L) {
+                    inputs.add(input);
+                }
+            }
+        }
+        for (int i = 0; i < this.catalystItems[slot].getSlots(); i++) {
+            ItemStack stack = this.catalystItems[slot].getStackInSlot(i);
+            if (!stack.isEmpty()) {
+                inputs.add(new GenericStack(AEItemKey.of(stack), stack.getCount()));
+            }
+        }
+        for (int tank = 0; tank < this.catalystFluids[slot].getTanks(); tank++) {
+            FluidStack stack = this.catalystFluids[slot].getFluidInTank(tank);
+            if (stack != null && !stack.isEmpty()) {
+                inputs.add(new GenericStack(gtShanhai$fluidKey(stack), stack.getAmount()));
+            }
+        }
+        return inputs.toArray(GenericStack[]::new);
+    }
+
+    private static AEFluidKey gtShanhai$fluidKey(FluidStack stack) {
+        return stack.getTag() == null
+                ? AEFluidKey.of(stack.getFluid())
+                : AEFluidKey.of(stack.getFluid(), stack.getTag());
     }
 
     public IPatternDetails gtShanhai$applyOutputMultiplier(IPatternDetails pattern, ItemStack stack) {
