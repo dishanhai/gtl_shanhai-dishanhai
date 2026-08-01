@@ -49,11 +49,19 @@ class StellarPatternMultiplierSourceTest {
         assertTrue(source.contains("this::pollOutputMultiplierHostState"));
         assertTrue(poll.contains("if (!outputMultiplierModeEnabled) return;"));
         assertTrue(poll.contains("getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L"));
-        assertTrue(poll.contains("if (detected == lastDetectedHostOutputMultiplier)"),
+        assertTrue(poll.contains("detected == lastDetectedHostOutputMultiplier"),
                 "宿主倍率未变化时必须零刷新");
+        assertTrue(poll.contains("fingerprint == lastDetectedForgeRecipeTypeFingerprint"),
+                "伪神子模块支持的配方类型集合未变化时才允许零刷新");
         assertTrue(poll.contains("detected != pendingDetectedHostOutputMultiplier"),
                 "宿主倍率变化必须经连续两次轮询确认（防抖），瞬时跳变不得触发全量样板重编码");
-        assertTrue(poll.contains("applyOutputMultiplierSettings(true, detected)"));
+        assertTrue(poll.contains("fingerprint != pendingDetectedForgeRecipeTypeFingerprint"),
+                "伪神子模块增减但最大倍率不变时也必须经防抖确认后重写样板");
+        assertTrue(source.contains("resolveForgeRecipeTypeFingerprint()"));
+        assertTrue(poll.contains("refreshOutputMultiplierPatterns()"),
+                "宿主倍率确认变化后应重写可见样板，但不得覆盖手动倍率字段");
+        assertFalse(poll.contains("applyOutputMultiplierSettings(true, detected)"),
+                "伪神 15x 等按配方类型生效的倍率不能写成所有样板共享倍率");
     }
 
     @Test
@@ -122,6 +130,25 @@ class StellarPatternMultiplierSourceTest {
                 "getRealPattern 可能重新 decode，同一栈不应因对象 identity 变化穿透缓存");
         assertTrue(source.contains("clearOutputMultiplierPatternCache();"),
                 "倍率、样板或配方缓存变化时必须清掉重写样板缓存");
+    }
+
+    @Test
+    void stellarBufferAppliesHostMultiplierPerRecipeType() throws IOException {
+        String source = Files.readString(MACHINE);
+        String apply = extractBlock(source, "public IPatternDetails gtShanhai$applyOutputMultiplier(");
+        String sync = extractBlock(source, "public void syncOutputMultiplierFromHost()");
+        String poll = extractBlock(source, "private void pollOutputMultiplierHostState()");
+
+        assertTrue(apply.contains("resolvePatternOutputMultiplier(recipeTypeId)"),
+                "伪神/子模块倍率必须按当前样板配方类型解析，不能直接使用全局 patternOutputMultiplier");
+        assertTrue(source.contains("resolveConnectedHostOutputMultiplier(@Nullable String recipeTypeId)"));
+        assertTrue(source.contains("OutputMultiplierResolver.resolveHostOutputMultiplier(\n"
+                + "                getControllers(), getLevel(), getPos(), recipeTypeId)"));
+        assertFalse(sync.contains("applyOutputMultiplierSettings(true, multiplier)"),
+                "从伪神主机读到 15x 时不能写成所有样板共享的手动倍率");
+        assertTrue(sync.contains("refreshOutputMultiplierPatterns()"));
+        assertFalse(poll.contains("applyOutputMultiplierSettings(true, detected)"),
+                "宿主 recipe-type-aware 倍率变化时只刷新可见样板，不能覆盖手动倍率字段");
     }
 
     @Test

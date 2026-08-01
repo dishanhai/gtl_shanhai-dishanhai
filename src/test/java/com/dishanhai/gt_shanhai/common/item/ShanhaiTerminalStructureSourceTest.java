@@ -66,6 +66,23 @@ class ShanhaiTerminalStructureSourceTest {
     }
 
     @Test
+    void plannerKeepsFluidBlockCandidatesInsteadOfDroppingThemAsEmptyItems() throws Exception {
+        String planner = Files.readString(PLANNER);
+        String plan = Files.readString(PLAN);
+
+        assertTrue(planner.contains("info.getBlockState()"),
+                "结构候选必须保留 BlockInfo 的 BlockState，岩浆这类无方块物品形态的流体不能被丢弃");
+        assertTrue(planner.contains("LiquidBlock"));
+        assertTrue(planner.contains("getFluid().getBucket()"));
+        assertTrue(plan.contains("BlockState desiredState"));
+        assertTrue(plan.contains("desiredFluid()"));
+        assertTrue(plan.contains("desiredState.getFluidState()"));
+        assertTrue(plan.contains("desiredState.getBlock() instanceof LiquidBlock"),
+                "只有岩漿/水這類 LiquidBlock 才能走流體施工，水浸方塊不能被誤判成流體位");
+        assertTrue(plan.contains("currentState.getBlock() instanceof LiquidBlock"));
+    }
+
+    @Test
     void noChamberModePlacesOrdinaryCasingsAndIgnoresChamberCandidates() throws Exception {
         String config = Files.readString(CONFIG);
         String planner = Files.readString(PLANNER);

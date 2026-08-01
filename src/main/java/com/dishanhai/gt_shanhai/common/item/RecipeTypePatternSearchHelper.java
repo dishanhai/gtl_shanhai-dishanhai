@@ -544,6 +544,7 @@ public final class RecipeTypePatternSearchHelper {
      * 早先那样"整槽 itemInventory/fluidInventory 皆空才补"——因为催化剂被扣料层保护而常驻，槽位永远
      * 非空，那样消耗性耗尽后也永远补不上，反而把机器卡死。先对每个消耗性输入 SIMULATE 探测网络真实
      * 可提取量，取瓶颈换算批量，再统一 MODULATE 提取写入 InternalSlot。
+     * 正常 AE {@code pushPattern} 已填入的消耗性库存只补 Presence 后直接返回，不得按宿主并行裁切。
      * <p>
      * <b>预算制"这一单"</b>：消耗性批量按剩余预算扣减，预算耗尽才算这一单彻底完成、不再自动补，
      * 避免像 ERR-20260711-006 那样变成停不下来的自动重下单循环。网络暂时没货或本轮未提取到消耗性
@@ -593,7 +594,6 @@ public final class RecipeTypePatternSearchHelper {
         GenericStack[] inputs = pattern.getSparseInputs();
         if (inputs == null || inputs.length == 0) return;
 
-        long hostParallelLimit = resolveHostParallelLimit(machine);
         GenericStack[] presenceTargets = new GenericStack[inputs.length];
         for (int i = 0; i < inputs.length; i++) {
             GenericStack in = inputs[i];
@@ -606,18 +606,13 @@ public final class RecipeTypePatternSearchHelper {
             if (presenceTarget != null && buffer instanceof VirtualPatternBufferMachineAccess access) {
                 access.gtShanhai$addVirtualTargetToSlot(slot, presenceTarget.what(),
                         Math.max(1L, presenceTarget.amount()));
-            } else if (in.what() instanceof AEItemKey) {
-                clampInventoryAmount(itemInventory, (AEItemKey) in.what(),
-                        saturatedMultiply(in.amount(), hostParallelLimit));
-            } else if (in.what() instanceof AEFluidKey) {
-                clampInventoryAmount(fluidInventory, (AEFluidKey) in.what(),
-                        saturatedMultiply(in.amount(), hostParallelLimit));
             }
         }
         if (consumableStockPresent) {
             return;
         }
 
+        long hostParallelLimit = resolveHostParallelLimit(machine);
         IGrid grid = buffer.getGrid();
         if (grid == null) return;
         Object actionSourceObj = readField(buffer, "actionSource");
@@ -660,16 +655,22 @@ public final class RecipeTypePatternSearchHelper {
     static long resolveHostParallelLimit(Object machine) {
         if (machine == null) return 1L;
 
-        long limit = normalizeHostParallelLimit(resolvePositiveLong(invokeNoArg(machine, "getRecipeLogicMaxParallel")));
+        long limit = normalizeExplicitHostParallelLimit(resolvePositiveLong(invokeNoArg(machine, "getRecipeLogicMaxParallel")));
         if (limit > 0L) return limit;
 
-        limit = normalizeHostParallelLimit(resolvePositiveLong(invokeNoArg(machine, "getMaxParallel")));
+        limit = normalizeFallbackHostParallelLimit(resolvePositiveLong(invokeNoArg(machine, "getMaxParallel")));
         if (limit > 0L) return limit;
 
         return 1L;
     }
 
-    private static long normalizeHostParallelLimit(long limit) {
+    private static long normalizeExplicitHostParallelLimit(long limit) {
+        if (limit <= 0L) return -1L;
+        if (limit >= Integer.MAX_VALUE) return -1L;
+        return limit;
+    }
+
+    private static long normalizeFallbackHostParallelLimit(long limit) {
         if (limit <= 0L) return -1L;
         if (limit >= Integer.MAX_VALUE) return 1L;
         return limit;
@@ -690,17 +691,6 @@ public final class RecipeTypePatternSearchHelper {
     @SuppressWarnings("unchecked")
     private static Object2LongMap<AEFluidKey> castFluidInventory(Object inventory) {
         return inventory instanceof Object2LongMap ? (Object2LongMap<AEFluidKey>) inventory : null;
-    }
-
-    private static <T> void clampInventoryAmount(Object2LongMap<T> inventory, T key, long maxAmount) {
-        if (inventory == null || key == null) return;
-        long current = inventory.getLong(key);
-        if (current <= maxAmount) return;
-        if (maxAmount <= 0L) {
-            inventory.removeLong(key);
-        } else {
-            inventory.put(key, maxAmount);
-        }
     }
 
     @SuppressWarnings("unchecked")

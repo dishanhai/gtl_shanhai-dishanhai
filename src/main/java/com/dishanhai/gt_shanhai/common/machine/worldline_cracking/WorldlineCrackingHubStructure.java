@@ -6,7 +6,6 @@ import com.gregtechceu.gtceu.api.pattern.FactoryBlockPattern;
 import com.gregtechceu.gtceu.api.pattern.Predicates;
 import com.gregtechceu.gtceu.api.pattern.util.RelativeDirection;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.resources.ResourceLocation;
 
@@ -174,7 +173,7 @@ public class WorldlineCrackingHubStructure {
             .where('Y', Predicates.blocks(BEACON))
             .where('Z', Predicates.blocks(REDSTONE_WIRE))
             .where('a', Predicates.blocks(PENTLANDITE_ORE))
-            .where(' ', Predicates.blocks(Blocks.AIR))
+            .where(' ', Predicates.any())
             .where('~', Predicates.controller(Predicates.blocks(definition.getBlock())))
             .build();
     }

@@ -1,64 +1,57 @@
 package com.dishanhai.gt_shanhai.common.machine.structure;
 
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.machine.multiblock.PartAbility;
 import com.gregtechceu.gtceu.api.pattern.BlockPattern;
 import com.gregtechceu.gtceu.api.pattern.FactoryBlockPattern;
 import com.gregtechceu.gtceu.api.pattern.Predicates;
 import com.gregtechceu.gtceu.api.pattern.util.RelativeDirection;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraft.resources.ResourceLocation;
 
 /*** STR 多方块结构 (50x56x50) */
 public class STRStructure {
 
-    public static final Block DIMENSIONALLY_TRANSCENDENT_CASING;
-    public static final Block DIMENSIONAL_BRIDGE_CASING;
-    public static final Block HIGH_STRENGTH_CONCRETE;
-    public static final Block PLASCRETE;
-    public static final Block HOLLOW_CASING;
-    public static final Block MAGIC_CORE;
-    public static final Block SPEEDING_PIPE;
-    public static final Block CONTAINMENT_FIELD_GENERATOR;
-    public static final Block MOLECULAR_CASING;
-    public static final Block HIGH_POWER_CASING;
-    public static final Block DEGENERATE_RHENIUM_CONSTRAINED_CASING;
-    public static final Block RHENIUM_REINFORCED_ENERGY_GLASS;
-    public static final Block LAVA;
-    public static final Block ANNIHILATE_CORE;
-    public static final Block DIMENSIONAL_STABILITY_CASING;
-    public static final Block SPACETIMEBENDINGCORE;
-    public static final Block GRAVITY_STABILIZATION_CASING;
-    public static final Block SPACE_ELEVATOR_INTERNAL_SUPPORT;
-    public static final Block SPACETIMECONTINUUMRIPPER;
-    public static final Block GRAVITATIONAL_WAVE_ANTENNA_TRANSMITTER;
+    private static Block block(String id) {
+        return block(id, Blocks.BARRIER);
+    }
 
-    static {
-        DIMENSIONALLY_TRANSCENDENT_CASING = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtlcore:dimensionally_transcendent_casing"));
-        DIMENSIONAL_BRIDGE_CASING = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:dimensional_bridge_casing"));
-        HIGH_STRENGTH_CONCRETE = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:high_strength_concrete"));
-        PLASCRETE = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu:plascrete"));
-        HOLLOW_CASING = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:hollow_casing"));
-        MAGIC_CORE = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:magic_core"));
-        SPEEDING_PIPE = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:speeding_pipe"));
-        CONTAINMENT_FIELD_GENERATOR = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:containment_field_generator"));
-        MOLECULAR_CASING = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtlcore:molecular_casing"));
-        HIGH_POWER_CASING = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu:high_power_casing"));
-        DEGENERATE_RHENIUM_CONSTRAINED_CASING = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtlcore:degenerate_rhenium_constrained_casing"));
-        RHENIUM_REINFORCED_ENERGY_GLASS = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtlcore:rhenium_reinforced_energy_glass"));
-        LAVA = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("minecraft:lava"));
-        ANNIHILATE_CORE = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:annihilate_core"));
-        DIMENSIONAL_STABILITY_CASING = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:dimensional_stability_casing"));
-        SPACETIMEBENDINGCORE = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtlcore:spacetimebendingcore"));
-        GRAVITY_STABILIZATION_CASING = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtladditions:gravity_stabilization_casing"));
-        SPACE_ELEVATOR_INTERNAL_SUPPORT = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("kubejs:space_elevator_internal_support"));
-        SPACETIMECONTINUUMRIPPER = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtlcore:spacetimecontinuumripper"));
-        GRAVITATIONAL_WAVE_ANTENNA_TRANSMITTER = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gt_shanhai:gravitational_wave_antenna_transmitter"));
+    private static Block block(String id, Block fallback) {
+        Block resolved = ForgeRegistries.BLOCKS.getValue(ResourceLocation.tryParse(id));
+        if (resolved != null && resolved != Blocks.AIR) {
+            return resolved;
+        }
+        Block safeFallback = fallback != null && fallback != Blocks.AIR ? fallback : Blocks.BARRIER;
+        GTDishanhaiMod.LOGGER.warn("[STRStructure] Missing block {}, fallback to {}",
+                id, ForgeRegistries.BLOCKS.getKey(safeFallback));
+        return safeFallback;
     }
 
     public static BlockPattern createPattern(MultiblockMachineDefinition definition) {
+        Block dimensionallyTranscendentCasing = block("gtlcore:dimensionally_transcendent_casing");
+        Block dimensionalBridgeCasing = block("kubejs:dimensional_bridge_casing");
+        Block highStrengthConcrete = block("kubejs:high_strength_concrete");
+        Block plascrete = block("gtceu:plascrete");
+        Block hollowCasing = block("kubejs:hollow_casing");
+        Block magicCore = block("kubejs:magic_core");
+        Block speedingPipe = block("kubejs:speeding_pipe");
+        Block containmentFieldGenerator = block("kubejs:containment_field_generator");
+        Block molecularCasing = block("gtlcore:molecular_casing");
+        Block highPowerCasing = block("gtceu:high_power_casing");
+        Block degenerateRheniumConstrainedCasing = block("gtlcore:degenerate_rhenium_constrained_casing");
+        Block rheniumReinforcedEnergyGlass = block("gtlcore:rhenium_reinforced_energy_glass");
+        Block lava = block("minecraft:lava");
+        Block annihilateCore = block("kubejs:annihilate_core");
+        Block dimensionalStabilityCasing = block("kubejs:dimensional_stability_casing");
+        Block spacetimeBendingCore = block("gtlcore:spacetimebendingcore");
+        Block gravityStabilizationCasing = block("gtladditions:gravity_stabilization_casing");
+        Block spaceElevatorInternalSupport = block("kubejs:space_elevator_internal_support");
+        Block spacetimeContinuumRipper = block("gtlcore:spacetimecontinuumripper");
+        Block gravitationalWaveAntennaTransmitter = block("gt_shanhai:gravitational_wave_antenna_transmitter", definition.getBlock());
+
         return FactoryBlockPattern.start(RelativeDirection.BACK, RelativeDirection.UP, RelativeDirection.LEFT)
             .aisle(STRData1.D1)
             .aisle(STRData1.D2)
@@ -111,27 +104,27 @@ public class STRStructure {
             .aisle(STRData2.D49)
             .aisle(STRData2.D50)
 
-            .where('A', Predicates.blocks(DIMENSIONALLY_TRANSCENDENT_CASING))
-            .where('B', Predicates.blocks(DIMENSIONAL_BRIDGE_CASING))
-            .where('C', Predicates.blocks(HIGH_STRENGTH_CONCRETE))
-            .where('D', Predicates.blocks(PLASCRETE))
-            .where('E', Predicates.blocks(HOLLOW_CASING))
-            .where('F', Predicates.blocks(MAGIC_CORE))
-            .where('G', Predicates.blocks(SPEEDING_PIPE))
-            .where('H', Predicates.blocks(CONTAINMENT_FIELD_GENERATOR))
-            .where('I', Predicates.blocks(MOLECULAR_CASING))
-            .where('J', Predicates.blocks(HIGH_POWER_CASING))
-            .where('K', Predicates.blocks(DEGENERATE_RHENIUM_CONSTRAINED_CASING))
-            .where('L', Predicates.blocks(RHENIUM_REINFORCED_ENERGY_GLASS))
-            .where('M', Predicates.blocks(LAVA))
-            .where('N', Predicates.blocks(ANNIHILATE_CORE))
-            .where('O', Predicates.blocks(DIMENSIONAL_STABILITY_CASING))
-            .where('P', Predicates.blocks(SPACETIMEBENDINGCORE))
-            .where('Q', Predicates.blocks(GRAVITY_STABILIZATION_CASING))
-            .where('R', Predicates.blocks(SPACE_ELEVATOR_INTERNAL_SUPPORT))
-            .where('S', Predicates.blocks(SPACETIMECONTINUUMRIPPER))
-            .where('T', Predicates.blocks(GRAVITATIONAL_WAVE_ANTENNA_TRANSMITTER))
-            .where('U', Predicates.blocks(DIMENSIONALLY_TRANSCENDENT_CASING, DIMENSIONAL_BRIDGE_CASING, MOLECULAR_CASING)
+            .where('A', Predicates.blocks(dimensionallyTranscendentCasing))
+            .where('B', Predicates.blocks(dimensionalBridgeCasing))
+            .where('C', Predicates.blocks(highStrengthConcrete))
+            .where('D', Predicates.blocks(plascrete))
+            .where('E', Predicates.blocks(hollowCasing))
+            .where('F', Predicates.blocks(magicCore))
+            .where('G', Predicates.blocks(speedingPipe))
+            .where('H', Predicates.blocks(containmentFieldGenerator))
+            .where('I', Predicates.blocks(molecularCasing))
+            .where('J', Predicates.blocks(highPowerCasing))
+            .where('K', Predicates.blocks(degenerateRheniumConstrainedCasing))
+            .where('L', Predicates.blocks(rheniumReinforcedEnergyGlass))
+            .where('M', Predicates.blocks(lava))
+            .where('N', Predicates.blocks(annihilateCore))
+            .where('O', Predicates.blocks(dimensionalStabilityCasing))
+            .where('P', Predicates.blocks(spacetimeBendingCore))
+            .where('Q', Predicates.blocks(gravityStabilizationCasing))
+            .where('R', Predicates.blocks(spaceElevatorInternalSupport))
+            .where('S', Predicates.blocks(spacetimeContinuumRipper))
+            .where('T', Predicates.blocks(gravitationalWaveAntennaTransmitter))
+            .where('U', Predicates.blocks(dimensionallyTranscendentCasing, dimensionalBridgeCasing, molecularCasing)
                     .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
                     .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
                     .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))

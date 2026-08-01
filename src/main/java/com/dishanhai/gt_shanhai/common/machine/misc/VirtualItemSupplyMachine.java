@@ -251,6 +251,7 @@ public class VirtualItemSupplyMachine extends MetaMachine
             tooltips.add(Component.literal("§7槽内放入目标真实物品，允许对应虚拟提供器样板下单"));
             tooltips.add(Component.literal("§a不会向 AE 普通库存暴露虚拟物品，也不会消耗槽内物品"));
             tooltips.add(Component.literal("§b用于样板中的不消耗物品、电路、模具与催化剂"));
+            tooltips.add(Component.literal("§b注意：此仓室在默认配置下无用，默配只检查AE中是否有对应虚拟物品实料"));
         });
 
         return def;

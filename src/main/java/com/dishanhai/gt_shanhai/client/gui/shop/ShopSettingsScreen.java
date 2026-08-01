@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopSettingsPacket;
@@ -33,15 +34,19 @@ public class ShopSettingsScreen extends ScaledScreen {
     private static final int BTN_HOVER = -12303292;
 
     private static final int TARGET_W = 340;
-    private static final int TARGET_H = 212;
+    private static final int TARGET_H = 254;
 
     private final ShopScreen parent;
     private String rollCap;
     private String sdaThreshold;
+    private String cardWidth;
+    private String cardHeight;
     private boolean aeDeliverDisabled;
     private boolean sdaDirectDiskHatchInject;
     private EditBox rollCapBox;
     private EditBox sdaThresholdBox;
+    private EditBox cardWidthBox;
+    private EditBox cardHeightBox;
     private int left, top, panelWidth, panelHeight;
 
     public ShopSettingsScreen(ShopScreen parent) {
@@ -54,6 +59,8 @@ public class ShopSettingsScreen extends ScaledScreen {
         this.maxScale = Float.MAX_VALUE;
         this.rollCap = Long.toString(DShanhaiConfig.COMMON.shopRewardRollCap.get());
         this.sdaThreshold = Long.toString(DShanhaiConfig.COMMON.shopSdaPackThreshold.get());
+        this.cardWidth = Integer.toString(ClientShopUiSettings.cardWidth());
+        this.cardHeight = Integer.toString(ClientShopUiSettings.cardHeight());
         this.aeDeliverDisabled = DShanhaiConfig.COMMON.shopAeDeliverDisabled.get();
         this.sdaDirectDiskHatchInject = DShanhaiConfig.COMMON.shopSdaDirectDiskHatchInject.get();
     }
@@ -82,6 +89,25 @@ public class ShopSettingsScreen extends ScaledScreen {
         sdaThresholdBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
         sdaThresholdBox.setResponder(s -> sdaThreshold = s);
         addRenderableWidget(sdaThresholdBox);
+
+        int boxW = (panelWidth - 30) / 2;
+        cardWidthBox = new EditBox(this.font, left + 12, top + 110, boxW, 14, Component.literal("商品卡片宽"));
+        cardWidthBox.setValue(cardWidth);
+        cardWidthBox.setMaxLength(3);
+        cardWidthBox.setBordered(true);
+        cardWidthBox.setTextColor(0xFFFFFF);
+        cardWidthBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        cardWidthBox.setResponder(s -> cardWidth = s);
+        addRenderableWidget(cardWidthBox);
+
+        cardHeightBox = new EditBox(this.font, left + 18 + boxW, top + 110, boxW, 14, Component.literal("商品卡片高"));
+        cardHeightBox.setValue(cardHeight);
+        cardHeightBox.setMaxLength(3);
+        cardHeightBox.setBordered(true);
+        cardHeightBox.setTextColor(0xFFFFFF);
+        cardHeightBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        cardHeightBox.setResponder(s -> cardHeight = s);
+        addRenderableWidget(cardHeightBox);
     }
 
     @Override
@@ -98,17 +124,20 @@ public class ShopSettingsScreen extends ScaledScreen {
                 left + 12, top + 58, WHITE, true);
         g.drawString(this.font, "§c调太大可能让服务端主线程卡死/崩溃，自己权衡", left + 12, top + 86, GRAY, true);
 
+        g.drawString(this.font, "§7商品卡片大小（客户端显示偏好；默认 70×36，网格默认每行 10 格）：",
+                left + 12, top + 100, WHITE, true);
+
         // AE 禁止注入：开启后 AE 模式只拉取材料付款/检索库存，购买/兑换得到的物品一律正常交付（进背包/SDA），不再注入 AE
-        drawBtn(g, left + 12, top + 100, panelWidth - 24, 16,
+        drawBtn(g, left + 12, top + 142, panelWidth - 24, 16,
                 aeDeliverDisabled ? "§aAE 禁止注入: 开（购买物品正常给到背包/SDA）"
                         : "§8AE 禁止注入: 关（原行为，能注入就注入 AE）",
                 mx, my);
-        drawBtn(g, left + 12, top + 120, panelWidth - 24, 16,
+        drawBtn(g, left + 12, top + 162, panelWidth - 24, 16,
                 sdaDirectDiskHatchInject ? "§a将SDA直接注入磁盘仓室: 开"
                         : "§8将SDA直接注入磁盘仓室: 关",
                 mx, my);
         g.drawString(this.font, "§7仅挂载同网 FTBQ AE提交器/商店终端可见的有内容 SDA；空 SDA 不挂载",
-                left + 12, top + 140, GRAY, true);
+                left + 12, top + 182, GRAY, true);
 
         drawBtn(g, left + 12, top + panelHeight - 22, 60, 14, "§c取消", mx, my);
         drawBtn(g, left + panelWidth - 12 - 70, top + panelHeight - 22, 70, 14, "§a确认保存", mx, my);
@@ -116,11 +145,11 @@ public class ShopSettingsScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
-        if (GuiRenderUtil.isHovering(mx, my, left + 12, top + 100, panelWidth - 24, 16)) {
+        if (GuiRenderUtil.isHovering(mx, my, left + 12, top + 142, panelWidth - 24, 16)) {
             aeDeliverDisabled = !aeDeliverDisabled;
             return true;
         }
-        if (GuiRenderUtil.isHovering(mx, my, left + 12, top + 120, panelWidth - 24, 16)) {
+        if (GuiRenderUtil.isHovering(mx, my, left + 12, top + 162, panelWidth - 24, 16)) {
             sdaDirectDiskHatchInject = !sdaDirectDiskHatchInject;
             return true;
         }
@@ -142,6 +171,13 @@ public class ShopSettingsScreen extends ScaledScreen {
         long sda;
         try { sda = sdaThreshold == null || sdaThreshold.isEmpty() ? 1L : Long.parseLong(sdaThreshold); }
         catch (NumberFormatException e) { sda = 1L; }
+        int width;
+        try { width = cardWidth == null || cardWidth.isEmpty() ? ClientShopUiSettings.DEFAULT_CARD_WIDTH : Integer.parseInt(cardWidth); }
+        catch (NumberFormatException e) { width = ClientShopUiSettings.DEFAULT_CARD_WIDTH; }
+        int height;
+        try { height = cardHeight == null || cardHeight.isEmpty() ? ClientShopUiSettings.DEFAULT_CARD_HEIGHT : Integer.parseInt(cardHeight); }
+        catch (NumberFormatException e) { height = ClientShopUiSettings.DEFAULT_CARD_HEIGHT; }
+        ClientShopUiSettings.setCardSize(width, height);
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
                 aeDeliverDisabled, sdaDirectDiskHatchInject));
         Minecraft.getInstance().setScreen(parent);

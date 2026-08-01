@@ -90,6 +90,30 @@ class ShanhaiTerminalExecutionSourceTest {
     }
 
     @Test
+    void executorAndMaterialBatchSupportFluidStructureSlots() throws Exception {
+        String executor = Files.readString(EXECUTOR);
+        String materials = Files.readString(MATERIALS);
+
+        assertTrue(materials.contains("AEFluidKey"));
+        assertTrue(materials.contains("ReservedFluid"));
+        assertTrue(materials.contains("takeOneFluid"));
+        assertTrue(materials.contains("bulkExtractFluidFromAe"));
+        assertTrue(materials.contains("extractFluidFromPlayer"));
+        assertTrue(materials.contains("refundFluidAmount"));
+        assertTrue(materials.contains("canRefundFluidForStructure"));
+        assertTrue(materials.contains("canRefundFluidAmount"));
+        assertTrue(materials.contains("Actionable.SIMULATE, ae.source())"));
+        assertTrue(materials.contains("BucketItem"));
+        assertTrue(materials.contains("shortage.getKey() instanceof AEFluidKey"));
+        assertTrue(executor.contains("entry.desiredState().getFluidState()"));
+        assertTrue(executor.contains("placeFluid"));
+        assertTrue(executor.contains("buildBatch.takeOneFluid"));
+        assertTrue(executor.contains("restoreFluid"));
+        assertTrue(executor.indexOf("materials.canRefundFluidForStructure") < executor.indexOf("removeExisting"),
+                "舊流體必須在替換世界前先確認能完整回收，避免部分插入後回滾造成重複或丟失");
+    }
+
+    @Test
     void dismantleUsesDedicatedAeFirstAndSdaFallbackStorage() throws Exception {
         String executor = Files.readString(EXECUTOR);
 
@@ -98,10 +122,11 @@ class ShanhaiTerminalExecutionSourceTest {
         assertTrue(dismantleSource.contains("canStoreDismantled(player, ae, dismantleReturns)"));
         assertTrue(dismantleSource.contains("storeDismantled(player, ae, removedStacks)"));
         assertTrue(dismantleSource.indexOf("canStoreDismantled") < dismantleSource.indexOf("removeExisting"));
-        assertFalse(dismantleSource.contains("materials.refund"));
+        assertFalse(dismantleSource.contains("materials.refund(player"));
         assertFalse(dismantleSource.contains("entry.kind() != ShanhaiStructurePlan.Kind.BLOCKED"));
         assertFalse(dismantleSource.contains("entry.kind() == ShanhaiStructurePlan.Kind.BLOCKED"));
-        assertTrue(dismantleSource.contains("restoreExisting(level, removedEntries.get(i), removedStacks.get(i))"));
+        assertTrue(dismantleSource.contains("restoreExisting(level, removedEntries.get(i), removedStacks.get(i),"));
+        assertTrue(dismantleSource.contains("removedEntries.get(i).currentFluid()"));
     }
 
     @Test

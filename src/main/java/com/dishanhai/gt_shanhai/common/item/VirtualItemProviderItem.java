@@ -60,6 +60,10 @@ public class VirtualItemProviderItem extends Item {
     public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip, TooltipFlag flag) {
         ItemStack target = VirtualItemProviderHelper.getTarget(stack);
         tooltip.add(Component.literal("另一只手拿物品时右键绑定为虚拟目标").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("你并不需要手动绑定虚拟物品供应器，在编码时不消耗物品会主动绑定").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("在默认配置下，只检验AE中是否有对应且满足数量的虚拟物品实料").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("例：虚拟物品供应器在编码中绑定一个不消耗的「铁锭」，会在AE中查找是否有足够的「铁锭」实物").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("虚拟供应器只用于标识哪个物品需要虚拟，而不是虚拟供应器能作为实际物品供应").withStyle(ChatFormatting.GRAY));
         tooltip.add(Component.literal("潜行右键清除绑定").withStyle(ChatFormatting.DARK_GRAY));
         if (target.isEmpty()) {
             tooltip.add(Component.literal("未绑定虚拟物品").withStyle(ChatFormatting.RED));

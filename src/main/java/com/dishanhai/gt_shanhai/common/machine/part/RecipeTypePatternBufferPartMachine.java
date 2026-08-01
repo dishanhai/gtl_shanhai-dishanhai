@@ -163,6 +163,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private long cachedHostOutputMultiplier = 1L;
     private long lastDetectedHostOutputMultiplier = Long.MIN_VALUE;
     private long pendingDetectedHostOutputMultiplier = Long.MIN_VALUE;
+    private int lastDetectedForgeRecipeTypeFingerprint = Integer.MIN_VALUE;
+    private int pendingDetectedForgeRecipeTypeFingerprint = Integer.MIN_VALUE;
     @Nullable
     private TickableSubscription outputMultiplierHostSyncSubscription;
     private final List<IPatternDetails> wildcardPatterns;
@@ -723,7 +725,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public IPatternDetails gtShanhai$applyOutputMultiplier(IPatternDetails pattern, ItemStack stack) {
         if (!outputMultiplierModeEnabled || pattern == null || getLevel() == null) return pattern;
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
-        long multiplier = getPatternOutputMultiplier();
+        long multiplier = resolvePatternOutputMultiplier(recipeTypeId);
         long recipeRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         int cacheKey = makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, recipeRevision);
         OutputMultiplierPatternCacheEntry cached = outputMultiplierPatternCache.get(cacheKey);
@@ -748,6 +750,7 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public void setOutputMultiplierModeEnabled(boolean enabled) {
         if (enabled && !outputMultiplierModeEnabled) {
             lastDetectedHostOutputMultiplier = Long.MIN_VALUE;
+            lastDetectedForgeRecipeTypeFingerprint = Integer.MIN_VALUE;
         }
         applyOutputMultiplierSettings(enabled, patternOutputMultiplier);
     }
@@ -764,8 +767,17 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     }
 
     private long resolveConnectedHostOutputMultiplier() {
-        return clampOutputMultiplier(OutputMultiplierResolver.resolveHostOutputMultiplier(
+        return clampOutputMultiplier(OutputMultiplierResolver.resolveMaxHostOutputMultiplier(
                 getControllers(), getLevel(), getPos()));
+    }
+
+    private long resolveConnectedHostOutputMultiplier(@Nullable String recipeTypeId) {
+        return clampOutputMultiplier(OutputMultiplierResolver.resolveHostOutputMultiplier(
+                getControllers(), getLevel(), getPos(), recipeTypeId));
+    }
+
+    private long resolvePatternOutputMultiplier(@Nullable String recipeTypeId) {
+        return Math.max(getPatternOutputMultiplier(), resolveConnectedHostOutputMultiplier(recipeTypeId));
     }
 
     private long getCachedHostOutputMultiplier() {
@@ -786,10 +798,19 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public void syncOutputMultiplierFromHost() {
         if (isRemote()) return;
         long multiplier = resolveConnectedHostOutputMultiplier();
+        int fingerprint = resolveForgeRecipeTypeFingerprint();
         lastDetectedHostOutputMultiplier = multiplier;
         pendingDetectedHostOutputMultiplier = multiplier;
+        lastDetectedForgeRecipeTypeFingerprint = fingerprint;
+        pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
         updateCachedHostOutputMultiplier(multiplier);
-        applyOutputMultiplierSettings(true, multiplier);
+        if (!outputMultiplierModeEnabled) {
+            applyOutputMultiplierSettings(true, getPatternOutputMultiplier());
+            return;
+        }
+        clearOutputMultiplierPatternCache();
+        refreshOutputMultiplierPatterns();
+        updateOutputMultiplierHostSyncSubscription();
     }
 
     public void syncOutputMultiplierFromPattern() {
@@ -905,23 +926,35 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         if (!outputMultiplierModeEnabled) return;
         if (getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L) return;
         long detected = resolveConnectedHostOutputMultiplier();
-        if (detected == lastDetectedHostOutputMultiplier) {
+        int fingerprint = resolveForgeRecipeTypeFingerprint();
+        if (detected == lastDetectedHostOutputMultiplier
+                && fingerprint == lastDetectedForgeRecipeTypeFingerprint) {
             // 读值回落到已应用值时必须复位 pending，否则交替翻转会被残留的旧 pending 误"确认"
             pendingDetectedHostOutputMultiplier = detected;
+            pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
             return;
         }
         // 防抖：宿主倍率在模块工作↔空闲转换间会瞬时跳变（如增殖核心 idle=10 / working=1000），
         // 每次跳变都触发全量样板重编码（spark 实测单窗口累计 930ms+ 的尖峰热点）。
         // 除首次同步外，要求连续两次轮询读到同一新值才应用；交替翻转永不满足，彻底静音。
         if (lastDetectedHostOutputMultiplier != Long.MIN_VALUE
-                && detected != pendingDetectedHostOutputMultiplier) {
+                && (detected != pendingDetectedHostOutputMultiplier
+                || fingerprint != pendingDetectedForgeRecipeTypeFingerprint)) {
             pendingDetectedHostOutputMultiplier = detected;
+            pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
             return;
         }
         pendingDetectedHostOutputMultiplier = detected;
         lastDetectedHostOutputMultiplier = detected;
+        pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
+        lastDetectedForgeRecipeTypeFingerprint = fingerprint;
         updateCachedHostOutputMultiplier(detected);
-        applyOutputMultiplierSettings(true, detected);
+        clearOutputMultiplierPatternCache();
+        refreshOutputMultiplierPatterns();
+    }
+
+    private int resolveForgeRecipeTypeFingerprint() {
+        return OutputMultiplierResolver.resolveForgeRecipeTypeFingerprint(getControllers());
     }
 
     private int makeOutputMultiplierPatternCacheKey(IPatternDetails pattern, ItemStack stack,
