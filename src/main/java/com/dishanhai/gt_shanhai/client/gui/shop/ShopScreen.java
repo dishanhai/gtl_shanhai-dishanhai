@@ -58,7 +58,6 @@ public class ShopScreen extends ScaledScreen {
     // ===== 布局常量（对齐 KE）=====
     private static final int TOP_BAR_H = 18;       // 顶栏按钮高
     private static final int DETAIL_W = 158;       // 右侧详情列宽（KE = 158）
-    private static final int MIN_DETAIL_W = 118;   // 窄屏详情列下限，低于这个按钮/成本预览会难以辨认
     private static final int GRID_GAP = 1;          // 格间距（KE = 1）
     private static final int DEFAULT_GRID_COLS = 10; // 默认每行 10 格
     private static final int TARGET_GRID_ROWS = 12; // 低高度时按一屏约 12 行反推卡片高度上限
@@ -780,29 +779,9 @@ public class ShopScreen extends ScaledScreen {
 
     private int listLeft() { return left + 5; }
 
-    /**
-     * 窄屏/大卡片设置下的统一缩放比例。优先保持右侧详情列可读，再把网格压回默认 10 列、
-     * 高度压回一屏约 12 行；用户设置仍是基准大小，只在空间不足时向下收。
-     */
-    private int responsiveLayoutPermille() {
-        int usable = Math.max(1, panelWidth - 2 - 6 - listLeft() + left);
-        int baseNeedW = DEFAULT_GRID_COLS * (ClientShopUiSettings.cardWidth() + GRID_GAP) + 2 + 6 + DETAIL_W;
-        int byWidth = Math.min(1000, Math.max(760, usable * 1000 / Math.max(1, baseNeedW)));
-
-        int rowsTop = tabsY() + TAB_H + 6 + 3 * (TAB_H + 2);
-        int minContent = Math.max(1, (top + panelHeight - 8) - rowsTop);
-        int baseRowsH = TARGET_GRID_ROWS * (ClientShopUiSettings.cardHeight() + GRID_GAP);
-        int byHeight = Math.min(1000, Math.max(780, minContent * 1000 / Math.max(1, baseRowsH)));
-        return Math.min(byWidth, byHeight);
-    }
-
-    private int scaledValue(int value, int min) {
-        return Math.max(min, value * responsiveLayoutPermille() / 1000);
-    }
-
+    /** 卡片宽度只在固定购买面板左侧的网格空间内收缩，不反向改变详情列或上方控件。 */
     private int cardWidthLimitForTenColumns() {
-        int detail = detailW();
-        int available = (left + panelWidth - 2 - detail - 6) - listLeft() - 2;
+        int available = (left + panelWidth - 2 - DETAIL_W - 6) - listLeft() - 2;
         return Math.max(MIN_EFFECTIVE_CARD_W, (available - (DEFAULT_GRID_COLS - 1) * GRID_GAP) / DEFAULT_GRID_COLS);
     }
 
@@ -810,9 +789,6 @@ public class ShopScreen extends ScaledScreen {
         int available = Math.max(1, contentHeight() - TARGET_GRID_ROWS * GRID_GAP);
         return Math.max(MIN_EFFECTIVE_CARD_H, available / TARGET_GRID_ROWS);
     }
-
-    private int detailW() { return scaledValue(DETAIL_W, MIN_DETAIL_W); }
-    private int searchW() { return Math.max(50, Math.min(SEARCH_W, detailW() - 8)); }
 
     private int cellW() {
         return Math.max(MIN_EFFECTIVE_CARD_W,
@@ -829,7 +805,7 @@ public class ShopScreen extends ScaledScreen {
     /** 网格宽度：铺满到详情列左侧，默认按 10 列封顶。 */
     private int listWidth() {
         int maxGridW = DEFAULT_GRID_COLS * (cellW() + GRID_GAP) + 2;
-        int available = (left + panelWidth - 2 - detailW() - 6) - listLeft();
+        int available = (left + panelWidth - 2 - DETAIL_W - 6) - listLeft();
         return Math.min(maxGridW, Math.max(cellW() + 2, available));
     }
 
@@ -845,59 +821,51 @@ public class ShopScreen extends ScaledScreen {
     private int searchBoxX() { return detailX() + 4; }
     private int searchBoxY() { return tabsY() + 1; }
 
-    private int topButtonW(int normalWidth) {
-        return Math.max(34, normalWidth * responsiveLayoutPermille() / 1000);
-    }
-
-    private boolean compactTopBar() {
-        return responsiveLayoutPermille() < 900 || favBtnX() < settingsBtnX() + settingsBtnW();
-    }
-
     private int buyTabX() { return left + 14; }
-    private int buyTabW() { return topButtonW(BUY_TAB_W); }
+    private int buyTabW() { return BUY_TAB_W; }
     private int sellTabX() { return left + 14 + buyTabW() + 2; }
-    private int sellTabW() { return topButtonW(SELL_TAB_W); }
+    private int sellTabW() { return SELL_TAB_W; }
     // 「货币中心」按钮：出售页签右侧，始终可见（打开 ATM 子页）
     private static final int CURRENCY_BTN_W = 64;
     private int currencyBtnX() { return sellTabX() + sellTabW() + 6; }
-    private int currencyBtnW() { return topButtonW(CURRENCY_BTN_W); }
+    private int currencyBtnW() { return CURRENCY_BTN_W; }
     // 「兑换中心」按钮：货币中心右侧，始终可见（打开兑换子页）
     private static final int EXCHANGE_BTN_W = 64;
     private int exchangeBtnX() { return currencyBtnX() + currencyBtnW() + 4; }
-    private int exchangeBtnW() { return topButtonW(EXCHANGE_BTN_W); }
+    private int exchangeBtnW() { return EXCHANGE_BTN_W; }
     // 「会员中心」按钮：兑换中心右侧，始终可见（打开会员购买+银行子页，见 ShopMembershipScreen）
     private static final int MEMBER_BTN_W = 64;
     private int memberBtnX() { return exchangeBtnX() + exchangeBtnW() + 4; }
-    private int memberBtnW() { return topButtonW(MEMBER_BTN_W); }
+    private int memberBtnW() { return MEMBER_BTN_W; }
     // 「新增商品」按钮：会员中心右侧，仅编辑权玩家且开了编辑模式（catalogEditUnlocked）才可见
     private static final int ADD_BTN_W = 64;
     private int addBtnX() { return memberBtnX() + memberBtnW() + 4; }
-    private int addBtnW() { return topButtonW(ADD_BTN_W); }
+    private int addBtnW() { return ADD_BTN_W; }
     // 「商店设置」按钮：仅编辑权玩家可见，不受编辑模式开关限制；新增商品隐藏时顶上来补位，不留空档
     private static final int SETTINGS_BTN_W = 64;
     private int settingsBtnX() { return catalogEditUnlocked ? addBtnX() + addBtnW() + 4 : addBtnX(); }
-    private int settingsBtnW() { return topButtonW(SETTINGS_BTN_W); }
+    private int settingsBtnW() { return SETTINGS_BTN_W; }
 
     /** 供 CurrencyAtmScreen 读取当前 AE 模式（同包访问）。 */
     static boolean isAeMode() { return aeMode; }
-    private int closeBtnW() { return topButtonW(CLOSE_W); }
+    private int closeBtnW() { return CLOSE_W; }
     private int closeBtnX() { return left + panelWidth - 8 - closeBtnW(); }
-    private int rechargeBtnW() { return topButtonW(RECHARGE_W); }
+    private int rechargeBtnW() { return RECHARGE_W; }
     private int rechargeBtnX() { return closeBtnX() - 4 - rechargeBtnW(); }
     // 「AE模式」切换：充值按钮左侧
     private static final int AE_BTN_W = 58;
-    private int aeBtnW() { return topButtonW(AE_BTN_W); }
+    private int aeBtnW() { return AE_BTN_W; }
     private int aeBtnX() { return rechargeBtnX() - 4 - aeBtnW(); }
     // 「精妙背包模式」切换：AE模式按钮左侧
     private static final int BACKPACK_BTN_W = 78;
-    private int backpackBtnW() { return topButtonW(BACKPACK_BTN_W); }
+    private int backpackBtnW() { return BACKPACK_BTN_W; }
     private int backpackBtnX() { return aeBtnX() - 4 - backpackBtnW(); }
     // 购物车微缩按键：精妙背包按钮左侧，比其余顶栏按钮窄，非空时标题带数量角标
     private static final int CART_BTN_W = 48;
-    private int cartBtnW() { return topButtonW(CART_BTN_W); }
+    private int cartBtnW() { return CART_BTN_W; }
     private int cartBtnX() { return backpackBtnX() - 4 - cartBtnW(); }
 
-    private int favBtnW() { return topButtonW(FAV_BTN_W); }
+    private int favBtnW() { return FAV_BTN_W; }
     private int favBtnX() { return cartBtnX() - 4 - favBtnW(); }
 
     // ===== 网格坐标单一真源（渲染/点击/tooltip 三处共用，杜绝错位）=====
@@ -983,7 +951,7 @@ public class ShopScreen extends ScaledScreen {
 
         // 搜索框（右侧详情列正上方）
         String prev = searchBox != null ? searchBox.getValue() : "";
-        searchBox = new EditBox(this.font, searchBoxX(), searchBoxY(), searchW(), 12, Component.literal("搜索"));
+        searchBox = new EditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W, 12, Component.literal("搜索"));
         searchBox.setValue(prev);
         searchBox.setResponder(s -> { scroll = 0; recomputeVisible(); });
         searchBox.setBordered(true);
@@ -992,7 +960,7 @@ public class ShopScreen extends ScaledScreen {
         addRenderableWidget(searchBox);
 
         // 数量输入框（AE 风格，详情区数量位；仅选中商品时可见）
-        amountBox = new AnimatableEditBox(this.font, detailX() + 8, contentTop() + 66, detailW() - 16, 12, Component.literal("数量"));
+        amountBox = new AnimatableEditBox(this.font, detailX() + 8, contentTop() + 66, DETAIL_W - 16, 12, Component.literal("数量"));
         amountBox.setValue(Long.toString(Math.max(1L, amount)));
         amountBox.setBordered(true);
         amountBox.setTextColor(0xFFFFFF);
@@ -1129,7 +1097,7 @@ public class ShopScreen extends ScaledScreen {
         float cardT = GuiRenderUtil.popAnimProgress(cardSwitchAtMs, CARD_SWITCH_ANIM_MS);
         if (amountBox != null) {
             amountBox.setVisible(selected != null);
-            amountBox.setAnim(this::cardAnimProgress, detailX() + detailW() / 2f, contentTop() + contentHeight() / 2f);
+            amountBox.setAnim(this::cardAnimProgress, detailX() + DETAIL_W / 2f, contentTop() + contentHeight() / 2f);
         }
         // 整体面板（KE 风格 4 层嵌套：金边→金→暗背景→内层）
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
@@ -1138,31 +1106,30 @@ public class ShopScreen extends ScaledScreen {
         g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
 
         // 顶部买/卖页签
-        boolean compact = compactTopBar();
         drawTab(g, buyTabX(), top + 6, buyTabW(), TOP_BAR_H, "购买", mode == Mode.BUY, mx, my);
         drawTab(g, sellTabX(), top + 6, sellTabW(), TOP_BAR_H, "出售", mode == Mode.SELL, mx, my);
         // 货币中心 + 兑换中心（始终可见）
-        drawButton(g, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H, compact ? "§6货币" : "§6货币中心", mx, my);
-        drawButton(g, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H, compact ? "§d兑换" : "§d兑换中心", mx, my);
-        drawButton(g, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H, compact ? "§b会员" : "§b会员中心", mx, my);
+        drawButton(g, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H, "§6货币中心", mx, my);
+        drawButton(g, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H, "§d兑换中心", mx, my);
+        drawButton(g, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H, "§b会员中心", mx, my);
         // 新增商品（编辑权 + 开了编辑模式）、商店设置（仅编辑权，不受编辑模式限制）
         if (catalogEditUnlocked) {
-            drawButton(g, addBtnX(), top + 6, addBtnW(), TOP_BAR_H, compact ? "§a新增" : "§a新增商品", mx, my);
+            drawButton(g, addBtnX(), top + 6, addBtnW(), TOP_BAR_H, "§a新增商品", mx, my);
         }
         if (canEdit) {
-            drawButton(g, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H, compact ? "§b设置" : "§b商店设置", mx, my);
+            drawButton(g, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H, "§b商店设置", mx, my);
         }
 
         // 顶栏右侧：购物车 → 精妙背包模式 → AE模式 → 充值全部 → 关闭
         int cartCount = ClientShopCart.size();
         drawButton(g, cartBtnX(), top + 6, cartBtnW(), TOP_BAR_H,
-                cartCount > 0 ? "§e车§6(" + cartCount + ")" : (compact ? "§e车" : "§e购物车"), mx, my);
+                cartCount > 0 ? "§e车§6(" + cartCount + ")" : "§e购物车", mx, my);
         drawButton(g, favBtnX(), top + 6, favBtnW(), TOP_BAR_H,
-                favoritesOnly ? "§e★收藏" : (compact ? "§7☆" : "§7☆收藏"), mx, my);
+                favoritesOnly ? "§e★收藏" : "§7☆收藏", mx, my);
         drawButton(g, backpackBtnX(), top + 6, backpackBtnW(), TOP_BAR_H,
-                backpackMode ? (compact ? "§aSDA开" : "§a精妙背包:开") : (compact ? "§8SDA关" : "§8精妙背包:关"), mx, my);
+                backpackMode ? "§a精妙背包:开" : "§8精妙背包:关", mx, my);
         drawButton(g, aeBtnX(), top + 6, aeBtnW(), TOP_BAR_H, aeMode ? "§aAE开" : "§8AE关", mx, my);
-        drawButton(g, rechargeBtnX(), top + 6, rechargeBtnW(), TOP_BAR_H, compact ? "§b充值" : "§b充值全部", mx, my);
+        drawButton(g, rechargeBtnX(), top + 6, rechargeBtnW(), TOP_BAR_H, "§b充值全部", mx, my);
         drawButton(g, closeBtnX(), top + 6, closeBtnW(), TOP_BAR_H, "§c关闭", mx, my);
 
         // 标题（居中于整个面板，KE 做法）
@@ -1198,7 +1165,7 @@ public class ShopScreen extends ScaledScreen {
         // 右侧详情面板（同上，锚点换成详情列自己的中心；cardT 已在上面算过，amountBox 同步过了）
         if (cardT < 1f) {
             g.pose().pushPose();
-            GuiRenderUtil.popScaleAt(g, detailX() + detailW() / 2f, gy + gh / 2f, cardT);
+            GuiRenderUtil.popScaleAt(g, detailX() + DETAIL_W / 2f, gy + gh / 2f, cardT);
             drawDetail(g, mx, my);
             g.pose().popPose();
         } else {
@@ -1947,8 +1914,8 @@ public class ShopScreen extends ScaledScreen {
 
     private int detailViewportHeight() { return detailViewportBottom() - detailViewportTop(); }
 
-    /** 详情列滚动条 X：从正文右缘 detailX()+detailW()-8 再让出 DETAIL_SCROLLBAR_GAP，整条落在右侧 8px 内缩带里。 */
-    private int detailScrollbarX() { return detailX() + detailW() - 8 + DETAIL_SCROLLBAR_GAP; }
+    /** 详情列滚动条 X：从正文右缘 detailX()+DETAIL_W-8 再让出 DETAIL_SCROLLBAR_GAP，整条落在右侧 8px 内缩带里。 */
+    private int detailScrollbarX() { return detailX() + DETAIL_W - 8 + DETAIL_SCROLLBAR_GAP; }
 
     private int clampDetailScroll(int value) {
         return Math.max(0, Math.min(detailScrollMax, value));
@@ -2275,7 +2242,7 @@ public class ShopScreen extends ScaledScreen {
         detailHoverStack = null; // 每帧先清，命中大图标再置
         descExpandVisible = false; // 每帧先清，描述非空才置
         int dx = detailX();
-        int dw = detailW();
+        int dw = DETAIL_W;
         int detailInnerW = dw - 16;
         int dy = contentTop();
         int dh = contentHeight();
@@ -2778,7 +2745,7 @@ public class ShopScreen extends ScaledScreen {
         }
 
         // 跳转入口（drawDetail 渲染时暂存的目标条目 + 命中框，点击直接切换详情页选中项）
-        boolean inDetailViewport = hit(mx, my, detailX(), detailViewportTop(), detailW(), detailViewportHeight());
+        boolean inDetailViewport = hit(mx, my, detailX(), detailViewportTop(), DETAIL_W, detailViewportHeight());
         if (inDetailViewport && linkVisible && linkTarget != null && hit(mx, my, linkX, linkY, linkW, linkH)) {
             selectEntry(linkTargetKey, linkTarget);
             return true;
@@ -2823,7 +2790,7 @@ public class ShopScreen extends ScaledScreen {
             int cx = dx + 8;
             int dy = contentTop();
             int dh = contentHeight();
-            int btnW = detailW() - 16;
+            int btnW = DETAIL_W - 16;
             int btnY = dy + dh - 24;
             // 确认购买/出售：自选奖励（CHOICE，本地池或 FTBQ 表自选子模式）商品先弹选择界面，选完再发购买包；
             // 随机/全部/普通商品直接买
@@ -2940,7 +2907,7 @@ public class ShopScreen extends ScaledScreen {
             cartOverlayScroll = Math.max(0, Math.min(maxScroll, cartOverlayScroll - (int) d));
             return true;
         }
-        if (selected != null && GuiRenderUtil.isHovering(mx, my, detailX(), detailViewportTop(), detailW(), detailViewportHeight())) {
+        if (selected != null && GuiRenderUtil.isHovering(mx, my, detailX(), detailViewportTop(), DETAIL_W, detailViewportHeight())) {
             detailScroll = clampDetailScroll(detailScroll - (int) d * 18);
             return true;
         }
