@@ -120,6 +120,22 @@ class ClientShopCatalogStateTest {
         assertEquals(4L, remaining.invoke(state, 0L));
     }
 
+    @Test
+    void goodsIndexReturnsVisibleEntriesInManifestOrder() {
+        ClientShopCatalog.applyManifest(new ShopCatalogManifest(40L, true, List.of(
+                new ShopCatalogManifest.Stub(7L, "杂货", "", "", "", false,
+                        1, "", "石头 A", List.of("minecraft:stone"), "stable-7", ""),
+                new ShopCatalogManifest.Stub(8L, "杂货", "", "", "", true,
+                        1, "", "隐藏石头", List.of("minecraft:stone"), "stable-8", ""),
+                new ShopCatalogManifest.Stub(9L, "工具", "", "", "", false,
+                        2, "", "石头 B", List.of("minecraft:stone", "minecraft:granite"), "stable-9", "")),
+                java.util.Map.of()));
+
+        assertEquals(List.of(7L, 9L), ClientShopCatalog.keysOfGoodsId("minecraft:stone"));
+        assertEquals(List.of(9L), ClientShopCatalog.keysOfGoodsId(" minecraft:granite "));
+        assertTrue(ClientShopCatalog.keysOfGoodsId("minecraft:dirt").isEmpty());
+    }
+
     private static ShopCatalogManifest manifest(long revision) {
         return manifest(revision, true);
     }

@@ -4,8 +4,6 @@ import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
-import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
-import com.dishanhai.gt_shanhai.network.WalletOpenRequestPacket;
 
 import dev.ftb.mods.ftblibrary.icon.Color4I;
 import dev.ftb.mods.ftblibrary.icon.ItemIcon;
@@ -103,9 +101,7 @@ public class ShopQuestJumpButton extends SimpleTextButton {
      * → S→C 开界面）。不在客户端直接 new ShopScreen：那样会绕过持有钱包校验，也拿不到编辑权/最新目录。
      */
     private static void openShopAt(long entryKey) {
-        ShopCatalogManifest.Stub stub = ClientShopCatalog.stub(entryKey);
-        ShopScreen.requestFocus(stub == null ? null : stub.stableId(), entryKey);
-        ShanhaiNetwork.CHANNEL.sendToServer(new WalletOpenRequestPacket());
+        ShopScreenOpener.requestOpenAt(entryKey);
     }
 
     /** 名称在按钮上可能被裁短（见 {@link #fitInto}），所以这里始终把完整名称列全。 */

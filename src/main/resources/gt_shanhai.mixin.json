@@ -139,6 +139,7 @@
     "JEICopyShortcutMixin",
     "JEIRecipeGuiInfinityCellMixin",
     "JEISdaElementDedupMixin",
+    "GTLCoreMultiblockInfoRegistrationMixin",
     "GTLCorePatternPreviewCompatibilityMixin",
     "RecipeSlotTooltipMixin",
     "WobbleFontMixin",

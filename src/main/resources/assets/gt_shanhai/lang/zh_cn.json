@@ -1,6 +1,7 @@
 ﻿{
   "key.categories.gt_shanhai": "山海私货",
   "key.gt_shanhai.open_shop": "打开山海商店（背包/饰品栏有钱包即可）",
+  "key.gt_shanhai.open_hovered_shop_item": "按住快捷键打开悬停物品的商店页面",
   "curios.identifier.wallet": "钱包",
   "curios.wallet.name": "钱包",
   "gt_shanhai.fluid.photon_state": "光子态",

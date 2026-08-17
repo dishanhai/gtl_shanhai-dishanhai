@@ -66,6 +66,8 @@ public class ClientInit {
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientLoggingOut);
         MinecraftForge.EVENT_BUS.addListener(ClientInit::onClientLoggingIn);
         MinecraftForge.EVENT_BUS.addListener(ShanhaiKeyMappings::onClientTick);
+        MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onItemTooltip);
+        MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onClientTick);
     }
 
     private static void onClientChatReceived(ClientChatReceivedEvent event) {
@@ -114,6 +116,7 @@ public class ClientInit {
         com.dishanhai.gt_shanhai.client.shop.ClientCostPreview.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientAeCurrencyBalance.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientShopQuestLinks.clear();
+        com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey.reset();
     }
 
     /**

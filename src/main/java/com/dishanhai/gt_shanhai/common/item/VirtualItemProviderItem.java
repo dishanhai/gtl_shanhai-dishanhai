@@ -85,6 +85,7 @@ public class VirtualItemProviderItem extends Item {
             return;
         }
         tooltip.add(Component.literal("已绑定: ").withStyle(ChatFormatting.AQUA)
+                .append(Component.literal(target.getCount() + "x ").withStyle(ChatFormatting.WHITE))
                 .append(target.getHoverName().copy().withStyle(ChatFormatting.WHITE)));
     }
 

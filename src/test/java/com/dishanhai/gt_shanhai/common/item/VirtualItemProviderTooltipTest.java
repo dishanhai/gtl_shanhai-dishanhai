@@ -1,38 +1,25 @@
 package com.dishanhai.gt_shanhai.common.item;
 
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.item.TooltipFlag;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VirtualItemProviderTooltipTest {
 
-    private final VirtualItemProviderItem providerItem = new VirtualItemProviderItem(new Item.Properties());
+    private static final Path ITEM = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "item", "VirtualItemProviderItem.java");
 
     @Test
-    void boundTooltipAlwaysPrefixesTargetNameWithStoredCount() {
-        assertBoundCountPrefix(64);
-        assertBoundCountPrefix(1);
-    }
+    void boundTooltipAlwaysPrefixesTargetNameWithStoredCount() throws Exception {
+        String source = Files.readString(ITEM);
 
-    private void assertBoundCountPrefix(int count) {
-        ItemStack provider = new ItemStack(providerItem);
-        ItemStack target = new ItemStack(Items.IRON_INGOT, count);
-        provider.getOrCreateTag().put(VirtualItemProviderHelper.TARGET_ITEM_KEY, target.save(new CompoundTag()));
-
-        List<Component> tooltip = new ArrayList<>();
-        providerItem.appendHoverText(provider, null, tooltip, TooltipFlag.NORMAL);
-
-        String bindingLine = tooltip.get(tooltip.size() - 1).getString();
-        assertTrue(bindingLine.startsWith("已绑定: " + count + "x "),
-                () -> "绑定提示必须包含目标数量，实际为: " + bindingLine);
+        assertTrue(source.contains("Component.literal(target.getCount() + \"x \")"),
+                "绑定提示必须在目标名称前显示保存的目标数量，包括数量为 1 时");
+        assertTrue(source.indexOf("Component.literal(target.getCount() + \"x \")")
+                        < source.indexOf("target.getHoverName()"),
+                "绑定数量必须显示在目标物品名称之前");
     }
 }

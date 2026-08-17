@@ -125,6 +125,8 @@ public final class ClientShopCatalog {
     private static final Map<String, List<Long>> groupKeys = new LinkedHashMap<>();
     private static final Map<String, Long> linkKeys = new LinkedHashMap<>();
     private static final Map<String, Long> stableIdToKey = new LinkedHashMap<>();
+    // 商品物品 ID 反向索引：JEI 悬停快捷键只查全量轻量 stub，不触发商品 chunk 加载。
+    private static final Map<String, List<Long>> goodsIdKeys = new LinkedHashMap<>();
     // 前置任务反向索引：FTBQ 任务 ID（十六进制）→ 以它为前置的商品 entryKey 列表（保持 manifest 顺序）。
     // 供任务书那侧的「前往商店」按钮反查（见 FtbViewQuestPanelShopButtonMixin）；隐藏条目不入索引。
     private static final Map<String, List<Long>> prereqQuestKeys = new LinkedHashMap<>();
@@ -228,6 +230,12 @@ public final class ClientShopCatalog {
         return stableIdToKey.getOrDefault(stableId, -1L);
     }
 
+    /** 按商品物品 ID 反查可见商品，顺序与服务端目录清单一致。 */
+    public static List<Long> keysOfGoodsId(String goodsId) {
+        if (goodsId == null || goodsId.isBlank()) return List.of();
+        return goodsIdKeys.getOrDefault(goodsId.trim().toLowerCase(Locale.ROOT), List.of());
+    }
+
     public static long beginChunkRequest(int chunkId) {
         return STATE.beginRequest(chunkId);
     }
@@ -302,6 +310,7 @@ public final class ClientShopCatalog {
         groupKeys.clear();
         linkKeys.clear();
         stableIdToKey.clear();
+        goodsIdKeys.clear();
         prereqQuestKeys.clear();
         topCategories.clear();
         subCategories.clear();
@@ -316,6 +325,12 @@ public final class ClientShopCatalog {
             if (!stub.linkKey().isEmpty()) linkKeys.putIfAbsent(stub.linkKey(), stub.entryKey());
             if (!stub.stableId().isEmpty()) stableIdToKey.put(stub.stableId(), stub.entryKey());
             if (stub.hidden()) continue;
+            for (String goodsId : stub.goodsIds()) {
+                if (goodsId == null || goodsId.isBlank()) continue;
+                String normalized = goodsId.trim().toLowerCase(Locale.ROOT);
+                List<Long> keys = goodsIdKeys.computeIfAbsent(normalized, ignored -> new ArrayList<>());
+                if (!keys.contains(stub.entryKey())) keys.add(stub.entryKey());
+            }
             if (!stub.prereqQuestId().isEmpty()) {
                 prereqQuestKeys.computeIfAbsent(stub.prereqQuestId(), ignored -> new ArrayList<>())
                         .add(stub.entryKey());
