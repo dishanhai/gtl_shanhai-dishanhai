@@ -1,5 +1,9 @@
 # GT-Shanhai Mod
 
+[![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+[![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-green.svg)](https://www.minecraft.net/)
+[![Forge](https://img.shields.io/badge/Forge-47.4.16-orange.svg)](https://files.minecraftforge.net/)
+
 [简体中文](#简体中文) | [English](#english)
 
 ---
