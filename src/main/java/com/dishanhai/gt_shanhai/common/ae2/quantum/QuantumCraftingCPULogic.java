@@ -206,7 +206,7 @@ public class QuantumCraftingCPULogic {
                             : 0L;
                     craftingContainer = gtlCoreBulkProvider
                             ? (extractedBulkAmount > 0L
-                                    ? AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory,
+                                    ? AEUtils.extractForProcessingPattern(details, inventory,
                                             expectedOutputs, extractedBulkAmount)
                                     : null)
                             : CraftingCpuHelper.extractPatternInputs(details, inventory, level,

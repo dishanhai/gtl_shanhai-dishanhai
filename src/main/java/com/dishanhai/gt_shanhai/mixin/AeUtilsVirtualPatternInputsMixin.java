@@ -1,8 +1,8 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import appeng.api.crafting.IPatternDetails;
 import appeng.api.stacks.KeyCounter;
 import appeng.crafting.inv.ICraftingInventory;
-import appeng.crafting.pattern.AEProcessingPattern;
 
 import com.dishanhai.gt_shanhai.common.item.VirtualCraftingPatternInputExtractor;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
@@ -17,13 +17,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public class AeUtilsVirtualPatternInputsMixin {
 
     @Inject(
-            method = "extractForProcessingPattern(Lappeng/crafting/pattern/AEProcessingPattern;"
+            method = "extractForProcessingPattern(Lappeng/api/crafting/IPatternDetails;"
                     + "Lappeng/crafting/inv/ICraftingInventory;Lappeng/api/stacks/KeyCounter;J)"
                     + "[Lappeng/api/stacks/KeyCounter;",
             at = @At("HEAD"),
             cancellable = true,
             remap = false)
-    private static void gtShanhai$extractReusablePresenceInputs(AEProcessingPattern details,
+    private static void gtShanhai$extractReusablePresenceInputs(IPatternDetails details,
             ICraftingInventory sourceInv, KeyCounter expectedOutputs, long multiplier,
             CallbackInfoReturnable<KeyCounter[]> cir) {
         if (!VirtualPatternEncodingHelper.containsVirtualProviderPattern(details)) return;

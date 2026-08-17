@@ -33,6 +33,10 @@ class OutputMultiplierResolverSourceTest {
     void resolverSupportsForgeOfTheAntichristMultiplierByRecipeType() throws Exception {
         String source = Files.readString(RESOLVER);
 
+        assertTrue(source.contains("resolveUniversalHostOutputMultiplier(Iterable<?> controllers,"),
+                "读宿主必须能单独取得全局倍率，不能因伪神按配方类型解析而让按钮退化为只刷新");
+        assertTrue(source.contains("return resolveHostOutputMultiplier(controllers, level, pos, null, false);"),
+                "全局倍率入口必须排除伪神的配方类型专属倍率");
         assertTrue(source.contains("resolveHostOutputMultiplier(Iterable<?> controllers,\n"
                         + "            @Nullable Level level, @Nullable BlockPos pos, @Nullable String recipeTypeId)"),
                 "星律读取宿主倍率必须有样板配方类型上下文，不能把伪神 15x 当成全局倍率");

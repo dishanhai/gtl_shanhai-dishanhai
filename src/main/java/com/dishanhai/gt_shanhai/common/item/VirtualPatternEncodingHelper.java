@@ -672,9 +672,41 @@ public final class VirtualPatternEncodingHelper {
             RecipeSelection partialSelection = selectPartialTypeScopedCandidate(
                     index.partialCandidates(outputBag), inputs, inputBag, outputBag,
                     availableCatalystInputs, requiredType, allowOmittedNonConsumables);
-            return partialSelection.ambiguous ? null : partialSelection.recipe;
+            if (partialSelection.ambiguous || partialSelection.recipe != null) {
+                return partialSelection.ambiguous ? null : partialSelection.recipe;
+            }
+            return findMatchingRecipeInCurrentTypeLookup(inputs, outputs, inputBag, outputBag,
+                    availableCatalystInputs, requiredType, allowOmittedNonConsumables);
         }
         return null;
+    }
+
+    private static GTRecipe findMatchingRecipeInCurrentTypeLookup(GenericStack[] inputs, GenericStack[] outputs,
+            StackBag inputBag, StackBag outputBag, StackBag availableCatalystInputs,
+            GTRecipeType requiredType, boolean allowOmittedNonConsumables) {
+        if (requiredType.getLookup() == null || requiredType.getLookup().getLookup() == null) return null;
+        List<GTRecipe> currentRecipes = new ArrayList<>();
+        Iterable<GTRecipe> recipes = requiredType.getLookup().getLookup().getRecipes(true)::iterator;
+        for (GTRecipe recipe : recipes) {
+            if (recipe != null && hasNonConsumableInput(recipe)) currentRecipes.add(recipe);
+        }
+
+        RecipeSelection selection = selectRecipeCandidate(currentRecipes, inputs, outputs, inputBag, outputBag,
+                availableCatalystInputs, requiredType, false, allowOmittedNonConsumables);
+        if (selection.recipe == null && !selection.ambiguous) {
+            selection = selectRecipeCandidate(currentRecipes, inputs, outputs, inputBag, outputBag,
+                    availableCatalystInputs, requiredType, true, allowOmittedNonConsumables);
+        }
+        if (selection.recipe == null && !selection.ambiguous) {
+            selection = selectPartialTypeScopedCandidate(currentRecipes, inputs, inputBag, outputBag,
+                    availableCatalystInputs, requiredType, allowOmittedNonConsumables);
+        }
+        if (selection.ambiguous || selection.recipe == null) return null;
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("[VirtualPatternEncoding] type-scoped live lookup matched recipe={}",
+                    selection.recipe.getId());
+        }
+        return selection.recipe;
     }
 
     private static RecipeSelection selectRecipeCandidate(List<GTRecipe> candidates,

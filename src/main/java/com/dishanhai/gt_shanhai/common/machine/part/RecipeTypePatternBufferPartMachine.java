@@ -771,6 +771,11 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
                 getControllers(), getLevel(), getPos()));
     }
 
+    private long resolveConnectedUniversalHostOutputMultiplier() {
+        return clampOutputMultiplier(OutputMultiplierResolver.resolveUniversalHostOutputMultiplier(
+                getControllers(), getLevel(), getPos()));
+    }
+
     private long resolveConnectedHostOutputMultiplier(@Nullable String recipeTypeId) {
         return clampOutputMultiplier(OutputMultiplierResolver.resolveHostOutputMultiplier(
                 getControllers(), getLevel(), getPos(), recipeTypeId));
@@ -798,14 +803,15 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public void syncOutputMultiplierFromHost() {
         if (isRemote()) return;
         long multiplier = resolveConnectedHostOutputMultiplier();
+        long universalMultiplier = resolveConnectedUniversalHostOutputMultiplier();
         int fingerprint = resolveForgeRecipeTypeFingerprint();
         lastDetectedHostOutputMultiplier = multiplier;
         pendingDetectedHostOutputMultiplier = multiplier;
         lastDetectedForgeRecipeTypeFingerprint = fingerprint;
         pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
         updateCachedHostOutputMultiplier(multiplier);
-        if (!outputMultiplierModeEnabled) {
-            applyOutputMultiplierSettings(true, getPatternOutputMultiplier());
+        if (!outputMultiplierModeEnabled || getPatternOutputMultiplier() != universalMultiplier) {
+            applyOutputMultiplierSettings(true, universalMultiplier);
             return;
         }
         clearOutputMultiplierPatternCache();

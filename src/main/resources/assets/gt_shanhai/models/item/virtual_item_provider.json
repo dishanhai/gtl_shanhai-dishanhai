@@ -1,6 +1,4 @@
 {
-  "parent": "minecraft:item/generated",
-  "textures": {
-    "layer0": "gt_shanhai:item/virtual_item_provider"
-  }
+  "parent": "builtin/entity",
+  "gui_light": "front"
 }

@@ -59,6 +59,11 @@ public final class OutputMultiplierResolver {
         return resolveHostOutputMultiplier(controllers, level, pos, null, true);
     }
 
+    public static long resolveUniversalHostOutputMultiplier(Iterable<?> controllers,
+            @Nullable Level level, @Nullable BlockPos pos) {
+        return resolveHostOutputMultiplier(controllers, level, pos, null, false);
+    }
+
     public static int resolveForgeRecipeTypeFingerprint(Iterable<?> controllers) {
         int fingerprint = 1;
         if (controllers == null) return fingerprint;

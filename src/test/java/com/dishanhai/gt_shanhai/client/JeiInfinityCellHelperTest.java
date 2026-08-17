@@ -48,6 +48,11 @@ public class JeiInfinityCellHelperTest {
             public Object getIngredient() {
                 return ingredient;
             }
+
+            @Override
+            public <V> ITypedIngredient<V> cast(IIngredientType<V> ingredientType) {
+                return null;
+            }
         };
     }
 }

@@ -144,9 +144,13 @@ class StellarPatternMultiplierSourceTest {
         assertTrue(source.contains("resolveConnectedHostOutputMultiplier(@Nullable String recipeTypeId)"));
         assertTrue(source.contains("OutputMultiplierResolver.resolveHostOutputMultiplier(\n"
                 + "                getControllers(), getLevel(), getPos(), recipeTypeId)"));
+        assertTrue(source.contains("resolveConnectedUniversalHostOutputMultiplier()"),
+                "读宿主必须区分全局倍率与伪神的配方类型专属倍率");
+        assertTrue(sync.contains("long universalMultiplier = resolveConnectedUniversalHostOutputMultiplier();"));
+        assertTrue(sync.contains("applyOutputMultiplierSettings(true, universalMultiplier)"),
+                "原初等全局宿主倍率必须写回输入栏，恢复读宿主按钮的可见效果");
         assertFalse(sync.contains("applyOutputMultiplierSettings(true, multiplier)"),
-                "从伪神主机读到 15x 时不能写成所有样板共享的手动倍率");
-        assertTrue(sync.contains("refreshOutputMultiplierPatterns()"));
+                "伪神最大倍率不能写成所有样板共享的手动倍率");
         assertFalse(poll.contains("applyOutputMultiplierSettings(true, detected)"),
                 "宿主 recipe-type-aware 倍率变化时只刷新可见样板，不能覆盖手动倍率字段");
     }

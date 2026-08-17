@@ -412,7 +412,8 @@ public class DShanhaiMachines {
                         GTLRecipeTypes.FISHING_GROUND_RECIPES,
                         GTLRecipeTypes.DISSOLUTION_TREATMENT,
                         GTLRecipeTypes.DIGESTION_TREATMENT,
-                        GTLRecipeTypes.DESULFURIZER_RECIPES)
+                        GTLRecipeTypes.DESULFURIZER_RECIPES
+                        )
                 .pattern(PrimordialAbyssalRefineryStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
                         new ResourceLocation("gtceu", "bronze_machine_casing")))

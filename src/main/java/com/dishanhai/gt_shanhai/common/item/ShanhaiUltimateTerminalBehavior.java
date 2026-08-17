@@ -368,11 +368,13 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
 
         ExtendLabelWidget replacement = new ExtendLabelWidget(47, 26, replacementLabel(terminal));
         BlockMapSelectorWidget selector = new BlockMapSelectorWidget(
-                root.getSizeHeight() + 4, settings.getSizeWidth(), (family, tier) -> {
+                0, root.getSizeHeight() + 4, settings.getSizeWidth(), (family, tier) -> {
             if (family == null || tier == null) return;
             ShanhaiUltimateTerminalConfig.setReplacement(terminal, family, tier);
             replacement.setComponent(replacementLabel(terminal));
-        });
+        }, (family, tier) -> family != null && tier != null
+                && family.equals(ShanhaiUltimateTerminalConfig.getReplacementFamily(terminal))
+                && tier == ShanhaiUltimateTerminalConfig.getReplacementTier(terminal));
         initializeReplacementSelector(selector, terminal);
         settings.addWidget(new SwitchWidget(14, 26, 30, 16,
                 (click, open) -> selector.showType(open))

@@ -1,11 +1,12 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import mezz.jei.api.helpers.IColorHelper;
+import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.runtime.IIngredientManager;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
 import mezz.jei.common.config.IIngredientFilterConfig;
-import mezz.jei.core.search.PrefixInfo;
-import mezz.jei.core.search.SearchMode;
-import mezz.jei.core.search.suffixtree.GeneralizedSuffixTree;
+import mezz.jei.common.search.PrefixInfo;
+import mezz.jei.common.search.SearchMode;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.ingredients.IListElementInfo;
 import mezz.jei.gui.search.ElementPrefixParser;
@@ -27,11 +28,12 @@ public class JEIAESearchPrefixMixin {
 
     @Inject(method = "<init>", at = @At("TAIL"), remap = false)
     private void gtShanhai$addAeSearchPrefixes(IIngredientManager ingredientManager, IIngredientFilterConfig filterConfig,
-            IColorHelper colorHelper, CallbackInfo ci) {
-        addPrefix(new PrefixInfo<>('*', () -> SearchMode.REQUIRE_PREFIX,
-                JEIAESearchPrefixMixin::getIdSearchStrings, GeneralizedSuffixTree::new));
-        addPrefix(new PrefixInfo<>('#', () -> SearchMode.REQUIRE_PREFIX,
-                info -> getTagSearchStrings(info, ingredientManager), GeneralizedSuffixTree::new));
+            IColorHelper colorHelper, IModIdHelper modIdHelper,
+            ISearchStorageBuilderFactory searchStorageBuilderFactory, CallbackInfo ci) {
+        addPrefix(new PrefixInfo<>("gt_shanhai_item_id", '*', () -> SearchMode.REQUIRE_PREFIX,
+                JEIAESearchPrefixMixin::getIdSearchStrings, searchStorageBuilderFactory));
+        addPrefix(new PrefixInfo<>("gt_shanhai_tags", '#', () -> SearchMode.REQUIRE_PREFIX,
+                info -> getTagSearchStrings(info, ingredientManager), searchStorageBuilderFactory));
     }
 
     private static Collection<String> getIdSearchStrings(IListElementInfo<?> info) {
