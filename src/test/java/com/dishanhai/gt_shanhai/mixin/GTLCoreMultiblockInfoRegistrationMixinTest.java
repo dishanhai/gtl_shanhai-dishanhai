@@ -60,10 +60,16 @@ class GTLCoreMultiblockInfoRegistrationMixinTest {
         assertTrue(source.contains("@Redirect(method = \"registerRecipes\""));
         assertTrue(source.contains("MultiblockInfoCategory;registerRecipes"),
                 "必須只替換 GTCEu 原有的多方塊資訊註冊呼叫");
-        assertTrue(source.contains("Minecraft.getInstance().submit("),
-                "非同步 JEI 啟動時仍必須把假世界預覽建立排到 Minecraft 執行緒");
-        assertTrue(source.contains(".join()"),
-                "JEI 註冊執行緒必須等待全部可用 wrapper 建立完成再返回");
+        assertTrue(source.contains("private void gtShanhai$registerRecoverablePreviews"),
+                "GTJEIPlugin 是實例方法，redirect handler 也必須是實例方法");
+        assertTrue(!source.contains("private static void gtShanhai$registerRecoverablePreviews"),
+                "不可用 static handler redirect 實例方法內的呼叫");
+        assertTrue(source.contains("CompletableFuture.supplyAsync("),
+                "預覽建立必須排到 Minecraft 執行器，但不能阻塞目前的 JEI 註冊執行緒");
+        assertTrue(source.contains(".thenAcceptAsync("),
+                "wrapper 建立完成後才可在 Minecraft 執行器加入 JEI 配方");
+        assertTrue(!source.contains(".join()"),
+                "Render thread 內等待 Minecraft.submit future 會形成自我死鎖");
         assertTrue(source.contains("MultiblockPreviewRegistrationHelper.collect"));
         assertTrue(source.contains("registry.addRecipes(MultiblockInfoCategory.RECIPE_TYPE, wrappers)"));
         assertTrue(config.contains("\"GTLCoreMultiblockInfoRegistrationMixin\""));

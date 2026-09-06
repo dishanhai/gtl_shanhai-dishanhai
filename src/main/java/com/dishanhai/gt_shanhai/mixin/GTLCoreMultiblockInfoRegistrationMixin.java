@@ -15,6 +15,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Prevents one broken GTLCore pattern preview from dropping the complete JEI multiblock category.
@@ -27,22 +28,28 @@ public abstract class GTLCoreMultiblockInfoRegistrationMixin {
     @Redirect(method = "registerRecipes", at = @At(value = "INVOKE",
             target = "Lcom/gregtechceu/gtceu/integration/jei/multipage/MultiblockInfoCategory;registerRecipes(Lmezz/jei/api/registration/IRecipeRegistration;)V"),
             remap = false)
-    private static void gtShanhai$registerRecoverablePreviews(IRecipeRegistration registry) {
+    private void gtShanhai$registerRecoverablePreviews(IRecipeRegistration registry) {
         AtomicInteger failed = new AtomicInteger();
-        List<MultiblockInfoWrapper> wrappers = Minecraft.getInstance().submit(() ->
-                MultiblockPreviewRegistrationHelper.collect(
-                        GTRegistries.MACHINES.values(),
-                        definition -> definition instanceof MultiblockMachineDefinition multiblock
-                                && multiblock.isRenderXEIPreview(),
-                        definition -> new MultiblockInfoWrapper((MultiblockMachineDefinition) definition),
-                        (definition, error) -> {
-                            failed.incrementAndGet();
-                            LOG.warn("[山海JEI] 跳過無法建立結構預覽的多方塊: {}",
-                                    definition.getId(), error);
-                        })).join();
-
-        registry.addRecipes(MultiblockInfoCategory.RECIPE_TYPE, wrappers);
-        LOG.info("[山海JEI] GTCEu 多方塊結構預覽已註冊: {}, 跳過失敗: {}",
-                wrappers.size(), failed.get());
+        Minecraft minecraft = Minecraft.getInstance();
+        CompletableFuture.supplyAsync(() ->
+                        MultiblockPreviewRegistrationHelper.collect(
+                                GTRegistries.MACHINES.values(),
+                                definition -> definition instanceof MultiblockMachineDefinition multiblock
+                                        && multiblock.isRenderXEIPreview(),
+                                definition -> new MultiblockInfoWrapper((MultiblockMachineDefinition) definition),
+                                (definition, error) -> {
+                                    failed.incrementAndGet();
+                                    LOG.warn("[山海JEI] 跳過無法建立結構預覽的多方塊: {}",
+                                            definition.getId(), error);
+                                }), minecraft)
+                .thenAcceptAsync(wrappers -> {
+                    registry.addRecipes(MultiblockInfoCategory.RECIPE_TYPE, wrappers);
+                    LOG.info("[山海JEI] GTCEu 多方塊結構預覽已註冊: {}, 跳過失敗: {}",
+                            wrappers.size(), failed.get());
+                }, minecraft)
+                .exceptionally(error -> {
+                    LOG.error("[山海JEI] 多方塊結構預覽註冊失敗", error);
+                    return null;
+                });
     }
 }
