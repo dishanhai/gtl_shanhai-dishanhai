@@ -226,9 +226,9 @@ public final class DShanhaiConfig {
                     .defineList("autoWrapExclusions", List.of("gtceu:programmed_circuit"), value -> value instanceof String);
             virtualProviderForceWrapOmittedNonConsumables = builder
                     .comment("编码器反查到不消耗输入但玩家未放入时，是否强行补回虚拟供应器/流体标记",
-                             "false=尊重玩家删除输入的操作，不包裹该缺失项（默认）",
-                             "true=保留旧行为，自动补回缺失的不消耗物品或流体")
-                    .define("forceWrapOmittedNonConsumables", false);
+                             "true=自动补回缺失的不消耗物品或流体（默认）",
+                             "false=尊重玩家删除输入的操作，不包裹该缺失项")
+                    .define("forceWrapOmittedNonConsumables", true);
             builder.pop();
 
             builder.push("recipe_type_pattern_buffer");

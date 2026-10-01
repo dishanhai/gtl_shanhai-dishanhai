@@ -50,10 +50,10 @@ public class VirtualPatternEncodingHelperTest {
                 "编码反查和星律运行时严格反推必须显式隔离");
         assertTrue(config.contains("public ForgeConfigSpec.BooleanValue virtualProviderForceWrapOmittedNonConsumables;"),
                 "必须提供缺失不消耗输入强制包裹开关");
-        assertTrue(config.contains(".define(\"forceWrapOmittedNonConsumables\", false)"),
-                "强制补回缺失不消耗输入必须默认关闭");
-        assertFalse(DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.getDefault(),
-                "强制补回缺失不消耗输入的运行时默认值必须关闭");
+        assertTrue(config.contains(".define(\"forceWrapOmittedNonConsumables\", true)"),
+                "缺失不消耗输入应默认补回虚拟供应器");
+        assertTrue(DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.getDefault(),
+                "缺失不消耗输入的运行时默认值应开启");
         String guard = "if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get())";
         assertTrue(source.indexOf(guard) >= 0 && source.indexOf(guard, source.indexOf(guard) + guard.length()) >= 0,
                 "物品和流体缺失分支都必须尊重强制包裹配置");

@@ -1,6 +1,7 @@
-package com.dishanhai.gt_shanhai.mixin;
+package com.dishanhai.gt_shanhai.integration.gtlcore;
 
-final class PatternPreviewSearchGuard {
+/** Bounds GTLCore preview searches before recursive pattern matching starts. */
+public final class PatternPreviewSearchGuard {
 
     private static final int MAX_AISLE_DEPTH = 128;
     private static final long MAX_SEARCH_COMBINATIONS = 4096L;
@@ -8,7 +9,7 @@ final class PatternPreviewSearchGuard {
     private PatternPreviewSearchGuard() {
     }
 
-    static boolean shouldSkip(int[][] aisleRepetitions) {
+    public static boolean shouldSkip(int[][] aisleRepetitions) {
         if (aisleRepetitions == null) {
             return false;
         }

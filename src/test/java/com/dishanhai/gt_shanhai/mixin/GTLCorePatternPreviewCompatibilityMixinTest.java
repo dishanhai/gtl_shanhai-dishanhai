@@ -39,7 +39,7 @@ class GTLCorePatternPreviewCompatibilityMixinTest {
     }
 
     private static boolean shouldSkip(int[][] aisleRepetitions) throws Exception {
-        Class<?> guard = Class.forName("com.dishanhai.gt_shanhai.mixin.PatternPreviewSearchGuard");
+        Class<?> guard = Class.forName("com.dishanhai.gt_shanhai.integration.gtlcore.PatternPreviewSearchGuard");
         Method method = guard.getDeclaredMethod("shouldSkip", int[][].class);
         method.setAccessible(true);
         return (boolean) method.invoke(null, (Object) aisleRepetitions);

@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GTLCoreMultiblockInfoRegistrationMixinTest {
 
     private static final Path HELPER_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
-            "gt_shanhai", "mixin", "MultiblockPreviewRegistrationHelper.java");
+            "gt_shanhai", "integration", "jei", "MultiblockPreviewRegistrationHelper.java");
     private static final Path MIXIN_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "GTLCoreMultiblockInfoRegistrationMixin.java");
     private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
@@ -26,7 +26,7 @@ class GTLCoreMultiblockInfoRegistrationMixinTest {
     void keepsValidPreviewsWhenOneFactoryFails() throws Exception {
         assertTrue(Files.exists(HELPER_SOURCE), "必須提供逐機器容錯的預覽收集器");
 
-        Class<?> helper = Class.forName("com.dishanhai.gt_shanhai.mixin.MultiblockPreviewRegistrationHelper");
+        Class<?> helper = Class.forName("com.dishanhai.gt_shanhai.integration.jei.MultiblockPreviewRegistrationHelper");
         Method collect = helper.getDeclaredMethod("collect", Iterable.class, Predicate.class,
                 Function.class, BiConsumer.class);
         collect.setAccessible(true);
@@ -64,10 +64,12 @@ class GTLCoreMultiblockInfoRegistrationMixinTest {
                 "GTJEIPlugin 是實例方法，redirect handler 也必須是實例方法");
         assertTrue(!source.contains("private static void gtShanhai$registerRecoverablePreviews"),
                 "不可用 static handler redirect 實例方法內的呼叫");
-        assertTrue(source.contains("CompletableFuture.supplyAsync("),
-                "預覽建立必須排到 Minecraft 執行器，但不能阻塞目前的 JEI 註冊執行緒");
-        assertTrue(source.contains(".thenAcceptAsync("),
-                "wrapper 建立完成後才可在 Minecraft 執行器加入 JEI 配方");
+        assertTrue(source.contains("List<MultiblockInfoWrapper> wrappers = MultiblockPreviewRegistrationHelper.collect"),
+                "wrapper 必須在 JEI registerRecipes 回調內同步建立");
+        assertTrue(!source.contains("CompletableFuture.supplyAsync("),
+                "不可在 JEI 註冊回調返回後異步加入多方塊配方");
+        assertTrue(!source.contains(".thenAcceptAsync("),
+                "不可把 JEI 多方塊配方註冊延後到回調返回後");
         assertTrue(!source.contains(".join()"),
                 "Render thread 內等待 Minecraft.submit future 會形成自我死鎖");
         assertTrue(source.contains("MultiblockPreviewRegistrationHelper.collect"));

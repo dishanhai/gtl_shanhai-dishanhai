@@ -1265,7 +1265,7 @@ public class DShanhaiMachines {
             tooltips.add(ShanhaiTextAPI.inline(
                     "{body_silver}都从这里{/}{water}流出又流回{/}{body_silver}——{/}"));
             tooltips.add(DShanhaiTextUtil.createRainbowText(
-                    "枢纽不决策，枢纽只是让决策变得毫无阻力。"));
+                    "祂戏弄着无尽的可能性，祂玩弄着无数的分支，祂在蓝星文明的终焉中，维持着一切"));
         });
 
         // ========== 寰宇洁净重力维护仓 ==========
@@ -1399,6 +1399,9 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7· §f槽位行列数/页数§7可在配置文件中自定义（修改后重新放置生效）"));
             tooltips.add(Component.literal("§7· 集成库存输入功能，UI打开调控直接拉取AE网络中的物品"));
             tooltips.add(Component.literal("§7· 集成通配符样板功能，UI打开放入支持通配符匹配"));
+            tooltips.add(Component.literal(""));
+            tooltips.add(Component.literal("§7· 与山海无线样板管理终端联动，可远程管理样板"));
+            tooltips.add(Component.literal("§7· 与原初引擎模块联动，可为样板倍增引擎专属产出倍率"));
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§6用法:"));
             tooltips.add(Component.literal("§7· 作为普通超级样板仓室装入宿主机器"));

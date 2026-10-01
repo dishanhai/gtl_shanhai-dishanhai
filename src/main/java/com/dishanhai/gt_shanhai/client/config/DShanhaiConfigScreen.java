@@ -129,9 +129,9 @@ public final class DShanhaiConfigScreen {
                 .setSaveConsumer(list -> cfg.virtualProviderAutoWrapExclusions.set(list)).build());
         vip.addEntry(e.startBooleanToggle(Component.literal("缺失不消耗输入时强制包裹"),
                         cfg.virtualProviderForceWrapOmittedNonConsumables.get())
-                .setDefaultValue(false)
-                .setTooltip(tip("关闭：尊重玩家删除不消耗输入的操作，不主动补回虚拟供应器/流体标记",
-                        "开启：反查配方缺失不消耗输入时，自动补回旧版虚拟供应器/流体标记"))
+                .setDefaultValue(true)
+                .setTooltip(tip("开启：反查配方缺失不消耗输入时，自动补回虚拟供应器/流体标记（默认）",
+                        "关闭：尊重玩家删除不消耗输入的操作，不主动补回虚拟供应器/流体标记"))
                 .setSaveConsumer(cfg.virtualProviderForceWrapOmittedNonConsumables::set).build());
 
         // ===== 配方类型样板总成 =====

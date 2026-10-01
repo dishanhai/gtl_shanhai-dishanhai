@@ -1,8 +1,8 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.client.JeiCopyShortcutHelper;
+import mezz.jei.common.Internal;
 import mezz.jei.api.runtime.IIngredientManager;
-import mezz.jei.common.config.IClientToggleState;
 import mezz.jei.common.input.IInternalKeyMappings;
 import mezz.jei.gui.input.IClickableIngredientInternal;
 import mezz.jei.gui.input.CombinedRecipeFocusSource;
@@ -45,14 +45,6 @@ public class JEICopyShortcutMixin {
     @Final
     private IIngredientManager ingredientManager;
 
-    @Shadow
-    @Final
-    private IClientToggleState toggleState;
-
-    @Shadow
-    @Final
-    private CommandUtil commandUtil;
-
     @Inject(method = "handleUserInput", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$handleCopyShortcuts(Screen screen, UserInput input, IInternalKeyMappings keyMappings,
             CallbackInfoReturnable<Optional<IUserInputHandler>> cir) {
@@ -80,11 +72,11 @@ public class JEICopyShortcutMixin {
 
         if (input.is(keyMappings.getCheatItemStack())) {
             GTSHANHAI_JEI_LOGGER.info("focus handler cheat click: simulate={}, ctrl={}, cheat={}, mouse=({}, {})",
-                    input.isSimulate(), Screen.hasControlDown(), toggleState.isCheatItemsEnabled(),
+                    input.isSimulate(), Screen.hasControlDown(), Internal.getClientToggleState().isCheatItemsEnabled(),
                     input.getMouseX(), input.getMouseY());
         }
 
-        if (!toggleState.isCheatItemsEnabled()) return Optional.empty();
+        if (!Internal.getClientToggleState().isCheatItemsEnabled()) return Optional.empty();
         if (!gtShanhai$isCtrlLeftCheat(input, keyMappings)) return Optional.empty();
 
         return focusSource.getIngredientUnderMouse(input, keyMappings)
@@ -107,7 +99,7 @@ public class JEICopyShortcutMixin {
             return;
         }
 
-        commandUtil.giveStack(infinityCell, GiveAmount.MAX);
+        gtShanhai$getCommandUtil().giveStack(infinityCell, GiveAmount.MAX);
         GTSHANHAI_JEI_LOGGER.info("focus handler infinity giveStack executed: {}", infinityCell.getTag());
         gtShanhai$showClientMessage(infinityCell);
         consumer.accept(new SameElementInputHandler((IUserInputHandler) (Object) this, clickable::isMouseOver));
@@ -125,7 +117,7 @@ public class JEICopyShortcutMixin {
                 if (nextInput.isSimulate()) {
                     return Optional.of(this);
                 }
-                commandUtil.giveStack(infinityCell, GiveAmount.MAX);
+                gtShanhai$getCommandUtil().giveStack(infinityCell, GiveAmount.MAX);
                 gtShanhai$showClientMessage(infinityCell);
                 return Optional.of(this);
             }
@@ -140,6 +132,10 @@ public class JEICopyShortcutMixin {
                         .withStyle(ChatFormatting.GRAY)
                         .append(infinityCell.getHoverName().copy().withStyle(ChatFormatting.YELLOW)),
                 true);
+    }
+
+    private static CommandUtil gtShanhai$getCommandUtil() {
+        return new CommandUtil(Internal.getJeiClientConfigs().getClientConfig(), Internal.getServerConnection());
     }
 
     private static int gtShanhai$getAction(UserInput input) {
