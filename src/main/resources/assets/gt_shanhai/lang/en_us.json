@@ -470,6 +470,12 @@
   "message.gt_shanhai.jei.quick_encode.inventory_fallback_success": "Encoded patterns: uploaded %s directly, delivered %s to the player's inventory",
   "message.gt_shanhai.jei.quick_encode.sda_failed": "Stellar assemblies are full and SDA packing failed; restored %s blank pattern(s)",
   "message.gt_shanhai.jei.quick_encode.sda_min_patterns": "Stellar assemblies cannot accept %s pattern(s); SDA fallback requires at least %s, so nothing was uploaded",
-  "message.gt_shanhai.jei.quick_encode.operation_detail": "Quick encode details: total %s; recipe type %s; targets %s; SDA packed %s; inventory %s; unwritten %s"
+  "message.gt_shanhai.jei.quick_encode.operation_detail": "Quick encode details: total %s; recipe type %s; targets %s; SDA packed %s; inventory %s; unwritten %s",
+  "message.gt_shanhai.jei.quick_encode.target_inventory": "Player inventory",
+  "message.gt_shanhai.jei.quick_encode.target_sda": "SDA",
+  "message.gt_shanhai.jei.quick_encode.target_none": "None",
+  "message.gt_shanhai.jei.quick_encode.slots": "Occupied slots %s; unused slots %s",
+  "message.gt_shanhai.jei.quick_encode.slots_unavailable": "Slot status unavailable",
+  "message.gt_shanhai.jei.quick_encode.teleport": "Click to teleport to this Stellar Pattern Assembly"
 }
 

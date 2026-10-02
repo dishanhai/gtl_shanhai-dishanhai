@@ -32,8 +32,6 @@
     "FOTCMixins$HeliophaseLeylineCrystallizerBypass",
     "SuppressBaseThreadDisplayMixin",
     "HelioFusionLockBypassMixin",
-    "SubspaceModuleMixins$ModuleBase",
-    "SubspaceModuleMixins$ModuleLogic",
     "RRFModuleRestrictionBypassMixin$BaseModule",
     "RRFModuleRestrictionBypassMixin$WorkableModule",
     "RRFModuleRestrictionBypassMixin$CatalyticCascade",

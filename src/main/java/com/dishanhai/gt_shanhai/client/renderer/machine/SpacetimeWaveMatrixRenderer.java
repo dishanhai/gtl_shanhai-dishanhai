@@ -86,7 +86,7 @@ public class SpacetimeWaveMatrixRenderer extends AbstractRingRenderer {
         poseStack.pushPose();
         poseStack.translate(centerPos.x, centerPos.y, centerPos.z);
 
-        AntichristStarRenderer.INSTANCE.renderOpaqueOriginalColor(profile, poseStack, STAR_LAYER_0);
+        AntichristStarRenderer.INSTANCE.renderOpaque(profile, poseStack);
         AntichristStarRenderer.INSTANCE.renderTransparent(profile, poseStack);
 
         poseStack.popPose();

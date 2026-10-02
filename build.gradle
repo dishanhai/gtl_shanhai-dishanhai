@@ -6,7 +6,7 @@ plugins {
 }
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(17)
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
     withSourcesJar()
 }
 
@@ -30,8 +30,8 @@ dependencies {
     implementation fileTree(dir: 'libs', include: '*.jar',
             excludes: ['spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.0-fix9.jar'])
     implementation files('libs/[GTLCore]gtlcore-1.2.3.1-fix9.jar')
-    implementation files('libs/jei-1.20.1-forge-15.49.0.188.jar')
-    testImplementation files('libs/jei-1.20.1-forge-15.49.0.188.jar')
+    implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
+    testImplementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     compileOnly fileTree(dir: 'libs', include: 'spark-*.jar')
     implementation files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/ftb-quests-forge-2001.4.8.jar')
     implementation files('D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GTL九周目/mods/ftb-teams-forge-2001.3.2.jar')

@@ -5,9 +5,12 @@ import appeng.crafting.pattern.AEProcessingPattern;
 
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
+import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
+import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineHost;
+import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -62,22 +65,41 @@ public final class WildcardPatternRecipeTypeBinding {
         if (controllers == null) return List.of();
         Map<ResourceLocation, GTRecipeType> types = new LinkedHashMap<>();
         for (IMultiController controller : controllers) {
-            if (!(controller instanceof IRecipeLogicMachine machine)) continue;
-            GTRecipeType[] machineTypes = machine.getRecipeTypes();
-            addExpandedTypes(types, machineTypes);
-            // 山海的多配方类型机器在运行时只返回当前选中的子集；星律匹配必须读取注册时的完整集合。
-            // 直接调用公开 API，避免只依赖反射导致原初临界加工模块被截断成当前 3 个类型。
-            if (machine instanceof SelectableRecipeTypeSetMachine selectable) {
-                addExpandedTypes(types, selectable.getAllSelectableRecipeTypes());
+            if (controller == null) continue;
+            collectMachineRecipeTypes(types, controller);
+            // GTLCore 模块化主机把原初系列模块存放在 moduleSet 中，而不是结构零件列表。
+            // 模块本身才持有完整的多配方类型集合；主机类型只作为候选，不能替代模块扫描。
+            collectModularMachineTypes(types, controller);
+            collectModularMachineTypes(types, controller.self());
+            // 多配方模組可能持有完整類型集合，而控制器只回報當前運行子集。
+            // 將同一控制器下的配方機器零件也納入山海側完整匹配。
+            for (IMultiPart part : controller.getParts()) {
+                if (part != null) collectMachineRecipeTypes(types, part.self());
             }
-            // getRecipeTypes() 对可选配方机器只返回当前选择子集；星律需要读取主机
-            // 的完整可用集合，否则原初系列等拥有数十种配方类型的主机会漏配方。
-            addNamedRecipeTypes(types, machine, "getRecipeTypeNameSet");
-            addExpandedTypes(types, reflectedRecipeTypes(machine, "getAllSelectableRecipeTypes"));
-            addExpandedTypes(types, reflectedRecipeType(machine, "getMultiRecipeType"));
-            addExpandedTypes(types, machine.getRecipeType());
         }
         return new ArrayList<>(types.values());
+    }
+
+    private static void collectModularMachineTypes(Map<ResourceLocation, GTRecipeType> target,
+            Object owner) {
+        if (!(owner instanceof IModularMachineHost<?> modularHost)) return;
+        for (IModularMachineModule<?, ?> module : modularHost.getModuleSet()) {
+            if (module == null) continue;
+            collectMachineRecipeTypes(target, module);
+        }
+    }
+
+    private static void collectMachineRecipeTypes(Map<ResourceLocation, GTRecipeType> target,
+            Object owner) {
+        if (!(owner instanceof IRecipeLogicMachine machine)) return;
+        addExpandedTypes(target, machine.getRecipeTypes());
+        if (machine instanceof SelectableRecipeTypeSetMachine selectable) {
+            addExpandedTypes(target, selectable.getAllSelectableRecipeTypes());
+        }
+        addNamedRecipeTypes(target, machine, "getRecipeTypeNameSet");
+        addExpandedTypes(target, reflectedRecipeTypes(machine, "getAllSelectableRecipeTypes"));
+        addExpandedTypes(target, reflectedRecipeType(machine, "getMultiRecipeType"));
+        addExpandedTypes(target, machine.getRecipeType());
     }
 
     private static void addNamedRecipeTypes(Map<ResourceLocation, GTRecipeType> target,

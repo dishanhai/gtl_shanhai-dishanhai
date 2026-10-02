@@ -23,10 +23,14 @@ import com.gregtechceu.gtceu.api.pattern.MultiblockWorldSavedData;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -67,8 +71,6 @@ public final class JeiPatternQuickEncodeService {
 
     public static void encodeAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,
             String anchorRecipeId, boolean wholeRecipeType) {
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] begin player={} recipeId={} wholeRecipeType={}",
-                player.getGameProfile().getName(), anchorRecipeId, wholeRecipeType);
         GTRecipe anchor = PatternRecipeTypeHelper.resolveRecipe(anchorRecipeId);
         if (anchor == null || anchor.id == null || anchor.recipeType == null
                 || anchor.recipeType.registryName == null) {
@@ -79,24 +81,18 @@ public final class JeiPatternQuickEncodeService {
         List<GTRecipe> recipes = wholeRecipeType
                 ? collectRecipes(anchor.recipeType)
                 : List.of(anchor);
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] recipe resolved id={} type={} count={}",
-                anchor.id, anchor.recipeType.registryName, recipes.size());
         if (recipes.isEmpty()) {
             show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
             return;
         }
 
         List<ItemStack> patterns = encodePatterns(player, recipes);
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] pattern encoding finished requested={} encoded={}",
-                recipes.size(), patterns.size());
         if (patterns.size() != recipes.size()) {
             show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
             return;
         }
 
         PatternSource source = findPatternSource(menu, patterns.size());
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] blank source {} requested={}",
-                source == null ? "missing" : "available", patterns.size());
         if (source == null) {
             show(player, "message.gt_shanhai.jei.quick_encode.missing_blank", patterns.size());
             return;
@@ -117,25 +113,22 @@ public final class JeiPatternQuickEncodeService {
             GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] automatic stellar target search stack", exception);
             availableTargets = List.of();
         }
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] target search type={} candidates={}",
-                PatternRecipeTypeHelper.readRecipeTypeId(patterns.get(0)), availableTargets.size());
         PatternQuickUploadService.Target currentTarget = null;
         for (ItemStack pattern : patterns) {
-            PatternQuickUploadService.UploadResult result = currentTarget == null
-                    ? null
-                    : safeInsertIntoStellarTarget(player, pattern, currentTarget);
-            if (result == null) {
+            PatternQuickUploadService.UploadResult result = null;
+            while (result == null) {
+                if (currentTarget == null) {
+                    currentTarget = selectAutomaticTarget(player.level().dimension(),
+                            player.blockPosition(), availableTargets);
+                }
+                if (currentTarget == null) break;
+                result = safeInsertIntoStellarTarget(player, pattern, currentTarget);
+                if (result != null) break;
                 invalidateCachedTarget(menu.getNetworkNode(), currentTarget);
                 removeTarget(availableTargets, currentTarget);
                 currentTarget = null;
-                currentTarget = selectAutomaticTarget(player.level().dimension(),
-                        player.blockPosition(), availableTargets);
-                result = currentTarget == null ? null
-                        : safeInsertIntoStellarTarget(player, pattern, currentTarget);
             }
             if (result == null) {
-                invalidateCachedTarget(menu.getNetworkNode(), currentTarget);
-                removeTarget(availableTargets, currentTarget);
                 // 星律样板槽全部占满时保留样板，稍后一次性写入 SDA；有替补星律则下一轮会重新选择。
                 sdaPatterns.add(pattern.copy());
                 currentTarget = null;
@@ -152,9 +145,6 @@ public final class JeiPatternQuickEncodeService {
         int skippedCount = useInventoryFallback || useSda ? 0 : sdaPatterns.size();
         int committedCount = uploaded.size() + inventoryCount
                 + (useSda ? sdaPatterns.size() : 0);
-        GTDishanhaiMod.LOGGER.info(
-                "[JEIQuickEncode] routing result total={} uploaded={} inventoryFallback={} sdaFallback={} skipped={}",
-                patterns.size(), uploaded.size(), inventoryCount, useSda ? sdaPatterns.size() : 0, skippedCount);
         // SDA 门槛只约束回退打包；已经成功写入星律的样板必须保留，不能因
         // 剩余回退样板不足 20 张而整体回滚。未达门槛的回退样板改交给玩家。
         PatternSource committedSource = limitPatternSource(source, committedCount);
@@ -273,20 +263,12 @@ public final class JeiPatternQuickEncodeService {
 
         List<PatternQuickUploadService.Target> cachedTargets = findCachedStellarTargets(
                 player, networkNode.getGrid(), pattern, recipeTypeId);
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] cached target lookup type={} result={}",
-                recipeTypeId, cachedTargets.size());
         if (!cachedTargets.isEmpty()) return cachedTargets;
 
-        // 快取沒有命中時只做一次公開的 GTLCore 目標搜尋；它只讀取目標，不負責寫入。
-        // 實際插入仍走 insertIntoStellarTarget，避免被外部 mixin/入口狀態影響。
+        // 山海側完整配方類型掃描沒有找到目標時，才用 GTLCore 公開搜尋補充候選位置。
+        // 候選的 recipeTypeId 不作匹配依據；實際兼容性由星律主機完整類型集合決定。
         List<PatternQuickUploadService.Target> publicTargets = findPublicStellarTargets(
                 player, networkNode, pattern, recipeTypeId);
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] public target lookup type={} result={}",
-                recipeTypeId, publicTargets.size());
-        if (!publicTargets.isEmpty()) {
-            GTDishanhaiMod.LOGGER.debug("[JEIQuickEncode] cache miss recovered {} stellar target(s) for type {}",
-                    publicTargets.size(), recipeTypeId);
-        }
         return publicTargets;
     }
 
@@ -296,33 +278,13 @@ public final class JeiPatternQuickEncodeService {
             PatternQuickUploadService.SearchResult search = PatternQuickUploadService.findTargets(
                     player, networkNode, pattern);
             if (search == null || search.match() == null || search.match().candidates().isEmpty()) {
-                GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] GTLCore public search returned no candidates type={} failure={}",
-                        recipeTypeId, search == null ? "null" : search.failureMessage());
                 return List.of();
             }
-            GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] GTLCore public search candidates={} requestedType={}",
-                    search.match().candidates().size(), recipeTypeId);
             Map<StellarTargetKey, PatternQuickUploadService.Target> unique = new LinkedHashMap<>();
             for (PatternQuickUploadService.Target candidate : search.match().candidates()) {
-                GTDishanhaiMod.LOGGER.info(
-                        "[JEIQuickEncode] public candidate pos={} positions={} candidateType={} machineId={}",
-                        candidate == null ? null : candidate.bufferPos(),
-                        candidate == null ? null : candidate.bufferPositions(),
-                        candidate == null ? null : candidate.recipeTypeId(),
-                        candidate == null ? null : candidate.targetMachineId());
-                if (candidate == null || candidate.recipeTypeId() == null
-                        || !PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(
-                                recipeTypeId, candidate.recipeTypeId().toString())) {
-                    GTDishanhaiMod.LOGGER.info(
-                            "[JEIQuickEncode] public candidate rejected requestedType={} candidateType={}",
-                            recipeTypeId, candidate == null ? null : candidate.recipeTypeId());
-                    continue;
-                }
+                if (candidate == null) continue;
                 PatternQuickUploadService.Target stellar = filterToStellarTarget(
                         player.getServer(), candidate, recipeTypeId);
-                GTDishanhaiMod.LOGGER.info(
-                        "[JEIQuickEncode] public candidate filtered requestedType={} resultPos={}",
-                        recipeTypeId, stellar == null ? null : stellar.bufferPos());
                 if (stellar != null) {
                     cachePublicTarget(networkNode.getGrid(), player, stellar, recipeTypeId);
                     unique.putIfAbsent(stellarTargetKey(stellar), stellar);
@@ -341,19 +303,8 @@ public final class JeiPatternQuickEncodeService {
     private static PatternQuickUploadService.UploadResult safeInsertIntoStellarTarget(
             ServerPlayer player, ItemStack pattern, PatternQuickUploadService.Target target) {
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(pattern);
-        GTDishanhaiMod.LOGGER.info(
-                "[JEIQuickEncode] insert begin target={} positions={} type={} pattern={}",
-                target == null ? null : target.bufferPos(),
-                target == null ? null : target.bufferPositions(), recipeTypeId,
-                pattern == null ? null : pattern.getItem());
         try {
-            PatternQuickUploadService.UploadResult result = insertIntoStellarTarget(player, pattern, target);
-            GTDishanhaiMod.LOGGER.info(
-                    "[JEIQuickEncode] insert end target={} type={} result={} slot={}",
-                    target == null ? null : target.bufferPos(), recipeTypeId,
-                    result == null ? "null" : "success",
-                    result == null ? -1 : result.slot());
-            return result;
+            return insertIntoStellarTarget(player, pattern, target);
         } catch (RuntimeException exception) {
             GTDishanhaiMod.LOGGER.error(
                     "[JEIQuickEncode] insert exception target={} type={}",
@@ -379,8 +330,6 @@ public final class JeiPatternQuickEncodeService {
         if (cache.scanned && cache.gridSize != grid.size()) {
             cache.scanned = false;
             cache.recipeTypeMissRescanned.clear();
-            GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] grid size changed old={} new={}, invalidating stellar cache",
-                    cache.gridSize, grid.size());
         }
         if (!cache.scanned) {
             scanStellarTargets(player, grid, cache);
@@ -435,8 +384,6 @@ public final class JeiPatternQuickEncodeService {
         if (candidates.isEmpty() && !cache.recipeTypeMissRescanned.contains(recipeTypeId)) {
             cache.recipeTypeMissRescanned.add(recipeTypeId);
             cache.scanned = false;
-            GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] no cached target for type={}, forcing one loaded-multiblock rescan",
-                    recipeTypeId);
             scanStellarTargets(player, grid, cache);
             for (CachedStellarTarget cached : cache.targets.values()) {
                 if (!containsRecipeType(cached.recipeTypeIds(), recipeTypeId)) continue;
@@ -456,13 +403,9 @@ public final class JeiPatternQuickEncodeService {
         }
         cache.scanned = true;
         cache.gridSize = grid.size();
-        int machineClassCount = 0;
-        int stellarCount = 0;
         for (Class<?> machineClass : grid.getMachineClasses()) {
-            machineClassCount++;
             if (!PatternContainer.class.isAssignableFrom(machineClass)) continue;
             for (Object machine : grid.getActiveMachines(machineClass)) {
-                stellarCount++;
                 if (machine instanceof RecipeTypePatternBufferPartMachine stellar) {
                     tryCacheStellarTarget(grid, cache, stellar, "grid");
                 }
@@ -479,7 +422,6 @@ public final class JeiPatternQuickEncodeService {
                     for (var part : controller.getParts()) {
                         MetaMachine machine = part == null ? null : part.self();
                         if (machine instanceof RecipeTypePatternBufferPartMachine stellar) {
-                            stellarCount++;
                             tryCacheStellarTarget(grid, cache, stellar, "multiblock");
                         }
                     }
@@ -490,10 +432,6 @@ public final class JeiPatternQuickEncodeService {
                         level.dimension(), exception);
             }
         }
-        GTDishanhaiMod.LOGGER.info(
-                "[JEIQuickEncode] stellar scan gridSize={} machineClasses={} activePatternContainers={} cachedTargets={} cached={}",
-                cache.gridSize, machineClassCount, stellarCount, cache.targets.size(),
-                cache.targets.keySet());
     }
 
     private static void tryCacheStellarTarget(IGrid grid, StellarTargetCache cache,
@@ -516,19 +454,12 @@ public final class JeiPatternQuickEncodeService {
         boolean visible = stellar.isVisibleInTerminal();
         boolean formed = hasFormedController(stellar);
         if (!activeOnGrid || !visible || !formed) {
-            GTDishanhaiMod.LOGGER.info(
-                    "[JEIQuickEncode] skip stellar pos={} activeOnGrid={} visible={} formed={}",
-                    stellar.getPos(), activeOnGrid, visible, formed);
             return;
         }
         List<com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController> controllers = new ArrayList<>();
         for (var controller : stellar.getControllers()) {
             if (controller != null) controllers.add(controller);
         }
-        GTDishanhaiMod.LOGGER.info(
-                "[JEIQuickEncode] stellar controllers pos={} classes={}",
-                stellar.getPos(), controllers.stream().map(controller ->
-                        controller.getClass().getName()).toList());
         List<GTRecipeType> hostTypes;
         try {
             hostTypes = WildcardPatternRecipeTypeBinding.collectHostRecipeTypes(
@@ -539,9 +470,6 @@ public final class JeiPatternQuickEncodeService {
             return;
         }
         Set<ResourceLocation> recipeTypeIds = recipeTypeIds(hostTypes);
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] stellar candidate pos={} activeOnGrid={} visible={} formed={} hostTypes={}",
-                stellar.getPos(), isActiveOnGrid(stellar, grid), stellar.isVisibleInTerminal(),
-                hasFormedController(stellar), recipeTypeIds);
         if (recipeTypeIds.isEmpty()) {
             GTDishanhaiMod.LOGGER.warn(
                     "[JEIQuickEncode] stellar pos={} has no readable host recipe types",
@@ -553,22 +481,12 @@ public final class JeiPatternQuickEncodeService {
         Component targetName = stellar.getTerminalGroup() == null
                 ? Component.literal("星律样板总成") : stellar.getTerminalGroup().name();
         StellarTargetKey key = new StellarTargetKey(levelKey, stellar.getPos().immutable());
+        ResourceLocation representativeTypeId = recipeTypeIds.iterator().next();
         Target target = new Target(levelKey, stellar.getPos().immutable(),
-                targetName, null, Component.empty(), null, null,
+                targetName, representativeTypeId,
+                PatternQuickUploadMetadata.recipeTypeName(representativeTypeId), null, null,
                 List.of(stellar.getPos().immutable()));
         cache.targets.put(key, new CachedStellarTarget(target, recipeTypeIds));
-        int slotCount = -1;
-        try {
-            InternalInventory inventory = stellar.getTerminalPatternInventory();
-            slotCount = inventory == null ? -1 : inventory.size();
-        } catch (RuntimeException exception) {
-            GTDishanhaiMod.LOGGER.warn(
-                    "[JEIQuickEncode] cached stellar inventory read failed pos={} exception={} message={}",
-                    stellar.getPos(), exception.getClass().getName(), exception.getMessage());
-        }
-        GTDishanhaiMod.LOGGER.info(
-                "[JEIQuickEncode] cached stellar pos={} hostTypes={} slots={}",
-                stellar.getPos(), recipeTypeIds, slotCount);
     }
 
     /**
@@ -596,23 +514,16 @@ public final class JeiPatternQuickEncodeService {
                 continue;
             }
             if (!level.isLoaded(position)) {
-                GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] insert skip unloaded position={}", position);
                 continue;
             }
             inspectedPositions++;
             MetaMachine machine = MetaMachine.getMachine(level, position);
             if (!(machine instanceof RecipeTypePatternBufferPartMachine stellar)) {
-                GTDishanhaiMod.LOGGER.info(
-                        "[JEIQuickEncode] insert skip non-stellar position={} machine={}",
-                        position, machine == null ? "null" : machine.getClass().getName());
                 continue;
             }
             Set<ResourceLocation> hostTypes = readHostRecipeTypeIds(stellar);
             boolean visible = stellar.isVisibleInTerminal();
             boolean supports = containsRecipeType(hostTypes, recipeTypeId);
-            GTDishanhaiMod.LOGGER.info(
-                    "[JEIQuickEncode] insert inspect position={} machine={} visible={} hostTypes={} requestedType={}",
-                    position, machine.getClass().getName(), visible, hostTypes, recipeTypeId);
             if (!visible || !supports) continue;
             compatiblePositions++;
             InternalInventory inventory = stellar.getTerminalPatternInventory();
@@ -622,21 +533,17 @@ public final class JeiPatternQuickEncodeService {
                         position, recipeTypeId);
                 continue;
             }
-            GTDishanhaiMod.LOGGER.info(
-                    "[JEIQuickEncode] insert inventory position={} slots={}", position, inventory.size());
             for (int slot = 0; slot < inventory.size(); slot++) {
                 if (!inventory.isItemValid(slot, pattern)) continue;
                 validSlots++;
                 ItemStack remainder = inventory.insertItem(slot, pattern.copy(), true);
                 if (!remainder.isEmpty()) continue;
                 inventory.insertItem(slot, pattern.copy(), false);
-                GTDishanhaiMod.LOGGER.info(
-                        "[JEIQuickEncode] insert committed position={} slot={} validSlots={}",
-                        position, slot, validSlots);
                 Target resolvedTarget = new Target(target.levelKey(), position.immutable(),
                         target.targetName(), target.recipeTypeId(), target.recipeTypeName(),
                         target.targetIcon(), target.targetMachineId(), List.of(position.immutable()));
-                return new PatternQuickUploadService.UploadResult(resolvedTarget, slot);
+                return new PatternQuickUploadService.UploadResult(
+                        PatternQuickUploadService.UploadStatus.INSERTED, resolvedTarget, slot);
             }
         }
         GTDishanhaiMod.LOGGER.warn(
@@ -682,8 +589,6 @@ public final class JeiPatternQuickEncodeService {
         ResourceKey<Level> levelKey = cached.target().levelKey();
         ServerLevel level = player.getServer().getLevel(levelKey);
         if (level == null || !level.isLoaded(cached.target().bufferPos())) {
-            GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] cached target dead level/loaded target={}",
-                    cached.target().bufferPos());
             return TargetValidation.dead();
         }
         MetaMachine machine = MetaMachine.getMachine(level, cached.target().bufferPos());
@@ -691,12 +596,6 @@ public final class JeiPatternQuickEncodeService {
                 || !isActiveOnGrid(stellar, grid)
                 || !stellar.isVisibleInTerminal()
                 || !hasFormedController(stellar)) {
-            GTDishanhaiMod.LOGGER.info(
-                    "[JEIQuickEncode] cached target validation failed target={} machine={} active={} visible={} formed={}",
-                    cached.target().bufferPos(), machine == null ? "null" : machine.getClass().getName(),
-                    machine instanceof RecipeTypePatternBufferPartMachine stellar && isActiveOnGrid(stellar, grid),
-                    machine instanceof RecipeTypePatternBufferPartMachine stellar && stellar.isVisibleInTerminal(),
-                    machine instanceof RecipeTypePatternBufferPartMachine stellar && hasFormedController(stellar));
             return TargetValidation.dead();
         }
         Set<ResourceLocation> currentTypeIds;
@@ -718,9 +617,6 @@ public final class JeiPatternQuickEncodeService {
                     cached.target().bufferPos(), PatternRecipeTypeHelper.readRecipeTypeId(pattern), exception);
             canAccept = false;
         }
-        GTDishanhaiMod.LOGGER.info(
-                "[JEIQuickEncode] cached target validation target={} currentTypes={} canAccept={}",
-                cached.target().bufferPos(), currentTypeIds, canAccept);
         return new TargetValidation(true, currentTypeIds, canAccept);
     }
 
@@ -798,25 +694,15 @@ public final class JeiPatternQuickEncodeService {
         List<BlockPos> stellarPositions = new ArrayList<>();
         for (BlockPos position : positions) {
             if (position == null || !level.isLoaded(position)) {
-                GTDishanhaiMod.LOGGER.info(
-                        "[JEIQuickEncode] filter candidate skip position={} loaded={}",
-                        position, position != null && level.isLoaded(position));
                 continue;
             }
             MetaMachine machine = MetaMachine.getMachine(level, position);
             if (machine instanceof RecipeTypePatternBufferPartMachine stellar) {
                 Set<ResourceLocation> hostTypes = readHostRecipeTypeIds(stellar);
                 boolean supports = containsRecipeType(hostTypes, recipeTypeId);
-                GTDishanhaiMod.LOGGER.info(
-                        "[JEIQuickEncode] filter candidate position={} machine={} hostTypes={} requestedType={} supports={}",
-                        position, machine.getClass().getName(), hostTypes, recipeTypeId, supports);
                 if (supports) {
                     stellarPositions.add(position.immutable());
                 }
-            } else {
-                GTDishanhaiMod.LOGGER.info(
-                        "[JEIQuickEncode] filter candidate position={} machine={} rejected=not_stellar",
-                        position, machine == null ? "null" : machine.getClass().getName());
             }
         }
         if (stellarPositions.isEmpty()) return null;
@@ -1029,8 +915,6 @@ public final class JeiPatternQuickEncodeService {
     }
 
     private static void show(ServerPlayer player, String translationKey, Object... args) {
-        GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] message key={} argCount={}",
-                translationKey, args == null ? 0 : args.length);
         Component message = Component.translatable(translationKey, args);
         player.displayClientMessage(message, true);
         Component detail = Component.literal("[JEI快速编写] ").append(message);
@@ -1056,12 +940,9 @@ public final class JeiPatternQuickEncodeService {
             message = Component.translatable("message.gt_shanhai.jei.quick_encode.partial_success",
                     total, uploaded.size(), sdaCount);
         }
-        GTDishanhaiMod.LOGGER.info(
-                "[JEIQuickEncode] completed total={} direct={} inventory={} sda={} skipped={} recipeType={}",
-                total, uploaded.size(), inventoryCount, sdaCount, skippedCount, recipeTypeId);
         player.displayClientMessage(message, true);
 
-        String targetDetails = describeTargets(uploaded);
+        Component targetDetails = describeTargets(player, uploaded, sdaCount, inventoryCount);
         Component detail = Component.translatable(
                 "message.gt_shanhai.jei.quick_encode.operation_detail",
                 total, recipeTypeId == null ? "unknown" : recipeTypeId,
@@ -1069,22 +950,75 @@ public final class JeiPatternQuickEncodeService {
         player.sendSystemMessage(detail);
     }
 
-    private static String describeTargets(List<UploadedPattern> uploaded) {
-        if (uploaded.isEmpty()) return "SDA";
-        Map<String, Integer> counts = new LinkedHashMap<>();
+    private static Component describeTargets(ServerPlayer player, List<UploadedPattern> uploaded,
+            int sdaCount, int inventoryCount) {
+        if (uploaded.isEmpty()) {
+            return Component.translatable(inventoryCount > 0
+                    ? "message.gt_shanhai.jei.quick_encode.target_inventory"
+                    : sdaCount > 0
+                            ? "message.gt_shanhai.jei.quick_encode.target_sda"
+                            : "message.gt_shanhai.jei.quick_encode.target_none");
+        }
+        Map<StellarTargetKey, Target> targets = new LinkedHashMap<>();
+        Map<StellarTargetKey, Integer> counts = new LinkedHashMap<>();
         for (UploadedPattern entry : uploaded) {
             Target target = entry.target();
+            StellarTargetKey key = stellarTargetKey(target);
+            targets.putIfAbsent(key, target);
+            counts.merge(key, 1, Integer::sum);
+        }
+        MutableComponent details = Component.empty();
+        for (Map.Entry<StellarTargetKey, Target> entry : targets.entrySet()) {
+            if (!details.getSiblings().isEmpty()) details.append(Component.literal("; "));
+            Target target = entry.getValue();
             String targetName = target.targetName() == null
                     ? "星律样板总成" : target.targetName().getString();
-            String detail = targetName + " @ " + target.levelKey().location()
-                    + " " + target.bufferPos();
-            counts.put(detail, counts.getOrDefault(detail, 0) + 1);
+            details.append(Component.literal(targetName + " @ "));
+            details.append(teleportLink(target));
+            details.append(Component.literal(" x" + counts.get(entry.getKey())));
+            details.append(Component.literal("; "));
+            details.append(describeSlots(player, target));
         }
-        List<String> details = new ArrayList<>();
-        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
-            details.add(entry.getKey() + " x" + entry.getValue());
+        return details;
+    }
+
+    private static Component teleportLink(Target target) {
+        BlockPos pos = target.bufferPos();
+        String dimension = target.levelKey().location().toString();
+        String command = "/shanhai stellar_tp " + dimension + " "
+                + pos.getX() + " " + pos.getY() + " " + pos.getZ();
+        String label = "[" + dimension + " " + pos.getX() + ", " + pos.getY()
+                + ", " + pos.getZ() + "]";
+        return Component.literal(label).withStyle(style -> style
+                .withColor(ChatFormatting.AQUA)
+                .withUnderlined(true)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.translatable("message.gt_shanhai.jei.quick_encode.teleport"))));
+    }
+
+    private static Component describeSlots(ServerPlayer player, Target target) {
+        try {
+            ServerLevel level = player.getServer().getLevel(target.levelKey());
+            if (level != null && level.isLoaded(target.bufferPos())) {
+                MetaMachine machine = MetaMachine.getMachine(level, target.bufferPos());
+                if (machine instanceof RecipeTypePatternBufferPartMachine stellar) {
+                    InternalInventory inventory = stellar.getTerminalPatternInventory();
+                    if (inventory != null) {
+                        int occupied = 0;
+                        for (int slot = 0; slot < inventory.size(); slot++) {
+                            if (!inventory.getStackInSlot(slot).isEmpty()) occupied++;
+                        }
+                        return Component.translatable("message.gt_shanhai.jei.quick_encode.slots",
+                                occupied, inventory.size() - occupied);
+                    }
+                }
+            }
+        } catch (RuntimeException exception) {
+            GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] failed to read target slot counts pos={}",
+                    target.bufferPos(), exception);
         }
-        return String.join("; ", details);
+        return Component.translatable("message.gt_shanhai.jei.quick_encode.slots_unavailable");
     }
 
     private record PatternSource(RestrictedInputSlot blankSlot, int slotAmount,

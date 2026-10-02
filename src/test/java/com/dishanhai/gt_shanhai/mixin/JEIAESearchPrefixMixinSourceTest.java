@@ -29,6 +29,6 @@ class JEIAESearchPrefixMixinSourceTest {
         assertTrue(source.contains("searchStorageBuilderFactory));"));
         assertFalse(source.contains("mezz.jei.core.search"));
         assertFalse(source.contains("GeneralizedSuffixTree"));
-        assertTrue(build.contains("jei-1.20.1-forge-15.49.0.188.jar"));
+        assertTrue(build.contains("jei-1.20.1-forge-15.49.0.200.jar"));
     }
 }

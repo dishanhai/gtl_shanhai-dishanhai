@@ -702,6 +702,12 @@
   "message.gt_shanhai.jei.quick_encode.inventory_fallback_success": "已编写样板：直接发送 %s 张，另有 %s 张已交给玩家物品栏",
   "message.gt_shanhai.jei.quick_encode.sda_failed": "星律已满且 SDA 打包失败，已恢复 %s 张空白样板",
   "message.gt_shanhai.jei.quick_encode.sda_min_patterns": "星律暂时无法接收 %s 张样板；SDA 回退至少需要 %s 张，未写入任何样板",
-  "message.gt_shanhai.jei.quick_encode.operation_detail": "快速编写详情：共 %s 张；配方类型 %s；目标 %s；SDA 打包 %s 张；物品栏 %s 张；未写入 %s 张"
+  "message.gt_shanhai.jei.quick_encode.operation_detail": "快速编写详情：共 %s 张；配方类型 %s；目标 %s；SDA 打包 %s 张；物品栏 %s 张；未写入 %s 张",
+  "message.gt_shanhai.jei.quick_encode.target_inventory": "玩家物品栏",
+  "message.gt_shanhai.jei.quick_encode.target_sda": "SDA",
+  "message.gt_shanhai.jei.quick_encode.target_none": "无",
+  "message.gt_shanhai.jei.quick_encode.slots": "已占用槽位 %s；未使用槽位 %s",
+  "message.gt_shanhai.jei.quick_encode.slots_unavailable": "槽位状态暂不可读",
+  "message.gt_shanhai.jei.quick_encode.teleport": "点击传送到该星律样板总成"
 }
 
