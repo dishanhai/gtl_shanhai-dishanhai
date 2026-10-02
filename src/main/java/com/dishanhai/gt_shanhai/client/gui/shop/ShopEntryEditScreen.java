@@ -45,11 +45,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private static final int BTN_HOVER = -12303292;
 
     private static final int TARGET_W = 520;
-    // 高度必须跟内容行同步算：ScaledScreen 高度受限时 vHeight 恰等于 targetHeight，于是
-    // panelHeight = min(TARGET_H, vHeight-16) 恒为 TARGET_H-16。最后一行「前置任务」占到
-    // top+434（fieldsY=+56 起链算），页脚画在 top+panelHeight-14，需 (TARGET_H-16)-14 >= 434+4，
-    // 即 TARGET_H >= 468，取 472 留 4px 余量。旧值 436/464 都压过行，改行距/加行后务必重算这里。
-    private static final int TARGET_H = 472;
+    // 編輯內容固定在可視區內，超出的欄位透過右側垂直滾動條查看；TARGET_H 不再需要覆蓋全部欄位。
+    private static final int TARGET_H = 380;
     /** 服务器正常速度下 1 现实秒 = 20 tick；周期限购的「周期(秒)」按此换算成 tick。 */
     private static final long TICKS_PER_SECOND = 20L;
     private static final int SLOT = 20;
@@ -84,6 +81,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private final List<Long> coinCounts = new ArrayList<>();   // 与 coins 逐一对应的真实数量
     private final List<ItemStack> items = new ArrayList<>();   // 实物物品（身份+NBT，count 恒为 1）
     private final List<Long> itemCounts = new ArrayList<>();   // 与 items 逐一对应的真实数量
+    private final List<ItemStack> submissionItems = new ArrayList<>(); // 购买前一次性提交物品
+    private final List<Long> submissionCounts = new ArrayList<>();
     private final List<FluidStack> fluids = new ArrayList<>(); // 实物流体
     private final List<ShopEntry.DisplayIcon> displayIcons = new ArrayList<>(); // 自定义显示图标（1主+最多4附属，物品/贴图二选一，不填=用商品本身图标）
     private static final int MAX_DISPLAY_ICONS = 5;
@@ -105,12 +104,15 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private MultiLineTextArea descArea;       // 描述「展开编写」大图层里的多行编辑区（与 descBox 同源，双向同步）
     private boolean descEditorOpen;           // 描述展开编写大图层开关
     private int left, top, panelWidth, panelHeight;
+    private int editorScroll;
+    private boolean draggingEditorScroll;
     private boolean catPickerOpen;            // 分类下拉选择窗开关
     private int catPickerScroll;              // 下拉窗滚动偏移（分类较多时用滚轮翻页）
     private static final int CAT_ROW_H = 12;  // 下拉窗每行高
     private int coinCostScroll;               // 币种成本排横向槽位滚动
     private int itemCostScroll;               // 物品成本排横向槽位滚动
     private int fluidCostScroll;              // 流体成本排横向槽位滚动
+    private int submissionScroll;             // 提交物品排横向槽位滚动
     private int goodsRowScroll;               // 商品排横向槽位滚动（商品排右边界是「显示名称」框，viewport 比成本排窄）
     private int draggingCostRow;              // 1=币种，2=物品，3=流体，4=商品；0=未拖拽
     /** 商品排的「行号」：与币种/物品/流体共用同一套横向滚动机制，只是 viewport 右界不同。 */
@@ -181,6 +183,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.displayName = entry.getDisplayName();
             this.tradeMode = entry.getTradeMode();
             this.prerequisiteQuestId = entry.getPrerequisiteQuestId();
+            for (ExchangeEntry.Ingredient item : entry.getSubmissionItems()) {
+                ItemStack stack = item.makeUnitStack();
+                if (!stack.isEmpty()) {
+                    submissionItems.add(stack);
+                    submissionCounts.add(item.count);
+                }
+            }
         } else {
             goodsList.add(ItemStack.EMPTY); // 新增商品不预填默认物品，留空槽等玩家自己选（submit() 已有空商品校验拦截）
             this.count = 1;
@@ -279,26 +288,28 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     // ===== 布局 =====
     private int cx() { return left + 14; }
-    private int goodsY() { return top + 24; }
+    private int contentY(int raw) { return raw - editorScroll; }
+    private int goodsY() { return contentY(top + 24); }
     // 商品排自带槽下数量标签（流体 mB），槽 20 + 标签 8 需要 32px 行距；旧值 +48（24px 行距）
     // 会让流体商品的数量文字直接压在「每份数量」标签上。
-    private int fieldsY() { return top + 56; }
+    private int fieldsY() { return contentY(top + 56); }
     /** 周期限购行：紧接「次数」行下方，新增独立于永久总量之外的第二套限购（见 ShopPeriodLimiter）。 */
-    private int periodY() { return fieldsY() + 16; }
+    private int periodY() { return contentY(top + 72); }
     /** 限时折扣行：紧接周期限购下方，独立于两套限购机制之外的第三套（打折不减次数）。 */
-    private int discountY() { return periodY() + 16; }
-    private int sparkY() { return discountY() + 26; }
-    private int coinY() { return sparkY() + 18; }
-    private int itemY() { return coinY() + 28; }
-    private int fluidY() { return itemY() + 28; }
-    private int descY() { return fluidY() + 32; }
-    private int iconY() { return descY() + 50; }
-    private int rewardModeY() { return iconY() + 34; }
-    private int rewardPoolY() { return rewardModeY() + 20; }
-    private int hiddenY() { return rewardPoolY() + 34; }
-    private int linkKeyY() { return hiddenY() + 20; }
-    private int linkToY() { return linkKeyY() + 18; }
-    private int prereqQuestY() { return linkToY() + 18; }
+    private int discountY() { return contentY(top + 88); }
+    private int sparkY() { return contentY(top + 114); }
+    private int coinY() { return contentY(top + 132); }
+    private int itemY() { return contentY(top + 160); }
+    private int fluidY() { return contentY(top + 188); }
+    private int descY() { return contentY(top + 220); }
+    private int iconY() { return contentY(top + 270); }
+    private int rewardModeY() { return contentY(top + 304); }
+    private int rewardPoolY() { return contentY(top + 324); }
+    private int hiddenY() { return contentY(top + 358); }
+    private int linkKeyY() { return contentY(top + 378); }
+    private int linkToY() { return contentY(top + 396); }
+    private int prereqQuestY() { return contentY(top + 414); }
+    private int submissionY() { return contentY(top + 444); }
     private int slotsX() { return cx() + 36; }
     // EU 成本行：紧跟星火框右侧，同一行（星火/EU 都是纯钱包型通道，物品/流体排另起行）
     private static final int EU_BOX_W = 110;
@@ -359,6 +370,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         if (row == 1) return coinCostScroll;
         if (row == 2) return itemCostScroll;
         if (row == 3) return fluidCostScroll;
+        if (row == 5) return submissionScroll;
         if (row == GOODS_ROW) return goodsRowScroll;
         return 0;
     }
@@ -367,6 +379,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         if (row == 1) coinCostScroll = value;
         else if (row == 2) itemCostScroll = value;
         else if (row == 3) fluidCostScroll = value;
+        else if (row == 5) submissionScroll = value;
         else if (row == GOODS_ROW) goodsRowScroll = value;
     }
 
@@ -452,12 +465,83 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int discountMinutesBoxX() { return discountMidLabelX() + 30; }
     private int discountHintX() { return discountMinutesBoxX() + DISCOUNT_MINUTES_W + 22; }        // "分钟" 标签后的说明文字
 
+    private int editorViewportTop() { return top + 20; }
+    private int editorViewportBottom() { return top + panelHeight - 28; }
+    private int editorMaxScroll() {
+        int rawBottom = top + 444 + SLOT + 14;
+        return Math.max(0, rawBottom - editorViewportBottom());
+    }
+
+    private void repositionEditorWidgets() {
+        if (countBox != null) countBox.setY(fieldsY());
+        if (catBox != null) catBox.setY(fieldsY());
+        if (limitBox != null) limitBox.setY(fieldsY());
+        if (periodSecondsBox != null) periodSecondsBox.setY(periodY());
+        if (periodCapBox != null) periodCapBox.setY(periodY());
+        if (discountPercentBox != null) discountPercentBox.setY(discountY());
+        if (discountMinutesBox != null) discountMinutesBox.setY(discountY());
+        if (sparkBox != null) sparkBox.setY(sparkY());
+        if (euBox != null) euBox.setY(sparkY());
+        if (descBox != null) descBox.setY(descY() + 10);
+        if (linkKeyBox != null) linkKeyBox.setY(linkKeyY());
+        if (linkToBox != null) linkToBox.setY(linkToY());
+        if (nameBox != null) nameBox.setY(goodsY());
+    }
+
+    private void updateEditorWidgetVisibility(boolean overlayOpen) {
+        int topBound = editorViewportTop(), bottomBound = editorViewportBottom();
+        EditBox[] boxes = {countBox, catBox, limitBox, periodSecondsBox, periodCapBox,
+                discountPercentBox, discountMinutesBox, sparkBox, euBox, descBox, linkKeyBox, linkToBox, nameBox};
+        for (EditBox box : boxes) {
+            if (box == null) continue;
+            boolean visible = !overlayOpen && box.getY() + box.getHeight() >= topBound && box.getY() <= bottomBound;
+            box.setVisible(visible);
+        }
+    }
+
+    private void drawEditorScrollbar(GuiGraphics g, int mx, int my) {
+        int x = left + panelWidth - 7;
+        int y = editorViewportTop();
+        int h = Math.max(20, editorViewportBottom() - y);
+        int max = editorMaxScroll();
+        g.fill(x, y, x + 4, y + h, BTN_BG);
+        if (max <= 0) return;
+        int content = h + max;
+        int handle = Math.max(16, h * h / content);
+        int hy = y + (h - handle) * editorScroll / max;
+        boolean hover = draggingEditorScroll || GuiRenderUtil.isHovering(mx, my, x, hy, 4, handle);
+        g.fill(x, hy, x + 4, hy + handle, hover ? CYAN : GOLD);
+    }
+
+    private boolean editorScrollbarClicked(double mx, double my) {
+        int x = left + panelWidth - 7;
+        int y = editorViewportTop();
+        int h = Math.max(20, editorViewportBottom() - y);
+        if (editorMaxScroll() <= 0 || !GuiRenderUtil.isHovering(mx, my, x - 3, y, 10, h)) return false;
+        draggingEditorScroll = true;
+        updateEditorScrollFromDrag(my);
+        return true;
+    }
+
+    private void updateEditorScrollFromDrag(double my) {
+        int y = editorViewportTop();
+        int h = Math.max(20, editorViewportBottom() - y);
+        int max = editorMaxScroll();
+        if (max <= 0) { editorScroll = 0; return; }
+        int content = h + max;
+        int handle = Math.max(16, h * h / content);
+        double rel = (my - y - handle / 2.0) / Math.max(1.0, h - handle);
+        editorScroll = Math.max(0, Math.min(max, (int) Math.round(rel * max)));
+        repositionEditorWidgets();
+    }
+
     @Override
     protected void initScaled() {
         left = Math.max(6, (vWidth - TARGET_W) / 2);
         top = Math.max(8, (vHeight - TARGET_H) / 2);
         panelWidth = Math.min(TARGET_W, vWidth - 12);
         panelHeight = Math.min(TARGET_H, vHeight - 16);
+        editorScroll = Math.max(0, Math.min(editorScroll, editorMaxScroll()));
 
         int fx = cx() + 60;
         countBox = mkNumBox(fx, fieldsY(), 60, Integer.toString(count), 1, 8192, v -> count = v);
@@ -597,6 +681,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         addRenderableWidget(linkToBox);
         addRenderableWidget(nameBox);
         addRenderableWidget(qtyEditBox);
+        repositionEditorWidgets();
     }
 
     private EditBox mkNumBox(int x, int y, int w, String val, int min, int max, java.util.function.IntConsumer setter) {
@@ -700,17 +785,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         hoverRewardOption = null;
         // 展开编写大图层/数量小弹窗打开时，原本的字段输入框全部隐藏（同帧同步，避免闪烁；本方法在 super.render 画控件前执行）
         boolean editorOpen = descEditorOpen || qtyEditorOpen;
-        if (countBox != null) countBox.setVisible(!editorOpen);
-        if (catBox != null) catBox.setVisible(!editorOpen);
-        if (limitBox != null) limitBox.setVisible(!editorOpen);
-        if (periodSecondsBox != null) periodSecondsBox.setVisible(!editorOpen);
-        if (periodCapBox != null) periodCapBox.setVisible(!editorOpen);
-        if (sparkBox != null) sparkBox.setVisible(!editorOpen);
-        if (euBox != null) euBox.setVisible(!editorOpen);
-        if (descBox != null) descBox.setVisible(!editorOpen);
-        if (linkKeyBox != null) linkKeyBox.setVisible(!editorOpen);
-        if (linkToBox != null) linkToBox.setVisible(!editorOpen);
-        if (nameBox != null) nameBox.setVisible(!editorOpen);
+        repositionEditorWidgets();
+        updateEditorWidgetVisibility(editorOpen);
         if (qtyEditBox != null) qtyEditBox.setVisible(qtyEditorOpen);
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
@@ -722,6 +798,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         drawBtn(g, confirmX(), top + 3, 70, 14,
                 catalogSnapshotValid() ? "§a确认保存" : "§8请重新打开", mx, my);
 
+        // 編輯內容必須限制在標題與頁腳之間；垂直滾動時，較下方欄位不能覆蓋標題或面板外部。
+        enableScaledScissor(g, left + 5, editorViewportTop(), left + panelWidth - 5, editorViewportBottom());
         int c = cx();
         // 商品（奖励模式启用且池非空时，交付内容完全由奖励池决定，主商品栏禁用手动选择、镜像池首项）
         // 未接管时改多槽位排（同「币种/物品/流体」交互），支持组合商品；接管时保留原单槽+名称行样式
@@ -793,12 +871,21 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
         // 前置任务（可选）：购买前须先完成的 FTBQ 任务，单槽选择器，样式同上面的 FTBQ 表槽位
         drawPrerequisiteQuestSlot(g, prereqQuestY(), mx, my);
+        // 商品固定物品提交（可选）：提交一次后永久解锁该商品
+        drawSubmissionRow(g, submissionY(), mx, my);
+
+        g.disableScissor();
 
         // 页脚提示常态贴面板底缘。这个下限是防「以后再加一行又忘了同步 TARGET_H」——本次撞车就是这么来的：
         // 「底缘倒推」一旦退进「前置任务」行，就会把槽位和「留空=不要求前置」整个糊掉。宁可越过面板边框，
         // 也不能盖住可交互的那一行。当前 TARGET_H=464 下走不到这个分支，纯兜底。
-        int footerY = Math.max(prereqQuestY() + SLOT + 4, top + panelHeight - 14);
+        int footerY = top + panelHeight - 14;
         g.drawString(this.font, "§8币种=钱包余额扣 · 物品=背包扣 · 流体=绑定AE抽 · 星火=数字余额", c, footerY, GRAY, true);
+        // 内容滚动后可能越过标题/页脚区域，用不透明条收回绘制边界；输入框则由 visibility 同步隐藏。
+        g.fill(left + 5, top + 18, left + panelWidth - 5, editorViewportTop(), PANEL_INNER);
+        g.fill(left + 5, editorViewportBottom(), left + panelWidth - 5, top + panelHeight - 5, PANEL_INNER);
+        g.drawString(this.font, "§8币种=钱包余额扣 · 物品=背包扣 · 流体=绑定AE抽 · 星火=数字余额", c, footerY, GRAY, true);
+        drawEditorScrollbar(g, mx, my);
 
         // 描述展开编写大图层：遮罩 + 面板背景先画在这里，descArea 本身在 renderScaledForeground 里画（压在遮罩之上）
         // 内部背景必须完全不透明（不能沿用 PANEL_BG 那种带一点透明度的底色），否则面板本身的文字/图标会透出来
@@ -1001,6 +1088,12 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 return true;
             }
         }
+        if (GuiRenderUtil.isHovering(mx, my, left + 6, editorViewportTop(), panelWidth - 18,
+                Math.max(20, editorViewportBottom() - editorViewportTop()))) {
+            editorScroll = Math.max(0, Math.min(editorMaxScroll(), editorScroll - (int) d * 18));
+            repositionEditorWidgets();
+            return true;
+        }
         int dir = d > 0 ? -1 : 1;
         if (!goodsLockedByReward()
                 && GuiRenderUtil.isHovering(mx, my, slotsX(), goodsY() - 1, costRowViewportW(GOODS_ROW) + 6, SLOT + 10)) {
@@ -1017,6 +1110,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
         }
         if (GuiRenderUtil.isHovering(mx, my, slotsX(), fluidY() - 1, costRowViewportW(3) + 6, SLOT + 10)) {
             fluidCostScroll = clampCostScroll(3, fluidCostScroll + dir, fluids.size());
+            return true;
+        }
+        if (GuiRenderUtil.isHovering(mx, my, slotsX(), submissionY() - 1, costRowViewportW(5) + 6, SLOT + 10)) {
+            submissionScroll = clampCostScroll(5, submissionScroll + dir, submissionItems.size());
             return true;
         }
         return super.universalMouseScrolled(mx, my, d);
@@ -1240,6 +1337,64 @@ public class ShopEntryEditScreen extends ScaledScreen {
         }
     }
 
+    /** 商品一次性提交物品排；留空表示不限制，右键删除，点击加号选择物品。 */
+    private void drawSubmissionRow(GuiGraphics g, int y, int mx, int my) {
+        drawCostIngredientRow(g, "§7提交物品", submissionItems, submissionCounts, y, 5, mx, my);
+        g.drawString(this.font, submissionItems.isEmpty() ? "§8留空=购买无需提交"
+                : "§8提交一次后永久解锁", slotsX() + costRowViewportW(5) + 4, y + 6, GRAY, true);
+    }
+
+    private boolean submissionRowClicked(int y, double mx, double my, int btn) {
+        if (costRowScrollbarClicked(5, y, submissionItems.size(), mx, my)) return true;
+        if (!GuiRenderUtil.isHovering(mx, my, slotsX(), y - 1, costRowViewportW(5), SLOT + 10)) return false;
+        int visible = costRowVisibleSlots(5);
+        int start = visibleCostRowStart(5, submissionItems.size());
+        int end = Math.min(submissionItems.size() + 1, start + visible);
+        int sx = slotsX();
+        for (int idx = start; idx < end; idx++) {
+            int x = sx + (idx - start) * PITCH;
+            if (idx < submissionItems.size() && GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
+                if (btn == 1) {
+                    submissionItems.remove(idx);
+                    if (idx < submissionCounts.size()) submissionCounts.remove(idx);
+                    rebuild();
+                } else {
+                    final int pickIndex = idx;
+                    capture();
+                    EditorWidgets.openItemPicker(submissionItems.get(idx), stack -> {
+                        if (stack == null || stack.isEmpty()) {
+                            submissionItems.remove(pickIndex);
+                            if (pickIndex < submissionCounts.size()) submissionCounts.remove(pickIndex);
+                        } else {
+                            ItemStack copy = stack.copy();
+                            copy.setCount(1);
+                            submissionItems.set(pickIndex, copy);
+                            if (pickIndex >= submissionCounts.size()) submissionCounts.add(Math.max(1L, stack.getCount()));
+                        }
+                    });
+                }
+                return true;
+            }
+            if (idx == submissionItems.size() && GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
+                openSubmissionPicker();
+                return true;
+            }
+        }
+        return true;
+    }
+
+    private void openSubmissionPicker() {
+        capture();
+        Minecraft.getInstance().setScreen(new MultiPickerScreen(this, false,
+                (stack, count) -> {
+                    if (stack == null || stack.isEmpty()) return;
+                    ItemStack copy = stack.copy();
+                    copy.setCount(1);
+                    submissionItems.add(copy);
+                    submissionCounts.add(Math.max(1L, count));
+                }, fluid -> {}));
+    }
+
     /** 「前置任务」行的单槽点击：左键打开任务选择器，右键清空已选任务。 */
     private boolean prerequisiteQuestRowClicked(int y, double mx, double my, int btn) {
         int sx = slotsX();
@@ -1400,6 +1555,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             submit();
             return true;
         }
+        if (editorScrollbarClicked(mx, my)) return true;
         // 分类下拉：打开/关闭「已存在分类」选择窗
         if (GuiRenderUtil.isHovering(mx, my, catCycleX(), fieldsY() - 1, 18, 14)) {
             capture();
@@ -1442,6 +1598,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             return true;
         }
         if (prerequisiteQuestRowClicked(prereqQuestY(), mx, my, btn)) return true;
+        if (submissionRowClicked(submissionY(), mx, my, btn)) return true;
         return super.universalMouseClicked(mx, my, btn);
     }
 
@@ -1483,6 +1640,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
+        if (draggingEditorScroll) {
+            updateEditorScrollFromDrag(my);
+            return true;
+        }
         if (descEditorOpen) {
             if (descArea != null) descArea.mouseDragged(mx, my);
             return true;
@@ -1492,7 +1653,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
             if (draggingCostRow == GOODS_ROW) { y = goodsY(); count = goodsList.size() + goodsFluids.size(); }
             else if (draggingCostRow == 1) { y = coinY(); count = coins.size(); }
             else if (draggingCostRow == 2) { y = itemY(); count = items.size(); }
-            else { y = fluidY(); count = fluids.size(); }
+            else if (draggingCostRow == 3) { y = fluidY(); count = fluids.size(); }
+            else { y = submissionY(); count = submissionItems.size(); }
             updateCostRowScrollFromDrag(draggingCostRow, y, count, my);
             return true;
         }
@@ -1501,6 +1663,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseReleased(double mx, double my, int btn) {
+        if (draggingEditorScroll) {
+            draggingEditorScroll = false;
+            return true;
+        }
         if (draggingCostRow != 0) {
             draggingCostRow = 0;
             return true;
@@ -1784,12 +1950,21 @@ public class ShopEntryEditScreen extends ScaledScreen {
         // discountPercent<=0 或窗口非法一律归一成不启用，这里未启用时随便填 -1/-1 也安全）
         long discountStartMs = discountPercent > 0 && discountMinutes > 0L ? System.currentTimeMillis() : -1L;
         long discountEndMs = discountStartMs > 0L ? discountStartMs + discountMinutes * 60_000L : -1L;
+        List<ExchangeEntry.Ingredient> submissionsForSubmit = new ArrayList<>();
+        for (int i = 0; i < submissionItems.size(); i++) {
+            ItemStack stack = submissionItems.get(i);
+            if (stack == null || stack.isEmpty()) continue;
+            ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+            if (id == null) continue;
+            long amount = i < submissionCounts.size() ? Math.max(1L, submissionCounts.get(i)) : Math.max(1, stack.getCount());
+            submissionsForSubmit.add(new ExchangeEntry.Ingredient(id, false, amount, stack.getTag()));
+        }
         ShopEditPacket pkt = new ShopEditPacket(
                 isNew ? ShopEditPacket.Action.ADD : ShopEditPacket.Action.EDIT,
                 goodsForSubmit, cat, desc, cost, oldGoods, oldCategory == null ? "" : oldCategory, -1, limit,
                 displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode,
                 periodTicksToSend, periodCap, prerequisiteQuestId, catalogRevision, oldEntryKey,
-                discountPercent, discountStartMs, discountEndMs);
+                discountPercent, discountStartMs, discountEndMs, submissionsForSubmit);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

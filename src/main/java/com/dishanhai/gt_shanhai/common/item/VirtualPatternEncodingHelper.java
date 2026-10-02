@@ -39,6 +39,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.HashMap;
@@ -626,7 +628,28 @@ public final class VirtualPatternEncodingHelper {
         return findMatchingRecipe(inputs, outputs, index, null, StackBag.EMPTY);
     }
 
-    private static GTRecipe findMatchingRecipeForEncoding(GenericStack[] inputs, GenericStack[] outputs) {
+    static GTRecipe findMatchingRecipeForEncoding(GenericStack[] inputs, GenericStack[] outputs) {
+        GTRecipe selectedRecipe = PatternRecipeTypeHelper.currentSelectedEncodingRecipe();
+        if (selectedRecipe != null) {
+            StackBag outputBag = StackBag.of(outputs);
+            long multiplier = detectRecipeOutputMultiplier(selectedRecipe, outputBag);
+            if (multiplier > 0L && matchesRecipeInputsAtMultiplier(selectedRecipe, inputs,
+                    StackBag.of(inputs), multiplier, StackBag.EMPTY, true)) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("[VirtualPatternEncoding] using JEI-selected recipe {} after exact input/output validation",
+                            selectedRecipe.id);
+                }
+                return selectedRecipe;
+            }
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("[VirtualPatternEncoding] JEI-selected recipe {} no longer matches current pattern, "
+                                + "falling back to unscoped exact lookup", selectedRecipe.id);
+            }
+            // 选择上下文已经失配时，不能继续沿用旧 recipe type；重新按完整输入/输出做唯一反查。
+            GTRecipe unscoped = findMatchingRecipe(inputs, outputs, getRecipeOutputIndex(), null,
+                    StackBag.EMPTY, true);
+            return unscoped;
+        }
         String encodingRecipeTypeId = PatternRecipeTypeHelper.currentEncodingRecipeTypeId();
         GTRecipeType encodingRecipeType = PatternRecipeTypeHelper.resolveRecipeType(encodingRecipeTypeId);
         if (!encodingRecipeTypeId.isEmpty() && encodingRecipeType == null) return null;
@@ -995,8 +1018,8 @@ public final class VirtualPatternEncodingHelper {
             StackBag availableCatalystInputs, boolean allowOmittedNonConsumables) {
         return StackBag.of(createRecipeInputs(recipe)).equals(inputs)
                 || StackBag.of(createVirtualInputs(recipe)).equals(inputs)
-                || patternInputsMatchRecipe(recipe, patternInputs, availableCatalystInputs,
-                        allowOmittedNonConsumables);
+                || findInputMatchPlan(recipe, patternInputs, availableCatalystInputs,
+                        allowOmittedNonConsumables) != null;
     }
 
     private static boolean patternInputsMatchRecipe(GTRecipe recipe, GenericStack[] patternInputs) {
@@ -1010,21 +1033,115 @@ public final class VirtualPatternEncodingHelper {
 
     private static boolean patternInputsMatchRecipe(GTRecipe recipe, GenericStack[] patternInputs,
             StackBag availableCatalystInputs, boolean allowOmittedNonConsumables) {
+        return findInputMatchPlan(recipe, patternInputs, availableCatalystInputs,
+                allowOmittedNonConsumables) != null;
+    }
+
+    /**
+     * 为一条配方建立输入内容到样板槽的一对一匹配计划。
+     *
+     * <p>旧实现按配方内容顺序取第一个命中槽位。Ingredient/tag 重叠时，前一个宽匹配
+     * 会抢走后一个只能精确匹配的槽位，导致本来可用的配方被判定为不匹配，或者重写阶段
+     * 把不消耗物品包到错误的槽位。这里先按候选数量和必需性排序，再对候选槽位回溯，
+     * 同一套计划算法同时服务反查和编码重写。</p>
+     */
+    private static InputMatchPlan findInputMatchPlan(GTRecipe recipe, GenericStack[] patternInputs,
+            StackBag availableCatalystInputs, boolean allowOmittedNonConsumables) {
         List<GenericStack> inputs = compactStacks(patternInputs);
-        int requiredCount = countRequiredPatternInputs(
-                recipe, availableCatalystInputs, allowOmittedNonConsumables);
+        int requiredCount = countRequiredPatternInputs(recipe, availableCatalystInputs,
+                allowOmittedNonConsumables);
         int totalCount = countRecipeInputs(recipe);
-        if (inputs.size() < requiredCount || inputs.size() > totalCount) return false;
+        if (inputs.size() < requiredCount || inputs.size() > totalCount) return null;
 
         boolean[] used = new boolean[inputs.size()];
-        if (!matchItemContents(recipe.getInputContents(ItemRecipeCapability.CAP), inputs, used,
-                availableCatalystInputs, allowOmittedNonConsumables)) return false;
-        if (!matchFluidContents(recipe.getInputContents(FluidRecipeCapability.CAP), inputs, used,
-                availableCatalystInputs, allowOmittedNonConsumables)) return false;
+        InputMatchPlan plan = new InputMatchPlan();
+        if (!assignItemContents(recipe.getInputContents(ItemRecipeCapability.CAP), inputs, used,
+                availableCatalystInputs, allowOmittedNonConsumables, plan)) return null;
+        if (!assignFluidContents(recipe.getInputContents(FluidRecipeCapability.CAP), inputs, used,
+                availableCatalystInputs, allowOmittedNonConsumables, plan)) return null;
         for (boolean matched : used) {
-            if (!matched) return false;
+            if (!matched) return null;
         }
-        return true;
+        return plan;
+    }
+
+    private static boolean assignItemContents(List<Content> contents, List<GenericStack> inputs,
+            boolean[] used, StackBag availableCatalystInputs, boolean allowOmittedNonConsumables,
+            InputMatchPlan plan) {
+        List<InputMatchSpec> specs = new ArrayList<>();
+        if (contents != null) {
+            for (Content content : contents) {
+                Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
+                if (ingredient == null || ingredient.isEmpty()) continue;
+                long amount = getItemAmount(content, firstItemStack(content));
+                List<InputMatchCandidate> candidates = new ArrayList<>();
+                for (int i = 0; i < inputs.size(); i++) {
+                    GenericStack input = inputs.get(i);
+                    if (!(input.what() instanceof AEItemKey key)) continue;
+                    int score = itemInputMatchScore(input, key, ingredient, amount,
+                            isOmittablePatternCatalyst(content));
+                    if (score > 0) candidates.add(new InputMatchCandidate(i, score));
+                }
+                candidates.sort(InputMatchCandidate.ORDER);
+                specs.add(new InputMatchSpec(content, candidates,
+                        canOmitItemPatternInput(content, availableCatalystInputs,
+                                allowOmittedNonConsumables)));
+            }
+        }
+        return assignContentSpecs(specs, 0, used, plan);
+    }
+
+    private static boolean assignFluidContents(List<Content> contents, List<GenericStack> inputs,
+            boolean[] used, StackBag availableCatalystInputs, boolean allowOmittedNonConsumables,
+            InputMatchPlan plan) {
+        List<InputMatchSpec> specs = new ArrayList<>();
+        if (contents != null) {
+            for (Content content : contents) {
+                FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+                if (ingredient == null || ingredient.isEmpty()) continue;
+                com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
+                long amount = sample == null ? 0L : sample.getAmount();
+                List<InputMatchCandidate> candidates = new ArrayList<>();
+                for (int i = 0; i < inputs.size(); i++) {
+                    GenericStack input = inputs.get(i);
+                    if (!(input.what() instanceof AEFluidKey key)) continue;
+                    int score = fluidInputMatchScore(input, key, ingredient, sample, amount, content);
+                    if (score > 0) candidates.add(new InputMatchCandidate(i, score));
+                }
+                candidates.sort(InputMatchCandidate.ORDER);
+                specs.add(new InputMatchSpec(content, candidates,
+                        canOmitFluidPatternInput(content, availableCatalystInputs,
+                                allowOmittedNonConsumables)));
+            }
+        }
+        return assignContentSpecs(specs, 0, used, plan);
+    }
+
+    private static boolean assignContentSpecs(List<InputMatchSpec> specs, int offset,
+            boolean[] used, InputMatchPlan plan) {
+        if (offset >= specs.size()) return true;
+        if (offset == 0) {
+            specs.sort((left, right) -> {
+                int required = Boolean.compare(left.canOmit, right.canOmit);
+                return required != 0 ? required
+                        : Integer.compare(left.candidates.size(), right.candidates.size());
+            });
+        }
+        InputMatchSpec spec = specs.get(offset);
+        for (InputMatchCandidate candidate : spec.candidates) {
+            if (used[candidate.inputIndex]) continue;
+            used[candidate.inputIndex] = true;
+            plan.bind(spec.content, candidate.inputIndex);
+            if (assignContentSpecs(specs, offset + 1, used, plan)) return true;
+            plan.unbind(spec.content);
+            used[candidate.inputIndex] = false;
+        }
+        if (spec.canOmit) {
+            plan.omit(spec.content);
+            if (assignContentSpecs(specs, offset + 1, used, plan)) return true;
+            plan.unomit(spec.content);
+        }
+        return false;
     }
 
     private static int countRequiredPatternInputs(GTRecipe recipe, StackBag availableCatalystInputs,
@@ -1084,73 +1201,36 @@ public final class VirtualPatternEncodingHelper {
         return count;
     }
 
-    private static boolean matchItemContents(List<Content> contents, List<GenericStack> inputs, boolean[] used,
-            StackBag availableCatalystInputs, boolean allowOmittedNonConsumables) {
-        if (contents == null || contents.isEmpty()) return true;
-        for (Content content : contents) {
-            Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
-            if (ingredient == null || ingredient.isEmpty()) continue;
-            long amount = getItemAmount(content, firstItemStack(content));
-            boolean optional = isOmittablePatternCatalyst(content);
-            boolean matched = false;
-            for (int i = 0; i < inputs.size(); i++) {
-                GenericStack input = inputs.get(i);
-                if (used[i] || !(input.what() instanceof AEItemKey key)) continue;
-                if (itemInputMatchesIngredient(input, key, ingredient, amount, optional)) {
-                    used[i] = true;
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched && !canOmitItemPatternInput(
-                    content, availableCatalystInputs, allowOmittedNonConsumables)) return false;
-        }
-        return true;
-    }
-
-    private static boolean itemInputMatchesIngredient(GenericStack input, AEItemKey key,
+    private static int itemInputMatchScore(GenericStack input, AEItemKey key,
             Ingredient ingredient, long expectedAmount, boolean optional) {
+        if (input == null || key == null || ingredient == null || input.amount() <= 0L) return 0;
         ItemStack stack = key.toStack();
-        if (input.amount() == expectedAmount && ingredient.test(stack)) return true;
-        if (!optional || input.amount() != 1L || !VirtualItemProviderHelper.isProviderItem(stack)) return false;
+        if (input.amount() == expectedAmount && ingredient.test(stack)) {
+            ItemStack sample = ingredient.getItems().length == 0 ? ItemStack.EMPTY : ingredient.getItems()[0];
+            return !sample.isEmpty() && key.equals(AEItemKey.of(sample)) ? 300 : 200;
+        }
+        if (!optional || input.amount() != 1L || !VirtualItemProviderHelper.isProviderItem(stack)) return 0;
         ItemStack target = VirtualItemProviderHelper.getTarget(stack);
-        if (target.isEmpty() || !ingredient.test(target)) return false;
+        if (target.isEmpty() || !ingredient.test(target)) return 0;
         long encodedAmount = Math.max(1L, target.getCount());
-        return encodedAmount == Math.min((long) Integer.MAX_VALUE, expectedAmount);
+        return encodedAmount == Math.min((long) Integer.MAX_VALUE, expectedAmount) ? 100 : 0;
     }
 
-    private static boolean matchFluidContents(List<Content> contents, List<GenericStack> inputs, boolean[] used,
-            StackBag availableCatalystInputs, boolean allowOmittedNonConsumables) {
-        if (contents == null || contents.isEmpty()) return true;
-        for (Content content : contents) {
-            FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
-            if (ingredient == null || ingredient.isEmpty()) continue;
-            com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
-            long amount = sample == null ? 0 : sample.getAmount();
-            boolean optional = isNonConsumable(content);
-            boolean matched = false;
-            for (int i = 0; i < inputs.size(); i++) {
-                GenericStack input = inputs.get(i);
-                if (used[i] || !(input.what() instanceof AEFluidKey key)
-                        || input.amount() != amount && !(optional && input.amount() == VIRTUAL_FLUID_MARKER_AMOUNT)) {
-                    continue;
-                }
-                Fluid fluid = (Fluid) key.getPrimaryKey();
-                CompoundTag tag = key.toTag();
-                com.lowdragmc.lowdraglib.side.fluid.FluidStack stack = com.lowdragmc.lowdraglib.side.fluid.FluidStack.create(
-                        fluid,
-                        amount,
-                        tag.contains("tag", 10) ? tag.getCompound("tag") : null);
-                if (ingredient.test(stack)) {
-                    used[i] = true;
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched && !canOmitFluidPatternInput(
-                    content, availableCatalystInputs, allowOmittedNonConsumables)) return false;
-        }
-        return true;
+    private static int fluidInputMatchScore(GenericStack input, AEFluidKey key,
+            FluidIngredient ingredient, com.lowdragmc.lowdraglib.side.fluid.FluidStack sample,
+            long expectedAmount, Content content) {
+        if (input == null || key == null || ingredient == null || sample == null || sample.isEmpty()) return 0;
+        if (input.amount() != expectedAmount
+                && !(isNonConsumable(content)
+                        && input.amount() == VIRTUAL_FLUID_MARKER_AMOUNT)) return 0;
+        Fluid fluid = (Fluid) key.getPrimaryKey();
+        CompoundTag tag = key.toTag();
+        com.lowdragmc.lowdraglib.side.fluid.FluidStack stack =
+                com.lowdragmc.lowdraglib.side.fluid.FluidStack.create(
+                        fluid, expectedAmount, tag.contains("tag", 10) ? tag.getCompound("tag") : null);
+        if (!ingredient.test(stack)) return 0;
+        if (key.equals(fluidKeyOf(sample)) && input.amount() == expectedAmount) return 300;
+        return input.amount() == expectedAmount ? 200 : 100;
     }
 
     private static boolean canOmitItemPatternInput(Content content, StackBag availableCatalystInputs,
@@ -1243,79 +1323,69 @@ public final class VirtualPatternEncodingHelper {
     private static GenericStack[] rewriteInputsPreservingSelections(GenericStack[] inputs, GTRecipe recipe) {
         List<GenericStack> original = compactStacks(inputs);
         List<GenericStack> rewritten = new ArrayList<>(original);
-        boolean[] used = new boolean[original.size()];
-        if (!rewriteItemInputsPreservingSelections(
-                recipe.getInputContents(ItemRecipeCapability.CAP), original, rewritten, used)) {
+        InputMatchPlan plan = findInputMatchPlan(recipe, inputs, StackBag.EMPTY, true);
+        if (plan == null) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("[VirtualPatternEncoding] recipe={} item ingredient match failed, wrap skipped", recipe.getId());
+                LOG.debug("[VirtualPatternEncoding] recipe={} exact input assignment failed, wrap skipped",
+                        recipe.getId());
             }
             return inputs;
         }
-        if (!rewriteFluidInputsPreservingSelections(
-                recipe.getInputContents(FluidRecipeCapability.CAP), original, rewritten, used)) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("[VirtualPatternEncoding] recipe={} fluid ingredient match failed, wrap skipped", recipe.getId());
-            }
-            return inputs;
-        }
-        for (boolean matched : used) {
-            if (!matched) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("[VirtualPatternEncoding] recipe={} has unmatched original pattern input, wrap skipped",
-                            recipe.getId());
-                }
-                return inputs;
-            }
-        }
+        rewriteItemInputsFromPlan(recipe.getInputContents(ItemRecipeCapability.CAP), original, rewritten, plan);
+        rewriteFluidInputsFromPlan(recipe.getInputContents(FluidRecipeCapability.CAP), original, rewritten, plan);
         return rewritten.toArray(new GenericStack[0]);
     }
 
-    private static boolean rewriteItemInputsPreservingSelections(List<Content> contents,
-            List<GenericStack> original, List<GenericStack> rewritten, boolean[] used) {
-        if (contents == null || contents.isEmpty()) return true;
+    private static void rewriteItemInputsFromPlan(List<Content> contents,
+            List<GenericStack> original, List<GenericStack> rewritten, InputMatchPlan plan) {
+        if (contents == null || contents.isEmpty()) return;
         for (Content content : contents) {
             Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
             if (ingredient == null || ingredient.isEmpty()) continue;
             long amount = getItemAmount(content, firstItemStack(content));
-            int matchedIndex = -1;
-            ItemStack selected = ItemStack.EMPTY;
-            for (int i = 0; i < original.size(); i++) {
-                GenericStack input = original.get(i);
-                if (used[i] || !(input.what() instanceof AEItemKey key)) continue;
-                ItemStack stack = key.toStack();
-                if (itemInputMatchesIngredient(
-                        input, key, ingredient, amount, isOmittablePatternCatalyst(content))) {
-                    matchedIndex = i;
-                    selected = stack;
-                    break;
-                }
-            }
-            if (matchedIndex < 0 && !isNonConsumable(content)) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("[VirtualPatternEncoding] no pattern slot matches recipe item ingredient (amount={})", amount);
-                }
-                return false;
-            }
-            if (matchedIndex < 0) {
+            Integer matchedIndex = plan.indexFor(content);
+            if (matchedIndex == null) {
+                if (!plan.wasOmitted(content)) continue;
                 if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) {
                     continue;
                 }
                 ItemStack sample = firstItemStack(content);
                 GenericStack missingInput = createVirtualItemInput(sample, amount);
-                if (missingInput == null) return false;
-                rewritten.add(missingInput);
+                if (missingInput != null) rewritten.add(missingInput);
                 continue;
             }
-            used[matchedIndex] = true;
             if (!isNonConsumable(content)) continue;
+            ItemStack selected = original.get(matchedIndex).what() instanceof AEItemKey key
+                    ? key.toStack() : ItemStack.EMPTY;
             if (VirtualItemProviderHelper.isProviderItem(selected)) continue;
 
             selected.setCount((int) Math.min(Integer.MAX_VALUE, amount));
             GenericStack virtualInput = createVirtualItemInput(selected, amount);
-            if (virtualInput == null) return false;
+            if (virtualInput == null) continue;
             rewritten.set(matchedIndex, virtualInput);
         }
-        return true;
+    }
+
+    private static void rewriteFluidInputsFromPlan(List<Content> contents,
+            List<GenericStack> original, List<GenericStack> rewritten, InputMatchPlan plan) {
+        if (contents == null || contents.isEmpty()) return;
+        for (Content content : contents) {
+            FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+            if (ingredient == null || ingredient.isEmpty()) continue;
+            com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
+            if (sample == null) continue;
+            Integer matchedIndex = plan.indexFor(content);
+            if (matchedIndex == null) {
+                if (!plan.wasOmitted(content)) continue;
+                if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) continue;
+                rewritten.add(new GenericStack(fluidKeyOf(sample), VIRTUAL_FLUID_MARKER_AMOUNT));
+                continue;
+            }
+            if (isNonConsumable(content)) {
+                rewritten.set(matchedIndex, new GenericStack(
+                        original.get(matchedIndex).what(), VIRTUAL_FLUID_MARKER_AMOUNT));
+            }
+        }
     }
 
     private static GenericStack createVirtualItemInput(ItemStack sample, long amount) {
@@ -1332,49 +1402,6 @@ public final class VirtualPatternEncodingHelper {
             return null;
         }
         return new GenericStack(AEItemKey.of(provider), 1);
-    }
-
-    private static boolean rewriteFluidInputsPreservingSelections(List<Content> contents,
-            List<GenericStack> original, List<GenericStack> rewritten, boolean[] used) {
-        if (contents == null || contents.isEmpty()) return true;
-        for (Content content : contents) {
-            FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
-            if (ingredient == null || ingredient.isEmpty()) continue;
-            com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
-            if (sample == null) return false;
-            long amount = sample.getAmount();
-            int matchedIndex = -1;
-            AEFluidKey selected = null;
-            for (int i = 0; i < original.size(); i++) {
-                GenericStack input = original.get(i);
-                if (used[i] || !(input.what() instanceof AEFluidKey key)
-                        || input.amount() != amount && !(isNonConsumable(content)
-                        && input.amount() == VIRTUAL_FLUID_MARKER_AMOUNT)) continue;
-                Fluid fluid = (Fluid) key.getPrimaryKey();
-                CompoundTag tag = key.toTag();
-                com.lowdragmc.lowdraglib.side.fluid.FluidStack stack =
-                        com.lowdragmc.lowdraglib.side.fluid.FluidStack.create(
-                                fluid, amount, tag.contains("tag", 10) ? tag.getCompound("tag") : null);
-                if (ingredient.test(stack)) {
-                    matchedIndex = i;
-                    selected = key;
-                    break;
-                }
-            }
-            if (matchedIndex < 0 && !isNonConsumable(content)) return false;
-            if (matchedIndex < 0) {
-                if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) {
-                    continue;
-                }
-                rewritten.add(new GenericStack(fluidKeyOf(sample), VIRTUAL_FLUID_MARKER_AMOUNT));
-                continue;
-            }
-            used[matchedIndex] = true;
-            if (isNonConsumable(content)) {
-                rewritten.set(matchedIndex, new GenericStack(selected, VIRTUAL_FLUID_MARKER_AMOUNT));
-            }
-        }
-        return true;
     }
 
     private static List<GenericStack> createVirtualInputs(GTRecipe recipe) {
@@ -1563,6 +1590,64 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private record RecipeCandidate(GTRecipe recipe, long multiplier) {}
+
+    private static final class InputMatchCandidate {
+        private static final Comparator<InputMatchCandidate> ORDER = (left, right) -> {
+            int score = Integer.compare(right.score, left.score);
+            return score != 0 ? score : Integer.compare(left.inputIndex, right.inputIndex);
+        };
+
+        private final int inputIndex;
+        private final int score;
+
+        private InputMatchCandidate(int inputIndex, int score) {
+            this.inputIndex = inputIndex;
+            this.score = score;
+        }
+    }
+
+    private static final class InputMatchSpec {
+        private final Content content;
+        private final List<InputMatchCandidate> candidates;
+        private final boolean canOmit;
+
+        private InputMatchSpec(Content content, List<InputMatchCandidate> candidates, boolean canOmit) {
+            this.content = content;
+            this.candidates = candidates;
+            this.canOmit = canOmit;
+        }
+    }
+
+    private static final class InputMatchPlan {
+        private final Map<Content, Integer> matches = new IdentityHashMap<>();
+        private final Map<Content, Boolean> omitted = new IdentityHashMap<>();
+
+        private void bind(Content content, int inputIndex) {
+            omitted.remove(content);
+            matches.put(content, inputIndex);
+        }
+
+        private void unbind(Content content) {
+            matches.remove(content);
+        }
+
+        private void omit(Content content) {
+            matches.remove(content);
+            omitted.put(content, Boolean.TRUE);
+        }
+
+        private void unomit(Content content) {
+            omitted.remove(content);
+        }
+
+        private Integer indexFor(Content content) {
+            return matches.get(content);
+        }
+
+        private boolean wasOmitted(Content content) {
+            return omitted.containsKey(content);
+        }
+    }
 
     private static final class RecipeSelection {
         private static final RecipeSelection NONE = new RecipeSelection(null, false);

@@ -3,7 +3,9 @@ package com.dishanhai.gt_shanhai.mixin;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.common.item.PatternWrapControlMenu;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -34,8 +36,21 @@ public class PatternEncodingRecipeTypeContextMixin {
     @Unique
     private boolean gtShanhai$pushedEncodingRecipeType;
 
+    @Unique
+    private boolean gtShanhai$pushedSelectedEncodingRecipe;
+
     @Inject(method = "encodeProcessingPattern", at = @At("HEAD"), require = 0, remap = false)
     private void gtShanhai$pushRecipeTypeForEncoding(CallbackInfoReturnable<ItemStack> cir) {
+        if (this instanceof PatternWrapControlMenu control) {
+            String selectedRecipeId = control.gtShanhai$getSelectedRecipeId();
+            GTRecipe selectedRecipe = PatternRecipeTypeHelper.resolveRecipe(selectedRecipeId);
+            if (selectedRecipe != null) {
+                PatternRecipeTypeHelper.pushSelectedEncodingRecipe(selectedRecipe);
+                gtShanhai$pushedSelectedEncodingRecipe = true;
+                GTDishanhaiMod.LOGGER.debug("[VirtualPatternEncoding] using JEI-selected recipe {}",
+                        selectedRecipe.id);
+            }
+        }
         String recipeTypeId = gtShanhai$readPendingRecipeTypeId(this);
         if (recipeTypeId.isEmpty()) return;
         PatternRecipeTypeHelper.pushEncodingRecipeType(recipeTypeId);
@@ -45,6 +60,10 @@ public class PatternEncodingRecipeTypeContextMixin {
 
     @Inject(method = "encodeProcessingPattern", at = @At("RETURN"), require = 0, remap = false)
     private void gtShanhai$popRecipeTypeAfterEncoding(CallbackInfoReturnable<ItemStack> cir) {
+        if (gtShanhai$pushedSelectedEncodingRecipe) {
+            PatternRecipeTypeHelper.popSelectedEncodingRecipe();
+            gtShanhai$pushedSelectedEncodingRecipe = false;
+        }
         if (!gtShanhai$pushedEncodingRecipeType) return;
         PatternRecipeTypeHelper.popEncodingRecipeType();
         gtShanhai$pushedEncodingRecipeType = false;

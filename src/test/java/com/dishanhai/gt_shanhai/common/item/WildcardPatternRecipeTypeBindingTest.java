@@ -30,7 +30,15 @@ class WildcardPatternRecipeTypeBindingTest {
         assertTrue(source.contains("findMatchingRecipeForPattern(")
                 && source.contains("pattern.getSparseInputs(), pattern.getSparseOutputs(), recipeTypeId"));
         assertTrue(source.contains("machine.getRecipeTypes()"));
-        assertTrue(source.contains("types.putIfAbsent(type.registryName, type)"));
-        assertTrue(source.contains("PatternRecipeExecutionGuard.isAuxiliaryIORecipeTypeId(type.registryName)"));
+        assertTrue(source.contains("target.putIfAbsent(current.registryName, current)"));
+        assertTrue(source.contains("PatternRecipeExecutionGuard.isAuxiliaryIORecipeTypeId(current.registryName)"));
+        assertTrue(source.contains("getMultiRecipeType"));
+        assertTrue(source.contains("getTypeList"));
+        assertTrue(source.contains("getRecipeTypeNameSet"),
+                "原初模块公开的完整配方类型集合必须参与星律目标匹配");
+        assertTrue(source.contains("getAllSelectableRecipeTypes"),
+                "选择集机器的完整类型列表必须作为运行时空集合的兜底");
+        assertTrue(source.contains("addNamedRecipeTypes(types, machine, \"getRecipeTypeNameSet\")"),
+                "完整配方类型集合不能只在 getRecipeTypes() 为空时读取");
     }
 }

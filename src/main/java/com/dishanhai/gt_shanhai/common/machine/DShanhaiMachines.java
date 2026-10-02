@@ -1261,9 +1261,9 @@ public class DShanhaiMachines {
                     "{body_electric}运算的不只是数据，是{/}{electric}因果对指令的沉默{/}{body_electric}。{/}"));
             tooltips.add(Component.literal(""));
             tooltips.add(ShanhaiTextAPI.inline(
-                    "{body_silver}每一束{/}{aurora}星光{/}{body_silver}、每一个{/}{golden}线程{/}{body_silver}、每一条{/}{magic}世线分歧{/}{body_silver}，{/}"));
+                    "{body_silver}我们的意志{/}{aurora}即是宇宙之意志{/}{body_silver}，我们无所不能{/}{aurora}，{/}{body_silver}我们无所不在{/}{aurora}。{/}"));
             tooltips.add(ShanhaiTextAPI.inline(
-                    "{body_silver}都从这里{/}{water}流出又流回{/}{body_silver}——{/}"));
+                    "{body_silver}我们即是宇宙的独裁者{/}{water}{/}{body_silver}——{/}"));
             tooltips.add(DShanhaiTextUtil.createRainbowText(
                     "祂戏弄着无尽的可能性，祂玩弄着无数的分支，祂在蓝星文明的终焉中，维持着一切"));
         });

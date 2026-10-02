@@ -55,6 +55,9 @@ public abstract class PatternWrapControlMenuMixin extends MEStorageMenu implemen
     @Unique
     private final Set<Integer> gtShanhai$markedSlots = new LinkedHashSet<>();
 
+    @Unique
+    private String gtShanhai$selectedRecipeId = "";
+
     protected PatternWrapControlMenuMixin(MenuType<?> menuType, int id, Inventory ip, ITerminalHost host) {
         super(menuType, id, ip, host);
     }
@@ -65,6 +68,8 @@ public abstract class PatternWrapControlMenuMixin extends MEStorageMenu implemen
             IPatternTerminalMenuHost host, boolean bindInventory, org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
         registerClientAction("gtShanhaiCycleWrapMode", this::gtShanhai$cycleWrapMode);
         registerClientAction("gtShanhaiToggleMark", Integer.class, this::gtShanhai$toggleMark);
+        registerClientAction("gtShanhaiRememberSelectedRecipe", String.class,
+                this::gtShanhai$rememberSelectedRecipe);
     }
 
     @Override
@@ -93,6 +98,22 @@ public abstract class PatternWrapControlMenuMixin extends MEStorageMenu implemen
         if (!this.gtShanhai$markedSlots.remove(slot)) {
             this.gtShanhai$markedSlots.add(slot);
         }
+    }
+
+    @Override
+    @Unique
+    public void gtShanhai$rememberSelectedRecipe(String recipeId) {
+        if (isClientSide()) {
+            sendClientAction("gtShanhaiRememberSelectedRecipe", recipeId == null ? "" : recipeId);
+            return;
+        }
+        this.gtShanhai$selectedRecipeId = recipeId == null ? "" : recipeId.trim();
+    }
+
+    @Override
+    @Unique
+    public String gtShanhai$getSelectedRecipeId() {
+        return this.gtShanhai$selectedRecipeId;
     }
 
     @Unique

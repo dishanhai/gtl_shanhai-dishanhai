@@ -83,6 +83,9 @@ public final class ShopEntryJsonCodec {
         if (entry.hasPrerequisiteQuest()) {
             out.addProperty("prerequisiteQuestId", entry.getPrerequisiteQuestId());
         }
+        if (entry.hasSubmissionRequirement()) {
+            out.add("submitItems", ingredientsToJson(entry.getSubmissionItems()));
+        }
         if (entry.getDiscountPercent() > 0) {
             out.addProperty("discountPercent", entry.getDiscountPercent());
             out.addProperty("discountStartMs", entry.getDiscountStartMs());
@@ -156,6 +159,8 @@ public final class ShopEntryJsonCodec {
             long periodTicks = json.has("periodTicks") ? json.get("periodTicks").getAsLong() : -1L;
             long periodLimit = json.has("periodLimit") ? json.get("periodLimit").getAsLong() : -1L;
             String prerequisiteQuestId = stringOrNull(json, "prerequisiteQuestId");
+            List<ExchangeEntry.Ingredient> submissionItems = json.has("submitItems") && json.get("submitItems").isJsonArray()
+                    ? parseSubmissionItems(json.getAsJsonArray("submitItems")) : List.of();
             String stableId = stringOrNull(json, "stableId"); // 旧存档缺失时 ShopEntry 构造器自动生成新 UUID
             int discountPercent = json.has("discountPercent") ? json.get("discountPercent").getAsInt() : 0;
             long discountStartMs = json.has("discountStartMs") ? json.get("discountStartMs").getAsLong() : -1L;
@@ -164,7 +169,7 @@ public final class ShopEntryJsonCodec {
             return new ShopEntry(goodsList, category, cost, description, limit,
                     icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName,
                     ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit, prerequisiteQuestId, stableId,
-                    discountPercent, discountStartMs, discountEndMs);
+                    discountPercent, discountStartMs, discountEndMs, submissionItems);
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品条目: {}", e.getMessage());
             return null;
@@ -364,5 +369,33 @@ public final class ShopEntryJsonCodec {
             rewards.add(ShopEntry.RewardOption.of(stack, weight, min, max));
         }
         return rewards;
+    }
+
+    private static JsonArray ingredientsToJson(List<ExchangeEntry.Ingredient> ingredients) {
+        JsonArray array = new JsonArray();
+        for (ExchangeEntry.Ingredient ingredient : ingredients) {
+            if (ingredient == null || ingredient.isFluid || ingredient.id == null) continue;
+            JsonObject item = new JsonObject();
+            item.addProperty("id", ingredient.id.toString());
+            item.addProperty("count", ingredient.count);
+            net.minecraft.nbt.CompoundTag nbt = ingredient.nbt();
+            if (nbt != null && !nbt.isEmpty()) item.addProperty("nbt", nbt.toString());
+            array.add(item);
+        }
+        return array;
+    }
+
+    private static List<ExchangeEntry.Ingredient> parseSubmissionItems(JsonArray array) {
+        List<ExchangeEntry.Ingredient> result = new ArrayList<>();
+        for (JsonElement element : array) {
+            if (!element.isJsonObject()) continue;
+            JsonObject item = element.getAsJsonObject();
+            if (!item.has("id")) continue;
+            ResourceLocation id = new ResourceLocation(item.get("id").getAsString());
+            if (!ForgeRegistries.ITEMS.containsKey(id)) continue;
+            long count = item.has("count") ? Math.max(1L, item.get("count").getAsLong()) : 1L;
+            result.add(new ExchangeEntry.Ingredient(id, false, count, parseNbt(item, "nbt")));
+        }
+        return result;
     }
 }

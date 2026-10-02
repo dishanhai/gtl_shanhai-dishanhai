@@ -20,6 +20,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 
 import org.gtlcore.gtlcore.api.item.tool.ae2.patternTool.Ae2GtmProcessingPattern;
 import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
+import org.gtlcore.gtlcore.integration.ae2.pattern.PatternQuickUploadMetadata;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,6 +53,10 @@ public final class ShanhaiPatternEncoder {
         }
         if (patternStack == null || patternStack.isEmpty()) return null;
 
+        // GTLCore 的目標搜尋只讀這個 metadata；山海自有標記不能取代它。
+        if (recipe.recipeType != null && recipe.recipeType.registryName != null) {
+            PatternQuickUploadMetadata.writeRecipeTypeId(patternStack, recipe.recipeType.registryName);
+        }
         PatternRecipeTypeHelper.writeAuthoritativeRecipeType(patternStack, recipe);
         return new Ae2GtmProcessingPattern(patternStack, player, recipe);
     }

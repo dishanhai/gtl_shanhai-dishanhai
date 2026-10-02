@@ -406,6 +406,54 @@ public class ShanhaiNetwork {
                 ShopQuestLinkEditPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopSubmissionSyncPacket.class,
+                ShopSubmissionSyncPacket::encode,
+                ShopSubmissionSyncPacket::new,
+                ShopSubmissionSyncPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopSubmitPacket.class,
+                ShopSubmitPacket::encode,
+                ShopSubmitPacket::new,
+                ShopSubmitPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopStageEditPacket.class,
+                ShopStageEditPacket::encode,
+                ShopStageEditPacket::new,
+                ShopStageEditPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                JeiPatternQuickEncodeRequestPacket.class,
+                JeiPatternQuickEncodeRequestPacket::encode,
+                JeiPatternQuickEncodeRequestPacket::new,
+                JeiPatternQuickEncodeRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopStagePreviewRequestPacket.class,
+                ShopStagePreviewRequestPacket::encode,
+                ShopStagePreviewRequestPacket::new,
+                ShopStagePreviewRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopStagePreviewPacket.class,
+                ShopStagePreviewPacket::encode,
+                ShopStagePreviewPacket::new,
+                ShopStagePreviewPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 

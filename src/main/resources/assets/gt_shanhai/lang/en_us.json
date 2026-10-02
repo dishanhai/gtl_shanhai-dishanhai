@@ -455,6 +455,21 @@
   "message.gt_shanhai.pattern_buffer_toolkit.paste_failed": "Clipboard empty, or not enough free slots in the target",
   "gui.gt_shanhai.eaep_wrong_host_confirm.title": "Stellar pattern host mismatch",
   "gui.gt_shanhai.eaep_wrong_host_confirm.message": "This pattern is typed as %s, but target %s does not support it. Host supports: %s. Upload anyway?",
-  "gui.gt_shanhai.eaep_wrong_host_confirm.no_host_types": "no recognized recipe types"
+  "gui.gt_shanhai.eaep_wrong_host_confirm.no_host_types": "no recognized recipe types",
+  "tooltip.gt_shanhai.jei.quick_encode_pattern": "Quickly encode as pattern",
+  "tooltip.gt_shanhai.jei.quick_encode_recipe_type": "Quickly encode every pattern in this recipe type",
+  "message.gt_shanhai.jei.quick_encode.invalid_recipe": "The selected JEI recipe is invalid",
+  "message.gt_shanhai.jei.quick_encode.encode_failed": "Recipe encoding failed; no patterns were uploaded",
+  "message.gt_shanhai.jei.quick_encode.missing_blank": "Not enough blank patterns; %s required",
+  "message.gt_shanhai.jei.quick_encode.no_stellar_target": "No Stellar Pattern Assembly supports this recipe type",
+  "message.gt_shanhai.jei.quick_encode.rollback_failed": "Upload failed and rollback was incomplete; inspect the Stellar Pattern Assemblies",
+  "message.gt_shanhai.jei.quick_encode.single_success": "Encoded and uploaded %s pattern(s)",
+  "message.gt_shanhai.jei.quick_encode.batch_success": "Encoded and uploaded %s pattern(s) for this recipe type",
+  "message.gt_shanhai.jei.quick_encode.partial_success": "Encoded %s pattern(s): uploaded %s, packed %s into an SDA",
+  "message.gt_shanhai.jei.quick_encode.direct_partial_success": "Uploaded %s pattern(s) directly; %s pattern(s) were left unwritten (SDA fallback requires at least %s)",
+  "message.gt_shanhai.jei.quick_encode.inventory_fallback_success": "Encoded patterns: uploaded %s directly, delivered %s to the player's inventory",
+  "message.gt_shanhai.jei.quick_encode.sda_failed": "Stellar assemblies are full and SDA packing failed; restored %s blank pattern(s)",
+  "message.gt_shanhai.jei.quick_encode.sda_min_patterns": "Stellar assemblies cannot accept %s pattern(s); SDA fallback requires at least %s, so nothing was uploaded",
+  "message.gt_shanhai.jei.quick_encode.operation_detail": "Quick encode details: total %s; recipe type %s; targets %s; SDA packed %s; inventory %s; unwritten %s"
 }
 

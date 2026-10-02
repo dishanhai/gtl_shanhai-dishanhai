@@ -687,6 +687,21 @@
   "message.gt_shanhai.pattern_buffer_toolkit.paste_failed": "剪贴板为空，或目标空槽不足",
   "gui.gt_shanhai.eaep_wrong_host_confirm.title": "星律样板主机不匹配",
   "gui.gt_shanhai.eaep_wrong_host_confirm.message": "本次样板类型为 %s，但目标 %s 不支持该类型。主机支持：%s。确认仍要上传吗？",
-  "gui.gt_shanhai.eaep_wrong_host_confirm.no_host_types": "无可识别配方类型"
+  "gui.gt_shanhai.eaep_wrong_host_confirm.no_host_types": "无可识别配方类型",
+  "tooltip.gt_shanhai.jei.quick_encode_pattern": "快速编写为样板",
+  "tooltip.gt_shanhai.jei.quick_encode_recipe_type": "快速编写当前配方类型全部样板",
+  "message.gt_shanhai.jei.quick_encode.invalid_recipe": "当前 JEI 配方无效，无法编写样板",
+  "message.gt_shanhai.jei.quick_encode.encode_failed": "配方编码失败，未写入任何样板",
+  "message.gt_shanhai.jei.quick_encode.missing_blank": "缺少空白样板，需要 %s 张",
+  "message.gt_shanhai.jei.quick_encode.no_stellar_target": "没有找到支持该配方类型的星律样板总成",
+  "message.gt_shanhai.jei.quick_encode.rollback_failed": "写入失败且回滚不完整，请检查星律样板总成",
+  "message.gt_shanhai.jei.quick_encode.single_success": "已快速编写并发送 %s 张样板",
+  "message.gt_shanhai.jei.quick_encode.batch_success": "已快速编写并发送当前配方类型的 %s 张样板",
+  "message.gt_shanhai.jei.quick_encode.partial_success": "已编写 %s 张样板：直接发送 %s 张，SDA 打包 %s 张",
+  "message.gt_shanhai.jei.quick_encode.direct_partial_success": "已直接发送 %s 张样板；另有 %s 张未写入（SDA 回退至少需要 %s 张）",
+  "message.gt_shanhai.jei.quick_encode.inventory_fallback_success": "已编写样板：直接发送 %s 张，另有 %s 张已交给玩家物品栏",
+  "message.gt_shanhai.jei.quick_encode.sda_failed": "星律已满且 SDA 打包失败，已恢复 %s 张空白样板",
+  "message.gt_shanhai.jei.quick_encode.sda_min_patterns": "星律暂时无法接收 %s 张样板；SDA 回退至少需要 %s 张，未写入任何样板",
+  "message.gt_shanhai.jei.quick_encode.operation_detail": "快速编写详情：共 %s 张；配方类型 %s；目标 %s；SDA 打包 %s 张；物品栏 %s 张；未写入 %s 张"
 }
 

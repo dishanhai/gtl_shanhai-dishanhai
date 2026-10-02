@@ -4,6 +4,7 @@ import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.shop.ShopConfig;
 import com.dishanhai.gt_shanhai.network.ShopCatalogManifestPacket;
 import com.dishanhai.gt_shanhai.network.ShopQuestLinkSyncPacket;
+import com.dishanhai.gt_shanhai.network.ShopSubmissionSyncPacket;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.entity.player.PlayerEvent;
@@ -31,5 +32,6 @@ public final class ShopCatalogSyncEventHandler {
         ShopCatalogManifestPacket.sendTo(player, ShopConfig.manifest());
         // 「任务 → 商店商品」手动绑定表，同一时机推：任务详情页那条跳转入口靠它决定显不显示
         ShopQuestLinkSyncPacket.sendTo(player);
+        ShopSubmissionSyncPacket.sync(player);
     }
 }

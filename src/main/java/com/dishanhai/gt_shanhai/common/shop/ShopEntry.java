@@ -60,6 +60,8 @@ public class ShopEntry {
      *  可空 = 不要求前置。非空时玩家须先完成该任务才能购买本商品，详情页显示可点击跳转到该任务；
      *  跟 {@link #ftbqTableId} 一样不做本地副本，直接按 ID 现查 FTBQ 当前任务数据。 */
     private final String prerequisiteQuestId;
+    /** 購買前一次性提交的固定物品；空列表=不要求提交。 */
+    private final List<ExchangeEntry.Ingredient> submissionItems;
     /** 稳定身份 ID（UUID 字符串），跟 {@link ShopCatalogSnapshot} 每次 publish 都会重排的 entryKey 不是一回事——
      *  entryKey 只是当前快照里的数组下标，加/删/排序/编辑任何一条都会让全部 entryKey 集体错位；stableId 只在
      *  新增/复制（生成新的）或编辑（沿用旧的）时才会变，专供需要跨快照/跨重登引用同一条目的场景使用
@@ -351,6 +353,20 @@ public class ShopEntry {
                      RewardMode ftbqSubMode, TradeMode tradeMode, long periodTicks, long periodLimit,
                      String prerequisiteQuestId, String stableId,
                      int discountPercent, long discountStartMs, long discountEndMs) {
+        this(goods, category, cost, description, remainingUses, displayIcons, rewardMode, rewardPool,
+                hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit,
+                prerequisiteQuestId, stableId, discountPercent, discountStartMs, discountEndMs, null);
+    }
+
+    /** 完整构造：附加一次性提交物品要求。 */
+    public ShopEntry(List<GoodsStack> goods, String category,
+                     ShopCost cost, String description, long remainingUses,
+                     List<DisplayIcon> displayIcons, RewardMode rewardMode, List<RewardOption> rewardPool,
+                     boolean hidden, String linkKey, String linkTo, String displayName, String ftbqTableId,
+                     RewardMode ftbqSubMode, TradeMode tradeMode, long periodTicks, long periodLimit,
+                     String prerequisiteQuestId, String stableId,
+                     int discountPercent, long discountStartMs, long discountEndMs,
+                     List<ExchangeEntry.Ingredient> submissionItems) {
         this.goods = normalizeGoods(goods);
         // 只认 CHOICE/ALL 为有效子模式，其余（含 null/NONE/FTBQ 误传）一律退回默认 RANDOM
         this.ftbqSubMode = (ftbqSubMode == RewardMode.CHOICE || ftbqSubMode == RewardMode.ALL) ? ftbqSubMode : RewardMode.RANDOM;
@@ -406,6 +422,18 @@ public class ShopEntry {
         this.discountPercent = discountValid ? Math.min(discountPercent, 90) : 0;
         this.discountStartMs = this.discountPercent > 0 ? discountStartMs : -1L;
         this.discountEndMs = this.discountPercent > 0 ? discountEndMs : -1L;
+        if (submissionItems == null || submissionItems.isEmpty()) {
+            this.submissionItems = java.util.Collections.emptyList();
+        } else {
+            List<ExchangeEntry.Ingredient> copy = new java.util.ArrayList<>();
+            for (ExchangeEntry.Ingredient item : submissionItems) {
+                if (item != null && !item.isFluid && item.id != null) {
+                    copy.add(new ExchangeEntry.Ingredient(item.id, false, item.count, item.nbt()));
+                }
+            }
+            this.submissionItems = copy.isEmpty() ? java.util.Collections.emptyList()
+                    : java.util.Collections.unmodifiableList(copy);
+        }
     }
 
     // ===== 兼容构造：无自定义名称/FTBQ表（委托空串）=====
@@ -590,6 +618,15 @@ public class ShopEntry {
     /** 是否配置了前置任务（购买前必须先完成该 FTBQ 任务）。 */
     public boolean hasPrerequisiteQuest() {
         return !prerequisiteQuestId.isEmpty();
+    }
+
+    /** 一次性提交要求（不可变；物品数量按每项 count 计算）。 */
+    public List<ExchangeEntry.Ingredient> getSubmissionItems() {
+        return submissionItems;
+    }
+
+    public boolean hasSubmissionRequirement() {
+        return !submissionItems.isEmpty();
     }
 
     /** 稳定身份 ID（UUID 字符串，恒非空）；见 {@link #stableId} 字段注释。 */

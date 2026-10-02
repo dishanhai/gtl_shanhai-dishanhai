@@ -5,6 +5,8 @@ import com.dishanhai.gt_shanhai.common.shop.ShopCatalogSnapshot;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopMaterialPurchase;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
+import com.dishanhai.gt_shanhai.common.shop.ShopStageConfig;
+import com.dishanhai.gt_shanhai.common.shop.ShopSubmissionSavedData;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
 
@@ -178,6 +180,7 @@ public class ShopActionPacket {
     }
 
     private static void doBuyMaterials(ServerPlayer player, ShopEntry entry, ShopActionPacket pkt) {
+        boolean cheat = com.dishanhai.gt_shanhai.common.shop.ShopCheatMode.isEnabled(player.getUUID());
         if (entry.hasMissingItems()) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失，无法购买原料"));
             return;
@@ -185,6 +188,24 @@ public class ShopActionPacket {
         if (!entry.allowsBuy()) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品不能购买，不处理原料"));
             return;
+        }
+        if (!cheat) {
+            com.dishanhai.gt_shanhai.common.shop.ShopSubmissionSavedData submissions =
+                    com.dishanhai.gt_shanhai.common.shop.ShopSubmissionSavedData.get(player.getServer());
+            if (entry.hasSubmissionRequirement()
+                    && !submissions.has(player, "entry:" + entry.getStableId())) {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 请先提交该商品要求的固定物品"));
+                sendCartResult(player, pkt, 0L, "请先提交商品固定物品");
+                return;
+            }
+            for (com.dishanhai.gt_shanhai.common.shop.ShopStageConfig.StageRequirement stage
+                    : com.dishanhai.gt_shanhai.common.shop.ShopStageConfig.requirementsForCategory(entry.getCategory())) {
+                if (!submissions.has(player, "stage:" + stage.path())) {
+                    player.sendSystemMessage(Component.literal("§c[山海商店] 请先提交阶段「" + stage.path() + "」的固定物品"));
+                    sendCartResult(player, pkt, 0L, "请先提交阶段固定物品");
+                    return;
+                }
+            }
         }
         ShopMaterialPurchase.Result result = ShopMaterialPurchase.buyMissingMaterials(player, entry, pkt.times, pkt.aeMode, pkt.backpackMode);
         if (!result.hasMissing()) {
@@ -222,6 +243,23 @@ public class ShopActionPacket {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品仅允许出售，不能购买"));
             sendCartResult(player, pkt, 0L, "该商品仅允许出售");
             return;
+        }
+        if (!cheat) {
+            ShopSubmissionSavedData submissions = ShopSubmissionSavedData.get(player.getServer());
+            if (entry.hasSubmissionRequirement()
+                    && !submissions.has(player, "entry:" + entry.getStableId())) {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 请先提交该商品要求的固定物品"));
+                sendCartResult(player, pkt, 0L, "请先提交商品固定物品");
+                return;
+            }
+            for (ShopStageConfig.StageRequirement stage
+                    : ShopStageConfig.requirementsForCategory(entry.getCategory())) {
+                if (!submissions.has(player, "stage:" + stage.path())) {
+                    player.sendSystemMessage(Component.literal("§c[山海商店] 请先提交阶段「" + stage.path() + "」的固定物品"));
+                    sendCartResult(player, pkt, 0L, "请先提交阶段固定物品");
+                    return;
+                }
+            }
         }
         // 流体商品没有背包/精妙背包容器可落地，只能注入绑定的在线 AE 网络，购买前必须显式开启顶栏「AE模式」——
         // 不像成本流体那样静默兜底走 AE，这里要求玩家自己确认，避免没注意到就被动往 AE 里塞货物。

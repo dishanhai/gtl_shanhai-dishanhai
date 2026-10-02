@@ -41,14 +41,14 @@ public class JEIRecipeGuiInfinityCellMixin {
             CallbackInfoReturnable<Optional<IUserInputHandler>> cir) {
         if (!recipeLayout.isMouseOver(input.getMouseX(), input.getMouseY())) return;
 
-        if (input.is(keyBindings.getLeftClick())) {
+        if (JeiCopyShortcutHelper.isInfinityCellShortcut(input, keyBindings)) {
             GTSHANHAI_JEI_LOGGER.info("recipe gui click: simulate={}, ctrl={}, cheat={}, mouse=({}, {})",
                     input.isSimulate(), Screen.hasControlDown(), Internal.getClientToggleState().isCheatItemsEnabled(),
                     input.getMouseX(), input.getMouseY());
         }
 
         if (!Internal.getClientToggleState().isCheatItemsEnabled()) return;
-        if (!Screen.hasControlDown() || !input.is(keyBindings.getLeftClick())) return;
+        if (!JeiCopyShortcutHelper.isInfinityCellShortcut(input, keyBindings)) return;
 
         Optional<mezz.jei.api.gui.inputs.RecipeSlotUnderMouse> slot = recipeLayout.getSlotUnderMouse(input.getMouseX(), input.getMouseY());
         if (slot.isEmpty()) {

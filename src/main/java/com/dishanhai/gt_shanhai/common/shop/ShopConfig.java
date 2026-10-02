@@ -517,6 +517,7 @@ public final class ShopConfig {
     /** 从磁盘重新加载商品清单；文件缺失时生成默认文件。 */
     public static synchronized void reload() {
         loadCategoryOrder(); // 先加载分类排序，publish() 建 manifest 时才能一并带上
+        ShopStageConfig.reload();
         if (!SHOP_FILE.exists()) {
             writeDefault();
         }

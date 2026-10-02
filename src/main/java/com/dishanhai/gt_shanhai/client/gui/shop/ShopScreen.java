@@ -22,6 +22,7 @@ import com.dishanhai.gt_shanhai.common.item.WalletItem;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopActionPacket;
 import com.dishanhai.gt_shanhai.network.ShopCostPreviewRequestPacket;
+import com.dishanhai.gt_shanhai.network.ShopStagePreviewRequestPacket;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -296,6 +297,9 @@ public class ShopScreen extends ScaledScreen {
     private boolean previewRequestedAeMode = false; // 花费预览最近一次发起请求时的 AE 模式状态；切换要重新请求
     private long previewRequestedAtGameTime = Long.MIN_VALUE; // 最近一次发起请求的游戏刻，供周期性兜底刷新节流
     private static final long PREVIEW_REFRESH_TICKS = 40L; // 花费预览周期兜底刷新间隔（2秒）：存量会随玩家操作背包/AE网络实时变化
+    private String stagePreviewRequestedPath;
+    private boolean stagePreviewRequestedAeMode;
+    private long stagePreviewRequestedAtGameTime = Long.MIN_VALUE;
     private ItemStack detailHoverStack; // 详情页商品大图标悬停时暂存的真实 ItemStack（含 SDA 等实时解析 tooltip，drawDetail 暂存 → renderTooltips 消费）
     private boolean descOverlayOpen; // 描述详情大图层（FTBQ 风格）开关
     private int descOverlayScroll;   // 描述详情大图层滚动行数（超出面板高度时用）
@@ -331,6 +335,12 @@ public class ShopScreen extends ScaledScreen {
     private dev.ftb.mods.ftbquests.quest.Quest prereqQuest;
     private boolean prereqQuestCompleted;
     private int prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH;
+    private boolean submissionBtnVisible, stageSubmissionBtnVisible;
+    private int submissionBtnX, submissionBtnY, submissionBtnW, submissionBtnH;
+    private int stageSubmissionBtnX, stageSubmissionBtnY, stageSubmissionBtnW, stageSubmissionBtnH;
+    private boolean stageLockActive;
+    private String stageLockPath;
+    private int stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH;
     // 网格卡片右键快捷菜单：导航跳转合集 + 管理效率（编辑权），条目变了/权限变了菜单项动态重算，不用固定坐标+布尔位那一套
     private boolean ctxMenuOpen;
     private long ctxMenuEntryKey = -1L;
@@ -442,6 +452,31 @@ public class ShopScreen extends ScaledScreen {
         if (selectedSub3.isEmpty()) return sb.toString();
         sb.append('/').append(selectedSub3);
         return sb.toString();
+    }
+
+    private String missingStageSubmission(String category) {
+        if (category == null || category.isBlank()) return null;
+        String[] parts = category.split("/");
+        StringBuilder path = new StringBuilder();
+        for (String part : parts) {
+            if (part == null || part.isBlank()) continue;
+            if (path.length() > 0) path.append('/');
+            path.append(part);
+            String candidate = path.toString();
+            if (com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState.hasStageRequirement(candidate)
+                    && !com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState.hasStage(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    /** 当前分类页是否被阶段提交限制锁定；打开商店编辑模式时保留管理视图。 */
+    private String lockedStageForCurrentView() {
+        if (mode != Mode.BUY || catalogEditUnlocked) return null;
+        return missingStageSubmission(currentViewCategory());
+    }
+
+    private boolean isStageLocked() {
+        return lockedStageForCurrentView() != null;
     }
 
     private static String[] splitCardCategoryPath(String category) {
@@ -652,7 +687,7 @@ public class ShopScreen extends ScaledScreen {
     }
 
     /** 命中检测某一层页签行；命中即消费掉这次点击并进入 beginTabAction。 */
-    private boolean tabRowClicked(double mx, double my, int level) {
+    private boolean tabRowClicked(double mx, double my, int level, int btn) {
         if (!rowVisible(level)) return false;
         int y = rowY(level);
         int x = left + 14;
@@ -669,6 +704,12 @@ public class ShopScreen extends ScaledScreen {
             int tw = Math.max(30, this.font.width(item) + 10);
             if (x + tw > tabsRight) break;
             if (hit(mx, my, x, y, tw, TAB_H)) {
+                if (btn == 1 && canEdit) {
+                    String parentPath = rowOrderParentPath(level);
+                    String stagePath = parentPath.isEmpty() ? item : parentPath + "/" + item;
+                    Minecraft.getInstance().setScreen(new ShopStageEditScreen(this, stagePath));
+                    return true;
+                }
                 beginTabAction(level, item, mx, my);
                 return true;
             }
@@ -1062,6 +1103,11 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        stageLockPath = lockedStageForCurrentView();
+        stageLockActive = stageLockPath != null;
+        if (stageLockActive) maybeRequestStagePreview(stageLockPath);
+        // 阶段锁定只影响商店内容区，不能把游戏世界送进全局后处理。
+        ShopStageBlur.setActive(false);
         ClientShopCatalog.pumpMaterialization(1_500_000L);
         ShopGridViewport.Range loadRange = visibleGridRange();
         List<Long> neededKeys = new ArrayList<>();
@@ -1174,7 +1220,7 @@ public class ShopScreen extends ScaledScreen {
 
         // 实时消息横幅队列（商店交互反馈，5 秒后自动滑出消失）：面板底部居中，覆盖在最上层，
         // 最多同时显示 FLASH_MAX_VISIBLE 条，新消息从底部滑入，挤开的/到期的都走同一套滑出动画再摘除
-        {
+        if (!stageLockActive) {
             long now = System.currentTimeMillis();
             tickFlash(now);
             if (!flashActive.isEmpty() || !flashLeaving.isEmpty()) {
@@ -1246,6 +1292,17 @@ public class ShopScreen extends ScaledScreen {
         g.drawCenteredString(this.font, m.text, left + panelWidth / 2, y + 4, 0xFFFFFF);
     }
 
+    /** 绘制在阶段锁定层之后，避免锁定面板遮住提交失败/模式切换提示。 */
+    private void renderFlashMessagesOnTop(GuiGraphics g) {
+        long now = System.currentTimeMillis();
+        tickFlash(now);
+        if (flashActive.isEmpty() && flashLeaving.isEmpty()) return;
+        g.flush();
+        int baseY = top + panelHeight - 24;
+        for (FlashMsg m : flashLeaving) drawFlashRow(g, m, now, baseY);
+        for (FlashMsg m : flashActive) drawFlashRow(g, m, now, baseY);
+    }
+
     private static final int DESC_OVERLAY_CLOSE_W = 16;
     private static final int DESC_OVERLAY_CLOSE_H = 12;
     private static final int DESC_OVERLAY_LINE_H = 10;
@@ -1283,6 +1340,11 @@ public class ShopScreen extends ScaledScreen {
     /** 前景层（盖住所有控件）：描述详情大图层，FTBQ 风格全屏遮罩 + 居中面板 + 自动换行长文本，超出可视高度可滚动。 */
     @Override
     protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
+        if (stageLockActive) {
+            renderStageLockOverlay(g, mx, my);
+            renderFlashMessagesOnTop(g);
+            return;
+        }
         if (ctxMenuOpen) {
             drawContextMenu(g, mx, my);
             return;
@@ -2241,6 +2303,8 @@ public class ShopScreen extends ScaledScreen {
         previewHoverExtra = null; // 每帧先清，命中预览格再置
         detailHoverStack = null; // 每帧先清，命中大图标再置
         descExpandVisible = false; // 每帧先清，描述非空才置
+        submissionBtnVisible = false;
+        stageSubmissionBtnVisible = false;
         int dx = detailX();
         int dw = DETAIL_W;
         int detailInnerW = dw - 16;
@@ -2471,6 +2535,28 @@ public class ShopScreen extends ScaledScreen {
                     cx, actionY, prereqColor, true);
             actionY += 12;
         }
+        submissionBtnVisible = selected.hasSubmissionRequirement()
+                && !com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState.hasEntry(selected.getStableId());
+        if (submissionBtnVisible) {
+            g.drawString(this.font, "§6提交商品固定物品（一次性解锁）:", cx, actionY, GOLD, true);
+            actionY += 12;
+            actionY = drawSubmissionRequirementPreview(g, cx, actionY, selected.getSubmissionItems(), detailInnerW, mx, hoverMy);
+            submissionBtnX = cx; submissionBtnY = actionY - detailScroll; submissionBtnW = detailInnerW; submissionBtnH = 18;
+            drawButton(g, cx, actionY, detailInnerW, 18, "§e提交商品固定物品", mx, hoverMy);
+            actionY += 21;
+        }
+        String missingStage = missingStageSubmission(selected.getCategory());
+        stageSubmissionBtnVisible = missingStage != null;
+        if (stageSubmissionBtnVisible) {
+            g.drawString(this.font, "§6提交阶段固定物品（一次性解锁）:", cx, actionY, GOLD, true);
+            actionY += 12;
+            actionY = drawSubmissionRequirementPreview(g, cx, actionY,
+                    com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState.stageRequirements(missingStage),
+                    detailInnerW, mx, hoverMy);
+            stageSubmissionBtnX = cx; stageSubmissionBtnY = actionY - detailScroll; stageSubmissionBtnW = detailInnerW; stageSubmissionBtnH = 18;
+            drawButton(g, cx, actionY, detailInnerW, 18, "§e提交阶段物品: " + missingStage, mx, hoverMy);
+            actionY += 21;
+        }
 
         String desc = selected.getDescription();
         if (desc != null && !desc.isEmpty()) {
@@ -2503,8 +2589,9 @@ public class ShopScreen extends ScaledScreen {
         // 前置任务未配置视为满足；配置了则须客户端已解析到且已完成——跟服务端 doBuy 的门槛口径一致（见反馈：
         // 花费预览格全绿时按钮不能还显示红，前置任务同理，不能光看成本够不够）
         boolean prereqSatisfiedClient = !selected.hasPrerequisiteQuest() || prereqQuestCompleted;
+        boolean submissionsSatisfiedClient = !submissionBtnVisible && !stageSubmissionBtnVisible;
         boolean canTrade = mode == Mode.BUY
-                ? (canAffordClient(dcost, amount) && prereqSatisfiedClient) // dcost 已含限时折扣+会员折扣（BUY 分支同一个值）
+                ? (canAffordClient(dcost, amount) && prereqSatisfiedClient && submissionsSatisfiedClient) // dcost 已含限时折扣+会员折扣（BUY 分支同一个值）
                 : (!selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
                     && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, detailInnerW, 20);
@@ -2528,6 +2615,119 @@ public class ShopScreen extends ScaledScreen {
         }
     }
 
+    /** 阶段/商品一次性提交材料预览，视觉上与花费预览共用物品槽和数量标签。 */
+    private int drawSubmissionRequirementPreview(GuiGraphics g, int x, int y,
+                                                  List<ExchangeEntry.Ingredient> requirements,
+                                                  int maxW, int mx, int my) {
+        return drawSubmissionRequirementPreview(g, x, y, requirements, maxW, mx, my, null);
+    }
+
+    private int drawSubmissionRequirementPreview(GuiGraphics g, int x, int y,
+                                                  List<ExchangeEntry.Ingredient> requirements,
+                                                  int maxW, int mx, int my, String stagePath) {
+        if (requirements == null || requirements.isEmpty()) {
+            g.drawString(this.font, "§8无（保存为空等于取消限制）", x, y, GRAY, true);
+            return y + 12;
+        }
+        int pitchX = 24;
+        int pitchY = 32;
+        int perRow = Math.max(1, (maxW + 2) / pitchX);
+        int endY = y;
+        for (int i = 0; i < requirements.size(); i++) {
+            ExchangeEntry.Ingredient requirement = requirements.get(i);
+            int col = i % perRow;
+            int row = i / perRow;
+            int sx = x + col * pitchX + 1;
+            int sy = y + row * pitchY + 1;
+            boolean hover = GuiRenderUtil.isHovering(mx, my, sx, sy, 20, 20);
+            EditorWidgets.checkerSlot(g, sx, sy, hover);
+            if (requirement.isFluid) {
+                net.minecraft.world.level.material.Fluid fluid = net.minecraftforge.registries.ForgeRegistries.FLUIDS.getValue(requirement.id);
+                renderFluidIcon(g, sx + 2, sy + 2, 16, fluid);
+            } else {
+                ItemStack stack = requirement.makeUnitStack();
+                if (stack.isEmpty()) stack = ShopEntry.missingItemStack(requirement.id, 1);
+                g.renderItem(stack, sx + 2, sy + 2);
+            }
+            java.math.BigInteger required = java.math.BigInteger.valueOf(requirement.count);
+            Long ownedLong = stagePath == null || requirement.isFluid
+                    ? null : ClientCostPreview.stageItemHave(stagePath, aeMode, i);
+            java.math.BigInteger owned = ownedLong == null ? null : java.math.BigInteger.valueOf(ownedLong);
+            String amount = formatBig(required) + (requirement.isFluid ? "mB" : "");
+            String prefix = owned == null ? "§f" : (owned.compareTo(required) >= 0 ? "§a" : "§c");
+            g.drawCenteredString(this.font, prefix + amount, sx + 10, sy + 22, WHITE);
+            if (hover) {
+                previewHoverName = "§f" + ingredientName(requirement) + " §7×" + amount;
+                if (owned == null) {
+                    previewHoverExtra = "§7库存核对中… §7提交数量: §f×" + amount;
+                } else if (owned.compareTo(required) >= 0) {
+                    previewHoverExtra = "§a拥有: " + groupBig(owned) + " §7提交数量: §f×" + amount;
+                } else {
+                    previewHoverExtra = "§c拥有: " + groupBig(owned) + " §7(缺 "
+                            + groupBig(required.subtract(owned)) + ") §7提交数量: §f×" + amount;
+                }
+            }
+            endY = sy + pitchY;
+        }
+        return endY;
+    }
+
+    /** 阶段尚未提交时覆盖内容区：商品列表/详情不可见，只保留解锁条件、说明和提交按钮。 */
+    private void renderStageLockOverlay(GuiGraphics g, int mx, int my) {
+        if (!stageLockActive || stageLockPath == null) return;
+        int areaX = listLeft();
+        int areaY = contentTop();
+        int areaW = detailX() + DETAIL_W - areaX;
+        int areaH = contentHeight();
+        renderStageLockBlur(g, areaX, areaY, areaW, areaH);
+
+        List<ExchangeEntry.Ingredient> requirements =
+                com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState.stageRequirements(stageLockPath);
+        int ow = Math.min(Math.max(250, areaW - 18), 360);
+        int oh = Math.min(Math.max(150, areaH - 18), 190);
+        int ox = areaX + (areaW - ow) / 2;
+        int oy = areaY + (areaH - oh) / 2;
+        renderBox(g, ox, oy, ow, oh, GOLD_DARK, PANEL_BG);
+        g.drawCenteredString(this.font, "§c阶段未解锁", ox + ow / 2, oy + 10, RED);
+        g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font,
+                "§7商品内容将在解锁后显示：" + stageLockPath, ow - 18), ox + ow / 2, oy + 25, WHITE);
+        g.drawString(this.font, "§6解锁条件（一次性提交）:", ox + 9, oy + 42, GOLD, true);
+        int previewY = oy + 54;
+        int previewBottom = drawSubmissionRequirementPreview(g, ox + 9, previewY, requirements, ow - 18, mx, my, stageLockPath);
+        g.drawString(this.font, "§7解锁信息：提交后永久解锁本阶段及其商品。", ox + 9, Math.min(oy + oh - 42, previewBottom + 2), GRAY, true);
+        stageLockSubmitW = ow - 18;
+        stageLockSubmitH = 18;
+        stageLockSubmitX = ox + 9;
+        stageLockSubmitY = oy + oh - 27;
+        drawButton(g, stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH,
+                "§a提交阶段固定物品", mx, my);
+    }
+
+    /** 只在商品列表与详情区域绘制霧化遮罩，避免模糊整个游戏世界。 */
+    private void renderStageLockBlur(GuiGraphics g, int x, int y, int w, int h) {
+        // 用較厚的局部磨砂層壓低商品輪廓；不再用全局後處理模糊世界背景。
+        g.fill(x, y, x + w, y + h, 0xB8181818);
+        int stripeStep = 2;
+        for (int stripeY = y + 1; stripeY < y + h; stripeY += stripeStep) {
+            g.fill(x, stripeY, x + w, Math.min(y + h, stripeY + 1), 0x54101010);
+        }
+        for (int stripeX = x + 1; stripeX < x + w; stripeX += stripeStep) {
+            g.fill(stripeX, y, Math.min(x + w, stripeX + 1), y + h, 0x40101010);
+        }
+    }
+
+    @Override
+    public void onClose() {
+        ShopStageBlur.clear();
+        super.onClose();
+    }
+
+    @Override
+    public void removed() {
+        ShopStageBlur.clear();
+        super.removed();
+    }
+
     // ============ 交互 ============
 
     @Override
@@ -2539,6 +2739,14 @@ public class ShopScreen extends ScaledScreen {
         // 购物车大图层打开时拦截全部点击：关闭/数量步进/删除/结算，其余点击原地吞掉，不下穿到网格/详情
         if (cartOverlayOpen) {
             return handleCartOverlayClick(mx, my);
+        }
+        if (stageLockActive && hit(mx, my, listLeft(), contentTop(), detailX() + DETAIL_W - listLeft(), contentHeight())) {
+            if (hit(mx, my, stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH)
+                    && stageLockPath != null) {
+                ShanhaiNetwork.CHANNEL.sendToServer(
+                        new com.dishanhai.gt_shanhai.network.ShopSubmitPacket(stageLockPath, aeMode, backpackMode));
+            }
+            return true;
         }
         // 描述详情大图层打开时拦截全部点击：点关闭按钮或图层外任意处都关闭，图层内右侧滚动条起手拖拽，其余点击原地吞掉
         if (descOverlayOpen) {
@@ -2703,7 +2911,7 @@ public class ShopScreen extends ScaledScreen {
         // 分类页签（主/二级/三级/四级）：命中即消费，具体是切页还是进入拖拽追踪由 beginTabAction 判定
         // （见 rowXxx/tabRowClicked 统一实现，取代原来四份重复的页签点击处理）
         for (int level = 0; level < 4; level++) {
-            if (tabRowClicked(mx, my, level)) return true;
+            if (tabRowClicked(mx, my, level, btn)) return true;
         }
 
         // 详情页中段滚动条（交易次数/预计/花费预览/描述/跳转），优先于详情内链接命中。
@@ -2775,6 +2983,19 @@ public class ShopScreen extends ScaledScreen {
         // 前置任务跳转：打开 FTBQ 任务书并定位到该任务（未解析到时点了也没用，命中框本身照样给，方便玩家复制ID反馈）
         if (inDetailViewport && prereqLinkVisible && selected != null && hit(mx, my, prereqLinkX, prereqLinkY, prereqLinkW, prereqLinkH)) {
             com.dishanhai.gt_shanhai.client.shop.ShopFtbqPrereqLookup.open(selected.getPrerequisiteQuestId());
+            return true;
+        }
+        if (inDetailViewport && submissionBtnVisible && selected != null
+                && hit(mx, my, submissionBtnX, submissionBtnY, submissionBtnW, submissionBtnH)) {
+            ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopSubmitPacket(
+                    ClientShopCatalog.revision(), ClientShopCatalog.keyOf(selected), aeMode, backpackMode));
+            return true;
+        }
+        if (inDetailViewport && stageSubmissionBtnVisible && selected != null
+                && hit(mx, my, stageSubmissionBtnX, stageSubmissionBtnY, stageSubmissionBtnW, stageSubmissionBtnH)) {
+            String stage = missingStageSubmission(selected.getCategory());
+            if (stage != null) ShanhaiNetwork.CHANNEL.sendToServer(
+                    new com.dishanhai.gt_shanhai.network.ShopSubmitPacket(stage, aeMode, backpackMode));
             return true;
         }
         // 展开描述详情（drawDetail 渲染时暂存的按钮坐标，命中即开大图层）
@@ -2883,6 +3104,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
+        if (stageLockActive) return true;
         if (descOverlayOpen) {
             int[] r = descOverlayBounds();
             int maxScroll = descOverlayMaxScroll(r, descOverlayLines(r).size());
@@ -3481,6 +3703,21 @@ public class ShopScreen extends ScaledScreen {
                 new ShopCostPreviewRequestPacket(ClientShopCatalog.revision(), selectedEntryKey, aeMode));
     }
 
+    /** 階段鎖定頁的材料庫存預覽，與商品花費預覽使用相同的服務端統計口徑。 */
+    private void maybeRequestStagePreview(String stagePath) {
+        if (stagePath == null || stagePath.isBlank()) return;
+        net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
+        long gameTime = lvl != null ? lvl.getGameTime() : 0L;
+        boolean stale = !stagePath.equals(stagePreviewRequestedPath)
+                || stagePreviewRequestedAeMode != aeMode
+                || gameTime - stagePreviewRequestedAtGameTime >= PREVIEW_REFRESH_TICKS;
+        if (!stale) return;
+        stagePreviewRequestedPath = stagePath;
+        stagePreviewRequestedAeMode = aeMode;
+        stagePreviewRequestedAtGameTime = gameTime;
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopStagePreviewRequestPacket(stagePath, aeMode));
+    }
+
     // ============ 图形化获得预览（组合商品，图标 + 数量）============
 
     /** 获得预览格：完整展示图标（无限盘=内容物主图标+盘本身角标，见 {@link ShopEntry#goodsSlotIcons}）+ 数量，纯展示（不比对拥有量，跟花费预览的核心区别）。 */
@@ -3710,71 +3947,78 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
-        if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
-        // 悬停货币栏：显示货币全名 + 精确余额
-        ResourceLocation cur = hoveredCurrency(smx, smy);
-        if (cur != null) {
-            java.math.BigInteger bal = WalletAccountAPI.isSpark(cur)
-                    ? ClientWalletAccount.getDigital()
-                    : ClientWalletAccount.getCurrency(cur);
-            List<Component> lines = new ArrayList<>();
-            lines.add(Component.literal("§6" + ShopPurchase.coinName(cur)));
-            lines.add(Component.literal("§7余额: §f" + bal.toString()));
-            g.renderComponentTooltip(this.font, lines, mx, my);
-            return;
-        }
-        // 悬停详情页商品大图标：渲染真实物品 tooltip（含 appendHoverText/能力提示，如 SDA 实时解析内容）
-        if (detailHoverStack != null && !detailHoverStack.isEmpty()) {
-            g.renderTooltip(this.font, detailHoverStack, mx, my);
-            return;
-        }
-        // 悬停详情页花费预览格：显示本地化名 + 数量，外加拥有/缺少（drawCostPreview 每帧暂存）
-        if (previewHoverName != null) {
-            if (previewHoverExtra != null) {
+        g.flush();
+        g.pose().pushPose();
+        g.pose().translate(0.0f, 0.0f, 600.0f);
+        try {
+            if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
+            // 悬停货币栏：显示货币全名 + 精确余额
+            ResourceLocation cur = hoveredCurrency(smx, smy);
+            if (cur != null) {
+                java.math.BigInteger bal = WalletAccountAPI.isSpark(cur)
+                        ? ClientWalletAccount.getDigital()
+                        : ClientWalletAccount.getCurrency(cur);
                 List<Component> lines = new ArrayList<>();
-                lines.add(Component.literal(previewHoverName));
-                lines.add(Component.literal(previewHoverExtra));
+                lines.add(Component.literal("§6" + ShopPurchase.coinName(cur)));
+                lines.add(Component.literal("§7余额: §f" + bal.toString()));
                 g.renderComponentTooltip(this.font, lines, mx, my);
+                return;
+            }
+            // 悬停详情页商品大图标：渲染真实物品 tooltip（含 appendHoverText/能力提示，如 SDA 实时解析内容）
+            if (detailHoverStack != null && !detailHoverStack.isEmpty()) {
+                g.renderTooltip(this.font, detailHoverStack, mx, my);
+                return;
+            }
+            // 悬停详情页花费/提交预览格：显示本地化名 + 数量，外加拥有/缺少或提交说明
+            if (previewHoverName != null) {
+                if (previewHoverExtra != null) {
+                    List<Component> lines = new ArrayList<>();
+                    lines.add(Component.literal(previewHoverName));
+                    lines.add(Component.literal(previewHoverExtra));
+                    g.renderComponentTooltip(this.font, lines, mx, my);
+                } else {
+                    g.renderTooltip(this.font, Component.literal(previewHoverName), mx, my);
+                }
+                return;
+            }
+            // 悬停商品格：坐标直接反算唯一索引，不再逐格扫描。
+            int idx = entryIndexAt(smx, smy);
+            if (idx < 0) return;
+            ShopEntry e = visibleEntry(idx);
+            if (e == null) {
+                g.renderTooltip(this.font, Component.literal("§8商品数据加载中…"), mx, my);
+                return;
+            }
+            List<Component> lines = new ArrayList<>();
+            lines.add(Component.literal("§f" + e.goodsDisplayName()));
+            if (e.hasMultipleGoods()) {
+                StringBuilder gc = new StringBuilder("§7成分: §f");
+                for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
+                    gc.append(gs.count()).append('×').append(ShopEntry.goodsSlotDisplayName(gs)).append(' ');
+                }
+                lines.add(Component.literal(gc.toString().trim()));
             } else {
-                g.renderTooltip(this.font, Component.literal(previewHoverName), mx, my);
+                lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
             }
-            return;
-        }
-        // 悬停商品格：坐标直接反算唯一索引，不再逐格扫描。
-        int idx = entryIndexAt(smx, smy);
-        if (idx < 0) return;
-        ShopEntry e = visibleEntry(idx);
-        if (e == null) {
-            g.renderTooltip(this.font, Component.literal("§8商品数据加载中…"), mx, my);
-            return;
-        }
-        List<Component> lines = new ArrayList<>();
-        lines.add(Component.literal("§f" + e.goodsDisplayName()));
-        if (e.hasMultipleGoods()) {
-            StringBuilder gc = new StringBuilder("§7成分: §f");
-            for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
-                gc.append(gs.count()).append('×').append(ShopEntry.goodsSlotDisplayName(gs)).append(' ');
+            if (e.isDiscountActive()) {
+                lines.add(Component.literal("§7成本 §8" + costInline(e.getCost()) + " §a→ " + costInline(e.getEffectiveCost())));
+                lines.add(Component.literal("§6限时特惠 -" + e.getDiscountPercent() + "% §7剩" + formatDuration(e.discountRemainingMs() / 1000L)));
+            } else {
+                lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
             }
-            lines.add(Component.literal(gc.toString().trim()));
-        } else {
-            lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
+            if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
+            if (e.getCost().hasPhysical()) lines.add(Component.literal("§8含实物：物品在背包 / 流体绑定 AE"));
+            if (!e.getDisplayIcons().isEmpty()) {
+                StringBuilder ic = new StringBuilder("§7图标: §f");
+                for (ShopEntry.DisplayIcon d : e.getDisplayIcons()) ic.append(d.displayName()).append(' ');
+                lines.add(Component.literal(ic.toString().trim()));
+            }
+            if (e.getDescription() != null && !e.getDescription().isEmpty()) {
+                lines.add(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(e.getDescription())));
+            }
+            g.renderComponentTooltip(this.font, lines, mx, my);
+        } finally {
+            g.pose().popPose();
         }
-        if (e.isDiscountActive()) {
-            lines.add(Component.literal("§7成本 §8" + costInline(e.getCost()) + " §a→ " + costInline(e.getEffectiveCost())));
-            lines.add(Component.literal("§6限时特惠 -" + e.getDiscountPercent() + "% §7剩" + formatDuration(e.discountRemainingMs() / 1000L)));
-        } else {
-            lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
-        }
-        if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
-        if (e.getCost().hasPhysical()) lines.add(Component.literal("§8含实物：物品在背包 / 流体绑定 AE"));
-        if (!e.getDisplayIcons().isEmpty()) {
-            StringBuilder ic = new StringBuilder("§7图标: §f");
-            for (ShopEntry.DisplayIcon d : e.getDisplayIcons()) ic.append(d.displayName()).append(' ');
-            lines.add(Component.literal(ic.toString().trim()));
-        }
-        if (e.getDescription() != null && !e.getDescription().isEmpty()) {
-            lines.add(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(e.getDescription())));
-        }
-        g.renderComponentTooltip(this.font, lines, mx, my);
     }
 }

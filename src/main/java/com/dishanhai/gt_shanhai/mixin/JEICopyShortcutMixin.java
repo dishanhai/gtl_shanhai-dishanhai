@@ -106,7 +106,7 @@ public class JEICopyShortcutMixin {
     }
 
     private static boolean gtShanhai$isCtrlLeftCheat(UserInput input, IInternalKeyMappings keyMappings) {
-        return Screen.hasControlDown() && input.is(keyMappings.getCheatItemStack());
+        return JeiCopyShortcutHelper.isInfinityCellShortcut(input, keyMappings);
     }
 
     private IUserInputHandler gtShanhai$createDeferredGiveHandler(final ItemStack infinityCell) {

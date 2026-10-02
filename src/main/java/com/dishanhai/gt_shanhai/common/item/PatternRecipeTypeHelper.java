@@ -36,6 +36,7 @@ public final class PatternRecipeTypeHelper {
     // DShanhaiRecipeModifierAPI 规则临时剥离/替换）触发误改判后一直来回横跳。
     private static final String TAG_RECIPE_TYPE_AUTHORITATIVE = "gt_shanhai_recipe_type_authoritative";
     private static final ThreadLocal<GTRecipe> AUTHORITATIVE_ENCODING_RECIPE = new ThreadLocal<>();
+    private static final ThreadLocal<GTRecipe> SELECTED_ENCODING_RECIPE = new ThreadLocal<>();
     private static final ThreadLocal<String> ENCODING_RECIPE_TYPE_ID = new ThreadLocal<>();
 
     private PatternRecipeTypeHelper() {
@@ -77,6 +78,26 @@ public final class PatternRecipeTypeHelper {
 
     public static GTRecipe currentAuthoritativeEncodingRecipe() {
         return AUTHORITATIVE_ENCODING_RECIPE.get();
+    }
+
+    /**
+     * JEI 传输阶段记录的精确 GT 配方。它只表示当前一次样板编码上下文，不能直接作为
+     * 运行时样板的持久身份；编码入口仍会用当前槽位输入/输出再次验证它。
+     */
+    public static void pushSelectedEncodingRecipe(GTRecipe recipe) {
+        if (recipe == null) {
+            SELECTED_ENCODING_RECIPE.remove();
+        } else {
+            SELECTED_ENCODING_RECIPE.set(recipe);
+        }
+    }
+
+    public static void popSelectedEncodingRecipe() {
+        SELECTED_ENCODING_RECIPE.remove();
+    }
+
+    public static GTRecipe currentSelectedEncodingRecipe() {
+        return SELECTED_ENCODING_RECIPE.get();
     }
 
     public static void pushEncodingRecipeType(String recipeTypeId) {
@@ -284,6 +305,17 @@ public final class PatternRecipeTypeHelper {
             writeAuthoritativeRecipeType(stack, authoritativeRecipe);
             return;
         }
+        GTRecipe selectedRecipe = currentSelectedEncodingRecipe();
+        if (selectedRecipe != null) {
+            GTRecipe matchedRecipe = VirtualPatternEncodingHelper.findMatchingRecipeForEncoding(inputs, outputs);
+            if (matchedRecipe != null) {
+                writeAuthoritativeRecipeType(stack, matchedRecipe);
+                return;
+            }
+            // JEI 传输后槽位可能被玩家改动；无法重新得到唯一配方时，不能把旧选中配方
+            // 继续固化成不可自愈的权威类型标记。
+            return;
+        }
         String encodingRecipeTypeId = currentEncodingRecipeTypeId();
         GTRecipeType encodingRecipeType = resolveRecipeType(encodingRecipeTypeId);
         if (encodingRecipeType != null) {
@@ -309,6 +341,29 @@ public final class PatternRecipeTypeHelper {
         } catch (RuntimeException ignored) {
             return null;
         }
+    }
+
+    /** Resolve a JEI-selected GT recipe by its globally unique recipe ID on the server. */
+    public static GTRecipe resolveRecipe(String recipeId) {
+        if (recipeId == null || recipeId.trim().isEmpty()) return null;
+        final ResourceLocation expected;
+        try {
+            expected = new ResourceLocation(recipeId.trim());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+        try {
+            for (GTRecipeType type : GTRegistries.RECIPE_TYPES) {
+                if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) continue;
+                Iterable<GTRecipe> recipes = type.getLookup().getLookup().getRecipes(true)::iterator;
+                for (GTRecipe recipe : recipes) {
+                    if (recipe != null && expected.equals(recipe.id)) return recipe;
+                }
+            }
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+        return null;
     }
 
     public static boolean recipeMatchesTypeId(GTRecipe recipe, String recipeTypeId) {

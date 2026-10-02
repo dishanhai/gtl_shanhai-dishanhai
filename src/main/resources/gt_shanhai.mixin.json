@@ -60,6 +60,7 @@
     "GTLcoreCoilTypeOverrideMixin",
     "NuclearParallelMixin",
     "PatternDetailsHelperMixin",
+    "PatternEncodingTermMenuAccessor",
     "PatternWrapControlMenuMixin",
     "PatternEncodingRecipeTypeContextMixin",
     "Ae2GtmProcessingPatternMixin",
@@ -126,6 +127,7 @@
     "NativeVirtualBeforeWorkingBypassMixin"
   ],
   "client": [
+    "JEISelectedRecipeContextMixin",
     "ClientRingBlockHelperMixin",
     "CraftingCPUScreenCancelButtonMixin",
     "FtbViewQuestPanelSubmitterButtonMixin",

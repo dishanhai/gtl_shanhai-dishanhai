@@ -4,6 +4,7 @@ import com.dishanhai.gt_shanhai.api.DShanhaiFluidTooltipAPI;
 import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
 import com.dishanhai.gt_shanhai.client.gui.shop.JeiItemOrderHolder;
 import com.dishanhai.gt_shanhai.common.machine.DShanhaiMachines;
+import com.dishanhai.gt_shanhai.integration.jei.JeiPatternQuickEncodeButtons;
 import com.lowdragmc.lowdraglib.LDLib;
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
@@ -13,6 +14,7 @@ import mezz.jei.api.helpers.IPlatformFluidHelper;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.registration.IRecipeCatalystRegistration;
 import mezz.jei.api.registration.IRecipeRegistration;
+import mezz.jei.api.registration.IAdvancedRegistration;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -35,6 +37,11 @@ public class ShanhaiJEIPlugin implements IModPlugin {
     @Override
     public ResourceLocation getPluginUid() {
         return UID;
+    }
+
+    @Override
+    public void registerAdvanced(IAdvancedRegistration registration) {
+        JeiPatternQuickEncodeButtons.register(registration);
     }
 
     @Override

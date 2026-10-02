@@ -9,4 +9,9 @@ public interface PatternWrapControlMenu {
     void gtShanhai$cycleWrapMode();
 
     void gtShanhai$toggleMark(Integer slot);
+
+    /** 记录 JEI 最近一次传输到本终端的精确 GTRecipe ID。 */
+    void gtShanhai$rememberSelectedRecipe(String recipeId);
+
+    String gtShanhai$getSelectedRecipeId();
 }

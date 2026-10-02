@@ -40,6 +40,7 @@ public class WalletOpenRequestPacket {
             com.dishanhai.gt_shanhai.common.shop.ShopCartAPI.sync(player);
             // 收藏同样跨重登保留，同一时机推回去，客户端一开店就能看到之前收藏的角标/筛选状态
             com.dishanhai.gt_shanhai.common.shop.ShopFavoriteAPI.sync(player);
+            ShopSubmissionSyncPacket.sync(player);
         });
         context.setPacketHandled(true);
     }

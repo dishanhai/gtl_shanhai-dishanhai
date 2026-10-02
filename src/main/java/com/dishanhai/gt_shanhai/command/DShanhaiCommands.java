@@ -749,6 +749,7 @@ public class DShanhaiCommands {
                         net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> player),
                         new com.dishanhai.gt_shanhai.network.ShopOpenPacket(canEdit, catalogEditUnlocked,
                                 com.dishanhai.gt_shanhai.common.shop.ShopConfig.manifest()));
+                com.dishanhai.gt_shanhai.network.ShopSubmissionSyncPacket.sync(player);
                 return 1;
             }
         }

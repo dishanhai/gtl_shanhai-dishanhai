@@ -3,8 +3,12 @@ package com.dishanhai.gt_shanhai.client;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IIngredientManager;
+import mezz.jei.common.input.IInternalKeyMappings;
+import mezz.jei.gui.input.UserInput;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -29,6 +33,25 @@ public final class JeiCopyShortcutHelper {
     private static final int MAX_CHAT_LENGTH = 256;
 
     private JeiCopyShortcutHelper() {}
+
+    /**
+     * JEI 15.49 将作弊取物组合键（默认 Ctrl+Shift+左键）封装在该映射中。
+     * 不要自行只检查鼠标按键，否则 JEI 更新后会漏掉修饰键组合。
+     */
+    public static boolean isInfinityCellShortcut(UserInput input, IInternalKeyMappings keyMappings) {
+        if (input == null) return false;
+        boolean leftClick = input.getKey().getType() == InputConstants.Type.MOUSE
+                && input.getKey().getValue() == 0
+                && Screen.hasControlDown() && Screen.hasShiftDown();
+        if (!leftClick) return false;
+
+        // Prefer the fixed shortcut contract. The mapping check is retained only
+        // for JEI screens that report the modifier state through the key mapping.
+        int modifiers = input.getModifiers();
+        return (modifiers & org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL) != 0
+                && (modifiers & org.lwjgl.glfw.GLFW.GLFW_MOD_SHIFT) != 0
+                || keyMappings != null && input.is(keyMappings.getCheatItemStack());
+    }
 
     public static boolean handle(ITypedIngredient<?> typedIngredient, IIngredientManager ingredientManager, int action) {
         if (typedIngredient == null || ingredientManager == null) return false;

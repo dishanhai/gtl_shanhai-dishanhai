@@ -59,6 +59,7 @@ public class ShopEditPacket {
     private final int discountPercent; // 限时折扣百分比（1-90）；0=不打折
     private final long discountStartMs; // 折扣生效窗口起点（绝对时间戳）；discountPercent=0 时无意义
     private final long discountEndMs; // 折扣生效窗口终点（绝对时间戳）；discountPercent=0 时无意义
+    private final List<ExchangeEntry.Ingredient> submissionItems; // 购买前一次性提交的固定物品
 
     public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
                           ShopCost cost, ResourceLocation oldGoods, String oldCategory, int oldEntryIndex, long limit,
@@ -112,6 +113,21 @@ public class ShopEditPacket {
                           ShopEntry.TradeMode tradeMode, long periodTicks, long periodLimit,
                           String prerequisiteQuestId, long catalogRevision, long oldEntryKey,
                           int discountPercent, long discountStartMs, long discountEndMs) {
+        this(action, goodsList, category, description, cost, oldGoods, oldCategory, oldEntryIndex, limit,
+                displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId,
+                ftbqSubMode, tradeMode, periodTicks, periodLimit, prerequisiteQuestId, catalogRevision, oldEntryKey,
+                discountPercent, discountStartMs, discountEndMs, List.of());
+    }
+
+    public ShopEditPacket(Action action, List<ShopEntry.GoodsStack> goodsList, String category, String description,
+                          ShopCost cost, ResourceLocation oldGoods, String oldCategory, int oldEntryIndex, long limit,
+                          List<ShopEntry.DisplayIcon> displayIcons, ShopEntry.RewardMode rewardMode,
+                          List<ShopEntry.RewardOption> rewardPool, boolean hidden, String linkKey, String linkTo,
+                          String displayName, String ftbqTableId, ShopEntry.RewardMode ftbqSubMode,
+                          ShopEntry.TradeMode tradeMode, long periodTicks, long periodLimit,
+                          String prerequisiteQuestId, long catalogRevision, long oldEntryKey,
+                          int discountPercent, long discountStartMs, long discountEndMs,
+                          List<ExchangeEntry.Ingredient> submissionItems) {
         this.action = action;
         this.goodsList = (goodsList == null || goodsList.isEmpty())
                 ? List.of(ShopEntry.GoodsStack.of(new ResourceLocation("minecraft:air"), 1, null)) : goodsList;
@@ -141,6 +157,7 @@ public class ShopEditPacket {
         this.discountPercent = discountPercent;
         this.discountStartMs = discountStartMs;
         this.discountEndMs = discountEndMs;
+        this.submissionItems = submissionItems == null ? List.of() : List.copyOf(submissionItems);
     }
 
     public ShopEditPacket(FriendlyByteBuf buf) {
@@ -195,6 +212,15 @@ public class ShopEditPacket {
         this.discountPercent = buf.readVarInt();
         this.discountStartMs = buf.readLong();
         this.discountEndMs = buf.readLong();
+        int ns = Math.min(64, buf.readVarInt());
+        List<ExchangeEntry.Ingredient> submits = new ArrayList<>(ns);
+        for (int i = 0; i < ns; i++) {
+            ResourceLocation id = buf.readResourceLocation();
+            long cnt = buf.readVarLong();
+            net.minecraft.nbt.CompoundTag nbt = buf.readNbt();
+            submits.add(new ExchangeEntry.Ingredient(id, false, cnt, nbt));
+        }
+        this.submissionItems = submits;
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -242,6 +268,12 @@ public class ShopEditPacket {
         buf.writeVarInt(discountPercent);
         buf.writeLong(discountStartMs);
         buf.writeLong(discountEndMs);
+        buf.writeVarInt(submissionItems.size());
+        for (ExchangeEntry.Ingredient item : submissionItems) {
+            buf.writeResourceLocation(item.id);
+            buf.writeVarLong(item.count);
+            buf.writeNbt(item.nbt());
+        }
     }
 
     private static void writeCost(FriendlyByteBuf buf, ShopCost cost) {
@@ -331,7 +363,8 @@ public class ShopEditPacket {
         ShopEntry entry = new ShopEntry(pkt.goodsList, pkt.category, pkt.cost, pkt.description, pkt.limit,
                 pkt.displayIcons, pkt.rewardMode, pkt.rewardPool, pkt.hidden, pkt.linkKey, pkt.linkTo, pkt.displayName,
                 pkt.ftbqTableId, pkt.ftbqSubMode, pkt.tradeMode, pkt.periodTicks, pkt.periodLimit, pkt.prerequisiteQuestId,
-                old != null ? old.getStableId() : null, pkt.discountPercent, pkt.discountStartMs, pkt.discountEndMs);
+                old != null ? old.getStableId() : null, pkt.discountPercent, pkt.discountStartMs, pkt.discountEndMs,
+                pkt.submissionItems);
         String limitTip = entry.isLimited() ? " §d(限" + entry.getRemainingUses() + "次)" : "";
 
         if (pkt.action == Action.ADD) {
@@ -349,6 +382,11 @@ public class ShopEditPacket {
         }
 
         boolean ok = ShopConfig.replaceEntry(old, entry);
+        if (ok && (old.hasSubmissionRequirement() != entry.hasSubmissionRequirement()
+                || old.hasSubmissionRequirement() && !sameSubmissionItems(old, entry))) {
+            com.dishanhai.gt_shanhai.common.shop.ShopSubmissionSavedData.get(player.getServer())
+                    .clearKey("entry:" + entry.getStableId());
+        }
         if (ok && entry.isLimited()) ShopLimitSavedData.get(player.getServer()).set(entry.getStableId(), entry.getRemainingUses());
         player.sendSystemMessage(ok
                 ? Component.literal("§b[山海商店] §a已更新 §f" + entry.goodsDisplayName() + limitTip)
@@ -358,5 +396,16 @@ public class ShopEditPacket {
     /** 只接受打开编辑器时捕获的版本与条目身份，过期时拒绝猜测。 */
     private static ShopEntry resolveOld(ShopEditPacket pkt) {
         return ShopConfig.resolve(pkt.catalogRevision, pkt.oldEntryKey);
+    }
+
+    private static boolean sameSubmissionItems(ShopEntry a, ShopEntry b) {
+        List<ExchangeEntry.Ingredient> left = a.getSubmissionItems();
+        List<ExchangeEntry.Ingredient> right = b.getSubmissionItems();
+        if (left.size() != right.size()) return false;
+        for (int i = 0; i < left.size(); i++) {
+            ExchangeEntry.Ingredient x = left.get(i), y = right.get(i);
+            if (!x.id.equals(y.id) || x.count != y.count || !java.util.Objects.equals(x.nbt(), y.nbt())) return false;
+        }
+        return true;
     }
 }

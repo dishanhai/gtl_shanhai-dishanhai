@@ -273,4 +273,25 @@ public class VirtualPatternEncodingHelperTest {
         assertTrue(equivalentGuard >= 0 && ambiguousReturn > equivalentGuard,
                 "同类型候选若仅催化模块不同，不能固定选择配方 ID 第一项");
     }
+
+    @Test
+    void inputReverseLookupUsesOneToOneBacktrackingAndSharedRewritePlan() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+
+        assertTrue(source.contains("findInputMatchPlan"),
+                "配方反查必须先建立输入内容到样板槽的一对一匹配计划");
+        assertTrue(source.contains("assignContentSpecs"),
+                "重叠 Ingredient 必须通过回溯分配，而不是按配方顺序首次命中");
+        assertTrue(source.contains("InputMatchCandidate.ORDER"),
+                "候选应按精确 AE key/NBT 与数量优先级排序");
+        assertTrue(source.contains("rewriteItemInputsFromPlan"),
+                "物品填写必须复用反查阶段生成的匹配计划");
+        assertTrue(source.contains("rewriteFluidInputsFromPlan"),
+                "流体填写必须复用反查阶段生成的匹配计划");
+        assertFalse(source.contains("rewriteItemInputsPreservingSelections"),
+                "不能保留按顺序重新猜槽位的旧填写算法");
+        assertFalse(source.contains("rewriteFluidInputsPreservingSelections"),
+                "不能保留按顺序重新猜槽位的旧流体填写算法");
+    }
 }

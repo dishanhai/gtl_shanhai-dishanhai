@@ -43,6 +43,7 @@ public final class ClientCostPreview {
             return size() > MAX_SLOTS;
         }
     };
+    private static final Map<String, Slot> stageSlots = new LinkedHashMap<>();
 
     private ClientCostPreview() {}
 
@@ -50,6 +51,11 @@ public final class ClientCostPreview {
      *  entryKey 是快照内的位置下标，revision 一变就可能换主，旧槽位的「拥有/缺少」不能套在新商品上。 */
     public static void clear() {
         slots.clear();
+        stageSlots.clear();
+    }
+
+    public static void clearStage() {
+        stageSlots.clear();
     }
 
     public static void apply(long entryKey, boolean aeMode, Map<ResourceLocation, BigInteger> newCoins,
@@ -86,5 +92,16 @@ public final class ClientCostPreview {
         Slot s = slots.get(checkEntryKey);
         if (s == null || s.aeMode != checkAeMode || index < 0 || index >= s.fluids.size()) return null;
         return s.fluids.get(index);
+    }
+
+    public static void applyStage(String stagePath, boolean aeMode, List<Long> newItems) {
+        if (stagePath == null || stagePath.isBlank()) return;
+        stageSlots.put(stagePath, new Slot(aeMode, Map.of(), newItems != null ? List.copyOf(newItems) : List.of(), List.of()));
+    }
+
+    public static Long stageItemHave(String stagePath, boolean aeMode, int index) {
+        Slot s = stageSlots.get(stagePath);
+        if (s == null || s.aeMode != aeMode || index < 0 || index >= s.items.size()) return null;
+        return s.items.get(index);
     }
 }
