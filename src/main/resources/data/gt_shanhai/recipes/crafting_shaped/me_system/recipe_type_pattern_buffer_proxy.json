@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["B  ", "I  ", "C  "],
+  "key": {
+    "B": {"item": "gt_shanhai:recipe_type_pattern_buffer"},
+    "I": {"item": "ae2:interface"},
+    "C": {"item": "kubejs:hv_universal_circuit"}
+  },
+  "result": {"item": "gt_shanhai:recipe_type_pattern_buffer_proxy", "count": 1}
+}

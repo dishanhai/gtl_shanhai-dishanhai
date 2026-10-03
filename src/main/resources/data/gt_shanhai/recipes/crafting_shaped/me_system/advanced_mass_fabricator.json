@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["M  ", "S  ", "C  "],
+  "key": {
+    "M": {"item": "gtceu:mass_fabricator"},
+    "S": {"item": "ae2:singularity"},
+    "C": {"item": "kubejs:hv_universal_circuit"}
+  },
+  "result": {"item": "gt_shanhai:advanced_mass_fabricator", "count": 1}
+}

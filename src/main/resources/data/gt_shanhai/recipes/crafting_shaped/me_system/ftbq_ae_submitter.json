@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["B  ", "I  ", "C  "],
+  "key": {
+    "B": {"item": "minecraft:book"},
+    "I": {"item": "ae2:interface"},
+    "C": {"item": "kubejs:lv_universal_circuit"}
+  },
+  "result": {"item": "gt_shanhai:ftbq_ae_submitter", "count": 1}
+}

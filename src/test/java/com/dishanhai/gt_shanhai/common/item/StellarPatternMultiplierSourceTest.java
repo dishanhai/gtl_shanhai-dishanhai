@@ -28,6 +28,8 @@ class StellarPatternMultiplierSourceTest {
         assertTrue(source.contains("@Persisted\n    private long patternOutputMultiplier = 1L"));
         assertTrue(source.contains("@DescSynced\n    @Persisted\n    private long cachedHostOutputMultiplier = 1L"),
                 "读宿主结果必须缓存并同步到客户端 UI，不能让显示端重新按客户端控制器状态算 1x");
+        assertTrue(source.contains("private long lastDetectedUniversalHostOutputMultiplier = Long.MIN_VALUE;"));
+        assertTrue(source.contains("private long pendingDetectedUniversalHostOutputMultiplier = Long.MIN_VALUE;"));
         assertTrue(source.contains("OutputMultiplierResolver.resolveHostOutputMultiplier("));
         assertTrue(source.contains("LongInputWidget"));
         assertFalse(source.contains("IntInputWidget"));
@@ -36,14 +38,17 @@ class StellarPatternMultiplierSourceTest {
         assertTrue(source.contains("new OutputMultiplierConfigurator()"));
         assertTrue(source.contains("syncOutputMultiplierFromHost"));
         assertTrue(source.contains("syncOutputMultiplierFromPattern"));
+        String enable = extractBlock(source, "public void setOutputMultiplierModeEnabled(boolean enabled)");
+        assertTrue(enable.contains("syncOutputMultiplierFromHost();"),
+                "开启倍率模式后必须立即读取宿主倍率，不能等待下一次轮询");
     }
 
     @Test
-    void stellarBufferAutoDetectsHostMultiplierEveryTwoSecondsOnlyOnChange() throws IOException {
+    void stellarBufferAutoDetectsHostMultiplierEveryTickOnlyOnChange() throws IOException {
         String source = Files.readString(MACHINE);
         String poll = extractBlock(source, "private void pollOutputMultiplierHostState()");
 
-        assertTrue(source.contains("OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 40L"));
+        assertTrue(source.contains("OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 1L"));
         assertTrue(source.contains("outputMultiplierHostSyncSubscription"));
         assertTrue(source.contains("outputMultiplierHostSyncSubscription = subscribeServerTick("));
         assertTrue(source.contains("this::pollOutputMultiplierHostState"));
@@ -51,10 +56,14 @@ class StellarPatternMultiplierSourceTest {
         assertTrue(poll.contains("getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L"));
         assertTrue(poll.contains("detected == lastDetectedHostOutputMultiplier"),
                 "宿主倍率未变化时必须零刷新");
+        assertTrue(poll.contains("detectedUniversal == lastDetectedUniversalHostOutputMultiplier"),
+                "全局宿主倍率变化也必须触发内部倍率同步");
         assertTrue(poll.contains("fingerprint == lastDetectedForgeRecipeTypeFingerprint"),
                 "伪神子模块支持的配方类型集合未变化时才允许零刷新");
         assertTrue(poll.contains("detected != pendingDetectedHostOutputMultiplier"),
                 "宿主倍率变化必须经连续两次轮询确认（防抖），瞬时跳变不得触发全量样板重编码");
+        assertTrue(poll.contains("detectedUniversal != pendingDetectedUniversalHostOutputMultiplier"),
+                "全局宿主倍率变化必须经连续两次轮询确认后写回内部倍率");
         assertTrue(poll.contains("fingerprint != pendingDetectedForgeRecipeTypeFingerprint"),
                 "伪神子模块增减但最大倍率不变时也必须经防抖确认后重写样板");
         assertTrue(source.contains("resolveForgeRecipeTypeFingerprint()"));
@@ -153,6 +162,8 @@ class StellarPatternMultiplierSourceTest {
                 "伪神最大倍率不能写成所有样板共享的手动倍率");
         assertFalse(poll.contains("applyOutputMultiplierSettings(true, detected)"),
                 "宿主 recipe-type-aware 倍率变化时只刷新可见样板，不能覆盖手动倍率字段");
+        assertTrue(poll.contains("applyOutputMultiplierSettings(true, detectedUniversal)"),
+                "宿主全局倍率变化时必须写回星律内部倍率字段");
     }
 
     @Test

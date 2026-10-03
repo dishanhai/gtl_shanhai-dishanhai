@@ -5,12 +5,9 @@ import appeng.crafting.pattern.AEProcessingPattern;
 
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
-import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
-import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineHost;
-import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -65,28 +62,11 @@ public final class WildcardPatternRecipeTypeBinding {
         if (controllers == null) return List.of();
         Map<ResourceLocation, GTRecipeType> types = new LinkedHashMap<>();
         for (IMultiController controller : controllers) {
-            if (controller == null) continue;
-            collectMachineRecipeTypes(types, controller);
-            // GTLCore 模块化主机把原初系列模块存放在 moduleSet 中，而不是结构零件列表。
-            // 模块本身才持有完整的多配方类型集合；主机类型只作为候选，不能替代模块扫描。
-            collectModularMachineTypes(types, controller);
-            collectModularMachineTypes(types, controller.self());
-            // 多配方模組可能持有完整類型集合，而控制器只回報當前運行子集。
-            // 將同一控制器下的配方機器零件也納入山海側完整匹配。
-            for (IMultiPart part : controller.getParts()) {
-                if (part != null) collectMachineRecipeTypes(types, part.self());
-            }
+            if (controller == null || !controller.isFormed()) continue;
+            // 星律的控制器才是配方類型的擁有者；掛載模組與其他零件不屬於這個星律。
+            collectMachineRecipeTypes(types, controller.self());
         }
         return new ArrayList<>(types.values());
-    }
-
-    private static void collectModularMachineTypes(Map<ResourceLocation, GTRecipeType> target,
-            Object owner) {
-        if (!(owner instanceof IModularMachineHost<?> modularHost)) return;
-        for (IModularMachineModule<?, ?> module : modularHost.getModuleSet()) {
-            if (module == null) continue;
-            collectMachineRecipeTypes(target, module);
-        }
     }
 
     private static void collectMachineRecipeTypes(Map<ResourceLocation, GTRecipeType> target,

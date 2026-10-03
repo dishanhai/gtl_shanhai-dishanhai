@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["B  ", "S  ", "M  "],
+  "key": {
+    "B": {"item": "minecraft:book"},
+    "S": {"item": "gtceu:tag_filter_me_stock_bus_part_machine"},
+    "M": {"item": "ae2:storage_bus"}
+  },
+  "result": {"item": "gt_shanhai:big_tag_filter_stock_bus", "count": 1}
+}

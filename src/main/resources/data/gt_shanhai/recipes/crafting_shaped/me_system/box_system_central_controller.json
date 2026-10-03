@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["A  ", "B  ", "C  "],
+  "key": {
+    "A": {"item": "ae2:controller"},
+    "B": {"item": "gtceu:hv_machine_hull"},
+    "C": {"item": "kubejs:hv_universal_circuit"}
+  },
+  "result": {"item": "gt_shanhai:box_system_central_controller", "count": 1}
+}

@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["H  ", "P  ", "C  "],
+  "key": {
+    "H": {"item": "gtceu:me_input_hatch"},
+    "P": {"item": "ae2:engineering_processor"},
+    "C": {"item": "kubejs:hv_universal_circuit"}
+  },
+  "result": {"item": "gt_shanhai:me_requestable_input_hatch", "count": 1}
+}

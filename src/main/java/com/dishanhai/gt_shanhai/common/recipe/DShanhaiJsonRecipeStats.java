@@ -39,7 +39,8 @@ public final class DShanhaiJsonRecipeStats {
         for (Map.Entry<ResourceLocation, Resource> entry : server.getResourceManager()
                 .listResources("recipes", id -> id.getPath().endsWith(".json")).entrySet()) {
             ResourceLocation file = entry.getKey();
-            boolean bundled = GTDishanhaiMod.MOD_ID.equals(file.getNamespace());
+            boolean bundled = GTDishanhaiMod.MOD_ID.equals(file.getNamespace())
+                    || isForeignNamespaceResource(file, entry.getValue());
             boolean cached = includeCache && DShanhaiRecipePackFinder.PACK_ID.equals(entry.getValue().sourcePackId());
             if (!bundled && !cached) continue;
 
@@ -85,6 +86,12 @@ public final class DShanhaiJsonRecipeStats {
 
     private static void add(Map<String, long[]> counts, String type, int status) {
         counts.computeIfAbsent(type, key -> new long[3])[status]++;
+    }
+
+    private static boolean isForeignNamespaceResource(ResourceLocation file, Resource resource) {
+        if (!"gtceu".equals(file.getNamespace())) return false;
+        String sourcePack = resource.sourcePackId();
+        return sourcePack != null && sourcePack.contains(GTDishanhaiMod.MOD_ID);
     }
 
     /**

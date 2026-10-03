@@ -96,7 +96,6 @@ import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigWidget;
 import org.gtlcore.gtlcore.client.gui.widget.PatternCycleWidget;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTrait;
-import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
 import org.gtlcore.gtlcore.utils.NumberUtils;
 import com.dishanhai.gt_shanhai.common.machine.output.OutputMultiplierResolver;
@@ -112,11 +111,11 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 星律样板总成：在 GTLCore 库存ME样板总成（MEStockingPatternBufferPartMachine）基础上叠加配方类型过滤。
+ * 星律样板总成：沿用 GTLCore 库存ME样板总成的库存输入語義，並接入超級樣板總成的 IV 類型入口。
  * 库存输入区域"真扣料时才实时提取"的消耗语义继承父类；周期同步与配方模拟阶段的可用量查询
  * 改走 StorageService 增量缓存（syncStockInput / findStock*Key 覆写），不再对全网做模拟提取遍历。
  */
-public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferPartMachine
+public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBufferPartMachine
         implements RecipeTypePatternSlotAccess {
 
     public static final int DEFAULT_PATTERNS_PER_ROW = 9;
@@ -127,7 +126,11 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private static final IGuiTexture STOCK_INPUT_ICON =
             new ResourceTexture("gt_shanhai:textures/gui/stock_input_panel.png");
     private static final IGuiTexture WILDCARD_INPUT_ICON = new TextTexture("*");
-    private static final long OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 40L;
+    /**
+     * 宿主倍率来源是多方聚合（万象核心、维护仓、其他来源及固定广播），不能只靠某一个来源的回调。
+     * 每 tick 重新读取聚合器，配合下面的两次一致防抖，来源上线后最多两个 tick 即可同步。
+     */
+    private static final long OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 1L;
     private static final int[] NO_ACTIVE_UNCACHED_SLOTS = new int[0];
     private static final int PARENT_REFUND = 0;
     private static final int PARENT_SHARED_ITEM = 1;
@@ -136,9 +139,9 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private static final int PARENT_BYPRODUCT = 4;
     private static final int PARENT_TERMINAL_VISIBILITY = 5;
     private static final int PARENT_PATTERN_CIRCUIT = 6;
-    private static final int PARENT_ADVANCED_ME = 7;
+    private static final int PARENT_ADVANCED_ME = 8;
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
-            RecipeTypePatternBufferPartMachine.class, MEStockingPatternBufferPartMachine.MANAGED_FIELD_HOLDER);
+            RecipeTypePatternBufferPartMachine.class, StellarSuperPatternBufferPartMachine.MANAGED_FIELD_HOLDER);
 
     private final CachedPatternPaginationUIManager paginationUIManager;
     private final String[] patternRecipeTypeIds;
@@ -163,6 +166,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     private long cachedHostOutputMultiplier = 1L;
     private long lastDetectedHostOutputMultiplier = Long.MIN_VALUE;
     private long pendingDetectedHostOutputMultiplier = Long.MIN_VALUE;
+    private long lastDetectedUniversalHostOutputMultiplier = Long.MIN_VALUE;
+    private long pendingDetectedUniversalHostOutputMultiplier = Long.MIN_VALUE;
     private int lastDetectedForgeRecipeTypeFingerprint = Integer.MIN_VALUE;
     private int pendingDetectedForgeRecipeTypeFingerprint = Integer.MIN_VALUE;
     @Nullable
@@ -750,7 +755,15 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
     public void setOutputMultiplierModeEnabled(boolean enabled) {
         if (enabled && !outputMultiplierModeEnabled) {
             lastDetectedHostOutputMultiplier = Long.MIN_VALUE;
+            pendingDetectedHostOutputMultiplier = Long.MIN_VALUE;
             lastDetectedForgeRecipeTypeFingerprint = Integer.MIN_VALUE;
+            pendingDetectedForgeRecipeTypeFingerprint = Integer.MIN_VALUE;
+            lastDetectedUniversalHostOutputMultiplier = Long.MIN_VALUE;
+            pendingDetectedUniversalHostOutputMultiplier = Long.MIN_VALUE;
+            if (!isRemote()) {
+                syncOutputMultiplierFromHost();
+                return;
+            }
         }
         applyOutputMultiplierSettings(enabled, patternOutputMultiplier);
     }
@@ -807,6 +820,8 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         int fingerprint = resolveForgeRecipeTypeFingerprint();
         lastDetectedHostOutputMultiplier = multiplier;
         pendingDetectedHostOutputMultiplier = multiplier;
+        lastDetectedUniversalHostOutputMultiplier = universalMultiplier;
+        pendingDetectedUniversalHostOutputMultiplier = universalMultiplier;
         lastDetectedForgeRecipeTypeFingerprint = fingerprint;
         pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
         updateCachedHostOutputMultiplier(multiplier);
@@ -932,31 +947,53 @@ public class RecipeTypePatternBufferPartMachine extends MEStockingPatternBufferP
         if (!outputMultiplierModeEnabled) return;
         if (getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L) return;
         long detected = resolveConnectedHostOutputMultiplier();
+        long detectedUniversal = resolveConnectedUniversalHostOutputMultiplier();
         int fingerprint = resolveForgeRecipeTypeFingerprint();
+        boolean hostStateChanged = false;
+        boolean universalStateChanged = false;
         if (detected == lastDetectedHostOutputMultiplier
                 && fingerprint == lastDetectedForgeRecipeTypeFingerprint) {
             // 读值回落到已应用值时必须复位 pending，否则交替翻转会被残留的旧 pending 误"确认"
             pendingDetectedHostOutputMultiplier = detected;
             pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
-            return;
-        }
-        // 防抖：宿主倍率在模块工作↔空闲转换间会瞬时跳变（如增殖核心 idle=10 / working=1000），
-        // 每次跳变都触发全量样板重编码（spark 实测单窗口累计 930ms+ 的尖峰热点）。
-        // 除首次同步外，要求连续两次轮询读到同一新值才应用；交替翻转永不满足，彻底静音。
-        if (lastDetectedHostOutputMultiplier != Long.MIN_VALUE
+        } else if (lastDetectedHostOutputMultiplier != Long.MIN_VALUE
                 && (detected != pendingDetectedHostOutputMultiplier
                 || fingerprint != pendingDetectedForgeRecipeTypeFingerprint)) {
+            // 防抖：宿主倍率在模块工作↔空闲转换间会瞬时跳变（如增殖核心 idle=10 / working=1000），
+            // 每次跳变都触发全量样板重编码（spark 实测单窗口累计 930ms+ 的尖峰热点）。
+            // 除首次同步外，要求连续两次轮询读到同一新值才应用；交替翻转永不满足，彻底静音。
             pendingDetectedHostOutputMultiplier = detected;
             pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
+        } else {
+            pendingDetectedHostOutputMultiplier = detected;
+            lastDetectedHostOutputMultiplier = detected;
+            pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
+            lastDetectedForgeRecipeTypeFingerprint = fingerprint;
+            hostStateChanged = true;
+        }
+
+        if (detectedUniversal == lastDetectedUniversalHostOutputMultiplier) {
+            pendingDetectedUniversalHostOutputMultiplier = detectedUniversal;
+        } else if (lastDetectedUniversalHostOutputMultiplier != Long.MIN_VALUE
+                && detectedUniversal != pendingDetectedUniversalHostOutputMultiplier) {
+            pendingDetectedUniversalHostOutputMultiplier = detectedUniversal;
+        } else {
+            pendingDetectedUniversalHostOutputMultiplier = detectedUniversal;
+            lastDetectedUniversalHostOutputMultiplier = detectedUniversal;
+            universalStateChanged = true;
+        }
+
+        if (hostStateChanged) {
+            updateCachedHostOutputMultiplier(detected);
+        }
+        if (universalStateChanged && getPatternOutputMultiplier() != detectedUniversal) {
+            applyOutputMultiplierSettings(true, detectedUniversal);
             return;
         }
-        pendingDetectedHostOutputMultiplier = detected;
-        lastDetectedHostOutputMultiplier = detected;
-        pendingDetectedForgeRecipeTypeFingerprint = fingerprint;
-        lastDetectedForgeRecipeTypeFingerprint = fingerprint;
-        updateCachedHostOutputMultiplier(detected);
-        clearOutputMultiplierPatternCache();
-        refreshOutputMultiplierPatterns();
+        if (hostStateChanged) {
+            clearOutputMultiplierPatternCache();
+            refreshOutputMultiplierPatterns();
+        }
     }
 
     private int resolveForgeRecipeTypeFingerprint() {

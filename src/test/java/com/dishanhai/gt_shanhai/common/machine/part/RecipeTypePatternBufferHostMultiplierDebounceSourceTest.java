@@ -31,8 +31,12 @@ class RecipeTypePatternBufferHostMultiplierDebounceSourceTest {
 
         assertTrue(source.contains("private long pendingDetectedHostOutputMultiplier = Long.MIN_VALUE;"),
                 "防抖 pending 字段必须存在");
+        assertTrue(source.contains("private long pendingDetectedUniversalHostOutputMultiplier = Long.MIN_VALUE;"),
+                "全局倍率防抖 pending 字段必须存在");
         assertTrue(poll.contains("detected != pendingDetectedHostOutputMultiplier"),
                 "新值必须先进 pending，第二次轮询确认后才应用（连续两次一致）");
+        assertTrue(poll.contains("detectedUniversal != pendingDetectedUniversalHostOutputMultiplier"),
+                "全局倍率新值必须先进 pending，第二次轮询确认后才写回内部字段");
         assertTrue(poll.contains("lastDetectedHostOutputMultiplier != Long.MIN_VALUE"),
                 "首次同步必须绕过防抖立即应用，保持模式开启时的即时性");
         int equalBranch = poll.indexOf("detected == lastDetectedHostOutputMultiplier");
@@ -50,5 +54,8 @@ class RecipeTypePatternBufferHostMultiplierDebounceSourceTest {
         int syncEnd = source.indexOf("public void syncOutputMultiplierFromPattern()", syncStart);
         assertTrue(source.substring(syncStart, syncEnd).contains("pendingDetectedHostOutputMultiplier = multiplier;"),
                 "UI 直连同步路径必须同时复位 pending，避免残留旧值干扰后续防抖判定");
+        assertTrue(source.substring(syncStart, syncEnd)
+                        .contains("pendingDetectedUniversalHostOutputMultiplier = universalMultiplier;"),
+                "UI 直连同步路径必须同时复位全局倍率 pending，避免残留旧值干扰后续防抖判定");
     }
 }

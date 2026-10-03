@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["B  ", "H  ", "C  "],
+  "key": {
+    "B": {"item": "gt_shanhai:me_requestable_input_bus"},
+    "H": {"item": "gt_shanhai:me_requestable_input_hatch"},
+    "C": {"item": "kubejs:hv_universal_circuit"}
+  },
+  "result": {"item": "gt_shanhai:input_dual_hatch", "count": 1}
+}

@@ -84,16 +84,10 @@ class JeiPatternQuickEncodeServiceTest {
 
         assertTrue(binding.contains("getMultiRecipeType"));
         assertTrue(binding.contains("getTypeList"));
-        assertTrue(binding.contains("controller.getParts()"),
-                "完整配方类型还需从多方块控制器的模块零件读取");
-        assertTrue(binding.contains("part.self()"),
-                "模块零件自身可能持有控制器未暴露的完整配方类型集合");
-        assertTrue(binding.contains("IModularMachineHost"),
-                "模块化主机必须直接读取 GTLCore moduleSet 中的模块");
-        assertTrue(binding.contains("getModuleSet()"),
-                "原初系列模块的完整配方类型来自主机 moduleSet");
-        assertTrue(binding.contains("collectModularMachineTypes(types, controller.self())"),
-                "主机 self() 也必须参与模块集合检索");
+        assertTrue(binding.contains("collectMachineRecipeTypes(types, controller.self())"),
+                "星律必須讀取直接綁定控制器自身的完整配方類型");
+        assertTrue(binding.contains("if (controller == null || !controller.isFormed()) continue;"),
+                "已失效的控制器不能提供可寫入配方類型");
         assertTrue(binding.contains("getRecipeTypeNameSet"),
                 "原初模块公开的完整类型名称集合必须直接纳入匹配");
         assertTrue(source.contains("MIN_SDA_FALLBACK_PATTERNS = 20"));
@@ -101,6 +95,25 @@ class JeiPatternQuickEncodeServiceTest {
         assertTrue(source.contains("getAEMaxPower(sda)"));
         assertTrue(source.contains("injectAEPower(sda, maxPower, Actionable.MODULATE)"));
         assertTrue(source.contains("direct_partial_success"));
+    }
+
+    @Test
+    void mountedModuleTypesDoNotBecomeEngineStellarTypes() throws Exception {
+        String binding = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "item", "WildcardPatternRecipeTypeBinding.java"));
+        String registration = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "machine", "DShanhaiMachines.java"));
+        String engine = registration.substring(registration.indexOf("PRIMORDIAL_OMEGA_ENGINE ="),
+                registration.indexOf("PRIMORDIAL_OMEGA_ENGINE.setTooltipBuilder"));
+        String furnace = registration.substring(registration.indexOf("PRIMORDIAL_ETERNAL_SMELTING_FURNACE ="),
+                registration.indexOf("PRIMORDIAL_ETERNAL_SMELTING_FURNACE.setTooltipBuilder"));
+
+        assertFalse(engine.contains("getSTELLAR_LGNITION()"));
+        assertTrue(furnace.contains("getSTELLAR_LGNITION()"));
+        assertFalse(binding.contains("getModuleSet()"),
+                "引擎星律不能繼承掛載在引擎上的永恆熔煉爐配方類型");
+        assertFalse(binding.contains("controller.getParts()"),
+                "星律配方類型不得從其他零件借用，只能來自直接綁定的控制器");
     }
 
     @Test

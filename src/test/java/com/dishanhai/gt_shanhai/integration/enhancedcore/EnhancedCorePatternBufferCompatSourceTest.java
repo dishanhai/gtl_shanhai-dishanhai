@@ -16,6 +16,10 @@ class EnhancedCorePatternBufferCompatSourceTest {
             "gt_shanhai", "mixin", "EnhancedCoreIntegratedFactoryStructureMixin.java");
     private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.enhancedcore.mixin.json");
     private static final Path MODS_TOML = Path.of("src", "main", "resources", "META-INF", "mods.toml");
+    private static final Path STELLAR_BASE = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "machine", "part", "StellarSuperPatternBufferPartMachine.java");
+    private static final Path STELLAR_MACHINE = Path.of("src", "main", "java", "com", "dishanhai",
+            "gt_shanhai", "common", "machine", "part", "RecipeTypePatternBufferPartMachine.java");
 
     @Test
     void optionalEnhancedCoreLayerAcceptsBothStellarPatternBlocks() throws IOException {
@@ -23,6 +27,8 @@ class EnhancedCorePatternBufferCompatSourceTest {
         String mixin = Files.readString(MIXIN);
         String config = Files.readString(CONFIG);
         String modsToml = Files.readString(MODS_TOML);
+        String stellarBase = Files.readString(STELLAR_BASE);
+        String stellarMachine = Files.readString(STELLAR_MACHINE);
 
         assertTrue(compat.contains("gtladditions:me_super_pattern_buffer"));
         assertTrue(compat.contains("gt_shanhai:recipe_type_pattern_buffer"));
@@ -38,5 +44,8 @@ class EnhancedCorePatternBufferCompatSourceTest {
         assertTrue(config.contains("\"required\": false"));
         assertTrue(config.contains("EnhancedCoreIntegratedFactoryStructureMixin"));
         assertTrue(modsToml.contains("config=\"gt_shanhai.enhancedcore.mixin.json\""));
+        assertTrue(stellarBase.contains("extends MEPatternBufferPartMachine"));
+        assertTrue(stellarBase.contains("StockingPatternBufferInternalSlot"));
+        assertTrue(stellarMachine.contains("extends StellarSuperPatternBufferPartMachine"));
     }
 }

@@ -292,7 +292,11 @@ class VirtualCraftingPresenceInputSourceTest {
         assertTrue(processMixin.contains("this.limitQty = requiresPerPatternLimit"),
                 "仅 PresenceInput 的返还项不得把整张样板强制为 times=1");
         assertTrue(nodeMixin.contains("\"request\", \"adaptiveRequest\", \"fastRequest\", \"ultraFastRequest\""),
-                "AE2 LEGACY 与 GTLCore 三种快速计算模式必须使用同一语义");
+                "AE2 LEGACY 与 GTLCore 快速计算模式必须使用同一语义");
+        assertTrue(nodeMixin.contains("\"maxFastRequest\""),
+                "GTLCore MAX_FAST 请求入口必须套用虚拟在场数量上限");
+        assertTrue(nodeMixin.contains("\"gtlcore$runMaxFastPrefix\""),
+                "GTLCore MAX_FAST 实际抽取入口必须套用虚拟在场数量上限");
         assertTrue(nodeMixin.contains("this.parentInput.getMultiplier()"),
                 "批量规划时虚拟在场输入只请求自身需求量，不得乘下单次数");
         assertTrue(nodeMixin.contains("priority = 1500"),
