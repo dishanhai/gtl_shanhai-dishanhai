@@ -1,0 +1,32 @@
+{
+  "type": "gtceu:stellar_forge",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "dishanhai:god_forge_mod"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:circuit", "configuration": 20}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 1000, "value": [{"fluid": "minecraft:water"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 96, "ingredient": {"item": "dishanhai:hxsp"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 128, "ingredient": {"item": "avaritia:neutron_pile"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 30000, "value": [{"fluid": "gtceu:grade_16_purified_water"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 20000, "value": [{"fluid": "gtceu:oxygen"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 20000, "value": [{"fluid": "gtceu:hydrogen"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 50000, "value": [{"fluid": "gtceu:dimensionallytranscendentresidue"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 50000, "value": [{"fluid": "gtceu:raw_star_matter_plasma"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 50000, "value": [{"fluid": "gtceu:spacetime"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 30000, "value": [{"fluid": "gtceu:cosmic_element"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 10000, "value": [{"fluid": "gtceu:neutronium"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 10000, "value": [{"fluid": "gtceu:uu_matter"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "data": {"ebf_temp": 10000},
+  "tickInputs": {"eu": [{"content": 32, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

@@ -28,6 +28,7 @@ import com.gregtechceu.gtceu.api.machine.MachineDefinition;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.feature.IFancyUIMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IInteractedMachine;
+import com.gregtechceu.gtceu.api.machine.feature.IMachineLife;
 import com.gregtechceu.gtceu.api.machine.multiblock.part.MultiblockPartMachine;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.block.MetaMachineBlock;
@@ -82,7 +83,7 @@ import static com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER;
 import static com.dishanhai.gt_shanhai.GTDishanhaiMod.MOD_ID;
 
 public class MEDiskHatchPartMachine extends MultiblockPartMachine
-        implements IInteractedMachine, IFancyUIMachine, DShanhaiAENetworkMachine, IStorageProvider, ISaveProvider,
+        implements IInteractedMachine, IFancyUIMachine, IMachineLife, DShanhaiAENetworkMachine, IStorageProvider, ISaveProvider,
         IPriorityHost {
 
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(MEDiskHatchPartMachine.class, MultiblockPartMachine.MANAGED_FIELD_HOLDER);
@@ -159,6 +160,13 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
         dirtyCellSlots.clear();
         pendingPersistFirstDirtyTick = Long.MIN_VALUE;
         super.onUnload();
+    }
+
+    @Override
+    public void onMachineRemoved() {
+        if (isRemote()) return;
+        forcePersistAll();
+        clearInventory(diskSlots.storage);
     }
 
     public void forcePersistAll() {
@@ -290,6 +298,15 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
     private final class DiskSlotTransfer extends ItemStackTransfer {
         private DiskSlotTransfer(int size) {
             super(size);
+        }
+
+        @Override
+        public void setStackInSlot(int slot, ItemStack stack) {
+            if (slot >= 0 && slot < slotRuntimeCaches.length
+                    && dirtyCellSlots.get(slot) && getStackInSlot(slot) != stack) {
+                forcePersistSlot(slot);
+            }
+            super.setStackInSlot(slot, stack);
         }
 
         @Override

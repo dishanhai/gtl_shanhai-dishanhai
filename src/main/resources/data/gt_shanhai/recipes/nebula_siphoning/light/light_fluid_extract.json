@@ -1,0 +1,15 @@
+{
+  "type": "gtceu:nebula_siphoning",
+  "duration": 400,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 4, "ingredient": {"item": "dishanhai:first_light"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {"content": {"amount": 1000, "value": [{"fluid": "dishanhai:light"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 8192, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

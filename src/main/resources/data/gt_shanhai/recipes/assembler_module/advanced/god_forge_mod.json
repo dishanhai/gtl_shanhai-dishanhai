@@ -1,0 +1,32 @@
+{
+  "type": "gtceu:assembler_module",
+  "duration": 1200,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 16, "ingredient": {"item": "gtladditions:forge_of_the_antichrist"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "dishanhai:wzcz3"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 256, "ingredient": {"item": "gtladditions:astral_array"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 128, "ingredient": {"item": "dishanhai:cosmic_probe_mk"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 102400, "ingredient": {"item": "gtceu:cosmic_ingot"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 64, "ingredient": {"item": "gtladditions:heart_of_the_universe"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 102400, "ingredient": {"item": "gtladditions:strange_annihilation_fuel_rod"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 10240, "ingredient": {"item": "gtladditions:black_hole_seed"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 64, "ingredient": {"item": "gtladditions:macro_atomic_resonant_fragment_stripper"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 102400, "ingredient": {"item": "gtlcore:miracle_crystal"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 32, "ingredient": {"item": "gtladditions:thread_modifier_hatch"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 16, "ingredient": {"item": "gtladditions:heliofusion_exoticizer"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 16, "ingredient": {"item": "gtladditions:helioflare_power_forge"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 16, "ingredient": {"item": "gtladditions:heliofluix_melting_core"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 16, "ingredient": {"item": "gtladditions:heliothermal_plasma_fabricator"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 16, "ingredient": {"item": "gtladditions:heliophase_leyline_crystallizer"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:uu_matter"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:eternity"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:cosmicneutronium"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:miracle"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {"item": [{"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "dishanhai:god_forge_mod"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]},
+  "tickInputs": {"eu": [{"content": 140799765315555, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

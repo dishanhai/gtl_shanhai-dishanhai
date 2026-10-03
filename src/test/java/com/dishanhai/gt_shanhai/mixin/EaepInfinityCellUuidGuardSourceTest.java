@@ -28,16 +28,14 @@ class EaepInfinityCellUuidGuardSourceTest {
     }
 
     @Test
-    void routineInsertAndExtractUpdateTotalsWithoutFullMapScan() throws IOException {
+    void eaepRetainsOwnershipOfStorageTotalsAndPersistence() throws IOException {
         String source = Files.readString(SOURCE);
 
-        assertTrue(source.contains("@Redirect(method = \"insert\""));
-        assertTrue(source.contains("@Redirect(method = \"extract\""));
-        assertTrue(source.contains("AeStorageAmountMath.afterBigIntegerInsert"));
-        assertTrue(source.contains("AeStorageAmountMath.afterBigIntegerExtract"));
-        assertTrue(source.contains("gtShanhai$markChanged"));
+        assertFalse(source.contains("@Redirect(method = \"insert\""));
+        assertFalse(source.contains("@Redirect(method = \"extract\""));
+        assertFalse(source.contains("gtShanhai$markChanged"));
         assertFalse(source.contains("@Overwrite"),
-                "只能绕过常规存取后的全表重算，persist 与数据修复仍须保留 EAEP 原始实现");
+                "EAEP 1.5.4.1 已增量维护总量，不能再覆盖其存取与持久化逻辑");
     }
 
     @Test
@@ -50,7 +48,18 @@ class EaepInfinityCellUuidGuardSourceTest {
                 "EAEP 1.5.5 将该方法改为 private，persist 注入应直接复用稳定字段");
         assertFalse(source.contains("abstract boolean hasUUID"),
                 "EAEP 1.5.5 将该方法改为 private，UUID 判定应直接读取 ItemStack NBT");
-        assertTrue(source.contains("Object2ObjectMap<AEKey, BigInteger> stored = getCellStoredMap();"));
-        assertTrue(source.contains("totalAEKeyType = stored == null ? 0 : stored.size();"));
+        assertFalse(source.contains("getCellStoredMap"),
+                "不可依赖 EAEP 1.5.3 的内存映射实现");
+    }
+
+    @Test
+    void diskLoadUsesSavedDataBeforeEaepFirstWorldTick() throws IOException {
+        String source = Files.readString(SOURCE);
+        assertTrue(source.contains("method = \"initData\""));
+        assertTrue(source.contains("server.isSameThread()"));
+        assertTrue(source.contains("InfinityStorageManager.getInstance(server)"));
+        assertTrue(source.contains("ExtendedAEPlus.STORAGE_INSTANCE ="));
+        assertFalse(source.contains("method = \"getStorageManagerInstance\""),
+                "EAEP 1.5.3 与 1.5.4.1 的方法静态性不同");
     }
 }

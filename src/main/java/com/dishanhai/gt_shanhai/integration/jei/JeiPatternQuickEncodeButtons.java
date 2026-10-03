@@ -23,6 +23,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.crafting.Recipe;
 
 public final class JeiPatternQuickEncodeButtons {
 
@@ -35,12 +36,15 @@ public final class JeiPatternQuickEncodeButtons {
         registration.addRecipeButtonFactory(new Factory(patternIcon, true));
     }
 
-    private static GTRecipe extractRecipe(Object recipeBase) {
+    private static ResourceLocation extractRecipeId(Object recipeBase) {
         if (recipeBase instanceof GTRecipe recipe) {
-            return recipe;
+            return recipe.id;
         }
         if (recipeBase instanceof GTRecipeWrapper wrapper) {
-            return wrapper.recipe;
+            return wrapper.recipe == null ? null : wrapper.recipe.id;
+        }
+        if (recipeBase instanceof Recipe<?> recipe) {
+            return recipe.getId();
         }
         return null;
     }
@@ -50,12 +54,11 @@ public final class JeiPatternQuickEncodeButtons {
 
         @Override
         public <T> IIconButtonController createButtonController(IRecipeLayoutDrawable<T> recipeLayout) {
-            GTRecipe recipe = extractRecipe(recipeLayout.getRecipe());
-            if (recipe == null || recipe.id == null || recipe.recipeType == null
-                    || recipe.recipeType.registryName == null) {
+            ResourceLocation recipeId = extractRecipeId(recipeLayout.getRecipe());
+            if (recipeId == null) {
                 return null;
             }
-            return new Controller(icon, recipe.id, wholeRecipeType);
+            return new Controller(icon, recipeId, wholeRecipeType);
         }
     }
 
@@ -70,11 +73,9 @@ public final class JeiPatternQuickEncodeButtons {
 
         @Override
         public void updateState(IButtonState state) {
-            Minecraft minecraft = Minecraft.getInstance();
-            boolean available = minecraft.player != null
-                    && minecraft.player.containerMenu instanceof PatternEncodingTermMenu;
-            state.setVisible(available);
-            state.setActive(available);
+            // JEI 配方页始终显示入口；只有打开样板编码终端时才允许真正发送请求。
+            state.setVisible(true);
+            state.setActive(true);
         }
 
         @Override
@@ -82,6 +83,10 @@ public final class JeiPatternQuickEncodeButtons {
             Minecraft minecraft = Minecraft.getInstance();
             if (minecraft.player == null
                     || !(minecraft.player.containerMenu instanceof PatternEncodingTermMenu menu)) {
+                if (!input.isSimulate() && minecraft.player != null) {
+                    minecraft.player.displayClientMessage(Component.translatable(
+                            "message.gt_shanhai.jei.quick_encode.open_terminal"), false);
+                }
                 return false;
             }
             if (!input.isSimulate()) {

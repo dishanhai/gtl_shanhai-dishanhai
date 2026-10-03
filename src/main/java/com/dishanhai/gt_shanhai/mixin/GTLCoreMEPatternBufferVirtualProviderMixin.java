@@ -13,6 +13,7 @@ import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
+import com.gtladd.gtladditions.common.machine.multiblock.part.MESuperPatternBufferPartMachine;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 
 import net.minecraft.world.item.ItemStack;
@@ -109,6 +110,13 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
         if (!VirtualPatternEncodingHelper.containsVirtualProviderPattern(patternDetails)) {
             QuantumDiagnostics.hit("patternBuffer.pushPattern.notVirtual",
                     "machine=" + gtShanhai$describeSelf() + " pattern=" + patternDetails);
+            return;
+        }
+        MEPatternBufferPartMachineBase machine = (MEPatternBufferPartMachineBase) (Object) this;
+        // IV 主機必須接管整筆訂單；直接寫入普通樣板槽會讓主機看不到工作。
+        if (machine instanceof MESuperPatternBufferPartMachine && machine.getControllers().stream()
+                .anyMatch(controller -> controller.self().getDefinition().getId().toString()
+                        .equals("gtl_enhancedcore:universal_joint_factory"))) {
             return;
         }
         Integer slotIndex = getSlotIndexForPattern(patternDetails);

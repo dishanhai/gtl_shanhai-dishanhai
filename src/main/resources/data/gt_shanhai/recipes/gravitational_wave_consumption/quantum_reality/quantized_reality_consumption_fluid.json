@@ -1,0 +1,13 @@
+{
+  "type": "gtceu:gravitational_wave_consumption",
+  "duration": 10000,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 32, "ingredient": {"item": "dishanhai:gravitational_lens"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 20, "value": [{"fluid": "kubejs:gelid_cryotheum"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 131072, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

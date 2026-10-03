@@ -1,0 +1,15 @@
+{
+  "type": "gtceu:molecular_deconstruction",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtceu:magnetohydrodynamicallyconstrainedstarmatter_dust"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {"content": {"amount": 144, "value": [{"fluid": "gtceu:magnetohydrodynamicallyconstrainedstarmatter"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 2147483647, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

@@ -1,0 +1,15 @@
+{
+  "type": "gtceu:compressor",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 9, "ingredient": {"item": "gtceu:tiny_magmatter_dust"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtceu:small_magmatter_dust"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 2147483, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

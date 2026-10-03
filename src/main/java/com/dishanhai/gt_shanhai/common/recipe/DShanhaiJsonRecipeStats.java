@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.packs.resources.Resource;
+import net.minecraftforge.fml.ModList;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 
@@ -117,8 +118,11 @@ public final class DShanhaiJsonRecipeStats {
         for (JsonElement element : json.getAsJsonArray("conditions")) {
             if (!element.isJsonObject()) continue;
             JsonObject condition = element.getAsJsonObject();
-            if (!condition.has("type") || !DShanhaiRecipeEnabledCondition.ID.toString()
-                    .equals(condition.get("type").getAsString())) continue;
+            if (!condition.has("type")) continue;
+            String conditionType = condition.get("type").getAsString();
+            if ("forge:mod_loaded".equals(conditionType) && condition.has("modid")
+                    && !ModList.get().isLoaded(condition.get("modid").getAsString())) return true;
+            if (!DShanhaiRecipeEnabledCondition.ID.toString().equals(conditionType)) continue;
             try {
                 if (!DShanhaiRecipeEnabledCondition.Serializer.INSTANCE.read(condition).isEnabled(config)) return true;
             } catch (Exception e) {

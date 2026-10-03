@@ -105,7 +105,24 @@ class MEDiskHatchPersistencePolicyTest {
     void slotStackLimitSimulationCannotEvictMountedRuntime() throws IOException {
         String source = Files.readString(HATCH_SOURCE);
 
-        assertFalse(source.contains("public void setStackInSlot(int slot, ItemStack stack)"),
-                "SlotWidget 会临时 set 空槽再恢复来计算堆叠上限，不能在 setStackInSlot 中强刷并失效运行态");
+        int start = source.indexOf("public void setStackInSlot(int slot, ItemStack stack)");
+        int end = source.indexOf("public ItemStack extractItem", start);
+        assertTrue(start >= 0 && end > start);
+        String setter = source.substring(start, end);
+        assertTrue(setter.contains("forcePersistSlot(slot)"),
+                "直接替换槽位前必须先写入旧盘尚未持久化的内容");
+        assertFalse(setter.contains("evictSlotRuntime"),
+                "SlotWidget 的临时空槽容量计算不能失效正在挂载的运行态");
+    }
+
+    @Test
+    void machineRemovalDropsPersistedDisksOutsideBreakEvent() throws IOException {
+        String source = Files.readString(HATCH_SOURCE);
+        int start = source.indexOf("public void onMachineRemoved()");
+        int end = source.indexOf("public void forcePersistAll()", start);
+        assertTrue(start >= 0 && end > start);
+        String removal = source.substring(start, end);
+        assertTrue(source.contains("IMachineLife"), "機器移除回調必須註冊 GTCEu 的生命週期接口");
+        assertTrue(removal.indexOf("forcePersistAll()") < removal.indexOf("clearInventory(diskSlots.storage)"));
     }
 }

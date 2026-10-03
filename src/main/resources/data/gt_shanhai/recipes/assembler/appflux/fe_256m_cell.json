@@ -1,0 +1,18 @@
+{
+  "type": "gtceu:assembler",
+  "conditions": [{"type": "forge:mod_loaded", "modid": "appflux"}],
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtlcore:cell_component_256m"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "kubejs:wyvern_energy_core"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "dishanhai:wzcz1"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "appflux:fe_256m_cell"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 8, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

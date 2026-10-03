@@ -143,7 +143,9 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
      */
     @Override
     public void updateTickSubscription() {
-        emptyLookupUntilTick = Long.MIN_VALUE;
+        // 能力內容變更也可能替換目前可用的電路配方。只解除空結果退避會讓非空候選
+        // 繼續命中舊快取，原初系大批量輸出配方切換時就會出現數秒空窗。
+        invalidateLookupSetCache();
         super.updateTickSubscription();
     }
 

@@ -1,0 +1,25 @@
+{
+  "type": "gtceu:suprachronal_assembly_line",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 4, "ingredient": {"item": "gtladditions:arcanic_astrograph"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 4096, "ingredient": {"item": "gtladditions:astral_array"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 256, "ingredient": {"item": "dishanhai:wzcz3"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 256, "ingredient": {"item": "gtladditions:thread_modifier_hatch"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 128, "ingredient": {"item": "kubejs:supracausal_computer"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 715827882, "ingredient": {"item": "kubejs:temporal_matter"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 715827882, "ingredient": {"item": "kubejs:timepiece"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 5024, "ingredient": {"item": "gtlcore:max_field_generator"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 2560, "ingredient": {"item": "kubejs:supracausal_mainframe"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 46080000, "value": [{"fluid": "gtceu:temporalfluid"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 46080000, "value": [{"fluid": "gtceu:primordialmatter"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 46080000, "value": [{"fluid": "gtceu:magnetohydrodynamicallyconstrainedstarmatter"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 46080000, "value": [{"fluid": "gtceu:chaos"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {"item": [{"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "dishanhai:time_reversal_protocol"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]},
+  "tickInputs": {"eu": [{"content": 1099511627776, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

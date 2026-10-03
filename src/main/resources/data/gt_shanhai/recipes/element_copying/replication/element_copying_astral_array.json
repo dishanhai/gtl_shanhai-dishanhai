@@ -1,0 +1,19 @@
+{
+  "type": "gtceu:element_copying",
+  "duration": 200,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtladditions:astral_array"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 950, "value": [{"fluid": "gtladditions:star_gate_crystal_slurry"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 1000, "value": [{"fluid": "gtceu:uu_matter"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtladditions:astral_array"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 2147483647, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

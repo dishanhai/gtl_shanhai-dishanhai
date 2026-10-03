@@ -1,0 +1,16 @@
+{
+  "type": "gtceu:voidflux_reaction",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 64, "ingredient": {"item": "kubejs:dust_cryotheum"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:circuit", "configuration": 1}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {"content": {"amount": 1000, "value": [{"fluid": "kubejs:gelid_cryotheum"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 131072, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

@@ -1,0 +1,20 @@
+{
+  "type": "gtceu:qft",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 15, "ingredient": {"item": "gtceu:degenerate_rhenium_dust"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "kubejs:leptonic_charge"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "kubejs:contained_high_density_protonic_matter"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 16, "ingredient": {"item": "gtladditions:forge_of_the_antichrist"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:circuit", "configuration": 2}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": []
+  },
+  "outputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 30, "ingredient": {"item": "kubejs:contained_exotic_matter"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 134217728, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

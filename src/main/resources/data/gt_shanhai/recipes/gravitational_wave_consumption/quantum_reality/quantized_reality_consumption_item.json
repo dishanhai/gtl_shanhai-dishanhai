@@ -1,0 +1,13 @@
+{
+  "type": "gtceu:gravitational_wave_consumption",
+  "duration": 1000,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 3200, "ingredient": {"item": "dishanhai:wzcz2"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 1000, "value": [{"fluid": "gtceu:cosmic_element"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 131072, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

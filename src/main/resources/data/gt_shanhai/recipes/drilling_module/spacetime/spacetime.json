@@ -1,0 +1,19 @@
+{
+  "type": "gtceu:drilling_module",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:circuit", "configuration": 31}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "kubejs:space_drone_mk3"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 1000, "value": [{"fluid": "gtceu:rocket_fuel_rp_1"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {"content": {"amount": 10000, "value": [{"fluid": "gtceu:spacetime"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {"eu": [{"content": 8388608, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

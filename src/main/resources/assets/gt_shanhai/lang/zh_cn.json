@@ -708,6 +708,7 @@
   "message.gt_shanhai.jei.quick_encode.target_none": "无",
   "message.gt_shanhai.jei.quick_encode.slots": "已占用槽位 %s；未使用槽位 %s",
   "message.gt_shanhai.jei.quick_encode.slots_unavailable": "槽位状态暂不可读",
-  "message.gt_shanhai.jei.quick_encode.teleport": "点击传送到该星律样板总成"
+  "message.gt_shanhai.jei.quick_encode.teleport": "点击传送到该星律样板总成",
+  "message.gt_shanhai.jei.quick_encode.open_terminal": "请先打开 AE2 样板编码终端，再使用快速编写"
 }
 

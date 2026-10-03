@@ -29,10 +29,17 @@ class JeiPatternQuickEncodeIntegrationSourceTest {
         assertTrue(plugin.contains("JeiPatternQuickEncodeButtons.register(registration)"));
         assertTrue(buttons.contains("addRecipeButtonFactory(new Factory(patternIcon, false))"));
         assertTrue(buttons.contains("addRecipeButtonFactory(new Factory(patternIcon, true))"));
+        assertTrue(buttons.contains("instanceof Recipe<?> recipe"));
+        assertTrue(buttons.contains("state.setVisible(true)"));
+        assertTrue(buttons.contains("state.setActive(true)"));
+        assertTrue(buttons.contains("message.gt_shanhai.jei.quick_encode.open_terminal"));
+        assertTrue(buttons.contains("displayClientMessage"));
         assertTrue(zhCn.contains("\"tooltip.gt_shanhai.jei.quick_encode_pattern\": \"快速编写为样板\""));
         assertTrue(zhCn.contains("\"tooltip.gt_shanhai.jei.quick_encode_recipe_type\""));
+        assertTrue(zhCn.contains("\"message.gt_shanhai.jei.quick_encode.open_terminal\""));
         assertTrue(enUs.contains("\"tooltip.gt_shanhai.jei.quick_encode_pattern\""));
         assertTrue(enUs.contains("\"tooltip.gt_shanhai.jei.quick_encode_recipe_type\""));
+        assertTrue(enUs.contains("\"message.gt_shanhai.jei.quick_encode.open_terminal\""));
     }
 
     @Test

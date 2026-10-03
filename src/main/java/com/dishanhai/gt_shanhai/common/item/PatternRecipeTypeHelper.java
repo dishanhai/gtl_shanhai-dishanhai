@@ -8,12 +8,17 @@ import appeng.crafting.pattern.AEProcessingPattern;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
+import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.RecipeManager;
+import net.minecraft.world.item.crafting.SmeltingRecipe;
 import net.minecraft.world.level.Level;
 
+import java.util.List;
 import java.util.Locale;
 
 public final class PatternRecipeTypeHelper {
@@ -345,7 +350,101 @@ public final class PatternRecipeTypeHelper {
 
     /** Resolve a JEI-selected GT recipe by its globally unique recipe ID on the server. */
     public static GTRecipe resolveRecipe(String recipeId) {
+        ResourceLocation expected = parseRecipeId(recipeId);
+        return expected == null ? null : findRecipeAcrossTypes(null, expected);
+    }
+
+    /**
+     * Resolve both native GTCEu recipes and vanilla smelting recipes. GTCEu registers
+     * vanilla smelting as a proxy of its electric-furnace recipe type, so the returned
+     * recipe deliberately uses the same GT recipe representation and metadata path.
+     */
+    public static GTRecipe resolveRecipe(Level level, String recipeId) {
+        ResourceLocation expected = parseRecipeId(recipeId);
+        GTRecipe gtRecipe = expected == null ? null
+                : findRecipeAcrossTypes(level == null ? null : level.getRecipeManager(), expected);
+        if (gtRecipe != null) return gtRecipe;
+        SmeltingRecipe vanilla = resolveVanillaSmeltingRecipe(level, recipeId);
+        return vanilla == null ? null : toElectricFurnaceRecipe(vanilla);
+    }
+
+    private static ResourceLocation parseRecipeId(String recipeId) {
         if (recipeId == null || recipeId.trim().isEmpty()) return null;
+        try {
+            return new ResourceLocation(recipeId.trim());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static GTRecipe findRecipeAcrossTypes(RecipeManager recipeManager,
+            ResourceLocation expected) {
+        // GT 配方 ID 的第一段路径就是配方类型（例如 cutter/cut_ilc），优先直查，
+        // 避免无关配方类型的 lookup 异常影响当前 JEI 配方。
+        GTRecipeType preferredType = findRecipeTypeFromId(expected);
+        GTRecipe preferred = findRecipeInType(preferredType, recipeManager, expected);
+        if (preferred != null) return preferred;
+
+        for (GTRecipeType type : GTRegistries.RECIPE_TYPES) {
+            if (type == null || type == preferredType) continue;
+            GTRecipe found = findRecipeInType(type, recipeManager, expected);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private static GTRecipeType findRecipeTypeFromId(ResourceLocation recipeId) {
+        if (recipeId == null) return null;
+        String path = recipeId.getPath();
+        int separator = path.indexOf('/');
+        if (separator <= 0) return null;
+        try {
+            return GTRegistries.RECIPE_TYPES.get(new ResourceLocation(
+                    recipeId.getNamespace(), path.substring(0, separator)));
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static GTRecipe findRecipeInType(GTRecipeType type, RecipeManager recipeManager,
+            ResourceLocation expected) {
+        if (type == null) return null;
+        if (recipeManager != null) {
+            try {
+                GTRecipe direct = type.getRecipe(recipeManager, expected);
+                if (direct != null) return direct;
+            } catch (RuntimeException exception) {
+                LOG.debug("Failed direct recipe lookup type={} id={}", type.registryName, expected,
+                        exception);
+            }
+        }
+        try {
+            if (type.getLookup() != null && type.getLookup().getLookup() != null) {
+                GTRecipe found = type.getLookup().getLookup().getRecipes(true)
+                        .filter(recipe -> recipe != null && expected.equals(recipe.id))
+                        .findFirst().orElse(null);
+                if (found != null) return found;
+            }
+        } catch (RuntimeException exception) {
+            LOG.debug("Failed indexed recipe lookup type={} id={}", type.registryName, expected,
+                    exception);
+        }
+        try {
+            for (List<GTRecipe> proxiedRecipes : type.getProxyRecipes().values()) {
+                if (proxiedRecipes == null) continue;
+                for (GTRecipe recipe : proxiedRecipes) {
+                    if (recipe != null && expected.equals(recipe.id)) return recipe;
+                }
+            }
+        } catch (RuntimeException exception) {
+            LOG.debug("Failed proxy recipe lookup type={} id={}", type.registryName, expected,
+                    exception);
+        }
+        return null;
+    }
+
+    public static SmeltingRecipe resolveVanillaSmeltingRecipe(Level level, String recipeId) {
+        if (level == null || recipeId == null || recipeId.trim().isEmpty()) return null;
         final ResourceLocation expected;
         try {
             expected = new ResourceLocation(recipeId.trim());
@@ -353,17 +452,23 @@ public final class PatternRecipeTypeHelper {
             return null;
         }
         try {
-            for (GTRecipeType type : GTRegistries.RECIPE_TYPES) {
-                if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) continue;
-                Iterable<GTRecipe> recipes = type.getLookup().getLookup().getRecipes(true)::iterator;
-                for (GTRecipe recipe : recipes) {
-                    if (recipe != null && expected.equals(recipe.id)) return recipe;
-                }
+            for (SmeltingRecipe recipe : level.getRecipeManager()
+                    .getAllRecipesFor(RecipeType.SMELTING)) {
+                if (recipe != null && expected.equals(recipe.getId())) return recipe;
             }
         } catch (RuntimeException ignored) {
             return null;
         }
         return null;
+    }
+
+    public static boolean isVanillaSmeltingRecipe(Level level, String recipeId) {
+        return resolveVanillaSmeltingRecipe(level, recipeId) != null;
+    }
+
+    public static GTRecipe toElectricFurnaceRecipe(SmeltingRecipe recipe) {
+        if (recipe == null) return null;
+        return GTRecipeTypes.FURNACE_RECIPES.toGTrecipe(recipe.getId(), recipe);
     }
 
     public static boolean recipeMatchesTypeId(GTRecipe recipe, String recipeTypeId) {

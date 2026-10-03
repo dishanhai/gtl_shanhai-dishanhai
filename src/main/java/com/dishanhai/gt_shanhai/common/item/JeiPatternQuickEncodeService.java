@@ -35,6 +35,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SmeltingRecipe;
 import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.api.item.tool.ae2.patternTool.Ae2GtmProcessingPattern;
@@ -56,6 +58,12 @@ import java.util.WeakHashMap;
 public final class JeiPatternQuickEncodeService {
 
     private static final int MIN_SDA_FALLBACK_PATTERNS = 20;
+    private static final ResourceLocation MOLECULAR_ASSEMBLER_MATRIX_ID =
+            new ResourceLocation("gtceu", "molecular_assembler_matrix");
+    private static final ResourceLocation PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE_ID =
+            new ResourceLocation("gt_shanhai", "primordial_molecular_assembler_module");
+    private static final ResourceLocation MOLECULAR_ASSEMBLER_IO_ID =
+            new ResourceLocation("gtceu", "me_molecular_assembler_io");
 
     /**
      * 只缓存当前 ME Grid 已发现的星律；容量状态每次轻量检查，避免每张样板都重新遍历整张网络。
@@ -71,15 +79,21 @@ public final class JeiPatternQuickEncodeService {
 
     public static void encodeAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,
             String anchorRecipeId, boolean wholeRecipeType) {
-        GTRecipe anchor = PatternRecipeTypeHelper.resolveRecipe(anchorRecipeId);
+        GTRecipe anchor = PatternRecipeTypeHelper.resolveRecipe(player.level(), anchorRecipeId);
         if (anchor == null || anchor.id == null || anchor.recipeType == null
                 || anchor.recipeType.registryName == null) {
+            GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] recipe resolve failed id={} dimension={}",
+                    anchorRecipeId, player.level().dimension().location());
             show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
             return;
         }
 
+        boolean vanillaSmelting = PatternRecipeTypeHelper.isVanillaSmeltingRecipe(
+                player.level(), anchorRecipeId);
         List<GTRecipe> recipes = wholeRecipeType
-                ? collectRecipes(anchor.recipeType)
+                ? vanillaSmelting
+                        ? collectVanillaSmeltingRecipes(player.level())
+                        : collectRecipes(anchor.recipeType)
                 : List.of(anchor);
         if (recipes.isEmpty()) {
             show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
@@ -122,7 +136,7 @@ public final class JeiPatternQuickEncodeService {
                             player.blockPosition(), availableTargets);
                 }
                 if (currentTarget == null) break;
-                result = safeInsertIntoStellarTarget(player, pattern, currentTarget);
+                result = safeInsertIntoTarget(player, pattern, currentTarget);
                 if (result != null) break;
                 invalidateCachedTarget(menu.getNetworkNode(), currentTarget);
                 removeTarget(availableTargets, currentTarget);
@@ -210,6 +224,26 @@ public final class JeiPatternQuickEncodeService {
         return recipes;
     }
 
+    private static List<GTRecipe> collectVanillaSmeltingRecipes(Level level) {
+        if (level == null || level.getRecipeManager() == null) return List.of();
+        Map<ResourceLocation, GTRecipe> unique = new LinkedHashMap<>();
+        try {
+            for (SmeltingRecipe vanilla : level.getRecipeManager()
+                    .getAllRecipesFor(RecipeType.SMELTING)) {
+                GTRecipe converted = PatternRecipeTypeHelper.toElectricFurnaceRecipe(vanilla);
+                if (converted != null && converted.id != null) {
+                    unique.putIfAbsent(vanilla.getId(), converted);
+                }
+            }
+        } catch (RuntimeException exception) {
+            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] 无法读取原版熔炉配方表", exception);
+            return List.of();
+        }
+        List<GTRecipe> recipes = new ArrayList<>(unique.values());
+        recipes.sort(Comparator.comparing(recipe -> recipe.id.toString()));
+        return recipes;
+    }
+
     private static List<ItemStack> encodePatterns(ServerPlayer player, List<GTRecipe> recipes) {
         List<ItemStack> patterns = new ArrayList<>(recipes.size());
         for (GTRecipe recipe : recipes) {
@@ -283,10 +317,12 @@ public final class JeiPatternQuickEncodeService {
             Map<StellarTargetKey, PatternQuickUploadService.Target> unique = new LinkedHashMap<>();
             for (PatternQuickUploadService.Target candidate : search.match().candidates()) {
                 if (candidate == null) continue;
-                PatternQuickUploadService.Target stellar = filterToStellarTarget(
+                PatternQuickUploadService.Target stellar = filterToSupportedTarget(
                         player.getServer(), candidate, recipeTypeId);
                 if (stellar != null) {
-                    cachePublicTarget(networkNode.getGrid(), player, stellar, recipeTypeId);
+                    if (isStellarTarget(player.getServer(), stellar)) {
+                        cachePublicTarget(networkNode.getGrid(), player, stellar, recipeTypeId);
+                    }
                     unique.putIfAbsent(stellarTargetKey(stellar), stellar);
                 }
             }
@@ -300,11 +336,22 @@ public final class JeiPatternQuickEncodeService {
         }
     }
 
-    private static PatternQuickUploadService.UploadResult safeInsertIntoStellarTarget(
+    private static PatternQuickUploadService.UploadResult safeInsertIntoTarget(
             ServerPlayer player, ItemStack pattern, PatternQuickUploadService.Target target) {
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(pattern);
         try {
-            return insertIntoStellarTarget(player, pattern, target);
+            PatternQuickUploadService.UploadResult result = isStellarTarget(player.getServer(), target)
+                    ? insertIntoStellarTarget(player, pattern, target)
+                    : PatternQuickUploadService.insertIntoTargetSlotResult(player, pattern, target);
+            if (result == null || result.status() != PatternQuickUploadService.UploadStatus.INSERTED) {
+                GTDishanhaiMod.LOGGER.info(
+                        "[JEIQuickEncode] target rejected upload target={} machine={} type={} status={}",
+                        target == null ? null : target.bufferPos(),
+                        target == null ? null : target.targetMachineId(), recipeTypeId,
+                        result == null ? "null" : result.status());
+                return null;
+            }
+            return result;
         } catch (RuntimeException exception) {
             GTDishanhaiMod.LOGGER.error(
                     "[JEIQuickEncode] insert exception target={} type={}",
@@ -717,6 +764,19 @@ public final class JeiPatternQuickEncodeService {
                 List.copyOf(stellarPositions));
     }
 
+    private static PatternQuickUploadService.Target filterToSupportedTarget(MinecraftServer server,
+            PatternQuickUploadService.Target target, String recipeTypeId) {
+        PatternQuickUploadService.Target stellar = filterToStellarTarget(server, target, recipeTypeId);
+        if (stellar != null) return stellar;
+        if (isMolecularAssemblerTarget(server, target)) {
+            GTDishanhaiMod.LOGGER.info(
+                    "[JEIQuickEncode] accepted molecular IO target pos={} controller={} port={} type={}",
+                    target.bufferPos(), target.targetMachineId(), MOLECULAR_ASSEMBLER_IO_ID, recipeTypeId);
+            return target;
+        }
+        return null;
+    }
+
     private static boolean supportsRecipeType(RecipeTypePatternBufferPartMachine stellar,
             String recipeTypeId) {
         return containsRecipeType(readHostRecipeTypeIds(stellar), recipeTypeId);
@@ -741,6 +801,8 @@ public final class JeiPatternQuickEncodeService {
         if (targets == null || targets.isEmpty()) return null;
         return targets.stream().min(Comparator
                 .comparingInt((PatternQuickUploadService.Target target) ->
+                        isMolecularAssemblerControllerHint(target) ? 1 : 0)
+                .thenComparingInt((PatternQuickUploadService.Target target) ->
                         target.levelKey().equals(playerLevel) ? 0 : 1)
                 .thenComparingLong(target -> distanceSquared(playerLevel, playerPos, target))
                 .thenComparing(target -> target.targetMachineId() == null
@@ -885,7 +947,7 @@ public final class JeiPatternQuickEncodeService {
         boolean success = true;
         for (int i = uploaded.size() - 1; i >= 0; i--) {
             UploadedPattern entry = uploaded.get(i);
-            if (!removeFromStellarTarget(player, entry.pattern(), entry.target(), entry.slot())) {
+            if (!removeFromTarget(player, entry.pattern(), entry.target(), entry.slot())) {
                 success = false;
                 GTDishanhaiMod.LOGGER.error(
                         "[JEIQuickEncode] 回滚失败 target={} pos={} slot={}",
@@ -895,8 +957,11 @@ public final class JeiPatternQuickEncodeService {
         return success;
     }
 
-    private static boolean removeFromStellarTarget(ServerPlayer player, ItemStack pattern,
+    private static boolean removeFromTarget(ServerPlayer player, ItemStack pattern,
             Target target, int slot) {
+        if (!isStellarTarget(player.getServer(), target)) {
+            return PatternQuickUploadService.removeFromTarget(player, pattern, target, slot);
+        }
         ServerLevel level = player.getServer().getLevel(target.levelKey());
         if (level == null) return false;
         BlockPos position = target.bufferPos();
@@ -1002,16 +1067,19 @@ public final class JeiPatternQuickEncodeService {
             ServerLevel level = player.getServer().getLevel(target.levelKey());
             if (level != null && level.isLoaded(target.bufferPos())) {
                 MetaMachine machine = MetaMachine.getMachine(level, target.bufferPos());
-                if (machine instanceof RecipeTypePatternBufferPartMachine stellar) {
-                    InternalInventory inventory = stellar.getTerminalPatternInventory();
-                    if (inventory != null) {
-                        int occupied = 0;
-                        for (int slot = 0; slot < inventory.size(); slot++) {
-                            if (!inventory.getStackInSlot(slot).isEmpty()) occupied++;
-                        }
-                        return Component.translatable("message.gt_shanhai.jei.quick_encode.slots",
-                                occupied, inventory.size() - occupied);
+                InternalInventory inventory = machine instanceof PatternContainer container
+                        ? container.getTerminalPatternInventory() : null;
+                if (inventory == null && level.getBlockEntity(target.bufferPos())
+                        instanceof PatternContainer container) {
+                    inventory = container.getTerminalPatternInventory();
+                }
+                if (inventory != null) {
+                    int occupied = 0;
+                    for (int slot = 0; slot < inventory.size(); slot++) {
+                        if (!inventory.getStackInSlot(slot).isEmpty()) occupied++;
                     }
+                    return Component.translatable("message.gt_shanhai.jei.quick_encode.slots",
+                            occupied, inventory.size() - occupied);
                 }
             }
         } catch (RuntimeException exception) {
@@ -1043,5 +1111,31 @@ public final class JeiPatternQuickEncodeService {
         private static TargetValidation dead() {
             return new TargetValidation(false, Set.of(), false);
         }
+    }
+
+    private static boolean isStellarTarget(MinecraftServer server, Target target) {
+        return target != null && !isMolecularAssemblerTarget(server, target);
+    }
+
+    private static boolean isMolecularAssemblerControllerHint(Target target) {
+        if (target == null || target.targetMachineId() == null) return false;
+        ResourceLocation machineId = target.targetMachineId();
+        return MOLECULAR_ASSEMBLER_MATRIX_ID.equals(machineId)
+                || PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE_ID.equals(machineId);
+    }
+
+    private static boolean isMolecularAssemblerTarget(MinecraftServer server, Target target) {
+        if (server == null || target == null) return false;
+        ServerLevel level = server.getLevel(target.levelKey());
+        if (level == null || !level.isLoaded(target.bufferPos())) return false;
+        MetaMachine machine = MetaMachine.getMachine(level, target.bufferPos());
+        if (machine != null) {
+            // 多方块控制器 ID 只用于描述目标，真正能接收分子样板的是 IO 端口。
+            return MOLECULAR_ASSEMBLER_IO_ID.equals(machine.getDefinition().getId());
+        }
+        // ExtendedAE 独立矩阵是方块实体 PatternContainer，不是 GT MetaMachine；
+        // 它仍可直接接收分子样板，但不能被当成星律或原初主机。
+        return MOLECULAR_ASSEMBLER_MATRIX_ID.equals(target.targetMachineId())
+                && level.getBlockEntity(target.bufferPos()) instanceof PatternContainer;
     }
 }

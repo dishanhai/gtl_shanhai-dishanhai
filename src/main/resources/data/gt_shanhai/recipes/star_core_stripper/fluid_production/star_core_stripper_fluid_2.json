@@ -1,0 +1,59 @@
+{
+  "type": "gtceu:star_core_stripper",
+  "duration": 200,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {"item": "dishanhai:time_reversal_protocol"}
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {"type": "gtceu:circuit", "configuration": 5},
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ],
+    "fluid": []
+  },
+  "outputs": {
+    "fluid": [
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:oil"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:oil_medium"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:oil_heavy"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:oil_light"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:helium"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "minecraft:lava"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:benzene"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:barnarda_air"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:hydrochloric_acid"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:radon"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:chlorine"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:methane"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:krypton"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:fluorine"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:natural_gas"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:sulfuric_acid"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:charcoal_byproducts"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:deuterium"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:neon"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:nitric_acid"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:coal_gas"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:helium_3"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:salt_water"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:unknowwater"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:xenon"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {"content": 2147483647, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  }
+}

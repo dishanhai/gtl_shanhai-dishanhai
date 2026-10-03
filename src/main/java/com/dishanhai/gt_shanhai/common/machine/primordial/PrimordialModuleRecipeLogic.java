@@ -19,11 +19,8 @@ import org.gtlcore.gtlcore.api.recipe.RecipeCacheStrategy;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 
-import it.unimi.dsi.fastutil.ints.IntArrayList;
-import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import it.unimi.dsi.fastutil.objects.ObjectList;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -193,8 +190,21 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             invalidateLookupSetCacheIfConfigured();
             return null;
         }
-        return RecipeCalculationHelper.INSTANCE.getFinalParallelData(
-                0L, parallels, new LongArrayList(), new IntArrayList(), (ObjectList<GTRecipe>) recipeList);
+        // 原初模組已在上方逐配方完成輸入/輸出可行性計算，這裡必須標記為可處理，
+        // 讓 buildFinalWirelessRecipe 進入真實扣料分支。GTLAdd 的 helper 在空餘配額為
+        // 0 時固定回傳 shouldProcess=false；直接使用該結果會只收集輸出而跳過扣料。
+        return new ParallelData((List<GTRecipe>) recipeList, parallels, true, null);
+    }
+
+    @Override
+    protected long getTotalParallelLimit() {
+        MetaMachine machine = getMachine();
+        if (machine instanceof PrimordialOmegaEngineModuleBase mod && mod.hasParallelOverdriver()) {
+            // 超限器的契約是每個配方獨立 Long.MAX_VALUE 並行；不能依賴
+            // getAdditionalThread() 的 int 轉型或 GTLAdd 的固定執行緒上限。
+            return Long.MAX_VALUE;
+        }
+        return super.getTotalParallelLimit();
     }
 
     private void invalidateLookupSetCacheIfConfigured() {

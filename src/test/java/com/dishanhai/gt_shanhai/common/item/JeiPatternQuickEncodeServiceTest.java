@@ -49,7 +49,7 @@ class JeiPatternQuickEncodeServiceTest {
                 < source.indexOf("if (!consumePatternSource(menu, committedSource))"));
         assertTrue(source.contains("insertIntoStellarTarget"),
                 "星律写入必须走山海侧直接槽位实现，避免被外部 GTLCore mixin 禁用");
-        assertTrue(source.contains("removeFromStellarTarget"),
+        assertTrue(source.contains("removeFromTarget"),
                 "直接写入的样板必须能按槽位原子回滚");
         assertTrue(source.contains("PatternQuickUploadService.findTargets"),
                 "自有快取未命中时必须用 GTLCore 公开搜索补齐漏掉的已加载多方块目标");
@@ -57,7 +57,7 @@ class JeiPatternQuickEncodeServiceTest {
                 "公开搜索结果只能作为星律目标发现，不能替代山海侧直接写入");
         String publicSearch = source.substring(
                 source.indexOf("private static List<PatternQuickUploadService.Target> findPublicStellarTargets"),
-                source.indexOf("private static PatternQuickUploadService.UploadResult safeInsertIntoStellarTarget"));
+                source.indexOf("private static PatternQuickUploadService.UploadResult safeInsertIntoTarget"));
         assertTrue(publicSearch.contains("filterToStellarTarget"));
         assertFalse(publicSearch.contains("candidate.recipeTypeId() == null"),
                 "GTLCore 提供的单一类型不能决定多配方主机是否兼容");
@@ -138,10 +138,75 @@ class JeiPatternQuickEncodeServiceTest {
     }
 
     @Test
+    void vanillaSmeltingRecipesUseTheGtElectricFurnaceEncodingRoute() throws Exception {
+        String source = Files.readString(SERVICE);
+        assertTrue(source.contains("resolveRecipe(player.level(), anchorRecipeId)"),
+                "原版 JEI 配方必须使用服务端 RecipeManager 解析");
+        assertTrue(source.contains("collectVanillaSmeltingRecipes(player.level())"),
+                "原版熔炉的整类编写必须只收集 minecraft:smelting 配方");
+
+        String helper = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "item", "PatternRecipeTypeHelper.java"));
+        assertTrue(helper.contains("RecipeType.SMELTING"));
+        assertTrue(helper.contains("GTRecipeTypes.FURNACE_RECIPES.toGTrecipe"),
+                "原版熔炉配方必须复用 GTCEu 的电炉代理转换，保持样板执行语义一致");
+    }
+
+    @Test
+    void resolvesNestedGtRecipeIdsWithoutGlobalLookupAbort() throws Exception {
+        String helper = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "item", "PatternRecipeTypeHelper.java"));
+
+        assertTrue(helper.contains("findRecipeTypeFromId(expected)"),
+                "嵌套配方 ID 必须先按第一段路径定位配方类型");
+        assertTrue(helper.contains("type.getRecipe(recipeManager, expected)"),
+                "服务端配方表应优先按完整 ID 直查");
+        assertTrue(helper.contains("for (List<GTRecipe> proxiedRecipes : type.getProxyRecipes().values())"),
+                "解析必须覆盖 GTCEu 的原版代理配方");
+        String lookup = helper.substring(helper.indexOf("private static GTRecipe findRecipeInType"),
+                helper.indexOf("public static SmeltingRecipe resolveVanillaSmeltingRecipe"));
+        assertTrue(lookup.contains("catch (RuntimeException exception)"),
+                "单个配方类型 lookup 失败不能中止其他类型的解析");
+    }
+
+    @Test
+    void jeiButtonsAcceptVanillaSmeltingRecipeWrappers() throws Exception {
+        String source = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "integration", "jei", "JeiPatternQuickEncodeButtons.java"));
+        assertTrue(source.contains("SmeltingRecipe"),
+                "原版熔炉 JEI 页面必须被快速编写按钮识别");
+        assertTrue(source.contains("recipe.getId()"),
+                "原版配方按钮必须传递其原始 recipe id");
+    }
+
+    @Test
+    void molecularAssemblerTargetsUseThePublicUploadContract() throws Exception {
+        String source = Files.readString(SERVICE);
+        assertTrue(source.contains("new ResourceLocation(\"gtceu\", \"molecular_assembler_matrix\")"),
+                "分子操纵者矩阵必须作为明确目标 ID 支持");
+        assertTrue(source.contains("new ResourceLocation(\"gt_shanhai\", \"primordial_molecular_assembler_module\")"),
+                "原初分子操纵模块必须作为明确目标 ID 支持");
+        assertTrue(source.contains("new ResourceLocation(\"gtceu\", \"me_molecular_assembler_io\")"),
+                "分子目标实际写入端必须限定为分子操纵者 IO 端口");
+        assertTrue(source.contains("PatternQuickUploadService.insertIntoTargetSlotResult"),
+                "非星律目标必须复用 GTLCore 的通用插入 API");
+        assertTrue(source.contains("PatternQuickUploadService.removeFromTarget"),
+                "非星律目标回滚必须复用 GTLCore 的通用回滚 API");
+        assertTrue(source.contains("UploadStatus.INSERTED"),
+                "重复或失败结果不能被误记为已上传");
+        assertTrue(source.contains("MOLECULAR_ASSEMBLER_IO_ID.equals(machine.getDefinition().getId())"),
+                "原初分子操纵模块必须通过实际 me_molecular_assembler_io 端口识别");
+        assertTrue(source.contains("level.getBlockEntity(target.bufferPos()) instanceof PatternContainer"),
+                "独立分子操纵者矩阵只能按自身 PatternContainer 识别，不能借用主机 ID 冒充端口");
+    }
+
+    @Test
     void automaticSelectionHasStableDimensionDistanceAndMachineOrdering() throws Exception {
         String source = Files.readString(SERVICE);
 
         assertTrue(source.contains("target.levelKey().equals(playerLevel) ? 0 : 1"));
+        assertTrue(source.contains("isMolecularAssemblerControllerHint(target) ? 1 : 0"),
+                "星律必须排在分子操纵者目标之前，后者只能作为替补");
         assertTrue(source.contains("thenComparingLong(target -> distanceSquared(playerLevel, playerPos, target))"));
         assertTrue(source.contains("thenComparing(target -> target.targetMachineId() == null"));
         assertTrue(source.contains("thenComparing(target -> target.levelKey().location().toString())"));

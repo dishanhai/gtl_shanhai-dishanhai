@@ -29,7 +29,7 @@ dependencies {
 
     implementation fileTree(dir: 'libs', include: '*.jar',
             excludes: ['spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.0-fix9.jar'])
-    implementation files('libs/[GTLCore]gtlcore-1.2.3.1-fix9.jar')
+    implementation files('libs/gtlcore-1.2.3.2-fix2.jar')
     implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     testImplementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     compileOnly fileTree(dir: 'libs', include: 'spark-*.jar')
