@@ -13,6 +13,7 @@ import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
@@ -26,6 +27,7 @@ public final class PatternRecipeTypeHelper {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai:recipe_type");
 
     public static final String TAG_RECIPE_TYPE = "gt_shanhai_recipe_type";
+    public static final String VANILLA_CRAFTING_RECIPE_TYPE_ID = "minecraft:crafting";
     private static final String VANILLA_SMELTING_RECIPE_TYPE_ID = "minecraft:smelting";
     private static final String VANILLA_SMELTING_RECIPE_TYPE_PATH = "smelting";
     private static final String GTCEU_ELECTRIC_FURNACE_RECIPE_TYPE_ID = "gtceu:electric_furnace";
@@ -464,6 +466,30 @@ public final class PatternRecipeTypeHelper {
 
     public static boolean isVanillaSmeltingRecipe(Level level, String recipeId) {
         return resolveVanillaSmeltingRecipe(level, recipeId) != null;
+    }
+
+    /** Resolve a vanilla crafting recipe by its exact JEI recipe ID. */
+    public static CraftingRecipe resolveVanillaCraftingRecipe(Level level, String recipeId) {
+        if (level == null || recipeId == null || recipeId.trim().isEmpty()) return null;
+        final ResourceLocation expected;
+        try {
+            expected = new ResourceLocation(recipeId.trim());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+        try {
+            for (CraftingRecipe recipe : level.getRecipeManager()
+                    .getAllRecipesFor(RecipeType.CRAFTING)) {
+                if (recipe != null && expected.equals(recipe.getId())) return recipe;
+            }
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+        return null;
+    }
+
+    public static boolean isVanillaCraftingRecipe(Level level, String recipeId) {
+        return resolveVanillaCraftingRecipe(level, recipeId) != null;
     }
 
     public static GTRecipe toElectricFurnaceRecipe(SmeltingRecipe recipe) {

@@ -49,12 +49,25 @@ public final class JeiPatternQuickEncodeButtons {
         return null;
     }
 
+    private static <T> ResourceLocation extractRecipeId(IRecipeLayoutDrawable<T> recipeLayout) {
+        T recipe = recipeLayout.getRecipe();
+        try {
+            ResourceLocation categoryRecipeId = recipeLayout.getRecipeCategory().getRegistryName(recipe);
+            if (categoryRecipeId != null) {
+                return categoryRecipeId;
+            }
+        } catch (RuntimeException ignored) {
+            // 个别第三方分类的包装器可能无法读取 ID，继续使用兼容性解析。
+        }
+        return extractRecipeId(recipe);
+    }
+
     private record Factory(IDrawable icon, boolean wholeRecipeType)
             implements IRecipeButtonControllerFactory {
 
         @Override
         public <T> IIconButtonController createButtonController(IRecipeLayoutDrawable<T> recipeLayout) {
-            ResourceLocation recipeId = extractRecipeId(recipeLayout.getRecipe());
+            ResourceLocation recipeId = extractRecipeId(recipeLayout);
             if (recipeId == null) {
                 return null;
             }

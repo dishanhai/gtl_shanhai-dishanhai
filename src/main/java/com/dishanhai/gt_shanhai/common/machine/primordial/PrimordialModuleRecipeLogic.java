@@ -15,7 +15,10 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
 import org.gtlcore.gtlcore.api.recipe.IParallelLogic;
+import org.gtlcore.gtlcore.api.recipe.IAdvancedContentModifier;
+import org.gtlcore.gtlcore.api.recipe.IGTRecipe;
 import org.gtlcore.gtlcore.api.recipe.RecipeCacheStrategy;
+import org.gtlcore.gtlcore.api.recipe.RecipeExtensionCopier;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 
@@ -224,9 +227,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         GTRecipe amplified = amplifyForMountedCore(recipe);
         long inputMax = IParallelLogic.getMaxParallel(getMachine(), amplified, limit);
         if (inputMax <= 0L) return null;
-        long outputMax = IParallelLogic.getMinParallel(getMachine(), amplified, inputMax);
-        if (outputMax <= 0L) return null;
-        return findMatchableScaledRecipe(amplified, outputMax);
+        // GTLCore 的 getMinParallel() 內部用 double ContentModifier 做輸出容量二分；
+        // Long.MAX_VALUE 超限並行與大批量輸出會在 2^53 後失去整數精度。
+        // 直接以精確 long 縮放配方測試輸出容量，讓二分與最終扣料使用同一條路徑。
+        return findMatchableScaledRecipe(amplified, inputMax);
     }
 
     protected boolean allowsEmptyRecipeOutputs() {
@@ -289,8 +293,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                     accumulatedEu = nextEu;
                     processedRecipe = true;
                     GTRecipe amplifiedOutputRecipe = amplifyForMountedCore(recipe);
-                    GTRecipe scaledOutputRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(
-                            amplifiedOutputRecipe, parallel);
+                    GTRecipe scaledOutputRecipe = scaleRecipePrecisely(amplifiedOutputRecipe, parallel);
                     RecipeCalculationHelper.INSTANCE.collectOutputs(scaledOutputRecipe,
                             (List<Content>) itemOutputs,
                             (List<Content>) fluidOutputs);
@@ -344,7 +347,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         if (context.matchedParallel == parallel && context.matchedRecipe != null) {
             return new MatchableScaledRecipe(parallel, context.matchedRecipe);
         }
-        return new MatchableScaledRecipe(parallel, RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel));
+        return new MatchableScaledRecipe(parallel, scaleRecipePrecisely(recipe, parallel));
     }
 
     private static final class MatchableScaledRecipe {
@@ -378,7 +381,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
         @Override
         public boolean test(long candidate) {
-            GTRecipe scaledRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, candidate);
+            GTRecipe scaledRecipe = scaleRecipePrecisely(recipe, candidate);
             if (matchRecipeInputHandlePartCache(scaledRecipe)
                     && RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe)) {
                 matchedParallel = candidate;
@@ -387,6 +390,20 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             }
             return false;
         }
+    }
+
+    /**
+     * 原初配方的并行缩放必须保留 long 数量精度。
+     * GTLAdd 的 multipleRecipe(long) 会先把倍率转成 double，超过 2^53 后会改变物品/流体数量。
+     */
+    private static GTRecipe scaleRecipePrecisely(GTRecipe recipe, long parallel) {
+        if (parallel <= 1L) {
+            return recipe;
+        }
+        GTRecipe scaled = recipe.copy(IAdvancedContentModifier.preciseMultiplier(parallel), false);
+        RecipeExtensionCopier.copy(recipe, scaled);
+        IGTRecipe.of(scaled).setRealParallels(parallel);
+        return scaled;
     }
 
     static long findHighestMatchableParallel(long requestedParallel, LongPredicate canMatch) {

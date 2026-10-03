@@ -4,6 +4,7 @@ import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
+import appeng.util.CraftingRecipeUtil;
 
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
@@ -16,6 +17,7 @@ import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import org.gtlcore.gtlcore.api.item.tool.ae2.patternTool.Ae2GtmProcessingPattern;
@@ -59,6 +61,27 @@ public final class ShanhaiPatternEncoder {
         }
         PatternRecipeTypeHelper.writeAuthoritativeRecipeType(patternStack, recipe);
         return new Ae2GtmProcessingPattern(patternStack, player, recipe);
+    }
+
+    /** Encode a vanilla crafting recipe as AE2's native crafting pattern. */
+    public static ItemStack encodeCrafting(CraftingRecipe recipe, ServerPlayer player) {
+        if (recipe == null || player == null) return ItemStack.EMPTY;
+
+        List<Ingredient> matrix = CraftingRecipeUtil.ensure3by3CraftingMatrix(recipe);
+        if (matrix == null || matrix.isEmpty()) return ItemStack.EMPTY;
+
+        ItemStack[] inputs = new ItemStack[matrix.size()];
+        boolean hasInput = false;
+        for (int slot = 0; slot < matrix.size(); slot++) {
+            Ingredient ingredient = matrix.get(slot);
+            ItemStack input = firstIngredientStack(ingredient);
+            inputs[slot] = input;
+            hasInput |= !input.isEmpty();
+        }
+        ItemStack output = recipe.getResultItem(player.level().registryAccess()).copy();
+        if (!hasInput || output.isEmpty()) return ItemStack.EMPTY;
+
+        return PatternDetailsHelper.encodeCraftingPattern(recipe, inputs, output, false, false);
     }
 
     private static void appendItemInputs(GTRecipe recipe, List<GenericStack> inputs,
@@ -149,6 +172,17 @@ public final class ShanhaiPatternEncoder {
         if (stacks == null || stacks.length == 0 || stacks[0].isEmpty()) return ItemStack.EMPTY;
         ItemStack result = stacks[0].copy();
         result.setCount(getItemAmount(content, result));
+        return result;
+    }
+
+    private static ItemStack firstIngredientStack(Ingredient ingredient) {
+        if (ingredient == null || ingredient.isEmpty()) return ItemStack.EMPTY;
+        ItemStack[] stacks = ingredient.getItems();
+        if (stacks == null || stacks.length == 0 || stacks[0].isEmpty()) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack result = stacks[0].copy();
+        result.setCount(1);
         return result;
     }
 

@@ -112,24 +112,31 @@ class PrimordialRecipeOutputAmplifierTest {
 
         assertTrue(maxParallel.contains("GTRecipe amplified = amplifyForMountedCore(recipe);"));
         assertTrue(maxParallel.contains("IParallelLogic.getMaxParallel(getMachine(), amplified, limit)"));
-        assertTrue(Pattern.compile("IParallelLogic\\.getMinParallel\\(\\s*getMachine\\(\\)\\s*,"
-                        + "\\s*amplified\\s*,\\s*[A-Za-z_$][\\w$]*\\s*\\)")
-                .matcher(maxParallel).find(), "输出容量必须限制输入可提供的最大并行");
+        assertTrue(maxParallel.contains("return findMatchableScaledRecipe(amplified, inputMax);"),
+                "输出容量必须在精确 long 缩放配方上检查，不能回到 double 二分");
+        assertFalse(maxParallel.contains("IParallelLogic.getMinParallel"),
+                "原初超限并行不得经过 double ContentModifier 的输出容量二分");
 
-        assertEquals(1, countExact(scaledMatch, "RecipeCalculationHelper.INSTANCE.multipleRecipe("),
-                "findMatchableScaledRecipe 只保留防御性兜底重建，二分命中路径由上下文复用 scaledRecipe");
+        assertTrue(scaledMatch.contains("scaleRecipePrecisely(recipe, parallel)"),
+                "findMatchableScaledRecipe 必须使用精确 long 缩放");
         assertTrue(scaledMatch.contains("context.matchedRecipe"));
         assertTrue(source.contains("private final class ScaledRecipeMatchContext implements LongPredicate"));
         assertTrue(source.contains("matchedRecipe = scaledRecipe"));
         assertTrue(source.contains("matchRecipeInputHandlePartCache(scaledRecipe)"));
         assertTrue(source.contains("RecipeRunnerHelper.matchRecipeOutput(getMachine(), scaledRecipe)"));
+        assertTrue(source.contains("IAdvancedContentModifier.preciseMultiplier(parallel)"));
+        assertTrue(source.contains("RecipeExtensionCopier.copy(recipe, scaled)"));
+        assertTrue(source.contains("IGTRecipe.of(scaled).setRealParallels(parallel)"));
+        assertFalse(Pattern.compile("if \\(parallel <= 1L\\)\\s*\\{[^}]*IGTRecipe\\.of\\(recipe\\)")
+                .matcher(source).find(),
+                "parallel <= 1 時不得改寫註冊配方的 realParallels");
 
         assertTrue(wireless.contains("matchableScaledRecipeCache.remove(recipe)"));
         assertTrue(wireless.contains("matchable = findMatchableScaledRecipe(amplifiedRecipe, parallel)"));
         assertTrue(wireless.contains("IParallelLogic.getRecipeOutputChance(machine, scaledRecipe)"));
         assertTrue(wireless.contains("GTRecipe amplifiedOutputRecipe = amplifyForMountedCore(recipe);"));
-        assertTrue(normalizedWireless.contains("multipleRecipe( amplifiedOutputRecipe, parallel)"),
-                "必须先把 chance=0 提升为满概率，再做并行缩放");
+        assertTrue(normalizedWireless.contains("scaleRecipePrecisely(amplifiedOutputRecipe, parallel)"),
+                "必须先把 chance=0 提升为满概率，再做精确 long 并行缩放");
         assertFalse(wireless.contains("collectOutputs(processedRecipes.get(i)"),
                 "已做概率抽取的 processedRecipeList 无法恢复被删除的低概率产出");
         assertEquals(2, countExact(wireless, "calculateRecipeEu(recipe, parallel, euMultiplier)"),

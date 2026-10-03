@@ -1,0 +1,29 @@
+{
+  "type": "gtceu:suprachronal_assembly_line",
+  "conditions": [
+    {"type": "forge:mod_loaded", "modid": "thetornproductionline"},
+    {"type": "gt_shanhai:recipe_enabled", "recipeId": "dishanhai:cztj", "defaultEnabled": false}
+  ],
+  "duration": 10000,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1024, "ingredient": {"item": "thetornproductionline:celestial_secret_deducing_module_advanced_max"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 2048, "ingredient": {"item": "thetornproductionline:celestial_secret_deducing_module_max"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 4096, "ingredient": {"item": "thetornproductionline:celestial_secret_deducing_module_opv"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 8192, "ingredient": {"item": "thetornproductionline:celestial_secret_deducing_module_uxv"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 16384, "ingredient": {"item": "thetornproductionline:celestial_secret_deducing_module_uiv"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 32726, "ingredient": {"item": "thetornproductionline:celestial_secret_deducing_module_uev"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 4096, "ingredient": {"item": "kubejs:suprachronal_mainframe_complex"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 4096, "ingredient": {"item": "kubejs:create_ultimate_battery"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 10, "ingredient": {"item": "kubejs:hyperdimensional_drone"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "dishanhai:wzcz3"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:celestial_secret_plasma"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {"item": [
+    {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "thetornproductionline:celestial_secret_deducing_creative_module"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+  ]},
+  "tickInputs": {"eu": [{"content": 4611686014132420608, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

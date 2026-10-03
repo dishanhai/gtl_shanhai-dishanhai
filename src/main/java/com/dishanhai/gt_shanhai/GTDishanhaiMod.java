@@ -169,6 +169,7 @@ public class GTDishanhaiMod {
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                 (net.minecraftforge.event.server.ServerAboutToStartEvent e) -> {
                     com.dishanhai.gt_shanhai.common.shop.ShopConfig.reload();
+                    com.dishanhai.gt_shanhai.common.recipe.DShanhaiDynamicStarCoreStripperRecipes.register();
                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.runPatternCacheInvalidationBatch("server-about-to-start", () -> {
                         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.updateAllLookupRecipes();
                         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyAllReplaceRules();

@@ -1,0 +1,27 @@
+{
+  "type": "gtceu:assembler_module",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 114514, "ingredient": {"item": "gtceu:void_miner"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 114514, "ingredient": {"item": "gtceu:integrated_ore_processor"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 114514, "ingredient": {"item": "gtceu:large_void_miner"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 57257, "ingredient": {"item": "gtceu:flotation_cell_regulator"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 2147483647, "ingredient": {"item": "minecraft:dragon_egg"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 2147483647, "ingredient": {"item": "kubejs:warped_ender_pearl"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 12, "ingredient": {"item": "gtceu:space_elevator"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 6, "ingredient": {"item": "gtceu:resource_collection"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 6, "ingredient": {"item": "gtceu:assembler_module"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": {"amount": 2147483647, "value": [{"fluid": "gtceu:stellar_energy_rocket_fuel"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 114514, "value": [{"fluid": "gtceu:rocket_fuel_rp_1"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 114514, "value": [{"fluid": "gtceu:rocket_fuel_cn3h7o3"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"amount": 114514, "value": [{"fluid": "gtceu:rocket_fuel_h8n4c2o4"}]}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "outputs": {"item": [
+    {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtladditions:space_infinity_integrated_ore_processor"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+  ]},
+  "tickInputs": {"eu": [{"content": 2097152, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

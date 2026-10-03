@@ -30,6 +30,7 @@ class JeiPatternQuickEncodeIntegrationSourceTest {
         assertTrue(buttons.contains("addRecipeButtonFactory(new Factory(patternIcon, false))"));
         assertTrue(buttons.contains("addRecipeButtonFactory(new Factory(patternIcon, true))"));
         assertTrue(buttons.contains("instanceof Recipe<?> recipe"));
+        assertTrue(buttons.contains("recipeLayout.getRecipeCategory().getRegistryName(recipe)"));
         assertTrue(buttons.contains("state.setVisible(true)"));
         assertTrue(buttons.contains("state.setActive(true)"));
         assertTrue(buttons.contains("message.gt_shanhai.jei.quick_encode.open_terminal"));

@@ -28,6 +28,7 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -901,11 +902,24 @@ public final class JeiPatternQuickEncodeService {
         }
         ItemStack firstDefinition = first.copy();
         ItemStack secondDefinition = second.copy();
-        PatternQuickUploadMetadata.removeRecipeTypes(firstDefinition);
-        PatternQuickUploadMetadata.removeRecipeTypes(secondDefinition);
-        PatternEncoderMetadata.removeEncoder(firstDefinition);
-        PatternEncoderMetadata.removeEncoder(secondDefinition);
+        stripUploadMetadataForComparison(firstDefinition);
+        stripUploadMetadataForComparison(secondDefinition);
         return ItemStack.isSameItemSameTags(firstDefinition, secondDefinition);
+    }
+
+    private static void stripUploadMetadataForComparison(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return;
+        CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.contains("gtlcore", 10)) return;
+        CompoundTag gtlcoreTag = tag.getCompound("gtlcore");
+        gtlcoreTag.remove("patternQuickUploadRecipeTypes");
+        gtlcoreTag.remove("patternEncoderId");
+        gtlcoreTag.remove("patternEncoderName");
+        if (gtlcoreTag.isEmpty()) {
+            tag.remove("gtlcore");
+        } else {
+            tag.put("gtlcore", gtlcoreTag);
+        }
     }
 
     private static boolean supportsRecipeType(RecipeTypePatternBufferPartMachine stellar,
