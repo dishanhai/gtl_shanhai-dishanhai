@@ -96,7 +96,7 @@ jar {
                 'Implementation-Title'    : mod_name,
                 'Implementation-Version'  : mod_version,
                 'Implementation-Vendor'   : mod_authors,
-                'MixinConfigs'            : 'gt_shanhai.mixin.json',
+                'MixinConfigs'            : 'gt_shanhai.mixin.json,gt_shanhai.enhancedcore.mixin.json',
         ])
     }
 }

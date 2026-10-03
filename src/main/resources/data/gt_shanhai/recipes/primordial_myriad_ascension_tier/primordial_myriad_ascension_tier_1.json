@@ -1,0 +1,25 @@
+{
+  "type": "gtceu:primordial_myriad_ascension_tier_1",
+  "duration": 100000,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtceu:eternity_nanoswarm"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtceu:cosmic_nanoswarm"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtladditions:strange_annihilation_fuel_rod"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "dishanhai:bhd_hyper_seed"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": { "amount": 100, "value": [{ "fluid": "gtceu:miracle" }] }, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": { "amount": 50, "value": [{ "fluid": "gtceu:eternity" }] }, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": { "amount": 50, "value": [{ "fluid": "gtceu:infinity" }] }, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": { "amount": 20, "value": [{ "fluid": "gtceu:primordialmatter" }] }, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "recipeConditions": [
+    {"type": "module_level", "module_id": "dishanhai:wzyh", "level": 4},
+    {"type": "recipe_note", "text": "消耗液态奇迹，全原初模块1000x产出(必须安装在同一主机)"}
+  ],
+  "tickInputs": {
+    "eu": [{"content": 2147483647, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]
+  }
+}

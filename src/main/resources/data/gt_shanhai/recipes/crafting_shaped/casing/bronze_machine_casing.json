@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["AAA", "BCA", "DEF"],
+  "key": {
+    "A": {"item": "gtceu:bronze_plate"},
+    "B": {"item": "gtceu:bronze_normal_fluid_pipe"},
+    "C": {"item": "gtceu:bronze_frame"},
+    "D": {"item": "gtlcore:primitive_fluid_regulator"},
+    "E": {"item": "gtlcore:primitive_robot_arm"},
+    "F": {"item": "gtceu:bronze_rotor"}
+  },
+  "result": {"item": "gtceu:bronze_machine_casing", "count": 1}
+}

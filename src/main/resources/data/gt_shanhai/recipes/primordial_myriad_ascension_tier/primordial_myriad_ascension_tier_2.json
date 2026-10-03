@@ -1,0 +1,24 @@
+{
+  "type": "gtceu:primordial_myriad_ascension_tier_2",
+  "duration": 100000,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "kubejs:quantum_chromodynamic_charge"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 4, "ingredient": {"item": "kubejs:leptonic_charge"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 2, "ingredient": {"item": "kubejs:quantumchromodynamic_protective_plating"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 2, "ingredient": {"item": "kubejs:nuclear_star"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": [
+      {"content": { "amount": 20, "value": [{ "fluid": "gtceu:miracle_gas" }] }, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": { "amount": 30, "value": [{ "fluid": "gtceu:liquid_starlight" }] }, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": { "amount": 20, "value": [{ "fluid": "gtceu:uu_matter" }] }, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": { "amount": 100, "value": [{ "fluid": "gtceu:cosmicneutronium" }] }, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ]
+  },
+  "recipeConditions": [
+    {"type": "recipe_note", "text": "消耗气态奇迹,全原初模块100x产出(必须安装在同一主机)"}
+  ],
+  "tickInputs": {
+    "eu": [{"content": 134217728, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]
+  }
+}

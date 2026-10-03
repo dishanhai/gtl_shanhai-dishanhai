@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["EAD", "BCB", "CCC"],
+  "key": {
+    "A": {"item": "gtceu:bronze_block"},
+    "B": {"tag": "gtceu:circuits/ulv"},
+    "C": {"item": "gtceu:bronze_machine_casing"},
+    "D": {"item": "gtlcore:primitive_fluid_regulator"},
+    "E": {"item": "gtlcore:primitive_robot_arm"}
+  },
+  "result": {"item": "gt_shanhai:ulv_zero_point_conversion", "count": 1}
+}

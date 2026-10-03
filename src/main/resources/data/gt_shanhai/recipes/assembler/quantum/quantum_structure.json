@@ -54,14 +54,7 @@
     ],
     "fluid": [
       {
-        "content": {
-          "ingredient": {
-            "amount": 576,
-            "value": {
-              "fluid": "gtceu:soldering_alloy"
-            }
-          }
-        },
+        "content": { "amount": 576, "value": [{ "fluid": "gtceu:soldering_alloy" }] },
         "chance": 10000,
         "maxChance": 10000,
         "tierChanceBoost": 0

@@ -19,7 +19,7 @@ import java.nio.file.Path;
  */
 public final class DShanhaiRecipePackFinder {
     private static final Logger LOG = LoggerFactory.getLogger("DShanhaiRecipePackFinder");
-    private static final String PACK_ID = "dishanhai_recipe_cache";
+    static final String PACK_ID = "dishanhai_recipe_cache";
 
     private DShanhaiRecipePackFinder() {}
 

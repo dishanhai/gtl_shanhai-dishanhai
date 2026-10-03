@@ -62,5 +62,7 @@ description="Shanhai's private stash - Spacetime Wave Matrix"
     versionRange="[15.3.3,)"
     ordering="AFTER"
     side="BOTH"
-[mixins]
+[[mixins]]
 config="gt_shanhai.mixin.json"
+[[mixins]]
+config="gt_shanhai.enhancedcore.mixin.json"

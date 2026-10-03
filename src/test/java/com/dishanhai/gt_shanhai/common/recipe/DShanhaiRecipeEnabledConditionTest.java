@@ -26,6 +26,7 @@ class DShanhaiRecipeEnabledConditionTest {
         test.configOverridesTheDefault();
         test.serializerPreservesIdAndDefault();
         test.forgeRejectsDisabledRecipeBeforeParsing();
+        test.jsonStatisticsRespectsRecipeOverride();
     }
 
     @Test
@@ -71,5 +72,18 @@ class DShanhaiRecipeEnabledConditionTest {
             JsonObject recipe = JsonParser.parseReader(reader).getAsJsonObject();
             assertFalse(CraftingHelper.processConditions(recipe, "conditions", ICondition.IContext.EMPTY));
         }
+    }
+
+    @Test
+    void jsonStatisticsRespectsRecipeOverride() {
+        JsonObject recipe = JsonParser.parseString("""
+                {"conditions":[{"type":"gt_shanhai:recipe_enabled",
+                "recipeId":"dishanhai:test_placeholder","defaultEnabled":false}]}
+                """).getAsJsonObject();
+        assertTrue(DShanhaiJsonRecipeStats.isDisabled(recipe, new JsonObject()));
+
+        JsonObject enabledConfig = new JsonObject();
+        enabledConfig.addProperty("test_placeholder", true);
+        assertFalse(DShanhaiJsonRecipeStats.isDisabled(recipe, enabledConfig));
     }
 }

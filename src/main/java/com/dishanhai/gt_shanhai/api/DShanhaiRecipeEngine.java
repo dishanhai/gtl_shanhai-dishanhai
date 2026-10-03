@@ -191,13 +191,20 @@ public class DShanhaiRecipeEngine {
     }
 
     public static Map<String, Object> getRecipeStats() {
+        com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats.Snapshot jsonStats =
+                com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats.scan(
+                        net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer());
         Map<String, Object> stats = new LinkedHashMap<>();
         stats.put("loaded", Boolean.TRUE);
-        stats.put("total", Long.valueOf(RECIPE_TOTAL.get()));
-        stats.put("success", Long.valueOf(RECIPE_SUCCESS.get()));
-        stats.put("failed", Long.valueOf(RECIPE_FAILED.get()));
-        stats.put("disabled", Long.valueOf(RECIPE_DISABLED.get()));
-        stats.put("errors", Integer.valueOf(RECIPE_ERRORS.size()));
+        stats.put("total", Long.valueOf(RECIPE_TOTAL.get() + jsonStats.total()));
+        stats.put("success", Long.valueOf(RECIPE_SUCCESS.get() + jsonStats.success()));
+        stats.put("failed", Long.valueOf(RECIPE_FAILED.get() + jsonStats.failed()));
+        stats.put("disabled", Long.valueOf(RECIPE_DISABLED.get() + jsonStats.disabled()));
+        stats.put("errors", Integer.valueOf(RECIPE_ERRORS.size() + (int) jsonStats.failed()));
+        stats.put("jsonTotal", Long.valueOf(jsonStats.total()));
+        stats.put("jsonSuccess", Long.valueOf(jsonStats.success()));
+        stats.put("jsonFailed", Long.valueOf(jsonStats.failed()));
+        stats.put("jsonDisabled", Long.valueOf(jsonStats.disabled()));
         Map<String, Object> byType = new LinkedHashMap<>();
         synchronized (RECIPE_TYPE_STATS) {
             for (Map.Entry<String, TypeStats> entry : RECIPE_TYPE_STATS.entrySet()) {
@@ -209,6 +216,23 @@ public class DShanhaiRecipeEngine {
                 item.put("disabled", Long.valueOf(typeStats.disabled));
                 byType.put(entry.getKey(), item);
             }
+        }
+        for (Map.Entry<String, com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats.TypeCounts> entry :
+                jsonStats.byType().entrySet()) {
+            com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats.TypeCounts counts = entry.getValue();
+            @SuppressWarnings("unchecked")
+            Map<String, Object> item = (Map<String, Object>) byType.computeIfAbsent(entry.getKey(), key -> {
+                Map<String, Object> empty = new LinkedHashMap<>();
+                empty.put("total", 0L);
+                empty.put("success", 0L);
+                empty.put("failed", 0L);
+                empty.put("disabled", 0L);
+                return empty;
+            });
+            item.put("total", (Long) item.get("total") + counts.total());
+            item.put("success", (Long) item.get("success") + counts.success());
+            item.put("failed", (Long) item.get("failed") + counts.failed());
+            item.put("disabled", (Long) item.get("disabled") + counts.disabled());
         }
         stats.put("byType", byType);
         return stats;
@@ -373,8 +397,9 @@ public class DShanhaiRecipeEngine {
     }
 
     public static void printRecipeStats() {
+        Map<String, Object> stats = getRecipeStats();
         LOG.info("[DRE] 配方统计: total={}, success={}, failed={}, disabled={}, errors={}",
-                RECIPE_TOTAL.get(), RECIPE_SUCCESS.get(), RECIPE_FAILED.get(), RECIPE_DISABLED.get(), RECIPE_ERRORS.size());
+                stats.get("total"), stats.get("success"), stats.get("failed"), stats.get("disabled"), stats.get("errors"));
     }
 
     public static void recordRecipe(String recipeType, boolean ok, String recipeId, String detail) {
@@ -399,20 +424,15 @@ public class DShanhaiRecipeEngine {
 
     public static void sendRecipeStatsToPlayer(net.minecraft.server.level.ServerPlayer player, String scriptVersion, String apiVersion) {
         if (player == null) return;
-        long total = RECIPE_TOTAL.get();
-        long success = RECIPE_SUCCESS.get();
-        long failed = RECIPE_FAILED.get();
-        long disabled = RECIPE_DISABLED.get();
+        Map<String, Object> stats = getRecipeStats();
+        long total = (Long) stats.get("total");
+        long success = (Long) stats.get("success");
+        long failed = (Long) stats.get("failed");
+        long disabled = (Long) stats.get("disabled");
         String modVersion = getModVersion();
 
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$?body_golden-============= 山海私货配方统计 ============="));
-        if (total == 0L && com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.isCacheValid()) {
-            // 缓存命中时 山海的配方库.js 从头部直接 return，RECIPE_TOTAL 等计数器不会被跑到，
-            // 是正常现象，不是加载异常——配方本身已经从缓存 json 数据包原生加载完毕。
-            long cachedCount = com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.getCachedRecipeCount();
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§b🗃 配方库缓存命中，本次跳过 Rhino 注册统计"));
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a共 §e" + cachedCount + "§a 条配方从缓存数据包原生加载，非异常"));
-        } else if (total == 0L) {
+        if (total == 0L) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e⚠ 配方统计为空，可能加载异常"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§e💡 请检查服务端日志"));
         } else if (failed == 0L) {
@@ -432,8 +452,11 @@ public class DShanhaiRecipeEngine {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a📦 总计: §e" + total + "§a 个配方"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a✓ 成功: §e" + success + "§a 个"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ 失败: §e" + failed + "§c 个"));
+            if ((Long) stats.get("jsonFailed") > 0) {
+                player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个，詳見服務端日誌"));
+            }
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c⚠ 警告: 配方库错误，反馈联系 qq:1982932217"));
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c⚠ 此错误回执由JAVA侧: DShanhaiRecipeEngine 生成，它通常表明是KJS配方错误，通常而言这不是JVAV错误"));
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c⚠ 此错误回执由JAVA侧: DShanhaiRecipeEngine 生成，請檢查 KJS 與 JSON 配方日誌"));
             List<String> recent = getRecentErrors(3);
             if (!recent.isEmpty()) {
                 player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c❌ 最近失败详情:"));

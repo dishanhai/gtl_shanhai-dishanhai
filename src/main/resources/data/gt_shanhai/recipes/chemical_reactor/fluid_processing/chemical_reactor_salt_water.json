@@ -27,14 +27,7 @@
     ],
     "fluid": [
       {
-        "content": {
-          "ingredient": {
-            "amount": 1000,
-            "value": {
-              "fluid": "minecraft:water"
-            }
-          }
-        },
+        "content": { "amount": 1000, "value": [{ "fluid": "minecraft:water" }] },
         "chance": 10000,
         "maxChance": 10000,
         "tierChanceBoost": 0
@@ -44,14 +37,7 @@
   "outputs": {
     "fluid": [
       {
-        "content": {
-          "ingredient": {
-            "amount": 1000,
-            "value": {
-              "fluid": "gtceu:salt_water"
-            }
-          }
-        },
+        "content": { "amount": 1000, "value": [{ "fluid": "gtceu:salt_water" }] },
         "chance": 10000,
         "maxChance": 10000,
         "tierChanceBoost": 0

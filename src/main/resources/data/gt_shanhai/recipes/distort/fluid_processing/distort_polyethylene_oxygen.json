@@ -39,14 +39,7 @@
     ],
     "fluid": [
       {
-        "content": {
-          "ingredient": {
-            "amount": 64000,
-            "value": {
-              "fluid": "minecraft:water"
-            }
-          }
-        },
+        "content": { "amount": 64000, "value": [{ "fluid": "minecraft:water" }] },
         "chance": 10000,
         "maxChance": 10000,
         "tierChanceBoost": 0
@@ -56,27 +49,13 @@
   "outputs": {
     "fluid": [
       {
-        "content": {
-          "ingredient": {
-            "amount": 150000,
-            "value": {
-              "fluid": "gtceu:oxygen"
-            }
-          }
-        },
+        "content": { "amount": 150000, "value": [{ "fluid": "gtceu:oxygen" }] },
         "chance": 10000,
         "maxChance": 10000,
         "tierChanceBoost": 0
       },
       {
-        "content": {
-          "ingredient": {
-            "amount": 150000,
-            "value": {
-              "fluid": "gtceu:polyethylene"
-            }
-          }
-        },
+        "content": { "amount": 150000, "value": [{ "fluid": "gtceu:polyethylene" }] },
         "chance": 10000,
         "maxChance": 10000,
         "tierChanceBoost": 0

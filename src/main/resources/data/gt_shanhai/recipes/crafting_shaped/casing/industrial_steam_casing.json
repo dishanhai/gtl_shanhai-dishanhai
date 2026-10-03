@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["AAA", "BCA", "DEF"],
+  "key": {
+    "A": {"item": "gtceu:bronze_plate"},
+    "B": {"tag": "forge:tools/hammers"},
+    "C": {"item": "gtceu:bronze_frame"},
+    "D": {"item": "gtceu:bronze_rotor"},
+    "E": {"item": "gtceu:bronze_gear"},
+    "F": {"item": "gtceu:bronze_rotor"}
+  },
+  "result": {"item": "gtceu:industrial_steam_casing", "count": 1}
+}

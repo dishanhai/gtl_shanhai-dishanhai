@@ -35,7 +35,11 @@ public final class DShanhaiRecipeEnabledCondition implements ICondition {
 
     @Override
     public boolean test(IContext context) {
-        return isEnabled(recipeId, defaultEnabled, readConfig());
+        return isEnabled(readConfig());
+    }
+
+    boolean isEnabled(JsonObject config) {
+        return isEnabled(recipeId, defaultEnabled, config);
     }
 
     static boolean isEnabled(ResourceLocation recipeId, boolean defaultEnabled, JsonObject config) {
@@ -55,7 +59,7 @@ public final class DShanhaiRecipeEnabledCondition implements ICondition {
         return defaultEnabled;
     }
 
-    private static JsonObject readConfig() {
+    static JsonObject readConfig() {
         Path path = FMLPaths.GAMEDIR.get().resolve(CONFIG_PATH);
         if (!Files.isRegularFile(path)) return new JsonObject();
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
