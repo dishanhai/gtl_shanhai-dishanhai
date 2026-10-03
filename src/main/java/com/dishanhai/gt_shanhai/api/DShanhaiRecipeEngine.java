@@ -673,13 +673,6 @@ public class DShanhaiRecipeEngine {
             ((Map) data).put("id", recipeId);
         } catch (Throwable ignored) {}
 
-        if (!isRecipeEnabled(recipeId, defaultEnabledObj, loadConfigObj)) {
-            LOG.info("[DRE] ⏭️ 配方加载已禁用，跳过: {} ({})", recipeId, recipeType);
-            recordRecipeStat(recipeType, "disabled");
-            setReceipt(true, recipeId, recipeType, "disabled", "", "配方加载已禁用，已跳过");
-            return true;
-        }
-
         try {
             Object machine = createRecipeBuilder(gtrObj, recipeType, recipeId);
             if (!(machine instanceof RecipeJS)) {

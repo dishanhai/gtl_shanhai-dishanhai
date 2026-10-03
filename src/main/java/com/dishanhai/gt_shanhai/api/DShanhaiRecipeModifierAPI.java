@@ -1037,6 +1037,10 @@ public class DShanhaiRecipeModifierAPI {
     /** 运行期被“配方开关”禁用的配方快照，键为 recipeType|recipeId。 */
     private static final Map<String, GTRecipe> DISABLED_RECIPES = new LinkedHashMap<>();
 
+    /** KubeJS 配方开关配置：键为完整配方 ID，false 表示禁用。 */
+    private static final Map<String, Boolean> PERSISTED_RECIPE_TOGGLES = new LinkedHashMap<>();
+    private static boolean LOADING_RECIPE_TOGGLES;
+
     /** addRecipe Mixin 的单一规则入口。返回 null 表示该配方被删除规则拦截。 */
     public static GTRecipe prepareLookupRecipe(GTRecipe recipe) {
         if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) return recipe;
@@ -1129,8 +1133,11 @@ public class DShanhaiRecipeModifierAPI {
         SUPPRESS_GET_RECIPES_STRIP.set(true);
         try {
             type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
-                if (found[0] == null && recipe != null && recipe.getId() != null
-                        && recipeId.equals(recipe.getId().toString())) found[0] = recipe;
+                if (found[0] == null && recipe != null && recipe.getId() != null) {
+                    String id = recipe.getId().toString();
+                    if (recipeId.equals(id) || recipeId.equals(recipe.getId().getPath())
+                            || id.endsWith(":" + recipeId)) found[0] = recipe;
+                }
             });
         } finally {
             SUPPRESS_GET_RECIPES_STRIP.set(false);
@@ -1249,15 +1256,30 @@ public class DShanhaiRecipeModifierAPI {
         String key = typeId + "|" + fullId;
         if (enabled) {
             GTRecipe saved = DISABLED_RECIPES.remove(key);
-            if (saved == null) return current != null;
+            removePersistedRecipeToggle(fullId);
+            if (saved == null) {
+                saveRecipeTogglesIfNeeded();
+                return current != null;
+            }
             replaceLookupRecipe(typeId, fullId, saved);
+            saveRecipeTogglesIfNeeded();
             return true;
         }
-        if (current == null) return DISABLED_RECIPES.containsKey(key);
+        if (current == null) {
+            boolean alreadyDisabled = DISABLED_RECIPES.containsKey(key);
+            if (alreadyDisabled) {
+                PERSISTED_RECIPE_TOGGLES.put(fullId, Boolean.FALSE);
+                saveRecipeTogglesIfNeeded();
+            }
+            return alreadyDisabled;
+        }
         DISABLED_RECIPES.putIfAbsent(key, current.copy());
+        removePersistedRecipeToggle(fullId);
+        PERSISTED_RECIPE_TOGGLES.put(fullId, Boolean.FALSE);
         removeAndSync(typeId, fullId);
         DShanhaiRecipeEngine.clearRecipeCache();
         DShanhaiGTRecipeQuery.resetCache();
+        saveRecipeTogglesIfNeeded();
         return true;
     }
 
@@ -1279,11 +1301,13 @@ public class DShanhaiRecipeModifierAPI {
     public static void resetRecipeToggles() {
         List<GTRecipe> saved = new ArrayList<>(DISABLED_RECIPES.values());
         DISABLED_RECIPES.clear();
+        PERSISTED_RECIPE_TOGGLES.clear();
         for (GTRecipe recipe : saved) {
             if (recipe != null && recipe.recipeType != null && recipe.recipeType.registryName != null && recipe.getId() != null) {
                 replaceLookupRecipe(recipe.recipeType.registryName.toString(), recipe.getId().toString(), recipe);
             }
         }
+        saveRecipeTogglesIfNeeded();
     }
 
     public static void clearOriginalSnapshot(String recipeTypeId) {
@@ -1532,7 +1556,75 @@ public class DShanhaiRecipeModifierAPI {
     private static final java.io.File STRIP_FILE = new java.io.File(CONFIG_DIR, "strip_rules.json");
     private static final java.io.File REPLACE_FILE = new java.io.File(CONFIG_DIR, "replace_rules.json");
     private static final java.io.File DELETE_FILE = new java.io.File(CONFIG_DIR, "delete_rules.json");
+    private static final java.io.File RECIPE_TOGGLE_FILE =
+            new java.io.File(net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get().toFile(),
+                    "kubejs/data/shanhai_recipe_load_config.json");
     private static final com.google.gson.Gson GSON = new com.google.gson.GsonBuilder().setPrettyPrinting().create();
+
+    /** 从 KubeJS 数据目录读取配方开关。配方类型注册前只缓存配置，待 ServerAboutToStart 再应用。 */
+    public static void loadRecipeToggles() {
+        PERSISTED_RECIPE_TOGGLES.clear();
+        if (!RECIPE_TOGGLE_FILE.exists()) return;
+        LOADING_RECIPE_TOGGLES = true;
+        try (var r = new java.io.FileReader(RECIPE_TOGGLE_FILE)) {
+            var json = com.google.gson.JsonParser.parseReader(r);
+            if (!json.isJsonObject()) return;
+            for (var entry : json.getAsJsonObject().entrySet()) {
+                if (entry.getValue() != null && entry.getValue().isJsonPrimitive()
+                        && entry.getValue().getAsJsonPrimitive().isBoolean()
+                        && !entry.getValue().getAsBoolean()) {
+                    PERSISTED_RECIPE_TOGGLES.put(entry.getKey(), Boolean.FALSE);
+                }
+            }
+            LOG.info("已加载配方开关配置: {} 个禁用配方", PERSISTED_RECIPE_TOGGLES.size());
+        } catch (Exception e) {
+            LOG.warn("加载配方开关配置失败: {}", e.getMessage());
+        } finally {
+            LOADING_RECIPE_TOGGLES = false;
+        }
+    }
+
+    /** 在 GT 配方 lookup 完成后应用持久化的禁用状态。 */
+    public static void applyPersistedRecipeToggles() {
+        if (PERSISTED_RECIPE_TOGGLES.isEmpty()) return;
+        List<String> recipeIds = new ArrayList<>(PERSISTED_RECIPE_TOGGLES.keySet());
+        boolean previous = LOADING_RECIPE_TOGGLES;
+        LOADING_RECIPE_TOGGLES = true;
+        int applied = 0;
+        try {
+            for (String recipeId : recipeIds) {
+                if (setRecipeEnabled(recipeId, false)) applied++;
+            }
+        } finally {
+            LOADING_RECIPE_TOGGLES = previous;
+        }
+        saveRecipeTogglesIfNeeded();
+        LOG.info("已应用持久化配方开关: {}/{} 个禁用配方", applied, recipeIds.size());
+    }
+
+    private static void removePersistedRecipeToggle(String recipeId) {
+        if (recipeId == null) return;
+        PERSISTED_RECIPE_TOGGLES.remove(recipeId);
+        int separator = recipeId.indexOf(':');
+        if (separator >= 0) PERSISTED_RECIPE_TOGGLES.remove(recipeId.substring(separator + 1));
+    }
+
+    private static void saveRecipeTogglesIfNeeded() {
+        if (LOADING_RECIPE_TOGGLES) return;
+        try {
+            java.io.File parent = RECIPE_TOGGLE_FILE.getParentFile();
+            if (parent != null) parent.mkdirs();
+            var obj = new com.google.gson.JsonObject();
+            for (String recipeId : PERSISTED_RECIPE_TOGGLES.keySet()) {
+                obj.addProperty(recipeId, false);
+            }
+            try (var w = new java.io.FileWriter(RECIPE_TOGGLE_FILE)) {
+                GSON.toJson(obj, w);
+            }
+        } catch (Exception e) {
+            LOG.warn("保存配方开关配置失败: {}", e.getMessage());
+        }
+    }
 
     /** 保存剥离规则到 config/gt_shanhai/strip_rules.json */
     public static void saveStripRules() {

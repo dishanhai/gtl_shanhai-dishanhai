@@ -125,6 +125,7 @@ public class GTDishanhaiMod {
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadStripRules();
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadReplaceRules();
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadDeleteRules();
+        com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadRecipeToggles();
         // 先恢复规则内存，让客户端首次 JEI 收集就能看到过滤后的配方；lookup 等类型就绪后再统一重建。
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadActivePresets();
 
@@ -181,6 +182,10 @@ public class GTDishanhaiMod {
                     // 变了就把这次 Rhino 真实注册出的配方从 RecipeManager 取出，编码成标准数据包 json 落盘，
                     // 交给 DShanhaiRecipePackFinder 常驻注入，下次开服直接走 vanilla 原生加载。
                     com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.exportIfNeeded(e.getServer());
+                    // 必须在完整配方导出后再移除禁用配方，否则缓存会丢失可恢复的配方快照。
+                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.runPatternCacheInvalidationBatch(
+                            "apply-persisted-recipe-toggles", () ->
+                                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyPersistedRecipeToggles());
                 });
 
         // 限购总量剩余次数按存档隔离回填/初始化，见 ShopLimitSavedData（不能再等 shop.json 里
