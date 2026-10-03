@@ -10,6 +10,11 @@ import com.gregtechceu.gtceu.api.registry.registrate.GTRegistrate;
 import com.dishanhai.gt_shanhai.common.DShanhaiCreativeModeTabs;
 import com.dishanhai.gt_shanhai.common.item.DShanhaiItems;
 import com.dishanhai.gt_shanhai.common.machine.DShanhaiMachines;
+import com.dishanhai.gt_shanhai.common.recipe.DShanhaiJavaRecipeLibrary;
+
+import net.minecraft.data.recipes.FinishedRecipe;
+
+import java.util.function.Consumer;
 
 @GTAddon
 public class GTDishanhaiGTAddon implements IGTAddon {
@@ -40,5 +45,10 @@ public class GTDishanhaiGTAddon implements IGTAddon {
         GTRegistries.MACHINES.unfreeze();
         DShanhaiMachines.init();
         GTRegistries.MACHINES.freeze();
+    }
+
+    @Override
+    public void addRecipes(Consumer<FinishedRecipe> provider) {
+        DShanhaiJavaRecipeLibrary.registerRecipes(provider);
     }
 }

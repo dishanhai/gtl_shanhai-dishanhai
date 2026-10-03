@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "D:/minecraft/gtl/.minecraft/versions/八周目/.minecraft/versions/GTL九周目/.minecraft/versions/GregTech Leisure-增强版/kubejs"
+		}
+	],
+	"settings": {
+		"java.compile.nullAnalysis.mode": "automatic",
+		"git.ignoreLimitWarning": true
+	}
+}

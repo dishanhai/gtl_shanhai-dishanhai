@@ -1,0 +1,67 @@
+{
+  "type": "gtceu:assembler",
+  "duration": 200,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:hv_machine_hull"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "kubejs:hv_universal_circuit"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:circuit",
+          "configuration": 17
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:hv_overclock_hatch"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 512,
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  }
+}

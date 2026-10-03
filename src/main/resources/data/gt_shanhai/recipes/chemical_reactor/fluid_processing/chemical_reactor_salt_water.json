@@ -1,0 +1,71 @@
+{
+  "type": "gtceu:chemical_reactor",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzcz1"
+          }
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:circuit",
+          "configuration": 1
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "ingredient": {
+            "amount": 1000,
+            "value": {
+              "fluid": "minecraft:water"
+            }
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "ingredient": {
+            "amount": 1000,
+            "value": {
+              "fluid": "gtceu:salt_water"
+            }
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 32,
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "type": "gtceu:distort",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtceu:carbon_dust"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzcz2"
+          }
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:circuit",
+          "configuration": 20
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "ingredient": {
+            "amount": 64000,
+            "value": {
+              "fluid": "minecraft:water"
+            }
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "ingredient": {
+            "amount": 150000,
+            "value": {
+              "fluid": "gtceu:oxygen"
+            }
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "ingredient": {
+            "amount": 150000,
+            "value": {
+              "fluid": "gtceu:polyethylene"
+            }
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "data": {
+    "ebf_temp": 9000
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 131072,
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.api.recipe;
 
+import com.dishanhai.gt_shanhai.integration.jei.ModuleCatalystSlotUI;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
@@ -9,6 +10,9 @@ import com.gregtechceu.gtceu.common.data.GTSoundEntries;
 import com.gtladd.gtladditions.common.modify.GTLAddSoundEntries;
 
 import com.lowdragmc.lowdraglib.gui.texture.ProgressTexture;
+
+import java.util.ArrayList;
+import java.util.List;
 
 public class DShanhaiRecipeTypes {
 
@@ -53,11 +57,18 @@ public class DShanhaiRecipeTypes {
     public static GTRecipeType COIN_FORGE;                       // 原初铸币工厂
     public static GTRecipeType PROXY_EXECUTION;                   // 代理执行占位类型
     public static final GTRecipeType[] NINE_INDUSTRIAL_MODES = new GTRecipeType[36]; // 36 水浒传模式显示类型
+    private static final List<GTRecipeType> REGISTERED_TYPES = new ArrayList<>();
 
     private DShanhaiRecipeTypes() {}
 
+    private static GTRecipeType register(String name, String category) {
+        GTRecipeType type = GTRecipeTypes.register(name, category);
+        REGISTERED_TYPES.add(type);
+        return type;
+    }
+
     public static void init() {
-        SPACETIME_DISTORTION = GTRecipeTypes.register("spacetime_distortion", "multiblock")
+        SPACETIME_DISTORTION = register("spacetime_distortion", "multiblock")
                 .setMaxIOSize(9, 6, 6, 5)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -68,7 +79,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        KU_MING_YUAN_YANG = GTRecipeTypes.register("kmyy", "multiblock")
+        KU_MING_YUAN_YANG = register("kmyy", "multiblock")
                 .setMaxIOSize(2, 1, 0, 0)
                 .setEUIO(IO.OUT)
                 .setMaxTooltips(4)
@@ -79,7 +90,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PRIMORDIAL_POWER_GENERATOR = GTRecipeTypes.register("primordial_power_generator", "multiblock")
+        PRIMORDIAL_POWER_GENERATOR = register("primordial_power_generator", "multiblock")
                 .setMaxIOSize(2, 2, 2, 2)
                 .setEUIO(IO.OUT)
                 .setMaxTooltips(4)
@@ -90,7 +101,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PRIMORDIAL_MYRIAD_ASCENSION_TIER_2 = GTRecipeTypes.register("primordial_myriad_ascension_tier_2", "multiblock")
+        PRIMORDIAL_MYRIAD_ASCENSION_TIER_2 = register("primordial_myriad_ascension_tier_2", "multiblock")
                 .setMaxIOSize(4, 0, 4, 0)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -99,7 +110,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTSoundEntries.ARC);
 
-        PRIMORDIAL_MYRIAD_ASCENSION_TIER_1 = GTRecipeTypes.register("primordial_myriad_ascension_tier_1", "multiblock")
+        PRIMORDIAL_MYRIAD_ASCENSION_TIER_1 = register("primordial_myriad_ascension_tier_1", "multiblock")
                 .setMaxIOSize(4, 0, 4, 0)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -108,7 +119,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTSoundEntries.ARC);
 
-        PRIMORDIAL_STELLAR_REACTION = GTRecipeTypes.register("primordial_stellar_reaction", "multiblock")
+        PRIMORDIAL_STELLAR_REACTION = register("primordial_stellar_reaction", "multiblock")
                 .setMaxIOSize(5, 3, 5, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -116,7 +127,7 @@ public class DShanhaiRecipeTypes {
                 .setSound(GTSoundEntries.ARC)
                 .setOffsetVoltageText(true);
 
-        PRIMORDIAL_BIOLOGICAL_CORE = GTRecipeTypes.register("primordial_biological_core", "multiblock")
+        PRIMORDIAL_BIOLOGICAL_CORE = register("primordial_biological_core", "multiblock")
                 .setMaxIOSize(6, 3, 3, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -127,7 +138,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PRIMORDIAL_MATTER_RECOMBINATION = GTRecipeTypes.register("primordial_matter_recombination", "multiblock")
+        PRIMORDIAL_MATTER_RECOMBINATION = register("primordial_matter_recombination", "multiblock")
                 .setMaxIOSize(12, 3, 6, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -138,7 +149,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PRIMORDIAL_CAUSAL_WEAVING = GTRecipeTypes.register("primordial_causal_weaving", "multiblock")
+        PRIMORDIAL_CAUSAL_WEAVING = register("primordial_causal_weaving", "multiblock")
                 .setMaxIOSize(12, 3, 6, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -149,7 +160,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PRIMORDIAL_SINGULARITY_INVERSION = GTRecipeTypes.register("primordial_singularity_inversion", "multiblock")
+        PRIMORDIAL_SINGULARITY_INVERSION = register("primordial_singularity_inversion", "multiblock")
                 .setMaxIOSize(12, 3, 6, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -160,7 +171,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        GRAVITATIONAL_WAVE_PRODUCTION = GTRecipeTypes.register("gravitational_wave_production", "multiblock")
+        GRAVITATIONAL_WAVE_PRODUCTION = register("gravitational_wave_production", "multiblock")
                 .setMaxIOSize(2, 2, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -171,7 +182,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        SEVENTY_TWO_CHANGES = GTRecipeTypes.register("seventy_two_changes", "single")
+        SEVENTY_TWO_CHANGES = register("seventy_two_changes", "single")
                 .setMaxIOSize(1, 1, 0, 0)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -180,7 +191,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        CHAOS_CRAFTING = GTRecipeTypes.register("chaos_crafting", "multiblock")
+        CHAOS_CRAFTING = register("chaos_crafting", "multiblock")
                 .setMaxIOSize(24, 24, 12, 12)
                 .setEUIO(IO.BOTH)
                 .setMaxTooltips(4)
@@ -191,7 +202,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        NEBULA_SIPHONING = GTRecipeTypes.register("nebula_siphoning", "multiblock")
+        NEBULA_SIPHONING = register("nebula_siphoning", "multiblock")
                 .setMaxIOSize(6, 3, 6, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -202,7 +213,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        TIANJIE_NAVIGATION = GTRecipeTypes.register("tianjie_navigation", "multiblock")
+        TIANJIE_NAVIGATION = register("tianjie_navigation", "multiblock")
                 .setMaxIOSize(6, 3, 6, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -213,7 +224,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        GRAVITATIONAL_WAVE_CONSUMPTION = GTRecipeTypes.register("gravitational_wave_consumption", "multiblock")
+        GRAVITATIONAL_WAVE_CONSUMPTION = register("gravitational_wave_consumption", "multiblock")
                 .setMaxIOSize(1, 0, 1, 0)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -222,7 +233,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        TAIXU_SMELTING = GTRecipeTypes.register("taixu_smelting", "multiblock")
+        TAIXU_SMELTING = register("taixu_smelting", "multiblock")
                 .setMaxIOSize(2, 2, 1, 1)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -233,7 +244,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        MATTER_AGGREGATION = GTRecipeTypes.register("matter_aggregation", "single")
+        MATTER_AGGREGATION = register("matter_aggregation", "single")
                 .setMaxIOSize(2, 2, 0, 0)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -242,7 +253,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        ZERO_POINT_CONVERSION = GTRecipeTypes.register("zero_point_conversion", "single")
+        ZERO_POINT_CONVERSION = register("zero_point_conversion", "single")
                 .setMaxIOSize(2, 2, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -253,7 +264,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PHOTON_SIPHON = GTRecipeTypes.register("photon_siphon", "single")
+        PHOTON_SIPHON = register("photon_siphon", "single")
                 .setMaxIOSize(4, 2, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -265,7 +276,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        WORLDLINE_OSCILLATION_COLLECTION = GTRecipeTypes.register("worldline_oscillation_collection", "multiblock")
+        WORLDLINE_OSCILLATION_COLLECTION = register("worldline_oscillation_collection", "multiblock")
                 .setMaxIOSize(2, 2, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -276,7 +287,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        INTERSTELLAR_MATTER_ABSORPTION = GTRecipeTypes.register("interstellar_matter_absorption", "multiblock")
+        INTERSTELLAR_MATTER_ABSORPTION = register("interstellar_matter_absorption", "multiblock")
                 .setMaxIOSize(2, 2, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -287,7 +298,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        MATTER_FLOW_CONDENSATION = GTRecipeTypes.register("matter_flow_condensation", "multiblock")
+        MATTER_FLOW_CONDENSATION = register("matter_flow_condensation", "multiblock")
                 .setMaxIOSize(4, 2, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -297,7 +308,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PRIMORDIAL_ENERGY_ABSORPTION = GTRecipeTypes.register("primordial_energy_absorption", "multiblock")
+        PRIMORDIAL_ENERGY_ABSORPTION = register("primordial_energy_absorption", "multiblock")
                 .setMaxIOSize(1, 2, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -308,7 +319,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PHOTON_SEPARATION = GTRecipeTypes.register("photon_separation", "multiblock")
+        PHOTON_SEPARATION = register("photon_separation", "multiblock")
                 .setMaxIOSize(2, 4, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -319,7 +330,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        MATTER_MODULE_CASTING = GTRecipeTypes.register("matter_module_casting", "multiblock")
+        MATTER_MODULE_CASTING = register("matter_module_casting", "multiblock")
                 .setMaxIOSize(15, 6, 6, 6)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -330,7 +341,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        MATTER_FORGING = GTRecipeTypes.register("matter_forging", "multiblock")
+        MATTER_FORGING = register("matter_forging", "multiblock")
                 .setMaxIOSize(4, 2, 2, 2)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -340,7 +351,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        WL_BOARD_CIRCUIT_ASSEMBLY = GTRecipeTypes.register("wl_board_circuit_assembly", "multiblock")
+        WL_BOARD_CIRCUIT_ASSEMBLY = register("wl_board_circuit_assembly", "multiblock")
                 .setMaxIOSize(9, 3, 6, 4)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -350,7 +361,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.CIRCUIT_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        WL_BOARD_WAFER_ETCHING = GTRecipeTypes.register("wl_board_wafer_etching", "multiblock")
+        WL_BOARD_WAFER_ETCHING = register("wl_board_wafer_etching", "multiblock")
                 .setMaxIOSize(6, 3, 4, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -361,7 +372,7 @@ public class DShanhaiRecipeTypes {
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
         // ========== 世线裂解枢纽 ==========
-        WORLDLINE_PROBABILITY_CRACKING = GTRecipeTypes.register("worldline_probability_cracking", "multiblock")
+        WORLDLINE_PROBABILITY_CRACKING = register("worldline_probability_cracking", "multiblock")
                 .setMaxIOSize(6, 9, 4, 4)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -372,7 +383,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        WORLDLINE_MATTER_RECURRENCE = GTRecipeTypes.register("worldline_matter_recurrence", "multiblock")
+        WORLDLINE_MATTER_RECURRENCE = register("worldline_matter_recurrence", "multiblock")
                 .setMaxIOSize(9, 6, 6, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -383,7 +394,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        WORLDLINE_SAMPLING = GTRecipeTypes.register("worldline_sampling", "multiblock")
+        WORLDLINE_SAMPLING = register("worldline_sampling", "multiblock")
                 .setMaxIOSize(3, 12, 3, 6)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -395,7 +406,7 @@ public class DShanhaiRecipeTypes {
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
         // ========== 原初世线切割核心 ==========
-        WORLDLINE_CUTTING = GTRecipeTypes.register("worldline_cutting", "multiblock")
+        WORLDLINE_CUTTING = register("worldline_cutting", "multiblock")
                 .setMaxIOSize(6, 6, 4, 4)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -406,7 +417,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        HIGH_DIMENSIONAL_FRAGMENT_CUTTING = GTRecipeTypes.register("high_dimensional_fragment_cutting", "multiblock")
+        HIGH_DIMENSIONAL_FRAGMENT_CUTTING = register("high_dimensional_fragment_cutting", "multiblock")
                 .setMaxIOSize(4, 9, 2, 4)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -417,7 +428,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        BLACK_HOLE_COMPRESSOR = GTRecipeTypes.register("black_hole_compressor", "multiblock")
+        BLACK_HOLE_COMPRESSOR = register("black_hole_compressor", "multiblock")
                 .setMaxIOSize(9, 6, 6, 5)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -428,7 +439,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        BLACK_HOLE_NEUTRONIUM_COMPRESSOR = GTRecipeTypes.register("black_hole_neutronium_compressor", "multiblock")
+        BLACK_HOLE_NEUTRONIUM_COMPRESSOR = register("black_hole_neutronium_compressor", "multiblock")
                 .setMaxIOSize(9, 6, 6, 5)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -439,7 +450,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        BLACK_HOLE_EVENT_HORIZON_BLAST = GTRecipeTypes.register("black_hole_event_horizon_blast", "multiblock")
+        BLACK_HOLE_EVENT_HORIZON_BLAST = register("black_hole_event_horizon_blast", "multiblock")
                 .setMaxIOSize(3, 9, 3, 6)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -450,7 +461,7 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        NINE_INDUSTRIAL = GTRecipeTypes.register("nine_industrial", "multiblock")
+        NINE_INDUSTRIAL = register("nine_industrial", "multiblock")
                 .setMaxIOSize(24, 24, 12, 12)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -471,7 +482,7 @@ public class DShanhaiRecipeTypes {
         }
 
         // ========== 原初铸币工厂 ==========
-        COIN_FORGE = GTRecipeTypes.register("coin_forge", "multiblock")
+        COIN_FORGE = register("coin_forge", "multiblock")
                 .setMaxIOSize(9, 6, 6, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
@@ -482,11 +493,15 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        PROXY_EXECUTION = GTRecipeTypes.register("proxy_execution", "multiblock")
+        PROXY_EXECUTION = register("proxy_execution", "multiblock")
                 .setMaxIOSize(0, 0, 0, 0)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(1)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
+
+        for (GTRecipeType type : REGISTERED_TYPES) {
+            ModuleCatalystSlotUI.install(type);
+        }
     }
 }

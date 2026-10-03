@@ -1,0 +1,109 @@
+{
+  "type": "gtceu:assembler",
+  "duration": 300,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:advanced_computer_casing"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 8,
+          "ingredient": {
+            "item": "ae2:engineering_processor"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4,
+          "ingredient": {
+            "item": "ae2:crafting_accelerator"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 2,
+          "ingredient": {
+            "item": "gtceu:quantum_processor_mainframe"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4,
+          "ingredient": {
+            "item": "gtceu:quantum_eye"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "ingredient": {
+            "amount": 288,
+            "value": {
+              "fluid": "gtceu:soldering_alloy"
+            }
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:quantum_parallel_processor"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 8192,
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  }
+}

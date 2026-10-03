@@ -118,6 +118,8 @@ public class GTDishanhaiMod {
         // 注册配置文件 (config/gt_shanhai/gt_shanhai-common.toml)
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON_SPEC, "gt_shanhai/gt_shanhai-common.toml");
         LOGGER.info("Config registered");
+        net.minecraftforge.common.crafting.CraftingHelper.register(
+                com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeEnabledCondition.Serializer.INSTANCE);
 
         // 加载剥离规则持久化
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadStripRules();

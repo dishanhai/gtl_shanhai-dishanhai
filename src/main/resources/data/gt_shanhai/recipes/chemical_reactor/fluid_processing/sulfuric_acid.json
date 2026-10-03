@@ -1,0 +1,89 @@
+{
+  "type": "gtceu:chemical_reactor",
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:sulfur_dust"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzcz1"
+          }
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:circuit",
+          "configuration": 2
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "ingredient": {
+            "amount": 1000,
+            "value": {
+              "fluid": "minecraft:water"
+            }
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "ingredient": {
+            "amount": 1000,
+            "value": {
+              "fluid": "gtceu:sulfuric_acid"
+            }
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "recipeConditions": [
+    {
+      "type": "recipe_note",
+      "text": "2号电路执行，槽位溢出放不下"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 32,
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  }
+}

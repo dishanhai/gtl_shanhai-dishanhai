@@ -1214,7 +1214,7 @@ public class DShanhaiCommands {
         try {
             Path path = Path.of(".").toRealPath();
             java.io.File f = new java.io.File(path.toFile(), CONFIG_PATH);
-            if (!f.exists()) return null;
+            if (!f.exists()) return new JsonObject();
             try (FileReader r = new FileReader(f)) {
                 return JsonParser.parseReader(r).getAsJsonObject();
             }
@@ -1227,6 +1227,7 @@ public class DShanhaiCommands {
         try {
             Path path = Path.of(".").toRealPath();
             java.io.File f = new java.io.File(path.toFile(), CONFIG_PATH);
+            java.nio.file.Files.createDirectories(f.toPath().getParent());
             try (FileWriter w = new FileWriter(f)) {
                 GSON.toJson(config, w);
             }

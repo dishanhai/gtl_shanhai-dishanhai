@@ -1,0 +1,65 @@
+{
+  "type": "gtceu:assembler",
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:test_placeholder",
+      "defaultEnabled": false
+    }
+  ],
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "nonexistent:invalid_item"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 2,
+          "ingredient": {
+            "item": "another:missing_item"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 3,
+          "ingredient": {
+            "item": "invalid:output_item"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 8,
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  }
+}
