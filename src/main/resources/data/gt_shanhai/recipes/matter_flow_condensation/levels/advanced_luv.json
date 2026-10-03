@@ -1,0 +1,116 @@
+{
+  "type": "gtceu:matter_flow_condensation",
+  "duration": 100,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:naquadah_alloy_ingot"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:uranium_rhodium_dinaquadide_ingot"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:indium_tin_barium_titanium_cuprate_ingot"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:circuit",
+          "configuration": 7
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:duranium"
+            }
+          ]
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:europium"
+            }
+          ]
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_advanced"
+            }
+          ]
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 32768,
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "recipeConditions": [
+    {
+      "type": "gt_shanhai:module_level",
+      "module_id": "dishanhai:wzax",
+      "level": 7
+    }
+  ]
+}

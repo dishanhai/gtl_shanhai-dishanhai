@@ -1,0 +1,116 @@
+{
+  "type": "gtceu:matter_flow_condensation",
+  "duration": 100,
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtladditions:creon_ingot"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtladditions:mellion_dust"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtladditions:super_dense_magmatter_plate"
+          }
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:circuit",
+          "configuration": 15
+        },
+        "chance": 0,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtladditions:star_gate_crystal_slurry"
+            }
+          ]
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      },
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:spatialfluid"
+            }
+          ]
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_ultimate"
+            }
+          ]
+        },
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2147483647,
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "recipeConditions": [
+    {
+      "type": "gt_shanhai:module_level",
+      "module_id": "dishanhai:wzyh",
+      "level": 15
+    }
+  ]
+}

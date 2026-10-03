@@ -1,0 +1,8 @@
+{
+  "type": "gtceu:assembler",
+  "conditions": [{"type": "forge:mod_loaded", "modid": "mekanism"}],
+  "duration": 20,
+  "inputs": {"item": [{"content": {"type": "gtceu:sized", "count": 102400, "ingredient": {"item": "gtladditions:god_forge_energy_casing"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}], "fluid": []},
+  "outputs": {"item": [{"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"type": "forge:nbt", "item": "mekanism:creative_energy_cube", "count": 1, "nbt": "{mekData:{EnergyContainers:[{Container:0b,stored:\"18446744073709551615.9999\"}],componentConfig:{config0:{side0:4,side1:4,side2:4,side3:4,side4:4,side5:4}}}}"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}], "fluid": []},
+  "tickInputs": {"eu": [{"content": 2147483647, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

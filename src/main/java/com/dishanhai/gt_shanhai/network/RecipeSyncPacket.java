@@ -22,7 +22,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -84,8 +86,15 @@ public class RecipeSyncPacket {
                 if (lookup == null) continue;
                 var branch = lookup.getLookup();
                 if (branch == null) continue;
-                List<GTRecipe> allRecipes = new ArrayList<>();
-                branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
+                Map<String, GTRecipe> recipesById = new LinkedHashMap<>();
+                List<GTRecipe> recipesWithoutId = new ArrayList<>();
+                branch.getRecipes(true).forEach(r -> {
+                    if (r == null) return;
+                    if (r.getId() == null) recipesWithoutId.add(r);
+                    else recipesById.put(r.getId().toString(), r);
+                });
+                List<GTRecipe> allRecipes = new ArrayList<>(recipesById.values());
+                allRecipes.addAll(recipesWithoutId);
 
                 // 隐藏旧条目
                 var oldWrappers = JEIRecipeCache.get(jeiType);
@@ -96,6 +105,9 @@ public class RecipeSyncPacket {
                 List<GTRecipeWrapper> newWrappers = new ArrayList<>();
                 for (GTRecipe r : allRecipes) {
                     GTRecipe copy = r.copy();
+                    String typeId = copy.recipeType == null || copy.recipeType.registryName == null
+                            ? "" : copy.recipeType.registryName.toString();
+                    if (DShanhaiRecipeModifierAPI.isDeletedByRuntimeRule(typeId, copy)) continue;
                     DShanhaiRecipeModifierAPI.applyStripByType(copy);
                     DShanhaiRecipeModifierAPI.applyReplaceByType(copy);
                     newWrappers.add(new GTRecipeWrapper(copy));

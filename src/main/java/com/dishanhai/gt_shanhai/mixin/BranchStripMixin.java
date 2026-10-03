@@ -27,6 +27,7 @@ public class BranchStripMixin {
 
         Stream<GTRecipe> stripped = stream.map(recipe -> {
             if (recipe == null) return null;
+            if (DShanhaiRecipeModifierAPI.isCanonicalLookupRecipe(recipe)) return recipe;
             if (recipe.recipeType == null || recipe.recipeType.registryName == null) return recipe;
             if (!DShanhaiRecipeModifierAPI.hasRuntimeStripOrReplaceRules(recipe.recipeType.registryName.toString())) return recipe;
             GTRecipe copy = recipe.copy();

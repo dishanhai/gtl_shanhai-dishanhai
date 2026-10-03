@@ -1,6 +1,10 @@
 package com.dishanhai.gt_shanhai.integration.jei;
 
+import appeng.api.stacks.AEKey;
+import appeng.api.stacks.GenericStack;
 import appeng.core.definitions.AEItems;
+import appeng.integration.modules.jei.GenericEntryStackHelper;
+import appeng.integration.modules.jeirei.TransferHelper;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
 import com.dishanhai.gt_shanhai.network.JeiPatternQuickEncodeRequestPacket;
@@ -13,6 +17,7 @@ import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.buttons.IButtonState;
 import mezz.jei.api.gui.buttons.IIconButtonController;
 import mezz.jei.api.gui.drawable.IDrawable;
+import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
 import mezz.jei.api.helpers.IGuiHelper;
 import mezz.jei.api.recipe.advanced.IRecipeButtonControllerFactory;
@@ -24,6 +29,10 @@ import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
+
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public final class JeiPatternQuickEncodeButtons {
 
@@ -71,11 +80,12 @@ public final class JeiPatternQuickEncodeButtons {
             if (recipeId == null) {
                 return null;
             }
-            return new Controller(icon, recipeId, wholeRecipeType);
+            return new Controller(icon, recipeId, wholeRecipeType, recipeLayout);
         }
     }
 
-    private record Controller(IDrawable icon, ResourceLocation recipeId, boolean wholeRecipeType)
+    private record Controller(IDrawable icon, ResourceLocation recipeId, boolean wholeRecipeType,
+                              IRecipeLayoutDrawable<?> recipeLayout)
             implements IIconButtonController {
 
         @Override
@@ -118,11 +128,52 @@ public final class JeiPatternQuickEncodeButtons {
 
         @Override
         public void drawExtras(GuiGraphics graphics, Rect2i area, int mouseX, int mouseY, float partialTick) {
-            if (!wholeRecipeType) return;
-            graphics.drawString(Minecraft.getInstance().font, "+",
-                    area.getX() + area.getWidth() - 6,
-                    area.getY() + area.getHeight() - 8,
-                    0xFFFFFF, true);
+            if (mouseX >= area.getX()
+                    && mouseX < area.getX() + area.getWidth()
+                    && mouseY >= area.getY()
+                    && mouseY < area.getY() + area.getHeight()) {
+                drawCraftableSlotHighlights(graphics);
+            }
+            if (wholeRecipeType) {
+                graphics.drawString(Minecraft.getInstance().font, "+",
+                        area.getX() + area.getWidth() - 6,
+                        area.getY() + area.getHeight() - 8,
+                        0xFFFFFF, true);
+            }
+        }
+
+        private void drawCraftableSlotHighlights(GuiGraphics graphics) {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (!(minecraft.player != null
+                    && minecraft.player.containerMenu instanceof PatternEncodingTermMenu menu)) {
+                return;
+            }
+            if (menu.getClientRepo() == null) {
+                return;
+            }
+
+            Set<AEKey> craftableKeys = menu.getClientRepo().getAllEntries().stream()
+                    .filter(entry -> entry.isCraftable())
+                    .map(entry -> entry.getWhat())
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            if (craftableKeys.isEmpty()) {
+                return;
+            }
+
+            Rect2i recipeRect = recipeLayout.getRect();
+            graphics.pose().pushPose();
+            graphics.pose().translate(recipeRect.getX(), recipeRect.getY(), 0.0f);
+            recipeLayout.getRecipeSlotsView()
+                    .getSlotViews(RecipeIngredientRole.INPUT)
+                    .stream()
+                    .filter(slot -> slot.getAllIngredients().anyMatch(ingredient -> {
+                        GenericStack stack = GenericEntryStackHelper.ingredientToStack(ingredient);
+                        return stack != null && craftableKeys.contains(stack.what());
+                    }))
+                    .forEach(slot -> slot.drawHighlight(graphics,
+                            TransferHelper.BLUE_SLOT_HIGHLIGHT_COLOR));
+            graphics.pose().popPose();
         }
     }
 }

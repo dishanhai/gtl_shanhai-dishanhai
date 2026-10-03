@@ -102,6 +102,7 @@
     "KeyStorageInsertThrottleMixin",
     "SlotCacheManagerAccessor",
     "RecipeModifierAPIMixin",
+    "GTRecipeTypeModifierMixin",
     "RecipeRunnerHelperOutputMixin",
     "RecipeIteratorStripMixin",
     "BranchStripMixin",

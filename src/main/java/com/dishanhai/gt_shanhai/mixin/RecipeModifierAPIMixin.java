@@ -18,6 +18,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.gen.Invoker;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
@@ -40,6 +41,21 @@ public abstract class RecipeModifierAPIMixin {
         DShanhaiRuntimeRecipeCache.clear();
     }
 
+    /**
+     * GTCEu 的 RecipeManagerMixin 会把原始配方通过此入口写入索引；在这里生成唯一规则副本，
+     * 使机器查找、RecipeIterator 与 Branch 使用同一份已修改内容。
+     */
+    @ModifyVariable(method = "addRecipe", at = @At("HEAD"), argsOnly = true, remap = false)
+    private GTRecipe gtShanhai$prepareLookupRecipe(GTRecipe recipe) {
+        return DShanhaiRecipeModifierAPI.prepareLookupRecipe(recipe);
+    }
+
+    @Inject(method = "addRecipe", at = @At("HEAD"), remap = false)
+    private void gtShanhai$removeDuplicateLookupRecipe(GTRecipe recipe,
+                                                        org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> cir) {
+        DShanhaiRecipeModifierAPI.removeDuplicateLookupRecipe(recipe);
+    }
+
     @Inject(method = "findRecipe", at = @At("HEAD"), cancellable = true)
     private void gtShanhai$getCachedFindRecipe(IRecipeCapabilityHolder holder, CallbackInfoReturnable<GTRecipe> cir) {
         String typeId = gtShanhai$getRecipeTypeId();
@@ -54,6 +70,9 @@ public abstract class RecipeModifierAPIMixin {
     @Inject(method = "findRecipe", at = @At("RETURN"), cancellable = true)
     private void gtShanhai$stripOnFindRecipe(IRecipeCapabilityHolder holder, CallbackInfoReturnable<GTRecipe> cir) {
         String typeId = gtShanhai$getRecipeTypeId();
+        GTRecipe current = cir.getReturnValue();
+        if (DShanhaiRecipeModifierAPI.isCanonicalLookupRecipe(current)
+                && !DShanhaiRecipeModifierAPI.hasRuntimeJSModifiers(typeId)) return;
         if (!DShanhaiRecipeModifierAPI.canUseRuntimeRecipeCache(typeId)) {
             applyStrip(holder, cir);
             return;
@@ -94,6 +113,8 @@ public abstract class RecipeModifierAPIMixin {
         if (recipe == null) return;
         String typeId = recipe.recipeType == null ? gtShanhai$getRecipeTypeId() : recipe.recipeType.registryName.toString();
         if (!DShanhaiRecipeModifierAPI.hasRuntimeRecipeModifiers(typeId)) return;
+        if (DShanhaiRecipeModifierAPI.isCanonicalLookupRecipe(recipe)
+                && !DShanhaiRecipeModifierAPI.hasRuntimeJSModifiers(typeId)) return;
         if (!(holder instanceof MetaMachine mm)) return;
         GTRecipe copy = recipe.copy();
         DShanhaiRecipeModifierAPI.applyFromRecipe(mm, copy);
@@ -105,6 +126,8 @@ public abstract class RecipeModifierAPIMixin {
         if (recipe == null || !DShanhaiRecipeModifierAPI.hasRuntimeRecipeModifiers(typeId)) {
             return recipe;
         }
+        if (DShanhaiRecipeModifierAPI.isCanonicalLookupRecipe(recipe)
+                && !DShanhaiRecipeModifierAPI.hasRuntimeJSModifiers(typeId)) return recipe;
         if (!(holder instanceof MetaMachine mm)) {
             GTRecipe copy = recipe.copy();
             DShanhaiRecipeModifierAPI.applyStripByType(copy);

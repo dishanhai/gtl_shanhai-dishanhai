@@ -40,6 +40,11 @@ public class GTLAddRecipesLogicMixins {
         GTLAddMultipleRecipesLogic self = (GTLAddMultipleRecipesLogic) (Object) this;
         MetaMachine machine = self.getMachine();
 
+        String typeId = recipe.recipeType == null || recipe.recipeType.registryName == null
+                ? "" : recipe.recipeType.registryName.toString();
+        if (DShanhaiRecipeModifierAPI.isCanonicalLookupRecipe(recipe)
+                && !DShanhaiRecipeModifierAPI.hasRuntimeJSModifiers(typeId)) return;
+
         GTRecipe copy = recipe.copy();
         DShanhaiRecipeModifierAPI.applyFromRecipe(machine, copy);
         cir.setReturnValue(copy);

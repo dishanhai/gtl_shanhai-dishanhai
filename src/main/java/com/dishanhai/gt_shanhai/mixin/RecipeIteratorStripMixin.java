@@ -22,6 +22,7 @@ public class RecipeIteratorStripMixin {
     private void gtShanhai$modifyOnNext(CallbackInfoReturnable<GTRecipe> cir) {
         GTRecipe recipe = cir.getReturnValue();
         if (recipe == null) return;
+        if (DShanhaiRecipeModifierAPI.isCanonicalLookupRecipe(recipe)) return;
         if (recipe.recipeType == null || recipe.recipeType.registryName == null) return;
         if (!DShanhaiRecipeModifierAPI.hasRuntimeStripOrReplaceRules(recipe.recipeType.registryName.toString())) return;
         GTRecipe copy = recipe.copy();

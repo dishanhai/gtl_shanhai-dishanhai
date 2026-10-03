@@ -41,6 +41,7 @@ import java.util.function.Supplier;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiGTRecipeQuery;
 import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
+import com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
@@ -463,8 +464,224 @@ public class DShanhaiCommands {
                         .then(materialsCommand("材料"))
                         .then(sdaCommand("SDA"))
                         .then(shopEditPermCommand()));
+        event.getDispatcher().register(legacyRecipeCommands());
+        registerLegacyRecipeAliases(event);
         // 商店对所有玩家开放（不加权限门槛）
         event.getDispatcher().register(shopCommand("商店"));
+    }
+
+    /** 舊腳本使用的無空格命令名稱（/配方修改、/配方信息……）。 */
+    private static void registerLegacyRecipeAliases(RegisterCommandsEvent event) {
+        event.getDispatcher().register(Commands.literal("配方修改").requires(s -> s.hasPermission(2))
+                .then(Commands.argument("配方ID", StringArgumentType.string())
+                        .then(Commands.argument("字段", StringArgumentType.string())
+                                .then(Commands.argument("值", StringArgumentType.greedyString())
+                                        .executes(ctx -> modifyRecipeCommand(ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "配方ID"),
+                                                StringArgumentType.getString(ctx, "字段"),
+                                                StringArgumentType.getString(ctx, "值")))))));
+        event.getDispatcher().register(Commands.literal("配方信息").requires(s -> s.hasPermission(2))
+                .then(Commands.argument("配方ID", StringArgumentType.greedyString())
+                        .executes(ctx -> recipeInfoCommand(ctx.getSource(), StringArgumentType.getString(ctx, "配方ID")))));
+        event.getDispatcher().register(Commands.literal("配方列表").requires(s -> s.hasPermission(2))
+                .executes(ctx -> listRecipes(ctx.getSource()))
+                .then(Commands.argument("类型", StringArgumentType.greedyString())
+                        .executes(ctx -> listRecipesByType(ctx.getSource(), StringArgumentType.getString(ctx, "类型")))));
+        event.getDispatcher().register(Commands.literal("配方帮助").requires(s -> s.hasPermission(2))
+                .executes(ctx -> recipeHelpCommand(ctx.getSource())));
+        event.getDispatcher().register(Commands.literal("配方开关").requires(s -> s.hasPermission(2))
+                .then(Commands.argument("配方ID", StringArgumentType.string())
+                        .then(Commands.argument("状态", StringArgumentType.word())
+                                .executes(ctx -> setRecipeStateCommand(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "配方ID"),
+                                        StringArgumentType.getString(ctx, "状态"))))));
+        event.getDispatcher().register(Commands.literal("配方数组开关").requires(s -> s.hasPermission(2))
+                .then(Commands.argument("类型", StringArgumentType.string())
+                        .then(Commands.argument("状态", StringArgumentType.word())
+                                .executes(ctx -> setRecipeTypeStateCommand(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "类型"),
+                                        StringArgumentType.getString(ctx, "状态"))))));
+        event.getDispatcher().register(Commands.literal("配方状态").requires(s -> s.hasPermission(2))
+                .then(Commands.argument("配方ID", StringArgumentType.greedyString())
+                        .executes(ctx -> statusRecipe(ctx.getSource(), StringArgumentType.getString(ctx, "配方ID")))));
+        event.getDispatcher().register(Commands.literal("配方列表已启用").requires(s -> s.hasPermission(2))
+                .executes(ctx -> listEnabledRecipes(ctx.getSource())));
+        event.getDispatcher().register(Commands.literal("配方列表已禁用").requires(s -> s.hasPermission(2))
+                .executes(ctx -> listDisabledRecipes(ctx.getSource())));
+        event.getDispatcher().register(Commands.literal("配方重置配置").requires(s -> s.hasPermission(2))
+                .executes(ctx -> {
+                    DShanhaiRecipeModifierAPI.resetRecipeToggles();
+                    ctx.getSource().sendSuccess(msg("§a[山海] 已恢复所有运行期配方开关"), false);
+                    return 1;
+                }));
+        event.getDispatcher().register(Commands.literal("配方确认重置").requires(s -> s.hasPermission(2))
+                .executes(ctx -> {
+                    DShanhaiRecipeModifierAPI.resetRecipeToggles();
+                    ctx.getSource().sendSuccess(msg("§a[山海] 已确认并恢复所有运行期配方开关"), false);
+                    return 1;
+                }));
+        event.getDispatcher().register(Commands.literal("配方诊断").requires(s -> s.hasPermission(2))
+                .executes(ctx -> recipeDiagnosticCommand(ctx.getSource())));
+        event.getDispatcher().register(Commands.literal("配方扫描注册").requires(s -> s.hasPermission(2))
+                .executes(ctx -> {
+                    ctx.getSource().sendSuccess(msg("§b[山海] 已扫描运行期 GTRecipe：" + liveRecipeCount()
+                            + " 个；新版配方无需旧数组注册"), false);
+                    return 1;
+                }));
+    }
+
+    /** 舊版山海_配方控制API 的中文根命令兼容层，数据源统一改为运行期 GTRecipe lookup。 */
+    private static LiteralArgumentBuilder<CommandSourceStack> legacyRecipeCommands() {
+        var root = Commands.literal("配方").requires(s -> s.hasPermission(2));
+        root.then(Commands.literal("修改")
+                .then(Commands.argument("配方ID", StringArgumentType.string())
+                        .then(Commands.argument("字段", StringArgumentType.string())
+                                .then(Commands.argument("值", StringArgumentType.greedyString())
+                                        .executes(ctx -> modifyRecipeCommand(ctx.getSource(),
+                                                StringArgumentType.getString(ctx, "配方ID"),
+                                                StringArgumentType.getString(ctx, "字段"),
+                                                StringArgumentType.getString(ctx, "值")))))));
+        root.then(Commands.literal("信息")
+                .then(Commands.argument("配方ID", StringArgumentType.greedyString())
+                        .executes(ctx -> recipeInfoCommand(ctx.getSource(), StringArgumentType.getString(ctx, "配方ID")))));
+        root.then(Commands.literal("列表")
+                .executes(ctx -> listRecipes(ctx.getSource()))
+                .then(Commands.argument("类型", StringArgumentType.greedyString())
+                        .executes(ctx -> listRecipesByType(ctx.getSource(), StringArgumentType.getString(ctx, "类型")))));
+        root.then(Commands.literal("帮助").executes(ctx -> recipeHelpCommand(ctx.getSource())));
+        root.then(Commands.literal("开关")
+                .then(Commands.argument("配方ID", StringArgumentType.string())
+                        .then(Commands.argument("状态", StringArgumentType.word())
+                                .executes(ctx -> setRecipeStateCommand(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "配方ID"),
+                                        StringArgumentType.getString(ctx, "状态"))))));
+        root.then(Commands.literal("数组开关")
+                .then(Commands.argument("类型", StringArgumentType.string())
+                        .then(Commands.argument("状态", StringArgumentType.word())
+                                .executes(ctx -> setRecipeTypeStateCommand(ctx.getSource(),
+                                        StringArgumentType.getString(ctx, "类型"),
+                                        StringArgumentType.getString(ctx, "状态"))))));
+        root.then(Commands.literal("状态")
+                .then(Commands.argument("配方ID", StringArgumentType.greedyString())
+                        .executes(ctx -> statusRecipe(ctx.getSource(), StringArgumentType.getString(ctx, "配方ID")))));
+        root.then(Commands.literal("列表已启用").executes(ctx -> listEnabledRecipes(ctx.getSource())));
+        root.then(Commands.literal("列表已禁用").executes(ctx -> listDisabledRecipes(ctx.getSource())));
+        root.then(Commands.literal("重置配置").executes(ctx -> {
+            DShanhaiRecipeModifierAPI.resetRecipeToggles();
+            ctx.getSource().sendSuccess(msg("§a[山海] 已恢复所有运行期配方开关"), false);
+            return 1;
+        }));
+        root.then(Commands.literal("确认重置").executes(ctx -> {
+            DShanhaiRecipeModifierAPI.resetRecipeToggles();
+            ctx.getSource().sendSuccess(msg("§a[山海] 已确认并恢复所有运行期配方开关"), false);
+            return 1;
+        }));
+        root.then(Commands.literal("诊断").executes(ctx -> recipeDiagnosticCommand(ctx.getSource())));
+        root.then(Commands.literal("扫描注册").executes(ctx -> {
+            ctx.getSource().sendSuccess(msg("§b[山海] 已扫描运行期 GTRecipe：" + liveRecipeCount() + " 个；新版配方无需旧数组注册"), false);
+            return 1;
+        }));
+        return root;
+    }
+
+    private static int modifyRecipeCommand(CommandSourceStack source, String id, String field, String value) {
+        String type = DShanhaiRecipeModifierAPI.findRecipeTypeById(id);
+        if (type == null) {
+            source.sendSuccess(msg("§c找不到运行期配方: " + id), false);
+            return 0;
+        }
+        String fullId = id.indexOf(':') >= 0 ? id : findFullRecipeId(type, id);
+        boolean ok = DShanhaiRecipeModifierAPI.modifyRecipeField(type, fullId, field, value);
+        source.sendSuccess(msg(ok ? "§a[山海] 已修改 " + fullId + " 的 " + field + " = " + value
+                : "§c[山海] 配方修改失败，支持字段：duration、EUt、inputEUt、outputEUt、parallels、ocTier、isFuel"), false);
+        return ok ? 1 : 0;
+    }
+
+    private static int recipeInfoCommand(CommandSourceStack source, String id) {
+        String type = DShanhaiRecipeModifierAPI.findRecipeTypeById(id);
+        if (type == null) {
+            source.sendSuccess(msg("§c找不到运行期配方: " + id), false);
+            return 0;
+        }
+        String fullId = id.indexOf(':') >= 0 ? id : findFullRecipeId(type, id);
+        for (var entry : DShanhaiGTRecipeQuery.getRecipesByType(type)) {
+            if (!entry.recipeId.equals(fullId) && !entry.recipeId.endsWith(":" + id)) continue;
+            source.sendSuccess(msg("§6===== 配方信息 =====\n§eID: §f" + entry.recipeId
+                    + "\n§e类型: §f" + entry.typeId + "\n§eEU/t: §f" + entry.eut
+                    + "\n§e时间: §f" + entry.duration + " tick\n§e输入: §f"
+                    + String.join(", ", entry.itemInputs) + "\n§e输出: §f" + String.join(", ", entry.itemOutputs)), false);
+            return 1;
+        }
+        source.sendSuccess(msg("§c配方已找到但摘要缓存尚未包含: " + fullId), false);
+        return 0;
+    }
+
+    private static int listRecipesByType(CommandSourceStack source, String type) {
+        String fullType = resolveRecipeType(type);
+        var recipes = DShanhaiRecipeEngine.getRecipesOfType(fullType);
+        StringBuilder sb = new StringBuilder("§b[山海] ").append(fullType).append(" 配方 (共 ").append(recipes.size()).append("):\n");
+        int limit = Math.min(40, recipes.size());
+        for (int i = 0; i < limit; i++) if (recipes.get(i) != null && recipes.get(i).getId() != null) sb.append(" §a✔ ").append(recipes.get(i).getId()).append("\n");
+        if (recipes.size() > limit) sb.append("§7... 还有 ").append(recipes.size() - limit).append(" 个");
+        source.sendSuccess(msg(sb.toString()), false);
+        return 1;
+    }
+
+    private static int setRecipeStateCommand(CommandSourceStack source, String id, String state) {
+        boolean enabled = isOnState(state);
+        boolean ok = DShanhaiRecipeModifierAPI.setRecipeEnabled(id, enabled);
+        source.sendSuccess(msg(ok ? "§a[山海] " + id + (enabled ? " 已启用" : " 已禁用") : "§c[山海] 配方不存在或无法切换: " + id), false);
+        return ok ? 1 : 0;
+    }
+
+    private static int setRecipeTypeStateCommand(CommandSourceStack source, String type, String state) {
+        String fullType = resolveRecipeType(type);
+        boolean enabled = isOnState(state);
+        var recipes = DShanhaiRecipeEngine.getRecipesOfType(fullType);
+        int changed = 0;
+        for (var recipe : new ArrayList<>(recipes)) if (recipe != null && recipe.getId() != null
+                && DShanhaiRecipeModifierAPI.setRecipeEnabled(recipe.getId().toString(), enabled)) changed++;
+        source.sendSuccess(msg("§a[山海] " + fullType + " 已" + (enabled ? "启用" : "禁用") + " " + changed + " 个配方"), false);
+        return changed > 0 ? 1 : 0;
+    }
+
+    private static boolean isOnState(String state) {
+        return "开".equals(state) || "启用".equals(state) || "开启".equals(state) || "on".equalsIgnoreCase(state) || "true".equalsIgnoreCase(state);
+    }
+
+    private static int listEnabledRecipes(CommandSourceStack source) { return listRecipeStates(source, true); }
+    private static int listDisabledRecipes(CommandSourceStack source) { return listRecipeStates(source, false); }
+    private static int listRecipeStates(CommandSourceStack source, boolean enabled) {
+        List<String> ids = new ArrayList<>();
+        if (!enabled) ids.addAll(DShanhaiRecipeModifierAPI.getDisabledRecipeIds());
+        else for (var type : GTRegistries.RECIPE_TYPES) if (type != null && type.registryName != null)
+            for (var recipe : DShanhaiRecipeEngine.getRecipesOfType(type.registryName.toString())) if (recipe != null && recipe.getId() != null) ids.add(recipe.getId().toString());
+        source.sendSuccess(msg((enabled ? "§a已启用" : "§c已禁用") + "配方 (" + ids.size() + "): " + String.join(", ", ids.subList(0, Math.min(40, ids.size())))), false);
+        return 1;
+    }
+
+    private static int recipeHelpCommand(CommandSourceStack source) {
+        source.sendSuccess(msg("§6配方命令：§f/配方修改 <ID> <字段> <值>；/配方信息 <ID>；/配方列表 [类型]；/配方开关 <ID> <开/关>；/配方状态 <ID>；/配方列表已启用；/配方列表已禁用；/配方诊断"), false);
+        return 1;
+    }
+
+    private static int recipeDiagnosticCommand(CommandSourceStack source) {
+        source.sendSuccess(msg("§6配方诊断：§f运行期配方 " + liveRecipeCount() + " 个，禁用快照 "
+                + DShanhaiRecipeModifierAPI.getDisabledRecipeIds().size() + " 个；数据源为 GTRegistries.RECIPE_TYPES lookup"), false);
+        return 1;
+    }
+
+    private static int liveRecipeCount() {
+        int total = 0;
+        for (var type : GTRegistries.RECIPE_TYPES) if (type != null && type.registryName != null)
+            total += DShanhaiRecipeEngine.getRecipesOfType(type.registryName.toString()).size();
+        return total;
+    }
+
+    private static String findFullRecipeId(String type, String id) {
+        for (var recipe : DShanhaiRecipeEngine.getRecipesOfType(type)) if (recipe != null && recipe.getId() != null
+                && (recipe.getId().getPath().equals(id) || recipe.getId().toString().endsWith(":" + id))) return recipe.getId().toString();
+        return id;
     }
 
     // ===== 商店编辑权限（/山海 商店 授权|取消授权|授权列表）=====
@@ -1164,49 +1381,48 @@ public class DShanhaiCommands {
     }
 
     private static int listRecipes(CommandSourceStack source) {
-        JsonObject config = loadConfig();
-        if (config == null) {
-            source.sendSuccess(msg("§c无法读取配方配置文件"), false);
-            return 0;
+        int total = 0;
+        StringBuilder sb = new StringBuilder("§b[山海] 运行期配方列表:\n");
+        int shown = 0;
+        for (var type : GTRegistries.RECIPE_TYPES) {
+            if (type == null || type.registryName == null) continue;
+            var recipes = DShanhaiRecipeEngine.getRecipesOfType(type.registryName.toString());
+            total += recipes.size();
+            for (var recipe : recipes) {
+                if (recipe == null || recipe.getId() == null) continue;
+                if (shown < 40) sb.append(" §a✔ §f").append(recipe.getId()).append(" §7[")
+                        .append(type.registryName).append("]\n");
+                shown++;
+            }
         }
-        int total = config.size();
-        int enabled = 0;
-        StringBuilder sb = new StringBuilder("§b[山海] 配方列表 (§f" + total + "§b 个):\n");
-        int n = 0;
-        for (Map.Entry<String, com.google.gson.JsonElement> e : config.entrySet()) {
-            String id = e.getKey();
-            boolean val = e.getValue().getAsBoolean();
-            if (val) enabled++;
-            sb.append(val ? " §a✔ " : " §c✘ ").append(id).append("\n");
-            n++;
-            if (n >= 20) { sb.append("§7... 还有 ").append(total - 20).append(" 个配方"); break; }
-        }
-        sb.append("§7已启用: §a").append(enabled).append("§7/").append(total);
+        if (shown > 40) sb.append("§7... 还有 ").append(shown - 40).append(" 个配方未显示\n");
+        sb.append("§7当前 lookup 配方总数: §f").append(total)
+                .append("§7，禁用快照: §f").append(DShanhaiRecipeModifierAPI.getDisabledRecipeIds().size());
         source.sendSuccess(msg(sb.toString()), false);
         return 1;
     }
 
     private static int toggleRecipe(CommandSourceStack source, String id) {
-        JsonObject config = loadConfig();
-        if (config == null) { source.sendSuccess(msg("§c无法读取配方配置文件"), false); return 0; }
-
-        boolean current = config.has(id) && config.get(id).getAsBoolean();
-        config.addProperty(id, !current);
-        saveConfig(config);
-
-        source.sendSuccess(msg("§b[山海] " + (!current ? "§a✔ 已启用" : "§c✘ 已禁用") + " §f" + id), false);
+        boolean enabled = DShanhaiRecipeModifierAPI.isRecipeEnabled(id);
+        boolean ok = DShanhaiRecipeModifierAPI.setRecipeEnabled(id, !enabled);
+        if (!ok) {
+            source.sendSuccess(msg("§c配方不存在或无法修改: " + id), false);
+            return 0;
+        }
+        source.sendSuccess(msg("§b[山海] " + (!enabled ? "§a✔ 已启用" : "§c✘ 已禁用") + " §f" + id), false);
         return 1;
     }
 
     private static int statusRecipe(CommandSourceStack source, String id) {
-        JsonObject config = loadConfig();
-        if (config == null) { source.sendSuccess(msg("§c无法读取配方配置文件"), false); return 0; }
-
-        boolean exists = config.has(id);
-        if (!exists) { source.sendSuccess(msg("§c配方 " + id + " 不存在"), false); return 0; }
-
-        boolean val = config.get(id).getAsBoolean();
-        source.sendSuccess(msg("§b[山海] §f" + id + " §7状态: " + (val ? "§a已启用" : "§c已禁用")), false);
+        String type = DShanhaiRecipeModifierAPI.findRecipeTypeById(id);
+        boolean enabled = type != null && DShanhaiRecipeModifierAPI.isRecipeEnabled(id);
+        if (type == null && enabled) type = "unknown";
+        if (type == null && DShanhaiRecipeModifierAPI.getDisabledRecipeIds().stream().noneMatch(v -> v.equals(id) || v.endsWith(":" + id))) {
+            source.sendSuccess(msg("§c配方不存在: " + id), false);
+            return 0;
+        }
+        source.sendSuccess(msg("§b[山海] §f" + id + " §7状态: " + (enabled ? "§a已启用" : "§c已禁用")
+                + (type == null ? "" : " §7类型: §f" + type)), false);
         return 1;
     }
 
