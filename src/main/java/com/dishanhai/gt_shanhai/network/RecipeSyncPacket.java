@@ -1,15 +1,14 @@
 package com.dishanhai.gt_shanhai.network;
 
-import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.client.ShanhaiJEIPlugin;
 import com.dishanhai.gt_shanhai.api.JEIRecipeCache;
+import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeTypeCategory;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -77,8 +76,12 @@ public class RecipeSyncPacket {
             var recipeManager = jeiRuntime.getRecipeManager();
             int refreshed = 0;
 
-            for (var entry : BuiltInRegistries.RECIPE_TYPE.entrySet()) {
-                if (!(entry.getValue() instanceof GTRecipeType gtRecipeType)) continue;
+            // 只刷新有山海运行时规则的类型；普通 GT 配方留在 JEI 原列表中，
+            // 避免同步包把全局配方再次 addRecipes 导致成倍显示。
+            for (String typeId : DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds()) {
+                GTRecipeType gtRecipeType = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
+                        .get(new ResourceLocation(typeId));
+                if (gtRecipeType == null) continue;
                 var jeiType = GTRecipeTypeCategory.TYPES.apply(gtRecipeType);
 
                 // 从 GT 配方查找表取当前配方（而非原版 RecipeManager）
@@ -97,25 +100,26 @@ public class RecipeSyncPacket {
                 allRecipes.addAll(recipesWithoutId);
 
                 // 隐藏旧条目
-                var oldWrappers = JEIRecipeCache.get(jeiType);
+                var oldWrappers = jeiRuntime.getRecipeManager().createRecipeLookup(jeiType)
+                        .includeHidden().get()
+                        .filter(value -> value instanceof GTRecipeWrapper)
+                        .map(value -> (GTRecipeWrapper) value)
+                        .toList();
+                if (oldWrappers.isEmpty()) oldWrappers = JEIRecipeCache.get(jeiType);
                 if (!oldWrappers.isEmpty()) {
                     recipeManager.hideRecipes(jeiType, oldWrappers);
                 }
+                JEIRecipeCache.clear(jeiType);
 
                 List<GTRecipeWrapper> newWrappers = new ArrayList<>();
                 for (GTRecipe r : allRecipes) {
-                    GTRecipe copy = r.copy();
-                    String typeId = copy.recipeType == null || copy.recipeType.registryName == null
-                            ? "" : copy.recipeType.registryName.toString();
-                    if (DShanhaiRecipeModifierAPI.isDeletedByRuntimeRule(typeId, copy)) continue;
-                    DShanhaiRecipeModifierAPI.applyStripByType(copy);
-                    DShanhaiRecipeModifierAPI.applyReplaceByType(copy);
-                    newWrappers.add(new GTRecipeWrapper(copy));
+                    // lookup 已經是唯一的執行時來源；JEI 收集 mixin 會在此邊界
+                    // 過濾刪除規則並只對非 canonical 配方建立修改副本。
+                    newWrappers.add(new GTRecipeWrapper(r));
                 }
 
                 if (!newWrappers.isEmpty()) {
                     recipeManager.addRecipes(jeiType, newWrappers);
-                    JEIRecipeCache.put(jeiType, newWrappers);
                     refreshed++;
                 }
             }

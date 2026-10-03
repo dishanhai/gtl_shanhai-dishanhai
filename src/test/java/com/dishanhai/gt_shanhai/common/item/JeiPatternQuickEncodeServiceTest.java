@@ -20,7 +20,7 @@ class JeiPatternQuickEncodeServiceTest {
         assertTrue(source.contains("recipe.recipeType == recipeType"));
         assertTrue(source.contains("unique.putIfAbsent(recipe.id, recipe)"));
         assertTrue(source.contains("Comparator.comparing(recipe -> recipe.id.toString())"));
-        assertTrue(source.contains("ShanhaiPatternEncoder.encode(recipe, player, true)"));
+        assertTrue(source.contains("ShanhaiPatternEncoder.encode(recipe, player, menu, true)"));
         String encoder = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
                 "gt_shanhai", "common", "item", "ShanhaiPatternEncoder.java"));
         assertTrue(encoder.contains("PatternQuickUploadMetadata.writeRecipeTypeId"),

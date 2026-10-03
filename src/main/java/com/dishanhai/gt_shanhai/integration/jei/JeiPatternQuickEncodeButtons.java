@@ -7,11 +7,13 @@ import appeng.integration.modules.jei.GenericEntryStackHelper;
 import appeng.integration.modules.jeirei.TransferHelper;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
+import com.dishanhai.gt_shanhai.client.ShanhaiJEIPlugin;
 import com.dishanhai.gt_shanhai.network.JeiPatternQuickEncodeRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
 
+import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.buttons.IButtonState;
@@ -21,7 +23,9 @@ import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
 import mezz.jei.api.helpers.IGuiHelper;
 import mezz.jei.api.recipe.advanced.IRecipeButtonControllerFactory;
+import mezz.jei.api.recipe.transfer.IRecipeTransferError;
 import mezz.jei.api.registration.IAdvancedRegistration;
+import mezz.jei.common.transfer.RecipeTransferUtil;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -29,10 +33,6 @@ import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
-
-import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 public final class JeiPatternQuickEncodeButtons {
 
@@ -132,7 +132,7 @@ public final class JeiPatternQuickEncodeButtons {
                     && mouseX < area.getX() + area.getWidth()
                     && mouseY >= area.getY()
                     && mouseY < area.getY() + area.getHeight()) {
-                drawCraftableSlotHighlights(graphics);
+                drawNativeTransferError(graphics, mouseX, mouseY);
             }
             if (wholeRecipeType) {
                 graphics.drawString(Minecraft.getInstance().font, "+",
@@ -142,38 +142,31 @@ public final class JeiPatternQuickEncodeButtons {
             }
         }
 
-        private void drawCraftableSlotHighlights(GuiGraphics graphics) {
+        private void drawNativeTransferError(GuiGraphics graphics, int mouseX, int mouseY) {
             Minecraft minecraft = Minecraft.getInstance();
             if (!(minecraft.player != null
                     && minecraft.player.containerMenu instanceof PatternEncodingTermMenu menu)) {
                 return;
             }
-            if (menu.getClientRepo() == null) {
+            IJeiRuntime runtime = ShanhaiJEIPlugin.getRuntime();
+            if (runtime == null) {
                 return;
             }
 
-            Set<AEKey> craftableKeys = menu.getClientRepo().getAllEntries().stream()
-                    .filter(entry -> entry.isCraftable())
-                    .map(entry -> entry.getWhat())
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toSet());
-            if (craftableKeys.isEmpty()) {
+            IRecipeTransferError transferError = RecipeTransferUtil.getTransferRecipeError(
+                    runtime.getRecipeTransferManager(), menu, recipeLayout, minecraft.player).orElse(null);
+            if (transferError == null || transferError.getType() != IRecipeTransferError.Type.COSMETIC) {
                 return;
             }
 
             Rect2i recipeRect = recipeLayout.getRect();
             graphics.pose().pushPose();
-            graphics.pose().translate(recipeRect.getX(), recipeRect.getY(), 0.0f);
-            recipeLayout.getRecipeSlotsView()
-                    .getSlotViews(RecipeIngredientRole.INPUT)
-                    .stream()
-                    .filter(slot -> slot.getAllIngredients().anyMatch(ingredient -> {
-                        GenericStack stack = GenericEntryStackHelper.ingredientToStack(ingredient);
-                        return stack != null && craftableKeys.contains(stack.what());
-                    }))
-                    .forEach(slot -> slot.drawHighlight(graphics,
-                            TransferHelper.BLUE_SLOT_HIGHLIGHT_COLOR));
-            graphics.pose().popPose();
+            try {
+                transferError.showError(graphics, mouseX, mouseY, recipeLayout.getRecipeSlotsView(),
+                        recipeRect.getX(), recipeRect.getY());
+            } finally {
+                graphics.pose().popPose();
+            }
         }
     }
 }

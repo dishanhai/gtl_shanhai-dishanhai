@@ -125,6 +125,8 @@ public class GTDishanhaiMod {
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadStripRules();
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadReplaceRules();
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadDeleteRules();
+        // 先恢复规则内存，让客户端首次 JEI 收集就能看到过滤后的配方；lookup 等类型就绪后再统一重建。
+        com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadActivePresets();
 
         var bus = FMLJavaModLoadingContext.get().getModEventBus();
 

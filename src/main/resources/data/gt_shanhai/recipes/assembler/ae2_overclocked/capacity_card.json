@@ -1,0 +1,15 @@
+{
+  "type": "gtceu:assembler",
+  "conditions": [{"type": "forge:mod_loaded", "modid": "ae2_overclocked"}],
+  "duration": 20,
+  "inputs": {
+    "item": [
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "gtlcore:cell_component_64m"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "ae2:advanced_card"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
+      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "ae2:spatial_cell_component_128"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+    ],
+    "fluid": []
+  },
+  "outputs": {"item": [{"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "ae2_overclocked:capacity_card"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}], "fluid": []},
+  "tickInputs": {"eu": [{"content": 128, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+}

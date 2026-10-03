@@ -26,6 +26,14 @@ public class JEIRecipeCache {
         REGISTERED.put(type, List.copyOf(wrappers));
     }
 
+    public static void clear(RecipeType<?> type) {
+        if (type != null) REGISTERED.remove(type);
+    }
+
+    public static void clearAll() {
+        REGISTERED.clear();
+    }
+
     /**
      * GTCEu/gtlcore 可能分批向同一个 JEI 类型注册配方；按完整 recipe ID 只接收一次。
      * 配方对象本身仍保留在 JEI 中，源码 RecipeManager 不会被修改。

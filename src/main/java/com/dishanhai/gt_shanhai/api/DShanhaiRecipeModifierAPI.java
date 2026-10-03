@@ -127,12 +127,27 @@ public class DShanhaiRecipeModifierAPI {
         }
     }
 
+    private static boolean sameReplaceRule(ReplaceEntry a, ReplaceEntry b) {
+        return a != null && b != null
+                && Objects.equals(a.oldItem, b.oldItem)
+                && Objects.equals(a.newItem, b.newItem)
+                && a.oldIsFluid == b.oldIsFluid
+                && a.newIsFluid == b.newIsFluid
+                && Objects.equals(a.recipeId, b.recipeId)
+                && a.count == b.count
+                && a.circuitNumber == b.circuitNumber;
+    }
+
     private static final Map<String, List<ReplaceEntry>> REPLACE_RULES = new LinkedHashMap<>();
 
     /** 注册替换规则 */
     public static void addReplaceRule(String recipeTypeId, ReplaceEntry rule) {
-        REPLACE_RULES.computeIfAbsent(recipeTypeId, k -> new CopyOnWriteArrayList<>()).add(rule);
-        if (!LOADING_REPLACE.get()) {
+        List<ReplaceEntry> rules = REPLACE_RULES.computeIfAbsent(recipeTypeId, k -> new CopyOnWriteArrayList<>());
+        for (ReplaceEntry existing : rules) {
+            if (sameReplaceRule(existing, rule)) return;
+        }
+        rules.add(rule);
+        if (!LOADING_REPLACE.get() && !LOADING_PRESET_BATCH.get()) {
             saveReplaceRules();
             rebuildLookup(recipeTypeId);
         }
@@ -172,8 +187,15 @@ public class DShanhaiRecipeModifierAPI {
 
     /** 注册删除规则 */
     public static void addDeleteRule(String recipeTypeId, DeleteEntry rule) {
-        DELETE_RULES.computeIfAbsent(recipeTypeId, k -> new CopyOnWriteArrayList<>()).add(rule);
-        if (!LOADING_DELETE.get()) { saveDeleteRules(); rebuildLookup(recipeTypeId); }
+        List<DeleteEntry> rules = DELETE_RULES.computeIfAbsent(recipeTypeId, k -> new CopyOnWriteArrayList<>());
+        for (DeleteEntry existing : rules) {
+            if (existing.recipeRegex.equals(rule.recipeRegex)) return;
+        }
+        rules.add(rule);
+        if (!LOADING_DELETE.get() && !LOADING_PRESET_BATCH.get()) {
+            saveDeleteRules();
+            rebuildLookup(recipeTypeId);
+        }
     }
 
     /** 获取删除规则列表 */
@@ -241,6 +263,14 @@ public class DShanhaiRecipeModifierAPI {
         }
     }
 
+    private static boolean sameStripRule(StripEntry a, StripEntry b) {
+        return a != null && b != null
+                && Objects.equals(a.targetItem, b.targetItem)
+                && a.isInput == b.isInput
+                && a.isFluid == b.isFluid
+                && Objects.equals(a.recipeId, b.recipeId);
+    }
+
     private static final Map<String, List<StripEntry>> STRIP_RULES = new LinkedHashMap<>();
 
     /** 临时禁用 BranchStripMixin，防止 updateLookupRecipes 缓存原始配方时被污染 */
@@ -248,8 +278,12 @@ public class DShanhaiRecipeModifierAPI {
 
     /** 注册剥离规则 */
     public static void addStripRule(String recipeTypeId, StripEntry rule) {
-        STRIP_RULES.computeIfAbsent(recipeTypeId, k -> new CopyOnWriteArrayList<>()).add(rule);
-        if (!LOADING_STRIP.get()) {
+        List<StripEntry> rules = STRIP_RULES.computeIfAbsent(recipeTypeId, k -> new CopyOnWriteArrayList<>());
+        for (StripEntry existing : rules) {
+            if (sameStripRule(existing, rule)) return;
+        }
+        rules.add(rule);
+        if (!LOADING_STRIP.get() && !LOADING_PRESET_BATCH.get()) {
             saveStripRules();
             rebuildLookup(recipeTypeId);
         }
@@ -482,7 +516,10 @@ public class DShanhaiRecipeModifierAPI {
             return false;
         }
         var stacks = si.getItems();
-        return stacks.length > 0 && matchesItem(stacks[0], target);
+        for (var stack : stacks) {
+            if (stack != null && matchesItem(stack, target)) return true;
+        }
+        return false;
     }
 
     /** 配方ID匹配：支持从JEI复制的完整ID(gtceu:nano_forge/vibranium_nanoswarm)或仅配方名 */
@@ -1024,6 +1061,24 @@ public class DShanhaiRecipeModifierAPI {
     }
 
     /**
+     * 準備 JEI 顯示用配方。RecipeManager 內的原始 JSON 配方不改寫；只有命中
+     * 山海規則的 GT 配方才建立副本。lookup 已寫回的 canonical 副本直接沿用，
+     * 避免 JEI 再次套用同一條規則。
+     */
+    public static GTRecipe prepareJeiRecipe(GTRecipe recipe) {
+        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) {
+            return recipe;
+        }
+        String typeId = recipe.recipeType.registryName.toString();
+        if (!hasRuntimeStripOrReplaceRules(typeId)) return recipe;
+        if (isCanonicalLookupRecipe(recipe) && !hasRuntimeJSModifiers(typeId)) return recipe;
+        GTRecipe copy = recipe.copy();
+        applyStripByType(copy);
+        applyReplaceByType(copy);
+        return copy;
+    }
+
+    /**
      * KubeJS 重建 GTCEu lookup 时可能把同一 recipeId 的旧对象再次留下；只在运行时清掉旧索引，
      * 不触碰 RecipeManager 保存的源码配方。
      */
@@ -1241,6 +1296,15 @@ public class DShanhaiRecipeModifierAPI {
         return !DELETE_RULES.getOrDefault(recipeTypeId, Collections.emptyList()).isEmpty();
     }
 
+    /** 返回需要运行时重建/同步的配方类型，避免刷新时触碰普通全局 JEI 配方。 */
+    public static Set<String> getRuntimeRuleTypeIds() {
+        Set<String> types = new LinkedHashSet<>();
+        types.addAll(STRIP_RULES.keySet());
+        types.addAll(REPLACE_RULES.keySet());
+        types.addAll(DELETE_RULES.keySet());
+        return Collections.unmodifiableSet(types);
+    }
+
     public static boolean isDeletedByRuntimeRule(String recipeTypeId, GTRecipe recipe) {
         return recipe != null && hasRuntimeDeleteRules(recipeTypeId) && matchesDeleteRule(recipeTypeId, recipe);
     }
@@ -1335,13 +1399,23 @@ public class DShanhaiRecipeModifierAPI {
         // 首次成功调用时缓存原始配方（此时 lookup 应为未修改状态）
         List<GTRecipe> originals = RECIPE_ORIGINALS.get(recipeTypeId);
         if (originals == null) {
-            final List<GTRecipe> fresh = new ArrayList<>();
+            final Map<String, GTRecipe> freshById = new LinkedHashMap<>();
+            final List<GTRecipe> freshWithoutId = new ArrayList<>();
             SUPPRESS_GET_RECIPES_STRIP.set(true);
             try {
-                lookup.getLookup().getRecipes(true).forEach(r -> { if (r != null) fresh.add(r.copy()); });
+                lookup.getLookup().getRecipes(true).forEach(r -> {
+                    if (r == null) return;
+                    if (r.getId() == null) {
+                        freshWithoutId.add(r.copy());
+                    } else {
+                        freshById.putIfAbsent(r.getId().toString(), r.copy());
+                    }
+                });
             } finally {
                 SUPPRESS_GET_RECIPES_STRIP.set(false);
             }
+            List<GTRecipe> fresh = new ArrayList<>(freshById.values());
+            fresh.addAll(freshWithoutId);
             if (fresh.isEmpty()) {
                 LOG.warn("[ModAPI] {} 无任何配方，跳过模板重建", recipeTypeId);
                 return;
@@ -1350,6 +1424,21 @@ public class DShanhaiRecipeModifierAPI {
             originals = fresh;
             LOG.info("[ModAPI] 已缓存原始配方: {} ({} 条)", recipeTypeId, originals.size());
         }
+
+        // 旧版本快照可能已由多个 Branch 路径收集出重复 ID；重建前统一压成一份。
+        Map<String, GTRecipe> uniqueById = new LinkedHashMap<>();
+        List<GTRecipe> uniqueWithoutId = new ArrayList<>();
+        for (GTRecipe original : originals) {
+            if (original == null) continue;
+            if (original.getId() == null) {
+                uniqueWithoutId.add(original);
+            } else {
+                uniqueById.putIfAbsent(original.getId().toString(), original);
+            }
+        }
+        originals = new ArrayList<>(uniqueById.values());
+        originals.addAll(uniqueWithoutId);
+        RECIPE_ORIGINALS.put(recipeTypeId, originals);
 
         var stripRules = STRIP_RULES.getOrDefault(recipeTypeId, Collections.emptyList());
         var replaceRules = REPLACE_RULES.getOrDefault(recipeTypeId, Collections.emptyList());
@@ -1507,6 +1596,7 @@ public class DShanhaiRecipeModifierAPI {
         loadStripRules();
         loadReplaceRules();
         loadDeleteRules();
+        loadActivePresets();
         updateAllLookupRecipes();
         applyAllReplaceRules();
         com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
@@ -1877,6 +1967,82 @@ public class DShanhaiRecipeModifierAPI {
     // ====== 预设系统 ======
 
     private static final java.io.File PRESET_DIR = new java.io.File(CONFIG_DIR, "presets");
+    private static final java.io.File ACTIVE_PRESETS_FILE = new java.io.File(CONFIG_DIR, "active_presets.json");
+    private static final List<String> MIGRATION_PRESETS = Arrays.asList("太空采矿预设", "太空钻井预设");
+    private static final ThreadLocal<Boolean> LOADING_PRESET_BATCH = ThreadLocal.withInitial(() -> false);
+
+    /**
+     * 啟動時恢復上次由命令載入的預設。舊版本沒有活動清單時，先遷移本任務的
+     * 太空採礦與太空鑽井預設，避免每次重啟都要手動重新載入。
+     */
+    public static void loadActivePresets() {
+        List<String> names = new ArrayList<>();
+        boolean hasActiveFile = ACTIVE_PRESETS_FILE.exists();
+        if (hasActiveFile) {
+            try (var r = new java.io.FileReader(ACTIVE_PRESETS_FILE)) {
+                var json = com.google.gson.JsonParser.parseReader(r);
+                if (json.isJsonArray()) {
+                    for (var el : json.getAsJsonArray()) {
+                        if (el.isJsonPrimitive() && !el.getAsString().trim().isEmpty()) {
+                            names.add(el.getAsString().trim());
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("[Preset] 活动预设清单读取失败: {}", e.getMessage());
+            }
+        } else {
+            names.addAll(MIGRATION_PRESETS);
+        }
+        if (names.isEmpty()) return;
+
+        List<String> loadedNames = new ArrayList<>();
+        LOADING_PRESET_BATCH.set(true);
+        try {
+            for (String name : names) {
+                if (loadPreset(name, false, "")) loadedNames.add(name);
+            }
+        } finally {
+            LOADING_PRESET_BATCH.set(false);
+        }
+        if (loadedNames.isEmpty()) return;
+        saveStripRules();
+        saveReplaceRules();
+        saveDeleteRules();
+        if (!hasActiveFile || loadedNames.size() != names.size()) saveActivePresets(loadedNames);
+        LOG.info("[Preset] 启动恢复活动预设: {}", String.join(", ", loadedNames));
+    }
+
+    private static void rememberActivePreset(String presetName) {
+        List<String> names = new ArrayList<>();
+        if (ACTIVE_PRESETS_FILE.exists()) {
+            try (var r = new java.io.FileReader(ACTIVE_PRESETS_FILE)) {
+                var json = com.google.gson.JsonParser.parseReader(r);
+                if (json.isJsonArray()) {
+                    for (var el : json.getAsJsonArray()) {
+                        if (el.isJsonPrimitive()) names.add(el.getAsString());
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("[Preset] 活动预设清单读取失败: {}", e.getMessage());
+            }
+        }
+        if (!names.contains(presetName)) names.add(presetName);
+        saveActivePresets(names);
+    }
+
+    private static void saveActivePresets(List<String> names) {
+        try {
+            new java.io.File(CONFIG_DIR).mkdirs();
+            var arr = new com.google.gson.JsonArray();
+            for (String name : names) arr.add(name);
+            try (var w = new java.io.FileWriter(ACTIVE_PRESETS_FILE)) {
+                GSON.toJson(arr, w);
+            }
+        } catch (Exception e) {
+            LOG.warn("[Preset] 活动预设清单保存失败: {}", e.getMessage());
+        }
+    }
 
     /** 列出所有预设文件 */
     public static String[] listPresets() {
@@ -2066,6 +2232,11 @@ public class DShanhaiRecipeModifierAPI {
                 }
             }
 
+            if (!LOADING_PRESET_BATCH.get()) {
+                rememberActivePreset(presetName);
+                updateAllLookupRecipes();
+                com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+            }
             LOG.info("[Preset] 已加载预设: {} (replace={}, type={})", presetName, replace, recipeType);
             return true;
         } catch (Exception e) {

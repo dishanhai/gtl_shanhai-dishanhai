@@ -5,64 +5,103 @@ import com.dishanhai.gt_shanhai.api.JEIRecipeCache;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import mezz.jei.api.recipe.RecipeType;
+import mezz.jei.library.recipes.RecipeManagerInternal;
+
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
-
-import mezz.jei.api.recipe.RecipeType;
-import mezz.jei.api.registration.IRecipeRegistration;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * 重定向 IRecipeRegistration.addRecipes，在 JEI 接收配方前应用剥离+替换。
- * 同时缓存已注册的包装器到 JEIRecipeCache，供 RecipeSyncPacket 刷新时隐藏旧条目。
+ * 在 JEI 最終收集入口處處理 GT 配方。
+ *
+ * GTLCore 的優化 mixin 會在 GTRecipeTypeCategory.registerRecipes 內直接呼叫
+ * IRecipeRegistration.addRecipes；攔截上游 category 會同時撞上原生與優化路徑。
+ * 在 RecipeManagerInternal 收口後，只保留同一配方 ID 的一份，並只對有規則的
+ * GT 配方建立修改副本；普通 JEI 類型完全不經過這裡的規則邏輯。
  */
-// Apply after GTLCore's optimized registration mixin so its injected addRecipes calls are covered too.
-@Mixin(targets = "com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeTypeCategory", priority = 900, remap = false)
+@Mixin(value = RecipeManagerInternal.class, remap = false)
 public class JEIRecipeListMixin {
 
-    private static final Logger LOG = LoggerFactory.getLogger("JEIRecipeList");
+    private static final ThreadLocal<Boolean> REENTRANT = ThreadLocal.withInitial(() -> false);
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    @Redirect(method = "registerRecipes", at = @At(value = "INVOKE",
-            target = "Lmezz/jei/api/registration/IRecipeRegistration;addRecipes(Lmezz/jei/api/recipe/RecipeType;Ljava/util/List;)V"),
-            remap = false)
-    private static void gtShanhai$addRecipes(IRecipeRegistration reg, RecipeType type, List recipes) {
-        if (recipes == null || recipes.isEmpty()) {
-            JEIRecipeCache.put(type, Collections.emptyList());
-            reg.addRecipes(type, recipes);
-            return;
-        }
-        List<GTRecipeWrapper> wrappers = new ArrayList<>();
-        Map<String, GTRecipeWrapper> wrappersById = new LinkedHashMap<>();
-        for (Object obj : recipes) {
-            if (obj instanceof GTRecipeWrapper wrapper) {
-                GTRecipe copy = wrapper.recipe.copy();
-                String typeId = copy.recipeType == null || copy.recipeType.registryName == null
-                        ? "" : copy.recipeType.registryName.toString();
-                if (DShanhaiRecipeModifierAPI.isDeletedByRuntimeRule(typeId, copy)) continue;
-                DShanhaiRecipeModifierAPI.applyStripByType(copy);
-                DShanhaiRecipeModifierAPI.applyReplaceByType(copy);
-                GTRecipeWrapper modified = new GTRecipeWrapper(copy);
-                if (copy.getId() != null) {
-                    wrappersById.put(copy.getId().toString(), modified);
-                } else {
-                    wrappers.add(modified);
-                }
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    @Inject(method = "addRecipes", at = @At("HEAD"), cancellable = true, remap = false)
+    private void gtShanhai$normalizeGtRecipes(RecipeType type, List recipes, CallbackInfo ci) {
+        if (REENTRANT.get() || recipes == null || recipes.isEmpty()) return;
+
+        boolean hasGtWrapper = false;
+        boolean allGtWrappers = true;
+        boolean changed = false;
+        List normalized = new ArrayList(recipes.size());
+        for (Object value : recipes) {
+            if (!(value instanceof GTRecipeWrapper wrapper)) {
+                allGtWrappers = false;
+                normalized.add(value);
+                continue;
+            }
+            hasGtWrapper = true;
+            GTRecipe recipe = wrapper.recipe;
+            if (recipe == null) {
+                normalized.add(value);
+                continue;
+            }
+            String typeId = recipe.recipeType == null || recipe.recipeType.registryName == null
+                    ? "" : recipe.recipeType.registryName.toString();
+            if (DShanhaiRecipeModifierAPI.isDeletedByRuntimeRule(typeId, recipe)) {
+                changed = true;
+                continue;
+            }
+            GTRecipe prepared = DShanhaiRecipeModifierAPI.prepareJeiRecipe(recipe);
+            if (prepared != recipe) {
+                normalized.add(new GTRecipeWrapper(prepared));
+                changed = true;
+            } else {
+                normalized.add(value);
             }
         }
-        wrappers.addAll(wrappersById.values());
-        List<GTRecipeWrapper> unseen = JEIRecipeCache.filterUnseen(type, wrappers);
+        if (!hasGtWrapper) return;
+
+        // GTCEu registration lists are homogeneous. Keep mixed lists untouched except
+        // for a required deletion/rewrite, since JEI may contain another recipe type.
+        if (!allGtWrappers) {
+            if (!changed) return;
+            gtShanhai$reenter(type, normalized, ci);
+            return;
+        }
+
+        List unseen = JEIRecipeCache.filterUnseen(type, normalized);
         JEIRecipeCache.append(type, unseen);
-        LOG.info("[JEIRecipeList] {}: 输入={}, 规范化={}, 新增={}, 去重={}",
-                type.getUid(), recipes.size(), wrappers.size(), unseen.size(), wrappers.size() - unseen.size());
-        reg.addRecipes(type, (List) unseen);
+        if (!changed && unseen.size() == recipes.size() && gtShanhai$sameEntries(recipes, unseen)) {
+            return;
+        }
+        gtShanhai$reenter(type, unseen, ci);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private void gtShanhai$reenter(RecipeType type, List recipes, CallbackInfo ci) {
+        REENTRANT.set(true);
+        try {
+            if (recipes.isEmpty()) {
+                ci.cancel();
+                return;
+            }
+            ((RecipeManagerInternal) (Object) this).addRecipes(type, recipes);
+            ci.cancel();
+        } finally {
+            REENTRANT.set(false);
+        }
+    }
+
+    private static boolean gtShanhai$sameEntries(List<?> left, List<?> right) {
+        if (left.size() != right.size()) return false;
+        for (int i = 0; i < left.size(); i++) {
+            if (left.get(i) != right.get(i)) return false;
+        }
+        return true;
     }
 }

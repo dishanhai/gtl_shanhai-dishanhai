@@ -110,7 +110,7 @@ public final class JeiPatternQuickEncodeService {
             }
             recipeTypeId = PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID;
             recipeCount = recipes.size();
-            patterns = encodeCraftingPatterns(player, recipes);
+            patterns = encodeCraftingPatterns(player, menu, recipes);
         } else {
             boolean vanillaSmelting = PatternRecipeTypeHelper.isVanillaSmeltingRecipe(
                     player.level(), anchorRecipeId);
@@ -125,7 +125,7 @@ public final class JeiPatternQuickEncodeService {
             }
             recipeTypeId = anchor.recipeType.registryName.toString();
             recipeCount = recipes.size();
-            patterns = encodePatterns(player, recipes);
+            patterns = encodePatterns(player, menu, recipes);
         }
         if (patterns.size() != recipeCount) {
             show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
@@ -300,11 +300,12 @@ public final class JeiPatternQuickEncodeService {
         return recipes;
     }
 
-    private static List<ItemStack> encodePatterns(ServerPlayer player, List<GTRecipe> recipes) {
+    private static List<ItemStack> encodePatterns(ServerPlayer player, PatternEncodingTermMenu menu,
+            List<GTRecipe> recipes) {
         List<ItemStack> patterns = new ArrayList<>(recipes.size());
         for (GTRecipe recipe : recipes) {
             try {
-                Ae2GtmProcessingPattern encoded = ShanhaiPatternEncoder.encode(recipe, player, true);
+                Ae2GtmProcessingPattern encoded = ShanhaiPatternEncoder.encode(recipe, player, menu, true);
                 ItemStack pattern = encoded == null ? ItemStack.EMPTY : encoded.getPatternItemStack();
                 if (!isExactValidPattern(player, recipe, pattern)) {
                     GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] 拒绝异常样板 recipe={}", recipe.id);
@@ -323,11 +324,12 @@ public final class JeiPatternQuickEncodeService {
     }
 
     private static List<ItemStack> encodeCraftingPatterns(ServerPlayer player,
+            PatternEncodingTermMenu menu,
             List<CraftingRecipe> recipes) {
         List<ItemStack> patterns = new ArrayList<>(recipes.size());
         for (CraftingRecipe recipe : recipes) {
             try {
-                ItemStack pattern = ShanhaiPatternEncoder.encodeCrafting(recipe, player);
+                ItemStack pattern = ShanhaiPatternEncoder.encodeCrafting(recipe, player, menu);
                 if (!isExactValidPattern(player, PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID,
                         pattern)) {
                     GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] 拒绝异常原版合成样板 recipe={}",
