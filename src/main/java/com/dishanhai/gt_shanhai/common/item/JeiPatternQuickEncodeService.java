@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
 import appeng.api.config.Actionable;
+import appeng.api.crafting.IPatternDetails;
 import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.inventories.InternalInventory;
 import appeng.api.implementations.items.IAEItemPowerStorage;
@@ -11,6 +12,7 @@ import appeng.api.stacks.AEItemKey;
 import appeng.api.storage.MEStorage;
 import appeng.core.definitions.AEItems;
 import appeng.crafting.pattern.AEProcessingPattern;
+import appeng.crafting.pattern.AECraftingPattern;
 import appeng.helpers.patternprovider.PatternContainer;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 import appeng.menu.slot.RestrictedInputSlot;
@@ -18,6 +20,7 @@ import appeng.menu.slot.RestrictedInputSlot;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.dishanhai.gt_shanhai.mixin.PatternEncodingTermMenuAccessor;
+import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.pattern.MultiblockWorldSavedData;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -35,6 +38,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
 import net.minecraft.world.level.Level;
@@ -58,6 +62,7 @@ import java.util.WeakHashMap;
 public final class JeiPatternQuickEncodeService {
 
     private static final int MIN_SDA_FALLBACK_PATTERNS = 20;
+    private static final int DUPLICATE_TARGET_HIGHLIGHT_COLOR = 0xFF3030;
     private static final ResourceLocation MOLECULAR_ASSEMBLER_MATRIX_ID =
             new ResourceLocation("gtceu", "molecular_assembler_matrix");
     private static final ResourceLocation PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE_ID =
@@ -79,29 +84,49 @@ public final class JeiPatternQuickEncodeService {
 
     public static void encodeAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,
             String anchorRecipeId, boolean wholeRecipeType) {
-        GTRecipe anchor = PatternRecipeTypeHelper.resolveRecipe(player.level(), anchorRecipeId);
-        if (anchor == null || anchor.id == null || anchor.recipeType == null
-                || anchor.recipeType.registryName == null) {
+        CraftingRecipe craftingAnchor = PatternRecipeTypeHelper.resolveVanillaCraftingRecipe(
+                player.level(), anchorRecipeId);
+        GTRecipe anchor = craftingAnchor == null
+                ? PatternRecipeTypeHelper.resolveRecipe(player.level(), anchorRecipeId) : null;
+        if (craftingAnchor == null && (anchor == null || anchor.id == null || anchor.recipeType == null
+                || anchor.recipeType.registryName == null)) {
             GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] recipe resolve failed id={} dimension={}",
                     anchorRecipeId, player.level().dimension().location());
             show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
             return;
         }
 
-        boolean vanillaSmelting = PatternRecipeTypeHelper.isVanillaSmeltingRecipe(
-                player.level(), anchorRecipeId);
-        List<GTRecipe> recipes = wholeRecipeType
-                ? vanillaSmelting
-                        ? collectVanillaSmeltingRecipes(player.level())
-                        : collectRecipes(anchor.recipeType)
-                : List.of(anchor);
-        if (recipes.isEmpty()) {
-            show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
-            return;
+        String recipeTypeId;
+        List<ItemStack> patterns;
+        int recipeCount;
+        if (craftingAnchor != null) {
+            List<CraftingRecipe> recipes = wholeRecipeType
+                    ? collectVanillaCraftingRecipes(player.level())
+                    : List.of(craftingAnchor);
+            if (recipes.isEmpty()) {
+                show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
+                return;
+            }
+            recipeTypeId = PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID;
+            recipeCount = recipes.size();
+            patterns = encodeCraftingPatterns(player, recipes);
+        } else {
+            boolean vanillaSmelting = PatternRecipeTypeHelper.isVanillaSmeltingRecipe(
+                    player.level(), anchorRecipeId);
+            List<GTRecipe> recipes = wholeRecipeType
+                    ? vanillaSmelting
+                            ? collectVanillaSmeltingRecipes(player.level())
+                            : collectRecipes(anchor.recipeType)
+                    : List.of(anchor);
+            if (recipes.isEmpty()) {
+                show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
+                return;
+            }
+            recipeTypeId = anchor.recipeType.registryName.toString();
+            recipeCount = recipes.size();
+            patterns = encodePatterns(player, recipes);
         }
-
-        List<ItemStack> patterns = encodePatterns(player, recipes);
-        if (patterns.size() != recipes.size()) {
+        if (patterns.size() != recipeCount) {
             show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
             return;
         }
@@ -114,6 +139,8 @@ public final class JeiPatternQuickEncodeService {
 
         List<UploadedPattern> uploaded = new ArrayList<>(patterns.size());
         List<ItemStack> sdaPatterns = new ArrayList<>();
+        Map<ResourceKey<Level>, List<ShanhaiStructureHighlightPacket.Marker>> duplicateHighlights =
+                new LinkedHashMap<>();
         List<PatternQuickUploadService.Target> availableTargets;
         try {
             availableTargets = findAutomaticStellarTargets(
@@ -122,7 +149,7 @@ public final class JeiPatternQuickEncodeService {
             // 目标扫描失败不能让网络包静默结束；后续样板仍按既定玩家/SDA回退规则处理。
             GTDishanhaiMod.LOGGER.error(
                     "[JEIQuickEncode] automatic stellar target search failed type={} exception={} message={}",
-                    PatternRecipeTypeHelper.readRecipeTypeId(patterns.get(0)),
+                    recipeTypeIdForPattern(player, patterns.get(0)),
                     exception.getClass().getName(), exception.getMessage());
             GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] automatic stellar target search stack", exception);
             availableTargets = List.of();
@@ -137,6 +164,13 @@ public final class JeiPatternQuickEncodeService {
                 }
                 if (currentTarget == null) break;
                 result = safeInsertIntoTarget(player, pattern, currentTarget);
+                if (result != null && result.status() == PatternQuickUploadService.UploadStatus.DUPLICATE) {
+                    addDuplicateHighlight(duplicateHighlights, result.target());
+                    removeTarget(availableTargets, currentTarget);
+                    currentTarget = null;
+                    result = null;
+                    continue;
+                }
                 if (result != null) break;
                 invalidateCachedTarget(menu.getNetworkNode(), currentTarget);
                 removeTarget(availableTargets, currentTarget);
@@ -150,6 +184,8 @@ public final class JeiPatternQuickEncodeService {
             }
             uploaded.add(new UploadedPattern(pattern, result.target(), result.slot()));
         }
+
+        sendDuplicateHighlights(player, duplicateHighlights);
 
         boolean useInventoryFallback = !sdaPatterns.isEmpty()
                 && sdaPatterns.size() < MIN_SDA_FALLBACK_PATTERNS;
@@ -196,7 +232,7 @@ public final class JeiPatternQuickEncodeService {
         }
         showSuccess(player, wholeRecipeType, patterns.size(), uploaded,
                 useSda ? sdaPatterns.size() : 0, inventoryCount, skippedCount,
-                PatternRecipeTypeHelper.readRecipeTypeId(patterns.get(0)));
+                recipeTypeId);
         for (int i = 0; i < committedCount; i++) {
             GTLStats.awardPatternEncoded(player);
         }
@@ -244,6 +280,25 @@ public final class JeiPatternQuickEncodeService {
         return recipes;
     }
 
+    private static List<CraftingRecipe> collectVanillaCraftingRecipes(Level level) {
+        if (level == null || level.getRecipeManager() == null) return List.of();
+        Map<ResourceLocation, CraftingRecipe> unique = new LinkedHashMap<>();
+        try {
+            for (CraftingRecipe recipe : level.getRecipeManager()
+                    .getAllRecipesFor(RecipeType.CRAFTING)) {
+                if (recipe != null && recipe.getId() != null) {
+                    unique.putIfAbsent(recipe.getId(), recipe);
+                }
+            }
+        } catch (RuntimeException exception) {
+            GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] 无法读取原版合成配方表", exception);
+            return List.of();
+        }
+        List<CraftingRecipe> recipes = new ArrayList<>(unique.values());
+        recipes.sort(Comparator.comparing(recipe -> recipe.getId().toString()));
+        return recipes;
+    }
+
     private static List<ItemStack> encodePatterns(ServerPlayer player, List<GTRecipe> recipes) {
         List<ItemStack> patterns = new ArrayList<>(recipes.size());
         for (GTRecipe recipe : recipes) {
@@ -266,15 +321,52 @@ public final class JeiPatternQuickEncodeService {
         return patterns;
     }
 
+    private static List<ItemStack> encodeCraftingPatterns(ServerPlayer player,
+            List<CraftingRecipe> recipes) {
+        List<ItemStack> patterns = new ArrayList<>(recipes.size());
+        for (CraftingRecipe recipe : recipes) {
+            try {
+                ItemStack pattern = ShanhaiPatternEncoder.encodeCrafting(recipe, player);
+                if (!isExactValidPattern(player, PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID,
+                        pattern)) {
+                    GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] 拒绝异常原版合成样板 recipe={}",
+                            recipe.getId());
+                    return List.of();
+                }
+                pattern = pattern.copy();
+                pattern.setCount(1);
+                PatternEncoderMetadata.writeEncoder(pattern, player.getUUID(),
+                        player.getGameProfile().getName());
+                patterns.add(pattern);
+            } catch (RuntimeException exception) {
+                GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] 编码原版合成配方失败 recipe={}",
+                        recipe.getId(), exception);
+                return List.of();
+            }
+        }
+        return patterns;
+    }
+
     private static boolean isExactValidPattern(ServerPlayer player, GTRecipe recipe, ItemStack pattern) {
-        if (pattern == null || pattern.isEmpty() || !PatternDetailsHelper.isEncodedPattern(pattern)
-                || !(PatternDetailsHelper.decodePattern(pattern, player.level()) instanceof AEProcessingPattern)) {
+        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) {
             return false;
         }
+        return isExactValidPattern(player, recipe.recipeType.registryName.toString(), pattern)
+                && PatternDetailsHelper.decodePattern(pattern, player.level()) instanceof AEProcessingPattern;
+    }
+
+    private static boolean isExactValidPattern(ServerPlayer player, String recipeTypeId,
+            ItemStack pattern) {
+        if (pattern == null || pattern.isEmpty() || !PatternDetailsHelper.isEncodedPattern(pattern)) {
+            return false;
+        }
+        IPatternDetails details = PatternDetailsHelper.decodePattern(pattern, player.level());
+        if (PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID.equals(recipeTypeId)) {
+            return details instanceof AECraftingPattern;
+        }
+        if (!(details instanceof AEProcessingPattern)) return false;
         String encodedTypeId = PatternRecipeTypeHelper.readRecipeTypeId(pattern);
-        return recipe.recipeType != null && recipe.recipeType.registryName != null
-                && PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(
-                        encodedTypeId, recipe.recipeType.registryName.toString());
+        return PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(encodedTypeId, recipeTypeId);
     }
 
     private static PatternQuickUploadService.Target findAutomaticStellarTarget(ServerPlayer player,
@@ -283,13 +375,26 @@ public final class JeiPatternQuickEncodeService {
                 findAutomaticStellarTargets(player, networkNode, pattern));
     }
 
+    private static String recipeTypeIdForPattern(ServerPlayer player, ItemStack pattern) {
+        if (pattern == null || pattern.isEmpty()) return "";
+        try {
+            IPatternDetails details = PatternDetailsHelper.decodePattern(pattern, player.level());
+            if (details instanceof AECraftingPattern) {
+                return PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID;
+            }
+        } catch (RuntimeException exception) {
+            GTDishanhaiMod.LOGGER.debug("[JEIQuickEncode] pattern type decode failed", exception);
+        }
+        return PatternRecipeTypeHelper.readRecipeTypeId(pattern);
+    }
+
     private static List<PatternQuickUploadService.Target> findAutomaticStellarTargets(
             ServerPlayer player, IGridNode networkNode, ItemStack pattern) {
         if (networkNode == null || networkNode.getGrid() == null) {
             GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] no active ME grid for recipe type search");
             return List.of();
         }
-        String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(pattern);
+        String recipeTypeId = recipeTypeIdForPattern(player, pattern);
         if (recipeTypeId == null || recipeTypeId.isBlank()) {
             GTDishanhaiMod.LOGGER.warn("[JEIQuickEncode] encoded pattern has no recipe type metadata");
             return List.of();
@@ -338,11 +443,14 @@ public final class JeiPatternQuickEncodeService {
 
     private static PatternQuickUploadService.UploadResult safeInsertIntoTarget(
             ServerPlayer player, ItemStack pattern, PatternQuickUploadService.Target target) {
-        String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(pattern);
+        String recipeTypeId = recipeTypeIdForPattern(player, pattern);
         try {
             PatternQuickUploadService.UploadResult result = isStellarTarget(player.getServer(), target)
                     ? insertIntoStellarTarget(player, pattern, target)
                     : PatternQuickUploadService.insertIntoTargetSlotResult(player, pattern, target);
+            if (result != null && result.status() == PatternQuickUploadService.UploadStatus.DUPLICATE) {
+                return result;
+            }
             if (result == null || result.status() != PatternQuickUploadService.UploadStatus.INSERTED) {
                 GTDishanhaiMod.LOGGER.info(
                         "[JEIQuickEncode] target rejected upload target={} machine={} type={} status={}",
@@ -550,7 +658,7 @@ public final class JeiPatternQuickEncodeService {
         }
         List<BlockPos> positions = target.bufferPositions();
         if (positions == null || positions.isEmpty()) positions = List.of(target.bufferPos());
-        String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(pattern);
+        String recipeTypeId = recipeTypeIdForPattern(player, pattern);
         int inspectedPositions = 0;
         int compatiblePositions = 0;
         int validSlots = 0;
@@ -579,6 +687,15 @@ public final class JeiPatternQuickEncodeService {
                         "[JEIQuickEncode] insert inventory missing position={} type={}",
                         position, recipeTypeId);
                 continue;
+            }
+            for (int slot = 0; slot < inventory.size(); slot++) {
+                if (isSameUploadPattern(inventory.getStackInSlot(slot), pattern)) {
+                    Target resolvedTarget = new Target(target.levelKey(), position.immutable(),
+                            target.targetName(), target.recipeTypeId(), target.recipeTypeName(),
+                            target.targetIcon(), target.targetMachineId(), List.of(position.immutable()));
+                    return new PatternQuickUploadService.UploadResult(
+                            PatternQuickUploadService.UploadStatus.DUPLICATE, resolvedTarget, slot);
+                }
             }
             for (int slot = 0; slot < inventory.size(); slot++) {
                 if (!inventory.isItemValid(slot, pattern)) continue;
@@ -661,7 +778,7 @@ public final class JeiPatternQuickEncodeService {
         } catch (RuntimeException exception) {
             GTDishanhaiMod.LOGGER.error(
                     "[JEIQuickEncode] cached target capacity check failed target={} type={}",
-                    cached.target().bufferPos(), PatternRecipeTypeHelper.readRecipeTypeId(pattern), exception);
+                    cached.target().bufferPos(), recipeTypeIdForPattern(player, pattern), exception);
             canAccept = false;
         }
         return new TargetValidation(true, currentTypeIds, canAccept);
@@ -775,6 +892,20 @@ public final class JeiPatternQuickEncodeService {
             return target;
         }
         return null;
+    }
+
+    private static boolean isSameUploadPattern(ItemStack first, ItemStack second) {
+        if (first == null || second == null || first.isEmpty() || second.isEmpty()
+                || !ItemStack.isSameItem(first, second)) {
+            return false;
+        }
+        ItemStack firstDefinition = first.copy();
+        ItemStack secondDefinition = second.copy();
+        PatternQuickUploadMetadata.removeRecipeTypes(firstDefinition);
+        PatternQuickUploadMetadata.removeRecipeTypes(secondDefinition);
+        PatternEncoderMetadata.removeEncoder(firstDefinition);
+        PatternEncoderMetadata.removeEncoder(secondDefinition);
+        return ItemStack.isSameItemSameTags(firstDefinition, secondDefinition);
     }
 
     private static boolean supportsRecipeType(RecipeTypePatternBufferPartMachine stellar,
@@ -1110,6 +1241,29 @@ public final class JeiPatternQuickEncodeService {
                                     boolean canAcceptPattern) {
         private static TargetValidation dead() {
             return new TargetValidation(false, Set.of(), false);
+        }
+    }
+
+    private static void addDuplicateHighlight(
+            Map<ResourceKey<Level>, List<ShanhaiStructureHighlightPacket.Marker>> highlights,
+            PatternQuickUploadService.Target target) {
+        if (target == null || target.levelKey() == null || target.bufferPos() == null) return;
+        List<ShanhaiStructureHighlightPacket.Marker> markers = highlights.get(target.levelKey());
+        if (markers == null) {
+            markers = new ArrayList<>();
+            highlights.put(target.levelKey(), markers);
+        }
+        ShanhaiStructureHighlightPacket.Marker marker =
+                new ShanhaiStructureHighlightPacket.Marker(target.bufferPos(), DUPLICATE_TARGET_HIGHLIGHT_COLOR);
+        if (!markers.contains(marker)) markers.add(marker);
+    }
+
+    private static void sendDuplicateHighlights(ServerPlayer player,
+            Map<ResourceKey<Level>, List<ShanhaiStructureHighlightPacket.Marker>> highlights) {
+        long expiresAt = System.currentTimeMillis() + 15000L;
+        for (Map.Entry<ResourceKey<Level>, List<ShanhaiStructureHighlightPacket.Marker>> entry
+                : highlights.entrySet()) {
+            ShanhaiStructureHighlightPacket.sendTo(player, entry.getKey(), expiresAt, entry.getValue());
         }
     }
 
