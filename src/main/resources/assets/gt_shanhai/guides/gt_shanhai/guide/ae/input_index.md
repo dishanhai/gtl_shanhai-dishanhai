@@ -11,6 +11,7 @@ item_ids:
   - gt_shanhai:me_requestable_input_bus
   - gt_shanhai:me_requestable_input_hatch
   - gt_shanhai:input_dual_hatch
+  - gt_shanhai:me_stellar_stock_part_machine
 ---
 
 # 输入（含请求）
@@ -19,6 +20,7 @@ item_ids:
 * <ItemLink id="gt_shanhai:me_requestable_input_bus" />
 * <ItemLink id="gt_shanhai:me_requestable_input_hatch" />
 * <ItemLink id="gt_shanhai:input_dual_hatch" />
+* [<ItemLink id="gt_shanhai:me_stellar_stock_part_machine" />](me_stellar_stock_part_machine.md)：按樣板輸入目標直接從 ME 庫存取料，不發起合成請求。
 * <ItemLink id="gt_shanhai:recipe_type_pattern_buffer" />
 
 <Row gap="24">
@@ -68,6 +70,15 @@ item_ids:
 > 一个方块同时提供物品输入和流体输入。\
 > 物品槽位与流体槽位分开管理，常用于同一台机器要同时吃两种资源的情况。\
 > 还能用数据棒复制和粘贴配置，减少重复设置。
+
+</Column>
+
+<Column gap="2" fullWidth={true}>
+
+### <ItemLink id="gt_shanhai:me_stellar_stock_part_machine" />
+
+> 以編碼樣板的輸入項目設定物品與流體庫存目標。\
+> 不預存材料，也不向 AE2 發起合成訂單；加工耗料由繼承的庫存處理邏輯直接從 ME 網路取出。
 
 </Column>
 

@@ -75,6 +75,7 @@ import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiOverclockHatchMachin
 import com.dishanhai.gt_shanhai.common.machine.part.LogicalComputeHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ProgrammableHatchPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.MEDiskHatchPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.MEStellarStockPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ReliableMEAsyncOutputPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferProxyPartMachine;
@@ -134,6 +135,7 @@ public class DShanhaiMachines {
     public static MachineDefinition ME_REQUESTABLE_INPUT_BUS;
     public static MachineDefinition ME_REQUESTABLE_INPUT_HATCH;
     public static MachineDefinition INPUT_DUAL_HATCH;
+    public static MachineDefinition ME_STELLAR_STOCK_PART;
     public static MachineDefinition MAINTENANCE_HATCH;
     public static MachineDefinition COSMIC_CLEAN_GRAVITY_MAINTENANCE_HATCH;
     public static MachineDefinition[] PROGRAMMABLE_HATCH = new MachineDefinition[GTValues.MAX + 1];
@@ -1199,6 +1201,20 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§6可共享：§c✕"));
         });
 
+        ME_STELLAR_STOCK_PART = GTDishanhaiRegistration.REGISTRATE
+                .machine("me_stellar_stock_part_machine", MEStellarStockPartMachine::new)
+                .rotationState(RotationState.ALL)
+                .renderer(() -> new WorkableCasingMachineRenderer(
+                        new ResourceLocation(MOD_ID, "block/casings/me_stellar_stock_part_machine_casing"),
+                        new ResourceLocation(MOD_ID, "block/machine/part/me_stellar_stock_part_machine"), false))
+                .register();
+
+        ME_STELLAR_STOCK_PART.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(Component.translatable("gt_shanhai.machine.me_stellar_stock_part_machine.tooltip.0"));
+            tooltips.add(Component.translatable("gt_shanhai.machine.me_stellar_stock_part_machine.tooltip.1"));
+            tooltips.add(Component.translatable("gt_shanhai.machine.me_stellar_stock_part_machine.tooltip.2"));
+        });
+
         // ── 可请求输入总成 ────────────────────────────────────────────
         INPUT_DUAL_HATCH = GTDishanhaiRegistration.REGISTRATE
                 .machine("input_dual_hatch", DShanhaiInputDualHatchMachine::new)
@@ -2063,6 +2079,11 @@ public class DShanhaiMachines {
             var inputDualHatchBlock = INPUT_DUAL_HATCH.getBlock();
             com.gregtechceu.gtceu.api.machine.multiblock.PartAbility.IMPORT_ITEMS.register(0, inputDualHatchBlock);
             com.gregtechceu.gtceu.api.machine.multiblock.PartAbility.IMPORT_FLUIDS.register(0, inputDualHatchBlock);
+        }
+        if (ME_STELLAR_STOCK_PART != null) {
+            var stellarStockBlock = ME_STELLAR_STOCK_PART.getBlock();
+            PartAbility.IMPORT_ITEMS.register(0, stellarStockBlock);
+            PartAbility.IMPORT_FLUIDS.register(0, stellarStockBlock);
         }
         if (LOGICAL_COMPUTE_HATCH != null) {
             var computeBlock = LOGICAL_COMPUTE_HATCH.getBlock();

@@ -46,7 +46,7 @@ class JeiPatternQuickEncodeServiceTest {
                 "星律主机的全部配方类型必须逐一参与匹配");
         assertTrue(source.contains("for (int i = uploaded.size() - 1; i >= 0; i--)"));
         assertTrue(source.indexOf("uploaded.add(new UploadedPattern")
-                < source.indexOf("if (!consumePatternSource(menu, committedSource))"));
+                < source.indexOf("!consumePatternSource(menu, committedSource)"));
         assertTrue(source.contains("insertIntoStellarTarget"),
                 "星律写入必须走山海侧直接槽位实现，避免被外部 GTLCore mixin 禁用");
         assertTrue(source.contains("removeFromTarget"),
@@ -58,7 +58,7 @@ class JeiPatternQuickEncodeServiceTest {
         String publicSearch = source.substring(
                 source.indexOf("private static List<PatternQuickUploadService.Target> findPublicStellarTargets"),
                 source.indexOf("private static PatternQuickUploadService.UploadResult safeInsertIntoTarget"));
-        assertTrue(publicSearch.contains("filterToStellarTarget"));
+        assertTrue(publicSearch.contains("filterToSupportedTarget"));
         assertFalse(publicSearch.contains("candidate.recipeTypeId() == null"),
                 "GTLCore 提供的单一类型不能决定多配方主机是否兼容");
         assertTrue(source.contains("Actionable.SIMULATE"));
@@ -67,7 +67,7 @@ class JeiPatternQuickEncodeServiceTest {
         assertTrue(source.contains("boolean useInventoryFallback = !sdaPatterns.isEmpty()"));
         assertTrue(source.contains("sdaPatterns.size() < MIN_SDA_FALLBACK_PATTERNS"));
         assertTrue(source.contains("givePatterns(player, sdaPatterns)"));
-        assertTrue(source.contains("PatternSource committedSource = limitPatternSource(source, committedCount)"));
+        assertTrue(source.contains("source == null ? null : limitPatternSource(source, committedCount)"));
         assertTrue(source.contains("int skippedCount = useInventoryFallback || useSda ? 0 : sdaPatterns.size()"));
         String routing = source.substring(source.indexOf("for (ItemStack pattern : patterns) {"),
                 source.indexOf("boolean useInventoryFallback"));
@@ -98,6 +98,63 @@ class JeiPatternQuickEncodeServiceTest {
     }
 
     @Test
+    void duplicatePatternsAreHandledWithoutFallbackOrRemovingTheBatchTarget() throws Exception {
+        String source = Files.readString(SERVICE);
+        String routing = source.substring(source.indexOf("for (ItemStack pattern : patterns) {"),
+                source.indexOf("sendDuplicateHighlights(player, duplicateHighlights)"));
+        int duplicateStart = routing.indexOf("if (result.status() == PatternQuickUploadService.UploadStatus.DUPLICATE)");
+        assertTrue(duplicateStart >= 0, "Duplicate is a completed outcome, not a failed insertion");
+        String duplicateBranch = routing.substring(duplicateStart,
+                routing.indexOf("uploaded.add(new UploadedPattern", duplicateStart));
+
+        assertTrue(duplicateBranch.contains("duplicatePatterns.add(new UploadedPattern"));
+        assertTrue(duplicateBranch.contains("addDuplicateHighlight(duplicateHighlights, result.target())"));
+        assertTrue(duplicateBranch.contains("continue;"));
+        assertFalse(duplicateBranch.contains("sdaPatterns.add"));
+        assertFalse(duplicateBranch.contains("removeTarget("),
+                "A duplicate does not make the target unusable for later recipes");
+        assertFalse(duplicateBranch.contains("currentTarget = null"));
+        assertFalse(duplicateBranch.contains("result = null"));
+    }
+
+    @Test
+    void blankPatternRequirementsOnlyIncludeNewlyCommittedPatterns() throws Exception {
+        String source = Files.readString(SERVICE);
+        int committedCount = source.indexOf("int committedCount = uploaded.size() + inventoryCount");
+        int blankCheck = source.indexOf("findPatternSource(menu, committedCount)");
+        assertTrue(blankCheck > committedCount,
+                "Duplicates must be removed before checking the required blank count");
+        assertFalse(source.contains("findPatternSource(menu, patterns.size())"));
+        assertTrue(source.contains("if (committedCount > 0 &&"),
+                "Duplicate-only requests must not require or consume blank patterns");
+        String committed = source.substring(committedCount, blankCheck);
+        assertFalse(committed.contains("duplicatePatterns.size()"));
+        assertTrue(source.contains("boolean rolledBack = rollback(player, uploaded)"),
+                "A failed blank check must undo only newly inserted patterns");
+    }
+
+    @Test
+    void fullTargetsRemainDiscoverableForAlreadyStoredPatterns() throws Exception {
+        String source = Files.readString(SERVICE);
+        String capacity = source.substring(source.indexOf("private static boolean canAcceptPattern("),
+                source.indexOf("private static Set<ResourceLocation> recipeTypeIds("));
+        assertTrue(capacity.contains("isSameUploadPattern(inventory.getStackInSlot(slot), pattern)"),
+                "An existing pattern is valid even when every slot is occupied");
+        assertTrue(capacity.contains("inventory.insertItem(slot, pattern.copy(), true).isEmpty()"),
+                "New patterns still require a simulated successful insertion");
+    }
+
+    @Test
+    void duplicateDetailsReportTheActualTargetWithoutCountingItAsAnUpload() throws Exception {
+        String source = Files.readString(SERVICE);
+        assertTrue(source.contains("targetPatterns.addAll(duplicatePatterns)"));
+        assertTrue(source.contains("message.gt_shanhai.jei.quick_encode.duplicate_detail"));
+        assertTrue(source.contains("message.gt_shanhai.jei.quick_encode.deduplicated_success"));
+        assertTrue(source.contains("int newlyEncoded = uploaded.size() + sdaCount + inventoryCount"));
+        assertTrue(source.contains("[JEIQuickEncode] pattern already present target={} type={} slot={}"));
+    }
+
+    @Test
     void mountedModuleTypesDoNotBecomeEngineStellarTypes() throws Exception {
         String binding = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
                 "gt_shanhai", "common", "item", "WildcardPatternRecipeTypeBinding.java"));
@@ -125,7 +182,7 @@ class JeiPatternQuickEncodeServiceTest {
         assertTrue(source.contains("target.bufferPos()"));
         assertTrue(source.contains("recipeTypeId"));
         assertTrue(source.contains("uploaded.size()"));
-        assertTrue(source.contains("describeTargets(player, uploaded, sdaCount, inventoryCount)"));
+        assertTrue(source.contains("describeTargets(player, targetPatterns, sdaCount, inventoryCount)"));
         assertTrue(source.contains("/shanhai stellar_tp "),
                 "成功寫入目標的座標應使用既有的安全傳送指令");
         assertTrue(source.contains("ClickEvent.Action.RUN_COMMAND"));

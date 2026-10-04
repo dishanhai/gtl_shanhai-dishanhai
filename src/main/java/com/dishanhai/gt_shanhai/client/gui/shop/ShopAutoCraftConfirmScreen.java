@@ -12,6 +12,7 @@ import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 自动合成方案确认框（山海署名，客户端）：花费预览「补齐全部缺口」算完后弹出，展示会消耗的用料
@@ -33,18 +34,25 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
     private static final int TARGET_H = 300;
     private static final int ROW_H = 11;
 
-    // 打开确认框那一刻的当前屏幕（预期是 ShopScreen），确认/取消后回去；静态持有，供 openOrUpdate 跨包调用。
-    private static Screen parentScreen;
-    private static boolean anySubmittable = false;
-    private static List<String> useLines = List.of();
-    private static List<String> noteLines = List.of();
+    private final UUID planId;
+    private final Screen parentScreen;
+    private final boolean anySubmittable;
+    private final List<String> useLines;
+    private final List<String> noteLines;
+    private boolean finished;
 
     private int left, top, panelWidth, panelHeight;
     private int listX, listY, listW, listH;
     private int scroll = 0;
 
-    public ShopAutoCraftConfirmScreen() {
+    private ShopAutoCraftConfirmScreen(UUID planId, boolean anySubmittable,
+            List<String> useLines, List<String> noteLines, Screen parentScreen) {
         super(Component.literal("自动合成确认"));
+        this.planId = planId;
+        this.anySubmittable = anySubmittable;
+        this.useLines = List.copyOf(useLines);
+        this.noteLines = List.copyOf(noteLines);
+        this.parentScreen = parentScreen;
         this.targetWidth = TARGET_W;
         this.targetHeight = TARGET_H;
         this.useOffset = false;
@@ -52,15 +60,16 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
         this.maxScale = Float.MAX_VALUE;
     }
 
-    /** {@code ShopAutoCraftPlanPacket} 到达时调用：已开着就只刷新内容，没开就在当前屏幕上打开。 */
-    public static void openOrUpdate(boolean anySubmittableIn, List<String> useLinesIn, List<String> noteLinesIn) {
-        anySubmittable = anySubmittableIn;
-        useLines = useLinesIn != null ? useLinesIn : List.of();
-        noteLines = noteLinesIn != null ? noteLinesIn : List.of();
+    /** 相同方案不重開；新方案使用獨立視窗狀態，舊視窗取消不能誤刪新方案。 */
+    public static void openOrUpdate(UUID planId, boolean anySubmittableIn, List<String> useLinesIn, List<String> noteLinesIn) {
         Screen current = Minecraft.getInstance().screen;
-        if (current instanceof ShopAutoCraftConfirmScreen) return;
-        parentScreen = current;
-        Minecraft.getInstance().setScreen(new ShopAutoCraftConfirmScreen());
+        Screen parent = current;
+        if (current instanceof ShopAutoCraftConfirmScreen existing) {
+            if (existing.planId.equals(planId)) return;
+            parent = existing.parentScreen;
+        }
+        Minecraft.getInstance().setScreen(new ShopAutoCraftConfirmScreen(
+                planId, anySubmittableIn, useLinesIn, noteLinesIn, parent));
     }
 
     private List<String> displayLines() {
@@ -70,7 +79,6 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
             lines.addAll(noteLines);
         }
         if (!useLines.isEmpty()) {
-            lines.add("§a— 将会消耗 —");
             lines.addAll(useLines);
         }
         if (lines.isEmpty()) lines.add("§7（没有可提交的合成项）");
@@ -138,6 +146,7 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        if (btn != 0 || finished) return false;
         int btnY = top + panelHeight - 22;
         int confirmW = panelWidth - 16 - 60;
         if (anySubmittable && GuiRenderUtil.isHovering(mx, my, left + 8, btnY, confirmW, 18)) {
@@ -161,13 +170,31 @@ public class ShopAutoCraftConfirmScreen extends ScaledScreen {
     }
 
     private void confirm() {
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(true));
+        if (finished) return;
+        finished = true;
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, true));
         Minecraft.getInstance().setScreen(parentScreen);
     }
 
     private void cancel() {
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(false));
+        if (finished) return;
+        finished = true;
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
         Minecraft.getInstance().setScreen(parentScreen);
+    }
+
+    @Override
+    public void onClose() {
+        cancel();
+    }
+
+    @Override
+    public void removed() {
+        if (!finished && Minecraft.getInstance().getConnection() != null) {
+            finished = true;
+            ShanhaiNetwork.CHANNEL.sendToServer(new ShopAutoCraftConfirmPacket(planId, false));
+        }
+        super.removed();
     }
 
     @Override

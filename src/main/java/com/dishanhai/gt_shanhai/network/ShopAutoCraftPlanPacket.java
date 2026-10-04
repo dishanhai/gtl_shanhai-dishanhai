@@ -8,6 +8,7 @@ import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
@@ -19,17 +20,20 @@ public class ShopAutoCraftPlanPacket {
 
     private static final int MAX_LINES = 512;
 
+    private final UUID planId;
     private final boolean anySubmittable;
     private final List<String> useLines;    // 会消耗的合并用料（"物品 ×数量"，已带颜色码）
     private final List<String> noteLines;   // 无样板/材料不足/计算失败的提示（已带颜色码）
 
-    public ShopAutoCraftPlanPacket(boolean anySubmittable, List<String> useLines, List<String> noteLines) {
+    public ShopAutoCraftPlanPacket(UUID planId, boolean anySubmittable, List<String> useLines, List<String> noteLines) {
+        this.planId = planId;
         this.anySubmittable = anySubmittable;
         this.useLines = useLines;
         this.noteLines = noteLines;
     }
 
     public ShopAutoCraftPlanPacket(FriendlyByteBuf buf) {
+        this.planId = buf.readUUID();
         this.anySubmittable = buf.readBoolean();
         this.useLines = readLines(buf);
         this.noteLines = readLines(buf);
@@ -44,6 +48,7 @@ public class ShopAutoCraftPlanPacket {
     }
 
     public void encode(FriendlyByteBuf buf) {
+        buf.writeUUID(planId);
         buf.writeBoolean(anySubmittable);
         writeLines(buf, useLines);
         writeLines(buf, noteLines);
@@ -73,6 +78,6 @@ public class ShopAutoCraftPlanPacket {
     @OnlyIn(Dist.CLIENT)
     private static void handleClient(ShopAutoCraftPlanPacket pkt) {
         com.dishanhai.gt_shanhai.client.gui.shop.ShopAutoCraftConfirmScreen.openOrUpdate(
-                pkt.anySubmittable, pkt.useLines, pkt.noteLines);
+                pkt.planId, pkt.anySubmittable, pkt.useLines, pkt.noteLines);
     }
 }

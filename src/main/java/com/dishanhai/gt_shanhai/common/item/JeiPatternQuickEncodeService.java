@@ -132,13 +132,8 @@ public final class JeiPatternQuickEncodeService {
             return;
         }
 
-        PatternSource source = findPatternSource(menu, patterns.size());
-        if (source == null) {
-            show(player, "message.gt_shanhai.jei.quick_encode.missing_blank", patterns.size());
-            return;
-        }
-
         List<UploadedPattern> uploaded = new ArrayList<>(patterns.size());
+        List<UploadedPattern> duplicatePatterns = new ArrayList<>();
         List<ItemStack> sdaPatterns = new ArrayList<>();
         Map<ResourceKey<Level>, List<ShanhaiStructureHighlightPacket.Marker>> duplicateHighlights =
                 new LinkedHashMap<>();
@@ -165,13 +160,6 @@ public final class JeiPatternQuickEncodeService {
                 }
                 if (currentTarget == null) break;
                 result = safeInsertIntoTarget(player, pattern, currentTarget);
-                if (result != null && result.status() == PatternQuickUploadService.UploadStatus.DUPLICATE) {
-                    addDuplicateHighlight(duplicateHighlights, result.target());
-                    removeTarget(availableTargets, currentTarget);
-                    currentTarget = null;
-                    result = null;
-                    continue;
-                }
                 if (result != null) break;
                 invalidateCachedTarget(menu.getNetworkNode(), currentTarget);
                 removeTarget(availableTargets, currentTarget);
@@ -181,6 +169,14 @@ public final class JeiPatternQuickEncodeService {
                 // 星律样板槽全部占满时保留样板，稍后一次性写入 SDA；有替补星律则下一轮会重新选择。
                 sdaPatterns.add(pattern.copy());
                 currentTarget = null;
+                continue;
+            }
+            if (result.status() == PatternQuickUploadService.UploadStatus.DUPLICATE) {
+                duplicatePatterns.add(new UploadedPattern(pattern, result.target(), result.slot()));
+                addDuplicateHighlight(duplicateHighlights, result.target());
+                GTDishanhaiMod.LOGGER.info(
+                        "[JEIQuickEncode] pattern already present target={} type={} slot={}",
+                        result.target().bufferPos(), recipeTypeId, result.slot());
                 continue;
             }
             uploaded.add(new UploadedPattern(pattern, result.target(), result.slot()));
@@ -198,8 +194,10 @@ public final class JeiPatternQuickEncodeService {
                 + (useSda ? sdaPatterns.size() : 0);
         // SDA 门槛只约束回退打包；已经成功写入星律的样板必须保留，不能因
         // 剩余回退样板不足 20 张而整体回滚。未达门槛的回退样板改交给玩家。
-        PatternSource committedSource = limitPatternSource(source, committedCount);
-        if (!consumePatternSource(menu, committedSource)) {
+        // 重複樣板不扣空白；扣料失敗時只回滾本次真正新增的槽位。
+        PatternSource source = committedCount == 0 ? null : findPatternSource(menu, committedCount);
+        PatternSource committedSource = source == null ? null : limitPatternSource(source, committedCount);
+        if (committedCount > 0 && (committedSource == null || !consumePatternSource(menu, committedSource))) {
             boolean rolledBack = rollback(player, uploaded);
             show(player, rolledBack
                     ? "message.gt_shanhai.jei.quick_encode.missing_blank"
@@ -231,7 +229,7 @@ public final class JeiPatternQuickEncodeService {
                     skippedCount, MIN_SDA_FALLBACK_PATTERNS);
             return;
         }
-        showSuccess(player, wholeRecipeType, patterns.size(), uploaded,
+        showSuccess(player, wholeRecipeType, patterns.size(), uploaded, duplicatePatterns,
                 useSda ? sdaPatterns.size() : 0, inventoryCount, skippedCount,
                 recipeTypeId);
         for (int i = 0; i < committedCount; i++) {
@@ -804,6 +802,7 @@ public final class JeiPatternQuickEncodeService {
         InternalInventory inventory = stellar.getTerminalPatternInventory();
         if (inventory == null) return false;
         for (int slot = 0; slot < inventory.size(); slot++) {
+            if (isSameUploadPattern(inventory.getStackInSlot(slot), pattern)) return true;
             if (inventory.isItemValid(slot, pattern)
                     && inventory.insertItem(slot, pattern.copy(), true).isEmpty()) {
                 return true;
@@ -1134,7 +1133,8 @@ public final class JeiPatternQuickEncodeService {
     }
 
     private static void showSuccess(ServerPlayer player, boolean wholeRecipeType, int total,
-            List<UploadedPattern> uploaded, int sdaCount, int inventoryCount,
+            List<UploadedPattern> uploaded, List<UploadedPattern> duplicatePatterns,
+            int sdaCount, int inventoryCount,
             int skippedCount, String recipeTypeId) {
         Component message;
         if (skippedCount > 0) {
@@ -1144,6 +1144,10 @@ public final class JeiPatternQuickEncodeService {
             message = Component.translatable(
                     "message.gt_shanhai.jei.quick_encode.inventory_fallback_success",
                     uploaded.size(), inventoryCount);
+        } else if (!duplicatePatterns.isEmpty()) {
+            int newlyEncoded = uploaded.size() + sdaCount + inventoryCount;
+            message = Component.translatable("message.gt_shanhai.jei.quick_encode.deduplicated_success",
+                    newlyEncoded, duplicatePatterns.size());
         } else if (sdaCount == 0) {
             message = Component.translatable(wholeRecipeType
                     ? "message.gt_shanhai.jei.quick_encode.batch_success"
@@ -1154,11 +1158,17 @@ public final class JeiPatternQuickEncodeService {
         }
         player.displayClientMessage(message, true);
 
-        Component targetDetails = describeTargets(player, uploaded, sdaCount, inventoryCount);
-        Component detail = Component.translatable(
+        List<UploadedPattern> targetPatterns = new ArrayList<>(uploaded);
+        targetPatterns.addAll(duplicatePatterns);
+        Component targetDetails = describeTargets(player, targetPatterns, sdaCount, inventoryCount);
+        MutableComponent detail = Component.translatable(
                 "message.gt_shanhai.jei.quick_encode.operation_detail",
                 total, recipeTypeId == null ? "unknown" : recipeTypeId,
                 targetDetails, sdaCount, inventoryCount, skippedCount);
+        if (!duplicatePatterns.isEmpty()) {
+            detail.append(Component.literal("; ")).append(Component.translatable(
+                    "message.gt_shanhai.jei.quick_encode.duplicate_detail", duplicatePatterns.size()));
+        }
         player.sendSystemMessage(detail);
     }
 

@@ -7,6 +7,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.function.Supplier;
+import java.util.UUID;
 
 /**
  * 自动合成确认框「确认合成」/「取消」（C→S）：confirm=true 真正提交
@@ -14,17 +15,21 @@ import java.util.function.Supplier;
  */
 public class ShopAutoCraftConfirmPacket {
 
+    private final UUID planId;
     private final boolean confirm;
 
-    public ShopAutoCraftConfirmPacket(boolean confirm) {
+    public ShopAutoCraftConfirmPacket(UUID planId, boolean confirm) {
+        this.planId = planId;
         this.confirm = confirm;
     }
 
     public ShopAutoCraftConfirmPacket(FriendlyByteBuf buf) {
+        this.planId = buf.readUUID();
         this.confirm = buf.readBoolean();
     }
 
     public void encode(FriendlyByteBuf buf) {
+        buf.writeUUID(planId);
         buf.writeBoolean(confirm);
     }
 
@@ -33,8 +38,8 @@ public class ShopAutoCraftConfirmPacket {
         context.enqueueWork(() -> {
             ServerPlayer player = context.getSender();
             if (player == null) return;
-            if (pkt.confirm) ShopAutoCraft.confirmPlan(player);
-            else ShopAutoCraft.cancel(player);
+            if (pkt.confirm) ShopAutoCraft.confirmPlan(player, pkt.planId);
+            else ShopAutoCraft.cancel(player, pkt.planId);
         });
         context.setPacketHandled(true);
     }
