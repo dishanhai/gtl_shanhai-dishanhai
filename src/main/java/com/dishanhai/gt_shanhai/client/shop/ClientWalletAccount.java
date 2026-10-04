@@ -59,7 +59,7 @@ public final class ClientWalletAccount {
         return memberTier;
     }
 
-    /** 某商品条目的已购买次数（key 见 {@code WalletAccountAPI#purchaseKey}），未同步/未买过为 0。 */
+    /** 某商品条目的已购买次数（key 见 {@code WalletAccountAPI#purchaseKey(ShopEntry)}），未同步/未买过为 0。 */
     public static long getPurchaseCount(String key) {
         if (key == null) return 0L;
         Long v = purchaseCounts.get(key);

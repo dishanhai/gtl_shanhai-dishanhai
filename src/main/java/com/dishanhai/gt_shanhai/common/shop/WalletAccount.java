@@ -47,7 +47,7 @@ public class WalletAccount {
     private BigInteger bankDebt = BigInteger.ZERO;
     /** 贷款欠款上次结息时刻；0=从未记账。 */
     private long bankDebtLastMs = 0L;
-    /** 商品条目 key（见 {@link WalletAccountAPI#purchaseKey}）→ 累计已购买次数，展示用，非结算依据。 */
+    /** 商品条目 key（见 {@link WalletAccountAPI#purchaseKey(ShopEntry)}）→ 累计已购买次数，展示用，非结算依据。 */
     private final Map<String, Long> purchaseCounts = new LinkedHashMap<>();
     /** 商品条目 key → 该玩家当前周期限购窗口的开窗锚点 gameTime（见 {@link ShopPeriodLimiter}），
      *  在玩家<b>首次消费</b>该商品时打下，配合 {@link #periodUsed} 判断窗口是否还在有效期内；无锚点=从未开窗。 */

@@ -249,12 +249,19 @@ public final class WalletAccountAPI {
     // ===================== 已购买次数（展示用统计） =====================
 
     /**
-     * 商品条目的稳定统计 key：goodsId+category（与 {@code ShopActionPacket#locate} 同一定位口径）。
-     * 同 goodsId 不同 NBT 的多条目（如各种超级磁盘阵列）会共享同一份统计，这是已知取舍——
-     * 展示"已购买次数"是给玩家看的参考数字，不追求逐条目精确到 NBT 级别。
+     * 旧商品定位 key：goodsId+category。仅供仍按物品 ID/分类聚合的业务（目前为周期限购）使用，
+     * 不可用于已购买次数统计，否则同物品 ID 的不同 NBT 商品会串号。
      */
     public static String purchaseKey(ResourceLocation goodsId, String category) {
         return goodsId + "|" + (category == null ? "" : category);
+    }
+
+    /**
+     * 单个商品条目的已购买次数 key：使用稳定身份 ID，确保同物品 ID/分类下的不同商品各自统计。
+     */
+    public static String purchaseKey(ShopEntry entry) {
+        if (entry == null || entry.getStableId() == null || entry.getStableId().isBlank()) return null;
+        return "entry:" + entry.getStableId();
     }
 
     public static long getPurchaseCount(MinecraftServer server, UUID uuid, String key) {

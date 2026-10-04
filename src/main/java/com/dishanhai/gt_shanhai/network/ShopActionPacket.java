@@ -346,7 +346,7 @@ public class ShopActionPacket {
         if (!cheat) {
             // 已购买次数只统计真实付款的购买（作弊直取不算"买"），随账户快照一起推给客户端展示
             WalletAccountAPI.addPurchaseCount(player.getServer(), player.getUUID(),
-                    WalletAccountAPI.purchaseKey(entry.getGoodsId(), entry.getCategory()), r.done());
+                    WalletAccountAPI.purchaseKey(entry), r.done());
             WalletAccountAPI.sync(player);
         }
         String viaText = switch (r.via() == null ? "" : r.via()) {

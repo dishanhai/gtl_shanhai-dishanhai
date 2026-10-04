@@ -2386,7 +2386,7 @@ public class ShopScreen extends ScaledScreen {
                 : selected.getCost().scaledTo(ShopPurchase.sellRatioPercent());
         int py = dy + 128;
         int costTrimW = dx + dw - 10 - cx;
-        String key = WalletAccountAPI.purchaseKey(selected.getGoodsId(), selected.getCategory());
+        String key = WalletAccountAPI.purchaseKey(selected);
         long bought = ClientWalletAccount.getPurchaseCount(key);
         int btnY = dy + dh - 24;
         // GuideME 集成：查一次商品清单是否有指南页命中，selected 没变就不重复扫描所有已装指南
