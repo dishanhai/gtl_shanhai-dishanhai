@@ -43,15 +43,17 @@ public final class PatternNotConsumableFilter {
     }
 
     /**
-     * 当前正在扣料/结算的配方（每次样板扣料 {@code meHandleRecipeInner} 进入时由 filter mixin 写入）。
-     * 供虚拟目标 strip（在 {@code handleItemInternal}/{@code meHandleRecipeInner} 的 RETURN 里触发、
-     * 那些点拿不到 recipe）判断"哪个虚拟目标是不消耗催化剂、执行后不该被剥离"。同一服务器线程串行
-     * 执行配方，下次扣料进入时覆盖，无需主动清理；strip 只在配方扣料链路内触发，读到的必是当前配方。
+     * 由整筆 {@code MEPatternRecipeHandlePart.handleRecipe} 的入口設定，
+     * 正常出口清除，供成功結算時判斷哪些虛擬催化劑必須保留。
      */
     private static final ThreadLocal<GTRecipe> ACTIVE_RECIPE = new ThreadLocal<>();
 
     public static void setActiveRecipe(GTRecipe recipe) {
         ACTIVE_RECIPE.set(recipe);
+    }
+
+    public static void clearActiveRecipe() {
+        ACTIVE_RECIPE.remove();
     }
 
     public static boolean isActiveRecipeAuxiliaryIO() {
@@ -71,7 +73,7 @@ public final class PatternNotConsumableFilter {
             return isItemNotConsumable(recipe, itemKey.toStack());
         }
         if (key instanceof AEFluidKey fluidKey) {
-            return isFluidNotConsumable(recipe, FluidStack.create(fluidKey.getFluid(), 1L));
+            return isFluidNotConsumable(recipe, FluidStack.create(fluidKey.getFluid(), 1L, fluidKey.getTag()));
         }
         return false;
     }

@@ -1,5 +1,8 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import appeng.api.stacks.AEFluidKey;
+import appeng.api.stacks.GenericStack;
+
 import com.dishanhai.gt_shanhai.client.renderer.item.VirtualItemProviderRenderer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer;
@@ -17,7 +20,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Stores a virtual target item for programmable hatches.
+ * Stores a virtual target item or fluid for programmable hatches.
  */
 public class VirtualItemProviderItem extends Item {
 
@@ -84,9 +87,16 @@ public class VirtualItemProviderItem extends Item {
             tooltip.add(Component.literal("未绑定虚拟物品").withStyle(ChatFormatting.RED));
             return;
         }
-        tooltip.add(Component.literal("已绑定: ").withStyle(ChatFormatting.AQUA)
-                .append(Component.literal(target.getCount() + "x ").withStyle(ChatFormatting.WHITE))
-                .append(target.getHoverName().copy().withStyle(ChatFormatting.WHITE)));
+        GenericStack genericTarget = GenericStack.fromItemStack(target);
+        if (genericTarget != null && genericTarget.what() instanceof AEFluidKey) {
+            tooltip.add(Component.literal("已绑定: ").withStyle(ChatFormatting.AQUA)
+                    .append(Component.literal(genericTarget.amount() + " mB ").withStyle(ChatFormatting.WHITE))
+                    .append(genericTarget.what().getDisplayName().copy().withStyle(ChatFormatting.WHITE)));
+        } else {
+            tooltip.add(Component.literal("已绑定: ").withStyle(ChatFormatting.AQUA)
+                    .append(Component.literal(target.getCount() + "x ").withStyle(ChatFormatting.WHITE))
+                    .append(target.getHoverName().copy().withStyle(ChatFormatting.WHITE)));
+        }
     }
 
     public static ItemStack getTarget(ItemStack stack) {

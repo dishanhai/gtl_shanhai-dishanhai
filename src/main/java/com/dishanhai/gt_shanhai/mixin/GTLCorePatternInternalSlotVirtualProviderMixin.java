@@ -12,10 +12,8 @@ import org.gtlcore.gtlcore.integration.ae2.handler.SlotCacheManager;
 
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
-import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
 
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -38,12 +36,6 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     @Shadow
     @Final
     private Object2LongOpenHashMap<AEFluidKey> fluidInventory;
-
-    @Unique
-    private Object2LongOpenHashMap<AEItemKey> gtShanhai$itemVirtualSnapshot;
-
-    @Unique
-    private Object2LongOpenHashMap<AEFluidKey> gtShanhai$fluidVirtualSnapshot;
 
     @Override
     public void gtShanhai$addVirtualTarget(AEKey key, long amount) {
@@ -92,6 +84,7 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
     public void gtShanhai$stripVirtualTargets() {
         gtShanhai$stripVirtualItems();
         gtShanhai$stripVirtualFluids();
+        gtShanhai$clearCatalystsIfDepleted();
     }
 
     @Override
@@ -111,38 +104,6 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
         gtShanhai$syncVirtualTargetsToCatalyst();
     }
 
-    @Inject(method = "handleItemInternal", at = @At("HEAD"), remap = false)
-    private void gtShanhai$snapshotVirtualItems(Object2LongMap<Ingredient> ingredients, int circuitConfig,
-            boolean simulate, CallbackInfoReturnable<Boolean> cir) {
-        gtShanhai$itemVirtualSnapshot = simulate ? null : VirtualPatternBufferSlotState.snapshotVirtualTargets(itemInventory);
-    }
-
-    @Inject(method = "handleItemInternal", at = @At("RETURN"), remap = false)
-    private void gtShanhai$restoreVirtualItems(Object2LongMap<Ingredient> ingredients, int circuitConfig,
-            boolean simulate, CallbackInfoReturnable<Boolean> cir) {
-        if (!simulate && Boolean.TRUE.equals(cir.getReturnValue())
-                && !PatternNotConsumableFilter.isActiveRecipeAuxiliaryIO()) {
-            gtShanhai$stripVirtualItems();
-        }
-        gtShanhai$itemVirtualSnapshot = null;
-    }
-
-    @Inject(method = "handleFluidInternal", at = @At("HEAD"), remap = false)
-    private void gtShanhai$snapshotVirtualFluids(Object2LongMap<FluidIngredient> ingredients,
-            boolean simulate, CallbackInfoReturnable<Boolean> cir) {
-        gtShanhai$fluidVirtualSnapshot = simulate ? null : VirtualPatternBufferSlotState.snapshotVirtualTargets(fluidInventory);
-    }
-
-    @Inject(method = "handleFluidInternal", at = @At("RETURN"), remap = false)
-    private void gtShanhai$restoreVirtualFluids(Object2LongMap<FluidIngredient> ingredients,
-            boolean simulate, CallbackInfoReturnable<Boolean> cir) {
-        if (!simulate && Boolean.TRUE.equals(cir.getReturnValue())
-                && !PatternNotConsumableFilter.isActiveRecipeAuxiliaryIO()) {
-            gtShanhai$stripVirtualFluids();
-        }
-        gtShanhai$fluidVirtualSnapshot = null;
-    }
-
     @Unique
     private void gtShanhai$stripVirtualItems() {
         VirtualPatternBufferSlotState.removeVirtualTargets(itemInventory, gtShanhai$getItemCatalystInventory());
@@ -150,7 +111,6 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
         // 不再执行一次即被清空。退料/下单结束走无谓词版全清，不残留。
         VirtualPatternBufferSlotState.stripVirtualTargets(itemInventory,
                 PatternNotConsumableFilter::isKeyNotConsumableForActiveRecipe);
-        gtShanhai$clearCatalystsIfDepleted();
     }
 
     @Unique
@@ -158,7 +118,6 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
         VirtualPatternBufferSlotState.removeVirtualTargets(fluidInventory, gtShanhai$getFluidCatalystInventory());
         VirtualPatternBufferSlotState.stripVirtualTargets(fluidInventory,
                 PatternNotConsumableFilter::isKeyNotConsumableForActiveRecipe);
-        gtShanhai$clearCatalystsIfDepleted();
     }
 
     /**

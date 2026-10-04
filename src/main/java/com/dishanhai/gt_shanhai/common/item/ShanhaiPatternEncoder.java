@@ -36,8 +36,6 @@ import java.util.List;
 /** Encodes GT recipes with gt_shanhai virtual inputs and authoritative recipe-type metadata. */
 public final class ShanhaiPatternEncoder {
 
-    private static final long VIRTUAL_FLUID_MARKER_AMOUNT = 1L;
-
     public static Ae2GtmProcessingPattern encode(GTRecipe recipe, ServerPlayer player,
                                                   boolean respectAutoWrapExclusions) {
         return encode(recipe, player, null, respectAutoWrapExclusions);
@@ -149,8 +147,16 @@ public final class ShanhaiPatternEncoder {
             com.lowdragmc.lowdraglib.side.fluid.FluidStack stack =
                     bestFluidStack(stacks, priority);
             if (stack == null || stack.isEmpty()) continue;
-            long amount = isNonConsumable(content) ? VIRTUAL_FLUID_MARKER_AMOUNT : stack.getAmount();
-            inputs.add(new GenericStack(fluidKeyOf(stack), Math.max(1L, amount)));
+            GenericStack target = new GenericStack(fluidKeyOf(stack), Math.max(1L, stack.getAmount()));
+            if (isNonConsumable(content)) {
+                ItemStack provider = VirtualItemProviderHelper.createBoundProvider(target);
+                if (provider.isEmpty()) {
+                    throw new IllegalStateException("Cannot wrap non-consumable fluid for " + recipe.id);
+                }
+                inputs.add(new GenericStack(AEItemKey.of(provider), 1L));
+            } else {
+                inputs.add(target);
+            }
         }
     }
 

@@ -71,6 +71,7 @@ import it.unimi.dsi.fastutil.ints.IntConsumer;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongMaps;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectArraySet;
@@ -491,57 +492,78 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     @Nullable
     protected AEItemKey findStockItemKey(Ingredient ingredient, Object2LongMap<AEItemKey> internal,
             Object2LongMap<AEItemKey> catalyst, long needAmount, boolean includeCatalyst) {
-        KeyCounter cached = includeCatalyst ? gtShanhai$cachedNetworkInventory() : null;
+        if (!includeCatalyst) {
+            return super.findStockItemKey(ingredient, internal, catalyst, needAmount, false);
+        }
+        Object2LongMap<AEItemKey> virtualTargets = internal instanceof Object2LongOpenHashMap<AEItemKey> inventory
+                ? VirtualPatternBufferSlotState.getVirtualTargets(inventory) : Object2LongMaps.emptyMap();
+        Object2LongMap<AEItemKey> distinctCatalyst =
+                VirtualPatternBufferSlotState.withoutVirtualCatalystMirrors(virtualTargets, internal, catalyst);
+        KeyCounter cached = gtShanhai$cachedNetworkInventory();
         if (cached == null) {
-            return super.findStockItemKey(ingredient, internal, catalyst, needAmount, includeCatalyst);
-        }
-        for (ItemStack item : ingredient.getItems()) {
-            if (item.isEmpty()) continue;
-            AEItemKey key = AEItemKey.of(item);
-            long amount = NumberUtils.saturatedAdd(internal.getLong(key),
-                    gtShanhai$cachedConfiguredItemAmount(cached, key));
-            amount = NumberUtils.saturatedAdd(amount, catalyst.getLong(key));
-            if (amount >= needAmount) return key;
-        }
-        for (ExportOnlyAEItemSlot slot : stockItemHandler.getInventory()) {
-            GenericStack config = slot.getConfig();
-            if (config == null || !(config.what() instanceof AEItemKey key) || !key.matches(ingredient)) {
-                continue;
+            AEItemKey key = super.findStockItemKey(ingredient, internal, distinctCatalyst, needAmount, true);
+            if (key != null && key.matches(ingredient)) return key;
+        } else {
+            for (ItemStack item : ingredient.getItems()) {
+                if (item.isEmpty()) continue;
+                AEItemKey key = AEItemKey.of(item);
+                long amount = NumberUtils.saturatedAdd(internal.getLong(key),
+                        gtShanhai$cachedConfiguredItemAmount(cached, key));
+                amount = NumberUtils.saturatedAdd(amount, distinctCatalyst.getLong(key));
+                if (amount >= needAmount) return key;
             }
-            long amount = NumberUtils.saturatedAdd(internal.getLong(key), Math.max(0L, cached.get(key)));
-            amount = NumberUtils.saturatedAdd(amount, catalyst.getLong(key));
-            if (amount >= needAmount) return key;
+            for (ExportOnlyAEItemSlot slot : stockItemHandler.getInventory()) {
+                GenericStack config = slot.getConfig();
+                if (config == null || !(config.what() instanceof AEItemKey key) || !key.matches(ingredient)) {
+                    continue;
+                }
+                long amount = NumberUtils.saturatedAdd(internal.getLong(key), Math.max(0L, cached.get(key)));
+                amount = NumberUtils.saturatedAdd(amount, distinctCatalyst.getLong(key));
+                if (amount >= needAmount) return key;
+            }
         }
-        return null;
+        return VirtualPatternBufferSlotState.findMatchingVirtualTarget(
+                virtualTargets, internal, catalyst, needAmount, key -> key.matches(ingredient));
     }
 
     @Override
     @Nullable
     protected AEFluidKey findStockFluidKey(FluidIngredient ingredient, Object2LongMap<AEFluidKey> internal,
             Object2LongMap<AEFluidKey> catalyst, long needAmount, boolean includeCatalyst) {
-        KeyCounter cached = includeCatalyst ? gtShanhai$cachedNetworkInventory() : null;
+        if (!includeCatalyst) {
+            return super.findStockFluidKey(ingredient, internal, catalyst, needAmount, false);
+        }
+        Object2LongMap<AEFluidKey> virtualTargets = internal instanceof Object2LongOpenHashMap<AEFluidKey> inventory
+                ? VirtualPatternBufferSlotState.getVirtualTargets(inventory) : Object2LongMaps.emptyMap();
+        Object2LongMap<AEFluidKey> distinctCatalyst =
+                VirtualPatternBufferSlotState.withoutVirtualCatalystMirrors(virtualTargets, internal, catalyst);
+        KeyCounter cached = gtShanhai$cachedNetworkInventory();
         if (cached == null) {
-            return super.findStockFluidKey(ingredient, internal, catalyst, needAmount, includeCatalyst);
-        }
-        for (FluidStack stack : ingredient.getStacks()) {
-            if (stack.isEmpty()) continue;
-            AEFluidKey key = AEFluidKey.of(stack.getFluid());
-            long amount = NumberUtils.saturatedAdd(internal.getLong(key),
-                    gtShanhai$cachedConfiguredFluidAmount(cached, key));
-            amount = NumberUtils.saturatedAdd(amount, catalyst.getLong(key));
-            if (amount >= needAmount) return key;
-        }
-        for (ExportOnlyAEFluidSlot slot : stockFluidHandler.getInventory()) {
-            GenericStack config = slot.getConfig();
-            if (config == null || !(config.what() instanceof AEFluidKey key)
-                    || !AEUtils.testFluidIngredient(ingredient, key)) {
-                continue;
+            AEFluidKey key = super.findStockFluidKey(ingredient, internal, distinctCatalyst, needAmount, true);
+            if (key != null && AEUtils.testFluidIngredient(ingredient, key)) return key;
+        } else {
+            for (FluidStack stack : ingredient.getStacks()) {
+                if (stack.isEmpty()) continue;
+                AEFluidKey key = AEFluidKey.of(stack.getFluid(), stack.getTag());
+                long amount = NumberUtils.saturatedAdd(internal.getLong(key),
+                        gtShanhai$cachedConfiguredFluidAmount(cached, key));
+                amount = NumberUtils.saturatedAdd(amount, distinctCatalyst.getLong(key));
+                if (amount >= needAmount) return key;
             }
-            long amount = NumberUtils.saturatedAdd(internal.getLong(key), Math.max(0L, cached.get(key)));
-            amount = NumberUtils.saturatedAdd(amount, catalyst.getLong(key));
-            if (amount >= needAmount) return key;
+            for (ExportOnlyAEFluidSlot slot : stockFluidHandler.getInventory()) {
+                GenericStack config = slot.getConfig();
+                if (config == null || !(config.what() instanceof AEFluidKey key)
+                        || !AEUtils.testFluidIngredient(ingredient, key)) {
+                    continue;
+                }
+                long amount = NumberUtils.saturatedAdd(internal.getLong(key), Math.max(0L, cached.get(key)));
+                amount = NumberUtils.saturatedAdd(amount, distinctCatalyst.getLong(key));
+                if (amount >= needAmount) return key;
+            }
         }
-        return null;
+        return VirtualPatternBufferSlotState.findMatchingVirtualTarget(
+                virtualTargets, internal, catalyst, needAmount,
+                key -> AEUtils.testFluidIngredient(ingredient, key));
     }
 
     @Override

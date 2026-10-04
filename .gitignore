@@ -8,6 +8,7 @@ NUL
 /run/
 /gradle-install/
 /.worktrees/
+/staging/
 
 # 库和源码参考
 /lib/

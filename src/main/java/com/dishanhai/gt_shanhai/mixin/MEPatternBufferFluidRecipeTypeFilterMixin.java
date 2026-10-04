@@ -25,11 +25,6 @@ public abstract class MEPatternBufferFluidRecipeTypeFilterMixin implements IMERe
     @Inject(method = "meHandleRecipeInner", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$rejectWrongRecipeTypeSlot(GTRecipe recipe, Object2LongMap<FluidIngredient> left,
             boolean simulate, int trySlot, CallbackInfoReturnable<Boolean> cir) {
-        // 记录当前扣料配方，供配方执行后的虚拟目标 strip 判断"不消耗催化剂需保留在场"。
-        // 对所有样板总成都记录（不只星律），保证 ThreadLocal 不残留上一次配方而串味。
-        if (!simulate) {
-            PatternNotConsumableFilter.setActiveRecipe(recipe);
-        }
         MEPatternBufferPartMachineBase machine = getMachine();
         if (!(machine instanceof RecipeTypePatternSlotAccess access)) {
             return; // 非星律样板总成不做配方类型过滤/剔除，保持 GTLCore 原生行为

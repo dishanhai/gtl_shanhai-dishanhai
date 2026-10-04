@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
+import com.dishanhai.gt_shanhai.common.item.PatternNotConsumableFilter;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -21,16 +22,27 @@ public class MEPatternRecipeHandlePartVirtualProviderMixin {
 
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai:virtual_pattern");
 
+    @Inject(method = "handleRecipe", at = @At("HEAD"), remap = false)
+    private void gtShanhai$beginPatternRecipe(GTRecipe recipe,
+            Reference2ObjectMap<RecipeCapability<?>, List<Object>> contents, boolean simulate, boolean setSlotCache,
+            CallbackInfoReturnable<Integer> cir) {
+        PatternNotConsumableFilter.setActiveRecipe(recipe);
+    }
+
     @Inject(method = "handleRecipe", at = @At("RETURN"), remap = false)
     private void gtShanhai$stripVirtualTargetsAfterPatternRecipe(GTRecipe recipe,
             Reference2ObjectMap<RecipeCapability<?>, List<Object>> contents, boolean simulate, boolean setSlotCache,
             CallbackInfoReturnable<Integer> cir) {
-        if (simulate || cir.getReturnValueI() < 0 || PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) {
-            return;
-        }
-        VirtualPatternBufferMachineAccess access = gtShanhai$getPatternBufferAccess();
-        if (access != null) {
-            access.gtShanhai$stripVirtualTargetsInSlot(cir.getReturnValueI());
+        try {
+            if (simulate || cir.getReturnValueI() < 0 || PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) {
+                return;
+            }
+            VirtualPatternBufferMachineAccess access = gtShanhai$getPatternBufferAccess();
+            if (access != null) {
+                access.gtShanhai$stripVirtualTargetsInSlot(cir.getReturnValueI());
+            }
+        } finally {
+            PatternNotConsumableFilter.clearActiveRecipe();
         }
     }
 

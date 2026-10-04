@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 
 /**
- * Rewrites GT non-consumable item inputs in AE processing patterns to virtual item providers.
+ * Rewrites GT non-consumable item and fluid inputs to self-describing virtual providers.
  */
 public final class VirtualPatternEncodingHelper {
 
@@ -123,10 +123,13 @@ public final class VirtualPatternEncodingHelper {
             for (Integer slot : forcedSlots) {
                 if (slot == null || slot < 0 || slot >= inputs.length) continue;
                 GenericStack raw = inputs[slot];
-                if (raw == null || !(raw.what() instanceof AEItemKey key)) continue;
-                ItemStack rawStack = key.toStack((int) Math.min(Integer.MAX_VALUE, Math.max(1L, raw.amount())));
-                if (VirtualItemProviderHelper.isProviderItem(rawStack) || VirtualItemProviderHelper.isAutoWrapExcluded(rawStack)) continue;
-                ItemStack provider = VirtualItemProviderHelper.createBoundProvider(rawStack);
+                if (raw == null || raw.amount() <= 0L) continue;
+                if (raw.what() instanceof AEItemKey key) {
+                    ItemStack rawStack = key.toStack();
+                    if (VirtualItemProviderHelper.isProviderItem(rawStack)
+                            || VirtualItemProviderHelper.isAutoWrapExcluded(rawStack)) continue;
+                }
+                ItemStack provider = VirtualItemProviderHelper.createBoundProvider(raw);
                 if (provider.isEmpty()) continue;
                 if (result == inputs) result = inputs.clone();
                 result[slot] = new GenericStack(AEItemKey.of(provider), 1);
@@ -543,7 +546,8 @@ public final class VirtualPatternEncodingHelper {
         if (!VirtualItemProviderHelper.isProviderItem(provider)) return null;
         ItemStack target = VirtualItemProviderHelper.getTarget(provider);
         if (target.isEmpty()) return null;
-        return new GenericStack(AEItemKey.of(target), Math.max(1L, target.getCount()));
+        GenericStack resolved = GenericStack.fromItemStack(target);
+        return resolved == null || resolved.amount() <= 0L ? null : resolved;
     }
 
     // 裸编程电路(未被包裹的集成电路)识别为"自映射虚拟目标"：目标就是电路自身、数量恒为 1。
@@ -608,11 +612,21 @@ public final class VirtualPatternEncodingHelper {
             matchingRecipe = findMatchingRecipe(inputs, outputs);
             matchingRecipeResolved = true;
             if (matchingRecipe != null) {
-                for (GenericStack input : inputs) {
-                    if (input == null || !(input.what() instanceof AEFluidKey)) continue;
-                    GenericStack virtualFluidTarget = getNonConsumableFluidTarget(matchingRecipe, input);
-                    if (virtualFluidTarget != null) {
-                        targets.put(new Entry(input.what(), input.amount()), virtualFluidTarget);
+                List<GenericStack> original = compactStacks(inputs);
+                InputMatchPlan plan = findInputMatchPlan(matchingRecipe, inputs, StackBag.EMPTY, false);
+                if (plan != null) {
+                    for (Content content : matchingRecipe.getInputContents(FluidRecipeCapability.CAP)) {
+                        if (!isNonConsumable(content)) continue;
+                        Integer index = plan.indexFor(content);
+                        if (index == null) continue;
+                        GenericStack input = original.get(index);
+                        if (!(input.what() instanceof AEFluidKey)
+                                || input.amount() != VIRTUAL_FLUID_MARKER_AMOUNT) continue;
+                        com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
+                        if (sample != null && !sample.isEmpty()) {
+                            targets.put(new Entry(input.what(), input.amount()),
+                                    new GenericStack(input.what(), Math.max(1L, sample.getAmount())));
+                        }
                     }
                 }
             }
@@ -1104,8 +1118,15 @@ public final class VirtualPatternEncodingHelper {
                 List<InputMatchCandidate> candidates = new ArrayList<>();
                 for (int i = 0; i < inputs.size(); i++) {
                     GenericStack input = inputs.get(i);
-                    if (!(input.what() instanceof AEFluidKey key)) continue;
-                    int score = fluidInputMatchScore(input, key, ingredient, sample, amount, content);
+                    int score;
+                    if (input.what() instanceof AEFluidKey key) {
+                        score = fluidInputMatchScore(input, key, ingredient, sample, amount, content);
+                    } else {
+                        GenericStack target = getVirtualProviderTarget(input);
+                        if (!isNonConsumable(content) || input.amount() != 1L || target == null
+                                || !(target.what() instanceof AEFluidKey key) || target.amount() != amount) continue;
+                        score = fluidInputMatchScore(target, key, ingredient, sample, amount, content) > 0 ? 100 : 0;
+                    }
                     if (score > 0) candidates.add(new InputMatchCandidate(i, score));
                 }
                 candidates.sort(InputMatchCandidate.ORDER);
@@ -1305,16 +1326,17 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private static GenericStack getNonConsumableFluidTarget(GTRecipe recipe, GenericStack stack) {
-        if (recipe == null || stack == null || !(stack.what() instanceof AEFluidKey key)) return null;
+        if (recipe == null || stack == null || stack.amount() != VIRTUAL_FLUID_MARKER_AMOUNT
+                || !(stack.what() instanceof AEFluidKey key)) return null;
         List<Content> contents = recipe.getInputContents(FluidRecipeCapability.CAP);
         if (contents == null || contents.isEmpty()) return null;
         for (Content content : contents) {
             if (!isNonConsumable(content)) continue;
             com.lowdragmc.lowdraglib.side.fluid.FluidStack fluidStack = firstFluidStack(content);
             if (fluidStack == null || fluidStack.isEmpty()) continue;
-            AEFluidKey contentKey = fluidKeyOf(fluidStack);
-            if (contentKey.equals(key)) {
-                return new GenericStack(contentKey, Math.max(1L, fluidStack.getAmount()));
+            FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+            if (fluidInputMatchScore(stack, key, ingredient, fluidStack, fluidStack.getAmount(), content) > 0) {
+                return new GenericStack(key, Math.max(1L, fluidStack.getAmount()));
             }
         }
         return null;
@@ -1378,14 +1400,23 @@ public final class VirtualPatternEncodingHelper {
             if (matchedIndex == null) {
                 if (!plan.wasOmitted(content)) continue;
                 if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) continue;
-                rewritten.add(new GenericStack(fluidKeyOf(sample), VIRTUAL_FLUID_MARKER_AMOUNT));
+                GenericStack missingInput = createVirtualFluidInput(fluidKeyOf(sample), sample.getAmount());
+                if (missingInput != null) rewritten.add(missingInput);
                 continue;
             }
             if (isNonConsumable(content)) {
-                rewritten.set(matchedIndex, new GenericStack(
-                        original.get(matchedIndex).what(), VIRTUAL_FLUID_MARKER_AMOUNT));
+                GenericStack selected = original.get(matchedIndex);
+                if (!(selected.what() instanceof AEFluidKey key)) continue;
+                GenericStack virtualInput = createVirtualFluidInput(key, sample.getAmount());
+                if (virtualInput != null) rewritten.set(matchedIndex, virtualInput);
             }
         }
+    }
+
+    private static GenericStack createVirtualFluidInput(AEFluidKey key, long amount) {
+        if (key == null || amount <= 0L) return null;
+        ItemStack provider = VirtualItemProviderHelper.createBoundProvider(new GenericStack(key, amount));
+        return provider.isEmpty() ? null : new GenericStack(AEItemKey.of(provider), 1L);
     }
 
     private static GenericStack createVirtualItemInput(ItemStack sample, long amount) {
@@ -1462,10 +1493,12 @@ public final class VirtualPatternEncodingHelper {
             com.lowdragmc.lowdraglib.side.fluid.FluidStack stack = firstFluidStack(content);
             if (stack == null || stack.isEmpty()) continue;
             AEFluidKey key = fluidKeyOf(stack);
-            long amount = virtualizeNonConsumable && isNonConsumable(content)
-                    ? VIRTUAL_FLUID_MARKER_AMOUNT
-                    : Math.max(1L, stack.getAmount());
-            stacks.add(new GenericStack(key, amount));
+            if (virtualizeNonConsumable && isNonConsumable(content)) {
+                GenericStack virtualInput = createVirtualFluidInput(key, stack.getAmount());
+                if (virtualInput != null) stacks.add(virtualInput);
+            } else {
+                stacks.add(new GenericStack(key, Math.max(1L, stack.getAmount())));
+            }
         }
     }
 

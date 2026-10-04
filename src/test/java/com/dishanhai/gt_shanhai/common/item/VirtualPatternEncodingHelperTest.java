@@ -60,8 +60,8 @@ public class VirtualPatternEncodingHelperTest {
         assertTrue(source.contains("GenericStack missingInput = createVirtualItemInput(sample, amount)"));
         assertTrue(source.contains("rewritten.add(missingInput)"),
                 "开启配置后仍需保留旧的物品补回能力");
-        assertTrue(source.contains("rewritten.add(new GenericStack(fluidKeyOf(sample), VIRTUAL_FLUID_MARKER_AMOUNT))"),
-                "开启配置后仍需保留旧的流体补回能力");
+        assertTrue(source.contains("createVirtualFluidInput(fluidKeyOf(sample), sample.getAmount())"),
+                "开启配置后缺失流体必须补回保存实际需求量的供应器，不能只补裸 1 mB");
         assertTrue(configScreen.contains("cfg.virtualProviderForceWrapOmittedNonConsumables.get()"),
                 "配置界面必须显示强制包裹开关");
     }

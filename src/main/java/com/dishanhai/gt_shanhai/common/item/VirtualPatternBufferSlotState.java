@@ -112,6 +112,37 @@ public final class VirtualPatternBufferSlotState {
         return targets == null ? it.unimi.dsi.fastutil.objects.Object2LongMaps.emptyMap() : targets;
     }
 
+    public static <T> T findMatchingVirtualTarget(Object2LongMap<T> targets, Object2LongMap<T> inventory,
+            Object2LongMap<T> catalyst, long needAmount, Predicate<T> matches) {
+        if (targets == null || inventory == null || matches == null || needAmount <= 0L) return null;
+        for (Object2LongMap.Entry<T> entry : targets.object2LongEntrySet()) {
+            T key = entry.getKey();
+            if (key == null || entry.getLongValue() < needAmount) continue;
+            // The catalyst map can be a mirror of the same presence, not additional stock.
+            long present = inventory.getLong(key);
+            if (catalyst != null) present = Math.max(present, catalyst.getLong(key));
+            if (present >= needAmount && matches.test(key)) return key;
+        }
+        return null;
+    }
+
+    public static <T> Object2LongMap<T> withoutVirtualCatalystMirrors(Object2LongMap<T> targets,
+            Object2LongMap<T> inventory, Object2LongMap<T> catalyst) {
+        if (targets.isEmpty() || catalyst.isEmpty()) return catalyst;
+        Object2LongOpenHashMap<T> distinct = new Object2LongOpenHashMap<>(catalyst);
+        for (Object2LongMap.Entry<T> entry : targets.object2LongEntrySet()) {
+            T key = entry.getKey();
+            long mirrored = Math.min(entry.getLongValue(),
+                    Math.min(inventory.getLong(key), catalyst.getLong(key)));
+            if (mirrored > 0L) {
+                long remaining = catalyst.getLong(key) - mirrored;
+                if (remaining > 0L) distinct.put(key, remaining);
+                else distinct.removeLong(key);
+            }
+        }
+        return distinct;
+    }
+
     public static synchronized <T extends AEKey> boolean hasVirtualTargets(Object2LongOpenHashMap<T> inventory) {
         Object2LongOpenHashMap<T> targets = findTargets(inventory);
         return targets != null && !targets.isEmpty();
@@ -183,7 +214,7 @@ public final class VirtualPatternBufferSlotState {
      * 带"保留谓词"的剥离：{@code keep} 判定为 true 的虚拟目标（如不消耗催化剂）不剥离——既不从库存
      * 扣减、也不移除其 target 登记，使其在配方多次执行间常驻在场。其余虚拟目标照常剥离。仅在 targets
      * 被清空（无保留项）后才注销整条 target 登记，否则保留项下次执行仍能被识别并继续保留。
-     * <p>用于"配方执行后"的 strip（{@code handleItemInternal}/{@code meHandleRecipeInner} 的 RETURN）：
+     * <p>用于整筆配方成功後的 strip（{@code MEPatternRecipeHandlePart.handleRecipe} 的 RETURN）：
      * 让虚拟催化剂支撑一整单的所有执行次数，不再执行一次即被清空。退料/下单结束走无谓词版全清，
      * 保证不残留、不把虚拟物品泄漏回网络。
      */

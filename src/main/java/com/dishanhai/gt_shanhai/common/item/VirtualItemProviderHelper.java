@@ -1,7 +1,9 @@
 package com.dishanhai.gt_shanhai.common.item;
 
 import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEKey;
+import appeng.api.stacks.GenericStack;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
@@ -35,6 +37,18 @@ public final class VirtualItemProviderHelper {
         bindTarget(provider, target);
         provider.getOrCreateTag().putBoolean(MARKED_KEY, true);
         return provider;
+    }
+
+    public static ItemStack createBoundProvider(GenericStack target) {
+        if (target == null || target.amount() <= 0L) return ItemStack.EMPTY;
+        if (target.what() instanceof AEItemKey key) {
+            return createBoundProvider(key.toStack((int) Math.min(Integer.MAX_VALUE, target.amount())));
+        }
+        if (target.what() instanceof AEFluidKey) {
+            // AE's wrapper keeps the fluid key, NBT and long amount inside the existing targetItem payload.
+            return createBoundProvider(GenericStack.wrapInItemStack(target));
+        }
+        return ItemStack.EMPTY;
     }
 
     public static ItemStack createUnmarkedBoundProvider(ItemStack target) {
