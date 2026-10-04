@@ -469,7 +469,9 @@ public interface ParallelOverrideMachine {
      * <pre>
      *   开关关着   ⇒ 原样返回 base（老行为，逐值不变）
      *   上限 ≤ 0   ⇒ 原样返回 base（没算出 / 没能源仓 ⇒ 不做电力限制）
-     *   🔴 本机豁免（{@link #isEnergyCapExempt()}，2026-10-02 第六轮）⇒ 原样返回 base（电上限视为 ∞）
+     *   🔴 电上限【视为 ∞】（{@link #isEnergyCapInfinite()}）⇒ 原样返回 base
+     *      ＝ 本机豁免（那台发电机，2026-10-02 第六轮）
+     *      ＋ 能源仓那头无限（创造模式能源仓 / 无线电网输入终端，2026-10-02 第十一轮）
      *   否则       ⇒ max(1, min(base, floor(上限 ÷ T)))    ← 🔴 2026-10-02 第五轮加的那个 ÷T
      *               （下限 1 = 既有的"至少试 1 份"行为；T = {@link #getEnergyCapThreads()}）
      * </pre>
@@ -517,7 +519,12 @@ public interface ParallelOverrideMachine {
         //    现在也调本方法）⇒ 豁免写在这里 = 没有第二条能绕过去的路。
         //    为什么是"视为 ∞"而不是"不写上限"、为什么豁免的是那台发电机：见
         //    isEnergyCapExempt() 的 javadoc（★ 那段就是任务书要的"写在代码里的理由"）。
-        if (isEnergyCapExempt()) {
+        // 🔴🔴 2026-10-02 第十一轮（用户实机 bug）：本行从 isEnergyCapExempt() 放宽成
+        //    isEnergyCapInfinite() —— 把「能源仓那头是无限」与「本机豁免」两种 ∞ 收在同一个出口：
+        //    创造模式能源仓 / 无线电网输入终端 ⇒ 电上限【就是 ∞】⇒ 用户规格「直接把并行拉到最大」
+        //    必须【与"电力自动关着"逐位同值】= 本机上限，<b>不许再被 ÷T</b>。
+        //    理由与本轮实测数字（2048 ÷ 9 = 227 vs 2048）逐条写在 isEnergyCapInfinite() 的 javadoc 里。
+        if (isEnergyCapInfinite()) {
             return base;
         }
         if (!isPowerAutoParallel()) {
@@ -528,6 +535,78 @@ public interface ParallelOverrideMachine {
             return base;
         }
         return ShanhaiParallelBudget.perThreadParallelFor(base, cap, threads);
+    }
+
+    /**
+     * 🔴🔴 <b>「电上限视为 ∞」的【唯一判据】—— 本机豁免（那台发电机）<u>或</u>能源仓那头是无限
+     * （创造模式能源仓 / 无线电网输入终端）。</b>
+     *
+     * <h2>用户原话（逐字，这就是规格）</h2>
+     * <blockquote>「好的，我的方案就是通过计算能源仓可以提供的总功率来确定并行数，
+     * 注意机器是可以放2个能源仓的，还可以放2个不同的能源仓的，所以你需要仔细计算，
+     * 我们通过总功率和此配方的功率来计算并行数，
+     * （<b>若是无线电网输入终端，或者创造能源仓则直接把并行拉到最大，这个就不需要我们算了</b>）」</blockquote>
+     *
+     * <h2>🔴 为什么必须新增这一条（2026-10-02 第十一轮 · 用户实机 bug 的根因）</h2>
+     * <pre>
+     *   用户原话（逐字）：「我给模块用创造能源仓，然后开启自动并行，它居然给我降并行了，
+     *                      数值是 <b>2048/9 向下取整</b>」
+     *   实测（进游戏截图，两档只差"电力自动"开不开）：
+     *     创造能源仓 + 电力自动开 ⇒ 并行 <b>227</b>（面板写着「电上限 ∞」）
+     *     同一台机（手动 / 一键最大）⇒ 并行 <b>2048</b>
+     *   ⛔ 改前：{@code parallelFromPowerMilli} 的「∞ ⇒ 取原本上限」那一支只抬了【电上限】，
+     *      而 {@link #applyEnergyCap(long, int)} 的 {@code ÷ T} 照旧执行 ⇒ 2048 ÷ 9 = 227
+     *      —— <b>面板自己都在自相矛盾</b>（写着「生效 227（电上限 ∞）」）。
+     *   ✅ 改后：∞ 这一支在第一句就返回 base ⇒ 接口层 = 本机上限 ⇒ 与"电力自动关着"逐位同值。
+     * </pre>
+     *
+     * <h2>🔴 为什么"∞"必须等于"电上限 ≤ ENERGY_CAP_NONE"（而不是另造一个语义）</h2>
+     * 本工程里<b>「不钳」的既有表示就是电上限 ≤ {@link #ENERGY_CAP_NONE}</b>（没有上限 / 没算出 /
+     * 没能源仓 —— 见 {@link #applyEnergyCap(long, int)} 的第一条短路）⇒
+     * <b>「电上限 = ∞」与「不参与钳制」是同一件事的两种说法</b>，不是新增语义。
+     * 于是「按规格拉满」这句话有了一个可离线断言的形式：
+     * <pre>
+     *   创造仓 / 无线电网终端 ⇒ 生效并行 == {@link #getAutoParallel()}（本机上限）
+     *                        ⇒ 与「电力自动关着 / 一键最大」<b>逐位同值</b>
+     *                        ⇒ 引擎总预算 == 本机上限 × T（{@link #energyCapForBudget()} 为 0）
+     * </pre>
+     *
+     * <h2>🔴 判定用 {@link #getEnergyCapState()} 而不是"电上限那个数"</h2>
+     * <pre>
+     *   状态与数值是【同一次写入】的（{@link #setEnergyCap(EnergyCapState, long, long)} 三样一起写）
+     *   ⇒ 不存在"状态说 ∞、数值是别的"这种漂移窗口；
+     *   而「能源仓那头是不是无限」这件事<b>只有状态能表达</b> ——
+     *   写进 {@code energyParallel} 的数是<b>本机上限</b>（{@code parallelFromPowerMilli} 的出口），
+     *   它本身长得跟一个"有限电上限"一模一样，光看数值分不出来。
+     * </pre>
+     * <p>⚠️ {@link EnergyCapState#UNLIMITED_BY_EXEMPTION} <b>不</b>走这一条：它由
+     * {@link #isEnergyCapExempt()} 覆盖（同一出口、不同原因，面板文案也不同 —— 见那两个枚举的注释）。
+     */
+    default boolean isEnergyCapInfinite() {
+        return isEnergyCapExempt()
+                || getEnergyCapState() == EnergyCapState.UNLIMITED;
+    }
+
+    /**
+     * 🔴🔴 <b>「并行预算」那一层要用的电上限 —— ∞ 时返回 {@link #ENERGY_CAP_NONE}。</b>
+     *
+     * <pre>
+     *   ∞（创造仓 / 无线电网终端 / 本机豁免）⇒ {@link #ENERGY_CAP_NONE}
+     *        ⇒ {@code ShanhaiParallelBudget#parallelBudget} 见 ≤ 0 就退回「本机上限 × T」
+     *        ⇒ 与「电力自动关着」逐位同值（老行为）
+     *   有限                                  ⇒ 原样返回 {@link #getEnergyParallel()}
+     * </pre>
+     *
+     * <h2>🔴 为什么预算层也必须这样（只改接口层不够）</h2>
+     * 接口层管的是 {@code getMaxParallel()}（面板"生效"那一行、int 桥、父类的 {@code ×T} 因子），
+     * 而引擎另一条路 {@code ShanhaiParallelBudget#parallelBudget(本机上限, 电上限, T)} 直接吃
+     * <b>电上限那个数</b> ⇒ 只改接口层时会出现「显示 2048、引擎只拿到 2043」这种
+     * <b>显示与生效不一致</b>（2043 = min(2048, 2048÷9) × 9 —— 正是本轮实测里那台机的真实读数）。
+     * <p>⇒ 两个调用点（模块 / 主机）必须与接口层读<b>同一个判据</b>，所以这里只此一份实现，
+     * 调用点一律调用本方法，<b>不许各写一遍三目表达式</b>（本工程反复记载过"两份实现迟早漂移"）。
+     */
+    default long energyCapForBudget() {
+        return isEnergyCapInfinite() ? ENERGY_CAP_NONE : getEnergyParallel();
     }
 
     // ═════════ 🔴 2026-10-02 第二轮：「为什么没有上限」必须在界面上说出来 ═════════
@@ -737,7 +816,11 @@ public interface ParallelOverrideMachine {
             case COMPUTED -> cap > ENERGY_CAP_NONE
                     ? "§7电上限 §a" + cap + " §8（按本轮候选配方算出来的）"
                     : "§c电上限数值非法 §8（内部错误，见日志）";
-            case UNLIMITED -> "§7电上限 §a∞ §8（无线电网终端 / 创造能源仓 ⇒ 按规格拉满）";
+            // 🔴 2026-10-02 第十一轮：这一句必须把【真实生效口径】说清 —— 改前那一轮面板上写的是
+            //    「生效 227（电上限 ∞）」这种自相矛盾的读数（∞ 却只给了 227）。现在既然按规格拉满，
+            //    就把"拉满到什么、与什么同值"一起说出来（本工程红线：活的界面上不许放假数据）。
+            case UNLIMITED -> "§7电上限 §a∞ §8（无线电网终端 / 创造能源仓 ⇒ 按规格拉满："
+                    + "并行 = 本机上限，与关掉电力自动同值）";
             // 🔴 第六轮：豁免的那一句必须与上一句【不同】—— 说清是"这台机器本身不参与电力钳制"，
             //    不是"它插了无线电网终端"。两句话混用 = 让玩家按错误的方向排查。
             case UNLIMITED_BY_EXEMPTION ->

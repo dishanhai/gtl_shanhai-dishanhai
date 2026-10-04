@@ -178,4 +178,28 @@ public final class GtlAddCompat {
     public static GTRecipeType photonMatrixEtch() {
         return GTLAddRecipesTypes.INSTANCE.getPHOTON_MATRIX_ETCH();
     }
+
+    /**
+     * 转发自 {@code …common.recipe.GTLAddRecipesTypes.EVOLUTION_OF_PRIMORDIAL}
+     * （🆕 2026-10-03；<b>public 静态字段</b>，不是 Kotlin object 的 getter —— 与
+     * {@link #molecularDeconstruction()} 同一种形态，见本类注释里"两种访问形态并存"那一段）。
+     *
+     * <p><b>中文名 = 太素衍化</b>；<b>注册 id = {@code gtceu:evolution_of_primordial}</b>
+     * —— 命名空间是 {@code gtceu}，<b>不是</b> {@code gtladditions}。实证（本轮实际执行，非推断）：
+     * <ol>
+     *   <li>{@code javap -c …GTLAddRecipesTypes} 的 {@code <clinit>} 里，偏移 1192 是
+     *       {@code ldc_w #635 // String evolution_of_primordial}，紧接
+     *       {@code invokestatic GTRecipeTypes.register:(String,String,RecipeType[])} ⇒ gtladditions
+     *       <b>也是调 gtceu 自己的 register</b>；</li>
+     *   <li>{@code javap -c …common.data.GTRecipeTypes} 的 {@code register(String,String,RecipeType...)}
+     *       第一句就是 {@code new GTRecipeType(GTCEu.id(name), group, proxyRecipes)}；</li>
+     *   <li>{@code javap -c …GTCEu.id(String)} = {@code new ResourceLocation("gtceu", toLowerCaseUnder(name))}
+     *       ⇒ 任何走这条路注册的类型，其 registryName 恒为 {@code gtceu:<id>}。</li>
+     * </ol>
+     * 旁证：语言文件键也是 {@code gtceu.evolution_of_primordial}（不在 {@code gtladditions.*} 下），
+     * 出处 {@code handoff/outbound/类型名自动反查.md:514}。
+     */
+    public static GTRecipeType evolutionOfPrimordial() {
+        return GTLAddRecipesTypes.EVOLUTION_OF_PRIMORDIAL;
+    }
 }

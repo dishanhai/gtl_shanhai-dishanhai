@@ -1,24 +1,37 @@
 package com.shanhai.common.recipe;
 
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.shanhai.ShanhaiMod;
+import com.shanhai.item.ShanhaiItems;
+import com.shanhai.registry.ShanhaiRegistration;
+import com.tterrag.registrate.util.entry.ItemEntry;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.registries.ForgeRegistries;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -333,8 +346,39 @@ public final class ShanhaiRecipeStats {
      */
     public static final String PREFIX_STAT = "&$body_golden-";
 
-    /** 版本取不到时的显示串。<b>宁可显示「不可用」，也不显示一个编出来的版本号。</b> */
+    /**
+     * 值取不到时的显示串（构建日期 / 版本号通用）。
+     * <b>宁可显示「不可用」，也不显示一个编出来的值。</b>
+     */
     public static final String VERSION_UNAVAILABLE = "(不可用)";
+
+    // ------------------------------------------------------------------ 🆕 /shanhai statistics（2026-10-03）
+
+    /**
+     * 命令根字面量（用户原话：「在游戏聊天框输入 {@code /shanhai Statistics}」）。
+     *
+     * <p>⚠️ <b>刻意不加 {@code .requires()}</b>：默认权限等级 0 ⇒ <b>任何人都能用</b>
+     * （用户要自己用；且他也可能在控制台里跑）。
+     */
+    public static final String COMMAND_ROOT = "shanhai";
+
+    /**
+     * 子命令字面量（<b>小写</b>）。Brigadier 的 literal <b>区分大小写</b>
+     * ⇒ 小写与大写是两个不同的节点，两个都注册就能同时吃 {@code /shanhai statistics}
+     * 与 {@code /shanhai Statistics}（用户 2026-10-03 原话：「Statistics前面s小写，我打错了」）。
+     */
+    public static final String COMMAND_ARG = "statistics";
+
+    /** 首字母大写的<b>兼容别名</b>子命令字面量（用户最初那版的写法，保留以免他手快打错）。 */
+    public static final String COMMAND_ARG_ALIAS = "Statistics";
+
+    /**
+     * 重打横幅那一拍的日志键名 —— <b>只写在日志里，不进横幅正文</b>。
+     *
+     * <p>为什么不往横幅里塞「（手动重打）」：那一版的文案/行数<b>用户已经验收过</b>，
+     * 重打出来的东西必须与登录那条<b>逐字节相同</b>；要区分「这是手动的那条」看这行日志即可。
+     */
+    public static final String REPLAY_LOG_KEY = "banner_replay";
 
     // ------------------------------------------------------------------ 累加器
 
@@ -524,7 +568,7 @@ public final class ShanhaiRecipeStats {
      * <b>带前缀的 6 行</b>（每行都照原版原文）：首行 / {@code [OK]配方库 加载完成!} /
      * {@code 欢迎来到GTL寰宇联合重工巨企} / 回执行 / 末句 / 末行。
      * <p>
-     * <b>不带前缀的 3 类行</b>（{@code ✅ 成功加载}、{@code 😊 配方库检测无报错}、{@code 🔷 当前重制版版本}，
+     * <b>不带前缀的 3 类行</b>（{@code ✅ 成功加载}、{@code 😊 配方库检测无报错}、{@code 🔷 重制版构建日期}，
      * 以及互斥的 {@code ⚠️ 失败}）—— 理由有三条，按分量排序：
      * <ol>
      *   <li><b>原版这几行本来就没有 {@code &$} 前缀</b>。老版对应的三行是
@@ -612,12 +656,17 @@ public final class ShanhaiRecipeStats {
         //    ⚠️ LIFETIME 的「随 /reload 累加、不被 reset 清零」语义【不变】（用户没要求改它）。
         //    ⚠️ 运行期读，代码里没有任何写死的数字。
         lines.add(PREFIX_STAT + "🔷 shanhai 相关配方总数: " + grandTotalText(lifetime, liveForming, liveLaser));
+        // 🆕 2026-10-03（用户原话：「还有左下角横幅可以再统计一下注册的山海物品」）
+        //    🔴 本轮【只新增这一行】，上面那些统计行一个字节都没动（前缀、顺序、措辞全保持原样）。
+        //    这一行的两个口径、以及「拿不到 ⇒ (不可用)」的规则，逐条写在
+        //    {@link ShanhaiItemCountCore} 的类注释 §1 / §2 里。
+        lines.add(itemCountLine());
         if (failed > 0) {
             lines.add("⚠️ 失败: " + failed + " 个");
         } else {
             lines.add(PREFIX_STAT + "😊 配方库检测无报错 祝领航员航行无阻!");
         }
-        lines.add(PREFIX_STAT + "🔷 当前重制版版本: " + modVersion());
+        lines.add(PREFIX_STAT + "🔷 重制版构建日期: " + buildDate());
         lines.add(PREFIX_AURORA + "欢迎来到GTL寰宇联合重工巨企");
         lines.add(PREFIX_MOSS + "此成功信息回执由JAVA侧: " + RECEIPT_CLASS_NAME + " 生成");
         lines.add(PREFIX_SILVER + "老大我们这样熬夜写私货心脏真的不会自己先休息吗");
@@ -710,15 +759,297 @@ public final class ShanhaiRecipeStats {
         }
     }
 
+    // ================================================================== 🆕 横幅「注册的山海物品」那一行（2026-10-03）
+
+    /**
+     * 注册表 id 前缀 = {@code modid + ":"}。
+     * <p>🔴 <b>真源是 {@link ShanhaiMod#MOD_ID}</b>，这里<b>不另写一个字面量 {@code "shanhai"}</b>
+     * ——本工程的教训是「同一个常量被两处各写一份，必然漂移」。
+     */
+    private static final String SHANHAI_ID_PREFIX = ShanhaiMod.MOD_ID + ":";
+
+    /**
+     * 横幅那一行的<b>唯一构造入口</b>：前缀复用既有 {@link #PREFIX_STAT}
+     * （{@code &$body_golden-}，<b>只有颜色流动、不含 {@code ?} / {@code *} 任何效果字符</b>
+     * ⇒ 字不会抖；用户明令「物品名抖动的字看不清」）。
+     */
+    public static String itemCountLine() {
+        return ShanhaiItemCountCore.line(PREFIX_STAT, registryShanhaiItemCount(), registrateItemLedgerCount());
+    }
+
+    /**
+     * <b>口径 A · 从 Forge 物品注册表现数</b>：「{@code shanhai:} 命名空间下现在有多少个物品」。
+     *
+     * <p>数据链：{@link ForgeRegistries#ITEMS}（Forge 的物品注册表本体，javap 已核实其
+     * {@code getKeys()} 返回 {@code Set<ResourceLocation>}）→ {@link #shanhaiItemIdStrings()}
+     * → {@link ShanhaiItemCountCore#countNamespace(Iterable, String)} 按前缀数条数。
+     * <b>代码里没有任何写死的物品总数</b>（本工程铁律：活界面上不许印假数字）。
+     *
+     * @return 条数；<b>注册表读不到 ⇒ -1</b>（调用方必须显示 {@code (不可用)}，不许回落成 0）
+     */
+    public static long registryShanhaiItemCount() {
+        return ShanhaiItemCountCore.countNamespace(shanhaiItemIdStrings(), SHANHAI_ID_PREFIX);
+    }
+
+    /**
+     * 把 Forge 物品注册表里的全部 id 读成字符串表。
+     *
+     * <p>🔴 <b>读不到就返回 {@code null}（= 「拿不到」），绝不返回空表</b>：
+     * 空表会被 {@link ShanhaiItemCountCore#countNamespace} 正确地折成 {@code 0}
+     * ——而 {@code 0} 的意思是「注册表里一个山海物品都没有」这个<b>具体事实</b>，
+     * 与「这次读取失败了」是两件完全不同的事。把后者说成前者就是印假数字。
+     */
+    private static List<String> shanhaiItemIdStrings() {
+        try {
+            Set<ResourceLocation> keys = ForgeRegistries.ITEMS.getKeys();
+            if (keys == null) {
+                return null;
+            }
+            List<String> ids = new ArrayList<>(keys.size());
+            for (ResourceLocation id : keys) {
+                if (id != null) {
+                    ids.add(id.toString());
+                }
+            }
+            return ids;
+        } catch (Throwable t) {
+            // 注册表还没填 / 已被拆 / 任何反射级事故 —— 一律按「拿不到」处理。
+            return null;
+        }
+    }
+
+    /**
+     * <b>口径 B · 交叉核对</b>：Registrate 自己的<b>物品登记台账</b>条目数
+     * （{@code REGISTRATE.getAll(Registries.ITEM).size()}）。
+     *
+     * <p>为什么它是一个<b>独立</b>口径：口径 A 读的是<b>游戏里的 Forge 注册表</b>，
+     * 而这里读的是 <b>Registrate 内存里的 {@code registrations} 表</b>（javap 已核实
+     * {@code AbstractRegistrate.getAll(ResourceKey)} 存在且返回 {@code Collection<RegistryEntry<R>>}）。
+     * 两条链的唯一交汇点是「Registrate 有没有真的把东西塞进注册表」——
+     * 若某次注册静默失败，台账会比注册表多，两个数就会不等，那一行会当场自己说出来。
+     *
+     * @return 台账条目数；<b>取不到 ⇒ -1</b>（同样显示 {@code (不可用)}，绝不回落）
+     */
+    public static long registrateItemLedgerCount() {
+        try {
+            return ShanhaiRegistration.REGISTRATE.getAll(Registries.ITEM).size();
+        } catch (Throwable t) {
+            return ShanhaiItemCountCore.UNAVAILABLE;
+        }
+    }
+
+    /**
+     * <b>口径 C（只进日志，不进横幅）</b>：{@link ShanhaiItems} 上声明了多少个静态
+     * {@link ItemEntry} 字段 —— 即「这个类自己说它注册了几个物品」。
+     *
+     * <p>⚠️ <b>它量的是另一个集合</b>（{@code ShanhaiItems} 一个类的声明数），
+     * <b>不是</b>注册表里 {@code shanhai:} 物品总数：每个流体都会由 Registrate 自动派生一个
+     * {@code shanhai:<id>_bucket} 桶物品（{@code ShanhaiFluids} 的 25 个流体 ⇒ 25 个桶），
+     * 还有经 {@code REGISTRATE} 注册的机器方块物品。所以它<b>不能</b>拿去跟口径 A 做
+     * 「一致/不一致」判定（那会让横幅常亮「不一致」），只作为启动期日志里的<b>分解依据</b>。
+     *
+     * @return 字段数；反射失败 ⇒ -1
+     */
+    static int shanhaiItemsDeclaredFields() {
+        try {
+            int n = 0;
+            for (Field f : ShanhaiItems.class.getDeclaredFields()) {
+                if (Modifier.isStatic(f.getModifiers()) && ItemEntry.class.isAssignableFrom(f.getType())) {
+                    n++;
+                }
+            }
+            return n;
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * 口径 C 的「落表数」：上面那些 {@link ItemEntry} 句柄里，有几个的 id <b>真的</b>能在
+     * Forge 注册表里查到（{@link ForgeRegistries#ITEMS} 的 {@code containsKey}，javap 已核实）。
+     *
+     * <p>用途：把「声明了 185 个」与「实际落表 185 个」区分开 —— 若两者不等，
+     * 就是某些物品<b>声明了却没注册进游戏</b>（那种故障在玩家眼里只是「物品不见了」，不报错）。
+     *
+     * @return 落表数；反射失败 ⇒ -1
+     */
+    static long shanhaiItemsInRegistry() {
+        try {
+            long n = 0L;
+            for (Field f : ShanhaiItems.class.getDeclaredFields()) {
+                if (!Modifier.isStatic(f.getModifiers()) || !ItemEntry.class.isAssignableFrom(f.getType())) {
+                    continue;
+                }
+                Object v = f.get(null);
+                if (v instanceof ItemEntry<?> entry) {
+                    ResourceLocation id = entry.getId();
+                    if (id != null && ForgeRegistries.ITEMS.containsKey(id)) {
+                        n++;
+                    }
+                }
+            }
+            return n;
+        } catch (Throwable t) {
+            return -1L;
+        }
+    }
+
+    /**
+     * <b>启动期</b>把「注册的山海物品」那一行的读数与判据打进日志。
+     *
+     * <p>为什么要这个钩子：横幅<b>只有玩家登录才发</b>，而无头专服没有玩家
+     * ⇒ 「新增那一行的数字对不对」在冒烟里<b>永远看不到</b>（与 {@code banner_total_check} 同理）。
+     * 这里把同一份计算搬到启动期，于是冒烟日志本身就能给出判据：
+     * <pre>
+     * [SHANHAI-SPEC] item_count_reads registry_shanhai=&lt;A&gt; registrate_ledger=&lt;B&gt; shanhaiitems_fields=&lt;C&gt;
+     *                shanhaiitems_in_registry=&lt;C2&gt; qmark=0 star=0 unavail_text_eq_existing=true
+     * [SHANHAI-SPEC] banner_item_line &lt;那一行的最终文本，含 &amp;$body_golden- 前缀&gt;
+     * [SHANHAI-SPEC] item_count_selftest ok cases=8
+     * </pre>
+     * <p>{@code qmark} / {@code star} 就是判据 ④ 的机器读数（抖动红线：都必须为 0）。
+     */
+    private static void logItemCountDiagnostics() {
+        final long registryCount = registryShanhaiItemCount();
+        final long ledgerCount = registrateItemLedgerCount();
+        final String line = ShanhaiItemCountCore.line(PREFIX_STAT, registryCount, ledgerCount);
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " item_count_reads registry_shanhai=" + registryCount
+                + " registrate_ledger=" + ledgerCount
+                + " shanhaiitems_fields=" + shanhaiItemsDeclaredFields()
+                + " shanhaiitems_in_registry=" + shanhaiItemsInRegistry()
+                + " qmark=" + ShanhaiItemCountCore.countChar(line, '?')
+                + " star=" + ShanhaiItemCountCore.countChar(line, '*')
+                + " unavail_text_eq_existing=" + ShanhaiItemCountCore.UNAVAILABLE_TEXT.equals(VERSION_UNAVAILABLE));
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " banner_item_line " + line);
+        try {
+            ShanhaiMod.LOGGER.info(LOG_PREFIX + " item_count_selftest " + ShanhaiItemCountCore.selfTest());
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error(LOG_PREFIX + " item_count_selftest FAILED: " + t);
+        }
+    }
+
+    /**
+     * <b>启动期</b>把整条横幅<b>逐行</b>打进日志（判据 ①「那一行真的在横幅字符串里」的机器证据）。
+     *
+     * <p>横幅只有在玩家登录后 160 tick 才会发到聊天栏，无头专服看不到它 ⇒ 这里打的是
+     * {@link #bannerLinesFor(MinecraftServer)} 的<b>同一份返回值</b>（同一个方法、同一个顺序），
+     * 因此日志里读到的文本就是玩家会看到的那条横幅（只差客户端把 {@code &$…-} 前缀解析成流动色）。
+     * <p>⚠️ 这一行<b>不会</b>真的发出去：它只写日志，不碰任何玩家/存档。
+     */
+    private static void logBannerPreview(MinecraftServer server) {
+        try {
+            List<String> lines = bannerLinesFor(server);
+            for (int i = 0; i < lines.size(); i++) {
+                ShanhaiMod.LOGGER.info(LOG_PREFIX + " banner_preview idx=" + i + " " + lines.get(i));
+            }
+            ShanhaiMod.LOGGER.info(LOG_PREFIX + " banner_preview_lines=" + lines.size());
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error(LOG_PREFIX + " banner_preview FAILED: " + t);
+        }
+    }
+
     /** 给玩家逐行发横幅。{@code null} 玩家静默跳过（调用方本来就会判，这里再加一道）。 */
     public static void sendBannerTo(ServerPlayer player) {
         if (player == null) {
             return;
         }
         // 🔴 2026-10-01：横幅要多算两条「按配方类型现数」的行 ⇒ 必须拿到服务器（配方表在它身上）。
-        for (String line : bannerLinesFor(player.getServer())) {
-            player.sendSystemMessage(Component.literal(line));
+        // 🔴 2026-10-03：投递动作整体抽到 {@link #deliverBanner}，与 /shanhai statistics 那条路【共用】
+        //    —— 两条路共用同一个 {@link #bannerLinesFor} 生成文本、同一个投递方法发送，
+        //    不存在「两份文案各自漂移」的可能。
+        deliverBanner(bannerLinesFor(player.getServer()), player);
+    }
+
+    /**
+     * 🔴 <b>横幅投递的唯一出口</b>（登录路径与 {@code /shanhai statistics} 命令路径共用）。
+     *
+     * <p>分流规则（用户 2026-10-03 点单）：
+     * <ul>
+     *   <li><b>执行者是人</b>（{@code player != null}）⇒ 逐行 {@code sendSystemMessage} 到他的聊天框；</li>
+     *   <li><b>执行者是控制台 / 命令方块 / 其它非玩家源</b>（{@code player == null}）⇒
+     *       <b>逐行写进日志</b>（{@link ShanhaiMod#LOGGER}，即 {@code latest.log}）。
+     *       🔴 这一条是<b>必须</b>的：无头专服没有玩家，只有把控制台那条路落到日志里，
+     *       「命令真的把横幅重新生成了一遍」才<b>可被机器验证</b>。</li>
+     * </ul>
+     *
+     * <p>⚠️ 两种分流发出去的<b>字符串集合完全一致</b>（都来自同一个 {@code lines} 参数）
+     * —— 客户端把 {@code &$…-} 前缀解析成流动色这件事与本方法无关（那在 {@code Font.drawInBatch} 里）。
+     *
+     * @param lines  {@link #bannerLinesFor(MinecraftServer)} 的返回值（<b>调用方先算好</b>，
+     *               保证「日志里记的行数」与「真正发出去的行数」是同一份，不会各算一次）
+     * @param player 人类执行者；{@code null} ⇒ 走日志
+     */
+    private static void deliverBanner(List<String> lines, ServerPlayer player) {
+        for (String line : lines) {
+            if (player != null) {
+                player.sendSystemMessage(Component.literal(line));
+            } else {
+                ShanhaiMod.LOGGER.info(line);
+            }
         }
+    }
+
+    // ================================================================== 🆕 /shanhai statistics（2026-10-03）
+
+    /**
+     * 🔴 注册 {@code /shanhai statistics}（+ 兼容别名 {@code /shanhai Statistics}）。
+     *
+     * <h4>为什么挂在 {@link RegisterCommandsEvent} 上、并且就在本类里</h4>
+     * <ul>
+     *   <li>本类已经是 {@code @Mod.EventBusSubscriber(modid = …, bus = Bus.FORGE)}（且<b>不写 {@code value}</b>
+     *       ⇒ 两个 dist 都注册，见类注释 §6 的 {@code javap -v} 取证）。
+     *       {@code RegisterCommandsEvent} 正是<b>发在 Forge 总线上</b>的事件
+     *       ⇒ 本类挂一个 {@code @SubscribeEvent} 就够了，<b>不需要</b>去 {@code ShanhaiMod} 构造器里
+     *       再加一条显式 {@code addListener}（少一处需要同步维护的挂载点）。</li>
+     *   <li>🔴 <b>不是客户端注册</b>：本类没有 {@code Dist.CLIENT} 限定，单机（集成服务端）与专服都会走到
+     *       —— 用户玩的是单机，只在 {@code Dist.CLIENT} 注册反而会让他的单人存档里没有这条命令。</li>
+     * </ul>
+     *
+     * <h4>大小写</h4>
+     * Brigadier 的 literal 是<b>逐字符比较</b>的 ⇒ 两个 literal 都注册。
+     * 用户 2026-10-03 更正：「{@code Statistics}前面 s 小写，我打错了」⇒ <b>主命令是小写那条</b>，
+     * 大写那条<b>保留为兼容别名</b>（他一开始就是那么写的，两条都留不留坑）。
+     */
+    @SubscribeEvent
+    public static void onRegisterCommands(RegisterCommandsEvent event) {
+        event.getDispatcher().register(
+                Commands.literal(COMMAND_ROOT)
+                        .then(commandBranch(COMMAND_ARG))
+                        .then(commandBranch(COMMAND_ARG_ALIAS)));
+        // 注册期打一行 INFO：这条日志本身就是「命令树真的挂上了」的机器可判证据
+        // （无头专服里控制台能不能跑命令，先看这一行在不在）。
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " command_registered /" + COMMAND_ROOT + " " + COMMAND_ARG
+                + " (+alias /" + COMMAND_ROOT + " " + COMMAND_ARG_ALIAS + ")");
+    }
+
+    /** {@code /shanhai <name>} 那一支：无参数、任何权限、执行即重打横幅。 */
+    private static LiteralArgumentBuilder<CommandSourceStack> commandBranch(String name) {
+        return Commands.literal(name).executes(ctx -> replayBanner(ctx.getSource()));
+    }
+
+    /**
+     * <b>把左下角那条横幅按当前真实状态重新生成并打一遍</b>（命令路径的唯一入口）。
+     *
+     * <h4>🔴 数字全部现读，这里<b>没有任何缓存</b></h4>
+     * 文本来自 {@link #bannerLinesFor(MinecraftServer)} —— 与登录那条横幅<b>同一个方法、同一份实时状态</b>：
+     * <ul>
+     *   <li>三批条数取 {@code CORE}（本批差值法的实时读数）；</li>
+     *   <li>「原初物质定型 / 原初激光蚀刻」两行<b>当场遍历服务器 {@code RecipeManager}</b> 现数；</li>
+     *   <li>「注册的山海物品」当场遍历 {@code ForgeRegistries.ITEMS} 现数；</li>
+     *   <li>构建日期当场读 jar 内 {@code assets/shanhai/build.properties}（刻意不缓存）。</li>
+     * </ul>
+     * ⇒ 例如中间 {@code /reload} 过、或又注册了物品，重打出来的数就是<b>那一刻</b>的数。
+     *
+     * @return 打出去的行数（Brigadier 的 {@code result}，同时便于人工核对「是不是 15 行」）
+     */
+    public static int replayBanner(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        List<String> lines = bannerLinesFor(server);
+        ServerPlayer player = source.getPlayer();
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " " + REPLAY_LOG_KEY
+                + " lines=" + lines.size()
+                + " by=" + (player != null ? player.getGameProfile().getName() : "console"));
+        deliverBanner(lines, player);
+        return lines.size();
     }
 
     /**
@@ -775,10 +1106,97 @@ public final class ShanhaiRecipeStats {
                 + " banner_total=" + (bannerTotal < 0L ? VERSION_UNAVAILABLE : bannerTotal)
                 + " identity=" + (bannerTotal >= 0L && bannerTotal == rowsSum + liveForming + liveLaser
                         ? "OK" : "DIFF"));
+        // 🆕 2026-10-03：新增那一行（🔷 注册的山海物品）的启动期读数 + 整条横幅的逐行文本。
+        //    🔴 【只追加】：上面那些既有日志行的措辞、顺序一个字节都没动。
+        logItemCountDiagnostics();
+        logBannerPreview(server);
     }
 
     /**
-     * 取本 mod 的运行期版本（横幅 {@code 🔷 当前重制版版本: …} 那一行）。
+     * 构建日期的资源路径（{@code src/main/resources/} 下的路径 ⇒ 运行期按 classpath 资源读）。
+     * <p>它在 jar 里的条目名就是 {@code assets/shanhai/build.properties}（判据 ① 直接读它）。
+     */
+    public static final String BUILD_DATE_RESOURCE = "/assets/shanhai/build.properties";
+
+    /** {@link #BUILD_DATE_RESOURCE} 里的键名。 */
+    public static final String BUILD_DATE_KEY = "build_date";
+
+    /** 构建日期的合法形态：{@code yyyy-MM-dd}。<b>只认这一种</b>，其余一律当读不到。 */
+    private static final java.util.regex.Pattern BUILD_DATE_FORMAT =
+            java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
+
+    /**
+     * 取本 mod 的<b>构建日期</b>（横幅 {@code 🔷 重制版构建日期: …} 那一行）。
+     *
+     * <h4>为什么是「构建日期」而不是「版本号」</h4>
+     * 用户 2026-10-02 原话：「重制版左下角的横幅显示当前版本可以改成构建日期，
+     * <b>符合我们用日期定义版本的模式</b>」。⇒ 本工程用日期当版本口径，
+     * 横幅就印日期；{@code mod_version}（{@code gradle.properties}）保持 {@code 0.1.0} <b>不动</b>，
+     * 那是另一件事。
+     *
+     * <h4>🔴 值的唯一来源是构建期注入，本类不写死任何日期</h4>
+     * 值来自 {@link #BUILD_DATE_RESOURCE}（{@code assets/shanhai/build.properties}），
+     * 那是个<b>占位符文件</b>（{@code build_date=${build_date}}），由 {@code build.gradle} 的
+     * {@code processResources -> filesMatching(...) { expand ... }} 在构建时替换成构建当天。
+     * ⇒ <b>源码里 grep 不到任何字面日期</b>，改日期只能改构建输入（或系统时钟）。
+     *
+     * <h4>🔴 取不到就返回 {@link #VERSION_UNAVAILABLE}，绝不回落到写死的日期</h4>
+     * 这是本工程既有的铁律（同 {@link #modVersion()} 那条注释）——「宁可缺，不可假」。
+     * 具体会走到这条路的情形（都<b>不</b>是理论假设，是本轮判据 ② 实测过的）：
+     * <ul>
+     *   <li>占位符<b>没被 expand 覆盖</b>（{@code build.properties} 没写进 {@code filesMatching}）
+     *       ⇒ 读出来是字面量 {@code ${build_date}} ⇒ 形态不符 ⇒ 不可用；</li>
+     *   <li>资源缺失 / 键名改了 / IO 抛异常 / 类加载器拿不到这个条目。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>刻意不做缓存</b>：这条路径每个玩家登录只走一次，省下的 IO 是零头；
+     * 而缓存会把「第一次读失败」永久固化下来，让一次偶发失败变成整局游戏的假「(不可用)」。
+     *
+     * @return {@code yyyy-MM-dd}，或 {@link #VERSION_UNAVAILABLE}
+     */
+    public static String buildDate() {
+        String raw;
+        try {
+            raw = readBuildDateFromResource();
+        } catch (Throwable ignored) {
+            // 资源读不到、类加载器异常、Properties 解析失败……一律降级成「不可用」，
+            // 不抛给横幅调用方（横幅少一行总好过整个登录事件炸掉）。
+            raw = VERSION_UNAVAILABLE;
+        }
+        return raw;
+    }
+
+    /** {@link #buildDate()} 的纯读取核：拿不到/形态不对都返回 {@link #VERSION_UNAVAILABLE}。 */
+    private static String readBuildDateFromResource() throws java.io.IOException {
+        java.util.Properties props = new java.util.Properties();
+        // 用 ShanhaiRecipeStats.class 自己的类加载器（而不是线程上下文那个）：
+        // 在 Forge 里前者才保证解析到【本 mod 的 jar】。
+        // 并且用 load(InputStream) 而不是 load(Reader)：properties 按 ISO-8859-1 解码，
+        // 而本文件刻意保持纯 ASCII（日期），两边口径一致。
+        try (java.io.InputStream in = ShanhaiRecipeStats.class.getResourceAsStream(BUILD_DATE_RESOURCE)) {
+            if (in == null) {
+                return VERSION_UNAVAILABLE;
+            }
+            props.load(in);
+        }
+        String value = props.getProperty(BUILD_DATE_KEY);
+        if (value == null) {
+            return VERSION_UNAVAILABLE;
+        }
+        value = value.trim();
+        // 🔴 这一条就是「没被 expand 覆盖」的守门人：占位符原文 ${build_date} 到这里被拒。
+        if (!BUILD_DATE_FORMAT.matcher(value).matches()) {
+            return VERSION_UNAVAILABLE;
+        }
+        return value;
+    }
+
+    /**
+     * 取本 mod 的运行期版本（{@code mods.toml} 的 {@code version="${mod_version}"}）。
+     *
+     * <p>⚠️ 2026-10-02：<b>横幅已经不再用这一行</b>（改为 {@link #buildDate()}）。
+     * 本方法<b>刻意保留</b>：它是公开 API，删掉属于「改版本相关的东西」，
+     * 而本轮任务范围只有横幅那一行。
      *
      * <p>取不到就返回 {@link #VERSION_UNAVAILABLE}，<b>绝不回落到写死的版本号</b> ——
      * 活界面上印假数字是本工程的血账之一。

@@ -423,6 +423,32 @@ public final class ShanhaiRecipeTypes {
     public static GTRecipeType PRIMORDIAL_MATTER_FORMING;
 
     /**
+     * 🆕 2026-10-03 新增第 45 条：<b>原初山海调试</b>（{@code gtceu:primordial_debug}）。
+     *
+     * <p>用户点单（逐字）：
+     * <pre>
+     * 我还需要一条测试配方用来测试我们做的这个，你就新增一个配方种类叫原初山海调试，
+     * 然后就给原初山海调试模块这个机器加，然后里面分别添加一个原石变成各种矿物
+     * （每个配方都要加上不同的编程电路），然后其中添加各种条件，也添加一些 2-3 个的组合条件
+     * </pre>
+     * <p>补充（逐字）：「各种矿物你随便，反正测试用的，各种条件是都要上的，而且还需要上组合条件」。
+     *
+     * <p>🔴 <b>它没有上游原型</b>——不是照抄 {@code DShanhaiRecipeTypes.java} 的任何一条。
+     * 所以 IO 上限是<b>按 27 条测试配方的真实需要</b>定的，不是抄来的：
+     * 每条 = 2× 物品输入（1× 原石 ＋ 1× 编程电路 {@code .circuit(n)}）＋ 1× 物品输出
+     * ⇒ 至少 (2, 1, 0, 0)；这里取 <b>(6, 6, 2, 2)</b> 留余量，
+     * 流体侧本批 27 条一条都没用，留 2/2 是为了将来往这个类型上加条件实验时不必再改 Java。
+     *
+     * <p>挂载点 = {@code shanhai:primordial_debug_module}（原初山海调试模块，见
+     * {@code ModuleRegistry#RECIPE_DEBUG_MODULE} 与 {@code buildDebugModuleRecipeTypes()}）。
+     * <p>配方正文 = {@code kubejs\server_scripts\[server_scripts]shanhai_debug_test_recipes.js}（27 条，
+     * 2026-10-03 本代理新建；分组 A 6 无条件 ／ B 7 单条件 ／ B2 2 超净间另两档 ／ C 6 两两组合 ／ D 6 三条件）。
+     * <p>中文名（lang 键 = {@code gtceu.primordial_debug}，<b>不是</b> {@code gtceu.recipe_type.primordial_debug}）
+     * 见 {@code assets/shanhai/lang/zh_cn.json} 与 {@code en_us.json}。
+     */
+    public static GTRecipeType PRIMORDIAL_DEBUG;
+
+    /**
      * 🆕 两条新类型的【配方条数声明值】—— 只用于**由 id 可 grep 的证据行**与 KJS 侧对账。
      *
      * <p>🔴 为什么是常量而不是这里现算：本方法是**配方类型注册期**（{@code GTCEuAPI.RegisterEvent}），
@@ -443,16 +469,23 @@ public final class ShanhaiRecipeTypes {
     public static final int SWARM_CAST_DECLARED_RECIPES = 28;
 
     /**
-     * 🆕 原初物质定型的【配方条数声明值】= <b>2457</b>（v3 · 2026-10-01 换源后的口径）。
+     * 🆕 原初物质定型的【配方条数声明值】= <b>2460</b>
+     * （v3 生成批 2457 ＋ 2026-10-03 手工追加 3，见下）。
      *
-     * <p>出处（2026-10-01 迁移后更新）= <b>KJS 文件里的配方数据行数</b>：
+     * <p>出处 = <b>KJS 文件里的配方数据行数</b>：
      * {@code kubejs\server_scripts\[server_scripts]shanhai_primordial_forming.js}
-     * 共 <b>2457</b> 行（构成：压模器 {@code gtceu:extruder} <b>1344</b> ＋ 流体固化器
-     * {@code gtceu:fluid_solidifier} <b>1113</b>，剔除 0 条；来源分布取自
-     * {@code temp\pf-fix\manifest-v3.tsv} 的 2457 行）。
+     * 共 <b>2460</b> 行 = 生成的 <b>2457</b>（构成：压模器 {@code gtceu:extruder} <b>1344</b> ＋
+     * 流体固化器 {@code gtceu:fluid_solidifier} <b>1113</b>，剔除 0 条；来源分布取自
+     * {@code temp\pf-fix\manifest-v3.tsv} 的 2457 行）
+     * ＋ <b>3 条手工追加</b>（2026-10-03 用户点单：方钠石 / 青金石 / 蓝金石 的【粉 → 板】，
+     * 1:1、LV（EUt 32）、3s（60 tick）、编程电路 8；写在同一个 KJS 文件的 PF_ROWS 数组末尾，
+     * 带醒目标注。为什么必须是同一个文件：下面的对账器只数【那一个文件】的行数）。
+     *
      * <p>🔴 <b>离线对账器</b>（不需要跑 MC）：{@code node tools\check-pf-declared-vs-disk.mjs}
      * —— 它数 KJS 数据行数、再读本常量，两者必须相等；并另判一条「旧数据包里必须 0 个 json」。
      * 它就是「声明值又过时了 / 数据包没搬干净」这两件事的下一次自动报警。
+     * <p>⚠️ <b>重跑生成器会冲掉那 3 条</b>：{@code gen_pf_kjs.js} 会把整个 KJS 文件按 2457 行重写
+     * ⇒ 届时本常量（2460）与对账器、以及下面那个运行期探针会立刻报红 —— 不会静默。</p>
      * <p>📜 历史：v1 / v2 的声明值<b>都已过时</b>（v3 换源的原因见
      * {@link #PRIMORDIAL_MATTER_FORMING} 的字段注释），此处<b>不再写它们的数字</b>——
      * 写了就会有人照抄。
@@ -460,7 +493,7 @@ public final class ShanhaiRecipeTypes {
      * 它会现查配方表并打出 {@code [SHANHAI-PFORM] 原初物质定型 现查=… 期望=…}，
      * 与这里不等就是"某一侧改了而另一侧没跟上"。
      */
-    public static final int PRIMORDIAL_MATTER_FORMING_DECLARED_RECIPES = 2457;
+    public static final int PRIMORDIAL_MATTER_FORMING_DECLARED_RECIPES = 2460;
 
     /**
      * 真类型条数（不含 36 条显示类型）。fail-fast 用。
@@ -469,10 +502,13 @@ public final class ShanhaiRecipeTypes {
      * （用户点单新增「原初物质解构」{@code primordial_matter_deconstruction}）。
      * <b>2026-09-30：41 → 43</b>（用户点单新增「原初激光蚀刻」＋「原初蜂群铸造」两条）。
      * <b>2026-10-01：43 → 44</b>（用户点单新增「原初物质定型」{@code primordial_matter_forming}）。
+     * <b>2026-10-03：44 → 45</b>（用户点单新增「原初山海调试」{@code primordial_debug}；见
+     * {@link #PRIMORDIAL_DEBUG} 的字段注释。⚠️ 本轮任务书原写「41 → 42」，那是**过时口径**——
+     * 41 已经在 2026-09-30 变成 43、2026-10-01 变成 44，本轮的真值是 44 → 45）。
      * 这个数字同时被 {@link #countMissingReal()} 与 {@code ShanhaiRegistry#verifyRecipeTypesRegistered}
      * 使用，<b>改类型数量必须同步改这里与那个数组</b>，否则 fail-fast 只查一部分、其余静默缺失。
      */
-    public static final int REAL_TYPE_COUNT = 44;
+    public static final int REAL_TYPE_COUNT = 45;
 
     /**
      * 幂等闸门。与 {@code ShanhaiMachines.INITIALIZED} / {@code ModuleRegistry} 同款写法。
@@ -614,8 +650,12 @@ public final class ShanhaiRecipeTypes {
 
 
         // :225-234 —— 原版 overlay 顺序是 DUST,FLUID,DUST,FLUID（与其他条不同，照抄）
+        // 🔴 2026-10-03 用户裁决：流体入 **1 → 2**。
+        //    起因：PF 的 `shanhai:pf/taixu_dust` 实测 fluidIn = 2 ⇒ 超出原上限。
+        //    本次只动【流体入】这一位；物品入 2 / 物品出 2 / 流体出 1 三个数与原版 overlay 那条
+        //    `:225-234` 的照抄值**逐字不变**。
         TAIXU_SMELTING = register("taixu_smelting", "multiblock")
-                .setMaxIOSize(2, 2, 1, 1)
+                .setMaxIOSize(2, 2, 2, 1)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
@@ -747,8 +787,32 @@ public final class ShanhaiRecipeTypes {
         //      max(itemIn)=4 / max(itemOut)=1 / max(fluidIn)=2 / max(fluidOut)=1
         //      ⇒ 新规格下 **9 条超出流体限额**（6 条 fluidIn=2 > 1、4 条 fluidOut=1 > 0）。
         //      这是本改动的**已知代价**，已按要求上报，未擅自改配方、也未擅自放宽规格。
+        // 🔴 2026-10-03 用户裁决（第二刀，同一句话的后续）：流体入 **1 → 2**。
+        //    起因：PF 的 `shanhai:pf/gluon` / `shanhai:pf/gluon_2` 两条配方实测 fluidIn = 2，
+        //      而上面 2026-09-26 那刀把流体入压到 1 ⇒ 生成器每轮打印 `slot overflows`
+        //      的 3 条里占 2 条（第三类是 taixu_smelting）。本次只动【流体入】这一位，
+        //      物品入 9 / 物品出 1 / 流体出 0 三个数与 2026-09-26 的裁决**逐字不变**。
+        //    ⚠️ 上面 2026-09-26 那段留档【原文未删】—— 它是当时那刀的记录；
+        //      其中"9 条超出流体限额（6 条 fluidIn=2 > 1、4 条 fluidOut=1 > 0）"里的
+        //      **6 条 fluidIn 超限**已由本次放宽消掉，**4 条 fluidOut=1 > 0 仍然存在**（本轮不动流体出）。
+        // 🔴 2026-10-03 用户裁决（第三刀，同一句话的后续）：新增【流体输出槽】—— 流体出 **0 → 1**。
+        //    原话逐字：「给物质锻造开一个流体输出槽」
+        //    起因：用户新写的 π 介子配方 `shanhai:pf/pion`（1x up_quark + 1x down_quark + 1x gluon
+        //      ⇒ 1x shanhai:pion ＋ shanhai:zero_point_energy 4000 流体输出）实测
+        //      `slots = {itemIn:4,itemOut:1,fluidIn:0,fluidOut:1}`，而流体出上限为 0 ⇒ **溢出**。
+        //    ⇒ 目标 IO = **(9, 1, 2, 1)**；本次【只动第四位】，前三位与 2026-09-26/10-03 的裁决逐字不变。
+        //    ⚠️ 上面 2026-09-26 / 2026-10-03 两段留档【原文未删】—— 它们是当时那两刀的记录；
+        //      其中"4 条 fluidOut=1 > 0 仍然存在"里的 **fluidOut=1 超限已由本次放宽消掉**
+        //      （现存 6 条 matter_forging 配方实测 max(fluidOut)=1 ⇒ 放宽后 0 条超出流体出限额）。
+        //    ⚠️ 本类型【没有】专属 .rtui（实测名单：shanhai 侧 5 个 —— matter_module_casting /
+        //      primordial_matter_deconstruction / wl_board_circuit_assembly / wl_board_wafer_etching /
+        //      black_hole_event_horizon_blast；gtceu-1.20.1-1.4.4.jar 侧 4 个 —— assembly_line /
+        //      forge_hammer / lathe / research_station。两处都没有 matter_forging）
+        //      ⇒ 它走框架的通用版面。
+        //      ⚠️「通用版面会在 fluidOut=1 时真画出一个流体输出格」本次【未实测】——
+        //      这只是按框架行为的推断，已列入交付报告"残余不确定性"一节，未被当作已证事实。
         MATTER_FORGING = register("matter_forging", "multiblock")
-                .setMaxIOSize(9, 1, 1, 0)
+                .setMaxIOSize(9, 1, 2, 1)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
@@ -1125,6 +1189,18 @@ public final class ShanhaiRecipeTypes {
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
 
+        // ═════════════ 2026-10-03 新增第 45 条（用户点单「原初山海调试」；见字段区那段长注释）═════════════
+        // 🔴 本条【无上游原型】⇒ IO 上限不是抄来的，是按 27 条测试配方的真实需要定的：
+        //    每条 = 1× minecraft:cobblestone ＋ 1× 编程电路（KJS 的 .circuit(n)，落 chance=0 的电路输入）
+        //         ＋ 1× 矿物输出
+        //    ⇒ 至少 (2, 1, 0, 0)；取 (6, 6, 2, 2) 留余量，流体侧留 2/2 便于后续条件实验。
+        //    进度条照同批新类型（第 42..44 条）的惯例取 PROGRESS_BAR_ARROW。
+        PRIMORDIAL_DEBUG = register("primordial_debug", "multiblock")
+                .setMaxIOSize(6, 6, 2, 2)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+
         // ───────── fail-fast（就地）：任何一条静默没生效，就在这里响亮地失败 ─────────
         int realMissing = countMissingReal();
         if (realMissing > 0) {
@@ -1166,10 +1242,12 @@ public final class ShanhaiRecipeTypes {
                 PRIMORDIAL_SWARM_CASTING.registryName, SWARM_CAST_DECLARED_RECIPES);
         ShanhaiMod.LOGGER.info("[SHANHAI-NEWTYPE] 原初物质定型 = {}（{} 条配方，"
                         + "模头/模具→电路 映射表见 handoff\\outbound\\原初物质定型.md §2；"
-                        + "来源 = 压模器 gtceu:extruder(1344 条) ＋ 流体固化器 gtceu:fluid_solidifier(1113 条)"
-                        + " = 2457（剔除 0 条；旧版把压模器误认成 gtceu:forming_press 冲压机床，已纠正）；"
-                        + "模头/模具→电路 用 0..32（实测用到 31 个，8 与 10 空）；"
-                        + "挂「原初临界加工模块」；配方以数据包形式随 jar 一起装）",
+                        + "来源 = 生成批 2457（压模器 gtceu:extruder 1344 条 ＋ 流体固化器 gtceu:fluid_solidifier 1113 条，"
+                        + "剔除 0 条；旧版把压模器误认成 gtceu:forming_press 冲压机床，已纠正）"
+                        + " ＋ 2026-10-03 手工追加 3 条（方钠石/青金石/蓝金石 粉→板，电路 8）= 2460；"
+                        + "模头/模具→电路 用 0..32（生成批用到 31 个，8 与 10 空）；"
+                        + "挂「原初临界加工模块」；配方以 KubeJS 形式装"
+                        + "（kubejs\\server_scripts\\[server_scripts]shanhai_primordial_forming.js））",
                 PRIMORDIAL_MATTER_FORMING.registryName, PRIMORDIAL_MATTER_FORMING_DECLARED_RECIPES);
 
         // ───────── JEI 展示层：给"带等级门槛"的配方插一个物质模块催化剂槽（不碰任何配方数据）─────────
@@ -1713,7 +1791,9 @@ public final class ShanhaiRecipeTypes {
                 // ───── 🆕 2026-09-30 新增的第 42／43 条（用户点单「原初激光蚀刻」＋「原初蜂群铸造」）─────
                 PRIMORDIAL_LASER_ETCHING, PRIMORDIAL_SWARM_CASTING,
                 // ───── 🆕 2026-10-01 新增的第 44 条（用户点单「原初物质定型」）─────
-                PRIMORDIAL_MATTER_FORMING};
+                PRIMORDIAL_MATTER_FORMING,
+                // ───── 🆕 2026-10-03 新增的第 45 条（用户点单「原初山海调试」）─────
+                PRIMORDIAL_DEBUG};
     }
 
     /**

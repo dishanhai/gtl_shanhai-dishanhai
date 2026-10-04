@@ -75,6 +75,23 @@ public final class ShanhaiFluids {
     public static final FluidEntry<ForgeFlowingFluid.Flowing> LIQUID_ENDING =
             fluid("liquid_ending", "liquid_ending", "liquid_ending_flow", "液态终末");
 
+    // ==================================================================
+    // 🔴 2026-10-03 用户点单：**14 个物质流的注册顺序改成与「物质模块等级」同序**
+    //    （新序见下；id 与中文名一个字节都没动，只改了字段（=注册）顺序）
+    //
+    //    新序 = entry(入门,Lv1) → foundation(基础,Lv2) → basic(推演,Lv3) → virtual(虚像,Lv4)
+    //           → advanced(重组,Lv5) → zero(归零,Lv6) → darkstar(暗星,Lv7) → transition(虚数跃迁,Lv8)
+    //           → transmutation(嬗变,Lv9) → ascension(升维,Lv10) → peak(巅峰,Lv11)
+    //           → transcend(超限,Lv13) → eternal(永恒,Lv14) → ultimate(创造,Lv15)
+    //    ⚠️ Lv12 混沌 / Lv16 现实锚点 / Lv17 创始现实修改**没有对应流体**（保持没有，不编造）。
+    //
+    //    旧序（作废，逐字留档）：entry, foundation, basic, virtual, **transmutation, darkstar,
+    //        advanced, transition, zero, peak, ascension, transcend**, eternal, ultimate
+    //      ⇒ 本次移动的只有 5 个：advanced / zero / darkstar / transmutation / ascension。
+    //    （2026-10-01 创造栏那边已经把「物质流桶」按模块顺序排过一轮；本轮把**注册顺序**也对齐，
+    //      两处同序 ⇒ 以后不再出现"注册序与显示序对不上"。）
+    // ==================================================================
+
     /** 流体 `matter_fluid_entry`（入门物质流）· 贴图 `matter_fluid_entry.png`（🔴 源目录无 flow ⇒ flowingTexture 指回 still（避免缺失贴图））· 桶 `shanhai:matter_fluid_entry_bucket`（入门物质流桶）。 */
     public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_ENTRY =
             fluid("matter_fluid_entry", "matter_fluid_entry", "matter_fluid_entry", "入门物质流");
@@ -91,33 +108,33 @@ public final class ShanhaiFluids {
     public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_VIRTUAL =
             fluid("matter_fluid_virtual", "matter_fluid_virtual", "matter_fluid_virtual_flow", "虚像物质流");
 
-    /** 流体 `matter_fluid_transmutation`（嬗变物质流）· 贴图 `matter_fluid_transmutation.png`（🔴 源目录无 flow ⇒ flowingTexture 指回 still（避免缺失贴图））· 桶 `shanhai:matter_fluid_transmutation_bucket`（嬗变物质流桶）。 */
-    public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_TRANSMUTATION =
-            fluid("matter_fluid_transmutation", "matter_fluid_transmutation", "matter_fluid_transmutation", "嬗变物质流");
-
-    /** 流体 `matter_fluid_darkstar`（暗星物质流）· 贴图 `matter_fluid_darkstar.png`（flow `matter_fluid_darkstar_flow.png`）· 桶 `shanhai:matter_fluid_darkstar_bucket`（暗星物质流桶）。 */
-    public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_DARKSTAR =
-            fluid("matter_fluid_darkstar", "matter_fluid_darkstar", "matter_fluid_darkstar_flow", "暗星物质流");
-
     /** 流体 `matter_fluid_advanced`（重组物质流）· 贴图 `matter_fluid_advanced.png`（flow `matter_fluid_advanced_flow.png`）· 桶 `shanhai:matter_fluid_advanced_bucket`（高级物质流桶）。 */
     public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_ADVANCED =
             fluid("matter_fluid_advanced", "matter_fluid_advanced", "matter_fluid_advanced_flow", "重组物质流");
-
-    /** 流体 `matter_fluid_transition`（虚数跃迁物质流）· 贴图 `matter_fluid_transition.png`（flow `matter_fluid_transition_flow.png`）· 桶 `shanhai:matter_fluid_transition_bucket`（虚数跃迁物质流桶）。 */
-    public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_TRANSITION =
-            fluid("matter_fluid_transition", "matter_fluid_transition", "matter_fluid_transition_flow", "虚数跃迁物质流");
 
     /** 流体 `matter_fluid_zero`（归零物质流）· 贴图 `matter_fluid_zero.png`（🔴 源目录无 flow ⇒ flowingTexture 指回 still（避免缺失贴图））· 桶 `shanhai:matter_fluid_zero_bucket`（归零物质流桶）。 */
     public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_ZERO =
             fluid("matter_fluid_zero", "matter_fluid_zero", "matter_fluid_zero", "归零物质流");
 
-    /** 流体 `matter_fluid_peak`（巅峰物质流）· 贴图 `matter_fluid_peak.png`（flow `matter_fluid_peak_flow.png`）· 桶 `shanhai:matter_fluid_peak_bucket`（巅峰物质流桶）。 */
-    public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_PEAK =
-            fluid("matter_fluid_peak", "matter_fluid_peak", "matter_fluid_peak_flow", "巅峰物质流");
+    /** 流体 `matter_fluid_darkstar`（暗星物质流）· 贴图 `matter_fluid_darkstar.png`（flow `matter_fluid_darkstar_flow.png`）· 桶 `shanhai:matter_fluid_darkstar_bucket`（暗星物质流桶）。 */
+    public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_DARKSTAR =
+            fluid("matter_fluid_darkstar", "matter_fluid_darkstar", "matter_fluid_darkstar_flow", "暗星物质流");
+
+    /** 流体 `matter_fluid_transition`（虚数跃迁物质流）· 贴图 `matter_fluid_transition.png`（flow `matter_fluid_transition_flow.png`）· 桶 `shanhai:matter_fluid_transition_bucket`（虚数跃迁物质流桶）。 */
+    public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_TRANSITION =
+            fluid("matter_fluid_transition", "matter_fluid_transition", "matter_fluid_transition_flow", "虚数跃迁物质流");
+
+    /** 流体 `matter_fluid_transmutation`（嬗变物质流）· 贴图 `matter_fluid_transmutation.png`（🔴 源目录无 flow ⇒ flowingTexture 指回 still（避免缺失贴图））· 桶 `shanhai:matter_fluid_transmutation_bucket`（嬗变物质流桶）。 */
+    public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_TRANSMUTATION =
+            fluid("matter_fluid_transmutation", "matter_fluid_transmutation", "matter_fluid_transmutation", "嬗变物质流");
 
     /** 流体 `matter_fluid_ascension`（升维物质流）· 贴图 `matter_fluid_ascension.png`（🔴 源目录无 flow ⇒ flowingTexture 指回 still（避免缺失贴图））· 桶 `shanhai:matter_fluid_ascension_bucket`（升维物质流桶）。 */
     public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_ASCENSION =
             fluid("matter_fluid_ascension", "matter_fluid_ascension", "matter_fluid_ascension", "升维物质流");
+
+    /** 流体 `matter_fluid_peak`（巅峰物质流）· 贴图 `matter_fluid_peak.png`（flow `matter_fluid_peak_flow.png`）· 桶 `shanhai:matter_fluid_peak_bucket`（巅峰物质流桶）。 */
+    public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_PEAK =
+            fluid("matter_fluid_peak", "matter_fluid_peak", "matter_fluid_peak_flow", "巅峰物质流");
 
     /** 流体 `matter_fluid_transcend`（超限物质流）· 贴图 `matter_fluid_transcend.png`（🔴 源目录无 flow ⇒ flowingTexture 指回 still（避免缺失贴图））· 桶 `shanhai:matter_fluid_transcend_bucket`（超限物质流桶）。 */
     public static final FluidEntry<ForgeFlowingFluid.Flowing> MATTER_FLUID_TRANSCEND =

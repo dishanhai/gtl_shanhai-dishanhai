@@ -331,8 +331,11 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
         //    ⛔ 上一轮那句「≤ 2^31 时走 super ⇒ 那条路上"电上限 ÷ T"尚未生效，待裁」【已作废】。
         //    ⚠️ 本行的 limit 与父类那条路【现在逐位同值】（都是 每线程上限 × T）——
         //       改动前两者差 T 倍（本轮修掉的正是这件事）。判据断言这条恒等式。
+        // 🔴 2026-10-02 第十一轮（用户实机 bug）：入参从 getEnergyParallel() 改成 energyCapForBudget()
+        //    —— 与模块侧逐字同源：能源仓那头无限（创造模式能源仓 / 无线电网输入终端）时返回
+        //    ENERGY_CAP_NONE（= 不限制）⇒ 本方法退回「本机上限 × T」，与「电力自动关着」逐位同值。
         final long limit = ShanhaiParallelBudget.parallelBudget(
-                host.getRecipeLogicMaxParallel(), host.getEnergyParallel(), getMultipleThreads());
+                host.getRecipeLogicMaxParallel(), host.energyCapForBudget(), getMultipleThreads());
         if (limit <= (long) Integer.MAX_VALUE) {
             return super.calculateParallels();
         }
@@ -633,8 +636,11 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
             //    `budget` = 每线程上限 × T；`parentBudget` = 父类的 (long) getMaxParallel() × getMultipleThreads()。
             //    改动前两者差 T 倍（那正是"退回父类就不生效"的病根）。这一行现在是**实机的自校验**：
             //    玩家贴出这一行，若两者不等就说明 T 的两个来源漂移了。
+            // 🔴 2026-10-02 第十一轮：本行是【诊断】，必须与生产路径读同一个口径 —— 入参与
+            //    shanhai$calculateParallelsInRound() 一样改成 energyCapForBudget()，
+            //    否则「本核预算 == 父类预算」这条自校验会在 ∞ 档上打出假红（诊断撒谎比没有诊断更糟）。
             final long budget = ShanhaiParallelBudget.parallelBudget(
-                    getMachine().getRecipeLogicMaxParallel(), getMachine().getEnergyParallel(),
+                    getMachine().getRecipeLogicMaxParallel(), getMachine().energyCapForBudget(),
                     getMultipleThreads());
             final long parentBudget = (long) getMachine().getMaxParallel() * (long) getMultipleThreads();
             // 状态码：0 = 有配方；1 = 无配方(match == null)

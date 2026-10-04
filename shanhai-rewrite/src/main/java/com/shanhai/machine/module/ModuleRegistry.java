@@ -358,6 +358,15 @@ public final class ModuleRegistry {
             GTLRecipeTypes.GREENHOUSE_RECIPES,
             GTLRecipeTypes.INCUBATOR_RECIPES,
             GTLRecipeTypes.FLOTATING_BENEFICIATION_RECIPES,
+            // 🔴 2026-10-03 用户点单（逐字）：「然后给原初生物核心添加渔场的配方」。
+            //    ⇒ 【只在末尾追加这一条】，原有 5 条一个字节都没动、下标不变
+            //      （下标 = GUI 里 activeRecipeType 的口径，位移会让玩家已保存的机器换配方类型）。
+            //    id = gtceu:fishing_ground（`javap -c org.gtlcore.gtlcore.common.data.GTLRecipeTypes`
+            //      的 <clinit>：偏移 2210 ldc_w #921 // String fishing_ground →
+            //      2213 ldc_w #498 // String multiblock → 2220 invokestatic GTRecipeTypes.register
+            //      → 2252 putstatic #923 // Field FISHING_GROUND_RECIPES ⇒ 字段与 id 一一对应）。
+            //    中文名「渔场」出处：gtlcore jar 的 assets/gtceu/lang/zh_cn.json 的 "gtceu.fishing_ground"。
+            GTLRecipeTypes.FISHING_GROUND_RECIPES,
     };
 
     /** 原初混沌蜉蝣解构结晶炉 —— 上游 :351。 */
@@ -620,6 +629,324 @@ public final class ModuleRegistry {
     };
 
     /**
+     * 🟢 2026-10-03 用户点单新增第 27 台：<b>原初碳基解构核心</b>
+     * （{@code shanhai:primordial_carbon_deconstruction_core}）。
+     *
+     * <p><b>用户原话（逐字）</b>：
+     * <blockquote>
+     * 「新增机器：原初有机分解模块（有机分解你可以帮我取个科幻一点的名字），拥有配方类型：
+     * 太素衍化，石化工厂，木化工厂，其余和其他模块一样」<br>
+     * 「再给原初碳基解构核心加上热解炉，裂化机，蒸馏塔，脱硫的配方」
+     * </blockquote>
+     * （机器名由用户在候选里选定 = <b>「原初碳基解构核心」</b>。）
+     *
+     * <p>⇒ 本条数组 = 两句话的并集，<b>7 个类型</b>，顺序 = 用户点名的先后顺序。
+     * <p>🔴 <b>7 个类型全部是宿主（gtceu / gtlcore / gtladditions）已有的，本工程一个新类型都没注册</b>
+     * ⇒ {@code ShanhaiRecipeTypes.java} <b>一个字节都没动</b>（该文件本轮按任务书禁止改动）。
+     *
+     * <h3>逐条 id 实证（全部由本轮的 jar 字节码 + 语言文件反查得到，不是转抄）</h3>
+     * <pre>
+     *   下标  中文名      本数组里的字段                                    注册 id（register 的首参）
+     *   ───  ──────────  ────────────────────────────────────────────────  ─────────────────────────────
+     *   0    太素衍化    GtlAddCompat.evolutionOfPrimordial()              gtceu:evolution_of_primordial
+     *   1    石化工厂    GTLRecipeTypes.PETROCHEMICAL_PLANT_RECIPES        gtceu:petrochemical_plant
+     *   2    木化工厂    GTLRecipeTypes.WOOD_DISTILLATION_RECIPES          gtceu:wood_distillation
+     *   3    热解炉      GTRecipeTypes.PYROLYSE_RECIPES                    gtceu:pyrolyse_oven
+     *   4    裂化机      GTRecipeTypes.CRACKING_RECIPES                    gtceu:cracker
+     *   5    蒸馏塔      GTRecipeTypes.DISTILLATION_RECIPES                gtceu:distillation_tower
+     *   6    脱硫        GTLRecipeTypes.DESULFURIZER_RECIPES               gtceu:desulfurizer
+     * </pre>
+     * ⚠️ 任务书里把第 0 条写成 {@code gtladditions:evolution_of_primordial}；<b>命名空间那一节是错的</b>
+     * —— 实测是 {@code gtceu:}。三条判据写在本数组第 0 行与
+     * {@link GtlAddCompat#evolutionOfPrimordial()} 的 javadoc 里（走 gtceu 自己的
+     * {@code GTRecipeTypes.register} ⇒ {@code GTCEu.id(name)} 恒返回 {@code gtceu:<id>}）。
+     * 中文名反查出处：{@code handoff/outbound/类型名自动反查.md:514}（太素衍化）／
+     * {@code :539}（木化工厂）／{@code :553}（渔场）等，键名一律 {@code gtceu.<id>}。
+     *
+     * <p>⚠️ 与 {@link #RECIPE_ORE_PROCESSING} 那类"多条 GTL/GT 混合"的数组同型：数组内容全是
+     * {@code GTRecipeType} 对象，命名空间只在**取证/报告**里出现，代码侧不拼字符串
+     * —— 拼字符串会绕开 {@code gtceu:} 与 {@code gtladditions:} 的歧义（正是上面那条订正要治的病）。
+     */
+    public static final GTRecipeType[] RECIPE_CARBON_DECONSTRUCTION_CORE = {
+            GtlAddCompat.evolutionOfPrimordial(),       // 太素衍化   gtceu:evolution_of_primordial
+            GTLRecipeTypes.PETROCHEMICAL_PLANT_RECIPES, // 石化工厂   gtceu:petrochemical_plant
+            GTLRecipeTypes.WOOD_DISTILLATION_RECIPES,   // 木化工厂   gtceu:wood_distillation
+            GTRecipeTypes.PYROLYSE_RECIPES,             // 热解炉     gtceu:pyrolyse_oven
+            GTRecipeTypes.CRACKING_RECIPES,             // 裂化机     gtceu:cracker
+            GTRecipeTypes.DISTILLATION_RECIPES,         // 蒸馏塔     gtceu:distillation_tower
+            GTLRecipeTypes.DESULFURIZER_RECIPES,        // 脱硫       gtceu:desulfurizer
+    };
+
+    /**
+     * 🟢 2026-10-03 用户点单新增<b>第 28 台</b>：<b>原初引力干涉阵列</b>
+     * （{@code shanhai:primordial_gravitational_interference_array}）。
+     *
+     * <p><b>用户原话（逐字）</b>：
+     * <blockquote>
+     * 「你可以设计一台新机器，拥有引力波宏观干涉和引力波广域广播的配方，名字你去我来选」
+     * </blockquote>
+     * （机器名由<b>用户</b>在候选里选定 = <b>「原初引力干涉阵列」</b>；英文注册路径 = 队长给的
+     * {@code primordial_gravitational_interference_array}。）
+     *
+     * <p>⇒ 本条数组 = 用户点名的<b>两个</b>类型，顺序 = 用户点名的先后顺序：
+     * <pre>
+     *   下标  中文名          本数组里的字段                                        注册 id
+     *   ───  ──────────────  ────────────────────────────────────────────────────  ───────────────────────────────────
+     *   0    引力波宏观干涉  ShanhaiRecipeTypes.GRAVITATIONAL_WAVE_PRODUCTION      gtceu:gravitational_wave_production
+     *   1    引力波广域广播  ShanhaiRecipeTypes.GRAVITATIONAL_WAVE_CONSUMPTION     gtceu:gravitational_wave_consumption
+     * </pre>
+     * （两条 id 的取证 = 2026-10-03 客户端 latest.log 里那行
+     *  {@code [SHANHAI-JEI] 模块催化剂展示槽已挂：45/45 …} 的「已挂」列表，逐字含这两个 id。）
+     *
+     * <p>🔴 <b>语义（别搞反）</b>：{@code gravitational_wave_production} = 宏观干涉 = <b>接收 / 测量端</b>
+     * （IO = 2 物品入 / 2 物品出 / 2 流体入 / 2 流体出 ⇒ 产物从那一步出）；
+     * {@code gravitational_wave_consumption} = 广域广播 = <b>发射端</b>
+     * （IO = 1 物品入 / <b>0 物品出</b> / 1 流体入，用户已定「引力子碎片在这里当广播消耗品被吃掉」）
+     * ⇒ <b>本机不改这两个类型的 IO / 中文名，一个字都不许动</b>。
+     *
+     * <p>🔴 <b>本轮之前，这两个类型【没有任何机器挂载】</b>：它们只出现在
+     * {@link #RECIPE_DEBUG_MODULE} 那张 catch-all 表里（玩家在正常机器上跑不到）
+     * ⇒ 本轮就是给它们一个家。
+     *
+     * <p>⚠️ 两条都是<b>山海自有</b>真类型（{@code ShanhaiRecipeTypes} 里 register 过、
+     * 在 {@code REAL_TYPE_COUNT} = 45 之内）⇒ 本机落地后"有没有配方可跑"取决于配方数据侧
+     * （用户已自行写配方）；<b>本轮一个配方都不写</b>（任务书硬要求）。
+     *
+     * <p>⚠️ 写法照抄 {@link #RECIPE_WORLDLINE_CRACKING_HUB}：直接读 {@code ShanhaiRecipeTypes}
+     * 的静态字段、不做 {@code buildXxx()} 那种带名字表的 fail-fast —— 只挂 2 条的数组抄那套
+     * 是多余结构；时机正确性由 {@link #RECIPE_DEBUG_MODULE} 的长注释（GTRecipeTypes.init()
+     * 先于 GTMachines.init()）与那 24 台的既有事实共同保证。
+     */
+    public static final GTRecipeType[] RECIPE_GRAVITATIONAL_INTERFERENCE_ARRAY = {
+            ShanhaiRecipeTypes.GRAVITATIONAL_WAVE_PRODUCTION,   // 引力波宏观干涉  gtceu:gravitational_wave_production
+            ShanhaiRecipeTypes.GRAVITATIONAL_WAVE_CONSUMPTION,  // 引力波广域广播  gtceu:gravitational_wave_consumption
+    };
+
+    /**
+     * 🟢 2026-10-03 用户点单新增<b>第 29 台</b>：<b>原初深空汲取核心</b>
+     * （{@code shanhai:primordial_deep_space_extraction_core}）。
+     *
+     * <p><b>用户原话（逐字）</b>：
+     * <blockquote>
+     * 「我想新增一个机器，它可以执行以下配方：集气室，大型集气室，虚空聚流反应，虚空流体钻机，
+     * 名字你取我来选」
+     * </blockquote>
+     * （机器名由<b>用户</b>在候选里选定 = <b>「原初深空汲取核心」</b>；形态 = <b>模块</b>（贴主机）。）
+     *
+     * <p>⇒ 本条数组 = 用户点名的<b>四个</b>类型，<b>顺序 = 用户点名的先后</b>
+     * （「集气室 → 大型集气室 → 虚空聚流反应 → 虚空流体钻机」逐字照用户那句话的先后）：
+     * <pre>
+     *   下标  中文名        本数组里的字段                                  注册 id（register 的首参）
+     *   ───  ────────────  ──────────────────────────────────────────────  ─────────────────────────────────
+     *   0    集气室        GTRecipeTypes.GAS_COLLECTOR_RECIPES             gtceu:gas_collector
+     *   1    大型集气室    GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES     gtceu:large_gas_collector
+     *   2    虚空聚流反应  GtlAddCompat.voidfluxReaction()                gtceu:voidflux_reaction
+     *   3    虚空流体钻机  GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES gtceu:void_fluid_drilling_rig
+     * </pre>
+     * ⚠️ 上面这张表与数组体<b>必须同序</b>（下标 0..3 一一对应）：数组给机器用、表给人看，
+     * 错位就会变成"注释说是 A、机器挂的是 B"，那正是本工程最忌讳的一种假数据。
+     *
+     * <h3>取证出处（2026-10-03 本轮实跑 javap 得到；原始输出见交付报告）</h3>
+     * <ul>
+     *   <li>{@code gtceu:gas_collector}：{@code javap -p -c -cp libs/gtceu-1.20.1-1.4.4.jar
+     *       com.gregtechceu.gtceu.common.data.GTRecipeTypes} 的 {@code <clinit>}
+     *       偏移 <b>2360</b> = {@code ldc_w // String gas_collector}、
+     *       偏移 <b>2424</b> = {@code putstatic // Field GAS_COLLECTOR_RECIPES}。</li>
+     *   <li>{@code gtceu:large_gas_collector}：{@code javap -p -c -cp libs/gtlcore-1.2.3.2-fix3.jar
+     *       org.gtlcore.gtlcore.common.data.GTLRecipeTypes} 的 {@code <clinit>}
+     *       偏移 <b>2432</b> = {@code ldc_w // String large_gas_collector}、
+     *       偏移 <b>2473</b> = {@code putstatic // Field LARGE_GAS_COLLECTOR_RECIPES}。</li>
+     *   <li>{@code gtceu:void_fluid_drilling_rig}：同一份 {@code GTLRecipeTypes} 的 {@code <clinit>}
+     *       偏移 <b>1358</b> = {@code ldc_w // String void_fluid_drilling_rig}、
+     *       偏移 <b>1399</b> = {@code putstatic // Field VOID_FLUID_DRILLING_RIG_RECIPES}。</li>
+     *   <li>{@code gtceu:voidflux_reaction}：{@code javap -p -c -cp libs/gtladditions-3.2.8Custom-fix2.jar
+     *       com.gtladd.gtladditions.common.recipe.GTLAddRecipesTypes} 的 {@code <clinit>}
+     *       偏移 <b>192</b> = {@code ldc_w // String voidflux_reaction}、
+     *       偏移 <b>233</b> = {@code putstatic // Field VOIDFLUX_REACTION}。
+     *       本工程<b>一律经</b> {@link GtlAddCompat#voidfluxReaction()} 转发
+     *       （项目铁律：禁止直接 import {@code GTLAddRecipesTypes}）。</li>
+     *   <li>🔴 <b>命名空间为什么四条全是 {@code gtceu:}</b>：四条注册的字节码里
+     *       {@code invokestatic} 的目标<b>都是</b>
+     *       {@code com/gregtechceu/gtceu/common/data/GTRecipeTypes.register:(String,String,[Lnet/minecraft/world/item/crafting/RecipeType;)Lcom/gregtechceu/gtceu/api/recipe/GTRecipeType;}
+     *       —— gtlcore 与 gtladditions <b>都没有自己造注册器</b>，它们是调 gtceu 自己那个方法；
+     *       而它的第一句是 {@code new GTRecipeType(GTCEu.id(name), …)}，{@code GTCEu.id(String)} =
+     *       {@code new ResourceLocation("gtceu", toLowerCaseUnder(name))}
+     *       ⇒ 谁调它都落 {@code gtceu:}。<b>不存在</b> {@code gtlcore:…} / {@code gtladditions:…}
+     *       形态的 id（本机不去拼字符串，只引用对象 —— 拼字符串正是这条歧义的来源）。</li>
+     * </ul>
+     *
+     * <h3>🔴 语义：这四个类型【一个物品输出槽都没有】</h3>
+     * 四条的 {@code GTRecipeType#setMaxIOSize(物品入, 物品出, 流体入, 流体出)} 逐条实读
+     * （同一份 javap 的 {@code <clinit>}）：
+     * <pre>
+     *   gtceu:gas_collector            (1, 0, 0, 1)
+     *   gtceu:large_gas_collector      (2, 0, 0, 1)
+     *   gtceu:voidflux_reaction        (3, 0, 0, 1)
+     *   gtceu:void_fluid_drilling_rig  (2, 0, 0, 1)
+     * </pre>
+     * ⇒ 这四个类型<b>只有 1 个流体输出槽</b>，<b>物品输出槽全是 0</b>（任务书里点名的那三个如此，
+     * 第 4 个 {@code voidflux_reaction} 实测<b>同形</b>）。对本机的含义：
+     * <ul>
+     *   <li>这四类配方<b>只出流体</b> ⇒ 玩家要接的是<b>流体输出仓</b>，这台机器<b>不可能</b>产出物品
+     *       —— 那是类型自己的 IO 口径，不是本机的 bug，也不是本工程能改的（见下一条红线）；</li>
+     *   <li>它们<b>也没有流体输入槽</b>：{@code voidflux_reaction} 里那句"流体调节器 ＋ XX数据"
+     *       中的两样<b>都是物品</b>（配方侧 {@code chance: 0} 不消耗 = 催化剂形态）
+     *       ⇒ 任务书里"只吃电"这句话是<b>成立的</b>；</li>
+     *   <li>⇒ 在 JEI 里右键本机时，这四类分类的右侧只会出现<b>流体</b>产物。</li>
+     * </ul>
+     *
+     * <p>🔴 <b>本机不改这四个类型的 IO / 中文名 / 注册，一个字都不许动</b>：四条都是宿主
+     * （gtceu / gtlcore / gtladditions）已有的类型，本工程只做<b>只读引用</b>；
+     * {@code ShanhaiRecipeTypes.java} 与三个宿主 jar 本轮<b>一个字节都没改</b>。
+     *
+     * <p>⚠️ <b>本轮一个配方都不写</b>（任务书硬要求）：本机只是"给这四个类型一个家"。
+     * 落地后"有没有配方可跑"取决于宿主自带的数据（集气室 / 大型集气室 / 虚空流体钻机 /
+     * 虚空聚流反应 的配方都在宿主 jar 内，本工程不介入）。已知：集气室的配方带 {@code dimension}
+     * 配方条件 —— 那条通道由「额外挂载槽 ×3」+ 维度碎片承担（见
+     * {@code PrimordialModuleRecipeLogic#shanhai$extraMountGateAllows}，与配方类型无关）。
+     *
+     * <p>⚠️ 写法照抄 {@link #RECIPE_GRAVITATIONAL_INTERFERENCE_ARRAY}（第 28 台：直接读静态字段
+     * 与 {@link GtlAddCompat} 转发口，不做多余结构）。<b>唯一多出来的一步</b>：任务书要求把
+     * "某条没注册上 ⇒ 静默挂上 null" 变成<b>注册期响亮失败</b>，故本条不写裸数组字面量，而是走
+     * {@link #buildDeepSpaceExtractionCoreRecipeTypes()} → {@link #requireNoNullRecipeTypes}。
+     * 为什么必须有这一步：本工程唯一的 null 兜底在
+     * {@code MachineTooltips#recipeTypesList}，而它<b>是"跳过 null"</b>
+     * （原文 {@code if (type == null || type.registryName == null) continue;}，
+     * 理由见该处注释"宁缺毋滥"）⇒ <b>裸数组里出现 null 的后果是"这台机器少一条类型"、
+     * 日志里一个字都没有</b>，与"它本来就只有三条"完全同形。
+     */
+    public static final GTRecipeType[] RECIPE_DEEP_SPACE_EXTRACTION_CORE =
+            buildDeepSpaceExtractionCoreRecipeTypes();
+
+    /**
+     * 造 {@link #RECIPE_DEEP_SPACE_EXTRACTION_CORE} 并<b>在注册期做 fail-fast</b>
+     * （第 29 台，2026-10-03）。
+     *
+     * <p>🔴 为什么必须单独写成方法而不是一个裸数组字面量：本数组读的是
+     * <b>三个不同来源</b>的类型 ——
+     * <ol>
+     *   <li>{@code gtceu} 的 {@code GTRecipeTypes} 静态字段（{@code <clinit>} 里赋值）；</li>
+     *   <li>{@code gtlcore} 的 {@code GTLRecipeTypes} 静态字段（同一个包的 {@code <clinit>}）；</li>
+     *   <li>{@code gtladditions} 的 {@code GTLAddRecipesTypes} Kotlin object getter
+     *       （{@code GTLAddCompat.voidfluxReaction()}；它读 {@code INSTANCE}，
+     *       <b>会触发那个 object 的类加载</b>）。</li>
+     * </ol>
+     * 任一处早于我们，或晚于我们，取到的就是 {@code null}；而 {@code null} 的**默认后果是静默**
+     * （见 {@link #RECIPE_DEEP_SPACE_EXTRACTION_CORE} 注释末段）。
+     *
+     * <h3>时机为什么本来就成立（本轮复核，不是照抄）</h3>
+     * <pre>
+     * ShanhaiMod（@Mod 构造器）→ ShanhaiRegistry.init()   ← 只入列物品/流体/创造栏，不注册机器
+     *   └─ GTCEu CommonProxy.init()
+     *        ├─ 偏移 43  GTRecipeConditions.init()
+     *        ├─ 偏移 94  GTRecipeTypes.init()   ← 内部在偏移 122 post 出
+     *        │                 GTCEuAPI.RegisterEvent&lt;ResourceLocation, GTRecipeType&gt;
+     *        │                 （gtlcore / gtladditions / 本工程都在这个回调里注册类型），
+     *        │                 偏移 128 才 freeze()
+     *        └─ 偏移 97  GTMachines.init()      ← post 出 MachineDefinition RegisterEvent
+     *                        └─ ShanhaiRegistry.onMachineRegister → ShanhaiMachines.init()
+     *                             └─ ModuleRegistry.init() → 本类【类加载】
+     *                                 （RECIPE_* 数组就是在这里被求值的）
+     * </pre>
+     * ⇒ 本类的类加载<b>严格晚于</b> gtceu/gtlcore/gtladditions 三条注册链，
+     * 三条来源此刻都已被赋值。既有旁证（同一时机、已在盘上跑了很久）：
+     * {@link #RECIPE_ETERNAL_SMELTING}（3 条 {@link GtlAddCompat}）、
+     * {@link #RECIPE_BIO}（1 条）、{@link #RECIPE_CARBON_DECONSTRUCTION_CORE}（第 27 台，1 条）、
+     * 以及 {@link #RECIPE_CRITICAL_PROCESSING} 起的 30+ 处 {@code GTLRecipeTypes.X} 直接引用。
+     * <p>⚠️ 但"本来就成立"与"静默拿到 null"在日志上<b>长得一模一样</b> ⇒ 本方法把它变成异常。
+     *
+     * <p>⚠️ 检查器本体 = {@link #requireNoNullRecipeTypes}，与调试模块那张 45 条表<b>共用同一处</b>
+     * （任务书："已有同类检查就沿用，不要发明第二套"）。本方法只负责<b>提供名字表</b>
+     * —— 异常里要能指名"是哪一条"，只报下标不够用。
+     */
+    private static GTRecipeType[] buildDeepSpaceExtractionCoreRecipeTypes() {
+        final String path = "primordial_deep_space_extraction_core";
+        // 🔴 名字表与类型表**必须同长 / 同序**（长度错位由检查器当场抛）：
+        //    名字里同时写了"从哪个类拿的"，因为这台机器的四个来源分属三个 jar，
+        //    只知道"第几条 null"不足以定位病根。
+        final String[] names = {
+                "GTRecipeTypes.GAS_COLLECTOR_RECIPES (gtceu:gas_collector)",
+                "GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES (gtceu:large_gas_collector)",
+                "GtlAddCompat.voidfluxReaction() (gtceu:voidflux_reaction)",
+                "GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES (gtceu:void_fluid_drilling_rig)",
+        };
+        // 顺序 = 用户点名的先后（见上面那条数组注释里的下标表，两处必须一致）。
+        GTRecipeType[] types = {
+                GTRecipeTypes.GAS_COLLECTOR_RECIPES,               // 集气室        gtceu:gas_collector
+                GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES,        // 大型集气室    gtceu:large_gas_collector
+                GtlAddCompat.voidfluxReaction(),                   // 虚空聚流反应  gtceu:voidflux_reaction
+                GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES,    // 虚空流体钻机  gtceu:void_fluid_drilling_rig
+        };
+        return requireNoNullRecipeTypes(path, names, types,
+                "这四个类型里，前三个来自 gtceu/gtlcore 的静态字段、第四个来自 gtladditions 的 "
+                        + "GTLAddRecipesTypes 这个 Kotlin object 的 getter ⇒ 说明有一条注册链没跑到本类类加载之前。"
+                        + "请先确认 CommonProxy#init() 里 GTRecipeTypes.init()(字节码偏移 94) 仍在 "
+                        + "GTMachines.init()(偏移 97) 之前（本类的类加载由后者触发），"
+                        + "且 gtlcore / gtladditions 的类型注册回调没有被挪到 freeze 之后。");
+    }
+
+    /**
+     * 🔴 <b>「配方类型数组里不许有 null」的唯一检查器</b>（全工程只此一处，不许在别处再写第二份）。
+     *
+     * <p>本方法的由来：2026-10-03 落地第 29 台时，任务书点名要"若数组里出现 null 就抛异常、
+     * 并在异常里点名是哪一个下标/类型 id"。工程里<b>已有</b>一份同类检查
+     * （{@link #buildDebugModuleRecipeTypes} 里那两段：名字表错位 + null 计数），
+     * 但它与那张 45 条表写死在一起、别人用不上 ⇒ 本轮把它<b>原地提取</b>成这个方法，
+     * 调试模块与本台<b>走同一个判定核</b>，而不是复制一份出来。
+     *
+     * <p>🔴 为什么必须有它（默认为什么是静默的）：{@code register(ModuleSpec)} 拿到数组后
+     * 只做两件事 —— 交给 {@code MultiblockMachineBuilder.recipeTypes(...)} 与
+     * {@code MachineTooltips.forModule(...)}。后者对 {@code null} 的处理是
+     * <b>跳过</b>（"宁缺毋滥：显示可以退化，加载不可以"，见
+     * {@code MachineTooltips#recipeTypesList} 注释），于是
+     * <b>数组里一个 null 的后果 = 这台机器少一条类型，日志里一个字都没有</b>，
+     * 与"它本来就没有那一条"完全同形。本方法把这件事变成<b>带下标与字段名的加载期异常</b>。
+     *
+     * <p>⚠️ 与 {@code require(String)}（句柄非 null）是同一条纪律的两个落点：
+     * 那个管"整台机器没注册上"，这个管"某一台的一条配方类型没拿到"。
+     *
+     * @param path  机器注册路径（只用于异常文案，不参与判定）
+     * @param names 与 {@code types} <b>同长同序</b>的名字表（异常里指名的来源）
+     * @param types 待检查的数组
+     * @param hint  追加在异常里的排障提示（可空，各调用点写各自最该看的那条链）
+     * @return 入参 {@code types} 原样返回（便于当字段初始化器用）
+     */
+    private static GTRecipeType[] requireNoNullRecipeTypes(String path, String[] names,
+                                                           GTRecipeType[] types, String hint) {
+        // 🔴 名字表与类型表**必须同长**：异常里要指名"是哪一条"，指错名比不指更坏。
+        //    下面这句把"两张表错位"变成注册期异常，避免出现"报的是 A、坏的是 B"。
+        if (names.length != types.length) {
+            throw new IllegalStateException("[SHANHAI-RECIPE-TYPES] 模块 " + path
+                    + " 的名字表与类型表错位：names.length=" + names.length
+                    + " != types.length=" + types.length
+                    + "。两张表必须一一对应，否则异常里会指错名字（比不报名字更坏）。");
+        }
+        StringBuilder missing = new StringBuilder();
+        int nulls = 0;
+        for (int i = 0; i < types.length; i++) {
+            if (types[i] == null) {
+                nulls++;
+                if (missing.length() > 0) {
+                    missing.append(" / ");
+                }
+                missing.append("[").append(i).append("] ").append(names[i]);
+            }
+        }
+        if (nulls > 0) {
+            throw new IllegalStateException("[SHANHAI-RECIPE-TYPES] 模块 " + path + " 的配方类型里有 "
+                    + nulls + " / " + types.length + " 个是 null（下标从 0 起）。"
+                    + " 已拿到 " + (types.length - nulls) + " 条。"
+                    + (hint == null || hint.isEmpty() ? "" : " " + hint)
+                    + " 具体缺的是：" + missing
+                    + " ⇒ 绝不能把 null 放进 recipeTypes：WorkableMultiblockMachine#getRecipeType() ="
+                    + " recipeTypes[activeRecipeType]，会在离病根极远的地方炸；"
+                    + "而本工程唯一的 null 兜底（MachineTooltips#recipeTypesList）是【跳过】它，"
+                    + "即「静默少一条」。");
+        }
+        return types;
+    }
+
+    /**
      * 造 {@link #RECIPE_DEBUG_MODULE} 并<b>在注册期做 fail-fast</b>。
      *
      * <p>🔴 为什么单独写成方法而不是一个裸数组字面量：这份数组读的是
@@ -688,6 +1015,8 @@ public final class ModuleRegistry {
                 "PRIMORDIAL_SWARM_CASTING",
                 // ───── 🆕 2026-10-01 新增的第 44 条（用户点单「原初物质定型」）─────
                 "PRIMORDIAL_MATTER_FORMING",
+                // ───── 🆕 2026-10-03 新增的第 45 条（用户点单「原初山海调试」）─────
+                "PRIMORDIAL_DEBUG",
         };
         GTRecipeType[] types = {
                 ShanhaiRecipeTypes.PRIMORDIAL_POWER_GENERATOR,
@@ -738,37 +1067,49 @@ public final class ModuleRegistry {
                 ShanhaiRecipeTypes.PRIMORDIAL_SWARM_CASTING,
                 // ───── 🆕 2026-10-01 新增的第 44 条（用户点单「原初物质定型」）─────
                 ShanhaiRecipeTypes.PRIMORDIAL_MATTER_FORMING,
+                // ───── 🆕 2026-10-03 新增的第 45 条（用户点单「原初山海调试」）─────
+                ShanhaiRecipeTypes.PRIMORDIAL_DEBUG,
         };
-        if (names.length != types.length) {
-            throw new IllegalStateException("[SHANHAI-DEBUG-MODULE] 模块 " + path
-                    + " 的名字表与类型表错位：names.length=" + names.length
-                    + " != types.length=" + types.length
-                    + "。两张表必须一一对应，否则异常里会指错名字（比不报名字更坏）。");
+        // 🔴 2026-10-03：原先这里有两段内联检查（名字表错位 + null 计数）；
+        //    落地第 29 台时按任务书要求"沿用现成的同类检查、不要发明第二套"，
+        //    把它**原地提取**成 requireNoNullRecipeTypes(...) —— 本表与第 29 台那张 4 条表
+        //    现在走**同一个判定核**。判定语义与异常里带的信息逐条未变（只把缺项文案从
+        //    "ShanhaiRecipeTypes.NAME" 补成 "[下标] ShanhaiRecipeTypes.NAME"，
+        //    因为本表有 45 条，只报字段名定位不到"第几条"）。
+        return requireNoNullRecipeTypes(path, names, types,
+                "说明 ShanhaiRecipeTypes 少注册了类型"
+                        + "（ShanhaiRecipeTypes.REAL_TYPE_COUNT = " + ShanhaiRecipeTypes.REAL_TYPE_COUNT + "）。"
+                        + "⇒ 请先确认 CommonProxy#init() 里 GTRecipeTypes.init()(字节码偏移 94) 仍在 "
+                        + "GTMachines.init()(偏移 97) 之前，且 GTRecipeType 的 RegisterEvent 监听器"
+                        + "（ShanhaiRegistry::onRecipeTypeRegister）已挂上。");
+    }
+
+    /**
+     * <b>正面对照</b>：证明 {@link #requireNoNullRecipeTypes} 对"已知为坏的输入"<b>真的会抛</b>。
+     *
+     * <p>🔴 为什么必须有这一步（本项目的血账）：<b>"永远不抛的检查器"与"永远通过的检查器"
+     * 在日志上长得一模一样</b> —— 它会给出一片虚假的安心。工程里已有同款先例：
+     * {@code PrimordialModuleMachine#selfTestParallelTableChecker()}（由 {@link #init()} 调用）。
+     *
+     * <p>判据可 grep：日志里必须有
+     * {@code [SHANHAI-DEEPSPACE] 配方类型检查器正面对照通过}；没有这一行就说明它被删了。
+     */
+    private static void selfTestRecipeTypeChecker() {
+        boolean threw = false;
+        try {
+            requireNoNullRecipeTypes("self-test-on-purpose",
+                    new String[]{"（正面对照用的假名字）"},
+                    new GTRecipeType[]{null},
+                    "（正面对照：这条异常是应该发生的）");
+        } catch (IllegalStateException expected) {
+            threw = true;
         }
-        StringBuilder missing = new StringBuilder();
-        int nulls = 0;
-        for (int i = 0; i < types.length; i++) {
-            if (types[i] == null) {
-                nulls++;
-                if (missing.length() > 0) {
-                    missing.append(" / ");
-                }
-                missing.append("ShanhaiRecipeTypes.").append(names[i]);
-            }
+        if (!threw) {
+            throw new IllegalStateException("[SHANHAI-RECIPE-TYPES] 正面对照失败："
+                    + "把一个明知为 null 的数组喂给 requireNoNullRecipeTypes，它竟然没有抛 —— "
+                    + "这种检查器与「永远通过」的检查器在日志上完全同形，采信它就等于没有检查。"
+                    + "在修好检查器之前，本次启动直接失败（宁可不启动，也不要一份假的安心）。");
         }
-        if (nulls > 0) {
-            throw new IllegalStateException("[SHANHAI-DEBUG-MODULE] 模块 " + path + " 的配方类型里有 "
-                    + nulls + " / " + types.length + " 个是 null ⇒ 说明 ShanhaiRecipeTypes 少注册了类型。"
-                    + " 已拿到 " + (types.length - nulls)
-                    + " 条（ShanhaiRecipeTypes.REAL_TYPE_COUNT = " + ShanhaiRecipeTypes.REAL_TYPE_COUNT + "）。"
-                    + " 具体缺的是：" + missing
-                    + " ⇒ 请先确认 CommonProxy#init() 里 GTRecipeTypes.init()(字节码偏移 94) 仍在 "
-                    + "GTMachines.init()(偏移 97) 之前，且 GTRecipeType 的 RegisterEvent 监听器"
-                    + "（ShanhaiRegistry::onRecipeTypeRegister）已挂上。"
-                    + " 绝不能把 null 放进 recipeTypes：WorkableMultiblockMachine#getRecipeType() ="
-                    + " recipeTypes[activeRecipeType]，会在离病根极远的地方炸。");
-        }
-        return types;
     }
 
     // ═════════════════════════════ 句柄表（java-core 直接用，禁止字符串查表） ═════════════════════════════
@@ -855,6 +1196,43 @@ public final class ModuleRegistry {
      *   物品本身早就有自己的模型/贴图（{@code ShanhaiItems.WORLDLINE_CRACKING_HUB}），且已在创造栏里。
      */
     public static MultiblockMachineDefinition WORLDLINE_CRACKING_HUB;
+
+    /**
+     * 🟢 2026-10-03 新增第 27 台：<b>原初碳基解构核心</b>
+     * （{@code shanhai:primordial_carbon_deconstruction_core}）。
+     *
+     * <p>中文名由用户在候选里亲定（原话里的临时名是「原初有机分解模块」）。
+     * <p>配方类型 = {@link #RECIPE_CARBON_DECONSTRUCTION_CORE}（7 条，全是宿主已有类型）。
+     * <p>⚠️ 贴图本轮<b>未改</b> —— 与其余 24 台一样走 {@code register()} 里那套统一的
+     *   bronze 外壳 + steam_grinder 控制器渲染，<b>没有</b>新增任何 {@code assets/} 下的
+     *   模型/贴图文件（这也是本台能"零资产"落地的原因）。
+     */
+    public static MultiblockMachineDefinition PRIMORDIAL_CARBON_DECONSTRUCTION_CORE;
+
+    /**
+     * 🟢 2026-10-03 新增<b>第 28 台</b>：<b>原初引力干涉阵列</b>
+     * （{@code shanhai:primordial_gravitational_interference_array}）。
+     *
+     * <p>中文名由用户在候选里亲定；配方类型 = {@link #RECIPE_GRAVITATIONAL_INTERFERENCE_ARRAY}
+     * （引力波宏观干涉 ＋ 引力波广域广播，两条<b>山海自有</b>类型）。
+     * <p>⚠️ 贴图本轮<b>未改</b> —— 与其余 26 台一样走 {@code register()} 里那套统一的
+     *   bronze 外壳 + steam_grinder 控制器渲染（{@code workableCasingRenderer} 动态出模型），
+     *   <b>没有</b>新增任何 {@code assets/} 下的模型/贴图文件（这也是本台能"零资产"落地的原因）。
+     */
+    public static MultiblockMachineDefinition PRIMORDIAL_GRAVITATIONAL_INTERFERENCE_ARRAY;
+
+    /**
+     * 🟢 2026-10-03 新增<b>第 29 台</b>：<b>原初深空汲取核心</b>
+     * （{@code shanhai:primordial_deep_space_extraction_core}）。
+     *
+     * <p>中文名由用户在候选里亲定；配方类型 = {@link #RECIPE_DEEP_SPACE_EXTRACTION_CORE}
+     * （集气室 ／ 大型集气室 ／ 虚空聚流反应 ／ 虚空流体钻机，四条全是<b>宿主已有</b>类型，
+     * 顺序 = 用户点名的先后）。
+     * <p>⚠️ 贴图本轮<b>未改</b> —— 与其余 27 台一样走 {@code register()} 里那套统一的
+     *   bronze 外壳 + steam_grinder 控制器渲染（{@code workableCasingRenderer} 动态出模型），
+     *   <b>没有</b>新增任何 {@code assets/} 下的模型/贴图文件（这也是本台能"零资产"落地的原因）。
+     */
+    public static MultiblockMachineDefinition PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE;
 
     // ═════════════════════════════ 模块规格表 ═════════════════════════════
 
@@ -1204,10 +1582,79 @@ public final class ModuleRegistry {
                     PrimordialMatterRecombinatorCoreStructure::createPattern,
                     () -> RECIPE_WORLDLINE_CRACKING_HUB,
                     PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            // 🟢 2026-10-03 新增第 27 台（用户点单：原初碳基解构核心）。
+            //   机器类 / 结构图案 / 并行表 / generator 四项**全部照抄第 26 台**
+            //   （StandardPrimordialModule + createPattern + STANDARD + false）
+            //   ⇒ 与用户原话「其余和其他模块一样」逐项对齐；唯一不同的只有 recipeTypes 那一个数组。
+            new ModuleSpec(
+                    "PRIMORDIAL_CARBON_DECONSTRUCTION_CORE",
+                    "primordial_carbon_deconstruction_core",
+                    "Primordial Carbon Deconstruction Core",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_CARBON_DECONSTRUCTION_CORE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            // 🟢 2026-10-03 新增第 28 台（用户点单：原初引力干涉阵列）。
+            //   机器类 / 结构图案 / 并行表 / generator 四项同样**全部照抄第 26、27 台**
+            //   （StandardPrimordialModule + createPattern + STANDARD + false）；
+            //   唯一不同的只有 recipeTypes 那一个数组（挂 [引力波宏观干涉 + 引力波广域广播]）。
+            //   🔴 并行表选 STANDARD 的理由（不是随手填的）：
+            //     ① 本台**没有上游同族原型**（上游 25 个模块里没有它，它是用户点单的新机器）
+            //        ⇒ "照同族选"只能落到最近两次新增（第 26/27 台）的既有口径 = STANDARD；
+            //     ② ENHANCED 这张表（表#1）在上游只有【物质重组核心 / 奇点反演核心 / 因果编织矩阵】
+            //        三台用，本台不属于那三台中的任何一类语义 ⇒ 选 ENHANCED 等于**擅自给它加数值**
+            //        （同一档物质模块下并行更高：如等级1 入门模块 ENHANCED 256 vs STANDARD 128）；
+            //     ③ 它与其余 25 台模块同型（同类/同结构/同默认并行 64/非发电），没有任何一处
+            //        需要走另一张表。见 PrimordialModuleMachine.ParallelTable 的档位说明。
+            new ModuleSpec(
+                    "PRIMORDIAL_GRAVITATIONAL_INTERFERENCE_ARRAY",
+                    "primordial_gravitational_interference_array",
+                    "Primordial Gravitational Interference Array",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_GRAVITATIONAL_INTERFERENCE_ARRAY,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            // 🟢 2026-10-03 新增第 29 台（用户点单：原初深空汲取核心）。
+            //   机器类 / 结构图案 / 并行表 / generator 四项同样**全部照抄第 26、27、28 台**
+            //   （StandardPrimordialModule + createPattern + STANDARD + false）；
+            //   唯一不同的只有 recipeTypes 那一个数组
+            //   （挂 [集气室 + 大型集气室 + 虚空聚流反应 + 虚空流体钻机]，顺序 = 用户点名的先后）。
+            //   🔴 并行表选 STANDARD 的理由（不是随手填的，与第 28 台同款）：
+            //     ① 本台**没有上游同族原型**（上游 25 个模块里没有它，它是用户点单的新机器）
+            //        ⇒ "照同族选"只能落到最近三次新增（第 26/27/28 台）的既有口径 = STANDARD；
+            //     ② ENHANCED 这张表（表#1）在上游只有【物质重组核心 / 奇点反演核心 / 因果编织矩阵】
+            //        三台用，本台的四个类型（集气/钻探/虚空聚流）不属于那三台中的任何一类语义
+            //        ⇒ 选 ENHANCED 等于**擅自给它加数值**
+            //        （同一档物质模块下并行更高：如等级1 入门模块 ENHANCED 256 vs STANDARD 128）；
+            //     ③ 它与其余 26 台模块同型（同类/同结构/同默认并行 64/非发电），没有任何一处
+            //        需要走另一张表。见 PrimordialModuleMachine.ParallelTable 的档位说明。
+            new ModuleSpec(
+                    "PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE",
+                    "primordial_deep_space_extraction_core",
+                    "Primordial Deep Space Extraction Core",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_DEEP_SPACE_EXTRACTION_CORE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
                     false)
             // 0 个待后续阶段：guide 权威清单的 25 个模块里，铸币厂（primordial_coin_forge）已被用户删除，
             // 其余 24 个（物质重组核心 + 23 个）全部在本表注册。加一个模块仍然只需"这里加一行 + 句柄区加一个字段
             // + init() 末尾 require 一次"，注册循环与主机侧都不用动。
+            //
+            // 🟢 2026-10-03 再 +1 ⇒ 本表【27 条】（第 27 台 = 原初碳基解构核心，见上面那条）。
+            //    ⚠️ 台数的**唯一可读真源**是 SPECS.size()：init() 里那条日志与并行表归属统计
+            //       早就改成由 SPECS.size() 提供（2026-09-26 那次订正，见上面"硬编码数字一定会再次过期"）。
+            //        ⇒ 本注释里的数字只作考古，**不要**在日志/断言里再抄一份。
+            // 🟢 2026-10-03 同日再 +1 ⇒ 本表【28 条】（第 28 台 = 原初引力干涉阵列，
+            //    挂 [引力波宏观干涉 + 引力波广域广播]，并行表 STANDARD，见上面那条）。
+            // 🟢 2026-10-03 同日再 +1 ⇒ 本表【29 条】（第 29 台 = 原初深空汲取核心，
+            //    挂 [集气室 + 大型集气室 + 虚空聚流反应 + 虚空流体钻机]，并行表 STANDARD，
+            //    见上面那条；它的类型数组走 buildDeepSpaceExtractionCoreRecipeTypes() 的 fail-fast）。
+            //    ⇒ 并行表归属随之由「28 台 = ENHANCED 3 / STANDARD 25」变成
+            //      「29 台 = ENHANCED 3 / STANDARD 26」（那条日志由 SPECS.size() 现算，不用手改）。
     );
 
     /** 句柄名 → 已注册的机器定义。 */
@@ -1268,14 +1715,24 @@ public final class ModuleRegistry {
                     PrimordialModuleMachine.parallelTableSize(PrimordialModuleMachine.ParallelTable.STANDARD),
                     SPECS.size(), enhanced, standard, PrimordialModuleMachine.DEFAULT_PARALLEL);
         }
-        // ───── 🆕 2026-09-30：恒星热力槽白名单自检（**注册期硬拦**，不是装饰） ─────
+        // ───── 🆕 2026-09-30：热力白名单自检（**注册期硬拦**，不是装饰） ─────
         //
-        //  背景：用户选择题答案（逐字）**「B. 只留那三台」** ⇒ GUI 里那一格由一张
-        //  **id 白名单**（ShanhaiHeatGate.HEAT_SLOT_MACHINE_IDS）决定显不显示。
-        //  🔴 按 id 决定 UI 是一条**会静默失效**的写法：白名单里写错一个字 / 那台机器被改名，
-        //     结果是玩家**看不到那一格**，而日志里一个字都不会有 —— 与"本来就没有"完全同形。
+        //  背景：用户选择题答案（逐字）**「B. 只留那三台」** ⇒ 哪几台的槽能充当【热力源】
+        //  由一张 **id 白名单**（ShanhaiHeatGate.HEAT_SLOT_MACHINE_IDS）决定。
+        //  🔴 按 id 决定行为是一条**会静默失效**的写法：白名单里写错一个字 / 那台机器被改名，
+        //     结果是玩家**看不到热力效果**（线圈/容器放进去像空气），而日志里一个字都不会有
+        //     —— 与"这台本来就不吃热力"完全同形。
         //  ⇒ 所以这里把"三个 id 必须逐个能在已注册的模块里找到"变成**注册期异常**：
-        //     漏了会【报错】，不会【默默少一格】。
+        //     漏了会【报错】，不会【默默失效】。
+        //
+        //  🔴 2026-10-03 文案订正（**只改字：下面的判据、调用、实参一字未动**）：
+        //     旧文案写的是「{} 台会显示恒星热力槽」—— 那个**单独的**恒星热力槽已按用户同日
+        //     规格②删除，槽位合并进【每一台模块都有的】额外挂载槽 ×3
+        //     （见 ShanhaiHeatGate 类注释 §1、PrimordialModuleMachine#extraMountSlots、
+        //      以及 ShanhaiHeatGate 里 HEAT_SLOT_MACHINE_IDS 的现行语义注释）。
+        //     ⇒ 现在**每一台**模块都看得见那一格，白名单管的不再是"这一格显不显示"，
+        //       而是"这一格里的线圈 / 恒星热力容器算不算热力源"。
+        //     旧文案在新机制下是**活的假数据**（它会让读日志的人以为只有 3 台有那一格），故改。
         //
         //  时机：本方法 = ShanhaiMod(@Mod 构造器) → ShanhaiRegistration.register(bus) → ShanhaiRegistry.init()
         //        的第 ③ 段（见本类类注释的初始化链）。此刻 SPECS 已可读、机器即将注册
@@ -1292,12 +1749,44 @@ public final class ModuleRegistry {
             if (heatSlotProblem != null) {
                 throw new IllegalStateException(heatSlotProblem);
             }
-            ShanhaiMod.LOGGER.info("[SHANHAI-HEATSLOT] 白名单自检通过：{} 台模块里有 {} 台会显示恒星热力槽 = {}"
-                            + "（用户 2026-09-30 选择题答案「B. 只留那三台」）；其余 {} 台不显示这一格。",
+            ShanhaiMod.LOGGER.info("[SHANHAI-HEATSLOT] 热力白名单自检通过：{} 台模块里有 {} 台的【额外挂载槽】"
+                            + "可充当热力源（线圈 / 恒星热力容器，同一格要放满 {} 个）= {}"
+                            + "（用户 2026-09-30 选择题答案「B. 只留那三台」；2026-10-03 起那一格 = 额外挂载槽 ×3，"
+                            + "单独的恒星热力槽已删除、其判定已改读 extraMountSlots）；"
+                            + "其余 {} 台的额外挂载槽不充当热力源（那一格它们照样有，只是不吃热力）。",
                     registeredIds.size(),
                     ShanhaiHeatGate.HEAT_SLOT_MACHINE_IDS.size(),
+                    ShanhaiHeatGate.REQUIRED_COUNT,
                     ShanhaiHeatGate.HEAT_SLOT_MACHINE_IDS,
                     registeredIds.size() - ShanhaiHeatGate.HEAT_SLOT_MACHINE_IDS.size());
+        }
+        // ───── 🆕 2026-10-03：第 29 台（原初深空汲取核心）的【配方类型自检 + 正面对照】 ─────
+        //
+        //  背景：本台挂的 4 个类型里，3 个读的是 gtceu / gtlcore 的**静态字段**、
+        //  1 个读的是 gtladditions 的 Kotlin object getter（GtlAddCompat.voidfluxReaction()）。
+        //  数组在**类加载期**就填好了（见 RECIPE_DEEP_SPACE_EXTRACTION_CORE 的长注释），
+        //  而"某一条没拿到 ⇒ null"在日志里与"拿到了"长得一模一样 —— 本工程最忌讳这类失败。
+        //
+        //  🔴 检查分两拍，缺一拍都会退化成装饰：
+        //    ① 【异常】由 requireNoNullRecipeTypes 在 buildDeepSpaceExtractionCoreRecipeTypes()
+        //       里当场抛（null 永远进不了那个字段）；
+        //    ② 【读数 + 正面对照】就是本段 —— 光有①的话，日志里没有任何"它真的查过"的痕迹，
+        //       别人删掉①你也不会发现。故这里既打印实际读到的 4 条 id，
+        //       又跑一次 selfTestRecipeTypeChecker() 证明检查器**对已知为坏的输入真的会抛**。
+        {
+            final GTRecipeType[] deepSpace = RECIPE_DEEP_SPACE_EXTRACTION_CORE;
+            final StringBuilder readIds = new StringBuilder();
+            for (int i = 0; i < deepSpace.length; i++) {
+                if (i > 0) {
+                    readIds.append(" / ");
+                }
+                readIds.append(i).append("=")
+                        .append(deepSpace[i] == null ? "null" : deepSpace[i].registryName);
+            }
+            selfTestRecipeTypeChecker();
+            ShanhaiMod.LOGGER.info("[SHANHAI-DEEPSPACE] 配方类型检查器正面对照通过（对已知为坏的输入确实抛异常）；"
+                            + "本机配方类型自检：{} 条全部非 null = {}",
+                    deepSpace.length, readIds);
         }
         // ───── fail-fast：句柄为 null 绝不允许流进主机的 pattern() ─────
         PRIMORDIAL_MATTER_RECOMBINATOR_CORE = require("PRIMORDIAL_MATTER_RECOMBINATOR_CORE");
@@ -1331,6 +1820,14 @@ public final class ModuleRegistry {
         PRIMORDIAL_DEBUG_MODULE = require("PRIMORDIAL_DEBUG_MODULE");
         // ───── 🟢 2026-09-26 新增第 26 台（世线裂解枢纽）─────
         WORLDLINE_CRACKING_HUB = require("WORLDLINE_CRACKING_HUB");
+        // ───── 🟢 2026-10-03 新增第 27 台（原初碳基解构核心）─────
+        PRIMORDIAL_CARBON_DECONSTRUCTION_CORE = require("PRIMORDIAL_CARBON_DECONSTRUCTION_CORE");
+        // ───── 🟢 2026-10-03 新增第 28 台（原初引力干涉阵列）─────
+        PRIMORDIAL_GRAVITATIONAL_INTERFERENCE_ARRAY =
+                require("PRIMORDIAL_GRAVITATIONAL_INTERFERENCE_ARRAY");
+        // ───── 🟢 2026-10-03 新增第 29 台（原初深空汲取核心）─────
+        PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE =
+                require("PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE");
     }
 
     private static MultiblockMachineDefinition register(ModuleSpec spec) {

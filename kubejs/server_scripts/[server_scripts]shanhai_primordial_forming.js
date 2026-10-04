@@ -40,8 +40,26 @@
 //      生成期已逐条核对：2457/2457 条 json 的 euTier 都等于这个公式 ⇒ 不需要补写。
 //
 // ── 校验 ───────────────────────────────────────────────────────────────────
-//   进游戏后看日志这一行（与 Java 侧 [SHANHAI-NEWTYPE] 的 2457 对账）：
-//     [SHANHAI-NEWTYPE] 原初物质定型 ... ok=2457 failed=0 declared=2457
+//   进游戏后看日志这一行（与 Java 侧 [SHANHAI-NEWTYPE] 的条数对账）：
+//     [SHANHAI-NEWTYPE] 原初物质定型 ... ok=<条数> failed=0 declared=<条数>
+//
+// ── 🔴 2026-10-03 手工追加 3 条（用户点单）────────────────────────────────────
+//   方钠石 / 青金石 / 蓝金石 的【粉 → 板】：1 粉 : 1 板，LV（EUt 32），3s（60 tick），
+//   编程电路 8。三条写在 PF_ROWS 数组【末尾】，带一段醒目的注释。
+//   ⇒ 条数 2457（生成）＋ 3（手工）= 2460：
+//     · 本文件的 DECLARED 已同步 2457 → 2460；
+//     · Java 侧 ShanhaiRecipeTypes.PRIMORDIAL_MATTER_FORMING_DECLARED_RECIPES 也改成 2460。
+//     两边只要有一边没跟上，离线对账器 `node tools\check-pf-declared-vs-disk.mjs`
+//     与运行期探针 [SHANHAI-PFORM]「现查 ≠ 期望」都会立刻报红 ⇒ 不会静默。
+//   ⇒ ⚠️ 重跑 gen_pf_kjs.js（要先把源 json 拷回 data\shanhai\recipes\primordial_forming\）
+//     会把本文件整份重写 ⇒ 这 3 行会消失（然后上面那两处会报红，届时按这段注释补回来）。
+//   ⇒ 为什么用电路号 8：本类型 0~32 共 33 个号 = 模具表（0~13 铸模 / 14~32 压模模头），
+//     原 2457 条用掉 31 个（逐号产出的形态与那张表 31/31 吻合），
+//     只有 8（模具·命名）与 10（模具·药片）空着 —— 用户点单「调一个空余的电路」。
+//     电路在这条线里只是选择器：25 号"板"被 220 条共用、2 号 263 条 ⇒ 三条共用 8 号
+//     不会互相抢（它们的输入是三种不同的粉）。
+//   ⇒ 输入走矿辞 #forge:dusts/<mat>（三个标签实测都在，各只含自己那一种粉），
+//     六个物品 id 都对着实例 export\registries\item.json 核过存在。
 // =============================================================================
 
 // ---- 标签流体：走 Java 侧构造（纯 Java，无 JSON 字符串拼接）----
@@ -80,7 +98,7 @@ ServerEvents.recipes(function (event) {
     var ok = 0
     var bad = 0
     var errs = ''
-    var DECLARED = 2457
+    var DECLARED = 2460
 
     var PF_ROWS = [
 {n:'any__shikongchanggan',a:['1x gtceu:spacetime_ingot'],c:23,o:['1x gtceu:long_spacetime_rod'],d:1,e:2013265920},
@@ -2540,6 +2558,14 @@ ServerEvents.recipes(function (event) {
 {n:'thetornproductionline__celestial_secret_deducing_module_3_luv',nc:['1x thetornproductionline:circult_process_module_3'],a:['1x kubejs:circuit_resonatic_luv'],o:['16x thetornproductionline:celestial_secret_deducing_module_luv'],d:1,e:1},
 {n:'thetornproductionline__celestial_secret_deducing_module_3_zpm',nc:['1x thetornproductionline:circult_process_module_3'],a:['1x kubejs:circuit_resonatic_zpm'],o:['16x thetornproductionline:celestial_secret_deducing_module_zpm'],d:1,e:1},
 {n:'thetornproductionline__easier_neutronium_credit',a:['32768x gtceu:ancient_gold_coin'],c:4,o:['1x gtceu:neutronium_credit'],d:200,e:536870912},
+// ── 🔴 手工追加（2026-10-03 用户点单）───────────────────────────────────────────
+//   方钠石 / 青金石 / 蓝金石：粉 → 板，1:1，LV（EUt 32），3s（60 tick），电路 8。
+//   ⇒ 上面那 2457 条是 gen_pf_kjs.js 从数据包 json 生成的；【以下 3 行是手写的】，
+//     重跑生成器会把本文件整份重写 ⇒ 这 3 行会消失（DECLARED 与 Java 常量会立刻报红）。
+//   ⇒ 电路 8 = 本类型 0~32 里空着的两个号之一（另一个是 10）；详见文件头那一段。
+{n:'sodalite_dust_to_plate',a:['1x #forge:dusts/sodalite'],c:8,o:['1x gtceu:sodalite_plate'],d:60,e:32},
+{n:'lapis_dust_to_plate',a:['1x #forge:dusts/lapis'],c:8,o:['1x gtceu:lapis_plate'],d:60,e:32},
+{n:'lazurite_dust_to_plate',a:['1x #forge:dusts/lazurite'],c:8,o:['1x gtceu:lazurite_plate'],d:60,e:32},
     ]
 
     for (k = 0; k < PF_ROWS.length; k++) {

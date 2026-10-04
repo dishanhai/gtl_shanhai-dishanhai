@@ -194,6 +194,22 @@ public final class ShanhaiConcurrencyTables {
      * <p>🔴 <b>正面对照</b>（与数值一起搬自原实现，未改一个字符）：把同一份对照表套到
      * {@link #enhancedParallelTable()} 上，与本工程 {@code PrimordialMatterRecombinatorCore}
      * 里那张老表 <b>17/17 逐项吻合</b> ⇒ 对照表本身是对的。
+     *
+     * <h2>🔴 2026-10-03 重排（用户拍板，与 {@code PrimordialModuleMachine.MODULE_LEVELS} 同批）</h2>
+     * <b>两条同时发生</b>，都必须看清：
+     * <ol>
+     *   <li><b>插入顺序改成等级 1..17</b>（旧插入序 = 上游那张表的抄写顺序，<b>不是</b>等级序）
+     *       —— 因为下面的 {@link #MODULE_ORDER} 就是取本表的插入序，而它的 javadoc 一直写着
+     *       「等级 1..17」。改之前那句话是<b>不成立</b>的（旧插入序 = 1,2,3,5,7,8,9,11,12,14,15,17,16,6,4,10,13）。
+     *       KubeJS 侧按 {@code moduleIdAt(i)} ↔ {@code moduleDescription(i)} <b>成对</b>取用，
+     *       所以这一项不改变任何物品的显示内容。</li>
+     *   <li><b>数值按新等级表重新落位</b>（用户「物理台阶」方案）：1-4 与 17 的数值<b>一个字节不改</b>；
+     *       旧 5..16 那 12 个值各自<b>从小到大</b>重新分配到新 5..16 ⇒ 档位越高并行越大、曲线零回落。</li>
+     * </ol>
+     * ⛔ 旧值（作废，逐字留档，便于对照旧存档 / 旧报告）：按<b>旧等级</b> 5..16 =
+     * 嬗变 2048 · 暗星 4096 · 重组 16384 · 虚数跃迁 65536 · 归零 524288 · 巅峰 1048576 ·
+     * 升维 2097152 · 超限 268435456 · 混沌 536870912 · 永恒 2147483647 ·
+     * 物质创造 4611686018427387903 · 现实锚点 6917529027641081855。
      */
     private static final Map<String, Long> STANDARD_PARALLEL = new LinkedHashMap<>();
 
@@ -203,42 +219,44 @@ public final class ShanhaiConcurrencyTables {
     static {
         // ───── 表#2/#3 ───── 上游出处：PrimordialEngravingModule:86-105
         //                       / PrimordialParallelProcessingModuleBase:54-65
-        STANDARD_PARALLEL.put("shanhai:introductory_material_module", 128L);                     // wzrm
-        STANDARD_PARALLEL.put("shanhai:basic_material_module", 256L);                            // wzjc
-        STANDARD_PARALLEL.put("shanhai:material_deduction_module", 512L);                        // wzcz1
-        STANDARD_PARALLEL.put("shanhai:transformation_material_module", 2048L);                  // wzsb
-        STANDARD_PARALLEL.put("shanhai:material_recombination_module", 16384L);                  // wzcz2
-        STANDARD_PARALLEL.put("shanhai:imaginary_material_transition_remolding_module", 65536L);  // wzqs
-        STANDARD_PARALLEL.put("shanhai:zeroing_material_module", 524288L);                       // wzgl
-        STANDARD_PARALLEL.put("shanhai:dimensional_ascension_material_module", 2097152L);        // wzsw
-        STANDARD_PARALLEL.put("shanhai:transfinite_material_module", 268435456L);                // wzcx
-        STANDARD_PARALLEL.put("shanhai:eternal_material_module", 2147483647L);                   // wzyh
-        STANDARD_PARALLEL.put("shanhai:material_creation_module", 4611686018427387903L);         // wzcz3
-        STANDARD_PARALLEL.put("shanhai:genesis_reality_modification_module", Long.MAX_VALUE);    // create_mk
-        STANDARD_PARALLEL.put("shanhai:reality_anchor_module", 6917529027641081855L);            // reality_anchor_module
-        STANDARD_PARALLEL.put("shanhai:dark_star_material_module", 4096L);                       // wzax
-        STANDARD_PARALLEL.put("shanhai:virtual_image_material_module", 1024L);                   // wzxc
-        STANDARD_PARALLEL.put("shanhai:apex_material_module", 1048576L);                         // wzhy
-        STANDARD_PARALLEL.put("shanhai:chaos_material_module", 536870912L);                      // wzdf
+        // 🔴 行序 = 等级 1..17（2026-10-03 起）；每行行尾的 `// 等级N` 是本次加的可核对标注。
+        STANDARD_PARALLEL.put("shanhai:introductory_material_module", 128L);                     // 等级1  wzrm
+        STANDARD_PARALLEL.put("shanhai:basic_material_module", 256L);                            // 等级2  wzjc
+        STANDARD_PARALLEL.put("shanhai:material_deduction_module", 512L);                        // 等级3  wzcz1
+        STANDARD_PARALLEL.put("shanhai:virtual_image_material_module", 1024L);                   // 等级4  wzxc
+        STANDARD_PARALLEL.put("shanhai:material_recombination_module", 2048L);                   // 等级5  wzcz2
+        STANDARD_PARALLEL.put("shanhai:zeroing_material_module", 4096L);                         // 等级6  wzgl
+        STANDARD_PARALLEL.put("shanhai:dark_star_material_module", 16384L);                      // 等级7  wzax
+        STANDARD_PARALLEL.put("shanhai:imaginary_material_transition_remolding_module", 65536L);  // 等级8  wzqs
+        STANDARD_PARALLEL.put("shanhai:transformation_material_module", 524288L);                // 等级9  wzsb
+        STANDARD_PARALLEL.put("shanhai:dimensional_ascension_material_module", 1048576L);        // 等级10 wzsw
+        STANDARD_PARALLEL.put("shanhai:apex_material_module", 2097152L);                         // 等级11 wzhy
+        STANDARD_PARALLEL.put("shanhai:chaos_material_module", 268435456L);                      // 等级12 wzdf
+        STANDARD_PARALLEL.put("shanhai:transfinite_material_module", 536870912L);                // 等级13 wzcx
+        STANDARD_PARALLEL.put("shanhai:eternal_material_module", 2147483647L);                   // 等级14 wzyh
+        STANDARD_PARALLEL.put("shanhai:material_creation_module", 4611686018427387903L);         // 等级15 wzcz3
+        STANDARD_PARALLEL.put("shanhai:reality_anchor_module", 6917529027641081855L);            // 等级16 reality_anchor_module
+        STANDARD_PARALLEL.put("shanhai:genesis_reality_modification_module", Long.MAX_VALUE);    // 等级17 create_mk
 
         // ───── 表#1 ───── 上游出处：PrimordialMatterRecombinatorCore:86-105
-        ENHANCED_PARALLEL.put("shanhai:introductory_material_module", 256L);                     // wzrm
-        ENHANCED_PARALLEL.put("shanhai:basic_material_module", 1024L);                           // wzjc
-        ENHANCED_PARALLEL.put("shanhai:material_deduction_module", 2048L);                       // wzcz1
-        ENHANCED_PARALLEL.put("shanhai:virtual_image_material_module", 1024L);                   // wzxc（与基础模块同为 1024，非笔误）
-        ENHANCED_PARALLEL.put("shanhai:transformation_material_module", 8192L);                  // wzsb
-        ENHANCED_PARALLEL.put("shanhai:dark_star_material_module", 4096L);                       // wzax
-        ENHANCED_PARALLEL.put("shanhai:material_recombination_module", 16384L);                  // wzcz2
-        ENHANCED_PARALLEL.put("shanhai:imaginary_material_transition_remolding_module", 65536L);  // wzqs
-        ENHANCED_PARALLEL.put("shanhai:zeroing_material_module", 524288L);                       // wzgl
-        ENHANCED_PARALLEL.put("shanhai:apex_material_module", 1048576L);                         // wzhy
-        ENHANCED_PARALLEL.put("shanhai:dimensional_ascension_material_module", 2097152L);        // wzsw
-        ENHANCED_PARALLEL.put("shanhai:transfinite_material_module", 268435456L);                // wzcx
-        ENHANCED_PARALLEL.put("shanhai:chaos_material_module", 536870912L);                      // wzdf
-        ENHANCED_PARALLEL.put("shanhai:eternal_material_module", 2147483647L);                   // wzyh
-        ENHANCED_PARALLEL.put("shanhai:material_creation_module", 4611686018427387903L);         // wzcz3
-        ENHANCED_PARALLEL.put("shanhai:reality_anchor_module", 6917529027641081855L);            // reality_anchor_module
-        ENHANCED_PARALLEL.put("shanhai:genesis_reality_modification_module", Long.MAX_VALUE);    // create_mk
+        // 行序同样 = 等级 1..17（2026-10-03 起）。
+        ENHANCED_PARALLEL.put("shanhai:introductory_material_module", 256L);                     // 等级1  wzrm
+        ENHANCED_PARALLEL.put("shanhai:basic_material_module", 1024L);                           // 等级2  wzjc
+        ENHANCED_PARALLEL.put("shanhai:material_deduction_module", 2048L);                       // 等级3  wzcz1
+        ENHANCED_PARALLEL.put("shanhai:virtual_image_material_module", 1024L);                   // 等级4  wzxc（与基础模块同为 1024，非笔误）
+        ENHANCED_PARALLEL.put("shanhai:material_recombination_module", 4096L);                   // 等级5  wzcz2
+        ENHANCED_PARALLEL.put("shanhai:zeroing_material_module", 8192L);                         // 等级6  wzgl
+        ENHANCED_PARALLEL.put("shanhai:dark_star_material_module", 16384L);                      // 等级7  wzax
+        ENHANCED_PARALLEL.put("shanhai:imaginary_material_transition_remolding_module", 65536L);  // 等级8  wzqs
+        ENHANCED_PARALLEL.put("shanhai:transformation_material_module", 524288L);                // 等级9  wzsb
+        ENHANCED_PARALLEL.put("shanhai:dimensional_ascension_material_module", 1048576L);        // 等级10 wzsw
+        ENHANCED_PARALLEL.put("shanhai:apex_material_module", 2097152L);                         // 等级11 wzhy
+        ENHANCED_PARALLEL.put("shanhai:chaos_material_module", 268435456L);                      // 等级12 wzdf
+        ENHANCED_PARALLEL.put("shanhai:transfinite_material_module", 536870912L);                // 等级13 wzcx
+        ENHANCED_PARALLEL.put("shanhai:eternal_material_module", 2147483647L);                   // 等级14 wzyh
+        ENHANCED_PARALLEL.put("shanhai:material_creation_module", 4611686018427387903L);         // 等级15 wzcz3
+        ENHANCED_PARALLEL.put("shanhai:reality_anchor_module", 6917529027641081855L);            // 等级16 reality_anchor_module
+        ENHANCED_PARALLEL.put("shanhai:genesis_reality_modification_module", Long.MAX_VALUE);    // 等级17 create_mk
     }
 
     /** 表#2/#3（只读视图；{@code PrimordialModuleMachine} 的 {@code ParallelTable.STANDARD} 用它）。 */

@@ -175,6 +175,13 @@ minecraft {
     }
 }
 
+// ------------------------------------------------------------------ 构建日期
+// 横幅「🔷 重制版构建日期: yyyy-MM-dd」那一行的【唯一来源】。
+// 🔴 日期必须在这里（构建时）算出并注入，Java 侧不许写死任何日期字符串
+//    （活界面上印假数据是本工程的血账 —— 见 ShanhaiRecipeStats#buildDate 的 javadoc）。
+// 口径：本机时区、当天、yyyy-MM-dd。改日期只能改这里或改系统时钟。
+def buildDate = new java.text.SimpleDateFormat('yyyy-MM-dd').format(new Date())
+
 processResources {
     filteringCharset = 'UTF-8'
     var replaceProperties = [
@@ -185,9 +192,16 @@ processResources {
             mod_description  : mod_description,
             minecraft_version: minecraft_version,
             forge_version    : forge_version,
+            // 见上：注入到 assets/shanhai/build.properties 的 ${build_date}
+            build_date       : buildDate,
     ]
     inputs.properties replaceProperties
-    filesMatching(['META-INF/mods.toml']) {
+    // 🔴 必须【显式】把日期声明成输入：否则同一棵树里同日二次构建会被判 UP-TO-DATE，
+    //    于是跨天重编也一直沿用第一次那个日期（拿到旧日期却不报错，最难查）。
+    inputs.property('buildDate', buildDate)
+    // ⚠️ expand 只作用到下面列出的文件。assets/shanhai/build.properties 【必须】在这个列表里，
+    //    否则 ${build_date} 会以占位符原文进 jar（Java 侧会退化成「(不可用)」）。
+    filesMatching(['META-INF/mods.toml', 'assets/shanhai/build.properties']) {
         expand replaceProperties
         filteringCharset = 'UTF-8'
     }

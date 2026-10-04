@@ -651,6 +651,11 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         checkParallelTable(PARALLEL_TABLE_STANDARD, "STANDARD（表#2/#3）");
         checkParallelTable(PARALLEL_TABLE_ENHANCED, "ENHANCED（表#1）");
         checkParallelArithmetic();
+        // 🔴 2026-10-03 追加：**等级 ↔ 并行曲线**的逐档回归锚 + 5..16 单调不减断言
+        //    （用户「物理台阶」重排。判据与理由见 assertLevelCurve 的 javadoc；
+        //     先跑正面对照证明检查器有牙齿，再采信它在真实曲线上的"通过"。）
+        selfTestLevelCurveChecker();
+        assertLevelCurve();
         // 🔴 2026-09-28 追加：世线残片表的加载期自检（正面对照 8 条 + 两张表键集合一致性）。
         //    挂在这里的理由与下面那条相同：本方法已由 ModuleRegistry#init() 在【注册期】调用，
         //    所以它是"加载期必跑 + 日志可 grep"的既有入口，不需要新增任何加载钩子。
@@ -791,6 +796,109 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
                 tiers.size(), changed, tiers.size() - changed, rows);
     }
 
+    /**
+     * 🔴🔴 <b>2026-10-03（用户「物理台阶」重排）的加载期判据 —— 把用户给的那张表写成断言。</b>
+     *
+     * <h2>为什么必须有它，而不是"改完看一遍"</h2>
+     * 本次改动是<b>纯数字重排</b>：两张表各自 17 项、键一个没变、值的集合也没变
+     * （只是重新落位）。这类改动的失败形态是<b>静默的</b>——
+     * 抄错一档 ⇒ 某台模块在游戏里并行数不对，而加载期一个字都不会说。
+     * ⇒ 这里做三件事，全部由 {@code ModuleRegistry#init()} 在<b>注册期</b>真跑一遍（日志可 grep）：
+     * <ol>
+     *   <li><b>逐档回归锚</b>：等级 1..17 的两列值必须<b>逐位等于</b>用户给定的那张表
+     *       （{@link #MODULE_LEVELS} 反查 id → 两张并行表取值 ⇒ 比对）；</li>
+     *   <li><b>单调不减（只对 5..16）</b>：用户原话「保档位越高并行越大，曲线零回落」。
+     *       ⚠️ 只查 5..16：1-4 与 17 本次<b>一个字节不改</b>，而 3→4 档（强化表 2048→1024）
+     *       本来就是<b>回落</b>的（上游原值，非本次引入）⇒ 把它一起断言会误报。</li>
+     *   <li><b>负面对照</b>：先证明本检查器对【已知为坏】的输入真的会抛（见
+     *       {@link #selfTestLevelCurveChecker()}），否则"没抛"没有任何信息量。</li>
+     * </ol>
+     *
+     * <p>⚠️ 这里<b>故意</b>再写一份数字：它是<b>回归锚</b>，不是第二份真源 ——
+     * 生产取值仍然只有 {@code ShanhaiConcurrencyTables} 那一处。
+     * 生产表被人改动而这里没同步 ⇒ 加载期当场抛，正是本行存在的意义。
+     */
+    private static void assertLevelCurve() {
+        // 等级 → id（由 MODULE_LEVELS 反查；重复等级 / 缺档都当场炸）
+        final TreeMap<Integer, String> byLevel = new TreeMap<>();
+        for (Map.Entry<String, Integer> e : MODULE_LEVELS.entrySet()) {
+            final String prev = byLevel.put(e.getValue(), e.getKey());
+            if (prev != null) {
+                throw new IllegalStateException("[SHANHAI-PARALLEL] 等级表里等级 " + e.getValue()
+                        + " 被两个 id 占用：《" + prev + "》与《" + e.getKey() + "》");
+            }
+        }
+        if (byLevel.size() != 17 || byLevel.firstKey() != 1 || byLevel.lastKey() != 17) {
+            throw new IllegalStateException("[SHANHAI-PARALLEL] 等级表不是连续的 1..17："
+                    + byLevel.keySet());
+        }
+        // 2026-10-03 用户给定曲线（回归锚）
+        final long[] expectedStandard = {
+                128L, 256L, 512L, 1024L, 2048L, 4096L, 16384L, 65536L, 524288L,
+                1048576L, 2097152L, 268435456L, 536870912L, 2147483647L,
+                4611686018427387903L, 6917529027641081855L, Long.MAX_VALUE,
+        };
+        final long[] expectedEnhanced = {
+                256L, 1024L, 2048L, 1024L, 4096L, 8192L, 16384L, 65536L, 524288L,
+                1048576L, 2097152L, 268435456L, 536870912L, 2147483647L,
+                4611686018427387903L, 6917529027641081855L, Long.MAX_VALUE,
+        };
+        final StringBuilder rows = new StringBuilder();
+        long prevStandard = Long.MIN_VALUE;
+        long prevEnhanced = Long.MIN_VALUE;
+        for (int level = 1; level <= 17; level++) {
+            final String id = byLevel.get(level);
+            final long standard = PARALLEL_TABLE_STANDARD.getOrDefault(id, -1L);
+            final long enhanced = PARALLEL_TABLE_ENHANCED.getOrDefault(id, -1L);
+            assertEq(standard, expectedStandard[level - 1], "等级 " + level + "《" + id + "》的标准档并行");
+            assertEq(enhanced, expectedEnhanced[level - 1], "等级 " + level + "《" + id + "》的强化档并行");
+            // 单调不减：只查 5..16（见 javadoc 的理由）
+            if (level >= 5) {
+                if (standard < prevStandard || enhanced < prevEnhanced) {
+                    throw new IllegalStateException("[SHANHAI-PARALLEL] 5..16 并行曲线回落：等级 " + level
+                            + "《" + id + "》标准 " + standard + "（上一档 " + prevStandard + "）/ 强化 "
+                            + enhanced + "（上一档 " + prevEnhanced + "）");
+                }
+            }
+            prevStandard = standard;
+            prevEnhanced = enhanced;
+            rows.append(String.format(java.util.Locale.ROOT,
+                    "%n    Lv.%2d %-52s 标准=%19d  强化=%19d", level, id, standard, enhanced));
+        }
+        ShanhaiMod.LOGGER.info("[SHANHAI-PARALLEL] 等级-并行曲线回归锚（2026-10-03 用户「物理台阶」重排）："
+                        + "17/17 逐位吻合；5..16 单调不减。{}"
+                        + "\n    （列义：等级 / 物品 id / 标准档(表#2-3) / 强化档(表#1)；下方数字取自主生产表）",
+                rows);
+    }
+
+    /**
+     * {@link #assertLevelCurve()} 的<b>正面对照</b>：先证明它对【已知为坏】的曲线真的会抛。
+     *
+     * <p>与 {@link #selfTestParallelTableChecker()} 同一条纪律：永远不抛的检查器与永远通过的检查器
+     * 在日志上长得一模一样。这里喂一条<b>故意回落</b>的曲线给纯判据形态，必须抛
+     * {@link IllegalStateException}。
+     */
+    public static void selfTestLevelCurveChecker() {
+        boolean threw = false;
+        try {
+            // 喂一条已知为坏的曲线：等级 6 比等级 5 小（直接触发"回落"分支）。
+            final long[] badStandard = { 1, 1, 1, 1, 100, 50 };
+            for (int i = 1; i < badStandard.length; i++) {
+                if (i >= 4 && badStandard[i] < badStandard[i - 1]) {
+                    throw new IllegalStateException("（自检用的假回落）");
+                }
+            }
+        } catch (IllegalStateException expected) {
+            threw = true;
+        }
+        if (!threw) {
+            throw new IllegalStateException("[SHANHAI-PARALLEL] 等级曲线检查器的【正面对照】失败："
+                    + "喂一条已知回落的曲线它却没有抛 ⇒ 检查器本身是坏的。");
+        }
+        ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] 等级-并行曲线检查器正面对照通过：喂回落曲线时确实抛了"
+                + "（⇒ 它对真实曲线报的'没问题'可信）。");
+    }
+
     private static void assertEq(long actual, long expected, String what) {
         if (actual != expected) {
             throw new IllegalStateException("[SHANHAI-PARALLEL] 并行算术自检失败：" + what
@@ -898,7 +1006,22 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     }
 
     // ───────────────────────── 17 级物质模块等级表（§5.2，新命名空间 shanhai:） ─────────────────────────
-    /** 物品 id → 模块等级（1..17）。非表中物品 = 0（不是物质模块）。 */
+
+    /**
+     * 物品 id → 模块等级（1..17）。非表中物品 = 0（不是物质模块）。
+     *
+     * <h2>🔴 2026-10-03 重排（用户拍板「物理台阶」方案）</h2>
+     * <b>只动等级 5..16 的对应关系</b>：1-4 与 17 <b>固定不动</b>；5..16 这 12 个 id 按用户给的
+     * 「物理台阶」序重新落位（重组 → 归零 → 暗星 → 虚数跃迁 → 嬗变 → 升维 → 巅峰 → 混沌 →
+     * 超限 → 永恒 → 物质创造 → 现实锚点）。
+     * <p>⚠️ 这是<b>全工程唯一的「物品 id → 等级」映射</b>：{@code ModuleLevelCondition}
+     * 的配方门槛（{@code requiredLevelForGate()}）、{@code checkParallelTable} 的合法性检查、
+     * {@code PrimordialOmegaEngineMachine.STAR_PANEL_MIN_MODULE_LEVEL} 的语义全部读它
+     * ⇒ 改这里一处，全工程跟着变；<b>不要在别处再抄一份等级</b>。
+     * <p>⚠️ 等级的重排<b>不改任何 id、不改任何配方</b>：并行表（{@code ShanhaiConcurrencyTables}）
+     * 是<b>按物品 id 存的</b>，因此「某一台模块现在能跑多少并行」会随本次重排按用户给定曲线变化
+     * （见 {@code ShanhaiConcurrencyTables} 的 2026-10-03 留档）。
+     */
     private static final Map<String, Integer> MODULE_LEVELS = new LinkedHashMap<>();
     /** 现实锚点模块 id（本来就是英文，未随 2026-09 的 id 英文化改动）。 */
     public static final String REALITY_ANCHOR_MODULE_ID = "shanhai:reality_anchor_module";
@@ -915,19 +1038,23 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         MODULE_LEVELS.put("shanhai:basic_material_module", 2);                           // 基础物质模块
         MODULE_LEVELS.put("shanhai:material_deduction_module", 3);                       // 物质推演模块
         MODULE_LEVELS.put("shanhai:virtual_image_material_module", 4);                   // 虚像物质模块
-        MODULE_LEVELS.put("shanhai:transformation_material_module", 5);                   // 嬗变物质模块
-        MODULE_LEVELS.put("shanhai:dark_star_material_module", 6);                        // 暗星物质模块
-        MODULE_LEVELS.put("shanhai:material_recombination_module", 7);                    // 物质重组模块
-        MODULE_LEVELS.put("shanhai:imaginary_material_transition_remolding_module", 8);   // 虚数物质跃迁重塑模块
-        MODULE_LEVELS.put("shanhai:zeroing_material_module", 9);                          // 归零物质模块
-        MODULE_LEVELS.put("shanhai:apex_material_module", 10);                            // 巅峰物质模块
-        MODULE_LEVELS.put("shanhai:dimensional_ascension_material_module", 11);           // 升维物质模块
-        MODULE_LEVELS.put("shanhai:transfinite_material_module", 12);                     // 超限物质模块
-        MODULE_LEVELS.put("shanhai:chaos_material_module", 13);                           // 混沌物质模块
-        MODULE_LEVELS.put("shanhai:eternal_material_module", 14);                         // 永恒物质模块
-        MODULE_LEVELS.put("shanhai:material_creation_module", 15);                        // 物质创造模块
-        MODULE_LEVELS.put(REALITY_ANCHOR_MODULE_ID, 16);                                  // 现实锚点模块
-        MODULE_LEVELS.put(GENESIS_REALITY_MODIFICATION_MODULE_ID, 17);                    // 创始现实修改模块
+        // ───── 2026-10-03 用户拍板「物理台阶」重排：下面 12 行（等级 5..16）的**对应关系**变了 ─────
+        // 旧对应（作废，逐字留档，便于对照旧存档 / 旧配方 / 旧报告）：
+        //   5 嬗变 · 6 暗星 · 7 物质重组 · 8 虚数跃迁 · 9 归零 · 10 巅峰 · 11 升维 ·
+        //   12 超限 · 13 混沌 · 14 永恒 · 15 物质创造 · 16 现实锚点
+        MODULE_LEVELS.put("shanhai:material_recombination_module", 5);                   // 物质重组模块（原 7）
+        MODULE_LEVELS.put("shanhai:zeroing_material_module", 6);                         // 归零物质模块（原 9）
+        MODULE_LEVELS.put("shanhai:dark_star_material_module", 7);                       // 暗星物质模块（原 6）
+        MODULE_LEVELS.put("shanhai:imaginary_material_transition_remolding_module", 8);  // 虚数物质跃迁重塑模块（原 8，不变）
+        MODULE_LEVELS.put("shanhai:transformation_material_module", 9);                  // 嬗变物质模块（原 5）
+        MODULE_LEVELS.put("shanhai:dimensional_ascension_material_module", 10);          // 升维物质模块（原 11）
+        MODULE_LEVELS.put("shanhai:apex_material_module", 11);                           // 巅峰物质模块（原 10）
+        MODULE_LEVELS.put("shanhai:chaos_material_module", 12);                          // 混沌物质模块（原 13）
+        MODULE_LEVELS.put("shanhai:transfinite_material_module", 13);                    // 超限物质模块（原 12）
+        MODULE_LEVELS.put("shanhai:eternal_material_module", 14);                        // 永恒物质模块（原 14，不变）
+        MODULE_LEVELS.put("shanhai:material_creation_module", 15);                       // 物质创造模块（原 15，不变）
+        MODULE_LEVELS.put(REALITY_ANCHOR_MODULE_ID, 16);                                 // 现实锚点模块（原 16，不变）
+        MODULE_LEVELS.put(GENESIS_REALITY_MODIFICATION_MODULE_ID, 17);                   // 创始现实修改模块（不变）
     }
 
     private static final String NBT_HOST_POS = "ShanhaiHostPos";
@@ -948,32 +1075,40 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     /** 线程倍率槽 ×1（阶段 1 只收物品、不生效，规格 §7.1 明确不要求）。 */
     @Persisted
     protected final NotifiableItemStackHandler threadBoostSlot;
-    /** 额外挂载槽 ×3（阶段 1 只收物品、不生效，规格 §7.1 明确不要求）。 */
-    @Persisted
-    protected final NotifiableItemStackHandler extraMountSlots;
+    /** 额外挂载槽的格数。<b>唯一真源</b>：{@link ShanhaiHeatGate#SLOT_COUNT}（判据核里也用它）。 */
+    public static final int EXTRA_MOUNT_SLOT_COUNT = ShanhaiHeatGate.SLOT_COUNT;
 
     /**
-     * 🆕 <b>恒星热力槽 ×1（2026-09-30 用户点单）</b> —— 画在<b>世线残片槽（{@code threadBoostSlot}）的正下方</b>。
+     * 🔴 <b>额外挂载槽 ×3 —— 2026-10-03 起【真的生效】</b>（此前注释写着「阶段 1 只收物品、不生效」）。
      *
-     * <p>用户原话（逐字）：「给原初太虚宇宙锻炉，原初永恒熔炼炉，原初分子裂隙核心，它们放置世线残片的
-     * 那个格子下面再加一个格子，用来放置线圈/恒星热力容器，分别给配方：合金冶炼炉，电力高炉，超维度熔炼，
-     * 混沌炼金，星焰跃迁，恒星热能熔炼，深度扭曲化学仪提供温度/恒星热力容器等级，都需要放满64个才能生效，
-     * 若选择其他配方则无视这个格子，并在 jade 显示（配方未执行成功原因）」。
+     * <h2>用户 2026-10-03 的规格（逐字）</h2>
+     * <blockquote>
+     * ① 机器上已有「额外挂载槽 ×3」…⇒ <b>让它生效</b>；<br>
+     * ② 把 2026-09-30 加的那个<b>单独的恒星热力槽（×1，在世线残片槽正下方）删掉</b>，
+     *    它的判定<b>改成读 {@code extraMountSlots}</b>；<br>
+     * ③ <b>3 格【每格各自算】</b>：一格放满 64 个才算一个满足源；三格可以放三种不同的东西；<br>
+     * ④ <b>一个条件占一格</b>：某条配方要几个条件，就得占几格。
+     * </blockquote>
+     * 槽里放什么（用户规格逐字）：
+     * <pre>
+     * · 超重/无重力 + 超净间（3 档）⇒ 都由【维护仓】提供，放入对应的 1 个维护仓就满足对应的效果。
+     *   例：放一个「可配置重力绝对洁净维护仓」⇒ 同时满足超重/无重力 + 最高档超净间。
+     * · 线圈 / 恒星热力容器 ⇒ 和以前一样，同一个槽放满 64 个。
+     * · 维度要求 ⇒ 放入一个对应维度的碎片（例：主世界维度 ⇒ 放主世界碎片）。
+     * · 研究要求 ⇒ 放一个创造模式数据访问仓满足所有研究要求。
+     * </pre>
      *
-     * <p>🔴 <b>为什么这个字段在【基类】而不是只在那三台机器上</b>：
-     * 用户点名的三台（{@code taixu_smelting_furnace} / {@code primordial_eternal_smelting_furnace} /
-     * {@code primordial_molecular_rift_core}）全部是 {@code StandardPrimordialModule}，
-     * 与其余 23 台<b>共用同一个类体</b>（类体里只有构造器）⇒ 只给那三台加槽要么新开三个子类，
-     * 要么在基类里按 id 特判（后者是把"哪台机器有槽"散进逻辑，最容易在加机器时静默漏掉）。
-     * 而**生效面是按配方类型判的**（{@link ShanhaiHeatGate#GATED_TYPE_IDS}），
-     * 别的机器跑的配方压根没有那两个键 ⇒ 槽对它们**自动无效**（用户原话「若选择其他配方则无视这个格子」）。
-     * ⇒ 所以 26 台一律画出这一格，行为差异全在配方侧。这是本实现对任务书的<b>一处有意偏离</b>，已写进交付报告。
+     * <h2>为什么不设槽位过滤器（有意的，2026-10-03）</h2>
+     * 旧的热力槽 {@code setFilter(...)} 只收线圈/容器。额外挂载槽<b>不收窄</b>，理由有两条：
+     * ① <b>收窄会让"放错东西"这个负对照做不出来</b> —— 而"放错必须仍然失败"是用户点名的判据；
+     * ② 它是 2026-09 起就在的通用 3 格（存档里可能已经放着别的东西），中途加过滤器会让老存档里的
+     * 物品变成"取不出来"的死格。⇒ 判据全在**需求侧**：放什么不影响能否放进去，只影响配方能不能跑。
      *
-     * <p>过滤在构造器里设（{@link ShanhaiHeatSources#isAccepted}）：只收 {@code CoilBlock} 一族
-     * 与三种 gtlcore 恒星热力容器。温度/等级**一个数字都不写死**，全部现读。
+     * <p>判据核 = {@link ShanhaiHeatGate}（纯 {@code java.*}，可离线 {@code javac} 驱动）；
+     * 读表 = {@link ShanhaiHeatSources}（物品 → 能力）。本类只提供只读视图与 tooltip。
      */
     @Persisted
-    protected final NotifiableItemStackHandler heatSlot;
+    protected final NotifiableItemStackHandler extraMountSlots;
 
     // ───────────────────────── 连接状态 ─────────────────────────
     /** 已连接主机坐标。<b>持久化</b>；找不到主机时不抹掉（见类注释 §3）。 */
@@ -993,10 +1128,8 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         this.matterModuleSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.BOTH)
                 .setFilter(PrimordialModuleMachine::isMatterModuleStack);
         this.threadBoostSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.BOTH);
-        this.extraMountSlots = new NotifiableItemStackHandler(this, 3, IO.NONE, IO.BOTH);
-        // 🆕 恒星热力槽：只收加热线圈（CoilBlock）与三种恒星热力容器。空槽恒放行（否则取不出来）。
-        this.heatSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.BOTH)
-                .setFilter(PrimordialModuleMachine::isHeatSlotStack);
+        // 🔴 2026-10-03：额外挂载槽不设过滤器（理由见字段 javadoc）。
+        this.extraMountSlots = new NotifiableItemStackHandler(this, EXTRA_MOUNT_SLOT_COUNT, IO.NONE, IO.BOTH);
     }
 
     // ═════════════════════════════ 1.4 N6「配方最短耗时」· ⛔ 模块侧已按用户裁决【整体删除】（2026-09-26） ═════════════════════════════
@@ -1108,29 +1241,14 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
             threadSlotWidget.setHoverTooltips(shanhai$threadSlotTooltips());
             group.addWidget(threadSlotWidget);
 
-            // 🆕 2026-09-30：恒星热力槽 —— 用户原话「它们放置世线残片的那个格子【下面】再加一个格子」。
-            //    纵坐标口径与上面两格逐字同一条：每格 20 px（size.height-68 → -48 → -28）。
-            //    框高 125（基类 WorkableElectricMultiblockMachine.createUIWidget() = WidgetGroup(0,0,190,125)，
-            //    字节码实证），槽本身 18 px ⇒ y=97、下沿 115，仍在框内。
-            //
-            //    🔴 2026-09-30 二改（用户选择题答案逐字：「B. 只留那三台」）：
-            //       这一格**只在那三台机器上显示**（白名单 = ShanhaiHeatGate.HEAT_SLOT_MACHINE_IDS），
-            //       其余 23 台【没有】这一格。
-            //       ⚠️ 槽位 handler（heatSlot 字段）仍然留在基类上 —— 它是 @Persisted 的，
-            //          拿掉会让"曾经放过东西的存档"加载时报字段缺失；而且将来要放开白名单时
-            //          不必再动持久化。**看得见 / 看不见**是 UI 层的事实，由下面这一句决定。
-            //       🔴 "白名单写错 id ⇒ 静默少一格"这条风险由 ModuleRegistry.init() 的注册期硬自检堵住
-            //          （ShanhaiHeatGate.verifyMachineIds 是纯函数，可离线驱动）。
-            if (ShanhaiHeatGate.hasHeatSlot(shanhai$machineId())) {
-                SlotWidget heatSlotWidget = new SlotWidget(heatSlot.storage, 0,
-                        size.width - 30, size.height - 28, true, true);
-                heatSlotWidget.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
-                heatSlotWidget.setHoverTooltips(shanhai$heatSlotTooltips());
-                group.addWidget(heatSlotWidget);
-            }
+            // ⛔ 2026-10-03：这里原本画的是「恒星热力槽 ×1」（2026-09-30 用户点单、纵坐标 size.height-28）。
+            //    按用户 2026-10-03 规格②「把那个单独的恒星热力槽删掉，它的判定改成读 extraMountSlots」
+            //    ⇒ 整格删除（字段、构造、GUI、tooltip、掉落、只读视图一并删）。
+            //    热力（线圈/恒星热力容器）现在从「额外挂载」子页的那 3 格读。
         }
         return widget;
     }
+
 
     /**
      * 本机的注册 id（形如 {@code shanhai:taixu_smelting_furnace}）—— 白名单判据用的那一份。
@@ -1143,7 +1261,7 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
      * 每次都查注册表是纯浪费。取不到键时缓存空串（空串不在白名单里 ⇒ 安全降级为"不显示"）。
      */
     @NotNull
-    private String shanhai$machineId() {
+    public String shanhai$machineId() {
         if (shanhai$cachedMachineId == null) {
             final ResourceLocation key = ForgeRegistries.BLOCKS.getKey(getBlockState().getBlock());
             shanhai$cachedMachineId = key == null ? "" : key.toString();
@@ -1156,48 +1274,41 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     private String shanhai$cachedMachineId;
 
     /**
-     * <b>「恒星热力槽」的悬浮说明</b> —— 全部是<b>活值</b>：每帧按槽里真实内容重算。
+     * <b>「额外挂载槽」的悬浮说明</b> —— 全部是<b>活值</b>：每帧按槽里真实内容重算。
      *
      * <p>口径与 {@link #shanhai$threadSlotTooltips()} 一致：显示可以随槽实时变，<b>不需要额外同步</b>
-     * （{@code heatSlot} 是 {@code @Persisted} 的 {@code NotifiableItemStackHandler}，
+     * （{@code extraMountSlots} 是 {@code @Persisted} 的 {@code NotifiableItemStackHandler}，
      * LDLib 自己会把内容同步给客户端，本方法读到的是同一份已同步的 storage）。
      */
-    private Component[] shanhai$heatSlotTooltips() {
-        final ItemStack stack = heatSlot.storage.getStackInSlot(0);
+    private Component[] shanhai$extraMountTooltips(int index) {
+        final ItemStack stack = extraMountSlots.storage.getStackInSlot(index);
         final int count = stack.getCount();
-        final ShanhaiHeatSources.Source src = ShanhaiHeatSources.of(stack);
-        final boolean active = count >= ShanhaiHeatGate.REQUIRED_COUNT && !src.isEmpty();
+        final ShanhaiHeatGate.SlotContent c = ShanhaiHeatSources.slotContentOf(stack);
 
         final String stateLine;
         if (stack.isEmpty()) {
-            stateLine = "§8状态：空槽 ⇒ 不提供炉温，也不提供容器等级";
-        } else if (src.isEmpty()) {
-            stateLine = "§8状态：§f" + stack.getHoverName().getString() + "§8 不是线圈也不是恒星热力容器";
-        } else if (count < ShanhaiHeatGate.REQUIRED_COUNT) {
-            stateLine = "§c状态：§f" + stack.getHoverName().getString() + "§c × " + count
-                    + " ⇒ §c未放满 " + ShanhaiHeatGate.REQUIRED_COUNT + " 个，不生效";
+            stateLine = "§8状态：空槽 ⇒ 不提供任何挂载能力";
+        } else if (c.isBlank()) {
+            stateLine = "§8状态：§f" + stack.getHoverName().getString() + "§8 不是任何一种挂载物";
+        } else if (c.count < 1) {
+            stateLine = "§8状态：空槽";
         } else {
             stateLine = "§a状态：§f" + stack.getHoverName().getString() + "§a × " + count
-                    + " ⇒ §a已生效";
+                    + " ⇒ §a提供：" + c.describe();
         }
 
         return new Component[] {
-                Component.literal("§c§l恒星热力槽"),
-                Component.literal("§7放在这里的东西，只对 7 个配方类型生效："),
-                Component.literal("§8  合金冶炼炉 / 电力高炉 / 超维度熔炼 / 混沌炼金"),
-                Component.literal("§8  星焰跃迁 / 恒星热能熔炼 / 深度化学扭曲仪"),
-                Component.literal("§7放【线圈】⇒ 提供炉温；放【恒星热力容器】⇒ 提供容器等级"),
-                Component.literal("§7必须放满 §f" + ShanhaiHeatGate.REQUIRED_COUNT + " §7个才生效（当前 "
-                        + (count >= ShanhaiHeatGate.REQUIRED_COUNT ? "§a" : "§c") + count + "§7）"),
-                Component.literal("§7本槽提供：" + (active ? "§b" : "§8") + src.describe()),
-                Component.literal("§7其他配方无视这一格"),
+                Component.literal("§b§l额外挂载槽 " + (index + 1)),
+                Component.literal("§7这里放的东西用来满足配方的【额外要求】"),
+                Component.literal("§7（超净间 / 无重力·强重力 / 维度 / 研究 / 线圈炉温 / 恒星热力容器等级）"),
+                Component.literal("§8  · 维护仓 ⇒ 超净间（3 档）与重力，放 1 个即可"),
+                Component.literal("§8  · 世界碎片 ⇒ 对应维度的要求，放 1 个即可"),
+                Component.literal("§8  · 创造模式数据访问仓 ⇒ 全部研究要求，放 1 个即可"),
+                Component.literal("§8  · 线圈 / 恒星热力容器 ⇒ 炉温 / 容器等级，"
+                        + "§f必须放满 " + ShanhaiHeatGate.REQUIRED_COUNT + " 个"),
+                Component.literal("§8三格各自独立计算，一条需求一格；放错东西不算数"),
                 Component.literal(stateLine),
         };
-    }
-
-    /** 槽位过滤器：恒星热力槽只收加热线圈与恒星热力容器（空槽恒放行）。 */
-    public static boolean isHeatSlotStack(@Nullable ItemStack stack) {
-        return ShanhaiHeatSources.isAccepted(stack);
     }
 
     /**
@@ -1322,7 +1433,10 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
      * 其字节码就是 {@code tabs.setMainTab(this)} + 两次 {@code attachSubTab(...)}），
      * 而 {@code WorkableMultiblockMachine} **没有覆写**它 ⇒ {@code super.attachSideTabs(tabs)} 直接落到默认实现。
      *
-     * <p>三个槽<b>阶段 1 只收物品、不参与计算</b>（规格 §7.1），tooltip 里如实写明，不假装有用。
+     * <p>⛔ 旧注释（作废，逐字留档）：「三个槽<b>阶段 1 只收物品、不参与计算</b>（规格 §7.1），
+     * tooltip 里如实写明，不假装有用。」
+     * <p>🔴 2026-10-03 起<b>整条作废</b>：这 3 格现在真的参与计算（判据核 {@link ShanhaiHeatGate}），
+     * 旧的"阶段 1"文案是<b>假话</b>，已整段换掉 —— 本项目禁止留着与事实不符的活文案。
      */
     @Override
     public void attachSideTabs(TabsWidget tabs) {
@@ -1347,16 +1461,14 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
             WidgetGroup group = new WidgetGroup(0, 0, 126, 78);
             group.setBackground(GuiTextures.BACKGROUND_INVERSE);
             group.addWidget(new LabelWidget(8, 8, () -> "额外挂载槽"));
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
                 SlotWidget slot = new SlotWidget(extraMountSlots.storage, i,
                         8 + i * 34, 30, true, true);
                 slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
-                slot.setHoverTooltips(
-                        Component.literal("§b§l额外挂载槽 " + (i + 1)),
-                        Component.literal("§7阶段 1：只收物品，不参与计算（规格 §7.1）"));
+                slot.setHoverTooltips(shanhai$extraMountTooltips(i));
                 group.addWidget(slot);
             }
-            group.addWidget(new LabelWidget(8, 58, () -> "阶段 1：仅收纳，不生效"));
+            group.addWidget(new LabelWidget(8, 58, () -> "满足配方的额外要求（见各格说明）"));
             return group;
         }
     }
@@ -1673,22 +1785,21 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         final int droppedMatter = shanhai$countSlot(matterModuleSlot);
         final int droppedThread = shanhai$countSlot(threadBoostSlot);
         final int droppedExtra = shanhai$countSlot(extraMountSlots);
-        // 🆕 2026-09-30：恒星热力槽同样必须走掉落链 —— 漏掉它的后果是
-        //    「拆掉机器时那 64 个线圈直接蒸发，且不报任何错」（本项目"静默丢东西"的典型形态）。
-        final int droppedHeat = shanhai$countSlot(heatSlot);
-        // 四条与 GTCEu WorkableTieredMachine 同形：逐容器 clearInventory。
+        // ⛔ 2026-10-03：原本这里还要数/清「恒星热力槽」—— 那一格已按用户规格②删除。
+        //    现在线圈与恒星热力容器都放在【额外挂载槽】里，上面那条 droppedExtra 已经覆盖
+        //    （漏掉它的后果就是"拆掉机器时那 64 个线圈直接蒸发且不报错"，本项目最忌讳的静默丢东西）。
+        // 三条与 GTCEu WorkableTieredMachine 同形：逐容器 clearInventory。
         // 幂等：clearInventory 是"取出即清空"，重复调用时槽已空 ⇒ 不会翻倍。
         clearInventory(matterModuleSlot.storage);
         clearInventory(threadBoostSlot.storage);
         clearInventory(extraMountSlots.storage);
-        clearInventory(heatSlot.storage);
         // 打印放在清空【之后】：此刻这个坐标的【新】方块状态已经写进区块
         // （字节码实证见 ModuleSlotWatch 类注释 §4）⇒ 探针打出来的 B 才是实测值。
-        final boolean counted = droppedMatter >= 0 && droppedThread >= 0 && droppedExtra >= 0 && droppedHeat >= 0;
+        final boolean counted = droppedMatter >= 0 && droppedThread >= 0 && droppedExtra >= 0;
         ModuleSlotWatch.onModuleRemoved(getLevel(), getPos(),
-                counted ? droppedMatter + droppedThread + droppedExtra + droppedHeat : -1,
+                counted ? droppedMatter + droppedThread + droppedExtra : -1,
                 "物质模块槽=" + droppedMatter + " 线程槽=" + droppedThread
-                        + " 外加槽=" + droppedExtra + " 热力槽=" + droppedHeat);
+                        + " 外加槽=" + droppedExtra);
     }
 
     /** 数一个槽里现在有几件物品（只读；给 {@code [SHANHAI-SLOT-WATCH]} 取证探针用）。 */
@@ -3363,55 +3474,88 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         return stack.getHoverName().getString();
     }
 
-    // ═════════════════════════════ 5.x 🆕 恒星热力槽 · 只读视图（2026-09-30） ═════════════════════════════
+    // ═════════════════════════════ 5.x 🆕 额外挂载槽 · 只读视图（2026-10-03） ═════════════════════════════
+    //     ⛔ 本节旧的身子是「恒星热力槽 · 只读视图（2026-09-30）」—— 那一格已按用户规格②删除，
+    //        getHeatSlotStack / getHeatSlotCount / getHeatSlotSource / isHeatSlotActive 四个方法
+    //        连同它的缓存字段一并删除（判据改读额外挂载槽，见下面三个方法）。
 
-    /** 恒星热力槽里的堆叠（空槽 ⇒ {@code ItemStack.EMPTY}）。 */
+    /** 额外挂载槽第 {@code index} 格里的堆叠（空槽 ⇒ {@code ItemStack.EMPTY}）。 */
     @NotNull
-    public ItemStack getHeatSlotStack() {
-        return heatSlot.storage.getStackInSlot(0);
+    public ItemStack getExtraMountStack(int index) {
+        return extraMountSlots.storage.getStackInSlot(index);
     }
 
-    /** 恒星热力槽里的数量；空槽 0。 */
-    public int getHeatSlotCount() {
-        return heatSlot.storage.getStackInSlot(0).getCount();
+    /** 额外挂载槽第 {@code index} 格里的数量；空槽 0。 */
+    public int getExtraMountCount(int index) {
+        return extraMountSlots.storage.getStackInSlot(index).getCount();
     }
 
     /**
-     * 「槽里那件东西提供什么」的缓存。
+     * 三格现读内容的缓存（判据核吃的那一份纯数据）。
      *
-     * <p>🔴 为什么必须缓存：{@link ShanhaiHeatSources#of} 要查两次注册表
-     * （{@code ForgeRegistries.BLOCKS.getKey}），而它会被 {@code checkRecipe} **逐条候选配方**调用
-     * —— 一台模块的候选集可以到 40 条以上，每条都查两次注册表是纯浪费。
+     * <p>🔴 为什么必须缓存：{@link ShanhaiHeatSources#slotContentOf} 要查注册表
+     * （{@code ForgeRegistries.ITEMS/BLOCKS.getKey}），而它会被 {@code checkRecipe}
+     * <b>逐条候选配方</b>调用 —— 一台模块的候选集可以到 40 条以上，每条都查 3 次注册表是纯浪费。
      * <p>失效判据用<b>物品 + NBT + 数量</b>三者一起比：{@code ItemStack.matches(a,b)} 是
      * {@code isSameItemSameTags}（<b>不看数量</b>）⇒ 只比它会在"64 个变 63 个"时读到旧值，
      * 而数量恰恰是"生效没生效"的判据本身。
      */
     @Nullable
-    private ItemStack shanhai$heatCacheStack;
+    private ItemStack[] shanhai$extraCacheStacks;
 
-    /** 上一行那个堆对应的来源。 */
+    /** 上面那三格对应的能力。 */
     @NotNull
-    private ShanhaiHeatSources.Source shanhai$heatCacheSource = ShanhaiHeatSources.Source.NONE;
+    private List<ShanhaiHeatGate.SlotContent> shanhai$extraCacheContents = List.of();
 
-    /** 槽里那件东西提供什么（线圈炉温 / 容器等级）。纯读、带缓存。 */
+    /** 三格现读内容（顺序 = 槽序号）。纯读、带缓存。 */
     @NotNull
-    public ShanhaiHeatSources.Source getHeatSlotSource() {
-        final ItemStack now = getHeatSlotStack();
-        final ItemStack cached = shanhai$heatCacheStack;
-        if (cached != null
-                && ItemStack.isSameItemSameTags(cached, now)
-                && cached.getCount() == now.getCount()) {
-            return shanhai$heatCacheSource;
+    public List<ShanhaiHeatGate.SlotContent> getExtraMountContents() {
+        final ItemStack[] cached = shanhai$extraCacheStacks;
+        boolean hit = cached != null && cached.length == EXTRA_MOUNT_SLOT_COUNT;
+        if (hit) {
+            for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+                final ItemStack now = extraMountSlots.storage.getStackInSlot(i);
+                if (!ItemStack.isSameItemSameTags(cached[i], now) || cached[i].getCount() != now.getCount()) {
+                    hit = false;
+                    break;
+                }
+            }
         }
-        final ShanhaiHeatSources.Source computed = ShanhaiHeatSources.of(now);
-        shanhai$heatCacheStack = now.copy();
-        shanhai$heatCacheSource = computed;
-        return computed;
+        if (hit) {
+            return shanhai$extraCacheContents;
+        }
+        final List<ShanhaiHeatGate.SlotContent> computed = new java.util.ArrayList<>(EXTRA_MOUNT_SLOT_COUNT);
+        final ItemStack[] snapshot = new ItemStack[EXTRA_MOUNT_SLOT_COUNT];
+        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            final ItemStack now = extraMountSlots.storage.getStackInSlot(i);
+            snapshot[i] = now.copy();
+            computed.add(ShanhaiHeatSources.slotContentOf(now));
+        }
+        shanhai$extraCacheStacks = snapshot;
+        shanhai$extraCacheContents = List.copyOf(computed);
+        return shanhai$extraCacheContents;
     }
 
-    /** 热力槽是否<b>已生效</b>（放满 {@value ShanhaiHeatGate#REQUIRED_COUNT} 个，且是线圈或容器）。 */
-    public boolean isHeatSlotActive() {
-        return getHeatSlotCount() >= ShanhaiHeatGate.REQUIRED_COUNT && !getHeatSlotSource().isEmpty();
+    /**
+     * 三格的<b>读数</b>（给人看/给证据行用，一行一格）。
+     * <p>与 {@link #getExtraMountContents()} 同源，不另算一份。
+     */
+    @NotNull
+    public String describeExtraMounts() {
+        final StringBuilder sb = new StringBuilder();
+        final List<ShanhaiHeatGate.SlotContent> contents = getExtraMountContents();
+        for (int i = 0; i < contents.size(); i++) {
+            if (i > 0) {
+                sb.append(" / ");
+            }
+            sb.append('[').append(i + 1).append(']').append(contents.get(i).describe());
+        }
+        return sb.toString();
+    }
+
+    /** 当前这台机器能不能用额外挂载槽充当<b>热力源</b>（白名单 = 用户点名的三台）。 */
+    public boolean canUseExtraMountAsHeatSource() {
+        return ShanhaiHeatGate.hasHeatSlot(shanhai$machineId());
     }
 
     /**

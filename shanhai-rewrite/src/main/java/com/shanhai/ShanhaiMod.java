@@ -4,18 +4,21 @@ import com.gregtechceu.gtceu.api.machine.MachineDefinition;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.condition.RecipeConditionType;
 import com.mojang.logging.LogUtils;
+import com.shanhai.client.config.ShanhaiClientConfig;
 import com.shanhai.common.recipe.PrimordialFormingRecipeProbe;
 import com.shanhai.config.ShanhaiConfig;
 import com.shanhai.machine.module.ModuleSetBlockWatch;
 import com.shanhai.machine.module.ModuleSlotWatch;
 import com.shanhai.registry.ShanhaiRegistration;
 import com.shanhai.registry.ShanhaiRegistry;
+import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 import org.slf4j.Logger;
 
 /**
@@ -88,6 +91,15 @@ public class ShanhaiMod {
         // Forge 原生配置（ForgeConfigSpec）。用 COMMON 而非 CLIENT 的理由见 ShanhaiConfig 类注释。
         // ⚠️ 这一步【不需要】改 mods.toml：registerConfig 是运行期注册，与 mods.toml 无关。
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, ShanhaiConfig.COMMON_SPEC);
+
+        // 🔴 客户端配置（终末之环头顶光环的位姿 8 旋钮）。
+        //    ① 必须【在这里】注册：放进 FMLClientSetupEvent 的话，游戏内 Mods 列表认不出 Config 按钮，
+        //       用户就没法点齿轮调位姿（这条是用户上一个同类 mod 的既有口径）。
+        //    ② 用 FMLEnvironment.dist 守卫：专用服务端不该注册客户端配置
+        //       （Dist 只是个枚举，没有 @OnlyIn，服务端引用它不会炸）。
+        if (FMLEnvironment.dist == Dist.CLIENT) {
+            ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, ShanhaiClientConfig.CLIENT_SPEC);
+        }
 
         // Registrate 必须挂在任何 builder 入列之前（本工程只有一个实例，见 ShanhaiRegistration）。
         ShanhaiRegistration.register(modEventBus);

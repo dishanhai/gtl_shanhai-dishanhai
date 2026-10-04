@@ -589,10 +589,12 @@ public class ModuleLevelCondition extends RecipeCondition {
      *   2026-09-30      : §b模块要求： 1× 创始现实修改模块           §7（等级 ≥ 17）  ← 名字先剥码 ⇒ 整行零 &
      *   2026-10-01 首版 : &$ultimateRainbow-模块要求：1× 物质推演模块（等级 ≥ 3）     ← 又露码（用户图1）
      *   2026-10-01 二版 : §b模块要求： 1× 物质推演模块               §7（等级 ≥ 3）  ← 整行零 &（保守档）
-     *   2026-10-01 三版 : &$ultimateRainbow-模块要求：1× 物质推演模块（等级 ≥ 3）     ← 🔴 本版：用户选甲
+     *   2026-10-01 三版 : &$ultimateRainbow-模块要求：1× 物质推演模块（等级 ≥ 3）     ← 用户选甲
+     *   2026-10-03 四版 : &$ultimateRainbow-模块要求：1× 物质推演模块                 ← 🔴 本版：用户点单去掉等级段
      * </pre>
      *
-     * <h2>🔴 2026-10-01 第三轮（本版）：走【甲】—— 恢复归一彩虹，前提已用离线判据判死</h2>
+     * <h2>🔴 2026-10-01 第三轮（历史留档：当时的最新版，已由下方 2026-10-03 第四轮取代）：
+     * 走【甲】—— 恢复归一彩虹，前提已用离线判据判死</h2>
      * 上一版之所以退回纯 {@code §}，是因为那一行走的渲染路径<b>没有</b>我们的注入点。
      * 本版把那条注入点补上了（{@code Font.drawInBatch(String, …, boolean)} 11 参那个，
      * 见 {@link com.shanhai.mixin.ShanhaiFontStyleMixin} 类注释 §2 的家族图与
@@ -602,22 +604,38 @@ public class ModuleLevelCondition extends RecipeCondition {
      *   GTRecipeWidget:665  LabelWidget.&lt;init&gt;(IILjava/lang/String;)V
      *   LabelWidget.drawInBackground:108 → GuiGraphics.m_280056_:(Font;String;IIIZ)I
      *      → GuiGraphics.drawString(Font,String,float,…) :40 → Font.m_272078_:(String;…IIZ)I
-     *   ⇒ 🔴 m_272078_ = 本版新注入点 ⇒ 解析器在这条路上【会被调用】（改前不会）
+     *   ⇒ 🔴 m_272078_ = 那一轮新注入点 ⇒ 解析器在这条路上【会被调用】（改前不会）
      * </pre>
      * <b>回退办法（一行，随时可用）</b>：把本方法体换回上一版的三行
      * <pre>
      *   return Component.literal("§b模块要求：").append(displayNameWithCount())
      *           .append(Component.literal(" §7（等级 ≥ " + gateText() + "）"));
      * </pre>
+     * ⚠️ <b>2026-10-03 起这条回退办法会同时把等级那一段加回来</b>（用户同日已点单去掉它）
+     * ⇒ 若只是因为"彩虹色出问题"要回退，请<b>保留现在这一行正文、只换样式码</b>
+     * （把 {@link #REQ_LINE_STYLE} 换成 {@code "§b"} 或 {@code "§6"}），别用上面这三行。
      * <p>🔴 <b>若那次构建的注入没生效</b>，{@code require = 1} 的表现是<b>启动即崩</b>（不是静默露码）——
      * 这正是用户 2026-10-01 拍板要的失败形态（原话：「启动就崩其实是最好修的，要是莫名其妙崩了才难修」）。
+     * <p>🔴 <b>2026-10-03 第四轮（本版）：用户点单【去掉「（等级 ≥ N）」那一段】</b>
+     * <blockquote>「把后面等级&gt;=多少去了，挡视线了」</blockquote>
+     * ⇒ 那一行现在<b>只画「模块要求：1× 虚像物质模块」</b>，等级数字不再出现在配方页上。
+     * <b>判定一个字都没动</b>（门槛照旧拦，见 {@link #test}）；被去掉的只是"把它写出来"。
+     *
+     * <pre>
+     *   改前（2026-10-01 三版）: &amp;$ultimateRainbow-模块要求：1× 虚像物质模块（等级 ≥ 4）
+     *   改后（2026-10-03 四版）: &amp;$ultimateRainbow-模块要求：1× 虚像物质模块
+     * </pre>
+     * ⚠️ 尾串检查：去的是<b>整段</b>（连同它前面的括号一起），所以改后既没有空括号，
+     *    也没有尾随空格（{@code plainNameWithCount()} 后面直接结束）⇒ 上面"整行无 §"的前提不变。
+     * <p>⚠️ 代价（如实记）：{@code plainGateText()} 里那条「未识别的物质模块 id」标记也<b>不再画在这里</b>；
+     *    那种配方仍会在加载期打 WARN（见本类 {@code [SHANHAI-MODULE-LEVEL]} 的日志），<b>不是静默失效</b>。
      */
     @Override
     public Component getTooltips() {
         // 甲方案：整行一个 `&$ultimateRainbow-` 正文（不许含 §，否则 parser 判 ours=false 交回原版 ⇒ 露码）。
-        // 名字与等级都走 plain*（= noAmpEcho 过的串）⇒ 对任意 module_id 入参，正文里都不会混进第二个 `&`。
-        return Component.literal(REQ_LINE_STYLE + "模块要求：" + plainNameWithCount()
-                + "（等级 ≥ " + plainGateText() + "）");
+        // 名字走 plain*（= noAmpEcho 过的串）⇒ 对任意 module_id 入参，正文里都不会混进第二个 `&`。
+        // 🔴 2026-10-03：等级那一段（`（等级 ≥ N）`）已按用户点单删除 —— 只改显示，不动判定。
+        return Component.literal(REQ_LINE_STYLE + "模块要求：" + plainNameWithCount());
     }
 
     public Component getFailTooltip() {
@@ -666,6 +684,10 @@ public class ModuleLevelCondition extends RecipeCondition {
     //  ⚠️ 两条路的物品名解析逻辑逐字相同，只是返回类型不同（String vs Component）——
     //     刻意不互相调用：Component → String 要走 getString()，会把 lang 解析提前到服务端，
     //     而 `§`-free 那一版只在配方页（客户端）用，形状最简单。
+    //  🔴 2026-10-03 第四轮：用户点单去掉「（等级 ≥ N）」⇒ getTooltips() 现在只拼
+    //      `REQ_LINE_STYLE + "模块要求：" + plainNameWithCount()`
+    //      ⇒ 本小节里 **{@link #plainNameWithCount()} 仍在用；{@link #plainGateText()} 已无调用者**
+    //        （备件，理由见它自己的 javadoc）。
 
     /** {@link #displayNameWithCount()} 的 §-free 版（{@code 1× 入门物质模块}）。<b>在用</b>（{@link #getTooltips()}）。 */
     private String plainNameWithCount() {
@@ -707,6 +729,14 @@ public class ModuleLevelCondition extends RecipeCondition {
      * <p>⚠️ {@code gateText()} 的返回值只会是「纯数字」或「{@code ?（未识别的物质模块 id：…）}」两种形态
      * （后者已在 {@code gateText()} 内部过了一次 {@link #noAmpEcho(String)}），
      * 这里再过一次是同一条不变式的兜底：<b>这条行上一个 {@code &} 都不许有</b>。
+     *
+     * <p>⛔ <b>2026-10-03 起【本方法已无调用者】（备件，不是删除 —— 与 {@link #getFailTooltip()} /
+     * {@link #getPassTooltip()} 同样的处理）</b>：{@link #getTooltips()} 里那一段
+     * 「{@code （等级 ≥ N）}」已按用户点单删除（原话「把后面等级&gt;=多少去了，挡视线了」）
+     * ⇒ 那行不再需要 §-free 的等级文本。
+     * <p>为什么<b>保留</b>而不是删：① 它与 {@code gateText()} 是本类"等级文本"的两个出口，
+     * 将来那一行若要恢复成带等级的形态（用户随时可能改回来），这里是唯一的现成件；
+     * ② 删掉它不会让任何错误变响，只会在恢复时多写一遍 {@code noAmpEcho} 包装。留着的代价 = 0 调用点。
      */
     private String plainGateText() {
         return noAmpEcho(gateText());

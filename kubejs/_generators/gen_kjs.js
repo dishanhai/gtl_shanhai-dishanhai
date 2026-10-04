@@ -119,7 +119,20 @@ function isCommentLine(line) {
 function parseShanhaiCaps(p) {
     var lines = fs.readFileSync(p, 'utf8').split(/\r?\n/)   // 源文件是 UTF-8（不是转储）
     var live = [], dead = 0, realTypeCount = null, dup = []
-    var regRe = /GTRecipeTypes\.register\(\s*"([a-z0-9_]+)"\s*,/
+    // 🔴 2026-10-03 修（正则回归）：本行原来是写死的 /GTRecipeTypes\.register\(\s*"([a-z0-9_]+)"\s*,/。
+    //    ShanhaiRecipeTypes.java 于 2026-10-03 11:08 把注册入口换成了**本类自己的包装方法**
+    //    （L550 `private static GTRecipeType register(String name, String category, RecipeType<?>... proxyRecipes)`，
+    //      L551 内部才转交 `GTRecipeTypes.register(name, category, proxyRecipes)`），
+    //    注册点写法因此从 `X = GTRecipeTypes.register("id", "multiblock")` 变成 `X = register("id", "multiblock")`
+    //    ⇒ 写死类名的那条正则**静默失配 ⇒ 0 条** ⇒ G1 抛「活代码 register 条数 = 0 ≠ setMaxIOSize 条数 = 45」。
+    //    ⇒ 新判据**同时**认两种形态：① 本类包装 register("id", …)；② 原始 GTRecipeTypes.register("id", …)。
+    //      两种形态必须都认 —— 否则谁把写法改回原形态，这里又会静默失配一次（同一类 bug 复发）。
+    //    ⚠️ 为什么放宽前缀不会误伤包装方法自己的那两行（照 L550/L551 实文写的，不是猜的）：
+    //      · L550 定义 `register(String name, …)` —— 括号后紧跟的是标识符 `String`，不是 `"` ⇒ 不匹配；
+    //      · L551 转交 `GTRecipeTypes.register(name, category, …)` —— 同样括号后无引号 ⇒ 不匹配；
+    //      · 注释作废块（L1446+）里的 `// … GTRecipeTypes.register("…", …)` —— 由 isCommentLine 挡掉，不进 regs。
+    //      ⇒ 判据「register( 紧跟一个带引号的 id」只可能落在**调用点**上。
+    var regRe = /(?:GTRecipeTypes\.)?\bregister\(\s*"([a-z0-9_]+)"\s*,/
     var maxRe = /\.setMaxIOSize\(\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\)/
     var lastReg = null, regs = 0
     var caps = {}, where = {}
@@ -246,8 +259,15 @@ if (_g0.length) {
         + '\n    ⇒ 注意：`worldline_oscillation_collection` 的 (16,2,4,2) 是 2026-09-29 的用户裁决；'
         + '\n       若这次改动是有意的，请【同时】更新本节 _ctrls 里的期望值，不要只改源码。\n')
 }
+// 🔴 2026-10-03 补：把 G1 那条判据的两个数【在通过时也打出来】。
+//   原样只在失败时于 throw 的消息里出现（'活代码 register 条数 = N ≠ setMaxIOSize 条数 = M'），
+//   于是"改好了"这件事在 stdout 上没有读数可查 —— 而 2026-10-03 的正则回归恰恰就是这两个数失配。
+//   ⇒ 通过时也报数，回归下次一跑就能从 stdout 直接看见（不需要去看代码或去数）。
+//   ⚠️ 只加打印，不改判据：判据仍是下面 _g1 里的 `SH_JAVA.regs !== SH_JAVA.liveCount`。
 console.log('[PF] 真源① ShanhaiRecipeTypes.java：活代码 setMaxIOSize = ' + SH_JAVA.liveCount
-    + ' 条（= REAL_TYPE_COUNT ' + SH_JAVA.realTypeCount + '）／注释作废块里 ' + SH_JAVA.deadCount + ' 条（已剔除）')
+    + ' 条（= REAL_TYPE_COUNT ' + SH_JAVA.realTypeCount + '）／注释作废块里 ' + SH_JAVA.deadCount + ' 条（已剔除）'
+    + '／活代码 register 条数 = ' + SH_JAVA.regs
+    + (SH_JAVA.regs === SH_JAVA.liveCount ? ' ⇒ = setMaxIOSize 条数 ' + SH_JAVA.liveCount + ' ✓' : ' 🔴 ≠ setMaxIOSize 条数 ' + SH_JAVA.liveCount))
 console.log('[PF] 真源② GTRecipeTypes.txt（javap 转储）：解析出 ' + Object.keys(GT_BYTECODE.caps).length
     + ' 个 gtceu 原生类型（正面对照 circuit_assembler=' + JSON.stringify(GT_BYTECODE.caps['circuit_assembler'])
     + ' primitive_blast_furnace=' + JSON.stringify(GT_BYTECODE.caps['primitive_blast_furnace']) + '）')
@@ -651,6 +671,16 @@ console.log('[PF] CELL_EUT（现算 = gt_voltage.cellEUt(元件名)）= ' + JSON
 //    刻意做成**显式正向表**，不再沿用反着写的 `NO_GATE_TYPES` 白名单（那个表只列了土高炉一个，
 //    "不是山海的机器"这件事当时是靠"漏掉即默认"表达的，加一台新的原生机器就会静默变错）。
 //
+// 🔴🔴 2026-10-03 用户点单后，**两张表的剩余作用（已按新规则重核，只读分析，未改判定用途）**：
+//    · SHANHAI_TYPES —— 【仍在生效】，但作用缩小成"**不消耗时落哪种形态**"：
+//        纸上【有】催化剂纸时：在本表里 ⇒ 等级门槛 ModuleLevelCondition；不在 ⇒ .notConsumable 真催化剂。
+//        ⚠️ 它**不再**决定"要不要消耗"—— 那由纸（`catModule`）单独决定。
+//        它另有一个【加载期护栏】用途（G5）：纸上用到的 shanhai 类型漏进本表 ⇒ 直接拒绝写产物。
+//    · WORLDLINE_TYPES —— 【对产物零影响】：2026-10-03 起不再参与任何判定，只剩诊断读数
+//        （进 specs.json 的 `isWorldlineRecipe` 与产物注释），保留是为了"历史判据可追溯"。
+//        ⇒ 改它【不会】改变任何一条配方的落法；改 SHANHAI_TYPES 仍会（无纸条目除外）。
+//    · SHARD_FAMILY（残片族）—— 同上：2026-10-01 那版判据的读数，本轮起只作诊断（见其定义处）。
+//
 //  · SHANHAI_TYPES —— 出处：shanhai-rewrite\src\main\java\com\shanhai\common\recipe\ShanhaiRecipeTypes.java
 //      里 **全部 41 条** `GTRecipeTypes.register("…", "…")`（已用 grep 逐条抄下来，未凭记忆写）。
 //      gtceu 原生的（primitive_blast_furnace / assembler / circuit_assembler …）**不在这张表里**。
@@ -676,15 +706,26 @@ var SHANHAI_TYPES = {
     matter_aggregation: 1, gravitational_wave_consumption: 1, tianjie_navigation: 1,
     nebula_siphoning: 1, chaos_crafting: 1, seventy_two_changes: 1,
     gravitational_wave_production: 1, primordial_myriad_ascension_tier_1: 1,
-    primordial_myriad_ascension_tier_2: 1, kmyy: 1, spacetime_distortion: 1
+    primordial_myriad_ascension_tier_2: 1, kmyy: 1, spacetime_distortion: 1,
+    // 🆕 2026-10-03 补第 45 条「原初山海调试」primordial_debug
+    //   （用户点单；注册在 ShanhaiRecipeTypes.java 的 register("primordial_debug","multiblock")）。
+    //   ⇒ 它是"山海自己注册的类型"，按本表口径必须在这里有一条；漏了就落 .notConsumable 真催化剂。
+    //   ⚠️ 它【不】进 WORLDLINE_TYPES（不是世线族）。
+    primordial_debug: 1
 }
-// ── 世线族（gt id）—— 这些类型的配方【消耗】物质模块 ─────────────────────────
+// ── 世线族（gt id）—— 🔴 2026-10-03 起【不再决定】物质模块要不要消耗，只作历史诊断读数 ─────
+// 🔴🔴 2026-10-03 状态说明（用户点单：判据改成"只看纸"）：
+//    本表【当前对产物零影响】—— 它不再出现在 `consumeModule` 的判据里，
+//    只写进 specs.json 的 `isWorldlineRecipe` 字段、以及产物注释里的一句"历史读数"。
+//    保留它的理由：① 用户历次裁决（下面三段）的证据链不能丢；② 将来若要回到"按类型"的判据，
+//    这张表是现成的、已核过真源的正向表。⇒ 删/改本表【不会】改变任何配方落法。
 // 🔴🔴 2026-09-28 用户裁决（第一条）：**`wl_board_circuit_assembly` 与 `wl_board_wafer_etching`
 //    不算"世线族"** ⇒ 已从本表【拿掉】。
 //    ⇒ 后果：PF.txt 里那 3 条「世线板电路组装」配方（no=34 出 8× shanhai:wl_board_ulv ／
 //      no=43 出 1× shanhai:wl_board_lv ／ no=60 出 1× shanhai:wl_board_mv）**保持"不消耗"**，
 //      它们的物质模块落现有机制（这两个类型都在 SHANHAI_TYPES 里 ⇒ **等级门槛 ModuleLevelCondition**）。
-//      纸上本来就写着「物质模块是催化剂」，与落法一致。
+//      纸上本来就写着「物质模块是催化剂」，与落法一致（⇒ 在 2026-10-03 判据下这个结论【不变】，
+//      而且现在的原因更直接：纸上有催化剂纸）。
 //    ⚠️ 本表只保留真正以 `worldline_` 开头的 4 个，且**采样已移出**。`wl_board_*` 虽然也注册在
 //      ShanhaiRecipeTypes.java 里（L596 / L606），但同样**不参与"应当消耗"的判定**。
 // 🔴🔴 2026-09-29 用户裁决（第二条）：**`worldline_sampling`（世线采样）也不算"世线族"** ⇒ 已从本表拿掉。
@@ -704,7 +745,11 @@ var WORLDLINE_TYPES = {
     worldline_oscillation_collection: 1, worldline_cutting: 1,
     worldline_matter_recurrence: 1, worldline_probability_cracking: 1
 }
-// ── 世线【残片族】（= 「世线的运用」）—— 产出落在这一族 ⇒ 物质模块【不消耗】─────────
+// ── 世线【残片族】（= 「世线的运用」）—— 🔴 2026-10-03 起【不再决定】物质模块要不要消耗 ────
+// 🔴🔴 2026-10-03 状态说明：本表第二轮起也变成**历史诊断读数**（写进 specs.json 的推导、
+//    以及产物注释里那句"与 2026-10-01 结论也一致"）。判定消不消耗的唯一依据是纸。
+//    实测自证：本次唯一命中本表的配方（thread_shard_1，PF 第 77 条）纸上【有】催化剂纸
+//    ⇒ 新判据给出"不消耗"，与旧判据结论一致 ⇒ 本表当前"改了也不影响产物"。
 // 🔴🔴 2026-10-01 用户拍板（**采用"判据 B"**）：把消费判据从"只看配方类型"改成
 //    **「看【产出】是不是『残片族』」**。原话（逐字）：
 //      · 「那条配方的模块」⇒ 选 **「B. 等级门槛（不烧、但要挂）」**
@@ -726,15 +771,17 @@ var WORLDLINE_TYPES = {
 //         `SHARD_EXPONENTS` 表里、同属"残片族/运用类"⇒ 一并收录（当前 PF.txt 里它没有配方，
 //         所以对本次产物 **零影响**；收录它只是为了与真源逐字对齐、将来不漏）。
 //
-//   📐 判据落点（与既有规则的优先级）：
+//   📐 判据落点（⚠️ 下面是 **2026-10-01 那版**的优先级，已被 2026-10-03"只看纸"取代，只作留档）：
 //      ⓐ 产出含物质模块（制作物质模块）  ⇒ **消耗**
-//      ⓑ′ 产出 ∈ 残片族（世线的运用）    ⇒ **不消耗**（落等级门槛）   ← 本次新增，**这条优先**
+//      ⓑ′ 产出 ∈ 残片族（世线的运用）    ⇒ **不消耗**（落等级门槛）   ← 2026-10-01 新增，**这条优先**
 //      ⓑ 类型 ∈ 世线族（世线本体线）      ⇒ **消耗**                  ← 原规则②，保留
 //      ⓒ 其他山海类型                     ⇒ 等级门槛
 //      ⓓ 非山海类型                       ⇒ 真催化剂
 //      ⇒ ⚠️ ⓑ′ 会与 ⓑ 重叠（`worldline_cutting` 同时命中两条），**ⓑ′ 先判 ⇒ ⓑ′ 赢**。
 //        证据自证：世线震荡收集（产出 **维度世线碎片** = 世线本体）不命中 ⓑ′ ⇒ **仍消耗** ✓
 //                  （⇒ 用户 2026-10-01 复述："世线本体 = 世线碎片·核心那一族" ⇒ 它该消耗 ✓）
+//      🔴🔴 2026-10-03 起：上面这套【全部失效】，判据只剩一条 —— 纸上有没有「物质模块是催化剂」。
+//        本表不再参与决策（见本段开头的状态说明）。
 var SHARD_FAMILY = {
     'shanhai:thread_shard_1': 1,
     'shanhai:thread_shard_2': 1,
@@ -753,6 +800,16 @@ var SHARD_FAMILY = {
 //    `shanhai.recipe.fail.module_level.unresolved` = "…（配方里的模块 id 不在 17 个物质模块表里）"
 //    也以它为准 ⇒ 这就是"什么算物质模块"的唯一判据。
 //
+// 🔴🔴 2026-10-03 同步（用户「物理台阶」重排）：Java 侧 `MODULE_LEVELS` 把**等级 5..16 的对应关系**
+//    改了（1-4 与 17 固定不动）⇒ 本表的 8 个值跟着改（transformation 5→9、dark_star 6→7、
+//    material_recombination 7→5、zeroing 9→6、apex 10→11、dimensional_ascension 11→10、
+//    transfinite 12→13、chaos 13→12）。**键集合一个都没动**（"什么算物质模块"的判据不变）。
+//    ⚠️ 本表的**数字只用于生成注释文本**（`要求模块等级 ≥ N`，见下面 `lvl` 的两处用处），
+//       真正生效的门槛由 Java 侧 `MODULE_LEVELS` 现算 —— 所以本表必须与它同步，否则注释会说谎。
+//    ⚠️ 本次同步**不改变任何产物字节**：现存的 `moduleLevelRequirement` 只用到
+//       introductory(Lv.1) / basic(Lv.2) / material_deduction(Lv.3) / virtual_image(Lv.4) /
+//       genesis(Lv.17) 这 5 个 id，全部落在"固定不动"的档位上（改后重跑 sha256 逐字节相同）。
+//
 // 🔴🔴 为什么必须换成这张表：**旧代码用的是 `/material_module$/` 正则，它漏了 17 项里的 6 个**
 //    （不以 "material_module" 结尾的：material_deduction_module / material_recombination_module /
 //      imaginary_material_transition_remolding_module / material_creation_module /
@@ -767,15 +824,16 @@ var MATERIAL_MODULES = {
     'shanhai:basic_material_module': 2,
     'shanhai:material_deduction_module': 3,
     'shanhai:virtual_image_material_module': 4,
-    'shanhai:transformation_material_module': 5,
-    'shanhai:dark_star_material_module': 6,
-    'shanhai:material_recombination_module': 7,
+    // 2026-10-03 起下面 8 个数字 = 新档位（与 Java MODULE_LEVELS 同步）
+    'shanhai:material_recombination_module': 5,
+    'shanhai:zeroing_material_module': 6,
+    'shanhai:dark_star_material_module': 7,
     'shanhai:imaginary_material_transition_remolding_module': 8,
-    'shanhai:zeroing_material_module': 9,
-    'shanhai:apex_material_module': 10,
-    'shanhai:dimensional_ascension_material_module': 11,
-    'shanhai:transfinite_material_module': 12,
-    'shanhai:chaos_material_module': 13,
+    'shanhai:transformation_material_module': 9,
+    'shanhai:dimensional_ascension_material_module': 10,
+    'shanhai:apex_material_module': 11,
+    'shanhai:chaos_material_module': 12,
+    'shanhai:transfinite_material_module': 13,
     'shanhai:eternal_material_module': 14,
     'shanhai:material_creation_module': 15,
     'shanhai:reality_anchor_module': 16,
@@ -814,12 +872,83 @@ var QUARK_EMISSION_CATALYSTS = {
 }
 /** 纸面原文常量：出现这两处才能被静默改名抓出来（见 §7④）。 */
 var PAPER_QUARK_CATALYST = '夸克释放催化剂作为催化剂'
+/** 🔴 2026-10-03：物质模块的**唯一判据纸**的纸面原文（kind = 'NOTE'）。
+ *  用户点单原文：「判断物质模块是否是催化剂仅凭借是否我放了那张纸」
+ *  ⇒ 全脚本只在这里写一次这个字符串，判据 / 自报行 / 文件头计数都引用它，避免改名时漏改一处。 */
+var PAPER_MODULE_CATALYST = '物质模块是催化剂'
 /** "Nx <id>" / "<id>" ⇒ id。产物里的 itemInputs / notConsumable 都是这个形态。 */
 function idOfSlotText(s) {
     var t = String(s).trim()
     var m = /^\d+x\s+(.+)$/.exec(t)
     return m ? m[1] : t
 }
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔴🔴 2026-10-03 追加（用户点单）：**判据的唯一实现**——「只看纸」。
+//    ⚠️ 为什么把它抽成函数：本轮之前，这条判据只活在 `specFromRow()` 里，
+//       而 `emitOldGt()` 那 3 条"老配方"（PF 第 21 / 27 / 36 条）走的是**另一条路**
+//       （硬编码字符串文本，见 emitOldGt 处）⇒ 它们**根本吃不到判据**
+//       ⇒ `shanhai:pf/photon`（= PF 第 36 条，纸上没有催化剂纸）一直挂着
+//       `moduleLevelRequirement = 1x 入门物质模块`，而按 2026-10-03 的规则它**应当被消耗**。
+//    ⇒ 现在两条路**共用这一个函数**（一个判据、两处落点），再也不会出现"某条配方漏在判据之外"。
+//    ⚠️ 自证：`moduleRuleSelfTest()`（下面）在加载期拿一条**已知有纸**的行验证本函数报 true，
+//       拿一条**已知无纸**的行验证它报 false —— 判据自己先证明自己认得出来。
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * 物质模块怎么落 —— **只看纸**（用户 2026-10-03 原话逐字：
+ * 「判断物质模块是否是催化剂仅凭借是否我放了那张纸」）。
+ * @param {object} R        rows.json 里的**整行对象**（判据读它的 `notes`，即 papers 里 kind='NOTE' 的那批）
+ * @param {string} typeId   gt 类型 id（决定"不消耗"时落门槛还是落真催化剂）
+ * @returns {{catModule:boolean, slot:(number|null), decision:string, why:string}}
+ *          decision: 'consume'（纸上无催化剂纸 ⇒ 模块进 itemInputs 被消耗）
+ *                  | 'gate'    （纸上有 ⇒ 山海自己的机器 ⇒ ModuleLevelCondition 等级门槛）
+ *                  | 'catalyst'（纸上有 ⇒ 非山海机器 ⇒ .notConsumable 真催化剂）
+ */
+function moduleRuleOf(R, typeId) {
+    var catModule = false, slot = null
+    var notes = (R && R.notes) || []
+    for (var i = 0; i < notes.length; i++) {
+        if (notes[i].desc.name === PAPER_MODULE_CATALYST) { catModule = true; slot = notes[i].slot }
+    }
+    var decision = catModule ? (SHANHAI_TYPES[typeId] ? 'gate' : 'catalyst') : 'consume'
+    var why = catModule
+        ? ('纸上（第 ' + slot + ' 格）放着「' + PAPER_MODULE_CATALYST + '」')
+        : ('纸上（无）【没有】「' + PAPER_MODULE_CATALYST + '」')
+    return { catModule: catModule, slot: slot, decision: decision, why: why }
+}
+/** 某一行输入里全部【物质模块】的落点文本（形如 '1x shanhai:basic_material_module'），按纸上顺序，数量照纸。 */
+function moduleSlotsOfRow(R) {
+    var out = []
+    for (var i = 0; i < ((R && R.real) || []).length; i++) {
+        var d = R.real[i].d
+        if (MATERIAL_MODULES[d.id]) out.push((d.count || 1) + 'x ' + d.id)
+    }
+    return out
+}
+// ── 判据自证：先证明它认得出来，再让任何一条配方去用它 ──────────────────────────
+// ⚠️ 用的是【真正在读的那份 rows】里的样本（不是编造的对象）：
+//   · 正向：找一条 notes 里【写着】催化剂纸的 ⇒ 必须报 true；
+//   · 负向：找一条【没写】的 ⇒ 必须报 false。
+//   任一条不成立 ⇒ 抛错拒绝写产物（判据坏了却继续生成，比不生成危险得多）。
+function moduleRuleSelfTest() {
+    var pos = null, neg = null
+    for (var i = 0; i < rows.length; i++) {
+        var has = moduleRuleOf(rows[i], 'zzz_probe').catModule
+        if (has && !pos) pos = rows[i]
+        if (!has && !neg) neg = rows[i]
+    }
+    if (!pos) throw new Error('[PF] 🔴 物质模块判据自证失败：整份 rows.json 里找不到任何一条写着「'
+        + PAPER_MODULE_CATALYST + '」的样板 ⇒ 判据不可能工作（先查 parse_pf/gen_manifest 是否把 NOTE 读丢了）。')
+    if (!neg) throw new Error('[PF] 🔴 物质模块判据自证失败：整份 rows.json 里**每一条**都写着「'
+        + PAPER_MODULE_CATALYST + '」⇒ 判据恒为 true，等于没有判据。')
+    var rp = moduleRuleOf(pos, 'primordial_singularity_inversion')   // 山海类型 ⇒ 期望 gate
+    var rn = moduleRuleOf(neg, 'primordial_singularity_inversion')   // 无纸 ⇒ 期望 consume
+    if (rp.decision !== 'gate') throw new Error('[PF] 🔴 判据自证失败：有纸的山海类型配方应当落 gate，实得 ' + rp.decision)
+    if (rn.decision !== 'consume') throw new Error('[PF] 🔴 判据自证失败：无纸的配方应当落 consume，实得 ' + rn.decision)
+    var rc = moduleRuleOf(pos, 'primitive_blast_furnace')            // 非山海类型 + 有纸 ⇒ 期望 catalyst
+    if (rc.decision !== 'catalyst') throw new Error('[PF] 🔴 判据自证失败：有纸的非山海类型配方应当落 catalyst，实得 ' + rc.decision)
+    console.info('[PF] ✅ 物质模块判据自证（只看纸）：有纸样本 #' + pos.no + ' ⇒ gate/catalyst ✓；无纸样本 #' + neg.no + ' ⇒ consume ✓')
+}
+moduleRuleSelfTest()
 /** 某条 spec 的产出里有哪些落在【残片族】（供告警/注记行点名，只回 id，不编中文名）。 */
 function shardFamilyNames(outs) {
     var r = []
@@ -830,13 +959,110 @@ function shardFamilyNames(outs) {
     return r.join(' / ') || '（无）'
 }
 // ═══════════════════════════════════════════════════════════════════════════════
+// 🔴 2026-10-03 「力场发生器是催化剂」—— 判据由【写死 LV】改成【认整族】＋ 族自证
+// ═══════════════════════════════════════════════════════════════════════════════
+// 修的是什么：本文件原来把判据写死成 `it.id === 'gtceu:lv_field_generator'`（旧 L993）
+//   ⇒ 纸上写了「力场发生器是催化剂」、元件却用 **MV/HV/…** 时**静默失效**：那个物品照常
+//     落进 `itemInputs` **被消耗**，且不报任何错。
+//   受害配方 = `shanhai:pf/muon`（PF.txt 第 83 条，元件「处理样板HV」，用 `gtceu:hv_field_generator`）。
+//
+// 现判据（两条**同时**满足才算命中）：
+//   ① 纸写了「力场发生器是催化剂」（= 本段上方的 `catField`）；
+//   ② 物品 id ∈【力场发生器族】= `isFieldGeneratorFamily(it.id)`。
+//
+// 🔴 族**不得**用裸后缀 `/field_generator$/` 判 —— 游戏导出的注册表里有 2 个**不属于**力场发生器、
+//    却同样以该后缀结尾的 id，裸后缀会把它们**误吞**（它们会被错误地变成"不消耗的催化剂"）：
+//      · `kubejs:containment_field_generator`              （遏制场发生器）
+//      · `kubejs:spacetime_compression_field_generator`    （时空压缩场发生器）
+//    ⇒ 本判据把**命名空间锚死**在 `gtceu:` / `gtlcore:` 两处。
+//
+// 族内容（2026-10-03 现查导出 `local\kubejs\export\registries\item.json`：以 `field_generator`
+//   结尾的 id 共 **16** 个，其中属族 **14** 个、被排除 **2** 个）：
+//     gtceu:lv / mv / hv / ev / iv / luv / zpm / uv / uhv / uev / uiv / opv / uxv _field_generator（13 个电压档）
+//     gtlcore:max_field_generator                                                                  （第 14 个）
+//     （排除：上面那 2 个 `kubejs:` 的）
+//
+// ⚠️ 为什么用"命名空间锚死的正则"、而不是手抄一张 14 键的正向表：
+//    本文件 §§7①/§7④ 那两次的真正病根是**按名字正则在命名不规整的空间里判**
+//    （`/material_module$/` 漏 6 项；`/quark_emission_catalyst$/` 会误吞
+//     `shanhai:quark_emission_catalyst`）。本族的 id 空间**是规整的**（`gtceu:<档位>_field_generator`），
+//    那个病根在这里不适用；而**手抄表**的病根恰好就是【本 defect 本身】—— GT 再加一档电压时
+//    表不会跟着长 ⇒ 同一处静默失效原样复发。⇒ 取两者之长：**正则做判据（不会漏档）＋ 注册表
+//    现场自证（不会误吞、也不会漏档）**。自证见下。
+var FIELD_GENERATOR_FAMILY_RE = /^(?:gtceu|gtlcore):[a-z0-9_]*_field_generator$/
+/** 官方族判据：物品 id 是否属于【力场发生器族】（见上：命名空间锚死，挡掉 2 个 kubejs 同名物）。 */
+function isFieldGeneratorFamily(id) {
+    return typeof id === 'string' && FIELD_GENERATOR_FAMILY_RE.test(id)
+}
+// ── 族自证（正负对照都在里面）───────────────────────────────────────────────────
+//   正面：导出注册表里 14 个 gtceu/gtlcore 的 `*_field_generator` 必须被判据【全部接受】；
+//   负面：同一张表里 2 个 `kubejs:*_field_generator` 必须被【全部拒绝】。
+//   任一不符 ⇒ 抛错拒绝写产物（判据与真实注册表脱节了，绝不能静默继续）。
+//   ⚠️ 读不到导出表（新实例 / 还没 /kubejs export）时**不抛错**，只响亮告警并如实写"本轮无读数" ——
+//      口径与上面的 `exportRecipeFileCount()` 一致（读不到就报"读不到"，绝不编一个数字）。
+var FIELD_FAMILY_EVIDENCE = (function () {
+    var _p = path.join(INSTANCE, 'local', 'kubejs', 'export', 'registries', 'item.json')
+    var _raw
+    try { _raw = fs.readFileSync(_p, 'utf8') } catch (e) {
+        return { ok: null, why: '读不到 `' + _p + '`（' + (e && e.code ? e.code : e) + '）' }
+    }
+    var _seen = {}, _m = _raw.match(/"([a-z0-9_]+:[a-z0-9_\/]*field_generator)"/g) || []
+    for (var _i = 0; _i < _m.length; _i++) _seen[_m[_i].slice(1, -1)] = 1
+    var _all = []
+    for (var _k in _seen) if (Object.prototype.hasOwnProperty.call(_seen, _k)) _all.push(_k)
+    _all.sort()
+    var _in = [], _out = []
+    for (var _j = 0; _j < _all.length; _j++) { if (isFieldGeneratorFamily(_all[_j])) _in.push(_all[_j]); else _out.push(_all[_j]) }
+    return { ok: true, path: _p, all: _all, inFam: _in, outFam: _out }
+})()
+if (FIELD_FAMILY_EVIDENCE.ok === true) {
+    var _ffBad = []
+    if (FIELD_FAMILY_EVIDENCE.all.length !== FIELD_FAMILY_EVIDENCE.inFam.length + FIELD_FAMILY_EVIDENCE.outFam.length) {
+        _ffBad.push('分类不守恒（族内 ' + FIELD_FAMILY_EVIDENCE.inFam.length + ' + 族外 '
+            + FIELD_FAMILY_EVIDENCE.outFam.length + ' ≠ 总数 ' + FIELD_FAMILY_EVIDENCE.all.length + '）')
+    }
+    if (FIELD_FAMILY_EVIDENCE.inFam.length !== 14) {
+        _ffBad.push('族内命中 = ' + FIELD_FAMILY_EVIDENCE.inFam.length
+            + '，期望 14（13 个 gtceu 电压档 ＋ gtlcore:max_field_generator）')
+    }
+    if (FIELD_FAMILY_EVIDENCE.outFam.length !== 2) {
+        _ffBad.push('族外 = ' + FIELD_FAMILY_EVIDENCE.outFam.length
+            + '，期望 2（kubejs:containment_field_generator / kubejs:spacetime_compression_field_generator）')
+    }
+    for (var _ffb1 = 0; _ffb1 < FIELD_FAMILY_EVIDENCE.outFam.length; _ffb1++) {
+        var _ffid = FIELD_FAMILY_EVIDENCE.outFam[_ffb1]
+        if (!/^kubejs:/.test(_ffid)) _ffBad.push('被排除的 `' + _ffid
+            + '` 不在 kubejs 命名空间 ⇒ 判据可能把一个真的力场发生器族成员误排除了（那会让它静默被消耗）')
+    }
+    for (var _ffb2 = 0; _ffb2 < FIELD_FAMILY_EVIDENCE.inFam.length; _ffb2++) {
+        var _ffid2 = FIELD_FAMILY_EVIDENCE.inFam[_ffb2]
+        if (!/^(gtceu|gtlcore):/.test(_ffid2)) _ffBad.push('族内出现了非 gtceu/gtlcore 的 `' + _ffid2 + '`')
+    }
+    if (_ffBad.length) {
+        throw new Error('[PF] 🔴 力场发生器【族自证】失败，拒绝写产物：\n    · ' + _ffBad.join('\n    · ')
+            + '\n    ⇒ 判据 = `' + FIELD_GENERATOR_FAMILY_RE + '`，取证文件 = ' + FIELD_FAMILY_EVIDENCE.path
+            + '\n    ⇒ 要么判据写错了（会静默误吞/漏档），要么游戏真的加了族成员 —— 两种情况都必须先看清再继续。')
+    }
+    console.info('[PF] ✅ 力场发生器族自证（正负对照）：导出注册表里以 `field_generator` 结尾的 id = '
+        + FIELD_FAMILY_EVIDENCE.all.length + ' 个；判据命中 = ' + FIELD_FAMILY_EVIDENCE.inFam.length
+        + ' 个 → ' + FIELD_FAMILY_EVIDENCE.inFam.join(' / '))
+    console.info('[PF]    ↳ 负对照：被【排除】= ' + FIELD_FAMILY_EVIDENCE.outFam.length + ' 个 → '
+        + FIELD_FAMILY_EVIDENCE.outFam.join(' / ') + '（这 2 个不是力场发生器，裸后缀 `/field_generator$/` 会误吞它们）')
+} else {
+    console.warn('[PF] ⚠️ 力场发生器族【本轮无自证读数】：' + FIELD_FAMILY_EVIDENCE.why
+        + ' ⇒ 判据 `' + FIELD_GENERATOR_FAMILY_RE + '` 仍按命名空间锚定生效，'
+        + '但"命中几个 / 排除几个"这次没有读数（不编数字）。')
+}
+// ═══════════════════════════════════════════════════════════════════════════════
 // 🔴 2026-09-30 硬拦【G5·模块决策的静默兜底】—— 与 CAP 缺键同型的病，同一个修法
 // ═══════════════════════════════════════════════════════════════════════════════
 // 缺键时的行为（逐个说清，这正是"兜底是继续但结果错、还是跳过"那一问）：
 //   · `TYPE_ID` 缺键        ⇒ specFromRow 返回 null ⇒ **跳过**（配方消失）——已在顶部改成硬断言；
-//   · `SHANHAI_TYPES` 缺键  ⇒ moduleDecision 落 'catalyst' ⇒ **继续，但配方内容变了**
+//   · `SHANHAI_TYPES` 缺键  ⇒ 纸上有催化剂纸时 moduleDecision 落 'catalyst' ⇒ **继续，但配方内容变了**
 //       （物质模块从"等级门槛"变成 `.notConsumable(...)` 真催化剂）；
-//   · `WORLDLINE_TYPES` 缺键 ⇒ 世线族配方不再"消耗"物质模块 ⇒ **继续，但内容变了**；
+//       ⚠️ 2026-10-03 起它**只影响"不消耗时的形态"**，不影响"要不要消耗"（那由纸单独决定）；
+//   · `WORLDLINE_TYPES` 缺键 ⇒ 2026-10-03 起【对产物零影响】：它只剩诊断读数
+//       （specs.json 的 isWorldlineRecipe 与产物注释），不再决定消不消耗；
 //   · `MATERIAL_MODULES` 缺键 ⇒ 那个物品被当普通材料**消耗掉** ⇒ **继续，但内容变了**。
 // 本条只拦最容易漏的那种：**一个类型明明由 shanhai 自己注册（真源①有），却没被写进 SHANHAI_TYPES**
 //   ⇒ 它会被静默当成"不是山海的机器"落 catalyst。CAP 那次就是这么漏的
@@ -845,7 +1071,8 @@ function shardFamilyNames(outs) {
 //      CAP = 真源① ∪ 真源②(gtceu 原生)，拿它当判据会把 `circuit_assembler` /
 //      `primitive_blast_furnace` 两个 gtceu 原生也误判成"shanhai 注册过"（这是我在扫描脚本里
 //      实际犯过一次的口径错误，被自己的原始输出当场抓下）。
-//   ⚠️ gtceu 原生类型落在本表之外是**正确**的：按 2026-09-28 规则，非山海的机器 ⇒ 真催化剂。
+//   ⚠️ gtceu 原生类型落在本表之外是**正确**的：按 2026-10-03 判据，纸上有催化剂纸时，
+//      非山海的机器 ⇒ 真催化剂（无纸时一律消耗，与类型无关）。
 var _g5 = []
 // ⚠️ 口径同上（2026-09-30）：只看【本次纸上真正用到】的类型 ⇒ 与改动前逐字等价
 //    （改动前 TYPE_ID 的 13 个键全部被用到 ⇒ "遍历表"与"遍历用到的"是同一个集合）。
@@ -883,10 +1110,15 @@ function specFromRow(R) {
     var s = { r: R, type: typeId, srcTypeName: R.type }
 
     // 输入分类
-    var catModule = null, catField = null, catQuark = null
+    // 🔴 2026-10-03：catModule **就是本轮的判据**（不再只是一个注记）⇒ 连"纸在第几格"一起记下来，
+    //    让产物的自报行能指出"按哪张纸判的"（`papers[i].slot`，PF.txt 里 in 的下标）。
+    //    ⚠️ 2026-10-03 追加：判据本体已抽到 `moduleRuleOf()`（全脚本唯一实现，emitOldGt 也用同一个）
+    //       ⇒ 这里只是**调用**它，不再自己写一份判断（"一条规则两处各写一遍"正是上一轮漏掉 pf/photon 的成因）。
+    var _mr = moduleRuleOf(R, typeId)
+    var catModule = _mr.catModule, catModuleSlot = _mr.slot
+    var catField = null, catQuark = null
     for (var i = 0; i < R.notes.length; i++) {
         var n = R.notes[i].desc.name
-        if (n === '物质模块是催化剂') catModule = true
         if (n === '力场发生器是催化剂') catField = true
         // 🔴 2026-09-30 新增：纸面原文「夸克释放催化剂作为催化剂」（逐字，末尾无句号）
         if (n === PAPER_QUARK_CATALYST) catQuark = true
@@ -901,22 +1133,30 @@ function specFromRow(R) {
     var itemInputs = [], notConsumable = [], moduleGate = null, moduleFallback = null, flags = []
     /** 本条实际落成"催化剂"的夸克释放催化剂（供 [SHANHAI-DESC] 证据行与产物注释用），元素形如 '64x shanhai:...' */
     var quarkLanded = []
+    /** 🔴 2026-10-03：本条实际落成"不消耗"催化剂（`.notConsumable`）的**力场发生器**，
+     *  元素形如 '1x gtceu:hv_field_generator'。供"这条族判据到底改了哪几条配方"**现算**用 —— */
+    var fieldLanded = []
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // 🔴🔴 2026-09-28 用户新规则（原话逐字，本次唯一的口径）：
-    //   「有些配方的物质模块的配置错了，目前，注意是目前只有制作物质模块和世线的配方才需要消耗物质模块」
-    //   ⇒ 【应当消耗】物质模块的配方只有两类：
-    //        ① 制作物质模块 —— 该配方的【产出】里有 `*material_module` 物品
-    //        ② 世线的配方   —— 该配方【类型】属于世线族（见 WORLDLINE_TYPES）
-    //      【不消耗】其余所有含物质模块的配方：
-    //        · 山海自己注册的类型 ⇒ 落现有「等级门槛」机制（ModuleLevelCondition，也不消耗）
-    //        · 不是山海的机器     ⇒ 落 `.notConsumable('Nx shanhai:<模块>')`（真催化剂）
-    //   ⚠️ 判据【不再看】纸上那张「物质模块是催化剂」—— 那是 2026-09-26 那版的做法。
-    //      旧版只在纸写了催化剂时才特殊处理；纸没写的样板 ⇒ 模块留在 itemInputs 里被【正常消耗】
-    //      ⇒ 那正是用户说的"配置错了"。**这一条是本次改动的核心。**
+    // 🔴🔴 2026-10-03 用户点单（原话逐字，**本次唯一的口径**）：
+    //   「你又写错了，这条配方物质模块要消耗，而不是催化剂，判断物质模块是否是催化剂仅凭借是否我放了那张纸」
+    //   ⇒ 判据 = 【只看纸】，只看纸上有没有那张 `name === '物质模块是催化剂'` 的 NOTE（kind = 'NOTE'）：
+    //        · 有纸 ⇒ 【不消耗】，且【形态保持现状】：
+    //             - 该配方类型 ∈ SHANHAI_TYPES（山海自己注册的类型）⇒ 落 ModuleLevelCondition 等级门槛（不占输入槽）
+    //             - 非山海类型（如土高炉 primitive_blast_furnace）⇒ 落 `.notConsumable(...)` 真催化剂
+    //        · 无纸 ⇒ 【消耗】：模块物品**进 itemInputs**（数量照纸上那个格子的数量，通常 1x），
+    //             既不挂门槛、也不进 notConsumable
+    //   ⚠️ 本条规则【取代】原来的 `consumeModule = isModuleRecipe || (isWorldlineRecipe && !isShardFamilyRecipe)`
+    //      —— 那套是"按产出 / 按类型推断"，会把"纸上一句话都没写"的配方【静默】判成不消耗
+    //      （用户报的正是这条：no=98 纸上只有「60s / 原初奇点反演」两张纸，模块却被落了门槛）。
+    //   ⚠️ isModuleRecipe / isWorldlineRecipe / isShardFamilyRecipe 三个读数【保留】，但
+    //      **它们不再决定"要不要消耗"**，只用于诊断与自报：
+    //        · isModuleRecipe ⇒ 用于核对"制作物质模块的配方 ⇒ 消耗"这条口径没退化
+    //          （说明见 §7①：实测本次 5 条制作物质模块的配方纸上【全都没有】催化剂纸 ⇒ 与"只看纸"天然一致）；
+    //        · isWorldlineRecipe / isShardFamilyRecipe ⇒ 只进 specs.json 与产物注释（历史判据留档、可追溯）。
     //   ⚠️ 降级通道【保留】：moduleGate / moduleFallback ⇒ 产物里的 moduleLevelRequirement /
     //      moduleLevelFallbackCatalyst。jar 没绑 / typeof 判不到类时自动退回催化剂形态（配方不会消失）。
-    //   ⚠️ 未知类型（两张表都查不到）走【安全默认 = 不消耗的真催化剂】，绝不默认成"消耗"，
+    //   ⚠️ 未知类型（不在 SHANHAI_TYPES 里）在有纸时走 `.notConsumable` 真催化剂，
     //      并在控制台报警（UNKNOWN_MODULE_TYPES），不静默。
     // ═══════════════════════════════════════════════════════════════════════════
     var isModuleRecipe = false
@@ -926,16 +1166,32 @@ function specFromRow(R) {
         if (od && od.kind === 'ITEM' && od.id && MATERIAL_MODULES[od.id]) isModuleRecipe = true
     }
     var isWorldlineRecipe = !!WORLDLINE_TYPES[typeId]
-    // 🔴 2026-10-01（用户拍板"判据 B"）：产出落在【残片族】（=「世线的运用」）⇒ 不消耗。
-    //    ⚠️ 判据必须落在【产出】上：`worldline_cutting` 这个类型同时命中"世线族"，
-    //      只看类型就分不开"本体"与"运用" —— 那正是用户报的 bug。
+    // 🔴 2026-10-01（用户拍板"判据 B"）留下的**历史读数** —— ⚠️ 2026-10-03 起它【不再决定】消不消耗，
+    //    只进 specs.json 与产物注释（留档、可追溯；"当年为什么这么改"的证据不能丢）。
+    //    当时的理由：`worldline_cutting` 这个类型同时命中"世线族"，只看类型分不开"本体"与"运用"。
     var isShardFamilyRecipe = false
     for (var ps = 0; ps < R.outs.length; ps++) {
         var sd = R.outs[ps].d
         if (sd && sd.kind === 'ITEM' && sd.id && SHARD_FAMILY[sd.id]) isShardFamilyRecipe = true
     }
-    var consumeModule = isModuleRecipe || (isWorldlineRecipe && !isShardFamilyRecipe)
-    var moduleDecision = consumeModule ? 'consume' : (SHANHAI_TYPES[typeId] ? 'gate' : 'catalyst')
+    // 🔴🔴 2026-10-03：判据 = 只看纸（`catModule` = 纸上有没有「物质模块是催化剂」）。
+    //    ⚠️ 这一行就是本轮的**全部**决策逻辑 —— 三个 is* 读数只进诊断，不参与这里（见上方长注释）。
+    //    ⚠️ 2026-10-03 追加：改成直接取 `moduleRuleOf()` 的结论（唯一实现），本条不再自己算。
+    var consumeModule = (_mr.decision === 'consume')
+    var moduleDecision = _mr.decision
+    // 🔴 2026-10-03：把【被取代的旧判据】（`isModuleRecipe || (isWorldlineRecipe && !isShardFamilyRecipe)`）
+    //    的结论也算一遍，纯粹为了**现算"本版到底改了哪几条"**（文件头 §7① 要与它对齐，不手抄）。
+    //    ⚠️ 它不参与任何落法；`moduleLandedChanged` = 新旧判据结论不同的那几条。
+    var moduleDecisionLegacy = (isModuleRecipe || (isWorldlineRecipe && !isShardFamilyRecipe))
+        ? 'consume' : (SHANHAI_TYPES[typeId] ? 'gate' : 'catalyst')
+    // 🔴 口径核对（不是决策）：用户要求保留「制作物质模块的配方 ⇒ 消耗」，并"核一遍别让它退化"。
+    //    新判据下它与"只看纸"天然一致（那类配方纸上本来就没有催化剂纸）；
+    //    万一哪天有人在制作物质模块的配方上放了催化剂纸 ⇒ 两个口径打架 ⇒ 必须【响】，不能静默按纸走。
+    if (catModule && isModuleRecipe) {
+        flags.push('🔴 口径打架：本条的【产出】里有物质模块（= 用户口径里的"制作物质模块"，应当【消耗】），'
+            + '但纸上（第 ' + catModuleSlot + ' 格）写着「物质模块是催化剂」⇒ 按 2026-10-03 判据【只看纸】本条落"不消耗"，'
+            + '与"制作物质模块 ⇒ 消耗"那条口径相反 ⇒ **请用户裁决**（生成器不自己选）。')
+    }
     var modSeen = 0
 
     for (var b = 0; b < items.length; b++) {
@@ -943,29 +1199,37 @@ function specFromRow(R) {
         if (it.isModule) {
             modSeen = modSeen + 1
             if (moduleDecision === 'consume') {
-                // ✅ 应当消耗：模块留在 itemInputs 里，照常被消耗掉
+                // ✅ 无纸 ⇒ 应当消耗：模块留在 itemInputs 里（数量照纸），照常被消耗掉
                 itemInputs.push(it.cnt + 'x ' + it.id)
-                if (catModule) flags.push('🔴 纸上写了「物质模块是催化剂」，但按 2026-09-28 新规则本条应当【消耗】物质模块'
-                    + '（' + (isModuleRecipe ? '产出里有物质模块 ⇒ 属于"制作物质模块"' : '配方类型是世线族 ⇒ 属于"世线的配方"') + '）'
-                    + ' ⇒ **以新规则为准：不挂催化剂、不设门槛，模块照常消耗**。')
+                // 🔴 不变式：consumeModule = !catModule ⇒ 走到这个分支【必然】纸上没有催化剂纸。
+                //    这是一条**加载期自检**，不是分支逻辑：万一有人把上面那行判据改坏 ⇒ 这里必须响，
+                //    绝不能像 2026-09-28 那版一样"纸写着催化剂、却静默按消费走"（那正是用户报的错的一半）。
+                if (catModule) throw new Error('[PF] 🔴 内部不变式被破坏（PF.txt 第 ' + R.no + ' 条 / ' + R.type + '）：'
+                    + '本分支（消费）本应只在"纸上无「物质模块是催化剂」"时进入，但本条纸上（第 ' + catModuleSlot + ' 格）【写着】这张纸。'
+                    + '\n    ⇒ consumeModule / moduleDecision 的判据被改坏了（2026-10-03 口径 = 只看纸）⇒ 拒绝写产物。')
                 continue
             }
             if (moduleDecision === 'gate') {
                 if (moduleGate === null) { moduleGate = it.cnt + 'x ' + it.id; moduleFallback = it.cnt + 'x ' + it.id }
                 else flags.push('该样板有【多个】物质模块输入（' + moduleGate + ' 与 ' + it.cnt + 'x ' + it.id + '）⇒ 等级门槛只取了第一个。')
-                // 🔴 2026-10-01：只有在【判据真的因为残片族而改判】时才报这一行 ——
-                //    ⚠️ 否则纸写催化剂、判据却"因别的原因 gate"的几十条会各多出一句
-                //       "产出 ∈ 残片族（（无））"的假话（我自己第一版真犯了这个错，被逐行 diff 抓下）。
-                if (catModule && isShardFamilyRecipe) flags.push('✅ 纸上写了「物质模块是催化剂」，与判据一致：本条产出 ∈ 残片族'
-                    + '（' + shardFamilyNames(R.outs) + ' =「世线的运用」）⇒ **不消耗**，落等级门槛；'
-                    + '纸与判据两边都对上了，不需要裁决。')
+                // 🔴 2026-10-03 改文案：不消耗的【原因】现在是"纸上有催化剂纸"，残片族不再是判据 ⇒
+                //    这一行只补一句"与 2026-10-01 那版判据的结论也一致"，不再说"判据是因残片族生效的"。
+                //    ⚠️ 仍然只在【真的命中残片族】时才打 —— 否则纸写催化剂、产出与非残片族的几十条
+                //       会各多出一句 "产出 ∈ 残片族（（无））" 的假话（2026-10-01 我自己真犯过这个错）。
+                if (catModule && isShardFamilyRecipe) flags.push('✅ 纸上写了「物质模块是催化剂」⇒ 按 2026-10-03 判据（只看纸）**不消耗**，落等级门槛；'
+                    + '本条产出 ∈ 残片族（' + shardFamilyNames(R.outs) + ' =「世线的运用」）'
+                    + ' ⇒ 与 2026-10-01 那版判据（看产出）的结论【也一致】，两个口径不打架。')
                 continue   // 从 itemInputs 里移走（不能两处都写）
             }
             // moduleDecision === 'catalyst'（非山海的机器）⇒ 真催化剂，不设等级门槛
             notConsumable.push(it.cnt + 'x ' + it.id)
             continue
         }
-        if (it.id === 'gtceu:lv_field_generator' && catField) { notConsumable.push(it.cnt + 'x ' + it.id); continue }
+        // 🔴 2026-10-03 修（defect A）：判据由【写死 LV】改成【认整族】—— 见段首那段长注释。
+        //    原来写 `it.id === 'gtceu:lv_field_generator'` ⇒ 纸写了这句、元件却是 MV/HV/…
+        //    时**静默失效**（物品照常进 itemInputs 被消耗，且不报错）。
+        //    受害配方 = `shanhai:pf/muon`（PF.txt 第 83 条，`gtceu:hv_field_generator`）。
+        if (catField && isFieldGeneratorFamily(it.id)) { notConsumable.push(it.cnt + 'x ' + it.id); fieldLanded.push(it.cnt + 'x ' + it.id); continue }
         // 🔴 2026-09-30：纸面原文「夸克释放催化剂作为催化剂」⇒ 该物品落 .notConsumable（不消耗）。
         //    ⚠️ 数量【保留纸上写的那个数】（本次两条都是 64）—— 本轮只改"消不消耗"，
         //       **一个数字都没动**（改数量/概率/门槛等级属于用户的数值领地，见交付报告）。
@@ -984,12 +1248,17 @@ function specFromRow(R) {
     if (moduleDecision === 'catalyst') {
         if (modSeen > 0) UNKNOWN_MODULE_TYPES[typeId] = 1
         flags.push('该配方类型 `gtceu:' + typeId + '` 不在 SHANHAI_TYPES 里（= 非山海的机器）'
-            + ' ⇒ 按 2026-09-28 规则落 `.notConsumable(...)` 真催化剂（不设等级门槛）。')
+            + ' ⇒ 按 2026-10-03 判据（纸上有「物质模块是催化剂」⇒ 不消耗、形态保持现状）'
+            + '落 `.notConsumable(...)` 真催化剂（不设等级门槛）。')
     }
     if (catField) {
+        // 🔴 2026-10-03：反查判据必须与上面挂载时**同一套**（族判据），否则 HV 那条会继续被
+        //    误报成"该样板里【没有】力场发生器物品"—— 那是**假话**（实测它就在输入里，被消耗掉了）。
+        //    同时把"/field_generator/ 只测整串文本"换成"先取 id、再走族判据"，与挂载侧逐字同源。
         var hasF = false
-        for (var c = 0; c < notConsumable.length; c++) if (/field_generator/.test(notConsumable[c])) hasF = true
-        if (!hasF) flags.push('纸写「力场发生器是催化剂」，但该样板里【没有】力场发生器物品 ⇒ 催化剂无从挂起，本条按"无催化剂"落。')
+        for (var c = 0; c < notConsumable.length; c++) if (isFieldGeneratorFamily(idOfSlotText(notConsumable[c]))) hasF = true
+        if (!hasF) flags.push('纸写「力场发生器是催化剂」，但该样板里【没有】力场发生器物品'
+            + '（族判据 = `' + FIELD_GENERATOR_FAMILY_RE + '`）⇒ 催化剂无从挂起，本条按"无催化剂"落。')
     }
     // 🔴 2026-09-30：同型的"纸写了、但物品不在"守卫 —— 不静默。
     //    两种情形都要报：①纸上写了这句话、输入里一个夸克释放催化剂都没有；
@@ -1018,25 +1287,29 @@ function specFromRow(R) {
     }
 
     // 🧪 每条含物质模块的配方【自报落法】—— 用户要求"能一眼纠正"（2026-09-28）。
-    //    形态：一行注释写进产物每条配方上方。
+    //    🔴 2026-10-03 改文案（用户点单）：要能看出**它是按哪张纸判的** ⇒ 每行都写明
+    //       「纸上（第 N 格）有／没有『物质模块是催化剂』」，并把它当成本条落法的【原因】写出来。
     var moduleNote = null
     if (modSeen > 0) {
-        var why
         if (moduleDecision === 'consume') {
-            why = isModuleRecipe ? '产出里有物质模块 ⇒ 属于"制作物质模块"' : '配方类型 ' + typeId + ' ∈ 世线族'
-            moduleNote = '🧪 物质模块【消耗】：' + why + '。模块留在 itemInputs 里，不挂催化剂、不设门槛。'
+            var why = '纸上（' + (catModuleSlot === null ? '无' : '第 ' + catModuleSlot + ' 格') + '）'
+                + (catModule ? '有' : '【没有】') + '「' + PAPER_MODULE_CATALYST + '」'
+            var extra = isModuleRecipe
+                ? '；另：本条【产出】里有物质模块（= 属于"制作物质模块"），与"只看纸"的结论【一致】，不冲突'
+                : (isWorldlineRecipe ? '；另：本条类型 ∈ 世线族（历史读数，现不参与判定）' : '')
+            moduleNote = '🧪 物质模块【消耗·纸上无催化剂纸】：' + why + extra
+                + ' ⇒ 按 2026-10-03 判据（只看纸）模块留在 itemInputs 里被正常消耗，不挂催化剂、不设门槛。'
         } else if (moduleDecision === 'gate') {
             // ⚠️ 等级直接从**同一张** MATERIAL_MODULES 里读（值就是等级 1..17）—— 不另抄一份表
             var lvl = moduleGate ? MATERIAL_MODULES[idOfSlotText(moduleGate)] : null
-            var whyGate = isShardFamilyRecipe
-                ? '本条产出 ∈ 残片族（' + shardFamilyNames(R.outs) + ' =「世线的运用」）⇒ 按 2026-10-01 判据【不消耗】'
-                : '类型 ' + typeId + ' 是山海自己的机器，且本条既非"制作物质模块"也非"世线族"'
-            moduleNote = '🧪 物质模块【不消耗·等级门槛】：' + whyGate
+            moduleNote = '🧪 物质模块【不消耗·等级门槛·纸上有催化剂纸】：纸上（第 ' + catModuleSlot + ' 格）放着「' + PAPER_MODULE_CATALYST + '」'
+                + '，且类型 ' + typeId + ' ∈ SHANHAI_TYPES（= 山海自己的机器）'
                 + ' ⇒ 落 ModuleLevelCondition（要求模块等级 ≥ ' + (lvl === undefined || lvl === null ? '?' : lvl) + '，等级取自 MODULE_LEVELS）。'
-                + '⚠️ 门槛【不占输入槽】。若本条应当"只是纯催化剂（.notConsumable）"，改 SHANHAI_TYPES / WORLDLINE_TYPES 的判定即可，一处生效。'
+                + '⚠️ 门槛【不占输入槽】。若本条应当"只是纯催化剂（.notConsumable）"，改 SHANHAI_TYPES 即可，一处生效。'
         } else {
-            moduleNote = '🧪 物质模块【不消耗·真催化剂】：类型 ' + typeId + ' 不在 SHANHAI_TYPES 里（= 非山海的机器）'
-                + ' ⇒ 落 .notConsumable(...)，不设等级门槛。'
+            moduleNote = '🧪 物质模块【不消耗·真催化剂·纸上有催化剂纸】：纸上（第 ' + catModuleSlot + ' 格）放着「' + PAPER_MODULE_CATALYST + '」'
+                + '，但类型 ' + typeId + ' 不在 SHANHAI_TYPES 里（= 非山海的机器）'
+                + ' ⇒ 落 .notConsumable(...) 真催化剂，不设等级门槛。'
         }
     }
 
@@ -1111,9 +1384,22 @@ function specFromRow(R) {
         // 🔴 2026-09-28 诊断字段（只进 specs.json 做对账，**不进 KJS 产物**）：
         //    moduleDecision = 'consume' | 'gate' | 'catalyst' ⇒ 这条配方的物质模块怎么落
         hasModuleInput: modSeen > 0, moduleDecision: moduleDecision, moduleNote: moduleNote,
+        // 🔴 2026-10-03 新增（同样只进 specs.json）：判据的**输入与旧结论**，供对账/负面对照用
+        //    · hasModuleCatalystPaper / moduleCatalystPaperSlot = 那张纸在不在、在第几格（本轮唯一判据）
+        //    · moduleDecisionLegacy = 被取代的旧判据（产出/类型推断）会给出什么
+        //    · moduleLandedChanged = 新旧判据结论不同 ⇒ **本版相对上一版落法真的变了的**就是这些条
+        hasModuleCatalystPaper: !!catModule, moduleCatalystPaperSlot: catModuleSlot,
+        moduleDecisionLegacy: moduleDecisionLegacy,
+        moduleLandedChanged: moduleDecisionLegacy !== moduleDecision,
         // 🔴 2026-09-30「描述落地」证据（只进 specs.json 与产物注释，不进配方数据）：
         quarkCatalystLanded: quarkLanded, descNote: descNote,
+        // 🔴 2026-10-03「力场发生器族判据」证据（只进 specs.json 与产物注释，不进配方数据）：
+        fieldGeneratorLanded: fieldLanded,
         isModuleRecipe: isModuleRecipe, isWorldlineRecipe: isWorldlineRecipe,
+        // 🔴 2026-10-03 补：`isShardFamilyRecipe` 原本只在 specFromRow 内部用（不返回）
+        //    ⇒ 文件头那句"本次命中它的 N 条"读 specs[i].isShardFamilyRecipe 全是 undefined ⇒ **打印出一个假 0**
+        //    （实测：真正的条数是 1，`shanhai:pf/thread_shard_1`）。本轮把它挂出来，供文件头与对账脚本现算。
+        isShardFamilyRecipe: isShardFamilyRecipe,
         inputFluids: inFluids, itemOutputs: outItems, outputFluids: outFluids, chancedOutputs: chanced,
         duration: dur, EUt: EUt, flags: flags,
         slots: { itemIn: slotIn, itemOut: slotOut, fluidIn: inFluids.length, fluidOut: outFluids.length, cap: cap, over: over }
@@ -1289,9 +1575,11 @@ function outNoteRowNos(re) {
     return a
 }
 function nosText(a) { return a.length ? a.map(function (x) { return '#' + x }).join(' / ') + '（' + a.length + ' 条）' : '（本次一条都没有）' }
+/** 同 nosText，但元素是【已经写好的整段文字】（不是行号）—— 用于"本版改了哪几条"这种现算清单。 */
+function nosText2(a) { return a.length ? a.join('；') + '（' + a.length + ' 条）' : '（本次一条都没有 —— 新旧判据结论完全一致）' }
 var NOS_FIELD = noteRowNos('力场发生器是催化剂')
 var NOS_CHANCED = outNoteRowNos(/电子中微子产出概率5%/)
-var NOS_CATALYST_PAPER = noteRowNos('物质模块是催化剂')
+var NOS_CATALYST_PAPER = noteRowNos(PAPER_MODULE_CATALYST)
 // 🔴 2026-09-30 新增：纸面原文「夸克释放催化剂作为催化剂」（逐字，末尾无句号）
 var NOS_QUARK_CATALYST = noteRowNos(PAPER_QUARK_CATALYST)
 // 真正出纸的样板（产物理就是 minecraft:paper，不是"改名纸当注记"）—— 原先产物里写死了 "#25"
@@ -1308,6 +1596,98 @@ for (var _cs = 0; _cs < rows.length && CHANCED_OUT_SLOT === null; _cs++) {
         if (/电子中微子产出概率5%/.test(rows[_cs].outNotes[_cq].desc.name)) { CHANCED_OUT_SLOT = rows[_cs].outNotes[_cq].slot; break }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔴🔴 2026-10-03 追加（用户点单）：老 3 条 GT 配方的【源样板绑定 + 模块落法现算】
+// ═══════════════════════════════════════════════════════════════════════════════
+// 【根因】为什么 `shanhai:pf/photon` 没被「只看纸」覆盖（逐行查实，不是猜）：
+//   ① rows.json 里 8 个 `old: true` 的行被 L1340 分成 `oldRows`，而 `specs` **只由 `newRows` 构建**
+//      （L1386 `for (wi < newRows.length)`）⇒ **`specFromRow()`（判据所在）从没在这些行上跑过**；
+//   ② 它们的配方由 `emitOldGt()` 用**冻结的字符串文本**发出：老 ⑦ 那条（= PF 第 36 条 = `shanhai:pf/photon`）
+//      把 `moduleLevelRequirement: '1x shanhai:introductory_material_module'` 与 `itemInputs: []` 直接写死
+//      ⇒ 纸上的信息**根本进不到这条配方**；
+//   ③ `var used = {…'shanhai:pf/photon':1…}`（L1369）只是**占 id**，不代表"这三条是孤儿"。
+// 【修法】把"源样板绑定 + 判据"提到**顶层**（这样文件头也能现算它），emitOldGt 只负责排版：
+//   `LEGACY_GT_BIND` 显式绑定 id → 样板行号，加载期逐条自证（行存在 / old=true / circuit 与产出对得上）。
+var LEGACY_GT_BIND = {
+    // id → 它抄自哪个样板行（行号**现查 rows.json**，不凭记忆）
+    'shanhai:pf/primordial_omega_engine': { no: 21, circuit: 0, product: 'shanhai:primordial_omega_engine', typeId: 'circuit_assembler' },
+    'shanhai:pf/photon': { no: 36, circuit: 2, product: 'shanhai:photon', typeId: 'photon_siphon' },
+    'shanhai:pf/first_light': { no: 27, circuit: 1, product: 'shanhai:first_light', typeId: 'photon_siphon' }
+}
+/** 按绑定取源样板行，并逐条自证 —— 对不上就抛（绝不静默换一条配方，也绝不静默丢掉模块）。 */
+function legacyGtRow(id) {
+    var b = LEGACY_GT_BIND[id]
+    if (!b) throw new Error('[PF] 🔴 内部错误：老配方 ' + id + ' 没有绑定源样板行 ⇒ 它的模块落法无法现算。')
+    var R = null
+    for (var i = 0; i < rows.length; i++) if (rows[i].no === b.no) { R = rows[i]; break }
+    if (!R) throw new Error('[PF] 🔴 老配方 ' + id + ' 绑定的 PF 第 ' + b.no + ' 条在 rows.json 里【不存在】'
+        + ' ⇒ 绑定过期了（PF.txt 重新导出后行号可能漂移）⇒ 拒绝写产物。')
+    if (!R.old) throw new Error('[PF] 🔴 老配方 ' + id + ' 绑定的 PF 第 ' + b.no + ' 条【不是】old 行 ⇒ 绑错行了。')
+    var circ = (R.circuits && R.circuits.length) ? R.circuits[0].n : 0
+    if (circ !== b.circuit) throw new Error('[PF] 🔴 老配方 ' + id + ' 的 circuit 绑定不符：正文写死 ' + b.circuit
+        + '，而 PF 第 ' + b.no + ' 条纸上是 ' + circ + ' ⇒ 拒绝写产物（说明绑错了行）。')
+    var hasProduct = false
+    for (var j = 0; j < R.outs.length; j++) if (R.outs[j].d.id === b.product) hasProduct = true
+    if (!hasProduct) throw new Error('[PF] 🔴 老配方 ' + id + ' 的产出绑定不符：PF 第 ' + b.no + ' 条的产出里【没有】'
+        + b.product + ' ⇒ 绑错了行。')
+    return R
+}
+/**
+ * 按「只看纸」现算一条老配方的模块落法（与 specFromRow **共用** `moduleRuleOf`，判据只有一份）。
+ * @returns {{id:string,no:number,decision:string,catModule:boolean,slot:(number|null),
+ *            gateLines:string[], itemInputsPrefix:string[], note:string}}
+ *   · decision='consume' ⇒ `gateLines` 为空（**门槛行与降级行一起消失**）、`itemInputsPrefix` = 模块文本（可能为空）
+ *   · decision='gate'    ⇒ `gateLines` = 门槛行 + 降级行、`itemInputsPrefix` = 空（itemInputs 保持原样）
+ */
+function legacyGtRule(id) {
+    var b = LEGACY_GT_BIND[id]
+    var R = legacyGtRow(id)
+    var rule = moduleRuleOf(R, b.typeId)
+    var slots = moduleSlotsOfRow(R)
+    var spec = '按 2026-10-03 判据（只看纸）模块留在 itemInputs 里被正常消耗，不挂催化剂、不设门槛。'
+    if (rule.decision !== 'consume') spec = '落 ModuleLevelCondition 等级门槛（不占输入槽）。'
+    var note = '// 🧪 物质模块【' + (rule.decision === 'consume' ? '消耗·纸上无催化剂纸' : '不消耗·等级门槛·纸上有催化剂纸') + '】：'
+        + rule.why + ' ⇒ ' + spec
+        + '｜⚠️ 本条是老配方（正文由 emitOldGt 硬编码）；2026-10-03 追加：它的模块落法改为按源样板'
+        + '（PF 第 ' + R.no + ' 条）的纸**现算**，不再写死。'
+    if (rule.decision === 'consume') {
+        return { id: id, no: R.no, decision: rule.decision, catModule: rule.catModule, slot: rule.slot, gateLines: [], itemInputsPrefix: slots, note: note }
+    }
+    // 纸上有催化剂纸 ⇒ 不消耗；形态沿用 2026-09-29 起的既有形态（门槛 + 条件类不可用时的降级催化剂）
+    if (!slots.length) throw new Error('[PF] 🔴 老配方 ' + id + '（PF 第 ' + R.no + ' 条）纸上有「'
+        + PAPER_MODULE_CATALYST + '」却【没有物质模块物品】⇒ 门槛无从挂起 ⇒ 拒绝写产物，请用户裁决。')
+    return {
+        id: id, no: R.no, decision: rule.decision, catModule: rule.catModule, slot: rule.slot,
+        gateLines: [
+            '    moduleLevelRequirement: \'' + slots[0] + '\',',
+            '    // ⚠️ 降级用：条件类不可用时退回催化剂形态（宁可比原来差，也不能让配方消失）',
+            '    moduleLevelFallbackCatalyst: \'' + slots[0] + '\','
+        ],
+        itemInputsPrefix: [], note: note
+    }
+}
+/** 老 3 条的固定顺序（报告/文件头都用它遍历 —— 不依赖 `for…in` 的顺序）。 */
+var LEGACY_GT_ORDER = ['shanhai:pf/primordial_omega_engine', 'shanhai:pf/photon', 'shanhai:pf/first_light']
+/** 老 3 条的模块落法读数（顶层算一次，文件头与控制台都用它 —— 不两处各算一遍）。 */
+var LEGACY_GT_RULES = {}
+for (var _lgi = 0; _lgi < LEGACY_GT_ORDER.length; _lgi++) LEGACY_GT_RULES[LEGACY_GT_ORDER[_lgi]] = legacyGtRule(LEGACY_GT_ORDER[_lgi])
+// ⚠️ 老 ①（电路组装机）与老 ⑧（first_light）的源样板上【本来就没有】物质模块，正文是冻结文本、
+//    里面没有模块落法段 ⇒ 一旦将来给这两条补上模块（或行号漂移绑错行），这里必须【响】：
+//    静默丢掉一个模块 = 让玩家白烧一个模块而不报错。
+for (var _lgj = 0; _lgj < LEGACY_GT_ORDER.length; _lgj++) {
+    var _lg2 = LEGACY_GT_ORDER[_lgj]
+    if (_lg2 === 'shanhai:pf/photon') continue
+    var _rlg = legacyGtRow(_lg2), _slg = moduleSlotsOfRow(_rlg)
+    if (_slg.length) throw new Error('[PF] 🔴 老配方 ' + _lg2 + '（PF 第 ' + _rlg.no + ' 条）的源样板现在有物质模块输入（'
+        + _slg.join(' / ') + '），但它的正文是冻结文本、没有模块落法段 ⇒ 拒绝写产物：'
+        + '请让它也走 legacyGtRule() 的排版（即像老 ⑦ 那样把模块段落接出来）。')
+}
+console.info('[PF] ✅ 老 3 条 GT 配方的模块落法（按源样板的纸现算）：'
+    + LEGACY_GT_ORDER.map(function (k) {
+        var r = LEGACY_GT_RULES[k]
+        return k + ' ⇐ PF#' + r.no + ' ⇒ ' + r.decision + (r.itemInputsPrefix.length ? '（itemInputs +' + r.itemInputsPrefix.join('/') + '）' : '')
+    }).join('　｜　'))
 
 // ---------------------------------------------------------------- emit KJS
 var L = []
@@ -1562,38 +1942,49 @@ w('//')
 w('// =============================================================================')
 w('// §7 🔴 三处口径（**先报出来，没自己选**）：')
 w('// =============================================================================')
-w('//  ①物质模块怎么落 —— 🔴🔴 2026-09-28 用户规则 ＋ 🔴🔴 2026-10-01 判据修正（**后者覆盖前者的适用面**）')
-w('//     ✅ 用户 2026-09-28 原话（逐字）：')
-w('//        「有些配方的物质模块的配置错了，目前，注意是目前只有制作物质模块和世线的配方才需要消耗物质模块」')
-w('//     ✅ 用户 2026-10-01 原话（逐字，**本次修正**）：')
-w('//        · 「那条配方的模块」⇒ 选「B. 等级门槛（不烧、但要挂）」')
-w('//        · 「世线残片其余 6 档 ＋ 寰宇并行超限器」⇒ 选「A. 还没写，以后补」⇒ **不许动**')
-w('//     ⇒【应当消耗】物质模块的配方只有两类：')
-w('//         ⓐ 制作物质模块 —— 该配方的【产出】里有【物质模块】（如 shanhai:basic_material_module）')
-w('//         ⓑ 世线的配方   —— 该配方【类型】属于世线族（gt id 判定）：')
-w('//              worldline_oscillation_collection / worldline_cutting /')
-w('//              worldline_matter_recurrence / worldline_probability_cracking')
-w('//            ⚠️ 2026-09-29 用户裁决：「世线采样是合成世线晶核的，是一个准备工作，不是真正的制作世线，')
-w('//               所以不需要消耗物质模块」⇒ `worldline_sampling` 已从世线族【拿掉】（原 5 个 ⇒ 现 4 个）。')
-w('//               ⇒ 采样配方（若有物质模块输入）落"等级门槛"，不再消耗；')
-w('//                 当前 PF.txt 第 64 条采样配方输入里没有物质模块 ⇒ 该条配方落法不变。')
-w('//        ⇒ 这两类里，物质模块就是**普通输入，照常被消耗**（`.itemInputs(...)`，不挂催化剂、不设门槛）。')
-w('//     🔴🔴 2026-10-01 判据修正（**本次唯一改动，用户拍板"采用 B"**）：')
-w('//        把"世线族 ⇒ 消耗"这条**再加一层** —— **看【产出】是不是「残片族」**：')
-w('//          · 产出 ∈ 残片族（thread_shard_1..7 ／ universal_parallel_overdriver）⇒ **不消耗**（落等级门槛）')
-w('//          · 产出 ∉ 残片族                                      ⇒ 照旧**消耗**')
-w('//        🔑 为什么必须看产出：`worldline_cutting`（原初世线切割）这个【类型】同时命中"世线族"，')
-w('//           但它产出的 `thread_shard_1`（世线残片·初醒）属于**「世线的运用」**、不是「世线本体」')
-w('//           ⇒ 只按类型判就会把"运用"当"本体"烧掉 —— **那正是用户报的那个 bug**。')
-w('//        用户 2026-09-26 亲自定的区分（逐字）：「世线残片 7 档（初醒→裁决）是【世线的运用】…」')
-w('//                                       ＋「世线本体 = 世线碎片·核心那一族」')
-w('//        ✅ 真源 = `ShanhaiConcurrencyTables.SHARD_EXPONENTS` 的 8 个键（**不新造清单**）。')
-w('//        ✅ 自证（负面对照）：**世线震荡收集**产出的 `dimensional_worldline_fragment`（维度世线碎片）')
-w('//           = **世线本体** ⇒ 不命中本层 ⇒ **保持消耗** ✓（用户 2026-10-01 复述确认了这一点）。')
-w('//     🔴 2026-09-28 用户裁决（第一条）：**`wl_board_circuit_assembly`（世线板电路组装）与')
-w('//        `wl_board_wafer_etching`（世线晶圆蚀刻）【不算"世线族"】**。')
-w('//        ⇒ 它们从 WORLDLINE_TYPES 里【已拿掉】；凡这两个类型的配方，物质模块一律**不消耗**，')
-w('//          按现有机制落（两者都是山海自己的类型 ⇒ 等级门槛；纸上写着「物质模块是催化剂」的与之一致）。')
+w('//  ①物质模块怎么落 —— 🔴🔴 2026-10-03 用户点单（**本版唯一判据 = 只看纸**）')
+w('//     ✅ 用户 2026-10-03 原话（逐字）：')
+w('//        「你又写错了，这条配方物质模块要消耗，而不是催化剂，判断物质模块是否是催化剂仅凭借是否我放了那张纸」')
+w('//     ⇒ 判据 = 只看纸：纸上有没有那张 `name === \'' + PAPER_MODULE_CATALYST + '\'` 的 NOTE（\u2261 papers 里 kind=\'NOTE\' 的那张）。')
+w('//        · 【有纸】⇒ 不消耗，且【形态保持现状】：')
+w('//             - 该配方类型 ∈ SHANHAI_TYPES（山海自己注册的类型）⇒ 落 ModuleLevelCondition 等级门槛（不占输入槽）')
+w('//             - 非山海类型（如土高炉 primitive_blast_furnace）⇒ 落 `.notConsumable(...)` 真催化剂')
+w('//        · 【无纸】⇒ 消耗：模块物品**进 itemInputs**（数量照纸上那个格子的数量，通常 1x），')
+w('//             既不挂门槛、也不进 notConsumable')
+w('//     📌 「制作物质模块的配方 ⇒ 消耗」这条口径【保留】（已核对，没退化）：')
+w('//        · 本次 PF.txt 里"产出含物质模块"的配方共 ' + (function () { var n = 0; for (var i = 0; i < specs.length; i++) if (specs[i].isModuleRecipe) n++; return n })() + ' 条，'
+    + '它们纸上【全都没有】催化剂纸 ⇒ 按"只看纸"天然落【消耗】，与那条口径一致。')
+w('//        · ⚠️ 反过来的情况（配方产出含物质模块【且】纸上有催化剂纸）本次 = '
+    + (function () { var n = 0; for (var i = 0; i < specs.length; i++) if (specs[i].isModuleRecipe && specs[i].hasModuleCatalystPaper) n++; return n })()
+    + ' 条 —— 生成器对这种情况**不自己选**：会打一条「🔴 口径打架」告警并请用户裁决，绝不静默。')
+w('//     🔴 本版相对上一版的落法变化（**现算**，判据 = 旧口径 `isModuleRecipe || (isWorldlineRecipe && !isShardFamilyRecipe)`'
+    + ' vs 新口径 `!纸`）：')
+w('//        ' + nosText2((function () {
+        var a = []
+        for (var i = 0; i < specs.length; i++) if (specs[i].hasModuleInput && specs[i].moduleLandedChanged) {
+            a.push('`' + specs[i].id + '`（PF 第 ' + specs[i].row.no + ' 条：' + specs[i].moduleDecisionLegacy + ' ⇒ ' + specs[i].moduleDecision + '）')
+        }
+        return a
+    })()))
+w('//        ⚠️ 只有上列这些条目的**配方数据**（itemInputs / notConsumable / moduleLevelRequirement）会变；')
+w('//           其余含模块的配方只是自报行（🧪）文案跟着新口径重写了，落法与数据一字未动。')
+w('//     🔴🔴 2026-10-03 追加（用户点单）：**老 3 条 GT 配方也走这条判据**（它们原先漏在外面）')
+w('//        【根因】rows.json 里 8 个 `old: true` 的行被分成 `oldRows`，而 `specs` 只由 `newRows` 构建 ⇒')
+w('//               `specFromRow()`（判据所在）**从没在这些行上跑过**；它们的正文由 `emitOldGt()` 用')
+w('//               **冻结文本**发出，老 ⑦（= PF 第 36 条 = `shanhai:pf/photon`）把')
+w('//               `moduleLevelRequirement: 1x 入门物质模块` 与 `itemInputs: []` 直接写死。')
+w('//        【修法】顶层新增 `LEGACY_GT_BIND`（老配方 id → 源样板行号，加载期逐条自证）+ `legacyGtRule()`，')
+w('//               与 `specFromRow()` **共用同一个 `moduleRuleOf()`** ⇒ 一条判据、两处落点。')
+w('//        【本次读数（现算）】')
+for (var _lgn = 0; _lgn < LEGACY_GT_ORDER.length; _lgn++) {
+    var _lr = LEGACY_GT_RULES[LEGACY_GT_ORDER[_lgn]]
+    var _lrd = _lr.itemInputsPrefix.length
+        ? ('itemInputs += ' + _lr.itemInputsPrefix.join(' + ') + '；moduleLevelRequirement / moduleLevelFallbackCatalyst 两行【消失】')
+        : '本条输入里本来就没有物质模块 ⇒ 落法无变化'
+    w('//           · `' + _lr.id + '` ⇐ PF 第 ' + _lr.no + ' 条｜纸：' + (_lr.catModule ? '有催化剂纸' : '**无**催化剂纸')
+        + ' ⇒ **' + _lr.decision + '**（' + (_lr.decision === 'consume' ? _lrd : '保持门槛形态，两行不动') + '）')
+}
+w('//        ⚠️ 本条只改**模块落法**：产出 / 时长 / EUt / 流体 / `notConsumable` / circuit 一个字都没动。')
 w('//     🔴 「什么算物质模块」以【权威 17 项表】为准，**不是**正则匹配名字：')
 w('//        出处 = `com/shanhai/machine/module/PrimordialModuleMachine.MODULE_LEVELS`（17 项，等级 1..17），')
 w('//        与 lang 的 `shanhai.recipe.fail.module_level.unresolved`「…不在 17 个物质模块表里」同一口径。')
@@ -1601,34 +1992,56 @@ w('//        ⚠️ 其中 6 个 id 并不以 `material_module` 结尾（materia
 w('//           material_recombination_module / imaginary_material_transition_remolding_module /')
 w('//           material_creation_module / reality_anchor_module / genesis_reality_modification_module）')
 w('//           ⇒ 任何"按名字正则"的写法都会漏掉它们（本生成器 2026-09-28 之前就是这么漏的）。')
-w('//     ⇒【不消耗】其余所有含物质模块的配方：')
-w('//         · 山海自己注册的配方类型 ⇒ 落【等级门槛 ModuleLevelCondition】  .addCondition(new ModuleLevelCondition(...))')
-w('//         · 不是山海的机器（gtceu 原生的 primitive_blast_furnace 等）⇒ `.notConsumable(\'Nx shanhai:<模块>\')`')
-w('//     🔴 与 2026-09-26 那版的关键差别（这就是用户说的"配置错了"的根因）：')
-w('//        旧版**只在纸上写了「物质模块是催化剂」时才特殊处理**；纸【没写】的样板 ⇒ 物质模块留在 itemInputs 里')
-w('//        被**正常消耗**。⇒ 本次把判据从"看纸"改成"看产出与配方类型"。')
-w('//     📌 留档（被本版覆盖的旧口径，2026-09-26 用户原话逐字）：')
-w('//        「以后物质模块是催化剂指的都是我们今天刚写好的机制」')
-w('//        ⇒ 当时的口径是「纸上写=等级门槛」，并给 `primitive_blast_furnace` 单开一张 NO_GATE_TYPES 白名单。')
-w('//        那张白名单**已被显式正向表 SHANHAI_TYPES / WORLDLINE_TYPES 取代**（生成器里可查）。')
 w('//     · 已取证：`mods\\shanhai-0.1.0.jar` 里 **存在** ')
 w('//       `com/shanhai/machine/module/ModuleLevelCondition.class` ⇒ 门槛机制可挂。')
 w('//     · 本文件的做法：门槛形态由 `SHANHAI_PF_MODULE_MODE` 一行可切（\'gate\' 默认 ／ \'catalyst\' 全退催化剂）。')
 w('//       ⚠️ 降级通道【保留】（jar 没绑 / `typeof` 判不到类时自动退回催化剂，配方不会消失）。')
 w('//     · ⚠️ 另有 ' + (function () { var n = 0; for (var i = 0; i < specs.length; i++) for (var j = 0; j < specs[i].flags.length; j++) if (specs[i].flags[j].indexOf('但该样板里【没有】任何物质模块物品') >= 0) { n++; break } return n })()
-    + ' 条样板有「物质模块是催化剂」这张纸却【没有物质模块物品】⇒ 门槛无从挂起，')
-w('//       （上面这个数是按本次 specs 的 flags **现算**的；纸写「物质模块是催化剂」的样板共 '
+    + ' 条样板有「' + PAPER_MODULE_CATALYST + '」这张纸却【没有物质模块物品】⇒ 门槛无从挂起，')
+w('//       （上面这个数是按本次 specs 的 flags **现算**的；纸写「' + PAPER_MODULE_CATALYST + '」的样板共 '
     + NOS_CATALYST_PAPER.length + ' 条：' + (NOS_CATALYST_PAPER.join(' / ') || '无') + '）')
 w('//       本文件按"无门槛无催化剂"落，并在脚本里逐条注明。')
-w('//  ②「力场发生器是催化剂」—— ' + nosText(NOS_FIELD) + '，每条同格就有 `gtceu:lv_field_generator`。')
-w('//       本文件按 `.notConsumable(\'1x gtceu:lv_field_generator\')` 落。**待确认电压档（LV？）**')
-w('//       ⚠️⚠️ 2026-09-30 现查出的**已知脆弱点（本次没改，仅报出）**：')
-w('//          这条规则在代码里是【硬编码 LV】的 —— 判据写死成 `it.id === \'gtceu:lv_field_generator\'`。')
-w('//          本次 3 条命中的确实都是 LV，所以落法正确；但**换一台 MV/HV 力场发生器就会静默不生效**')
-w('//          （物品照常被消耗、且不报错）。旁证：PF 第 58 条用的是 `gtceu:mv_field_generator`，')
-w('//          它身上没有这张纸所以没暴露。⇒ 建议改成"凡 `*_field_generator` 且纸写了这句 ⇒ 催化剂"。')
-w('//          我没动它：那会改变 58 条吗？不会（它没这张纸）—— 但它属于「扩大规则覆盖面」，')
-w('//          按本轮硬要求②（改数值/口径要停下报）留给你裁决。')
+w('//     📌 留档 —— 本版【取代】的两条旧口径（结论已被覆盖，只留证据链）：')
+w('//        · 2026-09-28（逐字）：「有些配方的物质模块的配置错了，目前，注意是目前只有制作物质模块和世线的配方才需要消耗物质模块」')
+w('//          ⇒ 当时把判据从"看纸"改成"看产出与配方类型"（`consumeModule = isModuleRecipe || (isWorldlineRecipe && !isShardFamilyRecipe)`）。')
+w('//          ⚠️ 那正是本版要改掉的：纸上一句话都没写的配方被【静默】判成不消耗（用户报的 no=98 就是这种）。')
+w('//        · 2026-10-01（逐字）：「那条配方的模块」⇒ 选「B. 等级门槛（不烧、但要挂）」；')
+w('//          「世线残片其余 6 档 ＋ 寰宇并行超限器」⇒ 选「A. 还没写，以后补」⇒ **不许动**。')
+w('//          ⇒ 当时给"世线族 ⇒ 消耗"再加一层"看产出是不是残片族"（SHARD_FAMILY，产出 ∈ 残片族 ⇒ 不消耗）。')
+w('//          ✅ 本版下该结论【仍然成立】（本次命中它的 ' + (function () { var n = 0; for (var i = 0; i < specs.length; i++) if (specs[i].hasModuleInput && specs[i].isShardFamilyRecipe) n++; return n })()
+    + ' 条产出 ∈ 残片族的配方纸上都有催化剂纸 ⇒ 照样不消耗）；')
+w('//            但残片族已【不再参与判定】，只在产物注释里留一句"与 2026-10-01 结论也一致"。')
+w('//        · 2026-09-26（更早，逐字）：「以后物质模块是催化剂指的都是我们今天刚写好的机制」')
+w('//          ⇒ 当时口径 = 「纸上写 ⇒ 等级门槛」，并给 `primitive_blast_furnace` 单开一张 NO_GATE_TYPES 白名单。')
+w('//          本版回到"看纸"，但那**不是**回到这一版：本版有显式正向表 SHANHAI_TYPES 决定"不消耗时的形态"，')
+w('//          白名单式的反写逻辑【不再使用】。')
+w('//  ②「力场发生器是催化剂」—— ' + nosText(NOS_FIELD)
+    + ' —— 🔴 2026-10-03 判据已由【写死 LV】改成【认整族】')
+w('//       现判据（两条**同时**满足）：① 纸写了这句话；② 物品 id ∈ 力场发生器族 = `'
+    + FIELD_GENERATOR_FAMILY_RE + '`')
+w('//         （命名空间锚死在 `gtceu:` / `gtlcore:` —— 裸后缀 `/field_generator$/` 会误吞')
+w('//          `kubejs:containment_field_generator` 与 `kubejs:spacetime_compression_field_generator`）')
+w('//       📌 族自证（正负对照，生成期现读导出注册表）：' + (FIELD_FAMILY_EVIDENCE.ok === true
+    ? '以 `field_generator` 结尾的 id 共 ' + FIELD_FAMILY_EVIDENCE.all.length + ' 个；判据命中 '
+        + FIELD_FAMILY_EVIDENCE.inFam.length + ' 个 [' + FIELD_FAMILY_EVIDENCE.inFam.join(' / ') + ']；'
+        + '被排除 ' + FIELD_FAMILY_EVIDENCE.outFam.length + ' 个 [' + FIELD_FAMILY_EVIDENCE.outFam.join(' / ') + ']'
+    : '⚠️ 本轮无自证读数：' + FIELD_FAMILY_EVIDENCE.why))
+w('//       ✅ 因这条改动而改变的配方（**现算**，不是手抄）：' + (function () {
+        var a = []
+        for (var i = 0; i < specs.length; i++) if (specs[i].fieldGeneratorLanded && specs[i].fieldGeneratorLanded.length) {
+            a.push('`' + specs[i].id + '`（' + specs[i].fieldGeneratorLanded.join(' / ') + '）')
+        }
+        return a.length ? a.join('；') : '（无）'
+    })())
+w('//       📌 留档（被本版覆盖的旧口径，2026-09-30 我写下的原文**逐字**，一字未改）：')
+w('//          「这条规则在代码里是【硬编码 LV】的 —— 判据写死成 `it.id === \'gtceu:lv_field_generator\'`。」')
+w('//          「本次 3 条命中的确实都是 LV，所以落法正确；但**换一台 MV/HV 力场发生器就会静默不生效**')
+w('//           （物品照常被消耗、且不报错）。旁证：PF 第 58 条用的是 `gtceu:mv_field_generator`，')
+w('//           它身上没有这张纸所以没暴露。⇒ 建议改成"凡 `*_field_generator` 且纸写了这句 ⇒ 催化剂"。」')
+w('//          「我没动它：那会改变 58 条吗？不会（它没这张纸）—— 但它属于「扩大规则覆盖面」，')
+w('//           按本轮硬要求②（改数值/口径要停下报）留给你裁决。」')
+w('//       ⇒ 用户 2026-10-03 拍板：修。上面那个"建议"已落地，但**没有**照它字面用裸 `*_field_generator`')
+w('//          （裸后缀会误吞那 2 个 kubejs 的同类 id），改用命名空间锚定 + 注册表现场自证。')
 w('//  ④「' + PAPER_QUARK_CATALYST + '」—— ' + nosText(NOS_QUARK_CATALYST) + '（**本轮新增支持**）')
 w('//       纸面原文逐字：「' + PAPER_QUARK_CATALYST + '」（**末尾没有句号**）。')
 w('//       ⇒ 本文件按 `.notConsumable(\'<纸上那个数量>x shanhai:<上|下>_quark_emission_catalyst\')` 落，')
@@ -1730,6 +2143,8 @@ w('// ==========================================================================
 w('var SHANHAI_PF_TAG = \'[SHANHAI-PF]\'')
 w('')
 w('// 🔴 §7① 的切换点：\'gate\' = 物质模块等级门槛（默认）／ \'catalyst\' = 老写法（不消耗催化剂）')
+w('//    ⚠️ 2026-10-03：它只影响【纸上写了催化剂纸】那些配方的"不消耗形态"，')
+w('//       "要不要消耗"由纸单独决定（无纸的条目根本不看这个开关）。')
 w('var SHANHAI_PF_MODULE_MODE = \'gate\'')
 w('')
 w('// 老山海 module_level 条件类是否已由 jar 侧注册并绑定（见 §7①）。')
@@ -1885,8 +2300,10 @@ var OLDSPEC = [
         raw: null
     }
 ]
-// 手工拼老 3 条（照抄上一版文本）
+// 手工拼老 3 条（照抄上一版文本）—— ⚠️ 模块落法不再写死，见上方 `LEGACY_GT_RULES` 段（含根因说明）
 function emitOldGt() {
+    var _r36 = LEGACY_GT_RULES['shanhai:pf/photon']
+    function _j(a) { return a.map(function (x) { return '\'' + x + '\'' }).join(', ') }
     var o1 = [
         '{',
         '    id: \'shanhai:pf/primordial_omega_engine\',',
@@ -1910,6 +2327,10 @@ function emitOldGt() {
         '    EUt: 8',
         '}'
     ]
+    // 🔴 2026-10-03 追加：本条的模块落法**不再写死**——由 `_r36`（= 按 PF 第 36 条的纸现算，见顶层 LEGACY_GT_RULES）给出。
+    //    · 纸上无催化剂纸 ⇒ `_r36.gateLines` 为空（下面两行门槛/降级【不出现】）、`itemInputs` 里出现模块；
+    //    · 若将来用户给第 36 条补上那张纸 ⇒ `_r36.gateLines` 自动变回原来的两行、`itemInputs` 变回空。
+    //    ⚠️ 其余行（产出/时长/EUt/流体/notConsumable/circuit）与本轮之前**逐字相同**。
     var o2 = [
         '{',
         '    id: \'shanhai:pf/photon\',',
@@ -1917,12 +2338,10 @@ function emitOldGt() {
         '    // PF.txt 原文该格：programmed_circuit + tag:{Configuration:2}',
         '    circuit: 2,',
         '    // 🔴 用户 2026-09-28 原话：「光子虹吸的配方里面主世界碎片和物质模块都是不消耗的（作为催化剂）」',
-        '    //     ⇒ 主世界碎片保留不消耗；物质模块于 2026-09-29 改成"等级 >= 1"的配方门槛（见 §7①）',
-        '    notConsumable: [\'1x gtlcore:world_fragments_overworld\'],',
-        '    moduleLevelRequirement: \'1x shanhai:introductory_material_module\',',
-        '    // ⚠️ 降级用：条件类不可用时退回改动前的催化剂形态（宁可比原来差，也不能让配方消失）',
-        '    moduleLevelFallbackCatalyst: \'1x shanhai:basic_material_module\',',
-        '    itemInputs: [],',
+        '    //     ⇒ 主世界碎片【保留不消耗】（本条一律不动）；物质模块的落法见下面那行 🧪 自报',
+        '    notConsumable: [\'1x gtlcore:world_fragments_overworld\'],'
+    ].concat(['    ' + _r36.note]).concat(_r36.gateLines, [
+        '    itemInputs: [' + _j(_r36.itemInputsPrefix) + '],',
         '    inputFluids: [],',
         '    itemOutputs: [\'16x shanhai:photon\'],',
         '    outputFluids: [\'shanhai:zero_point_energy 32000\', \'shanhai:light 16000\'],',
@@ -1930,7 +2349,7 @@ function emitOldGt() {
         '    duration: 1200,',
         '    EUt: 32',
         '}'
-    ]
+    ])
     var o3 = [
         '{',
         '    id: \'shanhai:pf/first_light\',',
@@ -1949,7 +2368,10 @@ function emitOldGt() {
     ]
     var blocks = [
         { note: ['// ===== 老 ①（上一版逐字，未改）：处理样板ULV / 电路组装机 / 10s ====='], body: o1 },
-        { note: ['// ===== 老 ⑦（上一版逐字，未改）：处理样板LV / 光子虹吸 / 60s ====='], body: o2 },
+        // 🔴 2026-10-03：老 ⑦ 的"上一版逐字，未改"已经【不再成立】—— 它的物质模块落法按纸改成了消耗
+        //    （只改了模块落法；产出/时长/EUt/流体/notConsumable/circuit 仍是上一版逐字）。
+        //    ⚠️ 一行注释说假话比没有注释更坏（本项目的老毛病）⇒ 这里如实改写这一行。
+        { note: ['// ===== 老 ⑦（上一版逐字；**仅**物质模块落法于 2026-10-03 按纸改为消耗）：处理样板LV / 光子虹吸 / 60s ====='], body: o2 },
         { note: ['// ===== 老 ⑧（上一版逐字，未改）：处理样板LV / 光子虹吸 / 60s ====='], body: o3 }
     ]
     for (var b = 0; b < blocks.length; b++) {
@@ -1967,7 +2389,8 @@ for (var x = 0; x < specs.length; x++) {
     w(',')
     w('    // ▶ PF.txt 第 ' + R.no + ' 条（本次新增）｜元件「' + R.cell + '」｜纸：类型「' + s.srcTypeName + '」'
         + (R.time ? '／耗时「' + R.time + '」' : '') + '｜输出 ' + s.itemOutputs.join(' + '))
-    // 🧪 2026-09-28：每条含物质模块的配方【自报落法】，让用户能一眼看出对不对并一眼纠正
+    // 🧪 2026-09-28 起每条含物质模块的配方【自报落法】，让用户能一眼看出对不对并一眼纠正
+    //    🔴 2026-10-03：文案已改成"按哪张纸判的"（纸在第几格 / 有还是没有）
     if (s.moduleNote) w('    // ' + s.moduleNote)
     // 🔴 2026-09-30：本轮"描述落地"的可 grep 证据行（用户明确要求每条落地的描述打一行）
     if (s.descNote) w('    // ' + s.descNote)
@@ -2347,9 +2770,10 @@ for (var o3 = 0; o3 < specs.length; o3++) {
         + ',' + sp3.slots.fluidIn + '/' + sp3.slots.cap[2] + ',' + sp3.slots.fluidOut + '/' + sp3.slots.cap[3] + ')'
         + (sp3.flags.length ? '   FLAGS=' + sp3.flags.length : ''))
 }
-console.log('--- 物质模块决策表（2026-09-28 规则 ＋ 2026-10-01 残片族修正）---')
-console.log('  口径：consume = 应当消耗（制作物质模块 ／ 世线本体线）; gate = 等级门槛(不消耗); catalyst = notConsumable 真催化剂(不消耗)')
-console.log('  ⚠️ 2026-10-01 修正：产出 ∈ 残片族（世线的运用）⇒ 强制 gate，即使类型 ∈ 世线族')
+console.log('--- 物质模块决策表（🔴 2026-10-03 判据 = 只看纸：纸上有「' + PAPER_MODULE_CATALYST + '」⇒ 不消耗，没有 ⇒ 消耗）---')
+console.log('  口径：consume = 纸上【没有】催化剂纸 ⇒ 模块进 itemInputs 被消耗; gate = 纸上有 ⇒ 山海类型 ⇒ 等级门槛(不消耗); catalyst = 纸上有 ⇒ 非山海类型 ⇒ notConsumable 真催化剂(不消耗)')
+console.log('  ⚠️ isModuleRecipe / isWorldlineRecipe / 产出∈残片族 三个读数【不再参与判定】，只作诊断与口径核对')
+console.log('  ⚠️ "本版落法变了"的判据 = moduleDecisionLegacy(被取代的旧判据) ≠ moduleDecision(新判据)')
 for (var o4 = 0; o4 < specs.length; o4++) {
     var sp4 = specs[o4]
     if (!sp4.hasModuleInput) continue
@@ -2360,11 +2784,25 @@ for (var o4 = 0; o4 < specs.length; o4++) {
     var shardHit = []
     for (var o8 = 0; o8 < sp4.row.outs.length; o8++) { var od8 = sp4.row.outs[o8].d; if (od8 && od8.kind === 'ITEM' && SHARD_FAMILY[od8.id]) shardHit.push(od8.id) }
     console.log('  #' + String(sp4.row.no).padStart(2) + '  ' + sp4.type + '  ⇒ ' + sp4.moduleDecision
+        + '  | 纸=' + (sp4.hasModuleCatalystPaper ? '有(第' + sp4.moduleCatalystPaperSlot + '格)' : '无')
         + '  | ' + mods4.join(' , ')
         + '  | isModuleRecipe=' + sp4.isModuleRecipe + ' isWorldline=' + sp4.isWorldlineRecipe
-        + ' 产出∈残片族=' + (shardHit.length ? 'YES(' + shardHit.join('+') + ')' : 'no'))
+        + ' 产出∈残片族=' + (shardHit.length ? 'YES(' + shardHit.join('+') + ')' : 'no')
+        + (sp4.moduleLandedChanged ? '   ⟵ 🔴 落法相对上一版变了（旧判据=' + sp4.moduleDecisionLegacy + '）' : ''))
 }
-console.log('--- 非山海类型且带物质模块输入的类型（走 catalyst 安全默认）---')
+console.log('--- 本版落法变化的配方（新旧判据结论不同的，完整 id）---')
+var _chgList = []
+for (var oc = 0; oc < specs.length; oc++) if (specs[oc].hasModuleInput && specs[oc].moduleLandedChanged) _chgList.push(specs[oc].id + '(#' + specs[oc].row.no + ' ' + specs[oc].moduleDecisionLegacy + '⇒' + specs[oc].moduleDecision + ')')
+console.log(_chgList.length ? '  ' + _chgList.join('\n  ') : '  (无)')
+console.log('--- 口径核对：产出含物质模块（= 制作物质模块）的配方 ⇒ 应当【消耗】，纸上应当【没有】催化剂纸 ---')
+var _mrOk = 0, _mrBad = []
+for (var om = 0; om < specs.length; om++) {
+    if (!specs[om].isModuleRecipe) continue
+    if (!specs[om].hasModuleCatalystPaper && specs[om].moduleDecision === 'consume') _mrOk++
+    else _mrBad.push(specs[om].id + '(纸=' + specs[om].hasModuleCatalystPaper + ' 决策=' + specs[om].moduleDecision + ')')
+}
+console.log('  一致 = ' + _mrOk + ' 条；打架 = ' + _mrBad.length + ' 条' + (_mrBad.length ? '：' + _mrBad.join(' / ') : ''))
+console.log('--- 非山海类型且带物质模块输入的类型（有纸时走 catalyst 真催化剂，不设等级门槛）---')
 var uKeys = Object.keys(UNKNOWN_MODULE_TYPES)
 if (uKeys.length) for (var o7 = 0; o7 < uKeys.length; o7++) console.log('  ⚠️ ' + uKeys[o7] + ' 不在 SHANHAI_TYPES 里 ⇒ 该类型的物质模块按"真催化剂"落（不设等级门槛）')
 else console.log('  (无)')
