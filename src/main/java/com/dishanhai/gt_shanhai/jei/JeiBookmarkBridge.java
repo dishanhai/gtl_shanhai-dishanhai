@@ -8,6 +8,7 @@ import net.minecraftforge.fluids.FluidStack;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -75,6 +76,46 @@ public final class JeiBookmarkBridge {
         return result;
     }
 
+    /**
+     * 批量把物品栈加入 JEI 书签。保持公开签名不暴露 JEI 类型；返回实际新增数量。
+     */
+    public static int addItemStacks(Collection<ItemStack> stacks) {
+        if (stacks == null || stacks.isEmpty()) return 0;
+        Object runtime = runtimeRef;
+        if (runtime == null) return 0;
+        try {
+            Object manager = invoke(runtime, "getIngredientManager");
+            Object bookmarkOverlay = invoke(runtime, "getBookmarkOverlay");
+            if (manager == null || bookmarkOverlay == null) return 0;
+            Object bookmarkList = readField(bookmarkOverlay, "bookmarkList");
+            if (bookmarkList == null) return 0;
+
+            ClassLoader classLoader = bookmarkOverlay.getClass().getClassLoader();
+            Class<?> bookmarkType = Class.forName(
+                    "mezz.jei.gui.bookmarks.IBookmark", false, classLoader);
+            Method add = bookmarkList.getClass().getMethod("add", bookmarkType);
+            Class<?> ingredientBookmark = Class.forName(
+                    "mezz.jei.gui.bookmarks.IngredientBookmark", false, classLoader);
+            Method create = ingredientBookmark.getMethod(
+                    "create",
+                    Class.forName("mezz.jei.api.ingredients.ITypedIngredient", false, classLoader),
+                    Class.forName("mezz.jei.api.runtime.IIngredientManager", false, classLoader));
+
+            int added = 0;
+            for (ItemStack stack : stacks) {
+                if (stack == null || stack.isEmpty()) continue;
+                Object optional = invokeTypedItemIngredient(manager, stack);
+                if (!(optional instanceof java.util.Optional<?> typedOptional) || typedOptional.isEmpty()) continue;
+                Object bookmark = create.invoke(null, typedOptional.get(), manager);
+                Object result = add.invoke(bookmarkList, bookmark);
+                if (Boolean.TRUE.equals(result)) added++;
+            }
+            return added;
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
     /** 遍历当前书签列表，把每一项能解出的原始摄取物（ItemStack/FluidStack/其他）交给 consumer；解不出的静默跳过。 */
     private static void forEachRawIngredient(Consumer<Object> consumer) {
         Object runtime = runtimeRef;
@@ -104,6 +145,17 @@ public final class JeiBookmarkBridge {
         } catch (Throwable ignored) {
             return null;
         }
+    }
+
+    private static Object invokeTypedItemIngredient(Object manager, ItemStack stack) throws Exception {
+        ClassLoader classLoader = manager.getClass().getClassLoader();
+        Class<?> vanillaTypes = Class.forName(
+                "mezz.jei.api.constants.VanillaTypes", false, classLoader);
+        Object itemStackType = vanillaTypes.getField("ITEM_STACK").get(null);
+        Method create = manager.getClass().getMethod("createTypedIngredient",
+                Class.forName("mezz.jei.api.ingredients.IIngredientType", false, classLoader),
+                Object.class);
+        return create.invoke(manager, itemStackType, stack);
     }
 
     private static Object invoke(Object target, String methodName) throws Exception {

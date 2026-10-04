@@ -4,6 +4,7 @@ import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.RecipeTypePatternSwitchMode;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.SphereStyleOverride;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.VirtualProviderMode;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.JeiBookmarkMode;
 
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
@@ -175,6 +176,16 @@ public final class DShanhaiConfigScreen {
                 .setDefaultValue(3).setMin(1).setMax(64)
                 .setTooltip(tip("总槽位 = 每行槽位 × 每页行数 × 最大页数，修改后需重新放置总成生效"))
                 .setSaveConsumer(cfg.recipeTypeMaxPages::set).build());
+
+        // ===== JEI =====
+        ConfigCategory jei = builder.getOrCreateCategory(Component.literal("JEI"));
+        jei.addEntry(e.startEnumSelector(Component.literal("配方侧边收藏模式"),
+                        JeiBookmarkMode.class, cfg.jeiBookmarkMode.get())
+                .setDefaultValue(JeiBookmarkMode.MISSING_ITEMS)
+                .setTooltip(tip("MISSING_ITEMS=收藏当前配方中玩家背包数量不足的输入物品",
+                        "NO_RECIPE_ITEMS=收藏当前配方中 JEI 查不到任何产出流程的输入物品",
+                        "保存后下一次渲染 tooltip 即反映新模式"))
+                .setSaveConsumer(cfg.jeiBookmarkMode::set).build());
 
         // ===== 山海商店 =====
         ConfigCategory shop = builder.getOrCreateCategory(Component.literal("商店"));

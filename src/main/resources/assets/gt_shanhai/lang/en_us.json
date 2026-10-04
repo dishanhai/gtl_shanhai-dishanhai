@@ -486,6 +486,11 @@
   "message.gt_shanhai.jei.quick_encode.slots": "Occupied slots %s; unused slots %s",
   "message.gt_shanhai.jei.quick_encode.slots_unavailable": "Slot status unavailable",
   "message.gt_shanhai.jei.quick_encode.teleport": "Click to teleport to this Stellar Pattern Assembly",
-  "message.gt_shanhai.jei.quick_encode.open_terminal": "Open an AE2 pattern encoding terminal before using quick encode"
+  "message.gt_shanhai.jei.quick_encode.open_terminal": "Open an AE2 pattern encoding terminal before using quick encode",
+  "tooltip.gt_shanhai.jei.bookmark_missing": "Bookmark input items missing from your inventory",
+  "tooltip.gt_shanhai.jei.bookmark_no_recipe": "Bookmark input items with no recipe process",
+  "message.gt_shanhai.jei.bookmark.no_items": "No input items match the current mode",
+  "message.gt_shanhai.jei.bookmark.added": "Checked %s input item(s); added %s JEI bookmark(s)",
+  "message.gt_shanhai.jei.bookmark.already_bookmarked": "The input items are already bookmarked in JEI"
 }
 

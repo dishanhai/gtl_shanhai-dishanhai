@@ -28,6 +28,11 @@ public final class DShanhaiConfig {
             VIRTUAL_ACTIVE_TYPE
         }
 
+        public enum JeiBookmarkMode {
+            MISSING_ITEMS,
+            NO_RECIPE_ITEMS
+        }
+
         /**
          * 原始终焉引擎球体渲染风格的客户端显示覆盖。
          * <p>
@@ -127,6 +132,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue aeStorageDeltaCacheEnabled;
         /** AE 网络库存增量刷新缓存 — 强制全量重扫安全网间隔（tick） */
         public ForgeConfigSpec.IntValue aeStorageForceRescanTicks;
+        /** JEI 配方侧边收藏按键的筛选模式 */
+        public ForgeConfigSpec.EnumValue<JeiBookmarkMode> jeiBookmarkMode;
 
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("tag_filter_bus");
@@ -380,6 +387,14 @@ public final class DShanhaiConfig {
                              "不经过 AE 的 insert/extract 记录路径，增量缓存无法感知——原版 AE2 靠每 tick 全扫兜底",
                              "此安全网保证这类变化最迟 N tick 内被看见，把陈旧窗口从无界压到有界")
                     .defineInRange("forceRescanTicks", 40, 10, 1200);
+            builder.pop();
+
+            builder.push("jei");
+            jeiBookmarkMode = builder
+                    .comment("JEI 配方侧边收藏按键的筛选模式",
+                            "MISSING_ITEMS = 收藏当前配方中玩家背包数量不足的输入物品",
+                            "NO_RECIPE_ITEMS = 收藏当前配方中 JEI 查不到任何产出流程的输入物品")
+                    .defineEnum("bookmarkMode", JeiBookmarkMode.MISSING_ITEMS);
             builder.pop();
         }
     }

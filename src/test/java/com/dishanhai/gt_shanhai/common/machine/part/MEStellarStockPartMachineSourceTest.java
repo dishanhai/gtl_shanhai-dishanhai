@@ -37,7 +37,7 @@ class MEStellarStockPartMachineSourceTest {
     void pullTargetsComeOnlyFromPatternInputsAndIncludeLongMultipliers() throws Exception {
         String source = readMachine() + Files.readString(source("MEStellarStockTargetPlanner.java"));
 
-        assertTrue(source.contains("details.getInputs()"));
+        assertTrue(source.contains("detail.getInputs()"));
         assertTrue(source.contains("input.getPossibleInputs()"));
         assertTrue(source.contains("input.getMultiplier()"));
         assertTrue(source.contains("instanceof AEItemKey"));
@@ -113,15 +113,17 @@ class MEStellarStockPartMachineSourceTest {
                 textures.resolve("block/machine/part/me_stellar_stock_part_machine/overlay_front.png"),
                 textures.resolve("block/machine/part/me_stellar_stock_part_machine/overlay_front_emissive.png")
         };
+        int[] widths = {32, 32, 16};
+        int[] heights = {256, 256, 128};
         for (int i = 0; i < paths.length; i++) {
             assertTrue(Files.isRegularFile(paths[i]), "Missing stellar texture: " + paths[i]);
             BufferedImage image = ImageIO.read(paths[i].toFile());
             assertTrue(image != null);
-            assertTrue(image.getWidth() == 32 && image.getHeight() == 32);
+            assertTrue(image.getWidth() == widths[i] && image.getHeight() == heights[i]);
             int visible = 0;
             int transparent = 0;
-            for (int y = 0; y < 32; y++) {
-                for (int x = 0; x < 32; x++) {
+            for (int y = 0; y < image.getHeight(); y++) {
+                for (int x = 0; x < image.getWidth(); x++) {
                     if ((image.getRGB(x, y) >>> 24) == 0) {
                         transparent++;
                     } else {
@@ -140,6 +142,15 @@ class MEStellarStockPartMachineSourceTest {
         assertTrue(source.contains("private static final int BASE_PATTERN_SLOTS = 5"));
         assertTrue(source.contains("for (int i = 0; i < BASE_PATTERN_SLOTS; i++)"));
         assertTrue(source.contains("10 + i * 18"));
+    }
+
+    @Test
+    void autoPullModeChecksAllPatternSlots() throws Exception {
+        String source = readMachine();
+        assertTrue(source.contains("if (!hasPattern())"));
+        assertTrue(source.contains("private boolean hasPattern()"));
+        assertTrue(source.contains("patternInventory.getSlots()"));
+        assertFalse(source.contains("patternInventory.getStackInSlot(0).isEmpty()"));
     }
 
     @Test
@@ -162,6 +173,22 @@ class MEStellarStockPartMachineSourceTest {
         assertTrue(source.contains("target::onContentsChanged"));
         assertFalse(source.contains("aeItemHandler = newItems"));
         assertFalse(source.contains("aeFluidHandler = newFluids"));
+    }
+
+    @Test
+    void manualStockConfigurationSurvivesAutomaticPatternRefresh() throws Exception {
+        String source = readMachine();
+
+        assertTrue(source.contains("manualStockConfiguration"));
+        assertTrue(source.contains("automaticStockConfiguration"));
+        assertTrue(source.contains("reconcileManualConfiguration()"));
+        assertTrue(source.contains("mergeManualAndAutomatic"));
+        assertTrue(source.contains("findManualSlot"));
+        assertTrue(source.contains("Math.max("));
+        assertTrue(source.contains("writeManualConfiguration"));
+        assertTrue(source.contains("writeAutomaticConfiguration"));
+        assertFalse(source.contains("aeItemHandler.clearInventory("));
+        assertFalse(source.contains("aeFluidHandler.clearInventory("));
     }
 
     private static Path source(String fileName) {

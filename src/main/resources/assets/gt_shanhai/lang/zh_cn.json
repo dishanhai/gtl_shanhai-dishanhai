@@ -718,6 +718,11 @@
   "message.gt_shanhai.jei.quick_encode.slots": "已占用槽位 %s；未使用槽位 %s",
   "message.gt_shanhai.jei.quick_encode.slots_unavailable": "槽位状态暂不可读",
   "message.gt_shanhai.jei.quick_encode.teleport": "点击传送到该星律样板总成",
-  "message.gt_shanhai.jei.quick_encode.open_terminal": "请先打开 AE2 样板编码终端，再使用快速编写"
+  "message.gt_shanhai.jei.quick_encode.open_terminal": "请先打开 AE2 样板编码终端，再使用快速编写",
+  "tooltip.gt_shanhai.jei.bookmark_missing": "收藏当前配方中背包数量不足的输入物品",
+  "tooltip.gt_shanhai.jei.bookmark_no_recipe": "收藏当前配方中没有合成流程的输入物品",
+  "message.gt_shanhai.jei.bookmark.no_items": "当前模式没有符合条件的输入物品",
+  "message.gt_shanhai.jei.bookmark.added": "已检查 %s 个输入物品，新增 %s 个 JEI 书签",
+  "message.gt_shanhai.jei.bookmark.already_bookmarked": "输入物品已在 JEI 书签中"
 }
 
