@@ -31,8 +31,11 @@ class JeiBookmarkButtonSourceTest {
         assertTrue(buttons.contains("DShanhaiConfig.COMMON.jeiBookmarkMode.get()"));
         assertTrue(buttons.contains("tooltip.gt_shanhai.jei.bookmark_no_recipe"));
         assertTrue(buttons.contains("tooltip.gt_shanhai.jei.bookmark_missing"));
-        assertTrue(buttons.contains("某個第三方配方類型失敗時繼續檢查其他類型"));
+        assertTrue(buttons.contains("mergeInputs"));
+        assertTrue(buttons.contains("JeiBookmarkMissingItemsRequestPacket"));
         assertTrue(config.contains("enum JeiBookmarkMode"));
+        assertTrue(config.contains("COMBINED"));
+        assertTrue(config.contains("数量极高时视为足够"));
         assertTrue(config.contains("defineEnum(\"bookmarkMode\", JeiBookmarkMode.MISSING_ITEMS)"));
         assertTrue(screen.contains("startEnumSelector(Component.literal(\"配方侧边收藏模式\")"));
     }
@@ -58,12 +61,29 @@ class JeiBookmarkButtonSourceTest {
         for (String key : new String[]{
                 "tooltip.gt_shanhai.jei.bookmark_missing",
                 "tooltip.gt_shanhai.jei.bookmark_no_recipe",
+                "tooltip.gt_shanhai.jei.bookmark_combined",
                 "message.gt_shanhai.jei.bookmark.no_items",
                 "message.gt_shanhai.jei.bookmark.added",
                 "message.gt_shanhai.jei.bookmark.already_bookmarked"}) {
             assertTrue(zhCn.contains("\"" + key + "\""));
             assertTrue(enUs.contains("\"" + key + "\""));
         }
+    }
+
+    @Test
+    void recipeTypeQuickEncodeUsesDistinctIconAndRequiresSecondClick() throws Exception {
+        String buttons = Files.readString(BUTTONS);
+        String zhCn = Files.readString(ZH_CN);
+        String enUs = Files.readString(EN_US);
+
+        assertTrue(buttons.contains("AEItems.CRAFTING_PATTERN.stack()"));
+        assertTrue(buttons.contains("CONFIRMATION_WINDOW_MILLIS = 3000L"));
+        assertTrue(buttons.contains("message.gt_shanhai.jei.quick_encode.recipe_type_confirm"));
+        assertTrue(buttons.contains("tooltip.gt_shanhai.jei.quick_encode_recipe_type_confirm"));
+        assertTrue(zhCn.contains("\"tooltip.gt_shanhai.jei.quick_encode_recipe_type_confirm\""));
+        assertTrue(zhCn.contains("\"message.gt_shanhai.jei.quick_encode.recipe_type_confirm\""));
+        assertTrue(enUs.contains("\"tooltip.gt_shanhai.jei.quick_encode_recipe_type_confirm\""));
+        assertTrue(enUs.contains("\"message.gt_shanhai.jei.quick_encode.recipe_type_confirm\""));
     }
 
     private static Path source(String... parts) {

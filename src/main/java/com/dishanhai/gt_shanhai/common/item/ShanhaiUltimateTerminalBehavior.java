@@ -374,7 +374,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             replacement.setComponent(replacementLabel(terminal));
         }, (family, tier) -> family != null && tier != null
                 && family.equals(ShanhaiUltimateTerminalConfig.getReplacementFamily(terminal))
-                && tier == ShanhaiUltimateTerminalConfig.getReplacementTier(terminal));
+                && tier == ShanhaiUltimateTerminalConfig.getReplacementTier(terminal, family));
         initializeReplacementSelector(selector, terminal);
         settings.addWidget(new SwitchWidget(14, 26, 30, 16,
                 (click, open) -> selector.showType(open))
@@ -407,7 +407,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         if (blocks.length == 0) {
             return Component.translatable("gui.gt_shanhai.ultimate_terminal.replacement_none");
         }
-        int tier = Math.min(ShanhaiUltimateTerminalConfig.getReplacementTier(terminal), blocks.length - 1);
+        int tier = Math.min(ShanhaiUltimateTerminalConfig.getReplacementTier(terminal, family), blocks.length - 1);
         try {
             return Component.literal("(")
                     .append(BlockMapSelectorWidget.getBlock(family))
@@ -428,7 +428,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         CompoundTag selectorTag = selectorState.getOrCreateTag();
         selectorTag.putString("blocks", family);
         selectorTag.putInt("Tier", Math.min(
-                ShanhaiUltimateTerminalConfig.getReplacementTier(terminal), lazyBlocks.get().length - 1));
+                ShanhaiUltimateTerminalConfig.getReplacementTier(terminal, family), lazyBlocks.get().length - 1));
         selector.setInit(selectorState);
     }
 

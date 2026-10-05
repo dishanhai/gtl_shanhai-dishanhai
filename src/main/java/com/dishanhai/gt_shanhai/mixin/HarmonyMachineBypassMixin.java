@@ -29,7 +29,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 绕过 HarmonyMachine 的氢/氦消耗检查。
  * 当安装了聚合枢纽时，跳过氢氦不足导致的配方失败。
  */
-@Mixin(value = org.gtlcore.gtlcore.common.machine.multiblock.electric.HarmonyMachine.class, remap = false, priority = 900)
+// 必须在 gtladditions HarmonyMachineMixin（默认 priority=1000）之后应用：
+// 该 mixin 会先为 HarmonyMachine 加入 gtladditions$consumeCosmosStartup /
+// gtladditions$consumeAstralStartup；过早注入会因 require=0 静默跳过这两个目标。
+@Mixin(value = org.gtlcore.gtlcore.common.machine.multiblock.electric.HarmonyMachine.class, remap = false, priority = 1500)
 public class HarmonyMachineBypassMixin {
 
     private static final Logger LOG = LoggerFactory.getLogger("gt_shanhai:harmony");

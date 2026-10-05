@@ -132,6 +132,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
      * 每 tick 重新读取聚合器，配合下面的两次一致防抖，来源上线后最多两个 tick 即可同步。
      */
     private static final long OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 1L;
+    private static final int[] NO_ACTIVE_SLOTS = new int[0];
     private static final int[] NO_ACTIVE_UNCACHED_SLOTS = new int[0];
     private static final int PARENT_REFUND = 0;
     private static final int PARENT_SHARED_ITEM = 1;
@@ -187,6 +188,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private IntConsumer wildcardRemoveSlotFromMap;
     private boolean rebuildingWildcardPatterns;
     private int selectedWildcardMotherSlot;
+    private int[] activeSlotsScratch;
     private int[] activeUncachedSlotsScratch;
 
     public RecipeTypePatternBufferPartMachine(@Nullable IMachineBlockEntity holder) {
@@ -196,6 +198,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public RecipeTypePatternBufferPartMachine(@Nullable IMachineBlockEntity holder, int patternsPerRow,
             int rowsPerPage, int maxPages) {
         super(holder, patternsPerRow * rowsPerPage * maxPages, IO.BOTH);
+        this.activeSlotsScratch =
+                new int[patternsPerRow * rowsPerPage * maxPages + WILDCARD_PATTERN_SLOT_COUNT];
         this.activeUncachedSlotsScratch =
                 new int[patternsPerRow * rowsPerPage * maxPages + WILDCARD_PATTERN_SLOT_COUNT];
         this.patternRecipeTypeIds = new String[patternsPerRow * rowsPerPage * maxPages];
@@ -1181,6 +1185,25 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     protected int[] getActiveSlots() {
         gtShanhai$clearResolvedRuntimeWarnings();
         return super.getActiveSlots();
+    }
+
+    @Override
+    public int[] gtShanhai$getActiveSlots() {
+        gtShanhai$clearResolvedRuntimeWarnings();
+        int slotCount = getInternalSlotCount();
+        if (activeSlotsScratch.length < slotCount) {
+            activeSlotsScratch = Arrays.copyOf(activeSlotsScratch, slotCount);
+        }
+
+        int activeCount = 0;
+        for (int slotIndex = 0; slotIndex < slotCount; slotIndex++) {
+            if (getInternalSlot(slotIndex).isActive()) {
+                activeSlotsScratch[activeCount++] = slotIndex;
+            }
+        }
+        return activeCount == 0
+                ? NO_ACTIVE_SLOTS
+                : Arrays.copyOf(activeSlotsScratch, activeCount);
     }
 
     @Override

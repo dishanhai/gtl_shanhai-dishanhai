@@ -1,33 +1,33 @@
 package com.dishanhai.gt_shanhai.integration.jei;
 
-import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import appeng.core.definitions.AEItems;
-import appeng.integration.modules.jei.GenericEntryStackHelper;
-import appeng.integration.modules.jeirei.TransferHelper;
+import appeng.menu.me.common.MEStorageMenu;
 import appeng.menu.me.items.PatternEncodingTermMenu;
 
 import com.dishanhai.gt_shanhai.client.ShanhaiJEIPlugin;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.JeiBookmarkMode;
-import com.dishanhai.gt_shanhai.jei.JeiBookmarkBridge;
+import com.dishanhai.gt_shanhai.network.JeiBookmarkMissingItemsRequestPacket;
 import com.dishanhai.gt_shanhai.network.JeiPatternQuickEncodeRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
 
 import mezz.jei.api.runtime.IJeiRuntime;
 import mezz.jei.api.gui.IRecipeLayoutDrawable;
+import mezz.jei.api.gui.ingredient.IRecipeSlotView;
 import mezz.jei.api.gui.builder.ITooltipBuilder;
 import mezz.jei.api.gui.buttons.IButtonState;
 import mezz.jei.api.gui.buttons.IIconButtonController;
 import mezz.jei.api.gui.drawable.IDrawable;
 import mezz.jei.api.recipe.RecipeIngredientRole;
-import mezz.jei.api.recipe.IFocus;
-import mezz.jei.api.recipe.IRecipeLookup;
 import mezz.jei.api.gui.inputs.IJeiUserInput;
-import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.forge.ForgeTypes;
 import mezz.jei.api.helpers.IGuiHelper;
+import mezz.jei.api.ingredients.IIngredientType;
+import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.recipe.advanced.IRecipeButtonControllerFactory;
 import mezz.jei.api.recipe.transfer.IRecipeTransferError;
 import mezz.jei.api.registration.IAdvancedRegistration;
@@ -41,10 +41,12 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraftforge.fluids.FluidStack;
 
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public final class JeiPatternQuickEncodeButtons {
@@ -55,7 +57,8 @@ public final class JeiPatternQuickEncodeButtons {
         IGuiHelper guiHelper = registration.getJeiHelpers().getGuiHelper();
         IDrawable patternIcon = guiHelper.createDrawableItemStack(AEItems.PROCESSING_PATTERN.stack());
         registration.addRecipeButtonFactory(new Factory(patternIcon, false));
-        registration.addRecipeButtonFactory(new Factory(patternIcon, true));
+        IDrawable recipeTypeIcon = guiHelper.createDrawableItemStack(AEItems.CRAFTING_PATTERN.stack());
+        registration.addRecipeButtonFactory(new Factory(recipeTypeIcon, true));
         IDrawable bookmarkIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.BOOK));
         registration.addRecipeButtonFactory(new BookmarkFactory(bookmarkIcon));
     }
@@ -99,9 +102,35 @@ public final class JeiPatternQuickEncodeButtons {
         }
     }
 
-    private record Controller(IDrawable icon, ResourceLocation recipeId, boolean wholeRecipeType,
-                              IRecipeLayoutDrawable<?> recipeLayout)
-            implements IIconButtonController {
+    private static final class Controller implements IIconButtonController {
+
+        private static final long CONFIRMATION_WINDOW_MILLIS = 3000L;
+
+        private final IDrawable icon;
+        private final ResourceLocation recipeId;
+        private final boolean wholeRecipeType;
+        private final IRecipeLayoutDrawable<?> recipeLayout;
+        private long confirmationExpiresAt;
+
+        private Controller(IDrawable icon, ResourceLocation recipeId, boolean wholeRecipeType,
+                           IRecipeLayoutDrawable<?> recipeLayout) {
+            this.icon = icon;
+            this.recipeId = recipeId;
+            this.wholeRecipeType = wholeRecipeType;
+            this.recipeLayout = recipeLayout;
+        }
+
+        private boolean confirmationPending() {
+            return wholeRecipeType && System.currentTimeMillis() < confirmationExpiresAt;
+        }
+
+        private void armConfirmation() {
+            confirmationExpiresAt = System.currentTimeMillis() + CONFIRMATION_WINDOW_MILLIS;
+        }
+
+        private void clearConfirmation() {
+            confirmationExpiresAt = 0L;
+        }
 
         @Override
         public void initState(IButtonState state) {
@@ -128,6 +157,13 @@ public final class JeiPatternQuickEncodeButtons {
                 return false;
             }
             if (!input.isSimulate()) {
+                if (wholeRecipeType && !confirmationPending()) {
+                    armConfirmation();
+                    minecraft.player.displayClientMessage(Component.translatable(
+                            "message.gt_shanhai.jei.quick_encode.recipe_type_confirm"), false);
+                    return true;
+                }
+                clearConfirmation();
                 ShanhaiNetwork.CHANNEL.sendToServer(new JeiPatternQuickEncodeRequestPacket(
                         menu.containerId, recipeId.toString(), wholeRecipeType));
             }
@@ -136,9 +172,14 @@ public final class JeiPatternQuickEncodeButtons {
 
         @Override
         public void getTooltips(ITooltipBuilder tooltip) {
-            tooltip.add(Component.translatable(wholeRecipeType
-                    ? "tooltip.gt_shanhai.jei.quick_encode_recipe_type"
-                    : "tooltip.gt_shanhai.jei.quick_encode_pattern"));
+            if (wholeRecipeType && confirmationPending()) {
+                tooltip.add(Component.translatable(
+                        "tooltip.gt_shanhai.jei.quick_encode_recipe_type_confirm"));
+            } else {
+                tooltip.add(Component.translatable(wholeRecipeType
+                        ? "tooltip.gt_shanhai.jei.quick_encode_recipe_type"
+                        : "tooltip.gt_shanhai.jei.quick_encode_pattern"));
+            }
         }
 
         @Override
@@ -188,11 +229,12 @@ public final class JeiPatternQuickEncodeButtons {
     private record BookmarkFactory(IDrawable icon) implements IRecipeButtonControllerFactory {
         @Override
         public <T> IIconButtonController createButtonController(IRecipeLayoutDrawable<T> recipeLayout) {
-            return new BookmarkController(icon, recipeLayout);
+            return new BookmarkController(icon, extractRecipeId(recipeLayout), recipeLayout);
         }
     }
 
-    private record BookmarkController(IDrawable icon, IRecipeLayoutDrawable<?> recipeLayout)
+    private record BookmarkController(IDrawable icon, ResourceLocation recipeId,
+                                      IRecipeLayoutDrawable<?> recipeLayout)
             implements IIconButtonController {
         @Override
         public void initState(IButtonState state) {
@@ -208,114 +250,103 @@ public final class JeiPatternQuickEncodeButtons {
 
         @Override
         public boolean onPress(IJeiUserInput input) {
-            List<ItemStack> inputs = collectDisplayedInputs(recipeLayout);
-            List<ItemStack> selected = filterInputs(inputs);
-            if (input.isSimulate()) return !selected.isEmpty();
+            List<GenericStack> inputs = collectDisplayedInputs(recipeLayout);
+            JeiBookmarkMode mode = DShanhaiConfig.COMMON.jeiBookmarkMode.get();
+            if (input.isSimulate()) return !inputs.isEmpty();
             Minecraft minecraft = Minecraft.getInstance();
-            if (selected.isEmpty()) {
+            if (inputs.isEmpty()) {
                 if (minecraft.player != null) {
                     minecraft.player.displayClientMessage(Component.translatable(
                             "message.gt_shanhai.jei.bookmark.no_items"), false);
                 }
                 return false;
             }
-            int added = JeiBookmarkBridge.addItemStacks(selected);
-            if (minecraft.player != null) {
-                minecraft.player.displayClientMessage(Component.translatable(
-                        added > 0
-                                ? "message.gt_shanhai.jei.bookmark.added"
-                                : "message.gt_shanhai.jei.bookmark.already_bookmarked",
-                        selected.size(), added), false);
+            if (minecraft.player == null
+                    || !(minecraft.player.containerMenu instanceof MEStorageMenu menu)) {
+                if (minecraft.player != null) {
+                    minecraft.player.displayClientMessage(Component.translatable(
+                            "message.gt_shanhai.jei.bookmark.open_terminal"), false);
+                }
+                return false;
             }
-            return added > 0;
+            int menuId = menu.containerId;
+            String id = recipeId == null ? "" : recipeId.toString();
+            GTDishanhaiMod.LOGGER.info("[JEIBookmarkDiag] request recipe={} mode={} inputs={}",
+                    id, mode, inputs.size());
+            ShanhaiNetwork.CHANNEL.sendToServer(
+                    new JeiBookmarkMissingItemsRequestPacket(menuId, id, mode, mergeInputs(inputs)));
+            return true;
         }
 
         @Override
         public void getTooltips(ITooltipBuilder tooltip) {
             JeiBookmarkMode mode = DShanhaiConfig.COMMON.jeiBookmarkMode.get();
-            tooltip.add(Component.translatable(mode == JeiBookmarkMode.NO_RECIPE_ITEMS
-                    ? "tooltip.gt_shanhai.jei.bookmark_no_recipe"
-                    : "tooltip.gt_shanhai.jei.bookmark_missing"));
+            String key;
+            if (mode == JeiBookmarkMode.NO_RECIPE_ITEMS) {
+                key = "tooltip.gt_shanhai.jei.bookmark_no_recipe";
+            } else if (mode == JeiBookmarkMode.COMBINED) {
+                key = "tooltip.gt_shanhai.jei.bookmark_combined";
+            } else {
+                key = "tooltip.gt_shanhai.jei.bookmark_missing";
+            }
+            tooltip.add(Component.translatable(key));
         }
 
         @Override
         public void drawExtras(GuiGraphics graphics, Rect2i area, int mouseX, int mouseY, float partialTick) {}
     }
 
-    private static List<ItemStack> collectDisplayedInputs(IRecipeLayoutDrawable<?> recipeLayout) {
-        List<ItemStack> result = new ArrayList<>();
-        for (var slot : recipeLayout.getRecipeSlotsView().getSlotViews(RecipeIngredientRole.INPUT)) {
-            Optional<ItemStack> displayed = slot.getDisplayedItemStack();
-            if (displayed.isPresent() && !displayed.get().isEmpty()) {
-                result.add(displayed.get().copy());
+    private static List<GenericStack> collectDisplayedInputs(IRecipeLayoutDrawable<?> recipeLayout) {
+        List<GenericStack> result = new ArrayList<>();
+        IIngredientType<FluidStack> fluidType = getFluidIngredientType();
+        for (IRecipeSlotView slot : recipeLayout.getRecipeSlotsView().getSlotViews(RecipeIngredientRole.INPUT)) {
+            Optional<ITypedIngredient<?>> displayed = slot.getDisplayedIngredient();
+            if (displayed.isEmpty()) continue;
+            Object ingredient = displayed.get().getIngredient();
+            if (ingredient instanceof ItemStack itemStack && !itemStack.isEmpty()) {
+                GenericStack stack = GenericStack.fromItemStack(itemStack.copy());
+                if (stack != null && stack.what() != null && stack.amount() > 0) result.add(stack);
+            } else if (ingredient instanceof FluidStack fluidStack
+                    && !fluidStack.isEmpty()
+                    && (fluidType == null || displayed.get().getType() == fluidType)) {
+                GenericStack stack = GenericStack.fromFluidStack(fluidStack.copy());
+                if (stack != null && stack.what() != null && stack.amount() > 0) result.add(stack);
             }
         }
         return result;
     }
 
-    private static List<ItemStack> filterInputs(List<ItemStack> inputs) {
-        List<ItemStack> unique = new ArrayList<>();
-        for (ItemStack stack : inputs) {
-            if (containsSame(unique, stack)) continue;
-            unique.add(stack);
+    private static List<GenericStack> mergeInputs(List<GenericStack> inputs) {
+        Map<appeng.api.stacks.AEKey, Long> amounts = new LinkedHashMap<>();
+        for (GenericStack input : inputs) {
+            if (input == null || input.what() == null || input.amount() <= 0) continue;
+            Long previous = amounts.get(input.what());
+            long next = previous == null ? input.amount() : saturatingAdd(previous, input.amount());
+            amounts.put(input.what(), next);
         }
-        if (DShanhaiConfig.COMMON.jeiBookmarkMode.get() == JeiBookmarkMode.NO_RECIPE_ITEMS) {
-            List<ItemStack> result = new ArrayList<>();
-            for (ItemStack stack : unique) {
-                if (!hasRecipeProcess(stack)) result.add(stack);
-            }
-            return result;
-        }
-
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null) return unique;
-        List<ItemStack> result = new ArrayList<>();
-        for (ItemStack stack : unique) {
-            int required = 0;
-            for (ItemStack input : inputs) {
-                if (ItemStack.isSameItemSameTags(stack, input)) required += Math.max(1, input.getCount());
-            }
-            if (countInInventory(minecraft.player, stack) < required) result.add(stack);
+        List<GenericStack> result = new ArrayList<>(amounts.size());
+        for (Map.Entry<appeng.api.stacks.AEKey, Long> entry : amounts.entrySet()) {
+            result.add(new GenericStack(entry.getKey(), entry.getValue()));
         }
         return result;
     }
 
-    private static boolean containsSame(List<ItemStack> stacks, ItemStack candidate) {
-        for (ItemStack stack : stacks) {
-            if (ItemStack.isSameItemSameTags(stack, candidate)) return true;
-        }
-        return false;
+    private static long saturatingAdd(long left, long right) {
+        if (Long.MAX_VALUE - left < right) return Long.MAX_VALUE;
+        return left + right;
     }
 
-    private static int countInInventory(net.minecraft.world.entity.player.Player player, ItemStack wanted) {
-        int count = 0;
-        for (ItemStack stack : player.getInventory().items) {
-            if (ItemStack.isSameItemSameTags(stack, wanted)) count += stack.getCount();
-        }
-        return count;
-    }
-
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static boolean hasRecipeProcess(ItemStack stack) {
+    @SuppressWarnings("unchecked")
+    private static IIngredientType<FluidStack> getFluidIngredientType() {
         IJeiRuntime runtime = ShanhaiJEIPlugin.getRuntime();
-        if (runtime == null) return false;
-        IFocus<?> focus;
-        try {
-            focus = runtime.getJeiHelpers().getFocusFactory()
-                    .createFocus(RecipeIngredientRole.OUTPUT, VanillaTypes.ITEM_STACK, stack);
-        } catch (Throwable ignored) {
-            return false;
-        }
-        Collection<IFocus<?>> focuses = List.of(focus);
-        for (var recipeType : runtime.getJeiHelpers().getAllRecipeTypes().toList()) {
+        if (runtime != null) {
             try {
-                IRecipeLookup lookup = runtime.getRecipeManager().createRecipeLookup(recipeType)
-                        .limitFocus(focuses);
-                if (lookup.get().findAny().isPresent()) return true;
+                return (IIngredientType<FluidStack>) runtime.getJeiHelpers()
+                        .getPlatformFluidHelper().getFluidIngredientType();
             } catch (Throwable ignored) {
-                // 某個第三方配方類型失敗時繼續檢查其他類型，避免誤判整體沒有流程。
+                // JEI helper API 变化时回退到当前版本的 Forge 类型常量。
             }
         }
-        return false;
+        return ForgeTypes.FLUID_STACK;
     }
 }

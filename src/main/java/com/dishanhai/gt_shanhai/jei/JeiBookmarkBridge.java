@@ -80,40 +80,15 @@ public final class JeiBookmarkBridge {
      * 批量把物品栈加入 JEI 书签。保持公开签名不暴露 JEI 类型；返回实际新增数量。
      */
     public static int addItemStacks(Collection<ItemStack> stacks) {
-        if (stacks == null || stacks.isEmpty()) return 0;
-        Object runtime = runtimeRef;
-        if (runtime == null) return 0;
-        try {
-            Object manager = invoke(runtime, "getIngredientManager");
-            Object bookmarkOverlay = invoke(runtime, "getBookmarkOverlay");
-            if (manager == null || bookmarkOverlay == null) return 0;
-            Object bookmarkList = readField(bookmarkOverlay, "bookmarkList");
-            if (bookmarkList == null) return 0;
+        return addTypedStacks(stacks, "mezz.jei.api.constants.VanillaTypes", "ITEM_STACK");
+    }
 
-            ClassLoader classLoader = bookmarkOverlay.getClass().getClassLoader();
-            Class<?> bookmarkType = Class.forName(
-                    "mezz.jei.gui.bookmarks.IBookmark", false, classLoader);
-            Method add = bookmarkList.getClass().getMethod("add", bookmarkType);
-            Class<?> ingredientBookmark = Class.forName(
-                    "mezz.jei.gui.bookmarks.IngredientBookmark", false, classLoader);
-            Method create = ingredientBookmark.getMethod(
-                    "create",
-                    Class.forName("mezz.jei.api.ingredients.ITypedIngredient", false, classLoader),
-                    Class.forName("mezz.jei.api.runtime.IIngredientManager", false, classLoader));
-
-            int added = 0;
-            for (ItemStack stack : stacks) {
-                if (stack == null || stack.isEmpty()) continue;
-                Object optional = invokeTypedItemIngredient(manager, stack);
-                if (!(optional instanceof java.util.Optional<?> typedOptional) || typedOptional.isEmpty()) continue;
-                Object bookmark = create.invoke(null, typedOptional.get(), manager);
-                Object result = add.invoke(bookmarkList, bookmark);
-                if (Boolean.TRUE.equals(result)) added++;
-            }
-            return added;
-        } catch (Throwable ignored) {
-            return 0;
-        }
+    /**
+     * 批量把流体栈加入 JEI 书签。流体数量只用于保留当前配方单次需求的显示信息，
+     * JEI 去重仍由流体类型/NBT 身份决定。
+     */
+    public static int addFluidStacks(Collection<FluidStack> stacks) {
+        return addTypedStacks(stacks, "mezz.jei.api.forge.ForgeTypes", "FLUID_STACK");
     }
 
     /** 遍历当前书签列表，把每一项能解出的原始摄取物（ItemStack/FluidStack/其他）交给 consumer；解不出的静默跳过。 */
@@ -147,15 +122,66 @@ public final class JeiBookmarkBridge {
         }
     }
 
-    private static Object invokeTypedItemIngredient(Object manager, ItemStack stack) throws Exception {
+    private static int addTypedStacks(Collection<?> stacks, String typeClassName, String typeFieldName) {
+        if (stacks == null || stacks.isEmpty()) return 0;
+        Object runtime = runtimeRef;
+        if (runtime == null) return 0;
+        try {
+            Object manager = invoke(runtime, "getIngredientManager");
+            Object bookmarkOverlay = invoke(runtime, "getBookmarkOverlay");
+            if (manager == null || bookmarkOverlay == null) return 0;
+            Object bookmarkList = readField(bookmarkOverlay, "bookmarkList");
+            if (bookmarkList == null) return 0;
+
+            ClassLoader classLoader = bookmarkOverlay.getClass().getClassLoader();
+            Class<?> bookmarkType = Class.forName(
+                    "mezz.jei.gui.bookmarks.IBookmark", false, classLoader);
+            Method add = bookmarkList.getClass().getMethod("add", bookmarkType);
+            Class<?> ingredientBookmark = Class.forName(
+                    "mezz.jei.gui.bookmarks.IngredientBookmark", false, classLoader);
+            Method create = ingredientBookmark.getMethod(
+                    "create",
+                    Class.forName("mezz.jei.api.ingredients.ITypedIngredient", false, classLoader),
+                    Class.forName("mezz.jei.api.runtime.IIngredientManager", false, classLoader));
+
+            int added = 0;
+            for (Object stack : stacks) {
+                if (stack == null || isEmptyIngredient(stack)) continue;
+                Object optional = invokeTypedIngredient(manager, stack, typeClassName, typeFieldName);
+                if (!(optional instanceof java.util.Optional<?> typedOptional) || typedOptional.isEmpty()) continue;
+                Object bookmark = create.invoke(null, typedOptional.get(), manager);
+                Object result = add.invoke(bookmarkList, bookmark);
+                if (Boolean.TRUE.equals(result)) added++;
+            }
+            return added;
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    private static boolean isEmptyIngredient(Object stack) {
+        if (stack instanceof ItemStack itemStack) return itemStack.isEmpty();
+        if (stack instanceof FluidStack fluidStack) return fluidStack.isEmpty();
+        return false;
+    }
+
+    private static Object invokeTypedIngredient(Object manager, Object stack,
+            String typeClassName, String typeFieldName) throws Exception {
         ClassLoader classLoader = manager.getClass().getClassLoader();
-        Class<?> vanillaTypes = Class.forName(
-                "mezz.jei.api.constants.VanillaTypes", false, classLoader);
-        Object itemStackType = vanillaTypes.getField("ITEM_STACK").get(null);
+        Class<?> typeClass = Class.forName(typeClassName, false, classLoader);
+        Object ingredientType = "mezz.jei.api.forge.ForgeTypes".equals(typeClassName)
+                ? getFluidIngredientType(manager)
+                : typeClass.getField(typeFieldName).get(null);
         Method create = manager.getClass().getMethod("createTypedIngredient",
                 Class.forName("mezz.jei.api.ingredients.IIngredientType", false, classLoader),
                 Object.class);
-        return create.invoke(manager, itemStackType, stack);
+        return create.invoke(manager, ingredientType, stack);
+    }
+
+    private static Object getFluidIngredientType(Object manager) throws Exception {
+        ClassLoader classLoader = manager.getClass().getClassLoader();
+        Class<?> forgeTypes = Class.forName("mezz.jei.api.forge.ForgeTypes", false, classLoader);
+        return forgeTypes.getField("FLUID_STACK").get(null);
     }
 
     private static Object invoke(Object target, String methodName) throws Exception {

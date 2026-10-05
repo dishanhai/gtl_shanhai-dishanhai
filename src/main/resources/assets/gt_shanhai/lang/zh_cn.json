@@ -74,6 +74,8 @@
   "gt_shanhai.machine.primordial_matter_recombinator_core.mode": "§a物质重组中",
   "module.primordial_matter_recombinator_core.name": "原初物质重组核心",
   "gtceu.recipe_type.primordial_matter_recombination": "原初物质重组",
+  "gtceu.recipe_type.primordial_matter_deconstruction": "原初物质解构",
+  "gtceu.primordial_matter_deconstruction": "原初物质解构",
   "gtceu.primordial_matter_recombination": "原初物质重组",
   "block.gt_shanhai.primordial_causal_weaving_matrix": "原初因果编织矩阵",
   "gt_shanhai.machine.primordial_causal_weaving_matrix.name": "原初因果编织矩阵",
@@ -697,6 +699,8 @@
   "gui.gt_shanhai.eaep_wrong_host_confirm.no_host_types": "无可识别配方类型",
   "tooltip.gt_shanhai.jei.quick_encode_pattern": "快速编写为样板",
   "tooltip.gt_shanhai.jei.quick_encode_recipe_type": "快速编写当前配方类型全部样板",
+  "tooltip.gt_shanhai.jei.quick_encode_recipe_type_confirm": "再次点击以编写当前配方类型全部样板（3秒内有效）",
+  "message.gt_shanhai.jei.quick_encode.recipe_type_confirm": "即将批量编写当前配方类型全部样板；请在3秒内再次点击确认",
   "message.gt_shanhai.jei.quick_encode.invalid_recipe": "当前 JEI 配方无效，无法编写样板",
   "message.gt_shanhai.jei.quick_encode.encode_failed": "配方编码失败，未写入任何样板",
   "message.gt_shanhai.jei.quick_encode.missing_blank": "缺少空白样板，需要 %s 张",
@@ -719,10 +723,12 @@
   "message.gt_shanhai.jei.quick_encode.slots_unavailable": "槽位状态暂不可读",
   "message.gt_shanhai.jei.quick_encode.teleport": "点击传送到该星律样板总成",
   "message.gt_shanhai.jei.quick_encode.open_terminal": "请先打开 AE2 样板编码终端，再使用快速编写",
-  "tooltip.gt_shanhai.jei.bookmark_missing": "收藏当前配方中背包数量不足的输入物品",
-  "tooltip.gt_shanhai.jei.bookmark_no_recipe": "收藏当前配方中没有合成流程的输入物品",
+  "tooltip.gt_shanhai.jei.bookmark_missing": "收藏当前配方中 AE 网络存储低于单次需求量的输入物品或流体",
+  "tooltip.gt_shanhai.jei.bookmark_no_recipe": "收藏当前配方中 AE 网络没有对应样板合成流程的输入物品或流体",
+  "tooltip.gt_shanhai.jei.bookmark_combined": "组合数量与合成流程判断：仅在无 AE 主产物样板且数量不足时收藏；极高储量视为足够",
   "message.gt_shanhai.jei.bookmark.no_items": "当前模式没有符合条件的输入物品",
-  "message.gt_shanhai.jei.bookmark.added": "已检查 %s 个输入物品，新增 %s 个 JEI 书签",
-  "message.gt_shanhai.jei.bookmark.already_bookmarked": "输入物品已在 JEI 书签中"
+  "message.gt_shanhai.jei.bookmark.open_terminal": "请先打开一个 AE 网络终端，再检查库存或样板流程",
+  "message.gt_shanhai.jei.bookmark.added": "已检查 %s 个输入项，新增 %s 个 JEI 书签",
+  "message.gt_shanhai.jei.bookmark.already_bookmarked": "输入项已在 JEI 书签中"
 }
 

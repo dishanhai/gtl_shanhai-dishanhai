@@ -29,6 +29,7 @@ public final class ShanhaiUltimateTerminalConfig {
     private static final String BOUND_AE_KEY = "BoundAE";
     private static final String REPLACEMENT_FAMILY_KEY = "ReplacementFamily";
     private static final String REPLACEMENT_TIER_KEY = "ReplacementTier";
+    private static final String TIER_SELECTIONS_KEY = "TierSelections";
 
     private ShanhaiUltimateTerminalConfig() {}
 
@@ -122,13 +123,35 @@ public final class ShanhaiUltimateTerminalConfig {
     }
 
     public static int getReplacementTier(ItemStack stack) {
-        return Math.max(0, get(stack).getInt(REPLACEMENT_TIER_KEY));
+        CompoundTag config = get(stack);
+        String family = config.getString(REPLACEMENT_FAMILY_KEY);
+        return getReplacementTier(stack, family);
     }
 
     public static void setReplacement(ItemStack stack, String family, int tier) {
         CompoundTag config = get(stack);
-        config.putString(REPLACEMENT_FAMILY_KEY, family == null ? "" : family);
-        config.putInt(REPLACEMENT_TIER_KEY, Math.max(0, tier));
+        String normalizedFamily = family == null ? "" : family;
+        int normalizedTier = Math.max(0, tier);
+        config.putString(REPLACEMENT_FAMILY_KEY, normalizedFamily);
+        config.putInt(REPLACEMENT_TIER_KEY, normalizedTier);
+        if (!normalizedFamily.isEmpty()) {
+            CompoundTag selections = config.contains(TIER_SELECTIONS_KEY, CompoundTag.TAG_COMPOUND)
+                    ? config.getCompound(TIER_SELECTIONS_KEY) : new CompoundTag();
+            selections.putInt(normalizedFamily, normalizedTier);
+            config.put(TIER_SELECTIONS_KEY, selections);
+        }
+    }
+
+    public static int getReplacementTier(ItemStack stack, String family) {
+        if (family == null || family.isEmpty()) return 0;
+        CompoundTag config = get(stack);
+        if (config.contains(TIER_SELECTIONS_KEY, CompoundTag.TAG_COMPOUND)) {
+            CompoundTag selections = config.getCompound(TIER_SELECTIONS_KEY);
+            if (selections.contains(family)) {
+                return Math.max(0, selections.getInt(family));
+            }
+        }
+        return Math.max(0, config.getInt(REPLACEMENT_TIER_KEY));
     }
 
     public static void setBoundAe(ItemStack stack, GlobalPos pos) {

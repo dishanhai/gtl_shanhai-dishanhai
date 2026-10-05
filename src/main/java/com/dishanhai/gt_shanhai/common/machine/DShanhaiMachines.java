@@ -358,7 +358,8 @@ public class DShanhaiMachines {
                         GTLRecipeTypes.LARGE_VOID_MINER_RECIPES,
                         GTLRecipeTypes.RANDOM_ORE_RECIPES,
                         GTRecipeTypes.ORE_WASHER_RECIPES,
-                        GTLRecipeTypes.MINER_MODULE_RECIPES)
+                        GTLRecipeTypes.MINER_MODULE_RECIPES,
+                        DShanhaiRecipeTypes.PRIMORDIAL_MATTER_DECONSTRUCTION)
                 .pattern(PrimordialChaoticEphemeralDeconstructionCrystallizationFurnaceStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
                         new ResourceLocation("gtceu", "bronze_machine_casing")))

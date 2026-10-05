@@ -339,7 +339,7 @@ public final class RecipeTypePatternSearchHelper {
             Object patternMachine = resolvePatternBuffer(part);
             if (patternMachine == null) continue;
             collectMarkedPatternRecipesFromMachine(machine, null, part, patternMachine,
-                    readActiveSlots(patternMachine), result, true);
+                    readActiveSlots(patternMachine, patternMachine), result, true);
         }
         return applyRecipeTypeSwitch(machine, result);
     }
@@ -350,7 +350,7 @@ public final class RecipeTypePatternSearchHelper {
                 ? (IRecipeCapabilityMachine) machine
                 : null;
         collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, buffer, buffer,
-                readActiveSlots(buffer), result, true);
+                readActiveSlots(buffer, buffer), result, true);
         return applyRecipeTypeSwitch(machine, result);
     }
 
@@ -376,8 +376,9 @@ public final class RecipeTypePatternSearchHelper {
             IRecipeCapabilityMachine capabilityMachine, Object handler, Set<GTRecipe> result,
             boolean includeFirstSpark) {
         Object ownerMachine = findHandlerMachine(handler);
+        Object patternMachine = resolvePatternBuffer(ownerMachine);
         collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, ownerMachine,
-                resolvePatternBuffer(ownerMachine), readActiveSlots(handler), result, includeFirstSpark);
+                patternMachine, readActiveSlots(handler, patternMachine), result, includeFirstSpark);
     }
 
     private static void collectMarkedPatternRecipesFromParts(IRecipeLogicMachine machine,
@@ -388,7 +389,7 @@ public final class RecipeTypePatternSearchHelper {
             Object patternMachine = resolvePatternBuffer(part);
             Object slotSource = patternMachine == null ? part : patternMachine;
             collectMarkedPatternRecipesFromMachine(machine, capabilityMachine, part, patternMachine,
-                    readActiveSlots(slotSource), result, includeFirstSpark);
+                    readActiveSlots(slotSource, patternMachine), result, includeFirstSpark);
             if (includeFirstSpark) {
                 collectPlainPatternRecipesFromPart(machine, capabilityMachine, part, result);
             }
@@ -1050,7 +1051,7 @@ public final class RecipeTypePatternSearchHelper {
             return;
         }
 
-        int[] activeSlots = readActiveSlots(handler);
+        int[] activeSlots = readActiveSlots(handler, machine);
         if (activeSlots == null || activeSlots.length == 0) return;
         for (int slot : activeSlots) {
             GTRecipeType type = PatternRecipeTypeHelper.resolveRecipeType(access.gtShanhai$getPatternRecipeTypeId(slot));
@@ -1077,6 +1078,14 @@ public final class RecipeTypePatternSearchHelper {
             }
         }
         return null;
+    }
+
+    private static int[] readActiveSlots(Object handler, Object patternMachine) {
+        if (patternMachine instanceof RecipeTypePatternSlotAccess access) {
+            int[] direct = access.gtShanhai$getActiveSlots();
+            if (direct != null) return direct;
+        }
+        return readActiveSlots(handler);
     }
 
     private static int[] readActiveSlots(Object handler) {

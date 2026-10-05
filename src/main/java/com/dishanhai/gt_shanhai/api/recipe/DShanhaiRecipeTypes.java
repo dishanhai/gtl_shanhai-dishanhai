@@ -41,6 +41,7 @@ public class DShanhaiRecipeTypes {
     public static GTRecipeType PHOTON_SEPARATION;
     public static GTRecipeType MATTER_MODULE_CASTING;
     public static GTRecipeType MATTER_FORGING;
+    public static GTRecipeType PRIMORDIAL_MATTER_DECONSTRUCTION;
     public static GTRecipeType WL_BOARD_CIRCUIT_ASSEMBLY;
     public static GTRecipeType WL_BOARD_WAFER_ETCHING;
     public static GTRecipeType PRIMORDIAL_ENERGY_ABSORPTION;
@@ -348,6 +349,17 @@ public class DShanhaiRecipeTypes {
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
                 .setSlotOverlay(false, false, true, GuiTextures.FLUID_SLOT)
                 .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
+                .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
+                .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
+
+        PRIMORDIAL_MATTER_DECONSTRUCTION = register("primordial_matter_deconstruction", "multiblock")
+                .setMaxIOSize(1, 20, 1, 16)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_HAMMER, ProgressTexture.FillDirection.UP_TO_DOWN)
+                .setSlotOverlay(false, false, true, GuiTextures.FLUID_SLOT)
+                .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
+                .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 

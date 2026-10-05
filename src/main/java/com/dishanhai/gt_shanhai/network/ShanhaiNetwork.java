@@ -454,6 +454,23 @@ public class ShanhaiNetwork {
                 ShopStagePreviewPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        // JEI 收藏缺失项查询追加注册，保持既有消息 ID 不移动。
+        CHANNEL.registerMessage(
+                packetId++,
+                JeiBookmarkMissingItemsRequestPacket.class,
+                JeiBookmarkMissingItemsRequestPacket::encode,
+                JeiBookmarkMissingItemsRequestPacket::new,
+                JeiBookmarkMissingItemsRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                JeiBookmarkMissingItemsResponsePacket.class,
+                JeiBookmarkMissingItemsResponsePacket::encode,
+                JeiBookmarkMissingItemsResponsePacket::new,
+                JeiBookmarkMissingItemsResponsePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 

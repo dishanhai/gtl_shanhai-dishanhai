@@ -9,7 +9,7 @@ NUL
 /gradle-install/
 /.worktrees/
 /staging/
-
+/.manual-check/
 # 库和源码参考
 /lib/
 /libs/
@@ -81,3 +81,4 @@ build.gradle
 CLAUDE.md
 !lgpl-3.0.txt
 docs/superpowers/plans/2026-07-19-primordial-myriad-proliferation-core.md
+.manual-check/amount/com/dishanhai/gt_shanhai/jei/JeiBookmarkAmountParser.class

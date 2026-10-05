@@ -30,7 +30,8 @@ public final class DShanhaiConfig {
 
         public enum JeiBookmarkMode {
             MISSING_ITEMS,
-            NO_RECIPE_ITEMS
+            NO_RECIPE_ITEMS,
+            COMBINED
         }
 
         /**
@@ -392,8 +393,9 @@ public final class DShanhaiConfig {
             builder.push("jei");
             jeiBookmarkMode = builder
                     .comment("JEI 配方侧边收藏按键的筛选模式",
-                            "MISSING_ITEMS = 收藏当前配方中玩家背包数量不足的输入物品",
-                            "NO_RECIPE_ITEMS = 收藏当前配方中 JEI 查不到任何产出流程的输入物品")
+                            "MISSING_ITEMS = 收藏当前配方中 AE 网络存储数量低于单次需求量的输入物品或流体",
+                            "NO_RECIPE_ITEMS = 收藏当前配方中 AE 网络没有对应样板合成流程的输入物品或流体",
+                            "COMBINED = 组合数量与 AE 样板流程判断：仅在无主产物样板且数量不足时收藏；数量极高时视为足够")
                     .defineEnum("bookmarkMode", JeiBookmarkMode.MISSING_ITEMS);
             builder.pop();
         }

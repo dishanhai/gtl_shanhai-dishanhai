@@ -29,6 +29,11 @@ public interface RecipeTypePatternSlotAccess {
         return sharedFingerprint;
     }
 
+    /** 直接读取活跃槽位，供样板搜索热路径绕过 Stream 与反射。 */
+    default int[] gtShanhai$getActiveSlots() {
+        return null;
+    }
+
     boolean gtShanhai$slotAllowsRecipe(int slot, GTRecipe recipe);
 
     int gtShanhai$getPatternSlotCount();

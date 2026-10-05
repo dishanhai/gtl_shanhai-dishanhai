@@ -56,6 +56,8 @@ class ShanhaiUltimateTerminalSourceTest {
         assertTrue(config.contains("BoundAE"));
         assertTrue(config.contains("ReplacementFamily"));
         assertTrue(config.contains("ReplacementTier"));
+        assertTrue(config.contains("TierSelections"));
+        assertTrue(config.contains("getReplacementTier(ItemStack stack, String family)"));
     }
 
     @Test

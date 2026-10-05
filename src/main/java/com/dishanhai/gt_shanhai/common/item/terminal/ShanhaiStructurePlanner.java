@@ -192,7 +192,9 @@ public final class ShanhaiStructurePlanner {
 
     private static Block replacementTarget(ItemStack terminal, Block[] family) {
         if (family.length == 0) return null;
-        int tier = Math.min(ShanhaiUltimateTerminalConfig.getReplacementTier(terminal), family.length - 1);
+        String familyName = ShanhaiUltimateTerminalConfig.getReplacementFamily(terminal);
+        int tier = Math.min(ShanhaiUltimateTerminalConfig.getReplacementTier(terminal, familyName),
+                family.length - 1);
         return family[tier];
     }
 

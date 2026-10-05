@@ -182,8 +182,9 @@ public final class DShanhaiConfigScreen {
         jei.addEntry(e.startEnumSelector(Component.literal("配方侧边收藏模式"),
                         JeiBookmarkMode.class, cfg.jeiBookmarkMode.get())
                 .setDefaultValue(JeiBookmarkMode.MISSING_ITEMS)
-                .setTooltip(tip("MISSING_ITEMS=收藏当前配方中玩家背包数量不足的输入物品",
-                        "NO_RECIPE_ITEMS=收藏当前配方中 JEI 查不到任何产出流程的输入物品",
+                .setTooltip(tip("MISSING_ITEMS=收藏当前配方中 AE 网络存储低于单次需求量的输入物品或流体",
+                        "NO_RECIPE_ITEMS=收藏当前配方中 AE 网络没有对应样板合成流程的输入物品或流体",
+                        "COMBINED=仅在无 AE 主产物样板且数量不足时收藏；数量极高时视为足够",
                         "保存后下一次渲染 tooltip 即反映新模式"))
                 .setSaveConsumer(cfg.jeiBookmarkMode::set).build());
 

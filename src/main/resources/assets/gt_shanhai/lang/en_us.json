@@ -64,6 +64,8 @@
   "gt_shanhai.machine.seventy_two_changes.mode": "§eTransforming...",
   "gtceu.seventy_two_changes": "Seventy-Two Changes",
   "gtceu.recipe_type.seventy_two_changes": "Seventy-Two Changes",
+  "gtceu.recipe_type.primordial_matter_deconstruction": "Primordial Matter Deconstruction",
+  "gtceu.primordial_matter_deconstruction": "Primordial Matter Deconstruction",
   "gt_shanhai.machine.module_slot.empty": "§7No Module Installed",
   "block.gt_shanhai.primordial_world_fragments_collector": "Primordial World Fragments Collector",
   "gt_shanhai.machine.primordial_world_fragments_collector.name": "Primordial World Fragments Collector",
@@ -465,6 +467,8 @@
   "gui.gt_shanhai.eaep_wrong_host_confirm.no_host_types": "no recognized recipe types",
   "tooltip.gt_shanhai.jei.quick_encode_pattern": "Quickly encode as pattern",
   "tooltip.gt_shanhai.jei.quick_encode_recipe_type": "Quickly encode every pattern in this recipe type",
+  "tooltip.gt_shanhai.jei.quick_encode_recipe_type_confirm": "Click again to encode every pattern in this recipe type (valid for 3 seconds)",
+  "message.gt_shanhai.jei.quick_encode.recipe_type_confirm": "This will batch-encode every pattern in the recipe type; click again within 3 seconds to confirm",
   "message.gt_shanhai.jei.quick_encode.invalid_recipe": "The selected JEI recipe is invalid",
   "message.gt_shanhai.jei.quick_encode.encode_failed": "Recipe encoding failed; no patterns were uploaded",
   "message.gt_shanhai.jei.quick_encode.missing_blank": "Not enough blank patterns; %s required",
@@ -487,10 +491,12 @@
   "message.gt_shanhai.jei.quick_encode.slots_unavailable": "Slot status unavailable",
   "message.gt_shanhai.jei.quick_encode.teleport": "Click to teleport to this Stellar Pattern Assembly",
   "message.gt_shanhai.jei.quick_encode.open_terminal": "Open an AE2 pattern encoding terminal before using quick encode",
-  "tooltip.gt_shanhai.jei.bookmark_missing": "Bookmark input items missing from your inventory",
-  "tooltip.gt_shanhai.jei.bookmark_no_recipe": "Bookmark input items with no recipe process",
-  "message.gt_shanhai.jei.bookmark.no_items": "No input items match the current mode",
-  "message.gt_shanhai.jei.bookmark.added": "Checked %s input item(s); added %s JEI bookmark(s)",
-  "message.gt_shanhai.jei.bookmark.already_bookmarked": "The input items are already bookmarked in JEI"
+  "tooltip.gt_shanhai.jei.bookmark_missing": "Bookmark inputs whose AE network storage is below the one-recipe demand",
+  "tooltip.gt_shanhai.jei.bookmark_no_recipe": "Bookmark inputs with no matching AE network pattern process",
+  "tooltip.gt_shanhai.jei.bookmark_combined": "Combined amount and pattern check: bookmark only when no AE primary-output pattern exists and storage is insufficient; extremely high storage counts as enough",
+  "message.gt_shanhai.jei.bookmark.no_items": "No recipe inputs match the current mode",
+  "message.gt_shanhai.jei.bookmark.open_terminal": "Open an AE network terminal before checking storage or pattern processes",
+  "message.gt_shanhai.jei.bookmark.added": "Checked %s recipe input(s); added %s JEI bookmark(s)",
+  "message.gt_shanhai.jei.bookmark.already_bookmarked": "The recipe inputs are already bookmarked in JEI"
 }
 

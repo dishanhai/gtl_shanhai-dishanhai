@@ -127,6 +127,25 @@ class PatternRecipeLookupPerformanceSourceTest {
     }
 
     @Test
+    void activePatternLookupUsesTheDirectStellarSlotBridge() throws IOException {
+        String access = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "item", "RecipeTypePatternSlotAccess.java"));
+        String buffer = Files.readString(PATTERN_BUFFER_MACHINE);
+        String helper = Files.readString(SEARCH_HELPER);
+
+        assertTrue(access.contains("gtShanhai$getActiveSlots()"),
+                "样板槽桥接接口必须暴露直接 active slot 读取入口");
+        assertTrue(buffer.contains("public int[] gtShanhai$getActiveSlots()"),
+                "星律样板总成必须实现直接 active slot 读取");
+        assertTrue(buffer.contains("activeSlotsScratch"),
+                "直接 active slot 读取必须复用收集缓冲区");
+        assertTrue(helper.contains("readActiveSlots(handler, patternMachine)"),
+                "已解析出样板总成时必须优先使用直接 bridge");
+        assertTrue(helper.contains("access.gtShanhai$getActiveSlots()"),
+                "active slot 热路径不得继续只走 getActiveSlots 反射");
+    }
+
+    @Test
     void recipeTypeMetadataReadAvoidsPerCallCollectionsAndDuplicateReads() throws IOException {
         String source = Files.readString(PATTERN_HELPER);
 
