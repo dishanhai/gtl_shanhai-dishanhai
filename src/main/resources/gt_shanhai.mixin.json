@@ -103,7 +103,6 @@
     "NetworkStorageSaturatedAggregationMixin",
     "StorageServiceDeltaCacheMixin",
     "PreciseInventoryDisplayQueryMixin",
-    "FastCellDisplayQueryCacheMixin",
     "GTLCoreInfinityCellOverflowGuardMixin",
     "GTLCoreFastInfinityCellOverflowGuardMixin",
     "KeyStorageInsertThrottleMixin",

@@ -45,6 +45,7 @@ class FastCellDisplayQueryCacheSourceTest {
                 "不可在 Mixin package 重新加入會被目標類直接引用的內部快取類");
         assertTrue(cacheEntry.contains("package com.dishanhai.gt_shanhai.api.ae2;"),
                 "快取資料類別不可放在 Mixin package，避免 Mixin 類別載入保護");
-        assertTrue(config.contains("\"FastCellDisplayQueryCacheMixin\""));
+        assertFalse(config.contains("\"FastCellDisplayQueryCacheMixin\""),
+                "GTLCore fix3 的 FastCellDisplayPackets.push 已改為 (MEStorageMenu, Map)，舊快取 Mixin 不得註冊");
     }
 }
