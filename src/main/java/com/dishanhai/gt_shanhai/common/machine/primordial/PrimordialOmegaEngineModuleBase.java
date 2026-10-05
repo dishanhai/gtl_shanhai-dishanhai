@@ -411,6 +411,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         if (getLevel() == null) return false;
         BlockPos[] positions = AntichristPosHelper.INSTANCE.calculatePossibleHostPositions(getPos(), getFrontFacing());
         for (BlockPos pos : positions) {
+            if (!getLevel().hasChunkAt(pos)) continue;
             BlockEntity be = getLevel().getBlockEntity(pos);
             if (be instanceof IMachineBlockEntity machineBE) {
                 MetaMachine machine = machineBE.getMetaMachine();

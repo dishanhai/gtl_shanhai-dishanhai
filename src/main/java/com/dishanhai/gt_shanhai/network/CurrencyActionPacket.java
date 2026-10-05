@@ -15,7 +15,7 @@ import java.math.BigInteger;
 import java.util.function.Supplier;
 
 /**
- * 货币 ATM 操作包（C→S）：单币提交 / 币种兑换 / AE 抽取。
+ * 货币 ATM 操作包（C→S）：单币提交 / 币种兑换 / AE 结算。
  *
  * <p>服务端校验发包玩家背包/饰品栏任意位置是否携带钱包 {@link WalletItem#isCarrying}，
  * 按 {@link Op} 派发到 {@link ShopPurchase} 的对应结算方法，账户余额走玩家 UUID 账本。</p>
@@ -28,12 +28,18 @@ public class CurrencyActionPacket {
     private final ResourceLocation currency;   // 源/操作币种
     private final ResourceLocation target;     // EXCHANGE 目标币种（其余忽略）
     private final long amount;                 // EXCHANGE/AE_EXTRACT 数量（DEPOSIT 忽略）
+    private final boolean includeAe;           // TO_DIGITAL 时是否自动从 AE 补足
 
     public CurrencyActionPacket(Op op, ResourceLocation currency, ResourceLocation target, long amount) {
+        this(op, currency, target, amount, false);
+    }
+
+    public CurrencyActionPacket(Op op, ResourceLocation currency, ResourceLocation target, long amount, boolean includeAe) {
         this.op = op;
         this.currency = currency == null ? new ResourceLocation("minecraft:air") : currency;
         this.target = target == null ? new ResourceLocation("minecraft:air") : target;
         this.amount = Math.max(0L, amount);
+        this.includeAe = includeAe;
     }
 
     public CurrencyActionPacket(FriendlyByteBuf buf) {
@@ -41,6 +47,7 @@ public class CurrencyActionPacket {
         this.currency = buf.readResourceLocation();
         this.target = buf.readResourceLocation();
         this.amount = buf.readVarLong();
+        this.includeAe = buf.readBoolean();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -48,6 +55,7 @@ public class CurrencyActionPacket {
         buf.writeResourceLocation(currency);
         buf.writeResourceLocation(target);
         buf.writeVarLong(amount);
+        buf.writeBoolean(includeAe);
     }
 
     public static void handle(CurrencyActionPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -89,15 +97,14 @@ public class CurrencyActionPacket {
                         : Component.literal("§c[货币中心] AE 抽取失败（无绑定在线 AE 网络 / 网络无此币）"));
             }
             case TO_DIGITAL -> {
-                // pkt.amount 语义 = 想要转出的源币数量，实际可能因余额不足被 toDigital 内部封顶；
-                // 消耗量直接拿转换前后的账户余额差（BigInteger 精确，不靠 gained÷币值反推——
-                // gained 是显示用 long，数额巨大到截断 Long.MAX 时反推除法会算错真实消耗量）
-                BigInteger before = WalletAccountAPI.getCurrency(player.getServer(), player.getUUID(), pkt.currency);
-                long gained = ShopPurchase.toDigital(player, pkt.currency, pkt.amount);
-                if (gained > 0L) {
-                    BigInteger after = WalletAccountAPI.getCurrency(player.getServer(), player.getUUID(), pkt.currency);
-                    BigInteger consumedBig = before.subtract(after);
-                    long consumed = consumedBig.bitLength() < 63 ? consumedBig.longValue() : Long.MAX_VALUE;
+                // pkt.amount 语义 = 想要转出的源币数量；结果同时包含 AE 自动补足后的实际消耗量。
+                ShopPurchase.DigitalResult conversion =
+                        ShopPurchase.toDigitalResult(player, pkt.currency, pkt.amount, pkt.includeAe);
+                if (conversion.gained().signum() > 0) {
+                    long consumed = conversion.consumed().bitLength() < 63
+                            ? conversion.consumed().longValue() : Long.MAX_VALUE;
+                    long gained = conversion.gained().bitLength() < 63
+                            ? conversion.gained().longValue() : Long.MAX_VALUE;
                     player.sendSystemMessage(Component.literal("§b[货币中心] §a已把 §f" + ShopPurchase.formatCount(consumed) + " "
                             + ShopPurchase.coinName(pkt.currency) + " §a转成 §e" + ShopPurchase.formatCount(gained) + " 星火"));
                 } else {

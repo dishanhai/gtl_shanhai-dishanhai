@@ -27,6 +27,20 @@ public final class ClientAeCurrencyBalance {
         balances.put(currency, available);
     }
 
+    /** 乐观调整某币种 AE 余额；服务端下一次回包会覆盖校正。 */
+    public static void optimisticAdd(ResourceLocation currency, long delta) {
+        if (currency == null || delta == 0L) return;
+        Long current = balances.get(currency);
+        if (current == null) return;
+        if (delta > 0L && current > Long.MAX_VALUE - delta) {
+            balances.put(currency, Long.MAX_VALUE);
+        } else if (delta < 0L && current < -delta) {
+            balances.put(currency, 0L);
+        } else {
+            balances.put(currency, current + delta);
+        }
+    }
+
     /** 该币种上一次往返查到的 AE 网络可抽量；未同步过返回 null。 */
     public static Long get(ResourceLocation currency) {
         if (currency == null) return null;

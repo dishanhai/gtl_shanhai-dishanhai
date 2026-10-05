@@ -85,6 +85,7 @@
     "MEStorageMenuBroadcastOptimizationMixin",
     "PatternAccessTermMenuIncrementalThrottleMixin",
     "CraftingTreeNodeVirtualPresenceMixin",
+    "MaxFastExecutorVirtualPresenceMixin",
     "CraftingTreeProcessVirtualPresenceMixin",
     "CraftingPlanVirtualMarkerMixins$Entry",
     "CraftingPlanVirtualMarkerMixins$Summary",

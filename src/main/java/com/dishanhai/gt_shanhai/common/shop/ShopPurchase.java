@@ -1108,7 +1108,7 @@ public final class ShopPurchase {
         return false;
     }
 
-    // ==================== 货币 ATM：单币提交 / 币种兑换 / AE 抽取 ====================
+    // ==================== 货币 ATM：单币提交 / 币种兑换 / AE 自动结算 ====================
 
     /**
      * 单币种提交：把背包里该币种的实体币全部吸入账户余额（1:1）。
@@ -1166,7 +1166,7 @@ public final class ShopPurchase {
     }
 
     /**
-     * AE 抽取：从绑定的在线 AE 网络（提交器/商店终端）抽取 amount 个该币种，存入账户余额。
+     * 从绑定的在线 AE 网络（提交器/商店终端）抽取 amount 个该币种，存入账户余额。
      * 网络不足则按实际可抽量成交。
      * @return 实际抽取并入账的枚数
      */
@@ -1185,8 +1185,8 @@ public final class ShopPurchase {
     }
 
     /**
-     * 查询绑定该玩家的在线 AE 网络当前有多少枚 currency 可抽（纯 SIMULATE，不改动网络），
-     * 供 ATM 界面「从 AE 抽取」前预览，好让玩家知道该输多少而不用试错。
+     * 查询绑定该玩家的在线 AE 网络当前有多少枚 currency 可用（纯 SIMULATE，不改动网络），
+     * 供货币中心余额展示使用。
      * @return 可抽枚数（0 = 无绑定在线网络 / 网络无此币）
      */
     public static long aeAvailableCoin(ServerPlayer player, ResourceLocation currency) {
@@ -1198,17 +1198,84 @@ public final class ShopPurchase {
         return ShopAeNetwork.availableForPlayer(player, key);
     }
 
+    /** 快速售出全部货币的结果：获得的星火、从 AE 抽入账户的币数、实际换算币种数。 */
+    public record QuickSellResult(BigInteger gained, BigInteger extracted, int convertedCurrencies) {
+        public static final QuickSellResult EMPTY = new QuickSellResult(BigInteger.ZERO, BigInteger.ZERO, 0);
+    }
+
+    /** 单币转星火的精确结果，供 ATM 消息显示实际消耗量。 */
+    public record DigitalResult(BigInteger consumed, BigInteger gained) {
+        public static final DigitalResult EMPTY = new DigitalResult(BigInteger.ZERO, BigInteger.ZERO);
+    }
+
     /**
-     * 币种 → 星火（数字余额）：按币值把最多 coins 枚 currency 换成星火，
-     * 请求量超过账户余额时按余额封顶成交（见 {@link WalletAccountAPI#convertCurrencyToDigital}）。
+     * 快速售出全部可按币值结算的货币。
+     *
+     * <p>只处理 {@link CurrencyRateConfig#getValue(ResourceLocation)} 大于 0 的正常货币；
+     * 特殊货币仍保留在钱包/AE 中，继续走兑换中心的自定义兑换表。开启 AE 模式时，
+     * 每种货币会先把绑定网络中可抽取的同类实体币自动入账，再一次性按币值换成星火。</p>
+     */
+    public static QuickSellResult quickSellAllCurrencies(ServerPlayer player, boolean includeAe) {
+        if (player == null) return QuickSellResult.EMPTY;
+        MinecraftServer server = player.getServer();
+        if (server == null) return QuickSellResult.EMPTY;
+        BigInteger gained = BigInteger.ZERO;
+        BigInteger extracted = BigInteger.ZERO;
+        int converted = 0;
+        for (ResourceLocation currency : CurrencyRateConfig.getCurrencies()) {
+            long value = CurrencyRateConfig.getValue(currency);
+            if (value <= 0L) continue;
+            if (includeAe) {
+                long got = aeExtractCoin(player, currency, Long.MAX_VALUE);
+                if (got > 0L) extracted = extracted.add(BigInteger.valueOf(got));
+            }
+            BigInteger balance = WalletAccountAPI.getCurrency(server, player.getUUID(), currency);
+            if (balance.signum() <= 0) continue;
+            BigInteger one = WalletAccountAPI.convertCurrencyToDigital(
+                    server, player.getUUID(), currency, balance);
+            if (one.signum() > 0) {
+                gained = gained.add(one);
+                converted++;
+            }
+        }
+        return new QuickSellResult(gained, extracted, converted);
+    }
+
+    /**
+     * 币种 → 星火（数字余额）：按币值把最多 coins 枚 currency 换成星火。
+     * includeAe 开启时，账户不足的部分会直接从绑定 AE 网络抽取后再结算，
+     * 不需要客户端先做额外的 AE 中间操作。
      * @return 换得的星火数（显示用，可能截断到 Long.MAX）
      */
     public static long toDigital(ServerPlayer player, ResourceLocation currency, long coins) {
-        if (player == null || currency == null || coins <= 0L) return 0L;
+        return toDigital(player, currency, coins, false);
+    }
+
+    public static long toDigital(ServerPlayer player, ResourceLocation currency, long coins, boolean includeAe) {
+        DigitalResult result = toDigitalResult(player, currency, coins, includeAe);
+        return result.gained().bitLength() < 63 ? result.gained().longValue() : Long.MAX_VALUE;
+    }
+
+    public static DigitalResult toDigitalResult(ServerPlayer player, ResourceLocation currency,
+                                                 long coins, boolean includeAe) {
+        if (player == null || currency == null || coins <= 0L) return DigitalResult.EMPTY;
         MinecraftServer server = player.getServer();
-        if (server == null) return 0L;
-        BigInteger gained = WalletAccountAPI.convertCurrencyToDigital(server, player.getUUID(), currency, BigInteger.valueOf(coins));
-        return gained.bitLength() < 63 ? gained.longValue() : Long.MAX_VALUE;
+        if (server == null) return DigitalResult.EMPTY;
+        if (CurrencyRateConfig.getValue(currency) <= 0L) return DigitalResult.EMPTY;
+        if (includeAe) {
+            BigInteger requested = BigInteger.valueOf(coins);
+            BigInteger account = WalletAccountAPI.getCurrency(server, player.getUUID(), currency);
+            BigInteger missing = requested.subtract(account);
+            if (missing.signum() > 0) {
+                long pull = missing.bitLength() < 63 ? missing.longValue() : Long.MAX_VALUE;
+                aeExtractCoin(player, currency, pull);
+            }
+        }
+        BigInteger available = WalletAccountAPI.getCurrency(server, player.getUUID(), currency);
+        BigInteger consumed = available.min(BigInteger.valueOf(coins));
+        if (consumed.signum() <= 0) return DigitalResult.EMPTY;
+        BigInteger gained = WalletAccountAPI.convertCurrencyToDigital(server, player.getUUID(), currency, consumed);
+        return gained.signum() > 0 ? new DigitalResult(consumed, gained) : DigitalResult.EMPTY;
     }
 
     /**

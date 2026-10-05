@@ -119,13 +119,22 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     public void asyncCheckPattern(long period) {
         if (!getMultiblockState().hasError() && isFormed()) return;
         if ((getHolder().getOffset() + period) % 4 != 0) return;
-        if (checkPattern()) {
-            setFlipped(getMultiblockState().isNeededFlip());
-            onStructureFormed();
-            if (getLevel() instanceof ServerLevel serverLevel) {
-                MultiblockWorldSavedData.getOrCreate(serverLevel).addMapping(getMultiblockState());
-                MultiblockWorldSavedData.getOrCreate(serverLevel).removeAsyncLogic(this);
-            }
+        if (!checkPatternWithTryLock()) return;
+        if (getLevel() instanceof ServerLevel serverLevel) {
+            serverLevel.getServer().execute(() -> {
+                getPatternLock().lock();
+                try {
+                    if (isFormed()) return;
+                    setFlipped(getMultiblockState().isNeededFlip());
+                    onStructureFormed();
+                    MultiblockWorldSavedData worldData =
+                            MultiblockWorldSavedData.getOrCreate(serverLevel);
+                    worldData.addMapping(getMultiblockState());
+                    worldData.removeAsyncLogic(this);
+                } finally {
+                    getPatternLock().unlock();
+                }
+            });
         }
     }
 

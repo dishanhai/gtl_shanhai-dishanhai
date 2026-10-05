@@ -6,6 +6,7 @@ import appeng.api.networking.storage.IStorageService;
 import appeng.api.stacks.AEKey;
 import appeng.api.storage.MEStorage;
 import appeng.menu.me.common.MEStorageMenu;
+import com.dishanhai.gt_shanhai.api.ae2.FastCellDisplayQueryCacheEntry;
 import com.dishanhai.gt_shanhai.api.ae2.IStorageServiceRevisionAccess;
 import java.math.BigInteger;
 import java.util.List;
@@ -31,7 +32,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class FastCellDisplayQueryCacheMixin {
 
     @Unique
-    private static final Map<MEStorageMenu, QueryCache> gtShanhai$QUERY_CACHE = new WeakHashMap<>();
+    private static final Map<MEStorageMenu, FastCellDisplayQueryCacheEntry> gtShanhai$QUERY_CACHE = new WeakHashMap<>();
     @Unique
     private static final ThreadLocal<MEStorageMenu> gtShanhai$CURRENT_MENU = new ThreadLocal<>();
 
@@ -59,7 +60,7 @@ public abstract class FastCellDisplayQueryCacheMixin {
                 return PreciseInventoryDisplayService.query(storage, keys);
             }
 
-            QueryCache cache = gtShanhai$QUERY_CACHE.get(menu);
+            FastCellDisplayQueryCacheEntry cache = gtShanhai$QUERY_CACHE.get(menu);
             if (cache != null && cache.storage == storage && cache.revision == revision
                     && cache.topology == topology
                     && cache.keys.equals(keys)) {
@@ -68,7 +69,7 @@ public abstract class FastCellDisplayQueryCacheMixin {
 
             Map<AEKey, BigInteger> amounts = PreciseInventoryDisplayService.query(storage, keys);
             if (cache == null) {
-                cache = new QueryCache();
+                cache = new FastCellDisplayQueryCacheEntry();
                 gtShanhai$QUERY_CACHE.put(menu, cache);
             }
             cache.storage = storage;
@@ -109,12 +110,4 @@ public abstract class FastCellDisplayQueryCacheMixin {
                 : 0L;
     }
 
-    @Unique
-    private static final class QueryCache {
-        private MEStorage storage;
-        private long revision = Long.MIN_VALUE;
-        private long topology = Long.MIN_VALUE;
-        private List<AEKey> keys = List.of();
-        private Map<AEKey, BigInteger> amounts = Map.of();
-    }
 }

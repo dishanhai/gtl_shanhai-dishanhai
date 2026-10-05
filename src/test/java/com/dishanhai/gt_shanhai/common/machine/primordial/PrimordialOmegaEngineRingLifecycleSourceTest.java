@@ -41,6 +41,23 @@ class PrimordialOmegaEngineRingLifecycleSourceTest {
         assertTrue(sync.contains("new SHideRingPacket(getPos(), getFrontFacing(), hide)"));
     }
 
+    @Test
+    void patternFormationDefersWorldMutationToServerThread() throws IOException {
+        String source = Files.readString(ENGINE);
+        String asyncCheck = extractBlock(source, "public void asyncCheckPattern(long period) {");
+
+        assertTrue(asyncCheck.contains("checkPatternWithTryLock()"),
+                "异步结构扫描必须先用 tryLock，避免与主线程结构变更互相等待");
+        assertTrue(asyncCheck.contains("serverLevel.getServer().execute"),
+                "结构成型回调必须回到 Minecraft server thread 执行");
+        assertTrue(asyncCheck.contains("getPatternLock().lock()"),
+                "回到主线程后仍需持有结构锁再读取成型状态");
+        assertTrue(asyncCheck.contains("finally"),
+                "结构锁必须在异常路径释放");
+        assertFalse(asyncCheck.contains("if (checkPattern())"),
+                "不能直接在异步搜索线程执行成型回调");
+    }
+
     private static String extractBlock(String source, String declaration) {
         int start = source.indexOf(declaration);
         assertTrue(start >= 0, "missing declaration: " + declaration);

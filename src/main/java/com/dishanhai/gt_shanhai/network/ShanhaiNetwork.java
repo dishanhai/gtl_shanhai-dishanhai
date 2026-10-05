@@ -471,6 +471,15 @@ public class ShanhaiNetwork {
                 JeiBookmarkMissingItemsResponsePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        // 货币中心快速售出追加注册，保持既有消息 ID 不移动。
+        CHANNEL.registerMessage(
+                packetId++,
+                CurrencyQuickSellPacket.class,
+                CurrencyQuickSellPacket::encode,
+                CurrencyQuickSellPacket::new,
+                CurrencyQuickSellPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         RecipeSyncPacket.init();
     }
 

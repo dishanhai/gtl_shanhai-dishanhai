@@ -9,6 +9,7 @@ import com.dishanhai.gt_shanhai.client.shop.ClientAeCurrencyBalance;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.network.CurrencyActionPacket;
 import com.dishanhai.gt_shanhai.network.CurrencyAeBalanceRequestPacket;
+import com.dishanhai.gt_shanhai.network.CurrencyQuickSellPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 
 import net.minecraft.client.Minecraft;
@@ -26,7 +27,7 @@ import java.util.List;
 /**
  * 货币中心（ATM 子页面，客户端）。从 {@link ShopScreen} 顶栏「货币中心」按钮唤起，
  * 关闭返回 parent。左侧列各币种+余额，右侧对选中币做：提交（背包→钱包）、
- * 币种兑换（按 {@link CurrencyRateConfig} 汇率）、AE 抽取（AE 模式，网络→钱包）。
+ * 币种兑换（按 {@link CurrencyRateConfig} 汇率）、AE 自动结算（AE 模式下网络余额可直接参与）。
  * 纯客户端界面，结算全发 {@link CurrencyActionPacket} 给服务端。
  */
 public class CurrencyAtmScreen extends ScaledScreen {
@@ -68,8 +69,6 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private int scroll = 0;
 
     // AE 网络余额预览往返节流状态（见 maybeRequestAeBalance）
-    private ResourceLocation aeBalanceRequestedFor;
-    private boolean aeBalanceRequestedAeMode;
     private long aeBalanceRequestedAtGameTime = Long.MIN_VALUE;
 
     private int left, top, panelWidth, panelHeight;
@@ -228,29 +227,31 @@ public class CurrencyAtmScreen extends ScaledScreen {
             String name = GuiRenderUtil.trimText(this.font, ShopPurchase.coinName(cur), lw - 28);
             g.drawString(this.font, name, lx + 22, ry + 2, sel ? GOLD : WHITE, true);
             BigInteger bal = ClientWalletAccount.getCurrency(cur);
-            g.drawString(this.font, "§7余额 §e" + formatBig(bal), lx + 22, ry + 11, GRAY, true);
+            Long aeBal = ClientAeCurrencyBalance.get(cur);
+            String balanceLabel = "§7钱包 §e" + formatBig(bal);
+            if (aeBal != null) {
+                balanceLabel += " §bAE §e" + formatBig(BigInteger.valueOf(aeBal));
+            } else {
+                balanceLabel += " §8AE …";
+            }
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, balanceLabel, lw - 28),
+                    lx + 22, ry + 11, GRAY, true);
         }
         g.disableScissor();
     }
 
     /**
-     * AE 网络余额预览的服务端往返节流：选中币种切换立即重新请求，
+     * AE 网络余额预览的服务端往返节流：界面打开后立即请求全部币种，
      * 之外每 {@link #AE_BALANCE_REFRESH_TICKS} 刻兜底刷新一次（AE 网络存量变化不会主动推送）。
-     * 非 AE 模式不用往返——界面本就不显示这行。
      */
     private void maybeRequestAeBalance() {
-        boolean ae = ShopScreen.isAeMode();
-        if (selected == null || !ae) return;
         net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
         long gameTime = lvl != null ? lvl.getGameTime() : 0L;
-        // AE 模式关闭期间网络存量可能已变化，关闭前的缓存不能带回来当"新鲜"——重新开启后强制立即刷新一次
-        boolean stale = !selected.equals(aeBalanceRequestedFor) || ae != aeBalanceRequestedAeMode
+        boolean stale = aeBalanceRequestedAtGameTime == Long.MIN_VALUE
                 || gameTime - aeBalanceRequestedAtGameTime >= AE_BALANCE_REFRESH_TICKS;
         if (!stale) return;
-        aeBalanceRequestedFor = selected;
-        aeBalanceRequestedAeMode = ae;
         aeBalanceRequestedAtGameTime = gameTime;
-        ShanhaiNetwork.CHANNEL.sendToServer(new CurrencyAeBalanceRequestPacket(selected));
+        ShanhaiNetwork.CHANNEL.sendToServer(new CurrencyAeBalanceRequestPacket());
     }
 
     private void drawDetail(GuiGraphics g, int mx, int my) {
@@ -271,24 +272,22 @@ public class CurrencyAtmScreen extends ScaledScreen {
         if (item != null) g.renderItem(new ItemStack(item), cx, dy + 8);
         g.drawString(this.font, ShopPurchase.coinName(selected), cx + 22, dy + 8, WHITE, true);
         BigInteger bal = ClientWalletAccount.getCurrency(selected);
+        Long aeBal = ClientAeCurrencyBalance.get(selected);
         g.drawString(this.font, "§7钱包余额: §e" + formatBig(bal), cx + 22, dy + 20, CYAN, true);
+        g.drawString(this.font, "§7AE网络余额: §b" + (aeBal == null ? "查询中…" : formatBig(BigInteger.valueOf(aeBal))),
+                cx + 22, dy + 32, CYAN, true);
         boolean special = CurrencyRateConfig.isSpecial(selected);
         String valueLabel = special ? "§c特殊（不参与币值兑换）" : "§f" + CurrencyRateConfig.getValue(selected);
-        g.drawString(this.font, "§7币值: " + valueLabel, cx + 22, dy + 32, GRAY, true);
+        g.drawString(this.font, "§7币值: " + valueLabel, cx + 22, dy + 44, GRAY, true);
 
         // 提交全部
-        drawButton(g, cx, dy + 48, detailW() - 16, 14, "§a提交全部（背包→钱包）", mx, my);
+        drawButton(g, cx, dy + 56, detailW() - 16, 14, "§a提交全部（背包→钱包）", mx, my);
 
         // 数量标签（amountBox 由 super.render 画在 dy+88）
         String amountLabel = "§7数量（可输入）:";
         g.drawString(this.font, amountLabel, cx, dy + 76, WHITE, true);
-        // AE 网络余额（仅 AE 模式）：往返查询到之前先显示"查询中"，不瞎猜 0——好让玩家知道该输多少再点抽取
+        // AE 网络余额：独立显示在货币详情中；转星火时是否自动使用由 AE 模式决定
         // x 偏移按实际字宽算，不用固定数字——中文标签宽度跟字体/缩放走，硬编码偏移量在别的缩放比例下会重叠
-        if (ShopScreen.isAeMode()) {
-            Long aeBal = ClientAeCurrencyBalance.get(selected);
-            String aeLabel = aeBal == null ? "§7AE网络余额: §8查询中…" : "§7AE网络余额: §b" + formatBig(BigInteger.valueOf(aeBal));
-            g.drawString(this.font, aeLabel, cx + this.font.width(amountLabel) + 10, dy + 76, CYAN, true);
-        }
         // 步进按钮（三排：+1/+10/+100/+1k，-1/-10/-100/-1k，×10/×100/÷10/÷100，同 ShopScreen 购买次数面板）
         long[] steps = {1, 10, 100, 1000};
         int bw = (detailW() - 16 - 9) / 4;
@@ -308,27 +307,13 @@ public class CurrencyAtmScreen extends ScaledScreen {
             drawButton(g, px, dy + 146, pw, 12, "§b" + plabels[i], mx, my);
         }
 
-        // 百分比快填（AE 网络余额版）：同一行固定占位，未开 AE 模式/余额还没查到时不画按钮（跟下面"从 AE 抽取"
-        // 按钮的显隐规则一致），避免玩家在余额未知时按下去却不知道填的是哪个数
-        if (ShopScreen.isAeMode() && ClientAeCurrencyBalance.get(selected) != null) {
-            String[] aePlabels = {"AE·全部", "AE·75%", "AE·50%", "AE·25%", "AE·10%"};
-            for (int i = 0; i < 5; i++) {
-                int px = cx + i * (pw + 3);
-                drawButton(g, px, dy + 160, pw, 12, "§d" + aePlabels[i], mx, my);
-            }
-        }
-
-        // AE 抽取（仅 AE 模式）
-        boolean ae = ShopScreen.isAeMode();
-        if (ae) {
-            drawButton(g, cx, dy + 178, detailW() - 16, 14, "§b从 AE 抽取 " + formatBig(BigInteger.valueOf(amount)) + " 枚", mx, my);
-        } else {
-            g.drawString(this.font, "§8（开启 AE 模式后可从网络抽取）", cx, dy + 181, GRAY, true);
-        }
+        // 快速售出：服务端按币值处理全部内部余额；AE 模式开启时自动先吸入 AE 同类余额
+        drawButton(g, cx, dy + 160, detailW() - 16, 14,
+                ShopScreen.isAeMode() ? "§d快速售出全部货币（含 AE）" : "§d快速售出全部货币（钱包）", mx, my);
 
         // 兑换区（特殊货币不参与币值兑换，改引导去兑换中心；下面这串固定 Y 坐标见 ShopScreen 同类注释的教训，
         // 插行/改行高必须连带下移 ey，不能只加行不挪 ey）
-        int ey = dy + 200;
+        int ey = dy + 182;
         if (special) {
             g.drawString(this.font, "§c特殊货币，不参与比例兑换/星火互转", cx, ey, GRAY, true);
             g.drawString(this.font, "§8请到「兑换中心」使用专属兑换表", cx, ey + 12, GRAY, true);
@@ -357,7 +342,8 @@ public class CurrencyAtmScreen extends ScaledScreen {
         long value = CurrencyRateConfig.getValue(selected);
         BigInteger toSpark = value > 0L ? BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)) : BigInteger.ZERO;
         drawButton(g, cx, ey + 62, detailW() - 16, 14,
-                value > 0L ? "§d转成星火 §7(付 " + formatBig(BigInteger.valueOf(amount)) + " → §e+" + formatBig(toSpark) + "星火§7)"
+                value > 0L ? "§d转成星火 " + (ShopScreen.isAeMode() ? "§7(钱包+AE)" : "§7(钱包)")
+                        + " §7(付 " + formatBig(BigInteger.valueOf(amount)) + " → §e+" + formatBig(toSpark) + "星火§7)"
                         : "§8转成星火（币值未配置）", mx, my);
         // 星火转出：amount = 想要的目标币数量（非花的星火数），花费 = amount × 币值
         BigInteger sparkNeeded = value > 0L ? BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)) : BigInteger.ZERO;
@@ -417,7 +403,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
         int dx = detailX(), dy = listTop(), cx = dx + 8;
         int fullW = detailW() - 16;
         // 提交全部
-        if (GuiRenderUtil.isHovering(mx, my, cx, dy + 48, fullW, 14)) {
+        if (GuiRenderUtil.isHovering(mx, my, cx, dy + 56, fullW, 14)) {
             send(CurrencyActionPacket.Op.DEPOSIT, selected, null, 0L);
             optimisticDeposit(selected);
             return true;
@@ -443,21 +429,13 @@ public class CurrencyAtmScreen extends ScaledScreen {
             int px = cx + i * (pw + 3);
             if (GuiRenderUtil.isHovering(mx, my, px, dy + 146, pw, 12)) { setAmountPct(pcts[i]); return true; }
         }
-        // 百分比快填（AE 网络余额版；同一行位置，未开 AE 模式/余额未知时不响应，跟 drawDetail 的显隐规则对齐）
-        if (ShopScreen.isAeMode() && ClientAeCurrencyBalance.get(selected) != null) {
-            for (int i = 0; i < 5; i++) {
-                int px = cx + i * (pw + 3);
-                if (GuiRenderUtil.isHovering(mx, my, px, dy + 160, pw, 12)) { setAmountAePct(pcts[i]); return true; }
-            }
-        }
-        // AE 抽取
-        if (ShopScreen.isAeMode() && GuiRenderUtil.isHovering(mx, my, cx, dy + 178, fullW, 14)) {
-            send(CurrencyActionPacket.Op.AE_EXTRACT, selected, null, amount);
-            ClientWalletAccount.optimisticAddCurrency(selected, BigInteger.valueOf(amount)); // 乐观预览：按输入量先加，服务端快照校正
+        // 快速售出全部货币：服务端按当前 AE 模式决定是否先吸入 AE 余额
+        if (GuiRenderUtil.isHovering(mx, my, cx, dy + 160, fullW, 14)) {
+            sendQuickSell();
             return true;
         }
         // 兑换区（特殊货币：仅"前往兑换中心" + 提取实体币；ey 必须跟 drawDetail 里的 ey 保持同一个值）
-        int ey = dy + 200;
+        int ey = dy + 182;
         if (CurrencyRateConfig.isSpecial(selected)) {
             if (GuiRenderUtil.isHovering(mx, my, cx, ey + 28, fullW, 14)) {
                 Minecraft.getInstance().setScreen(new ExchangeScreen(parent, parent.canEdit()));
@@ -496,12 +474,21 @@ public class CurrencyAtmScreen extends ScaledScreen {
         // 转成星火（币种 → 数字余额）
         long value = CurrencyRateConfig.getValue(selected);
         if (GuiRenderUtil.isHovering(mx, my, cx, ey + 62, fullW, 14)) {
-            send(CurrencyActionPacket.Op.TO_DIGITAL, selected, null, amount);
-            // 乐观预览：同样按余额封顶（见 WalletAccountAPI#convertCurrencyToDigital）
+            boolean includeAe = ShopScreen.isAeMode();
+            send(CurrencyActionPacket.Op.TO_DIGITAL, selected, null, amount, includeAe);
+            // 乐观预览：AE 模式下按“钱包 + 已知 AE 缓存”封顶，服务端权威快照会校正。
             if (value > 0L) {
-                BigInteger consumed = ClientWalletAccount.getCurrency(selected).min(BigInteger.valueOf(amount));
+                BigInteger walletBal = ClientWalletAccount.getCurrency(selected);
+                Long aeLong = includeAe ? ClientAeCurrencyBalance.get(selected) : null;
+                BigInteger aeBal = aeLong == null ? BigInteger.ZERO : BigInteger.valueOf(aeLong);
+                BigInteger consumed = walletBal.add(aeBal).min(BigInteger.valueOf(amount));
                 if (consumed.signum() > 0) {
-                    ClientWalletAccount.optimisticAddCurrency(selected, consumed.negate());
+                    BigInteger walletConsumed = walletBal.min(consumed);
+                    BigInteger aeConsumed = consumed.subtract(walletConsumed);
+                    ClientWalletAccount.optimisticAddCurrency(selected, walletConsumed.negate());
+                    if (aeConsumed.signum() > 0 && aeConsumed.bitLength() < 63) {
+                        ClientAeCurrencyBalance.optimisticAdd(selected, -aeConsumed.longValue());
+                    }
                     ClientWalletAccount.optimisticAddDigital(consumed.multiply(BigInteger.valueOf(value)));
                 }
             }
@@ -559,32 +546,37 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private long lastMoneySendAtMs;
 
     private void send(CurrencyActionPacket.Op op, ResourceLocation currency, ResourceLocation target, long amt) {
+        send(op, currency, target, amt, false);
+    }
+
+    private void send(CurrencyActionPacket.Op op, ResourceLocation currency, ResourceLocation target,
+                      long amt, boolean includeAe) {
         long now = System.currentTimeMillis();
         if (now - lastMoneySendAtMs < 300L) return;
         lastMoneySendAtMs = now;
-        ShanhaiNetwork.CHANNEL.sendToServer(new CurrencyActionPacket(op, currency, target, amt));
+        ShanhaiNetwork.CHANNEL.sendToServer(new CurrencyActionPacket(op, currency, target, amt, includeAe));
+    }
+
+    private void sendQuickSell() {
+        long now = System.currentTimeMillis();
+        if (now - lastMoneySendAtMs < 300L) return;
+        lastMoneySendAtMs = now;
+        aeBalanceRequestedAtGameTime = Long.MIN_VALUE;
+        ShanhaiNetwork.CHANNEL.sendToServer(new CurrencyQuickSellPacket(ShopScreen.isAeMode()));
     }
 
     private void syncBox() {
         if (amountBox != null) amountBox.setValue(Long.toString(amount));
     }
 
-    /** 百分比快填：把数量设为选中币种余额的 pct%（BigInteger 算，超 long 夹到 Long.MAX）。 */
+    /** 百分比快填：AE 模式下按钱包+AE 合计余额计算，其他情况只按钱包余额计算。 */
     private void setAmountPct(int pct) {
         if (selected == null) return;
         BigInteger bal = ClientWalletAccount.getCurrency(selected);
-        BigInteger v = bal.multiply(BigInteger.valueOf(pct)).divide(BigInteger.valueOf(100));
-        amount = v.signum() <= 0 ? 1L : (v.bitLength() < 63 ? v.longValue() : Long.MAX_VALUE);
-        if (amount < 1L) amount = 1L;
-        syncBox();
-    }
-
-    /** 百分比快填（AE 网络余额版）：把数量设为选中币种「绑定在线 AE 网络」余额的 pct%；余额未知（未查询到）时不动。 */
-    private void setAmountAePct(int pct) {
-        if (selected == null) return;
-        Long aeBal = ClientAeCurrencyBalance.get(selected);
-        if (aeBal == null) return;
-        BigInteger bal = BigInteger.valueOf(aeBal);
+        if (ShopScreen.isAeMode()) {
+            Long aeBal = ClientAeCurrencyBalance.get(selected);
+            if (aeBal != null) bal = bal.add(BigInteger.valueOf(aeBal));
+        }
         BigInteger v = bal.multiply(BigInteger.valueOf(pct)).divide(BigInteger.valueOf(100));
         amount = v.signum() <= 0 ? 1L : (v.bitLength() < 63 ? v.longValue() : Long.MAX_VALUE);
         if (amount < 1L) amount = 1L;
