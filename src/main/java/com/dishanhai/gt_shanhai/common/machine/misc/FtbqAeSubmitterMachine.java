@@ -559,7 +559,7 @@ public class FtbqAeSubmitterMachine extends MetaMachine
         }
         long total = insertRewardStacks(storage, rewardStacks, true);
         if (total <= 0L) return 0L;
-        if (!gtShanhai$claimReward(data, rewardPlayerId, reward)) {
+        if (!gtShanhai$claimReward(data, rewardPlayerId, reward, player)) {
             return 0L;
         }
         insertRewardStacks(storage, rewardStacks, false);
@@ -593,7 +593,7 @@ public class FtbqAeSubmitterMachine extends MetaMachine
         if (rewardStacks.isEmpty()) return 0L;
         long total = insertRewardStacks(storage, rewardStacks, true);
         if (total <= 0L) return 0L;
-        if (!gtShanhai$claimReward(data, rewardPlayerId, randomReward)) return 0L;
+        if (!gtShanhai$claimReward(data, rewardPlayerId, randomReward, player)) return 0L;
         insertRewardStacks(storage, rewardStacks, false);
         for (Reward selected : selectedRewards) {
             selected.automatedClaimPost(getHolder().self(), rewardPlayerId, player);
@@ -601,53 +601,96 @@ public class FtbqAeSubmitterMachine extends MetaMachine
         return total;
     }
 
-    // FTBQ 跨版本兼容：不同 FTBQ 版本 TeamData.claimReward 的第三参类型（long / Date）
-    // 与返回类型（boolean / void）不同，直接硬编码 (UUID,Reward,long):boolean 在 4.22 等版本会
-    // 抛 NoSuchMethodError 崩服。改为运行时反射探测并缓存匹配的方法。
+    // FTBQ 跨版本兼容：1.4.22 的 claimReward(ServerPlayer, ...) 会再次直接发奖，
+    // 因此 AE 已完成模拟插入后优先只标记 markRewardAsClaimed，避免把同一奖励发两次。
+    // 旧版没有该方法时才回退到 claimReward 的反射兼容路径。
     private static volatile Method gtShanhai$claimRewardMethod;
-    private static volatile boolean gtShanhai$claimRewardResolved = false;
+    private static volatile Method gtShanhai$legacyClaimRewardMethod;
+    private static volatile boolean gtShanhai$claimRewardResolved;
+    private static volatile boolean gtShanhai$legacyClaimRewardResolved;
 
-    private static Method gtShanhai$resolveClaimReward(TeamData data) {
-        if (gtShanhai$claimRewardResolved) return gtShanhai$claimRewardMethod;
+    private static Method gtShanhai$resolveClaimReward(TeamData data, ServerPlayer player) {
+        if (player == null && gtShanhai$legacyClaimRewardResolved) return gtShanhai$legacyClaimRewardMethod;
+        if (player != null && gtShanhai$claimRewardResolved) return gtShanhai$claimRewardMethod;
         synchronized (FtbqAeSubmitterMachine.class) {
-            if (gtShanhai$claimRewardResolved) return gtShanhai$claimRewardMethod;
+            if (player == null && gtShanhai$legacyClaimRewardResolved) return gtShanhai$legacyClaimRewardMethod;
+            if (player != null && gtShanhai$claimRewardResolved) return gtShanhai$claimRewardMethod;
             Method found = null;
-            for (Method m : data.getClass().getMethods()) {
-                if (!"claimReward".equals(m.getName())) continue;
-                Class<?>[] p = m.getParameterTypes();
-                // 只认三参、且首参为 UUID、次参为 Reward 的重载（第三参 long 或 Date）
-                if (p.length == 3 && p[0] == UUID.class && Reward.class.isAssignableFrom(p[1])) {
-                    Class<?> third = p[2];
-                    if (third == long.class || third == Long.class || java.util.Date.class.isAssignableFrom(third)) {
-                        found = m;
+            if (player != null) {
+                for (Method method : data.getClass().getMethods()) {
+                    if (!"claimReward".equals(method.getName())) continue;
+                    Class<?>[] p = method.getParameterTypes();
+                    if (p.length == 4
+                            && p[0] == ServerPlayer.class
+                            && Reward.class.isAssignableFrom(p[1])
+                            && p[2] == boolean.class
+                            && (p[3] == long.class || p[3] == Long.class)) {
+                        found = method;
+                        break;
+                    }
+                    if (p.length == 3
+                            && p[0] == ServerPlayer.class
+                            && Reward.class.isAssignableFrom(p[1])
+                            && p[2] == boolean.class) {
+                        found = method;
                         break;
                     }
                 }
+                gtShanhai$claimRewardMethod = found;
+                gtShanhai$claimRewardResolved = true;
+            } else {
+                for (Method method : data.getClass().getMethods()) {
+                    if (!"claimReward".equals(method.getName())) continue;
+                    Class<?>[] p = method.getParameterTypes();
+                    if (p.length == 3 && p[0] == UUID.class && Reward.class.isAssignableFrom(p[1])) {
+                        Class<?> third = p[2];
+                        if (third == long.class || third == Long.class
+                                || java.util.Date.class.isAssignableFrom(third)) {
+                            found = method;
+                            break;
+                        }
+                    }
+                }
+                gtShanhai$legacyClaimRewardMethod = found;
+                gtShanhai$legacyClaimRewardResolved = true;
             }
-            gtShanhai$claimRewardMethod = found;
-            gtShanhai$claimRewardResolved = true;
             return found;
         }
     }
 
-    private boolean gtShanhai$claimReward(TeamData data, UUID player, Reward reward) {
-        Method m = gtShanhai$resolveClaimReward(data);
-        if (m == null) {
-            // 未找到兼容重载：跳过 claim（不发奖但不崩服），并告警一次
-            GTDishanhaiMod.LOGGER.warn("[FtbqAeSubmitter] 未找到兼容的 TeamData.claimReward 重载，跳过奖励领取");
-            return false;
-        }
+    private boolean gtShanhai$claimReward(TeamData data, UUID player, Reward reward, ServerPlayer serverPlayer) {
+        long now = System.currentTimeMillis();
         try {
-            Class<?> third = m.getParameterTypes()[2];
-            long now = System.currentTimeMillis();
-            Object thirdArg = java.util.Date.class.isAssignableFrom(third) ? new java.util.Date(now) : Long.valueOf(now);
-            Object result = m.invoke(data, player, reward, thirdArg);
-            // 返回 void 的版本视为已成功领取
-            return !(result instanceof Boolean) || (Boolean) result;
-        } catch (ReflectiveOperationException e) {
-            GTDishanhaiMod.LOGGER.warn("[FtbqAeSubmitter] 调用 TeamData.claimReward 失败: {}", e.toString());
-            return false;
+            return data.markRewardAsClaimed(player, reward, now);
+        } catch (NoSuchMethodError ignored) {
+            // 舊版 FTBQ 沒有 markRewardAsClaimed，繼續走反射兼容路徑。
         }
+
+        Method method = gtShanhai$resolveClaimReward(data, serverPlayer);
+        if (method == null) method = gtShanhai$resolveClaimReward(data, null);
+        if (method != null) {
+            try {
+                Class<?>[] p = method.getParameterTypes();
+                Object result;
+                if (p[0] == ServerPlayer.class) {
+                    Object[] args = p.length == 4
+                            ? new Object[]{serverPlayer, reward, Boolean.FALSE, Long.valueOf(now)}
+                            : new Object[]{serverPlayer, reward, Boolean.FALSE};
+                    result = method.invoke(data, args);
+                } else {
+                    Class<?> third = p[2];
+                    Object thirdArg = java.util.Date.class.isAssignableFrom(third)
+                            ? new java.util.Date(now) : Long.valueOf(now);
+                    result = method.invoke(data, player, reward, thirdArg);
+                }
+                return !(result instanceof Boolean) || (Boolean) result;
+            } catch (ReflectiveOperationException e) {
+                GTDishanhaiMod.LOGGER.warn("[FtbqAeSubmitter] 调用 TeamData.claimReward 失败: {}", e.toString());
+            }
+        }
+
+        GTDishanhaiMod.LOGGER.warn("[FtbqAeSubmitter] 未找到兼容的 TeamData.claimReward 重载，跳过奖励领取");
+        return false;
     }
 
     private long insertRewardStacks(MEStorage storage, List<ItemStack> rewardStacks, boolean simulate) {

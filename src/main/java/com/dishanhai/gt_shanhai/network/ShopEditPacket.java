@@ -40,7 +40,8 @@ public class ShopEditPacket {
     private final ResourceLocation oldGoods;
     private final String oldCategory;
     private final int oldEntryIndex;          // 旧协议兼容字段，不再参与原条目解析
-    private final long limit;                 // 限购次数（购买/出售共享）；-1=不限
+    private final long limit;                 // 服務端次數（舊 limit）；-1=不限
+    private Long saveUses;                    // null=未編輯存檔次數，保留即時餘量；-1=不限
     private final List<ShopEntry.DisplayIcon> displayIcons; // 自定义显示图标（1 主+最多4附属，物品/贴图二选一），空=用商品本身图标
     private final ShopEntry.RewardMode rewardMode; // 奖励模式：NONE=普通固定商品
     private final List<ShopEntry.RewardOption> rewardPool; // 奖励池（各自权重+数量区间），仅 rewardMode != NONE 时有意义
@@ -221,7 +222,17 @@ public class ShopEditPacket {
             submits.add(new ExchangeEntry.Ingredient(id, false, cnt, nbt));
         }
         this.submissionItems = submits;
+        this.saveUses = buf.readBoolean() ? buf.readLong() : null;
     }
+
+    /** 僅明確修改存檔欄位時攜帶覆寫值，避免一般編輯覆蓋開啟編輯器後發生的交易。 */
+    public ShopEditPacket withSaveUses(long value) {
+        this.saveUses = value < 0L ? -1L : value;
+        return this;
+    }
+
+    public Long saveUses() { return saveUses; }
+    public long serverUses() { return limit; }
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeEnum(action);
@@ -274,6 +285,8 @@ public class ShopEditPacket {
             buf.writeVarLong(item.count);
             buf.writeNbt(item.nbt());
         }
+        buf.writeBoolean(saveUses != null);
+        if (saveUses != null) buf.writeLong(saveUses);
     }
 
     private static void writeCost(FriendlyByteBuf buf, ShopCost cost) {
@@ -365,7 +378,10 @@ public class ShopEditPacket {
                 pkt.ftbqTableId, pkt.ftbqSubMode, pkt.tradeMode, pkt.periodTicks, pkt.periodLimit, pkt.prerequisiteQuestId,
                 old != null ? old.getStableId() : null, pkt.discountPercent, pkt.discountStartMs, pkt.discountEndMs,
                 pkt.submissionItems);
-        String limitTip = entry.isLimited() ? " §d(限" + entry.getRemainingUses() + "次)" : "";
+        entry.overrideRemainingUses(pkt.saveUses != null ? pkt.saveUses
+                : old != null ? old.getRemainingUses() : entry.getServerUses());
+        String limitTip = " §d(存檔次數:" + usesText(entry.getRemainingUses())
+                + "，服務端次數:" + usesText(entry.getServerUses()) + ")";
 
         if (pkt.action == Action.ADD) {
             if (pkt.oldEntryKey != -1L) {
@@ -373,9 +389,7 @@ public class ShopEditPacket {
                 return;
             }
             ShopConfig.addEntry(entry);
-            // 限购总量按存档隔离（见 ShopLimitSavedData），编辑器里管理员显式改的次数要在当前存档立即生效，
-            // 不能等下次 syncLimitsFromSave 时才回填——那时存档里可能已有旧记录，会把这次改动悄悄吃掉。
-            if (entry.isLimited()) ShopLimitSavedData.get(player.getServer()).set(entry.getStableId(), entry.getRemainingUses());
+            ShopLimitSavedData.get(player.getServer()).set(entry.getStableId(), entry.getRemainingUses());
             player.sendSystemMessage(Component.literal("§b[山海商店] §a已新增 §f"
                     + entry.getGoodsCount() + "x " + entry.goodsDisplayName() + " §7[" + pkt.category + "]" + limitTip));
             return;
@@ -387,10 +401,14 @@ public class ShopEditPacket {
             com.dishanhai.gt_shanhai.common.shop.ShopSubmissionSavedData.get(player.getServer())
                     .clearKey("entry:" + entry.getStableId());
         }
-        if (ok && entry.isLimited()) ShopLimitSavedData.get(player.getServer()).set(entry.getStableId(), entry.getRemainingUses());
+        if (ok) ShopLimitSavedData.get(player.getServer()).set(entry.getStableId(), entry.getRemainingUses());
         player.sendSystemMessage(ok
                 ? Component.literal("§b[山海商店] §a已更新 §f" + entry.goodsDisplayName() + limitTip)
                 : Component.literal("§c[山海商店] 更新失败"));
+    }
+
+    private static String usesText(long value) {
+        return value < 0L ? "不限" : Long.toString(value);
     }
 
     /** 只接受打开编辑器时捕获的版本与条目身份，过期时拒绝猜测。 */

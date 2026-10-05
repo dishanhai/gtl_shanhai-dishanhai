@@ -66,7 +66,9 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int count;
     private String category;
     private String description;
-    private long limit = -1L; // 限购次数（购买/出售共享）；-1 = 不限（默认）
+    private long limit = -1L; // 服務端次數；-1 = 不限
+    private long saveUses = -1L; // 當前存檔剩餘次數；-1 = 不限
+    private final long initialSaveUses;
     private long periodSeconds = -1L; // 周期限购的周期长度（现实秒，服务器正常速度下 1秒=20tick）；-1 = 不启用（默认）
     private long periodCap = -1L;  // 周期限购每周期额度（每玩家独立计数）；-1 = 不启用（默认），与 periodSeconds 须同时填写才生效
     private int discountPercent;   // 限时折扣百分比（1-90）；0 = 不打折（默认）
@@ -100,7 +102,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private String prerequisiteQuestId = ""; // 前置 FTBQ 任务 ID（十六进制），可空 = 不要求前置
 
     private EditBox countBox, catBox, sparkBox, euBox, descBox, limitBox, linkKeyBox, linkToBox, nameBox, periodSecondsBox, periodCapBox;
-    private EditBox discountPercentBox, discountMinutesBox;
+    private EditBox discountPercentBox, discountMinutesBox, saveUsesBox;
     private MultiLineTextArea descArea;       // 描述「展开编写」大图层里的多行编辑区（与 descBox 同源，双向同步）
     private boolean descEditorOpen;           // 描述展开编写大图层开关
     private int left, top, panelWidth, panelHeight;
@@ -160,7 +162,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.count = firstItemCount;
             this.category = entry.getCategory();
             this.description = entry.getDescription();
-            this.limit = entry.getRemainingUses(); // 预填当前剩余次数；不动这个框就原样保留
+            this.limit = entry.getServerUses();
+            this.saveUses = isNew ? limit : entry.getRemainingUses();
             this.periodSeconds = entry.isPeriodLimited() ? entry.getPeriodTicks() / TICKS_PER_SECOND : -1L;
             this.periodCap = entry.isPeriodLimited() ? entry.getPeriodLimit() : -1L;
             // 折扣生效中才预填：按剩余时间倒推「持续分钟数」，原样提交约等于保留原定结束时间；
@@ -198,6 +201,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.oldGoods = null;
             this.oldCategory = null;
         }
+        this.initialSaveUses = saveUses;
     }
 
     private boolean catalogSnapshotValid() {
@@ -293,23 +297,24 @@ public class ShopEntryEditScreen extends ScaledScreen {
     // 商品排自带槽下数量标签（流体 mB），槽 20 + 标签 8 需要 32px 行距；旧值 +48（24px 行距）
     // 会让流体商品的数量文字直接压在「每份数量」标签上。
     private int fieldsY() { return contentY(top + 56); }
+    private int usesY() { return contentY(top + 72); }
     /** 周期限购行：紧接「次数」行下方，新增独立于永久总量之外的第二套限购（见 ShopPeriodLimiter）。 */
-    private int periodY() { return contentY(top + 72); }
+    private int periodY() { return contentY(top + 88); }
     /** 限时折扣行：紧接周期限购下方，独立于两套限购机制之外的第三套（打折不减次数）。 */
-    private int discountY() { return contentY(top + 88); }
-    private int sparkY() { return contentY(top + 114); }
-    private int coinY() { return contentY(top + 132); }
-    private int itemY() { return contentY(top + 160); }
-    private int fluidY() { return contentY(top + 188); }
-    private int descY() { return contentY(top + 220); }
-    private int iconY() { return contentY(top + 270); }
-    private int rewardModeY() { return contentY(top + 304); }
-    private int rewardPoolY() { return contentY(top + 324); }
-    private int hiddenY() { return contentY(top + 358); }
-    private int linkKeyY() { return contentY(top + 378); }
-    private int linkToY() { return contentY(top + 396); }
-    private int prereqQuestY() { return contentY(top + 414); }
-    private int submissionY() { return contentY(top + 444); }
+    private int discountY() { return contentY(top + 104); }
+    private int sparkY() { return contentY(top + 130); }
+    private int coinY() { return contentY(top + 148); }
+    private int itemY() { return contentY(top + 176); }
+    private int fluidY() { return contentY(top + 204); }
+    private int descY() { return contentY(top + 236); }
+    private int iconY() { return contentY(top + 286); }
+    private int rewardModeY() { return contentY(top + 320); }
+    private int rewardPoolY() { return contentY(top + 340); }
+    private int hiddenY() { return contentY(top + 374); }
+    private int linkKeyY() { return contentY(top + 394); }
+    private int linkToY() { return contentY(top + 412); }
+    private int prereqQuestY() { return contentY(top + 430); }
+    private int submissionY() { return contentY(top + 460); }
     private int slotsX() { return cx() + 36; }
     // EU 成本行：紧跟星火框右侧，同一行（星火/EU 都是纯钱包型通道，物品/流体排另起行）
     private static final int EU_BOX_W = 110;
@@ -436,20 +441,19 @@ public class ShopEntryEditScreen extends ScaledScreen {
     /** 分类循环按钮位置（分类框右侧）。x 与 initScaled 里 catBox 对齐：cx()+160，宽 110。 */
     private int catCycleX() { return cx() + 160 + 110 + 4; }
 
-    /** 「次数」标签 x（分类下拉按钮右侧）。 */
-    private int limitLabelX() { return catCycleX() + 22; }
+    /** 兩層次數獨立成行，避免分類欄與長標籤互相遮擋。 */
+    private int limitLabelX() { return cx() + 200; }
 
-    /** 「次数」输入框 x（标签右侧，宽 46）。 */
-    private int limitBoxX() { return limitLabelX() + 26; }
+    private int limitBoxX() { return limitLabelX() + 70; }
 
-    /** 分类提示文案 x（次数框右侧，让出输入框空间）。 */
-    private int catHintX() { return limitBoxX() + 46 + 6; }
+    /** 分類提示文案保留在分類框右側。 */
+    private int catHintX() { return catCycleX() + 22; }
 
     /** 自定义名称输入框：贴商品行右边界，不管真实物品名多长都不会撞到。 */
     private static final int NAME_BOX_W = 160;
     private int nameBoxX() { return left + panelWidth - 12 - NAME_BOX_W; }
 
-    // ===== 周期限购行布局（次数行下方，独立于永久总量的第二套限购）=====
+    // ===== 周期限购行布局（獨立次數行下方）=====
     private static final int PERIOD_SECONDS_W = 46;
     private static final int PERIOD_CAP_W = 70;
     private int periodSecondsBoxX() { return cx() + 60; }
@@ -468,14 +472,15 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int editorViewportTop() { return top + 20; }
     private int editorViewportBottom() { return top + panelHeight - 28; }
     private int editorMaxScroll() {
-        int rawBottom = top + 444 + SLOT + 14;
+        int rawBottom = top + 460 + SLOT + 14;
         return Math.max(0, rawBottom - editorViewportBottom());
     }
 
     private void repositionEditorWidgets() {
         if (countBox != null) countBox.setY(fieldsY());
         if (catBox != null) catBox.setY(fieldsY());
-        if (limitBox != null) limitBox.setY(fieldsY());
+        if (limitBox != null) limitBox.setY(usesY());
+        if (saveUsesBox != null) saveUsesBox.setY(usesY());
         if (periodSecondsBox != null) periodSecondsBox.setY(periodY());
         if (periodCapBox != null) periodCapBox.setY(periodY());
         if (discountPercentBox != null) discountPercentBox.setY(discountY());
@@ -490,7 +495,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     private void updateEditorWidgetVisibility(boolean overlayOpen) {
         int topBound = editorViewportTop(), bottomBound = editorViewportBottom();
-        EditBox[] boxes = {countBox, catBox, limitBox, periodSecondsBox, periodCapBox,
+        EditBox[] boxes = {countBox, catBox, limitBox, saveUsesBox, periodSecondsBox, periodCapBox,
                 discountPercentBox, discountMinutesBox, sparkBox, euBox, descBox, linkKeyBox, linkToBox, nameBox};
         for (EditBox box : boxes) {
             if (box == null) continue;
@@ -551,14 +556,29 @@ public class ShopEntryEditScreen extends ScaledScreen {
         catBox.setBordered(true);
         catBox.setTextColor(0xFFFFFF);
         catBox.setResponder(s -> category = s);
-        limitBox = new EditBox(this.font, limitBoxX(), fieldsY(), 46, 12, Component.literal("次数"));
+        limitBox = new EditBox(this.font, limitBoxX(), usesY(), 110, 12, Component.literal("服務端次數"));
         limitBox.setMaxLength(19);
         limitBox.setValue(limit < 0L ? "" : Long.toString(limit));
         limitBox.setBordered(true);
         limitBox.setTextColor(0xFFFFFF);
         limitBox.setHint(Component.literal("§8不限"));
         limitBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
-        limitBox.setResponder(s -> limit = parseLimit(s));
+        limitBox.setResponder(s -> {
+            long previous = limit;
+            limit = parseLimit(s);
+            if (isNew && saveUses == previous) {
+                saveUses = limit;
+                if (saveUsesBox != null) saveUsesBox.setValue(saveUses < 0L ? "" : Long.toString(saveUses));
+            }
+        });
+        saveUsesBox = new EditBox(this.font, cx() + 60, usesY(), 110, 12, Component.literal("存檔次數"));
+        saveUsesBox.setMaxLength(19);
+        saveUsesBox.setValue(saveUses < 0L ? "" : Long.toString(saveUses));
+        saveUsesBox.setBordered(true);
+        saveUsesBox.setTextColor(0xFFFFFF);
+        saveUsesBox.setHint(Component.literal("§8不限"));
+        saveUsesBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        saveUsesBox.setResponder(s -> saveUses = parseLimit(s));
         periodSecondsBox = new EditBox(this.font, periodSecondsBoxX(), periodY(), PERIOD_SECONDS_W, 12, Component.literal("周期秒数"));
         periodSecondsBox.setMaxLength(9);
         periodSecondsBox.setValue(periodSeconds < 0L ? "" : Long.toString(periodSeconds));
@@ -670,6 +690,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         addRenderableWidget(countBox);
         addRenderableWidget(catBox);
         addRenderableWidget(limitBox);
+        addRenderableWidget(saveUsesBox);
         addRenderableWidget(periodSecondsBox);
         addRenderableWidget(periodCapBox);
         addRenderableWidget(discountPercentBox);
@@ -726,6 +747,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private void capture() {
         if (catBox != null) category = catBox.getValue();
         if (limitBox != null) limit = parseLimit(limitBox.getValue());
+        if (saveUsesBox != null) saveUses = parseLimit(saveUsesBox.getValue());
         if (periodSecondsBox != null) periodSeconds = parseLimit(periodSecondsBox.getValue());
         if (periodCapBox != null) periodCap = parseLimit(periodCapBox.getValue());
         if (discountPercentBox != null) discountPercent = parseDiscountPercent(discountPercentBox.getValue());
@@ -820,8 +842,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         g.drawString(this.font, "§7分类", c + 60 + 60 + 14, fieldsY() + 2, GRAY, true);
         // 读取已有分区循环按钮（分类框右侧「▸」，点一下切到下一个已存在分类）
         drawBtn(g, catCycleX(), fieldsY() - 1, 18, 14, "§e▾", mx, my);
-        // 限购次数（框由 super.render 绘制；空=不限，购买/出售共享同一计数）
-        g.drawString(this.font, "§7次数", limitLabelX(), fieldsY() + 2, GRAY, true);
+        g.drawString(this.font, "§7存檔次數", c, usesY() + 2, GRAY, true);
+        g.drawString(this.font, "§7服務端次數", limitLabelX(), usesY() + 2, GRAY, true);
         g.drawString(this.font, "§8可填「主/子」建子分组", catHintX(), fieldsY() + 2, GRAY, true);
         // 周期限购（框由 super.render 绘制；两框都空=不启用，独立于上面的永久总量，每玩家各自计数，到点自动刷新）
         g.drawString(this.font, "§7周期限购", c, periodY() + 2, GRAY, true);
@@ -1965,6 +1987,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 displayIcons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName, ftbqTableId, ftbqSubMode, tradeMode,
                 periodTicksToSend, periodCap, prerequisiteQuestId, catalogRevision, oldEntryKey,
                 discountPercent, discountStartMs, discountEndMs, submissionsForSubmit);
+        if (isNew ? saveUses != limit : saveUses != initialSaveUses) pkt.withSaveUses(saveUses);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

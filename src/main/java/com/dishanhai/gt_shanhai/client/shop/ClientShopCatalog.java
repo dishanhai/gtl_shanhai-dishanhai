@@ -375,7 +375,7 @@ public final class ClientShopCatalog {
     private static void applyRemainingUses(ShopEntry entry, long target) {
         if (entry == null || target < 0L) return;
         long current = entry.getRemainingUses();
-        if (current >= 0L && target < current) entry.consumeUses(current - target);
+        if (current < 0L || target < current) entry.overrideRemainingUses(target);
     }
 
     private static String groupKey(String top, String sub, String sub2, String sub3) {

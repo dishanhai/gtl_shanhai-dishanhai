@@ -61,10 +61,11 @@ public class ShopToggleHiddenPacket {
             return;
         }
         ShopEntry updated = new ShopEntry(old.getGoodsList(), old.getCategory(), old.getCost(), old.getDescription(),
-                old.getRemainingUses(), old.getDisplayIcons(), old.getRewardMode(), old.getRewardPool(),
+                old.getServerUses(), old.getDisplayIcons(), old.getRewardMode(), old.getRewardPool(),
                 !old.isHidden(), old.getLinkKey(), old.getLinkTo(), old.getDisplayName(), old.getFtbqTableId(),
                 old.getFtbqSubMode(), old.getTradeMode(), old.getPeriodTicks(), old.getPeriodLimit(),
                 old.getPrerequisiteQuestId(), old.getStableId());
+        updated.overrideRemainingUses(old.getRemainingUses());
         boolean ok = ShopConfig.replaceEntry(old, updated);
         player.sendSystemMessage(ok
                 ? Component.literal(updated.isHidden() ? "§b[山海商店] §a已设为隐藏" : "§b[山海商店] §a已取消隐藏")

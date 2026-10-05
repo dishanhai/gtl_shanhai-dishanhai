@@ -689,6 +689,15 @@ public class DShanhaiCommands {
     /** 商店编辑白名单管理指令（OP 专用）。授予后非 OP 玩家亦可在界面内编辑商店。 */
     private static LiteralArgumentBuilder<CommandSourceStack> shopEditPermCommand() {
         return Commands.literal("商店")
+                .then(Commands.literal("重置次数")
+                        .requires(s -> s.hasPermission(2))
+                        .executes(ctx -> {
+                            int count = com.dishanhai.gt_shanhai.common.shop.ShopConfig
+                                    .resetSaveUses(ctx.getSource().getServer());
+                            ctx.getSource().sendSuccess(msg("§b[山海商店] §a已將本存檔的 §f" + count
+                                    + " §a個商品次數重置為服務端設定值，服務端次數未變更"), true);
+                            return 1;
+                        }))
                 .then(Commands.literal("授权")
                         .then(Commands.argument("玩家", net.minecraft.commands.arguments.EntityArgument.player())
                                 .executes(ctx -> {

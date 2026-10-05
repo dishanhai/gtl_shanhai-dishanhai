@@ -498,20 +498,23 @@ public final class ShopConfig {
      * 商品的剩余次数——存档里已经记过账（这个存档消费过）就用存档的值覆盖 shop.json 解析出的值；
      * 存档里没有记录（全新存档，或这个存档第一次见到这个 stableId）就拿 shop.json 里的配置值当
      * 起始配额，顺带把它写进存档，后续这个存档就一直认自己的记录。须在 {@link #reload()} 之后、
-     * 且 server 已可用时调用（服务端启动 {@code ServerAboutToStartEvent} / {@code /商店 reload} 命令）。
+     * 且世界已可用時呼叫（{@code ServerStartingEvent} / {@code /商店 reload}）。
      */
     public static synchronized void syncLimitsFromSave(net.minecraft.server.MinecraftServer server) {
         if (server == null) return;
         ShopLimitSavedData data = ShopLimitSavedData.get(server);
         for (ShopEntry entry : snapshot().entries()) {
-            if (!entry.isLimited()) continue;
-            Long saved = data.get(entry.getStableId());
-            if (saved != null) {
-                entry.overrideRemainingUses(saved);
-            } else {
-                data.set(entry.getStableId(), entry.getRemainingUses());
-            }
+            data.applyTo(entry);
         }
+    }
+
+    /** 僅重置當前存檔，重新發布目錄版本讓客戶端清除已耗盡的快取；不寫 shop.json。 */
+    public static synchronized int resetSaveUses(net.minecraft.server.MinecraftServer server) {
+        ShopLimitSavedData data = ShopLimitSavedData.get(server);
+        List<ShopEntry> entries = new ArrayList<>(getEntries());
+        for (ShopEntry entry : entries) data.reset(entry);
+        publish(entries);
+        return entries.size();
     }
 
     /** 从磁盘重新加载商品清单；文件缺失时生成默认文件。 */

@@ -24,9 +24,9 @@ public class ShopEntry {
     private final ShopCost cost;
     /** 商品描述（玩家自定义文案，可空；详情页 / 悬停显示）。 */
     private final String description;
-    /** 配置态限购基准值；-1 = 不限。序列化写这个，不写运行中被扣减后的余量。 */
-    private final long configuredRemainingUses;
-    /** 剩余可交易（购买/出售共享）次数；-1 = 不限。非 final：随成交在服务端原地扣减，见 {@link #consumeUses}。 */
+    /** 服務端次數（shop.json 的舊 limit）；僅編輯設定時變更，交易不扣減。 */
+    private final long serverUses;
+    /** 存檔次數（買賣共用餘量）；-1 = 不限。交易只扣此值，不修改 {@link #serverUses}。 */
     private long remainingUses;
     /** 自定义显示图标（可空/空表列表 = 用商品本身图标）。网格格/详情页取代 {@link #makeGoodsStack} 的图标，
      *  第一项为主图标，其余最多 4 项在四角叠成小徽标，用于让「多元组合商品」（如生产核废料的无限盘）一眼看出成分。 */
@@ -374,7 +374,7 @@ public class ShopEntry {
         this.cost = cost == null ? new ShopCost(java.math.BigInteger.ZERO, null, null) : cost;
         this.description = description == null ? "" : description;
         long normalizedRemainingUses = remainingUses < 0L ? -1L : remainingUses;
-        this.configuredRemainingUses = normalizedRemainingUses;
+        this.serverUses = normalizedRemainingUses;
         this.remainingUses = normalizedRemainingUses;
         if (displayIcons == null || displayIcons.isEmpty()) {
             this.displayIcons = java.util.Collections.emptyList();
@@ -559,14 +559,19 @@ public class ShopEntry {
         return description;
     }
 
-    /** 剩余可交易次数；-1 = 不限。 */
+    /** 當前存檔剩餘可交易次數；-1 = 不限。 */
     public long getRemainingUses() {
         return remainingUses;
     }
 
-    /** 配置文件里的初始限购值；-1 = 不限。 */
+    /** 服務端次數；-1 = 不限，供新存檔初始化與重置使用。 */
+    public long getServerUses() {
+        return serverUses;
+    }
+
+    /** 相容既有 API；此值屬於服務端設定，不是存檔剩餘量。 */
     public long getConfiguredRemainingUses() {
-        return configuredRemainingUses;
+        return getServerUses();
     }
 
     /** 是否为限次商品（购买/出售共享同一计数）。 */
@@ -585,14 +590,9 @@ public class ShopEntry {
         remainingUses = Math.max(0L, remainingUses - amount);
     }
 
-    /**
-     * 用存档里记录的剩余次数覆盖当前内存值（不限商品忽略）；仅供 {@link ShopConfig#syncLimitsFromSave}
-     * 在服务端启动/重载时按 {@link ShopLimitSavedData} 回填，不走这个口子的地方（如客户端）永远只看
-     * shop.json 解析出的原始值。见 {@link #stableId} 字段注释——存档按这个身份索引，不受 entryKey 影响。
-     */
-    void overrideRemainingUses(long value) {
-        if (remainingUses < 0L) return;
-        remainingUses = Math.max(0L, value);
+    /** 覆寫存檔次數，不改服務端次數；兩層可各自設為不限（-1）。 */
+    public void overrideRemainingUses(long value) {
+        remainingUses = value < 0L ? -1L : value;
     }
 
     /** 周期限购窗口长度（tick）；-1 = 不启用。与永久总量 {@link #getRemainingUses} 是两套独立机制。 */

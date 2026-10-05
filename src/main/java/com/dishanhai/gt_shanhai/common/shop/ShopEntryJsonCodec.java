@@ -38,8 +38,8 @@ public final class ShopEntryJsonCodec {
         if (entry.getDescription() != null && !entry.getDescription().isEmpty()) {
             out.addProperty("description", entry.getDescription());
         }
-        if (entry.isLimited()) {
-            out.addProperty("limit", entry.getConfiguredRemainingUses());
+        if (entry.getServerUses() >= 0L) {
+            out.addProperty("limit", entry.getServerUses());
         }
         out.add("cost", costToJson(entry.getCost()));
         net.minecraft.nbt.CompoundTag nbt = entry.getGoodsNbt();
@@ -96,14 +96,22 @@ public final class ShopEntryJsonCodec {
     }
 
     public static String toPayload(ShopEntry entry) {
-        return COMPACT_GSON.toJson(toJson(entry));
+        JsonObject payload = toJson(entry);
+        payload.addProperty("remainingUses", entry.getRemainingUses());
+        return COMPACT_GSON.toJson(payload);
     }
 
     public static ShopEntry fromPayload(String payload) {
         if (payload == null || payload.isBlank()) return null;
         try {
             JsonElement parsed = JsonParser.parseString(payload);
-            return parsed.isJsonObject() ? fromJson(parsed.getAsJsonObject()) : null;
+            if (!parsed.isJsonObject()) return null;
+            JsonObject json = parsed.getAsJsonObject();
+            ShopEntry entry = fromJson(json);
+            if (entry != null && json.has("remainingUses")) {
+                entry.overrideRemainingUses(json.get("remainingUses").getAsLong());
+            }
+            return entry;
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品负载: {}", e.getMessage());
             return null;
