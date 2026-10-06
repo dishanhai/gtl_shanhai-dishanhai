@@ -14,6 +14,8 @@ public class GTDishanhaiKubeJSPlugin extends KubeJSPlugin {
     @Override
     public void registerClasses(ScriptType type, ClassFilter filter) {
         filter.allow("com.dishanhai.gt_shanhai.api.DShanhaiRecipeKJSAPI");
+        filter.allow("com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeQuery");
+        filter.allow("com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService");
         filter.allow("com.dishanhai.gt_shanhai.api.TooltipEffectAPI");
         filter.allow("com.dishanhai.gt_shanhai.api.TooltipEffectRegistry");
         filter.allow("com.dishanhai.gt_shanhai.api.TooltipEffectLine");
@@ -36,5 +38,11 @@ public class GTDishanhaiKubeJSPlugin extends KubeJSPlugin {
         event.add("DShanhaiRecipeCache", com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.class);
         event.add("ShanhaiRecipes", DShanhaiRecipeKJSAPI.class);
         event.add("RecipeModAPI", DShanhaiRecipeModifierAPI.class);
+        event.add("ShanhaiRecipeQuery",
+                com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeQuery.class);
+        event.add("ShanhaiRecipeEditorOps",
+                com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorOps.class);
+        event.add("ShanhaiRecipeRebuild",
+                com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.class);
     }
 }

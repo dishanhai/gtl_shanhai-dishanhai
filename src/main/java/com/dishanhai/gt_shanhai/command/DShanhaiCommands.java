@@ -133,6 +133,7 @@ public class DShanhaiCommands {
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         var cmd = Commands.literal("shanhai")
                 .then(recipeCommand())
+                .then(ShanhaiRecipeEditorCommand.create())
                 .then(gtQueryCommand())
                 .then(materialsCommand("materials"))
                 .then(sdaCommand("sda"))

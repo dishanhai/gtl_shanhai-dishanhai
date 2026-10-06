@@ -173,11 +173,14 @@ public class GTDishanhaiMod {
                 (net.minecraftforge.event.server.ServerAboutToStartEvent e) -> {
                     com.dishanhai.gt_shanhai.common.shop.ShopConfig.reload();
                     com.dishanhai.gt_shanhai.common.recipe.DShanhaiDynamicStarCoreStripperRecipes.register();
-                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.runPatternCacheInvalidationBatch("server-about-to-start", () -> {
-                        com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.updateAllLookupRecipes();
-                        com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyAllReplaceRules();
-                        com.dishanhai.gt_shanhai.common.misc.MekanismFurnaceRecipeStripper.strip(e.getServer());
-                    });
+                    com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildAll(
+                            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.STARTUP);
+                    java.util.Set<String> runtimeRecipeTypes =
+                            new java.util.LinkedHashSet<>(
+                                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+                    com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildVanillaManager(
+                            e.getServer(), runtimeRecipeTypes);
+                    com.dishanhai.gt_shanhai.common.misc.MekanismFurnaceRecipeStripper.strip(e.getServer());
                     // 配方库缓存：山海的配方库.js 源文件/gtlcore配置没变就跳过重导出；
                     // 变了就把这次 Rhino 真实注册出的配方从 RecipeManager 取出，编码成标准数据包 json 落盘，
                     // 交给 DShanhaiRecipePackFinder 常驻注入，下次开服直接走 vanilla 原生加载。
@@ -186,6 +189,8 @@ public class GTDishanhaiMod {
                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.runPatternCacheInvalidationBatch(
                             "apply-persisted-recipe-toggles", () ->
                                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyPersistedRecipeToggles());
+                    com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildVanillaManager(
+                            e.getServer(), runtimeRecipeTypes);
                 });
 
         // 限购总量剩余次数按存档隔离回填/初始化，见 ShopLimitSavedData（不能再等 shop.json 里
