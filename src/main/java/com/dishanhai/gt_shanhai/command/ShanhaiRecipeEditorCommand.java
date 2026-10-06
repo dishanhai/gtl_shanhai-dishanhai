@@ -99,7 +99,7 @@ public final class ShanhaiRecipeEditorCommand {
         ShanhaiRecipeEditorOps ops = new ShanhaiRecipeEditorOps(
                 new ShanhaiRecipeOverrideStore(FMLPaths.GAMEDIR.get()
                         .resolve("config/gt_shanhai/recipe_overrides.json")));
-        ShanhaiRecipeEditorOps.Result result = ops.rollback(recipeId);
+        ShanhaiRecipeEditorOps.Result result = ops.rollback(recipeId, source.getServer());
         source.sendSuccess(() -> Component.literal(
                 "[山海] 回滚 " + recipeId + " -> " + result.status()
                         + " revision=" + result.revision()), false);

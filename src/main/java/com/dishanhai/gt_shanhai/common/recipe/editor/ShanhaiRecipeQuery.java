@@ -21,7 +21,10 @@ public final class ShanhaiRecipeQuery {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(256, pageSize));
         List<Card> all = new ArrayList<>();
-        for (String typeId : DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds()) {
+        java.util.LinkedHashSet<String> typeIds =
+                new java.util.LinkedHashSet<>(RecipeOriginalSnapshotStore.typeIds());
+        typeIds.addAll(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+        for (String typeId : typeIds) {
             if (!type.isEmpty() && !type.equals(typeId)) continue;
             for (var recipe : RecipeOriginalSnapshotStore.copiesOf(typeId)) {
                 String recipeId = recipe.getId() == null ? "" : recipe.getId().toString();

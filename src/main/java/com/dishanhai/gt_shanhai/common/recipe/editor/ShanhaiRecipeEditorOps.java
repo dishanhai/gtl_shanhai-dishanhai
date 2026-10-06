@@ -1,5 +1,8 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService;
+import net.minecraft.server.MinecraftServer;
+
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
@@ -50,12 +53,48 @@ public final class ShanhaiRecipeEditorOps {
         }
     }
 
+    public Result commit(Edit edit, MinecraftServer server) {
+        Result stored = commit(edit);
+        if (stored.status() != Result.Status.SUCCESS || server == null) return stored;
+        try {
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
+                    edit.base().recipeTypeId(),
+                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            RecipeRebuildService.rebuildVanillaManager(
+                    server, java.util.Set.of(edit.base().recipeTypeId()));
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+            return new Result(Result.Status.SUCCESS, "override-written-and-rebuilt", report.revision());
+        } catch (Throwable t) {
+            return new Result(Result.Status.REBUILD_FAILED, "override-written-rebuild-failed", REVISION.get());
+        }
+    }
+
     public Result rollback(String recipeId) {
         try {
             store.remove(recipeId);
             return new Result(Result.Status.SUCCESS, "override-removed", REVISION.incrementAndGet());
         } catch (Exception e) {
             return new Result(Result.Status.REBUILD_FAILED, "override-remove-failed", REVISION.get());
+        }
+    }
+
+    public Result rollback(String recipeId, MinecraftServer server) {
+        Optional<ShanhaiRecipeOverrideStore.Entry> existing = store.find(recipeId);
+        Result removed = rollback(recipeId);
+        if (removed.status() != Result.Status.SUCCESS || server == null || existing.isEmpty()) {
+            return removed;
+        }
+        String typeId = existing.get().payload().has("recipeTypeId")
+                ? existing.get().payload().get("recipeTypeId").getAsString() : "";
+        if (typeId.isEmpty()) return removed;
+        try {
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
+                    typeId, RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            RecipeRebuildService.rebuildVanillaManager(server, java.util.Set.of(typeId));
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+            return new Result(Result.Status.SUCCESS, "override-removed-and-rebuilt", report.revision());
+        } catch (Throwable t) {
+            return new Result(Result.Status.REBUILD_FAILED, "override-removed-rebuild-failed", REVISION.get());
         }
     }
 

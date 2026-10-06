@@ -67,6 +67,10 @@ public final class RecipeOriginalSnapshotStore {
         return byId != null && !byId.isEmpty();
     }
 
+    public static synchronized Set<String> typeIds() {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(SNAPSHOTS.keySet()));
+    }
+
     public static synchronized void clear(String recipeTypeId) {
         if (recipeTypeId != null) {
             Map<String, GTRecipe> removed = SNAPSHOTS.remove(recipeTypeId);

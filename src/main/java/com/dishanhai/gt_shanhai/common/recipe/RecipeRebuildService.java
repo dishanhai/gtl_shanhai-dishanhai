@@ -78,6 +78,11 @@ public final class RecipeRebuildService {
                         var lookup = type.getLookup();
                         lookup.removeAllRecipes();
                         for (GTRecipe recipe : rebuilt) lookup.addRecipe(recipe);
+                        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+                        if (server != null) {
+                            com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeTable
+                                    .replaceType(server, recipeTypeId, rebuilt);
+                        }
                         DShanhaiRecipeModifierAPI.invalidateRecipeCaches(
                                 "recipe-rebuild:" + reason.name().toLowerCase(),
                                 Set.of(recipeTypeId));

@@ -68,7 +68,8 @@ public final class RecipeEditorCommitPacket {
                     new ShanhaiRecipeOverrideStore(FMLPaths.GAMEDIR.get()
                             .resolve("config/gt_shanhai/recipe_overrides.json")));
             ShanhaiRecipeEditorOps.Result result = ops.commit(
-                    new ShanhaiRecipeEditorOps.Edit(base, packet.baseFingerprint));
+                    new ShanhaiRecipeEditorOps.Edit(base, packet.baseFingerprint),
+                    net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer());
             return new RecipeEditorResultPacket(
                     RecipeEditorResultPacket.Status.valueOf(result.status().name()),
                     result.message(),
