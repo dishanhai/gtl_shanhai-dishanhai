@@ -34,6 +34,27 @@ class ShopAutoCraftPacketCodecTest {
     }
 
     @Test
+    void requestRoundTripPreservesUnlockTargetAndStagePath() {
+        FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
+        FriendlyByteBuf decoded = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            new ShopAutoCraftRequestPacket(ShopAutoCraftRequestPacket.Target.STAGE,
+                    0L, -1L, 1L, "无限盘区/前期", true).encode(encoded);
+            new ShopAutoCraftRequestPacket(encoded).encode(decoded);
+            assertEquals(ShopAutoCraftRequestPacket.Target.STAGE, decoded.readEnum(ShopAutoCraftRequestPacket.Target.class));
+            assertEquals(0L, decoded.readLong());
+            assertEquals(-1L, decoded.readLong());
+            assertEquals(1L, decoded.readVarLong());
+            assertEquals("无限盘区/前期", decoded.readUtf(256));
+            assertTrue(decoded.readBoolean());
+            assertFalse(decoded.isReadable());
+        } finally {
+            encoded.release();
+            decoded.release();
+        }
+    }
+
+    @Test
     void planRoundTripPreservesItsIdentityAndTargetQuantities() {
         UUID id = UUID.randomUUID();
         FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());

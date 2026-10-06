@@ -11,6 +11,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.Util;
 
 import org.lwjgl.glfw.GLFW;
 
@@ -114,6 +115,13 @@ public final class ChangelogScreen extends Screen {
             lines.add(new RenderLine(Component.literal(document.title()), TITLE_COLOR, true));
             lines.add(new RenderLine(Component.empty(), BODY_COLOR, false));
         }
+        for (ChangelogConfig.ChangelogLink link : document.links()) {
+            List<FormattedCharSequence> wrapped = font.split(link.asComponent(), textWidth);
+            for (FormattedCharSequence sequence : wrapped) {
+                lines.add(new RenderLine(sequence, 0xFF55AAFF, false, link));
+            }
+            lines.add(new RenderLine(Component.empty(), BODY_COLOR, false));
+        }
         for (MarkdownLine sourceLine : document.lines()) {
             if (sourceLine.kind() == LineKind.BLANK) {
                 lines.add(new RenderLine(Component.empty(), BODY_COLOR, false));
@@ -175,6 +183,37 @@ public final class ChangelogScreen extends Screen {
         graphics.disableScissor();
     }
 
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        int centerX = panelLeft + (PANEL_WIDTH - SCROLLBAR_WIDTH - 2) / 2;
+        int y = contentTop - scrollOffset;
+        for (RenderLine line : lines) {
+            if (line.link() != null && mouseY >= y && mouseY <= y + line.height()) {
+                int textWidth = font.width(line.text());
+                if (mouseX >= centerX - textWidth / 2.0
+                        && mouseX <= centerX + textWidth / 2.0) {
+                    if (button == 0) {
+                        activateLink(line.link());
+                    } else if (button == 1) {
+                        copyLink(line.link());
+                    }
+                    return true;
+                }
+            }
+            y += line.height();
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    private void activateLink(ChangelogConfig.ChangelogLink link) {
+        copyLink(link);
+        Util.getPlatform().openUri(link.url());
+    }
+
+    private void copyLink(ChangelogConfig.ChangelogLink link) {
+        minecraft.keyboardHandler.setClipboard(link.url());
+    }
+
     private void renderScrollbar(GuiGraphics graphics, int panelRight) {
         int max = maxScroll();
         if (max <= 0) {
@@ -225,14 +264,27 @@ public final class ChangelogScreen extends Screen {
         return false;
     }
 
-    private record RenderLine(FormattedCharSequence text, int color, boolean heading, boolean empty) {
+    private record RenderLine(
+            FormattedCharSequence text,
+            int color,
+            boolean heading,
+            boolean empty,
+            ChangelogConfig.ChangelogLink link) {
 
         RenderLine(Component text, int color, boolean heading) {
-            this(text.getVisualOrderText(), color, heading, text.getString().isEmpty());
+            this(text.getVisualOrderText(), color, heading, text.getString().isEmpty(), null);
         }
 
         RenderLine(FormattedCharSequence text, int color, boolean heading) {
-            this(text, color, heading, false);
+            this(text, color, heading, false, null);
+        }
+
+        RenderLine(
+                FormattedCharSequence text,
+                int color,
+                boolean heading,
+                ChangelogConfig.ChangelogLink link) {
+            this(text, color, heading, false, link);
         }
 
         int height() {

@@ -48,11 +48,48 @@ class ChangelogMarkdownSourceTest {
     }
 
     @Test
+    void markdownSupportsRepeatedLinkFrontMatterEntries() throws Exception {
+        String config = source("common/config/ChangelogConfig.java");
+        assertTrue(config.contains("ChangelogLink"),
+                "公告配置应提供可点击链接数据");
+        assertTrue(config.contains("link"),
+                "公告 front matter 应支持 link 标记");
+        assertTrue(config.contains("parseLink"),
+                "公告配置应解析 Markdown 链接标记");
+        assertTrue(config.contains("List<String> linkValues"),
+                "公告配置应保留多个重复 link 标记");
+    }
+
+    @Test
+    void screenSupportsOpeningAndCopyingChangelogLinks() throws Exception {
+        String screen = source("client/gui/ChangelogScreen.java");
+        assertTrue(screen.contains("mouseClicked"),
+                "公告画面应处理链接点击");
+        assertTrue(screen.contains("openUri"),
+                "左键应支持使用系统浏览器打开链接");
+        assertTrue(screen.contains("setClipboard"),
+                "右键应支持复制链接地址");
+        assertTrue(screen.contains("activateLink"),
+                "左键点击链接应同时复制并打开链接");
+        assertTrue(screen.contains("ChangelogLink"),
+                "公告画面应渲染链接数据");
+    }
+
+    @Test
     void screenProvidesHistoricalUpdatesButton() throws Exception {
         String screen = source("client/gui/ChangelogScreen.java");
         assertTrue(screen.contains("历史更新"),
                 "全屏公告应提供历史更新按钮");
         assertTrue(screen.contains("ChangelogHistoryScreen"),
                 "历史更新按钮应打开历史公告列表");
+    }
+
+    @Test
+    void historyScreenIncludesLatestVersionAndUsesSortedAllDocuments() throws Exception {
+        String history = source("client/gui/ChangelogHistoryScreen.java");
+        assertTrue(history.contains("ChangelogConfig.getAll()"),
+                "历史更新列表应包含当前最新公告");
+        assertTrue(history.contains("documents"),
+                "历史更新列表应使用完整公告集合");
     }
 }

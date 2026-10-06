@@ -383,6 +383,9 @@ public class ShopScreen extends ScaledScreen {
     private boolean submissionBtnVisible, stageSubmissionBtnVisible;
     private int submissionBtnX, submissionBtnY, submissionBtnW, submissionBtnH;
     private int stageSubmissionBtnX, stageSubmissionBtnY, stageSubmissionBtnW, stageSubmissionBtnH;
+    private int submissionAutoCraftX, submissionAutoCraftY, submissionAutoCraftW, submissionAutoCraftH;
+    private int stageLockAutoCraftX, stageLockAutoCraftY, stageLockAutoCraftW, stageLockAutoCraftH;
+    private boolean submissionAutoCraftVisible, stageLockAutoCraftVisible;
     private boolean stageLockActive;
     private String stageLockPath;
     private int stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH;
@@ -2628,6 +2631,13 @@ public class ShopScreen extends ScaledScreen {
             g.drawString(this.font, "§6提交商品固定物品（一次性解锁）:", cx, actionY, GOLD, true);
             actionY += 12;
             actionY = drawSubmissionRequirementPreview(g, cx, actionY, selected.getSubmissionItems(), detailInnerW, mx, hoverMy);
+            submissionAutoCraftVisible = aeMode;
+            if (submissionAutoCraftVisible) {
+                submissionAutoCraftX = cx; submissionAutoCraftY = actionY - detailScroll;
+                submissionAutoCraftW = detailInnerW; submissionAutoCraftH = 18;
+                drawButton(g, cx, actionY, detailInnerW, 18, "§b⚙ AE下单补齐商品前置", mx, hoverMy);
+                actionY += 21;
+            }
             submissionBtnX = cx; submissionBtnY = actionY - detailScroll; submissionBtnW = detailInnerW; submissionBtnH = 18;
             drawButton(g, cx, actionY, detailInnerW, 18, "§e提交商品固定物品", mx, hoverMy);
             actionY += 21;
@@ -2786,6 +2796,11 @@ public class ShopScreen extends ScaledScreen {
         stageLockSubmitH = 18;
         stageLockSubmitX = ox + 9;
         stageLockSubmitY = oy + oh - 27;
+        stageLockAutoCraftVisible = aeMode && !requirements.isEmpty();
+        stageLockAutoCraftW = ow - 18; stageLockAutoCraftH = 18;
+        stageLockAutoCraftX = ox + 9; stageLockAutoCraftY = stageLockSubmitY - 21;
+        if (stageLockAutoCraftVisible) drawButton(g, stageLockAutoCraftX, stageLockAutoCraftY,
+                stageLockAutoCraftW, stageLockAutoCraftH, "§b⚙ AE下单补齐阶段前置", mx, my);
         drawButton(g, stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH,
                 "§a提交阶段固定物品", mx, my);
     }
@@ -2828,6 +2843,13 @@ public class ShopScreen extends ScaledScreen {
             return handleCartOverlayClick(mx, my);
         }
         if (stageLockActive && hit(mx, my, listLeft(), contentTop(), detailX() + DETAIL_W - listLeft(), contentHeight())) {
+            if (stageLockAutoCraftVisible && hit(mx, my, stageLockAutoCraftX, stageLockAutoCraftY,
+                    stageLockAutoCraftW, stageLockAutoCraftH) && stageLockPath != null) {
+                ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
+                        com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.Target.STAGE,
+                        0L, -1L, 1L, stageLockPath, aeMode));
+                return true;
+            }
             if (hit(mx, my, stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH)
                     && stageLockPath != null) {
                 ShanhaiNetwork.CHANNEL.sendToServer(
@@ -3183,6 +3205,13 @@ public class ShopScreen extends ScaledScreen {
             if (hadSelection) {
                 showMessage(Component.literal("§b[山海商店] §7批量名单已清空"));
             }
+            return true;
+        }
+        if (inDetailViewport && submissionAutoCraftVisible && selected != null
+                && hit(mx, my, submissionAutoCraftX, submissionAutoCraftY, submissionAutoCraftW, submissionAutoCraftH)) {
+            ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
+                    com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.Target.ENTRY_SUBMISSION,
+                    ClientShopCatalog.revision(), ClientShopCatalog.keyOf(selected), 1L, "", aeMode));
             return true;
         }
 

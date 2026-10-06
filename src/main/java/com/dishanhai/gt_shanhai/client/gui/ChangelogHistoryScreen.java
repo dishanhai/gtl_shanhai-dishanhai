@@ -21,7 +21,7 @@ public final class ChangelogHistoryScreen extends Screen {
     private ChangelogHistoryScreen(Screen parent) {
         super(Component.literal("历史更新"));
         this.parent = parent;
-        this.documents = ChangelogConfig.getHistory();
+        this.documents = ChangelogConfig.getAll();
     }
 
     public static void open(Screen parent) {

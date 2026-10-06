@@ -6,6 +6,7 @@ import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPU;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopAutoCraftPlanPacket;
+import com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket;
 import com.dishanhai.gt_shanhai.mixin.ShopCraftingJobAccessors;
 import appeng.api.config.Actionable;
 import appeng.api.networking.IGrid;
@@ -55,6 +56,13 @@ public final class ShopAutoCraft {
     private static final Map<UUID, Session> CALCULATING = new ConcurrentHashMap<>();
     private static final Map<UUID, Session> READY = new ConcurrentHashMap<>();
 
+    /** 补齐目标种类：商品成本 / 阶段解锁前置 / 商品一次性提交前置。 */
+    public enum Target {
+        COST,
+        STAGE,
+        ENTRY_SUBMISSION
+    }
+
     private static final class PlanItem {
         final AEKey key;
         final long amount;
@@ -83,6 +91,9 @@ public final class ShopAutoCraft {
         final IGrid grid;
         final ShopEntry entry;
         final long times;
+        final boolean aeMode;
+        final Target target;
+        final String stagePath;
         final Map<AEKey, BigInteger> shortages;
         final Map<AEKey, BigInteger> retained;
         final Map<AEKey, BigInteger> reserved = new LinkedHashMap<>();
@@ -92,9 +103,16 @@ public final class ShopAutoCraft {
         long ticks;
 
         Session(IGrid grid, ShopEntry entry, long times, Snapshot snapshot) {
+            this(grid, entry, times, Target.COST, "", true, snapshot);
+        }
+
+        Session(IGrid grid, ShopEntry entry, long times, Target target, String stagePath, boolean aeMode, Snapshot snapshot) {
             this.grid = grid;
             this.entry = entry;
             this.times = times;
+            this.aeMode = aeMode;
+            this.target = target == null ? Target.COST : target;
+            this.stagePath = stagePath == null ? "" : stagePath;
             this.shortages = snapshot.shortages;
             this.retained = snapshot.retained;
             this.reserved.putAll(retained);
@@ -147,6 +165,65 @@ public final class ShopAutoCraft {
         CALCULATING.put(player.getUUID(), session);
         startNextCalculation(player, session);
         message(player, "§7正在計算合成方案（" + session.items.size() + " 項）");
+    }
+
+    public static void beginStagePlan(ServerPlayer player, String stagePath, boolean aeMode) {
+        if (player == null || stagePath == null || stagePath.isBlank()) return;
+        if (!aeMode) { message(player, "§c請先開啟「AE模式」"); return; }
+        IGrid grid = ShopAeNetwork.findBoundGrid(player);
+        if (grid == null) { message(player, "§c未綁定在線 AE 網路"); return; }
+        List<ExchangeEntry.Ingredient> requirements = ShopStageConfig.get(stagePath);
+        if (requirements.isEmpty()) return;
+        startIngredientPlan(player, null, Target.STAGE, stagePath, requirements, grid);
+    }
+
+    public static void beginEntrySubmissionPlan(ServerPlayer player, ShopEntry entry, boolean aeMode) {
+        if (player == null || entry == null || !entry.isValid() || !entry.hasSubmissionRequirement()) return;
+        if (!aeMode) { message(player, "§c請先開啟「AE模式」"); return; }
+        IGrid grid = ShopAeNetwork.findBoundGrid(player);
+        if (grid == null) { message(player, "§c未綁定在線 AE 網路"); return; }
+        startIngredientPlan(player, entry, Target.ENTRY_SUBMISSION, entry.getStableId(), entry.getSubmissionItems(), grid);
+    }
+
+    private static void startIngredientPlan(ServerPlayer player, ShopEntry entry, Target target, String path,
+                                             List<ExchangeEntry.Ingredient> requirements, IGrid grid) {
+        cancelAll(player.getUUID());
+        Session session = new Session(grid, entry, 1L, target, path, true,
+                snapshotIngredients(player, requirements, grid));
+        prepareAndStart(player, session);
+    }
+
+    private static void prepareAndStart(ServerPlayer player, Session session) {
+        for (Map.Entry<AEKey, BigInteger> shortage : session.shortages.entrySet()) {
+            AEKey key = shortage.getKey();
+            if (shortage.getValue().compareTo(LONG_MAX) > 0) {
+                session.notes.add("§c" + key.getDisplayName().getString() + " 缺口超出 AE 單次數量上限");
+            } else if (!session.grid.getCraftingService().isCraftable(key)) {
+                session.notes.add("§7✗ " + key.getDisplayName().getString() + " §c無可用合成流程");
+            } else if (session.items.size() < MAX_PLAN_ITEMS) {
+                session.items.add(new PlanItem(key, shortage.getValue().longValueExact()));
+            }
+        }
+        if (session.items.isEmpty()) { READY.put(player.getUUID(), session); sendPlanToClient(player, session); return; }
+        CALCULATING.put(player.getUUID(), session);
+        startNextCalculation(player, session);
+        message(player, "§7正在計算合成方案（" + session.items.size() + " 項）");
+    }
+
+    private static Snapshot snapshotIngredients(ServerPlayer player, List<ExchangeEntry.Ingredient> requirements, IGrid grid) {
+        Map<AEKey, BigInteger> demand = new LinkedHashMap<>();
+        for (ExchangeEntry.Ingredient ingredient : requirements) {
+            if (ingredient == null || ingredient.isFluid) continue;
+            ShopAutoCraftAmounts.add(demand, AEItemKey.of(ingredient.makeUnitStack()), BigInteger.valueOf(ingredient.count));
+        }
+        Map<AEKey, BigInteger> carried = new LinkedHashMap<>();
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) addCarried(carried, player.getInventory().getItem(i));
+        ShopBackpack.equipped(player).ifPresent(backpack -> { for (int i = 0; i < backpack.getSlots(); i++) addCarried(carried, backpack.getStackInSlot(i)); });
+        for (Map.Entry<AEKey, BigInteger> stack : carried.entrySet()) stack.setValue(stack.getValue().subtract(ShopAutoCraftAmounts.consume(demand, stack.getKey(), stack.getValue())));
+        Map<AEKey, BigInteger> stock = new LinkedHashMap<>();
+        IActionSource source = source(player);
+        for (AEKey key : demand.keySet()) ShopAutoCraftAmounts.add(stock, key, BigInteger.valueOf(Math.max(0L, grid.getStorageService().getInventory().extract(key, Long.MAX_VALUE, Actionable.SIMULATE, source))));
+        return new Snapshot(ShopAutoCraftAmounts.missing(demand, stock, Map.of()), ShopAutoCraftAmounts.reserve(demand, stock));
     }
 
     private static Snapshot snapshot(ServerPlayer player, ShopEntry entry, long times, IGrid grid) {
@@ -358,11 +435,11 @@ public final class ShopAutoCraft {
         // 先消費這份方案；重複確認、舊視窗確認均不能提交第二次。
         if (!READY.remove(player.getUUID(), session)) return;
         IGrid grid = ShopAeNetwork.findBoundGrid(player);
-        if (session.grid != grid || !ShopConfig.getEntries().contains(session.entry)) {
+        if (session.grid != grid || !targetStillValid(session)) {
             message(player, "§cAE 網路或商品已改變，請重新計算");
             return;
         }
-        Snapshot current = snapshot(player, session.entry, session.times, grid);
+        Snapshot current = snapshotForSession(player, session, grid);
         boolean shortagesChanged = !current.shortages.equals(session.shortages);
         boolean retainedChanged = !current.retained.equals(session.retained);
         boolean reservedStockAvailable = hasReservedStock(player, session);
@@ -372,7 +449,7 @@ public final class ShopAutoCraft {
                     player.getGameProfile().getName(), planId,
                     shortagesChanged, retainedChanged, reservedStockAvailable);
             message(player, "§e庫存、價格或在製數量已改變，正在重新計算，請再次確認");
-            beginPlan(player, session.entry, session.times, true);
+            restartPlan(player, session);
             return;
         }
         int submitted = 0;
@@ -392,6 +469,27 @@ public final class ShopAutoCraft {
         }
         if (submitted > 0) message(player, "§a已提交 " + submitted + " 項合成任務到 AE 網路");
         if (!failures.isEmpty()) message(player, "§c提交失敗：" + String.join("、", failures));
+    }
+
+    private static boolean targetStillValid(Session session) {
+        if (!session.aeMode) return false;
+        if (session.target == Target.COST) return session.entry != null && ShopConfig.getEntries().contains(session.entry);
+        if (session.target == Target.STAGE) return !session.stagePath.isBlank() && !ShopStageConfig.get(session.stagePath).isEmpty();
+        return session.entry != null && ShopConfig.getEntries().contains(session.entry) && session.entry.hasSubmissionRequirement();
+    }
+
+    private static Snapshot snapshotForSession(ServerPlayer player, Session session, IGrid grid) {
+        return switch (session.target) {
+            case STAGE -> snapshotIngredients(player, ShopStageConfig.get(session.stagePath), grid);
+            case ENTRY_SUBMISSION -> snapshotIngredients(player, session.entry.getSubmissionItems(), grid);
+            default -> snapshot(player, session.entry, session.times, grid);
+        };
+    }
+
+    private static void restartPlan(ServerPlayer player, Session session) {
+        if (session.target == Target.STAGE) beginStagePlan(player, session.stagePath, true);
+        else if (session.target == Target.ENTRY_SUBMISSION) beginEntrySubmissionPlan(player, session.entry, true);
+        else beginPlan(player, session.entry, session.times, true);
     }
 
     private static boolean hasReservedStock(ServerPlayer player, Session session) {

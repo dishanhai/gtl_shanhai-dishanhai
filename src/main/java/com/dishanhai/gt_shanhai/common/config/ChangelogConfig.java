@@ -44,6 +44,12 @@ public final class ChangelogConfig {
     private static final Pattern VERSION_IN_FILE_NAME = Pattern.compile(
             "(?:^|[-_])([0-9]+)\\.([0-9]+)\\.([0-9]+)(?:[-+]([0-9A-Za-z.-]+))?\\.md$",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern WRAPPED_MARKDOWN_LINK = Pattern.compile(
+            "^\\[\\[\\s*([^\\]]+)\\]\\((https?://[^)\\s]+)\\)\\s*\\](?:\\s*-\\s*(.*))?$",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern SIMPLE_MARKDOWN_LINK = Pattern.compile(
+            "^\\[([^\\]]+)\\]\\((https?://[^)\\s]+)\\)(?:\\s*-\\s*(.*))?$",
+            Pattern.CASE_INSENSITIVE);
 
     private static List<ChangelogDocument> loaded;
 
@@ -91,12 +97,22 @@ public final class ChangelogConfig {
     public record MarkdownSpan(String text, boolean bold, boolean italic, boolean code) {
     }
 
+    public record ChangelogLink(String text, String url, String description) {
+
+        public MutableComponent asComponent() {
+            String suffix = this.description.isBlank() ? "" : " - " + this.description;
+            return Component.literal(this.text + suffix)
+                    .withStyle(style -> style.withColor(0x55AAFF).withUnderlined(true));
+        }
+    }
+
     public record ChangelogDocument(
             String version,
             String title,
             boolean enabled,
             Path source,
             String fileVersion,
+            List<ChangelogLink> links,
             List<MarkdownLine> lines) {
 
         public boolean hasContent() {
@@ -189,12 +205,13 @@ public final class ChangelogConfig {
         }
         String fileVersion = matcher.group(1) + "." + matcher.group(2) + "." + matcher.group(3);
         Map<String, String> frontMatter = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        List<String> linkValues = new ArrayList<>();
         List<String> body = new ArrayList<>();
         try {
             List<String> rawLines = Files.readAllLines(path, StandardCharsets.UTF_8);
             int bodyStart = 0;
             if (!rawLines.isEmpty() && rawLines.get(0).trim().equals("---")) {
-                bodyStart = readFrontMatter(rawLines, frontMatter);
+                bodyStart = readFrontMatter(rawLines, frontMatter, linkValues);
             }
             for (int i = bodyStart; i < rawLines.size(); i++) {
                 body.add(rawLines.get(i));
@@ -213,10 +230,12 @@ public final class ChangelogConfig {
                 enabled,
                 path,
                 fileVersion,
+                parseLinks(linkValues),
                 parseMarkdown(body));
     }
 
-    private static int readFrontMatter(List<String> rawLines, Map<String, String> target) {
+    private static int readFrontMatter(
+            List<String> rawLines, Map<String, String> target, List<String> linkValues) {
         for (int i = 1; i < rawLines.size(); i++) {
             String line = rawLines.get(i).trim();
             if (line.equals("---")) {
@@ -224,10 +243,43 @@ public final class ChangelogConfig {
             }
             int separator = line.indexOf(':');
             if (separator > 0) {
-                target.put(line.substring(0, separator).trim(), line.substring(separator + 1).trim());
+                String key = line.substring(0, separator).trim();
+                String value = line.substring(separator + 1).trim();
+                if ("link".equalsIgnoreCase(key)) {
+                    linkValues.add(value);
+                } else {
+                    target.put(key, value);
+                }
             }
         }
         return 0;
+    }
+
+    private static List<ChangelogLink> parseLinks(List<String> linkValues) {
+        List<ChangelogLink> links = new ArrayList<>();
+        for (String value : linkValues) {
+            ChangelogLink link = parseLink(value);
+            if (link != null) {
+                links.add(link);
+            } else {
+                GTDishanhaiMod.LOGGER.warn("[Changelog] 忽略无效公告链接: {}", value);
+            }
+        }
+        return Collections.unmodifiableList(links);
+    }
+
+    private static ChangelogLink parseLink(String value) {
+        Matcher matcher = WRAPPED_MARKDOWN_LINK.matcher(value.trim());
+        if (!matcher.matches()) {
+            matcher = SIMPLE_MARKDOWN_LINK.matcher(value.trim());
+        }
+        if (!matcher.matches()) {
+            return null;
+        }
+        String text = matcher.group(1).trim();
+        String url = matcher.group(2).trim();
+        String description = matcher.group(3) == null ? "" : matcher.group(3).trim();
+        return text.isEmpty() || url.isEmpty() ? null : new ChangelogLink(text, url, description);
     }
 
     private static List<MarkdownLine> parseMarkdown(List<String> body) {
