@@ -2,6 +2,11 @@ package com.dishanhai.gt_shanhai.common.recipe.editor;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.recipe.RecipeOriginalSnapshotStore;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.level.material.Fluid;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +51,65 @@ public final class ShanhaiRecipeQuery {
     public static Optional<ShanhaiRecipeBase> get(String typeId, String recipeId) {
         var recipe = RecipeOriginalSnapshotStore.copyOf(typeId, recipeId);
         return recipe == null ? Optional.empty() : Optional.ofNullable(ShanhaiRecipeBase.from(recipe));
+    }
+
+    /**
+     * Fluid counterpart of the item query used by the first editor screen.
+     * Fluid inputs and outputs are indexed separately so "source" and "use"
+     * keep the same meaning as the item buttons.
+     */
+    public static Result byInputFluid(MinecraftServer server, Fluid fluid) {
+        return byFluid(server, fluid, false);
+    }
+
+    public static Result byOutputFluid(MinecraftServer server, Fluid fluid) {
+        return byFluid(server, fluid, true);
+    }
+
+    public static Result byInput(MinecraftServer server, Item item) {
+        return byItem(server, item, false);
+    }
+
+    public static Result byOutput(MinecraftServer server, Item item) {
+        return byItem(server, item, true);
+    }
+
+    public static String fluidIdOf(Fluid fluid) {
+        return ShanhaiRecipeReverseIndex.fluidIdOf(fluid);
+    }
+
+    private static Result byFluid(MinecraftServer server, Fluid fluid, boolean output) {
+        if (server == null || fluid == null) {
+            return new Result(List.of(), 0, currentRevision());
+        }
+        List<GTRecipe> matches = output
+                ? ShanhaiRecipeReverseIndex.queryFluidOutput(server, fluid)
+                : ShanhaiRecipeReverseIndex.queryFluidInput(server, fluid);
+        List<Card> cards = new ArrayList<>(matches.size());
+        for (GTRecipe recipe : matches) {
+            ShanhaiRecipeBase base = ShanhaiRecipeBase.from(recipe);
+            if (base == null) continue;
+            cards.add(new Card(base.recipeTypeId(), base.recipeId(), base.duration(), base.eut(),
+                    ShanhaiRecipeFingerprint.of(base)));
+        }
+        return new Result(List.copyOf(cards), cards.size(), currentRevision());
+    }
+
+    private static Result byItem(MinecraftServer server, Item item, boolean output) {
+        if (server == null || item == null) {
+            return new Result(List.of(), 0, currentRevision());
+        }
+        List<GTRecipe> matches = output
+                ? ShanhaiRecipeReverseIndex.queryByOutput(server, item)
+                : ShanhaiRecipeReverseIndex.query(server, item);
+        List<Card> cards = new ArrayList<>(matches.size());
+        for (GTRecipe recipe : matches) {
+            ShanhaiRecipeBase base = ShanhaiRecipeBase.from(recipe);
+            if (base == null) continue;
+            cards.add(new Card(base.recipeTypeId(), base.recipeId(), base.duration(), base.eut(),
+                    ShanhaiRecipeFingerprint.of(base)));
+        }
+        return new Result(List.copyOf(cards), cards.size(), currentRevision());
     }
 
     public static long currentRevision() {

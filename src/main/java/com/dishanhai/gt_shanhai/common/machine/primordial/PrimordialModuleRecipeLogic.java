@@ -3,6 +3,8 @@ package com.dishanhai.gt_shanhai.common.machine.primordial;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
@@ -11,9 +13,16 @@ import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
 import com.gtladd.gtladditions.common.data.ParallelData;
 import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
+import com.gregtechceu.gtceu.api.machine.multiblock.CleanroomType;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.gregtechceu.gtceu.api.recipe.RecipeCondition;
+import com.gregtechceu.gtceu.api.recipe.condition.RecipeConditionType;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
+import com.gregtechceu.gtceu.common.recipe.condition.CleanroomCondition;
+import com.gregtechceu.gtceu.common.recipe.condition.DimensionCondition;
+import com.gregtechceu.gtceu.common.recipe.condition.ResearchCondition;
+import org.gtlcore.gtlcore.common.recipe.condition.GravityCondition;
 import org.gtlcore.gtlcore.api.recipe.IParallelLogic;
 import org.gtlcore.gtlcore.api.recipe.IAdvancedContentModifier;
 import org.gtlcore.gtlcore.api.recipe.IGTRecipe;
@@ -25,11 +34,18 @@ import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+
 import org.jetbrains.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.LongPredicate;
 
@@ -151,7 +167,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                 && isSelectedRecipeType(recipe.recipeType)
                 && matchRecipeInputHandlePartCache(recipe)
                 && RecipeRunnerHelper.matchRecipeOutput(getMachine(), recipe)
-                && recipe.checkConditions(this).isSuccess();
+                && shanhai$extraMountGateAllows(recipe)
+                && shanhai$conditionsPass(recipe);
     }
 
     /**
@@ -494,6 +511,189 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         return result;
     }
 
+    private ShanhaiHeatGate.Outcome shanhai$gateOutcome;
+
+    private boolean shanhai$extraMountGateAllows(GTRecipe recipe) {
+        MetaMachine machine = getMachine();
+        if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
+            return true;
+        }
+
+        boolean unrestrictedMode = DShanhaiConfig.COMMON.primordialModuleUnrestrictedMode.get();
+        List<ShanhaiHeatGate.Requirement> needs = new ArrayList<>();
+        if (recipe.conditions != null) {
+            for (RecipeCondition condition : recipe.conditions) {
+                if (condition == null || condition.isReverse()) {
+                    continue;
+                }
+                ShanhaiHeatGate.Requirement requirement = shanhai$requirementOf(condition);
+                if (requirement == null) {
+                    continue;
+                }
+                if (!ShanhaiHeatGate.isRequirementEnforced(requirement.kind, unrestrictedMode)) {
+                    continue;
+                }
+                if (!condition.test(recipe, this)) {
+                    needs.add(requirement);
+                }
+            }
+        }
+
+        GTRecipeType type = recipe.recipeType;
+        boolean heatReachable = type != null
+                && type.registryName != null
+                && ShanhaiHeatGate.isGated(type.registryName.toString())
+                && module.canUseExtraMountAsHeatSource();
+        if (!unrestrictedMode && heatReachable && recipe.data != null) {
+            int requiredTemperature = readRecipeInt(recipe.data, ShanhaiHeatGate.KEY_EBF_TEMP);
+            int requiredContainment = readRecipeInt(recipe.data, ShanhaiHeatGate.KEY_SC_TIER);
+            if (requiredTemperature > 0) {
+                needs.add(ShanhaiHeatGate.Requirement.heatTemp(requiredTemperature));
+            }
+            if (requiredContainment > 0) {
+                needs.add(ShanhaiHeatGate.Requirement.scTier(requiredContainment));
+            }
+        }
+
+        ShanhaiHeatGate.Outcome outcome =
+                ShanhaiHeatGate.evaluate(needs, module.getExtraMountContents());
+        shanhai$gateOutcome = outcome;
+        if (outcome.allowed) {
+            return true;
+        }
+        module.setModuleConditionError(shanhai$extraMountFailure(outcome, module));
+        return false;
+    }
+
+    private boolean shanhai$conditionsPass(GTRecipe recipe) {
+        ShanhaiHeatGate.Outcome outcome = shanhai$gateOutcome;
+        if (outcome == null || outcome.satisfied.isEmpty()) {
+            if (!shanhai$hasIgnoredCondition(recipe)) {
+                return recipe.checkConditions(this).isSuccess();
+            }
+        }
+
+        Map<RecipeConditionType<?>, Boolean> orGroupAllFail = new LinkedHashMap<>();
+        for (RecipeCondition condition : recipe.conditions) {
+            ShanhaiHeatGate.Requirement requirement = shanhai$requirementOf(condition);
+            boolean passed = (!condition.isReverse() && shanhai$conditionIgnored(requirement))
+                    || condition.test(recipe, this) != condition.isReverse();
+            if (!passed) {
+                passed = outcome != null && requirement != null && outcome.satisfied.contains(requirement);
+            }
+            if (condition.isOr()) {
+                orGroupAllFail.merge(condition.getType(), !passed, (left, right) -> left && right);
+            } else if (!passed) {
+                return false;
+            }
+        }
+        for (Boolean allFail : orGroupAllFail.values()) {
+            if (Boolean.TRUE.equals(allFail)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean shanhai$hasIgnoredCondition(GTRecipe recipe) {
+        if (recipe.conditions == null) {
+            return false;
+        }
+        for (RecipeCondition condition : recipe.conditions) {
+            if (!condition.isReverse()
+                    && shanhai$conditionIgnored(shanhai$requirementOf(condition))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean shanhai$conditionIgnored(ShanhaiHeatGate.Requirement requirement) {
+        return requirement != null
+                && ShanhaiHeatGate.isRequirementIgnored(
+                        requirement.kind,
+                        DShanhaiConfig.COMMON.primordialModuleUnrestrictedMode.get());
+    }
+
+    @Nullable
+    private ShanhaiHeatGate.Requirement shanhai$requirementOf(RecipeCondition condition) {
+        if (condition instanceof CleanroomCondition cleanroom) {
+            CleanroomType type = cleanroom.getCleanroom();
+            int tier = ShanhaiHeatGate.cleanroomTierOfName(type == null ? null : type.getName());
+            return tier == ShanhaiHeatGate.CLEANROOM_NONE
+                    ? null : ShanhaiHeatGate.Requirement.cleanroom(tier);
+        }
+        if (condition instanceof DimensionCondition dimension) {
+            ResourceLocation id = dimension.getDimension();
+            return id == null ? null : ShanhaiHeatGate.Requirement.dimension(id.toString());
+        }
+        if (condition instanceof ResearchCondition) {
+            return ShanhaiHeatGate.Requirement.research();
+        }
+        if (condition instanceof GravityCondition) {
+            return ShanhaiHeatGate.Requirement.gravity();
+        }
+        return null;
+    }
+
+    private static int readRecipeInt(CompoundTag data, String key) {
+        return data.contains(key) ? data.getInt(key) : 0;
+    }
+
+    private String shanhai$extraMountFailure(ShanhaiHeatGate.Outcome outcome,
+                                             PrimordialOmegaEngineModuleBase module) {
+        ShanhaiHeatGate.Requirement requirement = outcome.blocked;
+        if (requirement == null) {
+            return "额外挂载条件未满足";
+        }
+        String needed = requirement.describe();
+        return switch (outcome.deny) {
+            case SLOT_EMPTY -> "这个配方需要【" + needed + "】，但三个额外挂载槽全是空的";
+            case WRONG_ITEM -> "这个配方需要【" + needed + "】，但额外挂载槽里放的是【"
+                    + shanhai$extraActualNames(module) + "】";
+            case NOT_FULL -> "这个配方需要放满 " + ShanhaiHeatGate.REQUIRED_COUNT + " 个【"
+                    + needed + "】才生效，槽里只有 " + shanhai$extraCountOfKind(requirement.kind, outcome) + " 个";
+            case CLEANROOM_TIER -> "这个配方需要【" + needed + "】，但槽里的维护仓档位只有 "
+                    + outcome.have;
+            case HEAT_TEMP -> "这个配方需要 " + requirement.number + "K 炉温，但槽里的线圈只有 "
+                    + outcome.have + "K";
+            case SC_TIER -> "这个配方需要 " + requirement.number + " 级恒星热力容器，但槽里只有 "
+                    + outcome.have + " 级";
+            default -> "额外挂载条件未满足";
+        };
+    }
+
+    private String shanhai$extraActualNames(PrimordialOmegaEngineModuleBase module) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < ShanhaiHeatGate.SLOT_COUNT; i++) {
+            ItemStack stack = module.getExtraMountStack(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (result.length() > 0) {
+                result.append("、");
+            }
+            result.append(stack.getHoverName().getString());
+        }
+        return result.length() == 0 ? "其它物品" : result.toString();
+    }
+
+    private static int shanhai$extraCountOfKind(ShanhaiHeatGate.Kind kind,
+                                                ShanhaiHeatGate.Outcome outcome) {
+        int best = 0;
+        for (ShanhaiHeatGate.SlotContent slot : outcome.slots) {
+            boolean relevant = switch (kind) {
+                case HEAT_TEMP -> slot.coilTemperature > 0;
+                case SC_TIER -> slot.containmentTier > 0;
+                default -> true;
+            };
+            if (relevant) {
+                best = Math.max(best, slot.count);
+            }
+        }
+        return best;
+    }
+
     private void refreshModuleConditionContext() {
         MetaMachine machine = getMachine();
         if (!(machine instanceof PrimordialOmegaEngineModuleBase mod)) {
@@ -555,7 +755,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             }
             moduleConditionFalseCache.remove(recipe);
         }
-        
+
         MetaMachine machine = getMachine();
         String recipeId = recipe.getId() != null ? recipe.getId().toString() : "";
 

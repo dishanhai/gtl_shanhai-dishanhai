@@ -44,11 +44,13 @@ public final class RecipeEditorResultPacket {
     }
 
     public static void handle(RecipeEditorResultPacket packet, Supplier<NetworkEvent.Context> supplier) {
-        supplier.get().enqueueWork(() -> {
-            // Client UI workflows consume this packet through their own state bridge.
-            // Keeping the common packet free of client class references avoids dedicated-server loading.
-        });
-        supplier.get().setPacketHandled(true);
+        NetworkEvent.Context context = supplier.get();
+        if (context.getDirection().getReceptionSide().isClient()) {
+            context.enqueueWork(() ->
+                    com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorWidget
+                            .receiveClientResult(packet));
+        }
+        context.setPacketHandled(true);
     }
 
     public Status status() { return status; }

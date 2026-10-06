@@ -191,6 +191,78 @@ class MEStellarStockPartMachineSourceTest {
         assertFalse(source.contains("aeFluidHandler.clearInventory("));
     }
 
+    @Test
+    void patternPullSwitchDefaultsToEnabledAndPersistsDisabledSlots() throws Exception {
+        String source = readMachine();
+
+        assertTrue(source.contains("@Persisted\n    private int disabledPatternMask;"),
+                "Existing machines must default to all five patterns enabled");
+        assertTrue(source.contains("(disabledPatternMask & (1 << slot)) == 0"));
+        assertTrue(source.contains("disabledPatternMask &= ~(1 << slot)"));
+        assertTrue(source.contains("disabledPatternMask |= 1 << slot"));
+    }
+
+    @Test
+    void disabledPatternIsExcludedBeforeDecodingAndCacheComparison() throws Exception {
+        String source = readMachine();
+
+        assertTrue(source.contains("ItemStack current = isPatternPullEnabled(i)\n"
+                + "                    ? patternInventory.getStackInSlot(i) : ItemStack.EMPTY;"),
+                "Disabled patterns must never reach the decoder or its cached input list");
+        assertTrue(source.indexOf("isPatternPullEnabled(i)")
+                < source.indexOf("samePatterns(currentPatterns, decodedPatterns)"));
+        assertTrue(source.contains("if (!current.isEmpty())"));
+    }
+
+    @Test
+    void switchingPatternPullInvalidatesCacheAndRefreshesServerConfiguration() throws Exception {
+        String source = readMachine();
+        int start = source.indexOf("private void setPatternPullEnabled(");
+        assertTrue(start >= 0, "Missing server-side pattern pull setter");
+        String setter = source.substring(start, source.indexOf("private static List<", start));
+
+        assertTrue(setter.contains("isRemote()"));
+        assertTrue(setter.contains("slot < 0 || slot >= BASE_PATTERN_SLOTS"));
+        assertTrue(setter.contains("isPatternPullEnabled(slot) == enabled"));
+        assertTrue(setter.contains("decodedPatterns = List.of();"));
+        assertTrue(setter.contains("cachedInputs = null;"));
+        assertTrue(setter.contains("patternDirty = true;"));
+        assertTrue(setter.contains("markDirty();"));
+        assertTrue(setter.contains("updatePatternConfiguration();"));
+    }
+
+    @Test
+    void disablingAllPatternsDoesNotEnableParentAutomaticPulling() throws Exception {
+        String source = readMachine();
+        int start = source.indexOf("private boolean hasPattern()");
+        String hasPattern = source.substring(start,
+                source.indexOf("private boolean isPatternPullEnabled(int slot)", start));
+
+        assertTrue(hasPattern.contains("!patternInventory.getStackInSlot(i).isEmpty()"));
+        assertFalse(hasPattern.contains("isPatternPullEnabled"),
+                "Physical patterns must continue guarding the inherited automatic pull mode");
+    }
+
+    @Test
+    void everyPatternSlotHasASyncedVerticalRedGreenSwitchInTheRightGap() throws Exception {
+        String source = readMachine();
+
+        assertTrue(source.contains("final int slot = i;"));
+        assertTrue(source.contains("new SwitchWidget(19, 11 + i * 18, 4, 16,"));
+        assertTrue(source.contains("setPatternPullEnabled(slot, enabled)"));
+        assertTrue(source.contains(".setSupplier(() -> isPatternPullEnabled(slot))"));
+        assertTrue(source.contains(".setPressed(isPatternPullEnabled(slot))"));
+        assertTrue(source.contains("new ColorBorderTexture(-1, 0xFFFF3030)"));
+        assertTrue(source.contains("new ColorBorderTexture(-1, 0xFF20B24B)"));
+    }
+
+    @Test
+    void patternPullSwitchHasBothTranslations() throws Exception {
+        String key = "\"gt_shanhai.machine.me_stellar_stock_part_machine.pattern_pull\"";
+        assertTrue(Files.readString(ZH_LANG).contains(key));
+        assertTrue(Files.readString(EN_LANG).contains(key));
+    }
+
     private static Path source(String fileName) {
         return Path.of("src", "main", "java", "com", "dishanhai",
                 "gt_shanhai", "common", "machine", "part", fileName);

@@ -1232,6 +1232,12 @@ public class DShanhaiRecipeModifierAPI {
         invalidatePatternCaches("modifyRecipeField:" + recipeTypeId);
         DShanhaiRecipeEngine.clearRecipeCache();
         DShanhaiGTRecipeQuery.resetCache();
+        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server != null) {
+            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildVanillaManager(
+                    server, java.util.Set.of(recipeTypeId));
+        }
+        com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeReverseIndex.invalidate();
         com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
     }
 

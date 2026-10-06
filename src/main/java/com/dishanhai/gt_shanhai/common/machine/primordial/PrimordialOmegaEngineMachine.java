@@ -4,16 +4,18 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.ItemStack;
 
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfiguratorButton;
+import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
-import com.gregtechceu.gtceu.api.machine.feature.IMachineLife;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.pattern.MultiblockWorldSavedData;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
+import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
@@ -33,6 +35,9 @@ import com.google.common.primitives.Ints;
 import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
+import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
+import com.lowdragmc.lowdraglib.gui.widget.Widget;
+import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import java.util.ArrayList;
@@ -41,9 +46,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import net.minecraftforge.registries.ForgeRegistries;
+
 public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMachine
-        implements IModularMachineHost<PrimordialOmegaEngineMachine>, IMachineLife,
-                   IOutputMultiplierSource {
+        implements IModularMachineHost<PrimordialOmegaEngineMachine>, IOutputMultiplierSource {
 
     private static final long MAX_PARALLEL = 9223372036854775807L;
 
@@ -83,8 +89,60 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     @DescSynced
     private int sphereStyle = PrimordialSphereStyle.UNIVERSE.ordinal();
 
+    public static final int STAR_PANEL_MIN_MODULE_LEVEL = 15;
+    public static final int STAR_RADIUS_MIN = 13;
+    public static final int STAR_RADIUS_MAX = 43;
+    public static final int STAR_MODE_FOLLOW_LEVEL = 0;
+    public static final int STAR_MODE_MANUAL = 1;
+    public static final int STAR_OVERRIDE_UNSET = -1;
+    public static final int STAR_PALETTE_SPECTRAL = 0;
+    public static final int STAR_PALETTE_RAINBOW = 1;
+    public static final int STAR_RAINBOW_PERIOD_OFF = 0;
+    public static final int[] STAR_RAINBOW_PERIODS = {0, 20, 60, 200, 600, 1800, 6000, 12000};
+
+    @Persisted
+    @DescSynced
+    private int starRenderMode = STAR_MODE_FOLLOW_LEVEL;
+
+    @Persisted
+    @DescSynced
+    private int starPalette = STAR_PALETTE_SPECTRAL;
+
+    @Persisted
+    @DescSynced
+    private int starRainbowPeriodTicks = STAR_RAINBOW_PERIOD_OFF;
+
+    @Persisted
+    @DescSynced
+    private int starRadiusOverride = STAR_OVERRIDE_UNSET;
+
+    @Persisted
+    @DescSynced
+    private int starHueOverride = STAR_OVERRIDE_UNSET;
+
+    @Persisted
+    @DescSynced
+    private boolean starAlwaysWorking;
+
+    @Persisted
+    private final NotifiableItemStackHandler matterBonusSlot;
+
+    @Persisted
+    @DescSynced
+    private int matterBonusLevel;
+
     public PrimordialOmegaEngineMachine(IMachineBlockEntity holder) {
         super(holder, GTRecipeTypes.FURNACE_RECIPES);
+        matterBonusSlot = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.NONE) {
+            @Override
+            public void onContentsChanged() {
+                super.onContentsChanged();
+                if (!isRemote()) {
+                    refreshMatterBonusLevel();
+                }
+            }
+        };
+        matterBonusSlot.setFilter(PrimordialOmegaEngineMachine::isMatterModuleStack);
     }
 
     // ========== 配方逻辑 ==========
@@ -237,6 +295,8 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     @Override
     public void onMachineRemoved() {
         syncRingVisibility(false);
+        super.onMachineRemoved();
+        clearInventory(matterBonusSlot.storage);
     }
 
     private void syncRingVisibility(boolean hide) {
@@ -272,6 +332,9 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         super.onLoad();
         if (getUuid() == null) {
             setUuid(UUID.randomUUID());
+        }
+        if (!isRemote()) {
+            refreshMatterBonusLevel();
         }
     }
 
@@ -385,6 +448,156 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         notifyBlockUpdate();
     }
 
+    public int moduleSlotBonus() {
+        if (!isRemote()) {
+            refreshMatterBonusLevel();
+        }
+        return matterBonusLevel;
+    }
+
+    public boolean canControlStarRender() {
+        return moduleSlotBonus() >= STAR_PANEL_MIN_MODULE_LEVEL;
+    }
+
+    public boolean isStarRenderManual() {
+        return starRenderMode == STAR_MODE_MANUAL;
+    }
+
+    public int getStarRadiusOverride() {
+        return starRadiusOverride;
+    }
+
+    public int getStarHueOverride() {
+        return starHueOverride;
+    }
+
+    public int getStarPalette() {
+        return starPalette;
+    }
+
+    public int getStarRainbowPeriodTicks() {
+        return starRainbowPeriodTicks;
+    }
+
+    public boolean isStarAlwaysWorking() {
+        return starAlwaysWorking;
+    }
+
+    public void setStarAlwaysWorking(boolean value) {
+        if (starAlwaysWorking == value) return;
+        starAlwaysWorking = value;
+        notifyBlockUpdate();
+    }
+
+    public void toggleStarPalette() {
+        if (!canControlStarRender() || isStarRenderManual()) return;
+        starPalette = starPalette == STAR_PALETTE_SPECTRAL
+                ? STAR_PALETTE_RAINBOW : STAR_PALETTE_SPECTRAL;
+        notifyBlockUpdate();
+    }
+
+    public void cycleRainbowPeriod() {
+        if (!canControlStarRender() || isStarRenderManual()
+                || starPalette != STAR_PALETTE_RAINBOW) {
+            return;
+        }
+        int index = 0;
+        for (int i = STAR_RAINBOW_PERIODS.length - 1; i >= 0; i--) {
+            if (STAR_RAINBOW_PERIODS[i] <= starRainbowPeriodTicks) {
+                index = i;
+                break;
+            }
+        }
+        starRainbowPeriodTicks = STAR_RAINBOW_PERIODS[(index + 1) % STAR_RAINBOW_PERIODS.length];
+        notifyBlockUpdate();
+    }
+
+    public void toggleStarRenderMode() {
+        if (!canControlStarRender()) return;
+        if (isStarRenderManual()) {
+            starRenderMode = STAR_MODE_FOLLOW_LEVEL;
+        } else {
+            starRenderMode = STAR_MODE_MANUAL;
+            if (starRadiusOverride < STAR_RADIUS_MIN) {
+                starRadiusOverride = estimateLevelRadius();
+            }
+            if (starHueOverride < 0) {
+                starHueOverride = estimateLevelHue();
+            }
+        }
+        notifyBlockUpdate();
+    }
+
+    public void stepStarRadius(int delta) {
+        if (!canControlStarRender()) return;
+        int base = starRadiusOverride < STAR_RADIUS_MIN ? estimateLevelRadius() : starRadiusOverride;
+        int next = Math.max(STAR_RADIUS_MIN, Math.min(base + delta, STAR_RADIUS_MAX));
+        if (next == starRadiusOverride) return;
+        starRadiusOverride = next;
+        notifyBlockUpdate();
+    }
+
+    public void stepStarHue(int delta) {
+        if (!canControlStarRender()) return;
+        int base = starHueOverride < 0 ? estimateLevelHue() : starHueOverride;
+        int next = Math.floorMod(base + delta, 360);
+        if (next == starHueOverride) return;
+        starHueOverride = next;
+        notifyBlockUpdate();
+    }
+
+    private int estimateLevelRadius() {
+        int level = Math.max(0, Math.min(moduleSlotBonus(), 17));
+        return Math.max(STAR_RADIUS_MIN,
+                Math.min(STAR_RADIUS_MAX,
+                        Math.round(13.0F + (35.1F - 13.0F) * level / 17.0F)));
+    }
+
+    private int estimateLevelHue() {
+        int level = Math.max(0, Math.min(moduleSlotBonus(), 17));
+        return Math.round(300.0F * level / 17.0F);
+    }
+
+    private static boolean isMatterModuleStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return true;
+        var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return key != null
+                && PrimordialOmegaEngineModuleBase.getModuleLevelById(key.toString()) > 0;
+    }
+
+    private int computeMatterBonusLevel() {
+        ItemStack stack = matterBonusSlot.storage.getStackInSlot(0);
+        if (stack.getCount() != 64) return 0;
+        var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return key == null ? 0
+                : PrimordialOmegaEngineModuleBase.getModuleLevelById(key.toString());
+    }
+
+    private void refreshMatterBonusLevel() {
+        int next = computeMatterBonusLevel();
+        if (next == matterBonusLevel) return;
+        matterBonusLevel = next;
+        notifyBlockUpdate();
+    }
+
+    @Override
+    public Widget createUIWidget() {
+        Widget widget = super.createUIWidget();
+        if (widget instanceof WidgetGroup group) {
+            var size = group.getSize();
+            SlotWidget bonusSlot = new SlotWidget(
+                    matterBonusSlot.storage, 0, size.width - 30, size.height - 68, true, true);
+            bonusSlot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
+            bonusSlot.setHoverTooltips(
+                    Component.literal("§d§l物质模块专属槽"),
+                    Component.literal("§7只收山海物质模块"),
+                    Component.literal("§7必须放满 §b64§7 个同种模块才生效"),
+                    Component.literal("§7生效后：中子星半径与颜色随等级变化"));
+            group.addWidget(bonusSlot);
+        }
+        return widget;
+    }
+
     @Override
     protected void attachCleanConfigurators(ConfiguratorPanel panel) {
         super.attachCleanConfigurators(panel);
@@ -396,6 +609,25 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
                         ? PrimordialSphereStyle.NEUTRON_STAR
                         : PrimordialSphereStyle.UNIVERSE))
                 .setTooltipsSupplier(PrimordialOmegaEngineMachine::sphereStyleTooltips));
+        panel.attachConfigurators(new StarRenderConfigurator(this));
+        panel.attachConfigurators(new IFancyConfiguratorButton.Toggle(
+                GuiTextures.BUTTON_WORKING_ENABLE.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D)
+                        .setColor(0xFF5A5A5A),
+                GuiTextures.BUTTON_WORKING_ENABLE.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D),
+                this::isStarAlwaysWorking,
+                (clickData, pressed) -> setStarAlwaysWorking(Boolean.TRUE.equals(pressed)))
+                .setTooltipsSupplier(PrimordialOmegaEngineMachine::starAlwaysWorkingTooltips));
+    }
+
+    private static List<Component> starAlwaysWorkingTooltips(boolean pressed) {
+        List<Component> tooltips = new ArrayList<>(3);
+        tooltips.add(Component.literal("始终渲染为工作状态：")
+                .withStyle(ChatFormatting.YELLOW)
+                .append(Component.literal(pressed ? "开" : "关（默认）")
+                        .withStyle(pressed ? ChatFormatting.AQUA : ChatFormatting.DARK_GRAY)));
+        tooltips.add(Component.literal("打开后：中子星光束常亮、轨道环常转").withStyle(ChatFormatting.GRAY));
+        tooltips.add(Component.literal("这是机器状态，所有人都会看到并随存档保存").withStyle(ChatFormatting.GOLD));
+        return tooltips;
     }
 
     /**

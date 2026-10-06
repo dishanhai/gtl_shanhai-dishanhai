@@ -83,6 +83,7 @@ public final class RecipeRebuildService {
                             com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeTable
                                     .replaceType(server, recipeTypeId, rebuilt);
                         }
+                        com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeReverseIndex.invalidate();
                         DShanhaiRecipeModifierAPI.invalidateRecipeCaches(
                                 "recipe-rebuild:" + reason.name().toLowerCase(),
                                 Set.of(recipeTypeId));
@@ -91,6 +92,7 @@ public final class RecipeRebuildService {
                     }
                 });
 
+        com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
         return new RebuildReport(
                 recipeTypeId,
                 originals.size(),

@@ -23,9 +23,13 @@ class RecipeEditorPacketCodecTest {
     void editorPacketsCarryFingerprintAndStatus() throws Exception {
         String commit = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/network/RecipeEditorCommitPacket.java"));
+        String detail = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/network/RecipeEditorDetailPacket.java"));
         String result = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/network/RecipeEditorResultPacket.java"));
         assertTrue(commit.contains("baseFingerprint"));
+        assertTrue(detail.contains("recipeTypeId"));
+        assertTrue(detail.contains("\"detail\""));
         assertTrue(result.contains("Status"));
         assertTrue(result.contains("revision"));
     }

@@ -44,6 +44,7 @@ import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
@@ -300,6 +301,8 @@ public class DShanhaiCommands {
                                                                 StringArgumentType.getString(ctx, "oldItem"), true,
                                                                 StringArgumentType.getString(ctx, "newItem"), false, null)))))));
         var cn配方 = Commands.literal("配方")
+                .then(Commands.literal("修改器")
+                        .executes(ctx -> openRecipeModifier(ctx.getSource())))
                 .then(Commands.literal("列表").executes(ctx -> listRecipes(ctx.getSource())))
                 .then(Commands.literal("删除")
                         .then(recipeTypeArg("type")
@@ -469,6 +472,19 @@ public class DShanhaiCommands {
         registerLegacyRecipeAliases(event);
         // 商店对所有玩家开放（不加权限门槛）
         event.getDispatcher().register(shopCommand("商店"));
+    }
+
+    private static int openRecipeModifier(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("[山海] 只有玩家可以打开配方修改器"));
+            return 0;
+        }
+        if (!ShanhaiRecipeEditorFactory.open(null, player)) {
+            source.sendFailure(Component.literal("[山海] 配方修改器 UI 当前不可用"));
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("[山海] 已打开配方修改器"), false);
+        return 1;
     }
 
     /** 舊腳本使用的無空格命令名稱（/配方修改、/配方信息……）。 */

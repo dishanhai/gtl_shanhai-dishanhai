@@ -33,9 +33,12 @@ class EnhancedCorePatternBufferCompatSourceTest {
         assertTrue(compat.contains("gtladditions:me_super_pattern_buffer"));
         assertTrue(compat.contains("gt_shanhai:recipe_type_pattern_buffer"));
         assertTrue(compat.contains("gt_shanhai:recipe_type_pattern_buffer_proxy"));
+        assertTrue(compat.contains("gtlcore:multi_functional_casing"));
         assertTrue(compat.contains("ForgeRegistries.BLOCKS.getValue"));
         assertTrue(compat.contains("Predicates.blocks(Arrays.copyOf(blocks, blockCount))"));
         assertTrue(!compat.contains("result.or(candidate)"));
+        assertTrue(compat.indexOf("gtlcore:multi_functional_casing\"")
+                < compat.indexOf("gt_shanhai:recipe_type_pattern_buffer\""));
         assertTrue(compat.indexOf("gt_shanhai:recipe_type_pattern_buffer\"")
                 < compat.indexOf("gt_shanhai:recipe_type_pattern_buffer_proxy\""));
         assertTrue(mixin.contains("@Pseudo"));

@@ -512,6 +512,24 @@ public class ShanhaiNetwork {
                 RecipeEditorResultPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        // 中子星渲染控制追加注册，保持既有消息 ID 不移动。
+        CHANNEL.registerMessage(
+                packetId++,
+                PrimordialStarRenderActionPacket.class,
+                PrimordialStarRenderActionPacket::encode,
+                PrimordialStarRenderActionPacket::new,
+                PrimordialStarRenderActionPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        // 配方编辑器详情追加注册，保持既有消息 ID 不移动。
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorDetailPacket.class,
+                RecipeEditorDetailPacket::encode,
+                RecipeEditorDetailPacket::new,
+                RecipeEditorDetailPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         RecipeSyncPacket.init();
     }
 

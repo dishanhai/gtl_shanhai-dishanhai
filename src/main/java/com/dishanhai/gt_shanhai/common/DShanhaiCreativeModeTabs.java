@@ -45,6 +45,7 @@ public class DShanhaiCreativeModeTabs {
                             output.accept(new ItemStack(GTDishanhaiMod.GRAVITON_SHARD.get()));
                             output.accept(new ItemStack(GTDishanhaiMod.VIRTUAL_ITEM_PROVIDER.get()));
                             output.accept(new ItemStack(GTDishanhaiMod.GUIDE_BOOK.get()));
+                            output.accept(new ItemStack(GTDishanhaiMod.RECIPE_MODIFIER_DEV.get()));
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_COMPUTER_ITEM.get()));
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_COMPUTER_UNIT_ITEM.get()));
                             output.accept(new ItemStack(DShanhaiAE2Blocks.QUANTUM_PARALLEL_PROCESSOR_ITEM.get()));

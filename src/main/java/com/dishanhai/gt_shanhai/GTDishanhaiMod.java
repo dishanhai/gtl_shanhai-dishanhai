@@ -25,6 +25,7 @@ import com.dishanhai.gt_shanhai.common.item.GuideBookItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayCellHandler;
 import com.dishanhai.gt_shanhai.common.item.VirtualItemProviderItem;
+import com.dishanhai.gt_shanhai.common.item.RecipeModifierDevItem;
 
 import net.minecraft.world.item.Item;
 
@@ -105,6 +106,13 @@ public class GTDishanhaiMod {
             .stacksTo(1)
             .rarity(Rarity.UNCOMMON)));
 
+    /** 配方修改器专属开发者工具，不提供配方，只作为命令入口的物品化快捷入口。 */
+    public static final RegistryObject<Item> RECIPE_MODIFIER_DEV = ITEMS.register(
+        "_recipe_modifier_dev",
+        () -> new RecipeModifierDevItem(new Item.Properties()
+            .stacksTo(1)
+            .rarity(Rarity.EPIC)));
+
     /** 获取模组版本号，供 KubeJS 调用 */
     public static String getVersion() {
         return net.minecraftforge.fml.ModList.get().getModContainerById(MOD_ID)
@@ -152,6 +160,7 @@ public class GTDishanhaiMod {
 
         // 网络通道初始化
         com.dishanhai.gt_shanhai.network.ShanhaiNetwork.init();
+        com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory.register();
         LOGGER.info("ShanhaiNetwork.init() 完成");
 
         // 自定义磁盘槽掉落保护（服务端/单机均需注册）

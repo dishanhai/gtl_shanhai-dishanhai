@@ -91,6 +91,13 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("false=模块必须有主机才能运行",
                         "true=模块脱离主机后可独立运行配方"))
                 .setSaveConsumer(cfg.modulesWorkWithoutHost::set).build());
+        machine.addEntry(e.startBooleanToggle(Component.literal("原初模块旧式无限制模式"),
+                        cfg.primordialModuleUnrestrictedMode.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("默认关闭：检查超净间、重力、维度、线圈温度和恒星热力容器等级",
+                        "研究/数据访问条件不作为原初模块的额外挂载限制",
+                        "开启后恢复旧行为：除重力外不检查上述额外挂载限制"))
+                .setSaveConsumer(cfg.primordialModuleUnrestrictedMode::set).build());
         machine.addEntry(e.startBooleanToggle(Component.literal("递归反演阵列破除子模块限制"), cfg.recursiveReverseArrayBypassModuleRestrictions.get())
                 .setDefaultValue(false)
                 .setTooltip(tip("false=保持原逻辑：催化剂/聚焦材料/温度/运行状态全部正常检查",

@@ -46,7 +46,8 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
 
     @Override
     protected float getSmoothTick(MetaMachine machine, float partialTick) {
-        if (machine instanceof PrimordialOmegaEngineMachine poe && poe.getRecipeLogic().isWorking()) {
+        if (machine instanceof PrimordialOmegaEngineMachine poe
+                && (poe.getRecipeLogic().isWorking() || poe.isStarAlwaysWorking())) {
             return RenderUtil.getSmoothTick(poe, partialTick);
         }
         return 0f;
@@ -60,10 +61,54 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
         if (sphereStyleOf(machine) == PrimordialSphereStyle.NEUTRON_STAR) {
             // 中子星常驻可见，必须用连续时钟：smoothTick 停机归零会让三层球壳的累积角度瞬间弹回基准。
             PrimordialNeutronStarSphereRenderer.enqueue(
-                    blockEntity, facing, RenderUtil.getSmoothTick(machine, partialTick), isWorking);
+                    blockEntity, facing, RenderUtil.getSmoothTick(machine, partialTick), isWorking,
+                    moduleSlotBonusOf(machine),
+                    starRadiusOverrideOf(machine),
+                    starHueOverrideOf(machine),
+                    rainbowPaletteOf(machine),
+                    rainbowPeriodOf(machine));
         } else {
             PrimordialUniverseSphereRenderer.render(smoothTick, facing, poseStack);
         }
+    }
+
+    private static int moduleSlotBonusOf(MetaMachine machine) {
+        return machine instanceof PrimordialOmegaEngineMachine poe ? poe.moduleSlotBonus() : 0;
+    }
+
+    private static int starRadiusOverrideOf(MetaMachine machine) {
+        if (!(machine instanceof PrimordialOmegaEngineMachine poe)) {
+            return PrimordialOmegaEngineMachine.STAR_OVERRIDE_UNSET;
+        }
+        return poe.canControlStarRender() && poe.isStarRenderManual()
+                ? poe.getStarRadiusOverride()
+                : PrimordialOmegaEngineMachine.STAR_OVERRIDE_UNSET;
+    }
+
+    private static int starHueOverrideOf(MetaMachine machine) {
+        if (!(machine instanceof PrimordialOmegaEngineMachine poe)) {
+            return PrimordialOmegaEngineMachine.STAR_OVERRIDE_UNSET;
+        }
+        return poe.canControlStarRender() && poe.isStarRenderManual()
+                ? poe.getStarHueOverride()
+                : PrimordialOmegaEngineMachine.STAR_OVERRIDE_UNSET;
+    }
+
+    private static boolean rainbowPaletteOf(MetaMachine machine) {
+        if (!(machine instanceof PrimordialOmegaEngineMachine poe)) {
+            return false;
+        }
+        return poe.canControlStarRender()
+                && !poe.isStarRenderManual()
+                && poe.getStarPalette() == PrimordialOmegaEngineMachine.STAR_PALETTE_RAINBOW;
+    }
+
+    private static int rainbowPeriodOf(MetaMachine machine) {
+        if (!(machine instanceof PrimordialOmegaEngineMachine poe)) {
+            return PrimordialOmegaEngineMachine.STAR_RAINBOW_PERIOD_OFF;
+        }
+        return rainbowPaletteOf(machine) ? poe.getStarRainbowPeriodTicks()
+                : PrimordialOmegaEngineMachine.STAR_RAINBOW_PERIOD_OFF;
     }
 
     private static PrimordialSphereStyle sphereStyleOf(MetaMachine machine) {

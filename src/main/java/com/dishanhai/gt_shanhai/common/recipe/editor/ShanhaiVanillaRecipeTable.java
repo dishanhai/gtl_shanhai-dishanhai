@@ -62,6 +62,7 @@ public final class ShanhaiVanillaRecipeTable {
         try {
             maps.recipesField().set(server.getRecipeManager(), ImmutableMap.copyOf(byType));
             maps.byNameField().set(server.getRecipeManager(), ImmutableMap.copyOf(byName));
+            ShanhaiRecipeTableHook.invalidateCaches(server);
         } catch (IllegalAccessException e) {
             throw new IllegalStateException("unable to replace RecipeManager recipe tables", e);
         }

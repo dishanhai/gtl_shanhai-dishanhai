@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai;
 
 import com.dishanhai.gt_shanhai.api.ModuleLevelCondition;
 import com.dishanhai.gt_shanhai.api.RecipeNoteCondition;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
 import com.gregtechceu.gtceu.api.addon.GTAddon;
 import com.gregtechceu.gtceu.api.addon.IGTAddon;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
@@ -15,6 +16,7 @@ import com.dishanhai.gt_shanhai.common.recipe.DShanhaiJavaRecipeLibrary;
 import net.minecraft.data.recipes.FinishedRecipe;
 
 import java.util.function.Consumer;
+import java.util.List;
 
 @GTAddon
 public class GTDishanhaiGTAddon implements IGTAddon {
@@ -45,6 +47,17 @@ public class GTDishanhaiGTAddon implements IGTAddon {
         GTRegistries.MACHINES.unfreeze();
         DShanhaiMachines.init();
         GTRegistries.MACHINES.freeze();
+
+        List<String> heatMachineIds = List.of(
+                DShanhaiMachines.TAIXU_SMELTING_FURNACE.getId().toString(),
+                DShanhaiMachines.PRIMORDIAL_ETERNAL_SMELTING_FURNACE.getId().toString(),
+                DShanhaiMachines.PRIMORDIAL_MOLECULAR_RIFT_CORE.getId().toString());
+        String heatMachineProblem = ShanhaiHeatGate.verifyMachineIds(heatMachineIds);
+        if (heatMachineProblem != null) {
+            throw new IllegalStateException("[gt_shanhai] " + heatMachineProblem
+                    + "；额外挂载热力判定拒绝继续加载");
+        }
+        GTDishanhaiMod.LOGGER.info("额外挂载热力白名单自检通过：{}", heatMachineIds);
     }
 
     @Override

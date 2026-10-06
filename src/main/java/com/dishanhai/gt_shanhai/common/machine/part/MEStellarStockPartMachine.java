@@ -14,8 +14,10 @@ import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAESlot;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemList;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidList;
+import com.lowdragmc.lowdraglib.gui.texture.ColorBorderTexture;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
+import com.lowdragmc.lowdraglib.gui.widget.SwitchWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.misc.ItemStackTransfer;
@@ -25,6 +27,7 @@ import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 import com.lowdragmc.lowdraglib.utils.Position;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
 import org.gtlcore.gtlcore.api.machine.trait.MEStock.IMESlot;
@@ -60,6 +63,9 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
     private CompoundTag manualStockConfiguration = new CompoundTag();
     @Persisted
     private CompoundTag automaticStockConfiguration = new CompoundTag();
+    @DescSynced
+    @Persisted
+    private int disabledPatternMask;
     @DescSynced
     private String patternStatus = STATUS_PREFIX + "empty";
 
@@ -146,7 +152,8 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
 
         List<ItemStack> currentPatterns = new ArrayList<>();
         for (int i = 0; i < patternInventory.getSlots(); i++) {
-            ItemStack current = patternInventory.getStackInSlot(i);
+            ItemStack current = isPatternPullEnabled(i)
+                    ? patternInventory.getStackInSlot(i) : ItemStack.EMPTY;
             currentPatterns.add(current.copy());
         }
         if (!samePatterns(currentPatterns, decodedPatterns)) {
@@ -201,6 +208,28 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
             }
         }
         return false;
+    }
+
+    private boolean isPatternPullEnabled(int slot) {
+        return slot >= 0 && slot < BASE_PATTERN_SLOTS
+                && (disabledPatternMask & (1 << slot)) == 0;
+    }
+
+    private void setPatternPullEnabled(int slot, boolean enabled) {
+        if (isRemote() || slot < 0 || slot >= BASE_PATTERN_SLOTS
+                || isPatternPullEnabled(slot) == enabled) {
+            return;
+        }
+        if (enabled) {
+            disabledPatternMask &= ~(1 << slot);
+        } else {
+            disabledPatternMask |= 1 << slot;
+        }
+        decodedPatterns = List.of();
+        cachedInputs = null;
+        patternDirty = true;
+        markDirty();
+        updatePatternConfiguration();
     }
 
     private static List<MEStellarStockTargetPlanner.Input<AEKey>> readInputs(List<IPatternDetails> details) {
@@ -601,6 +630,14 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
         for (int i = 0; i < BASE_PATTERN_SLOTS; i++) {
             group.addWidget(new SlotWidget(patternInventory, i, 0, 10 + i * 18)
                     .setBackground(GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY));
+            final int slot = i;
+            group.addWidget(new SwitchWidget(19, 11 + i * 18, 4, 16,
+                    (click, enabled) -> setPatternPullEnabled(slot, enabled))
+                    .setTexture(new ColorBorderTexture(-1, 0xFFFF3030),
+                            new ColorBorderTexture(-1, 0xFF20B24B))
+                    .setPressed(isPatternPullEnabled(slot))
+                    .setSupplier(() -> isPatternPullEnabled(slot))
+                    .setHoverTooltips(Component.translatable("gt_shanhai.machine.me_stellar_stock_part_machine.pattern_pull")));
         }
         group.addWidget(new LabelWidget(0, height + 3, () -> patternStatus));
         return group;

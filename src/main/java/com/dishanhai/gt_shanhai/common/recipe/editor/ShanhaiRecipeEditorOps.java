@@ -1,6 +1,11 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
 import com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService;
+import com.dishanhai.gt_shanhai.common.recipe.RecipeOriginalSnapshotStore;
+import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.Objects;
@@ -69,6 +74,76 @@ public final class ShanhaiRecipeEditorOps {
         }
     }
 
+    public Result setIo(
+            MinecraftServer server,
+            GTRecipe target,
+            JsonObject inputs,
+            JsonObject outputs,
+            JsonObject tickInputs,
+            boolean rebuildIndex,
+            boolean persist) {
+        if (target == null) return invalidResult();
+        ShanhaiRecipeBase source = ShanhaiRecipeBase.from(target);
+        ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
+                source.recipeTypeId(), source.recipeId(), source.duration(), source.eut(),
+                inputs == null ? source.inputs() : inputs,
+                outputs == null ? source.outputs() : outputs,
+                tickInputs == null ? source.tickInputs() : tickInputs,
+                source.conditions());
+        return applyBaseEdit(new Edit(edited, ShanhaiRecipeFingerprint.of(source)), server, rebuildIndex, persist);
+    }
+
+    public Result applyEdits(
+            MinecraftServer server,
+            GTRecipe target,
+            JsonObject inputs,
+            JsonObject outputs,
+            JsonObject tickInputs,
+            Integer duration,
+            Long eut,
+            JsonArray conditions,
+            boolean rebuildIndex,
+            boolean persist) {
+        if (target == null) return invalidResult();
+        ShanhaiRecipeBase source = ShanhaiRecipeBase.from(target);
+        ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
+                source.recipeTypeId(), source.recipeId(),
+                duration == null ? source.duration() : duration,
+                eut == null ? source.eut() : eut,
+                inputs == null ? source.inputs() : inputs,
+                outputs == null ? source.outputs() : outputs,
+                tickInputs == null ? source.tickInputs() : tickInputs,
+                conditions == null ? source.conditions() : conditions);
+        return applyBaseEdit(new Edit(edited, ShanhaiRecipeFingerprint.of(source)), server, rebuildIndex, persist);
+    }
+
+    public Result removeRecipe(MinecraftServer server, GTRecipe target, boolean persist) {
+        if (target == null || target.getId() == null) return invalidResult();
+        boolean removed = DShanhaiRecipeModifierAPI.setRecipeEnabled(target.getId().toString(), false);
+        if (!removed) {
+            return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-found", REVISION.get());
+        }
+        if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
+            RecipeRebuildService.rebuildType(
+                    target.recipeType.registryName.toString(),
+                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+        }
+        return new Result(Result.Status.SUCCESS, persist ? "recipe-removed-and-persisted" : "recipe-removed",
+                REVISION.incrementAndGet());
+    }
+
+    public Result restore(MinecraftServer server, GTRecipe target) {
+        if (target == null || target.getId() == null) return invalidResult();
+        boolean restored = DShanhaiRecipeModifierAPI.setRecipeEnabled(target.getId().toString(), true);
+        if (!restored) return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-disabled", REVISION.get());
+        if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
+            RecipeRebuildService.rebuildType(
+                    target.recipeType.registryName.toString(),
+                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+        }
+        return new Result(Result.Status.SUCCESS, "recipe-restored", REVISION.incrementAndGet());
+    }
+
     public Result rollback(String recipeId) {
         try {
             store.remove(recipeId);
@@ -81,11 +156,15 @@ public final class ShanhaiRecipeEditorOps {
     public Result rollback(String recipeId, MinecraftServer server) {
         Optional<ShanhaiRecipeOverrideStore.Entry> existing = store.find(recipeId);
         Result removed = rollback(recipeId);
-        if (removed.status() != Result.Status.SUCCESS || server == null || existing.isEmpty()) {
+        if (removed.status() != Result.Status.SUCCESS || server == null) {
             return removed;
         }
-        String typeId = existing.get().payload().has("recipeTypeId")
-                ? existing.get().payload().get("recipeTypeId").getAsString() : "";
+        String typeId = existing.flatMap(entry -> {
+            if (entry.payload().has("recipeTypeId")) {
+                return Optional.ofNullable(entry.payload().get("recipeTypeId").getAsString());
+            }
+            return Optional.empty();
+        }).orElseGet(() -> typeIdFor(recipeId));
         if (typeId.isEmpty()) return removed;
         try {
             RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
@@ -98,8 +177,26 @@ public final class ShanhaiRecipeEditorOps {
         }
     }
 
+    /**
+     * Explicit restore entry point used by the holo editor. Unlike the old
+     * rollback path it also rebuilds when the override file is already absent;
+     * this is required after a delete/restore cycle where the live lookup no
+     * longer contains the recipe.
+     */
+    public Result restore(String recipeId, MinecraftServer server) {
+        return rollback(recipeId, server);
+    }
+
     public Result undo(String recipeId) {
         return rollback(recipeId);
+    }
+
+    private static String typeIdFor(String recipeId) {
+        if (recipeId == null || recipeId.isEmpty()) return "";
+        for (String typeId : RecipeOriginalSnapshotStore.typeIds()) {
+            if (RecipeOriginalSnapshotStore.copyOf(typeId, recipeId) != null) return typeId;
+        }
+        return "";
     }
 
     private static boolean valid(Edit edit) {
@@ -109,5 +206,27 @@ public final class ShanhaiRecipeEditorOps {
                 && !edit.base().recipeId().isEmpty()
                 && edit.baseFingerprint() != null
                 && !edit.baseFingerprint().isEmpty();
+    }
+
+    private Result applyBaseEdit(Edit edit, MinecraftServer server, boolean rebuildIndex, boolean persist) {
+        if (!valid(edit)) return invalidResult();
+        Result result = commit(edit);
+        if (result.status() != Result.Status.SUCCESS || server == null || !rebuildIndex) return result;
+        try {
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
+                    edit.base().recipeTypeId(),
+                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            RecipeRebuildService.rebuildVanillaManager(server, java.util.Set.of(edit.base().recipeTypeId()));
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+            return new Result(Result.Status.SUCCESS,
+                    persist ? "override-written-and-rebuilt" : "override-written-and-rebuilt-session",
+                    report.revision());
+        } catch (Throwable ignored) {
+            return new Result(Result.Status.REBUILD_FAILED, "override-written-rebuild-failed", REVISION.get());
+        }
+    }
+
+    private static Result invalidResult() {
+        return new Result(Result.Status.VALIDATION_ERROR, "invalid-edit", REVISION.get());
     }
 }

@@ -71,6 +71,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue nineIndustrialShuffle;
         /** 模块机器 — 是否允许脱离主机独立运行 */
         public ForgeConfigSpec.BooleanValue modulesWorkWithoutHost;
+        /** 原初模块 — 是否启用旧式无限制模式（正常模式不限制研究/数据访问） */
+        public ForgeConfigSpec.BooleanValue primordialModuleUnrestrictedMode;
         /** 递归反演阵列 — 是否破除已连接子模块内部运行限制 */
         public ForgeConfigSpec.BooleanValue recursiveReverseArrayBypassModuleRestrictions;
         /** ME 磁盘仓室 — 槽位数 */
@@ -220,6 +222,12 @@ public final class DShanhaiConfig {
                              "NEUTRON_STAR = 强制全部渲染成中子星，忽略机器上的设定",
                              "本项不改写机器的持久化状态，切回 FOLLOW_MACHINE 即恢复各机器原设定")
                     .defineEnum("sphereStyle", SphereStyleOverride.FOLLOW_MACHINE);
+            primordialModuleUnrestrictedMode = builder
+                    .comment("原初模块是否启用旧式无限制模式（默认关闭）",
+                            "false = 正常读取超净间、重力、维度、线圈温度和恒星热力容器等级限制",
+                            "      研究/数据访问条件不作为原初模块的额外挂载限制",
+                            "true = 兼容旧行为：除重力条件外，不检查超净间、维度、线圈温度和恒星热力容器等级")
+                    .define("unrestrictedMode", false);
             builder.pop();
 
             builder.push("virtual_item_provider");

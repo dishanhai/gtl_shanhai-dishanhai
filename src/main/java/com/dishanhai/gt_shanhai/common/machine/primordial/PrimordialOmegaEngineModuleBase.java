@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.common.machine.primordial;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
@@ -11,6 +12,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.output.IOutputMultiplierSource;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatSources;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
@@ -36,9 +39,11 @@ import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import net.minecraft.world.item.Items;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -66,6 +71,8 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     private long cachedThreadBoost;
     private long cachedExtraMountTick = Long.MIN_VALUE;
     private int cachedExtraMountMask;
+    private ItemStack[] cachedExtraMountStacks;
+    private List<ShanhaiHeatGate.SlotContent> cachedExtraMountContents = List.of();
     private long cachedCanWorkTick = Long.MIN_VALUE;
     private boolean cachedCanWork;
     private Item cachedModuleItem = Items.AIR;
@@ -590,6 +597,73 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         return cachedExtraMountMask;
     }
 
+    /** 额外挂载槽第 {@code index} 格的当前堆叠。 */
+    public ItemStack getExtraMountStack(int index) {
+        return extraMountSlots.storage.getStackInSlot(index);
+    }
+
+    /** 额外挂载槽第 {@code index} 格的当前数量。 */
+    public int getExtraMountCount(int index) {
+        return getExtraMountStack(index).getCount();
+    }
+
+    /**
+     * 读取三格的能力快照。缓存同时比较物品、NBT 与数量，避免 63/64 的热力门槛读到旧值。
+     */
+    public List<ShanhaiHeatGate.SlotContent> getExtraMountContents() {
+        boolean cacheHit = cachedExtraMountStacks != null
+                && cachedExtraMountStacks.length == ShanhaiHeatGate.SLOT_COUNT;
+        if (cacheHit) {
+            for (int i = 0; i < ShanhaiHeatGate.SLOT_COUNT; i++) {
+                ItemStack current = getExtraMountStack(i);
+                ItemStack cached = cachedExtraMountStacks[i];
+                if (!ItemStack.isSameItemSameTags(current, cached)
+                        || current.getCount() != cached.getCount()) {
+                    cacheHit = false;
+                    break;
+                }
+            }
+        }
+        if (cacheHit) {
+            return cachedExtraMountContents;
+        }
+
+        List<ShanhaiHeatGate.SlotContent> computed = new ArrayList<>(ShanhaiHeatGate.SLOT_COUNT);
+        ItemStack[] snapshot = new ItemStack[ShanhaiHeatGate.SLOT_COUNT];
+        for (int i = 0; i < ShanhaiHeatGate.SLOT_COUNT; i++) {
+            ItemStack current = getExtraMountStack(i);
+            snapshot[i] = current.copy();
+            computed.add(ShanhaiHeatSources.slotContentOf(current));
+        }
+        cachedExtraMountStacks = snapshot;
+        cachedExtraMountContents = List.copyOf(computed);
+        return cachedExtraMountContents;
+    }
+
+    /** 三格内容的可读诊断。 */
+    public String describeExtraMounts() {
+        StringBuilder result = new StringBuilder();
+        List<ShanhaiHeatGate.SlotContent> contents = getExtraMountContents();
+        for (int i = 0; i < contents.size(); i++) {
+            if (i > 0) {
+                result.append(" / ");
+            }
+            result.append('[').append(i + 1).append(']').append(contents.get(i).describe());
+        }
+        return result.toString();
+    }
+
+    /** 当前模块方块的注册 ID，用于额外挂载热力白名单。 */
+    public String getMachineId() {
+        ResourceLocation key = ForgeRegistries.BLOCKS.getKey(getBlockState().getBlock());
+        return key == null ? null : key.toString();
+    }
+
+    /** 只有指定的三台机器可把额外挂载槽当作热力源。 */
+    public boolean canUseExtraMountAsHeatSource() {
+        return ShanhaiHeatGate.hasHeatSlot(getMachineId());
+    }
+
     /** 原初模块额外挂载提供的配方 EU 系数。 */
     public double getExtraMountEuMultiplier() {
         return hasDarkEnergyMultiplierMounted() ? 0.5D : 1.0D;
@@ -750,7 +824,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             var group = new WidgetGroup(0, 0, 126, 78);
             group.setBackground(GuiTextures.BACKGROUND_INVERSE);
             group.addWidget(new LabelWidget(8, 8, () -> "额外挂载槽"));
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < ShanhaiHeatGate.SLOT_COUNT; i++) {
                 var slot = new SlotWidget(
                         extraMountSlots.storage,
                         i,
@@ -759,17 +833,37 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                         true,
                         true);
                 slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
-                slot.setHoverTooltips(
-                        Component.literal("§b§l额外挂载槽 " + (i + 1)),
-                        Component.literal("§7用于原初模块额外挂载物品"),
-                        Component.literal("§7暗能量倍增器: §b配方 EU 消耗 -50%"),
-                        Component.literal("§7湮灭核心: §c配方耗时 -90%, 产物湮灭风险 1%"),
-                        Component.literal("§7超稳态黑洞种子: §d输出端可写时吞噬溢出产物"));
+                slot.setHoverTooltips(shanhai$extraMountTooltips(i));
                 group.addWidget(slot);
             }
             group.addWidget(new LabelWidget(8, 58, () -> "暗能量 / 湮灭 / 黑洞种子"));
             return group;
         }
+    }
+
+    private Component[] shanhai$extraMountTooltips(int index) {
+        ItemStack stack = getExtraMountStack(index);
+        ShanhaiHeatGate.SlotContent content = ShanhaiHeatSources.slotContentOf(stack);
+        String state;
+        if (stack.isEmpty()) {
+            state = "§8状态：空槽";
+        } else if (content.isBlank()) {
+            state = "§8状态：§f" + stack.getHoverName().getString() + "§8 不是有效挂载物";
+        } else {
+            state = "§a状态：§f" + stack.getHoverName().getString()
+                    + "§a × " + stack.getCount() + " ⇒ " + content.describe();
+        }
+        return new Component[] {
+                Component.literal("§b§l额外挂载槽 " + (index + 1)),
+                Component.literal("§7三格独立满足配方额外要求"),
+                Component.literal("§7维护仓：超净间 / 重力，放 1 个即可"),
+                Component.literal("§7世界碎片：对应维度，放 1 个即可"),
+                Component.literal("§7研究/数据访问不参与正常限制"),
+                Component.literal("§7旧式无限制模式：gt_shanhai-common.toml → primordial_omega_engine"),
+                Component.literal("§7线圈 / 恒星热力容器：必须放满 " + ShanhaiHeatGate.REQUIRED_COUNT + " 个"),
+                Component.literal("§7暗能量倍增器 / 湮灭核心 / 黑洞种子仍保留原有效果"),
+                Component.literal(state)
+        };
     }
 
     protected void configureParallelModuleSlot(SlotWidget slot) {
