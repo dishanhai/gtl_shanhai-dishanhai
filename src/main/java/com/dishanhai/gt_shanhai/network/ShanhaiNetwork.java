@@ -488,6 +488,30 @@ public class ShanhaiNetwork {
                 CurrencyQuickSellPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorQueryPacket.class,
+                RecipeEditorQueryPacket::encode,
+                RecipeEditorQueryPacket::new,
+                RecipeEditorQueryPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorCommitPacket.class,
+                RecipeEditorCommitPacket::encode,
+                RecipeEditorCommitPacket::new,
+                RecipeEditorCommitPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorResultPacket.class,
+                RecipeEditorResultPacket::encode,
+                RecipeEditorResultPacket::new,
+                RecipeEditorResultPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 

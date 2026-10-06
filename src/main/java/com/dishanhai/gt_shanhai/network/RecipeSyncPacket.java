@@ -1,13 +1,13 @@
 package com.dishanhai.gt_shanhai.network;
 
-import com.dishanhai.gt_shanhai.client.ShanhaiJEIPlugin;
-import com.dishanhai.gt_shanhai.api.JEIRecipeCache;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.dishanhai.gt_shanhai.api.JEIRecipeCache;
+import com.dishanhai.gt_shanhai.client.ShanhaiJEIPlugin;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeTypeCategory;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
-
+import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
@@ -16,7 +16,6 @@ import net.minecraftforge.network.NetworkDirection;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.simple.SimpleChannel;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,14 +26,22 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * 配方同步包——配方修改后通知客户端刷新 JEI 显示。
- * 客户端收到后通过 JEI Runtime API 隐藏旧配方并重新注册新配方。
+ * Versioned recipe refresh signal. The client recomputes recipes locally; the packet
+ * carries only revision and bounded affected-id metadata.
  */
-public class RecipeSyncPacket {
+public final class RecipeSyncPacket {
 
     private static final Logger LOG = LoggerFactory.getLogger("RecipeSync");
     private static final String PROTOCOL = "1";
+    private static final int PAYLOAD_VERSION = 1;
+    private static final int MAX_ENTRIES = 4096;
+    private static final int MAX_STRING = 512;
     private static SimpleChannel CHANNEL;
+
+    private final long revision;
+    private final List<String> typeIds;
+    private final List<String> recipeIds;
+    private final boolean fullRefresh;
 
     public static void init() {
         CHANNEL = NetworkRegistry.newSimpleChannel(
@@ -44,87 +51,135 @@ public class RecipeSyncPacket {
                 RecipeSyncPacket::encode, RecipeSyncPacket::decode, RecipeSyncPacket::handle);
     }
 
+    public RecipeSyncPacket() {
+        this(0L, List.of(), List.of(), true);
+    }
+
+    public RecipeSyncPacket(long revision, List<String> typeIds, List<String> recipeIds, boolean fullRefresh) {
+        this.revision = revision;
+        this.typeIds = bounded(typeIds);
+        this.recipeIds = bounded(recipeIds);
+        this.fullRefresh = fullRefresh;
+    }
+
     public static void syncToAll() {
         if (CHANNEL == null) return;
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null || server.getPlayerList() == null) return;
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            CHANNEL.sendTo(new RecipeSyncPacket(), player.connection.connection,
-                    NetworkDirection.PLAY_TO_CLIENT);
+
+        List<String> types = new ArrayList<>(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+        List<String> recipes = new ArrayList<>();
+        for (String typeId : types) {
+            GTRecipeType type = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
+                    .get(new ResourceLocation(typeId));
+            if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) continue;
+            type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
+                if (recipe != null && recipe.getId() != null && recipes.size() < MAX_ENTRIES) {
+                    recipes.add(recipe.getId().toString());
+                }
+            });
         }
-        LOG.info("[RecipeSync] 已向 {} 个玩家发送配方同步包", server.getPlayerList().getPlayerCount());
+        RecipeSyncPacket packet = new RecipeSyncPacket(
+                DShanhaiRecipeModifierAPI.getRecipeRevision(), types, recipes, false);
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            CHANNEL.sendTo(packet, player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
+        }
+        LOG.info("[RecipeSync] 已向 {} 个玩家发送配方同步包 rev={} types={} recipes={}",
+                server.getPlayerList().getPlayerCount(), packet.revision, packet.typeIds.size(), packet.recipeIds.size());
     }
 
-    public RecipeSyncPacket() {}
-
-    public static void encode(RecipeSyncPacket msg, FriendlyByteBuf buf) {}
+    public static void encode(RecipeSyncPacket msg, FriendlyByteBuf buf) {
+        buf.writeVarInt(PAYLOAD_VERSION);
+        buf.writeVarLong(msg.revision);
+        buf.writeBoolean(msg.fullRefresh);
+        writeStrings(buf, msg.typeIds);
+        writeStrings(buf, msg.recipeIds);
+    }
 
     public static RecipeSyncPacket decode(FriendlyByteBuf buf) {
-        return new RecipeSyncPacket();
+        if (!buf.isReadable()) return new RecipeSyncPacket();
+        int version = buf.readVarInt();
+        if (version != PAYLOAD_VERSION) return new RecipeSyncPacket();
+        long revision = buf.readVarLong();
+        boolean fullRefresh = buf.readBoolean();
+        return new RecipeSyncPacket(revision, readStrings(buf), readStrings(buf), fullRefresh);
+    }
+
+    public static void handle(RecipeSyncPacket msg, Supplier<NetworkEvent.Context> ctx) {
+        ctx.get().enqueueWork(() -> refreshClient(msg));
+        ctx.get().setPacketHandled(true);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    public static void handle(RecipeSyncPacket msg, Supplier<NetworkEvent.Context> ctx) {
-        ctx.get().enqueueWork(() -> {
-            Minecraft mc = Minecraft.getInstance();
-            if (mc == null || mc.level == null || mc.getConnection() == null) return;
-            var jeiRuntime = ShanhaiJEIPlugin.getRuntime();
-            if (jeiRuntime == null) {
-                LOG.warn("[RecipeSync] JEI 运行时不可用，跳过刷新");
-                return;
+    private static void refreshClient(RecipeSyncPacket msg) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null || mc.level == null || mc.getConnection() == null) return;
+        IJeiRuntime jeiRuntime = ShanhaiJEIPlugin.getRuntime();
+        if (jeiRuntime == null) {
+            LOG.warn("[RecipeSync] JEI 运行时不可用，跳过刷新");
+            return;
+        }
+        List<String> typeIds = msg.fullRefresh || msg.typeIds.isEmpty()
+                ? new ArrayList<>(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds())
+                : msg.typeIds;
+        var recipeManager = jeiRuntime.getRecipeManager();
+        int refreshed = 0;
+        for (String typeId : typeIds) {
+            GTRecipeType gtRecipeType = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
+                    .get(new ResourceLocation(typeId));
+            if (gtRecipeType == null) continue;
+            var jeiType = GTRecipeTypeCategory.TYPES.apply(gtRecipeType);
+            var lookup = gtRecipeType.getLookup();
+            if (lookup == null || lookup.getLookup() == null) continue;
+            Map<String, GTRecipe> byId = new LinkedHashMap<>();
+            List<GTRecipe> withoutId = new ArrayList<>();
+            lookup.getLookup().getRecipes(true).forEach(recipe -> {
+                if (recipe == null) return;
+                if (recipe.getId() == null) withoutId.add(recipe);
+                else byId.put(recipe.getId().toString(), recipe);
+            });
+            List<GTRecipeWrapper> wrappers = new ArrayList<>();
+            for (GTRecipe recipe : byId.values()) wrappers.add(new GTRecipeWrapper(recipe));
+            for (GTRecipe recipe : withoutId) wrappers.add(new GTRecipeWrapper(recipe));
+
+            var oldWrappers = recipeManager.createRecipeLookup(jeiType)
+                    .includeHidden().get()
+                    .filter(value -> value instanceof GTRecipeWrapper)
+                    .map(value -> (GTRecipeWrapper) value)
+                    .toList();
+            if (oldWrappers.isEmpty()) oldWrappers = JEIRecipeCache.get(jeiType);
+            if (!oldWrappers.isEmpty()) recipeManager.hideRecipes(jeiType, oldWrappers);
+            JEIRecipeCache.clear(jeiType);
+            if (!wrappers.isEmpty()) {
+                recipeManager.addRecipes(jeiType, wrappers);
+                refreshed++;
             }
-            var recipeManager = jeiRuntime.getRecipeManager();
-            int refreshed = 0;
+        }
+        LOG.info("[RecipeSync] 已刷新 {} 个 GT 配方类型的 JEI 显示 rev={}", refreshed, msg.revision);
+    }
 
-            // 只刷新有山海运行时规则的类型；普通 GT 配方留在 JEI 原列表中，
-            // 避免同步包把全局配方再次 addRecipes 导致成倍显示。
-            for (String typeId : DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds()) {
-                GTRecipeType gtRecipeType = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
-                        .get(new ResourceLocation(typeId));
-                if (gtRecipeType == null) continue;
-                var jeiType = GTRecipeTypeCategory.TYPES.apply(gtRecipeType);
+    private static void writeStrings(FriendlyByteBuf buf, List<String> values) {
+        buf.writeVarInt(Math.min(MAX_ENTRIES, values.size()));
+        for (int i = 0; i < values.size() && i < MAX_ENTRIES; i++) {
+            buf.writeUtf(values.get(i) == null ? "" : values.get(i), MAX_STRING);
+        }
+    }
 
-                // 从 GT 配方查找表取当前配方（而非原版 RecipeManager）
-                var lookup = gtRecipeType.getLookup();
-                if (lookup == null) continue;
-                var branch = lookup.getLookup();
-                if (branch == null) continue;
-                Map<String, GTRecipe> recipesById = new LinkedHashMap<>();
-                List<GTRecipe> recipesWithoutId = new ArrayList<>();
-                branch.getRecipes(true).forEach(r -> {
-                    if (r == null) return;
-                    if (r.getId() == null) recipesWithoutId.add(r);
-                    else recipesById.put(r.getId().toString(), r);
-                });
-                List<GTRecipe> allRecipes = new ArrayList<>(recipesById.values());
-                allRecipes.addAll(recipesWithoutId);
+    private static List<String> readStrings(FriendlyByteBuf buf) {
+        int count = buf.readVarInt();
+        if (count < 0 || count > MAX_ENTRIES) throw new IllegalArgumentException("invalid recipe sync count");
+        List<String> values = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) values.add(buf.readUtf(MAX_STRING));
+        return List.copyOf(values);
+    }
 
-                // 隐藏旧条目
-                var oldWrappers = jeiRuntime.getRecipeManager().createRecipeLookup(jeiType)
-                        .includeHidden().get()
-                        .filter(value -> value instanceof GTRecipeWrapper)
-                        .map(value -> (GTRecipeWrapper) value)
-                        .toList();
-                if (oldWrappers.isEmpty()) oldWrappers = JEIRecipeCache.get(jeiType);
-                if (!oldWrappers.isEmpty()) {
-                    recipeManager.hideRecipes(jeiType, oldWrappers);
-                }
-                JEIRecipeCache.clear(jeiType);
-
-                List<GTRecipeWrapper> newWrappers = new ArrayList<>();
-                for (GTRecipe r : allRecipes) {
-                    // lookup 已經是唯一的執行時來源；JEI 收集 mixin 會在此邊界
-                    // 過濾刪除規則並只對非 canonical 配方建立修改副本。
-                    newWrappers.add(new GTRecipeWrapper(r));
-                }
-
-                if (!newWrappers.isEmpty()) {
-                    recipeManager.addRecipes(jeiType, newWrappers);
-                    refreshed++;
-                }
-            }
-            LOG.info("[RecipeSync] 已刷新 {} 个 GT 配方类型的 JEI 显示", refreshed);
-        });
-        ctx.get().setPacketHandled(true);
+    private static List<String> bounded(List<String> values) {
+        if (values == null || values.isEmpty()) return List.of();
+        List<String> bounded = new ArrayList<>(Math.min(MAX_ENTRIES, values.size()));
+        for (String value : values) {
+            if (bounded.size() >= MAX_ENTRIES) break;
+            if (value != null && !value.isEmpty()) bounded.add(value);
+        }
+        return List.copyOf(bounded);
     }
 }
