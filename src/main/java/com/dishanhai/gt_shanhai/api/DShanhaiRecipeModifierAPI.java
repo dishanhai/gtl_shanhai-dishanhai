@@ -11,6 +11,7 @@ import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
+import com.dishanhai.gt_shanhai.common.recipe.RecipeOriginalSnapshotStore;
 import com.dishanhai.gt_shanhai.mixin.SlotCacheManagerAccessor;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 
@@ -1031,9 +1032,6 @@ public class DShanhaiRecipeModifierAPI {
 
     // ====== 剥离规则应用到 Lookup 模板（ServerStartedEvent 调用） ======
 
-    /** 原始配方缓存：首次成功调用时从 lookup 深拷贝，之后始终从此还原 */
-    private static final Map<String, List<GTRecipe>> RECIPE_ORIGINALS = new LinkedHashMap<>();
-
     /** 运行期被“配方开关”禁用的配方快照，键为 recipeType|recipeId。 */
     private static final Map<String, GTRecipe> DISABLED_RECIPES = new LinkedHashMap<>();
 
@@ -1312,7 +1310,7 @@ public class DShanhaiRecipeModifierAPI {
 
     public static void clearOriginalSnapshot(String recipeTypeId) {
         if (!SUPPRESS_LOOKUP_RECIPE_MODIFIERS.get()) {
-            RECIPE_ORIGINALS.remove(recipeTypeId);
+            RecipeOriginalSnapshotStore.clear(recipeTypeId);
         }
     }
 
@@ -1342,14 +1340,7 @@ public class DShanhaiRecipeModifierAPI {
     }
 
     private static void captureOriginalRecipe(String recipeTypeId, GTRecipe recipe) {
-        List<GTRecipe> originals = RECIPE_ORIGINALS.computeIfAbsent(recipeTypeId, k -> new ArrayList<>());
-        String id = recipe.getId() != null ? recipe.getId().toString() : "";
-        for (GTRecipe existing : originals) {
-            String existingId = existing.getId() != null ? existing.getId().toString() : "";
-            if (!id.isEmpty() && id.equals(existingId)) return;
-            if (id.isEmpty() && existing == recipe) return;
-        }
-        originals.add(recipe.copy());
+        RecipeOriginalSnapshotStore.capture(recipeTypeId, recipe);
     }
 
     /** addRecipe 重建阶段关闭入口，防止重建副本再次触发 capture/规则套用。 */
@@ -1421,8 +1412,8 @@ public class DShanhaiRecipeModifierAPI {
         if (lookup == null) return;
 
         // 首次成功调用时缓存原始配方（此时 lookup 应为未修改状态）
-        List<GTRecipe> originals = RECIPE_ORIGINALS.get(recipeTypeId);
-        if (originals == null) {
+        List<GTRecipe> originals = RecipeOriginalSnapshotStore.copiesOf(recipeTypeId);
+        if (!RecipeOriginalSnapshotStore.hasSnapshot(recipeTypeId)) {
             final Map<String, GTRecipe> freshById = new LinkedHashMap<>();
             final List<GTRecipe> freshWithoutId = new ArrayList<>();
             SUPPRESS_GET_RECIPES_STRIP.set(true);
@@ -1444,8 +1435,10 @@ public class DShanhaiRecipeModifierAPI {
                 LOG.warn("[ModAPI] {} 无任何配方，跳过模板重建", recipeTypeId);
                 return;
             }
-            RECIPE_ORIGINALS.put(recipeTypeId, fresh);
-            originals = fresh;
+            for (GTRecipe recipe : fresh) {
+                RecipeOriginalSnapshotStore.capture(recipeTypeId, recipe);
+            }
+            originals = RecipeOriginalSnapshotStore.copiesOf(recipeTypeId);
             LOG.info("[ModAPI] 已缓存原始配方: {} ({} 条)", recipeTypeId, originals.size());
         }
 
@@ -1462,7 +1455,11 @@ public class DShanhaiRecipeModifierAPI {
         }
         originals = new ArrayList<>(uniqueById.values());
         originals.addAll(uniqueWithoutId);
-        RECIPE_ORIGINALS.put(recipeTypeId, originals);
+        RecipeOriginalSnapshotStore.clear(recipeTypeId);
+        for (GTRecipe original : originals) {
+            RecipeOriginalSnapshotStore.capture(recipeTypeId, original);
+        }
+        originals = RecipeOriginalSnapshotStore.copiesOf(recipeTypeId);
 
         var stripRules = STRIP_RULES.getOrDefault(recipeTypeId, Collections.emptyList());
         var replaceRules = REPLACE_RULES.getOrDefault(recipeTypeId, Collections.emptyList());
