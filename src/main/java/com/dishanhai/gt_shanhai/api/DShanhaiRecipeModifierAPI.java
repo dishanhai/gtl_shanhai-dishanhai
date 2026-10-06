@@ -1352,18 +1352,11 @@ public class DShanhaiRecipeModifierAPI {
      * 仅处理 STRIP_RULES + REPLACE_RULES 中出现的类型，不全量扫描缓存。
      */
     public static void updateAllLookupRecipes() {
-        runPatternCacheInvalidationBatch("updateAllLookupRecipes", () -> {
-            Set<String> processed = new LinkedHashSet<>();
-
-            processed.addAll(STRIP_RULES.keySet());
-            processed.addAll(REPLACE_RULES.keySet());
-            processed.addAll(DELETE_RULES.keySet());
-            for (String typeId : processed) {
-                rebuildLookupFromOriginals(typeId);
-            }
-            LOG.info("[ModAPI] 配方模板重建完成 (类型={}, 剥离={}, 替换={}, 删除={})",
-                    processed.size(), STRIP_RULES.size(), REPLACE_RULES.size(), DELETE_RULES.size());
-        });
+        List<com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReport> reports =
+                com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildAll(
+                        com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.RELOAD);
+        LOG.info("[ModAPI] 配方模板重建完成 (类型={}, 剥离={}, 替换={}, 删除={})",
+                reports.size(), STRIP_RULES.size(), REPLACE_RULES.size(), DELETE_RULES.size());
     }
 
     private static void applyDeleteRules(String recipeTypeId, List<DeleteEntry> rules) {
@@ -1694,15 +1687,10 @@ public class DShanhaiRecipeModifierAPI {
 
     /** 应用所有已持久化的替换规则（批量处理，一次重建配方表） */
     public static void applyAllReplaceRules() {
-        runPatternCacheInvalidationBatch("applyAllReplaceRules", () -> {
-            for (var entry : REPLACE_RULES.entrySet()) {
-                String typeId = entry.getKey();
-                var rules = entry.getValue();
-                if (rules.isEmpty()) continue;
-                rebuildLookupFromOriginals(typeId);
-                LOG.info("[ModAPI] 批量替换完成: {} ({} 条规则，已与剥离/删除规则统一重建)", typeId, rules.size());
-            }
-        });
+        List<com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReport> reports =
+                com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildAll(
+                        com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.RULE_CHANGED);
+        LOG.info("[ModAPI] 批量替换完成: {} 个类型（已与剥离/删除规则统一重建）", reports.size());
     }
 
     public static void registerPatternCacheOwner(Object owner) {
