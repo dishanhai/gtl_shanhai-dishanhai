@@ -8,11 +8,13 @@
     "ShanhaiSmokeMixin",
     "ShanhaiInfiniteThreadDisplayMixin",
     "ShanhaiGeneratorWirelessEnergyJadeMixin",
-    "ShanhaiSetBlockWatchMixin"
+    "ShanhaiSetBlockWatchMixin",
+    "ShanhaiRecipeTypeGetRecipeMixin"
   ],
   "client": [
     "ShanhaiFontStyleMixin",
-    "ShanhaiJeiRecipeOrderMixin"
+    "ShanhaiJeiRecipeOrderMixin",
+    "ShanhaiJeiBookmarkMixin"
   ],
   "injectors": {
     "defaultRequire": 1
