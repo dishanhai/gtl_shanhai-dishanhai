@@ -5,6 +5,7 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -111,6 +112,11 @@ public final class RecipeRebuildService {
         DShanhaiRecipeModifierAPI.applyReplaceByType(copy);
         if (DShanhaiRecipeModifierAPI.isDeletedByRuntimeRule(recipeTypeId, copy)) return null;
         return copy;
+    }
+
+    public static void rebuildVanillaManager(MinecraftServer server, Set<String> typeIds) {
+        com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeRebuild
+                .rebuild(server, typeIds);
     }
 
     private static GTRecipeType resolveType(String recipeTypeId) {
