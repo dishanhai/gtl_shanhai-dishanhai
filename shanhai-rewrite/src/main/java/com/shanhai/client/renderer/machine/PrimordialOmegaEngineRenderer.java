@@ -45,6 +45,25 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
     }
 
     /**
+     * 作废本渲染器持有的<b>两组静态 VBO</b>（环形轨道 + 中心球体/行星的 obj 模型）。
+     *
+     * <h2>为什么必须有这个入口（2026-10-04 贴图 bug）</h2>
+     * 这两组 VBO 里存的是<b>已经烘进顶点里的图集 UV</b>，而资源包一重载，客户端就整张重建方块图集、
+     * 并把 {@code ModelManager} 换成新实例（{@code Minecraft.reloadResourcePacks()}）⇒
+     * 旧 UV 会去采到别的方块的贴图（用户实测：「结构件/控制器面上出现不属于它的贴图」），
+     * 重启游戏才对。修法与取证逐条写在
+     * {@link PrimordialOmegaEngineRingBuffer} 的类注释里。
+     *
+     * <p>调用方：{@code ShanhaiClientReloadInvalidator}（客户端资源重载监听器，跑在渲染线程）。
+     * <p>⚠️ 环形那条路<b>还有一条不依赖事件注册的自愈路径</b>（见 {@code getRingBuffers()} 里
+     * 比 {@code ModelManager} 实例身份那一步）—— 两条互为保险。
+     */
+    public static void invalidateBakedCaches() {
+        PrimordialOmegaEngineRingBuffer.invalidate();
+        PrimordialOmegaEngineModelBuffers.invalidate();
+    }
+
+    /**
      * 平滑 tick。<b>本方法是「机器在不在跑」进入渲染链的唯一入口</b>。
      *
      * <h2>🔴 「始终渲染为工作状态」开关就接在这里（2026-09-24 新增的第 7 个按钮）</h2>

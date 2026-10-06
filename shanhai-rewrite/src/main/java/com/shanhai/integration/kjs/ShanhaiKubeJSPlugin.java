@@ -70,9 +70,63 @@ public class ShanhaiKubeJSPlugin extends KubeJSPlugin {
     public void registerBindings(BindingsEvent event) {
         super.registerBindings(event);
         event.add("ModuleLevelCondition", ModuleLevelCondition.class);
+        // 🔴 2026-10-05（B4）：把【指纹函数本身】绑进 KubeJS。
+        //    覆盖层脚本 shanhai_recipe_overrides.js 与编辑器必须算出【逐字节相同】的 base_fp，
+        //    而"两份实现碰巧一样"是靠不住的（老版就是靠"逐字复刻"维持的，一旦有一边改了就会漂）。
+        //    绑同一个类 ⇒ 两边跑的是同一段代码 ⇒ 一致性是【构造上必然】的，不是"验出来的"。
+        //    脚本侧用法：ShanhaiFingerprint.fingerprint(recipe.json) → String（null = 算不出来）
+        event.add("ShanhaiFingerprint",
+                com.shanhai.common.recipe.editor.ShanhaiRecipeFingerprint.class);
+        // 🆕 2026-10-05（B 组：额外条件）：把"重放额外条件"这件事做成一个 Java 绑定。
+        //    🔴 为什么不能在脚本里用 recipe.set('recipeConditions', …)：KubeJS 那个 component
+        //      写出来的形状是 {"type":k,"data":{…}}，而 GT 的加载器要的是平铺
+        //      {"type":k,…字段…}（RecipeCondition.CODEC 是 KeyDispatchCodec）⇒ 形状不对称，
+        //      会让整条配方 json 解析失败。取证与三步做法见 ShanhaiRecipeConditionReplay 的类注释。
+        //    脚本侧用法：var err = ShanhaiConditions.apply(recipe, JsonIO.of(entry.fields.conditions));
+        //               err === "" ⇒ 成功；非空 ⇒ 这一条 entry 整体不套用（fail-closed）。
+        event.add("ShanhaiConditions",
+                com.shanhai.common.recipe.editor.ShanhaiRecipeConditionReplay.class);
         // 一次性自证：插件被加载时打一行，避免"没加载"与"加载了但没人用"在日志上长得一样。
         ShanhaiMod.LOGGER.info("[SHANHAI-KJS] ShanhaiKubeJSPlugin 已加载：已绑定全局类 "
-                + "ModuleLevelCondition（构造器 (String 物质模块物品id, int 数量)）；"
+                + "ModuleLevelCondition（构造器 (String 物质模块物品id, int 数量)）、"
+                + "ShanhaiFingerprint（静态 fingerprint(JsonElement) / versionOf(String) / isCurrentVersion(String)）、"
+                + "ShanhaiConditions（静态 validate(JsonElement) / apply(RecipeJS,JsonElement) / count(JsonElement)）；"
                 + "配方条件类型 module_level 的注册在 ShanhaiRegistry#onRecipeConditionRegister。");
+    }
+
+    /**
+     * 🆕 2026-10-05：把 KubeJS 侧的<b>配方 JSON</b>在一次性的窗口里抓下来，供配方编辑器算 {@code base_fp}。
+     *
+     * <h2>🔴 为什么必须抢在这个窗口里（不抢就永远拿不到）</h2>
+     * 覆盖层脚本算 {@code base_fp} 用的是 {@code JsonIO.toString(recipe.json)}，其中
+     * {@code recipe.json} 是 KubeJS 的 {@code RecipeJS.json}。而 KubeJS 只在
+     * {@code ServerEvents.recipes} 那一小段里持有这些 {@code RecipeJS}：
+     * <ul>
+     *   <li>实测（冒烟第 1、2 局）：到 {@code ServerStartedEvent} 时
+     *       {@code RecipesEventJS.instance} <b>已经是 null</b>；</li>
+     *   <li>备选路线（拿活的 {@code GTRecipe} 过一遍 {@code GTRecipeSerializer.CODEC}）已被
+     *       <b>同一次运行内的逐字节比对证否</b>：键序从 {@code data} 开头（KubeJS 那份从
+     *       {@code type} 开头），长度 777 vs 1305，且 codec 那份根本不写
+     *       {@code chance/maxChance/tierChanceBoost}。</li>
+     * </ul>
+     * 本方法就是 KubeJS 官方给插件留的那个窗口（{@code KubeJSPlugin.injectRuntimeRecipes}），
+     * 参数里<b>直接带着 {@code RecipesEventJS}</b> ⇒ 拿得到全部 {@code RecipeJS}。
+     *
+     * <p>抓法是"算好就存"：当场把每条配方的 {@code base_fp} 字符串算出来放进缓存
+     * （而不是留着 {@code RecipeJS} 引用）—— 前者约 20 MB 的紧凑字符串，后者会把整批
+     * 配方对象图钉死在内存里。抓完打一行读数（条数 / 字符数 / 用时），"没抓到"与
+     * "抓到了但是空的"因此可区分。
+     */
+    @Override
+    public void injectRuntimeRecipes(dev.latvian.mods.kubejs.recipe.RecipesEventJS event,
+                                     net.minecraft.world.item.crafting.RecipeManager recipeManager,
+                                     java.util.Map<net.minecraft.resources.ResourceLocation,
+                                             net.minecraft.world.item.crafting.Recipe<?>> recipes) {
+        super.injectRuntimeRecipes(event, recipeManager, recipes);
+        try {
+            com.shanhai.common.recipe.editor.ShanhaiRecipeFingerprintCapture.captureFrom(event);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("[SHANHAI-EDIT] editor fp_capture_failed err={}", t.toString(), t);
+        }
     }
 }

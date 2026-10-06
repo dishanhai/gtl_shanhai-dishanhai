@@ -1,6 +1,8 @@
 package com.shanhai.common.recipe;
 
+import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
+import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.common.data.GTSoundEntries;
@@ -185,7 +187,10 @@ public final class ShanhaiRecipeTypes {
     public static GTRecipeType PRIMORDIAL_POWER_GENERATOR;
     /** 原初恒星反应 —— 原初宇宙反应炉。 */
     public static GTRecipeType PRIMORDIAL_STELLAR_REACTION;
-    /** 原初生物演化协议 —— 原初生物核心。 */
+    /** 原初生物演化协议 —— 原初生物核心。
+     *  <p>🔴 2026-10-04：本类型改用**专属 .rtui**（用户原话「你这个有点超出了，可以用原初物质解构那个模板」）——
+     *  {@code assets/gtceu/ui/recipe_type/primordial_biological_core.rtui}（226×168），
+     *  四元组随之改为 <b>(1, 72, 3, 3)</b>（与模板槽位逐位相等）。判据见 {@link #init()} 里那段「第二轮」注释。 */
     public static GTRecipeType PRIMORDIAL_BIOLOGICAL_CORE;
     /** 原初物质重组 —— 原初物质重组核心。 */
     public static GTRecipeType PRIMORDIAL_MATTER_RECOMBINATION;
@@ -220,7 +225,19 @@ public final class ShanhaiRecipeTypes {
      *     起因是星门水晶浆液那条产线要吐 16 种流体。
      *  <p>四个数 = 专属模板 {@code assets/gtceu/ui/recipe_type/primordial_matter_deconstruction.rtui}
      *  （**190×114**；由 {@code black_hole_event_horizon_blast.rtui} 裁剪改写而来）真正画出的槽位数
-     *  —— 见 {@link #init()} 里那段注释的取证。 */
+     *  —— 见 {@link #init()} 里那段注释的取证。
+     *  <p>🔴 2026-10-04 订正（本轮为"换模板"任务把这份模板逐槽量过一遍，实测读数如下）：
+     *  <ul>
+     *    <li>上面那句「190×114」<b>与文件实测不符</b>（原文保留于上行，不删）。文件的
+     *        {@code root.size} 实测 = <b>226×240</b>，且 = 全部 widget 的右／下边界 + 5
+     *        （最右 203+18=221 ⇒ 226；最下 217+18=235 ⇒ 240）。</li>
+     *    <li>「四个数 = 模板真正画出的槽位数」这句<b>实测成立</b>：widget 计数 = item_slot <b>104</b>
+     *        （item_in 1 ＋ item_out <b>103</b>）＋ fluid_slot <b>17</b>（fluid_in 1 ＋ fluid_out <b>16</b>）
+     *        ＋ progress 1 = 122 个，与 {@code (1, 103, 1, 16)} <b>逐位相等</b>。</li>
+     *    <li>几何（本轮新模板照抄的就是这套）：18px 步长；item_out 12 列（x=5..203）自 y=37 起；
+     *        fluid_out 8 列（x=5..131）紧接 item 网格下沿（y=199）起；头行 y=1；
+     *        progress 20×20 位于 x = 5+18×(item_in 数+fluid_in 数)+7。</li>
+     *  </ul> */
     public static GTRecipeType PRIMORDIAL_MATTER_DECONSTRUCTION;
     /** 无中文名（lang 未收录，带专属 .rtui）—— 原初装配线模块 ＋ 永恒格雷工坊额外模块。
      *  <p>🔴 2026-09-26 订正：旧句"无中文名（lang 未收录）"<b>与事实不符</b>（原文保留于上行）——
@@ -449,6 +466,60 @@ public final class ShanhaiRecipeTypes {
     public static GTRecipeType PRIMORDIAL_DEBUG;
 
     /**
+     * 🆕 2026-10-04 新增第 46 条：<b>原初深空汲取</b>（{@code gtceu:primordial_deep_space_extraction}）。
+     *
+     * <p>用户点单（逐字）：
+     * <pre>
+     * 为原初深空汲取核心新增配方类型：原初深空汲取，并为此配方种类新增配方：
+     * 终极世界碎片高速采集模块和世界碎片作为催化剂，可以获取对应世界碎片的矿物，岩石（注意新增），
+     * 流体，气体（注意新增），并设计合适的输出槽便于jei全部显示，这个工作我在dgy中做过，可以参考配方
+     * </pre>
+     *
+     * <p>挂载点 = {@code shanhai:primordial_deep_space_extraction_core}（原初深空汲取核心，第 29 台，
+     * 见 {@code ModuleRegistry#RECIPE_DEEP_SPACE_EXTRACTION_CORE}）—— 该机器原来挂 4 个宿主已有类型，
+     * 本轮把本条<b>加进同一组</b>（不改别的机器）。
+     *
+     * <p>🔴 <b>IO 四元组（{@code setMaxIOSize(2, 108, 0, 8)}）—— 不是估的，是从导出表【现算】的</b>：
+     * <p>⚠️ 2026-10-04 第二轮订正：本节原写 {@code setMaxIOSize(2, 92, 0, 7)}（那是上一刀的值，原文保留在下面各条里）。
+     * 本轮改用专属 .rtui（用户原话「可以用原初物质解构那个模板」）⇒ 四元组改为<b>与模板真正画出的槽位逐位相等</b>：
+     * 物品入 <b>2</b>（不变）/ 物品出 <b>92 ⇒ 108</b>（模板 12 列 × 9 行；⚠️ 需求将由 92 涨到
+     * <b>95</b> —— 用户追加「深空汲取需要有碎片自回和晶体复产」，即每条 ＋3 项产出）/
+     * 流体入 <b>0</b>（不变）/ 流体出 <b>7 ⇒ 8</b>（模板 8 列 × 1 行）。
+     * 判据与机理见 {@link #PRIMORDIAL_BIOLOGICAL_CORE} 那段「第二轮」注释的 {@code GTRecipeTypeUI} 字节码摘录。
+     * <p>下面四条是<b>上一刀</b>（92/7 那一版）的读数留档，逐条数字仍然成立：
+     * <ul>
+     *   <li><b>物品入 = 2</b>：本类型的每条配方只有两个催化剂
+     *       （{@code thetornproductionline:ultimate_world_fragment_miner_module} ＋ 对应的
+     *       {@code gtlcore:world_fragments_*}），两者都 {@code .notConsumable(...)}
+     *       —— ⚠️ {@code notConsumable} <b>照样占输入槽</b>（本工程既有教训），故是 2 不是 0。</li>
+     *   <li><b>物品出 = 92</b>：16 条配方里物品出<b>条数</b>的最大值（overworld = 88 项矿物 ＋ 4 项岩石）。
+     *       逐条读数（矿物项数／岩石项数／物品出）：overworld 88+4=92、nether 48+4=52、end 24+2=26、
+     *       moon 16+1=17、mars 12+1=13、venus 12+1=13、mercury 8+1=9、ceres 16+1=17、io 16+1=17、
+     *       ganymede 20+1=21、pluto 20+1=21、titan 16+1=17、enceladus 12+1=13、glacio 36+1=37、
+     *       barnarda 28+1=29、reactor 32+2=34。</li>
+     *   <li><b>流体入 = 0</b>：本类型配方一个流体输入都没有（用户口径：只留那两个催化剂）。</li>
+     *   <li><b>流体出 = 7</b>：最大值出现在 overworld（6 项流体 ＋ 1 项气体）。次高 nether = 3、ceres = 4、
+     *       titan = 3。⚠️ <b>气体在 GTCEu 里是流体</b>（走流体输出槽），不是物品。</li>
+     * </ul>
+     * <p>⚠️ <b>概率产出占不占格</b>：本类型 16 条全部用 {@code .chancedOutput(...)}，而它<b>照样每项占 1 个</b>
+     * 物品输出格 —— 依据是 {@code GTRecipe.outputs} 把普通产出与概率产出<b>放在同一个列表</b>里、仅靠
+     * {@code Content.chance} 区分（{@code GTRecipe.doTrim} 里那句
+     * {@code content.chance > 0 && content.chance < content.maxChance} 就是判据），
+     * 而 JEI 侧 {@code GTRecipeWidget.addSlots} 按 {@code recipe.getOutputContents(cap)} 的**下标**逐格填。
+     * ⇒ "自回的那一项碎片"同样算 1 格，已计入 95。
+     * <p>取值来源（全部来自实例导出表 {@code <实例>\local\kubejs\export\}）：
+     * 矿物 ← {@code added_recipes/thetornproductionline/fragment_world_collection/ultimate_world_fragment_*.json}
+     * （与 {@code [server_scripts]dgy.js} 的 {@code allWorldFragmentData} <b>逐条一致，实测 16/16 identical</b>）；
+     * 岩石 ← {@code recipes/gtceu/fragment_world_collection/sky_block_digging_*}；
+     * 流体 ← 同最上面那条；气体 ← {@code recipes/gtladditions/voidflux_reaction/*}。
+     * <p>倍率：本类型 = <b>碎片世界采集 ×2</b>（用户 2026-10-04 口径）。
+     * ⚠️ 用户同一句话里的「星核剥离 = 4×」<b>实测不成立</b>（星核剥离 {@code gtceu:star_core_stripper}
+     * 的逐项计数恒为 1x，见交付报告），故本类型的倍率<b>只取已成立的 ×2</b>，
+     * <b>没有</b>按 1:2:4 反推去改任何一个数字。
+     */
+    public static GTRecipeType PRIMORDIAL_DEEP_SPACE_EXTRACTION;
+
+    /**
      * 🆕 两条新类型的【配方条数声明值】—— 只用于**由 id 可 grep 的证据行**与 KJS 侧对账。
      *
      * <p>🔴 为什么是常量而不是这里现算：本方法是**配方类型注册期**（{@code GTCEuAPI.RegisterEvent}），
@@ -505,10 +576,12 @@ public final class ShanhaiRecipeTypes {
      * <b>2026-10-03：44 → 45</b>（用户点单新增「原初山海调试」{@code primordial_debug}；见
      * {@link #PRIMORDIAL_DEBUG} 的字段注释。⚠️ 本轮任务书原写「41 → 42」，那是**过时口径**——
      * 41 已经在 2026-09-30 变成 43、2026-10-01 变成 44，本轮的真值是 44 → 45）。
+     * <b>2026-10-04：45 → 46</b>（用户点单新增「原初深空汲取」
+     * {@code primordial_deep_space_extraction}；见 {@link #PRIMORDIAL_DEEP_SPACE_EXTRACTION}）。
      * 这个数字同时被 {@link #countMissingReal()} 与 {@code ShanhaiRegistry#verifyRecipeTypesRegistered}
      * 使用，<b>改类型数量必须同步改这里与那个数组</b>，否则 fail-fast 只查一部分、其余静默缺失。
      */
-    public static final int REAL_TYPE_COUNT = 45;
+    public static final int REAL_TYPE_COUNT = 46;
 
     /**
      * 幂等闸门。与 {@code ShanhaiMachines.INITIALIZED} / {@code ModuleRegistry} 同款写法。
@@ -541,6 +614,68 @@ public final class ShanhaiRecipeTypes {
 
     /** 注册期自动登记的全部山海配方类型（顺序 = 注册顺序）。见上方长注释。 */
     private static final List<GTRecipeType> REGISTERED_TYPES = new ArrayList<>();
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 🆕 2026-10-05 · 配方类型 IO 上限的【唯一查询入口】（配方编辑器 B3 用）
+    //
+    // 用户原话：
+    //   「B3我要求的编辑屏的输入和输出不是一个固定的，而是随着配方类型变化的」
+    //   「有时需要满足非常巨大的输入和输出格」
+    //
+    // 🔴 为什么问的是 GTCEu 自己、而不是我们那张表：
+    //   `setMaxIOSize(a,b,c,d)` 的结果就存在 `GTRecipeType.maxInputs / maxOutputs`
+    //   这两个 TreeMap 里（javap 实测：`public final TreeMap<RecipeCapability<?>, Integer> maxInputs/maxOutputs`
+    //   ＋ `public int getMaxInputs(RecipeCapability<?>)` / `getMaxOutputs(RecipeCapability<?>)`）。
+    //   直接读它 ⇒ **原版类型与别的 mod 注册的类型一样拿得到**，不需要我们维护第二份清单
+    //   （本工程在「手工白名单会漏项」这件事上付过账 —— 见上面 JEI 催化剂列表那段）。
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    /** 拿不到任何上限时的兜底（= 编辑器原来的固定 3×3／1×3 口径）。 */
+    public static final int[] FALLBACK_MAX_IO = {9, 3, 9, 3};
+
+    /**
+     * 一个配方类型的 IO 上限四元组：{@code {物品入, 流体入, 物品出, 流体出}}。
+     *
+     * <p>取不到（类型为 null / 该能力没登记）时，对应那一项退到 {@link #FALLBACK_MAX_IO} 的同位值 ——
+     * <b>不给 0</b>：给 0 会让那一条配方在编辑屏上一个格子都没有（比给大了更坏）。
+     */
+    public static int[] maxIoOf(GTRecipeType type) {
+        if (type == null) {
+            return FALLBACK_MAX_IO.clone();
+        }
+        return new int[]{
+                maxOf(type, true, true),
+                maxOf(type, false, true),
+                maxOf(type, true, false),
+                maxOf(type, false, false)};
+    }
+
+    private static int maxOf(GTRecipeType type, boolean item, boolean input) {
+        final int fallback = item ? (input ? FALLBACK_MAX_IO[0] : FALLBACK_MAX_IO[2])
+                : (input ? FALLBACK_MAX_IO[1] : FALLBACK_MAX_IO[3]);
+        try {
+            final int n = input
+                    ? type.getMaxInputs(item ? ItemRecipeCapability.CAP : FluidRecipeCapability.CAP)
+                    : type.getMaxOutputs(item ? ItemRecipeCapability.CAP : FluidRecipeCapability.CAP);
+            return n > 0 ? n : fallback;
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("[SHANHAI-SPEC] max_io_read_failed type={} item={} input={} err={}",
+                    type.registryName, item, input, t.toString());
+            return fallback;
+        }
+    }
+
+    /** 全部已注册类型的四元组读数（日志/自检用；判据 = 每一个类型都答得出来）。 */
+    public static String maxIoStatsLine() {
+        final StringBuilder sb = new StringBuilder();
+        for (GTRecipeType t : REGISTERED_TYPES) {
+            final int[] m = maxIoOf(t);
+            sb.append(t.registryName == null ? "?" : t.registryName.getPath())
+                    .append('=').append(m[0]).append('/').append(m[1]).append('/').append(m[2]).append('/').append(m[3])
+                    .append(' ');
+        }
+        return sb.toString().trim();
+    }
 
     private ShanhaiRecipeTypes() {}
 
@@ -600,8 +735,47 @@ public final class ShanhaiRecipeTypes {
                 .setOffsetVoltageText(true);
 
         // :119-128
+        // 🔴 2026-10-04 用户点单（原话逐字）：「那个输出格子不够用，你需要扩大」
+        //    ⇒ 物品出 **3** 格装不下 shanhai:primordial_bio/… 那两条配方的
+        //      39 项（温室高速培养）/ 57 项（高速生物数据）物品出。
+        //    本行【只改了「物品出」这一个数字】：3 ⇒ 64；其余 6 / 3 / 3 与上游逐字一致，未动。
+        //    ⚠️ 上一句留档【原文未删】—— 它是那一刀的记录；下面这刀把 (6,64,3,3) 整体换掉了。
+        //
+        // 🔴 2026-10-04 第二轮（用户原话逐字）：「你这个有点超出了，可以用原初物质解构那个模板」
+        //    ⇒ 本类型改用**专属 .rtui**：新增
+        //      {@code assets/gtceu/ui/recipe_type/primordial_biological_core.rtui}
+        //      （逐字段照抄 {@code primordial_matter_deconstruction.rtui} 的 schema：
+        //        同 type 字符串 / 同键集 / 同 18px 步长 / root.size = 右·下边界 + 5）。
+        //
+        //    🔴 判据（别再猜「窗口宽高由 setMaxIOSize 决定」——**不是**）：
+        //      {@code GTRecipeTypeUI.getCustomUI()} 的字节码（gtceu-1.20.1-1.4.4.jar，javap -p -c）：
+        //        {@code resourceManager.getResource(new ResourceLocation(
+        //             recipeType.registryName.getNamespace(),
+        //             "ui/recipe_type/%s.rtui".formatted(recipeType.registryName.getPath())))}
+        //      ① 读到了 ⇒ {@code hasCustomUI()=true} ⇒ {@code createEditableUITemplate(...).createDefault()}
+        //         直接反序列化模板，**JEI 页尺寸 = 模板 root.size**（{@code getJEISize()}）；
+        //      ② 读不到 ⇒ 回落 {@code addInventorySlotGroup()}：**固定 3 列**、行数 = Σ⌈上限/3⌉，
+        //         于是窗口随产出条数**越堆越高**（92 项 = 31 行 ≈ 620px）。
+        //      ⇒ 这就是"超出窗口"的机理，也是"换模板"能治它的原因。
+        //      ⚠️ 命名空间是 {@code gtceu}（不是 shanhai）：{@code GTRecipeTypes.register} 内部调
+        //         {@code GTCEu.id(name)}（字节码实证）⇒ 模板必须放在 {@code assets/gtceu/ui/recipe_type/}。
+        //
+        //    ⇒ 四元组改成【与该模板真正画出的槽位数逐位相等】（本文件既有口径，非估值）：
+        //        (6, 64, 3, 3) ⇒ **(1, 72, 3, 3)**
+        //        · 物品入 6 ⇒ **1**：实测两条配方各只有 1 个 {@code .notConsumable(...)} 模块催化剂
+        //          （{@code [server_scripts]shanhai_recipes.js} 现算），模板 item_in 也就是 1 格。
+        //        · 物品出 64 ⇒ **72**：模板 item_out = 12 列 × 6 行 = **72 格**（步长 18，x=5..203）。
+        //          ⚠️ **实测峰值 = 57**，不是 39 —— 39 只是 greenhouse 那条；57 来自
+        //          {@code shanhai:primordial_bio/high_speed_bio_data_use}（同一文件现算，逐条见交付报告）。
+        //          ⇒ 72 ≥ 57，余量 15。
+        //        · 流体入 3 / 流体出 3 **原样不动**（两条配方实测都是 0；"只增不减"是本文件既有纪律，
+        //          且模板里也真画了 3 个 fluid_in + 3 个 fluid_out）。
+        //    ⚠️ 概率产出照样占格：本类型 39/57 项**全部**是 {@code .chancedOutput(...)}，
+        //       而它们与普通产出同在一个 {@code GTRecipe.outputs} 列表里（只靠 Content.chance 区分，
+        //       见 {@code GTRecipe.doTrim} 的 {@code content.chance > 0 && content.chance < content.maxChance}）
+        //       ⇒ **每一项占 1 个物品输出格**，没有"概率产出不占格"这回事。
         PRIMORDIAL_BIOLOGICAL_CORE = register("primordial_biological_core", "multiblock")
-                .setMaxIOSize(6, 3, 3, 3)
+                .setMaxIOSize(1, 72, 3, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
@@ -1201,6 +1375,41 @@ public final class ShanhaiRecipeTypes {
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
 
+        // ═════════════ 2026-10-04 新增第 46 条（用户点单「原初深空汲取」；见字段区那段长注释）═════════════
+        // 🔴 本条【无上游原型】⇒ IO 四元组不是抄来的，是**从实例导出表现算**的（逐条读数见字段注释）：
+        //    物品入 2（= 两个 notConsumable 催化剂；⚠️ notConsumable 照样占输入槽）
+        //    物品出 92（16 条里最大 = overworld 的 88 项矿物 + 4 项岩石）
+        //    流体入 0（只留那两个催化剂，一个流体输入都没有）
+        //    流体出 7（最大 = overworld 的 6 项流体 + 1 项气体）
+        //    ⇒ 判据：任何一条配方的实际占用都不超过这四位数 ⇒ JEI 能把产出全部显示出来。
+        //    进度条照同批新类型（第 42..45 条）的惯例取 PROGRESS_BAR_ARROW。
+        //    ⚠️ 上面那段留档【原文未删】—— 它是上一刀的记录；下面这刀把 (2,92,0,7) 整体换掉了。
+        //
+        // 🔴 2026-10-04 第二轮（用户原话逐字）：「这个也是」＋「可以用原初物质解构那个模板」
+        //    ⇒ 与 primordial_biological_core 同一刀：改用**专属 .rtui**
+        //      {@code assets/gtceu/ui/recipe_type/primordial_deep_space_extraction.rtui}
+        //      （照抄 {@code primordial_matter_deconstruction.rtui} 的 schema；窗口宽高由它决定，
+        //        机理与判据写在 {@link #PRIMORDIAL_BIOLOGICAL_CORE} 那段的「第二轮」注释里）。
+        //    ⇒ (2, 92, 0, 7) ⇒ **(2, 108, 0, 8)** —— 与模板真正画出的槽位逐位相等：
+        //        · 物品入 **2 保持不变**（用户红线：深空是两个催化剂，**不能照抄模板的 1**）；
+        //          模板里 item_in 就是 2 格（item_in_0 / item_in_1）。
+        //        · 物品出 92 ⇒ **108**：模板 item_out = 12 列 × 9 行 = **108 格**。
+        //          ⚠️ 需求不是 92 而是 **95**：用户 2026-10-04 追加「深空汲取需要有碎片自回和晶体复产」
+        //          ⇒ 马上要给这 16 条各加 3 项产出（输入的世界碎片按 50% 概率自回 ＋
+        //          {@code gtlcore:mining_crystal} 5% ＋ {@code gtlcore:treasures_crystal} 5%）
+        //          ⇒ 92 + 3 = 95，故上限一次定到 108（余量 13）。**本轮不动 KJS 配方正文**（另派一条线加那 3 项）。
+        //        · 流体入 0 **保持不变**（本类型一个流体输入都没有）。
+        //        · 流体出 7 ⇒ **8**：模板 fluid_out 一格 8 列 × 1 行 = 8 格，覆盖实测峰值 7。
+        //    ⚠️ 概率产出照样占格（与本类型 16 条全部用 {@code .chancedOutput(...)} 的事实一致）：
+        //       概率产出与普通产出入同在 {@code GTRecipe.outputs}（{@code Content.chance} 区分），
+        //       见 {@code GTRecipe.doTrim} ⇒ **每 1 项 = 1 个物品输出格**。
+        //       ⇒ "自回的那一项碎片"同样占 1 格，已被算进 95。
+        PRIMORDIAL_DEEP_SPACE_EXTRACTION = register("primordial_deep_space_extraction", "multiblock")
+                .setMaxIOSize(2, 108, 0, 8)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+
         // ───────── fail-fast（就地）：任何一条静默没生效，就在这里响亮地失败 ─────────
         int realMissing = countMissingReal();
         if (realMissing > 0) {
@@ -1793,7 +2002,9 @@ public final class ShanhaiRecipeTypes {
                 // ───── 🆕 2026-10-01 新增的第 44 条（用户点单「原初物质定型」）─────
                 PRIMORDIAL_MATTER_FORMING,
                 // ───── 🆕 2026-10-03 新增的第 45 条（用户点单「原初山海调试」）─────
-                PRIMORDIAL_DEBUG};
+                PRIMORDIAL_DEBUG,
+                // ───── 🆕 2026-10-04 新增的第 46 条（用户点单「原初深空汲取」）─────
+                PRIMORDIAL_DEEP_SPACE_EXTRACTION};
     }
 
     /**
