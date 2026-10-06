@@ -268,6 +268,14 @@ public class ShanhaiNetwork {
         );
         CHANNEL.registerMessage(
                 packetId++,
+                ShopBatchManagePacket.class,
+                ShopBatchManagePacket::encode,
+                ShopBatchManagePacket::new,
+                ShopBatchManagePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
                 CurrencyAeBalanceRequestPacket.class,
                 CurrencyAeBalanceRequestPacket::encode,
                 CurrencyAeBalanceRequestPacket::new,

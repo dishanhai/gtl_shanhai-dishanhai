@@ -1,11 +1,17 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import appeng.api.crafting.IPatternDetails;
+import appeng.api.stacks.AEKey;
+import appeng.api.stacks.GenericStack;
+import appeng.api.stacks.KeyCounter;
+import appeng.crafting.CraftBranchFailure;
+import appeng.crafting.CraftingCalculation;
 import appeng.crafting.CraftingTreeNode;
 import appeng.crafting.CraftingTreeProcess;
 import appeng.crafting.inv.CraftingSimulationState;
 
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
+import com.dishanhai.gt_shanhai.common.item.VirtualCraftingPresenceState;
 
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingCalculation;
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingTreeProcess;
@@ -18,7 +24,10 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.util.IdentityHashMap;
 
 // priority 必须高于 GTLCore 的 CraftingTreeNodeMixin(默认 1000)。
 // 原因:adaptiveRequest / fastRequest / ultraFastRequest / maxFastRequest /
@@ -36,11 +45,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class CraftingTreeNodeVirtualPresenceMixin implements CraftingTreeNodeVirtualPresenceAccess {
 
     @Shadow @Final IPatternDetails.IInput parentInput;
+    @Shadow @Final private CraftingCalculation job;
+    @Shadow @Final private AEKey what;
+    @Shadow @Final private long amount;
     @Shadow private java.util.ArrayList<CraftingTreeProcess> nodes;
     @Shadow @Final private boolean canEmit;
     @Shadow private void buildChildPatterns() {
         throw new AssertionError();
     }
+    private static final ThreadLocal<IdentityHashMap<CraftingTreeNodeVirtualPresenceAccess, Boolean>> GT_SHANHAI_PRESENCE_SCAN_VISITED =
+            new ThreadLocal<>();
 
     @ModifyVariable(
             method = { "request", "adaptiveRequest", "fastRequest", "ultraFastRequest",
@@ -53,6 +67,26 @@ public abstract class CraftingTreeNodeVirtualPresenceMixin implements CraftingTr
         return VirtualPatternEncodingHelper.isPresenceInput(this.parentInput)
                 ? this.parentInput.getMultiplier()
                 : requestedAmount;
+    }
+
+    @Inject(method = "request", at = @At("HEAD"), cancellable = true, remap = false)
+    private void gtShanhai$keepPresenceInputInInventory(CraftingSimulationState inventory,
+            long requestedAmount, KeyCounter containerItems, CallbackInfo ci)
+            throws InterruptedException, CraftBranchFailure {
+        if (!VirtualPatternEncodingHelper.isPresenceInput(this.parentInput)) {
+            return;
+        }
+        ((ICraftingCalculation) this.job).gtlcore$handlePausing();
+        inventory.addStackBytes(this.what, this.amount, requestedAmount);
+        long needed = Math.max(1L, this.parentInput.getMultiplier());
+        for (GenericStack possibleInput : this.parentInput.getPossibleInputs()) {
+            if (possibleInput != null && VirtualCraftingPresenceState.hasPresence(
+                    inventory, possibleInput.what(), needed)) {
+                ci.cancel();
+                return;
+            }
+        }
+        // 不存在时让原生 request 继续处理递归配方或记录缺料，避免把失败伪装成成功。
     }
 
     @Inject(method = "gtlcore$tryMaxFastAggregation", at = @At("HEAD"), cancellable = true, remap = false)
@@ -82,6 +116,26 @@ public abstract class CraftingTreeNodeVirtualPresenceMixin implements CraftingTr
 
     @Override
     public boolean gtShanhai$containsPresenceInputInSubtree() {
+        IdentityHashMap<CraftingTreeNodeVirtualPresenceAccess, Boolean> visited =
+                GT_SHANHAI_PRESENCE_SCAN_VISITED.get();
+        boolean rootScan = visited == null;
+        if (rootScan) {
+            visited = new IdentityHashMap<>();
+            GT_SHANHAI_PRESENCE_SCAN_VISITED.set(visited);
+        }
+        if (visited.put(this, Boolean.TRUE) != null) {
+            return false;
+        }
+        try {
+            return gtShanhai$scanPresenceInputInSubtree();
+        } finally {
+            if (rootScan) {
+                GT_SHANHAI_PRESENCE_SCAN_VISITED.remove();
+            }
+        }
+    }
+
+    private boolean gtShanhai$scanPresenceInputInSubtree() {
         if (VirtualPatternEncodingHelper.isPresenceInput(this.parentInput)) {
             return true;
         }

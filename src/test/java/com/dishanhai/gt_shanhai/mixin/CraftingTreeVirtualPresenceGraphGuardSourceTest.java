@@ -39,8 +39,20 @@ class CraftingTreeVirtualPresenceGraphGuardSourceTest {
                 "GRAPH 判定发生在程序编译前，必须先建立子节点才能看到根节点下的 PresenceInput");
         assertTrue(executor.contains("method = \"execute\""),
                 "MAX_FAST root execute 直达聚合入口必须单独守卫");
-        assertTrue(executor.contains("executeChild(root, inventory, requestedAmount, containerItems, metrics)"),
-                "Presence root 必须回退到 MAX_FAST 非聚合执行栈");
+        assertTrue(executor.contains("root.legacyRequest(inventory, requestedAmount, containerItems)"),
+                "Presence root 必须回退到 AE2 legacyRequest，不能再进入 MAX_FAST prefix 抽取");
+        assertTrue(!executor.contains("executeChild(root, inventory, requestedAmount, containerItems, metrics)"),
+                "Presence root 不得回退到仍会执行 MAX_FAST prefix 的 executeChild");
+        assertTrue(source.contains("IdentityHashMap"),
+                "Presence 子树扫描必须按节点身份去重，避免递归图导致计算线程无限扫描");
+        assertTrue(source.contains("IdentityHashMap<CraftingTreeNodeVirtualPresenceAccess, Boolean>"),
+                "身份去重表必须使用 Mixin 访问接口类型，避免 Mixin 声明类无法转换为目标类");
+        assertTrue(source.contains("VirtualCraftingPresenceState.hasPresence"),
+                "PresenceInput 必须只用 SIMULATE 检查存在，不得进入 MODULATE 抽取");
+        assertTrue(source.contains("gtlcore$handlePausing"),
+                "取消原生 request 前必须保留 AE2/GTLCore 的暂停检查");
+        assertTrue(source.contains("inventory.addStackBytes"),
+                "取消原生 request 前必须保留 AE2 的计算字节统计");
         assertTrue(config.contains("\"MaxFastExecutorVirtualPresenceMixin\""));
         assertTrue(config.contains("\"CraftingTreeNodeVirtualPresenceMixin\""));
     }

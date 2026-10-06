@@ -372,7 +372,7 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createUltimateRainbow("蜉蝣朝生暮死，矿物亿万年沉淀，皆在此炉中解构与重生"));
             tooltips.add(Component.literal("§b来自混沌的蜉蝣在晶格中凝固，每一粒原子都刻写着宇宙的矿脉图谱"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
-            tooltips.add(Component.literal("§7配方类型：蜉蝣选矿，湿法研磨，天基矿石处理，集成矿石处理，虚空采矿，虚空矿脉洗矿，太空采矿"));
+            tooltips.add(Component.literal("§7配方类型：蜉蝣选矿，湿法研磨，天基矿石处理，集成矿石处理，虚空采矿，虚空矿脉洗矿，太空采矿，原初物质解构"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f并行，直接从电网取电")));

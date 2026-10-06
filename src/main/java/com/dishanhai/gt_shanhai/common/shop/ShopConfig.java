@@ -14,6 +14,8 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -127,6 +129,21 @@ public final class ShopConfig {
         return snapshot().resolveByStableId(stableId);
     }
 
+    /** 按 stableId 解析当前快照中的条目，去重并保持请求顺序。 */
+    public static List<ShopEntry> resolveStableIds(Collection<String> stableIds) {
+        if (stableIds == null || stableIds.isEmpty()) return List.of();
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String stableId : stableIds) {
+            if (stableId != null && !stableId.isBlank()) unique.add(stableId);
+        }
+        List<ShopEntry> result = new ArrayList<>(unique.size());
+        for (String stableId : unique) {
+            ShopEntry entry = resolveByStableId(stableId);
+            if (entry != null) result.add(entry);
+        }
+        return result;
+    }
+
     // ==================== 两级分类：主/子（约定 category = "主" 或 "主/子"）====================
 
     /** 取分类主名（"主/子" → "主"；无「/」→ 原样）。 */
@@ -193,43 +210,65 @@ public final class ShopConfig {
         save();
     }
 
-    // 误删防护：记住最近一次被删除的条目 + 原始位置，30 秒内可用 undoLastRemove() 撤销一次
-    private static ShopEntry lastRemovedEntry;
-    private static int lastRemovedIndex = -1;
+    // 误删防护：记住最近一次被删除的条目集合 + 原始位置，30 秒内可用 undoLastRemove() 撤销一次
+    private record RemovedEntry(ShopEntry entry, int index) {}
+    private static List<RemovedEntry> lastRemovedEntries = List.of();
     private static long lastRemovedAtMs;
     private static final long UNDO_WINDOW_MS = 30_000L;
 
     /** 删除一个商品条目（按对象引用）并写回 shop.json；返回是否删除成功。 */
     public static synchronized boolean removeEntry(ShopEntry entry) {
-        if (entry == null) return false;
+        return removeEntries(entry == null ? List.of() : List.of(entry)) > 0;
+    }
+
+    /** 一次删除多个商品条目；按当前快照原子发布，供批量菜单使用。 */
+    public static synchronized int removeEntries(Collection<ShopEntry> targets) {
+        if (targets == null || targets.isEmpty()) return 0;
         List<ShopEntry> updated = new ArrayList<>(getEntries());
-        int idx = updated.indexOf(entry);
-        boolean removed = updated.remove(entry);
-        if (removed) {
-            lastRemovedEntry = entry;
-            lastRemovedIndex = idx;
+        Set<ShopEntry> wanted = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (ShopEntry target : targets) if (target != null) wanted.add(target);
+        if (wanted.isEmpty()) return 0;
+        List<RemovedEntry> removed = new ArrayList<>();
+        for (int i = 0; i < updated.size(); i++) {
+            ShopEntry entry = updated.get(i);
+            if (wanted.contains(entry)) removed.add(new RemovedEntry(entry, i));
+        }
+        if (!removed.isEmpty()) {
+            updated.removeIf(wanted::contains);
+            lastRemovedEntries = List.copyOf(removed);
             lastRemovedAtMs = System.currentTimeMillis();
             publish(updated);
             save();
         }
-        return removed;
+        return removed.size();
     }
 
-    /** 撤销最近一次删除（30 秒内有效，且只能撤销一次）；恢复成功返回该条目，否则 null（已超时/已撤销过）。 */
+    /** 按 stableId 一次删除多个条目；找不到的 ID 静默跳过。 */
+    public static synchronized int removeEntriesByStableIds(Collection<String> stableIds) {
+        return removeEntries(resolveStableIds(stableIds));
+    }
+
+    /** 撤销最近一次删除（30 秒内有效，且只能撤销一次）；恢复成功返回首个条目，否则 null。 */
     public static synchronized ShopEntry undoLastRemove() {
-        if (lastRemovedEntry == null) return null;
+        if (lastRemovedEntries.isEmpty()) return null;
         if (System.currentTimeMillis() - lastRemovedAtMs > UNDO_WINDOW_MS) {
-            lastRemovedEntry = null;
+            lastRemovedEntries = List.of();
             return null;
         }
         List<ShopEntry> updated = new ArrayList<>(getEntries());
-        ShopEntry restored = lastRemovedEntry;
-        int idx = Math.max(0, Math.min(lastRemovedIndex, updated.size()));
-        updated.add(idx, restored);
+        List<RemovedEntry> restoredEntries = new ArrayList<>(lastRemovedEntries);
+        restoredEntries.sort(Comparator.comparingInt(RemovedEntry::index));
+        int inserted = 0;
+        for (RemovedEntry removed : restoredEntries) {
+            if (updated.contains(removed.entry())) continue;
+            int idx = Math.max(0, Math.min(removed.index() + inserted, updated.size()));
+            updated.add(idx, removed.entry());
+            inserted++;
+        }
+        ShopEntry restored = restoredEntries.isEmpty() ? null : restoredEntries.get(0).entry();
         publish(updated);
         save();
-        lastRemovedEntry = null;
-        lastRemovedIndex = -1;
+        lastRemovedEntries = List.of();
         return restored;
     }
 
@@ -245,8 +284,153 @@ public final class ShopConfig {
         return true;
     }
 
+    /** 批量切换隐藏状态；一次发布目录，避免连续单项包造成 revision 冲突。 */
+    public static synchronized int batchSetHidden(Collection<String> stableIds, boolean hidden) {
+        List<ShopEntry> targets = resolveStableIds(stableIds);
+        if (targets.isEmpty()) return 0;
+        Set<String> wanted = new LinkedHashSet<>();
+        for (ShopEntry entry : targets) wanted.add(entry.getStableId());
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int changed = 0;
+        for (int i = 0; i < updated.size(); i++) {
+            ShopEntry old = updated.get(i);
+            if (!wanted.contains(old.getStableId()) || old.isHidden() == hidden) continue;
+            updated.set(i, copyEntry(old, old.getCategory(), hidden));
+            changed++;
+        }
+        if (changed > 0) {
+            publish(updated);
+            save();
+        }
+        return changed;
+    }
+
+    /** 批量快速分组；目标分类为空时回退到默认分类。 */
+    public static synchronized int batchRegroup(Collection<String> stableIds, String category) {
+        List<ShopEntry> targets = resolveStableIds(stableIds);
+        if (targets.isEmpty()) return 0;
+        String nextCategory = category == null || category.isBlank() ? ShopEntry.DEFAULT_CATEGORY : category.trim();
+        Set<String> wanted = new LinkedHashSet<>();
+        for (ShopEntry entry : targets) wanted.add(entry.getStableId());
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int changed = 0;
+        for (int i = 0; i < updated.size(); i++) {
+            ShopEntry old = updated.get(i);
+            if (!wanted.contains(old.getStableId()) || nextCategory.equals(old.getCategory())) continue;
+            updated.set(i, copyEntry(old, nextCategory, old.isHidden()));
+            changed++;
+        }
+        if (changed > 0) {
+            publish(updated);
+            save();
+        }
+        return changed;
+    }
+
+    /** 批量设置交易方向；一次发布目录，保留每个条目的其他字段与 stableId。 */
+    public static synchronized int batchSetTradeMode(Collection<String> stableIds, ShopEntry.TradeMode tradeMode) {
+        List<ShopEntry> targets = resolveStableIds(stableIds);
+        if (targets.isEmpty()) return 0;
+        ShopEntry.TradeMode nextMode = tradeMode == null ? ShopEntry.TradeMode.BOTH : tradeMode;
+        Set<String> wanted = new LinkedHashSet<>();
+        for (ShopEntry entry : targets) wanted.add(entry.getStableId());
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int changed = 0;
+        for (int i = 0; i < updated.size(); i++) {
+            ShopEntry old = updated.get(i);
+            if (!wanted.contains(old.getStableId()) || old.getTradeMode() == nextMode) continue;
+            updated.set(i, copyEntry(old, old.getCategory(), old.isHidden(), nextMode));
+            changed++;
+        }
+        if (changed > 0) {
+            publish(updated);
+            save();
+        }
+        return changed;
+    }
+
+    /**
+     * 批量排序：同分类内每个选中条目移动一步，置顶则把选中条目移到该分类最前；
+     * 其他分类的相对物理顺序不变。
+     */
+    public static synchronized int batchMove(Collection<String> stableIds, int direction) {
+        List<ShopEntry> targets = resolveStableIds(stableIds);
+        if (targets.isEmpty() || (direction != -1 && direction != 0 && direction != 1)) return 0;
+        Set<String> wanted = new LinkedHashSet<>();
+        for (ShopEntry entry : targets) wanted.add(entry.getStableId());
+        List<ShopEntry> updated = new ArrayList<>(getEntries());
+        int changed = 0;
+        LinkedHashSet<String> categories = new LinkedHashSet<>();
+        for (ShopEntry entry : targets) categories.add(entry.getCategory());
+        for (String category : categories) {
+            List<Integer> positions = new ArrayList<>();
+            List<ShopEntry> local = new ArrayList<>();
+            for (int i = 0; i < updated.size(); i++) {
+                ShopEntry entry = updated.get(i);
+                if (category.equals(entry.getCategory())) {
+                    positions.add(i);
+                    local.add(entry);
+                }
+            }
+            if (direction < 0) {
+                for (int i = 1; i < local.size(); i++) {
+                    if (wanted.contains(local.get(i).getStableId())
+                            && !wanted.contains(local.get(i - 1).getStableId())) {
+                        Collections.swap(local, i, i - 1);
+                        changed++;
+                    }
+                }
+            } else if (direction > 0) {
+                for (int i = local.size() - 2; i >= 0; i--) {
+                    if (wanted.contains(local.get(i).getStableId())
+                            && !wanted.contains(local.get(i + 1).getStableId())) {
+                        Collections.swap(local, i, i + 1);
+                        changed++;
+                    }
+                }
+            } else {
+                List<ShopEntry> selectedPart = new ArrayList<>();
+                List<ShopEntry> otherPart = new ArrayList<>();
+                for (ShopEntry entry : local) {
+                    if (wanted.contains(entry.getStableId())) selectedPart.add(entry);
+                    else otherPart.add(entry);
+                }
+                List<ShopEntry> reordered = new ArrayList<>(local.size());
+                reordered.addAll(selectedPart);
+                reordered.addAll(otherPart);
+                if (!reordered.equals(local)) {
+                    local = reordered;
+                    changed += selectedPart.size();
+                }
+            }
+            for (int i = 0; i < positions.size(); i++) updated.set(positions.get(i), local.get(i));
+        }
+        if (changed > 0) {
+            publish(updated);
+            save();
+        }
+        return changed;
+    }
+
+    /** 保留完整商品元数据复制一份，仅替换分类/隐藏状态。 */
+    private static ShopEntry copyEntry(ShopEntry old, String category, boolean hidden) {
+        return copyEntry(old, category, hidden, old.getTradeMode());
+    }
+
+    /** 保留完整商品元数据复制一份，按需替换分类/隐藏状态/交易方向。 */
+    private static ShopEntry copyEntry(ShopEntry old, String category, boolean hidden, ShopEntry.TradeMode tradeMode) {
+        ShopEntry copy = new ShopEntry(old.getGoodsList(), category, old.getCost(), old.getDescription(),
+                old.getServerUses(), old.getDisplayIcons(), old.getRewardMode(), old.getRewardPool(),
+                hidden, old.getLinkKey(), old.getLinkTo(), old.getDisplayName(), old.getFtbqTableId(),
+                old.getFtbqSubMode(), tradeMode, old.getPeriodTicks(), old.getPeriodLimit(),
+                old.getPrerequisiteQuestId(), old.getStableId(), old.getDiscountPercent(),
+                old.getDiscountStartMs(), old.getDiscountEndMs(), old.getSubmissionItems());
+        copy.overrideRemainingUses(old.getRemainingUses());
+        return copy;
+    }
+
     // 撤销上一次排序（前移/后移/置顶）：记住移动前"紧邻在它前面的那个条目"（身份锚点，不是数字下标），
-    // 30 秒内可用 undoLastMove() 挪回去；只保留最近一次，跟 lastRemovedEntry 的删除撤销是两套独立状态。
+    // 30 秒内可用 undoLastMove() 挪回去；只保留最近一次，跟 lastRemovedEntries 的删除撤销是两套独立状态。
     // 用身份锚点而不是原始下标的原因：撤销窗口内如果有别的增删/排序动作把列表整体挪了位，记死的下标会失效
     // （复原到错误位置甚至越界），身份锚点会跟着锚点条目本身重新定位，天然不受这些中间变更影响；
     // 锚点条目如果在窗口内被删掉了，退化成"补到列表最后一位"（保底，见 undoLastMove 注释）。

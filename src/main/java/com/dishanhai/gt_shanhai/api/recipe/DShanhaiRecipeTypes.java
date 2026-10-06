@@ -353,7 +353,7 @@ public class DShanhaiRecipeTypes {
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
         PRIMORDIAL_MATTER_DECONSTRUCTION = register("primordial_matter_deconstruction", "multiblock")
-                .setMaxIOSize(1, 20, 1, 16)
+                .setMaxIOSize(1, 103, 1, 16)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_HAMMER, ProgressTexture.FillDirection.UP_TO_DOWN)

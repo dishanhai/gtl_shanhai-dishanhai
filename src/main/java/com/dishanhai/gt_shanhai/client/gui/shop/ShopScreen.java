@@ -32,6 +32,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -250,6 +251,11 @@ public class ShopScreen extends ScaledScreen {
     private ShopEntry pendingDeleteEntry;
     private long pendingDeleteArmedAtMs;
     private static final long DELETE_CONFIRM_WINDOW_MS = 3000L;
+    /** Alt + 左鍵批量名單：只存 stableId，跨分類、搜尋、滾動與目錄 revision 仍能重新解析。 */
+    private final LinkedHashSet<String> batchSelectionStableIds = new LinkedHashSet<>();
+    /** 批量刪除二次確認快照；與單項 pendingDeleteEntry 分開，避免切換卡片時誤確認。 */
+    private final LinkedHashSet<String> pendingDeleteBatchIds = new LinkedHashSet<>();
+    private long pendingDeleteBatchArmedAtMs;
     // 撤销上一次删除：静态=跨界面实例保留（删完手滑关掉界面也还能点），服务端另有独立 30 秒兜底窗口（见 ShopConfig#undoLastRemove）
     private static String undoDeleteLabel;
     private static long undoDeleteUntilMs;
@@ -290,6 +296,45 @@ public class ShopScreen extends ScaledScreen {
         selected = null;
         detailScroll = 0;
         detailScrollMax = 0;
+    }
+
+    private boolean isBatchSelected(ShopEntry entry) {
+        return entry != null && batchSelectionStableIds.contains(entry.getStableId());
+    }
+
+    private List<String> batchIdsSnapshot() {
+        return List.copyOf(batchSelectionStableIds);
+    }
+
+    private List<ShopEntry> batchEntries() {
+        List<ShopEntry> result = new ArrayList<>();
+        for (String stableId : batchSelectionStableIds) {
+            long key = ClientShopCatalog.keyOfStableId(stableId);
+            ShopEntry entry = key >= 0L ? ClientShopCatalog.get(key) : null;
+            if (entry != null) result.add(entry);
+        }
+        return result;
+    }
+
+    private void toggleBatchSelection(ShopEntry entry) {
+        if (entry == null || entry.getStableId() == null || entry.getStableId().isBlank()) return;
+        if (!batchSelectionStableIds.add(entry.getStableId())) {
+            batchSelectionStableIds.remove(entry.getStableId());
+        }
+        showMessage(Component.literal(batchSelectionStableIds.contains(entry.getStableId())
+                ? "§b[山海商店] §a已加入批量名单: §f" + entry.goodsDisplayName()
+                : "§b[山海商店] §7已移出批量名单: §f" + entry.goodsDisplayName()));
+    }
+
+    private boolean batchDeleteArmed() {
+        return !pendingDeleteBatchIds.isEmpty()
+                && System.currentTimeMillis() - pendingDeleteBatchArmedAtMs < DELETE_CONFIRM_WINDOW_MS;
+    }
+
+    private void clearBatchSelection() {
+        batchSelectionStableIds.clear();
+        pendingDeleteBatchIds.clear();
+        pendingDeleteBatchArmedAtMs = 0L;
     }
     private String previewHoverName; // 详情页花费预览槽悬停名（drawDetail 暂存 → renderTooltips 消费）
     private String previewHoverExtra; // 悬停槽的"拥有/缺少"提示行（drawPreviewSlot 暂存 → renderTooltips 消费），无数据（未同步/加载中）为 null
@@ -357,6 +402,7 @@ public class ShopScreen extends ScaledScreen {
     private boolean groupPickerOpen;
     private ShopEntry groupPickerEntry;
     private long groupPickerEntryKey = -1L;
+    private List<String> groupPickerBatchIds = List.of();
     private int groupPickerScroll;
     private List<String> groupPickerOptions = List.of();
     private static final int GROUP_PICKER_ROW_H = 14;
@@ -1510,6 +1556,33 @@ public class ShopScreen extends ScaledScreen {
         groupPickerOptions = options;
         groupPickerEntry = entry;
         groupPickerEntryKey = entryKey;
+        groupPickerBatchIds = List.of();
+        groupPickerScroll = 0;
+        groupPickerOpen = true;
+    }
+
+    private void openGroupPickerBatch() {
+        List<ShopEntry> entries = batchEntries();
+        if (entries.isEmpty()) return;
+        List<String> options = new ArrayList<>();
+        for (String top : ClientShopCatalog.topCategories()) {
+            options.add(top);
+            for (String sub : ClientShopCatalog.subCategories(top)) {
+                String subPath = top + "/" + sub;
+                options.add(subPath);
+                for (String sub2 : ClientShopCatalog.subCategories2(top, sub)) {
+                    String sub2Path = subPath + "/" + sub2;
+                    options.add(sub2Path);
+                    for (String sub3 : ClientShopCatalog.subCategories3(top, sub, sub2)) {
+                        options.add(sub2Path + "/" + sub3);
+                    }
+                }
+            }
+        }
+        groupPickerOptions = options;
+        groupPickerEntry = entries.get(0);
+        groupPickerEntryKey = ClientShopCatalog.keyOf(groupPickerEntry);
+        groupPickerBatchIds = batchIdsSnapshot();
         groupPickerScroll = 0;
         groupPickerOpen = true;
     }
@@ -1522,8 +1595,12 @@ public class ShopScreen extends ScaledScreen {
         g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
         renderBox(g, ox, oy, ow, r[3], GOLD_DARK, PANEL_BG);
 
+        String title = groupPickerBatchIds.isEmpty()
+                ? groupPickerEntry.goodsDisplayName()
+                : groupPickerBatchIds.size() + " 件商品";
         g.drawString(this.font, GuiRenderUtil.trimText(this.font,
-                "§b" + groupPickerEntry.goodsDisplayName() + " §7— 快速分组", ow - DESC_OVERLAY_CLOSE_W - 20),
+                "§b" + title + " §7— " + (groupPickerBatchIds.isEmpty() ? "快速分组" : "批量快速分组"),
+                ow - DESC_OVERLAY_CLOSE_W - 20),
                 ox + 8, oy + 8, GOLD, true);
         int closeX = groupPickerCloseX(r), closeY = groupPickerCloseY(r);
         drawButton(g, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H, "§cX", mx, my);
@@ -1531,7 +1608,7 @@ public class ShopScreen extends ScaledScreen {
         int visible = groupPickerVisibleRows(r);
         int maxScroll = groupPickerMaxScroll(r);
         groupPickerScroll = Math.max(0, Math.min(maxScroll, groupPickerScroll));
-        String current = groupPickerEntry.getCategory();
+        String current = groupPickerBatchIds.isEmpty() ? groupPickerEntry.getCategory() : "";
         int rowY0 = oy + 22;
         for (int i = 0; i < visible; i++) {
             int idx = groupPickerScroll + i;
@@ -1922,6 +1999,9 @@ public class ShopScreen extends ScaledScreen {
         if (stub != null && ClientShopFavorites.contains(stub.stableId())) {
             g.drawString(this.font, "§e★", cx + cellW - 10, cy + 14, GOLD, false);
         }
+        if (stub != null && batchSelectionStableIds.contains(stub.stableId())) {
+            renderBatchSelectionOutline(g, cx, cy, cellW, cellH);
+        }
         renderNumberBar(g, cx + 2, cy + cellH - 13, 34);
         g.drawString(this.font, "§8加载中", cx + 5, cy + cellH - 11, GRAY, false);
     }
@@ -2115,6 +2195,7 @@ public class ShopScreen extends ScaledScreen {
         int fill = sel ? SELECT_BG : (hover ? ROW_HOVER : ROW_BG);
         renderBox(g, cx, cy, cellW, cellH, border, fill);
         if (sel) renderSelectionOutline(g, cx, cy, cellW, cellH);
+        if (isBatchSelected(entry)) renderBatchSelectionOutline(g, cx, cy, cellW, cellH);
 
         CellCache cc = cellCacheFor(entry);
 
@@ -2265,6 +2346,12 @@ public class ShopScreen extends ScaledScreen {
         g.fill(x - 1, y + h, x + w + 1, y + h + 1, CYAN);
         g.fill(x - 1, y, x, y + h, CYAN);
         g.fill(x + w, y, x + w + 1, y + h, CYAN);
+    }
+
+    /** 批量选中态：金色双层外框，包住原卡片边缘并与详情的青色单层框区分。 */
+    private static void renderBatchSelectionOutline(GuiGraphics g, int x, int y, int w, int h) {
+        renderOutline(g, x - 2, y - 2, w + 4, h + 4, GOLD_DARK);
+        renderOutline(g, x - 1, y - 1, w + 2, h + 2, GOLD);
     }
 
     /** KE 风格紧凑数字：1K+/1M+/1B+/1T+/1Qa+/1Qi+。 */
@@ -2794,8 +2881,14 @@ public class ShopScreen extends ScaledScreen {
                 if (idx >= groupPickerOptions.size()) break;
                 int ry = rowY0 + i * GROUP_PICKER_ROW_H;
                 if (hit(mx, my, r[0] + 6, ry, r[2] - 12, GROUP_PICKER_ROW_H)) {
-                    sendQuickRegroup(groupPickerEntry, groupPickerEntryKey, groupPickerOptions.get(idx));
+                    if (groupPickerBatchIds.isEmpty()) {
+                        sendQuickRegroup(groupPickerEntry, groupPickerEntryKey, groupPickerOptions.get(idx));
+                    } else {
+                        sendBatchManage(com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.REGROUP,
+                                groupPickerOptions.get(idx));
+                    }
                     groupPickerOpen = false;
+                    groupPickerBatchIds = List.of();
                     return true;
                 }
             }
@@ -2927,6 +3020,9 @@ public class ShopScreen extends ScaledScreen {
             if (entry != null) {
                 if (btn == 1) {
                     openContextMenu(entry, visibleEntryKeys.get(entryIndex), (int) mx, (int) my);
+                } else if (btn == 0 && net.minecraft.client.gui.screens.Screen.hasAltDown()) {
+                    // Alt + 左键只切换批量名单，不触发详情、购物车或商品拖拽。
+                    toggleBatchSelection(entry);
                 } else if (btn == 0 && net.minecraft.client.gui.screens.Screen.hasControlDown()) {
                     // Ctrl+左键：加入购物车候选（不影响详情页选中），已在购物车里则忽略，去购物车面板调数量
                     boolean already = ClientShopCart.contains(entry.getStableId());
@@ -3078,6 +3174,16 @@ public class ShopScreen extends ScaledScreen {
                     return true;
                 }
             }
+        }
+
+        // 空白区 Alt + 右键：不命中商品卡片或其他控件时，清空本次批量操作名单。
+        if (net.minecraft.client.gui.screens.Screen.hasAltDown() && btn == 1) {
+            boolean hadSelection = !batchSelectionStableIds.isEmpty();
+            clearBatchSelection();
+            if (hadSelection) {
+                showMessage(Component.literal("§b[山海商店] §7批量名单已清空"));
+            }
+            return true;
         }
 
         return super.universalMouseClicked(mx, my, btn);
@@ -3276,7 +3382,7 @@ public class ShopScreen extends ScaledScreen {
     /** 打开右键菜单：按该条目内容 + 当前权限现算菜单项，空菜单（无任何可用项）不弹出。 */
     private void openContextMenu(ShopEntry entry, long entryKey, int x, int y) {
         if (entry == null) return;
-        List<ContextMenuItem> items = buildContextMenuItems(entry, entryKey);
+        List<ContextMenuItem> items = buildContextMenuItems(entry, entryKey, isBatchSelected(entry));
         if (items.isEmpty()) return;
         ctxMenuItems = items;
         ctxMenuEntryKey = entryKey;
@@ -3310,15 +3416,9 @@ public class ShopScreen extends ScaledScreen {
      * 管理类整组只有编辑权玩家才追加。同 {@link #drawDetail} 里的跳转判定逻辑保持口径一致（复用同一批
      * {@link ClientShopCatalog}/{@link com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup} 查询）。
      */
-    private List<ContextMenuItem> buildContextMenuItems(ShopEntry entry, long entryKey) {
+    private List<ContextMenuItem> buildContextMenuItems(ShopEntry entry, long entryKey, boolean batchMode) {
         List<ContextMenuItem> items = new ArrayList<>();
         items.add(new ContextMenuItem("§f查看详情", false, () -> selectEntry(entryKey, entry)));
-        // 收藏对所有玩家开放（不受 canEdit 限制）：纯个人标记，不影响商店目录本身，见 ClientShopFavorites。
-        boolean favored = ClientShopFavorites.contains(entry.getStableId());
-        items.add(new ContextMenuItem(favored ? "§e★取消收藏" : "§7☆收藏", false, () -> {
-            ClientShopFavorites.toggle(entry.getStableId());
-            if (favoritesOnly) recomputeVisible(); // 筛选中时取消收藏要立刻从网格消失，不用等下次切页/搜索
-        }));
 
         if (entry.hasLinkTarget()) {
             long targetKey = ClientShopCatalog.linkedEntryKey(entry.getLinkTo());
@@ -3347,27 +3447,85 @@ public class ShopScreen extends ScaledScreen {
             }));
         }
 
+        // 收藏对所有玩家开放（不受 canEdit 限制）：纯个人标记，不影响商店目录本身。
+        if (batchMode) {
+            List<ShopEntry> selectedEntries = batchEntries();
+            boolean allFavored = !selectedEntries.isEmpty();
+            for (ShopEntry selectedEntry : selectedEntries) {
+                if (!ClientShopFavorites.contains(selectedEntry.getStableId())) {
+                    allFavored = false;
+                    break;
+                }
+            }
+            items.add(new ContextMenuItem(allFavored ? "§e★批量取消收藏" : "§7☆批量收藏", false,
+                    this::toggleBatchFavorites));
+        } else {
+            boolean favored = ClientShopFavorites.contains(entry.getStableId());
+            items.add(new ContextMenuItem(favored ? "§e★取消收藏" : "§7☆收藏", false, () -> {
+                ClientShopFavorites.toggle(entry.getStableId());
+                if (favoritesOnly) recomputeVisible();
+            }));
+        }
+
         if (canEdit) {
-            // 编辑条目/复制为新条目/删除都折进了编辑模式；隐藏/排序不受编辑模式限制，仍只看 canEdit
-            if (catalogEditUnlocked) {
+            // 批量模式隐藏编辑/复制，避免把单项编辑表单语义误套到整批商品。
+            if (!batchMode && catalogEditUnlocked) {
                 items.add(new ContextMenuItem("§b编辑条目", true, () -> ShopEntryEditor.openEdit(this, entry)));
                 items.add(new ContextMenuItem("§a复制为新条目", false, () -> ShopEntryEditor.openDuplicate(this, entry)));
                 items.add(new ContextMenuItem("§d⇄ 快速分组", false, () -> openGroupPicker(entry, entryKey)));
             }
-            items.add(new ContextMenuItem(entry.isHidden() ? "§a取消隐藏" : "§c设为隐藏", false, () -> toggleHidden(entry)));
-            items.add(new ContextMenuItem("§e▲ 前移", false, () ->
-                    sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.UP)));
-            items.add(new ContextMenuItem("§e▼ 后移", false, () ->
-                    sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.DOWN)));
-            items.add(new ContextMenuItem("§6⤒ 置顶", false, () ->
-                    sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.TOP)));
-            if (catalogEditUnlocked) {
-                items.add(new ContextMenuItem("§c删除此商品", true, () -> {
-                    selectEntry(entryKey, entry);
-                    pendingDeleteEntry = entry;
-                    pendingDeleteArmedAtMs = System.currentTimeMillis();
-                    showMessage(Component.literal("§e[山海商店] 已选中，再点一次详情页「删除此商品」确认删除，3 秒内有效"));
-                }));
+            if (batchMode) {
+                List<ShopEntry> selectedEntries = batchEntries();
+                boolean allHidden = !selectedEntries.isEmpty();
+                for (ShopEntry selectedEntry : selectedEntries) {
+                    if (!selectedEntry.isHidden()) {
+                        allHidden = false;
+                        break;
+                    }
+                }
+                final boolean batchHide = allHidden;
+                items.add(new ContextMenuItem(batchHide ? "§a批量取消隐藏" : "§c批量设为隐藏", false,
+                        () -> sendBatchManage(batchHide
+                                ? com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.UNHIDE
+                                : com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.HIDE, null)));
+                items.add(new ContextMenuItem("§e▲ 批量前移", false, () -> sendBatchManage(
+                        com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.UP, null)));
+                items.add(new ContextMenuItem("§e▼ 批量后移", false, () -> sendBatchManage(
+                        com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.DOWN, null)));
+                items.add(new ContextMenuItem("§6⤒ 批量置顶", false, () -> sendBatchManage(
+                        com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.TOP, null)));
+                if (catalogEditUnlocked) {
+                    items.add(new ContextMenuItem("§d⇄ 批量快速分组", false, () -> openGroupPickerBatch()));
+                    items.add(new ContextMenuItem("§b批量设为仅购买", false, () -> sendBatchManage(
+                            com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.SET_TRADE_MODE,
+                            null, ShopEntry.TradeMode.BUY_ONLY)));
+                    items.add(new ContextMenuItem("§e批量设为仅出售", false, () -> sendBatchManage(
+                            com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.SET_TRADE_MODE,
+                            null, ShopEntry.TradeMode.SELL_ONLY)));
+                    items.add(new ContextMenuItem("§a批量设为不限", false, () -> sendBatchManage(
+                            com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.SET_TRADE_MODE,
+                            null, ShopEntry.TradeMode.BOTH)));
+                    boolean sameDeleteBatch = batchDeleteArmed()
+                            && pendingDeleteBatchIds.equals(new LinkedHashSet<>(batchSelectionStableIds));
+                    items.add(new ContextMenuItem(sameDeleteBatch ? "§c⚠再点一次确认批量删除" : "§c批量删除", true,
+                            this::armOrDeleteBatch));
+                }
+            } else {
+                items.add(new ContextMenuItem(entry.isHidden() ? "§a取消隐藏" : "§c设为隐藏", false, () -> toggleHidden(entry)));
+                items.add(new ContextMenuItem("§e▲ 前移", false, () ->
+                        sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.UP)));
+                items.add(new ContextMenuItem("§e▼ 后移", false, () ->
+                        sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.DOWN)));
+                items.add(new ContextMenuItem("§6⤒ 置顶", false, () ->
+                        sendReorder(entry, com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.TOP)));
+                if (catalogEditUnlocked) {
+                    items.add(new ContextMenuItem("§c删除此商品", true, () -> {
+                        selectEntry(entryKey, entry);
+                        pendingDeleteEntry = entry;
+                        pendingDeleteArmedAtMs = System.currentTimeMillis();
+                        showMessage(Component.literal("§e[山海商店] 已选中，再点一次详情页「删除此商品」确认删除，3 秒内有效"));
+                    }));
+                }
             }
         }
         return items;
@@ -3414,6 +3572,75 @@ public class ShopScreen extends ScaledScreen {
                 entry.getDiscountPercent(), entry.getDiscountStartMs(), entry.getDiscountEndMs());
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         showMessage(Component.literal("§b[山海商店] §a已把 §f" + entry.goodsDisplayName() + " §a分组到 §e" + newCategory));
+    }
+
+    private void toggleBatchFavorites() {
+        List<ShopEntry> entries = batchEntries();
+        if (entries.isEmpty()) return;
+        boolean allFavored = true;
+        for (ShopEntry entry : entries) {
+            if (!ClientShopFavorites.contains(entry.getStableId())) {
+                allFavored = false;
+                break;
+            }
+        }
+        for (ShopEntry entry : entries) {
+            if (allFavored) ClientShopFavorites.remove(entry.getStableId());
+            else ClientShopFavorites.add(entry.getStableId());
+        }
+        if (favoritesOnly) recomputeVisible();
+        showMessage(Component.literal(allFavored
+                ? "§b[山海商店] §7已批量取消收藏 " + entries.size() + " 项"
+                : "§b[山海商店] §a已批量收藏 " + entries.size() + " 项"));
+    }
+
+    private void sendBatchManage(com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action action,
+                                 String category) {
+        sendBatchManage(action, category, null);
+    }
+
+    private void sendBatchManage(com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action action,
+                                 String category, ShopEntry.TradeMode tradeMode) {
+        List<String> ids = batchIdsSnapshot();
+        if (ids.isEmpty()) return;
+        ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopBatchManagePacket(
+                action, ClientShopCatalog.revision(), ids, category, tradeMode));
+        if (action == com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.DELETE) {
+            clearBatchSelection();
+            undoDeleteLabel = ids.size() + " 件商品";
+            undoDeleteUntilMs = System.currentTimeMillis() + UNDO_DELETE_UI_WINDOW_MS;
+            clearSelection();
+        } else if (action == com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.HIDE
+                || action == com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.UNHIDE
+                || action == com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.REGROUP) {
+            showMessage(Component.literal("§b[山海商店] §a已发起批量管理操作，共 §f" + ids.size() + " §a项"));
+        } else if (action == com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.SET_TRADE_MODE) {
+            String label = switch (tradeMode == null ? ShopEntry.TradeMode.BOTH : tradeMode) {
+                case BUY_ONLY -> "仅购买";
+                case SELL_ONLY -> "仅出售";
+                default -> "不限";
+            };
+            showMessage(Component.literal("§b[山海商店] §a已将 " + ids.size() + " 项商品交易方向设为【" + label + "】"));
+        } else {
+            undoReorderLabel = ids.size() + " 件商品";
+            undoReorderUntilMs = System.currentTimeMillis() + UNDO_REORDER_UI_WINDOW_MS;
+        }
+    }
+
+    private void armOrDeleteBatch() {
+        List<String> ids = batchIdsSnapshot();
+        if (ids.isEmpty()) return;
+        if (batchDeleteArmed() && pendingDeleteBatchIds.equals(new LinkedHashSet<>(ids))) {
+            sendBatchManage(com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.DELETE, null);
+            pendingDeleteBatchIds.clear();
+            pendingDeleteBatchArmedAtMs = 0L;
+            showMessage(Component.literal("§b[山海商店] §a已批量删除 §f" + ids.size() + " §a项"));
+            return;
+        }
+        pendingDeleteBatchIds.clear();
+        pendingDeleteBatchIds.addAll(ids);
+        pendingDeleteBatchArmedAtMs = System.currentTimeMillis();
+        showMessage(Component.literal("§e[山海商店] 已选中批量删除，再点一次确认，3 秒内有效"));
     }
 
     /** 一键切换隐藏：其余字段原样带回去，走跟编辑器提交同一条 EDIT 通路，不新开一套网络包。 */
@@ -4000,14 +4227,59 @@ public class ShopScreen extends ScaledScreen {
             } else {
                 lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
             }
+            String tradeLabel = switch (e.getTradeMode()) {
+                case BUY_ONLY -> "仅购买";
+                case SELL_ONLY -> "仅出售";
+                default -> "不限";
+            };
+            lines.add(Component.literal("§7交易方向: §f" + tradeLabel));
+            int memberPct = ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier());
             if (e.isDiscountActive()) {
-                lines.add(Component.literal("§7成本 §8" + costInline(e.getCost()) + " §a→ " + costInline(e.getEffectiveCost())));
+                lines.add(Component.literal("§7基础成本 §8" + costInline(e.getCost())
+                        + " §a→ 当前生效成本 " + costInline(e.getEffectiveCost(memberPct))));
                 lines.add(Component.literal("§6限时特惠 -" + e.getDiscountPercent() + "% §7剩" + formatDuration(e.discountRemainingMs() / 1000L)));
+            } else if (memberPct > 0) {
+                lines.add(Component.literal("§7基础成本 §8" + costInline(e.getCost())
+                        + " §a→ 当前生效成本 " + costInline(e.getEffectiveCost(memberPct))
+                        + " §d(会员-" + memberPct + "%)"));
             } else {
-                lines.add(Component.literal("§7成本 " + costInline(e.getCost())));
+                lines.add(Component.literal("§7基础成本 " + costInline(e.getCost())));
+            }
+            if (!e.allowsSell()) {
+                lines.add(Component.literal("§7出售回收: §c不可出售"));
+            } else if (e.getRewardMode() != ShopEntry.RewardMode.NONE) {
+                lines.add(Component.literal("§7出售回收: §c奖励模式商品不可出售"));
+            } else if (e.hasMultipleGoods() || e.getCost().hasPhysical()) {
+                lines.add(Component.literal("§7出售回收: §c组合/实物成本商品不可出售"));
+            } else {
+                lines.add(Component.literal("§7出售回收: §e" + costInline(e.getCost().scaledTo(ShopPurchase.sellRatioPercent()))));
             }
             if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
-            if (e.getCost().hasPhysical()) lines.add(Component.literal("§8含实物：物品在背包 / 流体绑定 AE"));
+            if (e.isPeriodLimited()) {
+                lines.add(Component.literal("§7周期限购: 每 " + formatDuration(e.getPeriodTicks() / 20L)
+                        + " 秒最多 " + formatBig(java.math.BigInteger.valueOf(e.getPeriodLimit())) + " 次"));
+            }
+            String rewardLabel = switch (e.getRewardMode()) {
+                case CHOICE -> "自选奖励";
+                case RANDOM -> "随机奖励";
+                case ALL -> "全部奖励";
+                case FTBQ -> "FTBQ表·" + switch (e.getFtbqSubMode()) {
+                    case CHOICE -> "自选";
+                    case ALL -> "全部";
+                    default -> "随机";
+                };
+                default -> "固定商品";
+            };
+            lines.add(Component.literal("§7奖励模式: §d" + rewardLabel));
+            if (e.getCost().hasPhysical()) {
+                int itemCount = e.getCost().items().size();
+                int fluidCount = e.getCost().fluids().size();
+                lines.add(Component.literal("§8实物成本: 物品 " + itemCount + " 项，流体 " + fluidCount + " 项"
+                        + (fluidCount > 0 ? "（流体需绑定 AE）" : "（物品从背包扣除）")));
+            }
+            if (e.hasSubmissionRequirement()) {
+                lines.add(Component.literal("§6固定提交: " + e.getSubmissionItems().size() + " 项，购买前需一次性提交"));
+            }
             if (!e.getDisplayIcons().isEmpty()) {
                 StringBuilder ic = new StringBuilder("§7图标: §f");
                 for (ShopEntry.DisplayIcon d : e.getDisplayIcons()) ic.append(d.displayName()).append(' ');
