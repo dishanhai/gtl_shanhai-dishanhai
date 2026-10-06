@@ -742,9 +742,18 @@ public final class ModuleRegistry {
      *   1    大型集气室    GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES     gtceu:large_gas_collector
      *   2    虚空聚流反应  GtlAddCompat.voidfluxReaction()                gtceu:voidflux_reaction
      *   3    虚空流体钻机  GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES gtceu:void_fluid_drilling_rig
+     *   4 🆕 原初深空汲取  ShanhaiRecipeTypes.PRIMORDIAL_DEEP_SPACE_EXTRACTION  gtceu:primordial_deep_space_extraction
      * </pre>
-     * ⚠️ 上面这张表与数组体<b>必须同序</b>（下标 0..3 一一对应）：数组给机器用、表给人看，
+     * ⚠️ 上面这张表与数组体<b>必须同序</b>（下标一一对应）：数组给机器用、表给人看，
      * 错位就会变成"注释说是 A、机器挂的是 B"，那正是本工程最忌讳的一种假数据。
+     * <p>🆕 <b>2026-10-04 用户点单追加下标 4</b>（原初深空汲取）：用户原话
+     * 「<b>为原初深空汲取核心新增配方类型：原初深空汲取</b>」⇒ 本条数组由 4 条变 5 条，
+     * <b>其余四条的字段与顺序一字未动</b>（也没有改任何别的机器）。
+     * 第 4 条是<b>山海自有</b>真类型（前面四条都是宿主已有类型）——
+     * 它由 {@code ShanhaiRecipeTypes.init()} 在 {@code GTRecipeTypes.init()} 的注册回调里赋值，
+     * 而本类的类加载由 {@code GTMachines.init()} 触发（见 {@link #buildDeepSpaceExtractionCoreRecipeTypes()}
+     * 的时机链），<b>严格更晚</b> ⇒ 取到的必然不是 null；这一条同样受
+     * {@link #requireNoNullRecipeTypes} 的 fail-fast 保护。
      *
      * <h3>取证出处（2026-10-03 本轮实跑 javap 得到；原始输出见交付报告）</h3>
      * <ul>
@@ -869,20 +878,27 @@ public final class ModuleRegistry {
                 "GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES (gtceu:large_gas_collector)",
                 "GtlAddCompat.voidfluxReaction() (gtceu:voidflux_reaction)",
                 "GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES (gtceu:void_fluid_drilling_rig)",
+                // 🆕 2026-10-04 用户点单新增第 5 条：原初深空汲取（山海自有真类型，
+                //    由 ShanhaiRecipeTypes.init() 在 GTRecipeTypes.init() 的注册回调里赋值；
+                //    本类（ModuleRegistry）的类加载由 GTMachines.init() 触发 ⇒ 严格更晚 ⇒ 必已赋值）。
+                "ShanhaiRecipeTypes.PRIMORDIAL_DEEP_SPACE_EXTRACTION (gtceu:primordial_deep_space_extraction)",
         };
-        // 顺序 = 用户点名的先后（见上面那条数组注释里的下标表，两处必须一致）。
+        // 顺序 = 用户点名的先后（见上面那条数组注释里的下标表，两处必须一致）；
+        // 🆕 第 5 条（原初深空汲取）追加在末尾。
         GTRecipeType[] types = {
                 GTRecipeTypes.GAS_COLLECTOR_RECIPES,               // 集气室        gtceu:gas_collector
                 GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES,        // 大型集气室    gtceu:large_gas_collector
                 GtlAddCompat.voidfluxReaction(),                   // 虚空聚流反应  gtceu:voidflux_reaction
                 GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES,    // 虚空流体钻机  gtceu:void_fluid_drilling_rig
+                ShanhaiRecipeTypes.PRIMORDIAL_DEEP_SPACE_EXTRACTION, // 原初深空汲取  gtceu:primordial_deep_space_extraction
         };
         return requireNoNullRecipeTypes(path, names, types,
-                "这四个类型里，前三个来自 gtceu/gtlcore 的静态字段、第四个来自 gtladditions 的 "
-                        + "GTLAddRecipesTypes 这个 Kotlin object 的 getter ⇒ 说明有一条注册链没跑到本类类加载之前。"
+                "这五个类型里，前三个来自 gtceu/gtlcore 的静态字段、第四个来自 gtladditions 的 "
+                        + "GTLAddRecipesTypes 这个 Kotlin object 的 getter、第五个（2026-10-04 追加）来自 "
+                        + "ShanhaiRecipeTypes 这个【本工程自有】的静态字段 ⇒ 说明有一条注册链没跑到本类类加载之前。"
                         + "请先确认 CommonProxy#init() 里 GTRecipeTypes.init()(字节码偏移 94) 仍在 "
                         + "GTMachines.init()(偏移 97) 之前（本类的类加载由后者触发），"
-                        + "且 gtlcore / gtladditions 的类型注册回调没有被挪到 freeze 之后。");
+                        + "且 gtlcore / gtladditions / 本工程的类型注册回调没有被挪到 freeze 之后。");
     }
 
     /**

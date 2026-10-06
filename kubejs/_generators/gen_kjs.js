@@ -58,8 +58,18 @@ function exportCountText(typeId) {
 //    模块自带自检（VN 长度 / VN[14]==='MAX' / 每档 = 上一档 ×4 / 星门 = 2^47 / 4^16 口径恰好越界）。
 var GT_VOLTAGE = require('./gt_voltage.js')
 
+// 🔴 2026-10-04：CAP 的【真源③】模块 —— 「注册在 gtceu 命名空间、但不是 gtceu 本体注册的」类型，
+//    从【注册它的那个 mod jar】的字节码里现读 setMaxIOSize。
+//    起因：`gtceu:fishing_ground`（渔场，gtlcore 注册）被守卫当成"两真源都查不到"而拒绝写产物，
+//    真实是守卫自己少了一个真源 ⇒ 把**合法的同步**拦死。详见 mod_caps.js 文件头。
+//    本模块同时导出**真源②与真源③共用**的 javap 解析器（一个解析器、两个消费者）。
+var MODCAPS = require('./mod_caps.js')
+
 // ═══════════════════════════════════════════════════════════════════════════════
-// IO caps —— 🔴 2026-09-29 重做：CAP 表【不再写死】，改为【双真源 · 现读现算 · 双向硬拦】
+// IO caps —— 🔴 2026-09-29 重做：CAP 表【不再写死】，改为【真源 · 现读现算 · 双向硬拦】
+//   · 2026-10-04：真源由【两个】扩到【三个】—— 见下面 ① / ② / ③ 三段与 CAP 合成处的事故记录：
+//     双真源会漏掉"别的 mod 注册在 gtceu 命名空间下的类型"（如 gtlcore 的 gtceu:fishing_ground），
+//     把**合法同步**拦死。**只扩来源，不放宽判据**：假类型名照样被 G3 拒绝。
 // ═══════════════════════════════════════════════════════════════════════════════
 // 为什么推翻了"写死一张表"这个做法（本次实测到的两个真错，不是我猜的）：
 //   ① 【缺键】`primordial_matter_recombination` 不在旧表里（旧表 12 个键，Java 活代码 41 个）
@@ -157,53 +167,16 @@ function parseShanhaiCaps(p) {
     return { caps: caps, where: where, liveCount: live.length, deadCount: dead, dup: dup, realTypeCount: realTypeCount, regs: regs }
 }
 
-/** 真源②：gtceu 的 javap -c 转储 ⇒ id ⇒ (a,b,c,d)。 */
+/** 真源②／真源③ **共用**的 javap 转储解析器 —— 2026-10-04 起搬进 `mod_caps.js`，本处只留薄包装。
+ *  🔴 为什么搬而不是"再抄一份"：真源③ 要用**同一个**解析器。复制一份 = 让"两边对不上"这件事
+ *     在没人看得见的地方发生（本工程吃过 7 次"检查器自己的假设错了"的亏）。
+ *  ⚠️ 解析器的全部纪律（回看窗口 25 行、`var v` 每轮显式清空…）随代码一起搬走了，
+ *     逐字注释见 `kubejs\_generators\mod_caps.js` 的同名函数。
+ *  ⚠️ 下面 G0 的【正面对照】仍在原处，且现在**同时**护住两个真源：
+ *     ② 由 circuit_assembler / primitive_blast_furnace / assembler / electric_furnace 四条守着，
+ *     ③ 由 fishing_ground 一条 + 与②的逐条交叉验证守着。 */
 function parseJavapCaps(p) {
-    var lines = readTextSmart(p).split(/\r?\n/)
-    var caps = {}, problems = []
-    for (var i = 0; i < lines.length; i++) {
-        var t = lines[i].replace(/^\s+/, '')
-        if (!/register:\(Ljava\/lang\/String;Ljava\/lang\/String;/.test(t)) continue
-        var strs = []
-        // 🔴 2026-09-30：回看窗口 **6 → 25 行**。原来 6 行会漏掉【参数离 register 较远】的那一条：
-        //    实测 `electric_furnace`（中文名「电炉」）的两条 String 在 register 之前 7、8 行
-        //    （它中间还夹着 `anewarray RecipeType` + `iconst_0` + `getstatic RecipeType.f_44108_` + `aastore`
-        //      这四行，把两条 String 顶出了 6 行窗口）⇒ 真实原生类型数 57 而不是 58。
-        //    后果不是"少一个数字"，而是 **「电炉」这个名字反查不到** ⇒ 纸上写它会被误判成笔误。
-        //    ⇒ 为什么放大是安全的：register 的两个 String 参数**必然**紧邻在它的数组构造之前，
-        //      因此"从 register 往前最近的 2 条 String"永远是它自己的参数，不可能取到上一条注册的。
-        //      多留窗口只会救回被顶出去的那一条，不会改变已有的任何一条。
-        for (var k = i - 1; k >= Math.max(0, i - 25) && strs.length < 2; k--) {
-            var ms = /\/\/ String ([A-Za-z0-9_]+)\s*$/.exec(lines[k].replace(/^\s+/, ''))
-            if (ms) strs.push(ms[1])
-        }
-        if (strs.length < 2) { problems.push('L' + (i + 1) + ': register 前找不到两条 String'); continue }
-        var id = strs[1]
-        var pushes = [], found = false
-        for (var k2 = i + 1; k2 < Math.min(lines.length, i + 20); k2++) {
-            var s = lines[k2].replace(/^\s+/, '')
-            var mo = /^\d+:\s+(\S+)\s*(.*)$/.exec(s)
-            if (!mo) continue
-            var op = mo[1], rest = mo[2]
-            if (/setMaxIOSize:\(IIII\)/.test(s)) { found = true; break }
-            if (/invokevirtual|invokestatic|getstatic|putstatic|anewarray|^new$|checkcast/.test(op)) continue
-            // 🔴 `v` 必须【每轮显式清空】。写 `var v` 是不够的（var 是函数作用域、不会重置）：
-            //    实测这个漏写法让 `bipush 6` 那一位继承了上一轮的 0 ⇒ circuit_assembler 被算成
-            //    [0,1,1,0] 而不是 [6,1,1,0]（下限被低估 ⇒ 自检会漏报溢出）。
-            //    是下面的【正面对照断言】当场抓到的，不是靠人看。
-            var v = undefined
-            if (/^iconst_m1$/.test(op)) v = -1
-            else { var m1 = /^iconst_([0-5])$/.exec(op); if (m1) v = parseInt(m1[1], 10) }
-            if (v === undefined) { var m2 = /^bipush\s+(-?\d+)$/.exec(op + ' ' + rest); if (m2) v = parseInt(m2[1], 10) }
-            if (v === undefined) { var m3 = /^sipush\s+(-?\d+)$/.exec(op + ' ' + rest); if (m3) v = parseInt(m3[1], 10) }
-            if (v === undefined) { problems.push('L' + (k2 + 1) + ' ' + id + ': 认不出的操作数 `' + s.trim() + '`'); break }
-            pushes.push(v)
-        }
-        if (!found) { problems.push('L' + (i + 1) + ' ' + id + ': 之后找不到 setMaxIOSize'); continue }
-        if (pushes.length !== 4) { problems.push(id + ': 操作数个数 = ' + pushes.length + '（不是 4）'); continue }
-        caps[id] = pushes
-    }
-    return { caps: caps, problems: problems }
+    return MODCAPS.parseJavapCaps(readTextSmart(p))
 }
 
 var SH_JAVA = parseShanhaiCaps(JAVA_TYPES)
@@ -523,7 +496,7 @@ if (TD_PAPER_ONLY.length) {
 //    ⇒ `rows[].type` 是 null ⇒ 反查器看不到名字。这时拿 in 里那些"纸"的名字去猜。
 if (TD_NO_TYPE_BAD_CELL.length) {
     var _tdL2 = []
-    var _knownNote = { '物质模块是催化剂': 1, '力场发生器是催化剂': 1, '夸克释放催化剂作为催化剂': 1 }
+    var _knownNote = { '物质模块是催化剂': 1, '力场发生器是催化剂': 1, '夸克释放催化剂作为催化剂': 1, '电路批产模块MK1是催化剂': 1 }
     for (var _tdq = 0; _tdq < TD_NO_TYPE_BAD_CELL.length; _tdq++) {
         var _R3 = TD_NO_TYPE_BAD_CELL[_tdq]
         var _noteNames = (_R3.notes || []).map(function (x) { return x.desc.name })
@@ -550,7 +523,7 @@ if (TD_NO_TYPE_BAD_CELL.length) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // CAP 合成 + 硬拦 G2/G3/G4 —— 必须放在 TYPE_ID 之后（判据要用它）
 // ═══════════════════════════════════════════════════════════════════════════════
-// CAP = 真源①(全部) ∪ 真源②(只取【本次纸上真正用到】的 gtceu 原生)
+// CAP = 真源①(全部) ∪ 真源②(只取【本次纸上真正用到】的 gtceu 原生) ∪ 真源③(同上口径)
 //
 // 🔴 2026-09-30 口径修正（**这是"只扩判定源"必须配套的一处**，不修就会每次误报）：
 //    原来这里是 `for (var _k in TYPE_ID) …` —— 遍历整张 TYPE_ID。
@@ -560,13 +533,83 @@ if (TD_NO_TYPE_BAD_CELL.length) {
 //    ⇒ 照旧遍历会把 103 个【CAP 里没有上限数据】的 id 拖进 G2/G3
 //    ⇒ 每一次生成都会以"IO 上限（CAP）硬拦失败"收场（实测撞到过，原始输出见交付报告）。
 //    ⇒ 正确的口径 = **G2/G3/G4 的本意**：只为"本次纸上真正用到的类型"要上限数据。
-//      这一条对现有配方是**零影响**：纸上用到的 14 个名字对应的 14 个 id 只有
-//      `circuit_assembler` / `primitive_blast_furnace` 两个要靠真源② ⇒ CAP 仍是 43 个键（= 改动前的值）。
+//
+// 🔴🔴 2026-10-04 新增【真源③】—— 起因是**守卫自己把合法同步拦死**（这是本次的事故，不是"预防性加固"）：
+//    用户同步失败，原文：「【用到的配方类型在两个真源里都查不到】1 个：gtceu:fishing_ground（纸上叫「渔场」）」
+//    而 `gtceu:fishing_ground` **是合法的**：由 **gtlcore** 注册在 gtceu 命名空间下
+//    （`gtlcore-1.2.3.2-fix3.jar!org/gtlcore/gtlcore/common/data/GTLRecipeTypes.class` 的 `<clinit>`：
+//      `register("fishing_ground","multiblock",…)` + `setMaxIOSize(2,24,0,0)`），
+//    中文名「渔场」在同 jar 的 `assets/gtceu/lang/zh_cn.json`，游戏导出表里有 8 条配方。
+//    ⇒ 根因 = 真源①②都**只能看见"各自那个 mod 注册的类型"**：
+//        ① = shanhai 自己的 Java 活代码；② = gtceu 本体的 javap 快照。
+//      本整合包把大量**别的 mod** 的类型也注册在 `gtceu:` 命名空间下（实测游戏导出表 133 个类型目录）
+//      ⇒ 少这一源，"别人的类型"一律被判成笔误。
+//    ⇒ 真源③ = **现读实例 mods**：自动扫出"常量池里含 setMaxIOSize"的注册类，解包 + javap，
+//      用**与真源②同一个解析器**还原 `id ⇒ (a,b,c,d)`（模块：kubejs\_generators\mod_caps.js）。
+//      ⚠️ 现读现算、**无缓存无快照** ⇒ 不会重演"真源②那个快照会过期"的老病。
+//
+//    🔴 **它只扩"来源"，绝不放宽"判据"** —— 两条护栏：
+//      G-③a【旁证】mod_caps 给出的 id 必须另有独立来源（lang 里的 `gtceu.<id>` 键 或 游戏导出表目录），
+//            否则丢弃并如实报出 ⇒ 防止"往前回看取错字符串"凭空造出一个不存在的类型名（那才是放宽）。
+//      G-③b【与真源②交叉验证】两边读的是**同一个** `GTRecipeTypes.class` 的同一段字节码 ⇒ 必须逐条相等。
+//      负面判据（G3）也原样保留：真不存在的类型名照样抛错拒绝写产物 —— 见文件末「负面对照」段。
 var _usedGtIds = {}
 for (var _rc0 = 0; _rc0 < rows.length; _rc0++) {
     var _rt0 = rows[_rc0].type
     if (_rt0 && TYPE_ID[_rt0]) _usedGtIds[TYPE_ID[_rt0]] = _rt0
 }
+// 🧪 负面对照探针（默认关闭）：`SH_CAP_PROBE=<id>[,<id>…]` 把类型 id **当成"纸上用到了"**注入。
+//   · 用途 = **用真实产物路径**证明守卫没有被放宽：
+//       $env:SH_CAP_PROBE='zzz_definitely_not_a_type'  ⇒ 必须抛错、拒绝写产物（G3 报红）；
+//       $env:SH_CAP_PROBE='fishing_ground'             ⇒ 必须照常通过（真类型）。
+//   · 为什么做成"直接注入到判据的输入"而不是另写一个检查脚本：本工程吃过 7 次
+//     "检查器自己的假设错了 ⇒ 它的 PASS 不可信"的亏。注入法走的是**同一条代码路径**，没法自说自话。
+//   · ⚠️ 探针会一并进入 CAP 合成（它就是 `_usedGtIds`）。所以正面对照请用**纸上本来就用到**的 id
+//     （如 fishing_ground），否则 CAP 会多一个键、产物 §4 表会多一行（那是探针的副作用，不是配方变化）。
+if (Object.prototype.hasOwnProperty.call(process.env, 'SH_CAP_PROBE')) {
+    var _probeIds = String(process.env.SH_CAP_PROBE || '').split(',').map(function (s) { return s.trim() }).filter(function (s) { return s })
+    var _probeName = process.env.SH_CAP_PROBE_NAME || '（负面对照注入的假类型）'
+    for (var _pp = 0; _pp < _probeIds.length; _pp++) _usedGtIds[_probeIds[_pp]] = _probeName
+    console.log('[PF] 🧪 SH_CAP_PROBE 已注入 ' + _probeIds.length + ' 个 id 到"纸上用到"集合：'
+        + _probeIds.join(' / ') + '（显示名「' + _probeName + '」）'
+        + ' ⇒ 期望结果：' + (_probeIds.join(',').indexOf('zzz') >= 0 ? '**被 G3 拒绝、不写产物**' : '照常通过（真类型）'))
+}
+
+// ── 真源③ 现读（放在这里：上面 G6 已经读过 mods 了，MODS_DIR 也早已定义）────────────
+var MODCAPS_RES = MODCAPS.build({ modsDir: MODS_DIR, exportRecipesRoot: EXPORT_RECIPES_ROOT })
+var MOD_BYTECODE = { caps: MODCAPS_RES.caps }
+var MOD_META = MODCAPS_RES.meta
+console.log('[PF] 真源③ 实例 mods 的注册类字节码（现读，无缓存）：' + MOD_META.javapVersion)
+console.log('[PF]   扫 ' + MOD_META.jarScanned + '/' + MOD_META.jarCount + ' 个 jar、' + MOD_META.classScanned + ' 个 class（'
+    + MOD_META.scanSeconds + ' 秒）⇒ 含 setMaxIOSize 的注册类 ' + MOD_META.matchedClasses.length + ' 个：'
+    + MOD_META.matchedClasses.map(function (c) { return c.jar + '!' + c.cls + '=' + c.ids + ' 类型' }).join('　'))
+console.log('[PF]   解析出 id = ' + MOD_META.capsAll + ' ⇒ 旁证（lang 的 gtceu.<id> 键 或 游戏导出表目录）通过 ' + MOD_META.capsKept
+    + ' 个、**丢弃 ' + MOD_META.unverified.length + ' 个**（旁证不得者不算数 ⇒ 防"回看取错字符串"凭空造类型）'
+    + (MOD_META.unverified.length ? '：' + MOD_META.unverified.join(' ／ ') : ''))
+if (MOD_META.unverified.length) console.log('[PF]   ℹ️ 被丢弃的这些 id 【本来也进不来】：它们没有 lang 键 ⇒ type_names 的反查表里没有它们 ⇒ 纸上写不出它们。')
+if (MOD_META.unreadableJars.length) console.log('[PF]   ⚠️ 读不了的 jar（如实列出，不静默）：' + MOD_META.unreadableJars.join(' ／ '))
+if (MOD_META.javapProblems.length) console.log('[PF]   ⚠️ javap 解析未成形 ' + MOD_META.javapProblems.length
+    + ' 条（多数是"定义了 setMaxIOSize 的类/构建器"这类没有 register 的正常情况；前 3 条：' + MOD_META.javapProblems.slice(0, 3).join(' ／ ') + '）')
+if (MOD_META.conflicts.length) console.log('[PF]   ⚠️ 跨类同名 id 上限不一致 ' + MOD_META.conflicts.length + ' 个：' + JSON.stringify(MOD_META.conflicts))
+// ── 硬拦 G-③b：真源③ 与真源② 的【交叉验证】─────────────────────────────────────
+// 两边读的都是 gtceu 本体 `GTRecipeTypes.class`（一个来自 2026-09-26 的转储、一个来自现读 jar）
+// ⇒ 对同一批 id 必须给出**逐条相同**的四元组。对不上 = 其中一个过期/解析器坏了 ⇒ CAP 值不可信 ⇒ 抛。
+var _g3b = [], _x2same = 0
+for (var _xid in GT_BYTECODE.caps) if (Object.prototype.hasOwnProperty.call(GT_BYTECODE.caps, _xid)) {
+    var _raw = MODCAPS_RES.capsRaw[_xid]
+    if (!_raw) { _g3b.push('真源② 有 `' + _xid + '` ' + JSON.stringify(GT_BYTECODE.caps[_xid]) + '，而现读 gtceu jar 的同类里【没有】'); continue }
+    if (_raw.join(',') !== GT_BYTECODE.caps[_xid].join(',')) {
+        _g3b.push('`' + _xid + '`：真源②(09-26 转储) = ' + JSON.stringify(GT_BYTECODE.caps[_xid]) + '，真源③(现读 jar) = ' + JSON.stringify(_raw))
+    } else _x2same++
+}
+if (_g3b.length) {
+    throw new Error('[PF] 🔴 真源② 与 真源③ 的【交叉验证】失败（两边读的是同一个 GTRecipeTypes.class ⇒ 必须逐条相等），拒绝写产物：\n    · '
+        + _g3b.slice(0, 12).join('\n    · ') + (_g3b.length > 12 ? '\n    · …共 ' + _g3b.length + ' 条' : '')
+        + '\n    ⇒ 含义：gtceu 本体 jar 换过了（真源②那个 09-26 的快照过期），或真源③的解析坏了。'
+        + '\n    ⇒ 修法：重新生成真源② `recipe-convert\\javap\\GTRecipeTypes.txt`（见文件头 §真源② 的 javap 命令），'
+        + '\n       或先查真源③：`node kubejs\\_generators\\mod_caps.js --mods "<实例>\\mods" --export "<实例>\\local\\kubejs\\export\\recipes"`。')
+}
+console.log('[PF] ✅ G-③b 交叉验证：真源② 与 真源③ 对同一个 GTRecipeTypes.class 的 **' + _x2same + ' 个类型逐条相等** ✓')
 
 var CAP = {}, CAP_ORIGIN = {}
 for (var _id1 in SH_JAVA.caps) if (Object.prototype.hasOwnProperty.call(SH_JAVA.caps, _id1)) {
@@ -576,7 +619,7 @@ for (var _id1 in SH_JAVA.caps) if (Object.prototype.hasOwnProperty.call(SH_JAVA.
 var _nativeIds = []
 for (var _id2 in _usedGtIds) if (Object.prototype.hasOwnProperty.call(_usedGtIds, _id2)) {
     if (CAP[_id2]) continue                       // 已在真源①里 ⇒ 不用真源②
-    if (!GT_BYTECODE.caps[_id2]) continue         // 真源②也没有 ⇒ 交给 G3 报错
+    if (!GT_BYTECODE.caps[_id2]) continue         // 真源②也没有 ⇒ 可能是真源③的类型，交给下面
     _nativeIds.push(_id2)
 }
 // ⚠️ **必须先排序、再往 CAP 里插**：`CAP` 的键顺序决定产物文件头 §4 表的行序。
@@ -589,6 +632,24 @@ for (var _id2b = 0; _id2b < _nativeIds.length; _id2b++) {
     CAP[_nativeIds[_id2b]] = GT_BYTECODE.caps[_nativeIds[_id2b]]
     CAP_ORIGIN[_nativeIds[_id2b]] = '②GTRecipeTypes.txt(javap)'
 }
+// ── 真源③ 供数：只取【本次纸上真正用到】、且①②都没有的 id（同一口径、同样先排序再插）──
+var _modIds = []
+for (var _id2c in _usedGtIds) if (Object.prototype.hasOwnProperty.call(_usedGtIds, _id2c)) {
+    if (CAP[_id2c]) continue                            // ①②已有 ⇒ 不用③
+    if (!MOD_BYTECODE.caps[_id2c]) continue              // ③也没有 ⇒ 交给 G3 报错
+    _modIds.push(_id2c)
+}
+_modIds.sort()
+for (var _id2d = 0; _id2d < _modIds.length; _id2d++) {
+    CAP[_modIds[_id2d]] = MOD_BYTECODE.caps[_modIds[_id2d]]
+    CAP_ORIGIN[_modIds[_id2d]] = '③mod jar 字节码 ' + MODCAPS_RES.origin[_modIds[_id2d]]
+}
+if (_modIds.length) {
+    for (var _id2e = 0; _id2e < _modIds.length; _id2e++) {
+        console.log('[PF] 🆕 真源③ 供数：gtceu:' + _modIds[_id2e] + '（纸上叫「' + _usedGtIds[_modIds[_id2e]] + '」）= ('
+            + MOD_BYTECODE.caps[_modIds[_id2e]].join(', ') + ')　出处 ' + MODCAPS_RES.origin[_modIds[_id2e]])
+    }
+}
 
 var _g = []
 // G2【类型存在但表里没有】—— 这正是 2026-09-26/09-28 那次"整条配方消失/自检空转"的病根
@@ -598,29 +659,50 @@ for (var _id3 in _usedGtIds) if (Object.prototype.hasOwnProperty.call(_usedGtIds
 }
 if (_missing.length) _g.push('【类型存在但 CAP 表里没有】' + _missing.length + ' 个：\n        - ' + _missing.join('\n        - ')
     + '\n        ⇒ 这些配方会回落到兜底上限 ⇒ 槽位自检对它们形同虚设。')
-// G3【用到的类型必须真的注册过】—— 两个真源都查不到 ⇒ 该 id 很可能是笔误
+// G3【用到的类型必须真的注册过】—— 三个真源都查不到 ⇒ 该 id 很可能是笔误
+//  🔴 判据是"三源都查不到"，不是"放宽成不查"：假类型（如 zzz_definitely_not_a_type）照样进这里 ⇒ 照样抛。
 var _unknown = []
 for (var _id4 in _usedGtIds) if (Object.prototype.hasOwnProperty.call(_usedGtIds, _id4)) {
-    if (!SH_JAVA.caps[_id4] && !GT_BYTECODE.caps[_id4]) _unknown.push('gtceu:' + _id4 + '（纸上叫「' + _usedGtIds[_id4] + '」）')
+    if (!SH_JAVA.caps[_id4] && !GT_BYTECODE.caps[_id4] && !MOD_BYTECODE.caps[_id4]) {
+        _unknown.push('gtceu:' + _id4 + '（纸上叫「' + _usedGtIds[_id4] + '」）')
+    }
 }
-if (_unknown.length) _g.push('【用到的配方类型在两个真源里都查不到】' + _unknown.length + ' 个：\n        - ' + _unknown.join('\n        - ')
-    + '\n        ⇒ 要么 id 写错了，要么该类型没有被注册。')
-// G4【表里有但类型已不存在】—— 反向差集：CAP 的每个键都必须能追溯到真源①或真源②
+if (_unknown.length) _g.push('【用到的配方类型在三个真源里都查不到】' + _unknown.length + ' 个：\n        - ' + _unknown.join('\n        - ')
+    + '\n        ⇒ 要么 id 写错了，要么该类型没有被注册。'
+    // 🆕 2026-10-04：把"**确实注册了、但读不到 setMaxIOSize**"这一类单独说清。
+    //    实测样本（不是假想）：gtladditions 的 `gtceu:transmutation_block_conversion` 真的注册了
+    //    （`register("transmutation_block_conversion","dummy",…)`），但它**一次都没调 setMaxIOSize**
+    //    （只 setXEIVisible(false)）⇒ 读不到 IO 上限。它【不是打错字】。
+    //    守卫对它仍然拒绝（不编一个上限数字 —— 那正是"检查器假装在工作"），但要让人一眼分得清。
+    + (function () {
+        var _nc = []
+        for (var _nci = 0; _nci < MOD_META.noCaps.length; _nci++) {
+            var _nm = MOD_META.noCaps[_nci].split(' @ ')[0]
+            if (_usedGtIds[_nm]) _nc.push('gtceu:' + _nm + '　（' + MOD_META.noCaps[_nci] + ' 里注册了，但那一段**没有 setMaxIOSize** ⇒ 读不到上限）')
+        }
+        return _nc.length ? '\n        ⚠️ 其中这 ' + _nc.length + ' 个【不是打错字、也确实注册了】，只是没有上限数据：\n        - '
+            + _nc.join('\n        - ') : ''
+    })())
+// G4【表里有但类型已不存在】—— 反向差集：CAP 的每个键都必须能追溯到真源①/②/③
 var _orphan = []
 for (var _id5 in CAP) if (Object.prototype.hasOwnProperty.call(CAP, _id5)) {
-    if (!SH_JAVA.caps[_id5] && !GT_BYTECODE.caps[_id5]) _orphan.push(_id5)
+    if (!SH_JAVA.caps[_id5] && !GT_BYTECODE.caps[_id5] && !MOD_BYTECODE.caps[_id5]) _orphan.push(_id5)
 }
 if (_orphan.length) _g.push('【CAP 表里有但类型已不存在】' + _orphan.length + ' 个：' + _orphan.join(' / '))
 if (_g.length) {
     throw new Error('[PF] 🔴 IO 上限（CAP）硬拦失败，拒绝写产物：\n    · ' + _g.join('\n    · ')
         + '\n    真源①：' + JAVA_TYPES
         + '\n    真源②：' + GT_JAVAP
-        + '\n    ⇒ 真值只认这两个文件里的活代码/字节码；不要手工往 CAP 里塞数字（它现在完全由真源现算）。')
+        + '\n    真源③：实例 mods 里注册类的字节码（现读：' + MOD_META.modsDir + '，脚本 ' + ROOT + 'kubejs\\_generators\\mod_caps.js）'
+        + '\n    ⇒ 真值只认这三个来源里的活代码/字节码；不要手工往 CAP 里塞数字（它现在完全由真源现算）。'
+        + '\n    ⇒ 真源③ 是【自动】的（扫 mods ⇒ 自动定位注册类 ⇒ javap），不需要人工维护快照；'
+        + '\n      单跑自检：node kubejs\\_generators\\mod_caps.js --mods "' + MOD_META.modsDir + '"')
 }
 console.log('[PF] CAP 现算 = ' + Object.keys(CAP).length + ' 个键（真源① ' + Object.keys(SH_JAVA.caps).length
-    + ' 个 + 真源② gtceu 原生 ' + _nativeIds.length + ' 个 = ' + _nativeIds.join(' / ') + '）')
+    + ' 个 + 真源② gtceu 原生 ' + _nativeIds.length + ' 个 = ' + _nativeIds.join(' / ')
+    + ' + 真源③ 别人的类型 ' + _modIds.length + ' 个 = ' + _modIds.join(' / ') + '）')
 console.log('[PF] 🔴 双向差集（与真源）: [类型存在但表里没有] = ' + _missing.length
-    + '  [表里有但类型已不存在] = ' + _orphan.length + '  [两真源都查不到] = ' + _unknown.length)
+    + '  [表里有但类型已不存在] = ' + _orphan.length + '  [三真源都查不到] = ' + _unknown.length)
 
 var UNRESOLVED_TYPE = {}
 // 用户 2026-09-26 **最新**裁决（逐字）：「溢出那就算了，改成 max+8=max,4^8A」
@@ -876,6 +958,29 @@ var PAPER_QUARK_CATALYST = '夸克释放催化剂作为催化剂'
  *  用户点单原文：「判断物质模块是否是催化剂仅凭借是否我放了那张纸」
  *  ⇒ 全脚本只在这里写一次这个字符串，判据 / 自报行 / 文件头计数都引用它，避免改名时漏改一处。 */
 var PAPER_MODULE_CATALYST = '物质模块是催化剂'
+/** 🔴 2026-10-04 新增：纸「X是催化剂」的**第四种形态** —— 纸面点名了某个**具体物品**
+ *  （前三种各有专门规则：物质模块 ⇒ moduleRuleOf；力场发生器 ⇒ 认整族；夸克释放催化剂 ⇒ 显式表）。
+ *  本表 = 【纸面原文】→【物品 id】⇒ 该配方里那个物品落 `.notConsumable(...)`（不消耗），数量照纸一字不改。
+ *  取证：PF.txt 第 98／100／102／103／110 条（全是「世线电路板组装」，输入 = 1x 电路批产模块MK1 ＋ 2x 世线板）。
+ *  ⚠️ 往这里加条目必须**先核对那个 id 真在导出注册表里**，别凭印象写。
+ *  ⚠️ 表里【没有】的「X是催化剂」纸 ⇒ 打 🔴 告警（绝不静默把那个物品当材料吃掉）。 */
+var PAPER_NAMED_CATALYSTS = {
+    '电路批产模块MK1是催化剂': 'thetornproductionline:circult_process_module_1'
+}
+/** 🔴 2026-10-04 新增：纸「<粒子>产出概率N%」里【具体中文名】→ 物品 id 的表。
+ *  写法规则（在产出格那张纸上）：
+ *    · **泛指**「中微子产出概率N%」⇒ 匹配本条任何以 `_neutrino` 结尾的产出
+ *      （取证：PF.txt 第 92 条「光子分离 · 处理样板HV · 10s · 电路3」⇒ 产出 μ子中微子，纸上写「中微子产出概率3%」）
+ *    · **具体**「产出概率纸」等 ⇒ 查本表
+ *  ⚠️ 表里没有的具体名字 ⇒ 打 🔴 告警（绝不静默当 100% 产出）。
+ *  ⚠️ 往这里加条目要**照抄语言文件里的真名**，别自己译。 */
+var CHANCE_PAPER_ITEM = {
+    '电子中微子': 'shanhai:electron_neutrino',
+    'μ子中微子': 'shanhai:muon_neutrino',
+    'μ中微子': 'shanhai:muon_neutrino',
+    'τ子中微子': 'shanhai:tau_neutrino',
+    'τ中微子': 'shanhai:tau_neutrino'
+}
 /** "Nx <id>" / "<id>" ⇒ id。产物里的 itemInputs / notConsumable 都是这个形态。 */
 function idOfSlotText(s) {
     var t = String(s).trim()
@@ -1116,12 +1221,18 @@ function specFromRow(R) {
     //       ⇒ 这里只是**调用**它，不再自己写一份判断（"一条规则两处各写一遍"正是上一轮漏掉 pf/photon 的成因）。
     var _mr = moduleRuleOf(R, typeId)
     var catModule = _mr.catModule, catModuleSlot = _mr.slot
-    var catField = null, catQuark = null
+    var catField = null, catQuark = null, catNamed = null, catNamedPaper = null
     for (var i = 0; i < R.notes.length; i++) {
         var n = R.notes[i].desc.name
         if (n === '力场发生器是催化剂') catField = true
         // 🔴 2026-09-30 新增：纸面原文「夸克释放催化剂作为催化剂」（逐字，末尾无句号）
         if (n === PAPER_QUARK_CATALYST) catQuark = true
+        // 🔴 2026-10-04 新增：纸「X是催化剂」的第四种形态 —— 点名了某个**具体物品**
+        //    （前三种各有专门规则：物质模块 ／ 力场发生器族 ／ 夸克释放催化剂表 ⇒ 这里一律排除）
+        if (n !== PAPER_MODULE_CATALYST && n !== '力场发生器是催化剂' && n !== PAPER_QUARK_CATALYST && /是催化剂$/.test(n)) {
+            catNamedPaper = n
+            catNamed = PAPER_NAMED_CATALYSTS[n] || null
+        }
     }
     var items = [], mods = []
     for (var a = 0; a < R.real.length; a++) {
@@ -1136,6 +1247,8 @@ function specFromRow(R) {
     /** 🔴 2026-10-03：本条实际落成"不消耗"催化剂（`.notConsumable`）的**力场发生器**，
      *  元素形如 '1x gtceu:hv_field_generator'。供"这条族判据到底改了哪几条配方"**现算**用 —— */
     var fieldLanded = []
+    /** 🔴 2026-10-04：本条实际落成"不消耗"的、由纸「X是催化剂」点名的**具体物品**（同上，供现算与自报）。 */
+    var namedLanded = []
 
     // ═══════════════════════════════════════════════════════════════════════════
     // 🔴🔴 2026-10-03 用户点单（原话逐字，**本次唯一的口径**）：
@@ -1225,6 +1338,13 @@ function specFromRow(R) {
             notConsumable.push(it.cnt + 'x ' + it.id)
             continue
         }
+        // 🔴 2026-10-04 新增：纸「X是催化剂」点名的**具体物品** ⇒ 落 .notConsumable（不消耗）。
+        //    数量照纸上写的那个数，**一个数字都不动**；只有【纸上写了这张纸的那条配方】才生效。
+        if (catNamed && it.id === catNamed) {
+            notConsumable.push(it.cnt + 'x ' + it.id)
+            namedLanded.push(it.cnt + 'x ' + it.id)
+            continue
+        }
         // 🔴 2026-10-03 修（defect A）：判据由【写死 LV】改成【认整族】—— 见段首那段长注释。
         //    原来写 `it.id === 'gtceu:lv_field_generator'` ⇒ 纸写了这句、元件却是 MV/HV/…
         //    时**静默失效**（物品照常进 itemInputs 被消耗，且不报错）。
@@ -1260,6 +1380,14 @@ function specFromRow(R) {
         if (!hasF) flags.push('纸写「力场发生器是催化剂」，但该样板里【没有】力场发生器物品'
             + '（族判据 = `' + FIELD_GENERATOR_FAMILY_RE + '`）⇒ 催化剂无从挂起，本条按"无催化剂"落。')
     }
+    // 🔴 2026-10-04：纸「X是催化剂」（点名具体物品）的两道护栏 —— 缺一个就【响亮说清楚】，绝不静默吃料。
+    if (catNamedPaper) {
+        if (!catNamed) flags.push('🔴 纸写「' + catNamedPaper + '」，但 gen_kjs.js 的 PAPER_NAMED_CATALYSTS 表里'
+            + '【没有】这张纸 ⇒ 那个物品**照常进 itemInputs 被消耗**（这不是你要的效果）'
+            + ' ⇒ 把这张纸的原文加进那张表（连同它对应的物品 id）即可。')
+        else if (!namedLanded.length) flags.push('纸写「' + catNamedPaper + '」（= ' + catNamed
+            + '），但该样板输入里【没有】这个物品 ⇒ 催化剂无从挂起，本条按"无催化剂"落。')
+    }
     // 🔴 2026-09-30：同型的"纸写了、但物品不在"守卫 —— 不静默。
     //    两种情形都要报：①纸上写了这句话、输入里一个夸克释放催化剂都没有；
     //                    ②有夸克释放催化剂、但它不在 QUARK_EMISSION_CATALYSTS 里（很可能是新加的夸克味）。
@@ -1284,6 +1412,11 @@ function specFromRow(R) {
         descNote = '[SHANHAI-DESC] ' + PAPER_QUARK_CATALYST + ' ⇒ ' + (quarkLanded.length
             ? '落 `.notConsumable(' + quarkLanded.join(' / ') + ')`（**不消耗**，数量照纸上一字未改）'
             : '⚠️ 本条**没有**可挂的夸克释放催化剂 ⇒ 落成"无催化剂"，详见上方 🔴 告警')
+    }
+    // 🔴 2026-10-04：纸「X是催化剂」点名的具体物品落到哪 —— 同一套 [SHANHAI-DESC] 证据行。
+    if (catNamed && namedLanded.length) {
+        descNote = '[SHANHAI-DESC] ' + catNamedPaper + ' ⇒ 落 `.notConsumable(' + namedLanded.join(' / ')
+            + ')`（**不消耗**，数量照纸上一字未改；物品 id = ' + catNamed + '）'
     }
 
     // 🧪 每条含物质模块的配方【自报落法】—— 用户要求"能一眼纠正"（2026-09-28）。
@@ -1318,13 +1451,31 @@ function specFromRow(R) {
     for (var e = 0; e < R.outs.length; e++) {
         var o = R.outs[e].d
         if (o.kind === 'FLUID') { outFluids.push(o.id + ' ' + o.amount); continue }
-        // 纸「电子中微子产出概率5%」写在 out 里、紧邻产出 shanhai:electron_neutrino 的那一格（下标每次现算）
-        var isChanced = false
+        // 🔴 2026-10-04 通用化：纸「<粒子>产出概率N%」（写在 out 那格、紧邻产出物）
+        //    老写法「产出概率纸」逐字仍走这一条，**产物一字不变**（chance=500/boost=100）。
+        //    新写法：泛指「中微子产出概率3%」⇒ 匹配本条任何 `_neutrino` 产出；
+        //            具体名字 ⇒ 查 CHANCE_PAPER_ITEM；表里没有 ⇒ 🔴 告警（不当 100% 静默放过）。
+        var chPaper = null, chPct = 0
         for (var f = 0; f < (R.outNotes || []).length; f++) {
-            if (/电子中微子产出概率5%/.test(R.outNotes[f].desc.name) && o.id === 'shanhai:electron_neutrino') isChanced = true
+            var _pn = R.outNotes[f].desc.name
+            var _pm = /^(.+?)产出概率(\d+)%$/.exec(_pn)
+            if (!_pm) continue
+            var _who = _pm[1]
+            var _pct = parseInt(_pm[2], 10)
+            if (_who === '中微子') {                       // 泛指
+                if (/_neutrino$/.test(o.id)) { chPaper = _pn; chPct = _pct; break }
+                continue
+            }
+            var _wantId = CHANCE_PAPER_ITEM[_who]
+            if (!_wantId) {
+                flags.push('🔴 纸写「' + _pn + '」，但 CHANCE_PAPER_ITEM 表里没有「' + _who + '」这个中文名'
+                    + ' ⇒ 本条产出照旧 100%。请把这张纸加进那张表（或改用泛指写法「中微子产出概率N%」）。')
+                continue
+            }
+            if (_wantId === o.id) { chPaper = _pn; chPct = _pct; break }
         }
-        if (isChanced) { chanced.push({ item: (o.count || 1) + 'x ' + o.id, chance: 500, tierChanceBoost: 100 }); flags.push('纸「电子中微子产出概率5%」⇒ ' + o.id + ' 改成 chancedOutput(500, 100)。'
-            + '⚠️ 单位：本包 chance 是【万分比】，10000=100% ⇒ 5% = 500（不是 5000）。'
+        if (chPaper) { chanced.push({ item: (o.count || 1) + 'x ' + o.id, chance: chPct * 100, tierChanceBoost: 100 }); flags.push('纸「' + chPaper + '」⇒ ' + o.id + ' 改成 chancedOutput(' + (chPct * 100) + ', 100)。'
+            + '⚠️ 单位：本包 chance 是【万分比】，10000=100% ⇒ ' + chPct + '% = ' + (chPct * 100) + '（不是 ' + (chPct * 1000) + '）。'
             + '⚠️ 第二个 int 不是"加成上限"，是【每超频一级的加成量 tierChanceBoost】'
             + '（字节码实证：GTRecipeBuilder.chancedOutput 把 iload_3 写进字段 tierChanceBoost）。'
             + '100 = GTCEu 自己"5% 档副产"的标准值（本包 414 条实际配方 chance=500/boost=100）。'
@@ -1578,7 +1729,7 @@ function nosText(a) { return a.length ? a.map(function (x) { return '#' + x }).j
 /** 同 nosText，但元素是【已经写好的整段文字】（不是行号）—— 用于"本版改了哪几条"这种现算清单。 */
 function nosText2(a) { return a.length ? a.join('；') + '（' + a.length + ' 条）' : '（本次一条都没有 —— 新旧判据结论完全一致）' }
 var NOS_FIELD = noteRowNos('力场发生器是催化剂')
-var NOS_CHANCED = outNoteRowNos(/电子中微子产出概率5%/)
+var NOS_CHANCED = outNoteRowNos(/产出概率\d+%/)
 var NOS_CATALYST_PAPER = noteRowNos(PAPER_MODULE_CATALYST)
 // 🔴 2026-09-30 新增：纸面原文「夸克释放催化剂作为催化剂」（逐字，末尾无句号）
 var NOS_QUARK_CATALYST = noteRowNos(PAPER_QUARK_CATALYST)
@@ -1589,11 +1740,11 @@ for (var _rp = 0; _rp < rows.length; _rp++) {
         if (rows[_rp].outs[_rq].d.id === 'minecraft:paper') { NOS_REAL_PAPER.push(rows[_rp].no); break }
     }
 }
-// 「电子中微子产出概率5%」那张纸在 out 里的下标（写死的 out[3] 也要现算）
+// 「产出概率纸」那张纸在 out 里的下标（写死的 out[3] 也要现算）
 var CHANCED_OUT_SLOT = null
 for (var _cs = 0; _cs < rows.length && CHANCED_OUT_SLOT === null; _cs++) {
     for (var _cq = 0; _cq < rows[_cs].outNotes.length; _cq++) {
-        if (/电子中微子产出概率5%/.test(rows[_cs].outNotes[_cq].desc.name)) { CHANCED_OUT_SLOT = rows[_cs].outNotes[_cq].slot; break }
+        if (/产出概率\d+%/.test(rows[_cs].outNotes[_cq].desc.name)) { CHANCED_OUT_SLOT = rows[_cs].outNotes[_cq].slot; break }
     }
 }
 
@@ -1610,27 +1761,40 @@ for (var _cs = 0; _cs < rows.length && CHANCED_OUT_SLOT === null; _cs++) {
 // 【修法】把"源样板绑定 + 判据"提到**顶层**（这样文件头也能现算它），emitOldGt 只负责排版：
 //   `LEGACY_GT_BIND` 显式绑定 id → 样板行号，加载期逐条自证（行存在 / old=true / circuit 与产出对得上）。
 var LEGACY_GT_BIND = {
-    // id → 它抄自哪个样板行（行号**现查 rows.json**，不凭记忆）
-    'shanhai:pf/primordial_omega_engine': { no: 21, circuit: 0, product: 'shanhai:primordial_omega_engine', typeId: 'circuit_assembler' },
-    'shanhai:pf/photon': { no: 36, circuit: 2, product: 'shanhai:photon', typeId: 'photon_siphon' },
-    'shanhai:pf/first_light': { no: 27, circuit: 1, product: 'shanhai:first_light', typeId: 'photon_siphon' }
+    // 🔴 2026-10-04 改为【按身份绑定】—— 原先是按【行号】钉的（no: 21 / 36 / 27），
+    //    而用户每改一次 PF.txt 行号就会整体漂移：2026-10-04 那次 118 → 124 条，
+    //    no=21/27/36 全被挤成了新的土高炉行 ⇒ 直接抛错、整条同步跑不动。
+    //    现在匹配判据 = 「old 行 ＋ 产出含 product ＋ 编程电路 = circuit ＋ 中文类型 = typeCn」，
+    //    四者同时成立且**唯一**才算命中；hintNo 只用于"行号漂移"提示与报错定位，**不参与匹配**。
+    'shanhai:pf/primordial_omega_engine': { hintNo: 37, circuit: 0, product: 'shanhai:primordial_omega_engine', typeId: 'circuit_assembler', typeCn: '电路组装机' },
+    'shanhai:pf/photon': { hintNo: 9, circuit: 2, product: 'shanhai:photon', typeId: 'photon_siphon', typeCn: '光子虹吸' },
+    'shanhai:pf/first_light': { hintNo: 2, circuit: 1, product: 'shanhai:first_light', typeId: 'photon_siphon', typeCn: '光子虹吸' }
 }
 /** 按绑定取源样板行，并逐条自证 —— 对不上就抛（绝不静默换一条配方，也绝不静默丢掉模块）。 */
 function legacyGtRow(id) {
     var b = LEGACY_GT_BIND[id]
     if (!b) throw new Error('[PF] 🔴 内部错误：老配方 ' + id + ' 没有绑定源样板行 ⇒ 它的模块落法无法现算。')
-    var R = null
-    for (var i = 0; i < rows.length; i++) if (rows[i].no === b.no) { R = rows[i]; break }
-    if (!R) throw new Error('[PF] 🔴 老配方 ' + id + ' 绑定的 PF 第 ' + b.no + ' 条在 rows.json 里【不存在】'
-        + ' ⇒ 绑定过期了（PF.txt 重新导出后行号可能漂移）⇒ 拒绝写产物。')
-    if (!R.old) throw new Error('[PF] 🔴 老配方 ' + id + ' 绑定的 PF 第 ' + b.no + ' 条【不是】old 行 ⇒ 绑错行了。')
-    var circ = (R.circuits && R.circuits.length) ? R.circuits[0].n : 0
-    if (circ !== b.circuit) throw new Error('[PF] 🔴 老配方 ' + id + ' 的 circuit 绑定不符：正文写死 ' + b.circuit
-        + '，而 PF 第 ' + b.no + ' 条纸上是 ' + circ + ' ⇒ 拒绝写产物（说明绑错了行）。')
-    var hasProduct = false
-    for (var j = 0; j < R.outs.length; j++) if (R.outs[j].d.id === b.product) hasProduct = true
-    if (!hasProduct) throw new Error('[PF] 🔴 老配方 ' + id + ' 的产出绑定不符：PF 第 ' + b.no + ' 条的产出里【没有】'
-        + b.product + ' ⇒ 绑错了行。')
+    var cand = []
+    for (var i = 0; i < rows.length; i++) {
+        var R0 = rows[i]
+        if (!R0.old) continue
+        var hasProduct0 = false
+        for (var j0 = 0; j0 < R0.outs.length; j0++) if (R0.outs[j0].d.id === b.product) hasProduct0 = true
+        if (!hasProduct0) continue
+        var circ0 = (R0.circuits && R0.circuits.length) ? R0.circuits[0].n : 0
+        if (circ0 !== b.circuit) continue
+        if (b.typeCn && R0.type !== b.typeCn) continue
+        cand.push(R0)
+    }
+    if (cand.length === 0) throw new Error('[PF] 🔴 老配方 ' + id + ' 在 rows.json 里【找不到源样板】'
+        + '（判据：old 行 ＋ 产出含 ' + b.product + ' ＋ 编程电路 ' + b.circuit + (b.typeCn ? ' ＋ 类型「' + b.typeCn + '」' : '') + '）'
+        + ' ⇒ 是不是把那条样板删了、或改了它的电路号/类型？上次它在第 ' + b.hintNo + ' 条。拒绝写产物。')
+    if (cand.length > 1) throw new Error('[PF] 🔴 老配方 ' + id + ' 匹配到 ' + cand.length + ' 条源样板（第 '
+        + cand.map(function (r) { return r.no }).join(' / ') + ' 条）⇒ 绑定不唯一 ⇒ 拒绝写产物，请人工裁决。')
+    var R = cand[0]
+    if (R.no !== b.hintNo) console.info('[PF] ℹ️ 老配方 ' + id + ' 的源样板行号漂移：上次 #' + b.hintNo
+        + ' ⇒ 本次 #' + R.no + '（按身份匹配命中，结果不受影响）')
+    var hasProduct = true
     return R
 }
 /**
@@ -1826,7 +1990,7 @@ w('//  · **shanhai 类型总数 = ' + SH_JAVA.liveCount + '**（**现算**：�
     + '`shanhai-rewrite\\src\\main\\java\\com\\shanhai\\common\\recipe\\ShanhaiRecipeTypes.java`')
 w('//      的【活代码】`.setMaxIOSize(...)` 条数，与同文件常量 `REAL_TYPE_COUNT = ' + SH_JAVA.realTypeCount + '` 互为自证；')
 w('//      注释作废块里另有 ' + SH_JAVA.deadCount + ' 条，已按"行首是注释符"剔除。）')
-w('//  · 上述类型的 id 存在性由加载期断言 G3 保证（CAP 的每个键都必须能追溯到真源①或真源②），')
+w('//  · 上述类型的 id 存在性由加载期断言 G3 保证（CAP 的每个键都必须能追溯到真源①/②/③），')
 w('//      追不到就抛错、**拒绝写产物** —— 所以"存在性"不是靠这里手写一段话，是靠不通过就出不来。')
 w('//  · 历史抽检样本（2026-09-26 抽的那 8 个）本次**现查**：'
     + _probeIds.join(' / ') + ' ⇒ **' + _probeHit + '/' + _probeIds.length + ' 在**'
@@ -1862,6 +2026,13 @@ w('//  上表 = 【真源现读现算】的结果（2026-09-29 起），不再�
 w('//    真源① shanhai 类型 ⇒ shanhai-rewrite\\src\\main\\java\\com\\shanhai\\common\\recipe\\ShanhaiRecipeTypes.java')
 w('//        的【活代码】`.setMaxIOSize(a,b,c,d)`（行首是注释符的作废块会被剔除）。')
 w('//    真源② gtceu 原生类型 ⇒ recipe-convert\\javap\\GTRecipeTypes.txt（已部署 gtceu jar 的 javap -c 转储）。')
+w('//    真源③ 「别的 mod 注册在 gtceu 命名空间下」的类型 ⇒ **现读实例 mods**（2026-10-04 新增）：')
+w('//        扫 `mods\\*.jar` 里常量池含 `setMaxIOSize` 的注册类 ⇒ 解包 + `javap -p -c` ⇒ 取 `register("id",…)` 后那个四元组。')
+w('//        脚本 kubejs\\_generators\\mod_caps.js；**自动定位，不需要人工维护快照**（无缓存 ⇒ 不会像真源②那样过期）。')
+w('//        本次真源③ 供数的类型见上面 §4 表里标注或不标注的全部键；其判定另有两条护栏：')
+w('//          ① 旁证：id 必须另有 lang 的 `gtceu.<id>` 键 或 游戏导出表目录，否则丢弃（防"回看取错字符串"凭空造类型）；')
+w('//          ② 交叉验证：真源③ 与真源② 对**同一个** `GTRecipeTypes.class` 必须逐条相等（本次 '
+    + _x2same + ' 个类型 ✓）。')
 w('//    ⇒ 键集合若与真源对不上，生成器**抛错并拒绝写产物**（双向断言：缺键 / 多键 / 用到的类型查不到）。')
 w('//  · gtceu:primitive_blast_furnace = (3, 3, 0, 0)')
 w('//      —— 出处：gtceu jar `GTRecipeTypes.class` 字节码偏移 3028-3032：')
@@ -1932,11 +2103,11 @@ w('//    （本次确实有 ' + NOS_REAL_PAPER.length + ' 条：' + (NOS_REAL_PA
 w('//  · 纸有三种：')
 w('//      ① 「配方类型：XXX」（也有裸写类型名的，如「光子虹吸」「电路组装机」）⇒ 决定用哪台机器')
 w('//      ② 「Ns」⇒ 决定耗时（×20 = tick）')
-w('//      ③ 备注（本次四种：物质模块是催化剂 ' + NOS_CATALYST_PAPER.length + ' 条 / 力场发生器是催化剂 ' + NOS_FIELD.length + ' 条 / 夸克释放催化剂作为催化剂 ' + NOS_QUARK_CATALYST.length + ' 条 / 电子中微子产出概率5% ' + NOS_CHANCED.length + ' 条）')
+w('//      ③ 备注（本次四种：物质模块是催化剂 ' + NOS_CATALYST_PAPER.length + ' 条 / 力场发生器是催化剂 ' + NOS_FIELD.length + ' 条 / 夸克释放催化剂作为催化剂 ' + NOS_QUARK_CATALYST.length + ' 条 / 产出概率纸 ' + NOS_CHANCED.length + ' 条）')
 w('//         ⚠️ 上面每个数都是【行数】不是【纸数】：rows.json 里含「原初物质重组 ⇒ 土高炉」的副本行，')
 w('//            同一张纸会被算多行 ⇒ 例如「物质模块是催化剂」纸面只有 43 张、这里会显示 57 行。')
 w('//  · 🔴 纸写在 in 里，也可能写在 **out** 里 —— ' + nosText(NOS_CHANCED)
-    + '的「电子中微子产出概率5%」就在 out[' + CHANCED_OUT_SLOT + ']。')
+    + '的「产出概率纸」就在 out[' + CHANCED_OUT_SLOT + ']。')
 w('//    本文件把"带自定义名的纸"从 out 里剔除，只留真产物。')
 w('//')
 w('// =============================================================================')
@@ -2050,7 +2221,7 @@ w('//       🔴 本轮之前这句话【一个字都没被读到】⇒ 那 64 �
 w('//          取证：把 PF 副本里这句话改名后重跑，specs 的**配方形状差异 = 0** ⇒ 反证"当前完全没读"。')
 w('//       ⚠️ 只对**纸上写了这句话**的配方生效 ⇒ 第 59 / 63 条（同样有 ×1 夸克释放催化剂，')
 w('//          但纸上没有这句话）保持原样：仍在 itemInputs 里被消耗。这个不对称**留给你裁决**。')
-w('//  ③「电子中微子产出概率5%」—— ' + nosText(NOS_CHANCED) + '，且写在该样板的 **out[' + CHANCED_OUT_SLOT + ']**，紧邻 out['
+w('//  ③「产出概率纸」—— ' + nosText(NOS_CHANCED) + '，且写在该样板的 **out[' + CHANCED_OUT_SLOT + ']**，紧邻 out['
     + (CHANCED_OUT_SLOT === null ? '?' : CHANCED_OUT_SLOT - 1) + '] 的')
 w('//       `shanhai:electron_neutrino`。')
 w('//     ✅ 用户 2026-09-26 裁决（原话逐字）：「吃加成」')
@@ -2430,64 +2601,19 @@ w('// --------------------------------------------------------------------------
 w('// 注册：工作台配方（老 ②③④⑤⑥ = **历史值 2026-09-26 的 5 条**：'
     + '它们建文件时就在，不随 PF.txt 变化，故无法现算）')
 w('// -----------------------------------------------------------------------------')
-// ---- 🔴 运行期反查：那两条老配方【到底还在不在】(用户 2026-09-27 要求可判定的证据) ----
-//    放在 ServerEvents.loaded ⇒ 配方表已完全定型，能真读到结果。
-w('// -----------------------------------------------------------------------------')
-w('// -----------------------------------------------------------------------------')
-w('// 🔴 运行期探针：把【真实 id】打出来 —— 不再猜')
-w('//   教训：上一版用 recipeManager.byKey(id) 反查，报 present=false，而用户 JEI 里【配方还在】，')
-w('//   两者不可能同时对 ⇒ 【byKey 查不到 GTCEu 的配方】⇒ 那条判据【不可靠，已废】。')
-w('//   本版改成【遍历配方表】getRecipes().toArray()，按 getId() 里的关键词找 ⇒ 自洽、不依赖索引。')
-w('//   ⚠️ 刻意【不用 getResultItem()】—— 字节码实证它恒返回 ItemStack.EMPTY。')
-w('//   判读：water_lava=[none] ⇒ 那类配方确实不在表里；打出具体 id ⇒ 那就是【真实 id】。')
-w('//   同时报 totalRecipes 做 sanity：若为 0 ⇒ 是遍历入口不对，不是配方不在。')
-w('// -----------------------------------------------------------------------------')
-w('ServerEvents.loaded(function (event) {')
-w("    // 🔴 迟到删除：ServerEvents.recipes 期间删不掉（实测：那时 mod 的配方还没进表），")
-w("    //    改到 loaded 时直接改配方表。判据 = 紧随其后的探针（同一行日志体系）。")
-w("    // 🔴 用【子串】而不是精确 id —— 实测同一个\"水+岩浆→黑曜石+蒸汽\"存在【两条】老配方：")
-w("    //      cxhmz:chemical_reactor/water_lava_to_steam 与 cxhmz:large_chemical_reactor/water_lava_to_steam")
-w("    //    （探针实测：删掉第一条后第二条约仍在 ⇒ 这就是用户说\"配方还在\"的原因）")
-w("    var KEY = ['water_lava_to_steam', 'fire_charge_ch']")
-w("    // ⚠️ 绝不删自己新写的（shanhai: 前缀）")
-w("    var dropped = 0")
-w("    var keep = []")
-w("    var lerr = ''")
-w("    try {")
-w("        var all0 = event.server.recipeManager.getRecipes().toArray()")
-w("        for (var k0 = 0; k0 < all0.length; k0++) {")
-w("            var r0 = '?'")
-w("            try { r0 = String(all0[k0].getId()) } catch (e0) { r0 = '?' }")
-w("            var hit = false")
-w("            for (var k1 = 0; k1 < KEY.length; k1++) if (r0.indexOf(KEY[k1]) >= 0) hit = true")
-w("            if (r0.indexOf('shanhai:') === 0) hit = false")
-w("            if (hit) { dropped = dropped + 1; continue }")
-w("            keep.push(all0[k0])")
-w("        }")
-w("        if (dropped > 0) event.server.recipeManager.replaceRecipes(keep)")
-w("    } catch (e1) { lerr = ' (' + e1 + ')' }")
-w("    console.info(SHANHAI_PF_TAG + ' remove-late dropped=' + dropped + ' kept=' + keep.length + lerr)")
-w("")
-w('    var arr = []')
-w('    var why = \'\'')
-w('    try { arr = event.server.recipeManager.getRecipes().toArray() } catch (e) { why = \' (\' + e + \')\' }')
-w('    var total = arr.length')
-w('    var wl = \'none\'')
-w('    var fc = \'none\'')
-w('    var ncx = 0')
-w('    var cxList = \'\'')
-w('    for (var i = 0; i < total; i++) {')
-w('        var rid = \'?\'')
-w('        try { rid = String(arr[i].getId()) } catch (e2) { rid = \'?\' }')
-w('        if (rid.indexOf(\'water_lava\') >= 0) wl = rid')
-w('        if (rid.indexOf(\'fire_charge\') >= 0) { if (fc === \'none\') fc = rid; else if (fc.indexOf(rid) < 0) fc = fc + \'|\' + rid }')
-w('        if (rid.indexOf(\'cxhmz\') === 0 || rid.indexOf(\'cxbp\') === 0) { ncx = ncx + 1; if (cxList.length < 200) cxList = cxList + \' \' + rid }')
-w('    }')
-w('    console.info(SHANHAI_PF_TAG + \' probe totalRecipes=\' + total + \' water_lava=[\' + wl + \'] fire_charge=[\' + fc + \'] cx-ns-count=\' + ncx + why)')
-w('    if (ncx > 0) console.info(SHANHAI_PF_TAG + \' probe cx-ids\' + cxList)')
-w('})')
-w('')
-w('')
+// ---- 🔴 2026-10-04 用户点单删除：这里原先生成两段【运行期动作】 ----
+//    ① 【迟到删除】：在 ServerEvents.loaded 里遍历整张配方表，把
+//       `cxhmz:chemical_reactor/water_lava_to_steam`（水+岩浆⇒蒸汽+黑曜石×1024）与
+//       `cxbp:large_chemical_reactor/fire_charge_ch`（火药+碳粉+烈焰粉⇒火焰弹×3）丢掉。
+//       （产物里 `remove-late dropped=… kept=…` 那行日志就是它）
+//    ② 紧随其后的【探针】：再遍历一遍表，打印 totalRecipes / water_lava / fire_charge / cx 命名空间条数
+//       （产物里 `probe totalRecipes=…` 那行）。它唯一的作用是验证 ①。
+//    ⇒ 用户裁决：「添加配方再删除，那不是多此一举吗，我直接删源代码，这样代码会少一些，
+//      运行也会消耗更少电脑性能」⇒ 两段一起删 ⇒ 每次加载少【两趟】全表（5.6 万条）遍历。
+//    ⇒ 对应源码已由用户从宿主脚本里删掉：
+//       · dgy.js 的水+岩浆块（`event.recipes.gtceu.chemical_reactor('cxhmz:water_lava_to_steam')`）
+//       · 产线爆破.js 的烈焰弹块（`grtr.large_chemical_reactor("cxbp:fire_charge_ch")`）
+//    ⚠️ 若那两条配方哪天又回到宿主脚本里，本处【不会再删它们】—— 要么删源码，要么把这段恢复。
 w('ServerEvents.recipes(function (event) {')
 w('    var ok = 0')
 w('    // 🔴 2026-09-27 接进聊天栏横幅（scope=shanhai_pf）')
@@ -2524,59 +2650,14 @@ w('')
 w('// -----------------------------------------------------------------------------')
 w('// 注册：GT 机器配方（老 ' + PFC.gtOld + ' 条 + 新增 ' + (PFC.gt - PFC.gtOld) + ' 条 = ' + PFC.gt + ' 条）')
 w('// -----------------------------------------------------------------------------')
-// ---- 🔴 移除被移植替代的老配方（用户 2026-09-26 在 PF.txt 的纸上点名）----
-// 🟢 第二版：第一版只记了「调用成功」，用户实测【没删掉】。
-//    本版把 event.remove 的【返回值（删了几条）】打出来 —— 这是决定性的运行期判据：
-//      · 返回 0  ⇒ 谓词没匹配上（写错 / 配方根本不在表里）
-//      · 返回 >0 而配方仍在 ⇒ 是【执行顺序】问题（别人后加）
-//    并同时按【显式 id】再删一次做交叉验证。
-w('// -----------------------------------------------------------------------------')
-w('// 🔴 移除【被移植替代的老配方】')
-w('//   用户 2026-09-26 逐字原话：「我在PF.txt中纸写了，移植的配方是原本产线撕裂或者dgy的配方，')
-w('//     由于要结合山海，所以我更新了其中的一些配方，但是老配方还在文件里面，因此需要删除」')
-w('//   他写在样板里的纸面原文：「注意，此配方为产线撕裂/dgy移植，添加此配方之后需要移除原本的配方」')
-w('//   ① minecraft:obsidian —— gtceu:chemical_reactor：水 2147483647mB + 岩浆 1024000mB ⇒ 蒸汽 + 黑曜石×1024')
-w('//   ② minecraft:fire_charge —— gtceu:large_chemical_reactor：火药 + 碳粉 + 烈焰粉 ⇒ 火焰弹×3')
-w('//   ⚠️ 用户明确【不删】：gtceu:mixer 产出 fire_charge、以及原版合成台那两条。')
-w('//   🔴🔴 2026-09-27 探针实证（遍历 55,947 条配方表得到的真实 id）：')
-w('//      真实格式 = <命名空间>:<配方类型路径>/<路径>  —— 不是 <ns>:<路径>！')
-w('//        真 id = cxhmz:chemical_reactor/water_lava_to_steam')
-w('//        真 id = cxbp:large_chemical_reactor/fire_charge_ch')
-w('//      我从导出路径猜的 cxhmz:water_lava_to_steam 【少了一整段类型路径】⇒ 永远不匹配 ✗')
-w('//      ⚠️ 正则 { id: /...$/ } 本轮实测【也没生效】⇒ 只能用【精确 id】。')
-w('//      ⚠️ 探针同时确认【不该删的两条在表里】：gtceu:mixer/fire_charge 与 minecraft:fire_charge（原版合成台）。')
-w('//   🔴 2026-09-27 字节码实证：GTRecipe.getResultItem() 恒返回 ItemStack.EMPTY（javap -c 只有 getstatic ItemStack.f_41583_; areturn），')
-w('//      而 KubeJS 的 OutputFilter.test() 只有一句 RecipeKJS.hasOutput(match) ⇒ 【{output:...} 对 GT 配方永远不可能匹配】！')
-w('//      ⇒ 所以第一版的 {type,output} 谓词【注定无效】（这也是"删不掉"的机械根因）。')
-w('//      ⇒ 正确写法是【按 id 删】：GTRecipe implements 原版 Recipe<Container>（javap 类声明），有 id 字段与 getId()。')
-w('//      ⇒ 这里用【正则 id】而不是硬猜命名空间（导出路径是 added_recipes/cxhmz/chemical_reactor/water_lava_to_steam.json，')
-w('//        命名空间那一段我无法从路径 100% 反推）。')
-w('//      🔴 2026-09-30 【事实更正】老配方的来源**不是 mod jar**（旧注释说"来自 mod jar（ns=cxhmz/cxbp）"，那是错的）。')
-w('//         现查（在已部署实例的 kubejs\\server_scripts 里逐个文件 grep）真源是【宿主的 KJS 脚本】：')
-w('//           · `cxhmz:water_lava_to_steam`  ⇐ [server_scripts]dgy.js:2604')
-w('//              `event.recipes.gtceu.chemical_reactor(\'cxhmz:water_lava_to_steam\')`')
-w('//           · `cxbp:fire_charge_ch`        ⇐ [server_scripts]产线爆破.js:471')
-w('//              `grtr.large_chemical_reactor("cxbp:fire_charge_ch")`')
-w('//         ⇒ 运行期 id = `<ns>:<类型路径>/<路径>`（dgy.js 里写的 `cxhmz:water_lava_to_steam`')
-w('//           在表里会变成 `cxhmz:chemical_reactor/water_lava_to_steam`）。')
-w('//         ⚠️ 这是 KJS 脚本写的配方，但**不影响 event.remove**：我们删的是【配方表里的条目】，')
-w('//            不分来源；而且本删除跑在 ServerEvents.loaded ⇒ 一定在全部 ServerEvents.recipes')
-w('//            （KJS 注册配方的唯一时机）之后 ⇒ 不会被"后加的脚本又加回来"。')
-w('//   ✅ 幂等：重复执行时返回值变 0，不报错。')
-w('// -----------------------------------------------------------------------------')
-w('ServerEvents.recipes(function (event) {')
-w('    // 🔴 2026-09-27 收尾：这里原本有 4 条 event.remove —— 【已删除】，因为实测【全部无效】。')
-w('    //    ① {type,output} 两条：字节码证明 GTRecipe.getResultItem() 恒返回 ItemStack.EMPTY，')
-w('    //       而 KubeJS 的 OutputFilter.test() 只有一句 RecipeKJS.hasOutput(match)')
-w('    //       ⇒ 【{output:...} 对 GT 配方永远不可能匹配】。')
-w('    //    ② {id} 精确 / {id:/正则/} 两条：时机太早 —— ServerEvents.recipes 期间 mod 的配方')
-w('    //       还没进配方表（实测：此刻移除后，18 秒后的探针仍能看到它）。')
-w('    //    ✅ 真正生效的删除已挪到本文件末尾的 ServerEvents.loaded 里（直接改配方表）。')
-w('    //    ✅ 那处的判据是自洽的：remove-late 与紧随其后的 probe 用同一套遍历。')
-w('    console.info(SHANHAI_PF_TAG + \' remove-old 已停用（本块 4 条实测无效，见下方 ServerEvents.loaded）\')')
-w('})')
-w('')
-w('')
+// ---- 🔴 2026-10-04 用户点单删除：这里原先给产物生成一大段【已停用手术的墓志铭】 ----
+//    · 那段注释记录的是 2026-09-26 ~ 09-30 那轮排查（4 条 event.remove 为何无效、
+//      真 id 长什么样、真源在宿主 KJS 而不是 mod jar）—— 结论都已固化成上面的经验，
+//      而它服务的那个删除动作本身【已随上一条一起删掉】⇒ 注释也跟着删，产物少 60 行噪音。
+//    📌 那轮的结论（别丢）：① GTRecipe.getResultItem() 恒返回 ItemStack.EMPTY
+//       ⇒ KubeJS 的 `{output:…}` 谓词对 GT 配方【永远匹配不上】；
+//       ② ServerEvents.recipes 期间 mod 的配方【还没进表】⇒ 此刻 remove 时机太早；
+//       ⇒ 所以本工程要删配方，一律【删宿主源码】，或在 ServerEvents.loaded 改配方表。
 w('ServerEvents.recipes(function (event) {')
 w('    var gtr = event.recipes.gtceu')
 w('    var ok = 0')
@@ -2630,7 +2711,7 @@ w('            }')
 w('            for (j = 0; j < r.outputFluids.length; j++) {')
 w('                b = b.outputFluids(r.outputFluids[j])')
 w('            }')
-w('//            // 🔴 概率产出（本次新增能力）：' + nosText(NOS_CHANCED) + '的「电子中微子产出概率5%」')
+w('//            // 🔴 概率产出（本次新增能力）：' + nosText(NOS_CHANCED) + '的「产出概率纸」')
 w('            // ⚠️ 第二个 int 是【每超频一级的加成量 tierChanceBoost】，不是"上限"：')
 w('            //    字节码实证 GTRecipeBuilder.chancedOutput(ItemStack,int,int)：')
 w('            //      67: aload_0 / 68: iload_2 / 69: putfield chance:I')
@@ -2847,3 +2928,18 @@ console.log('[PROV] specs.json       自证: srcSha256=' + _sRec.srcSha256 + ' a
 //    它是【交付物】而不是中间产物，所以只登记、不加机器可解析标记行——加了会改变产物字节）。
 var _aRec = PROV.record(TARGET, 'kubejs\\_generators\\gen_kjs.js', PF_SRC)
 console.log('[PROV] 产物 自证: srcSha256=' + _aRec.srcSha256 + ' artifactSha256=' + _aRec.artifactSha256 + ' bytes=' + _aRec.artifactBytes)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 负面对照（G3 的验收命令）—— CAP 守卫【没有被放宽】的机器判据
+// ═══════════════════════════════════════════════════════════════════════════════
+// 背景：2026-10-04 为了让 `gtceu:fishing_ground`（gtlcore 注册的合法类型）通过，
+//   给守卫补了真源③。**扩来源最危险的地方就是顺手把判据放宽了** ⇒ 所以这两条对照必须一直能跑。
+// 用法（两条都走**同一条产物路径**，不是另写一个检查脚本）：
+//   $env:SH_CAP_PROBE='zzz_definitely_not_a_type'   ⇒ 期望 **exit 1**，报文含
+//        「【用到的配方类型在三个真源里都查不到】1 个」⇒ 假类型被拒 ✓
+//   $env:SH_CAP_PROBE='fishing_ground'              ⇒ 期望 **exit 0**（真类型照常通过）✓
+//   Remove-Item Env:SH_CAP_PROBE                    ⇒ 恢复正常生成
+console.log('--- 负面对照（CAP 守卫是否被放宽的机器判据；默认不跑，按需手跑）---')
+console.log('  ① $env:SH_CAP_PROBE=\'zzz_definitely_not_a_type\'; node gen_kjs.js   ⇒ 期望 exit 1（G3 报红拒绝写产物）')
+console.log('  ② $env:SH_CAP_PROBE=\'fishing_ground\';          node gen_kjs.js   ⇒ 期望 exit 0（真类型不许被误拒）')
+console.log('  ⚠️ 跑完记得 Remove-Item Env:SH_CAP_PROBE —— 探针会进 CAP 合成（②会多一行 §4 表）')

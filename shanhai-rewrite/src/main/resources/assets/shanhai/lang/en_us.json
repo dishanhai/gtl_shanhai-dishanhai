@@ -25,6 +25,10 @@
   "shanhai.machine.super_wildcard_pattern_buffer.patterns": "Patterns: %s",
   "shanhai.machine.super_wildcard_pattern_buffer.cached": "Cached: %s",
   "shanhai.machine.super_wildcard_pattern_buffer.foa_unavailable": "§cForge pattern mode unavailable (upstream implementation not resolvable; see ERROR log)",
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier": "Auto multiplier",
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.tooltip.0": "§bOn§7: the effective multiplier is read from the multiblock controller this hatch belongs to (Forge of the Antichrist or the Primordial Omega Engine)",
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.tooltip.1": "§8The value is rounded DOWN; if it cannot be read, it counts as ×1 (that machine simply grants no bonus output) - never an error, never a wrong recipe",
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.tooltip.2": "§8While on, the multiplier box above is disabled (greyed out) and its value is ignored; the hand-typed value only counts while this is OFF",
   "shanhai.machine.super_wildcard_pattern_buffer.circuit.title": "Pattern circuit: slot %s / current %s",
   "shanhai.machine.super_wildcard_pattern_buffer.circuit.hint": "%s-%s = set circuit\n%s = unset (uses the shared circuit)",
   "shanhai.machine.super_wildcard_pattern_buffer.circuit.confirm": "OK",
@@ -390,6 +394,7 @@
   "shanhai.recipe.fail.heat_coil_temp": "This recipe needs %sK coil temperature, but the coil in the slot only gives %sK",
   "shanhai.recipe.fail.heat_sc_tier": "This recipe needs a tier %s stellar containment casing, but the slot holds a tier %s one",
   "gtceu.primordial_debug": "Primordial Shanhai Debug",
+  "gtceu.primordial_deep_space_extraction": "Primordial Deep Space Extraction",
   "item.shanhai.world_fragments_creation": "Creation Dimension Fragment",
   "shanhai.tooltip.desc.world_fragments_creation": "Creation Dimension Fragment: insert 1 in an extra mount slot to satisfy the [creation (kubejs:create)] dimension requirement"
 }

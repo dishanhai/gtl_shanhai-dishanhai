@@ -52,6 +52,27 @@ final class PrimordialOmegaEngineModelBuffers {
         return buffers;
     }
 
+    /**
+     * 作废本组 VBO（资源重载时由 {@code ShanhaiClientReloadInvalidator} 调用）。
+     *
+     * <p>本类<b>本来就有自愈</b>（{@link #modelsChanged} 比 {@link BakedModel} 实例 —— 重载后
+     * {@code Minecraft.reloadResourcePacks()} 会 {@code new ModelManager(...)}，所以模型实例必变），
+     * 这一条只是把"作废"提前到重载那一刻，别让作废与首次重烘之间的那一帧还挂着旧 UV。
+     * <p>⚠️ 与 {@link PrimordialOmegaEngineRingBuffer} 不同，这里<b>没有</b>"一辈子只烘一次"的坑
+     * —— 修 2026-10-04 那个贴图 bug 的关键在环形那条路上（它才是一直用旧 UV 的那一个）。
+     *
+     * <p>只在渲染线程真正 close；非渲染线程只丢引用（资源重载的 apply 跑在渲染线程）。
+     */
+    static void invalidate() {
+        if (!RenderSystem.isOnRenderThread()) {
+            buffers = null;
+            bakedModels = null;
+            return;
+        }
+        closeBuffers();
+        bakedModels = null;
+    }
+
     static void beginRender() {
         RenderType.solid().setupRenderState();
         RenderSystem.setShader(GameRenderer::getRendertypeSolidShader);

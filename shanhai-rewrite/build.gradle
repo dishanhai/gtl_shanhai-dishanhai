@@ -220,7 +220,14 @@ jar {
                 // Forge 1.20.1 从 META-INF/MANIFEST.MF 的 MixinConfigs 属性发现 mixin 配置
                 // （依据：originals/upstream/gtl_shanhai-dishanhai/build.gradle、及已证实的
                 //  gtceu/gtlcore/gtladditions 三个 jar 的 MANIFEST.MF）。
-                'MixinConfigs'          : 'shanhai.mixin.json',
+                //
+                // 🔴 2026-10-04 追加 B：第二个配置 `shanhai.gtladditions.mixin.json`
+                //    只装「给上游那台机器加自动倍率」的两个 mixin，且它 `"required": false`
+                //    ⇒ 上游改了类名/方法/构造器签名时，代价是**一行 WARN**，
+                //       而不是把整合包启动打崩（用户点名的 fail-soft）。
+                //    刻意分成两个文件而不是塞进 shanhai.mixin.json：后者是 required:true，
+                //    混进去就等于「上游一改、整个 mod 起不来」。
+                'MixinConfigs'          : 'shanhai.mixin.json,shanhai.gtladditions.mixin.json',
         ])
     }
     // The refmap must sit at the JAR ROOT: shanhai.mixin.json references it by

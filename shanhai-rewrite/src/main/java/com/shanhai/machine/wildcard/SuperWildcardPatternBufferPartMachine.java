@@ -16,6 +16,7 @@ import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfiguratorButton.Toggle;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MachineDefinition;
+import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
@@ -128,7 +129,8 @@ import java.util.List;
  * 本类的任何方法<b>都不</b>从 KubeJS 调用（宿主脚本只引用它的<b>物品 id</b>），
  * 因此不存在「Rhino 撞重载」的风险面。
  */
-public class SuperWildcardPatternBufferPartMachine extends MEPatternBufferPartMachineBase {
+public class SuperWildcardPatternBufferPartMachine extends MEPatternBufferPartMachineBase
+        implements AutoForgeMultiplierHost {
 
     /**
      * 通配符样板槽位数 —— 需求②点名的数字（宿主 = 1）。
@@ -246,10 +248,96 @@ public class SuperWildcardPatternBufferPartMachine extends MEPatternBufferPartMa
     @Persisted
     private boolean forgePatternMode = false;
 
-    /** 神锻模式倍率（上游默认 15，这里跟随）。 */
+    /** 神锻模式倍率（上游默认 15，这里跟随）。⚠️ <b>它就是「手填值」</b>，语义没有变。 */
     @DescSynced
     @Persisted
     private int forgePatternMultiplier = ShanhaiForgePatternMode.DEFAULT_MULTIPLIER;
+
+    /**
+     * 🔴 <b>「自动倍率」开关</b>（用户 2026-10-04 点单；同日第二轮提了四条修正）。
+     *
+     * <p>用户原话（逐字）：
+     * <b>「就是那个倍率不是需要你配置的嘛，我希望给他添加一个开关，打开之后可以自动配置这个倍率
+     * （通过读取那台机器上的倍率）」</b>；「读哪台机器」他选的是
+     * <b>「读它所在多方块的控制器」</b>。
+     *
+     * <h2>语义（2026-10-04 第二轮修正后的最终口径）</h2>
+     * <pre>
+     *   开着 ⇒ 生效倍率 = 从本仓室所在多方块的控制器上读到的「额外产出倍率」，
+     *                    【向下取整】并夹到 [1, 30]（用户修正②）；
+     *          🔴 读不到 ⇒ 按「无额外产出」算 = ×1（用户修正④），
+     *                     手填值在关开着时【不参与运算】；
+     *   关联 ⇒ 手填值只在【关】的时候才参与。
+     * </pre>
+     * 两种来源（用户修正①「其实不止是伪神之锻炉，还有我们的原始终焉引擎」）：
+     * <ul>
+     *   <li>gtladditions 的 <b>伪神之锻炉</b>控制器 ⇒ 反射 {@code getRecipeOutputMultiply()}；</li>
+     *   <li>本工程的 <b>原始终焉引擎</b> ⇒ 直接调
+     *       {@code PrimordialRecipeEffects.outputMultiplier(engine.moduleSlotBonus())}。</li>
+     * </ul>
+     * 两者都不匹配 ⇒ ×1。全程绝不抛异常、绝不让配方算错。
+     *
+     * <h2>🔴 默认值 = <b>开</b>（用户第二轮逐字追加：「顺便提一个要求，这个开关默认打开」）</h2>
+     * 两条连带后果，都已按用户口径处理、<b>没有做任何特判</b>：
+     * <ul>
+     *   <li><b>老存档里的既有机器也变成「默认开」</b>：本字段是新增的 ⇒ 旧 NBT 里没有它 ⇒
+     *       反序列化落回 Java 默认值 {@code true}。这正是用户要的，故<b>刻意不写任何「补默认」代码</b>。</li>
+     *   <li><b>「读不到 ⇒ ×1」从此是常态路径</b>（多数机器的控制器不给额外产出）
+     *       —— 用户 2026-10-04 修正④逐字：「读不到不应该默认是1吗，<b>因为没有额外产出的机器才读不到啊</b>」
+     *       ⇒ ① 日志走 {@link ShanhaiAutoForgeMultiplierDriver} 里的限流闸门（同因只打一次，不刷屏）；
+     *       ② 面板第二行明写原因（见 {@link #shanhaiAutoForgeMultiplierReasonText()}）。
+     *       ⚠️ 「读不到」<b>不是</b>「退回手填值」：手填值<b>只在开关关着时</b>才参与运算。</li>
+     * </ul>
+     *
+     * <h2>为什么与 {@link #forgePatternMode} 同样标 {@code @DescSynced @Persisted}</h2>
+     * {@code @DescSynced}：开关状态在<b>客户端</b>的面板上被读（{@code ForgePatternConfigurator}），
+     * 不同步就只会显示服务端那份之外的另一套默认值。
+     * {@code @Persisted}：重载存档后保持上次的选择，不会出现「开着的开关忽然变回关」这种读数突变。
+     */
+    @DescSynced
+    @Persisted
+    private boolean autoForgeMultiplier = true;
+
+    /**
+     * 最近一次<b>从控制器读到的</b>倍率（已规范化）；{@link ShanhaiAutoForgeMultiplier#NO_READ} = 没读到/非法。
+     *
+     * <h2>🔴 为什么它必须 {@code @DescSynced}（而不是让面板自己去读控制器）</h2>
+     * 「面板显示的数」必须<b>就是算法用的那个数</b>。若让界面自己再读一次控制器，
+     * 就会出现「界面写着 23、配方按 18 算」这种两份真相 —— 正是本工程反复血账过的那一类。
+     * ⇒ 读取只发生在<b>服务端</b>一处（{@link #shanhaiRefreshAutoForgeMultiplier()}），
+     * 结果同步到客户端，界面、日志、算法<b>读的是同一个字段</b>。
+     *
+     * <p>⚠️ 它<b>不带</b> {@code @Persisted}：这是运行时派生量（伪神锻的倍率每时每刻都在变），
+     * 落盘没有意义；重载后第一次重算会立刻写新值。
+     */
+    @DescSynced
+    private int autoForgeMultiplierRead = ShanhaiAutoForgeMultiplier.NO_READ;
+
+    /**
+     * 上一次读取的<b>标注</b>：读到时是<b>来源</b>（{@code SOURCE_*}），读不到时是<b>原因</b>（{@code REASON_*}）。
+     *
+     * <p>与 {@link #autoForgeMultiplierRead} 同一种性质：服务端算、同步给面板显示
+     * （前缀「来源：」/「原因：」由 {@link ShanhaiAutoForgeMultiplier#reasonLine} 加）。
+     * 自动开关关着时它是 {@link ShanhaiAutoForgeMultiplier#REASON_AUTO_OFF}。
+     *
+     * <p>⚠️ 2026-10-04：它<b>不再</b>只表示「失败原因」—— 读成功时它承载「这份数是从哪台机器读来的」，
+     * 因为用户要求面板能看出<b>当前的来源</b>（伪神之锻炉 / 原始终焉引擎）。
+     */
+    @DescSynced
+    private String autoForgeMultiplierReason = ShanhaiAutoForgeMultiplier.REASON_AUTO_OFF;
+
+    /**
+     * <b>本机那份「自动倍率」驱动</b> —— 探测/判定/文案/限流日志/节流计数都在它里面。
+     *
+     * <p>🔴 2026-10-04 追加 B：这些逻辑<b>整体搬进 {@link ShanhaiAutoForgeMultiplierDriver}</b>，
+     * 于是上游那台「超级样板总成」（经 mixin 加装）走的是<b>同一份实现</b>——
+     * 用户逐字：「不许出现第二份实现」。
+     *
+     * <p>⚠️ 刻意<b>不加</b> {@code @DescSynced}/{@code @Persisted}：闸门与节流计数是纯服务端运行时状态，
+     * 不属于机器的持久化/同步字段（持久化的那三个见上面）。
+     */
+    private final ShanhaiAutoForgeMultiplierDriver autoForgeMultiplierDriver =
+            new ShanhaiAutoForgeMultiplierDriver(this);
 
     /** 通配符样板展开出来的**原始**样板（未经神锻改写）。{@link #buildEffectivePatterns()} 由它派生生效表。 */
     private final List<IPatternDetails> rawExpandedPatterns = new ObjectArrayList<>();
@@ -468,6 +556,9 @@ public class SuperWildcardPatternBufferPartMachine extends MEPatternBufferPartMa
         if (!this.buffer.isEmpty()) {
             AEUtils.reFunds(this.buffer, this.getMainNode().getGrid(), this.actionSource);
         }
+        // 🔴 自动倍率的周期复读（2026-10-04）。位置放在最后：它可能触发一次 rebuildPatterns()，
+        //    那件事的代价比上面那次退款大，不该挡住退款。
+        this.shanhaiTickAutoForgeMultiplier();
     }
 
     @Override
@@ -587,7 +678,10 @@ public class SuperWildcardPatternBufferPartMachine extends MEPatternBufferPartMa
         this.activeSlotIndices.clear();
         this.internalSlots.clear();
         final boolean forgeMode = this.isForgePatternModeEnabled();
-        final int multiplier = this.getForgePatternMultiplier();
+        // 🔴 生效倍率的唯一读点。顺序不许动：必须在取 multiplier 【之前】重读一次控制器
+        //    （关掉自动时它会把读数清成 NO_READ、把手填值交给下面那个方法）。
+        this.shanhaiRefreshAutoForgeMultiplier();
+        final int multiplier = this.getEffectiveForgePatternMultiplier();
         int index = 0;
         for (IPatternDetails raw : this.rawExpandedPatterns) {
             final IPatternDetails effective =
@@ -871,6 +965,210 @@ public class SuperWildcardPatternBufferPartMachine extends MEPatternBufferPartMa
                 this.rebuildPatterns();
             }
         }
+    }
+
+    // ------------------------------------------------------- 自动倍率（需求：读控制器/模块）
+
+    /** 自动倍率开关是否打开（默认开，见字段注释）。 */
+    public boolean isAutoForgeMultiplierEnabled() {
+        return this.autoForgeMultiplier;
+    }
+
+    /**
+     * 切换自动倍率；值真的变了才重算 —— 与 {@link #setForgePatternModeEnabled(boolean)} 同款。
+     *
+     * <p>🔴 必须重算：关掉时要让手填值<b>立刻</b>生效（用户验收步骤③「关开关 ⇒ 手填值立刻生效」），
+     * 打开时要让读到的值立刻生效。走的是与「玩家手改倍率」完全相同的那条路径
+     * （{@code rebuildPatterns()}），不另开岔路。
+     */
+    public void setAutoForgeMultiplierEnabled(boolean enabled) {
+        if (this.autoForgeMultiplier != enabled) {
+            this.autoForgeMultiplier = enabled;
+            this.rebuildPatterns();
+        }
+    }
+
+    /**
+     * 最近一次从控制器/模块读到的倍率（详见 {@link #autoForgeMultiplierRead}）；
+     * {@link ShanhaiAutoForgeMultiplier#NO_READ} = 没读到。
+     */
+    public int shanhaiAutoForgeMultiplierRead() {
+        return this.autoForgeMultiplierRead;
+    }
+
+    /**
+     * 读取标注：读到时是<b>来源</b>（{@code SOURCE_*}），读不到时是<b>原因</b>（{@code REASON_*}）。
+     *
+     * <p>{@link AutoForgeMultiplierHost} 要求的名字是 {@code shanhaiAutoForgeMultiplierNote()}；
+     * 旧名 {@link #shanhaiAutoForgeMultiplierReason()} 保留为别名（对旧调用点是同一件事）。
+     */
+    @Override
+    public String shanhaiAutoForgeMultiplierNote() {
+        return this.autoForgeMultiplierReason;
+    }
+
+    /** 旧名别名（等价于 {@link #shanhaiAutoForgeMultiplierNote()}）。 */
+    public String shanhaiAutoForgeMultiplierReason() {
+        return this.autoForgeMultiplierReason;
+    }
+
+    /** 把「读数 + 标注」写进同步字段 —— <b>驱动是唯一的写点</b>。 */
+    @Override
+    public void shanhaiStoreAutoForgeMultiplier(int read, String note) {
+        this.autoForgeMultiplierRead = read;
+        this.autoForgeMultiplierReason = note;
+    }
+
+    /**
+     * 🔴 <b>生效倍率 —— 全机唯一的口径</b>（用户验收步骤⑤点名的那个二选一，本机选的是「新增方法」）。
+     *
+     * <pre>
+     *   {@link #getForgePatternMultiplier()}    = 【手填值】（输入框里那个数；语义一个字都没改）
+     *   getEffectiveForgePatternMultiplier()    = 【真正传给 rewrite(...) 的那个数】
+     *       自动开 ⇒ 读到多少就是多少；【读不到 ⇒ ×1】（用户 2026-10-04 修正④）
+     *       自动关 ⇒ 手填值
+     * </pre>
+     *
+     * <h2>谁在读它（说清楚，免得后来人接错线）</h2>
+     * <ul>
+     *   <li>{@link #buildEffectivePatterns()} —— <b>唯一</b>把它交给
+     *       {@code ShanhaiForgePatternMode.rewrite(raw, level, forgeMode, multiplier)} 的地方
+     *       （= 算法侧）；</li>
+     *   <li>{@link ForgePatternConfigurator} 的面板第一行（= 界面侧，经
+     *       {@link #shanhaiAutoForgeMultiplierText()}）；</li>
+     *   <li>{@link ShanhaiAutoForgeMultiplierDriver#tick()}（= 变化检测）；</li>
+     *   <li>日志行（= 日志侧）。</li>
+     * </ul>
+     * ⇒ 界面说 23、日志说 23、算法用的就是 23，<b>不存在第二份真相</b>。
+     */
+    public int getEffectiveForgePatternMultiplier() {
+        return ShanhaiAutoForgeMultiplier.effective(
+                this.autoForgeMultiplier,
+                this.autoForgeMultiplierRead,
+                this.forgePatternMultiplier,
+                ShanhaiForgePatternMode.MIN_MULTIPLIER,
+                ShanhaiForgePatternMode.MAX_MULTIPLIER);
+    }
+
+    /** 面板第一行（唯一实现在 {@link ShanhaiAutoForgeMultiplierDriver#text()}）。 */
+    @Override
+    public String shanhaiAutoForgeMultiplierText() {
+        return this.shanhaiAutoForgeMultiplierDriver().text();
+    }
+
+    /** 面板第二行（唯一实现在 {@link ShanhaiAutoForgeMultiplierDriver#reasonText()}）。 */
+    @Override
+    public String shanhaiAutoForgeMultiplierReasonText() {
+        return this.shanhaiAutoForgeMultiplierDriver().reasonText();
+    }
+
+    // ------------------------------------------------------- AutoForgeMultiplierHost 的其余部分
+    //
+    // 🔴 这些方法是「两台机器不一样的那几件事」——共享逻辑（Driver/Panel）只认它们，
+    //    所以判定/文案/日志**只有一份**（用户 2026-10-04 追加 B 的硬要求）。
+
+    /** 本机那份驱动（持有日志闸门与节流计数）。 */
+    @Override
+    public ShanhaiAutoForgeMultiplierDriver shanhaiAutoForgeMultiplierDriver() {
+        return this.autoForgeMultiplierDriver;
+    }
+
+    /** 客户端侧还是服务端侧。 */
+    @Override
+    public boolean shanhaiIsRemote() {
+        return this.isRemote();
+    }
+
+    /**
+     * 本仓室所在多方块的控制器列表。
+     *
+     * <p>{@code MultiblockPartMachine} 上那个方法（{@code javap} 实证签名
+     * {@code public List<IMultiController> getControllers()}）—— 一个仓室可以同时属于多座多方块
+     * （共享仓室），所以是 List；<b>逐个试</b>，谁能读出额外产出倍率就用谁。
+     */
+    @Override
+    public List<?> shanhaiControllers() {
+        return this.getControllers();
+    }
+
+    /** 已经落地的生效倍率（本机从同步读数算出来）。 */
+    @Override
+    public int shanhaiAppliedForgeMultiplier() {
+        return this.getEffectiveForgePatternMultiplier();
+    }
+
+    /**
+     * 把生效倍率落地 —— 本机走 {@link #rebuildPatterns()}（它按已同步的读数重算，
+     * 与「玩家手改倍率」同一条路径；入参只用于日志）。
+     */
+    @Override
+    public void shanhaiApplyForgeMultiplier(int multiplier) {
+        this.rebuildPatterns();
+    }
+
+    /** 日志前缀。 */
+    @Override
+    public String shanhaiLogTag() {
+        return "[SHANHAI-WILDCARD]";
+    }
+
+    /**
+     * <b>把控制器/模块上的倍率刷新进同步字段</b>（并打限流日志）—— 转发给共享驱动。
+     *
+     * <p>⚠️ 2026-10-04 追加 B 之后这里<b>一行逻辑都没有了</b>：探测、判定、文案、限流日志
+     * 全部搬到 {@link ShanhaiAutoForgeMultiplierDriver}，上游那台「超级样板总成」走的是<b>同一份</b>
+     * （用户逐字：「不许出现第二份实现」）。
+     *
+     * <h2>怎么拿到控制器（留给后来人）</h2>
+     * 本机继承链上那个方法叫 {@code getControllers()}（{@code MultiblockPartMachine} 上，
+     * {@code javap} 实证签名 {@code public List<IMultiController> getControllers()}）——
+     * 一个仓室可以同时属于多座多方块（共享仓室），所以是 List；
+     * <b>逐个试</b>，谁能读出额外产出倍率就用谁（四种来源见
+     * {@link ShanhaiForgeMultiplierReader}），都读不出就返回第一条失败原因。
+     * 返回的 {@code List} 里装的是 {@code IMultiController}，其实现就是那台控制器机器本身
+     * （{@code MultiblockControllerMachine}：伪神之锻炉、<b>原始终焉引擎</b>，以及追加 A 之后的
+     * <b>模块机器</b>）⇒ {@link ShanhaiForgeMultiplierReader#read(Object, int, int)} 直接收
+     * {@link Object}，<b>gtladditions 的类型不出现在编译期签名里</b>。
+     */
+    private ShanhaiForgeMultiplierReader.Result shanhaiRefreshAutoForgeMultiplier() {
+        return this.shanhaiAutoForgeMultiplierDriver().refresh();
+    }
+
+    // ⚠️ 2026-10-04 追加 B：原 `shanhaiLogAutoForgeMultiplier` 与 `suppressedSuffix` 已整体搬进
+    //    {@link ShanhaiAutoForgeMultiplierDriver#log}／{@code suppressedSuffix}（同一份实现两台机器共用）。
+    //    这里刻意不留副本 —— 用户逐字：「不许出现第二份实现」。
+
+
+    /**
+     * <b>周期复读控制器倍率，变了就整机重算</b>（{@link #update()} 里每 tick 调一次）—— 转发给共享驱动。
+     *
+     * <h2>为什么必须「周期」而不是「只读一次」</h2>
+     * 🔴 {@code javap -c} 实证（并已写成自检里的断言）：
+     * {@code getRecipeOutputMultiply() = base × 递归反演加成}，其中
+     * {@code base = 1 + 14 × (min(runningSecs,14400)/14400)²} ∈ <b>[1, 15]</b>、
+     * 递归反演那个因子只可能是 1 或 2。
+     * ⇒ 它是<b>随这台机器的运行时间从 1 爬到 15</b> 的（每十几分钟变一档）。
+     * 若只在展开样板时读一次，玩家会看到「开关开着、数却永远停在 1」——
+     * 那是「活的界面上放死数据」，本工程红线。
+     * （⛔ 旧句曾写成「0 秒 = 15，跑满 4 小时 = 29」—— 那是我把 {@code Math.pow} 的两个操作数
+     * 读反了算出来的错值，2026-10-04 已订正，详见 {@code ShanhaiForgeMultiplierReader} §三。）
+     *
+     * <h2>三条安全阀（缺一条就可能变成抖动源）—— 现在都住在 Driver 里</h2>
+     * <ol>
+     *   <li><b>每 100 tick 才探一次</b>（≈5 秒）；</li>
+     *   <li><b>只有「已落地的生效值」真的变了才动手</b>；</li>
+     *   <li><b>落地过一次之后 200 tick 内不再动</b>（≈10 秒）—— 万一上游那个数在震荡，
+     *       也不会把机器拖进重建循环。</li>
+     * </ol>
+     *
+     * <h2>代价（如实写）</h2>
+     * 走的是与「玩家手改倍率」<b>完全相同</b>的 {@link #rebuildPatterns()}：
+     * 会把槽内物料退回 ME buffer、清空配方缓存再重新展开。
+     * ⇒ 在伪神锻实际运行的情况下，<b>每十几分钟会出现一次这样的整机重算</b>
+     * （数值每变一档一次，见上）。这是「自动跟随」的必然代价，不粉饰。
+     */
+    private void shanhaiTickAutoForgeMultiplier() {
+        this.shanhaiAutoForgeMultiplierDriver().tick();
     }
 
     // ------------------------------------------------------------------ 基类钩子
