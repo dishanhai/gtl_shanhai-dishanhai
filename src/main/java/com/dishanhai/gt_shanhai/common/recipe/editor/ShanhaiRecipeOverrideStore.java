@@ -14,6 +14,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Optional;
+import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 
 public final class ShanhaiRecipeOverrideStore {
 
@@ -26,28 +30,83 @@ public final class ShanhaiRecipeOverrideStore {
         this.path = path.toAbsolutePath().normalize();
     }
 
-    public record Entry(String recipeId, String baseFingerprint, JsonObject payload) {}
+    public record Entry(String recipeTypeId, String recipeId, String baseFingerprint, JsonObject payload) {}
 
     public Optional<Entry> find(String recipeId) {
+        return find("", recipeId);
+    }
+
+    public Optional<Entry> find(String recipeTypeId, String recipeId) {
         if (recipeId == null || !Files.isRegularFile(path)) return Optional.empty();
         try {
             JsonObject root = loadRoot();
+            Entry fallback = null;
             for (JsonElement element : root.getAsJsonArray("entries")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject object = element.getAsJsonObject();
                 if (recipeId.equals(string(object, "recipeId", ""))) {
                     JsonObject payload = object.has("payload") && object.get("payload").isJsonObject()
                             ? object.getAsJsonObject("payload").deepCopy() : new JsonObject();
-                    return Optional.of(new Entry(
+                    Entry entry = new Entry(
+                            storedType(object),
                             recipeId,
                             string(object, "baseFingerprint", ""),
-                            payload));
+                            payload);
+                    if (recipeTypeId != null && !recipeTypeId.isEmpty()
+                            && recipeTypeId.equals(entry.recipeTypeId())) {
+                        return Optional.of(entry);
+                    }
+                    if (fallback == null) fallback = entry;
                 }
             }
+            if (fallback != null) return Optional.of(fallback);
         } catch (Exception ignored) {
             return Optional.empty();
         }
         return Optional.empty();
+    }
+
+    public Set<String> typeIds() {
+        if (!Files.isRegularFile(path)) return Set.of();
+        try {
+            JsonObject root = loadRoot();
+            Set<String> result = new LinkedHashSet<>();
+            for (JsonElement element : root.getAsJsonArray("entries")) {
+                if (!element.isJsonObject()) continue;
+                String typeId = storedType(element.getAsJsonObject());
+                if (!typeId.isEmpty()) result.add(typeId);
+            }
+            return Set.copyOf(result);
+        } catch (Exception ignored) {
+            return Set.of();
+        }
+    }
+
+    public Map<String, Entry> entriesForType(String recipeTypeId) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty() || !Files.isRegularFile(path)) {
+            return Map.of();
+        }
+        try {
+            JsonObject root = loadRoot();
+            Map<String, Entry> result = new LinkedHashMap<>();
+            for (JsonElement element : root.getAsJsonArray("entries")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject object = element.getAsJsonObject();
+                if (!recipeTypeId.equals(storedType(object))) continue;
+                String recipeId = string(object, "recipeId", "");
+                if (recipeId.isEmpty()) continue;
+                JsonObject payload = object.has("payload") && object.get("payload").isJsonObject()
+                        ? object.getAsJsonObject("payload").deepCopy() : new JsonObject();
+                result.putIfAbsent(recipeId, new Entry(
+                        recipeTypeId,
+                        recipeId,
+                        string(object, "baseFingerprint", ""),
+                        payload));
+            }
+            return Map.copyOf(result);
+        } catch (Exception ignored) {
+            return Map.of();
+        }
     }
 
     public void put(ShanhaiRecipeBase base, String fingerprint, String updatedBy) throws IOException {
@@ -60,7 +119,9 @@ public final class ShanhaiRecipeOverrideStore {
                 continue;
             }
             JsonObject object = element.getAsJsonObject();
-            if (!base.recipeId().equals(string(object, "recipeId", ""))) kept.add(object);
+            boolean sameId = base.recipeId().equals(string(object, "recipeId", ""));
+            boolean sameType = base.recipeTypeId().equals(storedType(object));
+            if (!(sameId && sameType)) kept.add(object);
         }
         JsonObject entry = new JsonObject();
         entry.addProperty("recipeId", base.recipeId());
@@ -75,14 +136,23 @@ public final class ShanhaiRecipeOverrideStore {
     }
 
     public void remove(String recipeId) throws IOException {
+        remove("", recipeId);
+    }
+
+    public void remove(String recipeTypeId, String recipeId) throws IOException {
         if (recipeId == null) return;
         JsonObject root = loadRoot();
         JsonArray kept = new JsonArray();
         for (JsonElement element : root.getAsJsonArray("entries")) {
-            if (!element.isJsonObject()
-                    || !recipeId.equals(string(element.getAsJsonObject(), "recipeId", ""))) {
+            if (!element.isJsonObject()) {
                 kept.add(element);
+                continue;
             }
+            JsonObject object = element.getAsJsonObject();
+            boolean sameId = recipeId.equals(string(object, "recipeId", ""));
+            boolean sameType = recipeTypeId == null || recipeTypeId.isEmpty()
+                    || recipeTypeId.equals(storedType(object));
+            if (!(sameId && sameType)) kept.add(object);
         }
         root.add("entries", kept);
         writeRoot(root);
@@ -117,5 +187,13 @@ public final class ShanhaiRecipeOverrideStore {
     private static String string(JsonObject object, String key, String fallback) {
         JsonElement value = object.get(key);
         return value == null || !value.isJsonPrimitive() ? fallback : value.getAsString();
+    }
+
+    private static String storedType(JsonObject object) {
+        String typeId = string(object, "recipeTypeId", "");
+        if (!typeId.isEmpty()) return typeId;
+        JsonElement payload = object.get("payload");
+        return payload != null && payload.isJsonObject()
+                ? string(payload.getAsJsonObject(), "recipeTypeId", "") : "";
     }
 }

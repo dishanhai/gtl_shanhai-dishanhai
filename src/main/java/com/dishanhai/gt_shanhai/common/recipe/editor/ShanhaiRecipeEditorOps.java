@@ -35,20 +35,34 @@ public final class ShanhaiRecipeEditorOps {
     }
 
     public Result preview(Edit edit) {
-        if (!valid(edit)) return new Result(Result.Status.VALIDATION_ERROR, "invalid-edit", REVISION.get());
+        String validation = validationError(edit);
+        if (validation != null) {
+            return new Result(Result.Status.VALIDATION_ERROR, validation, REVISION.get());
+        }
         return new Result(Result.Status.SUCCESS, "preview-ready", REVISION.get());
     }
 
     public Result commit(Edit edit) {
-        if (!valid(edit)) return new Result(Result.Status.VALIDATION_ERROR, "invalid-edit", REVISION.get());
-        String currentFingerprint = ShanhaiRecipeFingerprint.of(edit.base());
-        if (!Objects.equals(currentFingerprint, edit.baseFingerprint())) {
-            return new Result(Result.Status.CONFLICT, "base-fingerprint-mismatch", REVISION.get());
+        return commitInternal(edit, false);
+    }
+
+    private Result commitInternal(Edit edit, boolean requireSnapshot) {
+        String validation = validationError(edit);
+        if (validation != null) {
+            return new Result(Result.Status.VALIDATION_ERROR, validation, REVISION.get());
         }
-        Optional<ShanhaiRecipeOverrideStore.Entry> existing = store.find(edit.base().recipeId());
-        if (existing.isPresent()
-                && !Objects.equals(existing.get().baseFingerprint(), edit.baseFingerprint())) {
-            return new Result(Result.Status.CONFLICT, "stored-fingerprint-mismatch", REVISION.get());
+        ShanhaiRecipeBase current = currentBase(edit.base());
+        if (current == null) {
+            if (requireSnapshot) {
+                return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-found", REVISION.get());
+            }
+            // Keep the standalone/KubeJS API deterministic when no runtime
+            // snapshot is installed; live packet commits always require one.
+            if (!Objects.equals(ShanhaiRecipeFingerprint.of(edit.base()), edit.baseFingerprint())) {
+                return new Result(Result.Status.CONFLICT, "base-fingerprint-mismatch", REVISION.get());
+            }
+        } else if (!Objects.equals(ShanhaiRecipeFingerprint.of(current), edit.baseFingerprint())) {
+            return new Result(Result.Status.CONFLICT, "base-fingerprint-mismatch", REVISION.get());
         }
         try {
             store.put(edit.base(), edit.baseFingerprint(), "shanhai-recipe-editor");
@@ -59,7 +73,7 @@ public final class ShanhaiRecipeEditorOps {
     }
 
     public Result commit(Edit edit, MinecraftServer server) {
-        Result stored = commit(edit);
+        Result stored = commitInternal(edit, true);
         if (stored.status() != Result.Status.SUCCESS || server == null) return stored;
         try {
             RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
@@ -89,6 +103,7 @@ public final class ShanhaiRecipeEditorOps {
                 inputs == null ? source.inputs() : inputs,
                 outputs == null ? source.outputs() : outputs,
                 tickInputs == null ? source.tickInputs() : tickInputs,
+                source.tickOutputs(),
                 source.conditions());
         return applyBaseEdit(new Edit(edited, ShanhaiRecipeFingerprint.of(source)), server, rebuildIndex, persist);
     }
@@ -113,6 +128,7 @@ public final class ShanhaiRecipeEditorOps {
                 inputs == null ? source.inputs() : inputs,
                 outputs == null ? source.outputs() : outputs,
                 tickInputs == null ? source.tickInputs() : tickInputs,
+                source.tickOutputs(),
                 conditions == null ? source.conditions() : conditions);
         return applyBaseEdit(new Edit(edited, ShanhaiRecipeFingerprint.of(source)), server, rebuildIndex, persist);
     }
@@ -208,9 +224,23 @@ public final class ShanhaiRecipeEditorOps {
                 && !edit.baseFingerprint().isEmpty();
     }
 
+    private String validationError(Edit edit) {
+        if (!valid(edit)) return "invalid-edit";
+        return ShanhaiRecipeEditorValidation.validateBase(edit.base());
+    }
+
+    private ShanhaiRecipeBase currentBase(ShanhaiRecipeBase requested) {
+        if (requested == null) return null;
+        GTRecipe original = RecipeOriginalSnapshotStore.copyOf(
+                requested.recipeTypeId(), requested.recipeId());
+        if (original == null) return null;
+        GTRecipe effective = RecipeRebuildService.buildCanonical(requested.recipeTypeId(), original);
+        return effective == null ? null : ShanhaiRecipeBase.from(effective);
+    }
+
     private Result applyBaseEdit(Edit edit, MinecraftServer server, boolean rebuildIndex, boolean persist) {
         if (!valid(edit)) return invalidResult();
-        Result result = commit(edit);
+        Result result = commitInternal(edit, server != null);
         if (result.status() != Result.Status.SUCCESS || server == null || !rebuildIndex) return result;
         try {
             RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(

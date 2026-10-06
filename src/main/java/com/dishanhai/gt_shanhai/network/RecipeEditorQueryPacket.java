@@ -41,6 +41,15 @@ public final class RecipeEditorQueryPacket {
         ServerPlayer sender = context.getSender();
         context.enqueueWork(() -> {
             if (sender == null) return;
+            if (!sender.hasPermissions(2)) {
+                ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sender),
+                        new RecipeEditorResultPacket(
+                                RecipeEditorResultPacket.Status.PERMISSION_DENIED,
+                                "permission-denied",
+                                ShanhaiRecipeQuery.currentRevision(),
+                                ""));
+                return;
+            }
             ShanhaiRecipeQuery.Result result = ShanhaiRecipeQuery.query(
                     packet.typeFilter, packet.text, packet.page, packet.pageSize);
             String payload = new com.google.gson.Gson().toJson(result);

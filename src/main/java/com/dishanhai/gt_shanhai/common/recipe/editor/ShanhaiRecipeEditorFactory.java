@@ -44,7 +44,7 @@ public final class ShanhaiRecipeEditorFactory extends UIFactory<ShanhaiRecipeEdi
     @Override
     protected ModularUI createUITemplate(
             ShanhaiRecipeEditorFactory holder, Player player) {
-        return new ModularUI(420, 300, holder, player)
+        return new ModularUI(ShanhaiRecipeEditorWidget.WIDTH, ShanhaiRecipeEditorWidget.HEIGHT, holder, player)
                 .widget(new ShanhaiRecipeEditorWidget(player))
                 .background(GuiTextures.BACKGROUND);
     }

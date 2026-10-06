@@ -530,6 +530,30 @@ public class ShanhaiNetwork {
                 RecipeEditorDetailPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorMachinePacket.class,
+                RecipeEditorMachinePacket::encode,
+                RecipeEditorMachinePacket::new,
+                RecipeEditorMachinePacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorDraftRequestPacket.class,
+                RecipeEditorDraftRequestPacket::encode,
+                RecipeEditorDraftRequestPacket::new,
+                RecipeEditorDraftRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorDraftSyncPacket.class,
+                RecipeEditorDraftSyncPacket::encode,
+                RecipeEditorDraftSyncPacket::new,
+                RecipeEditorDraftSyncPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         RecipeSyncPacket.init();
     }
 

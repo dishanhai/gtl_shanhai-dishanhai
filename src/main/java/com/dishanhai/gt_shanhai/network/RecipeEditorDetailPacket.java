@@ -36,6 +36,10 @@ public final class RecipeEditorDetailPacket {
         ServerPlayer sender = context.getSender();
         context.enqueueWork(() -> {
             if (sender == null) return;
+            if (!sender.hasPermissions(2)) {
+                sendPermissionDenied(sender);
+                return;
+            }
             ShanhaiRecipeQuery.get(packet.recipeTypeId, packet.recipeId)
                     .ifPresentOrElse(
                             base -> send(sender, base),
@@ -58,6 +62,15 @@ public final class RecipeEditorDetailPacket {
                 new RecipeEditorResultPacket(
                         RecipeEditorResultPacket.Status.VALIDATION_ERROR,
                         "recipe-not-found",
+                        ShanhaiRecipeQuery.currentRevision(),
+                        ""));
+    }
+
+    private static void sendPermissionDenied(ServerPlayer player) {
+        ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new RecipeEditorResultPacket(
+                        RecipeEditorResultPacket.Status.PERMISSION_DENIED,
+                        "permission-denied",
                         ShanhaiRecipeQuery.currentRevision(),
                         ""));
     }

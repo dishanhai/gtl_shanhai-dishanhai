@@ -187,6 +187,8 @@ public class GTDishanhaiMod {
                     java.util.Set<String> runtimeRecipeTypes =
                             new java.util.LinkedHashSet<>(
                                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+                    runtimeRecipeTypes.addAll(
+                            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.overrideTypeIds());
                     com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildVanillaManager(
                             e.getServer(), runtimeRecipeTypes);
                     com.dishanhai.gt_shanhai.common.misc.MekanismFurnaceRecipeStripper.strip(e.getServer());

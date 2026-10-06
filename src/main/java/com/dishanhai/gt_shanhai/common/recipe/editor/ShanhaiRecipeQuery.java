@@ -2,7 +2,11 @@ package com.dishanhai.gt_shanhai.common.recipe.editor;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.recipe.RecipeOriginalSnapshotStore;
+import com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.Item;
@@ -14,7 +18,17 @@ import java.util.Optional;
 
 public final class ShanhaiRecipeQuery {
 
-    public record Card(String recipeTypeId, String recipeId, int duration, long eut, String fingerprint) {}
+    public record Card(String recipeTypeId, String recipeId, int duration, long eut, String fingerprint,
+                       String iconKind, String iconId) {
+        public Card {
+            if (iconKind == null) iconKind = "";
+            if (iconId == null) iconId = "";
+        }
+
+        public Card(String recipeTypeId, String recipeId, int duration, long eut, String fingerprint) {
+            this(recipeTypeId, recipeId, duration, eut, fingerprint, "", "");
+        }
+    }
 
     public record Result(List<Card> cards, int total, long revision) {}
 
@@ -29,17 +43,24 @@ public final class ShanhaiRecipeQuery {
         java.util.LinkedHashSet<String> typeIds =
                 new java.util.LinkedHashSet<>(RecipeOriginalSnapshotStore.typeIds());
         typeIds.addAll(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+        typeIds.addAll(RecipeRebuildService.overrideTypeIds());
+        net.minecraft.resources.ResourceLocation requestedType =
+                type.isEmpty() ? null : net.minecraft.resources.ResourceLocation.tryParse(type);
+        if (requestedType != null && GTRegistries.RECIPE_TYPES.get(requestedType) != null) {
+            typeIds.add(type);
+        }
         for (String typeId : typeIds) {
             if (!type.isEmpty() && !type.equals(typeId)) continue;
-            for (var recipe : RecipeOriginalSnapshotStore.copiesOf(typeId)) {
+            List<GTRecipe> effectiveRecipes = RecipeRebuildService.buildCanonicalList(
+                    typeId, RecipeRebuildService.originalsOfType(typeId));
+            for (var recipe : effectiveRecipes) {
                 String recipeId = recipe.getId() == null ? "" : recipe.getId().toString();
                 if (!needle.isEmpty() && !recipeId.toLowerCase(java.util.Locale.ROOT).contains(needle)
                         && !typeId.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
                     continue;
                 }
                 ShanhaiRecipeBase base = ShanhaiRecipeBase.from(recipe);
-                all.add(new Card(typeId, recipeId, base.duration(), base.eut(),
-                        ShanhaiRecipeFingerprint.of(base)));
+                all.add(card(typeId, recipeId, base));
             }
         }
         int from = Math.min(all.size(), safePage * safeSize);
@@ -50,7 +71,10 @@ public final class ShanhaiRecipeQuery {
 
     public static Optional<ShanhaiRecipeBase> get(String typeId, String recipeId) {
         var recipe = RecipeOriginalSnapshotStore.copyOf(typeId, recipeId);
-        return recipe == null ? Optional.empty() : Optional.ofNullable(ShanhaiRecipeBase.from(recipe));
+        if (recipe == null) return Optional.empty();
+        GTRecipe effective = RecipeRebuildService.buildCanonical(typeId, recipe);
+        return effective == null
+                ? Optional.empty() : Optional.ofNullable(ShanhaiRecipeBase.from(effective));
     }
 
     /**
@@ -89,8 +113,7 @@ public final class ShanhaiRecipeQuery {
         for (GTRecipe recipe : matches) {
             ShanhaiRecipeBase base = ShanhaiRecipeBase.from(recipe);
             if (base == null) continue;
-            cards.add(new Card(base.recipeTypeId(), base.recipeId(), base.duration(), base.eut(),
-                    ShanhaiRecipeFingerprint.of(base)));
+            cards.add(card(base.recipeTypeId(), base.recipeId(), base));
         }
         return new Result(List.copyOf(cards), cards.size(), currentRevision());
     }
@@ -106,10 +129,57 @@ public final class ShanhaiRecipeQuery {
         for (GTRecipe recipe : matches) {
             ShanhaiRecipeBase base = ShanhaiRecipeBase.from(recipe);
             if (base == null) continue;
-            cards.add(new Card(base.recipeTypeId(), base.recipeId(), base.duration(), base.eut(),
-                    ShanhaiRecipeFingerprint.of(base)));
+            cards.add(card(base.recipeTypeId(), base.recipeId(), base));
         }
         return new Result(List.copyOf(cards), cards.size(), currentRevision());
+    }
+
+    private static Card card(String typeId, String recipeId, ShanhaiRecipeBase base) {
+        String[] icon = outputIcon(base.outputs());
+        return new Card(typeId, recipeId, base.duration(), base.eut(),
+                ShanhaiRecipeFingerprint.of(base), icon[0], icon[1]);
+    }
+
+    /** First concrete output, so the recipe card can blit that texture. Item wins over fluid. */
+    static String[] outputIcon(JsonObject outputs) {
+        String item = firstId(outputs, "item", "item");
+        if (!item.isEmpty()) return new String[] {"item", item};
+        String tag = firstId(outputs, "item", "tag");
+        if (!tag.isEmpty()) return new String[] {"tag", tag};
+        String fluid = firstId(outputs, "fluid", "fluid");
+        if (!fluid.isEmpty()) return new String[] {"fluid", fluid};
+        return new String[] {"", ""};
+    }
+
+    private static String firstId(JsonObject table, String section, String key) {
+        if (table == null || !table.has(section) || !table.get(section).isJsonArray()) return "";
+        for (JsonElement element : table.getAsJsonArray(section)) {
+            if (!element.isJsonObject()) continue;
+            String found = findPrimitive(element.getAsJsonObject(), key);
+            if (!found.isEmpty()) return found;
+        }
+        return "";
+    }
+
+    private static String findPrimitive(JsonObject object, String key) {
+        if (object.has(key) && object.get(key).isJsonPrimitive()) {
+            String value = object.get(key).getAsString();
+            if (value.indexOf(':') > 0) return value;
+        }
+        for (var entry : object.entrySet()) {
+            JsonElement value = entry.getValue();
+            if (value.isJsonObject()) {
+                String found = findPrimitive(value.getAsJsonObject(), key);
+                if (!found.isEmpty()) return found;
+            } else if (value.isJsonArray()) {
+                for (JsonElement child : value.getAsJsonArray()) {
+                    if (!child.isJsonObject()) continue;
+                    String found = findPrimitive(child.getAsJsonObject(), key);
+                    if (!found.isEmpty()) return found;
+                }
+            }
+        }
+        return "";
     }
 
     public static long currentRevision() {

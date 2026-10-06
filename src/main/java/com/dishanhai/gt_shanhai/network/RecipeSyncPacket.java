@@ -21,8 +21,10 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -63,11 +65,21 @@ public final class RecipeSyncPacket {
     }
 
     public static void syncToAll() {
+        syncToAll(Set.of());
+    }
+
+    public static void syncToAll(Set<String> affectedTypeIds) {
         if (CHANNEL == null) return;
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null || server.getPlayerList() == null) return;
 
-        List<String> types = new ArrayList<>(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+        Set<String> typeSet = new LinkedHashSet<>(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+        if (affectedTypeIds != null) {
+            affectedTypeIds.stream()
+                    .filter(typeId -> typeId != null && !typeId.isEmpty())
+                    .forEach(typeSet::add);
+        }
+        List<String> types = new ArrayList<>(typeSet);
         List<String> recipes = new ArrayList<>();
         for (String typeId : types) {
             GTRecipeType type = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES

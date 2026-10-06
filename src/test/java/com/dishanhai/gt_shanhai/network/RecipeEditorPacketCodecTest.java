@@ -17,6 +17,11 @@ class RecipeEditorPacketCodecTest {
         assertTrue(source.contains("MAX_ENTRIES"));
         assertTrue(source.contains("writeVarLong"));
         assertTrue(source.contains("readVarLong"));
+        assertTrue(source.contains("GTRecipeSerializer.SERIALIZER.toNetwork"));
+        assertTrue(source.contains("GTRecipeSerializer.SERIALIZER.fromNetwork"));
+        assertTrue(source.contains("removedRecipeIds"));
+        assertTrue(source.contains("syncRecipeToAll"));
+        assertTrue(source.contains("PAYLOAD_VERSION = 2"));
     }
 
     @Test

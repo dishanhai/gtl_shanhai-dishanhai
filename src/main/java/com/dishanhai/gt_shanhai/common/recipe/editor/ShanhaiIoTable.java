@@ -9,6 +9,9 @@ import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import com.mojang.serialization.JsonOps;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -284,6 +287,72 @@ public final class ShanhaiIoTable {
         fill(table, recipe.outputs, ItemRecipeCapability.CAP, true, table.inSection());
         fill(table, recipe.outputs, FluidRecipeCapability.CAP, false, table.inSection() + table.itemOut);
         return table;
+    }
+
+    /**
+     * Builds the graphical buffer from the same GTCEu codec JSON sent by the
+     * editor detail packet. This keeps the client slot view in sync with the
+     * server snapshot without inventing a second wire format.
+     */
+    public static ShanhaiIoTable fromJson(JsonObject inputs, JsonObject outputs) {
+        int itemIn = arraySize(inputs, "item");
+        int fluidIn = arraySize(inputs, "fluid");
+        int itemOut = arraySize(outputs, "item");
+        int fluidOut = arraySize(outputs, "fluid");
+        ShanhaiIoTable table = new ShanhaiIoTable(
+                Math.max(ITEM_IN, itemIn),
+                Math.max(FLUID_IN, fluidIn),
+                Math.max(ITEM_OUT, itemOut),
+                Math.max(FLUID_OUT, fluidOut));
+        fillJson(table, inputs, "item", ItemRecipeCapability.CAP, true, 0);
+        fillJson(table, inputs, "fluid", FluidRecipeCapability.CAP, false, table.itemIn);
+        fillJson(table, outputs, "item", ItemRecipeCapability.CAP, true, table.inSection());
+        fillJson(table, outputs, "fluid", FluidRecipeCapability.CAP, false,
+                table.inSection() + table.itemOut);
+        return table;
+    }
+
+    private static int arraySize(JsonObject value, String key) {
+        if (value == null) return 0;
+        JsonElement element = value.get(key);
+        return element != null && element.isJsonArray() ? element.getAsJsonArray().size() : 0;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void fillJson(ShanhaiIoTable table, JsonObject source, String key,
+                                 RecipeCapability capability, boolean itemKind, int offset) {
+        if (source == null) return;
+        JsonElement element = source.get(key);
+        if (element == null || !element.isJsonArray()) return;
+        JsonArray values = element.getAsJsonArray();
+        for (int i = 0; i < values.size() && offset + i < table.cells.size(); i++) {
+            Content content = ((com.mojang.serialization.Codec<Content>) Content.codec(capability))
+                    .parse(JsonOps.INSTANCE, values.get(i)).result().orElse(null);
+            if (content == null) continue;
+            Cell cell = table.cells.get(offset + i);
+            cell.original = content;
+            cell.chance = content.chance;
+            cell.maxChance = content.maxChance;
+            cell.tierChanceBoost = content.tierChanceBoost;
+            if (itemKind) {
+                Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
+                if (ingredient != null) {
+                    ItemStack[] stacks = ingredient.getItems();
+                    if (stacks.length > 0) {
+                        cell.item = stacks[0].copy();
+                        if (content.getContent() instanceof SizedIngredient sized) {
+                            cell.item.setCount(Math.max(1, sized.getAmount()));
+                        }
+                    }
+                }
+            } else {
+                FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+                if (ingredient != null) {
+                    FluidStack[] stacks = ingredient.getStacks();
+                    if (stacks.length > 0) cell.fluid = stacks[0].copy();
+                }
+            }
+        }
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

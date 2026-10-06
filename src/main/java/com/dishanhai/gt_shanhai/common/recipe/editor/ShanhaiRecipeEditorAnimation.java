@@ -8,7 +8,12 @@ package com.dishanhai.gt_shanhai.common.recipe.editor;
  */
 public final class ShanhaiRecipeEditorAnimation {
 
-    public static final long DURATION_MS = 220L;
+    public static final long DURATION_MS = 640L;
+
+    /** Monotonic millisecond clock. currentTimeMillis jumps by a timer quantum and steps the slide. */
+    public static long nowMs() {
+        return System.nanoTime() / 1_000_000L;
+    }
 
     private int currentStage;
     private int targetStage;
@@ -46,7 +51,9 @@ public final class ShanhaiRecipeEditorAnimation {
     public float progress(long nowMs) {
         if (currentStage == targetStage) return 1.0f;
         long elapsed = Math.max(0L, nowMs - startedAt);
-        return Math.min(1.0f, elapsed / (float) DURATION_MS);
+        float linear = Math.min(1.0f, elapsed / (float) DURATION_MS);
+        // Smoothstep removes the visible velocity jump at both ends of a page slide.
+        return linear * linear * (3.0f - 2.0f * linear);
     }
 
     public boolean moving(long nowMs) {

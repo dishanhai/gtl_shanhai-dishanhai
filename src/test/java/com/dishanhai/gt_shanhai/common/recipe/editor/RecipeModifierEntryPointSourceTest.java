@@ -53,7 +53,7 @@ class RecipeModifierEntryPointSourceTest {
         assertTrue(itemSource.contains("hasPermissions(2)"));
         assertTrue(Files.readString(animation).contains("\"frames\""));
         String preview = Files.readString(PREVIEW);
-        assertTrue(preview.contains("item-frames"));
+        assertTrue(preview.contains("animation:item"));
         assertTrue(preview.contains("data-stage=\"0\""));
         assertTrue(preview.contains("data-stage=\"2\""));
     }

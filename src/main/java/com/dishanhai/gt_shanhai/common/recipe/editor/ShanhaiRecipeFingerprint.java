@@ -20,6 +20,20 @@ public final class ShanhaiRecipeFingerprint {
         return fingerprint(base == null ? JsonNull.INSTANCE : base.payloadJson());
     }
 
+    public static String legacySnapshotFingerprint(ShanhaiRecipeBase base) {
+        if (base == null) return fingerprint(JsonNull.INSTANCE);
+        JsonObject payload = new JsonObject();
+        payload.addProperty("recipeTypeId", base.recipeTypeId());
+        payload.addProperty("recipeId", base.recipeId());
+        payload.addProperty("duration", base.duration());
+        payload.addProperty("eut", base.eut());
+        payload.add("inputs", base.inputs());
+        payload.add("outputs", base.outputs());
+        payload.add("tickInputs", base.tickInputs());
+        payload.add("conditions", new JsonArray());
+        return fingerprint(payload);
+    }
+
     public static String fingerprint(JsonElement value) {
         JsonElement canonical = canonicalize(value);
         String serialized = new GsonBuilder().disableHtmlEscaping().create().toJson(canonical);
