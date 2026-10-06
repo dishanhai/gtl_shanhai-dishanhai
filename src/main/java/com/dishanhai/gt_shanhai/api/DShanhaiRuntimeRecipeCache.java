@@ -46,7 +46,7 @@ public final class DShanhaiRuntimeRecipeCache {
 
     public static Key key(String recipeTypeId, IRecipeCapabilityHolder holder, String scope) {
         return new Key(recipeTypeId, itemFingerprint(holder), fluidFingerprint(holder),
-                DShanhaiRecipeModifierAPI.getPatternCacheRevision(), scope);
+                DShanhaiRecipeModifierAPI.getRecipeTypeRevision(recipeTypeId), scope);
     }
 
     public static boolean contains(Key key) {

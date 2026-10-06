@@ -77,6 +77,9 @@ public final class RecipeRebuildService {
                         var lookup = type.getLookup();
                         lookup.removeAllRecipes();
                         for (GTRecipe recipe : rebuilt) lookup.addRecipe(recipe);
+                        DShanhaiRecipeModifierAPI.invalidateRecipeCaches(
+                                "recipe-rebuild:" + reason.name().toLowerCase(),
+                                Set.of(recipeTypeId));
                     } finally {
                         DShanhaiRecipeModifierAPI.SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(previous);
                     }

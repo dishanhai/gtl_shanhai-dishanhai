@@ -40,6 +40,7 @@ public class DShanhaiRecipeModifierAPI {
 
     private static final List<WeakReference<Object>> PATTERN_CACHE_OWNERS = new CopyOnWriteArrayList<>();
     private static final AtomicLong PATTERN_CACHE_REVISION = new AtomicLong();
+    private static final Map<String, AtomicLong> RECIPE_TYPE_REVISIONS = new ConcurrentHashMap<>();
     private static final Object PATTERN_CACHE_INVALIDATION_BATCH_LOCK = new Object();
     private static int patternCacheInvalidationBatchDepth;
     private static boolean patternCacheInvalidationBatchDirty;
@@ -1758,6 +1759,29 @@ public class DShanhaiRecipeModifierAPI {
 
     public static long getPatternCacheRevision() {
         return PATTERN_CACHE_REVISION.get();
+    }
+
+    public static long getRecipeRevision() {
+        return PATTERN_CACHE_REVISION.get();
+    }
+
+    public static long getRecipeTypeRevision(String recipeTypeId) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty()) return 0L;
+        AtomicLong revision = RECIPE_TYPE_REVISIONS.get(recipeTypeId);
+        return revision == null ? 0L : revision.get();
+    }
+
+    public static void invalidateRecipeCaches(String reason, Set<String> typeIds) {
+        if (typeIds != null) {
+            for (String typeId : typeIds) {
+                if (typeId != null && !typeId.isEmpty()) {
+                    RECIPE_TYPE_REVISIONS
+                            .computeIfAbsent(typeId, key -> new AtomicLong())
+                            .incrementAndGet();
+                }
+            }
+        }
+        invalidatePatternCaches(reason);
     }
 
     public static boolean invalidatePatternCacheOwner(Object owner, String reason) {
