@@ -6,6 +6,7 @@ import com.gregtechceu.gtceu.api.recipe.condition.RecipeConditionType;
 import com.mojang.logging.LogUtils;
 import com.shanhai.client.config.ShanhaiClientConfig;
 import com.shanhai.common.recipe.PrimordialFormingRecipeProbe;
+import com.shanhai.common.recipe.ShanhaiRecipeEditProbe;
 import com.shanhai.config.ShanhaiConfig;
 import com.shanhai.machine.module.ModuleSetBlockWatch;
 import com.shanhai.machine.module.ModuleSlotWatch;
@@ -163,6 +164,17 @@ public class ShanhaiMod {
         MinecraftForge.EVENT_BUS.addListener(PrimordialFormingRecipeProbe::onServerStarted);
         LOGGER.info("{} 配方条数探针已挂上 FORGE 事件总线（只读；判据 = 新类型条数 == 声明值 且 模头残留 = 0）",
                 PrimordialFormingRecipeProbe.PREFIX);
+
+        // 🔴 取证探针 [SHANHAI-EDITPROBE]（2026-10-04）：证明「运行期改一条已注册配方 ⇒ 立刻生效」这条路成立。
+        //    机制 = 把 GTCEu 的输入索引 GTRecipeLookup 整个重建（removeAllRecipes + 逐条 addRecipe），
+        //    与老 gt_shanhai 的 DShanhaiRecipeModifierAPI.removeAndSync 是同一套做法（逐条反编译取证见类注释）。
+        //    🔴 它【会真的改写】运行期索引（读完立刻还原）⇒ 默认不开，必须给环境变量
+        //    SHANHAI_EDITPROBE=1 或建 config/shanhai-editprobe.flag 才跑；开关判定结果无条件打日志。
+        //    挂 ServerStartedEvent 的理由：那时 KubeJS 那批配方也已经落进 RecipeManager 与索引了。
+        MinecraftForge.EVENT_BUS.addListener(ShanhaiRecipeEditProbe::onServerStarted);
+        LOGGER.info("{} 配方运行期编辑探针已挂上 FORGE 事件总线（默认不开；开关 = 环境变量 {} 或文件 {}）",
+                ShanhaiRecipeEditProbe.PREFIX, ShanhaiRecipeEditProbe.ENV_ENABLE,
+                ShanhaiRecipeEditProbe.FLAG_FILE);
 
         LOGGER.info("[SHANHAI] {} 已加载（阶段 1）", MOD_ID);
     }

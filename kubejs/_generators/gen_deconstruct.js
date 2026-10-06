@@ -195,7 +195,53 @@ for(const m of mats){
 const OV_DATA = path.join(REPO, 'kubejs', '_generators', 'data', 'ore_yield_overrides.json')
 if (!fs.existsSync(OV_DATA)) throw new Error('缺少矿物粉产率覆盖表：' + OV_DATA + ' —— 先跑 node temp\\pmd-ore2\\build-decision.mjs')
 const OVFILE = JSON.parse(fs.readFileSync(OV_DATA, 'utf8'))
-const OV = OVFILE.overrides || {}
+const OV_AUTO = OVFILE.overrides || {}
+// ═══════════════════════════════════════════════════════════════════════════════
+// 🔴 用户指定覆盖 —— 【生成器自己的专用表】（2026-10-04 本轮新增）
+//   语义：用户【点名指定】的覆盖，**不来自成分推算**（既不是"全链产率"、也不是"扭曲仪配比"）；
+//         数值来自用户自己写的口径 ⇒ **不许被自动生成覆盖**。
+//   为什么必须放【生成器里】，而不能放上面那张自动表里：
+//     ore_yield_overrides.json 由 temp/pmd-ore2/build-decision.mjs 用 writeFileSync
+//     **整体重写**（全量覆盖、不合并磁盘现值）⇒ 放在那张表里的用户条目会在下次重跑时
+//     **被静默丢弃**（输入退回 1×、产出退回化学式口径），而且丢得没有任何报错。
+//   优先级：**本表赢** —— 合并时若自动表也出现同名键，一律以本表为准（用户指定 > 自动推算）。
+//   顺序：合并结果仍按 **id 升序** 摆放（与自动表"严格升序"的约定一致）⇒
+//         产物的 OV_EV 段顺序与并入前逐字节相同（这就是"搬家不改结果"）。
+// ═══════════════════════════════════════════════════════════════════════════════
+const USER_SPECIFIED_OVERRIDES = {
+  'shanhai:deconstruct/gtceu_uraninite_dust': {
+    inItem: '10x gtceu:uraninite_dust',
+    outItems: ['1x gtceu:uranium_235_dust', '9x gtceu:uranium_dust'],
+    outFluids: ['gtceu:oxygen 20000'],
+    cn: '晶质铀矿',
+    src: '用户指定',
+    ev: '晶质铀矿粉 输入=10x gtceu:uraninite_dust 产出=铀-235粉×1、铀粉×9、氧 20000mB | 来源=用户指定（用户在游戏里手写的 AE 处理样板，样板纸名「原初物质解构配方修改」） | 每1粉=铀-235粉 0.1、铀粉 0.9、氧 2000',
+  },
+}
+// 合并：自动表 + 用户指定表；用户指定优先；结果保持 id 升序
+function mergeOverrides(auto, user) {
+  const out = {}
+  const pending = Object.keys(user).sort()
+  for (const k of Object.keys(auto)) {
+    while (pending.length && pending[0] < k) { const uk = pending.shift(); out[uk] = user[uk] }
+    const pi = pending.indexOf(k)
+    if (pi >= 0) { pending.splice(pi, 1); out[k] = user[k] } else { out[k] = auto[k] }
+  }
+  while (pending.length) { const uk = pending.shift(); out[uk] = user[uk] }
+  return out
+}
+const OV = mergeOverrides(OV_AUTO, USER_SPECIFIED_OVERRIDES)
+{
+  const uks = Object.keys(USER_SPECIFIED_OVERRIDES)
+  console.log('=== 🔴 用户指定覆盖（生成器专用表；不受 ore_yield_overrides.json 重写影响）===')
+  console.log('  条数 = ' + uks.length + ' : ' + JSON.stringify(uks))
+  for (const k of uks) {
+    if (Object.prototype.hasOwnProperty.call(OV_AUTO, k)) console.log('  ⚠️ 自动表里也出现了同名键，已按【用户指定优先】覆盖：' + k)
+    const uu = USER_SPECIFIED_OVERRIDES[k]
+    console.log('  [SHANHAI-USEROV] ' + (uu.cn || '') + '\t' + k + '\t' + uu.inItem + ' -> ' + (uu.outItems || []).concat(uu.outFluids || []).join(' , '))
+  }
+  console.log('')
+}
 let ovApplied = 0
 const RESCUED = []          // 🔴 原始产出像自环、但被覆盖表救成真配方的（必须留证，否则没人知道差点删了什么）
 {

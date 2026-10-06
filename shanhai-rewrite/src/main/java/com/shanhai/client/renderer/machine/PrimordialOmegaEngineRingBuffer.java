@@ -6,6 +6,7 @@ import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.client.resources.model.ModelManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
@@ -17,10 +18,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.client.model.data.ModelData;
 import net.minecraftforge.registries.ForgeRegistries;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 
@@ -32,18 +33,97 @@ import java.util.Map;
 /**
  * 原始终焉引擎环形轨道顶点缓冲
  * 与终焉矩阵相同的环形状，但使用蒸汽时代方块映射
+ *
+ * <h2>🔴 2026-10-04 修复：资源包重载（load 一次材质包）后贴图全乱、必须重启才正常</h2>
+ *
+ * <h3>根因（代码级，可复核）</h3>
+ * 本类的顶点缓冲是<b>照着一份 {@link BakedQuad} 烘出来的</b>，而 {@link BakedQuad} 里的 UV 是
+ * <b>方块图集的绝对坐标</b>（`textures/atlas/blocks.png` 整张图上的 0~1 值；取证：
+ * `javap -p net.minecraft.client.renderer.block.model.BakedQuad` 的字段是
+ * `int[] vertices`（UV 就编在里面）+ `TextureAtlasSprite sprite`，
+ * 而 `builder.putBulkData(pose, quad, …)` 写进 {@code DefaultVertexFormat.BLOCK} 的就是这对 UV）。
+ * <p>
+ * 资源包一重载，客户端会**整张重建方块图集**（日志原文，每次 load 都有：
+ * {@code [Render thread/INFO] [TextureAtlas/]: Created: 16384x16384x4 minecraft:textures/atlas/blocks.png-atlas}）
+ * 并把 {@code ModelManager} 换成新实例（{@code Minecraft.reloadResourcePacks()} 里
+ * {@code new ModelManager(...) → putfield modelManager}）⇒ 图集里每个 sprite 的落点都可能变。
+ * <p>
+ * 🔴 而旧代码<b>一辈子只烘一次</b>（`ringBuffers == null && !ringBuildAttempted`，
+ * 见 2026-10-04 前 `javap -c getRingBuffers()` 的 `ifnonnull` / `ifne` 两条短路）
+ * ⇒ 重载之后，这组 VBO 里的 UV 仍然指着<b>旧图集的坐标</b>，于是每张面都去采到
+ * <b>别的方块（甚至别的模组）的 sprite</b>：用户实测现象 =「多方块结构件/控制器的面上出现了
+ * 不属于它的贴图（绿色网格、蓝色同心圈）」；重启游戏会重新烘一次 ⇒ 恢复正常。
+ *
+ * <h3>修法（两处，都在这一个方法里，改动最小）</h3>
+ * <ol>
+ *   <li><b>自愈判据</b>：记住烘这批 VBO 时用的是哪一个 {@link ModelManager}；下一次渲染时若
+ *       它与 {@code Minecraft.getModelManager()} 已经不是同一个实例 ⇒ 说明重载过了
+ *       ⇒ {@link #invalidate()} 后重烘。<b>不依赖任何事件注册成功</b>（注册失败也照样会修）。</li>
+ *   <li>另有显式入口 {@link #invalidate()}，由 {@code ShanhaiClientReloadInvalidator} 在
+ *       {@code RegisterClientReloadListenersEvent} 的资源重载回调里调用（那次回调跑在
+ *       **渲染线程**上 —— 判据就是上面那行 {@code [Render thread/…] TextureAtlas: Created}），
+ *       保证"重载后第一帧就是新图集"，而不是等下一帧。</li>
+ * </ol>
+ * <p>
+ * ⚠️ <b>烘制不再用共享 {@code Tesselator} 的 builder</b>（原来 `Tesselator.getInstance().getBuilder()`
+ * 是全局共享缓冲：在渲染中途 {@code begin()/end()} 会把它正在用的内容冲掉）。改为与兄弟类
+ * {@link PrimordialOmegaEngineModelBuffers} 同款的自建 {@link BufferBuilder}（已实测可用的写法）。
  */
 public class PrimordialOmegaEngineRingBuffer {
 
     private static VertexBuffer[] ringBuffers;
     private static boolean ringBuildAttempted;
 
+    /**
+     * 当前这批 VBO 是照着<b>哪一个</b> {@link ModelManager}（= 哪一张方块图集）烘的。
+     * 资源重载会把它整个换新 ⇒ 实例身份变了 ⇒ 旧 VBO 全部作废（见类注释）。
+     */
+    private static ModelManager builtAgainstModelManager;
+
     public static VertexBuffer[] getRingBuffers() {
+        // 🔴 自愈判据：本方法每次渲染都会被调用，O(1) 取一次 ModelManager 实例比一下身份。
+        //    它独立于事件注册，所以「重载监听器没装上也照样修」（两条路互为保险）。
+        ModelManager current = currentModelManager();
+        if (current != null && current != builtAgainstModelManager) {
+            invalidate();
+            builtAgainstModelManager = current;
+        }
         if (ringBuffers == null && !ringBuildAttempted) {
             ringBuildAttempted = true;
             ringBuffers = buildAllBuffers();
         }
         return ringBuffers;
+    }
+
+    private static ModelManager currentModelManager() {
+        Minecraft minecraft = Minecraft.getInstance();
+        return minecraft == null ? null : minecraft.getModelManager();
+    }
+
+    /**
+     * 作废本组 VBO（下一次 {@link #getRingBuffers()} 会用<b>当前</b>图集重烘）。
+     *
+     * <p>只在渲染线程真正 close（{@code glDeleteBuffers} 必须在渲染线程）；
+     * 非渲染线程走到这里就只丢引用（正常路径到不了 —— 资源重载的 apply 跑在渲染线程）。
+     */
+    public static void invalidate() {
+        VertexBuffer[] old = ringBuffers;
+        ringBuffers = null;
+        ringBuildAttempted = false;
+        if (old == null) {
+            return;
+        }
+        if (!RenderSystem.isOnRenderThread()) {
+            com.shanhai.ShanhaiMod.LOGGER.warn(
+                    "[SHANHAI-RELOAD] ring VBO 在非渲染线程被作废 ⇒ 只丢引用、不 close（本来不该发生；"
+                            + "GL 对象交给 GC，下一次渲染会用新图集重烘）");
+            return;
+        }
+        for (VertexBuffer buffer : old) {
+            if (buffer != null) {
+                buffer.close();
+            }
+        }
     }
 
     private static VertexBuffer[] buildAllBuffers() {
@@ -134,8 +214,10 @@ public class PrimordialOmegaEngineRingBuffer {
 
     private static VertexBuffer buildRingBuffer(String[][] pattern) {
         VertexBuffer buffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
-        Tesselator tesselator = Tesselator.getInstance();
-        BufferBuilder builder = tesselator.getBuilder();
+        // 🔴 自建 BufferBuilder（不用 Tesselator 的全局共享那个）：本方法在渲染中途被调用，
+        //    共享缓冲里可能正装着别处的内容，begin()/end() 会把它冲掉。
+        //    写法与 PrimordialOmegaEngineModelBuffers.buildBuffer 逐行同款（那条路已实测可用）。
+        BufferBuilder builder = new BufferBuilder(1 << 20);
         builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.BLOCK);
 
         PoseStack poseStack = new PoseStack();

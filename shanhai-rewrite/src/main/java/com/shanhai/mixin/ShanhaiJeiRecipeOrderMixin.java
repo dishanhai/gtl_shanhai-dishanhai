@@ -1,6 +1,7 @@
 package com.shanhai.mixin;
 
 import com.shanhai.client.jei.ShanhaiJeiRecipeOrdering;
+import com.shanhai.client.jei.ShanhaiJeiRecipePatches;
 
 import mezz.jei.api.recipe.IFocusGroup;
 import mezz.jei.api.recipe.RecipeType;
@@ -136,11 +137,16 @@ public class ShanhaiJeiRecipeOrderMixin {
                 return;
             }
             String uid = String.valueOf(recipeType.getUid());
-            if (!ShanhaiJeiRecipeOrdering.isTargetCategory(recipeType.getUid())) {
+            boolean targetCategory = ShanhaiJeiRecipeOrdering.isTargetCategory(recipeType.getUid());
+            boolean hasPatches = !ShanhaiJeiRecipePatches.isEmpty();
+            if (!targetCategory && !hasPatches) {
+                // ⚠️ 两个分支都不命中 ⇒ 【原样返回同一个 Stream】，与"本 mixin 不存在"完全等价。
                 return;
             }
             List<?> base = original.toList();
-            List<?> ordered = ShanhaiJeiRecipeOrdering.order(base, uid);
+            // 🔴 顺序有意为之：先贴补丁（配方内容变了），再排序（按贴完之后的输入形态分档）。
+            List<?> patched = hasPatches ? ShanhaiJeiRecipePatches.patched(base, uid) : base;
+            List<?> ordered = targetCategory ? ShanhaiJeiRecipeOrdering.order(patched, uid) : patched;
             cir.setReturnValue(ordered.stream());
         } catch (Throwable throwable) {
             ShanhaiJeiRecipeOrdering.logFailureOnce(throwable);

@@ -116,8 +116,28 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
     public void findAndHandleRecipe() {
         shanhai$resolveRouting();
         // 🔴 每轮重扫前清空「这一轮为什么没跑起来」的暂存 —— 见 shanhai$publishFailReason 的 A③ 注释。
+        //
+        // 🔴🔴 2026-10-04 修 bug：「额外挂载槽」那个暂存位【漏了清空】，三个暂存只清了两个。
+        //   后果（用户实机报的「配方失败原因显示错误」，静态可证 + 日志可证）：
+        //     一旦这台机器【曾经】因为额外挂载槽被拦过一次（recordExtraBlock 把下面那个 boolean 置 true），
+        //     而该标志【只被写、从不被清】⇒ 此后这台机器的每一轮扫描里
+        //     shanhai$recordVoltageTierBlock 都会在【第一行就 return】，电压那条原因【永远写不进去】。
+        //     ⇒ shanhai$publishFailReason 拿到 null ⇒ 一个字都不写 ⇒ 机器状态栏里留着的是【别人的】原因。
+        //   「别人的原因」为什么偏偏是超净间那一条：本闸门为了判「原版是否已经满足」，
+        //     会调 Condition#test 做**窥探**（见本文件 shanhai$extraMountGateAllows 第 853 行），
+        //     而 gtlcore 的 CleanroomConditionMixin.test 是**带副作用的** —— 它判定失败时
+        //     自己就会 RecipeResult.of(machine, fail("未满足%s条件")) 把原因写进机器
+        //     （字节码实证：org/gtlcore/gtlcore/mixin/gtm/api/recipe/condition/CleanroomConditionMixin，
+        //       `ldc #83 // String gtceu.recipe.fail.cleanroom` … `RecipeResult.of` `iconst_0; ireturn`）。
+        //   ⇒ 实机读数（实例 logs\latest.log，2026-10-04）：
+        //       15:43:46 槽全空 ⇒ 拦下(SLOT_EMPTY, cleanroom) ⇒ 这个 boolean 被置 true；
+        //       15:43:56 放入超净维护仓 ⇒【槽放行】+【VOLTAGE-GATE 拦下 machineTier=2 < recipeEuTier=3】
+        //                ⇒ 电压那条被上面那个陈旧 boolean 吞掉 ⇒ 显示的是窥探留下的「未满足超净间条件」。
+        //   判据：这条是【显示错】，不是闸门判错 —— 闸门当时的判定恰好就是用户预期的那一条
+        //     （需求 cleanroom=cleanroom、槽提供 ×1 cleanroom ⇒ 放行；真正拦下的是电压 MV < HV）。
         shanhai$pendingFailReason = null;
         shanhai$pendingFailIsModuleLevel = false;
+        shanhai$pendingFailIsExtraMount = false;
         super.findAndHandleRecipe();
         shanhai$publishFailReason();
     }

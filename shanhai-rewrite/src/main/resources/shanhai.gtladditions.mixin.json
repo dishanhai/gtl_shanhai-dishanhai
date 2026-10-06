@@ -1,0 +1,14 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.shanhai.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "shanhai.refmap.json",
+  "mixins": [
+    "ShanhaiSuperPatternBufferAutoMultiplierMixin",
+    "ShanhaiFoaPanelAutoMultiplierMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

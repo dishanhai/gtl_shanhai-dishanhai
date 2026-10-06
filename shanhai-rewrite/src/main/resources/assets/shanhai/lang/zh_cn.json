@@ -25,6 +25,10 @@
   "shanhai.machine.super_wildcard_pattern_buffer.patterns": "样板数：%s",
   "shanhai.machine.super_wildcard_pattern_buffer.cached": "已缓存：%s",
   "shanhai.machine.super_wildcard_pattern_buffer.foa_unavailable": "§c神锻模式不可用（上游实现取不到，详见日志 ERROR）",
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier": "自动倍率",
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.tooltip.0": "§b开§7：生效倍率改为读取【本仓室所在多方块控制器】的额外产出倍率（伪神之锻炉 或 原始终焉引擎）",
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.tooltip.1": "§8读到的数【向下取整】；读不到 ⇒ 按「这台机器不给额外产出」算 = ×1（绝不报错、绝不让配方算错）",
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.tooltip.2": "§8开着时上面的倍率输入框被禁用（变灰、点不动），框里的值【完全不参与运算】；关掉它手填值才生效",
   "shanhai.machine.super_wildcard_pattern_buffer.circuit.title": "样板电路设置：第 %s 格／当前 %s",
   "shanhai.machine.super_wildcard_pattern_buffer.circuit.hint": "%s–%s = 指定电路\n%s = 不设置（沿用左侧共享电路）",
   "shanhai.machine.super_wildcard_pattern_buffer.circuit.confirm": "确定",
@@ -106,6 +110,7 @@
   "gtceu.primordial_swarm_casting": "原初蜂群铸造",
   "gtceu.primordial_matter_forming": "原初物质定型",
   "gtceu.primordial_debug": "原初山海调试",
+  "gtceu.primordial_deep_space_extraction": "原初深空汲取",
 
   "item.shanhai.annihilation_core": "&$crimson-湮灭核心",
   "item.shanhai.antihydrogen": "&$water-反氢",

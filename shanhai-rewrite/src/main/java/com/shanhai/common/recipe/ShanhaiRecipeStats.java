@@ -661,6 +661,14 @@ public final class ShanhaiRecipeStats {
         //    这一行的两个口径、以及「拿不到 ⇒ (不可用)」的规则，逐条写在
         //    {@link ShanhaiItemCountCore} 的类注释 §1 / §2 里。
         lines.add(itemCountLine());
+        // 🆕 2026-10-05 第 11 刀（用户点单）：横幅加一行「通过配方编辑器 修改/删除/新增 的配方」。
+        //    用户原话（逐字）：「**可以在左边横幅里显示通过配方编辑器修改/删除/新增的配方，不计入总数**」
+        //    ⇒ 🔴 这一行【不进】总数：总数的口径是 {@link #grandTotalOf}（KJS 三批 LIFETIME ＋ 两行现数值），
+        //       本行是从编辑器那份覆盖文件里现数的，与配方表不是同一个口径（它是"编辑动作"的账，
+        //       不是"配方表里有几条"的账）⇒ 加进去会让"总数 == 五行之和"那条已验收的判据失效。
+        //    ⚠️ 数据源 = {@code config/shanhai/recipe_overrides.json}（编辑器自己的账本），
+        //       文件不在/读不出来 ⇒ 印「(不可用)」，绝不编一个 0（本工程红字：宁可缺，不可假）。
+        lines.add(editorRecipeLine());
         if (failed > 0) {
             lines.add("⚠️ 失败: " + failed + " 个");
         } else {
@@ -679,6 +687,37 @@ public final class ShanhaiRecipeStats {
         return count < 0L
                 ? (PREFIX_STAT + "✅ " + label + ": (不可用)")
                 : (PREFIX_STAT + "✅ " + label + ": " + count + " 个配方");
+    }
+
+    /**
+     * 🆕 第 11 刀：横幅那一行「🛠 配方编辑器 修改/删除/新增」。
+     *
+     * <p>用户原话（逐字）：「可以在左边横幅里显示通过配方编辑器修改/删除/新增的配方，<b>不计入总数</b>」。
+     *
+     * <h4>数据源与口径</h4>
+     * <ul>
+     *   <li>读的是编辑器自己的账本 {@code config/shanhai/recipe_overrides.json}
+     *       （{@link com.shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore#countsByOp()}）；
+     *       <b>一条 id 只算一条</b>（那个文件本身按 id 去重，见 {@code upsert}）。</li>
+     *   <li>「修改」= {@code op=set} 条数；「删除」= {@code op=remove} 条数；「新增」= {@code op=add} 条数。</li>
+     *   <li>🔴 <b>不计入总数</b>：总数那一行的口径（KJS 三批 ＋ 两行现数值）一个字都没动。</li>
+     *   <li>三种都是 0 ⇒ 印「通过配方编辑器修改/删除/新增的配方: 0 / 0 / 0」，
+     *       <b>不隐藏这一行</b>（隐藏了没法区分"没有编辑"与"这个功能没做"）。</li>
+     *   <li>文件读不出来 ⇒ 印 {@code (不可用)} —— 绝不编一个 0。</li>
+     * </ul>
+     */
+    private static String editorRecipeLine() {
+        try {
+            final int[] c = com.shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore.countsByOp();
+            if (c == null) {
+                return PREFIX_STAT + "🛠 通过配方编辑器修改/删除/新增: (不可用)";
+            }
+            return PREFIX_STAT + "🛠 通过配方编辑器修改/删除/新增: " + c[0] + " / " + c[1] + " / " + c[2]
+                    + " 个（不计入上面的总数）";
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error(LOG_PREFIX + " editor_recipe_line FAILED: " + t);
+            return PREFIX_STAT + "🛠 通过配方编辑器修改/删除/新增: (不可用)";
+        }
     }
 
     /**
@@ -1014,11 +1053,17 @@ public final class ShanhaiRecipeStats {
         event.getDispatcher().register(
                 Commands.literal(COMMAND_ROOT)
                         .then(commandBranch(COMMAND_ARG))
-                        .then(commandBranch(COMMAND_ARG_ALIAS)));
+                        .then(commandBranch(COMMAND_ARG_ALIAS))
+                        // 🆕 2026-10-04：隐藏调试命令 /shanhai editprobe（配方运行期编辑探针）。
+                        //    注册方式照上面两支（同一套 Brigadier 用法）；本行【只增不减】，
+                        //    上面三行与它们打出去的日志逐字节未变。
+                        .then(com.shanhai.common.recipe.ShanhaiRecipeEditProbe.commandBranch()));
         // 注册期打一行 INFO：这条日志本身就是「命令树真的挂上了」的机器可判证据
         // （无头专服里控制台能不能跑命令，先看这一行在不在）。
         ShanhaiMod.LOGGER.info(LOG_PREFIX + " command_registered /" + COMMAND_ROOT + " " + COMMAND_ARG
                 + " (+alias /" + COMMAND_ROOT + " " + COMMAND_ARG_ALIAS + ")");
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " command_registered /" + COMMAND_ROOT + " "
+                + com.shanhai.common.recipe.ShanhaiRecipeEditProbe.COMMAND_ARG);
     }
 
     /** {@code /shanhai <name>} 那一支：无参数、任何权限、执行即重打横幅。 */

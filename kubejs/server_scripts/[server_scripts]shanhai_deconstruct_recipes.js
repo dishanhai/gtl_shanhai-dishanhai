@@ -1294,9 +1294,9 @@ ServerEvents.recipes(function (event) {
             outFluids: []
         }
         ,{
-            id: 'shanhai:deconstruct/gtceu_uraninite_dust', inItem: '1x gtceu:uraninite_dust', inFluid: null,
-            outItems: ['1x gtceu:uranium_dust'],
-            outFluids: ['gtceu:oxygen 2000']
+            id: 'shanhai:deconstruct/gtceu_uraninite_dust', inItem: '10x gtceu:uraninite_dust', inFluid: null,
+            outItems: ['1x gtceu:uranium_235_dust', '9x gtceu:uranium_dust'],
+            outFluids: ['gtceu:oxygen 20000']
         }
         ,{
             id: 'shanhai:deconstruct/gtceu_uvarovite_dust', inItem: '20x gtceu:uvarovite_dust', inFluid: null,
@@ -5948,7 +5948,7 @@ ServerEvents.recipes(function (event) {
             outItems: ['1x gtladditions:creon_dust'],
             outFluids: []
         }
-    // 🔴 本批 1147 条里，有 91 条的数值来自【矿物粉全链产率】（用户 2026-09-30 拍板 B）
+    // 🔴 本批 1147 条里，有 92 条的数值来自【矿物粉全链产率】（用户 2026-09-30 拍板 B）
     //    其余保持化学式口径（要么闸门未通过、要么就是元素单质自身 1:1）
     ]
     var applySet = function (sym, v) {
@@ -6069,6 +6069,7 @@ ServerEvents.recipes(function (event) {
         ,'shanhai:deconstruct/gtceu_tricalcium_phosphate_dust': '磷酸三钙粉 输入=25x gtceu:tricalcium_phosphate_dust 产出=钙粉×15、磷粉×2、氧 8000mB | 来源=全链产率 | 每1粉=钙粉 0.6、氧 0.32、磷粉 0.08'
         ,'shanhai:deconstruct/gtceu_trinium_compound_dust': '凯金化合物粉 输入=9x gtceu:trinium_compound_dust 产出=硒粉×8、砹粉×8、凯金粉×9、锕粉×9 | 来源=扭曲仪配比 | 每1粉=凯金粉 1、锕粉 1、硒粉 0.888889、砹粉 0.888889'
         ,'shanhai:deconstruct/gtceu_trona_dust': '天然碱粉 输入=16x gtceu:trona_dust 产出=钠粉×3、碳粉×2、氧 6002mB、氢 1004mB | 来源=全链产率 | 每1粉=氧 0.375125、钠粉 0.1875、碳粉 0.125、氢 0.06275'
+        ,'shanhai:deconstruct/gtceu_uraninite_dust': '晶质铀矿粉 输入=10x gtceu:uraninite_dust 产出=铀-235粉×1、铀粉×9、氧 20000mB | 来源=用户指定（用户在游戏里手写的 AE 处理样板，样板纸名「原初物质解构配方修改」） | 每1粉=铀-235粉 0.1、铀粉 0.9、氧 2000'
         ,'shanhai:deconstruct/gtceu_uvarovite_dust': '钙铬榴石粉 输入=20x gtceu:uvarovite_dust 产出=钙粉×3、硅粉×3、铬粉×2、氧 12000mB | 来源=全链产率 | 每1粉=氧 0.6、钙粉 0.15、硅粉 0.15、铬粉 0.1'
         ,'shanhai:deconstruct/gtceu_vanadium_magnetite_dust': '钒磁铁矿粉 输入=14x gtceu:vanadium_magnetite_dust 产出=钒粉×7、铁粉×3、氧 4000mB | 来源=全链产率 | 每1粉=钒粉 0.5、氧 0.285714、铁粉 0.214286'
         ,'shanhai:deconstruct/gtceu_wulfenite_dust': '钼铅矿粉 输入=6x gtceu:wulfenite_dust 产出=铅粉×1、钼粉×1、氧 4000mB | 来源=全链产率 | 每1粉=氧 0.666667、铅粉 0.166667、钼粉 0.166667'
@@ -6210,6 +6211,22 @@ ServerEvents.recipes(function (event) {
 global.SD_EXTRA = {
 };
 
+// ── 🔴 2026-10-04 用户指定覆盖：shanhai:deconstruct/gtceu_uraninite_dust ──
+//   用户口径（逐字，来自用户在游戏里手写的 AE 处理样板；样板那张纸的名字 =「原初物质解构配方修改」）：
+//     输入：10× gtceu:uraninite_dust
+//     产出：1× gtceu:uranium_235_dust ／ 9× gtceu:uranium_dust ／ 20000 mB gtceu:oxygen
+//   ⚠️ 这条的数值【不能写在本手写区】—— SD_EXTRA 只能改【产出】（add / set / setFluid），
+//      而在产物里输入是直接取 `J.inItem`（见本文件上面的注册循环），【改不了份数】；
+//      偏偏 10× 就是用户口径的一部分 ⇒ 只能落在【生成器输入】。
+//   ✅ 2026-10-04（本轮）落点已从"覆盖表"【挪进生成器专用表】——
+//      kubejs/_generators/gen_deconstruct.js 的 USER_SPECIFIED_OVERRIDES
+//      （语义：用户点名指定、不来自成分推算、不许被自动生成覆盖；生成时与自动表合并，用户指定优先）。
+//   ⇒ 因此【不再依赖】kubejs/_generators/data/ore_yield_overrides.json —— 那张表由
+//      temp/pmd-ore2/build-decision.mjs 【整体重写】（writeFileSync 全量覆盖，不合并磁盘现值）；
+//      重写后本条【依然在】。已做正面证明：在副本上把那张表里这条抹掉后重跑生成器，产物仍是
+//      10× gtceu:uraninite_dust ⇒ 1× gtceu:uranium_235_dust ＋ 9× gtceu:uranium_dust ＋ 氧 20000mB。
+//      反面（负面对照）：用【改前】的生成器做同样实验 ⇒ 退回 1× 输入 / 1x gtceu:uranium_dust / 氧 2000mB，
+//      说明这条专用表确实是唯一载体。
 // =============================================================================
 // ── 原 shanhai_symbol_deconstruct.js -- 9 个特殊符号所在材质的【原初物质解构】配方
 //
