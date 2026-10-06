@@ -190,8 +190,8 @@ public final class ShanhaiHoloMenuClient {
                         .then(Commands.literal("settings").executes(ctx -> {
                             ShanhaiHoloMenuState.setPanelMode(ShanhaiHoloMenuPanel.MODE_SETTINGS);
                             log("panel=settings", ctx.getSource());
-                            reply(ctx.getSource(), "全息面板：§b设置 §7（距离 / 朝向档 / 布局）"
-                                    + " §8· 点「返回」那一行回五块板");
+                            reply(ctx.getSource(), "全息面板：§b设置 §7（距离 / 布局 / 环绕特效 / 高级调参 / 返回）"
+                                    + " §8· 点「返回」那一行回五块板；点「高级调参」进第二层翻那 14 项");
                             return 1;
                         }))
                         .then(Commands.literal("command").executes(ctx -> {

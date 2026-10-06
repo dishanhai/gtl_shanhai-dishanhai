@@ -291,6 +291,51 @@ public final class ShanhaiRecipeQuery {
     }
 
     /**
+     * 🆕 2026-10-06（第 14 刀）<b>流体版的两个查询</b>。
+     *
+     * <h4>用户原话（逐字）</h4>
+     * <blockquote>「还有一个很严重的问题，就是我在第一面中无法拖动流体到查询物品框中，<b>流体也是需要查询的</b>」</blockquote>
+     *
+     * <h4>口径（与物品侧逐条对齐，不同的地方只有一处）</h4>
+     * <ul>
+     *   <li>分组、排序、截断三层<b>完全复用</b> {@link #group}（流体没有"非 GT"那一半：原版/工作台那一族
+     *       不存在流体输入 ⇒ <b>不会</b>去扫 {@link ShanhaiVanillaRecipeTable}，也不用 {@code groupMixed}）；</li>
+     *   <li>键 = {@link Fluid} 本体（不带 NBT/数量/chance；<b>不区分"消耗"与"催化剂"</b>）；
+     *       完整语义写在 {@code ShanhaiRecipeReverseIndex.BY_FLUID_IN} 的类文档里；</li>
+     *   <li>note 里把"GT N 条 · 非 GT 0 条"这件事<b>写明</b>，免得用户以为漏了工作台。</li>
+     * </ul>
+     */
+    public static Result byOutputFluid(MinecraftServer server, net.minecraft.world.level.material.Fluid fluid) {
+        if (server == null || fluid == null) {
+            return empty(Kind.SOURCE, "没有流体");
+        }
+        final List<GTRecipe> hits = ShanhaiRecipeReverseIndex.queryFluidOutput(server, fluid);
+        return group(Kind.SOURCE, hits,
+                "流体 " + fluidIdOf(fluid) + " 出现在 " + hits.size() + " 条配方的【输出】里"
+                        + "（GT " + hits.size() + " 条 · 非 GT 0 条 —— 原版配方没有流体输入）");
+    }
+
+    /** 流体版的「作为物品的用处」：哪些配方的【输入】里用到这种流体。 */
+    public static Result byInputFluid(MinecraftServer server, net.minecraft.world.level.material.Fluid fluid) {
+        if (server == null || fluid == null) {
+            return empty(Kind.USE, "没有流体");
+        }
+        final List<GTRecipe> hits = ShanhaiRecipeReverseIndex.queryFluidInput(server, fluid);
+        return group(Kind.USE, hits,
+                "流体 " + fluidIdOf(fluid) + " 出现在 " + hits.size() + " 条配方的【输入】里"
+                        + "（GT " + hits.size() + " 条 · 非 GT 0 条 —— 原版配方没有流体输入）");
+    }
+
+    /** 流体 id（与物品侧 {@link #idOf} 同口径的读数用字符串）。 */
+    public static String fluidIdOf(net.minecraft.world.level.material.Fluid fluid) {
+        if (fluid == null) {
+            return "?";
+        }
+        final ResourceLocation id = BuiltInRegistries.FLUID.getKey(fluid);
+        return id == null ? "?" : id.toString();
+    }
+
+    /**
      * 🆕 <b>非 GT 那一边的命中</b>（工作台 / 熔炉 / 切石机 / 锻造台 …）。
      *
      * <p>为什么单独扫：GT 的反查索引 {@link ShanhaiRecipeReverseIndex} 的 5 处扫描循环

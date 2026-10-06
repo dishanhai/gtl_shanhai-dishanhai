@@ -82,6 +82,20 @@ public final class ShanhaiRecipeEditorWorkspaceCheck {
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} IO_ITEMCOUNT_SELFCHECK_CRASHED_OUTER: {}", PREFIX, t.toString());
         }
+        // 🆕 2026-10-06（第 15 刀）：**「超出机器 io 的配方能不能完整显示/编辑」**那条链的纯内存自检。
+        //    用户原话：「有些配方真的会超出5页」「有些配方的输出超出了 jei/机器的 io 但是 kjs
+        //    还是强制注册成功了，我希望这些配方也可以正常显示输出和输入」。
+        //    靶子用他本机活日志里的真实数字（used=19862），判四件事：
+        //    ① 19862 还夹不夹得住（改前 cells=141 / out=5 页 → 改后 19875 / 621 页，带负对照）；
+        //    ② 保存会不会静默丢（truncationRisk 旧表必须报出"会丢 19734 条"）；
+        //    ③ 同步包：全量 vs 只发当前页的字节数（包大小与配方规模解耦）；
+        //    ④ 只发一页时"页内读得回来、页外没被动过"（真 FriendlyByteBuf 往返）。
+        //    同样不需要 server / 客户端 / 写盘。
+        try {
+            ShanhaiIoTable.selfcheckBigIoPaging();
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("{} IO_BIGIO_SELFCHECK_CRASHED_OUTER: {}", PREFIX, t.toString());
+        }
         if (server == null) {
             return;
         }

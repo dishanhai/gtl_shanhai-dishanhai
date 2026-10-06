@@ -70,14 +70,79 @@ public final class ShanhaiIoTable {
     public static final int CELLS = ITEM_IN + FLUID_IN + ITEM_OUT + FLUID_OUT;
 
     /**
-     * 单区上限（防止某个畸形类型把面板撑爆）。**不是**业务上限：
-     * {@link ShanhaiRecipeTypes#maxIoOf} 给的才是权威，这里只兜底。
-     * <p>🔴 2026-10-05 用户点单：「有时需要满足<b>非常巨大的输入和输出格</b>」
-     * ⇒ 上限按现有最夸张的类型留足余量（原初物质解构 103 物品出 / 原初深空汲取 108 物品出），
-     * 并且<b>格子区做成可分页</b>（{@link ShanhaiRecipeEditorWorkspace#CELLS_PER_PAGE}），
-     * 所以上限提上去也不会把面板撑爆。
+     * 🔴🔴 2026-10-06（第 15 刀）<b>【类型声明上限】的放大闸 —— 不再是"任何一栏最多 128 格"</b>。
+     *
+     * <h4>为什么原来那个 128 是错的（用户点单 ＋ 活日志实证）</h4>
+     * 用户原话（逐字）：
+     * <blockquote>「还有就是有些配方真的会超出5页，这个页数你也可以添加一下」<br>
+     * 「其实是有些配方的输出超出了 jei/机器的 io 但是 kjs 还是强制注册成功了，
+     * 我希望这些配方也可以正常显示输出和输入」</blockquote>
+     * 他本机的活日志（{@code logs/latest.log}，只读）里就有两条<b>真实</b>规模：
+     * <pre>
+     * 16:01:09  workspace_io_shape id=thetornproductionline:assembler/creative_all_items_gen
+     *           type=gtceu:assembler shape=9/1/19862/3 (type_max=9/1/1/3 used=3/0/19862/0)
+     *           cells=141 pages(in=1 out=5)          ← ★ 19862 被夹成 128；141 格 ÷ 32 = 正好 5 页
+     * 15:42:13  workspace_io_shape id=…/ultimate_integrated_ore_process
+     *           type=gtceu:miner_module shape=2/1/282/3 (type_max=2/1/6/3 used=2/0/282/0)
+     *           cells=134 pages(in=1 out=5)          ← ★ 282 被夹成 128
+     * </pre>
+     * ⇒ 用户截图里的「输出 4/5 (131 格)」「物品出 128 · 流体出 3」就是这一行夹出来的。
+     *
+     * <h4>新旧口径（两个上限，各管一件事）</h4>
+     * <pre>
+     *   旧：shape[i] = max(0, min(128, max(type_max[i], used[i])))        ← 用一个数管两件事
+     *   新：shape[i] = max( min(type_max[i], MAX_PER_SECTION),           ← ① 类型【声明】的上限
+     *                     min(used[i],     MAX_CELLS_PER_SECTION) )      ← ② 这条配方【真用到】的条数
+     * </pre>
+     * 为什么必须分开：① 是"类型觉得自己能装多少"（可以很离谱，甚至 {@code Integer.MAX_VALUE}，
+     * 拿它开格子会把内存撑爆 ⇒ 需要闸）；② 是"这条配方 json 里真的有几条"
+     * （它本身就受配方文件大小限制 ⇒ 照单全收才是对的，正是用户要的那件事）。
+     *
+     * <p>⚠️ <b>本常量只管 ①</b>。给 ① 留 4096 是因为活日志里所有类型的
+     * {@code type_max} 实测都在 1..17（见 {@code ShanhaiRecipeTypes.maxIoStatsLine()} 的读数），
+     * 4096 已经等于"任何真实类型都不受它限制"，同时又挡住畸形值。
      */
-    public static final int MAX_PER_SECTION = 128;
+    public static final int MAX_PER_SECTION = 4096;
+
+    /**
+     * 🔴 2026-10-06（第 15 刀）<b>【这条配方真用到几条】的绝对安全上限</b> —— 本类真正的兜底。
+     *
+     * <p>取值依据（**不是拍的**，是用户本机活日志里的最大真实值 ×3）：
+     * 实测最大 = <b>19862</b>（{@code thetornproductionline:assembler/creative_all_items_gen}，
+     * 见 {@link #MAX_PER_SECTION} 那段引的日志原文），次大 282。65536 给足余量，
+     * 又保证"就算有人写一条几十万条的畸形配方"也不会把客户端/服务端内存拖垮
+     * （65536 × 4 栏 = 26 万个格子，仍是几十 MB 量级）。
+     *
+     * <p>⚠️ 一旦某条配方的真实用量超过它，<b>保存会被拒绝</b>
+     * （{@link #truncationRisk} ⇒ {@code ShanhaiRecipeEditorWorkspace#save}），
+     * <b>绝不静默丢数据</b> —— 这是本工程"宁可拒绝，不许静默"那条纪律。
+     */
+    public static final int MAX_CELLS_PER_SECTION = 65536;
+
+    /**
+     * 🔴 2026-10-06（第 15 刀）<b>四元组的唯一算法</b>（两个来源取大，但各自有自己的闸）。
+     *
+     * <p>两个来源的语义差别见 {@link #MAX_PER_SECTION}。本方法是<b>纯函数</b>，
+     * 所以"19862 到底会不会被截断"这件事可以脱离游戏离线判（离线模型
+     * {@code handoff/outbound/BigIoShapeModel.java} 逐行复刻的它就是这一份）。
+     *
+     * @param typeCap 类型自己声明的上限（{@link ShanhaiRecipeTypes#maxIoOf}，长度 4）
+     * @param used    这条配方实际用到的条数（{@link #usedBy}，长度 4）
+     * @return 四元组 {@code {物品入, 流体入, 物品出, 流体出}}（每个都是"这一栏开几个格子"）
+     */
+    public static int[] shapeFor(int[] typeCap, int[] used) {
+        final int[] out = new int[4];
+        for (int i = 0; i < 4; i++) {
+            final int cap = clampTo(typeCap != null && i < typeCap.length ? typeCap[i] : 0, MAX_PER_SECTION);
+            final int real = clampTo(used != null && i < used.length ? used[i] : 0, MAX_CELLS_PER_SECTION);
+            out[i] = Math.max(cap, real);
+        }
+        return out;
+    }
+
+    private static int clampTo(int n, int hi) {
+        return Math.max(0, Math.min(hi, n));
+    }
 
     /**
      * 🔴🔴 2026-10-05（第 6 轮）<b>一个物品格的【数量】上限 —— 不是 64</b>。
@@ -352,8 +417,15 @@ public final class ShanhaiIoTable {
         build();
     }
 
+    /**
+     * 建表时的<b>兜底</b>夹取 —— 只挡"畸形到不可能有人真用"的数。
+     *
+     * <p>🔴 2026-10-06（第 15 刀）：这里原来是 {@code min(MAX_PER_SECTION, n)}（= 128），
+     * 它是"19862 变成 128"的最后一刀。现在改成 {@link #MAX_CELLS_PER_SECTION}（65536）——
+     * <b>这一层不再参与业务判断</b>，业务裁剪已经上移到 {@link #shapeFor} 里按两个来源分开做。
+     */
     private static int clampSection(int n) {
-        return Math.max(0, Math.min(MAX_PER_SECTION, n));
+        return clampTo(n, MAX_CELLS_PER_SECTION);
     }
 
     private void build() {
@@ -427,6 +499,41 @@ public final class ShanhaiIoTable {
     /** 输出栏里的第 i 格在整表里的下标。 */
     public int outIndex(int i) {
         return inSection() + i;
+    }
+
+    /**
+     * 🔴 2026-10-06（第 15 刀）<b>现在屏幕上真正可见的那些格子（整表下标）</b>
+     * —— 同步包只发这一批，见 {@link #writeState(FriendlyByteBuf, int[])} 里那笔账。
+     *
+     * <p>口径与 {@code ShanhaiRecipeEditorWorkspace#inCellIndex/outCellIndex}
+     * <b>逐字相同</b>（同样是 {@code page * cellsPerPage + slot}，同样越界就跳过）：
+     * 那两处是"第 slot 个控件画哪一格"，这里是"要发哪几格"，两边必须是同一批下标，
+     * 否则屏幕上会出现"收到的是别的页"那种错位。
+     *
+     * @param inPage       输入栏当前页（0 基）
+     * @param outPage      输出栏当前页（0 基）
+     * @param cellsPerPage 一栏一页多少格（{@link ShanhaiRecipeEditorWorkspace#CELLS_PER_PAGE}）
+     * @return 可见下标（长度 ≤ 2×{@code cellsPerPage}）
+     */
+    public int[] visibleIndices(int inPage, int outPage, int cellsPerPage) {
+        final int per = Math.max(1, cellsPerPage);
+        final int[] tmp = new int[Math.min(cells.size(), per * 2)];
+        int n = 0;
+        final int inSec = inSection();
+        for (int slot = 0; slot < per; slot++) {
+            final int idx = inPage * per + slot;
+            if (idx >= 0 && idx < inSec) {
+                tmp[n++] = inIndex(idx);
+            }
+        }
+        final int outSec = outSection();
+        for (int slot = 0; slot < per; slot++) {
+            final int idx = outPage * per + slot;
+            if (idx >= 0 && idx < outSec) {
+                tmp[n++] = outIndex(idx);
+            }
+        }
+        return java.util.Arrays.copyOf(tmp, n);
     }
 
     /**
@@ -525,6 +632,54 @@ public final class ShanhaiIoTable {
                 contentsOf(recipe, "inputs", FluidRecipeCapability.CAP).size(),
                 contentsOf(recipe, "outputs", ItemRecipeCapability.CAP).size(),
                 contentsOf(recipe, "outputs", FluidRecipeCapability.CAP).size()};
+    }
+
+    /** 四个区的名字（读数/报错文本用；下标与 {@link #usedBy} 的四元组一一对应）。 */
+    public static final String[] SECTION_NAMES = {"物品输入", "流体输入", "物品输出", "流体输出"};
+
+    /**
+     * 🔴🔴 2026-10-06（第 15 刀）<b>「保存会不会静默丢 IO」的判据（纯函数）</b>。
+     *
+     * <h4>为什么必须有它（这是本次改动里最要紧的一条）</h4>
+     * 保存那条路是<b>整段替换</b>语义：
+     * {@code ShanhaiRecipeEditorWorkspace.save()} → {@code io.json("outputs")}
+     * （只遍历<b>本表</b>的格子）→ {@code ShanhaiRecipeEditorOps.setIo}
+     * → {@code ShanhaiRecipeIoApply.applyTable} 里第一句就是 {@code table.clear()}。
+     * ⇒ <b>表里装不下的那些条数，会在"用户改了任意一格"的那一刻被整段抹掉</b>
+     * （内存里的配方 ＋ 落盘的 {@code config/shanhai/recipe_overrides.json} 一起），
+     * 而日志上一切正常 —— 本工程最怕的那类静默数据损伤。
+     * <p>改动之前这就是<b>真会发生</b>的：{@code used=19862} 而表里只有 128 格 ⇒
+     * 用户只要动一下那条配方的任意一格再点保存，<b>19734 条输出凭空消失</b>。
+     *
+     * <h4>判据与用法</h4>
+     * 逐栏比"这条配方真有几条"与"这张表开得出几格"；任何一栏装不下就返回一段人话描述，
+     * 调用方（{@code save}）据此<b>拒绝这次保存</b>并报 ERROR —— 宁可拒绝，不许静默。
+     *
+     * @param used 这条配方四个区各有多少条（{@link #usedBy}）
+     * @param t    当前编辑缓冲
+     * @return {@code null} = 装得下（可以安全写回）；否则是"会丢多少"的描述
+     */
+    public static String truncationRisk(int[] used, ShanhaiIoTable t) {
+        if (used == null || t == null) {
+            return null;
+        }
+        final int[] have = {t.itemIn, t.fluidIn, t.itemOut, t.fluidOut};
+        final StringBuilder sb = new StringBuilder();
+        int lostTotal = 0;
+        for (int i = 0; i < 4; i++) {
+            final int u = i < used.length ? used[i] : 0;
+            final int h = have[i];
+            if (u > h) {
+                if (sb.length() > 0) {
+                    sb.append('；');
+                }
+                sb.append(SECTION_NAMES[i]).append(" 有 ").append(u)
+                        .append(" 条、编辑器只装得下 ").append(h)
+                        .append(" 条 ⇒ 一键保存会丢 ").append(u - h).append(" 条");
+                lostTotal += u - h;
+            }
+        }
+        return sb.length() == 0 ? null : sb.append("（合计 ").append(lostTotal).append(" 条）").toString();
     }
 
     private static Map<RecipeCapability<?>, List<Content>> table(GTRecipe r, String which) {
@@ -787,16 +942,80 @@ public final class ShanhaiIoTable {
 
     // ================================================================== 两侧同步
 
-    /** 把格子的"显示内容"写给客户端（面板上一次同步里的一小段）。 */
+    /**
+     * 全量同步（旧口径）：把<b>每一格</b>都写进包。只给"小表"用
+     * —— 自检 {@code IO_ITEMCOUNT_SELFCHECK.IC3} 与任何"格子数一眼可数"的场合。
+     *
+     * <p>🔴 面板那条路<b>不许</b>走它：见 {@link #writeState(FriendlyByteBuf, int[])} 里
+     * "19862 格 = 291 KiB / 每 tick 一包"那段账。
+     */
     public void writeState(FriendlyByteBuf buf) {
+        writeState(buf, null);
+    }
+
+    /**
+     * 🔴🔴 2026-10-06（第 15 刀）<b>按【当前可见的那一页】同步</b> —— 这是"同步包不能爆"的落点。
+     *
+     * <h4>为什么必须改（账算给你看）</h4>
+     * 旧口径把每一格都写出去，实测（逐字段按 Forge 的 {@code FriendlyByteBuf} 语义算，
+     * 见离线模型 {@code BigIoShapeModel} 的 D 段）：
+     * <pre>
+     *   每格 = dirty(1) + chance varint(2) + maxChance varint(2) + boost varint(1)
+     *        + notConsumable(1) + chanceDirty(1) + 物品/流体那一段
+     *   物品格（非空）：上面 8 ＋ writeBoolean(1) ＋ writeItemStack(布尔1 ＋ itemId varint 2~3
+     *                  ＋ count byte 1 ＋ NBT 空标记 1) ＋ 数量 varint(1)          ≈ 15 字节
+     *   空格：        上面 8 ＋ writeBoolean(1)                                      =  9 字节
+     * </pre>
+     * ⇒ 放开 128 之后那条真实配方（19862 个输出 ＋ 其余）合计 <b>≈ 291 KiB / 一次推送</b>，
+     * 而 {@code StatePump} 是<b>版本一变就推一次</b>（每次拖动/翻页/保存都算变）。
+     * 原版 {@code Varint21FrameDecoder} 的硬上限是 2097151 字节 ⇒ 还没炸，但离得很近，
+     * 而且每 tick 几百 KB 对局域网/远程服务器就是实打实的卡。
+     * <p>⇒ 面板一共只有 2×{@code CELLS_PER_PAGE}=64 个格子控件，
+     * <b>客户端根本不需要当前页以外的格子</b>（绘制/命中都只走 {@code inCellIndex/outCellIndex}）
+     * ⇒ 只发可见的 ≤64 格，包大小与配方规模<b>彻底解耦</b>（≤ ~1 KiB）。
+     *
+     * <h4>线上格式（写侧带下标，读侧自描述）</h4>
+     * <pre>
+     *   writeVarInt itemIn/fluidIn/itemOut/fluidOut     ← 四元组（客户端 resize 用）
+     *   writeVarInt n                                   ← 这次发了多少格
+     *   n × { writeVarInt 下标; 该格那一整段 }
+     * </pre>
+     * 下标<b>随包发</b>（不靠两侧各算一份）⇒ 读侧不需要知道"每页几格"这件事，
+     * 也就不可能因为页大小/页号的假设不同而错位。{@code indices == null} ⇒ 全量
+     * （等价于"下标 = 0..n-1"），读侧仍是同一套格式、同一段代码。
+     *
+     * @param indices 要同步的整表下标（{@code null} = 全量）
+     */
+    public void writeState(FriendlyByteBuf buf, int[] indices) {
         // 🔴 先写四元组：客户端那份是【按类型重建】的（格子数随类型变化），
         //    不把形状送过去，两侧的下标就会错位（拖第 9 格改到第 12 格那类事故）。
         buf.writeVarInt(itemIn);
         buf.writeVarInt(fluidIn);
         buf.writeVarInt(itemOut);
         buf.writeVarInt(fluidOut);
-        buf.writeVarInt(cells.size());
-        for (Cell c : cells) {
+        final int[] idx = indices == null ? allIndices() : indices;
+        // 🔴 n 必须【严格等于】下面真正写出去的条数：读侧按这个数循环，多算一个就会读到包尾
+        //    （错位 ⇒ 后面的字段全错，本工程踩过"两侧字段顺序反了"那条 P0）。
+        //    ⇒ 越界下标先在计数之前筛掉，而不是在循环里 continue。
+        int live = 0;
+        for (int i = 0; i < idx.length; i++) {
+            if (cell(idx[i]) != null) {
+                live++;
+            } else {
+                ShanhaiMod.LOGGER.warn("{} io_sync_skip_bad_index index={} cells={}",
+                        PREFIX, idx[i], cells.size());
+            }
+        }
+        buf.writeVarInt(live);
+        for (int i = 0; i < idx.length; i++) {
+            final Cell c = cell(idx[i]);
+            if (c == null) {
+                continue;       // 已经在上面报过警、也已经在 live 里扣掉了
+            }
+            buf.writeVarInt(idx[i]);
+            // 🔴 2026-10-06：把"这一格是物品还是流体"也写进包 ⇒ 读侧<b>自描述</b>，
+            //    不需要自己去推（下标越界时也照样读得完，流不会从此错位）。一格 1 字节。
+            buf.writeBoolean(c.itemKind);
             buf.writeBoolean(c.dirty);
             // 🆕 概率三件套 + 催化剂：界面要标"10.00%"与"不消耗"，两侧必须一致。
             buf.writeVarInt(c.chance);
@@ -812,7 +1031,22 @@ public final class ShanhaiIoTable {
         }
     }
 
-    /** 读回（客户端那份 session 用）：先按形状重建，再逐格读。 */
+    private int[] allIndices() {
+        final int[] a = new int[cells.size()];
+        for (int i = 0; i < a.length; i++) {
+            a[i] = i;
+        }
+        return a;
+    }
+
+    /**
+     * 读回（客户端那份 session 用）：先按形状重建，再按【包里的下标】逐格读。
+     *
+     * <p>⚠️ 与写侧是同一套格式：{@code n × {下标, 该格那一整段}}。
+     * 不在这 n 个下标里的格子<b>保持原样</b>（它们不在屏幕上，见写侧那段账）；
+     * 但每一次推送都会把<b>当前页的全部格子</b>（含空格）发一遍，
+     * 所以"翻到第 N 页"那一拍，新页的每一格都是新鲜的 ⇒ 屏幕上不可能出现旧页的残留。
+     */
     public void readState(FriendlyByteBuf buf) {
         final int ii = buf.readVarInt();
         final int fi = buf.readVarInt();
@@ -820,22 +1054,64 @@ public final class ShanhaiIoTable {
         final int fo = buf.readVarInt();
         resize(ii, fi, io, fo);
         final int n = buf.readVarInt();
-        for (int i = 0; i < cells.size(); i++) {
-            final Cell c = cells.get(i);
-            if (i < n) {
-                c.dirty = buf.readBoolean();
-                c.chance = buf.readVarInt();
-                c.maxChance = buf.readVarInt();
-                c.tierChanceBoost = buf.readVarInt();
-                c.notConsumable = buf.readBoolean();
-                c.chanceDirty = buf.readBoolean();
-                if (c.itemKind) {
-                    c.item = readItem(buf);
-                } else {
-                    c.fluid = readFluid(buf);
-                }
+        int applied = 0;
+        int dropped = 0;
+        for (int k = 0; k < n; k++) {
+            // 🔴 下标【必须先读】。哪怕它越界，后面那一段字节也得照样读掉，
+            //    否则整条流从这个点开始全部错位（本工程踩过"两侧字段顺序反了"那条 P0：
+            //    错位后的异常还被 Forge 吞掉 ⇒ 界面上只表现为"面板打不开"）。
+            final int index = buf.readVarInt();
+            final boolean itemKind = buf.readBoolean();
+            final boolean dirty = buf.readBoolean();
+            final int chance = buf.readVarInt();
+            final int maxChance = buf.readVarInt();
+            final int boost = buf.readVarInt();
+            final boolean notConsumable = buf.readBoolean();
+            final boolean chanceDirty = buf.readBoolean();
+            final ItemStack item = itemKind ? readItem(buf) : ItemStack.EMPTY;
+            final FluidStack fluid = itemKind ? FluidStack.empty() : readFluid(buf);
+            final Cell c = cell(index);
+            if (c == null) {
+                dropped++;
+                continue;
             }
+            c.dirty = dirty;
+            c.chance = chance;
+            c.maxChance = maxChance;
+            c.tierChanceBoost = boost;
+            c.notConsumable = notConsumable;
+            c.chanceDirty = chanceDirty;
+            if (itemKind) {
+                c.item = item;
+            } else {
+                c.fluid = fluid;
+            }
+            applied++;
         }
+        if (dropped > 0) {
+            // 不许静默：只有"两侧形状不一致"才会走到这里，而那正是"拖第 9 格改到第 12 格"那类事故的前兆。
+            ShanhaiMod.LOGGER.error("{} io_sync_dropped_out_of_range dropped={} of={} cells={} shape={}/{}/{}/{}",
+                    PREFIX, dropped, n, cells.size(), itemIn, fluidIn, itemOut, fluidOut);
+        }
+        lastSyncCells = applied;
+        lastSyncTotal = n;
+    }
+
+    /**
+     * 上一次 {@link #readState} 真的落进了几格（读数；两侧对账用）。
+     * <p>🔴 为什么要有它：`0==0` 那种"空输入恒真"的假绿是本工程踩过的坑
+     * （见 HANDOFF-20261006-配方编辑器第一屏GT条数归零 §1.4）⇒
+     * 自检断言里必须能看出"这次比了多少格"，所以把这两个数留下来打日志。
+     */
+    private int lastSyncCells = -1;
+    private int lastSyncTotal = -1;
+
+    public int lastSyncCells() {
+        return lastSyncCells;
+    }
+
+    public int lastSyncTotal() {
+        return lastSyncTotal;
     }
 
     /**
@@ -944,18 +1220,81 @@ public final class ShanhaiIoTable {
     /**
      * 一个具体物品栈 ⇒ 一个 GT 物品原料。
      *
-     * <p>⚠️ 这里用的是<b>第二刀运行期验过</b>的那个形状：{@code SizedIngredient} 由
-     * {@code Ingredient.of(stack)}（即 vanilla 的 ItemStack Ingredient）再套 count。
+     * <p>⚠️ 形状仍然是<b>第二刀运行期验过</b>的那一个：{@code SizedIngredient} ＋ 内层
+     * {@code Ingredient} ＋ count。只有内层那一层在 2026-10-06 变了（见 {@link #ingredientForStack}）。
      */
     private static Object itemIngredientOf(ItemStack stack) {
         try {
             return com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient
-                    .create(Ingredient.of(stack), stack.getCount());
+                    .create(ingredientForStack(stack), stack.getCount());
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} io_cell_sized_ingredient_failed item={} err={}",
                     PREFIX, stack, t.toString());
             return null;
         }
+    }
+
+    /**
+     * 🔴 2026-10-06（用户原话：「他配方编辑器<b>不能保留编程电路</b>」）：
+     * <b>带编号的编程电路必须走 GT 自己的 {@code IntCircuitIngredient}</b>，不能走
+     * {@code Ingredient.of(栈)}。
+     *
+     * <h4>为什么（三层实测证据，不是推断）</h4>
+     * <ol>
+     *   <li><b>vanilla 那条路必然丢号</b>：{@code javap -c
+     *       net.minecraft.world.item.crafting.Ingredient$ItemValue#serialize}（Forge
+     *       1.20.1-47.2.20 mapped_official）只有 {@code ldc "item"} 一个键
+     *       ⇒ {@code Ingredient.of(栈).toJson()} = {@code {"item":"gtceu:programmed_circuit"}}，
+     *       <b>NBT 里的 {@code Configuration} 根本没进 JSON</b>；而
+     *       {@code Ingredient#test} 的字节码是 {@code 栈.is(候选.getItem())} —— <b>只比物品、不比 NBT</b>
+     *       ⇒ 存盘再读回来之后，这条配方<b>任何一个号都能喂进去</b>（号彻底没了，不是"变成 0"）；</li>
+     *   <li><b>正确形状有现成参照</b>：GT 自己的序列化形是
+     *       {@code {"type":"gtceu:circuit","configuration":N}}（{@code IntCircuitIngredient#toJson}
+     *       字节码 {@code ldc "type"} ＋ {@code ldc "configuration"}，{@code TYPE = GTCEu.id("circuit")}），
+     *       本实例 {@code local/kubejs/export/recipes/shanhai/photon_siphon/pf/photon.json}
+     *       里一条活的配方就是 {@code "ingredient":{"type":"gtceu:circuit","configuration":2}}；</li>
+     *   <li><b>读回来也靠它</b>：{@code IntCircuitIngredient#getItems()} 返回
+     *       {@code IntCircuitBehaviour.stack(号)}（带 {@code Configuration} NBT）
+     *       ⇒ {@link #representativeItem} 拿到的是带号的栈，卡片上的角标
+     *       （{@link #circuitOf}）才画得出来。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>没有号</b>的裸芯片（NBT 里没有 {@code Configuration}，{@link #circuitOf} 给 {@code -1}）
+     * 与<b>所有非电路物品</b>一律保持原路（{@code Ingredient.of(栈)}）。
+     *
+     * <h4>为什么不会动到已验收的那几条</h4>
+     * 现有判据用的探针是<b>普通物品</b>（{@code ShanhaiRecipeEditorWorkspaceCheck.PROBE_ITEM}
+     * = {@code minecraft:dirt}、{@link ShanhaiIoTable} 的 IO_CHANCE_SELFCHECK 用 dirt/stone、
+     * {@code ShanhaiRecipeEditorSelfcheck.probeStack()} 用 {@code Items.STONE}）
+     * ⇒ {@link #circuitOf} 一律 {@code -1} ⇒ 走的还是老分支，JSON 一个字节不变（模型 E 段量过）。
+     * ⚠️ 反过来说：<b>现有判据里没有一条拿"带号的电路"测过</b>，
+     * 这正是这个 bug 能一路绿过去的原因（2026-10-06 补的模型与这条日志就是为堵它）。
+     *
+     * <h4>🆕 2026-10-06（第 13 刀）：非 GT／工作台那条链也共用本方法</h4>
+     * 原版那一侧的 {@link ShanhaiVanillaRecipeShape#ingredientOf} 此前也是裸
+     * {@code Ingredient.of(shown)} ⇒ <b>同一条 bug</b>（工作台格子里拖进带号电路同样丢号）。
+     * 两处合成<b>同一个</b>方法，避免"改了一边忘另一边"。
+     */
+    public static Ingredient ingredientForStack(ItemStack stack) {
+        final int circuit = circuitOf(stack);
+        if (circuit >= com.gregtechceu.gtceu.api.recipe.ingredient.IntCircuitIngredient.CIRCUIT_MIN
+                && circuit <= com.gregtechceu.gtceu.api.recipe.ingredient.IntCircuitIngredient.CIRCUIT_MAX) {
+            try {
+                final Ingredient circuitIng =
+                        com.gregtechceu.gtceu.api.recipe.ingredient.IntCircuitIngredient.circuitInput(circuit);
+                ShanhaiMod.LOGGER.info("{} io_cell_circuit_kept item={} circuit={} (这一格按 GT 的 "
+                                + "gtceu:circuit 形状写 ⇒ 号会进 recipe_overrides.json 的 ingredient)",
+                        PREFIX, net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()),
+                        circuit);
+                return circuitIng;
+            } catch (Throwable t) {
+                // 取不到带号的电路原料 ⇒ 退回老路（宁可没号，也不能让这一格整个写不进去）
+                ShanhaiMod.LOGGER.error("{} io_cell_circuit_ingredient_failed circuit={} item={} err={} "
+                                + "(退回 Ingredient.of(栈)：这一格会丢掉电路号)",
+                        PREFIX, circuit, stack, t.toString());
+            }
+        }
+        return Ingredient.of(stack);
     }
 
     /** 一张表里有几个非空格子（日志读数）。 */
@@ -1462,5 +1801,174 @@ public final class ShanhaiIoTable {
             ShanhaiMod.LOGGER.error("{} IO_ITEMCOUNT_SELFCHECK_CRASHED (server keeps running): {}",
                     PREFIX, th.toString(), th);
         }
+    }
+
+    /**
+     * 🔴🔴 2026-10-06（第 15 刀）<b>「超大 IO 配方」那条链的机器判据</b>。
+     *
+     * <h4>它判的是用户报的那件事</h4>
+     * 用户原话（逐字）：
+     * <blockquote>「有些配方真的会超出5页」<br>
+     * 「其实是有些配方的输出超出了 jei/机器的 io 但是 kjs 还是强制注册成功了，
+     * 我希望这些配方也可以正常显示输出和输入」</blockquote>
+     * 靶子用的是他本机活日志里的<b>真实数字</b>（不是编的）：
+     * {@code type_max=9/1/1/3 · used=3/0/19862/0 · 旧代码 cells=141 pages(out=5)}。
+     *
+     * <h4>判据（每条都带对照，且读数里能看出"这次比了多少格"）</h4>
+     * <pre>
+     *   BG1 新口径 cells == 19875（19862 不再被夹成 128）   BG1neg 旧口径必须 == 141（负对照）
+     *   BG2 新口径 outPages == 621                        BG2neg 旧口径必须 == 5（负对照）
+     *   BG3 truncationRisk(used, 新表) == null（装得下）
+     *   BG4 truncationRisk(used, 旧表) 必须报出"会丢 19734 条"（★ 这就是"保存会丢数据"的证据）
+     *   BG5 分页同步：writeState(全量) 的字节数 vs writeState(当前页) 的字节数
+     *       —— 期望 全量 > 200000 且 当前页 < 4000（包大小与配方规模解耦）
+     *   BG6 分页同步真的读得回来：writeState(第 3 页) → readState ⇒
+     *       那一页的格子逐格相等，且【页外】的格子没被动过
+     *   BG7 空输入不恒真：本项统计"真的比过几个格子"（compared>0），
+     *       0 的话直接判红（本工程踩过 0==0 假绿的坑）
+     * </pre>
+     *
+     * <p>跑法：由 {@link ShanhaiRecipeEditorWorkspaceCheck#run} 在 {@code SHANHAI_EDITOR=1} 时调用。
+     * <b>不需要客户端、不需要玩家、不写盘</b>。
+     */
+    public static void selfcheckBigIoPaging() {
+        int pass = 0;
+        int fail = 0;
+        try {
+            // ── 靶子：用户本机活日志里那条真实配方（逐字抄自 logs/latest.log 16:01:09）──
+            final int[] typeCap = {9, 1, 1, 3};
+            final int[] used = {3, 0, 19862, 0};
+            // 改动前那一句（逐字复刻旧公式）：先取大，再被 MAX_PER_SECTION 夹一次。
+            final int[] oldShape = new int[4];
+            for (int i = 0; i < 4; i++) {
+                oldShape[i] = clampTo(Math.max(typeCap[i], used[i]), 128);
+            }
+            final int[] newShape = shapeFor(typeCap, used);
+
+            final ShanhaiIoTable oldT = new ShanhaiIoTable(oldShape[0], oldShape[1], oldShape[2], oldShape[3]);
+            final ShanhaiIoTable newT = new ShanhaiIoTable(newShape[0], newShape[1], newShape[2], newShape[3]);
+
+            final int oldCells = oldT.cellCount();
+            final int newCells = newT.cellCount();
+            final int oldPages = pageCountOf(oldT.outSection());
+            final int newPages = pageCountOf(newT.outSection());
+
+            final boolean bg1 = newCells == 19875;
+            final boolean bg1neg = oldCells == 141;
+            final boolean bg2 = newPages == 621;
+            final boolean bg2neg = oldPages == 5;
+
+            final String riskNew = truncationRisk(used, newT);
+            final String riskOld = truncationRisk(used, oldT);
+            final boolean bg3 = riskNew == null;
+            final boolean bg4 = riskOld != null && riskOld.contains("19734");
+
+            // ── BG5/BG6：真 FriendlyByteBuf 往返（和面板那条同步链同一段代码）──
+            final ShanhaiIoTable tx = new ShanhaiIoTable(newShape[0], newShape[1], newShape[2], newShape[3]);
+            final net.minecraft.world.item.ItemStack probe =
+                    new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIRT);
+            for (int i = 0; i < tx.cellCount(); i++) {
+                tx.cell(i).setItem(probe, 1);          // 全表填满（模拟极端：每格都有东西）
+            }
+            final int[] page3 = tx.visibleIndices(0, 3, ShanhaiRecipeEditorWorkspace.CELLS_PER_PAGE);
+            int fullBytes = -1;
+            int pageBytes = -1;
+            boolean syncThrew = false;
+            int compared = 0;
+            boolean pageOk = false;
+            boolean outsideUntouched = false;
+            try {
+                final net.minecraft.network.FriendlyByteBuf big =
+                        new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+                tx.writeState(big);                     // 旧口径：全量
+                fullBytes = big.readableBytes();
+
+                final net.minecraft.network.FriendlyByteBuf small =
+                        new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+                tx.writeState(small, page3);            // 新口径：只发当前页
+                pageBytes = small.readableBytes();
+
+                // 读侧：先造一份"全表都有东西（数量 7）"的客户端副本，再只把第 3 页那一批读进去 ⇒
+                // 页内的格子必须与源一致，页外必须还是 7（证明"只发一部分"没有副作用）。
+                final ShanhaiIoTable rx = new ShanhaiIoTable(newShape[0], newShape[1], newShape[2], newShape[3]);
+                for (int i = 0; i < rx.cellCount(); i++) {
+                    rx.cell(i).setItem(probe, 7);
+                }
+                rx.readState(small);
+                final boolean[] visible = new boolean[rx.cellCount()];
+                pageOk = true;
+                for (int i = 0; i < page3.length; i++) {
+                    final int idx = page3[i];
+                    if (idx >= 0 && idx < visible.length) {
+                        visible[idx] = true;
+                    }
+                    final Cell a = tx.cell(idx);
+                    final Cell b = rx.cell(idx);
+                    compared++;
+                    if (a == null || b == null || a.shownCount() != b.shownCount()) {
+                        pageOk = false;
+                    }
+                }
+                pageOk = compared > 0 && pageOk;
+                outsideUntouched = true;
+                for (int i = 0; i < rx.cellCount(); i++) {
+                    if (!visible[i] && rx.cell(i).shownCount() != 7) {
+                        outsideUntouched = false;
+                        break;
+                    }
+                }
+                ShanhaiMod.LOGGER.info("{} IO_BIGIO_SELFCHECK BG6 read_applied={} read_total={} "
+                                + "（读数：这次真的比了 {} 格、发了 {} 格）",
+                        PREFIX, rx.lastSyncCells(), rx.lastSyncTotal(), compared, page3.length);
+            } catch (Throwable ts) {
+                syncThrew = true;
+                ShanhaiMod.LOGGER.error("{} IO_BIGIO_SELFCHECK sync_threw: {}", PREFIX, ts.toString());
+            }
+
+            final boolean bg5 = !syncThrew && fullBytes > 200_000 && pageBytes > 0 && pageBytes < 4000;
+            final boolean bg6 = !syncThrew && pageOk && outsideUntouched && compared == page3.length;
+            final boolean bg7 = compared > 0;
+
+            final boolean[] all = {bg1, bg1neg, bg2, bg2neg, bg3, bg4, bg5, bg6, bg7};
+            final String[] names = {"BG1_new_cells", "BG1neg_old_cells", "BG2_new_pages", "BG2neg_old_pages",
+                    "BG3_new_no_truncation", "BG4_old_would_drop", "BG5_wire_budget", "BG6_page_roundtrip",
+                    "BG7_not_vacuous"};
+            final StringBuilder failed = new StringBuilder();
+            for (int i = 0; i < all.length; i++) {
+                if (all[i]) {
+                    pass++;
+                } else {
+                    fail++;
+                    failed.append(names[i]).append(' ');
+                }
+            }
+            ShanhaiMod.LOGGER.info("{} IO_BIGIO_SELFCHECK BG1 cells 新口径={} 旧口径={} (期望 19875/141) PASS={}/{}",
+                    PREFIX, newCells, oldCells, bg1, bg1neg);
+            ShanhaiMod.LOGGER.info("{} IO_BIGIO_SELFCHECK BG2 out_pages 新口径={} 旧口径={} (期望 621/5) PASS={}/{}",
+                    PREFIX, newPages, oldPages, bg2, bg2neg);
+            ShanhaiMod.LOGGER.info("{} IO_BIGIO_SELFCHECK BG3/BG4 新表装得下={} 旧表={} PASS={}/{}",
+                    PREFIX, riskNew == null ? "是" : riskNew,
+                    riskOld == null ? "（没算出风险 ⇒ 判据坏了）" : riskOld, bg3, bg4);
+            ShanhaiMod.LOGGER.info("{} IO_BIGIO_SELFCHECK BG5 同步包 全量={} 字节 / 当前页={} 字节 PASS={} "
+                            + "（{} 格 vs {} 格；原版帧上限 2097151）",
+                    PREFIX, fullBytes, pageBytes, bg5, tx.cellCount(), page3.length);
+            ShanhaiMod.LOGGER.info("{} IO_BIGIO_SELFCHECK BG6 页内逐格相等={} 页外没被动过={} 比过={} 格 PASS={}",
+                    PREFIX, pageOk, outsideUntouched, compared, bg6);
+            ShanhaiMod.LOGGER.info("{} IO_BIGIO_SELFCHECK_DONE pass={} fail={} failed={}",
+                    PREFIX, pass, fail, fail == 0 ? "(none)" : failed.toString().trim());
+            if (fail > 0) {
+                ShanhaiMod.LOGGER.error("{} IO_BIGIO_SELFCHECK FAILED {} 条判据不过 ⇒ "
+                        + "「超出机器 io 的配方也能完整显示/编辑」这件事没做成，必须修", PREFIX, fail);
+            }
+        } catch (Throwable th) {
+            ShanhaiMod.LOGGER.error("{} IO_BIGIO_SELFCHECK_CRASHED (server keeps running): {}",
+                    PREFIX, th.toString(), th);
+        }
+    }
+
+    /** 一栏几页（至少 1 页）——与 {@code ShanhaiRecipeEditorWorkspace#pageCountOf} 同一口径。 */
+    private static int pageCountOf(int section) {
+        return Math.max(1, (section + ShanhaiRecipeEditorWorkspace.CELLS_PER_PAGE - 1)
+                / ShanhaiRecipeEditorWorkspace.CELLS_PER_PAGE);
     }
 }

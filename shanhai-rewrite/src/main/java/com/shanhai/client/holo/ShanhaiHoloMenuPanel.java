@@ -32,14 +32,21 @@ import com.shanhai.common.holo.ShanhaiHoloMenuBoards;
  * ⚠️ 标签占掉第 0 格是刻意的：这样"距离 − 值 +"这种三件套正好落在格 1/2/3 上，
  * 不用为每一行单独算坐标，也就不会出现"某一行的按钮与文字错位"。
  *
- * <h2>4. 两个面板的内容</h2>
+ * <h2>4. 三个面板的内容（两层，两层都用满同一块 5 行网格）</h2>
  * <pre>
- *                 设置面板 (MODE_SETTINGS，**只有 3 行**)        命令面板 (MODE_COMMAND，**只有 2 行**)
- *   行 0   （不画 —— 标题框已删）                     行 0   （不画 —— 标题框已删）
- *   行 1 ┌ 距离  [−0.2] [2.8 格] [+0.2]                 │ 行 1 ┌ 输入命令，回车执行 / 你打的字（整行）
- *   行 2 │ 布局  [环绕] [竖列] [横排]                    │ 行 2 └ 返回（整行可点）
- *   行 3 └ 返回（整行可点）                              │ 行 3   （不画）
- *   行 4   （不画）                                      ┘ 行 4   （不画）
+ *   设置面板（第一层，5 行全画）              命令面板（只画 2 行）
+ *   行 0 ┌ 距离     [−0.2 格] [2.8 格] [+0.2 格]   行 0   （不画）
+ *   行 1 │ 布局     [环绕] [竖列] [横排]          行 1 ┌ 输入命令，回车执行 / 你打的字（整行）
+ *   行 2 │ 环绕特效 [关] [弱] [中] [强]            行 2 └ 返回（整行可点）
+ *   行 3 │ 高级调参 （整行可点 ⇒ 进第二层）         行 3   （不画）
+ *   行 4 └ 返回     （整行可点）                   行 4   （不画）
+ *
+ *   高级调参页（第二层，MODE_ADVANCED，每页 4 项 + 第 5 行导航，共 4 页 = 4/4/4/2）
+ *   行 0 ┌ [环数]        [− 1 条]  [2 条]     [+ 1 条]
+ *   行 1 │ [环半径倍率]  [− 0.05 倍] [1.40 倍] [+ 0.05 倍]
+ *   行 2 │ [环亮度]      …（第 4 页只有 2 项：行 2 / 行 3 不画）
+ *   行 3 │ [刻度密度]    …
+ *   行 4 └ [上一页] [环·第1/4页] [下一页] [返回]      ← 返回 = 回第一层，不是关面板
  * </pre>
  *
  * <p>🔴 <b>2026-10-06（用户第三轮点单）：「朝向」那一行【整行删掉】</b>。用户原话逐字：
@@ -58,6 +65,16 @@ import com.shanhai.common.holo.ShanhaiHoloMenuBoards;
  * <p>设置那两行的选项与两条既有命令<b>逐条对应</b>（{@code /shanhai menu distance} /
  * {@code layout ring|column|row}），所以"面板改了之后命令读到的值"必然一致
  * —— 两边都是 {@link ShanhaiHoloMenuState} 的同一份状态。
+ *
+ * <p>🔴 <b>2026-10-06（第四轮点单）环绕特效做成游戏内可调</b>，形式 = <b>四档预设（关/弱/中/强）</b>
+ * ＋ <b>高级页翻 15 项</b>。落地：
+ * <pre>
+ *   ① 「环绕特效」那一行四格 = 四档，点一格整组切换（当前档带 ▸，与「布局」行同构）；
+ *   ② 「高级调参」那一行整行可点 ⇒ 第二层：每页 4 项 + 第 5 行导航，4 页（4/4/4/3）＝ 那 15 项（2026-10-06 16:2x 追加第 15 项「跟随延迟」）；
+ *   ③ 🔴 两层都用满同一块 5 行网格 ⇒ 几何、行位、准星可达性与已验收版逐位相同
+ *      （没有为容纳新行动过任何一个数）—— 理由见 {@link #MODE_ADVANCED} 的注释；
+ *   ④ 档位与 15 项取值只存内存（{@link ShanhaiHoloSurroundTuning}），不新增落盘文件。
+ * </pre>
  *
  * <p>🔴 <b>2026-10-06（用户第 ② 条点单）命令面板只剩两个框</b>，用户原话逐字：
  * <blockquote>
@@ -92,6 +109,20 @@ public final class ShanhaiHoloMenuPanel {
     public static final int MODE_SETTINGS = 1;
     /** 命令输入面板。 */
     public static final int MODE_COMMAND = 2;
+    /**
+     * 🆕 2026-10-06（第二轮点单）<b>高级调参页</b> —— 设置面板里点「高级调参」那一行进来的第二层。
+     *
+     * <pre>
+     *   每页 4 个参数项 ＋ 第 5 行导航，共 4 页（4/4/4/3），一共 15 项（第 15 项「跟随延迟」是 2026-10-06 16:2x 追加的）。
+     *   每行 4 格 = [名称][−][当前值][+]
+     *   导航 4 格  = [上一页][类别·第 n/N 页][下一页][返回]（返回 = 回第一层，不是关面板）
+     * </pre>
+     * 🔴 <b>为什么是"每页 4 项"而不是原设计的 3 页 6/7/1</b>：面板的行数
+     * {@link #ROWS} = {@link ShanhaiHoloMenuTuning#BOARD_COUNT} = 5，而这个 5 <b>同时</b>被
+     * 五块菜单板用（{@code RING_STEP_DEG = 360/5}）⇒ <b>加行数就会挪动用户已验收的菜单板</b>，
+     * 那是红线。所以 5 行网格一个数都不动 ⇒ 扣掉 1 行导航，每页最多 4 项。
+     */
+    public static final int MODE_ADVANCED = 3;
 
     /** 行数 = 板块数（一块板一行）。 */
     public static final int ROWS = ShanhaiHoloMenuTuning.BOARD_COUNT;
@@ -127,48 +158,126 @@ public final class ShanhaiHoloMenuPanel {
     /** 🔴 <b>命令面板真正画出来的那两行</b>（顺序 = 从上到下）：输入框、返回框。 */
     public static final int[] COMMAND_ROWS = {COMMAND_INPUT_ROW, COMMAND_BACK_ROW};
 
-    // ================================================================== 🆕 设置面板的行布局（2026-10-06 第三轮）
+    // ================================================== 🆕 设置面板的行布局（2026-10-06 第三 / 四轮）
 
     /**
-     * 🆕 <b>设置面板只剩三行</b>：距离 / 布局 / 返回。
+     * 🆕 <b>设置面板用满这 5 行</b>（= 板数；一块板一行，"5" 这个数一个都没挪）：
+     * <pre>
+     *   行 0  距离      [− 0.2 格] [2.8 格] [+ 0.2 格]
+     *   行 1  布局      [环绕] [竖列] [横排]
+     *   行 2  环绕特效  [关] [弱] [中] [强]          ← 四格，点一格整组切换
+     *   行 3  高级调参  （整行可点 ⇒ 进第二层高级页）
+     *   行 4  返回      （整行可点 ⇒ 收起面板回到五块菜单板）
+     * </pre>
      *
-     * <p>用户原话逐字：
+     * <p>用户原话逐字（第三条点单）：
      * <blockquote>你干脆把朝向的修改选项删了得了，反正另外两个正常人肯定不会用</blockquote>
+     * ⇒ 原来的「朝向」那一行<b>整行不存在</b>（不是"画了但不可点"）；而朝向档本身<b>没有丢</b>：
+     * {@code /shanhai menu facing follow|snap|fixed} 一个字没动（它影响的是五块菜单板）。
      *
-     * <pre>
-     *   行 1  距离  [− 0.2 格] [2.8 格] [+ 0.2 格]
-     *   行 2  布局  [环绕] [竖列] [横排]
-     *   行 3  返回（整行可点）
-     * </pre>
-     * 🔴 三行<b>挨着</b>（行 1/2/3，中间不留空档），而且这一段的中心正好是面板中心
-     * （行 2 的 y = 0，见 {@link ShanhaiHoloMenuLayout#panelRows()}）⇒ 整列仍然居中在锚点上。
-     * <p>⚠️ 行 0（原来的「全息设置」标题框）与行 4 <b>不出现在面板上</b>：
-     * {@link #rowVisible} 对它们返回 {@code false} ⇒ 渲染器三个绘制遍都不画、输入层也不认它们。
-     * <p>🔴 <b>为什么标题也没有了</b>：用户点单的判据是「设置面板只剩三行：距离 / 布局 / 返回」
-     * —— 标题框是第 4 行。命令面板那次（「我只要两个框」）同样把标题框删掉了，两处口径一致。
+     * <p>🔴 <b>行 0 与行 4 现在都画出来了</b>（改版前它们分别是"标题行"与"空行"）：
+     * 用户拍板的版面就是「距离 / 布局 / 环绕特效 / 高级调参 / 返回」五行，正好占满这块 5 行网格
+     * ⇒ 几何、行位、行高、准星可达性与已验收版<b>逐位相同</b>（没有为容纳新行动过任何一个数）。
      */
-    public static final int SETTINGS_DIST_ROW = 1;
+    public static final int SETTINGS_DIST_ROW = 0;
 
-    /** 布局那一行 —— 紧贴距离行下面。 */
-    public static final int SETTINGS_LAYOUT_ROW = SETTINGS_DIST_ROW + 1;
-
-    /** 「返回」那一行 —— 紧贴布局行下面（<b>不再是 {@code ROWS − 1}</b>，否则会留一条空档）。 */
-    public static final int SETTINGS_BACK_ROW = SETTINGS_LAYOUT_ROW + 1;
-
-    /** 🔴 <b>设置面板真正画出来的那三行</b>（顺序 = 从上到下）：距离、布局、返回。 */
-    public static final int[] SETTINGS_ROWS = {SETTINGS_DIST_ROW, SETTINGS_LAYOUT_ROW, SETTINGS_BACK_ROW};
+    /** 「布局」那一行 —— 紧贴距离行下面。 */
+    public static final int SETTINGS_LAYOUT_ROW = 1;
 
     /**
-     * 🔴 <b>这一行要不要画 / 要不要参与命中</b>（两个面板各自"只有几行"的唯一落点）。
+     * 🆕 「环绕特效」那一行：<b>[关][弱][中][强] 四格</b>，点一格即整组切换。
+     * <p>与「布局」行同构：当前生效那一档带 {@code ▸} 标记（{@link #isCurrent}），
+     * 点任意一格都切到那一档。
+     * <p>⚠️ 这一行<b>没有单独的名称格</b>：一行只有 4 格、而四档正好占满四格
+     * （名称靠日志与这一行的位置表达；要加名称格就得砍掉一档，那是用户没要的）。
+     */
+    public static final int SETTINGS_PRESET_ROW = 2;
+
+    /** 🆕 「高级调参」那一行：<b>整行可点</b> ⇒ 进第二层（{@link #MODE_ADVANCED}）。 */
+    public static final int SETTINGS_ADV_ROW = 3;
+
+    /** 「返回」那一行：整行可点 ⇒ 收起面板、回到五块菜单板（<b>不关投影</b>）。 */
+    public static final int SETTINGS_BACK_ROW = 4;
+
+    /** 🔴 <b>设置面板画出来的行</b>（= 全部 5 行，顺序 = 从上到下）。 */
+    public static final int[] SETTINGS_ROWS = {SETTINGS_DIST_ROW, SETTINGS_LAYOUT_ROW,
+            SETTINGS_PRESET_ROW, SETTINGS_ADV_ROW, SETTINGS_BACK_ROW};
+
+    // ---------------------------------------------------------------- 🆕 第二层：高级调参页
+
+    /**
+     * 高级页的第几行是导航 = <b>最后一行</b>（与第一层「返回」同一行号 ⇒ 两层用满同一块 5 行网格）。
+     * <p>导航四格：{@code [上一页][类别·第 n/N 页][下一页][返回]}。
+     */
+    public static final int ADV_NAV_ROW = ROWS - 1;
+
+    /** 导航格 0 = 上一页。 */
+    public static final int ADV_CELL_PREV = 0;
+    /** 导航格 1 = 「类别 · 第 n/N 页」（只读，不可点）。 */
+    public static final int ADV_CELL_INFO = 1;
+    /** 导航格 2 = 下一页。 */
+    public static final int ADV_CELL_NEXT = 2;
+    /** 导航格 3 = 返回（<b>回第一层设置面板，不是关面板</b>）。 */
+    public static final int ADV_CELL_BACK = 3;
+
+    /** 参数值那一行：格 1 = {@code −}、格 2 = 当前值（只读）、格 3 = {@code +}。 */
+    public static final int ADV_CELL_MINUS = 1;
+    public static final int ADV_CELL_VALUE = 2;
+    public static final int ADV_CELL_PLUS = 3;
+
+    /** 当前在第几页（0 基）。<b>只在内存里</b>，不落盘。 */
+    private static int advPage;
+
+    /** 当前高级页（0 基）。 */
+    public static int advPage() {
+        return advPage;
+    }
+
+    /** 一共几页（= 4）。 */
+    public static int advPageCount() {
+        return ShanhaiHoloSurroundTuning.PAGE_COUNT;
+    }
+
+    /** 切到某一页（越界钳住；进高级页时一律回到第 1 页）。 */
+    public static void setAdvPage(int page) {
+        advPage = Math.max(0, Math.min(ShanhaiHoloSurroundTuning.PAGE_COUNT - 1, page));
+    }
+
+    /** 翻页（{@code +1 / −1}），到头就停住（不循环 —— 循环会让人不知道自己在第几页）。 */
+    public static void flipAdvPage(int delta) {
+        setAdvPage(advPage + delta);
+    }
+
+    /** 当前页有几项（第 4 页只有 3 项：15 = 4+4+4+3）。 */
+    public static int advParamCountOnPage() {
+        return ShanhaiHoloSurroundTuning.paramCountOnPage(advPage);
+    }
+
+    /**
+     * （高级页的某个行号, 当前页）⇒ 第几项（0..13）；{@code -1} = 这一行这一页没有项。
+     * <p>它把 {@link ShanhaiHoloSurroundTuning#indexOf} 包了一层 —— 调用方（面板 / 输入层 /
+     * 离线探针）都走它，于是"第几行是哪一项"只有一处答案。
+     */
+    public static int advParamIndex(int row) {
+        return ShanhaiHoloSurroundTuning.indexOf(advPage, row);
+    }
+
+    /** 第 idx 项在哪一行（当前页）；不在本页返回 −1。 */
+    public static int advRowOf(int idx) {
+        final int page = ShanhaiHoloSurroundTuning.pageOf(idx);
+        return page == advPage ? ShanhaiHoloSurroundTuning.pageRowOf(idx) : -1;
+    }
+
+    /**
+     * 🔴 <b>这一行要不要画 / 要不要参与命中</b>（三个面板各自"只有几行"的唯一落点）。
      *
      * <pre>
-     *   命令面板：只有 {@link #COMMAND_INPUT_ROW} 与 {@link #COMMAND_BACK_ROW} 两行
-     *             —— 标题行 / 空行 /「结果」行全部【不画】（"多的都删了"）
-     *   设置面板：只有 {@link #SETTINGS_ROWS} 那三行（距离 / 布局 / 返回）
-     *             —— 标题行与第 4 行【不画】；🔴 原来的「朝向」行【已经不存在】
+     *   命令面板  ：只有 {@link #COMMAND_INPUT_ROW} 与 {@link #COMMAND_BACK_ROW} 两行
+     *   设置面板  ：{@link #SETTINGS_ROWS} 那五行（距离 / 布局 / 环绕特效 / 高级调参 / 返回）
+     *   高级页    ：前几行 = 本页的参数项（最后一页只有 2 项）+ 最后一行导航
      * </pre>
-     * 渲染器三个绘制遍、以及输入层的"指着谁/点了哪一格"都读它 ⇒
-     * <b>画出来的行与能点的行只可能是一套</b>（判据见 {@link #selfTest()} 的 N7/N8/N9）。
+     * 渲染器三个绘制遍、环绕层的板面禁区、输入层的"指着谁/点了哪一格"都读它 ⇒
+     * <b>画出来的行与能点的行只可能是一套</b>（判据见 {@link #selfTest()} 的 N7/N8/N9/N10）。
      */
     public static boolean rowVisible(int mode, int row) {
         if (row < 0 || row >= ROWS) {
@@ -181,6 +290,9 @@ public final class ShanhaiHoloMenuPanel {
                 }
             }
             return false;
+        }
+        if (mode == MODE_ADVANCED) {
+            return row == ADV_NAV_ROW || advParamIndex(row) >= 0;
         }
         if (mode == MODE_COMMAND) {
             return row == COMMAND_INPUT_ROW || row == COMMAND_BACK_ROW;
@@ -230,6 +342,44 @@ public final class ShanhaiHoloMenuPanel {
     /** 命令面板：清空输入。 */
     public static final int CLICK_CMD_CLEAR = 12;
 
+    // ---- 🆕 2026-10-06（第二轮）：环绕特效四档 + 高级调参页 ----
+
+    /** 设置面板「环绕特效」那一行的四格（点一格 = 整组切到那一档）。 */
+    public static final int CLICK_PRESET_OFF = 13;
+    public static final int CLICK_PRESET_WEAK = 14;
+    public static final int CLICK_PRESET_MID = 15;
+    public static final int CLICK_PRESET_STRONG = 16;
+
+    /** 设置面板「高级调参」那一行 ⇒ 进第二层（回到第 1 页）。 */
+    public static final int CLICK_ADV_OPEN = 17;
+    /** 高级页导航：上一页 / 下一页。 */
+    public static final int CLICK_ADV_PREV = 18;
+    public static final int CLICK_ADV_NEXT = 19;
+    /** 高级页导航：返回<b>第一层设置面板</b>（不是关面板）。 */
+    public static final int CLICK_ADV_BACK = 20;
+    /** 高级页参数行：那一项的 − / +（具体减哪一项由 (行, 当前页) 决定，见 {@link #advParamIndex}）。 */
+    public static final int CLICK_PARAM_DOWN = 21;
+    public static final int CLICK_PARAM_UP = 22;
+
+    /**
+     * 🆕 动作码 ⇒ 环绕特效档位号；不是预设那四个码就返回 {@code -1}。
+     * <p>它把"点哪一格 = 切到哪一档"收成一处（输入层与自检都读它，不各写一遍 switch）。
+     */
+    public static int presetOfClick(int click) {
+        return switch (click) {
+            case CLICK_PRESET_OFF -> ShanhaiHoloSurroundTuning.PRESET_OFF;
+            case CLICK_PRESET_WEAK -> ShanhaiHoloSurroundTuning.PRESET_WEAK;
+            case CLICK_PRESET_MID -> ShanhaiHoloSurroundTuning.PRESET_MID;
+            case CLICK_PRESET_STRONG -> ShanhaiHoloSurroundTuning.PRESET_STRONG;
+            default -> -1;
+        };
+    }
+
+    /** 🆕 「环绕特效」那一行的第 {@code cell} 格对应哪一档（{@code -1} = 没有）。 */
+    public static int presetOfCell(int cell) {
+        return cell < 0 || cell >= ShanhaiHoloSurroundTuning.PRESET_COUNT ? -1 : cell;
+    }
+
     /** 动作码 ⇒ 中文（日志与报告都用它，<b>不许让英文码出现在人看的行里</b>）。 */
     public static String clickName(int click) {
         return switch (click) {
@@ -245,6 +395,16 @@ public final class ShanhaiHoloMenuPanel {
             case CLICK_CMD_TYPE -> "打开键盘输入";
             case CLICK_CMD_RUN -> "执行命令";
             case CLICK_CMD_CLEAR -> "清空输入";
+            case CLICK_PRESET_OFF -> "环绕特效=关";
+            case CLICK_PRESET_WEAK -> "环绕特效=弱";
+            case CLICK_PRESET_MID -> "环绕特效=中";
+            case CLICK_PRESET_STRONG -> "环绕特效=强";
+            case CLICK_ADV_OPEN -> "进高级调参";
+            case CLICK_ADV_PREV -> "上一页";
+            case CLICK_ADV_NEXT -> "下一页";
+            case CLICK_ADV_BACK -> "高级页返回";
+            case CLICK_PARAM_DOWN -> "参数减一档";
+            case CLICK_PARAM_UP -> "参数加一档";
             default -> "无动作";
         };
     }
@@ -254,6 +414,7 @@ public final class ShanhaiHoloMenuPanel {
         return switch (mode) {
             case MODE_SETTINGS -> "设置面板";
             case MODE_COMMAND -> "命令面板";
+            case MODE_ADVANCED -> "高级调参页";
             default -> "无面板";
         };
     }
@@ -339,8 +500,41 @@ public final class ShanhaiHoloMenuPanel {
                     case 3 -> CLICK_LAYOUT_ROW;
                     default -> CLICK_NONE;
                 };
-                case SETTINGS_BACK_ROW -> CLICK_CLOSE;  // 「返回」整行可点
-                default -> CLICK_NONE;                  // 行 0 / 行 4：不画，也不可点
+                // 🔴 环绕特效那一行：四格全部可点，点哪一格 = 整组切到那一档
+                //    （格号 == 档位号，见 presetOfCell；两者不可能对不上）
+                case SETTINGS_PRESET_ROW -> switch (cell) {
+                    case 0 -> CLICK_PRESET_OFF;
+                    case 1 -> CLICK_PRESET_WEAK;
+                    case 2 -> CLICK_PRESET_MID;
+                    case 3 -> CLICK_PRESET_STRONG;
+                    default -> CLICK_NONE;
+                };
+                // 「高级调参」整行可点 ⇒ 进第二层
+                case SETTINGS_ADV_ROW -> CLICK_ADV_OPEN;
+                // 「返回」整行可点
+                case SETTINGS_BACK_ROW -> CLICK_CLOSE;
+                default -> CLICK_NONE;
+            };
+        }
+        if (mode == MODE_ADVANCED) {
+            if (row == ADV_NAV_ROW) {
+                return switch (cell) {
+                    case ADV_CELL_PREV -> CLICK_ADV_PREV;
+                    case ADV_CELL_NEXT -> CLICK_ADV_NEXT;
+                    case ADV_CELL_BACK -> CLICK_ADV_BACK;
+                    // 格 1 = 「类别·第 n/N 页」读数，只读（不可点）
+                    default -> CLICK_NONE;
+                };
+            }
+            // 参数行：只有本页真的有那一项时才有按钮
+            if (advParamIndex(row) < 0) {
+                return CLICK_NONE;
+            }
+            return switch (cell) {
+                case ADV_CELL_MINUS -> CLICK_PARAM_DOWN;
+                case ADV_CELL_PLUS -> CLICK_PARAM_UP;
+                // 格 0 = 参数名（标签）、格 2 = 当前值（只读）
+                default -> CLICK_NONE;
             };
         }
         if (mode == MODE_COMMAND) {
@@ -354,6 +548,30 @@ public final class ShanhaiHoloMenuPanel {
             };
         }
         return CLICK_NONE;
+    }
+
+    /**
+     * 这一格画成"标签"（白、字号大一点）还是"按钮"（淡青、指到会变白）。
+     *
+     * <p>渲染器在改版前用的是 {@code cell == 0}，那一刀对"格 0 不是标签"的两行是错的：
+     * 「环绕特效」那一行的格 0 是<b>一颗按钮</b>（「关」），「高级调参」那一行的格 0 也是
+     * （整行可点）。⇒ 收成这一个函数，渲染器只读它。
+     * <p>⚠️ 「返回」那一行的格 0 <b>照旧算标签</b>：那是用户已经验收过的观感（白字），
+     * 本次不动它。
+     */
+    public static boolean isLabelCell(int mode, int row, int cell) {
+        if (cell != 0) {
+            return false;
+        }
+        if (mode == MODE_SETTINGS) {
+            return row == SETTINGS_DIST_ROW || row == SETTINGS_LAYOUT_ROW
+                    || row == SETTINGS_BACK_ROW;
+        }
+        if (mode == MODE_ADVANCED) {
+            // 参数名是标签；导航那一行四格全是按钮
+            return row != ADV_NAV_ROW;
+        }
+        return true;
     }
 
     /** 这个名字是不是"可点的按钮"（渲染器用它决定要不要画成亮色）。 */
@@ -410,7 +628,36 @@ public final class ShanhaiHoloMenuPanel {
                             + "横排";
                     default -> "";
                 };
+                // 🆕 环绕特效那一行：四格 = 四档，当前生效那一档带 ▸
+                case SETTINGS_PRESET_ROW -> cell < ShanhaiHoloSurroundTuning.PRESET_COUNT
+                        ? mark(ShanhaiHoloSurroundTuning.preset() == cell)
+                        + ShanhaiHoloSurroundTuning.presetName(cell)
+                        : "";
+                // 🆕 高级调参那一行：整行可点，名称挂在格 0
+                case SETTINGS_ADV_ROW -> cell == 0 ? "高级调参" : "";
                 case SETTINGS_BACK_ROW -> cell == 0 ? "返回" : "";
+                default -> "";
+            };
+        }
+        if (mode == MODE_ADVANCED) {
+            if (row == ADV_NAV_ROW) {
+                return switch (cell) {
+                    case ADV_CELL_PREV -> "上一页";
+                    case ADV_CELL_INFO -> advNavInfoText();
+                    case ADV_CELL_NEXT -> "下一页";
+                    case ADV_CELL_BACK -> "返回";
+                    default -> "";
+                };
+            }
+            final int idx = advParamIndex(row);
+            if (idx < 0) {
+                return "";
+            }
+            return switch (cell) {
+                case 0 -> ShanhaiHoloSurroundTuning.PARAM_NAME[idx];
+                case ADV_CELL_MINUS -> "− " + ShanhaiHoloSurroundTuning.paramStepText(idx);
+                case ADV_CELL_VALUE -> ShanhaiHoloSurroundTuning.paramText(idx);
+                case ADV_CELL_PLUS -> "+ " + ShanhaiHoloSurroundTuning.paramStepText(idx);
                 default -> "";
             };
         }
@@ -425,6 +672,57 @@ public final class ShanhaiHoloMenuPanel {
             };
         }
         return "";
+    }
+
+    // ============================================================ 🆕 高级页的类别 / 页码文字
+
+    /**
+     * 第 idx 项属于哪一类（<b>短的</b>名字，为了塞得进一格 140 bu）：
+     * 前 6 项 = {@code 环}（数据环）、中 7 项 = {@code 星尘}、最后 1 项 = {@code 整体}。
+     */
+    public static String categoryOf(int idx) {
+        if (idx < 0 || idx >= ShanhaiHoloSurroundTuning.PARAM_COUNT) {
+            return "";
+        }
+        if (idx <= ShanhaiHoloSurroundTuning.P_RING_PRECESS_SCALE) {
+            return "环";
+        }
+        if (idx <= ShanhaiHoloSurroundTuning.P_FIELD_BRIGHT) {
+            return "星尘";
+        }
+        return "整体";
+    }
+
+    /**
+     * 导航格 1 的文字 = {@code 类别·第 n/N 页}。
+     * <p>一页可能横跨两类（第 2 页 = 数据环 2 项 + 星尘 2 项）⇒ 写成 {@code 环+星尘}。
+     */
+    public static String pageCategoryText() {
+        return "第" + (advPage + 1) + "/" + advPageCount() + "页";
+    }
+
+    /** 这一页是哪几类（单独一个函数，方便自检、探针与报告逐页念出来）。 */
+    public static String pageCategories() {
+        return pageCategoriesOf(advPage);
+    }
+
+    /** 指定某一页是哪几类（{@code ""} = 那一页没有项）。 */
+    public static String pageCategoriesOf(int page) {
+        final int cnt = ShanhaiHoloSurroundTuning.paramCountOnPage(page);
+        if (cnt <= 0) {
+            return "";
+        }
+        final int first = ShanhaiHoloSurroundTuning.indexOf(page, 0);
+        final int last = ShanhaiHoloSurroundTuning.indexOf(page, cnt - 1);
+        final String a = categoryOf(first);
+        final String b = categoryOf(last);
+        return a.equals(b) ? a : a + "+" + b;
+    }
+
+    /** 导航那一格的完整文字（{@code 环+星尘·第2/4页}）—— 面板上画的就是它。 */
+    public static String advNavInfoText() {
+        final String cat = pageCategories();
+        return (cat.isEmpty() ? "" : cat + "·") + pageCategoryText();
     }
 
     /**
@@ -676,8 +974,48 @@ public final class ShanhaiHoloMenuPanel {
                 clickAction(MODE_SETTINGS, SETTINGS_DIST_ROW, 0), CLICK_NONE);
         c(bad, n, "N2 负对照：设置-距离-格2(当前值) 不可点",
                 clickAction(MODE_SETTINGS, SETTINGS_DIST_ROW, 2), CLICK_NONE);
-        c(bad, n, "设置-标题行(行0) 整行不可点", clickAction(MODE_SETTINGS, 0, 0), CLICK_NONE);
-        c(bad, n, "设置-行4 整行不可点", clickAction(MODE_SETTINGS, 4, 0), CLICK_NONE);
+        // 🔴 2026-10-06（第四轮）：设置面板【5 行全用满】，一个行位都不空着
+        c(bad, n, "设置面板画出来的行数 == 板块数 " + ROWS + "（五行全用满）",
+                visibleRowCount(MODE_SETTINGS), ROWS);
+        c(bad, n, "设置面板的行位恰好是 0..4（顺序：距离/布局/环绕特效/高级调参/返回）",
+                SETTINGS_ROWS.length, ROWS);
+        for (int r = 0; r < ROWS; r++) {
+            c(bad, n, "设置面板第 " + r + " 行画得出来", rowVisible(MODE_SETTINGS, r), true);
+        }
+        c(bad, n, "行 0 = 距离那一行（格 2 写着当前距离）",
+                cellText(MODE_SETTINGS, SETTINGS_DIST_ROW, 0), "距离");
+        c(bad, n, "行 1 = 布局那一行", cellText(MODE_SETTINGS, SETTINGS_LAYOUT_ROW, 0), "布局");
+        c(bad, n, "行 2 = 环绕特效那一行（没有名称格，四格就是四档）",
+                cellText(MODE_SETTINGS, SETTINGS_PRESET_ROW, 0).replace(MARK, ""),
+                ShanhaiHoloSurroundTuning.presetName(0));
+        c(bad, n, "行 3 = 高级调参那一行", cellText(MODE_SETTINGS, SETTINGS_ADV_ROW, 0), "高级调参");
+        c(bad, n, "行 4 = 返回那一行", cellText(MODE_SETTINGS, SETTINGS_BACK_ROW, 0), "返回");
+        // 🆕 环绕特效那一行：四格 = 四档，逐格比对"点它 = 切到哪一档"与"格子上写的是哪一档"
+        for (int col = 0; col < CELLS; col++) {
+            final int want = switch (col) {
+                case 0 -> CLICK_PRESET_OFF;
+                case 1 -> CLICK_PRESET_WEAK;
+                case 2 -> CLICK_PRESET_MID;
+                default -> CLICK_PRESET_STRONG;
+            };
+            final String pn = ShanhaiHoloSurroundTuning.presetName(col);
+            c(bad, n, "设置-环绕特效-格" + col + " 的动作码 = 切到「" + pn + "」档",
+                    clickAction(MODE_SETTINGS, SETTINGS_PRESET_ROW, col), want);
+            c(bad, n, "设置-环绕特效-格" + col + " 上的字 = 「" + pn + "」（可能带 ▸）",
+                    cellText(MODE_SETTINGS, SETTINGS_PRESET_ROW, col).replace(MARK, ""), pn);
+            c(bad, n, "设置-环绕特效-格" + col + " 的档位号 == 格号（格号即档位，不可能对不上）",
+                    presetOfClick(want), presetOfCell(col));
+        }
+        // 🆕 「高级调参」整行可点 ⇒ 四格同一个动作码
+        for (int col = 0; col < CELLS; col++) {
+            c(bad, n, "设置-高级调参-格" + col + " = 进第二层（整行可点）",
+                    clickAction(MODE_SETTINGS, SETTINGS_ADV_ROW, col), CLICK_ADV_OPEN);
+        }
+        // 「返回」整行可点
+        for (int col = 0; col < CELLS; col++) {
+            c(bad, n, "设置-返回-格" + col + " = 收起面板",
+                    clickAction(MODE_SETTINGS, SETTINGS_BACK_ROW, col), CLICK_CLOSE);
+        }
         // 命令面板（🆕 第 ② 条点单：**只有两个框** —— 【输入框】与【返回框】）
         for (int col = 0; col < CELLS; col++) {
             c(bad, n, "命令-输入框第 " + col + " 格 = 开键盘",
@@ -783,7 +1121,10 @@ public final class ShanhaiHoloMenuPanel {
             append(ch);
         }
         // N3 负对照：两个面板的「返回」都在最后一行、都整行可点
-        for (int[] modeRow : new int[][]{{MODE_SETTINGS, ROWS - 1}, {MODE_COMMAND, COMMAND_BACK_ROW}}) {
+        //   ⚠️ 2026-10-06：原来写的是 `ROWS - 1`（硬编码到最后一行）。现在设置面板的「返回」
+        //      行号由 SETTINGS_BACK_ROW 说了算（它是 4，与 ROWS-1 相等，但**不许**再靠这个巧合）。
+        for (int[] modeRow : new int[][]{{MODE_SETTINGS, SETTINGS_BACK_ROW},
+                {MODE_COMMAND, COMMAND_BACK_ROW}}) {
             for (int col = 0; col < CELLS; col++) {
                 c(bad, n, "N3 负对照：" + modeName(modeRow[0]) + " 第 " + modeRow[1]
                                 + " 行（它的「返回」那一行）第 " + col + " 格必须是「返回」",
@@ -819,36 +1160,142 @@ public final class ShanhaiHoloMenuPanel {
         }
         c(bad, n, "N5 负对照：行 0 在最上、y 逐行递减", topFirst, true);
 
-        // ---- 文本模型：设置那三行必须"读得出当前值" ----
+        // ---- 文本模型：设置那几行必须"读得出当前值" ----
         //    🔴 这里【绝不调用 ShanhaiHoloMenuState.resetForTest()】—— 自检会在进世界后的
         //       第一个 tick 被跑到（见 ShanhaiHoloMenuInput#logSelfTests），那会把用户此刻的
         //       距离/档位/开关<b>当场抹回默认</b>。凡是"自检会不会改坏现场"都要在这一层拒掉。
-        //       ⇒ 改成与当前值无关的不变量：三档里<b>恰好一档</b>带标记。
-        int facingMarked = 0;
-        for (int col = 1; col <= 3; col++) {
-            if (isCurrent(cellText(MODE_SETTINGS, 2, col))) {
-                facingMarked++;
-            }
-        }
-        c(bad, n, "朝向那一行恰好一档带 ▸ 标记", facingMarked, 1);
+        //       ⇒ 改成与当前值无关的不变量：每一组档位里<b>恰好一档</b>带标记。
+        //
+        //    🔴 2026-10-06（第三轮收尾）：原来这里有一条 "朝向那一行恰好一档带 ▸ 标记"，
+        //       扫的是「行 2」。删掉「朝向」那一行之后行号全挪了 —— 那条判据会去扫<b>别的行</b>
+        //       而"恰好一档带 ▸"对任何一档选择都成立 ⇒ <b>它永远绿，却什么也没验</b>
+        //       （这正是本工程最忌讳的"判据恒绿"）。现在改成三条各有唯一答案的判据：
+        //       ① 布局那一行扫【布局那一行】；② 环绕特效那一行扫它自己；
+        //       ③ 「朝向」这两个字以及那三个动作码在<b>整张设置面板</b>上一个都不许剩（扫全表）。
         int layoutMarked = 0;
         for (int col = 1; col <= 3; col++) {
-            if (isCurrent(cellText(MODE_SETTINGS, 3, col))) {
+            if (isCurrent(cellText(MODE_SETTINGS, SETTINGS_LAYOUT_ROW, col))) {
                 layoutMarked++;
             }
         }
         c(bad, n, "布局那一行恰好一档带 ▸ 标记", layoutMarked, 1);
-        c(bad, n, "N-负对照：标签格【不许】带 ▸ 标记",
-                isCurrent(cellText(MODE_SETTINGS, 2, 0)), false);
+        int presetMarked = 0;
+        for (int col = 0; col < ShanhaiHoloSurroundTuning.PRESET_COUNT; col++) {
+            if (isCurrent(cellText(MODE_SETTINGS, SETTINGS_PRESET_ROW, col))) {
+                presetMarked++;
+            }
+        }
+        c(bad, n, "环绕特效那一行恰好一档带 ▸ 标记", presetMarked, 1);
+        c(bad, n, "N-负对照：真正的标签格【不许】带 ▸ 标记",
+                isCurrent(cellText(MODE_SETTINGS, SETTINGS_DIST_ROW, 0)), false);
         c(bad, n, "距离那一行写着当前距离（带「格」字）",
-                cellText(MODE_SETTINGS, 1, 2).contains("格"), true);
-        c(bad, n, "设置面板的标题不为空",
-                !title(MODE_SETTINGS).isEmpty(), true);
+                cellText(MODE_SETTINGS, SETTINGS_DIST_ROW, 2).contains("格"), true);
+        // 🔴 2026-10-06：这一条原来写的是"设置面板的标题不为空"（标题框那一版）。
+        //    用户拍板的版面是「距离 / 布局 / 环绕特效 / 高级调参 / 返回」五行 —— 行 0 被「距离」
+        //    占了，标题框已经没有位置 ⇒ 判据反过来：两个面板都【没有】标题，行 0 也不再是标题。
+        c(bad, n, "N9 负对照：设置面板没有标题（行 0 是「距离」，标题框已删）",
+                title(MODE_SETTINGS), "");
+        c(bad, n, "N9 负对照：设置面板第 0 行的第 1 格是「− 步长」而不是标题",
+                cellText(MODE_SETTINGS, SETTINGS_DIST_ROW, 1).startsWith("−"), true);
+        // 🔴 N8：整张设置面板扫一遍 —— 「朝向」那一行必须【彻底不存在】。
+        //    判据分两层：① 文字层（任何格子里不许出现"朝向/跟随/转向/世界固定"）；
+        //                ② 动作码层（那三个码一个都不许被任何一格返回）。
+        //    用"扫全表"而不是"看某一行"：把它挪回别的行、或改成别的格子，一样会被抓到。
+        c(bad, n, "N8 负对照：设置面板上「朝向」那一行彻底没了（既没有这些字、也没有一格能改朝向）",
+                facingLeakScan(MODE_SETTINGS, -1, -1, null, CLICK_NONE), "");
+        // N8 的正对照：同一条扫描函数，喂一格"故意混进去的朝向按钮" ⇒ 它必须报出来。
+        //    （没有这一条，"扫描结果为空"可能只是因为扫描器从来不报错 —— 本工程血规矩。）
+        final String leakCtrl = facingLeakScan(MODE_SETTINGS, SETTINGS_LAYOUT_ROW, 1,
+                "▸平滑跟随", CLICK_FACING_FOLLOW);
+        c(bad, n, "N8 正对照：同一套扫描喂一格假的「平滑跟随」⇒ 必须报出文字层与动作码层两条",
+                leakCtrl.contains("平滑跟随") && leakCtrl.contains("点得到朝向"), true);
+        c(bad, n, "朝向档本身还在（{@link #clickName} 仍认得那三个码；命令一个字没动）",
+                clickName(CLICK_FACING_FIXED), "朝向=世界固定");
         // N7 负对照（第 ② 条点单）：命令面板的标题框【删掉了】⇒ title() 必须是空的
         c(bad, n, "N7 负对照：命令面板没有标题（那个「命令（管理员权限）」框已经删掉）",
                 title(MODE_COMMAND), "");
         c(bad, n, "N7 负对照：命令面板第 0 行一个字都不画（标题行没了）",
                 cellText(MODE_COMMAND, 0, 0), "");
+
+        // ---- 🔴 N10（第四轮点单）：高级调参页（第二层）的行/格/翻页模型 ----
+        //    用户拍板的版面：每页 4 项 + 第 5 行导航，共 4 页（4/4/4/3），一共那 15 项。
+        //    判据全部从 ShanhaiHoloSurroundTuning 的 15 项现算（页数/项数不写死）。
+        //    ⚠️ 这里会翻页 ⇒ 进来先存、出去原样放回（自检不改现场）。
+        final int savedPage = advPage;
+        try {
+            c(bad, n, "N10 高级页一共 " + ShanhaiHoloSurroundTuning.PAGE_COUNT + " 页（每页 "
+                            + ShanhaiHoloSurroundTuning.PARAMS_PER_PAGE + " 项 + 1 行导航）",
+                    advPageCount(), ShanhaiHoloSurroundTuning.PAGE_COUNT);
+            int pageSum = 0;
+            for (int page = 0; page < advPageCount(); page++) {
+                setAdvPage(page);
+                final int cnt = advParamCountOnPage();
+                pageSum += cnt;
+                c(bad, n, "N10 第 " + (page + 1) + " 页画出来的行数 == " + cnt + " 个参数行 + 1 行导航",
+                        visibleRowCount(MODE_ADVANCED), cnt + 1);
+                for (int r = 0; r < ROWS; r++) {
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行的可见性"
+                                    + "（导航行 " + ADV_NAV_ROW + " 永远可见）",
+                            rowVisible(MODE_ADVANCED, r), r == ADV_NAV_ROW || r < cnt);
+                }
+                c(bad, n, "N10 导航-格0 = 上一页",
+                        clickAction(MODE_ADVANCED, ADV_NAV_ROW, ADV_CELL_PREV), CLICK_ADV_PREV);
+                c(bad, n, "N10 导航-格1（类别·第 n/N 页）不可点（它是读数，不是按钮）",
+                        clickAction(MODE_ADVANCED, ADV_NAV_ROW, ADV_CELL_INFO), CLICK_NONE);
+                c(bad, n, "N10 导航-格2 = 下一页",
+                        clickAction(MODE_ADVANCED, ADV_NAV_ROW, ADV_CELL_NEXT), CLICK_ADV_NEXT);
+                c(bad, n, "N10 导航-格3 = 回第一层（不是关面板）",
+                        clickAction(MODE_ADVANCED, ADV_NAV_ROW, ADV_CELL_BACK), CLICK_ADV_BACK);
+                c(bad, n, "N10 导航-格3 上写着「返回」",
+                        cellText(MODE_ADVANCED, ADV_NAV_ROW, ADV_CELL_BACK), "返回");
+                c(bad, n, "N10 导航-格1 写着「类别·第 n/N 页」",
+                        cellText(MODE_ADVANCED, ADV_NAV_ROW, ADV_CELL_INFO), advNavInfoText());
+                c(bad, n, "N10 导航-格1 里带着「第 " + (page + 1) + "/" + advPageCount() + "页」",
+                        cellText(MODE_ADVANCED, ADV_NAV_ROW, ADV_CELL_INFO)
+                                .contains("第" + (page + 1) + "/" + advPageCount() + "页"), true);
+                for (int r = 0; r < cnt; r++) {
+                    final int idx = advParamIndex(r);
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行 ⇒ 第 " + (idx + 1) + " 项",
+                            idx, page * ShanhaiHoloSurroundTuning.PARAMS_PER_PAGE + r);
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行格0 写着参数名"
+                                    + "（第 " + (idx + 1) + " 项）",
+                            cellText(MODE_ADVANCED, r, 0),
+                            ShanhaiHoloSurroundTuning.PARAM_NAME[idx]);
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行格2 写着当前值（现读）",
+                            cellText(MODE_ADVANCED, r, ADV_CELL_VALUE),
+                            ShanhaiHoloSurroundTuning.paramText(idx));
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行格1 = 这一项减一档",
+                            clickAction(MODE_ADVANCED, r, ADV_CELL_MINUS), CLICK_PARAM_DOWN);
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行格3 = 这一项加一档",
+                            clickAction(MODE_ADVANCED, r, ADV_CELL_PLUS), CLICK_PARAM_UP);
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行格0/格2 不可点（名称与值是只读的）",
+                            clickAction(MODE_ADVANCED, r, 0) == CLICK_NONE
+                                    && clickAction(MODE_ADVANCED, r, ADV_CELL_VALUE) == CLICK_NONE,
+                            true);
+                }
+                for (int r = cnt; r < ADV_NAV_ROW; r++) {
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行（本页没有项）一个字都不画",
+                            cellText(MODE_ADVANCED, r, 0), "");
+                    c(bad, n, "N10 第 " + (page + 1) + " 页第 " + r + " 行（本页没有项）一格都不可点",
+                            clickAction(MODE_ADVANCED, r, ADV_CELL_MINUS), CLICK_NONE);
+                }
+            }
+            c(bad, n, "N10 四页加起来恰好是那 " + ShanhaiHoloSurroundTuning.PARAM_COUNT + " 项（4+4+4+3）",
+                    pageSum, ShanhaiHoloSurroundTuning.PARAM_COUNT);
+            setAdvPage(0);
+            flipAdvPage(-1);
+            c(bad, n, "N10 第 1 页再往回翻 ⇒ 停在第 1 页（不循环，免得不知道自己在哪页）",
+                    advPage(), 0);
+            setAdvPage(advPageCount() - 1);
+            flipAdvPage(+1);
+            c(bad, n, "N10 最后一页再往下翻 ⇒ 停在最后一页", advPage(), advPageCount() - 1);
+            setAdvPage(99);
+            c(bad, n, "N10 setAdvPage(99) 被钳到最后一页", advPage(), advPageCount() - 1);
+            setAdvPage(-99);
+            c(bad, n, "N10 setAdvPage(−99) 被钳到第 1 页", advPage(), 0);
+        } finally {
+            advPage = savedPage;
+        }
 
         // ---- 命令文本：追加/退格/清空/截断 ----
         //    同样先存后恢复：自检不许留下"用户没敲过的命令"。
@@ -891,6 +1338,35 @@ public final class ShanhaiHoloMenuPanel {
         dirty = true;
     }
 
+    /**
+     * 扫一遍某个面板，找「朝向」那一行的<b>任何</b>残迹（文字层 + 动作码层）。
+     *
+     * @param fakeRow/fakeCell/fakeText/fakeAction 负对照用：把<b>这一格</b>换成给定内容再扫。
+     *        {@code fakeRow < 0} = 不注入（生产扫描就走这个）。
+     * @return 找到的残迹（空串 = 一点都没有）
+     */
+    private static String facingLeakScan(int mode, int fakeRow, int fakeCell,
+                                         String fakeText, int fakeAction) {
+        final StringBuilder out = new StringBuilder();
+        for (int r = 0; r < ROWS; r++) {
+            for (int col = 0; col < CELLS; col++) {
+                final boolean fake = r == fakeRow && col == fakeCell;
+                final String t = fake && fakeText != null ? fakeText : cellText(mode, r, col);
+                final int a = fake ? fakeAction : clickAction(mode, r, col);
+                if (t.contains("朝向") || t.contains("跟随") || t.contains("转向")
+                        || t.contains("世界固定")) {
+                    out.append('(').append(r).append(',').append(col).append(")=「")
+                            .append(t).append("」 ");
+                }
+                if (a == CLICK_FACING_FOLLOW || a == CLICK_FACING_SNAP
+                        || a == CLICK_FACING_FIXED) {
+                    out.append("点得到朝向(").append(r).append(',').append(col).append(") ");
+                }
+            }
+        }
+        return out.toString();
+    }
+
     /** 截断两个函数的边界（含 2 条负对照）。 */
     private static void tailClipSelfCheck(StringBuilder bad, int[] n) {
         c(bad, n, "tail 太短就原样", tail("abc", 5), "abc");
@@ -905,10 +1381,14 @@ public final class ShanhaiHoloMenuPanel {
     public static String selfTestLine() {
         final Report r = selfTest();
         return "holo_panel_selftest " + r.pass() + "/" + r.total() + " PASS=" + r.ok()
-                + (r.ok() ? "（判据：" + ROWS + " 行 × " + CELLS + " 格；含 8 组负对照："
-                + "格子边界 / 标签与当前值不可点 / 两个面板都有「返回」 / 行板不自转不缩放 / 行序从上到下 / "
-                + "命令面板上已无「执行」「清空」两行 / 命令面板只剩两个框（可见行=输入框+返回框、"
-                + "其余三行不画也不可点、标题没了） / 输入框只占一行）"
+                + (r.ok() ? "（判据：" + ROWS + " 行 × " + CELLS + " 格 = 三个面板共用同一块网格；"
+                + "含 10 组负对照：格子边界 / 标签与当前值不可点 / 两个面板都有「返回」 / "
+                + "行板不自转不缩放 / 行序从上到下 / 命令面板上已无「执行」「清空」两行 / "
+                + "命令面板只剩两个框 / 输入框只占一行 / "
+                + "设置面板上「朝向」那一行彻底没了（含一条「喂一格假按钮」的正对照） / "
+                + "设置面板没有标题；"
+                + "另含两个面板的版面判据：设置面板 5 行全用满（距离/布局/环绕特效/高级调参/返回）+ "
+                + "环绕特效四格=四档 + 高级页 4 页（4/4/4/3）逐行逐格对到那 15 项）"
                 : (" FAILED:" + r.bad()));
     }
 

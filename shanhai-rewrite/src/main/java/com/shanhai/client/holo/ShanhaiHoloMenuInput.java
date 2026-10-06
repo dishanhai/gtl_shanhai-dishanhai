@@ -474,9 +474,72 @@ public final class ShanhaiHoloMenuInput {
                 ShanhaiMod.LOGGER.info("{} holo_cmd_cleared player={} src={}",
                         PREFIX, lp.getGameProfile().getName(), source);
             }
+            // ---- 🆕 2026-10-06（第二轮）：环绕特效四档 + 高级调参页 ----
+            case ShanhaiHoloMenuPanel.CLICK_PRESET_OFF,
+                 ShanhaiHoloMenuPanel.CLICK_PRESET_WEAK,
+                 ShanhaiHoloMenuPanel.CLICK_PRESET_MID,
+                 ShanhaiHoloMenuPanel.CLICK_PRESET_STRONG ->
+                    setSurroundPresetAndLog(lp, ShanhaiHoloMenuPanel.presetOfClick(click), source);
+            case ShanhaiHoloMenuPanel.CLICK_ADV_OPEN -> {
+                // 进第二层：每一层都回到第 1 页（"上次翻到哪"不该变成第二层的隐藏状态）
+                ShanhaiHoloMenuPanel.setAdvPage(0);
+                ShanhaiHoloMenuState.setPanelMode(ShanhaiHoloMenuPanel.MODE_ADVANCED);
+                ShanhaiMod.LOGGER.info("{} holo_panel_opened panel={} page=1/{} player={} src={}",
+                        PREFIX, ShanhaiHoloMenuPanel.modeName(ShanhaiHoloMenuPanel.MODE_ADVANCED),
+                        ShanhaiHoloMenuPanel.advPageCount(), lp.getGameProfile().getName(), source);
+            }
+            case ShanhaiHoloMenuPanel.CLICK_ADV_PREV -> flipAdvPageAndLog(lp, -1, source);
+            case ShanhaiHoloMenuPanel.CLICK_ADV_NEXT -> flipAdvPageAndLog(lp, +1, source);
+            case ShanhaiHoloMenuPanel.CLICK_ADV_BACK -> {
+                // 🔴 返回 = 回【第一层设置面板】，不是关面板（关面板那一格在第一层的「返回」）
+                ShanhaiHoloMenuState.setPanelMode(ShanhaiHoloMenuPanel.MODE_SETTINGS);
+                ShanhaiMod.LOGGER.info("{} holo_panel_back_to_settings player={} src={}",
+                        PREFIX, lp.getGameProfile().getName(), source);
+            }
+            case ShanhaiHoloMenuPanel.CLICK_PARAM_DOWN -> nudgeParamAndLog(lp, row, -1, source);
+            case ShanhaiHoloMenuPanel.CLICK_PARAM_UP -> nudgeParamAndLog(lp, row, +1, source);
             default -> ShanhaiMod.LOGGER.warn("{} holo_panel_click_unhandled click={} mode={} row={} cell={}",
                     PREFIX, click, mode, row, cell);
         }
+    }
+
+    /** 切环绕特效档位（整组替换）—— 面板与日志读的是同一份状态。 */
+    private static void setSurroundPresetAndLog(LocalPlayer lp, int preset, String source) {
+        if (preset < 0) {
+            return;
+        }
+        final int now = ShanhaiHoloSurround.setPreset(preset);
+        ShanhaiMod.LOGGER.info("{} holo_surround_preset preset={} name={} player={} src={} | {}",
+                PREFIX, now, ShanhaiHoloSurroundTuning.presetName(now),
+                lp.getGameProfile().getName(), source, ShanhaiHoloSurroundTuning.summary());
+    }
+
+    /** 高级页翻页（到头停住）。 */
+    private static void flipAdvPageAndLog(LocalPlayer lp, int delta, String source) {
+        final int before = ShanhaiHoloMenuPanel.advPage();
+        ShanhaiHoloMenuPanel.flipAdvPage(delta);
+        final int now = ShanhaiHoloMenuPanel.advPage();
+        ShanhaiMod.LOGGER.info("{} holo_adv_page page={}/{} (was {}) category={} player={} src={}",
+                PREFIX, now + 1, ShanhaiHoloMenuPanel.advPageCount(), before + 1,
+                ShanhaiHoloMenuPanel.pageCategories(), lp.getGameProfile().getName(), source);
+    }
+
+    /**
+     * 高级页某一行的 ± —— <b>具体改哪一项由 (行, 当前页) 现算</b>
+     * （见 {@link ShanhaiHoloMenuPanel#advParamIndex}），不在这里再写一套行号。
+     */
+    private static void nudgeParamAndLog(LocalPlayer lp, int row, int dir, String source) {
+        final int idx = ShanhaiHoloMenuPanel.advParamIndex(row);
+        if (idx < 0) {
+            ShanhaiMod.LOGGER.warn("{} holo_adv_nudge_ignored row={} page={}/{}（这一行本页没有项）",
+                    PREFIX, row, ShanhaiHoloMenuPanel.advPage() + 1,
+                    ShanhaiHoloMenuPanel.advPageCount());
+            return;
+        }
+        final float now = ShanhaiHoloSurround.nudgeParam(idx, dir);
+        ShanhaiMod.LOGGER.info("{} holo_adv_nudge param={} name={} dir={} now={} player={} src={}",
+                PREFIX, idx + 1, ShanhaiHoloSurroundTuning.PARAM_NAME[idx], dir,
+                ShanhaiHoloSurroundTuning.paramText(idx), lp.getGameProfile().getName(), source);
     }
 
     private static void setDistanceAndLog(LocalPlayer lp, float want, String source) {

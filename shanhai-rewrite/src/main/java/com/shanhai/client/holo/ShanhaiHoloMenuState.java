@@ -130,17 +130,18 @@ public final class ShanhaiHoloMenuState {
     //      ⇒ 最左/最右那两格（例如「平滑跟随」「世界固定」）永远指不到 = "完全没法选"；
     //      而「世界固定」这个按钮本身也在格 3 ⇒ 连点都点不到 ⇒ "完全没改"。
     //
-    //   🔴 修法（只改"框的朝向"，不动任何几何）：面板与菜单共用【同一套朝向档】语义 ——
-    //        FOLLOW 平滑跟随（时间常数 YAW_TAU_FOLLOW_SEC）
-    //        SNAP   立即跟随（= 修复前的行为，保留成对照组）
-    //        FIXED  🔴默认：**【打开面板那一刻】钉在世界方位上**，之后玩家扭头它不动
-    //               ⇒ 准星会横着扫过整块面板 ⇒ 每一格都能指到（离线探针逐格验过）
+    //   🔴 修法（只改"框的朝向"，不动任何几何）：
+    //        第一版：面板与菜单共用【同一套朝向档】语义（FOLLOW 平滑 / SNAP 立即 / FIXED 世界固定）。
+    //        🔴 第三轮（用户点单「把朝向的修改选项删了」）：面板【恒为 FIXED】——
+    //           打开面板那一刻钉在世界方位上，之后玩家扭头它不动
+    //           ⇒ 准星会横着扫过整块面板 ⇒ 每一格都能指到（离线探针逐格验过）。
+    //           朝向档本身没丢：菜单（环绕档五块板 / 旧两档）照旧读它。
     //   位置仍然【跟着玩家走】（锚点 = 眼睛 + 钉住那一刻的视线方向 × distance）——
     //   这正是用户 2026-10-05 定环绕档时说的「玩家位置移动还是需要跟随的」。
-    /** 面板框用的偏航（度，原版口径：0 = +Z）。{@link Facing#FIXED} 下它是"打开那一刻"的值。 */
+    /** 面板框用的偏航（度，原版口径：0 = +Z）。🔴 它【恒为"打开面板那一刻"的值】（见 advance）。 */
     private static float panelYawDeg;
 
-    /** {@code false} = 下一次 {@link #advance} 要把面板偏航重新钉在当前朝向上（开面板 / 刚点「世界固定」）。 */
+    /** {@code false} = 下一次 {@link #advance} 要把面板偏航重新钉在当前朝向上（开面板 / 复位）。 */
     private static boolean panelYawPrimed;
 
     private static double px;
@@ -185,10 +186,15 @@ public final class ShanhaiHoloMenuState {
 
     /** 打开某个面板（{@code MODE_NONE} ⇒ 回到五块菜单板）。<b>不关投影</b>。 */
     public static void setPanelMode(int mode) {
+        // 🆕 2026-10-06（第二轮）：只有"从没开面板 → 开面板"才重新钉一次朝向。
+        //    🔴 为什么：面板现在恒为「世界固定」（见 advance），而在两层之间来回切
+        //    （设置 ↔ 高级调参）时如果每次都重钉，面板会当场跳到"你现在扭头看的方向"上
+        //    ⇒ 正在连点「+」的手感会被打断。切层时面板应当【一动不动】。
+        final boolean wasOpen = panelMode != ShanhaiHoloMenuPanel.MODE_NONE;
         panelMode = mode;
         panelHoverRow = -1;
         panelHoverCell = -1;
-        if (mode != ShanhaiHoloMenuPanel.MODE_NONE) {
+        if (mode != ShanhaiHoloMenuPanel.MODE_NONE && !wasOpen) {
             // 🔴 开面板那一拍：把面板的框偏航重新钉一次（见 panelYawDeg 的注释）。
             //    下一帧的 advance() 会用【那一刻】的玩家偏航落位 —— 于是"打开时正对着你、
             //    之后扭头它就不动了"。
@@ -242,15 +248,14 @@ public final class ShanhaiHoloMenuState {
      * 换朝向档。<b>切到 {@link Facing#FIXED} 的那一刻把当前朝向冻住</b>
      * —— 这样"固定"的含义是"就停在这个方向"，而不是"突然跳到某个世界坐标角度"。
      *
-     * <p>🆕 2026-10-06：这一条现在对<b>面板</b>是真的（{@link #panelYawDeg} 会被重新钉一次）；
-     * 对菜单的旧两档（row/column）照旧是"从此不再更新"，对环绕档则完全无效（框偏航恒 0）。
+     * <p>🔴 2026-10-06（第三轮）：<b>这一条现在只对"菜单"有效</b>。
+     * 面板（设置 / 命令 / 高级页）的朝向<b>恒为「世界固定」</b>，与这个档位无关
+     * （见 {@link #advance} 里那段说明）—— 用户点单删掉「朝向」那一行正是为了让面板
+     * 不可能被切成"贴着脸"，否则最左/最右格会指不到（死循环）。
+     * <p>对菜单的旧两档（竖列 / 横排）照旧是"从此不再更新"，对环绕档则完全无效（框偏航恒 0）。
      */
     public static void setFacing(Facing next) {
         facing = next == null ? Facing.FOLLOW : next;
-        if (facing == Facing.FIXED) {
-            // 点了「世界固定」⇒ 下一帧把面板钉在"点这一下的那一刻"的朝向上（看得见的手感）
-            panelYawPrimed = false;
-        }
     }
 
     public static Layout layout() {
@@ -319,7 +324,7 @@ public final class ShanhaiHoloMenuState {
      *
      * <p>与 {@link #frameYaw()} <b>不是一个东西</b>：那个是五块菜单板的框偏航（环绕档恒 0），
      * 这个是面板那一列的框偏航（= {@code 180 − 面板偏航}）。两个量分开存，是因为它们
-     * <b>各自朝向档的语义不同</b>：菜单的环绕档恒不跟头，而面板要能"世界固定"。
+     * <b>各自的口径不同</b>：菜单的环绕档恒不跟头，而面板恒为"打开那一刻的世界方位"。
      */
     public static float panelFrameYaw() {
         return ShanhaiHoloMenuPanel.frameYaw(panelYawDeg);
@@ -404,22 +409,25 @@ public final class ShanhaiHoloMenuState {
 
         // 🔴 2026-10-06（用户实测第 ③ 条）：面板的框偏航 —— 必须跑在下面那个 `if (!primed) return;`
         //    之前，否则"刚开投影的第一帧"面板偏航不会落位。
-        //    口径与菜单的朝向档同一套（见 panelYawDeg 的注释）。
+        //
+        // 🔴🔴 2026-10-06（第三轮，用户点单）：「朝向」那一行删掉之后，面板朝向就【恒为「世界固定」】。
+        //    用户原话逐字：
+        //      「你干脆把朝向的修改选项删了得了，反正另外两个正常人肯定不会用」
+        //    病根是一条死循环：面板上那颗「立即转向」会让面板贴回玩家脸正前方 ⇒ 准星永远落在
+        //    面板横向正中（格 2）⇒ 最右格那颗「世界固定」指不到 ⇒ 点不到就改不回来。
+        //    修法是【两条互相独立的保险】：
+        //      ① 改不了 —— 面板上不再有朝向那一行（见 ShanhaiHoloMenuPanel）；
+        //      ② 也不受影响 —— 面板的偏航【不再读 facing 档】，永远钉在"打开面板那一刻"的方位上。
+        //    ⚠️ 菜单那边一个字没改：环绕档的五块板恒不跟头（frameYaw 恒 0），
+        //       /shanhai menu facing follow|snap|fixed 在旧两档（竖列/横排）上照旧生效。
         if (panelOpen()) {
-            final float live = Mth.wrapDegrees(targetYaw);
             if (!panelYawPrimed) {
-                panelYawDeg = live;                 // 打开面板 / 刚点「世界固定」那一拍：当场钉住
+                // 打开面板 / 关掉再开 / 复位之后的第一帧：当场钉住当前朝向
+                panelYawDeg = Mth.wrapDegrees(targetYaw);
                 panelYawPrimed = true;
-            } else {
-                switch (facing) {
-                    case FOLLOW -> panelYawDeg = smoothAngle(panelYawDeg, live,
-                            ShanhaiHoloMenuTuning.YAW_TAU_FOLLOW_SEC, dt);
-                    case SNAP -> panelYawDeg = live;
-                    case FIXED -> {
-                        // 刻意什么都不做：钉在"打开/点固定"那一刻 —— 玩家扭头时准星才能扫过整块面板
-                    }
-                }
             }
+            // 之后【刻意什么都不做】：面板钉在世界方位上，扭头时准星才能横扫过整块面板
+            //   ⇒ 每一格都指得到（离线逐格验过，见 temp/holo-verify 的 PanelProbe）。
         }
 
         if (!primed) {
@@ -654,7 +662,11 @@ public final class ShanhaiHoloMenuState {
                 + " distance=" + distance
                 + (isRing() ? " ring_radius=" + ringRadius() : "")
                 + " yaw=" + yawDeg
-                + " pos=" + String.format(java.util.Locale.ROOT, "%.3f/%.3f/%.3f", px, py, pz);
+                + " pos=" + String.format(java.util.Locale.ROOT, "%.3f/%.3f/%.3f", px, py, pz)
+                // 🆕 2026-10-06（第二轮）：环绕特效档位也进这一行（否则"日志读到的"与
+                //    "渲染真正用的"会是两个数）
+                + " surround=" + ShanhaiHoloSurroundTuning.presetName(
+                        ShanhaiHoloSurroundTuning.preset());
     }
 
     /** 自检 + 读数打进日志（机器可判；无头专服看不到，但客户端日志有）。 */

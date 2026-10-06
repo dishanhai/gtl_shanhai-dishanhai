@@ -219,6 +219,29 @@ public final class ShanhaiRecipeBase {
             BASE.put(gt.id, gt);
             n++;
         }
+        // 🔴🔴 2026-10-06 P0（用户报：「我修改配方之后，或者重新 edit restore 之后，
+        //    配方编辑器的第一面中的配方数都会变成 0（除了工作台那些特殊配方）」）：
+        //    **空底本绝不许被记成"抓住了"**。
+        //
+        // <h4>为什么要在这里拦</h4>
+        // 抓底本是【懒】的（第一次编辑时才做）。如果这一次 {@code getRecipes()} 里一条 GTRecipe
+        // 都没有，原来那句 {@code captured = true} 会把"底本 = 0 条"钉成【本进程的既成事实】：
+        // {@link #pristine} 从此恒返回 null，而两处消费底本的地方都把"底本里没有它"
+        // 读成"这条配方该删"——
+        //   · {@code ShanhaiRecipeEditorOps#syncVanillaFromBase} ⇒ 把整张原版表里的 GT 配方删光
+        //     （运行期读数：{@code vanilla_tables_stale_gt_dropped count=54033}）；
+        //   · {@code ShanhaiRecipeEditorOps#rebuildTypeFromBase} ⇒ 把一个类型的 GT 索引树清空
+        //     （运行期读数：{@code index_rebuild type=gtceu:zero_point_conversion tree_before=2 wanted=0 tree_after=0}）。
+        // ⇒ 不置 captured：下一次还有机会在表完好时再抓一次（代价只是多扫一遍配方表）。
+        if (n == 0) {
+            capturedCount = 0;
+            capturedAt = java.time.LocalTime.now().withNano(0).toString();
+            ShanhaiMod.LOGGER.error("{} base_capture_refused_empty 这一次 getRecipes() 里一条 GTRecipe 都没有"
+                            + " ⇒ 不把「空底本」记成既成事实（否则 pristine() 恒 null，"
+                            + "两处「底本里没有它就删」会把整张表清空）。captured 仍为 false，下次会重抓。at={}",
+                    PREFIX, capturedAt);
+            return;
+        }
         capturedCount = n;
         captured = true;
         capturedAt = java.time.LocalTime.now().withNano(0).toString();

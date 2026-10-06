@@ -536,9 +536,29 @@ public final class ShanhaiRecipeEditorOps {
         }
         final int ledgerBefore = ShanhaiRecipeBase.ledgerSnapshot().size();
 
+        // 🔴🔴 2026-10-06 第二轮（用户现场读数：「/shanhai edit restore 之后还是可以搜得到，
+        //    甚至还可以进行合成」；日志：cleared=1 entries_left=0／dropped=0／
+        //    vanilla_created_dropped=0／net_sent changed=1 removed=0／客户端 jei_vanilla_synth_from_bytes）：
+        //    **根因 = 下面第 ① 块与第 ⑤ 块的动作顺序自相矛盾** ——
+        //      · 第 ① 块对 op=add 的条目调 ShanhaiVanillaRecipeTable.forgetNew(id)，
+        //        而它的实现就是 `NEW.remove(id); BASE.remove(id);`（ShanhaiVanillaRecipeTable L408-414）；
+        //      · 第 ⑤ 块却拿 newIdsSnapshot()（= NEW.keySet() 的快照）当"本局新建过哪些"的名单
+        //        ⇒ 走到第 ⑤ 块时 NEW 已被第 ① 块掏空 ⇒ **那个循环一次都不进**
+        //        ⇒ vanillaCreatedDropped=0、**一条 markRemoved 都没有** ⇒ 台账里没有"这条被删了"
+        //        ⇒ applyLedger 的 `e.removed()` 分支不走（现场读数 replaced/reverted/dropped/reinserted/failed
+        //          全 0 —— 走的是"动过、但底本里已经没有它"那条静默分支）⇒ 活表里那条配方原封不动
+        //        ⇒ noticeRestored 里 readFromTable(...) != null ⇒ 发的是 changed
+        //        ⇒ 客户端拿字节又把它合成出来（现场：jei_vanilla_synth_from_bytes id=…new_recipe_1）。
+        //    修法 = **把名单在第 ① 块之前先取好**（一行快照，不发明任何新机制；与
+        //    ShanhaiVanillaRecipeOps.restoreAll 同源 —— 那边也是"先取名单、再动集合"）。
+        final java.util.Set<ResourceLocation> vanillaCreatedIds =
+                ShanhaiVanillaRecipeTable.newIdsSnapshot();
+
         // 🔴 新建过的那几条 ⇒ 连底本一起抹掉（否则"清掉覆盖条目"之后它们会被底本重建出来，
         //    变成"这次会话还在、重启就没了、IO 还是空壳"的幽灵 —— 用户那张截图就是这个）。
         int forgot = 0;
+        // 读数：第 ① 块命中了几条 op=add（防复发判据要用它，见第 ⑤ 块之后那段自检）
+        int vanillaAddEntries = 0;
         try {
             for (String s : ShanhaiRecipeOverrideStore.appliedIds()) {
                 final ResourceLocation id = ResourceLocation.tryParse(s);
@@ -548,6 +568,7 @@ public final class ShanhaiRecipeEditorOps {
                 final com.google.gson.JsonObject e = ShanhaiRecipeOverrideStore.findEntry(id);
                 final String op = e != null && e.has("op") ? e.get("op").getAsString() : "";
                 if ("add".equals(op)) {
+                    vanillaAddEntries++;
                     if (ShanhaiRecipeBase.forgetNew(id)) {
                         forgot++;
                     }
@@ -562,6 +583,75 @@ public final class ShanhaiRecipeEditorOps {
         final int fileDropped = ShanhaiRecipeOverrideStore.clearAllEntries();
         final int ledgerDropped = ShanhaiRecipeBase.clearAllEditsKeepTypes();
         ShanhaiRecipeBase.clearEverRemoved();
+
+        // 🔴🔴 2026-10-06（用户原话，逐字）：
+        //   「A1-8通过，但是我发现通过/shanhai edit restore删除配方的话被删除的工作台配方还会出现」
+        //
+        //   根因就在这一段【只清了 GT 那一侧的账】：
+        //     · GT   ：clearAllEditsKeepTypes() ＋ clearEverRemoved() ＋（op=add 的）forgetNew
+        //              —— 而且 GT 的 applyLedger 还多一条"底本里没有它 ⇒ 从表里拿掉"（stale 分支）
+        //     · 非 GT：**只** forgetNew（从底本里忘掉），台账（ShanhaiVanillaRecipeTable.LEDGER）
+        //              【一条都没清】，也【没有 markRemoved】
+        //   ⇒ 走到 ShanhaiVanillaRecipeOps.applyLedger 时，这条工作台配方同时满足
+        //     「台账里有一条非删除的编辑」＋「底本里没有它（刚被 forgetNew 摘掉）」
+        //     ⇒ 撞进那个 `base == null` 分支 ⇒ ERROR `vanilla_sync_missing_base … left as is`
+        //     ⇒ **该删的没删，留在原版活表里** ⇒ JEI 与合成台都还看得到它。
+        //     现场读数（用户 2026-10-06 的日志）：
+        //       editor restore_all_ok … cleared=5 entries_left=0        ← 文件确实清了
+        //       editor vanilla_sync_missing_base id=…new_recipe_2 -> left as is
+        //       editor vanilla_tables_apply replaced=0 reverted=0 dropped=0 reinserted=0 failed=1
+        //       editor RESTORE_ALL … net_changed=1 net_removed=0         ← 发的是 changed，不是 removed
+        //
+        //   修法＝把【删除那条工作时就已经在用的同一套招牌动作】补到这里（照抄
+        //   ShanhaiVanillaRecipeOps.removeOne 与 ShanhaiVanillaRecipeOps.restoreAll，
+        //   一行新逻辑都没有）：
+        //     ① 非 GT 台账一起清（"恢复全部"的语义就是撤销所有编辑 —— 少了这一句，
+        //        被改过的非 GT 配方在 restore 之后【还留着改过的值】，同族的第二个洞）；
+        //     ② 本编辑器新建的那几条 ⇒ markRemoved（台账标"删除"）＋ forgetNew（从底本摘掉）。
+        //        顺序必须在 clearAllEditsKeepTypes 之后（markRemoved 写的台账不许再被清掉）；
+        //        也必须在 syncVanillaFromBase 之前（applyLedger 是读台账干活的那一拍）。
+        //   ⇒ 于是 applyLedger 走的是**本来就有的** `e.removed()` 分支：all.remove(i) ⇒ dropped++ ✓
+        ShanhaiVanillaRecipeTable.clearAllEditsKeepTypes();
+        int vanillaCreatedDropped = 0;
+        // 🔴 名单用的是**第 ① 块之前**取好的那份快照（vanillaCreatedIds），不是现读的 newIdsSnapshot()
+        //    —— 现读的那一份到这一拍已经被第 ① 块的 forgetNew 掏空了（现场读数见上面那段注释）。
+        for (ResourceLocation vid : vanillaCreatedIds) {
+            ShanhaiVanillaRecipeTable.markRemoved(vid);
+            ShanhaiVanillaRecipeTable.forgetNew(vid);
+            vanillaCreatedDropped++;
+        }
+        // 🔴🔴 机器判据（防复发；**口径写在日志文案里**，不许只靠注释）：
+        //    判据 = 【本局新建过几条】(vanillaCreatedIds) 与【真标了几条删除】(vanillaCreatedDropped) 必须相等。
+        //    为什么这条判据成立：上面那个循环对名单里每一条都**无条件** markRemoved＋计数 ⇒ 不相等
+        //    只可能是"名单在取快照与循环之间被谁掏空了"，也就是本 bug 的复发形态
+        //    （先 forgetNew 再读 NEW.keySet()）。
+        //    · created_ids>0 而 dropped==0 ⇒ 打 ERROR `vanilla_created_drop_EMPTY`（红）；
+        //    · 0<dropped<created_ids        ⇒ 打 ERROR `vanilla_created_drop_MISMATCH`（红）。
+        //    ⚠️ 判据**故意不用**"覆盖文件里有没有 op=add"去判红：上几局留下的 op=add 条目也会让那个
+        //       读数为正，而那种情况本局 NEW 里压根没有它 ⇒ 没有"新建的那条"要删 ⇒ 拿它判会打出**假红**。
+        if (vanillaCreatedDropped != vanillaCreatedIds.size()) {
+            if (vanillaCreatedDropped == 0) {
+                ShanhaiMod.LOGGER.error("{} vanilla_created_drop_EMPTY created_ids={} dropped=0 "
+                                + "vanilla_add_entries={} -> 本局新建过的配方一条都没被标删除"
+                                + "（第 ⑤ 块读到的那份名单是空的 ⇒ 活表里那几条还会被客户端 JEI 合成出来）"
+                                + " · 口径：created_ids = 第 ① 块之前取好的 NEW 快照条数，"
+                                + "dropped = 真调过 markRemoved 的条数，两者必须相等",
+                        PREFIX, vanillaCreatedIds.size(), vanillaAddEntries);
+            } else {
+                ShanhaiMod.LOGGER.error("{} vanilla_created_drop_MISMATCH created_ids={} dropped={} "
+                                + "vanilla_add_entries={} -> 名单里有 {} 条没走到 markRemoved"
+                                + " · 口径同 vanilla_created_drop_EMPTY：created_ids 与 dropped 必须相等",
+                        PREFIX, vanillaCreatedIds.size(), vanillaCreatedDropped, vanillaAddEntries,
+                        vanillaCreatedIds.size() - vanillaCreatedDropped);
+            }
+        } else if (vanillaCreatedIds.isEmpty() && vanillaAddEntries > 0) {
+            // 本条**不是红**：文件里那些 op=add 是上几局留下来的条目（本局 NEW 里没有它 ⇒
+            // 没有"新建的那条"要删）。打一行 INFO 把口径摊开，免得下次有人拿它当异常。
+            ShanhaiMod.LOGGER.info("{} vanilla_created_drop_none vanilla_add_entries={} "
+                            + "created_ids=0 dropped=0 · 口径：文件里有 op=add 条目但它们不是本局新建的"
+                            + " ⇒ 本条不是红，只有 created_ids>0 才判",
+                    PREFIX, vanillaAddEntries);
+        }
 
         final long t0 = System.nanoTime();
         int rebuilt = 0;
@@ -581,9 +671,14 @@ public final class ShanhaiRecipeEditorOps {
 
         ShanhaiMod.LOGGER.info("{} RESTORE_ALL types={} rebuilt_types={} ledger_before={} ledger_cleared={} "
                         + "file_entries_cleared={} index_ms={} vanilla_ms={} "
-                        + "net_sent changed={} removed={}（逐条单条通知：不整机重注册，与界面「删除这条」同一条路）",
+                        + "net_sent changed={} removed={} vanilla_created_dropped={} "
+                        + "vanilla_created_ids={} vanilla_add_entries={} "
+                        + "（逐条单条通知：不整机重注册，与界面「删除这条」同一条路；"
+                        + "口径：vanilla_created_dropped 必须等于 vanilla_created_ids —— 本局新建的那几条"
+                        + "都要被标成删除；不等会在上一拍另打一行 ERROR，vanilla_add_entries = 覆盖文件里"
+                        + "op=add 的条数，含上几局留下的、不必相等）",
                 PREFIX, types.size(), rebuilt, ledgerBefore, ledgerDropped, fileDropped, indexMs, vanillaMs,
-                net[0], net[1]);
+                net[0], net[1], vanillaCreatedDropped, vanillaCreatedIds.size(), vanillaAddEntries);
         return new Result(true, "已恢复全部（清掉 " + fileDropped + " 条覆盖记录，重建 " + rebuilt + " 个配方类型）",
                 "index_ms=" + indexMs + " vanilla_ms=" + vanillaMs + " types=" + types.size()
                         + " net_changed=" + net[0] + " net_removed=" + net[1],
@@ -676,6 +771,11 @@ public final class ShanhaiRecipeEditorOps {
 
         // 🔴 "恢复原样"作用在【编辑器新建的那条】上是什么语义 ⇒ **等于删掉它**
         //    （底本里本来就没有"原样"可回；留着它就会变成重启就没、IO 空壳的幽灵）。
+        //    🔴🔴 2026-10-06（与 restoreAll 那条顺序洞**同族**的单条版）：判据必须在动 NEW **之前**取 ——
+        //    下面那条 op=add 分支会调 ShanhaiVanillaRecipeTable.forgetNew(id)（= 从 NEW 里摘掉），
+        //    等走到下面 `isNew(id)` 时它已经是 false ⇒ 那一整块（clearEdit＋markRemoved＋forgetNew）
+        //    永远进不去 ⇒ 单条恢复同样**只摘底本、不标删除**。取一份快照即修（与 restoreAll 同一手法）。
+        final boolean vanillaWasNew = ShanhaiVanillaRecipeTable.isNew(id);
         boolean forgot = false;
         try {
             final com.google.gson.JsonObject e = ShanhaiRecipeOverrideStore.findEntry(id);
@@ -686,6 +786,23 @@ public final class ShanhaiRecipeEditorOps {
             }
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.warn("{} restore_one_forget_new_failed id={} err={}", PREFIX, id, t.toString());
+        }
+
+        // 🔴 2026-10-06：与 restoreAll 同一处洞的**单条版**（见那边整段注释与现场读数）。
+        //    这里的 `forgetNew` 只摘底本、不标删除 ⇒ 若这条是"本编辑器新建出来的工作台配方"，
+        //    applyLedger 同样会撞 `missing_base → left as is`（该删没删）。
+        //    ⇒ 补齐同一条纪律：先清这一条的台账，再标删除，最后才忘掉底本。
+        //    ⚠️ 判据用**内存里的 NEW**（`isNew`）而不是文件里的 op=add：文件可能已经被清过
+        //    （restore 就是先清文件的），而"它是不是本编辑器新建的"只有内存知道。
+        //    ⚠️ 而且必须用**上面第 ① 块之前取的那份快照**（vanillaWasNew）：op=add 分支自己就会
+        //    把 id 从 NEW 里摘掉 ⇒ 现读 isNew 恒为 false ⇒ 这一段等于死代码（本 bug 的单条版）。
+        //    ⚠️ 今天 `/shanhai edit restore <id>` 是按 GT 反查索引找配方的（非 GT 的 id 会读成
+        //    "找不到这条配方"）⇒ 这一段对 GT 的 id 是 `vanillaWasNew == false` 的**空操作**，不改既有行为。
+        if (vanillaWasNew) {
+            ShanhaiVanillaRecipeTable.clearEdit(id);
+            ShanhaiVanillaRecipeTable.markRemoved(id);
+            ShanhaiVanillaRecipeTable.forgetNew(id);
+            forgot = true;
         }
 
         final long t0 = System.nanoTime();
@@ -752,6 +869,21 @@ public final class ShanhaiRecipeEditorOps {
         ShanhaiRecipeBase.captureIfAbsent(server);
         final GTRecipeLookup lookup = type.getLookup();
         final int treeBefore = lookup.getLookup().getRecipes(true).toList().size();
+
+        // 🔴🔴 2026-10-06 P0（与 syncVanillaFromBase 同源、同一场事故的第二条破坏路径）：
+        //    底本没抓到（空捕获已被 {@code ShanhaiRecipeBase#capture} 拒绝）时，
+        //    {@link ShanhaiRecipeBase#finalRecipesOf} 会返回**空表**，而下面那句
+        //    {@code lookup.removeAllRecipes()} 会把这个类型的**整棵索引树清空** ——
+        //    运行期读数（用户 2026-10-06 的日志）：
+        //      index_rebuild type=gtceu:zero_point_conversion tree_before=2 wanted=0 deduped=0 tree_after=0
+        //    ⇒ 空底本下宁可**拒绝重建**（保住现状），也绝不静默删掉一整个类型的配方。
+        //    健康局面下底本永远是抓到的（本方法第一句就是 captureIfAbsent），这条守卫不会触发。
+        if (!ShanhaiRecipeBase.isCaptured()) {
+            ShanhaiMod.LOGGER.error("{} index_rebuild_refused_no_base type={} tree_now={} "
+                            + "（底本没抓到 ⇒ 拒绝按空底本重建，否则 removeAllRecipes 会清空这个类型的整棵树）",
+                    PREFIX, type.registryName, treeBefore);
+            return new int[]{treeBefore, 0, 0, 0, 0, treeBefore};
+        }
 
         final List<GTRecipe> wanted = ShanhaiRecipeBase.finalRecipesOf(type);
         // 🔴 去重（按 id）：底本已经按 id 压过一份，这里再保一道，
@@ -847,8 +979,24 @@ public final class ShanhaiRecipeEditorOps {
         //    客户端那 8 秒已经不再发生"。
         final long syncT0 = System.nanoTime();
         final RecipeManager rm = server.getRecipeManager();
+        // 🔴🔴 2026-10-06 P0（用户：「我修改配方之后…第一面中的配方数都会变成 0」）：
+        //    **做这次全表重写之前，先保证【底本】确实抓到了。**
+        //
+        //    这条路会被"工作台 / 原版配方"的保存【直接】调用（{@code ShanhaiVanillaRecipeOps} 的
+        //    4 处 + {@code ShanhaiRecipeEditorWorkspace#saveVanillaAndReturn}），
+        //    而那些调用点在调本方法之前【没有】抓过底本 ⇒ 于是本方法对着一个【空底本】执行
+        //    下面那句「底本里没有它 ⇒ 从两张表里拿掉」⇒ 一次把 54033 条 GT 配方全删掉。
+        //    运行期读数（2026-10-06 用户的日志）：
+        //      vanilla_tables_stale_gt_dropped count=54033
+        //      table_hook_writeback all=15450 types=19      （正常应是 all=69483 types=223）
+        //      reverse_index_built scanned=0 indexed_recipes=0
+        //    先抓一次底本就把这条路堵死（抓的是"还没被任何编辑污染"的那份表，见 capture 的注释）。
+        ShanhaiRecipeBase.captureIfAbsent(server);
+        final boolean baseUsable = ShanhaiRecipeBase.isCaptured();
         final List<Recipe<?>> all = new ArrayList<>(rm.getRecipes());
         final Set<ResourceLocation> presentGtIds = new HashSet<>();
+        // 底本不可用 ⇒ 被"保留"而不是被"删掉"的 GT 配方条数（非 0 一律报 ERROR，不许静默）
+        int keptWithoutBase = 0;
         int replaced = 0;
         int dropped = 0;
         int nulls = 0;
@@ -883,6 +1031,18 @@ public final class ShanhaiRecipeEditorOps {
                 //    （活表优先）仍然读得到 ⇒ 那一格还在、数据却是空壳 ⇒ 正是用户截图里那一条。
                 //    ⚠️ 判据只认"底本里没有它"（开机快照里本来就有全部 GT 配方）⇒ 不会误删别人的东西。
                 if (ShanhaiRecipeBase.pristine(gt.id) == null) {
+                    // 🔴🔴 2026-10-06 P0：**「底本里没有它」只有在底本确实抓到了的时候才有判别力。**
+                    //    底本没抓到（空 / 被拒）时，这句话只能说明"底本没建"，
+                    //    不能说明"这条配方该删"——2026-10-06 用户现场就是在这里把
+                    //    54033 条 GT 配方当成"底本里没有的过时条目"一次删光的
+                    //    （日志原文：vanilla_tables_stale_gt_dropped count=54033）。
+                    //    ⇒ 底本不可用就【一律保留】，并报 ERROR（保留会让面板多一条，删掉会让整表归零；
+                    //      宁可多一条，不可整表归零）。
+                    if (!baseUsable) {
+                        keptWithoutBase++;
+                        presentGtIds.add(gt.id);
+                        continue;
+                    }
                     all.remove(i);
                     i--;
                     stale++;
@@ -950,6 +1110,14 @@ public final class ShanhaiRecipeEditorOps {
             ShanhaiMod.LOGGER.info("{} vanilla_tables_stale_gt_dropped count={}（底本里已经没有的 GT 配方："
                     + "恢复原样把「编辑器新建的那条」忘掉之后，原版两张表里也得跟着拿掉，"
                     + "否则面板会留一个空壳卡片）", PREFIX, stale);
+        }
+        if (keptWithoutBase > 0) {
+            // 🔴 2026-10-06 P0：底本没抓到 ⇒ 这些 GT 配方一律【保留】。非 0 一定是异常，
+            //    ERROR 级别 + 明确计数，绝不静默（"少一条"与"本来就没有"长得一样是本工程最怕的失败）。
+            ShanhaiMod.LOGGER.error("{} vanilla_sync_kept_no_base count={} —— 底本未抓到（空底本已被拒绝），"
+                            + "这些 GT 配方一律保留而不是按「底本里没有它」删掉；"
+                            + "成因见 base_capture_refused_empty，本次未清空原版表",
+                    PREFIX, keptWithoutBase);
         }
         ShanhaiRecipeTableHook.forceWriteBack(server, all);
         ShanhaiMod.LOGGER.info("{} vanilla_tables_written total={} replaced={} reverted={} dropped={} reinserted={} missing_base={}",

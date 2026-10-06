@@ -503,6 +503,18 @@ public final class ShanhaiRecipeEditorWorkspace {
     private ItemStack queryItem = ItemStack.EMPTY;
 
     /**
+     * 🆕 2026-10-06（第 14 刀）<b>同一个框里放的流体</b>（用户原话：
+     * 「我在第一面中无法拖动流体到查询物品框中，<b>流体也是需要查询的</b>」）。
+     *
+     * <p>⚠️ 与 {@link #queryItem} <b>互斥</b>：放物品就清流体、放流体就清物品 ——
+     * 一次查询只能有一个主语，否则"查的到底是谁"在界面上说不清（也会让 note 说谎）。
+     * 用 LDLib 的 {@code FluidStack}（GT 的 {@code FluidIngredient} 与 IO 格子都是它，
+     * 见 {@code ShanhaiIoTable} 的流体那一支）。
+     */
+    private com.lowdragmc.lowdraglib.side.fluid.FluidStack queryFluid =
+            com.lowdragmc.lowdraglib.side.fluid.FluidStack.empty();
+
+    /**
      * 文本搜索框里的字。
      *
      * <p>⚠️ 这个字段<b>不</b>受 {@link #blank()} 影响 —— 因为输入框要用它做
@@ -1028,15 +1040,19 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     /** 把一条活配方的 IO 读进编辑缓冲（"载入配方"与"保存之后重新对齐"共用这一条）。 */
     private void loadBuffer(GTRecipe live) {
+        final long tLoad0 = System.nanoTime();
         // 🔴 先按【这条配方的类型】决定四元组，再开格子（用户点单 B3）。
         //    两个来源取大：① 类型自己的 setMaxIOSize（经 GTRecipeType 读，原版类型也覆盖）；
         //                  ② 这条配方实际用到的条数（保证任何配方都不会被截断 —— 用户说过
         //                     "非常巨大的输入和输出格"，宁可多留不可少开）。
+        // 🔴🔴 2026-10-06（第 15 刀）：**取大之后还必须在两个来源上各夹一次**，不能再合成一个 128。
+        //    原来这里是 `Math.max(cap, used)` 之后交给 ShanhaiIoTable 的构造器统一夹 128 ⇒
+        //    用户那条 19862 个输出的配方被夹成 128（活日志 cells=141 / out=5 页，逐字对上他截图）。
+        //    现在两个来源各有自己的闸（类型声明上限 4096 / 真实用量 65536），见
+        //    {@link ShanhaiIoTable#shapeFor} 与那里引的日志原文。
         final int[] cap = ShanhaiRecipeTypes.maxIoOf(live.getType());
         final int[] used = ShanhaiIoTable.usedBy(live);
-        final int[] shape = new int[]{
-                Math.max(cap[0], used[0]), Math.max(cap[1], used[1]),
-                Math.max(cap[2], used[2]), Math.max(cap[3], used[3])};
+        final int[] shape = ShanhaiIoTable.shapeFor(cap, used);
         this.ioCapacity = shape;
         liveType = live.getType();
         io.resize(shape[0], shape[1], shape[2], shape[3]);
@@ -1067,12 +1083,15 @@ public final class ShanhaiRecipeEditorWorkspace {
         loadedRecipe = true;
         numbersVersion++;
         touch();
+        // 🆕 2026-10-06（第 15 刀）：末尾多一个 load_ms —— 19862 个输出那种配方"打开一次要多久"
+        //    只有这一行读数能回答（用户在 30 秒判据里要点开那条配方，卡不卡全看这个数）。
         ShanhaiMod.LOGGER.info("{} workspace_io_shape id={} type={} shape={}/{}/{}/{} (type_max={}/{}/{}/{} used={}/{}/{}/{})"
-                        + " cells={} pages(in={} out={})",
+                        + " cells={} pages(in={} out={}) load_ms={}",
                 PREFIX, live.id, live.getType() == null ? "?" : live.getType().registryName,
                 shape[0], shape[1], shape[2], shape[3],
                 cap[0], cap[1], cap[2], cap[3], used[0], used[1], used[2], used[3],
-                io.cellCount(), inPageCount(), outPageCount());
+                io.cellCount(), inPageCount(), outPageCount(),
+                (System.nanoTime() - tLoad0) / 1_000_000L);
         // 🔴 这一行就是本轮那个显示 bug 的机器判据：面板【重开/重新载入】之后读到的耗时是哪个数。
         //    期望：用户改成 5000 并保存之后，这里必须打 5000（不是开机时那一份 1200）。
         ShanhaiMod.LOGGER.info("{} workspace_display_duration id={} shown={} table_now={} table_boot={} "
@@ -1411,6 +1430,21 @@ public final class ShanhaiRecipeEditorWorkspace {
         return queryItem == null ? ItemStack.EMPTY : queryItem;
     }
 
+    /** 🆕 第 14 刀：同一个框里的流体（没有流体时是空栈）。 */
+    public com.lowdragmc.lowdraglib.side.fluid.FluidStack queryFluid() {
+        return queryFluid == null ? com.lowdragmc.lowdraglib.side.fluid.FluidStack.empty() : queryFluid;
+    }
+
+    /** 🆕 第 14 刀：这个框里到底有没有东西（物品或流体），以及是哪种。 */
+    public boolean queryHasItem() {
+        return queryItem != null && !queryItem.isEmpty();
+    }
+
+    /** 🆕 第 14 刀：同上，流体那一支。 */
+    public boolean queryHasFluid() {
+        return queryFluid != null && !queryFluid.isEmpty();
+    }
+
     /** 文本搜索框里的字（<b>两侧都有效</b>，理由见字段注释）。 */
     public String searchTextRaw() {
         return searchText == null ? "" : searchText;
@@ -1432,6 +1466,7 @@ public final class ShanhaiRecipeEditorWorkspace {
             return false;
         }
         queryItem = stack.copy();
+        queryFluid = com.lowdragmc.lowdraglib.side.fluid.FluidStack.empty();   // 🆕 第 14 刀：互斥
         // 🔴 2026-10-05 第 11 刀（用户报「物品框里没有图标」）：这一句原来【漏了】。
         //    面板那一层是"版本号变了才推状态"（StatePump：`if (session.version() == sentVersion) return;`）
         //    而 `clearQueryItem()` 有 `touch()`、`offerQueryItem()` 没有 ⇒ 放进物品这一拍
@@ -1451,11 +1486,45 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     /** 空掉物品槽。 */
     public boolean clearQueryItem() {
-        if (queryItem == null || queryItem.isEmpty()) {
+        final boolean hadItem = queryItem != null && !queryItem.isEmpty();
+        final boolean hadFluid = queryFluid != null && !queryFluid.isEmpty();
+        if (!hadItem && !hadFluid) {
             return false;
         }
         queryItem = ItemStack.EMPTY;
+        queryFluid = com.lowdragmc.lowdraglib.side.fluid.FluidStack.empty();   // 🆕 第 14 刀：两个一起清
         touch();
+        return true;
+    }
+
+    /**
+     * 🆕 2026-10-06（第 14 刀）：<b>往同一个框里放一个流体</b>（JEI 拖进来的那一下）。
+     *
+     * <p>与 {@link #offerQueryItem} 逐条同构（含 {@code touch()} 那条"别靠 say 顺手推状态"的教训）。
+     * 放流体时清掉物品 ⇒ 一次查询只有一个主语。
+     * <p>⚠️ 收进来的是 LDLib 的 {@code FluidStack}（把 JEI 的壳剥开那一步在客户端
+     * {@code ShanhaiQuerySlotWidget} 里做，理由同 {@link #toItemStack} 的类注释）。
+     *
+     * @return true = 收下了
+     */
+    public boolean offerQueryFluid(Object ingredient) {
+        if (blank() || ingredient == null) {
+            return false;
+        }
+        if (!(ingredient instanceof com.lowdragmc.lowdraglib.side.fluid.FluidStack fluid)
+                || fluid.isEmpty()) {
+            return false;
+        }
+        queryFluid = fluid.copy();
+        queryItem = ItemStack.EMPTY;
+        touch();
+        say("§a已放入流体 §f" + ShanhaiRecipeEditorSession.shortId(
+                        net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(fluid.getFluid()))
+                        + "§a，点下面两个按钮之一开查",
+                "§8获取途径 / 作为物品的用处（流体没有「当机器」这一问）");
+        ShanhaiMod.LOGGER.info("{} query_item_set kind=fluid fluid={} amount={}",
+                PREFIX, net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(fluid.getFluid()),
+                fluid.getAmount());
         return true;
     }
 
@@ -1668,16 +1737,26 @@ public final class ShanhaiRecipeEditorWorkspace {
             if (q.isEmpty()) {
                 return emptyState(kind, "请输入关键词（配方 id 或配方种类名，中英文都行）");
             }
+        } else if (queryHasFluid()) {
+            // 🆕 第 14 刀：框里是流体 ⇒ 走流体那两条（MACHINE 对流体没有语义，如实说，不编数据）
+            if (kind == ShanhaiRecipeQuery.Kind.MACHINE) {
+                return emptyState(kind, "这是流体，没有「当机器用」这一问；请点「获取途径」或「作为物品的用处」");
+            }
         } else {
             if (queryItem == null || queryItem.isEmpty()) {
-                return emptyState(kind, "请先从 JEI 拖一个物品到上面的框里，再点这三个按钮");
+                return emptyState(kind, "请先从 JEI 拖一个物品或流体到上面的框里，再点这三个按钮");
             }
         }
         final long t0 = System.nanoTime();
         final ShanhaiRecipeQuery.Result r;
+        final boolean fluid = queryHasFluid();
         switch (kind) {
-            case SOURCE -> r = ShanhaiRecipeQuery.byOutput(server, queryItem.getItem());
-            case USE -> r = ShanhaiRecipeQuery.byInput(server, queryItem.getItem());
+            case SOURCE -> r = fluid
+                    ? ShanhaiRecipeQuery.byOutputFluid(server, queryFluid.getFluid())
+                    : ShanhaiRecipeQuery.byOutput(server, queryItem.getItem());
+            case USE -> r = fluid
+                    ? ShanhaiRecipeQuery.byInputFluid(server, queryFluid.getFluid())
+                    : ShanhaiRecipeQuery.byInput(server, queryItem.getItem());
             case MACHINE -> r = ShanhaiRecipeQuery.asMachine(server, queryItem.getItem());
             case TEXT -> r = ShanhaiRecipeQuery.byText(server, searchText);
             default -> r = ShanhaiRecipeQuery.byText(server, searchText);
@@ -1694,9 +1773,13 @@ public final class ShanhaiRecipeEditorWorkspace {
                         ? "§e" + kind.zh + "：§f没有命中"
                         : "§a" + kind.zh + "：§f" + r.total() + " §a条 · §f" + r.groups().size() + " §a种配方种类",
                 "§8" + r.note());
-        ShanhaiMod.LOGGER.info("{} query kind={} item={} text={} total={} groups={} ms={} note={}",
-                PREFIX, kind, queryItem == null || queryItem.isEmpty() ? "(none)"
-                        : net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(queryItem.getItem()),
+        ShanhaiMod.LOGGER.info("{} query kind={} subject={} text={} total={} groups={} ms={} note={}",
+                PREFIX, kind, fluid
+                        ? "fluid:" + net.minecraft.core.registries.BuiltInRegistries.FLUID
+                        .getKey(queryFluid.getFluid())
+                        : (queryItem == null || queryItem.isEmpty() ? "(none)"
+                        : "item:" + net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(queryItem.getItem())),
                 searchText, r.total(), r.groups().size(), ms, r.note());
         touch();
         return !r.groups().isEmpty();
@@ -1971,8 +2054,23 @@ public final class ShanhaiRecipeEditorWorkspace {
         if (blank()) {
             return "";
         }
+        if (queryHasFluid()) {
+            // 🆕 第 14 刀：框里是流体时走这一支（不是"从 JEI 拖一个物品进来"那种空态文案）
+            final ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.FLUID
+                    .getKey(queryFluid.getFluid());
+            String name;
+            try {
+                name = com.shanhai.common.text.ShanhaiTextParser
+                        .stripStyleCode(queryFluid.getDisplayName().getString());
+            } catch (Throwable t) {
+                name = String.valueOf(id);
+            }
+            return "§b" + ShanhaiRecipeEditorSession.clipUnits(name, 10) + " §8("
+                    + ShanhaiRecipeEditorSession.clipUnits(id == null ? "?" : id.toString(), 22)
+                    + ") §7" + queryFluid.getAmount() + "mB";
+        }
         if (queryItem == null || queryItem.isEmpty()) {
-            return "§8从 JEI 拖一个物品进来";
+            return "§8从 JEI 拖一个物品或流体进来";
         }
         final ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM
                 .getKey(queryItem.getItem());
@@ -2316,6 +2414,52 @@ public final class ShanhaiRecipeEditorWorkspace {
         touch();
     }
 
+    /**
+     * 🔴🔴 2026-10-06（第 15 刀）<b>直接跳到输入栏第 N 页</b>（看得见的跳页；用户点单）。
+     *
+     * <h4>为什么要它</h4>
+     * 用户原话（逐字）：
+     * <blockquote>「还有就是有些配方真的会超出5页，这个页数你也可以添加一下」<br>
+     * 「如果这样改了可能会有上百页的，3我也选一下」</blockquote>
+     * 放开那个 128 之后，他本机那条 {@code creative_all_items_gen} 的输出栏是
+     * <b>621 页</b>（19865 格 ÷ 32）—— 一页页点等于没有。
+     * ⇒ 面板上除了原有的 ◀ ▶，另有「|◀ 首页 / ▶| 末页」两颗按钮 ＋ 一个<b>页码输入框</b>，
+     *   三者都落到本方法（以及 {@link #goOutPage(int)}）。
+     *
+     * <h4>为什么与 {@link #setInPage(int)} 分开写</h4>
+     * {@code setInPage} 是"相对翻页"用的（返回 void、越界夹回，既有调用点不动它）；
+     * 本方法是"绝对跳页"的入口，多返回一个"页码真的动了吗"、
+     * 多打一行 {@code io_page_jump} 读数 —— 用户在界面上点那一下，日志里能对上。
+     * 两者的夹取口径<b>逐字相同</b>（都是 {@code max(0, min(pageCount-1, p))}）。
+     *
+     * @param p 目标页（<b>0 基</b>；调用方从 1 基的页码减去 1）
+     * @return true = 页码真的动了（会推一次状态给客户端）
+     */
+    public boolean goInPage(int p) {
+        final int np = Math.max(0, Math.min(inPageCount() - 1, p));
+        if (np == inPage) {
+            return false;
+        }
+        inPage = np;
+        ShanhaiMod.LOGGER.info("{} io_page_jump column=inputs want={} got={} pages={} cells={}",
+                PREFIX, p, np, inPageCount(), io.inSection());
+        touch();
+        return true;
+    }
+
+    /** 直接跳到输出栏第 N 页（0 基）—— 同 {@link #goInPage(int)}。 */
+    public boolean goOutPage(int p) {
+        final int np = Math.max(0, Math.min(outPageCount() - 1, p));
+        if (np == outPage) {
+            return false;
+        }
+        outPage = np;
+        ShanhaiMod.LOGGER.info("{} io_page_jump column=outputs want={} got={} pages={} cells={}",
+                PREFIX, p, np, outPageCount(), io.outSection());
+        touch();
+        return true;
+    }
+
     /** 电压下拉：选中某一档 ⇒ 用「电压 × 电流」重算耗能（不再直接把耗能设成档位电压）。 */
     public void setTierByName(String name) {
         final int idx = tierIndexByName(name);
@@ -2376,6 +2520,27 @@ public final class ShanhaiRecipeEditorWorkspace {
         if (!ioDirty && !durDirty && !eutDirty && !condDirty) {
             say("§7这次没有任何改动", "§8（点数、拖动、右键删、中键改数量之后再保存）");
             return new ShanhaiRecipeEditorOps.Result(true, "没有改动，未写盘", "no dirty field", 0, 0, false, false, null);
+        }
+        // 🔴🔴 2026-10-06（第 15 刀）**保存前的"会丢数据"闸**。
+        //    保存走的是【整段替换】语义（ShanhaiRecipeIoApply.applyTable 第一句就是 table.clear()），
+        //    而 io.json(...) 只遍历本表的格子 ⇒ 表里装不下的条数会被整段抹掉 —— 内存里的配方
+        //    与落盘的 recipe_overrides.json 一起，日志上还一切正常。
+        //    改动之前这条路上真会发生：19862 条输出 vs 表里 128 格 ⇒ 动一下任意一格再保存就丢 19734 条。
+        //    ⇒ 走到这里说明"表已经装不下这条配方的全部 IO"（正常路径下不可能，
+        //      因为 shape 是按 used 开出来的；只有 used 超过 MAX_CELLS_PER_SECTION 才可能）
+        //      ⇒ 这一次保存【拒绝】，并把"会丢多少"写在界面上和日志里。
+        //    ⚠️ 只在真要写 IO 那一拍拦（ioDirty=false 的那些保存一个字也不写 IO，拦它没有道理）。
+        if (ioDirty) {
+            final String risk = ShanhaiIoTable.truncationRisk(ShanhaiIoTable.usedBy(live), io);
+            if (risk != null) {
+                ShanhaiMod.LOGGER.error("{} workspace_save_refused_would_truncate id={} {} "
+                                + "（不是静默失败：这一次保存【没有】执行，配方一个字节都没动）",
+                        PREFIX, recipeId, risk);
+                say("§c这次保存会丢掉 IO（已拒绝）", "§8" + risk
+                        + " §8· 请把这条配方拆小，或找开发者提高上限");
+                return new ShanhaiRecipeEditorOps.Result(false, "保存会丢 IO，已拒绝", risk,
+                        0, 0, false, false, null);
+            }
         }
         final com.google.gson.JsonObject inputs = ioDirty ? io.json("inputs") : null;
         final com.google.gson.JsonObject outputs = ioDirty ? io.json("outputs") : null;
@@ -3940,11 +4105,23 @@ public final class ShanhaiRecipeEditorWorkspace {
         buf.writeUtf(condValue == null ? "" : condValue);
         buf.writeBoolean(condReverse);
         buf.writeUtf(condSource == null ? "" : condSource);
-        io.writeState(buf);
+        // 🔴🔴 2026-10-06（第 15 刀）：IO 格子改成**只发当前可见的那一页**。
+        //    原因：放开 128 之后，"每格都发"那条口径下用户那条 19862 输出的配方
+        //    一次推送就要 ≈291 KiB（账见 ShanhaiIoTable#writeState(FriendlyByteBuf,int[])），
+        //    而这个包是【版本一变就推一次】的。面板一共只有 2×CELLS_PER_PAGE=64 个格子控件，
+        //    客户端根本不需要当前页以外的格子 ⇒ 只发可见的 ≤64 格。
+        //    ⚠️ 用到的 inPage/outPage 就在本方法【上面第 5、6 行】已经写进包里
+        //    （writeVarInt(inPage); writeVarInt(outPage)）⇒ 两侧算出来的下标是同一批；
+        //    而且下标本身也随包发（读侧自描述），不靠两侧各算一份。
+        io.writeState(buf, io.visibleIndices(inPage, outPage, CELLS_PER_PAGE));
         // 🆕 第 7 轮：查询那一块。
         //    ⚠️ 物品槽用 writeItem —— 它的数量是 writeByte，但这里只关心"是哪个物品"，
         //       数量在卡片上另有 VarInt 通道（见 ShanhaiRecipeQuery#writeCard 的注释）。
         buf.writeItem(queryItem == null ? ItemStack.EMPTY : queryItem);
+        // 🆕 第 14 刀：紧挨着物品写流体（两侧同一句位置 ⇒ 顺序不可能错位；这条纪律的由来见下面那段 P0）。
+        //    形状 = LDLib 自己那一对 writeToBuf / readFromBuf（与 IO 格子的流体通道同一个函数）。
+        (queryFluid == null ? com.lowdragmc.lowdraglib.side.fluid.FluidStack.empty() : queryFluid)
+                .writeToBuf(buf);
         buf.writeUtf(searchText == null ? "" : searchText);
         buf.writeVarInt(queryKind == null ? 0 : queryKind.ordinal());
         // 🔴🔴 2026-10-05 第 8 轮（P0）：这两行的**【顺序】必须与 readState 逐字对应**。
@@ -4033,6 +4210,8 @@ public final class ShanhaiRecipeEditorWorkspace {
         io.readState(buf);
         // 🆕 第 7 轮：查询那一块
         queryItem = buf.readItem();
+        // 🆕 第 14 刀：紧挨着物品读流体（与 writeState 同位置）
+        queryFluid = com.lowdragmc.lowdraglib.side.fluid.FluidStack.readFromBuf(buf);
         searchText = buf.readUtf();
         final int qk = buf.readVarInt();
         queryKind = qk >= 0 && qk < ShanhaiRecipeQuery.Kind.values().length

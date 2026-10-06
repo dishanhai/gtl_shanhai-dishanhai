@@ -1,14 +1,17 @@
 package com.shanhai.common.recipe.editor;
 
+import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
+import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.shanhai.ShanhaiMod;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluid;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -68,6 +71,38 @@ public final class ShanhaiRecipeReverseIndex {
     private static final Map<Item, int[]> BY_OUTPUT = new HashMap<>();
 
     /**
+     * 🆕 2026-10-06（第 14 刀）流体侧的输入/输出反查索引。
+     *
+     * <h4>用户原话（逐字）</h4>
+     * <blockquote>「还有一个很严重的问题，就是我在第一面中无法拖动流体到查询物品框中，<b>流体也是需要查询的</b>」</blockquote>
+     *
+     * <h4>🔴 匹配语义（必须先写清楚，判据才不是"只比 id"）</h4>
+     * 与物品侧<b>逐字同构</b>（见 {@link #query} 与那三条 {@code reverse_index_semantics_note}）：
+     * <ul>
+     *   <li><b>键 = {@link Fluid} 本体</b>（注册表对象），<b>不带</b> NBT、<b>不带</b>数量 ——
+     *       GT 的流体输入是 {@code FluidIngredient}（可能带 tag / 多候选），
+     *       本索引收的是它 {@code getStacks()} 里出现过的<b>每一种流体</b>；
+     *       ⇒ 索引路问的是「这条配方会不会用到<b>这种流体的某个变体</b>」，
+     *       而 {@code FluidIngredient.test(某个具体 FluidStack)} 问的是「这一桶能不能直接喂进去」。
+     *       两者对不上是<b>正常</b>的（物品侧同款现象：17864 vs 13），自检会把两个数都打出来；</li>
+     *   <li><b>chance / tierChanceBoost / 催化剂（chance==0）一律不参与键</b>：
+     *       本查询回答的是"哪些配方用到它"，不是"用多少 / 多大概率"。
+     *       ⇒ 一个<b>不消耗</b>的流体催化剂（{@code chance==0}）照旧会出现在"作为物品的用处"里 ✓
+     *       （这正是用户要的：他要问的是"哪里用得上它"）；</li>
+     *   <li>输入侧与输出侧<b>分开两张表</b>（{@code SOURCE=获取途径} 读输出、{@code USE=用处} 读输入），
+     *       与物品侧同一口径；</li>
+     *   <li>读不出来的 content <b>跳过</b>（与物品侧同一套容错），不因为一条怪配方把整张表搞崩。</li>
+     * </ul>
+     *
+     * <h4>⚠️ 不许把物品那条路弄慢</h4>
+     * 两张表在<b>同一趟扫描</b>里建（{@link #build} 那个循环内），<b>不新增任何一次全表遍历</b>；
+     * 大多数配方的流体 content 数为 0（{@code getInputContents(FluidRecipeCapability.CAP)} 直接返回空）
+     * ⇒ 增量成本 ≈ 几次空调用/条（物品侧一次 54031 条的全表扫是 264~369 ms，这里是它的零头）。
+     */
+    private static final Map<Fluid, int[]> BY_FLUID_IN = new HashMap<>();
+    private static final Map<Fluid, int[]> BY_FLUID_OUT = new HashMap<>();
+
+    /**
      * 🆕 2026-10-05 第 7 轮：文本搜索用的两条平行表（下标与 {@link #RECIPES} 一一对应）。
      *
      * <p>为什么预存而不是每次现算：全表 5.2 万条，每条都 {@code id.toString().toLowerCase()}
@@ -79,6 +114,9 @@ public final class ShanhaiRecipeReverseIndex {
     private static volatile boolean built = false;
     private static volatile boolean verified = false;
     private static volatile boolean verifiedOutput = false;
+    /** 🆕 第 14 刀：流体两张表各自的自证结论（与物品侧分开，互不代偿）。 */
+    private static volatile boolean verifiedFluidIn = false;
+    private static volatile boolean verifiedFluidOut = false;
 
     private static long buildMs = -1;
     private static int scannedCount = -1;
@@ -94,6 +132,18 @@ public final class ShanhaiRecipeReverseIndex {
     /** 🆕 第 7 轮：输出索引的自证结论（与输入侧分开，两者互不代偿）。 */
     private static String outputDiagnosis = "(never built)";
 
+    // ---- 🆕 第 14 刀：流体侧读数（全部独立于物品侧，不覆盖上面任何一个数）----
+    private static int fluidInEntries = -1;
+    private static int fluidOutEntries = -1;
+    private static int probeFluidInIndexHits = -1;
+    private static int probeFluidInLinearHits = -1;
+    private static int probeFluidOutIndexHits = -1;
+    private static int probeFluidOutLinearHits = -1;
+    private static String probeFluidInId = "(not run)";
+    private static String probeFluidOutId = "(not run)";
+    private static String fluidInDiagnosis = "(never built)";
+    private static String fluidOutDiagnosis = "(never built)";
+
     private ShanhaiRecipeReverseIndex() {}
 
     /** 记录一条配方的可展示摘要（面板行用它，不把整个 GTRecipe 传到客户端）。 */
@@ -108,14 +158,24 @@ public final class ShanhaiRecipeReverseIndex {
         BY_ID.clear();
         BY_ITEM.clear();
         BY_OUTPUT.clear();
+        BY_FLUID_IN.clear();          // 🆕 第 14 刀
+        BY_FLUID_OUT.clear();         // 🆕 第 14 刀
         LOWER_IDS.clear();
         TYPE_IDS.clear();
         verified = false;
         verifiedOutput = false;
+        verifiedFluidIn = false;      // 🆕 第 14 刀
+        verifiedFluidOut = false;     // 🆕 第 14 刀
         probeIndexHits = -1;
         probeLinearHits = -1;
         probeOutIndexHits = -1;
         probeOutLinearHits = -1;
+        probeFluidInIndexHits = -1;
+        probeFluidInLinearHits = -1;
+        probeFluidOutIndexHits = -1;
+        probeFluidOutLinearHits = -1;
+        fluidInEntries = 0;
+        fluidOutEntries = 0;
 
         int scanned = 0;
         int entries = 0;
@@ -142,6 +202,16 @@ public final class ShanhaiRecipeReverseIndex {
                 for (Item it : itemsOf(gt, true)) {
                     outEntries++;
                     addIndex(BY_OUTPUT, it, idx);
+                }
+                // 🆕 第 14 刀：同一趟扫描里建流体两张表（口径见 BY_FLUID_IN 的类文档）。
+                //    ⚠️ 只在这里多花几次"取流体 content"的调用；物品那三行一个字没动。
+                for (Fluid f : fluidsOf(gt, true)) {
+                    fluidOutEntries++;
+                    addIndex(BY_FLUID_OUT, f, idx);
+                }
+                for (Fluid f : fluidsOf(gt, false)) {
+                    fluidInEntries++;
+                    addIndex(BY_FLUID_IN, f, idx);
                 }
                 final Set<Item> items = new LinkedHashSet<>();
                 final List<Content> contents = gt.getInputContents(ItemRecipeCapability.CAP);
@@ -247,6 +317,77 @@ public final class ShanhaiRecipeReverseIndex {
             ShanhaiMod.LOGGER.warn("{} reverse_index_unverified -> query() will use the linear scan (correct but ~70ms): {}",
                     PREFIX, buildDiagnosis);
         }
+
+        // ══════════════════════════════════════════════════════════════════════════════════
+        // 🆕 2026-10-06 第 14 刀：流体两张表的【当场自证】（与物品侧逐条同款纪律）
+        //
+        //   · 索引路 vs 一条【独立实现】的线性扫，同一个探针、同一次运行；
+        //   · 探针【不写死 id】（写死会在别的整合包里变成"探针不存在"）：取索引里条目最多的
+        //     那种流体 ⇒ 一定真实存在、且是最有代表性的那一种；
+        //   · 不相等 ⇒ 标记 unverified，查询退回线性扫（正确性优先，速度其次）；
+        //   · 与物品侧【完全分开】：物品那两行日志与那两个 verified 一个字节都没动。
+        // ══════════════════════════════════════════════════════════════════════════════════
+        final Fluid probeFluidIn = argmaxFluid(BY_FLUID_IN);
+        if (probeFluidIn == null) {
+            probeFluidInId = "(none: 这张表里一条流体输入都没有)";
+            probeFluidInIndexHits = 0;
+            probeFluidInLinearHits = 0;
+            verifiedFluidIn = true;                 // 空表：索引给 0，线性扫也给 0 ⇒ 一致
+            fluidInDiagnosis = "empty (no fluid input in this table)";
+        } else {
+            probeFluidInId = String.valueOf(
+                    net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(probeFluidIn));
+            probeFluidInIndexHits = queryFluidViaIndex(BY_FLUID_IN, probeFluidIn).size();
+            probeFluidInLinearHits = linearQueryByFluids(server, probeFluidIn, false).size();
+            verifiedFluidIn = probeFluidInIndexHits == probeFluidInLinearHits && probeFluidInIndexHits > 0;
+            fluidInDiagnosis = verifiedFluidIn ? "ok"
+                    : "index/linear disagree -> fluid-input query falls back to the linear scan";
+        }
+        final Fluid probeFluidOut = argmaxFluid(BY_FLUID_OUT);
+        if (probeFluidOut == null) {
+            probeFluidOutId = "(none: 这张表里一条流体输出都没有)";
+            probeFluidOutIndexHits = 0;
+            probeFluidOutLinearHits = 0;
+            verifiedFluidOut = true;
+            fluidOutDiagnosis = "empty (no fluid output in this table)";
+        } else {
+            probeFluidOutId = String.valueOf(
+                    net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(probeFluidOut));
+            probeFluidOutIndexHits = queryFluidViaIndex(BY_FLUID_OUT, probeFluidOut).size();
+            probeFluidOutLinearHits = linearQueryByFluids(server, probeFluidOut, true).size();
+            verifiedFluidOut = probeFluidOutIndexHits == probeFluidOutLinearHits && probeFluidOutIndexHits > 0;
+            fluidOutDiagnosis = verifiedFluidOut ? "ok"
+                    : "index/linear disagree -> fluid-output query falls back to the linear scan";
+        }
+        ShanhaiMod.LOGGER.info("{} reverse_index_fluid_built fluid_in_entries={} fluid_out_entries={} "
+                        + "probe_in={} in_via_index={} in_via_linear={} in_agree={} "
+                        + "probe_out={} out_via_index={} out_via_linear={} out_agree={} "
+                        + "（流体侧与物品侧【分开自证】；探针=索引里条目最多的那种流体，不写死 id）",
+                PREFIX, fluidInEntries, fluidOutEntries,
+                probeFluidInId, probeFluidInIndexHits, probeFluidInLinearHits, verifiedFluidIn,
+                probeFluidOutId, probeFluidOutIndexHits, probeFluidOutLinearHits, verifiedFluidOut);
+        if (!verifiedFluidIn) {
+            ShanhaiMod.LOGGER.warn("{} reverse_index_fluid_in_unverified -> 流体输入查询退回线性扫（正确但慢）: {}",
+                    PREFIX, fluidInDiagnosis);
+        }
+        if (!verifiedFluidOut) {
+            ShanhaiMod.LOGGER.warn("{} reverse_index_fluid_out_unverified -> 流体输出查询退回线性扫（正确但慢）: {}",
+                    PREFIX, fluidOutDiagnosis);
+        }
+    }
+
+    /** 🆕 第 14 刀：索引里条目最多的那种流体（探针；表为空返回 null）。 */
+    private static Fluid argmaxFluid(Map<Fluid, int[]> table) {
+        Fluid best = null;
+        int bestN = -1;
+        for (Map.Entry<Fluid, int[]> e : table.entrySet()) {
+            final int n = e.getValue() == null ? 0 : e.getValue().length;
+            if (n > bestN) {
+                bestN = n;
+                best = e.getKey();
+            }
+        }
+        return best;
     }
 
     /**
@@ -255,16 +396,73 @@ public final class ShanhaiRecipeReverseIndex {
      * <p>🔴 第 7 轮改成收一个 {@code Map} 参数：输入侧与输出侧共用同一段代码
      * （原来只有输入侧，直接写死 {@link #BY_ITEM}）。
      */
-    private static void addIndex(Map<Item, int[]> table, Item item, int idx) {
-        final int[] old = table.get(item);
+    private static <K> void addIndex(Map<K, int[]> table, K key, int idx) {
+        final int[] old = table.get(key);
         if (old == null) {
-            table.put(item, new int[]{idx});
+            table.put(key, new int[]{idx});
             return;
         }
         final int[] next = new int[old.length + 1];
         System.arraycopy(old, 0, next, 0, old.length);
         next[old.length] = idx;
-        table.put(item, next);
+        table.put(key, next);
+    }
+
+    /**
+     * 🆕 第 14 刀：一条配方某一侧的<b>流体集合</b>（建流体索引用）。
+     *
+     * <p>与 {@link #itemsOf} 逐字同构，只是把 capability 从物品换成流体：
+     * <pre>
+     *   raw = c.content
+     *   raw 本身就是 FluidStack  ⇒ 直接取（GT 允许 content 放裸 FluidStack）
+     *   否则 FluidRecipeCapability.CAP.of(raw) ⇒ FluidIngredient ⇒ getStacks() ⇒ 每种流体的 Fluid
+     * </pre>
+     * ⚠️ {@code getStacks()} 对 tag 型流体原料走的是"把 tag 解析成具体流体"这条路
+     * （与物品侧 {@code Ingredient.getItems()} 解析 tag 同一口径）；解析不出来就给空数组，
+     * 那种情况下这条 content 对索引不可见 —— 与物品侧的行为一致，<b>不另外编数据</b>。
+     */
+    private static Set<Fluid> fluidsOf(GTRecipe gt, boolean output) {
+        final Set<Fluid> fluids = new LinkedHashSet<>();
+        final List<Content> contents;
+        try {
+            contents = output
+                    ? gt.getOutputContents(FluidRecipeCapability.CAP)
+                    : gt.getInputContents(FluidRecipeCapability.CAP);
+        } catch (Throwable t) {
+            return fluids;
+        }
+        if (contents == null) {
+            return fluids;
+        }
+        for (Content c : contents) {
+            if (c == null || c.content == null) {
+                continue;
+            }
+            try {
+                if (c.content instanceof com.lowdragmc.lowdraglib.side.fluid.FluidStack fs) {
+                    if (!fs.isEmpty() && fs.getFluid() != null) {
+                        fluids.add(fs.getFluid());
+                    }
+                    continue;
+                }
+                final FluidIngredient ing = FluidRecipeCapability.CAP.of(c.content);
+                if (ing == null) {
+                    continue;
+                }
+                final com.lowdragmc.lowdraglib.side.fluid.FluidStack[] stacks = ing.getStacks();
+                if (stacks == null) {
+                    continue;
+                }
+                for (com.lowdragmc.lowdraglib.side.fluid.FluidStack st : stacks) {
+                    if (st != null && !st.isEmpty() && st.getFluid() != null) {
+                        fluids.add(st.getFluid());
+                    }
+                }
+            } catch (Throwable ignored) {
+                // 单条 content 读不出来就跳过（与物品侧同款容错）
+            }
+        }
+        return fluids;
     }
 
     /**
@@ -436,6 +634,156 @@ public final class ShanhaiRecipeReverseIndex {
             }
         }
         return out;
+    }
+
+    // ------------------------------------------------------------- 🆕 第 14 刀：流体侧
+
+    /**
+     * 「哪些配方的【输入】里用到这种流体」（＝第一面那个框放流体时的「作为物品的用处」）。
+     *
+     * <p>语义见 {@link #BY_FLUID_IN} 的类文档：键是 {@link Fluid} 本体，
+     * <b>不带</b> NBT/数量/chance，也不区分"消耗"与"催化剂"。
+     */
+    public static List<GTRecipe> queryFluidInput(MinecraftServer server, Fluid fluid) {
+        ensure(server);
+        if (verifiedFluidIn) {
+            return queryFluidViaIndex(BY_FLUID_IN, fluid);
+        }
+        ShanhaiMod.LOGGER.warn("{} reverse_query_fluid_in_fallback_to_linear fluid={} reason={}",
+                PREFIX, fluidIdOf(fluid), fluidInDiagnosis);
+        return linearQueryByFluids(server, fluid, false);
+    }
+
+    /** 「哪些配方的【输出】里有这种流体」（＝「获取途径」）。 */
+    public static List<GTRecipe> queryFluidOutput(MinecraftServer server, Fluid fluid) {
+        ensure(server);
+        if (verifiedFluidOut) {
+            return queryFluidViaIndex(BY_FLUID_OUT, fluid);
+        }
+        ShanhaiMod.LOGGER.warn("{} reverse_query_fluid_out_fallback_to_linear fluid={} reason={}",
+                PREFIX, fluidIdOf(fluid), fluidOutDiagnosis);
+        return linearQueryByFluids(server, fluid, true);
+    }
+
+    /** 🔴 只走索引那条路（自检的对照拍用它；与 {@link #queryIndexOnly} 同一理由）。 */
+    public static List<GTRecipe> queryFluidInputIndexOnly(Fluid fluid) {
+        return queryFluidViaIndex(BY_FLUID_IN, fluid);
+    }
+
+    /** 🔴 只走索引那条路（输出侧）。 */
+    public static List<GTRecipe> queryFluidOutputIndexOnly(Fluid fluid) {
+        return queryFluidViaIndex(BY_FLUID_OUT, fluid);
+    }
+
+    private static List<GTRecipe> queryFluidViaIndex(Map<Fluid, int[]> table, Fluid fluid) {
+        final int[] idx = fluid == null ? null : table.get(fluid);
+        if (idx == null) {
+            return List.of();
+        }
+        final List<GTRecipe> out = new ArrayList<>(idx.length);
+        for (int i : idx) {
+            if (i >= 0 && i < RECIPES.size()) {
+                out.add(RECIPES.get(i));
+            }
+        }
+        return out;
+    }
+
+    /**
+     * <b>与流体索引同语义</b>的线性对照（自证用）。
+     *
+     * <p>与建表那段是<b>两份独立实现</b>：这里直接读 {@code GTRecipe.inputs/outputs} 那张 public 表
+     * （不走 {@code getInputContents}），否则两边都由同一段代码算出来 ⇒ 永远自洽、永远查不出问题。
+     * 判据与物品侧同款：{@code FluidIngredient.test(该流体的一桶)} 太严（它还要看 tag/NBT），
+     * 所以这里用的是"这个 ingredient 的候选里有没有这种流体"这一条同语义判据。
+     */
+    public static List<GTRecipe> linearQueryByFluids(MinecraftServer server, Fluid fluid, boolean output) {
+        final List<GTRecipe> out = new ArrayList<>();
+        if (server == null || fluid == null) {
+            return out;
+        }
+        for (var r : server.getRecipeManager().getRecipes()) {
+            if (!(r instanceof GTRecipe gt)) {
+                continue;
+            }
+            boolean hit = false;
+            final List<Content> contents = output
+                    ? gt.outputs.get(FluidRecipeCapability.CAP)
+                    : gt.inputs.get(FluidRecipeCapability.CAP);
+            if (contents != null) {
+                for (Content c : contents) {
+                    try {
+                        if (c == null || c.content == null) {
+                            continue;
+                        }
+                        if (c.content instanceof com.lowdragmc.lowdraglib.side.fluid.FluidStack fs) {
+                            if (!fs.isEmpty() && fs.getFluid() == fluid) {
+                                hit = true;
+                                break;
+                            }
+                            continue;
+                        }
+                        final FluidIngredient ing = FluidRecipeCapability.CAP.of(c.content);
+                        if (ing == null) {
+                            continue;
+                        }
+                        final com.lowdragmc.lowdraglib.side.fluid.FluidStack[] stacks = ing.getStacks();
+                        if (stacks == null) {
+                            continue;
+                        }
+                        for (com.lowdragmc.lowdraglib.side.fluid.FluidStack st : stacks) {
+                            if (st != null && !st.isEmpty() && st.getFluid() == fluid) {
+                                hit = true;
+                                break;
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                        // 单条 content 读不出来就跳过（与建表那边同款容错）
+                    }
+                    if (hit) {
+                        break;
+                    }
+                }
+            }
+            if (hit) {
+                out.add(gt);
+            }
+        }
+        return out;
+    }
+
+    /** 流体输入索引里的条目数（读数用）。 */
+    public static int fluidInputEntryCount() {
+        return fluidInEntries;
+    }
+
+    /** 流体输出索引里的条目数（读数用）。 */
+    public static int fluidOutputEntryCount() {
+        return fluidOutEntries;
+    }
+
+    public static boolean isFluidInputVerified() {
+        return verifiedFluidIn;
+    }
+
+    public static boolean isFluidOutputVerified() {
+        return verifiedFluidOut;
+    }
+
+    /** 流体自证的诊断行（读数用）。 */
+    public static String fluidDiagnosisLine() {
+        return "in=" + fluidInDiagnosis + " out=" + fluidOutDiagnosis
+                + " probe_in=" + probeFluidInId + "(" + probeFluidInIndexHits + "/" + probeFluidInLinearHits + ")"
+                + " probe_out=" + probeFluidOutId + "(" + probeFluidOutIndexHits + "/" + probeFluidOutLinearHits + ")";
+    }
+
+    /** 流体 id（读数的统一口径）。 */
+    public static String fluidIdOf(Fluid fluid) {
+        if (fluid == null) {
+            return "?";
+        }
+        final ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(fluid);
+        return id == null ? "?" : id.toString();
     }
 
     // ------------------------------------------------------------- 🆕 第 7 轮：文本搜索的平行表

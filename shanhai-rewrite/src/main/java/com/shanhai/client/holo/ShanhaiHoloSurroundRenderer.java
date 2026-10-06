@@ -203,6 +203,12 @@ public final class ShanhaiHoloSurroundRenderer {
         if (disabled) {
             return false;
         }
+        // 🔴 2026-10-06（第二轮）：「关」档 = 这一帧【一个顶点都不发】。
+        //    这是"环绕特效 = 关"那句话在渲染侧的唯一落点（几何核里另有一条同样的短路，
+        //    两条独立：即便有人绕开渲染器直接调几何核，也是 0 顶点）。
+        if (!ShanhaiHoloSurroundTuning.drawEnabled()) {
+            return false;
+        }
         try {
             return doRender(event, buffers, viewMatrix,
                     playerX, playerY, playerZ,

@@ -673,7 +673,10 @@ public final class ShanhaiHoloMenuRenderer {
             if (text == null || text.isEmpty()) {
                 continue;
             }
-            final boolean isLabel = cell == 0;
+            // 🆕 2026-10-06（第二轮）："格 0 是不是标签"改成问面板 —— 「环绕特效」那一行的
+            //    格 0 是【一颗按钮】（「关」），「高级调参」那一行的格 0 也是（整行可点）。
+            //    写死 `cell == 0` 会把它们画成标签色/标签字号。
+            final boolean isLabel = ShanhaiHoloMenuPanel.isLabelCell(panelMode, row, cell);
             // 🆕 命令面板的【输入框】那一行：字号更大 + 空的时候用暗色（那句话是占位符，不是你打的字）。
             final boolean isCommandInput = panelMode == ShanhaiHoloMenuPanel.MODE_COMMAND
                     && row == ShanhaiHoloMenuPanel.COMMAND_INPUT_ROW && isLabel;
