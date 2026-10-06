@@ -213,7 +213,7 @@ public final class ShanhaiIOWidget extends Widget implements IGhostIngredientTar
      * <p>拿不到贴图（没装渲染扩展 / 该流体没有 still 贴图）时退回"纯色块"，
      * <b>绝不静默画成空白</b>。
      */
-    private static void drawFluidSprite(GuiGraphics g, FluidStack stack, int x, int y) {
+    static void drawFluidSprite(GuiGraphics g, FluidStack stack, int x, int y) {
         ResourceLocation still = null;
         int tint = 0xFFFFFFFF;
         try {
@@ -253,8 +253,8 @@ public final class ShanhaiIOWidget extends Widget implements IGhostIngredientTar
      *
      * @param alignRight true = 文本右边缘贴 {@code (ax, ay)}；false = 左边缘贴
      */
-    private static void smallText(GuiGraphics g, Minecraft mc, String text, int ax, int ay,
-                                  int color, boolean alignRight) {
+    static void smallText(GuiGraphics g, Minecraft mc, String text, int ax, int ay,
+                          int color, boolean alignRight) {
         if (text == null || text.isEmpty()) {
             return;
         }
@@ -345,7 +345,7 @@ public final class ShanhaiIOWidget extends Widget implements IGhostIngredientTar
     }
 
     /** {@code 1000 → 1B}、{@code 144 → 144}（只用于格子角上的小字）。 */
-    private static String shortAmount(long mb) {
+    static String shortAmount(long mb) {
         if (mb >= 1000L) {
             final long b = mb / 1000L;
             return b >= 1000L ? (b / 1000L) + "kB" : b + "B";
@@ -470,7 +470,7 @@ public final class ShanhaiIOWidget extends Widget implements IGhostIngredientTar
      * <p>现场读数支持这条：用户实例日志 {@code io_drag_offer=0}、{@code io_offer_applied=0}，
      * 而同一次会话 {@code io_clear_applied=1}（右键删格子是通的）。
      */
-    private static Object normalize(Object ingredient, boolean itemKind) {
+    static Object normalize(Object ingredient, boolean itemKind) {
         // ① JEI 的标准形状：先拆 ITypedIngredient（这是 LDLib 实际递进来的那个）
         final Object unwrapped = unwrapTyped(ingredient);
         if (itemKind) {
@@ -488,6 +488,24 @@ public final class ShanhaiIOWidget extends Widget implements IGhostIngredientTar
         // ② Forge 的 FluidStack ⇒ LDLib 的 FluidStack（LDLib 自己那条转换，不自己拼）
         final Object wrapped = com.lowdragmc.lowdraglib.gui.widget.PhantomFluidWidget.checkJEIIngredient(unwrapped);
         return wrapped instanceof FluidStack fluid && !fluid.isEmpty() ? fluid : null;
+    }
+
+    /**
+     * 🆕 2026-10-06（第 14 刀）：把 JEI 递进来的一坨东西剥成<b>物品栈或流体栈</b>（两样都收）。
+     *
+     * <p>存在的理由：第一面那个查询框原先只认物品（用户原话「<b>无法拖动流体到查询物品框中</b>」），
+     * 而"JEI 的壳怎么剥 + Forge 流体怎么转成 LDLib 流体"这件事在本类里<b>已经验证过一遍</b>
+     * （IO 格子那条链，见上面 {@link #normalize} 的整段取证）⇒ 直接复用，不另写一份
+     * （本工程的纪律：已有且已验证的转换不许重写）。
+     *
+     * @return {@code ItemStack} 或 {@code FluidStack}；两样都不是 ⇒ {@code null}
+     */
+    static Object normalizeAny(Object ingredient) {
+        final Object item = normalize(ingredient, true);
+        if (item != null) {
+            return item;
+        }
+        return normalize(ingredient, false);
     }
 
     /** {@code ITypedIngredient} ⇒ 它里面那个原料对象；不是的话原样返回。 */

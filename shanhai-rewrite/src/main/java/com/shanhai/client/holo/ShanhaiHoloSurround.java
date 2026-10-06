@@ -19,7 +19,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
  * 而游戏里那个 Sink 换成"真的写顶点"的实现即可 —— <b>两条路走的是同一份几何代码</b>。
  *
  * <h2>1. 🔴 与 HTML 规格的对应关系（一个公式都没有重新发明）</h2>
- * 参考实现：{@code C:\Users\david\Desktop\山海HTML\17-全息环绕-结合版.html}。
+ * 参考实现：{@code 17-全息环绕-结合版.html}（本地预览页）。
  * 本类里每个函数名后面都标了它在 HTML 里对应的那一个，参数全部取自
  * {@link ShanhaiHoloSurroundTuning}。
  *
@@ -46,24 +46,83 @@ public final class ShanhaiHoloSurround {
 
     private ShanhaiHoloSurround() {}
 
-    /** 转调参数类，纯粹为了少打几个字（不复制任何数值）。 */
+    /**
+     * 转调参数类，纯粹为了少打几个字。
+     *
+     * <p>🔴 <b>2026-10-06（第二轮）：那 14 个"可调项"从常量改成了方法</b>。
+     * 原因是编译期常量会被 javac 内联到每一个调用点 ⇒ 运行期改不动（见
+     * {@link ShanhaiHoloSurroundTuning} §十 的那整段说明）。
+     * 现在它们一律现读 {@link ShanhaiHoloSurroundTuning#param(int)}，
+     * <b>存值的地方只有一处</b>（那个 LIVE 数组），所以"面板里改的"与"渲染用的"不可能漂。
+     * <p>⚠️ 不是可调项的那些（硬夹上限、禁区宽度、最小亮度…）照旧是常量 ——
+     * 它们是<b>物理约束</b>，不是美术参数。
+     */
     private static final class T {
-        static final int RING_COUNT = ShanhaiHoloSurroundTuning.RING_COUNT;
-        static final float RING_SCALE = ShanhaiHoloSurroundTuning.RING_SCALE;
-        static final float RING_BRIGHT = ShanhaiHoloSurroundTuning.RING_BRIGHT;
-        static final float RING_TICK_DENSITY = ShanhaiHoloSurroundTuning.RING_TICK_DENSITY;
-        static final float RING_FLOW_SCALE = ShanhaiHoloSurroundTuning.RING_FLOW_SCALE;
-        static final float RING_PRECESS_SCALE = ShanhaiHoloSurroundTuning.RING_PRECESS_SCALE;
+        static int RING_COUNT() {
+            return ShanhaiHoloSurroundTuning.paramInt(ShanhaiHoloSurroundTuning.P_RING_COUNT);
+        }
+
+        static float RING_SCALE() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_RING_SCALE);
+        }
+
+        static float RING_BRIGHT() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_RING_BRIGHT);
+        }
+
+        static float RING_TICK_DENSITY() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_RING_TICK_DENSITY);
+        }
+
+        static float RING_FLOW_SCALE() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_RING_FLOW_SCALE);
+        }
+
+        static float RING_PRECESS_SCALE() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_RING_PRECESS_SCALE);
+        }
+
+        static int FIELD_POINT_COUNT() {
+            return ShanhaiHoloSurroundTuning.paramInt(ShanhaiHoloSurroundTuning.P_FIELD_POINT_COUNT);
+        }
+
+        static float FIELD_INNER() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_FIELD_INNER);
+        }
+
+        static float FIELD_OUTER() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_FIELD_OUTER);
+        }
+
+        static float FIELD_LINK() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_FIELD_LINK_THRESHOLD);
+        }
+
+        static int FIELD_LINK_MAX() {
+            return ShanhaiHoloSurroundTuning.paramInt(
+                    ShanhaiHoloSurroundTuning.P_FIELD_LINK_MAX_PER_POINT);
+        }
+
+        static float FIELD_LINK_PERIOD() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_FIELD_LINK_PERIOD);
+        }
+
+        static float FIELD_BRIGHT() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_FIELD_BRIGHT);
+        }
+
+        static float GLOBAL_BRIGHT() {
+            return ShanhaiHoloSurroundTuning.param(ShanhaiHoloSurroundTuning.P_GLOBAL_BRIGHT);
+        }
+
+        static float FIELD_FOLLOW_TAU() {
+            return ShanhaiHoloSurroundTuning.param(
+                    ShanhaiHoloSurroundTuning.P_FIELD_FOLLOW_TAU);
+        }
+
         static final float RING_MAX_R = ShanhaiHoloSurroundTuning.RING_MAX_RADIUS_BLOCKS;
-        static final float FIELD_INNER = ShanhaiHoloSurroundTuning.FIELD_INNER_RADIUS_BLOCKS;
-        static final float FIELD_OUTER = ShanhaiHoloSurroundTuning.FIELD_OUTER_RADIUS_BLOCKS;
         static final float FIELD_GAP = ShanhaiHoloSurroundTuning.FIELD_INNER_GAP_BLOCKS;
         static final float FIELD_MIN_THICK = ShanhaiHoloSurroundTuning.FIELD_MIN_SHELL_THICKNESS_BLOCKS;
-        static final float FIELD_LINK = ShanhaiHoloSurroundTuning.FIELD_LINK_THRESHOLD_BLOCKS;
-        static final int FIELD_LINK_MAX = ShanhaiHoloSurroundTuning.FIELD_LINK_MAX_PER_POINT;
-        static final float FIELD_LINK_PERIOD = ShanhaiHoloSurroundTuning.FIELD_LINK_PERIOD_SEC;
-        static final float FIELD_BRIGHT = ShanhaiHoloSurroundTuning.FIELD_BRIGHT;
-        static final float GLOBAL_BRIGHT = ShanhaiHoloSurroundTuning.GLOBAL_BRIGHT;
         static final float FACE_CLEAR = ShanhaiHoloSurroundTuning.BOARD_FACE_CLEARANCE_BLOCKS;
         static final float EDGE_FADE = ShanhaiHoloSurroundTuning.BOARD_EDGE_FADE_BLOCKS;
         static final float CULL = ShanhaiHoloSurroundTuning.CULL_FADE;
@@ -72,6 +131,31 @@ public final class ShanhaiHoloSurround {
         static final float MIN_R = ShanhaiHoloSurroundTuning.MIN_RADIUS_BLOCKS;
 
         private T() {}
+    }
+
+    // ==================================================================== 一、🆕 四档预设（面板 / 日志的统一入口）
+
+    /**
+     * 当前档位号（{@code 0..3} = 关 / 弱 / 中 / 强）。真正的存值处在
+     * {@link ShanhaiHoloSurroundTuning}，本类只做转发 —— 面板、输入层、渲染器读的都是同一个数。
+     */
+    public static int preset() {
+        return ShanhaiHoloSurroundTuning.preset();
+    }
+
+    /** 切档（整组替换；「关」只置档、不动 14 项取值）。 */
+    public static int setPreset(int next) {
+        return ShanhaiHoloSurroundTuning.setPreset(next);
+    }
+
+    /** 高级页那一颗 ± ：{@code dir = +1 / −1}；返回值已经钳在安全区间内。 */
+    public static float nudgeParam(int idx, int dir) {
+        return ShanhaiHoloSurroundTuning.nudge(idx, dir);
+    }
+
+    /** 第 idx 项当前生效值（面板显示与日志读它）。 */
+    public static float param(int idx) {
+        return ShanhaiHoloSurroundTuning.param(idx);
     }
 
     /** 光点数组的固定容量（= HTML 的 {@code FN = 200}）—— 预分配上限，滑块拖小也不重新分配。 */
@@ -220,6 +304,9 @@ public final class ShanhaiHoloSurround {
     private static final double[] PROJ_OUT = new double[3];
     private static final float[] SHELL_OUT = new float[2];
 
+    /** {@link #fieldCenter()} 的出口（共享数组，不每帧新建）。 */
+    private static final double[] FIELD_CENTER_OUT = new double[3];
+
     /** 每条环算一遍的基（半径 / 圆心 / 自转与倾角的三角值）。 */
     private static final class RingBasis {
         double r, cx, cy, cz, cs, sn, ct, st;
@@ -281,12 +368,12 @@ public final class ShanhaiHoloSurround {
      * <p>HTML {@code ringRadius(R) = Math.min(R.r * TUNE.ringScale, RING_MAX_R)}。
      */
     public static float ringRadius(ShanhaiHoloSurroundTuning.RingSpec spec) {
-        return (float) Math.min(spec.r() * (double) T.RING_SCALE, (double) T.RING_MAX_R);
+        return (float) Math.min(spec.r() * (double) T.RING_SCALE(), (double) T.RING_MAX_R);
     }
 
     /** 生效的环（前 {@code RING_COUNT} 条）。 */
     public static int activeRingCount() {
-        int n = Math.round(T.RING_COUNT);
+        int n = Math.round(T.RING_COUNT());
         if (n < 0) {
             n = 0;
         }
@@ -316,8 +403,8 @@ public final class ShanhaiHoloSurround {
                 rm = r;
             }
         }
-        final double inner = Math.max((double) T.FIELD_INNER, rm + (double) T.FIELD_GAP);
-        final double outer = Math.max(inner + (double) T.FIELD_MIN_THICK, (double) T.FIELD_OUTER);
+        final double inner = Math.max((double) T.FIELD_INNER(), rm + (double) T.FIELD_GAP);
+        final double outer = Math.max(inner + (double) T.FIELD_MIN_THICK, (double) T.FIELD_OUTER());
         SHELL_OUT[0] = (float) inner;
         SHELL_OUT[1] = (float) outer;
         return SHELL_OUT;
@@ -337,6 +424,13 @@ public final class ShanhaiHoloSurround {
         f.ringSegments = 0;
         f.fieldLinks = 0;
         f.fieldDots = 0;
+        // 🔴 2026-10-06（第二轮）：「关」档 = 【跳过整个绘制遍】。
+        //    判据在渲染器那一层也有一条（它直接不发顶点），这里是几何核自己的那条 ——
+        //    离线装置（CountingSink）因此也会读到 0 个顶点，不会出现"装置说画了、游戏没画"。
+        //    ⚠️ 只跳绘制：14 项取值与点场状态<b>一个数都不动</b> ⇒ 切回来现场还在。
+        if (!ShanhaiHoloSurroundTuning.drawEnabled()) {
+            return;
+        }
         updateBoardGeometry(f);
         fieldAdvance(f);
         emitRings(f, sink);
@@ -563,7 +657,7 @@ public final class ShanhaiHoloSurround {
     private static void ringBasis(Frame f, ShanhaiHoloSurroundTuning.RingSpec spec) {
         final RingBasis b = BASIS;
         b.r = ringRadius(spec);
-        final double sp = T.RING_PRECESS_SCALE;
+        final double sp = T.RING_PRECESS_SCALE();
         final double spin = spec.spin0() + spec.spinV() * sp * f.tSec;
         final double tilt = spec.tilt() + spec.tiltAmp() * sp * Math.sin(f.tSec * 0.31 * sp + spec.phase());
         b.cs = Math.cos(spin);
@@ -605,15 +699,15 @@ public final class ShanhaiHoloSurround {
     private static double flowAngle(ShanhaiHoloSurroundTuning.RingSpec spec, int j, int fn, float tSec) {
         final double step = Math.PI * 2.0 / Math.max(1, fn);
         return spec.phase() + j * step
-                + tSec * (double) spec.flowV() * (0.4 + 0.6 * (double) T.RING_PRECESS_SCALE);
+                + tSec * (double) spec.flowV() * (0.4 + 0.6 * (double) T.RING_PRECESS_SCALE());
     }
 
     private static int flowCount(ShanhaiHoloSurroundTuning.RingSpec spec) {
-        return Math.round(spec.flowN() * T.RING_FLOW_SCALE);
+        return Math.round(spec.flowN() * T.RING_FLOW_SCALE());
     }
 
     private static void emitRings(Frame f, Sink sink) {
-        final float bright = T.RING_BRIGHT * T.GLOBAL_BRIGHT * f.globalAlpha;
+        final float bright = T.RING_BRIGHT() * T.GLOBAL_BRIGHT() * f.globalAlpha;
         if (bright <= T.MIN_BRIGHT) {
             return;
         }
@@ -656,7 +750,7 @@ public final class ShanhaiHoloSurround {
         f.ringSegments += ShanhaiHoloSurroundTuning.RING_ARCS * ShanhaiHoloSurroundTuning.RING_ARC_SEGMENTS;
 
         // ② 刻度（短刻度与环体同款；长刻度单独一套颜色/线宽）
-        final int tickN = Math.round(spec.tickN() * T.RING_TICK_DENSITY);
+        final int tickN = Math.round(spec.tickN() * T.RING_TICK_DENSITY());
         if (tickN >= ShanhaiHoloSurroundTuning.RING_TICK_MIN_COUNT) {
             for (int k = 0; k < tickN; k++) {
                 final double th = k * Math.PI * 2.0 / tickN;
@@ -811,13 +905,43 @@ public final class ShanhaiHoloSurround {
         pairOverflow = 0;
     }
 
+    /**
+     * 点场中心的<b>世界坐标</b>（= {@link #fieldAdvance} 里那个被平滑过的量）。
+     *
+     * <p>🔴 它存在的唯一理由是"可量"：2026-10-06 16:2x 用户报
+     * 「类似北斗七星的渲染完全跟不上玩家的速度」—— 要判定"到底哪一层在滞后、滞后几格"，
+     * 就得能把点场中心与玩家位置<b>各自读出来相减</b>，而不是靠读代码推断那条时间常数。
+     * 离线装置（{@code temp/holo-verify} 的 {@code SurroundProbe} 第 10 段）用它做正/负对照。
+     *
+     * <p>同 {@link #shellRadii()} 的约定：返回<b>共享的</b>临时数组，只读、别存起来。
+     *
+     * @return {@code [x, y, z]}（世界坐标，格）
+     */
+    public static double[] fieldCenter() {
+        FIELD_CENTER_OUT[0] = fieldCX;
+        FIELD_CENTER_OUT[1] = fieldCY;
+        FIELD_CENTER_OUT[2] = fieldCZ;
+        return FIELD_CENTER_OUT;
+    }
+
     /** HTML {@code effectUpdate(dt, t)}。 */
     public static void fieldAdvance(Frame f) {
         if (!fieldReady) {
             fieldReset(f);
         }
         final double dt = f.dtSec;
-        final double k = 1.0 - Math.exp(-dt / ShanhaiHoloSurroundTuning.FIELD_FOLLOW_TAU_SEC);
+        // 🔴 2026-10-06 16:2x（用户第 ④ 条：「类似北斗七星的渲染完全跟不上玩家的速度」）：
+        //    这一条的 τ 原来是【编译期内联的常量 1.15 秒】⇒ 玩家一跑，这整片星尘就拖在身后
+        //    ≈ 5 格/秒 × 1.15 秒 = 5.75 格（离线装置实测读数，见 temp/holo-verify 的
+        //    SurroundProbe 第 10 段）。现在它走【运行期生效的那一份】{@link T#FIELD_FOLLOW_TAU()}，
+        //    出厂值改成「即时」，用户想回"慢慢飘"就在高级调参页把这一项拨大。
+        //
+        // ⚠️ τ ≤ 0 必须【短路】，不许直接算 1 − exp(−dt/τ)：dt 与 τ 同时为 0 时是 0/0 = NaN，
+        //    会把点场中心毒成 NaN（之后每一次 render 都是 NaN，整层再也画不出来）。
+        //    这条约定与 {@code ShanhaiHoloMenuState#smoothPos} 逐字一致（τ ≤ 0 ⇒ 瞬时贴合）。
+        final float tau = T.FIELD_FOLLOW_TAU();
+        final double k = tau <= 0.0f ? 1.0
+                : (dt <= 0.0 ? 0.0 : 1.0 - Math.exp(-dt / tau));
         fieldCX += (f.playerX - fieldCX) * k;
         fieldCY += (f.playerY + ShanhaiHoloSurroundTuning.FIELD_CENTER_Y_BLOCKS - fieldCY) * k;
         fieldCZ += (f.playerZ - fieldCZ) * k;
@@ -863,8 +987,8 @@ public final class ShanhaiHoloSurround {
 
     /** HTML {@code drawField(t)}。 */
     private static void emitField(Frame f, Sink sink) {
-        final float bright = T.FIELD_BRIGHT * T.GLOBAL_BRIGHT * f.globalAlpha;
-        final int n = clampInt(Math.round(ShanhaiHoloSurroundTuning.FIELD_POINT_COUNT), 0, FIELD_CAPACITY);
+        final float bright = T.FIELD_BRIGHT() * T.GLOBAL_BRIGHT() * f.globalAlpha;
+        final int n = clampInt(Math.round(T.FIELD_POINT_COUNT()), 0, FIELD_CAPACITY);
         if (bright <= T.MIN_BRIGHT || n == 0) {
             return;
         }
@@ -872,8 +996,8 @@ public final class ShanhaiHoloSurround {
         final double outer = shell[1];
 
         // 呼吸：连线阈值上下摆（周期 = FIELD_LINK_PERIOD_SEC 秒，见参数类里的那段备案）
-        final double per = Math.PI * 2.0 / Math.max(0.001, (double) T.FIELD_LINK_PERIOD);
-        final double lk = T.FIELD_LINK * (1.0 + ShanhaiHoloSurroundTuning.FIELD_LINK_BREATH_AMP
+        final double per = Math.PI * 2.0 / Math.max(0.001, (double) T.FIELD_LINK_PERIOD());
+        final double lk = T.FIELD_LINK() * (1.0 + ShanhaiHoloSurroundTuning.FIELD_LINK_BREATH_AMP
                 * Math.sin(f.tSec * per));
         final double lk2 = lk * lk;
 
@@ -932,7 +1056,7 @@ public final class ShanhaiHoloSurround {
         }
 
         // ---- 从近到远贪心接线，每点最多 FIELD_LINK_MAX_PER_POINT 条 ----
-        final int cap = Math.max(1, Math.round(T.FIELD_LINK_MAX));
+        final int cap = Math.max(1, Math.round(T.FIELD_LINK_MAX()));
         for (int i = 0; i < n; i++) {
             DEGREE[i] = 0;
         }
@@ -1191,12 +1315,12 @@ public final class ShanhaiHoloSurround {
         double rm = 0.0;
         for (int i = 0; i < n; i++) {
             final ShanhaiHoloSurroundTuning.RingSpec s = ShanhaiHoloSurroundTuning.RING_TABLE[i];
-            final double raw = s.r() * (double) T.RING_SCALE;
+            final double raw = s.r() * (double) T.RING_SCALE();
             final double eff = ringRadius(s);
             final boolean clamped = raw > (double) T.RING_MAX_R + 1.0e-6;
             sb.append(String.format(java.util.Locale.ROOT,
                     "  环%d y=%.2f 表内半径=%.3f ×%.2f = %.4f ⇒ 生效 %.4f%s%n",
-                    i + 1, s.y(), s.r(), T.RING_SCALE, raw, eff,
+                    i + 1, s.y(), s.r(), T.RING_SCALE(), raw, eff,
                     clamped ? "   ← 被 1.75 硬夹住了" : ""));
             if (eff > rm) {
                 rm = eff;
@@ -1205,7 +1329,7 @@ public final class ShanhaiHoloSurround {
         final float[] shell = shellRadii();
         sb.append(String.format(java.util.Locale.ROOT,
                 "  环最大半径=%.4f ⇒ 壳层内半径 = max(%.2f, %.4f+%.2f) = %.4f ; 外半径 = %.4f%n",
-                rm, T.FIELD_INNER, rm, T.FIELD_GAP, shell[0], shell[1]));
+                rm, T.FIELD_INNER(), rm, T.FIELD_GAP, shell[0], shell[1]));
         sb.append("  两套不重叠（内半径 - 环最大半径 = "
                 + ShanhaiHoloSurroundTuning.fmt(shell[0] - (float) rm, 4) + " 格 ≥ 0.32）\n");
 
@@ -1319,7 +1443,129 @@ public final class ShanhaiHoloSurround {
 
         sb.append("--- I. 实测剔除率（规则 ③-① 一共挡掉多少；判据不许是「恒挡」）---\n");
         appendCullProbe(sb);
+        sb.append(appendPresetSection());
         return sb.toString();
+    }
+
+    /**
+     * 🆕 <b>J 段：四档预设（关 / 弱 / 中 / 强）与 14 项取值</b>。
+     *
+     * <pre>
+     *   ① 「中」档逐项 == 那 14 个出厂默认值（机器比对，逐条打印"第几项、值多少"）
+     *   ② 那一整套判据 —— {@link ShanhaiHoloSurroundTuning#presetSelfCheck()}（含 4 条负对照）
+     *   ③ 四档各自跑 300 帧，打"最坏一帧的顶点数 / 单批峰值"，证明最强档也远小于每帧容量
+     *   ④ 「关」档必须一个顶点都不发（跳过绘制遍）
+     * </pre>
+     * ✅ 这一节<b>跑完把档位放回原样</b>（自检不许改现场，同 {@code ShanhaiHoloMenuPanel} 那条口径）。
+     */
+    private static String appendPresetSection() {
+        final StringBuilder sb = new StringBuilder(4096);
+        final int savedPreset = ShanhaiHoloSurroundTuning.preset();
+        try {
+            sb.append("--- J. 四档预设（关 / 弱 / 中 / 强）+ 14 项运行期取值 ---\n");
+            sb.append("  ① 「中」档 == 14 个出厂默认值（逐项机器比对，不靠人看）：\n");
+            int same = 0;
+            for (int i = 0; i < ShanhaiHoloSurroundTuning.PARAM_COUNT; i++) {
+                final float def = ShanhaiHoloSurroundTuning.defaultOf(i);
+                final float mid = ShanhaiHoloSurroundTuning.PRESET_VALUES
+                        [ShanhaiHoloSurroundTuning.PRESET_MID][i];
+                final boolean eq = Float.compare(def, mid) == 0;
+                if (eq) {
+                    same++;
+                }
+                sb.append(String.format(java.util.Locale.ROOT,
+                        "     第 %2d 项 %-6s 中档=%-7s 出厂默认=%-7s %s%n",
+                        i + 1, ShanhaiHoloSurroundTuning.PARAM_NAME[i],
+                        ShanhaiHoloSurroundTuning.fmt(mid, 2),
+                        ShanhaiHoloSurroundTuning.fmt(def, 2), eq ? "✓ 相同" : "✗ 不同"));
+            }
+            sb.append("     ⇒ 「中」档 == 默认值：").append(same).append("/")
+                    .append(ShanhaiHoloSurroundTuning.PARAM_COUNT).append(" 项逐项相同\n");
+            sb.append("  ② 四档判据：").append(ShanhaiHoloSurroundTuning.presetSelfCheckLine())
+                    .append('\n');
+
+            sb.append("  ③ 每一档的每帧几何规模（真的跑 render()，同一张点场，各扫 300 帧取最大值）：\n");
+            final int[] verts = new int[ShanhaiHoloSurroundTuning.PRESET_COUNT];
+            final int[] peak = new int[ShanhaiHoloSurroundTuning.PRESET_COUNT];
+            for (int p = 0; p < ShanhaiHoloSurroundTuning.PRESET_COUNT; p++) {
+                ShanhaiHoloSurroundTuning.setPreset(p);
+                final int[] m = measureWorstFrame();
+                verts[p] = m[0];
+                peak[p] = m[1];
+                sb.append(String.format(java.util.Locale.ROOT,
+                        "     「%s」档：最坏一帧 线段 %d 条 + 光点 %d 个 = %d 顶点 = %d 字节 (%.1f KiB)"
+                                + "；单批峰值 %d 顶点 = %d 字节 (%.1f KiB)；切了 %d 批；候选点对溢出 %d%n",
+                        ShanhaiHoloSurroundTuning.presetName(p), m[2], m[3], m[0],
+                        m[0] * ShanhaiHoloSurroundTuning.BYTES_PER_VERTEX,
+                        m[0] * ShanhaiHoloSurroundTuning.BYTES_PER_VERTEX / 1024.0,
+                        m[1], m[1] * ShanhaiHoloSurroundTuning.BYTES_PER_VERTEX,
+                        m[1] * ShanhaiHoloSurroundTuning.BYTES_PER_VERTEX / 1024.0, m[4], m[5]));
+            }
+            // ④ 判据（三条，都是机器判定）
+            final int capacityVerts = ShanhaiHoloSurroundTuning.PER_FRAME_BUFFER_BYTES
+                    / ShanhaiHoloSurroundTuning.BYTES_PER_VERTEX;
+            sb.append(String.format(java.util.Locale.ROOT,
+                    "  ④ 判据①：「关」档必须一个顶点都不发（跳过绘制遍）—— 读数 %d 顶点 %s%n",
+                    verts[ShanhaiHoloSurroundTuning.PRESET_OFF],
+                    verts[ShanhaiHoloSurroundTuning.PRESET_OFF] == 0 ? "✓ PASS" : "✗ FAIL"));
+            sb.append(String.format(java.util.Locale.ROOT,
+                    "     判据②：最强档的总顶点 %d < 每帧容量参数 %d（那个 1<<14）%s%n",
+                    verts[ShanhaiHoloSurroundTuning.PRESET_STRONG],
+                    ShanhaiHoloSurroundTuning.PER_FRAME_BUFFER_CAPACITY,
+                    verts[ShanhaiHoloSurroundTuning.PRESET_STRONG]
+                            < ShanhaiHoloSurroundTuning.PER_FRAME_BUFFER_CAPACITY ? "✓ PASS" : "✗ FAIL"));
+            sb.append(String.format(java.util.Locale.ROOT,
+                    "     判据③（真正咬人的那条）：最强档的单批峰值 %d < 缓冲区装得下的顶点数 %d"
+                            + "（= %d 字节 ÷ %d 字节/顶点）%s%n",
+                    peak[ShanhaiHoloSurroundTuning.PRESET_STRONG], capacityVerts,
+                    ShanhaiHoloSurroundTuning.PER_FRAME_BUFFER_BYTES,
+                    ShanhaiHoloSurroundTuning.BYTES_PER_VERTEX,
+                    peak[ShanhaiHoloSurroundTuning.PRESET_STRONG] < capacityVerts ? "✓ PASS" : "✗ FAIL"));
+            return sb.toString();
+        } finally {
+            ShanhaiHoloSurroundTuning.setPreset(savedPreset);
+        }
+    }
+
+    /**
+     * 扫 300 帧，取"最坏那一帧"的读数。
+     *
+     * @return {@code [总顶点, 单批峰值顶点, 线段条数, 光点个数, 批数, 候选点对溢出]}
+     */
+    private static int[] measureWorstFrame() {
+        final CountingSink probe = new CountingSink();
+        int worstVerts = 0;
+        int worstBatch = 0;
+        int worstSegs = 0;
+        int worstDots = 0;
+        int batches = 0;
+        int maxOverflow = 0;
+        resetForTest();                     // 同一张可复现的点场，各档之间才可比
+        final Frame fc = scenario(0.0f);
+        for (int frame = 0; frame < 300; frame++) {
+            fc.tSec = frame / 60.0f;
+            fc.dtSec = 1.0f / 60.0f;
+            probe.begin();
+            render(fc, probe);
+            probe.finish();
+            if (probe.totalVerts() > worstVerts) {
+                worstVerts = probe.totalVerts();
+            }
+            if (probe.maxBatchVerts > worstBatch) {
+                worstBatch = probe.maxBatchVerts;
+            }
+            if (probe.segments > worstSegs) {
+                worstSegs = probe.segments;
+            }
+            if (probe.dots > worstDots) {
+                worstDots = probe.dots;
+            }
+            batches = probe.batches;
+            if (pairOverflow() > maxOverflow) {
+                maxOverflow = pairOverflow();
+            }
+        }
+        return new int[]{worstVerts, worstBatch, worstSegs, worstDots, batches, maxOverflow};
     }
 
     /** HTML 那次 bug 的观感是"整层不见了" ⇒ 这里直接量"到底被挡掉多少"。 */

@@ -31,7 +31,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
  * <h2>2. 数值出处（不是拍的）</h2>
  * <ul>
  *   <li><b>板内排版、四角括号、序号+分隔线、描边/扫描线/色散</b> —— 逐值取自
- *       {@code C:\Users\david\Desktop\山海HTML\10-全息主菜单-甲案-全息投影台.html}
+ *       {@code 10-全息主菜单-甲案-全息投影台.html}（本地预览页）
  *       的 {@code .slab / .idx / .zh / .en / .br} 规则（只读参考资料，未改动它）。</li>
  *   <li><b>{@link #BOARD_SCALE}</b> = {@code {0.965, 0.99, 1.0, 0.985, 0.96}}
  *       —— 逐字抄甲案的 {@code --sc}（两端板略小）。</li>

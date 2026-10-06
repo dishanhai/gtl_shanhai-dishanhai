@@ -6,6 +6,7 @@ import com.lowdragmc.lowdraglib.gui.ingredient.IGhostIngredientTarget;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SelectorWidget;
+import com.lowdragmc.lowdraglib.gui.widget.TextFieldWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.utils.Position;
@@ -636,14 +637,47 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         //    非 GT 屏最多 9 格（1 页），留着只会显示"输入 1/1 (9 格)"这种噪音，
         //    而且那块位置要给"3×3 网格 ＋ 宽高按钮"用。
         //    ⚠️ 输出那一对【保持原样】（产物还是走原来那一套）。
-        addEditButton(IN_X, PAGE_Y, 20, "§f◀", cd -> onInPage(false), gtOnly);
-        addEditButton(IN_X + 24, PAGE_Y, 20, "§f▶", cd -> onInPage(true), gtOnly);
-        addEditLabel(IN_X + 50, PAGE_Y + 5, () -> "§7输入 §f" + (session.inPage() + 1) + "§7/§f"
-                + session.inPageCount() + " §8(" + session.ioTable().inSection() + " 格)", gtOnly);
-        addEditButton(OUT_X, PAGE_Y, 20, "§f◀", cd -> onOutPage(false), gtOnly);
-        addEditButton(OUT_X + 24, PAGE_Y, 20, "§f▶", cd -> onOutPage(true), gtOnly);
-        addEditLabel(OUT_X + 50, PAGE_Y + 5, () -> "§7输出 §f" + (session.outPage() + 1) + "§7/§f"
-                + session.outPageCount() + " §8(" + session.ioTable().outSection() + " 格)", gtOnly);
+        //
+        //    🔴🔴 2026-10-06（第 15 刀）：一行里多了"看得见的跳页"（用户点单，逐字：
+        //      「还有就是有些配方真的会超出5页，这个页数你也可以添加一下」
+        //       「如果这样改了可能会有上百页的，3我也选一下」）。
+        //    放开那个 128 之后，他本机那条 creative_all_items_gen 的输出栏是 621 页 ⇒
+        //    一页页点等于没有，所以每栏给四颗按钮 ＋ 一个页码框：
+        //      ◀ 一次一页 · 首页 · 末页 · [页码框] 直接填第 N 页（1 起）
+        //    用「首页/末页」这两个词而不是符号，是照第二屏那一排公共翻页行的写法
+        //    （用户在那儿已经认识这两个词了；符号还得靠猜）。
+        //    宽度是按"两栏各自的格子区宽度"算过的（见下面 x 值）：
+        //      左栏 6..150（右边 176 起）· 右栏 176..336（面板 340）
+        //      ⇒ 整行占 x0+0 .. x0+154：左栏到 160、右栏到 330，两栏都不会溢出。
+        //    ⚠️ 原来那一行里的 "§8(N 格)" 拿掉了：同一个数在下面 CAP_Y 那行
+        //      （「物品入 9 · 流体入 1 · 物品出 19862 · 流体出 3」）本来就写着，
+        //      而 621 页那一行必须给页码框腾位置（"输入/输出"这几个字则由
+        //      y=38 的分栏标题和格子颜色区分，信息一条都没少）。
+        addEditButton(IN_X, PAGE_Y, 16, "§f◀", cd -> onInPage(false), gtOnly);
+        addEditButton(IN_X + 18, PAGE_Y, 16, "§f▶", cd -> onInPage(true), gtOnly);
+        addPageButton(IN_X + 36, PAGE_Y, 30, "§f首页", cd -> onInPageEdge(false))
+                .setHoverTooltips(tip(PAGE_TIP_IN));
+        addPageButton(IN_X + 68, PAGE_Y, 30, "§f末页", cd -> onInPageEdge(true))
+                .setHoverTooltips(tip(PAGE_TIP_IN));
+        final Widget inJump = new TextFieldWidget(IN_X + 100, PAGE_Y + 2, 22, 16,
+                () -> String.valueOf(session.inPage() + 1),
+                this::onInPageTyped);
+        inJump.setHoverTooltips(tip(PAGE_TIP_IN));
+        addEdit(inJump, gtOnly);
+        addEditLabel(IN_X + 124, PAGE_Y + 5, () -> "§7/§f" + session.inPageCount(), gtOnly);
+
+        addEditButton(OUT_X, PAGE_Y, 16, "§f◀", cd -> onOutPage(false), gtOnly);
+        addEditButton(OUT_X + 18, PAGE_Y, 16, "§f▶", cd -> onOutPage(true), gtOnly);
+        addPageButton(OUT_X + 36, PAGE_Y, 30, "§f首页", cd -> onOutPageEdge(false))
+                .setHoverTooltips(tip(PAGE_TIP_OUT));
+        addPageButton(OUT_X + 68, PAGE_Y, 30, "§f末页", cd -> onOutPageEdge(true))
+                .setHoverTooltips(tip(PAGE_TIP_OUT));
+        final Widget outJump = new TextFieldWidget(OUT_X + 100, PAGE_Y + 2, 22, 16,
+                () -> String.valueOf(session.outPage() + 1),
+                this::onOutPageTyped);
+        outJump.setHoverTooltips(tip(PAGE_TIP_OUT));
+        addEdit(outJump, gtOnly);
+        addEditLabel(OUT_X + 124, PAGE_Y + 5, () -> "§7/§f" + session.outPageCount(), gtOnly);
 
         // ── 上限读数（"随配方类型变化"这件事必须看得见）──
         addEditLabel(IN_X, CAP_Y, (Supplier<String>) session::capacityText);
@@ -932,6 +966,27 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         editOnly.add(label);
         group.add(button);
         group.add(label);
+    }
+
+    /**
+     * 🆕 2026-10-06（第 15 刀）：编辑屏 IO 分页行的一颗小按钮 —— 外观与
+     * {@link #addEditButton(int, int, int, String, Consumer, List)} 逐字相同，
+     * 只是<b>把控件本体返回出去</b>，好让调用方挂 tooltip。
+     *
+     * <p>为什么不直接改 {@code addEditButton} 的返回类型：那个方法有 9 个既有调用点，
+     * 而本刀的红线是"不许回改用户已验收的行为" ⇒ 新加一个方法比改老的更稳
+     * （老的那些一个字节都没动）。
+     */
+    private Widget addPageButton(int x, int y, int w, String text, Consumer<Object> onClick) {
+        final Widget button = new ButtonWidget(x, y, w, 20, GuiTextures.BUTTON, cd -> onClick.accept(cd));
+        final Widget label = new LabelWidget(x + 6, y + 7, ShanhaiLdlText.esc(text));
+        addWidget(button);
+        addWidget(label);
+        editOnly.add(button);
+        editOnly.add(label);
+        gtOnly.add(button);
+        gtOnly.add(label);
+        return button;
     }
 
     private void addCell(int widgetIndex, java.util.function.IntSupplier index, int x, int y) {
@@ -1494,7 +1549,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         session.newRecipe();
     }
 
-    /** 输入栏翻页（只在服务端改：页号是 session 的一部分，改完会推给客户端）。 */
+    /** 输入栏翻页。 */
     private void onInPage(boolean forward) {
         if (clientSide || !session.stageIsEdit()) {
             return;
@@ -1508,6 +1563,90 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
             return;
         }
         session.setOutPage(session.outPage() + (forward ? 1 : -1));
+    }
+
+    // ── 🆕 2026-10-06（第 15 刀）：看得见的跳页 ────────────────────────────────────────────
+    //
+    // 用户点单（逐字）：「有些配方真的会超出5页……这个页数你也可以添加一下」
+    //                 「如果这样改了可能会有上百页的，3我也选一下」。
+    // 放开 128 之后他本机那条 creative_all_items_gen 的输出栏 = 621 页（活日志 used=19862）。
+    // ⇒ 每栏四颗按钮 ＋ 一个页码框；全部只在服务端改（页号是 session 的一部分，改完推给客户端）。
+
+    /** tooltip 文本（口径与 {@code ShanhaiRecipeEditorWorkspace#goInPage} 是同一套）。 */
+    private static final String PAGE_TIP_IN =
+            "§f输入栏翻页§7：◀ ▶ 一次一页 · §f首页§7/§f末页§7 直达两头 · "
+                    + "中间那个小框§f直接填页号§7（从 1 数起，填完回车）";
+    private static final String PAGE_TIP_OUT =
+            "§f输出栏翻页§7：◀ ▶ 一次一页 · §f首页§7/§f末页§7 直达两头 · "
+                    + "中间那个小框§f直接填页号§7（从 1 数起，填完回车）";
+
+    /** 输入栏【首页】/【末页】两颗按钮。 */
+    private void onInPageEdge(boolean last) {
+        if (clientSide || !session.stageIsEdit()) {
+            return;
+        }
+        session.goInPage(last ? session.inPageCount() - 1 : 0);
+    }
+
+    /** 输出栏【首页】/【末页】两颗按钮。 */
+    private void onOutPageEdge(boolean last) {
+        if (clientSide || !session.stageIsEdit()) {
+            return;
+        }
+        session.goOutPage(last ? session.outPageCount() - 1 : 0);
+    }
+
+    /**
+     * 输入栏那个页码框：填第 N 页（<b>1 起</b>）就直接跳过去。
+     *
+     * <p>🔴 为什么自己解析、而不用 GT 现成的 {@code IntInputWidget}（耗时/电流那两个框就是它）：
+     * 那个控件的文本框回调最终走到 {@code Integer.parseInt(原文)}，<b>原文为空或非数字时抛
+     * NumberFormatException</b>，而它<b>没有</b> try/catch（javap 实测：
+     * {@code NumberInputWidget.lambda$buildUI$1} → {@code IntInputWidget.fromText} → {@code parseInt}；
+     * {@code TextFieldWidget.handleClientAction} 直接 {@code textResponder.accept(str)}，无异常表）。
+     * 翻页框是"用户会反复清空重填"的那类输入 ⇒ 这里用 LDLib 的裸 {@code TextFieldWidget} ＋
+     * 自己的安全解析：空/非数字<b>什么都不做</b>（下一拍 {@code textSupplier} 会把框弹回真实页码）。
+     */
+    private void onInPageTyped(String text) {
+        if (clientSide || !session.stageIsEdit()) {
+            return;
+        }
+        final Integer p = parsePageNumber(text);
+        if (p != null) {
+            session.goInPage(p - 1);
+        }
+    }
+
+    /** 输出栏那个页码框。 */
+    private void onOutPageTyped(String text) {
+        if (clientSide || !session.stageIsEdit()) {
+            return;
+        }
+        final Integer p = parsePageNumber(text);
+        if (p != null) {
+            session.goOutPage(p - 1);
+        }
+    }
+
+    /** 纯函数：页码文本 ⇒ 页码；空 / 非数字 / 太长 ⇒ {@code null}（＝不跳）。 */
+    private static Integer parsePageNumber(String text) {
+        if (text == null) {
+            return null;
+        }
+        final String t = text.trim();
+        if (t.isEmpty() || t.length() > 9) {
+            return null;
+        }
+        for (int i = 0; i < t.length(); i++) {
+            if (!Character.isDigit(t.charAt(i))) {
+                return null;
+            }
+        }
+        try {
+            return Integer.valueOf(t);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private void onBack() {

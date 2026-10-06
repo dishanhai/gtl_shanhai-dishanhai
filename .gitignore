@@ -69,3 +69,9 @@ recipe-convert/
 handoff/
 tools/
 docs/
+# ── 解包 jar 的残渣（出现在【仓库根目录】，看着像源码，永远不入库）──
+/META-INF/
+/com/
+*.class
+/v5_designs.py
+/v5_genesis.py

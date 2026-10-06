@@ -123,13 +123,21 @@ final class ShanhaiRecipeTableHook {
             // 🔴 第三方缓存（FastSuite 的 AuxRecipeManager）:必须打掉，否则合成台/熔炉这一拍
             //    问到的还是旧快照 —— 这就是"改完必须重进"的真正原因。
             final int cleared = invalidateCaches(server);
+            // 🔴🔴 2026-10-06（用户：「工作台的 jei 和实际配方无法正确同步」）：
+            //    **多态合成（Polymorph）挂在玩家身上的"上次命中哪条配方"也要一起打掉。**
+            //    它比 FastSuite 那张表更靠前：工作台的 getRecipeFor 被 MixinCraftingMenu 直接换成了
+            //    RecipeSelection.getPlayerRecipe → PlayerRecipeData → AbstractRecipeData.getRecipe，
+            //    而那里的短路只看 lastRecipe.matches(...)、**不查它还在不在表里**（见本方法上方的逐条取证）
+            //    ⇒ 只清 FastSuite 是清不到它的（那一层根本走不到）—— 这就是"实际也不同步"。
+            //    纯反射 + 失败只降级（Polymorph 没装 ⇒ 返回 -1 并打一行说明）。
+            final int poly = invalidatePolymorphPlayerCaches(server);
             // 🔴🔴 表被写过了 ⇒ 版本 +1。面板据此重建自己那份 id 列表
             //    （用户两条报障的共同根因：列表是旧快照、数据现读 ⇒ 新建的看不见 / 抹掉的剩个空壳）。
             final int ver = TABLE_VERSION.incrementAndGet();
             ShanhaiMod.LOGGER.info("{} table_hook_writeback all={} dup_ids={} byType_ok={} byName_ok={} "
-                            + "types={} names={} manager={} caches_cleared={} table_version={}",
+                            + "types={} names={} manager={} caches_cleared={} polymorph_players={} table_version={}",
                     PREFIX, all.size(), dup, okType, okName, byType.size(), byName.size(),
-                    managerClass(server), cleared, ver);
+                    managerClass(server), cleared, poly, ver);
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.warn("{} table_hook_failed err={} (本局退回 replaceRecipes 的结果)",
                     PREFIX, t.toString());
@@ -358,6 +366,13 @@ final class ShanhaiRecipeTableHook {
      */
     static int invalidateCaches(MinecraftServer server) {
         int cleared = 0;
+        // 🆕 2026-10-06：把"字段找到了没有"和"清掉了几张"分成两个数。
+        //    老的写法只看 cleared==0 就打 `recipe_cache_none`，于是
+        //    「字段在、但那一刻它是空的（没有陈旧项可清）」被印成「这个包里没有第三方配方缓存」
+        //    —— 假读数会把下一次排查直接带偏（本工程点过名的那类"检查器自己的假设错了"）。
+        int fieldsFound = 0;
+        int fieldsEmpty = 0;
+        final StringBuilder emptyNames = new StringBuilder();
         try {
             Class<?> c = server.getRecipeManager().getClass();
             while (c != null && c != Object.class) {
@@ -372,13 +387,23 @@ final class ShanhaiRecipeTableHook {
                     try {
                         f.setAccessible(true);
                         final Object v = f.get(server.getRecipeManager());
-                        if (v instanceof Map<?, ?> m && !m.isEmpty()) {
-                            final int n0 = m.size();
-                            ((Map<?, ?>) m).clear();
-                            cleared++;
-                            ShanhaiMod.LOGGER.info("{} recipe_cache_cleared field={}.{} entries={}",
-                                    PREFIX, c.getSimpleName(), f.getName(), n0);
+                        if (!(v instanceof Map<?, ?> m)) {
+                            continue;                   // 字段在、但不是 Map 形态 ⇒ 按"没找到"算
                         }
+                        fieldsFound++;
+                        final int n0 = m.size();
+                        if (n0 == 0) {
+                            fieldsEmpty++;              // 空的 = 没有陈旧项可清（不是"没这个字段"）
+                            if (emptyNames.length() > 0) {
+                                emptyNames.append(',');
+                            }
+                            emptyNames.append(c.getSimpleName()).append('.').append(f.getName());
+                            continue;
+                        }
+                        ((Map<?, ?>) m).clear();
+                        cleared++;
+                        ShanhaiMod.LOGGER.info("{} recipe_cache_cleared field={}.{} entries={}",
+                                PREFIX, c.getSimpleName(), f.getName(), n0);
                     } catch (Throwable t) {
                         ShanhaiMod.LOGGER.warn("{} recipe_cache_clear_failed field={}.{} err={}",
                                 PREFIX, c.getSimpleName(), f.getName(), t.toString());
@@ -387,14 +412,133 @@ final class ShanhaiRecipeTableHook {
                 c = c.getSuperclass();
             }
             if (cleared == 0) {
-                ShanhaiMod.LOGGER.info("{} recipe_cache_none manager={}（这个包里没有第三方配方缓存，或它不是 Map 形态）",
-                        PREFIX, managerClass(server));
+                ShanhaiMod.LOGGER.info("{} recipe_cache_none reason={} manager={} fields_found={} empty=[{}] "
+                                + "（⚠️ reason=all_empty 的意思是：那个缓存字段确实在、但这一拍它是空的 ⇒ "
+                                + "本来就没有陈旧项要清，功能上无害；老文案把它印成「没有这个字段」是假读数）",
+                        PREFIX, fieldsFound == 0 ? "no_cache_field" : "all_empty", managerClass(server),
+                        fieldsFound, emptyNames);
             }
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.warn("{} recipe_cache_probe_failed err={}", PREFIX, t.toString());
         }
         return cleared;
     }
+
+    // ------------------------------------------------- Polymorph 的「上次命中哪条配方」（第 13 刀）
+
+    /**
+     * 🔴🔴 2026-10-06（用户原话：「<b>工作台的 jei 和实际配方无法正确同步</b>……添加可以实时同步，
+     * 但是删除的时候 jei 和实际都无法实时同步，<b>可能是 mod 多态合成的问题</b>？」）
+     * —— <b>他猜对了，这一半就是多态合成（Polymorph）的缓存。</b>
+     *
+     * <h2>机理（{@code javap -c} 逐条读出来的，不是推断）</h2>
+     * <ol>
+     *   <li>{@code MixinCraftingMenu.polymorph$getRecipe(...)} <b>无条件</b>把工作台那一步换成
+     *       {@code RecipeSelection.getPlayerRecipe(menu, type, container, level, player)}
+     *       ⇒ 工作台走的是<b>玩家身上那份</b> {@code IPlayerRecipeData}（= {@code PlayerRecipeData}）；</li>
+     *   <li>{@code AbstractRecipeData.getRecipe(...)} 里有一段<b>短路</b>：只要
+     *       {@code lastRecipe != null}、本对象<b>不是</b> BlockEntity 那份、且容器里的物品与上次记下的
+     *       {@code input} 逐格相同 ⇒ 直接 {@code return Optional.of(lastRecipe)}；</li>
+     *   <li>而复验那条缓存只用 {@code lambda$getRecipe$2}：
+     *       {@code if (r.getType() == type && r.matches(container, level)) ref.set(r);}
+     *       —— <b>只按"它自己还匹不匹配"复验，从不查"这张表里还有没有它"</b> ✗
+     *       ⇒ 已从配方表里删掉的那条，只要工作台摆法没动，就<b>继续被当成命中</b>；</li>
+     *   <li>{@code PlayerRecipeData.getRecipe} 的 {@code cachedSelection} 只在<b>同一 tick</b> 内复用，
+     *       所以长命的那个就是第 ② 条的 {@code lastRecipe} ＋ {@code input}。</li>
+     * </ol>
+     * <p>⇒ 用户看到的"<b>实际</b>也不同步"：服务端那张表<b>确实</b>已经把这条删了
+     * （同一拍 {@code table_hook_writeback all=69480}、{@code vanilla_index_built recipes=15449}），
+     * 但工作台那一问被 Polymorph 的缓存挡住了 —— 直到他动一下摆法才会重新算。
+     *
+     * <h2>本方法做什么 / 不做什么</h2>
+     * <ul>
+     *   <li>对每个在线玩家取 {@code PolymorphCapabilities.getRecipeData(player)}（<b>纯反射</b>，
+     *       本 mod 对 Polymorph <b>没有编译期依赖</b>；没装 ⇒ 这条路本来就不存在，返回 -1 并在日志里说明）；</li>
+     *   <li>只清三个<b>缓存</b>字段：{@code lastRecipe}（{@code AbstractRecipeData}）、
+     *       {@code input}（同一类）、{@code cachedSelection}（{@code PlayerRecipeData}）。
+     *       <b>刻意不动</b> {@code selectedRecipe} —— 那是玩家在多态合成里选的那一项（他的选择，不是缓存）；</li>
+     *   <li>清完不影响正确性：下一次查询会按<b>当前</b>表重新算一遍，
+     *       {@code selectedRecipe} 若还在候选里照样被选中。</li>
+     * </ul>
+     *
+     * @return ≥0 = 找到玩家数据的个数（0 = 没有玩家在线）；-1 = Polymorph 不在/反射失败（已降级）
+     */
+    static int invalidatePolymorphPlayerCaches(MinecraftServer server) {
+        if (server == null) {
+            return -1;
+        }
+        Class<?> caps;
+        try {
+            caps = Class.forName("com.illusivesoulworks.polymorph.common.capability.PolymorphCapabilities");
+        } catch (Throwable absent) {
+            if (!POLY_ABSENT_LOGGED) {
+                POLY_ABSENT_LOGGED = true;
+                ShanhaiMod.LOGGER.info("{} polymorph_cache_none reason=not_installed "
+                        + "（没有多态合成 ⇒ 工作台那条路不存在缓存，无需处理）", PREFIX);
+            }
+            return -1;
+        }
+        int data = 0;
+        int fieldsCleared = 0;
+        try {
+            final java.lang.reflect.Method getRecipeData =
+                    caps.getMethod("getRecipeData", net.minecraft.world.entity.player.Player.class);
+            for (net.minecraft.server.level.ServerPlayer p : server.getPlayerList().getPlayers()) {
+                Object d = null;
+                try {
+                    final Object opt = getRecipeData.invoke(null, p);
+                    if (opt instanceof java.util.Optional<?> o) {
+                        d = o.orElse(null);
+                    }
+                } catch (Throwable ignored) {
+                    // 取不到这个玩家的数据 ⇒ 跳过（不影响别人）
+                }
+                if (d == null) {
+                    continue;
+                }
+                data++;
+                if (clearFieldByName(d, "lastRecipe")) {
+                    fieldsCleared++;
+                }
+                if (clearFieldByName(d, "input")) {
+                    fieldsCleared++;
+                }
+                if (clearFieldByName(d, "cachedSelection")) {
+                    fieldsCleared++;
+                }
+            }
+            ShanhaiMod.LOGGER.info("{} polymorph_cache_invalidated players_data={} fields_cleared={} "
+                            + "（把玩家身上「上次命中哪条配方」清掉：不清它，工作台在摆法不变时会继续用已删的那条 "
+                            + "—— lastRecipe 的复验只认 matches()，不认这张表里还有没有它）",
+                    PREFIX, data, fieldsCleared);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} polymorph_cache_probe_failed err={} (降级：这一拍不清它的缓存)",
+                    PREFIX, t.toString());
+            return -1;
+        }
+        return data;
+    }
+
+    /** 反射把 {@code name} 那个字段置 null（沿父类链找；找不到/设不了 ⇒ false，绝不抛）。 */
+    private static boolean clearFieldByName(Object target, String name) {
+        Class<?> c = target.getClass();
+        while (c != null && c != Object.class) {
+            try {
+                final Field f = c.getDeclaredField(name);
+                f.setAccessible(true);
+                f.set(target, null);
+                return true;
+            } catch (NoSuchFieldException nsf) {
+                c = c.getSuperclass();
+            } catch (Throwable t) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /** "Polymorph 没装"那条 INFO 只打一次（写法与 {@code byTypeFieldName} 同一套降级纪律）。 */
+    private static boolean POLY_ABSENT_LOGGED = false;
 
     private static final java.util.concurrent.atomic.AtomicInteger TABLE_VERSION =
             new java.util.concurrent.atomic.AtomicInteger();

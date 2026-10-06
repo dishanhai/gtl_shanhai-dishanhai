@@ -64,7 +64,9 @@ import java.util.Map;
  *   shown  = 界面上显示 / 将要写入的那个 ItemStack
  *   dirty  = 用户动过没有
  * 重建规则：dirty == false ⇒ 【原样放回 base】（一个字节都不动）
- *           dirty == true  ⇒ Ingredient.of(shown)
+ *           dirty == true  ⇒ {@code ShanhaiIoTable.ingredientForStack(shown)}
+ *                             （2026-10-06 之前是裸 {@code Ingredient.of(shown)} —— 会丢电路号；
+ *                               普通物品两条路完全等价）
  * </pre>
  * 这条纪律与 GT 那条线 {@code ShanhaiIoTable.Cell#dirty} 的语义逐字同构。
  *
@@ -793,7 +795,13 @@ public final class ShanhaiVanillaRecipeShape {
         if (s.shown.isEmpty()) {
             return Ingredient.EMPTY;
         }
-        return Ingredient.of(s.shown);
+        // 🔴 2026-10-06（用户原话：「他配方编辑器<b>不能保留编程电路</b>」）：
+        //    这里原来是裸 `Ingredient.of(s.shown)` —— 与 GT 那条线（{@code ShanhaiIoTable}）
+        //    曾经是同一个病：vanilla 的 ItemValue 只写物品 id、**NBT（电路号）根本进不了 JSON**
+        //    （javap 实证见 {@link ShanhaiIoTable#ingredientForStack}）。
+        //    ⇒ 换成两边共用的那一个方法：带号电路走 GT 的 `{"type":"gtceu:circuit","configuration":N}`，
+        //      其余物品（含"没号的裸芯片"）走原路，一个字节不变。
+        return ShanhaiIoTable.ingredientForStack(s.shown);
     }
 
     // ---------------------------------------------------------------- 覆盖层要写的字段

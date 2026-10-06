@@ -119,6 +119,7 @@ public final class ShanhaiJeiBridge {
                     conds.toString());
             channel.send(PacketDistributor.ALL.noArg(), msg);
             RESTORE_OR_EDIT_NOTIFY.incrementAndGet();
+            noteBackInForce(recipe.id.toString());   // 这条又回来了 ⇒ 不再替它保住"已删"补丁
             ShanhaiMod.LOGGER.info("{} net_sent action=changed id={} type={} dur={} eu={} in_bytes={} out_bytes={} "
                             + "cond_n={} cond_bytes={} cond_types={}",
                     PREFIX, recipe.id, recipe.getType() == null ? "?" : recipe.getType().registryName,
@@ -143,6 +144,7 @@ public final class ShanhaiJeiBridge {
         try {
             channel.send(PacketDistributor.ALL.noArg(), RecipeSyncMessage.removed(recipe));
             RESTORE_OR_EDIT_NOTIFY.incrementAndGet();
+            noteRemovedInForce(recipe.id.toString());   // 🔴 记下来：下一次对账要保住这条 ✓
             ShanhaiMod.LOGGER.info("{} net_sent action=removed id={}", PREFIX, recipe.id);
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} net_send_failed id={} err={}", PREFIX, recipe.id, t.toString(), t);
@@ -176,6 +178,7 @@ public final class ShanhaiJeiBridge {
             channel.send(PacketDistributor.ALL.noArg(),
                     RecipeSyncMessage.removedById(typeId.toString(), recipeId.toString()));
             RESTORE_OR_EDIT_NOTIFY.incrementAndGet();
+            noteRemovedInForce(recipeId.toString());    // 🔴 同上（restore/按 id 删那条路）
             ShanhaiMod.LOGGER.info("{} net_sent action=removed id={} type={} (by_id)",
                     PREFIX, recipeId, typeId);
         } catch (Throwable t) {
@@ -276,6 +279,7 @@ public final class ShanhaiJeiBridge {
             channel.send(PacketDistributor.ALL.noArg(),
                     RecipeSyncMessage.changedVanilla(uid, recipeId.toString(), fieldsJson, recipeBytes));
             RESTORE_OR_EDIT_NOTIFY.incrementAndGet();
+            noteBackInForce(recipeId.toString());   // 这条又回来了 ⇒ 不再替它保住"已删"补丁
             ShanhaiMod.LOGGER.info("{} net_sent action=changed kind=vanilla id={} jei_uid={} fields={} recipe_bytes={}",
                     PREFIX, recipeId, uid, fieldsJson, recipeBytes == null ? 0 : recipeBytes.length);
         } catch (Throwable t) {
@@ -366,6 +370,7 @@ public final class ShanhaiJeiBridge {
         try {
             channel.send(PacketDistributor.ALL.noArg(),
                     RecipeSyncMessage.removedVanilla(uid, recipeId.toString()));
+            noteRemovedInForce(recipeId.toString());   // 🔴 记下来：下一次对账要保住这条 ✓
             ShanhaiMod.LOGGER.info("{} net_sent action=removed kind=vanilla id={} jei_uid={}",
                     PREFIX, recipeId, uid);
         } catch (Throwable t) {
@@ -389,13 +394,64 @@ public final class ShanhaiJeiBridge {
             ShanhaiMod.LOGGER.warn("{} net_skip reason=channel_not_ready action=reconcile", PREFIX);
             return;
         }
+        // 🔴🔴 2026-10-06（用户：「工作台的 jei 和实际配方无法正确同步……删除的时候 jei 和实际都无法实时同步」）：
+        //    名单必须并上"本局我让客户端删掉的那些 id"，否则下面这条链会当场翻车 —— 现场逐字读数：
+        //      16:33:34.180 jei_patch_stored  … action=removed patches=2      ← 藏住了 ✓
+        //      16:33:34.186 jei_runtime_hidden … hidden=2 total=12            ← 确实藏了 ✓
+        //      16:34:29.122 jei_patch_dropped  … reason=not_in_force          ← 55 秒后丢了 ✗
+        //      16:34:29.129 jei_runtime_unhidden … unhidden=2 total=4         ← 又还回来了 ✗✗
+        //    机制：appliedIds() 给的是【账本里还有哪些条目】，而"本编辑器新建、随后被删"的那条
+        //    配方，它的 op=add 条目已经从账本里抹掉了 ⇒ 天然不在名单里 ⇒ 客户端把那条
+        //    action=removed 的补丁当"没在生效"丢掉，顺手把藏起来的原件还回去 ⇒ "删了还在"。
+        //    ⚠️ 这不削弱对账本来要挡的事：REMOVED_IN_FORCE 是【进程内】的，服务端一重启就空
+        //       ⇒ "重进存档后客户端还留着过时补丁"照旧会被清掉 ✓
+        final java.util.List<String> keep = new java.util.ArrayList<>(
+                inForce == null ? java.util.List.<String>of() : inForce);
+        int removedKept = 0;
+        for (String id : REMOVED_IN_FORCE) {
+            if (!keep.contains(id)) {
+                keep.add(id);
+                removedKept++;
+            }
+        }
         try {
             channel.send(PacketDistributor.PLAYER.with(() -> player),
-                    RecipeSyncMessage.reconcile(inForce));
-            ShanhaiMod.LOGGER.info("{} net_sent action=reconcile player={} in_force={}",
-                    PREFIX, player.getName().getString(), inForce == null ? 0 : inForce.size());
+                    RecipeSyncMessage.reconcile(keep));
+            ShanhaiMod.LOGGER.info("{} net_sent action=reconcile player={} in_force={} removed_kept={} "
+                            + "(in_force = 账本条目 ＋ 本局发过 removed 的 id；后者不并进来，"
+                            + "被删的配方会在下一次对账时从 JEI 里【回来】—— 见 2026-10-06 现场读数)",
+                    PREFIX, player.getName().getString(), keep.size(), removedKept);
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} net_send_failed action=reconcile err={}", PREFIX, t.toString(), t);
+        }
+    }
+
+    /**
+     * 🔴 <b>本局"已经让客户端删掉"的那些 id</b>（进程内；服务端一重启就空）。
+     *
+     * <p>唯一用途 = {@link #sendReconcile} 的保留名单（机理见那里的整段注释）。
+     * 只增不减，例外只有一个：那条配方又回来了（{@link #noteBackInForce}）。
+     * 集合大小 = 本局删过几条配方，量级极小。
+     */
+    private static final java.util.Set<String> REMOVED_IN_FORCE =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** 读数：本局记了几条"让客户端删掉"的 id（日志/自检用）。 */
+    public static int removedInForceCount() {
+        return REMOVED_IN_FORCE.size();
+    }
+
+    /** 发过 {@code action=removed} ⇒ 记下来（下一次对账要保住这条 id 的补丁）。 */
+    private static void noteRemovedInForce(String id) {
+        if (id != null && !id.isEmpty()) {
+            REMOVED_IN_FORCE.add(id);
+        }
+    }
+
+    /** 发过 {@code action=changed} ⇒ 这条配方又回来了（不再需要替它保住"已删"那个补丁）。 */
+    private static void noteBackInForce(String id) {
+        if (id != null && !id.isEmpty()) {
+            REMOVED_IN_FORCE.remove(id);
         }
     }
 

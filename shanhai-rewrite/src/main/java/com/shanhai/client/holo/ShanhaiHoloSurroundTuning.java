@@ -10,7 +10,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
  * 用户点单：那 5 块全息板旁边太空了，要加一层<b>环绕在玩家周围</b>的点与线条。
  * 美术已经在浏览器里验收过，规格就是这一份单文件 HTML：
  * <pre>
- *   C:\Users\david\Desktop\山海HTML\17-全息环绕-结合版.html
+ *   17-全息环绕-结合版.html
  * </pre>
  * 它是「A 数据环（贴身 4 圈细环 + 刻度 + 沿环流动的光点 + 环缓慢进动）」
  * 与「B 星尘网格（周围 200 个光点的壳层 + 近距连线 + 阈值呼吸重组）」的结合版。
@@ -69,7 +69,7 @@ public final class ShanhaiHoloSurroundTuning {
 
     private ShanhaiHoloSurroundTuning() {}
 
-    // ==================================================================== 一、用户点单的 14 个参数
+    // ==================================================================== 一、用户点单的那批参数（原 14 项 + 本轮新增的「跟随延迟」）
 
     // ---- A · 数据环（贴身）----
 
@@ -398,8 +398,29 @@ public final class ShanhaiHoloSurroundTuning {
     /** 点场中心相对<b>玩家脚底</b>的高度（格，HTML {@code fieldC.y = player.y + 1.15}）。 */
     public static final float FIELD_CENTER_Y_BLOCKS = 1.15f;
 
-    /** 点场中心追随玩家的指数时间常数（秒，HTML {@code dt/1.15}）。 */
-    public static final float FIELD_FOLLOW_TAU_SEC = 1.15f;
+    /**
+     * 点场中心追随玩家的指数时间常数（秒，HTML {@code dt/1.15}）——<b>出厂默认值 = 0（即时）</b>。
+     *
+     * <p>🔴 2026-10-06 16:2x（用户第 ④ 条）：「这个类似与北斗七星的渲染完全跟不上玩家的速度
+     * （就是和其他的渲染不同步，跟随玩家太慢了）」——"像星座"的那一片就是点场 + 连线，
+     * 而它的中心一直被这一条以 τ 秒的指数平滑拖着走：
+     * <pre>
+     *   fieldC += (player − fieldC) · (1 − e^(−dt/τ))
+     *   ⇒ 玩家以 v 匀速跑，稳态"拖在身后"的距离 = v · dt · (1−k)/k，k = 1 − e^(−dt/τ)
+     *   ⇒ v = 5 格/秒、τ = 1.15 秒、60 fps ⇒ 5.71 格（连续近似 v·τ = 5.75 格）
+     *   ⇒ 离线装置实测：τ=1.15 ⇒ 5.708 格（用户手上那一版）；τ=0 ⇒ 0.000 格
+     * </pre>
+     * 现在这一个常量只是"出厂值"，运行期生效的是 {@code param(P_FIELD_FOLLOW_TAU)}
+     * （用户能在面板高级调参页上拨那一项「跟随延迟」）。
+     *
+     * <p>🔴 <b>为什么出厂值改成 0.00</b>：1.15 秒是照 HTML 那份效果抄来的"整片星尘缓缓飘过来"，
+     * 但第一人称跑起来它就是"整片星尘拖在身后 5.7 格"，而<b>同一层的其他部分全是即时跟随</b>
+     * （数据环直接读当前帧玩家位置；点与点之间的连线用的是同一批点；光晕与文字层挂在板上）
+     * ⇒ 只有这一片不同步，用户的描述（"跟不上"、"和其他渲染不同步"）与实测完全吻合。
+     * <p>0 在 {@code ShanhaiHoloSurround#fieldAdvance} 里是<b>短路</b>（当场等于当前帧玩家位置），
+     * 不是"极小的时间常数"—— 后者会退化成 v·dt·(1−k)/k 那一档的残余滞后。
+     */
+    public static final float FIELD_FOLLOW_TAU_SEC = 0.0f;
 
     /** 点的仰角范围（HTML {@code (random()-0.5)*0.84} ⇒ ±0.42 弧度）—— 压扁成壳层，别钻到地里。 */
     public static final float FIELD_ELEVATION_SPAN_RAD = 0.84f;
@@ -492,26 +513,614 @@ public final class ShanhaiHoloSurroundTuning {
 
     // ==================================================================== 九、读数
 
-    /** 一行摘要（日志用，也便于与用户手上的那三行黄字对照）。 */
+    /**
+     * 一行摘要（日志用，也便于与用户手上的那三行黄字对照）。
+     *
+     * <p>🔴 2026-10-06（第二轮）：<b>这里读的数改成"运行期生效的那一份"</b>
+     * （{@link #param(int)}），不再是编译期常量 —— 否则用户在面板里换了档，
+     * 日志打的还是"出厂参数"，那就是一条会撒谎的读数。
+     */
     public static String summary() {
         final float[] shell = ShanhaiHoloSurround.shellRadii();
-        return "rings=" + RING_COUNT
-                + " ringScale=" + fmt(RING_SCALE, 2)
-                + " ringBright=" + fmt(RING_BRIGHT, 2)
-                + " tickDensity=" + fmt(RING_TICK_DENSITY, 2)
-                + " flow=" + fmt(RING_FLOW_SCALE, 1)
-                + " precess=" + fmt(RING_PRECESS_SCALE, 2)
-                + " | points=" + FIELD_POINT_COUNT
+        return "preset=" + presetName(preset) + "(" + preset + ")"
+                + " rings=" + paramInt(P_RING_COUNT)
+                + " ringScale=" + fmt(param(P_RING_SCALE), 2)
+                + " ringBright=" + fmt(param(P_RING_BRIGHT), 2)
+                + " tickDensity=" + fmt(param(P_RING_TICK_DENSITY), 2)
+                + " flow=" + fmt(param(P_RING_FLOW_SCALE), 1)
+                + " precess=" + fmt(param(P_RING_PRECESS_SCALE), 2)
+                + " | points=" + paramInt(P_FIELD_POINT_COUNT)
                 + " shell=" + fmt(shell[0], 2) + "-" + fmt(shell[1], 2) + "格"
-                + " link=" + fmt(FIELD_LINK_THRESHOLD_BLOCKS, 2) + "x" + FIELD_LINK_MAX_PER_POINT
-                + " breath=" + fmt(FIELD_LINK_PERIOD_SEC, 0) + "s"
-                + " fieldBright=" + fmt(FIELD_BRIGHT, 2)
-                + " | global=" + fmt(GLOBAL_BRIGHT, 2)
+                + " link=" + fmt(param(P_FIELD_LINK_THRESHOLD), 2)
+                + "x" + paramInt(P_FIELD_LINK_MAX_PER_POINT)
+                + " breath=" + fmt(param(P_FIELD_LINK_PERIOD), 0) + "s"
+                + " fieldBright=" + fmt(param(P_FIELD_BRIGHT), 2)
+                + " followDelay=" + fmt(param(P_FIELD_FOLLOW_TAU), 2) + "s"
+                + " | global=" + fmt(param(P_GLOBAL_BRIGHT), 2)
                 + " | ringMaxR=" + fmt(RING_MAX_RADIUS_BLOCKS, 2) + "格";
     }
 
     /** 固定两位小数的数字格式化（不依赖 Locale，避免小数点变成逗号）。 */
     public static String fmt(float v, int decimals) {
         return String.format(java.util.Locale.ROOT, "%." + decimals + "f", v);
+    }
+
+    // ==================================================================== 十、🆕 四档预设 + 15 项【运行期生效】的取值
+
+    /*
+     * 2026-10-06（第二轮点单）：环绕特效要做成游戏内可调。
+     *
+     * 🔴 为什么需要这一节：上面那批常量是 `public static final` —— 编译期常量会被 javac
+     *    【内联】到每一个调用点（`ShanhaiHoloSurround.T.*` 就是那一批），运行期改不动。
+     *    所以本轮把"生效值"搬进本类的一个静态数组 LIVE，并把 §1 的常量降级为
+     *    【出厂默认值】（= 「中」档），调用点一律改读 {@link #param(int)}。
+     *    这样只有一处存值（LIVE），不存在"两处各存一份必然漂"。
+     *
+     * 🔴 版面为什么是"4 项一页"而不是原设计的 3 页 6/7/1：
+     *    面板的行数 = {@link ShanhaiHoloMenuTuning#BOARD_COUNT} = 5，而这个 5 同时被
+     *    【五块菜单板】用（RING_STEP_DEG = 360/5）⇒ 加行数就会挪动用户已经验收过的菜单板，
+     *    那是红线。所以 5 行网格一个数都不动：**每页 4 项（4 行）+ 第 5 行导航**，
+     *    原先 14 项 ⇒ 4 页（4/4/4/2）；🆕 本轮追加第 15 项「跟随延迟」⇒ 4 页（4/4/4/3），仍 4 页。
+     */
+
+    // ---- 15 项的下标（顺序 = 面板高级页的翻页顺序，也是报表顺序）----
+
+    public static final int P_RING_COUNT = 0;
+    public static final int P_RING_SCALE = 1;
+    public static final int P_RING_BRIGHT = 2;
+    public static final int P_RING_TICK_DENSITY = 3;
+    public static final int P_RING_FLOW_SCALE = 4;
+    public static final int P_RING_PRECESS_SCALE = 5;
+    public static final int P_FIELD_POINT_COUNT = 6;
+    public static final int P_FIELD_INNER = 7;
+    public static final int P_FIELD_OUTER = 8;
+    public static final int P_FIELD_LINK_THRESHOLD = 9;
+    public static final int P_FIELD_LINK_MAX_PER_POINT = 10;
+    public static final int P_FIELD_LINK_PERIOD = 11;
+    public static final int P_FIELD_BRIGHT = 12;
+    public static final int P_GLOBAL_BRIGHT = 13;
+
+    /**
+     * 🆕 2026-10-06 16:2x（用户第 ④ 条点单）：<b>第 15 项 = 点场（星尘）中心的"跟随延迟"</b>（秒）。
+     *
+     * <p>加它的理由：用户报"星尘跟不上玩家"，而修法是"出厂即时跟随"——
+     * 但他明确想要的话，可以自己把这一项拨大，回到那种"整片星尘慢慢飘过来"的旧观感。
+     * 拨到 1.15 秒就<b>逐格等于</b>他抱怨的那一版（离线装置的负对照就是拿这个值跑的）。
+     *
+     * <p>⚠️ 它只影响<b>点场</b>（星尘点 + 连线 + 它们的壳层中心）；
+     * <b>数据环</b>从来就是每帧读当前帧的玩家位置、压根不读这个数（离线装置 10.3 段实测）。
+     *
+     * <p>版面：<b>追加在最后</b>（不动任何一项的下标）⇒ 4 页变成 4/4/4/<b>3</b>，
+     * 仍然是"每页 4 项 + 第 5 行导航"，仍是 4 页，5 行网格一个数都没动。
+     */
+    public static final int P_FIELD_FOLLOW_TAU = 14;
+
+    /** 一共几项（14 + 1 = 15）。 */
+    public static final int PARAM_COUNT = 15;
+
+    /** 高级页每页放几项 = 面板行数 − 1（第 5 行是导航）。 */
+    public static final int PARAMS_PER_PAGE = 4;
+
+    /** 高级页一共几页 = ceil(15/4) = 4（4/4/4/3）。 */
+    public static final int PAGE_COUNT = (PARAM_COUNT + PARAMS_PER_PAGE - 1) / PARAMS_PER_PAGE;
+
+    /** 第 idx 项在第几页（0 基）。 */
+    public static int pageOf(int idx) {
+        return idx < 0 || idx >= PARAM_COUNT ? -1 : idx / PARAMS_PER_PAGE;
+    }
+
+    /** 第 idx 项在它那一页的第几行（0 基；行号 = 面板的行号）。 */
+    public static int pageRowOf(int idx) {
+        return idx < 0 || idx >= PARAM_COUNT ? -1 : idx % PARAMS_PER_PAGE;
+    }
+
+    /** （页, 页内行）⇒ 第几项；越界返回 {@code -1}。 */
+    public static int indexOf(int page, int pageRow) {
+        if (page < 0 || page >= PAGE_COUNT || pageRow < 0 || pageRow >= PARAMS_PER_PAGE) {
+            return -1;
+        }
+        final int idx = page * PARAMS_PER_PAGE + pageRow;
+        return idx < PARAM_COUNT ? idx : -1;
+    }
+
+    /** 某一页真的有几项（最后一页可能不满：15 = 4+4+4+3）。 */
+    public static int paramCountOnPage(int page) {
+        if (page < 0 || page >= PAGE_COUNT) {
+            return 0;
+        }
+        final int left = PARAM_COUNT - page * PARAMS_PER_PAGE;
+        return Math.min(PARAMS_PER_PAGE, Math.max(0, left));
+    }
+
+    /** 15 项的中文名（面板上的格子 0 与报表第一列都用它）。 */
+    public static final String[] PARAM_NAME = {
+            "环数", "环半径倍率", "环亮度", "刻度密度", "流动光点", "进动速度",
+            "光点数", "壳层内半径", "壳层外半径", "连线阈值", "每点接线数", "呼吸周期",
+            "点场亮度", "整体亮度", "跟随延迟"
+    };
+
+    /** 15 项的单位（不带空格的写法，面板上拼成 {@code "2.55 格"}）。 */
+    public static final String[] PARAM_UNIT = {
+            "条", "倍", "", "", "", "",
+            "个", "格", "格", "格", "条", "秒",
+            "", "", "秒"
+    };
+
+    /** 15 项显示几位小数。 */
+    public static final int[] PARAM_DECIMALS = {
+            0, 2, 2, 2, 2, 2,
+            0, 2, 2, 2, 0, 1,
+            2, 2, 2
+    };
+
+    /**
+     * 15 项每一档 ± 一次跨多少。
+     * <p>取的都是"看得见变化"的最小步子：环数 / 光点数 / 接线数是整数（步长 1 / 10 / 1），
+     * 亮度与小半径是 0.05，呼吸周期是 1 秒，跟随延迟是 0.05 秒。
+     */
+    public static final float[] PARAM_STEP = {
+            1.0f, 0.05f, 0.05f, 0.05f, 0.10f, 0.05f,
+            10.0f, 0.05f, 0.05f, 0.05f, 1.0f, 1.0f,
+            0.05f, 0.05f, 0.05f
+    };
+
+    /**
+     * 🔴 15 项的<b>安全区间下限</b>（每一档、每一次 ± 之后都必须落在区间内，越界就钳住）。
+     * <p>取值来源：HTML 那张参数面板上的滑块 min（例如环半径倍率 0.6、刻度密度 0、
+     * 光点数 0、壳层内半径 1.2、外半径 2.0、连线阈值 0.5、接线数 1、周期 3、亮度 0）。
+     * <p>新增的"跟随延迟"下限取 <b>0.00</b>（= 即时跟随，生产代码里 τ ≤ 0 会短路成瞬时贴合）。
+     */
+    public static final float[] PARAM_MIN = {
+            0.0f, 0.60f, 0.0f, 0.0f, 0.0f, 0.0f,
+            0.0f, 1.20f, 2.00f, 0.50f, 1.0f, 3.0f,
+            0.0f, 0.0f, 0.00f
+    };
+
+    /**
+     * 🔴 15 项的<b>安全区间上限</b>。
+     * <pre>
+     *   ① 结构性的两项取【硬容量】而不是"美术喜好"：
+     *      环数 ≤ {@code RING_TABLE.length}（= 6，表里就 6 条环，再多也取不到）
+     *      光点数 ≤ {@code ShanhaiHoloSurround.FIELD_CAPACITY}（= 200，光点数组是预分配的定长数组）
+     *   ② 其余七项取 HTML 滑块 max；亮度三项取 2（新增的"整体亮度"上限 2 与点场亮度同口径）
+     *   ③ 环半径倍率的上限是 1.40 —— 再大也只会被 {@link #RING_MAX_RADIUS_BLOCKS} 硬夹到 1.75 格，
+     *      放开它只会让"刻度值"与"生效值"对不上
+     *   ④ 跟随延迟上限 2.00 秒（旧观感 1.15 秒要拨得到；再大就纯粹是"跟不上"了）
+     * </pre>
+     */
+    public static final float[] PARAM_MAX = {
+            RING_TABLE.length, 1.40f, 2.0f, 1.60f, 2.0f, 2.50f,
+            ShanhaiHoloSurround.FIELD_CAPACITY, 4.00f, 5.00f, 1.80f, 5.0f, 30.0f,
+            2.0f, 2.0f, 2.00f
+    };
+
+    // ---- 四档 ----
+
+    /** 「关」：不画环绕层（跳过绘制遍）。<b>不动那 15 项取值</b> ⇒ 切回来现场还在。 */
+    public static final int PRESET_OFF = 0;
+    public static final int PRESET_WEAK = 1;
+    public static final int PRESET_MID = 2;
+    public static final int PRESET_STRONG = 3;
+    public static final int PRESET_COUNT = 4;
+
+    /** 出厂默认档 = 中（= 用户已经验收过的那一组数）。 */
+    public static final int PRESET_DEFAULT = PRESET_MID;
+
+    /** 档位中文名（面板四格与日志都用它）。 */
+    public static String presetName(int p) {
+        return switch (p) {
+            case PRESET_OFF -> "关";
+            case PRESET_WEAK -> "弱";
+            case PRESET_MID -> "中";
+            case PRESET_STRONG -> "强";
+            default -> "?";
+        };
+    }
+
+    /**
+     * 🔴 <b>四档 × 15 项的取值表</b>（整组替换）。
+     *
+     * <pre>
+     *   第 0 行（关）：<b>不会被写进 LIVE</b> —— 「关」只表示"不画"，15 项取值原样保留。
+     *                 这一行必须与中档【逐项相同】（自检断言），它存在只是为了让"下标 = 档位号"。
+     *   第 2 行（中）：<b>必须逐项等于 §1 那些常量的默认值</b>（自检里是机器比对，不靠人看）。
+     *   弱 ≤ 中 ≤ 强：逐项单调（唯一反向的是"呼吸周期"—— 周期越短呼吸越快 = 越强）。
+     * </pre>
+     *
+     * <p>🔴 <b>为什么第 15 项「跟随延迟」四档全是 0.00</b>：
+     * <pre>
+     *   ① 判据 ⑤ 要求逐项 弱 ≤ 中 ≤ 强 ⇒ 只要"弱"是 0（即时），"中/强"就只能 ≥ 0，
+     *      而任何 &gt; 0 的值都会把用户刚报的那条 bug（星尘拖在身后）重新带回来；
+     *   ② 四档是"亮不亮、多不多"的强度档，不该顺手改变"跟不跟得上"这种<b>正确性</b>属性；
+     * "弱"若取非 0（比如 0.3 秒），"中"就必须 ≥ 0.3 ⇒ 用户手里的默认档又开始拖尾 —— 这是一条死路。
+     * 所以四档一律 0.00，想回"慢慢飘"的人自己去高级页拨那一项（拨到 1.15 就逐格等于旧版）。
+     * </pre>
+     */
+    public static final float[][] PRESET_VALUES = {
+            // 环数  倍率   环亮   刻度   流动   进动 | 光点  内径   外径   阈值   接线  周期 | 点亮   全局   跟随
+            {2, 1.40f, 1.00f, 1.60f, 1.00f, 1.00f, 200, 2.55f, 3.30f, 1.44f, 3, 15.0f, 1.50f, 1.00f, 0.00f},
+            {1, 1.00f, 0.55f, 0.80f, 0.50f, 0.50f, 110, 2.20f, 3.00f, 1.10f, 2, 20.0f, 0.90f, 0.80f, 0.00f},
+            {2, 1.40f, 1.00f, 1.60f, 1.00f, 1.00f, 200, 2.55f, 3.30f, 1.44f, 3, 15.0f, 1.50f, 1.00f, 0.00f},
+            {3, 1.40f, 1.60f, 1.60f, 2.00f, 1.80f, 200, 2.80f, 3.90f, 1.75f, 4, 10.0f, 2.00f, 1.30f, 0.00f}
+    };
+
+    // ---- 运行期状态（唯一一份存值处；只存内存，不落盘）----
+
+    /** 15 项当前生效值。 */
+    private static final float[] LIVE = new float[PARAM_COUNT];
+
+    /** 当前档位。 */
+    private static int preset = PRESET_DEFAULT;
+
+    static {
+        System.arraycopy(PRESET_VALUES[PRESET_DEFAULT], 0, LIVE, 0, PARAM_COUNT);
+    }
+
+    /** 当前档位号。 */
+    public static int preset() {
+        return preset;
+    }
+
+    /** 这一帧要不要画环绕层（「关」档 = 跳过整个绘制遍）。 */
+    public static boolean drawEnabled() {
+        return preset != PRESET_OFF;
+    }
+
+    /** 第 idx 项当前生效值（渲染与日志读的就是它）。 */
+    public static float param(int idx) {
+        return idx < 0 || idx >= PARAM_COUNT ? 0.0f : LIVE[idx];
+    }
+
+    /** 第 idx 项当前生效值，取整（环数 / 光点数 / 接线数用）。 */
+    public static int paramInt(int idx) {
+        return Math.round(param(idx));
+    }
+
+    /** 第 idx 项的显示文字（{@code "2.55 格"} / {@code "200 个"} / {@code "1.00"}）。 */
+    public static String paramText(int idx) {
+        if (idx < 0 || idx >= PARAM_COUNT) {
+            return "";
+        }
+        final String u = PARAM_UNIT[idx];
+        return fmt(LIVE[idx], PARAM_DECIMALS[idx]) + (u.isEmpty() ? "" : " " + u);
+    }
+
+    /** 第 idx 项"± 一步"的文字（面板上那颗 ± 按钮写的就是它）。 */
+    public static String paramStepText(int idx) {
+        if (idx < 0 || idx >= PARAM_COUNT) {
+            return "";
+        }
+        final String u = PARAM_UNIT[idx];
+        return fmt(PARAM_STEP[idx], PARAM_DECIMALS[idx]) + (u.isEmpty() ? "" : " " + u);
+    }
+
+    /**
+     * 🔴 <b>切档</b>（整组替换）。
+     *
+     * <p>「关」= 只置档位、<b>一个数都不改</b> ⇒ 切回弱/中/强时按那一档整组重写，
+     * 而切回"关之前的那些数"不需要恢复动作（它们从来没被改过）。
+     *
+     * @return 生效之后的档位号（越界一律落回 {@link #PRESET_DEFAULT}）
+     */
+    public static int setPreset(int next) {
+        preset = next < 0 || next >= PRESET_COUNT ? PRESET_DEFAULT : next;
+        if (preset != PRESET_OFF) {
+            System.arraycopy(PRESET_VALUES[preset], 0, LIVE, 0, PARAM_COUNT);
+            settleShell();
+        }
+        return preset;
+    }
+
+    /**
+     * 🔴 <b>单步 ±</b>（面板高级页每行那两颗按钮）。
+     *
+     * @param dir {@code +1} / {@code -1}
+     * @return 步进之后的生效值（<b>已经钳在安全区间内</b>）
+     */
+    public static float nudge(int idx, int dir) {
+        if (idx < 0 || idx >= PARAM_COUNT) {
+            return 0.0f;
+        }
+        return setParam(idx, LIVE[idx] + (dir >= 0 ? PARAM_STEP[idx] : -PARAM_STEP[idx]));
+    }
+
+    /** 直接设某一项（自检与将来的命令入口用）；返回值同样已经钳过。 */
+    public static float setParam(int idx, float want) {
+        if (idx < 0 || idx >= PARAM_COUNT) {
+            return 0.0f;
+        }
+        LIVE[idx] = clampParam(idx, want);
+        settleShell();
+        return LIVE[idx];
+    }
+
+    /** 把所有档位与 15 项还原成出厂状态（离线自检 / 复位用）。 */
+    public static void resetTuning() {
+        preset = PRESET_DEFAULT;
+        System.arraycopy(PRESET_VALUES[PRESET_DEFAULT], 0, LIVE, 0, PARAM_COUNT);
+        settleShell();
+    }
+
+    /** 单项钳制（只认它自己那一列的上下限）。 */
+    public static float clampParam(int idx, float v) {
+        if (idx < 0 || idx >= PARAM_COUNT) {
+            return 0.0f;
+        }
+        final float lo = PARAM_MIN[idx];
+        final float hi = PARAM_MAX[idx];
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    /**
+     * 🔴 <b>物理约束的收口处</b>：壳层内半径 + 间隙 ≤ 外半径 − 最小壳厚。
+     * <pre>
+     *   需要：outer ≥ inner + {@link #FIELD_INNER_GAP_BLOCKS} + {@link #FIELD_MIN_SHELL_THICKNESS_BLOCKS}
+     *   先抬外半径（抬得动就抬）；实在抬不动（已经顶到上限）就把内半径压下来。
+     *   两个方向都能得到一组合法值，因为：
+     *     outer≤5.0、inner≥1.2 ⇒ 内半径最多被压到 max(1.2, 5.0−0.67)=4.33 —— 恒可行
+     * </pre>
+     * ⚠️ 规则 ②（{@code shellRadii()}）在渲染侧还会再抬一次内半径（环划到哪点场就退到环外），
+     * 所以这里是"双保险"：即便有人绕开了这一条，渲染也不会画出重叠的两套。
+     */
+    private static void settleShell() {
+        final float need = FIELD_INNER_GAP_BLOCKS + FIELD_MIN_SHELL_THICKNESS_BLOCKS;
+        float inner = LIVE[P_FIELD_INNER];
+        float outer = LIVE[P_FIELD_OUTER];
+        if (outer < inner + need) {
+            final float want = inner + need;
+            if (want <= PARAM_MAX[P_FIELD_OUTER]) {
+                outer = want;
+            } else {
+                outer = PARAM_MAX[P_FIELD_OUTER];
+                inner = Math.max(PARAM_MIN[P_FIELD_INNER], outer - need);
+            }
+        }
+        LIVE[P_FIELD_INNER] = inner;
+        LIVE[P_FIELD_OUTER] = outer;
+    }
+
+    /** 第 idx 项的<b>出厂默认值</b>（= 「中」档的值）—— 这是"下标 ⇒ 常量"的唯一一处对应。 */
+    public static float defaultOf(int idx) {
+        return switch (idx) {
+            case P_RING_COUNT -> RING_COUNT;
+            case P_RING_SCALE -> RING_SCALE;
+            case P_RING_BRIGHT -> RING_BRIGHT;
+            case P_RING_TICK_DENSITY -> RING_TICK_DENSITY;
+            case P_RING_FLOW_SCALE -> RING_FLOW_SCALE;
+            case P_RING_PRECESS_SCALE -> RING_PRECESS_SCALE;
+            case P_FIELD_POINT_COUNT -> FIELD_POINT_COUNT;
+            case P_FIELD_INNER -> FIELD_INNER_RADIUS_BLOCKS;
+            case P_FIELD_OUTER -> FIELD_OUTER_RADIUS_BLOCKS;
+            case P_FIELD_LINK_THRESHOLD -> FIELD_LINK_THRESHOLD_BLOCKS;
+            case P_FIELD_LINK_MAX_PER_POINT -> FIELD_LINK_MAX_PER_POINT;
+            case P_FIELD_LINK_PERIOD -> FIELD_LINK_PERIOD_SEC;
+            case P_FIELD_BRIGHT -> FIELD_BRIGHT;
+            case P_GLOBAL_BRIGHT -> GLOBAL_BRIGHT;
+            case P_FIELD_FOLLOW_TAU -> FIELD_FOLLOW_TAU_SEC;
+            default -> Float.NaN;
+        };
+    }
+
+    // ---- 自检 ----
+
+    /** 自检结果（{@code bad == null} = 全过）。 */
+    public record Report(int pass, int total, String bad) {
+        public boolean ok() {
+            return bad == null;
+        }
+    }
+
+    /** 一条判据：{@code what} 失败时写进 bad。 */
+    private static void c(StringBuilder bad, int[] n, String what, boolean ok, String actual) {
+        n[1]++;
+        if (ok) {
+            n[0]++;
+        } else {
+            bad.append(' ').append(what).append("：得到 ").append(actual).append(';');
+        }
+    }
+
+    /**
+     * 🔴 <b>四档预设 + 15 项取值的离线自检</b>（机器比对，不靠人看）。
+     *
+     * <p>9 组判据 + 4 条负对照，全部走的是上面那些生产函数（{@link #setPreset} /
+     * {@link #nudge} / {@link #clampParam}），没有另写一套算术。
+     * <p>⚠️ 它<b>不改现场</b>：进来自存 {@code LIVE} 与档位，出去原样放回 ——
+     * 万一日后有人把它挂进游戏里跑，也不会把用户的档位抹掉。
+     */
+    public static Report presetSelfCheck() {
+        final float[] savedLive = LIVE.clone();
+        final int savedPreset = preset;
+        try {
+            final StringBuilder bad = new StringBuilder();
+            final int[] n = {0, 0};
+
+            // ① 中档 == 那批出厂默认值（逐项，机器比对）
+            for (int i = 0; i < PARAM_COUNT; i++) {
+                final float def = defaultOf(i);
+                final float got = PRESET_VALUES[PRESET_MID][i];
+                c(bad, n, "①「中」档第 " + (i + 1) + " 项「" + PARAM_NAME[i] + "」== 出厂默认值 "
+                                + fmt(def, 2), Float.compare(got, def) == 0, fmt(got, 2));
+            }
+            // ② 关档那一行不写值 ⇒ 必须与中档逐项相同
+            for (int i = 0; i < PARAM_COUNT; i++) {
+                c(bad, n, "②「关」档第 " + (i + 1) + " 项与中档相同（关档不写值）",
+                        Float.compare(PRESET_VALUES[PRESET_OFF][i], PRESET_VALUES[PRESET_MID][i]) == 0,
+                        fmt(PRESET_VALUES[PRESET_OFF][i], 2));
+            }
+            // ③ 每一档、每一项都落在安全区间内
+            for (int p = 0; p < PRESET_COUNT; p++) {
+                for (int i = 0; i < PARAM_COUNT; i++) {
+                    final float v = PRESET_VALUES[p][i];
+                    final boolean ok = v >= PARAM_MIN[i] - 1.0e-6f && v <= PARAM_MAX[i] + 1.0e-6f;
+                    c(bad, n, "③「" + presetName(p) + "」档第 " + (i + 1) + " 项「" + PARAM_NAME[i]
+                            + "」落在 [" + fmt(PARAM_MIN[i], 2) + ", " + fmt(PARAM_MAX[i], 2) + "]",
+                            ok, fmt(v, 2));
+                }
+            }
+            // ④ 壳层物理约束：外 − 内 ≥ 间隙 + 最小壳厚
+            for (int p = 0; p < PRESET_COUNT; p++) {
+                final float inner = PRESET_VALUES[p][P_FIELD_INNER];
+                final float outer = PRESET_VALUES[p][P_FIELD_OUTER];
+                final float need = FIELD_INNER_GAP_BLOCKS + FIELD_MIN_SHELL_THICKNESS_BLOCKS;
+                c(bad, n, "④「" + presetName(p) + "」档 外−内 = " + fmt(outer - inner, 2)
+                                + " ≥ " + fmt(need, 2) + "（间隙 " + fmt(FIELD_INNER_GAP_BLOCKS, 2)
+                                + " + 最小壳厚 " + fmt(FIELD_MIN_SHELL_THICKNESS_BLOCKS, 2) + "）",
+                        outer - inner >= need - 1.0e-6f, fmt(outer - inner, 2));
+            }
+            // ⑤ 弱 ≤ 中 ≤ 强 逐项单调（周期反向：越短越强），且不允许"三档全一样"
+            for (int i = 0; i < PARAM_COUNT; i++) {
+                final float w = PRESET_VALUES[PRESET_WEAK][i];
+                final float m = PRESET_VALUES[PRESET_MID][i];
+                final float s = PRESET_VALUES[PRESET_STRONG][i];
+                final boolean reverse = i == P_FIELD_LINK_PERIOD;   // 周期越短 = 呼吸越快 = 越强
+                final boolean ok = reverse ? (w >= m && m >= s) : (w <= m && m <= s);
+                c(bad, n, "⑤ 第 " + (i + 1) + " 项「" + PARAM_NAME[i] + "」弱≤中≤强"
+                        + (reverse ? "（周期是反向：越短越强）" : ""), ok, fmt(w, 2) + " / " + fmt(m, 2)
+                        + " / " + fmt(s, 2));
+            }
+            // ⑥ 结构性上限：环数 ≤ 环表长度、光点数 ≤ 光点数组容量
+            for (int p = PRESET_WEAK; p <= PRESET_STRONG; p++) {
+                c(bad, n, "⑥「" + presetName(p) + "」档 环数 ≤ " + RING_TABLE.length + "（环表就这么多条）",
+                        PRESET_VALUES[p][P_RING_COUNT] <= RING_TABLE.length,
+                        fmt(PRESET_VALUES[p][P_RING_COUNT], 0));
+                c(bad, n, "⑥「" + presetName(p) + "」档 光点数 ≤ " + ShanhaiHoloSurround.FIELD_CAPACITY
+                                + "（光点数组是定长预分配）",
+                        PRESET_VALUES[p][P_FIELD_POINT_COUNT] <= ShanhaiHoloSurround.FIELD_CAPACITY,
+                        fmt(PRESET_VALUES[p][P_FIELD_POINT_COUNT], 0));
+            }
+            // ⑦ 运行期钳制：对每一项，把值拖到区间外一步 ⇒ 结果必须仍在区间内
+            for (int i = 0; i < PARAM_COUNT; i++) {
+                final float low = setParam(i, PARAM_MIN[i] - PARAM_STEP[i] * 3.0f);
+                c(bad, n, "⑦ 第 " + (i + 1) + " 项「" + PARAM_NAME[i] + "」拖到底仍 ≥ " + fmt(PARAM_MIN[i], 2),
+                        low >= PARAM_MIN[i] - 1.0e-6f, fmt(low, 2));
+                final float high = setParam(i, PARAM_MAX[i] + PARAM_STEP[i] * 3.0f);
+                c(bad, n, "⑦ 第 " + (i + 1) + " 项「" + PARAM_NAME[i] + "」拖到顶仍 ≤ " + fmt(PARAM_MAX[i], 2),
+                        high <= PARAM_MAX[i] + 1.0e-6f, fmt(high, 2));
+            }
+            // ⑧ 「关」档不写值：切到关，15 项必须逐项不变
+            resetTuning();
+            final float[] before = LIVE.clone();
+            setPreset(PRESET_OFF);
+            for (int i = 0; i < PARAM_COUNT; i++) {
+                c(bad, n, "⑧ 切到「关」之后第 " + (i + 1) + " 项「" + PARAM_NAME[i] + "」原样保留",
+                        Float.compare(before[i], LIVE[i]) == 0, fmt(LIVE[i], 2));
+            }
+            // ⑨ 三档整组替换：切到某一档之后 LIVE 必须逐项等于那一档的表
+            for (int p = PRESET_WEAK; p <= PRESET_STRONG; p++) {
+                setPreset(p);
+                for (int i = 0; i < PARAM_COUNT; i++) {
+                    c(bad, n, "⑨ 切到「" + presetName(p) + "」之后第 " + (i + 1) + " 项「"
+                                    + PARAM_NAME[i] + "」== 那一档的表",
+                            Float.compare(LIVE[i], PRESET_VALUES[p][i]) == 0, fmt(LIVE[i], 2));
+                }
+            }
+
+            // ---- 负对照：判据必须真的会响（否则"全绿"只是因为判据从不报错）----
+            final StringBuilder neg = new StringBuilder();
+            // N1：把中档第 1 项改掉 ⇒ ① 组必须报红
+            final float[][] n1 = copyTable();
+            n1[PRESET_MID][P_RING_COUNT] = 5.0f;
+            final String n1bad = scanTable(n1);
+            c(bad, n, "N1 负对照：把「中」档第 1 项改掉 ⇒ 判据必须报出「!= 出厂默认值」",
+                    n1bad.contains("①"), n1bad.isEmpty() ? "（没有报红）" : "报红了");
+            // N2：把强档外半径压到内半径以下 ⇒ ④ 组必须报红
+            final float[][] n2 = copyTable();
+            n2[PRESET_STRONG][P_FIELD_OUTER] = n2[PRESET_STRONG][P_FIELD_INNER] - 0.1f;
+            final String n2bad = scanTable(n2);
+            c(bad, n, "N2 负对照：把强档外半径压到内半径以内 ⇒ 判据必须报出壳层约束被破坏",
+                    n2bad.contains("④"), n2bad.isEmpty() ? "（没有报红）" : "报红了");
+            // N3：把弱档亮度抬到强档之上 ⇒ ⑤ 组必须报红
+            final float[][] n3 = copyTable();
+            n3[PRESET_WEAK][P_FIELD_BRIGHT] = 2.0f;
+            final String n3bad = scanTable(n3);
+            c(bad, n, "N3 负对照：把弱档点场亮度抬到强档之上 ⇒ 判据必须报出单调性被破坏",
+                    n3bad.contains("⑤"), n3bad.isEmpty() ? "（没有报红）" : "报红了");
+            // N4：把某档光点数设成容量 +1 ⇒ ⑥ 组必须报红
+            final float[][] n4 = copyTable();
+            n4[PRESET_MID][P_FIELD_POINT_COUNT] = ShanhaiHoloSurround.FIELD_CAPACITY + 1.0f;
+            final String n4bad = scanTable(n4);
+            c(bad, n, "N4 负对照：把光点数设成容量+1 ⇒ 判据必须报出结构性上限被顶破",
+                    n4bad.contains("⑥"), n4bad.isEmpty() ? "（没有报红）" : "报红了");
+            // neg 只是把四条负对照的"报红内容"留个痕（便于日后排查为什么某条不响）
+            neg.append("N1=").append(n1bad.isEmpty() ? "-" : "red")
+                    .append(" N2=").append(n2bad.isEmpty() ? "-" : "red")
+                    .append(" N3=").append(n3bad.isEmpty() ? "-" : "red")
+                    .append(" N4=").append(n4bad.isEmpty() ? "-" : "red");
+            if (neg.length() == 0) {
+                throw new IllegalStateException();
+            }
+
+            return new Report(n[0], n[1], bad.length() == 0 ? null : bad.toString());
+        } finally {
+            System.arraycopy(savedLive, 0, LIVE, 0, PARAM_COUNT);
+            preset = savedPreset;
+        }
+    }
+
+    /** 复制一张档位表（负对照用）。 */
+    private static float[][] copyTable() {
+        final float[][] out = new float[PRESET_COUNT][PARAM_COUNT];
+        for (int p = 0; p < PRESET_COUNT; p++) {
+            System.arraycopy(PRESET_VALUES[p], 0, out[p], 0, PARAM_COUNT);
+        }
+        return out;
+    }
+
+    /**
+     * 把 ①②③④⑤⑥ 六组判据跑在一张<b>给定</b>的表上，返回失败项的组号前缀串。
+     * <p>抽出来只为一件事：负对照要拿一张<b>故意改坏</b>的表跑同一套判据，
+     * 否则"判据会响"这件事就永远只是推理。
+     */
+    private static String scanTable(float[][] table) {
+        final StringBuilder bad = new StringBuilder();
+        for (int i = 0; i < PARAM_COUNT; i++) {
+            if (Float.compare(table[PRESET_MID][i], defaultOf(i)) != 0) {
+                bad.append('①');
+            }
+            if (Float.compare(table[PRESET_OFF][i], table[PRESET_MID][i]) != 0) {
+                bad.append('②');
+            }
+        }
+        for (int p = 0; p < PRESET_COUNT; p++) {
+            for (int i = 0; i < PARAM_COUNT; i++) {
+                final float v = table[p][i];
+                if (v < PARAM_MIN[i] - 1.0e-6f || v > PARAM_MAX[i] + 1.0e-6f) {
+                    bad.append('③');
+                }
+            }
+            final float need = FIELD_INNER_GAP_BLOCKS + FIELD_MIN_SHELL_THICKNESS_BLOCKS;
+            if (table[p][P_FIELD_OUTER] - table[p][P_FIELD_INNER] < need - 1.0e-6f) {
+                bad.append('④');
+            }
+        }
+        for (int i = 0; i < PARAM_COUNT; i++) {
+            final float w = table[PRESET_WEAK][i];
+            final float m = table[PRESET_MID][i];
+            final float s = table[PRESET_STRONG][i];
+            final boolean reverse = i == P_FIELD_LINK_PERIOD;
+            if (reverse ? !(w >= m && m >= s) : !(w <= m && m <= s)) {
+                bad.append('⑤');
+            }
+        }
+        for (int p = PRESET_WEAK; p <= PRESET_STRONG; p++) {
+            if (table[p][P_RING_COUNT] > RING_TABLE.length
+                    || table[p][P_FIELD_POINT_COUNT] > ShanhaiHoloSurround.FIELD_CAPACITY) {
+                bad.append('⑥');
+            }
+        }
+        return bad.toString();
+    }
+
+    /** 一行读数（日志与 Harness 都用它）。 */
+    public static String presetSelfCheckLine() {
+        final Report r = presetSelfCheck();
+        return "holo_surround_preset_selftest " + r.pass() + "/" + r.total() + " PASS=" + r.ok()
+                + (r.ok() ? "（判据：「中」档逐项 == 那批出厂默认值 / 关档不写值 / 四档逐项落在安全区间 / "
+                + "壳层外−内 ≥ 间隙+最小壳厚 / 弱≤中≤强 逐项单调 / 结构性上限（环数≤"
+                + RING_TABLE.length + "、光点数≤" + ShanhaiHoloSurround.FIELD_CAPACITY
+                + "）/ ± 步进越界被钳住 / 关档原样保留 / 整组替换；"
+                + "另含 4 条负对照：改坏中档 / 压扁壳层 / 弱档比强档亮 / 光点数顶破容量）"
+                : (" FAILED:" + r.bad()));
     }
 }

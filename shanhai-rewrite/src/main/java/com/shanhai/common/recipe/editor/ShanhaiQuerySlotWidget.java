@@ -51,6 +51,8 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
 
     private static final int ACT_SET = 11;
     private static final int ACT_CLEAR = 12;
+    /** 🆕 第 14 刀：放进来的是流体（载荷 = LDLib 的 FluidStack）。 */
+    private static final int ACT_SET_FLUID = 13;
 
     private final ShanhaiRecipeEditorWorkspace session;
 
@@ -64,7 +66,12 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
         final int x = getPositionX();
         final int y = getPositionY();
         final ItemStack stack = session == null ? ItemStack.EMPTY : session.queryItem();
-        final boolean has = stack != null && !stack.isEmpty();
+        final com.lowdragmc.lowdraglib.side.fluid.FluidStack fluid =
+                session == null ? com.lowdragmc.lowdraglib.side.fluid.FluidStack.empty()
+                        : session.queryFluid();
+        final boolean hasFluid = fluid != null && !fluid.isEmpty();
+        final boolean hasItem = !hasFluid && stack != null && !stack.isEmpty();
+        final boolean has = hasItem || hasFluid;
         graphics.fill(x, y, x + CELL, y + CELL, has ? FRAME_FILLED : FRAME_EMPTY);
         graphics.fill(x + 1, y + 1, x + CELL - 1, y + CELL - 1, CELL_BG);
         if (!has) {
@@ -73,23 +80,32 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
             //    （都是个空心方框，谁也说不清是哪种）⇒ 空态必须有自己的样子。
             graphics.fill(x + 5, y + 5, x + CELL - 5, y + CELL - 5, 0xFF4A4A4A);
             graphics.fill(x + 6, y + 12, x + CELL - 6, y + 13, 0xFF9A9A9A);
-            measureOnce(null);
+            measureOnce(null, null);
             return;
         }
-        // 🔴 第 12 刀：改用 **LDLib 自己画槽位的那一个函数** —— 这是"图标画不出来"的修法。
-        //    取证：LDLib 自己的 `SlotWidget.drawInBackground` 画物品走的就是
-        //    `DrawerHelper.drawItemStack(graphics, stack, x+1, y+1, -1, null)`，
-        //    它内部会先把 shader 颜色置白（`RenderSystem.setShaderColor(1,1,1,1)`）再
-        //    `enableDepthTest()` / `depthMask(true)` / 抬高 z 再画。
-        //    直接调 `graphics.renderItem` 会继承**调用方留下的状态**（我们的面板前面画过
-        //    底色方框、又处在 LDLib 的半透明裁剪层里）⇒ 图标可能整块看不见/被盖住。
-        //    用户原话「物品框里还是没有图标」正是这一类"服务端有、客户端也有、就是看不见"。
-        com.lowdragmc.lowdraglib.gui.util.DrawerHelper.drawItemStack(
-                graphics, stack, x + 1, y + 1, -1, null);
-        graphics.renderItemDecorations(Minecraft.getInstance().font, stack, x + 1, y + 1);
-        // 底下一行小字：这是"查询用的物品"（不是背包格，拖进来不会消耗）
+        if (hasFluid) {
+            // 🆕 第 14 刀：流体格 —— 直接复用 IO 格子那条**已经过运行期验证**的画法
+            //    （still 贴图 ＋ tint，拿不到贴图退回纯色块，绝不画成空白）。
+            ShanhaiIOWidget.drawFluidSprite(graphics, fluid, x + 1, y + 1);
+            ShanhaiIOWidget.smallText(graphics, Minecraft.getInstance(),
+                    ShanhaiIOWidget.shortAmount(fluid.getAmount()), x + CELL - 1, y + CELL - 1,
+                    0xFFFFFFFF, true);
+        } else {
+            // 🔴 第 12 刀：改用 **LDLib 自己画槽位的那一个函数** —— 这是"图标画不出来"的修法。
+            //    取证：LDLib 自己的 `SlotWidget.drawInBackground` 画物品走的就是
+            //    `DrawerHelper.drawItemStack(graphics, stack, x+1, y+1, -1, null)`，
+            //    它内部会先把 shader 颜色置白（`RenderSystem.setShaderColor(1,1,1,1)`）再
+            //    `enableDepthTest()` / `depthMask(true)` / 抬高 z 再画。
+            //    直接调 `graphics.renderItem` 会继承**调用方留下的状态**（我们的面板前面画过
+            //    底色方框、又处在 LDLib 的半透明裁剪层里）⇒ 图标可能整块看不见/被盖住。
+            //    用户原话「物品框里还是没有图标」正是这一类"服务端有、客户端也有、就是看不见"。
+            com.lowdragmc.lowdraglib.gui.util.DrawerHelper.drawItemStack(
+                    graphics, stack, x + 1, y + 1, -1, null);
+            graphics.renderItemDecorations(Minecraft.getInstance().font, stack, x + 1, y + 1);
+        }
+        // 底下一行小字：这是"查询用的东西"（不是背包格，拖进来不会消耗）
         graphics.drawString(Minecraft.getInstance().font, "§8查", x + 2, y + CELL - 8, 0xFFFFFF, false);
-        measureOnce(stack);
+        measureOnce(stack, fluid);
     }
 
     /**
@@ -103,15 +119,31 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
      *   query_slot_render has=true item=minecraft:oak_planks  ⇒ 客户端有东西（那就是画的问题）
      * </pre>
      */
-    private static void measureOnce(ItemStack stack) {
-        final String key = stack == null || stack.isEmpty() ? "(empty)"
-                : String.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()));
+    private static void measureOnce(ItemStack stack,
+                                    com.lowdragmc.lowdraglib.side.fluid.FluidStack fluid) {
+        final String key;
+        if (fluid != null && !fluid.isEmpty()) {
+            key = "fluid:" + net.minecraft.core.registries.BuiltInRegistries.FLUID
+                    .getKey(fluid.getFluid()) + ":" + fluid.getAmount() + "mB";
+        } else if (stack == null || stack.isEmpty()) {
+            key = "(empty)";
+        } else {
+            key = String.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM
+                    .getKey(stack.getItem()));
+        }
         if (!MEASURED.add(key)) {
             return;
         }
-        ShanhaiMod.LOGGER.info("{} query_slot_render has={} item={} count={}",
-                PREFIX, stack != null && !stack.isEmpty(), key,
-                stack == null ? 0 : stack.getCount());
+        ShanhaiMod.LOGGER.info("{} query_slot_render has={} item={} count={} fluid={} amount={}",
+                PREFIX, stack != null && !stack.isEmpty() || fluid != null && !fluid.isEmpty(),
+                stack == null ? "(none)"
+                        : String.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM
+                        .getKey(stack.getItem())),
+                stack == null ? 0 : stack.getCount(),
+                fluid == null || fluid.isEmpty() ? "(none)"
+                        : String.valueOf(net.minecraft.core.registries.BuiltInRegistries.FLUID
+                        .getKey(fluid.getFluid())),
+                fluid == null ? 0 : fluid.getAmount());
     }
 
     /** 已经量过的键（每个物品只写一行，免得每帧刷屏）。 */
@@ -123,13 +155,28 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
         if (isMouseOverElement(mouseX, mouseY)) {
             tooltipTexts.clear();
             final ItemStack stack = session == null ? ItemStack.EMPTY : session.queryItem();
-            if (stack != null && !stack.isEmpty()) {
+            final com.lowdragmc.lowdraglib.side.fluid.FluidStack fluid =
+                    session == null ? com.lowdragmc.lowdraglib.side.fluid.FluidStack.empty()
+                            : session.queryFluid();
+            if (fluid != null && !fluid.isEmpty()) {
+                String name;
+                try {
+                    name = com.shanhai.common.text.ShanhaiTextParser
+                            .stripStyleCode(fluid.getDisplayName().getString());
+                } catch (Throwable t) {
+                    name = String.valueOf(net.minecraft.core.registries.BuiltInRegistries.FLUID
+                            .getKey(fluid.getFluid()));
+                }
+                tooltipTexts.add(Component.literal("§f查询流体：§7" + name + " §8" + fluid.getAmount() + "mB"));
+                tooltipTexts.add(Component.literal("§8右键清空 · 再从 JEI 拖一个进来换掉"));
+            } else if (stack != null && !stack.isEmpty()) {
                 tooltipTexts.add(Component.literal("§f查询物品：§7"
                         + com.shanhai.common.text.ShanhaiTextParser
                         .stripStyleCode(stack.getHoverName().getString())));
                 tooltipTexts.add(Component.literal("§8右键清空 · 再从 JEI 拖一个进来换掉"));
             } else {
-                tooltipTexts.add(Component.literal("§8从 JEI 拖一个物品到这里（不会消耗任何东西）"));
+                tooltipTexts.add(Component.literal("§8从 JEI 拖一个物品或流体到这里（不会消耗任何东西）"));
+                tooltipTexts.add(Component.literal("§8拖进来的流体也可以点「获取途径 / 作为物品的用处」"));
             }
         }
         super.drawInForeground(graphics, mouseX, mouseY, partialTicks);
@@ -157,10 +204,16 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
         if (session == null) {
             return List.of();
         }
-        // 只认物品：三问都是按物品问的（流体进这个框没有对应语义）。
-        // 收不下就不留落点 —— 但面板那一层已经记账（见 ShanhaiDragStats），不是静默。
-        final ItemStack stack = ShanhaiRecipeEditorWorkspace.toItemStack(unwrapTyped(ingredient));
-        if (stack == null || stack.isEmpty()) {
+        // 🔴🔴 2026-10-06（第 14 刀）用户原话（逐字）：
+        //   「还有一个很严重的问题，就是我在第一面中<b>无法拖动流体</b>到查询物品框中，<b>流体也是需要查询的</b>」
+        //   根因就在这一行：原来只 `toItemStack(...)`，流体落下来得到 EMPTY ⇒ 直接 `return List.of()`
+        //   ⇒ **一个落点都没有** ⇒ JEI 连拖都不开始（与 IO 格子当年那条事故同款）。
+        //   ⇒ 现在两样都收：物品走老路，流体走 `ShanhaiIOWidget.normalizeAny`（它会把 JEI 的
+        //     `ITypedIngredient` 剥成 LDLib 的 FluidStack，用的就是 IO 格子那条已验证的转换）。
+        final Object v = ShanhaiIOWidget.normalizeAny(unwrapTyped(ingredient));
+        final boolean isItem = v instanceof ItemStack s && !s.isEmpty();
+        final boolean isFluid = v instanceof com.lowdragmc.lowdraglib.side.fluid.FluidStack f && !f.isEmpty();
+        if (!isItem && !isFluid) {
             return List.of();
         }
         final ShanhaiQuerySlotWidget self = this;
@@ -174,18 +227,29 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
 
             @Override
             public void accept(Object dropped) {
-                final ItemStack v = ShanhaiRecipeEditorWorkspace.toItemStack(unwrapTyped(dropped));
-                if (v == null || v.isEmpty()) {
-                    ShanhaiDragStats.dropRejected("query_slot_not_item");
+                final Object got = ShanhaiIOWidget.normalizeAny(unwrapTyped(dropped));
+                if (got instanceof ItemStack stack && !stack.isEmpty()) {
+                    ShanhaiDragStats.dropAccepted();
+                    session.offerQueryItem(stack);
+                    final ItemStack send = stack.copy();
+                    self.writeClientAction(ACT_SET, buf -> buf.writeItem(send));
+                    ShanhaiMod.LOGGER.info("{} query_slot_drop kind=item item={} n={} totals({})",
+                            PREFIX, net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()),
+                            stack.getCount(), ShanhaiDragStats.statsLine());
                     return;
                 }
-                ShanhaiDragStats.dropAccepted();
-                session.offerQueryItem(v);
-                final ItemStack send = v.copy();
-                self.writeClientAction(ACT_SET, buf -> buf.writeItem(send));
-                ShanhaiMod.LOGGER.info("{} query_slot_drop item={} n={} totals({})",
-                        PREFIX, net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(v.getItem()),
-                        v.getCount(), ShanhaiDragStats.statsLine());
+                if (got instanceof com.lowdragmc.lowdraglib.side.fluid.FluidStack fluid && !fluid.isEmpty()) {
+                    ShanhaiDragStats.dropAccepted();
+                    session.offerQueryFluid(fluid);
+                    final com.lowdragmc.lowdraglib.side.fluid.FluidStack send = fluid.copy();
+                    // ⚠️ 只发一次、载荷是那一桶本身（写成"先发个空栈占位"是错的：那会让服务端先收一个空流体）
+                    self.writeClientAction(ACT_SET_FLUID, buf -> send.writeToBuf(buf));
+                    ShanhaiMod.LOGGER.info("{} query_slot_drop kind=fluid fluid={} amount={} totals({})",
+                            PREFIX, net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(fluid.getFluid()),
+                            fluid.getAmount(), ShanhaiDragStats.statsLine());
+                    return;
+                }
+                ShanhaiDragStats.dropRejected("query_slot_not_item_or_fluid");
             }
         };
         ShanhaiDragStats.phantomCall(1);
@@ -218,8 +282,17 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
                 case ACT_SET -> {
                     final ItemStack v = buffer.readItem();
                     final boolean ok = session.offerQueryItem(v);
-                    ShanhaiMod.LOGGER.info("{} query_slot_set ok={} item={}", PREFIX, ok,
+                    ShanhaiMod.LOGGER.info("{} query_slot_set ok={} kind=item item={}", PREFIX, ok,
                             net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(v.getItem()));
+                }
+                case ACT_SET_FLUID -> {
+                    // 🆕 第 14 刀：服务端收流体（形状与 IO 格子那条流体通道同一个函数对）
+                    final com.lowdragmc.lowdraglib.side.fluid.FluidStack f =
+                            com.lowdragmc.lowdraglib.side.fluid.FluidStack.readFromBuf(buffer);
+                    final boolean ok = session.offerQueryFluid(f);
+                    ShanhaiMod.LOGGER.info("{} query_slot_set ok={} kind=fluid fluid={} amount={}", PREFIX, ok,
+                            net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(f.getFluid()),
+                            f.getAmount());
                 }
                 case ACT_CLEAR -> ShanhaiMod.LOGGER.info("{} query_slot_clear ok={}", PREFIX,
                         session.clearQueryItem());
