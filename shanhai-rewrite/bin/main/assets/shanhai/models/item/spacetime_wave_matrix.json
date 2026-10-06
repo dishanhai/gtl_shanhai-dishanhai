@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "shanhai:block/multiblock/spacetime_wave_matrix/overlay_front"
+  }
+}

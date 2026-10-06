@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "shanhai:block/machine/part/cosmic_clean_gravity_maintenance_hatch"
+  }
+}

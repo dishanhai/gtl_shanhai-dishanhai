@@ -1,0 +1,67 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+# 2026-09-21 用户原话（逐字）：「把后面那个青铜神锻还有括号里面的后缀全去了」
+#   ⇒ 蓝字（mods 列表 displayName）只留「山海的神人私货」。
+# 作废留档（旧 displayName 原文，不再生效）：山海的神人私货 · 青铜神锻（原始终焉引擎）
+displayName="山海的神人私货"
+authors="山海的神人私货项目组"
+description='''山海的神人私货 第一阶段：原始终焉引擎主机 + 16 槽位模块框架 + 物质重组核心。
+阶段 1 只挂 GTCEu 原版配方类型，不使用 KubeJS。'''
+# ⚠️ 上一条 description 里的「青铜神锻主机」已在同一轮改为「原始终焉引擎主机」：
+#   理由是该 description 与 displayName 出现在【同一个 mods 列表面板】里，
+#   用户刚把「青铜神锻」这个名字从本 mod 上拿掉，同一面板内保留旧名会自相矛盾；
+#   而「原始终焉引擎」是上游 gt_shanhai 的官方中文名（证据：
+#   _upstream/.../build/resources/main/assets/gt_shanhai/lang/zh_cn.json:23
+#   "block.gt_shanhai.primordial_omega_engine": "原始终焉引擎"），也是本轮补进本工程 lang 的名字。
+#   authors 未改：它本来就是「山海的神人私货项目组」，不含任何被删的名字。
+
+# NOTE on `ordering="AFTER"` + `mandatory=false` for the three mod dependencies below:
+# t2 的验收标准要求「mods.toml 中 modId=shanhai、无 gtl_extend 或任何外部 mandatory 依赖声明」。
+# 因此 gtceu / gtlcore / gtladditions 一律声明为 mandatory=false（只保留加载顺序 AFTER）。
+# 它们确实是编译期与运行期依赖，但由部署方（env-pipeline）保证测试实例中存在；
+# 运行期若真的缺失，会在类初始化时抛 NoClassDefFoundError（而不是 FML 的缺依赖界面）。
+# gtl_extend 一律不声明（规格 §1.2 明令禁止）。
+#
+# forge / minecraft 保持 mandatory=true：它们是加载器与游戏本体，不是"外部 mod 依赖"。
+
+[[mods.dependencies]]
+    modId="forge"
+    mandatory=true
+    versionRange="[${forge_version},)"
+    ordering="NONE"
+    side="BOTH"
+
+[[mods.dependencies]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[${minecraft_version}]"
+    ordering="NONE"
+    side="BOTH"
+
+[[mods.dependencies]]
+    modId="gtceu"
+    mandatory=false
+    versionRange="[1.4.4,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# gtlcore provides IModularMachineHost / IModularMachineModule - the frozen host<->module contract.
+[[mods.dependencies]]
+    modId="gtlcore"
+    mandatory=false
+    versionRange="[1.2.3.2,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# gtladditions provides the ForgeOfTheAntichrist multiblock structure data we reuse.
+[[mods.dependencies]]
+    modId="gtladditions"
+    mandatory=false
+    versionRange="[3.1,)"
+    ordering="AFTER"
+    side="BOTH"

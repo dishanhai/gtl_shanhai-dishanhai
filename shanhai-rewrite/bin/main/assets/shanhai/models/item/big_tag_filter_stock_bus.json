@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "shanhai:block/casings/big_tag_filter_stock_bus_casing"
+  }
+}

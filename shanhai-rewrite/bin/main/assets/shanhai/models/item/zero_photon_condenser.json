@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "shanhai:block/multiblock/zero_photon_condenser/overlay_front"
+  }
+}

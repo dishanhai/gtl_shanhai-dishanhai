@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "shanhai:block/multiblock/worldline_cracking_hub/overlay_front"
+  }
+}

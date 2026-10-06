@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "shanhai:block/multiblock/taixu_smelting_furnace/world_line_stripping_oscillation_generator/overlay_front"
+  }
+}
