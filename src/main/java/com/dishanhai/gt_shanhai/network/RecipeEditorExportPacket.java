@@ -6,8 +6,10 @@ import com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeConditions;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorValidation;
+import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeJsExport;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -31,7 +33,8 @@ import java.util.function.Supplier;
  * Writes the edited recipe as a datapack JSON GTCEu and GTLCore already decode.
  * The namespace is the one in the edited id. A path with no namespace keeps the
  * opened recipe's namespace. Files are gathered under
- * {@code kubejs/data/Exported_Recipe/<namespace>/recipes/<path>.json}.
+ * {@code kubejs/data/Exported_Recipe/<type>/<namespace>/<path>.json}.
+ * {@code <type>} is the path of the recipe type id ({@code gtceu:qft} → {@code qft}).
  * {@code Exported_Recipe} is only a folder, not a recipe namespace.
  */
 public final class RecipeEditorExportPacket {
@@ -111,9 +114,14 @@ public final class RecipeEditorExportPacket {
         }
         if (parsed == null) return null;
         String path = parsed.getPath();
-        if (path.isEmpty() || path.charAt(0) == '/' || path.charAt(path.length() - 1) == '/') return null;
-        if (path.contains("..") || path.contains("//")) return null;
+        if (!folderSafe(path)) return null;
         return parsed;
+    }
+
+    private static boolean folderSafe(String path) {
+        if (path == null || path.isEmpty()) return false;
+        if (path.charAt(0) == '/' || path.charAt(path.length() - 1) == '/') return false;
+        return !path.contains("..") && !path.contains("//");
     }
 
     private static RecipeEditorResultPacket export(RecipeEditorExportPacket packet) {
@@ -121,7 +129,8 @@ public final class RecipeEditorExportPacket {
             if (packet.payload.length() > ShanhaiRecipeEditorValidation.MAX_PAYLOAD_CHARS) {
                 return invalid("editor-payload-too-large");
             }
-            if (ResourceLocation.tryParse(packet.recipeTypeId) == null
+            ResourceLocation typeId = ResourceLocation.tryParse(packet.recipeTypeId);
+            if (typeId == null || !folderSafe(typeId.getPath())
                     || ResourceLocation.tryParse(packet.sourceRecipeId) == null) {
                 return invalid("invalid-recipe-identity");
             }
@@ -153,21 +162,25 @@ public final class RecipeEditorExportPacket {
 
             JsonElement encoded = GTRecipeSerializer.CODEC.encodeStart(JsonOps.INSTANCE, recipe)
                     .getOrThrow(false, GTDishanhaiMod.LOGGER::warn);
-            if (GTRecipeSerializer.CODEC.parse(JsonOps.INSTANCE, encoded).result().isEmpty()) {
+            if (!encoded.isJsonObject()
+                    || GTRecipeSerializer.CODEC.parse(JsonOps.INSTANCE, encoded).result().isEmpty()) {
                 return invalid("export-codec-rejected");
             }
+            writeEnabledCondition(encoded.getAsJsonObject(), exportId);
 
             Path root = FMLPaths.GAMEDIR.get()
                     .resolve("kubejs").resolve("data").resolve(EXPORT_BUCKET)
-                    .resolve(exportId.getNamespace()).resolve("recipes")
                     .toAbsolutePath().normalize();
-            Path file = root.resolve(exportId.getPath() + ".json").normalize();
+            Path file = root.resolve(typeId.getPath())
+                    .resolve(exportId.getNamespace())
+                    .resolve(exportId.getPath() + ".json")
+                    .normalize();
             if (!file.startsWith(root)) return invalid("invalid-export-path");
             Files.createDirectories(file.getParent());
             Files.writeString(file, PRETTY.toJson(encoded), StandardCharsets.UTF_8);
 
-            String relative = "kubejs/data/" + EXPORT_BUCKET + "/" + exportId.getNamespace()
-                    + "/recipes/" + exportId.getPath() + ".json";
+            String relative = "kubejs/data/" + EXPORT_BUCKET + "/" + typeId.getPath()
+                    + "/" + exportId.getNamespace() + "/" + exportId.getPath() + ".json";
             return new RecipeEditorResultPacket(
                     RecipeEditorResultPacket.Status.SUCCESS,
                     "export",
@@ -177,6 +190,31 @@ public final class RecipeEditorExportPacket {
             GTDishanhaiMod.LOGGER.warn("[配方编辑器] 导出配方 json 失败", e);
             return invalid("export-failed");
         }
+    }
+
+    /**
+     * Forge datapack condition, separate from GTCEu {@code recipeConditions}.
+     * The key is {@code namespace:leaf}, matching {@code gt_shanhai:ku_ming_yuan_yang}.
+     */
+    private static void writeEnabledCondition(JsonObject recipe, ResourceLocation exportId) {
+        String enabledId = ShanhaiRecipeJsExport.enabledRecipeId(exportId);
+        if (enabledId.isEmpty()) return;
+        JsonArray conditions = recipe.has("conditions") && recipe.get("conditions").isJsonArray()
+                ? recipe.getAsJsonArray("conditions") : new JsonArray();
+        for (JsonElement element : conditions) {
+            if (!element.isJsonObject()) continue;
+            JsonObject existing = element.getAsJsonObject();
+            if (existing.has("type")
+                    && "gt_shanhai:recipe_enabled".equals(existing.get("type").getAsString())) {
+                return;
+            }
+        }
+        JsonObject condition = new JsonObject();
+        condition.addProperty("type", "gt_shanhai:recipe_enabled");
+        condition.addProperty("recipeId", enabledId);
+        condition.addProperty("defaultEnabled", false);
+        conditions.add(condition);
+        recipe.add("conditions", conditions);
     }
 
     private static RecipeEditorResultPacket invalid(String message) {

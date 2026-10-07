@@ -46,6 +46,7 @@ import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.api.item.tool.ae2.patternTool.Ae2GtmProcessingPattern;
 import org.gtlcore.gtlcore.common.data.GTLStats;
+import org.gtlcore.gtlcore.integration.ae2.WirelessTerminalGridResolver;
 import org.gtlcore.gtlcore.integration.ae2.pattern.PatternEncoderMetadata;
 import org.gtlcore.gtlcore.integration.ae2.pattern.PatternQuickUploadMetadata;
 import org.gtlcore.gtlcore.integration.ae2.pattern.PatternQuickUploadService;
@@ -235,6 +236,104 @@ public final class JeiPatternQuickEncodeService {
         for (int i = 0; i < committedCount; i++) {
             GTLStats.awardPatternEncoded(player);
         }
+    }
+
+    /**
+     * One edited recipe from the recipe modifier. Encoding uses the same pattern
+     * writer as JEI. Upload uses the wireless terminal already on the player,
+     * because the editor menu is not the pattern terminal.
+     *
+     * @return false when nothing was encoded or the blank pattern could not be paid
+     */
+    public static boolean encodeEdited(ServerPlayer player, GTRecipe recipe) {
+        if (player == null || recipe == null || recipe.recipeType == null
+                || recipe.recipeType.registryName == null) {
+            if (player != null) show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
+            return false;
+        }
+        ItemStack pattern;
+        try {
+            Ae2GtmProcessingPattern encoded = ShanhaiPatternEncoder.encode(recipe, player, null, true);
+            pattern = encoded == null ? ItemStack.EMPTY : encoded.getPatternItemStack();
+            if (!isExactValidPattern(player, recipe, pattern)) {
+                show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
+                return false;
+            }
+            pattern = pattern.copy();
+            pattern.setCount(1);
+            PatternEncoderMetadata.writeEncoder(pattern, player.getUUID(), player.getGameProfile().getName());
+        } catch (RuntimeException exception) {
+            GTDishanhaiMod.LOGGER.error("[RecipeEditorEncode] 编码配方失败 recipe={}", recipe.id, exception);
+            show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
+            return false;
+        }
+
+        IGrid grid = WirelessTerminalGridResolver.find(player, player.level());
+        IGridNode node = grid == null ? null : grid.getPivot();
+        MEStorage storage = grid == null || grid.getStorageService() == null
+                ? null : grid.getStorageService().getInventory();
+        if (node == null || node.getGrid() == null || storage == null) {
+            show(player, "message.gt_shanhai.recipe_editor.quick_encode.no_grid");
+            return false;
+        }
+
+        String recipeTypeId = recipe.recipeType.registryName.toString();
+        List<PatternQuickUploadService.Target> availableTargets;
+        try {
+            availableTargets = new ArrayList<>(findAutomaticStellarTargets(player, node, pattern));
+        } catch (RuntimeException exception) {
+            GTDishanhaiMod.LOGGER.error("[RecipeEditorEncode] 星律目标搜索失败 type={}", recipeTypeId, exception);
+            availableTargets = new ArrayList<>();
+        }
+        IActionSource actionSource = IActionSource.ofPlayer(player);
+        PatternQuickUploadService.Target currentTarget = null;
+        PatternQuickUploadService.UploadResult result = null;
+        while (result == null) {
+            if (currentTarget == null) {
+                currentTarget = selectAutomaticTarget(player.level().dimension(),
+                        player.blockPosition(), availableTargets);
+            }
+            if (currentTarget == null) break;
+            result = safeInsertIntoTarget(player, pattern, currentTarget);
+            if (result != null) break;
+            invalidateCachedTarget(node, currentTarget);
+            removeTarget(availableTargets, currentTarget);
+            currentTarget = null;
+        }
+
+        List<UploadedPattern> uploaded = new ArrayList<>();
+        List<UploadedPattern> duplicates = new ArrayList<>();
+        Map<ResourceKey<Level>, List<ShanhaiStructureHighlightPacket.Marker>> duplicateHighlights =
+                new LinkedHashMap<>();
+        boolean inventory = false;
+        if (result != null && result.status() == PatternQuickUploadService.UploadStatus.DUPLICATE) {
+            duplicates.add(new UploadedPattern(pattern, result.target(), result.slot()));
+            addDuplicateHighlight(duplicateHighlights, result.target());
+            sendDuplicateHighlights(player, duplicateHighlights);
+        } else if (result != null) {
+            uploaded.add(new UploadedPattern(pattern, result.target(), result.slot()));
+        } else {
+            inventory = true;
+        }
+        int committed = uploaded.size() + (inventory ? 1 : 0);
+        if (committed > 0) {
+            long paid = storage.extract(blankPatternKey(), committed, Actionable.MODULATE, actionSource);
+            if (paid != committed) {
+                if (paid > 0L) {
+                    storage.insert(blankPatternKey(), paid, Actionable.MODULATE, actionSource);
+                }
+                boolean rolledBack = rollback(player, uploaded);
+                show(player, rolledBack
+                        ? "message.gt_shanhai.jei.quick_encode.missing_blank"
+                        : "message.gt_shanhai.jei.quick_encode.rollback_failed",
+                        committed);
+                return false;
+            }
+            if (inventory) givePatterns(player, List.of(pattern));
+            GTLStats.awardPatternEncoded(player);
+        }
+        showSuccess(player, false, 1, uploaded, duplicates, 0, inventory ? 1 : 0, 0, recipeTypeId);
+        return true;
     }
 
     private static List<GTRecipe> collectRecipes(GTRecipeType recipeType) {

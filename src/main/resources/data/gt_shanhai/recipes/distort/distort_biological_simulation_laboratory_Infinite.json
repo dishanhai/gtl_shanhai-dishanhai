@@ -1,0 +1,514 @@
+{
+  "data": {
+    "euTier": 8,
+    "ebf_temp": 4000
+  },
+  "duration": 40,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 524288
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 1
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "gtladditions:biological_simulation_laboratory"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:gate_and_bridg"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "avaritia:infinity_sword"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "minecraft:nether_star"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "minecraft:dragon_egg"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 20480,
+          "ingredient": {
+            "item": "minecraft:wither_skeleton_skull"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:blaze_rod"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:cod"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:egg"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:beef"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:salmon"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:glowstone_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:sugar"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:chicken"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:rotten_flesh"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:string"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:porkchop"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:slime_ball"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:gunpowder"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:ghast_tear"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:ender_pearl"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:mutton"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:white_wool"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:echo_shard"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:sculk_sensor"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:sculk_catalyst"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:sculk"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:bone"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:rabbit"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:tropical_fish"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:wheat"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:carrot"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:potato"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:poppy"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:feather"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:leather"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:rabbit_hide"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:spider_eye"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:rabbit_foot"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:ink_sac"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:glow_ink_sac"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:nautilus_shell"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:iron_ingot"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:gold_ingot"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:copper_ingot"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:gold_nugget"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:emerald"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:coal"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:redstone"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:bamboo"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:stick"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:arrow"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 65565,
+          "ingredient": {
+            "item": "minecraft:glass_bottle"
+          }
+        }
+      }
+    ]
+  }
+}

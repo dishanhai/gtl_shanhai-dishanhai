@@ -43,7 +43,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private final StagePage selectPage;
     private final StagePage editPage;
     private final StagePage reviewPage;
-    private final DraggableScrollableWidgetGroup resultList;
+    private final RecipeCardList resultList;
+    /** Query page whose cards should open already scrolled to the bottom. -1 means top. */
+    private int landAtEndPage = -1;
     private DraggableScrollableWidgetGroup conditionList;
     private DraggableScrollableWidgetGroup parameterList;
     private final List<ShanhaiIOWidget> inputItemCells = new ArrayList<>();
@@ -55,6 +57,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private final int[] shownItemOut = new int[ITEM_PAGE];
     private final int[] shownFluidOut = new int[FLUID_PAGE];
     private ShanhaiQuerySlotWidget querySlot;
+    private ShanhaiRecipeHistoryWidget queryHistory;
     private IoGrid inputItemGrid;
     private IoGrid inputFluidGrid;
     private IoGrid outputItemGrid;
@@ -70,8 +73,8 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         selectPage = page();
         editPage = page();
         reviewPage = page();
-        resultList = new DraggableScrollableWidgetGroup(4, 116, getSizeWidth() - 8, 110)
-                .setYScrollBarWidth(5)
+        resultList = new RecipeCardList(4, 116, getSizeWidth() - 8, 110);
+        resultList.setYScrollBarWidth(5)
                 .setYBarStyle(new ColorRectTexture(0xff79c9dd), GuiTextures.VANILLA_BUTTON)
                 .setBackground(GuiTextures.DISPLAY)
                 .setUseScissor(true);
@@ -94,8 +97,15 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (queryHistory != null && queryHistory.isOpen() && !queryHistory.hit(mouseX, mouseY)) {
+            queryHistory.setOpen(false);
+        }
         if (claimPopupClick(this, mouseX, mouseY, button)) return true;
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    void closeQueryHistory() {
+        if (queryHistory != null) queryHistory.setOpen(false);
     }
 
     @Override
@@ -224,6 +234,13 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
             }
             appendCards(source, rest, width, y, order);
         }
+        if (landAtEndPage >= 0 && landAtEndPage == host.queryPage) resultList.scrollToEnd();
+        landAtEndPage = -1;
+    }
+
+    /** Previous-page overscroll lands on the last row once that page's cards arrive. */
+    void landQueryAtEnd(int page) {
+        landAtEndPage = page;
     }
 
     private int appendCards(List<ShanhaiRecipeQuery.Card> source, List<Integer> indexes,
@@ -360,10 +377,17 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private void buildSelectPage() {
         selectPage.addWidget(new ShanhaiRecipeMachineSlotWidget(4, 4,
                 () -> host.machineStack, host::setMachine));
-        selectPage.addWidget(new LabelWidget(32, 8, () -> host.machineStack.isEmpty()
-                ? "§8未放入 GT 机器，也可按配方 ID、原料或输出搜索"
-                : "§f" + host.machineStack.getHoverName().getString()
-                + " §7· 已映射 " + host.machineTypes.size() + " 种"));
+        selectPage.addWidget(new LabelWidget(32, 8, () -> {
+            if (host.machineStack.isEmpty()) {
+                return host.ownedTypeCount > 0
+                        ? "§8未放入 GT 机器 · 山海类型 " + host.ownedTypeCount + " 种"
+                        : "§8未放入 GT 机器，也可按配方 ID、原料或输出搜索";
+            }
+            String line = "§f" + host.machineStack.getHoverName().getString()
+                    + " §7· 已映射 " + host.mappedTypeCount + " 种";
+            if (host.ownedTypeCount > 0) line += " · 山海类型 " + host.ownedTypeCount + " 种";
+            return line;
+        }));
         selectPage.addWidget(textField(4, 54, 200, 18, () -> host.typeFilter,
                 value -> {
                     host.typeFilter = ShanhaiRecipeEditorWidget.limit(value);
@@ -376,6 +400,8 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
                 }));
         querySlot = new ShanhaiQuerySlotWidget(416, 52, host::acceptQueryDrop);
         selectPage.addWidget(querySlot);
+        queryHistory = new ShanhaiRecipeHistoryWidget(host, 244, 52);
+        queryHistory.setClientSideWidget();
         selectPage.addWidget(button(4, 76, 72, 16, "搜索", () -> {
             host.queryPage = 0;
             host.flushDraftSave();
@@ -412,6 +438,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         selectPage.addWidget(button(4, 256, 150, 18, "刷新配方表", host::query));
         selectPage.addWidget(button(340, 256, 156, 18, "进入编辑",
                 () -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_EDIT, true)));
+        selectPage.addWidget(queryHistory);
     }
 
     private void buildEditPage() {
@@ -463,6 +490,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         editPage.addWidget(new LabelWidget(4, 234, "§8输入 0%% = 不消耗；输出百分比 = 概率产物。加页会扩出空格子"));
         editPage.addWidget(button(4, 256, 150, 18, "返回配方卡",
                 () -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_SELECT, true)));
+        ButtonWidget jsExport = button(176, 256, 156, 18, "导出JS数组", host::copyJsArray);
+        jsExport.setClientSideWidget();
+        editPage.addWidget(jsExport);
         editPage.addWidget(button(340, 256, 156, 18, "去差异审核",
                 () -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_REVIEW, true)));
     }
@@ -510,7 +540,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
                 new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::keepOriginalFace)),
                 click -> host.toggleKeepOriginal()));
         reviewPage.addWidget(new LabelWidget(352, 100, host::keepOriginalHint));
-        reviewPage.addWidget(button(340, 220, 156, 18, "导出配方为json", host::exportJson));
+        ButtonWidget encodePattern = button(258, 220, 118, 18, "快速编写为样板", host::encodePattern);
+        encodePattern.setHoverTooltips("按当前审核稿编码样板并上传。需要身上的无线终端，以及网络中的 1 张空白样板");
+        reviewPage.addWidget(encodePattern);
+        reviewPage.addWidget(button(380, 220, 116, 18, "导出配方为json", host::exportJson));
         reviewPage.addWidget(button(4, 256, 150, 18, "返回图形编辑",
                 () -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_EDIT, true)));
         reviewPage.addWidget(button(340, 256, 156, 18, "提交并刷新 JEI", host::commit));
@@ -715,6 +748,52 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         if (widget instanceof LabelWidget) widget.setClientSideWidget();
         if (widget instanceof WidgetGroup group) {
             for (Widget child : group.widgets) markClientLabels(child);
+        }
+    }
+
+    /**
+     * Select-page card list. A wheel tick that cannot move the scroll changes
+     * the query page: up at the top goes back, down at the bottom goes forward.
+     * The tick that first reaches the edge still only scrolls.
+     */
+    private final class RecipeCardList extends DraggableScrollableWidgetGroup {
+        private static final long EDGE_GAP_MS = 380L;
+        private long edgedAt;
+
+        private RecipeCardList(int x, int y, int width, int height) {
+            super(x, y, width, height);
+        }
+
+        void scrollToEnd() {
+            setScrollYOffset(Math.max(0, getMaxHeight() - getSize().height));
+        }
+
+        @Override
+        public boolean mouseWheelMove(double mouseX, double mouseY, double wheelDelta) {
+            if (!isMouseOverElement(mouseX, mouseY)) {
+                setFocus(false);
+                return false;
+            }
+            int before = getScrollYOffset();
+            super.mouseWheelMove(mouseX, mouseY, wheelDelta);
+            if (getScrollYOffset() != before) return true;
+            int step = wheelStep(wheelDelta);
+            if (step == 0) return true;
+            int max = Math.max(0, getMaxHeight() - getSize().height);
+            int dir = 0;
+            if (step < 0 && before <= 0) dir = -1;
+            else if (step > 0 && before >= max) dir = 1;
+            if (dir == 0) return true;
+            long now = ShanhaiRecipeEditorAnimation.nowMs();
+            if (now - edgedAt < EDGE_GAP_MS) return true;
+            edgedAt = now;
+            host.overscrollQueryPage(dir);
+            return true;
+        }
+
+        private static int wheelStep(double wheelDelta) {
+            double clamped = wheelDelta < -1d ? -1d : (wheelDelta > 1d ? 1d : wheelDelta);
+            return (int) ((-clamped) * 13d);
         }
     }
 

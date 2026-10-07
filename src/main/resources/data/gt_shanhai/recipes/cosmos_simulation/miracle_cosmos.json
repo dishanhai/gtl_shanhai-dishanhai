@@ -1,0 +1,222 @@
+{
+  "duration": 240,
+  "type": "gtceu:cosmos_simulation",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 102400,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtlcore:miracle_crystal"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_overworld"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_nether"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_end"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_reactor"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_enceladus"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_titan"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_glacio"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_barnarda"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_moon"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_mars"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_venus"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_mercury"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_ceres"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_ganymede"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:world_fragments_pluto"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:mining_crystal"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2147483647,
+          "ingredient": {
+            "item": "gtlcore:treasures_crystal"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtceu:nan_certificate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "kubejs:overworld_data"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "kubejs:nether_data"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "kubejs:end_data"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,249 @@
+{
+  "duration": 240,
+  "type": "gtceu:cosmos_simulation",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1024000,
+          "value": [
+            {
+              "fluid": "gtceu:cosmic_element"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2048,
+          "ingredient": {
+            "item": "kubejs:leptonic_charge"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16384,
+          "ingredient": {
+            "item": "gtceu:white_dwarf_mtter_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16384,
+          "ingredient": {
+            "item": "gtceu:black_dwarf_mtter_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "ae2:sky_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:trinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:plutonium_241_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:titanium_50_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:copper76_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:uranium_235_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:perditio_crystal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:earth_crystal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:ignis_crystal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:tartarite_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:uruium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:force_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:alien_algae_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:bloodstone_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "minecraft:netherite_scrap"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:purified_tengam_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:quantanium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:bedrock_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:damascus_steel_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "avaritia:neutron_pile"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:certus_quartz_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "ae2:fluix_dust"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,1018 @@
+{
+  "data": {
+    "euTier": 14,
+    "ebf_temp": 24000
+  },
+  "duration": 240,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 140799765315555
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131000,
+          "value": [
+            {
+              "fluid": "gtceu:grade_16_purified_water"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 1
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "gtceu:eye_of_harmony"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:time_reversal_protocol"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:spacetime"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:quark_gluon_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:heavy_quark_degenerate_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:neutronium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:heavy_lepton_mixture"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:fluorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:bromine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:neon"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:argon"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:krypton"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:xenon"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:radon"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:mercury"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:deuterium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:tritium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:helium_3"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:unknowwater"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:uu_matter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:argon_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:echoite_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:legendarium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:metastable_hassium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:degenerate_rhenium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:celestialtungsten_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:chaos_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:starmetal_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:enderium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:orichalcum_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:quasifissioning_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:vibranium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:astraltitanium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:cosmic_mesh_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:taranium_rich_liquid_helium_4_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:dense_neutron_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:draconiumawakened_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:nickel_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:infuscolium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:flyb_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:high_energy_quark_gluon_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:quantumchromodynamically_confined_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:plutonium_241_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:iron_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:silver_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:actinium_superhydride_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:crystalmatrix_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:mithril_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:adamantium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:helium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:mana"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:white_dwarf_mtter_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:infused_gold_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:black_dwarf_mtter_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "ae2:sky_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:trinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:plutonium_241_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:titanium_50_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:copper76_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:uranium_235_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:perditio_crystal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:earth_crystal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:ignis_crystal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:tartarite_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:uruium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:force_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:alien_algae_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:bloodstone_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "minecraft:netherite_scrap"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:purified_tengam_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:quantanium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:bedrock_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:damascus_steel_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "avaritia:neutron_pile"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:certus_quartz_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "ae2:fluix_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:shirabon_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:rare_earth_metal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:enderium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:uraninite_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:diatomite_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:bentonite_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:endstone_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:cassiterite_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:bauxite_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:sapphire_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:spacetime_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1024000,
+          "ingredient": {
+            "item": "kubejs:dust_cryotheum"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1024000,
+          "ingredient": {
+            "item": "gtceu:rare_earth_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1024000,
+          "ingredient": {
+            "item": "gtceu:stem_cells"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2048000,
+          "ingredient": {
+            "item": "kubejs:biological_cells"
+          }
+        }
+      }
+    ]
+  }
+}

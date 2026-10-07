@@ -1,0 +1,248 @@
+{
+  "data": {
+    "euTier": 14,
+    "ebf_temp": 24000
+  },
+  "duration": 240,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 140799765315555
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131000,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 2
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "item": "gtceu:eye_of_harmony"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:time_reversal_protocol"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 32,
+          "ingredient": {
+            "item": "dishanhai:hxsp"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "gtceu:small_eternity_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:kinetic_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:omni_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:pellet_antimatter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:amorphous_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:corporeal_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:essentia_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:dark_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:temporal_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:void_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "gtceu:tiny_magmatter_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:hypercube"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:quantum_anomaly"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:magnetohydrodynamicallyconstrainedstarmatter_block"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "gtceu:tiny_transcendentmetal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10140,
+          "ingredient": {
+            "item": "gtceu:tiny_infinity_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:space_essence"
+          }
+        }
+      }
+    ]
+  }
+}

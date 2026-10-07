@@ -15,6 +15,7 @@ categories:
 * [配方剥离](recipe_strip.md)
 * [配方替换](recipe_replace.md)
 * [配方删除](recipe_delete.md)
+* [配方修改器开发者工具](recipe_modifier_dev.md)
 
 ## 当前范围
 
@@ -22,3 +23,4 @@ categories:
 * 剥离规则的输入/输出、物品/流体、按配方 ID 过滤
 * 替换规则的物品替换、流体替换、数量和电路替换
 * 按配方 ID 正则删除配方并持久化到规则文件
+* 配方修改器开发者工具：图形化查找、修改并提交单条 GT 配方

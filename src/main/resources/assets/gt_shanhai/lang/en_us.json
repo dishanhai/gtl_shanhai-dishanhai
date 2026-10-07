@@ -496,6 +496,7 @@
   "message.gt_shanhai.jei.quick_encode.slots_unavailable": "Slot status unavailable",
   "message.gt_shanhai.jei.quick_encode.teleport": "Click to teleport to this Stellar Pattern Assembly",
   "message.gt_shanhai.jei.quick_encode.open_terminal": "Open an AE2 pattern encoding terminal before using quick encode",
+  "message.gt_shanhai.recipe_editor.quick_encode.no_grid": "Carry a powered wireless terminal linked to an ME network before encoding",
   "tooltip.gt_shanhai.jei.bookmark_missing": "Bookmark inputs whose AE network storage is below the one-recipe demand",
   "tooltip.gt_shanhai.jei.bookmark_no_recipe": "Bookmark inputs with no matching AE network pattern process",
   "tooltip.gt_shanhai.jei.bookmark_combined": "Combined amount and pattern check: bookmark only when no AE primary-output pattern exists and storage is insufficient; extremely high storage counts as enough",

@@ -26,6 +26,8 @@ public final class ShanhaiRecipeBase {
     private final JsonObject tickInputs;
     private final JsonObject tickOutputs;
     private final JsonArray conditions;
+    /** Recipe data {@code ebf_temp}. {@code -1} means the snapshot has no temperature. Not part of the fingerprint. */
+    private final int blastTemp;
 
     public ShanhaiRecipeBase(
             String recipeTypeId,
@@ -50,6 +52,20 @@ public final class ShanhaiRecipeBase {
             JsonObject tickInputs,
             JsonObject tickOutputs,
             JsonArray conditions) {
+        this(recipeTypeId, recipeId, duration, eut, inputs, outputs, tickInputs, tickOutputs, conditions, -1);
+    }
+
+    public ShanhaiRecipeBase(
+            String recipeTypeId,
+            String recipeId,
+            int duration,
+            long eut,
+            JsonObject inputs,
+            JsonObject outputs,
+            JsonObject tickInputs,
+            JsonObject tickOutputs,
+            JsonArray conditions,
+            int blastTemp) {
         this.recipeTypeId = recipeTypeId == null ? "" : recipeTypeId;
         this.recipeId = recipeId == null ? "" : recipeId;
         this.duration = Math.max(1, duration);
@@ -59,6 +75,7 @@ public final class ShanhaiRecipeBase {
         this.tickInputs = tickInputs == null ? new JsonObject() : tickInputs.deepCopy();
         this.tickOutputs = tickOutputs == null ? new JsonObject() : tickOutputs.deepCopy();
         this.conditions = conditions == null ? new JsonArray() : conditions.deepCopy();
+        this.blastTemp = blastTemp;
     }
 
     public static ShanhaiRecipeBase simple(
@@ -96,7 +113,14 @@ public final class ShanhaiRecipeBase {
                 ShanhaiRecipeIoApply.tableJson(recipe, "outputs"),
                 ShanhaiRecipeIoApply.tableJson(recipe, "tickInputs"),
                 ShanhaiRecipeIoApply.tableJson(recipe, "tickOutputs"),
-                conditionsJson(recipe));
+                conditionsJson(recipe),
+                blastTempOf(recipe));
+    }
+
+    /** {@code -1} when the recipe data has no {@code ebf_temp}. Zero is a real temperature. */
+    public static int blastTempOf(GTRecipe recipe) {
+        if (recipe == null || recipe.data == null || !recipe.data.contains("ebf_temp")) return -1;
+        return recipe.data.getInt("ebf_temp");
     }
 
     public static ShanhaiRecipeBase fromPayload(JsonObject payload) {
@@ -200,6 +224,10 @@ public final class ShanhaiRecipeBase {
 
     public JsonArray conditions() {
         return conditions.deepCopy();
+    }
+
+    public int blastTemp() {
+        return blastTemp;
     }
 
     public ShanhaiRecipeBase withDuration(int value) {

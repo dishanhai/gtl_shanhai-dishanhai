@@ -100,34 +100,45 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         changed.run();
     }
 
-    private void applyPicked(Object accepted, int discoveredIndex, ShanhaiIoTable.Cell discoveredCell) {
-        ShanhaiIoTable.Cell target = table == null ? null : table.cell(discoveredIndex);
-        if (target == null || target != discoveredCell) return;
-        if (target.itemKind) {
-            ItemStack stack = accepted instanceof ItemStack item ? item : ItemStack.EMPTY;
-            if (sameItem(target.item, stack)) return;
-            before.run();
-            target.setItem(stack, stack.getCount());
-        } else {
-            FluidStack stack = accepted instanceof FluidStack fluid ? fluid : FluidStack.empty();
-            if (sameFluid(target.fluid, stack)) return;
-            before.run();
-            target.setFluid(stack);
+    /**
+     * Writes the shop picker's confirmed list. The clicked cell is the first slot of its
+     * own kind; the other kind starts at the first cell on the same side. Extra entries
+     * grow that side instead of spilling into the opposite side.
+     */
+    private void applyBatch(int origin, List<ItemStack> items, List<FluidStack> fluids) {
+        if (table == null) return;
+        int itemCount = items == null ? 0 : items.size();
+        int fluidCount = fluids == null ? 0 : fluids.size();
+        if (itemCount == 0 && fluidCount == 0) return;
+        ShanhaiIoTable.Cell originCell = table.cell(origin);
+        if (originCell == null) return;
+        before.run();
+        boolean inputSide = origin < table.inSection();
+        int itemLocal = originCell.itemKind
+                ? (inputSide ? origin : origin - table.inSection()) : 0;
+        int fluidLocal = originCell.itemKind ? 0
+                : (inputSide ? origin - table.itemIn() : origin - (table.inSection() + table.itemOut()));
+        int itemSize = inputSide ? table.itemIn() : table.itemOut();
+        int fluidSize = inputSide ? table.fluidIn() : table.fluidOut();
+        int nextItems = itemCount == 0 ? itemSize : Math.max(itemSize, itemLocal + itemCount);
+        int nextFluids = fluidCount == 0 ? fluidSize : Math.max(fluidSize, fluidLocal + fluidCount);
+        if (inputSide) table.resize(nextItems, nextFluids, table.itemOut(), table.fluidOut());
+        else table.resize(table.itemIn(), table.fluidIn(), nextItems, nextFluids);
+        int itemBase = inputSide ? 0 : table.inSection();
+        int fluidBase = inputSide ? table.itemIn() : table.inSection() + table.itemOut();
+        for (int i = 0; i < itemCount; i++) {
+            ShanhaiIoTable.Cell cell = table.cell(itemBase + itemLocal + i);
+            ItemStack stack = items.get(i);
+            if (cell == null || !cell.itemKind || stack == null || stack.isEmpty()) continue;
+            cell.setItem(stack, Math.max(1, stack.getCount()));
+        }
+        for (int i = 0; i < fluidCount; i++) {
+            ShanhaiIoTable.Cell cell = table.cell(fluidBase + fluidLocal + i);
+            FluidStack stack = fluids.get(i);
+            if (cell == null || cell.itemKind || stack == null || stack.isEmpty()) continue;
+            cell.setFluid(stack);
         }
         changed.run();
-    }
-
-    private static boolean sameItem(ItemStack left, ItemStack right) {
-        if (left.isEmpty() && right.isEmpty()) return true;
-        return ItemStack.isSameItemSameTags(left, right) && left.getCount() == right.getCount();
-    }
-
-    private static boolean sameFluid(FluidStack left, FluidStack right) {
-        if (left.isEmpty() && right.isEmpty()) return true;
-        if (left.isEmpty() || right.isEmpty()) return false;
-        return left.getFluid() == right.getFluid()
-                && left.getAmount() == right.getAmount()
-                && java.util.Objects.equals(left.getTag(), right.getTag());
     }
 
     @Override
@@ -137,13 +148,8 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
             ShanhaiIoTable.Cell current = cell();
             if (current == null) return true;
             int index = indexSupplier.getAsInt();
-            if (current.itemKind) {
-                ShanhaiRecipeStackPickerBridge.openItem(current.item.copy(),
-                        stack -> applyPicked(stack, index, current));
-            } else {
-                ShanhaiRecipeStackPickerBridge.openFluid(current.fluid.copy(),
-                        stack -> applyPicked(stack, index, current));
-            }
+            ShanhaiRecipeStackPickerBridge.open(!current.itemKind,
+                    (items, fluids) -> applyBatch(index, items, fluids));
             return true;
         }
         if (button == 0) {

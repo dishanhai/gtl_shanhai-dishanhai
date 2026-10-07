@@ -7,9 +7,11 @@ import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
+import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
-import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
+import com.lowdragmc.lowdraglib.gui.util.ClickData;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
 import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
 import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
@@ -17,9 +19,15 @@ import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.Items;
+
+import java.util.function.Consumer;
 
 public class SelectableRecipeTypeSetConfigurator implements IFancyUIProvider {
+
+    private static final int PAGE_WIDTH = 176;
+    private static final int PAGE_HEIGHT = 170;
+    private static final int ROW_HEIGHT = 16;
+    private static final int ROW_STRIDE = 18;
 
     private final SelectableRecipeTypeSetMachine machine;
     private WidgetGroup mainPage;
@@ -51,14 +59,13 @@ public class SelectableRecipeTypeSetConfigurator implements IFancyUIProvider {
     }
 
     private WidgetGroup buildPage() {
-        WidgetGroup page = new WidgetGroup(0, 0, 176, 170);
+        WidgetGroup page = new WidgetGroup(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
         fillPage(page);
         return page;
     }
 
     private void fillPage(WidgetGroup page) {
         GTRecipeType[] types = machine.getAllSelectableRecipeTypes();
-        int pageHeight = 170;
         page.setBackground(GuiTextures.BACKGROUND_INVERSE);
 
         // 轮询检测服务端选择变化（服务端剪枝/其他玩家操作/数据包回执与本地乐观状态不一致），
@@ -77,52 +84,98 @@ public class SelectableRecipeTypeSetConfigurator implements IFancyUIProvider {
             }
         });
 
-        page.addWidget(new LabelWidget(5, 5, machine.getRecipeTypeSetHeaderText()));
-        page.addWidget(new LabelWidget(5, 18, machine.getRecipeTypeSetDescriptionText()));
+        int selectedCount = 0;
+        for (GTRecipeType type : types) {
+            if (machine.isRecipeTypeSelected(type)) {
+                selectedCount++;
+            }
+        }
+        page.addWidget(new LabelWidget(6, 4, machine.getRecipeTypeSetHeaderText()));
+        page.addWidget(new LabelWidget(6, 16, machine.getRecipeTypeSetDescriptionText()));
+        int countColor = selectedCount == 0 ? 0xFFFF6666
+                : selectedCount == types.length ? 0xFF66FF88
+                : 0xFFFFFF66;
+        page.addWidget(new ImageWidget(112, 3, 58, 12,
+                new TextTexture(selectedCount + "/" + types.length, countColor)
+                        .setType(TextTexture.TextType.RIGHT)
+                        .setDropShadow(true))
+                .setHoverTooltips("已选中 / 全部配方类型"));
 
-        page.addWidget(new ButtonWidget(5, 34, 48, 16, new TextTexture("§a全选", -1), cd -> {
-            runAndRefresh(() -> machine.selectAllRecipeTypes());
+        page.addWidget(framedButton(5, 30, 54, 14, "§a全选", cd -> {
+            runAndRefresh(machine::selectAllRecipeTypes);
             sendSelectionAction(SelectableRecipeTypeSetPacket.ACTION_SELECT_ALL, -1);
-        }));
-        page.addWidget(new ButtonWidget(57, 34, 64, 16, new TextTexture("§e仅第一项", -1), cd -> {
-            runAndRefresh(() -> machine.selectFirstRecipeType());
+        }).setHoverTooltips("选中全部配方类型"));
+        page.addWidget(framedButton(63, 30, 54, 14, "§e仅第一项", cd -> {
+            runAndRefresh(machine::selectFirstRecipeType);
             sendSelectionAction(SelectableRecipeTypeSetPacket.ACTION_SELECT_FIRST, -1);
-        }));
-        page.addWidget(new ButtonWidget(125, 34, 42, 16, new TextTexture("§c全空", -1), cd -> {
-            runAndRefresh(() -> machine.selectNoRecipeTypes());
+        }).setHoverTooltips("只保留列表第一项"));
+        page.addWidget(framedButton(121, 30, 50, 14, "§c全空", cd -> {
+            runAndRefresh(machine::selectNoRecipeTypes);
             sendSelectionAction(SelectableRecipeTypeSetPacket.ACTION_SELECT_NONE, -1);
-        }));
+        }).setHoverTooltips("清空选择"));
 
         if (types.length == 0) {
-            page.addWidget(new ImageWidget(5, 56, 166, 16, new TextTexture("§7无可用配方类型")));
+            page.addWidget(new LabelWidget(6, 50, "§7无可用配方类型"));
             return;
         }
 
-        recipeList = new DraggableScrollableWidgetGroup(4, 56, 168, pageHeight - 60);
+        int listX = 4;
+        int listY = 48;
+        int listW = 168;
+        int maxListH = PAGE_HEIGHT - listY - 4;
+        int contentH = 3 + types.length * ROW_STRIDE;
+        int listH = Math.min(maxListH, Math.max(ROW_HEIGHT + 6, contentH));
+        boolean scrolling = contentH > listH;
+        int barWidth = scrolling ? 4 : 0;
+
+        recipeList = new DraggableScrollableWidgetGroup(listX, listY, listW, listH);
         recipeList.setBackground(GuiTextures.DISPLAY);
+        if (scrolling) {
+            recipeList.setYScrollBarWidth(barWidth);
+            recipeList.setYBarStyle(new ColorRectTexture(0x66000000), new ColorRectTexture(0xFFDDDDDD).setRadius(1));
+        }
         page.addWidget(recipeList);
 
-        int y = 4;
+        int usable = listW - barWidth - 4;
+        int onlyW = 34;
+        int nameW = usable - onlyW - 2;
+        int y = 3;
         for (int i = 0; i < types.length; i++) {
             int typeIndex = i;
             GTRecipeType type = types[i];
             boolean selected = machine.isRecipeTypeSelected(type);
-            String display = (selected ? "§a[x] " : "§7[ ] ") + recipeTypeDisplayName(type);
+            if (selected) {
+                recipeList.addWidget(new ImageWidget(2, y, nameW, ROW_HEIGHT, new ColorRectTexture(0xFF243E2C)));
+            }
+            recipeList.addWidget(new ImageWidget(4, y + 3, 2, 10,
+                    new ColorRectTexture(selected ? 0xFF55FF77 : 0xFF6A6A6A)));
 
-            recipeList.addWidget(new ButtonWidget(0, y, 122, 18, IGuiTexture.EMPTY, cd -> {
+            String display = (selected ? "§a[x] §f" : "§8[ ] §7") + recipeTypeDisplayName(type);
+            ButtonWidget toggle = new ButtonWidget(2, y, nameW, ROW_HEIGHT, IGuiTexture.EMPTY, cd -> {
                 boolean nextSelected = !machine.isRecipeTypeSelected(type);
-                runAndRefresh(() -> {
-                    machine.setRecipeTypeSelected(type, nextSelected);
-                });
+                runAndRefresh(() -> machine.setRecipeTypeSelected(type, nextSelected));
                 sendSelectionAction(SelectableRecipeTypeSetPacket.ACTION_SET_INDEX_SELECTED, typeIndex, nextSelected);
-            }));
-            recipeList.addWidget(new ImageWidget(2, y + 2, 118, 14, new TextTexture(display, -1)));
-            recipeList.addWidget(new ButtonWidget(126, y, 38, 18, new TextTexture("§b仅此", -1), cd -> {
+            });
+            toggle.setHoverBorderTexture(1, selected ? 0xFF66FF88 : 0xFFBBBBBB);
+            toggle.setHoverTooltips(selected ? "点击取消这一项" : "点击选中这一项");
+            recipeList.addWidget(toggle);
+            recipeList.addWidget(new ImageWidget(8, y + 1, nameW - 10, ROW_HEIGHT - 2,
+                    new TextTexture(display, -1).setType(TextTexture.TextType.LEFT)));
+
+            recipeList.addWidget(framedButton(nameW + 4, y, onlyW, ROW_HEIGHT, "§b仅此", cd -> {
                 runAndRefresh(() -> machine.selectOnlyRecipeType(type));
                 sendSelectionAction(SelectableRecipeTypeSetPacket.ACTION_SELECT_ONLY_INDEX, typeIndex);
-            }));
-            y += 22;
+            }).setHoverTooltips("只保留这一项"));
+            y += ROW_STRIDE;
         }
+    }
+
+    private static ButtonWidget framedButton(int x, int y, int width, int height, String text, Consumer<ClickData> onPress) {
+        ButtonWidget button = new ButtonWidget(x, y, width, height,
+                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(text, -1).setDropShadow(true)),
+                onPress);
+        button.setHoverBorderTexture(1, 0xFFFFFFFF);
+        return button;
     }
 
     private void sendSelectionAction(int action, int typeIndex) {

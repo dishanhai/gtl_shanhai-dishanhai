@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache;
 import com.gregtechceu.gtceu.api.item.MetaMachineItem;
 import com.gregtechceu.gtceu.api.machine.MachineDefinition;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
@@ -20,7 +21,7 @@ import java.util.Set;
  */
 public final class ShanhaiRecipeMachineMapping {
 
-    public record TypeOption(String id, String label, int recipeCount) {}
+    public record TypeOption(String id, String label, int recipeCount, boolean owned) {}
 
     private ShanhaiRecipeMachineMapping() {}
 
@@ -47,12 +48,40 @@ public final class ShanhaiRecipeMachineMapping {
     public static List<TypeOption> describe(ServerPlayer player, ItemStack machine) {
         if (player == null) return List.of();
         List<TypeOption> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
         for (GTRecipeType type : recipeTypes(machine)) {
-            int count = RecipeOriginalSnapshotStoreCompat.count(player, type.registryName);
-            result.add(new TypeOption(type.registryName.toString(),
-                    ShanhaiRecipeTypeNames.display(type.registryName), count));
+            addOption(result, seen, player, type, false);
+        }
+        // gt_shanhai 的类型经 GTCEu.register 后 id 是 gtceu:路径，不在机器 getRecipeTypes() 里就不会出现。
+        for (GTRecipeType type : DShanhaiRecipeCache.ownedRecipeTypes()) {
+            addOption(result, seen, player, type, true);
         }
         return List.copyOf(result);
+    }
+
+    private static void addOption(List<TypeOption> result, Set<String> seen, ServerPlayer player,
+                                  GTRecipeType type, boolean owned) {
+        if (type == null || type.registryName == null) return;
+        String id = type.registryName.toString();
+        if (!seen.add(id)) return;
+        int count = owned
+                ? rawCount(type)
+                : RecipeOriginalSnapshotStoreCompat.count(player, type.registryName);
+        result.add(new TypeOption(id, ShanhaiRecipeTypeNames.display(type.registryName), count, owned));
+    }
+
+    /** Lookup size only. Owned types are listed in bulk, so this does not rebuild each table. */
+    private static int rawCount(GTRecipeType type) {
+        try {
+            if (type.getLookup() == null || type.getLookup().getLookup() == null) return 0;
+            int[] count = new int[1];
+            type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
+                if (recipe != null) count[0]++;
+            });
+            return count[0];
+        } catch (RuntimeException ignored) {
+            return 0;
+        }
     }
 
     public static String machineId(ItemStack machine) {

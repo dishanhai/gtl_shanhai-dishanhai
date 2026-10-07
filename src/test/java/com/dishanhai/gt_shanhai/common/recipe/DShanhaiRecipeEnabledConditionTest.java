@@ -27,6 +27,9 @@ class DShanhaiRecipeEnabledConditionTest {
         test.serializerPreservesIdAndDefault();
         test.forgeRejectsDisabledRecipeBeforeParsing();
         test.jsonStatisticsRespectsRecipeOverride();
+        test.jsonFailureHintNamesMissingItemAndFluid();
+        test.jsonFailureHintReportsUnknownRecipeType();
+        test.jsonFailureHintFallsBackWhenIdsResolve();
     }
 
     @Test
@@ -85,5 +88,43 @@ class DShanhaiRecipeEnabledConditionTest {
         JsonObject enabledConfig = new JsonObject();
         enabledConfig.addProperty("test_placeholder", true);
         assertFalse(DShanhaiJsonRecipeStats.isDisabled(recipe, enabledConfig));
+    }
+
+    @Test
+    void jsonFailureHintNamesMissingItemAndFluid() {
+        JsonObject recipe = JsonParser.parseString("""
+                {"type":"gtceu:electric_implosion_compressor",
+                 "inputs":{"item":[{"content":{"ingredient":{"item":"4x kubejs:quantum_chromodynamic_charge"}}}],
+                           "fluid":[{"content":{"value":[{"fluid":"gtceu:missing_plasma"}]}}]},
+                 "outputs":{"item":[{"content":{"ingredient":{"item":"dishanhai:quantum_chromodynamic_charge_super"}}}]}}
+                """).getAsJsonObject();
+        String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
+                recipe,
+                "gtceu:electric_implosion_compressor",
+                id -> "kubejs:quantum_chromodynamic_charge".equals(id),
+                id -> false,
+                id -> true);
+        assertTrue(hint.contains("未知物品 dishanhai:quantum_chromodynamic_charge_super"));
+        assertFalse(hint.contains("kubejs:quantum_chromodynamic_charge"));
+        assertTrue(hint.contains("未知流體 gtceu:missing_plasma"));
+        assertFalse(hint.contains("未知配方類型"));
+    }
+
+    @Test
+    void jsonFailureHintReportsUnknownRecipeType() {
+        JsonObject recipe = JsonParser.parseString("{\"type\":\"gtceu:no_such_machine\"}").getAsJsonObject();
+        String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
+                recipe, "gtceu:no_such_machine", id -> true, id -> true, id -> false);
+        assertEquals("未知配方類型 gtceu:no_such_machine", hint);
+    }
+
+    @Test
+    void jsonFailureHintFallsBackWhenIdsResolve() {
+        JsonObject recipe = JsonParser.parseString(
+                "{\"outputs\":{\"item\":[{\"content\":{\"ingredient\":{\"item\":\"minecraft:stone\"}}}]}}")
+                .getAsJsonObject();
+        String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
+                recipe, "gtceu:electric_implosion_compressor", id -> true, id -> true, id -> true);
+        assertEquals("已寫入資料包，但沒有進入配方表", hint);
     }
 }

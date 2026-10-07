@@ -124,6 +124,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private final java.util.function.ObjLongConsumer<ItemStack> onAddItem;
     private final Consumer<FluidStack> onAddFluid;
     private final Consumer<ResourceLocation> onAddTexture; // 贴图模式确认回调；非 allowTexture 场景为 null
+    private Runnable afterConfirm; // 全部回调之后、回到父界面之前。取消不走这里。
     private final boolean restrictedMode;         // true = 仅限固定候选列表（如已配置货币），无模式切换/物品栏/流体
     private final boolean allowTexture;           // true = 浏览模式循环里加入「贴图」（仅显示图标选择器开启，物品/流体排选择器不受影响）
 
@@ -1197,7 +1198,19 @@ public class MultiPickerScreen extends ScaledScreen {
                 onAddItem.accept(st, exact);
             }
         }
+        if (afterConfirm != null) afterConfirm.run();
         Minecraft.getInstance().setScreen(parent);
+    }
+
+    /** 确认加入的回调全部跑完后、回到父界面之前执行。取消和 Esc 不调用。 */
+    public void setAfterConfirm(Runnable afterConfirm) {
+        this.afterConfirm = afterConfirm;
+    }
+
+    @Override
+    public void onClose() {
+        if (this.minecraft != null && parent != null) this.minecraft.setScreen(parent);
+        else super.onClose();
     }
 
     private void drawBtn(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my) {

@@ -55,12 +55,14 @@ public final class RecipeEditorMachinePacket {
                 value.addProperty("id", option.id());
                 value.addProperty("label", option.label());
                 value.addProperty("count", option.recipeCount());
+                if (option.owned()) value.addProperty("owned", true);
                 types.add(value);
             }
             payload.add("types", types);
+            boolean machinePresent = packet.machine != null && !packet.machine.isEmpty();
             ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sender),
                     new RecipeEditorResultPacket(
-                            options.isEmpty()
+                            machinePresent && options.isEmpty()
                                     ? RecipeEditorResultPacket.Status.VALIDATION_ERROR
                                     : RecipeEditorResultPacket.Status.SUCCESS,
                             "machine",

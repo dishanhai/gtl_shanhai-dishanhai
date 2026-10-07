@@ -114,6 +114,11 @@ link: [[https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link](http
 - 添加特殊配方需求的增加和删除能力
 - 添加配方json化导出能力
 - 添加高级筛选能力和物品反向搜索功能
+- 添加配方编辑器右侧边栏支持
+- 添加已注册模块ID获取方法
+- 优化配方编辑器导出路径结构
+- 添加JEI侧边栏混入支持
+
 
 ## TODO
 

@@ -34,6 +34,7 @@ import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
 
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
+import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
@@ -814,6 +815,14 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     private class ExtraMountPageProvider implements IFancyUIProvider {
 
+        private static final int PAGE_WIDTH = 176;
+        private static final int PAGE_HEIGHT = 170;
+        private static final int CARD_X = 4;
+        private static final int CARD_W = 168;
+        private static final int CARD_H = 32;
+        private static final int CARD_Y = 30;
+        private static final int CARD_STRIDE = 34;
+
         @Override
         public Component getTitle() {
             return Component.literal("§b额外挂载");
@@ -826,48 +835,152 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
         @Override
         public Widget createMainPage(FancyMachineUIWidget widget) {
-            var group = new WidgetGroup(0, 0, 126, 78);
-            group.setBackground(GuiTextures.BACKGROUND_INVERSE);
-            group.addWidget(new LabelWidget(8, 8, () -> "额外挂载槽"));
+            WidgetGroup page = new WidgetGroup(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+            page.setBackground(GuiTextures.BACKGROUND_INVERSE);
+            page.addWidget(new LabelWidget(6, 4, "额外挂载槽"));
+            page.addWidget(new LabelWidget(6, 16, "§7三格各自独立生效"));
+            page.addWidget(new LabelWidget(146, 6, PrimordialOmegaEngineModuleBase.this::extraMountFillText)
+                    .setHoverTooltips("已放入 / 三个挂载槽"));
+
             for (int i = 0; i < ShanhaiHeatGate.SLOT_COUNT; i++) {
-                var slot = new SlotWidget(
+                int slotIndex = i;
+                int y = CARD_Y + i * CARD_STRIDE;
+                page.addWidget(new ImageWidget(CARD_X, y, CARD_W, CARD_H, GuiTextures.DISPLAY));
+                SlotWidget slot = new SlotWidget(
                         extraMountSlots.storage,
-                        i,
-                        8 + i * 34,
-                        30,
+                        slotIndex,
+                        CARD_X + 6,
+                        y + 7,
                         true,
                         true);
                 slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
-                slot.setHoverTooltips(shanhai$extraMountTooltips(i));
-                group.addWidget(slot);
+                slot.setHoverTooltips(shanhai$extraMountTooltips(slotIndex));
+                page.addWidget(slot);
+                page.addWidget(new LabelWidget(CARD_X + 30, y + 4, "挂载槽 " + (slotIndex + 1)));
+                page.addWidget(new LabelWidget(CARD_X + 30, y + 16, () -> extraMountStatusLine(slotIndex)));
             }
-            group.addWidget(new LabelWidget(8, 58, () -> "暗能量 / 湮灭 / 黑洞种子"));
-            return group;
+            page.addWidget(new LabelWidget(6, 136, PrimordialOmegaEngineModuleBase.this::extraMountRulesText));
+            return page;
         }
     }
 
-    private Component[] shanhai$extraMountTooltips(int index) {
-        ItemStack stack = getExtraMountStack(index);
-        ShanhaiHeatGate.SlotContent content = ShanhaiHeatSources.slotContentOf(stack);
-        String state;
-        if (stack.isEmpty()) {
-            state = "§8状态：空槽";
-        } else if (content.isBlank()) {
-            state = "§8状态：§f" + stack.getHoverName().getString() + "§8 不是有效挂载物";
-        } else {
-            state = "§a状态：§f" + stack.getHoverName().getString()
-                    + "§a × " + stack.getCount() + " ⇒ " + content.describe();
+    /** 右上角已放入格数。LabelWidget 在服务端取样后同步，换物品不用重开界面。 */
+    private String extraMountFillText() {
+        int filled = 0;
+        for (int i = 0; i < ShanhaiHeatGate.SLOT_COUNT; i++) {
+            if (!getExtraMountStack(i).isEmpty()) {
+                filled++;
+            }
         }
+        String color = filled == 0 ? "§c" : filled == ShanhaiHeatGate.SLOT_COUNT ? "§a" : "§e";
+        return color + filled + "§7/" + ShanhaiHeatGate.SLOT_COUNT;
+    }
+
+    private String extraMountRulesText() {
+        String heat = canUseExtraMountAsHeatSource()
+                ? "§7线圈、恒星容器§8：放满 " + ShanhaiHeatGate.REQUIRED_COUNT
+                : "§8线圈与恒星容器在此机不生效";
+        return "§7维护、重力、维度碎片§8：放 1 个\n"
+                + heat + "\n"
+                + "§7暗能量 / 湮灭核心 / 黑洞种子§8：各算一次";
+    }
+
+    /** 槽位右侧的一行状态。特殊效果物不走热力解析，不能标成无效挂载。 */
+    private String extraMountStatusLine(int index) {
+        ItemStack stack = getExtraMountStack(index);
+        if (stack.isEmpty()) {
+            return "§8空";
+        }
+        String itemId = extraMountItemId(stack);
+        int count = stack.getCount();
+        String amount = count > 1 ? " §8×" + count : "";
+        if (DARK_ENERGY_MULTIPLIER_ID.equals(itemId)) {
+            return "§b暗能量 §7EU -50%" + amount;
+        }
+        if (ANNIHILATION_CORE_ID.equals(itemId)) {
+            return "§c湮灭核心 §7耗时 -90%" + amount;
+        }
+        if (HYPERSTABLE_BLACK_HOLE_SEED_ID.equals(itemId)) {
+            return "§d黑洞种子 §7吞噬溢出" + amount;
+        }
+        ShanhaiHeatGate.SlotContent content = ShanhaiHeatSources.slotContentOf(stack);
+        if (content.isBlank()) {
+            return "§c无效挂载";
+        }
+        return extraMountCapabilityLine(content);
+    }
+
+    private static String extraMountItemId(ItemStack stack) {
+        var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return key == null ? "" : key.toString();
+    }
+
+    private static String extraMountCapabilityLine(ShanhaiHeatGate.SlotContent content) {
+        StringBuilder line = new StringBuilder();
+        if (content.coilTemperature > 0) {
+            appendMountPart(line, heatAmountText("线圈 " + content.coilTemperature + "K", content.count));
+        }
+        if (content.containmentTier > 0) {
+            appendMountPart(line, heatAmountText("恒星容器 " + content.containmentTier + "级", content.count));
+        }
+        if (content.cleanroomTier > 0) {
+            appendMountPart(line, "§a" + cleanroomLabel(content.cleanroomTier));
+        }
+        if (content.gravity) {
+            appendMountPart(line, "§a重力");
+        }
+        if (content.research) {
+            appendMountPart(line, "§e研究 §8不检查");
+        }
+        if (!content.dimensions.isEmpty()) {
+            appendMountPart(line, "§a维度 " + shortDimensionName(content.dimensions.iterator().next()));
+        }
+        return line.length() == 0 ? "§c无效挂载" : line.toString();
+    }
+
+    private static String heatAmountText(String name, int count) {
+        if (count >= ShanhaiHeatGate.REQUIRED_COUNT) {
+            return "§a" + name + " §7已满";
+        }
+        return "§e" + name + " §7" + count + "/" + ShanhaiHeatGate.REQUIRED_COUNT;
+    }
+
+    private static void appendMountPart(StringBuilder line, String part) {
+        if (line.length() > 0) {
+            line.append("§7 · ");
+        }
+        line.append(part);
+    }
+
+    private static String cleanroomLabel(int tier) {
+        return switch (tier) {
+            case ShanhaiHeatGate.CLEANROOM_PLAIN -> "清洁维护";
+            case ShanhaiHeatGate.CLEANROOM_STERILE -> "无菌维护";
+            case ShanhaiHeatGate.CLEANROOM_LAW -> "法则维护";
+            default -> "超净间";
+        };
+    }
+
+    private static String shortDimensionName(String dimensionId) {
+        int slash = dimensionId.lastIndexOf(':');
+        return slash >= 0 && slash + 1 < dimensionId.length()
+                ? dimensionId.substring(slash + 1)
+                : dimensionId;
+    }
+
+    private Component[] shanhai$extraMountTooltips(int index) {
         return new Component[] {
                 Component.literal("§b§l额外挂载槽 " + (index + 1)),
-                Component.literal("§7三格独立满足配方额外要求"),
+                Component.literal("§7状态在槽位右侧，换物品后立即更新"),
                 Component.literal("§7维护仓：超净间 / 重力，放 1 个即可"),
                 Component.literal("§7世界碎片：对应维度，放 1 个即可"),
                 Component.literal("§7研究/数据访问不参与正常限制"),
                 Component.literal("§7旧式无限制模式：gt_shanhai-common.toml → primordial_omega_engine"),
                 Component.literal("§7线圈 / 恒星热力容器：必须放满 " + ShanhaiHeatGate.REQUIRED_COUNT + " 个"),
-                Component.literal("§7暗能量倍增器 / 湮灭核心 / 黑洞种子仍保留原有效果"),
-                Component.literal(state)
+                Component.literal(canUseExtraMountAsHeatSource()
+                        ? "§7这台机器可以把线圈和恒星容器当热力源"
+                        : "§7这台机器不把线圈和恒星容器当热力源"),
+                Component.literal("§7暗能量倍增器 / 湮灭核心 / 黑洞种子仍保留原有效果")
         };
     }
 

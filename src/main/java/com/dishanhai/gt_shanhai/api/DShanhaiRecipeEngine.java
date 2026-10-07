@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.api;
 
+import com.dishanhai.gt_shanhai.common.recipe.DShanhaiDuplicateRecipeWarnings;
 import com.gregtechceu.gtceu.integration.kjs.recipe.GTRecipeSchema;
 import dev.latvian.mods.kubejs.recipe.RecipeJS;
 import dev.latvian.mods.kubejs.recipe.NamespaceFunction;
@@ -205,6 +206,16 @@ public class DShanhaiRecipeEngine {
         stats.put("jsonSuccess", Long.valueOf(jsonStats.success()));
         stats.put("jsonFailed", Long.valueOf(jsonStats.failed()));
         stats.put("jsonDisabled", Long.valueOf(jsonStats.disabled()));
+        List<String> jsonFailureHints = new ArrayList<>();
+        for (com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats.Failure failure : jsonStats.failures()) {
+            jsonFailureHints.add(failure.recipeId() + " | " + failure.hint());
+        }
+        stats.put("jsonFailureHints", jsonFailureHints);
+        List<String> duplicateWarnings = DShanhaiDuplicateRecipeWarnings.warningLines(
+                net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer(),
+                new java.util.LinkedHashSet<>(REGISTERED_RECIPE_IDS),
+                com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.isCacheValid());
+        stats.put("duplicateWarnings", duplicateWarnings);
         Map<String, Object> byType = new LinkedHashMap<>();
         synchronized (RECIPE_TYPE_STATS) {
             for (Map.Entry<String, TypeStats> entry : RECIPE_TYPE_STATS.entrySet()) {
@@ -358,6 +369,7 @@ public class DShanhaiRecipeEngine {
         clearErrors();
         clearLastReceipt();
         REGISTERED_RECIPE_IDS.clear();
+        DShanhaiDuplicateRecipeWarnings.clear();
         ModuleLevelCondition.clearRequirements();
         synchronized (RECIPE_TYPE_BY_ID) {
             RECIPE_TYPE_BY_ID.clear();
@@ -393,7 +405,9 @@ public class DShanhaiRecipeEngine {
      */
     public static boolean registerRecipe(String recipeId) {
         if (recipeId == null || recipeId.isEmpty()) return false;
-        return REGISTERED_RECIPE_IDS.add(recipeId);
+        boolean first = REGISTERED_RECIPE_IDS.add(recipeId);
+        if (!first) DShanhaiDuplicateRecipeWarnings.noteRepeatedRegistration(recipeId);
+        return first;
     }
 
     public static void printRecipeStats() {
@@ -453,7 +467,7 @@ public class DShanhaiRecipeEngine {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a✓ 成功: §e" + success + "§a 个"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ 失败: §e" + failed + "§c 个"));
             if ((Long) stats.get("jsonFailed") > 0) {
-                player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个，詳見服務端日誌"));
+                sendJsonFailureHints(player, stats);
             }
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c⚠ 警告: 配方库错误，反馈联系 qq:1982932217"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c⚠ 此错误回执由JAVA侧: DShanhaiRecipeEngine 生成，請檢查 KJS 與 JSON 配方日誌"));
@@ -468,7 +482,45 @@ public class DShanhaiRecipeEngine {
                 }
             }
         }
+        sendDuplicateWarnings(player, stats);
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$?body_golden-==========================================="));
+    }
+
+    private static void sendDuplicateWarnings(net.minecraft.server.level.ServerPlayer player, Map<String, Object> stats) {
+        Object raw = stats.get("duplicateWarnings");
+        if (!(raw instanceof List<?> warnings) || warnings.isEmpty()) return;
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "§e⚠ 配方重複: §e" + warnings.size() + "§e 組"));
+        int shown = Math.min(3, warnings.size());
+        for (int i = 0; i < shown; i++) {
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "  §7" + (i + 1) + ". §e" + warnings.get(i)));
+        }
+        if (warnings.size() > shown) {
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "  §7... 還有 " + (warnings.size() - shown) + " 條，詳見服務端日誌"));
+        }
+    }
+
+    private static void sendJsonFailureHints(net.minecraft.server.level.ServerPlayer player, Map<String, Object> stats) {
+        Object raw = stats.get("jsonFailureHints");
+        if (!(raw instanceof List<?> hints) || hints.isEmpty()) {
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "§c✗ JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个，詳見服務端日誌"));
+            return;
+        }
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "§c✗ JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个"));
+        player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ 解析提示:"));
+        int shown = Math.min(3, hints.size());
+        for (int i = 0; i < shown; i++) {
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "  §7" + (i + 1) + ". §c" + hints.get(i)));
+        }
+        if (hints.size() > shown) {
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "  §7... 還有 " + (hints.size() - shown) + " 條解析提示，詳見服務端日誌"));
+        }
     }
 
     private static void recordRecipeStat(String recipeType, String status) {
@@ -683,6 +735,7 @@ public class DShanhaiRecipeEngine {
             }
             applyAll(machine, data);
             ((RecipeJS) machine).save();
+            registerRecipe(recipeId);
             recordRecipeStat(recipeType, "success");
             setReceipt(true, recipeId, recipeType, "saved", "", "");
             return true;

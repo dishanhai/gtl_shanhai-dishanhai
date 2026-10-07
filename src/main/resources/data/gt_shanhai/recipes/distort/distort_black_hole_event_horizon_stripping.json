@@ -1,0 +1,285 @@
+{
+  "data": {
+    "euTier": 14,
+    "ebf_temp": 24000
+  },
+  "duration": 240,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 4611686014132420608
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131000,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 4
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "item": "gtceu:eye_of_harmony"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:time_reversal_protocol"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "item": "dishanhai:hxsp"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:magmatter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:spatialfluid"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtladditions:phonon_crystal_solution"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:temporalfluid"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:cosmicneutronium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:magnetohydrodynamicallyconstrainedstarmatter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtladditions:phonon_medium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:chaos"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:primordialmatter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:mana"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:white_dwarf_mtter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:black_dwarf_mtter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:starlight"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:infinity"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:cosmic_element"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:neutronium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:eternity"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:miracle"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:spacetime"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

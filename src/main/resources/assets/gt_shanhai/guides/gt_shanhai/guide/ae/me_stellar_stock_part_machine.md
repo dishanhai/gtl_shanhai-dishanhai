@@ -12,14 +12,21 @@ item_ids:
 
 # ME 星空库存输入总成
 
+<Column gap="15" fullWidth={true}>
+
+<Row>
+  <BlockImage id="gt_shanhai:me_stellar_stock_part_machine" scale="4" />
+</Row>
+
 <Column gap="2" fullWidth={true}>
 
-### 定位
+<ItemLink id="gt_shanhai:me_stellar_stock_part_machine" /> 用编码样板的输入项给多方块定供料目标。样板里写了哪些物品和流体，加工耗料时就从已连接的 ME 网络库存里直接抽走。总成自己不囤材料，也不会向 AE2 下合成订单。
 
-> <ItemLink id="gt_shanhai:me_stellar_stock_part_machine" />\
-> 通过最多五张编码样板的输入项目汇总设置 ME 库存目标，再沿用库存总成的输入处理，让多方块机器消耗的材料直接来自 ME 网络。
+* 同时作为物品输入和流体输入，装在两种原料都要吃的多方块上。
+* 左侧最多五张编码样板。每张样板旁有开关，关掉的样板不加入拉取配置。
+* 只读样板输入，不读输出。一组可替代输入里，按网络里现有库存决定抽哪一种。
 
-它不是 AE2 合成请求器：不会排入合成 CPU 工作，也不会把材料预先抽进自己的物品或流体缓冲槽。
+</Column>
 
 </Column>
 
@@ -27,7 +34,7 @@ item_ids:
 
 ### 样板解析
 
-将有效的 AE2 编码样板放入专用样板槽。总成最多提供五个竖向样板槽，并汇总所有样板的 `getInputs()`：
+将有效的 AE2 编码样板放入左侧样板槽。槽位旁的开关决定这张样板是否加入拉取；关掉后它不参与汇总。总成最多五张样板，并汇总已开启样板的 `getInputs()`：
 
 * 读取物品和流体输入；样板输出不会成为库存目标。
 * 对每组可替代输入，根据 ME 网络当前库存选择目标。

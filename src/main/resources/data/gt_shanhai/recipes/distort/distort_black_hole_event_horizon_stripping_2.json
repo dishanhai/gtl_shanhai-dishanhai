@@ -1,0 +1,465 @@
+{
+  "data": {
+    "euTier": 14,
+    "ebf_temp": 24000
+  },
+  "duration": 240,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 4611686014132420608
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131000,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 3
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "item": "gtceu:eye_of_harmony"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:time_reversal_protocol"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 32,
+          "ingredient": {
+            "item": "kubejs:quantum_chromodynamic_charge"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:actinium_superhydride_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:adamantium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:argon_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:astraltitanium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:celestialtungsten_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:chaos_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:cosmic_mesh_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:crystalmatrix_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:degenerate_rhenium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:dense_neutron_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:draconiumawakened_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:echoite_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:enderium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:flyb_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:heavy_quark_degenerate_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:helium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:high_energy_quark_gluon_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:infuscolium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:iron_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:legendarium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:metastable_hassium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:mithril_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:nickel_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:orichalcum_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:plutonium_241_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:quantumchromodynamically_confined_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:quark_gluon_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:quasifissioning_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:silver_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:starmetal_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:taranium_rich_liquid_helium_4_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:vibranium_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:eternity"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131072000,
+          "value": [
+            {
+              "fluid": "gtceu:cosmicneutronium"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

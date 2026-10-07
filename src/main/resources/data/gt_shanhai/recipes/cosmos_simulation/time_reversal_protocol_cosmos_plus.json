@@ -1,0 +1,193 @@
+{
+  "duration": 240,
+  "recipeConditions": [
+    {
+      "text": "配方还需要水作为输入流体",
+      "type": "recipe_note"
+    }
+  ],
+  "type": "gtceu:cosmos_simulation",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 131002,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:time_reversal_protocol"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "gtceu:small_eternity_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:kinetic_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:omni_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:pellet_antimatter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:amorphous_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:corporeal_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:essentia_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:dark_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:temporal_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:void_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "gtceu:tiny_magmatter_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:hypercube"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:quantum_anomaly"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:magnetohydrodynamicallyconstrainedstarmatter_block"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "gtceu:tiny_transcendentmetal_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10140,
+          "ingredient": {
+            "item": "gtceu:tiny_infinity_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10240,
+          "ingredient": {
+            "item": "kubejs:space_essence"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -728,6 +728,7 @@
   "message.gt_shanhai.jei.quick_encode.slots_unavailable": "槽位状态暂不可读",
   "message.gt_shanhai.jei.quick_encode.teleport": "点击传送到该星律样板总成",
   "message.gt_shanhai.jei.quick_encode.open_terminal": "请先打开 AE2 样板编码终端，再使用快速编写",
+  "message.gt_shanhai.recipe_editor.quick_encode.no_grid": "身上没有可用的无线终端，或终端没连上 ME 网络",
   "tooltip.gt_shanhai.jei.bookmark_missing": "收藏当前配方中 AE 网络存储低于单次需求量的输入物品或流体",
   "tooltip.gt_shanhai.jei.bookmark_no_recipe": "收藏当前配方中 AE 网络没有对应样板合成流程的输入物品或流体",
   "tooltip.gt_shanhai.jei.bookmark_combined": "组合数量与合成流程判断：仅在无 AE 主产物样板且数量不足时收藏；极高储量视为足够",
