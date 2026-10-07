@@ -20,7 +20,7 @@ class RecipeRebuildServiceSourceTest {
         assertTrue(source.contains("lookup.removeAllRecipes()"));
         assertTrue(source.contains("lookup.addRecipe"));
         assertTrue(source.contains("runPatternCacheInvalidationBatch"));
-        assertTrue(source.contains("RecipeSyncPacket.syncToAll(java.util.Set.of(recipeTypeId))"),
-                "the rebuilt recipe type must be included in the JEI refresh packet");
+        assertTrue(source.contains("if (reason != RebuildReason.EDITOR_COMMIT)"));
+        assertTrue(source.contains("RecipeSyncPacket.syncToAll(java.util.Set.of(recipeTypeId))"));
     }
 }

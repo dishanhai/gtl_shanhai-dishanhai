@@ -554,6 +554,14 @@ public class ShanhaiNetwork {
                 RecipeEditorDraftSyncPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorExportPacket.class,
+                RecipeEditorExportPacket::encode,
+                RecipeEditorExportPacket::new,
+                RecipeEditorExportPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         RecipeSyncPacket.init();
     }
 

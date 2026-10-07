@@ -29,13 +29,12 @@ public final class ShanhaiRecipeTabBarWidget extends Widget {
         var font = Minecraft.getInstance().font;
         for (int i = 0; i < LABELS.length; i++) {
             int left = x + i * part;
-            boolean active = host.stage == i;
+            float on = Math.max(0f, 1f - Math.abs(marker - i));
             boolean allowed = host.canEnter(i);
-            graphics.fill(left, y, left + part - 3, y + 18, active ? 0xFF69E8FF : 0xFF36546A);
-            graphics.fill(left + 1, y + 1, left + part - 4, y + 17,
-                    active ? 0xFF1A3549 : 0xFF16243A);
+            graphics.fill(left, y, left + part - 3, y + 18, mix(0xFF36546A, 0xFF69E8FF, on));
+            graphics.fill(left + 1, y + 1, left + part - 4, y + 17, mix(0xFF16243A, 0xFF1A3549, on));
             graphics.drawString(font, LABELS[i], left + 6, y + 5,
-                    allowed ? 0xFFEAF7FF : 0xFF6E8494, false);
+                    allowed ? mix(0xFFB7C9D6, 0xFFEAF7FF, on) : 0xFF6E8494, false);
         }
         int bar = Math.round(marker * part);
         graphics.fill(x + bar, y + 16, x + bar + part - 3, y + 18, 0xFF69E8FF);
@@ -49,5 +48,19 @@ public final class ShanhaiRecipeTabBarWidget extends Widget {
         if (index < 0 || index >= LABELS.length) return false;
         host.setStage(index, true);
         return true;
+    }
+
+    private static int mix(int from, int to, float amount) {
+        float t = Math.max(0f, Math.min(1f, amount));
+        int fr = (from >> 16) & 0xFF;
+        int fg = (from >> 8) & 0xFF;
+        int fb = from & 0xFF;
+        int tr = (to >> 16) & 0xFF;
+        int tg = (to >> 8) & 0xFF;
+        int tb = to & 0xFF;
+        int r = Math.round(fr + (tr - fr) * t);
+        int g = Math.round(fg + (tg - fg) * t);
+        int b = Math.round(fb + (tb - fb) * t);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 }

@@ -195,6 +195,20 @@ public final class ShanhaiIoTable {
         return Arrays.copyOf(result, size);
     }
 
+    void restoreCells(int newItemIn, int newFluidIn, int newItemOut, int newFluidOut, List<Cell> source) {
+        itemIn = clampSection(newItemIn);
+        fluidIn = clampSection(newFluidIn);
+        itemOut = clampSection(newItemOut);
+        fluidOut = clampSection(newFluidOut);
+        rebuild();
+        if (source == null) return;
+        int count = Math.min(cells.size(), source.size());
+        for (int i = 0; i < count; i++) {
+            Cell copied = source.get(i) == null ? null : source.get(i).copy();
+            if (copied != null && copied.itemKind == cells.get(i).itemKind) cells.set(i, copied);
+        }
+    }
+
     public void resize(int newItemIn, int newFluidIn, int newItemOut, int newFluidOut) {
         int ni = clampSection(newItemIn);
         int nf = clampSection(newFluidIn);
@@ -371,7 +385,12 @@ public final class ShanhaiIoTable {
                 Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
                 if (ingredient != null) {
                     ItemStack[] stacks = ingredient.getItems();
-                    if (stacks.length > 0) cell.item = stacks[0].copy();
+                    if (stacks.length > 0) {
+                        cell.item = stacks[0].copy();
+                        if (content.getContent() instanceof SizedIngredient sized) {
+                            cell.item.setCount(Math.max(1, sized.getAmount()));
+                        }
+                    }
                 }
             } else {
                 FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());

@@ -2,7 +2,7 @@
   "data": {
     "euTier": 12
   },
-  "duration": 20,
+  "duration": 4,
   "tickInputs": {
     "eu": [
       {
@@ -18,44 +18,39 @@
           "type": "gtceu:long",
           "actualAmount": 1,
           "ingredient": {
-            "item": "kubejs:naquadria_charge"
+            "item": "kubejs:extremely_durable_plasma_cell"
           }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 64,
+          "actualAmount": 3,
           "ingredient": {
-            "item": "kubejs:time_dilation_containment_unit"
+            "item": "kubejs:quantum_chromodynamic_charge"
           }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 64,
+          "actualAmount": 3,
           "ingredient": {
-            "item": "kubejs:charged_triplet_neutronium_sphere"
+            "item": "gtceu:heavy_quark_degenerate_matter_block"
           }
         }
-      },
+      }
+    ],
+    "fluid": [
       {
         "content": {
-          "type": "gtceu:long",
-          "actualAmount": 16,
-          "ingredient": {
-            "item": "gtladditions:forge_of_the_antichrist"
-          }
-        },
-        "chance": 0
-      },
-      {
-        "content": {
-          "type": "gtceu:circuit",
-          "configuration": 1
-        },
-        "chance": 0
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:dense_neutron_plasma"
+            }
+          ]
+        }
       }
     ]
   },
@@ -64,9 +59,9 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 1920,
+          "actualAmount": 15,
           "ingredient": {
-            "item": "kubejs:contained_reissner_nordstrom_singularity"
+            "item": "kubejs:dense_neutron_plasma_cell"
           }
         }
       }

@@ -1,0 +1,61 @@
+{
+  "data": {
+    "euTier": 11
+  },
+  "duration": 4,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 33554432
+      }
+    ]
+  },
+  "type": "gtceu:qft",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:naquadria_charge"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:plasma_containment_cell"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:neutronium"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 15,
+          "ingredient": {
+            "item": "kubejs:neutron_plasma_containment_cell"
+          }
+        }
+      }
+    ]
+  }
+}

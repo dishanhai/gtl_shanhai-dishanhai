@@ -30,6 +30,21 @@ public class JEIRecipeCache {
         if (type != null) REGISTERED.remove(type);
     }
 
+    public static synchronized void removeRecipes(RecipeType<?> type, Set<String> recipeIds) {
+        if (type == null || recipeIds == null || recipeIds.isEmpty()) return;
+        List<GTRecipeWrapper> registered = REGISTERED.get(type);
+        if (registered == null || registered.isEmpty()) return;
+
+        List<GTRecipeWrapper> remaining = new ArrayList<>(registered.size());
+        for (GTRecipeWrapper wrapper : registered) {
+            String recipeId = wrapper == null || wrapper.recipe == null || wrapper.recipe.getId() == null
+                    ? "" : wrapper.recipe.getId().toString();
+            if (!recipeIds.contains(recipeId)) remaining.add(wrapper);
+        }
+        if (remaining.isEmpty()) REGISTERED.remove(type);
+        else REGISTERED.put(type, List.copyOf(remaining));
+    }
+
     public static void clearAll() {
         REGISTERED.clear();
     }

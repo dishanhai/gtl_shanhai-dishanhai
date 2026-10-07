@@ -42,7 +42,11 @@ public final class ShanhaiRecipeIoApply {
         if (recipe == null || json == null) return -1;
         Map<RecipeCapability<?>, List<Content>> table = tableOf(recipe, which);
         if (table == null) return -1;
-        table.clear();
+        table.remove(ItemRecipeCapability.CAP);
+        table.remove(FluidRecipeCapability.CAP);
+        if ("tickInputs".equals(which) || "tickOutputs".equals(which)) {
+            table.remove(EURecipeCapability.CAP);
+        }
         int written = put(table, ItemRecipeCapability.CAP, json, K_ITEM);
         written += put(table, FluidRecipeCapability.CAP, json, K_FLUID);
         if ("tickInputs".equals(which) || "tickOutputs".equals(which)) {

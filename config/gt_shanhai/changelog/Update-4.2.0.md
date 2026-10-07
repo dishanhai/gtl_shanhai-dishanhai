@@ -7,11 +7,12 @@ link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/commits/master/](http
 link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/releases](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases)] - 模组和完整包文件发布页
 link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/issues](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues)] - 杜撰与查看模组问题反馈——如果你有问题可以反馈
 link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13)] - 新功能意见征集
+link: [[https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link](https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link)] - 爱发电赞助链接！感谢您的赞助！
 ---
 
 # gt_shanhai 4.2.0
 
-发布日期：`2026 年 10 月 6 日`
+发布日期：`2026 年 10 月 7 日`
 此更新贡献者：**dishanhai**——`核心代码贡献者`、**dgyjh02804**——`重置版作者`、**ReallyChooseC**——`issues #15` 反馈者并提出改进建议
 
 ## 商店批量管理
@@ -44,35 +45,36 @@ link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13](https://gi
 
 ## 工具
 
-- 修复`终极终端替换配置`问题
-- 更新网络协议版本至 v6
+- 修复`终极终端替换配置`问题。
+- 更新网络协议版本至 v6。
+- 添加`配方修改器开发者工具`物品——接入重置版配方修改器。
 
 ## 配方与机器及仓室
 
 # 原初系列
-- 修复原始终焉引擎`异步检查模式`问题。
-- 修复原始终焉引擎模块`主机位置检查`。
+- 修复原始终焉引擎`异步检查模式`问题；
+- 修复原始终焉引擎模块`主机位置检查`；
 - 优化能量仓供电与并行功率预算计算。
 # 配方与星律
-- 优化配方类型注册、配方查找与运行时缓存路径。
+- 优化配方类型注册、配方查找与运行时缓存路径；
 - 改进星律样板执行相关的`输入匹配与虚拟供料`逻辑。
 # 星空库存总成
-- 添加新仓室 `星空库存总成` [`ME Stellar Stock`] 
-· 具体功能见 [AE 星空库存总成](guides\gt_shanhai\guide\ae\me_stellar_stock_part_machine.md)
-· 或查看游戏内「AE 星空库存总成」的 `guideme` 文档（对物品jei按G进入）
+- 添加新仓室 `星空库存总成` [`ME Stellar Stock`] ；
+· 具体功能见 [AE 星空库存总成](guides\gt_shanhai\guide\ae\me_stellar_stock_part_machine.md)；
+· 或查看游戏内「AE 星空库存总成」的 `guideme` 文档（对物品jei按G进入）。
 
 
 ## kubejs 修改
 
-- 添加三个去循环量子操纵者配方
-- 为gtlcore世界碎片系列添加tag：`#dishanhai:world_fragments`——你可以使用此标签快速拉取世界碎片
+- 添加三个去循环量子操纵者配方。
+- 为gtlcore世界碎片系列添加tag：`#dishanhai:world_fragments`——你可以使用此标签快速拉取世界碎片。
 
 ## 虚拟物品系统
-- 添加虚拟物品支持到`AE2最大快速请求`
-- 为存在性检查添加了专门的请求入口跟踪机制
-- 实现了当检测到虚拟物品时回退到原生AE2请求的方法
-- 在`MaxFastExecutor`中添加了针对`虚拟物品的特殊处理逻辑`
-- 防止虚拟物品输入参与最大快速聚合和循环候选图构建
+- 添加虚拟物品支持到`AE2最大快速请求`。
+- 为存在性检查添加了专门的请求入口跟踪机制。
+- 实现了当检测到虚拟物品时回退到原生AE2请求的方法。
+- 在`MaxFastExecutor`中添加了针对`虚拟物品的特殊处理逻辑`。
+- 防止虚拟物品输入参与最大快速聚合和循环候选图构建。
 
 ## AE2 快速请求
 
@@ -83,23 +85,35 @@ link: [[https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13](https://gi
 ## 更新公告系统
 
 - 新增从 `config/gt_shanhai/changelog/` 读取 Markdown 更新公告。
-- 添加公告链接支持和改进历史更新功能
+- 添加公告链接支持和改进历史更新功能。
 - 按文件名中的 SemVer 自动选择最高版本公告。
 - 支持历史版本列表、标题、列表、粗体、斜体与行内代码显示。
 
 ## 重置版合并内容
 
-- 移植添加`全息投影渲染器UI`——*手持创始现实修改模块即可唤出全息UI*
-- 移植添加`配方修改器`——*全息UI中添加配方修改器，并支持实时配方修改*
-- 移植`中子星渲染器`——*支持多种显示模式，支持始终渲染工作状态...*
-- 移植新增`原始物质解构`配方类型以及配方解析器
+- 移植添加`全息投影渲染器UI`——*手持创始现实修改模块即可唤出全息UI*。
+- 移植添加`配方修改器`——*全息UI中添加配方修改器，并支持实时配方修改*。
+- 移植`中子星渲染器`——*支持多种显示模式，支持始终渲染工作状态...*。
+- 移植新增`原始物质解构`配方类型以及配方解析器。
 - 移植`原初系列机器挂载槽扩展`——*支持原初系列机器挂载槽扩展*：
-  -- 维护仓：超净间/重力，放1个即可——维护仓条件模拟
-  -- 世界碎片：对应维度，放1个即可——世界环境模拟
-  -- 创造模式数据访问仓：研究要求，放1个即可——全数据模拟
-  -- 线圈/恒星热力容器：必须放满64个——模拟线圈热量及恒星热力容器
-  添加 `原初模块旧式无限制模式` 配置默认 `flase`——开启时除维护仓外不检查上述额外挂载限制(数据除外) 
-- 移植物品`创造维度碎片`——用于模拟创造维度环境
+  -- 维护仓：超净间/重力，放1个即可——维护仓条件模拟。
+  -- 世界碎片：对应维度，放1个即可——世界环境模拟。
+  -- 创造模式数据访问仓：研究要求，放1个即可——全数据模拟。
+  -- 线圈/恒星热力容器：必须放满64个——模拟线圈热量及恒星热力容器。
+  添加 `原初模块旧式无限制模式` 配置默认 `flase`——开启时除维护仓外不检查上述额外挂载限制(数据除外) 。
+- 移植物品`创造维度碎片`——用于模拟创造维度环境。
+
+## 配方修改器
+
+- 实现配方重构建服务，支持运行时配方类型覆盖。
+- 添加配方编辑器基础类和继承逻辑，支持tickOutputs和条件验证。
+- 增加IO表JSON解析功能，同步客户端和服务端配方快照。
+- 优化配方编辑器动画效果，使用平滑步进函数改善用户体验。
+- 添加配方重构建报告和同步机制，确保配方修改正确传播。
+- 支持配方覆盖存储和冲突检测，提供配方指纹验证功能。
+- 添加特殊配方需求的增加和删除能力
+- 添加配方json化导出能力
+- 添加高级筛选能力和物品反向搜索功能
 
 ## TODO
 

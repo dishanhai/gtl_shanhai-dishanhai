@@ -68,6 +68,7 @@ public class ClientInit {
         MinecraftForge.EVENT_BUS.addListener(ShanhaiKeyMappings::onClientTick);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onItemTooltip);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onClientTick);
+        com.dishanhai.gt_shanhai.client.recipe.ShanhaiRecipeStackPicker.install();
     }
 
     private static void onClientChatReceived(ClientChatReceivedEvent event) {

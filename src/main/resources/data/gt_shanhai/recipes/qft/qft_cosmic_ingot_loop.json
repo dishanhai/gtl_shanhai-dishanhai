@@ -2,7 +2,7 @@
   "data": {
     "euTier": 14
   },
-  "duration": 20,
+  "duration": 40,
   "tickInputs": {
     "eu": [
       {
@@ -16,45 +16,49 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 144,
+          "actualAmount": 1,
           "ingredient": {
-            "item": "gtladditions:black_hole_seed"
+            "type": "gtceu:circuit",
+            "configuration": 1
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:cosmicneutronium_nanoswarm"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2,
+          "ingredient": {
+            "item": "kubejs:cosmic_singularity"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:hypercube"
           }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 64,
+          "actualAmount": 1,
           "ingredient": {
-            "item": "gtceu:eternity_nanoswarm"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 64,
-          "ingredient": {
-            "item": "gtceu:spacetime_nanoswarm"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 64,
-          "ingredient": {
-            "item": "minecraft:repeating_command_block"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 1024,
-          "ingredient": {
-            "item": "gtladditions:astral_array"
+            "item": "avaritia:infinity_ingot"
           }
         }
       }
@@ -62,10 +66,30 @@
     "fluid": [
       {
         "content": {
-          "amount": 576000,
+          "amount": 576,
           "value": [
             {
-              "fluid": "gtceu:miracle"
+              "fluid": "gtceu:white_dwarf_mtter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 576,
+          "value": [
+            {
+              "fluid": "gtceu:black_dwarf_mtter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 500,
+          "value": [
+            {
+              "fluid": "gtceu:primordialmatter"
             }
           ]
         }
@@ -79,7 +103,7 @@
           "type": "gtceu:long",
           "actualAmount": 1,
           "ingredient": {
-            "item": "gtladditions:compressed_astral_array"
+            "item": "gtceu:cosmic_ingot"
           }
         }
       }

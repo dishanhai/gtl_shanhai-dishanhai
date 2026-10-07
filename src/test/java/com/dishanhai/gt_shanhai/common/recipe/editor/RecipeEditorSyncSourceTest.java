@@ -25,6 +25,7 @@ class RecipeEditorSyncSourceTest {
         assertTrue(table.contains("ShanhaiRecipeTableHook.invalidateCaches"));
         assertTrue(ops.contains("public Result restore"));
         assertTrue(ops.contains("setRecipeEnabled"));
+        assertTrue(ops.contains("RecipeSyncPacket.syncRecipeToAll"));
         assertTrue(factory.contains("public static boolean open"));
         assertTrue(factory.contains("ShanhaiRecipeEditorWorkspace"));
     }

@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.recipe.editor;
 
 import com.dishanhai.gt_shanhai.network.RecipeEditorCommitPacket;
 import com.dishanhai.gt_shanhai.network.RecipeEditorDetailPacket;
+import com.dishanhai.gt_shanhai.network.RecipeEditorExportPacket;
 import com.dishanhai.gt_shanhai.network.RecipeEditorDraftRequestPacket;
 import com.dishanhai.gt_shanhai.network.RecipeEditorMachinePacket;
 import com.dishanhai.gt_shanhai.network.RecipeEditorQueryPacket;
@@ -31,6 +32,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     public static final int WIDTH = 520;
     public static final int HEIGHT = 360;
+    /** JEI crops 12px of padding and a 20px config button off the right strip. */
+    private static final int JEI_SEARCH_MARGIN = 140;
     public static final int STAGE_SELECT = 0;
     public static final int STAGE_EDIT = 1;
     public static final int STAGE_REVIEW = 2;
@@ -51,7 +54,13 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     String searchText = "";
     String durationText = "1";
     String eutText = "0";
-    String statusText = "§7拖入 GT 机器，或按配方 ID 搜索";
+    String recipeIdText = "";
+    boolean keepOriginal;
+    String conditionPick = "";
+    JsonElement conditionDraft;
+    int editingCondition = -1;
+    JsonArray conditionEdits = new JsonArray();
+    String statusText = "§7拖入 GT 机器，或按配方、原料、输出搜索";
     int stage = STAGE_SELECT;
     int fromStage = STAGE_SELECT;
     int inputPage;
@@ -61,10 +70,15 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     int outputItemPage;
     int outputFluidPage;
     int selectedIo = -1;
+    long selectedAt = ShanhaiRecipeEditorAnimation.nowMs();
     String chanceText = "100";
     String countText = "1";
     int queryPage;
     int queryTotal;
+    String sortKey = "id";
+    boolean sortDesc;
+    ShanhaiRecipeQuery.SearchMode searchMode = ShanhaiRecipeQuery.SearchMode.RECIPE_ID;
+    ShanhaiRecipeQuery.IngredientKind ingredientKind = ShanhaiRecipeQuery.IngredientKind.ITEM;
     private long draftSaveAt = -1L;
     private boolean draftLoadPending;
     private boolean draftChangedBeforeLoad;
@@ -72,6 +86,23 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     ShanhaiRecipeQuery.Card selectedCard;
     ShanhaiRecipeBase selectedBase;
     ShanhaiIoTable ioTable = new ShanhaiIoTable();
+    private final List<EditSnap> editHistory = new ArrayList<>();
+    private String lastEditKind = "";
+
+    /**
+     * Left edge that keeps JEI's search field readable.
+     * The list lives in the strip to the right of a centered GUI, so a wide
+     * window leaves that strip too thin and the text box collapses.
+     */
+    public static int jeiLeft(int screenWidth, int guiWidth) {
+        if (screenWidth <= 0) return 0;
+        int centered = Math.max(0, (screenWidth - guiWidth) / 2);
+        if (screenWidth - centered - guiWidth >= JEI_SEARCH_MARGIN) return centered;
+        int left = screenWidth - guiWidth - JEI_SEARCH_MARGIN;
+        if (left < 2) left = 2;
+        int maxLeft = Math.max(0, screenWidth - guiWidth);
+        return Math.min(left, maxLeft);
+    }
 
     public ShanhaiRecipeEditorWidget(Player player) {
         super(0, 0, WIDTH, HEIGHT);
@@ -87,7 +118,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         addWidget(new LabelWidget(12, 6, "§b§l山海配方修改器"));
         addWidget(new LabelWidget(12, 18, "§7机器映射 → 图形化编辑 → 差异审核"));
         addWidget(panel);
-        LabelWidget status = new LabelWidget(12, 346, () -> statusText);
+        LabelWidget status = new LabelWidget(12, 336, () -> statusText);
         status.setClientSideWidget();
         addWidget(status);
         setStage(STAGE_SELECT, false);
@@ -98,7 +129,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     }
 
     private SelectorWidget createTypeSelector() {
-        SelectorWidget selector = new SelectorWidget(4, 30, 496, 18, List.of(), 0xFF1A1A1A)
+        SelectorWidget selector = new ShanhaiRecipeTypeSelector(4, 30, 496, 18, List.of(), 0xFF1A1A1A)
                 .setButtonBackground(GuiTextures.VANILLA_BUTTON)
                 .setBackground(GuiTextures.BACKGROUND)
                 .setFontColor(0xFF1A1A1A)
@@ -167,12 +198,116 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     void query() {
         if (!isClient()) return;
+        if (searchMode != ShanhaiRecipeQuery.SearchMode.RECIPE_ID) {
+            String id = searchText == null ? "" : searchText.trim();
+            if (id.isEmpty()) {
+                cards.clear();
+                queryTotal = 0;
+                panel.refreshCards(cards, List.of());
+                setStatus("§7反查请拖入物品或流体，或填写注册 ID");
+                return;
+            }
+            if (net.minecraft.resources.ResourceLocation.tryParse(id) == null) {
+                setStatus("§c反查需要完整注册 ID");
+                return;
+            }
+        }
         ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorQueryPacket(
-                typeFilter, searchText, queryPage, QUERY_PAGE_SIZE));
+                typeFilter, searchText, queryPage, QUERY_PAGE_SIZE, sortWire(),
+                searchMode, ingredientKind));
+    }
+
+    void acceptQueryDrop(String id, boolean fluid) {
+        if (id == null || id.isEmpty()) {
+            searchText = "";
+            queryPage = 0;
+            flushDraftSave();
+            query();
+            return;
+        }
+        searchText = id;
+        ingredientKind = fluid
+                ? ShanhaiRecipeQuery.IngredientKind.FLUID
+                : ShanhaiRecipeQuery.IngredientKind.ITEM;
+        if (searchMode == ShanhaiRecipeQuery.SearchMode.RECIPE_ID) {
+            searchMode = ShanhaiRecipeQuery.SearchMode.INGREDIENT;
+        }
+        queryPage = 0;
+        flushDraftSave();
+        query();
+    }
+
+    void setSearchMode(ShanhaiRecipeQuery.SearchMode mode) {
+        ShanhaiRecipeQuery.SearchMode next = mode == null
+                ? ShanhaiRecipeQuery.SearchMode.RECIPE_ID : mode;
+        if (next == searchMode) return;
+        searchMode = next;
+        queryPage = 0;
+        query();
+    }
+
+    void setIngredientKind(ShanhaiRecipeQuery.IngredientKind kind) {
+        ShanhaiRecipeQuery.IngredientKind next = kind == null
+                ? ShanhaiRecipeQuery.IngredientKind.ITEM : kind;
+        if (next == ingredientKind) return;
+        ingredientKind = next;
+        if (searchMode != ShanhaiRecipeQuery.SearchMode.RECIPE_ID) {
+            queryPage = 0;
+            query();
+        }
+    }
+
+    String modeFace(ShanhaiRecipeQuery.SearchMode mode, String plain) {
+        return searchMode == mode ? "【" + plain + "】" : plain;
+    }
+
+    String kindFace(ShanhaiRecipeQuery.IngredientKind kind, String plain) {
+        if (searchMode == ShanhaiRecipeQuery.SearchMode.RECIPE_ID || ingredientKind != kind) return plain;
+        return "【" + plain + "】";
+    }
+
+    String searchHint() {
+        boolean fluid = ingredientKind == ShanhaiRecipeQuery.IngredientKind.FLUID;
+        return switch (searchMode) {
+            case INGREDIENT -> fluid ? "§7原料反查 · 流体 ID" : "§7原料反查 · 物品 ID";
+            case OUTPUT -> fluid ? "§7输出反查 · 流体 ID" : "§7输出反查 · 物品 ID";
+            default -> "§7配方 ID 包含搜索";
+        };
+    }
+
+    void setSort(String key) {
+        String next = key == null || key.isEmpty() ? "id" : key;
+        if (next.equals(sortKey)) {
+            sortDesc = !sortDesc;
+        } else {
+            sortKey = next;
+            sortDesc = !"id".equals(next);
+        }
+        queryPage = 0;
+        query();
+    }
+
+    String sortWire() {
+        return sortKey + (sortDesc ? ":desc" : ":asc");
+    }
+
+    String sortFace(String key, String plain) {
+        return key != null && key.equals(sortKey) ? sortLabel() : plain;
+    }
+
+    String sortLabel() {
+        return switch (sortKey) {
+            case "eut" -> sortDesc ? "EU↓" : "EU↑";
+            case "duration" -> sortDesc ? "耗时↓" : "耗时↑";
+            case "inputs" -> sortDesc ? "输入↓" : "输入↑";
+            case "outputs" -> sortDesc ? "输出↓" : "输出↑";
+            default -> sortDesc ? "Z-A" : "A-Z";
+        };
     }
 
     void requestDetail(ShanhaiRecipeQuery.Card card) {
         if (!isClient() || card == null) return;
+        keepOriginal = false;
         selectedCard = card;
         flushDraftSave();
         setStatus("§e正在读取配方快照…");
@@ -194,18 +329,59 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             long eut = Long.parseLong(eutText.trim());
             JsonObject inputs = ioTable.json("inputs");
             JsonObject outputs = ioTable.json("outputs");
+            String liveRaw = recipeIdText == null || recipeIdText.isBlank()
+                    ? selectedBase.recipeId() : recipeIdText.trim();
+            if (RecipeEditorExportPacket.exportLocation(liveRaw, selectedBase.recipeId()) == null) {
+                setStatus("§c配方 id 不合法，使用小写的 命名空间:路径");
+                return;
+            }
             ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
                     selectedBase.recipeTypeId(), selectedBase.recipeId(), duration, eut,
                     inputs, outputs, selectedBase.tickInputs(),
-                    selectedBase.tickOutputs(), selectedBase.conditions());
+                    selectedBase.tickOutputs(), conditionEdits);
+            JsonObject payload = payloadWithConditionNote(edited);
+            payload.addProperty("keepOriginal", keepOriginal);
+            payload.addProperty("liveRecipeId",
+                    RecipeEditorExportPacket.exportLocation(liveRaw, selectedBase.recipeId()).toString());
             ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorCommitPacket(
                     edited.recipeTypeId(), edited.recipeId(),
-                    ShanhaiRecipeFingerprint.of(selectedBase), edited.payloadJson().toString()));
+                    ShanhaiRecipeFingerprint.of(selectedBase), payload.toString()));
             flushDraftSave();
             setStatus("§e提交中：服务端正在重建配方索引…");
         } catch (RuntimeException invalid) {
             setStatus("§c耗时或 EU/t 不是整数");
         }
+    }
+
+    void exportJson() {
+        if (!isClient() || selectedBase == null) return;
+        try {
+            int duration = Math.max(1, Integer.parseInt(durationText.trim()));
+            long eut = Long.parseLong(eutText.trim());
+            if (RecipeEditorExportPacket.exportLocation(recipeIdText, selectedBase.recipeId()) == null) {
+                setStatus("§c配方 id 不合法，使用小写的 命名空间:路径");
+                return;
+            }
+            JsonObject inputs = ioTable.json("inputs");
+            JsonObject outputs = ioTable.json("outputs");
+            ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
+                    selectedBase.recipeTypeId(), selectedBase.recipeId(), duration, eut,
+                    inputs, outputs, selectedBase.tickInputs(),
+                    selectedBase.tickOutputs(), conditionEdits);
+            ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorExportPacket(
+                    edited.recipeTypeId(), selectedBase.recipeId(), recipeIdText.trim(),
+                    payloadWithConditionNote(edited).toString()));
+            setStatus("§e正在导出配方 json…");
+        } catch (RuntimeException invalid) {
+            setStatus("§c耗时或 EU/t 不是整数");
+        }
+    }
+
+    private JsonObject payloadWithConditionNote(ShanhaiRecipeBase edited) {
+        JsonObject payload = edited.payloadJson();
+        payload.addProperty("conditionNote",
+                ShanhaiRecipeConditions.diffLine(selectedBase.conditions(), conditionEdits));
+        return payload;
     }
 
     void shiftQueryPage(int delta) {
@@ -239,11 +415,312 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         flushDraftSave();
     }
 
+    void setDurationText(String value) {
+        String next = limit(value);
+        if (!next.equals(durationText)) beforeEdit("text:duration");
+        durationText = next;
+        scheduleDraftSave();
+    }
+
+    void setEutText(String value) {
+        String next = limit(value);
+        if (!next.equals(eutText)) beforeEdit("text:eut");
+        eutText = next;
+        scheduleDraftSave();
+    }
+
+    void toggleKeepOriginal() {
+        keepOriginal = !keepOriginal;
+        if (!isClient()) return;
+        setStatus(keepOriginal
+                ? "§a原配方会保留。把配方 id 改成新的，提交后两者同时存在"
+                : "§e提交后原配方会从 JEI 和配方层移除");
+        flushDraftSave();
+    }
+
+    String keepOriginalFace() {
+        return keepOriginal ? "保留原配方" : "移除原配方";
+    }
+
+    String keepOriginalHint() {
+        if (keepOriginal) return "§7新 id 与原配方同时留下";
+        return "§7JEI 和机器里只留修改后的";
+    }
+
+    void setRecipeIdText(String value) {
+        String next = limit(value);
+        if (!next.equals(recipeIdText)) beforeEdit("text:recipeId");
+        recipeIdText = next;
+        scheduleDraftSave();
+    }
+
+    void setConditionPick(String value) {
+        conditionPick = value == null ? "" : value;
+        editingCondition = -1;
+        conditionDraft = ShanhaiRecipeConditions.defaultJson(conditionPick);
+        panel.refreshParameters();
+    }
+
+    void editCondition(int index) {
+        if (!isClient() || index < 0 || index >= conditionEdits.size()) return;
+        editingCondition = index;
+        conditionDraft = conditionEdits.get(index).deepCopy();
+        panel.refreshParameters();
+    }
+
+    List<ShanhaiRecipeConditions.Parameter> draftParameters() {
+        return ShanhaiRecipeConditions.parameters(conditionDraft);
+    }
+
+    String parameterText(String path) {
+        for (ShanhaiRecipeConditions.Parameter parameter : draftParameters()) {
+            if (parameter.path.equals(path)) return parameter.value;
+        }
+        return "";
+    }
+
+    void setParameterText(String path, String value) {
+        if (!isClient() || conditionDraft == null) return;
+        JsonElement next = ShanhaiRecipeConditions.withParameter(conditionDraft, path, value);
+        if (next == conditionDraft) return;
+        if (editingCondition >= 0) beforeEdit("condition");
+        conditionDraft = next;
+        if (editingCondition >= 0 && editingCondition < conditionEdits.size()) {
+            conditionEdits.set(editingCondition, next.deepCopy());
+            panel.refreshConditions(false);
+            flushDraftSave();
+        }
+    }
+
+    List<String> parameterChoices(String path) {
+        return ShanhaiRecipeConditions.parameterChoices(path, parameterText(path));
+    }
+
+    void addCondition() {
+        if (!isClient() || selectedBase == null) return;
+        JsonElement created = conditionDraft == null
+                ? ShanhaiRecipeConditions.defaultJson(conditionPick) : conditionDraft.deepCopy();
+        if (created == null) {
+            setStatus("§c没有可添加的配方条件");
+            return;
+        }
+        beforeEdit("condition");
+        conditionEdits.add(created);
+        panel.refreshConditions();
+        setStatus("§a已添加 " + ShanhaiRecipeConditions.label(created));
+        flushDraftSave();
+    }
+
+    void removeCondition(int index) {
+        if (!isClient() || index < 0 || index >= conditionEdits.size()) return;
+        beforeEdit("condition");
+        String label = ShanhaiRecipeConditions.label(conditionEdits.get(index));
+        conditionEdits.remove(index);
+        panel.refreshConditions();
+        setStatus("§e已移除 " + label);
+        flushDraftSave();
+    }
+
+    String conditionLabel(int index) {
+        if (index < 0 || index >= conditionEdits.size()) return "";
+        return ShanhaiRecipeConditions.label(conditionEdits.get(index));
+    }
+
+    void setChanceText(String value) {
+        String next = limit(value);
+        if (!next.equals(chanceText)) beforeEdit("text:chance");
+        chanceText = next;
+        applyChance(false);
+    }
+
+    void setCountText(String value) {
+        String next = limit(value);
+        if (!next.equals(countText)) beforeEdit("text:count");
+        countText = next;
+        applyCountText();
+    }
+
+    void beforeIoEdit() {
+        beforeEdit("io");
+    }
+
+    void undoEdit() {
+        if (selectedBase == null || editHistory.isEmpty()) {
+            setStatus("§7没有可撤销的修改");
+            return;
+        }
+        EditSnap now = captureEdit();
+        EditSnap top = editHistory.get(editHistory.size() - 1);
+        if (!now.same(top)) {
+            applyEdit(top);
+            lastEditKind = "";
+            setStatus("§a已撤销上一步");
+            flushDraftSave();
+            return;
+        }
+        if (editHistory.size() <= 1) {
+            setStatus("§7没有可撤销的修改");
+            return;
+        }
+        editHistory.remove(editHistory.size() - 1);
+        applyEdit(editHistory.get(editHistory.size() - 1));
+        lastEditKind = "";
+        setStatus("§a已撤销上一步");
+        flushDraftSave();
+    }
+
+    void restoreOriginal() {
+        if (selectedBase == null || editHistory.isEmpty()) return;
+        EditSnap origin = editHistory.get(0);
+        EditSnap now = captureEdit();
+        if (now.same(origin)) {
+            setStatus("§7已经是打开时的配方");
+            return;
+        }
+        if (!now.same(editHistory.get(editHistory.size() - 1))) editHistory.add(now);
+        applyEdit(origin);
+        lastEditKind = "restore";
+        setStatus("§a已还原为打开时的配方");
+        flushDraftSave();
+    }
+
+    private void seedEditHistory() {
+        editHistory.clear();
+        lastEditKind = "";
+        if (selectedBase == null) return;
+        editHistory.add(originEdit());
+        EditSnap now = captureEdit();
+        if (!now.same(editHistory.get(0))) editHistory.add(now);
+    }
+
+    private void beforeEdit(String kind) {
+        if (restoringDraft || selectedBase == null || editHistory.isEmpty()) return;
+        if (kind != null && kind.startsWith("text:") && kind.equals(lastEditKind)) return;
+        EditSnap now = captureEdit();
+        if (!now.same(editHistory.get(editHistory.size() - 1))) editHistory.add(now);
+        while (editHistory.size() > 48) editHistory.remove(1);
+        lastEditKind = kind == null ? "" : kind;
+    }
+
+    private void applyEdit(EditSnap snap) {
+        durationText = snap.duration;
+        eutText = snap.eut;
+        recipeIdText = snap.recipeId;
+        conditionEdits = parseConditions(snap.conditions);
+        panel.refreshConditions();
+        ioTable.restoreCells(snap.itemIn, snap.fluidIn, snap.itemOut, snap.fluidOut, snap.cells);
+        inputItemPage = clampPage(snap.inputItemPage, ioTable.itemIn(), ShanhaiRecipeEditorPanel.ITEM_PAGE);
+        inputFluidPage = clampPage(snap.inputFluidPage, ioTable.fluidIn(), ShanhaiRecipeEditorPanel.FLUID_PAGE);
+        outputItemPage = clampPage(snap.outputItemPage, ioTable.itemOut(), ShanhaiRecipeEditorPanel.ITEM_PAGE);
+        outputFluidPage = clampPage(snap.outputFluidPage, ioTable.fluidOut(), ShanhaiRecipeEditorPanel.FLUID_PAGE);
+        inputPage = inputItemPage;
+        outputPage = outputItemPage;
+        selectedIo = ioTable.cell(snap.selectedIo) == null ? -1 : snap.selectedIo;
+        chanceText = snap.chanceText;
+        countText = snap.countText;
+        panel.bindTable(ioTable);
+    }
+
+    private int clampPage(int page, int section, int pageSize) {
+        return Math.max(0, Math.min(page, pageCount(section, pageSize) - 1));
+    }
+
+    private EditSnap captureEdit() {
+        List<ShanhaiIoTable.Cell> cells = new ArrayList<>();
+        for (ShanhaiIoTable.Cell cell : ioTable.all()) cells.add(cell.copy());
+        return new EditSnap(durationText, eutText, recipeIdText, conditionEdits.toString(),
+                ioTable.itemIn(), ioTable.fluidIn(),
+                ioTable.itemOut(), ioTable.fluidOut(), cells,
+                inputItemPage, inputFluidPage, outputItemPage, outputFluidPage,
+                selectedIo, chanceText, countText);
+    }
+
+    private EditSnap originEdit() {
+        ShanhaiIoTable base = ShanhaiIoTable.fromJson(selectedBase.inputs(), selectedBase.outputs());
+        List<ShanhaiIoTable.Cell> cells = new ArrayList<>();
+        for (ShanhaiIoTable.Cell cell : base.all()) cells.add(cell.copy());
+        return new EditSnap(Integer.toString(selectedBase.duration()), Long.toString(selectedBase.eut()),
+                selectedBase.recipeId(), selectedBase.conditions().toString(),
+                base.itemIn(), base.fluidIn(), base.itemOut(), base.fluidOut(), cells,
+                0, 0, 0, 0, -1, "100", "1");
+    }
+
+    private static final class EditSnap {
+        private final String duration;
+        private final String eut;
+        private final String recipeId;
+        private final String conditions;
+        private final int itemIn;
+        private final int fluidIn;
+        private final int itemOut;
+        private final int fluidOut;
+        private final List<ShanhaiIoTable.Cell> cells;
+        private final int inputItemPage;
+        private final int inputFluidPage;
+        private final int outputItemPage;
+        private final int outputFluidPage;
+        private final int selectedIo;
+        private final String chanceText;
+        private final String countText;
+
+        private EditSnap(String duration, String eut, String recipeId, String conditions,
+                         int itemIn, int fluidIn, int itemOut, int fluidOut,
+                         List<ShanhaiIoTable.Cell> cells, int inputItemPage, int inputFluidPage,
+                         int outputItemPage, int outputFluidPage, int selectedIo,
+                         String chanceText, String countText) {
+            this.duration = duration == null ? "" : duration;
+            this.eut = eut == null ? "" : eut;
+            this.recipeId = recipeId == null ? "" : recipeId;
+            this.conditions = conditions == null ? "[]" : conditions;
+            this.itemIn = itemIn;
+            this.fluidIn = fluidIn;
+            this.itemOut = itemOut;
+            this.fluidOut = fluidOut;
+            this.cells = cells;
+            this.inputItemPage = inputItemPage;
+            this.inputFluidPage = inputFluidPage;
+            this.outputItemPage = outputItemPage;
+            this.outputFluidPage = outputFluidPage;
+            this.selectedIo = selectedIo;
+            this.chanceText = chanceText == null ? "" : chanceText;
+            this.countText = countText == null ? "" : countText;
+        }
+
+        private boolean same(EditSnap other) {
+            if (other == null || itemIn != other.itemIn || fluidIn != other.fluidIn
+                    || itemOut != other.itemOut || fluidOut != other.fluidOut) return false;
+            if (!duration.equals(other.duration) || !eut.equals(other.eut)
+                    || !recipeId.equals(other.recipeId) || !conditions.equals(other.conditions)) return false;
+            if (inputItemPage != other.inputItemPage || inputFluidPage != other.inputFluidPage
+                    || outputItemPage != other.outputItemPage || outputFluidPage != other.outputFluidPage) return false;
+            if (cells.size() != other.cells.size()) return false;
+            for (int i = 0; i < cells.size(); i++) {
+                if (!sameCell(cells.get(i), other.cells.get(i))) return false;
+            }
+            return true;
+        }
+
+        private static boolean sameCell(ShanhaiIoTable.Cell left, ShanhaiIoTable.Cell right) {
+            if (left == right) return true;
+            if (left == null || right == null || left.itemKind != right.itemKind) return false;
+            if (left.chance != right.chance || left.maxChance != right.maxChance) return false;
+            if (left.itemKind) {
+                return ItemStack.isSameItemSameTags(left.item, right.item)
+                        && left.item.getCount() == right.item.getCount();
+            }
+            if (left.fluid.isEmpty() && right.fluid.isEmpty()) return true;
+            if (left.fluid.isEmpty() || right.fluid.isEmpty()) return false;
+            return left.fluid.getFluid() == right.fluid.getFluid()
+                    && left.fluid.getAmount() == right.fluid.getAmount();
+        }
+    }
+
     void growInput() {
-        ioTable.resize(
-                growTo(ioTable.itemIn(), ShanhaiRecipeEditorPanel.ITEM_PAGE),
-                growTo(ioTable.fluidIn(), ShanhaiRecipeEditorPanel.FLUID_PAGE),
-                ioTable.itemOut(), ioTable.fluidOut());
+        int nextItems = growTo(ioTable.itemIn(), ShanhaiRecipeEditorPanel.ITEM_PAGE);
+        int nextFluids = growTo(ioTable.fluidIn(), ShanhaiRecipeEditorPanel.FLUID_PAGE);
+        if (nextItems == ioTable.itemIn() && nextFluids == ioTable.fluidIn()) return;
+        beforeEdit("grow");
+        ioTable.resize(nextItems, nextFluids, ioTable.itemOut(), ioTable.fluidOut());
         inputItemPage = pageCount(ioTable.itemIn(), ShanhaiRecipeEditorPanel.ITEM_PAGE) - 1;
         inputFluidPage = pageCount(ioTable.fluidIn(), ShanhaiRecipeEditorPanel.FLUID_PAGE) - 1;
         inputPage = inputItemPage;
@@ -252,10 +729,11 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     }
 
     void growOutput() {
-        ioTable.resize(
-                ioTable.itemIn(), ioTable.fluidIn(),
-                growTo(ioTable.itemOut(), ShanhaiRecipeEditorPanel.ITEM_PAGE),
-                growTo(ioTable.fluidOut(), ShanhaiRecipeEditorPanel.FLUID_PAGE));
+        int nextItems = growTo(ioTable.itemOut(), ShanhaiRecipeEditorPanel.ITEM_PAGE);
+        int nextFluids = growTo(ioTable.fluidOut(), ShanhaiRecipeEditorPanel.FLUID_PAGE);
+        if (nextItems == ioTable.itemOut() && nextFluids == ioTable.fluidOut()) return;
+        beforeEdit("grow");
+        ioTable.resize(ioTable.itemIn(), ioTable.fluidIn(), nextItems, nextFluids);
         outputItemPage = pageCount(ioTable.itemOut(), ShanhaiRecipeEditorPanel.ITEM_PAGE) - 1;
         outputFluidPage = pageCount(ioTable.fluidOut(), ShanhaiRecipeEditorPanel.FLUID_PAGE) - 1;
         outputPage = outputItemPage;
@@ -266,6 +744,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     void selectIo(int index) {
         ShanhaiIoTable.Cell cell = ioTable.cell(index);
         if (cell == null) return;
+        if (index != selectedIo) selectedAt = ShanhaiRecipeEditorAnimation.nowMs();
         selectedIo = index;
         int max = Math.max(1, cell.maxChance);
         chanceText = Integer.toString(cell.chance * 100 / max);
@@ -274,7 +753,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     void markNotConsumed() {
         ShanhaiIoTable.Cell cell = selectedCell();
-        if (cell == null) return;
+        if (cell == null || cell.chance == 0) return;
+        beforeEdit("chance");
         cell.chance = 0;
         cell.dirty = true;
         chanceText = "0";
@@ -282,6 +762,10 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     }
 
     void markChanceOutput() {
+        applyChance(true);
+    }
+
+    private void applyChance(boolean checkpoint) {
         ShanhaiIoTable.Cell cell = selectedCell();
         if (cell == null) return;
         int percent = parsePercent(chanceText);
@@ -290,8 +774,11 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             return;
         }
         int max = cell.maxChance <= 0 ? 10000 : cell.maxChance;
+        int next = percent * max / 100;
+        if (cell.chance == next && cell.maxChance == max) return;
+        if (checkpoint) beforeEdit("chance");
         cell.maxChance = max;
-        cell.chance = percent * max / 100;
+        cell.chance = next;
         cell.dirty = true;
         chanceText = Integer.toString(percent);
         syncIoDraft();
@@ -301,6 +788,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         ShanhaiIoTable.Cell cell = selectedCell();
         if (cell == null) return;
         if (cell.maxChance <= 0) cell.maxChance = 10000;
+        if (cell.chance == cell.maxChance) return;
+        beforeEdit("chance");
         cell.chance = cell.maxChance;
         cell.dirty = true;
         chanceText = "100";
@@ -321,6 +810,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             setStatus("§c数量要写成正整数");
             return;
         }
+        if (cell.shownCount() == count) return;
         if (cell.itemKind) {
             if (cell.item.isEmpty()) {
                 setStatus("§c先放入物品");
@@ -337,13 +827,19 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         syncIoDraft();
     }
 
+    float selectionAccent() {
+        float linear = Math.min(1f, Math.max(0L,
+                ShanhaiRecipeEditorAnimation.nowMs() - selectedAt) / 160f);
+        return linear * linear * (3f - 2f * linear);
+    }
+
     String traitLine() {
         ShanhaiIoTable.Cell cell = ioTable.cell(selectedIo);
         if (cell == null) return "§8点一格，再设不消耗或概率";
         String side = selectedIo < ioTable.inSection() ? "输入" : "输出";
         String kind = cell.itemKind ? "物品" : "流体";
         String mode = cell.chance <= 0 ? "不消耗" : (cell.chance >= cell.maxChance ? "必定" : "概率");
-        return "§7" + side + kind + " §f" + mode + " §7" + chanceText + "%  数量 " + countText;
+        return "§7" + side + kind + " §f" + mode + " §7" + chanceText + "%%  数量 " + countText;
     }
 
     private ShanhaiIoTable.Cell selectedCell() {
@@ -381,10 +877,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     String conditionLine() {
         if (selectedBase == null) return "§7条件：—";
-        int count = selectedBase.conditions().size();
-        return count == 0
-                ? "§7条件：无，提交时仍原样保留"
-                : "§d条件：" + count + " 条，提交时原样保留";
+        return ShanhaiRecipeConditions.diffLine(selectedBase.conditions(), conditionEdits);
     }
 
     String fingerprintLine() {
@@ -430,8 +923,22 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             cards.clear();
             cards.addAll(result.cards());
             queryTotal = result.total();
-            panel.refreshCards(cards);
-            setStatus(result.total() == 0 ? "§c没有命中配方" : "§a命中 " + result.total() + " 条");
+            panel.refreshCards(cards, result.groups());
+            setStatus(result.total() == 0
+                    ? "§c没有命中配方"
+                    : "§a" + modeName(result.mode()) + "命中 " + result.total() + " 条");
+            return;
+        }
+        if ("export".equals(packet.message())) {
+            if (packet.status() == RecipeEditorResultPacket.Status.SUCCESS) {
+                String payload = packet.payload() == null ? "" : packet.payload();
+                String[] lines = payload.split("\n", 3);
+                String where = lines[0] + (lines.length > 1 ? " " + lines[1] : "");
+                String diff = lines.length > 2 ? " " + lines[2] : "";
+                setStatus("§a已导出 " + compact(where, 40) + diff);
+            } else {
+                setStatus(statusLine(packet));
+            }
             return;
         }
         if ("detail".equals(packet.message())
@@ -440,6 +947,9 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             if (selectedBase != null) {
                 durationText = Integer.toString(selectedBase.duration());
                 eutText = Long.toString(selectedBase.eut());
+                recipeIdText = selectedBase.recipeId();
+                conditionEdits = selectedBase.conditions().deepCopy();
+                panel.refreshConditions();
                 inputPage = 0;
                 outputPage = 0;
                 inputItemPage = 0;
@@ -449,17 +959,21 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 selectedIo = -1;
                 ioTable = ShanhaiIoTable.fromJson(selectedBase.inputs(), selectedBase.outputs());
                 panel.bindTable(ioTable);
+                seedEditHistory();
                 setStatus("§a已载入 " + compact(selectedBase.recipeId(), 48));
             }
             return;
         }
-        setStatus(statusLine(packet));
+        setStatus(packet.payload() != null && packet.payload().startsWith("§7条件")
+                ? "§a已提交 " + packet.payload()
+                : statusLine(packet));
         if (packet.status() == RecipeEditorResultPacket.Status.SUCCESS
                 && packet.message() != null && packet.message().contains("rebuilt")) {
             ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorDraftRequestPacket(
                     RecipeEditorDraftRequestPacket.Action.CLEAR, null));
             selectedBase = null;
             selectedCard = null;
+            editHistory.clear();
             setStage(STAGE_SELECT, true);
             query();
         }
@@ -490,6 +1004,67 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         }
     }
 
+    private static String modeName(ShanhaiRecipeQuery.SearchMode mode) {
+        return switch (mode) {
+            case INGREDIENT -> "原料";
+            case OUTPUT -> "输出";
+            default -> "配方";
+        };
+    }
+
+    List<Integer> sortIndexes(List<ShanhaiRecipeQuery.Card> source, List<Integer> indexes) {
+        List<Integer> ordered = new ArrayList<>();
+        if (source == null || indexes == null) return ordered;
+        for (Integer index : indexes) {
+            if (index == null || index < 0 || index >= source.size() || source.get(index) == null) continue;
+            ordered.add(index);
+        }
+        ordered.sort((left, right) -> compareCards(source.get(left), source.get(right)));
+        return ordered;
+    }
+
+    private int compareCards(ShanhaiRecipeQuery.Card left, ShanhaiRecipeQuery.Card right) {
+        int order = switch (sortKey) {
+            case "eut" -> Long.compare(left.eut(), right.eut());
+            case "duration" -> Integer.compare(left.duration(), right.duration());
+            case "inputs" -> Integer.compare(left.inputCount(), right.inputCount());
+            case "outputs" -> Integer.compare(left.outputCount(), right.outputCount());
+            default -> left.recipeId().compareToIgnoreCase(right.recipeId());
+        };
+        if (order == 0) return left.recipeId().compareToIgnoreCase(right.recipeId());
+        return sortDesc ? -order : order;
+    }
+
+    private static String ioBrief(JsonObject card, String key) {
+        if (card == null || !card.has(key) || !card.get(key).isJsonArray()) return "";
+        JsonArray values = card.getAsJsonArray(key);
+        StringBuilder text = new StringBuilder();
+        int limit = Math.min(3, values.size());
+        for (int i = 0; i < limit; i++) {
+            if (i > 0) text.append(", ");
+            text.append(ioBit(values.get(i)));
+        }
+        if (values.size() > 3) text.append("…");
+        return text.toString();
+    }
+
+    private static String ioBit(JsonElement element) {
+        if (element == null || element.isJsonNull()) return "";
+        if (!element.isJsonObject()) return element.getAsString();
+        JsonObject value = element.getAsJsonObject();
+        String id = value.has("id") ? value.get("id").getAsString() : "";
+        int slash = id.lastIndexOf(':');
+        String name = slash >= 0 && slash + 1 < id.length() ? id.substring(slash + 1) : id;
+        int count = value.has("count") ? value.get("count").getAsInt() : 1;
+        return count > 1 ? name + "x" + count : name;
+    }
+
+    private static int ioCount(JsonObject card, String countKey, String arrayKey) {
+        if (card.has(countKey) && card.get(countKey).isJsonPrimitive()) return card.get(countKey).getAsInt();
+        if (card.has(arrayKey) && card.get(arrayKey).isJsonArray()) return card.getAsJsonArray(arrayKey).size();
+        return 0;
+    }
+
     private ShanhaiRecipeQuery.Result parseResult(String payload) {
         try {
             JsonObject root = JsonParser.parseString(payload).getAsJsonObject();
@@ -504,14 +1079,61 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                         card.get("eut").getAsLong(),
                         card.get("fingerprint").getAsString(),
                         card.has("iconKind") ? card.get("iconKind").getAsString() : "",
-                        card.has("iconId") ? card.get("iconId").getAsString() : ""));
+                        card.has("iconId") ? card.get("iconId").getAsString() : "",
+                        ioBrief(card, "inputs"),
+                        ioBrief(card, "outputs"),
+                        ioCount(card, "inputCount", "inputs"),
+                        ioCount(card, "outputCount", "outputs")));
             }
-            return new ShanhaiRecipeQuery.Result(List.copyOf(result),
-                    root.get("total").getAsInt(), root.get("revision").getAsLong());
+            List<ShanhaiRecipeQuery.Card> page = List.copyOf(result);
+            return new ShanhaiRecipeQuery.Result(page,
+                    root.get("total").getAsInt(), root.get("revision").getAsLong(),
+                    parseMode(root.get("mode")), parseGroups(root, page.size()));
         } catch (RuntimeException invalid) {
             setStatus("§c配方列表解析失败");
             return new ShanhaiRecipeQuery.Result(List.of(), 0, 0L);
         }
+    }
+
+    private static ShanhaiRecipeQuery.IngredientKind parseKind(String name) {
+        if (name == null || name.isEmpty()) return ShanhaiRecipeQuery.IngredientKind.ITEM;
+        try {
+            return ShanhaiRecipeQuery.IngredientKind.valueOf(name);
+        } catch (IllegalArgumentException invalid) {
+            return ShanhaiRecipeQuery.IngredientKind.ITEM;
+        }
+    }
+
+    private static ShanhaiRecipeQuery.SearchMode parseMode(JsonElement element) {
+        if (element == null || !element.isJsonPrimitive()) return ShanhaiRecipeQuery.SearchMode.RECIPE_ID;
+        try {
+            return ShanhaiRecipeQuery.SearchMode.valueOf(element.getAsString());
+        } catch (IllegalArgumentException invalid) {
+            return ShanhaiRecipeQuery.SearchMode.RECIPE_ID;
+        }
+    }
+
+    private static List<ShanhaiRecipeQuery.Group> parseGroups(JsonObject root, int cardCount) {
+        if (root == null || !root.has("groups") || !root.get("groups").isJsonArray()) return null;
+        JsonArray values = root.getAsJsonArray("groups");
+        if (values.isEmpty()) return null;
+        List<ShanhaiRecipeQuery.Group> groups = new ArrayList<>();
+        for (JsonElement element : values) {
+            if (!element.isJsonObject()) continue;
+            JsonObject group = element.getAsJsonObject();
+            String typeId = group.has("recipeTypeId") && group.get("recipeTypeId").isJsonPrimitive()
+                    ? group.get("recipeTypeId").getAsString() : "";
+            List<Integer> indexes = new ArrayList<>();
+            if (group.has("cardIndexes") && group.get("cardIndexes").isJsonArray()) {
+                for (JsonElement index : group.getAsJsonArray("cardIndexes")) {
+                    if (!index.isJsonPrimitive()) continue;
+                    int value = index.getAsInt();
+                    if (value >= 0 && value < cardCount) indexes.add(value);
+                }
+            }
+            groups.add(new ShanhaiRecipeQuery.Group(typeId, indexes));
+        }
+        return groups.isEmpty() ? null : groups;
     }
 
     private ShanhaiRecipeBase parseBase(String payload) {
@@ -592,6 +1214,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         draft.putInt("stage", stage);
         draft.putString("typeFilter", typeFilter);
         draft.putString("searchText", searchText);
+        draft.putString("searchMode", searchMode.name());
+        draft.putString("ingredientKind", ingredientKind.name());
         draft.putInt("queryPage", queryPage);
         draft.putInt("inputPage", inputItemPage);
         draft.putInt("outputPage", outputItemPage);
@@ -616,6 +1240,9 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             draft.putString("baseFingerprint", ShanhaiRecipeFingerprint.of(selectedBase));
             draft.putString("durationText", durationText);
             draft.putString("eutText", eutText);
+            draft.putString("recipeIdText", recipeIdText);
+            draft.putBoolean("keepOriginal", keepOriginal);
+            draft.putString("conditionEdits", conditionEdits.toString());
             draft.putString("draftInputs", editableTable(selectedBase.inputs(), ioTable.json("inputs")).toString());
             draft.putString("draftOutputs", editableTable(selectedBase.outputs(), ioTable.json("outputs")).toString());
         }
@@ -646,6 +1273,9 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                     ? ItemStack.of(draft.getCompound("machine")) : ItemStack.EMPTY;
             typeFilter = draft.getString("typeFilter");
             searchText = draft.getString("searchText");
+            searchMode = parseMode(draft.contains("searchMode")
+                    ? new com.google.gson.JsonPrimitive(draft.getString("searchMode")) : null);
+            ingredientKind = parseKind(draft.getString("ingredientKind"));
             queryPage = Math.max(0, draft.getInt("queryPage"));
             inputItemPage = Math.max(0, draft.contains("inputItemPage")
                     ? draft.getInt("inputItemPage") : draft.getInt("inputPage"));
@@ -670,6 +1300,12 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                         ? draft.getString("durationText") : Integer.toString(selectedBase.duration());
                 eutText = draft.contains("eutText")
                         ? draft.getString("eutText") : Long.toString(selectedBase.eut());
+                recipeIdText = draft.contains("recipeIdText")
+                        ? draft.getString("recipeIdText") : selectedBase.recipeId();
+                conditionEdits = draft.contains("conditionEdits")
+                        ? parseConditions(draft.getString("conditionEdits"))
+                        : selectedBase.conditions().deepCopy();
+                panel.refreshConditions();
                 JsonObject inputs = draft.contains("draftInputs")
                         ? JsonParser.parseString(draft.getString("draftInputs")).getAsJsonObject()
                         : selectedBase.inputs();
@@ -682,6 +1318,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                             draft.getInt("itemOut"), draft.getInt("fluidOut"));
                 }
                 panel.bindTable(ioTable);
+                seedEditHistory();
                 String fingerprint = draft.getString("baseFingerprint");
                 if (!fingerprint.isEmpty()) {
                     selectedCard = new ShanhaiRecipeQuery.Card(
@@ -704,6 +1341,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 ShanhaiNetwork.CHANNEL.sendToServer(
                         new RecipeEditorDetailPacket(selectedCard.recipeTypeId(), selectedCard.recipeId()));
             }
+            if (draft.contains("keepOriginal")) keepOriginal = draft.getBoolean("keepOriginal");
             setStatus(selectedBase == null && selectedCard == null
                     ? "§7草稿已恢复" : "§a已恢复未提交的配方编辑进度");
         } catch (RuntimeException invalid) {
@@ -724,6 +1362,16 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     static String compact(String value, int max) {
         if (value == null) return "";
         return value.length() <= max ? value : value.substring(0, Math.max(0, max - 3)) + "...";
+    }
+
+    private static JsonArray parseConditions(String raw) {
+        try {
+            JsonElement element = JsonParser.parseString(raw == null ? "[]" : raw);
+            if (element.isJsonArray()) return element.getAsJsonArray();
+        } catch (RuntimeException ignored) {
+            // Keep an empty list rather than a half-parsed condition.
+        }
+        return new JsonArray();
     }
 
     static String limit(String value) {

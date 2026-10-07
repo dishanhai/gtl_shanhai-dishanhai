@@ -1,12 +1,12 @@
 {
   "data": {
-    "euTier": 12
+    "euTier": 13
   },
-  "duration": 20,
+  "duration": 4,
   "tickInputs": {
     "eu": [
       {
-        "content": 134217728
+        "content": 536870912
       }
     ]
   },
@@ -18,16 +18,7 @@
           "type": "gtceu:long",
           "actualAmount": 1,
           "ingredient": {
-            "item": "kubejs:time_dilation_containment_unit"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 64,
-          "ingredient": {
-            "item": "kubejs:charged_triplet_neutronium_sphere"
+            "item": "kubejs:chaos_shard"
           }
         }
       },
@@ -40,22 +31,15 @@
           }
         },
         "chance": 0
-      },
-      {
-        "content": {
-          "type": "gtceu:circuit",
-          "configuration": 4
-        },
-        "chance": 0
       }
     ],
     "fluid": [
       {
         "content": {
-          "amount": 10000,
+          "amount": 1000,
           "value": [
             {
-              "fluid": "gtceu:uu_matter"
+              "fluid": "gtceu:raw_star_matter_plasma"
             }
           ]
         }
@@ -67,9 +51,18 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 30,
+          "actualAmount": 15,
           "ingredient": {
-            "item": "kubejs:contained_kerr_newmann_singularity"
+            "item": "kubejs:chaos_containment_unit"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:time_dilation_containment_unit"
           }
         }
       }

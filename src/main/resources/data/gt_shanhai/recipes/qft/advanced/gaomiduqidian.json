@@ -1,20 +1,75 @@
 {
-  "type": "gtceu:qft",
+  "data": {
+    "euTier": 12
+  },
   "duration": 20,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 134217728
+      }
+    ]
+  },
+  "type": "gtceu:qft",
   "inputs": {
     "item": [
-      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "kubejs:leptonic_charge"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
-      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "kubejs:time_dilation_containment_unit"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
-      {"content": {"type": "gtceu:sized", "count": 1, "ingredient": {"item": "kubejs:charged_triplet_neutronium_sphere"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0},
-      {"content": {"type": "gtceu:sized", "count": 16, "ingredient": {"item": "gtladditions:forge_of_the_antichrist"}}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0},
-      {"content": {"type": "gtceu:circuit", "configuration": 3}, "chance": 0, "maxChance": 10000, "tierChanceBoost": 0}
-    ],
-    "fluid": []
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:leptonic_charge"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:time_dilation_containment_unit"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:charged_triplet_neutronium_sphere"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtladditions:forge_of_the_antichrist"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:circuit",
+          "configuration": 3
+        },
+        "chance": 0
+      }
+    ]
   },
   "outputs": {
     "item": [
-      {"content": {"type": "gtceu:sized", "count": 30, "ingredient": {"item": "kubejs:contained_high_density_protonic_matter"}}, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 30,
+          "ingredient": {
+            "item": "kubejs:contained_high_density_protonic_matter"
+          }
+        }
+      }
     ]
-  },
-  "tickInputs": {"eu": [{"content": 134217728, "chance": 10000, "maxChance": 10000, "tierChanceBoost": 0}]}
+  }
 }

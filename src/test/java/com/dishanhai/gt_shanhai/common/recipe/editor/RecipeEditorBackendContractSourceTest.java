@@ -33,7 +33,7 @@ class RecipeEditorBackendContractSourceTest {
         assertTrue(rebuild.contains("entriesForType(recipeTypeId)"));
         assertTrue(rebuild.contains("override.toGtRecipe(copy)"));
         assertTrue(commit.contains("sender.hasPermissions(2)"));
-        assertTrue(commit.contains("RecipeOriginalSnapshotStore.copyOf"));
+        assertTrue(commit.contains("RecipeRebuildService.editableOf"));
         assertTrue(widget.contains("selectedBase.tickOutputs()"));
         assertTrue(widget.contains("json.has(\"tickOutputs\")"));
     }

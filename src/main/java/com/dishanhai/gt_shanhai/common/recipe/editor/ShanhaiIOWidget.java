@@ -7,6 +7,7 @@ import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import com.mojang.blaze3d.systems.RenderSystem;
 import mezz.jei.api.ingredients.ITypedIngredient;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.Rect2i;
@@ -20,6 +21,7 @@ import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
 
 import java.util.List;
 import java.util.function.BooleanSupplier;
+import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
 
 /** One graphical item or fluid cell. Drops are recorded, never consumed. */
@@ -32,7 +34,9 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
     private ShanhaiIoTable table;
     private final IntSupplier indexSupplier;
     private final Runnable changed;
+    private Runnable before = () -> {};
     private BooleanSupplier selected = () -> false;
+    private DoubleSupplier accent = () -> 1d;
     private Runnable onSelect = () -> {};
 
     public ShanhaiIOWidget(ShanhaiIoTable table, IntSupplier indexSupplier,
@@ -48,8 +52,16 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         this.onSelect = onSelect == null ? () -> {} : onSelect;
     }
 
+    public void setAccent(DoubleSupplier accent) {
+        this.accent = accent == null ? () -> 1d : accent;
+    }
+
     public void setTable(ShanhaiIoTable table) {
         this.table = table;
+    }
+
+    public void setBeforeChange(Runnable before) {
+        this.before = before == null ? () -> {} : before;
     }
 
     private ShanhaiIoTable.Cell cell() {
@@ -81,14 +93,41 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         ShanhaiIoTable.Cell target = table == null ? null : table.cell(discoveredIndex);
         if (target == null || target != discoveredCell) return;
         Object normalized = normalize(accepted, target.itemKind);
-        if (normalized instanceof ItemStack stack) {
+        if (!(normalized instanceof ItemStack) && !(normalized instanceof FluidStack)) return;
+        before.run();
+        if (normalized instanceof ItemStack stack) target.setItem(stack, stack.getCount());
+        else target.setFluid((FluidStack) normalized);
+        changed.run();
+    }
+
+    private void applyPicked(Object accepted, int discoveredIndex, ShanhaiIoTable.Cell discoveredCell) {
+        ShanhaiIoTable.Cell target = table == null ? null : table.cell(discoveredIndex);
+        if (target == null || target != discoveredCell) return;
+        if (target.itemKind) {
+            ItemStack stack = accepted instanceof ItemStack item ? item : ItemStack.EMPTY;
+            if (sameItem(target.item, stack)) return;
+            before.run();
             target.setItem(stack, stack.getCount());
-        } else if (normalized instanceof FluidStack fluid) {
-            target.setFluid(fluid);
         } else {
-            return;
+            FluidStack stack = accepted instanceof FluidStack fluid ? fluid : FluidStack.empty();
+            if (sameFluid(target.fluid, stack)) return;
+            before.run();
+            target.setFluid(stack);
         }
         changed.run();
+    }
+
+    private static boolean sameItem(ItemStack left, ItemStack right) {
+        if (left.isEmpty() && right.isEmpty()) return true;
+        return ItemStack.isSameItemSameTags(left, right) && left.getCount() == right.getCount();
+    }
+
+    private static boolean sameFluid(FluidStack left, FluidStack right) {
+        if (left.isEmpty() && right.isEmpty()) return true;
+        if (left.isEmpty() || right.isEmpty()) return false;
+        return left.getFluid() == right.getFluid()
+                && left.getAmount() == right.getAmount()
+                && java.util.Objects.equals(left.getTag(), right.getTag());
     }
 
     @Override
@@ -96,9 +135,14 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         if (!isMouseOverElement(mouseX, mouseY)) return false;
         if (button == 1) {
             ShanhaiIoTable.Cell current = cell();
-            if (current != null) {
-                current.clear();
-                changed.run();
+            if (current == null) return true;
+            int index = indexSupplier.getAsInt();
+            if (current.itemKind) {
+                ShanhaiRecipeStackPickerBridge.openItem(current.item.copy(),
+                        stack -> applyPicked(stack, index, current));
+            } else {
+                ShanhaiRecipeStackPickerBridge.openFluid(current.fluid.copy(),
+                        stack -> applyPicked(stack, index, current));
             }
             return true;
         }
@@ -115,8 +159,12 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         if (current == null) return;
         int x = getPositionX();
         int y = getPositionY();
-        if (selected.getAsBoolean()) {
-            graphics.fill(x - 1, y - 1, x + CELL + 1, y + CELL + 1, 0xFF69E8FF);
+        float strength = selected.getAsBoolean() ? (float) accent.getAsDouble() : 0f;
+        if (strength > 0.02f) {
+            int alpha = Math.min(255, Math.round(255f * strength));
+            int inset = Math.round((1f - strength) * 3f);
+            graphics.fill(x - 1 + inset, y - 1 + inset, x + CELL + 1 - inset, y + CELL + 1 - inset,
+                    (alpha << 24) | 0x0069E8FF);
         }
         graphics.fill(x, y, x + CELL, y + CELL, current.itemKind ? FRAME_ITEM : FRAME_FLUID);
         graphics.fill(x + 1, y + 1, x + CELL - 1, y + CELL - 1, 0xFF272A35);
@@ -125,13 +173,12 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
             graphics.renderItemDecorations(Minecraft.getInstance().font, current.item, x + 2, y + 2);
         } else if (!current.itemKind && !current.fluid.isEmpty()) {
             drawFluid(graphics, current.fluid, x + 2, y + 2);
-            smallText(graphics, Integer.toString(current.shownCount()), x + 18, y + 19);
+            smallTextRight(graphics, compactCount(current.shownCount()), x + CELL - 2, y + CELL - 1);
         }
-        if (current.chance != 10000) {
-            smallText(graphics, (current.chance * 100 / Math.max(1, current.maxChance)) + "%", x + 2, y + 19);
-        }
-        if (current.chance == 0) {
-            graphics.fill(x + 2, y + 2, x + 7, y + 7, 0xFFFFC400);
+        if (notConsumed(current)) {
+            drawNotConsumed(graphics, x + 2, y + 2);
+        } else if (current.chance != 10000) {
+            smallText(graphics, (current.chance * 100 / Math.max(1, current.maxChance)) + "%", x + 2, y + CELL - 1);
         }
     }
 
@@ -140,18 +187,42 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         super.updateScreen();
         ShanhaiIoTable.Cell current = cell();
         if (current == null || current.empty()) {
-            setHoverTooltips(List.of(Component.literal("灰框物品 / 蓝框流体，JEI 拖入，右键清空")));
+            setHoverTooltips(List.of(Component.literal("灰框物品 / 蓝框流体，JEI 拖入，右键打开选取器")));
         } else if (current.itemKind) {
             setHoverTooltips(List.of(current.item.getHoverName(),
                     Component.literal("数量 " + current.item.getCount()),
-                    Component.literal("概率 " + current.chance + "/" + current.maxChance),
-                    Component.literal("右键清空")));
+                    chanceTip(current),
+                    Component.literal("右键打开选取器")));
         } else {
             setHoverTooltips(List.of(current.fluid.getDisplayName(),
                     Component.literal("数量 " + current.fluid.getAmount() + " mB"),
-                    Component.literal("概率 " + current.chance + "/" + current.maxChance),
-                    Component.literal("右键清空")));
+                    chanceTip(current),
+                    Component.literal("右键打开选取器")));
         }
+    }
+
+    private boolean notConsumed(ShanhaiIoTable.Cell current) {
+        if (current == null || current.chance != 0 || table == null) return false;
+        int index = indexSupplier.getAsInt();
+        if (index < 0) return false;
+        ShanhaiIoTable.Kind kind = table.kindOf(index);
+        return kind == ShanhaiIoTable.Kind.ITEM_IN || kind == ShanhaiIoTable.Kind.FLUID_IN;
+    }
+
+    private Component chanceTip(ShanhaiIoTable.Cell current) {
+        if (notConsumed(current)) return Component.literal("不消耗").withStyle(ChatFormatting.RED);
+        return Component.literal("概率 " + current.chance + "/" + current.maxChance);
+    }
+
+    /** Red 不 at half size, top-right of the icon. Same scale GTCEu uses for chance marks. */
+    private static void drawNotConsumed(GuiGraphics graphics, int iconX, int iconY) {
+        var font = Minecraft.getInstance().font;
+        String mark = "不";
+        graphics.pose().pushPose();
+        graphics.pose().translate(iconX + 16, iconY, 400f);
+        graphics.pose().scale(0.5f, 0.5f, 1f);
+        graphics.drawString(font, mark, -font.width(mark), 0, 0xFFFF0000, true);
+        graphics.pose().popPose();
     }
 
     static Object normalize(Object ingredient, boolean itemKind) {
@@ -210,9 +281,26 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
     private static void smallText(GuiGraphics graphics, String value, int x, int y) {
         if (value == null || value.isEmpty()) return;
         graphics.pose().pushPose();
-        graphics.pose().translate(x, y - 6, 300);
+        graphics.pose().translate(x, y - 5, 300);
         graphics.pose().scale(.5f, .5f, 1f);
         graphics.drawString(Minecraft.getInstance().font, value, 0, 0, 0xFFFFFFFF, true);
         graphics.pose().popPose();
+    }
+
+    private static void smallTextRight(GuiGraphics graphics, String value, int right, int bottom) {
+        if (value == null || value.isEmpty()) return;
+        var font = Minecraft.getInstance().font;
+        graphics.pose().pushPose();
+        graphics.pose().translate(right, bottom, 300);
+        graphics.pose().scale(.5f, .5f, 1f);
+        graphics.drawString(font, value, -font.width(value), -9, 0xFFFFFFFF, true);
+        graphics.pose().popPose();
+    }
+
+    private static String compactCount(int count) {
+        int value = Math.max(0, count);
+        if (value < 1000) return Integer.toString(value);
+        if (value < 1_000_000) return (value / 1000) + "k";
+        return (value / 1_000_000) + "m";
     }
 }

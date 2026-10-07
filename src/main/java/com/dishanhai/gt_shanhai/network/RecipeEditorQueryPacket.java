@@ -14,12 +14,45 @@ public final class RecipeEditorQueryPacket {
     private final String text;
     private final int page;
     private final int pageSize;
+    private final String sort;
+    private final ShanhaiRecipeQuery.SearchMode mode;
+    private final ShanhaiRecipeQuery.IngredientKind ingredientKind;
 
     public RecipeEditorQueryPacket(String typeFilter, String text, int page, int pageSize) {
+        this(typeFilter, text, page, pageSize, "id");
+    }
+
+    public RecipeEditorQueryPacket(String typeFilter, String text, int page, int pageSize, String sort) {
+        this(typeFilter, text, page, pageSize, sort,
+                ShanhaiRecipeQuery.SearchMode.RECIPE_ID, ShanhaiRecipeQuery.IngredientKind.ITEM);
+    }
+
+    public RecipeEditorQueryPacket(
+            String typeFilter,
+            String text,
+            int page,
+            int pageSize,
+            ShanhaiRecipeQuery.SearchMode mode,
+            ShanhaiRecipeQuery.IngredientKind ingredientKind) {
+        this(typeFilter, text, page, pageSize, "id", mode, ingredientKind);
+    }
+
+    public RecipeEditorQueryPacket(
+            String typeFilter,
+            String text,
+            int page,
+            int pageSize,
+            String sort,
+            ShanhaiRecipeQuery.SearchMode mode,
+            ShanhaiRecipeQuery.IngredientKind ingredientKind) {
         this.typeFilter = typeFilter == null ? "" : typeFilter;
         this.text = text == null ? "" : text;
         this.page = Math.max(0, page);
         this.pageSize = Math.max(1, Math.min(256, pageSize));
+        this.sort = sort == null || sort.isEmpty() ? "id" : sort;
+        this.mode = mode == null ? ShanhaiRecipeQuery.SearchMode.RECIPE_ID : mode;
+        this.ingredientKind = ingredientKind == null
+                ? ShanhaiRecipeQuery.IngredientKind.ITEM : ingredientKind;
     }
 
     public RecipeEditorQueryPacket(FriendlyByteBuf buf) {
@@ -27,6 +60,11 @@ public final class RecipeEditorQueryPacket {
         this.text = buf.readUtf(256);
         this.page = Math.max(0, buf.readVarInt());
         this.pageSize = Math.max(1, Math.min(256, buf.readVarInt()));
+        this.sort = buf.readUtf(32);
+        this.mode = enumValue(buf.readVarInt(), ShanhaiRecipeQuery.SearchMode.values(),
+                ShanhaiRecipeQuery.SearchMode.RECIPE_ID);
+        this.ingredientKind = enumValue(buf.readVarInt(), ShanhaiRecipeQuery.IngredientKind.values(),
+                ShanhaiRecipeQuery.IngredientKind.ITEM);
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -34,6 +72,21 @@ public final class RecipeEditorQueryPacket {
         buf.writeUtf(text, 256);
         buf.writeVarInt(page);
         buf.writeVarInt(pageSize);
+        buf.writeUtf(sort, 32);
+        buf.writeVarInt(mode.ordinal());
+        buf.writeVarInt(ingredientKind.ordinal());
+    }
+
+    public String sort() {
+        return sort;
+    }
+
+    public ShanhaiRecipeQuery.SearchMode mode() {
+        return mode;
+    }
+
+    public ShanhaiRecipeQuery.IngredientKind ingredientKind() {
+        return ingredientKind;
     }
 
     public static void handle(RecipeEditorQueryPacket packet, Supplier<NetworkEvent.Context> supplier) {
@@ -51,7 +104,8 @@ public final class RecipeEditorQueryPacket {
                 return;
             }
             ShanhaiRecipeQuery.Result result = ShanhaiRecipeQuery.query(
-                    packet.typeFilter, packet.text, packet.page, packet.pageSize);
+                    sender.getServer(), packet.typeFilter, packet.text, packet.page, packet.pageSize,
+                    packet.mode, packet.ingredientKind);
             String payload = new com.google.gson.Gson().toJson(result);
             ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sender),
                     new RecipeEditorResultPacket(
@@ -61,5 +115,9 @@ public final class RecipeEditorQueryPacket {
                             payload));
         });
         context.setPacketHandled(true);
+    }
+
+    private static <T> T enumValue(int index, T[] values, T fallback) {
+        return index < 0 || index >= values.length ? fallback : values[index];
     }
 }

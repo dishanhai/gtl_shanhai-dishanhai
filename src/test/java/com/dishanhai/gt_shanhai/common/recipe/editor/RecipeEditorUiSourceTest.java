@@ -95,6 +95,17 @@ class RecipeEditorUiSourceTest {
     }
 
     @Test
+    void settledStageHidesInactivePagesInsteadOfDrawingReviewOverThem() throws IOException {
+        String panel = Files.readString(JAVA_ROOT.resolve(Path.of(
+                "common", "recipe", "editor", "ShanhaiRecipeEditorPanel.java")));
+        assertTrue(panel.contains("showSettled(selectPage,"));
+        assertTrue(panel.contains("showSettled(editPage,"));
+        assertTrue(panel.contains("showSettled(reviewPage,"));
+        assertTrue(panel.contains("boolean visible = host.stage == stage;"));
+        assertTrue(panel.contains("show(page, 0f, visible, visible);"));
+    }
+
+    @Test
     void holoBridgeDelegatesToLocalLayeredFactory() throws IOException {
         String source = Files.readString(JAVA_ROOT.resolve(Path.of(
                 "common", "recipe", "editor", "DShanhaiRecipeEditorFactory.java")));

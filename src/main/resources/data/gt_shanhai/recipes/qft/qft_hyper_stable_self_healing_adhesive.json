@@ -2,7 +2,7 @@
   "data": {
     "euTier": 14
   },
-  "duration": 20,
+  "duration": 4,
   "tickInputs": {
     "eu": [
       {
@@ -16,9 +16,30 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 144,
+          "actualAmount": 1,
           "ingredient": {
-            "item": "gtladditions:black_hole_seed"
+            "type": "gtceu:circuit",
+            "configuration": 1
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:uruium_nanoswarm"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "gtceu:activated_carbon_dust"
           }
         }
       },
@@ -27,34 +48,7 @@
           "type": "gtceu:long",
           "actualAmount": 64,
           "ingredient": {
-            "item": "gtceu:eternity_nanoswarm"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 64,
-          "ingredient": {
-            "item": "gtceu:spacetime_nanoswarm"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 64,
-          "ingredient": {
-            "item": "minecraft:repeating_command_block"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 1024,
-          "ingredient": {
-            "item": "gtladditions:astral_array"
+            "item": "gtceu:bismuth_dust"
           }
         }
       }
@@ -62,10 +56,30 @@
     "fluid": [
       {
         "content": {
-          "amount": 576000,
+          "amount": 20000,
           "value": [
             {
-              "fluid": "gtceu:miracle"
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 20000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 100,
+          "value": [
+            {
+              "fluid": "gtceu:cosmic_element"
             }
           ]
         }
@@ -79,7 +93,7 @@
           "type": "gtceu:long",
           "actualAmount": 1,
           "ingredient": {
-            "item": "gtladditions:compressed_astral_array"
+            "item": "kubejs:hyper_stable_self_healing_adhesive"
           }
         }
       }

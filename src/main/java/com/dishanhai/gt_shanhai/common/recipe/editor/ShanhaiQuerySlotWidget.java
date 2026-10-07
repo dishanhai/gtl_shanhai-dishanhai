@@ -14,11 +14,11 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.List;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /**
- * Ghost slot that turns a JEI drop into a recipe-id search.
- * The query packet only matches ids, so this does not pretend to be a reverse lookup.
+ * Ghost slot that turns a JEI drop into an item or fluid registry id.
+ * The editor decides whether that id is a recipe search or a reverse lookup.
  */
 public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngredientTarget {
 
@@ -26,11 +26,11 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
     private static final int ACT_CLEAR = 2;
     public static final int CELL = 22;
 
-    private final Consumer<String> onId;
+    private final BiConsumer<String, Boolean> onId;
     private ItemStack shownItem = ItemStack.EMPTY;
     private FluidStack shownFluid = FluidStack.empty();
 
-    public ShanhaiQuerySlotWidget(int x, int y, Consumer<String> onId) {
+    public ShanhaiQuerySlotWidget(int x, int y, BiConsumer<String, Boolean> onId) {
         super(x, y, CELL, CELL);
         this.onId = onId;
     }
@@ -56,7 +56,7 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
                 String id = idOf(value);
                 if (id.isEmpty()) return;
                 remember(value);
-                if (onId != null) onId.accept(id);
+                if (onId != null) onId.accept(id, value instanceof FluidStack);
                 writeClientAction(ACT_SET, buffer -> {
                     buffer.writeBoolean(value instanceof ItemStack);
                     buffer.writeUtf(id, 256);
@@ -71,7 +71,7 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!isMouseOverElement(mouseX, mouseY) || button != 1) return false;
         clear();
-        if (onId != null) onId.accept("");
+        if (onId != null) onId.accept("", false);
         writeClientAction(ACT_CLEAR, buffer -> {});
         return true;
     }
@@ -80,7 +80,7 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
     public void handleClientAction(int id, FriendlyByteBuf buffer) {
         if (id == ACT_CLEAR) {
             clear();
-            if (onId != null) onId.accept("");
+            if (onId != null) onId.accept("", false);
             return;
         }
         if (id != ACT_SET) return;
@@ -88,7 +88,7 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
         String registryId = buffer.readUtf(256);
         if (item) remember(buffer.readItem());
         else remember(FluidStack.readFromBuf(buffer));
-        if (onId != null) onId.accept(registryId);
+        if (onId != null) onId.accept(registryId, !item);
     }
 
     @Override
@@ -112,8 +112,9 @@ public final class ShanhaiQuerySlotWidget extends Widget implements IGhostIngred
     public void updateScreen() {
         super.updateScreen();
         setHoverTooltips(List.of(
-                Component.literal("拖入物品或流体，按其注册 ID 搜索配方 ID"),
-                Component.literal("右键清空。这不是原料反查")));
+                Component.literal("拖入物品或流体，写入注册 ID"),
+                Component.literal("原料 / 输出模式下按这个 ID 反查"),
+                Component.literal("右键清空")));
     }
 
     private void remember(Object value) {

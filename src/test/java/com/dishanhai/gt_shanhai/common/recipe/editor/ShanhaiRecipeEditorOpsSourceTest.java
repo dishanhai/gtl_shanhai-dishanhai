@@ -23,4 +23,20 @@ class ShanhaiRecipeEditorOpsSourceTest {
         assertEquals(ShanhaiRecipeEditorOps.Result.Status.CONFLICT, result.status());
         assertTrue(store.find("dishanhai:test").isEmpty());
     }
+
+    @Test
+    void linkedEntryKeepsTheSourceRecipeAndCoexistFlag() throws Exception {
+        Path file = Files.createTempFile("shanhai-recipe-linked", ".json");
+        Files.delete(file);
+        ShanhaiRecipeOverrideStore store = new ShanhaiRecipeOverrideStore(file);
+        ShanhaiRecipeBase opened = ShanhaiRecipeBase.simple(
+                "gtceu:assembler", "gtceu:foo", 100, 32L, 1);
+
+        store.putLinked(opened, "fp", "gtceu:foo_copy", "gtceu:foo", true, "test");
+
+        ShanhaiRecipeOverrideStore.Entry entry = store.find("gtceu:assembler", "gtceu:foo_copy").orElseThrow();
+        assertEquals("gtceu:foo", entry.sourceRecipeId());
+        assertTrue(entry.keepOriginal());
+        assertTrue(store.find("gtceu:assembler", "gtceu:foo").isEmpty());
+    }
 }

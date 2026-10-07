@@ -6,6 +6,7 @@ import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.Objects;
@@ -47,6 +48,45 @@ public final class ShanhaiRecipeEditorOps {
     }
 
     private Result commitInternal(Edit edit, boolean requireSnapshot) {
+        return storeCommit(edit, requireSnapshot, false, null);
+    }
+
+    public Result commit(Edit edit, MinecraftServer server) {
+        return commit(edit, server, false, null);
+    }
+
+    /**
+     * {@code keepOriginal} false replaces or removes the opened recipe.
+     * True keeps it and writes {@code liveRecipeId} beside it.
+     * A null or equal live id keeps the opened id, which is the in-place replace.
+     */
+    public Result commit(Edit edit, MinecraftServer server, boolean keepOriginal, String liveRecipeId) {
+        Result stored = storeCommit(edit, true, keepOriginal, liveRecipeId);
+        if (stored.status() != Result.Status.SUCCESS || server == null) return stored;
+        try {
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
+                    edit.base().recipeTypeId(),
+                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            RecipeRebuildService.rebuildVanillaManager(
+                    server, java.util.Set.of(edit.base().recipeTypeId()));
+            String live = canonicalLive(edit.base().recipeId(), liveRecipeId);
+            Optional<ShanhaiRecipeOverrideStore.Entry> written =
+                    store.find(edit.base().recipeTypeId(), live);
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
+                    edit.base().recipeTypeId(), live);
+            if (written.isPresent()
+                    && !written.get().keepOriginal()
+                    && !written.get().sourceRecipeId().equals(written.get().recipeId())) {
+                com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
+                        edit.base().recipeTypeId(), written.get().sourceRecipeId());
+            }
+            return new Result(Result.Status.SUCCESS, "override-written-and-rebuilt", report.revision());
+        } catch (Throwable t) {
+            return new Result(Result.Status.REBUILD_FAILED, "override-written-rebuild-failed", REVISION.get());
+        }
+    }
+
+    private Result storeCommit(Edit edit, boolean requireSnapshot, boolean keepOriginal, String liveRecipeId) {
         String validation = validationError(edit);
         if (validation != null) {
             return new Result(Result.Status.VALIDATION_ERROR, validation, REVISION.get());
@@ -64,27 +104,32 @@ public final class ShanhaiRecipeEditorOps {
         } else if (!Objects.equals(ShanhaiRecipeFingerprint.of(current), edit.baseFingerprint())) {
             return new Result(Result.Status.CONFLICT, "base-fingerprint-mismatch", REVISION.get());
         }
+        String opened = edit.base().recipeId();
+        String live = canonicalLive(opened, liveRecipeId);
+        if (live.isEmpty()) {
+            return new Result(Result.Status.VALIDATION_ERROR, "配方 id 不合法", REVISION.get());
+        }
+        Optional<ShanhaiRecipeOverrideStore.Entry> existing = store.find(edit.base().recipeTypeId(), opened);
+        boolean openedAddition = existing
+                .filter(entry -> !entry.sourceRecipeId().equals(entry.recipeId()))
+                .isPresent();
+        String upstream = openedAddition ? existing.get().sourceRecipeId() : opened;
+        if (keepOriginal && live.equals(upstream)) {
+            return new Result(Result.Status.VALIDATION_ERROR, "共存需要新的配方 id", REVISION.get());
+        }
+        if (!live.equals(opened) && liveIdTaken(live)) {
+            return new Result(Result.Status.VALIDATION_ERROR, "这个配方 id 已经存在", REVISION.get());
+        }
         try {
-            store.put(edit.base(), edit.baseFingerprint(), "shanhai-recipe-editor");
+            if (!keepOriginal && live.equals(opened) && !openedAddition) {
+                store.put(edit.base(), edit.baseFingerprint(), "shanhai-recipe-editor");
+            } else {
+                store.putLinked(edit.base(), edit.baseFingerprint(), live, upstream,
+                        keepOriginal, "shanhai-recipe-editor");
+            }
             return new Result(Result.Status.SUCCESS, "override-written", REVISION.incrementAndGet());
         } catch (Exception e) {
             return new Result(Result.Status.REBUILD_FAILED, "override-write-failed", REVISION.get());
-        }
-    }
-
-    public Result commit(Edit edit, MinecraftServer server) {
-        Result stored = commitInternal(edit, true);
-        if (stored.status() != Result.Status.SUCCESS || server == null) return stored;
-        try {
-            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
-                    edit.base().recipeTypeId(),
-                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
-            RecipeRebuildService.rebuildVanillaManager(
-                    server, java.util.Set.of(edit.base().recipeTypeId()));
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
-            return new Result(Result.Status.SUCCESS, "override-written-and-rebuilt", report.revision());
-        } catch (Throwable t) {
-            return new Result(Result.Status.REBUILD_FAILED, "override-written-rebuild-failed", REVISION.get());
         }
     }
 
@@ -140,9 +185,12 @@ public final class ShanhaiRecipeEditorOps {
             return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-found", REVISION.get());
         }
         if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
+            String typeId = target.recipeType.registryName.toString();
             RecipeRebuildService.rebuildType(
-                    target.recipeType.registryName.toString(),
+                    typeId,
                     RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
+                    typeId, target.getId().toString());
         }
         return new Result(Result.Status.SUCCESS, persist ? "recipe-removed-and-persisted" : "recipe-removed",
                 REVISION.incrementAndGet());
@@ -153,9 +201,12 @@ public final class ShanhaiRecipeEditorOps {
         boolean restored = DShanhaiRecipeModifierAPI.setRecipeEnabled(target.getId().toString(), true);
         if (!restored) return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-disabled", REVISION.get());
         if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
+            String typeId = target.recipeType.registryName.toString();
             RecipeRebuildService.rebuildType(
-                    target.recipeType.registryName.toString(),
+                    typeId,
                     RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
+                    typeId, target.getId().toString());
         }
         return new Result(Result.Status.SUCCESS, "recipe-restored", REVISION.incrementAndGet());
     }
@@ -186,7 +237,7 @@ public final class ShanhaiRecipeEditorOps {
             RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
                     typeId, RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
             RecipeRebuildService.rebuildVanillaManager(server, java.util.Set.of(typeId));
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(typeId, recipeId);
             return new Result(Result.Status.SUCCESS, "override-removed-and-rebuilt", report.revision());
         } catch (Throwable t) {
             return new Result(Result.Status.REBUILD_FAILED, "override-removed-rebuild-failed", REVISION.get());
@@ -231,11 +282,24 @@ public final class ShanhaiRecipeEditorOps {
 
     private ShanhaiRecipeBase currentBase(ShanhaiRecipeBase requested) {
         if (requested == null) return null;
-        GTRecipe original = RecipeOriginalSnapshotStore.copyOf(
+        GTRecipe effective = RecipeRebuildService.editableOf(
                 requested.recipeTypeId(), requested.recipeId());
-        if (original == null) return null;
-        GTRecipe effective = RecipeRebuildService.buildCanonical(requested.recipeTypeId(), original);
         return effective == null ? null : ShanhaiRecipeBase.from(effective);
+    }
+
+    private static String canonicalLive(String opened, String liveRecipeId) {
+        if (liveRecipeId == null || liveRecipeId.isBlank()) return opened == null ? "" : opened;
+        ResourceLocation parsed = ResourceLocation.tryParse(liveRecipeId.trim());
+        return parsed == null ? "" : parsed.toString();
+    }
+
+    private boolean liveIdTaken(String liveId) {
+        if (store.find(liveId).isPresent()) return true;
+        if (DShanhaiRecipeModifierAPI.findRecipeTypeById(liveId) != null) return true;
+        for (String typeId : RecipeOriginalSnapshotStore.typeIds()) {
+            if (RecipeOriginalSnapshotStore.copyOf(typeId, liveId) != null) return true;
+        }
+        return false;
     }
 
     private Result applyBaseEdit(Edit edit, MinecraftServer server, boolean rebuildIndex, boolean persist) {
@@ -247,7 +311,8 @@ public final class ShanhaiRecipeEditorOps {
                     edit.base().recipeTypeId(),
                     RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
             RecipeRebuildService.rebuildVanillaManager(server, java.util.Set.of(edit.base().recipeTypeId()));
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
+                    edit.base().recipeTypeId(), edit.base().recipeId());
             return new Result(Result.Status.SUCCESS,
                     persist ? "override-written-and-rebuilt" : "override-written-and-rebuilt-session",
                     report.revision());

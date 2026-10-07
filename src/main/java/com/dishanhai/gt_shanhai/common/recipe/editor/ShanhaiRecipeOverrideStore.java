@@ -30,7 +30,28 @@ public final class ShanhaiRecipeOverrideStore {
         this.path = path.toAbsolutePath().normalize();
     }
 
-    public record Entry(String recipeTypeId, String recipeId, String baseFingerprint, JsonObject payload) {}
+    /**
+     * {@code keepOriginal} is only meaningful when {@code sourceRecipeId} differs from
+     * {@code recipeId}: the entry is then an added recipe. Same ids stay an in-place replacement.
+     */
+    public record Entry(
+            String recipeTypeId,
+            String recipeId,
+            String baseFingerprint,
+            JsonObject payload,
+            boolean keepOriginal,
+            String sourceRecipeId) {
+
+        public Entry(String recipeTypeId, String recipeId, String baseFingerprint, JsonObject payload) {
+            this(recipeTypeId, recipeId, baseFingerprint, payload, false, recipeId);
+        }
+
+        public Entry {
+            if (sourceRecipeId == null || sourceRecipeId.isEmpty()) {
+                sourceRecipeId = recipeId == null ? "" : recipeId;
+            }
+        }
+    }
 
     public Optional<Entry> find(String recipeId) {
         return find("", recipeId);
@@ -47,11 +68,7 @@ public final class ShanhaiRecipeOverrideStore {
                 if (recipeId.equals(string(object, "recipeId", ""))) {
                     JsonObject payload = object.has("payload") && object.get("payload").isJsonObject()
                             ? object.getAsJsonObject("payload").deepCopy() : new JsonObject();
-                    Entry entry = new Entry(
-                            storedType(object),
-                            recipeId,
-                            string(object, "baseFingerprint", ""),
-                            payload);
+                    Entry entry = readEntry(object, recipeId, payload);
                     if (recipeTypeId != null && !recipeTypeId.isEmpty()
                             && recipeTypeId.equals(entry.recipeTypeId())) {
                         return Optional.of(entry);
@@ -97,11 +114,7 @@ public final class ShanhaiRecipeOverrideStore {
                 if (recipeId.isEmpty()) continue;
                 JsonObject payload = object.has("payload") && object.get("payload").isJsonObject()
                         ? object.getAsJsonObject("payload").deepCopy() : new JsonObject();
-                result.putIfAbsent(recipeId, new Entry(
-                        recipeTypeId,
-                        recipeId,
-                        string(object, "baseFingerprint", ""),
-                        payload));
+                result.putIfAbsent(recipeId, readEntry(object, recipeId, payload));
             }
             return Map.copyOf(result);
         } catch (Exception ignored) {
@@ -130,6 +143,48 @@ public final class ShanhaiRecipeOverrideStore {
         entry.addProperty("updatedBy", updatedBy == null ? "unknown" : updatedBy);
         entry.addProperty("updatedAt", java.time.Instant.now().toString());
         entry.add("payload", base.payloadJson());
+        kept.add(entry);
+        root.add("entries", kept);
+        writeRoot(root);
+    }
+
+    /**
+     * Writes a recipe that lives under {@code liveRecipeId} and was cloned from
+     * {@code sourceRecipeId}. Does not delete an in-place replacement of the source.
+     */
+    public void putLinked(
+            ShanhaiRecipeBase opened,
+            String fingerprint,
+            String liveRecipeId,
+            String sourceRecipeId,
+            boolean keepOriginal,
+            String updatedBy) throws IOException {
+        JsonObject root = loadRoot();
+        JsonArray kept = new JsonArray();
+        for (JsonElement element : root.getAsJsonArray("entries")) {
+            if (!element.isJsonObject()) {
+                kept.add(element);
+                continue;
+            }
+            JsonObject object = element.getAsJsonObject();
+            boolean sameType = opened.recipeTypeId().equals(storedType(object));
+            String id = string(object, "recipeId", "");
+            if (sameType && (id.equals(liveRecipeId) || id.equals(opened.recipeId()))) {
+                String storedSource = string(object, "sourceRecipeId", id);
+                boolean addition = !storedSource.equals(id);
+                if (id.equals(liveRecipeId) || addition) continue;
+            }
+            kept.add(object);
+        }
+        JsonObject entry = new JsonObject();
+        entry.addProperty("recipeId", liveRecipeId);
+        entry.addProperty("sourceRecipeId", sourceRecipeId == null ? opened.recipeId() : sourceRecipeId);
+        entry.addProperty("keepOriginal", keepOriginal);
+        entry.addProperty("recipeTypeId", opened.recipeTypeId());
+        entry.addProperty("baseFingerprint", fingerprint);
+        entry.addProperty("updatedBy", updatedBy == null ? "unknown" : updatedBy);
+        entry.addProperty("updatedAt", java.time.Instant.now().toString());
+        entry.add("payload", opened.payloadJson());
         kept.add(entry);
         root.add("entries", kept);
         writeRoot(root);
@@ -182,6 +237,20 @@ public final class ShanhaiRecipeOverrideStore {
         } catch (AtomicMoveNotSupportedException ignored) {
             Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
         }
+    }
+
+    private static Entry readEntry(JsonObject object, String recipeId, JsonObject payload) {
+        String source = string(object, "sourceRecipeId", recipeId);
+        boolean keepOriginal = object.has("keepOriginal")
+                && object.get("keepOriginal").isJsonPrimitive()
+                && object.get("keepOriginal").getAsBoolean();
+        return new Entry(
+                storedType(object),
+                recipeId,
+                string(object, "baseFingerprint", ""),
+                payload,
+                keepOriginal,
+                source);
     }
 
     private static String string(JsonObject object, String key, String fallback) {

@@ -52,29 +52,29 @@ public final class RecipeRebuildService {
         ShanhaiRecipeOverrideStore overrides = defaultOverrideStore();
         Map<String, ShanhaiRecipeOverrideStore.Entry> overridesByRecipe =
                 overrides.entriesForType(recipeTypeId);
-        List<GTRecipe> rebuilt = new ArrayList<>();
-        Set<String> ids = new LinkedHashSet<>();
+        List<GTRecipe> rebuilt = assemble(recipeTypeId, originals, overridesByRecipe);
+        Map<String, GTRecipe> rebuiltById = new LinkedHashMap<>();
+        for (GTRecipe recipe : rebuilt) {
+            if (recipe != null && recipe.getId() != null) {
+                rebuiltById.putIfAbsent(recipe.getId().toString(), recipe);
+            }
+        }
         int dropped = 0;
         int replaced = 0;
-
+        Set<String> seen = new LinkedHashSet<>();
         for (GTRecipe original : originals) {
             if (original == null) continue;
             String id = recipeId(original);
-            if (!id.isEmpty() && !ids.add(id)) {
+            if (!id.isEmpty() && !seen.add(id)) {
                 dropped++;
                 continue;
             }
-            if (!id.isEmpty() && !DShanhaiRecipeModifierAPI.isRecipeEnabled(id)) {
-                dropped++;
-                continue;
-            }
-            GTRecipe canonical = buildCanonical(recipeTypeId, original, overridesByRecipe);
+            GTRecipe canonical = id.isEmpty() ? null : rebuiltById.get(id);
             if (canonical == null) {
                 dropped++;
                 continue;
             }
             if (!sameShape(original, canonical)) replaced++;
-            rebuilt.add(canonical);
         }
 
         DShanhaiRecipeModifierAPI.runPatternCacheInvalidationBatch(
@@ -99,7 +99,9 @@ public final class RecipeRebuildService {
                     }
                 });
 
-        com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll(Set.of(recipeTypeId));
+        if (reason != RebuildReason.EDITOR_COMMIT) {
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll(Set.of(recipeTypeId));
+        }
         return new RebuildReport(
                 recipeTypeId,
                 originals.size(),
@@ -127,17 +129,79 @@ public final class RecipeRebuildService {
                 defaultOverrideStore().entriesForType(recipeTypeId));
     }
 
-    public static List<GTRecipe> buildCanonicalList(
-            String recipeTypeId, Iterable<? extends GTRecipe> originals) {
+    public static List<GTRecipe> buildCanonicalList(String recipeTypeId, Iterable<? extends GTRecipe> originals) {
         if (originals == null) return List.of();
         Map<String, ShanhaiRecipeOverrideStore.Entry> overrides =
                 defaultOverrideStore().entriesForType(recipeTypeId);
-        List<GTRecipe> result = new ArrayList<>();
-        for (GTRecipe original : originals) {
-            GTRecipe canonical = buildCanonical(recipeTypeId, original, overrides);
-            if (canonical != null) result.add(canonical);
+        return List.copyOf(assemble(recipeTypeId, originals, overrides));
+    }
+
+    /** Snapshot recipe after overrides, or an added recipe that is not in the snapshot. */
+    public static GTRecipe editableOf(String recipeTypeId, String recipeId) {
+        if (recipeTypeId == null || recipeId == null || recipeId.isEmpty()) return null;
+        GTRecipe snapshot = RecipeOriginalSnapshotStore.copyOf(recipeTypeId, recipeId);
+        if (snapshot != null) return buildCanonical(recipeTypeId, snapshot);
+        ShanhaiRecipeOverrideStore.Entry entry =
+                defaultOverrideStore().entriesForType(recipeTypeId).get(recipeId);
+        if (entry == null || entry.sourceRecipeId().equals(entry.recipeId())) return null;
+        return materializeAddition(recipeTypeId, entry);
+    }
+
+    private static List<GTRecipe> assemble(
+            String recipeTypeId,
+            Iterable<? extends GTRecipe> originals,
+            Map<String, ShanhaiRecipeOverrideStore.Entry> overrides) {
+        Map<String, ShanhaiRecipeOverrideStore.Entry> safe = overrides == null ? Map.of() : overrides;
+        Set<String> removedSources = new LinkedHashSet<>();
+        for (ShanhaiRecipeOverrideStore.Entry entry : safe.values()) {
+            if (entry == null || entry.keepOriginal()) continue;
+            if (!entry.sourceRecipeId().equals(entry.recipeId())) {
+                removedSources.add(entry.sourceRecipeId());
+            }
         }
-        return List.copyOf(result);
+        Set<String> disabled = new LinkedHashSet<>(DShanhaiRecipeModifierAPI.getDisabledRecipeIds());
+        List<GTRecipe> rebuilt = new ArrayList<>();
+        Set<String> ids = new LinkedHashSet<>();
+        if (originals != null) {
+            for (GTRecipe original : originals) {
+                if (original == null) continue;
+                String id = recipeId(original);
+                if (!id.isEmpty() && !ids.add(id)) continue;
+                if (!id.isEmpty() && (disabled.contains(id) || removedSources.contains(id))) continue;
+                GTRecipe canonical = buildCanonical(recipeTypeId, original, safe);
+                if (canonical == null) continue;
+                rebuilt.add(canonical);
+            }
+        }
+        for (ShanhaiRecipeOverrideStore.Entry entry : safe.values()) {
+            if (entry == null || entry.recipeId().isEmpty() || ids.contains(entry.recipeId())) continue;
+            if (entry.sourceRecipeId().equals(entry.recipeId())) continue;
+            GTRecipe added = materializeAddition(recipeTypeId, entry);
+            if (added == null || added.getId() == null) continue;
+            if (!ids.add(added.getId().toString())) continue;
+            rebuilt.add(added);
+        }
+        return rebuilt;
+    }
+
+    private static GTRecipe materializeAddition(
+            String recipeTypeId, ShanhaiRecipeOverrideStore.Entry entry) {
+        GTRecipe template = RecipeOriginalSnapshotStore.copyOf(recipeTypeId, entry.sourceRecipeId());
+        if (template == null) return null;
+        ShanhaiRecipeBase originalBase = ShanhaiRecipeBase.from(template);
+        ShanhaiRecipeBase override = ShanhaiRecipeBase.inheritLegacyDetails(
+                entry.payload(), originalBase, entry.baseFingerprint());
+        if (override == null
+                || !recipeTypeId.equals(override.recipeTypeId())
+                || ShanhaiRecipeEditorValidation.validateBase(override) != null) {
+            return null;
+        }
+        GTRecipe edited = override.toGtRecipe(template);
+        if (edited == null) return null;
+        ResourceLocation id = ResourceLocation.tryParse(entry.recipeId());
+        if (id == null) return null;
+        edited.setId(id);
+        return edited;
     }
 
     private static GTRecipe buildCanonical(

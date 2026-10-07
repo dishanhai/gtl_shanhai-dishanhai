@@ -9,20 +9,42 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.material.Fluid;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public final class ShanhaiRecipeQuery {
 
+    public enum SearchMode {
+        RECIPE_ID,
+        INGREDIENT,
+        OUTPUT
+    }
+
+    public enum IngredientKind {
+        ITEM,
+        FLUID
+    }
+
     public record Card(String recipeTypeId, String recipeId, int duration, long eut, String fingerprint,
-                       String iconKind, String iconId) {
+                       String iconKind, String iconId,
+                       String inputBrief, String outputBrief, int inputCount, int outputCount) {
         public Card {
             if (iconKind == null) iconKind = "";
             if (iconId == null) iconId = "";
+            if (inputBrief == null) inputBrief = "";
+            if (outputBrief == null) outputBrief = "";
+        }
+
+        public Card(String recipeTypeId, String recipeId, int duration, long eut, String fingerprint,
+                    String iconKind, String iconId) {
+            this(recipeTypeId, recipeId, duration, eut, fingerprint, iconKind, iconId, "", "", 0, 0);
         }
 
         public Card(String recipeTypeId, String recipeId, int duration, long eut, String fingerprint) {
@@ -30,11 +52,59 @@ public final class ShanhaiRecipeQuery {
         }
     }
 
-    public record Result(List<Card> cards, int total, long revision) {}
+    /** Card indexes refer to the cards array in this page's Result. */
+    public record Group(String recipeTypeId, List<Integer> cardIndexes) {
+        public Group {
+            recipeTypeId = recipeTypeId == null ? "" : recipeTypeId;
+            cardIndexes = cardIndexes == null ? List.of() : List.copyOf(cardIndexes);
+        }
+    }
+
+    public record Result(List<Card> cards, int total, long revision, SearchMode mode, List<Group> groups) {
+        public Result {
+            cards = cards == null ? List.of() : List.copyOf(cards);
+            mode = mode == null ? SearchMode.RECIPE_ID : mode;
+            groups = groups == null ? groupByRecipeType(cards) : List.copyOf(groups);
+        }
+
+        public Result(List<Card> cards, int total, long revision) {
+            this(cards, total, revision, SearchMode.RECIPE_ID, null);
+        }
+    }
 
     private ShanhaiRecipeQuery() {}
 
     public static Result query(String typeFilter, String text, int page, int pageSize) {
+        return queryRecipeIds(typeFilter, text, page, pageSize);
+    }
+
+    public static Result query(
+            String typeFilter,
+            String text,
+            int page,
+            int pageSize,
+            SearchMode mode,
+            IngredientKind ingredientKind) {
+        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        return query(server, typeFilter, text, page, pageSize, mode, ingredientKind);
+    }
+
+    public static Result query(
+            MinecraftServer server,
+            String typeFilter,
+            String text,
+            int page,
+            int pageSize,
+            SearchMode mode,
+            IngredientKind ingredientKind) {
+        SearchMode safeMode = mode == null ? SearchMode.RECIPE_ID : mode;
+        if (safeMode != SearchMode.RECIPE_ID) {
+            return queryReverse(server, typeFilter, text, page, pageSize, safeMode, ingredientKind);
+        }
+        return queryRecipeIds(typeFilter, text, page, pageSize);
+    }
+
+    private static Result queryRecipeIds(String typeFilter, String text, int page, int pageSize) {
         String type = typeFilter == null ? "" : typeFilter;
         String needle = text == null ? "" : text.toLowerCase(java.util.Locale.ROOT);
         int safePage = Math.max(0, page);
@@ -51,8 +121,7 @@ public final class ShanhaiRecipeQuery {
         }
         for (String typeId : typeIds) {
             if (!type.isEmpty() && !type.equals(typeId)) continue;
-            List<GTRecipe> effectiveRecipes = RecipeRebuildService.buildCanonicalList(
-                    typeId, RecipeRebuildService.originalsOfType(typeId));
+            List<GTRecipe> effectiveRecipes = RecipeRebuildService.buildCanonicalList(typeId, RecipeRebuildService.originalsOfType(typeId));
             for (var recipe : effectiveRecipes) {
                 String recipeId = recipe.getId() == null ? "" : recipe.getId().toString();
                 if (!needle.isEmpty() && !recipeId.toLowerCase(java.util.Locale.ROOT).contains(needle)
@@ -69,10 +138,74 @@ public final class ShanhaiRecipeQuery {
                 DShanhaiRecipeModifierAPI.getRecipeRevision());
     }
 
+    private static Result queryReverse(
+            MinecraftServer server,
+            String typeFilter,
+            String text,
+            int page,
+            int pageSize,
+            SearchMode mode,
+            IngredientKind ingredientKind) {
+        ResourceLocation id = ResourceLocation.tryParse(text == null ? "" : text.trim());
+        IngredientKind kind = ingredientKind == null ? IngredientKind.ITEM : ingredientKind;
+        if (server == null || id == null) {
+            return new Result(List.of(), 0, currentRevision(), mode, List.of());
+        }
+
+        List<GTRecipe> matches;
+        if (kind == IngredientKind.FLUID) {
+            Fluid fluid = BuiltInRegistries.FLUID.getOptional(id).orElse(null);
+            if (fluid == null) return new Result(List.of(), 0, currentRevision(), mode, List.of());
+            matches = mode == SearchMode.OUTPUT
+                    ? ShanhaiRecipeReverseIndex.queryFluidOutput(server, fluid)
+                    : ShanhaiRecipeReverseIndex.queryFluidInput(server, fluid);
+        } else {
+            Item item = BuiltInRegistries.ITEM.getOptional(id).orElse(null);
+            if (item == null) return new Result(List.of(), 0, currentRevision(), mode, List.of());
+            matches = mode == SearchMode.OUTPUT
+                    ? ShanhaiRecipeReverseIndex.queryByOutput(server, item)
+                    : ShanhaiRecipeReverseIndex.query(server, item);
+        }
+        return pageMatches(matches, typeFilter, page, pageSize, mode);
+    }
+
+    private static Result pageMatches(
+            List<GTRecipe> matches,
+            String typeFilter,
+            int page,
+            int pageSize,
+            SearchMode mode) {
+        String type = typeFilter == null ? "" : typeFilter;
+        List<Card> all = new ArrayList<>();
+        for (GTRecipe recipe : matches) {
+            ShanhaiRecipeBase base = ShanhaiRecipeBase.from(recipe);
+            if (base == null || (!type.isEmpty() && !type.equals(base.recipeTypeId()))) continue;
+            all.add(card(base.recipeTypeId(), base.recipeId(), base));
+        }
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(256, pageSize));
+        int from = (int) Math.min(all.size(), (long) safePage * safeSize);
+        int to = Math.min(all.size(), from + safeSize);
+        List<Card> pageCards = List.copyOf(all.subList(from, to));
+        return new Result(pageCards, all.size(), currentRevision(), mode, null);
+    }
+
+    private static List<Group> groupByRecipeType(List<Card> cards) {
+        Map<String, List<Integer>> indexesByType = new LinkedHashMap<>();
+        if (cards != null) {
+            for (int i = 0; i < cards.size(); i++) {
+                Card card = cards.get(i);
+                if (card == null) continue;
+                indexesByType.computeIfAbsent(card.recipeTypeId(), ignored -> new ArrayList<>()).add(i);
+            }
+        }
+        List<Group> groups = new ArrayList<>(indexesByType.size());
+        indexesByType.forEach((typeId, indexes) -> groups.add(new Group(typeId, indexes)));
+        return List.copyOf(groups);
+    }
+
     public static Optional<ShanhaiRecipeBase> get(String typeId, String recipeId) {
-        var recipe = RecipeOriginalSnapshotStore.copyOf(typeId, recipeId);
-        if (recipe == null) return Optional.empty();
-        GTRecipe effective = RecipeRebuildService.buildCanonical(typeId, recipe);
+        GTRecipe effective = RecipeRebuildService.editableOf(typeId, recipeId);
         return effective == null
                 ? Optional.empty() : Optional.ofNullable(ShanhaiRecipeBase.from(effective));
     }
@@ -115,7 +248,8 @@ public final class ShanhaiRecipeQuery {
             if (base == null) continue;
             cards.add(card(base.recipeTypeId(), base.recipeId(), base));
         }
-        return new Result(List.copyOf(cards), cards.size(), currentRevision());
+        return new Result(List.copyOf(cards), cards.size(), currentRevision(),
+                output ? SearchMode.OUTPUT : SearchMode.INGREDIENT, null);
     }
 
     private static Result byItem(MinecraftServer server, Item item, boolean output) {
@@ -131,7 +265,8 @@ public final class ShanhaiRecipeQuery {
             if (base == null) continue;
             cards.add(card(base.recipeTypeId(), base.recipeId(), base));
         }
-        return new Result(List.copyOf(cards), cards.size(), currentRevision());
+        return new Result(List.copyOf(cards), cards.size(), currentRevision(),
+                output ? SearchMode.OUTPUT : SearchMode.INGREDIENT, null);
     }
 
     private static Card card(String typeId, String recipeId, ShanhaiRecipeBase base) {

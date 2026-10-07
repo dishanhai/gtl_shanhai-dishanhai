@@ -1,12 +1,12 @@
 {
   "data": {
-    "euTier": 12
+    "euTier": 11
   },
-  "duration": 20,
+  "duration": 4,
   "tickInputs": {
     "eu": [
       {
-        "content": 134217728
+        "content": 33554432
       }
     ]
   },
@@ -16,46 +16,38 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 1,
-          "ingredient": {
-            "item": "kubejs:time_dilation_containment_unit"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 64,
-          "ingredient": {
-            "item": "kubejs:charged_triplet_neutronium_sphere"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
           "actualAmount": 16,
           "ingredient": {
-            "item": "gtladditions:forge_of_the_antichrist"
+            "item": "gtceu:atinium_hydride_dust"
           }
-        },
-        "chance": 0
+        }
       },
       {
         "content": {
-          "type": "gtceu:circuit",
-          "configuration": 4
-        },
-        "chance": 0
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:plasma_containment_cell"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:naquadria_charge"
+          }
+        }
       }
     ],
     "fluid": [
       {
         "content": {
-          "amount": 10000,
+          "amount": 1000,
           "value": [
             {
-              "fluid": "gtceu:uu_matter"
+              "fluid": "gtceu:actinium_superhydride_plasma"
             }
           ]
         }
@@ -67,9 +59,9 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 30,
+          "actualAmount": 15,
           "ingredient": {
-            "item": "kubejs:contained_kerr_newmann_singularity"
+            "item": "kubejs:actinium_superhydride_plasma_containment_cell"
           }
         }
       }

@@ -1,12 +1,12 @@
 {
   "data": {
-    "euTier": 12
+    "euTier": 11
   },
-  "duration": 20,
+  "duration": 4,
   "tickInputs": {
     "eu": [
       {
-        "content": 134217728
+        "content": 33554432
       }
     ]
   },
@@ -25,37 +25,32 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 64,
+          "actualAmount": 5,
           "ingredient": {
-            "item": "kubejs:time_dilation_containment_unit"
+            "item": "gtceu:double_rhenium_plate"
           }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 64,
+          "actualAmount": 1,
           "ingredient": {
-            "item": "kubejs:charged_triplet_neutronium_sphere"
+            "item": "kubejs:plasma_containment_cell"
           }
         }
-      },
+      }
+    ],
+    "fluid": [
       {
         "content": {
-          "type": "gtceu:long",
-          "actualAmount": 16,
-          "ingredient": {
-            "item": "gtladditions:forge_of_the_antichrist"
-          }
-        },
-        "chance": 0
-      },
-      {
-        "content": {
-          "type": "gtceu:circuit",
-          "configuration": 1
-        },
-        "chance": 0
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:degenerate_rhenium_plasma"
+            }
+          ]
+        }
       }
     ]
   },
@@ -64,9 +59,9 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 1920,
+          "actualAmount": 15,
           "ingredient": {
-            "item": "kubejs:contained_reissner_nordstrom_singularity"
+            "item": "kubejs:rhenium_plasma_containment_cell"
           }
         }
       }
