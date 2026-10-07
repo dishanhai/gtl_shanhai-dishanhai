@@ -29,7 +29,7 @@ categories:
 
 ## 额外挂载
 
-`extraMountSlots` 有 3 个槽位，当前支持三类挂载物：
+`extraMountSlots` 有 6 个槽位，当前支持三类挂载物：
 
 * `dark_energy_multiplier`，配方 EU 消耗减半
 * `annihilation_core`，配方耗时压缩到 10%，并携带产物湮灭风险

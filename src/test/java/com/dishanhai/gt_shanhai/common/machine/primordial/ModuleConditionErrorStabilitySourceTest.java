@@ -45,6 +45,21 @@ class ModuleConditionErrorStabilitySourceTest {
     }
 
     @Test
+    void lookupReappliesCoilTemperatureGate() throws IOException {
+        String source = Files.readString(LOGIC);
+        int start = source.indexOf("protected Set<GTRecipe> lookupRecipeIterator()");
+        int end = source.indexOf("private ShanhaiHeatGate.Outcome shanhai$gateOutcome", start);
+        assertTrue(start >= 0 && end > start);
+        String method = source.substring(start, end);
+        assertTrue(method.contains("shanhai$extraMountGateAllows(recipe)"),
+                "样板并入的候选也必须再过额外挂载闸门，否则无线圈仍能跑 3000K 配方");
+        assertTrue(method.contains("cachedGateMountContents"),
+                "挂载槽变化必须丢掉上一轮放行结果");
+        assertTrue(source.contains("instanceof net.minecraft.nbt.NumericTag"),
+                "炉温必须直接读 NBT，不能走会被温度绕过改成 0 的 getInt");
+    }
+
+    @Test
     void recipeReloadClearsStaticModuleRequirements() throws IOException {
         String source = Files.readString(ENGINE);
         int resetStart = source.indexOf("public static void resetRecipeStats()");

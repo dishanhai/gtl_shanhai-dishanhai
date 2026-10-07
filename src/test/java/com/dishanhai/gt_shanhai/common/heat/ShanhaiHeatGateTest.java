@@ -51,6 +51,26 @@ class ShanhaiHeatGateTest {
     }
 
     @Test
+    void oneOmniformNucleusSatisfiesEveryDataRequirement() {
+        ShanhaiHeatGate.SlotContent one = ShanhaiHeatGate.SlotContent.allData(1);
+        ShanhaiHeatGate.Outcome outcome = ShanhaiHeatGate.evaluate(
+                List.of(
+                        ShanhaiHeatGate.Requirement.heatTemp(96000),
+                        ShanhaiHeatGate.Requirement.scTier(3),
+                        ShanhaiHeatGate.Requirement.cleanroom(ShanhaiHeatGate.CLEANROOM_LAW),
+                        ShanhaiHeatGate.Requirement.gravity(),
+                        ShanhaiHeatGate.Requirement.dimension("ad_astra:glacio"),
+                        ShanhaiHeatGate.Requirement.research()),
+                List.of(one));
+
+        assertTrue(outcome.allowed);
+        assertEquals(6, outcome.satisfied.size());
+        assertFalse(ShanhaiHeatGate.slotSatisfies(
+                ShanhaiHeatGate.Requirement.heatTemp(1200),
+                ShanhaiHeatGate.SlotContent.allData(0)));
+    }
+
+    @Test
     void normalModeEnforcesPhysicalRequirementsButIgnoresResearch() {
         assertTrue(ShanhaiHeatGate.isRequirementEnforced(
                 ShanhaiHeatGate.Kind.DIMENSION, false));

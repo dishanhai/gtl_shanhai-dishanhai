@@ -7,6 +7,7 @@ import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
@@ -151,6 +152,9 @@ public final class StellarPatternStuckWatch {
         for (IMultiController controller : machine.getControllers()) {
             if (!(controller.self() instanceof IRecipeLogicMachine logicMachine)) continue;
             appendRecipeLogicState(result, logicMachine);
+            if (logicMachine instanceof PrimordialOmegaEngineModuleBase module) {
+                appendPlain(result, "挂载", module.getModuleConditionError());
+            }
             if (logicMachine.getRecipeLogic() instanceof IRecipeStatus status) {
                 appendStatus(result, "配方", status.getRecipeStatus());
                 appendStatus(result, "工作", status.getWorkingStatus());
@@ -169,9 +173,12 @@ public final class StellarPatternStuckWatch {
 
     private static void appendStatus(List<String> result, String label, @Nullable RecipeResult status) {
         if (status == null || status.isSuccess() || status.reason() == null) return;
-        String text = status.reason().getString();
+        appendPlain(result, label, status.reason().getString());
+    }
+
+    private static void appendPlain(List<String> result, String label, @Nullable String text) {
         if (text == null || text.isBlank()) return;
-        result.add(label + "=" + text);
+        result.add(label + "=" + text.replace('\n', ' '));
     }
 
     private static final class Snapshot {

@@ -25,6 +25,7 @@ import com.dishanhai.gt_shanhai.common.item.GuideBookItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayCellHandler;
 import com.dishanhai.gt_shanhai.common.item.VirtualItemProviderItem;
+import com.dishanhai.gt_shanhai.common.item.OmniformNucleusItem;
 import com.dishanhai.gt_shanhai.common.item.RecipeModifierDevItem;
 
 import net.minecraft.world.item.Item;
@@ -105,6 +106,12 @@ public class GTDishanhaiMod {
         () -> new com.dishanhai.gt_shanhai.common.item.WalletItem(new Item.Properties()
             .stacksTo(1)
             .rarity(Rarity.UNCOMMON)));
+
+    /** 额外挂载槽：一个即满足炉温、恒星容器、超净间、重力和任意维度。 */
+    public static final RegistryObject<Item> OMNIFORM_NUCLEUS = ITEMS.register(
+        "omniform_nucleus",
+        () -> new OmniformNucleusItem(new Item.Properties()
+            .rarity(Rarity.EPIC)));
 
     /** 配方修改器专属开发者工具，不提供配方，只作为命令入口的物品化快捷入口。 */
     public static final RegistryObject<Item> RECIPE_MODIFIER_DEV = ITEMS.register(

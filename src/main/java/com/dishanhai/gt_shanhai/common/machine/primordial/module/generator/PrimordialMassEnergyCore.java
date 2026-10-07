@@ -85,6 +85,11 @@ public class PrimordialMassEnergyCore extends PrimordialOmegaEngineModuleBase {
     }
 
     @Override
+    protected int mainStatusTextWidth() {
+        return 104;
+    }
+
+    @Override
     protected boolean showsModuleAndThreadSlots() {
         // 质能档位完全由自己的 machineStorage 槽决定，基类自带的物质模块槽/线程倍率槽
         // 对本模块没有任何效果，只会跟 machineStorage 槽重叠、误导玩家。
@@ -104,6 +109,7 @@ public class PrimordialMassEnergyCore extends PrimordialOmegaEngineModuleBase {
                     Component.literal("§7决定本核心的发电档位"),
                     Component.literal("§7插入即产电，不消耗任何物品"));
             g.addWidget(slot);
+            labelBesideSlot(slot, "§6档位");
 
             var gridBtn = new ButtonWidget(s.width - 78, s.height - 50, 24, 16,
                     new TextTexture("网", -1), clickData -> setDistributionMode(MODE_GRID_ONLY));

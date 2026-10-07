@@ -365,6 +365,7 @@
   "item.gt_shanhai.guide_book": "Shanhai Divine Private Index",
   "item.gt_shanhai.wallet": "Shanhai Wallet",
   "item.gt_shanhai._recipe_modifier_dev": "Recipe Modifier Developer Tool",
+  "item.gt_shanhai.omniform_nucleus": "Omniform Nucleus",
   "tooltip.gt_shanhai._recipe_modifier_dev.open": "Right-click to open the layered recipe modifier",
   "tooltip.gt_shanhai._recipe_modifier_dev.permission": "Developer-only tool; permission level 2 required",
   "tooltip.gt_shanhai._recipe_modifier_dev.command": "Equivalent entry: /山海 配方 修改器",

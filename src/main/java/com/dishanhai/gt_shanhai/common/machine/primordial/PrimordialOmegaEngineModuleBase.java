@@ -32,8 +32,11 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gtladd.gtladditions.api.machine.IThreadModifierMachine;
 import com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper;
 
+import com.lowdragmc.lowdraglib.side.item.IItemTransfer;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
+import com.lowdragmc.lowdraglib.gui.widget.ComponentPanelWidget;
+import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
 import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
@@ -175,7 +178,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             if (stack == null || stack.isEmpty()) return true;
             return isValidModule(stack);
         });
-        extraMountSlots = new NotifiableItemStackHandler(this, 3, IO.NONE, IO.BOTH);
+        extraMountSlots = new NotifiableItemStackHandler(this, ShanhaiHeatGate.SLOT_COUNT, IO.NONE, IO.BOTH);
     }
 
     private static boolean isValidModule(ItemStack stack) {
@@ -605,7 +608,32 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     /** 额外挂载槽第 {@code index} 格的当前堆叠。 */
     public ItemStack getExtraMountStack(int index) {
+        ensureExtraMountSlotCount();
         return extraMountSlots.storage.getStackInSlot(index);
+    }
+
+    /**
+     * 旧存档的 Size 是 3。ItemStackTransfer 读档会把格子缩回存档里的数量，这里再补回 6 格。
+     * 补格前先抄走原有物品，setSize 会清空。
+     */
+    private void ensureExtraMountSlotCount() {
+        var storage = extraMountSlots.storage;
+        int wanted = ShanhaiHeatGate.SLOT_COUNT;
+        int have = storage.getSlots();
+        if (have == wanted) {
+            return;
+        }
+        int keep = Math.min(have, wanted);
+        ItemStack[] kept = new ItemStack[keep];
+        for (int i = 0; i < keep; i++) {
+            kept[i] = storage.getStackInSlot(i).copy();
+        }
+        storage.setSize(wanted);
+        for (int i = 0; i < keep; i++) {
+            if (!kept[i].isEmpty()) {
+                storage.setStackInSlot(i, kept[i]);
+            }
+        }
     }
 
     /** 额外挂载槽第 {@code index} 格的当前数量。 */
@@ -614,7 +642,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     }
 
     /**
-     * 读取三格的能力快照。缓存同时比较物品、NBT 与数量，避免 63/64 的热力门槛读到旧值。
+     * 读取各格的能力快照。缓存同时比较物品、NBT 与数量，避免 63/64 的热力门槛读到旧值。
      */
     public List<ShanhaiHeatGate.SlotContent> getExtraMountContents() {
         boolean cacheHit = cachedExtraMountStacks != null
@@ -646,7 +674,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         return cachedExtraMountContents;
     }
 
-    /** 三格内容的可读诊断。 */
+    /** 各格内容的可读诊断。 */
     public String describeExtraMounts() {
         StringBuilder result = new StringBuilder();
         List<ShanhaiHeatGate.SlotContent> contents = getExtraMountContents();
@@ -728,6 +756,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         }
         if (tag.contains(KEY_EXTRA_MOUNT_SLOT)) {
             extraMountSlots.storage.deserializeNBT(tag.getCompound(KEY_EXTRA_MOUNT_SLOT));
+            ensureExtraMountSlotCount();
         }
         if (tag.contains(KEY_CHILD_STORAGES)) {
             var list = tag.getList(KEY_CHILD_STORAGES, net.minecraft.nbt.Tag.TAG_COMPOUND);
@@ -772,39 +801,69 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     // ========== UI & 线程倍率槽显示 ==========
 
+    private static final int MAIN_PAGE_WIDTH = 190;
+    private static final int MAIN_PAGE_HEIGHT = 125;
+    private static final int MAIN_COLUMN_X = 132;
+    private static final int MAIN_COLUMN_WIDTH = 54;
+
+    /** 子类往主页加槽之后，用它把短标签贴到槽旁边。 */
+    private WidgetGroup mainPage;
+
     @Override
     public Widget createUIWidget() {
-        Widget widget = super.createUIWidget();
-        if (widget instanceof WidgetGroup group && showsModuleAndThreadSlots()) {
-            var size = group.getSize();
-            // 物质模块槽（右上方）
-            var modSlot = new SlotWidget(
-                moduleSlot.storage, 0,
-                size.width - 30, size.height - 68,
-                true, true
-            );
-            modSlot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
-            modSlot.setHoverTooltips(
+        WidgetGroup page = new WidgetGroup(0, 0, MAIN_PAGE_WIDTH, MAIN_PAGE_HEIGHT);
+        page.setBackground(GuiTextures.BACKGROUND_INVERSE);
+        this.mainPage = page;
+
+        int textWidth = mainStatusTextWidth();
+        DraggableScrollableWidgetGroup text = new DraggableScrollableWidgetGroup(4, 4, textWidth, 117);
+        text.setBackground(getScreenTexture());
+        boolean remote = getLevel() != null && getLevel().isClientSide;
+        text.addWidget(new ComponentPanelWidget(4, 5, this::addDisplayText)
+                .textSupplier(remote ? null : this::addDisplayText)
+                .setMaxWidthLimit(Math.max(40, textWidth - 8))
+                .clickHandler(this::handleDisplayClick));
+        page.addWidget(text);
+        page.addWidget(new ImageWidget(MAIN_COLUMN_X, 4, MAIN_COLUMN_WIDTH, 117, GuiTextures.DISPLAY));
+
+        if (showsModuleAndThreadSlots()) {
+            addLabeledStorageSlot(page, moduleSlot.storage, page.getSize().width - 30, page.getSize().height - 68, "§6物质",
                     Component.literal("§6§l物质模块"),
                     Component.literal("§7放入物质模块系列"),
                     Component.literal("§7用于标识模块等级并参与配方条件判定"),
                     Component.literal("§7并非模块并行槽位注意区分"));
-            group.addWidget(modSlot);
-            // 线程倍率槽（右下）
-            var thrSlot = new SlotWidget(
-                threadBoostSlot.storage, 0,
-                size.width - 30, size.height - 48,
-                true, true
-            );
-            thrSlot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
-            thrSlot.setHoverTooltips(
+            addLabeledStorageSlot(page, threadBoostSlot.storage, page.getSize().width - 30, page.getSize().height - 48, "§d线程",
                     Component.literal("§d§l线程倍率槽"),
                     Component.literal("§7放入已注册的线程倍率物品"),
                     Component.literal("§7提升本模块的跨配方线程数"),
                     Component.literal("§7§6寰宇并行超限器 §7可启用超限模式"));
-            group.addWidget(thrSlot);
         }
-        return widget;
+        return page;
+    }
+
+    /** 左侧状态栏宽度。质能核心要给右侧三个模式按钮留空，所以覆写收窄。 */
+    protected int mainStatusTextWidth() {
+        return 124;
+    }
+
+    private void addLabeledStorageSlot(WidgetGroup page, IItemTransfer storage,
+            int x, int y, String label, Component... tooltips) {
+        SlotWidget slot = new SlotWidget(storage, 0, x, y, true, true);
+        slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
+        slot.setHoverTooltips(tooltips);
+        page.addWidget(slot);
+        labelBesideSlot(slot, label);
+    }
+
+    /** 槽在右缘时标签放左边，否则放右边，避免盖住槽本身。 */
+    protected void labelBesideSlot(SlotWidget slot, String label) {
+        if (mainPage == null || slot == null) {
+            return;
+        }
+        int x = slot.getSelfPositionX();
+        int y = slot.getSelfPositionY();
+        int labelX = x >= 156 ? x - 26 : x + 20;
+        mainPage.addWidget(new LabelWidget(labelX, y + 5, label));
     }
 
     /** 物质模块槽 / 线程倍率槽是否在 UI 中显示。部分模块（如零点能发生器，并行由编程电路
@@ -817,11 +876,6 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
         private static final int PAGE_WIDTH = 176;
         private static final int PAGE_HEIGHT = 170;
-        private static final int CARD_X = 4;
-        private static final int CARD_W = 168;
-        private static final int CARD_H = 32;
-        private static final int CARD_Y = 30;
-        private static final int CARD_STRIDE = 34;
 
         @Override
         public Component getTitle() {
@@ -837,29 +891,38 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         public Widget createMainPage(FancyMachineUIWidget widget) {
             WidgetGroup page = new WidgetGroup(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
             page.setBackground(GuiTextures.BACKGROUND_INVERSE);
+            ensureExtraMountSlotCount();
             page.addWidget(new LabelWidget(6, 4, "额外挂载槽"));
-            page.addWidget(new LabelWidget(6, 16, "§7三格各自独立生效"));
+            page.addWidget(new LabelWidget(6, 16, "§7六格各自独立生效"));
+            page.addWidget(new LabelWidget(6, 27, "§7每格单独满足一条额外要求"));
             page.addWidget(new LabelWidget(146, 6, PrimordialOmegaEngineModuleBase.this::extraMountFillText)
-                    .setHoverTooltips("已放入 / 三个挂载槽"));
+                    .setHoverTooltips("已放入 / 六个挂载槽"));
 
+            // 物品槽不能放进滚动列表：超出视口的槽会被设成不可见，canPutStack 直接拒绝放入。
+            int originY = 42;
+            int pitchX = 86;
+            int pitchY = 28;
             for (int i = 0; i < ShanhaiHeatGate.SLOT_COUNT; i++) {
                 int slotIndex = i;
-                int y = CARD_Y + i * CARD_STRIDE;
-                page.addWidget(new ImageWidget(CARD_X, y, CARD_W, CARD_H, GuiTextures.DISPLAY));
+                int x = 4 + (i % 2) * pitchX;
+                int y = originY + (i / 2) * pitchY;
+                page.addWidget(new ImageWidget(x, y, 82, 26, GuiTextures.DISPLAY));
                 SlotWidget slot = new SlotWidget(
                         extraMountSlots.storage,
                         slotIndex,
-                        CARD_X + 6,
-                        y + 7,
+                        x + 4,
+                        y + 4,
                         true,
                         true);
                 slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
                 slot.setHoverTooltips(shanhai$extraMountTooltips(slotIndex));
                 page.addWidget(slot);
-                page.addWidget(new LabelWidget(CARD_X + 30, y + 4, "挂载槽 " + (slotIndex + 1)));
-                page.addWidget(new LabelWidget(CARD_X + 30, y + 16, () -> extraMountStatusLine(slotIndex)));
+                page.addWidget(new LabelWidget(x + 24, y + 2, "挂载槽 " + (slotIndex + 1)));
+                page.addWidget(new LabelWidget(x + 24, y + 13, () -> extraMountStatusLine(slotIndex)));
             }
-            page.addWidget(new LabelWidget(6, 136, PrimordialOmegaEngineModuleBase.this::extraMountRulesText));
+            page.addWidget(new LabelWidget(6, 130, () -> extraMountRuleLine(0)));
+            page.addWidget(new LabelWidget(6, 141, () -> extraMountRuleLine(1)));
+            page.addWidget(new LabelWidget(6, 152, () -> extraMountRuleLine(2)));
             return page;
         }
     }
@@ -876,13 +939,16 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         return color + filled + "§7/" + ShanhaiHeatGate.SLOT_COUNT;
     }
 
-    private String extraMountRulesText() {
-        String heat = canUseExtraMountAsHeatSource()
-                ? "§7线圈、恒星容器§8：放满 " + ShanhaiHeatGate.REQUIRED_COUNT
-                : "§8线圈与恒星容器在此机不生效";
-        return "§7维护、重力、维度碎片§8：放 1 个\n"
-                + heat + "\n"
-                + "§7暗能量 / 湮灭核心 / 黑洞种子§8：各算一次";
+    private String extraMountRuleLine(int line) {
+        if (line == 0) {
+            return "§7维护、重力、维度碎片§8：放 1 个";
+        }
+        if (line == 1) {
+            return canUseExtraMountAsHeatSource()
+                    ? "§7线圈、恒星容器§8：放满 " + ShanhaiHeatGate.REQUIRED_COUNT
+                    : "§8线圈与恒星容器在此机不生效";
+        }
+        return "§7暗能量 / 湮灭核心 / 黑洞种子§8：各算一次";
     }
 
     /** 槽位右侧的一行状态。特殊效果物不走热力解析，不能标成无效挂载。 */
@@ -904,6 +970,9 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             return "§d黑洞种子 §7吞噬溢出" + amount;
         }
         ShanhaiHeatGate.SlotContent content = ShanhaiHeatSources.slotContentOf(stack);
+        if (content.allData) {
+            return "§d万象原核 §a一个全满足";
+        }
         if (content.isBlank()) {
             return "§c无效挂载";
         }
@@ -991,6 +1060,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                 Component.literal("§7放入山海物质模块系列"),
                 Component.literal("§7决定此原初模块的并行上限"),
                 Component.literal("§7等级越高并行越高，现实锚点/创始现实修改提供超高并行"));
+        labelBesideSlot(slot, "§6并行");
     }
 
     // ========== 显示 ==========

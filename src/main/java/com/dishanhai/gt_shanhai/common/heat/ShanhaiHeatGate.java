@@ -16,7 +16,7 @@ public final class ShanhaiHeatGate {
     private ShanhaiHeatGate() {}
 
     public static final int REQUIRED_COUNT = 64;
-    public static final int SLOT_COUNT = 3;
+    public static final int SLOT_COUNT = 6;
 
     public static final int CLEANROOM_NONE = 0;
     public static final int CLEANROOM_PLAIN = 1;
@@ -193,10 +193,19 @@ public final class ShanhaiHeatGate {
         public final boolean gravity;
         public final boolean research;
         public final Set<String> dimensions;
+        /** 一个物品同时满足炉温、恒星容器、超净间、重力、研究和任意维度。 */
+        public final boolean allData;
 
         public SlotContent(int count, int coilTemperature, int containmentTier,
                            int cleanroomTier, boolean gravity, boolean research,
                            Set<String> dimensions) {
+            this(count, coilTemperature, containmentTier, cleanroomTier,
+                    gravity, research, dimensions, false);
+        }
+
+        public SlotContent(int count, int coilTemperature, int containmentTier,
+                           int cleanroomTier, boolean gravity, boolean research,
+                           Set<String> dimensions, boolean allData) {
             this.count = count;
             this.coilTemperature = coilTemperature;
             this.containmentTier = containmentTier;
@@ -204,14 +213,26 @@ public final class ShanhaiHeatGate {
             this.gravity = gravity;
             this.research = research;
             this.dimensions = dimensions == null ? Set.of() : Set.copyOf(dimensions);
+            this.allData = allData;
+        }
+
+        public static SlotContent allData(int count) {
+            return new SlotContent(Math.max(0, count), 0, 0, CLEANROOM_NONE,
+                    false, false, Set.of(), true);
         }
 
         public boolean isBlank() {
+            if (allData) {
+                return false;
+            }
             return coilTemperature <= 0 && containmentTier <= 0 && cleanroomTier <= 0
                     && !gravity && !research && dimensions.isEmpty();
         }
 
         public String describe() {
+            if (allData) {
+                return "×" + count + " 万象原核";
+            }
             StringBuilder result = new StringBuilder("×").append(count);
             if (coilTemperature > 0) {
                 result.append(" 线圈 ").append(coilTemperature).append("K");
@@ -300,6 +321,9 @@ public final class ShanhaiHeatGate {
     public static boolean slotSatisfies(Requirement requirement, SlotContent slot) {
         if (requirement == null || slot == null || slot.count <= 0) {
             return false;
+        }
+        if (slot.allData) {
+            return true;
         }
         return switch (requirement.kind) {
             case CLEANROOM -> slot.cleanroomTier >= requirement.number;

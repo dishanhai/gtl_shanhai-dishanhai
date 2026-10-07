@@ -531,6 +531,7 @@
   "item.gt_shanhai.guide_book": "山海的神人私货引索",
   "item.gt_shanhai.wallet": "山海钱包",
   "item.gt_shanhai._recipe_modifier_dev": "配方修改器开发者工具",
+  "item.gt_shanhai.omniform_nucleus": "万象原核",
   "tooltip.gt_shanhai._recipe_modifier_dev.open": "右键打开分层配方修改器",
   "tooltip.gt_shanhai._recipe_modifier_dev.permission": "仅限开发者使用，需要权限等级 2",
   "tooltip.gt_shanhai._recipe_modifier_dev.command": "等价入口：/山海 配方 修改器",

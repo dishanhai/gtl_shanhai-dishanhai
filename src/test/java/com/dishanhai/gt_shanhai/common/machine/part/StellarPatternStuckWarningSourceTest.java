@@ -65,6 +65,9 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(watch.contains("appendRecipeLogicState(result, logicMachine)"));
         assertTrue(watch.contains("!logicMachine.isWorkingEnabled()"));
         assertTrue(watch.contains("工作=已暂停工作"));
+        assertTrue(watch.contains("module.getModuleConditionError()"),
+                "样板卡死必须带上原初模块的额外挂载失败原因");
+        assertTrue(watch.contains("appendPlain(result, \"挂载\""));
     }
 
     @Test

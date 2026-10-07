@@ -47,6 +47,7 @@ public final class ShanhaiHeatSources {
             "gt_shanhai:cosmic_clean_gravity_maintenance_hatch");
 
     public static final String CREATIVE_DATA_ACCESS_HATCH_ID = "gtceu:creative_data_access_hatch";
+    public static final String OMNIFORM_NUCLEUS_ID = "gt_shanhai:omniform_nucleus";
 
     @NotNull
     public static ShanhaiHeatGate.SlotContent slotContentOf(@Nullable ItemStack stack) {
@@ -54,6 +55,9 @@ public final class ShanhaiHeatSources {
             return ShanhaiHeatGate.SlotContent.EMPTY;
         }
         int count = stack.getCount();
+        if (OMNIFORM_NUCLEUS_ID.equals(itemIdOf(stack))) {
+            return ShanhaiHeatGate.SlotContent.allData(count);
+        }
         Block block = blockOf(stack);
         if (block instanceof CoilBlock coilBlock && coilBlock.coilType != null) {
             return new ShanhaiHeatGate.SlotContent(

@@ -65,6 +65,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     private Set<GTRecipe> cachedModuleConditionSource;
     private Set<GTRecipe> cachedModuleConditionRecipes;
     private String cachedModuleConditionError;
+    private List<ShanhaiHeatGate.SlotContent> cachedGateMountContents;
     private String cachedModuleItemId;
     private int cachedModuleCount = Integer.MIN_VALUE;
     private final java.util.IdentityHashMap<GTRecipe, AmplifiedRecipeCacheEntry> amplifiedRecipeCache =
@@ -469,18 +470,27 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     }
 
     /**
-     * 在基类"遍历选中类型原生查找"结果上，按模块等级门控逐一过滤——这是模块相对主机唯一的额外约束。
-     * 样板总成发配槽的发现/执行已由 GTLCore 原生接管（见基类说明），本类不再自行扫描/合并样板配方。
-     * 同一份基类候选和同一模块物品/数量下复用过滤集合；并行数与库存数量仍由 calculateParallels
-     * 每轮实算。模块槽变化、选择集变化和候选集合刷新都会立即使本缓存失效。
+     * 在基类候选上再过两道门：模块等级，以及额外挂载（含线圈炉温）。
+     * 样板总成并入的配方不走 checkRecipe，只在这里补上挂载判定。
+     * 挂载槽变化时丢掉基类候选缓存，避免温度绕过把旧候选留在窗口里。
      */
     @Override
     protected Set<GTRecipe> lookupRecipeIterator() {
         refreshModuleConditionContext();
+        List<ShanhaiHeatGate.SlotContent> mounts = currentGateMountContents();
+        if (mounts != cachedGateMountContents) {
+            cachedGateMountContents = mounts;
+            cachedModuleConditionSource = null;
+            cachedModuleConditionRecipes = null;
+            cachedModuleConditionError = null;
+            invalidateLookupSetCache();
+        }
         Set<GTRecipe> base = super.lookupRecipeIterator();
         if (base.isEmpty()) {
-            cachedModuleConditionError = null;
-            clearConditionError();
+            cachedModuleConditionError = readConditionError();
+            if (cachedModuleConditionError == null) {
+                clearConditionError();
+            }
             return base;
         }
         if (base == cachedModuleConditionSource && cachedModuleConditionRecipes != null) {
@@ -491,14 +501,21 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         boolean moduleConditionFailed = false;
         String firstConditionError = null;
         for (GTRecipe recipe : base) {
-            if (checkModuleCondition(recipe)) {
-                result.add(recipe);
-            } else {
+            if (!checkModuleCondition(recipe)) {
                 moduleConditionFailed = true;
                 if (firstConditionError == null) {
                     firstConditionError = readConditionError();
                 }
+                continue;
             }
+            if (!shanhai$extraMountGateAllows(recipe) || !shanhai$conditionsPass(recipe)) {
+                moduleConditionFailed = true;
+                if (firstConditionError == null) {
+                    firstConditionError = readConditionError();
+                }
+                continue;
+            }
+            result.add(recipe);
         }
         cachedModuleConditionError = firstConditionError;
         if (!moduleConditionFailed) {
@@ -636,8 +653,27 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         return null;
     }
 
+    private List<ShanhaiHeatGate.SlotContent> currentGateMountContents() {
+        MetaMachine machine = getMachine();
+        if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
+            return null;
+        }
+        return module.getExtraMountContents();
+    }
+
+    /**
+     * 不走 {@link CompoundTag#getInt(String)}。温度绕过会把 ebf_temp 的 getInt 改成 0，
+     * 额外挂载闸门若跟着读到 0，就会把 3000K 配方当成没有炉温要求。
+     */
     private static int readRecipeInt(CompoundTag data, String key) {
-        return data.contains(key) ? data.getInt(key) : 0;
+        if (data == null || key == null || !data.contains(key)) {
+            return 0;
+        }
+        net.minecraft.nbt.Tag tag = data.get(key);
+        if (tag instanceof net.minecraft.nbt.NumericTag numeric) {
+            return numeric.getAsInt();
+        }
+        return 0;
     }
 
     private String shanhai$extraMountFailure(ShanhaiHeatGate.Outcome outcome,
@@ -648,7 +684,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         }
         String needed = requirement.describe();
         return switch (outcome.deny) {
-            case SLOT_EMPTY -> "这个配方需要【" + needed + "】，但三个额外挂载槽全是空的";
+            case SLOT_EMPTY -> "这个配方需要【" + needed + "】，但" + ShanhaiHeatGate.SLOT_COUNT + "个额外挂载槽全是空的";
             case WRONG_ITEM -> "这个配方需要【" + needed + "】，但额外挂载槽里放的是【"
                     + shanhai$extraActualNames(module) + "】";
             case NOT_FULL -> "这个配方需要放满 " + ShanhaiHeatGate.REQUIRED_COUNT + " 个【"

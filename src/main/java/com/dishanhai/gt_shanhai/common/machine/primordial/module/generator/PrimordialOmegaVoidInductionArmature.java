@@ -166,6 +166,7 @@ public class PrimordialOmegaVoidInductionArmature extends PrimordialOmegaEngineM
                     Component.literal("§7放入 GT 编程电路决定真空零点能并行"),
                     Component.literal("§7优先级高于结构仓室内的电路"));
             group.addWidget(slot);
+            labelBesideSlot(slot, "§e电路");
 
             var yesBtn = new ButtonWidget(size.width - 52, size.height - 50, 24, 16,
                     new TextTexture("YES", -1), clickData -> acceptRisk());
