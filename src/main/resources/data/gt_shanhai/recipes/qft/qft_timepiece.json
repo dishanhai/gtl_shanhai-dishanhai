@@ -29,7 +29,7 @@
           "type": "gtceu:long",
           "actualAmount": 1,
           "ingredient": {
-            "item": "gtceu:uruium_nanoswarm"
+            "item": "gtceu:spacetime_hex_wire"
           }
         },
         "chance": 0
@@ -37,43 +37,25 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 64,
+          "actualAmount": 1,
           "ingredient": {
-            "item": "gtceu:activated_carbon_dust"
+            "item": "gtceu:white_dwarf_mtter_nanoswarm"
           }
-        }
+        },
+        "chance": 0
       },
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 64,
+          "actualAmount": 1,
           "ingredient": {
-            "item": "gtceu:bismuth_dust"
+            "item": "gtceu:black_dwarf_mtter_nanoswarm"
           }
-        }
+        },
+        "chance": 0
       }
     ],
     "fluid": [
-      {
-        "content": {
-          "amount": 20000,
-          "value": [
-            {
-              "fluid": "gtceu:oxygen"
-            }
-          ]
-        }
-      },
-      {
-        "content": {
-          "amount": 20000,
-          "value": [
-            {
-              "fluid": "gtceu:hydrogen"
-            }
-          ]
-        }
-      },
       {
         "content": {
           "amount": 100,
@@ -91,9 +73,9 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 4,
+          "actualAmount": 1,
           "ingredient": {
-            "item": "kubejs:hyper_stable_self_healing_adhesive"
+            "item": "kubejs:timepiece"
           }
         }
       }

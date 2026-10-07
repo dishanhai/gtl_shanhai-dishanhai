@@ -33,7 +33,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     public static final int WIDTH = 520;
     public static final int HEIGHT = 360;
     /** JEI crops 12px of padding and a 20px config button off the right strip. */
-    private static final int JEI_SEARCH_MARGIN = 140;
+    /** Right-hand column shared by JEI bookmarks (top) and the search list (below). */
+    public static final int JEI_SIDE_WIDTH = 140;
     public static final int STAGE_SELECT = 0;
     public static final int STAGE_EDIT = 1;
     public static final int STAGE_REVIEW = 2;
@@ -90,15 +91,14 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     private String lastEditKind = "";
 
     /**
-     * Left edge that keeps JEI's search field readable.
-     * The list lives in the strip to the right of a centered GUI, so a wide
-     * window leaves that strip too thin and the text box collapses.
+     * Left edge that keeps a {@link #JEI_SIDE_WIDTH} column on the right.
+     * Bookmarks and the search list both use that column.
      */
     public static int jeiLeft(int screenWidth, int guiWidth) {
         if (screenWidth <= 0) return 0;
         int centered = Math.max(0, (screenWidth - guiWidth) / 2);
-        if (screenWidth - centered - guiWidth >= JEI_SEARCH_MARGIN) return centered;
-        int left = screenWidth - guiWidth - JEI_SEARCH_MARGIN;
+        if (screenWidth - centered - guiWidth >= JEI_SIDE_WIDTH) return centered;
+        int left = screenWidth - guiWidth - JEI_SIDE_WIDTH;
         if (left < 2) left = 2;
         int maxLeft = Math.max(0, screenWidth - guiWidth);
         return Math.min(left, maxLeft);

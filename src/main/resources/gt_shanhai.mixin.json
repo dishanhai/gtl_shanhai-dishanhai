@@ -135,6 +135,8 @@
   ],
   "client": [
     "RecipeEditorJeiMarginMixin",
+    "RecipeEditorJeiBookmarkSideMixin",
+    "RecipeEditorJeiListSideMixin",
     "RecipeEditorPickerHoldMixin",
     "JEIRecipeListMixin",
     "JeiRecipesGuiAccessor",

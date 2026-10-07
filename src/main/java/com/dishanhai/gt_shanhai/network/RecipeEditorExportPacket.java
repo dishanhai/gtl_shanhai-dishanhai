@@ -30,9 +30,14 @@ import java.util.function.Supplier;
 /**
  * Writes the edited recipe as a datapack JSON GTCEu and GTLCore already decode.
  * The namespace is the one in the edited id. A path with no namespace keeps the
- * opened recipe's namespace. The file is {@code kubejs/data/<namespace>/recipes/<path>.json}.
+ * opened recipe's namespace. Files are gathered under
+ * {@code kubejs/data/Exported_Recipe/<namespace>/recipes/<path>.json}.
+ * {@code Exported_Recipe} is only a folder, not a recipe namespace.
  */
 public final class RecipeEditorExportPacket {
+
+    /** 集中存放导出 json 的文件夹。不是配方命名空间。 */
+    private static final String EXPORT_BUCKET = "Exported_Recipe";
 
     private static final Gson PRETTY = new GsonBuilder()
             .disableHtmlEscaping()
@@ -153,14 +158,15 @@ public final class RecipeEditorExportPacket {
             }
 
             Path root = FMLPaths.GAMEDIR.get()
-                    .resolve("kubejs").resolve("data").resolve(exportId.getNamespace()).resolve("recipes")
+                    .resolve("kubejs").resolve("data").resolve(EXPORT_BUCKET)
+                    .resolve(exportId.getNamespace()).resolve("recipes")
                     .toAbsolutePath().normalize();
             Path file = root.resolve(exportId.getPath() + ".json").normalize();
             if (!file.startsWith(root)) return invalid("invalid-export-path");
             Files.createDirectories(file.getParent());
             Files.writeString(file, PRETTY.toJson(encoded), StandardCharsets.UTF_8);
 
-            String relative = "kubejs/data/" + exportId.getNamespace()
+            String relative = "kubejs/data/" + EXPORT_BUCKET + "/" + exportId.getNamespace()
                     + "/recipes/" + exportId.getPath() + ".json";
             return new RecipeEditorResultPacket(
                     RecipeEditorResultPacket.Status.SUCCESS,

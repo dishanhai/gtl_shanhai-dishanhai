@@ -225,6 +225,11 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         return id != null ? MODULE_LEVELS.getOrDefault(id, 0) : 0;
     }
 
+    /** 已注册物质模块 id，顺序与 {@link #MODULE_LEVELS} 一致。配方编辑器只读这张表。 */
+    public static java.util.List<String> registeredModuleIds() {
+        return java.util.List.copyOf(MODULE_LEVELS.keySet());
+    }
+
     /** 获取物质模块搭配的详细诊断信息（模块不足时输出具体差距） */
     public String getModuleConditionDiagnosis(String moduleId, int requiredLevel) {
         int requiredLv = getModuleLevelById(moduleId);

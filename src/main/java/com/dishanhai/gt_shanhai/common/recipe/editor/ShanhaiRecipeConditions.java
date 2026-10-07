@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import com.gregtechceu.gtceu.api.recipe.RecipeCondition;
 import com.gregtechceu.gtceu.api.recipe.condition.RecipeConditionType;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
@@ -85,7 +86,9 @@ public final class ShanhaiRecipeConditions {
             keys.add("true");
             keys.add("false");
         }
-        if (field.length() >= 4 && !GENERIC_FIELDS.contains(field)) {
+        if ("module_id".equals(field)) {
+            keys.addAll(PrimordialOmegaEngineModuleBase.registeredModuleIds());
+        } else if (field.length() >= 4 && !GENERIC_FIELDS.contains(field)) {
             collectGt(field, keys);
             collectBuiltin(field, keys);
         }
