@@ -38,6 +38,8 @@ class PrimordialOmegaEngineRendererPerformanceSourceTest {
 
         assertTrue(dispatch.contains("PrimordialNeutronStarSphereRenderer.enqueue("),
                 "中子星风格必须派发到 PrimordialNeutronStarSphereRenderer");
+        assertTrue(dispatch.contains("PrimordialNeutronStarSphereRenderer.renderSuctionPlanets("),
+                "中子星光束旁必须画往复运动的星球");
         assertTrue(dispatch.contains("PrimordialUniverseSphereRenderer.render("),
                 "宇宙风格必须派发到 PrimordialUniverseSphereRenderer");
     }

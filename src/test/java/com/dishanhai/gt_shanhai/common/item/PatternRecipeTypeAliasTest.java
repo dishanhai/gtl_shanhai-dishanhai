@@ -16,6 +16,8 @@ class PatternRecipeTypeAliasTest {
                 PatternRecipeTypeHelper.canonicalRecipeTypeId(" smelting "));
         assertEquals("gtceu:electric_furnace",
                 PatternRecipeTypeHelper.canonicalRecipeTypeId("GTCEU:ELECTRIC_FURNACE"));
+        assertEquals("gtceu:matter_exotic",
+                PatternRecipeTypeHelper.canonicalRecipeTypeId("gtceu:matter_exoticizer"));
     }
 
     @Test

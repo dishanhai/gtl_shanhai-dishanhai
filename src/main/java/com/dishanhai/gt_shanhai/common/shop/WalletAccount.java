@@ -29,8 +29,10 @@ public class WalletAccount {
     private static final String TAG_PERIOD_USED = "periodUsed";
     private static final String TAG_MEMBER_TIER = "memberTier";
     private static final String TAG_BANK_DEPOSIT = "bankDeposit";
+    private static final String TAG_BANK_DEPOSIT_INTEREST = "bankDepositInterest";
     private static final String TAG_BANK_DEPOSIT_MS = "bankDepositMs";
     private static final String TAG_BANK_DEBT = "bankDebt";
+    private static final String TAG_BANK_DEBT_INTEREST = "bankDebtInterest";
     private static final String TAG_BANK_DEBT_MS = "bankDebtMs";
 
     /** 币种 → 余额（BigInteger，保序）。 */
@@ -39,13 +41,17 @@ public class WalletAccount {
     private BigInteger digitalBalance = BigInteger.ZERO;
     /** 付费会员档位（-1=未购买任何档位，0/1/2=青铜/白银/黄金），永久买断，见 {@link ShopMembership}/{@link WalletAccountAPI#buyMemberTier}。 */
     private int memberTier = -1;
-    /** 定期存款本金（含已结算利息，见 {@link ShopBank}）。 */
+    /** 定期存款本金。旧档里已经折进本金的利息仍留在这里，见 {@link ShopBank}。 */
     private BigInteger bankDeposit = BigInteger.ZERO;
-    /** 定期存款上次结息时刻（{@link System#currentTimeMillis}）；0=从未记账。 */
+    /** 定期存款尚未取走的利息。缺标签的旧档视为 0。 */
+    private BigInteger bankDepositInterest = BigInteger.ZERO;
+    /** 定期存款上次计息起点（{@link System#currentTimeMillis}）；0=从未记账。 */
     private long bankDepositLastMs = 0L;
-    /** 贷款欠款本金（含已结算利息）。 */
+    /** 贷款本金。旧档里已经折进本金的利息仍留在这里。 */
     private BigInteger bankDebt = BigInteger.ZERO;
-    /** 贷款欠款上次结息时刻；0=从未记账。 */
+    /** 贷款尚未还掉的利息。缺标签的旧档视为 0。 */
+    private BigInteger bankDebtInterest = BigInteger.ZERO;
+    /** 贷款上次计息起点；0=从未记账。 */
     private long bankDebtLastMs = 0L;
     /** 商品条目 key（见 {@link WalletAccountAPI#purchaseKey(ShopEntry)}）→ 累计已购买次数，展示用，非结算依据。 */
     private final Map<String, Long> purchaseCounts = new LinkedHashMap<>();
@@ -110,6 +116,14 @@ public class WalletAccount {
         bankDeposit = (value == null || value.signum() <= 0) ? BigInteger.ZERO : value;
     }
 
+    public BigInteger getBankDepositInterest() {
+        return bankDepositInterest;
+    }
+
+    public void setBankDepositInterest(BigInteger value) {
+        bankDepositInterest = (value == null || value.signum() <= 0) ? BigInteger.ZERO : value;
+    }
+
     public long getBankDepositLastMs() {
         return bankDepositLastMs;
     }
@@ -124,6 +138,14 @@ public class WalletAccount {
 
     public void setBankDebt(BigInteger value) {
         bankDebt = (value == null || value.signum() <= 0) ? BigInteger.ZERO : value;
+    }
+
+    public BigInteger getBankDebtInterest() {
+        return bankDebtInterest;
+    }
+
+    public void setBankDebtInterest(BigInteger value) {
+        bankDebtInterest = (value == null || value.signum() <= 0) ? BigInteger.ZERO : value;
     }
 
     public long getBankDebtLastMs() {
@@ -206,12 +228,16 @@ public class WalletAccount {
         if (memberTier >= 0) {
             tag.putInt(TAG_MEMBER_TIER, memberTier);
         }
-        if (bankDeposit.signum() > 0) {
-            tag.putByteArray(TAG_BANK_DEPOSIT, bankDeposit.toByteArray());
+        if (bankDeposit.signum() > 0 || bankDepositInterest.signum() > 0) {
+            if (bankDeposit.signum() > 0) tag.putByteArray(TAG_BANK_DEPOSIT, bankDeposit.toByteArray());
+            if (bankDepositInterest.signum() > 0) {
+                tag.putByteArray(TAG_BANK_DEPOSIT_INTEREST, bankDepositInterest.toByteArray());
+            }
             tag.putLong(TAG_BANK_DEPOSIT_MS, bankDepositLastMs);
         }
-        if (bankDebt.signum() > 0) {
-            tag.putByteArray(TAG_BANK_DEBT, bankDebt.toByteArray());
+        if (bankDebt.signum() > 0 || bankDebtInterest.signum() > 0) {
+            if (bankDebt.signum() > 0) tag.putByteArray(TAG_BANK_DEBT, bankDebt.toByteArray());
+            if (bankDebtInterest.signum() > 0) tag.putByteArray(TAG_BANK_DEBT_INTEREST, bankDebtInterest.toByteArray());
             tag.putLong(TAG_BANK_DEBT_MS, bankDebtLastMs);
         }
         CompoundTag pur = new CompoundTag();
@@ -252,25 +278,15 @@ public class WalletAccount {
         if (tag.contains(TAG_MEMBER_TIER)) {
             acc.memberTier = tag.getInt(TAG_MEMBER_TIER);
         }
-        if (tag.contains(TAG_BANK_DEPOSIT)) {
-            byte[] bytes = tag.getByteArray(TAG_BANK_DEPOSIT);
-            if (bytes.length > 0) {
-                BigInteger v = new BigInteger(bytes);
-                if (v.signum() > 0) {
-                    acc.bankDeposit = v;
-                    acc.bankDepositLastMs = tag.getLong(TAG_BANK_DEPOSIT_MS);
-                }
-            }
+        if (tag.contains(TAG_BANK_DEPOSIT) || tag.contains(TAG_BANK_DEPOSIT_INTEREST)) {
+            acc.bankDeposit = readPositive(tag, TAG_BANK_DEPOSIT);
+            acc.bankDepositInterest = readPositive(tag, TAG_BANK_DEPOSIT_INTEREST);
+            acc.bankDepositLastMs = tag.getLong(TAG_BANK_DEPOSIT_MS);
         }
-        if (tag.contains(TAG_BANK_DEBT)) {
-            byte[] bytes = tag.getByteArray(TAG_BANK_DEBT);
-            if (bytes.length > 0) {
-                BigInteger v = new BigInteger(bytes);
-                if (v.signum() > 0) {
-                    acc.bankDebt = v;
-                    acc.bankDebtLastMs = tag.getLong(TAG_BANK_DEBT_MS);
-                }
-            }
+        if (tag.contains(TAG_BANK_DEBT) || tag.contains(TAG_BANK_DEBT_INTEREST)) {
+            acc.bankDebt = readPositive(tag, TAG_BANK_DEBT);
+            acc.bankDebtInterest = readPositive(tag, TAG_BANK_DEBT_INTEREST);
+            acc.bankDebtLastMs = tag.getLong(TAG_BANK_DEBT_MS);
         }
         CompoundTag pur = tag.getCompound(TAG_PURCHASES);
         for (String key : pur.getAllKeys()) {
@@ -287,5 +303,13 @@ public class WalletAccount {
             }
         }
         return acc;
+    }
+
+    private static BigInteger readPositive(CompoundTag tag, String key) {
+        if (!tag.contains(key)) return BigInteger.ZERO;
+        byte[] bytes = tag.getByteArray(key);
+        if (bytes.length == 0) return BigInteger.ZERO;
+        BigInteger value = new BigInteger(bytes);
+        return value.signum() > 0 ? value : BigInteger.ZERO;
     }
 }

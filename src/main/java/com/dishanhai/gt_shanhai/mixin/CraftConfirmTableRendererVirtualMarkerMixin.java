@@ -34,12 +34,18 @@ public class CraftConfirmTableRendererVirtualMarkerMixin {
     private void gtShanhai$addVirtualPresenceDescription(CraftingPlanSummaryEntry entry,
             CallbackInfoReturnable<List<Component>> cir) {
         boolean virtualPresence = gtShanhai$isVirtualPresence(entry);
-        boolean overflow = entry instanceof CraftingPlanVirtualMarkerAccess access
-                && access.gtShanhai$isOverflow();
-        if (!virtualPresence && !overflow) return;
+        CraftingPlanVirtualMarkerAccess marker = entry instanceof CraftingPlanVirtualMarkerAccess access
+                ? access : null;
+        boolean overflow = marker != null && marker.gtShanhai$isOverflow();
+        boolean cycleDemoted = marker != null && marker.gtShanhai$isCycleDemoted();
+        if (!virtualPresence && !overflow && !cycleDemoted) return;
         // 就地改 AE2 返回的那个 ArrayList，不 setReturnValue——一旦 cancel，GTLCore 的行就没了。
         List<Component> lines = cir.getReturnValue();
         if (lines == null) return;
+        if (cycleDemoted) {
+            lines.add(0, Component.translatable("gui.gt_shanhai.crafting_plan.cycle_demoted")
+                    .withStyle(ChatFormatting.GOLD));
+        }
         if (virtualPresence) {
             lines.add(0, Component.translatable("gui.gt_shanhai.crafting_plan.virtual_presence")
                     .withStyle(ChatFormatting.LIGHT_PURPLE));
@@ -67,9 +73,11 @@ public class CraftConfirmTableRendererVirtualMarkerMixin {
         boolean virtualPresence = gtShanhai$isVirtualPresence(entry);
         CraftingPlanVirtualMarkerAccess access =
                 entry instanceof CraftingPlanVirtualMarkerAccess a ? a : null;
+        boolean cycleDemoted = access != null && access.gtShanhai$isCycleDemoted();
         boolean hasDiagnostics = access != null
                 && (access.gtShanhai$isNoPattern()
                         || access.gtShanhai$isOverflow()
+                        || cycleDemoted
                         || access.gtShanhai$getRecursionKind() != CraftingRecursionDetector.Kind.NONE);
         boolean missing = entry.getMissingAmount() > 0L;
         if (!virtualPresence && !hasDiagnostics && !missing) return;
@@ -78,6 +86,10 @@ public class CraftConfirmTableRendererVirtualMarkerMixin {
         if (virtualPresence) {
             lines.add(Component.translatable("gui.gt_shanhai.crafting_plan.virtual_presence.detail")
                     .withStyle(ChatFormatting.LIGHT_PURPLE));
+        }
+        if (cycleDemoted) {
+            lines.add(Component.translatable("gui.gt_shanhai.crafting_plan.cycle_demoted.detail")
+                    .withStyle(ChatFormatting.GOLD));
         }
         if (hasDiagnostics) {
             // 不缺失的自反项，AE2 自己已经把可用／合成数量写清楚了，不再重复一遍。

@@ -36,4 +36,11 @@ public interface CraftingPlanVirtualMarkerAccess {
     boolean gtShanhai$isOverflow();
 
     void gtShanhai$setOverflow(boolean overflow);
+
+    /**
+     * 计算时队首样板被判定为回环，缺失清单来自后面那张可运行样板。
+     */
+    boolean gtShanhai$isCycleDemoted();
+
+    void gtShanhai$setCycleDemoted(boolean cycleDemoted);
 }

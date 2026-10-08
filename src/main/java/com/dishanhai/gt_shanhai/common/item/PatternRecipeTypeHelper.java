@@ -518,6 +518,11 @@ public final class PatternRecipeTypeHelper {
                 || VANILLA_SMELTING_RECIPE_TYPE_PATH.equals(normalized)) {
             return GTCEU_ELECTRIC_FURNACE_RECIPE_TYPE_ID;
         }
+        // 恒星聚变异化器的样板有时被标成机器名派生的 matter_exoticizer，
+        // 实际配方类型是 gtceu:matter_exotic。不折叠的话星律槽会拒绝扣料。
+        if ("gtceu:matter_exoticizer".equals(normalized)) {
+            return "gtceu:matter_exotic";
+        }
         return normalized;
     }
 

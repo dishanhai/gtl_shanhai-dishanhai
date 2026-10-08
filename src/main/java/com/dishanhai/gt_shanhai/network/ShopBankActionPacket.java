@@ -19,7 +19,7 @@ import java.util.function.Supplier;
  */
 public class ShopBankActionPacket {
 
-    public enum Op { DEPOSIT, WITHDRAW, BORROW, REPAY }
+    public enum Op { DEPOSIT, WITHDRAW, BORROW, REPAY, DEPOSIT_ALL, WITHDRAW_ALL, REPAY_ALL }
 
     private final Op op;
     private final long amount;
@@ -57,9 +57,13 @@ public class ShopBankActionPacket {
         String label;
         switch (pkt.op) {
             case DEPOSIT -> { result = WalletAccountAPI.bankDeposit(server, uuid, amt); label = "存入"; }
+            case DEPOSIT_ALL -> { result = WalletAccountAPI.bankDepositAll(server, uuid); label = "存入"; }
             case WITHDRAW -> { result = WalletAccountAPI.bankWithdraw(server, uuid, amt); label = "取出"; }
+            case WITHDRAW_ALL -> { result = WalletAccountAPI.bankWithdrawAll(server, uuid); label = "取出"; }
             case BORROW -> { result = WalletAccountAPI.bankBorrow(server, uuid, amt); label = "借出"; }
-            default -> { result = WalletAccountAPI.bankRepay(server, uuid, amt); label = "还款"; }
+            case REPAY -> { result = WalletAccountAPI.bankRepay(server, uuid, amt); label = "还款"; }
+            case REPAY_ALL -> { result = WalletAccountAPI.bankRepayAll(server, uuid); label = "还款"; }
+            default -> { result = BigInteger.ZERO; label = "操作"; }
         }
         player.sendSystemMessage(result.signum() > 0
                 ? Component.literal("§b[山海银行] §a已" + label + " §f" + ShopPurchase.formatCount(

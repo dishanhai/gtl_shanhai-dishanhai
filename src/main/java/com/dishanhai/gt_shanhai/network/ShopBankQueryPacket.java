@@ -13,38 +13,67 @@ import java.math.BigInteger;
 import java.util.function.Supplier;
 
 /**
- * 会员中心「银行」查询响应（S→C）：定期存款/欠款本息快照（已惰性结算最新利息，见
- * {@link WalletAccountAPI#getBankDeposit}/{@link WalletAccountAPI#getBankDebt}），
- * 写入 {@code ClientShopBank} 缓存，供 {@code ShopMembershipScreen} 显示。
+ * 会员中心「银行」查询响应（S→C）。前两个字段仍是存款合计与欠款合计，后面带本金、利息、
+ * 可借额度和服务器利率，避免客户端拿自己的配置文件显示利差。
  */
 public class ShopBankQueryPacket {
 
     private final BigInteger deposit;
     private final BigInteger debt;
+    private final BigInteger depositPrincipal;
+    private final BigInteger depositInterest;
+    private final BigInteger debtPrincipal;
+    private final BigInteger debtInterest;
+    private final BigInteger loanRoom;
+    private final int depositRateBp;
+    private final int loanRateBp;
+    private final long maxLoan;
 
-    public ShopBankQueryPacket(BigInteger deposit, BigInteger debt) {
-        this.deposit = deposit == null ? BigInteger.ZERO : deposit;
-        this.debt = debt == null ? BigInteger.ZERO : debt;
+    public ShopBankQueryPacket(WalletAccountAPI.BankView view) {
+        WalletAccountAPI.BankView src = view;
+        this.deposit = src.depositTotal();
+        this.debt = src.debtTotal();
+        this.depositPrincipal = src.depositPrincipal;
+        this.depositInterest = src.depositInterest;
+        this.debtPrincipal = src.debtPrincipal;
+        this.debtInterest = src.debtInterest;
+        this.loanRoom = src.loanRoom;
+        this.depositRateBp = src.depositRateBp;
+        this.loanRateBp = src.loanRateBp;
+        this.maxLoan = src.maxLoan;
     }
 
     public ShopBankQueryPacket(FriendlyByteBuf buf) {
-        byte[] db = buf.readByteArray();
-        this.deposit = db.length == 0 ? BigInteger.ZERO : new BigInteger(db);
-        byte[] dt = buf.readByteArray();
-        this.debt = dt.length == 0 ? BigInteger.ZERO : new BigInteger(dt);
+        this.deposit = readBi(buf);
+        this.debt = readBi(buf);
+        this.depositPrincipal = readBi(buf);
+        this.depositInterest = readBi(buf);
+        this.debtPrincipal = readBi(buf);
+        this.debtInterest = readBi(buf);
+        this.loanRoom = readBi(buf);
+        this.depositRateBp = buf.readVarInt();
+        this.loanRateBp = buf.readVarInt();
+        this.maxLoan = buf.readVarLong();
     }
 
     public void encode(FriendlyByteBuf buf) {
-        buf.writeByteArray(deposit.toByteArray());
-        buf.writeByteArray(debt.toByteArray());
+        writeBi(buf, deposit);
+        writeBi(buf, debt);
+        writeBi(buf, depositPrincipal);
+        writeBi(buf, depositInterest);
+        writeBi(buf, debtPrincipal);
+        writeBi(buf, debtInterest);
+        writeBi(buf, loanRoom);
+        buf.writeVarInt(depositRateBp);
+        buf.writeVarInt(loanRateBp);
+        buf.writeVarLong(maxLoan);
     }
 
     /** 服务端：把该玩家当前的存款/欠款快照（含惰性结息副作用）推给客户端。 */
     public static void sendTo(ServerPlayer player) {
         if (player == null) return;
-        BigInteger deposit = WalletAccountAPI.getBankDeposit(player.getServer(), player.getUUID());
-        BigInteger debt = WalletAccountAPI.getBankDebt(player.getServer(), player.getUUID());
-        ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new ShopBankQueryPacket(deposit, debt));
+        WalletAccountAPI.BankView view = WalletAccountAPI.bankView(player.getServer(), player.getUUID());
+        ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new ShopBankQueryPacket(view));
     }
 
     public static void handle(ShopBankQueryPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -57,6 +86,18 @@ public class ShopBankQueryPacket {
 
     @OnlyIn(Dist.CLIENT)
     private static void applyClient(ShopBankQueryPacket pkt) {
-        com.dishanhai.gt_shanhai.client.shop.ClientShopBank.apply(pkt.deposit, pkt.debt);
+        com.dishanhai.gt_shanhai.client.shop.ClientShopBank.apply(new com.dishanhai.gt_shanhai.client.shop.ClientShopBank.Snapshot(
+                pkt.depositPrincipal, pkt.depositInterest, pkt.debtPrincipal, pkt.debtInterest,
+                pkt.loanRoom, pkt.depositRateBp, pkt.loanRateBp, pkt.maxLoan));
+    }
+
+    private static void writeBi(FriendlyByteBuf buf, BigInteger value) {
+        BigInteger safe = value == null ? BigInteger.ZERO : value;
+        buf.writeByteArray(safe.toByteArray());
+    }
+
+    private static BigInteger readBi(FriendlyByteBuf buf) {
+        byte[] bytes = buf.readByteArray();
+        return bytes.length == 0 ? BigInteger.ZERO : new BigInteger(bytes);
     }
 }

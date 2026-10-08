@@ -90,11 +90,15 @@ public final class RecipeEditorEncodePacket {
                 if (recipe == null) return failed("invalid-recipe-type");
             } else {
                 GTRecipe snapshot = RecipeOriginalSnapshotStore.copyOf(packet.recipeTypeId, packet.sourceRecipeId);
-                if (snapshot == null) return failed("recipe-not-found");
-                GTRecipe original = RecipeRebuildService.buildCanonical(packet.recipeTypeId, snapshot);
-                if (original == null) return failed("recipe-not-found");
-                recipe = edited.toGtRecipe(original);
-                if (recipe == null) return failed("recipe-not-found");
+                if (snapshot == null) {
+                    recipe = RecipeRebuildService.materializeFresh(packet.recipeTypeId, edited);
+                    if (recipe == null) return failed("recipe-not-found");
+                } else {
+                    GTRecipe original = RecipeRebuildService.buildCanonical(packet.recipeTypeId, snapshot);
+                    if (original == null) return failed("recipe-not-found");
+                    recipe = edited.toGtRecipe(original);
+                    if (recipe == null) return failed("recipe-not-found");
+                }
             }
 
             boolean wrote = JeiPatternQuickEncodeService.encodeEdited(player, recipe);

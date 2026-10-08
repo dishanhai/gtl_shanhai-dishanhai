@@ -389,7 +389,10 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         if (!isClient()) return;
         String type = typeFilter == null ? "" : typeFilter.trim();
         if (net.minecraft.resources.ResourceLocation.tryParse(type) == null) {
-            setStatus("§c先选择配方类型，再添加配方");
+            type = machineTypes.isEmpty() ? "" : machineTypes.get(0);
+        }
+        if (type.isEmpty()) {
+            setStatus("§c配方类型还在读取，稍后再添加");
             return;
         }
         creating = true;
@@ -420,13 +423,120 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         panel.bindTable(ioTable);
         panel.closeQueryHistory();
         seedEditHistory();
+        panel.syncCreateChrome();
         setStage(STAGE_EDIT, true);
-        setStatus("§a新建配方：填写 命名空间:路径，再编辑输入输出。不会改动已有配方");
+        setStatus("§a新建配方：左侧点选类型。放入输入和产物后按「猜测」填 id");
+    }
+
+    String createTypeLabel() {
+        if (selectedBase == null) return "选择配方类型";
+        int index = machineTypes.indexOf(selectedBase.recipeTypeId());
+        if (index >= 0 && index < machineTypeNames.size()) return machineTypeNames.get(index);
+        String id = selectedBase.recipeTypeId();
+        return id == null || id.isEmpty() ? "选择配方类型" : id;
+    }
+
+    void pickCreateType(String label) {
+        if (!creating || label == null) return;
+        int index = machineTypeNames.indexOf(label);
+        if (index < 0 || index >= machineTypes.size()) return;
+        applyCreateType(machineTypes.get(index));
+    }
+
+    private void applyCreateType(String typeId) {
+        if (!creating || selectedBase == null || typeId == null || typeId.equals(selectedBase.recipeTypeId())) return;
+        if (net.minecraft.resources.ResourceLocation.tryParse(typeId) == null) return;
+        selectedBase = new ShanhaiRecipeBase(
+                typeId,
+                selectedBase.recipeId(),
+                selectedBase.duration(),
+                selectedBase.eut(),
+                selectedBase.inputs(),
+                selectedBase.outputs(),
+                selectedBase.tickInputs(),
+                selectedBase.tickOutputs(),
+                selectedBase.conditions(),
+                selectedBase.blastTemp());
+        scheduleDraftSave();
+    }
+
+    /** Fills {@code gt_shanhai:type_input1_output1} from the selected type and the first stacks. */
+    void guessCreateId() {
+        if (!isClient() || !creating || selectedBase == null) return;
+        net.minecraft.resources.ResourceLocation type =
+                net.minecraft.resources.ResourceLocation.tryParse(selectedBase.recipeTypeId());
+        if (type == null) {
+            setStatus("§c先在左侧选择配方类型");
+            return;
+        }
+        String input = firstStackToken(true);
+        String output = firstStackToken(false);
+        if (input.isEmpty() && output.isEmpty()) {
+            setStatus("§c先放入输入物或产物，再猜测 id");
+            return;
+        }
+        String path = idToken(type.getPath(), false);
+        if (!input.isEmpty()) path = path + "_" + input;
+        if (!output.isEmpty()) path = path + "_" + output;
+        if (path.length() > 180) path = path.substring(0, 180);
+        while (path.endsWith("_")) path = path.substring(0, path.length() - 1);
+        String id = "gt_shanhai:" + path;
+        if (RecipeEditorExportPacket.exportLocation(id, "") == null) {
+            setStatus("§c猜出来的 id 不合法");
+            return;
+        }
+        setRecipeIdText(id);
+        if (input.isEmpty()) setStatus("§e已填入 " + id + " §7还没有输入物");
+        else if (output.isEmpty()) setStatus("§e已填入 " + id + " §7还没有产物");
+        else setStatus("§a已填入 " + id);
+    }
+
+    private String firstStackToken(boolean inputSide) {
+        int inputs = ioTable.inSection();
+        int start = inputSide ? 0 : inputs;
+        int end = inputSide ? inputs : inputs + ioTable.outSection();
+        for (int i = start; i < end; i++) {
+            ShanhaiIoTable.Cell cell = ioTable.cell(i);
+            if (cell == null || cell.empty()) continue;
+            net.minecraft.resources.ResourceLocation id = cell.itemKind
+                    ? net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(cell.item.getItem())
+                    : net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(cell.fluid.getFluid());
+            if (id == null) continue;
+            String token = idToken(id.getPath(), true);
+            if (!token.isEmpty()) return token;
+        }
+        return "";
+    }
+
+    private static String idToken(String raw, boolean leafOnly) {
+        if (raw == null || raw.isEmpty()) return "";
+        String lower = raw.toLowerCase(java.util.Locale.ROOT);
+        if (leafOnly) {
+            int slash = lower.lastIndexOf('/');
+            if (slash >= 0 && slash + 1 < lower.length()) lower = lower.substring(slash + 1);
+        }
+        StringBuilder token = new StringBuilder();
+        for (int i = 0; i < lower.length(); i++) {
+            char c = lower.charAt(i);
+            boolean ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+            if (!leafOnly && c == '/') ok = false;
+            if (ok) {
+                token.append(c);
+            } else if (token.length() > 0 && token.charAt(token.length() - 1) != '_') {
+                token.append('_');
+            }
+        }
+        int start = 0;
+        int end = token.length();
+        while (start < end && token.charAt(start) == '_') start++;
+        while (end > start && token.charAt(end - 1) == '_') end--;
+        return token.substring(start, end);
     }
 
     void requestDetail(ShanhaiRecipeQuery.Card card) {
         if (!isClient() || card == null) return;
         creating = false;
+        panel.syncCreateChrome();
         keepOriginal = false;
         selectedCard = card;
         flushDraftSave();
@@ -630,6 +740,19 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         if (!next.equals(eutText)) beforeEdit("text:eut");
         eutText = next;
         scheduleDraftSave();
+    }
+
+    String voltageFace() {
+        String name = ShanhaiVoltageTiers.nameFor(eutText);
+        return name == null ? "电压档" : name;
+    }
+
+    void pickVoltage(String label) {
+        Long eut = ShanhaiVoltageTiers.eutOfName(label);
+        if (eut == null) eut = ShanhaiVoltageTiers.eutOfLabel(label);
+        if (eut == null) return;
+        setEutText(Long.toString(eut));
+        setStatus("§aEU/t 已设为 " + label.trim() + "  " + eut);
     }
 
     void toggleKeepOriginal() {
@@ -1612,6 +1735,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             stage = restoredStage;
             fromStage = restoredStage;
             panel.applyStage(false);
+            panel.syncCreateChrome();
             if (!machineStack.isEmpty()) {
                 ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorMachinePacket(machineStack));
             }

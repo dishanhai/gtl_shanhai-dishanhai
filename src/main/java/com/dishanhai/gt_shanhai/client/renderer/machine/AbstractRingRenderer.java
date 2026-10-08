@@ -138,10 +138,7 @@ public abstract class AbstractRingRenderer extends WorkableCasingMachineRenderer
             }
 
             if (isWorking) {
-                float dir = (idx == 1) ? -1.0f : 1.0f;
-                float speedFactor = 0.4f + idx * 0.4f;
-                float baseAngle = idx * 120.0f;
-                float angle = (smoothTick * speedFactor * 2.0f * dir + baseAngle) % 360.0f;
+                float angle = PrimordialEngineRingOffset.angleDegrees(idx, smoothTick);
                 poseStack.mulPose(new Quaternionf().fromAxisAngleDeg(1, 0, 0, angle));
             }
 

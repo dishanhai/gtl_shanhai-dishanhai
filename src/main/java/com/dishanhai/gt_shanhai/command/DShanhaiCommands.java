@@ -847,14 +847,19 @@ public class DShanhaiCommands {
         }
         net.minecraft.server.MinecraftServer server = source.getServer();
         java.util.UUID uuid = player.getUUID();
-        java.math.BigInteger deposit = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.getBankDeposit(server, uuid);
-        java.math.BigInteger debt = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.getBankDebt(server, uuid);
+        com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.BankView bank =
+                com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankView(server, uuid);
         int tierIdx = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.getMemberTier(server, uuid);
         String tier = com.dishanhai.gt_shanhai.common.shop.ShopMembership.tierNameForTier(tierIdx);
         int pct = com.dishanhai.gt_shanhai.common.shop.ShopMembership.discountPercentForTier(tierIdx);
         source.sendSuccess(msg("§b=== 山海银行 ==="), false);
-        source.sendSuccess(msg("§7定期存款: §a" + deposit + " §7星火"), false);
-        source.sendSuccess(msg("§7欠款: §c" + debt + " §7星火"), false);
+        source.sendSuccess(msg("§7存款本金: §a" + bank.depositPrincipal + " §7星火"), false);
+        source.sendSuccess(msg("§7存款利息: §a" + bank.depositInterest + " §7星火"), false);
+        source.sendSuccess(msg("§7存款合计: §a" + bank.depositTotal() + " §7星火"), false);
+        source.sendSuccess(msg("§7欠款本金: §c" + bank.debtPrincipal + " §7星火"), false);
+        source.sendSuccess(msg("§7欠款利息: §c" + bank.debtInterest + " §7星火"), false);
+        source.sendSuccess(msg("§7欠款合计: §c" + bank.debtTotal() + " §7星火"), false);
+        source.sendSuccess(msg("§7可借: §e" + bank.loanRoom + " §7/ " + bank.maxLoan), false);
         source.sendSuccess(msg(tier.isEmpty()
                 ? "§7会员: §8未购买 §7（前往「会员中心」购买解锁折扣）"
                 : "§7会员: §d[" + tier + " -" + pct + "%]"), false);

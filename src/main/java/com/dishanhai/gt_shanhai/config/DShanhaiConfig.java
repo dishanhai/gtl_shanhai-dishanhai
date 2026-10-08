@@ -355,14 +355,14 @@ public final class DShanhaiConfig {
             builder.push("shop_bank");
             shopBankDepositRateBpPerHour = builder
                     .comment("山海商店银行：定期存款每小时计息基点（万分之N，默认 5 ≈ 0.05%/小时，约 1.2%/天）",
-                             "线性单利，按 System.currentTimeMillis() 惰性结算（存/取/查询时结一次，无独立 tick 调度器）")
+                             "线性单利，利息不滚入本金。按 System.currentTimeMillis() 惰性结算，无独立 tick 调度器")
                     .defineInRange("depositRateBpPerHour", 5, 0, 10_000);
             shopBankLoanRateBpPerHour = builder
                     .comment("山海商店银行：贷款每小时计息基点（万分之N，默认 15 ≈ 0.15%/小时，约 3.6%/天）",
-                             "刻意高于存款利率吃利差；欠款只会累积，本模组不做强制追讨/抵押没收，靠数字倒逼玩家自觉还款")
+                             "刻意高于存款利率吃利差。还款先冲利息再冲本金。不做强制追讨或抵押没收")
                     .defineInRange("loanRateBpPerHour", 15, 0, 10_000);
             shopBankMaxLoanSpark = builder
-                    .comment("山海商店银行：单玩家最大欠款上限（星火），达到上限后借不出新的（默认 1亿）")
+                    .comment("山海商店银行：单玩家最大欠款上限（星火），本金加利息达到上限后借不出新的（默认 1亿）")
                     .defineInRange("maxLoanSpark", 100_000_000L, 0L, Long.MAX_VALUE);
             builder.pop();
 

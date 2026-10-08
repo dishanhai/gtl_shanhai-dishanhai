@@ -67,6 +67,11 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
                     starHueOverrideOf(machine),
                     rainbowPaletteOf(machine),
                     rainbowPeriodOf(machine));
+            PrimordialNeutronStarSphereRenderer.renderSuctionPlanets(
+                    facing, RenderUtil.getSmoothTick(machine, partialTick), isWorking,
+                    moduleSlotBonusOf(machine),
+                    starRadiusOverrideOf(machine),
+                    poseStack);
         } else {
             PrimordialUniverseSphereRenderer.render(smoothTick, facing, poseStack);
         }

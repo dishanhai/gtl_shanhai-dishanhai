@@ -10,10 +10,14 @@ import appeng.menu.me.crafting.CraftingPlanSummaryEntry;
 
 import com.dishanhai.gt_shanhai.common.ae2.CraftingPlanOverflowDetector;
 import com.dishanhai.gt_shanhai.common.ae2.CraftingRecursionDetector;
+import com.dishanhai.gt_shanhai.common.ae2.FeasiblePatternDemotions;
 import com.dishanhai.gt_shanhai.common.item.CraftingPlanVirtualMarkerAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
+
+import org.gtlcore.gtlcore.integration.ae2.graph.AeGraphPlan;
+import org.gtlcore.gtlcore.integration.ae2.graph.GraphSummaryContext;
 
 import net.minecraft.network.FriendlyByteBuf;
 
@@ -64,6 +68,9 @@ public final class CraftingPlanVirtualMarkerMixins {
         @Unique
         private boolean gtShanhai$overflow;
 
+        @Unique
+        private boolean gtShanhai$cycleDemoted;
+
         @Override
         public boolean gtShanhai$isVirtualPresence() {
             return gtShanhai$virtualPresence;
@@ -110,6 +117,16 @@ public final class CraftingPlanVirtualMarkerMixins {
             gtShanhai$overflow = overflow;
         }
 
+        @Override
+        public boolean gtShanhai$isCycleDemoted() {
+            return gtShanhai$cycleDemoted;
+        }
+
+        @Override
+        public void gtShanhai$setCycleDemoted(boolean cycleDemoted) {
+            gtShanhai$cycleDemoted = cycleDemoted;
+        }
+
         @Inject(method = "write", at = @At("TAIL"), remap = false)
         private void gtShanhai$writeMarkers(FriendlyByteBuf buffer, CallbackInfo ci) {
             buffer.writeBoolean(gtShanhai$virtualPresence);
@@ -122,6 +139,7 @@ public final class CraftingPlanVirtualMarkerMixins {
             for (int i = 0; i < count; i++) {
                 AEKey.writeKey(buffer, recursionPath.get(i));
             }
+            buffer.writeBoolean(gtShanhai$cycleDemoted);
         }
 
         @Inject(method = "read", at = @At("RETURN"), remap = false)
@@ -141,11 +159,13 @@ public final class CraftingPlanVirtualMarkerMixins {
             for (int i = 0; i < count; i++) {
                 path.add(AEKey.readKey(buffer));
             }
+            boolean cycleDemoted = buffer.readBoolean();
             if (entry instanceof CraftingPlanVirtualMarkerAccess access) {
                 access.gtShanhai$setVirtualPresence(virtualPresence);
                 access.gtShanhai$setNoPattern(noPattern);
                 access.gtShanhai$setOverflow(overflow);
                 access.gtShanhai$setRecursion(kind, path);
+                access.gtShanhai$setCycleDemoted(cycleDemoted);
             }
         }
     }
@@ -159,13 +179,23 @@ public final class CraftingPlanVirtualMarkerMixins {
             CraftingPlanSummary summary = cir.getReturnValue();
             if (summary == null) return;
 
-            Object2LongMap<AEKey> requirements = VirtualPatternEncodingHelper.collectPresenceRequirements(job);
+            // GTLCore 圖計畫會用一份空 patternTimes 的 CraftingPlan 呼叫 fromJob，
+            // 真正的樣板在 GraphSummaryContext 裡。空計畫標不出虛擬在場。
+            ICraftingPlan presencePlan = job;
+            AeGraphPlan graphPlan = GraphSummaryContext.graphPlan(job);
+            if (graphPlan != null) {
+                presencePlan = graphPlan;
+            }
+            Object2LongMap<AEKey> requirements = VirtualPatternEncodingHelper.collectPresenceRequirements(presencePlan);
             ICraftingService craftingService = grid == null ? null : grid.getCraftingService();
             Set<AEKey> overflowKeys = CraftingPlanOverflowDetector.collectOverflowKeys(job);
             int detections = 0;
 
             for (CraftingPlanSummaryEntry entry : summary.getEntries()) {
                 if (!(entry instanceof CraftingPlanVirtualMarkerAccess access)) continue;
+                if (FeasiblePatternDemotions.wasDemoted(job, entry.getWhat())) {
+                    access.gtShanhai$setCycleDemoted(true);
+                }
                 if (requirements.containsKey(entry.getWhat())) {
                     access.gtShanhai$setVirtualPresence(true);
                 }

@@ -59,6 +59,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private ShanhaiQuerySlotWidget querySlot;
     private ShanhaiRecipeHistoryWidget queryHistory;
     private ButtonWidget keepToggle;
+    private TextFieldWidget recipeIdField;
+    private SelectorWidget createTypeSelector;
+    private ButtonWidget guessId;
+    private boolean createChrome;
     private IoGrid inputItemGrid;
     private IoGrid inputFluidGrid;
     private IoGrid outputItemGrid;
@@ -310,6 +314,23 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         layoutMotion(ShanhaiRecipeEditorAnimation.nowMs());
         refreshIo();
         if (keepToggle != null) keepToggle.setVisible(!host.creating);
+        syncCreateChrome();
+    }
+
+    /** Type picker and id guess stay on the add-recipe editor. The id field keeps its full width otherwise. */
+    void syncCreateChrome() {
+        boolean creating = host.creating;
+        if (createTypeSelector != null) createTypeSelector.setVisible(creating);
+        if (guessId != null) guessId.setVisible(creating);
+        if (recipeIdField == null || createChrome == creating) return;
+        createChrome = creating;
+        if (creating) {
+            recipeIdField.setSelfPosition(244, 2);
+            recipeIdField.setSize(180, 16);
+        } else {
+            recipeIdField.setSelfPosition(4, 2);
+            recipeIdField.setSize(488, 14);
+        }
     }
 
     @Override
@@ -391,7 +412,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
             return line;
         }));
         ButtonWidget addRecipe = button(340, 4, 156, 18, "配方添加", host::beginCreate);
-        addRecipe.setHoverTooltips("按当前配方类型新建一条配方。不修改、不移除已有配方");
+        addRecipe.setHoverTooltips("新建一条配方。类型在编辑页点选，id 可按类型、输入和产物猜测");
         selectPage.addWidget(addRecipe);
         selectPage.addWidget(textField(4, 54, 200, 18, () -> host.typeFilter,
                 value -> {
@@ -447,9 +468,35 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     }
 
     private void buildEditPage() {
-        editPage.addWidget(textField(4, 2, 488, 14, () -> host.recipeIdText, host::setRecipeIdText));
+        recipeIdField = textField(4, 2, 488, 14, () -> host.recipeIdText, host::setRecipeIdText);
+        editPage.addWidget(recipeIdField);
+        createTypeSelector = new ShanhaiRecipeTypeSelector(4, 2, 236, 16, List.of(), 0xFF1A1A1A)
+                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
+                .setBackground(GuiTextures.BACKGROUND)
+                .setFontColor(0xFF1A1A1A)
+                .setMaxCount(8)
+                .setCandidatesSupplier(() -> List.copyOf(host.machineTypeNames))
+                .setSupplier(host::createTypeLabel)
+                .setOnChanged(host::pickCreateType);
+        createTypeSelector.setClientSideWidget();
+        createTypeSelector.setVisible(false);
+        editPage.addWidget(createTypeSelector);
+        guessId = button(428, 2, 64, 16, "猜测", host::guessCreateId);
+        guessId.setHoverTooltips("填入 gt_shanhai:类型_输入1_产物1。只取第一个输入和第一个产物");
+        guessId.setVisible(false);
+        editPage.addWidget(guessId);
         editPage.addWidget(new LabelWidget(4, 18, "§7耗时 / tick"));
         editPage.addWidget(new LabelWidget(150, 18, "§7EU/t"));
+        SelectorWidget voltage = new ShanhaiRecipeTypeSelector(188, 16, 64, 14, ShanhaiVoltageTiers.names(), 0xFF1A1A1A)
+                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
+                .setBackground(GuiTextures.BACKGROUND)
+                .setFontColor(0xFF1A1A1A)
+                .setMaxCount(10)
+                .setCandidatesSupplier(ShanhaiVoltageTiers::names)
+                .setSupplier(host::voltageFace)
+                .setOnChanged(host::pickVoltage);
+        voltage.setClientSideWidget();
+        voltage.setHoverTooltips("点选电压档，数字写入下方 EU/t。MAX = 2147483647，MAX+16 = Long.MAX_VALUE");
         editPage.addWidget(textField(4, 30, 130, 18, () -> host.durationText, host::setDurationText));
         editPage.addWidget(textField(150, 30, 130, 18, () -> host.eutText,
                 value -> host.setEutText(value)));
@@ -501,6 +548,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         editPage.addWidget(new ButtonWidget(340, 256, 156, 18,
                 new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::reviewButtonFace)),
                 click -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_REVIEW, true)));
+        editPage.addWidget(voltage);
     }
 
     private void buildReviewPage() {

@@ -432,6 +432,8 @@
   "gui.gt_shanhai.remote_pattern_return": "Return to Terminal",
   "gui.gt_shanhai.crafting_plan.virtual_presence": "Virtual Presence",
   "gui.gt_shanhai.crafting_plan.virtual_presence.detail": "This entry includes a virtual requirement: the virtual portion is not consumed and only checks whether the target exists in the network",
+  "gui.gt_shanhai.crafting_plan.cycle_demoted": "Skipped looping pattern",
+  "gui.gt_shanhai.crafting_plan.cycle_demoted.detail": "Skipped a looping pattern. Missing items come from the next pattern that can run",
   "item.gt_shanhai.advanced_pattern_box": "Advanced Pattern Box",
   "tooltip.gt_shanhai.advanced_pattern_box.open": "§7Right-click air to open, holding §b%s§7 / §b%s§7 encoded patterns",
   "tooltip.gt_shanhai.advanced_pattern_box.extract": "§7Right-click a Pattern Provider / ME Pattern Buffer / Assembler Matrix / §bME Craft Pattern Container§7: pull its patterns into the box",

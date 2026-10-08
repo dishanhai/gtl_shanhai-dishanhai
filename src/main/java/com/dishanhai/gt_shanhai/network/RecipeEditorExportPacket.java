@@ -158,15 +158,20 @@ public final class RecipeEditorExportPacket {
                 if (recipe == null) return invalid("invalid-recipe-type");
             } else {
                 GTRecipe snapshot = RecipeOriginalSnapshotStore.copyOf(packet.recipeTypeId, packet.sourceRecipeId);
-                if (snapshot == null) return invalid("recipe-not-found");
-                GTRecipe original = RecipeRebuildService.buildCanonical(packet.recipeTypeId, snapshot);
-                if (original == null) return invalid("recipe-not-found");
-                if (conditionNote.isEmpty()) {
-                    conditionDiff = ShanhaiRecipeConditions.diffLine(
-                            ShanhaiRecipeBase.from(original).conditions(), edited.conditions());
+                if (snapshot == null) {
+                    // Added recipes are not in the original snapshot. Export the draft itself.
+                    recipe = RecipeRebuildService.materializeFresh(packet.recipeTypeId, edited);
+                    if (recipe == null) return invalid("recipe-not-found");
+                } else {
+                    GTRecipe original = RecipeRebuildService.buildCanonical(packet.recipeTypeId, snapshot);
+                    if (original == null) return invalid("recipe-not-found");
+                    if (conditionNote.isEmpty()) {
+                        conditionDiff = ShanhaiRecipeConditions.diffLine(
+                                ShanhaiRecipeBase.from(original).conditions(), edited.conditions());
+                    }
+                    recipe = edited.toGtRecipe(original);
+                    if (recipe == null) return invalid("recipe-not-found");
                 }
-                recipe = edited.toGtRecipe(original);
-                if (recipe == null) return invalid("recipe-not-found");
             }
 
             JsonElement encoded = GTRecipeSerializer.CODEC.encodeStart(JsonOps.INSTANCE, recipe)

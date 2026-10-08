@@ -4,16 +4,18 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 
+import com.mojang.blaze3d.vertex.PoseStack;
+
 import com.gtladd.gtladditions.client.RenderMode;
-import com.gtladd.gtladditions.client.render.machine.antichrist.AntichristDeferredRenderer;
 import com.gtladd.gtladditions.client.render.machine.antichrist.AntichristRenderProfile;
+import com.gtladd.gtladditions.client.render.machine.deferred.DeferredMachineRenderer;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 
 /**
  * 中子星渲染：不自绘球体，直接复用伪神之煅炉（{@code gtladditions:forge_of_the_antichrist}）的星体管线。
  * <p>
- * 入队 gtladditions 的 {@code AntichristDeferredRenderer} 后，由伪神锻自己的延迟批次在
+ * 入队 gtladditions 的 {@code DeferredMachineRenderer} 后，由伪神锻自己的延迟批次在
  * {@code AFTER_TRANSLUCENT_BLOCKS} 阶段统一绘制 —— 三层球壳、星体着色器、Oculus 光影兼容全部沿用，
  * 不需要我们再维护一套。<b>2026-09-21 起按用户要求<b>点亮等离子体光束</b>（{@code beamAlpha = isWorking ? 1.0 : 0.0}，
  * 严格照上游"只在工作时亮"）—— 详见 {@link #BEAM_ALPHA} 的注释；球体尺寸本类不变。</b>
@@ -92,6 +94,9 @@ final class PrimordialNeutronStarSphereRenderer {
      * {@code renderSpecialEffects} → 本方法），单线程访问，没有并发问题。
      */
     private static long lastNonFiniteWarnMs;
+
+    /** 客户端渲染线程专用。微缩星的光束本地坐标。 */
+    private static final float[] MINIATURE_LOCAL = new float[3];
 
     /**
      * 等离子体光束的开关值（2026-09-21 队长裁决：**点亮**，严格按上游"只在工作时亮"）。
@@ -176,7 +181,42 @@ final class PrimordialNeutronStarSphereRenderer {
                 color[0], color[1], color[2],
                 radius,
                 isWorking ? BEAM_ALPHA : 0.0f);
-        AntichristDeferredRenderer.INSTANCE.enqueue(blockEntity, profile);
+        // 延迟批次按方块坐标覆盖，第二条记录会把宿主星体挤掉。微缩星放进同一条。
+        DeferredMachineRenderer.INSTANCE.enqueue$gtladditions(
+                new PrimordialNeutronStarFrame(blockEntity, profile, miniatureProfile(
+                        facing, continuousTick, isWorking, starPos, color, radius)));
+    }
+
+    private static AntichristRenderProfile miniatureProfile(Direction facing, float continuousTick,
+                                                            boolean isWorking, Vec3 starPos, float[] color,
+                                                            float starRadius) {
+        if (!isWorking) return null;
+        PrimordialNeutronStarSuction.writeMiniatureLocalPosition(continuousTick, starRadius, MINIATURE_LOCAL);
+        Vec3 position = PrimordialNeutronStarSuctionPlanets.toAnchorOffset(
+                facing, starPos, MINIATURE_LOCAL[0], MINIATURE_LOCAL[1], MINIATURE_LOCAL[2]);
+        return new AntichristRenderProfile(
+                continuousTick,
+                true,
+                facing,
+                RenderMode.NORMAL,
+                position,
+                color[0], color[1], color[2],
+                PrimordialNeutronStarSuction.MINIATURE_RADIUS,
+                0.0f);
+    }
+
+    /**
+     * 光束外侧的星球。只在光束点亮（{@code isWorking}）时画，停机不空转。
+     * 半径与 {@link #enqueue} 用同一套钳位，最近点才不会钻进正在呼吸的星体。
+     */
+    static void renderSuctionPlanets(Direction facing, float continuousTick, boolean isWorking,
+                                     int moduleBonus, int radiusOverride, PoseStack poseStack) {
+        if (!isWorking) return;
+        float baseRadius = radiusOverride > 0
+                ? Math.min(radiusOverride, SAFE_MAX_STAR_RADIUS)
+                : baseRadiusFor(moduleBonus);
+        float radius = sanitizeRadius(pulseRadius(baseRadius, continuousTick), moduleBonus);
+        PrimordialNeutronStarSuctionPlanets.render(facing, continuousTick, radius, poseStack);
     }
 
     /**

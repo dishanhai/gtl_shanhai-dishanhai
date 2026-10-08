@@ -664,6 +664,8 @@
   "gui.gt_shanhai.remote_pattern_return": "返回终端",
   "gui.gt_shanhai.crafting_plan.virtual_presence": "虚拟在场",
   "gui.gt_shanhai.crafting_plan.virtual_presence.detail": "此条目包含虚拟需求：虚拟部分不会消耗，仅检查网络中是否存在目标物",
+  "gui.gt_shanhai.crafting_plan.cycle_demoted": "已跳过回环样板",
+  "gui.gt_shanhai.crafting_plan.cycle_demoted.detail": "已跳过回环样板，缺失来自下一张可运行样板",
   "item.gt_shanhai.advanced_pattern_box": "高级样板包装箱",
   "tooltip.gt_shanhai.advanced_pattern_box.open": "§7对空气右键打开，已存 §b%s§7 / §b%s§7 个已编码样板",
   "tooltip.gt_shanhai.advanced_pattern_box.extract": "§7右键样板供应器/样板总成/装配矩阵/§bME样板核心§7：取出其中的样板到包装箱",

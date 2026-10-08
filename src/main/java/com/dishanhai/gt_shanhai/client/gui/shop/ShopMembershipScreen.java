@@ -19,14 +19,13 @@ import java.math.BigInteger;
 /**
  * 会员中心（山海署名，客户端）：从 {@link ShopScreen} 顶栏「会员中心」按钮唤起，关闭返回 parent。
  *
- * <p>上半区：会员档位购买（青铜/白银/黄金，永久买断，见 {@link ShopMembership}）——纯购买制，
- * 不再从历史消费自动推算（见反馈：改成必须在这个界面里花钱买）。</p>
- * <p>下半区：山海银行（定期存款/贷款，见 {@code WalletAccountAPI} 的 {@code bank*} 系列结算方法，
- * 见反馈：会员中心要集成银行显示，不能只靠命令）。</p>
- *
- * <p>纯客户端界面，结算全发对应 C→S 包给服务端，权威结果由服务端回推快照/查询包刷新。</p>
+ * <p>页签「会员」：青铜/白银/黄金永久买断，付目标档全价。</p>
+ * <p>页签「银行」：定期存款与贷款。数字、利率、可借额度来自服务器快照。</p>
  */
 public class ShopMembershipScreen extends ScaledScreen {
+
+    private static final int PAGE_MEMBER = 0;
+    private static final int PAGE_BANK = 1;
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;
@@ -43,24 +42,24 @@ public class ShopMembershipScreen extends ScaledScreen {
     private static final int TARGET_H = 420;
     private static final int TOP_BAR_H = 16;
     private static final int BACK_W = 60;
-    private static final int TIER_ROW_H = 26;
-    // 弹入动画节奏 + 银行余额往返节流：跟 CurrencyAtmScreen 同一套手法/节奏，保持系列界面观感一致
+    private static final int TAB_W = 72;
+    private static final int TIER_ROW_H = 36;
     private static final long POP_ANIM_MS = 150L;
     private static final long BANK_REFRESH_TICKS = 40L;
 
     private final ShopScreen parent;
     private int left, top, panelWidth, panelHeight;
+    private int page = PAGE_MEMBER;
     private long amount = 10000L;
     private AnimatableEditBox amountBox;
 
-    // 初值不能用 Long.MIN_VALUE：gameTime - MIN_VALUE 会溢出成巨负数，恒 < 刷新间隔导致首发请求永远发不出去
     private long bankRequestedAtGameTime = -BANK_REFRESH_TICKS;
     private final long screenOpenAtMs = System.currentTimeMillis();
 
     private static String flashText;
     private static long flashUntil;
 
-    /** 把带 [会员中心]/[山海银行] 前缀的系统消息镜像进本屏底部横幅（同 CurrencyAtmScreen 的做法）。 */
+    /** 把带 [会员中心]/[山海银行] 前缀的系统消息镜像进本屏底部横幅。 */
     public static void showMessage(Component msg) {
         if (msg == null) return;
         flashText = msg.getString();
@@ -79,18 +78,23 @@ public class ShopMembershipScreen extends ScaledScreen {
     }
 
     private int backBtnX() { return left + panelWidth - 8 - BACK_W; }
+    private int bankTabX() { return backBtnX() - 6 - TAB_W; }
+    private int memberTabX() { return bankTabX() - 4 - TAB_W; }
     private int contentX() { return left + 8; }
     private int contentW() { return panelWidth - 16; }
-    private int tiersY() { return top + TOP_BAR_H + 22; }
-    private int tierRowY(int i) { return tiersY() + i * TIER_ROW_H; }
-    private int bankSectionY() { return tiersY() + ShopMembership.tierCount() * TIER_ROW_H + 14; }
-    private int bankDepositY() { return bankSectionY() + 12; }
-    private int bankDebtY() { return bankSectionY() + 24; }
-    private int bankAmountLabelY() { return bankSectionY() + 40; }
-    private int bankAmountBoxY() { return bankSectionY() + 52; }
-    private int bankStepY() { return bankSectionY() + 68; }
-    private int bankButtonsY() { return bankSectionY() + 84; }
-    private int bankRateHintY() { return bankButtonsY() + 18; }
+    private int tabY() { return top + 4; }
+    private int pageY() { return top + TOP_BAR_H + 10; }
+    private int tierRowY(int i) { return pageY() + 16 + i * TIER_ROW_H; }
+    private int cardY() { return pageY(); }
+    private int cardH() { return 78; }
+    private int cardW() { return (contentW() - 8) / 2; }
+    private int debtCardX() { return contentX() + cardW() + 8; }
+    private int amountLabelY() { return cardY() + cardH() + 8; }
+    private int bankAmountBoxY() { return amountLabelY() + 12; }
+    private int bankStepY() { return bankAmountBoxY() + 16; }
+    private int bankButtonsY() { return bankStepY() + 16; }
+    private int bankAllY() { return bankButtonsY() + 18; }
+    private int bankRateHintY() { return bankAllY() + 18; }
 
     @Override
     protected void initScaled() {
@@ -116,7 +120,7 @@ public class ShopMembershipScreen extends ScaledScreen {
 
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
-        if (amountBox != null) amountBox.setVisible(true);
+        syncAmountBox();
         float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS);
         if (openT < 1f) {
             g.pose().pushPose();
@@ -128,6 +132,13 @@ public class ShopMembershipScreen extends ScaledScreen {
         }
     }
 
+    private void syncAmountBox() {
+        if (amountBox == null) return;
+        boolean bank = page == PAGE_BANK;
+        amountBox.setVisible(bank);
+        amountBox.active = bank;
+    }
+
     private void renderPanel(GuiGraphics g, int mx, int my) {
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
@@ -135,73 +146,106 @@ public class ShopMembershipScreen extends ScaledScreen {
         g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
 
         g.drawString(this.font, "§6会员中心", left + 10, top + 5, GOLD, true);
-        g.drawString(this.font, "§d星火 §e" + formatBig(ClientWalletAccount.getDigital()), left + 90, top + 5, WHITE, true);
+        String spark = fitSpark(formatExact(ClientWalletAccount.getDigital()), memberTabX() - (left + 78) - 8);
+        g.drawString(this.font, "§d星火 §e" + spark, left + 78, top + 5, WHITE, true);
+        drawButton(g, memberTabX(), tabY(), TAB_W, TOP_BAR_H, page == PAGE_MEMBER ? "§6会员" : "§7会员", mx, my);
+        drawButton(g, bankTabX(), tabY(), TAB_W, TOP_BAR_H, page == PAGE_BANK ? "§6银行" : "§7银行", mx, my);
         drawButton(g, backBtnX(), top + 4, BACK_W, TOP_BAR_H, "§e← 返回", mx, my);
 
         maybeRequestBankQuery();
+        if (page == PAGE_MEMBER) renderMember(g, mx, my);
+        else renderBank(g, mx, my);
+        renderFlash(g);
+    }
 
-        int cx = contentX(), cw = contentW();
+    private void renderMember(GuiGraphics g, int mx, int my) {
+        int cx = contentX();
+        int cw = contentW();
         int memberTier = ClientWalletAccount.getMemberTier();
-        g.drawString(this.font, "§6会员档位 §7(永久买断，购买后立即生效，不会过期/降级)", cx, top + TOP_BAR_H + 10, GOLD, true);
+        g.drawString(this.font, "§6会员档位 §7(永久买断，付该档全价，不会过期或降级)", cx, pageY(), GOLD, true);
         for (int i = 0; i < ShopMembership.tierCount(); i++) {
             drawTierRow(g, cx, tierRowY(i), cw, i, memberTier, mx, my);
         }
+    }
 
-        int by = bankSectionY();
-        g.drawString(this.font, "§6山海银行", cx, by, GOLD, true);
-        BigInteger deposit = ClientShopBank.getDeposit();
-        BigInteger debt = ClientShopBank.getDebt();
-        g.drawString(this.font, deposit == null ? "§7定期存款: §8查询中…" : "§7定期存款: §a" + formatBig(deposit) + " §7星火",
-                cx, bankDepositY(), WHITE, true);
-        g.drawString(this.font, debt == null ? "§7欠款: §8查询中…" : "§7欠款: §c" + formatBig(debt) + " §7星火",
-                cx, bankDebtY(), WHITE, true);
-        g.drawString(this.font, "§7数量（可输入）:", cx, bankAmountLabelY(), WHITE, true);
+    private void renderBank(GuiGraphics g, int mx, int my) {
+        int cx = contentX();
+        int cw = contentW();
+        ClientShopBank.Snapshot bank = ClientShopBank.get();
+        drawCard(g, cx, cardY(), cardW(), cardH(), "§6定期存款",
+                bank == null ? null : bank.depositPrincipal,
+                bank == null ? null : bank.depositInterest,
+                bank == null ? null : bank.depositTotal(),
+                null);
+        String roomLine = bank == null ? "§8查询中…"
+                : "§7可借 §e" + formatExact(bank.loanRoom) + " §7/ " + formatExact(BigInteger.valueOf(Math.max(0L, bank.maxLoan)));
+        drawCard(g, debtCardX(), cardY(), cardW(), cardH(), "§6贷款欠款",
+                bank == null ? null : bank.debtPrincipal,
+                bank == null ? null : bank.debtInterest,
+                bank == null ? null : bank.debtTotal(),
+                roomLine);
 
+        g.drawString(this.font, "§7数量（可输入）:", cx, amountLabelY(), WHITE, true);
         long[] steps = {1000L, 10000L, 100000L, 1000000L};
         String[] stepLabels = {"+1k", "+10k", "+100k", "+1M"};
         int sbw = (cw - 9) / 4;
         for (int i = 0; i < 4; i++) {
-            int bx = cx + i * (sbw + 3);
-            drawButton(g, bx, bankStepY(), sbw, 12, "§a" + stepLabels[i], mx, my);
+            drawButton(g, cx + i * (sbw + 3), bankStepY(), sbw, 12, "§a" + stepLabels[i], mx, my);
         }
-
         int bbw = (cw - 12) / 4;
         drawButton(g, cx, bankButtonsY(), bbw, 14, "§a存入", mx, my);
         drawButton(g, cx + (bbw + 4), bankButtonsY(), bbw, 14, "§6取出", mx, my);
         drawButton(g, cx + (bbw + 4) * 2, bankButtonsY(), bbw, 14, "§e借款", mx, my);
         drawButton(g, cx + (bbw + 4) * 3, bankButtonsY(), bbw, 14, "§b还款", mx, my);
-        g.drawString(this.font, "§8存款利率 0.05%/小时 · 贷款利率 0.15%/小时（吃利差）· 欠款无强制追讨，靠自觉还款",
-                cx, bankRateHintY(), GRAY, true);
+        int allW = (cw - 8) / 3;
+        drawButton(g, cx, bankAllY(), allW, 14, "§a全部存入", mx, my);
+        drawButton(g, cx + allW + 4, bankAllY(), allW, 14, "§6全部取出", mx, my);
+        drawButton(g, cx + (allW + 4) * 2, bankAllY(), allW, 14, "§b还清", mx, my);
+        g.drawString(this.font, rateHint(bank), cx, bankRateHintY(), GRAY, true);
+    }
 
-        // 底部实时反馈横幅（同 CurrencyAtmScreen 的做法：物品图标渲染层跟 fill 不同批次，flush 防止横幅被盖住）
-        if (flashText != null && System.currentTimeMillis() < flashUntil) {
-            g.flush();
-            int flashW = this.font.width(flashText);
-            int bannerW = Math.min(panelWidth - 12, flashW + 16);
-            int bannerX = left + (panelWidth - bannerW) / 2;
-            int bannerY = top + panelHeight - 24;
-            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 16, 0xE0101010);
-            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 1, 0xFF00C0C0);
-            g.drawCenteredString(this.font, flashText, left + panelWidth / 2, bannerY + 4, 0xFFFFFF);
+    private void drawCard(GuiGraphics g, int x, int y, int w, int h, String title,
+                          BigInteger principal, BigInteger interest, BigInteger total, String extra) {
+        g.fill(x, y, x + w, y + h, BOX_BG);
+        g.drawString(this.font, title, x + 6, y + 4, GOLD, true);
+        if (principal == null) {
+            g.drawString(this.font, "§8查询中…", x + 6, y + 18, GRAY, true);
+            return;
         }
+        g.drawString(this.font, "§7本金 §f" + formatExact(principal), x + 6, y + 18, WHITE, true);
+        g.drawString(this.font, "§7利息 §f" + formatExact(interest), x + 6, y + 30, WHITE, true);
+        g.drawString(this.font, "§7合计 §e" + formatExact(total), x + 6, y + 42, WHITE, true);
+        if (extra != null) g.drawString(this.font, extra, x + 6, y + 56, WHITE, true);
+    }
+
+    private void renderFlash(GuiGraphics g) {
+        if (flashText == null || System.currentTimeMillis() >= flashUntil) return;
+        g.flush();
+        int flashW = this.font.width(flashText);
+        int bannerW = Math.min(panelWidth - 12, flashW + 16);
+        int bannerX = left + (panelWidth - bannerW) / 2;
+        int bannerY = top + panelHeight - 24;
+        g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 16, 0xE0101010);
+        g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 1, 0xFF00C0C0);
+        g.drawCenteredString(this.font, flashText, left + panelWidth / 2, bannerY + 4, 0xFFFFFF);
     }
 
     private void drawTierRow(GuiGraphics g, int x, int y, int w, int tier, int currentTier, int mx, int my) {
         boolean owned = currentTier >= tier;
-        boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, TIER_ROW_H - 2);
-        g.fill(x, y, x + w, y + TIER_ROW_H - 2, hover ? ROW_BG : BOX_BG);
+        boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, TIER_ROW_H - 4);
+        g.fill(x, y, x + w, y + TIER_ROW_H - 4, hover ? ROW_BG : BOX_BG);
         String name = ShopMembership.tierNameForTier(tier);
         int pct = ShopMembership.discountPercentForTier(tier);
         BigInteger price = BigInteger.valueOf(ShopMembership.priceOf(tier));
-        g.drawString(this.font, "§f" + name + "会员 §a-" + pct + "%折扣", x + 4, y + 3, WHITE, true);
-        g.drawString(this.font, "§7售价: §e" + formatBig(price) + " 星火", x + 4, y + 14, GRAY, true);
-        int btnW = 90, btnX = x + w - 8 - btnW;
+        g.drawString(this.font, "§f" + name + "会员 §a-" + pct + "%折扣", x + 6, y + 6, WHITE, true);
+        g.drawString(this.font, "§7售价: §e" + formatExact(price) + " 星火", x + 6, y + 18, GRAY, true);
+        int btnW = 90;
+        int btnX = x + w - 8 - btnW;
         String label = owned ? "§a已拥有"
                 : (price.compareTo(ClientWalletAccount.getDigital()) > 0 ? "§8星火不足" : "§6购买");
-        drawButton(g, btnX, y + 4, btnW, TIER_ROW_H - 10, label, mx, my);
+        drawButton(g, btnX, y + 8, btnW, 16, label, mx, my);
     }
 
-    /** 银行余额往返节流：打开面板/超过刷新间隔才重新请求，避免每帧都打服务端。 */
     private void maybeRequestBankQuery() {
         net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
         long gameTime = lvl != null ? lvl.getGameTime() : 0L;
@@ -212,27 +256,46 @@ public class ShopMembershipScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        syncAmountBox();
         if (GuiRenderUtil.isHovering(mx, my, backBtnX(), top + 4, BACK_W, TOP_BAR_H)) {
             Minecraft.getInstance().setScreen(parent);
             return true;
         }
-        int cx = contentX(), cw = contentW();
+        if (GuiRenderUtil.isHovering(mx, my, memberTabX(), tabY(), TAB_W, TOP_BAR_H)) {
+            page = PAGE_MEMBER;
+            return true;
+        }
+        if (GuiRenderUtil.isHovering(mx, my, bankTabX(), tabY(), TAB_W, TOP_BAR_H)) {
+            page = PAGE_BANK;
+            return true;
+        }
+        if (page == PAGE_MEMBER) return clickMember(mx, my) || super.universalMouseClicked(mx, my, btn);
+        return clickBank(mx, my) || super.universalMouseClicked(mx, my, btn);
+    }
+
+    private boolean clickMember(double mx, double my) {
+        int cx = contentX();
+        int cw = contentW();
         int memberTier = ClientWalletAccount.getMemberTier();
         for (int i = 0; i < ShopMembership.tierCount(); i++) {
             int y = tierRowY(i);
-            int btnW = 90, btnX = cx + cw - 8 - btnW;
-            if (GuiRenderUtil.isHovering(mx, my, btnX, y + 4, btnW, TIER_ROW_H - 10)) {
-                if (memberTier < i) {
-                    ShanhaiNetwork.CHANNEL.sendToServer(new ShopMembershipBuyPacket(i));
-                }
+            int btnW = 90;
+            int btnX = cx + cw - 8 - btnW;
+            if (GuiRenderUtil.isHovering(mx, my, btnX, y + 8, btnW, 16)) {
+                if (memberTier < i) ShanhaiNetwork.CHANNEL.sendToServer(new ShopMembershipBuyPacket(i));
                 return true;
             }
         }
+        return false;
+    }
+
+    private boolean clickBank(double mx, double my) {
+        int cx = contentX();
+        int cw = contentW();
         long[] steps = {1000L, 10000L, 100000L, 1000000L};
         int sbw = (cw - 9) / 4;
         for (int i = 0; i < 4; i++) {
-            int bx = cx + i * (sbw + 3);
-            if (GuiRenderUtil.isHovering(mx, my, bx, bankStepY(), sbw, 12)) {
+            if (GuiRenderUtil.isHovering(mx, my, cx + i * (sbw + 3), bankStepY(), sbw, 12)) {
                 amount = addClamp(amount, steps[i]);
                 syncBox();
                 return true;
@@ -243,11 +306,13 @@ public class ShopMembershipScreen extends ScaledScreen {
         if (GuiRenderUtil.isHovering(mx, my, cx + (bbw + 4), bankButtonsY(), bbw, 14)) { send(ShopBankActionPacket.Op.WITHDRAW); return true; }
         if (GuiRenderUtil.isHovering(mx, my, cx + (bbw + 4) * 2, bankButtonsY(), bbw, 14)) { send(ShopBankActionPacket.Op.BORROW); return true; }
         if (GuiRenderUtil.isHovering(mx, my, cx + (bbw + 4) * 3, bankButtonsY(), bbw, 14)) { send(ShopBankActionPacket.Op.REPAY); return true; }
-        return super.universalMouseClicked(mx, my, btn);
+        int allW = (cw - 8) / 3;
+        if (GuiRenderUtil.isHovering(mx, my, cx, bankAllY(), allW, 14)) { send(ShopBankActionPacket.Op.DEPOSIT_ALL); return true; }
+        if (GuiRenderUtil.isHovering(mx, my, cx + allW + 4, bankAllY(), allW, 14)) { send(ShopBankActionPacket.Op.WITHDRAW_ALL); return true; }
+        if (GuiRenderUtil.isHovering(mx, my, cx + (allW + 4) * 2, bankAllY(), allW, 14)) { send(ShopBankActionPacket.Op.REPAY_ALL); return true; }
+        return false;
     }
 
-    // 存/取/借/还都是非幂等的资金操作且点击后不关屏：300ms 内的第二次点击按误触双击吞掉，
-    // 防止手滑一次双击变成两笔交易（借两倍款）；正常连续操作不受影响
     private long lastMoneySendAtMs;
 
     private void send(ShopBankActionPacket.Op op) {
@@ -273,17 +338,47 @@ public class ShopMembershipScreen extends ScaledScreen {
         g.drawCenteredString(this.font, label, x + w / 2, y + (h - 8) / 2, WHITE);
     }
 
-    private static String formatBig(BigInteger v) {
+    private String fitSpark(String text, int maxPx) {
+        if (maxPx <= 0 || this.font.width(text) <= maxPx) return text;
+        return formatSci(ClientWalletAccount.getDigital());
+    }
+
+    private static String rateHint(ClientShopBank.Snapshot bank) {
+        if (bank == null) return "§8利率查询中… 欠款无强制追讨，还款先冲利息";
+        return "§8存款 " + rateText(bank.depositRateBp) + " · 贷款 " + rateText(bank.loanRateBp)
+                + " · 还息优先 · 无强制追讨";
+    }
+
+    /** 基点转百分比。5 → 0.05%/小时，15 → 0.15%/小时。 */
+    private static String rateText(int bp) {
+        int safe = Math.max(0, bp);
+        int whole = safe / 100;
+        int frac = safe % 100;
+        if (frac == 0) return whole + "%/小时";
+        if (frac % 10 == 0) return whole + "." + (frac / 10) + "%/小时";
+        String tail = frac < 10 ? "0" + frac : Integer.toString(frac);
+        return whole + "." + tail + "%/小时";
+    }
+
+    private static String formatExact(BigInteger v) {
         if (v == null || v.signum() <= 0) return "0";
-        if (v.bitLength() < 63) {
-            long n = v.longValue();
-            if (n >= 1_000_000_000_000L) return (n / 1_000_000_000_000L) + "T+";
-            if (n >= 1_000_000_000L) return (n / 1_000_000_000L) + "B+";
-            if (n >= 1_000_000L) return (n / 1_000_000L) + "M+";
-            if (n >= 1_000L) return (n / 1_000L) + "K+";
-            return String.valueOf(n);
-        }
         String s = v.toString();
-        return s.charAt(0) + "." + s.substring(1, Math.min(3, s.length())) + "e" + (s.length() - 1);
+        if (s.length() > 24) return formatSci(v);
+        StringBuilder out = new StringBuilder();
+        int lead = s.length() % 3;
+        if (lead == 0) lead = 3;
+        out.append(s, 0, lead);
+        for (int i = lead; i < s.length(); i += 3) {
+            out.append(',');
+            out.append(s, i, i + 3);
+        }
+        return out.toString();
+    }
+
+    private static String formatSci(BigInteger v) {
+        if (v == null || v.signum() <= 0) return "0";
+        String s = v.toString();
+        if (s.length() <= 3) return s;
+        return s.charAt(0) + "." + s.substring(1, 3) + "e" + (s.length() - 1);
     }
 }

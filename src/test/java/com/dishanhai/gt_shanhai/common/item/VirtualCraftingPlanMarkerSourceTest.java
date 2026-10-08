@@ -25,7 +25,9 @@ class VirtualCraftingPlanMarkerSourceTest {
         assertTrue(Files.exists(COMMON_MIXIN), "需要服务端计划标记和网络同步 Mixin");
         String source = Files.readString(COMMON_MIXIN);
 
-        assertTrue(source.contains("VirtualPatternEncodingHelper.collectPresenceRequirements(job)"),
+        assertTrue(source.contains("GraphSummaryContext.graphPlan(job)"),
+                "GTLCore 图计划替换 fromJob 参数后，必须回读真正的 AeGraphPlan");
+        assertTrue(source.contains("VirtualPatternEncodingHelper.collectPresenceRequirements(presencePlan)"),
                 "虚拟标识必须来自计划中的 PresenceInput，不能按物品 ID 猜测");
         assertTrue(source.contains("requirements.containsKey(entry.getWhat())"));
         assertTrue(source.contains("buffer.writeBoolean(gtShanhai$virtualPresence)"),
@@ -43,6 +45,8 @@ class VirtualCraftingPlanMarkerSourceTest {
 
         assertTrue(source.contains("method = \"getEntryDescription\""),
                 "计划表格中必须直接显示虚拟标识");
+        assertTrue(source.contains("gui.gt_shanhai.crafting_plan.cycle_demoted"),
+                "回环让位必须写在被替换产物的格子上，和虚拟在场同一条描述");
         assertTrue(source.contains("method = \"getEntryTooltip\""),
                 "悬浮说明必须解释虚拟物品不会消耗");
         assertTrue(source.contains("ChatFormatting.LIGHT_PURPLE"));
@@ -51,6 +55,7 @@ class VirtualCraftingPlanMarkerSourceTest {
         assertTrue(config.contains("CraftConfirmTableRendererVirtualMarkerMixin"));
         assertTrue(lang.contains("gui.gt_shanhai.crafting_plan.virtual_presence"));
         assertTrue(lang.contains("gui.gt_shanhai.crafting_plan.virtual_presence.detail"));
+        assertTrue(lang.contains("已跳过回环样板，缺失来自下一张可运行样板"));
     }
 
     @Test
