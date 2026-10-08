@@ -62,6 +62,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     String eutText = "0";
     String recipeIdText = "";
     boolean keepOriginal;
+    /** Blank draft. Commit adds a recipe and does not replace or remove one. */
+    boolean creating;
     String conditionPick = "";
     JsonElement conditionDraft;
     int editingCondition = -1;
@@ -383,8 +385,48 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         };
     }
 
+    void beginCreate() {
+        if (!isClient()) return;
+        String type = typeFilter == null ? "" : typeFilter.trim();
+        if (net.minecraft.resources.ResourceLocation.tryParse(type) == null) {
+            setStatus("§c先选择配方类型，再添加配方");
+            return;
+        }
+        creating = true;
+        keepOriginal = true;
+        selectedCard = null;
+        jsBlastTemp = -1;
+        selectedBase = new ShanhaiRecipeBase(
+                type, type, 100, 0L, new JsonObject(), new JsonObject(), new JsonObject(), new JsonArray());
+        durationText = "100";
+        eutText = "0";
+        recipeIdText = "";
+        conditionPick = "";
+        conditionDraft = null;
+        editingCondition = -1;
+        conditionEdits = new JsonArray();
+        panel.refreshConditions();
+        panel.refreshParameters();
+        inputPage = 0;
+        outputPage = 0;
+        inputItemPage = 0;
+        inputFluidPage = 0;
+        outputItemPage = 0;
+        outputFluidPage = 0;
+        selectedIo = -1;
+        chanceText = "100";
+        countText = "1";
+        ioTable = ShanhaiIoTable.fromJson(new JsonObject(), new JsonObject());
+        panel.bindTable(ioTable);
+        panel.closeQueryHistory();
+        seedEditHistory();
+        setStage(STAGE_EDIT, true);
+        setStatus("§a新建配方：填写 命名空间:路径，再编辑输入输出。不会改动已有配方");
+    }
+
     void requestDetail(ShanhaiRecipeQuery.Card card) {
         if (!isClient() || card == null) return;
+        creating = false;
         keepOriginal = false;
         selectedCard = card;
         flushDraftSave();
@@ -407,6 +449,26 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             long eut = Long.parseLong(eutText.trim());
             JsonObject inputs = ioTable.json("inputs");
             JsonObject outputs = ioTable.json("outputs");
+            if (creating) {
+                net.minecraft.resources.ResourceLocation createdId =
+                        RecipeEditorExportPacket.exportLocation(recipeIdText, "");
+                if (createdId == null) {
+                    setStatus("§c填写新配方 id，使用小写的 命名空间:路径");
+                    return;
+                }
+                ShanhaiRecipeBase created = new ShanhaiRecipeBase(
+                        selectedBase.recipeTypeId(), createdId.toString(), duration, eut,
+                        inputs, outputs, new JsonObject(), new JsonObject(), conditionEdits);
+                JsonObject payload = payloadWithConditionNote(created);
+                payload.addProperty("createNew", true);
+                payload.addProperty("liveRecipeId", createdId.toString());
+                ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorCommitPacket(
+                        created.recipeTypeId(), created.recipeId(),
+                        ShanhaiRecipeFingerprint.of(created), payload.toString()));
+                flushDraftSave();
+                setStatus("§e提交中：正在新增配方并重建索引…");
+                return;
+            }
             String liveRaw = recipeIdText == null || recipeIdText.isBlank()
                     ? selectedBase.recipeId() : recipeIdText.trim();
             if (RecipeEditorExportPacket.exportLocation(liveRaw, selectedBase.recipeId()) == null) {
@@ -436,10 +498,13 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         try {
             int duration = Math.max(1, Integer.parseInt(durationText.trim()));
             long eut = Long.parseLong(eutText.trim());
-            net.minecraft.resources.ResourceLocation exportId =
-                    RecipeEditorExportPacket.exportLocation(recipeIdText, selectedBase.recipeId());
+            net.minecraft.resources.ResourceLocation exportId = creating
+                    ? RecipeEditorExportPacket.exportLocation(recipeIdText, "")
+                    : RecipeEditorExportPacket.exportLocation(recipeIdText, selectedBase.recipeId());
             if (exportId == null) {
-                setStatus("§c配方 id 不合法，使用小写的 命名空间:路径");
+                setStatus(creating
+                        ? "§c填写新配方 id，使用小写的 命名空间:路径"
+                        : "§c配方 id 不合法，使用小写的 命名空间:路径");
                 return;
             }
             ShanhaiRecipeClipboard.copy(ShanhaiRecipeJsExport.format(
@@ -456,19 +521,28 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         try {
             int duration = Math.max(1, Integer.parseInt(durationText.trim()));
             long eut = Long.parseLong(eutText.trim());
-            if (RecipeEditorExportPacket.exportLocation(recipeIdText, selectedBase.recipeId()) == null) {
-                setStatus("§c配方 id 不合法，使用小写的 命名空间:路径");
+            net.minecraft.resources.ResourceLocation exportId = creating
+                    ? RecipeEditorExportPacket.exportLocation(recipeIdText, "")
+                    : RecipeEditorExportPacket.exportLocation(recipeIdText, selectedBase.recipeId());
+            if (exportId == null) {
+                setStatus(creating
+                        ? "§c填写新配方 id，使用小写的 命名空间:路径"
+                        : "§c配方 id 不合法，使用小写的 命名空间:路径");
                 return;
             }
             JsonObject inputs = ioTable.json("inputs");
             JsonObject outputs = ioTable.json("outputs");
+            String sourceId = creating ? exportId.toString() : selectedBase.recipeId();
             ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
-                    selectedBase.recipeTypeId(), selectedBase.recipeId(), duration, eut,
-                    inputs, outputs, selectedBase.tickInputs(),
-                    selectedBase.tickOutputs(), conditionEdits);
+                    selectedBase.recipeTypeId(), sourceId, duration, eut,
+                    inputs, outputs,
+                    creating ? new JsonObject() : selectedBase.tickInputs(),
+                    creating ? new JsonObject() : selectedBase.tickOutputs(),
+                    conditionEdits);
+            JsonObject payload = payloadWithConditionNote(edited);
+            if (creating) payload.addProperty("createNew", true);
             ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorExportPacket(
-                    edited.recipeTypeId(), selectedBase.recipeId(), recipeIdText.trim(),
-                    payloadWithConditionNote(edited).toString()));
+                    edited.recipeTypeId(), sourceId, exportId.toString(), payload.toString()));
             setStatus("§e正在导出配方 json…");
         } catch (RuntimeException invalid) {
             setStatus("§c耗时或 EU/t 不是整数");
@@ -480,15 +554,26 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         try {
             int duration = Math.max(1, Integer.parseInt(durationText.trim()));
             long eut = Long.parseLong(eutText.trim());
+            net.minecraft.resources.ResourceLocation patternId = creating
+                    ? RecipeEditorExportPacket.exportLocation(recipeIdText, "")
+                    : RecipeEditorExportPacket.exportLocation(recipeIdText, selectedBase.recipeId());
+            if (creating && patternId == null) {
+                setStatus("§c填写新配方 id，使用小写的 命名空间:路径");
+                return;
+            }
+            String sourceId = creating ? patternId.toString() : selectedBase.recipeId();
             JsonObject inputs = ioTable.json("inputs");
             JsonObject outputs = ioTable.json("outputs");
             ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
-                    selectedBase.recipeTypeId(), selectedBase.recipeId(), duration, eut,
-                    inputs, outputs, selectedBase.tickInputs(),
-                    selectedBase.tickOutputs(), conditionEdits);
+                    selectedBase.recipeTypeId(), sourceId, duration, eut,
+                    inputs, outputs,
+                    creating ? new JsonObject() : selectedBase.tickInputs(),
+                    creating ? new JsonObject() : selectedBase.tickOutputs(),
+                    conditionEdits);
+            JsonObject payload = payloadWithConditionNote(edited);
+            if (creating) payload.addProperty("createNew", true);
             ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorEncodePacket(
-                    edited.recipeTypeId(), selectedBase.recipeId(),
-                    payloadWithConditionNote(edited).toString()));
+                    edited.recipeTypeId(), sourceId, payload.toString()));
             setStatus("§e正在按当前审核稿编写样板…");
         } catch (RuntimeException invalid) {
             setStatus("§c耗时或 EU/t 不是整数");
@@ -548,6 +633,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     }
 
     void toggleKeepOriginal() {
+        if (creating) return;
         keepOriginal = !keepOriginal;
         if (!isClient()) return;
         setStatus(keepOriginal
@@ -561,8 +647,34 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     }
 
     String keepOriginalHint() {
+        if (creating) return "§7不会移除或覆盖已有配方";
         if (keepOriginal) return "§7新 id 与原配方同时留下";
         return "§7JEI 和机器里只留修改后的";
+    }
+
+    String reviewBanner() {
+        if (creating) return "§e全新配方。提交后只增加，不改动已有配方";
+        return "§e提交前核对。服务端会重算指纹并重建配方表";
+    }
+
+    String reviewIdLine() {
+        if (selectedBase == null) return "§8没有待审核草稿";
+        if (!creating) return "§7配方 §f" + compact(selectedBase.recipeId(), 42);
+        String id = recipeIdText == null ? "" : recipeIdText.trim();
+        return id.isEmpty() ? "§e新建配方，尚未填写 id" : "§7新配方 §f" + compact(id, 42);
+    }
+
+    String reviewButtonFace() {
+        return creating ? "去新增审核" : "去差异审核";
+    }
+
+    String commitFace() {
+        return creating ? "提交新配方" : "提交并刷新 JEI";
+    }
+
+    String codecHint() {
+        if (creating) return "§7格子、耗时、EU/t 和条件都会写入新配方";
+        return "§7条件与未改动的格子保持原 codec";
     }
 
     void setRecipeIdText(String value) {
@@ -698,7 +810,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         if (!now.same(editHistory.get(editHistory.size() - 1))) editHistory.add(now);
         applyEdit(origin);
         lastEditKind = "restore";
-        setStatus("§a已还原为打开时的配方");
+        setStatus(creating ? "§a已清空为刚打开的空白配方" : "§a已还原为打开时的配方");
         flushDraftSave();
     }
 
@@ -1000,6 +1112,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     String fingerprintLine() {
         if (selectedBase == null) return "§7指纹：—";
+        if (creating) return "§7全新配方，不对照旧指纹";
         return "§7打开时指纹 §f" + compact(ShanhaiRecipeFingerprint.of(selectedBase), 28);
     }
 
@@ -1010,6 +1123,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     String durationDiffLine() {
         if (selectedBase == null) return "§7耗时：—";
+        if (creating) return "§7耗时 §f" + (durationText == null ? "" : durationText.trim());
         String before = Integer.toString(selectedBase.duration());
         String after = durationText == null ? "" : durationText.trim();
         if (before.equals(after)) return "§7耗时 §f" + before + " §8未改";
@@ -1018,6 +1132,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     String eutDiffLine() {
         if (selectedBase == null) return "§7EU/t：—";
+        if (creating) return "§7EU/t §f" + (eutText == null ? "" : eutText.trim());
         String before = Long.toString(selectedBase.eut());
         String after = eutText == null ? "" : eutText.trim();
         if (before.equals(after)) return "§7EU/t §f" + before + " §8未改";
@@ -1099,6 +1214,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 && packet.message() != null && packet.message().contains("rebuilt")) {
             ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorDraftRequestPacket(
                     RecipeEditorDraftRequestPacket.Action.CLEAR, null));
+            creating = false;
             selectedBase = null;
             selectedCard = null;
             editHistory.clear();
@@ -1392,6 +1508,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             draft.putString("eutText", eutText);
             draft.putString("recipeIdText", recipeIdText);
             draft.putBoolean("keepOriginal", keepOriginal);
+            draft.putBoolean("creating", creating);
             draft.putString("conditionEdits", conditionEdits.toString());
             draft.putString("draftInputs", editableTable(selectedBase.inputs(), ioTable.json("inputs")).toString());
             draft.putString("draftOutputs", editableTable(selectedBase.outputs(), ioTable.json("outputs")).toString());
@@ -1418,6 +1535,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         if (draft == null || draft.isEmpty()) return;
 
         restoringDraft = true;
+        creating = draft.getBoolean("creating");
         try {
             machineStack = draft.contains("machine", CompoundTag.TAG_COMPOUND)
                     ? ItemStack.of(draft.getCompound("machine")) : ItemStack.EMPTY;
@@ -1481,7 +1599,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 panel.bindTable(ioTable);
                 seedEditHistory();
                 String fingerprint = draft.getString("baseFingerprint");
-                if (!fingerprint.isEmpty()) {
+                if (!creating && !fingerprint.isEmpty()) {
                     selectedCard = new ShanhaiRecipeQuery.Card(
                             selectedBase.recipeTypeId(), selectedBase.recipeId(),
                             selectedBase.duration(), selectedBase.eut(), fingerprint);
@@ -1506,6 +1624,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             setStatus(selectedBase == null && selectedCard == null
                     ? "§7草稿已恢复" : "§a已恢复未提交的配方编辑进度");
         } catch (RuntimeException invalid) {
+            creating = false;
             setStatus("§c编辑草稿无法解析，已回到查询页");
             stage = STAGE_SELECT;
             fromStage = STAGE_SELECT;

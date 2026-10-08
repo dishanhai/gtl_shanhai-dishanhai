@@ -84,6 +84,25 @@ public final class RecipeEditorCommitPacket {
                     ? json.getAsJsonObject("inputs") : new JsonObject();
             JsonObject outputs = json.has("outputs") && json.get("outputs").isJsonObject()
                     ? json.getAsJsonObject("outputs") : new JsonObject();
+            boolean createNew = json.has("createNew")
+                    && json.get("createNew").isJsonPrimitive()
+                    && json.get("createNew").getAsBoolean();
+            if (createNew) {
+                player.sendSystemMessage(Component.literal(
+                        "§b[配方修改器] §a已新增配方并重建\n"
+                                + "§7配方：§f" + packet.recipeId
+                                + "  §7类型：§f" + packet.recipeTypeId + "\n"
+                                + "§7未改动已有配方\n"
+                                + "§7耗时：§f" + json.get("duration").getAsInt() + " tick"
+                                + "  §7EU/t：§f" + json.get("eut").getAsLong() + "\n"
+                                + "§7物品输入 §f" + arraySize(inputs, "item")
+                                + "  §7流体输入 §f" + arraySize(inputs, "fluid")
+                                + "  §7物品输出 §f" + arraySize(outputs, "item")
+                                + "  §7流体输出 §f" + arraySize(outputs, "fluid") + "\n"
+                                + (result.payload().isEmpty() ? "" : result.payload() + "\n")
+                                + "§7GT 配方表与 JEI 刷新请求已发送"));
+                return;
+            }
             boolean keepOriginal = json.has("keepOriginal")
                     && json.get("keepOriginal").isJsonPrimitive()
                     && json.get("keepOriginal").getAsBoolean();
@@ -138,6 +157,10 @@ public final class RecipeEditorCommitPacket {
                     || !packet.recipeId.equals(json.get("recipeId").getAsString())) {
                 return invalid("recipe-identity-mismatch");
             }
+            boolean createNew = json.has("createNew")
+                    && json.get("createNew").isJsonPrimitive()
+                    && json.get("createNew").getAsBoolean();
+            if (createNew) return createNew(packet, json);
             var effective = RecipeRebuildService.editableOf(packet.recipeTypeId, packet.recipeId);
             ShanhaiRecipeBase original = effective == null ? null : ShanhaiRecipeBase.from(effective);
             if (original == null) return invalid("recipe-not-found");
@@ -177,6 +200,29 @@ public final class RecipeEditorCommitPacket {
             GTDishanhaiMod.LOGGER.warn("[配方编辑器] 拒绝非法提交包", e);
             return invalid("invalid-editor-payload");
         }
+    }
+
+    private static RecipeEditorResultPacket createNew(RecipeEditorCommitPacket packet, JsonObject json) {
+        String liveRaw = json.has("liveRecipeId") && json.get("liveRecipeId").isJsonPrimitive()
+                ? json.get("liveRecipeId").getAsString() : packet.recipeId;
+        ResourceLocation live = RecipeEditorExportPacket.exportLocation(liveRaw, packet.recipeId);
+        if (live == null || !live.toString().equals(packet.recipeId)) {
+            return invalid("配方 id 不合法");
+        }
+        ShanhaiRecipeBase base = ShanhaiRecipeBase.fromPayload(json);
+        String validation = ShanhaiRecipeEditorValidation.validateBase(base);
+        if (validation != null) return invalid(validation);
+        ShanhaiRecipeEditorOps ops = new ShanhaiRecipeEditorOps(
+                new ShanhaiRecipeOverrideStore(FMLPaths.GAMEDIR.get()
+                        .resolve("config/gt_shanhai/recipe_overrides.json")));
+        ShanhaiRecipeEditorOps.Result result = ops.create(
+                new ShanhaiRecipeEditorOps.Edit(base, packet.baseFingerprint),
+                net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer());
+        return new RecipeEditorResultPacket(
+                RecipeEditorResultPacket.Status.valueOf(result.status().name()),
+                result.message(),
+                result.revision(),
+                "");
     }
 
     private static RecipeEditorResultPacket invalid(String message) {

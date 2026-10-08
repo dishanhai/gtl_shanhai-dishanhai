@@ -40,10 +40,21 @@ public final class ShanhaiRecipeOverrideStore {
             String baseFingerprint,
             JsonObject payload,
             boolean keepOriginal,
-            String sourceRecipeId) {
+            String sourceRecipeId,
+            boolean created) {
 
         public Entry(String recipeTypeId, String recipeId, String baseFingerprint, JsonObject payload) {
-            this(recipeTypeId, recipeId, baseFingerprint, payload, false, recipeId);
+            this(recipeTypeId, recipeId, baseFingerprint, payload, false, recipeId, false);
+        }
+
+        public Entry(
+                String recipeTypeId,
+                String recipeId,
+                String baseFingerprint,
+                JsonObject payload,
+                boolean keepOriginal,
+                String sourceRecipeId) {
+            this(recipeTypeId, recipeId, baseFingerprint, payload, keepOriginal, sourceRecipeId, false);
         }
 
         public Entry {
@@ -138,6 +149,38 @@ public final class ShanhaiRecipeOverrideStore {
         }
         JsonObject entry = new JsonObject();
         entry.addProperty("recipeId", base.recipeId());
+        entry.addProperty("recipeTypeId", base.recipeTypeId());
+        entry.addProperty("baseFingerprint", fingerprint);
+        entry.addProperty("updatedBy", updatedBy == null ? "unknown" : updatedBy);
+        entry.addProperty("updatedAt", java.time.Instant.now().toString());
+        entry.add("payload", base.payloadJson());
+        kept.add(entry);
+        root.add("entries", kept);
+        writeRoot(root);
+    }
+
+    /**
+     * Writes a recipe that did not exist before. Same id replaces only another
+     * created entry. Nothing in the original snapshot is removed.
+     */
+    public void putCreated(ShanhaiRecipeBase base, String fingerprint, String updatedBy) throws IOException {
+        JsonObject root = loadRoot();
+        JsonArray kept = new JsonArray();
+        for (JsonElement element : root.getAsJsonArray("entries")) {
+            if (!element.isJsonObject()) {
+                kept.add(element);
+                continue;
+            }
+            JsonObject object = element.getAsJsonObject();
+            boolean sameId = base.recipeId().equals(string(object, "recipeId", ""));
+            boolean sameType = base.recipeTypeId().equals(storedType(object));
+            if (!(sameId && sameType)) kept.add(object);
+        }
+        JsonObject entry = new JsonObject();
+        entry.addProperty("recipeId", base.recipeId());
+        entry.addProperty("sourceRecipeId", base.recipeId());
+        entry.addProperty("keepOriginal", true);
+        entry.addProperty("created", true);
         entry.addProperty("recipeTypeId", base.recipeTypeId());
         entry.addProperty("baseFingerprint", fingerprint);
         entry.addProperty("updatedBy", updatedBy == null ? "unknown" : updatedBy);
@@ -244,13 +287,17 @@ public final class ShanhaiRecipeOverrideStore {
         boolean keepOriginal = object.has("keepOriginal")
                 && object.get("keepOriginal").isJsonPrimitive()
                 && object.get("keepOriginal").getAsBoolean();
+        boolean created = object.has("created")
+                && object.get("created").isJsonPrimitive()
+                && object.get("created").getAsBoolean();
         return new Entry(
                 storedType(object),
                 recipeId,
                 string(object, "baseFingerprint", ""),
                 payload,
                 keepOriginal,
-                source);
+                source,
+                created);
     }
 
     private static String string(JsonObject object, String key, String fallback) {

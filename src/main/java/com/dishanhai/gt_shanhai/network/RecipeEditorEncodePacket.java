@@ -81,13 +81,21 @@ public final class RecipeEditorEncodePacket {
             if (edited == null) return failed("invalid-editor-payload");
             String validation = ShanhaiRecipeEditorValidation.validateBase(edited);
             if (validation != null) return failed(validation);
-
-            GTRecipe snapshot = RecipeOriginalSnapshotStore.copyOf(packet.recipeTypeId, packet.sourceRecipeId);
-            if (snapshot == null) return failed("recipe-not-found");
-            GTRecipe original = RecipeRebuildService.buildCanonical(packet.recipeTypeId, snapshot);
-            if (original == null) return failed("recipe-not-found");
-            GTRecipe recipe = edited.toGtRecipe(original);
-            if (recipe == null) return failed("recipe-not-found");
+            boolean createNew = json.has("createNew")
+                    && json.get("createNew").isJsonPrimitive()
+                    && json.get("createNew").getAsBoolean();
+            GTRecipe recipe;
+            if (createNew) {
+                recipe = RecipeRebuildService.materializeFresh(packet.recipeTypeId, edited);
+                if (recipe == null) return failed("invalid-recipe-type");
+            } else {
+                GTRecipe snapshot = RecipeOriginalSnapshotStore.copyOf(packet.recipeTypeId, packet.sourceRecipeId);
+                if (snapshot == null) return failed("recipe-not-found");
+                GTRecipe original = RecipeRebuildService.buildCanonical(packet.recipeTypeId, snapshot);
+                if (original == null) return failed("recipe-not-found");
+                recipe = edited.toGtRecipe(original);
+                if (recipe == null) return failed("recipe-not-found");
+            }
 
             boolean wrote = JeiPatternQuickEncodeService.encodeEdited(player, recipe);
             return wrote

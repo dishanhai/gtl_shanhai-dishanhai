@@ -148,17 +148,26 @@ public final class RecipeEditorExportPacket {
             ShanhaiRecipeBase edited = ShanhaiRecipeBase.fromPayload(json);
             String validation = ShanhaiRecipeEditorValidation.validateBase(edited);
             if (validation != null) return invalid(validation);
-
-            GTRecipe snapshot = RecipeOriginalSnapshotStore.copyOf(packet.recipeTypeId, packet.sourceRecipeId);
-            if (snapshot == null) return invalid("recipe-not-found");
-            GTRecipe original = RecipeRebuildService.buildCanonical(packet.recipeTypeId, snapshot);
-            if (original == null) return invalid("recipe-not-found");
-            String conditionDiff = conditionNote.isEmpty()
-                    ? ShanhaiRecipeConditions.diffLine(
-                            ShanhaiRecipeBase.from(original).conditions(), edited.conditions())
-                    : conditionNote;
-            GTRecipe recipe = edited.toGtRecipe(original);
-            if (recipe == null) return invalid("recipe-not-found");
+            boolean createNew = json.has("createNew")
+                    && json.get("createNew").isJsonPrimitive()
+                    && json.get("createNew").getAsBoolean();
+            GTRecipe recipe;
+            String conditionDiff = conditionNote;
+            if (createNew) {
+                recipe = RecipeRebuildService.materializeFresh(packet.recipeTypeId, edited);
+                if (recipe == null) return invalid("invalid-recipe-type");
+            } else {
+                GTRecipe snapshot = RecipeOriginalSnapshotStore.copyOf(packet.recipeTypeId, packet.sourceRecipeId);
+                if (snapshot == null) return invalid("recipe-not-found");
+                GTRecipe original = RecipeRebuildService.buildCanonical(packet.recipeTypeId, snapshot);
+                if (original == null) return invalid("recipe-not-found");
+                if (conditionNote.isEmpty()) {
+                    conditionDiff = ShanhaiRecipeConditions.diffLine(
+                            ShanhaiRecipeBase.from(original).conditions(), edited.conditions());
+                }
+                recipe = edited.toGtRecipe(original);
+                if (recipe == null) return invalid("recipe-not-found");
+            }
 
             JsonElement encoded = GTRecipeSerializer.CODEC.encodeStart(JsonOps.INSTANCE, recipe)
                     .getOrThrow(false, GTDishanhaiMod.LOGGER::warn);

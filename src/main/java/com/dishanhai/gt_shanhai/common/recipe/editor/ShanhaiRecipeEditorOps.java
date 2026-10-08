@@ -56,6 +56,51 @@ public final class ShanhaiRecipeEditorOps {
     }
 
     /**
+     * Adds a recipe that has no original. Rejects an id that already exists.
+     */
+    public Result create(Edit edit, MinecraftServer server) {
+        String validation = validationError(edit);
+        if (validation != null) {
+            return new Result(Result.Status.VALIDATION_ERROR, validation, REVISION.get());
+        }
+        String id = edit.base().recipeId();
+        if (liveIdTaken(id)) {
+            return new Result(Result.Status.VALIDATION_ERROR, "这个配方 id 已经存在", REVISION.get());
+        }
+        if (com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES.get(
+                ResourceLocation.tryParse(edit.base().recipeTypeId())) == null) {
+            return new Result(Result.Status.VALIDATION_ERROR, "invalid-recipe-type", REVISION.get());
+        }
+        try {
+            store.putCreated(edit.base(), edit.baseFingerprint(), "shanhai-recipe-editor");
+        } catch (Exception e) {
+            return new Result(Result.Status.REBUILD_FAILED, "override-write-failed", REVISION.get());
+        }
+        if (server == null) {
+            return new Result(Result.Status.SUCCESS, "recipe-created", REVISION.incrementAndGet());
+        }
+        try {
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
+                    edit.base().recipeTypeId(),
+                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            RecipeRebuildService.rebuildVanillaManager(
+                    server, java.util.Set.of(edit.base().recipeTypeId()));
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
+                    edit.base().recipeTypeId(), id);
+            return new Result(Result.Status.SUCCESS, "recipe-created-and-rebuilt", report.revision());
+        } catch (Throwable t) {
+            return new Result(Result.Status.REBUILD_FAILED, "override-written-rebuild-failed", REVISION.get());
+        }
+    }
+
+    private static ShanhaiRecipeBase withRecipeId(ShanhaiRecipeBase base, String recipeId) {
+        return new ShanhaiRecipeBase(
+                base.recipeTypeId(), recipeId, base.duration(), base.eut(),
+                base.inputs(), base.outputs(), base.tickInputs(), base.tickOutputs(),
+                base.conditions(), base.blastTemp());
+    }
+
+    /**
      * {@code keepOriginal} false replaces or removes the opened recipe.
      * True keeps it and writes {@code liveRecipeId} beside it.
      * A null or equal live id keeps the opened id, which is the in-place replace.
@@ -113,15 +158,22 @@ public final class ShanhaiRecipeEditorOps {
         boolean openedAddition = existing
                 .filter(entry -> !entry.sourceRecipeId().equals(entry.recipeId()))
                 .isPresent();
+        boolean openedCreated = existing.map(ShanhaiRecipeOverrideStore.Entry::created).orElse(false);
         String upstream = openedAddition ? existing.get().sourceRecipeId() : opened;
-        if (keepOriginal && live.equals(upstream)) {
+        if (keepOriginal && live.equals(upstream) && !openedCreated) {
             return new Result(Result.Status.VALIDATION_ERROR, "共存需要新的配方 id", REVISION.get());
         }
         if (!live.equals(opened) && liveIdTaken(live)) {
             return new Result(Result.Status.VALIDATION_ERROR, "这个配方 id 已经存在", REVISION.get());
         }
         try {
-            if (!keepOriginal && live.equals(opened) && !openedAddition) {
+            if (openedCreated) {
+                ShanhaiRecipeBase written = live.equals(opened) ? edit.base() : withRecipeId(edit.base(), live);
+                store.putCreated(written, edit.baseFingerprint(), "shanhai-recipe-editor");
+                if (!keepOriginal && !live.equals(opened)) {
+                    store.remove(edit.base().recipeTypeId(), opened);
+                }
+            } else if (!keepOriginal && live.equals(opened) && !openedAddition) {
                 store.put(edit.base(), edit.baseFingerprint(), "shanhai-recipe-editor");
             } else {
                 store.putLinked(edit.base(), edit.baseFingerprint(), live, upstream,

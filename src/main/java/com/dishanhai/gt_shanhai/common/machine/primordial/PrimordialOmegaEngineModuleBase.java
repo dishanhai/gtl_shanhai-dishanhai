@@ -958,20 +958,18 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             return "§8空";
         }
         String itemId = extraMountItemId(stack);
-        int count = stack.getCount();
-        String amount = count > 1 ? " §8×" + count : "";
         if (DARK_ENERGY_MULTIPLIER_ID.equals(itemId)) {
-            return "§b暗能量 §7EU -50%" + amount;
+            return "§bEU -50%";
         }
         if (ANNIHILATION_CORE_ID.equals(itemId)) {
-            return "§c湮灭核心 §7耗时 -90%" + amount;
+            return "§c耗时 -90%";
         }
         if (HYPERSTABLE_BLACK_HOLE_SEED_ID.equals(itemId)) {
-            return "§d黑洞种子 §7吞噬溢出" + amount;
+            return "§d吞噬溢出";
         }
         ShanhaiHeatGate.SlotContent content = ShanhaiHeatSources.slotContentOf(stack);
         if (content.allData) {
-            return "§d万象原核 §a一个全满足";
+            return "§a全满足";
         }
         if (content.isBlank()) {
             return "§c无效挂载";
@@ -986,11 +984,17 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     private static String extraMountCapabilityLine(ShanhaiHeatGate.SlotContent content) {
         StringBuilder line = new StringBuilder();
-        if (content.coilTemperature > 0) {
-            appendMountPart(line, heatAmountText("线圈 " + content.coilTemperature + "K", content.count));
-        }
-        if (content.containmentTier > 0) {
-            appendMountPart(line, heatAmountText("恒星容器 " + content.containmentTier + "级", content.count));
+        if (content.coilTemperature > 0 || content.containmentTier > 0) {
+            if (content.count >= ShanhaiHeatGate.REQUIRED_COUNT) {
+                if (content.coilTemperature > 0) {
+                    appendMountPart(line, "§a" + compactKelvin(content.coilTemperature));
+                }
+                if (content.containmentTier > 0) {
+                    appendMountPart(line, "§a" + content.containmentTier + "级");
+                }
+            } else {
+                appendMountPart(line, "§e" + content.count + "/" + ShanhaiHeatGate.REQUIRED_COUNT);
+            }
         }
         if (content.cleanroomTier > 0) {
             appendMountPart(line, "§a" + cleanroomLabel(content.cleanroomTier));
@@ -1002,16 +1006,28 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             appendMountPart(line, "§e研究 §8不检查");
         }
         if (!content.dimensions.isEmpty()) {
-            appendMountPart(line, "§a维度 " + shortDimensionName(content.dimensions.iterator().next()));
+            appendMountPart(line, "§a" + fitCardText(shortDimensionName(content.dimensions.iterator().next())));
         }
         return line.length() == 0 ? "§c无效挂载" : line.toString();
     }
 
-    private static String heatAmountText(String name, int count) {
-        if (count >= ShanhaiHeatGate.REQUIRED_COUNT) {
-            return "§a" + name + " §7已满";
+    /** 半宽卡片大约只能放 58 像素。满格用绿色短名，未满只留数量。 */
+    private static String compactKelvin(int kelvin) {
+        if (kelvin >= 10000 && kelvin % 1000 == 0) {
+            int tenths = kelvin / 1000;
+            if (tenths % 10 == 0) {
+                return (tenths / 10) + "万K";
+            }
+            return (tenths / 10) + "." + (tenths % 10) + "万K";
         }
-        return "§e" + name + " §7" + count + "/" + ShanhaiHeatGate.REQUIRED_COUNT;
+        return kelvin + "K";
+    }
+
+    private static String fitCardText(String text) {
+        if (text.length() <= 8) {
+            return text;
+        }
+        return text.substring(0, 7) + "…";
     }
 
     private static void appendMountPart(StringBuilder line, String part) {
@@ -1041,6 +1057,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         return new Component[] {
                 Component.literal("§b§l额外挂载槽 " + (index + 1)),
                 Component.literal("§7状态在槽位右侧，换物品后立即更新"),
+                Component.literal("§7万象原核：同时满足炉温、恒星热力容器、超净间、重力和任意维度"),
                 Component.literal("§7维护仓：超净间 / 重力，放 1 个即可"),
                 Component.literal("§7世界碎片：对应维度，放 1 个即可"),
                 Component.literal("§7研究/数据访问不参与正常限制"),

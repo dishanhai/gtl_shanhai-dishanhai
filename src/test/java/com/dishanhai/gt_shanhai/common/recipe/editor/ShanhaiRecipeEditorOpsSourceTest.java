@@ -39,4 +39,21 @@ class ShanhaiRecipeEditorOpsSourceTest {
         assertTrue(entry.keepOriginal());
         assertTrue(store.find("gtceu:assembler", "gtceu:foo").isEmpty());
     }
+
+    @Test
+    void createdEntryRoundTripsWithoutASourceRecipe() throws Exception {
+        Path file = Files.createTempFile("shanhai-recipe-created", ".json");
+        Files.delete(file);
+        ShanhaiRecipeOverrideStore store = new ShanhaiRecipeOverrideStore(file);
+        ShanhaiRecipeBase opened = ShanhaiRecipeBase.simple(
+                "gtceu:assembler", "gt_shanhai:brand_new", 100, 32L, 1);
+
+        store.putCreated(opened, "fp", "test");
+
+        ShanhaiRecipeOverrideStore.Entry entry = store.find(
+                "gtceu:assembler", "gt_shanhai:brand_new").orElseThrow();
+        assertTrue(entry.created());
+        assertEquals("gt_shanhai:brand_new", entry.sourceRecipeId());
+        assertTrue(entry.keepOriginal());
+    }
 }

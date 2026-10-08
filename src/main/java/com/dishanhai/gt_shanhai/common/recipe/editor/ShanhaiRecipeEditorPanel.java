@@ -58,6 +58,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private final int[] shownFluidOut = new int[FLUID_PAGE];
     private ShanhaiQuerySlotWidget querySlot;
     private ShanhaiRecipeHistoryWidget queryHistory;
+    private ButtonWidget keepToggle;
     private IoGrid inputItemGrid;
     private IoGrid inputFluidGrid;
     private IoGrid outputItemGrid;
@@ -308,6 +309,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         super.updateScreen();
         layoutMotion(ShanhaiRecipeEditorAnimation.nowMs());
         refreshIo();
+        if (keepToggle != null) keepToggle.setVisible(!host.creating);
     }
 
     @Override
@@ -388,6 +390,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
             if (host.ownedTypeCount > 0) line += " · 山海类型 " + host.ownedTypeCount + " 种";
             return line;
         }));
+        ButtonWidget addRecipe = button(340, 4, 156, 18, "配方添加", host::beginCreate);
+        addRecipe.setHoverTooltips("按当前配方类型新建一条配方。不修改、不移除已有配方");
+        selectPage.addWidget(addRecipe);
         selectPage.addWidget(textField(4, 54, 200, 18, () -> host.typeFilter,
                 value -> {
                     host.typeFilter = ShanhaiRecipeEditorWidget.limit(value);
@@ -493,14 +498,14 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         ButtonWidget jsExport = button(176, 256, 156, 18, "导出JS数组", host::copyJsArray);
         jsExport.setClientSideWidget();
         editPage.addWidget(jsExport);
-        editPage.addWidget(button(340, 256, 156, 18, "去差异审核",
-                () -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_REVIEW, true)));
+        editPage.addWidget(new ButtonWidget(340, 256, 156, 18,
+                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::reviewButtonFace)),
+                click -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_REVIEW, true)));
     }
 
     private void buildReviewPage() {
-        reviewPage.addWidget(new LabelWidget(4, 4, "§e提交前核对。服务端会重算指纹并重建配方表"));
-        reviewPage.addWidget(new LabelWidget(4, 28, () -> host.selectedBase == null
-                ? "§8没有待审核草稿" : "§7配方 §f" + host.compact(host.selectedBase.recipeId(), 42)));
+        reviewPage.addWidget(new LabelWidget(4, 4, host::reviewBanner));
+        reviewPage.addWidget(new LabelWidget(4, 28, host::reviewIdLine));
         reviewPage.addWidget(new LabelWidget(4, 118, () -> host.recipeIdText.isEmpty()
                 ? "" : "§7配方 id §f" + host.compact(host.recipeIdText, 32)));
         conditionList = new DraggableScrollableWidgetGroup(4, 134, 246, 108)
@@ -535,10 +540,11 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         reviewPage.addWidget(new LabelWidget(4, 100, host::conditionLine));
         reviewPage.addWidget(new LabelWidget(260, 28, host::durationDiffLine));
         reviewPage.addWidget(new LabelWidget(260, 52, host::eutDiffLine));
-        reviewPage.addWidget(new LabelWidget(260, 82, "§7条件与未改动的格子保持原 codec"));
-        reviewPage.addWidget(new ButtonWidget(260, 96, 88, 16,
+        reviewPage.addWidget(new LabelWidget(260, 82, host::codecHint));
+        keepToggle = new ButtonWidget(260, 96, 88, 16,
                 new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::keepOriginalFace)),
-                click -> host.toggleKeepOriginal()));
+                click -> host.toggleKeepOriginal());
+        reviewPage.addWidget(keepToggle);
         reviewPage.addWidget(new LabelWidget(352, 100, host::keepOriginalHint));
         ButtonWidget encodePattern = button(258, 220, 118, 18, "快速编写为样板", host::encodePattern);
         encodePattern.setHoverTooltips("按当前审核稿编码样板并上传。需要身上的无线终端，以及网络中的 1 张空白样板");
@@ -546,7 +552,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         reviewPage.addWidget(button(380, 220, 116, 18, "导出配方为json", host::exportJson));
         reviewPage.addWidget(button(4, 256, 150, 18, "返回图形编辑",
                 () -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_EDIT, true)));
-        reviewPage.addWidget(button(340, 256, 156, 18, "提交并刷新 JEI", host::commit));
+        reviewPage.addWidget(new ButtonWidget(340, 256, 156, 18,
+                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::commitFace)),
+                click -> host.commit()));
     }
 
     private IoGrid addGrid(List<ShanhaiIOWidget> into, int[] shown, int count,

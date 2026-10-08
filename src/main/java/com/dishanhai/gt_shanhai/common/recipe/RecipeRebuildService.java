@@ -8,10 +8,12 @@ import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorValidation;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore;
 import net.minecraftforge.fml.loading.FMLPaths;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -143,8 +145,38 @@ public final class RecipeRebuildService {
         if (snapshot != null) return buildCanonical(recipeTypeId, snapshot);
         ShanhaiRecipeOverrideStore.Entry entry =
                 defaultOverrideStore().entriesForType(recipeTypeId).get(recipeId);
-        if (entry == null || entry.sourceRecipeId().equals(entry.recipeId())) return null;
+        if (entry == null) return null;
+        if (entry.created()) return materializeCreated(recipeTypeId, entry);
+        if (entry.sourceRecipeId().equals(entry.recipeId())) return null;
         return materializeAddition(recipeTypeId, entry);
+    }
+
+    /** A recipe assembled only from an editor payload, with no snapshot template. */
+    public static GTRecipe materializeFresh(String recipeTypeId, ShanhaiRecipeBase base) {
+        if (base == null) return null;
+        GTRecipeType type = resolveType(recipeTypeId);
+        ResourceLocation id = ResourceLocation.tryParse(base.recipeId());
+        if (type == null || id == null) return null;
+        GTRecipe shell = new GTRecipe(
+                type,
+                id,
+                new HashMap<>(),
+                new HashMap<>(),
+                new HashMap<>(),
+                new HashMap<>(),
+                new HashMap<>(),
+                new HashMap<>(),
+                new HashMap<>(),
+                new HashMap<>(),
+                new ArrayList<>(),
+                new ArrayList<>(),
+                new CompoundTag(),
+                Math.max(1, base.duration()),
+                false);
+        GTRecipe edited = base.toGtRecipe(shell);
+        if (edited == null) return null;
+        edited.setId(id);
+        return edited;
     }
 
     private static List<GTRecipe> assemble(
@@ -175,13 +207,31 @@ public final class RecipeRebuildService {
         }
         for (ShanhaiRecipeOverrideStore.Entry entry : safe.values()) {
             if (entry == null || entry.recipeId().isEmpty() || ids.contains(entry.recipeId())) continue;
-            if (entry.sourceRecipeId().equals(entry.recipeId())) continue;
-            GTRecipe added = materializeAddition(recipeTypeId, entry);
+            GTRecipe added;
+            if (entry.created()) {
+                added = materializeCreated(recipeTypeId, entry);
+            } else if (entry.sourceRecipeId().equals(entry.recipeId())) {
+                continue;
+            } else {
+                added = materializeAddition(recipeTypeId, entry);
+            }
             if (added == null || added.getId() == null) continue;
             if (!ids.add(added.getId().toString())) continue;
             rebuilt.add(added);
         }
         return rebuilt;
+    }
+
+    private static GTRecipe materializeCreated(
+            String recipeTypeId, ShanhaiRecipeOverrideStore.Entry entry) {
+        ShanhaiRecipeBase override = ShanhaiRecipeBase.fromPayload(entry.payload());
+        if (override == null
+                || !recipeTypeId.equals(override.recipeTypeId())
+                || !entry.recipeId().equals(override.recipeId())
+                || ShanhaiRecipeEditorValidation.validateBase(override) != null) {
+            return null;
+        }
+        return materializeFresh(recipeTypeId, override);
     }
 
     private static GTRecipe materializeAddition(
