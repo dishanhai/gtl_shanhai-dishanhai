@@ -1354,6 +1354,10 @@ public class DShanhaiRecipeModifierAPI {
     public static final ThreadLocal<Boolean> SUPPRESS_LOOKUP_RECIPE_MODIFIERS =
             ThreadLocal.withInitial(() -> false);
 
+    /** 防止写回 lookup 时再次进入同一条重写。 */
+    private static final ThreadLocal<Boolean> REAPPLYING_LOOKUP_RULES =
+            ThreadLocal.withInitial(() -> false);
+
     /**
      * 用当前规则重建有规则的类型的模板。
      * 仅处理 STRIP_RULES + REPLACE_RULES 中出现的类型，不全量扫描缓存。
@@ -1686,10 +1690,30 @@ public class DShanhaiRecipeModifierAPI {
         loadReplaceRules();
         loadDeleteRules();
         loadActivePresets();
-        updateAllLookupRecipes();
-        applyAllReplaceRules();
-        com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+        reapplyPersistedLookupRules("command-reload");
         LOG.info("已从文件重新加载: 剥离={}, 替换={}, 删除={}", STRIP_RULES.size(), REPLACE_RULES.size(), DELETE_RULES.size());
+    }
+
+    /**
+     * 把已经在内存里的剥离/替换/删除/编辑覆盖写进 GTCEu lookup。
+     * JEI 会在读取时自行套规则，所以重开后界面仍是新配方；
+     * GTCEu 在 RecipeManager.apply 末尾会用数据包原配方重建 lookup，必须在那之后再写一次。
+     */
+    public static void reapplyPersistedLookupRules(String reason) {
+        if (REAPPLYING_LOOKUP_RULES.get()) return;
+        if (getRuntimeRuleTypeIds().isEmpty()
+                && com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.overrideTypeIds().isEmpty()) {
+            return;
+        }
+        REAPPLYING_LOOKUP_RULES.set(true);
+        try {
+            updateAllLookupRecipes();
+            applyAllReplaceRules();
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+            LOG.info("[ModAPI] 已把持久化规则写回 GTCEu 配方层 ({})", reason);
+        } finally {
+            REAPPLYING_LOOKUP_RULES.set(false);
+        }
     }
 
     /** 应用所有已持久化的替换规则（批量处理，一次重建配方表） */

@@ -129,4 +129,28 @@ class ShopBankTest {
         assertEquals(BigInteger.valueOf(12345L), roundTrip.getBankDebt());
         assertEquals(BigInteger.valueOf(80L), roundTrip.getBankDeposit());
     }
+
+    @Test
+    void overdueBlocksOnlyWhileDebtRemainsPastDue() {
+        BigInteger owed = BigInteger.valueOf(10L);
+        assertEquals(false, ShopBank.overdue(owed, T0 + HOUR, T0));
+        assertEquals(true, ShopBank.overdue(owed, T0, T0));
+        assertEquals(true, ShopBank.overdue(owed, T0, T0 + 1L));
+        assertEquals(false, ShopBank.overdue(BigInteger.ZERO, T0, T0 + HOUR));
+        assertEquals(T0 + 24 * HOUR, ShopBank.freshDue(T0, 24 * HOUR));
+    }
+
+    @Test
+    void missingDueTagLoadsAsZeroAndRoundTripsWhenSet() {
+        CompoundTag tag = new CompoundTag();
+        tag.putByteArray("bankDebt", BigInteger.valueOf(9L).toByteArray());
+        tag.putLong("bankDebtMs", 70L);
+        WalletAccount loaded = WalletAccount.load(tag);
+        assertEquals(0L, loaded.getBankDebtDueMs());
+
+        loaded.setBankDebtDueMs(T0 + HOUR);
+        WalletAccount roundTrip = WalletAccount.load(loaded.save());
+        assertEquals(T0 + HOUR, roundTrip.getBankDebtDueMs());
+        assertEquals(BigInteger.valueOf(9L), roundTrip.getBankDebt());
+    }
 }

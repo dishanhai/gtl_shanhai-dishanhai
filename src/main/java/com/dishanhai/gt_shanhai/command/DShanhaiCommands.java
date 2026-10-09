@@ -860,8 +860,13 @@ public class DShanhaiCommands {
         source.sendSuccess(msg("§7欠款利息: §c" + bank.debtInterest + " §7星火"), false);
         source.sendSuccess(msg("§7欠款合计: §c" + bank.debtTotal() + " §7星火"), false);
         source.sendSuccess(msg("§7可借: §e" + bank.loanRoom + " §7/ " + bank.maxLoan), false);
+        if (bank.debtTotal().signum() > 0) {
+            source.sendSuccess(msg(bank.overdue
+                    ? "§c状态: 已逾期，还清前不能再借"
+                    : "§7状态: 未逾期"), false);
+        }
         source.sendSuccess(msg(tier.isEmpty()
-                ? "§7会员: §8未购买 §7（前往「会员中心」购买解锁折扣）"
+                ? "§7会员: §8未购买 §7（前往「银会中心」购买解锁折扣）"
                 : "§7会员: §d[" + tier + " -" + pct + "%]"), false);
         return 1;
     }
@@ -905,9 +910,13 @@ public class DShanhaiCommands {
         java.math.BigInteger got = com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.bankBorrow(
                 source.getServer(), player.getUUID(), java.math.BigInteger.valueOf(amount));
         com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.sync(player);
+        boolean overdue = got.signum() <= 0 && com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI
+                .bankView(source.getServer(), player.getUUID()).overdue;
         source.sendSuccess(msg(got.signum() > 0
                 ? "§b[山海银行] §e已借出 §f" + got + " §e星火（持续计息，记得还款；已到欠款上限按上限封顶）"
-                : "§c已达欠款上限，无法再借"), false);
+                : overdue
+                        ? "§c欠款已逾期，还清前不能再借"
+                        : "§c已达欠款上限，无法再借"), false);
         return got.signum() > 0 ? 1 : 0;
     }
 

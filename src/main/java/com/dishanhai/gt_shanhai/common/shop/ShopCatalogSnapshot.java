@@ -20,7 +20,13 @@ public final class ShopCatalogSnapshot {
 
     public record Descriptor(String category, boolean hidden, String linkKey,
                              String displayName, List<String> goodsIds, int payloadBytes, String stableId,
-                             String prereqQuestId) {
+                             String prereqQuestId, List<String> goodsMatchKeys) {
+        public Descriptor(String category, boolean hidden, String linkKey,
+                          String displayName, List<String> goodsIds, int payloadBytes, String stableId,
+                          String prereqQuestId) {
+            this(category, hidden, linkKey, displayName, goodsIds, payloadBytes, stableId, prereqQuestId, List.of());
+        }
+
         public Descriptor {
             category = category == null || category.isBlank() ? ShopEntry.DEFAULT_CATEGORY : category;
             linkKey = linkKey == null ? "" : linkKey;
@@ -29,6 +35,7 @@ public final class ShopCatalogSnapshot {
             payloadBytes = Math.max(1, payloadBytes);
             stableId = stableId == null ? "" : stableId;
             prereqQuestId = prereqQuestId == null ? "" : prereqQuestId;
+            goodsMatchKeys = goodsMatchKeys == null ? List.of() : List.copyOf(goodsMatchKeys);
         }
     }
 
@@ -144,13 +151,17 @@ public final class ShopCatalogSnapshot {
                 throw new IllegalArgumentException("商品负载超过 1 MiB: entryKey=" + key);
             }
             List<String> goodsIds = new ArrayList<>();
+            List<String> goodsMatchKeys = new ArrayList<>();
             for (ShopEntry.GoodsStack goods : entry.getGoodsList()) {
-                if (goods != null && goods.id() != null) goodsIds.add(goods.id().toString());
+                if (goods == null || goods.id() == null) continue;
+                String goodsId = goods.id().toString();
+                goodsIds.add(goodsId);
+                goodsMatchKeys.add(ShopGoodsIdentity.key(goodsId, goods.nbt()));
             }
             payloads.add(payload);
             descriptors.add(new Descriptor(entry.getCategory(), entry.isHidden() || !entry.isStructurallyValid(), entry.getLinkKey(),
                     entry.goodsDisplayName(), goodsIds, payload.estimatedUtf8Bytes(), entry.getStableId(),
-                    entry.getPrerequisiteQuestId()));
+                    entry.getPrerequisiteQuestId(), goodsMatchKeys));
             byKey.put(key, entry);
             byEntry.put(entry, key);
             byStableId.put(entry.getStableId(), entry);
@@ -206,7 +217,7 @@ public final class ShopCatalogSnapshot {
             String top = path[0], sub = path[1], sub2 = path[2], sub3 = path[3];
             stubs.add(new ShopCatalogManifest.Stub(key, top, sub, sub2, sub3, descriptor.hidden(),
                     chunkByKey.getOrDefault(key, -1), descriptor.linkKey(), descriptor.displayName(), descriptor.goodsIds(),
-                    descriptor.stableId(), descriptor.prereqQuestId()));
+                    descriptor.stableId(), descriptor.prereqQuestId(), descriptor.goodsMatchKeys()));
             if (!descriptor.linkKey().isEmpty()) links.putIfAbsent(descriptor.linkKey(), key);
             if (descriptor.hidden()) continue;
             tops.add(top);

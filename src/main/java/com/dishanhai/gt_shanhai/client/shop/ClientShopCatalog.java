@@ -5,6 +5,7 @@ import com.dishanhai.gt_shanhai.common.shop.ShopCatalogEntryPayload;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntryJsonCodec;
+import com.dishanhai.gt_shanhai.common.shop.ShopGoodsIdentity;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopCatalogChunkRequestPacket;
 
@@ -127,6 +128,8 @@ public final class ClientShopCatalog {
     private static final Map<String, Long> stableIdToKey = new LinkedHashMap<>();
     // 商品物品 ID 反向索引：JEI 悬停快捷键只查全量轻量 stub，不触发商品 chunk 加载。
     private static final Map<String, List<Long>> goodsIdKeys = new LinkedHashMap<>();
+    // 物品 ID + NBT 身份。同 ID 有多条商品时，悬停跳转用它，不再取第一条。
+    private static final Map<String, List<Long>> goodsIdentityKeys = new LinkedHashMap<>();
     // 前置任务反向索引：FTBQ 任务 ID（十六进制）→ 以它为前置的商品 entryKey 列表（保持 manifest 顺序）。
     // 供任务书那侧的「前往商店」按钮反查（见 FtbViewQuestPanelShopButtonMixin）；隐藏条目不入索引。
     private static final Map<String, List<Long>> prereqQuestKeys = new LinkedHashMap<>();
@@ -140,6 +143,10 @@ public final class ClientShopCatalog {
     private static final LinkedHashMap<Integer, Set<Long>> cachedChunkKeys =
             new LinkedHashMap<>(16, 0.75F, true);
     private static Set<Integer> pinnedChunks = Set.of();
+    private static long jeiProductScanRevision = Long.MIN_VALUE;
+    private static final Set<Integer> jeiProductChunks = new LinkedHashSet<>();
+    private static final Set<Integer> jeiProductScannedChunks = new LinkedHashSet<>();
+    private static final ArrayDeque<Integer> jeiProductChunkQueue = new ArrayDeque<>();
 
     private ClientShopCatalog() {}
 
@@ -153,6 +160,9 @@ public final class ClientShopCatalog {
             pendingChunks.clear();
             cachedChunkKeys.clear();
             pinnedChunks = Set.of();
+            resetJeiProductScan();
+            ShopJeiProductCatalog.clear();
+            ClientShopJeiMode.productsChanged();
             // entryKey 是快照内位置下标，revision 一变就可能换主：旧 revision 的花费预览槽位
             // 不能留给新商品顶用（服务端对过期 revision 的预览请求已静默丢弃，这里清掉即闭环）
             ClientCostPreview.clear();
@@ -236,6 +246,18 @@ public final class ClientShopCatalog {
         return goodsIdKeys.getOrDefault(goodsId.trim().toLowerCase(Locale.ROOT), List.of());
     }
 
+    /**
+     * 悬停跳转：同 ID 只有一条时仍走那一条；有多条时必须对上商品 NBT 身份，对不上就不跳。
+     */
+    public static long keyOfHoveredGoods(String itemId, net.minecraft.nbt.CompoundTag nbt) {
+        if (itemId == null || itemId.isBlank()) return -1L;
+        String id = itemId.trim().toLowerCase(Locale.ROOT);
+        List<Long> exact = goodsIdentityKeys.get(ShopGoodsIdentity.key(id, nbt));
+        if (exact != null && !exact.isEmpty()) return exact.get(0);
+        List<Long> byId = goodsIdKeys.getOrDefault(id, List.of());
+        return byId.size() == 1 ? byId.get(0) : -1L;
+    }
+
     public static long beginChunkRequest(int chunkId) {
         return STATE.beginRequest(chunkId);
     }
@@ -278,6 +300,7 @@ public final class ClientShopCatalog {
         if (budgetNanos <= 0L || pendingChunks.isEmpty()) return 0;
         long deadline = System.nanoTime() + budgetNanos;
         int built = 0;
+        boolean productsChanged = false;
         while (!pendingChunks.isEmpty() && System.nanoTime() < deadline) {
             PendingChunk pending = pendingChunks.removeFirst();
             if (pending.done()) {
@@ -286,7 +309,9 @@ public final class ClientShopCatalog {
             }
             ShopCatalogEntryPayload payload = pending.current();
             ShopEntry entry = ShopEntryJsonCodec.fromPayload(payload.json());
-            if (entry != null && stubsByKey.containsKey(payload.entryKey())) {
+            ShopCatalogManifest.Stub stub = stubsByKey.get(payload.entryKey());
+            if (entry != null && stub != null) {
+                productsChanged |= ShopJeiProductCatalog.addEntry(entry, stub.hidden());
                 long target = STATE.remainingUses(payload.entryKey());
                 applyRemainingUses(entry, target);
                 ShopEntry old = entriesByKey.put(payload.entryKey(), entry);
@@ -298,11 +323,65 @@ public final class ClientShopCatalog {
             if (advanced.done()) finishChunk(advanced);
             else pendingChunks.addFirst(advanced);
         }
+        if (productsChanged) ClientShopJeiMode.productsChanged();
         return built;
+    }
+
+    /** Progressive JEI-only preload; never requests buyer costs, only visible shop product entries. */
+    public static void startJeiProductScan() {
+        if (!STATE.ready() || jeiProductScanRevision == STATE.revision()) return;
+        resetJeiProductScan();
+        jeiProductScanRevision = STATE.revision();
+        for (ShopCatalogManifest.Stub stub : manifest.stubs()) {
+            if (!stub.hidden() && stub.chunkId() >= 0) jeiProductChunks.add(stub.chunkId());
+        }
+        for (Integer chunkId : jeiProductChunks) {
+            Set<Long> cached = cachedChunkKeys.get(chunkId);
+            if (cached == null) continue;
+            for (Long key : cached) {
+                ShopEntry entry = entriesByKey.get(key);
+                ShopCatalogManifest.Stub stub = stubsByKey.get(key);
+                if (entry != null && stub != null) {
+                    ShopJeiProductCatalog.addEntry(entry, stub.hidden());
+                }
+            }
+            jeiProductScannedChunks.add(chunkId);
+        }
+        for (Integer chunkId : jeiProductChunks) {
+            if (!jeiProductScannedChunks.contains(chunkId)) jeiProductChunkQueue.addLast(chunkId);
+        }
+        ClientShopJeiMode.productsChanged();
+    }
+
+    public static void tickJeiProductScan(net.minecraftforge.event.TickEvent.ClientTickEvent event) {
+        if (event.phase != net.minecraftforge.event.TickEvent.Phase.END || !ClientShopJeiMode.isEnabled()
+                || !STATE.ready()) return;
+        startJeiProductScan();
+        if (ShopJeiProductCatalog.refreshPendingFtbqItems()) ClientShopJeiMode.productsChanged();
+        pumpMaterialization(1_500_000L);
+
+        int sent = 0;
+        int attempts = 0;
+        int attemptLimit = Math.min(32, jeiProductChunkQueue.size());
+        long now = net.minecraft.Util.getMillis();
+        while (sent < 4 && attempts < attemptLimit && !jeiProductChunkQueue.isEmpty()) {
+            int chunkId = jeiProductChunkQueue.removeFirst();
+            attempts++;
+            if (jeiProductScannedChunks.contains(chunkId)) continue;
+            long requestId = STATE.beginRequest(chunkId, now);
+            if (requestId > 0L) {
+                ShanhaiNetwork.CHANNEL.sendToServer(
+                        new ShopCatalogChunkRequestPacket(STATE.revision(), requestId, chunkId));
+                sent++;
+            }
+            if (!jeiProductScannedChunks.contains(chunkId)) jeiProductChunkQueue.addLast(chunkId);
+        }
     }
 
     public static void clear() {
         applyManifest(ShopCatalogManifest.empty());
+        resetJeiProductScan();
+        ShopJeiProductCatalog.clear();
     }
 
     private static void rebuildManifestIndexes() {
@@ -311,6 +390,7 @@ public final class ClientShopCatalog {
         linkKeys.clear();
         stableIdToKey.clear();
         goodsIdKeys.clear();
+        goodsIdentityKeys.clear();
         prereqQuestKeys.clear();
         topCategories.clear();
         subCategories.clear();
@@ -325,11 +405,19 @@ public final class ClientShopCatalog {
             if (!stub.linkKey().isEmpty()) linkKeys.putIfAbsent(stub.linkKey(), stub.entryKey());
             if (!stub.stableId().isEmpty()) stableIdToKey.put(stub.stableId(), stub.entryKey());
             if (stub.hidden()) continue;
-            for (String goodsId : stub.goodsIds()) {
+            List<String> matchKeys = stub.goodsMatchKeys();
+            for (int i = 0; i < stub.goodsIds().size(); i++) {
+                String goodsId = stub.goodsIds().get(i);
                 if (goodsId == null || goodsId.isBlank()) continue;
                 String normalized = goodsId.trim().toLowerCase(Locale.ROOT);
                 List<Long> keys = goodsIdKeys.computeIfAbsent(normalized, ignored -> new ArrayList<>());
                 if (!keys.contains(stub.entryKey())) keys.add(stub.entryKey());
+                String matchKey = i < matchKeys.size() ? matchKeys.get(i) : "";
+                if (matchKey == null || matchKey.isBlank()) {
+                    matchKey = ShopGoodsIdentity.key(normalized, null);
+                }
+                List<Long> identityHits = goodsIdentityKeys.computeIfAbsent(matchKey, ignored -> new ArrayList<>());
+                if (!identityHits.contains(stub.entryKey())) identityHits.add(stub.entryKey());
             }
             if (!stub.prereqQuestId().isEmpty()) {
                 prereqQuestKeys.computeIfAbsent(stub.prereqQuestId(), ignored -> new ArrayList<>())
@@ -407,7 +495,18 @@ public final class ClientShopCatalog {
         LinkedHashSet<Long> keys = new LinkedHashSet<>();
         for (ShopCatalogEntryPayload payload : pending.entries()) keys.add(payload.entryKey());
         cachedChunkKeys.put(pending.chunkId(), Set.copyOf(keys));
+        if (jeiProductScanRevision == STATE.revision() && jeiProductChunks.contains(pending.chunkId())) {
+            jeiProductScannedChunks.add(pending.chunkId());
+            jeiProductChunkQueue.removeIf(chunkId -> chunkId == pending.chunkId());
+        }
         evictOverflow();
+    }
+
+    private static void resetJeiProductScan() {
+        jeiProductScanRevision = Long.MIN_VALUE;
+        jeiProductChunks.clear();
+        jeiProductScannedChunks.clear();
+        jeiProductChunkQueue.clear();
     }
 
     private static void evictOverflow() {

@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * 多张样板抢同一个产物时，决定谁留在队首。
@@ -133,6 +134,33 @@ public final class FeasiblePatternOrder {
         items.addAll(kept);
         items.addAll(deferred);
         return true;
+    }
+
+    /**
+     * 实际用上的样板都不是回环样板，同时至少有一张回环样板没被用上。
+     * 深度或访问预算用尽、证明不了时返回 false。
+     */
+    public static <T> boolean usedSkipsCycle(List<T> items, Function<T, Pattern> view, Object product,
+            long totalRequested, Lookup lookup, Predicate<T> used) {
+        if (items == null || view == null || lookup == null || product == null || used == null) return false;
+        int count = items.size();
+        if (count < 2 || totalRequested <= 0) return false;
+        Search search = new Search(lookup, product, MAX_DEPTH, MAX_VISITS);
+        boolean unusedPoisoned = false;
+        boolean usedFeasible = false;
+        boolean usedPoisoned = false;
+        for (int i = 0; i < count; i++) {
+            T item = items.get(i);
+            boolean poisoned = search.isPoisoned(view.apply(item), totalRequested);
+            if (search.truncated) return false;
+            if (used.test(item)) {
+                if (poisoned) usedPoisoned = true;
+                else usedFeasible = true;
+            } else if (poisoned) {
+                unusedPoisoned = true;
+            }
+        }
+        return unusedPoisoned && usedFeasible && !usedPoisoned;
     }
 
     private static final class Search {

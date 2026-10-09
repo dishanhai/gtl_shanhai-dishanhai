@@ -867,6 +867,11 @@ public class ShopScreen extends ScaledScreen {
     /** 内容区可见高度（撑到面板底部留边）。 */
     private int contentHeight() { return Math.max(60, (top + panelHeight - 8) - contentTop()); }
 
+    private static final int GRID_HINT_H = 12;
+
+    /** 网格卡片区高度。底部留一行给按键提示，详情列仍用 {@link #contentHeight()}。 */
+    private int gridHeight() { return Math.max(48, contentHeight() - GRID_HINT_H); }
+
     private int listLeft() { return left + 5; }
 
     /** 卡片宽度只在固定购买面板左侧的网格空间内收缩，不反向改变详情列或上方控件。 */
@@ -876,7 +881,7 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private int cardHeightLimitForTargetRows() {
-        int available = Math.max(1, contentHeight() - TARGET_GRID_ROWS * GRID_GAP);
+        int available = Math.max(1, gridHeight() - TARGET_GRID_ROWS * GRID_GAP);
         return Math.max(MIN_EFFECTIVE_CARD_H, available / TARGET_GRID_ROWS);
     }
 
@@ -923,7 +928,7 @@ public class ShopScreen extends ScaledScreen {
     private static final int EXCHANGE_BTN_W = 64;
     private int exchangeBtnX() { return currencyBtnX() + currencyBtnW() + 4; }
     private int exchangeBtnW() { return EXCHANGE_BTN_W; }
-    // 「会员中心」按钮：兑换中心右侧，始终可见（打开会员购买+银行子页，见 ShopMembershipScreen）
+    // 「银会中心」按钮：兑换中心右侧，始终可见（打开会员购买+银行子页，见 ShopMembershipScreen）
     private static final int MEMBER_BTN_W = 64;
     private int memberBtnX() { return exchangeBtnX() + exchangeBtnW() + 4; }
     private int memberBtnW() { return MEMBER_BTN_W; }
@@ -975,20 +980,20 @@ public class ShopScreen extends ScaledScreen {
 
     private ShopGridViewport.Range visibleGridRange() {
         return ShopGridViewport.visibleRange(
-                visibleEntryKeys.size(), gridColumns(), scroll, contentHeight(), rowStride(), 1);
+                visibleEntryKeys.size(), gridColumns(), scroll, gridHeight(), rowStride(), 1);
     }
 
     private int entryIndexAt(double mouseX, double mouseY) {
         return ShopGridViewport.indexAt(
                 visibleEntryKeys.size(), gridColumns(), colStride(), rowStride(), cellW(), cellH(),
-                listLeft(), contentTop(), listWidth(), contentHeight(), scroll, mouseX, mouseY);
+                listLeft(), contentTop(), listWidth(), gridHeight(), scroll, mouseX, mouseY);
     }
 
     /** 最大滚动像素（内容总高 - 可见高，下限 0）。 */
     private int maxGridScroll() {
         int cols = gridColumns();
         int rows = (visibleEntryKeys.size() + cols - 1) / cols;
-        return Math.max(0, rows * rowStride() - contentHeight());
+        return Math.max(0, rows * rowStride() - gridHeight());
     }
 
     /** 网格右侧滚动条轨道 x（紧贴列末端右侧，同 {@link #drawGrid} 原有算法）。 */
@@ -1206,7 +1211,7 @@ public class ShopScreen extends ScaledScreen {
         // 货币中心 + 兑换中心（始终可见）
         drawButton(g, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H, "§6货币中心", mx, my);
         drawButton(g, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H, "§d兑换中心", mx, my);
-        drawButton(g, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H, "§b会员中心", mx, my);
+        drawButton(g, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H, "§b银会中心", mx, my);
         // 新增商品（编辑权 + 开了编辑模式）、商店设置（仅编辑权，不受编辑模式限制）
         if (catalogEditUnlocked) {
             drawButton(g, addBtnX(), top + 6, addBtnW(), TOP_BAR_H, "§a新增商品", mx, my);
@@ -1256,6 +1261,7 @@ public class ShopScreen extends ScaledScreen {
         } else {
             drawGrid(g, mx, my);
         }
+        drawGridHint(g);
 
         // 右侧详情面板（同上，锚点换成详情列自己的中心；cardT 已在上面算过，amountBox 同步过了）
         if (cardT < 1f) {
@@ -1938,9 +1944,16 @@ public class ShopScreen extends ScaledScreen {
         descOverlayScroll = (int) Math.round(Math.max(0.0, Math.min(1.0, rel)) * maxScroll);
     }
 
+    private void drawGridHint(GuiGraphics g) {
+        int maxW = Math.max(8, listWidth() - 8);
+        String text = GuiRenderUtil.trimText(this.font,
+                "§8Ctrl+左键将商品加入购物车 · 右键打开快捷菜单 · Alt+左键批量修改商品配置", maxW);
+        g.drawString(this.font, text, listLeft() + 4, contentTop() + gridHeight() + 2, GRAY, false);
+    }
+
     private void drawGrid(GuiGraphics g, int mx, int my) {
         int cols = gridColumns();
-        int gx = listLeft(), gy = contentTop(), gw = listWidth(), gh = contentHeight();
+        int gx = listLeft(), gy = contentTop(), gw = listWidth(), gh = gridHeight();
 
         // 像素级平滑滚动：内容整体按 -scroll 平移，用 scissor 裁到网格矩形内。
         enableGridScissor(g, gx, gy, gx + gw, gy + gh);
@@ -2028,7 +2041,7 @@ public class ShopScreen extends ScaledScreen {
 
     /** 网格滚动条点击/拖拽起手：命中整条轨道即可（不用精确点在把手上），随即按该点位置跳转。 */
     private boolean gridScrollbarClicked(double mx, double my) {
-        int gy = contentTop(), gh = contentHeight();
+        int gy = contentTop(), gh = gridHeight();
         int barX = gridScrollbarX();
         if (mx < barX || mx > barX + GRID_SCROLLBAR_W || my < gy || my > gy + gh) return false;
         draggingGridScroll = true;
@@ -2040,7 +2053,7 @@ public class ShopScreen extends ScaledScreen {
     private void updateGridScrollFromDrag(double my) {
         int maxScroll = maxGridScroll();
         if (maxScroll <= 0) { scroll = 0; return; }
-        int gy = contentTop(), gh = contentHeight();
+        int gy = contentTop(), gh = gridHeight();
         int cols = gridColumns();
         int rows = (visibleEntryKeys.size() + cols - 1) / cols;
         int contentH = rows * rowStride();
@@ -3007,7 +3020,7 @@ public class ShopScreen extends ScaledScreen {
             Minecraft.getInstance().setScreen(new ExchangeScreen(this, canEdit));
             return true;
         }
-        // 会员中心（打开会员购买+银行子页）
+        // 银会中心（打开会员购买+银行子页）
         if (hit(mx, my, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H)) {
             Minecraft.getInstance().setScreen(new ShopMembershipScreen(this));
             return true;

@@ -20,6 +20,8 @@ class RecipeLifecycleSourceTest {
 
         assertTrue(mod.contains("RecipeRebuildService.rebuildAll"));
         assertTrue(mod.contains("RecipeRebuildService.rebuildVanillaManager"));
+        assertTrue(mod.contains("reapplyPersistedLookupRules(\"server-started\")"));
+        assertTrue(mod.contains("ServerStartedEvent"));
         assertTrue(plugin.contains("ShanhaiRecipeQuery"));
         assertTrue(plugin.contains("ShanhaiRecipeEditorOps"));
         assertTrue(command.contains("配方编辑"));

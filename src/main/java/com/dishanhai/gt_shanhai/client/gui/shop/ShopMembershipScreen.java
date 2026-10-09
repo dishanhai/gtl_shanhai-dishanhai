@@ -17,7 +17,7 @@ import net.minecraft.network.chat.Component;
 import java.math.BigInteger;
 
 /**
- * 会员中心（山海署名，客户端）：从 {@link ShopScreen} 顶栏「会员中心」按钮唤起，关闭返回 parent。
+ * 银会中心（山海署名，客户端）：从 {@link ShopScreen} 顶栏「银会中心」按钮唤起，关闭返回 parent。
  *
  * <p>页签「会员」：青铜/白银/黄金永久买断，付目标档全价。</p>
  * <p>页签「银行」：定期存款与贷款。数字、利率、可借额度来自服务器快照。</p>
@@ -59,7 +59,7 @@ public class ShopMembershipScreen extends ScaledScreen {
     private static String flashText;
     private static long flashUntil;
 
-    /** 把带 [会员中心]/[山海银行] 前缀的系统消息镜像进本屏底部横幅。 */
+    /** 把带 [银会中心]/[山海银行] 前缀的系统消息镜像进本屏底部横幅。 */
     public static void showMessage(Component msg) {
         if (msg == null) return;
         flashText = msg.getString();
@@ -67,7 +67,7 @@ public class ShopMembershipScreen extends ScaledScreen {
     }
 
     public ShopMembershipScreen(ShopScreen parent) {
-        super(Component.literal("会员中心"));
+        super(Component.literal("银会中心"));
         this.parent = parent;
         this.targetWidth = TARGET_W;
         this.targetHeight = TARGET_H;
@@ -145,7 +145,7 @@ public class ShopMembershipScreen extends ScaledScreen {
         g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
         g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
 
-        g.drawString(this.font, "§6会员中心", left + 10, top + 5, GOLD, true);
+        g.drawString(this.font, "§6银会中心", left + 10, top + 5, GOLD, true);
         String spark = fitSpark(formatExact(ClientWalletAccount.getDigital()), memberTabX() - (left + 78) - 8);
         g.drawString(this.font, "§d星火 §e" + spark, left + 78, top + 5, WHITE, true);
         drawButton(g, memberTabX(), tabY(), TAB_W, TOP_BAR_H, page == PAGE_MEMBER ? "§6会员" : "§7会员", mx, my);
@@ -178,6 +178,8 @@ public class ShopMembershipScreen extends ScaledScreen {
                 bank == null ? null : bank.depositTotal(),
                 null);
         String roomLine = bank == null ? "§8查询中…"
+                : bank.overdue
+                ? "§c已逾期，还清前不能再借"
                 : "§7可借 §e" + formatExact(bank.loanRoom) + " §7/ " + formatExact(BigInteger.valueOf(Math.max(0L, bank.maxLoan)));
         drawCard(g, debtCardX(), cardY(), cardW(), cardH(), "§6贷款欠款",
                 bank == null ? null : bank.debtPrincipal,
@@ -195,7 +197,8 @@ public class ShopMembershipScreen extends ScaledScreen {
         int bbw = (cw - 12) / 4;
         drawButton(g, cx, bankButtonsY(), bbw, 14, "§a存入", mx, my);
         drawButton(g, cx + (bbw + 4), bankButtonsY(), bbw, 14, "§6取出", mx, my);
-        drawButton(g, cx + (bbw + 4) * 2, bankButtonsY(), bbw, 14, "§e借款", mx, my);
+        boolean overdue = bank != null && bank.overdue;
+        drawButton(g, cx + (bbw + 4) * 2, bankButtonsY(), bbw, 14, overdue ? "§8已逾期" : "§e借款", mx, my);
         drawButton(g, cx + (bbw + 4) * 3, bankButtonsY(), bbw, 14, "§b还款", mx, my);
         int allW = (cw - 8) / 3;
         drawButton(g, cx, bankAllY(), allW, 14, "§a全部存入", mx, my);
@@ -344,9 +347,9 @@ public class ShopMembershipScreen extends ScaledScreen {
     }
 
     private static String rateHint(ClientShopBank.Snapshot bank) {
-        if (bank == null) return "§8利率查询中… 欠款无强制追讨，还款先冲利息";
+        if (bank == null) return "§8利率查询中… 还息优先 · 逾期还清前停贷";
         return "§8存款 " + rateText(bank.depositRateBp) + " · 贷款 " + rateText(bank.loanRateBp)
-                + " · 还息优先 · 无强制追讨";
+                + " · 还息优先 · 逾期还清前停贷";
     }
 
     /** 基点转百分比。5 → 0.05%/小时，15 → 0.15%/小时。 */

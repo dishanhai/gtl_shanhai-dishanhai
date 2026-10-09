@@ -234,11 +234,16 @@ public class GTDishanhaiMod {
                 });
 
         // 服务端启动完成后自动同步所有 SDA 到 kubejs/data（彻底消除手动迁移需求）。
-        // 不在 ServerStartedEvent 里同步做——只记录目标 tick，真正的加载+同步交给下面
-        // 的 ServerTickEvent 延迟 100 tick（约5秒）后执行，避免卡住玩家登录。
+        // SDA 不在这里同步做——只记录目标 tick，真正的加载交给下面延迟 100 tick 的任务。
+        // 配方规则必须在这里写回：此时 GTCEu lookup 已定稿，再晚机器会先吃到原配方。
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                net.minecraftforge.eventbus.api.EventPriority.LOWEST,
                 (net.minecraftforge.event.server.ServerStartedEvent e) -> {
                     sdaAutoSyncTargetTick = e.getServer().getTickCount() + 100;
+                    // ServerAboutToStart 时 GTCEu / KubeJS 还会用原数据包配方重建 lookup。
+                    // 等服务器起来、查找表定稿后再写一次，效果与 /山海 配方 重载 相同。
+                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.reapplyPersistedLookupRules("server-started");
+                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyPersistedRecipeToggles();
                 });
 
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(

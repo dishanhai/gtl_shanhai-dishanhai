@@ -136,6 +136,30 @@ class ClientShopCatalogStateTest {
         assertTrue(ClientShopCatalog.keysOfGoodsId("minecraft:dirt").isEmpty());
     }
 
+    @Test
+    void hoveredGoodsUsesNbtIdentityWhenTheSameItemIdHasSeveralEntries() {
+        net.minecraft.nbt.CompoundTag logs = new net.minecraft.nbt.CompoundTag();
+        logs.putString("Name", "原木磁盘阵列");
+        net.minecraft.nbt.CompoundTag fish = new net.minecraft.nbt.CompoundTag();
+        fish.putString("Name", "渔场磁盘阵列");
+        String itemId = "gt_shanhai:super_disk_array";
+        String logKey = com.dishanhai.gt_shanhai.common.shop.ShopGoodsIdentity.key(itemId, logs);
+        String fishKey = com.dishanhai.gt_shanhai.common.shop.ShopGoodsIdentity.key(itemId, fish);
+
+        ClientShopCatalog.applyManifest(new ShopCatalogManifest(41L, true, List.of(
+                new ShopCatalogManifest.Stub(3L, "磁盘", "", "", "", false,
+                        1, "", "编程电路存储阵列", List.of(itemId), "stable-3", "", List.of(logKey)),
+                new ShopCatalogManifest.Stub(4L, "磁盘", "", "", "", false,
+                        1, "", "渔场磁盘阵列", List.of(itemId), "stable-4", "", List.of(fishKey))),
+                java.util.Map.of()));
+
+        assertEquals(4L, ClientShopCatalog.keyOfHoveredGoods(itemId, fish));
+        assertEquals(3L, ClientShopCatalog.keyOfHoveredGoods(itemId, logs));
+        net.minecraft.nbt.CompoundTag other = new net.minecraft.nbt.CompoundTag();
+        other.putString("Name", "奇点磁盘阵列");
+        assertEquals(-1L, ClientShopCatalog.keyOfHoveredGoods(itemId, other));
+    }
+
     private static ShopCatalogManifest manifest(long revision) {
         return manifest(revision, true);
     }

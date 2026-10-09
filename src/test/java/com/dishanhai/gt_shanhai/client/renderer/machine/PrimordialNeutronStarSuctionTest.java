@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PrimordialNeutronStarSuctionTest {
@@ -157,6 +158,24 @@ class PrimordialNeutronStarSuctionTest {
                 previous[2] = current[2];
             }
         }
+    }
+
+    @Test
+    void supportGapIsOpenBesideTheBracket() {
+        float angle = 0.0f;
+        float radius = 1.2f;
+        assertFalse(PrimordialEngineRingOffset.clearsRing(0.0f, 6.0f, -62.0f,
+                PrimordialEngineRingOffset.LARGE, angle, radius), "大环支架正中应当挡住");
+        assertTrue(PrimordialEngineRingOffset.clearsRing(20.0f, 6.0f, -62.0f,
+                PrimordialEngineRingOffset.LARGE, angle, radius), "大环支架旁边的空区应当能过");
+        assertFalse(PrimordialEngineRingOffset.clearsRing(0.0f, 0.0f, -62.0f,
+                PrimordialEngineRingOffset.LARGE, angle, radius), "大环环核应当挡住");
+        assertTrue(PrimordialEngineRingOffset.clearsRing(0.0f, 14.0f, -62.0f,
+                PrimordialEngineRingOffset.LARGE, angle, radius), "过了支架尖端应当能过");
+        assertFalse(PrimordialEngineRingOffset.clearsRing(0.0f, 9.2f, -54.0f, 1, angle, radius),
+                "中环支架正中应当挡住");
+        assertTrue(PrimordialEngineRingOffset.clearsRing(20.0f, 9.2f, -54.0f, 1, angle, radius),
+                "中环支架旁边的空区应当能过");
     }
 
     @Test

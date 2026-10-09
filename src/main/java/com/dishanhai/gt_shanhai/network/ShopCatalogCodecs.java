@@ -26,6 +26,8 @@ public final class ShopCatalogCodecs {
     public static final int MAX_STABLE_ID_CHARS = 64;
     /** FTBQ 任务 ID 是十六进制 long 字符串（≤16 字符），留一倍余量兜异常配置。 */
     public static final int MAX_QUEST_ID_CHARS = 32;
+    /** 物品 ID + NUL + SHA-256，留出资源 ID 上限。 */
+    public static final int MAX_MATCH_KEY_CHARS = 512;
     public static final int MAX_CATEGORY_ORDER_KEYS = 4096;
     public static final int MAX_CATEGORY_ORDER_VALUES = 4096;
     public static final int MAX_CATEGORY_ORDER_KEY_CHARS = 1024;
@@ -58,6 +60,7 @@ public final class ShopCatalogCodecs {
             }
             buf.writeUtf(stub.stableId(), MAX_STABLE_ID_CHARS);
             buf.writeUtf(stub.prereqQuestId(), MAX_QUEST_ID_CHARS);
+            writeMatchKeys(buf, stub.goodsMatchKeys());
         }
         writeCategoryOrder(buf, manifest == null ? Map.of() : manifest.categoryOrder());
     }
@@ -108,9 +111,10 @@ public final class ShopCatalogCodecs {
             for (int g = 0; g < goodsCount; g++) goodsIds.add(buf.readUtf(MAX_RESOURCE_ID_CHARS));
             String stableId = buf.readUtf(MAX_STABLE_ID_CHARS);
             String prereqQuestId = buf.readUtf(MAX_QUEST_ID_CHARS);
+            List<String> goodsMatchKeys = readMatchKeys(buf);
             stubs.add(new ShopCatalogManifest.Stub(
                     entryKey, top, sub, sub2, sub3, hidden, chunkId, linkKey, displayName, goodsIds, stableId,
-                    prereqQuestId));
+                    prereqQuestId, goodsMatchKeys));
         }
         Map<String, List<String>> categoryOrder = readCategoryOrder(buf);
         return new ShopCatalogManifest(revision, ready, stubs, categoryOrder);
@@ -150,6 +154,22 @@ public final class ShopCatalogCodecs {
             payloads.add(new ShopCatalogEntryPayload(entryKey, json));
         }
         return List.copyOf(payloads);
+    }
+
+    private static void writeMatchKeys(FriendlyByteBuf buf, List<String> matchKeys) {
+        List<String> safe = matchKeys == null ? List.of() : matchKeys;
+        requireEncodeSize("stub goods match keys", safe.size(), MAX_GOODS_PER_STUB);
+        buf.writeVarInt(safe.size());
+        for (String matchKey : safe) {
+            buf.writeUtf(matchKey == null ? "" : matchKey, MAX_MATCH_KEY_CHARS);
+        }
+    }
+
+    private static List<String> readMatchKeys(FriendlyByteBuf buf) {
+        int count = readBoundedCount(buf, "stub goods match keys", MAX_GOODS_PER_STUB);
+        List<String> matchKeys = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) matchKeys.add(buf.readUtf(MAX_MATCH_KEY_CHARS));
+        return matchKeys;
     }
 
     private static int readBoundedCount(FriendlyByteBuf buf, String label, int max) {

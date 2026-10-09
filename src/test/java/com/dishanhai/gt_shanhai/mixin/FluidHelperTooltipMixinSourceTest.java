@@ -23,5 +23,7 @@ class FluidHelperTooltipMixinSourceTest {
         assertTrue(source.contains("tooltip.add(ShanhaiTextAPI.inline(line));"));
         assertTrue(source.contains("tooltip.add(Component.literal(\"§7\" + line));"));
         assertFalse(source.contains("ITooltipBuilder"));
+        assertTrue(source.contains("ShopItemHotkey.offerFluid("),
+                "JEI 流体列表悬停必须能跳到对应流体商品");
     }
 }

@@ -124,6 +124,33 @@ class FeasiblePatternOrderTest {
     }
 
     @Test
+    void usedFeasiblePatternShowsTheSkipWhenTheCyclePatternWasNotUsed() {
+        FeasiblePatternOrder.Pattern shortPattern = produce("fluid", 1L, slot("dust", 2L));
+        FeasiblePatternOrder.Pattern longPattern = produce("fluid", 1L, slot("ore", 1L));
+        Catalog catalog = new Catalog();
+        catalog.patterns.put("dust", List.of(produce("dust", 1L, slot("fluid", 1L))));
+        List<FeasiblePatternOrder.Pattern> order = List.of(shortPattern, longPattern);
+
+        assertTrue(FeasiblePatternOrder.usedSkipsCycle(order, IDENTITY, "fluid", 1L, catalog,
+                pattern -> pattern == longPattern));
+        assertFalse(FeasiblePatternOrder.usedSkipsCycle(order, IDENTITY, "fluid", 1L, catalog,
+                pattern -> pattern == shortPattern));
+    }
+
+    @Test
+    void usingTheCyclePatternDoesNotClaimItWasSkipped() {
+        FeasiblePatternOrder.Pattern shortPattern = produce("fluid", 1L, slot("dust", 2L));
+        FeasiblePatternOrder.Pattern longPattern = produce("fluid", 1L, slot("ore", 1L));
+        Catalog catalog = new Catalog();
+        catalog.patterns.put("dust", List.of(produce("dust", 1L, slot("fluid", 1L))));
+        catalog.stock.put("dust", 2L);
+        List<FeasiblePatternOrder.Pattern> order = List.of(shortPattern, longPattern);
+
+        assertFalse(FeasiblePatternOrder.usedSkipsCycle(order, IDENTITY, "fluid", 1L, catalog,
+                pattern -> pattern == longPattern));
+    }
+
+    @Test
     void emitableDustIsARealSource() {
         FeasiblePatternOrder.Pattern shortPattern = produce("fluid", 1L, slot("dust", 2L));
         FeasiblePatternOrder.Pattern longPattern = produce("fluid", 1L, slot("ore", 1L));

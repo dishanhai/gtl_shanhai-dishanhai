@@ -153,10 +153,12 @@ public final class WalletAccountAPI {
         public final int depositRateBp;
         public final int loanRateBp;
         public final long maxLoan;
+        /** 到期后仍有欠款。为真时 {@link #loanRoom} 为 0，借款会被拒绝。 */
+        public final boolean overdue;
 
         public BankView(BigInteger depositPrincipal, BigInteger depositInterest,
                         BigInteger debtPrincipal, BigInteger debtInterest, BigInteger loanRoom,
-                        int depositRateBp, int loanRateBp, long maxLoan) {
+                        int depositRateBp, int loanRateBp, long maxLoan, boolean overdue) {
             this.depositPrincipal = depositPrincipal;
             this.depositInterest = depositInterest;
             this.debtPrincipal = debtPrincipal;
@@ -165,6 +167,7 @@ public final class WalletAccountAPI {
             this.depositRateBp = depositRateBp;
             this.loanRateBp = loanRateBp;
             this.maxLoan = maxLoan;
+            this.overdue = overdue;
         }
 
         public BigInteger depositTotal() {
@@ -195,15 +198,17 @@ public final class WalletAccountAPI {
         WalletAccount acc = d.get(uuid);
         if (acc == null) {
             return new BankView(BigInteger.ZERO, BigInteger.ZERO, BigInteger.ZERO, BigInteger.ZERO,
-                    BigInteger.valueOf(Math.max(0L, cap)), depositRate, loanRate, cap);
+                    BigInteger.valueOf(Math.max(0L, cap)), depositRate, loanRate, cap, false);
         }
         long now = System.currentTimeMillis();
         ShopBank.Book deposit = ShopBank.settle(depositBook(acc), now, depositRate);
         ShopBank.Book debt = ShopBank.settle(debtBook(acc), now, loanRate);
-        boolean dirty = applyDepositBook(acc, deposit) | applyDebtBook(acc, debt);
+        boolean dirty = applyDepositBook(acc, deposit) | applyDebtBook(acc, debt) | syncDebtDue(acc, debt, now);
         if (dirty) d.setDirty();
+        boolean overdue = ShopBank.overdue(debt.total(), acc.getBankDebtDueMs(), now);
+        BigInteger room = overdue ? BigInteger.ZERO : ShopBank.room(debt, BigInteger.valueOf(cap));
         return new BankView(deposit.principal, deposit.interest, debt.principal, debt.interest,
-                ShopBank.room(debt, BigInteger.valueOf(cap)), depositRate, loanRate, cap);
+                room, depositRate, loanRate, cap, overdue);
     }
 
     /** 存入：数字余额（星火）→ 定期存款本金。返回实际存入量（余额不足按余额封顶，0=没存进去）。 */
@@ -246,19 +251,28 @@ public final class WalletAccountAPI {
 
     /**
      * 借款：新增欠款本金 + 等额加进数字余额（星火）。上限比较的是本金加利息。
-     * 返回实际借到的量（0=已到上限或无效请求）。无强制追讨、无抵押。
+     * 到期后仍有欠款时直接拒绝，直到还清。返回实际借到的量（0=逾期、已到上限或无效请求）。
      */
     public static BigInteger bankBorrow(MinecraftServer server, UUID uuid, BigInteger amount) {
         if (amount == null || amount.signum() <= 0) return BigInteger.ZERO;
         WalletAccountSavedData d = data(server);
         WalletAccount acc = d.getOrCreate(uuid);
         long now = System.currentTimeMillis();
-        ShopBank.Move mv = ShopBank.borrow(debtBook(acc), amount, loanCap(), now, loanRate());
-        boolean changed = applyDebtBook(acc, mv.book);
+        long rate = loanRate();
+        ShopBank.Book settled = ShopBank.settle(debtBook(acc), now, rate);
+        boolean changed = applyDebtBook(acc, settled) | syncDebtDue(acc, settled, now);
+        if (ShopBank.overdue(settled.total(), acc.getBankDebtDueMs(), now)) {
+            if (changed) d.setDirty();
+            return BigInteger.ZERO;
+        }
+        boolean hadDebt = settled.total().signum() > 0;
+        ShopBank.Move mv = ShopBank.borrow(settled, amount, loanCap(), now, rate);
+        changed |= applyDebtBook(acc, mv.book);
         if (mv.amount.signum() <= 0) {
             if (changed) d.setDirty();
             return BigInteger.ZERO;
         }
+        if (!hadDebt) acc.setBankDebtDueMs(ShopBank.freshDue(now, loanTermMs()));
         acc.setDigital(acc.getDigital().add(mv.amount));
         d.setDirty();
         return mv.amount;
@@ -337,10 +351,26 @@ public final class WalletAccountAPI {
         boolean changed = acc.getBankDebt().compareTo(book.principal) != 0
                 || acc.getBankDebtInterest().compareTo(book.interest) != 0
                 || acc.getBankDebtLastMs() != book.lastMs;
+        if (book.isEmpty() && acc.getBankDebtDueMs() != 0L) {
+            acc.setBankDebtDueMs(0L);
+            changed = true;
+        }
         if (!changed) return false;
         acc.setBankDebt(book.principal);
         acc.setBankDebtInterest(book.interest);
         acc.setBankDebtLastMs(book.lastMs);
+        return true;
+    }
+
+    /** 还清则清掉到期时刻。旧档有欠款但没有到期时刻时，从现在起给一个完整期限，避免刚更新就停贷。 */
+    private static boolean syncDebtDue(WalletAccount acc, ShopBank.Book debt, long now) {
+        if (debt.isEmpty()) {
+            if (acc.getBankDebtDueMs() == 0L) return false;
+            acc.setBankDebtDueMs(0L);
+            return true;
+        }
+        if (acc.getBankDebtDueMs() > 0L) return false;
+        acc.setBankDebtDueMs(ShopBank.freshDue(now, loanTermMs()));
         return true;
     }
 
@@ -354,6 +384,12 @@ public final class WalletAccountAPI {
 
     private static BigInteger loanCap() {
         return BigInteger.valueOf(DShanhaiConfig.COMMON.shopBankMaxLoanSpark.get());
+    }
+
+    private static long loanTermMs() {
+        int hours = DShanhaiConfig.COMMON.shopBankLoanTermHours.get();
+        if (hours <= 0) return ShopBank.MS_PER_HOUR;
+        return hours * ShopBank.MS_PER_HOUR;
     }
 
     // ===================== 已购买次数（展示用统计） =====================

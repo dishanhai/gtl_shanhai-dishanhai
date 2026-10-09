@@ -127,6 +127,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.IntValue shopBankLoanRateBpPerHour;
         /** 山海商店银行 — 单玩家最大欠款上限（星火） */
         public ForgeConfigSpec.LongValue shopBankMaxLoanSpark;
+        /** 山海商店银行 — 贷款期限（小时），到期仍欠款则拒绝再借 */
+        public ForgeConfigSpec.IntValue shopBankLoanTermHours;
         /** 运行期配方查找缓存 — 是否统计 hit/miss/negativeHit/clear 次数（默认关闭，避免每 tick 统计开销） */
         public ForgeConfigSpec.BooleanValue runtimeRecipeCacheDiagnostics;
         /** KJS 配方库磁盘缓存 — 是否启用启动期缓存优化 */
@@ -364,6 +366,11 @@ public final class DShanhaiConfig {
             shopBankMaxLoanSpark = builder
                     .comment("山海商店银行：单玩家最大欠款上限（星火），本金加利息达到上限后借不出新的（默认 1亿）")
                     .defineInRange("maxLoanSpark", 100_000_000L, 0L, Long.MAX_VALUE);
+            shopBankLoanTermHours = builder
+                    .comment("山海商店银行：贷款期限（小时，默认 24）",
+                             "从这笔贷款开始起算。到期后只要本金或利息还在，就拒绝下一笔贷款，直到还清。",
+                             "期限内追加借款不延后到期时间。还清后下一笔重新计期限。")
+                    .defineInRange("loanTermHours", 24, 1, 24 * 365);
             builder.pop();
 
             builder.push("runtime_recipe_cache");

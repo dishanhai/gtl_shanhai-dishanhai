@@ -738,6 +738,9 @@
   "message.gt_shanhai.jei.bookmark.no_items": "当前模式没有符合条件的输入物品",
   "message.gt_shanhai.jei.bookmark.open_terminal": "请先打开一个 AE 网络终端，再检查库存或样板流程",
   "message.gt_shanhai.jei.bookmark.added": "已检查 %s 个输入项，新增 %s 个 JEI 书签",
-  "message.gt_shanhai.jei.bookmark.already_bookmarked": "输入项已在 JEI 书签中"
+  "message.gt_shanhai.jei.bookmark.already_bookmarked": "输入项已在 JEI 书签中",
+  "tooltip.gt_shanhai.jei.shop_mode": "切换山海商店商品列表",
+  "message.gt_shanhai.jei.shop_mode.enabled": "已切换到山海商店商品",
+  "message.gt_shanhai.jei.shop_mode.disabled": "已恢复 JEI 普通物品列表"
 }
 

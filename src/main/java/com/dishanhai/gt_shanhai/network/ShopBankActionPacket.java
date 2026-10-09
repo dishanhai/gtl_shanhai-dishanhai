@@ -65,10 +65,14 @@ public class ShopBankActionPacket {
             case REPAY_ALL -> { result = WalletAccountAPI.bankRepayAll(server, uuid); label = "还款"; }
             default -> { result = BigInteger.ZERO; label = "操作"; }
         }
+        boolean overdueBorrow = result.signum() <= 0 && pkt.op == Op.BORROW
+                && WalletAccountAPI.bankView(server, uuid).overdue;
         player.sendSystemMessage(result.signum() > 0
                 ? Component.literal("§b[山海银行] §a已" + label + " §f" + ShopPurchase.formatCount(
                         result.bitLength() < 63 ? result.longValue() : Long.MAX_VALUE) + " §a星火")
-                : Component.literal("§c[山海银行] " + label + "失败（余额/欠款不足，或已达欠款上限）"));
+                : Component.literal(overdueBorrow
+                        ? "§c[山海银行] 借款失败（欠款已逾期，还清前不能再借）"
+                        : "§c[山海银行] " + label + "失败（余额/欠款不足，或已达欠款上限）"));
         WalletAccountAPI.sync(player); // 星火数字余额变动
         ShopBankQueryPacket.sendTo(player); // 定期存款/欠款变动
     }

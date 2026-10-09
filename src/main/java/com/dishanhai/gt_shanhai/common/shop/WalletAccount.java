@@ -34,6 +34,7 @@ public class WalletAccount {
     private static final String TAG_BANK_DEBT = "bankDebt";
     private static final String TAG_BANK_DEBT_INTEREST = "bankDebtInterest";
     private static final String TAG_BANK_DEBT_MS = "bankDebtMs";
+    private static final String TAG_BANK_DEBT_DUE = "bankDebtDueMs";
 
     /** 币种 → 余额（BigInteger，保序）。 */
     private final Map<ResourceLocation, BigInteger> currencyBalances = new LinkedHashMap<>();
@@ -53,6 +54,8 @@ public class WalletAccount {
     private BigInteger bankDebtInterest = BigInteger.ZERO;
     /** 贷款上次计息起点；0=从未记账。 */
     private long bankDebtLastMs = 0L;
+    /** 贷款到期时刻（墙钟毫秒）。0=没有在途贷款。到期后仍有欠款则拒绝再借，还清后归 0。 */
+    private long bankDebtDueMs = 0L;
     /** 商品条目 key（见 {@link WalletAccountAPI#purchaseKey(ShopEntry)}）→ 累计已购买次数，展示用，非结算依据。 */
     private final Map<String, Long> purchaseCounts = new LinkedHashMap<>();
     /** 商品条目 key → 该玩家当前周期限购窗口的开窗锚点 gameTime（见 {@link ShopPeriodLimiter}），
@@ -156,6 +159,14 @@ public class WalletAccount {
         bankDebtLastMs = value;
     }
 
+    public long getBankDebtDueMs() {
+        return bankDebtDueMs;
+    }
+
+    public void setBankDebtDueMs(long value) {
+        bankDebtDueMs = Math.max(0L, value);
+    }
+
     // ===== 已购买次数（展示用统计，不参与结算） =====
 
     public long getPurchaseCount(String key) {
@@ -239,6 +250,7 @@ public class WalletAccount {
             if (bankDebt.signum() > 0) tag.putByteArray(TAG_BANK_DEBT, bankDebt.toByteArray());
             if (bankDebtInterest.signum() > 0) tag.putByteArray(TAG_BANK_DEBT_INTEREST, bankDebtInterest.toByteArray());
             tag.putLong(TAG_BANK_DEBT_MS, bankDebtLastMs);
+            if (bankDebtDueMs > 0L) tag.putLong(TAG_BANK_DEBT_DUE, bankDebtDueMs);
         }
         CompoundTag pur = new CompoundTag();
         for (Map.Entry<String, Long> e : purchaseCounts.entrySet()) {
@@ -287,6 +299,7 @@ public class WalletAccount {
             acc.bankDebt = readPositive(tag, TAG_BANK_DEBT);
             acc.bankDebtInterest = readPositive(tag, TAG_BANK_DEBT_INTEREST);
             acc.bankDebtLastMs = tag.getLong(TAG_BANK_DEBT_MS);
+            acc.bankDebtDueMs = Math.max(0L, tag.getLong(TAG_BANK_DEBT_DUE));
         }
         CompoundTag pur = tag.getCompound(TAG_PURCHASES);
         for (String key : pur.getAllKeys()) {

@@ -18,10 +18,11 @@ public final class ClientShopBank {
         public final int depositRateBp;
         public final int loanRateBp;
         public final long maxLoan;
+        public final boolean overdue;
 
         public Snapshot(BigInteger depositPrincipal, BigInteger depositInterest,
                         BigInteger debtPrincipal, BigInteger debtInterest, BigInteger loanRoom,
-                        int depositRateBp, int loanRateBp, long maxLoan) {
+                        int depositRateBp, int loanRateBp, long maxLoan, boolean overdue) {
             this.depositPrincipal = nz(depositPrincipal);
             this.depositInterest = nz(depositInterest);
             this.debtPrincipal = nz(debtPrincipal);
@@ -30,6 +31,7 @@ public final class ClientShopBank {
             this.depositRateBp = depositRateBp;
             this.loanRateBp = loanRateBp;
             this.maxLoan = maxLoan;
+            this.overdue = overdue;
         }
 
         public BigInteger depositTotal() {

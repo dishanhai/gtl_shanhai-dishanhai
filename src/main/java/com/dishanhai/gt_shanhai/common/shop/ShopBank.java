@@ -115,6 +115,17 @@ public final class ShopBank {
         return reduce(settled, pay);
     }
 
+    /** 欠款还在，且当前时间已经到达或超过到期时刻。还清（合计为 0）后不再算逾期。 */
+    public static boolean overdue(BigInteger total, long dueMs, long now) {
+        return total != null && total.signum() > 0 && dueMs > 0L && now >= dueMs;
+    }
+
+    /** 新贷款的到期时刻。期限非正时返回 {@code now}。加法溢出时封顶。 */
+    public static long freshDue(long now, long termMs) {
+        if (termMs <= 0L || now >= Long.MAX_VALUE - Math.max(0L, termMs)) return now;
+        return now + termMs;
+    }
+
     /** 还可再借的星火。{@code cap} 小于等于已欠合计时返回 0。 */
     public static BigInteger room(Book book, BigInteger cap) {
         BigInteger owed = book == null ? BigInteger.ZERO : book.total();

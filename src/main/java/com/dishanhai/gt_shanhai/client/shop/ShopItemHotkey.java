@@ -2,11 +2,13 @@ package com.dishanhai.gt_shanhai.client.shop;
 
 import com.dishanhai.gt_shanhai.client.ShanhaiKeyMappings;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopScreenOpener;
+import com.dishanhai.gt_shanhai.common.shop.ShopGoodsIdentity;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
@@ -17,7 +19,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.util.List;
 import java.util.Objects;
 
-/** GuideME 风格的商店物品快捷跳转：悬停可购买物品并按住配置键 10 tick 后打开对应商品。 */
+/** GuideME 风格的商店快捷跳转：悬停可购买物品或流体，按住配置键 10 tick 后打开对应商品。 */
 public final class ShopItemHotkey {
 
     private static final int TICKS_TO_OPEN = 10;
@@ -27,21 +29,38 @@ public final class ShopItemHotkey {
     private ShopItemHotkey() {}
 
     public static void onItemTooltip(ItemTooltipEvent event) {
-        KeyMapping mapping = ShanhaiKeyMappings.OPEN_HOVERED_SHOP_ITEM;
-        Minecraft minecraft = Minecraft.getInstance();
-        if (mapping == null || mapping.isUnbound() || minecraft.player == null || minecraft.screen == null
-                || event.getItemStack().isEmpty()) {
+        if (event.getItemStack().isEmpty()) {
             HOLD_STATE.reset();
             return;
         }
-
         ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(event.getItemStack().getItem());
         if (itemId == null) {
             HOLD_STATE.reset();
             return;
         }
-        List<Long> entryKeys = ClientShopCatalog.keysOfGoodsId(itemId.toString());
-        if (entryKeys.isEmpty()) {
+        offer(event.getToolTip(), itemId.toString(), event.getItemStack().getTag());
+    }
+
+    /** 流体商品没有 NBT。悬停流体时传 null，按流体 ID 对上商店里的对应流体。 */
+    public static void offerFluid(List<Component> tooltip, ResourceLocation fluidId) {
+        if (fluidId == null) {
+            HOLD_STATE.reset();
+            return;
+        }
+        offer(tooltip, fluidId.toString(), null);
+    }
+
+    public static void offer(List<Component> tooltip, String id, CompoundTag nbt) {
+        KeyMapping mapping = ShanhaiKeyMappings.OPEN_HOVERED_SHOP_ITEM;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (mapping == null || mapping.isUnbound() || minecraft.player == null || minecraft.screen == null
+                || tooltip == null || id == null || id.isBlank()) {
+            HOLD_STATE.reset();
+            return;
+        }
+        String matchKey = ShopGoodsIdentity.key(id, nbt);
+        long resolved = ClientShopCatalog.keyOfHoveredGoods(id, nbt);
+        if (resolved < 0L) {
             HOLD_STATE.reset();
             return;
         }
@@ -49,12 +68,12 @@ public final class ShopItemHotkey {
         boolean held = isKeyHeld(mapping);
         if (newTick) {
             newTick = false;
-            long entryKey = HOLD_STATE.update(itemId.toString(), entryKeys.get(0), held);
+            long entryKey = HOLD_STATE.update(matchKey, resolved, held);
             if (entryKey >= 0L) {
                 ShopScreenOpener.requestOpenAt(entryKey);
             }
         }
-        addTooltip(event, mapping, held);
+        addTooltip(tooltip, mapping, held);
     }
 
     public static void onClientTick(TickEvent.ClientTickEvent event) {
@@ -81,12 +100,12 @@ public final class ShopItemHotkey {
         return InputConstants.isKeyDown(window, mapping.getKey().getValue());
     }
 
-    private static void addTooltip(ItemTooltipEvent event, KeyMapping mapping, boolean held) {
+    private static void addTooltip(List<Component> tooltip, KeyMapping mapping, boolean held) {
         MutableComponent prompt = Component.literal("按住 [").withStyle(ChatFormatting.DARK_GRAY)
                 .append(mapping.getTranslatedKeyMessage().copy().withStyle(ChatFormatting.GRAY))
                 .append(Component.literal("] 前往山海商店").withStyle(ChatFormatting.DARK_GRAY));
-        int insertAt = Math.min(1, event.getToolTip().size());
-        event.getToolTip().add(insertAt, HOLD_STATE.progressBar(prompt, held));
+        int insertAt = Math.min(1, tooltip.size());
+        tooltip.add(insertAt, HOLD_STATE.progressBar(prompt, held));
     }
 
     static final class HoldState {

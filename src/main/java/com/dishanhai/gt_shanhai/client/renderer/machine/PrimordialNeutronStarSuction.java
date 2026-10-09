@@ -5,9 +5,8 @@ package com.dishanhai.gt_shanhai.client.renderer.machine;
  * <p>
  * 坐标系与伪神锻光束一致：原点是星心，光束截面在 XY，光束沿 -Z 指向机头。
  * 星球从机头外侧走进环包裹的中子星区，停一下再返回。
- * 环带沿光束是实心圆盘。贴着法线 {@code (-sin θ, cos θ)} 走时，环面分量为 0，
- * 环自己转也不会把球卷进去。两环叠在一起就改骑较厚的那一圈；法线还没盖住，
- * 先在环口横向改道，到位再穿。判定比真实环带宽一截，避免停在带边上被下一刻卷进去。
+ * 环核才是整圈实心，支架只占光束附近一小段角度，空区不算挡住。
+ * 支架转到面前时贴着法线 {@code (-sin θ, cos θ)} 改道，避免停在带边上被下一刻卷进去。
  * <p>
  * 轨迹在客户端渲染线程上按时间积分。
  */
@@ -70,6 +69,7 @@ final class PrimordialNeutronStarSuction {
     private static float aimY;
     private static float heldX;
     private static float heldY;
+    private static int activeIndex;
 
     private PrimordialNeutronStarSuction() {}
 
@@ -124,10 +124,17 @@ final class PrimordialNeutronStarSuction {
     }
 
     private static void step(int index, float tick, float dt, float starRadius, float planetRadius) {
+        activeIndex = index;
         float x = CURSOR_X[index];
         float y = CURSOR_Y[index];
         float z = CURSOR_Z[index];
-        float xySpeed = LATERAL_SPEED * dt;
+        float xySpeed = (index == COUNT ? 3.2f : LATERAL_SPEED) * dt;
+        if (keepOffRing(index, tick, xySpeed, starRadius, planetRadius)) {
+            advancePhase(index, tick, dt, starRadius, planetRadius);
+            return;
+        }
+        x = CURSOR_X[index];
+        y = CURSOR_Y[index];
         float zSpeed = ALONG_SPEED * dt;
         float goal = goalZ(index, starRadius, planetRadius);
         float fat = planetRadius + SWEEP;
@@ -136,9 +143,40 @@ final class PrimordialNeutronStarSuction {
             zTry = retreatZ(z, zSpeed, fat);
         }
 
+        boolean pastLarge = PHASE[index] == PHASE_OUT
+                && -z >= PrimordialEngineRingOffset.bandOuter(
+                        PrimordialEngineRingOffset.LARGE, planetRadius);
+        if (index == COUNT && zTry != z) {
+            chooseAim(index, tick, zTry, goal, planetRadius, starRadius, x, y);
+            if (Math.hypot(x - aimX, y - aimY) < 2.5f
+                    && slideFat(x, y, aimX, aimY, zTry, tick, starRadius, planetRadius, xySpeed, false)
+                    && clear(heldX, heldY, zTry, tick, starRadius, planetRadius)) {
+                CURSOR_X[index] = heldX;
+                CURSOR_Y[index] = heldY;
+                CURSOR_Z[index] = zTry;
+                advancePhase(index, tick, dt, starRadius, planetRadius);
+                return;
+            }
+        }
+        if (pastLarge && zTry != z) {
+            chooseAim(index, tick, zTry, goal, planetRadius, starRadius, x, y);
+            if (slideFat(x, y, aimX, aimY, zTry, tick, starRadius, planetRadius, xySpeed, false)
+                    && clear(heldX, heldY, zTry, tick, starRadius, planetRadius)) {
+                CURSOR_X[index] = heldX;
+                CURSOR_Y[index] = heldY;
+                CURSOR_Z[index] = zTry;
+                settle(index, tick, xySpeed, starRadius, planetRadius);
+                advancePhase(index, tick, dt, starRadius, planetRadius);
+                return;
+            }
+        }
         if (zTry != z) {
             chooseAim(index, tick, zTry, goal, planetRadius, starRadius, x, y);
-            if (slideFat(x, y, aimX, aimY, zTry, tick, starRadius, planetRadius, xySpeed, true)
+            int pair = index == COUNT ? 1 : 2;
+            boolean crowded = hardCount(zTry, fat) >= pair
+                    && Math.hypot(x - aimX, y - aimY) > 1.5f;
+            if (!crowded
+                    && slideFat(x, y, aimX, aimY, zTry, tick, starRadius, planetRadius, xySpeed, true)
                     && corridorFat(x, y, heldX, heldY, z, zTry, tick, starRadius, planetRadius)) {
                 CURSOR_X[index] = heldX;
                 CURSOR_Y[index] = heldY;
@@ -155,6 +193,63 @@ final class PrimordialNeutronStarSuction {
         }
         settle(index, tick, xySpeed, starRadius, planetRadius);
         advancePhase(index, tick, dt, starRadius, planetRadius);
+    }
+
+    /** 已经擦到实心环时，就近挪进空区或环带外面。只动这一步的横移。 */
+    private static boolean keepOffRing(int index, float tick, float xySpeed, float starRadius, float planetRadius) {
+        float x = CURSOR_X[index];
+        float y = CURSOR_Y[index];
+        float z = CURSOR_Z[index];
+        if (realClear(x, y, z, tick, starRadius, planetRadius)) {
+            return false;
+        }
+        float best = xySpeed + 0.01f;
+        float bestX = x;
+        float bestY = y;
+        boolean found = false;
+        float len = (float) Math.hypot(x, y);
+        for (int dir = -1; dir <= 1; dir += 2) {
+            if (len < 0.3f) break;
+            float sx = x + x / len * xySpeed * dir;
+            float sy = y + y / len * xySpeed * dir;
+            if (!realClear(sx, sy, z, tick, starRadius, planetRadius)) continue;
+            bestX = sx;
+            bestY = sy;
+            found = true;
+            break;
+        }
+        if (!found) {
+            for (int sector = 0; sector < 16; sector++) {
+                double angle = sector * Math.PI / 8.0;
+                float dx = (float) Math.cos(angle);
+                float dy = (float) Math.sin(angle);
+                for (int step = 4; step >= 1; step--) {
+                    float dist = xySpeed * step / 4.0f;
+                    float sx = x + dx * dist;
+                    float sy = y + dy * dist;
+                    if (!realClear(sx, sy, z, tick, starRadius, planetRadius)) continue;
+                    if (dist < best) {
+                        best = dist;
+                        bestX = sx;
+                        bestY = sy;
+                        found = true;
+                    }
+                }
+            }
+        }
+        if (!found) return false;
+        CURSOR_X[index] = bestX;
+        CURSOR_Y[index] = bestY;
+        return true;
+    }
+
+    private static boolean realClear(float x, float y, float z, float tick, float starRadius, float planetRadius) {
+        if (!starClear(x, y, z, starRadius, planetRadius)) return false;
+        for (int ring = 0; ring < PrimordialEngineRingOffset.COUNT; ring++) {
+            float angle = PrimordialEngineRingOffset.angleDegrees(ring, tick);
+            if (!PrimordialEngineRingOffset.clearsRing(x, y, z, ring, angle, planetRadius)) return false;
+        }
+        return true;
     }
 
     /** 往目标走，停在仍算干净的最远点。{@code fatOnly} 时必须留有扫掠余量。 */
@@ -208,6 +303,13 @@ final class PrimordialNeutronStarSuction {
         int ring = worstRing(x, y, z, tick, planetRadius + SWEEP);
         if (ring < 0) ring = worstRing(x, y, z, tick, planetRadius);
         if (ring < 0) ring = nearestRing(-z, planetRadius + SWEEP);
+        if (activeIndex == COUNT && clear(x, y, z, tick, starRadius, planetRadius)) {
+            float sign = closerSign(tick, 2, planetRadius, x, y);
+            float harbor = (float) Math.hypot(
+                    x - normalX(tick, 2, sign, planetRadius),
+                    y - normalY(tick, 2, sign, planetRadius));
+            if (harbor < 1.2f) return;
+        }
         if (slideOnto(index, x, y, z, tick, xySpeed, starRadius, planetRadius, ring, true)) return;
         if (!clear(x, y, z, tick, starRadius, planetRadius)) {
             if (slideOnto(index, x, y, z, tick, xySpeed, starRadius, planetRadius, ring, false)) return;
@@ -373,6 +475,17 @@ final class PrimordialNeutronStarSuction {
                                  float starRadius, float fromX, float fromY) {
         boolean inward = PHASE[index] == PHASE_IN || PHASE[index] == PHASE_LINGER;
         float along = -z;
+        if (index == COUNT && along < 60.0f) {
+            float plus = closerSign(tick, 2, planetRadius, fromX, fromY);
+            if (normalReal(tick, z, 2, plus, planetRadius, starRadius)) {
+                writeNormal(tick, 2, plus, planetRadius);
+                return;
+            }
+            if (normalReal(tick, z, 2, -plus, planetRadius, starRadius)) {
+                writeNormal(tick, 2, -plus, planetRadius);
+                return;
+            }
+        }
         float bandRadius = planetRadius + SWEEP;
         int hard0 = -1;
         int hard1 = -1;
@@ -474,6 +587,11 @@ final class PrimordialNeutronStarSuction {
                 z, tick, starRadius, planetRadius);
     }
 
+    private static boolean normalReal(float tick, float z, int ring, float sign, float planetRadius, float starRadius) {
+        return clear(normalX(tick, ring, sign, planetRadius), normalY(tick, ring, sign, planetRadius),
+                z, tick, starRadius, planetRadius);
+    }
+
     private static void writeSticky(float tick, int ring, float planetRadius, float fromX, float fromY) {
         writeNormal(tick, ring, closerSign(tick, ring, planetRadius, fromX, fromY), planetRadius);
     }
@@ -544,21 +662,42 @@ final class PrimordialNeutronStarSuction {
         return true;
     }
 
+    /** 走位仍按支架尖端留出整圈余量。空区判定交给 {@link PrimordialEngineRingOffset#clearsRing}。 */
     private static boolean fatClear(float x, float y, float z, float tick, float starRadius, float planetRadius) {
-        if (!starClear(x, y, z, starRadius, planetRadius)) return false;
-        float fat = planetRadius + SWEEP;
-        for (int ring = 0; ring < PrimordialEngineRingOffset.COUNT; ring++) {
-            float angle = PrimordialEngineRingOffset.angleDegrees(ring, tick);
-            if (!PrimordialEngineRingOffset.clearsRing(x, y, z, ring, angle, fat)) return false;
-        }
-        return true;
+        return starClear(x, y, z, starRadius, planetRadius)
+                && outsideSlab(x, y, z, tick, planetRadius + SWEEP);
     }
 
     private static boolean clear(float x, float y, float z, float tick, float starRadius, float planetRadius) {
         if (!starClear(x, y, z, starRadius, planetRadius)) return false;
+        if (!outsideSlab(x, y, z, tick, planetRadius)) return false;
+        if (activeIndex != COUNT) return true;
         for (int ring = 0; ring < PrimordialEngineRingOffset.COUNT; ring++) {
             float angle = PrimordialEngineRingOffset.angleDegrees(ring, tick);
-            if (!PrimordialEngineRingOffset.clearsRing(x, y, z, ring, angle, planetRadius)) return false;
+            float radial = PrimordialEngineRingOffset.ringRadial(x, y, z, angle);
+            float inner = PrimordialEngineRingOffset.bandInner(ring, planetRadius);
+            float outer = PrimordialEngineRingOffset.bandOuter(ring, planetRadius);
+            if (radial < inner || radial > outer) continue;
+            float margin = Math.abs(PrimordialEngineRingOffset.planeDistance(x, y, angle)) + 0.05f
+                    - (PrimordialEngineRingOffset.halfThickness(ring) + planetRadius);
+            double radians = Math.toRadians(angle);
+            float inPlane = (float) (y * Math.sin(radians) + x * Math.cos(radians));
+            if (margin < 1.0f && Math.abs(inPlane) > 4.0f) return false;
+        }
+        return true;
+    }
+
+    private static boolean outsideSlab(float x, float y, float z, float tick, float radius) {
+        for (int ring = 0; ring < PrimordialEngineRingOffset.COUNT; ring++) {
+            float angle = PrimordialEngineRingOffset.angleDegrees(ring, tick);
+            float radial = PrimordialEngineRingOffset.ringRadial(x, y, z, angle);
+            float inner = PrimordialEngineRingOffset.bandInner(ring, radius);
+            float outer = PrimordialEngineRingOffset.bandOuter(ring, radius);
+            if (radial < inner || radial > outer) continue;
+            if (Math.abs(PrimordialEngineRingOffset.planeDistance(x, y, angle)) + 0.05f
+                    < PrimordialEngineRingOffset.halfThickness(ring) + radius) {
+                return false;
+            }
         }
         return true;
     }

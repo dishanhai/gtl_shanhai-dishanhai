@@ -34,6 +34,24 @@ class ShopCatalogCodecsTest {
         assertEquals(1, decoded.stubs().size());
         assertEquals("mod:disk", decoded.stubs().get(0).goodsIds().get(0));
         assertEquals("00000000000004D2", decoded.stubs().get(0).prereqQuestId());
+        assertEquals(List.of(), decoded.stubs().get(0).goodsMatchKeys());
+    }
+
+    @Test
+    void manifestRoundTripsGoodsMatchKeys() throws Exception {
+        Class<?> codecs = Class.forName("com.dishanhai.gt_shanhai.network.ShopCatalogCodecs");
+        Method write = codecs.getMethod("writeManifest", FriendlyByteBuf.class, ShopCatalogManifest.class);
+        Method read = codecs.getMethod("readManifest", FriendlyByteBuf.class);
+        ShopCatalogManifest source = new ShopCatalogManifest(7L, true, List.of(
+                new ShopCatalogManifest.Stub(1L, "磁盘", "", "", "", false,
+                        0, "", "原木磁盘阵列", List.of("gt_shanhai:super_disk_array"), "stable-1", "",
+                        List.of("gt_shanhai:super_disk_array\u0000abc"))), java.util.Map.of());
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+
+        write.invoke(null, buffer, source);
+        ShopCatalogManifest decoded = (ShopCatalogManifest) read.invoke(null, buffer);
+
+        assertEquals(List.of("gt_shanhai:super_disk_array\u0000abc"), decoded.stubs().get(0).goodsMatchKeys());
     }
 
     @Test

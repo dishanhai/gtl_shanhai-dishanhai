@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.jei;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiFluidTooltipAPI;
 import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopJeiMode;
 import com.dishanhai.gt_shanhai.client.gui.shop.JeiItemOrderHolder;
 import com.dishanhai.gt_shanhai.common.machine.DShanhaiMachines;
 import com.dishanhai.gt_shanhai.integration.jei.JeiPatternQuickEncodeButtons;
@@ -41,6 +42,10 @@ public class ShanhaiJEIPlugin implements IModPlugin {
 
     @Override
     public void registerAdvanced(IAdvancedRegistration registration) {
+        var guiHelper = registration.getJeiHelpers().getGuiHelper();
+        ClientShopJeiMode.setButtonIcons(
+                guiHelper.createDrawableItemStack(new ItemStack(net.minecraft.world.item.Items.EMERALD)),
+                guiHelper.createDrawableItemStack(new ItemStack(net.minecraft.world.item.Items.CHEST)));
         JeiPatternQuickEncodeButtons.register(registration);
     }
 

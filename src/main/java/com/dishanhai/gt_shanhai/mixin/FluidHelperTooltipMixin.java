@@ -2,9 +2,12 @@ package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiFluidTooltipAPI;
 import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
+import com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.registries.ForgeRegistries;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -22,6 +25,10 @@ public class FluidHelperTooltipMixin {
     @Inject(method = "getTooltip", at = @At("TAIL"), remap = false)
     private void addShanhaiFluidTooltip(List<Component> tooltip, FluidStack fluidStack, TooltipFlag tooltipFlag, CallbackInfo ci) {
         try {
+            if (fluidStack != null && !fluidStack.isEmpty()) {
+                ResourceLocation id = ForgeRegistries.FLUIDS.getKey(fluidStack.getFluid());
+                ShopItemHotkey.offerFluid(tooltip, id);
+            }
             String fluidId = fluidStack.getFluid().builtInRegistryHolder().key().location().toString();
             String[] lines = DShanhaiFluidTooltipAPI.getEntryLines(fluidId);
             if (lines == null || lines.length == 0) return;

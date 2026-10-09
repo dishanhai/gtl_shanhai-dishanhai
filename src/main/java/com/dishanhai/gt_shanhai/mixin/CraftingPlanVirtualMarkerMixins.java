@@ -1,16 +1,20 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import appeng.api.crafting.IPatternDetails;
 import appeng.api.networking.IGrid;
 import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.api.networking.crafting.ICraftingService;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
+import appeng.api.storage.MEStorage;
 import appeng.menu.me.crafting.CraftingPlanSummary;
 import appeng.menu.me.crafting.CraftingPlanSummaryEntry;
 
+import com.dishanhai.gt_shanhai.common.ae2.AeCycleSkipLabel;
 import com.dishanhai.gt_shanhai.common.ae2.CraftingPlanOverflowDetector;
 import com.dishanhai.gt_shanhai.common.ae2.CraftingRecursionDetector;
 import com.dishanhai.gt_shanhai.common.ae2.FeasiblePatternDemotions;
+import com.dishanhai.gt_shanhai.common.ae2.FeasiblePatternOrder;
 import com.dishanhai.gt_shanhai.common.item.CraftingPlanVirtualMarkerAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 
@@ -30,6 +34,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public final class CraftingPlanVirtualMarkerMixins {
@@ -38,6 +43,8 @@ public final class CraftingPlanVirtualMarkerMixins {
     private static final int MAX_SYNCED_PATH = 6;
     /** 单次计划最多做几次递归检测，避免大计划里逐项深搜。 */
     private static final int MAX_DETECTIONS_PER_PLAN = 24;
+    /** 单次计划最多核对几项「回环样板有没有被换掉」。 */
+    private static final int MAX_CYCLE_LABELS_PER_PLAN = 8;
 
     private CraftingPlanVirtualMarkerMixins() {}
 
@@ -190,11 +197,33 @@ public final class CraftingPlanVirtualMarkerMixins {
             ICraftingService craftingService = grid == null ? null : grid.getCraftingService();
             Set<AEKey> overflowKeys = CraftingPlanOverflowDetector.collectOverflowKeys(job);
             int detections = 0;
+            // 图引擎打开界面时，fromJob 收到的是一份空 patternTimes 的替身计划。
+            // 真正用了哪张样板在 AeGraphPlan 上，树计算写进 CraftingPlan 的让位标记这里读不到。
+            AeGraphPlan shownGraph = job instanceof AeGraphPlan direct
+                    ? direct
+                    : GraphSummaryContext.graphPlan(job);
+            Map<IPatternDetails, Long> usedPatterns = shownGraph != null
+                    ? shownGraph.patternTimes()
+                    : job.patternTimes();
+            MEStorage storage = grid == null || grid.getStorageService() == null
+                    ? null
+                    : grid.getStorageService().getInventory();
+            FeasiblePatternOrder.Lookup cycleLookup = craftingService == null
+                    ? null
+                    : AeCycleSkipLabel.network(craftingService, storage, actionSource);
+            int cycleChecks = 0;
 
             for (CraftingPlanSummaryEntry entry : summary.getEntries()) {
                 if (!(entry instanceof CraftingPlanVirtualMarkerAccess access)) continue;
                 if (FeasiblePatternDemotions.wasDemoted(job, entry.getWhat())) {
                     access.gtShanhai$setCycleDemoted(true);
+                } else if (cycleLookup != null && entry.getCraftAmount() > 0L
+                        && cycleChecks < MAX_CYCLE_LABELS_PER_PLAN) {
+                    cycleChecks++;
+                    if (AeCycleSkipLabel.skipped(craftingService, usedPatterns, entry.getWhat(),
+                            entry.getCraftAmount(), cycleLookup)) {
+                        access.gtShanhai$setCycleDemoted(true);
+                    }
                 }
                 if (requirements.containsKey(entry.getWhat())) {
                     access.gtShanhai$setVirtualPresence(true);

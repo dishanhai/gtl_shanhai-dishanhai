@@ -16,7 +16,15 @@ public final class ShopCatalogManifest {
      */
     public record Stub(long entryKey, String top, String sub, String sub2, String sub3, boolean hidden,
                        int chunkId, String linkKey, String displayName, List<String> goodsIds, String stableId,
-                       String prereqQuestId) {
+                       String prereqQuestId, List<String> goodsMatchKeys) {
+        /** 旧调用方没有 NBT 身份；空表表示这条商品只能按物品 ID 区分。 */
+        public Stub(long entryKey, String top, String sub, String sub2, String sub3, boolean hidden,
+                    int chunkId, String linkKey, String displayName, List<String> goodsIds, String stableId,
+                    String prereqQuestId) {
+            this(entryKey, top, sub, sub2, sub3, hidden, chunkId, linkKey, displayName, goodsIds, stableId,
+                    prereqQuestId, List.of());
+        }
+
         public Stub {
             top = top == null ? "" : top;
             sub = sub == null ? "" : sub;
@@ -27,6 +35,7 @@ public final class ShopCatalogManifest {
             goodsIds = goodsIds == null ? List.of() : List.copyOf(goodsIds);
             stableId = stableId == null ? "" : stableId;
             prereqQuestId = prereqQuestId == null ? "" : prereqQuestId;
+            goodsMatchKeys = goodsMatchKeys == null ? List.of() : List.copyOf(goodsMatchKeys);
         }
     }
 

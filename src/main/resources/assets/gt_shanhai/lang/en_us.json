@@ -506,6 +506,9 @@
   "message.gt_shanhai.jei.bookmark.no_items": "No recipe inputs match the current mode",
   "message.gt_shanhai.jei.bookmark.open_terminal": "Open an AE network terminal before checking storage or pattern processes",
   "message.gt_shanhai.jei.bookmark.added": "Checked %s recipe input(s); added %s JEI bookmark(s)",
-  "message.gt_shanhai.jei.bookmark.already_bookmarked": "The recipe inputs are already bookmarked in JEI"
+  "message.gt_shanhai.jei.bookmark.already_bookmarked": "The recipe inputs are already bookmarked in JEI",
+  "tooltip.gt_shanhai.jei.shop_mode": "Toggle the Shanhai shop product list",
+  "message.gt_shanhai.jei.shop_mode.enabled": "Showing Shanhai shop products",
+  "message.gt_shanhai.jei.shop_mode.disabled": "Restored the normal JEI ingredient list"
 }
 

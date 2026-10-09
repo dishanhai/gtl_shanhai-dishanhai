@@ -28,6 +28,7 @@ public class ShopBankQueryPacket {
     private final int depositRateBp;
     private final int loanRateBp;
     private final long maxLoan;
+    private final boolean overdue;
 
     public ShopBankQueryPacket(WalletAccountAPI.BankView view) {
         WalletAccountAPI.BankView src = view;
@@ -41,6 +42,7 @@ public class ShopBankQueryPacket {
         this.depositRateBp = src.depositRateBp;
         this.loanRateBp = src.loanRateBp;
         this.maxLoan = src.maxLoan;
+        this.overdue = src.overdue;
     }
 
     public ShopBankQueryPacket(FriendlyByteBuf buf) {
@@ -54,6 +56,7 @@ public class ShopBankQueryPacket {
         this.depositRateBp = buf.readVarInt();
         this.loanRateBp = buf.readVarInt();
         this.maxLoan = buf.readVarLong();
+        this.overdue = buf.readBoolean();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -67,6 +70,7 @@ public class ShopBankQueryPacket {
         buf.writeVarInt(depositRateBp);
         buf.writeVarInt(loanRateBp);
         buf.writeVarLong(maxLoan);
+        buf.writeBoolean(overdue);
     }
 
     /** 服务端：把该玩家当前的存款/欠款快照（含惰性结息副作用）推给客户端。 */
@@ -88,7 +92,7 @@ public class ShopBankQueryPacket {
     private static void applyClient(ShopBankQueryPacket pkt) {
         com.dishanhai.gt_shanhai.client.shop.ClientShopBank.apply(new com.dishanhai.gt_shanhai.client.shop.ClientShopBank.Snapshot(
                 pkt.depositPrincipal, pkt.depositInterest, pkt.debtPrincipal, pkt.debtInterest,
-                pkt.loanRoom, pkt.depositRateBp, pkt.loanRateBp, pkt.maxLoan));
+                pkt.loanRoom, pkt.depositRateBp, pkt.loanRateBp, pkt.maxLoan, pkt.overdue));
     }
 
     private static void writeBi(FriendlyByteBuf buf, BigInteger value) {
