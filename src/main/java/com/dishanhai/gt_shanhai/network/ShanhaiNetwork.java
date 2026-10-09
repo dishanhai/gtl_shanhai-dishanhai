@@ -570,6 +570,14 @@ public class ShanhaiNetwork {
                 RecipeEditorEncodePacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        CHANNEL.registerMessage(
+                packetId++,
+                RecipeEditorJeiOpenPacket.class,
+                RecipeEditorJeiOpenPacket::encode,
+                RecipeEditorJeiOpenPacket::new,
+                RecipeEditorJeiOpenPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         RecipeSyncPacket.init();
     }
 

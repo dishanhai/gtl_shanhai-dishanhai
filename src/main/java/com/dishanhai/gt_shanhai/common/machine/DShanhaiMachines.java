@@ -5,6 +5,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.shanhai.common.compat.GtlAddCompat;
 
 import com.gregtechceu.gtceu.api.data.RotationState;
 import com.gregtechceu.gtceu.api.item.MetaMachineItem;
@@ -415,7 +416,8 @@ public class DShanhaiMachines {
                         GTLRecipeTypes.FISHING_GROUND_RECIPES,
                         GTLRecipeTypes.DISSOLUTION_TREATMENT,
                         GTLRecipeTypes.DIGESTION_TREATMENT,
-                        GTLRecipeTypes.DESULFURIZER_RECIPES
+                        GTLRecipeTypes.DESULFURIZER_RECIPES,
+                        GtlAddCompat.evolutionOfPrimordial()
                         )
                 .pattern(PrimordialAbyssalRefineryStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
@@ -428,8 +430,8 @@ public class DShanhaiMachines {
         PRIMORDIAL_ABYSSAL_REFINERY.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createUltimateRainbow("渊薮不涸，万物归流——虚空之下，皆是待炼之料"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
-            tooltips.add(Component.literal("§b从虚空钻探到深海渔场，从石化裂解到煮解脱硫，七源归一"));
-            tooltips.add(Component.literal("§7配方类型：虚空流体钻机 / 石化工厂 / 木材干馏 / 渔场 / 溶解 / 煮解 / 脱硫"));
+            tooltips.add(Component.literal("§b从虚空钻探到深海渔场，从石化裂解到煮解脱硫，八源归一"));
+            tooltips.add(Component.literal("§7配方类型：虚空流体钻机 / 石化工厂 / 木材干馏 / 渔场 / 溶解 / 煮解 / 脱硫 / 太素衍化"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f并行，直接从电网取电")));

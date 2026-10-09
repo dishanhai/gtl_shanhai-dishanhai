@@ -131,7 +131,7 @@ public class ClientInit {
      */
     private static void onClientLoggingIn(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingIn event) {
         var modList = net.minecraftforge.fml.ModList.get();
-        if (!modList.isLoaded("jei") || modList.isLoaded("jei_optimize")) return;
+        if (!modList.isLoaded("jei") || modList.isLoaded("jeioptimize")) return ;
         var player = event.getPlayer();
         if (player == null) return;
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal(

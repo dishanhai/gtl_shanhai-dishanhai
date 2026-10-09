@@ -135,9 +135,15 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         addWidget(status);
         setStage(STAGE_SELECT, false);
         if (isClient()) {
-            requestDraftLoad();
-            ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorMachinePacket(ItemStack.EMPTY));
-            query();
+            String[] opened = ShanhaiRecipeEditorLaunch.consume();
+            if (opened != null) {
+                draftLoadPending = false;
+                requestDetail(new ShanhaiRecipeQuery.Card(opened[0], opened[1], 0, 0, ""));
+            } else {
+                requestDraftLoad();
+                ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorMachinePacket(ItemStack.EMPTY));
+                query();
+            }
         }
     }
 

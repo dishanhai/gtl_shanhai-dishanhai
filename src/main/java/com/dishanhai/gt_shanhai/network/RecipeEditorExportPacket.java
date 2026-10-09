@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.common.recipe.RecipeOriginalSnapshotStore;
 import com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase;
@@ -36,11 +37,18 @@ import java.util.function.Supplier;
  * {@code kubejs/data/Exported_Recipe/<type>/<namespace>/<path>.json}.
  * {@code <type>} is the path of the recipe type id ({@code gtceu:qft} → {@code qft}).
  * {@code Exported_Recipe} is only a folder, not a recipe namespace.
+ * <p>
+ * {@code developerMode} writes straight into the mod datapack
+ * {@code data/gt_shanhai/recipes/<recipe path>.json}.
  */
 public final class RecipeEditorExportPacket {
 
     /** 集中存放导出 json 的文件夹。不是配方命名空间。 */
     private static final String EXPORT_BUCKET = "Exported_Recipe";
+
+    /** 开发模式的模组源码配方目录。只在 developerMode 打开时使用。 */
+    private static final Path DEV_RECIPE_ROOT = Path.of(
+            "C:/Users/dishanhai/Desktop/gt_shanhai/src/main/resources/data/gt_shanhai/recipes");
 
     private static final Gson PRETTY = new GsonBuilder()
             .disableHtmlEscaping()
@@ -182,19 +190,26 @@ public final class RecipeEditorExportPacket {
             }
             writeEnabledCondition(encoded.getAsJsonObject(), exportId);
 
-            Path root = FMLPaths.GAMEDIR.get()
-                    .resolve("kubejs").resolve("data").resolve(EXPORT_BUCKET)
-                    .toAbsolutePath().normalize();
-            Path file = root.resolve(typeId.getPath())
-                    .resolve(exportId.getNamespace())
-                    .resolve(exportId.getPath() + ".json")
-                    .normalize();
+            boolean developer = developerExport();
+            Path root = developer
+                    ? DEV_RECIPE_ROOT.toAbsolutePath().normalize()
+                    : FMLPaths.GAMEDIR.get()
+                            .resolve("kubejs").resolve("data").resolve(EXPORT_BUCKET)
+                            .toAbsolutePath().normalize();
+            Path file = developer
+                    ? root.resolve(exportId.getPath() + ".json").normalize()
+                    : root.resolve(typeId.getPath())
+                            .resolve(exportId.getNamespace())
+                            .resolve(exportId.getPath() + ".json")
+                            .normalize();
             if (!file.startsWith(root)) return invalid("invalid-export-path");
             Files.createDirectories(file.getParent());
             Files.writeString(file, PRETTY.toJson(encoded), StandardCharsets.UTF_8);
 
-            String relative = "kubejs/data/" + EXPORT_BUCKET + "/" + typeId.getPath()
-                    + "/" + exportId.getNamespace() + "/" + exportId.getPath() + ".json";
+            String relative = developer
+                    ? file.toString()
+                    : "kubejs/data/" + EXPORT_BUCKET + "/" + typeId.getPath()
+                            + "/" + exportId.getNamespace() + "/" + exportId.getPath() + ".json";
             return new RecipeEditorResultPacket(
                     RecipeEditorResultPacket.Status.SUCCESS,
                     "export",
@@ -229,6 +244,14 @@ public final class RecipeEditorExportPacket {
         condition.addProperty("defaultEnabled", false);
         conditions.add(condition);
         recipe.add("conditions", conditions);
+    }
+
+    private static boolean developerExport() {
+        try {
+            return DShanhaiConfig.COMMON.developerMode.get();
+        } catch (IllegalStateException notLoaded) {
+            return false;
+        }
     }
 
     private static RecipeEditorResultPacket invalid(String message) {

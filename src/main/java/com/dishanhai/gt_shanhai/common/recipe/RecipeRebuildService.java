@@ -151,6 +151,67 @@ public final class RecipeRebuildService {
         return materializeAddition(recipeTypeId, entry);
     }
 
+    /**
+     * Types that have never been rebuilt are absent from the snapshot. JEI still shows
+     * those recipes, so capture the live match before declaring it missing.
+     * Returns the type id the snapshot was stored under.
+     */
+    public static String captureLive(String recipeTypeId, String recipeId) {
+        if (recipeId == null || recipeId.isEmpty()) return null;
+        String scanned = scanLookup(recipeTypeId, recipeId);
+        if (scanned != null) return scanned;
+        String fromManager = captureFromManager(recipeId);
+        if (fromManager != null) return fromManager;
+        if (recipeTypeId != null && !recipeTypeId.isEmpty()) {
+            for (GTRecipeType type : GTRegistries.RECIPE_TYPES) {
+                if (type == null || type.registryName == null) continue;
+                String typeId = type.registryName.toString();
+                if (typeId.equals(recipeTypeId)) continue;
+                scanned = scanLookup(typeId, recipeId);
+                if (scanned != null) return scanned;
+            }
+        }
+        return null;
+    }
+
+    private static String scanLookup(String recipeTypeId, String recipeId) {
+        GTRecipeType type = resolveType(recipeTypeId);
+        if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) return null;
+        GTRecipe[] found = new GTRecipe[1];
+        DShanhaiRecipeModifierAPI.SUPPRESS_GET_RECIPES_STRIP.set(true);
+        try {
+            type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
+                if (found[0] != null || recipe == null || recipe.getId() == null) return;
+                if (recipeId.equals(recipe.getId().toString())) found[0] = recipe;
+            });
+        } finally {
+            DShanhaiRecipeModifierAPI.SUPPRESS_GET_RECIPES_STRIP.set(false);
+        }
+        if (found[0] == null) return null;
+        String actualType = found[0].recipeType != null && found[0].recipeType.registryName != null
+                ? found[0].recipeType.registryName.toString() : recipeTypeId;
+        RecipeOriginalSnapshotStore.capture(actualType, found[0]);
+        return editableOf(actualType, recipeId) == null ? null : actualType;
+    }
+
+    private static String captureFromManager(String recipeId) {
+        ResourceLocation id = ResourceLocation.tryParse(recipeId);
+        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (id == null || server == null) return null;
+        net.minecraft.world.item.crafting.Recipe<?> recipe =
+                server.getRecipeManager().byKey(id).orElse(null);
+        if (!(recipe instanceof GTRecipe gt) || gt.getId() == null
+                || gt.recipeType == null || gt.recipeType.registryName == null) {
+            return null;
+        }
+        String actualType = gt.recipeType.registryName.toString();
+        if (!recipeId.equals(gt.getId().toString())) return null;
+        String scanned = scanLookup(actualType, recipeId);
+        if (scanned != null) return scanned;
+        RecipeOriginalSnapshotStore.capture(actualType, gt);
+        return editableOf(actualType, recipeId) == null ? null : actualType;
+    }
+
     /** A recipe assembled only from an editor payload, with no snapshot template. */
     public static GTRecipe materializeFresh(String recipeTypeId, ShanhaiRecipeBase base) {
         if (base == null) return null;

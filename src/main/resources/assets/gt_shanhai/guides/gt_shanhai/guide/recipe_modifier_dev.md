@@ -65,7 +65,7 @@ item_ids:
 * 保留原配方：原配方继续存在。配方 ID 必须改成一条还不存在的新 ID，提交后两条同时留下。
 * 可以在这里增删配方条件。
 * 快速编写为样板：按当前审核稿编码处理样板并上传。需要身上有连上 ME 网络的无线终端，网络里还要有 1 张空白样板。
-* 导出配方为 json：写到 `kubejs/data/Exported_Recipe/` 下，按配方类型、命名空间和路径分文件。导出不代替提交。
+* 导出配方为 json：默认写到 `kubejs/data/Exported_Recipe/`，按配方类型、命名空间和路径分文件。`gt_shanhai-common.toml` 里 `developerMode = true` 时，直接写到模组源码 `data/gt_shanhai/recipes/`，路径跟配方 id 的路径一致。导出不代替提交。
 * 提交并刷新 JEI：服务端重算指纹、写入覆盖并重建该配方类型。配方 ID 使用小写的 `命名空间:路径`。若中途配方已被别人改过，提交会因指纹不符而拒绝。
 
 </Column>

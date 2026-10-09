@@ -204,10 +204,27 @@ public final class ShanhaiRecipeQuery {
         return List.copyOf(groups);
     }
 
+    public record Located(String typeId, String recipeId, ShanhaiRecipeBase base) {}
+
     public static Optional<ShanhaiRecipeBase> get(String typeId, String recipeId) {
-        GTRecipe effective = RecipeRebuildService.editableOf(typeId, recipeId);
-        return effective == null
-                ? Optional.empty() : Optional.ofNullable(ShanhaiRecipeBase.from(effective));
+        Located located = locate(typeId, recipeId);
+        return located == null ? Optional.empty() : Optional.of(located.base());
+    }
+
+    /** Snapshot hit, or a live lookup capture for a type that has not been rebuilt yet. */
+    public static Located locate(String typeId, String recipeId) {
+        if (recipeId == null || recipeId.isEmpty()) return null;
+        String type = typeId == null ? "" : typeId;
+        ShanhaiRecipeBase direct = baseOf(RecipeRebuildService.editableOf(type, recipeId));
+        if (direct != null) return new Located(type, recipeId, direct);
+        String liveType = RecipeRebuildService.captureLive(type, recipeId);
+        if (liveType == null || liveType.isEmpty()) return null;
+        ShanhaiRecipeBase live = baseOf(RecipeRebuildService.editableOf(liveType, recipeId));
+        return live == null ? null : new Located(liveType, recipeId, live);
+    }
+
+    private static ShanhaiRecipeBase baseOf(GTRecipe recipe) {
+        return recipe == null ? null : ShanhaiRecipeBase.from(recipe);
     }
 
     /**

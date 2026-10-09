@@ -739,6 +739,11 @@
   "message.gt_shanhai.jei.bookmark.open_terminal": "请先打开一个 AE 网络终端，再检查库存或样板流程",
   "message.gt_shanhai.jei.bookmark.added": "已检查 %s 个输入项，新增 %s 个 JEI 书签",
   "message.gt_shanhai.jei.bookmark.already_bookmarked": "输入项已在 JEI 书签中",
+  "tooltip.gt_shanhai.jei.edit_recipe": "编辑此配方",
+  "message.gt_shanhai.jei.edit_recipe.need_tool": "背包里需要有配方修改器开发者工具",
+  "message.gt_shanhai.jei.edit_recipe.need_permission": "配方修改器需要权限等级 2",
+  "message.gt_shanhai.jei.edit_recipe.not_found": "配方修改器里没有这条配方：%s %s",
+  "message.gt_shanhai.jei.edit_recipe.unavailable": "配方修改器当前打不开",
   "tooltip.gt_shanhai.jei.shop_mode": "切换山海商店商品列表",
   "message.gt_shanhai.jei.shop_mode.enabled": "已切换到山海商店商品",
   "message.gt_shanhai.jei.shop_mode.disabled": "已恢复 JEI 普通物品列表"

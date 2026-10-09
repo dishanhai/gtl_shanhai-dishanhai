@@ -6,15 +6,19 @@ import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
+import com.gregtechceu.gtceu.api.recipe.ingredient.IntCircuitIngredient;
 import com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient;
+import com.gregtechceu.gtceu.common.data.GTItems;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import com.mojang.serialization.JsonOps;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -435,12 +439,52 @@ public final class ShanhaiIoTable {
         if (!cell.dirty && cell.original != null) return cell.original;
         Object value;
         if (cell.itemKind) {
-            Ingredient ingredient = Ingredient.of(cell.item.copy());
-            value = SizedIngredient.create(ingredient, Math.max(1, cell.item.getCount()));
+            ItemStack stack = cell.item.copy();
+            int count = Math.max(1, stack.getCount());
+            value = SizedIngredient.create(ingredientForStack(stack), count);
         } else {
             value = FluidIngredient.of(cell.fluid.copy());
         }
         return new Content(value, cell.chance, cell.maxChance, cell.tierChanceBoost, null, null);
+    }
+
+    /**
+     * Programmed circuits keep their configuration as {@code gtceu:circuit}.
+     * Any other stack NBT or damage is written as a strict NBT ingredient.
+     * Vanilla {@code Ingredient.of} only stores the item id.
+     */
+    static Ingredient ingredientForStack(ItemStack stack) {
+        ItemStack one = stack.copy();
+        one.setCount(1);
+        int circuit = circuitConfiguration(one);
+        if (circuit >= 0) return IntCircuitIngredient.circuitInput(circuit);
+        if (one.hasTag() || one.getDamageValue() > 0) return StrictNBTIngredient.of(one);
+        return Ingredient.of(one);
+    }
+
+    /** Circuit number, or -1 when this stack is not a configured programmed circuit. */
+    public static int circuitConfiguration(ItemStack stack) {
+        if (stack == null || stack.isEmpty() || stack.getItem() != GTItems.INTEGRATED_CIRCUIT.get()) {
+            return -1;
+        }
+        CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.contains("Configuration")) return -1;
+        int configuration = tag.getInt("Configuration");
+        if (configuration < IntCircuitIngredient.CIRCUIT_MIN
+                || configuration > IntCircuitIngredient.CIRCUIT_MAX) {
+            return -1;
+        }
+        return configuration;
+    }
+
+    /** Tooltip line for a configured circuit or any other item NBT. Empty when there is none. */
+    public static String stackDetail(ItemStack stack) {
+        int circuit = circuitConfiguration(stack);
+        if (circuit >= 0) return "电路 " + circuit;
+        if (stack == null || !stack.hasTag() || stack.getTag().isEmpty()) return "";
+        String text = stack.getTag().toString();
+        if (text.length() > 96) text = text.substring(0, 93) + "...";
+        return text;
     }
 
     public void writeState(FriendlyByteBuf buffer, int[] indices) {

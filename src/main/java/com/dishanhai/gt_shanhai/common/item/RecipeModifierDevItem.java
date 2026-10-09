@@ -1,10 +1,12 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -21,6 +23,17 @@ public final class RecipeModifierDevItem extends Item {
 
     public RecipeModifierDevItem(Properties properties) {
         super(properties);
+    }
+
+    /** Player inventory, hotbar and offhand. Ender chest does not count. */
+    public static boolean inInventory(Player player) {
+        if (player == null) return false;
+        Item item = GTDishanhaiMod.RECIPE_MODIFIER_DEV.get();
+        Inventory inventory = player.getInventory();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            if (inventory.getItem(i).is(item)) return true;
+        }
+        return false;
     }
 
     @Override

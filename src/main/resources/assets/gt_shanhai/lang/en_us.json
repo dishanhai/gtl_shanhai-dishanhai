@@ -507,6 +507,11 @@
   "message.gt_shanhai.jei.bookmark.open_terminal": "Open an AE network terminal before checking storage or pattern processes",
   "message.gt_shanhai.jei.bookmark.added": "Checked %s recipe input(s); added %s JEI bookmark(s)",
   "message.gt_shanhai.jei.bookmark.already_bookmarked": "The recipe inputs are already bookmarked in JEI",
+  "tooltip.gt_shanhai.jei.edit_recipe": "Edit this recipe",
+  "message.gt_shanhai.jei.edit_recipe.need_tool": "The recipe modifier developer tool must be in your inventory",
+  "message.gt_shanhai.jei.edit_recipe.need_permission": "The recipe modifier requires permission level 2",
+  "message.gt_shanhai.jei.edit_recipe.not_found": "The recipe modifier cannot find this recipe: %s %s",
+  "message.gt_shanhai.jei.edit_recipe.unavailable": "The recipe modifier cannot be opened right now",
   "tooltip.gt_shanhai.jei.shop_mode": "Toggle the Shanhai shop product list",
   "message.gt_shanhai.jei.shop_mode.enabled": "Showing Shanhai shop products",
   "message.gt_shanhai.jei.shop_mode.disabled": "Restored the normal JEI ingredient list"

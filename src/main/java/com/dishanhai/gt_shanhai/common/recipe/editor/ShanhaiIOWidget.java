@@ -19,6 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
@@ -95,8 +96,12 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         Object normalized = normalize(accepted, target.itemKind);
         if (!(normalized instanceof ItemStack) && !(normalized instanceof FluidStack)) return;
         before.run();
-        if (normalized instanceof ItemStack stack) target.setItem(stack, stack.getCount());
-        else target.setFluid((FluidStack) normalized);
+        if (normalized instanceof ItemStack stack) {
+            target.setItem(stack, stack.getCount());
+            keepPlacedCircuit(discoveredIndex, target);
+        } else {
+            target.setFluid((FluidStack) normalized);
+        }
         changed.run();
     }
 
@@ -131,6 +136,7 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
             ItemStack stack = items.get(i);
             if (cell == null || !cell.itemKind || stack == null || stack.isEmpty()) continue;
             cell.setItem(stack, Math.max(1, stack.getCount()));
+            keepPlacedCircuit(itemBase + itemLocal + i, cell);
         }
         for (int i = 0; i < fluidCount; i++) {
             ShanhaiIoTable.Cell cell = table.cell(fluidBase + fluidLocal + i);
@@ -145,6 +151,19 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!isMouseOverElement(mouseX, mouseY)) return false;
         if (button == 1) {
+            ShanhaiIoTable.Cell current = cell();
+            if (current == null) return true;
+            if (!current.empty()) {
+                before.run();
+                current.clear();
+                current.chance = 10000;
+                current.maxChance = 10000;
+                current.tierChanceBoost = 0;
+                changed.run();
+            }
+            return true;
+        }
+        if (button == 2) {
             ShanhaiIoTable.Cell current = cell();
             if (current == null) return true;
             int index = indexSupplier.getAsInt();
@@ -193,17 +212,32 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         super.updateScreen();
         ShanhaiIoTable.Cell current = cell();
         if (current == null || current.empty()) {
-            setHoverTooltips(List.of(Component.literal("灰框物品 / 蓝框流体，JEI 拖入，右键打开选取器")));
+            setHoverTooltips(List.of(Component.literal("灰框物品 / 蓝框流体，JEI 拖入，中键打开选取器")));
         } else if (current.itemKind) {
-            setHoverTooltips(List.of(current.item.getHoverName(),
-                    Component.literal("数量 " + current.item.getCount()),
-                    chanceTip(current),
-                    Component.literal("右键打开选取器")));
+            List<Component> tips = new ArrayList<>();
+            tips.add(current.item.getHoverName());
+            tips.add(Component.literal("数量 " + current.item.getCount()));
+            String detail = ShanhaiIoTable.stackDetail(current.item);
+            if (!detail.isEmpty()) tips.add(Component.literal(detail));
+            tips.add(chanceTip(current));
+            tips.add(Component.literal("右键取消选取"));
+            tips.add(Component.literal("中键打开选取器"));
+            setHoverTooltips(tips);
         } else {
             setHoverTooltips(List.of(current.fluid.getDisplayName(),
                     Component.literal("数量 " + current.fluid.getAmount() + " mB"),
                     chanceTip(current),
-                    Component.literal("右键打开选取器")));
+                    Component.literal("右键取消选取"),
+                    Component.literal("中键打开选取器")));
+        }
+    }
+
+    /** A configured programmed circuit placed on an input defaults to not consumed. */
+    private void keepPlacedCircuit(int index, ShanhaiIoTable.Cell cell) {
+        if (table == null || cell == null || ShanhaiIoTable.circuitConfiguration(cell.item) < 0) return;
+        if (table.kindOf(index) != ShanhaiIoTable.Kind.ITEM_IN) return;
+        if (cell.chance == 10000 && cell.maxChance == 10000 && cell.tierChanceBoost == 0) {
+            cell.chance = 0;
         }
     }
 

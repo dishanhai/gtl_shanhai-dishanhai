@@ -139,6 +139,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.IntValue aeStorageForceRescanTicks;
         /** JEI 配方侧边收藏按键的筛选模式 */
         public ForgeConfigSpec.EnumValue<JeiBookmarkMode> jeiBookmarkMode;
+        /** 开发模式 — 配方修改器 json 直接写入模组源码 recipes 目录 */
+        public ForgeConfigSpec.BooleanValue developerMode;
 
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("tag_filter_bus");
@@ -412,6 +414,16 @@ public final class DShanhaiConfig {
                             "NO_RECIPE_ITEMS = 收藏当前配方中 AE 网络没有对应样板合成流程的输入物品或流体",
                             "COMBINED = 组合数量与 AE 样板流程判断：仅在无主产物样板且数量不足时收藏；数量极高时视为足够")
                     .defineEnum("bookmarkMode", JeiBookmarkMode.MISSING_ITEMS);
+            builder.pop();
+
+            builder.push("developer");
+            developerMode = builder
+                    .comment("开发模式（默认关闭）",
+                            "false = 配方修改器导出 json 仍写到游戏目录 kubejs/data/Exported_Recipe/",
+                            "true = 直接写入 C:/Users/dishanhai/Desktop/gt_shanhai/src/main/resources/data/gt_shanhai/recipes/",
+                            "文件落在配方 id 的路径上，例如 gt_shanhai:qft/foo → recipes/qft/foo.json",
+                            "只在这台开发机打开。其他机器没有这个目录，导出会失败。")
+                    .define("developerMode", false);
             builder.pop();
         }
     }

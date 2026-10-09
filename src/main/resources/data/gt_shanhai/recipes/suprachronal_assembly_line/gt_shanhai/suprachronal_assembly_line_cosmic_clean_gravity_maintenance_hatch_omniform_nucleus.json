@@ -1,0 +1,116 @@
+{
+  "data": {
+    "euTier": 14
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2147483647
+      }
+    ]
+  },
+  "type": "gtceu:suprachronal_assembly_line",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 2000,
+          "value": [
+            {
+              "fluid": "gtceu:starmetal"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 3400,
+          "value": [
+            {
+              "fluid": "gtceu:crystalmatrix"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:astraltitanium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 668,
+          "value": [
+            {
+              "fluid": "gtceu:infinity"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:cosmic_clean_gravity_maintenance_hatch"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "gtlcore:advanced_stellar_containment_casing"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "kubejs:infinity_coil_block"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:world_fragments_creation"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:omniform_nucleus"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:suprachronal_assembly_line_cosmic_clean_gravity_maintenance_hatch_omniform_nucleus",
+      "defaultEnabled": false
+    }
+  ]
+}

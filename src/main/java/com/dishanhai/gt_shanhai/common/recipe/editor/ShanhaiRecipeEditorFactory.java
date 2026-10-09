@@ -24,6 +24,7 @@ public final class ShanhaiRecipeEditorFactory extends UIFactory<ShanhaiRecipeEdi
 
     public static final ShanhaiRecipeEditorFactory INSTANCE = new ShanhaiRecipeEditorFactory();
     private static boolean registered;
+    private static final ThreadLocal<String[]> OPEN_TARGET = new ThreadLocal<>();
 
     private ShanhaiRecipeEditorFactory() {
         super(new net.minecraft.resources.ResourceLocation(
@@ -38,7 +39,21 @@ public final class ShanhaiRecipeEditorFactory extends UIFactory<ShanhaiRecipeEdi
 
     /** Stable reflection entry used by the holo menu and command path. */
     public static boolean open(Object ignored, ServerPlayer player) {
-        return player != null && INSTANCE.openUI(INSTANCE, player);
+        return open(player, "", "");
+    }
+
+    /** Opens the editor and lands on one recipe. Empty ids keep the normal entry. */
+    public static boolean open(ServerPlayer player, String recipeTypeId, String recipeId) {
+        if (player == null) return false;
+        OPEN_TARGET.set(new String[] {
+                recipeTypeId == null ? "" : recipeTypeId,
+                recipeId == null ? "" : recipeId
+        });
+        try {
+            return INSTANCE.openUI(INSTANCE, player);
+        } finally {
+            OPEN_TARGET.remove();
+        }
     }
 
     @Override
@@ -52,13 +67,18 @@ public final class ShanhaiRecipeEditorFactory extends UIFactory<ShanhaiRecipeEdi
     @Override
     @OnlyIn(Dist.CLIENT)
     protected ShanhaiRecipeEditorFactory readHolderFromSyncData(FriendlyByteBuf buffer) {
+        ShanhaiRecipeEditorLaunch.arm(buffer.readUtf(256), buffer.readUtf(256));
         return INSTANCE;
     }
 
     @Override
     protected void writeHolderToSyncData(FriendlyByteBuf buffer,
                                          ShanhaiRecipeEditorFactory holder) {
-        // The editor state is requested through the existing recipe packets.
+        String[] target = OPEN_TARGET.get();
+        String typeId = target == null || target.length < 1 || target[0] == null ? "" : target[0];
+        String recipeId = target == null || target.length < 2 || target[1] == null ? "" : target[1];
+        buffer.writeUtf(typeId, 256);
+        buffer.writeUtf(recipeId, 256);
     }
 
     @Override

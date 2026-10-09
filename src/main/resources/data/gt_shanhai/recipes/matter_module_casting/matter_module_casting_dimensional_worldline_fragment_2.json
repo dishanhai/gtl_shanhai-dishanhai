@@ -1,0 +1,132 @@
+{
+  "data": {
+    "euTier": 2
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "module_id": "dishanhai:wzjc",
+      "level": 4,
+      "type": "module_level"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 128
+      }
+    ]
+  },
+  "type": "gtceu:matter_module_casting",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_entry"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 32000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_basic"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 16000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_foundation"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 128,
+          "ingredient": {
+            "item": "minecraft:ender_pearl"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "gtceu:mv_energy_input_hatch_16a"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "dishanhai:matter_singularity"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1024,
+          "ingredient": {
+            "item": "dishanhai:photon"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtl_enhancedcore:universal_joint_factory"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:programmed_circuit"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:dimensional_worldline_fragment"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:matter_module_casting_dimensional_worldline_fragment_2",
+      "defaultEnabled": false
+    }
+  ]
+}
