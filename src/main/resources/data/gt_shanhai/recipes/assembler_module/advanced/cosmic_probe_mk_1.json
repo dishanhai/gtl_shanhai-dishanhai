@@ -154,7 +154,7 @@
     {
       "type": "gt_shanhai:recipe_enabled",
       "recipeId": "gt_shanhai:cosmic_probe_mk_1",
-      "defaultEnabled": false
+      "defaultEnabled": true
     }
   ]
 }

@@ -114,6 +114,12 @@ public final class DShanhaiConfigScreen {
                         "⚠ 无限盘/ExtendedAE 库存闪烁、下单误报“材料不足”时请关闭此项",
                         "改动后需重进存档生效"))
                 .setSaveConsumer(cfg.aeStorageDeltaCacheEnabled::set).build());
+        machine.addEntry(e.startIntField(Component.literal("AE 库存强制重扫间隔"), cfg.aeStorageForceRescanTicks.get())
+                .setDefaultValue(40).setMin(10).setMax(1200)
+                .setTooltip(tip("仅在增量缓存开启时生效，单位 tick，默认 40（2 秒）",
+                        "存储总线背后的箱子/机器被管道、漏斗或玩家直接改动时，不走 insert/extract",
+                        "此安全网保证这类变化最迟 N tick 内被看见"))
+                .setSaveConsumer(cfg.aeStorageForceRescanTicks::set).build());
         machine.addEntry(e.startEnumSelector(Component.literal("原始终焉引擎球体渲染风格"),
                         SphereStyleOverride.class, cfg.primordialSphereStyle.get())
                 .setDefaultValue(SphereStyleOverride.FOLLOW_MACHINE)
@@ -171,18 +177,56 @@ public final class DShanhaiConfigScreen {
                         "化反样板可在大型化反宿主执行、反之亦然；按组精确授权，不同于上面的全放开开关",
                         "空列表 = 保持严格隔离"))
                 .setSaveConsumer(list -> cfg.recipeTypeSharedSearchSets.set(list)).build());
+        pattern.addEntry(e.startIntField(Component.literal("卡死告警延迟（秒）"), cfg.recipeTypePatternStuckWarningSeconds.get())
+                .setDefaultValue(10).setMin(1).setMax(3600)
+                .setTooltip(tip("样板槽收到 AE 下单原料后，延迟结束时原料仍完整留在槽内，就向附近玩家与下单玩家广播",
+                        "默认 10 秒，避开主机低并行刚开始吃料时的误报"))
+                .setSaveConsumer(cfg.recipeTypePatternStuckWarningSeconds::set).build());
         pattern.addEntry(e.startIntField(Component.literal("每行样板槽位数"), cfg.recipeTypePatternsPerRow.get())
-                .setDefaultValue(9).setMin(1).setMax(16)
-                .setTooltip(tip("默认 9，修改后需重新放置总成生效"))
+                .setDefaultValue(10).setMin(1).setMax(16)
+                .setTooltip(tip("修改后重启生效：已放置的总成在下次区块加载时采用新配置",
+                        "调小会裁剪槽位，被裁槽位里的样板会掉在机器位置，内部缓冲料无法保留，改小前请先清空高位槽"))
                 .setSaveConsumer(cfg.recipeTypePatternsPerRow::set).build());
         pattern.addEntry(e.startIntField(Component.literal("每页行数"), cfg.recipeTypeRowsPerPage.get())
-                .setDefaultValue(6).setMin(1).setMax(16)
-                .setTooltip(tip("默认 6，修改后需重新放置总成生效"))
+                .setDefaultValue(10).setMin(1).setMax(16)
+                .setTooltip(tip("生效方式与裁剪风险同每行样板槽位数"))
                 .setSaveConsumer(cfg.recipeTypeRowsPerPage::set).build());
         pattern.addEntry(e.startIntField(Component.literal("最大页数"), cfg.recipeTypeMaxPages.get())
-                .setDefaultValue(3).setMin(1).setMax(64)
-                .setTooltip(tip("总槽位 = 每行槽位 × 每页行数 × 最大页数，修改后需重新放置总成生效"))
+                .setDefaultValue(10).setMin(1).setMax(64)
+                .setTooltip(tip("总槽位 = 每行槽位 × 每页行数 × 最大页数",
+                        "生效方式与裁剪风险同每行样板槽位数"))
                 .setSaveConsumer(cfg.recipeTypeMaxPages::set).build());
+        pattern.addEntry(e.startLongField(Component.literal("虚拟供料单次并行上限"), cfg.patternVirtualSupplyBatchParallel.get())
+                .setDefaultValue(65536L).setMin(1L).setMax(Long.MAX_VALUE)
+                .setTooltip(tip("首配路径单个样板槽位单次从无线 ME 网络真实提取的目标并行批量上限",
+                        "实际并行取此值与网络真实库存的较小值，不会超过网络库存",
+                        "不影响配方类型选择集本身的机器最大并行上限"))
+                .setSaveConsumer(cfg.patternVirtualSupplyBatchParallel::set).build());
+
+        // ===== 高级样板包装箱 =====
+        ConfigCategory patternBox = builder.getOrCreateCategory(Component.literal("高级样板包装箱"));
+        patternBox.addEntry(e.startIntField(Component.literal("每行样板槽位数"), cfg.advancedPatternBoxPatternsPerRow.get())
+                .setDefaultValue(9).setMin(1).setMax(16)
+                .setTooltip(tip("总容量 = 每行槽位 × 每页行数 × 最大页数，默认 9×6×4 = 216"))
+                .setSaveConsumer(cfg.advancedPatternBoxPatternsPerRow::set).build());
+        patternBox.addEntry(e.startIntField(Component.literal("每页行数"), cfg.advancedPatternBoxRowsPerPage.get())
+                .setDefaultValue(6).setMin(1).setMax(8)
+                .setTooltip(tip("调大会撑高 GUI，小分辨率或大 GUI 缩放下可能超出屏幕"))
+                .setSaveConsumer(cfg.advancedPatternBoxRowsPerPage::set).build());
+        patternBox.addEntry(e.startIntField(Component.literal("最大页数"), cfg.advancedPatternBoxMaxPages.get())
+                .setDefaultValue(4).setMin(1).setMax(64)
+                .setTooltip(tip("调大后下次打开包装箱即按新容量扩容",
+                        "调小不会丢样板：高位槽有样板时实际槽位保持原尺寸，清空后才缩回"))
+                .setSaveConsumer(cfg.advancedPatternBoxMaxPages::set).build());
+
+        // ===== 样板总成工具箱 =====
+        ConfigCategory toolkit = builder.getOrCreateCategory(Component.literal("样板总成工具箱"));
+        toolkit.addEntry(e.startIntField(Component.literal("剪贴板预览上限"), cfg.patternBufferToolkitPreviewLimit.get())
+                .setDefaultValue(270).setMin(9).setMax(2048)
+                .setTooltip(tip("面板最多渲染的样板数，默认 270 = 9 列 × 30 行，面板内滚动查看",
+                        "只影响预览，不限制剪贴板实际容量：超出部分照常复制/剪切/套用，只是不在面板里画出来",
+                        "每个预览格都要同步给客户端，调太大会卡顿甚至撑爆数据包"))
+                .setSaveConsumer(cfg.patternBufferToolkitPreviewLimit::set).build());
 
         // ===== JEI =====
         ConfigCategory jei = builder.getOrCreateCategory(Component.literal("JEI"));
@@ -202,6 +246,12 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("非 AE 模式下，单次购买货物总量 ≥ 此值时打包成超级磁盘阵列赠送（而非塞背包）",
                         "默认 1000；设 1 则任何购买都给 SDA"))
                 .setSaveConsumer(cfg.shopSdaPackThreshold::set).build());
+        shop.addEntry(e.startLongField(Component.literal("奖励抽取次数上限"), cfg.shopRewardRollCap.get())
+                .setDefaultValue(1_000_000L).setMin(1L).setMax(Long.MAX_VALUE)
+                .setTooltip(tip("奖励表模式单次购买最多独立随机抽取的次数，超出部分留到下次购买",
+                        "每次抽取都在服务端主线程同步跑完，调太大可能卡死甚至触发看门狗崩服",
+                        "FTBQ 模式实际仍会夹到 Integer.MAX_VALUE"))
+                .setSaveConsumer(cfg.shopRewardRollCap::set).build());
         shop.addEntry(e.startBooleanToggle(Component.literal("AE 模式禁止注入"), cfg.shopAeDeliverDisabled.get())
                 .setDefaultValue(false)
                 .setTooltip(tip("开启后 AE 模式只用来拉取材料付款/检索库存，购买/兑换得到的物品一律正常交付（进背包/按 SDA 打包阈值打包），不再注入 AE 网络"))
@@ -211,6 +261,57 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("开启后有内容 SDA 会优先放入同网 ME 磁盘仓室直接挂载",
                         "磁盘仓室必须与 FTBQ AE提交器或商店终端在同一 AE 网络；空 SDA 商品不挂载"))
                 .setSaveConsumer(cfg.shopSdaDirectDiskHatchInject::set).build());
+        shop.addEntry(e.startIntField(Component.literal("出售回收比例（%）"), cfg.shopSellRatioPercent.get())
+                .setDefaultValue(70).setMin(1).setMax(100)
+                .setTooltip(tip("出售拿回买价的百分比，默认 70，即卖出价 = 买价 × 70%",
+                        "买卖价差防止买了立刻卖回零损耗；100 = 无价差"))
+                .setSaveConsumer(cfg.shopSellRatioPercent::set).build());
+
+        // ===== 商店银行 =====
+        ConfigCategory bank = builder.getOrCreateCategory(Component.literal("商店银行"));
+        bank.addEntry(e.startIntField(Component.literal("存款每小时基点"), cfg.shopBankDepositRateBpPerHour.get())
+                .setDefaultValue(5).setMin(0).setMax(10_000)
+                .setTooltip(tip("万分之 N，默认 5 ≈ 0.05%/小时，约 1.2%/天",
+                        "线性单利，利息不滚入本金，按系统时间惰性结算"))
+                .setSaveConsumer(cfg.shopBankDepositRateBpPerHour::set).build());
+        bank.addEntry(e.startIntField(Component.literal("贷款每小时基点"), cfg.shopBankLoanRateBpPerHour.get())
+                .setDefaultValue(15).setMin(0).setMax(10_000)
+                .setTooltip(tip("万分之 N，默认 15 ≈ 0.15%/小时，约 3.6%/天",
+                        "高于存款利率。还款先冲利息再冲本金，不做强制追讨"))
+                .setSaveConsumer(cfg.shopBankLoanRateBpPerHour::set).build());
+        bank.addEntry(e.startLongField(Component.literal("最大欠款（星火）"), cfg.shopBankMaxLoanSpark.get())
+                .setDefaultValue(100_000_000L).setMin(0L).setMax(Long.MAX_VALUE)
+                .setTooltip(tip("单玩家本金加利息达到上限后借不出新的，默认 1 亿"))
+                .setSaveConsumer(cfg.shopBankMaxLoanSpark::set).build());
+        bank.addEntry(e.startIntField(Component.literal("贷款期限（小时）"), cfg.shopBankLoanTermHours.get())
+                .setDefaultValue(24).setMin(1).setMax(8760)
+                .setTooltip(tip("从这笔贷款开始起算，默认 24 小时",
+                        "到期后只要本金或利息还在，就拒绝下一笔，直到还清",
+                        "期限内追加借款不延后到期时间"))
+                .setSaveConsumer(cfg.shopBankLoanTermHours::set).build());
+
+        // ===== 缓存与诊断 =====
+        ConfigCategory cache = builder.getOrCreateCategory(Component.literal("缓存与诊断"));
+        cache.addEntry(e.startBooleanToggle(Component.literal("运行期配方缓存统计"), cfg.runtimeRecipeCacheDiagnostics.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("统计 hit/miss/negativeHit/clear，不影响缓存读写",
+                        "关闭时计数器不自增；开启后用 /shanhai cache stats 查看"))
+                .setSaveConsumer(cfg.runtimeRecipeCacheDiagnostics::set).build());
+        cache.addEntry(e.startBooleanToggle(Component.literal("KJS 配方库磁盘缓存"), cfg.kjsRecipeLibraryCacheEnabled.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("默认关闭。开启有风险，一般只用于开发环境加快进游戏",
+                        "正常游玩或生产环境不建议开启",
+                        "修改后需重启游戏或服务端"))
+                .setSaveConsumer(cfg.kjsRecipeLibraryCacheEnabled::set).build());
+
+        // ===== 开发 =====
+        ConfigCategory developer = builder.getOrCreateCategory(Component.literal("开发"));
+        developer.addEntry(e.startBooleanToggle(Component.literal("开发模式"), cfg.developerMode.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("关闭：配方修改器导出 json 写到游戏目录 kubejs/data/Exported_Recipe/",
+                        "开启：直接写入本机 gt_shanhai 源码 recipes 目录",
+                        "只在这台开发机打开。其他机器没有该目录，导出会失败"))
+                .setSaveConsumer(cfg.developerMode::set).build());
 
         return builder.build();
     }

@@ -76,7 +76,7 @@
     {
       "type": "gt_shanhai:recipe_enabled",
       "recipeId": "gt_shanhai:suprachronal_assembly_line_create_data_world_fragments_creation",
-      "defaultEnabled": false
+      "defaultEnabled": true
     }
   ]
 }

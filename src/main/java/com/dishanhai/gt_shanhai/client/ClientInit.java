@@ -86,7 +86,8 @@ public class ClientInit {
         ClickEvent clickEvent = style.getClickEvent();
         if (clickEvent == null || clickEvent.getAction() != ClickEvent.Action.RUN_COMMAND) return;
 
-        if (JeiChatLinkHelper.runSearchCommand(clickEvent.getValue())) {
+        if (RecipeExportChatLink.reveal(clickEvent.getValue())
+                || JeiChatLinkHelper.runSearchCommand(clickEvent.getValue())) {
             event.setCanceled(true);
         }
     }

@@ -126,7 +126,7 @@
     {
       "type": "gt_shanhai:recipe_enabled",
       "recipeId": "dishanhai:matter_module_casting_dimensional_worldline_fragment_2",
-      "defaultEnabled": false
+      "defaultEnabled": true
     }
   ]
 }

@@ -17,8 +17,12 @@ import com.google.gson.JsonParser;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeSerializer;
 import com.mojang.serialization.JsonOps;
+import net.minecraft.ChatFormatting;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.fml.loading.FMLPaths;
@@ -45,6 +49,12 @@ public final class RecipeEditorExportPacket {
 
     /** 集中存放导出 json 的文件夹。不是配方命名空间。 */
     private static final String EXPORT_BUCKET = "Exported_Recipe";
+
+    /**
+     * 聊天路径的点击命令。客户端拦截后用资源管理器定位文件，不会发给服务器。
+     * {@code OPEN_FILE} 从服务器下发会被客户端丢掉，所以这里用允许下发的 {@code RUN_COMMAND}。
+     */
+    public static final String REVEAL_COMMAND = "/gtshanhai_reveal_export ";
 
     /** 开发模式的模组源码配方目录。只在 developerMode 打开时使用。 */
     private static final Path DEV_RECIPE_ROOT = Path.of(
@@ -97,8 +107,7 @@ public final class RecipeEditorExportPacket {
             }
             RecipeEditorResultPacket result = export(packet);
             if (result.status() == RecipeEditorResultPacket.Status.SUCCESS) {
-                sender.sendSystemMessage(Component.literal(
-                        "§b[配方修改器] §a已导出\n" + exportChat(result.payload())));
+                sender.sendSystemMessage(exportChat(result.payload()));
             } else {
                 sender.sendSystemMessage(Component.literal(
                         "§b[配方修改器] §c导出失败：" + result.message()));
@@ -241,7 +250,7 @@ public final class RecipeEditorExportPacket {
         JsonObject condition = new JsonObject();
         condition.addProperty("type", "gt_shanhai:recipe_enabled");
         condition.addProperty("recipeId", enabledId);
-        condition.addProperty("defaultEnabled", false);
+        condition.addProperty("defaultEnabled", true);
         conditions.add(condition);
         recipe.add("conditions", conditions);
     }
@@ -259,14 +268,56 @@ public final class RecipeEditorExportPacket {
                 RecipeEditorResultPacket.Status.VALIDATION_ERROR, message, 0L, "");
     }
 
-    private static String exportChat(String payload) {
+    private static Component exportChat(String payload) {
         String[] lines = payload == null ? new String[0] : payload.split("\n", 3);
         String id = lines.length > 0 ? lines[0] : "";
         String path = lines.length > 1 ? lines[1] : "";
         String diff = lines.length > 2 ? lines[2] : "";
-        String message = "§7" + id + "\n§7" + path;
-        if (!diff.isEmpty()) message += "\n" + diff;
+        MutableComponent message = Component.literal("§b[配方修改器] §a已导出\n§7" + id);
+        if (!path.isEmpty()) {
+            message.append(Component.literal("\n"));
+            message.append(exportPathLink(path));
+        }
+        if (!diff.isEmpty()) message.append(Component.literal("\n" + diff));
         return message;
+    }
+
+    /** 路径行可点击。点击值是绝对路径，显示文字仍是原来的相对路径或开发模式绝对路径。 */
+    private static Component exportPathLink(String shown) {
+        Path file;
+        try {
+            file = shownPath(shown);
+        } catch (java.nio.file.InvalidPathException ex) {
+            return Component.literal("§7" + shown);
+        }
+        return Component.literal(shown).withStyle(style -> style
+                .withColor(ChatFormatting.AQUA)
+                .withUnderlined(true)
+                .withClickEvent(new ClickEvent(
+                        ClickEvent.Action.RUN_COMMAND, REVEAL_COMMAND + file))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("点击在资源管理器中定位").withStyle(ChatFormatting.YELLOW))));
+    }
+
+    private static Path shownPath(String shown) {
+        Path path = Path.of(shown.trim());
+        if (!path.isAbsolute()) {
+            path = FMLPaths.GAMEDIR.get().resolve(path);
+        }
+        return path.toAbsolutePath().normalize();
+    }
+
+    /** 只允许定位本次导出会写到的两个目录里的 json。 */
+    public static boolean revealable(Path file) {
+        if (file == null) return false;
+        Path normalized = file.toAbsolutePath().normalize();
+        Path name = normalized.getFileName();
+        if (name == null || !name.toString().endsWith(".json")) return false;
+        Path exportRoot = FMLPaths.GAMEDIR.get()
+                .resolve("kubejs").resolve("data").resolve(EXPORT_BUCKET)
+                .toAbsolutePath().normalize();
+        if (normalized.startsWith(exportRoot)) return true;
+        return normalized.startsWith(DEV_RECIPE_ROOT.toAbsolutePath().normalize());
     }
 
     private static void send(ServerPlayer player, RecipeEditorResultPacket packet) {

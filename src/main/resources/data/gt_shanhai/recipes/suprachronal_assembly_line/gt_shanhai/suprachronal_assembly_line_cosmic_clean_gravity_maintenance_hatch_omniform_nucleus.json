@@ -110,7 +110,7 @@
     {
       "type": "gt_shanhai:recipe_enabled",
       "recipeId": "gt_shanhai:suprachronal_assembly_line_cosmic_clean_gravity_maintenance_hatch_omniform_nucleus",
-      "defaultEnabled": false
+      "defaultEnabled": true
     }
   ]
 }

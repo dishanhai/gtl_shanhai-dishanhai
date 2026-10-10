@@ -1,0 +1,59 @@
+{
+  "duration": 100,
+  "type": "gtceu:sps_crafting",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 102,
+          "value": [
+            {
+              "fluid": "gtceu:dragon_breath"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1024,
+          "ingredient": {
+            "item": "minecraft:obsidian"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzsb"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1024,
+          "ingredient": {
+            "item": "kubejs:draconium_dust"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:sps_crafting_obsidian_draconium_dust",
+      "defaultEnabled": true
+    }
+  ]
+}

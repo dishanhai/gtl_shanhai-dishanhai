@@ -61,7 +61,7 @@ public final class ShanhaiRecipeJsExport {
         }
         StringBuilder builder = new StringBuilder();
         builder.append("{id:'").append(leaf(recipeId)).append('\'');
-        builder.append(",defaultEnabled:false");
+        builder.append(",defaultEnabled:true");
         builder.append(",type:'").append(typePath(recipeTypeId)).append('\'');
         builder.append(",circuit:").append(circuit);
         builder.append(",notConsumable:").append(array(notConsumable));
