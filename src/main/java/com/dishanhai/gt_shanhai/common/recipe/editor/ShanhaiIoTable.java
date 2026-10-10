@@ -14,10 +14,16 @@ import com.mojang.serialization.JsonOps;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.common.crafting.StrictNBTIngredient;
 
 import java.util.ArrayList;
@@ -57,6 +63,8 @@ public final class ShanhaiIoTable {
         public Content original;
         public ItemStack item = ItemStack.EMPTY;
         public FluidStack fluid = FluidStack.empty();
+        /** Empty means this cell matches one registry id. Otherwise a tag id without '#'. */
+        public String matchTag = "";
         public boolean dirty;
         public int chance = 10000;
         public int maxChance = 10000;
@@ -76,23 +84,28 @@ public final class ShanhaiIoTable {
         }
 
         public void setItem(ItemStack stack, int count) {
+            Item previous = item.isEmpty() ? null : item.getItem();
             if (stack == null || stack.isEmpty() || count <= 0) {
                 item = ItemStack.EMPTY;
             } else {
                 item = stack.copy();
                 item.setCount(Math.max(1, Math.min(MAX_ITEM_COUNT, count)));
             }
+            if (item.isEmpty() || previous == null || item.getItem() != previous) matchTag = "";
             dirty = true;
         }
 
         public void setFluid(FluidStack stack) {
+            Fluid previous = fluid.isEmpty() ? null : fluid.getFluid();
             fluid = stack == null || stack.isEmpty() ? FluidStack.empty() : stack.copy();
+            if (fluid.isEmpty() || previous == null || fluid.getFluid() != previous) matchTag = "";
             dirty = true;
         }
 
         public void clear() {
             item = ItemStack.EMPTY;
             fluid = FluidStack.empty();
+            matchTag = "";
             dirty = true;
         }
 
@@ -101,6 +114,7 @@ public final class ShanhaiIoTable {
             copy.original = original;
             copy.item = item.copy();
             copy.fluid = fluid.isEmpty() ? FluidStack.empty() : fluid.copy();
+            copy.matchTag = matchTag == null ? "" : matchTag;
             copy.dirty = dirty;
             copy.chance = chance;
             copy.maxChance = maxChance;
@@ -361,13 +375,17 @@ public final class ShanhaiIoTable {
                         if (content.getContent() instanceof SizedIngredient sized) {
                             cell.item.setCount(Math.max(1, sized.getAmount()));
                         }
+                        cell.matchTag = tagId(ingredient);
                     }
                 }
             } else {
                 FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
                 if (ingredient != null) {
                     FluidStack[] stacks = ingredient.getStacks();
-                    if (stacks.length > 0) cell.fluid = stacks[0].copy();
+                    if (stacks.length > 0) {
+                        cell.fluid = stacks[0].copy();
+                        cell.matchTag = tagId(ingredient.toJson());
+                    }
                 }
             }
         }
@@ -394,13 +412,17 @@ public final class ShanhaiIoTable {
                         if (content.getContent() instanceof SizedIngredient sized) {
                             cell.item.setCount(Math.max(1, sized.getAmount()));
                         }
+                        cell.matchTag = tagId(ingredient);
                     }
                 }
             } else {
                 FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
                 if (ingredient != null) {
                     FluidStack[] stacks = ingredient.getStacks();
-                    if (stacks.length > 0) cell.fluid = stacks[0].copy();
+                    if (stacks.length > 0) {
+                        cell.fluid = stacks[0].copy();
+                        cell.matchTag = tagId(ingredient.toJson());
+                    }
                 }
             }
         }
@@ -441,7 +463,12 @@ public final class ShanhaiIoTable {
         if (cell.itemKind) {
             ItemStack stack = cell.item.copy();
             int count = Math.max(1, stack.getCount());
-            value = SizedIngredient.create(ingredientForStack(stack), count);
+            value = SizedIngredient.create(ingredientForStack(stack, cell.matchTag), count);
+        } else if (cell.matchTag != null && !cell.matchTag.isEmpty()) {
+            ResourceLocation tag = ResourceLocation.tryParse(cell.matchTag);
+            value = tag == null
+                    ? FluidIngredient.of(cell.fluid.copy())
+                    : FluidIngredient.of(FluidTags.create(tag), cell.fluid.getAmount());
         } else {
             value = FluidIngredient.of(cell.fluid.copy());
         }
@@ -454,12 +481,63 @@ public final class ShanhaiIoTable {
      * Vanilla {@code Ingredient.of} only stores the item id.
      */
     static Ingredient ingredientForStack(ItemStack stack) {
+        return ingredientForStack(stack, "");
+    }
+
+    static Ingredient ingredientForStack(ItemStack stack, String matchTag) {
         ItemStack one = stack.copy();
         one.setCount(1);
         int circuit = circuitConfiguration(one);
         if (circuit >= 0) return IntCircuitIngredient.circuitInput(circuit);
         if (one.hasTag() || one.getDamageValue() > 0) return StrictNBTIngredient.of(one);
+        if (matchTag != null && !matchTag.isEmpty()) {
+            ResourceLocation tag = ResourceLocation.tryParse(matchTag);
+            if (tag != null) return Ingredient.of(ItemTags.create(tag));
+        }
         return Ingredient.of(one);
+    }
+
+    /** Tags carried by the item or fluid currently shown in the cell, without '#'. */
+    public static List<String> tagsOf(Cell cell) {
+        List<String> tags = new ArrayList<>();
+        if (cell == null || cell.empty()) return tags;
+        if (cell.itemKind) {
+            cell.item.getItem().builtInRegistryHolder().tags()
+                    .forEach(tag -> tags.add(tag.location().toString()));
+        } else {
+            BuiltInRegistries.FLUID.wrapAsHolder(cell.fluid.getFluid()).tags()
+                    .forEach(tag -> tags.add(tag.location().toString()));
+        }
+        tags.sort(String::compareTo);
+        return tags;
+    }
+
+    static String tagId(Ingredient ingredient) {
+        if (ingredient == null) return "";
+        try {
+            return tagId(ingredient.toJson());
+        } catch (RuntimeException ignored) {
+            return "";
+        }
+    }
+
+    static String tagId(JsonElement element) {
+        if (element == null || element.isJsonNull()) return "";
+        if (element.isJsonArray()) {
+            JsonArray array = element.getAsJsonArray();
+            if (array.size() != 1) return "";
+            return tagId(array.get(0));
+        }
+        if (!element.isJsonObject()) return "";
+        JsonObject object = element.getAsJsonObject();
+        if (object.has("tag") && object.get("tag").isJsonPrimitive()
+                && !object.has("item") && !object.has("fluid")) {
+            String text = object.get("tag").getAsString().trim();
+            if (text.startsWith("#")) text = text.substring(1);
+            if (ResourceLocation.tryParse(text) != null) return text;
+        }
+        if (object.has("ingredient")) return tagId(object.get("ingredient"));
+        return "";
     }
 
     /** Circuit number, or -1 when this stack is not a configured programmed circuit. */

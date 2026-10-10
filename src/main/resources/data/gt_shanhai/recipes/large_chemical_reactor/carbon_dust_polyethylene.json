@@ -1,24 +1,24 @@
 {
   "data": {
-    "euTier": 10
+    "euTier": 2
   },
   "duration": 100,
   "tickInputs": {
     "eu": [
       {
-        "content": 8388608
+        "content": 128
       }
     ]
   },
-  "type": "gtceu:sps_crafting",
+  "type": "gtceu:large_chemical_reactor",
   "inputs": {
     "fluid": [
       {
         "content": {
-          "amount": 102,
+          "amount": 14000,
           "value": [
             {
-              "fluid": "gtceu:dragon_breath"
+              "fluid": "minecraft:water"
             }
           ]
         }
@@ -28,9 +28,9 @@
       {
         "content": {
           "type": "gtceu:sized",
-          "count": 1024,
+          "count": 16,
           "ingredient": {
-            "item": "minecraft:obsidian"
+            "item": "gtceu:carbon_dust"
           }
         }
       },
@@ -39,7 +39,7 @@
           "type": "gtceu:sized",
           "count": 1,
           "ingredient": {
-            "item": "dishanhai:wzsb"
+            "item": "dishanhai:wzcz1"
           }
         },
         "chance": 0
@@ -47,14 +47,25 @@
     ]
   },
   "outputs": {
-    "item": [
+    "fluid": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1024,
-          "ingredient": {
-            "item": "kubejs:draconium_dust"
-          }
+          "amount": 10000,
+          "value": [
+            {
+              "fluid": "gtceu:polyethylene"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 5000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
         }
       }
     ]
@@ -62,7 +73,7 @@
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",
-      "recipeId": "gt_shanhai:sps_crafting_obsidian_draconium_dust",
+      "recipeId": "gt_shanhai:carbon_dust_polyethylene",
       "defaultEnabled": true
     }
   ]

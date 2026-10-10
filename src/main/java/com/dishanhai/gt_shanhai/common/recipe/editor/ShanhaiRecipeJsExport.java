@@ -107,14 +107,21 @@ public final class ShanhaiRecipeJsExport {
     }
 
     private static String itemToken(ShanhaiIoTable.Cell cell) {
+        int count = cell.shownCount();
+        if (cell.matchTag != null && !cell.matchTag.isEmpty()) {
+            String tag = "#" + cell.matchTag;
+            return count == 1 ? tag : count + "x " + tag;
+        }
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(cell.item.getItem());
         if (id == null) return null;
-        int count = cell.shownCount();
         if (count == 1) return id.toString();
         return count + "x " + id;
     }
 
     private static String fluidToken(ShanhaiIoTable.Cell cell) {
+        if (cell.matchTag != null && !cell.matchTag.isEmpty()) {
+            return "#" + cell.matchTag + " " + cell.shownCount();
+        }
         ResourceLocation id = BuiltInRegistries.FLUID.getKey(cell.fluid.getFluid());
         if (id == null) return null;
         return id + " " + cell.shownCount();

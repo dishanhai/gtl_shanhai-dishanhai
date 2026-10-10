@@ -43,7 +43,8 @@ import java.util.function.Supplier;
  * {@code Exported_Recipe} is only a folder, not a recipe namespace.
  * <p>
  * {@code developerMode} writes straight into the mod datapack
- * {@code data/gt_shanhai/recipes/<recipe path>.json}.
+ * {@code data/gt_shanhai/recipes/<type>/<recipe path>.json}.
+ * A recipe path that does not already start with {@code <type>/} gets that folder.
  */
 public final class RecipeEditorExportPacket {
 
@@ -135,6 +136,20 @@ public final class RecipeEditorExportPacket {
         return parsed;
     }
 
+    /**
+     * {@code recipes/<type>/<body>}. Body keeps a subcategory already present in the id.
+     * {@code sps_crafting/metals/dust} stays. {@code dust} becomes {@code sps_crafting/dust}.
+     */
+    public static String pathUnderType(ResourceLocation typeId, ResourceLocation exportId) {
+        String typePath = typeId.getPath();
+        String recipePath = exportId.getPath();
+        String body = recipePath.startsWith(typePath + "/")
+                ? recipePath.substring(typePath.length() + 1)
+                : recipePath;
+        if (body.isEmpty()) body = typePath;
+        return typePath + "/" + body;
+    }
+
     private static boolean folderSafe(String path) {
         if (path == null || path.isEmpty()) return false;
         if (path.charAt(0) == '/' || path.charAt(path.length() - 1) == '/') return false;
@@ -200,16 +215,19 @@ public final class RecipeEditorExportPacket {
             writeEnabledCondition(encoded.getAsJsonObject(), exportId);
 
             boolean developer = developerExport();
+            String placed = pathUnderType(typeId, exportId);
+            String typePath = typeId.getPath();
+            String body = placed.substring(typePath.length() + 1);
             Path root = developer
                     ? DEV_RECIPE_ROOT.toAbsolutePath().normalize()
                     : FMLPaths.GAMEDIR.get()
                             .resolve("kubejs").resolve("data").resolve(EXPORT_BUCKET)
                             .toAbsolutePath().normalize();
             Path file = developer
-                    ? root.resolve(exportId.getPath() + ".json").normalize()
-                    : root.resolve(typeId.getPath())
+                    ? root.resolve(placed + ".json").normalize()
+                    : root.resolve(typePath)
                             .resolve(exportId.getNamespace())
-                            .resolve(exportId.getPath() + ".json")
+                            .resolve(body + ".json")
                             .normalize();
             if (!file.startsWith(root)) return invalid("invalid-export-path");
             Files.createDirectories(file.getParent());
@@ -217,8 +235,8 @@ public final class RecipeEditorExportPacket {
 
             String relative = developer
                     ? file.toString()
-                    : "kubejs/data/" + EXPORT_BUCKET + "/" + typeId.getPath()
-                            + "/" + exportId.getNamespace() + "/" + exportId.getPath() + ".json";
+                    : "kubejs/data/" + EXPORT_BUCKET + "/" + typePath
+                            + "/" + exportId.getNamespace() + "/" + body + ".json";
             return new RecipeEditorResultPacket(
                     RecipeEditorResultPacket.Status.SUCCESS,
                     "export",

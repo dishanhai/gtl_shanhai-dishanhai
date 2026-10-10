@@ -1,24 +1,24 @@
 {
   "data": {
-    "euTier": 10
+    "euTier": 1
   },
   "duration": 100,
   "tickInputs": {
     "eu": [
       {
-        "content": 8388608
+        "content": 32
       }
     ]
   },
-  "type": "gtceu:sps_crafting",
+  "type": "gtceu:large_chemical_reactor",
   "inputs": {
     "fluid": [
       {
         "content": {
-          "amount": 102,
+          "amount": 1000,
           "value": [
             {
-              "fluid": "gtceu:dragon_breath"
+              "fluid": "minecraft:water"
             }
           ]
         }
@@ -28,9 +28,9 @@
       {
         "content": {
           "type": "gtceu:sized",
-          "count": 1024,
+          "count": 1,
           "ingredient": {
-            "item": "minecraft:obsidian"
+            "item": "gtceu:sulfur_dust"
           }
         }
       },
@@ -39,22 +39,22 @@
           "type": "gtceu:sized",
           "count": 1,
           "ingredient": {
-            "item": "dishanhai:wzsb"
+            "item": "dishanhai:wzcz1"
           }
-        },
-        "chance": 0
+        }
       }
     ]
   },
   "outputs": {
-    "item": [
+    "fluid": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1024,
-          "ingredient": {
-            "item": "kubejs:draconium_dust"
-          }
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:sulfuric_acid"
+            }
+          ]
         }
       }
     ]
@@ -62,7 +62,7 @@
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",
-      "recipeId": "gt_shanhai:sps_crafting_obsidian_draconium_dust",
+      "recipeId": "gt_shanhai:sulfur_dust_sulfuric_acid",
       "defaultEnabled": true
     }
   ]

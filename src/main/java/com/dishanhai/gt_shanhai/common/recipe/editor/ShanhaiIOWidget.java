@@ -205,6 +205,9 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         } else if (current.chance != 10000) {
             smallText(graphics, (current.chance * 100 / Math.max(1, current.maxChance)) + "%", x + 2, y + CELL - 1);
         }
+        if (current.matchTag != null && !current.matchTag.isEmpty()) {
+            graphics.drawString(Minecraft.getInstance().font, "T", x + CELL - 6, y + 1, 0xFF69E8FF, false);
+        }
     }
 
     @Override
@@ -219,17 +222,37 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
             tips.add(Component.literal("数量 " + current.item.getCount()));
             String detail = ShanhaiIoTable.stackDetail(current.item);
             if (!detail.isEmpty()) tips.add(Component.literal(detail));
+            tips.addAll(matchTips(current));
             tips.add(chanceTip(current));
             tips.add(Component.literal("右键取消选取"));
             tips.add(Component.literal("中键打开选取器"));
             setHoverTooltips(tips);
         } else {
-            setHoverTooltips(List.of(current.fluid.getDisplayName(),
-                    Component.literal("数量 " + current.fluid.getAmount() + " mB"),
-                    chanceTip(current),
-                    Component.literal("右键取消选取"),
-                    Component.literal("中键打开选取器")));
+            List<Component> tips = new ArrayList<>();
+            tips.add(current.fluid.getDisplayName());
+            tips.add(Component.literal("数量 " + current.fluid.getAmount() + " mB"));
+            tips.addAll(matchTips(current));
+            tips.add(chanceTip(current));
+            tips.add(Component.literal("右键取消选取"));
+            tips.add(Component.literal("中键打开选取器"));
+            setHoverTooltips(tips);
         }
+    }
+
+    private static List<Component> matchTips(ShanhaiIoTable.Cell current) {
+        List<Component> tips = new ArrayList<>();
+        if (current.matchTag != null && !current.matchTag.isEmpty()) {
+            tips.add(Component.literal("标签 #" + current.matchTag).withStyle(ChatFormatting.AQUA));
+        }
+        List<String> tags = ShanhaiIoTable.tagsOf(current);
+        int shown = Math.min(6, tags.size());
+        for (int i = 0; i < shown; i++) {
+            tips.add(Component.literal("#" + tags.get(i)).withStyle(ChatFormatting.GRAY));
+        }
+        if (tags.size() > shown) {
+            tips.add(Component.literal("…共 " + tags.size() + " 个标签").withStyle(ChatFormatting.DARK_GRAY));
+        }
+        return tips;
     }
 
     /** A configured programmed circuit placed on an input defaults to not consumed. */

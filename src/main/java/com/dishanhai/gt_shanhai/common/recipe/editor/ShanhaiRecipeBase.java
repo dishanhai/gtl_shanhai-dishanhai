@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.gregtechceu.gtceu.api.recipe.RecipeCondition;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.mojang.serialization.JsonOps;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
@@ -141,7 +142,9 @@ public final class ShanhaiRecipeBase {
                 payload.getAsJsonObject("outputs"),
                 payload.has("tickInputs") ? payload.getAsJsonObject("tickInputs") : new JsonObject(),
                 payload.has("tickOutputs") ? payload.getAsJsonObject("tickOutputs") : new JsonObject(),
-                payload.has("conditions") ? payload.getAsJsonArray("conditions") : new JsonArray());
+                payload.has("conditions") ? payload.getAsJsonArray("conditions") : new JsonArray(),
+                payload.has("blastTemp") && payload.get("blastTemp").isJsonPrimitive()
+                        ? payload.get("blastTemp").getAsInt() : -1);
     }
 
     public static ShanhaiRecipeBase inheritLegacyDetails(
@@ -167,7 +170,8 @@ public final class ShanhaiRecipeBase {
                 edited.outputs(),
                 edited.tickInputs(),
                 restoredTickOutputs,
-                restoredConditions);
+                restoredConditions,
+                edited.blastTemp());
     }
 
     public GTRecipe toGtRecipe(GTRecipe original) {
@@ -186,6 +190,10 @@ public final class ShanhaiRecipeBase {
         }
         copy.conditions.clear();
         copy.conditions.addAll(parsedConditions);
+        if (blastTemp >= 0) {
+            if (copy.data == null) copy.data = new CompoundTag();
+            copy.data.putInt("ebf_temp", blastTemp);
+        }
         if (eut != 0L) ShanhaiRecipeIoApply.applyEut(copy, eut);
         return copy;
     }

@@ -83,6 +83,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     String countText = "1";
     /** Recipe data ebf_temp from the detail snapshot. -1 means absent. */
     int jsBlastTemp = -1;
+    String blastTempText = "";
     int queryPage;
     int queryTotal;
     String sortKey = "id";
@@ -405,6 +406,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         keepOriginal = true;
         selectedCard = null;
         jsBlastTemp = -1;
+        blastTempText = ShanhaiRecipeHeat.usesTemperature(type) ? "0" : "";
         selectedBase = new ShanhaiRecipeBase(
                 type, type, 100, 0L, new JsonObject(), new JsonObject(), new JsonObject(), new JsonArray());
         durationText = "100";
@@ -430,6 +432,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         panel.closeQueryHistory();
         seedEditHistory();
         panel.syncCreateChrome();
+        panel.syncBlastChrome(showBlastTemp());
         setStage(STAGE_EDIT, true);
         setStatus("§a新建配方：左侧点选类型。放入输入和产物后按「猜测」填 id");
     }
@@ -463,10 +466,13 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 selectedBase.tickOutputs(),
                 selectedBase.conditions(),
                 selectedBase.blastTemp());
+        if (blastTempText.isEmpty() && ShanhaiRecipeHeat.usesTemperature(typeId)) blastTempText = "0";
+        if (!ShanhaiRecipeHeat.usesTemperature(typeId) && jsBlastTemp < 0) blastTempText = "";
+        panel.syncBlastChrome(showBlastTemp());
         scheduleDraftSave();
     }
 
-    /** Fills {@code gt_shanhai:type_input1_output1} from the selected type and the first stacks. */
+    /** Fills {@code gt_shanhai:type/input1_output1}. The type is a folder, not part of the leaf. */
     void guessCreateId() {
         if (!isClient() || !creating || selectedBase == null) return;
         net.minecraft.resources.ResourceLocation type =
@@ -481,12 +487,21 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             setStatus("§c先放入输入物或产物，再猜测 id");
             return;
         }
-        String path = idToken(type.getPath(), false);
-        if (!input.isEmpty()) path = path + "_" + input;
-        if (!output.isEmpty()) path = path + "_" + output;
-        if (path.length() > 180) path = path.substring(0, 180);
-        while (path.endsWith("_")) path = path.substring(0, path.length() - 1);
-        String id = "gt_shanhai:" + path;
+        String folder = type.getPath();
+        String leaf = input;
+        if (!output.isEmpty()) leaf = leaf.isEmpty() ? output : leaf + "_" + output;
+        int room = 180 - folder.length() - 1;
+        if (room < 1) {
+            setStatus("§c配方类型路径太长");
+            return;
+        }
+        if (leaf.length() > room) leaf = leaf.substring(0, room);
+        while (leaf.endsWith("_")) leaf = leaf.substring(0, leaf.length() - 1);
+        if (leaf.isEmpty()) {
+            setStatus("§c猜出来的 id 不合法");
+            return;
+        }
+        String id = "gt_shanhai:" + folder + "/" + leaf;
         if (RecipeEditorExportPacket.exportLocation(id, "") == null) {
             setStatus("§c猜出来的 id 不合法");
             return;
@@ -572,9 +587,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                     setStatus("§c填写新配方 id，使用小写的 命名空间:路径");
                     return;
                 }
-                ShanhaiRecipeBase created = new ShanhaiRecipeBase(
-                        selectedBase.recipeTypeId(), createdId.toString(), duration, eut,
-                        inputs, outputs, new JsonObject(), new JsonObject(), conditionEdits);
+                ShanhaiRecipeBase created = draftBase(
+                        createdId.toString(), duration, eut, inputs, outputs, true);
                 JsonObject payload = payloadWithConditionNote(created);
                 payload.addProperty("createNew", true);
                 payload.addProperty("liveRecipeId", createdId.toString());
@@ -591,10 +605,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 setStatus("§c配方 id 不合法，使用小写的 命名空间:路径");
                 return;
             }
-            ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
-                    selectedBase.recipeTypeId(), selectedBase.recipeId(), duration, eut,
-                    inputs, outputs, selectedBase.tickInputs(),
-                    selectedBase.tickOutputs(), conditionEdits);
+            ShanhaiRecipeBase edited = draftBase(
+                    selectedBase.recipeId(), duration, eut, inputs, outputs, false);
             JsonObject payload = payloadWithConditionNote(edited);
             payload.addProperty("keepOriginal", keepOriginal);
             payload.addProperty("liveRecipeId",
@@ -625,7 +637,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             }
             ShanhaiRecipeClipboard.copy(ShanhaiRecipeJsExport.format(
                     ioTable, exportId.toString(), selectedBase.recipeTypeId(),
-                    duration, eut, jsBlastTemp));
+                    duration, eut, shownBlastTemp()));
             setStatus("§a已复制 JS 配方对象");
         } catch (RuntimeException invalid) {
             setStatus("§c耗时或 EU/t 不是整数");
@@ -649,12 +661,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             JsonObject inputs = ioTable.json("inputs");
             JsonObject outputs = ioTable.json("outputs");
             String sourceId = creating ? exportId.toString() : selectedBase.recipeId();
-            ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
-                    selectedBase.recipeTypeId(), sourceId, duration, eut,
-                    inputs, outputs,
-                    creating ? new JsonObject() : selectedBase.tickInputs(),
-                    creating ? new JsonObject() : selectedBase.tickOutputs(),
-                    conditionEdits);
+            ShanhaiRecipeBase edited = draftBase(sourceId, duration, eut, inputs, outputs, creating);
             JsonObject payload = payloadWithConditionNote(edited);
             if (creating) payload.addProperty("createNew", true);
             ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorExportPacket(
@@ -680,12 +687,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             String sourceId = creating ? patternId.toString() : selectedBase.recipeId();
             JsonObject inputs = ioTable.json("inputs");
             JsonObject outputs = ioTable.json("outputs");
-            ShanhaiRecipeBase edited = new ShanhaiRecipeBase(
-                    selectedBase.recipeTypeId(), sourceId, duration, eut,
-                    inputs, outputs,
-                    creating ? new JsonObject() : selectedBase.tickInputs(),
-                    creating ? new JsonObject() : selectedBase.tickOutputs(),
-                    conditionEdits);
+            ShanhaiRecipeBase edited = draftBase(sourceId, duration, eut, inputs, outputs, creating);
             JsonObject payload = payloadWithConditionNote(edited);
             if (creating) payload.addProperty("createNew", true);
             ShanhaiNetwork.CHANNEL.sendToServer(new RecipeEditorEncodePacket(
@@ -696,10 +698,22 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         }
     }
 
+    private ShanhaiRecipeBase draftBase(String recipeId, int duration, long eut,
+                                       JsonObject inputs, JsonObject outputs, boolean freshTicks) {
+        return new ShanhaiRecipeBase(
+                selectedBase.recipeTypeId(), recipeId, duration, eut,
+                inputs, outputs,
+                freshTicks ? new JsonObject() : selectedBase.tickInputs(),
+                freshTicks ? new JsonObject() : selectedBase.tickOutputs(),
+                conditionEdits,
+                shownBlastTemp());
+    }
+
     private JsonObject payloadWithConditionNote(ShanhaiRecipeBase edited) {
         JsonObject payload = edited.payloadJson();
         payload.addProperty("conditionNote",
                 ShanhaiRecipeConditions.diffLine(selectedBase.conditions(), conditionEdits));
+        if (edited.blastTemp() >= 0) payload.addProperty("blastTemp", edited.blastTemp());
         return payload;
     }
 
@@ -745,6 +759,13 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         String next = limit(value);
         if (!next.equals(eutText)) beforeEdit("text:eut");
         eutText = next;
+        scheduleDraftSave();
+    }
+
+    void setBlastTempText(String value) {
+        String next = limit(value);
+        if (!next.equals(blastTempText)) beforeEdit("text:blast");
+        blastTempText = next;
         scheduleDraftSave();
     }
 
@@ -1201,6 +1222,38 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         return "§7" + side + kind + " §f" + mode + " §7" + chanceText + "%%  数量 " + countText;
     }
 
+    String matchFace() {
+        ShanhaiIoTable.Cell cell = ioTable.cell(selectedIo);
+        if (cell == null || cell.matchTag == null || cell.matchTag.isEmpty()) return "精确";
+        return "#" + cell.matchTag;
+    }
+
+    List<String> matchChoices() {
+        List<String> choices = new ArrayList<>();
+        choices.add("精确");
+        ShanhaiIoTable.Cell cell = ioTable.cell(selectedIo);
+        if (cell == null || cell.empty()) return choices;
+        for (String tag : ShanhaiIoTable.tagsOf(cell)) choices.add("#" + tag);
+        if (cell.matchTag != null && !cell.matchTag.isEmpty()) {
+            String current = "#" + cell.matchTag;
+            if (!choices.contains(current)) choices.add(1, current);
+        }
+        return choices;
+    }
+
+    void pickMatch(String label) {
+        ShanhaiIoTable.Cell cell = selectedCell();
+        if (cell == null || label == null) return;
+        String next = label.startsWith("#") ? label.substring(1).trim() : "";
+        String current = cell.matchTag == null ? "" : cell.matchTag;
+        if (next.equals(current)) return;
+        beforeEdit("match");
+        cell.matchTag = next;
+        cell.dirty = true;
+        syncIoDraft();
+        setStatus(next.isEmpty() ? "§a这一格按精确 id" : "§a这一格按标签 #" + next);
+    }
+
     private ShanhaiIoTable.Cell selectedCell() {
         ShanhaiIoTable.Cell cell = ioTable.cell(selectedIo);
         if (cell == null || cell.empty()) {
@@ -1268,6 +1321,46 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         return "§7EU/t §6" + before + " §f→ §a" + after;
     }
 
+    boolean showBlastTemp() {
+        if (selectedBase == null) return false;
+        return jsBlastTemp >= 0 || ShanhaiRecipeHeat.usesTemperature(selectedBase.recipeTypeId());
+    }
+
+    int shownBlastTemp() {
+        if (!showBlastTemp()) return -1;
+        if (blastTempText != null && !blastTempText.isBlank()) {
+            try {
+                return Math.max(0, Integer.parseInt(blastTempText.trim()));
+            } catch (NumberFormatException invalid) {
+                return Math.max(0, jsBlastTemp);
+            }
+        }
+        return jsBlastTemp;
+    }
+
+    String temperatureRequirementLine() {
+        if (!showBlastTemp()) return "";
+        int temp = Math.max(0, shownBlastTemp());
+        String before = jsBlastTemp < 0 ? "" : Integer.toString(jsBlastTemp);
+        String after = Integer.toString(temp);
+        String label = ShanhaiRecipeHeat.temperatureLine(selectedBase.recipeTypeId(), temp);
+        if (creating || before.isEmpty() || before.equals(after)) return "§7" + label;
+        return "§7" + label + " §8原 " + before + "K";
+    }
+
+    String coilRequirementLine() {
+        if (!showBlastTemp()) return "";
+        int temp = Math.max(0, shownBlastTemp());
+        java.util.List<String> lines = ShanhaiRecipeHeat.lines(selectedBase.recipeTypeId(), temp);
+        if (lines.size() < 2) return "";
+        StringBuilder text = new StringBuilder("§7");
+        for (int i = 1; i < lines.size(); i++) {
+            if (i > 1) text.append("  ");
+            text.append(lines.get(i));
+        }
+        return text.toString();
+    }
+
     private int shift(int page, int delta, int section, int pageSize) {
         int pages = pageCount(section, pageSize);
         return Math.max(0, Math.min(pages - 1, page + delta));
@@ -1332,6 +1425,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 ioTable = ShanhaiIoTable.fromJson(selectedBase.inputs(), selectedBase.outputs());
                 panel.bindTable(ioTable);
                 seedEditHistory();
+                panel.syncBlastChrome(showBlastTemp());
                 setStatus("§a已载入 " + compact(selectedBase.recipeId(), 48));
             }
             return;
@@ -1521,6 +1615,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             JsonObject json = JsonParser.parseString(payload).getAsJsonObject();
             jsBlastTemp = json.has("blastTemp") && json.get("blastTemp").isJsonPrimitive()
                     ? json.get("blastTemp").getAsInt() : -1;
+            blastTempText = jsBlastTemp >= 0 ? Integer.toString(jsBlastTemp) : "";
             json.remove("blastTemp");
             return new ShanhaiRecipeBase(
                     json.get("recipeTypeId").getAsString(),

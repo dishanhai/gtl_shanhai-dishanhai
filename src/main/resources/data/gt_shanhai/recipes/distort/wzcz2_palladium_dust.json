@@ -1,0 +1,152 @@
+{
+  "data": {
+    "euTier": 6
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 32768
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 625000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 110000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 125000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 10000,
+          "value": [
+            {
+              "fluid": "gtceu:fluorine"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzcz2"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10000,
+          "ingredient": {
+            "item": "gtceu:platinum_group_sludge_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 2
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 500000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 10000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 100000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 5000,
+          "value": [
+            {
+              "fluid": "gtceu:fluorine"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10000,
+          "ingredient": {
+            "item": "gtceu:palladium_dust"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:wzcz2_palladium_dust",
+      "defaultEnabled": true
+    }
+  ]
+}

@@ -62,6 +62,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private TextFieldWidget recipeIdField;
     private SelectorWidget createTypeSelector;
     private ButtonWidget guessId;
+    private LabelWidget blastLabel;
+    private TextFieldWidget blastField;
+    private LabelWidget coilLabel;
     private boolean createChrome;
     private IoGrid inputItemGrid;
     private IoGrid inputFluidGrid;
@@ -318,6 +321,12 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     }
 
     /** Type picker and id guess stay on the add-recipe editor. The id field keeps its full width otherwise. */
+    void syncBlastChrome(boolean show) {
+        if (blastLabel != null) blastLabel.setVisible(show);
+        if (blastField != null) blastField.setVisible(show);
+        if (coilLabel != null) coilLabel.setVisible(show);
+    }
+
     void syncCreateChrome() {
         boolean creating = host.creating;
         if (createTypeSelector != null) createTypeSelector.setVisible(creating);
@@ -482,7 +491,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         createTypeSelector.setVisible(false);
         editPage.addWidget(createTypeSelector);
         guessId = button(428, 2, 64, 16, "猜测", host::guessCreateId);
-        guessId.setHoverTooltips("填入 gt_shanhai:类型_输入1_产物1。只取第一个输入和第一个产物");
+        guessId.setHoverTooltips("填入 gt_shanhai:类型/输入1_产物1。类型是文件夹，只取第一个输入和第一个产物");
         guessId.setVisible(false);
         editPage.addWidget(guessId);
         editPage.addWidget(new LabelWidget(4, 18, "§7耗时 / tick"));
@@ -500,6 +509,16 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         editPage.addWidget(textField(4, 30, 130, 18, () -> host.durationText, host::setDurationText));
         editPage.addWidget(textField(150, 30, 130, 18, () -> host.eutText,
                 value -> host.setEutText(value)));
+        blastLabel = new LabelWidget(78, 50, "§7温度");
+        blastLabel.setVisible(false);
+        editPage.addWidget(blastLabel);
+        blastField = textField(106, 48, 52, 14, () -> host.blastTempText, host::setBlastTempText);
+        blastField.setVisible(false);
+        blastField.setHoverTooltips("配方温度，单位 K。线圈等级按这个温度计算");
+        editPage.addWidget(blastField);
+        coilLabel = new LabelWidget(162, 50, host::coilRequirementLine);
+        coilLabel.setVisible(false);
+        editPage.addWidget(coilLabel);
         editPage.addWidget(button(292, 30, 100, 18, "撤销修改", host::undoEdit));
         editPage.addWidget(button(396, 30, 100, 18, "还原", host::restoreOriginal));
         editPage.addWidget(new LabelWidget(4, 50, "§a输入物品"));
@@ -536,6 +555,17 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         editPage.addWidget(new LabelWidget(224, 190, "§7数量"));
         editPage.addWidget(textField(250, 186, 48, 16, () -> host.countText, host::setCountText));
         editPage.addWidget(new LabelWidget(4, 206, host::traitLine));
+        SelectorWidget match = new ShanhaiRecipeTypeSelector(268, 204, 228, 14, List.of("精确"), 0xFF1A1A1A)
+                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
+                .setBackground(GuiTextures.BACKGROUND)
+                .setFontColor(0xFF1A1A1A)
+                .setMaxCount(14)
+                .setCandidatesSupplier(host::matchChoices)
+                .setSupplier(host::matchFace)
+                .setOnChanged(host::pickMatch);
+        match.setClientSideWidget();
+        match.setHoverTooltips("点中一格后，这里列出该物品或流体自己的标签。选中后这一格按标签匹配，精确则只用注册 id");
+        editPage.addWidget(match);
         editPage.addWidget(new LabelWidget(4, 220, () -> "§7" + host.ioTable.itemIn()
                 + " 物品入 / " + host.ioTable.fluidIn() + " 流体入 → "
                 + host.ioTable.itemOut() + " 物品出 / " + host.ioTable.fluidOut() + " 流体出"));
@@ -587,8 +617,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         reviewPage.addWidget(new LabelWidget(4, 82, host::ioLine));
         reviewPage.addWidget(new LabelWidget(4, 100, host::conditionLine));
         reviewPage.addWidget(new LabelWidget(260, 28, host::durationDiffLine));
-        reviewPage.addWidget(new LabelWidget(260, 52, host::eutDiffLine));
-        reviewPage.addWidget(new LabelWidget(260, 82, host::codecHint));
+        reviewPage.addWidget(new LabelWidget(260, 40, host::eutDiffLine));
+        reviewPage.addWidget(new LabelWidget(260, 52, host::temperatureRequirementLine));
+        reviewPage.addWidget(new LabelWidget(260, 64, host::coilRequirementLine));
+        reviewPage.addWidget(new LabelWidget(260, 78, host::codecHint));
         keepToggle = new ButtonWidget(260, 96, 88, 16,
                 new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::keepOriginalFace)),
                 click -> host.toggleKeepOriginal());
