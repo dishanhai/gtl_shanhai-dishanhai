@@ -505,9 +505,22 @@ public final class ParallelPowerBudget {
      *       机器至少会尝试跑 1 份、跑不动就 WAITING"的既有行为一致。</li>
      * </ul>
      *
+     * <h2>🔴🔴 2026-10-11 口径修正：{@code ceiling} 必须是<b>【总并行】</b>口径</h2>
+     * <pre>
+     *   本方法的出口 = floor(P ÷ k)   ← 【总并行】（喂给 applyEnergyCap 之后它再 ÷T）
+     *   ⇒ 与它取 min 的那个 ceiling 必须【同口径】：ceiling = 本机上限 × T
+     *     调用方一律传 {@code ShanhaiParallelBudget#totalParallelLimitFor(本机上限, T)}。
+     *   ⛔ 改前两个调用点传的是 {@code getParallelOverrideCeiling()}
+     *      （模块 = 物质模块并行表值、【每线程】；主机 = MAX_PARALLEL、【每线程】）
+     *      ⇒ 本方法把"每线程上限"当成了"总上限" ⇒ 电上限 = min(P÷k, 本机上限)
+     *      ⇒ 总并行 = min(P÷k, 本机上限)（用户报的「最大总并行数 = 物质模块的并行数」）。
+     * </pre>
+     *
      * @param totalPowerPerTick 能源仓总功率（{@link #UNLIMITED} = 特例）
      * @param perParallelMilliEut 每并行耗电 k（<b>毫</b> EU/t，{@link #perParallelMilliCost}）
-     * @param ceiling           原本的上限（模块 = 物质模块并行表值，主机 = {@code MAX_PARALLEL}）
+     * @param ceiling           原本的上限 —— 🔴 <b>【总并行】口径</b>（= 本机上限 × 跨配方线程数；
+     *                          模块 = 并行表值 × T，主机 = {@code MAX_PARALLEL} × T）。
+     *                          ⛔ 不许传"每线程上限"（见上方 2026-10-11 那段）。
      */
     public static long parallelFromPowerMilli(long totalPowerPerTick, long perParallelMilliEut, long ceiling) {
         final long cap = Math.max(1L, ceiling);

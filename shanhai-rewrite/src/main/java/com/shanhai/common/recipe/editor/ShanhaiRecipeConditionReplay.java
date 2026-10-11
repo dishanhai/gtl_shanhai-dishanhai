@@ -134,7 +134,55 @@ public final class ShanhaiRecipeConditionReplay {
         ShanhaiMod.LOGGER.info("{} conditions_replay_applied id={} n={} types={} write_flag={} "
                         + "（直接写 GT 认的平铺 JSON，绕过 KubeJS 那个 read/write 不对称的 component）",
                 PREFIX, safeId(recipe), normalized.size(), ShanhaiRecipeConditions.summary(normalized), flag);
+
+        // 🆕🔴 2026-10-07（显示层缺口）：条件装上了【服务端】，还必须让【客户端 JEI 那一份】也带上 ——
+        //    否则 JEI 配方页里那一行催化剂槽看不见：ModuleCatalystSlotUI.firstGateModule 读的就是
+        //    recipe.conditions，而客户端那份是"照服务端发过去的字节/载荷"造的。
+        //    通道用**现成的**：ShanhaiJeiBridge 的 ACTION_CHANGED（载荷里就有 conditionsJson 这一格，
+        //    客户端 synthesize() 会整段替换副本的 conditions）—— 这里只把【受影响的这一条】登记进去，
+        //    真正发出去的时点见 ShanhaiJeiBridge.noteReplayedConditions 的整段注释。
+        noteToJei(recipe, json, normalized);
         return "";
+    }
+
+    /**
+     * 把"这一条刚被重放装上条件"交给 JEI 那条现成的通道（{@link ShanhaiJeiBridge}）。
+     *
+     * <p>🔴 <b>只登记，不在这里发送</b>：本方法跑在配方加载期（KubeJS 事件里），那一刻
+     * <b>没有 server、也没有玩家</b> ⇒ 直接发必然发不出去。登记之后由"玩家登录 / reload /
+     * 立刻有玩家在线"这三个时点补发（掉线的客户端下次上线就由登录那一拍补上）。
+     *
+     * <p>⚠️ <b>fail-open 且如实报</b>：任何一步失败都只打一行日志 ——
+     * 重放本身<b>已经成功</b>（服务端那一份是对的），绝不因为"推不出去"把重放判成失败。
+     * 拿不到类型 id 时<b>宁可不推</b>并说明理由（客户端是按"类型 == 当前分类 uid"对号入座的，推错类型等于把补丁丢进黑洞）。
+     */
+    private static void noteToJei(RecipeJS recipe, JsonObject json, JsonArray normalized) {
+        final String id = safeId(recipe);
+        if (id == null || id.isEmpty() || "(id?)".equals(id)) {
+            ShanhaiMod.LOGGER.warn("{} conditions_replay_jei_skipped id={} reason=no_recipe_id "
+                    + "（这条条件在服务端已装上，只是没法告诉客户端是哪一条 ⇒ JEI 那一页看不到槽）", PREFIX, id);
+            return;
+        }
+        String type = null;
+        try {
+            final JsonElement t = json.get("type");
+            if (t != null && t.isJsonPrimitive()) {
+                type = t.getAsString();
+            }
+        } catch (Throwable ignored) {
+            // 落到下面那句"没有类型"的如实报告
+        }
+        if (type == null || type.isEmpty()) {
+            ShanhaiMod.LOGGER.warn("{} conditions_replay_jei_skipped id={} reason=no_type_id "
+                    + "（配方 json 里没有 \"type\" ⇒ 不知道它属于 JEI 哪个分类 ⇒ 宁可不推，也不推错）", PREFIX, id);
+            return;
+        }
+        try {
+            ShanhaiJeiBridge.noteReplayedConditions(id, type, normalized.toString());
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} conditions_replay_jei_note_failed id={} type={} err={} "
+                    + "（重放本身已成功；只有 JEI 那一次推送没登记上）", PREFIX, id, type, t.toString());
+        }
     }
 
     /**

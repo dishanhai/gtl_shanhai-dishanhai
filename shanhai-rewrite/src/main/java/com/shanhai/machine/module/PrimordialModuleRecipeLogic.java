@@ -257,7 +257,24 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
         }
         try {
             final Set<GTRecipe> candidates = lookupRecipeSet();
-            final long ceiling = module.getParallelOverrideCeiling();
+            // 🔴🔴 2026-10-11 <b>口径修正（用户原话即规格）</b>：
+            //   「物质模块限制的最大并行数应该限制<b>机器的并行数</b>，而不是<b>总并行数</b>；
+            //     而最大耗电限制的应该是<b>总并行数</b>，不然电供不起」
+            // <pre>
+            //   module.getParallelOverrideCeiling()  = max(1, 物质模块并行表值)   ← 【每线程】口径
+            //        （引擎父类 MutableRecipesLogic.calculateParallels() 会把 getMaxParallel() 乘回 T）
+            //   parallelFromPowerMilli(...) 的出口    = floor(P ÷ k)              ← 【总并行】口径
+            //   ⛔ 改前：把【每线程】上限当成了【总】上限的 ceiling
+            //        ⇒ 电上限 = min(P÷k, 本机上限)，再经 applyEnergyCap 的 ÷T
+            //        ⇒ 引擎总并行 = min(P÷k, 本机上限) —— 正是用户报的
+            //          「设置最大总并行数为物质模块的并行数，而不是 物质模块 × 线程数」✗
+            //   ✅ 现在：传【总】上限 = 本机上限 × T（复用唯一实现 ShanhaiParallelBudget#totalParallelLimitFor，
+            //        不在本处再写一遍乘法）⇒ 电上限 = min(P÷k, 本机上限×T)
+            //        ⇒ 每线程 = min(本机上限, floor(电上限÷T)) ⇒ 总并行 = min(本机上限×T, P÷k) ✓
+            //   ⚠️ T = 1 时 totalParallelLimitFor(x,1) == x ⇒ 本行与改前【逐位相同】（回归红线）。
+            // </pre>
+            final long ceiling = ShanhaiParallelBudget.totalParallelLimitFor(
+                    module.getParallelOverrideCeiling(), getMultipleThreads());
             if (candidates.isEmpty()) {
                 // 🔴 2026-10-02 第二轮：这里**不再**写一个裸的"没有上限"，而是把**原因**一起写下去。
                 //    上一轮这一档与"还没算过""异常"在面板上长得一模一样（都是「尚未算出」），

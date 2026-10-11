@@ -1773,25 +1773,35 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         session.removeCondition();
     }
 
+    /**
+     * 「类型」下拉变了。
+     *
+     * <p>🔴 2026-10-07：<b>这一条是"用户显式动作"的唯一入口</b>。
+     * LDLib 的 {@code SelectorWidget} 字节码实测：{@code onChanged} 只有两个出口 ——
+     * ① {@code lambda$computeLayout$2}（用户点中列表里的某一项）；
+     * ② {@code handleClientAction(2)}（服务端收到"用户点了某项"那个包）。
+     * {@code setValue} / {@code setCandidates} / {@code computeLayout} / {@code updateScreen}
+     * <b>都不会</b>触发它（见 temp\condbug\SelectorWidget.javap.txt 的原文）。
+     */
     private void onCondType(String label) {
         if (clientSide || !session.condOpen()) {
             return;
         }
-        session.setCondType(label);
+        session.setCondTypeFrom(label, ShanhaiRecipeEditorWorkspace.ORIGIN_USER_DROPDOWN);
     }
 
-    /** 🔴 第 5 轮：档位下拉的回调（作用在选中那条上；候选随类型变）。 */
+    /** 🔴 第 5 轮：档位下拉的回调（作用在选中那条上；候选随类型变）。同上：这是用户动作入口。 */
     private void onCondValue(String label) {
         if (clientSide || !session.condOpen()) {
             return;
         }
-        session.setCondValue(label);
+        session.setCondValueFrom(label, ShanhaiRecipeEditorWorkspace.ORIGIN_USER_DROPDOWN);
     }
 
     private void onCondReverse() {
         if (clientSide || !session.condOpen()) {
             return;
         }
-        session.toggleCondReverse();
+        session.toggleCondReverseFrom(ShanhaiRecipeEditorWorkspace.ORIGIN_USER_DROPDOWN);
     }
 }

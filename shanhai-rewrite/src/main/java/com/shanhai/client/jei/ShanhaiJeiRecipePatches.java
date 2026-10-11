@@ -6,6 +6,7 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
 import com.shanhai.ShanhaiMod;
 import com.shanhai.common.recipe.editor.ShanhaiJeiBridge;
+import com.shanhai.common.recipe.editor.ShanhaiJeiOwnCopies;
 import com.shanhai.common.recipe.editor.ShanhaiJeiSyncPlan;
 import com.shanhai.common.recipe.editor.ShanhaiRecipeConditions;
 import com.shanhai.common.recipe.editor.ShanhaiRecipeIoApply;
@@ -134,17 +135,24 @@ public final class ShanhaiJeiRecipePatches {
         volatile boolean hadOriginal;
 
         /**
-         * 🔴🔴 2026-10-06（用户："新建之后再改产物 ⇒ JEI 里同一条出现两份"）：
-         * <b>我们自己 {@code addRecipes} 进去的那几个实例</b>（正常最多 1 个）。
+         * 🔴🔴 2026-10-11（对账自己抓到的"越叠越多"）：
+         * <b>我们自己 {@code addRecipes} 进去的那几份的句柄，已经【不放在这里】了。</b>
          *
-         * <p>为什么要自己记：**不能靠"JEI 现在交出来的是哪份"去猜** —— 新建之后再改同一条时，
-         * JEI 交出来的那份**正是我们上次加进去的** ⇒ {@code hadOriginal} 判不出来 ⇒
-         * 结果又是"只 add、不撤旧的" ⇒ 同 id 两份并存 ✗（用户截图为证：×1 与 ×3 并排）
-         * <p>用法：改/删同一条时**先用这张表把旧的实例 hide 掉（按实例同一性，精确），再上新的一份** ✓
-         * <p>⚠️ 这张表必须**跟着补丁一起换代**：每次改同一条都会 new 一个 Patch
-         * ⇒ {@code accept} 里必须把旧 Patch 的这张表**搬过来**，否则引用丢了就永远撤不掉旧的 ✗
+         * <p>修复前它就叫 {@code addedInstances}，挂在本类身上。坑在"挂在本类身上"这五个字：
+         * <b>每次改同一条都会 new 一个 Patch</b>（靠 {@code accept} 把它搬过去，那条路是通的），
+         * 但<b>对账 {@code reconcile()} 会把 Patch 整个从表里删掉</b>
+         * ⇒ <b>句柄跟着一起消失</b>，从此<b>再也没有人能撤掉我们上一次 addRecipes 进去的那一份</b> ✗
+         * <p>而那一份的处境是最糟的：它<b>既没被 hide、又确实在 JEI 的 recipes 列表里</b>
+         * （JEI 那侧 {@code RecipeTypeData.addRecipes} = {@code ArrayList.addAll}，<b>不去重</b>，见
+         * {@link com.shanhai.common.recipe.editor.ShanhaiJeiOwnCopies} 的取证）
+         * ⇒ <b>界面照旧显示它</b>；下一次同一条 id 再登记就是第 2 份、第 3 份 ⇒ 用户说的
+         * 「新建之后再改同一条 ⇒ JEI 里同一条出现两份」「×1 与 ×3 并排」✗✗
+         *
+         * <p>⇒ 句柄搬进<b>不跟着 Patch 一起死</b>的全局台账
+         * {@link com.shanhai.common.recipe.editor.ShanhaiJeiOwnCopies}（按 分类 uid ＋ 完整 recipe id 归组）。
          */
-        final java.util.List<Object> addedInstances = new java.util.ArrayList<>();
+        /* （2026-10-11 起本字段已删：句柄在 ShanhaiJeiOwnCopies 里；留这段注释是为了让后来人知道
+            为什么不能"为了方便"再挂回 Patch 上。） */
 
         /** 我们造出来的那一份（只活在本表的返回值里；下一次改同一条会重造）。 */
         volatile Object synth;
@@ -207,12 +215,11 @@ public final class ShanhaiJeiRecipePatches {
             final Patch stored = new Patch(msg.recipeId, msg.typeId, removed,
                     msg.inputsJson, msg.outputsJson, msg.conditionsJson,
                     msg.hasDuration, msg.duration, msg.hasEut, msg.eut, msg.vanillaJson, msg.recipeBytes);
-            // 🔴🔴 2026-10-06（用户："新建之后再改同一条 ⇒ JEI 里两份"）：
-            //    **改同一条 = 换一个补丁对象** ⇒ 必须把上一版的"我们自己加过的实例表"搬过来，
-            //    否则引用一丢就永远撤不掉旧的那一份 ⇒ 同 id 两份并存 ✗（用户截图为证）
+            // 🔴🔴 2026-10-11：句柄不再挂在 Patch 上（那条路会在 reconcile 丢补丁时把句柄一起丢掉），
+            //    改由全局台账 ShanhaiJeiOwnCopies 保管 ⇒ 换代/丢补丁都还在。
+            //    这里只搬"这一条 id 在 JEI 里本来有没有旧的"与"登记过没有"这两个判断位。
             final Patch prev = PATCHES.get(msg.recipeId);
             if (prev != null) {
-                stored.addedInstances.addAll(prev.addedInstances);
                 stored.hadOriginal = prev.hadOriginal;
                 stored.registered = prev.registered;
             }
@@ -271,54 +278,47 @@ public final class ShanhaiJeiRecipePatches {
                         PREFIX, p.recipeId);
                 return;
             }
-            // 🔴🔴 2026-10-06（用户："左键原料能查到、用产物查不到"）：**把这条登记进 JEI 自己的结构。**
-            //    我们此前只在 `getRecipes` 的**返回值**上追加了一条 ⇒ 那只是"显示列表"，
-            //    而 JEI 的"按物品查找"（左键=怎么获得 / 右键=能做什么）走的是**它自己内部那条索引**
-            //    ⇒ 不登记进去，按【产物】就永远查不到 ✗
-            //    ⚠️ 只对【新建的】登记（JEI 里本来没有旧的）：改/删已有那条走"藏旧的 + 我们补新的"，
-            //      重复登记会在 JEI 内部多留一份同 id 的对象 ✗
-            if (!p.removed && !p.hadOriginal && !p.registered) {
-                final Object reg = runtimeAddable(p);
-                if (reg != null && ShanhaiJeiRuntime.registerInJei(p.typeId, p.recipeId, reg)) {
-                    p.registered = true;
-                }
-            }
             // 🔴🔴🔴 2026-10-06 用户抓到的【自己藏自己】（现场读数：
             //    `jei_runtime_registered total=1` 紧接着 `jei_runtime_hidden hidden=1`）：
             //    **新建的配方没有"旧的那份"可藏** —— 藏下去藏掉的正是我们刚登记进去的那一份
             //    ⇒ add 与 hide 互相抵消 ⇒ 用户完全看不到 ✗✗
             //    ⇒ 判据：`hadOriginal`（JEI 里本来就有这条 id 吗）为 false ⇒ **只 add、绝不 hide** ✓
+            //
+            // 🔴🔴 2026-10-11（对账抓到的"越叠越多"）：**登记只许有一次，而且必须先撤上一份。**
+            //    修复前这里是【两个分支各登记一次**同一个实例**】：
+            //      · 上面那个 `if (!p.registered)` 先 registerInJei(reg)
+            //      · 下面这个分支又 registerInJei(reg)（addedInstances 还是空的 ⇒ 不觉得"已经是我的"）
+            //    而 JEI 那侧的语义由字节码定死（见 ShanhaiJeiOwnCopies 类注释的取证）：
+            //      RecipeManagerInternal#addRecipes → RecipeTypeData#addRecipes = recipes.addAll(...)
+            //      而 recipes 是【普通 ArrayList、没有去重】⇒ **同一份实例登记两次 = 列表里两条** ✗
+            //    ⇒ 两处合成一处：① 先从全局台账取走"上一次我们自己加进去的那一份"并 hide 掉；
+            //                     ② 再登记新的一份（只这一次），并把句柄记回台账 ✓
+            //    （句柄为什么必须放全局台账、不能挂 Patch：见 Patch 的字段注释与 reconcile() 里那段。）
             if (!p.removed && !p.hadOriginal) {
-                // 🔴🔴 2026-10-06（用户："新建之后再改同一条 ⇒ JEI 里两份"）：
-                //    **每一条新内容都先把"我们上一次加进去的那份"精确撤掉，再上新的那一个** ✓
-                //    为什么不能只做一次：改同一条时 JEI 交出来的那份**正是我们上次加的**
-                //    ⇒ 按 id 是判不出"谁是旧的"的 ⇒ 只能靠我们自己的实例表（不能猜）✓
+                final String ownKey = ShanhaiJeiOwnCopies.key(p.typeId, p.recipeId);
                 final Object reg = runtimeAddable(p);
                 if (reg != null) {
-                    boolean alreadyMine = false;
-                    for (Object o : p.addedInstances) {
-                        if (o == reg) {
-                            alreadyMine = true;     // 同一份对象 ⇒ 不用重复登记
-                            break;
-                        }
+                    final java.util.List<Object> mine = ShanhaiJeiOwnCopies.takePrevious(ownKey, reg);
+                    if (!mine.isEmpty() && !ShanhaiJeiRuntime.hideGiven(p.typeId, mine)) {
+                        // 撤不掉（JEI 还没就绪 / 传错实例静默无效）⇒ **句柄放回台账**，下一次同一条还能再撤；
+                        // 绝不静默丢句柄 —— 句柄一丢就是"那份永远撤不掉"⇒ 越叠越多 ✗
+                        ShanhaiJeiOwnCopies.recordAll(ownKey, mine);
+                        ShanhaiMod.LOGGER.warn("{} jei_own_copy_hide_failed id={} count={} "
+                                        + "（撤不掉我们上一份 ⇒ 句柄留在台账里、下一次再撤；"
+                                        + "JEI 那侧 addRecipes 不去重，句柄丢了就会越叠越多）",
+                                PREFIX, p.recipeId, mine.size());
                     }
-                    if (!alreadyMine) {
-                        if (!p.addedInstances.isEmpty()) {
-                            ShanhaiJeiRuntime.hideGiven(p.typeId, p.addedInstances);
-                            p.addedInstances.clear();
-                        }
-                        if (ShanhaiJeiRuntime.registerInJei(p.typeId, p.recipeId, reg)) {
-                            p.addedInstances.add(reg);
-                            p.registered = true;
-                        }
+                    if (ShanhaiJeiRuntime.registerInJei(p.typeId, p.recipeId, reg)) {
+                        ShanhaiJeiOwnCopies.record(ownKey, reg);
+                        p.registered = true;
                     }
                 }
                 p.runtimeApplied = false;           // 不走"藏 JEI 自己那份"这条路
                 p.runtimePending = false;           // 也不再重试
                 ShanhaiMod.LOGGER.info("{} jei_runtime_hide_skipped id={} reason=new_recipe_no_old_copy "
-                                + "mine_now={}（★新建的配方在 JEI 里本来就没有旧的 ⇒ 只登记我们自己的那一份；"
-                                + "改同一条时先把我们上一份精确撤掉 ⇒ 同 id 只会有一份）",
-                        PREFIX, p.recipeId, p.addedInstances.size());
+                                + "mine_now={}（★新建的配方在 JEI 里本来就没有旧的 ⇒ 只登记我们自己的那一份，"
+                                + "而且只登记一次；改同一条时先把上一份精确撤掉 ⇒ 同 id 只会有一份）",
+                        PREFIX, p.recipeId, ShanhaiJeiOwnCopies.ownCount(ownKey));
                 return;
             }
             final boolean ok = ShanhaiJeiRuntime.hideOwnCopies(p.typeId, p.recipeId);
@@ -419,6 +419,23 @@ public final class ShanhaiJeiRecipePatches {
         if (ShanhaiJeiRuntime.inOfficialCall()) {
             ShanhaiJeiRuntime.noteReentryBlocked();
             return recipes;
+        }
+        // 🔴🔴 2026-10-11（对账自己抓到的**假红**）：
+        //    **matched / hidden / added 是"这一拍"的读数，不是"这一条配方"的累计读数。**
+        //    修复前它们只增不减 ⇒ 同一条配方被查 3 拍（收藏夹 2 拍 ＋ 分类页 1 拍）就打成
+        //    `jei_sync matched=3 hidden=3 added=3 … visible_expected=3 expected=1 PASS=false`
+        //    ＋ 一条 `jei_sync_ACCOUNTING_MISMATCH`（现场：用户实例 logs\latest.log 09:51:07.750）。
+        //    而那个 3 是【查询拍数】，不是【显示份数】—— 屏幕上那一条始终只有 1 份（同 id 的去重在这里做）。
+        //    ⇒ 每拍开头清零，判据行恢复成"这一拍"的真读数：
+        //      · 一拍里 1 条 ⇒ 1−1+1 = 1 ⇒ PASS（假红消失）；
+        //      · 一拍里出现"我们没去重掉的第 2 份"才可能不等于 1 ⇒ 真红还在 ✓
+        //    ⚠️ 清零必须放在**防重入闸之后**：防重入那次透传是我们自己的内部查询，
+        //       它要是清了零，外层那一拍的读数就被自己抹掉了 ✗
+        for (Patch q : PATCHES.values()) {
+            q.matched = 0;
+            q.hidden = 0;
+            q.added = 0;
+            q.keptOriginal = 0;
         }
         try {
             final List<T> out = new ArrayList<>(recipes.size() + 2);
@@ -796,6 +813,7 @@ public final class ShanhaiJeiRecipePatches {
         int dropped = 0;
         int kept = 0;
         int unhidden = 0;
+        int ownHidden = 0;
         for (String id : new ArrayList<>(PATCHES.keySet())) {
             if (keep.contains(id)) {
                 kept++;
@@ -820,9 +838,38 @@ public final class ShanhaiJeiRecipePatches {
                     ShanhaiMod.LOGGER.warn("{} jei_unhide_on_drop_failed id={} err={}", PREFIX, id, t.toString());
                 }
             }
+            // 🔴🔴🔴 2026-10-11（对账自己抓到的"越叠越多"的**主累加点**）：
+            //    **丢补丁时必须把我们自己 addRecipes 进去的那一份也撤掉** —— 修复前这里只有上面那半
+            //    （把 hide 过的 JEI 原件还回去），而**我们自己加进去的那一份从来没人撤**。
+            //    为什么"从来没人撤"：句柄原来挂在 Patch 上，而这一行上面就是 `PATCHES.remove(id)`
+            //    ⇒ 句柄跟着 Patch 一起没了；而"新建的配方"那条分支又把 runtimeApplied 置成 false
+            //    ⇒ 连上面那半也不会替它做任何事 ✗
+            //    那一份的处境是最糟的：**既没被 hide、又确实在 JEI 的 recipes 列表里**
+            //    （JEI 那侧 addRecipes = ArrayList.addAll，不去重）⇒ 界面照旧显示它；
+            //    下一次同一条 id 再登记就是第 2 份、第 3 份 ⇒「改一次多一份、越叠越多」✗✗
+            //    ⇒ 现在：句柄在全局台账里（不随 Patch 死）⇒ 丢补丁就把它们撤掉 ✓
+            //    判据（运行期可 grep）：本行读数的 `own_hidden=` 一旦 >0，就说明正好抓住了这条路径。
+            final String ownKey = ShanhaiJeiOwnCopies.key(gone == null ? null : gone.typeId, id);
+            final java.util.List<Object> ownGone = ShanhaiJeiOwnCopies.drain(ownKey);
+            if (!ownGone.isEmpty()) {
+                try {
+                    if (ShanhaiJeiRuntime.hideGiven(gone == null ? null : gone.typeId, ownGone)) {
+                        ownHidden++;
+                    } else {
+                        // 撤不掉 ⇒ 句柄放回台账（下一次还有机会撤；绝不静默丢句柄）
+                        ShanhaiJeiOwnCopies.recordAll(ownKey, ownGone);
+                        ShanhaiMod.LOGGER.warn("{} jei_own_copy_drop_hide_failed id={} count={} "
+                                        + "（丢补丁时撤不掉我们加的那一份 ⇒ 它会继续显示；句柄已放回台账）",
+                                PREFIX, id, ownGone.size());
+                    }
+                } catch (Throwable t) {
+                    ShanhaiJeiOwnCopies.recordAll(ownKey, ownGone);
+                    ShanhaiMod.LOGGER.warn("{} jei_own_copy_drop_hide_threw id={} err={}", PREFIX, id, t.toString());
+                }
+            }
         }
-        ShanhaiMod.LOGGER.info("{} jei_reconcile in_force={} kept={} dropped={} unhidden={} patches_now={}",
-                PREFIX, keep.size(), kept, dropped, unhidden, PATCHES.size());
+        ShanhaiMod.LOGGER.info("{} jei_reconcile in_force={} kept={} dropped={} unhidden={} own_hidden={} patches_now={}",
+                PREFIX, keep.size(), kept, dropped, unhidden, ownHidden, PATCHES.size());
     }
 
     /** 一条 JEI 配方元素的完整 recipe id（认不出来 = null ⇒ 不参与补丁）。 */

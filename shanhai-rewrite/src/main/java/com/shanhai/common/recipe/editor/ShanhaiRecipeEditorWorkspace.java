@@ -221,6 +221,33 @@ public final class ShanhaiRecipeEditorWorkspace {
      */
     private String condSource = "(未载入)";
 
+    // ---------------------------------------------------------------- 🔴 2026-10-07 条件写回闸门
+    //
+    // 用户原话：「我重启游戏之后我写好的配方条件都被改了」。
+    // 现场（temp\condbug\A-cond-actions.txt）：`workspace_cond_add type=cleanroom` 之后约 1 秒，
+    // 没有任何别的日志就出现 `workspace_cond_edit index=0 type=module_level …` —— 那条 edit 把
+    // 刚加进去的那一条<b>原地换掉</b>。而 `workspace_cond_edit` 只由 rebuildSelectedFromEditor
+    // 打出、它只被三个下拉 setter 调用 ⇒ 这一次写在日志上<b>分不出"谁点的"</b>。
+    // 下面两个常量就是那个"谁点的"：只有 USER_DROPDOWN 才允许写，AUTO 一律拒写并留痕。
+
+    /** 来源标记：用户显式点了「类型 / 档位 / 满足开关」这三样控件之一。 */
+    public static final String ORIGIN_USER_DROPDOWN = "user_dropdown";
+
+    /** 来源标记：任何自动路径（切配方 / 载入 / 面板重画 / 版本推送 / 面板开关）—— <b>一个字都不许写</b>。 */
+    public static final String ORIGIN_AUTO = "auto";
+
+    /**
+     * 🔴 <b>只给自检用的负对照开关</b>：置 true ⇒ 自动路径也照样写回（= 旧行为）。
+     * 自检靠它证明"新加的断言真的抓得住旧行为"（否则那条断言可能是恒真的假绿）。
+     */
+    static boolean TEST_FORCE_EDIT_WITHOUT_USER = false;
+
+    /** 条件被真写回过的次数（自检的机器判据：切配方一拍里它必须<b>一动不动</b>）。 */
+    private int condEditorEdited;
+
+    /** 条件编辑器被重置（换配方重载）的次数 —— 用来证明"切配方确实重载了"。 */
+    private int condEditorResets;
+
     private boolean loadedRecipe;
 
     /** 🆕 第 7 轮（队列 #5）：当前这条活配方的类型对象 —— 算"真实耗时"要用它。 */
@@ -1020,6 +1047,8 @@ public final class ShanhaiRecipeEditorWorkspace {
         outPage = 0;
         countCell = -1;
         conditions = new com.google.gson.JsonArray();
+        // 🔴 2026-10-07：非 GT 这一支同样要把编辑态清掉（与 loadConditionsFor 同一个理由）。
+        resetCondEditor("load_vanilla_recipe");
         condSel = -1;
         condOpen = false;
         loadedRecipe = true;
@@ -1124,6 +1153,9 @@ public final class ShanhaiRecipeEditorWorkspace {
         final Resolved r = resolveConditions(server, live.id, live);
         conditions = r.conditions();
         condSource = r.source();
+        // 🔴 2026-10-07：载入一条配方 = 编辑态(old condTypeKey/condValue/condSel)一律作废。
+        //    不重置的话，新配方的条件列表会继承上一条配方的"当前下拉值" —— 见 resetCondEditor 注释。
+        resetCondEditor("load_conditions:" + (live.id == null ? "?" : live.id));
         condNote = "载入时 " + conditions.size() + " 条（来源 " + condSource + "）";
 
         ShanhaiMod.LOGGER.info("{} workspace_conditions_source id={} source={} n={} "
@@ -2896,6 +2928,36 @@ public final class ShanhaiRecipeEditorWorkspace {
         return condTypeKey;
     }
 
+    /** 🔴 2026-10-07：条件被<b>真写回</b>过的次数（自检的机器判据用；切配方一拍里必须不动）。 */
+    public int condEditedTotal() {
+        return condEditorEdited;
+    }
+
+    /** 🔴 2026-10-07：条件编辑器被重置（= 换了一条配方，编辑态按配方隔离）的次数。 */
+    public int condEditorResetTotal() {
+        return condEditorResets;
+    }
+
+    /**
+     * 🔴 2026-10-07：<b>编辑态按配方隔离</b>。
+     *
+     * <p>病根：{@code condTypeKey} / {@code condValue} / {@code condSel} / {@code condReverse}
+     * 是<b>会话级</b>字段，切配方时从不重置 ⇒ 一进新配方，它们还指着<b>上一条配方</b>的条件。
+     * 于是"点一下下拉"就会拿上一条配方的值去写这条配方的行。
+     * 修法：载入任一条配方时把它们清空（{@code condSel=-1} 起，面板上也就不显示"正在改第 N 条"）；
+     * 选中某一行时再由 {@link #loadCondEditor()} 从<b>那一条自己的 json</b> 重新填。
+     */
+    private void resetCondEditor(String why) {
+        condTypeKey = "";
+        condValue = "";
+        condReverse = false;
+        condSel = -1;
+        condEditorResets++;
+        ShanhaiMod.LOGGER.info("{} workspace_cond_editor_reset reason={}（编辑态不跨配方继承；"
+                        + "下一个用户动作才允许写回）edited_total={}",
+                PREFIX, why, condEditorEdited);
+    }
+
     /** 🔴 第 5 轮：编辑控件里那个唯一的可编辑值 = 「档位」下拉选中的那一项（key）。 */
     public String condValue() {
         return condValue;
@@ -3183,16 +3245,40 @@ public final class ShanhaiRecipeEditorWorkspace {
      * 原来那句「档位下拉是一个不带类型上下文的固定列表」正是用户抱怨的根子。
      */
     public void setCondType(String label) {
+        setCondTypeFrom(label, ORIGIN_AUTO);
+    }
+
+    /**
+     * 🔴 2026-10-07（用户报「我重启游戏之后我写好的配方条件都被改了」）：<b>把"谁点的"变成参数</b>。
+     *
+     * <p>面板那个「类型」下拉的回调 {@code onCondType} 走这一条（origin = {@link #ORIGIN_USER_DROPDOWN}）；
+     * 其它任何路径一律 {@link #ORIGIN_AUTO} —— 而<b>只有 USER 那一档才会写回</b>。
+     * 这样"切配方 / 载入 / 面板重建 / 版本推送"就再也<b>不可能</b>把一个字写进条件里。
+     */
+    public void setCondTypeFrom(String label, String origin) {
         final int idx = condTypeLabels().indexOf(label);
         final List<String> keys = condTypeKeys();
         if (idx < 0 || idx >= keys.size()) {
+            ShanhaiMod.LOGGER.warn("{} workspace_cond_type_unmatched label={} origin={}",
+                    PREFIX, label, origin);
             return;
         }
-        condTypeKey = keys.get(idx);
+        final String newKey = keys.get(idx);
+        // 🔴 只有"用户点了下拉"才允许落盘；其它来源一律拒绝写。
+        if (!ORIGIN_USER_DROPDOWN.equals(origin) && !TEST_FORCE_EDIT_WITHOUT_USER) {
+            if (!newKey.equals(condTypeKey)) {
+                // 不是用户动作却想把类型改掉 ⇒ 这是"自动改条件"的形状 ⇒ 拒绝 + 留痕
+                ShanhaiMod.LOGGER.warn("{} workspace_cond_edit_refused reason=not_user_action "
+                                + "what=type index={} {}->{} origin={}（自动路径不许改条件）",
+                        PREFIX, condSel, condTypeKey, newKey, origin);
+            }
+            return;
+        }
+        condTypeKey = newKey;
         final List<ShanhaiRecipeConditions.Value> vs = ShanhaiRecipeConditions.valueTableOf(server, condTypeKey);
         condValue = vs.isEmpty() ? "" : vs.get(0).key();
         if (condSel >= 0 && condSel < conditions.size() && !blank()) {
-            rebuildSelectedFromEditor();
+            rebuildSelectedFromEditor(ORIGIN_USER_DROPDOWN + ":type");
             loadCondEditor();
             condNote = "第 " + (condSel + 1) + " 条改成类型 " + ShanhaiRecipeConditions.typeLabel(condTypeKey)
                     + (condHasValueColumn() ? "，档位已重置为「" + condValueLabel() + "」" : "");
@@ -3208,14 +3294,27 @@ public final class ShanhaiRecipeEditorWorkspace {
      * （例如他进游戏时用的还是上一个 jar）不会静默什么都不做。
      */
     public void setCondValue(String label) {
+        setCondValueFrom(label, ORIGIN_AUTO);
+    }
+
+    /** 🔴 见 {@link #setCondTypeFrom(String, String)} —— 同一个"只有用户动作才写"的闸门。 */
+    public void setCondValueFrom(String label, String origin) {
         final List<ShanhaiRecipeConditions.Value> vs = ShanhaiRecipeConditions.valueTableOf(server, condTypeKey);
         if (vs.isEmpty() || label == null) {
             return;
         }
         for (ShanhaiRecipeConditions.Value v : vs) {
             if (v.dropdown().equals(label) || v.label().equals(label) || v.key().equals(label)) {
+                if (!ORIGIN_USER_DROPDOWN.equals(origin) && !TEST_FORCE_EDIT_WITHOUT_USER) {
+                    if (!v.key().equals(condValue)) {
+                        ShanhaiMod.LOGGER.warn("{} workspace_cond_edit_refused reason=not_user_action "
+                                        + "what=value index={} {}->{} origin={}（自动路径不许改条件）",
+                                PREFIX, condSel, condValue, v.key(), origin);
+                    }
+                    return;
+                }
                 condValue = v.key();
-                rebuildSelectedFromEditor();
+                rebuildSelectedFromEditor(ORIGIN_USER_DROPDOWN + ":value");
                 touch();
                 return;
             }
@@ -3226,8 +3325,19 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     /** 「要求【满足】/【不满足】」开关（两侧都会跑；只有服务端那份会被写盘）。 */
     public boolean toggleCondReverse() {
+        return toggleCondReverseFrom(ORIGIN_AUTO);
+    }
+
+    /** 🔴 见 {@link #setCondTypeFrom(String, String)} —— 同一个"只有用户动作才写"的闸门。 */
+    public boolean toggleCondReverseFrom(String origin) {
+        if (!ORIGIN_USER_DROPDOWN.equals(origin) && !TEST_FORCE_EDIT_WITHOUT_USER) {
+            ShanhaiMod.LOGGER.warn("{} workspace_cond_edit_refused reason=not_user_action "
+                            + "what=reverse index={} origin={}（自动路径不许改条件）",
+                    PREFIX, condSel, origin);
+            return condReverse;
+        }
         condReverse = !condReverse;
-        rebuildSelectedFromEditor();
+        rebuildSelectedFromEditor(ORIGIN_USER_DROPDOWN + ":reverse");
         if (!blank()) {
             touch();
         }
@@ -3240,15 +3350,32 @@ public final class ShanhaiRecipeEditorWorkspace {
     }
 
     /**
-     * 把编辑控件里的值写回<b>选中那条</b>（改一下就立刻生效，没有"确定"按钮 ——
-     * 因为这一屏的其它控件也是这个手感，多一个确认会让"我改了没生效"变成常态）。
+     * 🔴 2026-10-07：把编辑控件里的值写回<b>选中那条</b>。
      *
-     * <p>🔴 第 5 轮：从"读三个分散的字段再拼"改成"<b>（类型 + 档位）</b>由
-     * {@link ShanhaiRecipeConditions#makeValueCondition} 一处造出来" —— 上游只有一个入口，
-     * 就没有"控件之间不同步"的缝。造不出来<b>如实留痕并且不动原来的那条</b>（不塞半成品）。
+     * <p><b>只有用户显式动作才允许走到这里</b>（{@code origin} 必须是
+     * {@link #ORIGIN_USER_DROPDOWN}；{@link #ORIGIN_AUTO} 一律拒写并留痕）。
+     * 这一条闸门是用户那句「我重启游戏之后我写好的配方条件都被改了」的直接修法：
+     * 记日志只记"改了哪一条"，<b>分不出"谁改的"</b> —— 现在每一次写都带 {@code origin=}。
+     *
+     * <p>另外两道闸：
+     * <ul>
+     *   <li><b>no-op 不写</b>：新造出来的这一条与原来那条相同 ⇒ 直接返回，不记 {@code workspace_cond_edit}。
+     *       目的是让"程序性回填下拉"（LDLib 的 {@code setValue} 在候选变化时必然发生）绝对不产生写；</li>
+     *   <li><b>造不出来不写</b>：{@code makeValueCondition} 返回 null ⇒ 保持原样（原来就是这样，保留）。</li>
+     * </ul>
      */
-    private void rebuildSelectedFromEditor() {
+    private void rebuildSelectedFromEditor(String origin) {
         if (blank() || condSel < 0 || condSel >= conditions.size()) {
+            return;
+        }
+        // 🔴 origin 带后缀（面板传的是 "user_dropdown:value" / ":type"）⇒ 必须按【前缀】认，
+        //    写成 equals 会把用户真实操作判成"自动写"、静默拒掉（2026-10-07 实机踩过）。
+        final boolean userAction =
+                (origin != null && origin.startsWith(ORIGIN_USER_DROPDOWN)) || TEST_FORCE_EDIT_WITHOUT_USER;
+        if (!userAction) {
+            ShanhaiMod.LOGGER.warn("{} workspace_cond_edit_refused reason=not_user_action "
+                            + "what=rebuild index={} type={} value={} origin={}（面板重画/推送/切配方不许写条件）",
+                    PREFIX, condSel, condTypeKey, condValue, origin);
             return;
         }
         final RecipeCondition c = ShanhaiRecipeConditions.makeValueCondition(
@@ -3265,10 +3392,18 @@ public final class ShanhaiRecipeEditorWorkspace {
                     PREFIX, condSel, condTypeKey);
             return;
         }
+        if (ShanhaiRecipeConditions.sameAs(conditions.get(condSel), el)) {
+            // 🔴 与原来那条逐字相同 ⇒ 这不是一次改动，一个字节都不许写、也不许记 edit。
+            ShanhaiMod.LOGGER.info("{} workspace_cond_edit_noop index={} type={} value={} origin={} "
+                            + "（与原来那条逐字相同 ⇒ 未写回）",
+                    PREFIX, condSel, condTypeKey, condValue, origin);
+            return;
+        }
         conditions.set(condSel, el);
+        condEditorEdited++;
         condNote = "第 " + (condSel + 1) + " 条 = " + ShanhaiRecipeConditions.describe(el);
-        ShanhaiMod.LOGGER.info("{} workspace_cond_edit index={} type={} value={} reverse={} json={}",
-                PREFIX, condSel, condTypeKey, condValue, condReverse,
+        ShanhaiMod.LOGGER.info("{} workspace_cond_edit index={} type={} value={} reverse={} origin={} json={}",
+                PREFIX, condSel, condTypeKey, condValue, condReverse, origin,
                 ShanhaiRecipeConditions.canonical(el));
     }
 

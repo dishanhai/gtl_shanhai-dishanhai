@@ -1,5 +1,6 @@
 package com.shanhai.common.recipe.editor;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
@@ -254,19 +255,17 @@ public final class ShanhaiRecipeEditorOps {
 
         ShanhaiRecipeReverseIndex.invalidate();
 
-        final JsonObject tick = ShanhaiRecipeIoApply.tableJson(target, "tickInputs");
-        if (tick.size() == 0) {
-            final JsonObject gen = ShanhaiRecipeIoApply.tableJson(target, "tickOutputs");
-            if (gen.size() > 0) {
-                tick.add("eu", gen.get("eu"));
-            }
-        }
-        // 🔴 同拍把 eu 也写进 fields.tickInputs —— 覆盖层下一局重放时才能一起回来。
-        tick.addProperty("eu", eut);
+        // 🔴 同拍把 eu 也写进 fields —— 覆盖层下一局是照【盘上那份 recipe JSON】重放的，
+        //    只写 data.euTier 的话盘上的 tickInputs.eu 永远停在建配方时那个默认值 8：
+        //    用户实机逐字读数 recipe_overrides.json「data.euTier=5(IV) 但 tickInputs.eu=8」、
+        //    latest.log「workspace_recipe_loaded … eu=8 euTier=5」⇒ JEI 显示 ULV、机器只耗 8 EU/t。
+        //    形状（数组）由 ShanhaiRecipeIoApply.tickTableWithEut 保证与加载器同一份。
         final JsonObject data = new JsonObject();
         data.addProperty("euTier", com.gregtechceu.gtceu.utils.GTUtil.getTierByVoltage(Math.abs(eut)));
         final JsonObject fields = new JsonObject();
         fields.add("data", data);
+        final String tickKey = ShanhaiRecipeIoApply.tickTableNameFor(target);
+        fields.add(tickKey, ShanhaiRecipeIoApply.tickTableWithEut(target, tickKey, eut));
         final PersistOutcome po = persist ? persistSetFields(server, id, type, fields, fp) : PersistOutcome.OFF;
 
         ShanhaiMod.LOGGER.info("{} edit_eut id={} from={} to={} euTier={} rebuilt={} index_ms={} vanilla_ms={} persist={}",
@@ -391,6 +390,10 @@ public final class ShanhaiRecipeEditorOps {
             final JsonObject data = new JsonObject();
             data.addProperty("euTier", com.gregtechceu.gtceu.utils.GTUtil.getTierByVoltage(Math.abs(eut)));
             fields.add("data", data);
+            // 🔴 同拍的另一半（与 setEut 同一处缺口，见那边的注释）：只写 data.euTier
+            //    ⇒ 盘上的 tickInputs.eu 不动 ⇒ 下一局活配方 eu=8/euTier=5 分叉。
+            final String tickKey = ShanhaiRecipeIoApply.tickTableNameFor(target);
+            fields.add(tickKey, ShanhaiRecipeIoApply.tickTableWithEut(target, tickKey, eut));
         }
         if (conditions != null) {
             fields.add(ShanhaiRecipeConditions.FIELD, conditions);
@@ -399,9 +402,19 @@ public final class ShanhaiRecipeEditorOps {
                 ? persistSetFields(server, id, type, fields, fp)
                 : PersistOutcome.OFF;
 
-        ShanhaiMod.LOGGER.info("{} edit_apply id={} type={} dur={}->{} eut={}->{} in={} out={} tickIn={} "
+        // 🔴 2026-10-07（时长的两个口径必须同现在一行）：`dur=` 那两个数是【原始值】（= 盘上 entry 与
+        //    面板「耗时(t)」框的口径），而机器实际跑的是它按 gtlcore 的 durationMultiplier 换算之后的
+        //    tick 数 —— 用户实例 k=0.001 且下限 1.0 ⇒ 原始 200 实际只跑 1 tick。
+        //    真实现场（原始读数，latest.log:11517 与 :11522）：
+        //        edit_apply    … dur=200->200 …          ← 只有这一行时，读日志的人会以为在跑 200 tick
+        //        workspace_display_duration … live=1      ← 另一行才说实际是 1 tick
+        //    ⇒ 一行里两个口径不同现，就会再次把人（和下一个会话）引到「盘上 200、游戏里 1 ⇒ 是不是写丢了」
+        //      这个错方向上去。dur_live= 就是补上另一半；它只读不改，对配方的行为零影响。
+        final int durRawAfter = duration == null ? durBefore : duration;
+        ShanhaiMod.LOGGER.info("{} edit_apply id={} type={} dur={}->{} dur_live={} eut={}->{} in={} out={} tickIn={} "
                         + "conds={}->{} rebuilt={} index_ms={} vanilla_ms={} persist={} fields={} base_fp_len={}",
                 PREFIX, id, typeId(type), durBefore, duration == null ? "(untouched)" : duration,
+                ShanhaiRecipeDuration.toLive(type, durRawAfter),
                 eutBefore, eut == null ? "(untouched)" : eut,
                 countOf(inputs), countOf(outputs), countOf(tickInputs),
                 ShanhaiRecipeConditions.summary(condBefore),
@@ -1359,9 +1372,32 @@ public final class ShanhaiRecipeEditorOps {
         final JsonObject recipe = existing.has("recipe") && existing.get("recipe").isJsonObject()
                 ? existing.getAsJsonObject("recipe").deepCopy() : new JsonObject();
         final java.util.List<String> merged = new java.util.ArrayList<>();
+        final java.util.List<String> keptSiblings = new java.util.ArrayList<>();
         for (var en : fields.entrySet()) {
-            recipe.add(en.getKey(), en.getValue());
+            final JsonElement old = recipe.get(en.getKey());
+            // 🔴 口子只加不改 —— 而且【只往里加一层】：这一层里"这次没提到的键"原样留下。
+            //    以前这里是【整对象替换】：data 会被 {"euTier":…} 顶掉、tickInputs 会被整张顶掉
+            //    （两个都是静默丢数据，本工程红线）。同一个道理，上一层的 fields 合并（见
+            //    persistSetFields）早就这么做了，这里只是把同一条规则往下再走一层。
+            //    ⚠️ 对现存 15 条 op=add 是【零差异】：它们 recipe.data 里只有 euTier 一个键。
+            if (old != null && old.isJsonObject() && en.getValue().isJsonObject()) {
+                final JsonObject layer = old.getAsJsonObject().deepCopy();
+                for (var e2 : en.getValue().getAsJsonObject().entrySet()) {
+                    layer.add(e2.getKey(), e2.getValue());
+                }
+                if (old.getAsJsonObject().size() > en.getValue().getAsJsonObject().size()) {
+                    keptSiblings.add(en.getKey());
+                }
+                recipe.add(en.getKey(), layer);
+            } else {
+                recipe.add(en.getKey(), en.getValue());
+            }
             merged.add(en.getKey());
+        }
+        if (!keptSiblings.isEmpty()) {
+            ShanhaiMod.LOGGER.info("{} persist_kept_add_siblings id={} keys={} "
+                            + "(这些键是这份 recipe JSON 里原有的、这次保存没提到 ⇒ 原样保留，不再被整对象替换抹掉)",
+                    PREFIX, id, keptSiblings);
         }
         // type 永远以这条条目的 type 为准（它是重放时选哪个类型函数的依据）
         final String typeStr = existing.has("type") ? existing.get("type").getAsString() : typeId(type);

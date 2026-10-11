@@ -464,8 +464,11 @@ public final class ParallelOverrideConfigurator implements IFancyConfigurator {
         if (machine.isPowerAutoParallel()) {
             final String capText = ParallelOverrideMachine.energyCapShortText(
                     machine.getEnergyCapState(), machine.getEnergyParallel());
+            // 🔴 2026-10-11 口径修正：两行读数【本来就是两个口径】，字面上说清楚，免得被混着读：
+            //    生效 = getEffectiveParallel() = 引擎 getMaxParallel() 的同一个源 ⇒【每线程】
+            //    （引擎父类再 × T 才是总预算）；电上限 = floor(P÷k) ⇒【总并行】。
             return "§7模式 §d电力自动§7 · 生效 §6" + formatParallel(effective)
-                    + " §8（电上限 " + capText + "§8）";
+                    + " §8（每线程）· 电上限 " + capText + " §8（总并行）";
         }
         if (override <= ParallelOverrideMachine.PARALLEL_AUTO) {
             return "§7模式 §f自动§7 · 生效 §6" + formatParallel(effective);

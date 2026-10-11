@@ -137,7 +137,49 @@ public final class ShanhaiRecipeEditorCommand {
                         .executes(ctx -> {
                             ShanhaiRecipeEditorSelfcheck.run(ctx.getSource().getServer(), true);
                             return 1;
-                        }));
+                        }))
+                // 🆕 2026-10-07（第 1 步「两套界面共存 + 开关」）：
+                //    ⚠️ 整节【追加在末尾】—— 上面既有子命令一条都没动、没挪位置、没改名字。
+                //    不带参数 = 念当前是哪一套；ours|his = 切过去（写进 config/shanhai-common.toml）。
+                .then(Commands.literal("ui")
+                        .executes(ShanhaiRecipeEditorCommand::uiStatus)
+                        .then(Commands.literal("ours").executes(ctx -> uiSet(ctx, "ours")))
+                        .then(Commands.literal("his").executes(ctx -> uiSet(ctx, "his"))));
+    }
+
+    /** {@code /shanhai edit ui} = 念当前生效的是哪一套（只读，不改任何东西）。 */
+    private static int uiStatus(CommandContext<CommandSourceStack> ctx) {
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "§a配方编辑器界面§7：§f" + com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.current().zh
+                        + " §8(" + com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.statsLine() + ")"),
+                false);
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "§7切换：§f/shanhai edit ui ours §7= 老的那套（默认） · §f/shanhai edit ui his §7= 新的那套（只读浏览）"),
+                false);
+        // 🆕 顺手把那条自检的读数打出来（正对照 + 负对照；同一条也写进日志）
+        for (String line : com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.selfcheckLines()) {
+            ShanhaiMod.LOGGER.info("{} {}", PREFIX, line);
+            ctx.getSource().sendSuccess(() -> Component.literal("§8" + line), false);
+        }
+        return 1;
+    }
+
+    /** {@code /shanhai edit ui ours|his} = 切并存盘。 */
+    private static int uiSet(CommandContext<CommandSourceStack> ctx, String want) {
+        final com.shanhai.common.recipe.editor2.ShanhaiRecipeUiRule.Ui ui =
+                com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.parse(want);
+        if (ui == null || !com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.set(ui)) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "§c界面开关没写成功（看日志里的 ui_switch_write_skipped / ui_switch_write_failed）"));
+            return 0;
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "§a配方编辑器界面已切到 §f" + ui.zh
+                        + " §7（已写进 §fconfig/shanhai-common.toml§7，下次打开面板生效）"), true);
+        ShanhaiMod.LOGGER.info("{} ui_switch_cmd ui={} by={} stats={}",
+                PREFIX, ui, ctx.getSource().getTextName(),
+                com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.statsLine());
+        return 1;
     }
 
     @SubscribeEvent

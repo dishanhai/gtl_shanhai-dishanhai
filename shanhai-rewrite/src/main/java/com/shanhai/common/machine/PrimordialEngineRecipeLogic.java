@@ -394,7 +394,14 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
         }
         try {
             final java.util.Set<GTRecipe> candidates = lookupRecipeSet();
-            final long ceiling = host.getParallelOverrideCeiling();
+            // 🔴🔴 2026-10-11 <b>口径修正（与模块侧逐字同源）</b>：
+            //   电上限（= floor(P÷k)，【总并行】口径）的上限钳制必须也吃【总】口径的上限
+            //   = 本机上限 × T；⛔ 改前传的是 host.getParallelOverrideCeiling()
+            //   （= MAX_PARALLEL = 2^30，【每线程】口径，引擎父类会再 × T=128）
+            //   ⇒ 主机侧同样把"每线程上限"当成了"总上限"（只是 2^30 很大，症状不如模块侧明显）。
+            //   ⚠️ T = 1 时与改前逐位相同；∞ 能源仓那一档（isEnergyCapInfinite）不经过本行。
+            final long ceiling = ShanhaiParallelBudget.totalParallelLimitFor(
+                    host.getParallelOverrideCeiling(), getMultipleThreads());
             if (candidates.isEmpty()) {
                 // 🔴 2026-10-02 第二轮：不再写一个裸的"没有上限"，而是把**原因**一起写下去
                 //    （理由与模块侧那一处逐字相同，见 ParallelOverrideMachine.EnergyCapState 的注释）。
