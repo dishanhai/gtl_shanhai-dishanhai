@@ -512,7 +512,7 @@ public class DShanhaiRecipeEngine {
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
                 "§c✗ JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个"));
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ 解析提示:"));
-        int shown = Math.min(3, hints.size());
+        int shown = Math.min(8, hints.size());
         for (int i = 0; i < shown; i++) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
                     "  §7" + (i + 1) + ". §c" + hints.get(i)));
@@ -624,6 +624,27 @@ public class DShanhaiRecipeEngine {
         public String toString() {
             return String.format("[%s],[%s],[%s],[%s],[%s],[%s]", recipeId, recipeType, field, uid, exceptionType, detail);
         }
+
+        /** 聊天和日誌用的一句話。帶上字段、異常類型，以及能對上的形狀原因。 */
+        public String reportLine() {
+            StringBuilder line = new StringBuilder();
+            line.append(recipeId).append(" [").append(recipeType).append(']');
+            if (!field.isEmpty()) line.append(" 字段 ").append(field);
+            if (!exceptionType.isEmpty()) line.append(' ').append(exceptionType);
+            if (!detail.isEmpty()) line.append('：').append(detail);
+            String cause = shapeCause(detail);
+            if (!cause.isEmpty()) line.append('；').append(cause);
+            if (!uid.isEmpty()) line.append(" (").append(uid).append(')');
+            return line.toString();
+        }
+
+        private static String shapeCause(String detail) {
+            if (detail == null || detail.isEmpty()) return "";
+            if (detail.contains("Non [a-z0-9")) return "配方 id 含大寫或非法字元，路徑只能用小寫、數字和 / . _ -";
+            if (detail.contains("actualAmount")) return "gtceu:long 需要 actualAmount，不能只寫 count";
+            if (detail.contains("gtceu:item")) return "gtceu:item 不是原料類型，要用 gtceu:sized 或 gtceu:long";
+            return "";
+        }
     }
 
     private static final Map<String, ErrorEntry> RECIPE_ERRORS = Collections.synchronizedMap(new LinkedHashMap<>());
@@ -678,7 +699,7 @@ public class DShanhaiRecipeEngine {
             List<ErrorEntry> entries = new ArrayList<>(RECIPE_ERRORS.values());
             int from = Math.max(0, entries.size() - max);
             List<String> result = new ArrayList<>();
-            for (int i = from; i < entries.size(); i++) result.add(entries.get(i).toString());
+            for (int i = from; i < entries.size(); i++) result.add(entries.get(i).reportLine());
             return result;
         }
     }
@@ -853,9 +874,7 @@ public class DShanhaiRecipeEngine {
             RECIPE_ERRORS.put(uid, entry);
             trimErrorEntriesLocked();
         }
-        String fieldText = field == null || field.isEmpty() ? "" : " field=" + field;
-        String errorText = exceptionType.isEmpty() ? detail : exceptionType + ": " + detail;
-        kjsWarn("配方注册失败 uid=" + uid + " [" + recipeType + "] " + recipeId + fieldText + " - " + errorText);
+        kjsWarn("配方注册失败 " + entry.reportLine());
         return uid;
     }
 
@@ -987,7 +1006,7 @@ public class DShanhaiRecipeEngine {
             for (ErrorEntry entry : RECIPE_ERRORS.values()) {
                 if (i >= 100) break;
                 player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                        "§7" + (++i) + ". " + entry));
+                        "§7" + (++i) + ". " + entry.reportLine()));
             }
         }
         if (RECIPE_ERRORS.size() > 100) {

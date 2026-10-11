@@ -25,6 +25,7 @@ import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Root of the recipe modifier. Pages, cards and IO cells live in
@@ -84,6 +85,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     /** Recipe data ebf_temp from the detail snapshot. -1 means absent. */
     int jsBlastTemp = -1;
     String blastTempText = "";
+    JsonObject recipeData = new JsonObject();
+    String activeDataKey = "";
     int queryPage;
     int queryTotal;
     String sortKey = "id";
@@ -406,7 +409,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         keepOriginal = true;
         selectedCard = null;
         jsBlastTemp = -1;
-        blastTempText = ShanhaiRecipeHeat.usesTemperature(type) ? "0" : "";
+        seedRecipeData(type, new JsonObject());
         selectedBase = new ShanhaiRecipeBase(
                 type, type, 100, 0L, new JsonObject(), new JsonObject(), new JsonObject(), new JsonArray());
         durationText = "100";
@@ -466,8 +469,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 selectedBase.tickOutputs(),
                 selectedBase.conditions(),
                 selectedBase.blastTemp());
-        if (blastTempText.isEmpty() && ShanhaiRecipeHeat.usesTemperature(typeId)) blastTempText = "0";
-        if (!ShanhaiRecipeHeat.usesTemperature(typeId) && jsBlastTemp < 0) blastTempText = "";
+        seedRecipeData(typeId, recipeData);
         panel.syncBlastChrome(showBlastTemp());
         scheduleDraftSave();
     }
@@ -706,7 +708,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 freshTicks ? new JsonObject() : selectedBase.tickInputs(),
                 freshTicks ? new JsonObject() : selectedBase.tickOutputs(),
                 conditionEdits,
-                shownBlastTemp());
+                shownBlastTemp(),
+                editedRecipeData());
     }
 
     private JsonObject payloadWithConditionNote(ShanhaiRecipeBase edited) {
@@ -714,6 +717,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         payload.addProperty("conditionNote",
                 ShanhaiRecipeConditions.diffLine(selectedBase.conditions(), conditionEdits));
         if (edited.blastTemp() >= 0) payload.addProperty("blastTemp", edited.blastTemp());
+        if (edited.recipeData().size() > 0) payload.add("recipeData", edited.recipeData());
         return payload;
     }
 
@@ -766,7 +770,73 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         String next = limit(value);
         if (!next.equals(blastTempText)) beforeEdit("text:blast");
         blastTempText = next;
+        writeActiveDataKey();
         scheduleDraftSave();
+    }
+
+    String dataKeyFace() {
+        return activeDataKey.isEmpty() ? "数据" : ShanhaiRecipeHeat.shortName(activeDataKey);
+    }
+
+    int dataKeyCount() {
+        return ShanhaiRecipeHeat.keysFor(selectedBase == null ? "" : selectedBase.recipeTypeId()).size();
+    }
+
+    List<String> dataKeyChoices() {
+        List<String> choices = new ArrayList<>();
+        for (String key : ShanhaiRecipeHeat.keysFor(selectedBase == null ? "" : selectedBase.recipeTypeId())) {
+            choices.add(ShanhaiRecipeHeat.shortName(key));
+        }
+        return choices;
+    }
+
+    void pickDataKey(String label) {
+        String key = ShanhaiRecipeHeat.keyOfShortName(label);
+        if (key.isEmpty() || key.equals(activeDataKey)) return;
+        writeActiveDataKey();
+        activeDataKey = key;
+        blastTempText = dataText(key);
+        scheduleDraftSave();
+    }
+
+    boolean temperatureKeyActive() {
+        return ShanhaiRecipeHeat.isTemperatureKey(activeDataKey);
+    }
+
+    List<String> coilChoices() {
+        return ShanhaiRecipeHeat.coilChoices();
+    }
+
+    String coilSelectFace() {
+        int temp = 0;
+        if (blastTempText != null && !blastTempText.isBlank()) {
+            try {
+                temp = Math.max(0, Integer.parseInt(blastTempText.trim()));
+            } catch (NumberFormatException ignored) {
+                temp = 0;
+            }
+        }
+        return ShanhaiRecipeHeat.coilFace(temp);
+    }
+
+    void pickCoil(String label) {
+        int temp = ShanhaiRecipeHeat.temperatureOfCoilChoice(label);
+        if (temp < 0) return;
+        if (!Integer.toString(temp).equals(blastTempText)) beforeEdit("text:blast");
+        blastTempText = Integer.toString(temp);
+        writeActiveDataKey();
+        scheduleDraftSave();
+    }
+
+    String dataRequirementLine() {
+        List<String> lines = currentDataLines();
+        if (lines.isEmpty()) return "";
+        StringBuilder text = new StringBuilder("§7");
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) text.append("  ");
+            text.append(lines.get(i));
+        }
+        return text.toString();
     }
 
     String voltageFace() {
@@ -1323,35 +1393,27 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     boolean showBlastTemp() {
         if (selectedBase == null) return false;
-        return jsBlastTemp >= 0 || ShanhaiRecipeHeat.usesTemperature(selectedBase.recipeTypeId());
+        return !ShanhaiRecipeHeat.keysFor(selectedBase.recipeTypeId()).isEmpty()
+                || recipeData.size() > 0;
     }
 
     int shownBlastTemp() {
-        if (!showBlastTemp()) return -1;
-        if (blastTempText != null && !blastTempText.isBlank()) {
-            try {
-                return Math.max(0, Integer.parseInt(blastTempText.trim()));
-            } catch (NumberFormatException invalid) {
-                return Math.max(0, jsBlastTemp);
-            }
+        writeActiveDataKey();
+        if (!recipeData.has("ebf_temp") || !recipeData.get("ebf_temp").isJsonPrimitive()) return -1;
+        try {
+            return recipeData.get("ebf_temp").getAsInt();
+        } catch (RuntimeException invalid) {
+            return -1;
         }
-        return jsBlastTemp;
     }
 
     String temperatureRequirementLine() {
-        if (!showBlastTemp()) return "";
-        int temp = Math.max(0, shownBlastTemp());
-        String before = jsBlastTemp < 0 ? "" : Integer.toString(jsBlastTemp);
-        String after = Integer.toString(temp);
-        String label = ShanhaiRecipeHeat.temperatureLine(selectedBase.recipeTypeId(), temp);
-        if (creating || before.isEmpty() || before.equals(after)) return "§7" + label;
-        return "§7" + label + " §8原 " + before + "K";
+        List<String> lines = currentDataLines();
+        return lines.isEmpty() ? "" : "§7" + lines.get(0);
     }
 
     String coilRequirementLine() {
-        if (!showBlastTemp()) return "";
-        int temp = Math.max(0, shownBlastTemp());
-        java.util.List<String> lines = ShanhaiRecipeHeat.lines(selectedBase.recipeTypeId(), temp);
+        List<String> lines = currentDataLines();
         if (lines.size() < 2) return "";
         StringBuilder text = new StringBuilder("§7");
         for (int i = 1; i < lines.size(); i++) {
@@ -1359,6 +1421,55 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             text.append(lines.get(i));
         }
         return text.toString();
+    }
+
+    private List<String> currentDataLines() {
+        if (!showBlastTemp()) return List.of();
+        writeActiveDataKey();
+        return ShanhaiRecipeHeat.lines(selectedBase.recipeTypeId(), ShanhaiRecipeHeat.tagOf(recipeData));
+    }
+
+    private void seedRecipeData(String typeId, JsonObject previous) {
+        JsonObject next = new JsonObject();
+        for (String key : ShanhaiRecipeHeat.keysFor(typeId)) {
+            if (previous != null && previous.has(key)) next.add(key, previous.get(key).deepCopy());
+            else next.addProperty(key, 0);
+        }
+        if (previous != null) {
+            for (Map.Entry<String, JsonElement> entry : previous.entrySet()) {
+                if (!next.has(entry.getKey())) next.add(entry.getKey(), entry.getValue().deepCopy());
+            }
+        }
+        recipeData = next;
+        activeDataKey = next.size() == 0 ? "" : next.keySet().iterator().next();
+        blastTempText = dataText(activeDataKey);
+    }
+
+    private JsonObject editedRecipeData() {
+        writeActiveDataKey();
+        return recipeData.deepCopy();
+    }
+
+    private void writeActiveDataKey() {
+        if (activeDataKey == null || activeDataKey.isEmpty() || recipeData == null) return;
+        if (blastTempText == null || blastTempText.isBlank()) return;
+        try {
+            recipeData.addProperty(activeDataKey, Long.parseLong(blastTempText.trim()));
+        } catch (NumberFormatException ignored) {
+            // Leave the previous number until the field is a whole number again.
+        }
+    }
+
+    private String dataText(String key) {
+        if (key == null || key.isEmpty() || recipeData == null || !recipeData.has(key)
+                || !recipeData.get(key).isJsonPrimitive()) {
+            return "";
+        }
+        try {
+            return Long.toString(recipeData.get(key).getAsLong());
+        } catch (RuntimeException invalid) {
+            return "";
+        }
     }
 
     private int shift(int page, int delta, int section, int pageSize) {
@@ -1615,8 +1726,12 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             JsonObject json = JsonParser.parseString(payload).getAsJsonObject();
             jsBlastTemp = json.has("blastTemp") && json.get("blastTemp").isJsonPrimitive()
                     ? json.get("blastTemp").getAsInt() : -1;
-            blastTempText = jsBlastTemp >= 0 ? Integer.toString(jsBlastTemp) : "";
+            JsonObject loaded = json.has("recipeData") && json.get("recipeData").isJsonObject()
+                    ? json.getAsJsonObject("recipeData") : new JsonObject();
+            if (jsBlastTemp >= 0) loaded.addProperty("ebf_temp", jsBlastTemp);
+            seedRecipeData(json.get("recipeTypeId").getAsString(), loaded);
             json.remove("blastTemp");
+            json.remove("recipeData");
             return new ShanhaiRecipeBase(
                     json.get("recipeTypeId").getAsString(),
                     json.get("recipeId").getAsString(),

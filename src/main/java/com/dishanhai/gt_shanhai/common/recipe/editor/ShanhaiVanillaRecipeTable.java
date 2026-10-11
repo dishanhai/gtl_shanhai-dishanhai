@@ -11,6 +11,7 @@ import net.minecraft.world.item.crafting.RecipeType;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 public final class ShanhaiVanillaRecipeTable {
 
@@ -58,7 +59,55 @@ public final class ShanhaiVanillaRecipeTable {
             for (ResourceLocation id : old.keySet()) byName.remove(id);
         }
         byName.putAll(replacement);
+        install(server, maps, byType, byName);
+    }
 
+    /**
+     * Replaces or deletes individual recipes inside one type. The rest of that
+     * type stays in the existing map instead of being rebuilt from snapshots.
+     */
+    public static void replaceEntries(
+            MinecraftServer server,
+            String typeId,
+            Map<ResourceLocation, Recipe<?>> upserts,
+            Set<ResourceLocation> removals) {
+        RecipeManagerReflectionUtil.RecipeManagerMaps maps = resolve(server);
+        if (maps == null) return;
+
+        RecipeType<?> targetType = null;
+        Map<ResourceLocation, Recipe<?>> existing = null;
+        for (Map.Entry<RecipeType<?>, Map<ResourceLocation, Recipe<?>>> entry : maps.recipesMap().entrySet()) {
+            if (matchesType(entry.getKey(), typeId, entry.getValue())) {
+                targetType = entry.getKey();
+                existing = entry.getValue();
+                break;
+            }
+        }
+        if (targetType == null || existing == null) return;
+
+        Map<ResourceLocation, Recipe<?>> next = new LinkedHashMap<>(existing);
+        if (removals != null) {
+            for (ResourceLocation id : removals) next.remove(id);
+        }
+        if (upserts != null) next.putAll(upserts);
+
+        Map<RecipeType<?>, Map<ResourceLocation, Recipe<?>>> byType =
+                new LinkedHashMap<>(maps.recipesMap());
+        byType.put(targetType, next);
+
+        Map<ResourceLocation, Recipe<?>> byName = new LinkedHashMap<>(maps.byNameMap());
+        if (removals != null) {
+            for (ResourceLocation id : removals) byName.remove(id);
+        }
+        if (upserts != null) byName.putAll(upserts);
+        install(server, maps, byType, byName);
+    }
+
+    private static void install(
+            MinecraftServer server,
+            RecipeManagerReflectionUtil.RecipeManagerMaps maps,
+            Map<RecipeType<?>, Map<ResourceLocation, Recipe<?>>> byType,
+            Map<ResourceLocation, Recipe<?>> byName) {
         try {
             maps.recipesField().set(server.getRecipeManager(), ImmutableMap.copyOf(byType));
             maps.byNameField().set(server.getRecipeManager(), ImmutableMap.copyOf(byName));

@@ -21,6 +21,20 @@ class RecipeRebuildServiceSourceTest {
         assertTrue(source.contains("lookup.addRecipe"));
         assertTrue(source.contains("runPatternCacheInvalidationBatch"));
         assertTrue(source.contains("if (reason != RebuildReason.EDITOR_COMMIT)"));
-        assertTrue(source.contains("RecipeSyncPacket.syncToAll(java.util.Set.of(recipeTypeId))"));
+        assertTrue(source.contains("RecipeSyncPacket.syncToAll(Set.of(recipeTypeId))"));
+        assertTrue(source.indexOf("captureManagerOriginals") < source.indexOf("captureLookupOriginals"));
+        assertTrue(source.contains("withoutSuperseded"));
+        assertTrue(source.contains("refreshLookupEntries"));
+        assertTrue(source.contains("unlinkRecipes"));
+        assertTrue(source.contains("replaceEntries"));
+    }
+
+    @Test
+    void editorCommitRefreshesOnlyTheEditedLookupEntries() throws Exception {
+        String editor = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/recipe/editor/ShanhaiRecipeEditorOps.java"));
+        assertTrue(editor.contains("RecipeRebuildService.refreshLookupEntries"));
+        assertTrue(!editor.contains("RebuildReason.EDITOR_COMMIT"));
+        assertTrue(!editor.contains("rebuildVanillaManager"));
     }
 }

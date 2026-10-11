@@ -60,8 +60,18 @@ public final class DShanhaiJsonRecipeStats {
             if (!bundled && !cached) continue;
 
             String path = file.getPath();
-            ResourceLocation recipeId = new ResourceLocation(file.getNamespace(),
-                    path.substring("recipes/".length(), path.length() - ".json".length()));
+            String recipePath = path.substring("recipes/".length(), path.length() - ".json".length());
+            ResourceLocation recipeId;
+            try {
+                recipeId = new ResourceLocation(file.getNamespace(), recipePath);
+            } catch (RuntimeException invalidId) {
+                String brokenId = file.getNamespace() + ":" + recipePath;
+                String hint = "配方 id 不合法，路徑只能用小寫、數字和 / . _ -：" + shortMessage(invalidId);
+                GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方載入失敗: {} {}", brokenId, hint);
+                add(counts, "unknown", 1);
+                failures.add(new Failure(brokenId, "unknown", hint));
+                continue;
+            }
             JsonObject json;
             try (Reader reader = entry.getValue().openAsReader()) {
                 JsonElement element = JsonParser.parseReader(reader);
@@ -84,7 +94,7 @@ public final class DShanhaiJsonRecipeStats {
             } else if (isDisabled(json, config)) {
                 add(counts, type, 2);
             } else {
-                String hint = explainLoadFailure(json, rawType);
+                String hint = explainLoadFailure(recipeId.toString(), json, rawType);
                 GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方載入失敗: {} [{}] {}", recipeId, rawType, hint);
                 add(counts, type, 1);
                 failures.add(new Failure(recipeId.toString(), rawType, hint));
@@ -111,60 +121,265 @@ public final class DShanhaiJsonRecipeStats {
                                      Predicate<String> itemExists,
                                      Predicate<String> fluidExists,
                                      Predicate<String> recipeTypeExists) {
+        return explainLoadFailure(null, json, rawType, itemExists, fluidExists, recipeTypeExists);
+    }
+
+    /**
+     * 配方沒進 RecipeManager 時，從 JSON 裡找出未註冊的物品、流體、配方類型，
+     * 以及萬數量仍寫成 {@code gtceu:sized}、{@code gtceu:long} 缺 {@code actualAmount}、
+     * distort 缺 {@code ebf_temp}、{@code recipe_enabled} 的 id 和檔案 id 不一致。
+     */
+    static String explainLoadFailure(String recipeId, JsonObject json, String rawType,
+                                     Predicate<String> itemExists,
+                                     Predicate<String> fluidExists,
+                                     Predicate<String> recipeTypeExists) {
         Set<String> unknownItems = new LinkedHashSet<>();
         Set<String> unknownFluids = new LinkedHashSet<>();
-        if (json != null) collectMissing(json, itemExists, fluidExists, unknownItems, unknownFluids);
+        Set<String> illegalIds = new LinkedHashSet<>();
+        ShapeNotes shape = new ShapeNotes();
+        if (json != null) {
+            collectMissing(json, itemExists, fluidExists, unknownItems, unknownFluids, illegalIds);
+            collectShape(json, shape);
+        }
         StringBuilder hint = new StringBuilder();
+        appendIds(hint, "非法 id", illegalIds);
         appendIds(hint, "未知物品", unknownItems);
         appendIds(hint, "未知流體", unknownFluids);
         if (rawType != null && rawType.indexOf(':') >= 0
                 && recipeTypeExists != null && !recipeTypeExists.test(rawType)) {
             appendPart(hint, "未知配方類型 " + rawType);
         }
-        return hint.length() == 0 ? "已寫入資料包，但沒有進入配方表" : hint.toString();
+        if ("gtceu:distort".equals(rawType) && !hasEbfTemp(json)) {
+            shape.lines.add("gtceu:distort 缺少 data.ebf_temp");
+        }
+        String mismatch = enabledIdMismatch(json, recipeId);
+        if (mismatch != null) shape.lines.add(mismatch);
+        if (hint.length() == 0 && shape.lines.isEmpty()) return "已寫入資料包，但沒有進入配方表";
+        if (hint.length() == 0) appendPart(hint, "已寫入資料包，但沒有進入配方表");
+        int shown = 0;
+        for (String line : shape.lines) {
+            if (shown == 4) {
+                appendPart(hint, "另有 " + (shape.lines.size() - shown) + " 條形狀問題");
+                break;
+            }
+            appendPart(hint, line);
+            shown++;
+        }
+        return hint.toString();
     }
 
-    private static String explainLoadFailure(JsonObject json, String rawType) {
-        return explainLoadFailure(json, rawType,
+    private static String explainLoadFailure(String recipeId, JsonObject json, String rawType) {
+        return explainLoadFailure(recipeId, json, rawType,
                 DShanhaiJsonRecipeStats::itemExists,
                 DShanhaiJsonRecipeStats::fluidExists,
                 DShanhaiJsonRecipeStats::recipeTypeExists);
+    }
+
+    private static final class ShapeNotes {
+        private final List<String> bigSized = new ArrayList<>();
+        private final List<String> missingLong = new ArrayList<>();
+        private final List<String> missingCount = new ArrayList<>();
+        private final List<String> unknownTypes = new ArrayList<>();
+        private final List<String> lines = new ArrayList<>();
+
+        private void finish() {
+            if (!bigSized.isEmpty()) {
+                lines.add("萬數量用了 gtceu:sized：" + joinSamples(bigSized)
+                        + "，應改 gtceu:long 的 actualAmount");
+            }
+            if (!missingLong.isEmpty()) {
+                lines.add("gtceu:long 缺少 actualAmount：" + joinSamples(missingLong));
+            }
+            if (!missingCount.isEmpty()) {
+                lines.add("gtceu:sized 缺少 count：" + joinSamples(missingCount));
+            }
+            if (!unknownTypes.isEmpty()) {
+                lines.add("未知原料類型 " + joinSamples(unknownTypes)
+                        + "，物品數量要用 gtceu:sized 或 gtceu:long");
+            }
+        }
+
+        private static String joinSamples(List<String> values) {
+            StringBuilder part = new StringBuilder();
+            int shown = 0;
+            for (String value : values) {
+                if (shown == 3) {
+                    part.append(" 等");
+                    break;
+                }
+                if (shown > 0) part.append(", ");
+                part.append(value);
+                shown++;
+            }
+            return part.toString();
+        }
+    }
+
+    private static final Set<String> KNOWN_INGREDIENT_TYPES = Set.of(
+            "gtceu:sized", "gtceu:long", "gtceu:circuit", "gtceu:int_provider");
+    private static final long LONG_ITEM_AMOUNT = 10000L;
+
+    private static void collectShape(JsonElement element, ShapeNotes shape) {
+        walkShape(element, shape);
+        shape.finish();
+    }
+
+    private static void walkShape(JsonElement element, ShapeNotes shape) {
+        if (element == null || element.isJsonNull()) return;
+        if (element.isJsonArray()) {
+            for (JsonElement child : element.getAsJsonArray()) walkShape(child, shape);
+            return;
+        }
+        if (!element.isJsonObject()) return;
+        JsonObject object = element.getAsJsonObject();
+        if (object.has("type") && object.get("type").isJsonPrimitive()) {
+            noteIngredient(object, object.get("type").getAsString(), shape);
+        }
+        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+            JsonElement value = entry.getValue();
+            if (value.isJsonArray() || value.isJsonObject()) walkShape(value, shape);
+        }
+    }
+
+    private static void noteIngredient(JsonObject content, String type, ShapeNotes shape) {
+        boolean ingredientShape = content.has("ingredient") || content.has("count")
+                || content.has("actualAmount") || content.has("configuration");
+        if (!ingredientShape) return;
+        String label = ingredientLabel(content);
+        if ("gtceu:sized".equals(type)) {
+            if (!content.has("count") || !content.get("count").isJsonPrimitive()) {
+                shape.missingCount.add(label.isEmpty() ? "gtceu:sized" : label);
+                return;
+            }
+            try {
+                if (content.get("count").getAsLong() >= LONG_ITEM_AMOUNT) {
+                    shape.bigSized.add("count=" + content.get("count").getAsLong()
+                            + (label.isEmpty() ? "" : " " + label));
+                }
+            } catch (RuntimeException ignored) {
+                shape.missingCount.add(label.isEmpty() ? "gtceu:sized" : label);
+            }
+            return;
+        }
+        if ("gtceu:long".equals(type)) {
+            if (!content.has("actualAmount") || !content.get("actualAmount").isJsonPrimitive()) {
+                shape.missingLong.add(label.isEmpty() ? "gtceu:long" : label);
+            }
+            return;
+        }
+        if (type.startsWith("gtceu:") && !KNOWN_INGREDIENT_TYPES.contains(type)) {
+            shape.unknownTypes.add(type + (label.isEmpty() ? "" : " " + label));
+        }
+    }
+
+    private static String ingredientLabel(JsonObject content) {
+        if (!content.has("ingredient") || !content.get("ingredient").isJsonObject()) return "";
+        JsonObject ingredient = content.getAsJsonObject("ingredient");
+        if (ingredient.has("item") && ingredient.get("item").isJsonPrimitive()) {
+            return ingredient.get("item").getAsString();
+        }
+        if (ingredient.has("tag") && ingredient.get("tag").isJsonPrimitive()) {
+            return "#" + ingredient.get("tag").getAsString();
+        }
+        if (ingredient.has("type") && ingredient.get("type").isJsonPrimitive()
+                && "gtceu:circuit".equals(ingredient.get("type").getAsString())) {
+            String configuration = ingredient.has("configuration") && ingredient.get("configuration").isJsonPrimitive()
+                    ? ingredient.get("configuration").getAsString() : "?";
+            return "電路 " + configuration;
+        }
+        return "";
+    }
+
+    private static boolean hasEbfTemp(JsonObject json) {
+        if (json == null || !json.has("data") || !json.get("data").isJsonObject()) return false;
+        JsonObject data = json.getAsJsonObject("data");
+        return data.has("ebf_temp") && data.get("ebf_temp").isJsonPrimitive();
+    }
+
+    private static String enabledIdMismatch(JsonObject json, String recipeId) {
+        if (json == null || recipeId == null || recipeId.isEmpty()) return null;
+        if (!json.has("conditions") || !json.get("conditions").isJsonArray()) return null;
+        for (JsonElement element : json.getAsJsonArray("conditions")) {
+            if (!element.isJsonObject()) continue;
+            JsonObject condition = element.getAsJsonObject();
+            if (!condition.has("type") || !condition.get("type").isJsonPrimitive()) continue;
+            if (!DShanhaiRecipeEnabledCondition.ID.toString().equals(condition.get("type").getAsString())) continue;
+            if (!condition.has("recipeId") || !condition.get("recipeId").isJsonPrimitive()) {
+                return "recipe_enabled 缺少 recipeId，檔案 id 是 " + recipeId;
+            }
+            String written = condition.get("recipeId").getAsString();
+            if (!recipeId.equals(written)) {
+                return "recipe_enabled 寫成 " + written + "，檔案 id 是 " + recipeId;
+            }
+        }
+        return null;
     }
 
     private static void collectMissing(JsonElement element,
                                        Predicate<String> itemExists,
                                        Predicate<String> fluidExists,
                                        Set<String> unknownItems,
-                                       Set<String> unknownFluids) {
+                                       Set<String> unknownFluids,
+                                       Set<String> illegalIds) {
         if (element == null || element.isJsonNull()) return;
         if (element.isJsonArray()) {
             for (JsonElement child : element.getAsJsonArray()) {
-                collectMissing(child, itemExists, fluidExists, unknownItems, unknownFluids);
+                collectMissing(child, itemExists, fluidExists, unknownItems, unknownFluids, illegalIds);
             }
             return;
         }
         if (!element.isJsonObject()) return;
         JsonObject object = element.getAsJsonObject();
-        takeIds(object.get("item"), itemExists, unknownItems);
-        takeIds(object.get("fluid"), fluidExists, unknownFluids);
+        takeIds(object.get("item"), itemExists, unknownItems, illegalIds);
+        takeIds(object.get("fluid"), fluidExists, unknownFluids, illegalIds);
         for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
             JsonElement value = entry.getValue();
             if (value.isJsonArray() || value.isJsonObject()) {
-                collectMissing(value, itemExists, fluidExists, unknownItems, unknownFluids);
+                collectMissing(value, itemExists, fluidExists, unknownItems, unknownFluids, illegalIds);
             }
         }
     }
 
-    private static void takeIds(JsonElement element, Predicate<String> exists, Set<String> missing) {
+    private static void takeIds(JsonElement element, Predicate<String> exists, Set<String> missing, Set<String> illegalIds) {
         if (element == null || element.isJsonNull() || exists == null) return;
         if (element.isJsonArray()) {
-            for (JsonElement child : element.getAsJsonArray()) takeIds(child, exists, missing);
+            for (JsonElement child : element.getAsJsonArray()) takeIds(child, exists, missing, illegalIds);
             return;
         }
         if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) return;
         String id = stripCountPrefix(element.getAsString());
         if (id.indexOf(':') < 0) return;
+        if (!legalResourceId(id)) {
+            if (illegalIds != null) illegalIds.add(id);
+            return;
+        }
         if (!exists.test(id)) missing.add(id);
+    }
+
+    static boolean legalResourceId(String id) {
+        if (id == null) return false;
+        int colon = id.indexOf(':');
+        if (colon <= 0 || colon >= id.length() - 1) return false;
+        return legalNamespace(id.substring(0, colon)) && legalPath(id.substring(colon + 1));
+    }
+
+    private static boolean legalNamespace(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-') continue;
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean legalPath(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                    || c == '_' || c == '.' || c == '-' || c == '/') continue;
+            return false;
+        }
+        return true;
     }
 
     static String stripCountPrefix(String raw) {

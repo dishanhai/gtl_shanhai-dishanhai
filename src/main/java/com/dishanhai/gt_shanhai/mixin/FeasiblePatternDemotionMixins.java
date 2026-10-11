@@ -10,7 +10,6 @@ import com.dishanhai.gt_shanhai.common.ae2.FeasiblePatternDemotions;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -24,7 +23,7 @@ public final class FeasiblePatternDemotionMixins {
     public static class Calculation {
 
         @Inject(method = "runCraftAttempt", at = @At("HEAD"), remap = false)
-        private void gtShanhai$resetDemotions(boolean simulate, long amount, CallbackInfo ci) {
+        private void gtShanhai$resetDemotions(boolean simulate, long amount, CallbackInfoReturnable<CraftingPlan> cir) {
             FeasiblePatternDemotions.beginAttempt();
         }
     }

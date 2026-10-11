@@ -51,6 +51,7 @@ public final class RecipeEditorDetailPacket {
     private static void send(ServerPlayer player, ShanhaiRecipeBase base) {
         com.google.gson.JsonObject payload = base.payloadJson();
         if (base.blastTemp() >= 0) payload.addProperty("blastTemp", base.blastTemp());
+        if (base.recipeData().size() > 0) payload.add("recipeData", base.recipeData());
         ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                 new RecipeEditorResultPacket(
                         RecipeEditorResultPacket.Status.SUCCESS,

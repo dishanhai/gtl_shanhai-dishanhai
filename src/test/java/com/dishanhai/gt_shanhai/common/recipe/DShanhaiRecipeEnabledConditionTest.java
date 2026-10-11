@@ -127,4 +127,51 @@ class DShanhaiRecipeEnabledConditionTest {
                 recipe, "gtceu:electric_implosion_compressor", id -> true, id -> true, id -> true);
         assertEquals("已寫入資料包，但沒有進入配方表", hint);
     }
+
+    @Test
+    void jsonFailureHintNamesOversizedSizedIngredient() {
+        JsonObject recipe = JsonParser.parseString("""
+                {"type":"gtceu:distort",
+                 "inputs":{"item":[
+                   {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"dishanhai:wzcz2"}},"chance":0},
+                   {"content":{"type":"gtceu:sized","count":10000,"ingredient":{"item":"gtceu:platinum_group_sludge_dust"}}}
+                 ]},
+                 "outputs":{"item":[
+                   {"content":{"type":"gtceu:sized","count":10000,"ingredient":{"item":"gtceu:osmium_dust"}}}
+                 ]},
+                 "conditions":[{"type":"gt_shanhai:recipe_enabled","recipeId":"gt_shanhai:wzcz2_iridium_dust","defaultEnabled":true}]}
+                """).getAsJsonObject();
+        String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
+                "gt_shanhai:distort/wzcz2_iridium_dust",
+                recipe,
+                "gtceu:distort",
+                id -> true,
+                id -> true,
+                id -> true);
+        assertTrue(hint.contains("已寫入資料包，但沒有進入配方表"));
+        assertTrue(hint.contains("萬數量用了 gtceu:sized"));
+        assertTrue(hint.contains("gtceu:osmium_dust"));
+        assertTrue(hint.contains("gtceu:long 的 actualAmount"));
+        assertTrue(hint.contains("gtceu:distort 缺少 data.ebf_temp"));
+        assertTrue(hint.contains("recipe_enabled 寫成 gt_shanhai:wzcz2_iridium_dust"));
+        assertTrue(hint.contains("檔案 id 是 gt_shanhai:distort/wzcz2_iridium_dust"));
+    }
+
+    @Test
+    void jsonFailureHintNamesIllegalIdAndMissingActualAmount() {
+        JsonObject recipe = JsonParser.parseString("""
+                {"type":"gtceu:distort","data":{"ebf_temp":3000},
+                 "inputs":{"item":[
+                   {"content":{"type":"gtceu:long","ingredient":{"item":"Minecraft:Stone"}}},
+                   {"content":{"type":"gtceu:item","count":1,"ingredient":{"item":"minecraft:stick"}}}
+                 ]}}
+                """).getAsJsonObject();
+        String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
+                recipe, "gtceu:distort", id -> true, id -> true, id -> true);
+        assertTrue(hint.contains("非法 id Minecraft:Stone"));
+        assertFalse(hint.contains("未知物品 Minecraft:Stone"));
+        assertTrue(hint.contains("gtceu:long 缺少 actualAmount"));
+        assertTrue(hint.contains("未知原料類型 gtceu:item"));
+        assertFalse(hint.contains("缺少 data.ebf_temp"));
+    }
 }

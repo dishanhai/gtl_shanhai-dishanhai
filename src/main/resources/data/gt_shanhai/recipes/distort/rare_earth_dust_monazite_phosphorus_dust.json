@@ -1,0 +1,146 @@
+{
+  "data": {
+    "euTier": 9,
+    "ebf_temp": 0
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "cleanroom": "cleanroom",
+      "type": "cleanroom"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 1966080
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 120000,
+          "value": [
+            {
+              "tag": "forge:nitric_acid"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 160000,
+          "value": [
+            {
+              "tag": "forge:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 160000,
+          "value": [
+            {
+              "tag": "forge:acetone"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:rhenium_nanoswarm"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "gtceu:monazite_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 128,
+          "ingredient": {
+            "item": "gtceu:apatite_dust"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 96000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 96000,
+          "value": [
+            {
+              "fluid": "gtceu:diluted_hydrochloric_acid"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 90000,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 568,
+          "ingredient": {
+            "item": "gtceu:phosphorus_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1440,
+          "ingredient": {
+            "item": "gtceu:rare_earth_dust"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:distort/rare_earth_dust_monazite_phosphorus_dust",
+      "defaultEnabled": true
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "data": {
+    "euTier": 1,
+    "ebf_temp": 0
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 32
+      }
+    ]
+  },
+  "type": "gtceu:chaotic_alchemy",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:copper_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 2
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 90,
+          "value": [
+            {
+              "fluid": "gtceu:annealed_copper"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:chaotic_alchemy/copper_dust_annealed_copper",
+      "defaultEnabled": true
+    }
+  ]
+}

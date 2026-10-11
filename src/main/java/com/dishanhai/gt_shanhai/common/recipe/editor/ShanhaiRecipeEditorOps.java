@@ -9,8 +9,10 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 
+import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class ShanhaiRecipeEditorOps {
@@ -80,11 +82,8 @@ public final class ShanhaiRecipeEditorOps {
             return new Result(Result.Status.SUCCESS, "recipe-created", REVISION.incrementAndGet());
         }
         try {
-            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
-                    edit.base().recipeTypeId(),
-                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
-            RecipeRebuildService.rebuildVanillaManager(
-                    server, java.util.Set.of(edit.base().recipeTypeId()));
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.refreshLookupEntries(
+                    edit.base().recipeTypeId(), java.util.Set.of(id));
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
                     edit.base().recipeTypeId(), id);
             return new Result(Result.Status.SUCCESS, "recipe-created-and-rebuilt", report.revision());
@@ -109,14 +108,12 @@ public final class ShanhaiRecipeEditorOps {
         Result stored = storeCommit(edit, true, keepOriginal, liveRecipeId);
         if (stored.status() != Result.Status.SUCCESS || server == null) return stored;
         try {
-            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
-                    edit.base().recipeTypeId(),
-                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
-            RecipeRebuildService.rebuildVanillaManager(
-                    server, java.util.Set.of(edit.base().recipeTypeId()));
             String live = canonicalLive(edit.base().recipeId(), liveRecipeId);
             Optional<ShanhaiRecipeOverrideStore.Entry> written =
                     store.find(edit.base().recipeTypeId(), live);
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.refreshLookupEntries(
+                    edit.base().recipeTypeId(),
+                    affectedIds(edit.base().recipeId(), live, written));
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
                     edit.base().recipeTypeId(), live);
             if (written.isPresent()
@@ -238,9 +235,7 @@ public final class ShanhaiRecipeEditorOps {
         }
         if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
             String typeId = target.recipeType.registryName.toString();
-            RecipeRebuildService.rebuildType(
-                    typeId,
-                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            RecipeRebuildService.refreshLookupEntries(typeId, Set.of(target.getId().toString()));
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
                     typeId, target.getId().toString());
         }
@@ -254,9 +249,7 @@ public final class ShanhaiRecipeEditorOps {
         if (!restored) return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-disabled", REVISION.get());
         if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
             String typeId = target.recipeType.registryName.toString();
-            RecipeRebuildService.rebuildType(
-                    typeId,
-                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
+            RecipeRebuildService.refreshLookupEntries(typeId, Set.of(target.getId().toString()));
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
                     typeId, target.getId().toString());
         }
@@ -286,9 +279,8 @@ public final class ShanhaiRecipeEditorOps {
         }).orElseGet(() -> typeIdFor(recipeId));
         if (typeId.isEmpty()) return removed;
         try {
-            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
-                    typeId, RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
-            RecipeRebuildService.rebuildVanillaManager(server, java.util.Set.of(typeId));
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.refreshLookupEntries(
+                    typeId, Set.of(recipeId));
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(typeId, recipeId);
             return new Result(Result.Status.SUCCESS, "override-removed-and-rebuilt", report.revision());
         } catch (Throwable t) {
@@ -339,6 +331,21 @@ public final class ShanhaiRecipeEditorOps {
         return effective == null ? null : ShanhaiRecipeBase.from(effective);
     }
 
+    private static Set<String> affectedIds(
+            String opened, String live, Optional<ShanhaiRecipeOverrideStore.Entry> written) {
+        Set<String> ids = new LinkedHashSet<>();
+        if (opened != null && !opened.isEmpty()) ids.add(opened);
+        if (live != null && !live.isEmpty()) ids.add(live);
+        if (written != null && written.isPresent()) {
+            ShanhaiRecipeOverrideStore.Entry entry = written.get();
+            if (entry.recipeId() != null && !entry.recipeId().isEmpty()) ids.add(entry.recipeId());
+            if (entry.sourceRecipeId() != null && !entry.sourceRecipeId().isEmpty()) {
+                ids.add(entry.sourceRecipeId());
+            }
+        }
+        return ids;
+    }
+
     private static String canonicalLive(String opened, String liveRecipeId) {
         if (liveRecipeId == null || liveRecipeId.isBlank()) return opened == null ? "" : opened;
         ResourceLocation parsed = ResourceLocation.tryParse(liveRecipeId.trim());
@@ -359,10 +366,8 @@ public final class ShanhaiRecipeEditorOps {
         Result result = commitInternal(edit, server != null);
         if (result.status() != Result.Status.SUCCESS || server == null || !rebuildIndex) return result;
         try {
-            RecipeRebuildService.RebuildReport report = RecipeRebuildService.rebuildType(
-                    edit.base().recipeTypeId(),
-                    RecipeRebuildService.RebuildReason.EDITOR_COMMIT);
-            RecipeRebuildService.rebuildVanillaManager(server, java.util.Set.of(edit.base().recipeTypeId()));
+            RecipeRebuildService.RebuildReport report = RecipeRebuildService.refreshLookupEntries(
+                    edit.base().recipeTypeId(), Set.of(edit.base().recipeId()));
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
                     edit.base().recipeTypeId(), edit.base().recipeId());
             return new Result(Result.Status.SUCCESS,

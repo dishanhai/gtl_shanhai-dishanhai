@@ -29,6 +29,8 @@ public final class ShanhaiRecipeBase {
     private final JsonArray conditions;
     /** Recipe data {@code ebf_temp}. {@code -1} means the snapshot has no temperature. Not part of the fingerprint. */
     private final int blastTemp;
+    /** Other JEI data-info numbers, such as {@code SCTier}. Not part of the fingerprint. */
+    private final JsonObject recipeData;
 
     public ShanhaiRecipeBase(
             String recipeTypeId,
@@ -67,6 +69,22 @@ public final class ShanhaiRecipeBase {
             JsonObject tickOutputs,
             JsonArray conditions,
             int blastTemp) {
+        this(recipeTypeId, recipeId, duration, eut, inputs, outputs, tickInputs, tickOutputs,
+                conditions, blastTemp, null);
+    }
+
+    public ShanhaiRecipeBase(
+            String recipeTypeId,
+            String recipeId,
+            int duration,
+            long eut,
+            JsonObject inputs,
+            JsonObject outputs,
+            JsonObject tickInputs,
+            JsonObject tickOutputs,
+            JsonArray conditions,
+            int blastTemp,
+            JsonObject recipeData) {
         this.recipeTypeId = recipeTypeId == null ? "" : recipeTypeId;
         this.recipeId = recipeId == null ? "" : recipeId;
         this.duration = Math.max(1, duration);
@@ -76,7 +94,11 @@ public final class ShanhaiRecipeBase {
         this.tickInputs = tickInputs == null ? new JsonObject() : tickInputs.deepCopy();
         this.tickOutputs = tickOutputs == null ? new JsonObject() : tickOutputs.deepCopy();
         this.conditions = conditions == null ? new JsonArray() : conditions.deepCopy();
-        this.blastTemp = blastTemp;
+        JsonObject data = recipeData == null ? new JsonObject() : recipeData.deepCopy();
+        if (blastTemp >= 0) data.addProperty("ebf_temp", blastTemp);
+        this.recipeData = data;
+        this.blastTemp = data.has("ebf_temp") && data.get("ebf_temp").isJsonPrimitive()
+                ? data.get("ebf_temp").getAsInt() : blastTemp;
     }
 
     public static ShanhaiRecipeBase simple(
@@ -115,7 +137,8 @@ public final class ShanhaiRecipeBase {
                 ShanhaiRecipeIoApply.tableJson(recipe, "tickInputs"),
                 ShanhaiRecipeIoApply.tableJson(recipe, "tickOutputs"),
                 conditionsJson(recipe),
-                blastTempOf(recipe));
+                blastTempOf(recipe),
+                ShanhaiRecipeHeat.capture(recipe.data));
     }
 
     /** {@code -1} when the recipe data has no {@code ebf_temp}. Zero is a real temperature. */
@@ -144,7 +167,9 @@ public final class ShanhaiRecipeBase {
                 payload.has("tickOutputs") ? payload.getAsJsonObject("tickOutputs") : new JsonObject(),
                 payload.has("conditions") ? payload.getAsJsonArray("conditions") : new JsonArray(),
                 payload.has("blastTemp") && payload.get("blastTemp").isJsonPrimitive()
-                        ? payload.get("blastTemp").getAsInt() : -1);
+                        ? payload.get("blastTemp").getAsInt() : -1,
+                payload.has("recipeData") && payload.get("recipeData").isJsonObject()
+                        ? payload.getAsJsonObject("recipeData") : new JsonObject());
     }
 
     public static ShanhaiRecipeBase inheritLegacyDetails(
@@ -171,7 +196,8 @@ public final class ShanhaiRecipeBase {
                 edited.tickInputs(),
                 restoredTickOutputs,
                 restoredConditions,
-                edited.blastTemp());
+                edited.blastTemp(),
+                edited.recipeData());
     }
 
     public GTRecipe toGtRecipe(GTRecipe original) {
@@ -190,10 +216,9 @@ public final class ShanhaiRecipeBase {
         }
         copy.conditions.clear();
         copy.conditions.addAll(parsedConditions);
-        if (blastTemp >= 0) {
-            if (copy.data == null) copy.data = new CompoundTag();
-            copy.data.putInt("ebf_temp", blastTemp);
-        }
+        if (copy.data == null) copy.data = new CompoundTag();
+        ShanhaiRecipeHeat.write(copy.data, recipeData);
+        if (blastTemp >= 0) copy.data.putInt("ebf_temp", blastTemp);
         if (eut != 0L) ShanhaiRecipeIoApply.applyEut(copy, eut);
         return copy;
     }
@@ -236,6 +261,10 @@ public final class ShanhaiRecipeBase {
 
     public int blastTemp() {
         return blastTemp;
+    }
+
+    public JsonObject recipeData() {
+        return recipeData.deepCopy();
     }
 
     public ShanhaiRecipeBase withDuration(int value) {

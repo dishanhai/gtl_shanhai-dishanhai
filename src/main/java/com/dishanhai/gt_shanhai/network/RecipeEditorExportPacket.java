@@ -212,7 +212,12 @@ public final class RecipeEditorExportPacket {
                     || GTRecipeSerializer.CODEC.parse(JsonOps.INSTANCE, encoded).result().isEmpty()) {
                 return invalid("export-codec-rejected");
             }
-            writeEnabledCondition(encoded.getAsJsonObject(), exportId);
+            JsonObject recipeJson = encoded.getAsJsonObject();
+            writeLongItemAmounts(recipeJson);
+            if (GTRecipeSerializer.CODEC.parse(JsonOps.INSTANCE, recipeJson).result().isEmpty()) {
+                return invalid("export-codec-rejected");
+            }
+            writeEnabledCondition(recipeJson, exportId);
 
             boolean developer = developerExport();
             String placed = pathUnderType(typeId, exportId);
@@ -231,7 +236,7 @@ public final class RecipeEditorExportPacket {
                             .normalize();
             if (!file.startsWith(root)) return invalid("invalid-export-path");
             Files.createDirectories(file.getParent());
-            Files.writeString(file, PRETTY.toJson(encoded), StandardCharsets.UTF_8);
+            Files.writeString(file, PRETTY.toJson(recipeJson), StandardCharsets.UTF_8);
 
             String relative = developer
                     ? file.toString()
@@ -249,8 +254,74 @@ public final class RecipeEditorExportPacket {
     }
 
     /**
+     * 萬級物品數量不能寫 {@code gtceu:sized} 的 {@code count}。
+     * 同一條配方裡只要有一格達到這個數量，物品格全部改成 {@code gtceu:long} 的 {@code actualAmount}。
+     */
+    static final long LONG_ITEM_AMOUNT = 10000L;
+
+    static void writeLongItemAmounts(JsonObject recipe) {
+        if (recipe == null || !recipeNeedsLongItems(recipe)) return;
+        rewriteSizedItems(recipe.get("inputs"));
+        rewriteSizedItems(recipe.get("outputs"));
+    }
+
+    private static boolean recipeNeedsLongItems(JsonObject recipe) {
+        return sectionHasLongAmount(recipe.get("inputs")) || sectionHasLongAmount(recipe.get("outputs"));
+    }
+
+    private static boolean sectionHasLongAmount(JsonElement section) {
+        if (section == null || !section.isJsonObject()) return false;
+        JsonElement items = section.getAsJsonObject().get("item");
+        if (items == null || !items.isJsonArray()) return false;
+        for (JsonElement element : items.getAsJsonArray()) {
+            if (itemAmount(element) >= LONG_ITEM_AMOUNT) return true;
+        }
+        return false;
+    }
+
+    private static long itemAmount(JsonElement element) {
+        JsonObject content = itemContent(element);
+        if (content == null || !content.has("type") || !content.get("type").isJsonPrimitive()) return 0L;
+        String type = content.get("type").getAsString();
+        if ("gtceu:long".equals(type)) return primitiveLong(content, "actualAmount");
+        if ("gtceu:sized".equals(type)) return primitiveLong(content, "count");
+        return 0L;
+    }
+
+    private static long primitiveLong(JsonObject content, String field) {
+        if (!content.has(field) || !content.get(field).isJsonPrimitive()) return 0L;
+        try {
+            return content.get(field).getAsLong();
+        } catch (RuntimeException ignored) {
+            return 0L;
+        }
+    }
+
+    private static void rewriteSizedItems(JsonElement section) {
+        if (section == null || !section.isJsonObject()) return;
+        JsonElement items = section.getAsJsonObject().get("item");
+        if (items == null || !items.isJsonArray()) return;
+        for (JsonElement element : items.getAsJsonArray()) {
+            JsonObject content = itemContent(element);
+            if (content == null || !content.has("type") || !content.get("type").isJsonPrimitive()) continue;
+            if (!"gtceu:sized".equals(content.get("type").getAsString())) continue;
+            long amount = primitiveLong(content, "count");
+            content.remove("count");
+            content.addProperty("type", "gtceu:long");
+            content.addProperty("actualAmount", amount);
+        }
+    }
+
+    private static JsonObject itemContent(JsonElement element) {
+        if (element == null || !element.isJsonObject()) return null;
+        JsonObject entry = element.getAsJsonObject();
+        if (!entry.has("content") || !entry.get("content").isJsonObject()) return null;
+        return entry.getAsJsonObject("content");
+    }
+
+    /**
      * Forge datapack condition, separate from GTCEu {@code recipeConditions}.
-     * The key is {@code namespace:leaf}, matching {@code gt_shanhai:ku_ming_yuan_yang}.
+     * The key is the full recipe id, for example {@code gt_shanhai:distort/wzcz2_palladium_dust}.
      */
     private static void writeEnabledCondition(JsonObject recipe, ResourceLocation exportId) {
         String enabledId = ShanhaiRecipeJsExport.enabledRecipeId(exportId);

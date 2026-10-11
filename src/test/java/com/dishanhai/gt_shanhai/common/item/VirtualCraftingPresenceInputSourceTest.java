@@ -285,7 +285,7 @@ class VirtualCraftingPresenceInputSourceTest {
         assertTrue(Files.exists(CRAFTING_TREE_NODE_MIXIN),
                 "需要统一修正 AE2 与 GTLCore 四种合成树请求入口");
         assertTrue(config.contains("CraftingTreeProcessVirtualPresenceMixin"));
-        assertTrue(config.contains("CraftingTreeNodeVirtualPresenceMixin"));
+        assertTrue(config.contains("\"CraftingTreeNodeVirtualPresenceMixin\""));
 
         String processMixin = Files.readString(CRAFTING_TREE_PROCESS_MIXIN);
         String nodeMixin = Files.readString(CRAFTING_TREE_NODE_MIXIN);

@@ -62,9 +62,11 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private TextFieldWidget recipeIdField;
     private SelectorWidget createTypeSelector;
     private ButtonWidget guessId;
-    private LabelWidget blastLabel;
-    private TextFieldWidget blastField;
-    private LabelWidget coilLabel;
+    private SelectorWidget dataKeySelector;
+    private SelectorWidget coilSelector;
+    private TextFieldWidget dataValueField;
+    private LabelWidget dataLine;
+    private LabelWidget parameterLabel;
     private boolean createChrome;
     private IoGrid inputItemGrid;
     private IoGrid inputFluidGrid;
@@ -322,9 +324,25 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
 
     /** Type picker and id guess stay on the add-recipe editor. The id field keeps its full width otherwise. */
     void syncBlastChrome(boolean show) {
-        if (blastLabel != null) blastLabel.setVisible(show);
-        if (blastField != null) blastField.setVisible(show);
-        if (coilLabel != null) coilLabel.setVisible(show);
+        boolean many = show && host.dataKeyCount() > 1;
+        boolean temperature = show && host.temperatureKeyActive();
+        if (dataKeySelector != null) dataKeySelector.setVisible(many);
+        if (coilSelector != null) {
+            coilSelector.setVisible(temperature);
+            coilSelector.setSelfPosition(many ? 362 : 258, 136);
+            coilSelector.setSize(many ? 132 : 236, 14);
+        }
+        if (dataValueField != null) {
+            dataValueField.setVisible(show && !temperature);
+            dataValueField.setSelfPosition(many ? 362 : 258, 136);
+            dataValueField.setSize(many ? 132 : 236, 14);
+        }
+        if (dataLine != null) dataLine.setVisible(show);
+        if (parameterLabel != null) parameterLabel.setSelfPosition(258, show ? 168 : 138);
+        if (parameterList != null) {
+            parameterList.setSelfPosition(258, show ? 182 : 152);
+            parameterList.setSize(236, show ? 34 : 64);
+        }
     }
 
     void syncCreateChrome() {
@@ -509,16 +527,6 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         editPage.addWidget(textField(4, 30, 130, 18, () -> host.durationText, host::setDurationText));
         editPage.addWidget(textField(150, 30, 130, 18, () -> host.eutText,
                 value -> host.setEutText(value)));
-        blastLabel = new LabelWidget(78, 50, "§7温度");
-        blastLabel.setVisible(false);
-        editPage.addWidget(blastLabel);
-        blastField = textField(106, 48, 52, 14, () -> host.blastTempText, host::setBlastTempText);
-        blastField.setVisible(false);
-        blastField.setHoverTooltips("配方温度，单位 K。线圈等级按这个温度计算");
-        editPage.addWidget(blastField);
-        coilLabel = new LabelWidget(162, 50, host::coilRequirementLine);
-        coilLabel.setVisible(false);
-        editPage.addWidget(coilLabel);
         editPage.addWidget(button(292, 30, 100, 18, "撤销修改", host::undoEdit));
         editPage.addWidget(button(396, 30, 100, 18, "还原", host::restoreOriginal));
         editPage.addWidget(new LabelWidget(4, 50, "§a输入物品"));
@@ -598,7 +606,39 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
                 .setBackground(GuiTextures.DISPLAY)
                 .setUseScissor(true);
         reviewPage.addWidget(parameterList);
-        reviewPage.addWidget(new LabelWidget(258, 138, "§7条件参数"));
+        parameterLabel = new LabelWidget(258, 138, "§7条件参数");
+        reviewPage.addWidget(parameterLabel);
+        dataKeySelector = new ShanhaiRecipeTypeSelector(258, 136, 100, 14, List.of(), 0xFF1A1A1A)
+                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
+                .setBackground(GuiTextures.BACKGROUND)
+                .setFontColor(0xFF1A1A1A)
+                .setMaxCount(12)
+                .setCandidatesSupplier(host::dataKeyChoices)
+                .setSupplier(host::dataKeyFace)
+                .setOnChanged(host::pickDataKey);
+        dataKeySelector.setClientSideWidget();
+        dataKeySelector.setVisible(false);
+        dataKeySelector.setHoverTooltips("温度、恒星热力容器、组件产线、纳米锻炉、中子活化、裂变热、研磨球、聚变启动 EU");
+        reviewPage.addWidget(dataKeySelector);
+        coilSelector = new ShanhaiRecipeTypeSelector(362, 136, 132, 14, List.of(), 0xFF1A1A1A)
+                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
+                .setBackground(GuiTextures.BACKGROUND)
+                .setFontColor(0xFF1A1A1A)
+                .setMaxCount(14)
+                .setCandidatesSupplier(host::coilChoices)
+                .setSupplier(host::coilSelectFace)
+                .setOnChanged(host::pickCoil);
+        coilSelector.setClientSideWidget();
+        coilSelector.setVisible(false);
+        coilSelector.setHoverTooltips("按线圈温度选择。选中后把配方温度设成这颗线圈的温度");
+        reviewPage.addWidget(coilSelector);
+        dataValueField = textField(362, 136, 132, 14, () -> host.blastTempText, host::setBlastTempText);
+        dataValueField.setVisible(false);
+        dataValueField.setHoverTooltips("这项配方数据的数字");
+        reviewPage.addWidget(dataValueField);
+        dataLine = new LabelWidget(258, 152, host::dataRequirementLine);
+        dataLine.setVisible(false);
+        reviewPage.addWidget(dataLine);
         SelectorWidget conditionSelector = new ShanhaiRecipeTypeSelector(
                 258, 118, 188, 16, List.of(), 0xFF1A1A1A)
                 .setButtonBackground(GuiTextures.VANILLA_BUTTON)
@@ -618,14 +658,12 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         reviewPage.addWidget(new LabelWidget(4, 100, host::conditionLine));
         reviewPage.addWidget(new LabelWidget(260, 28, host::durationDiffLine));
         reviewPage.addWidget(new LabelWidget(260, 40, host::eutDiffLine));
-        reviewPage.addWidget(new LabelWidget(260, 52, host::temperatureRequirementLine));
-        reviewPage.addWidget(new LabelWidget(260, 64, host::coilRequirementLine));
-        reviewPage.addWidget(new LabelWidget(260, 78, host::codecHint));
-        keepToggle = new ButtonWidget(260, 96, 88, 16,
+        reviewPage.addWidget(new LabelWidget(260, 54, host::codecHint));
+        keepToggle = new ButtonWidget(260, 72, 88, 16,
                 new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::keepOriginalFace)),
                 click -> host.toggleKeepOriginal());
         reviewPage.addWidget(keepToggle);
-        reviewPage.addWidget(new LabelWidget(352, 100, host::keepOriginalHint));
+        reviewPage.addWidget(new LabelWidget(352, 76, host::keepOriginalHint));
         ButtonWidget encodePattern = button(258, 220, 118, 18, "快速编写为样板", host::encodePattern);
         encodePattern.setHoverTooltips("按当前审核稿编码样板并上传。需要身上的无线终端，以及网络中的 1 张空白样板");
         reviewPage.addWidget(encodePattern);

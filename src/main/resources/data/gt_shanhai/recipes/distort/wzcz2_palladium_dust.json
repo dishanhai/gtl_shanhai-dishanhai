@@ -1,6 +1,7 @@
 {
   "data": {
-    "euTier": 6
+    "euTier": 6,
+    "ebf_temp": 3000
   },
   "duration": 100,
   "tickInputs": {
@@ -57,8 +58,8 @@
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "dishanhai:wzcz2"
           }
@@ -67,8 +68,8 @@
       },
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 10000,
+          "type": "gtceu:long",
+          "actualAmount": 10000,
           "ingredient": {
             "item": "gtceu:platinum_group_sludge_dust"
           }
@@ -76,8 +77,8 @@
       },
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "type": "gtceu:circuit",
             "configuration": 2
@@ -133,8 +134,8 @@
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 10000,
+          "type": "gtceu:long",
+          "actualAmount": 10000,
           "ingredient": {
             "item": "gtceu:palladium_dust"
           }
@@ -145,7 +146,7 @@
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",
-      "recipeId": "gt_shanhai:wzcz2_palladium_dust",
+      "recipeId": "gt_shanhai:distort/wzcz2_palladium_dust",
       "defaultEnabled": true
     }
   ]

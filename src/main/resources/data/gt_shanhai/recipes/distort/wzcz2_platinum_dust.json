@@ -1,6 +1,7 @@
 {
   "data": {
-    "euTier": 6
+    "euTier": 6,
+    "ebf_temp": 3600
   },
   "duration": 100,
   "tickInputs": {
@@ -12,6 +13,38 @@
   },
   "type": "gtceu:distort",
   "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:wzcz2"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10000,
+          "ingredient": {
+            "item": "gtceu:platinum_group_sludge_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 2
+          }
+        },
+        "chance": 0
+      }
+    ],
     "fluid": [
       {
         "content": {
@@ -53,41 +86,20 @@
           ]
         }
       }
-    ],
-    "item": [
-      {
-        "content": {
-          "type": "gtceu:sized",
-          "count": 1,
-          "ingredient": {
-            "item": "dishanhai:wzcz2"
-          }
-        },
-        "chance": 0
-      },
-      {
-        "content": {
-          "type": "gtceu:sized",
-          "count": 10000,
-          "ingredient": {
-            "item": "gtceu:platinum_group_sludge_dust"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:sized",
-          "count": 1,
-          "ingredient": {
-            "type": "gtceu:circuit",
-            "configuration": 2
-          }
-        },
-        "chance": 0
-      }
     ]
   },
   "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10000,
+          "ingredient": {
+            "item": "gtceu:platinum_dust"
+          }
+        }
+      }
+    ],
     "fluid": [
       {
         "content": {
@@ -127,17 +139,6 @@
               "fluid": "gtceu:fluorine"
             }
           ]
-        }
-      }
-    ],
-    "item": [
-      {
-        "content": {
-          "type": "gtceu:sized",
-          "count": 10000,
-          "ingredient": {
-            "item": "gtceu:platinum_dust"
-          }
         }
       }
     ]

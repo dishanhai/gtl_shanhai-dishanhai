@@ -45,8 +45,8 @@ class GtlCoreGraphPresenceCompatibilitySourceTest {
         assertTrue(policy.contains("reusable"));
         assertTrue(capture.contains("GtlPatternCatalog$CandidateCapture"));
         assertTrue(capture.contains("enterInput"));
-        assertTrue(capture.contains("configuration"));
-        assertTrue(capture.contains("reusable"));
+        assertTrue(capture.contains("method = \"step\""));
+        assertTrue(capture.contains("GraphPresenceDispatchBridge.clear()"));
         assertTrue(adapter.contains("GtlExecutionAdapter"));
         assertTrue(adapter.contains("isPresenceInput"));
         assertTrue(adapter.contains("@Local IPatternDetails.IInput input"),

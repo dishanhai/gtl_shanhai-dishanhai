@@ -85,10 +85,10 @@ public final class ShanhaiRecipeJsExport {
         return slash >= 0 ? path.substring(slash + 1) : path;
     }
 
-    /** Condition key written beside the datapack recipe, {@code namespace:leaf}. */
+    /** Datapack {@code recipe_enabled} key. Keeps the folder, for example {@code gt_shanhai:distort/wzcz2_palladium_dust}. */
     public static String enabledRecipeId(ResourceLocation exportId) {
         if (exportId == null) return "";
-        return exportId.getNamespace() + ":" + leaf(exportId.toString());
+        return exportId.toString();
     }
 
     private static String typePath(String recipeTypeId) {

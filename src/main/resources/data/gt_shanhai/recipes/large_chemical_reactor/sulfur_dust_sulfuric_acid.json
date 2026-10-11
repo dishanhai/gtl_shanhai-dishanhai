@@ -12,23 +12,11 @@
   },
   "type": "gtceu:large_chemical_reactor",
   "inputs": {
-    "fluid": [
-      {
-        "content": {
-          "amount": 1000,
-          "value": [
-            {
-              "fluid": "minecraft:water"
-            }
-          ]
-        }
-      }
-    ],
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "gtceu:sulfur_dust"
           }
@@ -41,6 +29,19 @@
           "ingredient": {
             "item": "dishanhai:wzcz1"
           }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
         }
       }
     ]
@@ -62,7 +63,7 @@
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",
-      "recipeId": "gt_shanhai:sulfur_dust_sulfuric_acid",
+      "recipeId": "gt_shanhai:large_chemical_reactor/sulfur_dust_sulfuric_acid",
       "defaultEnabled": true
     }
   ]
