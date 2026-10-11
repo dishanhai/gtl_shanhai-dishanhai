@@ -11,7 +11,7 @@ import java.util.List;
  * <h2>0. 这个类负责什么</h2>
  * 「公告表 → 要发出去的行」这一段<b>全部纯逻辑</b>都在这里：
  * <ul>
- *   <li><b>公告表</b>（{@link #TABLE}）：本轮只有一条（{@link #NEWS_ID_2026_10_06}），
+ *   <li><b>公告表</b>（{@link #TABLE}）：现在两条（最新 {@link #NEWS_ID_2026_10_11}、往前一条 {@link #NEWS_ID_2026_10_06}），
  *       但结构是<b>表</b>，以后加一条就是往 {@code List.of(…)} 里再插一个 {@link News} —— 一行的事；</li>
  *   <li><b>序号取用</b>（{@link #byOrdinal}）：{@code 1 = 最新}，往前翻就是 2 / 3 / …；</li>
  *   <li><b>投递决议</b>（{@link #resolve}）：要么给出「逐行发出去的那几行」，
@@ -108,6 +108,9 @@ public final class ShanhaiNewsCore {
     /** 本条公告的 id（= 日期，用户指定）。 */
     public static final String NEWS_ID_2026_10_06 = "2026-10-06";
 
+    /** 本条公告的 id（= 日期）。2026-10-11 的公告：免死防护 ＋ 头顶星空。 */
+    public static final String NEWS_ID_2026_10_11 = "2026-10-11";
+
     // ================================================================== 公告表
 
     /**
@@ -129,11 +132,24 @@ public final class ShanhaiNewsCore {
      * 序号会自动跟着变（新插的那条就是 1，老的依次往后挪），{@code /shanhai 公告 list} 与
      * 「序号越界」提示里的条数也都会自动跟着变 —— <b>没有任何第二处需要同步</b>。
      *
-     * <h4>本轮为什么只有一条</h4>
-     * 用户 2026-10-06 只给了这一条（{@code id=2026-10-06}）。表结构已经按「多条」设计，
-     * 但<b>不预置任何占位/示例条目</b>：表里出现的每一条都是真公告，不许有假数据。
+     * <h4>表里现在有哪几条</h4>
+     * 2026-10-11（免死防护 ＋ 头顶星空 ＋ 两处修复）与 2026-10-06（全息菜单 ＋ 配方编辑器）。
+     * 表结构按「多条」设计，但<b>不预置任何占位/示例条目</b>：表里出现的每一条都是真公告，不许有假数据。
      */
     private static final List<News> TABLE = List.of(
+            new News(
+                    NEWS_ID_2026_10_11,
+                    NEWS_ID_2026_10_11,
+                    "免死防护 · 头顶星空",
+                    List.of(
+                            PREFIX_STYLE_MAIN + "· 免死防护：随身带着「创始现实修改模块」，被人一轮打死也死不了",
+                            PREFIX_STYLE_SUB + "    · 血量被直接清零、被从世界里抹掉、被传送走，它都会把你拉回来；左下角会告诉你它拦下了什么",
+                            PREFIX_STYLE_SUB + "    · 主动把模块丢出去、或者放进箱子 / 机器 / AE，才算交出去 —— 那时它不再拦（左下角会写「已卸下」）",
+                            PREFIX_STYLE_MAIN + "· 头顶星空：抬头看看，星尘从地平线一直铺到正上方；设置里「覆盖范围」三档可调（环带 / 半球 / 全球）",
+                            PREFIX_STYLE_SUB + "    · 手拿模块对空气右键开菜单 → 空手点「设置」→「高级调参」翻到第 4 页",
+                            PREFIX_STYLE_MAIN + "· 顺手修了两处：并行数现在按「机器上限 × 线程数」算（电够就跑满），JEI 里改过的配方不再叠成两份"
+                    )
+            ),
             new News(
                     NEWS_ID_2026_10_06,
                     NEWS_ID_2026_10_06,
@@ -380,18 +396,22 @@ public final class ShanhaiNewsCore {
             firstBad = firstBad.isEmpty() ? "case1" : firstBad;
         }
 
-        // case2 序号 1 = 最新那一条（取到的是 id 为 2026-10-06 的那条）
+        // case2 序号 1 = 最新那一条（= 表头第一个；且 id 唯一、非空）
+        //   🔴 结构性质，不写死具体日期：以后每加一条公告都不用改这一条
         cases++;
         final News newest = byOrdinal(t, 1);
-        if (newest == null || !NEWS_ID_2026_10_06.equals(newest.id())) {
+        final boolean idUnique = t.stream().map(News::id).distinct().count() == t.size();
+        if (!t.isEmpty() && (newest == null || newest != t.get(0) || !idUnique
+                || newest.id() == null || newest.id().isEmpty())) {
             failed++;
             firstBad = firstBad.isEmpty() ? "case2" : firstBad;
         }
 
-        // case3 最新那条逐行发出去 = 5 行
+        // case3 最新那条逐行发出去的行数 = 那条自己的行数（非空）
         cases++;
         final Delivery d1 = resolve(t, 1);
-        if (!d1.ok() || d1.lines().size() != 5) {
+        if (!d1.ok() || t.isEmpty() || t.get(0).lines() == null || t.get(0).lines().isEmpty()
+                || d1.lines().size() != t.get(0).lines().size()) {
             failed++;
             firstBad = firstBad.isEmpty() ? "case3" : firstBad;
         }
@@ -411,16 +431,15 @@ public final class ShanhaiNewsCore {
             firstBad = firstBad.isEmpty() ? "case4" : firstBad;
         }
 
-        // case5 首行与末行用主句前缀（标题行 / 收尾行的角色），中间两行是引导行
-        //   🔴 先判 size()==5 再 get —— 直接用 get(0)/get(4) 会在表被清空时抛
-        //      ArrayIndexOutOfBoundsException，把一次「自检报红」变成一次「自检炸掉」
-        //      （负对照实测抓到过这一处，见 temp\news-verify-*\offline\ 的 negctl 段）。
+        // case5 首行与末行用主句前缀（标题行 / 收尾行的角色），中间是引导行
+        //   🔴 只判「首末 = 主句」，不判中间**具体第几行**是引导行 —— 每条公告行数不同，
+        //      写死下标会在下一条公告上假红（2026-10-11 那条 6 行，实测抓到过）。
         cases++;
-        if (d1.lines().size() != 5
-                || !d1.lines().get(0).startsWith(PREFIX_STYLE_MAIN)
-                || !d1.lines().get(4).startsWith(PREFIX_STYLE_MAIN)
-                || !d1.lines().get(1).startsWith(PREFIX_STYLE_SUB)
-                || !d1.lines().get(3).startsWith(PREFIX_STYLE_SUB)) {
+        final List<String> l1 = d1.lines();
+        if (!d1.ok() || l1.size() < 2
+                || !l1.get(0).startsWith(PREFIX_STYLE_MAIN)
+                || !l1.get(l1.size() - 1).startsWith(PREFIX_STYLE_MAIN)
+                || !l1.subList(1, l1.size() - 1).stream().anyMatch(s -> s.startsWith(PREFIX_STYLE_SUB))) {
             failed++;
             firstBad = firstBad.isEmpty() ? "case5" : firstBad;
         }
@@ -441,10 +460,12 @@ public final class ShanhaiNewsCore {
             firstBad = firstBad.isEmpty() ? "case7" : firstBad;
         }
 
-        // case8 序号 2 越界 ⇒ 决议为"不可发"，且提示是「没有第 2 条…」（不是抛异常）
+        // case8 越界序号（= 表长 + 1）⇒ 决议为"不可发"，且提示是「没有第 N 条公告」（不是抛异常）
+        //   🔴 不写死 2：表里有两条时 2 是合法序号（2026-10-11 实踩）
         cases++;
-        final Delivery d2 = resolve(t, 2);
-        if (d2.ok() || !d2.message().contains("没有第 2 条公告")) {
+        final int over = t.size() + 1;
+        final Delivery d2 = resolve(t, over);
+        if (d2.ok() || !d2.message().contains("没有第 " + over + " 条公告")) {
             failed++;
             firstBad = firstBad.isEmpty() ? "case8" : firstBad;
         }
@@ -480,10 +501,14 @@ public final class ShanhaiNewsCore {
             firstBad = firstBad.isEmpty() ? "case12" : firstBad;
         }
 
-        // case13 日志行口径：样例前缀必须逐字命中（用户给的那一行就是它的前缀）
+        // case13 日志行口径：前缀里的 id / lines / total 全部由【表自己】现算（不写死 2026-10-06 / 5 / 1）
         cases++;
-        final String logLine = sentLogLine(NEWS_ID_2026_10_06, 5, t.size(), "player", 1);
-        if (!logLine.startsWith("[SHANHAI-NEWS] banner_sent id=2026-10-06 lines=5 total=1")) {
+        final News top = t.isEmpty() ? null : t.get(0);
+        final String topId = (top == null) ? "none" : top.id();
+        final int topLines = (top == null || top.lines() == null) ? 0 : top.lines().size();
+        final String logLine = sentLogLine(topId, topLines, t.size(), "player", 1);
+        if (!logLine.startsWith("[SHANHAI-NEWS] banner_sent id=" + topId
+                + " lines=" + topLines + " total=" + t.size())) {
             failed++;
             firstBad = firstBad.isEmpty() ? "case13" : firstBad;
         }
