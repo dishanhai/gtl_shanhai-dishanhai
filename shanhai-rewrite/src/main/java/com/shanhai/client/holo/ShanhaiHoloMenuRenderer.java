@@ -9,6 +9,8 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.math.Axis;
 import com.shanhai.common.holo.ShanhaiHoloMenuBoards;
+import com.shanhai.common.holo.ShanhaiHoloMenuNetwork;
+import com.shanhai.common.holo.ShanhaiHoloRemoteCodec;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -178,13 +180,18 @@ public final class ShanhaiHoloMenuRenderer {
     private static final float PANEL_FIELD_BORDER_BU = 2.0f;
 
     /**
-     * 每帧那个 {@code BufferBuilder} 的<b>容量参数</b>。
+     * 每帧那个 {@code BufferBuilder} 的<b>容量下限</b>（顶点数）。
+     *
      * <p>⚠️ 传进去的数<b>不是字节数</b>：{@code BufferBuilder(int capacity)} 内部做的是
      * {@code MemoryTracker.create(capacity * 6)}（源码原文）⇒ 1&lt;&lt;14 = 16384 对应
-     * <b>98,304 字节（96 KiB）</b>，正好是"峰值单批 ≈ 11.8 KB"的 8 倍。
+     * <b>98,304 字节（96 KiB）</b>。
      * <p>对照：原来写的是 {@code 1 << 18} ⇒ 1,572,864 字节（1.5 MB）/ 帧。
+     * <p>🔴 2026-10-07（联机 P3）：<b>实际容量不再用这个常量</b>，而是
+     * {@link ShanhaiHoloPose#bufferCapacityFor}{@code (1 + 远程人数)} ——
+     * 它把本常量当下限（独狼时逐位不变），人多了才往上长。
+     * 唯一一份定义搬到了 {@link ShanhaiHoloPose#BUFFER_CAPACITY_FLOOR}（那边能离线验）。
      */
-    private static final int PER_FRAME_BUFFER_CAPACITY = 1 << 14;
+    private static final int PER_FRAME_BUFFER_CAPACITY = ShanhaiHoloPose.BUFFER_CAPACITY_FLOOR;
 
     /**
      * {@link #drawSpaced} 复用的那把矩阵（每帧 ~100 次 {@code new Matrix4f(board)} ⇒ 全砍掉）。
@@ -327,19 +334,31 @@ public final class ShanhaiHoloMenuRenderer {
         if (step.changed()) {
             logAnim(step);
         }
-        if (ShanhaiHoloMenuAnim.hidden()) {
-            return;                             // 完全收起 ⇒ 与"从没开过"一样便宜
-        }
+        // 🔴 2026-10-07（联机 P3）：**"本地收起"不再等于"整帧什么都不画"**。
+        //    原因是一条很实在的场景：投影的默认值是【关】（{@code DEFAULT_ENABLED=false}）
+        //    ⇒ 照原来的写法，"我自己没开投影"就永远看不见别人的板子，
+        //      而那恰恰是用户拍板④要的"显示别人的板子：默认开"。
+        //    ⇒ 拆成两个条件：本地那一份画不画（localVisible）、别人那一份画不画（remoteCount > 0）。
+        //    ⚠️ 本地可见时（hidden()==false）下面的代码与改动前【逐行相同】——
+        //      只是多了这一层 `if (localVisible)` 的包装，读数是逐位不变的。
+        final boolean localVisible = !ShanhaiHoloMenuAnim.hidden();
         final Minecraft minecraft = Minecraft.getInstance();
         final net.minecraft.client.player.LocalPlayer player = minecraft.player;
         if (player == null || minecraft.level == null) {
             return;
         }
+        // 🆕 这一帧要画【几个别人】——只此一处判据（距离 / 他自己开着没 / 他的 DEF 到了没 / 在不在屏幕里）。
+        //   🔴 必须在建 BufferBuilder **之前**算出来：顶点容量要跟着可见人数走（见 ShanhaiHoloPose.bufferCapacityFor）。
+        final int remoteCount = collectRemotePeers(minecraft, player, event);
+        if (!localVisible && remoteCount == 0) {
+            return;                             // 本地完全收起、且没有别人 ⇒ 与"从没开过"一样便宜
+        }
 
         // 推进跟随插值（渲染线程，每帧一次；理由见 ShanhaiHoloMenuState §5）
         //   ⚠️ 面板开着的时候【也要】推 —— 否则关掉面板回到五块板时，锚点的上一帧时刻是陈旧的，
         //      那一下会看到整块"飞"过去（dt 被夹到 0.25s，但插值会真的走一大步）。
-        ShanhaiHoloMenuState.advance(player, event.getPartialTick());
+        //   ⚠️ 本地收起时也推：别人还在画，本地的锚点不能停在陈旧的时刻上（下次开投影会"飞"）。
+        ShanhaiHoloMenuState.advanceHolo(player, event.getPartialTick());
 
         // 🆕 面板模式：这一帧画设置/命令面板，还是五块菜单板
         panelMode = ShanhaiHoloMenuState.panelMode();
@@ -381,24 +400,16 @@ public final class ShanhaiHoloMenuRenderer {
         final double oy = player.getY() + (anchor.y - player.getY()) * ease;
         final double oz = player.getZ() + (anchor.z - player.getZ()) * ease;
 
-        poseStack.pushPose();
         // 🆕 2026-10-06：环绕层（数据环 + 星尘网格）要的是【原始视图矩阵】（世界 → 相机）。
         //     事件给的 poseStack 在被 translate / mulPose 之前就是它，此后就会被改 —— 所以先拷一份。
         //     复用一把静态矩阵（就是本文件里 SCRATCH_MATRIX 那个套路），不进每帧的对象账。
         //     🔴 它【只有相机旋转、没有 −camPos】：环绕层自己补平移（ShanhaiHoloSurroundView）。
+        //     ⚠️ 放在 applyHoloFrame 之前读的是同一份值：pushPose 只【复制】当前矩阵，不改它的值。
         final Matrix4f viewMatrix = VIEW_MATRIX.set(poseStack.last().pose());
-        // 平移到世界的锚点（相机相对坐标：事件给的 PoseStack 已经是"相机视图矩阵"）
-        poseStack.translate(ox - camera.x, oy - camera.y, oz - camera.z);
-        // 【全息本体坐标系】落地。⚠️ 这里用的是【框偏航】而不是玩家偏航（两者在旧档里是 180−yaw 的关系、
-        // 在环绕档里恒为 0；面板那一列另有它的朝向档）—— 值一律由 ShanhaiHoloMenuState 算好
-        // （advance / panelFrameYaw），本行不再自己推导。
-        poseStack.mulPose(Axis.YP.rotationDegrees(frameYawDeg + animSpin));
-        // 展开时的整块缩放（1 ⇒ 不动）
-        if (animScale != 1.0f) {
-            poseStack.scale(animScale, animScale, animScale);
-        }
-        // 全息本体抖动（甲案的 holoJit：周期末尾 4% 的时间里跳两下）
-        applyJitter(poseStack, tSec);
+        // 🔴 2026-10-07（联机 P1）：L384–401 那一段【整段抽出】成 applyHoloFrame（见该方法的注释）。
+        //    抽出的证明（逐位一致）：抽出前 R、t 由这里的上下文算好、就地乘进去；
+        //    抽出后 R、t 是同一批数由参数传进去 ⇒ 算式一个字没变，矩阵乘的顺序也没变。
+        applyHoloFrame(poseStack, camera, ox, oy, oz, frameYawDeg, animSpin, animScale, tSec);
 
         // 🔴 板位姿来自几何核的同一个函数（环境档 = 绕玩家一圈；旧两档 = 甲案桶形弧面）
         // 🆕 面板模式 = ShanhaiHoloMenuLayout.panelRows()（5 块行板竖着叠）。
@@ -432,8 +443,14 @@ public final class ShanhaiHoloMenuRenderer {
         //         而 begin 里会 rewind ⇒ 峰值是【单批】而不是整帧累计）
         //       ⇒ 96 KiB 是"整帧几何总量 1108 顶点 ≈ 17.7 KB"的 5.5 倍、
         //         更是"单批峰值 ≈ 11.8 KB"的 8 倍，绝不会走到 ensureCapacity 那条"+2 MB realloc"的路。
+        // 🔴 2026-10-07（联机 P3）：容量**跟着可见人数走**（设计 §4.4 的那笔账）。
+        //    原来是固定 1<<14 = 6144 顶点；"1 本地 + 3 远程"的账是 ≈10101 顶点 ⇒ 3 人就撞上
+        //    `ensureCapacity` 那条"+2 MB realloc"的路（每帧一次，60 fps ≈ 120 MB/s）。
+        //    下面这个函数按 `1 + 远程人数` 取 2 的幂，且**下限仍是原来的 1<<14**
+        //    ⇒ 独狼玩的时候一个字节都不多花（与改动前逐位相同）。
+        final int bufferCapacity = ShanhaiHoloPose.bufferCapacityFor(1 + remoteCount);
         final MultiBufferSource.BufferSource buffers =
-                MultiBufferSource.immediate(new BufferBuilder(PER_FRAME_BUFFER_CAPACITY));
+                MultiBufferSource.immediate(new BufferBuilder(bufferCapacity));
         try {
             // 🆕 2026-10-06（用户第 ② 条点单）：命令面板【只画两个框】。
             //   可见行由 ShanhaiHoloMenuPanel#rowVisible 一个口径说了算（输入层读的是同一个函数）
@@ -441,15 +458,26 @@ public final class ShanhaiHoloMenuRenderer {
             //   ⚠️ 这块板【还在板表里】、位姿一个数都没动 —— 只是这一帧不画它，
             //      所以"5 块行板"这套几何（第 6 条点单时定的）原样保留。
             // ---- 第 1 遍：底板层（写深度）----
+            //   ⚠️ 2026-10-07（P3）：整段包一层 `if (localVisible)` —— 本地收起时这一遍不跑，
+            //      但下面"别人那 5 块板"照跑（否则"自己没开投影就看不见别人"，与拍板④相反）。
             final VertexConsumer plate = buffers.getBuffer(plateType());
-            for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT; i++) {
-                if (!rowDrawn(i)) {
-                    continue;
+            if (localVisible) {
+                for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT; i++) {
+                    if (!rowDrawn(i)) {
+                        continue;
+                    }
+                    pushBoard(poseStack, boards[i]);
+                    drawPlateLayers(plate, poseStack.last().pose(), i, tSec);
+                    poseStack.popPose();
                 }
-                pushBoard(poseStack, boards[i]);
-                drawPlateLayers(plate, poseStack.last().pose(), i, tSec);
-                poseStack.popPose();
             }
+            // ---- 🆕 2026-10-07（联机 P3）：【别人那 5 块板】----
+            //   🔴 位置刻意选在"本地第 1 遍（底板，写深度）之后"：
+            //      远程板也走 plateType ⇒ 它也写深度 ⇒
+            //      "远程板挡远程板""本地板挡远程板"全由深度缓冲一次做对，不需要任何排序逻辑。
+            //   🔴 面板模式（设置/命令）**不画**（用户拍板①）—— 这里传的永远是"5 块菜单板"，
+            //      所以"你在点哪一格"和输入框里的字不会漏给别人。
+            drawRemoteBoards(poseStack, camera, buffers, remoteCount, tSec, event.getPartialTick());
             // ---- 🆕 第 1.5 遍：环绕层（数据环 + 星尘网格）----
             //   🔴 位置是刻意的：底板这一遍【写深度】已经把五块板的位置占住了 ⇒
             //      环绕层跑到板背后的部分会被深度测试真的挡住；
@@ -459,49 +487,55 @@ public final class ShanhaiHoloMenuRenderer {
             //   ⚠️ 板面禁区只认【画出来的】那些板：没画的行给 0 块（见 surroundBoards）。
             final ShanhaiHoloMenuLayout.Board[] surroundRows = surroundBoards(boards);
             final int surroundCount = rowCountCache;
-            ShanhaiHoloSurroundRenderer.render(event, buffers, viewMatrix,
-                    net.minecraft.util.Mth.lerp(event.getPartialTick(), player.xOld, player.getX()),
-                    net.minecraft.util.Mth.lerp(event.getPartialTick(), player.yOld, player.getY()),
-                    net.minecraft.util.Mth.lerp(event.getPartialTick(), player.zOld, player.getZ()),
-                    ox, oy, oz, frameYawDeg, animSpin, animScale, surroundRows, surroundCount,
-                    tSec, globalAlpha);
+            if (localVisible) {
+                ShanhaiHoloSurroundRenderer.render(event, buffers, viewMatrix,
+                        net.minecraft.util.Mth.lerp(event.getPartialTick(), player.xOld, player.getX()),
+                        net.minecraft.util.Mth.lerp(event.getPartialTick(), player.yOld, player.getY()),
+                        net.minecraft.util.Mth.lerp(event.getPartialTick(), player.zOld, player.getZ()),
+                        ox, oy, oz, frameYawDeg, animSpin, animScale, surroundRows, surroundCount,
+                        tSec, globalAlpha);
+            }
             // ---- 第 2 遍：发光层（加法）----
             final VertexConsumer glow = buffers.getBuffer(glowType());
             final float breath = breath(tSec);
-            for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT; i++) {
-                if (!rowDrawn(i)) {
-                    continue;
+            if (localVisible) {
+                for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT; i++) {
+                    if (!rowDrawn(i)) {
+                        continue;
+                    }
+                    pushBoard(poseStack, boards[i]);
+                    drawGlowLayers(glow, poseStack.last().pose(), i, tSec, breath);
+                    // 🆕 面板模式：被指到的那一行补一根竖条（"指着谁"不含糊）
+                    if (panelMode != ShanhaiHoloMenuPanel.MODE_NONE && i == panelHoverRow) {
+                        drawPanelHoverMark(glow, poseStack.last().pose());
+                    }
+                    // 🆕 命令面板：输入框 / 返回框 的外框（第 ② 条点单：两块各一圈、都只占一行）
+                    if (panelMode == ShanhaiHoloMenuPanel.MODE_COMMAND
+                            && (i == ShanhaiHoloMenuPanel.COMMAND_INPUT_ROW
+                            || i == ShanhaiHoloMenuPanel.COMMAND_BACK_ROW)) {
+                        drawPanelCommandField(glow, poseStack.last().pose(), i, breath);
+                    }
+                    poseStack.popPose();
                 }
-                pushBoard(poseStack, boards[i]);
-                drawGlowLayers(glow, poseStack.last().pose(), i, tSec, breath);
-                // 🆕 面板模式：被指到的那一行补一根竖条（"指着谁"不含糊）
-                if (panelMode != ShanhaiHoloMenuPanel.MODE_NONE && i == panelHoverRow) {
-                    drawPanelHoverMark(glow, poseStack.last().pose());
-                }
-                // 🆕 命令面板：输入框 / 返回框 的外框（第 ② 条点单：两块各一圈、都只占一行）
-                if (panelMode == ShanhaiHoloMenuPanel.MODE_COMMAND
-                        && (i == ShanhaiHoloMenuPanel.COMMAND_INPUT_ROW
-                        || i == ShanhaiHoloMenuPanel.COMMAND_BACK_ROW)) {
-                    drawPanelCommandField(glow, poseStack.last().pose(), i, breath);
-                }
-                poseStack.popPose();
             }
             // ---- 第 3 遍：文字（原版 Font 通道）----
             final Font font = minecraft.font;
-            for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT; i++) {
-                if (!rowDrawn(i)) {
-                    continue;
+            if (localVisible) {
+                for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT; i++) {
+                    if (!rowDrawn(i)) {
+                        continue;
+                    }
+                    pushBoard(poseStack, boards[i]);
+                    if (panelMode == ShanhaiHoloMenuPanel.MODE_NONE) {
+                        drawTextLayers(font, buffers, poseStack.last().pose(), i, tSec);
+                    } else {
+                        drawPanelRowText(font, buffers, poseStack.last().pose(), i);
+                    }
+                    poseStack.popPose();
                 }
-                pushBoard(poseStack, boards[i]);
-                if (panelMode == ShanhaiHoloMenuPanel.MODE_NONE) {
-                    drawTextLayers(font, buffers, poseStack.last().pose(), i, tSec);
-                } else {
-                    drawPanelRowText(font, buffers, poseStack.last().pose(), i);
-                }
-                poseStack.popPose();
             }
             // ---- 第 4 遍（🆕）：「正在加载」那根走马灯进度条（纯几何，跟着按下那块板走）----
-            if (panelMode == ShanhaiHoloMenuPanel.MODE_NONE
+            if (localVisible && panelMode == ShanhaiHoloMenuPanel.MODE_NONE
                     && pressBoard >= 0 && pressBoard < boards.length) {
                 final VertexConsumer bar = buffers.getBuffer(glowType());
                 pushBoard(poseStack, boards[pressBoard]);
@@ -542,7 +576,268 @@ public final class ShanhaiHoloMenuRenderer {
                 ShanhaiHoloMenuAnim.describe());
     }
 
+    // ------------------------------------------------------------------ 🆕 联机 P3：别人那 5 块板
+
+    /**
+     * 这一帧可见的远程玩家（<b>复用数组，不每帧 new</b>）。
+     * <p>长度 64 是个硬上限：真到那个规模，帧预算早就被顶点数吃光了（见 {@link ShanhaiHoloPose#bufferCapacityFor}），
+     * 与其静默变慢，不如让这里的上限看得见。
+     */
+    private static final net.minecraft.client.player.AbstractClientPlayer[] REMOTE_PEERS =
+            new net.minecraft.client.player.AbstractClientPlayer[64];
+
+    /** 上一帧真正画了几个人（只在<b>变化时</b>打一行日志：不刷屏，但"到底画没画"一眼可判）。 */
+    private static int lastDrawnPeers = -1;
+
+    private static int drawnPeers;
+    private static int drawnBoards;
+    private static long drawnFrames;
+
+    /** 叠加剔除用的 scratch（世界 → 裁剪）：同一帧只算一次，见 {@link #collectRemotePeers}。 */
+    private static final Matrix4f CULL_VIEW = new Matrix4f();
+    private static final Matrix4f CULL_MVP = new Matrix4f();
+    private static final org.joml.Vector4f CULL_POINT = new org.joml.Vector4f();
+
+    /** 屏幕外剔除的宽容边（NDC 单位）。1.5 ⇒ 宁可多画一点点，也绝不剔掉半个还在画面里的板子。 */
+    private static final float CULL_NDC = 1.5f;
+
+    /**
+     * 🔴 <b>这一帧要画几个别人</b> —— 联机渲染的<b>唯一判据</b>（设计 §2.2 的三级剔除）：
+     * <ol>
+     *   <li><b>同维度 + 不是我自己</b>：{@code ClientLevel.players()} 本来就只含当前维度；</li>
+     *   <li><b>他自己开着 + 他的 DEF 到了</b>：{@code ShanhaiHoloRemoteState.paintable}
+     *       （没收到 DEF 就<b>不画</b> —— 否则会用我自己的 15 项去画他的星空）；</li>
+     *   <li><b>距离</b>：{@code distanceToSqr <= RENDER_DISTANCE_SQR}（64 格，用户拍板③）；</li>
+     *   <li><b>屏幕外</b>：把眼睛位置经 MVP 投到 NDC，|x| 或 |y| 超出 {@link #CULL_NDC} 就剔。
+     *       ⚠️ 这一级<b>不是可选项</b>：批数与顶点都随人数线性涨（设计 §4.5），
+     *       剔掉"背后那 20 个人"是"人多也不崩"的唯一理由。</li>
+     * </ol>
+     * 结果写进 {@link #REMOTE_PEERS}，返回人数。容量与真实绘制用的是<b>同一个数组</b>
+     * ⇒ 不可能出现"算容量时算 2 个、画的时候画 5 个"。
+     */
+    private static int collectRemotePeers(Minecraft minecraft,
+                                          net.minecraft.client.player.LocalPlayer self,
+                                          RenderLevelStageEvent event) {
+        if (!ShanhaiHoloRemoteView.showOthersBoards() && !ShanhaiHoloRemoteView.showOthersSurround()) {
+            return 0;                                   // 两个开关都关 ⇒ 连遍历都不做
+        }
+        final net.minecraft.client.multiplayer.ClientLevel level = minecraft.level;
+        if (level == null) {
+            return 0;
+        }
+        // MVP 同一帧只算一次（设计 §2.5：VIEW_FULL/MVP/PROJ 别每人算一遍）
+        final Vec3 cam = event.getCamera().getPosition();
+        ShanhaiHoloSurroundView.composeView(CULL_VIEW, VIEW_MATRIX, cam.x, cam.y, cam.z);
+        CULL_MVP.set(event.getProjectionMatrix()).mul(CULL_VIEW);
+
+        int n = 0;
+        for (net.minecraft.client.player.AbstractClientPlayer other : level.players()) {
+            if (other == null || other == self) {
+                continue;
+            }
+            if (!ShanhaiHoloRemoteState.paintable(other.getUUID())) {
+                continue;
+            }
+            if (other.distanceToSqr(self) > ShanhaiHoloMenuNetwork.RENDER_DISTANCE_SQR) {
+                continue;
+            }
+            if (!onScreen(other.getEyePosition(event.getPartialTick()))) {
+                continue;
+            }
+            if (n < REMOTE_PEERS.length) {
+                REMOTE_PEERS[n++] = other;
+            }
+        }
+        return n;
+    }
+
+    /** 世界坐标是不是在画面里（宽容 1.5 个 NDC）。 */
+    private static boolean onScreen(Vec3 world) {
+        CULL_POINT.set((float) world.x, (float) world.y, (float) world.z, 1.0f);
+        CULL_MVP.transform(CULL_POINT);
+        if (CULL_POINT.w <= 1.0e-4f) {
+            return false;                               // 在相机平面后面
+        }
+        final float x = CULL_POINT.x / CULL_POINT.w;
+        final float y = CULL_POINT.y / CULL_POINT.w;
+        return x >= -CULL_NDC && x <= CULL_NDC && y >= -CULL_NDC && y <= CULL_NDC;
+    }
+
+    /**
+     * 🆕 <b>画别人的 5 块菜单板</b>（联机 P3 的主体）。
+     *
+     * <h4>为什么"画出来的一定和他自己看到的一样"</h4>
+     * 位姿走 {@link ShanhaiHoloPose#landingForRemote}（与本地 {@code advanceHolo} 落地那一支
+     * <b>同一个式子</b>），帧变换走 {@link #applyHoloFrame}（与本地同一个）、
+     * 板落位走 {@link #poseBoard}（与本地同一个）、三层绘制走
+     * {@link #drawPlateLayers}/{@link #drawGlowLayers}/{@link #drawTextLayers}
+     * （与本地同一个）⇒ 全链路<b>没有第二份公式</b>。
+     * 离线套件里有一条断言专门钉这件事（远程 vs 本地 34 个数逐位相等 + rotLerp 负对照）。
+     *
+     * <h4>🔴 三件"远程不许画"的东西（都要在进这个循环之前摆平）</h4>
+     * <ol>
+     *   <li><b>按下/加载</b>：{@code pressBoard/pressAmount} 是<b>本地</b>状态（他按没按下去，
+     *       别人不该知道）⇒ 这里临时置 -1/0，出来后<b>原样还原</b>
+     *       （本地第 2、4 遍还要用它们）。</li>
+     *   <li><b>展开动画</b>：{@code animSpin=0 / animScale=1}（"已经展开完毕"的静止态），
+     *       而 {@code globalAlpha} 是逐顶点乘进去的静态量 ⇒ 临时置 1.0 再还原。</li>
+     *   <li><b>面板</b>：别人只画 5 块菜单板，永远不画设置/命令面板（用户拍板①）
+     *       ⇒ 这里不碰 {@code panelMode}，也永远不调 {@code drawPanelRowText} 那一组。</li>
+     * </ol>
+     *
+     * @param count 上一层已经算好的可见人数（{@link #collectRemotePeers} 的结果）
+     */
+    private static void drawRemoteBoards(PoseStack poseStack, Vec3 camera,
+                                         MultiBufferSource.BufferSource buffers, int count,
+                                         float tSec, float partialTick) {
+        if (count <= 0) {
+            if (lastDrawnPeers != 0) {
+                lastDrawnPeers = 0;
+                com.shanhai.ShanhaiMod.LOGGER.info(
+                        "{} holo_mp_draw peers=0（没有可见的别人：没开开关/他关着/没收到 DEF/超 64 格/屏幕外）",
+                        ShanhaiHoloRemoteView.PREFIX);
+            }
+            return;
+        }
+        // 保存本地那三个"每帧算一次"的静态量 —— 远程那一遍要用不同的值，用完必须还原
+        final int savedPressBoard = pressBoard;
+        final float savedPressAmount = pressAmount;
+        final float savedPressBreath = pressBreath;
+        final float savedGlobalAlpha = globalAlpha;
+        pressBoard = -1;
+        pressAmount = 0.0f;
+        pressBreath = 0.0f;
+        globalAlpha = 1.0f;
+        try {
+            final Font font = Minecraft.getInstance().font;
+            for (int k = 0; k < count; k++) {
+                final net.minecraft.client.player.AbstractClientPlayer other = REMOTE_PEERS[k];
+                final ShanhaiHoloRemoteState.Entry st = ShanhaiHoloRemoteState.of(other.getUUID());
+                if (st == null || !st.enabled || !st.defReceived) {
+                    continue;                            // 两次遍历之间他改了？那就这一帧跳过
+                }
+                final String layout = layoutNameOf(st.layout);
+                // ⚠️ 眼睛位置只取一次（三次调用会白算两遍插值）
+                final Vec3 eye = other.getEyePosition(partialTick);
+                final ShanhaiHoloPose.Landing landing = ShanhaiHoloPose.landingForRemote(
+                        layout, st.distance, eye.x, eye.y, eye.z,
+                        other.yRotO, other.getYRot(), partialTick);
+                // ---- 一个 Frame：push（applyHoloFrame 里）→ 板 → pop ----
+                applyHoloFrame(poseStack, camera, landing.cx(), landing.cy(), landing.cz(),
+                        landing.frameYawDeg(), 0.0f, 1.0f, tSec);
+                try {
+                    final ShanhaiHoloMenuLayout.Board[] bs = landing.boards();
+                    final VertexConsumer rp = buffers.getBuffer(plateType());
+                    for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT && i < bs.length; i++) {
+                        poseBoard(poseStack, bs[i], -1, 0.0f);
+                        drawPlateLayers(rp, poseStack.last().pose(), i, tSec);
+                        poseStack.popPose();
+                        drawnBoards++;
+                    }
+                    final VertexConsumer rg = buffers.getBuffer(glowType());
+                    final float breath = breath(tSec);
+                    for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT && i < bs.length; i++) {
+                        poseBoard(poseStack, bs[i], -1, 0.0f);
+                        drawGlowLayers(rg, poseStack.last().pose(), i, tSec, breath);
+                        poseStack.popPose();
+                        drawnBoards++;
+                    }
+                    for (int i = 0; i < ShanhaiHoloMenuTuning.BOARD_COUNT && i < bs.length; i++) {
+                        poseBoard(poseStack, bs[i], -1, 0.0f);
+                        drawTextLayers(font, buffers, poseStack.last().pose(), i, tSec);
+                        poseStack.popPose();
+                        drawnBoards++;
+                    }
+                } finally {
+                    // 🔴 与 applyHoloFrame 里那个 pushPose 配对：无论中间抛不抛都要弹回来
+                    poseStack.popPose();
+                }
+                drawnPeers++;
+                drawnFrames++;
+                if (k == 0) {
+                    // 每人最多一行读数（只打第一个人，免得人多刷屏）
+                    com.shanhai.ShanhaiMod.LOGGER.info(
+                            "{} holo_mp_remote_draw uuid={} layout={} distance={} yaw_rotLerp={} {}",
+                            ShanhaiHoloRemoteView.PREFIX,
+                            other.getUUID().toString().substring(0, 8), layout, st.distance,
+                            ShanhaiHoloPose.yawDeg(other.yRotO, other.getYRot(), partialTick),
+                            ShanhaiHoloPose.describe(landing.cx(), landing.cy(), landing.cz(),
+                                    landing.frameYawDeg()));
+                }
+            }
+            if (lastDrawnPeers != count) {
+                lastDrawnPeers = count;
+                com.shanhai.ShanhaiMod.LOGGER.info(
+                        "{} holo_mp_draw peers={} boards={} capacity_verts={} frames={}",
+                        ShanhaiHoloRemoteView.PREFIX, count, drawnBoards,
+                        ShanhaiHoloPose.bufferCapacityFor(1 + count), drawnFrames);
+            }
+        } finally {
+            pressBoard = savedPressBoard;
+            pressAmount = savedPressAmount;
+            pressBreath = savedPressBreath;
+            globalAlpha = savedGlobalAlpha;
+        }
+    }
+
+    /** 排布序号 → 几何核认的那个名字（{@code ShanhaiHoloMenuState.Layout} 的 ordinal）。 */
+    private static String layoutNameOf(int ordinal) {
+        return switch (ordinal) {
+            case ShanhaiHoloRemoteCodec.LAYOUT_COLUMN -> "column";
+            case ShanhaiHoloRemoteCodec.LAYOUT_ROW -> "row";
+            default -> "ring";
+        };
+    }
+
     // ------------------------------------------------------------------ 板变换
+
+    /**
+     * 🆕 2026-10-07（联机 P1）<b>把一个【已经算好的】全息位姿压成相机空间的 PoseStack 帧</b>。
+     *
+     * <p>它就是原来 {@code onRenderLevelStage} 里那一段（{@code pushPose → translate(−cam) →
+     * mulPose(YP, frameYaw+spin) → 可选 scale → applyJitter}）<b>原样搬出来</b>，
+     * 唯一的变化是"数从哪来"：原来是就地读本方法的局部变量与本类的静态字段，
+     * 现在是<b>参数</b>。
+     *
+     * <h4>为什么可以这样抽（逐位一致的证明）</h4>
+     * <pre>
+     *   抽出前：t = (ox−cam.x, …)、R = Rot_Y(frameYaw+spin) 都在这里算，就地乘进去
+     *   抽出后：t、R 是【同一批数】由调用方传进来 ⇒ 同一个式子、同一个乘法顺序 ⇒ 逐位相同
+     * </pre>
+     * 调用方一处都没变（本地的四条绘制遍仍然紧接着它跑），所以"本地那条路径的读数逐位不变"。
+     *
+     * <h4>🔴 {@code pushPose} 与调用方 {@code finally} 里的 {@code popPose} 是一对，不许拆</h4>
+     * 本方法负责 {@code pushPose}，配对的那个 {@code poseStack.popPose()} 留在
+     * {@code onRenderLevelStage} 的 {@code finally} 里 —— 这是"渲染线程抛异常也不会把矩阵栈搞歪"
+     * 的唯一保险（{@code try} 一开始就压进去、任何出口都弹出来）。
+     * <b>把这个 push 挪到 try 之外/之后、或者把 pop 挪进本方法，都会破坏这条配对。</b>
+     *
+     * @param poseStack  事件给的（只有相机旋转）
+     * @param camera     这一帧的相机世界坐标（{@code event.getCamera().getPosition()}）
+     * @param ox,oy,oz   全息原点世界坐标（已含展开动画插值）
+     * @param frameYawDeg 框偏航（已含朝向档 / 环绕档语义）
+     * @param animSpinDeg 展开动画的自转（度）
+     * @param animScale  展开动画的整块缩放（{@code 1.0f} = 不动，会整段跳过）
+     * @param tSec       这一帧的时刻（秒）
+     */
+    private static void applyHoloFrame(PoseStack poseStack, Vec3 camera,
+                                       double ox, double oy, double oz,
+                                       float frameYawDeg, float animSpinDeg, float animScale,
+                                       float tSec) {
+        poseStack.pushPose();
+        // 平移到世界的锚点（相机相对坐标：事件给的 PoseStack 已经是"相机视图矩阵"）
+        poseStack.translate(ox - camera.x, oy - camera.y, oz - camera.z);
+        // 【全息本体坐标系】落地。⚠️ 这里用的是【框偏航】而不是玩家偏航（两者在旧档里是 180−yaw 的关系、
+        // 在环绕档里恒为 0；面板那一列另有它的朝向档）—— 值一律由 ShanhaiHoloMenuState 算好
+        // （advanceHolo / panelFrameYaw / ShanhaiHoloPose.landing），本行不再自己推导。
+        poseStack.mulPose(Axis.YP.rotationDegrees(frameYawDeg + animSpinDeg));
+        // 展开时的整块缩放（1 ⇒ 不动）
+        if (animScale != 1.0f) {
+            poseStack.scale(animScale, animScale, animScale);
+        }
+        // 全息本体抖动（甲案的 holoJit：周期末尾 4% 的时间里跳两下）
+        applyJitter(poseStack, tSec);
+    }
 
     /**
      * 把一块板的局部位姿压到 {@code PoseStack} 上。
@@ -557,8 +852,14 @@ public final class ShanhaiHoloMenuRenderer {
      * 并且横竖缩 {@link ShanhaiHoloMenuPending#PRESS_SHRINK}。
      * <p>⚠️ 这两下都作用在<b>板自己的局部坐标系</b>里，所以环绕档下每一块板被按下去的方向
      * 都是"顺着它自己的法线往里"，不会出现"有的板往左、有的往右"。
+     *
+     * <p>🔴 2026-10-07（联机 P1）：把"按下"那两个量<b>改成参数</b>（原来是读本类的静态字段
+     * {@code pressBoard} / {@code pressAmount}）⇒ 于是远程那一遍可以传
+     * {@code poseBoard(…, -1, 0f)}（"他有没有按下去"是本地的状态，<b>远程不该画</b>），
+     * 而本地那一路的读数逐位不变（传进去的就是原来那两个字段的值）。
      */
-    private static void pushBoard(PoseStack poseStack, ShanhaiHoloMenuLayout.Board board) {
+    private static void poseBoard(PoseStack poseStack, ShanhaiHoloMenuLayout.Board board,
+                                  int pressBoard, float pressAmount) {
         poseStack.pushPose();
         poseStack.translate(board.x(), board.y(), board.z());
         if (board.rotY() != 0.0f) {
@@ -574,6 +875,16 @@ public final class ShanhaiHoloMenuRenderer {
         }
         final float s = ShanhaiHoloMenuTuning.BLOCKS_PER_BU * board.scale();
         poseStack.scale(s, s, s);
+    }
+
+    /**
+     * 本地那一路的板变换 = {@link #poseBoard} 喂本帧的"按下"状态（原实现，一行没变）。
+     *
+     * <p>⚠️ 与 {@code poseBoard} 是<b>同一个函数体的两次调用</b>，不是两份公式：
+     * 这里只是把本类那两个静态字段（{@code pressBoard} / {@code pressAmount}）当参数传下去。
+     */
+    private static void pushBoard(PoseStack poseStack, ShanhaiHoloMenuLayout.Board board) {
+        poseBoard(poseStack, board, pressBoard, pressAmount);
     }
 
     /**

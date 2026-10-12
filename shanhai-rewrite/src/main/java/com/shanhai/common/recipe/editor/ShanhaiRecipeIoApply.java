@@ -269,4 +269,61 @@ public final class ShanhaiRecipeIoApply {
         r.data.putInt("euTier", tier);
         return true;
     }
+
+    /** 这条配方的 EU 该落在哪张 tick 表：发电型 ⇒ {@code tickOutputs}，其余 ⇒ {@code tickInputs}。 */
+    public static String tickTableNameFor(GTRecipe r) {
+        return euSideOf(r) == EuSide.GENERATE ? "tickOutputs" : "tickInputs";
+    }
+
+    /**
+     * <b>同拍的另一半（落盘侧）</b>：把 {@code eut} 写进一张 tick 表的 <b>GT 形状 JSON</b>。
+     *
+     * <h4>为什么必须有这个方法</h4>
+     * {@link #applyEut} 只把电压写进<b>活配方对象</b>；而覆盖层下一局是<b>照着盘上那份 recipe JSON
+     * 重放</b>的。落盘那一侧以前只写了 {@code data.euTier}（见 {@code ShanhaiRecipeEditorOps}
+     * 里那两处 {@code fields.add("data", …)}）⇒ 盘上的 {@code tickInputs.eu} 永远停在建配方时那个
+     * 默认值 8。用户的真实文件与真实日志逐字给出了这个分叉：
+     * <pre>
+     *   recipe_overrides.json : data.euTier=5(IV)  但 tickInputs.eu[0].content=8(ULV)
+     *   latest.log:11213      : workspace_recipe_loaded … eu=8 euTier=5
+     * </pre>
+     * ⇒ 机器按 IV 闸门准入，却只耗 8 EU/t；JEI 也照 {@code tickInputs.eu} 显示成 ULV。
+     *
+     * <h4>形状</h4>
+     * 与 {@link #tableJson} / 配方加载器<b>同一份</b>（都出自 {@code Content.codec(cap)}），
+     * 逐字就是盘上已有的那一份：
+     * {@code {"eu":[{"content":<eut>,"chance":10000,"maxChance":10000,"tierChanceBoost":0}]}}。
+     * <b>只改 content 一个字段</b> —— chance / maxChance / tierChanceBoost 原样保留，
+     * 所以这张表原样喂回加载器不会改变任何别的语义。
+     *
+     * @param which {@code "tickInputs"} / {@code "tickOutputs"}（见 {@link #tickTableNameFor}）
+     * @return 永不为 null；表里原本没有 eu 就按上面那条标准形状补一条
+     */
+    public static JsonObject tickTableWithEut(GTRecipe r, String which, long eut) {
+        final JsonObject out = tableJson(r, which);
+        final JsonArray arr = new JsonArray();
+        boolean had = false;
+        if (out.has(K_EU) && out.get(K_EU).isJsonArray()) {
+            for (JsonElement el : out.getAsJsonArray(K_EU)) {
+                if (!el.isJsonObject()) {
+                    continue;
+                }
+                el.getAsJsonObject().addProperty("content", eut);
+                arr.add(el);
+                had = true;
+            }
+        }
+        if (!had) {
+            // 表里原本没有 eu（或形状不是数组）⇒ 补一条标准的。数值与
+            // ShanhaiRecipeEditorWorkspaceCheck.emptyNewRecipeJson 逐字相同（那份是"新建配方"用的形状）。
+            final JsonObject c = new JsonObject();
+            c.addProperty("content", eut);
+            c.addProperty("chance", 10000);
+            c.addProperty("maxChance", 10000);
+            c.addProperty("tierChanceBoost", 0);
+            arr.add(c);
+        }
+        out.add(K_EU, arr);
+        return out;
+    }
 }

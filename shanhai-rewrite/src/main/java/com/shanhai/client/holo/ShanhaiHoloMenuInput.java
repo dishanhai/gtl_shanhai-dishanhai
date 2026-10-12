@@ -498,6 +498,14 @@ public final class ShanhaiHoloMenuInput {
             }
             case ShanhaiHoloMenuPanel.CLICK_PARAM_DOWN -> nudgeParamAndLog(lp, row, -1, source);
             case ShanhaiHoloMenuPanel.CLICK_PARAM_UP -> nudgeParamAndLog(lp, row, +1, source);
+            // ---- 🆕 2026-10-07（配方编辑器「两套界面」第 1 步）：设置面板「高级调参」行最后一格 ----
+            //   纯客户端本地动作：翻一下开关并写回 config/shanhai-common.toml
+            //   （不发包、不碰服务端状态 —— 与「距离」「布局」那两行同一条口径）。
+            case ShanhaiHoloMenuPanel.CLICK_EDITOR_UI -> {
+                final com.shanhai.common.recipe.editor2.ShanhaiRecipeUiRule.Ui now =
+                        com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.flip();
+                logPanelChoice(lp, "配方编辑器界面=" + now.zh, source);
+            }
             default -> ShanhaiMod.LOGGER.warn("{} holo_panel_click_unhandled click={} mode={} row={} cell={}",
                     PREFIX, click, mode, row, cell);
         }
@@ -703,7 +711,10 @@ public final class ShanhaiHoloMenuInput {
             ShanhaiHoloMenuState.setPanelHover(-1, -1);
         }
         if (!moduleAnywhere(lp)) {
-            ShanhaiHoloMenuState.setEnabled(false);
+            // 🆕 2026-10-07：这一条走【不落盘】的那个入口（setEnabledTransient）。
+            //   它是瞬时条件（"你现在身上有没有模块"），不是用户意图；
+            //   写盘会把用户"我开着"的偏好悄悄抹掉 —— 全工程只有这一处调它。
+            ShanhaiHoloMenuState.setEnabledTransient(false);
             ShanhaiMod.LOGGER.info("{} holo_menu_auto_closed reason=module_gone_from_player player={} "
                             + "hand_main={} hand_off={} inv_slots={}",
                     PREFIX, lp.getGameProfile().getName(),

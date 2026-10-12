@@ -110,7 +110,15 @@ import org.jetbrains.annotations.Nullable;
  * <h3>6.2 根因（判据 = 显示串反推，不是猜）</h3>
  * <ol>
  *   <li>{@link #getTooltips()} 的字节码只有三段：{@code "§b模块要求："} ＋ {@code getStyledName()} ＋
- *       {@code " §7（等级 ≥ " + N + "）"}（{@code javap -c} 可证，本类里<b>没有任何</b>"N× "前缀拼接）。</li>
+ *       {@code " §7（等级 ≥ " + N + "）"}（{@code javap -c} 可证）。</li>
+ *   <li>🔴🔴 <b>2026-10-06 更正上面这条</b>：括号里那句「本类里<b>没有任何</b>"{@code N× }"前缀拼接」
+ *       <b>当时就是错的</b> —— 同一版里 {@code displayNameWithCount()} / {@code plainNameWithCount()}
+ *       都在拼 {@code requiredLevel + "× "}，只是它们没被那次的调用链覆盖到
+ *       （{@code getTooltips()} 当时拼的是 {@code getStyledName()}，不是它们）。
+ *       那句错的断言后来害了一次：2026-10-03 把「（等级 ≥ N）」删掉之后，
+ *       {@code getTooltips()} 换用了 {@code plainNameWithCount()} ⇒ {@code N× } 真的印上了配方页
+ *       ⇒ 用户读成"要 N 个模块"（截图逐字：{@code 模块要求: 5× 物质重组模块}）。
+ *       现在整行<b>零 {@code ×}</b>，见 {@link #levelSuffix()} 的血账与 §8。</li>
  *   <li>⇒ 上一行里那个 {@code 1x } 前缀<b>只可能来自名字那一段</b>，而名字那一段在物品查不到时会
  *       <b>原样回退成 {@link #moduleId}</b>。</li>
  *   <li>⇒ 显示的 {@code 1x shanhai:introductory_material_module} 就是<b>构造时收到的 {@code moduleId} 原文</b>；
@@ -265,6 +273,25 @@ import org.jetbrains.annotations.Nullable;
  * ② 该 dev 描述符在喂给注解处理器的 TSRG 里<b>有 SRG 映射</b>（{@code drawInBatch(String,…,IIZ)} → {@code m_272078_}）。
  * <p>⚠️ <b>仍未证实</b>：真构建后 jar 里能不能看到合并进去的注入、以及实机观感 —— 需要构建＋启动，本轮红线禁止。
  * 交接文档里给了构建后立刻可跑的 {@code javap} 验收命令。
+ *
+ * <h2>8. 🔴🔴 2026-10-06 第五轮：「5× 」被读成【5 个】—— 那个位置印的是等级，不是数量</h2>
+ * <p><b>用户截图逐字</b>：JEI 配方页那一行 = {@code 模块要求: 5× 物质重组模块}
+ * ⇒ 他读成"配方要 <b>5 个</b>物质重组模块"，来问"编辑器怎么写出需要 5 个模块"✗。
+ * 而配方编辑器第三屏自己写的是「物质重组模块（<b>等级</b> 5）」✓ —— <b>编辑器没写错，是这一行说错了</b>。
+ * <p><b>判定没被写坏</b>：门槛走 {@link #requiredLevelForGate()}（现查
+ * {@code PrimordialModuleMachine.MODULE_LEVELS}），<b>一个字节都没经过 {@link #requiredLevel} 那个字段</b>
+ * ⇒ 本条只是显示口径修正，配方该怎么拦还怎么拦。
+ * <p><b>改法（三条硬约束 ＋ 逐字对照）</b>：
+ * <pre>
+ *   改前 : &amp;$ultimateRainbow-模块要求：5× 物质重组模块              ← 那个 5 是等级，被摆成数量 ✗
+ *   改后 : &amp;$ultimateRainbow-模块要求：物质重组模块（等级 5）        ← 数字明说是等级 ✓
+ *   约束 ① 整行零 {@code §}（露码那条血账，见 §7.3）；② 整行零 {@code ×}（"要 N 个"这种读法在字面上不可能成立）；
+ *        ③ 数字取【真门槛】而不是那个字段（字段的两种写入侧含义相反，且缺省值是 0 ⇒ 会印出「等级 0」的谎话）。
+ * </pre>
+ * <p>代码落点：{@link #levelSuffix()}（新）、{@link #displayNameWithLevel()}（原 {@code displayNameWithCount}）、
+ * {@code plainNameWithLevel()}（原 {@code plainNameWithCount}，{@link #getTooltips()} 在用）。
+ * <p>机器判据：{@code temp\condfix\报告.md} 的离线读数 ＋ {@code ShanhaiRecipeEditorSelfcheck}
+ * 的 {@code case=module_level_tip}（正向：真串必须含「等级 5」；负对照：把旧写法塞回去必须报红）。
  */
 public class ModuleLevelCondition extends RecipeCondition {
 
@@ -286,7 +313,14 @@ public class ModuleLevelCondition extends RecipeCondition {
     /**
      * KJS 写法 {@code "Nx <物品id>"} 里的 <b>N</b>。
      * <p>🔴 <b>本工程不拿它当门槛，也不拿它当需求数量</b> —— 见类注释 §1/§3。
-     * 保留字段只为：① 与上游 JSON / 网络协议逐字同形（{@code level} 键）；② 显示（{@code ×N}）。
+     * 保留字段只为：① 与上游 JSON / 网络协议逐字同形（{@code level} 键）；
+     * ② 门槛不可解时那条 WARN 把收到的原文一起打出来（便于对账）。
+     * <p>🔴🔴 <b>2026-10-06 起它<b>不再参与任何显示</b></b>：此前 {@code getTooltips()} 把它印在
+     * {@code N× } 的位子上，而它的两个写入侧含义<b>互相矛盾</b> ——
+     * 编辑器（{@code ShanhaiRecipeConditions.makeValueCondition}）写的是该模块的<b>等级</b>，
+     * KJS 老写法（{@code "Nx id"}）按脚本注释写的是<b>数量</b>；{@code deserialize} 在 JSON 缺
+     * {@code level} 字段时还会填 <b>0</b> ⇒ 拿它显示会印出「5×」（读成 5 个）或「等级 0」（谎话）。
+     * 现在显示一律现查等级表，见 {@link #levelSuffix()}。
      */
     public final int requiredLevel;
 
@@ -590,7 +624,9 @@ public class ModuleLevelCondition extends RecipeCondition {
      *   2026-10-01 首版 : &$ultimateRainbow-模块要求：1× 物质推演模块（等级 ≥ 3）     ← 又露码（用户图1）
      *   2026-10-01 二版 : §b模块要求： 1× 物质推演模块               §7（等级 ≥ 3）  ← 整行零 &（保守档）
      *   2026-10-01 三版 : &$ultimateRainbow-模块要求：1× 物质推演模块（等级 ≥ 3）     ← 用户选甲
-     *   2026-10-03 四版 : &$ultimateRainbow-模块要求：1× 物质推演模块                 ← 🔴 本版：用户点单去掉等级段
+     *   2026-10-03 四版 : &$ultimateRainbow-模块要求：1× 物质推演模块                 ← 用户点单去掉等级段
+     *   2026-10-06 五版 : &$ultimateRainbow-模块要求：物质重组模块（等级 5）           ← 🔴 本版：那个 5 是【等级】，
+     *                                                                                  四版把它说成了数量（用户截图）
      * </pre>
      *
      * <h2>🔴 2026-10-01 第三轮（历史留档：当时的最新版，已由下方 2026-10-03 第四轮取代）：
@@ -606,67 +642,111 @@ public class ModuleLevelCondition extends RecipeCondition {
      *      → GuiGraphics.drawString(Font,String,float,…) :40 → Font.m_272078_:(String;…IIZ)I
      *   ⇒ 🔴 m_272078_ = 那一轮新注入点 ⇒ 解析器在这条路上【会被调用】（改前不会）
      * </pre>
-     * <b>回退办法（一行，随时可用）</b>：把本方法体换回上一版的三行
+     * <b>回退办法（历史留档，⚠️ 2026-10-06 起这三行已经过时、别直接抄）</b>：那是 2026-10-01 二版的方法体
      * <pre>
-     *   return Component.literal("§b模块要求：").append(displayNameWithCount())
-     *           .append(Component.literal(" §7（等级 ≥ " + gateText() + "）"));
+     *   return Component.literal("§b模块要求：").append(displayNameWithCount())      // ⛔ 该方法已更名为 displayNameWithLevel
+     *           .append(Component.literal(" §7（等级 ≥ " + gateText() + "）"));       // ⛔ 会把等级印成"数量"那个老形状带回来
      * </pre>
      * ⚠️ <b>2026-10-03 起这条回退办法会同时把等级那一段加回来</b>（用户同日已点单去掉它）
      * ⇒ 若只是因为"彩虹色出问题"要回退，请<b>保留现在这一行正文、只换样式码</b>
      * （把 {@link #REQ_LINE_STYLE} 换成 {@code "§b"} 或 {@code "§6"}），别用上面这三行。
      * <p>🔴 <b>若那次构建的注入没生效</b>，{@code require = 1} 的表现是<b>启动即崩</b>（不是静默露码）——
      * 这正是用户 2026-10-01 拍板要的失败形态（原话：「启动就崩其实是最好修的，要是莫名其妙崩了才难修」）。
-     * <p>🔴 <b>2026-10-03 第四轮（本版）：用户点单【去掉「（等级 ≥ N）」那一段】</b>
+     * <p>🔴 <b>2026-10-03 第四轮：用户点单【去掉「（等级 ≥ N）」那一段】</b>
      * <blockquote>「把后面等级&gt;=多少去了，挡视线了」</blockquote>
-     * ⇒ 那一行现在<b>只画「模块要求：1× 虚像物质模块」</b>，等级数字不再出现在配方页上。
+     * ⇒ 那一行当时<b>只画「模块要求：1× 虚像物质模块」</b>，等级数字不再出现在配方页上。
      * <b>判定一个字都没动</b>（门槛照旧拦，见 {@link #test}）；被去掉的只是"把它写出来"。
      *
      * <pre>
      *   改前（2026-10-01 三版）: &amp;$ultimateRainbow-模块要求：1× 虚像物质模块（等级 ≥ 4）
-     *   改后（2026-10-03 四版）: &amp;$ultimateRainbow-模块要求：1× 虚像物质模块
+     *   四版（2026-10-03）      : &amp;$ultimateRainbow-模块要求：1× 虚像物质模块
      * </pre>
-     * ⚠️ 尾串检查：去的是<b>整段</b>（连同它前面的括号一起），所以改后既没有空括号，
-     *    也没有尾随空格（{@code plainNameWithCount()} 后面直接结束）⇒ 上面"整行无 §"的前提不变。
      * <p>⚠️ 代价（如实记）：{@code plainGateText()} 里那条「未识别的物质模块 id」标记也<b>不再画在这里</b>；
      *    那种配方仍会在加载期打 WARN（见本类 {@code [SHANHAI-MODULE-LEVEL]} 的日志），<b>不是静默失效</b>。
+     *    🔴 2026-10-06：这一条代价现在<b>部分收回</b> —— 不可解时那一行会画 {@code （等级 未知）}
+     *    （不写数字、也不写 id 原文），点名那个 id 仍然只在 WARN 里，见 {@link #levelSuffix()}。
+     *
+     * <h2>🔴🔴 2026-10-06 第五轮（本版）：四版那个「1× 」被用户读成了【数量】</h2>
+     * <b>用户截图逐字</b>：{@code 模块要求: 5× 物质重组模块}
+     * ⇒ 他问"编辑器怎么写出需要 5 个模块"✗ —— 而配方编辑器第三屏自己写的是
+     * 「物质重组模块（等级 5）」✓（编辑器没写错）。真根因与新的三条硬约束见 {@link #levelSuffix()}。
+     * <pre>
+     *   五版（本版）: &amp;$ultimateRainbow-模块要求：物质重组模块（等级 5）
+     *   ⇒ 整行零 {@code §}、零 {@code ×}；数字由 {@link #requiredLevelForGate()} 现查等级表得到。
+     * </pre>
      */
     @Override
     public Component getTooltips() {
         // 甲方案：整行一个 `&$ultimateRainbow-` 正文（不许含 §，否则 parser 判 ours=false 交回原版 ⇒ 露码）。
         // 名字走 plain*（= noAmpEcho 过的串）⇒ 对任意 module_id 入参，正文里都不会混进第二个 `&`。
         // 🔴 2026-10-03：等级那一段（`（等级 ≥ N）`）已按用户点单删除 —— 只改显示，不动判定。
-        return Component.literal(REQ_LINE_STYLE + "模块要求：" + plainNameWithCount());
+        // 🔴🔴 2026-10-06：等级那一段以【不说 ×】的新形状回来了 —— `物质重组模块（等级 5）`；
+        //    整行不变式 = 【零 §】＋【零 ×】（理由见 levelSuffix() 的血账）。
+        return Component.literal(REQ_LINE_STYLE + "模块要求：" + plainNameWithLevel());
     }
 
     public Component getFailTooltip() {
-        return Component.literal("§c✗ 模块不足：").append(displayNameWithCount())
-                .append(Component.literal(" §7（等级 ≥ " + gateText() + "）"));
+        return Component.literal("§c✗ 模块不足：").append(displayNameWithLevel());
     }
 
     public Component getPassTooltip() {
-        return Component.literal("§a✓ 模块满足：").append(displayNameWithCount())
-                .append(Component.literal(" §7（等级 ≥ " + gateText() + "）"));
+        return Component.literal("§a✓ 模块满足：").append(displayNameWithLevel());
     }
 
     /**
-     * 提示行里的「数量 ＋ 名字」那一段：{@code 1× 入门物质模块}。
+     * 提示行里的「名字 ＋ 等级」那一段：{@code 入门物质模块（等级 1）}。
      *
      * <pre>
-     *   改前（2026-09-26 之前）：1x shanhai:introductory_material_module     ← 裸 id，还是配方侧写法
-     *   改后（本轮）            ：1× 入门物质模块                            ← 该物品的【显示名】
+     *   改前（2026-09-26 之前）：1x shanhai:introductory_material_module   ← 裸 id，还是配方侧写法
+     *   2026-09-26 … 2026-10-06 ：1× 入门物质模块                          ← 🔴 「×N」的位子印的是
+     *                                                                      构造器第二个实参，而那个
+     *                                                                      数字说的是【等级】✗
+     *   2026-10-06（本轮）      ：入门物质模块（等级 1）                    ← 数字明说是等级 ✓
      * </pre>
      * <ul>
-     *   <li>数量 = 构造器第二个实参（{@code "1x"} 里那个 1，{@link #requiredLevel}），只用于显示、不参与判定；
-     *       为 0 时整段省略（用 {@code N× } 而不是 {@code Nx }）。</li>
+     *   <li>等级 = {@link #requiredLevelForGate()}（<b>真门槛</b>，由那个物品 id 自己在等级表里的档位决定）
+     *       ⇒ 与配方实际的准入判定<b>同一个源</b>，不可能出现"显示 1、实际要 4"那种记录。</li>
      *   <li>名字 = {@link #displayName()}，即物品的显示名 Component（客户端按 lang 表渲成中文）。</li>
      * </ul>
      */
-    private Component displayNameWithCount() {
-        Component name = displayName();
-        if (requiredLevel <= 0) {
-            return name;
+    private Component displayNameWithLevel() {
+        return displayName().copy().append(Component.literal(levelSuffix()));
+    }
+
+    /**
+     * 等级尾串：{@code （等级 5）}／不可解时 {@code （等级 未知）}。
+     *
+     * <h2>🔴 2026-10-06 血账：这里以前印的是 {@code N× }，而 N 的含义是【等级】</h2>
+     * <b>现象</b>（用户截图，JEI 配方页那一行逐字）：{@code 模块要求: 5× 物质重组模块}
+     * ⇒ 用户读成「配方要 <b>5 个</b>物质重组模块」✗（他为此来问"编辑器怎么写出需要 5 个模块"）。
+     * <p><b>那 5 是什么</b>：{@code shanhai:material_recombination_module} 在
+     * {@code PrimordialModuleMachine.MODULE_LEVELS} 里的档位 = <b>5 级</b>（该表第 5 行），
+     * 而配方编辑器写入侧（{@code ShanhaiRecipeConditions.makeValueCondition}）<b>就是把这个档位写进
+     * {@code level} 字段</b>的（它的 javadoc 逐字：「{@code level} 一并写成<b>该模块自身等级</b>」）
+     * ⇒ 于是 "5" 被印在 {@code N× } 的位子上，而 2026-10-03 用户点单删掉的那一段
+     * 「{@code （等级 ≥ N）}」（原话「把后面等级&gt;=多少去了，挡视线了」）<b>恰好是唯一解释它是等级的文本</b>
+     * ⇒ 删完之后整行就只剩一个孤零零的「5× 」，除了读成数量没有第二种读法 ✗。
+     *
+     * <h2>写法为何是现在这样（三条都是硬约束）</h2>
+     * <ol>
+     *   <li><b>零 {@code ×}</b>：整行不许再出现任何 {@code ×} —— 这样"要 N 个"这种读法<b>在字面上不可能成立</b>
+     *       （比"把 5× 改成 等级 5"更强：连形状都不存在了）。这与用户对编辑器那行的口径一致
+     *       （{@code ShanhaiRecipeConditions} 的 C14 判据就是「行里不许出现 {@code ×}」，理由 = 用户说看不懂）。</li>
+     *   <li><b>零 {@code §}</b>：本串会被拼进 {@link #getTooltips()} 那条
+     *       {@code &$ultimateRainbow-} 正文里，那条不变式见类注释 §7.3（同族血账）。</li>
+     *   <li><b>数字取真门槛</b>（不是 {@link #requiredLevel} 那个字段）：字段在两种写入侧下含义不同
+     *       （编辑器写<b>等级</b>、KJS 老写法 {@code "Nx id"} 写<b>数量</b>），而且 {@code deserialize}
+     *       在 {@code level} 字段缺失时会填 <b>0</b> ⇒ 印字段值会印出「（等级 0）」这种谎话 ✗。
+     *       现查等级表则两者都不会错。</li>
+     * </ol>
+     */
+    private String levelSuffix() {
+        final int lv = requiredLevelForGate();
+        if (lv <= 0 || lv == UNRESOLVABLE_GATE) {
+            // fail-closed 的同一口径：门槛不可解时绝不编一个数字出来（那种配方会另外打 WARN）。
+            return "（等级 未知）";
         }
-        return Component.literal(requiredLevel + "× ").append(name);
+        return "（等级 " + lv + "）";
     }
 
     // ═══════════════════════════════ 「模块要求」那一行的纯文本版本 ═══════════════════════════════
@@ -684,15 +764,23 @@ public class ModuleLevelCondition extends RecipeCondition {
     //  ⚠️ 两条路的物品名解析逻辑逐字相同，只是返回类型不同（String vs Component）——
     //     刻意不互相调用：Component → String 要走 getString()，会把 lang 解析提前到服务端，
     //     而 `§`-free 那一版只在配方页（客户端）用，形状最简单。
-    //  🔴 2026-10-03 第四轮：用户点单去掉「（等级 ≥ N）」⇒ getTooltips() 现在只拼
+    //  🔴 2026-10-03 第四轮：用户点单去掉「（等级 ≥ N）」⇒ getTooltips() 当时只拼
     //      `REQ_LINE_STYLE + "模块要求：" + plainNameWithCount()`
-    //      ⇒ 本小节里 **{@link #plainNameWithCount()} 仍在用；{@link #plainGateText()} 已无调用者**
-    //        （备件，理由见它自己的 javadoc）。
+    //      ⇒ 本小节里 **{@link #plainGateText()} 已无调用者**（备件，理由见它自己的 javadoc）。
+    //  🔴🔴 2026-10-06 第五轮（本轮）：上面那一版把等级数字<b>整个删掉</b>了，而那个位置的 `N× `
+    //      仍印着构造器第二个实参 ⇒ 变成一句没有上下文的「5× 」（用户读成"要 5 个"，见 levelSuffix() 的血账）。
+    //      ⇒ getTooltips() 现在拼 `REQ_LINE_STYLE + "模块要求：" + plainNameWithLevel()`，
+    //        `plainNameWithLevel()` = {@link #plainDisplayName()} ＋ {@link #levelSuffix()}。
 
-    /** {@link #displayNameWithCount()} 的 §-free 版（{@code 1× 入门物质模块}）。<b>在用</b>（{@link #getTooltips()}）。 */
-    private String plainNameWithCount() {
-        final String name = plainDisplayName();
-        return requiredLevel <= 0 ? name : requiredLevel + "× " + name;
+    /**
+     * {@link #displayNameWithLevel()} 的 §-free 版（{@code 入门物质模块（等级 1）}）。<b>在用</b>（{@link #getTooltips()}）。
+     *
+     * <p>🔴 2026-10-06：本方法原名叫 {@code plainNameWithCount()}，拼的是 {@code requiredLevel + "× " + name}
+     * —— 那个 {@code ×} 就是用户截图里「5× 物质重组模块」的来源（见 {@link #levelSuffix()} 的血账）。
+     * 改名是为了不再说谎：它拼的是<b>等级</b>，不是数量。
+     */
+    private String plainNameWithLevel() {
+        return plainDisplayName() + levelSuffix();
     }
 
     /**

@@ -422,8 +422,65 @@ public final class ShanhaiHoloSurroundTuning {
      */
     public static final float FIELD_FOLLOW_TAU_SEC = 0.0f;
 
-    /** 点的仰角范围（HTML {@code (random()-0.5)*0.84} ⇒ ±0.42 弧度）—— 压扁成壳层，别钻到地里。 */
+    /**
+     * 「环带」那一档的仰角<b>总跨度</b>（弧度）= 旧公式 {@code (rnd()-0.5)*0.84} 里的那个 0.84：
+     * ±0.42 rad = ±24.1°，光点全挤在胸腰那一圈。
+     *
+     * <p>🔴 2026-10-07 之后它<b>不再</b>是「点的仰角范围」本身，而是<b>第 16 项「覆盖范围」的第 0 档</b>
+     * （{@code FIELD_COVER_BAND}）的跨度 —— 「仰角铺在哪」改由 {@link #elevLoRad()} /
+     * {@link #elevHiRad()} 现读 {@link #P_FIELD_COVER} 决定，出厂档是<b>整个上半球</b>。
+     * 留着它只为一件事：第 0 档必须与改前【逐档同义】，好当负对照。
+     */
     public static final float FIELD_ELEVATION_SPAN_RAD = 0.84f;
+
+    /** 「覆盖范围」第 0 档 = <b>环带</b>：仰角 −0.42 … +0.42 rad（= 改前那套，留作对照）。 */
+    public static final int FIELD_COVER_BAND = 0;
+    /** 「覆盖范围」第 1 档 = <b>半球</b>（出厂）：仰角 0 … +π/2，地平线一直铺到天顶。 */
+    public static final int FIELD_COVER_DOME = 1;
+    /** 「覆盖范围」第 2 档 = <b>全球</b>：仰角 −π/2 … +π/2。 */
+    public static final int FIELD_COVER_GLOBE = 2;
+    /** 「覆盖范围」的上限档号（= {@link #PARAM_MAX} 里第 16 项用的那个数，不另拍）。 */
+    public static final int FIELD_COVER_MAX = FIELD_COVER_GLOBE;
+
+    /**
+     * 半圈 = π/2（弧度）。
+     * <p>参照页 {@code 山海HTML/18-全息环绕-穹顶版.html:777} 的 {@code HALF_PI}，
+     * 那一页里「半球档上界 = 天顶」就是用它写的。
+     */
+    public static final float HALF_PI_RAD = (float) (Math.PI / 2.0);
+
+    /**
+     * 🔴 <b>点场仰角的<b>下界</b>（弧度）</b>—— 0 = 地平线，+π/2 = 天顶，−π/2 = 正下方。
+     *
+     * <p>它是「腰际一圈 → 头顶半球」这件事在<b>生产路径</b>上的唯一开关：
+     * {@code ShanhaiHoloSurround#fieldReset} 里 {@code FE[i] = elevLoRad() + rnd()*(elevHiRad()-elevLoRad())}。
+     *
+     * <p>三档（与参照页的 {@code TUNE.cover} 逐档同义）：
+     * <pre>
+     *   0 环带  −0.42 rad   ← 与改前逐档同义（旧公式的区间）
+     *   1 半球   0.00 rad   ← 出厂：地平线 → 天顶，整个上半球扣住玩家
+     *   2 全球  −π/2  rad
+     * </pre>
+     * 档号取 {@code Math.round(param(...))}（小数一律四舍五入到最近一档，手改 toml 写 1.5 也不会崩）。
+     */
+    public static float elevLoRad() {
+        return switch (Math.round(param(P_FIELD_COVER))) {
+            case FIELD_COVER_BAND -> -FIELD_ELEVATION_SPAN_RAD * 0.5f;
+            case FIELD_COVER_GLOBE -> -HALF_PI_RAD;
+            default -> 0.0f;                        // 半球（含一切越界值兜底）
+        };
+    }
+
+    /**
+     * 点场仰角的<b>上界</b>（弧度）—— 半球/全球两档都是<b>天顶</b>（{@code +π/2}）。
+     * <p>环带档 = {@code +0.42}（{@link #FIELD_ELEVATION_SPAN_RAD} 的一半），与改前逐档同义。
+     * @see #elevLoRad()
+     */
+    public static float elevHiRad() {
+        return Math.round(param(P_FIELD_COVER)) == FIELD_COVER_BAND
+                ? FIELD_ELEVATION_SPAN_RAD * 0.5f
+                : HALF_PI_RAD;
+    }
 
     /** 点的半径抖动幅度下限（格，HTML {@code 0.05 + random()*0.14}）。 */
     public static final float FIELD_WOBBLE_MIN_BLOCKS = 0.05f;
@@ -595,13 +652,34 @@ public final class ShanhaiHoloSurroundTuning {
      */
     public static final int P_FIELD_FOLLOW_TAU = 14;
 
-    /** 一共几项（14 + 1 = 15）。 */
-    public static final int PARAM_COUNT = 15;
+    /**
+     * 🆕 2026-10-07：<b>第 16 项 = 点场（星尘）的「覆盖范围」</b>—— 星尘铺在哪一段仰角上。
+     *
+     * <p>加它的理由（用户原话：「像个半球一样<b>天空也要</b>的怎么没有」）：
+     * 旧公式 {@code FE[i] = (rnd() - 0.5) * FIELD_ELEVATION_SPAN_RAD} 把仰角钉死在
+     * <b>±0.42 rad = ±24.1°</b>上 ⇒ 光点全挤在胸腰那一圈，<b>头顶 24° 以上是空的</b>。
+     * 本轮把「仰角上下界」本身变成一项可调值，出厂 = <b>整个上半球（地平线 → 天顶）</b>。
+     *
+     * <p>三档的取值（与参照页 {@code 山海HTML/18-全息环绕-穹顶版.html} 的 {@code TUNE.cover} 逐档同义）：
+     * <pre>
+     *   0 = 环带  仰角 = −0.42 … +0.42 rad   ← 与改前【同一个区间】（旧观感，留作对照）
+     *   1 = 半球  仰角 =  0.00 … +π/2  rad   ← 出厂默认：地平线一直铺到天顶
+     *   2 = 全球  仰角 = −π/2  … +π/2  rad   （下半球那半会被 {@code FIELD_MIN_Y_ABOVE_FEET} 抬到脚面）
+     * </pre>
+     *
+     * <p>版面：照第 15 项那次的同一条口径 —— <b>追加在最后</b>（不动任何一项的下标）。
+     * {@code 16 = 4×4} ⇒ 高级页仍是 <b>4 页（4/4/4/4）</b>，第 4 页由 3 项变 4 项、不再有空行，
+     * 5 行网格一个数都没动。
+     */
+    public static final int P_FIELD_COVER = 15;
+
+    /** 一共几项（14 + 1 + 1 = 16）。 */
+    public static final int PARAM_COUNT = 16;
 
     /** 高级页每页放几项 = 面板行数 − 1（第 5 行是导航）。 */
     public static final int PARAMS_PER_PAGE = 4;
 
-    /** 高级页一共几页 = ceil(15/4) = 4（4/4/4/3）。 */
+    /** 高级页一共几页 = ceil(16/4) = 4（4/4/4/4）。 */
     public static final int PAGE_COUNT = (PARAM_COUNT + PARAMS_PER_PAGE - 1) / PARAMS_PER_PAGE;
 
     /** 第 idx 项在第几页（0 基）。 */
@@ -623,7 +701,7 @@ public final class ShanhaiHoloSurroundTuning {
         return idx < PARAM_COUNT ? idx : -1;
     }
 
-    /** 某一页真的有几项（最后一页可能不满：15 = 4+4+4+3）。 */
+    /** 某一页真的有几项（16 = 4+4+4+4 ⇒ 现在页页都是满的）。 */
     public static int paramCountOnPage(int page) {
         if (page < 0 || page >= PAGE_COUNT) {
             return 0;
@@ -632,25 +710,28 @@ public final class ShanhaiHoloSurroundTuning {
         return Math.min(PARAMS_PER_PAGE, Math.max(0, left));
     }
 
-    /** 15 项的中文名（面板上的格子 0 与报表第一列都用它）。 */
+    /** 16 项的中文名（面板上的格子 0 与报表第一列都用它）。 */
     public static final String[] PARAM_NAME = {
             "环数", "环半径倍率", "环亮度", "刻度密度", "流动光点", "进动速度",
             "光点数", "壳层内半径", "壳层外半径", "连线阈值", "每点接线数", "呼吸周期",
-            "点场亮度", "整体亮度", "跟随延迟"
+            "点场亮度", "整体亮度", "跟随延迟", "覆盖范围"
     };
 
-    /** 15 项的单位（不带空格的写法，面板上拼成 {@code "2.55 格"}）。 */
+    /** 16 项的单位（不带空格的写法，面板上拼成 {@code "2.55 格"}）。 */
     public static final String[] PARAM_UNIT = {
             "条", "倍", "", "", "", "",
             "个", "格", "格", "格", "条", "秒",
-            "", "", "秒"
+            "", "", "秒",
+            // 第 16 项「覆盖范围」的单位留空：它的三档是【名字】不是数（见 #coverText）
+            ""
     };
 
-    /** 15 项显示几位小数。 */
+    /** 16 项显示几位小数。 */
     public static final int[] PARAM_DECIMALS = {
             0, 2, 2, 2, 2, 2,
             0, 2, 2, 2, 0, 1,
-            2, 2, 2
+            2, 2, 2,
+            0
     };
 
     /**
@@ -661,7 +742,9 @@ public final class ShanhaiHoloSurroundTuning {
     public static final float[] PARAM_STEP = {
             1.0f, 0.05f, 0.05f, 0.05f, 0.10f, 0.05f,
             10.0f, 0.05f, 0.05f, 0.05f, 1.0f, 1.0f,
-            0.05f, 0.05f, 0.05f
+            0.05f, 0.05f, 0.05f,
+            // 第 16 项「覆盖范围」：± 一次跨一整档
+            1.0f
     };
 
     /**
@@ -673,7 +756,9 @@ public final class ShanhaiHoloSurroundTuning {
     public static final float[] PARAM_MIN = {
             0.0f, 0.60f, 0.0f, 0.0f, 0.0f, 0.0f,
             0.0f, 1.20f, 2.00f, 0.50f, 1.0f, 3.0f,
-            0.0f, 0.0f, 0.00f
+            0.0f, 0.0f, 0.00f,
+            // 第 16 项「覆盖范围」：0 = 环带（下限；那一档与改前逐档同义）
+            0.0f
     };
 
     /**
@@ -691,7 +776,9 @@ public final class ShanhaiHoloSurroundTuning {
     public static final float[] PARAM_MAX = {
             RING_TABLE.length, 1.40f, 2.0f, 1.60f, 2.0f, 2.50f,
             ShanhaiHoloSurround.FIELD_CAPACITY, 4.00f, 5.00f, 1.80f, 5.0f, 30.0f,
-            2.0f, 2.0f, 2.00f
+            2.0f, 2.0f, 2.00f,
+            // 第 16 项「覆盖范围」：2 = 全球（上限 = FIELD_COVER_MAX，不是一个新拍的数）
+            FIELD_COVER_MAX
     };
 
     // ---- 四档 ----
@@ -737,11 +824,11 @@ public final class ShanhaiHoloSurroundTuning {
      * </pre>
      */
     public static final float[][] PRESET_VALUES = {
-            // 环数  倍率   环亮   刻度   流动   进动 | 光点  内径   外径   阈值   接线  周期 | 点亮   全局   跟随
-            {2, 1.40f, 1.00f, 1.60f, 1.00f, 1.00f, 200, 2.55f, 3.30f, 1.44f, 3, 15.0f, 1.50f, 1.00f, 0.00f},
-            {1, 1.00f, 0.55f, 0.80f, 0.50f, 0.50f, 110, 2.20f, 3.00f, 1.10f, 2, 20.0f, 0.90f, 0.80f, 0.00f},
-            {2, 1.40f, 1.00f, 1.60f, 1.00f, 1.00f, 200, 2.55f, 3.30f, 1.44f, 3, 15.0f, 1.50f, 1.00f, 0.00f},
-            {3, 1.40f, 1.60f, 1.60f, 2.00f, 1.80f, 200, 2.80f, 3.90f, 1.75f, 4, 10.0f, 2.00f, 1.30f, 0.00f}
+            // 环数  倍率   环亮   刻度   流动   进动 | 光点  内径   外径   阈值   接线  周期 | 点亮   全局   跟随 | 覆盖
+            {2, 1.40f, 1.00f, 1.60f, 1.00f, 1.00f, 200, 2.55f, 3.30f, 1.44f, 3, 15.0f, 1.50f, 1.00f, 0.00f, 1},
+            {1, 1.00f, 0.55f, 0.80f, 0.50f, 0.50f, 110, 2.20f, 3.00f, 1.10f, 2, 20.0f, 0.90f, 0.80f, 0.00f, 1},
+            {2, 1.40f, 1.00f, 1.60f, 1.00f, 1.00f, 200, 2.55f, 3.30f, 1.44f, 3, 15.0f, 1.50f, 1.00f, 0.00f, 1},
+            {3, 1.40f, 1.60f, 1.60f, 2.00f, 1.80f, 200, 2.80f, 3.90f, 1.75f, 4, 10.0f, 2.00f, 1.30f, 0.00f, 1}
     };
 
     // ---- 运行期状态（唯一一份存值处；只存内存，不落盘）----
@@ -776,19 +863,43 @@ public final class ShanhaiHoloSurroundTuning {
         return Math.round(param(idx));
     }
 
-    /** 第 idx 项的显示文字（{@code "2.55 格"} / {@code "200 个"} / {@code "1.00"}）。 */
+    /**
+     * 第 idx 项的显示文字（{@code "2.55 格"} / {@code "200 个"} / {@code "1.00"}）。
+     * <p>🔴 第 16 项「覆盖范围」是<b>唯一</b>一个值本身没有意义的项（0/1/2 只是档号）
+     * ⇒ 它走 {@link #coverText(int)} 印<b>名字</b>（环带 / 半球 / 全球）。
+     * 面板自检断言 {@code cellText(...) == paramText(idx)}，读的是同一个函数 ⇒ 不会分叉。
+     */
     public static String paramText(int idx) {
         if (idx < 0 || idx >= PARAM_COUNT) {
             return "";
         }
+        if (idx == P_FIELD_COVER) {
+            return coverText(Math.round(LIVE[idx]));
+        }
         final String u = PARAM_UNIT[idx];
         return fmt(LIVE[idx], PARAM_DECIMALS[idx]) + (u.isEmpty() ? "" : " " + u);
+    }
+
+    /**
+     * 「覆盖范围」三档的中文名（面板的值格与 {@code ±} 按钮都用它）。
+     * <p>为什么不让它显示裸数字 0/1/2：用户在面板上看到「覆盖范围 1」是读不出意思的，
+     * 而这一格只有 140 bu，名字必须短 —— 所以用「环带 / 半球 / 全球」三个两字词。
+     */
+    public static String coverText(int cover) {
+        return switch (cover) {
+            case FIELD_COVER_BAND -> "环带";
+            case FIELD_COVER_GLOBE -> "全球";
+            default -> "半球";
+        };
     }
 
     /** 第 idx 项"± 一步"的文字（面板上那颗 ± 按钮写的就是它）。 */
     public static String paramStepText(int idx) {
         if (idx < 0 || idx >= PARAM_COUNT) {
             return "";
+        }
+        if (idx == P_FIELD_COVER) {
+            return "1 档";                 // 这一项 ± 一次正好跨一整档（环带↔半球↔全球）
         }
         final String u = PARAM_UNIT[idx];
         return fmt(PARAM_STEP[idx], PARAM_DECIMALS[idx]) + (u.isEmpty() ? "" : " " + u);
@@ -838,6 +949,28 @@ public final class ShanhaiHoloSurroundTuning {
     public static void resetTuning() {
         preset = PRESET_DEFAULT;
         System.arraycopy(PRESET_VALUES[PRESET_DEFAULT], 0, LIVE, 0, PARAM_COUNT);
+        settleShell();
+    }
+
+    /**
+     * 🆕 2026-10-07：<b>配置 ⇒ 运行副本</b>的写入口（只给 {@link ShanhaiHoloPersist#loadOnce} 用）。
+     *
+     * <p>与 {@link #setPreset(int)} 的区别是刻意的，两条都要：
+     * <ul>
+     *   <li>{@code setPreset} = <b>用户切档</b>：档位与 15 项<b>整组替换</b>（那一档的预设值）。</li>
+     *   <li>本方法 = <b>读盘还原</b>：档位号与 15 项各自来自配置文件，<b>不许用预设表覆盖</b>
+     *       —— 否则用户在高级页手拨过的数会被"那一档的预设值"抹掉。</li>
+     * </ul>
+     * 「关」档照旧只表示"不画"，不影响这 15 个值（与 {@link #setPreset} 同一条口径）。
+     * <p>单项仍然过 {@link #clampParam}（读盘那侧已经判过一遍越界，这里是第二道）。
+     */
+    static void applyPersisted(int presetValue, float[] values) {
+        preset = presetValue < 0 || presetValue >= PRESET_COUNT ? PRESET_DEFAULT : presetValue;
+        if (values != null) {
+            for (int i = 0; i < PARAM_COUNT && i < values.length; i++) {
+                LIVE[i] = clampParam(i, values[i]);
+            }
+        }
         settleShell();
     }
 
@@ -897,6 +1030,7 @@ public final class ShanhaiHoloSurroundTuning {
             case P_FIELD_BRIGHT -> FIELD_BRIGHT;
             case P_GLOBAL_BRIGHT -> GLOBAL_BRIGHT;
             case P_FIELD_FOLLOW_TAU -> FIELD_FOLLOW_TAU_SEC;
+            case P_FIELD_COVER -> FIELD_COVER_DOME;
             default -> Float.NaN;
         };
     }

@@ -143,14 +143,25 @@ public final class ShanhaiHoloSurround {
         return ShanhaiHoloSurroundTuning.preset();
     }
 
-    /** 切档（整组替换；「关」只置档、不动 14 项取值）。 */
+    /**
+     * 切档（整组替换；「关」只置档、不动 15 项取值）。
+     *
+     * <p>🆕 2026-10-07：<b>本方法是环绕侧唯一的落盘点</b> —— 面板那四格（关/弱/中/强）
+     * 走的都是它，改完值立刻写回 {@code config/shanhai-client.toml} 的 {@code [holo_menu.surround]}。
+     * ⚠️ {@link ShanhaiHoloSurroundTuning#setPreset} 是"纯运行副本"那一层（离线自检直接调它，
+     * 不该写用户的配置）⇒ 落盘挂在<b>本类</b>（面板 / 输入层的统一入口），不挂它。
+     */
     public static int setPreset(int next) {
-        return ShanhaiHoloSurroundTuning.setPreset(next);
+        final int now = ShanhaiHoloSurroundTuning.setPreset(next);
+        ShanhaiHoloPersist.saveSurround();
+        return now;
     }
 
-    /** 高级页那一颗 ± ：{@code dir = +1 / −1}；返回值已经钳在安全区间内。 */
+    /** 高级页那一颗 ± ：{@code dir = +1 / −1}；返回值已经钳在安全区间内。改完值立刻落盘（见 {@link #setPreset}）。 */
     public static float nudgeParam(int idx, int dir) {
-        return ShanhaiHoloSurroundTuning.nudge(idx, dir);
+        final float now = ShanhaiHoloSurroundTuning.nudge(idx, dir);
+        ShanhaiHoloPersist.saveSurround();
+        return now;
     }
 
     /** 第 idx 项当前生效值（面板显示与日志读它）。 */
@@ -874,9 +885,17 @@ public final class ShanhaiHoloSurround {
         fieldCX = f.playerX;
         fieldCY = f.playerY + ShanhaiHoloSurroundTuning.FIELD_CENTER_Y_BLOCKS;
         fieldCZ = f.playerZ;
+        /* 🔴 2026-10-07（用户：「像个半球一样天空也要的怎么没有」）：
+           仰角不再是写死的 ±0.42 rad，而是现读第 16 项「覆盖范围」的上下界。
+           出厂档 = 半球 ⇒ [0, +π/2]：地平线一直铺到天顶，整个上半球扣住玩家
+           （改前是 [−0.42, +0.42] ⇒ 头顶 24° 以上一个点都没有）。
+           ⚠️ 这里【仍然只消耗一个 rnd()】（区间写成 lo + u*span，旧式是 (u−0.5)*0.84）
+           ⇒ 后面 FT/FPH/FW/... 那一串随机量的消耗顺序一个都不动。 */
+        final float elevLo = ShanhaiHoloSurroundTuning.elevLoRad();
+        final float elevSpan = ShanhaiHoloSurroundTuning.elevHiRad() - elevLo;
         for (int i = 0; i < FIELD_CAPACITY; i++) {
             FA[i] = rnd() * Math.PI * 2.0;
-            FE[i] = (rnd() - 0.5) * ShanhaiHoloSurroundTuning.FIELD_ELEVATION_SPAN_RAD;
+            FE[i] = elevLo + rnd() * elevSpan;
             FT[i] = rnd();
             FPH[i] = rnd() * 6.283;
             FW[i] = ShanhaiHoloSurroundTuning.FIELD_WOBBLE_W_MIN
@@ -1462,8 +1481,10 @@ public final class ShanhaiHoloSurround {
         final StringBuilder sb = new StringBuilder(4096);
         final int savedPreset = ShanhaiHoloSurroundTuning.preset();
         try {
-            sb.append("--- J. 四档预设（关 / 弱 / 中 / 强）+ 14 项运行期取值 ---\n");
-            sb.append("  ① 「中」档 == 14 个出厂默认值（逐项机器比对，不靠人看）：\n");
+            sb.append("--- J. 四档预设（关 / 弱 / 中 / 强）+ ")
+                    .append(ShanhaiHoloSurroundTuning.PARAM_COUNT).append(" 项运行期取值 ---\n");
+            sb.append("  ① 「中」档 == ").append(ShanhaiHoloSurroundTuning.PARAM_COUNT)
+                    .append(" 个出厂默认值（逐项机器比对，不靠人看）：\n");
             int same = 0;
             for (int i = 0; i < ShanhaiHoloSurroundTuning.PARAM_COUNT; i++) {
                 final float def = ShanhaiHoloSurroundTuning.defaultOf(i);

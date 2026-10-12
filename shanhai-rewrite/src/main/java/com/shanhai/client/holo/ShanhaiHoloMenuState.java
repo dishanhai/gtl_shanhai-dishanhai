@@ -4,6 +4,7 @@ import com.shanhai.ShanhaiMod;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
@@ -46,6 +47,17 @@ import net.minecraftforge.api.distmarker.OnlyIn;
  * 20 Hz 推进 ⇒ 两次 tick 之间目标不变 ⇒ 全息会以 20 Hz 一跳一跳地动（肉眼可见）。
  * 渲染帧推进 + 用 {@code System.nanoTime()} 自己算 Δt ⇒ 每帧都连续。
  * 代价是引入了"上一帧时刻"这一个可变字段，因此本类的方法<b>只在渲染线程调用</b>（单线程，无并发）。
+ *
+ * <h2>6. 🆕 2026-10-07 持久化：本类选的是【load-once + 改值即落盘】（write-through）</h2>
+ * <pre>
+ *   唯一持久副本 = config/shanhai-client.toml 的 [holo_menu]（{@code ShanhaiClientConfig}）。
+ *   本类的 4 个字段（enabled / facing / layout / distance）= <b>运行副本</b>，不是第二份持久副本：
+ *     · 进世界那一刻 {@link ShanhaiHoloPersist#ensureLoaded()} 从配置读一次（load-once）
+ *     · 之后<b>每一个 setter 改完值立刻写回配置并 save()</b>（见下面 4 个 setter 里的 saveMenu 调用）
+ *   ⇒ 两边任何时刻都相等；{@link ShanhaiHoloPersist#auditLine()} 就是这条的机器判据。
+ * </pre>
+ * ⚠️ 唯一的例外是 {@link #setEnabledTransient(boolean)}（模块被拿走时的自动关，瞬时条件不写盘），
+ * 理由写在它自己的注释里。
  */
 @OnlyIn(Dist.CLIENT)
 public final class ShanhaiHoloMenuState {
@@ -98,10 +110,21 @@ public final class ShanhaiHoloMenuState {
         ROW
     }
 
-    private static boolean enabled;
+    // ---- 🆕 2026-10-07：这 4 个字段的【初值】改从 ShanhaiHoloPersist 的默认值常量取 ----
+    //
+    //   🔴 为什么不在这里再写一遍字面量：加了持久化之后，"默认值"要同时出现在三个地方
+    //      ① 本类的字段初值（配置没加载时的兜底）② toml 里那一项的 defineInRange 默认值
+    //      ③ 配置越界/读失败时的回退值。三处写同一个字面量 ⇒ 迟早漂。
+    //      ⇒ 唯一一份 = ShanhaiHoloPersist.DEFAULT_*，三个地方都引用它。
+    //   ⚠️ 循环初始化安全：DEFAULT_FACING 取的是【嵌套枚举】Facing 的常量，
+    //      而枚举是独立的类（自己的 <clinit>）⇒ 不构成两个类的静态初始化互等。
+    //   ⚠️ 取值一字未改：enabled=false / facing=FIXED / layout=RING（见类注释与 Facing 的实测依据）。
+
+    /** 🔴 唯一持久副本 = 配置；本字段是运行副本，初值 = {@link ShanhaiHoloPersist#DEFAULT_ENABLED}。 */
+    private static boolean enabled = ShanhaiHoloPersist.DEFAULT_ENABLED;
     /** 🔴 默认 {@link Facing#FIXED}（理由与实测读数见 {@link Facing} 的类注释）。 */
-    private static Facing facing = Facing.FIXED;
-    private static Layout layout = Layout.RING;
+    private static Facing facing = ShanhaiHoloPersist.DEFAULT_FACING;
+    private static Layout layout = ShanhaiHoloPersist.DEFAULT_LAYOUT;
 
     // ---- 🆕 2026-10-06：二级面板（设置 / 命令）----
     //
@@ -116,8 +139,8 @@ public final class ShanhaiHoloMenuState {
     private static int panelHoverRow = -1;
     private static int panelHoverCell = -1;
 
-    /** 运行期可调的距离（格）；初值 = {@link ShanhaiHoloMenuTuning#DISTANCE_BLOCKS}。 */
-    private static float distance = ShanhaiHoloMenuTuning.DISTANCE_BLOCKS;
+    /** 运行期可调的距离（格）；初值 = {@link ShanhaiHoloPersist#DEFAULT_DISTANCE}（= {@link ShanhaiHoloMenuTuning#DISTANCE_BLOCKS}）。 */
+    private static float distance = ShanhaiHoloPersist.DEFAULT_DISTANCE;
 
     // ---- 🆕 2026-10-06（用户实测第 ③ 条）：面板（设置 / 命令）的框偏航 ----
     //
@@ -174,7 +197,70 @@ public final class ShanhaiHoloMenuState {
             //    这一条同时兜住"模块被拿走自动关"与"/shanhai menu off"两条路。
             closePanel();
         }
+        // 🆕 2026-10-07：改了值就落盘（这一行是"用户意图"的落盘点）。
+        final boolean changed = enabled != value;
         enabled = value;
+        if (changed) {
+            ShanhaiHoloPersist.saveMenu();
+        }
+    }
+
+    /**
+     * 🆕 2026-10-07：<b>不落盘</b>的关投影 —— 只给"模块从玩家身上消失 ⇒ 自动关"这一条瞬时条件用。
+     *
+     * <p>为什么必须分开：那条自动关说的是"你现在手上有模块吗"，不是"你想不想开"。
+     * 若它写盘，用户"我开着"的偏好会在下次进世界（没拿模块）时被悄悄抹掉 —— 那不是持久化，是丢配置。
+     * <p>⚠️ 全工程<b>只有一处</b>调它：{@code ShanhaiHoloMenuInput#onClientTick} 的
+     * {@code module_gone_from_player} 分支（grep {@code setEnabledTransient} 可核）。
+     */
+    public static void setEnabledTransient(boolean value) {
+        if (value && !enabled) {
+            primed = false;
+            lastNanos = 0L;
+        }
+        if (!value) {
+            closePanel();
+        }
+        enabled = value;
+    }
+
+    // ------------------------------------------------------------------ 🆕 运行副本的"裸读"出口（给落盘层用）
+    //
+    //   与上面那批访问器的区别：这一批【不做任何门控】，读到的就是字段本身。
+    //   落盘层要的是"字段现在等于几"，不是"面板现在显示什么"。
+
+    /** 见上面那段说明。 */
+    public static boolean enabledRaw() {
+        return enabled;
+    }
+
+    /** 见上面那段说明。 */
+    public static Facing facingRaw() {
+        return facing;
+    }
+
+    /** 见上面那段说明。 */
+    public static Layout layoutRaw() {
+        return layout;
+    }
+
+    /** 见上面那段说明。 */
+    public static float distanceRaw() {
+        return distance;
+    }
+
+    /**
+     * 🆕 2026-10-07：<b>配置 ⇒ 运行副本</b>的写入口（只给 {@link ShanhaiHoloPersist#loadOnce} 用）。
+     *
+     * <p>它<b>不落盘</b>（避免"读配置"反过来又写一次配置），也<b>不关面板</b>
+     * （只在进世界那一刻调用，那时面板必是关的；而且 {@link #panelMode()} 对
+     * {@code enabled=false} 本来就返回 {@link ShanhaiHoloMenuPanel#MODE_NONE}）。
+     */
+    static void applyPersisted(boolean enabledValue, Facing facingValue, Layout layoutValue, float distanceValue) {
+        enabled = enabledValue;
+        facing = facingValue == null ? ShanhaiHoloPersist.DEFAULT_FACING : facingValue;
+        layout = layoutValue == null ? ShanhaiHoloPersist.DEFAULT_LAYOUT : layoutValue;
+        distance = Mth.clamp(distanceValue, ShanhaiHoloPersist.DISTANCE_MIN, ShanhaiHoloPersist.DISTANCE_MAX);
     }
 
     // ------------------------------------------------------------------ 🆕 面板
@@ -255,7 +341,12 @@ public final class ShanhaiHoloMenuState {
      * <p>对菜单的旧两档（竖列 / 横排）照旧是"从此不再更新"，对环绕档则完全无效（框偏航恒 0）。
      */
     public static void setFacing(Facing next) {
-        facing = next == null ? Facing.FOLLOW : next;
+        final Facing v = next == null ? Facing.FOLLOW : next;
+        final boolean changed = facing != v;
+        facing = v;
+        if (changed) {
+            ShanhaiHoloPersist.saveMenu();
+        }
     }
 
     public static Layout layout() {
@@ -263,7 +354,12 @@ public final class ShanhaiHoloMenuState {
     }
 
     public static void setLayout(Layout next) {
-        layout = next == null ? Layout.RING : next;
+        final Layout v = next == null ? Layout.RING : next;
+        final boolean changed = layout != v;
+        layout = v;
+        if (changed) {
+            ShanhaiHoloPersist.saveMenu();
+        }
     }
 
     public static void setLayoutRow(boolean row) {
@@ -297,9 +393,14 @@ public final class ShanhaiHoloMenuState {
         return distance;
     }
 
-    /** 夹到 [0.8, 8.0] 格：太近会糊脸、太远看不清字。 */
+    /** 夹到 [{@link ShanhaiHoloPersist#DISTANCE_MIN}, {@link ShanhaiHoloPersist#DISTANCE_MAX}] 格：太近会糊脸、太远看不清字。 */
     public static float setDistance(float next) {
-        distance = Mth.clamp(next, 0.8f, 8.0f);
+        final float v = Mth.clamp(next, ShanhaiHoloPersist.DISTANCE_MIN, ShanhaiHoloPersist.DISTANCE_MAX);
+        final boolean changed = distance != v;
+        distance = v;
+        if (changed) {
+            ShanhaiHoloPersist.saveMenu();
+        }
         return distance;
     }
 
@@ -374,11 +475,26 @@ public final class ShanhaiHoloMenuState {
      *
      * <p>调用方 = {@link ShanhaiHoloMenuRenderer}（渲染线程，每帧一次）。
      *
-     * @param player    本地玩家；{@code null} 时直接返回（不改任何状态）
+     * <p>🔴 <b>2026-10-07（联机 P1）：签名从 {@code LocalPlayer} 放宽到 {@link Entity}。</b>
+     * 只有一个理由：让"<b>算位姿</b>"这件事不再绑死在"本地玩家"这个类型上（联机要让别人也能被算）。
+     * 方法体<b>一个字节都没改</b> —— 它只用到 {@code yRotO}（{@code Entity} 的 public 字段）、
+     * {@code getYRot()}、{@code getEyePosition(float)}，三者都在 {@code Entity} 上
+     * （{@code javap} 核实：{@code Entity.yRotO: public float}、
+     * {@code getYRot()F}、{@code getEyePosition(F)Lnet/minecraft/world/phys/Vec3;}）。
+     * {@code LocalPlayer extends AbstractClientPlayer extends Player extends … Entity}
+     * ⇒ 本地那条路径<b>行为逐位不变</b>（同一个对象、同一个函数体）。
+     *
+     * <p>⚠️ {@link #advance} 这个旧名字<b>保留成转调</b>：别的调用点零改动。
+     *
+     * <p>🔴 <b>远程玩家绝不许调本方法</b>：它会写掉<b>本地</b>的 {@code px/py/pz/yawDeg/panelYawDeg}
+     * （本方法下半段），把本地菜单拽到别人身上。远程只走只读的
+     * {@link ShanhaiHoloPose#landingForRemote}。
+     *
+     * @param player    要算谁（本地玩家走渲染器那条路；类型放宽只为"位姿链不再写死本地"）
      * @param partialTick 当前帧的插值系数（来自 {@code RenderLevelStageEvent#getPartialTick}），
      *                    用它拿"帧级连续"的眼睛位置与视线偏航 —— 否则目标量本身会以 20 Hz 台阶跳
      */
-    public static void advance(LocalPlayer player, float partialTick) {
+    public static void advanceHolo(Entity player, float partialTick) {
         if (player == null) {
             return;
         }
@@ -459,6 +575,18 @@ public final class ShanhaiHoloMenuState {
                 // 刻意什么都不做：朝向冻结在切换那一刻（或打开那一刻）的方向。
             }
         }
+    }
+
+    /**
+     * 🆕 2026-10-07（联机 P1）<b>旧名字的兼容转调</b>。
+     *
+     * <p>签名从 {@code LocalPlayer} 放宽到 {@link Entity} 之后，所有既有调用点本来就会自动
+     * 落到 {@link #advanceHolo} 上；这一条留着是为了<b>语义仍清楚</b>：
+     * 传 {@code LocalPlayer} 进来的人，本意一定是"推进本地那一份"。
+     * 两行转调，<b>行为与放宽之前逐位相同</b>。
+     */
+    public static void advance(LocalPlayer player, float partialTick) {
+        advanceHolo(player, partialTick);
     }
 
     // ------------------------------------------------------------------ 纯算术核

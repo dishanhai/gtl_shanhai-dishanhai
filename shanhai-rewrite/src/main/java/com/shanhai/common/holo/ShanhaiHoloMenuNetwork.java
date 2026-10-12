@@ -56,10 +56,89 @@ public final class ShanhaiHoloMenuNetwork {
 
     /** 消息 id（两侧必须一致，顺序也必须一致）。 */
     public static final int ID_C2S_OPEN_EDITOR = 0;
-
     /** 🆕 消息 id：客户端把"要执行的命令"整条发过来（服务端以管理员权限跑）。 */
     public static final int ID_C2S_RUN_COMMAND = 1;
 
+    // ---- 🆕 2026-10-07（联机 P2）：三条新消息 ------------------------------------
+    //
+    //   为什么是三条、而不是"全塞一包"（理由与设计 §3.1 一致，都能独立判）：
+    //     · DEF    很少变（只在进服/换维度/改了高级调参时发）⇒ 一人一次 61 字节载荷
+    //     · STATE  一变就发（开关/排布/距离/朝向/环绕档）⇒ 9 字节载荷
+    //   分开的收益：拨一下档位只花 25 字节，而不是把 61 字节的参数再发一遍。
+    //
+    //   🔴 收方是谁：**同服所有持模块者**（用户拍板③），由服务端算（不信客户端）；
+    //      "按距离裁剪"发生在**渲染端**（只画 64 格以内的人），不在发包端。
+
+    /** 🆕 S2C：那个人的环绕调参（15 项 + 档位），很少变。载荷 {@code ShanhaiHoloRemoteCodec#DEF_BYTES} 字节。 */
+    public static final int ID_S2C_HOLO_DEF = 2;
+
+    /** 🆕 S2C：那个人的开关/排布/距离/朝向/环绕档，一变就发。载荷 {@code STATE_BYTES} 字节。 */
+    public static final int ID_S2C_HOLO_STATE = 3;
+
+    /** 🆕 C2S：客户端把自己的设置报上来（PUBLISH = DEF + STATE，服务端只当"数据"、不当"权限"）。 */
+    public static final int ID_C2S_HOLO_PUBLISH = 4;
+
+    /**
+     * 🆕 S2C：服务端请某个客户端<b>再报一次</b>（载荷 16 字节，只有"请谁报"）。
+     *
+     * <p>为什么要它：用户拍板②定的是"15 项<b>一人一次</b>"⇒ 不能让客户端定期重发。
+     * 但"我进来的时候别人已经站在这儿了"这个场景必须有人补一刀，而<b>服务端手上没有别人的样子时
+     * 不能编</b>（编了就是"用我的参数画他的星空"）。⇒ 让服务端<b>点名</b>请他自己报一次。
+     * 稳态下这条消息一个字节都不发（见 {@code ShanhaiHoloRemoteSync} 的巡检）。
+     */
+    public static final int ID_S2C_HOLO_ASK = 5;
+
+    /**
+     * 🆕 <b>渲染端</b>只画这个距离以内的其他玩家（用户拍板③："渲染按距离裁剪，只画 64 格以内的玩家"）。
+     *
+     * <p>⚠️ 它与"发给谁"是<b>两件事</b>：发包给同服所有持模块者（不看距离），
+     * 画的时候才按距离剔。这一条把"服务器人多时全画"那种卡顿挡在外面。
+     */
+    public static final double RENDER_DISTANCE_BLOCKS = 64.0;
+
+    /** 上面那个数的平方（避免每帧开方）。 */
+    public static final double RENDER_DISTANCE_SQR = RENDER_DISTANCE_BLOCKS * RENDER_DISTANCE_BLOCKS;
+
+    private static SimpleChannel channel;
+    private static boolean registered;
+
+    /**
+     * 🆕 2026-10-07（联机 P2）<b>客户端侧的落点</b>（收到 S2C 之后要调谁）。
+     *
+     * <p>🔴 为什么用这个接口、而不是在 {@code common} 包里直接 {@code import} 客户端那个类：
+     * 本类在 {@code common/holo}，<b>专服也会加载它</b>；一旦它在字节码里引用
+     * {@code com.shanhai.client.holo.*}（那个包全是 {@code @OnlyIn(CLIENT)}），
+     * 专服上就可能踩到"客户端类被加载"。⇒ 反向注册：客户端开机时
+     * {@link #setClientSink} 一个实现进来，common 侧只认这个接口。
+     * 没注册（= 专服）时 {@link #clientSink} 为 null，收到 S2C 只会打一行日志。
+     */
+    public interface ClientSink {
+
+        /** 收到某人的 DEF。 */
+        void acceptDef(java.util.UUID who, int surroundPreset, float[] params);
+
+        /** 收到某人的 STATE。 */
+        void acceptState(java.util.UUID who, boolean enabled, int layout, float distance,
+                         int facing, int surroundPreset, boolean panelOpen);
+
+        /** 服务端点名要你再报一次（可能因为别人刚进来 / 他手上那份太旧了）。 */
+        void republish();
+    }
+
+    private static volatile ClientSink clientSink;
+
+    /** 客户端开机时注册（专服永远不调）。 */
+    public static void setClientSink(ClientSink sink) {
+        clientSink = sink;
+        ShanhaiMod.LOGGER.info("{} holo_mp_client_sink_registered present={}",
+                PREFIX, sink != null);
+    }
+
+    public static boolean hasClientSink() {
+        return clientSink != null;
+    }
+
+    private ShanhaiHoloMenuNetwork() {}
     /**
      * 命令长度上限（字符）。两侧同一条口径：
      * <pre>
@@ -79,11 +158,6 @@ public final class ShanhaiHoloMenuNetwork {
      */
     public static final int COMMAND_PERMISSION_LEVEL = 4;
 
-    private static SimpleChannel channel;
-    private static boolean registered;
-
-    private ShanhaiHoloMenuNetwork() {}
-
     @SubscribeEvent
     public static void onCommonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
@@ -92,6 +166,8 @@ public final class ShanhaiHoloMenuNetwork {
             ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloMenuBoards.tableLine());
             ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloMenuBoards.selfCheck());
             ShanhaiMod.LOGGER.info("{} {}", PREFIX, roundTripSelfCheck());
+            // 🆕 2026-10-07（联机 P2）：三条联机载荷的字节数与往返自检（专服与客户端都打同一行）
+            ShanhaiMod.LOGGER.info("{} {}", PREFIX, ShanhaiHoloRemoteCodec.selfTest());
         });
     }
 
@@ -114,12 +190,27 @@ public final class ShanhaiHoloMenuNetwork {
             channel.registerMessage(ID_C2S_RUN_COMMAND, RunCommandMessage.class,
                     RunCommandMessage::encode, RunCommandMessage::decode, RunCommandMessage::handle,
                     java.util.Optional.of(NetworkDirection.PLAY_TO_SERVER));
+            // ---- 🆕 2026-10-07（联机 P2）：DEF / STATE（S2C）+ PUBLISH（C2S）----
+            channel.registerMessage(ID_S2C_HOLO_DEF, HoloDefMessage.class,
+                    HoloDefMessage::encode, HoloDefMessage::decode, HoloDefMessage::handle,
+                    java.util.Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+            channel.registerMessage(ID_S2C_HOLO_STATE, HoloStateMessage.class,
+                    HoloStateMessage::encode, HoloStateMessage::decode, HoloStateMessage::handle,
+                    java.util.Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+            channel.registerMessage(ID_C2S_HOLO_PUBLISH, HoloPublishMessage.class,
+                    HoloPublishMessage::encode, HoloPublishMessage::decode, HoloPublishMessage::handle,
+                    java.util.Optional.of(NetworkDirection.PLAY_TO_SERVER));
+            channel.registerMessage(ID_S2C_HOLO_ASK, HoloAskMessage.class,
+                    HoloAskMessage::encode, HoloAskMessage::decode, HoloAskMessage::handle,
+                    java.util.Optional.of(NetworkDirection.PLAY_TO_CLIENT));
             registered = true;
             ShanhaiMod.LOGGER.info("{} holo_net_channel_registered name={} version={} id={} "
-                            + "c2s_id=[{},{}] c2s=[open_editor,run_command] direction={} messages=2",
+                            + "c2s_id=[{},{}] c2s=[open_editor,run_command] direction={} "
+                            + "mp_id=[s2c_def={},s2c_state={},c2s_publish={},s2c_ask={}] messages=6",
                     PREFIX, CHANNEL_NAME, CHANNEL_VERSION,
                     new ResourceLocation("shanhai", CHANNEL_NAME), ID_C2S_OPEN_EDITOR, ID_C2S_RUN_COMMAND,
-                    NetworkDirection.PLAY_TO_SERVER);
+                    NetworkDirection.PLAY_TO_SERVER,
+                    ID_S2C_HOLO_DEF, ID_S2C_HOLO_STATE, ID_C2S_HOLO_PUBLISH, ID_S2C_HOLO_ASK);
         } catch (Throwable t) {
             // 通道建不起来绝不能让服务端起不来（全息那块功能退化，但机器还能跑）
             ShanhaiMod.LOGGER.error("{} holo_net_channel_register_failed err={}", PREFIX, t.toString(), t);
@@ -346,6 +437,88 @@ public final class ShanhaiHoloMenuNetwork {
             }
         }
         return false;
+    }
+
+    // ------------------------------------------------------------------ 🆕 联机：发
+
+    /**
+     * 🆕 C2S：<b>客户端把自己的设置报上去</b>（联机 P2 的唯一入口，只能在客户端调用）。
+     *
+     * <p>🔴 <b>服务端不信这条包里的任何人/任何权限</b>：
+     * <ul>
+     *   <li>"我是谁"由服务端用 {@code ctx.getSender()} 自己取，<b>不读</b>载荷里的 UUID；</li>
+     *   <li>"他能不能被广播"由服务端自己查背包（{@link #moduleInInventory}）；</li>
+     *   <li>载荷里的数只是"他那边长什么样"，改它最多骗到别人眼里的<b>观感</b>，没有权限后果。</li>
+     * </ul>
+     */
+    public static void publishHolo(java.util.UUID self, boolean enabled, int layout, float distance,
+                                   int facing, int surroundPreset, float[] params, boolean panelOpen) {
+        if (!isReady()) {
+            ShanhaiMod.LOGGER.warn("{} holo_mp_publish_skip reason=channel_not_ready enabled={}", PREFIX, enabled);
+            return;
+        }
+        try {
+            channel.sendToServer(new HoloPublishMessage(self, enabled, layout, distance, facing,
+                    surroundPreset, params, panelOpen));
+            ShanhaiMod.LOGGER.info("{} holo_mp_publish_sent enabled={} layout={} distance={} facing={} "
+                            + "preset={} params={} panel_open={} bytes={}",
+                    PREFIX, enabled, layout, distance, facing, surroundPreset,
+                    params == null ? -1 : params.length, panelOpen, ShanhaiHoloRemoteCodec.PUBLISH_BYTES);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("{} holo_mp_publish_failed err={}", PREFIX, t.toString(), t);
+        }
+    }
+
+    /** 🆕 S2C：把<b>某人</b>的 DEF 发给一个玩家（载荷 77 字节，其中"设置本身"61）。 */
+    public static void sendDefTo(ServerPlayer to, java.util.UUID who, int surroundPreset, float[] params) {
+        if (!isReady() || to == null || to.hasDisconnected()) {
+            return;
+        }
+        channel.send(net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> to),
+                new HoloDefMessage(who, surroundPreset, params));
+    }
+
+    /** 🆕 S2C：把<b>某人</b>的 STATE 发给一个玩家（载荷 25 字节）。 */
+    public static void sendStateTo(ServerPlayer to, java.util.UUID who, boolean enabled, int layout,
+                                   float distance, int facing, int surroundPreset, boolean panelOpen) {
+        if (!isReady() || to == null || to.hasDisconnected()) {
+            return;
+        }
+        channel.send(net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> to),
+                new HoloStateMessage(who, enabled, layout, distance, facing, surroundPreset, panelOpen));
+    }
+
+    /** 🆕 S2C：请某个客户端再报一次（16 字节载荷）。 */
+    public static void askPublish(ServerPlayer to) {
+        if (!isReady() || to == null || to.hasDisconnected()) {
+            return;
+        }
+        channel.send(net.minecraftforge.network.PacketDistributor.PLAYER.with(() -> to),
+                new HoloAskMessage(to.getUUID()));
+        ShanhaiMod.LOGGER.info("{} holo_mp_ask_sent to={}", PREFIX, to.getUUID());
+    }
+
+    /**
+     * 🆕 <b>收件人 = 同服所有持模块者（去掉自己）</b> —— 用户拍板③。     *
+     * <p>判据全部由<b>服务端自己算</b>：{@link #moduleInInventory}（不信客户端，注册表没好 ⇒ 当没有）。
+     * <b>不按距离过滤</b>（看不见的人反正会被渲染端那 64 格剔掉）。
+     */
+    public static java.util.List<ServerPlayer> moduleHoldersExcept(ServerPlayer self) {
+        final java.util.List<ServerPlayer> out = new java.util.ArrayList<>();
+        // ⚠️ 用 Entity#getServer()（public，javap 核实过），不要碰 protected 的 server 字段
+        final net.minecraft.server.MinecraftServer server = self == null ? null : self.getServer();
+        if (server == null) {
+            return out;
+        }
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            if (p == self || p.hasDisconnected()) {
+                continue;
+            }
+            if (moduleInInventory(p)) {
+                out.add(p);
+            }
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ 自检
@@ -606,6 +779,193 @@ public final class ShanhaiHoloMenuNetwork {
             final NetworkEvent.Context ctx = ctxSupplier.get();
             // 排到服务端主线程：执行命令会碰世界（{@code /give} / {@code /tp} 都不许在网络线程做）。
             ctx.enqueueWork(() -> onCommandRequest(ctx.getSender(), command));
+            ctx.setPacketHandled(true);
+        }
+    }
+
+    // ================================================================== 🆕 联机三条消息
+
+    /**
+     * 🆕 S2C：<b>某人的环绕调参</b>（DEF）。
+     *
+     * <p>载荷就是 {@link ShanhaiHoloRemoteCodec} 编出来的那段字节（77 = 16 UUID + 61 设置）——
+     * <b>编解码只有那一份实现</b>，本类只管搬运（{@code writeByteArray} / {@code readBytes}）。
+     * 这样"字节数"与"字段顺序"这两件事在两侧不可能漂。
+     */
+    public static final class HoloDefMessage {
+
+        private final byte[] payload;
+
+        public HoloDefMessage(java.util.UUID who, int surroundPreset, float[] params) {
+            this.payload = ShanhaiHoloRemoteCodec.encodeDef(who, surroundPreset, params);
+        }
+
+        private HoloDefMessage(byte[] payload) {
+            this.payload = payload;
+        }
+
+        public void encode(FriendlyByteBuf buf) {
+            buf.writeBytes(payload);
+        }
+
+        public static HoloDefMessage decode(FriendlyByteBuf buf) {
+            final byte[] raw = new byte[ShanhaiHoloRemoteCodec.DEF_BYTES];
+            buf.readBytes(raw);
+            return new HoloDefMessage(raw);
+        }
+
+        public void handle(Supplier<NetworkEvent.Context> ctxSupplier) {
+            final NetworkEvent.Context ctx = ctxSupplier.get();
+            // 排到主线程再写表：渲染线程会读那张表，网络线程上写它就得加锁。
+            ctx.enqueueWork(() -> {
+                final ShanhaiHoloRemoteCodec.Def d = ShanhaiHoloRemoteCodec.decodeDef(payload);
+                if (d == null) {
+                    ShanhaiMod.LOGGER.warn("{} holo_mp_def_decode_failed len={}", PREFIX, payload.length);
+                    return;
+                }
+                final ClientSink sink = clientSink;
+                if (sink == null) {
+                    ShanhaiMod.LOGGER.info("{} holo_mp_def_dropped reason=no_client_sink who={}",
+                            PREFIX, d.id());
+                    return;
+                }
+                sink.acceptDef(d.id(), d.surroundPreset(), d.params());
+                ShanhaiMod.LOGGER.info("{} holo_mp_def_recv who={} preset={} params={}",
+                        PREFIX, d.id(), d.surroundPreset(), d.params().length);
+            });
+            ctx.setPacketHandled(true);
+        }
+    }
+
+    /** 🆕 S2C：<b>某人的开关/档位</b>（STATE）。载荷 25 = 16 UUID + 9 设置。 */
+    public static final class HoloStateMessage {
+
+        private final byte[] payload;
+
+        public HoloStateMessage(java.util.UUID who, boolean enabled, int layout, float distance,
+                                int facing, int surroundPreset, boolean panelOpen) {
+            this.payload = ShanhaiHoloRemoteCodec.encodeState(who, enabled, layout, distance, facing,
+                    surroundPreset, panelOpen);
+        }
+
+        private HoloStateMessage(byte[] payload) {
+            this.payload = payload;
+        }
+
+        public void encode(FriendlyByteBuf buf) {
+            buf.writeBytes(payload);
+        }
+
+        public static HoloStateMessage decode(FriendlyByteBuf buf) {
+            final byte[] raw = new byte[ShanhaiHoloRemoteCodec.STATE_BYTES];
+            buf.readBytes(raw);
+            return new HoloStateMessage(raw);
+        }
+
+        public void handle(Supplier<NetworkEvent.Context> ctxSupplier) {
+            final NetworkEvent.Context ctx = ctxSupplier.get();
+            ctx.enqueueWork(() -> {
+                final ShanhaiHoloRemoteCodec.State s = ShanhaiHoloRemoteCodec.decodeState(payload);
+                if (s == null) {
+                    ShanhaiMod.LOGGER.warn("{} holo_mp_state_decode_failed len={}", PREFIX, payload.length);
+                    return;
+                }
+                final ClientSink sink = clientSink;
+                if (sink == null) {
+                    return;
+                }
+                sink.acceptState(s.id(), s.enabled(), s.layout(), s.distance(), s.facing(),
+                        s.surroundPreset(), s.panelOpen());
+                ShanhaiMod.LOGGER.info("{} holo_mp_state_recv who={} enabled={} layout={} distance={}",
+                        PREFIX, s.id(), s.enabled(), s.layout(), s.distance());
+            });
+            ctx.setPacketHandled(true);
+        }
+    }
+
+    /**
+     * 🆕 C2S：客户端把自己的<b>全部设置</b>报上来（DEF + STATE 拼一条，102 字节）。
+     *
+     * <p>🔴 服务端收到之后<b>只做两件事</b>：① 用 {@code ctx.getSender()} 认人（不读载荷里的 UUID）；
+     * ② {@link #moduleInInventory} 复核。然后才广播。
+     */
+    public static final class HoloPublishMessage {
+
+        private final byte[] def;
+        private final byte[] state;
+
+        public HoloPublishMessage(java.util.UUID self, boolean enabled, int layout, float distance,
+                                  int facing, int surroundPreset, float[] params, boolean panelOpen) {
+            this.def = ShanhaiHoloRemoteCodec.encodeDef(self, surroundPreset, params);
+            this.state = ShanhaiHoloRemoteCodec.encodeState(self, enabled, layout, distance, facing,
+                    surroundPreset, panelOpen);
+        }
+
+        private HoloPublishMessage(byte[] def, byte[] state) {
+            this.def = def;
+            this.state = state;
+        }
+
+        public void encode(FriendlyByteBuf buf) {
+            buf.writeBytes(def);
+            buf.writeBytes(state);
+        }
+
+        public static HoloPublishMessage decode(FriendlyByteBuf buf) {
+            final byte[] d = new byte[ShanhaiHoloRemoteCodec.DEF_BYTES];
+            final byte[] s = new byte[ShanhaiHoloRemoteCodec.STATE_BYTES];
+            buf.readBytes(d);
+            buf.readBytes(s);
+            return new HoloPublishMessage(d, s);
+        }
+
+        public void handle(Supplier<NetworkEvent.Context> ctxSupplier) {
+            final NetworkEvent.Context ctx = ctxSupplier.get();
+            // 🔴 排到服务端主线程：要念背包、要遍历玩家列表发消息，都不许在网络线程做。
+            ctx.enqueueWork(() -> ShanhaiHoloRemoteSync.onPublish(ctx.getSender(), def, state));
+            ctx.setPacketHandled(true);
+        }
+    }
+
+    /**
+     * 🆕 S2C：<b>服务端请这个客户端再报一次</b>（16 字节 = 它自己的 UUID，用来在日志里对得上人）。
+     *
+     * <p>载荷里的 UUID 是服务端填的"收件人自己"，客户端只把它打进日志 ——
+     * <b>不参与任何判断</b>（客户端本来就该知道自己在哪台服上是谁）。
+     */
+    public static final class HoloAskMessage {
+
+        private final byte[] payload;
+
+        public HoloAskMessage(java.util.UUID who) {
+            this.payload = ShanhaiHoloRemoteCodec.encodeAsk(who);
+        }
+
+        private HoloAskMessage(byte[] payload) {
+            this.payload = payload;
+        }
+
+        public void encode(FriendlyByteBuf buf) {
+            buf.writeBytes(payload);
+        }
+
+        public static HoloAskMessage decode(FriendlyByteBuf buf) {
+            final byte[] raw = new byte[ShanhaiHoloRemoteCodec.ASK_BYTES];
+            buf.readBytes(raw);
+            return new HoloAskMessage(raw);
+        }
+
+        public void handle(Supplier<NetworkEvent.Context> ctxSupplier) {
+            final NetworkEvent.Context ctx = ctxSupplier.get();
+            ctx.enqueueWork(() -> {
+                final java.util.UUID who = ShanhaiHoloRemoteCodec.decodeAsk(payload);
+                final ClientSink sink = clientSink;
+                if (sink == null) {
+                    return;
+                }
+                ShanhaiMod.LOGGER.info("{} holo_mp_ask_recv who={}", PREFIX, who);
+                sink.republish();
+            });
             ctx.setPacketHandled(true);
         }
     }

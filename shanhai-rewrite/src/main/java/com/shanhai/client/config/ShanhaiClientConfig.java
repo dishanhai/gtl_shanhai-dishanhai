@@ -1,5 +1,9 @@
 package com.shanhai.client.config;
 
+import com.shanhai.ShanhaiMod;
+import com.shanhai.client.holo.ShanhaiHoloPersist;
+import com.shanhai.client.holo.ShanhaiHoloSurroundTuning;
+
 import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
@@ -36,6 +40,37 @@ import net.minecraftforge.common.ForgeConfigSpec;
  * ⚠️ <b>改完要重启游戏才生效</b>（本类在渲染每帧读 {@code .get()}，
  * 但 Forge 配置文件本身的重新加载只在游戏启动时发生；游戏内 Mods→Config 界面改动
  * 会触发 {@code ModConfigEvent}，但为稳妥起见，改数后重启一次最保险）。
+ *
+ * <h2>🆕 2026-10-07：{@code [holo_menu]} —— 悬浮全息菜单的显示设置（20 项）</h2>
+ *
+ * <h3>为什么 20 项全进 <b>CLIENT</b>（= {@code config/shanhai-client.toml}），一项都不进 COMMON</h3>
+ * 判据只有一条：<b>谁会读这个值</b>。逐项查过（grep 全工程）：
+ * <ul>
+ *   <li>菜单状态 4 项（开关 / 朝向 / 排布 / 距离）—— 读它的是
+ *       {@code ShanhaiHoloMenuState}（{@code @OnlyIn(Dist.CLIENT)}）、渲染器、输入层、以及
+ *       {@code /shanhai menu} 这条<b>客户端</b>命令（注册在 {@code RegisterClientCommandsEvent}，
+ *       客户端就地执行、<b>不发包</b>，见 {@code ShanhaiHoloMenuClient} 的字节码取证）。
+ *       <b>服务端一处都不读</b>：全息是纯客户端画的，服务端连"菜单开着"都不知道。</li>
+ *   <li>环绕档位 1 项 + 环绕取值 15 项 —— 读它的是 {@code ShanhaiHoloSurround} /
+ *       {@code ShanhaiHoloSurroundRenderer}（每帧的绘制遍），同样<b>只在客户端</b>。</li>
+ * </ul>
+ * ⇒ 没有"服务端也要读"的那一类（原假设的"菜单开合影响命令树下发"<b>不成立</b>：
+ * 开合只影响客户端渲染，命令树的下发是服务端按权限发的，与本开关无关）
+ * ⇒ <b>20 项全部 CLIENT</b>。放进 COMMON 反而会让专用服务端也生成一份它永远不读的显示设置。
+ *
+ * <h3>🔴 单一真相源：{@code [holo_menu]} 是唯一持久副本（load-once + 改值即落盘）</h3>
+ * <ul>
+ *   <li>进世界那一刻读一次进运行副本（{@code ShanhaiHoloPersist.ensureLoaded()}）；</li>
+ *   <li>之后命令 / 面板里<b>每改一格</b>都立刻写回本文件并 {@code CLIENT_SPEC.save()}；</li>
+ *   <li>⇒ 本文件与游戏里看到的永远一致；{@code ShanhaiHoloPersist.auditLine()} 逐项比对两者。</li>
+ *   <li>⚠️ 所以<b>手改本文件的值会在下次进世界时被读进去</b>（那之前游戏里的改动会覆盖掉手改）
+ *       —— 这正是"配置是唯一持久副本"的代价，也是用户点单「全存」要的行为。</li>
+ * </ul>
+ *
+ * <h3>默认值</h3>
+ * 逐项 = 加持久化之前那些常量（{@code ShanhaiHoloPersist.DEFAULT_*} / {@code defaultOf(i)}）。
+ * 配置缺失 / 读失败 / 值越界 / 枚举名不认识 ⇒ 一律回这些默认值 + 一行 WARN
+ * ⇒ 行为与加持久化之前<b>逐项相等</b>。
  */
 public final class ShanhaiClientConfig {
 
@@ -58,6 +93,21 @@ public final class ShanhaiClientConfig {
     }
 
     public static final ForgeConfigSpec CLIENT_SPEC;
+
+    /**
+     * 🆕 键名 ⇒ {@code [holo_menu]} 那一节的 {@code ConfigValue}（键名 = {@link ShanhaiHoloPersist}
+     * 里的路径常量，逐字相同）。
+     *
+     * <p>用一张表而不是 20 个字段：落盘层是"按键名读写"的（见 {@link ShanhaiHoloPersist.Store}），
+     * 表结构让它一处就能改，也不会出现"字段名对了、键名写错"的不一致。
+     *
+     * <p>🔴 <b>它必须声明在下面的 {@code static {}} 之前</b> —— Java 的静态初始化按<b>书写顺序</b>执行：
+     * 写在后面的话，{@code static {}} 里的 {@code reg(...)} 会往一个还没被 new 出来的 map 里 put，
+     * 类初始化直接抛 NPE（实测：{@code Cannot invoke "java.util.Map.put(Object,Object)" because
+     * "ShanhaiClientConfig.HOLO" is null}）。那会让整个 mod 加载失败。
+     */
+    private static final java.util.Map<String, ForgeConfigSpec.ConfigValue<?>> HOLO =
+            new java.util.LinkedHashMap<>();
 
     private static final ForgeConfigSpec.EnumValue<PoseMode> POSE_MODE;
 
@@ -138,12 +188,234 @@ public final class ShanhaiClientConfig {
         b.pop();
 
         b.pop();
+
+        // ================================================================ 🆕 2026-10-07
+        //   [holo_menu] —— 悬浮全息菜单的显示设置（20 项）。
+        //   为什么全进 CLIENT（一项都不进 COMMON）与"唯一持久副本"的口径：见类注释那两节。
+        //   🔴 键名一律取 ShanhaiHoloPersist 里的路径常量（不是在这里另抄一遍字符串）
+        //      ⇒ 落盘层与配置层用的是同一个键，不存在"对不上"。
+        b.comment("悬浮全息菜单的显示设置：投影开关 / 朝向档 / 排布档 / 距离 / 环绕特效档位 + 15 项取值。",
+                        "⚠️ 这些值会被游戏内的改动【立刻覆盖】：/shanhai menu … 与全息设置面板里每改一格，",
+                        "   本文件当场重写一次。手改的值在【下次进世界】时生效（在那之前游戏里的改动会盖掉手改）。",
+                        "值不合法（越界 / 枚举名不认识 / 读不出来）⇒ 回默认值并打一行 WARN：",
+                        "  enabled=false  facing=FIXED  layout=RING  distance=2.8  preset=MID  15 项 = 「中」档那组数。")
+                .push("holo_menu");
+        reg(b.comment("投影开关的默认值（=/shanhai menu on|off 与面板上的那个开关）。",
+                        "false = 加持久化之前的行为：进游戏不自启，右键模块才开。")
+                .define("enabled", ShanhaiHoloPersist.DEFAULT_ENABLED), ShanhaiHoloPersist.K_ENABLED);
+        reg(b.comment("朝向档：FOLLOW = 平滑转向玩家；SNAP = 立即转向玩家；",
+                        "FIXED = 世界固定（默认；2026-10-06 实测选出的那一档，见 ShanhaiHoloMenuState.Facing）。",
+                        "⚠️ 环绕档（默认排布）下这三档都不生效。")
+                .defineEnum("facing", ShanhaiHoloPersist.DEFAULT_FACING), ShanhaiHoloPersist.K_FACING);
+        reg(b.comment("排布档：RING = 五块板沿水平面绕玩家一圈（默认）；COLUMN = 上下叠成柱；ROW = 左右排成横排。")
+                .defineEnum("layout", ShanhaiHoloPersist.DEFAULT_LAYOUT), ShanhaiHoloPersist.K_LAYOUT);
+        reg(b.comment("全息浮在玩家前方多远 / 环绕档下这一圈离玩家多远（格）。",
+                        "区间与 /shanhai menu distance 的参数区间、面板 ± 的夹取范围是同一个来源。")
+                .defineInRange("distance", (double) ShanhaiHoloPersist.DEFAULT_DISTANCE,
+                        (double) ShanhaiHoloPersist.DISTANCE_MIN, (double) ShanhaiHoloPersist.DISTANCE_MAX),
+                ShanhaiHoloPersist.K_DISTANCE);
+
+        b.comment("环绕特效（那一圈数据环 + 星尘点场）。").push("surround");
+        reg(b.comment("档位：OFF = 不画（15 项取值原样保留，切回来现场还在）；",
+                        "WEAK / MID / STRONG = 整组替换下面那 15 项。MID = 出厂默认（= 加持久化之前那组数）。")
+                .defineEnum("preset", ShanhaiHoloPersist.Preset.MID), ShanhaiHoloPersist.K_PRESET);
+
+        b.comment("环绕特效的 15 项取值（顺序与面板「高级调参」4 页逐项一致；键名见各项注释）。")
+                .push("params");
+        for (int i = 0; i < ShanhaiHoloSurroundTuning.PARAM_COUNT; i++) {
+            final String key = ShanhaiHoloPersist.paramKey(i);
+            final String name = ShanhaiHoloPersist.PARAM_KEYS[i];
+            final String unit = ShanhaiHoloSurroundTuning.PARAM_UNIT[i];
+            final float def = ShanhaiHoloPersist.defaultOf(i);
+            final float lo = ShanhaiHoloPersist.paramMin(i);
+            final float hi = ShanhaiHoloPersist.paramMax(i);
+            final String c = ShanhaiHoloSurroundTuning.PARAM_NAME[i]
+                    + (unit.isEmpty() ? "" : "（单位 " + unit + "）")
+                    + "。默认 " + ShanhaiHoloSurroundTuning.fmt(def, ShanhaiHoloSurroundTuning.PARAM_DECIMALS[i])
+                    // 🔴 2026-10-10 修注释（**只改注释文本**：键名 fieldCover ／ 默认值 ／ 键结构一个字节都没动）。
+                    //    第 16 项「覆盖范围」的 0/1/2 是【档号】不是数 ⇒ 原来那句"覆盖范围。默认 1"
+                    //    与事实不符（读的人会当成"1 = 某个数"）：那一档叫【半球】，= 出厂档。
+                    //    档名从核里那一份取（ShanhaiHoloSurroundTuning#coverText），配置层不另抄一遍。
+                    + (i == ShanhaiHoloSurroundTuning.P_FIELD_COVER
+                            ? " = " + ShanhaiHoloSurroundTuning.coverText(Math.round(def))
+                                    + "（三档：0 环带 / 1 半球 / 2 全球；半球 = 出厂档：星尘从地平线一直铺到天顶）"
+                            : "");
+            if (ShanhaiHoloPersist.paramIsInt(i)) {
+                reg(b.comment(c).defineInRange(name, Math.round(def), (int) lo, (int) hi), key);
+            } else {
+                reg(b.comment(c).defineInRange(name, (double) def, (double) lo, (double) hi), key);
+            }
+        }
+        b.pop();   // params
+        b.pop();   // surround
+        b.pop();   // holo_menu
+        // ⚠️ 这里【不许】再 pop 一次：halo_end 那一层已经在上面第 190 行 pop 掉了
+        //    （实测踩过：多一次 pop ⇒ 类初始化抛
+        //     IllegalArgumentException: Attempted to pop 1 elements when we only had: []）。
+        // ⚠️ 层级账（push/pop 必须配平）：halo_end 已在 190 行关掉 ⇒ 本节的三个 push 各自配一个 pop。
+
         CLIENT_SPEC = b.build();
+
+        // 🔴 把落盘出口装上：ShanhaiHoloPersist 是纯逻辑（不 import Forge），
+        //    真正读写 ForgeConfigSpec 的是下面这个 HoloStore —— "谁是唯一持久副本"因此只有一处。
+        ShanhaiHoloPersist.useStore(new HoloStore());
     }
 
     private ShanhaiClientConfig() {}
 
     // 读配置时全部兜底：配置还没加载时 .get() 会抛，宁可退回"原版默认值"也不让渲染线程炸。
+
+    // ==================================================================== 🆕 [holo_menu] 那 20 个键
+
+    /** 登记一个 holo 键（返回原值，便于写成一行）。 */
+    private static <T extends ForgeConfigSpec.ConfigValue<?>> T reg(T value, String key) {
+        HOLO.put(key, value);
+        return value;
+    }
+
+    /** 配置是否已加载（与 {@code ShanhaiConfig.isLoaded()} 同款兜底）。 */
+    public static boolean isLoaded() {
+        return CLIENT_SPEC.isLoaded();
+    }
+
+    /** 看一眼某个 holo 键现在写到 toml 路径是什么（自检 / 报告用）。 */
+    public static java.util.Set<String> holoKeys() {
+        return java.util.Collections.unmodifiableSet(HOLO.keySet());
+    }
+
+    /**
+     * 🔴 {@code [holo_menu]} 的落盘出口（{@link ShanhaiHoloPersist.Store} 的唯一生产实现）。
+     *
+     * <p>三条纪律：
+     * <ol>
+     *   <li>读：任何异常 / 键不存在 ⇒ 返回调用方给的 {@code def}（<b>绝不抛</b>，
+     *       配置没加载时 {@code .get()} 会抛 {@code IllegalStateException}）；</li>
+     *   <li>写：只写值，<b>不 save</b>（save 由 {@link #save()} 统一做，一次改动只落盘一次）；</li>
+     *   <li>{@link #save()} = {@code CLIENT_SPEC.save()} —— 这就是"立刻写进 toml"那一步。</li>
+     * </ol>
+     */
+    private static final class HoloStore implements ShanhaiHoloPersist.Store {
+
+        @Override
+        public boolean loaded() {
+            return CLIENT_SPEC.isLoaded();
+        }
+
+        @Override
+        public boolean getBool(String key, boolean def) {
+            final Object o = raw(key, def);
+            return o instanceof Boolean b ? b : def;
+        }
+
+        @Override
+        public double getDouble(String key, double def) {
+            final Object o = raw(key, def);
+            return o instanceof Number n ? n.doubleValue() : def;
+        }
+
+        @Override
+        public int getInt(String key, int def) {
+            final Object o = raw(key, def);
+            return o instanceof Number n ? n.intValue() : def;
+        }
+
+        @Override
+        public String getEnumName(String key) {
+            final Object o = raw(key, null);
+            if (o instanceof Enum<?> e) {
+                return e.name();
+            }
+            return o instanceof String s ? s : null;
+        }
+
+        @Override
+        public void setBool(String key, boolean value) {
+            if (HOLO.get(key) instanceof ForgeConfigSpec.BooleanValue v) {
+                v.set(value);
+            }
+        }
+
+        @Override
+        public void setDouble(String key, double value) {
+            if (HOLO.get(key) instanceof ForgeConfigSpec.DoubleValue v) {
+                v.set(value);
+            }
+        }
+
+        @Override
+        public void setInt(String key, int value) {
+            if (HOLO.get(key) instanceof ForgeConfigSpec.IntValue v) {
+                v.set(value);
+            }
+        }
+
+        @Override
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        public void setEnumName(String key, String value) {
+            final ForgeConfigSpec.ConfigValue<?> raw = HOLO.get(key);
+            if (!(raw instanceof ForgeConfigSpec.EnumValue v)) {
+                ShanhaiMod.LOGGER.warn("{} holo_enum_not_found key={} got={}",
+                        ShanhaiHoloPersist.PREFIX, key, raw == null ? "null" : raw.getClass().getName());
+                return;
+            }
+            if (value == null) {
+                return;
+            }
+            try {
+                Enum target = null;
+                try {
+                    final Object now = v.get();
+                    if (now instanceof Enum<?> e) {
+                        target = Enum.valueOf((Class) e.getDeclaringClass(), value.trim().toUpperCase(java.util.Locale.ROOT));
+                    }
+                } catch (Throwable t) {
+                    ShanhaiMod.LOGGER.warn("{} holo_enum_read_failed key={} err={}",
+                            ShanhaiHoloPersist.PREFIX, key, t.toString());
+                }
+                if (target == null) {
+                    final Object def = v.getDefault();
+                    target = Enum.valueOf((Class) def.getClass(), value.trim().toUpperCase(java.util.Locale.ROOT));
+                }
+                v.set(target);
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.warn("{} holo_enum_setting_failed key={} value={} err={}",
+                        ShanhaiHoloPersist.PREFIX, key, value, t.toString());
+            }
+        }
+
+        @Override
+        public boolean save() {
+            try {
+                CLIENT_SPEC.save();
+                return true;
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.warn("{} holo_config_save_failed err={}", ShanhaiHoloPersist.PREFIX, t.toString());
+                return false;
+            }
+        }
+
+        private static Object raw(String key, Object def) {
+            final ForgeConfigSpec.ConfigValue<?> v = HOLO.get(key);
+            if (v == null) {
+                ShanhaiMod.LOGGER.warn("{} holo_key_missing key={}", ShanhaiHoloPersist.PREFIX, key);
+                return def;
+            }
+            try {
+                final Object o = v.get();
+                if (o == null) {
+                    ShanhaiMod.LOGGER.warn("{} holo_value_null key={} path={}",
+                            ShanhaiHoloPersist.PREFIX, key, v.getPath());
+                    return def;
+                }
+                return o;
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.warn("{} holo_value_read_failed key={} path={} err={}",
+                        ShanhaiHoloPersist.PREFIX, key, v.getPath(), t.toString());
+                return def;
+            }
+        }
+    }
+
 
     public static boolean haloEnabled() {
         try {

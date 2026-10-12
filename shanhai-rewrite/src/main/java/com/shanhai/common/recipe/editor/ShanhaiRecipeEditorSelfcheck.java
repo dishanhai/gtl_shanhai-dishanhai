@@ -209,6 +209,9 @@ public final class ShanhaiRecipeEditorSelfcheck {
         // 🆕 第 12 刀：下一局（连着两次）读那三条端到端探针；只在 VVERIFY 档判红。
         runCase("vanilla_new_replay", () -> caseVanillaNewReplay(server));
 
+        // 🆕 2026-10-07：用户报「我重启游戏之后我写好的配方条件都被改了」
+        //    ⇒ 「切配方 / 载入 / 面板重建一个字都不许写」的机器判据（含负对照）。
+        runCase("condition_recipe_isolation", () -> caseConditionRecipeIsolation(server));
         if ("1".equals(System.getenv(ShanhaiRecipeEditorCommand.ENV_WRITE))) {
             runCase("write_through", () -> caseWriteThrough(server));
             // 🆕 阶段 2：把一条"改过输入"的编辑真的留下（覆盖文件里出现 pattern/key），
@@ -223,6 +226,8 @@ public final class ShanhaiRecipeEditorSelfcheck {
             runCase("vanilla_new_write", () -> caseVanillaNewWrite(server));
         }
 
+        runCase("module_level_tip", () -> caseModuleLevelTip());
+
         // 🔴🔴 2026-10-05（用户澄清：「但是我删除写的是 /shanhai edit restore」）：
         //    全局恢复那条命令必须【逐条】给客户端发单条补丁 —— 这是"restore 之后 JEI 不刷新"的判据。
         //    ⚠️ 故意放在【最后】：它会清空 rig 的覆盖文件（那是别的用例共用的夹具），
@@ -231,6 +236,68 @@ public final class ShanhaiRecipeEditorSelfcheck {
 
         ShanhaiMod.LOGGER.info("{} selftest done cases={} fail={} EDITOR={}",
                 PREFIX, cases, fails, fails == 0 ? "PASS" : "FAIL");
+    }
+
+    // ================================================================== 🆕 显示口径：模块要求那一行
+
+    /**
+     * <b>「模块要求」那一行的显示口径</b> —— 那个数字说的是【等级】，不许被读成【数量】。
+     *
+     * <h4>现场（用户截图逐字，2026-10-06）</h4>
+     * <pre>
+     *   JEI 那一行 : 模块要求: 5× 物质重组模块        ← 用户读成"要 5 个模块"✗（他来问"编辑器怎么写出 5 个"）
+     *   编辑器第三屏: 物质重组模块（等级 5）           ← 编辑器没写错 ✓
+     * </pre>
+     * 真根因：{@code ModuleLevelCondition} 把构造器第二个实参（那是<b>等级</b> —— 编辑器
+     * {@code ShanhaiRecipeConditions.makeValueCondition} 就是把该模块的档位写进 {@code level} 的）
+     * 印在了一个 {@code N× } 的位子上，而 2026-10-03 用户点单删掉的「{@code （等级 ≥ N）}」
+     * 恰好是那一行里唯一解释它是等级的文本。
+     *
+     * <h4>判据（正 ＋ 负两条，缺一条就是空断言）</h4>
+     * <ul>
+     *   <li><b>正向</b>：{@code requiredLevel=5} ＋ {@code module_id=shanhai:material_recombination_module}
+     *       （它在 {@code MODULE_LEVELS} 里就是 5 级）⇒ {@code getTooltips()} 的真串必须
+     *       <b>含</b>「{@code 等级 5}」且<b>不含任何 {@code ×}</b>。</li>
+     *   <li>🔴 <b>负对照</b>：把<b>旧写法那条字面量</b>喂给<b>同一个判据函数</b> ⇒ 它必须返回 {@code true}
+     *       （= 判据认得出"数量形态"）⇒ 等价于"把旧写法塞回去，上面那条正向判据必红"。
+     *       没有这一条，"判据恒真"与"代码真的改好了"在读数上分不开。</li>
+     * </ul>
+     * <p>⚠️ <b>只断言「等级 5」，不断言中文名</b>：本自检跑在<b>无头专服</b>里，专服不加载客户端 lang
+     * ⇒ {@code getHoverName()} 给的是 lang 键本身（{@code item.shanhai.material_recombination_module}）
+     * 而不是「物质重组模块」。同款说明见 {@code ModuleLevelCondition} 类注释 §6.5。
+     * <p>⚠️ 等级不从 {@code requiredLevel} 字段读，而是现问 {@code getModuleLevelById} —— 与
+     * {@code ModuleLevelCondition.levelSuffix()} 同一个源，这样这条判据不会和生产代码一起漂移。
+     */
+    private static void caseModuleLevelTip() {
+        final String id = "shanhai:material_recombination_module";
+        final int tableLv = com.shanhai.machine.module.PrimordialModuleMachine.getModuleLevelById(id);
+        final com.shanhai.machine.module.ModuleLevelCondition cond =
+                new com.shanhai.machine.module.ModuleLevelCondition(id, 5);
+        final String tip = cond.getTooltips().getString();
+        final String want = "（等级 " + cond.requiredLevelForGate() + "）";
+
+        // 判据本体：同一个函数同时吃「真串」与「旧写法字面量」⇒ 负对照才有意义。
+        // 两种"数量形态"都认：① 带 `×`（2026-10-03 之后那一版）；② 老配方侧写法 `Nx <id>`。
+        final java.util.function.Predicate<String> looksLikeCount = t -> t != null
+                && (t.indexOf('×') >= 0 || t.matches("(?s).*\\d\\s*[xX]\\s+\\S.*"));
+
+        final boolean positive = tableLv == 5
+                && tip.contains("等级 5")
+                && tip.contains(want)
+                && !looksLikeCount.test(tip);
+        check("module_level_tip", positive,
+                "真串=\"" + tip + "\" | 含「等级 5」=" + tip.contains("等级 5")
+                        + " 含「" + want + "」=" + tip.contains(want)
+                        + " 含×=" + (tip.indexOf('×') >= 0) + "（必须 false）"
+                        + " | 等级表里 " + id + " = " + tableLv + " 级（必须 5）"
+                        + " requiredLevelForGate()=" + cond.requiredLevelForGate());
+
+        // ---- 🔴 负对照：把【旧写法】那条字面量喂给同一个判据 ⇒ 必须认出来 ----
+        final String legacy = "&$ultimateRainbow-模块要求：5× 物质重组模块";
+        final boolean negative = looksLikeCount.test(legacy);
+        check("module_level_tip_negative_control", negative,
+                "旧写法字面量=\"" + legacy + "\" ⇒ 同一判据认出「数量形态」=" + negative
+                        + "（必须 true；为 false 说明上面那条正向判据是恒真的空断言）");
     }
 
     // ================================================================== 🆕 修复④：条件的真值对照
@@ -3878,9 +3945,349 @@ public final class ShanhaiRecipeEditorSelfcheck {
         lastApplyTargetId = id;
     }
 
+    // ================================================================== 🆕 2026-10-07 条件被自动改掉
+
+    /**
+     * 🔴🔴 <b>「切配方不许动条件」的机器判据</b>（用户报「我重启游戏之后我写好的配方条件都被改了」）。
+     *
+     * <h4>现场（temp\condbug\A-cond-actions.txt）</h4>
+     * <pre>
+     *   … workspace_cond_add type=cleanroom index=0 value=cleanroom now=[0:cleanroom]
+     *   …（约 1 秒后，中间没有任何别的日志）
+     *   … workspace_cond_edit index=0 type=module_level value=shanhai:material_recombination_module …
+     * </pre>
+     * 即：<b>条件被"当前下拉里那两格的值"原地换掉</b>，而用户没在这两格上做选择。
+     *
+     * <h4>这一拍断言什么</h4>
+     * <ol>
+     *   <li>载入 A（A <b>有</b>条件）→ 进条件页 → 选中第 1 行（复现那个"选中后未动下拉"的状态），
+     *       此时把写回计数归零；</li>
+     *   <li>切到 B（B 的条件与 A 不同）⇒
+     *       <b>① B 的条件一个字节都没动</b>、
+     *       <b>② 写回计数一动不动</b>（= 没有任何一次 {@code workspace_cond_edit}）、
+     *       <b>③ 编辑态被重置</b>（不继承 A 的"当前值"）;</li>
+     *   <li><b>负对照</b>：把"旧行为"塞回去（{@code TEST_FORCE_EDIT_WITHOUT_USER=true}，
+     *       模拟旧的"重建/切配方也照样写回"）⇒ <b>必须报红</b>；
+     *       再放开 ⇒ 计数必须<b>一个字都不再涨</b>（证明闸门真的在起作用，而不是数字巧合）。</li>
+     * </ol>
+     *
+     * <p>全程 {@code persist=false} 的等价物：本拍不调用任何保存 API，只动内存缓冲 ⇒
+     * 覆盖文件与台账一个字节都不写。
+     */
+    private static void caseConditionRecipeIsolation(MinecraftServer server) {
+        ShanhaiRecipeBase.captureIfAbsent(server);
+        ShanhaiRecipeReverseIndex.build(server);
+        ShanhaiRecipeEditorWorkspace ws = new ShanhaiRecipeEditorWorkspace(server, null);
+        ws.reloadTypes();
+
+        // ── 挑两条不同的 GT 配方 ──
+        //    🔴 第 4 轮修正（第 3 轮诊断行 `b_type= b_value=` 抓到的）：**B 也必须有条件**。
+        //       原来 B 是"随便第二条"，而在主代理那台机器上它是 `gtceu:cutter/oak_slab`
+        //       —— **一条条件都没有** ⇒ `selectCondition(0, …)` 直接 return（`row >= conditions.size()`）
+        //       ⇒ `condSel` 停在 **-1** ⇒ `rebuildSelectedFromEditor` 第一句 `condSel < 0` 就返回
+        //       ⇒ **负对照连"能写的槽位"都没有** ⇒ 同样是假绿 ✗
+        //       ⇒ 口径：A 与 B 都必须是"真有一条条件"的配方（这一拍的两半都靠它）。
+        GTRecipe a = null;
+        GTRecipe b = null;
+        for (GTRecipe r : ShanhaiRecipeReverseIndex.all()) {
+            if (r == null || r.id == null || r.getType() == null) {
+                continue;
+            }
+            if (HANDS_OFF.contains(r.id)) {
+                continue;
+            }
+            if (conditionsJsonOf(r).size() == 0) {
+                continue;                                   // ← 没条件的不当靶子（见上面的理由）
+            }
+            if (a == null) {
+                a = r;
+                continue;
+            }
+            if (!r.id.equals(a.id)) {
+                b = r;
+                break;
+            }
+        }
+        if (a == null) {
+            check("condition_isolation_switch_target", false,
+                    "finding_no_target 全表扫下来没有一条【有条件】的 GT 配方 ⇒ 这一拍做不了"
+                            + "（A/B 都必须真带条件：A 用来复现「选中一行」，B 用来给负对照一个能写的槽位）");
+            return;
+        }
+        if (b == null) {
+            check("condition_isolation_switch_target", false,
+                    "finding_only_one_target 只有一条【有条件】的 GT 配方 ⇒ A→B 这一拍做不了");
+            return;
+        }
+        final GTRecipe aTarget = a;
+        final GTRecipe bTarget = b;
+        final ResourceLocation aId = aTarget.id;
+        final ResourceLocation bId = bTarget.id;
+        final com.google.gson.JsonArray aConds = conditionsJsonOf(aTarget);
+        final com.google.gson.JsonArray bConds = conditionsJsonOf(bTarget);
+        final boolean aHasConditions = aConds.size() > 0;
+
+        check("condition_isolation_switch_target",
+                !aId.equals(bId) && aHasConditions,
+                "A=" + aId + " n=" + aConds.size() + " " + ShanhaiRecipeConditions.summary(aConds)
+                        + " | B=" + bId + " n=" + bConds.size() + " "
+                        + ShanhaiRecipeConditions.summary(bConds)
+                        + "（A 必须真有一条条件，否则「选中第 1 行」这一步复现不出那个状态）");
+
+        // ── B 的"锚"：切换【前】逐条抄下来（字面判据）──
+        final String bBefore = canonicalAll(bConds);
+
+        // ── 载入 A + 进条件页 + 选中第 1 行（= 复现现场那个"选好了、还没动下拉"的状态）──
+        //
+        // 🔴 这几下必须用 try/catch 记下来：万一它们抛了，后面几条断言会因为"什么都没有发生"
+        //    而**假绿**（那时 edited_total 当然不涨）。⇒ 失败要显式传播到断言里。
+        String setupError = null;
+        try {
+            ws.selectRecipe(aId);
+            ws.toggleConditions();
+            ws.selectCondition(0, false);
+        } catch (Throwable t) {
+            setupError = t.getClass().getSimpleName() + ": " + t.getMessage();
+        }
+        check("condition_isolation_setup_not_threw",
+                setupError == null,
+                "setup_error=" + (setupError == null ? "(none)" : setupError)
+                        + "（载入 A / 开条件页 / 选中第 1 行 这几下必须不抛 —— 抛了的话后面"
+                        + "「什么都没发生」的断言会假绿）");
+        // 现场还原度：A 真有条件时，选中第 1 行之后编辑控件里必须真有值（= 那个"待写回"的状态）
+        final boolean staged = ws.condSel() == 0 && ws.condTypeKey() != null && !ws.condTypeKey().isEmpty();
+        check("condition_isolation_staged_state",
+                !aHasConditions || staged,
+                "sel=" + ws.condSel() + " type=" + ws.condTypeKey() + " value=" + ws.condValue()
+                        + "（A 有 " + aConds.size()
+                        + " 条条件 ⇒ 选中第 1 行后编辑控件里必须有值；没有的话这一拍没复现出现场那个状态）");
+        final String aType = ws.condTypeKey();
+        final int editedBefore = ws.condEditedTotal();
+        if (editedBefore != 0) {
+            // 前面几拍可能已经写过；这一拍只看"增量"，先把基线记下来
+            ShanhaiMod.LOGGER.info("{} condition_isolation_baseline edited_total={}", PREFIX, editedBefore);
+        }
+
+        // ── 切到 B（现场那条坏路径：切配方 / 载入）──
+        final boolean switched = ws.selectRecipe(bId);
+
+        // ① B 的条件一个字都没动
+        final String bAfter = canonicalAll(conditionsJsonOf(bTarget));
+        check("condition_isolation_B_untouched",
+                switched && bBefore.equals(bAfter),
+                "A=" + aId + " -> B=" + bId + " switched=" + switched
+                        + " before=" + bBefore + " after=" + bAfter
+                        + "（切配方那一下绝不许改 B 的条件；这一条就是用户那句"
+                        + "「我写好的配方条件都被改了」的机器判据）");
+
+        // ② 切配方这一下没有任何一次写回
+        final int editedAfterSwitch = ws.condEditedTotal();
+        check("condition_isolation_no_write_on_switch",
+                editedAfterSwitch == editedBefore,
+                "edited_total " + editedBefore + " -> " + editedAfterSwitch
+                        + "（切配方/载入/面板重建一律不写：差必须是 0）");
+
+        // ③ 编辑态按配方隔离：不许继承 A 的"当前类型 / 当前档位 / 选中行"
+        check("condition_isolation_editor_state_reset",
+                ws.condSel() < 0 && (ws.condTypeKey() == null || ws.condTypeKey().isEmpty()),
+                "after_switch sel=" + ws.condSel() + " type=" + ws.condTypeKey()
+                        + " value=" + ws.condValue() + " resets=" + ws.condEditorResetTotal()
+                        + "（A 的 type=" + aType + " 不许跟到 B 上）");
+
+        // ══════════════════════════════════════════════════════════════════════════════════
+        //  「自动路径不许写」＋负对照（**先证明注入真的生效，再说它现在不发生了**）
+        //
+        //  🔴 上一版这两拍是**假验证**（主代理无头专服实跑抓到：forced_true 下 edited_total 0 -> 0）：
+        //     我注入的是 `setCondType("物质模块等级")` / `setCondValue("物质重组模块")`
+        //     —— 那是**界面上显示的中文标签**，不是注册表里的 key（真 key 长这样：cleanroom /
+        //     module_level / research …）。⇒ `condTypeLabels().indexOf(label)` 落空、
+        //     `valueTableOf(server, condTypeKey)` 对 research 直接返回空表
+        //     ⇒ **注入在 setter 的第一句就 return，压根没走到闸门那一步** ✗
+        //     ⇒ 读数"什么都没发生"分不出"闸门挡住了"还是"注入没动作" ✗✗
+        //
+        //  这一次：① 注入用**这条配方自己的真 key**；② 拆成四段，每段有各自的判据。
+        // ══════════════════════════════════════════════════════════════════════════════════
+        // B 第 1 条条件的真 key（B 刚载入 ⇒ condSel=-1，用 json 直接取）
+        final com.google.gson.JsonArray bCondsNow = conditionsJsonOf(bTarget);
+        final String bTypeKey = bCondsNow.size() > 0
+                ? ShanhaiRecipeConditions.typeKeyOf(bCondsNow.get(0)) : "";
+        final String bCurrentKey = bCondsNow.size() > 0
+                ? ShanhaiRecipeConditions.valueKeyOf(bTypeKey, bCondsNow.get(0)) : "";
+        final String bAltValue = altValueKeyOf(server, bTypeKey, bCurrentKey);
+        final String bCondsBefore = canonicalAll(bCondsNow);
+        final boolean forcedOff = ShanhaiRecipeEditorWorkspace.TEST_FORCE_EDIT_WITHOUT_USER;
+        ShanhaiMod.LOGGER.info("{} condition_isolation_neg_setup b_type={} b_value={} b_alt_value={} b_value_now={}",
+                PREFIX, bTypeKey, bCurrentKey, bAltValue, ws.condValue());
+
+        // ── 非 user 动作的写回必须被拒（**这一下真的走到了闸门**：真 key ＋ 真档位）──
+        ShanhaiRecipeEditorWorkspace.TEST_FORCE_EDIT_WITHOUT_USER = false;
+        final int beforeAuto = ws.condEditedTotal();
+        ws.selectCondition(0, false);                       // 选中 B 的第 1 行（老代码：这之后下拉一回填就写回）
+        ws.setCondType(bTypeKey);                           // 真 key
+        ws.setCondValue(bAltValue != null ? bAltValue : bCurrentKey);   // 真档位
+        final int afterAuto = ws.condEditedTotal();
+        final String bAutoAfter = canonicalAll(conditionsJsonOf(bTarget));
+        check("condition_isolation_auto_write_refused",
+                afterAuto == beforeAuto && bCondsBefore.equals(bAutoAfter),
+                "非用户动作 type=" + bTypeKey + " value=" + bAltValue
+                        + " ⇒ edited_total " + beforeAuto + " -> " + afterAuto
+                        + " / B 内容未变=" + bCondsBefore.equals(bAutoAfter)
+                        + "（0 增量：默认 origin = auto ⇒ 一律拒写。"
+                        + " ⚠️ 这一条只有在「注入真能造出条件」时才有效 —— 故下面 ② ③ 两段专门证它）");
+
+        // ── ① 闸门关 + 非法值 ⇒ 什么都不该发生（= 上一版假负对照的读数形状）──
+        final int n0 = ws.condEditedTotal();
+        ws.setCondType(bTypeKey);
+        ws.setCondValue("shanhai_no_such_condition_value");
+        final int n1 = ws.condEditedTotal();
+        check("condition_isolation_neg0_gate_off_invalid_value_does_nothing",
+                n1 == n0,
+                "gate=off invalid_value: edited_total " + n0 + " -> " + n1
+                        + "（闸门关着 ⇒ 拒写；这一条就是上一版那两条假负对照的读数形状）");
+
+        // ── ② 闸门开 + 非法值 ⇒ 仍然不写（放行也造不出条件）──
+        ShanhaiRecipeEditorWorkspace.TEST_FORCE_EDIT_WITHOUT_USER = true;
+        ws.setCondValue("shanhai_no_such_condition_value");
+        final int n2 = ws.condEditedTotal();
+        check("condition_isolation_neg1_forced_but_invalid_value_still_writes_nothing",
+                n2 == n1,
+                "gate=forced invalid_value: edited_total " + n1 + " -> " + n2
+                        + "（证明「0 -> 0」有第二种解释：值非法时 makeValueCondition 返回 null "
+                        + "⇒ 不是闸门挡的，是根本没造出来 ⇒ 上一版负对照正是死在这一句）");
+
+        // ── ③ 闸门开 + 合法且**确实不同**的值 ⇒ **必须真的写进去**（这才是"旧行为复现"）──
+        //
+        //  ⚠️ 为什么不用 B 自己那个类型的值：B 常常是**一条条件都没有**的配方
+        //     （主代理那台：B = `gtceu:cutter/oak_slab`，`b_type=` `b_value=` 都是空的）
+        //     ⇒ 用 B 的类型注入 ⇒ `makeValueCondition` 造不出 ⇒ 还是假绿 ✗
+        //  ⇒ 改用**超净间**这个一定有档位的类型（真 key `cleanroom`，label「超净间」）。
+        //
+        //  🔴 第 4 轮的关键修正（第 3 轮诊断行抓到的）：第 3 轮我是拿
+        //     `ws.condValue()` 当"现在这个值"去挑 alternative —— 而**读它的时机太早**：
+        //     那时候还没 `setCondTypeFrom`，`condValue` 是""，于是 `altValueKeyOf` 返回了表的
+        //     **第一项 "cleanroom"**，恰好**等于** `setCondTypeFrom` 之后被设成的那个值
+        //     ⇒ `setCondValue("cleanroom")` 与当前值相同 ⇒ `sameAs` 成立 ⇒ no-op ⇒ 0 增量 ✗
+        //     （现场读数逐字：`NEGATIVE_CONTROL gate=forced type=cleanroom value=cleanroom … 0 -> 0`）
+        //  ⇒ 正确顺序：**先把类型强制成超净间**（这一步会把它自己的档位表第一项设进 `condValue`），
+        //     **再**读 `condValue`，**然后**挑一个与它不同的 key ⇒ 这一次一定是真的改动 ✓
+        ShanhaiRecipeEditorWorkspace.TEST_FORCE_EDIT_WITHOUT_USER = true;
+        ws.selectRecipe(bId);                               // 重新载入 B（顺带清编辑态）—— 这一步不写
+        ws.selectCondition(0, false);                       // 选中 B 的第 1 行（下面强制改的就是它）
+        // 🔴 第 4 轮：把"有没有一个可写的槽位"变成断言 —— 否则 condSel=-1 时所有写都被
+        //    rebuildSelectedFromEditor 第一句挡掉，负对照又会退化成假绿 ✗
+        check("condition_isolation_neg_ctl_has_slot",
+                ws.condSel() >= 0,
+                "B=" + bId + " conditions=" + conditionsJsonOf(bTarget).size() + " sel=" + ws.condSel()
+                        + "（负对照必须有一个能写的槽位：B 得真有一条条件，否则 condSel=-1 ⇒ 写不进去）");
+        ws.setCondTypeFrom(ShanhaiRecipeConditions.TYPE_CLEANROOM,
+                ShanhaiRecipeEditorWorkspace.ORIGIN_USER_DROPDOWN);   // 真·用户动作入口 ⇒ 走闸门
+        final String ctlCurrent = ws.condValue();           // ← 必须在 setCondTypeFrom **之后**读
+        final String ctlValue = altValueKeyOf(server, ShanhaiRecipeConditions.TYPE_CLEANROOM, ctlCurrent);
+        ShanhaiMod.LOGGER.info("{} condition_isolation_neg_ctl type=cleanroom current={} alt={} sel={}",
+                PREFIX, ctlCurrent, ctlValue, ws.condSel());
+        if (ctlValue != null) {
+            ws.setCondValue(ctlValue);                      // 旧行为下 **这一句就是写回**
+        }
+        final int n3 = ws.condEditedTotal();
+        final boolean wroteSoFar = n3 > n2;
+        check("condition_isolation_neg_control_write_happens",
+                wroteSoFar,
+                "NEGATIVE_CONTROL gate=forced type=cleanroom current=" + ctlCurrent + " alt=" + ctlValue
+                        + " sel=" + ws.condSel()
+                        + " ⇒ edited_total " + n2 + " -> " + n3
+                        + "（必须 > 0 ⇒ 否则 condition_isolation_auto_write_refused 是恒真的假绿）");
+
+        // ── 负对照 2：B 的条件"一字未动"必须【不再成立】──
+        final String bAfterForce = canonicalAll(conditionsJsonOf(bTarget));
+        check("condition_isolation_neg_control_untouched_fails",
+                wroteSoFar && !bCondsBefore.equals(bAfterForce),
+                "NEGATIVE_CONTROL(旧行为) wrote=" + wroteSoFar
+                        + " before=" + bCondsBefore + " after=" + bAfterForce
+                        + "（旧行为下 B 的条件必须真的被改 ⇒ 这正是用户看到的「我的条件都被改了」）");
+
+        // ── ④ 闸门放回 false：同一个动作必须又被挡住（内容也不再变）──
+        ShanhaiRecipeEditorWorkspace.TEST_FORCE_EDIT_WITHOUT_USER = forcedOff;
+        final int n4 = ws.condEditedTotal();
+        final String bBeforeRestore = canonicalAll(conditionsJsonOf(bTarget));
+        if (ctlValue != null) {
+            ws.setCondTypeFrom(ShanhaiRecipeConditions.TYPE_CLEANROOM,
+                    ShanhaiRecipeEditorWorkspace.ORIGIN_USER_DROPDOWN);
+            ws.setCondValue(ctlValue);                      // 同样一次注入，闸门关着 ⇒ 不许写
+        }
+        final int n5 = ws.condEditedTotal();
+        final String bAfterRestore = canonicalAll(conditionsJsonOf(bTarget));
+        check("condition_isolation_quiet_after_restore",
+                n5 == n4 && bBeforeRestore.equals(bAfterRestore),
+                "闸门放回 false 后再注入同一个值：edited_total " + n4 + " -> " + n5
+                        + " / B 内容未再变=" + bBeforeRestore.equals(bAfterRestore)
+                        + "（必须 0 增量 ⇒ 上面 ③ 那次增长确实来自负对照开关）");
+
+        // ── ⑤ 收尾：切回 A（又是"切配方"那一拍，仍然一个字都不许写）──
+        final int n6 = ws.condEditedTotal();
+        ws.selectRecipe(aId);
+        final int n7 = ws.condEditedTotal();
+        check("condition_isolation_switch_back_no_write",
+                n7 == n6,
+                "再切回 A=" + aId + "：edited_total " + n6 + " -> " + n7
+                        + "（切配方永远不写，与第 2/3 条同口径）");
+        ShanhaiMod.LOGGER.info("{} condition_isolation_done edited_total={} resets={}",
+                PREFIX, ws.condEditedTotal(), ws.condEditorResetTotal());
+    }
+
+    /**
+     * 在该类型的档位表里挑一个<b>与 {@code currentKey} 不同</b>的 key。
+     *
+     * <p><b>契约（主代理第 4 轮点单的口径）</b>：{@code currentKey} 为空 / 表里没有它时，
+     * 返回**活表的第一项**（那一定是一个合法档位）✓；只有"表里每一项都等于 {@code currentKey}"
+     * （= 表只有一项）这种退化情形才返回 null。
+     *
+     * <p>为什么要它：负对照必须让<b>注入的动作真的造出一条条件</b>。
+     * 第 3 轮我硬写字面量 {@code "物质重组模块"}（界面标签，不是 key）⇒ {@code valueTableOf} 为空
+     * ⇒ 注入在 {@code setCondValueFrom} 第一句就 return ✗；
+     * 第 4 轮我又犯了另一半 —— **读"当前值"的时机太早**（还没 {@code setCondTypeFrom} 就读
+     * {@code condValue}），于是"alternative"挑中了表的**第一项**，而它恰好**等于**之后被设成的那个值
+     * ⇒ {@code sameAs} 成立 ⇒ no-op ⇒ 0 增量 ✗（现场读数：`type=cleanroom value=cleanroom … 0 -> 0`）。
+     * ⇒ 所以**调用方必须先让类型定下来，再拿 {@code condValue} 当 currentKey 传进来** ✓
+     */
+    private static String altValueKeyOf(MinecraftServer server, String typeKey, String currentKey) {
+        final List<ShanhaiRecipeConditions.Value> vs = ShanhaiRecipeConditions.valueTableOf(server, typeKey);
+        if (vs.isEmpty()) {
+            return null;                                    // 这个类型没有档位 ⇒ 挑不出来（调用方要如实报）
+        }
+        for (ShanhaiRecipeConditions.Value v : vs) {
+            if (currentKey == null || !v.key().equals(currentKey)) {
+                return v.key();                             // currentKey 为空 ⇒ 这里就是"活表第一项" ✓
+            }
+        }
+        return null;                                        // 表只有一项且正好等于 currentKey ⇒ 无 alternative
+    }
+
+    /**
+     * 把一条活配方的条件编成 JsonArray（{@code GTRecipe.conditions} 的类型是
+     * {@code List<RecipeCondition>}，<b>不是</b> JsonArray ⇒ 不能直接往 {@link #canonicalAll} 传）。
+     */
+    private static com.google.gson.JsonArray conditionsJsonOf(GTRecipe r) {
+        final com.google.gson.JsonArray a = ShanhaiRecipeConditions.encodeOf(r);
+        return a == null ? new com.google.gson.JsonArray() : a;
+    }
+
+    /** 把一个 JsonArray 逐条 canonical 拼成一个可逐字比对的字符串（null / 空都给确定形状）。 */
+    private static String canonicalAll(com.google.gson.JsonArray arr) {
+        if (arr == null) {
+            return "(null)";
+        }
+        final StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < arr.size(); i++) {
+            if (i > 0) {
+                sb.append(" | ");
+            }
+            sb.append(ShanhaiRecipeConditions.canonical(arr.get(i)));
+        }
+        return sb.append("]").toString();
+    }
+
     /** 面板读回那一拍要用的目标（尽量挑一条与别的 case 不重叠的 assembler 配方）。 */
-    private static GTRecipe pickTargetForPanel(MinecraftServer server) {
-        final Set<ResourceLocation> exclude = new HashSet<>(HANDS_OFF);
+    private static GTRecipe pickTargetForPanel(MinecraftServer server) {        final Set<ResourceLocation> exclude = new HashSet<>(HANDS_OFF);
         if (lastApplyTargetId != null) {
             exclude.add(lastApplyTargetId);
         }

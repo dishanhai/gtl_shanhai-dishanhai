@@ -82,6 +82,34 @@ public final class ShanhaiConfig {
          */
         public ForgeConfigSpec.IntValue ringRestoreDebounceTicks;
 
+        /**
+         * 🆕 2026-10-07（配方编辑器「两套界面」第 1 步）<b>配方编辑器用哪一套界面</b>。
+         *
+         * <p>两套界面<b>共存</b>，本项决定打开哪一套：
+         * <ul>
+         *   <li>{@link Ui#OURS} = 我们自己那套（三段式、可编辑）—— <b>默认</b>；
+         *       ⚠️ 默认值就是"加本项之前的行为"，所以加这一项本身<b>不改任何既有行为</b>；</li>
+         *   <li>{@link Ui#HIS} = 上游那套界面里的<b>只读浏览页</b>（类型列表 / 配方卡片 / 翻页）。</li>
+         * </ul>
+         *
+         * <p>放 COMMON 的理由：界面的 ModularUI 是 {@code UIFactory.createUITemplate}
+         * <b>两侧各建一次</b>，两侧必须选出同一套界面，否则控件表对不上；
+         * COMMON 在单机里两侧读的是同一个 {@code config/shanhai-common.toml} ⇒ 天然一致。
+         * （这条与 {@link #primordialSphereStyle} 那条"COMMON 不跨端同步 = 只影响我自己"的既有口径同源。）
+         *
+         * <p>游戏内也可以改：{@code /shanhai edit ui ours|his}（写回本文件）
+         * 或全息设置面板里那一格。
+         */
+        public enum Ui {
+            /** 我们自己那套（默认）。 */
+            OURS,
+            /** 上游那套界面的只读浏览页。 */
+            HIS
+        }
+
+        /** 见 {@link Ui}。 */
+        public ForgeConfigSpec.EnumValue<Ui> editorUi;
+
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("primordial_omega_engine");
             primordialSphereStyle = builder
@@ -101,6 +129,17 @@ public final class ShanhaiConfig {
                             "纯客户端参数：本项只影响你自己画面里的环，不改机器的持久化状态",
                             "区间 0..1200；0 = 不去抖（回到旧行为，不推荐）")
                     .defineInRange("ringRestoreDebounceTicks", DEFAULT_RING_RESTORE_DEBOUNCE_TICKS, 0, 1200);
+            builder.pop();
+            // 🆕 2026-10-07（第 1 步）：配方编辑器「两套界面」开关。
+            //    ⚠️ 整节【追加在末尾】（没有把任何既有项挪位置），默认值 = OURS = 加这一节之前的行为。
+            builder.push("recipe_editor");
+            editorUi = builder
+                    .comment("配方编辑器用哪一套界面（两套共存，这一项决定打开哪一套）",
+                            "OURS = 我们自己那套（三段式、可编辑）—— 默认，与加本项之前的行为完全一致",
+                            "HIS  = 上游那套界面里的【只读浏览页】：类型列表 / 配方卡片 / 翻页，点编辑动作不响应",
+                            "COMMON 不跨端同步：单机两侧读的是同一个 config/shanhai-common.toml ⇒ 必然一致",
+                            "游戏内改法：/shanhai edit ui ours|his，或全息设置面板里那一格（都会写回本文件）")
+                    .defineEnum("ui", Ui.OURS);
             builder.pop();
         }
 

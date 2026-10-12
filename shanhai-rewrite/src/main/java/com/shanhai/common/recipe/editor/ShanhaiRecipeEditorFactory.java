@@ -79,8 +79,30 @@ public final class ShanhaiRecipeEditorFactory extends UIFactory<ShanhaiRecipeEdi
     //    IUIHolder 由 holder 自己实现（LDLib 的 ModularUI 拿的是 holder）。
 
     static ModularUI buildUI(ShanhaiRecipeEditorHolder holder, Player player) {
+        // 🆕 2026-10-07（第 1 步「两套界面共存 + 开关」）：这是【唯一一处分派】。
+        //    🔴 开关默认值 = OURS ⇒ 在默认配置下这一句的返回值与加它之前【逐字节相同】
+        //       （老那一支的构造参数一个都没动）。判断口径见 ShanhaiRecipeUiSwitch#current()。
+        if (com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.usesHisNow()) {
+            return buildUIHis(holder, player);
+        }
         return new ModularUI(ShanhaiRecipeEditorPanel.W, ShanhaiRecipeEditorPanel.H, holder, player)
                 .widget(new ShanhaiRecipeEditorPanel(holder, player));
+    }
+
+    /**
+     * 🆕 2026-10-07（第 1 步）<b>新版（上游那套）界面的只读浏览页</b>那一屏。
+     *
+     * <p><b>这是一个新方法</b>：{@link #buildUI} 里"我们自己那套"那一支一个字都没动，
+     * 本方法只是"另一套界面"的装配点。它走的仍然是<b>同一个</b> {@link #ID} 工厂、
+     * <b>同一份</b> {@link ShanhaiRecipeEditorHolder} ⇒ 两侧装配路径（
+     * {@code createUITemplate} / {@code readHolderFromSyncData}）完全复用，不需要第二条网络通道。
+     */
+    public static ModularUI buildUIHis(ShanhaiRecipeEditorHolder holder, Player player) {
+        com.shanhai.ShanhaiMod.LOGGER.info("{} buildUI_his holder={} clientSide={}",
+                ShanhaiRecipeOverrideStore.PREFIX, holder, player.level().isClientSide());
+        return new ModularUI(com.shanhai.common.recipe.editor2.ShanhaiRecipeBrowsePanel.W,
+                com.shanhai.common.recipe.editor2.ShanhaiRecipeBrowsePanel.H, holder, player)
+                .widget(new com.shanhai.common.recipe.editor2.ShanhaiRecipeBrowsePanel(holder, player));
     }
 
     // ------------------------------------------------------------ UIFactory 两侧装配

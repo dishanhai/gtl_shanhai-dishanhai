@@ -6,7 +6,11 @@ import com.shanhai.ShanhaiMod;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.entity.player.PlayerEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.network.NetworkEvent;
@@ -84,6 +88,8 @@ public final class ShanhaiJeiBridge {
             // 通道建不起来绝不能让服务端起不来（编辑器那半边的功能仍然可用）
             ShanhaiMod.LOGGER.error("{} net_channel_register_failed err={}", PREFIX, t.toString(), t);
         }
+        // 与通道同一拍挂上"玩家登录"那一个钩子（重放条件的补发口；见本类 ReplayedEntry 一节）
+        registerPlayerHook();
     }
 
     public static boolean isReady() {
@@ -414,13 +420,27 @@ public final class ShanhaiJeiBridge {
                 removedKept++;
             }
         }
+        // 🔴🔴 2026-10-07（重放条件的推送）：**这些 id 也必须在对账名单里**，否则同一条链会当场翻车：
+        //    重放补推 ⇒ 客户端补丁表里有了它（JEI 上槽挂上了）；随后用户开一次编辑器面板 ⇒
+        //    sendReconcile(appliedIds()) 的名单里【没有它】（重放那条路不进编辑器账本）⇒
+        //    客户端把这条补丁当"没在生效"丢掉 ⇒ 槽又没了（与 2026-10-06 那次 removed_kept 同族）。
+        //    ⚠️ 这不削弱对账本来要挡的事：REPLAYED 是**进程内**的，且只在"本局真的重放过条件"时才非空。
+        int replayedKept = 0;
+        for (String id : REPLAYED.keySet()) {
+            if (!keep.contains(id)) {
+                keep.add(id);
+                replayedKept++;
+            }
+        }
         try {
             channel.send(PacketDistributor.PLAYER.with(() -> player),
                     RecipeSyncMessage.reconcile(keep));
             ShanhaiMod.LOGGER.info("{} net_sent action=reconcile player={} in_force={} removed_kept={} "
-                            + "(in_force = 账本条目 ＋ 本局发过 removed 的 id；后者不并进来，"
-                            + "被删的配方会在下一次对账时从 JEI 里【回来】—— 见 2026-10-06 现场读数)",
-                    PREFIX, player.getName().getString(), keep.size(), removedKept);
+                            + "replayed_kept={} "
+                            + "(in_force = 账本条目 ＋ 本局发过 removed 的 id ＋ 本局重放过条件的 id；"
+                            + "前一类不并进来，被删的配方会在下一次对账时从 JEI 里【回来】；"
+                            + "最后一类不并进来，重放装的条件会在下一次对账时从 JEI 上【消失】)",
+                    PREFIX, player.getName().getString(), keep.size(), removedKept, replayedKept);
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} net_send_failed action=reconcile err={}", PREFIX, t.toString(), t);
         }
@@ -457,8 +477,252 @@ public final class ShanhaiJeiBridge {
 
     /** 装机读数（自检/日志用）。 */
     public static String statsLine() {
-        return "channel=" + CHANNEL_NAME + " ready=" + isReady() + " version=" + CHANNEL_VERSION;
+        return "channel=" + CHANNEL_NAME + " ready=" + isReady() + " version=" + CHANNEL_VERSION
+                + " replayed_pending=" + REPLAYED.size() + " replayed_sent=" + REPLAYED_SENT.get()
+                + " replayed_flushes=" + REPLAYED_FLUSHES.get();
     }
+
+    // ═════════════════════════ 重放条件的推送（2026-10-07 显示层缺口） ═════════════════════════
+    //
+    // 【缺口】用户实机两局读数（逐字）：
+    //   服务端侧：`overlay … cond_applied=9 cond_failed=0` ＋ 9 行
+    //             `editor conditions_replay_applied id=… n=1 types=[0:module_level] write_flag=false->false`
+    //             ⇒ 条件【确实】装上了服务端那一份；
+    //   客户端侧：那 9 条在 JEI 配方页里【一行催化剂槽都没有】，只有"用编辑器当场改过"的 2 条有
+    //             （`matter_flow_condensation/new_recipe_1`、`wl_board_circuit_assembly/new_recipe_2`）。
+    //   差别就在本类：编辑器当场改走的是 `broadcastRecipeChanged`（载荷带 conditionsJson），
+    //   而 `ShanhaiRecipeConditionReplay` 只写了服务端 json、**一个字节都没往客户端送**。
+    //
+    // 【修法】复用本类现成的消息类型（ACTION_CHANGED），**不新造协议**：
+    //   只带 conditionsJson，inputs/outputs/recipeBytes 留 null ⇒ 客户端 `synthesize()` 拿
+    //   **JEI 手里那条原件**只换 conditions 那一格 —— 正是要的最小改动。
+    //   ⚠️ 字节留空是【刻意的】且有一条安全依据：`ShanhaiJeiRecipePatches.buildRuntimeObject`
+    //      见 recipeBytes==null 就返回 null ⇒ `tryRuntimeHide` 走 "cannot_rebuild ⇒ 不藏" 那条分支
+    //      （藏了会更糟），替换完全由查询出口那层做（那条路本来就通）。
+    //
+    // 【时机】重放发生在**配方加载期**（KubeJS 事件里）—— 那一刻没有 server、没有玩家 ⇒
+    //   这里【只登记不发送】，三个时点补发：
+    //     ① 登记时若已有 server 且有在线玩家（`/reload` 那一局）⇒ 立刻发给在线者；
+    //     ② 玩家登录（PlayerLoggedInEvent）⇒ 发给该玩家（**掉线/后进的客户端由这里补上**）；
+    //     ③ 对账（sendReconcile）⇒ 这些 id 必须在对账名单里，否则补丁会在下一次对账时被丢掉。
+    //   登记表【整个进程生命周期都留着】（量级 = 本次重放了几条，用户这一局 = 9）⇒
+    //   任何时刻进来的客户端都能拿到；重复发是无害的（客户端按完整 recipe id 覆盖同一格）。
+
+    /** 一条"重放装过条件"的记录（只够造一条 ACTION_CHANGED 包：id ＋ 类型 ＋ 条件）。 */
+    private static final class ReplayedEntry {
+        final String recipeId;
+        final String typeId;
+        final String conditionsJson;
+
+        ReplayedEntry(String recipeId, String typeId, String conditionsJson) {
+            this.recipeId = recipeId;
+            this.typeId = typeId;
+            this.conditionsJson = conditionsJson;
+        }
+    }
+
+    /** 待补发/已补发的重放记录（按完整 recipe id 去重）。 */
+    private static final java.util.Map<String, ReplayedEntry> REPLAYED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 读数：真的发出去过几条（判据/自检用，可 grep）。 */
+    private static final java.util.concurrent.atomic.AtomicInteger REPLAYED_SENT =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 读数：补发过几拍（登录 / 立刻 / …）。 */
+    private static final java.util.concurrent.atomic.AtomicInteger REPLAYED_FLUSHES =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 已发出去过几条（自检判据）。 */
+    public static int replayedSentCount() {
+        return REPLAYED_SENT.get();
+    }
+
+    /** 登记过几条待推的重放条件。 */
+    public static int replayedPendingCount() {
+        return REPLAYED.size();
+    }
+
+    /**
+     * <b>重放刚给这一条装上了条件 ⇒ 登记一条"要补推给客户端"的记录</b>（由
+     * {@code ShanhaiRecipeConditionReplay.apply} 调，见那里的 {@code noteToJei}）。
+     *
+     * <p>🔴 <b>只登记，不在这里发送</b>（理由见本节注释的【时机】）。登记完会顺手试一次"立刻补发"：
+     * 有 server 且有在线玩家就发（{@code /reload} 那一局），没有就记一行 deferred 等登录。
+     *
+     * <p>⚠️ 缺 id / 缺类型 / 空条件一律<b>不登记并如实打一行</b> —— 不推比推错强
+     * （客户端是按"类型 == 当前 JEI 分类 uid"对号入座的）。
+     */
+    public static void noteReplayedConditions(String recipeId, String typeId, String conditionsJson) {
+        if (recipeId == null || recipeId.isEmpty()) {
+            ShanhaiMod.LOGGER.warn("{} replayed_conditions_queue_skipped reason=no_recipe_id", PREFIX);
+            return;
+        }
+        if (typeId == null || typeId.isEmpty()) {
+            ShanhaiMod.LOGGER.warn("{} replayed_conditions_queue_skipped id={} reason=no_type_id", PREFIX, recipeId);
+            return;
+        }
+        if (conditionsJson == null || conditionsJson.isEmpty() || "[]".equals(conditionsJson)) {
+            ShanhaiMod.LOGGER.warn("{} replayed_conditions_queue_skipped id={} reason=no_conditions "
+                    + "（没有条件就没什么可补推的）", PREFIX, recipeId);
+            return;
+        }
+        REPLAYED.put(recipeId, new ReplayedEntry(recipeId, typeId, conditionsJson));
+        ShanhaiMod.LOGGER.info("{} replayed_conditions_queued id={} type={} cond_bytes={} pending={} "
+                        + "（重放把条件装上了服务端 ⇒ 这条还要补一次 JEI 推送："
+                        + "客户端此刻可能还没进世界，补发时点 = 登录 / reload / 立刻有玩家在线）",
+                PREFIX, recipeId, typeId, conditionsJson.length(), REPLAYED.size());
+        tryFlushReplayedToOnlinePlayers();
+    }
+
+    /**
+     * 有 server 且有在线玩家就立刻补发；否则记一行 deferred（<b>启动期就是这条路，安全空转</b>）。
+     *
+     * <p>server 从 {@link #currentServer} 取（由 {@code ServerStartedEvent} 记下）——
+     * <b>刻意不用别的取法</b>：这个字段的来源事件在本工程里已经用了十几处（{@code event.getServer()}），
+     * 形状是被验过的；拿不到就是"配方加载期还没有 server"这一种情况，安全跳过。
+     */
+    public static void tryFlushReplayedToOnlinePlayers() {
+        try {
+            if (REPLAYED.isEmpty()) {
+                return;
+            }
+            final MinecraftServer server = currentServer;
+            if (server == null) {
+                ShanhaiMod.LOGGER.info("{} replayed_conditions_flush_deferred reason=no_server pending={} "
+                                + "（配方加载期本来就没有 server ⇒ 等玩家登录那一拍补发）",
+                        PREFIX, REPLAYED.size());
+                return;
+            }
+            flushReplayedConditions(server, null);
+        } catch (Throwable t) {
+            // 补发失败绝不影响配方本身（服务端那一份是对的）
+            ShanhaiMod.LOGGER.warn("{} replayed_conditions_flush_now_failed err={}", PREFIX, t.toString());
+        }
+    }
+
+    /**
+     * <b>把登记过的重放条件补推出去</b>（{@code only == null} ⇒ 发给所有在线玩家）。
+     *
+     * <p>每一处都能安全跳过：没有 server / 通道没建起来 ⇒ 记一行并返回 0（不抛、不刷屏）；
+     * 单个条目发失败 ⇒ 只记这一条的 ERROR，继续发下一条。
+     *
+     * @return 真的发出去了几条
+     */
+    public static int flushReplayedConditions(MinecraftServer server, ServerPlayer only) {
+        if (REPLAYED.isEmpty()) {
+            return 0;
+        }
+        if (server == null) {
+            ShanhaiMod.LOGGER.info("{} replayed_conditions_flush_skipped reason=no_server pending={}",
+                    PREFIX, REPLAYED.size());
+            return 0;
+        }
+        if (!isReady()) {
+            // 专用服务端/客户端都可能走到这里（通道没建起来）；这不是错误，只是"这一拍发不了"
+            ShanhaiMod.LOGGER.warn("{} replayed_conditions_flush_skipped reason=channel_not_ready pending={}",
+                    PREFIX, REPLAYED.size());
+            return 0;
+        }
+        int sent = 0;
+        for (ReplayedEntry e : new java.util.ArrayList<>(REPLAYED.values())) {
+            try {
+                final RecipeSyncMessage msg = new RecipeSyncMessage(e.typeId, e.recipeId, ACTION_CHANGED,
+                        null, null, e.conditionsJson, false, 0, false, 0L, null);
+                channel.send(only == null ? PacketDistributor.ALL.noArg()
+                        : PacketDistributor.PLAYER.with(() -> only), msg);
+                sent++;
+                noteBackInForce(e.recipeId);        // 这条又（在客户端）生效了 ⇒ 不再替它保住"已删"
+                ShanhaiMod.LOGGER.info("{} net_sent action=replayed_conditions id={} type={} cond_bytes={} to={} "
+                                + "（★重放装的条件补推给客户端 ⇒ JEI 配方页才会挂上那行催化剂槽）",
+                        PREFIX, e.recipeId, e.typeId, e.conditionsJson.length(),
+                        only == null ? "all" : only.getName().getString());
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.error("{} replayed_conditions_send_failed id={} type={} err={} "
+                                + "（这一条没推出去 ⇒ 那个客户端的 JEI 上看不到它的槽；下次登录会再推一次）",
+                        PREFIX, e.recipeId, e.typeId, t.toString());
+            }
+        }
+        if (sent > 0) {
+            REPLAYED_SENT.addAndGet(sent);
+            REPLAYED_FLUSHES.incrementAndGet();
+            ShanhaiMod.LOGGER.info("{} replayed_conditions_flushed sent={} pending={} to={} flushes={}",
+                    PREFIX, sent, REPLAYED.size(), only == null ? "all" : only.getName().getString(),
+                    REPLAYED_FLUSHES.get());
+        }
+        return sent;
+    }
+
+    /** 登录钩子挂过没有（幂等闸）。 */
+    private static boolean playerHookRegistered;
+
+    /**
+     * 当前 server（{@code ServerStartedEvent} 那一拍记下；<b>没有 = null</b>）。
+     *
+     * <p>用途只有一个：{@link #tryFlushReplayedToOnlinePlayers()} 想知道"现在有没有 server"。
+     * 用事件记而不是每次去查全局单例 —— 来源事件在本工程里已被用了十几处，形状是验过的
+     * （{@code event.getServer()}）。
+     */
+    private static volatile MinecraftServer currentServer;
+
+    /** 挂"玩家登录"那一个钩子（幂等；挂不上只记一行，绝不影响服务端启动）。 */
+    private static void registerPlayerHook() {
+        if (playerHookRegistered) {
+            return;
+        }
+        playerHookRegistered = true;
+        try {
+            MinecraftForge.EVENT_BUS.register(PlayerJoinHook.class);
+            ShanhaiMod.LOGGER.info("{} replayed_conditions_login_hook_registered event=PlayerLoggedInEvent "
+                            + "（★掉线的客户端下次上线由这一拍补上：先把条件推给他，再让他开 JEI）", PREFIX);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} replayed_conditions_login_hook_failed err={} "
+                            + "（挂了也只影响「后进客户端补推」这一件事，其它功能不受影响）", PREFIX, t.toString());
+        }
+    }
+
+    /**
+     * <b>玩家登录 ⇒ 把重放装过条件的那几条推给他</b>（这一拍就是"掉线客户端下次上线能补上"的保证）。
+     *
+     * <p>为什么挂在 {@code PlayerLoggedInEvent}：这是"客户端一定在线、且客户端那边的配方表
+     * 刚刚由服务端同步完"的第一个时点；本类在专服上也跑到（事件只在逻辑服务端触发，
+     * 包走 {@code DistExecutor} 到客户端那一侧，专服自己不会去碰客户端类）。
+     */
+    public static final class PlayerJoinHook {
+
+        private PlayerJoinHook() {}
+
+        @SubscribeEvent
+        public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+            try {
+                if (!(event.getEntity() instanceof ServerPlayer sp)) {
+                    return;                     // 防呆：这个事件理论上只会带 ServerPlayer
+                }
+                flushReplayedConditions(sp.getServer(), sp);
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.warn("{} replayed_conditions_login_flush_failed err={}", PREFIX, t.toString());
+            }
+        }
+
+        /**
+         * 服务端起来了 ⇒ 记下 server（并顺手补发一次：{@code /reload} 那类场景里玩家已经在线）。
+         *
+         * <p>⚠️ 此时通常还没有玩家（单人是"服务端起完 → 玩家才进来"），所以真正补齐的是上面那一拍
+         * （{@code PlayerLoggedInEvent}）；这里只保证 {@link #currentServer} 有值，让
+         * {@code /reload} 之后的重放能当场发出去。
+         */
+        @SubscribeEvent
+        public static void onServerStarted(net.minecraftforge.event.server.ServerStartedEvent event) {
+            try {
+                currentServer = event.getServer();
+                flushReplayedConditions(currentServer, null);
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.warn("{} replayed_conditions_server_started_flush_failed err={}",
+                        PREFIX, t.toString());
+            }
+        }
+    }
+
 
     /**
      * 🔴 <b>第 5 轮修 #4 的机器判据</b>：一条带条件的同步消息<b>过一遍真正的编码器/解码器</b>

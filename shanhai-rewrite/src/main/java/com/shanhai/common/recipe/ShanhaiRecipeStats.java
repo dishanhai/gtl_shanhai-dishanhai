@@ -550,6 +550,13 @@ public final class ShanhaiRecipeStats {
             ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
             if (player != null) {
                 sendBannerTo(player);
+                // 🆕 2026-10-06：游戏内更新公告 —— 🔴 【同一拍】紧接在统计横幅之后发出去。
+                //    用户原话：「显示就和左下角那个配方统计数量的横幅同步显示」。
+                //    ⇒ 本轮【只加这一行】：不新增事件订阅者、不新增延迟计数、不另起时间点，
+                //      「横幅在前、公告紧随其后」由这两行的【代码顺序】保证。
+                //    ⚠️ 本行对上面三行（含 sendBannerTo）没有任何影响：它的全部异常都在
+                //      ShanhaiNewsCommand.sendNewsOnLogin 内部就地收成日志，绝不外抛到这个循环里。
+                com.shanhai.common.news.ShanhaiNewsCommand.sendNewsOnLogin(player);
             }
         }
     }
@@ -1057,13 +1064,20 @@ public final class ShanhaiRecipeStats {
                         // 🆕 2026-10-04：隐藏调试命令 /shanhai editprobe（配方运行期编辑探针）。
                         //    注册方式照上面两支（同一套 Brigadier 用法）；本行【只增不减】，
                         //    上面三行与它们打出去的日志逐字节未变。
-                        .then(com.shanhai.common.recipe.ShanhaiRecipeEditProbe.commandBranch()));
+                        .then(com.shanhai.common.recipe.ShanhaiRecipeEditProbe.commandBranch())
+                        // 🆕 2026-10-06：备用入口 /shanhai 公告（看历史更新公告：无参数=最新，
+                        //    <序号>=第 N 条（1 = 最新），list=列全部）。纯指令入口，不做 GUI。
+                        //    注册形态与上面三支完全相同（同一个 shanhai 根节点，Brigadier 合并同名子节点）。
+                        .then(com.shanhai.common.news.ShanhaiNewsCommand.commandBranch()));
         // 注册期打一行 INFO：这条日志本身就是「命令树真的挂上了」的机器可判证据
         // （无头专服里控制台能不能跑命令，先看这一行在不在）。
         ShanhaiMod.LOGGER.info(LOG_PREFIX + " command_registered /" + COMMAND_ROOT + " " + COMMAND_ARG
                 + " (+alias /" + COMMAND_ROOT + " " + COMMAND_ARG_ALIAS + ")");
         ShanhaiMod.LOGGER.info(LOG_PREFIX + " command_registered /" + COMMAND_ROOT + " "
                 + com.shanhai.common.recipe.ShanhaiRecipeEditProbe.COMMAND_ARG);
+        // 🆕 2026-10-06：只追加一行日志，上面两条一个字节都没动。
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " command_registered /" + COMMAND_ROOT + " "
+                + com.shanhai.common.news.ShanhaiNewsCommand.COMMAND_ARG);
     }
 
     /** {@code /shanhai <name>} 那一支：无参数、任何权限、执行即重打横幅。 */

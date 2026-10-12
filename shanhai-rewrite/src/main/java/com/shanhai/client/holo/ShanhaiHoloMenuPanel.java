@@ -362,6 +362,22 @@ public final class ShanhaiHoloMenuPanel {
     public static final int CLICK_PARAM_UP = 22;
 
     /**
+     * 🆕 2026-10-07（配方编辑器「两套界面」第 1 步）<b>「界面：老版/新版」那一格</b>。
+     *
+     * <p>落点 = {@link #SETTINGS_ADV_ROW} 的<b>最后一格</b>（格 3）。理由（本轮唯一的版面取舍）：
+     * <ul>
+     *   <li>🔴 <b>行数一个都没动</b>：{@link #ROWS} = {@code BOARD_COUNT} = 5，与已验收的 5 块菜单板
+     *       几何（{@code RING_STEP_DEG = 360/5}）绑死，加行就会挪板子 ⇒ 那是红线；</li>
+     *   <li>5 行里前三行（距离 / 布局 / 环绕特效）四格<b>全用满</b>，只有「高级调参」与「返回」
+     *       两行是"整行可点、格 1..3 空着"；挑<b>「高级调参」的格 3</b> 而不是「返回」的格 3
+     *       —— 因为「返回」那一行被用户当成"整行都是关面板"，在那里塞别的动作最容易被误点；</li>
+     *   <li>「高级调参」的格 0..2 仍然整段进第二层 ⇒ 本行功能<b>没有丢</b>。</li>
+     * </ul>
+     * 动作 = {@code ShanhaiRecipeUiSwitch.flip()}（客户端本地翻一下，写进 config/shanhai-common.toml）。
+     */
+    public static final int CLICK_EDITOR_UI = 23;
+
+    /**
      * 🆕 动作码 ⇒ 环绕特效档位号；不是预设那四个码就返回 {@code -1}。
      * <p>它把"点哪一格 = 切到哪一档"收成一处（输入层与自检都读它，不各写一遍 switch）。
      */
@@ -405,6 +421,7 @@ public final class ShanhaiHoloMenuPanel {
             case CLICK_ADV_BACK -> "高级页返回";
             case CLICK_PARAM_DOWN -> "参数减一档";
             case CLICK_PARAM_UP -> "参数加一档";
+            case CLICK_EDITOR_UI -> "配方编辑器界面=换一套";
             default -> "无动作";
         };
     }
@@ -510,7 +527,9 @@ public final class ShanhaiHoloMenuPanel {
                     default -> CLICK_NONE;
                 };
                 // 「高级调参」整行可点 ⇒ 进第二层
-                case SETTINGS_ADV_ROW -> CLICK_ADV_OPEN;
+                // 🆕 2026-10-07（第 1 步）：格 3 被「界面：老版/新版」那一格占用（见 CLICK_EDITOR_UI），
+                //    格 0..2 仍然整段进第二层 ⇒ 这一行的功能没有丢。
+                case SETTINGS_ADV_ROW -> cell == CELLS - 1 ? CLICK_EDITOR_UI : CLICK_ADV_OPEN;
                 // 「返回」整行可点
                 case SETTINGS_BACK_ROW -> CLICK_CLOSE;
                 default -> CLICK_NONE;
@@ -634,7 +653,10 @@ public final class ShanhaiHoloMenuPanel {
                         + ShanhaiHoloSurroundTuning.presetName(cell)
                         : "";
                 // 🆕 高级调参那一行：整行可点，名称挂在格 0
-                case SETTINGS_ADV_ROW -> cell == 0 ? "高级调参" : "";
+                // 🆕 2026-10-07（第 1 步）：最后一格是「界面：老版/新版」开关（值现读配置文件）
+                case SETTINGS_ADV_ROW -> cell == 0 ? "高级调参"
+                        : (cell == CELLS - 1
+                        ? com.shanhai.common.recipe.editor2.ShanhaiRecipeUiSwitch.cellText() : "");
                 case SETTINGS_BACK_ROW -> cell == 0 ? "返回" : "";
                 default -> "";
             };
@@ -1007,10 +1029,19 @@ public final class ShanhaiHoloMenuPanel {
                     presetOfClick(want), presetOfCell(col));
         }
         // 🆕 「高级调参」整行可点 ⇒ 四格同一个动作码
-        for (int col = 0; col < CELLS; col++) {
+        // 🔴 2026-10-07（第 1 步）：格 CELLS-1 现在是「界面：老版/新版」开关（CLICK_EDITOR_UI）
+        //    ⇒ 这一条的正对照收成 0..CELLS-2；格 CELLS-1 另立新判据（含一条负对照）。
+        for (int col = 0; col < CELLS - 1; col++) {
             c(bad, n, "设置-高级调参-格" + col + " = 进第二层（整行可点）",
                     clickAction(MODE_SETTINGS, SETTINGS_ADV_ROW, col), CLICK_ADV_OPEN);
         }
+        c(bad, n, "设置-高级调参-格" + (CELLS - 1) + " = 配方编辑器界面开关",
+                clickAction(MODE_SETTINGS, SETTINGS_ADV_ROW, CELLS - 1), CLICK_EDITOR_UI);
+        // 负对照：开关那一格【不许】还是"进第二层"（把旧值当新值就是假绿）
+        c(bad, n, "N10 负对照：设置-高级调参-格" + (CELLS - 1) + " 不再是进第二层",
+                clickAction(MODE_SETTINGS, SETTINGS_ADV_ROW, CELLS - 1) == CLICK_ADV_OPEN, false);
+        // 正对照：格 0 上的字仍是「高级调参」（那一行的功能没有丢）
+        c(bad, n, "设置-高级调参-格0 上的字没变", cellText(MODE_SETTINGS, SETTINGS_ADV_ROW, 0), "高级调参");
         // 「返回」整行可点
         for (int col = 0; col < CELLS; col++) {
             c(bad, n, "设置-返回-格" + col + " = 收起面板",
@@ -1388,7 +1419,8 @@ public final class ShanhaiHoloMenuPanel {
                 + "设置面板上「朝向」那一行彻底没了（含一条「喂一格假按钮」的正对照） / "
                 + "设置面板没有标题；"
                 + "另含两个面板的版面判据：设置面板 5 行全用满（距离/布局/环绕特效/高级调参/返回）+ "
-                + "环绕特效四格=四档 + 高级页 4 页（4/4/4/3）逐行逐格对到那 15 项）"
+                + "环绕特效四格=四档 + 高级页 " + ShanhaiHoloSurroundTuning.PAGE_COUNT + " 页（4/4/4/4）"
+                + "逐行逐格对到那 " + ShanhaiHoloSurroundTuning.PARAM_COUNT + " 项）"
                 : (" FAILED:" + r.bad()));
     }
 

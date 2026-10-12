@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.shanhai.ShanhaiMod;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -75,7 +76,26 @@ public final class ShanhaiHoloMenuClient {
     /** 世界空间渲染入口。挑 stage 的理由见 {@link ShanhaiHoloMenuRenderer} 类注释 §3。 */
     @SubscribeEvent
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
+        final Minecraft mc = Minecraft.getInstance();
+        // 🆕 2026-10-07（联机 P2）：每渲染帧推进"我的设置变了就报一次"。
+        //   🔴 必须【在渲染器之前】、而且不受"我自己关着投影"影响 ——
+        //      "让别人看见我"与"我自己看不看见"是两件事（用户拍板④：显示别人的板子默认开）。
+        ShanhaiHoloRemoteView.frameTick(mc);
         ShanhaiHoloMenuRenderer.onRenderLevelStage(event);
+    }
+
+    /**
+     * 🆕 2026-10-07（联机 P2）：<b>断线/退出世界</b> ⇒ 把"别人那张表"清干净。
+     *
+     * <p>不清的后果是可判的：{@code ClientLevel.players()} 换维度时会重建，
+     * 但"退出到主菜单"那一刻表里还留着上次那批人 ⇒ 下次进世界的第一帧会拿旧 UUID 去画
+     * （画在旧坐标上，位置是错的）。
+     */
+    @SubscribeEvent
+    public static void onLoggingOut(net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut event) {
+        final int n = ShanhaiHoloRemoteState.clearAll("logged_out");
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " " + ShanhaiHoloRemoteView.PREFIX
+                + " holo_mp_logout_client cleared={} {}", n, ShanhaiHoloRemoteState.describe());
     }
 
     /**
@@ -97,8 +117,18 @@ public final class ShanhaiHoloMenuClient {
                 && event.getDispatcher().getRoot().getChild(COMMAND_ROOT).getChild(COMMAND_ARG) != null;
         ShanhaiMod.LOGGER.info(LOG_PREFIX + " command_registered /" + COMMAND_ROOT + " " + COMMAND_ARG
                 + " present=" + present + " (client-side)");
+        // 🆕 2026-10-07：进世界的那一刻把显示设置从 config/shanhai-client.toml 读进运行副本（只读一次），
+        //   并打一行"运行副本 vs 配置"的逐项比对（audit）—— 这就是"没有两处各存一份"的机器判据。
+        ShanhaiHoloPersist.ensureLoaded();
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " " + ShanhaiHoloPersist.selfCheckLine());
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " persist_runtime {" + ShanhaiHoloPersist.describe() + "}");
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " persist_audit " + ShanhaiHoloPersist.auditLine());
         // 顺手把离线自检跑一遍 —— 它不碰任何游戏状态，失败会打 ERROR（冒烟/日志一眼可见）
         ShanhaiHoloMenuState.logSelfTest();
+        // 🆕 2026-10-07（联机 P2）：把客户端那侧的落点挂上（幂等），并打一行联机自检读数。
+        //   进世界/重生/换维度都会走到这里 ⇒ 顺便把"换维度要清表"这条也自然覆盖到。
+        ShanhaiHoloRemoteView.install();
+        ShanhaiMod.LOGGER.info(LOG_PREFIX + " " + ShanhaiHoloRemoteView.describe());
     }
 
     // ------------------------------------------------------------------ 命令树
@@ -174,7 +204,8 @@ public final class ShanhaiHoloMenuClient {
                         })))
                 // ---- 距离 ----
                 .then(Commands.literal("distance")
-                        .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(0.8D, 8.0D))
+                        .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(
+                                        ShanhaiHoloPersist.DISTANCE_MIN, ShanhaiHoloPersist.DISTANCE_MAX))
                                 .executes(ctx -> {
                                     final float d = ShanhaiHoloMenuState.setDistance(
                                             (float) DoubleArgumentType.getDouble(ctx, "blocks"));

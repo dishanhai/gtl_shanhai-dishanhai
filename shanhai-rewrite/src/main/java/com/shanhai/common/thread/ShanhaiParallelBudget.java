@@ -112,6 +112,9 @@ public final class ShanhaiParallelBudget {
      *   k      = 每并行耗电（🔴 2026-10-02 第七轮起以【毫 EU/t】的定点 long 参与运算，
      *           {@code ParallelPowerBudget#perParallelMilliCost}；中途不许 round）
      *   电上限 = floor(P × 1000 ÷ k毫)                        ← {@code ParallelPowerBudget#parallelFromPowerMilli}
+     *          🔴 它是【总并行】口径（见 2026-10-11 那一段）⇒ 它自己的 ceiling 也必须吃
+     *             【总】口径的上限 = {@link #totalParallelLimitFor}(本机上限, T)；
+     *             ⛔ 传入"每线程上限"就会把 min(P÷k, 本机上限) 当成总并行（2026-10-11 修掉的那个 bug）。
      *   ────────────────────────────────────────────────────────────────────────────
      *   每线程并行 p = min( 本机并行上限 , floor(电上限 ÷ T) )   ← 【本方法 = 接口层那个值】
      *   ────────────────────────────────────────────────────────────────────────────
