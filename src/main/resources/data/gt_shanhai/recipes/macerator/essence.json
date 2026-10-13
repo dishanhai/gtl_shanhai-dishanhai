@@ -24,8 +24,8 @@
       },
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "dishanhai:wzqs"
           }
@@ -38,8 +38,8 @@
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 8,
+          "type": "gtceu:long",
+          "actualAmount": 8,
           "ingredient": {
             "item": "kubejs:essence"
           }
@@ -50,7 +50,7 @@
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",
-      "recipeId": "kubejs:macerator/essence",
+      "recipeId": "gt_shanhai:macerator/essence",
       "defaultEnabled": true
     }
   ]

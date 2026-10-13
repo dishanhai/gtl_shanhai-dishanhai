@@ -1254,6 +1254,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.translatable("gt_shanhai.machine.me_stellar_stock_part_machine.tooltip.0"));
             tooltips.add(Component.translatable("gt_shanhai.machine.me_stellar_stock_part_machine.tooltip.1"));
             tooltips.add(Component.translatable("gt_shanhai.machine.me_stellar_stock_part_machine.tooltip.2"));
+            tooltips.add(Component.translatable("gt_shanhai.machine.me_stellar_stock_part_machine.tooltip.3"));
         });
 
         // ── 可请求输入总成 ────────────────────────────────────────────

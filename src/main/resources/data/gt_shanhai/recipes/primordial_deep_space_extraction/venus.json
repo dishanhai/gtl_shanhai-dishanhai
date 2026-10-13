@@ -8,7 +8,7 @@
           "type": "gtceu:sized",
           "count": 1,
           "ingredient": {
-            "item": "dishanhai:thetornproductionline:ultimate_world_fragment_miner_module"
+            "item": "dishanhai:ultimate_world_fragment_miner_module"
           }
         },
         "chance": 0,

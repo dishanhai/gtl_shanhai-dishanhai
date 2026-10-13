@@ -1,0 +1,126 @@
+{
+  "data": {
+    "euTier": 3
+  },
+  "duration": 32,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 480
+      }
+    ]
+  },
+  "type": "gtceu:centrifuge",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:trifluoroacetic_phosphate_ester_dust"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzgl"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 13000,
+          "value": [
+            {
+              "fluid": "gtceu:actinium_radium_nitrate_solution"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 26,
+          "ingredient": {
+            "item": "gtceu:actinium_nitrate_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 27,
+          "ingredient": {
+            "item": "gtceu:radium_nitrate_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4,
+          "ingredient": {
+            "item": "gtceu:francium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:thorium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 2,
+          "ingredient": {
+            "item": "gtceu:protactinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:radium_dust"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 13000,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtceu:centrifuge/actinium_radium_nitrate_solution",
+      "defaultEnabled": true
+    }
+  ]
+}

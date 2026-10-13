@@ -9,6 +9,7 @@ import com.dishanhai.gt_shanhai.client.ShanhaiJEIPlugin;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.JeiBookmarkMode;
 import com.dishanhai.gt_shanhai.network.JeiBookmarkMissingItemsRequestPacket;
+import com.dishanhai.gt_shanhai.network.JeiBookmarkMissingItemsRequestPacket.TaggedInput;
 import com.dishanhai.gt_shanhai.network.JeiPatternByproductUploadRequestPacket;
 import com.dishanhai.gt_shanhai.network.JeiPatternQuickEncodeRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
@@ -37,18 +38,29 @@ import mezz.jei.common.transfer.RecipeTransferUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.Rect2i;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderSet;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.material.Fluid;
 import net.minecraftforge.fluids.FluidStack;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Stream;
 
 public final class JeiPatternQuickEncodeButtons {
 
@@ -307,7 +319,7 @@ public final class JeiPatternQuickEncodeButtons {
 
         @Override
         public boolean onPress(IJeiUserInput input) {
-            List<GenericStack> inputs = collectDisplayedInputs(recipeLayout);
+            List<TaggedInput> inputs = collectDisplayedInputs(recipeLayout);
             JeiBookmarkMode mode = DShanhaiConfig.COMMON.jeiBookmarkMode.get();
             if (input.isSimulate()) return !inputs.isEmpty();
             Minecraft minecraft = Minecraft.getInstance();
@@ -331,7 +343,8 @@ public final class JeiPatternQuickEncodeButtons {
             GTDishanhaiMod.LOGGER.info("[JEIBookmarkDiag] request recipe={} mode={} inputs={}",
                     id, mode, inputs.size());
             ShanhaiNetwork.CHANNEL.sendToServer(
-                    new JeiBookmarkMissingItemsRequestPacket(menuId, id, mode, mergeInputs(inputs)));
+                    new JeiBookmarkMissingItemsRequestPacket(menuId, id, mode, mergeInputs(inputs),
+                            DShanhaiConfig.COMMON.jeiBookmarkExclusions.get()));
             return true;
         }
 
@@ -353,8 +366,8 @@ public final class JeiPatternQuickEncodeButtons {
         public void drawExtras(GuiGraphics graphics, Rect2i area, int mouseX, int mouseY, float partialTick) {}
     }
 
-    private static List<GenericStack> collectDisplayedInputs(IRecipeLayoutDrawable<?> recipeLayout) {
-        List<GenericStack> result = new ArrayList<>();
+    private static List<TaggedInput> collectDisplayedInputs(IRecipeLayoutDrawable<?> recipeLayout) {
+        List<TaggedInput> result = new ArrayList<>();
         IIngredientType<FluidStack> fluidType = getFluidIngredientType();
         for (IRecipeSlotView slot : recipeLayout.getRecipeSlotsView().getSlotViews(RecipeIngredientRole.INPUT)) {
             Optional<ITypedIngredient<?>> displayed = slot.getDisplayedIngredient();
@@ -362,28 +375,90 @@ public final class JeiPatternQuickEncodeButtons {
             Object ingredient = displayed.get().getIngredient();
             if (ingredient instanceof ItemStack itemStack && !itemStack.isEmpty()) {
                 GenericStack stack = GenericStack.fromItemStack(itemStack.copy());
-                if (stack != null && stack.what() != null && stack.amount() > 0) result.add(stack);
+                if (stack != null && stack.what() != null && stack.amount() > 0) {
+                    result.add(new TaggedInput(stack, equivalentItemTags(slot)));
+                }
             } else if (ingredient instanceof FluidStack fluidStack
                     && !fluidStack.isEmpty()
                     && (fluidType == null || displayed.get().getType() == fluidType)) {
                 GenericStack stack = GenericStack.fromFluidStack(fluidStack.copy());
-                if (stack != null && stack.what() != null && stack.amount() > 0) result.add(stack);
+                if (stack != null && stack.what() != null && stack.amount() > 0) {
+                    result.add(new TaggedInput(stack, equivalentFluidTags(slot, fluidType)));
+                }
             }
         }
         return result;
     }
 
-    private static List<GenericStack> mergeInputs(List<GenericStack> inputs) {
-        Map<appeng.api.stacks.AEKey, Long> amounts = new LinkedHashMap<>();
-        for (GenericStack input : inputs) {
-            if (input == null || input.what() == null || input.amount() <= 0) continue;
-            Long previous = amounts.get(input.what());
-            long next = previous == null ? input.amount() : saturatingAdd(previous, input.amount());
-            amounts.put(input.what(), next);
+    private static List<ResourceLocation> equivalentItemTags(IRecipeSlotView slot) {
+        List<Item> items = new ArrayList<>();
+        for (ItemStack stack : slot.getItemStacks().toList()) {
+            if (stack != null && !stack.isEmpty()) items.add(stack.getItem());
         }
-        List<GenericStack> result = new ArrayList<>(amounts.size());
+        return equivalentTags(items, item -> item.builtInRegistryHolder().tags(), BuiltInRegistries.ITEM::getTag);
+    }
+
+    private static List<ResourceLocation> equivalentFluidTags(IRecipeSlotView slot,
+            IIngredientType<FluidStack> fluidType) {
+        if (fluidType == null) return List.of();
+        List<Fluid> fluids = new ArrayList<>();
+        for (FluidStack stack : slot.getIngredients(fluidType).toList()) {
+            if (stack != null && !stack.isEmpty()) fluids.add(stack.getFluid());
+        }
+        return equivalentTags(fluids, fluid -> fluid.builtInRegistryHolder().tags(), BuiltInRegistries.FLUID::getTag);
+    }
+
+    /**
+     * 槽位里有多种物品时，只保留与槽位成员完全相同的标签。
+     * 成员比对只用来认出标签 id，真正查库存时服务端只扫 AE 返回值。
+     */
+    private static <T> List<ResourceLocation> equivalentTags(List<T> values,
+            Function<T, Stream<TagKey<T>>> tagLookup,
+            Function<TagKey<T>, Optional<HolderSet.Named<T>>> members) {
+        if (values.size() <= 1) return List.of();
+        Set<T> wanted = new HashSet<>(values);
+        if (wanted.size() <= 1) return List.of();
+        List<ResourceLocation> matched = new ArrayList<>();
+        for (TagKey<T> tag : tagLookup.apply(values.get(0)).toList()) {
+            Optional<HolderSet.Named<T>> named = members.apply(tag);
+            if (named.isEmpty() || !sameMembers(named.get(), wanted)) continue;
+            matched.add(tag.location());
+            if (matched.size() >= JeiBookmarkMissingItemsRequestPacket.MAX_TAGS) break;
+        }
+        return matched;
+    }
+
+    private static <T> boolean sameMembers(HolderSet.Named<T> members, Set<T> wanted) {
+        if (members.size() != wanted.size()) return false;
+        for (Holder<T> holder : members) {
+            if (!wanted.contains(holder.value())) return false;
+        }
+        return true;
+    }
+
+    private static List<TaggedInput> mergeInputs(List<TaggedInput> inputs) {
+        Map<appeng.api.stacks.AEKey, Long> amounts = new LinkedHashMap<>();
+        Map<appeng.api.stacks.AEKey, LinkedHashSet<ResourceLocation>> tags = new LinkedHashMap<>();
+        for (TaggedInput input : inputs) {
+            if (input == null || input.stack() == null || input.stack().what() == null
+                    || input.stack().amount() <= 0) {
+                continue;
+            }
+            appeng.api.stacks.AEKey key = input.stack().what();
+            Long previous = amounts.get(key);
+            long next = previous == null ? input.stack().amount() : saturatingAdd(previous, input.stack().amount());
+            amounts.put(key, next);
+            if (input.tags().isEmpty()) continue;
+            LinkedHashSet<ResourceLocation> merged = tags.computeIfAbsent(key, ignored -> new LinkedHashSet<>());
+            for (ResourceLocation id : input.tags()) {
+                if (id != null && merged.size() < JeiBookmarkMissingItemsRequestPacket.MAX_TAGS) merged.add(id);
+            }
+        }
+        List<TaggedInput> result = new ArrayList<>(amounts.size());
         for (Map.Entry<appeng.api.stacks.AEKey, Long> entry : amounts.entrySet()) {
-            result.add(new GenericStack(entry.getKey(), entry.getValue()));
+            LinkedHashSet<ResourceLocation> merged = tags.get(entry.getKey());
+            List<ResourceLocation> tagList = merged == null ? List.of() : List.copyOf(merged);
+            result.add(new TaggedInput(new GenericStack(entry.getKey(), entry.getValue()), tagList));
         }
         return result;
     }

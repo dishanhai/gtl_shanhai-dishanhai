@@ -37,7 +37,9 @@ class JeiBookmarkButtonSourceTest {
         assertTrue(config.contains("COMBINED"));
         assertTrue(config.contains("数量极高时视为足够"));
         assertTrue(config.contains("defineEnum(\"bookmarkMode\", JeiBookmarkMode.MISSING_ITEMS)"));
+        assertTrue(config.contains("defineList(\"bookmarkExclusions\", JeiBookmarkExclusions.DEFAULTS"));
         assertTrue(screen.contains("startEnumSelector(Component.literal(\"配方侧边收藏模式\")"));
+        assertTrue(screen.contains("被排除的配方收藏物"));
     }
 
     @Test

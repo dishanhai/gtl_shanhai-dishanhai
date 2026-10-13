@@ -111,6 +111,22 @@ public final class ShanhaiAdvancedCircuitSelection {
         return IntCircuitBehaviour.getCircuitConfiguration(items[0]);
     }
 
+    /**
+     * 只改客戶端槽裡的顯示堆，不通知機器。重開界面時客戶端槽經常還是空的，標籤圖示會畫成屏障。
+     */
+    public static void mirror(ItemStackTransfer slot, long mask) {
+        mask &= ALL_CIRCUITS;
+        if (slot == null || currentMask(slot.getStackInSlot(0)) == mask) return;
+        if (mask == 0L) {
+            slot.setStackInSlot(0, ItemStack.EMPTY);
+            return;
+        }
+        int lowest = Long.numberOfTrailingZeros(mask);
+        ItemStack stack = IntCircuitBehaviour.stack(lowest);
+        stack.getOrCreateTag().putLong(TAG, mask);
+        slot.setStackInSlot(0, stack);
+    }
+
     private static void write(ItemStackTransfer slot, long mask) {
         mask &= ALL_CIRCUITS;
         if (mask == 0L) {

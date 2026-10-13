@@ -16,10 +16,12 @@ import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.misc.ItemStackTransfer;
 
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 
 /**
- * 电路设置页：点选切换，全选覆盖 0–32。
+ * 电路设置页。格子和数量只认服务器推下来的掩码。
+ * 重开界面时客户端电路槽经常还是空的，读槽会把已开启画成关闭，数量却仍是服务器上的旧数字。
  */
 public final class ShanhaiAdvancedCircuitConfigurator {
 
@@ -30,14 +32,14 @@ public final class ShanhaiAdvancedCircuitConfigurator {
         ButtonWidget[] buttons = new ButtonWidget[ShanhaiAdvancedCircuitSelection.CIRCUIT_COUNT];
         IGuiTexture[] selectedLook = new IGuiTexture[ShanhaiAdvancedCircuitSelection.CIRCUIT_COUNT];
         IGuiTexture[] idleLook = new IGuiTexture[ShanhaiAdvancedCircuitSelection.CIRCUIT_COUNT];
-        RefreshWidget refresh = new RefreshWidget(circuitSlot, buttons, selectedLook, idleLook);
+        MaskSync sync = new MaskSync(circuitSlot, buttons, selectedLook, idleLook);
         group.addWidget(new ButtonWidget(4, 2, 40, 14,
                 new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(
                         Component.translatable("gt_shanhai.gui.advanced_circuit.select_all").getString(), -1)
                         .setDropShadow(true)),
                 click -> {
                     if (click.isRemote) {
-                        refresh.preview(ShanhaiAdvancedCircuitSelection.ALL_CIRCUITS);
+                        sync.preview(ShanhaiAdvancedCircuitSelection.ALL_CIRCUITS);
                     } else {
                         ShanhaiAdvancedCircuitSelection.selectAll(circuitSlot);
                     }
@@ -48,46 +50,46 @@ public final class ShanhaiAdvancedCircuitConfigurator {
                         .setDropShadow(true)),
                 click -> {
                     if (click.isRemote) {
-                        refresh.preview(0L);
+                        sync.preview(0L);
                     } else {
                         ShanhaiAdvancedCircuitSelection.clear(circuitSlot);
                     }
                 }).setHoverTooltips("清空已选电路"));
-        group.addWidget(new LabelWidget(92, 5, () ->
-                Long.bitCount(refresh.displayedMask()) + "/33"));
+        LabelWidget count = new LabelWidget(92, 5, () -> Long.bitCount(sync.mask()) + "/33");
+        count.setClientSideWidget();
+        sync.attach(count);
+        group.addWidget(count);
 
         int index = 0;
         for (int row = 0; row <= 2; row++) {
             for (int column = 0; column <= 8; column++) {
-                addCircuitButton(group, buttons, selectedLook, idleLook, refresh, circuitSlot, index,
+                addCircuitButton(group, buttons, selectedLook, idleLook, sync, circuitSlot, index,
                         6 + 18 * column, 20 + 18 * row);
                 index++;
             }
         }
         for (int column = 0; column <= 5; column++) {
-            addCircuitButton(group, buttons, selectedLook, idleLook, refresh, circuitSlot, index,
+            addCircuitButton(group, buttons, selectedLook, idleLook, sync, circuitSlot, index,
                     6 + 18 * column, 74);
             index++;
         }
-        refresh.bind(ShanhaiAdvancedCircuitSelection.currentMask(circuitSlot.getStackInSlot(0)));
-        group.addWidget(refresh);
+        group.addWidget(sync);
         return group;
     }
 
     private static void addCircuitButton(WidgetGroup group, ButtonWidget[] buttons, IGuiTexture[] selectedLook,
-                                         IGuiTexture[] idleLook, RefreshWidget refresh, ItemStackTransfer circuitSlot,
+                                         IGuiTexture[] idleLook, MaskSync sync, ItemStackTransfer circuitSlot,
                                          int configuration, int x, int y) {
-        IGuiTexture icon = new ItemStackTexture(IntCircuitBehaviour.stack(configuration)).scale(0.888f);
-        // 边框和暗色必须画在电路图标上面，画在下面会被图标完全挡住。
-        selectedLook[configuration] = new GuiTextureGroup(GuiTextures.SLOT, icon,
+        // 开和关各用一份图标。边框和暗色必须画在图标上面。
+        selectedLook[configuration] = new GuiTextureGroup(GuiTextures.SLOT, circuitIcon(configuration),
                 new ColorRectTexture(0x6637FF6E),
                 new ColorBorderTexture(2, 0xFF39FF6A));
-        idleLook[configuration] = new GuiTextureGroup(GuiTextures.SLOT, icon,
+        idleLook[configuration] = new GuiTextureGroup(GuiTextures.SLOT, circuitIcon(configuration),
                 new ColorRectTexture(0xC0101018),
                 new ColorBorderTexture(1, 0xFF8A3A3A));
         ButtonWidget button = new ButtonWidget(x, y, 18, 18, idleLook[configuration], click -> {
             if (click.isRemote) {
-                refresh.preview(ShanhaiAdvancedCircuitSelection.toggleBit(refresh.displayedMask(), configuration));
+                sync.preview(ShanhaiAdvancedCircuitSelection.toggleBit(sync.mask(), configuration));
             } else {
                 ShanhaiAdvancedCircuitSelection.toggle(circuitSlot, configuration);
             }
@@ -96,17 +98,25 @@ public final class ShanhaiAdvancedCircuitConfigurator {
         group.addWidget(button);
     }
 
-    private static final class RefreshWidget extends WidgetGroup {
+    private static IGuiTexture circuitIcon(int configuration) {
+        return new ItemStackTexture(IntCircuitBehaviour.stack(configuration)).scale(0.888f);
+    }
+
+    /**
+     * 服务器在打开界面和槽位变化时写下掩码。客户端只按这份掩码画格子和数量。
+     */
+    private static final class MaskSync extends Widget {
         private final ItemStackTransfer circuitSlot;
         private final ButtonWidget[] buttons;
         private final IGuiTexture[] selected;
         private final IGuiTexture[] idle;
-        private long displayed = 0L;
-        private long lastSynced = Long.MIN_VALUE;
+        private LabelWidget count;
+        private long mask;
+        private long sent = Long.MIN_VALUE;
         private long painted = Long.MIN_VALUE;
 
-        private RefreshWidget(ItemStackTransfer circuitSlot, ButtonWidget[] buttons,
-                              IGuiTexture[] selected, IGuiTexture[] idle) {
+        private MaskSync(ItemStackTransfer circuitSlot, ButtonWidget[] buttons,
+                         IGuiTexture[] selected, IGuiTexture[] idle) {
             super(0, 0, 0, 0);
             this.circuitSlot = circuitSlot;
             this.buttons = buttons;
@@ -114,42 +124,73 @@ public final class ShanhaiAdvancedCircuitConfigurator {
             this.idle = idle;
         }
 
-        private long displayedMask() {
-            return this.displayed;
+        private long mask() {
+            return this.mask;
         }
 
-        private void bind(long mask) {
-            this.displayed = mask;
-            this.lastSynced = mask;
-            show(mask);
+        private void attach(LabelWidget count) {
+            this.count = count;
         }
 
-        private void preview(long mask) {
-            this.displayed = mask & ShanhaiAdvancedCircuitSelection.ALL_CIRCUITS;
-            show(this.displayed);
+        private void preview(long next) {
+            show(next);
+        }
+
+        @Override
+        public void writeInitialData(FriendlyByteBuf buffer) {
+            long now = ShanhaiAdvancedCircuitSelection.currentMask(this.circuitSlot.getStackInSlot(0));
+            this.sent = now;
+            buffer.writeLong(now);
+        }
+
+        @Override
+        public void readInitialData(FriendlyByteBuf buffer) {
+            show(buffer.readLong());
+        }
+
+        @Override
+        public void detectAndSendChanges() {
+            long now = ShanhaiAdvancedCircuitSelection.currentMask(this.circuitSlot.getStackInSlot(0));
+            if (now == this.sent) return;
+            this.sent = now;
+            writeUpdateInfo(1, buffer -> buffer.writeLong(now));
+        }
+
+        @Override
+        public void readUpdateInfo(int id, FriendlyByteBuf buffer) {
+            if (id == 1) {
+                show(buffer.readLong());
+                return;
+            }
+            super.readUpdateInfo(id, buffer);
         }
 
         @Override
         public void updateScreen() {
-            if (!LDLib.isRemote()) return;
-            long synced = ShanhaiAdvancedCircuitSelection.currentMask(circuitSlot.getStackInSlot(0));
-            if (synced != this.lastSynced) {
-                this.lastSynced = synced;
-                this.displayed = synced;
-                show(synced);
+            super.updateScreen();
+            // 槽位同步若把客戶端堆清掉，只按已推送的掩碼補回去，不再反過來改格子。
+            if (ShanhaiAdvancedCircuitSelection.currentMask(this.circuitSlot.getStackInSlot(0)) != this.mask) {
+                ShanhaiAdvancedCircuitSelection.mirror(this.circuitSlot, this.mask);
             }
         }
 
-        private void show(long mask) {
-            if (mask == this.painted) return;
-            this.painted = mask;
-            for (int configuration = 0; configuration < this.buttons.length; configuration++) {
-                if (this.buttons[configuration] == null) continue;
-                boolean on = ShanhaiAdvancedCircuitSelection.isBitSet(mask, configuration);
-                this.buttons[configuration].setButtonTexture(on ? this.selected[configuration] : this.idle[configuration]);
-                this.buttons[configuration].setHoverTooltips(on
-                        ? "电路 " + configuration + " · 开启"
-                        : "电路 " + configuration + " · 关闭");
+        private void show(long next) {
+            next &= ShanhaiAdvancedCircuitSelection.ALL_CIRCUITS;
+            this.mask = next;
+            if (next != this.painted) {
+                this.painted = next;
+                for (int configuration = 0; configuration < this.buttons.length; configuration++) {
+                    if (this.buttons[configuration] == null) continue;
+                    boolean on = ShanhaiAdvancedCircuitSelection.isBitSet(next, configuration);
+                    this.buttons[configuration].setButtonTexture(on ? this.selected[configuration] : this.idle[configuration]);
+                    this.buttons[configuration].setHoverTooltips(on
+                            ? "电路 " + configuration + " · 开启"
+                            : "电路 " + configuration + " · 关闭");
+                }
+            }
+            ShanhaiAdvancedCircuitSelection.mirror(this.circuitSlot, next);
+            if (LDLib.isRemote() && this.count != null) {
+                this.count.updateScreen();
             }
         }
     }

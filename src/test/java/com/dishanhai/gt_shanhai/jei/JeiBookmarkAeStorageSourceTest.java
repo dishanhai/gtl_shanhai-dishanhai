@@ -35,6 +35,7 @@ class JeiBookmarkAeStorageSourceTest {
         String request = Files.exists(REQUEST) ? Files.readString(REQUEST) : "";
         String response = Files.exists(RESPONSE) ? Files.readString(RESPONSE) : "";
         String network = Files.readString(NETWORK);
+        String buttons = Files.readString(BUTTONS);
 
         assertTrue(request.contains("GenericStack.writeBuffer"));
         assertTrue(request.contains("GenericStack.readBuffer"));
@@ -47,6 +48,13 @@ class JeiBookmarkAeStorageSourceTest {
         assertTrue(request.contains("!craftable && !enough"));
         assertTrue(request.contains("case NO_RECIPE_ITEMS -> !craftable"));
         assertTrue(request.contains("getStorageService().getInventory()"));
+        assertTrue(request.contains("JeiBookmarkExclusions.parse"));
+        assertTrue(request.contains("coveredByAeTag"));
+        assertTrue(request.contains("isTagged"));
+        assertTrue(request.contains("reason=excluded"));
+        assertTrue(buttons.contains("equivalentTags"));
+        assertTrue(buttons.contains("TaggedInput"));
+        assertTrue(buttons.contains("jeiBookmarkExclusions.get()"));
         assertTrue(response.contains("JeiBookmarkBridge.addItemStacks"));
         assertTrue(response.contains("JeiBookmarkBridge.addFluidStacks"));
         assertTrue(response.contains("GenericStack.writeBuffer"));

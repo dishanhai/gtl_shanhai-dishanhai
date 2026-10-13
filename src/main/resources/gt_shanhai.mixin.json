@@ -129,6 +129,8 @@
     "AstralArrayCompressionTraitMixin",
     "ArcanicAstrographCompressionResetMixin",
     "ArcanicAstrographInputBypassMixin",
+    "ArcanicAstrographHubSlotMixin",
+    "ArcanicAstrographHubParallelMixin",
     "ProgrammableHatchRecipeTypeSearchMixin",
     "QuantumCraftingServiceMixin",
     "QuantumCraftingCPUMenuMixin",

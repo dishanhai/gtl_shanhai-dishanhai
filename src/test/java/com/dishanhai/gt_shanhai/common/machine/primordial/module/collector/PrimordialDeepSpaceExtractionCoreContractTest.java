@@ -86,4 +86,18 @@ class PrimordialDeepSpaceExtractionCoreContractTest {
             assertEquals(8, maxFluids);
         }
     }
+
+    @Test
+    void jeiUsesTheCompactDeepSpaceRtui() throws Exception {
+        Path rtui = Path.of("src", "main", "resources", "assets", "gtceu", "ui", "recipe_type",
+                "primordial_deep_space_extraction.rtui");
+        String text = new String(Files.readAllBytes(rtui), java.nio.charset.StandardCharsets.ISO_8859_1);
+        assertTrue(text.contains("gtceu:primordial_deep_space_extraction"));
+        assertTrue(text.contains("item_in_0"));
+        assertTrue(text.contains("item_in_1"));
+        assertTrue(text.contains("item_out_0"));
+        assertTrue(text.contains("item_out_107"));
+        assertTrue(text.contains("fluid_out_0"));
+        assertTrue(text.contains("fluid_out_7"));
+    }
 }

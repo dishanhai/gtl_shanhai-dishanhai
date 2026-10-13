@@ -29,7 +29,11 @@ class MEStellarStockPartMachineSourceTest {
         assertTrue(source.contains("@Persisted"));
         assertTrue(source.contains("PatternDetailsHelper.isEncodedPattern")
                 || source.contains("PatternDetailsHelper::isEncodedPattern"));
-        assertFalse(source.contains("implements ICraftingRequester"));
+        assertTrue(source.contains("implements ICraftingRequester"));
+        assertTrue(source.contains("handleCrafting("));
+        assertTrue(source.contains("insertCraftedItems("));
+        assertTrue(source.contains("storage.insert("));
+        assertFalse(source.contains("slot.addStack("));
         assertFalse(source.contains("pushPattern("));
     }
 
@@ -59,14 +63,15 @@ class MEStellarStockPartMachineSourceTest {
         assertTrue(registry.contains("PartAbility.IMPORT_ITEMS.register(0, stellarStockBlock)"));
         assertTrue(registry.contains("PartAbility.IMPORT_FLUIDS.register(0, stellarStockBlock)"));
         assertTrue(zh.contains("\"block.gt_shanhai.me_stellar_stock_part_machine\""));
+        assertTrue(zh.contains("星空可请求标签库存输入总成"));
         assertTrue(en.contains("\"block.gt_shanhai.me_stellar_stock_part_machine\""));
+        assertTrue(en.contains("Stellar Requestable Tag Stock Input Assembly"));
     }
 
     @Test
     void settingAPatternNeverExtractsOrStoresMaterialsLocally() throws Exception {
         String source = readMachine();
 
-        assertFalse(source.contains("Actionable.MODULATE"));
         assertFalse(source.contains(".extract("));
         assertFalse(source.contains("new NotifiableItemStackHandler"));
         assertFalse(source.contains("new NotifiableFluidTank"));
@@ -207,7 +212,7 @@ class MEStellarStockPartMachineSourceTest {
         String source = readMachine();
 
         assertTrue(source.contains("ItemStack current = isPatternPullEnabled(i)\n"
-                + "                    ? patternInventory.getStackInSlot(i) : ItemStack.EMPTY;"),
+                + "                        ? patternInventory.getStackInSlot(i) : ItemStack.EMPTY;"),
                 "Disabled patterns must never reach the decoder or its cached input list");
         assertTrue(source.indexOf("isPatternPullEnabled(i)")
                 < source.indexOf("samePatterns(currentPatterns, decodedPatterns)"));
@@ -254,6 +259,19 @@ class MEStellarStockPartMachineSourceTest {
         assertTrue(source.contains(".setPressed(isPatternPullEnabled(slot))"));
         assertTrue(source.contains("new ColorBorderTexture(-1, 0xFFFF3030)"));
         assertTrue(source.contains("new ColorBorderTexture(-1, 0xFF20B24B)"));
+    }
+
+    @Test
+    void tagFilterAndCraftingRequestStayOnTheStockingMachine() throws Exception {
+        String source = readMachine();
+
+        assertTrue(source.contains("@Persisted\n    private String tagWhite = \"\";"));
+        assertTrue(source.contains("private String tagBlack = \"\";"));
+        assertTrue(source.contains("appendTagTargets("));
+        assertTrue(source.contains("new StellarTagFilter("));
+        assertTrue(source.contains("addService(ICraftingRequester.class"));
+        assertTrue(source.contains("requestMissingStock()"));
+        assertFalse(source.contains("slot.addStack("));
     }
 
     @Test

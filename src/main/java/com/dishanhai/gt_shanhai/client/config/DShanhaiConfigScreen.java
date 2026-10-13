@@ -5,6 +5,7 @@ import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.RecipeTypePat
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.SphereStyleOverride;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.VirtualProviderMode;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.JeiBookmarkMode;
+import com.dishanhai.gt_shanhai.jei.JeiBookmarkExclusions;
 
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
@@ -238,6 +239,16 @@ public final class DShanhaiConfigScreen {
                         "COMBINED=仅在无 AE 主产物样板且数量不足时收藏；数量极高时视为足够",
                         "保存后下一次渲染 tooltip 即反映新模式"))
                 .setSaveConsumer(cfg.jeiBookmarkMode::set).build());
+        jei.addEntry(e.startStrList(Component.literal("被排除的配方收藏物"),
+                        new ArrayList<>(cfg.jeiBookmarkExclusions.get()))
+                .setDefaultValue(new ArrayList<>(JeiBookmarkExclusions.DEFAULTS))
+                .setTooltip(tip("命中的物品不会进入配方收藏",
+                        "只写物品 ID：不论 NBT 都拒绝，例 gtceu:data_module",
+                        "物品ID{SNBT}：ID 相同且 NBT 包含这些键值才拒绝",
+                        "字符串值 * 表示该键存在且非空，例 gtceu:data_stick{assembly_line_research:{research_id:\"*\"}}",
+                        "也接受 Item.of('物品ID', '{SNBT}')",
+                        "保存后下一次点收藏即生效"))
+                .setSaveConsumer(list -> cfg.jeiBookmarkExclusions.set(list)).build());
 
         // ===== 山海商店 =====
         ConfigCategory shop = builder.getOrCreateCategory(Component.literal("商店"));

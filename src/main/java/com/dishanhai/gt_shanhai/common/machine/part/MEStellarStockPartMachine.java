@@ -1,21 +1,35 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import appeng.api.config.Actionable;
 import appeng.api.crafting.IPatternDetails;
 import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.networking.IGrid;
+import appeng.api.networking.crafting.ICraftingLink;
+import appeng.api.networking.crafting.ICraftingRequester;
+import appeng.api.networking.crafting.ICraftingService;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
+import appeng.helpers.MultiCraftingTracker;
 
+import com.dishanhai.gt_shanhai.common.machine.ae.DShanhaiAENetworkMachine;
+import com.google.common.collect.ImmutableSet;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
+import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
+import com.gregtechceu.gtceu.integration.ae2.machine.trait.GridNodeHolder;
+import com.gregtechceu.gtceu.integration.ae2.utils.SerializableManagedGridNode;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAESlot;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemList;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidList;
 import com.lowdragmc.lowdraglib.gui.texture.ColorBorderTexture;
+import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
+import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
+import com.lowdragmc.lowdraglib.gui.widget.TextFieldWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SwitchWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
@@ -34,18 +48,26 @@ import org.gtlcore.gtlcore.api.machine.trait.MEStock.IMESlot;
 import org.gtlcore.gtlcore.api.machine.trait.MEStock.IOptimizedMEList;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.MEDualHatchStockPartMachine;
 
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 
 /**
- * Encoded patterns configure network-backed inputs; only the inherited handlers consume materials.
+ * Pattern inputs and tag-matched items configure network-backed stock.
+ * Shortages submit AE crafting requests; crafted items return to the network.
  */
-public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
+public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
+        implements ICraftingRequester, DShanhaiAENetworkMachine {
 
     private static final int BASE_PATTERN_SLOTS = 5;
     private static final int BASE_CONFIG_SIZE = 64;
@@ -54,9 +76,17 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
             new ManagedFieldHolder(MEStellarStockPartMachine.class,
                     MEDualHatchStockPartMachine.MANAGED_FIELD_HOLDER);
     private static final String STATUS_PREFIX = "gt_shanhai.machine.me_stellar_stock_part_machine.status.";
+    private static final String ITEM_TRACKER_TAG = "ShanhaiStellarItemCraftingTracker";
+    private static final String FLUID_TRACKER_TAG = "ShanhaiStellarFluidCraftingTracker";
+    private static final ResourceTexture TAG_FILTER_TEXTURE =
+            new ResourceTexture("gtceu:textures/gui/list.png");
 
     @Persisted
     private final ItemStackTransfer patternInventory;
+    @Persisted
+    private String tagWhite = "";
+    @Persisted
+    private String tagBlack = "";
     @Persisted
     private CompoundTag savedStockConfiguration = new CompoundTag();
     @Persisted
@@ -72,6 +102,12 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
     private List<ItemStack> decodedPatterns = List.of();
     private List<MEStellarStockTargetPlanner.Input<AEKey>> cachedInputs;
     private boolean patternDirty = true;
+    private MultiCraftingTracker itemTracker;
+    private MultiCraftingTracker fluidTracker;
+    private int trackerSlots;
+    private StellarTagFilter cachedTagFilter;
+    private String cachedTagWhite;
+    private String cachedTagBlack;
 
     private record SlotConfiguration(GenericStack item, GenericStack fluid) {
 
@@ -99,6 +135,11 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
     }
 
     @Override
+    protected GridNodeHolder createNodeHolder() {
+        return new RequestableGridNodeHolder(this);
+    }
+
+    @Override
     public ManagedFieldHolder getFieldHolder() {
         return MANAGED_FIELD_HOLDER;
     }
@@ -119,18 +160,22 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
             updatePatternConfiguration();
         }
         super.autoIO();
+        if (!isRemote() && isWorkingEnabled() && isOnline() && shouldSyncME()) {
+            requestMissingStock();
+        }
     }
 
     @Override
     protected void setAutoPullMode(int mode) {
-        if (!hasPattern()) {
+        if (!hasPattern() && !hasTagFilter()) {
             super.setAutoPullMode(mode);
         }
     }
 
     private void updatePatternConfiguration() {
         patternDirty = false;
-        if (!hasPattern()) {
+        boolean tagging = hasTagFilter();
+        if (!hasPattern() && !tagging) {
             decodedPatterns = List.of();
             cachedInputs = null;
             reconcileManualConfiguration();
@@ -150,48 +195,73 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
         }
         reconcileManualConfiguration();
 
-        List<ItemStack> currentPatterns = new ArrayList<>();
-        for (int i = 0; i < patternInventory.getSlots(); i++) {
-            ItemStack current = isPatternPullEnabled(i)
-                    ? patternInventory.getStackInSlot(i) : ItemStack.EMPTY;
-            currentPatterns.add(current.copy());
-        }
-        if (!samePatterns(currentPatterns, decodedPatterns)) {
-            decodedPatterns = List.copyOf(currentPatterns);
-            try {
-                List<IPatternDetails> details = new ArrayList<>();
-                for (ItemStack current : currentPatterns) {
-                    if (!current.isEmpty()) {
-                        IPatternDetails decoded = PatternDetailsHelper.decodePattern(current, getLevel(), false);
-                        if (decoded == null) {
-                            throw new IllegalArgumentException("Invalid encoded pattern");
+        if (!hasPattern()) {
+            decodedPatterns = List.of();
+            cachedInputs = List.of();
+        } else {
+            List<ItemStack> currentPatterns = new ArrayList<>();
+            for (int i = 0; i < patternInventory.getSlots(); i++) {
+                ItemStack current = isPatternPullEnabled(i)
+                        ? patternInventory.getStackInSlot(i) : ItemStack.EMPTY;
+                currentPatterns.add(current.copy());
+            }
+            if (!samePatterns(currentPatterns, decodedPatterns)) {
+                decodedPatterns = List.copyOf(currentPatterns);
+                try {
+                    List<IPatternDetails> details = new ArrayList<>();
+                    for (ItemStack current : currentPatterns) {
+                        if (!current.isEmpty()) {
+                            IPatternDetails decoded = PatternDetailsHelper.decodePattern(current, getLevel(), false);
+                            if (decoded == null) {
+                                throw new IllegalArgumentException("Invalid encoded pattern");
+                            }
+                            details.add(decoded);
                         }
-                        details.add(decoded);
                     }
+                    cachedInputs = readInputs(details);
+                    List<SlotConfiguration> manual = readConfigurations(
+                            manualStockConfiguration, aeItemHandler.getSlots());
+                    int required = Math.addExact(
+                            MEStellarStockTargetPlanner.requiredCapacity(cachedInputs),
+                            countConfiguredSlots(manual));
+                    ensureCapacity(Math.max(required, requiredCapacityForConfigurations(manual)));
+                } catch (RuntimeException ignored) {
+                    cachedInputs = null;
                 }
-                cachedInputs = readInputs(details);
-                List<SlotConfiguration> manual = readConfigurations(
-                        manualStockConfiguration, aeItemHandler.getSlots());
-                int required = Math.addExact(
-                        MEStellarStockTargetPlanner.requiredCapacity(cachedInputs),
-                        countConfiguredSlots(manual));
-                ensureCapacity(Math.max(required, requiredCapacityForConfigurations(manual)));
-            } catch (RuntimeException ignored) {
-                cachedInputs = null;
             }
         }
-        if (cachedInputs == null) {
+
+        Map<AEKey, Long> targets = new LinkedHashMap<>();
+        boolean patternOk = cachedInputs != null;
+        if (patternOk && !cachedInputs.isEmpty()) {
+            IGrid grid = getMainNode().getGrid();
+            KeyCounter available = grid == null ? new KeyCounter()
+                    : grid.getStorageService().getCachedInventory();
+            try {
+                targets.putAll(MEStellarStockTargetPlanner.plan(
+                        cachedInputs, available::get, aeItemHandler.getSlots()));
+            } catch (ArithmeticException | IllegalArgumentException ignored) {
+                patternOk = false;
+                targets.clear();
+            }
+        }
+        if (tagging) {
+            appendTagTargets(targets);
+        }
+        if (!patternOk && hasPattern() && !tagging) {
             applyTargets(Map.of());
             patternStatus = STATUS_PREFIX + "invalid";
             return;
         }
-
-        IGrid grid = getMainNode().getGrid();
-        KeyCounter available = grid == null ? new KeyCounter()
-                : grid.getStorageService().getCachedInventory();
         try {
-            applyTargets(MEStellarStockTargetPlanner.plan(cachedInputs, available::get, aeItemHandler.getSlots()));
-            patternStatus = STATUS_PREFIX + "active";
+            applyTargets(targets);
+            if (hasPattern() && !patternOk) {
+                patternStatus = STATUS_PREFIX + "invalid";
+            } else if (hasPattern()) {
+                patternStatus = STATUS_PREFIX + "active";
+            } else {
+                patternStatus = STATUS_PREFIX + "tag";
+            }
         } catch (ArithmeticException | IllegalArgumentException ignored) {
             applyTargets(Map.of());
             patternStatus = STATUS_PREFIX + "invalid";
@@ -644,8 +714,496 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine {
     }
 
     @Override
+    public void attachConfigurators(ConfiguratorPanel panel) {
+        super.attachConfigurators(panel);
+        panel.attachConfigurators(new TagFilterConfigurator());
+    }
+
+    @Override
+    protected CompoundTag writeConfigToTag() {
+        CompoundTag tag = super.writeConfigToTag();
+        tag.putString("TagWhite", tagWhite);
+        tag.putString("TagBlack", tagBlack);
+        return tag;
+    }
+
+    @Override
+    protected void readConfigFromTag(CompoundTag tag) {
+        super.readConfigFromTag(tag);
+        if (tag.contains("TagWhite")) {
+            tagWhite = tag.getString("TagWhite");
+        }
+        if (tag.contains("TagBlack")) {
+            tagBlack = tag.getString("TagBlack");
+        }
+        cachedTagFilter = null;
+        patternDirty = true;
+    }
+
+    @Override
     public void onMachineRemoved() {
         clearInventory(patternInventory);
         super.onMachineRemoved();
+    }
+
+    @Override
+    public long insertCraftedItems(ICraftingLink link, AEKey what, long amount, Actionable mode) {
+        IGrid grid = getMainNode().getGrid();
+        if (grid == null || what == null || amount <= 0) {
+            return 0;
+        }
+        appeng.api.storage.MEStorage storage = grid.getStorageService().getInventory();
+        if (storage == null) {
+            return 0;
+        }
+        return storage.insert(what, amount, mode, this.actionSource);
+    }
+
+    @Override
+    public void jobStateChange(ICraftingLink link) {
+        if (itemTracker != null) {
+            itemTracker.jobStateChange(link);
+        }
+        if (fluidTracker != null) {
+            fluidTracker.jobStateChange(link);
+        }
+        updateInventorySubscription();
+    }
+
+    @Override
+    public ImmutableSet<ICraftingLink> getRequestedJobs() {
+        if (itemTracker == null && fluidTracker == null) {
+            return ImmutableSet.of();
+        }
+        ImmutableSet.Builder<ICraftingLink> jobs = ImmutableSet.builder();
+        if (itemTracker != null) {
+            jobs.addAll(itemTracker.getRequestedJobs());
+        }
+        if (fluidTracker != null) {
+            jobs.addAll(fluidTracker.getRequestedJobs());
+        }
+        return jobs.build();
+    }
+
+    @Override
+    public String getAeJadeKind() {
+        return "星空可请求标签库存输入";
+    }
+
+    @Override
+    public int getAeTotalSlots() {
+        return aeItemHandler.getSlots() + aeFluidHandler.getInventory().length;
+    }
+
+    @Override
+    public int getAeConfiguredSlots() {
+        return countConfigured(true);
+    }
+
+    @Override
+    public int getAeStockedSlots() {
+        return countStocked();
+    }
+
+    @Override
+    public int getAePendingSlots() {
+        return countPending();
+    }
+
+    @Override
+    public int getAeActiveJobs() {
+        return getRequestedJobs().size();
+    }
+
+    @Override
+    public void saveCustomPersistedData(CompoundTag tag, boolean forDrop) {
+        super.saveCustomPersistedData(tag, forDrop);
+        if (forDrop || itemTracker == null) {
+            return;
+        }
+        CompoundTag itemTag = new CompoundTag();
+        CompoundTag fluidTag = new CompoundTag();
+        itemTracker.writeToNBT(itemTag);
+        fluidTracker.writeToNBT(fluidTag);
+        tag.put(ITEM_TRACKER_TAG, itemTag);
+        tag.put(FLUID_TRACKER_TAG, fluidTag);
+    }
+
+    @Override
+    public void loadCustomPersistedData(CompoundTag tag) {
+        super.loadCustomPersistedData(tag);
+        ensureTrackers();
+        if (tag.contains(ITEM_TRACKER_TAG)) {
+            itemTracker.readFromNBT(tag.getCompound(ITEM_TRACKER_TAG));
+        }
+        if (tag.contains(FLUID_TRACKER_TAG)) {
+            fluidTracker.readFromNBT(tag.getCompound(FLUID_TRACKER_TAG));
+        }
+    }
+
+    private void requestMissingStock() {
+        IGrid grid = getMainNode().getGrid();
+        if (grid == null) {
+            return;
+        }
+        ensureTrackers();
+        ICraftingService craftingService = grid.getCraftingService();
+        int itemSlots = Math.min(aeItemHandler.getSlots(), trackerSlots);
+        for (int i = 0; i < itemSlots; i++) {
+            GenericStack request = aeItemHandler.getInventory()[i].requestStack();
+            if (request == null || request.amount() <= 0) {
+                continue;
+            }
+            itemTracker.handleCrafting(i, request.what(), request.amount(),
+                    getLevel(), craftingService, this.actionSource);
+        }
+        int fluidSlots = Math.min(aeFluidHandler.getInventory().length, trackerSlots);
+        for (int i = 0; i < fluidSlots; i++) {
+            GenericStack request = aeFluidHandler.getInventory()[i].requestStack();
+            if (request == null || request.amount() <= 0) {
+                continue;
+            }
+            fluidTracker.handleCrafting(i, request.what(), request.amount(),
+                    getLevel(), craftingService, this.actionSource);
+        }
+    }
+
+    private void ensureTrackers() {
+        int slots = aeItemHandler.getSlots();
+        if (itemTracker != null && trackerSlots >= slots) {
+            return;
+        }
+        MultiCraftingTracker nextItems = new MultiCraftingTracker(this, slots);
+        MultiCraftingTracker nextFluids = new MultiCraftingTracker(this, slots);
+        if (itemTracker != null) {
+            CompoundTag itemTag = new CompoundTag();
+            CompoundTag fluidTag = new CompoundTag();
+            itemTracker.writeToNBT(itemTag);
+            fluidTracker.writeToNBT(fluidTag);
+            nextItems.readFromNBT(itemTag);
+            nextFluids.readFromNBT(fluidTag);
+        }
+        itemTracker = nextItems;
+        fluidTracker = nextFluids;
+        trackerSlots = slots;
+    }
+
+    private boolean hasTagFilter() {
+        return tagWhite != null && !tagWhite.trim().isEmpty()
+                || tagBlack != null && !tagBlack.trim().isEmpty();
+    }
+
+    private void setTagWhite(String value) {
+        String next = value == null ? "" : value;
+        if (next.equals(tagWhite)) {
+            return;
+        }
+        tagWhite = next;
+        cachedTagFilter = null;
+        if (!isRemote()) {
+            patternDirty = true;
+            markDirty();
+            updatePatternConfiguration();
+        }
+    }
+
+    private void setTagBlack(String value) {
+        String next = value == null ? "" : value;
+        if (next.equals(tagBlack)) {
+            return;
+        }
+        tagBlack = next;
+        cachedTagFilter = null;
+        if (!isRemote()) {
+            patternDirty = true;
+            markDirty();
+            updatePatternConfiguration();
+        }
+    }
+
+    private void appendTagTargets(Map<AEKey, Long> targets) {
+        List<GenericStack> matches = scanTagMatches();
+        if (matches.isEmpty()) {
+            return;
+        }
+        List<SlotConfiguration> manual = readConfigurations(manualStockConfiguration,
+                Math.max(aeItemHandler.getSlots(), BASE_CONFIG_SIZE));
+        int extra = 0;
+        for (GenericStack match : matches) {
+            if (!targets.containsKey(match.what())) {
+                extra++;
+            }
+        }
+        ensureCapacity(Math.max(aeItemHandler.getSlots(),
+                occupiedWithoutNewTags(targets, manual) + extra));
+        manual = readConfigurations(manualStockConfiguration, aeItemHandler.getSlots());
+        int occupied = occupiedWithoutNewTags(targets, manual);
+        int capacity = aeItemHandler.getSlots();
+        for (GenericStack match : matches) {
+            if (targets.containsKey(match.what())) {
+                continue;
+            }
+            if (occupied >= capacity) {
+                break;
+            }
+            targets.put(match.what(), Math.max(1L, match.amount()));
+            occupied++;
+        }
+    }
+
+    private static int occupiedWithoutNewTags(Map<AEKey, Long> targets, List<SlotConfiguration> manual) {
+        int occupied = targets.size();
+        for (SlotConfiguration configuration : manual) {
+            if (configuration.item() != null && !targets.containsKey(configuration.item().what())) {
+                occupied++;
+            }
+            if (configuration.fluid() != null && !targets.containsKey(configuration.fluid().what())) {
+                occupied++;
+            }
+        }
+        return occupied;
+    }
+
+    private List<GenericStack> scanTagMatches() {
+        IGrid grid = getMainNode().getGrid();
+        if (grid == null) {
+            return List.of();
+        }
+        KeyCounter available = grid.getStorageService().getCachedInventory();
+        if (available == null) {
+            return List.of();
+        }
+        StellarTagFilter filter = getTagFilter();
+        int limit = tagSlotBudget();
+        List<GenericStack> matches = new ArrayList<>();
+        for (Object2LongMap.Entry<AEKey> entry : available) {
+            if (matches.size() >= limit) {
+                break;
+            }
+            AEKey key = entry.getKey();
+            long amount = entry.getLongValue();
+            if (amount <= 0 || !(key instanceof AEItemKey)) {
+                continue;
+            }
+            AEItemKey itemKey = (AEItemKey) key;
+            if (!filter.isListed(itemKey)) {
+                continue;
+            }
+            matches.add(new GenericStack(itemKey, amount));
+        }
+        return matches;
+    }
+
+    private StellarTagFilter getTagFilter() {
+        if (cachedTagFilter == null
+                || !Objects.equals(cachedTagWhite, tagWhite)
+                || !Objects.equals(cachedTagBlack, tagBlack)) {
+            cachedTagWhite = tagWhite;
+            cachedTagBlack = tagBlack;
+            cachedTagFilter = new StellarTagFilter(tagWhite, tagBlack);
+        }
+        return cachedTagFilter;
+    }
+
+    private static int tagSlotBudget() {
+        return com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.tagBusSlotsCount.get();
+    }
+
+    private int countConfigured(boolean includeFluid) {
+        int count = 0;
+        for (int i = 0; i < aeItemHandler.getSlots(); i++) {
+            if (aeItemHandler.getInventory()[i].getConfig() != null) {
+                count++;
+            }
+            if (includeFluid && aeFluidHandler.getInventory()[i].getConfig() != null) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private int countStocked() {
+        int count = 0;
+        for (int i = 0; i < aeItemHandler.getSlots(); i++) {
+            GenericStack item = aeItemHandler.getInventory()[i].getStock();
+            GenericStack fluid = aeFluidHandler.getInventory()[i].getStock();
+            if (item != null && item.amount() > 0) {
+                count++;
+            }
+            if (fluid != null && fluid.amount() > 0) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private int countPending() {
+        int count = 0;
+        for (ExportOnlyAESlot slot : aeItemHandler.getInventory()) {
+            GenericStack request = slot.requestStack();
+            if (request != null && request.amount() > 0) {
+                count++;
+            }
+        }
+        for (ExportOnlyAESlot slot : aeFluidHandler.getInventory()) {
+            GenericStack request = slot.requestStack();
+            if (request != null && request.amount() > 0) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private final class TagFilterConfigurator implements IFancyConfigurator {
+
+        @Override
+        public Component getTitle() {
+            return Component.translatable("gui.gtlcore.tag_filter_config");
+        }
+
+        @Override
+        public IGuiTexture getIcon() {
+            return TAG_FILTER_TEXTURE;
+        }
+
+        @Override
+        public WidgetGroup createConfigurator() {
+            WidgetGroup group = new WidgetGroup(0, 0, 200, 80);
+            group.addWidget(new LabelWidget(3, 5, () ->
+                    Component.translatable("gui.gtlcore.tag_whitelist").getString()));
+            TextFieldWidget white = new TextFieldWidget(3, 18, 194, 14,
+                    () -> tagWhite, MEStellarStockPartMachine.this::setTagWhite);
+            white.setCurrentString(tagWhite);
+            group.addWidget(white);
+            group.addWidget(new LabelWidget(3, 38, () ->
+                    Component.translatable("gui.gtlcore.tag_blacklist").getString()));
+            TextFieldWidget black = new TextFieldWidget(3, 50, 194, 14,
+                    () -> tagBlack, MEStellarStockPartMachine.this::setTagBlack);
+            black.setCurrentString(tagBlack);
+            group.addWidget(black);
+            return group;
+        }
+    }
+
+    private static final class RequestableGridNodeHolder extends GridNodeHolder {
+
+        private RequestableGridNodeHolder(MEStellarStockPartMachine machine) {
+            super(machine);
+        }
+
+        @Override
+        protected SerializableManagedGridNode createManagedNode() {
+            SerializableManagedGridNode node = super.createManagedNode();
+            node.addService(ICraftingRequester.class, (MEStellarStockPartMachine) this.machine);
+            return node;
+        }
+    }
+
+    /**
+     * Same wildcard rules as the big tag filter stock bus: {@code forge:ores/*} style
+     * is expressed as {@code forge:ores*}, {@code *raw*}, and {@code @modid}.
+     */
+    private static final class StellarTagFilter {
+
+        private final String[] whiteTags;
+        private final String[] blackTags;
+        private final boolean hasWhite;
+        private final HashMap<Object, Boolean> cache = new HashMap<>();
+
+        private StellarTagFilter(String white, String black) {
+            String whitelist = white == null ? "" : white.trim();
+            String blacklist = black == null ? "" : black.trim();
+            whiteTags = whitelist.isEmpty() ? new String[0] : whitelist.split("[|,]");
+            blackTags = blacklist.isEmpty() ? new String[0] : blacklist.split("[|,]");
+            hasWhite = whiteTags.length > 0;
+        }
+
+        private boolean isListed(AEItemKey itemKey) {
+            Boolean cached = cache.get(itemKey.getPrimaryKey());
+            if (cached != null) {
+                return cached;
+            }
+            Set<String> tags = itemKey.getItem().builtInRegistryHolder().tags()
+                    .map(tag -> tag.location().toString())
+                    .collect(Collectors.toSet());
+            boolean listed = matches(itemKey, tags);
+            cache.put(itemKey.getPrimaryKey(), listed);
+            return listed;
+        }
+
+        private boolean matches(AEItemKey itemKey, Set<String> tags) {
+            for (String black : blackTags) {
+                String pattern = black.trim();
+                if (!pattern.isEmpty() && matchesAny(pattern, itemKey, tags)) {
+                    return false;
+                }
+            }
+            if (!hasWhite) {
+                return true;
+            }
+            for (String white : whiteTags) {
+                String pattern = white.trim();
+                if (!pattern.isEmpty() && matchesAny(pattern, itemKey, tags)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static boolean matchesAny(String pattern, AEItemKey key, Set<String> tags) {
+            if (pattern.startsWith("@")) {
+                return modIdMatches(pattern.substring(1),
+                        key.getItem().builtInRegistryHolder().key().location().getNamespace());
+            }
+            return tagMatchesAny(pattern, tags);
+        }
+
+        private static boolean modIdMatches(String pattern, String modId) {
+            boolean startWild = pattern.startsWith("*");
+            boolean endWild = pattern.endsWith("*");
+            if (startWild && endWild && pattern.length() > 2) {
+                return modId.contains(pattern.substring(1, pattern.length() - 1));
+            }
+            if (startWild && pattern.length() > 1) {
+                return modId.endsWith(pattern.substring(1));
+            }
+            if (endWild && pattern.length() > 1) {
+                return modId.startsWith(pattern.substring(0, pattern.length() - 1));
+            }
+            return modId.equals(pattern);
+        }
+
+        private static boolean tagMatchesAny(String pattern, Set<String> tags) {
+            boolean startWild = pattern.startsWith("*");
+            boolean endWild = pattern.endsWith("*");
+            if (startWild && endWild && pattern.length() > 2) {
+                String middle = pattern.substring(1, pattern.length() - 1);
+                for (String tag : tags) {
+                    if (tag.contains(middle)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            if (startWild && pattern.length() > 1) {
+                String suffix = pattern.substring(1);
+                for (String tag : tags) {
+                    if (tag.endsWith(suffix)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            if (endWild && pattern.length() > 1) {
+                String prefix = pattern.substring(0, pattern.length() - 1);
+                for (String tag : tags) {
+                    if (tag.startsWith(prefix)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            return tags.contains(pattern);
+        }
     }
 }

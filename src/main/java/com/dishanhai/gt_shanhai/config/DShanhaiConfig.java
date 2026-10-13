@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.config;
 
+import com.dishanhai.gt_shanhai.jei.JeiBookmarkExclusions;
+
 import net.minecraftforge.common.ForgeConfigSpec;
 
 import java.util.List;
@@ -139,6 +141,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.IntValue aeStorageForceRescanTicks;
         /** JEI 配方侧边收藏按键的筛选模式 */
         public ForgeConfigSpec.EnumValue<JeiBookmarkMode> jeiBookmarkMode;
+        /** JEI 配方侧边收藏 — 命中后拒绝收藏的物品 ID / NBT */
+        public ForgeConfigSpec.ConfigValue<List<? extends String>> jeiBookmarkExclusions;
         /** 开发模式 — 配方修改器 json 直接写入模组源码 recipes 目录 */
         public ForgeConfigSpec.BooleanValue developerMode;
 
@@ -414,6 +418,16 @@ public final class DShanhaiConfig {
                             "NO_RECIPE_ITEMS = 收藏当前配方中 AE 网络没有对应样板合成流程的输入物品或流体",
                             "COMBINED = 组合数量与 AE 样板流程判断：仅在无主产物样板且数量不足时收藏；数量极高时视为足够")
                     .defineEnum("bookmarkMode", JeiBookmarkMode.MISSING_ITEMS);
+            jeiBookmarkExclusions = builder
+                    .comment("被排除的配方收藏物",
+                            "每行一个物品。只写物品 ID 时，该物品不论 NBT 都拒绝收藏",
+                            "写成 物品ID{SNBT} 时，物品 ID 相同且 NBT 包含这些键值才拒绝",
+                            "字符串值写成 \"*\" 表示这个键存在且内容非空",
+                            "也接受 Item.of('物品ID', '{SNBT}')",
+                            "例：gtceu:data_module",
+                            "例：gtceu:data_stick{assembly_line_research:{research_id:\"*\"}}",
+                            "保存后下一次点收藏即生效。这是本机配置，会随收藏请求发给当前服务器")
+                    .defineList("bookmarkExclusions", JeiBookmarkExclusions.DEFAULTS, value -> value instanceof String);
             builder.pop();
 
             builder.push("developer");

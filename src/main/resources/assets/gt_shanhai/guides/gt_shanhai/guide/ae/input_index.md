@@ -20,7 +20,7 @@ item_ids:
 * <ItemLink id="gt_shanhai:me_requestable_input_bus" />
 * <ItemLink id="gt_shanhai:me_requestable_input_hatch" />
 * <ItemLink id="gt_shanhai:input_dual_hatch" />
-* [<ItemLink id="gt_shanhai:me_stellar_stock_part_machine" />](me_stellar_stock_part_machine.md)：按樣板輸入目標直接從 ME 庫存取料，不發起合成請求。
+* [<ItemLink id="gt_shanhai:me_stellar_stock_part_machine" />](me_stellar_stock_part_machine.md)：樣板輸入加上標籤匹配，庫存不足時發起合成請求，產物回到 ME 網路。
 * <ItemLink id="gt_shanhai:recipe_type_pattern_buffer" />
 
 <Row gap="24">
@@ -77,8 +77,8 @@ item_ids:
 
 ### <ItemLink id="gt_shanhai:me_stellar_stock_part_machine" />
 
-> 以編碼樣板的輸入項目設定物品與流體庫存目標。\
-> 不預存材料，也不向 AE2 發起合成訂單；加工耗料由繼承的庫存處理邏輯直接從 ME 網路取出。
+> 以編碼樣板的輸入項目，以及標籤白名單/黑名單匹配到的網路物品，設定庫存目標。\
+> 不預存材料。配置數量高於網路庫存時提交缺口合成請求，合成產物回到 ME 網路。
 
 </Column>
 

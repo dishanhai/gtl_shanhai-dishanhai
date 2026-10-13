@@ -1,0 +1,54 @@
+{
+  "data": {
+    "euTier": 1
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "cleanroom": "law_cleanroom",
+      "type": "cleanroom"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 30
+      }
+    ]
+  },
+  "type": "gtceu:extractor",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "minecraft:dragon_breath"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 500,
+          "value": [
+            {
+              "fluid": "gtceu:dragon_breath"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtceu:extractor/dragon_breath",
+      "defaultEnabled": true
+    }
+  ]
+}
