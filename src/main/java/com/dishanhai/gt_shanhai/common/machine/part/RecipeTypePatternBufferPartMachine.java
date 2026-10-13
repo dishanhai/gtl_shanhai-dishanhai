@@ -578,6 +578,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             RecipeTypePatternSearchHelper.clearPatternSlotState(this, index);
         }
         outputMultiplierPatternsRefreshNeeded = false;
+        if (outputMultiplierModeEnabled && publishedProductOutputsMissMultiplier()) {
+            outputMultiplierPatternsRefreshNeeded = true;
+        }
         refreshPatternRecipeType(index);
         gtShanhai$refreshPatternSlotWarning(index);
     }
@@ -760,13 +763,16 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         long recipeRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         int cacheKey = makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, recipeRevision);
         OutputMultiplierPatternCacheEntry cached = outputMultiplierPatternCache.get(cacheKey);
-        if (cached != null && cached.matches(pattern, stack, recipeTypeId, multiplier, recipeRevision)) {
+        if (cached != null && cached.matches(pattern, stack, recipeTypeId, multiplier, recipeRevision)
+                && VirtualPatternEncodingHelper.productOutputsReflectMultiplier(cached.pattern(), multiplier)) {
             return cached.pattern();
         }
         IPatternDetails rewritten = VirtualPatternEncodingHelper.rewritePatternOutputMultiplier(
                 pattern, getLevel(), recipeTypeId, multiplier);
-        outputMultiplierPatternCache.put(cacheKey,
-                new OutputMultiplierPatternCacheEntry(pattern, stack, recipeTypeId, multiplier, recipeRevision, rewritten));
+        if (VirtualPatternEncodingHelper.productOutputsReflectMultiplier(rewritten, multiplier)) {
+            outputMultiplierPatternCache.put(cacheKey,
+                    new OutputMultiplierPatternCacheEntry(pattern, stack, recipeTypeId, multiplier, recipeRevision, rewritten));
+        }
         return rewritten;
     }
 
@@ -896,7 +902,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 changed = true;
             }
         }
-        outputMultiplierPatternsRefreshNeeded = false;
+        outputMultiplierPatternsRefreshNeeded = publishedProductOutputsMissMultiplier();
         if (changed) {
             reCalculatePatternSlotMap();
             needPatternSync = true;
@@ -915,7 +921,13 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         IPatternDetails basePattern = createOutputMultiplierBasePattern(slot, patternStack);
         if (basePattern == null) return false;
         IPatternDetails effectivePattern = gtShanhai$applyOutputMultiplier(basePattern, patternStack);
-        if (effectivePattern == null || samePatternDefinition(currentPattern, effectivePattern)) return false;
+        long multiplier = resolvePatternOutputMultiplier(PatternRecipeTypeHelper.readRecipeTypeId(patternStack));
+        if (effectivePattern == null) return false;
+        // 定義相同不代表產出已放大。改寫失敗時舊 1x 樣板會留在 AE 可見 map 裡。
+        if (samePatternDefinition(currentPattern, effectivePattern)
+                && VirtualPatternEncodingHelper.productOutputsReflectMultiplier(currentPattern, multiplier)) {
+            return false;
+        }
 
         slot2PatternMap.put(slot, effectivePattern);
         if (resetSlotCaches) {
@@ -939,6 +951,22 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return realPatternHelper.processPatternWithCircuit(patternStack,
                 circuit -> internalSlot.getCacheManager().setCircuitCache(circuit),
                 getLevel(), keepByProduct);
+    }
+
+    private boolean publishedProductOutputsMissMultiplier() {
+        if (!outputMultiplierModeEnabled || isRemote()) return false;
+        if (!((Object) this instanceof MEPatternBufferSlot2PatternAccessor access)) return false;
+        Int2ObjectMap<IPatternDetails> slot2PatternMap = access.gtShanhai$getSlot2PatternMap();
+        for (int slot = 0; slot < maxPatternCount && slot < getPatternInventory().getSlots(); slot++) {
+            ItemStack stack = getPatternInventory().getStackInSlot(slot);
+            if (stack.isEmpty()) continue;
+            long multiplier = resolvePatternOutputMultiplier(PatternRecipeTypeHelper.readRecipeTypeId(stack));
+            IPatternDetails published = slot2PatternMap.get(slot);
+            if (!VirtualPatternEncodingHelper.productOutputsReflectMultiplier(published, multiplier)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean samePatternDefinition(IPatternDetails first, IPatternDetails second) {
@@ -1220,7 +1248,20 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     @Override
+    public int getPatternPriority() {
+        // 同物品若還有別處的 1x 樣板，AE 會先用優先級高的。倍率模式必須壓過 1x，否則計畫仍顯示合成 1 個。
+        if (outputMultiplierModeEnabled
+                && (getPatternOutputMultiplier() > 1L || cachedHostOutputMultiplier > 1L)) {
+            return 1;
+        }
+        return 0;
+    }
+
+    @Override
     public List<IPatternDetails> getAvailablePatterns() {
+        if (outputMultiplierModeEnabled && !isRemote() && publishedProductOutputsMissMultiplier()) {
+            outputMultiplierPatternsRefreshNeeded = true;
+        }
         refreshVisibleOutputMultiplierPatterns(false);
         List<IPatternDetails> patterns = super.getAvailablePatterns();
         if (wildcardPatterns == null || wildcardPatterns.isEmpty()) return patterns;

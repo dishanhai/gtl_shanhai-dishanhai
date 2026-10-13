@@ -186,6 +186,13 @@ class StellarPatternMultiplierSourceTest {
         assertTrue(source.contains("needPatternSync = true;"));
         assertTrue(available.contains("refreshVisibleOutputMultiplierPatterns(false)"),
                 "AE 查询可用样板前要自校正一次，防止加载后先暴露旧 1x pattern");
+        assertTrue(available.contains("publishedProductOutputsMissMultiplier()"),
+                "AE 查询时若已发布样板仍是 1x，必须重新改写，不能把脏标记清掉后永远暴露 1x");
+        String helper = Files.readString(HELPER);
+        assertTrue(helper.contains("productOutputsReflectMultiplier"),
+                "倍率改写不能在循环容器除不尽时直接退回 1x 样板");
+        assertFalse(helper.contains("if (rewrittenInputs == null) return pattern"),
+                "循环容器改写失败不得放弃整张样板的产出放大");
     }
 
     @Test

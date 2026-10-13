@@ -27,6 +27,7 @@ import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayCellHandler;
 import com.dishanhai.gt_shanhai.common.item.VirtualItemProviderItem;
 import com.dishanhai.gt_shanhai.common.item.OmniformNucleusItem;
 import com.dishanhai.gt_shanhai.common.item.RecipeModifierDevItem;
+import com.dishanhai.gt_shanhai.common.item.UniverseSimulationUnitItem;
 
 import net.minecraft.world.item.Item;
 
@@ -111,6 +112,12 @@ public class GTDishanhaiMod {
     public static final RegistryObject<Item> OMNIFORM_NUCLEUS = ITEMS.register(
         "omniform_nucleus",
         () -> new OmniformNucleusItem(new Item.Properties()
+            .rarity(Rarity.EPIC)));
+
+    public static final RegistryObject<Item> UNIVERSE_SIMULATION_UNIT = ITEMS.register(
+        "universe_simulation_unit",
+        () -> new UniverseSimulationUnitItem(new Item.Properties()
+            .stacksTo(64)
             .rarity(Rarity.EPIC)));
 
     /** 配方修改器专属开发者工具，不提供配方，只作为命令入口的物品化快捷入口。 */

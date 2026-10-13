@@ -19,6 +19,7 @@ import com.google.common.collect.ImmutableSet;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
+import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfiguratorButton;
 import com.gregtechceu.gtceu.integration.ae2.machine.trait.GridNodeHolder;
 import com.gregtechceu.gtceu.integration.ae2.utils.SerializableManagedGridNode;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
@@ -28,6 +29,7 @@ import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidList;
 import com.lowdragmc.lowdraglib.gui.texture.ColorBorderTexture;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
+import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.TextFieldWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
@@ -87,6 +89,9 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
     private String tagWhite = "";
     @Persisted
     private String tagBlack = "";
+    @DescSynced
+    @Persisted
+    private boolean requestEnabled = true;
     @Persisted
     private CompoundTag savedStockConfiguration = new CompoundTag();
     @Persisted
@@ -160,7 +165,7 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
             updatePatternConfiguration();
         }
         super.autoIO();
-        if (!isRemote() && isWorkingEnabled() && isOnline() && shouldSyncME()) {
+        if (!isRemote() && requestEnabled && isWorkingEnabled() && isOnline() && shouldSyncME()) {
             requestMissingStock();
         }
     }
@@ -716,7 +721,27 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
     @Override
     public void attachConfigurators(ConfiguratorPanel panel) {
         super.attachConfigurators(panel);
+        panel.attachConfigurators(new IFancyConfiguratorButton.Toggle(
+                new TextTexture("关"),
+                new TextTexture("请求"),
+                this::isRequestEnabled,
+                (click, enabled) -> setRequestEnabled(enabled))
+                .setTooltipsSupplier(enabled -> List.of(Component.translatable(enabled
+                        ? "gt_shanhai.machine.me_stellar_stock_part_machine.request.on"
+                        : "gt_shanhai.machine.me_stellar_stock_part_machine.request.off"))));
         panel.attachConfigurators(new TagFilterConfigurator());
+    }
+
+    private boolean isRequestEnabled() {
+        return requestEnabled;
+    }
+
+    private void setRequestEnabled(boolean enabled) {
+        if (isRemote() || requestEnabled == enabled) {
+            return;
+        }
+        requestEnabled = enabled;
+        markDirty();
     }
 
     @Override
@@ -724,6 +749,7 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
         CompoundTag tag = super.writeConfigToTag();
         tag.putString("TagWhite", tagWhite);
         tag.putString("TagBlack", tagBlack);
+        tag.putBoolean("RequestEnabled", requestEnabled);
         return tag;
     }
 
@@ -735,6 +761,9 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
         }
         if (tag.contains("TagBlack")) {
             tagBlack = tag.getString("TagBlack");
+        }
+        if (tag.contains("RequestEnabled")) {
+            requestEnabled = tag.getBoolean("RequestEnabled");
         }
         cachedTagFilter = null;
         patternDirty = true;

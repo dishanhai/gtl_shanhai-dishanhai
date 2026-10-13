@@ -271,6 +271,10 @@ class MEStellarStockPartMachineSourceTest {
         assertTrue(source.contains("new StellarTagFilter("));
         assertTrue(source.contains("addService(ICraftingRequester.class"));
         assertTrue(source.contains("requestMissingStock()"));
+        assertTrue(source.contains("private boolean requestEnabled = true;"));
+        assertTrue(source.contains("if (!isRemote() && requestEnabled && isWorkingEnabled()"));
+        assertTrue(source.contains("new IFancyConfiguratorButton.Toggle("));
+        assertTrue(source.contains("this::isRequestEnabled"));
         assertFalse(source.contains("slot.addStack("));
     }
 

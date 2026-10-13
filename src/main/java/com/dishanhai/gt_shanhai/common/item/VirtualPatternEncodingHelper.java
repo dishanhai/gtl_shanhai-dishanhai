@@ -424,28 +424,51 @@ public final class VirtualPatternEncodingHelper {
         return multiplier <= 0L ? 0L : multiplier;
     }
 
+    public static boolean productOutputsReflectMultiplier(IPatternDetails pattern, long multiplier) {
+        if (multiplier <= 1L) return true;
+        GenericStack[] outputs = pattern instanceof AEProcessingPattern processing
+                ? processing.getSparseOutputs() : pattern == null ? null : pattern.getOutputs();
+        if (outputs == null) return false;
+        boolean sawProduct = false;
+        for (GenericStack output : outputs) {
+            if (output == null || output.what() == null || output.amount() <= 0L) continue;
+            if (isRecipeCycleContainerKey(output.what())) continue;
+            sawProduct = true;
+            if (output.amount() % multiplier != 0L) return false;
+        }
+        return sawProduct;
+    }
+
     public static IPatternDetails rewritePatternOutputMultiplier(IPatternDetails pattern, Level level,
             String recipeTypeId, long requestedMultiplier) {
         if (!(pattern instanceof AEProcessingPattern processingPattern) || level == null) return pattern;
+        long targetMultiplier = Math.max(1L, requestedMultiplier);
+        if (targetMultiplier <= 1L) return pattern;
+        if (productOutputsReflectMultiplier(processingPattern, targetMultiplier)) return processingPattern;
+
         GenericStack[] inputs = processingPattern.getSparseInputs();
         GenericStack[] outputs = processingPattern.getSparseOutputs();
         GTRecipe recipe = findMatchingRecipeForPattern(inputs, outputs, recipeTypeId);
-        if (recipe == null) {
-            return rewritePatternOutputMultiplierDirect(processingPattern, level, requestedMultiplier);
+        long currentMultiplier = recipe == null ? 0L
+                : detectRecipeOutputMultiplier(recipe, StackBag.of(outputs));
+        if (recipe != null && currentMultiplier > 0L) {
+            GenericStack[] rewrittenInputs = rewriteCycleContainerInputs(
+                    inputs, currentMultiplier, targetMultiplier);
+            // 循環容器除不盡時不能放棄整張樣板，否則 AE 會繼續按 1x 產出下單。
+            if (rewrittenInputs == null) rewrittenInputs = inputs;
+            IPatternDetails rewritten = encodeScaledPattern(rewrittenInputs,
+                    createScaledRecipeOutputs(recipe, targetMultiplier), level);
+            if (rewritten != null && productOutputsReflectMultiplier(rewritten, targetMultiplier)
+                    && coversPatternProducts(rewritten, outputs, currentMultiplier, targetMultiplier)) {
+                return rewritten;
+            }
         }
-
-        long currentMultiplier = detectRecipeOutputMultiplier(recipe, StackBag.of(outputs));
-        if (currentMultiplier <= 0L) {
-            return rewritePatternOutputMultiplierDirect(processingPattern, level, requestedMultiplier);
+        IPatternDetails direct = rewritePatternOutputMultiplierDirect(processingPattern, level, requestedMultiplier);
+        if (direct != null && direct != processingPattern
+                && productOutputsReflectMultiplier(direct, targetMultiplier)) {
+            return direct;
         }
-        long targetMultiplier = Math.max(1L, requestedMultiplier);
-        GenericStack[] rewrittenInputs = rewriteCycleContainerInputs(
-                inputs, currentMultiplier, targetMultiplier);
-        if (rewrittenInputs == null) return pattern;
-        GenericStack[] rewrittenOutputs = createScaledRecipeOutputs(recipe, targetMultiplier);
-        IPatternDetails rewritten = PatternDetailsHelper.decodePattern(
-                PatternDetailsHelper.encodeProcessingPattern(rewrittenInputs, rewrittenOutputs), level);
-        return rewritten == null ? pattern : rewritten;
+        return scaledOutputView(processingPattern, targetMultiplier);
     }
 
     private static IPatternDetails rewritePatternOutputMultiplierDirect(AEProcessingPattern pattern, Level level,
@@ -454,9 +477,60 @@ public final class VirtualPatternEncodingHelper {
         if (targetMultiplier <= 1) return pattern;
         GenericStack[] rewrittenInputs = multiplyCycleContainerStacks(pattern.getSparseInputs(), targetMultiplier, true);
         GenericStack[] rewrittenOutputs = multiplyCycleContainerStacks(pattern.getSparseOutputs(), targetMultiplier, false);
-        IPatternDetails rewritten = PatternDetailsHelper.decodePattern(
-                PatternDetailsHelper.encodeProcessingPattern(rewrittenInputs, rewrittenOutputs), level);
+        IPatternDetails rewritten = encodeScaledPattern(rewrittenInputs, rewrittenOutputs, level);
         return rewritten == null ? pattern : rewritten;
+    }
+
+    private static IPatternDetails encodeScaledPattern(GenericStack[] inputs, GenericStack[] outputs, Level level) {
+        if (inputs == null || outputs == null || outputs.length == 0 || level == null) return null;
+        try {
+            ItemStack encoded = PatternDetailsHelper.encodeProcessingPattern(inputs, outputs);
+            return encoded == null || encoded.isEmpty()
+                    ? null : PatternDetailsHelper.decodePattern(encoded, level);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean coversPatternProducts(IPatternDetails rewritten, GenericStack[] patternOutputs,
+            long currentMultiplier, long targetMultiplier) {
+        if (rewritten == null || patternOutputs == null) return false;
+        GenericStack[] rewrittenOutputs = rewritten instanceof AEProcessingPattern processing
+                ? processing.getSparseOutputs() : rewritten.getOutputs();
+        for (GenericStack output : patternOutputs) {
+            if (output == null || output.what() == null || output.amount() <= 0L) continue;
+            if (isRecipeCycleContainerKey(output.what())) continue;
+            long baseAmount = currentMultiplier > 1L && output.amount() % currentMultiplier == 0L
+                    ? output.amount() / currentMultiplier : output.amount();
+            long expected = NumberUtils.saturatedMultiply(baseAmount, targetMultiplier);
+            long actual = 0L;
+            if (rewrittenOutputs != null) {
+                for (GenericStack candidate : rewrittenOutputs) {
+                    if (candidate != null && output.what().equals(candidate.what())) {
+                        actual = NumberUtils.saturatedAdd(actual, candidate.amount());
+                    }
+                }
+            }
+            if (actual < expected) return false;
+        }
+        return true;
+    }
+
+    private static IPatternDetails scaledOutputView(AEProcessingPattern pattern, long multiplier) {
+        GenericStack[] outputs = pattern.getOutputs();
+        if (outputs == null || outputs.length == 0) return pattern;
+        GenericStack[] scaled = new GenericStack[outputs.length];
+        for (int i = 0; i < outputs.length; i++) {
+            GenericStack output = outputs[i];
+            if (output == null || output.what() == null) {
+                scaled[i] = output;
+                continue;
+            }
+            long amount = isRecipeCycleContainerKey(output.what())
+                    ? output.amount() : NumberUtils.saturatedMultiply(output.amount(), multiplier);
+            scaled[i] = new GenericStack(output.what(), amount);
+        }
+        return new ScaledOutputPatternView(pattern, scaled);
     }
 
     private static GenericStack[] multiplyCycleContainerStacks(GenericStack[] stacks,
@@ -1545,6 +1619,36 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private VirtualPatternEncodingHelper() {}
+
+    private static final class ScaledOutputPatternView implements IPatternDetails {
+        private final AEProcessingPattern base;
+        private final GenericStack[] outputs;
+
+        private ScaledOutputPatternView(AEProcessingPattern base, GenericStack[] outputs) {
+            this.base = base;
+            this.outputs = outputs;
+        }
+
+        @Override
+        public AEItemKey getDefinition() {
+            return base.getDefinition();
+        }
+
+        @Override
+        public IPatternDetails.IInput[] getInputs() {
+            return base.getInputs();
+        }
+
+        @Override
+        public GenericStack[] getOutputs() {
+            return outputs;
+        }
+
+        @Override
+        public void pushInputsToExternalInventory(KeyCounter[] inputHolder, IPatternDetails.PatternInputSink inputSink) {
+            base.pushInputsToExternalInventory(inputHolder, inputSink);
+        }
+    }
 
     private static final class PatternAnalysis {
         private final Map<Entry, GenericStack> targets;
