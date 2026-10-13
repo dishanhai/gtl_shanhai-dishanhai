@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.common.recipe.editor;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.dishanhai.gt_shanhai.api.RecipeNoteCondition;
 import com.gregtechceu.gtceu.api.recipe.RecipeCondition;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.mojang.serialization.JsonOps;
@@ -211,8 +212,8 @@ public final class ShanhaiRecipeBase {
         ShanhaiRecipeIoApply.applyTable(copy, "tickOutputs", tickOutputs);
         List<RecipeCondition> parsedConditions = new ArrayList<>();
         for (JsonElement element : conditions) {
-            RecipeCondition.CODEC.parse(JsonOps.INSTANCE, element)
-                    .result().ifPresent(parsedConditions::add);
+            RecipeCondition parsed = parseEditorCondition(element);
+            if (parsed != null) parsedConditions.add(parsed);
         }
         copy.conditions.clear();
         copy.conditions.addAll(parsedConditions);
@@ -294,6 +295,19 @@ public final class ShanhaiRecipeBase {
         payload.add("tickOutputs", tickOutputs());
         payload.add("conditions", conditions());
         return payload;
+    }
+
+    private static RecipeCondition parseEditorCondition(JsonElement element) {
+        try {
+            var parsed = RecipeCondition.CODEC.parse(JsonOps.INSTANCE, element).result();
+            if (parsed.isPresent()) return parsed.get();
+        } catch (RuntimeException ignored) {
+            // A note the dispatch codec rejects is still written below.
+        }
+        if (ShanhaiRecipeConditions.isRecipeNote(element)) {
+            return new RecipeNoteCondition(ShanhaiRecipeConditions.noteText(element));
+        }
+        return null;
     }
 
     private static JsonArray conditionsJson(GTRecipe recipe) {

@@ -97,9 +97,14 @@ class ShanhaiUltimateTerminalSourceTest {
         assertTrue(behavior.contains("MetaMachine.getMachine"));
         assertTrue(behavior.contains("ShanhaiStructurePlanner.scan"));
         assertTrue(behavior.contains("ShanhaiStructureHighlightPacket"));
-        assertFalse(behavior.contains("ShanhaiTerminalCraftingManager.begin"));
-        assertFalse(behavior.contains("confirmSubmit"));
+        assertTrue(behavior.contains("ShanhaiTerminalCraftingManager.begin"));
+        assertTrue(behavior.contains("confirmSubmit"));
         assertFalse(behavior.contains("refreshBuildReadiness"));
+        int dismantle = behavior.indexOf("isDismantleMode(terminal)");
+        assertTrue(dismantle >= 0);
+        assertFalse(behavior.substring(0, dismantle).contains("confirmSubmit"),
+                "潜行施工确认不得绑定 AE 下单");
+        assertTrue(behavior.indexOf("confirmSubmit") > dismantle);
         assertTrue(behavior.contains("consumeBuildConfirmation"));
         assertTrue(behavior.contains("player.isShiftKeyDown()"));
     }

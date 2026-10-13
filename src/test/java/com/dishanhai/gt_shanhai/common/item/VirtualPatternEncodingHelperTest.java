@@ -31,6 +31,8 @@ public class VirtualPatternEncodingHelperTest {
                 "权威编码类型已知时，早期不完整索引 miss 必须查询该类型的当前 lookup");
         assertTrue(source.contains("requiredType.getLookup().getLookup().getRecipes(true)"),
                 "兜底必须读取已知 GTRecipeType 的实时服务端配方表");
+        assertTrue(source.contains("nonConsumableRecipesInType"),
+                "同一 revision 内不得按样板重复展开整棵 lookup");
         assertTrue(source.contains("type-scoped live lookup matched recipe={}"),
                 "实机日志必须能证明索引 miss 后的类型域兜底确实命中");
     }

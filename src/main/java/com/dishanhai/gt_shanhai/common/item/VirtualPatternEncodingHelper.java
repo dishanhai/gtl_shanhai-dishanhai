@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 
@@ -68,6 +69,7 @@ public final class VirtualPatternEncodingHelper {
         }
     };
     private static RecipeOutputIndexes recipeOutputIndexes;
+    private static volatile TypeScopedRecipeCache typeScopedRecipeCache;
 
     public static GenericStack[] rewriteInputsForVirtualProviders(GenericStack[] inputs, GenericStack[] outputs) {
         if (inputs == null || outputs == null) {
@@ -806,11 +808,7 @@ public final class VirtualPatternEncodingHelper {
             StackBag inputBag, StackBag outputBag, StackBag availableCatalystInputs,
             GTRecipeType requiredType, boolean allowOmittedNonConsumables) {
         if (requiredType.getLookup() == null || requiredType.getLookup().getLookup() == null) return null;
-        List<GTRecipe> currentRecipes = new ArrayList<>();
-        Iterable<GTRecipe> recipes = requiredType.getLookup().getLookup().getRecipes(true)::iterator;
-        for (GTRecipe recipe : recipes) {
-            if (recipe != null && hasNonConsumableInput(recipe)) currentRecipes.add(recipe);
-        }
+        List<GTRecipe> currentRecipes = nonConsumableRecipesInType(requiredType);
 
         RecipeSelection selection = selectRecipeCandidate(currentRecipes, inputs, outputs, inputBag, outputBag,
                 availableCatalystInputs, requiredType, false, allowOmittedNonConsumables);
@@ -828,6 +826,34 @@ public final class VirtualPatternEncodingHelper {
                     selection.recipe.getId());
         }
         return selection.recipe;
+    }
+
+    /**
+     * 类型域兜底会展开整棵 lookup。同一 revision 内配方表不变，按类型只展开一次。
+     */
+    private static List<GTRecipe> nonConsumableRecipesInType(GTRecipeType requiredType) {
+        long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
+        TypeScopedRecipeCache cache = typeScopedRecipeCache;
+        if (cache == null || cache.revision != revision) {
+            synchronized (VirtualPatternEncodingHelper.class) {
+                cache = typeScopedRecipeCache;
+                if (cache == null || cache.revision != revision) {
+                    cache = new TypeScopedRecipeCache(revision);
+                    typeScopedRecipeCache = cache;
+                }
+            }
+        }
+        return cache.recipesFor(requiredType);
+    }
+
+    private static List<GTRecipe> collectNonConsumableRecipes(GTRecipeType requiredType) {
+        if (requiredType.getLookup() == null || requiredType.getLookup().getLookup() == null) return List.of();
+        List<GTRecipe> currentRecipes = new ArrayList<>();
+        Iterable<GTRecipe> recipes = requiredType.getLookup().getLookup().getRecipes(true)::iterator;
+        for (GTRecipe recipe : recipes) {
+            if (recipe != null && hasNonConsumableInput(recipe)) currentRecipes.add(recipe);
+        }
+        return currentRecipes.isEmpty() ? List.of() : List.copyOf(currentRecipes);
     }
 
     private static RecipeSelection selectRecipeCandidate(List<GTRecipe> candidates,
@@ -1687,6 +1713,23 @@ public final class VirtualPatternEncodingHelper {
                 matchingRecipeResolved = true;
             }
             return matchingRecipe;
+        }
+    }
+
+    private static final class TypeScopedRecipeCache {
+        private final long revision;
+        private final ConcurrentHashMap<GTRecipeType, List<GTRecipe>> byType = new ConcurrentHashMap<>();
+
+        private TypeScopedRecipeCache(long revision) {
+            this.revision = revision;
+        }
+
+        private List<GTRecipe> recipesFor(GTRecipeType type) {
+            List<GTRecipe> cached = byType.get(type);
+            if (cached != null) return cached;
+            List<GTRecipe> built = collectNonConsumableRecipes(type);
+            List<GTRecipe> raced = byType.putIfAbsent(type, built);
+            return raced == null ? built : raced;
         }
     }
 

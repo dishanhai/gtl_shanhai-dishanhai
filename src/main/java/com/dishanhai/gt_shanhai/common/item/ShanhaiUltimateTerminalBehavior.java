@@ -146,6 +146,12 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             return InteractionResult.FAIL;
         }
 
+        if (ae != null && ShanhaiTerminalCraftingManager.confirmSubmit(
+                serverPlayer, terminal, plan, ae)) {
+            return InteractionResult.SUCCESS;
+        }
+        requestMissingOrders(serverPlayer, terminal, plan, ae);
+
         ShanhaiTerminalCraftingManager.Phase phase = ShanhaiTerminalCraftingManager.phase(terminal);
         if (phase == ShanhaiTerminalCraftingManager.Phase.READY_TO_BUILD) {
             serverPlayer.sendSystemMessage(Component.literal("§a[山海终端] 潜行右击同一控制器确认施工"));
@@ -198,6 +204,19 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
     private ShanhaiTerminalAeBinding.Context resolveAeContext(ServerPlayer player, ItemStack terminal) {
         if (!ShanhaiUltimateTerminalConfig.isAeMode(terminal)) return null;
         return ShanhaiTerminalAeBinding.resolve(player, terminal);
+    }
+
+    private void requestMissingOrders(ServerPlayer player, ItemStack terminal, ShanhaiStructurePlan plan,
+                                      ShanhaiTerminalAeBinding.Context ae) {
+        if (!ShanhaiUltimateTerminalConfig.isAeMode(terminal)) return;
+        if (ae == null) {
+            if (!materials.preflight(plan, player, null).success()) {
+                player.sendSystemMessage(Component.literal(
+                        "§e[山海终端] AE 网络未绑定或离线，无法下单缺口"));
+            }
+            return;
+        }
+        ShanhaiTerminalCraftingManager.begin(player, terminal, plan, ae, materials);
     }
 
     private boolean rejectOutOfBuildHeight(ServerPlayer player, ItemStack terminal,
@@ -438,6 +457,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         GlobalPos bound = ShanhaiUltimateTerminalConfig.getBoundAe(itemStack);
         list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.0"));
         list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.1"));
+        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.2"));
         list.add(bound == null
                 ? Component.translatable("tooltip.gt_shanhai.ultimate_terminal.unbound")
                 : Component.translatable("tooltip.gt_shanhai.ultimate_terminal.bound",

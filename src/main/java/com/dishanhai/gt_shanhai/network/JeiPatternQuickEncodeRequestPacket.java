@@ -4,6 +4,7 @@ import appeng.menu.me.items.PatternEncodingTermMenu;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.item.JeiPatternQuickEncodeService;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisUpload;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
@@ -67,6 +68,11 @@ public final class JeiPatternQuickEncodeRequestPacket {
         }
         GTDishanhaiMod.LOGGER.info("[JEIQuickEncode] request accepted player={} menuId={} recipeId={} wholeRecipeType={}",
                 player.getGameProfile().getName(), packet.menuId, packet.recipeId, packet.wholeRecipeType);
+        if (packet.recipeId.startsWith(SelfSynthesisUpload.MULTIBLOCK_PREFIX)) {
+            JeiPatternQuickEncodeService.encodeMultiblockAndUpload(player, menu,
+                    packet.recipeId.substring(SelfSynthesisUpload.MULTIBLOCK_PREFIX.length()));
+            return;
+        }
         JeiPatternQuickEncodeService.encodeAndUpload(
                 player, menu, packet.recipeId, packet.wholeRecipeType);
     }

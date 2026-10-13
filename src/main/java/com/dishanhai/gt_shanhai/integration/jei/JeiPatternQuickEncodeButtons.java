@@ -14,7 +14,9 @@ import com.dishanhai.gt_shanhai.network.JeiPatternByproductUploadRequestPacket;
 import com.dishanhai.gt_shanhai.network.JeiPatternQuickEncodeRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisUpload;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.integration.jei.multipage.MultiblockInfoWrapper;
 import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
 
 import mezz.jei.api.runtime.IJeiRuntime;
@@ -76,6 +78,7 @@ public final class JeiPatternQuickEncodeButtons {
         registration.addRecipeButtonFactory(new BookmarkFactory(bookmarkIcon));
         IDrawable byproductIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.LIME_DYE));
         registration.addRecipeButtonFactory(new ByproductUploadFactory(byproductIcon));
+        registration.addRecipeButtonFactory(new MultiblockFactory(patternIcon));
     }
 
     private static ResourceLocation extractRecipeId(Object recipeBase) {
@@ -102,6 +105,67 @@ public final class JeiPatternQuickEncodeButtons {
             // 个别第三方分类的包装器可能无法读取 ID，继续使用兼容性解析。
         }
         return extractRecipeId(recipe);
+    }
+
+    private record MultiblockFactory(IDrawable icon) implements IRecipeButtonControllerFactory {
+        @Override
+        public <T> IIconButtonController createButtonController(IRecipeLayoutDrawable<T> recipeLayout) {
+            if (!(recipeLayout.getRecipe() instanceof MultiblockInfoWrapper wrapper)
+                    || wrapper.definition == null || wrapper.definition.getId() == null) {
+                return null;
+            }
+            return new MultiblockController(icon, wrapper.definition.getId().toString());
+        }
+    }
+
+    private static final class MultiblockController implements IIconButtonController {
+        private final IDrawable icon;
+        private final String machineId;
+
+        private MultiblockController(IDrawable icon, String machineId) {
+            this.icon = icon;
+            this.machineId = machineId;
+        }
+
+        @Override
+        public void initState(IButtonState state) {
+            state.setIcon(icon);
+            state.setVisible(true);
+            state.setActive(true);
+        }
+
+        @Override
+        public void updateState(IButtonState state) {
+            state.setVisible(true);
+            state.setActive(true);
+        }
+
+        @Override
+        public boolean onPress(IJeiUserInput input) {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft.player == null
+                    || !(minecraft.player.containerMenu instanceof PatternEncodingTermMenu menu)) {
+                if (!input.isSimulate() && minecraft.player != null) {
+                    minecraft.player.displayClientMessage(Component.translatable(
+                            "message.gt_shanhai.jei.quick_encode.open_terminal"), false);
+                }
+                return false;
+            }
+            if (!input.isSimulate()) {
+                ShanhaiNetwork.CHANNEL.sendToServer(new JeiPatternQuickEncodeRequestPacket(
+                        menu.containerId, SelfSynthesisUpload.MULTIBLOCK_PREFIX + machineId, false));
+            }
+            return true;
+        }
+
+        @Override
+        public void getTooltips(ITooltipBuilder tooltip) {
+            tooltip.add(Component.translatable("tooltip.gt_shanhai.jei.quick_encode_multiblock"));
+        }
+
+        @Override
+        public void drawExtras(GuiGraphics graphics, Rect2i area, int mouseX, int mouseY, float partialTick) {
+        }
     }
 
     private record Factory(IDrawable icon, boolean wholeRecipeType)

@@ -217,6 +217,7 @@ public final class RecipeEditorExportPacket {
             if (GTRecipeSerializer.CODEC.parse(JsonOps.INSTANCE, recipeJson).result().isEmpty()) {
                 return invalid("export-codec-rejected");
             }
+            writeEditorConditions(recipeJson, edited.conditions());
             writeEnabledCondition(recipeJson, exportId);
 
             boolean developer = developerExport();
@@ -317,6 +318,15 @@ public final class RecipeEditorExportPacket {
         JsonObject entry = element.getAsJsonObject();
         if (!entry.has("content") || !entry.get("content").isJsonObject()) return null;
         return entry.getAsJsonObject("content");
+    }
+
+    /**
+     * GTCEu {@code recipeConditions}. Codec encode drops a note it cannot parse,
+     * so the editor array is written after that round trip.
+     */
+    static void writeEditorConditions(JsonObject recipe, JsonArray editorConditions) {
+        if (recipe == null || editorConditions == null) return;
+        recipe.add("recipeConditions", ShanhaiRecipeConditions.exportConditions(editorConditions));
     }
 
     /**

@@ -118,6 +118,31 @@ public final class ShanhaiRecipeConditions {
         return "";
     }
 
+    public static boolean hasNote(JsonArray conditions, String text) {
+        if (conditions == null || text == null) return false;
+        for (JsonElement element : conditions) {
+            if (isRecipeNote(element) && text.equals(noteText(element))) return true;
+        }
+        return false;
+    }
+
+    /** Datapack {@code recipeConditions}. Notes are always {@code type} + {@code text}. */
+    public static JsonArray exportConditions(JsonArray editorConditions) {
+        JsonArray exported = new JsonArray();
+        if (editorConditions == null) return exported;
+        for (JsonElement element : editorConditions) {
+            if (element == null || element.isJsonNull() || !element.isJsonObject()) continue;
+            if (isRecipeNote(element)) {
+                String text = noteText(element);
+                if (text.isEmpty()) continue;
+                exported.add(noteJson("recipe_note", text));
+                continue;
+            }
+            exported.add(element.deepCopy());
+        }
+        return exported;
+    }
+
     /** Registry ids that can fill this field. Dimension markers and matching builtin registries included. */
     public static List<String> parameterChoices(String path, String current) {
         String field = fieldName(path);

@@ -210,6 +210,10 @@ class StellarPatternMultiplierSourceTest {
 
         assertTrue(source.contains("outputMultiplierPatternsRefreshNeeded"),
                 "倍率样板全量校正必须有脏标记，不能每次 AE 查询都重解码全部槽位");
+        assertTrue(refreshOne.contains("sameVisiblePattern(currentPattern, effectivePattern)"),
+                "产出数量没变时不得再标 needPatternSync，否则 AE 每个 tick 重建提供者并重扫配方");
+        assertTrue(source.contains("confirmedPatternOutputMultipliers"),
+                "热路径必须复用已确认的配方类型倍率，不能在宿主空闲/工作跳变时改变缓存键");
         assertTrue(available.contains("wildcardPatterns.isEmpty()) return patterns"),
                 "无通配样板时必须直接复用父类不可变列表，避免重复复制");
         assertFalse(refreshOne.contains("reCalculatePatternSlotMap();"),

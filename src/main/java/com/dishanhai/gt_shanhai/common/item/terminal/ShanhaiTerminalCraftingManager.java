@@ -76,6 +76,9 @@ public final class ShanhaiTerminalCraftingManager {
     }
 
     private static final Map<UUID, Session> SESSIONS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Session> ORDER_SESSIONS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Map<GlobalPos, Map<AEKey, Long>>> SUBMITTED_AMOUNTS = new ConcurrentHashMap<>();
+    private static final Map<UUID, Map<GlobalPos, Map<AEKey, Long>>> BLOCKED_AMOUNTS = new ConcurrentHashMap<>();
     private static final Map<UUID, Session> ACTIVE_CALCULATIONS = new ConcurrentHashMap<>();
 
     private ShanhaiTerminalCraftingManager() {}
@@ -83,8 +86,19 @@ public final class ShanhaiTerminalCraftingManager {
     public static boolean begin(ServerPlayer player, ItemStack terminal, ShanhaiStructurePlan plan,
                                 Context ae, ShanhaiTerminalMaterialService materials) {
         if (player == null || terminal.isEmpty() || plan == null || ae == null) return false;
+        UUID terminalId = ShanhaiUltimateTerminalConfig.getTerminalUuid(terminal);
+        Session existing = ORDER_SESSIONS.get(terminalId);
+        if (existing != null
+                && existing.target.equals(plan.target())
+                && plan.fingerprint().equals(existing.planFingerprint)
+                && (existing.phase == Phase.CALCULATING
+                    || existing.phase == Phase.RETRY_CALCULATING
+                    || existing.phase == Phase.READY_TO_SUBMIT)) {
+            return false;
+        }
         List<ShanhaiTerminalMaterialService.RequestTarget> shortages =
-                materials.requestableShortages(plan, player, ae);
+                remainingShortages(terminalId, plan.target(),
+                        materials.requestableShortages(plan, player, ae));
         if (shortages.isEmpty()) return false;
         ICraftingService crafting = ae.grid().getCraftingService();
         List<WorkItem> items = new ArrayList<>();
@@ -105,11 +119,10 @@ public final class ShanhaiTerminalCraftingManager {
                     "§c[山海终端] 无可用合成流程: §f" + String.join("、", unavailable)));
         }
         if (items.isEmpty()) return false;
-        UUID terminalId = ShanhaiUltimateTerminalConfig.getTerminalUuid(terminal);
         Session session = new Session(
                 player.getUUID(), terminalId, plan.target(),
                 ShanhaiUltimateTerminalConfig.getBoundAe(terminal), plan.fingerprint(), items);
-        Session previous = SESSIONS.put(terminalId, session);
+        Session previous = ORDER_SESSIONS.put(terminalId, session);
         if (previous != null) ACTIVE_CALCULATIONS.remove(terminalId, previous);
         cancel(previous);
         ACTIVE_CALCULATIONS.put(terminalId, session);
@@ -136,7 +149,7 @@ public final class ShanhaiTerminalCraftingManager {
 
     public static boolean confirmSubmit(ServerPlayer player, ItemStack terminal,
                                         ShanhaiStructurePlan currentPlan, Context ae) {
-        Session session = validSession(player, terminal, currentPlan);
+        Session session = validOrderSession(player, terminal, currentPlan);
         if (session == null || session.phase != Phase.READY_TO_SUBMIT || ae == null) return false;
         if (!sameBinding(session, terminal)) return false;
         int submitted = 0;
@@ -157,14 +170,23 @@ public final class ShanhaiTerminalCraftingManager {
             player.sendSystemMessage(Component.literal(
                     "§c[山海终端] 部分合成提交失败: §f" + String.join("、", failed)));
         }
-        session.phase = Phase.READY_TO_BUILD;
+        ORDER_SESSIONS.remove(session.terminalId, session);
+        ACTIVE_CALCULATIONS.remove(session.terminalId, session);
+        for (WorkItem item : session.items) {
+            if (item.submitted) {
+                rememberAmount(SUBMITTED_AMOUNTS, session.terminalId, session.target, item.key, item.amount);
+            } else if (item.plan != null && item.plan.simulation()) {
+                rememberAmount(BLOCKED_AMOUNTS, session.terminalId, session.target, item.key, item.amount);
+            }
+        }
         if (submitted == 0) {
             player.sendSystemMessage(Component.literal(
-                    "§e[山海终端] 未成功提交 AE 合成任务；可潜行施工现有材料，缺材料位置跳过"));
+                    "§e[山海终端] 未成功提交 AE 合成任务；可继续按现有材料施工，缺材料位置跳过"));
             return true;
         }
         player.sendSystemMessage(Component.literal(
-                "§b[山海终端] 已提交 §f" + submitted + " §b项任务；可潜行施工现有材料，缺材料位置跳过"));
+                "§b[山海终端] 已提交 §f" + submitted
+                        + " §b项缺口下单；可继续按现有材料施工，缺材料位置跳过"));
         return true;
     }
 
@@ -192,9 +214,13 @@ public final class ShanhaiTerminalCraftingManager {
 
     public static void clear(ItemStack terminal) {
         UUID terminalId = ShanhaiUltimateTerminalConfig.getTerminalUuid(terminal);
-        Session session = SESSIONS.remove(terminalId);
-        if (session != null) ACTIVE_CALCULATIONS.remove(terminalId, session);
-        cancel(session);
+        Session build = SESSIONS.remove(terminalId);
+        Session order = ORDER_SESSIONS.remove(terminalId);
+        if (order != null) ACTIVE_CALCULATIONS.remove(terminalId, order);
+        SUBMITTED_AMOUNTS.remove(terminalId);
+        BLOCKED_AMOUNTS.remove(terminalId);
+        cancel(build);
+        cancel(order);
     }
 
     @SubscribeEvent
@@ -209,7 +235,7 @@ public final class ShanhaiTerminalCraftingManager {
             session.ticks++;
             if (session.ticks > CALC_TIMEOUT_TICKS) {
                 ACTIVE_CALCULATIONS.remove(session.terminalId, session);
-                SESSIONS.remove(session.terminalId, session);
+                ORDER_SESSIONS.remove(session.terminalId, session);
                 cancel(session);
                 ServerPlayer player = findPlayer(session.playerId);
                 if (player != null) player.sendSystemMessage(Component.literal("§c[山海终端] 合成方案计算超时"));
@@ -249,9 +275,13 @@ public final class ShanhaiTerminalCraftingManager {
                 continue;
             }
             if (usable == 0) {
-                SESSIONS.remove(session.terminalId, session);
+                for (WorkItem item : session.items) {
+                    rememberAmount(BLOCKED_AMOUNTS, session.terminalId, session.target, item.key, item.amount);
+                }
+                ORDER_SESSIONS.remove(session.terminalId, session);
                 if (player != null) player.sendSystemMessage(Component.literal(
-                        "§c[山海终端] 合成方案均不可提交: §f" + summarize(failures)));
+                        "§c[山海终端] 合成方案均不可提交: §f" + summarize(failures)
+                                + " §7补料后请开关一次 AE 模式再试"));
                 continue;
             }
             session.phase = Phase.READY_TO_SUBMIT;
@@ -314,13 +344,64 @@ public final class ShanhaiTerminalCraftingManager {
         return String.join("；", lines.subList(0, 3)) + " 等 " + lines.size() + " 项";
     }
 
+    private static List<ShanhaiTerminalMaterialService.RequestTarget> remainingShortages(
+            UUID terminalId, GlobalPos target, List<ShanhaiTerminalMaterialService.RequestTarget> shortages) {
+        if (shortages.isEmpty()) return shortages;
+        Map<AEKey, Long> submitted = amountsFor(SUBMITTED_AMOUNTS, terminalId, target);
+        Map<AEKey, Long> blocked = amountsFor(BLOCKED_AMOUNTS, terminalId, target);
+        if (submitted.isEmpty() && blocked.isEmpty()) return shortages;
+        List<ShanhaiTerminalMaterialService.RequestTarget> remaining = new ArrayList<>();
+        for (ShanhaiTerminalMaterialService.RequestTarget shortage : shortages) {
+            long covered = saturatedAdd(submitted.getOrDefault(shortage.key(), 0L),
+                    blocked.getOrDefault(shortage.key(), 0L));
+            if (covered >= shortage.amount()) continue;
+            remaining.add(new ShanhaiTerminalMaterialService.RequestTarget(
+                    shortage.key(), shortage.amount() - covered, shortage.displayName()));
+        }
+        return remaining;
+    }
+
+    private static Map<AEKey, Long> amountsFor(
+            Map<UUID, Map<GlobalPos, Map<AEKey, Long>>> amounts, UUID terminalId, GlobalPos target) {
+        Map<GlobalPos, Map<AEKey, Long>> byTarget = amounts.get(terminalId);
+        if (byTarget == null) return Map.of();
+        Map<AEKey, Long> found = byTarget.get(target);
+        return found == null ? Map.of() : found;
+    }
+
+    private static void rememberAmount(Map<UUID, Map<GlobalPos, Map<AEKey, Long>>> amounts,
+                                       UUID terminalId, GlobalPos target, AEKey key, long amount) {
+        if (key == null || amount <= 0) return;
+        Map<AEKey, Long> bucket = amounts
+                .computeIfAbsent(terminalId, ignored -> new ConcurrentHashMap<>())
+                .computeIfAbsent(target, ignored -> new ConcurrentHashMap<>());
+        long current = bucket.getOrDefault(key, 0L);
+        bucket.put(key, saturatedAdd(current, amount));
+    }
+
+    private static long saturatedAdd(long left, long right) {
+        long sum = left + right;
+        return (left ^ right) < 0 || (left ^ sum) >= 0 ? sum : Long.MAX_VALUE;
+    }
+
     private static Session validSession(ServerPlayer player, ItemStack terminal,
                                         ShanhaiStructurePlan currentPlan) {
+        return validSession(SESSIONS, player, terminal, currentPlan, false);
+    }
+
+    private static Session validOrderSession(ServerPlayer player, ItemStack terminal,
+                                             ShanhaiStructurePlan currentPlan) {
+        return validSession(ORDER_SESSIONS, player, terminal, currentPlan, true);
+    }
+
+    private static Session validSession(Map<UUID, Session> sessions, ServerPlayer player, ItemStack terminal,
+                                        ShanhaiStructurePlan currentPlan, boolean requireFingerprint) {
         if (player == null || terminal.isEmpty() || currentPlan == null) return null;
         UUID terminalId = ShanhaiUltimateTerminalConfig.getTerminalUuid(terminal);
-        Session session = SESSIONS.get(terminalId);
+        Session session = sessions.get(terminalId);
         if (session == null || !session.playerId.equals(player.getUUID())) return null;
         if (!session.target.equals(currentPlan.target())) return null;
+        if (requireFingerprint && !currentPlan.fingerprint().equals(session.planFingerprint)) return null;
         return session;
     }
 

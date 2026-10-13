@@ -8,6 +8,8 @@ import com.dishanhai.gt_shanhai.common.compat.eaep.EaepProviderRecipeTypeBridge;
 import com.dishanhai.gt_shanhai.common.compat.eaep.EaepProviderRecipeTypesPacketAccess;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisUpload;
 import com.extendedae_plus.init.ModNetwork;
 import com.extendedae_plus.network.provider.ProvidersListS2CPacket;
 import com.extendedae_plus.network.provider.RequestProvidersListC2SPacket;
@@ -81,7 +83,7 @@ public class EaepRequestProvidersListRecipeTypesMixin {
             filteredIds.add(id);
             names.add(PatternProviderDataUtil.getProviderDisplayName(id, accessMenu));
             slots.add(empty);
-            recipeTypes.add(EaepProviderRecipeTypeBridge.collectProviderRecipeTypeIds(container));
+            recipeTypes.add(gtShanhai$mapProviderRecipeTypes(container, uploadPattern));
             stellarProviders.add(container instanceof RecipeTypePatternBufferPartMachine);
         }
         sendProviders(player, filteredIds, names, slots, recipeTypes, stellarProviders, uploadPattern);
@@ -106,10 +108,18 @@ public class EaepRequestProvidersListRecipeTypesMixin {
             ids.add(-1L - i);
             names.add(PatternProviderDataUtil.getProviderDisplayName(container));
             slots.add(empty);
-            recipeTypes.add(EaepProviderRecipeTypeBridge.collectProviderRecipeTypeIds(container));
+            recipeTypes.add(gtShanhai$mapProviderRecipeTypes(container, uploadPattern));
             stellarProviders.add(container instanceof RecipeTypePatternBufferPartMachine);
         }
         sendProviders(player, ids, names, slots, recipeTypes, stellarProviders, uploadPattern);
+    }
+
+    private static List<String> gtShanhai$mapProviderRecipeTypes(PatternContainer container, ItemStack uploadPattern) {
+        List<String> types = EaepProviderRecipeTypeBridge.collectProviderRecipeTypeIds(container);
+        if (!(container instanceof SelfSynthesisChamberPartMachine) || uploadPattern == null || uploadPattern.isEmpty()) {
+            return types;
+        }
+        return SelfSynthesisUpload.mapRecipeTypes(types, PatternRecipeTypeHelper.readRecipeTypeId(uploadPattern));
     }
 
     private static void sendProviders(ServerPlayer player, List<Long> ids, List<String> names, List<Integer> slots,

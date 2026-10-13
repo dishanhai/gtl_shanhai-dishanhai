@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeJsExport;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.resources.ResourceLocation;
@@ -60,6 +61,29 @@ class RecipeEditorExportLongAmountTest {
         assertEquals("gtceu:sized", content.get("type").getAsString());
         assertEquals(64, content.get("count").getAsInt());
         assertFalse(content.has("actualAmount"));
+    }
+
+    @Test
+    void exportWritesNoteIntoRecipeConditions() {
+        JsonObject recipe = JsonParser.parseString("""
+                {"recipeConditions": [{"type": "cleanroom", "cleanroom": "cleanroom"}]}
+                """).getAsJsonObject();
+        JsonArray editor = JsonParser.parseString("""
+                [
+                  {"type": "cleanroom", "cleanroom": "cleanroom"},
+                  {"type": "recipe_note", "text": "槽位溢出放不下"}
+                ]
+                """).getAsJsonArray();
+
+        RecipeEditorExportPacket.writeEditorConditions(recipe, editor);
+
+        JsonArray written = recipe.getAsJsonArray("recipeConditions");
+        assertEquals(2, written.size());
+        assertEquals("cleanroom", written.get(0).getAsJsonObject().get("type").getAsString());
+        JsonObject note = written.get(1).getAsJsonObject();
+        assertEquals("recipe_note", note.get("type").getAsString());
+        assertEquals("槽位溢出放不下", note.get("text").getAsString());
+        assertFalse(recipe.has("conditions"));
     }
 
     @Test

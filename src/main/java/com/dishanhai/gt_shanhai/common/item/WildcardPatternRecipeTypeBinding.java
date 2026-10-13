@@ -20,10 +20,24 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.lang.reflect.Method;
 
 public final class WildcardPatternRecipeTypeBinding {
+
+    private static final Optional<Method> ABSENT_METHOD = Optional.empty();
+    /**
+     * 量子计算机每次推样板都会展开主机配方类型。多数类型没有这些兼容方法，
+     * 每次 getMethod 失败都会构造 NoSuchMethodException 并填充栈。按 Class 记住命中和缺失。
+     */
+    private static final ClassValue<ConcurrentHashMap<String, Optional<Method>>> NO_ARG_METHODS = new ClassValue<>() {
+        @Override
+        protected ConcurrentHashMap<String, Optional<Method>> computeValue(Class<?> type) {
+            return new ConcurrentHashMap<>();
+        }
+    };
 
     private WildcardPatternRecipeTypeBinding() {
     }
@@ -77,15 +91,18 @@ public final class WildcardPatternRecipeTypeBinding {
             addExpandedTypes(target, selectable.getAllSelectableRecipeTypes());
         }
         addNamedRecipeTypes(target, machine, "getRecipeTypeNameSet");
-        addExpandedTypes(target, reflectedRecipeTypes(machine, "getAllSelectableRecipeTypes"));
+        if (!(machine instanceof SelectableRecipeTypeSetMachine)) {
+            addExpandedTypes(target, reflectedRecipeTypes(machine, "getAllSelectableRecipeTypes"));
+        }
         addExpandedTypes(target, reflectedRecipeType(machine, "getMultiRecipeType"));
         addExpandedTypes(target, machine.getRecipeType());
     }
 
     private static void addNamedRecipeTypes(Map<ResourceLocation, GTRecipeType> target,
             Object owner, String methodName) {
+        Method method = findNoArgMethod(owner, methodName);
+        if (method == null) return;
         try {
-            Method method = owner.getClass().getMethod(methodName);
             Object result = method.invoke(owner);
             if (!(result instanceof Iterable<?> names)) return;
             for (Object name : names) {
@@ -94,7 +111,7 @@ public final class WildcardPatternRecipeTypeBinding {
                 if (type != null) addExpandedTypes(target, type);
             }
         } catch (ReflectiveOperationException | RuntimeException ignored) {
-            // 非原初主机没有这个方法，继续使用通用配方类型接口。
+            // 调用失败时保留已经收集到的通用配方类型。
         }
     }
 
@@ -126,8 +143,9 @@ public final class WildcardPatternRecipeTypeBinding {
     }
 
     private static GTRecipeType reflectedRecipeType(Object owner, String methodName) {
+        Method method = findNoArgMethod(owner, methodName);
+        if (method == null) return null;
         try {
-            Method method = owner.getClass().getMethod(methodName);
             Object result = method.invoke(owner);
             return result instanceof GTRecipeType type ? type : null;
         } catch (ReflectiveOperationException | RuntimeException ignored) {
@@ -136,12 +154,26 @@ public final class WildcardPatternRecipeTypeBinding {
     }
 
     private static GTRecipeType[] reflectedRecipeTypes(Object owner, String methodName) {
+        Method method = findNoArgMethod(owner, methodName);
+        if (method == null) return null;
         try {
-            Method method = owner.getClass().getMethod(methodName);
             Object result = method.invoke(owner);
             return result instanceof GTRecipeType[] types ? types : null;
         } catch (ReflectiveOperationException | RuntimeException ignored) {
             return null;
         }
+    }
+
+    private static Method findNoArgMethod(Object owner, String methodName) {
+        ConcurrentHashMap<String, Optional<Method>> cache = NO_ARG_METHODS.get(owner.getClass());
+        Optional<Method> cached = cache.get(methodName);
+        if (cached != null) return cached.orElse(null);
+        Optional<Method> resolved = ABSENT_METHOD;
+        try {
+            resolved = Optional.of(owner.getClass().getMethod(methodName));
+        } catch (NoSuchMethodException ignored) {
+        }
+        Optional<Method> raced = cache.putIfAbsent(methodName, resolved);
+        return (raced == null ? resolved : raced).orElse(null);
     }
 }

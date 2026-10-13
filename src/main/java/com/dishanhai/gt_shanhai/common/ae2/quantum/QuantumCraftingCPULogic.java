@@ -28,6 +28,8 @@ import appeng.crafting.pattern.AEProcessingPattern;
 import appeng.hooks.ticking.TickHandler;
 import appeng.me.service.CraftingService;
 import com.google.common.base.Preconditions;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisCraftCancel;
 import com.dishanhai.gt_shanhai.common.machine.part.StellarPatternCraftingContext;
 import com.dishanhai.gt_shanhai.common.item.VirtualCraftingPresenceState;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
@@ -297,6 +299,13 @@ public class QuantumCraftingCPULogic {
                                     + " power=" + patternPower);
                 }
                 if (!accepted) continue;
+                if (provider instanceof SelfSynthesisChamberPartMachine) {
+                    energyService.extractAEPower(patternPower, Actionable.MODULATE, PowerMultiplier.CONFIG);
+                    craftingContainer = null;
+                    cancel();
+                    SelfSynthesisCraftCancel.finish();
+                    return pushedPatterns + 1;
+                }
 
                 energyService.extractAEPower(patternPower, Actionable.MODULATE, PowerMultiplier.CONFIG);
                 pushedPatterns++;

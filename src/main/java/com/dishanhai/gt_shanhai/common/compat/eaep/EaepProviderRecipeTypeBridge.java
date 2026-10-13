@@ -5,6 +5,8 @@ import appeng.helpers.patternprovider.PatternContainer;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisUpload;
 import com.dishanhai.gt_shanhai.client.gui.scaled.PinyinSearchBridge;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
@@ -41,6 +43,9 @@ public final class EaepProviderRecipeTypeBridge {
     }
 
     public static List<String> collectProviderRecipeTypeIds(PatternContainer container) {
+        if (container instanceof SelfSynthesisChamberPartMachine chamber) {
+            return SelfSynthesisUpload.mapRecipeTypes(chamber.storedRecipeTypeIds(), "");
+        }
         if (!(container instanceof RecipeTypePatternBufferPartMachine buffer)) {
             return List.of();
         }
@@ -220,7 +225,7 @@ public final class EaepProviderRecipeTypeBridge {
             return 0;
         }
         Map<String, String> mappings = loadRecipeTypeNameMappings();
-        int bestScore = 0;
+        int bestScore = SelfSynthesisUpload.searchBonus(typeIds, normalizedQuery);
         for (String typeId : typeIds) {
             bestScore = Math.max(bestScore, recipeTypeMatchScore(typeId, normalizedQuery, mappings));
         }
@@ -250,6 +255,9 @@ public final class EaepProviderRecipeTypeBridge {
     private static String displayRecipeType(String typeId, Map<String, String> mappings) {
         if (typeId == null || typeId.isBlank()) {
             return "";
+        }
+        if (SelfSynthesisUpload.RECIPE_TYPE_ID.equals(normalize(typeId))) {
+            return SelfSynthesisUpload.DISPLAY_NAME;
         }
         String id = normalize(typeId);
         String mapped = mappings.get(id);

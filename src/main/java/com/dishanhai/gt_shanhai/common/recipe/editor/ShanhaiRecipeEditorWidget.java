@@ -707,9 +707,23 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 inputs, outputs,
                 freshTicks ? new JsonObject() : selectedBase.tickInputs(),
                 freshTicks ? new JsonObject() : selectedBase.tickOutputs(),
-                conditionEdits,
+                draftConditions(),
                 shownBlastTemp(),
                 editedRecipeData());
+    }
+
+    /** Conditions already added, plus a note still sitting in the text box. */
+    private JsonArray draftConditions() {
+        if (isClient()) panel.flushParameterFields();
+        JsonArray conditions = conditionEdits == null ? new JsonArray() : conditionEdits.deepCopy();
+        if (editingCondition >= 0 || !ShanhaiRecipeConditions.isRecipeNoteChoice(conditionPick)) {
+            return conditions;
+        }
+        String text = ShanhaiRecipeConditions.noteText(conditionDraft);
+        if (!text.isEmpty() && !ShanhaiRecipeConditions.hasNote(conditions, text)) {
+            conditions.add(ShanhaiRecipeConditions.noteJson("recipe_note", text));
+        }
+        return conditions;
     }
 
     private JsonObject payloadWithConditionNote(ShanhaiRecipeBase edited) {

@@ -132,6 +132,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
      * 每 tick 重新读取聚合器，配合下面的两次一致防抖，来源上线后最多两个 tick 即可同步。
      */
     private static final long OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 1L;
+    /**
+     * 主机配方类型只服务红框告警，不参与发配数量。量子计算机每个成功推送会读两次，
+     * 收集本身会展开全部配方类型。缓存 20 tick，告警最多晚 1 秒跟上主机切换。
+     */
+    private static final long HOST_RECIPE_TYPE_ID_CACHE_TICKS = 20L;
     private static final int[] NO_ACTIVE_SLOTS = new int[0];
     private static final int[] NO_ACTIVE_UNCACHED_SLOTS = new int[0];
     private static final int PARENT_REFUND = 0;
@@ -151,6 +156,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private String warningSlots = "";
     private BitSet cachedWarningSlots = new BitSet();
     private String cachedWarningSlotsEncoded = "";
+    private List<String> cachedHostRecipeTypeIds = List.of();
+    private long cachedHostRecipeTypeTick = Long.MIN_VALUE;
     private final BitSet stuckRuntimeWarningSlots = new BitSet();
     private final Int2ReferenceOpenHashMap<Object2LongMap<AEItemKey>> stuckRuntimeItemSnapshots =
             new Int2ReferenceOpenHashMap<>();
@@ -182,6 +189,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private final Object2IntMap<IPatternDetails> wildcardPatternToSlot;
     private final Int2ReferenceMap<GTRecipe> wildcardRecipeCache;
     private final Int2ReferenceMap<OutputMultiplierPatternCacheEntry> outputMultiplierPatternCache;
+    private final Object2LongOpenHashMap<String> confirmedPatternOutputMultipliers = new Object2LongOpenHashMap<>();
     private final RecipeTypePatternWildcardPersistence wildcardPersistence;
     private final InternalInventory combinedTerminalPatternInventory;
     private boolean outputMultiplierPatternsRefreshNeeded = true;
@@ -763,16 +771,14 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         long recipeRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         int cacheKey = makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, recipeRevision);
         OutputMultiplierPatternCacheEntry cached = outputMultiplierPatternCache.get(cacheKey);
-        if (cached != null && cached.matches(pattern, stack, recipeTypeId, multiplier, recipeRevision)
-                && VirtualPatternEncodingHelper.productOutputsReflectMultiplier(cached.pattern(), multiplier)) {
+        if (cached != null && cached.matches(pattern, stack, recipeTypeId, multiplier, recipeRevision)) {
             return cached.pattern();
         }
         IPatternDetails rewritten = VirtualPatternEncodingHelper.rewritePatternOutputMultiplier(
                 pattern, getLevel(), recipeTypeId, multiplier);
-        if (VirtualPatternEncodingHelper.productOutputsReflectMultiplier(rewritten, multiplier)) {
-            outputMultiplierPatternCache.put(cacheKey,
-                    new OutputMultiplierPatternCacheEntry(pattern, stack, recipeTypeId, multiplier, recipeRevision, rewritten));
-        }
+        // 改寫失敗也要記住。否則 AE 每次重建提供者都會再掃整份配方表。
+        outputMultiplierPatternCache.put(cacheKey,
+                new OutputMultiplierPatternCacheEntry(pattern, stack, recipeTypeId, multiplier, recipeRevision, rewritten));
         return rewritten;
     }
 
@@ -827,7 +833,17 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private long resolvePatternOutputMultiplier(@Nullable String recipeTypeId) {
-        return Math.max(getPatternOutputMultiplier(), resolveConnectedHostOutputMultiplier(recipeTypeId));
+        String key = recipeTypeId == null ? "" : recipeTypeId;
+        if (confirmedPatternOutputMultipliers.containsKey(key)) {
+            return confirmedPatternOutputMultipliers.getLong(key);
+        }
+        long resolved = Math.max(getPatternOutputMultiplier(), resolveConnectedHostOutputMultiplier(recipeTypeId));
+        confirmedPatternOutputMultipliers.put(key, resolved);
+        return resolved;
+    }
+
+    private void invalidateConfirmedPatternOutputMultipliers() {
+        confirmedPatternOutputMultipliers.clear();
     }
 
     private long getCachedHostOutputMultiplier() {
@@ -861,6 +877,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             applyOutputMultiplierSettings(true, universalMultiplier);
             return;
         }
+        invalidateConfirmedPatternOutputMultipliers();
         clearOutputMultiplierPatternCache();
         refreshOutputMultiplierPatterns();
         updateOutputMultiplierHostSyncSubscription();
@@ -921,11 +938,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         IPatternDetails basePattern = createOutputMultiplierBasePattern(slot, patternStack);
         if (basePattern == null) return false;
         IPatternDetails effectivePattern = gtShanhai$applyOutputMultiplier(basePattern, patternStack);
-        long multiplier = resolvePatternOutputMultiplier(PatternRecipeTypeHelper.readRecipeTypeId(patternStack));
         if (effectivePattern == null) return false;
-        // 定義相同不代表產出已放大。改寫失敗時舊 1x 樣板會留在 AE 可見 map 裡。
-        if (samePatternDefinition(currentPattern, effectivePattern)
-                && VirtualPatternEncodingHelper.productOutputsReflectMultiplier(currentPattern, multiplier)) {
+        // 視圖和 1x 樣板共用 definition。產出數量沒變就不要再標 needPatternSync，否則 AE 每個 tick 重建提供者。
+        if (sameVisiblePattern(currentPattern, effectivePattern)) {
             return false;
         }
 
@@ -969,10 +984,27 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return false;
     }
 
-    private static boolean samePatternDefinition(IPatternDetails first, IPatternDetails second) {
-        return first == second || Objects.equals(
-                first == null ? null : first.getDefinition(),
-                second == null ? null : second.getDefinition());
+    private static boolean sameVisiblePattern(IPatternDetails first, IPatternDetails second) {
+        if (first == second) return true;
+        if (first == null || second == null) return false;
+        if (!Objects.equals(first.getDefinition(), second.getDefinition())) return false;
+        return sameGenericStacks(first.getOutputs(), second.getOutputs());
+    }
+
+    private static boolean sameGenericStacks(GenericStack[] first, GenericStack[] second) {
+        if (first == second) return true;
+        if (first == null || second == null || first.length != second.length) return false;
+        for (int i = 0; i < first.length; i++) {
+            GenericStack left = first[i];
+            GenericStack right = second[i];
+            if (left == right) continue;
+            if (left == null || right == null
+                    || left.amount() != right.amount()
+                    || !Objects.equals(left.what(), right.what())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void applyOutputMultiplierSettings(boolean enabled, long multiplier) {
@@ -980,6 +1012,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (outputMultiplierModeEnabled == enabled && patternOutputMultiplier == clamped) return;
         outputMultiplierModeEnabled = enabled;
         patternOutputMultiplier = clamped;
+        invalidateConfirmedPatternOutputMultipliers();
         clearOutputMultiplierPatternCache();
         markDirty();
         refreshOutputMultiplierPatterns();
@@ -1045,6 +1078,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             return;
         }
         if (hostStateChanged) {
+            invalidateConfirmedPatternOutputMultipliers();
             clearOutputMultiplierPatternCache();
             refreshOutputMultiplierPatterns();
         }
@@ -2021,17 +2055,25 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private List<String> gtShanhai$hostRecipeTypeIds() {
+        long tick = getOffsetTimer();
+        if (tick - cachedHostRecipeTypeTick >= 0L
+                && tick - cachedHostRecipeTypeTick < HOST_RECIPE_TYPE_ID_CACHE_TICKS) {
+            return cachedHostRecipeTypeIds;
+        }
         List<GTRecipeType> hostTypes = WildcardPatternRecipeTypeBinding.collectHostRecipeTypes(getControllers());
         if (hostTypes.isEmpty()) {
-            return List.of();
-        }
-        List<String> result = new ArrayList<>(hostTypes.size());
-        for (GTRecipeType type : hostTypes) {
-            if (type != null && type.registryName != null) {
-                result.add(type.registryName.toString());
+            cachedHostRecipeTypeIds = List.of();
+        } else {
+            List<String> result = new ArrayList<>(hostTypes.size());
+            for (GTRecipeType type : hostTypes) {
+                if (type != null && type.registryName != null) {
+                    result.add(type.registryName.toString());
+                }
             }
+            cachedHostRecipeTypeIds = List.copyOf(result);
         }
-        return result;
+        cachedHostRecipeTypeTick = tick;
+        return cachedHostRecipeTypeIds;
     }
 
     private BitSet gtShanhai$warningSlotSet() {

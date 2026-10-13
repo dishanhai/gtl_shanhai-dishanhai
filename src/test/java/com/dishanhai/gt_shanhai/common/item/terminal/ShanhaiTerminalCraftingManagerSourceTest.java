@@ -44,10 +44,27 @@ class ShanhaiTerminalCraftingManagerSourceTest {
 
         assertFalse(behavior.contains("Phase.RETRY_CALCULATING"),
                 "终端普通右击不得再进入失败任务重算等待流程");
-        assertFalse(behavior.contains("confirmSubmit"),
-                "终端交互层不得再把施工绑定到 AE 下单确认");
+        assertTrue(behavior.contains("confirmSubmit"),
+                "终端应能确认已算好的缺口下单");
+        int dismantle = behavior.indexOf("isDismantleMode(terminal)");
+        assertTrue(dismantle >= 0 && behavior.indexOf("confirmSubmit") > dismantle,
+                "AE 下单确认必须发生在拆解与潜行施工之后，不能挡住施工");
+        assertFalse(behavior.substring(0, dismantle).contains("confirmSubmit"));
         assertFalse(behavior.contains("refreshBuildReadiness"),
                 "终端交互层不得再用材料到齐刷新阻塞施工");
+        int begin = source.indexOf("public static boolean begin");
+        int phaseMethod = source.indexOf("public static Phase phase");
+        String beginBody = source.substring(begin, phaseMethod);
+        assertTrue(beginBody.contains("ORDER_SESSIONS.put"));
+        assertFalse(beginBody.replace("ORDER_SESSIONS", "").contains("SESSIONS.put"),
+                "缺口下单不得覆盖施工确认会话");
+        int confirm = source.indexOf("public static boolean confirmSubmit");
+        int refresh = source.indexOf("public static boolean refreshBuildReadiness");
+        String confirmBody = source.substring(confirm, refresh);
+        assertFalse(confirmBody.contains("Phase.READY_TO_BUILD"),
+                "确认下单不得把施工会话改成等待施工");
+        assertTrue(confirmBody.contains("SUBMITTED_AMOUNTS"));
+        assertTrue(confirmBody.contains("BLOCKED_AMOUNTS"));
         assertTrue(source.contains("!item.submitted\n                    && item.future != null && !item.future.isDone()"),
                 "重算阶段只等待未提交任务的 Future");
         assertTrue(source.contains("当前无可用合成流程"),

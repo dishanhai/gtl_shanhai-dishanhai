@@ -9,6 +9,7 @@ import appeng.api.networking.IGrid;
 import appeng.api.networking.IGridNode;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.GenericStack;
 import appeng.api.storage.MEStorage;
 import appeng.core.definitions.AEItems;
 import appeng.crafting.pattern.AEProcessingPattern;
@@ -19,13 +20,20 @@ import appeng.menu.slot.RestrictedInputSlot;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
+import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
+import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter.MaterialEntry;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisUpload;
 import com.dishanhai.gt_shanhai.mixin.PatternEncodingTermMenuAccessor;
 import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.pattern.MultiblockWorldSavedData;
+import com.gregtechceu.gtceu.api.machine.MachineDefinition;
+import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.gregtechceu.gtceu.api.registry.GTRegistries;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -39,7 +47,12 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.registries.ForgeRegistries;
+
+import org.gtlcore.gtlcore.config.ConfigHolder;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
@@ -88,6 +101,22 @@ public final class JeiPatternQuickEncodeService {
     public static void encodeAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,
             String anchorRecipeId, boolean wholeRecipeType) {
         encodeAndUpload(player, menu, anchorRecipeId, wholeRecipeType, false);
+    }
+
+    public static void encodeMultiblockAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,
+            String machineId) {
+        ResourceLocation id = ResourceLocation.tryParse(machineId);
+        MachineDefinition definition = id == null ? null : GTRegistries.MACHINES.get(id);
+        if (!(definition instanceof MultiblockMachineDefinition multiblock)) {
+            show(player, "message.gt_shanhai.jei.quick_encode.invalid_recipe");
+            return;
+        }
+        List<ItemStack> patterns = encodeMultiblockPatterns(multiblock);
+        if (patterns.isEmpty()) {
+            show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
+            return;
+        }
+        uploadToSelfSynthesis(player, menu, patterns);
     }
 
     /** 只给单独的副产物上传按钮用。普通快速编写仍走上面的入口，不会写标识。 */
@@ -353,6 +382,118 @@ public final class JeiPatternQuickEncodeService {
         return true;
     }
 
+    private static final int MULTIBLOCK_PATTERN_INPUTS = 81;
+
+    private static List<ItemStack> encodeMultiblockPatterns(MultiblockMachineDefinition multiblock) {
+        String[] filters = ConfigHolder.INSTANCE.filterHatch;
+        List<GenericStack> inputs = new ArrayList<>();
+        for (MaterialEntry entry : DShanhaiMaterialCounter.countMaterials(multiblock)) {
+            if (entry == null || entry.count <= 0 || isFilteredHatch(entry.itemId, filters)) {
+                continue;
+            }
+            ResourceLocation itemId = ResourceLocation.tryParse(entry.itemId);
+            Item item = itemId == null ? null : ForgeRegistries.ITEMS.getValue(itemId);
+            if (item == null || item == Items.AIR) {
+                continue;
+            }
+            inputs.add(new GenericStack(AEItemKey.of(item), entry.count));
+        }
+        if (inputs.isEmpty()) {
+            return List.of();
+        }
+        int pages = (inputs.size() + MULTIBLOCK_PATTERN_INPUTS - 1) / MULTIBLOCK_PATTERN_INPUTS;
+        List<ItemStack> patterns = new ArrayList<>();
+        ResourceLocation recipeTypeId = new ResourceLocation(GTDishanhaiMod.MOD_ID, "self_synthesis");
+        for (int page = 0; page < pages; page++) {
+            int from = page * MULTIBLOCK_PATTERN_INPUTS;
+            int to = Math.min(inputs.size(), from + MULTIBLOCK_PATTERN_INPUTS);
+            GenericStack[] chunk = inputs.subList(from, to).toArray(new GenericStack[0]);
+            ItemStack book = new ItemStack(Items.WRITTEN_BOOK);
+            MutableComponent name = Component.translatable(multiblock.getDescriptionId())
+                    .withStyle(style -> style.withColor(16536828));
+            if (pages > 1) {
+                name.append(" " + (page + 1) + "/" + pages);
+            }
+            book.setHoverName(name);
+            GenericStack output = GenericStack.fromItemStack(book);
+            if (output == null) {
+                continue;
+            }
+            ItemStack pattern = PatternDetailsHelper.encodeProcessingPattern(chunk, new GenericStack[] { output });
+            if (pattern.isEmpty()) {
+                continue;
+            }
+            PatternQuickUploadMetadata.writeRecipeTypeId(pattern, recipeTypeId);
+            pattern.getOrCreateTag().putString(PatternRecipeTypeHelper.TAG_RECIPE_TYPE,
+                    SelfSynthesisUpload.RECIPE_TYPE_ID);
+            patterns.add(pattern.copy());
+        }
+        return patterns;
+    }
+
+    private static boolean isFilteredHatch(String itemId, String[] filters) {
+        if (itemId == null || itemId.isBlank() || filters == null) {
+            return false;
+        }
+        for (String filter : filters) {
+            if (filter != null && !filter.isEmpty() && itemId.contains(filter)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void uploadToSelfSynthesis(ServerPlayer player, PatternEncodingTermMenu menu,
+            List<ItemStack> patterns) {
+        IGridNode node = menu.getNetworkNode();
+        IGrid grid = node == null ? null : node.getGrid();
+        List<PatternQuickUploadService.Target> targets = new ArrayList<>(findSelfSynthesisTargets(
+                grid, patterns.get(0), SelfSynthesisUpload.RECIPE_TYPE_ID));
+        List<UploadedPattern> uploaded = new ArrayList<>();
+        List<ItemStack> leftover = new ArrayList<>();
+        PatternQuickUploadService.Target current = null;
+        for (ItemStack pattern : patterns) {
+            PatternQuickUploadService.UploadResult result = null;
+            while (result == null) {
+                if (current == null) {
+                    current = selectAutomaticTarget(player.level().dimension(), player.blockPosition(), targets);
+                }
+                if (current == null) {
+                    break;
+                }
+                result = safeInsertIntoTarget(player, pattern, current);
+                if (result != null) {
+                    break;
+                }
+                targets.remove(current);
+                current = null;
+            }
+            if (result != null && result.status() == PatternQuickUploadService.UploadStatus.INSERTED) {
+                uploaded.add(new UploadedPattern(pattern, result.target(), result.slot()));
+                continue;
+            }
+            if (result != null && result.status() == PatternQuickUploadService.UploadStatus.DUPLICATE) {
+                continue;
+            }
+            leftover.add(pattern.copy());
+            current = null;
+        }
+        int committed = uploaded.size() + leftover.size();
+        if (committed > 0) {
+            PatternSource source = findPatternSource(menu, committed);
+            if (source == null || !consumePatternSource(menu, source)) {
+                rollback(player, uploaded);
+                show(player, "message.gt_shanhai.jei.quick_encode.missing_blank", committed);
+                return;
+            }
+        }
+        if (!leftover.isEmpty()) {
+            givePatterns(player, leftover);
+        }
+        show(player, "message.gt_shanhai.jei.quick_encode.multiblock_uploaded",
+                uploaded.size(), leftover.size());
+    }
+
     private static List<GTRecipe> collectRecipes(GTRecipeType recipeType) {
         if (recipeType == null || recipeType.getLookup() == null
                 || recipeType.getLookup().getLookup() == null) {
@@ -525,7 +666,26 @@ public final class JeiPatternQuickEncodeService {
         // 候選的 recipeTypeId 不作匹配依據；實際兼容性由星律主機完整類型集合決定。
         List<PatternQuickUploadService.Target> publicTargets = findPublicStellarTargets(
                 player, networkNode, pattern, recipeTypeId);
-        return publicTargets;
+        if (!publicTargets.isEmpty()) return publicTargets;
+        return findSelfSynthesisTargets(networkNode.getGrid(), pattern, recipeTypeId);
+    }
+
+    private static List<PatternQuickUploadService.Target> findSelfSynthesisTargets(
+            IGrid grid, ItemStack pattern, String recipeTypeId) {
+        List<PatternQuickUploadService.Target> targets = new ArrayList<>();
+        if (grid == null) return targets;
+        for (Class<?> machineClass : grid.getMachineClasses()) {
+            if (machineClass == null || !SelfSynthesisChamberPartMachine.class.isAssignableFrom(machineClass)) {
+                continue;
+            }
+            for (Object machine : grid.getActiveMachines(machineClass)) {
+                if (!(machine instanceof SelfSynthesisChamberPartMachine chamber)) continue;
+                if (pattern != null && !pattern.isEmpty() && !chamber.hasEmptyPatternSlot()) continue;
+                PatternQuickUploadService.Target target = chamber.createUploadTarget(recipeTypeId);
+                if (target != null) targets.add(target);
+            }
+        }
+        return targets;
     }
 
     private static List<PatternQuickUploadService.Target> findPublicStellarTargets(
@@ -1410,7 +1570,11 @@ public final class JeiPatternQuickEncodeService {
     }
 
     private static boolean isStellarTarget(MinecraftServer server, Target target) {
-        return target != null && !isMolecularAssemblerTarget(server, target);
+        return target != null && !isSelfSynthesisTarget(target) && !isMolecularAssemblerTarget(server, target);
+    }
+
+    private static boolean isSelfSynthesisTarget(Target target) {
+        return target != null && SelfSynthesisChamberPartMachine.ID.equals(target.targetMachineId());
     }
 
     private static boolean isMolecularAssemblerControllerHint(Target target) {

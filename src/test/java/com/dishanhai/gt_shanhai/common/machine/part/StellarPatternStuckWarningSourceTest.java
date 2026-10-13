@@ -44,6 +44,8 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(machine.contains("super.pushPattern(patternDetails, inputHolder)"));
         assertTrue(machine.contains("StellarPatternCraftingContext.currentAePlayerId()"));
         assertTrue(machine.contains("gtShanhai$clearPatternSlotRuntimeWarning(slot)"));
+        assertTrue(machine.contains("HOST_RECIPE_TYPE_ID_CACHE_TICKS"),
+                "推样板热路径不能每次重新收集主机配方类型");
         assertTrue(machine.contains("StellarPatternStuckWatch.schedule("));
         assertTrue(machine.contains("gtShanhai$getSlotItemInventory(slot)"));
         assertTrue(machine.contains("gtShanhai$getSlotFluidInventory(slot)"));

@@ -38,7 +38,10 @@ class WildcardPatternRecipeTypeBindingTest {
                 "原初模块公开的完整配方类型集合必须参与星律目标匹配");
         assertTrue(source.contains("getAllSelectableRecipeTypes"),
                 "选择集机器的完整类型列表必须作为运行时空集合的兜底");
-        assertTrue(source.contains("addNamedRecipeTypes(types, machine, \"getRecipeTypeNameSet\")"),
+        assertTrue(source.contains("addNamedRecipeTypes(target, machine, \"getRecipeTypeNameSet\")"),
                 "完整配方类型集合不能只在 getRecipeTypes() 为空时读取");
+        assertTrue(source.contains("NO_ARG_METHODS"),
+                "缺失的兼容方法必须按 Class 缓存，热路径不能反复抛 NoSuchMethodException");
+        assertTrue(source.contains("findNoArgMethod(owner, methodName)"));
     }
 }

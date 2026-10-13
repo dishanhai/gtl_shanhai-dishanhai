@@ -76,6 +76,7 @@ import com.dishanhai.gt_shanhai.common.machine.part.DShanhaiOverclockHatchMachin
 import com.dishanhai.gt_shanhai.common.machine.part.LogicalComputeHatchMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ProgrammableHatchPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.MEDiskHatchPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.SelfSynthesisChamberPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.MEStellarStockPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.ReliableMEAsyncOutputPartMachine;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
@@ -147,6 +148,7 @@ public class DShanhaiMachines {
     public static MachineDefinition SUPER_PARALLEL_CORE;
     public static MachineDefinition SEVENTY_TWO_CHANGES;
     public static MachineDefinition ME_DISK_HATCH;
+    public static MachineDefinition SELF_SYNTHESIS_CHAMBER;
     public static MachineDefinition RECIPE_TYPE_PATTERN_BUFFER;
     public static MachineDefinition RECIPE_TYPE_PATTERN_BUFFER_PROXY;
     public static MachineDefinition RELIABLE_ME_ASYNC_OUTPUT_BUFFER;
@@ -1421,6 +1423,9 @@ public class DShanhaiMachines {
         // ========== ME 磁盘仓室（AE2 存储元件挂载点） ==========
         ME_DISK_HATCH = MEDiskHatchPartMachine.register();
 
+        // ========== 自合成仓 ==========
+        SELF_SYNTHESIS_CHAMBER = SelfSynthesisChamberPartMachine.register();
+
         // ========== 星律样板总成 ==========
         RECIPE_TYPE_PATTERN_BUFFER = MachineBuilder.create(
                 GTDishanhaiRegistration.REGISTRATE,
@@ -2176,6 +2181,10 @@ public class DShanhaiMachines {
                 com.gregtechceu.gtceu.api.machine.multiblock.PartAbility.IMPORT_ITEMS.register(tier, overclockBlock);
                 com.gregtechceu.gtceu.api.machine.multiblock.PartAbility.IMPORT_FLUIDS.register(tier, overclockBlock);
             }
+        }
+        if (SELF_SYNTHESIS_CHAMBER != null) {
+            com.dishanhai.gt_shanhai.common.machine.ShanhaiPartAbility.SELF_SYNTHESIS_CHAMBER
+                    .register(0, SELF_SYNTHESIS_CHAMBER.getBlock());
         }
         if (ME_DISK_HATCH != null) {
             com.dishanhai.gt_shanhai.common.machine.ShanhaiPartAbility.ME_DISK_HATCH.register(0, ME_DISK_HATCH.getBlock());

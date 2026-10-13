@@ -17,5 +17,8 @@ public class ShanhaiPartAbility {
     /** ME 磁盘仓室 — 接入 AE2 网络的存储元件挂载点 */
     public static final PartAbility ME_DISK_HATCH = new PartAbility("me_disk_hatch");
 
+    /** 自合成仓 — 样板自我发配并完成 AE 合成，不消耗发配物 */
+    public static final PartAbility SELF_SYNTHESIS_CHAMBER = new PartAbility("self_synthesis_chamber");
+
     private ShanhaiPartAbility() {}
 }

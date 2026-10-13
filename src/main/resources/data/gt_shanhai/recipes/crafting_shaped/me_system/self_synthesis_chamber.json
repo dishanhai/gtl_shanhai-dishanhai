@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["P  ", "B  ", "C  "],
+  "key": {
+    "P": {"item": "ae2:pattern_provider"},
+    "B": {"item": "gtceu:me_input_bus"},
+    "C": {"item": "kubejs:hv_universal_circuit"}
+  },
+  "result": {"item": "gt_shanhai:self_synthesis_chamber", "count": 1}
+}
