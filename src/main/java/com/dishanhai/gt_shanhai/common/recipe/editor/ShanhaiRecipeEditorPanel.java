@@ -21,7 +21,9 @@ import org.joml.Vector4f;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Three stacked pages. Only one is interactive; the others slide off during a stage change.
@@ -67,6 +69,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private TextFieldWidget dataValueField;
     private LabelWidget dataLine;
     private LabelWidget parameterLabel;
+    private final Map<String, TextFieldWidget> parameterFields = new LinkedHashMap<>();
     private boolean createChrome;
     private IoGrid inputItemGrid;
     private IoGrid inputFluidGrid;
@@ -152,6 +155,13 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         return false;
     }
 
+    public void revealLastCondition() {
+        if (conditionList == null) return;
+        int content = 2 + host.conditionEdits.size() * 16;
+        int hidden = content - conditionList.getSizeHeight();
+        if (hidden > 0) conditionList.setScrollYOffset(hidden);
+    }
+
     public void refreshConditions() {
         refreshConditions(true);
     }
@@ -164,15 +174,25 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         for (int i = 0; i < host.conditionEdits.size(); i++) {
             int index = i;
             EnterRow row = new EnterRow(0, 2 + i * 16, rowWidth, 16, i, animate);
-            row.addWidget(new LabelWidget(4, 2, () -> host.compact(host.conditionLabel(index), 16)));
+            row.addWidget(new LabelWidget(4, 2, () -> host.compact(host.conditionLabel(index), 16).replace("%", "%%")));
             row.addWidget(button(width - 40, 0, 36, 14, "改", () -> host.editCondition(index)));
             row.addWidget(button(width, 0, 36, 14, "移除", () -> host.removeCondition(index)));
             conditionList.addWidget(row);
         }
     }
 
+    /** Push the characters still sitting in the parameter boxes into the draft before add. */
+    public void flushParameterFields() {
+        for (Map.Entry<String, TextFieldWidget> entry : parameterFields.entrySet()) {
+            TextFieldWidget field = entry.getValue();
+            if (field == null) continue;
+            host.setParameterText(entry.getKey(), field.getRawCurrentString());
+        }
+    }
+
     public void refreshParameters() {
         if (parameterList == null) return;
+        parameterFields.clear();
         parameterList.clearAllWidgets();
         int rowWidth = Math.max(120, parameterList.getSizeWidth() - 8);
         List<ShanhaiRecipeConditions.Parameter> parameters = host.draftParameters();
@@ -201,8 +221,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
                 selector.setClientSideWidget();
                 row.addWidget(selector);
             } else {
-                row.addWidget(textField(62, 0, 160, 14,
-                        () -> host.parameterText(path), value -> host.setParameterText(path, value)));
+                TextFieldWidget field = textField(62, 0, 160, 14,
+                        () -> host.parameterText(path), value -> host.setParameterText(path, value));
+                parameterFields.put(path, field);
+                row.addWidget(field);
             }
             parameterList.addWidget(row);
             y += 16;
@@ -650,7 +672,9 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
                 .setOnChanged(host::setConditionPick);
         conditionSelector.setClientSideWidget();
         reviewPage.addWidget(conditionSelector);
-        reviewPage.addWidget(button(450, 118, 44, 16, "添加", host::addCondition));
+        ButtonWidget addCondition = button(450, 118, 44, 16, "添加", host::addCondition);
+        addCondition.setClientSideWidget();
+        reviewPage.addWidget(addCondition);
         reviewPage.addWidget(new LabelWidget(4, 46, () -> host.selectedBase == null
                 ? "" : "§7类型 §f" + host.compact(host.selectedBase.recipeTypeId(), 42)));
         reviewPage.addWidget(new LabelWidget(4, 64, host::fingerprintLine));

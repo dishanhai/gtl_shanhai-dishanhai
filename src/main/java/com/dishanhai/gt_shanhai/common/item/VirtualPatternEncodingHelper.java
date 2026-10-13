@@ -12,6 +12,7 @@ import appeng.crafting.pattern.AEProcessingPattern;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
@@ -456,15 +457,17 @@ public final class VirtualPatternEncodingHelper {
                     inputs, currentMultiplier, targetMultiplier);
             // 循環容器除不盡時不能放棄整張樣板，否則 AE 會繼續按 1x 產出下單。
             if (rewrittenInputs == null) rewrittenInputs = inputs;
-            IPatternDetails rewritten = encodeScaledPattern(rewrittenInputs,
+            IPatternDetails rewritten = encodeScaledPattern(processingPattern, rewrittenInputs,
                     createScaledRecipeOutputs(recipe, targetMultiplier), level);
-            if (rewritten != null && productOutputsReflectMultiplier(rewritten, targetMultiplier)
+            if (rewritten != null && keepsByproductOrder(processingPattern, rewritten)
+                    && productOutputsReflectMultiplier(rewritten, targetMultiplier)
                     && coversPatternProducts(rewritten, outputs, currentMultiplier, targetMultiplier)) {
                 return rewritten;
             }
         }
         IPatternDetails direct = rewritePatternOutputMultiplierDirect(processingPattern, level, requestedMultiplier);
         if (direct != null && direct != processingPattern
+                && keepsByproductOrder(processingPattern, direct)
                 && productOutputsReflectMultiplier(direct, targetMultiplier)) {
             return direct;
         }
@@ -477,19 +480,26 @@ public final class VirtualPatternEncodingHelper {
         if (targetMultiplier <= 1) return pattern;
         GenericStack[] rewrittenInputs = multiplyCycleContainerStacks(pattern.getSparseInputs(), targetMultiplier, true);
         GenericStack[] rewrittenOutputs = multiplyCycleContainerStacks(pattern.getSparseOutputs(), targetMultiplier, false);
-        IPatternDetails rewritten = encodeScaledPattern(rewrittenInputs, rewrittenOutputs, level);
+        IPatternDetails rewritten = encodeScaledPattern(pattern, rewrittenInputs, rewrittenOutputs, level);
         return rewritten == null ? pattern : rewritten;
     }
 
-    private static IPatternDetails encodeScaledPattern(GenericStack[] inputs, GenericStack[] outputs, Level level) {
+    private static IPatternDetails encodeScaledPattern(AEProcessingPattern source, GenericStack[] inputs,
+            GenericStack[] outputs, Level level) {
         if (inputs == null || outputs == null || outputs.length == 0 || level == null) return null;
         try {
             ItemStack encoded = PatternDetailsHelper.encodeProcessingPattern(inputs, outputs);
-            return encoded == null || encoded.isEmpty()
-                    ? null : PatternDetailsHelper.decodePattern(encoded, level);
+            if (encoded == null || encoded.isEmpty()) return null;
+            // 重编码只写 in/out。副产物下单靠根标签挂进 AE 可合成索引，丢掉后终端无法请求副产物。
+            PatternByproductOrder.copyDefinitionTags(source, encoded);
+            return PatternDetailsHelper.decodePattern(encoded, level);
         } catch (RuntimeException ignored) {
             return null;
         }
+    }
+
+    private static boolean keepsByproductOrder(IPatternDetails source, IPatternDetails rewritten) {
+        return !PatternByproductOrder.isMarked(source) || PatternByproductOrder.isMarked(rewritten);
     }
 
     private static boolean coversPatternProducts(IPatternDetails rewritten, GenericStack[] patternOutputs,

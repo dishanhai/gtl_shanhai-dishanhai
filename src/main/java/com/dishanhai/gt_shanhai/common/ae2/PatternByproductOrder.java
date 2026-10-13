@@ -199,6 +199,15 @@ public final class PatternByproductOrder {
         return filtered;
     }
 
+    /**
+     * 樣板重編碼只寫 in/out。把原定義上的根標籤抄回去，否則副產物下單標識會在倍率改寫後消失。
+     */
+    public static void copyDefinitionTags(IPatternDetails source, ItemStack encoded) {
+        if (source == null) return;
+        AEItemKey definition = source.getDefinition();
+        copyExtraTags(definition == null ? null : definition.getTag(), encoded);
+    }
+
     private static void copyExtraTags(CompoundTag original, ItemStack encoded) {
         if (original == null || encoded == null || encoded.isEmpty()) return;
         CompoundTag tag = encoded.getOrCreateTag();

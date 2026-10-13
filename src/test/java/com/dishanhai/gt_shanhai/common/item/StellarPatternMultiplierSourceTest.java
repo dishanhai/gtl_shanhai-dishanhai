@@ -193,6 +193,10 @@ class StellarPatternMultiplierSourceTest {
                 "倍率改写不能在循环容器除不尽时直接退回 1x 样板");
         assertFalse(helper.contains("if (rewrittenInputs == null) return pattern"),
                 "循环容器改写失败不得放弃整张样板的产出放大");
+        assertTrue(helper.contains("PatternByproductOrder.copyDefinitionTags(source, encoded)"),
+                "倍率重编码必须保留副产物下单根标签，否则 AE 可合成索引只剩主产物");
+        assertTrue(helper.contains("keepsByproductOrder"),
+                "重编码丢掉副产物标识时不得把这张样板发布给 AE");
     }
 
     @Test

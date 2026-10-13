@@ -29,7 +29,7 @@ public final class ShanhaiRecipeConditions {
 
     private static final String MARK = " · ";
     private static final Set<String> GENERIC_FIELDS = Set.of(
-            "level", "type", "name", "data", "value", "count", "id", "min", "max", "reverse");
+            "level", "type", "name", "data", "value", "count", "id", "min", "max", "reverse", "text");
 
     /** One editable leaf inside a condition codec object. Path uses {@code a.b[0].c}. */
     public static final class Parameter {
@@ -71,11 +71,51 @@ public final class ShanhaiRecipeConditions {
      * Numbers and booleans stay their original JSON kind.
      */
     public static JsonElement withParameter(JsonElement source, String path, String raw) {
+        if (isRecipeNote(source) && isNoteTextPath(path)) {
+            return noteJson(typeOf(source), raw);
+        }
         if (source == null || !source.isJsonObject() || path == null || path.isEmpty()) return source;
         JsonElement copy = source.deepCopy();
         if (!write(copy, tokens(path), raw)) return source;
         if (RecipeCondition.CODEC.parse(JsonOps.INSTANCE, copy).result().isEmpty()) return source;
         return copy;
+    }
+
+    /** Editor draft shape. Same object the datapack loader accepts: type + text. */
+    public static JsonObject noteJson(String type, String text) {
+        JsonObject object = new JsonObject();
+        object.addProperty("type", type == null || type.isEmpty() ? "recipe_note" : type);
+        object.addProperty("text", text == null ? "" : text);
+        return object;
+    }
+
+    public static boolean isRecipeNoteChoice(String choice) {
+        return "recipe_note".equals(keyOfChoice(choice));
+    }
+
+    public static boolean isRecipeNote(JsonElement element) {
+        String type = typeOf(element);
+        return "recipe_note".equals(type) || type.endsWith(":recipe_note");
+    }
+
+    public static boolean isNoteTextPath(String path) {
+        return "text".equals(path) || (path != null && path.endsWith(".text"));
+    }
+
+    public static String typeOf(JsonElement element) {
+        if (element == null || !element.isJsonObject()) return "";
+        JsonElement type = element.getAsJsonObject().get("type");
+        return type != null && type.isJsonPrimitive() ? type.getAsString() : "";
+    }
+
+    public static String noteText(JsonElement element) {
+        if (element == null || !element.isJsonObject()) return "";
+        JsonElement text = element.getAsJsonObject().get("text");
+        if (text != null && text.isJsonPrimitive()) return text.getAsString();
+        for (Parameter parameter : parameters(element)) {
+            if (isNoteTextPath(parameter.path)) return parameter.value;
+        }
+        return "";
     }
 
     /** Registry ids that can fill this field. Dimension markers and matching builtin registries included. */
@@ -150,6 +190,7 @@ public final class ShanhaiRecipeConditions {
         } catch (RuntimeException ignored) {
             // Fall through to the type id carried in the codec object.
         }
+        if (isRecipeNote(element)) return "备注：" + noteText(element);
         if (element.isJsonObject() && element.getAsJsonObject().has("type")
                 && element.getAsJsonObject().get("type").isJsonPrimitive()) {
             return element.getAsJsonObject().get("type").getAsString();

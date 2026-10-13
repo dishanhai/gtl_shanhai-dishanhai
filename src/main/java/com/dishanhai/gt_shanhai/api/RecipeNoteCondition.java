@@ -20,9 +20,9 @@ import net.minecraft.network.chat.Component;
 public class RecipeNoteCondition extends RecipeCondition {
 
     public static final Codec<RecipeNoteCondition> CODEC = RecordCodecBuilder.create(instance ->
-            instance.group(
+            RecipeCondition.isReverse(instance).and(
                     Codec.STRING.fieldOf("text").forGetter(c -> c.text)
-            ).apply(instance, RecipeNoteCondition::new)
+            ).apply(instance, (reverse, text) -> new RecipeNoteCondition(reverse, text))
     );
 
     public static final RecipeConditionType<RecipeNoteCondition> TYPE = new RecipeConditionType<>(
@@ -33,7 +33,11 @@ public class RecipeNoteCondition extends RecipeCondition {
     public final String text;
 
     public RecipeNoteCondition(String text) {
-        super(false);
+        this(false, text);
+    }
+
+    public RecipeNoteCondition(boolean reverse, String text) {
+        super(reverse);
         this.text = text == null ? "" : text;
     }
 
@@ -67,7 +71,9 @@ public class RecipeNoteCondition extends RecipeCondition {
     @Override
     public RecipeNoteCondition deserialize(JsonObject json) {
         super.deserialize(json);
-        return new RecipeNoteCondition(json.get("text").getAsString());
+        String value = json.has("text") && json.get("text").isJsonPrimitive()
+                ? json.get("text").getAsString() : "";
+        return new RecipeNoteCondition(isReverse(), value);
     }
 
     @Override
@@ -79,6 +85,6 @@ public class RecipeNoteCondition extends RecipeCondition {
     @Override
     public RecipeNoteCondition fromNetwork(FriendlyByteBuf buf) {
         super.fromNetwork(buf);
-        return new RecipeNoteCondition(buf.readUtf());
+        return new RecipeNoteCondition(isReverse(), buf.readUtf());
     }
 }

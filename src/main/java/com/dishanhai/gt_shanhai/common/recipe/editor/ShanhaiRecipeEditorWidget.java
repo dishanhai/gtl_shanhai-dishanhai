@@ -948,8 +948,19 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     void addCondition() {
         if (!isClient() || selectedBase == null) return;
+        panel.flushParameterFields();
         JsonElement created = conditionDraft == null
                 ? ShanhaiRecipeConditions.defaultJson(conditionPick) : conditionDraft.deepCopy();
+        if (ShanhaiRecipeConditions.isRecipeNoteChoice(conditionPick)
+                || ShanhaiRecipeConditions.isRecipeNote(created)) {
+            String text = ShanhaiRecipeConditions.noteText(created);
+            if (text.isEmpty()) {
+                setStatus("§c先填写备注文字");
+                return;
+            }
+            String type = ShanhaiRecipeConditions.typeOf(created);
+            created = ShanhaiRecipeConditions.noteJson(type.isEmpty() ? "recipe_note" : type, text);
+        }
         if (created == null) {
             setStatus("§c没有可添加的配方条件");
             return;
@@ -957,6 +968,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         beforeEdit("condition");
         conditionEdits.add(created);
         panel.refreshConditions();
+        panel.revealLastCondition();
         setStatus("§a已添加 " + ShanhaiRecipeConditions.label(created));
         flushDraftSave();
     }
