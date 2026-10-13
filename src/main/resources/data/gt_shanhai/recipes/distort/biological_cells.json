@@ -1,0 +1,73 @@
+{
+  "data": {
+    "euTier": 9,
+    "ebf_temp": 0
+  },
+  "duration": 240,
+  "recipeConditions": [
+    {
+      "cleanroom": "sterile_cleanroom",
+      "type": "cleanroom"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2097152
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:nova_catalyst"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4096,
+          "ingredient": {
+            "item": "gtceu:stem_cells"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "tag": "forge:dusts/agar"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8192,
+          "ingredient": {
+            "item": "kubejs:biological_cells"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtladditions:distort/biological_cells",
+      "defaultEnabled": true
+    }
+  ]
+}

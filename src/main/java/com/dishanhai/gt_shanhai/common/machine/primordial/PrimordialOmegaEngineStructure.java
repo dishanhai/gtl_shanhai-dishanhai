@@ -89,6 +89,8 @@ public class PrimordialOmegaEngineStructure {
                 new ResourceLocation("gt_shanhai", "primordial_cosmic_origin_core"));
         Block sixfoldResourceCore = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_sixfold_resource_core"));
+        Block deepSpaceExtractionCore = ForgeRegistries.BLOCKS.getValue(
+                new ResourceLocation("gt_shanhai", "primordial_deep_space_extraction_core"));
         Block myriadProliferationCore = ForgeRegistries.BLOCKS.getValue(
                 new ResourceLocation("gt_shanhai", "primordial_myriad_proliferation_core"));
         Block molecularAssemblerModule = ForgeRegistries.BLOCKS.getValue(
@@ -160,6 +162,7 @@ public class PrimordialOmegaEngineStructure {
                         .or(Predicates.blocks(abyssalRefinery))
                         .or(Predicates.blocks(cosmicOriginCore))
                         .or(Predicates.blocks(sixfoldResourceCore))
+                        .or(Predicates.blocks(deepSpaceExtractionCore))
                         .or(Predicates.blocks(myriadProliferationCore))
                         .or(Predicates.blocks(molecularAssemblerModule)))
                 // K: 内部填充 — 青铜砖块（不再与 A 冲突）

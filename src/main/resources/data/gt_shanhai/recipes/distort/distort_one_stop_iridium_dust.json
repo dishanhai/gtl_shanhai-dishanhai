@@ -1,0 +1,143 @@
+{
+  "data": {
+    "euTier": 6,
+    "ebf_temp": 4500
+  },
+  "duration": 24,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 32768
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 625000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1111000,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 125000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:fluorine"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 4
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:wzcz2"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 5000,
+          "ingredient": {
+            "item": "gtceu:platinum_group_sludge_dust"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 600000,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 125000,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 500,
+          "value": [
+            {
+              "fluid": "gtceu:fluorine"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 9000,
+          "ingredient": {
+            "item": "gtceu:iridium_dust"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:distort/distort_one_stop_iridium_dust",
+      "defaultEnabled": true
+    }
+  ]
+}

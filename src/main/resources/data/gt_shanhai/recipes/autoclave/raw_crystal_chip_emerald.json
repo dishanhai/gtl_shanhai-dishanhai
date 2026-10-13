@@ -1,0 +1,76 @@
+{
+  "data": {
+    "euTier": 3
+  },
+  "duration": 2400,
+  "recipeConditions": [
+    {
+      "cleanroom": "cleanroom",
+      "type": "cleanroom"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 320
+      }
+    ]
+  },
+  "type": "gtceu:autoclave",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "tag": "forge:exquisite_gems/emerald"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzax"
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 16,
+          "value": [
+            {
+              "tag": "forge:europium"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "tierChanceBoost": 2000,
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:raw_crystal_chip"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtceu:autoclave/raw_crystal_chip_emerald",
+      "defaultEnabled": true
+    }
+  ]
+}

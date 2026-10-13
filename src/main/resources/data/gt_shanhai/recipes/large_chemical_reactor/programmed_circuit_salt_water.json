@@ -1,0 +1,72 @@
+{
+  "data": {
+    "euTier": 2
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 128
+      }
+    ]
+  },
+  "type": "gtceu:large_chemical_reactor",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 1
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzcz1"
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:salt_water"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:large_chemical_reactor/programmed_circuit_salt_water",
+      "defaultEnabled": true
+    }
+  ]
+}

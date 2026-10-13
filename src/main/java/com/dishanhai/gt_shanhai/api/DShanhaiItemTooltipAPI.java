@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.api;
 
+import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 
@@ -411,6 +412,7 @@ public class DShanhaiItemTooltipAPI {
         boolean keyDown = isKeyDown(keyMode);
         List<Component> tooltip = event.getToolTip();
         List<KeyTooltipEntry> keyEntries = KEY_ENTRIES.get(itemId);
+        PatternByproductOrder.appendTooltip(stack, tooltip);
         addPatternRecipeTypeTooltip(stack, tooltip, event.getEntity() == null ? null : event.getEntity().level());
 
         // ====== wobble 特效物品 ======

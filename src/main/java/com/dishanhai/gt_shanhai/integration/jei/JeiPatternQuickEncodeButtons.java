@@ -9,6 +9,7 @@ import com.dishanhai.gt_shanhai.client.ShanhaiJEIPlugin;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig.ConfigValues.JeiBookmarkMode;
 import com.dishanhai.gt_shanhai.network.JeiBookmarkMissingItemsRequestPacket;
+import com.dishanhai.gt_shanhai.network.JeiPatternByproductUploadRequestPacket;
 import com.dishanhai.gt_shanhai.network.JeiPatternQuickEncodeRequestPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
@@ -61,6 +62,8 @@ public final class JeiPatternQuickEncodeButtons {
         registration.addRecipeButtonFactory(new Factory(recipeTypeIcon, true));
         IDrawable bookmarkIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.BOOK));
         registration.addRecipeButtonFactory(new BookmarkFactory(bookmarkIcon));
+        IDrawable byproductIcon = guiHelper.createDrawableItemStack(new ItemStack(Items.LIME_DYE));
+        registration.addRecipeButtonFactory(new ByproductUploadFactory(byproductIcon));
     }
 
     private static ResourceLocation extractRecipeId(Object recipeBase) {
@@ -223,6 +226,60 @@ public final class JeiPatternQuickEncodeButtons {
             } finally {
                 graphics.pose().popPose();
             }
+        }
+    }
+
+    private record ByproductUploadFactory(IDrawable icon) implements IRecipeButtonControllerFactory {
+        @Override
+        public <T> IIconButtonController createButtonController(IRecipeLayoutDrawable<T> recipeLayout) {
+            ResourceLocation recipeId = extractRecipeId(recipeLayout);
+            if (recipeId == null) return null;
+            return new ByproductUploadController(icon, recipeId);
+        }
+    }
+
+    private static final class ByproductUploadController implements IIconButtonController {
+        private final IDrawable icon;
+        private final ResourceLocation recipeId;
+
+        private ByproductUploadController(IDrawable icon, ResourceLocation recipeId) {
+            this.icon = icon;
+            this.recipeId = recipeId;
+        }
+
+        @Override
+        public void initState(IButtonState state) {
+            state.setIcon(icon);
+            updateState(state);
+        }
+
+        @Override
+        public void updateState(IButtonState state) {
+            state.setVisible(true);
+            state.setActive(true);
+        }
+
+        @Override
+        public boolean onPress(IJeiUserInput input) {
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft.player == null
+                    || !(minecraft.player.containerMenu instanceof PatternEncodingTermMenu menu)) {
+                if (!input.isSimulate() && minecraft.player != null) {
+                    minecraft.player.displayClientMessage(Component.translatable(
+                            "message.gt_shanhai.jei.quick_encode.open_terminal"), false);
+                }
+                return false;
+            }
+            if (!input.isSimulate()) {
+                ShanhaiNetwork.CHANNEL.sendToServer(new JeiPatternByproductUploadRequestPacket(
+                        menu.containerId, recipeId.toString()));
+            }
+            return true;
+        }
+
+        @Override
+        public void getTooltips(ITooltipBuilder tooltip) {
+            tooltip.add(Component.translatable("tooltip.gt_shanhai.jei.byproduct_upload"));
         }
     }
 

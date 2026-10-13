@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
 import com.dishanhai.gt_shanhai.api.DShanhaiGTRecipeQuery;
 import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine;
@@ -140,7 +141,9 @@ public class DShanhaiCommands {
                 .then(sdaCommand("sda"))
                 .then(shopCommand("shop"))
                 .then(stellarTeleportCommand())
-                .then(cacheCommand());
+                .then(cacheCommand())
+                .then(Commands.literal("patternByproduct")
+                        .executes(ctx -> PatternByproductOrder.toggleCommand(ctx.getSource())));
 
         event.getDispatcher().register(cmd);
         // 中文别名
@@ -472,6 +475,8 @@ public class DShanhaiCommands {
         registerLegacyRecipeAliases(event);
         // 商店对所有玩家开放（不加权限门槛）
         event.getDispatcher().register(shopCommand("商店"));
+        event.getDispatcher().register(Commands.literal("样板副产物")
+                .executes(ctx -> PatternByproductOrder.toggleCommand(ctx.getSource())));
     }
 
     private static int openRecipeModifier(CommandSourceStack source) {

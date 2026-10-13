@@ -1,0 +1,60 @@
+{
+  "data": {
+    "euTier": 3
+  },
+  "duration": 4,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 480
+      }
+    ]
+  },
+  "type": "gtceu:centrifuge",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 6,
+          "ingredient": {
+            "tag": "forge:dusts/platinum_group_sludge"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 100,
+          "value": [
+            {
+              "fluid": "gtceu:aqua_regia"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "tierChanceBoost": 500,
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:platinum_slag_dust"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:centrifuge/pgs_separation",
+      "defaultEnabled": true
+    }
+  ]
+}

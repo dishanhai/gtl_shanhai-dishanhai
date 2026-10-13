@@ -1,0 +1,57 @@
+{
+  "data": {
+    "euTier": 1
+  },
+  "duration": 40,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 30
+      }
+    ]
+  },
+  "type": "gtceu:macerator",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "kubejs:essence_block"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzqs"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 8,
+          "ingredient": {
+            "item": "kubejs:essence"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "kubejs:macerator/essence",
+      "defaultEnabled": true
+    }
+  ]
+}

@@ -448,6 +448,14 @@ public class ShanhaiNetwork {
         );
         CHANNEL.registerMessage(
                 packetId++,
+                JeiPatternByproductUploadRequestPacket.class,
+                JeiPatternByproductUploadRequestPacket::encode,
+                JeiPatternByproductUploadRequestPacket::new,
+                JeiPatternByproductUploadRequestPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                packetId++,
                 ShopStagePreviewRequestPacket.class,
                 ShopStagePreviewRequestPacket::encode,
                 ShopStagePreviewRequestPacket::new,

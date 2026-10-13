@@ -19,38 +19,6 @@
   },
   "type": "gtceu:distort",
   "inputs": {
-    "item": [
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 1,
-          "ingredient": {
-            "item": "gtceu:neutronium_nanoswarm"
-          }
-        },
-        "chance": 0
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 1440,
-          "ingredient": {
-            "tag": "forge:dusts/carbon"
-          }
-        }
-      },
-      {
-        "content": {
-          "type": "gtceu:sized",
-          "count": 1,
-          "ingredient": {
-            "type": "gtceu:circuit",
-            "configuration": 2
-          }
-        },
-        "chance": 0
-      }
-    ],
     "fluid": [
       {
         "content": {
@@ -91,6 +59,38 @@
             }
           ]
         }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:neutronium_nanoswarm"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1440,
+          "ingredient": {
+            "tag": "forge:dusts/carbon"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 2
+          }
+        },
+        "chance": 0
       }
     ]
   },

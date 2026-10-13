@@ -13,38 +13,6 @@
   },
   "type": "gtceu:distort",
   "inputs": {
-    "item": [
-      {
-        "content": {
-          "type": "gtceu:long",
-          "ingredient": {
-            "type": "gtceu:circuit",
-            "configuration": 2
-          },
-          "actualAmount": 1
-        },
-        "chance": 0
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "actualAmount": 1,
-          "ingredient": {
-            "item": "dishanhai:wzcz2"
-          }
-        },
-        "chance": 0
-      },
-      {
-        "content": {
-          "type": "gtceu:long",
-          "ingredient": {
-            "item": "gtceu:platinum_group_sludge_dust"
-          },
-          "actualAmount": 10000
-        }
-      }
-    ],
     "fluid": [
       {
         "content": {
@@ -86,20 +54,41 @@
           ]
         }
       }
-    ]
-  },
-  "outputs": {
+    ],
     "item": [
       {
         "content": {
           "type": "gtceu:long",
           "ingredient": {
-            "item": "gtceu:rhodium_dust"
+            "type": "gtceu:circuit",
+            "configuration": 6
           },
-          "actualAmount": 10000
+          "actualAmount": 1
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:wzcz2"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10000,
+          "ingredient": {
+            "item": "gtceu:platinum_group_sludge_dust"
+          }
         }
       }
-    ],
+    ]
+  },
+  "outputs": {
     "fluid": [
       {
         "content": {
@@ -129,6 +118,17 @@
               "fluid": "gtceu:fluorine"
             }
           ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 10000,
+          "ingredient": {
+            "item": "gtceu:rhodium_dust"
+          }
         }
       }
     ]

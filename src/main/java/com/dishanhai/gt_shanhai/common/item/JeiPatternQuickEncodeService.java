@@ -18,6 +18,7 @@ import appeng.menu.me.items.PatternEncodingTermMenu;
 import appeng.menu.slot.RestrictedInputSlot;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.dishanhai.gt_shanhai.mixin.PatternEncodingTermMenuAccessor;
 import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
@@ -86,6 +87,17 @@ public final class JeiPatternQuickEncodeService {
 
     public static void encodeAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,
             String anchorRecipeId, boolean wholeRecipeType) {
+        encodeAndUpload(player, menu, anchorRecipeId, wholeRecipeType, false);
+    }
+
+    /** 只给单独的副产物上传按钮用。普通快速编写仍走上面的入口，不会写标识。 */
+    public static void encodeAndUploadWithByproductOrder(ServerPlayer player, PatternEncodingTermMenu menu,
+            String anchorRecipeId) {
+        encodeAndUpload(player, menu, anchorRecipeId, false, true);
+    }
+
+    private static void encodeAndUpload(ServerPlayer player, PatternEncodingTermMenu menu,
+            String anchorRecipeId, boolean wholeRecipeType, boolean orderByproducts) {
         CraftingRecipe craftingAnchor = PatternRecipeTypeHelper.resolveVanillaCraftingRecipe(
                 player.level(), anchorRecipeId);
         GTRecipe anchor = craftingAnchor == null
@@ -131,6 +143,11 @@ public final class JeiPatternQuickEncodeService {
         if (patterns.size() != recipeCount) {
             show(player, "message.gt_shanhai.jei.quick_encode.encode_failed");
             return;
+        }
+        if (orderByproducts) {
+            for (int i = 0; i < patterns.size(); i++) {
+                PatternByproductOrder.setMarked(patterns.get(i), true);
+            }
         }
 
         List<UploadedPattern> uploaded = new ArrayList<>(patterns.size());

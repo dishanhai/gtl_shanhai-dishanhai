@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["ABC", "DED", "CBA"],
+  "key": {
+    "A": {"item": "gtceu:mv_fluid_drilling_rig"},
+    "B": {"item": "thetornproductionline:celestial_secret_deducing_module_mv"},
+    "C": {"item": "gtceu:mv_gas_collector"},
+    "D": {"item": "dishanhai:wl_board_mv"},
+    "E": {"item": "dishanhai:primordial_engine_core"}
+  },
+  "result": {"item": "gt_shanhai:primordial_deep_space_extraction_core", "count": 1}
+}

@@ -130,6 +130,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_ABYSSAL_REFINERY;
     public static MultiblockMachineDefinition PRIMORDIAL_COSMIC_ORIGIN_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_SIXFOLD_RESOURCE_CORE;
+    public static MultiblockMachineDefinition PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_MYRIAD_PROLIFERATION_CORE;
 
     public static MachineDefinition BIG_TAG_FILTER_STOCK_BUS;
@@ -195,6 +196,22 @@ public class DShanhaiMachines {
         types.add(GTLRecipeTypes.FISSION_REACTOR_RECIPES);
         types.add(GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES);
         return types.toArray(new GTRecipeType[0]);
+    }
+
+    private static GTRecipeType[] buildDeepSpaceExtractionRecipeTypes() {
+        GTRecipeType[] types = {
+                GTRecipeTypes.GAS_COLLECTOR_RECIPES,
+                GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES,
+                GtlAddCompat.voidfluxReaction(),
+                GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES,
+                DShanhaiRecipeTypes.PRIMORDIAL_DEEP_SPACE_EXTRACTION
+        };
+        for (int i = 0; i < types.length; i++) {
+            if (types[i] == null) {
+                throw new IllegalStateException("原初深空汲取核心缺少配方类型，下标 " + i);
+            }
+        }
+        return types;
     }
 
     public static void init() {
@@ -484,6 +501,27 @@ public class DShanhaiMachines {
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.3"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.4"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.5"));
+        });
+
+        PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_deep_space_extraction_core", PrimordialDeepSpaceExtractionCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(buildDeepSpaceExtractionRecipeTypes())
+                .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                .register();
+
+        PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("汲取深空，汇集气、流与世界碎片的产出"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_deep_space_extraction_core.tooltip.1"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_deep_space_extraction_core.tooltip.2"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_deep_space_extraction_core.tooltip.3"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_deep_space_extraction_core.tooltip.4"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_deep_space_extraction_core.tooltip.5"));
         });
 
         PRIMORDIAL_MYRIAD_PROLIFERATION_CORE = GTDishanhaiRegistration.REGISTRATE

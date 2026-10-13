@@ -78,11 +78,11 @@
       {
         "content": {
           "type": "gtceu:long",
-          "actualAmount": 1,
           "ingredient": {
             "type": "gtceu:circuit",
-            "configuration": 2
-          }
+            "configuration": 3
+          },
+          "actualAmount": 1
         },
         "chance": 0
       }

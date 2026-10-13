@@ -1,0 +1,190 @@
+{
+  "data": {
+    "euTier": 9,
+    "ebf_temp": 0
+  },
+  "duration": 12,
+  "recipeConditions": [
+    {
+      "cleanroom": "sterile_cleanroom",
+      "type": "cleanroom"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 1966080
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:naquadah_nanoswarm"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "tierChanceBoost": -100,
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "kubejs:glacio_spirit"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:tiny_naquadah_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:osmiridium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:salt_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:calcium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "gtceu:meat_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "gtceu:bio_chaff"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 2,
+          "ingredient": {
+            "item": "minecraft:bone"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 1
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:phosphoric_acid"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 3000,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 2000,
+          "value": [
+            {
+              "fluid": "gtceu:distilled_water"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:biomass"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "gtceu:stem_cells"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gtceu:phosphorus_dust"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtceu:distort/stem_cells",
+      "defaultEnabled": true
+    }
+  ]
+}

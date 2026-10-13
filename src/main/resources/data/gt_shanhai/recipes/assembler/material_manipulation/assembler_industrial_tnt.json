@@ -1,59 +1,57 @@
 {
-  "type": "gtceu:assembler",
+  "data": {
+    "euTier": 1
+  },
   "duration": 20,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 32
+      }
+    ]
+  },
+  "type": "gtceu:assembler",
   "inputs": {
     "item": [
       {
         "content": {
           "type": "gtceu:sized",
-          "count": 1,
+          "count": 2,
           "ingredient": {
             "item": "ae2:tiny_tnt"
           }
-        },
-        "chance": 10000,
-        "maxChance": 10000,
-        "tierChanceBoost": 0
+        }
       },
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "dishanhai:wzcz1"
           }
         },
-        "chance": 0,
-        "maxChance": 10000,
-        "tierChanceBoost": 0
+        "chance": 0
       }
-    ],
-    "fluid": []
+    ]
   },
   "outputs": {
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "gtceu:industrial_tnt"
           }
-        },
-        "chance": 10000,
-        "maxChance": 10000,
-        "tierChanceBoost": 0
+        }
       }
     ]
   },
-  "tickInputs": {
-    "eu": [
-      {
-        "content": 32,
-        "chance": 10000,
-        "maxChance": 10000,
-        "tierChanceBoost": 0
-      }
-    ]
-  }
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:assembler/material_manipulation/assembler_industrial_tnt",
+      "defaultEnabled": true
+    }
+  ]
 }

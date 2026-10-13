@@ -42,6 +42,7 @@ public class DShanhaiRecipeTypes {
     public static GTRecipeType MATTER_MODULE_CASTING;
     public static GTRecipeType MATTER_FORGING;
     public static GTRecipeType PRIMORDIAL_MATTER_DECONSTRUCTION;
+    public static GTRecipeType PRIMORDIAL_DEEP_SPACE_EXTRACTION;
     public static GTRecipeType WL_BOARD_CIRCUIT_ASSEMBLY;
     public static GTRecipeType WL_BOARD_WAFER_ETCHING;
     public static GTRecipeType PRIMORDIAL_ENERGY_ABSORPTION;
@@ -358,6 +359,17 @@ public class DShanhaiRecipeTypes {
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_HAMMER, ProgressTexture.FillDirection.UP_TO_DOWN)
                 .setSlotOverlay(false, false, true, GuiTextures.FLUID_SLOT)
+                .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
+                .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
+                .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
+                .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
+
+        // 物品出 108、流体出 8：16 条深空汲取里主世界占用最高（矿物+岩石+3 项尾部 ≤ 108，流体+气体 ≤ 8）。
+        PRIMORDIAL_DEEP_SPACE_EXTRACTION = register("primordial_deep_space_extraction", "multiblock")
+                .setMaxIOSize(2, 108, 0, 8)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
                 .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
                 .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)

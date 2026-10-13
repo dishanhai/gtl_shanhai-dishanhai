@@ -1,0 +1,127 @@
+{
+  "data": {
+    "euTier": 14
+  },
+  "duration": 1440,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 6184752906240
+      }
+    ]
+  },
+  "type": "gtceu:qft",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 100000,
+          "value": [
+            {
+              "tag": "forge:mutated_living_solder"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 100000,
+          "value": [
+            {
+              "tag": "forge:biomass"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 100000,
+          "value": [
+            {
+              "tag": "forge:sterilized_growth_medium"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "item": "kubejs:essence_seed"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "item": "kubejs:draconium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "item": "ae2:sky_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "tag": "forge:dusts/nether_star"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:neutronium_nanoswarm"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:spacetime_nanoswarm"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 100000,
+          "value": [
+            {
+              "fluid": "gtceu:super_mutated_living_solder"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtladditions:qft/super_mutated_living_solder",
+      "defaultEnabled": true
+    }
+  ]
+}

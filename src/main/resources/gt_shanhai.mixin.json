@@ -59,6 +59,9 @@
     "GTLcoreCoilTypeOverrideMixin",
     "NuclearParallelMixin",
     "PatternDetailsHelperMixin",
+    "NetworkCraftingProvidersByproductMixin",
+    "MEBufferPatternByproductMixin",
+    "PatternEncodingByproductMenuMixin",
     "PatternEncodingTermMenuAccessor",
     "PatternWrapControlMenuMixin",
     "PatternEncodingRecipeTypeContextMixin",
@@ -134,7 +137,11 @@
     "TextComponentParserMixin",
     "GuideMeFcsFlowTextMixin",
     "NativeVirtualFindHandleRecipeMixin",
-    "NativeVirtualBeforeWorkingBypassMixin"
+    "NativeVirtualBeforeWorkingBypassMixin",
+    "CircuitFancyConfiguratorMixin",
+    "NotifiableItemStackHandlerAdvancedCircuitMixin",
+    "NotifiableCircuitItemStackHandlerAdvancedCircuitMixin",
+    "IntCircuitIngredientAdvancedCircuitMixin"
   ],
   "client": [
     "RecipeEditorJeiMarginMixin",
@@ -184,6 +191,8 @@
     "PatternWrapControlScreenMixin",
     "AeTerminalRepoFavoritesMixin",
     "AeTerminalFavoritesScreenMixin",
-    "AeTerminalFavoritesScreenAccessor"
+    "AeTerminalFavoritesScreenAccessor",
+    "EncodedPatternByproductTooltipMixin",
+    "PatternEncodingByproductScreenMixin"
   ]
 }
