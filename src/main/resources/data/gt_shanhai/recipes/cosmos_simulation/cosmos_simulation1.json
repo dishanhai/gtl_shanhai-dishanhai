@@ -1,5 +1,11 @@
 {
   "duration": 240,
+  "recipeConditions": [
+    {
+      "type": "recipe_note",
+      "text": "需要寰宇模拟单元作为不消耗物，以及102400B宇宙素消耗流体"
+    }
+  ],
   "type": "gtceu:cosmos_simulation",
   "inputs": {
     "item": [

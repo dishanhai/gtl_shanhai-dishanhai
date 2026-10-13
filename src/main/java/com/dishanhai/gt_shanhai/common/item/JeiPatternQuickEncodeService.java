@@ -197,6 +197,7 @@ public final class JeiPatternQuickEncodeService {
             GTDishanhaiMod.LOGGER.error("[JEIQuickEncode] automatic stellar target search stack", exception);
             availableTargets = List.of();
         }
+        boolean noStellarTarget = availableTargets.isEmpty();
         PatternQuickUploadService.Target currentTarget = null;
         for (ItemStack pattern : patterns) {
             PatternQuickUploadService.UploadResult result = null;
@@ -232,7 +233,7 @@ public final class JeiPatternQuickEncodeService {
         sendDuplicateHighlights(player, duplicateHighlights);
 
         boolean useInventoryFallback = !sdaPatterns.isEmpty()
-                && sdaPatterns.size() < MIN_SDA_FALLBACK_PATTERNS;
+                && (noStellarTarget || sdaPatterns.size() < MIN_SDA_FALLBACK_PATTERNS);
         boolean useSda = !useInventoryFallback
                 && sdaPatterns.size() >= MIN_SDA_FALLBACK_PATTERNS;
         int inventoryCount = useInventoryFallback ? sdaPatterns.size() : 0;
@@ -664,10 +665,7 @@ public final class JeiPatternQuickEncodeService {
 
         // 山海側完整配方類型掃描沒有找到目標時，才用 GTLCore 公開搜尋補充候選位置。
         // 候選的 recipeTypeId 不作匹配依據；實際兼容性由星律主機完整類型集合決定。
-        List<PatternQuickUploadService.Target> publicTargets = findPublicStellarTargets(
-                player, networkNode, pattern, recipeTypeId);
-        if (!publicTargets.isEmpty()) return publicTargets;
-        return findSelfSynthesisTargets(networkNode.getGrid(), pattern, recipeTypeId);
+        return findPublicStellarTargets(player, networkNode, pattern, recipeTypeId);
     }
 
     private static List<PatternQuickUploadService.Target> findSelfSynthesisTargets(

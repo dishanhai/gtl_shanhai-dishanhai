@@ -120,7 +120,7 @@ public class SelfSynthesisChamberPartMachine extends MultiblockPartMachine
             tooltips.add(Component.literal("§7放入处理样板，由本仓自己完成 AE 合成"));
             tooltips.add(Component.literal("§bAE 仍要发配样板原料，配方不消耗这些发配物"));
             tooltips.add(Component.literal("§a发配物退回本仓所在 AE 网络，随后取消该合成任务"));
-            tooltips.add(Component.literal("§e支持山海快速样板上传，也可从 EAEP 样板上传选中"));
+            tooltips.add(Component.literal("§e多方块结构页可快速编写到本仓，也可从 EAEP 样板上传选中"));
             tooltips.add(Component.literal("§d任何面接 ME 线缆均可连接，不需要多方块主机"));
         });
         return def;
