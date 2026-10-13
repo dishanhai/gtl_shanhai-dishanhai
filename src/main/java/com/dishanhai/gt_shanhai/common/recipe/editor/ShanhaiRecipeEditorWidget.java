@@ -63,6 +63,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     String eutText = "0";
     String recipeIdText = "";
     boolean keepOriginal;
+    /** Written to datapack {@code recipe_enabled.defaultEnabled}. False also disables the live recipe on commit. */
+    boolean defaultEnabled = true;
     /** Blank draft. Commit adds a recipe and does not replace or remove one. */
     boolean creating;
     String conditionPick = "";
@@ -407,6 +409,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         }
         creating = true;
         keepOriginal = true;
+        defaultEnabled = true;
         selectedCard = null;
         jsBlastTemp = -1;
         seedRecipeData(type, new JsonObject());
@@ -561,6 +564,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         creating = false;
         panel.syncCreateChrome();
         keepOriginal = false;
+        defaultEnabled = true;
         selectedCard = card;
         flushDraftSave();
         setStatus("§e正在读取配方快照…");
@@ -639,7 +643,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             }
             ShanhaiRecipeClipboard.copy(ShanhaiRecipeJsExport.format(
                     ioTable, exportId.toString(), selectedBase.recipeTypeId(),
-                    duration, eut, shownBlastTemp()));
+                    duration, eut, shownBlastTemp(), defaultEnabled));
             setStatus("§a已复制 JS 配方对象");
         } catch (RuntimeException invalid) {
             setStatus("§c耗时或 EU/t 不是整数");
@@ -732,6 +736,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 ShanhaiRecipeConditions.diffLine(selectedBase.conditions(), conditionEdits));
         if (edited.blastTemp() >= 0) payload.addProperty("blastTemp", edited.blastTemp());
         if (edited.recipeData().size() > 0) payload.add("recipeData", edited.recipeData());
+        payload.addProperty("defaultEnabled", defaultEnabled);
         return payload;
     }
 
@@ -884,6 +889,23 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         if (creating) return "§7不会移除或覆盖已有配方";
         if (keepOriginal) return "§7新 id 与原配方同时留下";
         return "§7JEI 和机器里只留修改后的";
+    }
+
+    void toggleDefaultEnabled() {
+        defaultEnabled = !defaultEnabled;
+        if (!isClient()) return;
+        setStatus(defaultEnabled
+                ? "§a默认开启。导出 json 写 defaultEnabled: true"
+                : "§e默认关闭。导出 json 写 defaultEnabled: false，提交后当前配方也会关掉");
+        flushDraftSave();
+    }
+
+    String defaultEnabledFace() {
+        return defaultEnabled ? "默认开启" : "默认关闭";
+    }
+
+    String defaultEnabledHint() {
+        return defaultEnabled ? "§7defaultEnabled: true" : "§cdefaultEnabled: false";
     }
 
     String reviewBanner() {
@@ -1873,6 +1895,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
             draft.putString("eutText", eutText);
             draft.putString("recipeIdText", recipeIdText);
             draft.putBoolean("keepOriginal", keepOriginal);
+            draft.putBoolean("defaultEnabled", defaultEnabled);
             draft.putBoolean("creating", creating);
             draft.putString("conditionEdits", conditionEdits.toString());
             draft.putString("draftInputs", editableTable(selectedBase.inputs(), ioTable.json("inputs")).toString());
@@ -1987,6 +2010,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                         new RecipeEditorDetailPacket(selectedCard.recipeTypeId(), selectedCard.recipeId()));
             }
             if (draft.contains("keepOriginal")) keepOriginal = draft.getBoolean("keepOriginal");
+            if (draft.contains("defaultEnabled")) defaultEnabled = draft.getBoolean("defaultEnabled");
             setStatus(selectedBase == null && selectedCard == null
                     ? "§7草稿已恢复" : "§a已恢复未提交的配方编辑进度");
         } catch (RuntimeException invalid) {

@@ -87,6 +87,29 @@ class RecipeEditorExportLongAmountTest {
     }
 
     @Test
+    void exportWritesChosenDefaultEnabled() {
+        JsonObject recipe = new JsonObject();
+        ResourceLocation id = new ResourceLocation("gt_shanhai", "assembler/assembler_maintenance_hatch");
+
+        RecipeEditorExportPacket.writeEnabledCondition(recipe, id, false);
+
+        JsonObject created = recipe.getAsJsonArray("conditions").get(0).getAsJsonObject();
+        assertEquals("gt_shanhai:recipe_enabled", created.get("type").getAsString());
+        assertEquals("gt_shanhai:assembler/assembler_maintenance_hatch", created.get("recipeId").getAsString());
+        assertFalse(created.get("defaultEnabled").getAsBoolean());
+
+        RecipeEditorExportPacket.writeEnabledCondition(recipe, id, true);
+        assertTrue(recipe.getAsJsonArray("conditions").get(0).getAsJsonObject()
+                .get("defaultEnabled").getAsBoolean());
+        assertEquals(1, recipe.getAsJsonArray("conditions").size());
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("defaultEnabled", false);
+        assertFalse(RecipeEditorExportPacket.defaultEnabledOf(payload));
+        assertTrue(RecipeEditorExportPacket.defaultEnabledOf(new JsonObject()));
+    }
+
+    @Test
     void enabledConditionKeepsTheFolder() {
         ResourceLocation id = new ResourceLocation("gt_shanhai", "distort/wzcz2_palladium_dust");
         assertEquals("gt_shanhai:distort/wzcz2_palladium_dust", ShanhaiRecipeJsExport.enabledRecipeId(id));

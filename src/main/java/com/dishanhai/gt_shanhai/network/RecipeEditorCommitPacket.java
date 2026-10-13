@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.network;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeConditions;
@@ -186,11 +187,15 @@ public final class RecipeEditorCommitPacket {
             ShanhaiRecipeEditorOps ops = new ShanhaiRecipeEditorOps(
                     new ShanhaiRecipeOverrideStore(FMLPaths.GAMEDIR.get()
                             .resolve("config/gt_shanhai/recipe_overrides.json")));
+            String liveId = RecipeEditorExportPacket.exportLocation(liveRaw, packet.recipeId).toString();
             ShanhaiRecipeEditorOps.Result result = ops.commit(
                     new ShanhaiRecipeEditorOps.Edit(base, packet.baseFingerprint),
                     net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer(),
                     keepOriginal,
-                    RecipeEditorExportPacket.exportLocation(liveRaw, packet.recipeId).toString());
+                    liveId);
+            if (result.status() == ShanhaiRecipeEditorOps.Result.Status.SUCCESS) {
+                applyDefaultEnabled(json, liveId);
+            }
             return new RecipeEditorResultPacket(
                     RecipeEditorResultPacket.Status.valueOf(result.status().name()),
                     result.message(),
@@ -218,11 +223,21 @@ public final class RecipeEditorCommitPacket {
         ShanhaiRecipeEditorOps.Result result = ops.create(
                 new ShanhaiRecipeEditorOps.Edit(base, packet.baseFingerprint),
                 net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer());
+        if (result.status() == ShanhaiRecipeEditorOps.Result.Status.SUCCESS) {
+            applyDefaultEnabled(json, live.toString());
+        }
         return new RecipeEditorResultPacket(
                 RecipeEditorResultPacket.Status.valueOf(result.status().name()),
                 result.message(),
                 result.revision(),
                 "");
+    }
+
+    /** Editor switch. Missing field leaves the live toggle alone. */
+    private static void applyDefaultEnabled(JsonObject json, String recipeId) {
+        if (json == null || recipeId == null || recipeId.isEmpty()) return;
+        if (!json.has("defaultEnabled") || !json.get("defaultEnabled").isJsonPrimitive()) return;
+        DShanhaiRecipeModifierAPI.setRecipeEnabled(recipeId, json.get("defaultEnabled").getAsBoolean());
     }
 
     private static RecipeEditorResultPacket invalid(String message) {

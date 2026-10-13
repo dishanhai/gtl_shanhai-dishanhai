@@ -114,6 +114,64 @@ public final class DShanhaiJsonRecipeStats {
     }
 
     /**
+     * Recipes the datapack left unloaded because {@code recipe_enabled} is off,
+     * or because a required mod is missing. File id is the datapack id. A different
+     * condition {@code recipeId} is appended so {@code /配方开关} can target it.
+     */
+    public static List<String> disabledRecipeIds(MinecraftServer server) {
+        if (server == null) return List.of();
+        JsonObject config = DShanhaiRecipeEnabledCondition.readConfig();
+        List<String> ids = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (Map.Entry<ResourceLocation, Resource> entry : server.getResourceManager()
+                .listResources("recipes", id -> id.getPath().endsWith(".json")).entrySet()) {
+            ResourceLocation file = entry.getKey();
+            String path = file.getPath();
+            if (!path.startsWith("recipes/") || path.length() <= "recipes/.json".length()) continue;
+            String recipePath = path.substring("recipes/".length(), path.length() - ".json".length());
+            String fileId;
+            try {
+                fileId = new ResourceLocation(file.getNamespace(), recipePath).toString();
+            } catch (RuntimeException invalidId) {
+                continue;
+            }
+            JsonObject json;
+            try (Reader reader = entry.getValue().openAsReader()) {
+                JsonElement element = JsonParser.parseReader(reader);
+                if (element == null || !element.isJsonObject()) continue;
+                json = element.getAsJsonObject();
+            } catch (Exception ignored) {
+                continue;
+            }
+            if (!isDisabled(json, config)) continue;
+            String label = disabledLabel(fileId, json);
+            if (label.isEmpty() || !seen.add(label)) continue;
+            ids.add(label);
+        }
+        return ids;
+    }
+
+    static String disabledLabel(String fileId, JsonObject json) {
+        String file = fileId == null ? "" : fileId;
+        String written = enabledRecipeId(json);
+        if (written == null || written.isEmpty() || written.equals(file)) return file;
+        return file + " [" + written + "]";
+    }
+
+    private static String enabledRecipeId(JsonObject json) {
+        if (json == null || !json.has("conditions") || !json.get("conditions").isJsonArray()) return null;
+        for (JsonElement element : json.getAsJsonArray("conditions")) {
+            if (!element.isJsonObject()) continue;
+            JsonObject condition = element.getAsJsonObject();
+            if (!condition.has("type") || !condition.get("type").isJsonPrimitive()) continue;
+            if (!DShanhaiRecipeEnabledCondition.ID.toString().equals(condition.get("type").getAsString())) continue;
+            if (!condition.has("recipeId") || !condition.get("recipeId").isJsonPrimitive()) return null;
+            return condition.get("recipeId").getAsString();
+        }
+        return null;
+    }
+
+    /**
      * 配方沒進 RecipeManager 時，從 JSON 裡找出未註冊的物品、流體和配方類型。
      * 查詢由呼叫端提供，方便在沒有註冊表的測試裡驗證提示文案。
      */

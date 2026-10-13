@@ -688,6 +688,13 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
                 click -> host.toggleKeepOriginal());
         reviewPage.addWidget(keepToggle);
         reviewPage.addWidget(new LabelWidget(352, 76, host::keepOriginalHint));
+        ButtonWidget enabledToggle = new ButtonWidget(260, 92, 88, 16,
+                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::defaultEnabledFace)),
+                click -> host.toggleDefaultEnabled());
+        enabledToggle.setClientSideWidget();
+        enabledToggle.setHoverTooltips("导出 json 写入 defaultEnabled。关掉后提交会禁用当前配方");
+        reviewPage.addWidget(enabledToggle);
+        reviewPage.addWidget(new LabelWidget(352, 96, host::defaultEnabledHint));
         ButtonWidget encodePattern = button(258, 220, 118, 18, "快速编写为样板", host::encodePattern);
         encodePattern.setHoverTooltips("按当前审核稿编码样板并上传。需要身上的无线终端，以及网络中的 1 张空白样板");
         reviewPage.addWidget(encodePattern);

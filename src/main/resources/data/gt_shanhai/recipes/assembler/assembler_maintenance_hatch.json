@@ -1,0 +1,60 @@
+{
+  "data": {
+    "euTier": 1
+  },
+  "duration": 6,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 20
+      }
+    ]
+  },
+  "type": "gtceu:assembler",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:primordial_omega_engine"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "dishanhai:light"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:maintenance_hatch"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:assembler/assembler_maintenance_hatch",
+      "defaultEnabled": true
+    }
+  ]
+}

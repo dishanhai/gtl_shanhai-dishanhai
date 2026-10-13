@@ -21,6 +21,11 @@ public final class ShanhaiRecipeJsExport {
 
     public static String format(ShanhaiIoTable table, String recipeId, String recipeTypeId,
                                 int duration, long eut, int blastTemp) {
+        return format(table, recipeId, recipeTypeId, duration, eut, blastTemp, true);
+    }
+
+    public static String format(ShanhaiIoTable table, String recipeId, String recipeTypeId,
+                                int duration, long eut, int blastTemp, boolean defaultEnabled) {
         List<String> itemInputs = new ArrayList<>();
         List<String> inputFluids = new ArrayList<>();
         List<String> notConsumable = new ArrayList<>();
@@ -61,7 +66,7 @@ public final class ShanhaiRecipeJsExport {
         }
         StringBuilder builder = new StringBuilder();
         builder.append("{id:'").append(leaf(recipeId)).append('\'');
-        builder.append(",defaultEnabled:true");
+        builder.append(",defaultEnabled:").append(defaultEnabled);
         builder.append(",type:'").append(typePath(recipeTypeId)).append('\'');
         builder.append(",circuit:").append(circuit);
         builder.append(",notConsumable:").append(array(notConsumable));

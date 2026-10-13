@@ -88,6 +88,10 @@ class DShanhaiRecipeEnabledConditionTest {
         JsonObject enabledConfig = new JsonObject();
         enabledConfig.addProperty("test_placeholder", true);
         assertFalse(DShanhaiJsonRecipeStats.isDisabled(recipe, enabledConfig));
+        assertEquals(
+                "gt_shanhai:assembler/test_placeholder [dishanhai:test_placeholder]",
+                DShanhaiJsonRecipeStats.disabledLabel(
+                        "gt_shanhai:assembler/test_placeholder", recipe));
     }
 
     @Test

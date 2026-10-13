@@ -218,7 +218,7 @@ public final class RecipeEditorExportPacket {
                 return invalid("export-codec-rejected");
             }
             writeEditorConditions(recipeJson, edited.conditions());
-            writeEnabledCondition(recipeJson, exportId);
+            writeEnabledCondition(recipeJson, exportId, defaultEnabledOf(json));
 
             boolean developer = developerExport();
             String placed = pathUnderType(typeId, exportId);
@@ -329,13 +329,24 @@ public final class RecipeEditorExportPacket {
         recipe.add("recipeConditions", ShanhaiRecipeConditions.exportConditions(editorConditions));
     }
 
+    static boolean defaultEnabledOf(JsonObject json) {
+        if (json == null || !json.has("defaultEnabled") || !json.get("defaultEnabled").isJsonPrimitive()) {
+            return true;
+        }
+        try {
+            return json.get("defaultEnabled").getAsBoolean();
+        } catch (RuntimeException ignored) {
+            return true;
+        }
+    }
+
     /**
      * Forge datapack condition, separate from GTCEu {@code recipeConditions}.
      * The key is the full recipe id, for example {@code gt_shanhai:distort/wzcz2_palladium_dust}.
      */
-    private static void writeEnabledCondition(JsonObject recipe, ResourceLocation exportId) {
+    static void writeEnabledCondition(JsonObject recipe, ResourceLocation exportId, boolean defaultEnabled) {
         String enabledId = ShanhaiRecipeJsExport.enabledRecipeId(exportId);
-        if (enabledId.isEmpty()) return;
+        if (enabledId.isEmpty() || recipe == null) return;
         JsonArray conditions = recipe.has("conditions") && recipe.get("conditions").isJsonArray()
                 ? recipe.getAsJsonArray("conditions") : new JsonArray();
         for (JsonElement element : conditions) {
@@ -343,13 +354,16 @@ public final class RecipeEditorExportPacket {
             JsonObject existing = element.getAsJsonObject();
             if (existing.has("type")
                     && "gt_shanhai:recipe_enabled".equals(existing.get("type").getAsString())) {
+                if (!existing.has("recipeId")) existing.addProperty("recipeId", enabledId);
+                existing.addProperty("defaultEnabled", defaultEnabled);
+                recipe.add("conditions", conditions);
                 return;
             }
         }
         JsonObject condition = new JsonObject();
         condition.addProperty("type", "gt_shanhai:recipe_enabled");
         condition.addProperty("recipeId", enabledId);
-        condition.addProperty("defaultEnabled", true);
+        condition.addProperty("defaultEnabled", defaultEnabled);
         conditions.add(condition);
         recipe.add("conditions", conditions);
     }

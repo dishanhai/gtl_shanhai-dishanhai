@@ -27,6 +27,7 @@ import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayCellHandler;
 import com.dishanhai.gt_shanhai.common.item.VirtualItemProviderItem;
 import com.dishanhai.gt_shanhai.common.item.OmniformNucleusItem;
 import com.dishanhai.gt_shanhai.common.item.RecipeModifierDevItem;
+import com.dishanhai.gt_shanhai.common.item.GenesisCalculatorItem;
 import com.dishanhai.gt_shanhai.common.item.UniverseCircuitReassemblyUnitItem;
 import com.dishanhai.gt_shanhai.common.item.UniverseSimulationUnitItem;
 
@@ -124,6 +125,12 @@ public class GTDishanhaiMod {
     public static final RegistryObject<Item> UNIVERSE_CIRCUIT_REASSEMBLY_UNIT = ITEMS.register(
         "universe_circuit_reassembly_unit",
         () -> new UniverseCircuitReassemblyUnitItem(new Item.Properties()
+            .stacksTo(64)
+            .rarity(Rarity.EPIC)));
+
+    public static final RegistryObject<Item> GENESIS_CALCULATOR = ITEMS.register(
+        "genesis_calculator",
+        () -> new GenesisCalculatorItem(new Item.Properties()
             .stacksTo(64)
             .rarity(Rarity.EPIC)));
 

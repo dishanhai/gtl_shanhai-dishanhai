@@ -33,6 +33,7 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -45,6 +46,7 @@ import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
@@ -675,10 +677,16 @@ public class DShanhaiCommands {
     private static int listDisabledRecipes(CommandSourceStack source) { return listRecipeStates(source, false); }
     private static int listRecipeStates(CommandSourceStack source, boolean enabled) {
         List<String> ids = new ArrayList<>();
-        if (!enabled) ids.addAll(DShanhaiRecipeModifierAPI.getDisabledRecipeIds());
-        else for (var type : GTRegistries.RECIPE_TYPES) if (type != null && type.registryName != null)
+        if (!enabled) {
+            LinkedHashSet<String> merged = new LinkedHashSet<>(DShanhaiRecipeModifierAPI.getDisabledRecipeIds());
+            merged.addAll(DShanhaiJsonRecipeStats.disabledRecipeIds(source.getServer()));
+            ids.addAll(merged);
+        } else for (var type : GTRegistries.RECIPE_TYPES) if (type != null && type.registryName != null)
             for (var recipe : DShanhaiRecipeEngine.getRecipesOfType(type.registryName.toString())) if (recipe != null && recipe.getId() != null) ids.add(recipe.getId().toString());
-        source.sendSuccess(msg((enabled ? "§a已启用" : "§c已禁用") + "配方 (" + ids.size() + "): " + String.join(", ", ids.subList(0, Math.min(40, ids.size())))), false);
+        int shown = Math.min(40, ids.size());
+        String listed = shown == 0 ? "" : String.join(", ", ids.subList(0, shown));
+        String more = ids.size() > shown ? " §7...还有 " + (ids.size() - shown) + " 个" : "";
+        source.sendSuccess(msg((enabled ? "§a已启用" : "§c已禁用") + "配方 (" + ids.size() + "): " + listed + more), false);
         return 1;
     }
 
