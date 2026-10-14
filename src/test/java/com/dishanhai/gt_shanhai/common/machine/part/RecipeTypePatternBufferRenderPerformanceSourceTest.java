@@ -56,8 +56,12 @@ class RecipeTypePatternBufferRenderPerformanceSourceTest {
         assertFalse(slot.contains("net.minecraft.client.Minecraft")
                         || slot.contains("Minecraft.getInstance()"),
                 "common 槽位不得透过 Minecraft 单例链接 ClientLevel");
-        assertTrue(machine.contains("this::getLevel"),
+        assertTrue(machine.contains("this::patternPreviewLevel"),
                 "机器必须把通用 Level 提供给分页管理器");
+        assertTrue(machine.contains("Level level = getLevel();"),
+                "有世界时仍用机器自身 Level 解码样板");
+        assertFalse(machine.contains("Minecraft.getInstance()"),
+                "Level 回退只能装在客户端镜像上，不能写进机器类");
         assertTrue(pagination.contains("Supplier<Level> levelSupplier"),
                 "分页管理器必须继续传递通用 Level");
         assertTrue(slot.contains("Supplier<Level> levelSupplier")

@@ -1,0 +1,59 @@
+package com.dishanhai.gt_shanhai.common.item;
+
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
+
+import org.junit.jupiter.api.Test;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class SelectedRecipePatternTest {
+
+    @Test
+    void roundTripKeepsOrderScaleAndType() {
+        CompoundTag tag = SelectedRecipePattern.write(new SelectedRecipePattern.Contents(
+                2, 3, "gtceu:lathe", List.of("gtceu:lathe/a", "gtceu:lathe/b", "gtceu:lathe/a")));
+        SelectedRecipePattern.Contents contents = SelectedRecipePattern.read(tag);
+        assertEquals(2, contents.scale());
+        assertEquals(3, contents.outputScale());
+        assertEquals("gtceu:lathe", contents.recipeType());
+        assertEquals(List.of("gtceu:lathe/a", "gtceu:lathe/b"), contents.recipes());
+    }
+
+    @Test
+    void rejectsBlankAndUnknownVersions() {
+        assertNull(SelectedRecipePattern.write(new SelectedRecipePattern.Contents(
+                1, 1, "gtceu:lathe", List.of(" "))));
+        assertNull(SelectedRecipePattern.read(null));
+        CompoundTag root = new CompoundTag();
+        CompoundTag data = new CompoundTag();
+        data.putInt("version", 99);
+        ListTag recipes = new ListTag();
+        recipes.add(StringTag.valueOf("gtceu:lathe/a"));
+        data.put("recipes", recipes);
+        root.put(SelectedRecipePattern.TAG, data);
+        assertNull(SelectedRecipePattern.read(root));
+    }
+
+    @Test
+    void bufferAndGeneratorWireThePattern() throws Exception {
+        String machine = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "common", "machine", "part", "RecipeTypePatternBufferPartMachine.java"));
+        String widget = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "common", "gui", "generator", "PatternGeneratorWidget.java"));
+        assertTrue(machine.contains("SelectedRecipePattern.isPattern"));
+        assertTrue(machine.contains("SelectedRecipePattern.expand"));
+        assertTrue(machine.contains("acceptsWildcardMother"));
+        assertFalse(machine.contains("setFilter(WildcardPatternBridge::isWildcardPattern)"));
+        assertTrue(widget.contains("generateBundle"));
+        assertTrue(widget.contains("shanhai_pattern_generator.bundle"));
+    }
+}

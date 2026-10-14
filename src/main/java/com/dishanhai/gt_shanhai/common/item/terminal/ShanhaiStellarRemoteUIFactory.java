@@ -126,6 +126,7 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
                     net.minecraft.core.BlockPos.ZERO, definition.getBlock().defaultBlockState());
             if (blockEntity instanceof IMachineBlockEntity machineBlockEntity
                     && machineBlockEntity.getMetaMachine() instanceof RecipeTypePatternBufferPartMachine stellar) {
+                stellar.setPatternPreviewLevelFallback(() -> net.minecraft.client.Minecraft.getInstance().level);
                 return stellar;
             }
             GTDishanhaiMod.LOGGER.error(

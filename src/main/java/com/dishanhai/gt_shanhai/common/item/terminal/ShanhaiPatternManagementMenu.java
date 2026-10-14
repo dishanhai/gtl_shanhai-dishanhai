@@ -17,10 +17,15 @@ import de.mari_023.ae2wtlib.wut.ItemWUT;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShanhaiPatternContainerMetadataPacket;
+import com.dishanhai.gt_shanhai.network.ShanhaiPatternStellarDetailPacket;
 import appeng.helpers.patternprovider.PatternContainer;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -39,7 +44,9 @@ public final class ShanhaiPatternManagementMenu extends ContainerExPatternTermin
     private final ShanhaiPatternManagementMenuHost host;
     private final ToolboxMenu toolboxMenu;
     private final Set<Long> stellarContainerIds = new HashSet<>();
+    private final Map<Long, StellarTerminalDetail> stellarDetails = new HashMap<>();
     private Set<Long> lastSentStellarContainerIds = Set.of();
+    private int lastStellarDetailHash = Integer.MIN_VALUE;
 
     public ShanhaiPatternManagementMenu(int id, Inventory inventory, ShanhaiPatternManagementMenuHost host) {
         super(TYPE, id, inventory, host, true);
@@ -92,6 +99,17 @@ public final class ShanhaiPatternManagementMenu extends ContainerExPatternTermin
         stellarContainerIds.addAll(serverIds);
     }
 
+    public StellarTerminalDetail stellarDetail(long serverId) {
+        return stellarDetails.get(serverId);
+    }
+
+    public void replaceStellarDetails(List<StellarTerminalDetail> details) {
+        stellarDetails.clear();
+        for (StellarTerminalDetail detail : details) {
+            stellarDetails.put(detail.serverId(), detail);
+        }
+    }
+
     public RecipeTypePatternBufferPartMachine resolveStellarContainer(long serverId) {
         PatternContainer container = resolveTrackedContainer(serverId);
         if (!(container instanceof RecipeTypePatternBufferPartMachine stellar)) {
@@ -121,19 +139,32 @@ public final class ShanhaiPatternManagementMenu extends ContainerExPatternTermin
 
     private void syncStellarContainerMetadata() {
         Set<Long> current = new HashSet<>();
+        List<StellarTerminalDetail> details = new ArrayList<>();
+        int detailHash = 1;
         for (Long2ObjectMap.Entry<?> entry : trackedContainers().long2ObjectEntrySet()) {
             Object tracker = entry.getValue();
-            if (tracker != null && readContainer(tracker) instanceof RecipeTypePatternBufferPartMachine) {
-                current.add(entry.getLongKey());
-            }
+            if (tracker == null) continue;
+            if (!(readContainer(tracker) instanceof RecipeTypePatternBufferPartMachine stellar)) continue;
+            current.add(entry.getLongKey());
+            StellarTerminalDetail detail = stellar.terminalDetail(entry.getLongKey());
+            details.add(detail);
+            detailHash = 31 * detailHash + detail.hashCode();
         }
         stellarContainerIds.clear();
         stellarContainerIds.addAll(current);
+        net.minecraft.server.level.ServerPlayer player = (net.minecraft.server.level.ServerPlayer) getPlayer();
         if (!current.equals(lastSentStellarContainerIds)) {
             lastSentStellarContainerIds = Set.copyOf(current);
             ShanhaiNetwork.CHANNEL.sendTo(
                     new ShanhaiPatternContainerMetadataPacket(containerId, current),
-                    ((net.minecraft.server.level.ServerPlayer) getPlayer()).connection.connection,
+                    player.connection.connection,
+                    net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
+        }
+        if (detailHash != lastStellarDetailHash) {
+            lastStellarDetailHash = detailHash;
+            ShanhaiNetwork.CHANNEL.sendTo(
+                    new ShanhaiPatternStellarDetailPacket(containerId, details),
+                    player.connection.connection,
                     net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT);
         }
     }

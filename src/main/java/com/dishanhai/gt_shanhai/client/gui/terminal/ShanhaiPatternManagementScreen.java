@@ -6,6 +6,7 @@ import appeng.client.gui.widgets.ToolboxPanel;
 import appeng.client.gui.widgets.UpgradesPanel;
 import appeng.menu.SlotSemantics;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu;
+import com.dishanhai.gt_shanhai.common.item.terminal.StellarTerminalDetail;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShanhaiPatternRemoteConfigPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiPatternRemoteConfigPacket.Operation;
@@ -46,6 +47,11 @@ public final class ShanhaiPatternManagementScreen
     private static final int PANEL_BORDER = 0xFF8FB7D4;
     private static final int PANEL_SELECTED = 0xFF3E6F93;
     private static final int PANEL_TEXT = 0xFFE7F2FA;
+    private static final int DETAIL_WIDTH = 120;
+    private static final int DETAIL_GAP = 4;
+    private static final int DETAIL_LABEL = 0xFF9BB4CC;
+    private static final int DETAIL_WARN = 0xFFE0A15A;
+    private static final int DETAIL_OFFLINE = 0xFFE07A7A;
 
     private static final Operation[] CONTROL_ACTIONS = {
             Operation.OPEN_FULL_PATTERN,
@@ -101,18 +107,34 @@ public final class ShanhaiPatternManagementScreen
         for (StellarHeaderTarget target : headerTargets) {
             drawHeaderButton(graphics, target.x(), target.y());
         }
+    }
+
+    @Override
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        super.render(graphics, mouseX, mouseY, partialTick);
         if (controlOpen) {
+            graphics.pose().pushPose();
+            graphics.pose().translate(leftPos, topPos, 400.0F);
+            drawDetailPanel(graphics);
             drawControlPanel(graphics);
+            graphics.pose().popPose();
         }
         int localX = mouseX - leftPos;
         int localY = mouseY - topPos;
         for (StellarHeaderTarget target : headerTargets) {
-            if (target.contains(localX, localY)) {
-                graphics.renderTooltip(font, Component.translatable("gui.gt_shanhai.stellar_remote.button"),
-                        mouseX, mouseY);
-                break;
-            }
+            if (!target.contains(localX, localY)) continue;
+            graphics.renderTooltip(font, Component.translatable("gui.gt_shanhai.stellar_remote.button"),
+                    mouseX, mouseY);
+            break;
         }
+    }
+
+    @Override
+    protected void renderTooltip(GuiGraphics graphics, int mouseX, int mouseY) {
+        if (controlContains(mouseX - leftPos, mouseY - topPos)) {
+            return;
+        }
+        super.renderTooltip(graphics, mouseX, mouseY);
     }
 
     @Override
@@ -162,9 +184,26 @@ public final class ShanhaiPatternManagementScreen
         placeControlPanel(target);
     }
 
+    private boolean controlContains(int localX, int localY) {
+        return actionContains(localX, localY) || detailContains(localX, localY);
+    }
+
+    private boolean actionContains(int localX, int localY) {
+        return controlOpen && localX >= controlX && localY >= controlY
+                && localX < controlX + PANEL_WIDTH && localY < controlY + controlHeight();
+    }
+
+    private boolean detailContains(int localX, int localY) {
+        if (!controlOpen) return false;
+        int height = detailHeight(selectedDetail());
+        int x = detailX();
+        int y = detailY(height);
+        return localX >= x && localY >= y && localX < x + DETAIL_WIDTH && localY < y + height;
+    }
+
     private boolean handleControlClick(int localX, int localY) {
-        if (localX < controlX || localY < controlY
-                || localX >= controlX + PANEL_WIDTH || localY >= controlY + controlHeight()) {
+        if (detailContains(localX, localY)) return true;
+        if (!actionContains(localX, localY)) {
             controlOpen = false;
             return true;
         }
@@ -229,11 +268,98 @@ public final class ShanhaiPatternManagementScreen
     private void placeControlPanel(StellarHeaderTarget target) {
         controlX = target.x() + BUTTON_WIDTH - PANEL_WIDTH;
         if (controlX < 4) controlX = 4;
+        int detailScreenX = leftPos + controlX - DETAIL_GAP - DETAIL_WIDTH;
+        if (detailScreenX < 2) {
+            controlX += 2 - detailScreenX;
+        }
         controlY = target.y() + BUTTON_HEIGHT + 1;
         int height = controlHeight();
         if (controlY + height > this.imageHeight - 2) {
             controlY = Math.max(2, target.y() - height - 1);
         }
+    }
+
+    private StellarTerminalDetail selectedDetail() {
+        return getMenu().stellarDetail(selectedServerId);
+    }
+
+    private int detailX() {
+        return controlX - DETAIL_GAP - DETAIL_WIDTH;
+    }
+
+    private int detailY(int height) {
+        int y = controlY;
+        if (topPos + y + height > this.height - 2) {
+            y -= topPos + y + height - (this.height - 2);
+        }
+        if (topPos + y < 2) y = 2 - topPos;
+        return y;
+    }
+
+    private int detailHeight(StellarTerminalDetail detail) {
+        int lines = detail == null ? 1 : 7;
+        if (detail != null && showHost(detail)) lines++;
+        if (detail != null && detail.warnings() > 0) lines++;
+        return 6 + lines * ROW_STRIDE;
+    }
+
+    private static boolean showHost(StellarTerminalDetail detail) {
+        String host = detail.host().getString();
+        return !host.isEmpty() && !host.equals(detail.name().getString());
+    }
+
+    private void drawDetailPanel(GuiGraphics graphics) {
+        StellarTerminalDetail detail = selectedDetail();
+        int height = detailHeight(detail);
+        int x = detailX();
+        int y = detailY(height);
+        graphics.fill(x - 1, y - 1, x + DETAIL_WIDTH + 1, y + height + 1, PANEL_BORDER);
+        graphics.fill(x, y, x + DETAIL_WIDTH, y + height, PANEL_BG);
+        int textY = y + 3;
+        int textX = x + 4;
+        if (detail == null) {
+            drawDetailLine(graphics, textX, textY, Component.translatable("gui.gt_shanhai.stellar_remote.detail.pending"),
+                    DETAIL_LABEL);
+            return;
+        }
+        textY = drawDetailLine(graphics, textX, textY, detail.name(), PANEL_TEXT);
+        if (showHost(detail)) {
+            textY = drawDetailLine(graphics, textX, textY, detail.host(), DETAIL_LABEL);
+        }
+        textY = drawDetailLine(graphics, textX, textY, Component.translatable(
+                "gui.gt_shanhai.stellar_remote.detail.pos", detail.x(), detail.y(), detail.z()), DETAIL_LABEL);
+        textY = drawDetailLine(graphics, textX, textY, Component.translatable(
+                "gui.gt_shanhai.stellar_remote.detail.patterns", detail.filledPatterns(), detail.patternCapacity()),
+                PANEL_TEXT);
+        textY = drawDetailLine(graphics, textX, textY, Component.translatable(
+                "gui.gt_shanhai.stellar_remote.detail.wildcard", detail.wildcardMothers(), detail.wildcardExpanded()),
+                PANEL_TEXT);
+        textY = drawDetailLine(graphics, textX, textY, detail.multiplierEnabled()
+                ? Component.translatable("gui.gt_shanhai.stellar_remote.detail.multiplier", detail.multiplier())
+                : Component.translatable("gui.gt_shanhai.stellar_remote.detail.multiplier_off"), PANEL_TEXT);
+        textY = drawDetailLine(graphics, textX, textY, detail.circuit() < 0
+                ? Component.translatable("gui.gt_shanhai.stellar_remote.detail.circuit_none")
+                : Component.translatable("gui.gt_shanhai.stellar_remote.detail.circuit", detail.circuit()), PANEL_TEXT);
+        if (detail.warnings() > 0) {
+            textY = drawDetailLine(graphics, textX, textY, Component.translatable(
+                    "gui.gt_shanhai.stellar_remote.detail.warnings", detail.warnings()), DETAIL_WARN);
+        }
+        drawDetailLine(graphics, textX, textY, Component.translatable(detail.online()
+                ? "gui.gt_shanhai.stellar_remote.detail.online"
+                : "gui.gt_shanhai.stellar_remote.detail.offline"), detail.online() ? DETAIL_LABEL : DETAIL_OFFLINE);
+    }
+
+    private int drawDetailLine(GuiGraphics graphics, int x, int y, Component text, int color) {
+        graphics.drawString(font, trimDetail(text), x, y, color, false);
+        return y + ROW_STRIDE;
+    }
+
+    private Component trimDetail(Component text) {
+        int width = DETAIL_WIDTH - 8;
+        if (font.width(text) <= width) return text;
+        String raw = text.getString();
+        String trimmed = font.plainSubstrByWidth(raw, width - font.width("…")) + "…";
+        return Component.literal(trimmed);
     }
 
     private int controlHeight() {

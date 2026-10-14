@@ -109,12 +109,17 @@ public final class PatternGeneratorRecipes {
                 List.copyOf(encodedInputs), List.copyOf(encodedOutputs));
     }
 
-    public static ItemStack encode(Entry entry, ServerPlayer player, int scale, int outputScale) {
-        validate(entry, player);
+    public static ItemStack encodeDefinition(Entry entry, int scale, int outputScale) {
         GenericStack[] inputs = scale(entry.encodedInputs(), PatternGeneratorScale.clamp(scale));
         GenericStack[] outputs = scale(entry.encodedOutputs(), PatternGeneratorScale.outputFactor(scale, outputScale));
         ItemStack encoded = PatternDetailsHelper.encodeProcessingPattern(inputs, outputs);
-        if (encoded == null || encoded.isEmpty()) return ItemStack.EMPTY;
+        return encoded == null ? ItemStack.EMPTY : encoded;
+    }
+
+    public static ItemStack encode(Entry entry, ServerPlayer player, int scale, int outputScale) {
+        validate(entry, player);
+        ItemStack encoded = encodeDefinition(entry, scale, outputScale);
+        if (encoded.isEmpty()) return ItemStack.EMPTY;
         var pattern = new Ae2GtmProcessingPattern(encoded, player, entry.recipe());
         pattern.setLore(Component.translatable("gui.gtlcore.machine_colon")
                 .append(Component.translatable(typeTranslation(entry.recipe().recipeType)))

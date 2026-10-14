@@ -4,6 +4,7 @@ import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.common.item.SelectedRecipePattern;
 import com.dishanhai.gt_shanhai.common.item.generator.PatternGeneratorClientHooks;
 import com.dishanhai.gt_shanhai.common.item.generator.PatternGeneratorFilter;
 import com.dishanhai.gt_shanhai.common.item.generator.PatternGeneratorLayout;
@@ -77,6 +78,7 @@ public final class PatternGeneratorWidget extends WidgetGroup {
     private static final int APPLY_PRESET = 114;
     private static final int INSPECT_PRESET = 115;
     private static final int EXT = 116;
+    private static final int BUNDLE = 117;
     private static final int PRESET_FILE = 120;
     private static final int PRESET_PREVIEW = 121;
     private static final int BATCH_PER_TICK = 8;
@@ -92,7 +94,7 @@ public final class PatternGeneratorWidget extends WidgetGroup {
     private final WidgetGroup presets = new WidgetGroup(0, 0, WIDTH, HEIGHT);
     private final WidgetGroup savePreset = new WidgetGroup(0, 0, WIDTH, 158);
     private final WidgetGroup inventory = new WidgetGroup(0, 0, WIDTH, HEIGHT);
-    private final DraggableScrollableWidgetGroup grid = new DraggableScrollableWidgetGroup(10, 64, 290, 128)
+    private final DraggableScrollableWidgetGroup grid = new DraggableScrollableWidgetGroup(10, 64, 290, 110)
             .setYScrollBarWidth(4).setYBarStyle(new ColorRectTexture(0xff9495a3), GuiTextures.VANILLA_BUTTON)
             .setUseScissor(true).setDraggable(false);
     private final DraggableScrollableWidgetGroup presetList = new DraggableScrollableWidgetGroup(10, 62, 126, 142)
@@ -136,6 +138,7 @@ public final class PatternGeneratorWidget extends WidgetGroup {
     private Component feedback = Component.empty();
     private final SelectorWidget typeSelector;
     private final ButtonWidget generationButton;
+    private final ButtonWidget bundleButton;
     private final ButtonWidget cancelButton;
     private final ButtonWidget selectAllButton;
     private final ButtonWidget previousButton;
@@ -266,6 +269,11 @@ public final class PatternGeneratorWidget extends WidgetGroup {
         grid.setClientSideWidget();
         grid.setBackground(GuiTextures.BACKGROUND_INVERSE);
         previews.addWidget(grid);
+        bundleButton = button(10, 176, 290, 16, () -> tr("bundle", selected), () -> {
+            if (!flushDrafts()) send(BUNDLE, buffer -> buffer.writeVarInt(revision));
+        });
+        bundleButton.setId("shanhai_pattern_generator.bundle");
+        previews.addWidget(bundleButton);
         previews.addWidget(text(10, 196, 224, 14, () -> feedback.getString().isEmpty()
                 ? tr("selected_total", selected, count) : feedback.getString()));
         cancelButton = button(240, 196, 60, 14, () -> tr("cancel_pending"), () -> send(CANCEL, buffer -> {}));
@@ -645,6 +653,8 @@ public final class PatternGeneratorWidget extends WidgetGroup {
         boolean scaleValid = tryParse(scaleDraft) != null && tryParse(outputScaleDraft) != null;
         generationButton.setActive(!running && queuedTransfers == 0 && ready && !whiteDirty && !extDirty
                 && scaleValid && (selected > 0 || pendingCount > 0));
+        bundleButton.setActive(!running && pendingCount == 0 && queuedTransfers == 0 && ready
+                && !whiteDirty && !extDirty && scaleValid && selected > 0);
         selectAllButton.setActive(editable && ready && count > 0);
         previousButton.setActive(ready && page > 0);
         nextButton.setActive(ready && page + 1 < PatternGeneratorLayout.pages(count, settings.previewColumns));
@@ -659,6 +669,7 @@ public final class PatternGeneratorWidget extends WidgetGroup {
         savePresetButton.setActive(editable && ready && !whiteDirty && !extDirty && scaleValid
                 && !presetName.isBlank() && selected > 0 && !saveRequested);
         generationButton.setHoverTooltips(List.of(Component.translatable(PREFIX + "generate_hint")));
+        bundleButton.setHoverTooltips(List.of(Component.translatable(PREFIX + "bundle_hint")));
     }
 
     private List<Component> previewDetails(Preview value) {
@@ -1197,7 +1208,7 @@ public final class PatternGeneratorWidget extends WidgetGroup {
 
     @Override
     public void handleClientAction(int id, FriendlyByteBuf buffer) {
-        if (id < TYPE || id > EXT) {
+        if (id < TYPE || id > BUNDLE) {
             super.handleClientAction(id, buffer);
             return;
         }
@@ -1318,6 +1329,10 @@ public final class PatternGeneratorWidget extends WidgetGroup {
             rebuild(true);
             save();
             push();
+            return;
+        }
+        if (id == BUNDLE) {
+            generateBundle(buffer);
             return;
         }
         if (id == GENERATE) {
@@ -1579,6 +1594,63 @@ public final class PatternGeneratorWidget extends WidgetGroup {
     private static void copyBits(BitSet target, BitSet source) {
         target.clear();
         target.or(source);
+    }
+
+    private void generateBundle(FriendlyByteBuf buffer) {
+        int expected = buffer.readVarInt();
+        if (running || queuedTransfers > 0 || pendingCount > 0 || expected != revision || !ready
+                || !(holder.getPlayer() instanceof ServerPlayer player)) {
+            push();
+            return;
+        }
+        var chosen = matching.stream().filter(entry -> !unchecked.contains(entry.id())).toList();
+        if (chosen.isEmpty()) {
+            feedback = Component.translatable(PREFIX + "bundle_empty");
+            push();
+            return;
+        }
+        if (chosen.size() > SelectedRecipePattern.MAX_RECIPES) {
+            feedback = Component.translatable(PREFIX + "bundle_too_many", SelectedRecipePattern.MAX_RECIPES);
+            push();
+            return;
+        }
+        int scale = PatternGeneratorScale.clamp(settings.scale);
+        int outputScale = PatternGeneratorScale.clamp(settings.outputScale);
+        var ids = new ArrayList<String>(chosen.size());
+        for (var entry : chosen) {
+            try {
+                if (entry.recipe().recipeType == null || entry.recipe().recipeType.registryName == null
+                        || types.stream().noneMatch(type -> type == entry.recipe().recipeType)
+                        || !entry.recipe().recipeType.registryName.toString().equals(settings.recipeType)) {
+                    throw new IllegalArgumentException("Recipe no longer belongs to the selected machine mode");
+                }
+                PatternGeneratorRecipes.validate(entry, player);
+                boolean[] overflow = new boolean[1];
+                scaleStacks(entry.encodedInputs(), scale, overflow);
+                scaleStacks(entry.encodedOutputs(), PatternGeneratorScale.outputFactor(scale, outputScale), overflow);
+                if (overflow[0]) throw new ArithmeticException("pattern amount overflow");
+                ids.add(entry.id());
+            } catch (ArithmeticException overflow) {
+                feedback = Component.translatable(PREFIX + "scale_overflow");
+                push();
+                return;
+            } catch (RuntimeException error) {
+                feedback = Component.translatable(PREFIX + "recipes_changed");
+                push();
+                return;
+            }
+        }
+        ItemStack bundle = SelectedRecipePattern.create(new SelectedRecipePattern.Contents(
+                scale, outputScale, settings.recipeType, ids));
+        if (bundle.isEmpty()) {
+            feedback = Component.translatable(PREFIX + "bundle_empty");
+            push();
+            return;
+        }
+        player.getInventory().placeItemBackInInventory(bundle);
+        feedback = Component.translatable(PREFIX + "bundle_result", ids.size());
+        player.displayClientMessage(feedback, true);
+        push();
     }
 
     private void generateBatch() {

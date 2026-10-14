@@ -89,6 +89,8 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(menu.contains("TRACKER_CONTAINER_FIELD"));
         assertTrue(menu.contains("stellar.getGrid() != currentGrid"));
         assertTrue(menu.contains("ShanhaiPatternContainerMetadataPacket"));
+        assertTrue(menu.contains("ShanhaiPatternStellarDetailPacket"));
+        assertTrue(menu.contains("stellar.terminalDetail"));
     }
 
     @Test
@@ -176,6 +178,8 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(machine.contains("createRemoteSharedInputsUI"));
         assertTrue(machine.contains("createRemotePatternBehaviorUI"));
         assertTrue(machine.contains("createRemoteRefundUI"));
+        assertTrue(machine.contains("remotePlayerInventory(player, width, inventoryY)"));
+        assertTrue(machine.contains("setPatternPreviewLevelFallback"));
         assertTrue(holder.contains("OUTPUT_MULTIPLIER"));
         assertTrue(holder.contains("WILDCARD"));
         assertTrue(factory.contains("public boolean openMode"));
@@ -193,6 +197,10 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(screen.contains("hideStellarHeaderButtons()"));
         assertTrue(screen.contains("EAEP_OPEN_UI_BUTTONS_FIELD"));
         assertTrue(screen.contains("HEADER_BUTTON_X = 166"));
+        assertTrue(screen.contains("translate(leftPos, topPos, 400.0F)"));
+        assertTrue(screen.contains("controlContains(mouseX - leftPos, mouseY - topPos)"));
+        assertTrue(screen.contains("drawDetailPanel(graphics)"));
+        assertTrue(screen.contains("detailContains(localX, localY)"));
         assertTrue(screen.contains("Operation.OPEN_FULL_PATTERN"));
         assertTrue(screen.contains("Operation.OPEN_OUTPUT_MULTIPLIER"));
         assertTrue(screen.contains("Operation.OPEN_WILDCARD"));
