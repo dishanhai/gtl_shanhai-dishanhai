@@ -246,6 +246,22 @@ public class SuperDiskArrayInventory implements StorageCell {
     }
 
     /**
+     * 內部有物品、不能再塞進普通元件的磁碟。SDA 本體把這種物品照普通物品記賬；
+     * 虛擬盤和已掛載的子盤必須拒絕，否則會把內部庫存展開，或讓終端扣掉光標。
+     */
+    public static boolean storedAsPlainItem(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (stack.getItem() instanceof SuperDiskArrayItem) return true;
+        StorageCell nested = StorageCells.getCellInventory(stack, null);
+        return nested != null && !nested.canFitInsideCell();
+    }
+
+    public static boolean rejectsNestedCarrier(AEKey what) {
+        if (!(what instanceof AEItemKey itemKey)) return false;
+        return storedAsPlainItem(itemKey.toStack());
+    }
+
+    /**
      * 原子替换父 SDA 中一个嵌套载体的 AEKey。
      *
      * <p>嵌套磁盘持久化后 NBT 会变化，必须在同一张数量表内把旧 key 的一个计数迁到新 key。
@@ -293,11 +309,7 @@ public class SuperDiskArrayInventory implements StorageCell {
     public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
         if (what == null || amount <= 0) return 0L;
         if (readOnlyTemplate && mode == Actionable.MODULATE) return 0L;
-        if (what instanceof AEItemKey itemKey) {
-            if (itemKey.getItem() instanceof SuperDiskArrayItem) return 0L;
-            StorageCell nested = StorageCells.getCellInventory(itemKey.toStack(), null);
-            if (nested != null && !nested.canFitInsideCell()) return 0L;
-        }
+        // 有內容的磁碟和另一個 SDA 都記成普通物品。掛載時不展開它們的內部庫存。
         if (mode == Actionable.MODULATE) {
             BigInteger current = amounts.getOrDefault(what, BigInteger.ZERO);
             BigInteger delta = BigInteger.valueOf(amount);

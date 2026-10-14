@@ -171,6 +171,14 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(factory.contains("public boolean openPattern"));
         assertTrue(holder.contains("FULL_PATTERN"));
         assertTrue(machine.contains("createRemotePatternUI"));
+        assertTrue(machine.contains("createRemoteOutputMultiplierUI"));
+        assertTrue(machine.contains("createRemoteWildcardUI"));
+        assertTrue(machine.contains("createRemoteSharedInputsUI"));
+        assertTrue(machine.contains("createRemotePatternBehaviorUI"));
+        assertTrue(machine.contains("createRemoteRefundUI"));
+        assertTrue(holder.contains("OUTPUT_MULTIPLIER"));
+        assertTrue(holder.contains("WILDCARD"));
+        assertTrue(factory.contains("public boolean openMode"));
         assertTrue(config.contains("\"EaepOpenProviderUiStellarMixin\""));
     }
 
@@ -179,17 +187,26 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         String screen = read("client/gui/terminal/ShanhaiPatternManagementScreen.java");
         String packet = read("network/ShanhaiPatternRemoteConfigPacket.java");
 
-        assertTrue(screen.contains("patternSlot.getMachineInv().getServerId()"));
-        assertTrue(screen.contains("drawnProviders.add(serverId)"));
-        assertTrue(screen.contains("new RemoteUiButtonTarget(serverId"));
-        assertTrue(screen.contains("hideEaepGroupUiButtons()"));
+        assertTrue(screen.contains("getServerId"));
+        assertTrue(screen.contains("serverIds.add(serverId)"));
+        assertTrue(screen.contains("new StellarHeaderTarget(List.copyOf(serverIds)"));
+        assertTrue(screen.contains("hideStellarHeaderButtons()"));
         assertTrue(screen.contains("EAEP_OPEN_UI_BUTTONS_FIELD"));
+        assertTrue(screen.contains("HEADER_BUTTON_X = 166"));
         assertTrue(screen.contains("Operation.OPEN_FULL_PATTERN"));
+        assertTrue(screen.contains("Operation.OPEN_OUTPUT_MULTIPLIER"));
+        assertTrue(screen.contains("Operation.OPEN_WILDCARD"));
+        assertTrue(screen.contains("Operation.OPEN_SHARED_INPUTS"));
+        assertTrue(screen.contains("Operation.OPEN_PATTERN_BEHAVIOR"));
+        assertTrue(screen.contains("Operation.OPEN_REFUND"));
+        assertFalse(screen.contains("REMOTE_BUTTON_X = 198"));
         assertFalse(screen.contains("collectStellarServerIds"));
         assertFalse(screen.contains("GuiExPatternTerminalGroupHeaderRowAccessor"));
         assertFalse(screen.contains("containers.iterator().next()"));
         assertTrue(packet.contains("OPEN_FULL_PATTERN"));
-        assertTrue(packet.contains("ShanhaiStellarRemoteUIFactory.INSTANCE.openPattern"));
+        assertTrue(packet.contains("OPEN_OUTPUT_MULTIPLIER"));
+        assertTrue(packet.contains("OPEN_REFUND"));
+        assertTrue(packet.contains("openMode"));
     }
 
     private static String read(String relative) throws Exception {

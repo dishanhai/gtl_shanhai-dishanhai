@@ -166,6 +166,9 @@ public class VirtualCellStorage implements MEStorage {
     public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
         MEStorage.checkPreconditions(what, amount, mode, source);
         if (amount <= 0) return 0;
+        // 虚拟盘和 SDA 挂在同一张网上。这里若照单全收，终端会按「已放入」扣掉光标，
+        // 玩家既不能把 SDA 嵌进 SDA，也看不到这笔库存，表现就是被吞。
+        if (SuperDiskArrayInventory.rejectsNestedCarrier(what)) return 0L;
         if (!typeMatches(what)) return 0;
         if (bytesUsed >= bytesCapacity) return 0;
         BigInteger current = storage.getOrDefault(what, BigInteger.ZERO);

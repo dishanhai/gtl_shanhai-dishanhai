@@ -25,6 +25,17 @@ class PrimordialDeepSpaceExtractionCoreContractTest {
     }
 
     @Test
+    void installedParallelFeedsRecipeScaling() throws Exception {
+        String base = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "machine", "primordial", "module",
+                "PrimordialParallelProcessingModuleBase.java"));
+        int method = base.indexOf("public long getCurrentParallel()");
+        assertTrue(method >= 0, "配方邏輯讀 getCurrentParallel()，漏覆寫會退回 Long.MAX_VALUE");
+        int bodyEnd = base.indexOf("}", method);
+        assertTrue(base.substring(method, bodyEnd).contains("return currentParallel;"));
+    }
+
+    @Test
     void registrationMountsTheFiveRecipeTypesAndTheEngineSlot() throws Exception {
         String machines = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
                 "gt_shanhai", "common", "machine", "DShanhaiMachines.java"));

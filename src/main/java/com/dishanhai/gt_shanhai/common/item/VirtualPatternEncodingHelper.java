@@ -70,6 +70,7 @@ public final class VirtualPatternEncodingHelper {
     };
     private static RecipeOutputIndexes recipeOutputIndexes;
     private static volatile TypeScopedRecipeCache typeScopedRecipeCache;
+    private static volatile RecipeOutputSnapshotCache recipeOutputSnapshotCache;
 
     public static GenericStack[] rewriteInputsForVirtualProviders(GenericStack[] inputs, GenericStack[] outputs) {
         if (inputs == null || outputs == null) {
@@ -808,7 +809,9 @@ public final class VirtualPatternEncodingHelper {
             StackBag inputBag, StackBag outputBag, StackBag availableCatalystInputs,
             GTRecipeType requiredType, boolean allowOmittedNonConsumables) {
         if (requiredType.getLookup() == null || requiredType.getLookup().getLookup() == null) return null;
-        List<GTRecipe> currentRecipes = nonConsumableRecipesInType(requiredType);
+        // 索引 miss 後仍要看該類型的當前 lookup，但同一 revision 只按產出鍵建一次索引。
+        // 否則每張樣板都會對該類型全部不消耗配方重跑 detectRecipeOutputMultiplier。
+        List<GTRecipe> currentRecipes = nonConsumableRecipesSharingOutputs(requiredType, outputBag.keys());
 
         RecipeSelection selection = selectRecipeCandidate(currentRecipes, inputs, outputs, inputBag, outputBag,
                 availableCatalystInputs, requiredType, false, allowOmittedNonConsumables);
@@ -831,19 +834,43 @@ public final class VirtualPatternEncodingHelper {
     /**
      * 类型域兜底会展开整棵 lookup。同一 revision 内配方表不变，按类型只展开一次。
      */
-    private static List<GTRecipe> nonConsumableRecipesInType(GTRecipeType requiredType) {
+    private static TypeScopedRecipeCache typeScopedRecipeCache() {
         long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         TypeScopedRecipeCache cache = typeScopedRecipeCache;
+        if (cache != null && cache.revision == revision) return cache;
+        synchronized (VirtualPatternEncodingHelper.class) {
+            cache = typeScopedRecipeCache;
+            if (cache == null || cache.revision != revision) {
+                cache = new TypeScopedRecipeCache(revision);
+                typeScopedRecipeCache = cache;
+            }
+            return cache;
+        }
+    }
+
+    private static List<GTRecipe> nonConsumableRecipesInType(GTRecipeType requiredType) {
+        if (requiredType.getLookup() == null || requiredType.getLookup().getLookup() == null) return List.of();
+        return typeScopedRecipeCache().recipesFor(requiredType);
+    }
+
+    private static List<GTRecipe> nonConsumableRecipesSharingOutputs(GTRecipeType requiredType, Set<AEKey> outputKeys) {
+        if (requiredType.getLookup() == null || requiredType.getLookup().getLookup() == null) return List.of();
+        return typeScopedRecipeCache().sharingOutputKeys(requiredType, outputKeys);
+    }
+
+    private static RecipeOutputSnapshot recipeOutputSnapshot(GTRecipe recipe) {
+        long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
+        RecipeOutputSnapshotCache cache = recipeOutputSnapshotCache;
         if (cache == null || cache.revision != revision) {
             synchronized (VirtualPatternEncodingHelper.class) {
-                cache = typeScopedRecipeCache;
+                cache = recipeOutputSnapshotCache;
                 if (cache == null || cache.revision != revision) {
-                    cache = new TypeScopedRecipeCache(revision);
-                    typeScopedRecipeCache = cache;
+                    cache = new RecipeOutputSnapshotCache(revision);
+                    recipeOutputSnapshotCache = cache;
                 }
             }
         }
-        return cache.recipesFor(requiredType);
+        return cache.get(recipe);
     }
 
     private static List<GTRecipe> collectNonConsumableRecipes(GTRecipeType requiredType) {
@@ -861,12 +888,13 @@ public final class VirtualPatternEncodingHelper {
             StackBag availableCatalystInputs, GTRecipeType requiredType, boolean scaledOnly,
             boolean allowOmittedNonConsumables) {
         List<RecipeCandidate> matches = new ArrayList<>();
+        Map<AEKey, Long> patternAmounts = outputBag.amounts();
         for (GTRecipe recipe : candidates) {
             if (recipe == null || (requiredType != null && (recipe.recipeType == null
                     || !Objects.equals(recipe.recipeType.registryName, requiredType.registryName)))) {
                 continue;
             }
-            long multiplier = detectRecipeOutputMultiplier(recipe, outputBag);
+            long multiplier = detectRecipeOutputMultiplier(recipe, patternAmounts);
             if ((scaledOnly && multiplier <= 1L) || (!scaledOnly && multiplier != 1L)) continue;
             if (!matchesRecipeInputsAtMultiplier(
                     recipe, patternInputs, inputBag, multiplier, availableCatalystInputs,
@@ -928,12 +956,13 @@ public final class VirtualPatternEncodingHelper {
             StackBag availableCatalystInputs, GTRecipeType requiredType,
             boolean allowOmittedNonConsumables) {
         List<RecipeCandidate> matches = new ArrayList<>();
+        Map<AEKey, Long> patternAmounts = outputBag.amounts();
         for (GTRecipe recipe : candidates) {
             if (recipe == null || recipe.recipeType == null
                     || !Objects.equals(recipe.recipeType.registryName, requiredType.registryName)) {
                 continue;
             }
-            long multiplier = detectPartialRecipeOutputMultiplier(recipe, outputBag);
+            long multiplier = detectPartialRecipeOutputMultiplier(recipe, patternAmounts);
             if (multiplier <= 0L) continue;
             if (!matchesRecipeInputsAtMultiplier(
                     recipe, patternInputs, inputBag, multiplier, availableCatalystInputs,
@@ -983,17 +1012,17 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private static long detectRecipeOutputMultiplier(GTRecipe recipe, StackBag patternOutputs) {
-        StackBag baseOutputs = StackBag.of(createRecipeOutputs(recipe));
-        Set<AEKey> unscaledKeys = new HashSet<>();
-        for (AEKey key : baseOutputs.keys()) {
-            if (isRecipeCycleContainerKey(key)) unscaledKeys.add(key);
-        }
-        return UniformOutputMultiplier.detect(baseOutputs.amounts(), patternOutputs.amounts(), unscaledKeys);
+        return detectRecipeOutputMultiplier(recipe, patternOutputs.amounts());
     }
 
-    private static long detectPartialRecipeOutputMultiplier(GTRecipe recipe, StackBag patternOutputs) {
-        Map<AEKey, Long> recipeAmounts = StackBag.of(createRecipeOutputs(recipe)).amounts();
-        Map<AEKey, Long> patternAmounts = patternOutputs.amounts();
+    private static long detectRecipeOutputMultiplier(GTRecipe recipe, Map<AEKey, Long> patternAmounts) {
+        RecipeOutputSnapshot baseOutputs = recipeOutputSnapshot(recipe);
+        return UniformOutputMultiplier.detect(baseOutputs.amounts, patternAmounts, baseOutputs.unscaledKeys);
+    }
+
+    private static long detectPartialRecipeOutputMultiplier(GTRecipe recipe, Map<AEKey, Long> patternAmounts) {
+        RecipeOutputSnapshot snapshot = recipeOutputSnapshot(recipe);
+        Map<AEKey, Long> recipeAmounts = snapshot.amounts;
         if (recipeAmounts.isEmpty() || patternAmounts.isEmpty()) return 0L;
 
         Map<AEKey, Long> matchingRecipeAmounts = new HashMap<>();
@@ -1002,7 +1031,7 @@ public final class VirtualPatternEncodingHelper {
             Long amount = recipeAmounts.get(key);
             if (amount == null || amount.longValue() <= 0L) return 0L;
             matchingRecipeAmounts.put(key, amount);
-            if (isRecipeCycleContainerKey(key)) unscaledKeys.add(key);
+            if (snapshot.unscaledKeys.contains(key)) unscaledKeys.add(key);
         }
         return UniformOutputMultiplier.detect(matchingRecipeAmounts, patternAmounts, unscaledKeys);
     }
@@ -1719,6 +1748,7 @@ public final class VirtualPatternEncodingHelper {
     private static final class TypeScopedRecipeCache {
         private final long revision;
         private final ConcurrentHashMap<GTRecipeType, List<GTRecipe>> byType = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<GTRecipeType, Map<AEKey, List<GTRecipe>>> byOutputKey = new ConcurrentHashMap<>();
 
         private TypeScopedRecipeCache(long revision) {
             this.revision = revision;
@@ -1730,6 +1760,71 @@ public final class VirtualPatternEncodingHelper {
             List<GTRecipe> built = collectNonConsumableRecipes(type);
             List<GTRecipe> raced = byType.putIfAbsent(type, built);
             return raced == null ? built : raced;
+        }
+
+        private List<GTRecipe> sharingOutputKeys(GTRecipeType type, Set<AEKey> outputKeys) {
+            if (outputKeys == null || outputKeys.isEmpty()) return List.of();
+            Map<AEKey, List<GTRecipe>> index = outputKeyIndex(type);
+            LinkedHashSet<GTRecipe> found = new LinkedHashSet<>();
+            for (AEKey key : outputKeys) {
+                List<GTRecipe> keyed = index.get(key);
+                if (keyed != null) found.addAll(keyed);
+            }
+            return found.isEmpty() ? List.of() : new ArrayList<>(found);
+        }
+
+        private Map<AEKey, List<GTRecipe>> outputKeyIndex(GTRecipeType type) {
+            Map<AEKey, List<GTRecipe>> cached = byOutputKey.get(type);
+            if (cached != null) return cached;
+            Map<AEKey, List<GTRecipe>> built = new HashMap<>();
+            for (GTRecipe recipe : recipesFor(type)) {
+                for (AEKey key : recipeOutputSnapshot(recipe).outputKeys) {
+                    built.computeIfAbsent(key, ignored -> new ArrayList<>()).add(recipe);
+                }
+            }
+            Map<AEKey, List<GTRecipe>> raced = byOutputKey.putIfAbsent(type, built);
+            return raced == null ? built : raced;
+        }
+    }
+
+    private static final class RecipeOutputSnapshot {
+        private final Map<AEKey, Long> amounts;
+        private final Set<AEKey> unscaledKeys;
+        private final Set<AEKey> outputKeys;
+
+        private RecipeOutputSnapshot(Map<AEKey, Long> amounts, Set<AEKey> unscaledKeys, Set<AEKey> outputKeys) {
+            this.amounts = amounts;
+            this.unscaledKeys = unscaledKeys;
+            this.outputKeys = outputKeys;
+        }
+
+        private static RecipeOutputSnapshot capture(GTRecipe recipe) {
+            StackBag bag = StackBag.of(createRecipeOutputs(recipe));
+            Set<AEKey> outputKeys = bag.keys();
+            Set<AEKey> unscaledKeys = new HashSet<>();
+            for (AEKey key : outputKeys) {
+                if (isRecipeCycleContainerKey(key)) unscaledKeys.add(key);
+            }
+            return new RecipeOutputSnapshot(Map.copyOf(bag.amounts()), Set.copyOf(unscaledKeys), outputKeys);
+        }
+    }
+
+    private static final class RecipeOutputSnapshotCache {
+        private final long revision;
+        private final IdentityHashMap<GTRecipe, RecipeOutputSnapshot> byRecipe = new IdentityHashMap<>();
+
+        private RecipeOutputSnapshotCache(long revision) {
+            this.revision = revision;
+        }
+
+        private RecipeOutputSnapshot get(GTRecipe recipe) {
+            synchronized (this) {
+                RecipeOutputSnapshot cached = byRecipe.get(recipe);
+                if (cached != null) return cached;
+                cached = RecipeOutputSnapshot.capture(recipe);
+                byRecipe.put(recipe, cached);
+                return cached;
+            }
         }
     }
 

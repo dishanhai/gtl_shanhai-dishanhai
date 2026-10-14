@@ -1,60 +1,106 @@
 {
-  "type": "gtceu:assembler",
+  "data": {
+    "euTier": 14
+  },
   "duration": 20,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 9223372036854775807
+      }
+    ]
+  },
+  "type": "gtceu:assembler",
   "inputs": {
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
-            "item": "dishanhai:cshx"
+            "item": "dishanhai:wzcz3"
           }
         },
-        "chance": 10000,
-        "maxChance": 10000,
-        "tierChanceBoost": 0
+        "chance": 0
       },
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
-            "item": "dishanhai:create_mk"
+            "item": "avaritia:infinity_ring"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "avaritia:infinity_umbrella"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "sgjourney:universe_stargate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "avaritia:neutron_ring"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:genesis_calculator"
           }
         },
-        "chance": 0,
-        "maxChance": 10000,
-        "tierChanceBoost": 0
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 2
+          }
+        },
+        "chance": 0
       }
-    ],
-    "fluid": []
+    ]
   },
   "outputs": {
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 1,
+          "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "gtceu:creative_chest"
           }
-        },
-        "chance": 10000,
-        "maxChance": 10000,
-        "tierChanceBoost": 0
-      }
-    ],
-    "fluid": []
-  },
-  "tickInputs": {
-    "eu": [
-      {
-        "content": 2147483647,
-        "chance": 10000,
-        "maxChance": 10000,
-        "tierChanceBoost": 0
+        }
       }
     ]
-  }
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:assembler/creative/chest",
+      "defaultEnabled": true
+    }
+  ]
 }

@@ -55,8 +55,10 @@ class ShanhaiSdaPatternTransferSourceTest {
         String codec = Files.readString(AE_KEY_CODEC);
 
         assertTrue(inventory.contains("if (what == null || amount <= 0) return 0L;"));
-        assertFalse(inventory.contains("!(what instanceof AEItemKey)"));
-        assertTrue(inventory.contains("if (what instanceof AEItemKey itemKey)"));
+        assertFalse(inventory.contains("if (!(what instanceof AEItemKey)) return 0L;"));
+        assertTrue(inventory.contains("rejectsNestedCarrier(AEKey what)"));
+        assertTrue(inventory.contains("if (!(what instanceof AEItemKey itemKey)) return false;"));
+        assertTrue(!inventory.contains("if (rejectsNestedCarrier(what)) return 0L;"));
         assertTrue(codec.contains("import appeng.api.stacks.AEFluidKey;"));
         assertTrue(codec.contains("AEFluidKey.of(fluid)"));
     }

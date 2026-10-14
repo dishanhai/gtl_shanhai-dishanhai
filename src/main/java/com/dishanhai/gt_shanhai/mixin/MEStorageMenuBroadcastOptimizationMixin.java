@@ -26,7 +26,10 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
+
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 @Mixin(value = MEStorageMenu.class, remap = false)
@@ -57,6 +60,25 @@ public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu
     @Unique
     private long gtShanhai$pendingResyncRevision = Long.MIN_VALUE;
 
+    /**
+     * 客户端上次看到的数量。GTLCore 的 TerminalInventoryChanges.between 读的是
+     * previousAvailableStacks，而且它的结果会盖过我们自己的差异集。
+     * 这里若换成空计数器，整格取空的 key 两边都找不到，终端就一直显示。
+     * 也不能直接指到网络活缓存，否则下一轮 removeAll 会改掉网络库存。
+     */
+    @Unique
+    private final KeyCounter gtShanhai$broadcastBaseline = new KeyCounter();
+
+    @Unique
+    private KeyCounter gtShanhai$sentSnapshot = this.gtShanhai$broadcastBaseline;
+
+    @Unique
+    private boolean gtShanhai$sentSnapshotReady = false;
+
+    /** revision 没变时缓存应与基线一致，这一轮不要用可能陈旧的缓存覆盖基线。 */
+    @Unique
+    private boolean gtShanhai$keepBroadcastBaseline = false;
+
     protected MEStorageMenuBroadcastOptimizationMixin(MenuType<?> menuType, int id, Inventory playerInventory, Object host) {
         super(menuType, id, playerInventory, host);
     }
@@ -71,31 +93,30 @@ public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu
             KeyCounter cachedInventory = service.getCachedInventory();
             if (cachedInventory != null) {
                 long revision = revisionAccess.gtShanhai$getInventoryRevision();
-                if (this.updateHelper.isFullUpdate()) {
-                    this.gtShanhai$useRevisionOptimization = true;
+                if (!this.gtShanhai$sentSnapshotReady || this.updateHelper.isFullUpdate()) {
+                    // 第一次（或客户端要求全量）必须走原版：空 previous.removeAll 会把现有 key
+                    // 全部标成变更，配合 fullUpdate 下发完整库存。此时还没有可对比的已发送快照。
+                    this.gtShanhai$useRevisionOptimization = false;
+                    this.gtShanhai$pendingResyncRevision = revision;
                     this.gtShanhai$currentAvailableStacks = cachedInventory;
-                    this.gtShanhai$currentInventoryRevision = revision;
-                    this.gtShanhai$currentChangedKeys = cachedInventory.keySet();
                     return cachedInventory;
                 }
                 if (revision == this.gtShanhai$lastInventoryRevision) {
                     this.gtShanhai$useRevisionOptimization = true;
+                    this.gtShanhai$keepBroadcastBaseline = true;
                     this.gtShanhai$currentAvailableStacks = cachedInventory;
                     this.gtShanhai$currentInventoryRevision = revision;
                     this.gtShanhai$currentChangedKeys = Collections.emptySet();
                     return cachedInventory;
                 }
-                if (revision - this.gtShanhai$lastInventoryRevision == 1) {
-                    this.gtShanhai$useRevisionOptimization = true;
-                    this.gtShanhai$currentAvailableStacks = cachedInventory;
-                    this.gtShanhai$currentInventoryRevision = revision;
-                    this.gtShanhai$currentChangedKeys = revisionAccess.gtShanhai$getLastChangedKeys();
-                    return cachedInventory;
-                }
-                // revision 跳号：lastChangedKeys 是单槽信箱，一 tick 多次重扫时中间变更集已被
-                // 覆写丢弃，只应用最后一份会让终端数量静默失同步。本轮退回原版全量 diff 重新
-                // 对齐，diff 完成后在 TAIL 把 lastInventoryRevision 推进到当前值恢复增量模式。
-                this.gtShanhai$pendingResyncRevision = revision;
+                this.gtShanhai$keepBroadcastBaseline = false;
+                // 不走 lastChangedKeys 单槽信箱。revision 跳号或空发布会把「数量变成 0」的删除丢掉，
+                // 玩家一次取完整格后终端仍显示该物品。用上次下发的快照和当前缓存做差，归零也算变更。
+                this.gtShanhai$useRevisionOptimization = true;
+                this.gtShanhai$currentAvailableStacks = cachedInventory;
+                this.gtShanhai$currentInventoryRevision = revision;
+                this.gtShanhai$currentChangedKeys = gtShanhai$diffSnapshot(this.gtShanhai$sentSnapshot, cachedInventory);
+                return cachedInventory;
             }
         }
 
@@ -134,15 +155,65 @@ public abstract class MEStorageMenuBroadcastOptimizationMixin extends AEBaseMenu
         }
         if (this.gtShanhai$useRevisionOptimization) {
             this.gtShanhai$lastInventoryRevision = this.gtShanhai$currentInventoryRevision;
-            this.previousAvailableStacks = new KeyCounter();
+            if (this.gtShanhai$keepBroadcastBaseline) {
+                gtShanhai$pointPreviousAtBaseline();
+            } else {
+                gtShanhai$captureBaseline(this.gtShanhai$currentAvailableStacks);
+            }
         } else if (this.gtShanhai$pendingResyncRevision != Long.MIN_VALUE) {
-            // 跳号回退的原版全量 diff 已把客户端完整对齐，可安全推进 revision 恢复增量模式
+            // 原版全量 diff 已把客户端对齐。记下这份快照，之后的增量才能发现整格取空。
             this.gtShanhai$lastInventoryRevision = this.gtShanhai$pendingResyncRevision;
+            gtShanhai$captureBaseline(this.gtShanhai$currentAvailableStacks);
         }
         this.gtShanhai$pendingResyncRevision = Long.MIN_VALUE;
         this.gtShanhai$useRevisionOptimization = false;
+        this.gtShanhai$keepBroadcastBaseline = false;
         this.gtShanhai$currentAvailableStacks = null;
         this.gtShanhai$currentChangedKeys = Collections.emptySet();
+    }
+
+    @Unique
+    private void gtShanhai$pointPreviousAtBaseline() {
+        this.previousAvailableStacks = this.gtShanhai$broadcastBaseline;
+        this.gtShanhai$sentSnapshot = this.gtShanhai$broadcastBaseline;
+        this.gtShanhai$sentSnapshotReady = true;
+    }
+
+    /** 用这一轮真正拿去对比的库存覆盖基线。只保留数量大于 0 的 key。 */
+    @Unique
+    private void gtShanhai$captureBaseline(KeyCounter current) {
+        this.gtShanhai$broadcastBaseline.clear();
+        this.gtShanhai$broadcastBaseline.removeEmptySubmaps();
+        if (current != null) {
+            for (Object2LongMap.Entry<AEKey> entry : current) {
+                long amount = entry.getLongValue();
+                if (amount > 0L) {
+                    this.gtShanhai$broadcastBaseline.set(entry.getKey(), amount);
+                }
+            }
+        }
+        gtShanhai$pointPreviousAtBaseline();
+    }
+
+    /** 数量变化、新出现、整格归零都要进变更集。归零的 key 不在当前缓存里，必须从旧快照侧找。 */
+    @Unique
+    private static Set<AEKey> gtShanhai$diffSnapshot(KeyCounter sent, KeyCounter current) {
+        LinkedHashSet<AEKey> changes = new LinkedHashSet<>();
+        if (sent != null) {
+            for (Object2LongMap.Entry<AEKey> entry : sent) {
+                AEKey key = entry.getKey();
+                long now = current == null ? 0L : current.get(key);
+                if (now != entry.getLongValue()) changes.add(key);
+            }
+        }
+        if (current != null) {
+            for (Object2LongMap.Entry<AEKey> entry : current) {
+                AEKey key = entry.getKey();
+                long before = sent == null ? 0L : sent.get(key);
+                if (entry.getLongValue() != before) changes.add(key);
+            }
+        }
+        return changes;
     }
 
     @Unique

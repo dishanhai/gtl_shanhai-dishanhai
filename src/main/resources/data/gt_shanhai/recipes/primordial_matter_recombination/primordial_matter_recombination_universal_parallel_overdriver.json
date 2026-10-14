@@ -1,0 +1,132 @@
+{
+  "data": {
+    "euTier": 14
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "module_id": "dishanhai:wzyh",
+      "level": 64,
+      "type": "module_level"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2147483647
+      }
+    ]
+  },
+  "type": "gtceu:primordial_matter_recombination",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:universal_parallel_core"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:judgment_limiter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:prologue_of_the_end"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:reality_core"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "dishanhai:blue_son"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:genesis_calculator"
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1024000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_ultimate"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 512000,
+          "value": [
+            {
+              "fluid": "dishanhai:stabilized_eternity"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 512000,
+          "value": [
+            {
+              "fluid": "dishanhai:causal_essence"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:universal_parallel_overdriver"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:primordial_matter_recombination/primordial_matter_recombination_universal_parallel_overdriver",
+      "defaultEnabled": true
+    }
+  ]
+}

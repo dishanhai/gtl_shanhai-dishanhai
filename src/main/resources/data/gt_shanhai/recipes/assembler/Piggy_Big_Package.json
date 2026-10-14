@@ -1,0 +1,62 @@
+{
+  "data": {
+    "euTier": 1
+  },
+  "duration": 40,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 30
+      }
+    ]
+  },
+  "type": "gtceu:assembler",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 1
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:dog_coins"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "forge:nbt",
+            "item": "gt_shanhai:super_disk_array",
+            "count": 1,
+            "nbt": "{RepairCost:0,amts:[L;1L,557L,357L,505L,11428L,10980L,662L,2441L,155L,1L,1L,2L,14015L,3836L,2402L,656L,250L,276L,100L,136L,1L,3L,10L,2L,4L,1L,11872L,15782L,261L,23975L,7549L,5090L,4L,1L,1878L,5587L,2269L,860L,360L,1962L,8196L,344L,156L,666L,66L,486L,2L,10132L,10560L,416L,240L,118L,19116L,1440L,626L,740L,336L,508L,4800L,2146L,460L,540L,288L,2058L,360L,5056L,7302L,2880L,811L,3000L,24L,71L,68L,855L,320L,592L,104L,372L,52L,197L,32L,16L,16L,1L,2030L,992L,266L,268L,242L,360L,142L,486L,1L,736L,410L,64L,8L,1L,361L,281L,1L,249L,1L,620L,1178L,160L,292L,1L,1L,10L,10L,20L,20L,20L,20L],display:{Lore:['{\"text\":\"§7这是一个猪咪大礼包,猪咪大王的馈赠\"}','{\"text\":\"§7它只被授予给猪咪们,所以你是猪咪吗\"}','{\"text\":\"§7物品种类: §e115§7 种\"}','{\"text\":\"§7由CellAPI生成,显示由JEIcellAPI生成\"}','{\"text\":\"§7如果你不想你的游戏体验受到破坏，那么不要使用猪咪礼包\"}','{\"text\":\"§7猪咪礼包默认已从JEI中移除配方显示\"}','{\"text\":\"虽然你可以通过查看猪咪大帝的使用配方来看到\"}','{\"text\":\"§8山海私货V2.3——2.7.4重构\"}'],Name:'{\"text\":\"猪咪大礼包\"}'},ic:115L,internalCurrentPower:20000.0d,keys:[{\"#c\":\"ae2:i\",id:\"gtladditions:forge_of_the_antichrist\"},{\"#c\":\"ae2:i\",id:\"gtladditions:central_graviton_flow_regulator\"},{\"#c\":\"ae2:i\",id:\"gtladditions:mediary_graviton_flow_regulator\"},{\"#c\":\"ae2:i\",id:\"gtladditions:remote_graviton_flow_regulator\"},{\"#c\":\"ae2:i\",id:\"gtladditions:suprachronal_magnetic_confinement_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:god_forge_trim_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:god_forge_support_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:god_forge_inner_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:spatially_transcendent_gravitational_lens\"},{\"#c\":\"ae2:i\",id:\"expatternprovider:infinity_cell\",tag:{record:{\"#c\":\"ae2:f\",id:\"gtceu:hydrogen\"}}},{\"#c\":\"ae2:i\",id:\"expatternprovider:infinity_cell\",tag:{record:{\"#c\":\"ae2:f\",id:\"gtceu:helium\"}}},{\"#c\":\"ae2:i\",id:\"gtladditions:arcanic_astrograph\"},{\"#c\":\"ae2:i\",id:\"gtlcore:dimension_injection_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:create_casing\"},{\"#c\":\"ae2:i\",id:\"gtceu:high_power_casing\"},{\"#c\":\"ae2:i\",id:\"kubejs:dimension_creation_casing\"},{\"#c\":\"ae2:i\",id:\"kubejs:dimensional_stability_casing\"},{\"#c\":\"ae2:i\",id:\"kubejs:spacetime_compression_field_generator\"},{\"#c\":\"ae2:i\",id:\"gtladditions:phonon_conduit\"},{\"#c\":\"ae2:i\",id:\"gtladditions:god_forge_energy_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:heliophase_leyline_crystallizer\"},{\"#c\":\"ae2:i\",id:\"gtladditions:heliothermal_plasma_fabricator\"},{\"#c\":\"ae2:i\",id:\"gtladditions:heliofusion_exoticizer\"},{\"#c\":\"ae2:i\",id:\"gtladditions:heliofluix_melting_core\"},{\"#c\":\"ae2:i\",id:\"gtladditions:helioflare_power_forge\"},{\"#c\":\"ae2:i\",id:\"gtladditions:apocalyptic_torsion_quantum_matrix\"},{\"#c\":\"ae2:i\",id:\"gtladditions:quantum_glass\"},{\"#c\":\"ae2:i\",id:\"gtlcore:qft_coil\"},{\"#c\":\"ae2:i\",id:\"gtlcore:spacetimecontinuumripper\"},{\"#c\":\"ae2:i\",id:\"gtlcore:dimensionally_transcendent_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:manipulator\"},{\"#c\":\"ae2:i\",id:\"kubejs:dimensional_bridge_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:thread_modifier_hatch\"},{\"#c\":\"ae2:i\",id:\"gtladditions:macro_atomic_resonant_fragment_stripper\"},{\"#c\":\"ae2:i\",id:\"gtlcore:sps_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:hyper_mechanical_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:echo_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:fusion_casing_mk5\"},{\"#c\":\"ae2:i\",id:\"gtceu:quantumchromodynamically_confined_matter_frame\"},{\"#c\":\"ae2:i\",id:\"gtceu:neutronium_frame\"},{\"#c\":\"ae2:i\",id:\"gtceu:fusion_glass\"},{\"#c\":\"ae2:i\",id:\"kubejs:eternity_coil_block\"},{\"#c\":\"ae2:i\",id:\"kubejs:dyson_receiver_casing\"},{\"#c\":\"ae2:i\",id:\"kubejs:dyson_control_toroid\"},{\"#c\":\"ae2:i\",id:\"kubejs:dyson_control_casing\"},{\"#c\":\"ae2:i\",id:\"kubejs:annihilate_core\"},{\"#c\":\"ae2:i\",id:\"gtladditions:light_hunter_space_station\"},{\"#c\":\"ae2:i\",id:\"gtladditions:gravity_stabilization_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:extreme_density_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:ultimate_stellar_containment_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:super_computation_component\"},{\"#c\":\"ae2:i\",id:\"gtlcore:hyper_core\"},{\"#c\":\"ae2:i\",id:\"gtlcore:naquadah_alloy_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:enhance_hyper_mechanical_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:dragon_strength_tritanium_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:molecular_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:improved_superconductor_coil\"},{\"#c\":\"ae2:i\",id:\"gtlcore:fusion_casing_mk4\"},{\"#c\":\"ae2:i\",id:\"gtlcore:uxv_hermetic_casing\"},{\"#c\":\"ae2:i\",id:\"ae2:quartz_vibrant_glass\"},{\"#c\":\"ae2:i\",id:\"gtceu:computer_heat_vent\"},{\"#c\":\"ae2:i\",id:\"gtceu:advanced_computer_casing\"},{\"#c\":\"ae2:i\",id:\"gtceu:uhv_ultimate_battery\"},{\"#c\":\"ae2:i\",id:\"gtceu:uxv_machine_casing\"},{\"#c\":\"ae2:i\",id:\"gtceu:uiv_machine_casing\"},{\"#c\":\"ae2:i\",id:\"gtceu:uhv_machine_casing\"},{\"#c\":\"ae2:i\",id:\"gtceu:atomic_casing\"},{\"#c\":\"ae2:i\",id:\"kubejs:restraint_device\"},{\"#c\":\"ae2:i\",id:\"kubejs:containment_field_generator\"},{\"#c\":\"ae2:i\",id:\"kubejs:spacetime_assembly_line_unit\"},{\"#c\":\"ae2:i\",id:\"kubejs:force_field_glass\"},{\"#c\":\"ae2:i\",id:\"kubejs:module_connector\"},{\"#c\":\"ae2:i\",id:\"kubejs:neutronium_pipe_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:temporal_anchor_field_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:iridium_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:graviton_field_constraint_casing\"},{\"#c\":\"ae2:i\",id:\"gtceu:superconducting_coil\"},{\"#c\":\"ae2:i\",id:\"gtceu:naquadah_alloy_frame\"},{\"#c\":\"ae2:i\",id:\"gtceu:trinium_frame\"},{\"#c\":\"ae2:i\",id:\"gtlcore:rhenium_reinforced_energy_glass\"},{\"#c\":\"ae2:i\",id:\"gtceu:assembly_line_grating\"},{\"#c\":\"ae2:i\",id:\"gtlcore:advanced_assembly_line_unit\"},{\"#c\":\"ae2:i\",id:\"gtceu:assembly_line_casing\"},{\"#c\":\"ae2:i\",id:\"gtladditions:dimension_focus_infinity_crafting_array\"},{\"#c\":\"ae2:i\",id:\"kubejs:high_strength_concrete\"},{\"#c\":\"ae2:i\",id:\"gtceu:plascrete\"},{\"#c\":\"ae2:i\",id:\"kubejs:hollow_casing\"},{\"#c\":\"ae2:i\",id:\"kubejs:magic_core\"},{\"#c\":\"ae2:i\",id:\"kubejs:speeding_pipe\"},{\"#c\":\"ae2:i\",id:\"gtlcore:degenerate_rhenium_constrained_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:spacetimebendingcore\"},{\"#c\":\"ae2:i\",id:\"kubejs:space_elevator_internal_support\"},{\"#c\":\"ae2:i\",id:\"gt_shanhai:gravitational_wave_antenna_transmitter\"},{\"#c\":\"ae2:i\",id:\"gtlcore:advanced_fusion_coil\"},{\"#c\":\"ae2:i\",id:\"gtlcore:dimension_connection_casing\"},{\"#c\":\"ae2:i\",id:\"gtceu:infinity_frame\"},{\"#c\":\"ae2:i\",id:\"minecraft:crying_obsidian\"},{\"#c\":\"ae2:i\",id:\"gtladditions:recursive_reverse_array\"},{\"#c\":\"ae2:i\",id:\"gtceu:computer_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:component_assembly_line_casing_max\"},{\"#c\":\"ae2:i\",id:\"gt_shanhai:eternal_gregtech_workshop\"},{\"#c\":\"ae2:i\",id:\"gtceu:spacetime_block\"},{\"#c\":\"ae2:i\",id:\"gt_shanhai:spacetime_wave_matrix\"},{\"#c\":\"ae2:i\",id:\"gtlcore:space_elevator_support\"},{\"#c\":\"ae2:i\",id:\"gtlcore:space_elevator_mechanical_casing\"},{\"#c\":\"ae2:i\",id:\"gtlcore:power_module\"},{\"#c\":\"ae2:i\",id:\"kubejs:module_base\"},{\"#c\":\"ae2:i\",id:\"gtlcore:power_core\"},{\"#c\":\"ae2:i\",id:\"gtceu:space_elevator\"},{\"#c\":\"ae2:i\",id:\"gtladditions:nebula_reaper\"},{\"#c\":\"ae2:i\",id:\"gtladditions:astral_convergence_nexus\"},{\"#c\":\"ae2:i\",id:\"gtladditions:nexus_satellite_factory_mk1\"},{\"#c\":\"ae2:i\",id:\"gtladditions:nexus_satellite_factory_mk2\"},{\"#c\":\"ae2:i\",id:\"gtladditions:nexus_satellite_factory_mk3\"},{\"#c\":\"ae2:i\",id:\"gtladditions:nexus_satellite_factory_mk4\"}],shanhai_sda_uuid:[I;324783226,-1647366308,1798757249,2062206609]}"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:assembler/Piggy_Big_Package",
+      "defaultEnabled": false
+    }
+  ]
+}

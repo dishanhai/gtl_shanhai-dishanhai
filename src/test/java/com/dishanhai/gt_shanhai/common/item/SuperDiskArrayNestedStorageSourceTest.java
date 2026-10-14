@@ -18,11 +18,22 @@ class SuperDiskArrayNestedStorageSourceTest {
             "gt_shanhai", "common", "machine", "misc", "SingularityDataHubMachine.java");
 
     @Test
-    void sdaCannotBeInsertedIntoAnotherSda() throws IOException {
+    void sdaStoresNestedDisksAsPlainItems() throws IOException {
         String source = Files.readString(INVENTORY);
         assertTrue(source.contains("return false;"), "SDA 不得声明为可嵌套存储单元");
-        assertTrue(source.contains("itemKey.getItem() instanceof SuperDiskArrayItem"),
-                "SDA insert 必须拒绝另一个 SDA 载体");
+        assertTrue(source.contains("storedAsPlainItem("),
+                "有内容的磁盘必须能识别为普通物品");
+        assertTrue(!source.contains("if (rejectsNestedCarrier(what)) return 0L;"),
+                "SDA 自身 insert 必须收下另一个 SDA 和有内容的磁盘，不能再拒绝");
+        String virtualCell = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "common", "item", "VirtualCellStorage.java"));
+        assertTrue(virtualCell.contains("SuperDiskArrayInventory.rejectsNestedCarrier(what)"),
+                "虚拟盘不能代收这些磁盘，否则会把内部库存展开或吞掉光标");
+        String hatch = Files.readString(DISK_HATCH);
+        assertTrue(hatch.contains("SuperDiskArrayInventory.rejectsNestedCarrier(what)"),
+                "已挂载的子盘不能代收这些磁盘");
+        assertTrue(hatch.contains("SuperDiskArrayInventory.storedAsPlainItem(innerStack)"),
+                "磁盘仓室挂载时必须跳过有内容的磁盘");
     }
 
     @Test
@@ -41,5 +52,7 @@ class SuperDiskArrayNestedStorageSourceTest {
                 "奇点数据中枢必须识别嵌套 SDA");
         assertTrue(source.contains("不能递归挂载其内部库存"),
                 "奇点数据中枢必须跳过嵌套 SDA 的递归挂载");
+        assertTrue(source.contains("SuperDiskArrayInventory.storedAsPlainItem(innerStack)"),
+                "奇点数据中枢挂载时必须跳过有内容的磁盘");
     }
 }

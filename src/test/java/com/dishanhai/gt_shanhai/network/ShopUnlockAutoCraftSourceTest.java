@@ -51,6 +51,7 @@ class ShopUnlockAutoCraftSourceTest {
     void screenOffersAutoCraftButtonsForBothPrerequisiteBlocks() throws Exception {
         String screen = source("client/gui/shop/ShopScreen.java");
         assertTrue(screen.contains("stageLockAutoCraftX"));
+        assertTrue(screen.contains("stageSubmissionAutoCraftX"));
         assertTrue(screen.contains("submissionAutoCraftX"));
         assertTrue(screen.contains("ShopAutoCraftRequestPacket.Target.STAGE"));
         assertTrue(screen.contains("ShopAutoCraftRequestPacket.Target.ENTRY_SUBMISSION"));

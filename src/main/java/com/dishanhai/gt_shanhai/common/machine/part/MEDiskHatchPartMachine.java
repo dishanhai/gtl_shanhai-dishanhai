@@ -513,6 +513,10 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
                     // 已存在的嵌套 SDA 保留为普通物品；禁止把它再次解析成子库存，避免自引用挂载。
                     continue;
                 }
+                if (SuperDiskArrayInventory.storedAsPlainItem(innerStack)) {
+                    // 內部有物品的磁碟只當普通物品，不掛載它的內部庫存。
+                    continue;
+                }
                 normalizeEaeInfinityCellRecord(innerStack);
                 MEStorage directInfinityCell = createEaeInfinityCellStorage(innerStack);
                 if (directInfinityCell != null) {
@@ -1313,8 +1317,13 @@ public class MEDiskHatchPartMachine extends MultiblockPartMachine
 
         @Override
         public long insert(AEKey what, long amount, Actionable mode, IActionSource src) {
-            if (mode == Actionable.MODULATE && !canPersistCarrierChange(what, amount, true, src)) {
-                return 0;
+            if (SuperDiskArrayInventory.rejectsNestedCarrier(what)) {
+                return 0L;
+            }
+            // SIMULATE 與 MODULATE 必須同一結論。只在寫入時拒絕的話，終端先模擬成功再扣光標，
+            // 真實插入返回 0，物品就沒了。
+            if (!canPersistCarrierChange(what, amount, true, src)) {
+                return 0L;
             }
             long inserted = nested.insert(what, amount, mode, src);
             if (inserted > 0 && mode == Actionable.MODULATE) {

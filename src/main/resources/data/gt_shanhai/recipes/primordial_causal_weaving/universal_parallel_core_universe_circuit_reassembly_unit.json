@@ -1,0 +1,116 @@
+{
+  "data": {
+    "euTier": 12
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 134217728
+      }
+    ]
+  },
+  "type": "gtceu:primordial_causal_weaving",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 10000000,
+          "value": [
+            {
+              "fluid": "dishanhai:zero_point_energy"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1000000,
+          "value": [
+            {
+              "fluid": "dishanhai:light"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 10000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_eternal"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 32,
+          "ingredient": {
+            "item": "dishanhai:universal_parallel_core"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 128,
+          "ingredient": {
+            "item": "kubejs:cosmic_processing_core"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "dishanhai:worldline_genesis_embryo"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 256,
+          "ingredient": {
+            "item": "avaritia:eternal_singularity"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 512,
+          "ingredient": {
+            "item": "kubejs:dimensional_stability_casing"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:universe_circuit_reassembly_unit"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:primordial_causal_weaving/universal_parallel_core_universe_circuit_reassembly_unit",
+      "defaultEnabled": true
+    }
+  ]
+}

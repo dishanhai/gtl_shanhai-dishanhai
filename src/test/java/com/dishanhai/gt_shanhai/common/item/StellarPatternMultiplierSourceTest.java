@@ -210,6 +210,8 @@ class StellarPatternMultiplierSourceTest {
 
         assertTrue(source.contains("outputMultiplierPatternsRefreshNeeded"),
                 "倍率样板全量校正必须有脏标记，不能每次 AE 查询都重解码全部槽位");
+        assertTrue(source.contains("visibleOutputMultiplierStampMatches"),
+                "同一槽的样板、倍率和配方版本没变时，不得再次解码并重查配方");
         assertTrue(refreshOne.contains("sameVisiblePattern(currentPattern, effectivePattern)"),
                 "产出数量没变时不得再标 needPatternSync，否则 AE 每个 tick 重建提供者并重扫配方");
         assertTrue(source.contains("confirmedPatternOutputMultipliers"),

@@ -93,6 +93,15 @@ public abstract class PrimordialParallelProcessingModuleBase extends PrimordialO
         return Ints.saturatedCast(currentParallel);
     }
 
+    /**
+     * 配方縮放讀 {@code getRecipeLogicMaxParallel()}，它只看這個方法。
+     * 只覆寫 {@code getMaxParallel()} 時，Jade 顯示槽位並行，實際產出仍按父類的 Long.MAX_VALUE 放大。
+     */
+    @Override
+    public long getCurrentParallel() {
+        return currentParallel;
+    }
+
     @Override
     public long getMaxVoltage() {
         return Long.MAX_VALUE;

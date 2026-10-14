@@ -4,6 +4,7 @@ import com.gregtechceu.gtceu.api.item.ComponentItem;
 import com.gregtechceu.gtceu.common.data.GTItems;
 import com.tterrag.registrate.util.entry.ItemEntry;
 import com.tterrag.registrate.util.nullness.NonNullBiConsumer;
+import com.dishanhai.gt_shanhai.common.item.generator.PatternGeneratorBehavior;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiWirelessPatternManagementTerminalItem;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalIntegration;
 
@@ -15,6 +16,7 @@ public final class DShanhaiItems {
     public static ItemEntry<ComponentItem> ULTIMATE_TERMINAL;
     public static ItemEntry<ComponentItem> ADVANCED_PATTERN_BOX;
     public static ItemEntry<ComponentItem> PATTERN_BUFFER_TOOLKIT;
+    public static ItemEntry<ComponentItem> PATTERN_GENERATOR;
     public static ItemEntry<ShanhaiWirelessPatternManagementTerminalItem> WIRELESS_PATTERN_MANAGEMENT_TERMINAL;
 
     public static void init() {
@@ -35,6 +37,11 @@ public final class DShanhaiItems {
         PATTERN_BUFFER_TOOLKIT = REGISTRATE.item("pattern_buffer_toolkit", ComponentItem::create)
                 .properties(properties -> properties.stacksTo(1))
                 .onRegister(GTItems.attach(PatternBufferToolkitBehavior.INSTANCE))
+                .model(NonNullBiConsumer.noop())
+                .register();
+        PATTERN_GENERATOR = REGISTRATE.item("pattern_generator", ComponentItem::create)
+                .properties(properties -> properties.stacksTo(1))
+                .onRegister(GTItems.attach(PatternGeneratorBehavior.INSTANCE))
                 .model(NonNullBiConsumer.noop())
                 .register();
         WIRELESS_PATTERN_MANAGEMENT_TERMINAL = REGISTRATE

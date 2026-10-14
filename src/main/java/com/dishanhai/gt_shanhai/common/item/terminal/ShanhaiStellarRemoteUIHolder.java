@@ -5,6 +5,7 @@ import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartM
 import com.lowdragmc.lowdraglib.gui.modular.IUIHolder;
 import com.lowdragmc.lowdraglib.gui.modular.ModularUI;
 import appeng.api.networking.IGridNode;
+import java.util.List;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
@@ -16,7 +17,12 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
     public enum Mode {
         FULL_PATTERN,
         SLOT_CATALYST,
-        STOCK_INPUT
+        STOCK_INPUT,
+        OUTPUT_MULTIPLIER,
+        WILDCARD,
+        SHARED_INPUTS,
+        PATTERN_BEHAVIOR,
+        REFUND
     }
 
     private final GlobalPos targetPos;
@@ -24,16 +30,27 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
     private final int slot;
     private final @Nullable RecipeTypePatternBufferPartMachine target;
     private final @Nullable ShanhaiPatternManagementMenuHost terminalHost;
+    private final List<String> wildcardTypeIds;
+    private final List<String> wildcardTypeNames;
     private boolean invalidLogged;
 
     public ShanhaiStellarRemoteUIHolder(GlobalPos targetPos, Mode mode, int slot,
             @Nullable RecipeTypePatternBufferPartMachine target,
             @Nullable ShanhaiPatternManagementMenuHost terminalHost) {
+        this(targetPos, mode, slot, target, terminalHost, List.of(), List.of());
+    }
+
+    public ShanhaiStellarRemoteUIHolder(GlobalPos targetPos, Mode mode, int slot,
+            @Nullable RecipeTypePatternBufferPartMachine target,
+            @Nullable ShanhaiPatternManagementMenuHost terminalHost,
+            List<String> wildcardTypeIds, List<String> wildcardTypeNames) {
         this.targetPos = targetPos;
         this.mode = mode;
         this.slot = slot;
         this.target = target;
         this.terminalHost = terminalHost;
+        this.wildcardTypeIds = List.copyOf(wildcardTypeIds);
+        this.wildcardTypeNames = List.copyOf(wildcardTypeNames);
     }
 
     public GlobalPos targetPos() {
@@ -48,6 +65,14 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
         return slot;
     }
 
+    public List<String> wildcardTypeIds() {
+        return wildcardTypeIds;
+    }
+
+    public List<String> wildcardTypeNames() {
+        return wildcardTypeNames;
+    }
+
     @Override
     public ModularUI createUI(Player player) {
         RecipeTypePatternBufferPartMachine machine = target;
@@ -58,7 +83,25 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
         if (mode == Mode.SLOT_CATALYST) {
             return machine.createRemoteSlotCatalystUI(player, slot, this);
         }
-        return machine.createRemoteStockInputUI(player, this);
+        if (mode == Mode.STOCK_INPUT) {
+            return machine.createRemoteStockInputUI(player, this);
+        }
+        if (mode == Mode.OUTPUT_MULTIPLIER) {
+            return machine.createRemoteOutputMultiplierUI(player, this);
+        }
+        if (mode == Mode.WILDCARD) {
+            return machine.createRemoteWildcardUI(player, this, wildcardTypeIds, wildcardTypeNames);
+        }
+        if (mode == Mode.SHARED_INPUTS) {
+            return machine.createRemoteSharedInputsUI(player, this);
+        }
+        if (mode == Mode.PATTERN_BEHAVIOR) {
+            return machine.createRemotePatternBehaviorUI(player, this);
+        }
+        if (mode == Mode.REFUND) {
+            return machine.createRemoteRefundUI(player, this);
+        }
+        return null;
     }
 
     @Override

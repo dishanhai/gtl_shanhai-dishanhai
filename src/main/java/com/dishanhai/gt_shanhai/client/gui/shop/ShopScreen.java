@@ -384,8 +384,9 @@ public class ShopScreen extends ScaledScreen {
     private int submissionBtnX, submissionBtnY, submissionBtnW, submissionBtnH;
     private int stageSubmissionBtnX, stageSubmissionBtnY, stageSubmissionBtnW, stageSubmissionBtnH;
     private int submissionAutoCraftX, submissionAutoCraftY, submissionAutoCraftW, submissionAutoCraftH;
+    private int stageSubmissionAutoCraftX, stageSubmissionAutoCraftY, stageSubmissionAutoCraftW, stageSubmissionAutoCraftH;
     private int stageLockAutoCraftX, stageLockAutoCraftY, stageLockAutoCraftW, stageLockAutoCraftH;
-    private boolean submissionAutoCraftVisible, stageLockAutoCraftVisible;
+    private boolean submissionAutoCraftVisible, stageSubmissionAutoCraftVisible, stageLockAutoCraftVisible;
     private boolean stageLockActive;
     private String stageLockPath;
     private int stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH;
@@ -2408,6 +2409,7 @@ public class ShopScreen extends ScaledScreen {
         descExpandVisible = false; // 每帧先清，描述非空才置
         submissionBtnVisible = false;
         stageSubmissionBtnVisible = false;
+        stageSubmissionAutoCraftVisible = false;
         int dx = detailX();
         int dw = DETAIL_W;
         int detailInnerW = dw - 16;
@@ -2658,11 +2660,19 @@ public class ShopScreen extends ScaledScreen {
         String missingStage = missingStageSubmission(selected.getCategory());
         stageSubmissionBtnVisible = missingStage != null;
         if (stageSubmissionBtnVisible) {
+            // 编辑模式会取消全屏阶段遮挡，AE 下单不能只挂在遮挡层上。
+            var stageReqs = com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState.stageRequirements(missingStage);
+            maybeRequestStagePreview(missingStage);
             g.drawString(this.font, "§6提交阶段固定物品（一次性解锁）:", cx, actionY, GOLD, true);
             actionY += 12;
-            actionY = drawSubmissionRequirementPreview(g, cx, actionY,
-                    com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState.stageRequirements(missingStage),
-                    detailInnerW, mx, hoverMy);
+            actionY = drawSubmissionRequirementPreview(g, cx, actionY, stageReqs, detailInnerW, mx, hoverMy, missingStage);
+            stageSubmissionAutoCraftVisible = aeMode && !stageReqs.isEmpty();
+            if (stageSubmissionAutoCraftVisible) {
+                stageSubmissionAutoCraftX = cx; stageSubmissionAutoCraftY = actionY - detailScroll;
+                stageSubmissionAutoCraftW = detailInnerW; stageSubmissionAutoCraftH = 18;
+                drawButton(g, cx, actionY, detailInnerW, 18, "§b⚙ AE下单补齐阶段前置", mx, hoverMy);
+                actionY += 21;
+            }
             stageSubmissionBtnX = cx; stageSubmissionBtnY = actionY - detailScroll; stageSubmissionBtnW = detailInnerW; stageSubmissionBtnH = 18;
             drawButton(g, cx, actionY, detailInnerW, 18, "§e提交阶段物品: " + missingStage, mx, hoverMy);
             actionY += 21;
@@ -3120,6 +3130,16 @@ public class ShopScreen extends ScaledScreen {
                 && hit(mx, my, submissionBtnX, submissionBtnY, submissionBtnW, submissionBtnH)) {
             ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopSubmitPacket(
                     ClientShopCatalog.revision(), ClientShopCatalog.keyOf(selected), aeMode, backpackMode));
+            return true;
+        }
+        if (inDetailViewport && stageSubmissionAutoCraftVisible && selected != null
+                && hit(mx, my, stageSubmissionAutoCraftX, stageSubmissionAutoCraftY,
+                    stageSubmissionAutoCraftW, stageSubmissionAutoCraftH)) {
+            String stage = missingStageSubmission(selected.getCategory());
+            if (stage != null) ShanhaiNetwork.CHANNEL.sendToServer(
+                    new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
+                            com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.Target.STAGE,
+                            0L, -1L, 1L, stage, aeMode));
             return true;
         }
         if (inDetailViewport && stageSubmissionBtnVisible && selected != null

@@ -7,6 +7,8 @@ import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MachineDefinition;
 import com.lowdragmc.lowdraglib.gui.factory.UIFactory;
 import com.lowdragmc.lowdraglib.gui.modular.ModularUI;
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
@@ -36,34 +38,32 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
 
     public boolean openSlot(ServerPlayer player, RecipeTypePatternBufferPartMachine machine,
             ShanhaiPatternManagementMenuHost terminalHost, int slot) {
-        boolean opened = openUI(new ShanhaiStellarRemoteUIHolder(
-                GlobalPos.of(machine.getLevel().dimension(), machine.getPos()),
-                ShanhaiStellarRemoteUIHolder.Mode.SLOT_CATALYST, slot, machine, terminalHost), player);
-        GTDishanhaiMod.LOGGER.info(
-                "[StellarRemoteUI] server open mode=SLOT_CATALYST slot={} target={} opened={}",
-                slot, machine.getPos(), opened);
-        return opened;
+        return openMode(player, machine, terminalHost, ShanhaiStellarRemoteUIHolder.Mode.SLOT_CATALYST, slot);
     }
 
     public boolean openStock(ServerPlayer player, RecipeTypePatternBufferPartMachine machine,
             ShanhaiPatternManagementMenuHost terminalHost) {
-        boolean opened = openUI(new ShanhaiStellarRemoteUIHolder(
-                GlobalPos.of(machine.getLevel().dimension(), machine.getPos()),
-                ShanhaiStellarRemoteUIHolder.Mode.STOCK_INPUT, -1, machine, terminalHost), player);
-        GTDishanhaiMod.LOGGER.info(
-                "[StellarRemoteUI] server open mode=STOCK_INPUT slot=-1 target={} opened={}",
-                machine.getPos(), opened);
-        return opened;
+        return openMode(player, machine, terminalHost, ShanhaiStellarRemoteUIHolder.Mode.STOCK_INPUT, -1);
     }
 
     public boolean openPattern(ServerPlayer player, RecipeTypePatternBufferPartMachine machine,
             ShanhaiPatternManagementMenuHost terminalHost) {
+        return openMode(player, machine, terminalHost, ShanhaiStellarRemoteUIHolder.Mode.FULL_PATTERN, -1);
+    }
+
+    public boolean openMode(ServerPlayer player, RecipeTypePatternBufferPartMachine machine,
+            ShanhaiPatternManagementMenuHost terminalHost, ShanhaiStellarRemoteUIHolder.Mode mode, int slot) {
+        List<String> typeIds = new ArrayList<>();
+        List<String> typeNames = new ArrayList<>();
+        if (mode == ShanhaiStellarRemoteUIHolder.Mode.WILDCARD) {
+            machine.snapshotWildcardHostTypes(typeIds, typeNames);
+        }
         boolean opened = openUI(new ShanhaiStellarRemoteUIHolder(
                 GlobalPos.of(machine.getLevel().dimension(), machine.getPos()),
-                ShanhaiStellarRemoteUIHolder.Mode.FULL_PATTERN, -1, machine, terminalHost), player);
+                mode, slot, machine, terminalHost, typeIds, typeNames), player);
         GTDishanhaiMod.LOGGER.info(
-                "[StellarRemoteUI] server open mode=FULL_PATTERN slot=-1 target={} opened={}",
-                machine.getPos(), opened);
+                "[StellarRemoteUI] server open mode={} slot={} target={} opened={}",
+                mode, slot, machine.getPos(), opened);
         return opened;
     }
 
@@ -79,11 +79,24 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
         GlobalPos pos = GlobalPos.of(dimension, buffer.readBlockPos());
         ShanhaiStellarRemoteUIHolder.Mode mode = buffer.readEnum(ShanhaiStellarRemoteUIHolder.Mode.class);
         int slot = buffer.readVarInt();
+        List<String> typeIds = List.of();
+        List<String> typeNames = List.of();
+        if (mode == ShanhaiStellarRemoteUIHolder.Mode.WILDCARD) {
+            int count = Math.min(64, buffer.readVarInt());
+            List<String> ids = new ArrayList<>(count);
+            List<String> names = new ArrayList<>(count);
+            for (int index = 0; index < count; index++) {
+                ids.add(buffer.readUtf());
+                names.add(buffer.readUtf());
+            }
+            typeIds = List.copyOf(ids);
+            typeNames = List.copyOf(names);
+        }
         RecipeTypePatternBufferPartMachine mirror = createClientMirror();
         GTDishanhaiMod.LOGGER.info(
                 "[StellarRemoteUI] client read mode={} slot={} target={} mirror={}",
                 mode, slot, pos, mirror == null ? "missing" : mirror.getClass().getName());
-        return new ShanhaiStellarRemoteUIHolder(pos, mode, slot, mirror, null);
+        return new ShanhaiStellarRemoteUIHolder(pos, mode, slot, mirror, null, typeIds, typeNames);
     }
 
     @Override
@@ -92,6 +105,13 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
         buffer.writeBlockPos(holder.targetPos().pos());
         buffer.writeEnum(holder.mode());
         buffer.writeVarInt(holder.slot());
+        if (holder.mode() != ShanhaiStellarRemoteUIHolder.Mode.WILDCARD) return;
+        int count = Math.min(64, Math.min(holder.wildcardTypeIds().size(), holder.wildcardTypeNames().size()));
+        buffer.writeVarInt(count);
+        for (int index = 0; index < count; index++) {
+            buffer.writeUtf(holder.wildcardTypeIds().get(index));
+            buffer.writeUtf(holder.wildcardTypeNames().get(index));
+        }
     }
 
     @OnlyIn(Dist.CLIENT)

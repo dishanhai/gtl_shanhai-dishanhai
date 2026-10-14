@@ -6,22 +6,30 @@ import mezz.jei.api.gui.handlers.IGuiProperties;
 import mezz.jei.common.Internal;
 import mezz.jei.common.config.HistoryDisplaySide;
 import mezz.jei.common.config.IClientConfig;
+import mezz.jei.common.config.IIngredientGridConfig;
 import mezz.jei.common.util.ImmutableRect2i;
 import net.minecraft.client.Minecraft;
 
 /**
- * While the recipe editor is open, the search list stays in the right column
- * and bookmarks use the empty band under that list.
- * <p>JEI still subtracts the bookmark button row, the page-nav row, and any
- * lookup-history rows that share the bookmark side. The band includes those
- * pixels so the bookmark grid itself keeps three rows.
+ * While the recipe editor is open, the ingredient list stays in the right
+ * column and stops above the bookmark band. JEI anchors the search field to
+ * the bottom of that list area, so the band also has to clear the bookmark
+ * and history buttons.
+ * <p>Heights follow JEI 15.49: a grid is inset by 6, page nav takes 22, and
+ * the button row is inset 6 plus a 20px button. History, when it shares a
+ * side, sits above that 26px row with a 4px gap.
  */
 public final class ShanhaiRecipeEditorJeiSide {
 
-    /** Button row + page nav + border inset + three 18px bookmark rows. */
-    private static final int BOOKMARK_BODY = 22 + 22 + 12 + 18 * 3;
     private static final int SLOT = 18;
-    private static final int LIST_FLOOR = 96;
+    /** Three bookmark rows after the no-history chrome (inset + nav + button row). */
+    private static final int BOOKMARK_BODY = 110;
+    /** Same three rows once history has taken {@code historyHeight + 70} of chrome. */
+    private static final int BOOKMARK_BODY_WITH_HISTORY = 124;
+    private static final int LIST_FLOOR = 128;
+    private static final int LIST_FLOOR_WITH_HISTORY = 142;
+    /** {@link mezz.jei.gui.overlay.bookmarks.history.LookupHistoryOverlayLayout#getDisplayHeight}. */
+    private static final int HISTORY_BACKGROUND = 14;
 
     private ShanhaiRecipeEditorJeiSide() {}
 
@@ -33,12 +41,29 @@ public final class ShanhaiRecipeEditorJeiSide {
     }
 
     public static int bookmarkBand(int screenHeight) {
+        return bookmarkBand(screenHeight, historyPixels(true), historyPixels(false));
+    }
+
+    /**
+     * Bottom strip reserved for bookmarks. The ingredient list, including its
+     * search field, is limited to everything above this strip.
+     */
+    static int bookmarkBand(int screenHeight, int historyOnBookmarks, int historyOnList) {
         if (screenHeight <= 0) return 0;
-        int wanted = BOOKMARK_BODY + historyPixels();
-        int max = Math.max(0, screenHeight - LIST_FLOOR);
-        if (wanted > max) wanted = Math.min(max, BOOKMARK_BODY);
-        if (wanted < 80) wanted = Math.min(max, 80);
+        int wanted = bookmarkBody(historyOnBookmarks);
+        int max = Math.max(0, screenHeight - listFloor(historyOnList));
+        if (wanted > max) wanted = max;
         return Math.max(0, wanted);
+    }
+
+    static int bookmarkBody(int historyHeight) {
+        if (historyHeight <= 0) return BOOKMARK_BODY;
+        return BOOKMARK_BODY_WITH_HISTORY + historyHeight;
+    }
+
+    static int listFloor(int historyOnList) {
+        if (historyOnList <= 0) return LIST_FLOOR;
+        return LIST_FLOOR_WITH_HISTORY + historyOnList;
     }
 
     /** Right column, full height, capped at {@link ShanhaiRecipeEditorWidget#JEI_SIDE_WIDTH}. */
@@ -60,13 +85,35 @@ public final class ShanhaiRecipeEditorJeiSide {
         return rightColumn(gui).cropBottom(bookmarkArea(gui).getHeight());
     }
 
-    /** Rows JEI will cut off the bottom of the bookmark area when history sits on the left. */
-    private static int historyPixels() {
+    /** Rows of bookmarks that fit in {@code band} after JEI 15.49 takes its chrome. */
+    static int bookmarkRows(int band, int historyHeight) {
+        int grid = historyHeight <= 0 ? band - 56 : band - historyHeight - 70;
+        if (grid <= 0) return 0;
+        return grid / SLOT;
+    }
+
+    /** Rows of the ingredient list that fit above the bookmark band. */
+    static int listRows(int screenHeight, int historyOnBookmarks, int historyOnList) {
+        int band = bookmarkBand(screenHeight, historyOnBookmarks, historyOnList);
+        int listHeight = Math.max(0, screenHeight - band);
+        int grid = historyOnList <= 0 ? listHeight - 56 : listHeight - historyOnList - 70;
+        if (grid <= 0) return 0;
+        return grid / SLOT;
+    }
+
+    private static int historyPixels(boolean bookmarkSide) {
         try {
             IClientConfig config = Internal.getJeiClientConfigs().getClientConfig();
             if (!config.isLookupHistoryEnabled()) return 0;
-            if (config.getLookupHistoryDisplaySide() != HistoryDisplaySide.LEFT) return 0;
-            return Math.max(0, config.getMaxLookupHistoryRows()) * SLOT;
+            boolean onBookmarks = config.getLookupHistoryDisplaySide() == HistoryDisplaySide.LEFT;
+            if (onBookmarks != bookmarkSide) return 0;
+            IIngredientGridConfig grid = bookmarkSide
+                    ? Internal.getJeiClientConfigs().getBookmarkListConfig()
+                    : Internal.getJeiClientConfigs().getIngredientListConfig();
+            int rows = Math.max(0, config.getMaxLookupHistoryRows());
+            int height = rows * SLOT;
+            if (grid.drawBackground()) height += HISTORY_BACKGROUND;
+            return height;
         } catch (Throwable ignored) {
             return 0;
         }

@@ -27,6 +27,7 @@ import net.minecraftforge.common.MinecraftForge;
 public class ClientInit {
 
     public static void init() {
+        com.dishanhai.gt_shanhai.client.generator.PatternGeneratorClientSetup.install();
         appeng.init.client.InitScreens.register(
                 com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu.TYPE,
                 com.dishanhai.gt_shanhai.client.gui.terminal.ShanhaiPatternManagementScreen::new,

@@ -193,6 +193,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private final RecipeTypePatternWildcardPersistence wildcardPersistence;
     private final InternalInventory combinedTerminalPatternInventory;
     private boolean outputMultiplierPatternsRefreshNeeded = true;
+    private int[] visibleOutputMultiplierStamps;
     private IntConsumer wildcardRemoveSlotFromMap;
     private boolean rebuildingWildcardPatterns;
     private int selectedWildcardMotherSlot;
@@ -221,6 +222,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         this.wildcardPatternToSlot.defaultReturnValue(-1);
         this.wildcardRecipeCache = new Int2ReferenceOpenHashMap<>();
         this.outputMultiplierPatternCache = new Int2ReferenceOpenHashMap<>();
+        this.visibleOutputMultiplierStamps = new int[patternsPerRow * rowsPerPage * maxPages];
         this.wildcardPersistence = new RecipeTypePatternWildcardPersistence();
         this.wildcardPatternInventory = new ItemStackTransfer(WILDCARD_PATTERN_SLOT_COUNT);
         this.wildcardPatternInventory.setFilter(WildcardPatternBridge::isWildcardPattern);
@@ -933,12 +935,20 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (patternStack.isEmpty()) return false;
         if (!((Object) this instanceof MEPatternBufferSlot2PatternAccessor access)) return false;
 
+        long multiplier = resolvePatternOutputMultiplier(PatternRecipeTypeHelper.readRecipeTypeId(patternStack));
+        if (!resetSlotCaches && visibleOutputMultiplierStampMatches(slot, patternStack, multiplier)) {
+            return false;
+        }
+
         Int2ObjectMap<IPatternDetails> slot2PatternMap = access.gtShanhai$getSlot2PatternMap();
         IPatternDetails currentPattern = slot2PatternMap.get(slot);
         IPatternDetails basePattern = createOutputMultiplierBasePattern(slot, patternStack);
         if (basePattern == null) return false;
         IPatternDetails effectivePattern = gtShanhai$applyOutputMultiplier(basePattern, patternStack);
         if (effectivePattern == null) return false;
+        if (VirtualPatternEncodingHelper.productOutputsReflectMultiplier(effectivePattern, multiplier)) {
+            rememberVisibleOutputMultiplierStamp(slot, patternStack, multiplier);
+        }
         // 視圖和 1x 樣板共用 definition。產出數量沒變就不要再標 needPatternSync，否則 AE 每個 tick 重建提供者。
         if (sameVisiblePattern(currentPattern, effectivePattern)) {
             return false;
@@ -1100,6 +1110,32 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     private void clearOutputMultiplierPatternCache() {
         outputMultiplierPatternCache.clear();
+        if (visibleOutputMultiplierStamps != null) {
+            Arrays.fill(visibleOutputMultiplierStamps, 0);
+        }
+    }
+
+    private boolean visibleOutputMultiplierStampMatches(int slot, ItemStack stack, long multiplier) {
+        int[] stamps = visibleOutputMultiplierStamps;
+        if (stamps == null || slot < 0 || slot >= stamps.length) return false;
+        int stamp = stamps[slot];
+        return stamp != 0 && stamp == visibleOutputMultiplierStamp(stack, multiplier);
+    }
+
+    private void rememberVisibleOutputMultiplierStamp(int slot, ItemStack stack, long multiplier) {
+        if (visibleOutputMultiplierStamps == null || slot < 0 || slot >= visibleOutputMultiplierStamps.length) {
+            return;
+        }
+        int stamp = visibleOutputMultiplierStamp(stack, multiplier);
+        visibleOutputMultiplierStamps[slot] = stamp == 0 ? 1 : stamp;
+    }
+
+    private int visibleOutputMultiplierStamp(ItemStack stack, long multiplier) {
+        int result = 31 + stackKeyHash(stack);
+        result = 31 * result + Long.hashCode(multiplier);
+        result = 31 * result + Long.hashCode(DShanhaiRecipeModifierAPI.getPatternCacheRevision());
+        result = 31 * result + Boolean.hashCode(keepByProduct);
+        return result;
     }
 
     private static int stackKeyHash(ItemStack stack) {
@@ -1331,12 +1367,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         sideTabs.attachSubTab(createStockInputSidebarPage(parentConfigurators));
         sideTabs.attachSubTab(FancyConfiguratorSidebarPage.single(new WildcardPatternConfigurator()));
         sideTabs.attachSubTab(FancyConfiguratorSidebarPage.single(new OutputMultiplierConfigurator()));
-        sideTabs.attachSubTab(createGroupedSidebarPage(
-                "gui.gt_shanhai.pattern_buffer_shared_inputs", 2, parentConfigurators,
-                PARENT_SHARED_ITEM, PARENT_SHARED_FLUID, PARENT_SHARED_CIRCUIT));
-        sideTabs.attachSubTab(createGroupedSidebarPage(
-                "gui.gt_shanhai.pattern_buffer_pattern_behavior", 1, parentConfigurators,
-                PARENT_BYPRODUCT, PARENT_TERMINAL_VISIBILITY, PARENT_PATTERN_CIRCUIT));
+        sideTabs.attachSubTab(sharedInputsPage(parentConfigurators));
+        sideTabs.attachSubTab(patternBehaviorPage(parentConfigurators));
     }
 
     private List<IFancyConfigurator> collectParentConfigurators() {
@@ -1360,6 +1392,18 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
         return new FancyConfiguratorSidebarPage(stockInput.getTitle(), stockInput.getIcon(),
                 stockInput.getTooltips(), selected);
+    }
+
+    private FancyConfiguratorSidebarPage sharedInputsPage(List<IFancyConfigurator> configurators) {
+        return createGroupedSidebarPage(
+                "gui.gt_shanhai.pattern_buffer_shared_inputs", 2, configurators,
+                PARENT_SHARED_ITEM, PARENT_SHARED_FLUID, PARENT_SHARED_CIRCUIT);
+    }
+
+    private FancyConfiguratorSidebarPage patternBehaviorPage(List<IFancyConfigurator> configurators) {
+        return createGroupedSidebarPage(
+                "gui.gt_shanhai.pattern_buffer_pattern_behavior", 1, configurators,
+                PARENT_BYPRODUCT, PARENT_TERMINAL_VISIBILITY, PARENT_PATTERN_CIRCUIT);
     }
 
     private FancyConfiguratorSidebarPage createGroupedSidebarPage(
@@ -1885,6 +1929,14 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return slot >= 0 && slot < this.maxPatternCount;
     }
 
+    public void snapshotWildcardHostTypes(List<String> ids, List<String> names) {
+        for (GTRecipeType type : WildcardPatternRecipeTypeBinding.collectHostRecipeTypes(getControllers())) {
+            if (type == null || type.registryName == null || ids.size() >= 64) continue;
+            ids.add(type.registryName.toString());
+            names.add(wildcardRecipeTypeDisplayName(type));
+        }
+    }
+
     public ModularUI createRemotePatternUI(Player player, IUIHolder holder) {
         return new ModularUI(176, 166, holder, player)
                 .widget(new FancyMachineUIWidget(this, 176, 166));
@@ -1930,23 +1982,115 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     public ModularUI createRemoteStockInputUI(Player player, IUIHolder holder) {
-        WidgetGroup root = new WidgetGroup(0, 0, 176, 132);
+        return createRemoteSidebarUI(player, holder,
+                createStockInputSidebarPage(collectParentConfigurators()));
+    }
+
+    public ModularUI createRemoteOutputMultiplierUI(Player player, IUIHolder holder) {
+        return createRemoteSidebarUI(player, holder,
+                FancyConfiguratorSidebarPage.single(new OutputMultiplierConfigurator()));
+    }
+
+    public ModularUI createRemoteSharedInputsUI(Player player, IUIHolder holder) {
+        return createRemoteSidebarUI(player, holder, sharedInputsPage(collectParentConfigurators()));
+    }
+
+    public ModularUI createRemotePatternBehaviorUI(Player player, IUIHolder holder) {
+        return createRemoteSidebarUI(player, holder, patternBehaviorPage(collectParentConfigurators()));
+    }
+
+    public ModularUI createRemoteRefundUI(Player player, IUIHolder holder) {
+        List<IFancyConfigurator> parent = collectParentConfigurators();
+        if (PARENT_REFUND >= parent.size()) return null;
+        return createRemoteSidebarUI(player, holder,
+                FancyConfiguratorSidebarPage.single(parent.get(PARENT_REFUND)));
+    }
+
+    public ModularUI createRemoteWildcardUI(Player player, IUIHolder holder,
+            List<String> typeIds, List<String> typeNames) {
+        int width = 176;
+        int height = 166;
+        WidgetGroup root = new WidgetGroup(0, 0, width, height);
         root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
-                "gui.gtlcore.stock_input_config").getString()));
-        root.addWidget(new LabelWidget(138, 4,
-                () -> FormattingUtil.formatNumbers(countConfiguredStockSlots()) + " / 32"));
-        root.addWidget(new AEDualConfigWidget(16, 18, this.stockItemHandler, this.stockFluidHandler,
-                this::setPage, this.page));
-        root.addWidget(new ButtonWidget(112, 112, 56, 16, new TextTexture(
-                Component.translatable("gui.gt_shanhai.remote_pattern_return").getString()), click -> {
-                    if (player instanceof ServerPlayer serverPlayer) {
-                        com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper
-                                .openFirst(serverPlayer);
-                    }
-                }));
-        return new ModularUI(176, 132, holder, player)
+                "gui.gt_shanhai.wildcard_pattern_config").getString()));
+        for (int slot = 0; slot < WILDCARD_PATTERN_SLOT_COUNT; slot++) {
+            int motherSlot = slot;
+            root.addWidget(new SlotWidget(wildcardPatternInventory, slot, 34 + slot * 18, 16)
+                    .setBackground(new IGuiTexture[]{GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY}));
+            root.addWidget(new ButtonWidget(35 + slot * 18, 34, 16, 10,
+                    new TextTexture(String.valueOf(slot + 1), -1), click -> selectedWildcardMotherSlot = motherSlot));
+        }
+        root.addWidget(new LabelWidget(8, 46, () -> Component.translatable(
+                "gui.gt_shanhai.wildcard_pattern_slot",
+                selectedWildcardMotherSlot + 1, remoteWildcardTypeText()).getString()));
+        root.addWidget(new LabelWidget(8, 58, () -> Component.translatable(
+                "gui.gt_shanhai.wildcard_pattern_expanded", wildcardPatterns.size()).getString()));
+
+        DraggableScrollableWidgetGroup typeList = new DraggableScrollableWidgetGroup(8, 70, 160, 72);
+        typeList.setBackground(GuiTextures.DISPLAY);
+        typeList.setYScrollBarWidth(4).setYBarStyle(
+                new ColorRectTexture(0xFF3F4252),
+                new ColorRectTexture(0xFFE0E2EA).setRadius(2));
+        int count = Math.min(typeIds.size(), typeNames.size());
+        int y = 2;
+        typeList.addWidget(new ButtonWidget(2, y, 148, 16,
+                new TextTexture(Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString(), -1),
+                click -> clearWildcardRecipeType(selectedWildcardMotherSlot)));
+        y += 18;
+        for (int index = 0; index < count; index++) {
+            String typeId = typeIds.get(index);
+            String typeName = typeNames.get(index);
+            typeList.addWidget(new ButtonWidget(2, y, 148, 16,
+                    new TextTexture(typeName, -1),
+                    click -> assignWildcardRecipeTypeId(selectedWildcardMotherSlot, typeId)));
+            y += 18;
+        }
+        root.addWidget(typeList);
+        root.addWidget(remoteReturnButton(player, width - 64, height - 20));
+        return new ModularUI(width, height, holder, player)
                 .widget(root)
                 .background(GuiTextures.BACKGROUND);
+    }
+
+    private ModularUI createRemoteSidebarUI(Player player, IUIHolder holder, FancyConfiguratorSidebarPage page) {
+        Widget content = page.createMainPage(null);
+        int width = Math.max(176, content.getSize().width);
+        int height = content.getSize().height + 22;
+        WidgetGroup root = new WidgetGroup(0, 0, width, height);
+        root.addWidget(content);
+        root.addWidget(remoteReturnButton(player, width - 64, content.getSize().height + 2));
+        return new ModularUI(width, height, holder, player)
+                .widget(root)
+                .background(GuiTextures.BACKGROUND);
+    }
+
+    private ButtonWidget remoteReturnButton(Player player, int x, int y) {
+        return new ButtonWidget(x, y, 56, 16, new TextTexture(
+                Component.translatable("gui.gt_shanhai.remote_pattern_return").getString()), click -> {
+            if (player instanceof ServerPlayer serverPlayer) {
+                com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper
+                        .openFirst(serverPlayer);
+            }
+        });
+    }
+
+    private void assignWildcardRecipeTypeId(int slot, String typeId) {
+        if (slot < 0 || slot >= WILDCARD_PATTERN_SLOT_COUNT || typeId == null || typeId.isEmpty()) return;
+        ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
+        if (stack.isEmpty()) return;
+        wildcardPatternInventory.setStackInSlot(slot, WildcardPatternRecipeTypeBinding.assign(stack, typeId));
+    }
+
+    private String remoteWildcardTypeText() {
+        String typeId = currentWildcardRecipeTypeId();
+        if (typeId.isEmpty()) {
+            return Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString();
+        }
+        GTRecipeType type = PatternRecipeTypeHelper.resolveRecipeType(typeId);
+        if (type == null) {
+            return Component.translatable("gui.gt_shanhai.wildcard_pattern_unavailable_type", typeId).getString();
+        }
+        return wildcardRecipeTypeDisplayName(type);
     }
 
     /** 统计已配置的库存输入格数（物品+流体），用于 UI 上的 "X / 32" 显示。 */

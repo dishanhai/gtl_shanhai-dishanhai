@@ -33,6 +33,10 @@ public class VirtualPatternEncodingHelperTest {
                 "兜底必须读取已知 GTRecipeType 的实时服务端配方表");
         assertTrue(source.contains("nonConsumableRecipesInType"),
                 "同一 revision 内不得按样板重复展开整棵 lookup");
+        assertTrue(source.contains("nonConsumableRecipesSharingOutputs"),
+                "类型域兜底必须按产出键收窄候选，不能对每张样板线性扫描该类型全部不消耗配方");
+        assertTrue(source.contains("recipeOutputSnapshot"),
+                "倍率检测必须复用配方产出快照，不能对每个候选重新分配输出列表");
         assertTrue(source.contains("type-scoped live lookup matched recipe={}"),
                 "实机日志必须能证明索引 miss 后的类型域兜底确实命中");
     }

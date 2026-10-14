@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.client.gui.terminal;
 
-import appeng.client.gui.me.patternaccess.PatternSlot;
 import appeng.client.gui.style.ScreenStyle;
 import appeng.client.gui.widgets.BackgroundPanel;
 import appeng.client.gui.widgets.ToolboxPanel;
@@ -14,7 +13,9 @@ import com.glodblock.github.extendedae.client.gui.GuiExPatternTerminal;
 import de.mari_023.ae2wtlib.wut.CycleTerminalButton;
 import de.mari_023.ae2wtlib.wut.IUniversalTerminalCapable;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -25,24 +26,59 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import appeng.client.gui.me.patternaccess.PatternSlot;
 
 public final class ShanhaiPatternManagementScreen
         extends GuiExPatternTerminal<ShanhaiPatternManagementMenu>
         implements IUniversalTerminalCapable {
 
-    private static final int REMOTE_BUTTON_X = 198;
-    private static final int STOCK_BUTTON_X = 216;
-    private static final int REMOTE_BUTTON_WIDTH = 14;
-    private static final int REMOTE_BUTTON_HEIGHT = 12;
-    private static final int REMOTE_BUTTON_BORDER = 0xFF39425E;
-    private static final int REMOTE_BUTTON_BG = 0xFFB7D8F0;
-    private static final int REMOTE_BUTTON_TEXT = 0xFF2C5778;
-    private static final Field EAEP_OPEN_UI_BUTTONS_FIELD = findEaepOpenUiButtonsField();
+    private static final int HEADER_BUTTON_X = 166;
+    private static final int HEADER_BUTTON_Y = 55;
+    private static final int ROW_HEIGHT = 18;
+    private static final int BUTTON_WIDTH = 14;
+    private static final int BUTTON_HEIGHT = 12;
+    private static final int BUTTON_BORDER = 0xFF39425E;
+    private static final int BUTTON_BG = 0xFFB7D8F0;
+    private static final int BUTTON_TEXT = 0xFF2C5778;
+    private static final int PANEL_WIDTH = 112;
+    private static final int ROW_STRIDE = 12;
+    private static final int PANEL_BG = 0xF0121824;
+    private static final int PANEL_BORDER = 0xFF8FB7D4;
+    private static final int PANEL_SELECTED = 0xFF3E6F93;
+    private static final int PANEL_TEXT = 0xFFE7F2FA;
 
-    private final List<StockButtonTarget> stockButtons = new ArrayList<>();
-    private final List<RemoteUiButtonTarget> remoteUiButtons = new ArrayList<>();
+    private static final Operation[] CONTROL_ACTIONS = {
+            Operation.OPEN_FULL_PATTERN,
+            Operation.OPEN_STOCK_INPUT,
+            Operation.OPEN_OUTPUT_MULTIPLIER,
+            Operation.OPEN_WILDCARD,
+            Operation.OPEN_SHARED_INPUTS,
+            Operation.OPEN_PATTERN_BEHAVIOR,
+            Operation.OPEN_REFUND
+    };
+    private static final String[] CONTROL_LABELS = {
+            "gui.gt_shanhai.stellar_remote.pattern",
+            "gui.gt_shanhai.stellar_remote.stock",
+            "gui.gt_shanhai.stellar_remote.multiplier",
+            "gui.gt_shanhai.stellar_remote.wildcard",
+            "gui.gt_shanhai.stellar_remote.shared",
+            "gui.gt_shanhai.stellar_remote.behavior",
+            "gui.gt_shanhai.stellar_remote.refund"
+    };
+
+    private static final Field EAEP_OPEN_UI_BUTTONS_FIELD = findNamedField("openUIButtons");
+    private static final Field ROWS_FIELD = findNamedField("rows");
+    private static final Field VISIBLE_ROWS_FIELD = findNamedField("visibleRows");
+    private static final Field SCROLLBAR_FIELD = findNamedField("scrollbar");
+    private static final Map<String, Method> NO_ARG_METHODS = new HashMap<>();
+
+    private final List<StellarHeaderTarget> headerTargets = new ArrayList<>();
+    private final Set<Integer> stellarHeaderRows = new HashSet<>();
+    private boolean controlOpen;
+    private List<Long> controlServerIds = List.of();
+    private long selectedServerId;
+    private int controlX;
+    private int controlY;
 
     public ShanhaiPatternManagementScreen(ShanhaiPatternManagementMenu menu, Inventory inventory,
             Component title, ScreenStyle style) {
@@ -60,42 +96,42 @@ public final class ShanhaiPatternManagementScreen
     @Override
     public void drawFG(GuiGraphics graphics, int offsetX, int offsetY, int mouseX, int mouseY) {
         super.drawFG(graphics, offsetX, offsetY, mouseX, mouseY);
-        hideEaepGroupUiButtons();
-        stockButtons.clear();
-        remoteUiButtons.clear();
-        Set<Long> drawnProviders = new HashSet<>();
-        ItemStack icon = new ItemStack(Items.HOPPER);
-        for (Slot slot : getMenu().slots) {
-            if (!(slot instanceof PatternSlot patternSlot)) continue;
-            long serverId = patternSlot.getMachineInv().getServerId();
-            if (!getMenu().isStellarContainer(serverId) || !drawnProviders.add(serverId)) continue;
-            int y = patternSlot.y;
-            drawRemoteUiButton(graphics, REMOTE_BUTTON_X, y + 2);
-            remoteUiButtons.add(new RemoteUiButtonTarget(serverId, REMOTE_BUTTON_X, y + 2));
-            graphics.fill(STOCK_BUTTON_X, y, STOCK_BUTTON_X + 16, y + 16, 0xFF355C7D);
-            graphics.renderItem(icon, STOCK_BUTTON_X, y);
-            stockButtons.add(new StockButtonTarget(serverId, STOCK_BUTTON_X, y));
+        rebuildHeaderTargets();
+        hideStellarHeaderButtons();
+        for (StellarHeaderTarget target : headerTargets) {
+            drawHeaderButton(graphics, target.x(), target.y());
+        }
+        if (controlOpen) {
+            drawControlPanel(graphics);
+        }
+        int localX = mouseX - leftPos;
+        int localY = mouseY - topPos;
+        for (StellarHeaderTarget target : headerTargets) {
+            if (target.contains(localX, localY)) {
+                graphics.renderTooltip(font, Component.translatable("gui.gt_shanhai.stellar_remote.button"),
+                        mouseX, mouseY);
+                break;
+            }
         }
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (button == 0) {
+            rebuildHeaderTargets();
             int localX = (int) mouseX - leftPos;
             int localY = (int) mouseY - topPos;
-            for (RemoteUiButtonTarget target : remoteUiButtons) {
-                if (target.contains(localX, localY)) {
-                    ShanhaiNetwork.CHANNEL.sendToServer(new ShanhaiPatternRemoteConfigPacket(
-                            getMenu().containerId, target.serverId(), Operation.OPEN_FULL_PATTERN, -1));
-                    return true;
-                }
+            if (controlOpen && handleControlClick(localX, localY)) {
+                return true;
             }
-            for (StockButtonTarget target : stockButtons) {
-                if (target.contains(localX, localY)) {
-                    ShanhaiNetwork.CHANNEL.sendToServer(new ShanhaiPatternRemoteConfigPacket(
-                            getMenu().containerId, target.serverId(), Operation.OPEN_STOCK_INPUT, -1));
-                    return true;
+            for (StellarHeaderTarget target : headerTargets) {
+                if (!target.contains(localX, localY)) continue;
+                if (controlOpen && controlServerIds.equals(target.serverIds())) {
+                    controlOpen = false;
+                } else {
+                    openControl(target);
                 }
+                return true;
             }
         }
         return super.mouseClicked(mouseX, mouseY, button);
@@ -119,26 +155,184 @@ public final class ShanhaiPatternManagementScreen
     public void storeState() {
     }
 
-    private void hideEaepGroupUiButtons() {
-        Object value = readGuiField(this, EAEP_OPEN_UI_BUTTONS_FIELD);
+    private void openControl(StellarHeaderTarget target) {
+        controlOpen = true;
+        controlServerIds = target.serverIds();
+        selectedServerId = target.serverIds().get(0);
+        placeControlPanel(target);
+    }
+
+    private boolean handleControlClick(int localX, int localY) {
+        if (localX < controlX || localY < controlY
+                || localX >= controlX + PANEL_WIDTH || localY >= controlY + controlHeight()) {
+            controlOpen = false;
+            return true;
+        }
+        int row = (localY - controlY - 3) / ROW_STRIDE;
+        int providerRows = controlServerIds.size() > 1 ? controlServerIds.size() : 0;
+        if (row >= 0 && row < providerRows) {
+            selectedServerId = controlServerIds.get(row);
+            return true;
+        }
+        int actionIndex = row - providerRows - (providerRows > 0 ? 1 : 0);
+        if (actionIndex >= 0 && actionIndex < CONTROL_ACTIONS.length) {
+            long serverId = selectedServerId;
+            controlOpen = false;
+            ShanhaiNetwork.CHANNEL.sendToServer(new ShanhaiPatternRemoteConfigPacket(
+                    getMenu().containerId, serverId, CONTROL_ACTIONS[actionIndex], -1));
+        }
+        return true;
+    }
+
+    private void rebuildHeaderTargets() {
+        headerTargets.clear();
+        stellarHeaderRows.clear();
+        Object rowsValue = readField(this, ROWS_FIELD);
+        if (!(rowsValue instanceof List<?> rows)) return;
+        int scroll = currentScroll();
+        int visible = visibleRows();
+        for (int index = 0; index < rows.size(); index++) {
+            Object row = rows.get(index);
+            if (row == null || !row.getClass().getSimpleName().equals("GroupHeaderRow")) continue;
+            List<Long> serverIds = new ArrayList<>();
+            for (int next = index + 1; next < rows.size(); next++) {
+                Object candidate = rows.get(next);
+                if (candidate == null) continue;
+                if (candidate.getClass().getSimpleName().equals("GroupHeaderRow")) break;
+                if (!candidate.getClass().getSimpleName().equals("SlotsRow")) continue;
+                long serverId = serverIdOf(candidate);
+                if (!getMenu().isStellarContainer(serverId) || serverIds.contains(serverId)) continue;
+                serverIds.add(serverId);
+            }
+            if (serverIds.isEmpty()) continue;
+            stellarHeaderRows.add(index);
+            if (index < scroll || index >= scroll + visible) continue;
+            int visibleIndex = index - scroll;
+            headerTargets.add(new StellarHeaderTarget(List.copyOf(serverIds),
+                    HEADER_BUTTON_X, HEADER_BUTTON_Y + visibleIndex * ROW_HEIGHT));
+        }
+        if (!controlOpen) return;
+        StellarHeaderTarget anchor = null;
+        for (StellarHeaderTarget target : headerTargets) {
+            if (target.serverIds().equals(controlServerIds)) {
+                anchor = target;
+                break;
+            }
+        }
+        if (anchor == null || !anchor.serverIds().contains(selectedServerId)) {
+            controlOpen = false;
+            return;
+        }
+        placeControlPanel(anchor);
+    }
+
+    private void placeControlPanel(StellarHeaderTarget target) {
+        controlX = target.x() + BUTTON_WIDTH - PANEL_WIDTH;
+        if (controlX < 4) controlX = 4;
+        controlY = target.y() + BUTTON_HEIGHT + 1;
+        int height = controlHeight();
+        if (controlY + height > this.imageHeight - 2) {
+            controlY = Math.max(2, target.y() - height - 1);
+        }
+    }
+
+    private int controlHeight() {
+        int providers = controlServerIds.size() > 1 ? controlServerIds.size() * ROW_STRIDE + ROW_STRIDE : 0;
+        return 6 + providers + CONTROL_ACTIONS.length * ROW_STRIDE;
+    }
+
+    private void drawControlPanel(GuiGraphics graphics) {
+        int height = controlHeight();
+        graphics.fill(controlX - 1, controlY - 1, controlX + PANEL_WIDTH + 1, controlY + height + 1, PANEL_BORDER);
+        graphics.fill(controlX, controlY, controlX + PANEL_WIDTH, controlY + height, PANEL_BG);
+        int y = controlY + 3;
+        if (controlServerIds.size() > 1) {
+            for (int index = 0; index < controlServerIds.size(); index++) {
+                long serverId = controlServerIds.get(index);
+                if (serverId == selectedServerId) {
+                    graphics.fill(controlX + 2, y - 1, controlX + PANEL_WIDTH - 2, y + 10, PANEL_SELECTED);
+                }
+                graphics.drawString(font, Component.translatable(
+                        "gui.gt_shanhai.stellar_remote.provider", index + 1),
+                        controlX + 4, y, PANEL_TEXT, false);
+                y += ROW_STRIDE;
+            }
+            y += ROW_STRIDE;
+        }
+        for (String label : CONTROL_LABELS) {
+            graphics.drawString(font, Component.translatable(label), controlX + 4, y, PANEL_TEXT, false);
+            y += ROW_STRIDE;
+        }
+    }
+
+    private void drawHeaderButton(GuiGraphics graphics, int x, int y) {
+        graphics.fill(x - 1, y - 1, x + BUTTON_WIDTH + 1, y + BUTTON_HEIGHT + 1, BUTTON_BORDER);
+        graphics.fill(x, y, x + BUTTON_WIDTH, y + BUTTON_HEIGHT, BUTTON_BG);
+        graphics.drawString(font, Component.translatable("gui.gt_shanhai.stellar_remote.mark"),
+                x + 3, y + 2, BUTTON_TEXT, false);
+    }
+
+    private void hideStellarHeaderButtons() {
+        Object value = readField(this, EAEP_OPEN_UI_BUTTONS_FIELD);
         if (!(value instanceof Map<?, ?> buttons)) return;
-        for (Object button : buttons.values()) {
-            if (button instanceof AbstractWidget widget) {
+        for (Map.Entry<?, ?> entry : buttons.entrySet()) {
+            if (!(entry.getKey() instanceof Integer row) || !stellarHeaderRows.contains(row)) continue;
+            if (entry.getValue() instanceof AbstractWidget widget) {
                 widget.visible = false;
                 widget.active = false;
             }
         }
     }
 
-    private void drawRemoteUiButton(GuiGraphics graphics, int x, int y) {
-        graphics.fill(x - 1, y - 1, x + REMOTE_BUTTON_WIDTH + 1,
-                y + REMOTE_BUTTON_HEIGHT + 1, REMOTE_BUTTON_BORDER);
-        graphics.fill(x, y, x + REMOTE_BUTTON_WIDTH, y + REMOTE_BUTTON_HEIGHT, REMOTE_BUTTON_BG);
-        graphics.drawString(font, "UI", x + 2, y + 2, REMOTE_BUTTON_TEXT, false);
+    private int currentScroll() {
+        Object scrollbar = readField(this, SCROLLBAR_FIELD);
+        Object value = invokeNoArg(scrollbar, "getCurrentScroll");
+        return value instanceof Integer scroll ? scroll : 0;
     }
 
-    private static Object readGuiField(Object target, Field field) {
-        if (field == null) return null;
+    private int visibleRows() {
+        Object value = readField(this, VISIBLE_ROWS_FIELD);
+        return value instanceof Integer rows ? rows : 0;
+    }
+
+    private static long serverIdOf(Object slotsRow) {
+        Object container = invokeNoArg(slotsRow, "container");
+        Object id = invokeNoArg(container, "getServerId");
+        return id instanceof Long value ? value : Long.MIN_VALUE;
+    }
+
+    private static Object invokeNoArg(Object target, String name) {
+        if (target == null) return null;
+        String key = target.getClass().getName() + "#" + name;
+        Method method = NO_ARG_METHODS.get(key);
+        if (!NO_ARG_METHODS.containsKey(key)) {
+            method = findNoArg(target.getClass(), name);
+            NO_ARG_METHODS.put(key, method);
+        }
+        if (method == null) return null;
+        try {
+            return method.invoke(target);
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
+    private static Method findNoArg(Class<?> type, String name) {
+        Class<?> current = type;
+        while (current != null) {
+            for (Method method : current.getDeclaredMethods()) {
+                if (method.getName().equals(name) && method.getParameterCount() == 0) {
+                    method.setAccessible(true);
+                    return method;
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return null;
+    }
+
+    private static Object readField(Object target, Field field) {
+        if (field == null || target == null) return null;
         try {
             return field.get(target);
         } catch (IllegalAccessException ignored) {
@@ -146,31 +340,29 @@ public final class ShanhaiPatternManagementScreen
         }
     }
 
-    private static Field findEaepOpenUiButtonsField() {
+    private static Field findNamedField(String name) {
+        Field partial = null;
         Class<?> type = GuiExPatternTerminal.class;
         while (type != null) {
             for (Field field : type.getDeclaredFields()) {
-                if (Map.class.isAssignableFrom(field.getType())
-                        && field.getName().contains("openUIButtons")) {
+                if (field.getName().equals(name)) {
                     field.setAccessible(true);
                     return field;
+                }
+                if (partial == null && field.getName().contains(name)) {
+                    field.setAccessible(true);
+                    partial = field;
                 }
             }
             type = type.getSuperclass();
         }
-        return null;
+        return partial;
     }
 
-    private record StockButtonTarget(long serverId, int x, int y) {
+    private record StellarHeaderTarget(List<Long> serverIds, int x, int y) {
         boolean contains(int mouseX, int mouseY) {
-            return mouseX >= x && mouseX < x + 16 && mouseY >= y && mouseY < y + 16;
-        }
-    }
-
-    private record RemoteUiButtonTarget(long serverId, int x, int y) {
-        boolean contains(int mouseX, int mouseY) {
-            return mouseX >= x && mouseX < x + REMOTE_BUTTON_WIDTH
-                    && mouseY >= y && mouseY < y + REMOTE_BUTTON_HEIGHT;
+            return mouseX >= x && mouseX < x + BUTTON_WIDTH
+                    && mouseY >= y && mouseY < y + BUTTON_HEIGHT;
         }
     }
 }

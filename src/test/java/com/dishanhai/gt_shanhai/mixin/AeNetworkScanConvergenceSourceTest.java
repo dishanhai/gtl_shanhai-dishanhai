@@ -63,12 +63,18 @@ class AeNetworkScanConvergenceSourceTest {
         assertTrue(source.contains("storage == service.getInventory()"),
                 "必须断言 storage 就是网络存储：ME 储存箱等单元件 GUI 的 host 也接电网，"
                         + "用网络级缓存顶替会显示整个网络的内容");
-        assertTrue(source.contains("revision - this.gtShanhai$lastInventoryRevision == 1"),
-                "lastChangedKeys 是单槽信箱，revision 跳号（一 tick 多次重扫）时中间变更集已被"
-                        + "覆写丢弃，只有恰好 +1 才能走增量，否则终端数量静默失同步");
+        assertTrue(source.contains("gtShanhai$diffSnapshot"),
+                "不能只信 lastChangedKeys：单槽信箱在 revision 跳号或空发布时会丢掉整格取空，"
+                        + "终端必须用已发送快照和当前缓存做差，数量变成 0 也要下发");
+        assertTrue(source.contains("now != entry.getLongValue()"),
+                "快照差必须包含已消失的 key，否则一次取完整格后终端仍显示该物品");
         assertTrue(source.contains("gtShanhai$pendingResyncRevision"),
-                "跳号回退原版全量 diff 后必须推进 lastInventoryRevision 重新对齐，"
-                        + "否则增量模式永远无法恢复");
+                "首次全量对齐后必须推进 lastInventoryRevision，否则增量模式永远无法恢复");
+        assertTrue(source.contains("gtShanhai$broadcastBaseline"),
+                "previousAvailableStacks 必须留着上一份已下发库存：GTLCore between 读它，"
+                        + "空计数器会让整格取空的 key 从差异里消失");
+        assertTrue(!source.contains("previousAvailableStacks = new KeyCounter()"),
+                "不能在广播结束时把 previous 换成空计数器");
     }
 
     @Test
