@@ -9,11 +9,21 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraftforge.fml.ModList;
 import net.minecraftforge.registries.ForgeRegistries;
+import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
+import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.gregtechceu.gtceu.api.recipe.content.Content;
+import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
+import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.item.crafting.Recipe;
 
 import java.io.Reader;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -94,7 +104,8 @@ public final class DShanhaiJsonRecipeStats {
             } else if (isDisabled(json, config)) {
                 add(counts, type, 2);
             } else {
-                String hint = explainLoadFailure(recipeId.toString(), json, rawType);
+                String hint = explainLoadFailure(recipeId.toString(), json, rawType,
+                        sameBodyRecipeIds(server, recipeId.toString(), rawType, json));
                 GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方載入失敗: {} [{}] {}", recipeId, rawType, hint);
                 add(counts, type, 1);
                 failures.add(new Failure(recipeId.toString(), rawType, hint));
@@ -179,7 +190,7 @@ public final class DShanhaiJsonRecipeStats {
                                      Predicate<String> itemExists,
                                      Predicate<String> fluidExists,
                                      Predicate<String> recipeTypeExists) {
-        return explainLoadFailure(null, json, rawType, itemExists, fluidExists, recipeTypeExists);
+        return explainLoadFailure(null, json, rawType, itemExists, fluidExists, recipeTypeExists, null);
     }
 
     /**
@@ -191,6 +202,18 @@ public final class DShanhaiJsonRecipeStats {
                                      Predicate<String> itemExists,
                                      Predicate<String> fluidExists,
                                      Predicate<String> recipeTypeExists) {
+        return explainLoadFailure(recipeId, json, rawType, itemExists, fluidExists, recipeTypeExists, null);
+    }
+
+    /**
+     * {@code duplicateIds} 是已經在配方表裡、消耗材料和產物與這份 JSON 相同的配方。
+     * 不消耗的物品（chance 為 0，例如模具、電路、wzcz）不計入。沒有對上時仍用通用提示。
+     */
+    static String explainLoadFailure(String recipeId, JsonObject json, String rawType,
+                                     Predicate<String> itemExists,
+                                     Predicate<String> fluidExists,
+                                     Predicate<String> recipeTypeExists,
+                                     List<String> duplicateIds) {
         Set<String> unknownItems = new LinkedHashSet<>();
         Set<String> unknownFluids = new LinkedHashSet<>();
         Set<String> illegalIds = new LinkedHashSet<>();
@@ -212,8 +235,10 @@ public final class DShanhaiJsonRecipeStats {
         }
         String mismatch = enabledIdMismatch(json, recipeId);
         if (mismatch != null) shape.lines.add(mismatch);
-        if (hint.length() == 0 && shape.lines.isEmpty()) return "已寫入資料包，但沒有進入配方表";
-        if (hint.length() == 0) appendPart(hint, "已寫入資料包，但沒有進入配方表");
+        String unloaded = duplicateRemovalHint(duplicateIds);
+        if (unloaded == null) unloaded = "已寫入資料包，但沒有進入配方表";
+        if (hint.length() == 0 && shape.lines.isEmpty()) return unloaded;
+        if (hint.length() == 0) appendPart(hint, unloaded);
         int shown = 0;
         for (String line : shape.lines) {
             if (shown == 4) {
@@ -226,11 +251,189 @@ public final class DShanhaiJsonRecipeStats {
         return hint.toString();
     }
 
-    private static String explainLoadFailure(String recipeId, JsonObject json, String rawType) {
+    private static String explainLoadFailure(String recipeId, JsonObject json, String rawType, List<String> duplicateIds) {
         return explainLoadFailure(recipeId, json, rawType,
                 DShanhaiJsonRecipeStats::itemExists,
                 DShanhaiJsonRecipeStats::fluidExists,
-                DShanhaiJsonRecipeStats::recipeTypeExists);
+                DShanhaiJsonRecipeStats::recipeTypeExists,
+                duplicateIds);
+    }
+
+    /** 消耗的物品、流體，加上全部產物。chance 為 0 的輸入不算。 */
+    static String consumedBody(JsonObject json) {
+        if (json == null) return "";
+        List<String> lines = new ArrayList<>();
+        addJsonSide(lines, "in", json.get("inputs"), true);
+        addJsonSide(lines, "out", json.get("outputs"), false);
+        addJsonSide(lines, "tickOut", json.get("tickOutputs"), false);
+        Collections.sort(lines);
+        return String.join("\n", lines);
+    }
+
+    static String duplicateRemovalHint(List<String> duplicateIds) {
+        if (duplicateIds == null || duplicateIds.isEmpty()) return null;
+        StringBuilder names = new StringBuilder();
+        int shown = 0;
+        for (String id : duplicateIds) {
+            if (id == null || id.isEmpty()) continue;
+            if (shown == 3) {
+                names.append(" 等");
+                break;
+            }
+            if (shown > 0) names.append('、');
+            names.append(id);
+            shown++;
+        }
+        if (shown == 0) return null;
+        return "與 " + names + " 消耗材料和產物相同，被當成重複配方移除";
+    }
+
+    private static List<String> sameBodyRecipeIds(MinecraftServer server, String selfId, String rawType, JsonObject json) {
+        String body = consumedBody(json);
+        if (body.isEmpty() || server == null || rawType == null) return List.of();
+        ResourceLocation parsed = ResourceLocation.tryParse(rawType);
+        if (parsed == null) return List.of();
+        GTRecipeType type;
+        try {
+            type = GTRegistries.RECIPE_TYPES.get(parsed);
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+        if (type == null) return List.of();
+        List<String> hits = new ArrayList<>();
+        try {
+            for (Recipe<?> recipe : server.getRecipeManager().getAllRecipesFor(type)) {
+                if (hits.size() == 3) break;
+                considerDuplicate(hits, selfId, body, recipe);
+            }
+        } catch (RuntimeException e) {
+            GTDishanhaiMod.LOGGER.debug("Unable to compare recipe body for {}: {}", selfId, e.getMessage());
+        }
+        return hits;
+    }
+
+    private static void considerDuplicate(List<String> hits, String selfId, String body, Recipe<?> recipe) {
+        if (!(recipe instanceof GTRecipe gt) || gt.getId() == null) return;
+        String id = gt.getId().toString();
+        if (id.equals(selfId) || hits.contains(id)) return;
+        if (body.equals(consumedBody(gt))) hits.add(id);
+    }
+
+    private static String consumedBody(GTRecipe recipe) {
+        List<String> lines = new ArrayList<>();
+        addGtSide(lines, "in", recipe.inputs, true);
+        addGtSide(lines, "out", recipe.outputs, false);
+        addGtSide(lines, "tickOut", recipe.tickOutputs, false);
+        Collections.sort(lines);
+        return String.join("\n", lines);
+    }
+
+    private static void addGtSide(List<String> lines, String role, Map<?, List<Content>> contents, boolean consumedOnly) {
+        if (contents == null) return;
+        addGtContents(lines, role, contents.get(ItemRecipeCapability.CAP), consumedOnly);
+        addGtContents(lines, role, contents.get(FluidRecipeCapability.CAP), consumedOnly);
+    }
+
+    private static void addGtContents(List<String> lines, String role, List<Content> contents, boolean consumedOnly) {
+        if (contents == null) return;
+        for (Content content : contents) {
+            if (content == null) continue;
+            if (consumedOnly && content.chance == 0) continue;
+            Object inner = content.content;
+            if (inner instanceof Ingredient ingredient) {
+                for (ItemStack stack : ingredient.getItems()) {
+                    if (stack == null || stack.isEmpty()) continue;
+                    ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+                    if (id == null) continue;
+                    String nbt = stack.getTag() == null ? "" : stack.getTag().toString();
+                    lines.add(role + " " + stack.getCount() + "x " + id + nbt + "#c" + content.chance);
+                }
+            } else if (inner instanceof FluidIngredient fluid) {
+                for (FluidStack stack : fluid.getStacks()) {
+                    if (stack == null || stack.isEmpty()) continue;
+                    ResourceLocation id = ForgeRegistries.FLUIDS.getKey(stack.getFluid());
+                    if (id == null) continue;
+                    lines.add(role + " " + stack.getAmount() + "x " + id + "#c" + content.chance);
+                }
+            }
+        }
+    }
+
+    private static void addJsonSide(List<String> lines, String role, JsonElement side, boolean consumedOnly) {
+        if (side == null || !side.isJsonObject()) return;
+        for (Map.Entry<String, JsonElement> entry : side.getAsJsonObject().entrySet()) {
+            if ("eu".equals(entry.getKey()) || !entry.getValue().isJsonArray()) continue;
+            for (JsonElement element : entry.getValue().getAsJsonArray()) {
+                if (element.isJsonObject()) addJsonEntry(lines, role, element.getAsJsonObject(), consumedOnly);
+            }
+        }
+    }
+
+    private static void addJsonEntry(List<String> lines, String role, JsonObject entry, boolean consumedOnly) {
+        int chance = 10000;
+        if (entry.has("chance") && entry.get("chance").isJsonPrimitive()) {
+            try {
+                chance = entry.get("chance").getAsInt();
+            } catch (RuntimeException ignored) {
+                chance = 10000;
+            }
+        }
+        if (consumedOnly && chance == 0) return;
+        if (!entry.has("content") || !entry.get("content").isJsonObject()) return;
+        for (String atom : jsonAtoms(entry.getAsJsonObject("content"))) {
+            lines.add(role + " " + atom + "#c" + chance);
+        }
+    }
+
+    private static List<String> jsonAtoms(JsonObject content) {
+        List<String> atoms = new ArrayList<>();
+        long count = jsonCount(content);
+        if (content.has("type") && content.get("type").isJsonPrimitive()
+                && "gtceu:circuit".equals(content.get("type").getAsString())) {
+            String configuration = content.has("configuration") && content.get("configuration").isJsonPrimitive()
+                    ? content.get("configuration").getAsString() : "?";
+            atoms.add("circuit " + configuration);
+            return atoms;
+        }
+        if (content.has("ingredient") && content.get("ingredient").isJsonObject()) {
+            addItemAtom(atoms, count, content.getAsJsonObject("ingredient"));
+            return atoms;
+        }
+        addItemAtom(atoms, count, content);
+        if (content.has("value") && content.get("value").isJsonArray()) {
+            for (JsonElement value : content.getAsJsonArray("value")) {
+                if (!value.isJsonObject()) continue;
+                JsonObject one = value.getAsJsonObject();
+                if (one.has("fluid") && one.get("fluid").isJsonPrimitive()) {
+                    atoms.add(count + "x " + one.get("fluid").getAsString());
+                } else if (one.has("tag") && one.get("tag").isJsonPrimitive()) {
+                    atoms.add(count + "x #" + one.get("tag").getAsString());
+                }
+            }
+        }
+        return atoms;
+    }
+
+    private static void addItemAtom(List<String> atoms, long count, JsonObject ingredient) {
+        if (ingredient.has("item") && ingredient.get("item").isJsonPrimitive()) {
+            atoms.add(count + "x " + ingredient.get("item").getAsString());
+        } else if (ingredient.has("tag") && ingredient.get("tag").isJsonPrimitive()) {
+            atoms.add(count + "x #" + ingredient.get("tag").getAsString());
+        } else if (ingredient.has("fluid") && ingredient.get("fluid").isJsonPrimitive()) {
+            atoms.add(count + "x " + ingredient.get("fluid").getAsString());
+        }
+    }
+
+    private static long jsonCount(JsonObject content) {
+        for (String key : new String[] {"count", "actualAmount", "amount"}) {
+            if (!content.has(key) || !content.get(key).isJsonPrimitive()) continue;
+            try {
+                return content.get(key).getAsLong();
+            } catch (RuntimeException ignored) {
+                return 1;
+            }
+        }
+        return 1;
     }
 
     private static final class ShapeNotes {

@@ -84,6 +84,7 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
     @Test
     void menuUsesCurrentAe2TrackerAndGridAsTheAuthority() throws Exception {
         String menu = read("common/item/terminal/ShanhaiPatternManagementMenu.java");
+        String detail = read("network/ShanhaiPatternStellarDetailPacket.java");
 
         assertTrue(menu.contains("BY_ID_FIELD"));
         assertTrue(menu.contains("TRACKER_CONTAINER_FIELD"));
@@ -91,6 +92,9 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(menu.contains("ShanhaiPatternContainerMetadataPacket"));
         assertTrue(menu.contains("ShanhaiPatternStellarDetailPacket"));
         assertTrue(menu.contains("stellar.terminalDetail"));
+        assertTrue(detail.contains("detail.proxyCount()"));
+        assertTrue(detail.contains("detail.proxyLines()"));
+        assertTrue(detail.contains("buffer.readUtf(480)"));
     }
 
     @Test
@@ -180,6 +184,9 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(machine.contains("createRemoteRefundUI"));
         assertTrue(machine.contains("remotePlayerInventory(player, width, inventoryY)"));
         assertTrue(machine.contains("setPatternPreviewLevelFallback"));
+        assertTrue(machine.contains("getBoundProxyPositions()"));
+        assertTrue(machine.contains("terminalProxyLines"));
+        assertFalse(machine.contains("getProxies()"));
         assertTrue(holder.contains("OUTPUT_MULTIPLIER"));
         assertTrue(holder.contains("WILDCARD"));
         assertTrue(factory.contains("public boolean openMode"));
@@ -201,6 +208,15 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         assertTrue(screen.contains("controlContains(mouseX - leftPos, mouseY - topPos)"));
         assertTrue(screen.contains("drawDetailPanel(graphics)"));
         assertTrue(screen.contains("detailContains(localX, localY)"));
+        assertTrue(screen.contains("Operation.TELEPORT"));
+        assertTrue(screen.contains("detail.stuckBroadcast()"));
+        assertTrue(screen.contains("detail.hostCount()"));
+        assertTrue(screen.contains("font.split(hit.tooltip(), DETAIL_TOOLTIP_WIDTH)"));
+        assertTrue(screen.contains("parts[index].replace(\" | \", \"\\n\")"));
+        assertTrue(screen.contains("detail.proxyCount()"));
+        assertTrue(screen.contains("detail.proxyLines()"));
+        assertTrue(packet.contains("Operation.TELEPORT"));
+        assertTrue(packet.contains("teleportPlayerToStellar"));
         assertTrue(screen.contains("Operation.OPEN_FULL_PATTERN"));
         assertTrue(screen.contains("Operation.OPEN_OUTPUT_MULTIPLIER"));
         assertTrue(screen.contains("Operation.OPEN_WILDCARD"));

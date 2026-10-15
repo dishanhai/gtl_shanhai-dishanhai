@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.network;
 
+import com.dishanhai.gt_shanhai.command.DShanhaiCommands;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIFactory;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder;
@@ -19,7 +20,8 @@ public final class ShanhaiPatternRemoteConfigPacket {
         OPEN_WILDCARD,
         OPEN_SHARED_INPUTS,
         OPEN_PATTERN_BEHAVIOR,
-        OPEN_REFUND
+        OPEN_REFUND,
+        TELEPORT
     }
 
     private final int menuId;
@@ -64,6 +66,10 @@ public final class ShanhaiPatternRemoteConfigPacket {
         RecipeTypePatternBufferPartMachine stellar = menu.resolveStellarContainer(packet.serverId);
         if (stellar == null) return;
 
+        if (packet.operation == Operation.TELEPORT) {
+            DShanhaiCommands.teleportPlayerToStellar(player, stellar);
+            return;
+        }
         if (packet.operation == Operation.OPEN_SLOT_CATALYST) {
             if (!stellar.isValidRemotePatternSlot(packet.slot)) return;
             ShanhaiStellarRemoteUIFactory.INSTANCE.openSlot(

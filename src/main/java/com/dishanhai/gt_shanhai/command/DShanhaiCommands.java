@@ -1160,6 +1160,23 @@ public class DShanhaiCommands {
         return 1;
     }
 
+    public static void teleportPlayerToStellar(ServerPlayer player, RecipeTypePatternBufferPartMachine stellar) {
+        if (player == null || stellar == null || !(stellar.getLevel() instanceof ServerLevel level)) return;
+        BlockPos pos = stellar.getPos();
+        if (!level.hasChunkAt(pos)) {
+            player.sendSystemMessage(Component.literal("§c[山海] 目标区块未加载，拒绝传送"));
+            return;
+        }
+        if (!(MetaMachine.getMachine(level, pos) instanceof RecipeTypePatternBufferPartMachine)) {
+            player.sendSystemMessage(Component.literal("§c[山海] 目标位置已经不是星律样板总成，拒绝传送"));
+            return;
+        }
+        player.teleportTo(level, pos.getX() + 0.5D, pos.getY() + 1.0D, pos.getZ() + 0.5D,
+                player.getYRot(), player.getXRot());
+        player.sendSystemMessage(Component.literal("§a[山海] 已传送至星律样板总成: "
+                + level.dimension().location() + " " + pos.toShortString()));
+    }
+
     private static int cacheStats(CommandSourceStack source) {
         boolean enabled = DShanhaiConfig.COMMON.runtimeRecipeCacheDiagnostics.get();
         var stats = com.dishanhai.gt_shanhai.api.DShanhaiRuntimeRecipeCache.getDiagnosticsStats();

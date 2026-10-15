@@ -9,6 +9,9 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
 /**
  * 全工程【唯一】引用 gtladditions 非 api 符号的文件。
  *
@@ -107,7 +110,9 @@ public final class GtlAddCompat {
     //
     // ⚠️ 该类里**两种访问形态并存**，别"统一"掉（`javap` 实测）：
     //   · `MOLECULAR_DECONSTRUCTION` 是 **静态字段**；
-    //   · 其余 12 个是 Kotlin object 上的 **getter**（`GTLAddRecipesTypes.INSTANCE.getXxx()`）。
+    //   · 其余是 Kotlin object 上的 **getter**（`GTLAddRecipesTypes.INSTANCE.getXxx()`）。
+    //   · `EVOLUTION_OF_PRIMORDIAL`：3.2.x 是 public 静态字段，3.3.1 起字段改 private、只留 getter。
+    //     见 {@link #evolutionOfPrimordial()}，不要改回直接读字段。
     //
     // ⚠️ 这些 getter 返回的是 Kotlin object 在**首次访问时**构造/注册的 `GTRecipeType`。
     //   与 `GTLAddSoundEntries` 不同，这里返回的是**已注册的配方类型句柄**（gtladditions 自己
@@ -180,26 +185,37 @@ public final class GtlAddCompat {
     }
 
     /**
-     * 转发自 {@code …common.recipe.GTLAddRecipesTypes.EVOLUTION_OF_PRIMORDIAL}
-     * （🆕 2026-10-03；<b>public 静态字段</b>，不是 Kotlin object 的 getter —— 与
-     * {@link #molecularDeconstruction()} 同一种形态，见本类注释里"两种访问形态并存"那一段）。
+     * 太素衍化，注册 id {@code gtceu:evolution_of_primordial}。
      *
-     * <p><b>中文名 = 太素衍化</b>；<b>注册 id = {@code gtceu:evolution_of_primordial}</b>
-     * —— 命名空间是 {@code gtceu}，<b>不是</b> {@code gtladditions}。实证（本轮实际执行，非推断）：
-     * <ol>
-     *   <li>{@code javap -c …GTLAddRecipesTypes} 的 {@code <clinit>} 里，偏移 1192 是
-     *       {@code ldc_w #635 // String evolution_of_primordial}，紧接
-     *       {@code invokestatic GTRecipeTypes.register:(String,String,RecipeType[])} ⇒ gtladditions
-     *       <b>也是调 gtceu 自己的 register</b>；</li>
-     *   <li>{@code javap -c …common.data.GTRecipeTypes} 的 {@code register(String,String,RecipeType...)}
-     *       第一句就是 {@code new GTRecipeType(GTCEu.id(name), group, proxyRecipes)}；</li>
-     *   <li>{@code javap -c …GTCEu.id(String)} = {@code new ResourceLocation("gtceu", toLowerCaseUnder(name))}
-     *       ⇒ 任何走这条路注册的类型，其 registryName 恒为 {@code gtceu:<id>}。</li>
-     * </ol>
-     * 旁证：语言文件键也是 {@code gtceu.evolution_of_primordial}（不在 {@code gtladditions.*} 下），
-     * 出处 {@code handoff/outbound/类型名自动反查.md:514}。
+     * <p>3.2.x 是 public static 字段 {@code EVOLUTION_OF_PRIMORDIAL}；
+     * 3.3.1 起该字段改为 private，只留 {@code getEVOLUTION_OF_PRIMORDIAL()}。
+     * 编译类路径仍是 3.2.8，不能直接写 getter，否则编不过；直接写字段则在 3.3.1
+     * 上 {@code IllegalAccessError}。所以运行期先找 getter，没有再读 public 字段。
      */
     public static GTRecipeType evolutionOfPrimordial() {
-        return GTLAddRecipesTypes.EVOLUTION_OF_PRIMORDIAL;
+        if (evolutionOfPrimordialType != null) {
+            return evolutionOfPrimordialType;
+        }
+        evolutionOfPrimordialType = resolveEvolutionOfPrimordial();
+        return evolutionOfPrimordialType;
+    }
+
+    private static GTRecipeType evolutionOfPrimordialType;
+
+    private static GTRecipeType resolveEvolutionOfPrimordial() {
+        try {
+            Method getter = GTLAddRecipesTypes.class.getMethod("getEVOLUTION_OF_PRIMORDIAL");
+            return (GTRecipeType) getter.invoke(GTLAddRecipesTypes.INSTANCE);
+        } catch (NoSuchMethodException ignored) {
+            // 3.2.x 没有这个 getter
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("gtladditions getEVOLUTION_OF_PRIMORDIAL 调用失败", e);
+        }
+        try {
+            Field field = GTLAddRecipesTypes.class.getField("EVOLUTION_OF_PRIMORDIAL");
+            return (GTRecipeType) field.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("gtladditions 找不到 EVOLUTION_OF_PRIMORDIAL", e);
+        }
     }
 }

@@ -39,8 +39,13 @@ class RecipeTypePatternBufferWildcardIntegrationTest {
         assertTrue(machine.contains("new SlotWidget(wildcardPatternInventory, slot, 34 + slot * 18, 14)"),
                 "通配符配置页必须使用 5×1 横向布局");
         assertTrue(machine.contains("new WidgetGroup(0, 0, 160, 155)")
-                        && machine.contains("new PatternCycleWidget(8, 71, 142, 36, () -> wildcardPatterns)"),
-                "通配符配置页必须使用原版展开样板轮播预览");
+                        && machine.contains("() -> selectedWildcardPreviewPatterns()"),
+                "通配符配置页必须按当前母槽轮播预览");
+        assertTrue(machine.contains("wildcardPreviewByMother")
+                        && machine.contains("addWildcardPreview(motherSlot"),
+                "展开预览必须按母槽分开保存，切换编号时不能回到第一张");
+        assertTrue(machine.contains("selectedWildcardPreviewPatterns().size()"),
+                "展开样板数量必须跟随当前母槽");
         assertTrue(machine.contains("new StellarPatternBufferInternalSlot(globalSlot)"),
                 "展开样板必须使用支持残留库存继续匹配的星律库存型内部槽");
         assertTrue(machine.contains("protected int getInternalSlotCount()")

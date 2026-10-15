@@ -5,8 +5,13 @@ import appeng.api.crafting.PatternDetailsHelper;
 
 import com.dishanhai.gt_shanhai.common.item.generator.PatternGeneratorRecipes;
 import com.dishanhai.gt_shanhai.common.item.generator.PatternGeneratorScale;
-import com.gregtechceu.gtceu.api.item.component.IAddInformation;
+import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
+import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.recipe.content.Content;
+import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
+
+import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
@@ -15,8 +20,10 @@ import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
 
 import org.jetbrains.annotations.Nullable;
@@ -36,23 +43,18 @@ public final class SelectedRecipePattern {
     public static final String RECIPE_ID = "gt_shanhai_bundle_recipe";
     public static final int VERSION = 1;
     public static final int MAX_RECIPES = 4096;
+    /** 悬停只列前几条，剩下的进右键面板。 */
+    public static final int TOOLTIP_RECIPES = 8;
+    /** 面板里每张都是真实样板槽，和工具箱预览同一量级，避免一次同步上千张。 */
+    public static final int PREVIEW_LIMIT = 270;
+    /** GUI 四个角各叠一个物品材质。 */
+    public static final int CORNER_ICONS = 4;
 
     private SelectedRecipePattern() {}
 
     public record Contents(int scale, int outputScale, String recipeType, List<String> recipes) {}
 
     public record Expanded(IPatternDetails pattern, ItemStack stack, GTRecipe recipe) {}
-
-    public static final class Tooltip implements IAddInformation {
-        public static final Tooltip INSTANCE = new Tooltip();
-
-        private Tooltip() {}
-
-        @Override
-        public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> lines, TooltipFlag flag) {
-            SelectedRecipePattern.appendTooltip(stack, lines);
-        }
-    }
 
     public static ItemStack create(Contents contents) {
         CompoundTag tag = write(contents);
@@ -119,9 +121,73 @@ public final class SelectedRecipePattern {
                 PatternGeneratorScale.clamp(data.getInt("outputScale")), recipeType, List.copyOf(ids));
     }
 
-    public static void appendTooltip(ItemStack stack, List<Component> lines) {
+    /**
+     * 按记录顺序取产出物品，跳过流体、空产出和重复物品，最多四个。
+     * 只给客户端角标用，不编码 AE 样板。
+     */
+    public static List<ItemStack> cornerIcons(ItemStack bundle, @Nullable Level level) {
+        Contents contents = bundle == null ? null : read(bundle.getTag());
+        if (contents == null || level == null) return List.of();
+        List<ItemStack> icons = new ArrayList<>(CORNER_ICONS);
+        Set<Item> seen = new HashSet<>();
+        for (String id : contents.recipes()) {
+            if (icons.size() >= CORNER_ICONS) break;
+            collectCornerIcons(level, id, icons, seen);
+        }
+        return List.copyOf(icons);
+    }
+
+    private static void collectCornerIcons(Level level, String id, List<ItemStack> icons, Set<Item> seen) {
+        try {
+            ResourceLocation key = ResourceLocation.tryParse(id);
+            if (key == null || !(level.getRecipeManager().byKey(key).orElse(null) instanceof GTRecipe recipe)) {
+                return;
+            }
+            List<Content> outputs = recipe.getOutputContents(ItemRecipeCapability.CAP);
+            if (outputs == null) return;
+            for (Content content : outputs) {
+                if (icons.size() >= CORNER_ICONS) return;
+                ItemStack icon = firstOutputStack(content);
+                if (icon == null || icon.isEmpty() || isSelf(icon) || !seen.add(icon.getItem())) continue;
+                icons.add(icon);
+            }
+        } catch (RuntimeException ignored) {
+            // 单个配方读失败就跳过，不影响其余角标。
+        }
+    }
+
+    @Nullable
+    private static ItemStack firstOutputStack(@Nullable Content content) {
+        if (content == null) return null;
+        Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
+        if (ingredient == null || ingredient.isEmpty()) return null;
+        ItemStack[] stacks = ingredient.getItems();
+        if (stacks.length == 0 || stacks[0].isEmpty()) return null;
+        ItemStack icon = stacks[0].copy();
+        icon.setCount(1);
+        return icon;
+    }
+
+    private static boolean isSelf(ItemStack stack) {
+        return DShanhaiItems.SELECTED_RECIPE_PATTERN != null
+                && stack.getItem() == DShanhaiItems.SELECTED_RECIPE_PATTERN.get();
+    }
+
+    public static List<String> tooltipIds(@Nullable Contents contents) {
+        if (contents == null || contents.recipes() == null || contents.recipes().isEmpty()) return List.of();
+        int shown = Math.min(TOOLTIP_RECIPES, contents.recipes().size());
+        return List.copyOf(contents.recipes().subList(0, shown));
+    }
+
+    public static void appendTooltip(ItemStack stack, @Nullable Level level, List<Component> lines) {
         Contents contents = read(stack == null ? null : stack.getTag());
-        if (contents == null) return;
+        if (contents == null) {
+            lines.add(Component.translatable("tooltip.gt_shanhai.selected_recipe_pattern.empty")
+                    .withStyle(ChatFormatting.GRAY));
+            lines.add(Component.translatable("tooltip.gt_shanhai.selected_recipe_pattern.open")
+                    .withStyle(ChatFormatting.DARK_GRAY));
+            return;
+        }
         lines.add(Component.translatable("tooltip.gt_shanhai.selected_recipe_pattern.use")
                 .withStyle(ChatFormatting.GRAY));
         lines.add(Component.translatable("tooltip.gt_shanhai.selected_recipe_pattern.count", contents.recipes().size())
@@ -134,11 +200,102 @@ public final class SelectedRecipePattern {
                         .withStyle(ChatFormatting.GRAY));
             }
         }
-        if (contents.scale() != 1 || contents.outputScale() != 1) {
-            lines.add(Component.translatable("tooltip.gt_shanhai.selected_recipe_pattern.scale",
-                    contents.scale(), PatternGeneratorScale.outputFactor(contents.scale(), contents.outputScale()))
-                    .withStyle(ChatFormatting.GRAY));
+        lines.add(Component.translatable("tooltip.gt_shanhai.selected_recipe_pattern.scale",
+                contents.scale(), PatternGeneratorScale.outputFactor(contents.scale(), contents.outputScale()))
+                .withStyle(ChatFormatting.GRAY));
+        List<String> shown = tooltipIds(contents);
+        for (String id : shown) {
+            lines.add(describeRecipe(level, id));
         }
+        int rest = contents.recipes().size() - shown.size();
+        if (rest > 0) {
+            lines.add(Component.translatable("tooltip.gt_shanhai.selected_recipe_pattern.more", rest)
+                    .withStyle(ChatFormatting.DARK_GRAY));
+        }
+        lines.add(Component.translatable("tooltip.gt_shanhai.selected_recipe_pattern.open")
+                .withStyle(ChatFormatting.DARK_GRAY));
+    }
+
+    /** 右键面板用的只读样板。编码失败或配方已不在时给屏障，避免整张清单断掉。 */
+    public static List<ItemStack> previewStacks(ItemStack bundle, @Nullable Level level, int limit) {
+        Contents contents = bundle == null ? null : read(bundle.getTag());
+        if (contents == null || level == null || limit <= 0) return List.of();
+        List<ItemStack> stacks = new ArrayList<>();
+        for (String id : contents.recipes()) {
+            if (stacks.size() >= limit) break;
+            stacks.add(previewStack(id, contents, level));
+        }
+        return stacks;
+    }
+
+    private static ItemStack previewStack(String id, Contents contents, Level level) {
+        try {
+            ResourceLocation key = ResourceLocation.tryParse(id);
+            if (key == null || !(level.getRecipeManager().byKey(key).orElse(null) instanceof GTRecipe recipe)) {
+                return missing(id);
+            }
+            if (recipe.recipeType == null || recipe.recipeType.registryName == null) return missing(id);
+            PatternGeneratorRecipes.Entry entry = PatternGeneratorRecipes.describe(recipe);
+            if (entry.encodedOutputs().isEmpty()) return missing(id);
+            ItemStack encoded = PatternGeneratorRecipes.encodeDefinition(entry, contents.scale(), contents.outputScale());
+            if (encoded.isEmpty()) return missing(id);
+            encoded.getOrCreateTag().putString(RECIPE_ID, recipe.id.toString());
+            encoded.setHoverName(Component.literal(recipe.id.toString()));
+            return encoded;
+        } catch (RuntimeException ignored) {
+            return missing(id);
+        }
+    }
+
+    private static ItemStack missing(String id) {
+        ItemStack stack = new ItemStack(Items.BARRIER);
+        stack.setHoverName(Component.translatable("gui.gt_shanhai.selected_recipe_pattern.missing", id));
+        return stack;
+    }
+
+    private static Component describeRecipe(@Nullable Level level, String id) {
+        Component output = outputName(level, id);
+        if (output == null) return Component.literal(id).withStyle(ChatFormatting.DARK_GRAY);
+        return output.copy().append(Component.literal(" " + id).withStyle(ChatFormatting.DARK_GRAY));
+    }
+
+    @Nullable
+    private static Component outputName(@Nullable Level level, String id) {
+        if (level == null) return null;
+        ResourceLocation key = ResourceLocation.tryParse(id);
+        if (key == null) return null;
+        if (!(level.getRecipeManager().byKey(key).orElse(null) instanceof GTRecipe recipe)) return null;
+        Component item = firstItemName(recipe.getOutputContents(ItemRecipeCapability.CAP));
+        if (item != null) return item;
+        return firstFluidName(recipe.getOutputContents(FluidRecipeCapability.CAP));
+    }
+
+    @Nullable
+    private static Component firstItemName(@Nullable List<Content> contents) {
+        if (contents == null) return null;
+        for (Content content : contents) {
+            if (content == null) continue;
+            Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
+            if (ingredient == null || ingredient.isEmpty()) continue;
+            ItemStack[] stacks = ingredient.getItems();
+            if (stacks.length == 0 || stacks[0].isEmpty()) continue;
+            return stacks[0].getHoverName();
+        }
+        return null;
+    }
+
+    @Nullable
+    private static Component firstFluidName(@Nullable List<Content> contents) {
+        if (contents == null) return null;
+        for (Content content : contents) {
+            if (content == null) continue;
+            FluidIngredient ingredient = FluidRecipeCapability.CAP.of(content.getContent());
+            if (ingredient == null || ingredient.isEmpty()) continue;
+            FluidStack[] stacks = ingredient.getStacks();
+            if (stacks.length == 0 || stacks[0].isEmpty()) continue;
+            return stacks[0].getDisplayName();
+        }
+        return null;
     }
 
     public static List<Expanded> expand(ItemStack bundle, @Nullable Level level) {

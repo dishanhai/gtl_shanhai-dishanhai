@@ -41,6 +41,16 @@ public final class ShanhaiPatternStellarDetailPacket {
             buffer.writeVarInt(detail.circuit());
             buffer.writeVarInt(detail.warnings());
             buffer.writeBoolean(detail.online());
+            buffer.writeVarInt(detail.hostCount());
+            buffer.writeBoolean(detail.hostFormed());
+            buffer.writeInt(detail.hostX());
+            buffer.writeInt(detail.hostY());
+            buffer.writeInt(detail.hostZ());
+            buffer.writeUtf(detail.hostStatus(), 180);
+            buffer.writeUtf(detail.hostRecipeTypes(), 120);
+            buffer.writeUtf(detail.stuckBroadcast(), 960);
+            buffer.writeVarInt(detail.proxyCount());
+            buffer.writeUtf(detail.proxyLines(), 480);
         }
     }
 
@@ -68,7 +78,17 @@ public final class ShanhaiPatternStellarDetailPacket {
                     buffer.readVarLong(),
                     buffer.readVarInt(),
                     buffer.readVarInt(),
-                    buffer.readBoolean()));
+                    buffer.readBoolean(),
+                    buffer.readVarInt(),
+                    buffer.readBoolean(),
+                    buffer.readInt(),
+                    buffer.readInt(),
+                    buffer.readInt(),
+                    buffer.readUtf(180),
+                    buffer.readUtf(120),
+                    buffer.readUtf(960),
+                    buffer.readVarInt(),
+                    buffer.readUtf(480)));
         }
         return new ShanhaiPatternStellarDetailPacket(menuId, details);
     }

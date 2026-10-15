@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -55,5 +56,30 @@ class SelectedRecipePatternTest {
         assertFalse(machine.contains("setFilter(WildcardPatternBridge::isWildcardPattern)"));
         assertTrue(widget.contains("generateBundle"));
         assertTrue(widget.contains("shanhai_pattern_generator.bundle"));
+        String behavior = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "common", "item", "SelectedRecipePatternBehavior.java"));
+        String items = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "common", "item", "DShanhaiItems.java"));
+        String lang = Files.readString(Path.of("src", "main", "resources", "assets", "gt_shanhai", "lang", "zh_cn.json"));
+        assertTrue(behavior.contains("IItemUIFactory"));
+        assertTrue(behavior.contains("useOn"));
+        assertTrue(behavior.contains("previewStacks"));
+        assertTrue(items.contains("SelectedRecipePatternBehavior.INSTANCE"));
+        assertFalse(items.contains("SelectedRecipePattern.Tooltip"));
+        assertTrue(lang.contains("tooltip.gt_shanhai.selected_recipe_pattern.open"));
+        assertTrue(lang.contains("gui.gt_shanhai.selected_recipe_pattern.shown"));
+    }
+
+    @Test
+    void tooltipKeepsOnlyTheLeadingRecipes() {
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < SelectedRecipePattern.TOOLTIP_RECIPES + 2; i++) {
+            ids.add("gtceu:lathe/recipe_" + i);
+        }
+        SelectedRecipePattern.Contents contents = new SelectedRecipePattern.Contents(1, 1, "gtceu:lathe", ids);
+        assertEquals(SelectedRecipePattern.TOOLTIP_RECIPES, SelectedRecipePattern.tooltipIds(contents).size());
+        assertEquals("gtceu:lathe/recipe_0", SelectedRecipePattern.tooltipIds(contents).get(0));
+        assertEquals(List.of("gtceu:lathe/a"), SelectedRecipePattern.tooltipIds(
+                new SelectedRecipePattern.Contents(1, 1, "", List.of("gtceu:lathe/a"))));
     }
 }

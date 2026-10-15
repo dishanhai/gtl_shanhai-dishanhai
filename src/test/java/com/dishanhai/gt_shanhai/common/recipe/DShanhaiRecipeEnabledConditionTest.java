@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -130,6 +131,52 @@ class DShanhaiRecipeEnabledConditionTest {
         String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
                 recipe, "gtceu:electric_implosion_compressor", id -> true, id -> true, id -> true);
         assertEquals("已寫入資料包，但沒有進入配方表", hint);
+    }
+
+    @Test
+    void jsonFailureHintNamesDuplicateRecipe() {
+        JsonObject withCatalyst = JsonParser.parseString("""
+                {"type":"gtceu:precision_laser_engraver",
+                 "inputs":{"item":[
+                   {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"kubejs:pm_wafer"}},"chance":10000},
+                   {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"dishanhai:wzcz1"}},"chance":0},
+                   {"content":{"type":"gtceu:circuit","configuration":1},"chance":0}
+                 ]},
+                 "outputs":{"item":[
+                   {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"kubejs:fm_wafer"}},"chance":10000}
+                 ]}}
+                """).getAsJsonObject();
+        JsonObject sameBody = JsonParser.parseString("""
+                {"type":"gtceu:precision_laser_engraver",
+                 "inputs":{"item":[
+                   {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"kubejs:pm_wafer"}},"chance":10000}
+                 ]},
+                 "outputs":{"item":[
+                   {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"kubejs:fm_wafer"}},"chance":10000}
+                 ]}}
+                """).getAsJsonObject();
+        JsonObject withFluid = JsonParser.parseString("""
+                {"type":"gtceu:precision_laser_engraver",
+                 "inputs":{"item":[
+                   {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"kubejs:pm_wafer"}},"chance":10000}
+                 ],"fluid":[
+                   {"content":{"amount":100,"value":[{"fluid":"gtceu:gamma_rays_photoresist"}]},"chance":10000}
+                 ]},
+                 "outputs":{"item":[
+                   {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"kubejs:fm_wafer"}},"chance":10000}
+                 ]}}
+                """).getAsJsonObject();
+        assertEquals(DShanhaiJsonRecipeStats.consumedBody(sameBody), DShanhaiJsonRecipeStats.consumedBody(withCatalyst));
+        assertFalse(DShanhaiJsonRecipeStats.consumedBody(withFluid).equals(DShanhaiJsonRecipeStats.consumedBody(withCatalyst)));
+        String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
+                "gt_shanhai:precision_laser_engraver/wafer/fm_wafer",
+                withCatalyst,
+                "gtceu:precision_laser_engraver",
+                id -> true,
+                id -> true,
+                id -> true,
+                List.of("lens_module:precision/fm_wafer5"));
+        assertEquals("與 lens_module:precision/fm_wafer5 消耗材料和產物相同，被當成重複配方移除", hint);
     }
 
     @Test

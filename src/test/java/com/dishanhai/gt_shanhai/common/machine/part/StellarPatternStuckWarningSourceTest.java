@@ -46,6 +46,10 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(machine.contains("gtShanhai$clearPatternSlotRuntimeWarning(slot)"));
         assertTrue(machine.contains("HOST_RECIPE_TYPE_ID_CACHE_TICKS"),
                 "推样板热路径不能每次重新收集主机配方类型");
+        assertTrue(machine.contains("gtShanhai$isRuntimeTrackableSlot(slotIndex)"),
+                "通配展开槽也要排卡死检测，不能只看 maxPatternCount 以内的普通样板槽");
+        assertTrue(!machine.contains("slotIndex < maxPatternCount && !isRemote()"),
+                "星律通配样板展开后的槽位号大于 maxPatternCount，旧门槛会直接跳过告警");
         assertTrue(machine.contains("StellarPatternStuckWatch.schedule("));
         assertTrue(machine.contains("gtShanhai$getSlotItemInventory(slot)"));
         assertTrue(machine.contains("gtShanhai$getSlotFluidInventory(slot)"));
@@ -61,6 +65,8 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(watch.contains("level.hasChunkAt(watch.pos)"));
         assertTrue(watch.contains("MetaMachine.getMachine(level, watch.pos) instanceof RecipeTypePatternBufferPartMachine"));
         assertTrue(watch.contains("gtShanhai$setPatternSlotStuckWarning(watch.slot, snapshot.items, snapshot.fluids)"));
+        assertTrue(watch.contains("gtShanhai$rememberStuckBroadcast"));
+        assertTrue(watch.contains("currentHostStatus"));
         assertTrue(watch.contains("gtShanhai$clearPatternSlotRuntimeWarning(watch.slot)"));
         assertTrue(watch.contains("stillContainsAll(snapshot.items"));
         assertTrue(watch.contains("stillContainsAll(snapshot.fluids"));
@@ -81,6 +87,7 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(machine.contains("gtShanhai$setPatternSlotStuckWarning"));
         assertTrue(machine.contains("stuckRuntimeItemSnapshots.put(slot, items)"));
         assertTrue(machine.contains("stuckRuntimeFluidSnapshots.put(slot, fluids)"));
+        assertTrue(machine.contains("stuckRuntimeBroadcasts.remove(slot)"));
         assertTrue(machine.contains("private void gtShanhai$clearResolvedRuntimeWarnings()"));
         assertTrue(machine.contains("protected int[] getActiveSlots()"));
         assertTrue(machine.contains("gtShanhai$clearResolvedRuntimeWarnings();"));
@@ -88,11 +95,17 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(machine.contains("!gtShanhai$stillContainsAll(fluidSnapshot, internalSlot.getFluidInventory())"));
         assertTrue(machine.contains("gtShanhai$refreshPatternSlotWarning(slot)"),
                 "清理卡死红框后必须回到错主机配方类型判定，而不是盲目清空红框");
+        assertTrue(machine.contains("gtShanhai$isRuntimeTrackableSlot(slot)"),
+                "通配展开槽的卡死快照、广播和解除都要跟着内部槽位走");
+        assertTrue(machine.contains("gtShanhai$clearWildcardRuntimeWarnings()"),
+                "通配母槽重展开后必须清掉旧展开槽的卡死记录");
     }
 
     @Test
     void notifierBroadcastsNearbyAndAeRequesterWithUuidDedupeAndRunCommandCoordinate() throws IOException {
         String notifier = Files.readString(NOTIFIER);
+        String machine = Files.readString(MACHINE);
+        String watch = Files.readString(WATCH);
 
         assertTrue(notifier.contains("NEARBY_RADIUS = 500.0D"));
         assertTrue(notifier.contains("NEARBY_RADIUS_SQUARED = NEARBY_RADIUS * NEARBY_RADIUS"));
@@ -102,10 +115,15 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(notifier.contains("ClickEvent.Action.RUN_COMMAND"));
         assertTrue(notifier.contains("/shanhai stellar_tp "));
         assertTrue(notifier.contains("slot + 1"));
+        assertTrue(notifier.contains("displaySlot(slot, slotLabel)"),
+                "通配展开槽要用展开序号，普通槽仍显示 slot + 1");
+        assertTrue(machine.contains("gtShanhai$describeStuckSlot(int slot)"));
+        assertTrue(watch.contains("machine.gtShanhai$describeStuckSlot(slot)"));
         assertTrue(notifier.contains("hostRecipeTypeIds"));
         assertTrue(notifier.contains("patternRecipeTypeId"));
         assertTrue(notifier.contains("stuckInputs"));
         assertTrue(notifier.contains("stuckOutputs"));
+        assertTrue(notifier.contains("broadcastBody"));
     }
 
     @Test

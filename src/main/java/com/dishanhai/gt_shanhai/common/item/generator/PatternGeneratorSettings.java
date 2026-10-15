@@ -248,10 +248,17 @@ public final class PatternGeneratorSettings {
         return !tag.isEmpty() && tags(ghost).contains(tag) ? tag : "";
     }
 
+    /** 空字符串是精确匹配。1.20.1 里 {@code ResourceLocation.tryParse("")} 会得到路径为空的 id，不能当成标签。 */
+    static ResourceLocation filterTag(String tag) {
+        if (tag == null || tag.isBlank()) return null;
+        ResourceLocation parsed = ResourceLocation.tryParse(tag);
+        return parsed == null || parsed.getPath().isEmpty() ? null : parsed;
+    }
+
     public static boolean includes(List<PatternGeneratorFilter.Material> materials, GenericStack ghost, String tag) {
         if (ghost == null) return true;
         boolean fluid = ghost.what() instanceof AEFluidKey;
-        ResourceLocation tagId = ResourceLocation.tryParse(tag);
+        ResourceLocation tagId = filterTag(tag);
         return materials.stream().anyMatch(material -> {
             if (material.fluid() != fluid) return false;
             if (tagId == null) return material.id().equals(ghost.what().getId().toString());

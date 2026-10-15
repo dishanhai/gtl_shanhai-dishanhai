@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.common.item.NativeVirtualSetupState;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
@@ -8,6 +9,7 @@ import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.logic.OCParams;
 import com.gregtechceu.gtceu.api.recipe.logic.OCResult;
 
@@ -82,32 +84,81 @@ public abstract class NativeVirtualFindHandleRecipeMixin {
         for (GTRecipe virtual : virtualRecipes) {
             if (virtual == null) continue;
 
-            GTRecipe modified = machine.fullModifyRecipe(virtual.copy(), ocParams, ocResult);
-            if (modified == null) continue;
-
-            boolean match = RecipeRunnerHelper.matchRecipe(machine, modified)
-                    && modified.matchTickRecipe(machine).isSuccess()
-                    && modified.checkConditions(machine.getRecipeLogic()).isSuccess();
-            if (!match) continue;
-
-            boolean bypassHostLimits = DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get();
-            if (bypassHostLimits) {
-                NativeVirtualSetupState.beginVirtualExecution();
+            GTRecipeType ownedInactive = gtShanhai$ownedInactiveType(virtual);
+            if (ownedInactive != null) {
+                NativeVirtualSetupState.beginOwnedInactiveType(ownedInactive);
             }
             try {
-                setupRecipe(modified);
-            } finally {
+                GTRecipe modified = machine.fullModifyRecipe(virtual.copy(), ocParams, ocResult);
+                if (modified == null) continue;
+
+                boolean match = RecipeRunnerHelper.matchRecipe(machine, modified)
+                        && modified.matchTickRecipe(machine).isSuccess()
+                        && modified.checkConditions(machine.getRecipeLogic()).isSuccess();
+                if (!match) continue;
+
+                boolean bypassHostLimits = DShanhaiConfig.COMMON.recipeTypePatternAllowCheatVirtualExecution.get();
                 if (bypassHostLimits) {
-                    NativeVirtualSetupState.endVirtualExecution();
+                    NativeVirtualSetupState.beginVirtualExecution();
+                }
+                try {
+                    setupRecipe(modified);
+                } finally {
+                    if (bypassHostLimits) {
+                        NativeVirtualSetupState.endVirtualExecution();
+                    }
+                }
+
+                if (lastRecipe != null && getStatus() == RecipeLogic.Status.WORKING) {
+                    lastOriginRecipe = virtual;
+                    recipeDirty = false;
+                    ci.cancel();
+                    return;
+                }
+            } finally {
+                if (ownedInactive != null) {
+                    NativeVirtualSetupState.endOwnedInactiveType();
                 }
             }
-
-            if (lastRecipe != null && getStatus() == RecipeLogic.Status.WORKING) {
-                lastOriginRecipe = virtual;
-                recipeDirty = false;
-                ci.cancel();
-                return;
-            }
         }
+    }
+
+    /**
+     * 单配方切换机器（大型切割机：切割机/车床）当前没选中的类型，
+     * 在这一轮 setup 里让 getRecipeType() 回报样板类型。不改玩家选中的模式。
+     * 作弊破限的 beforeWorking 整段跳过仍然只由 allowCheatVirtualExecution 控制。
+     */
+    @Inject(method = "setupRecipe", at = @At("HEAD"), remap = false)
+    private void gtShanhai$beginOwnedInactiveType(GTRecipe recipe, CallbackInfo ci) {
+        if (NativeVirtualSetupState.ownedInactiveType() != null) return;
+        GTRecipeType ownedInactive = gtShanhai$ownedInactiveType(recipe);
+        if (ownedInactive != null) {
+            NativeVirtualSetupState.beginOwnedInactiveType(ownedInactive);
+        }
+    }
+
+    @Inject(method = "setupRecipe", at = @At("RETURN"), remap = false)
+    private void gtShanhai$endOwnedInactiveType(GTRecipe recipe, CallbackInfo ci) {
+        NativeVirtualSetupState.endOwnedInactiveType();
+    }
+
+    private GTRecipeType gtShanhai$ownedInactiveType(GTRecipe recipe) {
+        if (recipe == null || recipe.recipeType == null) return null;
+        if (machine instanceof SelectableRecipeTypeSetMachine) return null;
+        GTRecipeType[] types = machine.getRecipeTypes();
+        if (types == null || types.length < 2) return null;
+        int activeIndex = machine.getActiveRecipeType();
+        GTRecipeType active = activeIndex >= 0 && activeIndex < types.length ? types[activeIndex] : null;
+        if (gtShanhai$sameRecipeType(active, recipe.recipeType)) return null;
+        for (int i = 0; i < types.length; i++) {
+            if (gtShanhai$sameRecipeType(types[i], recipe.recipeType)) return types[i];
+        }
+        return null;
+    }
+
+    private static boolean gtShanhai$sameRecipeType(GTRecipeType left, GTRecipeType right) {
+        if (left == right) return true;
+        return left != null && right != null && left.registryName != null
+                && left.registryName.equals(right.registryName);
     }
 }

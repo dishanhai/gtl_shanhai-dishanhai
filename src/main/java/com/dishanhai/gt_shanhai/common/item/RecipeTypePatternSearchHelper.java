@@ -341,7 +341,33 @@ public final class RecipeTypePatternSearchHelper {
             collectMarkedPatternRecipesFromMachine(machine, null, part, patternMachine,
                     readActiveSlots(patternMachine, patternMachine), result, true);
         }
+        appendInactiveHostCachedRecipes(machine, result);
         return applyRecipeTypeSwitch(machine, result);
+    }
+
+    /**
+     * GTLCore 的配方查找只搜 {@code getRecipeType()}（当前选中的那一个），
+     * 并把样板缓存滤成 {@code recipe.recipeType == 查找类型}。
+     * 大型切割机停在切割机时，车床样板因此进不了候选。
+     * 这里把宿主拥有、但当前没选中的已缓存样板配方补进虚拟执行链。
+     */
+    private static void appendInactiveHostCachedRecipes(IRecipeLogicMachine machine, Set<GTRecipe> result) {
+        if (!(machine instanceof IRecipeCapabilityMachine capabilityMachine)) return;
+        if (machine instanceof SelectableRecipeTypeSetMachine) return;
+        GTRecipeType active = machine.getRecipeType();
+        List<MEPatternRecipeHandlePart> parts = capabilityMachine.getMEPatternRecipeHandleParts();
+        if (parts == null || parts.isEmpty()) return;
+        for (int i = 0; i < parts.size(); i++) {
+            MEPatternRecipeHandlePart part = parts.get(i);
+            if (part == null) continue;
+            Set<GTRecipe> cached = part.getCachedGTRecipe();
+            if (cached == null || cached.isEmpty()) continue;
+            for (GTRecipe recipe : cached) {
+                if (recipe == null || recipe.recipeType == null) continue;
+                if (recipeTypeEquals(recipe.recipeType, active)) continue;
+                result.add(recipe);
+            }
+        }
     }
 
     public static Set<GTRecipe> collectMarkedPatternRecipesFromBuffer(IRecipeLogicMachine machine, Object buffer) {

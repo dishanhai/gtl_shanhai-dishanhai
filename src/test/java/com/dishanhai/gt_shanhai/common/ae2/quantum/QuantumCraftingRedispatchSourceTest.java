@@ -32,6 +32,20 @@ class QuantumCraftingRedispatchSourceTest {
     }
 
     @Test
+    void byproductOutputsFinishTogether() throws IOException {
+        String logic = Files.readString(LOGIC);
+        String insert = logic.substring(logic.indexOf("public long insert(AEKey what"),
+                logic.indexOf("public void cancel()"));
+        String finishWhen = "job.remainingAmount <= 0 && job.waitingFor.list.isEmpty()";
+        int first = insert.indexOf(finishWhen);
+        int stored = insert.indexOf("inventory.insert(what, amount, Actionable.MODULATE);");
+        int second = stored < 0 ? -1 : insert.indexOf(finishWhen, stored);
+
+        assertTrue(first >= 0 && second > first,
+                "主产物先回到 CPU 时不能收工；最后一份副产物入库后才一起结清");
+    }
+
+    @Test
     void menuActionTargetsTheSelectedQuantumCpu() throws IOException {
         String menu = Files.readString(MENU);
 

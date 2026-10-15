@@ -24,6 +24,7 @@ import java.util.Set;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
@@ -49,9 +50,11 @@ public final class ShanhaiPatternManagementScreen
     private static final int PANEL_TEXT = 0xFFE7F2FA;
     private static final int DETAIL_WIDTH = 120;
     private static final int DETAIL_GAP = 4;
+    private static final int DETAIL_TOOLTIP_WIDTH = 220;
     private static final int DETAIL_LABEL = 0xFF9BB4CC;
     private static final int DETAIL_WARN = 0xFFE0A15A;
     private static final int DETAIL_OFFLINE = 0xFFE07A7A;
+    private static final int DETAIL_LINK = 0xFF7EC8E3;
 
     private static final Operation[] CONTROL_ACTIONS = {
             Operation.OPEN_FULL_PATTERN,
@@ -79,6 +82,7 @@ public final class ShanhaiPatternManagementScreen
     private static final Map<String, Method> NO_ARG_METHODS = new HashMap<>();
 
     private final List<StellarHeaderTarget> headerTargets = new ArrayList<>();
+    private final List<DetailHit> detailHits = new ArrayList<>();
     private final Set<Integer> stellarHeaderRows = new HashSet<>();
     private boolean controlOpen;
     private List<Long> controlServerIds = List.of();
@@ -126,6 +130,15 @@ public final class ShanhaiPatternManagementScreen
             graphics.renderTooltip(font, Component.translatable("gui.gt_shanhai.stellar_remote.button"),
                     mouseX, mouseY);
             break;
+        }
+        if (controlOpen) {
+            DetailHit hit = detailHitAt(localX, localY);
+            if (hit != null && hit.tooltip() != null) {
+                List<FormattedCharSequence> wrapped = font.split(hit.tooltip(), DETAIL_TOOLTIP_WIDTH);
+                if (!wrapped.isEmpty()) {
+                    graphics.renderTooltip(font, wrapped, mouseX, mouseY);
+                }
+            }
         }
     }
 
@@ -202,7 +215,13 @@ public final class ShanhaiPatternManagementScreen
     }
 
     private boolean handleControlClick(int localX, int localY) {
-        if (detailContains(localX, localY)) return true;
+        if (detailContains(localX, localY)) {
+            if (teleportLineContains(localX, localY)) {
+                ShanhaiNetwork.CHANNEL.sendToServer(new ShanhaiPatternRemoteConfigPacket(
+                        getMenu().containerId, selectedServerId, Operation.TELEPORT, 0));
+            }
+            return true;
+        }
         if (!actionContains(localX, localY)) {
             controlOpen = false;
             return true;
@@ -297,10 +316,7 @@ public final class ShanhaiPatternManagementScreen
     }
 
     private int detailHeight(StellarTerminalDetail detail) {
-        int lines = detail == null ? 1 : 7;
-        if (detail != null && showHost(detail)) lines++;
-        if (detail != null && detail.warnings() > 0) lines++;
-        return 6 + lines * ROW_STRIDE;
+        return 6 + detailLines(detail).size() * ROW_STRIDE;
     }
 
     private static boolean showHost(StellarTerminalDetail detail) {
@@ -310,48 +326,136 @@ public final class ShanhaiPatternManagementScreen
 
     private void drawDetailPanel(GuiGraphics graphics) {
         StellarTerminalDetail detail = selectedDetail();
-        int height = detailHeight(detail);
+        List<DetailLine> lines = detailLines(detail);
+        int height = 6 + lines.size() * ROW_STRIDE;
         int x = detailX();
         int y = detailY(height);
         graphics.fill(x - 1, y - 1, x + DETAIL_WIDTH + 1, y + height + 1, PANEL_BORDER);
         graphics.fill(x, y, x + DETAIL_WIDTH, y + height, PANEL_BG);
+        detailHits.clear();
         int textY = y + 3;
         int textX = x + 4;
-        if (detail == null) {
-            drawDetailLine(graphics, textX, textY, Component.translatable("gui.gt_shanhai.stellar_remote.detail.pending"),
-                    DETAIL_LABEL);
-            return;
+        for (DetailLine line : lines) {
+            Component shown = trimDetail(line.text());
+            graphics.drawString(font, shown, textX, textY, line.color(), false);
+            if (line.teleport()) {
+                int underline = Math.min(font.width(shown), DETAIL_WIDTH - 8);
+                graphics.fill(textX, textY + 9, textX + underline, textY + 10, line.color());
+            }
+            if (line.tooltip() != null || line.teleport()) {
+                detailHits.add(new DetailHit(textX, textY, DETAIL_WIDTH - 8, ROW_STRIDE,
+                        line.tooltip(), line.teleport()));
+            }
+            textY += ROW_STRIDE;
         }
-        textY = drawDetailLine(graphics, textX, textY, detail.name(), PANEL_TEXT);
-        if (showHost(detail)) {
-            textY = drawDetailLine(graphics, textX, textY, detail.host(), DETAIL_LABEL);
-        }
-        textY = drawDetailLine(graphics, textX, textY, Component.translatable(
-                "gui.gt_shanhai.stellar_remote.detail.pos", detail.x(), detail.y(), detail.z()), DETAIL_LABEL);
-        textY = drawDetailLine(graphics, textX, textY, Component.translatable(
-                "gui.gt_shanhai.stellar_remote.detail.patterns", detail.filledPatterns(), detail.patternCapacity()),
-                PANEL_TEXT);
-        textY = drawDetailLine(graphics, textX, textY, Component.translatable(
-                "gui.gt_shanhai.stellar_remote.detail.wildcard", detail.wildcardMothers(), detail.wildcardExpanded()),
-                PANEL_TEXT);
-        textY = drawDetailLine(graphics, textX, textY, detail.multiplierEnabled()
-                ? Component.translatable("gui.gt_shanhai.stellar_remote.detail.multiplier", detail.multiplier())
-                : Component.translatable("gui.gt_shanhai.stellar_remote.detail.multiplier_off"), PANEL_TEXT);
-        textY = drawDetailLine(graphics, textX, textY, detail.circuit() < 0
-                ? Component.translatable("gui.gt_shanhai.stellar_remote.detail.circuit_none")
-                : Component.translatable("gui.gt_shanhai.stellar_remote.detail.circuit", detail.circuit()), PANEL_TEXT);
-        if (detail.warnings() > 0) {
-            textY = drawDetailLine(graphics, textX, textY, Component.translatable(
-                    "gui.gt_shanhai.stellar_remote.detail.warnings", detail.warnings()), DETAIL_WARN);
-        }
-        drawDetailLine(graphics, textX, textY, Component.translatable(detail.online()
-                ? "gui.gt_shanhai.stellar_remote.detail.online"
-                : "gui.gt_shanhai.stellar_remote.detail.offline"), detail.online() ? DETAIL_LABEL : DETAIL_OFFLINE);
     }
 
-    private int drawDetailLine(GuiGraphics graphics, int x, int y, Component text, int color) {
-        graphics.drawString(font, trimDetail(text), x, y, color, false);
-        return y + ROW_STRIDE;
+    private List<DetailLine> detailLines(StellarTerminalDetail detail) {
+        List<DetailLine> lines = new ArrayList<>();
+        if (detail == null) {
+            lines.add(new DetailLine(Component.translatable("gui.gt_shanhai.stellar_remote.detail.pending"),
+                    DETAIL_LABEL, null, false));
+            return lines;
+        }
+        lines.add(new DetailLine(detail.name(), PANEL_TEXT, null, false));
+        if (showHost(detail)) {
+            lines.add(new DetailLine(detail.host(), DETAIL_LABEL, null, false));
+        }
+        lines.add(new DetailLine(Component.translatable(
+                "gui.gt_shanhai.stellar_remote.detail.pos", detail.x(), detail.y(), detail.z()),
+                DETAIL_LINK, Component.translatable("gui.gt_shanhai.stellar_remote.detail.teleport"), true));
+        if (detail.proxyCount() <= 0) {
+            lines.add(new DetailLine(Component.translatable("gui.gt_shanhai.stellar_remote.detail.proxies_none"),
+                    DETAIL_LABEL, null, false));
+        } else {
+            Component proxies = Component.translatable(
+                    "gui.gt_shanhai.stellar_remote.detail.proxies", detail.proxyCount());
+            Component proxyTip = detail.proxyLines().isEmpty()
+                    ? proxies
+                    : Component.literal(detail.proxyLines());
+            lines.add(new DetailLine(proxies, PANEL_TEXT, proxyTip, false));
+        }
+        if (detail.hostCount() > 0) {
+            lines.add(new DetailLine(Component.translatable(
+                    "gui.gt_shanhai.stellar_remote.detail.host_count", detail.hostCount()),
+                    DETAIL_LABEL, null, false));
+            Component types = detail.hostRecipeTypes().isEmpty()
+                    ? Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_types_none")
+                    : Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_types", detail.hostRecipeTypes());
+            lines.add(new DetailLine(types, PANEL_TEXT, types, false));
+            Component status = hostStatusLine(detail);
+            lines.add(new DetailLine(status, detail.hostStatus().isEmpty() ? DETAIL_LABEL : DETAIL_WARN, status, false));
+            Component hostPos = Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_pos",
+                    detail.hostX(), detail.hostY(), detail.hostZ());
+            lines.add(new DetailLine(hostPos, DETAIL_LABEL, hostPos, false));
+        }
+        lines.add(new DetailLine(Component.translatable(
+                "gui.gt_shanhai.stellar_remote.detail.patterns", detail.filledPatterns(), detail.patternCapacity()),
+                PANEL_TEXT, null, false));
+        lines.add(new DetailLine(Component.translatable(
+                "gui.gt_shanhai.stellar_remote.detail.wildcard", detail.wildcardMothers(), detail.wildcardExpanded()),
+                PANEL_TEXT, null, false));
+        lines.add(new DetailLine(detail.multiplierEnabled()
+                ? Component.translatable("gui.gt_shanhai.stellar_remote.detail.multiplier", detail.multiplier())
+                : Component.translatable("gui.gt_shanhai.stellar_remote.detail.multiplier_off"),
+                PANEL_TEXT, null, false));
+        lines.add(new DetailLine(detail.circuit() < 0
+                ? Component.translatable("gui.gt_shanhai.stellar_remote.detail.circuit_none")
+                : Component.translatable("gui.gt_shanhai.stellar_remote.detail.circuit", detail.circuit()),
+                PANEL_TEXT, null, false));
+        if (detail.warnings() > 0) {
+            lines.add(new DetailLine(Component.translatable(
+                    "gui.gt_shanhai.stellar_remote.detail.warnings", detail.warnings()),
+                    DETAIL_WARN, null, false));
+        }
+        if (detail.stuckBroadcast() != null && !detail.stuckBroadcast().isEmpty()) {
+            String[] parts = detail.stuckBroadcast().split("\n", -1);
+            for (int index = 0; index < parts.length; index++) {
+                if (parts[index].isEmpty()) continue;
+                Component stuck = Component.literal(parts[index]);
+                lines.add(new DetailLine(stuck, DETAIL_WARN,
+                        Component.literal(parts[index].replace(" | ", "\n")), false));
+            }
+        }
+        lines.add(new DetailLine(Component.translatable(detail.online()
+                ? "gui.gt_shanhai.stellar_remote.detail.online"
+                : "gui.gt_shanhai.stellar_remote.detail.offline"),
+                detail.online() ? DETAIL_LABEL : DETAIL_OFFLINE, null, false));
+        return lines;
+    }
+
+    private static Component hostStatusLine(StellarTerminalDetail detail) {
+        if (!detail.hostStatus().isEmpty()) {
+            return Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_status", detail.hostStatus());
+        }
+        if (!detail.hostFormed()) {
+            return Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_unformed");
+        }
+        return Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_running");
+    }
+
+    private boolean teleportLineContains(int localX, int localY) {
+        List<DetailLine> lines = detailLines(selectedDetail());
+        int y = detailY(6 + lines.size() * ROW_STRIDE) + 3;
+        int x = detailX();
+        for (DetailLine line : lines) {
+            if (line.teleport() && localX >= x && localX < x + DETAIL_WIDTH
+                    && localY >= y && localY < y + ROW_STRIDE) {
+                return true;
+            }
+            y += ROW_STRIDE;
+        }
+        return false;
+    }
+
+    private DetailHit detailHitAt(int localX, int localY) {
+        for (DetailHit hit : detailHits) {
+            if (localX >= hit.x() && localY >= hit.y()
+                    && localX < hit.x() + hit.width() && localY < hit.y() + hit.height()) {
+                return hit;
+            }
+        }
+        return null;
     }
 
     private Component trimDetail(Component text) {
@@ -484,6 +588,10 @@ public final class ShanhaiPatternManagementScreen
         }
         return partial;
     }
+
+    private record DetailLine(Component text, int color, Component tooltip, boolean teleport) {}
+
+    private record DetailHit(int x, int y, int width, int height, Component tooltip, boolean teleport) {}
 
     private record StellarHeaderTarget(List<Long> serverIds, int x, int y) {
         boolean contains(int mouseX, int mouseY) {

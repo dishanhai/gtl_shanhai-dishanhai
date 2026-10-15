@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item.generator;
 
+import net.minecraft.resources.ResourceLocation;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -9,10 +11,19 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PatternGeneratorCoreTest {
+    @Test
+    void blankFilterTagStaysExactMatch() {
+        assertNull(PatternGeneratorSettings.filterTag(null));
+        assertNull(PatternGeneratorSettings.filterTag(""));
+        assertNull(PatternGeneratorSettings.filterTag("   "));
+        assertEquals(new ResourceLocation("forge", "ingots"), PatternGeneratorSettings.filterTag("forge:ingots"));
+    }
+
     @Test
     void keywordsIgnoreQuotesAndDuplicates() {
         assertEquals(List.of("iron", "ingot"), PatternGeneratorFilter.keywords("  \"Iron\"  ingot iron "));

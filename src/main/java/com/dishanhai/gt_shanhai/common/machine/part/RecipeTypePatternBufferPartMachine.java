@@ -36,7 +36,10 @@ import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.UITemplate;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
+import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
+import com.gregtechceu.gtceu.api.machine.multiblock.MultiblockControllerMachine;
+import com.gregtechceu.gtceu.api.machine.multiblock.part.MultiblockPartMachine;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
@@ -82,6 +85,7 @@ import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
 import it.unimi.dsi.fastutil.Pair;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
@@ -169,6 +173,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             new Int2ReferenceOpenHashMap<>();
     private final Int2ReferenceOpenHashMap<Object2LongMap<AEFluidKey>> stuckRuntimeFluidSnapshots =
             new Int2ReferenceOpenHashMap<>();
+    private final Int2ReferenceOpenHashMap<String> stuckRuntimeBroadcasts = new Int2ReferenceOpenHashMap<>();
 
     @Persisted
     private final ItemStackTransfer wildcardPatternInventory;
@@ -188,6 +193,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     @Nullable
     private TickableSubscription outputMultiplierHostSyncSubscription;
     private final List<IPatternDetails> wildcardPatterns;
+    private final List<List<IPatternDetails>> wildcardPreviewByMother;
     private final List<ItemStack> wildcardPatternStacks;
     private final List<MEPatternBufferPartMachineBase.InternalSlot> wildcardInternalSlots;
     private final List<GTRecipe> wildcardResolvedRecipes;
@@ -222,6 +228,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         this.patternRecipeTypeIds = new String[patternsPerRow * rowsPerPage * maxPages];
         Arrays.fill(this.patternRecipeTypeIds, "");
         this.wildcardPatterns = new ObjectArrayList<>();
+        this.wildcardPreviewByMother = new ObjectArrayList<>();
+        for (int previewSlot = 0; previewSlot < WILDCARD_PATTERN_SLOT_COUNT; previewSlot++) {
+            this.wildcardPreviewByMother.add(new ObjectArrayList<>());
+        }
         this.wildcardPatternStacks = new ObjectArrayList<>();
         this.wildcardInternalSlots = new ObjectArrayList<>();
         this.wildcardResolvedRecipes = new ObjectArrayList<>();
@@ -262,7 +272,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public boolean pushPattern(IPatternDetails patternDetails, KeyCounter[] inputHolder) {
         Integer slotIndex = getSlotIndexForPattern(patternDetails);
         boolean accepted = super.pushPattern(patternDetails, inputHolder);
-        if (accepted && slotIndex != null && slotIndex >= 0 && slotIndex < maxPatternCount && !isRemote()) {
+        if (accepted && slotIndex != null && gtShanhai$isRuntimeTrackableSlot(slotIndex) && !isRemote()) {
             int slot = slotIndex;
             gtShanhai$clearPatternSlotRuntimeWarning(slot);
             StellarPatternStuckWatch.schedule(
@@ -1212,7 +1222,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     public void gtShanhai$setPatternSlotStuckWarning(int slot,
             Object2LongMap<AEItemKey> itemSnapshot, Object2LongMap<AEFluidKey> fluidSnapshot) {
-        if (slot < 0 || slot >= maxPatternCount) return;
+        if (!gtShanhai$isRuntimeTrackableSlot(slot)) return;
         Object2LongMap<AEItemKey> items = gtShanhai$copyPositiveSnapshot(itemSnapshot);
         Object2LongMap<AEFluidKey> fluids = gtShanhai$copyPositiveSnapshot(fluidSnapshot);
         if (items.isEmpty() && fluids.isEmpty()) {
@@ -1222,13 +1232,22 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         stuckRuntimeWarningSlots.set(slot);
         stuckRuntimeItemSnapshots.put(slot, items);
         stuckRuntimeFluidSnapshots.put(slot, fluids);
-        gtShanhai$setPatternSlotWarning(slot, true);
+        if (slot < maxPatternCount) {
+            gtShanhai$setPatternSlotWarning(slot, true);
+        }
+    }
+
+    public void gtShanhai$rememberStuckBroadcast(int slot, String text) {
+        if (!gtShanhai$isRuntimeTrackableSlot(slot) || text == null || text.isEmpty()) return;
+        stuckRuntimeBroadcasts.put(slot, text);
     }
 
     public void gtShanhai$clearPatternSlotRuntimeWarning(int slot) {
-        if (slot < 0 || slot >= maxPatternCount) return;
+        if (!gtShanhai$isRuntimeTrackableSlot(slot)) return;
         gtShanhai$clearPatternSlotRuntimeSnapshot(slot);
-        gtShanhai$refreshPatternSlotWarning(slot);
+        if (slot < maxPatternCount) {
+            gtShanhai$refreshPatternSlotWarning(slot);
+        }
     }
 
     public void gtShanhai$clearPatternSlotWarnings() {
@@ -1559,8 +1578,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                             selectedWildcardMotherSlot + 1, currentWildcardRecipeTypeText(hostTypes)).getString()));
             group.addWidget(new LabelWidget(8, 59,
                     () -> Component.translatable("gui.gt_shanhai.wildcard_pattern_expanded",
-                            wildcardPatterns.size()).getString()));
-            group.addWidget(new PatternCycleWidget(8, 71, 142, 36, () -> wildcardPatterns));
+                            selectedWildcardPreviewPatterns().size()).getString()));
+            group.addWidget(new PatternCycleWidget(8, 71, 142, 36,
+                    () -> selectedWildcardPreviewPatterns()));
 
             recipeTypeList = new DraggableScrollableWidgetGroup(8, 111, 142, 42);
             recipeTypeList.setBackground(com.gregtechceu.gtceu.api.gui.GuiTextures.DISPLAY);
@@ -1610,6 +1630,18 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             fillConfigurator(configuratorPage);
             if (recipeTypeList != null) recipeTypeList.setScrollYOffset(scrollY);
         }
+    }
+
+    private List<IPatternDetails> selectedWildcardPreviewPatterns() {
+        int slot = selectedWildcardMotherSlot;
+        if (slot < 0 || slot >= wildcardPreviewByMother.size()) return List.of();
+        List<IPatternDetails> preview = wildcardPreviewByMother.get(slot);
+        return preview == null ? List.of() : preview;
+    }
+
+    private void addWildcardPreview(int motherSlot, @Nullable IPatternDetails pattern) {
+        if (pattern == null || motherSlot < 0 || motherSlot >= wildcardPreviewByMother.size()) return;
+        wildcardPreviewByMother.get(motherSlot).add(pattern);
     }
 
     private String currentWildcardRecipeTypeId() {
@@ -1800,17 +1832,19 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return WildcardPatternBridge.isWildcardPattern(stack) || SelectedRecipePattern.isPattern(stack);
     }
 
-    private void rememberWildcardPattern(Map<CompoundTag, ExpandedWildcardPattern> uniquePatterns,
+    @Nullable
+    private IPatternDetails rememberWildcardPattern(Map<CompoundTag, ExpandedWildcardPattern> uniquePatterns,
             IPatternDetails pattern, ItemStack patternStack, GTRecipe recipe, String assignedTypeId) {
-        if (pattern == null || patternStack == null || patternStack.isEmpty()) return;
+        if (pattern == null || patternStack == null || patternStack.isEmpty()) return null;
         if (recipe != null) PatternRecipeTypeHelper.writeRecipeType(patternStack, recipe);
         IPatternDetails effectivePattern = gtShanhai$applyOutputMultiplier(pattern, patternStack);
-        if (effectivePattern == null) return;
+        if (effectivePattern == null) return null;
         ItemStack effectiveStack = effectivePattern.getDefinition().toStack();
-        if (effectiveStack.isEmpty()) return;
+        if (effectiveStack.isEmpty()) return null;
         if (recipe != null) PatternRecipeTypeHelper.writeRecipeType(effectiveStack, recipe);
         uniquePatterns.putIfAbsent(effectiveStack.serializeNBT(),
                 new ExpandedWildcardPattern(effectivePattern, effectiveStack, recipe, assignedTypeId));
+        return effectivePattern;
     }
 
     private void refreshWildcardPatterns(boolean restorePersistedData) {
@@ -1830,7 +1864,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                             || !assignedTypeId.equals(recipe.recipeType.registryName.toString()))) {
                         continue;
                     }
-                    rememberWildcardPattern(uniquePatterns, expanded.pattern(), expanded.stack(), recipe, assignedTypeId);
+                    addWildcardPreview(motherSlot, rememberWildcardPattern(uniquePatterns,
+                            expanded.pattern(), expanded.stack(), recipe, assignedTypeId));
                 }
                 continue;
             }
@@ -1839,7 +1874,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 if (patternStack.isEmpty()) continue;
                 GTRecipe recipe = WildcardPatternRecipeTypeBinding.findRecipe(pattern, assignedTypeId);
                 if (!assignedTypeId.isEmpty() && recipe == null) continue;
-                rememberWildcardPattern(uniquePatterns, pattern, patternStack, recipe, assignedTypeId);
+                addWildcardPreview(motherSlot, rememberWildcardPattern(uniquePatterns,
+                        pattern, patternStack, recipe, assignedTypeId));
             }
         }
 
@@ -1896,11 +1932,18 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
         if (wildcardRecipeCache != null) wildcardRecipeCache.clear();
         if (wildcardPatterns != null) wildcardPatterns.clear();
+        if (wildcardPreviewByMother != null) {
+            for (int motherSlot = 0; motherSlot < wildcardPreviewByMother.size(); motherSlot++) {
+                List<IPatternDetails> preview = wildcardPreviewByMother.get(motherSlot);
+                if (preview != null) preview.clear();
+            }
+        }
         if (wildcardPatternStacks != null) wildcardPatternStacks.clear();
         if (wildcardInternalSlots != null) wildcardInternalSlots.clear();
         if (wildcardResolvedRecipes != null) wildcardResolvedRecipes.clear();
         if (wildcardAssignedRecipeTypeIds != null) wildcardAssignedRecipeTypeIds.clear();
         if (wildcardPatternToSlot != null) wildcardPatternToSlot.clear();
+        gtShanhai$clearWildcardRuntimeWarnings();
         if ((Object) this instanceof VirtualPatternBufferMachineAccess access) {
             access.gtShanhai$invalidateRefundSlotIndex();
         }
@@ -1975,15 +2018,24 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 ? Component.translatable(getDefinition().getDescriptionId())
                 : Component.literal(this.customName);
         Component host = Component.empty();
+        int hostCount = 0;
+        boolean hostFormed = false;
+        int hostX = 0;
+        int hostY = 0;
+        int hostZ = 0;
         List<? extends IMultiController> controllers = getControllers();
         if (controllers != null) {
             for (int index = 0; index < controllers.size(); index++) {
                 IMultiController controller = controllers.get(index);
-                if (controller == null || controller.self() == null || controller.self().getDefinition() == null) {
-                    continue;
-                }
-                host = Component.translatable(controller.self().getDefinition().getDescriptionId());
-                break;
+                if (controller == null) continue;
+                hostCount++;
+                if (controller.isFormed()) hostFormed = true;
+                MultiblockControllerMachine machine = controller.self();
+                if (machine == null || machine.getDefinition() == null || !host.getString().isEmpty()) continue;
+                host = Component.translatable(machine.getDefinition().getDescriptionId());
+                hostX = machine.getPos().getX();
+                hostY = machine.getPos().getY();
+                hostZ = machine.getPos().getZ();
             }
         }
         int capacity = Math.max(0, maxPatternCount);
@@ -2001,11 +2053,90 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
         ItemStack circuitStack = getSharedCircuitInventory().getStackInSlot(0);
         int circuit = circuitStack.isEmpty() ? -1 : IntCircuitBehaviour.getCircuitConfiguration(circuitStack);
+        String hostStatus = hostCount == 0 ? "" : clip(StellarPatternStuckWatch.currentHostStatus(this), 180);
+        String hostTypes = hostCount == 0 ? "" : terminalHostRecipeTypes();
+        List<BlockPos> proxyPositions = getBoundProxyPositions();
+        int proxyCount = proxyPositions == null ? 0 : proxyPositions.size();
         return new StellarTerminalDetail(serverId, name, host,
                 getPos().getX(), getPos().getY(), getPos().getZ(),
                 filled, capacity, mothers, wildcardPatterns.size(),
                 isOutputMultiplierModeEnabled(), getPatternOutputMultiplier(),
-                circuit, gtShanhai$getWarningSlotCount(), isOnline());
+                circuit, gtShanhai$getWarningSlotCount(), isOnline(),
+                hostCount, hostFormed, hostX, hostY, hostZ,
+                hostStatus, hostTypes, terminalStuckBroadcast(),
+                proxyCount, terminalProxyLines(proxyPositions, proxyCount));
+    }
+
+    private String terminalProxyLines(List<BlockPos> positions, int proxyCount) {
+        if (positions == null || proxyCount <= 0) return "";
+        StringBuilder builder = new StringBuilder();
+        int shown = 0;
+        Level level = getLevel();
+        int limit = Math.min(proxyCount, 8);
+        for (int index = 0; index < limit; index++) {
+            BlockPos pos = positions.get(index);
+            if (pos == null) continue;
+            if (builder.length() > 0) builder.append('\n');
+            builder.append(pos.getX()).append(", ").append(pos.getY()).append(", ").append(pos.getZ());
+            builder.append(' ').append(proxyStateLabel(level, pos));
+            shown++;
+        }
+        int hidden = proxyCount - shown;
+        if (hidden > 0) {
+            if (builder.length() > 0) builder.append('\n');
+            builder.append("还有 ").append(hidden).append(" 个代理");
+        }
+        return clip(builder.toString(), 480);
+    }
+
+    private static String proxyStateLabel(Level level, BlockPos pos) {
+        if (level == null || !level.hasChunkAt(pos)) return "区块未加载";
+        if (MetaMachine.getMachine(level, pos) instanceof MultiblockPartMachine part && part.isFormed()) {
+            return "已成型";
+        }
+        return "未成型";
+    }
+
+    private String terminalHostRecipeTypes() {
+        List<String> ids = gtShanhai$hostRecipeTypeIds();
+        if (ids.isEmpty()) return "";
+        StringBuilder builder = new StringBuilder();
+        int shown = 0;
+        for (int index = 0; index < ids.size() && shown < 3; index++) {
+            if (builder.length() > 0) builder.append(" / ");
+            GTRecipeType type = PatternRecipeTypeHelper.resolveRecipeType(ids.get(index));
+            builder.append(type == null ? ids.get(index) : wildcardRecipeTypeDisplayName(type));
+            shown++;
+        }
+        if (ids.size() > shown) {
+            builder.append(" 等").append(ids.size() - shown).append("项");
+        }
+        return clip(builder.toString(), 120);
+    }
+
+    private String terminalStuckBroadcast() {
+        if (stuckRuntimeBroadcasts.isEmpty()) return "";
+        StringBuilder builder = new StringBuilder();
+        int shown = 0;
+        for (int slot = stuckRuntimeWarningSlots.nextSetBit(0); slot >= 0 && shown < 4;
+                slot = stuckRuntimeWarningSlots.nextSetBit(slot + 1)) {
+            String line = stuckRuntimeBroadcasts.get(slot);
+            if (line == null || line.isEmpty()) continue;
+            if (builder.length() > 0) builder.append('\n');
+            builder.append(line);
+            shown++;
+        }
+        int hidden = stuckRuntimeWarningSlots.cardinality() - shown;
+        if (hidden > 0) {
+            if (builder.length() > 0) builder.append('\n');
+            builder.append("还有 ").append(hidden).append(" 个卡死槽");
+        }
+        return clip(builder.toString(), 960);
+    }
+
+    private static String clip(String text, int max) {
+        if (text == null || text.isEmpty()) return "";
+        return text.length() <= max ? text : text.substring(0, max);
     }
 
     public boolean isValidRemotePatternSlot(int slot) {
@@ -2108,7 +2239,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 "gui.gt_shanhai.wildcard_pattern_slot",
                 selectedWildcardMotherSlot + 1, remoteWildcardTypeText()).getString()));
         root.addWidget(new LabelWidget(8, 58, () -> Component.translatable(
-                "gui.gt_shanhai.wildcard_pattern_expanded", wildcardPatterns.size()).getString()));
+                "gui.gt_shanhai.wildcard_pattern_expanded", selectedWildcardPreviewPatterns().size()).getString()));
 
         DraggableScrollableWidgetGroup typeList = new DraggableScrollableWidgetGroup(8, 70, 160, 72);
         typeList.setBackground(GuiTextures.DISPLAY);
@@ -2243,8 +2374,44 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
     }
 
+    /** 通配展開槽沒有主頁樣板格。告警裡改寫成展開序號和母槽，普通槽仍用原來的槽號。 */
+    public String gtShanhai$describeStuckSlot(int slot) {
+        if (slot < maxPatternCount || wildcardPatterns == null) return "";
+        int localSlot = slot - maxPatternCount;
+        if (localSlot < 0 || localSlot >= wildcardPatterns.size()) return "";
+        StringBuilder text = new StringBuilder("通配展开 ").append(localSlot + 1);
+        IPatternDetails pattern = wildcardPatterns.get(localSlot);
+        if (pattern == null || wildcardPreviewByMother == null) return text.toString();
+        StringBuilder mothers = new StringBuilder();
+        for (int mother = 0; mother < wildcardPreviewByMother.size(); mother++) {
+            List<IPatternDetails> preview = wildcardPreviewByMother.get(mother);
+            if (preview == null || !preview.contains(pattern)) continue;
+            if (mothers.length() > 0) mothers.append(',');
+            mothers.append(mother + 1);
+        }
+        if (mothers.length() > 0) {
+            text.append(" 母槽 ").append(mothers);
+        }
+        return text.toString();
+    }
+
+    /** 普通樣板槽與通配展開槽都要能登記卡死。展開槽從 {@code maxPatternCount} 起編。 */
+    private boolean gtShanhai$isRuntimeTrackableSlot(int slot) {
+        return slot >= 0 && slot < getInternalSlotCount();
+    }
+
+    private void gtShanhai$clearWildcardRuntimeWarnings() {
+        if (stuckRuntimeWarningSlots.isEmpty()) return;
+        int slot = stuckRuntimeWarningSlots.nextSetBit(maxPatternCount);
+        while (slot >= 0) {
+            int next = stuckRuntimeWarningSlots.nextSetBit(slot + 1);
+            gtShanhai$clearPatternSlotRuntimeSnapshot(slot);
+            slot = next;
+        }
+    }
+
     private boolean gtShanhai$isRuntimeWarningResolved(int slot) {
-        if (slot < 0 || slot >= maxPatternCount || slot >= getInternalSlotCount()) return true;
+        if (!gtShanhai$isRuntimeTrackableSlot(slot)) return true;
         Object2LongMap<AEItemKey> itemSnapshot = stuckRuntimeItemSnapshots.get(slot);
         Object2LongMap<AEFluidKey> fluidSnapshot = stuckRuntimeFluidSnapshots.get(slot);
         if ((itemSnapshot == null || itemSnapshot.isEmpty()) && (fluidSnapshot == null || fluidSnapshot.isEmpty())) {
@@ -2259,12 +2426,14 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         stuckRuntimeWarningSlots.clear(slot);
         stuckRuntimeItemSnapshots.remove(slot);
         stuckRuntimeFluidSnapshots.remove(slot);
+        stuckRuntimeBroadcasts.remove(slot);
     }
 
     private void gtShanhai$clearPatternSlotRuntimeSnapshots() {
         stuckRuntimeWarningSlots.clear();
         stuckRuntimeItemSnapshots.clear();
         stuckRuntimeFluidSnapshots.clear();
+        stuckRuntimeBroadcasts.clear();
     }
 
     private static <T> Object2LongOpenHashMap<T> gtShanhai$copyPositiveSnapshot(@Nullable Object2LongMap<T> source) {

@@ -17,5 +17,15 @@ public record StellarTerminalDetail(
         long multiplier,
         int circuit,
         int warnings,
-        boolean online) {
+        boolean online,
+        int hostCount,
+        boolean hostFormed,
+        int hostX,
+        int hostY,
+        int hostZ,
+        String hostStatus,
+        String hostRecipeTypes,
+        String stuckBroadcast,
+        int proxyCount,
+        String proxyLines) {
 }

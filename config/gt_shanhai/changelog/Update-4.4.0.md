@@ -12,7 +12,7 @@ link: [[https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link](http
 
 # gt_shanhai 4.4.0
 
-发布日期：`2026 年 10 月 TBD 日`
+发布日期：`2026 年 10 月 14 日`
 此更新贡献者：**dishanhai**——`核心代码贡献者`
 
 ## 配置界面

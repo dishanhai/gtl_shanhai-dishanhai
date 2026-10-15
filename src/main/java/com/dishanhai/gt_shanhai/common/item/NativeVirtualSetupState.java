@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+
 /**
  * 原生虚拟配方执行的跨类状态标记。
  * 非 mixin 类，可安全持有 static 字段。
@@ -15,6 +17,12 @@ public final class NativeVirtualSetupState {
     /** 每线程执行标记，防止并发搜索互相干扰 */
     private static final ThreadLocal<Boolean> VIRTUAL_EXECUTION = ThreadLocal.withInitial(() -> false);
 
+    /**
+     * 宿主拥有、但当前没选中的配方类型。只在这一轮 setup 期间让 {@code getRecipeType()}
+     * 回报该类型，不改持久化的 activeRecipeType，避免界面来回跳。
+     */
+    private static final ThreadLocal<GTRecipeType> OWNED_INACTIVE_TYPE = new ThreadLocal<>();
+
     public static void beginVirtualExecution() {
         VIRTUAL_EXECUTION.set(true);
     }
@@ -25,5 +33,21 @@ public final class NativeVirtualSetupState {
 
     public static boolean isVirtualExecution() {
         return VIRTUAL_EXECUTION.get();
+    }
+
+    public static void beginOwnedInactiveType(GTRecipeType type) {
+        if (type == null) {
+            OWNED_INACTIVE_TYPE.remove();
+            return;
+        }
+        OWNED_INACTIVE_TYPE.set(type);
+    }
+
+    public static void endOwnedInactiveType() {
+        OWNED_INACTIVE_TYPE.remove();
+    }
+
+    public static GTRecipeType ownedInactiveType() {
+        return OWNED_INACTIVE_TYPE.get();
     }
 }

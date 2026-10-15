@@ -17,7 +17,7 @@ public final class DShanhaiItems {
     public static ItemEntry<ComponentItem> ADVANCED_PATTERN_BOX;
     public static ItemEntry<ComponentItem> PATTERN_BUFFER_TOOLKIT;
     public static ItemEntry<ComponentItem> PATTERN_GENERATOR;
-    public static ItemEntry<ComponentItem> SELECTED_RECIPE_PATTERN;
+    public static ItemEntry<SelectedRecipePatternItem> SELECTED_RECIPE_PATTERN;
     public static ItemEntry<ShanhaiWirelessPatternManagementTerminalItem> WIRELESS_PATTERN_MANAGEMENT_TERMINAL;
 
     public static void init() {
@@ -45,9 +45,9 @@ public final class DShanhaiItems {
                 .onRegister(GTItems.attach(PatternGeneratorBehavior.INSTANCE))
                 .model(NonNullBiConsumer.noop())
                 .register();
-        SELECTED_RECIPE_PATTERN = REGISTRATE.item("selected_recipe_pattern", ComponentItem::create)
+        SELECTED_RECIPE_PATTERN = REGISTRATE.item("selected_recipe_pattern", SelectedRecipePatternItem::new)
                 .properties(properties -> properties.stacksTo(1))
-                .onRegister(GTItems.attach(SelectedRecipePattern.Tooltip.INSTANCE))
+                .onRegister(GTItems.attach(SelectedRecipePatternBehavior.INSTANCE))
                 .model(NonNullBiConsumer.noop())
                 .register();
         WIRELESS_PATTERN_MANAGEMENT_TERMINAL = REGISTRATE

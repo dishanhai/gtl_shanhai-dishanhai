@@ -1,0 +1,64 @@
+{
+  "data": {
+    "euTier": 2
+  },
+  "duration": 52,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 120
+      }
+    ]
+  },
+  "type": "gtceu:antientropy_condensation",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "forge:nbt",
+            "item": "gtceu:programmed_circuit",
+            "count": 1,
+            "nbt": "{Configuration:1}"
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 144,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "minecraft:ice"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtladditions:antientropy_condensation/blue_ice",
+      "defaultEnabled": true
+    }
+  ]
+}

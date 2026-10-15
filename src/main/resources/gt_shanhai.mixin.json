@@ -141,6 +141,8 @@
     "GuideMeFcsFlowTextMixin",
     "NativeVirtualFindHandleRecipeMixin",
     "NativeVirtualBeforeWorkingBypassMixin",
+    "VirtualOwnedRecipeTypeMixin",
+    "InactiveHostRecipeTypeLookupMixin",
     "CircuitFancyConfiguratorMixin",
     "NotifiableItemStackHandlerAdvancedCircuitMixin",
     "NotifiableCircuitItemStackHandlerAdvancedCircuitMixin",

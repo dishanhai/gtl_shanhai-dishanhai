@@ -32,9 +32,9 @@ public final class StellarPatternStuckNotifier {
 
     private StellarPatternStuckNotifier() {}
 
-    public static void notifyStuck(ServerLevel level, BlockPos pos, int slot, @Nullable Integer aePlayerId,
-            String reason, String stuckInputs, String stuckOutputs, List<String> hostRecipeTypeIds,
-            String patternRecipeTypeId) {
+    public static void notifyStuck(ServerLevel level, BlockPos pos, int slot, String slotLabel,
+            @Nullable Integer aePlayerId, String reason, String stuckInputs, String stuckOutputs,
+            List<String> hostRecipeTypeIds, String patternRecipeTypeId) {
         MinecraftServer server = level.getServer();
         Set<UUID> sent = new HashSet<>();
         double x = pos.getX() + 0.5D;
@@ -44,7 +44,7 @@ public final class StellarPatternStuckNotifier {
         for (ServerPlayer player : level.players()) {
             if (player.distanceToSqr(x, y, z) > NEARBY_RADIUS_SQUARED) continue;
             if (sent.add(player.getUUID())) {
-                send(player, level, pos, slot, "附近 " + (int) NEARBY_RADIUS + " 格", reason,
+                send(player, level, pos, slot, slotLabel, "附近 " + (int) NEARBY_RADIUS + " 格", reason,
                         stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId);
             }
         }
@@ -52,7 +52,7 @@ public final class StellarPatternStuckNotifier {
         if (aePlayerId != null) {
             ServerPlayer player = IPlayerRegistry.getConnected(server, aePlayerId);
             if (player != null && sent.add(player.getUUID())) {
-                send(player, level, pos, slot, "AE 下单玩家", reason,
+                send(player, level, pos, slot, slotLabel, "AE 下单玩家", reason,
                         stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId);
             }
         }
@@ -102,21 +102,42 @@ public final class StellarPatternStuckNotifier {
         return text.isBlank() ? "<empty>" : text;
     }
 
-    private static void send(ServerPlayer player, ServerLevel level, BlockPos pos, int slot, String route,
-            String reason, String stuckInputs, String stuckOutputs, List<String> hostRecipeTypeIds,
+    private static void send(ServerPlayer player, ServerLevel level, BlockPos pos, int slot, String slotLabel,
+            String route, String reason, String stuckInputs, String stuckOutputs, List<String> hostRecipeTypeIds,
             String patternRecipeTypeId) {
         Component coordinate = coordinateLink(level, pos);
         player.sendSystemMessage(Component.literal("§c[星律样板告警] §f")
                 .append(Component.literal(route).withStyle(ChatFormatting.YELLOW))
                 .append(Component.literal(" §c检测到样板槽卡死："))
                 .append(coordinate));
-        player.sendSystemMessage(Component.literal("§7槽位: §f" + (slot + 1)
+        player.sendSystemMessage(Component.literal("§7槽位: §f" + displaySlot(slot, slotLabel)
                 + " §7原因: §f" + reason));
         player.sendSystemMessage(Component.literal("§7卡死原料: §f" + stuckInputs));
         player.sendSystemMessage(Component.literal("§7卡死输出: §f" + stuckOutputs));
         player.sendSystemMessage(Component.literal("§7主机配方类型: §f"
                 + formatList(hostRecipeTypeIds)
                 + " §7样板配方类型: §f" + patternRecipeTypeId));
+    }
+
+    public static String broadcastBody(int slot, String slotLabel, String reason, String stuckInputs,
+            String stuckOutputs, List<String> hostRecipeTypeIds, String patternRecipeTypeId) {
+        String text = "槽位 " + displaySlot(slot, slotLabel)
+                + " 原因: " + oneLine(reason)
+                + " | 原料: " + oneLine(stuckInputs)
+                + " | 输出: " + oneLine(stuckOutputs)
+                + " | 主机配方: " + oneLine(formatList(hostRecipeTypeIds))
+                + " | 样板配方: " + oneLine(patternRecipeTypeId);
+        return text.length() <= 220 ? text : text.substring(0, 220);
+    }
+
+    private static String displaySlot(int slot, String slotLabel) {
+        if (slotLabel != null && !slotLabel.isBlank()) return slotLabel;
+        return String.valueOf(slot + 1);
+    }
+
+    private static String oneLine(String text) {
+        if (text == null || text.isBlank()) return "<none>";
+        return text.replace('\n', ' ').replace('\r', ' ');
     }
 
     private static Component coordinateLink(ServerLevel level, BlockPos pos) {

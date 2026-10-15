@@ -562,15 +562,21 @@ public class QuantumCraftingCPULogic {
                 QuantumDiagnostics.hit("logic.insert.finalOutput",
                         "what=" + what + " amount=" + amount + " inserted=" + inserted
                                 + " remaining=" + job.remainingAmount + " type=" + type);
-                if (job.remainingAmount <= 0) {
+                // 副产物下单会把同一次样板的全部产出放进 waitingFor。
+                // 主产物先回来就收工会清掉其余材料，合成进度只剩这一份。
+                if (job.remainingAmount <= 0 && job.waitingFor.list.isEmpty()) {
                     finishJob(true);
                     cpu.updateOutput(null);
                 } else {
-                    cpu.updateOutput(new GenericStack(job.finalOutput.what(), job.remainingAmount));
+                    cpu.updateOutput(new GenericStack(job.finalOutput.what(), Math.max(0L, job.remainingAmount)));
                 }
             }
         } else if (type == Actionable.MODULATE) {
             inventory.insert(what, amount, Actionable.MODULATE);
+            if (job != null && job.remainingAmount <= 0 && job.waitingFor.list.isEmpty()) {
+                finishJob(true);
+                cpu.updateOutput(null);
+            }
         }
         return inserted;
     }

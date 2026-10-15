@@ -1450,27 +1450,27 @@ public class DShanhaiMachines {
         RECIPE_TYPE_PATTERN_BUFFER.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createElectricText("星律样板总成"));
             tooltips.add(Component.literal(""));
-            tooltips.add(Component.literal("§7基于 GTLCore ME 样板总成，保留分页样板槽与输入能力"));
-            tooltips.add(Component.literal("§a拥有跨配方类型虚拟执行链，多类型直接运行不阻塞主配方类型"));
+            tooltips.add(Component.literal("§7带有虚拟执行链功能，允许单配方类型切换的机器同时运行其所有的配方类型"));
+            tooltips.add(Component.literal("§7分页样板仓。不同配方类型的样板一起跑，不用先切宿主的主类型"));
+            tooltips.add(Component.literal("§a原料相同的样板也不会互相串单，每个槽的库存互相隔开"));
             tooltips.add(Component.literal(""));
-            tooltips.add(Component.literal("§6继承能力:"));
-            tooltips.add(Component.literal("§7· 各样板槽位库存§f真·完全隔离§7，互不串料"));
-            tooltips.add(Component.literal("§7· §f中键催化剂槽§7：为多个样板共享同一组催化剂/共享电路"));
-            tooltips.add(Component.literal("§7· 样板可写入§f虚拟电路§7，下单不消耗电路，可覆盖共享电路"));
-            tooltips.add(Component.literal("§7· §f配方缓存§7：单槽默认缓存一种配方，可在 UI 中调整"));
-            tooltips.add(Component.literal("§7· 产物§f直接写入 ME 网络§7，无需额外输出总成(我更建议你用星轨输出矩阵)"));
-            tooltips.add(Component.literal("§7· §f槽位行列数/页数§7可在配置文件中自定义（修改后重新放置生效）"));
-            tooltips.add(Component.literal("§7· 集成库存输入功能，UI打开调控直接拉取AE网络中的物品"));
-            tooltips.add(Component.literal("§7· 集成通配符样板功能，UI打开放入支持通配符匹配"));
+            tooltips.add(Component.literal("§6样板"));
+            tooltips.add(Component.literal("§7· 中键催化剂槽：多张样板共用一组催化剂和电路"));
+            tooltips.add(Component.literal("§7· 写进样板的虚拟电路优先，下单不消耗，也能盖过共享电路"));
+            tooltips.add(Component.literal("§7· 每槽默认记住一种配方，数量在界面里改"));
+            tooltips.add(Component.literal("§7· 五个通配符槽放入星律通配样板，按记录的配方展开"));
             tooltips.add(Component.literal(""));
-            tooltips.add(Component.literal("§7· 与山海无线样板管理终端联动，可远程管理样板"));
-            tooltips.add(Component.literal("§7· 与原初引擎模块联动，可为样板倍增引擎专属产出倍率"));
+            tooltips.add(Component.literal("§6供料"));
+            tooltips.add(Component.literal("§7· 库存输入在界面里指定物品和流体，真正扣料时才从 ME 提取"));
+            tooltips.add(Component.literal("§7· 产物可以直接写回 ME。吞吐大时另接星轨输出矩阵"));
             tooltips.add(Component.literal(""));
-            tooltips.add(Component.literal("§6用法:"));
-            tooltips.add(Component.literal("§7· 作为普通超级样板仓室装入宿主机器"));
-            tooltips.add(Component.literal("§7· 按宿主原生支持的配方类型执行样板"));
-            tooltips.add(Component.literal("§7· 可搭配§f星律样板代理§7扩展样板容量"));
-            tooltips.add(Component.literal("§8无线供电宿主需先绑定无线网络（放置即绑定放置者，或数据棒右键）"));
+            tooltips.add(Component.literal("§6接入"));
+            tooltips.add(Component.literal("§7· 装在宿主的输入仓位，执行这台机器支持的配方(破限模式无视主机配方类型无条件运行)"));
+            tooltips.add(Component.literal("§7· 星律样板代理把同一组样板延伸到结构的其他面"));
+            tooltips.add(Component.literal("§7· 山海无线样板管理终端(特殊适配)可远程管理；原初模块可给这里的样板单独倍率"));
+            tooltips.add(Component.literal("§8和宿主配方类型对不上、或槽位卡死时，对应槽会亮红框"));
+            tooltips.add(Component.literal("§8行列和页数在配置里改，改完重新放置才生效"));
+            tooltips.add(Component.literal("§8无线供电的宿主要先绑定无线网络"));
         });
 
         RECIPE_TYPE_PATTERN_BUFFER_PROXY = MachineBuilder.create(
