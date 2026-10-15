@@ -1,0 +1,61 @@
+{
+  "data": {
+    "euTier": 13
+  },
+  "duration": 20,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 536870912
+      }
+    ]
+  },
+  "type": "gtceu:space_cosmic_probe_receivers",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:cosmic_probe_mk"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 6
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000000,
+          "value": [
+            {
+              "fluid": "gtceu:heavy_lepton_mixture"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:space_cosmic_probe_receivers/probe_mk1/mk1_heavy_lepton_mixture",
+      "defaultEnabled": true
+    }
+  ]
+}

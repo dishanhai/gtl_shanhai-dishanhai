@@ -61,6 +61,19 @@ public final class DShanhaiStyleRegistry {
         reg("starlight",     DShanhaiTextUtil.STARLIGHT_RGB, false, CYCLE, "星辉白金");
         reg("abyss",         DShanhaiTextUtil.ABYSS_RGB, false, CYCLE, "深渊蓝光");
 
+        // ===== 元色板：全 = 全部流动预设等时统合；随机从同一池平滑切换；完全随机逐字亮色 =====
+        reg("all",           DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素：统合全部流动色板");
+        reg("quan",          DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素别名");
+        reg("全",            DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素别名");
+        reg("random",        DShanhaiTextUtil.PALETTE_RANDOM, false, CYCLE, "随机：在全部流动色板间平滑切换");
+        reg("rand",          DShanhaiTextUtil.PALETTE_RANDOM, false, CYCLE, "随机别名");
+        reg("随机",          DShanhaiTextUtil.PALETTE_RANDOM, false, CYCLE, "随机别名");
+        reg("fullrandom",    DShanhaiTextUtil.PALETTE_FULL_RANDOM, false, CYCLE, "完全随机：逐字独立亮色平滑过渡");
+        reg("full_random",   DShanhaiTextUtil.PALETTE_FULL_RANDOM, false, CYCLE, "完全随机别名");
+        reg("chaos",         DShanhaiTextUtil.PALETTE_FULL_RANDOM, false, CYCLE, "完全随机别名");
+        reg("全随机",        DShanhaiTextUtil.PALETTE_FULL_RANDOM, false, CYCLE, "完全随机别名");
+        reg("完全随机",      DShanhaiTextUtil.PALETTE_FULL_RANDOM, false, CYCLE, "完全随机别名");
+
         // ===== 正文柔和样式（慢速 200ms） =====
         reg("body_golden",   DShanhaiTextUtil.BODY_GOLDEN_RGB, true, CYCLE, "正文·金色");
         reg("body_fire",     DShanhaiTextUtil.BODY_FIRE_RGB, true, CYCLE, "正文·火焰");
@@ -100,6 +113,78 @@ public final class DShanhaiStyleRegistry {
         regVariant("body_silver",     DShanhaiTextUtil.BODY_SILVER_RGB, true, WOBBLE);
         regVariant("golden",          DShanhaiTextUtil.GOLDEN_RGB, false, WOBBLE);
         regVariant("fire",            DShanhaiTextUtil.FIRE_RGB, false, WOBBLE);
+
+        // ===== 中文别名（与英文键同一色板；短名、长名都登记，FCS 取最长前缀） =====
+        alias("终极", "ultimate");
+        alias("终极彩虹", "ultimate");
+        alias("彩虹", "rainbow");
+        alias("混淆", "obfuscatedrainbow");
+        alias("混淆彩虹", "obfuscatedrainbow");
+        alias("金", "golden");
+        alias("金色", "golden");
+        alias("火", "fire");
+        alias("火焰", "fire");
+        alias("水", "water");
+        alias("水流", "water");
+        alias("魔", "magic");
+        alias("魔法", "magic");
+        alias("自然", "nature");
+        alias("电", "electric");
+        alias("电光", "electric");
+        alias("电流", "electric");
+        alias("冰", "ice");
+        alias("冰霜", "ice");
+        alias("熔岩", "lava");
+        alias("日落", "sunset");
+        alias("极光", "aurora");
+        alias("猩红", "crimson");
+        alias("霓虹", "neon");
+        alias("樱", "sakura");
+        alias("樱花", "sakura");
+        alias("宇宙", "cosmic");
+        alias("星云", "cosmic");
+        alias("虚空", "void");
+        alias("玉", "jade");
+        alias("青玉", "jade");
+        alias("等离子", "plasma");
+        alias("星辉", "starlight");
+        alias("深渊", "abyss");
+
+        alias("正文金", "body_golden");
+        alias("正文金色", "body_golden");
+        alias("正文火", "body_fire");
+        alias("正文火焰", "body_fire");
+        alias("正文水", "body_water");
+        alias("正文水流", "body_water");
+        alias("正文魔", "body_magic");
+        alias("正文魔法", "body_magic");
+        alias("正文自然", "body_nature");
+        alias("正文猩红", "body_crimson");
+        alias("银", "body_silver");
+        alias("银色", "body_silver");
+        alias("正文银", "body_silver");
+        alias("正文银色", "body_silver");
+        alias("正文日落", "body_sunset");
+        alias("正文极光", "body_aurora");
+        alias("正文霓虹", "body_neon");
+        alias("正文电", "body_electric");
+        alias("正文电光", "body_electric");
+        alias("正文冰", "body_ice");
+        alias("正文冰霜", "body_ice");
+        alias("正文熔岩", "body_lava");
+        alias("奶油", "body_cream");
+        alias("正文奶油", "body_cream");
+        alias("琥珀", "body_amber");
+        alias("正文琥珀", "body_amber");
+        alias("板岩", "body_slate");
+        alias("灰板岩", "body_slate");
+        alias("正文板岩", "body_slate");
+        alias("玫瑰", "body_rose");
+        alias("正文玫瑰", "body_rose");
+        alias("苔", "body_moss");
+        alias("苔藓", "body_moss");
+        alias("正文苔", "body_moss");
+        alias("正文苔藓", "body_moss");
     }
 
     // ========== 注册（static 块内用） ==========
@@ -118,6 +203,16 @@ public final class DShanhaiStyleRegistry {
         if (isBody) {
             STYLES.put(name.replace("body_", "body"), new StyleDef(name, rgb, true, anim, "gt_shanhai", desc));
         }
+    }
+
+    /** 中文或其它别名。色板、正文标记、动画类型都跟 canonical 走，不另做一套色。 */
+    private static void alias(String alias, String canonical) {
+        StyleDef src = STYLES.get(canonical);
+        if (src == null) src = STYLES.get(canonical.toLowerCase(Locale.ROOT));
+        if (src == null) return;
+        String key = alias.toLowerCase(Locale.ROOT);
+        if (STYLES.containsKey(key)) return;
+        STYLES.put(key, new StyleDef(key, src.rgb(), src.isBody(), src.anim(), src.modSource(), src.description()));
     }
 
     /** 变体注册：baseName_animName（static block 专用） */
@@ -197,8 +292,11 @@ public final class DShanhaiStyleRegistry {
         return STYLES.get(name.toLowerCase(Locale.ROOT));
     }
 
-    /** 获取色板 RGB 数组 */
+    /** 获取色板 RGB 数组。全 / 随机 / 完全随机返回哨兵，由取色函数展开。 */
     public static int[] getRGB(String name) {
+        if (DShanhaiTextUtil.isAllStyle(name)) return DShanhaiTextUtil.PALETTE_ALL;
+        if (DShanhaiTextUtil.isRandomStyle(name)) return DShanhaiTextUtil.PALETTE_RANDOM;
+        if (DShanhaiTextUtil.isFullRandomStyle(name)) return DShanhaiTextUtil.PALETTE_FULL_RANDOM;
         StyleDef def = get(name);
         return def != null ? def.rgb() : DShanhaiTextUtil.ULTIMATE_RAINBOW_RGB;
     }
@@ -213,7 +311,7 @@ public final class DShanhaiStyleRegistry {
     public static boolean isObfuscatedStyle(String name) {
         if (name == null) return false;
         String key = name.toLowerCase(Locale.ROOT);
-        return "obfuscatedrainbow".equals(key);
+        return "obfuscatedrainbow".equals(key) || "混淆".equals(key) || "混淆彩虹".equals(key);
     }
 
     /** 获取所有注册的样式名（用于 KubeJS 枚举） */

@@ -252,7 +252,10 @@ public final class CraftingPlanVirtualMarkerMixins {
                     continue;
                 }
                 if (!craftingService.isCraftable(entry.getWhat())) {
-                    access.gtShanhai$setNoPattern(true);
+                    // 虚拟在场只检查网络里有没有一份，不需要样板去合成它。
+                    if (!access.gtShanhai$isVirtualPresence()) {
+                        access.gtShanhai$setNoPattern(true);
+                    }
                     continue;
                 }
                 // 有样板却仍然缺失，最常见的原因就是被 AE2 的递归防护静默丢弃了。

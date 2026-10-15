@@ -38,13 +38,17 @@ import java.util.Map;
  * amount actually present in a recipe. This is what lets the editor display
  * KubeJS recipes whose IO count exceeds the machine's normal slot count without
  * silently truncating them.</p>
+ *
+ * <p>Opening a recipe always shows one full editor page: 16 item cells and
+ * 16 fluid cells on both the input side and the output side. A recipe with
+ * more entries keeps the larger count and pages past the first face.</p>
  */
 public final class ShanhaiIoTable {
 
-    public static final int ITEM_IN = 9;
-    public static final int FLUID_IN = 3;
-    public static final int ITEM_OUT = 9;
-    public static final int FLUID_OUT = 3;
+    public static final int ITEM_IN = 16;
+    public static final int FLUID_IN = 16;
+    public static final int ITEM_OUT = 16;
+    public static final int FLUID_OUT = 16;
     public static final int CELLS = ITEM_IN + FLUID_IN + ITEM_OUT + FLUID_OUT;
 
     /** Upper bound for a recipe type's declared slot capacity. */
@@ -161,13 +165,14 @@ public final class ShanhaiIoTable {
      * Returns {item input, fluid input, item output, fluid output}.
      */
     public static int[] shapeFor(int[] typeCapacity, int[] used) {
+        int[] floor = {ITEM_IN, FLUID_IN, ITEM_OUT, FLUID_OUT};
         int[] shape = new int[4];
         for (int i = 0; i < shape.length; i++) {
             int declared = typeCapacity != null && i < typeCapacity.length ? typeCapacity[i] : 0;
             int actual = used != null && i < used.length ? used[i] : 0;
-            shape[i] = Math.max(
+            shape[i] = Math.max(floor[i], Math.max(
                     Math.min(MAX_PER_SECTION, Math.max(0, declared)),
-                    Math.min(MAX_CELLS_PER_SECTION, Math.max(0, actual)));
+                    Math.min(MAX_CELLS_PER_SECTION, Math.max(0, actual))));
         }
         return shape;
     }

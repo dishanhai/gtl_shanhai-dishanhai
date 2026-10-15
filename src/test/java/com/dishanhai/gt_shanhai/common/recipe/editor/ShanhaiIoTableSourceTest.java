@@ -9,9 +9,22 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class ShanhaiIoTableSourceTest {
 
     @Test
+    void openingARecipeShowsOneFullPage() {
+        assertEquals(16, ShanhaiIoTable.ITEM_IN);
+        assertEquals(16, ShanhaiIoTable.ITEM_OUT);
+        assertEquals(16, ShanhaiIoTable.FLUID_IN);
+        assertEquals(16, ShanhaiIoTable.FLUID_OUT);
+        assertEquals(ShanhaiIoTable.ITEM_IN, ShanhaiRecipeEditorPanel.ITEM_PAGE);
+        assertEquals(ShanhaiIoTable.FLUID_IN, ShanhaiRecipeEditorPanel.FLUID_PAGE);
+        assertArrayEquals(
+                new int[] {16, 16, 16, 16},
+                ShanhaiIoTable.shapeFor(new int[] {9, 3, 9, 3}, new int[] {1, 0, 2, 0}));
+    }
+
+    @Test
     void actualRecipeUseCanExceedDeclaredTypeCapacity() {
         assertArrayEquals(
-                new int[] {9, 3, 19862, 3},
+                new int[] {16, 16, 19862, 16},
                 ShanhaiIoTable.shapeFor(
                         new int[] {9, 1, 1, 3},
                         new int[] {3, 0, 19862, 0}));

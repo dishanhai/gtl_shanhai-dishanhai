@@ -1,11 +1,14 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import appeng.api.crafting.IPatternDetails;
+import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
 import appeng.crafting.pattern.AEProcessingPattern;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
+import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 
 import org.spongepowered.asm.mixin.Final;
@@ -38,8 +41,11 @@ public class AEProcessingPatternVirtualProviderMixin {
     @Inject(method = "pushInputsToExternalInventory", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$pushVirtualProvidersToMachine(KeyCounter[] inputHolder,
             IPatternDetails.PatternInputSink inputSink, CallbackInfo ci) {
-        if (gtShanhai$getPlanningInputs() == null) return;
-        VirtualPatternEncodingHelper.pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink);
+        IPatternDetails.IInput[] planningInputs = gtShanhai$getPlanningInputs();
+        if (planningInputs == null) return;
+        // 副产物下单的不消耗输入只在场检查一份。推送不能再按批次数量向机器要实料。
+        VirtualPatternEncodingHelper.pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink,
+                VirtualPatternEncodingHelper.presenceKeys(planningInputs));
         ci.cancel();
     }
 
@@ -47,13 +53,27 @@ public class AEProcessingPatternVirtualProviderMixin {
     private IPatternDetails.IInput[] gtShanhai$getPlanningInputs() {
         long revision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         if (this.gtShanhai$cachedPlanningRevision != revision) {
+            IPatternDetails details = (IPatternDetails) (Object) this;
+            boolean byproductOrder = PatternByproductOrder.isMarked(details);
             IPatternDetails.IInput[] planningInputs = null;
-            if (VirtualPatternEncodingHelper.containsVirtualProviderInput(this.sparseInputs, this.sparseOutputs)) {
+            if (byproductOrder) {
+                planningInputs = VirtualPatternEncodingHelper.createByproductOrderPlanningInputs(
+                        this.sparseInputs, this.sparseOutputs, gtShanhai$recipeTypeId(details));
+            } else if (VirtualPatternEncodingHelper.containsVirtualProviderInput(this.sparseInputs, this.sparseOutputs)) {
                 planningInputs = VirtualPatternEncodingHelper.createPlanningInputs(this.sparseInputs, this.sparseOutputs);
+            }
+            if (!VirtualPatternEncodingHelper.containsPresenceInput(planningInputs)) {
+                planningInputs = null;
             }
             this.gtShanhai$cachedPlanningInputs = planningInputs;
             this.gtShanhai$cachedPlanningRevision = revision;
         }
         return this.gtShanhai$cachedPlanningInputs;
+    }
+
+    @Unique
+    private static String gtShanhai$recipeTypeId(IPatternDetails details) {
+        AEItemKey definition = details == null ? null : details.getDefinition();
+        return definition == null ? "" : PatternRecipeTypeHelper.readRecipeTypeId(definition.toStack());
     }
 }

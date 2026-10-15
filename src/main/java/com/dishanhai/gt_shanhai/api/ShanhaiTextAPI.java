@@ -80,6 +80,15 @@ public class ShanhaiTextAPI {
     /** 深渊蓝光逐字渐变 */
     public static Component abyss(String text) { return DShanhaiTextUtil.createAbyssText(text); }
 
+    /** 全元素：等时统合全部流动色板，段与段之间平滑衔接。FCS：{@code &$全-} / {@code &$all-} */
+    public static Component all(String text) { return DShanhaiTextUtil.createStyled(text, "all"); }
+
+    /** 随机：与「全」共用预设池，整段文字在各色板之间平滑切换。FCS：{@code &$随机-} */
+    public static Component random(String text) { return DShanhaiTextUtil.createStyled(text, "random"); }
+
+    /** 完全随机：逐字独立亮色，关键帧之间平滑过渡。FCS：{@code &$全随机-} / {@code &$完全随机-} */
+    public static Component fullRandom(String text) { return DShanhaiTextUtil.createStyled(text, "fullrandom"); }
+
     // =====================
     // 正文柔和渐变（慢速 500ms，去饱和色板，适合大段正文）
     // =====================

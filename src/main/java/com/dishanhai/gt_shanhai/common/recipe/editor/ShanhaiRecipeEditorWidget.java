@@ -1981,8 +1981,11 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                         : selectedBase.outputs();
                 ioTable = ShanhaiIoTable.fromJson(inputs, outputs);
                 if (draft.contains("itemIn")) {
-                    ioTable.resize(draft.getInt("itemIn"), draft.getInt("fluidIn"),
-                            draft.getInt("itemOut"), draft.getInt("fluidOut"));
+                    ioTable.resize(
+                            Math.max(ShanhaiIoTable.ITEM_IN, draft.getInt("itemIn")),
+                            Math.max(ShanhaiIoTable.FLUID_IN, draft.getInt("fluidIn")),
+                            Math.max(ShanhaiIoTable.ITEM_OUT, draft.getInt("itemOut")),
+                            Math.max(ShanhaiIoTable.FLUID_OUT, draft.getInt("fluidOut")));
                 }
                 panel.bindTable(ioTable);
                 seedEditHistory();

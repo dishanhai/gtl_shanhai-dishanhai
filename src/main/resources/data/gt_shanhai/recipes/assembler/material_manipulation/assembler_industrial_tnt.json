@@ -15,8 +15,8 @@
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 2,
+          "type": "gtceu:long",
+          "actualAmount": 2,
           "ingredient": {
             "item": "ae2:tiny_tnt"
           }
@@ -28,6 +28,17 @@
           "actualAmount": 1,
           "ingredient": {
             "item": "dishanhai:wzcz1"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 1
           }
         },
         "chance": 0
@@ -47,6 +58,7 @@
       }
     ]
   },
+  "recipeConditions": [],
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",

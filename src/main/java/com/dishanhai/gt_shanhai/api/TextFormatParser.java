@@ -13,6 +13,9 @@ import java.util.*;
  * 支持自动 & 码检测（mixin 从 FCS 文本直接解析）：
  * &@$ultimate-旋转彩虹
  * &@~#$fox-全效狐哩剑
+ * &$全-统合全部流动色板
+ * &$随机-在全部流动色板间切换
+ * &$全随机-逐字完全随机
  */
 public class TextFormatParser {
 
@@ -321,7 +324,9 @@ public class TextFormatParser {
         for (int i = 0; i < text.length(); i++) {
             Style style = Style.EMPTY;
             if (palette != null && palette.length > 0) {
-                style = style.withColor(TextColor.fromRgb(palette[i % palette.length]));
+                boolean body = flags.gradientTheme != null && DShanhaiStyleRegistry.isBody(flags.gradientTheme);
+                int color = DShanhaiTextUtil.getDynamicColor(palette, i, text.length(), body);
+                style = style.withColor(TextColor.fromRgb(color));
             }
             if (flags != null && flags.obfuscated) {
                 style = style.withObfuscated(true);

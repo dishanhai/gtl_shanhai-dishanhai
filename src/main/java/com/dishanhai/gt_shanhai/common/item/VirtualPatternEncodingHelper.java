@@ -203,6 +203,27 @@ public final class VirtualPatternEncodingHelper {
         return input instanceof PresenceInput;
     }
 
+    public static boolean containsPresenceInput(IPatternDetails.IInput[] inputs) {
+        if (inputs == null) return false;
+        for (int i = 0; i < inputs.length; i++) {
+            if (isPresenceInput(inputs[i])) return true;
+        }
+        return false;
+    }
+
+    /** 在场输入的目标键。推送和发配用它跳过按批次放大的实料抽取。 */
+    public static Set<AEKey> presenceKeys(IPatternDetails.IInput[] inputs) {
+        Set<AEKey> keys = new HashSet<>();
+        if (inputs == null) return keys;
+        for (int i = 0; i < inputs.length; i++) {
+            if (!isPresenceInput(inputs[i])) continue;
+            GenericStack[] possible = inputs[i].getPossibleInputs();
+            if (possible == null || possible.length == 0 || possible[0] == null || possible[0].what() == null) continue;
+            keys.add(possible[0].what());
+        }
+        return keys;
+    }
+
     public static boolean containsPresenceInputs(ICraftingPlan plan) {
         if (plan == null || plan.patternTimes() == null) return false;
         for (IPatternDetails details : plan.patternTimes().keySet()) {
@@ -265,6 +286,138 @@ public final class VirtualPatternEncodingHelper {
         return createPlanningInputs(sparseInputs, null);
     }
 
+    /**
+     * 反查配方里 chance &lt;= 0 的输入。在场数量取配方需求与样板编码量的较小值，
+     * 这样被下单次数放大的编码量不会变成要检查的份数。
+     */
+    private static Map<AEKey, Long> collectRecipeNonConsumableTargets(GenericStack[] inputs,
+            GenericStack[] outputs, String recipeTypeId) {
+        Map<AEKey, Long> targets = new LinkedHashMap<>();
+        if (inputs == null || outputs == null) return targets;
+        GTRecipe recipe;
+        try {
+            recipe = findMatchingRecipeForPattern(inputs, outputs, recipeTypeId);
+        } catch (RuntimeException exception) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("[VirtualPatternEncoding] byproduct non-consumable lookup failed", exception);
+            }
+            return targets;
+        }
+        if (recipe == null) return targets;
+        InputMatchPlan plan = findInputMatchPlan(recipe, inputs, StackBag.EMPTY, true);
+        List<GenericStack> original = compactStacks(inputs);
+        if (plan != null) {
+            addMatchedNonConsumableTargets(recipe.getInputContents(ItemRecipeCapability.CAP), original, plan, targets, true);
+            addMatchedNonConsumableTargets(recipe.getInputContents(FluidRecipeCapability.CAP), original, plan, targets, false);
+            return targets;
+        }
+        addIdentityNonConsumableTargets(recipe.getInputContents(ItemRecipeCapability.CAP), original, targets, true);
+        addIdentityNonConsumableTargets(recipe.getInputContents(FluidRecipeCapability.CAP), original, targets, false);
+        return targets;
+    }
+
+    private static void addMatchedNonConsumableTargets(List<Content> contents, List<GenericStack> inputs,
+            InputMatchPlan plan, Map<AEKey, Long> targets, boolean items) {
+        if (contents == null || contents.isEmpty() || plan == null) return;
+        for (int i = 0; i < contents.size(); i++) {
+            Content content = contents.get(i);
+            if (!isNonConsumable(content)) continue;
+            Integer index = plan.indexFor(content);
+            if (index == null || index < 0 || index >= inputs.size()) continue;
+            putNonConsumableTarget(inputs.get(index), content, targets, items);
+        }
+    }
+
+    private static void addIdentityNonConsumableTargets(List<Content> contents, List<GenericStack> inputs,
+            Map<AEKey, Long> targets, boolean items) {
+        if (contents == null || contents.isEmpty()) return;
+        for (int i = 0; i < inputs.size(); i++) {
+            GenericStack input = inputs.get(i);
+            if (input == null || input.what() == null) continue;
+            if (alreadyVirtualInput(input)) continue;
+            Content matched = null;
+            boolean consumed = false;
+            for (int c = 0; c < contents.size(); c++) {
+                Content content = contents.get(c);
+                if (!inputMatchesContent(input, content, items)) continue;
+                if (isNonConsumable(content)) {
+                    if (matched == null) matched = content;
+                } else {
+                    consumed = true;
+                }
+            }
+            if (matched != null && !consumed) {
+                putNonConsumableTarget(input, matched, targets, items);
+            }
+        }
+    }
+
+    private static boolean inputMatchesContent(GenericStack input, Content content, boolean items) {
+        if (input == null || content == null) return false;
+        if (items) {
+            if (!(input.what() instanceof AEItemKey key)) return false;
+            Ingredient ingredient = ItemRecipeCapability.CAP.of(content.getContent());
+            return ingredient != null && !ingredient.isEmpty() && ingredient.test(key.toStack());
+        }
+        if (!(input.what() instanceof AEFluidKey key)) return false;
+        com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
+        if (sample == null || sample.isEmpty()) return false;
+        AEFluidKey sampleKey = fluidKeyOf(sample);
+        return key.equals(sampleKey);
+    }
+
+    private static void putNonConsumableTarget(GenericStack input, Content content,
+            Map<AEKey, Long> targets, boolean items) {
+        if (input == null || input.what() == null || alreadyVirtualInput(input)) return;
+        long recipeAmount = 1L;
+        if (items) {
+            recipeAmount = Math.max(1L, getItemAmount(content, firstItemStack(content)));
+        } else {
+            com.lowdragmc.lowdraglib.side.fluid.FluidStack sample = firstFluidStack(content);
+            if (sample != null && !sample.isEmpty()) recipeAmount = Math.max(1L, sample.getAmount());
+        }
+        long encoded = Math.max(1L, input.amount());
+        long presence = Math.min(recipeAmount, encoded);
+        Long old = targets.get(input.what());
+        targets.put(input.what(), old == null ? presence : Math.max(old, presence));
+    }
+
+    private static boolean alreadyVirtualInput(GenericStack input) {
+        return getVirtualProviderTarget(input) != null || getIntegratedCircuitTarget(input) != null;
+    }
+
+    /**
+     * 副产物下单保留全部产出，可以反查到不消耗输入。
+     * 这些输入只检查一份在场，不按合成次数放大。
+     */
+    public static IPatternDetails.IInput[] createByproductOrderPlanningInputs(GenericStack[] sparseInputs,
+            GenericStack[] sparseOutputs, String recipeTypeId) {
+        Map<AEKey, Long> once = collectRecipeNonConsumableTargets(sparseInputs, sparseOutputs, recipeTypeId);
+        IPatternDetails.IInput[] base = createPlanningInputs(sparseInputs, sparseOutputs);
+        if (once.isEmpty()) return base;
+        List<IPatternDetails.IInput> rebuilt = new ArrayList<>();
+        for (int i = 0; i < base.length; i++) {
+            IPatternDetails.IInput input = base[i];
+            if (input == null || isPresenceInput(input)) {
+                if (input != null) rebuilt.add(input);
+                continue;
+            }
+            GenericStack[] possible = input.getPossibleInputs();
+            AEKey key = possible == null || possible.length == 0 || possible[0] == null ? null : possible[0].what();
+            Long presence = key == null ? null : once.get(key);
+            if (presence == null) {
+                rebuilt.add(input);
+                continue;
+            }
+            long consumed = input.getMultiplier() - presence;
+            if (consumed > 0L) {
+                rebuilt.add(new PlanningInput(key, consumed));
+            }
+            rebuilt.add(new PresenceInput(key, presence));
+        }
+        return rebuilt.toArray(new IPatternDetails.IInput[0]);
+    }
+
     public static IPatternDetails.IInput[] createPlanningInputs(GenericStack[] sparseInputs, GenericStack[] sparseOutputs) {
         Map<AEKey, Long> condensed = new LinkedHashMap<>();
         Map<AEKey, Long> presenceTargets = new LinkedHashMap<>();
@@ -296,16 +449,27 @@ public final class VirtualPatternEncodingHelper {
 
     public static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, KeyCounter[] inputHolder,
             IPatternDetails.PatternInputSink inputSink) {
-        pushSparseInputsIncludingVirtual(sparseInputs, null, inputHolder, inputSink, null);
+        pushSparseInputsIncludingVirtual(sparseInputs, null, inputHolder, inputSink, null, null);
     }
 
     public static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs,
             KeyCounter[] inputHolder, IPatternDetails.PatternInputSink inputSink) {
-        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, null);
+        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, null, null);
+    }
+
+    public static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs,
+            KeyCounter[] inputHolder, IPatternDetails.PatternInputSink inputSink, Set<AEKey> presenceKeys) {
+        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, null, presenceKeys);
     }
 
     private static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs, KeyCounter[] inputHolder,
             IPatternDetails.PatternInputSink inputSink, BiConsumer<AEKey, Long> virtualTargetSink) {
+        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, virtualTargetSink, null);
+    }
+
+    private static void pushSparseInputsIncludingVirtual(GenericStack[] sparseInputs, GenericStack[] sparseOutputs, KeyCounter[] inputHolder,
+            IPatternDetails.PatternInputSink inputSink, BiConsumer<AEKey, Long> virtualTargetSink,
+            Set<AEKey> presenceKeys) {
         KeyCounter allInputs = new KeyCounter();
         if (inputHolder != null) {
             for (KeyCounter counter : inputHolder) {
@@ -317,15 +481,17 @@ public final class VirtualPatternEncodingHelper {
 
         if (sparseInputs == null) return;
         PatternAnalysis analysis = getPatternAnalysis(sparseInputs, sparseOutputs);
-        long patternMultiplier = countPatternMultiplier(allInputs, sparseInputs, analysis);
+        long patternMultiplier = countPatternMultiplier(allInputs, sparseInputs, analysis, presenceKeys);
         for (GenericStack input : sparseInputs) {
             if (input == null || input.what() == null || input.amount() <= 0) continue;
             AEKey key = input.what();
             long amount = input.amount();
             GenericStack virtualTarget = analysis.targetFor(input);
-            if (virtualTarget != null) {
+            if (virtualTarget != null || (presenceKeys != null && presenceKeys.contains(key))) {
                 if (virtualTargetSink != null) {
-                    virtualTargetSink.accept(virtualTarget.what(), Math.max(1L, virtualTarget.amount()));
+                    AEKey target = virtualTarget == null ? key : virtualTarget.what();
+                    long once = virtualTarget == null ? Math.max(1L, amount) : Math.max(1L, virtualTarget.amount());
+                    virtualTargetSink.accept(target, once);
                 }
                 continue;
             }
@@ -349,11 +515,13 @@ public final class VirtualPatternEncodingHelper {
         return amount * multiplier;
     }
 
-    private static long countPatternMultiplier(KeyCounter inputs, GenericStack[] sparseInputs, PatternAnalysis analysis) {
+    private static long countPatternMultiplier(KeyCounter inputs, GenericStack[] sparseInputs, PatternAnalysis analysis,
+            Set<AEKey> presenceKeys) {
         if (inputs == null || sparseInputs == null) return 1L;
         long multiplier = Long.MAX_VALUE;
         for (GenericStack input : sparseInputs) {
             if (input == null || input.what() == null || input.amount() <= 0 || analysis.targetFor(input) != null) continue;
+            if (presenceKeys != null && presenceKeys.contains(input.what())) continue;
             long available = inputs.get(input.what());
             multiplier = Math.min(multiplier, available / input.amount());
         }
@@ -386,10 +554,11 @@ public final class VirtualPatternEncodingHelper {
             IPatternDetails.PatternInputSink inputSink, BiConsumer<AEKey, Long> virtualTargetSink) {
         GenericStack[] sparseInputs = getSparseInputs(details);
         GenericStack[] sparseOutputs = getSparseOutputs(details);
-        if (!containsVirtualInput(sparseInputs, sparseOutputs)) {
+        Set<AEKey> presence = presenceKeys(details.getInputs());
+        if (presence.isEmpty() && !containsVirtualInput(sparseInputs, sparseOutputs)) {
             return false;
         }
-        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, virtualTargetSink);
+        pushSparseInputsIncludingVirtual(sparseInputs, sparseOutputs, inputHolder, inputSink, virtualTargetSink, presence);
         return true;
     }
 

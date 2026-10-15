@@ -319,6 +319,29 @@ class VirtualCraftingPresenceInputSourceTest {
     }
 
     @Test
+    void byproductOrderTreatsNonConsumableInputsAsOnePresenceCheck() throws IOException {
+        String mixin = Files.readString(PROCESSING_PATTERN_MIXIN);
+        String helper = Files.readString(ENCODING_HELPER);
+        String summary = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "mixin", "CraftingPlanVirtualMarkerMixins.java"));
+
+        assertTrue(mixin.contains("PatternByproductOrder.isMarked(details)"),
+                "副产物下单样板必须走单独的在场规划");
+        assertTrue(mixin.contains("createByproductOrderPlanningInputs"),
+                "副产物下单必须把不消耗输入改成 PresenceInput");
+        assertTrue(mixin.contains("presenceKeys(planningInputs)"),
+                "推送必须跳过在场输入，不能按批次数量向机器要实料");
+        assertTrue(helper.contains("collectRecipeNonConsumableTargets"),
+                "必须按配方 chance<=0 识别不消耗输入");
+        assertTrue(helper.contains("Math.min(recipeAmount, encoded)"),
+                "在场份数不得沿用被下单次数放大后的编码数量");
+        assertTrue(helper.contains("presenceKeys.contains(key)"),
+                "发配推送必须把副产物下单的不消耗输入当成一份在场");
+        assertTrue(summary.contains("!access.gtShanhai$isVirtualPresence()"),
+                "虚拟在场缺失不能再报无样板永久阻塞");
+    }
+
+    @Test
     void processingPatternsCacheQuantityIndependentPlanningInputs() throws IOException {
         String mixin = Files.readString(PROCESSING_PATTERN_MIXIN);
 

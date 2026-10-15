@@ -52,6 +52,7 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.module.cutter.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.taixu.*;
 import com.dishanhai.gt_shanhai.common.machine.primordial.module.crafting.*;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.simulation.*;
 import com.dishanhai.gt_shanhai.common.machine.wave.*;
 import com.dishanhai.gt_shanhai.common.machine.nebula.*;
 import com.dishanhai.gt_shanhai.common.machine.worldline_cracking.WorldlineCrackingHubMachine;
@@ -133,6 +134,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition PRIMORDIAL_SIXFOLD_RESOURCE_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_MYRIAD_PROLIFERATION_CORE;
+    public static MultiblockMachineDefinition PRIMORDIAL_UNIVERSE_SIMULATION_CORE;
 
     public static MachineDefinition BIG_TAG_FILTER_STOCK_BUS;
     public static MachineDefinition ME_REQUESTABLE_INPUT_BUS;
@@ -548,6 +550,26 @@ public class DShanhaiMachines {
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.4"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.5"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_myriad_proliferation_core.tooltip.6"));
+        });
+
+        PRIMORDIAL_UNIVERSE_SIMULATION_CORE = GTDishanhaiRegistration.REGISTRATE
+                .multiblock("primordial_universe_simulation_core", PrimordialUniverseSimulationCore::new)
+                .rotationState(RotationState.ALL)
+                .recipeTypes(GTLRecipeTypes.COSMOS_SIMULATION_RECIPES)
+                .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
+                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                        new ResourceLocation("gtceu", "bronze_machine_casing")))
+                .workableCasingRenderer(
+                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                .register();
+
+        PRIMORDIAL_UNIVERSE_SIMULATION_CORE.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("推演寰宇，把宇宙模拟收进原初引擎"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_universe_simulation_core.tooltip.1"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_universe_simulation_core.tooltip.2"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_universe_simulation_core.tooltip.3"));
+            tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_universe_simulation_core.tooltip.4"));
         });
 
         // ── I级 原初物质重组核心 ──────────────────────────────────────────

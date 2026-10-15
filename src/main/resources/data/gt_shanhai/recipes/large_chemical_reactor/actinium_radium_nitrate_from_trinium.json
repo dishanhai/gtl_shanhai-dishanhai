@@ -1,0 +1,82 @@
+{
+  "data": {
+    "euTier": 4
+  },
+  "duration": 40,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2048
+      }
+    ]
+  },
+  "type": "gtceu:large_chemical_reactor",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:nitric_acid"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 4,
+          "ingredient": {
+            "item": "gtceu:trinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzax"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 1
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:actinium_radium_nitrate_solution"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "kubejs:large_chemical_reactor/actinium_radium_nitrate_from_trinium",
+      "defaultEnabled": true
+    }
+  ]
+}

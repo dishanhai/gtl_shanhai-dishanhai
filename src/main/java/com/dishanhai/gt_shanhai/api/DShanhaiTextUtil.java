@@ -250,12 +250,31 @@ public class DShanhaiTextUtil {
     private static final long BODY_INTERVAL = 200;
     private static int colorDirection = 1;
 
+    /**
+     * 元色板哨兵。不是可直接铺开的停靠点。
+     * {@link #getDynamicColor} 认的是数组身份，三条路径都走同一套取样。
+     */
+    static final int[] PALETTE_ALL = {0x010101};
+    static final int[] PALETTE_RANDOM = {0x020202};
+    static final int[] PALETTE_FULL_RANDOM = {0x030303};
+
+    /** 「全」在每套预设上停留的毫秒。各预设等时，不按色板长度摊。 */
+    static final long ALL_PRESET_MS = 800L;
+    /** 随机模式切到下一套预设的窗口。末段与下一套交叉淡化。 */
+    static final long RANDOM_WINDOW_MS = 1400L;
+    /** 完全随机：每个字在两个随机亮色关键帧之间过渡的窗口。 */
+    static final long FULL_RANDOM_WINDOW_MS = 480L;
+
+    private static volatile int[][] presetCache;
+    private static volatile int presetCacheCount = -1;
+
     // ========== 多行同步支持 ==========
 
     private static long sharedTimestamp = -1;
 
     public static void lockTime() { sharedTimestamp = System.currentTimeMillis(); }
     public static void unlockTime() { sharedTimestamp = -1; }
+    static void lockTimeAt(long timestamp) { sharedTimestamp = timestamp; }
     private static long getTime() {
         return sharedTimestamp >= 0 ? sharedTimestamp : System.currentTimeMillis();
     }
@@ -510,57 +529,24 @@ public class DShanhaiTextUtil {
     }
 
     private static Component perCharGradientRGB(String text, int[] rgbColors) {
-        if (text == null || text.isEmpty()) return Component.literal("");
-        int len = rgbColors.length;
-        long now = getTime();
-        long interval = calcInterval(text.length());
-        long cycle = interval * rgbColors.length;
-        long masked = now % (cycle > 0 ? cycle : 1);
-        double rawPhase = (double) masked / interval;
-        int intPhase = (int) rawPhase;
-        double frac = rawPhase - intPhase;
-        MutableComponent result = Component.literal("");
-        int dir = colorDirection;
-        for (int i = 0; i < text.length(); i++) {
-            int idx1 = (intPhase + dir * i) % len;
-            if (idx1 < 0) idx1 += len;
-            int idx2 = (idx1 + 1) % len;
-            int c1 = rgbColors[idx1], c2 = rgbColors[idx2];
-            int r = (int) (((c1 >> 16) & 0xFF) * (1 - frac) + ((c2 >> 16) & 0xFF) * frac);
-            int g = (int) (((c1 >> 8) & 0xFF) * (1 - frac) + ((c2 >> 8) & 0xFF) * frac);
-            int b = (int) ((c1 & 0xFF) * (1 - frac) + (c2 & 0xFF) * frac);
-            int interpolated = (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b);
-            result.append(Component.literal(String.valueOf(text.charAt(i)))
-                    .withStyle(Style.EMPTY.withColor(TextColor.fromRgb(interpolated))));
-        }
-        return result;
+        return paintFlow(text, rgbColors, false);
     }
 
     // ========== 正文慢速渐变渲染（500ms/步，柔和配色） ==========
 
     private static Component perCharGradientRGBBody(String text, int[] rgbColors) {
+        return paintFlow(text, rgbColors, true);
+    }
+
+    /** 逐字上色。组件路径与 FCS 路径共用 {@link #getDynamicColor}。 */
+    private static Component paintFlow(String text, int[] rgbColors, boolean isBody) {
         if (text == null || text.isEmpty()) return Component.literal("");
-        int len = rgbColors.length;
-        long now = getTime();
-        long effInterval = getEffectiveInterval(true, text.length());
-        long cycle = effInterval * len;
-        long masked = now % (cycle > 0 ? cycle : 1);
-        double rawPhase = (double) masked / effInterval;
-        int intPhase = (int) rawPhase;
-        double frac = rawPhase - intPhase;
+        int n = text.length();
         MutableComponent result = Component.literal("");
-        int dir = colorDirection;
-        for (int i = 0; i < text.length(); i++) {
-            int idx1 = (intPhase + dir * i) % len;
-            if (idx1 < 0) idx1 += len;
-            int idx2 = (idx1 + 1) % len;
-            int c1 = rgbColors[idx1], c2 = rgbColors[idx2];
-            int r = (int) (((c1 >> 16) & 0xFF) * (1 - frac) + ((c2 >> 16) & 0xFF) * frac);
-            int g = (int) (((c1 >> 8) & 0xFF) * (1 - frac) + ((c2 >> 8) & 0xFF) * frac);
-            int b = (int) ((c1 & 0xFF) * (1 - frac) + (c2 & 0xFF) * frac);
-            int interpolated = (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b);
+        for (int i = 0; i < n; i++) {
+            int color = getDynamicColor(rgbColors, i, n, isBody);
             result.append(Component.literal(String.valueOf(text.charAt(i)))
-                    .withStyle(Style.EMPTY.withColor(TextColor.fromRgb(interpolated))));
+                    .withStyle(Style.EMPTY.withColor(TextColor.fromRgb(color))));
         }
         return result;
     }
@@ -576,31 +562,16 @@ public class DShanhaiTextUtil {
     public static Component[] createMultiLineText(String[] lines, int[] rgbColors) {
         int totalLen = 0;
         for (String l : lines) totalLen += l.length();
-        long interval = calcInterval(Math.max(totalLen, 1));
-        long now = getTime();
-        long cycle = interval * rgbColors.length;
-        long masked = now % (cycle > 0 ? cycle : 1);
-        double rawPhase = (double) masked / interval;
-        int intPhase = (int) rawPhase;
-        double frac = rawPhase - intPhase;
         Component[] results = new Component[lines.length];
         int pos = 0;
-        int dir = colorDirection;
         for (int l = 0; l < lines.length; l++) {
             String text = lines[l].replace("——", "----");
             if (text.isEmpty()) { results[l] = Component.literal(" "); continue; }
             MutableComponent line = Component.literal("");
             for (int i = 0; i < text.length(); i++) {
-                int idx1 = (intPhase + dir * (pos + i)) % rgbColors.length;
-                if (idx1 < 0) idx1 += rgbColors.length;
-                int idx2 = (idx1 + 1) % rgbColors.length;
-                int c1 = rgbColors[idx1], c2 = rgbColors[idx2];
-                int r = (int) (((c1 >> 16) & 0xFF) * (1 - frac) + ((c2 >> 16) & 0xFF) * frac);
-                int g = (int) (((c1 >> 8) & 0xFF) * (1 - frac) + ((c2 >> 8) & 0xFF) * frac);
-                int b = (int) ((c1 & 0xFF) * (1 - frac) + (c2 & 0xFF) * frac);
-                int interpolated = (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b);
+                int color = getDynamicColor(rgbColors, pos + i, totalLen, false);
                 line.append(Component.literal(String.valueOf(text.charAt(i)))
-                        .withStyle(Style.EMPTY.withColor(TextColor.fromRgb(interpolated))));
+                        .withStyle(Style.EMPTY.withColor(TextColor.fromRgb(color))));
             }
             results[l] = line;
             pos += text.length();
@@ -609,44 +580,262 @@ public class DShanhaiTextUtil {
     }
 
     /**
-     * 获取动态色板颜色（time-based 插值）。
-     * 与 perCharGradientRGB 相同的算法，返回单个字符的颜色值。
+     * 动态取色。普通色板按时间在相邻停靠点间做 sRGB 插值。
+     * {@link #PALETTE_ALL}、{@link #PALETTE_RANDOM}、{@link #PALETTE_FULL_RANDOM}
+     * 走元色板，不把哨兵值当成颜色。
      *
-     * @param palette   颜色数组
+     * @param palette   颜色数组，或元色板哨兵
      * @param charIndex 当前字符索引
      * @param totalLen  文本总长度（用于自适应间隔）
      * @param isBody    是否为正文慢速样式
-     * @return ARGB 颜色值
+     * @return RGB 颜色值（不含 alpha）
      */
     public static int getDynamicColor(int[] palette, int charIndex, int totalLen, boolean isBody) {
-        long interval = getEffectiveInterval(isBody, totalLen);
-        long now = getTime();
-        long cycle = interval * palette.length;
-        long masked = now % (cycle > 0 ? cycle : 1);
-        double rawPhase = (double) masked / interval;
-        int intPhase = (int) rawPhase;
-        double frac = rawPhase - intPhase;
-        int len = palette.length;
-        int dir = colorDirection;
-        int idx1 = (intPhase + dir * charIndex) % len;
-        if (idx1 < 0) idx1 += len;
-        int idx2 = (idx1 + 1) % len;
-        int c1 = palette[idx1], c2 = palette[idx2];
-        int r = (int) (((c1 >> 16) & 0xFF) * (1 - frac) + ((c2 >> 16) & 0xFF) * frac);
-        int g = (int) (((c1 >> 8) & 0xFF) * (1 - frac) + ((c2 >> 8) & 0xFF) * frac);
-        int b = (int) ((c1 & 0xFF) * (1 - frac) + (c2 & 0xFF) * frac);
-        return (Math.min(255, r) << 16) | (Math.min(255, g) << 8) | Math.min(255, b);
+        if (palette == null || palette.length == 0) return 0xFFFFFF;
+        if (palette == PALETTE_ALL) return sampleAll(charIndex, isBody);
+        if (palette == PALETTE_RANDOM) return sampleRandom(charIndex, totalLen, isBody);
+        if (palette == PALETTE_FULL_RANDOM) return sampleFullRandom(charIndex);
+        return samplePaletteTime(palette, charIndex, totalLen, isBody);
     }
 
     public static int getPaletteEndColor(int[] rgbColors, int charCount) {
-        long interval = calcInterval(Math.max(charCount, 1));
-        int offset = (int) ((getTime() % (interval * rgbColors.length)) / interval) % rgbColors.length;
-        return rgbColors[rgbIndex(offset, Math.max(charCount - 1, 0), rgbColors.length, colorDirection)];
+        int n = Math.max(charCount, 1);
+        return getDynamicColor(rgbColors, n - 1, n, false);
     }
 
     public static int getPaletteStartColor(int[] rgbColors) {
-        int offset = (int) ((getTime() % (calcInterval(1) * rgbColors.length)) / calcInterval(1)) % rgbColors.length;
-        return rgbColors[rgbIndex(offset, 0, rgbColors.length, colorDirection)];
+        return getDynamicColor(rgbColors, 0, 1, false);
+    }
+
+    public static boolean isAllStyle(String name) {
+        if (name == null) return false;
+        switch (name.toLowerCase(java.util.Locale.ROOT)) {
+            case "all":
+            case "quan":
+            case "全":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static boolean isRandomStyle(String name) {
+        if (name == null) return false;
+        switch (name.toLowerCase(java.util.Locale.ROOT)) {
+            case "random":
+            case "rand":
+            case "随机":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static boolean isFullRandomStyle(String name) {
+        if (name == null) return false;
+        switch (name.toLowerCase(java.util.Locale.ROOT)) {
+            case "fullrandom":
+            case "full_random":
+            case "chaos":
+            case "全随机":
+            case "完全随机":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** 全部流动色板，注册顺序，按数组身份去重。含正文。元色板和动画变体不重复进入。 */
+    static int[][] flowPresets() {
+        int count = DShanhaiStyleRegistry.count();
+        int[][] cached = presetCache;
+        if (cached != null && presetCacheCount == count) return cached;
+        java.util.ArrayList<int[]> list = new java.util.ArrayList<>();
+        java.util.Set<int[]> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (DShanhaiStyleRegistry.StyleDef def : DShanhaiStyleRegistry.getAll()) {
+            if (def == null || def.anim() != AnimType.CYCLE) continue;
+            if (isMetaName(def.name())) continue;
+            int[] rgb = def.rgb();
+            if (rgb == null || rgb.length == 0 || isMetaPalette(rgb)) continue;
+            if (!seen.add(rgb)) continue;
+            list.add(rgb);
+        }
+        int[][] built = list.toArray(new int[0][]);
+        presetCache = built;
+        presetCacheCount = count;
+        return built;
+    }
+
+    static int pickPreset(long slot, int count) {
+        long x = slot * 0x9E3779B97F4A7C15L + 0xBF58476D1CE4E5B9L;
+        x ^= x >>> 30;
+        x *= 0x94D049BB133111EBL;
+        x ^= x >>> 27;
+        return (int) Math.floorMod(x, count);
+    }
+
+    private static boolean isMetaName(String name) {
+        return isAllStyle(name) || isRandomStyle(name) || isFullRandomStyle(name);
+    }
+
+    private static boolean isMetaPalette(int[] palette) {
+        return palette == PALETTE_ALL || palette == PALETTE_RANDOM || palette == PALETTE_FULL_RANDOM;
+    }
+
+    private static long scaledWindow(long base) {
+        if (colorInterval == 80) return base;
+        return Math.max(1L, base * colorInterval / 80L);
+    }
+
+    /** 普通色板：时间相位 + 字符偏移，相邻停靠点 sRGB 插值。 */
+    private static int samplePaletteTime(int[] palette, int charIndex, int totalLen, boolean isBody) {
+        int len = palette.length;
+        long interval = Math.max(1L, getEffectiveInterval(isBody, totalLen));
+        long cycle = interval * len;
+        long masked = Math.floorMod(getTime(), cycle);
+        double rawPhase = (double) masked / interval;
+        int intPhase = (int) rawPhase;
+        double frac = rawPhase - intPhase;
+        int dir = colorDirection;
+        int idx1 = Math.floorMod(intPhase + dir * charIndex, len);
+        int idx2 = Math.floorMod(idx1 + 1, len);
+        return lerpSrgb(palette[idx1], palette[idx2], frac);
+    }
+
+    /**
+     * 全：等时走过每一套流动色板。一段末尾 25% 淡入下一套的起点，避免色板相接时跳色。
+     * 相邻字符错开约 0.18 段，短名字仍能看见当前这套色板自己的渐变。
+     */
+    private static int sampleAll(int charIndex, boolean isBody) {
+        int[][] presets = flowPresets();
+        int n = presets.length;
+        if (n == 0) return 0xFFFFFF;
+        long per = scaledWindow(isBody ? ALL_PRESET_MS * 2L : ALL_PRESET_MS);
+        double travel = getTime() / (double) per;
+        double spread = 0.18 * colorDirection;
+        double pos = floorMod(travel + charIndex * spread, n);
+        int idx = (int) pos;
+        if (idx >= n) idx = 0;
+        double local = pos - idx;
+        int current = samplePaletteFraction(presets[idx], local);
+        if (local < 0.75) return current;
+        double t = smoothstep((local - 0.75) / 0.25);
+        int upcoming = samplePaletteFraction(presets[(idx + 1) % n], 0);
+        return lerpSrgb(current, upcoming, t);
+    }
+
+    /** 随机：整段文字共用一套预设，窗口末段平滑交到另一套。池子与「全」相同。 */
+    private static int sampleRandom(int charIndex, int totalLen, boolean isBody) {
+        int[][] presets = flowPresets();
+        int n = presets.length;
+        if (n == 0) return sampleFullRandom(charIndex);
+        long window = scaledWindow(isBody ? RANDOM_WINDOW_MS + 800L : RANDOM_WINDOW_MS);
+        long now = getTime();
+        long slot = Math.floorDiv(now, window);
+        double fade = (double) Math.floorMod(now, window) / window;
+        int i0 = pickPreset(slot, n);
+        int current = samplePaletteTime(presets[i0], charIndex, totalLen, isBody);
+        if (fade < 0.72) return current;
+        int i1 = pickPreset(slot + 1, n);
+        if (i1 == i0 && n > 1) i1 = (i0 + 1) % n;
+        int upcoming = samplePaletteTime(presets[i1], charIndex, totalLen, isBody);
+        double t = smoothstep((fade - 0.72) / 0.28);
+        return lerpSrgb(current, upcoming, t);
+    }
+
+    /** 完全随机：每个字独立的亮色关键帧，窗口内 sRGB 过渡，不抽预设。 */
+    private static int sampleFullRandom(int charIndex) {
+        long window = scaledWindow(FULL_RANDOM_WINDOW_MS);
+        long now = getTime();
+        long slot = Math.floorDiv(now, window);
+        double fade = (double) Math.floorMod(now, window) / window;
+        int c0 = vividHashColor(slot, charIndex);
+        int c1 = vividHashColor(slot + 1, charIndex);
+        return lerpSrgb(c0, c1, smoothstep(fade));
+    }
+
+    private static int samplePaletteFraction(int[] palette, double fraction) {
+        int len = palette.length;
+        double x = floorMod(fraction, 1.0) * len;
+        int i0 = (int) x;
+        if (i0 >= len) i0 = 0;
+        double frac = x - i0;
+        int i1 = (i0 + 1) % len;
+        return lerpSrgb(palette[i0], palette[i1], frac);
+    }
+
+    private static int vividHashColor(long slot, int charIndex) {
+        long h = slot * 0x9E3779B97F4A7C15L ^ (charIndex * 0xBF58476D1CE4E5B9L);
+        h ^= h >>> 30;
+        h *= 0x94D049BB133111EBL;
+        h ^= h >>> 27;
+        double hue = (h & 0xFFFF) / 65535.0 * 360.0;
+        double sat = 0.72 + ((h >>> 16) & 0xFF) / 255.0 * 0.28;
+        double val = 0.88 + ((h >>> 24) & 0xFF) / 255.0 * 0.12;
+        return hsvToRgb(hue, sat, val);
+    }
+
+    private static int hsvToRgb(double hue, double sat, double val) {
+        double h = floorMod(hue, 360.0) / 60.0;
+        int sector = (int) h;
+        double f = h - sector;
+        double p = val * (1.0 - sat);
+        double q = val * (1.0 - sat * f);
+        double t = val * (1.0 - sat * (1.0 - f));
+        double r;
+        double g;
+        double b;
+        switch (sector) {
+            case 0: r = val; g = t; b = p; break;
+            case 1: r = q; g = val; b = p; break;
+            case 2: r = p; g = val; b = t; break;
+            case 3: r = p; g = q; b = val; break;
+            case 4: r = t; g = p; b = val; break;
+            default: r = val; g = p; b = q; break;
+        }
+        return (channel(r) << 16) | (channel(g) << 8) | channel(b);
+    }
+
+    private static int lerpSrgb(int c1, int c2, double amount) {
+        if (amount <= 0.0) return c1;
+        if (amount >= 1.0) return c2;
+        int r = channel(linToSrgb(srgbToLin(channel8(c1, 16)) * (1.0 - amount) + srgbToLin(channel8(c2, 16)) * amount));
+        int g = channel(linToSrgb(srgbToLin(channel8(c1, 8)) * (1.0 - amount) + srgbToLin(channel8(c2, 8)) * amount));
+        int b = channel(linToSrgb(srgbToLin(channel8(c1, 0)) * (1.0 - amount) + srgbToLin(channel8(c2, 0)) * amount));
+        return (r << 16) | (g << 8) | b;
+    }
+
+    private static int channel8(int color, int shift) {
+        return (color >> shift) & 0xFF;
+    }
+
+    private static int channel(double unit) {
+        return (int) Math.round(unit * 255.0);
+    }
+
+    private static double srgbToLin(int channel) {
+        double s = channel / 255.0;
+        if (s <= 0.04045) return s / 12.92;
+        return Math.pow((s + 0.055) / 1.055, 2.4);
+    }
+
+    private static double linToSrgb(double linear) {
+        double s = linear <= 0.0031308 ? linear * 12.92 : 1.055 * Math.pow(linear, 1.0 / 2.4) - 0.055;
+        if (s < 0.0) return 0.0;
+        if (s > 1.0) return 1.0;
+        return s;
+    }
+
+    private static double smoothstep(double t) {
+        if (t <= 0.0) return 0.0;
+        if (t >= 1.0) return 1.0;
+        return t * t * (3.0 - 2.0 * t);
+    }
+
+    private static double floorMod(double value, double mod) {
+        double r = value % mod;
+        if (r < 0.0) r += mod;
+        return r;
     }
 
     public static Component createGradientFiller(String text, int startColor, int endColor) {
@@ -678,7 +867,7 @@ public class DShanhaiTextUtil {
         String s = style.toLowerCase(java.util.Locale.ROOT);
         String raw = style; // 保留原名用于 camelCase → snake_case fallback
 
-        if ("obfuscatedRainbow".equals(s) || "obfuscatedrainbow".equals(s)) return createObfuscatedRainbow(text);
+        if (DShanhaiStyleRegistry.isObfuscatedStyle(s)) return createObfuscatedRainbow(text);
 
         var def = DShanhaiStyleRegistry.get(s);
         // camelCase → snake_case fallback：bodySilver 查不到时试 body_silver
@@ -832,19 +1021,12 @@ public class DShanhaiTextUtil {
      */
     public static Component createRevealText(String text, int revealed, int[] rgb, int obfuscatedTail) {
         if (text == null || text.isEmpty()) return Component.literal("");
-        int len = rgb.length;
-        int mid = len / 2;
         int total = text.length();
-        long now = getTime();
-        // 使用 calcInterval 实现颜色流动（比 BODY_INTERVAL 更快更顺滑）
-        long phaseInterval = calcInterval(Math.max(total, 1));
-        int phase = (int)((now % (phaseInterval * len)) / phaseInterval);
         MutableComponent result = Component.literal("");
         for (int pos = 0; pos < total; pos++) {
             if (pos < revealed) {
-                int colorIdx = (phase + pos) % len;
-                if (colorIdx < 0) colorIdx += len;
-                var style = Style.EMPTY.withColor(TextColor.fromRgb(rgb[colorIdx]));
+                int color = getDynamicColor(rgb, pos, total, false);
+                var style = Style.EMPTY.withColor(TextColor.fromRgb(color));
                 if (obfuscatedTail > 0 && pos >= revealed - obfuscatedTail) {
                     long decodeFlip = (long)(System.currentTimeMillis() * 0.005);
                     if (((pos + decodeFlip) % 3) <= 0) style = style.withObfuscated(true);

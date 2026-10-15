@@ -32,8 +32,8 @@ import java.util.Map;
 public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhostIngredientTarget {
 
     public static final int PAGE_CELLS = 12;
-    public static final int ITEM_PAGE = 16;
-    public static final int FLUID_PAGE = 16;
+    public static final int ITEM_PAGE = ShanhaiIoTable.ITEM_IN;
+    public static final int FLUID_PAGE = ShanhaiIoTable.FLUID_IN;
     private static final int ITEM_COLS = 8;
     private static final int FLUID_COLS = 8;
     private static final int PAGE_Y = 24;

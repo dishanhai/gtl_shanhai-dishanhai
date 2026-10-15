@@ -30,6 +30,7 @@ item_ids:
   - gt_shanhai:primordial_quantum_distortion_matrix
   - gt_shanhai:primordial_shaoguang_aggregation_core
   - gt_shanhai:primordial_weiyang_reconstruction_module
+  - gt_shanhai:primordial_universe_simulation_core
   - gt_shanhai:primordial_engraving_module
   - gt_shanhai:primordial_coin_forge
   - gt_shanhai:taixu_smelting_furnace
@@ -113,6 +114,7 @@ item_ids:
 * [<ItemLink id="gt_shanhai:primordial_quantum_distortion_matrix" />](primordial_quantum_distortion_matrix.md)：处理量子操纵、奇点压缩、纳米制造与精密材料加工。
 * [<ItemLink id="gt_shanhai:primordial_shaoguang_aggregation_core" />](primordial_shaoguang_aggregation_core.md)：统合聚合核心、龙脉结晶与创造聚合。
 * [<ItemLink id="gt_shanhai:primordial_weiyang_reconstruction_module" />](primordial_weiyang_reconstruction_module.md)：处理物质异化、梦魇合成、电磁共振、地脉断层与虚空聚流。
+* [<ItemLink id="gt_shanhai:primordial_universe_simulation_core" />](primordial_universe_simulation_core.md)：处理宇宙模拟，沿用原初模块通用并行。
 * [<ItemLink id="gt_shanhai:primordial_engraving_module" />](primordial_engraving_module.md)：面向电路制造的专用模块，适合蚀刻和精密加工。
 * [<ItemLink id="gt_shanhai:primordial_coin_forge" />](primordial_coin_forge.md)：专门负责把原初物质铸成 GT 币。
 * [<ItemLink id="gt_shanhai:taixu_smelting_furnace" />](taixu_smelting_furnace.md)：太虚熔炼炉，必须装在运行中的原初引擎上，适合熔炼和合金处理。
@@ -169,6 +171,7 @@ item_ids:
 * [<ItemLink id="gt_shanhai:primordial_quantum_distortion_matrix" />](primordial_quantum_distortion_matrix.md)：处理量子操纵、奇点压缩、纳米制造与精密材料加工。
 * [<ItemLink id="gt_shanhai:primordial_shaoguang_aggregation_core" />](primordial_shaoguang_aggregation_core.md)：统合聚合核心、龙脉结晶与创造聚合。
 * [<ItemLink id="gt_shanhai:primordial_weiyang_reconstruction_module" />](primordial_weiyang_reconstruction_module.md)：处理物质异化、梦魇合成、电磁共振、地脉断层与虚空聚流。
+* [<ItemLink id="gt_shanhai:primordial_universe_simulation_core" />](primordial_universe_simulation_core.md)：处理宇宙模拟，沿用原初模块通用并行。
 * [<ItemLink id="gt_shanhai:primordial_engraving_module" />](primordial_engraving_module.md)：面向电路制造的专用模块，适合蚀刻和精密加工。
 * [<ItemLink id="gt_shanhai:primordial_coin_forge" />](primordial_coin_forge.md)：专门负责把原初物质铸成 GT 币。
 * [<ItemLink id="gt_shanhai:taixu_smelting_furnace" />](taixu_smelting_furnace.md)：太虚熔炼炉，必须装在运行中的原初引擎上，适合熔炼和合金处理。
