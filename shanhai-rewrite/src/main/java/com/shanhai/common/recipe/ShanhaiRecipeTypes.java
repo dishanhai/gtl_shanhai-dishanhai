@@ -1404,8 +1404,23 @@ public final class ShanhaiRecipeTypes {
         //       概率产出与普通产出入同在 {@code GTRecipe.outputs}（{@code Content.chance} 区分），
         //       见 {@code GTRecipe.doTrim} ⇒ **每 1 项 = 1 个物品输出格**。
         //       ⇒ "自回的那一项碎片"同样占 1 格，已被算进 95。
+        //
+        // 🔴 2026-10-11 第三刀（用户当场拍板「放宽上限到 144」）：
+        //   加进「太空电梯快速采集模块 MK1..MK6」那 6 条采矿配方后，物品出峰值 = **137**（MK6；
+        //   逐条 118/120/126/132/136/137）⇒ 旧上限 108 不够（差 10~29 格）。
+        //   ⇒ 物品出 **108 ⇒ 144**，与 .rtui 模板同步改成 **12 列 × 12 行 = 144 格**
+        //     （模板由 `temp/rtui-probe/gen_rtui.mjs` 生成；root 尺寸 226x240 ⇒ 226x276）。
+        //   ⇒ 其余三个数一个不动：物品入 2 是用户红线，流体入 0 / 流体出 8 没被这 6 条触碰。
+        //
+        // 🔴 2026-10-16 第四刀（用户原话：「太空电梯快速采集模块可以在太空采矿和太空钻井模式下工作…
+        //   同时输出它可以输出的太空采矿和太空钻井中的物品+流体」＋「那些流体槽也不够用」）：
+        //   ⇒ 每级**一条**配方同时出物品+流体（采矿物品 118..137 ＋ 钻井流体 12/19/28/28/28/30 种）。
+        //   ⇒ 物品出 **144 保持**（峰值 137 ≤ 144，余 7）；
+        //     流体出 **8 ⇒ 32**（**16 列 × 2 行**，模板与这里同步；峰值 30，余 2）。
+        //   ⇒ 模板排布同时按用户要求改成 **物品 16 列 × 9 行 = 144**（他说 12×12「太突出」）
+        //     ⇒ root 尺寸 226x276 ⇒ **298x240**（高度回到最初的 240）。
         PRIMORDIAL_DEEP_SPACE_EXTRACTION = register("primordial_deep_space_extraction", "multiblock")
-                .setMaxIOSize(2, 108, 0, 8)
+                .setMaxIOSize(2, 144, 0, 32)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);

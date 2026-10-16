@@ -849,7 +849,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/obsidian',
         type: 'primordial_matter_recombination',
-        circuit: 10,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:basic_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:basic_material_module',
@@ -937,7 +937,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/primordial_matter_recombination_8',
         type: 'primordial_matter_recombination',
-        circuit: 13,
+        circuit: 3,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:basic_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:basic_material_module',
@@ -955,7 +955,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/ulv_universal_circuit',
         type: 'primordial_singularity_inversion',
-        circuit: 32,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -1010,7 +1010,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/exquisite_emerald_gem',
         type: 'primordial_matter_recombination',
-        circuit: 15,
+        circuit: 1,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:basic_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:basic_material_module',
@@ -1028,7 +1028,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/celestial_secret_deducing_module_lv',
         type: 'primordial_singularity_inversion',
-        circuit: 31,
+        circuit: 3,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -1320,7 +1320,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/fire_charge',
         type: 'primordial_matter_recombination',
-        circuit: 13,
+        circuit: 3,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -1338,7 +1338,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/sticky_resin',
         type: 'primordial_causal_weaving',
-        circuit: 25,
+        circuit: 1,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -1356,7 +1356,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/celestial_secret_deducing_module_ulv',
         type: 'primordial_singularity_inversion',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -1393,7 +1393,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/easy_world_fragment_miner_module',
         type: 'primordial_singularity_inversion',
-        circuit: 28,
+        circuit: 3,
         notConsumable: [],
         itemInputs: ['4x gtceu:ulv_fragment_world_collection_machine', '1x thetornproductionline:celestial_secret_deducing_module_lv', '1x shanhai:introductory_material_module'],
         inputFluids: [],
@@ -1537,7 +1537,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/down_quark_emission_catalyst',
         type: 'primordial_singularity_inversion',
-        circuit: 8,
+        circuit: 3,
         notConsumable: [],
         itemInputs: ['1x shanhai:casing_empty_quark_emission_catalyst', '1x gtceu:mixed_plant', '1x gtceu:separated_plant'],
         inputFluids: [],
@@ -1605,7 +1605,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/advanced_world_fragment_miner_module',
         type: 'primordial_singularity_inversion',
-        circuit: 28,
+        circuit: 4,
         notConsumable: [],
         itemInputs: ['16x gtceu:ulv_fragment_world_collection_machine', '1x thetornproductionline:celestial_secret_deducing_module_mv', '1x thetornproductionline:easy_world_fragment_miner_module', '1x shanhai:material_deduction_module'],
         inputFluids: [],
@@ -1640,7 +1640,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/celestial_secret_deducing_module_mv',
         type: 'primordial_singularity_inversion',
-        circuit: 31,
+        circuit: 3,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:material_deduction_module',
         moduleLevelFallbackCatalyst: '1x shanhai:material_deduction_module',
@@ -1727,7 +1727,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/up_quark_emission_catalyst',
         type: 'primordial_singularity_inversion',
-        circuit: 8,
+        circuit: 3,
         notConsumable: [],
         itemInputs: ['1x shanhai:casing_empty_quark_emission_catalyst', '1x gtceu:processing_plant', '1x gtceu:assemble_plant'],
         inputFluids: [],
@@ -1762,7 +1762,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/primordial_matter_recombination_79',
         type: 'primordial_matter_recombination',
-        circuit: 16,
+        circuit: 3,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:material_deduction_module',
         moduleLevelFallbackCatalyst: '1x shanhai:material_deduction_module',
@@ -1780,7 +1780,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/lv_universal_circuit',
         type: 'primordial_singularity_inversion',
-        circuit: 32,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:material_deduction_module',
         moduleLevelFallbackCatalyst: '1x shanhai:material_deduction_module',
@@ -1834,7 +1834,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/quantum_eye',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:material_deduction_module',
         moduleLevelFallbackCatalyst: '1x shanhai:material_deduction_module',
@@ -1852,7 +1852,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/casing_empty_quark_emission_catalyst',
         type: 'primordial_singularity_inversion',
-        circuit: 9,
+        circuit: 6,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:basic_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:basic_material_module',
@@ -1886,7 +1886,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/adaptive_net_energy_input_hatch',
         type: 'primordial_singularity_inversion',
-        circuit: 30,
+        circuit: 3,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:virtual_image_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:virtual_image_material_module',
@@ -1958,7 +1958,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/mv_universal_circuit',
         type: 'primordial_singularity_inversion',
-        circuit: 32,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:virtual_image_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:virtual_image_material_module',
@@ -1976,7 +1976,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/primordial_matter_recombination_91',
         type: 'primordial_matter_recombination',
-        circuit: 17,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:virtual_image_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:virtual_image_material_module',
@@ -2046,7 +2046,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/celestial_secret_deducing_module_hv',
         type: 'primordial_singularity_inversion',
-        circuit: 31,
+        circuit: 3,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:virtual_image_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:virtual_image_material_module',
@@ -2064,7 +2064,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/navigate_prism',
         type: 'primordial_causal_weaving',
-        circuit: 1,
+        circuit: 6,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:material_deduction_module',
         moduleLevelFallbackCatalyst: '1x shanhai:material_deduction_module',
@@ -2155,7 +2155,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/celestial_secret_deducing_module_hv_2',
         type: 'primordial_singularity_inversion',
-        circuit: 31,
+        circuit: 3,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:material_recombination_module',
         moduleLevelFallbackCatalyst: '1x shanhai:material_recombination_module',
@@ -2225,7 +2225,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/circult_process_module_1',
         type: 'primordial_singularity_inversion',
-        circuit: 29,
+        circuit: 7,
         notConsumable: [],
         itemInputs: ['1x shanhai:material_recombination_module', '4x shanhai:wem_1', '64x thetornproductionline:celestial_secret_deducing_module_ev', '1024x shanhai:electron_neutrino', '64x shanhai:wl_board_ev', '4x gtceu:ev_circuit_assembler'],
         inputFluids: ['shanhai:matter_fluid_advanced 256000'],
@@ -2323,7 +2323,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/world_fragments_nether',
         type: 'primordial_causal_weaving',
-        circuit: 24,
+        circuit: 5,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:virtual_image_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:virtual_image_material_module',
@@ -2429,7 +2429,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/ultimate_world_fragment_miner_module',
         type: 'primordial_singularity_inversion',
-        circuit: 28,
+        circuit: 5,
         notConsumable: [],
         itemInputs: ['64x gtceu:large_fragment_world_collection_machine', '1x thetornproductionline:celestial_secret_deducing_module_ev', '2x thetornproductionline:advanced_world_fragment_miner_module', '1x shanhai:material_recombination_module', '1024x gtceu:titanium_drill_head'],
         inputFluids: [],
@@ -2463,7 +2463,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/greenhouse_speed_cultivation_module',
         type: 'primordial_singularity_inversion',
-        circuit: 28,
+        circuit: 4,
         notConsumable: [],
         itemInputs: ['4x shanhai:thread_shard_2', '256x gtceu:large_greenhouse', '4x shanhai:wl_board_ev', '1x shanhai:material_recombination_module'],
         inputFluids: [],
@@ -2479,7 +2479,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/brass_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2497,7 +2497,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/wrought_iron_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 30,
+        circuit: 1,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2515,7 +2515,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/paper_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 1,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2533,7 +2533,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/invar_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2551,7 +2551,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/red_alloy_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2569,7 +2569,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/compressed_fireclay_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2587,7 +2587,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/tin_alloy_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2605,7 +2605,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/annealed_copper_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 1,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2623,7 +2623,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/steel_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2641,7 +2641,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/conductive_alloy_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2659,7 +2659,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/bronze_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2695,7 +2695,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/cupronickel_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
@@ -2713,7 +2713,7 @@ var shanhaiPfGt = [
     {
         id: 'shanhai:pf/pulsating_alloy_ingot_pmr',
         type: 'primordial_matter_recombination',
-        circuit: 31,
+        circuit: 2,
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:introductory_material_module',
         moduleLevelFallbackCatalyst: '1x shanhai:introductory_material_module',
