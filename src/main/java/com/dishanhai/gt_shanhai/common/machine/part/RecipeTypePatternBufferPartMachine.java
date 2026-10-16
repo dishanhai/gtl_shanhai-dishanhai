@@ -707,6 +707,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
         if (slot < 0 || slot >= patternRecipeTypeIds.length || slot >= getPatternInventory().getSlots()) return null;
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
+        String recipeId = PatternRecipeTypeHelper.readRecipeId(stack);
+        GTRecipe recipe = PatternRecipeTypeHelper.resolveRecipe(recipeId);
+        if (recipe != null && PatternRecipeTypeHelper.storedRecipeFitsPattern(stack, getLevel(), recipe)) {
+            return recipe;
+        }
         // 只读：本槽同时在向 AE 网络供货，绝不能像过去那样借"自愈"之机悄悄改写 NBT
         // （AEItemKey 含 NBT，改动即变身份，见 PatternRecipeTypeHelper.peekRecipe 文档）。
         return PatternRecipeTypeHelper.peekRecipe(

@@ -148,6 +148,16 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("开启：反查配方缺失不消耗输入时，自动补回虚拟供应器/流体标记（默认）",
                         "关闭：尊重玩家删除不消耗输入的操作，不主动补回虚拟供应器/流体标记"))
                 .setSaveConsumer(cfg.virtualProviderForceWrapOmittedNonConsumables::set).build());
+        vip.addEntry(e.startBooleanToggle(Component.literal("编码时写入配方 ID"), cfg.encodeWriteRecipeId.get())
+                .setDefaultValue(true)
+                .setTooltip(tip("开启：样板编码和快速编码上传都写入精确配方 ID（默认）",
+                        "关闭：两边都不写。已有样板上的旧 ID 不会被清掉"))
+                .setSaveConsumer(cfg.encodeWriteRecipeId::set).build());
+        vip.addEntry(e.startBooleanToggle(Component.literal("编码时写入虚拟供应器"), cfg.encodeWriteVirtualProvider.get())
+                .setDefaultValue(true)
+                .setTooltip(tip("开启：不消耗输入按原规则写成虚拟供应器（默认）",
+                        "关闭：样板编码和快速编码上传都保留原物品或流体"))
+                .setSaveConsumer(cfg.encodeWriteVirtualProvider::set).build());
 
         // ===== 配方类型样板总成 =====
         ConfigCategory pattern = builder.getOrCreateCategory(Component.literal("配方类型样板总成"));

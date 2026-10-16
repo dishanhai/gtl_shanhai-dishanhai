@@ -300,4 +300,23 @@ public class VirtualPatternEncodingHelperTest {
         assertFalse(source.contains("rewriteFluidInputsPreservingSelections"),
                 "不能保留按顺序重新猜槽位的旧流体填写算法");
     }
+
+    @Test
+    void knownRecipeIdAnchorsWrapWhenThePatternWasEdited() throws IOException {
+        String source = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+
+        int anchoredCall = source.indexOf("rewriteInputsAnchoredToKnownRecipe(inputs, outputs, selectedRecipe)");
+        int uniqueLookup = source.indexOf("findMatchingRecipeForEncoding(inputs, outputs)", anchoredCall);
+        assertTrue(anchoredCall >= 0 && uniqueLookup > anchoredCall,
+                "已有配方 ID 时必须先按该配方包裹，唯一反查只作退路");
+        assertTrue(source.contains("allowPartialPattern"),
+                "配方 ID 锚定必须允许玩家删掉部分输入");
+        assertTrue(source.contains("plan.clearOmissions()"),
+                "格子里多了不属于该配方的输入时，不能把删掉的催化剂补回来");
+        assertTrue(source.contains("if (!plan.wasOmitted(content) || !isNonConsumable(content)) continue;"),
+                "被玩家删掉的消耗输入不能补回样板");
+        assertTrue(source.contains("falling back to unscoped exact lookup"),
+                "配方 ID 对不上当前样板时仍要退回唯一反查，不能把旧 ID 写成另一张配方");
+    }
 }

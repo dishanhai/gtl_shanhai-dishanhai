@@ -483,6 +483,7 @@ public class DShanhaiItemTooltipAPI {
 
     private static void addPatternRecipeTypeTooltip(ItemStack stack, List<Component> tooltip, Level level) {
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
+        String recipeId = PatternRecipeTypeHelper.readRecipeId(stack);
         if (recipeTypeId.isEmpty() && level != null) {
             int tagHash = stack.getTag() == null ? 0 : stack.getTag().hashCode();
             long cacheKey = ((long) System.identityHashCode(stack.getItem()) << 32) | (tagHash & 0xFFFFFFFFL);
@@ -494,9 +495,13 @@ public class DShanhaiItemTooltipAPI {
                 PATTERN_TYPE_TOOLTIP_CACHE.put(cacheKey, recipeTypeId);
             }
         }
-        if (recipeTypeId.isEmpty()) return;
-        tooltip.add(Component.literal("§b配方类型：§f" + recipeTypeDisplayName(recipeTypeId))
-                .append(Component.literal(" §8(" + recipeTypeId + ")")));
+        if (!recipeTypeId.isEmpty()) {
+            tooltip.add(Component.literal("§b配方类型：§f" + recipeTypeDisplayName(recipeTypeId))
+                    .append(Component.literal(" §8(" + recipeTypeId + ")")));
+        }
+        if (!recipeId.isEmpty()) {
+            tooltip.add(Component.literal("§b配方 ID：§f" + recipeId));
+        }
     }
 
     private static String recipeTypeDisplayName(String recipeTypeId) {

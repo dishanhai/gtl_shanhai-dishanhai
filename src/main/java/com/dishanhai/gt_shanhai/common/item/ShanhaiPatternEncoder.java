@@ -119,7 +119,8 @@ public final class ShanhaiPatternEncoder {
                 continue;
             }
 
-            if (isNonConsumable(content) && !VirtualItemProviderHelper.isProviderItem(stack)) {
+            if (isNonConsumable(content) && !VirtualItemProviderHelper.isProviderItem(stack)
+                    && PatternEncodePreferences.writeVirtualProvider()) {
                 boolean excluded = respectAutoWrapExclusions
                         && VirtualItemProviderHelper.isAutoWrapExcluded(stack);
                 if (!respectAutoWrapExclusions || !excluded) {
@@ -148,7 +149,7 @@ public final class ShanhaiPatternEncoder {
                     bestFluidStack(stacks, priority);
             if (stack == null || stack.isEmpty()) continue;
             GenericStack target = new GenericStack(fluidKeyOf(stack), Math.max(1L, stack.getAmount()));
-            if (isNonConsumable(content)) {
+            if (isNonConsumable(content) && PatternEncodePreferences.writeVirtualProvider()) {
                 ItemStack provider = VirtualItemProviderHelper.createBoundProvider(target);
                 if (provider.isEmpty()) {
                     throw new IllegalStateException("Cannot wrap non-consumable fluid for " + recipe.id);

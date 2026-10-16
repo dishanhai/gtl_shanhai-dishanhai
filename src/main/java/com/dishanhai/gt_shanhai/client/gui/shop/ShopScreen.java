@@ -338,6 +338,7 @@ public class ShopScreen extends ScaledScreen {
     }
     private String previewHoverName; // 详情页花费预览槽悬停名（drawDetail 暂存 → renderTooltips 消费）
     private String previewHoverExtra; // 悬停槽的"拥有/缺少"提示行（drawPreviewSlot 暂存 → renderTooltips 消费），无数据（未同步/加载中）为 null
+    private ItemStack previewHoverStack; // 获得/花费预览格悬停的真实物品（含 NBT），renderTooltips 画原版物品 tooltip
     private long previewRequestedKey = -1L;      // 花费预览最近一次发起请求时对应的商品；变了要重新请求
     private boolean previewRequestedAeMode = false; // 花费预览最近一次发起请求时的 AE 模式状态；切换要重新请求
     private long previewRequestedAtGameTime = Long.MIN_VALUE; // 最近一次发起请求的游戏刻，供周期性兜底刷新节流
@@ -2405,6 +2406,7 @@ public class ShopScreen extends ScaledScreen {
     private void drawDetail(GuiGraphics g, int mx, int my) {
         previewHoverName = null; // 每帧先清，命中预览格再置
         previewHoverExtra = null; // 每帧先清，命中预览格再置
+        previewHoverStack = null; // 每帧先清，命中物品预览格再置
         detailHoverStack = null; // 每帧先清，命中大图标再置
         descExpandVisible = false; // 每帧先清，描述非空才置
         submissionBtnVisible = false;
@@ -2551,13 +2553,14 @@ public class ShopScreen extends ScaledScreen {
         }
         boolean comboRewardPreview = mode == Mode.BUY && selected.getRewardMode() == ShopEntry.RewardMode.NONE
                 && selected.hasMultipleGoods();
+        int rewardEndY = contentY + 66; // 单行组合预览的旧终点；多行时由 drawRewardPreview 回写
         if (mode == Mode.BUY) {
             g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, contentY + 12, CYAN, true);
             ShopEntry.RewardMode rm = selected.getRewardMode();
             int physicalHintY;
             if (comboRewardPreview) {
-                drawRewardPreview(g, cx, contentY + 24, selected.getGoodsList(), amount, detailInnerW, mx, hoverMy);
-                physicalHintY = contentY + 66;
+                rewardEndY = drawRewardPreview(g, cx, contentY + 24, selected.getGoodsList(), amount, detailInnerW, mx, hoverMy);
+                physicalHintY = rewardEndY;
             } else {
                 String getLine = switch (rm) {
                     case CHOICE -> "§7预计获得: §d自选奖励 §7（购买前先选 1 项）";
@@ -2588,7 +2591,7 @@ public class ShopScreen extends ScaledScreen {
         }
 
         maybeRequestCostPreview(dcost);
-        int costPreviewY = contentY + (comboRewardPreview ? 80 : 50);
+        int costPreviewY = comboRewardPreview ? rewardEndY + 14 : contentY + 50;
         int cursorY = drawCostPreview(g, cx, costPreviewY, dcost, amount, detailInnerW, py + viewportH + 2048, mx, hoverMy);
         contentEndY = Math.max(contentEndY, cursorY);
         int actionY = cursorY + 2;
@@ -3959,7 +3962,12 @@ public class ShopScreen extends ScaledScreen {
             boolean hv = GuiRenderUtil.isHovering(mx, my, sx, syy, 20, 20);
             drawPreviewSlot(g, sx, syy, cell, hv);
             if (hv) {
-                previewHoverName = "§f" + cell.name + " §7×" + cell.exact;
+                if (cell.item != null && !cell.item.isEmpty()) {
+                    previewHoverStack = cell.item;
+                    previewHoverName = "§7需要: §f" + cell.exact;
+                } else {
+                    previewHoverName = "§f" + cell.name + " §7×" + cell.exact;
+                }
                 if (cell.have == null) {
                     previewHoverExtra = "§7库存核对中…";
                 } else if (cell.have.compareTo(cell.need) >= 0) {
@@ -4009,8 +4017,8 @@ public class ShopScreen extends ScaledScreen {
 
     // ============ 图形化获得预览（组合商品，图标 + 数量）============
 
-    /** 获得预览格：完整展示图标（无限盘=内容物主图标+盘本身角标，见 {@link ShopEntry#goodsSlotIcons}）+ 数量，纯展示（不比对拥有量，跟花费预览的核心区别）。 */
-    private record RewardCell(List<ShopEntry.DisplayIcon> icons, String amount, String exact, String name) {}
+    /** 获得预览格：完整展示图标（无限盘=内容物主图标+盘本身角标，见 {@link ShopEntry#goodsSlotIcons}）+ 数量，纯展示（不比对拥有量，跟花费预览的核心区别）。tip 是悬停用的真实物品（流体为空）。 */
+    private record RewardCell(List<ShopEntry.DisplayIcon> icons, ItemStack tip, String amount, String exact, String name) {}
 
     /** 把组合商品清单拆成获得预览格，数量按 times 展开（各项独立数量 × times）。 */
     private static java.util.List<RewardCell> goodsRewardCells(List<ShopEntry.GoodsStack> goods, long times) {
@@ -4019,18 +4027,23 @@ public class ShopScreen extends ScaledScreen {
         for (ShopEntry.GoodsStack gs : goods) {
             java.math.BigInteger need = java.math.BigInteger.valueOf(gs.count()).multiply(t);
             String unit = gs.isFluid() ? "mB" : "";
-            cells.add(new RewardCell(ShopEntry.goodsSlotIcons(gs), formatBig(need) + unit, groupBig(need) + unit,
+            ItemStack tip = ItemStack.EMPTY;
+            if (!gs.isFluid()) {
+                tip = gs.makeStack();
+                if (tip.isEmpty()) tip = ShopEntry.missingItemStack(gs.id(), 1);
+                else if (tip.getCount() != 1) tip.setCount(1);
+            }
+            cells.add(new RewardCell(ShopEntry.goodsSlotIcons(gs), tip, formatBig(need) + unit, groupBig(need) + unit,
                     ShopEntry.goodsSlotDisplayName(gs)));
         }
         return cells;
     }
 
     /**
-     * 图形化获得预览：组合商品用，跟「花费预览」同款槽位样式（真图标/流体贴图 + 数量），
-     * 但固定只占一行——组合商品清单通常就几种（见「等N种」命名），超出一行的按「+N」收尾，
-     * 不像花费预览那样按剩余高度动态换行/截断（这里在 getLine 那行原地展开，后面 cost 预览
-     * 的起始 Y 只需整体下移固定量，不用像 CurrencyAtmScreen 教训里那样牵连一串后续坐标）。
-     * @return 预览区结束后的 y（供调用方续接布局）。悬停格把名+精确数量写入 {@link #previewHoverName}。
+     * 图形化获得预览：组合商品用，跟「花费预览」同款槽位样式（真图标/流体贴图 + 数量）。
+     * 详情列已可滚动，超出一行就换行，不再把第 7 项起收成被裁掉的「+N」。
+     * 单行时返回值与旧布局相同（sy+30），调用方用返回值把实物提示和花费预览整体下移。
+     * @return 预览区结束后的 y（供调用方续接布局）。物品格悬停写入 {@link #previewHoverStack}。
      */
     private int drawRewardPreview(GuiGraphics g, int x, int y, List<ShopEntry.GoodsStack> goods, long times, int maxW, int mx, int my) {
         g.drawString(this.font, "§6预计获得:", x, y, GOLD, true);
@@ -4041,21 +4054,30 @@ public class ShopScreen extends ScaledScreen {
             return sy + 12;
         }
         int pitchX = 24;
+        int pitchY = 32;
         int perRow = Math.max(1, (maxW + 2) / pitchX);
-        int shown = Math.min(cells.size(), perRow); // 固定一行，多余的收成「+N」，不动态换行
-        for (int i = 0; i < shown; i++) {
-            int sx = x + i * pitchX + 1;
+        int endY = sy + 30;
+        for (int i = 0; i < cells.size(); i++) {
+            int col = i % perRow;
+            int row = i / perRow;
+            int sx = x + col * pitchX + 1;
+            int syy = sy + row * pitchY;
             RewardCell cell = cells.get(i);
-            boolean hv = GuiRenderUtil.isHovering(mx, my, sx, sy, 20, 20);
-            EditorWidgets.checkerSlot(g, sx, sy, hv);
-            renderIconComposite(g, cell.icons(), sx, sy);
-            g.drawCenteredString(this.font, "§f" + cell.amount(), sx + 10, sy + 22, WHITE);
-            if (hv) previewHoverName = "§f" + cell.name() + " §7×" + cell.exact();
+            boolean hv = GuiRenderUtil.isHovering(mx, my, sx, syy, 20, 20);
+            EditorWidgets.checkerSlot(g, sx, syy, hv);
+            renderIconComposite(g, cell.icons(), sx, syy);
+            g.drawCenteredString(this.font, "§f" + cell.amount(), sx + 10, syy + 22, WHITE);
+            if (hv) {
+                if (cell.tip() != null && !cell.tip().isEmpty()) {
+                    previewHoverStack = cell.tip();
+                    previewHoverName = "§7数量: §f" + cell.exact();
+                } else {
+                    previewHoverName = "§f" + cell.name() + " §7×" + cell.exact();
+                }
+            }
+            endY = syy + 30;
         }
-        if (cells.size() > shown) {
-            g.drawString(this.font, "§7+" + (cells.size() - shown), x + shown * pitchX + 3, sy + 6, GRAY, true);
-        }
-        return sy + 30;
+        return endY;
     }
 
     /** 多元成本紧凑单行（星火/币种/物品/流体）。 */
@@ -4256,6 +4278,14 @@ public class ShopScreen extends ScaledScreen {
             // 悬停详情页商品大图标：渲染真实物品 tooltip（含 appendHoverText/能力提示，如 SDA 实时解析内容）
             if (detailHoverStack != null && !detailHoverStack.isEmpty()) {
                 g.renderTooltip(this.font, detailHoverStack, mx, my);
+                return;
+            }
+            // 悬停获得/花费预览的物品格：原版物品 tooltip，再附上数量或拥有/缺少
+            if (previewHoverStack != null && !previewHoverStack.isEmpty()) {
+                List<Component> lines = new ArrayList<>(getTooltipFromItem(Minecraft.getInstance(), previewHoverStack));
+                if (previewHoverName != null) lines.add(Component.literal(previewHoverName));
+                if (previewHoverExtra != null) lines.add(Component.literal(previewHoverExtra));
+                g.renderTooltip(this.font, lines, previewHoverStack.getTooltipImage(), mx, my);
                 return;
             }
             // 悬停详情页花费/提交预览格：显示本地化名 + 数量，外加拥有/缺少或提交说明

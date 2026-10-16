@@ -87,6 +87,10 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.ConfigValue<List<? extends String>> virtualProviderAutoWrapExclusions;
         /** 虚拟物品提供器 — 编码器缺失不消耗输入时是否强行补回 */
         public ForgeConfigSpec.BooleanValue virtualProviderForceWrapOmittedNonConsumables;
+        /** 样板编码 — 是否写入精确配方 ID。关闭后快速编码上传同样不写。 */
+        public ForgeConfigSpec.BooleanValue encodeWriteRecipeId;
+        /** 样板编码 — 是否把不消耗输入写成虚拟供应器。关闭后快速编码上传同样不写。 */
+        public ForgeConfigSpec.BooleanValue encodeWriteVirtualProvider;
         /** 配方类型样板总成 — 主机配方类型联动模式 */
         public ForgeConfigSpec.EnumValue<RecipeTypePatternSwitchMode> recipeTypePatternSwitchMode;
         /** 配方类型样板总成 — 是否允许虚拟执行宿主当前不支持的配方类型 */
@@ -253,6 +257,16 @@ public final class DShanhaiConfig {
                              "true=自动补回缺失的不消耗物品或流体（默认）",
                              "false=尊重玩家删除输入的操作，不包裹该缺失项")
                     .define("forceWrapOmittedNonConsumables", true);
+            encodeWriteRecipeId = builder
+                    .comment("样板编码时是否写入 gt_shanhai_recipe_id",
+                             "true=编码和快速编码上传都写入精确配方 ID（默认）",
+                             "false=两边都不写。已有样板上的旧 ID 不会被清掉")
+                    .define("encodeWriteRecipeId", true);
+            encodeWriteVirtualProvider = builder
+                    .comment("样板编码时是否把不消耗输入写成虚拟物品供应器",
+                             "true=按原有自动/强制包裹规则写入（默认）",
+                             "false=编码和快速编码上传都保留原始物品或流体，不写虚拟供应器")
+                    .define("encodeWriteVirtualProvider", true);
             builder.pop();
 
             builder.push("recipe_type_pattern_buffer");

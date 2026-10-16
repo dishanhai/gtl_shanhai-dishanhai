@@ -8,6 +8,7 @@ import appeng.menu.me.items.PatternEncodingTermMenu;
 import appeng.util.ConfigInventory;
 
 import com.dishanhai.gt_shanhai.common.item.PatternEncodeOverride;
+import com.dishanhai.gt_shanhai.common.item.PatternEncodePreferences;
 import com.dishanhai.gt_shanhai.common.item.PatternWrapControlMenu;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 
@@ -70,6 +71,9 @@ public abstract class PatternWrapControlMenuMixin extends MEStorageMenu implemen
         registerClientAction("gtShanhaiToggleMark", Integer.class, this::gtShanhai$toggleMark);
         registerClientAction("gtShanhaiRememberSelectedRecipe", String.class,
                 this::gtShanhai$rememberSelectedRecipe);
+        registerClientAction("gtShanhaiSetWriteRecipeId", Boolean.class, this::gtShanhai$setWriteRecipeId);
+        registerClientAction("gtShanhaiSetWriteVirtualProvider", Boolean.class,
+                this::gtShanhai$setWriteVirtualProvider);
     }
 
     @Override
@@ -114,6 +118,26 @@ public abstract class PatternWrapControlMenuMixin extends MEStorageMenu implemen
     @Unique
     public String gtShanhai$getSelectedRecipeId() {
         return this.gtShanhai$selectedRecipeId;
+    }
+
+    @Override
+    @Unique
+    public void gtShanhai$setWriteRecipeId(Boolean enabled) {
+        if (isClientSide()) {
+            sendClientAction("gtShanhaiSetWriteRecipeId", enabled);
+            return;
+        }
+        PatternEncodePreferences.setWriteRecipeId(Boolean.TRUE.equals(enabled));
+    }
+
+    @Override
+    @Unique
+    public void gtShanhai$setWriteVirtualProvider(Boolean enabled) {
+        if (isClientSide()) {
+            sendClientAction("gtShanhaiSetWriteVirtualProvider", enabled);
+            return;
+        }
+        PatternEncodePreferences.setWriteVirtualProvider(Boolean.TRUE.equals(enabled));
     }
 
     @Unique

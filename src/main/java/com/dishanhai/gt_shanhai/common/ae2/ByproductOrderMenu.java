@@ -8,4 +8,7 @@ public interface ByproductOrderMenu {
     void gtShanhai$toggleByproductOrder();
 
     void gtShanhai$uploadByproductPattern();
+
+    /** 只影响这个终端的编码按钮，不改变快速上传。 */
+    void gtShanhai$setMarkByproductOnEncode(Boolean enabled);
 }

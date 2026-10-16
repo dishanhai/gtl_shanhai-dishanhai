@@ -192,6 +192,14 @@ class MEStellarStockPartMachineSourceTest {
         assertTrue(source.contains("Math.max("));
         assertTrue(source.contains("writeManualConfiguration"));
         assertTrue(source.contains("writeAutomaticConfiguration"));
+        assertTrue(source.contains("if (getAutoPullMode() != AUTO_PULL_OFF) {\n"
+                + "            super.setAutoPullMode(AUTO_PULL_OFF);"));
+        assertFalse(source.contains("saveStockConfiguration();\n"
+                + "            super.setAutoPullMode(AUTO_PULL_OFF);"));
+        assertTrue(source.contains("MEStellarStockConfiguration.reconcile("));
+        assertTrue(source.contains("acceptTagTarget("));
+        assertTrue(source.contains("omitSuppressed("));
+        assertTrue(source.contains("suppressPullKey("));
         assertFalse(source.contains("aeItemHandler.clearInventory("));
         assertFalse(source.contains("aeFluidHandler.clearInventory("));
     }

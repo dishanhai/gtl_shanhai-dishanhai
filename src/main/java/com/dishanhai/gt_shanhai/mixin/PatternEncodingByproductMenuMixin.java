@@ -28,6 +28,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -57,6 +58,9 @@ public abstract class PatternEncodingByproductMenuMixin extends MEStorageMenu im
     @Unique
     private ItemStack gtShanhai$pendingPattern = ItemStack.EMPTY;
 
+    @Unique
+    private boolean gtShanhai$markByproductOnEncode;
+
     protected PatternEncodingByproductMenuMixin(MenuType<?> menuType, int id, Inventory ip, ITerminalHost host) {
         super(menuType, id, ip, host);
     }
@@ -67,6 +71,30 @@ public abstract class PatternEncodingByproductMenuMixin extends MEStorageMenu im
             IPatternTerminalMenuHost host, boolean bindInventory, CallbackInfo ci) {
         registerClientAction("gtShanhaiToggleByproductOrder", this::gtShanhai$toggleByproductOrder);
         registerClientAction("gtShanhaiUploadByproductPattern", this::gtShanhai$uploadByproductPattern);
+        registerClientAction("gtShanhaiSetMarkByproductOnEncode", Boolean.class,
+                this::gtShanhai$setMarkByproductOnEncode);
+    }
+
+    @Inject(method = "encodeProcessingPattern", at = @At("RETURN"), remap = false, require = 0)
+    private void gtShanhai$markEncodedByproduct(CallbackInfoReturnable<ItemStack> cir) {
+        if (!this.gtShanhai$markByproductOnEncode || !gtShanhai$fromEncodeButton()) return;
+        ItemStack encoded = cir.getReturnValue();
+        if (encoded == null || encoded.isEmpty()) return;
+        PatternByproductOrder.setMarked(encoded, true);
+    }
+
+    @Unique
+    private static boolean gtShanhai$fromEncodeButton() {
+        for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
+            String method = frame.getMethodName();
+            if (method == null) continue;
+            if (method.contains("quickUpload") || method.contains("QuickUpload")
+                    || method.contains("prepareMarkedPattern") || method.contains("uploadByproduct")) {
+                return false;
+            }
+            if ("encode".equals(method)) return true;
+        }
+        return false;
     }
 
     @Inject(method = "gTLCore$quickUploadPattern", at = @At("HEAD"), remap = false, require = 0)
@@ -92,6 +120,15 @@ public abstract class PatternEncodingByproductMenuMixin extends MEStorageMenu im
         ItemStack pattern = this.gtShanhai$pendingPattern;
         gtShanhai$clearPendingUpload();
         gtShanhai$insertMarkedPattern(player, pattern, target);
+    }
+
+    @Override
+    public void gtShanhai$setMarkByproductOnEncode(Boolean enabled) {
+        if (isClientSide()) {
+            sendClientAction("gtShanhaiSetMarkByproductOnEncode", enabled);
+            return;
+        }
+        this.gtShanhai$markByproductOnEncode = Boolean.TRUE.equals(enabled);
     }
 
     @Override

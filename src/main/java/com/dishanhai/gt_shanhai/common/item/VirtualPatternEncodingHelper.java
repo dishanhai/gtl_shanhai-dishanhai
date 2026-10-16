@@ -76,6 +76,9 @@ public final class VirtualPatternEncodingHelper {
         if (inputs == null || outputs == null) {
             return inputs;
         }
+        if (!PatternEncodePreferences.writeVirtualProvider()) {
+            return inputs;
+        }
         if (PatternRecipeTypeHelper.currentAuthoritativeEncodingRecipe() != null) {
             return inputs;
         }
@@ -94,30 +97,42 @@ public final class VirtualPatternEncodingHelper {
             result = inputs.clone();
             autoDiagnostic = "auto-match skipped (force-wrap mode)";
         } else {
-            GTRecipe recipe = findMatchingRecipeForEncoding(inputs, outputs);
-            if (recipe == null) {
+            GTRecipe selectedRecipe = PatternRecipeTypeHelper.currentSelectedEncodingRecipe();
+            GenericStack[] anchored = selectedRecipe == null ? null
+                    : rewriteInputsAnchoredToKnownRecipe(inputs, outputs, selectedRecipe);
+            if (anchored != null) {
+                result = anchored;
+                autoDiagnostic = "recipe " + selectedRecipe.getId() + " anchored by id, wrapped";
                 if (LOG.isDebugEnabled()) {
-                    LOG.debug("[VirtualPatternEncoding] no unique recipe matched for outputs={}, wrap skipped, inputs left raw",
-                            StackBag.of(outputs));
+                    LOG.debug("[VirtualPatternEncoding] recipe={} anchored by id, inputs rewritten from that recipe",
+                            selectedRecipe.getId());
                 }
-                result = inputs;
-                autoDiagnostic = "no unique recipe matched";
             } else {
-                GenericStack[] rewritten = rewriteInputsPreservingSelections(inputs, recipe);
-                if (rewritten == inputs) {
+                GTRecipe recipe = findMatchingRecipeForEncoding(inputs, outputs);
+                if (recipe == null) {
                     if (LOG.isDebugEnabled()) {
-                        LOG.debug("[VirtualPatternEncoding] recipe={} matched but rewrite was rejected, inputs left raw",
-                                recipe.getId());
+                        LOG.debug("[VirtualPatternEncoding] no unique recipe matched for outputs={}, wrap skipped, inputs left raw",
+                                StackBag.of(outputs));
                     }
-                    autoDiagnostic = "recipe " + recipe.getId() + " matched but wrap rejected";
+                    result = inputs;
+                    autoDiagnostic = "no unique recipe matched";
                 } else {
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug("[VirtualPatternEncoding] recipe={} matched, inputs rewritten with virtual providers",
-                                recipe.getId());
+                    GenericStack[] rewritten = rewriteInputsPreservingSelections(inputs, recipe);
+                    if (rewritten == inputs) {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("[VirtualPatternEncoding] recipe={} matched but rewrite was rejected, inputs left raw",
+                                    recipe.getId());
+                        }
+                        autoDiagnostic = "recipe " + recipe.getId() + " matched but wrap rejected";
+                    } else {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("[VirtualPatternEncoding] recipe={} matched, inputs rewritten with virtual providers",
+                                    recipe.getId());
+                        }
+                        autoDiagnostic = "recipe " + recipe.getId() + " matched, wrapped";
                     }
-                    autoDiagnostic = "recipe " + recipe.getId() + " matched, wrapped";
+                    result = rewritten;
                 }
-                result = rewritten;
             }
         }
 
@@ -1369,27 +1384,41 @@ public final class VirtualPatternEncodingHelper {
      */
     private static InputMatchPlan findInputMatchPlan(GTRecipe recipe, GenericStack[] patternInputs,
             StackBag availableCatalystInputs, boolean allowOmittedNonConsumables) {
+        return findInputMatchPlan(recipe, patternInputs, availableCatalystInputs,
+                allowOmittedNonConsumables, false);
+    }
+
+    private static InputMatchPlan findInputMatchPlan(GTRecipe recipe, GenericStack[] patternInputs,
+            StackBag availableCatalystInputs, boolean allowOmittedNonConsumables,
+            boolean allowPartialPattern) {
         List<GenericStack> inputs = compactStacks(patternInputs);
         int requiredCount = countRequiredPatternInputs(recipe, availableCatalystInputs,
                 allowOmittedNonConsumables);
         int totalCount = countRecipeInputs(recipe);
-        if (inputs.size() < requiredCount || inputs.size() > totalCount) return null;
+        if (!allowPartialPattern && (inputs.size() < requiredCount || inputs.size() > totalCount)) return null;
 
         boolean[] used = new boolean[inputs.size()];
         InputMatchPlan plan = new InputMatchPlan();
         if (!assignItemContents(recipe.getInputContents(ItemRecipeCapability.CAP), inputs, used,
-                availableCatalystInputs, allowOmittedNonConsumables, plan)) return null;
+                availableCatalystInputs, allowOmittedNonConsumables, allowPartialPattern, plan)) return null;
         if (!assignFluidContents(recipe.getInputContents(FluidRecipeCapability.CAP), inputs, used,
-                availableCatalystInputs, allowOmittedNonConsumables, plan)) return null;
-        for (boolean matched : used) {
-            if (!matched) return null;
+                availableCatalystInputs, allowOmittedNonConsumables, allowPartialPattern, plan)) return null;
+        if (!allowPartialPattern) {
+            for (boolean matched : used) {
+                if (!matched) return null;
+            }
+            return plan;
         }
-        return plan;
+        if (inputs.isEmpty()) return plan;
+        for (boolean matched : used) {
+            if (matched) return plan;
+        }
+        return null;
     }
 
     private static boolean assignItemContents(List<Content> contents, List<GenericStack> inputs,
             boolean[] used, StackBag availableCatalystInputs, boolean allowOmittedNonConsumables,
-            InputMatchPlan plan) {
+            boolean allowAnyOmission, InputMatchPlan plan) {
         List<InputMatchSpec> specs = new ArrayList<>();
         if (contents != null) {
             for (Content content : contents) {
@@ -1406,7 +1435,7 @@ public final class VirtualPatternEncodingHelper {
                 }
                 candidates.sort(InputMatchCandidate.ORDER);
                 specs.add(new InputMatchSpec(content, candidates,
-                        canOmitItemPatternInput(content, availableCatalystInputs,
+                        allowAnyOmission || canOmitItemPatternInput(content, availableCatalystInputs,
                                 allowOmittedNonConsumables)));
             }
         }
@@ -1415,7 +1444,7 @@ public final class VirtualPatternEncodingHelper {
 
     private static boolean assignFluidContents(List<Content> contents, List<GenericStack> inputs,
             boolean[] used, StackBag availableCatalystInputs, boolean allowOmittedNonConsumables,
-            InputMatchPlan plan) {
+            boolean allowAnyOmission, InputMatchPlan plan) {
         List<InputMatchSpec> specs = new ArrayList<>();
         if (contents != null) {
             for (Content content : contents) {
@@ -1439,7 +1468,7 @@ public final class VirtualPatternEncodingHelper {
                 }
                 candidates.sort(InputMatchCandidate.ORDER);
                 specs.add(new InputMatchSpec(content, candidates,
-                        canOmitFluidPatternInput(content, availableCatalystInputs,
+                        allowAnyOmission || canOmitFluidPatternInput(content, availableCatalystInputs,
                                 allowOmittedNonConsumables)));
             }
         }
@@ -1650,9 +1679,72 @@ public final class VirtualPatternEncodingHelper {
         return null;
     }
 
+    /**
+     * 編碼當下已經有配方 ID 時，用這條配方的 chance 決定哪些輸入要包。
+     * 玩家刪掉若干輸入、拿掉副產物或改了整數倍率後，唯一反查會失敗，這裡仍按已對上的槽位包裹。
+     * 產出和這條配方沒有任何交集，或輸入一個都對不上時，退回唯一反查，避免舊 ID 套到另一張配方。
+     * 格子裡多了不屬於這條配方的輸入時，只包對得上的不消耗槽，不把刪掉的催化劑補回來。
+     */
+    private static GenericStack[] rewriteInputsAnchoredToKnownRecipe(GenericStack[] inputs,
+            GenericStack[] outputs, GTRecipe recipe) {
+        long multiplier = anchoredOutputMultiplier(recipe, outputs);
+        if (multiplier <= 0L) return null;
+        GenericStack[] scoredInputs = multiplier > 1L ? scaleDivisibleInputs(inputs, multiplier) : inputs;
+        InputMatchPlan plan = findInputMatchPlan(recipe, scoredInputs, StackBag.EMPTY, true, false);
+        if (plan == null) {
+            plan = findInputMatchPlan(recipe, scoredInputs, StackBag.EMPTY, true, true);
+        }
+        if (plan == null) return null;
+        if (hasUnmatchedPatternInput(scoredInputs, plan)) {
+            plan.clearOmissions();
+        }
+        return applyInputMatchPlan(inputs, recipe, plan);
+    }
+
+    private static long anchoredOutputMultiplier(GTRecipe recipe, GenericStack[] outputs) {
+        RecipeOutputSnapshot snapshot = recipeOutputSnapshot(recipe);
+        Map<AEKey, Long> patternAmounts = StackBag.of(outputs).amounts();
+        if (snapshot.amounts.isEmpty() || patternAmounts.isEmpty()) return 0L;
+        Map<AEKey, Long> overlapRecipe = new HashMap<>();
+        Map<AEKey, Long> overlapPattern = new HashMap<>();
+        Set<AEKey> unscaled = new HashSet<>();
+        for (Map.Entry<AEKey, Long> entry : patternAmounts.entrySet()) {
+            Long base = snapshot.amounts.get(entry.getKey());
+            if (base == null || base.longValue() <= 0L) continue;
+            overlapRecipe.put(entry.getKey(), base);
+            overlapPattern.put(entry.getKey(), entry.getValue());
+            if (snapshot.unscaledKeys.contains(entry.getKey())) unscaled.add(entry.getKey());
+        }
+        if (overlapRecipe.isEmpty()) return 0L;
+        long multiplier = UniformOutputMultiplier.detect(overlapRecipe, overlapPattern, unscaled);
+        return multiplier > 0L ? multiplier : 1L;
+    }
+
+    private static GenericStack[] scaleDivisibleInputs(GenericStack[] inputs, long multiplier) {
+        GenericStack[] scaled = new GenericStack[inputs.length];
+        for (int i = 0; i < inputs.length; i++) {
+            GenericStack input = inputs[i];
+            if (input == null || input.what() == null || input.amount() <= 0L
+                    || input.amount() % multiplier != 0L) {
+                scaled[i] = input;
+                continue;
+            }
+            long scaledAmount = input.amount() / multiplier;
+            scaled[i] = scaledAmount == input.amount()
+                    ? input : new GenericStack(input.what(), scaledAmount);
+        }
+        return scaled;
+    }
+
+    private static boolean hasUnmatchedPatternInput(GenericStack[] patternInputs, InputMatchPlan plan) {
+        int count = compactStacks(patternInputs).size();
+        for (int i = 0; i < count; i++) {
+            if (!plan.binds(i)) return true;
+        }
+        return false;
+    }
+
     private static GenericStack[] rewriteInputsPreservingSelections(GenericStack[] inputs, GTRecipe recipe) {
-        List<GenericStack> original = compactStacks(inputs);
-        List<GenericStack> rewritten = new ArrayList<>(original);
         InputMatchPlan plan = findInputMatchPlan(recipe, inputs, StackBag.EMPTY, true);
         if (plan == null) {
             if (LOG.isDebugEnabled()) {
@@ -1661,6 +1753,12 @@ public final class VirtualPatternEncodingHelper {
             }
             return inputs;
         }
+        return applyInputMatchPlan(inputs, recipe, plan);
+    }
+
+    private static GenericStack[] applyInputMatchPlan(GenericStack[] inputs, GTRecipe recipe, InputMatchPlan plan) {
+        List<GenericStack> original = compactStacks(inputs);
+        List<GenericStack> rewritten = new ArrayList<>(original);
         rewriteItemInputsFromPlan(recipe.getInputContents(ItemRecipeCapability.CAP), original, rewritten, plan);
         rewriteFluidInputsFromPlan(recipe.getInputContents(FluidRecipeCapability.CAP), original, rewritten, plan);
         return rewritten.toArray(new GenericStack[0]);
@@ -1675,7 +1773,7 @@ public final class VirtualPatternEncodingHelper {
             long amount = getItemAmount(content, firstItemStack(content));
             Integer matchedIndex = plan.indexFor(content);
             if (matchedIndex == null) {
-                if (!plan.wasOmitted(content)) continue;
+                if (!plan.wasOmitted(content) || !isNonConsumable(content)) continue;
                 if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) {
                     continue;
                 }
@@ -1706,7 +1804,7 @@ public final class VirtualPatternEncodingHelper {
             if (sample == null) continue;
             Integer matchedIndex = plan.indexFor(content);
             if (matchedIndex == null) {
-                if (!plan.wasOmitted(content)) continue;
+                if (!plan.wasOmitted(content) || !isNonConsumable(content)) continue;
                 if (!DShanhaiConfig.COMMON.virtualProviderForceWrapOmittedNonConsumables.get()) continue;
                 GenericStack missingInput = createVirtualFluidInput(fluidKeyOf(sample), sample.getAmount());
                 if (missingInput != null) rewritten.add(missingInput);
@@ -1723,6 +1821,9 @@ public final class VirtualPatternEncodingHelper {
 
     private static GenericStack createVirtualFluidInput(AEFluidKey key, long amount) {
         if (key == null || amount <= 0L) return null;
+        if (!PatternEncodePreferences.writeVirtualProvider()) {
+            return new GenericStack(key, amount);
+        }
         ItemStack provider = VirtualItemProviderHelper.createBoundProvider(new GenericStack(key, amount));
         return provider.isEmpty() ? null : new GenericStack(AEItemKey.of(provider), 1L);
     }
@@ -1732,7 +1833,8 @@ public final class VirtualPatternEncodingHelper {
         sample = sample.copy();
         sample.setCount((int) Math.min(Integer.MAX_VALUE, amount));
         if (IntCircuitBehaviour.isIntegratedCircuit(sample)
-                || VirtualItemProviderHelper.isAutoWrapExcluded(sample)) {
+                || VirtualItemProviderHelper.isAutoWrapExcluded(sample)
+                || !PatternEncodePreferences.writeVirtualProvider()) {
             return new GenericStack(AEItemKey.of(sample), amount);
         }
         ItemStack provider = VirtualItemProviderHelper.createBoundProvider(sample.copy());
@@ -1752,7 +1854,8 @@ public final class VirtualPatternEncodingHelper {
                 if (stack.isEmpty()) continue;
 
                 if (isNonConsumable(content)) {
-                    if (VirtualItemProviderHelper.isAutoWrapExcluded(stack)) {
+                    if (VirtualItemProviderHelper.isAutoWrapExcluded(stack)
+                            || !PatternEncodePreferences.writeVirtualProvider()) {
                         stacks.add(new GenericStack(AEItemKey.of(stack), getItemAmount(content, stack)));
                         continue;
                     }
@@ -2100,6 +2203,17 @@ public final class VirtualPatternEncodingHelper {
 
         private boolean wasOmitted(Content content) {
             return omitted.containsKey(content);
+        }
+
+        private boolean binds(int inputIndex) {
+            for (Integer matched : matches.values()) {
+                if (matched != null && matched.intValue() == inputIndex) return true;
+            }
+            return false;
+        }
+
+        private void clearOmissions() {
+            omitted.clear();
         }
     }
 

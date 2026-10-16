@@ -13,5 +13,9 @@ public interface PatternWrapControlMenu {
     /** 记录 JEI 最近一次传输到本终端的精确 GTRecipe ID。 */
     void gtShanhai$rememberSelectedRecipe(String recipeId);
 
+    void gtShanhai$setWriteRecipeId(Boolean enabled);
+
+    void gtShanhai$setWriteVirtualProvider(Boolean enabled);
+
     String gtShanhai$getSelectedRecipeId();
 }

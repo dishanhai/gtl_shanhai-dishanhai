@@ -43,6 +43,8 @@ import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 import com.lowdragmc.lowdraglib.utils.Position;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
@@ -56,6 +58,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -98,6 +101,8 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
     private CompoundTag manualStockConfiguration = new CompoundTag();
     @Persisted
     private CompoundTag automaticStockConfiguration = new CompoundTag();
+    @Persisted
+    private CompoundTag suppressedPullKeys = new CompoundTag();
     @DescSynced
     @Persisted
     private int disabledPatternMask;
@@ -107,6 +112,7 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
     private List<ItemStack> decodedPatterns = List.of();
     private List<MEStellarStockTargetPlanner.Input<AEKey>> cachedInputs;
     private boolean patternDirty = true;
+    private boolean preservePullSuppression;
     private MultiCraftingTracker itemTracker;
     private MultiCraftingTracker fluidTracker;
     private int trackerSlots;
@@ -194,10 +200,19 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
 
         if (!savedStockConfiguration.contains("AutoPullMode")) {
             saveStockConfiguration();
-            super.setAutoPullMode(AUTO_PULL_OFF);
-        } else if (getAutoPullMode() != AUTO_PULL_OFF) {
-            super.setAutoPullMode(AUTO_PULL_OFF);
         }
+        if (getAutoPullMode() != AUTO_PULL_OFF) {
+            super.setAutoPullMode(AUTO_PULL_OFF);
+            preservePullSuppression = true;
+        }
+        try {
+            reconcileAndApplyTargets(tagging);
+        } finally {
+            preservePullSuppression = false;
+        }
+    }
+
+    private void reconcileAndApplyTargets(boolean tagging) {
         reconcileManualConfiguration();
 
         if (!hasPattern()) {
@@ -253,6 +268,7 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
         if (tagging) {
             appendTagTargets(targets);
         }
+        MEStellarStockConfiguration.omitSuppressed(targets, readSuppressedKeys());
         if (!patternOk && hasPattern() && !tagging) {
             applyTargets(Map.of());
             patternStatus = STATUS_PREFIX + "invalid";
@@ -482,6 +498,7 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
 
     private void applyTargets(Map<AEKey, Long> targets) {
         reconcileManualConfiguration();
+        releaseBakedManual(targets);
         List<SlotConfiguration> manual = readConfigurations(
                 manualStockConfiguration, aeItemHandler.getSlots());
         List<SlotConfiguration> previousAutomatic = readConfigurations(
@@ -588,33 +605,93 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
     private void reconcileManualConfiguration() {
         int capacity = aeItemHandler.getSlots();
         List<SlotConfiguration> current = readCurrentConfigurations(capacity);
+        boolean automaticReady = automaticStockConfiguration.contains("Initialized");
+        List<SlotConfiguration> previousAutomatic = readConfigurations(automaticStockConfiguration, capacity);
         if (!manualStockConfiguration.contains("Initialized")) {
-            writeManualConfiguration(current);
+            List<SlotConfiguration> initial = new ArrayList<>(capacity);
+            for (int i = 0; i < capacity; i++) {
+                if (!automaticReady) {
+                    initial.add(current.get(i));
+                } else {
+                    initial.add(new SlotConfiguration(
+                            MEStellarStockConfiguration.initialManual(
+                                    current.get(i).item(), previousAutomatic.get(i).item()),
+                            MEStellarStockConfiguration.initialManual(
+                                    current.get(i).fluid(), previousAutomatic.get(i).fluid())));
+                }
+            }
+            writeManualConfiguration(List.copyOf(initial));
             return;
         }
         List<SlotConfiguration> previousManual = readConfigurations(manualStockConfiguration, capacity);
-        List<SlotConfiguration> previousAutomatic = readConfigurations(automaticStockConfiguration, capacity);
         List<SlotConfiguration> next = new ArrayList<>(capacity);
         for (int i = 0; i < capacity; i++) {
             SlotConfiguration currentConfiguration = current.get(i);
             SlotConfiguration manualConfiguration = previousManual.get(i);
             SlotConfiguration automaticConfiguration = previousAutomatic.get(i);
-            next.add(new SlotConfiguration(
-                    reconcileChannel(currentConfiguration.item(), manualConfiguration.item(),
-                            automaticConfiguration.item()),
-                    reconcileChannel(currentConfiguration.fluid(), manualConfiguration.fluid(),
-                            automaticConfiguration.fluid())));
+            GenericStack item = MEStellarStockConfiguration.reconcile(
+                    currentConfiguration.item(), manualConfiguration.item(), automaticConfiguration.item());
+            GenericStack fluid = MEStellarStockConfiguration.reconcile(
+                    currentConfiguration.fluid(), manualConfiguration.fluid(), automaticConfiguration.fluid());
+            notePullEdit(appliedStack(manualConfiguration.item(), automaticConfiguration.item()),
+                    currentConfiguration.item());
+            notePullEdit(appliedStack(manualConfiguration.fluid(), automaticConfiguration.fluid()),
+                    currentConfiguration.fluid());
+            next.add(new SlotConfiguration(item, fluid));
         }
         writeManualConfiguration(List.copyOf(next));
     }
 
-    private static GenericStack reconcileChannel(GenericStack current,
-                                                 GenericStack manual,
-                                                 GenericStack automatic) {
-        if (Objects.equals(current, automatic) || Objects.equals(current, manual)) {
-            return manual;
+    private static GenericStack appliedStack(GenericStack manual, GenericStack automatic) {
+        return automatic != null ? automatic : manual;
+    }
+
+    private void notePullEdit(GenericStack applied, GenericStack edited) {
+        if (preservePullSuppression || Objects.equals(applied, edited)) {
+            return;
         }
-        return current;
+        if (applied != null && (edited == null || !applied.what().equals(edited.what()))) {
+            suppressPullKey(applied.what());
+        }
+        if (edited != null) {
+            unsuppressPullKey(edited.what());
+        }
+    }
+
+    private void releaseBakedManual(Map<AEKey, Long> targets) {
+        int capacity = aeItemHandler.getSlots();
+        if (!manualStockConfiguration.contains("Initialized")
+                || !automaticStockConfiguration.contains("Initialized")) {
+            return;
+        }
+        List<SlotConfiguration> manual = readConfigurations(manualStockConfiguration, capacity);
+        List<SlotConfiguration> automatic = readConfigurations(automaticStockConfiguration, capacity);
+        List<SlotConfiguration> next = new ArrayList<>(capacity);
+        boolean changed = false;
+        for (int i = 0; i < capacity; i++) {
+            GenericStack item = releaseChannel(manual.get(i).item(), automatic.get(i).item(), targets);
+            GenericStack fluid = releaseChannel(manual.get(i).fluid(), automatic.get(i).fluid(), targets);
+            if (item != manual.get(i).item() || fluid != manual.get(i).fluid()) {
+                changed = true;
+            }
+            next.add(new SlotConfiguration(item, fluid));
+        }
+        if (changed) {
+            writeManualConfiguration(List.copyOf(next));
+        }
+    }
+
+    private static GenericStack releaseChannel(GenericStack manual,
+                                               GenericStack automatic,
+                                               Map<AEKey, Long> targets) {
+        if (manual == null) {
+            return null;
+        }
+        if (MEStellarStockConfiguration.releaseBaked(
+                manual, automatic, targets.containsKey(manual.what()))) {
+            return null;
+        }
+        return manual;
     }
 
     private List<SlotConfiguration> readCurrentConfigurations(int capacity) {
@@ -957,19 +1034,24 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
         }
         List<SlotConfiguration> manual = readConfigurations(manualStockConfiguration,
                 Math.max(aeItemHandler.getSlots(), BASE_CONFIG_SIZE));
+        Set<AEKey> manualKeys = configuredKeys(manual);
+        Set<AEKey> suppressed = readSuppressedKeys();
         int extra = 0;
         for (GenericStack match : matches) {
-            if (!targets.containsKey(match.what())) {
+            if (MEStellarStockConfiguration.acceptTagTarget(
+                    match.what(), targets.keySet(), manualKeys, suppressed)) {
                 extra++;
             }
         }
         ensureCapacity(Math.max(aeItemHandler.getSlots(),
                 occupiedWithoutNewTags(targets, manual) + extra));
         manual = readConfigurations(manualStockConfiguration, aeItemHandler.getSlots());
+        manualKeys = configuredKeys(manual);
         int occupied = occupiedWithoutNewTags(targets, manual);
         int capacity = aeItemHandler.getSlots();
         for (GenericStack match : matches) {
-            if (targets.containsKey(match.what())) {
+            if (!MEStellarStockConfiguration.acceptTagTarget(
+                    match.what(), targets.keySet(), manualKeys, suppressed)) {
                 continue;
             }
             if (occupied >= capacity) {
@@ -977,6 +1059,58 @@ public class MEStellarStockPartMachine extends MEDualHatchStockPartMachine
             }
             targets.put(match.what(), Math.max(1L, match.amount()));
             occupied++;
+        }
+    }
+
+    private static Set<AEKey> configuredKeys(List<SlotConfiguration> configurations) {
+        Set<AEKey> keys = new HashSet<>();
+        for (SlotConfiguration configuration : configurations) {
+            if (configuration.item() != null) {
+                keys.add(configuration.item().what());
+            }
+            if (configuration.fluid() != null) {
+                keys.add(configuration.fluid().what());
+            }
+        }
+        return keys;
+    }
+
+    private Set<AEKey> readSuppressedKeys() {
+        Set<AEKey> keys = new HashSet<>();
+        ListTag list = suppressedPullKeys.getList("Keys", Tag.TAG_COMPOUND);
+        for (int i = 0; i < list.size(); i++) {
+            GenericStack stack = GenericStack.readTag(list.getCompound(i));
+            if (stack != null) {
+                keys.add(stack.what());
+            }
+        }
+        return keys;
+    }
+
+    private void suppressPullKey(AEKey key) {
+        Set<AEKey> keys = readSuppressedKeys();
+        if (keys.add(key)) {
+            writeSuppressedKeys(keys);
+        }
+    }
+
+    private void unsuppressPullKey(AEKey key) {
+        Set<AEKey> keys = readSuppressedKeys();
+        if (keys.remove(key)) {
+            writeSuppressedKeys(keys);
+        }
+    }
+
+    private void writeSuppressedKeys(Set<AEKey> keys) {
+        CompoundTag next = new CompoundTag();
+        ListTag list = new ListTag();
+        for (AEKey key : keys) {
+            list.add(GenericStack.writeTag(new GenericStack(key, 1)));
+        }
+        next.put("Keys", list);
+        if (!next.equals(suppressedPullKeys)) {
+            suppressedPullKeys = next;
+            markDirty();
         }
     }
 

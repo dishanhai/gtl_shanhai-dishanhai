@@ -5,6 +5,7 @@ import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.stacks.GenericStack;
 import appeng.crafting.pattern.AEProcessingPattern;
 
+import com.dishanhai.gt_shanhai.api.PatternIdentityMatcher;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
@@ -27,6 +28,7 @@ public final class PatternRecipeTypeHelper {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai:recipe_type");
 
     public static final String TAG_RECIPE_TYPE = "gt_shanhai_recipe_type";
+    public static final String TAG_RECIPE_ID = "gt_shanhai_recipe_id";
     public static final String VANILLA_CRAFTING_RECIPE_TYPE_ID = "minecraft:crafting";
     private static final String VANILLA_SMELTING_RECIPE_TYPE_ID = "minecraft:smelting";
     private static final String VANILLA_SMELTING_RECIPE_TYPE_PATH = "smelting";
@@ -59,6 +61,43 @@ public final class PatternRecipeTypeHelper {
         stack.getOrCreateTag().putString(TAG_RECIPE_TYPE, recipeType.registryName.toString());
     }
 
+    public static String readRecipeId(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "";
+        CompoundTag tag = stack.getTag();
+        if (tag == null) return "";
+
+        String recipeId = tag.getString(TAG_RECIPE_ID);
+        if (parseRecipeId(recipeId) != null) return recipeId;
+
+        String legacyRecipeId = tag.getString(SelectedRecipePattern.RECIPE_ID);
+        return parseRecipeId(legacyRecipeId) == null ? "" : legacyRecipeId;
+    }
+
+    public static void writeRecipeId(ItemStack stack, String recipeId) {
+        if (!PatternEncodePreferences.writeRecipeId()) return;
+        if (stack == null || stack.isEmpty()) return;
+        ResourceLocation parsed = parseRecipeId(recipeId);
+        if (parsed == null || !parsed.toString().equals(recipeId)) return;
+
+        CompoundTag tag = stack.getOrCreateTag();
+        tag.putString(TAG_RECIPE_ID, recipeId);
+    }
+
+    /**
+     * 精確 ID 只在當前樣板仍允許執行該配方時生效。
+     * 玩家去掉輸入、調換主產物和副產物後，樣板不再覆蓋這條配方，呼叫方應回到原有匹配。
+     */
+    public static boolean storedRecipeFitsPattern(ItemStack stack, Level level, GTRecipe recipe) {
+        if (stack == null || stack.isEmpty() || level == null || recipe == null) return false;
+        try {
+            IPatternDetails details = PatternDetailsHelper.decodePattern(stack, level);
+            return PatternIdentityMatcher.matches(recipe, details);
+        } catch (RuntimeException exception) {
+            LOG.debug("[storedRecipeFitsPattern] decode failed", exception);
+            return false;
+        }
+    }
+
     /**
      * 编码时权威写入：仅供已经拿到确切来源 {@link GTRecipe}（玩家实际选中/上传的那一个，零歧义）
      * 的调用点使用，如 {@code Ae2GtmProcessingPatternMixin}。写入后该样板永久跳过自愈重推断。
@@ -66,6 +105,7 @@ public final class PatternRecipeTypeHelper {
     public static void writeAuthoritativeRecipeType(ItemStack stack, GTRecipe recipe) {
         if (stack == null || stack.isEmpty() || recipe == null) return;
         writeRecipeType(stack, recipe);
+        writeRecipeId(stack, recipe.id.toString());
         stack.getOrCreateTag().putBoolean(TAG_RECIPE_TYPE_AUTHORITATIVE, true);
     }
 
