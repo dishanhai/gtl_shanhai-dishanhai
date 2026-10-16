@@ -94,7 +94,7 @@ ServerEvents.recipes(function (event) {
     try {
         var b1 = gtr.primordial_singularity_inversion('shanhai:new_recipe_1')
             .itemInputs('1x shanhai:up_quark_emission_catalyst')
-            .circuit(8)
+            .circuit(3)
             .itemInputs('1x gtceu:fission_reactor')
             .itemInputs('1x gtceu:heat_exchanger')
             .itemOutputs('1x shanhai:strange_quark_emission_catalyst')
@@ -112,7 +112,7 @@ ServerEvents.recipes(function (event) {
     // @perm index=2 id=shanhai:primordial_singularity_inversion/new_recipe_2 type=gtceu:primordial_singularity_inversion typePath=primordial_singularity_inversion kjsId=shanhai:new_recipe_2 seq=2 conditions=0
     try {
         var b2 = gtr.primordial_singularity_inversion('shanhai:new_recipe_2')
-            .circuit(8)
+            .circuit(3)
             .itemInputs('1x gtceu:blaze_blast_furnace')
             .itemInputs('1x gtceu:assembly_line')
             .itemInputs('1x shanhai:casing_empty_quark_emission_catalyst')
@@ -242,15 +242,19 @@ ServerEvents.recipes(function (event) {
     try {
         var b7 = gtr.primordial_matter_recombination('shanhai:new_recipe_1')
             .itemInputs('1x gtceu:cooperite_dust')
-            .circuit(30)
+            .circuit(1)
             .itemOutputs('16x gtceu:platinum_group_sludge_dust')
             .duration(200)
             .EUt(2048)
             .addData('euTier', 4)
         PERM_OK = PERM_OK + 1
-        // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
+        // 额外条件 1 条（物质模块等级 shanhai:virtual_image_material_module level=4）
+        //   2026-10-16：把用户在编辑器里设的那条条件**固化进脚本** —— 它原来靠实例的
+        //   覆盖层（config\shanhai\recipe_overrides.json 的 op=set + base_fp 指纹）生效；
+        //   电路号一改，配方 JSON 就变 ⇒ 指纹失配 ⇒ 那条会静默不生效。固化后不再依赖指纹。
+        //   原文取自那条覆盖记录的 fields.conditions；时长 200 本来就一致（见上面的 .duration(200)）。
         // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e7 = ShanhaiConditions.apply(b7, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
+        var e7 = ShanhaiConditions.apply(b7, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:virtual_image_material_module","level":4}]'))
         if (e7 !== '') {
             PERM_COND_BAD = PERM_COND_BAD + 1
             PERM_ERRS = PERM_ERRS + '|cond shanhai:primordial_matter_recombination/new_recipe_1 <= ' + e7 + ' '
@@ -341,7 +345,7 @@ ServerEvents.recipes(function (event) {
             .itemInputs('1048576x gtceu:osmium_dust')
             .itemInputs('1048576x gtceu:platinum_dust')
             .itemInputs('1048576x gtceu:palladium_dust')
-            .circuit(32)
+            .circuit(7)
             .itemOutputs('1x shanhai:platinum_god_proof')
             .duration(200)
             .EUt(2048)
@@ -384,7 +388,7 @@ ServerEvents.recipes(function (event) {
     // @perm index=13 id=shanhai:primordial_causal_weaving/new_recipe_2 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_2 seq=2 conditions=0
     try {
         var b13 = gtr.primordial_causal_weaving('shanhai:new_recipe_2')
-            .circuit(11)
+            .circuit(3)
             .itemInputs('1x gtceu:door_of_create')
             .itemInputs('1191x gtlcore:dimension_connection_casing')
             .itemInputs('78x kubejs:dimension_creation_casing')
