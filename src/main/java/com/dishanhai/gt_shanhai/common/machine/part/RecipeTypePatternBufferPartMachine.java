@@ -5,7 +5,12 @@ import appeng.api.crafting.IPatternDetails;
 import appeng.api.crafting.PatternDetailsHelper;
 import appeng.api.inventories.InternalInventory;
 import appeng.api.networking.IGrid;
+import appeng.api.networking.crafting.ICraftingLink;
+import appeng.api.networking.crafting.ICraftingRequester;
 import appeng.api.networking.security.IActionSource;
+import appeng.helpers.MultiCraftingTracker;
+
+import com.google.common.collect.ImmutableSet;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
@@ -47,6 +52,8 @@ import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
+import com.gregtechceu.gtceu.integration.ae2.machine.trait.GridNodeHolder;
+import com.gregtechceu.gtceu.integration.ae2.utils.SerializableManagedGridNode;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidSlot;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemSlot;
 import com.gregtechceu.gtceu.api.gui.widget.LongInputWidget;
@@ -126,7 +133,7 @@ import java.util.function.Supplier;
  * 改走 StorageService 增量缓存（syncStockInput / findStock*Key 覆写），不再对全网做模拟提取遍历。
  */
 public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBufferPartMachine
-        implements RecipeTypePatternSlotAccess {
+        implements RecipeTypePatternSlotAccess, ICraftingRequester {
 
     public static final int DEFAULT_PATTERNS_PER_ROW = 9;
     public static final int DEFAULT_ROWS_PER_PAGE = 6;
@@ -160,8 +167,36 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private static final int PARENT_TERMINAL_VISIBILITY = 5;
     private static final int PARENT_PATTERN_CIRCUIT = 6;
     private static final int PARENT_ADVANCED_ME = 8;
+    /** 库存页视口。窗口另加 8 像素边框和 86 像素背包，232 在 GUI 比例 3 下能留在 1080p 屏幕内。 */
+    private static final int STOCK_PAGE_MAX_HEIGHT = 232;
     public static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             RecipeTypePatternBufferPartMachine.class, StellarSuperPatternBufferPartMachine.MANAGED_FIELD_HOLDER);
+    private static final String STOCK_ITEM_TRACKER = "ShanhaiPatternBufferItemCraftingTracker";
+    private static final String STOCK_FLUID_TRACKER = "ShanhaiPatternBufferFluidCraftingTracker";
+
+    @Persisted
+    private String stockTagWhite = "";
+    @Persisted
+    private String stockTagBlack = "";
+    @DescSynced
+    @Persisted
+    private boolean stockRequestEnabled;
+    @Persisted
+    private CompoundTag stockManualConfiguration = new CompoundTag();
+    @Persisted
+    private CompoundTag stockAutomaticConfiguration = new CompoundTag();
+    @Persisted
+    private CompoundTag stockSuppressedKeys = new CompoundTag();
+    @Persisted
+    private CompoundTag stockRequestLimits = new CompoundTag();
+
+    private final PatternBufferStockPull stockPull = new PatternBufferStockPull();
+    private final long[] stockDraftAmount = new long[CONFIG_SIZE * 2];
+    private final long[] stockDraftBatch = new long[CONFIG_SIZE * 2];
+    private final boolean[] stockDraftAmountSet = new boolean[CONFIG_SIZE * 2];
+    private final boolean[] stockDraftBatchSet = new boolean[CONFIG_SIZE * 2];
+    private MultiCraftingTracker stockItemCraftingTracker;
+    private MultiCraftingTracker stockFluidCraftingTracker;
 
     private final CachedPatternPaginationUIManager paginationUIManager;
     private final String[] patternRecipeTypeIds;
@@ -530,6 +565,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     @Override
     protected void syncStockInput() {
         KeyCounter cached = gtShanhai$cachedNetworkInventory();
+        if (!isRemote() && cached != null) {
+            refreshStockTagConfiguration(cached);
+        }
         if (cached == null) {
             stockItemHandler.clearStocks();
             stockFluidHandler.clearStocks();
@@ -538,6 +576,59 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         MEStorage view = new CachedNetworkAmountView(cached);
         stockItemHandler.syncStock(view);
         stockFluidHandler.syncStock(view);
+        if (!isRemote()) {
+            requestStockShortages();
+        }
+    }
+
+    private void refreshStockTagConfiguration(KeyCounter network) {
+        PatternBufferStockPull.Refresh refresh = stockPull.refreshItems(
+                stockItemHandler.getInventory(), network, stockTagWhite, stockTagBlack,
+                stockManualConfiguration, stockAutomaticConfiguration, stockSuppressedKeys);
+        boolean dirty = false;
+        if (refresh.manual != null && !refresh.manual.equals(stockManualConfiguration)) {
+            stockManualConfiguration = refresh.manual;
+            dirty = true;
+        }
+        if (refresh.automatic != null && !refresh.automatic.equals(stockAutomaticConfiguration)) {
+            stockAutomaticConfiguration = refresh.automatic;
+            dirty = true;
+        }
+        if (refresh.suppressed != null && !refresh.suppressed.equals(stockSuppressedKeys)) {
+            stockSuppressedKeys = refresh.suppressed;
+            dirty = true;
+        }
+        if (dirty) {
+            markDirty();
+        }
+        if (refresh.configsChanged) {
+            boolean removed = stockItemHandler.onConfigChanged();
+            if (removed || refresh.removedConfig) {
+                invalidateRecipeCaches();
+            }
+        }
+    }
+
+    private void requestStockShortages() {
+        if (!stockRequestEnabled || !isOnline()) {
+            return;
+        }
+        IGrid grid = getMainNode().getGrid();
+        if (grid == null) {
+            return;
+        }
+        ensureStockTrackers();
+        stockPull.request(stockItemHandler.getInventory(), stockFluidHandler.getInventory(),
+                stockRequestLimits, stockItemCraftingTracker, stockFluidCraftingTracker,
+                getLevel(), grid.getCraftingService(), this.actionSource);
+    }
+
+    private void ensureStockTrackers() {
+        if (stockItemCraftingTracker != null) {
+            return;
+        }
+        stockItemCraftingTracker = new MultiCraftingTracker(this, stockItemHandler.getInventory().length);
+        stockFluidCraftingTracker = new MultiCraftingTracker(this, stockFluidHandler.getInventory().length);
     }
 
     /** 已配置条目才允许由库存输入区供料（对齐父类 getAvailableAmount 的 configList 门控）。 */
@@ -689,6 +780,14 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     @Override
     public void saveCustomPersistedData(@NotNull CompoundTag tag, boolean forDrop) {
         super.saveCustomPersistedData(tag, forDrop);
+        if (!forDrop && stockItemCraftingTracker != null && stockFluidCraftingTracker != null) {
+            CompoundTag itemTag = new CompoundTag();
+            CompoundTag fluidTag = new CompoundTag();
+            stockItemCraftingTracker.writeToNBT(itemTag);
+            stockFluidCraftingTracker.writeToNBT(fluidTag);
+            tag.put(STOCK_ITEM_TRACKER, itemTag);
+            tag.put(STOCK_FLUID_TRACKER, fluidTag);
+        }
         if (wildcardPersistence.hasPending()) {
             // onLoad 后延迟 1 tick 的恢复还没执行，内存列表是空的：直接回写未消费的
             // pendingSlots，避免这次保存把存档里的通配符槽数据抹掉（保存+崩服组合会永久丢料）。
@@ -706,6 +805,15 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public void loadCustomPersistedData(@NotNull CompoundTag tag) {
         super.loadCustomPersistedData(tag);
         wildcardPersistence.load(tag);
+        if (tag.contains(STOCK_ITEM_TRACKER) || tag.contains(STOCK_FLUID_TRACKER)) {
+            ensureStockTrackers();
+            if (tag.contains(STOCK_ITEM_TRACKER)) {
+                stockItemCraftingTracker.readFromNBT(tag.getCompound(STOCK_ITEM_TRACKER));
+            }
+            if (tag.contains(STOCK_FLUID_TRACKER)) {
+                stockFluidCraftingTracker.readFromNBT(tag.getCompound(STOCK_FLUID_TRACKER));
+            }
+        }
     }
 
     @Override
@@ -1432,6 +1540,49 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     @Override
+    protected GridNodeHolder createNodeHolder() {
+        return new StockRequestGridNodeHolder(this);
+    }
+
+    @Override
+    public long insertCraftedItems(ICraftingLink link, AEKey what, long amount, Actionable mode) {
+        IGrid grid = getMainNode().getGrid();
+        if (grid == null || what == null || amount <= 0L) {
+            return 0L;
+        }
+        MEStorage storage = grid.getStorageService().getInventory();
+        if (storage == null) {
+            return 0L;
+        }
+        return storage.insert(what, amount, mode, this.actionSource);
+    }
+
+    @Override
+    public void jobStateChange(ICraftingLink link) {
+        if (stockItemCraftingTracker != null) {
+            stockItemCraftingTracker.jobStateChange(link);
+        }
+        if (stockFluidCraftingTracker != null) {
+            stockFluidCraftingTracker.jobStateChange(link);
+        }
+    }
+
+    @Override
+    public ImmutableSet<ICraftingLink> getRequestedJobs() {
+        if (stockItemCraftingTracker == null && stockFluidCraftingTracker == null) {
+            return ImmutableSet.of();
+        }
+        ImmutableSet.Builder<ICraftingLink> jobs = ImmutableSet.builder();
+        if (stockItemCraftingTracker != null) {
+            jobs.addAll(stockItemCraftingTracker.getRequestedJobs());
+        }
+        if (stockFluidCraftingTracker != null) {
+            jobs.addAll(stockFluidCraftingTracker.getRequestedJobs());
+        }
+        return jobs.build();
+    }
+
+    @Override
     public void attachConfigurators(@NotNull ConfiguratorPanel configuratorPanel) {
         List<IFancyConfigurator> parentConfigurators = collectParentConfigurators();
         if (PARENT_REFUND < parentConfigurators.size()) {
@@ -1466,11 +1617,12 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         StockInputConfigurator stockInput = new StockInputConfigurator();
         List<IFancyConfigurator> selected = new ArrayList<>(2);
         selected.add(stockInput);
+        selected.add(new PatternBufferStockRequestConfigurator(this));
         if (PARENT_ADVANCED_ME < configurators.size()) {
             selected.add(configurators.get(PARENT_ADVANCED_ME));
         }
         return new FancyConfiguratorSidebarPage(stockInput.getTitle(), stockInput.getIcon(),
-                stockInput.getTooltips(), selected);
+                stockInput.getTooltips(), selected, 1, STOCK_PAGE_MAX_HEIGHT);
     }
 
     private FancyConfiguratorSidebarPage sharedInputsPage(List<IFancyConfigurator> configurators) {
@@ -2593,6 +2745,158 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     && Objects.equals(this.recipeTypeId, recipeTypeId)
                     && this.multiplier == multiplier
                     && this.recipeRevision == recipeRevision;
+        }
+    }
+
+    String stockTagWhite() {
+        return stockTagWhite == null ? "" : stockTagWhite;
+    }
+
+    String stockTagBlack() {
+        return stockTagBlack == null ? "" : stockTagBlack;
+    }
+
+    void setStockTagWhite(String value) {
+        String next = value == null ? "" : value;
+        if (next.equals(stockTagWhite)) {
+            return;
+        }
+        stockTagWhite = next;
+        if (!isRemote()) {
+            markDirty();
+        }
+    }
+
+    void setStockTagBlack(String value) {
+        String next = value == null ? "" : value;
+        if (next.equals(stockTagBlack)) {
+            return;
+        }
+        stockTagBlack = next;
+        if (!isRemote()) {
+            markDirty();
+        }
+    }
+
+    boolean stockRequestEnabled() {
+        return stockRequestEnabled;
+    }
+
+    void setStockRequestEnabled(boolean enabled) {
+        if (isRemote() || stockRequestEnabled == enabled) {
+            return;
+        }
+        stockRequestEnabled = enabled;
+        markDirty();
+    }
+
+    int stockTagFilledCount() {
+        int count = 0;
+        for (int i = 0; i < CONFIG_SIZE; i++) {
+            if (stockAutomaticConfiguration.contains("Item" + i)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    boolean stockRequestRowEnabled(boolean fluid, int slot) {
+        CompoundTag row = PatternBufferStockPull.row(stockRequestLimits, fluid, slot);
+        return !row.contains("Enabled") || row.getBoolean("Enabled");
+    }
+
+    void setStockRequestRowEnabled(boolean fluid, int slot, boolean enabled) {
+        if (isRemote() || stockDraftIndex(fluid, slot) < 0) {
+            return;
+        }
+        CompoundTag row = PatternBufferStockPull.row(stockRequestLimits, fluid, slot);
+        if (row.contains("Enabled") && row.getBoolean("Enabled") == enabled) {
+            return;
+        }
+        stockRequestLimits = PatternBufferStockPull.writeRow(stockRequestLimits, fluid, slot, enabled,
+                row.getLong("Amount"), row.getLong("Batch"), row.getBoolean("Submitted"));
+        markDirty();
+    }
+
+    String stockRequestDraft(boolean fluid, int slot, boolean amount) {
+        int index = stockDraftIndex(fluid, slot);
+        CompoundTag row = PatternBufferStockPull.row(stockRequestLimits, fluid, slot);
+        if (index >= 0 && (amount ? stockDraftAmountSet[index] : stockDraftBatchSet[index])) {
+            return Long.toString(amount ? stockDraftAmount[index] : stockDraftBatch[index]);
+        }
+        return Long.toString(amount ? row.getLong("Amount") : row.getLong("Batch"));
+    }
+
+    void setStockRequestDraft(boolean fluid, int slot, boolean amount, String text) {
+        int index = stockDraftIndex(fluid, slot);
+        if (index < 0 || isRemote()) {
+            return;
+        }
+        long parsed = parseStockDraft(text);
+        if (parsed < 0L) {
+            return;
+        }
+        if (amount) {
+            stockDraftAmount[index] = parsed;
+            stockDraftAmountSet[index] = true;
+        } else {
+            stockDraftBatch[index] = parsed;
+            stockDraftBatchSet[index] = true;
+        }
+    }
+
+    void submitStockRequest(boolean fluid, int slot) {
+        int index = stockDraftIndex(fluid, slot);
+        if (index < 0 || isRemote()) {
+            return;
+        }
+        CompoundTag row = PatternBufferStockPull.row(stockRequestLimits, fluid, slot);
+        long amount = stockDraftAmountSet[index] ? stockDraftAmount[index] : row.getLong("Amount");
+        long batch = stockDraftBatchSet[index] ? stockDraftBatch[index] : row.getLong("Batch");
+        boolean enabled = !row.contains("Enabled") || row.getBoolean("Enabled");
+        stockRequestLimits = PatternBufferStockPull.writeRow(stockRequestLimits, fluid, slot,
+                enabled, amount, batch, true);
+        stockDraftAmountSet[index] = false;
+        stockDraftBatchSet[index] = false;
+        markDirty();
+    }
+
+    private int stockDraftIndex(boolean fluid, int slot) {
+        int items = stockItemHandler.getInventory().length;
+        if (slot < 0 || slot >= items) {
+            return -1;
+        }
+        int index = fluid ? items + slot : slot;
+        return index >= 0 && index < stockDraftAmount.length ? index : -1;
+    }
+
+    private static long parseStockDraft(String text) {
+        if (text == null) {
+            return 0L;
+        }
+        String trimmed = text.trim();
+        if (trimmed.isEmpty()) {
+            return 0L;
+        }
+        try {
+            long value = Long.parseLong(trimmed);
+            return value < 0L ? -1L : value;
+        } catch (NumberFormatException ignored) {
+            return -1L;
+        }
+    }
+
+    private static final class StockRequestGridNodeHolder extends GridNodeHolder {
+
+        private StockRequestGridNodeHolder(RecipeTypePatternBufferPartMachine machine) {
+            super(machine);
+        }
+
+        @Override
+        protected SerializableManagedGridNode createManagedNode() {
+            SerializableManagedGridNode node = super.createManagedNode();
+            node.addService(ICraftingRequester.class, (RecipeTypePatternBufferPartMachine) this.machine);
+            return node;
         }
     }
 }

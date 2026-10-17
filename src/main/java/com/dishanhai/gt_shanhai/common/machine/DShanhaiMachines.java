@@ -1486,6 +1486,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§6供料"));
             tooltips.add(Component.literal("§7· 库存输入在界面里指定物品和流体，真正扣料时才从 ME 提取"));
+            tooltips.add(Component.literal("§7· 标签拉取按白名单/黑名单补进空槽；可请求按维持量和批量下合成单"));
             tooltips.add(Component.literal("§7· 产物可以直接写回 ME。吞吐大时另接星轨输出矩阵"));
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§6接入"));

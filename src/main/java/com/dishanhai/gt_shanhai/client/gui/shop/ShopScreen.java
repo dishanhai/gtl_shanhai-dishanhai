@@ -869,9 +869,10 @@ public class ShopScreen extends ScaledScreen {
     /** 内容区可见高度（撑到面板底部留边）。 */
     private int contentHeight() { return Math.max(60, (top + panelHeight - 8) - contentTop()); }
 
-    private static final int GRID_HINT_H = 12;
+    private static final int GRID_HINT_H = 22;
+    private static final long GRID_HINT_ROTATE_MS = 5000L;
 
-    /** 网格卡片区高度。底部留一行给按键提示，详情列仍用 {@link #contentHeight()}。 */
+    /** 网格卡片区高度。底部留两行给操作提示，详情列仍用 {@link #contentHeight()}。 */
     private int gridHeight() { return Math.max(48, contentHeight() - GRID_HINT_H); }
 
     private int listLeft() { return left + 5; }
@@ -1947,10 +1948,164 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void drawGridHint(GuiGraphics g) {
-        int maxW = Math.max(8, listWidth() - 8);
-        String text = GuiRenderUtil.trimText(this.font,
-                "§8Ctrl+左键将商品加入购物车 · 右键打开快捷菜单 · Alt+左键批量修改商品配置", maxW);
-        g.drawString(this.font, text, listLeft() + 4, contentTop() + gridHeight() + 2, GRAY, false);
+        List<String> hints = operationHints();
+        if (hints.isEmpty()) return;
+        int base = (int) ((System.currentTimeMillis() / GRID_HINT_ROTATE_MS) % hints.size());
+        int y = contentTop() + gridHeight() + 1;
+        String page = "§8" + (base + 1) + "/" + hints.size();
+        int pageW = this.font.width(page);
+        int maxW = Math.max(8, listWidth() - pageW - 10);
+        int lines = Math.min(2, hints.size());
+        for (int i = 0; i < lines; i++) {
+            String text = GuiRenderUtil.trimText(this.font, "§8" + hints.get((base + i) % hints.size()), maxW);
+            g.drawString(this.font, text, listLeft() + 4, y + i * 10, GRAY, false);
+        }
+        g.drawString(this.font, page, listLeft() + listWidth() - pageW - 2, y, GRAY, false);
+    }
+
+    /** 网格为空时的下一步，避免玩家对着空白分类不知道该换页、清搜索还是先收藏。 */
+    private String emptyGridHint() {
+        if (favoritesOnly) return "§7没有收藏。右键商品可以收藏";
+        if (searchBox != null && !searchBox.getValue().isBlank()) return "§7没有匹配。换个词，或清空右侧搜索";
+        return "§7这个分类是空的。点上面的分类页签换一组";
+    }
+
+    /**
+     * 底部两行轮换的操作提示。普通玩家先看购买和购物车；编辑权才出现批量勾选和拖动排序，
+     * 避免把用不上的管理快捷键塞进唯一一行里被截断。
+     */
+    private List<String> operationHints() {
+        List<String> hints = new ArrayList<>();
+        if (!batchSelectionStableIds.isEmpty()) {
+            hints.add("已选 " + batchSelectionStableIds.size() + " 项：右键可批量操作");
+            hints.add("空白处 Alt+右键清空批量名单");
+        }
+        hints.add("左键商品打开详情，改次数后点确认");
+        hints.add("Ctrl+左键加入购物车，顶栏购物车一次结算");
+        hints.add("右键菜单：收藏、指南、跳转");
+        hints.add("详情上方搜索框可搜名称或物品 ID");
+        hints.add("AE 开走绑定网络，精妙背包开走身上背包");
+        hints.add("货币中心存币换汇，充值全部把背包货币入钱包");
+        if (canEdit) {
+            hints.add("Alt+左键勾选批量名单");
+            hints.add("拖动商品卡片可调整同分类顺序");
+        }
+        if (catalogEditUnlocked) {
+            hints.add("编辑模式开启：可新增、删除、改分组");
+        }
+        return hints;
+    }
+
+    /** 没选商品时占满详情列，把购买步骤和入口说明摊开，不再只写一句「请选择商品」。 */
+    private void drawEmptyDetailGuide(GuiGraphics g, int dx, int dy, int dw, int dh) {
+        int x = dx + 8;
+        int maxW = Math.max(8, dw - 16);
+        int y = dy + 8;
+        int limit = dy + dh - 12;
+        for (String line : emptyGuideLines()) {
+            if (y > limit) break;
+            if (line.isEmpty()) {
+                y += 4;
+                continue;
+            }
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, line, maxW), x, y, GRAY, false);
+            y += 11;
+        }
+    }
+
+    private List<String> emptyGuideLines() {
+        List<String> lines = new ArrayList<>();
+        lines.add("§6怎么买 / 卖");
+        lines.add("§f1.§7 左键点左侧商品");
+        lines.add("§f2.§7 改购买或出售次数");
+        lines.add("§f3.§7 确认货币足够，点下方确认成交");
+        lines.add("");
+        lines.add("§6常用操作");
+        lines.add("§eCtrl+左键");
+        lines.add("§7加入购物车，再一次结算");
+        lines.add("§e右键商品");
+        lines.add("§7展开操作栏：收藏、查看指南、跳转...");
+        lines.add("§e上方搜索框");
+        lines.add("§7搜名称或物品 ID");
+        lines.add("§e顶栏购买 / 出售");
+        lines.add("§7切换交易方向");
+        lines.add("§e☆收藏");
+        lines.add("§7只显示已收藏的商品");
+        lines.add("§eAE / 精妙背包");
+        lines.add("§7决定从网络还是背包扣物，以及购买物应该发到哪");
+        lines.add("§e货币中心");
+        lines.add("§7存币，或按汇率兑换星火/币种");
+        lines.add("§e兑换中心");
+        lines.add("§7按条目换物品或星火(半废弃)");
+        lines.add("§e银会中心");
+        lines.add("§7购买会员享受折扣、银行存款和贷款");
+        lines.add("§e充值全部");
+        lines.add("§7背包货币存进钱包(仅玩家背包)");
+        if (canEdit) {
+            lines.add("");
+            lines.add("§6编辑操作");
+            lines.add("§eAlt+左键");
+            lines.add("§7勾选或取消批量名单");
+            lines.add("§e空白处 Alt+右键");
+            lines.add("§7清空这次批量名单");
+            lines.add("§e拖动卡片");
+            lines.add("§7调整同分类里的顺序");
+        }
+        if (catalogEditUnlocked) {
+            lines.add("§e编辑模式");
+            lines.add("§7可新增、删除、改分组");
+        }
+        return lines;
+    }
+
+    /** 悬停顶栏按钮时的操作说明。坐标与绘制、点击共用同一套按钮矩形。 */
+    private List<Component> topButtonTip(int smx, int smy) {
+        int y = top + 6;
+        int h = TOP_BAR_H;
+        if (hit(smx, smy, buyTabX(), y, buyTabW(), h)) {
+            return buttonTip("购买", "从商店买东西。先点左侧商品，改次数，再点确认。");
+        }
+        if (hit(smx, smy, sellTabX(), y, sellTabW(), h)) {
+            return buttonTip("出售", "把商品卖回商店，按回收价入账。仅购买的商品不能卖。");
+        }
+        if (hit(smx, smy, currencyBtnX(), y, currencyBtnW(), h)) {
+            return buttonTip("货币中心", "把背包里的货币存进钱包，或按汇率把一种币换成另一种。");
+        }
+        if (hit(smx, smy, exchangeBtnX(), y, exchangeBtnW(), h)) {
+            return buttonTip("兑换中心", "按兑换条目付出物品、流体或星火，换取另一侧。");
+        }
+        if (hit(smx, smy, memberBtnX(), y, memberBtnW(), h)) {
+            return buttonTip("银会中心", "购买会员折扣，或办理定期存款和贷款。");
+        }
+        if (catalogEditUnlocked && hit(smx, smy, addBtnX(), y, addBtnW(), h)) {
+            return buttonTip("新增商品", "往当前商店目录加一条新商品。只在编辑模式开启时出现。");
+        }
+        if (canEdit && hit(smx, smy, settingsBtnX(), y, settingsBtnW(), h)) {
+            return buttonTip("商店设置", "调整奖励抽取上限、SDA 打包阈值、卡片大小，以及 AE 注入开关。");
+        }
+        if (hit(smx, smy, cartBtnX(), y, cartBtnW(), h)) {
+            return buttonTip("购物车", "Ctrl+左键把商品加进来。打开后可改数量，再一次结算。");
+        }
+        if (hit(smx, smy, favBtnX(), y, favBtnW(), h)) {
+            return buttonTip("只看收藏", "只显示已收藏的商品。右键商品可以收藏或取消。");
+        }
+        if (hit(smx, smy, backpackBtnX(), y, backpackBtnW(), h)) {
+            return buttonTip("精妙背包", "开启后，扣款和交货优先走身上穿戴的精妙背包。");
+        }
+        if (hit(smx, smy, aeBtnX(), y, aeBtnW(), h)) {
+            return buttonTip("AE 模式", "开启后，交易优先走已绑定的在线 AE 网络。没绑定终端时开不了。");
+        }
+        if (hit(smx, smy, rechargeBtnX(), y, rechargeBtnW(), h)) {
+            return buttonTip("充值全部", "把背包里的货币一次性存进钱包余额。");
+        }
+        return null;
+    }
+
+    private static List<Component> buttonTip(String title, String body) {
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal("§6" + title));
+        lines.add(Component.literal("§7" + body));
+        return lines;
     }
 
     private void drawGrid(GuiGraphics g, int mx, int my) {
@@ -1959,6 +2114,9 @@ public class ShopScreen extends ScaledScreen {
 
         // 像素级平滑滚动：内容整体按 -scroll 平移，用 scissor 裁到网格矩形内。
         enableGridScissor(g, gx, gy, gx + gw, gy + gh);
+        if (visibleEntryKeys.isEmpty()) {
+            g.drawCenteredString(this.font, emptyGridHint(), gx + gw / 2, gy + 18, GRAY);
+        }
         ShopGridViewport.Range range = visibleGridRange();
         for (int idx = range.fromInclusive(); idx < range.toExclusive(); idx++) {
             int col = idx % cols;
@@ -2421,7 +2579,7 @@ public class ShopScreen extends ScaledScreen {
         renderBox(g, dx, dy, dw, dh, GOLD_DARK, BOX_BG);
 
         if (selected == null) {
-            g.drawCenteredString(this.font, "§7← 请选择商品", dx + dw / 2, dy + 18, GRAY);
+            drawEmptyDetailGuide(g, dx, dy, dw, dh);
             return;
         }
 
@@ -4263,6 +4421,11 @@ public class ShopScreen extends ScaledScreen {
         g.pose().translate(0.0f, 0.0f, 600.0f);
         try {
             if (ctxMenuOpen || descOverlayOpen || guideOverlayOpen || groupPickerOpen || cartOverlayOpen) return; // 大图层/右键菜单盖住时，底层格子/图标的 tooltip 不该透出来
+            List<Component> topTip = topButtonTip(smx, smy);
+            if (topTip != null) {
+                g.renderComponentTooltip(this.font, topTip, mx, my);
+                return;
+            }
             // 悬停货币栏：显示货币全名 + 精确余额
             ResourceLocation cur = hoveredCurrency(smx, smy);
             if (cur != null) {
@@ -4379,6 +4542,10 @@ public class ShopScreen extends ScaledScreen {
             }
             if (e.getDescription() != null && !e.getDescription().isEmpty()) {
                 lines.add(Component.literal("§7" + GuiRenderUtil.translateAmpCodes(e.getDescription())));
+            }
+            lines.add(Component.literal("§8左键打开详情 · Ctrl+左键加入购物车 · 右键菜单"));
+            if (canEdit) {
+                lines.add(Component.literal("§8Alt+左键勾选批量 · 空白处 Alt+右键清空"));
             }
             g.renderComponentTooltip(this.font, lines, mx, my);
         } finally {

@@ -53,6 +53,8 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private static final int LIST_W = 220;
     private static final int ROW_H = 20;
     private static final int BACK_W = 60;
+    private static final int HINT_H = 36;
+    private static final long HINT_ROTATE_MS = 5000L;
     // 弹入动画节奏：跟 ShopScreen 系列界面统一（150ms ease-out），见 GuiRenderUtil#popScaleAt/popAnimProgress
     private static final long POP_ANIM_MS = 150L;
     // AE 网络余额预览节流：选中币种切换立即重新请求，之外每 40 刻（2秒）兜底刷新一次
@@ -75,6 +77,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
     private final long screenOpenAtMs = System.currentTimeMillis(); // 整个面板打开那一下的弹入动画起点
     private long detailSwitchAtMs;        // 切换选中货币那一下，右侧详情面板的弹入动画起点
+    private List<Component> hoverTip;     // 本帧悬停到的操作说明，renderTooltips 消费
 
     private static String flashText;      // 含 § 颜色码，与聊天框一致
     private static long flashUntil;       // System.currentTimeMillis() 到期时刻
@@ -100,7 +103,9 @@ public class CurrencyAtmScreen extends ScaledScreen {
     // ===== 坐标 =====
     private int listLeft() { return left + 8; }
     private int listTop() { return top + TOP_BAR_H + 10; }
-    private int listHeight() { return panelHeight - TOP_BAR_H - 18; }
+    /** 左侧币种列高度。底部留两行操作提示，不挤占右侧详情里已经排满的按钮。 */
+    private int listHeight() { return panelHeight - TOP_BAR_H - 18 - HINT_H; }
+    private int detailHeight() { return panelHeight - TOP_BAR_H - 18; }
     private int detailX() { return listLeft() + LIST_W + 8; }
     private int detailW() { return left + panelWidth - 8 - detailX(); }
     private int backBtnX() { return left + panelWidth - 8 - BACK_W; }
@@ -165,6 +170,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
     }
 
     private void renderPanel(GuiGraphics g, int mx, int my) {
+        hoverTip = null;
         // 面板
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
@@ -172,12 +178,23 @@ public class CurrencyAtmScreen extends ScaledScreen {
         g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
 
         g.drawString(this.font, "§6货币中心 §7- ATM", left + 10, top + 5, GOLD, true);
-        g.drawString(this.font, "§d星火 §e" + formatBig(ClientWalletAccount.getDigital()), left + 130, top + 5, WHITE, true);
-        drawButton(g, backBtnX(), top + 4, BACK_W, TOP_BAR_H, "§e← 返回", mx, my);
+        String sparkLabel = "§d星火 §e" + formatBig(ClientWalletAccount.getDigital());
+        g.drawString(this.font, sparkLabel, left + 130, top + 5, WHITE, true);
+        armTip(mx, my, left + 130, top + 2, this.font.width(sparkLabel), 12,
+                "星火", "数字余额。普通货币可以按币值转成星火，也可以花星火换回货币。");
+        drawButton(g, backBtnX(), top + 4, BACK_W, TOP_BAR_H, "§e← 返回", mx, my,
+                "返回商店", "回到山海商店。AE 模式要在商店顶栏开关，这里只显示当前状态。");
         boolean ae = ShopScreen.isAeMode();
-        g.drawString(this.font, ae ? "§aAE模式:开" : "§8AE模式:关", backBtnX() - 84, top + 5, ae ? GREEN : GRAY, true);
+        String aeLabel = ae ? "§aAE模式:开" : "§8AE模式:关";
+        int aeX = backBtnX() - 84;
+        g.drawString(this.font, aeLabel, aeX, top + 5, ae ? GREEN : GRAY, true);
+        armTip(mx, my, aeX, top + 2, this.font.width(aeLabel), 12,
+                "AE 模式", ae
+                        ? "当前已开启。快速售出和转成星火会先从绑定网络吸入货币，百分比也会把网络余额算进去。"
+                        : "当前关闭。要开启请回商店顶栏点 AE。开启前需要已绑定的在线商店终端或 FTBQ 提交器。");
 
         drawList(g, mx, my);
+        drawOperationHints(g);
         // 右侧详情面板：切换选中货币那一下弹入一次，同 ShopScreen 详情卡片切换的同一套手法——
         // amountBox 是 AnimatableEditBox，自己在 renderWidget 里套用同一锚点/进度做 PoseStack 缩放，
         // 这里只需每帧把动画进度源和锚点告诉它，不用再手动 setY/setAlpha 去追它（那套做法两次都出了
@@ -212,6 +229,10 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private void drawList(GuiGraphics g, int mx, int my) {
         int lx = listLeft(), ly = listTop(), lw = LIST_W, lh = listHeight();
         g.fill(lx, ly, lx + lw, ly + lh, BOX_BG);
+        if (currencies.isEmpty()) {
+            g.drawCenteredString(this.font, "§7还没有货币", lx + lw / 2, ly + 18, GRAY);
+            g.drawCenteredString(this.font, "§8检查 currency_rates.json", lx + lw / 2, ly + 32, GRAY);
+        }
         g.enableScissor(
                 (int) (lx * guiScale) + offsetX, (int) (ly * guiScale) + offsetY,
                 (int) ((lx + lw) * guiScale) + offsetX, (int) ((ly + lh) * guiScale) + offsetY);
@@ -236,8 +257,105 @@ public class CurrencyAtmScreen extends ScaledScreen {
             }
             g.drawString(this.font, GuiRenderUtil.trimText(this.font, balanceLabel, lw - 28),
                     lx + 22, ry + 11, GRAY, true);
+            armCurrencyTip(mx, my, lx + 1, ry, lw - 2, ROW_H - 1, cur, bal, aeBal);
         }
         g.disableScissor();
+    }
+
+    private void armCurrencyTip(int mx, int my, int x, int y, int w, int h,
+                                ResourceLocation cur, BigInteger bal, Long aeBal) {
+        if (hoverTip != null || !GuiRenderUtil.isHovering(mx, my, x, y, w, h)) return;
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal("§6" + ShopPurchase.coinName(cur)));
+        lines.add(Component.literal("§7钱包余额: §f" + bal.toString()));
+        lines.add(Component.literal("§7AE 网络: §f" + (aeBal == null ? "查询中" : aeBal)));
+        if (CurrencyRateConfig.isSpecial(cur)) {
+            lines.add(Component.literal("§c特殊货币，不能按币值兑换或转星火"));
+            lines.add(Component.literal("§7可以存进钱包、提取回背包。兑换去兑换中心。"));
+        } else {
+            lines.add(Component.literal("§7币值: §f" + CurrencyRateConfig.getValue(cur)));
+            lines.add(Component.literal("§8左键选中后，可以提交、兑换、转星火或提取"));
+        }
+        hoverTip = lines;
+    }
+
+    private void drawOperationHints(GuiGraphics g) {
+        List<String> hints = operationHints();
+        if (hints.isEmpty()) return;
+        int base = (int) ((System.currentTimeMillis() / HINT_ROTATE_MS) % hints.size());
+        int x = listLeft();
+        int y = listTop() + listHeight() + 1;
+        String page = "§8" + (base + 1) + "/" + hints.size();
+        int pageW = this.font.width(page);
+        int maxW = Math.max(8, LIST_W - pageW - 6);
+        int lines = Math.min(2, hints.size());
+        for (int i = 0; i < lines; i++) {
+            String text = GuiRenderUtil.trimText(this.font, "§8" + hints.get((base + i) % hints.size()), maxW);
+            g.drawString(this.font, text, x, y + i * 10, GRAY, false);
+        }
+        g.drawString(this.font, page, x + LIST_W - pageW, y, GRAY, false);
+    }
+
+    private List<String> operationHints() {
+        List<String> hints = new ArrayList<>();
+        boolean special = selected != null && CurrencyRateConfig.isSpecial(selected);
+        if (special) {
+            hints.add("这种是特殊货币，不能按币值兑换");
+            hints.add("比例兑换请去兑换中心");
+        }
+        hints.add("左键左侧货币，再做存入或提取");
+        hints.add("提交全部：背包里的这种币进钱包");
+        hints.add("提取实体币：钱包余额回到背包");
+        hints.add("数量框决定兑换、转星火和提取");
+        hints.add("全部和百分比按当前余额填数量");
+        if (!special) {
+            hints.add("兑换：按币值换成左右箭头选的币");
+            hints.add("转成星火，或用星火转回这种币");
+            hints.add("快速售出：可计价的币全部换星火");
+        }
+        hints.add("AE 模式在商店顶栏开关");
+        return hints;
+    }
+
+    private void drawEmptyGuide(GuiGraphics g, int dx, int dy, int dw, int dh) {
+        int x = dx + 8;
+        int maxW = Math.max(8, dw - 16);
+        int y = dy + 8;
+        int limit = dy + dh - 12;
+        for (String line : emptyGuideLines()) {
+            if (y > limit) break;
+            if (line.isEmpty()) {
+                y += 4;
+                continue;
+            }
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, line, maxW), x, y, GRAY, false);
+            y += 11;
+        }
+    }
+
+    private static List<String> emptyGuideLines() {
+        List<String> lines = new ArrayList<>();
+        lines.add("§6怎么用货币中心");
+        lines.add("§f1.§7 左键点左侧一种货币");
+        lines.add("§f2.§7 提交全部，把背包里的币存进钱包");
+        lines.add("§f3.§7 改数量后，再兑换、转星火或提取");
+        lines.add("");
+        lines.add("§6每个按钮做什么");
+        lines.add("§e提交全部");
+        lines.add("§7只存当前这一种，背包实体币进钱包");
+        lines.add("§e提取实体币");
+        lines.add("§7按数量从钱包取回背包");
+        lines.add("§e兑换");
+        lines.add("§7按两边币值，把当前币换成目标币");
+        lines.add("§e转成星火 / 星火转出");
+        lines.add("§7和顶栏的星火按币值互转");
+        lines.add("§e快速售出");
+        lines.add("§7所有配了币值的货币一次换成星火");
+        lines.add("§e特殊货币");
+        lines.add("§7不能按比例换，请去兑换中心");
+        lines.add("§eAE 模式");
+        lines.add("§7在商店顶栏开关，这里只显示状态");
+        return lines;
     }
 
     /**
@@ -255,7 +373,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
     }
 
     private void drawDetail(GuiGraphics g, int mx, int my) {
-        int dx = detailX(), dy = listTop(), dw = detailW(), dh = listHeight();
+        int dx = detailX(), dy = listTop(), dw = detailW(), dh = detailHeight();
         g.fill(dx, dy, dx + dw, dy + dh, BOX_BG);
         // 背景大块填充和后面的图标/文字/按钮走不同 RenderType（fill 用 positioncolor，物品图标/文字各自一套），
         // GuiGraphics 按类型分桶缓冲，实际提交 GPU 的顺序不一定等于调用顺序——不在这里强制 flush，深色背景块
@@ -263,7 +381,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
         // （同 renderPanel 里 flashText 横幅注释描述的成因，那边靠 flush()+Z 平移根治，这里量级小只需 flush()）。
         g.flush();
         if (selected == null) {
-            g.drawCenteredString(this.font, "§7← 选择货币", dx + dw / 2, dy + 18, GRAY);
+            drawEmptyGuide(g, dx, dy, dw, dh);
             return;
         }
         maybeRequestAeBalance();
@@ -281,35 +399,50 @@ public class CurrencyAtmScreen extends ScaledScreen {
         g.drawString(this.font, "§7币值: " + valueLabel, cx + 22, dy + 44, GRAY, true);
 
         // 提交全部
-        drawButton(g, cx, dy + 56, detailW() - 16, 14, "§a提交全部（背包→钱包）", mx, my);
+        drawButton(g, cx, dy + 56, detailW() - 16, 14, "§a提交全部（背包→钱包）", mx, my,
+                "提交全部", "把背包里这一种货币的实体币全部存进钱包。其他币种不动。");
 
         // 数量标签（amountBox 由 super.render 画在 dy+88）
         String amountLabel = "§7数量（可输入）:";
         g.drawString(this.font, amountLabel, cx, dy + 76, WHITE, true);
+        armTip(mx, my, cx, dy + 74, this.font.width(amountLabel), 12,
+                "数量", "这一格决定兑换付出多少、转成星火花多少、星火转出想得到多少，以及提取多少枚。");
         // AE 网络余额：独立显示在货币详情中；转星火时是否自动使用由 AE 模式决定
         // x 偏移按实际字宽算，不用固定数字——中文标签宽度跟字体/缩放走，硬编码偏移量在别的缩放比例下会重叠
         // 步进按钮（三排：+1/+10/+100/+1k，-1/-10/-100/-1k，×10/×100/÷10/÷100，同 ShopScreen 购买次数面板）
         long[] steps = {1, 10, 100, 1000};
         int bw = (detailW() - 16 - 9) / 4;
         String[] scaleLabels = {"§b×10", "§b×100", "§6÷10", "§6÷100"};
+        String[] stepTips = {"1", "10", "100", "1000"};
         for (int i = 0; i < 4; i++) {
             int bx = cx + i * (bw + 3);
-            drawButton(g, bx, dy + 104, bw, 12, "§a+" + compactStep(steps[i]), mx, my);
-            drawButton(g, bx, dy + 118, bw, 12, "§c-" + compactStep(steps[i]), mx, my);
-            drawButton(g, bx, dy + 132, bw, 12, scaleLabels[i], mx, my);
+            drawButton(g, bx, dy + 104, bw, 12, "§a+" + compactStep(steps[i]), mx, my,
+                    "增加数量", "给上面的数量加上 " + stepTips[i] + "。");
+            drawButton(g, bx, dy + 118, bw, 12, "§c-" + compactStep(steps[i]), mx, my,
+                    "减少数量", "给上面的数量减去 " + stepTips[i] + "，最少保留 1。");
+            drawButton(g, bx, dy + 132, bw, 12, scaleLabels[i], mx, my,
+                    i < 2 ? "放大数量" : "缩小数量",
+                    i < 2 ? "把数量乘上 " + (i == 0 ? "10" : "100") + "。"
+                            : "把数量除以 " + (i == 2 ? "10" : "100") + "，最少保留 1。");
         }
 
         // 百分比快填（读选中币种余额的百分比 → 数量框）
         String[] plabels = {"全部", "75%", "50%", "25%", "10%"};
+        String[] pctTips = {"100%", "75%", "50%", "25%", "10%"};
         int pw = (detailW() - 16 - 12) / 5;
+        String pctScope = ShopScreen.isAeMode() ? "钱包余额加上已查到的 AE 网络余额" : "钱包余额";
         for (int i = 0; i < 5; i++) {
             int px = cx + i * (pw + 3);
-            drawButton(g, px, dy + 146, pw, 12, "§b" + plabels[i], mx, my);
+            drawButton(g, px, dy + 146, pw, 12, "§b" + plabels[i], mx, my,
+                    "按" + pctTips[i] + "填数量", "用当前货币" + pctScope + "的 " + pctTips[i] + " 填进数量框。");
         }
 
         // 快速售出：服务端按币值处理全部内部余额；AE 模式开启时自动先吸入 AE 同类余额
         drawButton(g, cx, dy + 160, detailW() - 16, 14,
-                ShopScreen.isAeMode() ? "§d快速售出全部货币（含 AE）" : "§d快速售出全部货币（钱包）", mx, my);
+                ShopScreen.isAeMode() ? "§d快速售出全部货币（含 AE）" : "§d快速售出全部货币（钱包）", mx, my,
+                "快速售出", ShopScreen.isAeMode()
+                        ? "把所有配了币值的货币换成星火。会先从绑定网络吸入，再连钱包余额一起换。特殊货币不动。"
+                        : "把钱包里所有配了币值的货币一次换成星火。特殊货币留在钱包里，不受影响。");
 
         // 兑换区（特殊货币不参与币值兑换，改引导去兑换中心；下面这串固定 Y 坐标见 ShopScreen 同类注释的教训，
         // 插行/改行高必须连带下移 ey，不能只加行不挪 ey）
@@ -317,26 +450,31 @@ public class CurrencyAtmScreen extends ScaledScreen {
         if (special) {
             g.drawString(this.font, "§c特殊货币，不参与比例兑换/星火互转", cx, ey, GRAY, true);
             g.drawString(this.font, "§8请到「兑换中心」使用专属兑换表", cx, ey + 12, GRAY, true);
-            drawButton(g, cx, ey + 28, detailW() - 16, 14, "§9→ 前往兑换中心", mx, my);
+            drawButton(g, cx, ey + 28, detailW() - 16, 14, "§9→ 前往兑换中心", mx, my,
+                    "前往兑换中心", "特殊货币不走币值比例。兑换中心按单独配的兑换表交换。");
             // 提取实体币（钱包余额 → 背包实体币）
             drawButton(g, cx, ey + 50, detailW() - 16, 14,
                     bal.signum() > 0 ? "§6提取实体币 §7(钱包→背包，取 " + formatBig(BigInteger.valueOf(amount)) + " 枚)"
-                            : "§8提取实体币（钱包余额为0）", mx, my);
+                            : "§8提取实体币（钱包余额为0）", mx, my,
+                    "提取实体币", withdrawTip(bal));
             return;
         }
         g.drawString(this.font, "§7兑换目标:", cx, ey, WHITE, true);
         ResourceLocation target = targetIdx >= 0 && targetIdx < currencies.size() ? currencies.get(targetIdx) : null;
         // ◀ 目标币 ▶
-        drawButton(g, cx, ey + 12, 14, 14, "§e◀", mx, my);
+        drawButton(g, cx, ey + 12, 14, 14, "§e◀", mx, my,
+                "上一个目标", "换成清单里前一种可以兑换的货币。不会选中当前正在付出的这一种。");
         String tname = target == null ? "§8无" : GuiRenderUtil.trimText(this.font, ShopPurchase.coinName(target), detailW() - 60);
         g.drawString(this.font, tname, cx + 20, ey + 16, GOLD, true);
-        drawButton(g, cx + detailW() - 16 - 14, ey + 12, 14, 14, "§e▶", mx, my);
+        drawButton(g, cx + detailW() - 16 - 14, ey + 12, 14, 14, "§e▶", mx, my,
+                "下一个目标", "换成清单里后一种可以兑换的货币。");
         // 预计得到
         long gain = previewExchange(selected, target, amount);
         g.drawString(this.font, "§7预计得到: §a" + formatBig(BigInteger.valueOf(gain)) + " §7"
                 + (target == null ? "" : ShopPurchase.coinName(target)), cx, ey + 30, GREEN, true);
         drawButton(g, cx, ey + 42, detailW() - 16, 14,
-                gain > 0 ? "§a兑换" : "§8兑换（数量太小/无目标）", mx, my);
+                gain > 0 ? "§a兑换" : "§8兑换（数量太小/无目标）", mx, my,
+                "兑换", "付出数量框里的当前货币，按两边币值换成目标货币。得到的数量显示在按钮上方。");
 
         // 币种 ↔ 星火（自动币值）
         long value = CurrencyRateConfig.getValue(selected);
@@ -344,7 +482,10 @@ public class CurrencyAtmScreen extends ScaledScreen {
         drawButton(g, cx, ey + 62, detailW() - 16, 14,
                 value > 0L ? "§d转成星火 " + (ShopScreen.isAeMode() ? "§7(钱包+AE)" : "§7(钱包)")
                         + " §7(付 " + formatBig(BigInteger.valueOf(amount)) + " → §e+" + formatBig(toSpark) + "星火§7)"
-                        : "§8转成星火（币值未配置）", mx, my);
+                        : "§8转成星火（币值未配置）", mx, my,
+                "转成星火", ShopScreen.isAeMode()
+                        ? "按币值把数量换成星火。钱包不够时，会从绑定网络补这一种货币。"
+                        : "按币值把钱包里的数量换成星火。得到的星火等于付出枚数乘币值。");
         // 星火转出：amount = 想要的目标币数量（非花的星火数），花费 = amount × 币值
         BigInteger sparkNeeded = value > 0L ? BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)) : BigInteger.ZERO;
         boolean canFromDigital = value > 0L && ClientWalletAccount.getDigital().compareTo(sparkNeeded) >= 0;
@@ -356,12 +497,19 @@ public class CurrencyAtmScreen extends ScaledScreen {
         } else {
             fromDigitalLabel = "§8星火转出（星火余额不足，需 " + formatBig(sparkNeeded) + "）";
         }
-        drawButton(g, cx, ey + 78, detailW() - 16, 14, fromDigitalLabel, mx, my);
+        drawButton(g, cx, ey + 78, detailW() - 16, 14, fromDigitalLabel, mx, my,
+                "星火转出", "数量是想得到的货币枚数。花费的星火等于枚数乘币值，星火不够时按余额能换的上限成交。");
 
         // 提取实体币（钱包余额 → 背包实体币，装不下打包超级磁盘阵列）
         drawButton(g, cx, ey + 94, detailW() - 16, 14,
                 bal.signum() > 0 ? "§6提取实体币 §7(钱包→背包，取 " + formatBig(BigInteger.valueOf(amount)) + " 枚)"
-                        : "§8提取实体币（钱包余额为0）", mx, my);
+                        : "§8提取实体币（钱包余额为0）", mx, my,
+                "提取实体币", withdrawTip(bal));
+    }
+
+    private static String withdrawTip(BigInteger bal) {
+        if (bal.signum() <= 0) return "钱包里没有这种货币，先提交背包里的实体币。";
+        return "按数量从钱包取出实体币发到背包。达到打包阈值或背包装不下时，会收成超级磁盘阵列。";
     }
 
     /** 客户端预览兑换结果（服务端最终裁定）。 */
@@ -611,11 +759,27 @@ public class CurrencyAtmScreen extends ScaledScreen {
     }
 
     // ===== 小工具 =====
-    private void drawButton(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my) {
+    private void drawButton(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my,
+                            String tipTitle, String tipBody) {
         boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
         g.fill(x, y, x + w, y + h, GOLD_DARK);
         g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hover ? BTN_HOVER : BTN_BG);
         g.drawCenteredString(this.font, label, x + w / 2, y + (h - 8) / 2, WHITE);
+        if (tipTitle != null) armTip(mx, my, x, y, w, h, tipTitle, tipBody);
+    }
+
+    private void armTip(int mx, int my, int x, int y, int w, int h, String title, String body) {
+        if (hoverTip != null || !GuiRenderUtil.isHovering(mx, my, x, y, w, h)) return;
+        List<Component> lines = new ArrayList<>();
+        lines.add(Component.literal("§6" + title));
+        lines.add(Component.literal("§7" + body));
+        hoverTip = lines;
+    }
+
+    @Override
+    protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
+        if (hoverTip == null || hoverTip.isEmpty()) return;
+        g.renderComponentTooltip(this.font, hoverTip, mx, my);
     }
 
     private static String compactStep(long step) {

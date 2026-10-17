@@ -5,9 +5,11 @@ import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfiguratorButton;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
+import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
+import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
 import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
@@ -30,12 +32,14 @@ public final class FancyConfiguratorSidebarPage implements IFancyUIProvider {
     private static final int MIN_PAGE_WIDTH = 176;
     private static final int PAGE_PADDING = 4;
     private static final int SECTION_GAP = 4;
+    private static final int SCROLL_BAR_WIDTH = 4;
 
     private final Component title;
     private final IGuiTexture icon;
     private final List<Component> tooltips;
     private final List<IFancyConfigurator> configurators;
     private final int firstRowColumns;
+    private final int maxPageHeight;
 
     public FancyConfiguratorSidebarPage(Component title, IGuiTexture icon, List<Component> tooltips,
                                         List<IFancyConfigurator> configurators) {
@@ -44,11 +48,18 @@ public final class FancyConfiguratorSidebarPage implements IFancyUIProvider {
 
     public FancyConfiguratorSidebarPage(Component title, IGuiTexture icon, List<Component> tooltips,
                                         List<IFancyConfigurator> configurators, int firstRowColumns) {
+        this(title, icon, tooltips, configurators, firstRowColumns, 0);
+    }
+
+    public FancyConfiguratorSidebarPage(Component title, IGuiTexture icon, List<Component> tooltips,
+                                        List<IFancyConfigurator> configurators, int firstRowColumns,
+                                        int maxPageHeight) {
         this.title = title;
         this.icon = icon;
         this.tooltips = List.copyOf(tooltips);
         this.configurators = List.copyOf(configurators);
         this.firstRowColumns = Math.max(1, firstRowColumns);
+        this.maxPageHeight = Math.max(0, maxPageHeight);
     }
 
     public static FancyConfiguratorSidebarPage single(IFancyConfigurator configurator) {
@@ -90,14 +101,26 @@ public final class FancyConfiguratorSidebarPage implements IFancyUIProvider {
         }
         pageHeight = Math.max(40, pageHeight + PAGE_PADDING);
 
-        WidgetGroup page = new WidgetGroup(0, 0, pageWidth, pageHeight);
+        boolean scroll = maxPageHeight > 0 && pageHeight > maxPageHeight;
+        int viewHeight = scroll ? maxPageHeight : pageHeight;
+        int viewWidth = scroll ? pageWidth + SCROLL_BAR_WIDTH : pageWidth;
+        WidgetGroup page = new WidgetGroup(0, 0, viewWidth, viewHeight);
         page.setBackground(GuiTextures.BACKGROUND_INVERSE);
+        WidgetGroup content = page;
+        if (scroll) {
+            DraggableScrollableWidgetGroup scroller = new DraggableScrollableWidgetGroup(0, 0, viewWidth, viewHeight);
+            scroller.setYScrollBarWidth(SCROLL_BAR_WIDTH).setYBarStyle(
+                    new ColorRectTexture(0xFF3F4252),
+                    new ColorRectTexture(0xFFE0E2EA).setRadius(2));
+            page.addWidget(scroller);
+            content = scroller;
+        }
 
         int x = (pageWidth - firstRowWidth) / 2;
         for (int index = 0; index < firstRowCount; index++) {
             Widget section = sections.get(index);
             section.setSelfPosition(new Position(x, PAGE_PADDING));
-            page.addWidget(section);
+            content.addWidget(section);
             x += section.getSize().width + SECTION_GAP;
         }
 
@@ -105,8 +128,11 @@ public final class FancyConfiguratorSidebarPage implements IFancyUIProvider {
         for (int index = firstRowCount; index < sections.size(); index++) {
             Widget section = sections.get(index);
             section.setSelfPosition(new Position((pageWidth - section.getSize().width) / 2, y));
-            page.addWidget(section);
+            content.addWidget(section);
             y += section.getSize().height + SECTION_GAP;
+        }
+        if (scroll) {
+            content.addWidget(new WidgetGroup(0, pageHeight - 1, 1, 1));
         }
         return page;
     }
