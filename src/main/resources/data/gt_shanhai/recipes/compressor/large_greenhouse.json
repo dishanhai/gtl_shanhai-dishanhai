@@ -1,0 +1,48 @@
+{
+  "data": {
+    "euTier": 9
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2097152
+      }
+    ]
+  },
+  "type": "gtceu:compressor",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "gtceu:large_greenhouse"
+          },
+          "actualAmount": 3123433
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "dishanhai:greenhouse_speed_cultivation_module"
+          },
+          "actualAmount": 1
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:compressor/large_greenhouse",
+      "defaultEnabled": true
+    }
+  ]
+}

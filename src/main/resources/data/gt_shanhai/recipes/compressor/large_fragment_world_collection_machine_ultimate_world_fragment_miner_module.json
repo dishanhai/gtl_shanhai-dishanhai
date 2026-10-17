@@ -1,0 +1,48 @@
+{
+  "data": {
+    "euTier": 8
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 524288
+      }
+    ]
+  },
+  "type": "gtceu:compressor",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "gtceu:large_fragment_world_collection_machine"
+          },
+          "actualAmount": 1632333
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "dishanhai:ultimate_world_fragment_miner_module"
+          },
+          "actualAmount": 1
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:compressor/large_fragment_world_collection_machine_ultimate_world_fragment_miner_module",
+      "defaultEnabled": true
+    }
+  ]
+}

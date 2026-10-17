@@ -325,7 +325,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_mass_energy_core"))
                 .register();
 
         PRIMORDIAL_MASS_ENERGY_CORE.setTooltipBuilder((stack, tooltips) -> {
@@ -414,7 +414,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_flame_cracking_kiln"))
                 .register();
 
         PRIMORDIAL_FLAME_CRACKING_KILN.setTooltipBuilder((stack, tooltips) -> {
@@ -445,7 +445,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_abyssal_refinery"))
                 .register();
 
         PRIMORDIAL_ABYSSAL_REFINERY.setTooltipBuilder((stack, tooltips) -> {
@@ -473,7 +473,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_cosmic_origin_core"))
                 .register();
 
         PRIMORDIAL_COSMIC_ORIGIN_CORE.setTooltipBuilder((stack, tooltips) -> {
@@ -495,7 +495,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_sixfold_resource_core"))
                 .register();
 
         PRIMORDIAL_SIXFOLD_RESOURCE_CORE.setTooltipBuilder((stack, tooltips) -> {
@@ -516,7 +516,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_deep_space_extraction_core"))
                 .register();
 
         PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE.setTooltipBuilder((stack, tooltips) -> {
@@ -539,7 +539,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_myriad_proliferation_core"))
                 .register();
 
         PRIMORDIAL_MYRIAD_PROLIFERATION_CORE.setTooltipBuilder((stack, tooltips) -> {
@@ -561,7 +561,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_void_induction_armature"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_universe_simulation_core"))
                 .register();
 
         PRIMORDIAL_UNIVERSE_SIMULATION_CORE.setTooltipBuilder((stack, tooltips) -> {
@@ -661,7 +661,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_world_fragments_collector"))
                 .register();
 
            PRIMORDIAL_WORLD_FRAGMENTS_COLLECTOR.setTooltipBuilder((stack, tooltips) -> {
@@ -692,7 +692,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_anti_entropy_condensation_core"))
                 .register();
 
         PRIMORDIAL_ANTI_ENTROPY_CONDENSATION_CORE.setTooltipBuilder((stack, tooltips) -> {
@@ -723,7 +723,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_divergence_generator"))
                 .register();
 
         PRIMORDIAL_DIVERGENCE_GENERATOR.setTooltipBuilder((stack, tooltips) -> {
@@ -752,7 +752,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_caster"))
                 .register();
 
         PRIMORDIAL_MATTER_CASTER.setTooltipBuilder((stack, tooltips) -> {
@@ -782,7 +782,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_assembly_line_module"))
                 .register();
 
         PRIMORDIAL_ASSEMBLY_LINE_MODULE.setTooltipBuilder((stack, tooltips) -> {
@@ -843,7 +843,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_critical_processing_module"))
                 .register();
 
         PRIMORDIAL_CRITICAL_PROCESSING_MODULE.setTooltipBuilder((stack, tooltips) -> {
@@ -873,7 +873,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_multidimensional_implosion_core"))
                 .register();
 
         PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE.setTooltipBuilder((stack, tooltips) -> {
@@ -895,7 +895,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_supercritical_matter_generation_core"))
                 .register();
         PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createAuroraText("统合超临界合成、物质生成与质量发生"));
@@ -914,7 +914,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_cosmic_reactor"))
                 .register();
         PRIMORDIAL_COSMIC_REACTOR.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createFireText("在粒子对撞与核聚变之上点燃原初恒星反应"));
@@ -933,7 +933,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_molecular_rift_core"))
                 .register();
         PRIMORDIAL_MOLECULAR_RIFT_CORE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createMagicText("撕开分子裂隙，统一深度扭曲与大型化学处理"));
@@ -952,7 +952,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_tianqiong_assembly_core"))
                 .register();
         PRIMORDIAL_TIANQIONG_ASSEMBLY_CORE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createAuroraText("跨越太空组装与超时空装配的原初组装核心"));
@@ -976,7 +976,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_eternal_smelting_furnace"))
                 .register();
         PRIMORDIAL_ETERNAL_SMELTING_FURNACE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createFireText("以永恒炉火统合超维熔炼、物质锻造与混沌炼金"));
@@ -1000,7 +1000,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_worldline_traversal_matrix"))
                 .register();
         PRIMORDIAL_WORLDLINE_TRAVERSAL_MATRIX.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createMagicText("穿行世线，统合魔力、探测、衰变与深层采掘"));
@@ -1025,7 +1025,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_quantum_distortion_matrix"))
                 .register();
         PRIMORDIAL_QUANTUM_DISTORTION_MATRIX.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createElectricText("扭曲量子尺度，统一奇点、纳米与精密材料加工"));
@@ -1047,7 +1047,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_shaoguang_aggregation_core"))
                 .register();
         PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createAuroraText("汇聚韶光，统合聚合、龙脉结晶与创造聚合"));
@@ -1070,7 +1070,7 @@ public class DShanhaiMachines {
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_weiyang_reconstruction_module"))
                 .register();
         PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createMagicText("重构未央物质，驾驭梦魇、电磁共振与虚空聚流"));
@@ -1098,7 +1098,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "steam_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_engraving_module"))
                 .register();
 
         PRIMORDIAL_ENGRAVING_MODULE.setTooltipBuilder((stack, tooltips) -> {
@@ -1124,7 +1124,7 @@ public class DShanhaiMachines {
                         new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(
                         new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_matter_recombinator_core"))
+                        new ResourceLocation(MOD_ID, "block/multiblock/primordial_molecular_assembler_module"))
                 .register();
 
         PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE.setTooltipBuilder((stack, tooltips) -> {

@@ -1,0 +1,48 @@
+{
+  "data": {
+    "euTier": 10
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 8388608
+      }
+    ]
+  },
+  "type": "gtceu:compressor",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "gtladditions:biological_simulation_laboratory"
+          },
+          "actualAmount": 2131233
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "dishanhai:high_speed_bio_data_module"
+          },
+          "actualAmount": 1
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:compressor/biological_simulation_laboratory_high_speed_bio_data_module",
+      "defaultEnabled": true
+    }
+  ]
+}

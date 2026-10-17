@@ -129,8 +129,10 @@ public class DShanhaiRecipeTypes {
                 .setSound(GTSoundEntries.ARC)
                 .setOffsetVoltageText(true);
 
+        // 原初生物演化协议两条配方：物品出 39 / 57，催化剂各占 1 个物品入。
+        // 槽位与 assets/gtceu/ui/recipe_type/primordial_biological_core.rtui 一致。
         PRIMORDIAL_BIOLOGICAL_CORE = register("primordial_biological_core", "multiblock")
-                .setMaxIOSize(6, 3, 3, 3)
+                .setMaxIOSize(1, 72, 3, 3)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
