@@ -9,6 +9,8 @@ import appeng.crafting.execution.CraftingCpuHelper;
 import appeng.crafting.execution.InputTemplate;
 import appeng.crafting.inv.ICraftingInventory;
 
+import org.gtlcore.gtlcore.integration.ae2.AEUtils;
+
 import net.minecraft.world.level.Level;
 
 import org.jetbrains.annotations.Nullable;
@@ -73,7 +75,10 @@ public final class VirtualCraftingPatternInputExtractor {
             }
 
             GenericStack template = input.getPossibleInputs()[0];
-            long amount = multiplyAmount(input.getMultiplier(), patternMultiplier);
+            // 编程电路和在场目标一样只需要一份。批量次数只放大真正消耗的材料。
+            long amount = AEUtils.isIntegratedCircuit(template.what())
+                    ? input.getMultiplier()
+                    : multiplyAmount(input.getMultiplier(), patternMultiplier);
             long simulated = sourceInv.extract(template.what(), amount, Actionable.SIMULATE);
             if (simulated < amount) {
                 CraftingCpuHelper.reinjectPatternInputs(sourceInv, inputHolder);

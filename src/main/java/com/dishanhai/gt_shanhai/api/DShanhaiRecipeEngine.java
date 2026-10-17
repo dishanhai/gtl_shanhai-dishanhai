@@ -370,6 +370,7 @@ public class DShanhaiRecipeEngine {
         clearLastReceipt();
         REGISTERED_RECIPE_IDS.clear();
         DShanhaiDuplicateRecipeWarnings.clear();
+        com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats.invalidate();
         ModuleLevelCondition.clearRequirements();
         synchronized (RECIPE_TYPE_BY_ID) {
             RECIPE_TYPE_BY_ID.clear();
@@ -408,6 +409,16 @@ public class DShanhaiRecipeEngine {
         boolean first = REGISTERED_RECIPE_IDS.add(recipeId);
         if (!first) DShanhaiDuplicateRecipeWarnings.noteRepeatedRegistration(recipeId);
         return first;
+    }
+
+    /** 啟動後預先掃一次，玩家登入橫幅直接讀快照，不再卡在 listResources。 */
+    public static void warmRecipeStats(net.minecraft.server.MinecraftServer server) {
+        if (server == null) return;
+        try {
+            getRecipeStats();
+        } catch (RuntimeException e) {
+            LOG.warn("[DRE] 配方統計預熱失敗: {}", e.toString());
+        }
     }
 
     public static void printRecipeStats() {
@@ -466,6 +477,15 @@ public class DShanhaiRecipeEngine {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a📦 总计: §e" + total + "§a 个配方"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a✓ 成功: §e" + success + "§a 个"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ 失败: §e" + failed + "§c 个"));
+            if (disabled > 0L) {
+                player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                        "§e⚠ 禁用: §e" + disabled + "§e 个（成功 + 失敗 + 禁用 = 總計）"));
+            }
+            long accounted = success + failed + disabled;
+            if (accounted != total) {
+                player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                        "§c✗ 未歸類: §e" + (total - accounted) + "§c 个"));
+            }
             if ((Long) stats.get("jsonFailed") > 0) {
                 sendJsonFailureHints(player, stats);
             }
@@ -506,11 +526,11 @@ public class DShanhaiRecipeEngine {
         Object raw = stats.get("jsonFailureHints");
         if (!(raw instanceof List<?> hints) || hints.isEmpty()) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                    "§c✗ JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个，詳見服務端日誌"));
+                    "§c✗ 其中 JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个，詳見服務端日誌"));
             return;
         }
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                "§c✗ JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个"));
+                "§c✗ 其中 JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个"));
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ 解析提示:"));
         int shown = Math.min(8, hints.size());
         for (int i = 0; i < shown; i++) {

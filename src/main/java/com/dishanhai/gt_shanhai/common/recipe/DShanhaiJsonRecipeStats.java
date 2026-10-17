@@ -54,9 +54,26 @@ public final class DShanhaiJsonRecipeStats {
         }
     }
 
+    private static volatile Snapshot cachedSnapshot;
+    private static volatile MinecraftServer cachedServer;
+
+    /** 配方重載後丟掉快照。登入橫幅和重複掃描都不要再走一遍 listResources。 */
+    public static void invalidate() {
+        cachedSnapshot = null;
+        cachedServer = null;
+    }
+
     public static Snapshot scan(MinecraftServer server) {
         if (server == null) return new Snapshot(0, 0, 0, Map.of(), List.of());
+        Snapshot hit = cachedSnapshot;
+        if (hit != null && cachedServer == server) return hit;
+        Snapshot computed = scanUncached(server);
+        cachedSnapshot = computed;
+        cachedServer = server;
+        return computed;
+    }
 
+    private static Snapshot scanUncached(MinecraftServer server) {
         Map<String, long[]> counts = new LinkedHashMap<>();
         List<Failure> failures = new ArrayList<>();
         JsonObject config = DShanhaiRecipeEnabledCondition.readConfig();
@@ -104,8 +121,7 @@ public final class DShanhaiJsonRecipeStats {
             } else if (isDisabled(json, config)) {
                 add(counts, type, 2);
             } else {
-                String hint = explainLoadFailure(recipeId.toString(), json, rawType,
-                        sameBodyRecipeIds(server, recipeId.toString(), rawType, json));
+                String hint = explainUnload(server, recipeId.toString(), rawType, json);
                 GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方載入失敗: {} [{}] {}", recipeId, rawType, hint);
                 add(counts, type, 1);
                 failures.add(new Failure(recipeId.toString(), rawType, hint));
@@ -206,8 +222,8 @@ public final class DShanhaiJsonRecipeStats {
     }
 
     /**
-     * {@code duplicateIds} 是已經在配方表裡、消耗材料和產物與這份 JSON 相同的配方。
-     * 不消耗的物品（chance 為 0，例如模具、電路、wzcz）不計入。沒有對上時仍用通用提示。
+     * {@code duplicateIds} 是已經在配方表裡、輸入（含 chance 為 0 的不消耗材料）和產物都相同的配方。
+     * 只是消耗部分相同、但多了模具或電路時，不算重複。沒有對上時仍用通用提示。
      */
     static String explainLoadFailure(String recipeId, JsonObject json, String rawType,
                                      Predicate<String> itemExists,
@@ -259,11 +275,11 @@ public final class DShanhaiJsonRecipeStats {
                 duplicateIds);
     }
 
-    /** 消耗的物品、流體，加上全部產物。chance 為 0 的輸入不算。 */
+    /** 全部輸入（含 chance 為 0 的不消耗材料）和全部產物。 */
     static String consumedBody(JsonObject json) {
         if (json == null) return "";
         List<String> lines = new ArrayList<>();
-        addJsonSide(lines, "in", json.get("inputs"), true);
+        addJsonSide(lines, "in", json.get("inputs"), false);
         addJsonSide(lines, "out", json.get("outputs"), false);
         addJsonSide(lines, "tickOut", json.get("tickOutputs"), false);
         Collections.sort(lines);
@@ -285,43 +301,43 @@ public final class DShanhaiJsonRecipeStats {
             shown++;
         }
         if (shown == 0) return null;
-        return "與 " + names + " 消耗材料和產物相同，被當成重複配方移除";
+        return "與 " + names + " 輸入（含不消耗材料）和產物相同，被當成重複配方移除";
     }
 
-    private static List<String> sameBodyRecipeIds(MinecraftServer server, String selfId, String rawType, JsonObject json) {
-        String body = consumedBody(json);
-        if (body.isEmpty() || server == null || rawType == null) return List.of();
-        ResourceLocation parsed = ResourceLocation.tryParse(rawType);
-        if (parsed == null) return List.of();
-        GTRecipeType type;
-        try {
-            type = GTRegistries.RECIPE_TYPES.get(parsed);
-        } catch (RuntimeException e) {
-            return List.of();
-        }
-        if (type == null) return List.of();
-        List<String> hits = new ArrayList<>();
-        try {
-            for (Recipe<?> recipe : server.getRecipeManager().getAllRecipesFor(type)) {
-                if (hits.size() == 3) break;
-                considerDuplicate(hits, selfId, body, recipe);
+    private static String explainUnload(MinecraftServer server, String selfId, String rawType, JsonObject json) {
+        List<String> exact = new ArrayList<>();
+        String full = consumedBody(json);
+        if (!full.isEmpty() && server != null && rawType != null) {
+            GTRecipeType type = recipeType(rawType);
+            if (type != null) {
+                try {
+                    for (Recipe<?> recipe : server.getRecipeManager().getAllRecipesFor(type)) {
+                        if (!(recipe instanceof GTRecipe gt) || gt.getId() == null) continue;
+                        String id = gt.getId().toString();
+                        if (id.equals(selfId) || exact.contains(id) || exact.size() == 3) continue;
+                        if (full.equals(consumedBody(gt))) exact.add(id);
+                    }
+                } catch (RuntimeException e) {
+                    GTDishanhaiMod.LOGGER.debug("Unable to compare recipe body for {}: {}", selfId, e.getMessage());
+                }
             }
-        } catch (RuntimeException e) {
-            GTDishanhaiMod.LOGGER.debug("Unable to compare recipe body for {}: {}", selfId, e.getMessage());
         }
-        return hits;
+        return explainLoadFailure(selfId, json, rawType, exact);
     }
 
-    private static void considerDuplicate(List<String> hits, String selfId, String body, Recipe<?> recipe) {
-        if (!(recipe instanceof GTRecipe gt) || gt.getId() == null) return;
-        String id = gt.getId().toString();
-        if (id.equals(selfId) || hits.contains(id)) return;
-        if (body.equals(consumedBody(gt))) hits.add(id);
+    private static GTRecipeType recipeType(String rawType) {
+        ResourceLocation parsed = ResourceLocation.tryParse(rawType);
+        if (parsed == null) return null;
+        try {
+            return GTRegistries.RECIPE_TYPES.get(parsed);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static String consumedBody(GTRecipe recipe) {
         List<String> lines = new ArrayList<>();
-        addGtSide(lines, "in", recipe.inputs, true);
+        addGtSide(lines, "in", recipe.inputs, false);
         addGtSide(lines, "out", recipe.outputs, false);
         addGtSide(lines, "tickOut", recipe.tickOutputs, false);
         Collections.sort(lines);
@@ -340,7 +356,9 @@ public final class DShanhaiJsonRecipeStats {
             if (content == null) continue;
             if (consumedOnly && content.chance == 0) continue;
             Object inner = content.content;
-            if (inner instanceof Ingredient ingredient) {
+            if (inner instanceof com.gregtechceu.gtceu.api.recipe.ingredient.IntCircuitIngredient ingredient) {
+                lines.add(role + " " + circuitAtom(ingredient) + "#c" + content.chance);
+            } else if (inner instanceof Ingredient ingredient) {
                 for (ItemStack stack : ingredient.getItems()) {
                     if (stack == null || stack.isEmpty()) continue;
                     ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
@@ -357,6 +375,15 @@ public final class DShanhaiJsonRecipeStats {
                 }
             }
         }
+    }
+
+    private static String circuitAtom(com.gregtechceu.gtceu.api.recipe.ingredient.IntCircuitIngredient ingredient) {
+        ItemStack[] stacks = ingredient.getItems();
+        if (stacks.length > 0 && stacks[0] != null && stacks[0].getTag() != null
+                && stacks[0].getTag().contains("Configuration")) {
+            return "circuit " + stacks[0].getTag().getInt("Configuration");
+        }
+        return "circuit ?";
     }
 
     private static void addJsonSide(List<String> lines, String role, JsonElement side, boolean consumedOnly) {

@@ -64,9 +64,15 @@ class PatternRecipeLookupPerformanceSourceTest {
         // 空结果退避必须是"可解除"的：内容变化回调与缓存失效两条路径都要清退避，
         // 否则空转降频会退化成"补料后卡住不开工"级别的回归。
         assertTrue(selectable.contains("public void updateTickSubscription() {"));
-        assertTrue(selectable.contains("emptyLookupUntilTick = Long.MIN_VALUE;\n        super.updateTickSubscription();")
-                || selectable.contains("emptyLookupUntilTick = Long.MIN_VALUE;\r\n        super.updateTickSubscription();"),
-                "updateTickSubscription（GTCEu 仓室内容变更回调）必须先解除空结果退避");
+        assertTrue(selectable.contains("protected boolean protectLookupCacheFromContentNoise()"));
+        assertTrue(selectable.contains("CONTENT_NOISE_HOLD_TICKS"),
+                "樣板倉數量通知必須有雜訊窗口，不能每 tick 清掉非空候選");
+        assertTrue(selectable.contains("if (risingEdge) {\n            emptyLookupUntilTick = Long.MIN_VALUE;")
+                || selectable.contains("if (risingEdge) {\r\n            emptyLookupUntilTick = Long.MIN_VALUE;"),
+                "安靜後的第一次倉室通知仍須解除空結果退避，補料後不能卡住");
+        assertTrue(primordial.contains("protected boolean protectLookupCacheFromContentNoise() {\n        return true;")
+                        || primordial.contains("protected boolean protectLookupCacheFromContentNoise() {\r\n        return true;"),
+                "原初模塊必須避開每 tick 的樣板倉數量通知");
         assertTrue(selectable.contains("protected long getMaxLookupCacheTicks()"));
         assertTrue(selectable.contains("Math.min(getMaxLookupCacheTicks(), entry.cacheWindow * 2)"));
         assertTrue(primordial.contains("private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;"));

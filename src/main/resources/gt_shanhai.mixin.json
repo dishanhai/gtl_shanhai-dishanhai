@@ -68,6 +68,7 @@
     "Ae2GtmProcessingPatternMixin",
     "Ae2wtlibTerminalRegistrationMixin",
     "AEProcessingPatternVirtualProviderMixin",
+    "PatternProviderLogicCircuitMixin",
     "GTLCoreMEPatternBufferVirtualProviderMixin",
     "GTLCorePatternInternalSlotVirtualProviderMixin",
     "GTLCorePatternBufferCatalystVirtualGuardMixin",
@@ -146,7 +147,8 @@
     "CircuitFancyConfiguratorMixin",
     "NotifiableItemStackHandlerAdvancedCircuitMixin",
     "NotifiableCircuitItemStackHandlerAdvancedCircuitMixin",
-    "IntCircuitIngredientAdvancedCircuitMixin"
+    "IntCircuitIngredientAdvancedCircuitMixin",
+    "ShanhaiBlockSelfDropMixin"
   ],
   "client": [
     "RecipeEditorJeiMarginMixin",

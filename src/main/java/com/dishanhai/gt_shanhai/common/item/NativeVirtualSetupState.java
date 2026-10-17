@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 
 /**
@@ -22,6 +23,12 @@ public final class NativeVirtualSetupState {
      * 回报该类型，不改持久化的 activeRecipeType，避免界面来回跳。
      */
     private static final ThreadLocal<GTRecipeType> OWNED_INACTIVE_TYPE = new ThreadLocal<>();
+
+    /**
+     * 正在用宿主自有准入逻辑尝试的那条未选中样板。
+     * RetryableRecipeLogic 用引用相等拒绝当前模式以外的配方，对照这条样板放行。
+     */
+    private static final ThreadLocal<GTRecipe> OWNED_INACTIVE_CANDIDATE = new ThreadLocal<>();
 
     public static void beginVirtualExecution() {
         VIRTUAL_EXECUTION.set(true);
@@ -49,5 +56,21 @@ public final class NativeVirtualSetupState {
 
     public static GTRecipeType ownedInactiveType() {
         return OWNED_INACTIVE_TYPE.get();
+    }
+
+    public static void beginOwnedInactiveCandidate(GTRecipe recipe) {
+        if (recipe == null) {
+            OWNED_INACTIVE_CANDIDATE.remove();
+            return;
+        }
+        OWNED_INACTIVE_CANDIDATE.set(recipe);
+    }
+
+    public static void endOwnedInactiveCandidate() {
+        OWNED_INACTIVE_CANDIDATE.remove();
+    }
+
+    public static GTRecipe ownedInactiveCandidate() {
+        return OWNED_INACTIVE_CANDIDATE.get();
     }
 }

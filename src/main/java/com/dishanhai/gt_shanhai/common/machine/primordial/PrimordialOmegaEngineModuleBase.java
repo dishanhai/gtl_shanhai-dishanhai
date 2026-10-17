@@ -423,6 +423,28 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         }
     }
 
+    /**
+     * 拆掉控制器時把機器自己 GUI 裡的物品掉出來。
+     * 父類多方塊不持有這些槽，{@code @Persisted} 只負責存檔，不會在方塊移除時掉落。
+     */
+    @Override
+    public void onMachineRemoved() {
+        super.onMachineRemoved();
+        clearInventory(moduleSlot.storage);
+        clearInventory(threadBoostSlot.storage);
+        clearInventory(extraMountSlots.storage);
+        NotifiableItemStackHandler[] extra = getPersistedStorages();
+        if (extra == null) {
+            return;
+        }
+        for (NotifiableItemStackHandler storage : extra) {
+            if (storage == null || isBaseStorage(storage)) {
+                continue;
+            }
+            clearInventory(storage.storage);
+        }
+    }
+
     private boolean tryConnectToHost() {
         if (getLevel() == null) return false;
         BlockPos[] positions = AntichristPosHelper.INSTANCE.calculatePossibleHostPositions(getPos(), getFrontFacing());

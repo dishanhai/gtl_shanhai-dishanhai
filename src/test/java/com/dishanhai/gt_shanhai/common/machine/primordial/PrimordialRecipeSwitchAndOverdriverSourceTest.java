@@ -20,7 +20,11 @@ class PrimordialRecipeSwitchAndOverdriverSourceTest {
         String method = extractBlock(source, "public void updateTickSubscription() {");
 
         assertTrue(method.contains("invalidateLookupSetCache();"),
-                "輸入/輸出能力變更必須清除非空候選快取，才能立即切換電路配方");
+                "電路等選擇器變更必須清除非空候選快取，才能立即切換電路配方");
+        assertTrue(method.contains("noteNoisyHandlerContentsChanged();"),
+                "原初模塊的數量波動走雜訊窗口，不在每次通知上整表重搜");
+        assertTrue(source.contains("currentSelectorFingerprint"),
+                "電路和 1 格選擇槽變化必須能立刻把候選快取打掉");
     }
 
     @Test

@@ -4,9 +4,13 @@ import com.dishanhai.gt_shanhai.common.item.PatternSlotScopedRecipe;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumDiagnostics;
+import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
+import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
+import com.gregtechceu.gtceu.api.machine.trait.MachineTrait;
+import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
-import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
+import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 import com.gtladd.gtladditions.api.machine.logic.GTLAddMultipleWirelessRecipesLogic;
 import com.gtladd.gtladditions.common.data.ParallelData;
 import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
@@ -17,12 +21,15 @@ import it.unimi.dsi.fastutil.longs.LongList;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectList;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -95,6 +102,16 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     // 只有"什么都没变的空转机器"被降频。默认 0（普通机器行为完全不变），稳态模块覆写窗口。
     private long emptyLookupUntilTick = Long.MIN_VALUE;
 
+    // 樣板倉內部槽的數量波動會每 tick 觸發 updateTickSubscription。若每次都清掉非空候選，
+    // 原初模塊的 200 tick 集合快取永遠打不中，searchSelectedRecipeTypes → getRecipeIterator
+    // 就變成 spark 裡 getGTRecipe 的主體（實測約 0.68% 伺服器執行緒）。
+    // 雜訊窗口內只保留「配方是誰」；電路／1 格選擇槽的物品種類一變仍立刻整表失效。
+    // 數量、並行、扣料仍每輪實算。預設關閉，代理執行者等動態機器維持「內容一變就重搜」。
+    private static final long CONTENT_NOISE_HOLD_TICKS = 20L;
+    private long lastContentNotifyTick = Long.MIN_VALUE;
+    private long cachedSelectorFingerprint = Long.MIN_VALUE;
+    private boolean selectorFingerprintReady;
+
     public SelectableRecipeTypeSetRecipeLogic(SelectableRecipeTypeSetMachine machine) {
         super(machine);
     }
@@ -137,16 +154,101 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     }
 
     /**
+     * 穩態原初模塊覆寫為 true。預設 false：代理執行者等內容一變就必須重搜，
+     * 否則會守著已耗盡的候選反覆 getMaxParallel（307μs → 761μs 那次回歸）。
+     */
+    protected boolean protectLookupCacheFromContentNoise() {
+        return false;
+    }
+
+    /**
      * GTCEu 在任何输入/输出仓内容变化时回调本方法（WorkableMultiblockMachine 对每个 handler
-     * addChangedListener 注册）——借它做空结果退避的事件失效点：内容一变立即恢复实时搜索。
-     * 其他调用路径（初始化/状态变化）多清一次退避无害，方向安全（宁可多搜）。
+     * addChangedListener 注册）。
+     * 預設整表失效，電路配方立刻重搜。穩態機器改走雜訊窗口，避免樣板倉每 tick 的數量通知
+     * 把 getRecipeIterator 打回來。
      */
     @Override
     public void updateTickSubscription() {
-        // 能力內容變更也可能替換目前可用的電路配方。只解除空結果退避會讓非空候選
-        // 繼續命中舊快取，原初系大批量輸出配方切換時就會出現數秒空窗。
-        invalidateLookupSetCache();
+        if (!protectLookupCacheFromContentNoise()) {
+            invalidateLookupSetCache();
+        } else {
+            noteNoisyHandlerContentsChanged();
+        }
         super.updateTickSubscription();
+    }
+
+    /**
+     * 選擇器（電路、1 格輸入的物品種類、選中配方類型）變了：立刻清候選。
+     * 只是數量波動：新鮮非空候選在 {@link #CONTENT_NOISE_HOLD_TICKS} 內留著；
+     * 空結果退避只在「安靜超過 1 tick 後的第一次通知」解除，連續 AE 通知不會把空轉機器叫醒到每 5 tick 重搜。
+     */
+    private void noteNoisyHandlerContentsChanged() {
+        SelectableRecipeTypeSetMachine machine = getMachine();
+        long tick = machine.getOffsetTimer();
+        long selector = currentSelectorFingerprint(machine);
+        if (!selectorFingerprintReady) {
+            cachedSelectorFingerprint = selector;
+            selectorFingerprintReady = true;
+        } else if (selector != cachedSelectorFingerprint) {
+            cachedSelectorFingerprint = selector;
+            invalidateLookupSetCache();
+            lastContentNotifyTick = tick;
+            return;
+        }
+
+        boolean freshNonEmpty = cachedLookupRecipes != null
+                && !cachedLookupRecipes.isEmpty()
+                && tick - cachedLookupTick >= 0
+                && tick - cachedLookupTick < CONTENT_NOISE_HOLD_TICKS;
+        boolean risingEdge = lastContentNotifyTick == Long.MIN_VALUE || tick - lastContentNotifyTick > 1L;
+        lastContentNotifyTick = tick;
+        if (freshNonEmpty) {
+            return;
+        }
+        if (risingEdge) {
+            emptyLookupUntilTick = Long.MIN_VALUE;
+        }
+        if (cachedLookupRecipes != null && !cachedLookupRecipes.isEmpty()) {
+            invalidateLookupSetCache();
+        }
+    }
+
+    private long currentSelectorFingerprint(SelectableRecipeTypeSetMachine machine) {
+        long hash = 0x9E3779B97F4A7C15L;
+        GTRecipeType[] types = machine.getRecipeTypes();
+        hash = hash * 31L + types.length;
+        for (int i = 0; i < types.length; i++) {
+            GTRecipeType type = types[i];
+            hash = hash * 31L + (type == null || type.registryName == null ? 0 : type.registryName.hashCode());
+        }
+        hash = mixOneSlotHandlers(hash, machine.getTraits());
+        List<IMultiPart> parts = machine.getParts();
+        for (int i = 0; i < parts.size(); i++) {
+            hash = mixOneSlotHandlers(hash, parts.get(i).self().getTraits());
+        }
+        return hash;
+    }
+
+    private static long mixOneSlotHandlers(long hash, List<MachineTrait> traits) {
+        for (int t = 0; t < traits.size(); t++) {
+            MachineTrait trait = traits.get(t);
+            if (!(trait instanceof NotifiableItemStackHandler items) || items.getSlots() != 1) {
+                continue;
+            }
+            hash = mixSelectorStack(hash, items.getStackInSlot(0));
+        }
+        return hash;
+    }
+
+    private static long mixSelectorStack(long hash, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return hash * 31L;
+        }
+        hash = hash * 31L + Item.getId(stack.getItem());
+        if (IntCircuitBehaviour.isIntegratedCircuit(stack)) {
+            hash = hash * 31L + IntCircuitBehaviour.getCircuitConfiguration(stack);
+        }
+        return hash;
     }
 
     /**

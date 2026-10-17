@@ -285,6 +285,8 @@ public class GTDishanhaiMod {
                     // 预热到的就是最终 revision；异步守护线程执行，不卡登录。
                     com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper
                             .prewarmRecipeOutputIndexesAsync("server started +100t");
+                    // 登入橫幅會掃全部配方 JSON。提前在伺服器執行緒做完，玩家登入只讀快照。
+                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine.warmRecipeStats(e.getServer());
                 });
 
         // 客户端初始化推迟到 FMLClientSetupEvent（此时 RegistryObject 已可用）

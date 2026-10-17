@@ -364,9 +364,10 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
 
-        // 物品出 108、流体出 8：16 条深空汲取里主世界占用最高（矿物+岩石+3 项尾部 ≤ 108，流体+气体 ≤ 8）。
+        // 物品出 144、流体出 32。rtui 16 列 × 9 行物品、16 列 × 2 行流体，整页 298×240。
+        // 流体槽下标必须小于这里的流体输出，否则 JEI 在第 8 格越界，这一类配方全部不注册。
         PRIMORDIAL_DEEP_SPACE_EXTRACTION = register("primordial_deep_space_extraction", "multiblock")
-                .setMaxIOSize(2, 108, 0, 8)
+                .setMaxIOSize(2, 144, 0, 32)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)

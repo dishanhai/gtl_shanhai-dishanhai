@@ -108,12 +108,20 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     /**
      * 空闲模块的空结果退避窗口：spark 实测空转模块每 5 tick 一次的全量 getRecipeIterator
-     * 是最大稳态开销。窗口内不重搜；任何仓室内容变化/选择集变化/模块等级变化立即解除退避
-     * （见基类 updateTickSubscription 与 invalidateLookupSetCache），补料开工不受影响。
+     * 是最大稳态开销。窗口内不重搜；選擇器變化、選擇集變化、模塊等級變化會立刻解除。
+     * 連續的樣板倉數量通知不解除退避。安靜超過 1 tick 後的第一次通知仍會解除，補料可以開工。
      */
     @Override
     protected long getEmptyLookupBackoffTicks() {
         return 20L;
+    }
+
+    /**
+     * 樣板倉數量通知不再每 tick 清掉非空候選。電路和 1 格選擇槽仍立刻失效。
+     */
+    @Override
+    protected boolean protectLookupCacheFromContentNoise() {
+        return true;
     }
 
     @Override

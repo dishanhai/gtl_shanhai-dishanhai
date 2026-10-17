@@ -51,8 +51,16 @@ class QuantumCraftingBulkPowerTest {
     void bulkDispatchUsesAdaptiveAmountForExtractionAndProgress() throws IOException {
         String source = Files.readString(LOGIC);
 
+        assertTrue(source.contains("topUpConsumableInputsFromNetwork((AEProcessingPattern) details, task.getValue().value)"),
+                "批量发配前必须先用网络现货补齐消耗料，不能只靠 CPU 里的一份种子");
+        int topUp = source.indexOf("topUpConsumableInputsFromNetwork((AEProcessingPattern) details, task.getValue().value)");
+        int bulkAmount = source.indexOf("findAvailableBulkAmount((AEProcessingPattern) details, inventory");
+        assertTrue(topUp >= 0 && topUp < bulkAmount,
+                "补料必须发生在按 CPU 库存计算批量之前");
         assertTrue(source.contains("findAvailableBulkAmount((AEProcessingPattern) details, inventory"),
                 "批量发配必须先按 CPU 当前原料计算最大可执行份数");
+        assertTrue(source.contains("AEUtils.isIntegratedCircuit(key)"),
+                "编程电路只占一份，不能把整批复配卡成 1 份");
         assertTrue(source.contains("VirtualPatternEncodingHelper.isPresenceInput(input)"),
                 "可复用的 presence 输入不能限制批次数");
         assertTrue(source.contains("expectedOutputs, extractedBulkAmount"),

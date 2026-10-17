@@ -202,7 +202,11 @@ public class QuantumCraftingCPULogic {
                 if (needsExtraction) {
                     extractedAsBulk = gtlCoreBulkProvider;
                     // 有完整原料时仍一次发完整 task；递归中间料只到了一部分时，先发当前能执行的最大整批。
-                    // 这不是固定分片限速，批次只受 CPU 里真实可用原料限制。
+                    // 样板若把同一流体又消耗又当副产物吐回，计划里往往只留一份种子。
+                    // 供应器能整批接收、网络里又有现货时，先把缺口补进 CPU，避免永远一份一份等回流。
+                    if (gtlCoreBulkProvider) {
+                        topUpConsumableInputsFromNetwork((AEProcessingPattern) details, task.getValue().value);
+                    }
                     extractedBulkAmount = gtlCoreBulkProvider
                             ? findAvailableBulkAmount((AEProcessingPattern) details, inventory, task.getValue().value)
                             : 0L;
@@ -369,9 +373,14 @@ public class QuantumCraftingCPULogic {
             GenericStack[] possibleInputs = input.getPossibleInputs();
             if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) return 0L;
             long requiredAmount = input.getMultiplier();
-            if (requiredAmount > 0L) {
-                requiredPerPattern.add(possibleInputs[0].what(), requiredAmount);
+            if (requiredAmount <= 0L) continue;
+            AEKey key = possibleInputs[0].what();
+            // 编程电路整批只抽一份。有一份就够，不能把批次数卡成 1。
+            if (AEUtils.isIntegratedCircuit(key)) {
+                if (sourceInv.extract(key, requiredAmount, Actionable.SIMULATE) < requiredAmount) return 0L;
+                continue;
             }
+            requiredPerPattern.add(key, requiredAmount);
         }
         for (Object2LongMap.Entry<AEKey> input : requiredPerPattern) {
             long availableAmount = sourceInv.extract(input.getKey(), Long.MAX_VALUE, Actionable.SIMULATE);
@@ -380,6 +389,37 @@ public class QuantumCraftingCPULogic {
             if (availableBulkAmount == 0L) break;
         }
         return availableBulkAmount;
+    }
+
+    /**
+     * 批量供应器能一次吃下整份任务。CPU 里只有副产物种子时，按网络现货把消耗料补齐。
+     * 在场输入和编程电路保持一份，不从网络按批次数抽。
+     */
+    private void topUpConsumableInputsFromNetwork(AEProcessingPattern details, long requestedAmount) {
+        if (requestedAmount <= 0L) return;
+        IGrid grid = cpu.getGrid();
+        if (grid == null) return;
+        MEStorage storage = grid.getStorageService().getInventory();
+        if (storage == null) return;
+        boolean changed = false;
+        for (IPatternDetails.IInput input : details.getInputs()) {
+            if (VirtualPatternEncodingHelper.isPresenceInput(input)) continue;
+            GenericStack[] possibleInputs = input.getPossibleInputs();
+            if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) break;
+            AEKey key = possibleInputs[0].what();
+            long requiredAmount = input.getMultiplier();
+            if (requiredAmount <= 0L || AEUtils.isIntegratedCircuit(key)) continue;
+            long needed = saturatedMultiplyPositive(requiredAmount, requestedAmount);
+            long have = inventory.extract(key, Long.MAX_VALUE, Actionable.SIMULATE);
+            if (have >= needed) continue;
+            long missing = needed - have;
+            long extracted = storage.extract(key, missing, Actionable.MODULATE, cpu.getSrc());
+            if (extracted <= 0L) continue;
+            inventory.insert(key, extracted, Actionable.MODULATE);
+            postChange(key);
+            changed = true;
+        }
+        if (changed) cpu.markDirty();
     }
 
     static long limitBulkAmount(long requestedAmount, long availableAmount, long requiredPerPattern) {
@@ -408,9 +448,17 @@ public class QuantumCraftingCPULogic {
             if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) {
                 return StatusInputBottleneck.INVALID;
             }
-            if (input.getMultiplier() > 0L) {
-                requiredPerPattern.add(possibleInputs[0].what(), input.getMultiplier());
+            long requiredAmount = input.getMultiplier();
+            if (requiredAmount <= 0L) continue;
+            AEKey key = possibleInputs[0].what();
+            if (AEUtils.isIntegratedCircuit(key)) {
+                long available = inventory.extract(key, requiredAmount, Actionable.SIMULATE);
+                if (available < requiredAmount) {
+                    return new StatusInputBottleneck(true, key, available, requiredAmount, 0L);
+                }
+                continue;
             }
+            requiredPerPattern.add(key, requiredAmount);
         }
 
         AEKey bottleneck = null;
@@ -444,9 +492,18 @@ public class QuantumCraftingCPULogic {
             if (possibleInputs == null || possibleInputs.length == 0 || possibleInputs[0] == null) {
                 return "invalid-input presenceInputs=" + presenceInputs;
             }
-            if (input.getMultiplier() > 0L) {
-                requiredPerPattern.add(possibleInputs[0].what(), input.getMultiplier());
+            long requiredAmount = input.getMultiplier();
+            if (requiredAmount <= 0L) continue;
+            AEKey key = possibleInputs[0].what();
+            if (AEUtils.isIntegratedCircuit(key)) {
+                long available = sourceInv.extract(key, requiredAmount, Actionable.SIMULATE);
+                if (available < requiredAmount) {
+                    return "key=" + key + " available=" + available + " perPattern=" + requiredAmount
+                            + " maxBatch=0 presenceInputs=" + presenceInputs;
+                }
+                continue;
             }
+            requiredPerPattern.add(key, requiredAmount);
         }
 
         AEKey bottleneck = null;

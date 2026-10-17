@@ -1,0 +1,137 @@
+{
+  "data": {
+    "euTier": 13,
+    "SEPMTier": 0
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 536870912
+      }
+    ]
+  },
+  "type": "gtceu:assembler_module",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 31444,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 4234,
+          "value": [
+            {
+              "fluid": "gtceu:chaos"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 3232,
+          "value": [
+            {
+              "fluid": "gtceu:primordialmatter"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 51233,
+          "value": [
+            {
+              "fluid": "gtceu:spacetime"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "dishanhai:wzcx"
+          },
+          "actualAmount": 1
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "kubejs:space_drone_mk5"
+          },
+          "actualAmount": 1000000
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "tag": "gtceu:circuits/uxv"
+          },
+          "actualAmount": 100000
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "gtceu:duranium_drill_head"
+          },
+          "actualAmount": 1000000
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "dishanhai:space_elevator_miner_module_mk4"
+          },
+          "actualAmount": 4
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "kubejs:precision_circuit_assembly_robot_mk4"
+          },
+          "actualAmount": 1000
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "dishanhai:space_elevator_miner_module_mk5"
+          },
+          "actualAmount": 1
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:assembler_module/wzcx_space_elevator_miner_module_mk5",
+      "defaultEnabled": true
+    }
+  ]
+}

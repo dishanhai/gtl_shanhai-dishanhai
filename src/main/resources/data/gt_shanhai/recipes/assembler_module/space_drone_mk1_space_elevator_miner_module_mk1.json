@@ -1,0 +1,101 @@
+{
+  "data": {
+    "SEPMTier": 0
+  },
+  "duration": 100,
+  "type": "gtceu:assembler_module",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 9435,
+          "value": [
+            {
+              "fluid": "gtceu:quantanium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 4252,
+          "value": [
+            {
+              "fluid": "gtceu:carbon_nanotubes"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 5325,
+          "value": [
+            {
+              "fluid": "gtceu:highurabilityompoundteel"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "dishanhai:wzqs"
+          },
+          "actualAmount": 1
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "kubejs:space_drone_mk1"
+          },
+          "actualAmount": 1000000
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "tag": "gtceu:circuits/uv"
+          },
+          "actualAmount": 10000
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "gtceu:titanium_drill_head"
+          },
+          "actualAmount": 1000000
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "dishanhai:space_elevator_miner_module_mk1"
+          },
+          "actualAmount": 1
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:assembler_module/space_drone_mk1_space_elevator_miner_module_mk1",
+      "defaultEnabled": true
+    }
+  ]
+}

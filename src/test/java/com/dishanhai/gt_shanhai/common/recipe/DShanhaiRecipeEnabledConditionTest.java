@@ -166,7 +166,9 @@ class DShanhaiRecipeEnabledConditionTest {
                    {"content":{"type":"gtceu:sized","count":1,"ingredient":{"item":"kubejs:fm_wafer"}},"chance":10000}
                  ]}}
                 """).getAsJsonObject();
-        assertEquals(DShanhaiJsonRecipeStats.consumedBody(sameBody), DShanhaiJsonRecipeStats.consumedBody(withCatalyst));
+        assertFalse(DShanhaiJsonRecipeStats.consumedBody(sameBody).equals(DShanhaiJsonRecipeStats.consumedBody(withCatalyst)));
+        assertTrue(DShanhaiJsonRecipeStats.consumedBody(withCatalyst).contains("dishanhai:wzcz1"));
+        assertTrue(DShanhaiJsonRecipeStats.consumedBody(withCatalyst).contains("circuit 1#c0"));
         assertFalse(DShanhaiJsonRecipeStats.consumedBody(withFluid).equals(DShanhaiJsonRecipeStats.consumedBody(withCatalyst)));
         String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
                 "gt_shanhai:precision_laser_engraver/wafer/fm_wafer",
@@ -174,9 +176,18 @@ class DShanhaiRecipeEnabledConditionTest {
                 "gtceu:precision_laser_engraver",
                 id -> true,
                 id -> true,
+                id -> true);
+        assertEquals("已寫入資料包，但沒有進入配方表", hint);
+        assertFalse(hint.contains("重複"));
+        hint = DShanhaiJsonRecipeStats.explainLoadFailure(
+                "gt_shanhai:precision_laser_engraver/wafer/fm_wafer",
+                withCatalyst,
+                "gtceu:precision_laser_engraver",
+                id -> true,
+                id -> true,
                 id -> true,
                 List.of("lens_module:precision/fm_wafer5"));
-        assertEquals("與 lens_module:precision/fm_wafer5 消耗材料和產物相同，被當成重複配方移除", hint);
+        assertEquals("與 lens_module:precision/fm_wafer5 輸入（含不消耗材料）和產物相同，被當成重複配方移除", hint);
     }
 
     @Test
