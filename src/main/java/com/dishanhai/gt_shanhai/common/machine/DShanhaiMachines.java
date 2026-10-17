@@ -1456,7 +1456,9 @@ public class DShanhaiMachines {
                 holder -> new RecipeTypePatternBufferPartMachine(holder,
                         DShanhaiConfig.COMMON.recipeTypePatternsPerRow.get(),
                         DShanhaiConfig.COMMON.recipeTypeRowsPerPage.get(),
-                        DShanhaiConfig.COMMON.recipeTypeMaxPages.get()),
+                        DShanhaiConfig.COMMON.recipeTypeMaxPages.get(),
+                        DShanhaiConfig.COMMON.recipeTypeWildcardSlotsPerPage.get(),
+                        DShanhaiConfig.COMMON.recipeTypeWildcardMaxPages.get()),
                 MetaMachineBlock::new,
                 MetaMachineItem::new,
                 MetaMachineBlockEntity::createBlockEntity

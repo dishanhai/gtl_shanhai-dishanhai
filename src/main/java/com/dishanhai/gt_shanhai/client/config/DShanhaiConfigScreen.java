@@ -207,6 +207,17 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("总槽位 = 每行槽位 × 每页行数 × 最大页数",
                         "生效方式与裁剪风险同每行样板槽位数"))
                 .setSaveConsumer(cfg.recipeTypeMaxPages::set).build());
+        pattern.addEntry(e.startIntField(Component.literal("通配符槽每页格数"), cfg.recipeTypeWildcardSlotsPerPage.get())
+                .setDefaultValue(10).setMin(1).setMax(16)
+                .setTooltip(tip("星律通配符样板槽一页显示的格数，默认 10",
+                        "总槽位 = 每页格数 × 页数，默认 20",
+                        "修改后重启生效；调小会把高位槽里的通配样板掉在机器位置"))
+                .setSaveConsumer(cfg.recipeTypeWildcardSlotsPerPage::set).build());
+        pattern.addEntry(e.startIntField(Component.literal("通配符槽页数"), cfg.recipeTypeWildcardMaxPages.get())
+                .setDefaultValue(2).setMin(1).setMax(64)
+                .setTooltip(tip("继续加大页数即可追加通配符槽位",
+                        "生效方式与裁剪风险同通配符槽每页格数"))
+                .setSaveConsumer(cfg.recipeTypeWildcardMaxPages::set).build());
         pattern.addEntry(e.startLongField(Component.literal("虚拟供料单次并行上限"), cfg.patternVirtualSupplyBatchParallel.get())
                 .setDefaultValue(65536L).setMin(1L).setMax(Long.MAX_VALUE)
                 .setTooltip(tip("首配路径单个样板槽位单次从无线 ME 网络真实提取的目标并行批量上限",

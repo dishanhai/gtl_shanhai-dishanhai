@@ -40,6 +40,8 @@ import java.util.Set;
 public final class SelectedRecipePattern {
 
     public static final String TAG = "gt_shanhai_selected_recipes";
+    /** 右键面板放入格写入的配方 ID。生成器原有配方不进这份名单，取出样板时只撤这些。 */
+    public static final String MANUAL_TAG = "gt_shanhai_selected_recipe_manual";
     public static final String RECIPE_ID = "gt_shanhai_bundle_recipe";
     public static final int VERSION = 1;
     public static final int MAX_RECIPES = 4096;
@@ -119,6 +121,121 @@ public final class SelectedRecipePattern {
         if (!recipeType.isEmpty() && ResourceLocation.tryParse(recipeType) == null) recipeType = "";
         return new Contents(PatternGeneratorScale.clamp(data.getInt("scale")),
                 PatternGeneratorScale.clamp(data.getInt("outputScale")), recipeType, List.copyOf(ids));
+    }
+
+    /**
+     * 先信样板上的配方 ID，且样板内容仍覆盖这条配方；对不上再走原来的样板匹配。
+     * 通配样板自身不参与，避免套娃。
+     */
+    @Nullable
+    public static GTRecipe matchEncodedPattern(ItemStack pattern, @Nullable Level level) {
+        if (pattern == null || pattern.isEmpty() || level == null || isPattern(pattern)) return null;
+        try {
+            if (!PatternDetailsHelper.isEncodedPattern(pattern)) return null;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+        String stored = PatternRecipeTypeHelper.readRecipeId(pattern);
+        if (!stored.isEmpty()) {
+            GTRecipe recipe = PatternRecipeTypeHelper.resolveRecipe(level, stored);
+            if (recipe != null && recipe.id != null
+                    && PatternRecipeTypeHelper.storedRecipeFitsPattern(pattern, level, recipe)) {
+                return recipe;
+            }
+        }
+        GTRecipe peeked = PatternRecipeTypeHelper.peekRecipe(pattern, level);
+        return peeked == null || peeked.id == null ? null : peeked;
+    }
+
+    /**
+     * 用放入格当前匹配到的配方 ID 改写通配样板。
+     * 生成器写下的配方留在底稿里；只增删 {@link #MANUAL_TAG} 记录过的 ID。
+     * 已有配方类型保持不动，空样板才按本次放入结果补类型。
+     */
+    public static void syncManualRecipes(@Nullable CompoundTag root, List<String> slotRecipeIds,
+            List<String> slotTypes) {
+        if (root == null) return;
+        List<String> previousManual = readManualIds(root);
+        Contents current = read(root);
+        List<String> base = new ArrayList<>();
+        int scale = 1;
+        int outputScale = 1;
+        String type = "";
+        if (current != null) {
+            base.addAll(current.recipes());
+            scale = current.scale();
+            outputScale = current.outputScale();
+            type = current.recipeType();
+            for (String manualId : previousManual) {
+                base.remove(manualId);
+            }
+        }
+        List<String> manualNow = new ArrayList<>();
+        List<String> manualTypes = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        if (slotRecipeIds != null) {
+            for (int i = 0; i < slotRecipeIds.size() && base.size() + manualNow.size() < MAX_RECIPES; i++) {
+                String id = slotRecipeIds.get(i);
+                if (!validRecipeId(id) || !seen.add(id) || base.contains(id)) {
+                    continue;
+                }
+                manualNow.add(id);
+                String slotType = slotTypes != null && i < slotTypes.size() ? slotTypes.get(i) : "";
+                manualTypes.add(slotType == null ? "" : slotType);
+            }
+        }
+        if (manualNow.isEmpty()) {
+            root.remove(MANUAL_TAG);
+        } else {
+            ListTag manual = new ListTag();
+            for (String id : manualNow) {
+                manual.add(StringTag.valueOf(id));
+            }
+            root.put(MANUAL_TAG, manual);
+        }
+        List<String> merged = new ArrayList<>(base);
+        merged.addAll(manualNow);
+        if (merged.isEmpty()) {
+            root.remove(TAG);
+            return;
+        }
+        String nextType = type.isEmpty() ? singleRecipeType(manualTypes) : type;
+        CompoundTag written = write(new Contents(scale, outputScale, nextType, merged));
+        if (written == null) {
+            root.remove(TAG);
+            return;
+        }
+        root.put(TAG, written.getCompound(TAG));
+    }
+
+    private static List<String> readManualIds(CompoundTag root) {
+        if (!root.contains(MANUAL_TAG, Tag.TAG_LIST)) return List.of();
+        ListTag list = root.getList(MANUAL_TAG, Tag.TAG_STRING);
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < list.size(); i++) {
+            String id = list.getString(i);
+            if (validRecipeId(id)) ids.add(id);
+        }
+        return ids;
+    }
+
+    private static boolean validRecipeId(String id) {
+        if (id == null || id.isBlank()) return false;
+        ResourceLocation parsed = ResourceLocation.tryParse(id);
+        return parsed != null && id.equals(parsed.toString());
+    }
+
+    private static String singleRecipeType(List<String> types) {
+        String only = "";
+        for (String type : types) {
+            if (type == null || type.isEmpty() || ResourceLocation.tryParse(type) == null) continue;
+            if (only.isEmpty()) {
+                only = type;
+            } else if (!only.equals(type)) {
+                return "";
+            }
+        }
+        return only;
     }
 
     /**

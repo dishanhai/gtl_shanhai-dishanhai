@@ -64,6 +64,9 @@ class SelectedRecipePatternTest {
         assertTrue(behavior.contains("IItemUIFactory"));
         assertTrue(behavior.contains("useOn"));
         assertTrue(behavior.contains("previewStacks"));
+        assertTrue(behavior.contains("player.getInventory()"));
+        assertTrue(behavior.contains("syncManualRecipes"));
+        assertTrue(behavior.contains("matchEncodedPattern"));
         assertTrue(items.contains("SelectedRecipePatternBehavior.INSTANCE"));
         assertFalse(items.contains("SelectedRecipePattern.Tooltip"));
         assertTrue(lang.contains("tooltip.gt_shanhai.selected_recipe_pattern.open"));
@@ -81,5 +84,65 @@ class SelectedRecipePatternTest {
         assertEquals("gtceu:lathe/recipe_0", SelectedRecipePattern.tooltipIds(contents).get(0));
         assertEquals(List.of("gtceu:lathe/a"), SelectedRecipePattern.tooltipIds(
                 new SelectedRecipePattern.Contents(1, 1, "", List.of("gtceu:lathe/a"))));
+    }
+
+    @Test
+    void manualInsertAddsRecipeIdAndRemovalKeepsGeneratedRecipes() {
+        CompoundTag root = SelectedRecipePattern.write(new SelectedRecipePattern.Contents(
+                2, 3, "gtceu:lathe", List.of("gtceu:lathe/a")));
+        root.putString("keep", "yes");
+
+        SelectedRecipePattern.syncManualRecipes(root,
+                List.of("gtceu:lathe/a", "gtceu:cutter/b", ""),
+                List.of("gtceu:lathe", "gtceu:cutter", ""));
+        SelectedRecipePattern.Contents added = SelectedRecipePattern.read(root);
+        assertEquals(List.of("gtceu:lathe/a", "gtceu:cutter/b"), added.recipes());
+        assertEquals(2, added.scale());
+        assertEquals(3, added.outputScale());
+        assertEquals("gtceu:lathe", added.recipeType());
+        assertEquals("yes", root.getString("keep"));
+        assertTrue(root.contains(SelectedRecipePattern.MANUAL_TAG));
+
+        SelectedRecipePattern.syncManualRecipes(root, List.of(""), List.of(""));
+        SelectedRecipePattern.Contents removed = SelectedRecipePattern.read(root);
+        assertEquals(List.of("gtceu:lathe/a"), removed.recipes());
+        assertEquals("gtceu:lathe", removed.recipeType());
+        assertFalse(root.contains(SelectedRecipePattern.MANUAL_TAG));
+        assertEquals("yes", root.getString("keep"));
+    }
+
+    @Test
+    void manualInsertOnEmptyPatternSetsTypeAndClearsWhenRemoved() {
+        CompoundTag root = new CompoundTag();
+        root.putString("keep", "yes");
+        SelectedRecipePattern.syncManualRecipes(root,
+                List.of("gtceu:lathe/a", "gtceu:lathe/a"),
+                List.of("gtceu:lathe", "gtceu:lathe"));
+        SelectedRecipePattern.Contents added = SelectedRecipePattern.read(root);
+        assertEquals(List.of("gtceu:lathe/a"), added.recipes());
+        assertEquals(1, added.scale());
+        assertEquals("gtceu:lathe", added.recipeType());
+
+        SelectedRecipePattern.syncManualRecipes(root, List.of(), List.of());
+        assertNull(SelectedRecipePattern.read(root));
+        assertEquals("yes", root.getString("keep"));
+        assertFalse(root.contains(SelectedRecipePattern.MANUAL_TAG));
+    }
+
+    @Test
+    void manualInsertDoesNotDropGeneratedRecipesWhenFull() {
+        List<String> generated = new ArrayList<>();
+        for (int i = 0; i < SelectedRecipePattern.MAX_RECIPES; i++) {
+            generated.add("gtceu:lathe/r" + i);
+        }
+        CompoundTag root = SelectedRecipePattern.write(new SelectedRecipePattern.Contents(
+                1, 1, "gtceu:lathe", generated));
+        SelectedRecipePattern.syncManualRecipes(root,
+                List.of("gtceu:lathe/extra"), List.of("gtceu:lathe"));
+        SelectedRecipePattern.Contents contents = SelectedRecipePattern.read(root);
+        assertEquals(SelectedRecipePattern.MAX_RECIPES, contents.recipes().size());
+        assertEquals("gtceu:lathe/r0", contents.recipes().get(0));
+        assertFalse(contents.recipes().contains("gtceu:lathe/extra"));
+        assertFalse(root.contains(SelectedRecipePattern.MANUAL_TAG));
     }
 }

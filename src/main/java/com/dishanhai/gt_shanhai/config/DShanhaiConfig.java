@@ -107,6 +107,10 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.IntValue recipeTypeRowsPerPage;
         /** 配方类型样板总成 — 最大页数 */
         public ForgeConfigSpec.IntValue recipeTypeMaxPages;
+        /** 星律通配符样板槽 — 每页格数 */
+        public ForgeConfigSpec.IntValue recipeTypeWildcardSlotsPerPage;
+        /** 星律通配符样板槽 — 页数 */
+        public ForgeConfigSpec.IntValue recipeTypeWildcardMaxPages;
         /** 样板虚拟供料 — 每个样板槽位单次目标并行批量上限 */
         public ForgeConfigSpec.LongValue patternVirtualSupplyBatchParallel;
         /** 高级样板包装箱 — UI 每行样板槽位数 */
@@ -314,6 +318,16 @@ public final class DShanhaiConfig {
                              "总槽位 = patternsPerRow × rowsPerPage × maxPages",
                              "生效方式与裁剪风险同 patternsPerRow")
                     .defineInRange("maxPages", 10, 1, 64);
+            recipeTypeWildcardSlotsPerPage = builder
+                    .comment("星律通配符样板槽每页格数（默认 10）",
+                             "总槽位 = wildcardSlotsPerPage × wildcardMaxPages，默认 10×2 = 20",
+                             "修改后重启生效：已放置的总成在下次区块加载时采用新配置",
+                             "调大可继续追加每页槽位；调小会裁掉高位槽，里面的通配样板掉在机器位置，改小前请先清空")
+                    .defineInRange("wildcardSlotsPerPage", 10, 1, 16);
+            recipeTypeWildcardMaxPages = builder
+                    .comment("星律通配符样板槽页数（默认 2）",
+                             "调大页数即可继续追加槽位；生效方式与裁剪风险同 wildcardSlotsPerPage")
+                    .defineInRange("wildcardMaxPages", 2, 1, 64);
             patternVirtualSupplyBatchParallel = builder
                     .comment("样板虚拟供料（首配路径）单个样板槽位单次从无线 ME 网络真实提取的目标并行批量上限（默认 65536）",
                              "样板配方执行的并行数由这个批量与网络真实库存共同决定：取两者较小值，绝不会超过网络实际库存",

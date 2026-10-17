@@ -85,6 +85,7 @@ public final class JeiPatternQuickEncodeService {
             new ResourceLocation("gt_shanhai", "primordial_molecular_assembler_module");
     private static final ResourceLocation MOLECULAR_ASSEMBLER_IO_ID =
             new ResourceLocation("gtceu", "me_molecular_assembler_io");
+    private static final int MAX_DETAIL_RECIPE_IDS = 3;
 
     /**
      * 只缓存当前 ME Grid 已发现的星律；容量状态每次轻量检查，避免每张样板都重新遍历整张网络。
@@ -140,6 +141,7 @@ public final class JeiPatternQuickEncodeService {
         }
 
         String recipeTypeId;
+        List<String> recipeIds = new ArrayList<>();
         List<ItemStack> patterns;
         int recipeCount;
         if (craftingAnchor != null) {
@@ -151,6 +153,9 @@ public final class JeiPatternQuickEncodeService {
                 return;
             }
             recipeTypeId = PatternRecipeTypeHelper.VANILLA_CRAFTING_RECIPE_TYPE_ID;
+            for (CraftingRecipe recipe : recipes) {
+                if (recipe != null && recipe.getId() != null) recipeIds.add(recipe.getId().toString());
+            }
             recipeCount = recipes.size();
             patterns = encodeCraftingPatterns(player, menu, recipes);
         } else {
@@ -166,6 +171,9 @@ public final class JeiPatternQuickEncodeService {
                 return;
             }
             recipeTypeId = anchor.recipeType.registryName.toString();
+            for (GTRecipe recipe : recipes) {
+                if (recipe != null && recipe.id != null) recipeIds.add(recipe.id.toString());
+            }
             recipeCount = recipes.size();
             patterns = encodePatterns(player, menu, recipes);
         }
@@ -279,7 +287,7 @@ public final class JeiPatternQuickEncodeService {
         }
         showSuccess(player, wholeRecipeType, patterns.size(), uploaded, duplicatePatterns,
                 useSda ? sdaPatterns.size() : 0, inventoryCount, skippedCount,
-                recipeTypeId);
+                recipeTypeId, recipeIds);
         for (int i = 0; i < committedCount; i++) {
             GTLStats.awardPatternEncoded(player);
         }
@@ -379,7 +387,8 @@ public final class JeiPatternQuickEncodeService {
             if (inventory) givePatterns(player, List.of(pattern));
             GTLStats.awardPatternEncoded(player);
         }
-        showSuccess(player, false, 1, uploaded, duplicates, 0, inventory ? 1 : 0, 0, recipeTypeId);
+        showSuccess(player, false, 1, uploaded, duplicates, 0, inventory ? 1 : 0, 0, recipeTypeId,
+                recipe.id == null ? List.of() : List.of(recipe.id.toString()));
         return true;
     }
 
@@ -1409,7 +1418,7 @@ public final class JeiPatternQuickEncodeService {
     private static void showSuccess(ServerPlayer player, boolean wholeRecipeType, int total,
             List<UploadedPattern> uploaded, List<UploadedPattern> duplicatePatterns,
             int sdaCount, int inventoryCount,
-            int skippedCount, String recipeTypeId) {
+            int skippedCount, String recipeTypeId, List<String> recipeIds) {
         Component message;
         if (skippedCount > 0) {
             message = Component.translatable("message.gt_shanhai.jei.quick_encode.direct_partial_success",
@@ -1437,13 +1446,46 @@ public final class JeiPatternQuickEncodeService {
         Component targetDetails = describeTargets(player, targetPatterns, sdaCount, inventoryCount);
         MutableComponent detail = Component.translatable(
                 "message.gt_shanhai.jei.quick_encode.operation_detail",
-                total, recipeTypeId == null ? "unknown" : recipeTypeId,
+                total, recipeTypeLabel(recipeTypeId), describeRecipeIds(recipeIds),
                 targetDetails, sdaCount, inventoryCount, skippedCount);
         if (!duplicatePatterns.isEmpty()) {
             detail.append(Component.literal("; ")).append(Component.translatable(
                     "message.gt_shanhai.jei.quick_encode.duplicate_detail", duplicatePatterns.size()));
         }
         player.sendSystemMessage(detail);
+    }
+
+    /** 客户端翻译配方类型名，再附上类型 ID，例如 组装机(gtceu:assembler)。 */
+    private static Component recipeTypeLabel(String recipeTypeId) {
+        if (recipeTypeId == null || recipeTypeId.isBlank()) {
+            return Component.literal("unknown");
+        }
+        ResourceLocation id = ResourceLocation.tryParse(recipeTypeId);
+        String key = id == null ? recipeTypeId : id.toLanguageKey();
+        return Component.translatableWithFallback(key, recipeTypeId)
+                .append(Component.literal("(" + recipeTypeId + ")"));
+    }
+
+    private static Component describeRecipeIds(List<String> recipeIds) {
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        if (recipeIds != null) {
+            for (String recipeId : recipeIds) {
+                if (recipeId != null && !recipeId.isBlank()) unique.add(recipeId);
+            }
+        }
+        if (unique.isEmpty()) return Component.literal("unknown");
+        if (unique.size() == 1) return Component.literal(unique.iterator().next());
+        StringBuilder shown = new StringBuilder();
+        int count = 0;
+        for (String recipeId : unique) {
+            if (count >= MAX_DETAIL_RECIPE_IDS) break;
+            if (shown.length() > 0) shown.append(", ");
+            shown.append(recipeId);
+            count++;
+        }
+        if (unique.size() <= MAX_DETAIL_RECIPE_IDS) return Component.literal(shown.toString());
+        return Component.translatable("message.gt_shanhai.jei.quick_encode.recipe_ids_more",
+                shown.toString(), unique.size());
     }
 
     private static Component describeTargets(ServerPlayer player, List<UploadedPattern> uploaded,

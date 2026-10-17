@@ -35,10 +35,12 @@ class RecipeTypePatternBufferWildcardIntegrationTest {
 
         assertTrue(Files.exists(BRIDGE), "应存在可选通配符反射桥接");
         assertTrue(Files.exists(PERSISTENCE), "应存在动态槽持久化器");
-        assertTrue(machine.contains("WILDCARD_PATTERN_SLOT_COUNT = 5"), "通配符母槽数量必须为 5");
-        assertTrue(machine.contains("new SlotWidget(wildcardPatternInventory, slot, 34 + slot * 18, 14)"),
-                "通配符配置页必须使用 5×1 横向布局");
-        assertTrue(machine.contains("new WidgetGroup(0, 0, 160, 155)")
+        assertTrue(machine.contains("DEFAULT_WILDCARD_SLOTS_PER_PAGE = 10"), "通配符母槽默认每页 10 格");
+        assertTrue(machine.contains("DEFAULT_WILDCARD_MAX_PAGES = 2"), "通配符母槽默认 2 页，合计 20 格");
+        assertTrue(machine.contains("selectedWildcardPage"), "通配符配置页必须能切页");
+        assertTrue(machine.contains("addWildcardPageControls"), "通配符界面必须提供翻页按钮");
+        assertTrue(machine.contains("addWildcardMotherSlots"), "通配符槽必须按当前页铺格");
+        assertTrue(machine.contains("new WidgetGroup(0, 0, wildcardPanelWidth(), 168)")
                         && machine.contains("() -> selectedWildcardPreviewPatterns()"),
                 "通配符配置页必须按当前母槽轮播预览");
         assertTrue(machine.contains("wildcardPreviewByMother")
@@ -67,7 +69,16 @@ class RecipeTypePatternBufferWildcardIntegrationTest {
         assertTrue(machine.contains("if (!assignedTypeId.isEmpty() && recipe == null) continue"),
                 "指定类型无法匹配时不得回退到其他配方类型");
         assertTrue(machine.contains("private int selectedWildcardMotherSlot"),
-                "通配符 UI 必须记录当前选择的 1-5 号母槽");
+                "通配符 UI 必须记录当前选择的母槽");
+        String machines = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "common", "machine", "DShanhaiMachines.java"));
+        String config = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "config", "DShanhaiConfig.java"));
+        assertTrue(config.contains("wildcardSlotsPerPage") && config.contains("wildcardMaxPages"),
+                "配置必须能继续追加通配符槽位和页数");
+        assertTrue(machines.contains("recipeTypeWildcardSlotsPerPage")
+                        && machines.contains("recipeTypeWildcardMaxPages"),
+                "放置星律样板总成时必须读通配符槽配置");
         assertTrue(machine.contains("new DraggableScrollableWidgetGroup"),
                 "主机配方类型列表必须支持滚动");
         assertTrue(machine.contains("setYScrollBarWidth(4).setYBarStyle"),

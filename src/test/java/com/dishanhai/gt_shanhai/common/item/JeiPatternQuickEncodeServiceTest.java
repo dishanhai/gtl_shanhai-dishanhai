@@ -181,6 +181,10 @@ class JeiPatternQuickEncodeServiceTest {
         assertTrue(source.contains("player.sendSystemMessage(detail)"));
         assertTrue(source.contains("target.bufferPos()"));
         assertTrue(source.contains("recipeTypeId"));
+        assertTrue(source.contains("recipeTypeLabel(recipeTypeId)"));
+        assertTrue(source.contains("describeRecipeIds(recipeIds)"));
+        assertTrue(source.contains("Component.translatableWithFallback(key, recipeTypeId)"));
+        assertTrue(source.contains("message.gt_shanhai.jei.quick_encode.recipe_ids_more"));
         assertTrue(source.contains("uploaded.size()"));
         assertTrue(source.contains("describeTargets(player, targetPatterns, sdaCount, inventoryCount)"));
         assertTrue(source.contains("/shanhai stellar_tp "),

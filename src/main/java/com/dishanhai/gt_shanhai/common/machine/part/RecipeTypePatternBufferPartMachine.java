@@ -132,7 +132,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public static final int DEFAULT_ROWS_PER_PAGE = 6;
     public static final int DEFAULT_MAX_PAGES = 3;
     public static final int DEFAULT_PATTERN_COUNT = DEFAULT_PATTERNS_PER_ROW * DEFAULT_ROWS_PER_PAGE * DEFAULT_MAX_PAGES;
-    public static final int WILDCARD_PATTERN_SLOT_COUNT = 5;
+    public static final int DEFAULT_WILDCARD_SLOTS_PER_PAGE = 10;
+    public static final int DEFAULT_WILDCARD_MAX_PAGES = 2;
+    public static final int DEFAULT_WILDCARD_SLOT_COUNT =
+            DEFAULT_WILDCARD_SLOTS_PER_PAGE * DEFAULT_WILDCARD_MAX_PAGES;
     private static final int REMOTE_PLAYER_INVENTORY_HEIGHT = 80;
     private static final IGuiTexture STOCK_INPUT_ICON =
             new ResourceTexture("gt_shanhai:textures/gui/stock_input_panel.png");
@@ -210,26 +213,40 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private int[] visibleOutputMultiplierStamps;
     private IntConsumer wildcardRemoveSlotFromMap;
     private boolean rebuildingWildcardPatterns;
+    private final int wildcardSlotsPerPage;
+    private final int wildcardMaxPages;
+    private final int wildcardSlotCount;
+    private int selectedWildcardPage;
     private int selectedWildcardMotherSlot;
     private int[] activeSlotsScratch;
     private int[] activeUncachedSlotsScratch;
 
     public RecipeTypePatternBufferPartMachine(@Nullable IMachineBlockEntity holder) {
-        this(holder, DEFAULT_PATTERNS_PER_ROW, DEFAULT_ROWS_PER_PAGE, DEFAULT_MAX_PAGES);
+        this(holder, DEFAULT_PATTERNS_PER_ROW, DEFAULT_ROWS_PER_PAGE, DEFAULT_MAX_PAGES,
+                DEFAULT_WILDCARD_SLOTS_PER_PAGE, DEFAULT_WILDCARD_MAX_PAGES);
     }
 
     public RecipeTypePatternBufferPartMachine(@Nullable IMachineBlockEntity holder, int patternsPerRow,
             int rowsPerPage, int maxPages) {
+        this(holder, patternsPerRow, rowsPerPage, maxPages,
+                DEFAULT_WILDCARD_SLOTS_PER_PAGE, DEFAULT_WILDCARD_MAX_PAGES);
+    }
+
+    public RecipeTypePatternBufferPartMachine(@Nullable IMachineBlockEntity holder, int patternsPerRow,
+            int rowsPerPage, int maxPages, int wildcardSlotsPerPage, int wildcardMaxPages) {
         super(holder, patternsPerRow * rowsPerPage * maxPages, IO.BOTH);
+        this.wildcardSlotsPerPage = Math.max(1, wildcardSlotsPerPage);
+        this.wildcardMaxPages = Math.max(1, wildcardMaxPages);
+        this.wildcardSlotCount = this.wildcardSlotsPerPage * this.wildcardMaxPages;
         this.activeSlotsScratch =
-                new int[patternsPerRow * rowsPerPage * maxPages + WILDCARD_PATTERN_SLOT_COUNT];
+                new int[patternsPerRow * rowsPerPage * maxPages + this.wildcardSlotCount];
         this.activeUncachedSlotsScratch =
-                new int[patternsPerRow * rowsPerPage * maxPages + WILDCARD_PATTERN_SLOT_COUNT];
+                new int[patternsPerRow * rowsPerPage * maxPages + this.wildcardSlotCount];
         this.patternRecipeTypeIds = new String[patternsPerRow * rowsPerPage * maxPages];
         Arrays.fill(this.patternRecipeTypeIds, "");
         this.wildcardPatterns = new ObjectArrayList<>();
         this.wildcardPreviewByMother = new ObjectArrayList<>();
-        for (int previewSlot = 0; previewSlot < WILDCARD_PATTERN_SLOT_COUNT; previewSlot++) {
+        for (int previewSlot = 0; previewSlot < this.wildcardSlotCount; previewSlot++) {
             this.wildcardPreviewByMother.add(new ObjectArrayList<>());
         }
         this.wildcardPatternStacks = new ObjectArrayList<>();
@@ -242,7 +259,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         this.outputMultiplierPatternCache = new Int2ReferenceOpenHashMap<>();
         this.visibleOutputMultiplierStamps = new int[patternsPerRow * rowsPerPage * maxPages];
         this.wildcardPersistence = new RecipeTypePatternWildcardPersistence();
-        this.wildcardPatternInventory = new ItemStackTransfer(WILDCARD_PATTERN_SLOT_COUNT);
+        this.wildcardPatternInventory = new ItemStackTransfer(this.wildcardSlotCount);
         this.wildcardPatternInventory.setFilter(RecipeTypePatternBufferPartMachine::acceptsWildcardMother);
         this.wildcardPatternInventory.setOnContentsChanged(this::onWildcardPatternInventoryChanged);
         this.combinedTerminalPatternInventory = createCombinedTerminalPatternInventory(super.getTerminalPatternInventory());
@@ -416,9 +433,39 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
     }
 
+    /** 通配符母槽按当前每页格数和页数对账。调小配置时，高位槽里的样板掉在机器位置。 */
+    private void gtShanhai$reconcileWildcardInventorySize() {
+        int actual = wildcardPatternInventory.getSlots();
+        if (actual == wildcardSlotCount) return;
+        int keptCount = Math.min(actual, wildcardSlotCount);
+        List<ItemStack> kept = new ArrayList<>(keptCount);
+        for (int i = 0; i < keptCount; i++) {
+            kept.add(wildcardPatternInventory.getStackInSlot(i));
+        }
+        List<ItemStack> overflow = new ArrayList<>();
+        for (int i = wildcardSlotCount; i < actual; i++) {
+            ItemStack stack = wildcardPatternInventory.getStackInSlot(i);
+            if (!stack.isEmpty()) overflow.add(stack.copy());
+        }
+        wildcardPatternInventory.setSize(wildcardSlotCount);
+        for (int i = 0; i < keptCount; i++) {
+            wildcardPatternInventory.setStackInSlot(i, kept.get(i));
+        }
+        if (selectedWildcardMotherSlot >= wildcardSlotCount) selectedWildcardMotherSlot = 0;
+        if (selectedWildcardPage >= wildcardMaxPages) selectedWildcardPage = 0;
+        if (!overflow.isEmpty() && getLevel() instanceof ServerLevel serverLevel) {
+            serverLevel.getServer().tell(new TickTask(1, () -> {
+                for (ItemStack stack : overflow) {
+                    Block.popResource(serverLevel, getPos(), stack);
+                }
+            }));
+        }
+    }
+
     @Override
     public void onLoad() {
         gtShanhai$reconcilePatternInventorySize();
+        gtShanhai$reconcileWildcardInventorySize();
         super.onLoad();
         // 父类 onLoad 已通过 getRealPattern 构造并发布倍率样板，无需在首次 AE 查询时再解码一遍。
         outputMultiplierPatternsRefreshNeeded = false;
@@ -1539,6 +1586,43 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
     }
 
+    private int wildcardPanelWidth() {
+        return Math.max(176, 16 + wildcardSlotsPerPage * 18);
+    }
+
+    private void addWildcardPageControls(WidgetGroup group, int y, int width, Runnable onChange) {
+        group.addWidget(new ButtonWidget(8, y, 24, 12, new TextTexture("<<", -1), click -> {
+            if (selectedWildcardPage <= 0) return;
+            selectedWildcardPage--;
+            onChange.run();
+        }));
+        group.addWidget(new LabelWidget(width / 2 - 12, y + 2,
+                () -> (selectedWildcardPage + 1) + " / " + wildcardMaxPages));
+        group.addWidget(new ButtonWidget(width - 32, y, 24, 12, new TextTexture(">>", -1), click -> {
+            if (selectedWildcardPage >= wildcardMaxPages - 1) return;
+            selectedWildcardPage++;
+            onChange.run();
+        }));
+    }
+
+    private void addWildcardMotherSlots(WidgetGroup group, int originX, int slotY, int buttonY, Runnable onSelect) {
+        if (selectedWildcardPage < 0 || selectedWildcardPage >= wildcardMaxPages) selectedWildcardPage = 0;
+        int start = selectedWildcardPage * wildcardSlotsPerPage;
+        int end = Math.min(start + wildcardSlotsPerPage, wildcardSlotCount);
+        for (int slot = start; slot < end; slot++) {
+            int column = slot - start;
+            int motherSlot = slot;
+            group.addWidget(new SlotWidget(wildcardPatternInventory, slot, originX + column * 18, slotY)
+                    .setBackground(new IGuiTexture[]{GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY}));
+            String slotText = (selectedWildcardMotherSlot == slot ? "§a" : "§7") + (slot + 1);
+            group.addWidget(new ButtonWidget(originX + 1 + column * 18, buttonY, 16, 10,
+                    new TextTexture(slotText, -1), click -> {
+                        selectedWildcardMotherSlot = motherSlot;
+                        onSelect.run();
+                    }));
+        }
+    }
+
     private class WildcardPatternConfigurator implements IFancyConfigurator {
 
         private WidgetGroup configuratorPage;
@@ -1556,38 +1640,29 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
         @Override
         public Widget createConfigurator() {
-            configuratorPage = new WidgetGroup(0, 0, 160, 155);
+            configuratorPage = new WidgetGroup(0, 0, wildcardPanelWidth(), 168);
             fillConfigurator(configuratorPage);
             return configuratorPage;
         }
 
         private void fillConfigurator(WidgetGroup group) {
+            int width = group.getSize().width;
             List<GTRecipeType> hostTypes =
                     WildcardPatternRecipeTypeBinding.collectHostRecipeTypes(getControllers());
             group.addWidget(new LabelWidget(8, 2,
                     () -> Component.translatable("gui.gt_shanhai.wildcard_pattern_config").getString()));
-            for (int slot = 0; slot < WILDCARD_PATTERN_SLOT_COUNT; slot++) {
-                int motherSlot = slot;
-                group.addWidget(new SlotWidget(wildcardPatternInventory, slot, 34 + slot * 18, 14)
-                        .setBackground(new IGuiTexture[]{com.gregtechceu.gtceu.api.gui.GuiTextures.SLOT,
-                                com.gregtechceu.gtceu.api.gui.GuiTextures.PATTERN_OVERLAY}));
-                String slotText = (selectedWildcardMotherSlot == slot ? "§a" : "§7") + (slot + 1);
-                group.addWidget(new ButtonWidget(35 + slot * 18, 33, 16, 10,
-                        new TextTexture(slotText, -1), clickData -> {
-                            selectedWildcardMotherSlot = motherSlot;
-                            rebuildConfigurator();
-                        }));
-            }
-            group.addWidget(new LabelWidget(8, 46,
+            addWildcardPageControls(group, 14, width, this::rebuildConfigurator);
+            addWildcardMotherSlots(group, 8, 28, 47, this::rebuildConfigurator);
+            group.addWidget(new LabelWidget(8, 60,
                     () -> Component.translatable("gui.gt_shanhai.wildcard_pattern_slot",
                             selectedWildcardMotherSlot + 1, currentWildcardRecipeTypeText(hostTypes)).getString()));
-            group.addWidget(new LabelWidget(8, 59,
+            group.addWidget(new LabelWidget(8, 73,
                     () -> Component.translatable("gui.gt_shanhai.wildcard_pattern_expanded",
                             selectedWildcardPreviewPatterns().size()).getString()));
-            group.addWidget(new PatternCycleWidget(8, 71, 142, 36,
+            group.addWidget(new PatternCycleWidget(8, 85, width - 16, 36,
                     () -> selectedWildcardPreviewPatterns()));
 
-            recipeTypeList = new DraggableScrollableWidgetGroup(8, 111, 142, 42);
+            recipeTypeList = new DraggableScrollableWidgetGroup(8, 123, width - 16, 42);
             recipeTypeList.setBackground(com.gregtechceu.gtceu.api.gui.GuiTextures.DISPLAY);
             recipeTypeList.setYScrollBarWidth(4).setYBarStyle(
                     new ColorRectTexture(0xFF3F4252),
@@ -1650,7 +1725,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private String currentWildcardRecipeTypeId() {
-        if (selectedWildcardMotherSlot < 0 || selectedWildcardMotherSlot >= WILDCARD_PATTERN_SLOT_COUNT) return "";
+        if (selectedWildcardMotherSlot < 0 || selectedWildcardMotherSlot >= wildcardSlotCount) return "";
         return PatternRecipeTypeHelper.readRecipeTypeId(
                 wildcardPatternInventory.getStackInSlot(selectedWildcardMotherSlot));
     }
@@ -1669,7 +1744,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private void assignWildcardRecipeType(int slot, GTRecipeType type) {
-        if (slot < 0 || slot >= WILDCARD_PATTERN_SLOT_COUNT || type == null || type.registryName == null) return;
+        if (slot < 0 || slot >= wildcardSlotCount || type == null || type.registryName == null) return;
         ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
         if (stack.isEmpty()) return;
         wildcardPatternInventory.setStackInSlot(slot,
@@ -1677,7 +1752,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private void clearWildcardRecipeType(int slot) {
-        if (slot < 0 || slot >= WILDCARD_PATTERN_SLOT_COUNT) return;
+        if (slot < 0 || slot >= wildcardSlotCount) return;
         ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
         if (stack.isEmpty()) return;
         wildcardPatternInventory.setStackInSlot(slot, WildcardPatternRecipeTypeBinding.clear(stack));
@@ -1790,14 +1865,14 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
             @Override
             public int size() {
-                return normalInventory.size() + WILDCARD_PATTERN_SLOT_COUNT;
+                return normalInventory.size() + wildcardSlotCount;
             }
 
             @Override
             public ItemStack getStackInSlot(int slot) {
                 if (slot < normalInventory.size()) return normalInventory.getStackInSlot(slot);
                 int wildcardSlot = slot - normalInventory.size();
-                return wildcardSlot >= 0 && wildcardSlot < WILDCARD_PATTERN_SLOT_COUNT
+                return wildcardSlot >= 0 && wildcardSlot < wildcardSlotCount
                         ? wildcardPatternInventory.getStackInSlot(wildcardSlot) : ItemStack.EMPTY;
             }
 
@@ -1808,7 +1883,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     return;
                 }
                 int wildcardSlot = slot - normalInventory.size();
-                if (wildcardSlot >= 0 && wildcardSlot < WILDCARD_PATTERN_SLOT_COUNT) {
+                if (wildcardSlot >= 0 && wildcardSlot < wildcardSlotCount) {
                     wildcardPatternInventory.setStackInSlot(wildcardSlot, stack);
                     wildcardPatternInventory.onContentsChanged(wildcardSlot);
                 }
@@ -1818,7 +1893,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             public boolean isItemValid(int slot, ItemStack stack) {
                 if (slot < normalInventory.size()) return normalInventory.isItemValid(slot, stack);
                 int wildcardSlot = slot - normalInventory.size();
-                return wildcardSlot >= 0 && wildcardSlot < WILDCARD_PATTERN_SLOT_COUNT
+                return wildcardSlot >= 0 && wildcardSlot < wildcardSlotCount
                         && acceptsWildcardMother(stack);
             }
         };
@@ -1858,7 +1933,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         clearWildcardPatternData(false);
 
         Map<CompoundTag, ExpandedWildcardPattern> uniquePatterns = new LinkedHashMap<>();
-        for (int motherSlot = 0; motherSlot < WILDCARD_PATTERN_SLOT_COUNT; motherSlot++) {
+        for (int motherSlot = 0; motherSlot < wildcardSlotCount; motherSlot++) {
             ItemStack wildcardStack = wildcardPatternInventory.getStackInSlot(motherSlot);
             String assignedTypeId = PatternRecipeTypeHelper.readRecipeTypeId(wildcardStack);
             if (SelectedRecipePattern.isPattern(wildcardStack)) {
@@ -2053,7 +2128,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             }
         }
         int mothers = 0;
-        for (int slot = 0; slot < WILDCARD_PATTERN_SLOT_COUNT; slot++) {
+        for (int slot = 0; slot < wildcardSlotCount; slot++) {
             if (!wildcardPatternInventory.getStackInSlot(slot).isEmpty()) mothers++;
         }
         ItemStack circuitStack = getSharedCircuitInventory().getStackInSlot(0);
@@ -2227,26 +2302,28 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     public ModularUI createRemoteWildcardUI(Player player, IUIHolder holder,
             List<String> typeIds, List<String> typeNames) {
-        int width = 176;
-        int inventoryY = 166;
+        int width = Math.max(176, wildcardPanelWidth());
+        int inventoryY = 182;
         int height = inventoryY + REMOTE_PLAYER_INVENTORY_HEIGHT;
         WidgetGroup root = new WidgetGroup(0, 0, width, height);
+        WidgetGroup slotHost = new WidgetGroup(0, 30, width, 30);
+        Runnable[] rebuildSlots = new Runnable[1];
+        rebuildSlots[0] = () -> {
+            slotHost.clearAllWidgets();
+            addWildcardMotherSlots(slotHost, 8, 0, 18, () -> rebuildSlots[0].run());
+        };
         root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
                 "gui.gt_shanhai.wildcard_pattern_config").getString()));
-        for (int slot = 0; slot < WILDCARD_PATTERN_SLOT_COUNT; slot++) {
-            int motherSlot = slot;
-            root.addWidget(new SlotWidget(wildcardPatternInventory, slot, 34 + slot * 18, 16)
-                    .setBackground(new IGuiTexture[]{GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY}));
-            root.addWidget(new ButtonWidget(35 + slot * 18, 34, 16, 10,
-                    new TextTexture(String.valueOf(slot + 1), -1), click -> selectedWildcardMotherSlot = motherSlot));
-        }
-        root.addWidget(new LabelWidget(8, 46, () -> Component.translatable(
+        addWildcardPageControls(root, 16, width, () -> rebuildSlots[0].run());
+        rebuildSlots[0].run();
+        root.addWidget(slotHost);
+        root.addWidget(new LabelWidget(8, 62, () -> Component.translatable(
                 "gui.gt_shanhai.wildcard_pattern_slot",
                 selectedWildcardMotherSlot + 1, remoteWildcardTypeText()).getString()));
-        root.addWidget(new LabelWidget(8, 58, () -> Component.translatable(
+        root.addWidget(new LabelWidget(8, 74, () -> Component.translatable(
                 "gui.gt_shanhai.wildcard_pattern_expanded", selectedWildcardPreviewPatterns().size()).getString()));
 
-        DraggableScrollableWidgetGroup typeList = new DraggableScrollableWidgetGroup(8, 70, 160, 72);
+        DraggableScrollableWidgetGroup typeList = new DraggableScrollableWidgetGroup(8, 86, width - 16, 72);
         typeList.setBackground(GuiTextures.DISPLAY);
         typeList.setYScrollBarWidth(4).setYBarStyle(
                 new ColorRectTexture(0xFF3F4252),
@@ -2266,7 +2343,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             y += 18;
         }
         root.addWidget(typeList);
-        root.addWidget(remoteReturnButton(player, width - 64, 146));
+        root.addWidget(remoteReturnButton(player, width - 64, 162));
         root.addWidget(remotePlayerInventory(player, width, inventoryY));
         return new ModularUI(width, height, holder, player)
                 .widget(root)
@@ -2303,7 +2380,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private void assignWildcardRecipeTypeId(int slot, String typeId) {
-        if (slot < 0 || slot >= WILDCARD_PATTERN_SLOT_COUNT || typeId == null || typeId.isEmpty()) return;
+        if (slot < 0 || slot >= wildcardSlotCount || typeId == null || typeId.isEmpty()) return;
         ItemStack stack = wildcardPatternInventory.getStackInSlot(slot);
         if (stack.isEmpty()) return;
         wildcardPatternInventory.setStackInSlot(slot, WildcardPatternRecipeTypeBinding.assign(stack, typeId));
