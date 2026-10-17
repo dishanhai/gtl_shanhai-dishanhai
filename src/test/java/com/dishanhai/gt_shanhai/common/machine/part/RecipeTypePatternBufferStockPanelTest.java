@@ -33,8 +33,11 @@ class RecipeTypePatternBufferStockPanelTest {
                 "库存拉取页面必须位于连续侧栏第一项");
         assertTrue(source.contains("gt_shanhai:textures/gui/stock_input_panel.png"),
                 "库存拉取按钮必须使用专用自绘图标");
-        assertTrue(source.contains("new AEDualConfigWidget") && source.contains("countConfiguredStockSlots()"),
+        assertTrue(source.contains("new PatternBufferStockSlotWidget") && source.contains("countConfiguredStockSlots()"),
                 "独立配置页必须复用原有库存槽和计数逻辑");
+        assertTrue(Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "common", "machine", "part", "PatternBufferStockSlotWidget.java")).contains("extends AEDualConfigWidget"),
+                "库存槽必须沿用 AE 双配置槽");
         assertFalse(mainUiMethod.contains("AEDualConfigWidget"),
                 "样板主 UI 不应继续包含库存拉取槽");
         assertFalse(mainUiMethod.contains("stockLabelY") || mainUiMethod.contains("stockWidgetY"),

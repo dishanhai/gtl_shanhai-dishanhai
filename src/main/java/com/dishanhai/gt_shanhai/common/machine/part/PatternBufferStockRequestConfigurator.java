@@ -18,23 +18,19 @@ import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 
 import net.minecraft.network.chat.Component;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
- * 星律库存页上的标签拉取，以及按 ME 请求器排列的维持量、批量和提交。
+ * 星律库存页上的标签拉取。选中的格子在库存槽下方改维持量、批量和提交。
  */
 final class PatternBufferStockRequestConfigurator implements IFancyConfigurator {
 
-    private static final int ROWS = 4;
     private static final ResourceTexture ICON = new ResourceTexture("gtceu:textures/gui/list.png");
 
     private final RecipeTypePatternBufferPartMachine machine;
-    private WidgetGroup page;
-    private int requestPage;
+    private WidgetGroup pickPanel;
 
     PatternBufferStockRequestConfigurator(RecipeTypePatternBufferPartMachine machine) {
         this.machine = machine;
+        machine.bindStockRequestUi(this);
     }
 
     @Override
@@ -49,136 +45,114 @@ final class PatternBufferStockRequestConfigurator implements IFancyConfigurator 
 
     @Override
     public Widget createConfigurator() {
-        page = new WidgetGroup(0, 0, 176, 176);
-        fill(page);
-        return page;
-    }
-
-    private void fill(WidgetGroup group) {
-        group.addWidget(new LabelWidget(4, 2, () -> Component.translatable(
+        WidgetGroup page = new WidgetGroup(0, 0, 176, 80);
+        page.addWidget(new LabelWidget(4, 2, () -> Component.translatable(
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_tag.title").getString()));
-        group.addWidget(new LabelWidget(110, 2, () -> Component.translatable(
+        page.addWidget(new LabelWidget(110, 2, () -> Component.translatable(
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_tag.filled",
                 machine.stockTagFilledCount()).getString()));
-        group.addWidget(new LabelWidget(4, 14, () -> Component.translatable("gui.gtlcore.tag_whitelist").getString()));
+        page.addWidget(new LabelWidget(4, 14, () -> Component.translatable("gui.gtlcore.tag_whitelist").getString()));
         TextFieldWidget white = new TextFieldWidget(4, 24, 168, 12,
                 machine::stockTagWhite, machine::setStockTagWhite);
         white.setCurrentString(machine.stockTagWhite());
-        group.addWidget(white);
-        group.addWidget(new LabelWidget(4, 38, () -> Component.translatable("gui.gtlcore.tag_blacklist").getString()));
+        page.addWidget(white);
+        page.addWidget(new LabelWidget(4, 38, () -> Component.translatable("gui.gtlcore.tag_blacklist").getString()));
         TextFieldWidget black = new TextFieldWidget(4, 48, 168, 12,
                 machine::stockTagBlack, machine::setStockTagBlack);
         black.setCurrentString(machine.stockTagBlack());
-        group.addWidget(black);
-        group.addWidget(new LabelWidget(22, 64, () -> Component.translatable(
+        page.addWidget(black);
+        page.addWidget(new LabelWidget(22, 64, () -> Component.translatable(
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.label").getString()));
-        group.addWidget(new SwitchWidget(4, 64, 14, 12, (click, enabled) -> machine.setStockRequestEnabled(enabled))
+        page.addWidget(new SwitchWidget(4, 64, 14, 12, (click, enabled) -> machine.setStockRequestEnabled(enabled))
                 .setTexture(new ColorBorderTexture(-1, 0xFFFF3030), new ColorBorderTexture(-1, 0xFF20B24B))
                 .setPressed(machine.stockRequestEnabled())
                 .setSupplier(machine::stockRequestEnabled)
                 .setHoverTooltips(
                         Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.on"),
                         Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.off")));
-        group.addWidget(new LabelWidget(52, 80, () -> Component.translatable(
-                "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.amount").getString()));
-        group.addWidget(new LabelWidget(94, 80, () -> Component.translatable(
-                "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.batch").getString()));
-        group.addWidget(new LabelWidget(132, 80, () -> Component.translatable(
-                "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.submit").getString()));
-
-        List<Channel> channels = channels();
-        int pages = Math.max(1, (channels.size() + ROWS - 1) / ROWS);
-        if (requestPage >= pages) {
-            requestPage = pages - 1;
-        }
-        if (requestPage < 0) {
-            requestPage = 0;
-        }
-        if (channels.isEmpty()) {
-            group.addWidget(new LabelWidget(4, 96, () -> Component.translatable(
-                    "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.empty").getString()));
-        } else {
-            int start = requestPage * ROWS;
-            for (int row = 0; row < ROWS && start + row < channels.size(); row++) {
-                addRow(group, channels.get(start + row), 94 + row * 16);
-            }
-        }
-        group.addWidget(new ButtonWidget(4, 160, 16, 12, new TextTexture("<", -1), click -> changePage(-1)));
-        group.addWidget(new LabelWidget(70, 162, () -> (requestPage + 1) + " / " + Math.max(1,
-                (channels().size() + ROWS - 1) / ROWS)));
-        group.addWidget(new ButtonWidget(156, 160, 16, 12, new TextTexture(">", -1), click -> changePage(1)));
+        return page;
     }
 
-    private void addRow(WidgetGroup group, Channel channel, int y) {
-        group.addWidget(new SwitchWidget(4, y, 12, 12,
-                (click, enabled) -> machine.setStockRequestRowEnabled(channel.fluid, channel.slot, enabled))
+    Widget createPickPanel(int x, int y) {
+        pickPanel = new WidgetGroup(x, y, 176, 34);
+        fillPickPanel(pickPanel);
+        return pickPanel;
+    }
+
+    void rebuildPickPanel() {
+        if (pickPanel == null) {
+            return;
+        }
+        pickPanel.clearAllWidgets();
+        fillPickPanel(pickPanel);
+    }
+
+    private void fillPickPanel(WidgetGroup group) {
+        if (!machine.stockPickSet()) {
+            group.addWidget(new LabelWidget(4, 2, () -> Component.translatable(
+                    "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.empty").getString()));
+            return;
+        }
+        boolean fluid = machine.stockPickFluid();
+        int slot = machine.stockPickSlot();
+        group.addWidget(new SwitchWidget(4, 0, 12, 12,
+                (click, enabled) -> machine.setStockRequestRowEnabled(fluid, slot, enabled))
                 .setTexture(new ColorBorderTexture(-1, 0xFFFF3030), new ColorBorderTexture(-1, 0xFF20B24B))
-                .setPressed(machine.stockRequestRowEnabled(channel.fluid, channel.slot))
-                .setSupplier(() -> machine.stockRequestRowEnabled(channel.fluid, channel.slot))
-                .setHoverTooltips(channel.key.getDisplayName()));
-        group.addWidget(new LabelWidget(18, y + 2, () -> rowLabel(channel))
-                .setHoverTooltips(channel.key.getDisplayName()));
-        TextFieldWidget amount = new TextFieldWidget(52, y, 40, 12, null,
-                text -> machine.setStockRequestDraft(channel.fluid, channel.slot, true, text));
-        amount.setCurrentString(machine.stockRequestDraft(channel.fluid, channel.slot, true));
+                .setPressed(machine.stockRequestRowEnabled(fluid, slot))
+                .setSupplier(() -> machine.stockRequestRowEnabled(fluid, slot))
+                .setHoverTooltips(selectedName()));
+        group.addWidget(new LabelWidget(20, 2, this::selectedLabel).setHoverTooltips(selectedName()));
+        group.addWidget(new LabelWidget(4, 18, () -> Component.translatable(
+                "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.amount").getString()));
+        TextFieldWidget amount = new TextFieldWidget(28, 16, 36, 12, null,
+                text -> machine.setStockRequestDraft(fluid, slot, true, text));
+        amount.setCurrentString(machine.stockRequestDraft(fluid, slot, true));
         amount.setHoverTooltips(Component.translatable(
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.amount_tip"));
         group.addWidget(amount);
-        TextFieldWidget batch = new TextFieldWidget(94, y, 36, 12, null,
-                text -> machine.setStockRequestDraft(channel.fluid, channel.slot, false, text));
-        batch.setCurrentString(machine.stockRequestDraft(channel.fluid, channel.slot, false));
+        group.addWidget(new LabelWidget(68, 18, () -> Component.translatable(
+                "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.batch").getString()));
+        TextFieldWidget batch = new TextFieldWidget(92, 16, 32, 12, null,
+                text -> machine.setStockRequestDraft(fluid, slot, false, text));
+        batch.setCurrentString(machine.stockRequestDraft(fluid, slot, false));
         batch.setHoverTooltips(Component.translatable(
                 "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.batch_tip"));
         group.addWidget(batch);
-        group.addWidget(new ButtonWidget(132, y, 40, 12, new TextTexture(
+        group.addWidget(new ButtonWidget(128, 16, 44, 12, new TextTexture(
                 Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.submit")
                         .getString(), -1),
-                click -> machine.submitStockRequest(channel.fluid, channel.slot)));
+                click -> machine.submitStockRequest(fluid, slot)));
     }
 
-    private void changePage(int delta) {
-        int pages = Math.max(1, (channels().size() + ROWS - 1) / ROWS);
-        int next = requestPage + delta;
-        if (next < 0 || next >= pages || page == null) {
-            return;
+    private String selectedLabel() {
+        return Component.translatable(
+                "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.selected",
+                selectedName().getString()).getString();
+    }
+
+    private Component selectedName() {
+        AEKey key = selectedKey();
+        if (key == null) {
+            return Component.translatable("gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.empty");
         }
-        requestPage = next;
-        page.clearAllWidgets();
-        fill(page);
+        return key.getDisplayName();
     }
 
-    private List<Channel> channels() {
-        List<Channel> channels = new ArrayList<>();
-        collect(channels, machine.stockItemHandler.getInventory(), false);
-        collect(channels, machine.stockFluidHandler.getInventory(), true);
-        return channels;
-    }
-
-    private static void collect(List<Channel> channels, ExportOnlyAESlot[] slots, boolean fluid) {
-        for (int i = 0; i < slots.length; i++) {
-            GenericStack config = slots[i].getConfig();
-            if (config != null && config.what() != null) {
-                channels.add(new Channel(fluid, i, config.what()));
-            }
+    private AEKey selectedKey() {
+        if (!machine.stockPickSet()) {
+            return null;
         }
-    }
-
-    private static String rowLabel(Channel channel) {
-        String kind = Component.translatable(channel.fluid
-                ? "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.fluid_row"
-                : "gt_shanhai.machine.recipe_type_pattern_buffer.stock_request.item_row").getString();
-        return kind + (channel.slot + 1);
-    }
-
-    private static final class Channel {
-        private final boolean fluid;
-        private final int slot;
-        private final AEKey key;
-
-        private Channel(boolean fluid, int slot, AEKey key) {
-            this.fluid = fluid;
-            this.slot = slot;
-            this.key = key;
+        ExportOnlyAESlot[] slots = machine.stockPickFluid()
+                ? machine.stockFluidHandler.getInventory()
+                : machine.stockItemHandler.getInventory();
+        int slot = machine.stockPickSlot();
+        if (slot < 0 || slot >= slots.length) {
+            return null;
         }
+        GenericStack config = slots[slot].getConfig();
+        if (config == null) {
+            return null;
+        }
+        return config.what();
     }
 }

@@ -108,7 +108,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.material.Fluid;
 
 import org.gtlcore.gtlcore.api.gui.MEPatternCatalystUIManager;
-import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigWidget;
+
 import org.gtlcore.gtlcore.client.gui.widget.PatternCycleWidget;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferRecipeHandlerTrait;
@@ -1614,10 +1614,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private FancyConfiguratorSidebarPage createStockInputSidebarPage(List<IFancyConfigurator> configurators) {
-        StockInputConfigurator stockInput = new StockInputConfigurator();
+        PatternBufferStockRequestConfigurator request = new PatternBufferStockRequestConfigurator(this);
+        StockInputConfigurator stockInput = new StockInputConfigurator(request);
         List<IFancyConfigurator> selected = new ArrayList<>(2);
         selected.add(stockInput);
-        selected.add(new PatternBufferStockRequestConfigurator(this));
+        selected.add(request);
         if (PARENT_ADVANCED_ME < configurators.size()) {
             selected.add(configurators.get(PARENT_ADVANCED_ME));
         }
@@ -1674,6 +1675,12 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     private class StockInputConfigurator implements IFancyConfigurator {
 
+        private final PatternBufferStockRequestConfigurator request;
+
+        private StockInputConfigurator(PatternBufferStockRequestConfigurator request) {
+            this.request = request;
+        }
+
         @Override
         public Component getTitle() {
             return Component.translatable("gui.gtlcore.stock_input_config");
@@ -1686,13 +1693,15 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
         @Override
         public Widget createConfigurator() {
-            WidgetGroup group = new WidgetGroup(0, 0, 160, 109);
+            WidgetGroup group = new WidgetGroup(0, 0, 176, 146);
             group.addWidget(new LabelWidget(8, 2,
                     () -> Component.translatable("gui.gtlcore.stock_input_config").getString()));
             group.addWidget(new LabelWidget(130, 2,
                     () -> FormattingUtil.formatNumbers(countConfiguredStockSlots()) + " / 32"));
-            group.addWidget(new AEDualConfigWidget(8, 14, stockItemHandler, stockFluidHandler,
-                    RecipeTypePatternBufferPartMachine.this::setPage, page));
+            group.addWidget(new PatternBufferStockSlotWidget(8, 14, stockItemHandler, stockFluidHandler,
+                    RecipeTypePatternBufferPartMachine.this::setPage, page,
+                    RecipeTypePatternBufferPartMachine.this));
+            group.addWidget(request.createPickPanel(0, 110));
             return group;
         }
     }
@@ -2775,6 +2784,39 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         stockTagBlack = next;
         if (!isRemote()) {
             markDirty();
+        }
+    }
+
+    private boolean stockPickSet;
+    private boolean stockPickFluid;
+    private int stockPickSlot = -1;
+    private PatternBufferStockRequestConfigurator stockRequestUi;
+
+    void bindStockRequestUi(PatternBufferStockRequestConfigurator ui) {
+        stockRequestUi = ui;
+    }
+
+    boolean stockPickSet() {
+        return stockPickSet;
+    }
+
+    boolean stockPickFluid() {
+        return stockPickFluid;
+    }
+
+    int stockPickSlot() {
+        return stockPickSlot;
+    }
+
+    void noteStockPick(boolean set, boolean fluid, int slot) {
+        if (stockPickSet == set && (!set || stockPickFluid == fluid && stockPickSlot == slot)) {
+            return;
+        }
+        stockPickSet = set;
+        stockPickFluid = fluid;
+        stockPickSlot = slot;
+        if (stockRequestUi != null) {
+            stockRequestUi.rebuildPickPanel();
         }
     }
 

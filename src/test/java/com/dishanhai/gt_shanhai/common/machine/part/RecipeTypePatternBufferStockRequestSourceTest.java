@@ -28,6 +28,13 @@ class RecipeTypePatternBufferStockRequestSourceTest {
         assertTrue(ui.contains("machine.submitStockRequest"));
         assertTrue(ui.contains("stock_request.amount"));
         assertTrue(ui.contains("stock_request.batch"));
+        assertTrue(ui.contains("createPickPanel"));
+        assertTrue(machine.contains("new PatternBufferStockSlotWidget"));
+        assertTrue(machine.contains("request.createPickPanel"));
+        String slots = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "common", "machine", "part", "PatternBufferStockSlotWidget.java"));
+        assertTrue(slots.contains("button == 0"));
+        assertTrue(slots.contains("machine.noteStockPick(true, fluid, index)"));
         assertTrue(machine.contains("STOCK_PAGE_MAX_HEIGHT"));
         assertTrue(machine.contains("selected, 1, STOCK_PAGE_MAX_HEIGHT"));
         String adapter = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
