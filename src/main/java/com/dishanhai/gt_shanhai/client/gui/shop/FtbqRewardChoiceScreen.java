@@ -79,6 +79,21 @@ public class FtbqRewardChoiceScreen extends ScaledScreen {
         listH = panelHeight - 26 - 30;
     }
 
+    /** 表内物品奖励的权重（同一 ItemReward 实例；对不上时退回 0，百分比显示为 100%/??% 由 FTBQ 自己决定）。 */
+    private float weightOf(dev.ftb.mods.ftbquests.quest.reward.ItemReward reward) {
+        dev.ftb.mods.ftbquests.quest.loot.RewardTable table = resolveClientTable();
+        if (table == null || reward == null) return 0f;
+        for (dev.ftb.mods.ftbquests.quest.loot.WeightedReward wr : table.getWeightedRewards()) {
+            if (wr.getReward() == reward) return wr.getWeight();
+        }
+        return 0f;
+    }
+
+    private float tableWeight() {
+        dev.ftb.mods.ftbquests.quest.loot.RewardTable table = resolveClientTable();
+        return table == null ? 0f : table.getTotalWeight(false);
+    }
+
     /** 表内「仅物品类奖励」子序列（与服务端 {@code resolveFtbqItemRewardByIndex} 同规则遍历，下标必须对得上）。 */
     private List<dev.ftb.mods.ftbquests.quest.reward.ItemReward> pool() {
         List<dev.ftb.mods.ftbquests.quest.reward.ItemReward> list = new ArrayList<>();
@@ -116,9 +131,10 @@ public class FtbqRewardChoiceScreen extends ScaledScreen {
         g.fill(left + 5, top + 18, left + panelWidth - 5, top + panelHeight - 5, PANEL_INNER);
 
         g.drawString(this.font, "§6选择奖励", left + 8, top + 5, GOLD, true);
-        g.drawString(this.font, "§7" + GuiRenderUtil.trimText(this.font, entry.goodsDisplayName(), panelWidth - 16), left + 8, top + 14, GRAY, true);
+        g.drawString(this.font, "§7" + GuiRenderUtil.trimText(this.font, entry.goodsDisplayName() + "  §8百分比为表内权重", panelWidth - 16), left + 8, top + 14, GRAY, true);
 
         List<dev.ftb.mods.ftbquests.quest.reward.ItemReward> pool = pool();
+        float totalWeight = tableWeight();
         int visible = visibleRows();
         int maxScroll = maxScroll(pool.size());
         if (scroll > maxScroll) scroll = maxScroll;
@@ -137,9 +153,14 @@ public class FtbqRewardChoiceScreen extends ScaledScreen {
             g.renderItem(st, listX + 1, ry + 1);
             g.renderItemDecorations(this.font, st, listX + 1, ry + 1);
             String nm = st.getHoverName().getString();
+            String count = "§7×" + ir.getButtonText();
+            String chance = "§e" + dev.ftb.mods.ftbquests.quest.loot.WeightedReward.chanceString(weightOf(ir), totalWeight);
+            String right = count + " " + chance;
+            int rightW = this.font.width(right);
             String prefix = idx == selected ? "§a✔ §f" : "§f";
-            g.drawString(this.font, prefix + GuiRenderUtil.trimText(this.font, nm, listW - 22),
+            g.drawString(this.font, prefix + GuiRenderUtil.trimText(this.font, nm, Math.max(8, listW - 22 - rightW - 4)),
                     listX + 22, ry + 6, WHITE, true);
+            g.drawString(this.font, right, listX + listW - rightW, ry + 6, WHITE, true);
         }
         if (pool.size() > visible) {
             g.drawString(this.font, "§8" + (scroll + 1) + "-" + Math.min(scroll + visible, pool.size()) + "/" + pool.size()

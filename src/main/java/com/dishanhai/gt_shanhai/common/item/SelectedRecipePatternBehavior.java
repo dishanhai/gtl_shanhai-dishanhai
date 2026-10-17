@@ -10,6 +10,9 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.lowdragmc.lowdraglib.gui.editor.ColorPattern;
 import com.lowdragmc.lowdraglib.gui.factory.HeldItemUIFactory;
 import com.lowdragmc.lowdraglib.gui.modular.ModularUI;
+import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
+import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
+import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
 import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
 import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
@@ -40,7 +43,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 星律通配样板：右键打开放入格和玩家物品栏，放入编码样板后匹配配方 ID。
+ * 星律通配样板：右键打开后分两组。
+ * 自动生成只展示生成器底稿；手动更改用整页格子放入编码样板，匹配配方 ID。
  * 方块自己要打开界面时仍优先，例如右键机器不会被这张样板抢走。
  */
 public final class SelectedRecipePatternBehavior implements IItemUIFactory, IAddInformation {
@@ -50,18 +54,24 @@ public final class SelectedRecipePatternBehavior implements IItemUIFactory, IAdd
     private static final int SLOT = 18;
     private static final int LEFT = 8;
     private static final int COLUMNS = 14;
-    private static final int IMPORT_SLOTS = 9;
+    private static final int MANUAL_ROWS = 5;
+    /** 手动组占满预览区，不再和 100 多张自动配方挤同一排。旧存档不足此格数时只读已有格。 */
+    private static final int IMPORT_SLOTS = COLUMNS * MANUAL_ROWS;
     private static final int VISIBLE_ROWS = 5;
     private static final int SCROLL = 4;
-    private static final int IMPORT_Y = 42;
-    private static final int PREVIEW_TOP = 64;
+    private static final int GROUP_Y = 42;
+    private static final int GROUP_H = 14;
+    private static final int PREVIEW_TOP = GROUP_Y + GROUP_H + 4;
     private static final int PREVIEW_WIDTH = COLUMNS * SLOT + SCROLL;
     private static final int PREVIEW_HEIGHT = VISIBLE_ROWS * SLOT;
     private static final int WIDTH = LEFT + PREVIEW_WIDTH + 8;
+    private static final int INV_COLUMNS = 9;
     private static final int INV_TOP = PREVIEW_TOP + PREVIEW_HEIGHT + 6;
     private static final int HOTBAR_TOP = INV_TOP + (3 * SLOT) + 4;
     private static final int HEIGHT = HOTBAR_TOP + SLOT + 6;
-    private static final int ROW_LEFT = (WIDTH - (IMPORT_SLOTS * SLOT)) / 2;
+    private static final int ROW_LEFT = (WIDTH - (INV_COLUMNS * SLOT)) / 2;
+    private static final int BUTTON_GAP = 4;
+    private static final int BUTTON_W = (PREVIEW_WIDTH - BUTTON_GAP) / 2;
 
     private SelectedRecipePatternBehavior() {}
 
@@ -70,7 +80,11 @@ public final class SelectedRecipePatternBehavior implements IItemUIFactory, IAdd
         ItemStack stack = holder.getHeld();
         ItemStackTransfer imports = loadImports(stack);
         int[] unmatched = { 0 };
-        WidgetGroup previewHost = new WidgetGroup(LEFT, PREVIEW_TOP, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+        boolean[] showManual = { preferManual(stack, imports) };
+        WidgetGroup previewHost = new WidgetGroup(0, 0, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+        WidgetGroup generatedPage = new WidgetGroup(LEFT, PREVIEW_TOP, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+        WidgetGroup manualPage = manualPage(imports);
+        generatedPage.addWidget(previewHost);
         if (!player.level().isClientSide() && needsSync(stack, imports)) {
             syncImports(stack, imports, player.level(), unmatched);
         }
@@ -87,20 +101,68 @@ public final class SelectedRecipePatternBehavior implements IItemUIFactory, IAdd
             }
             holder.markAsDirty();
         });
+        generatedPage.setVisible(!showManual[0]);
+        manualPage.setVisible(showManual[0]);
 
         WidgetGroup group = new WidgetGroup(0, 0, WIDTH, HEIGHT);
         group.addWidget(new LabelWidget(LEFT, 6,
                 () -> Component.translatable("item.gt_shanhai.selected_recipe_pattern").getString()));
         group.addWidget(new LabelWidget(LEFT, 18, () -> summary(holder.getHeld())));
         group.addWidget(new LabelWidget(LEFT, 30, () -> importStatus(holder.getHeld(), unmatched[0])));
+        group.addWidget(groupButton(LEFT, false, showManual, generatedPage, manualPage));
+        group.addWidget(groupButton(LEFT + BUTTON_W + BUTTON_GAP, true, showManual, generatedPage, manualPage));
+        group.addWidget(generatedPage);
+        group.addWidget(manualPage);
+        addPlayerInventory(group, holder, player);
+        return new ModularUI(WIDTH, HEIGHT, holder, player).widget(group).background(GuiTextures.BACKGROUND);
+    }
+
+    /** 两组共用同一块区域。点哪组就显示哪组，格子不会叠在一起抢位置。 */
+    private static ButtonWidget groupButton(int x, boolean manual, boolean[] showManual,
+            WidgetGroup generatedPage, WidgetGroup manualPage) {
+        String key = manual
+                ? "gui.gt_shanhai.selected_recipe_pattern.group_manual"
+                : "gui.gt_shanhai.selected_recipe_pattern.group_generated";
+        String hint = manual
+                ? "gui.gt_shanhai.selected_recipe_pattern.group_manual_hint"
+                : "gui.gt_shanhai.selected_recipe_pattern.group_generated_hint";
+        ButtonWidget button = new ButtonWidget(x, GROUP_Y, BUTTON_W, GROUP_H,
+                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(() -> {
+                    String label = Component.translatable(key).getString();
+                    return showManual[0] == manual ? label : "§7" + label;
+                }).setDropShadow(true)),
+                click -> {
+                    showManual[0] = manual;
+                    generatedPage.setVisible(!manual);
+                    manualPage.setVisible(manual);
+                });
+        button.setHoverBorderTexture(1, 0xFFFFFFFF);
+        button.setHoverTooltips(Component.translatable(hint));
+        return button;
+    }
+
+    private static WidgetGroup manualPage(ItemStackTransfer imports) {
+        WidgetGroup page = new WidgetGroup(LEFT, PREVIEW_TOP, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+        page.setBackground(GuiTextures.DISPLAY);
         for (int index = 0; index < IMPORT_SLOTS; index++) {
-            group.addWidget(new SlotWidget(imports, index, ROW_LEFT + (index * SLOT), IMPORT_Y, true, true)
+            int x = (index % COLUMNS) * SLOT;
+            int y = (index / COLUMNS) * SLOT;
+            page.addWidget(new SlotWidget(imports, index, x, y, true, true)
                     .setBackgroundTexture(GuiTextures.SLOT)
                     .setHoverTooltips(Component.translatable("gui.gt_shanhai.selected_recipe_pattern.import")));
         }
-        group.addWidget(previewHost);
-        addPlayerInventory(group, holder, player);
-        return new ModularUI(WIDTH, HEIGHT, holder, player).widget(group).background(GuiTextures.BACKGROUND);
+        return page;
+    }
+
+    /** 没有自动配方、但放入格里已经有样板时，直接打开手动组。 */
+    private static boolean preferManual(ItemStack stack, ItemStackTransfer imports) {
+        if (!SelectedRecipePattern.generatedRecipeIds(stack == null ? null : stack.getTag()).isEmpty()) {
+            return false;
+        }
+        for (int index = 0; index < imports.getSlots(); index++) {
+            if (!imports.getStackInSlot(index).isEmpty()) return true;
+        }
+        return false;
     }
 
     private static void addPlayerInventory(WidgetGroup group, HeldItemUIFactory.HeldItemHolder holder, Player player) {
@@ -226,16 +288,18 @@ public final class SelectedRecipePatternBehavior implements IItemUIFactory, IAdd
         if (unmatched > 0) {
             return Component.translatable("gui.gt_shanhai.selected_recipe_pattern.unmatched", unmatched).getString();
         }
-        SelectedRecipePattern.Contents contents = SelectedRecipePattern.read(stack == null ? null : stack.getTag());
-        int total = contents == null ? 0 : contents.recipes().size();
-        int shown = Math.min(total, SelectedRecipePattern.PREVIEW_LIMIT);
-        return Component.translatable("gui.gt_shanhai.selected_recipe_pattern.shown", shown, total).getString();
+        CompoundTag tag = stack == null ? null : stack.getTag();
+        int generated = SelectedRecipePattern.generatedRecipeIds(tag).size();
+        int manual = SelectedRecipePattern.manualRecipeIds(tag).size();
+        int shown = Math.min(generated, SelectedRecipePattern.PREVIEW_LIMIT);
+        return Component.translatable("gui.gt_shanhai.selected_recipe_pattern.shown", shown, generated, manual)
+                .getString();
     }
 
     private static void fillPreview(WidgetGroup host, ItemStack bundle, Level level) {
         host.clearAllWidgets();
         host.addWidget(preview(SelectedRecipePattern.previewStacks(
-                bundle, level, SelectedRecipePattern.PREVIEW_LIMIT)));
+                bundle, level, SelectedRecipePattern.PREVIEW_LIMIT, true)));
     }
 
     /** 已写入的配方只展示，取出请从上方放入格拿回原样板。 */

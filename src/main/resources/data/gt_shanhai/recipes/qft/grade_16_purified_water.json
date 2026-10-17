@@ -1,0 +1,73 @@
+{
+  "data": {
+    "euTier": 11
+  },
+  "duration": 4,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 33554432
+      }
+    ]
+  },
+  "type": "gtceu:qft",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "minecraft:water"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 3
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzsw"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 2147483647,
+          "value": [
+            {
+              "fluid": "gtceu:grade_16_purified_water"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtceu:qft/grade_16_purified_water",
+      "defaultEnabled": true
+    }
+  ]
+}

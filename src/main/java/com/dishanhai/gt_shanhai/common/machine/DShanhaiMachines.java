@@ -1482,7 +1482,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7· 中键催化剂槽：多张样板共用一组催化剂和电路"));
             tooltips.add(Component.literal("§7· 写进样板的虚拟电路优先，下单不消耗，也能盖过共享电路"));
             tooltips.add(Component.literal("§7· 每槽默认记住一种配方，数量在界面里改"));
-            tooltips.add(Component.literal("§7· 五个通配符槽放入星律通配样板，按记录的配方展开"));
+            tooltips.add(Component.literal("§7· 20个通配符槽放入星律通配样板，按记录的配方展开"));
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§6供料"));
             tooltips.add(Component.literal("§7· 库存输入在界面里指定物品和流体，真正扣料时才从 ME 提取"));

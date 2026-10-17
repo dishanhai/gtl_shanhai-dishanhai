@@ -363,7 +363,7 @@ public class ShopEditPacket {
             }
         }
         if (!pkt.cost.isValid()) {
-            player.sendSystemMessage(Component.literal("§c[山海商店] 成本无效（需至少一项有效的星火/币种/物品/流体）"));
+            player.sendSystemMessage(Component.literal("§c[山海商店] 成本无效（物品或流体不存在）"));
             return;
         }
         // 稳定身份 ID：EDIT 必须沿用旧条目的，不能让每次编辑都换一个新身份（购物车等跨快照引用会失效）；

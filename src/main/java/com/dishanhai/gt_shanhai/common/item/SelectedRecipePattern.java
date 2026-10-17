@@ -208,6 +208,27 @@ public final class SelectedRecipePattern {
         root.put(TAG, written.getCompound(TAG));
     }
 
+    /** 放入格写进 {@link #MANUAL_TAG} 的配方。生成器底稿不在这里。 */
+    public static List<String> manualRecipeIds(@Nullable CompoundTag root) {
+        if (root == null) return List.of();
+        return List.copyOf(readManualIds(root));
+    }
+
+    /** 生成器写下、且没有被手动名单盖住的配方。顺序跟样板记录一致。 */
+    public static List<String> generatedRecipeIds(@Nullable CompoundTag root) {
+        if (root == null) return List.of();
+        Contents contents = read(root);
+        if (contents == null) return List.of();
+        List<String> manual = readManualIds(root);
+        if (manual.isEmpty()) return contents.recipes();
+        Set<String> manualIds = new HashSet<>(manual);
+        List<String> generated = new ArrayList<>();
+        for (String id : contents.recipes()) {
+            if (!manualIds.contains(id)) generated.add(id);
+        }
+        return List.copyOf(generated);
+    }
+
     private static List<String> readManualIds(CompoundTag root) {
         if (!root.contains(MANUAL_TAG, Tag.TAG_LIST)) return List.of();
         ListTag list = root.getList(MANUAL_TAG, Tag.TAG_STRING);
@@ -335,10 +356,19 @@ public final class SelectedRecipePattern {
 
     /** 右键面板用的只读样板。编码失败或配方已不在时给屏障，避免整张清单断掉。 */
     public static List<ItemStack> previewStacks(ItemStack bundle, @Nullable Level level, int limit) {
+        return previewStacks(bundle, level, limit, false);
+    }
+
+    /**
+     * @param generatedOnly 为真时跳过放入格写入的配方，只留生成器底稿
+     */
+    public static List<ItemStack> previewStacks(ItemStack bundle, @Nullable Level level, int limit,
+            boolean generatedOnly) {
         Contents contents = bundle == null ? null : read(bundle.getTag());
         if (contents == null || level == null || limit <= 0) return List.of();
+        List<String> ids = generatedOnly ? generatedRecipeIds(bundle.getTag()) : contents.recipes();
         List<ItemStack> stacks = new ArrayList<>();
-        for (String id : contents.recipes()) {
+        for (String id : ids) {
             if (stacks.size() >= limit) break;
             stacks.add(previewStack(id, contents, level));
         }

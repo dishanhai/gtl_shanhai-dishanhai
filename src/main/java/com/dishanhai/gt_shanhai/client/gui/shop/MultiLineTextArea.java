@@ -3,9 +3,12 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.MultilineTextField;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
+import org.lwjgl.glfw.GLFW;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -22,10 +25,11 @@ import java.util.List;
  * {@code getLineAtCursor()}/{@code getLineCount()} 对得上；仅「选区高亮」这一处离不开 StringView，
  * 用反射取其 beginIndex/endIndex（record 访问器，只读、无副作用，稳妥）。</p>
  *
- * <p>不是 {@link net.minecraft.client.gui.components.AbstractWidget}，不接入 Screen 的控件树/焦点系统，
- * 由宿主 Screen（{@link ShopEntryEditScreen}）在自己的 universalMouseClicked/keyPressed/charTyped 里手动路由。</p>
+ * <p>必须继承 {@link EditBox} 并挂进 Screen 焦点：展开编写如果只是自绘文本区，Windows 输入法会在失焦后锁成英文，
+ * Shift / Ctrl 也被当成已处理按键，中英文切不过去。字母和换行仍交给 {@link MultilineTextField}；
+ * 修饰键原样放行。宿主只拦 ESC 和 Ctrl+回车。</p>
  */
-class MultiLineTextArea {
+class MultiLineTextArea extends EditBox {
 
     private static final int LINE_H = 9;
 
@@ -51,13 +55,16 @@ class MultiLineTextArea {
     private final int width;
     private int x, y, w, h;
     private int scrollLine;
-    private boolean focused;
 
     MultiLineTextArea(Font font, int width) {
+        super(font, 0, 0, Math.max(1, width), 10, Component.literal("描述"));
         this.font = font;
         this.width = width;
         this.field = new MultilineTextField(font, width);
         this.field.setCursorListener(this::scrollToCursor);
+        setBordered(false);
+        setMaxLength(Integer.MAX_VALUE);
+        setVisible(false);
     }
 
     void setBounds(int x, int y, int w, int h) {
@@ -65,19 +72,26 @@ class MultiLineTextArea {
         this.y = y;
         this.w = w;
         this.h = h;
+        setX(x);
+        setY(y);
+        setWidth(Math.max(1, w));
+        setHeight(Math.max(1, h));
     }
 
-    void setValue(String text) {
+    @Override
+    public void setValue(String text) {
+        // EditBox 构造器会在 field 赋值前调用 setValue，这时只能写父类自己的缓冲。
+        if (field == null) {
+            super.setValue(text == null ? "" : text);
+            return;
+        }
         field.setValue(text == null ? "" : text);
         scrollLine = 0;
     }
 
-    String getValue() {
-        return field.value();
-    }
-
-    void setFocused(boolean f) {
-        this.focused = f;
+    @Override
+    public String getValue() {
+        return field == null ? super.getValue() : field.value();
     }
 
     private int visibleLines() {
@@ -125,7 +139,7 @@ class MultiLineTextArea {
     void render(GuiGraphics g, int mx, int my) {
         String s = field.value();
         int cursor = field.cursor();
-        boolean drawCursor = focused && (System.currentTimeMillis() / 500L) % 2L == 0L;
+        boolean drawCursor = isFocused() && (System.currentTimeMillis() / 500L) % 2L == 0L;
         int[] sel = selectedRange();
         List<int[]> lines = computeLines();
         int visible = visibleLines();
@@ -159,9 +173,10 @@ class MultiLineTextArea {
         return mx >= x && mx < x + w && my >= y && my < y + h;
     }
 
-    boolean mouseClicked(double mx, double my) {
+    @Override
+    public boolean mouseClicked(double mx, double my, int button) {
         if (!isHovering(mx, my)) return false;
-        focused = true; // 点中即取得焦点（同 EditBox 行为）；resize 重建后焦点丢失也能靠再点一下恢复
+        setFocused(true);
         field.setSelecting(Screen.hasShiftDown());
         double localX = mx - x;
         double localY = (my - y) + (double) scrollLine * LINE_H;
@@ -171,8 +186,13 @@ class MultiLineTextArea {
     }
 
     /** 拖拽扩选：与点选共用同一套「像素坐标 → 光标位置」换算，全程保持 selecting=true 直到松手。 */
-    boolean mouseDragged(double mx, double my) {
-        if (!focused) return false;
+    @Override
+    public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        return dragSelect(mx, my);
+    }
+
+    boolean dragSelect(double mx, double my) {
+        if (!isFocused()) return false;
         field.setSelecting(true);
         double localX = Math.max(0, mx - x);
         double localY = (my - y) + (double) scrollLine * LINE_H;
@@ -188,17 +208,30 @@ class MultiLineTextArea {
         return true;
     }
 
-    boolean keyPressed(int keyCode) {
-        if (!focused) return false;
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (!isVisible() || !isFocused()) return false;
+        // Shift / Ctrl / Alt 是中英文切换键。吃掉它们，输入法会锁在英文。
+        if (isImeModifier(keyCode)) return false;
         return field.keyPressed(keyCode);
     }
 
-    boolean charTyped(char c) {
-        if (!focused) return false;
+    @Override
+    public boolean charTyped(char c, int modifiers) {
+        if (!isVisible() || !isFocused()) return false;
         if (SharedConstants.isAllowedChatCharacter(c)) {
             field.insertText(Character.toString(c));
             return true;
         }
         return false;
+    }
+
+    private static boolean isImeModifier(int keyCode) {
+        return keyCode == GLFW.GLFW_KEY_LEFT_SHIFT || keyCode == GLFW.GLFW_KEY_RIGHT_SHIFT
+                || keyCode == GLFW.GLFW_KEY_LEFT_CONTROL || keyCode == GLFW.GLFW_KEY_RIGHT_CONTROL
+                || keyCode == GLFW.GLFW_KEY_LEFT_ALT || keyCode == GLFW.GLFW_KEY_RIGHT_ALT
+                || keyCode == GLFW.GLFW_KEY_LEFT_SUPER || keyCode == GLFW.GLFW_KEY_RIGHT_SUPER
+                || keyCode == GLFW.GLFW_KEY_CAPS_LOCK
+                || keyCode == GLFW.GLFW_KEY_UNKNOWN;
     }
 }

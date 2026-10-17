@@ -43,4 +43,25 @@ class ShopScreenCardSizeSettingsSourceTest {
         assertTrue(uiSettings.contains("DEFAULT_CARD_HEIGHT = 36"));
         assertTrue(uiSettings.contains("shop_client_ui.json"));
     }
+
+    @Test
+    void shopSettingsScrollsAndStoresRewardPreviewMode() throws Exception {
+        String settingsScreen = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopSettingsScreen.java"));
+        String screen = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopScreen.java"));
+        String uiSettings = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "client", "shop", "ClientShopUiSettings.java"));
+
+        assertTrue(settingsScreen.contains("settingsScroll"), "商店设置页内容超出视口时要能滚动");
+        assertTrue(settingsScreen.contains("universalMouseScrolled"), "滚轮要滚设置页，而不是把事件交给输入框");
+        assertTrue(settingsScreen.contains("获取预览模式"), "商店设置页要能切换获取预览模式");
+        assertTrue(settingsScreen.contains("ClientShopUiSettings.setRewardPreviewBar"),
+                "获取预览模式是客户端显示偏好，不能写进服务端设置包");
+        assertTrue(uiSettings.contains("rewardPreview"));
+        assertTrue(uiSettings.contains("PREVIEW_GRID"));
+        assertTrue(screen.contains("drawGoodsBars"), "普通商品的条形预览要单独画数量，不能复用概率列");
+        assertTrue(screen.contains("drawCostBars"), "花费预览的条形也要画数量，并跟获取预览模式走同一个开关");
+        assertTrue(screen.contains("drawRewardOddsGrid"), "方格模式仍要画出奖励表概率");
+        assertTrue(screen.contains("ClientShopUiSettings.rewardPreviewBar()"));
+    }
 }

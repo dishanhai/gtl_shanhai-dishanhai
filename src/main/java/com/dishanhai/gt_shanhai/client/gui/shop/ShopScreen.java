@@ -2081,7 +2081,7 @@ public class ShopScreen extends ScaledScreen {
             return buttonTip("新增商品", "往当前商店目录加一条新商品。只在编辑模式开启时出现。");
         }
         if (canEdit && hit(smx, smy, settingsBtnX(), y, settingsBtnW(), h)) {
-            return buttonTip("商店设置", "调整奖励抽取上限、SDA 打包阈值、卡片大小，以及 AE 注入开关。");
+            return buttonTip("商店设置", "调整奖励抽取上限、SDA 打包阈值、卡片大小、获取预览模式，以及 AE 注入开关。");
         }
         if (hit(smx, smy, cartBtnX(), y, cartBtnW(), h)) {
             return buttonTip("购物车", "Ctrl+左键把商品加进来。打开后可改数量，再一次结算。");
@@ -2709,30 +2709,43 @@ public class ShopScreen extends ScaledScreen {
             }
             contentY = py + 24;
         }
-        boolean comboRewardPreview = mode == Mode.BUY && selected.getRewardMode() == ShopEntry.RewardMode.NONE
-                && selected.hasMultipleGoods();
+        boolean previewBar = ClientShopUiSettings.rewardPreviewBar();
+        boolean normalGoods = selected.getRewardMode() == ShopEntry.RewardMode.NONE;
+        // 方格 + 组合商品走原来的图标格。条形、以及奖励表的两种预览，底边记在 oddsBottom。
+        boolean comboGrid = mode == Mode.BUY && normalGoods && !previewBar && selected.hasMultipleGoods();
         int rewardEndY = contentY + 66; // 单行组合预览的旧终点；多行时由 drawRewardPreview 回写
+        int oddsBottom = -1; // 条形或奖励表方格的底边；<0 表示这次没画这块
         if (mode == Mode.BUY) {
             g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, contentY + 12, CYAN, true);
             ShopEntry.RewardMode rm = selected.getRewardMode();
             int physicalHintY;
-            if (comboRewardPreview) {
+            if (comboGrid) {
                 rewardEndY = drawRewardPreview(g, cx, contentY + 24, selected.getGoodsList(), amount, detailInnerW, mx, hoverMy);
                 physicalHintY = rewardEndY;
+            } else if (normalGoods && previewBar) {
+                g.drawString(this.font, "§6预计获得:", cx, contentY + 24, GOLD, true);
+                oddsBottom = drawGoodsBars(g, cx, contentY + 36, selected.getGoodsList(), amount, detailInnerW, mx, hoverMy);
+                physicalHintY = oddsBottom;
+            } else if (normalGoods) {
+                g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计获得: §e" + formatBig(total) + " §7个", costTrimW), cx, contentY + 24, GREEN, true);
+                physicalHintY = contentY + 36;
             } else {
                 String getLine = switch (rm) {
-                    case CHOICE -> "§7预计获得: §d自选奖励 §7（购买前先选 1 项）";
-                    case RANDOM -> "§7预计获得: §d随机奖励 §7（从 " + selected.getRewardPool().size() + " 项中按权重抽 1）";
-                    case ALL -> "§7预计获得: §d全部奖励 §7（一次交付 " + selected.getRewardPool().size() + " 项全部）";
+                    case CHOICE -> "§7预计获得: §d自选 1 项";
+                    case RANDOM -> "§7预计获得: §d按下方概率随机 1 项";
+                    case ALL -> "§7预计获得: §d以下全部都给";
                     case FTBQ -> switch (selected.getFtbqSubMode()) {
-                        case CHOICE -> "§7预计获得: §9FTBQ表·自选 §7（购买前先选 1 项）";
-                        case ALL -> "§7预计获得: §9FTBQ表·全部 §7（一次交付表内所有物品奖励）";
-                        default -> "§7预计获得: §9FTBQ表·随机 §7（按表内权重随机抽取）";
+                        case CHOICE -> "§7预计获得: §9FTBQ 自选 1 项";
+                        case ALL -> "§7预计获得: §9FTBQ 全部物品";
+                        default -> "§7预计获得: §9FTBQ 按下方概率随机";
                     };
                     default -> "§7预计获得: §e" + formatBig(total) + " §7个";
                 };
                 g.drawString(this.font, GuiRenderUtil.trimText(this.font, getLine, costTrimW), cx, contentY + 24, GREEN, true);
-                physicalHintY = contentY + 36;
+                oddsBottom = previewBar
+                        ? drawRewardOdds(g, cx, contentY + 36, selected, detailInnerW, mx, hoverMy)
+                        : drawRewardOddsGrid(g, cx, contentY + 36, selected, detailInnerW, mx, hoverMy);
+                physicalHintY = oddsBottom;
             }
             if (dcost.hasPhysical()) g.drawString(this.font, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, physicalHintY, GRAY, true);
         } else if (selected.hasMultipleGoods()) {
@@ -2749,7 +2762,9 @@ public class ShopScreen extends ScaledScreen {
         }
 
         maybeRequestCostPreview(dcost);
-        int costPreviewY = comboRewardPreview ? rewardEndY + 14 : contentY + 50;
+        int costPreviewY = comboGrid ? rewardEndY + 14
+                : oddsBottom >= 0 ? (dcost.hasPhysical() ? oddsBottom + 14 : oddsBottom + 4)
+                : contentY + 50;
         int cursorY = drawCostPreview(g, cx, costPreviewY, dcost, amount, detailInnerW, py + viewportH + 2048, mx, hoverMy);
         contentEndY = Math.max(contentEndY, cursorY);
         int actionY = cursorY + 2;
@@ -2873,7 +2888,7 @@ public class ShopScreen extends ScaledScreen {
         boolean submissionsSatisfiedClient = !submissionBtnVisible && !stageSubmissionBtnVisible;
         boolean canTrade = mode == Mode.BUY
                 ? (canAffordClient(dcost, amount) && prereqSatisfiedClient && submissionsSatisfiedClient) // dcost 已含限时折扣+会员折扣（BUY 分支同一个值）
-                : (!selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
+                : (!selected.getCost().isEmpty() && !selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
                     && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, detailInnerW, 20);
         renderButton(g, cx, btnY, detailInnerW, 20, btnHover,
@@ -3334,6 +3349,10 @@ public class ShopScreen extends ScaledScreen {
                 }
                 if (mode == Mode.BUY && !selected.allowsBuy()) {
                     showMessage(Component.literal("§c[山海商店] 该商品仅允许出售，不能购买"));
+                    return true;
+                }
+                if (mode == Mode.SELL && selected.getCost().isEmpty()) {
+                    showMessage(Component.literal("§c[山海商店] 免费商品不能出售"));
                     return true;
                 }
                 if (mode == Mode.SELL && !selected.allowsSell()) {
@@ -4087,13 +4106,34 @@ public class ShopScreen extends ScaledScreen {
         } else if (cell.item != null && !cell.item.isEmpty()) {
             g.renderItem(cell.item, x + 2, y + 2);
         }
-        String prefix = cell.have == null ? "§f" : (cell.have.compareTo(cell.need) >= 0 ? "§a" : "§c");
-        g.drawCenteredString(this.font, prefix + cell.amount, x + 10, y + 22, WHITE);
+        g.drawCenteredString(this.font, costAmountColor(cell) + cell.amount, x + 10, y + 22, WHITE);
+    }
+
+    /** 够=绿，不够=红，拥有量还没同步回来=白。方格和条形共用。 */
+    private static String costAmountColor(PreviewCell cell) {
+        if (cell.have == null) return "§f";
+        return cell.have.compareTo(cell.need) >= 0 ? "§a" : "§c";
+    }
+
+    private void applyCostHover(PreviewCell cell) {
+        if (cell.item != null && !cell.item.isEmpty()) {
+            previewHoverStack = cell.item;
+            previewHoverName = "§7需要: §f" + cell.exact;
+        } else {
+            previewHoverName = "§f" + cell.name + " §7×" + cell.exact;
+        }
+        if (cell.have == null) {
+            previewHoverExtra = "§7库存核对中…";
+        } else if (cell.have.compareTo(cell.need) >= 0) {
+            previewHoverExtra = "§a拥有: " + groupBig(cell.have);
+        } else {
+            previewHoverExtra = "§c拥有: " + groupBig(cell.have) + " §7(缺 " + groupBig(cell.need.subtract(cell.have)) + ")";
+        }
     }
 
     /**
-     * 图形化花费预览：一排图标槽（货币/物品真图标、流体贴图、星火★）+ 数量，超宽换行、超界省略。
-     * 数量按 amount（购买次数）展开；格子颜色标出是否够（绿/红），未知（加载中）为白。
+     * 图形化花费预览。方格是图标槽 + 槽下数量；条形是名称列表 + 右侧数量。两者都跟「获取预览模式」走。
+     * 数量按购买次数展开；绿/红/白标出是否够（未同步为白）。超界省略。
      * @return 预览区结束后的 y（供描述接续）。悬停格把本地化名 + 拥有/缺少写入 {@link #previewHoverName}/{@link #previewHoverExtra}。
      */
     private int drawCostPreview(GuiGraphics g, int x, int y, ShopCost cost, long times, int maxW, int maxBottom, int mx, int my) {
@@ -4103,6 +4143,9 @@ public class ShopScreen extends ScaledScreen {
         if (cells.isEmpty()) {
             g.drawString(this.font, "§8免费", x, sy, GRAY, true);
             return sy + 12;
+        }
+        if (ClientShopUiSettings.rewardPreviewBar()) {
+            return drawCostBars(g, x, sy, cells, maxW, maxBottom, mx, my);
         }
         int pitchX = 24, pitchY = 32;
         int perRow = Math.max(1, (maxW + 2) / pitchX);
@@ -4119,24 +4162,45 @@ public class ShopScreen extends ScaledScreen {
             PreviewCell cell = cells.get(i);
             boolean hv = GuiRenderUtil.isHovering(mx, my, sx, syy, 20, 20);
             drawPreviewSlot(g, sx, syy, cell, hv);
-            if (hv) {
-                if (cell.item != null && !cell.item.isEmpty()) {
-                    previewHoverStack = cell.item;
-                    previewHoverName = "§7需要: §f" + cell.exact;
-                } else {
-                    previewHoverName = "§f" + cell.name + " §7×" + cell.exact;
-                }
-                if (cell.have == null) {
-                    previewHoverExtra = "§7库存核对中…";
-                } else if (cell.have.compareTo(cell.need) >= 0) {
-                    previewHoverExtra = "§a拥有: " + groupBig(cell.have);
-                } else {
-                    previewHoverExtra = "§c拥有: " + groupBig(cell.have) + " §7(缺 " + groupBig(cell.need.subtract(cell.have)) + ")";
-                }
-            }
+            if (hv) applyCostHover(cell);
             endY = syy + pitchY;
         }
         return endY;
+    }
+
+    /**
+     * 花费预览的条形。版式跟获得预览的条形一样（图标 + 名称 + 右侧数量），
+     * 数量颜色仍表示够不够。花费没有概率。
+     */
+    private int drawCostBars(GuiGraphics g, int x, int y, java.util.List<PreviewCell> cells, int maxW, int maxBottom, int mx, int my) {
+        int rowH = 20;
+        int end = y;
+        for (int i = 0; i < cells.size(); i++) {
+            int ry = y + i * rowH;
+            if (ry + rowH > maxBottom) {
+                g.drawString(this.font, "§7… 还有 " + (cells.size() - i) + " 项", x, ry + 2, GRAY, true);
+                return ry + 12;
+            }
+            PreviewCell cell = cells.get(i);
+            boolean hv = GuiRenderUtil.isHovering(mx, my, x, ry, maxW, rowH);
+            if (hv) g.fill(x, ry, x + maxW, ry + rowH - 1, 0x33FFFFFF);
+            if (cell.spark) {
+                g.drawCenteredString(this.font, "§e★", x + 10, ry + 6, WHITE);
+            } else if (cell.fluid != null) {
+                renderFluidIcon(g, x + 2, ry + 2, 16, cell.fluid);
+            } else if (cell.item != null && !cell.item.isEmpty()) {
+                g.renderItem(cell.item, x + 2, ry + 2);
+            }
+            boolean fluid = cell.fluid != null;
+            String qty = costAmountColor(cell) + (fluid ? cell.amount : "×" + cell.amount);
+            int qtyW = this.font.width(qty);
+            int nameMax = Math.max(8, maxW - 22 - qtyW - 2);
+            g.drawString(this.font, "§f" + GuiRenderUtil.trimText(this.font, cell.name, nameMax), x + 22, ry + 6, WHITE, true);
+            g.drawString(this.font, qty, x + maxW - qtyW, ry + 6, WHITE, true);
+            if (hv) applyCostHover(cell);
+            end = ry + rowH;
+        }
+        return end;
     }
 
     /**
@@ -4236,6 +4300,287 @@ public class ShopScreen extends ScaledScreen {
             endY = syy + 30;
         }
         return endY;
+    }
+
+    /**
+     * 普通商品的条形预览。版式跟奖励表清单一样（图标 + 名称 + 右侧数字），
+     * 右侧是获得数量（已乘购买次数），不是概率。
+     * @return 清单结束后的 y
+     */
+    private int drawGoodsBars(GuiGraphics g, int x, int y, List<ShopEntry.GoodsStack> goods, long times, int maxW, int mx, int my) {
+        java.util.List<RewardCell> cells = goodsRewardCells(goods, times);
+        if (cells.isEmpty()) {
+            g.drawString(this.font, "§8无", x, y, GRAY, true);
+            return y + 12;
+        }
+        int rowH = 20;
+        int end = y;
+        for (int i = 0; i < cells.size(); i++) {
+            RewardCell cell = cells.get(i);
+            int ry = y + i * rowH;
+            boolean hv = GuiRenderUtil.isHovering(mx, my, x, ry, maxW, rowH);
+            if (hv) g.fill(x, ry, x + maxW, ry + rowH - 1, 0x33FFFFFF);
+            if (cell.icons() != null && !cell.icons().isEmpty()) {
+                renderIconComposite(g, cell.icons(), x, ry);
+            }
+            boolean fluid = cell.amount().endsWith("mB");
+            String qty = "§e" + (fluid ? cell.amount() : "×" + cell.amount());
+            int qtyW = this.font.width(qty);
+            int nameMax = Math.max(8, maxW - 22 - qtyW - 2);
+            g.drawString(this.font, "§f" + GuiRenderUtil.trimText(this.font, cell.name(), nameMax), x + 22, ry + 6, WHITE, true);
+            g.drawString(this.font, qty, x + maxW - qtyW, ry + 6, WHITE, true);
+            if (hv) {
+                if (cell.tip() != null && !cell.tip().isEmpty()) {
+                    previewHoverStack = cell.tip();
+                    previewHoverName = "§7数量: §f" + cell.exact();
+                } else {
+                    previewHoverName = "§f" + cell.name();
+                    previewHoverExtra = "§7数量: §f" + cell.exact();
+                }
+            }
+            end = ry + rowH;
+        }
+        return end;
+    }
+
+    /**
+     * 奖励表的方格预览：图标格，格子下方写概率（全部模式写「必得」）。
+     * 自选的百分比仍是表内权重，格子上方注明。
+     * @return 格子区结束后的 y
+     */
+    private int drawRewardOddsGrid(GuiGraphics g, int x, int y, ShopEntry entry, int maxW, int mx, int my) {
+        List<RewardOddsLine> lines = rewardOddsLines(entry);
+        if (lines == null) {
+            g.drawString(this.font, "§c奖励表未同步或不存在", x, y, DEEP_RED, true);
+            return y + 12;
+        }
+        if (lines.isEmpty()) {
+            g.drawString(this.font, "§8奖励表是空的", x, y, GRAY, true);
+            return y + 12;
+        }
+        if (rewardOddsChoice(entry)) {
+            g.drawString(this.font, "§8百分比为表内权重", x, y, GRAY, true);
+            y += 10;
+        }
+        int pitchX = 40;
+        int pitchY = 32;
+        int perRow = Math.max(1, (maxW + 2) / pitchX);
+        int endY = y;
+        for (int i = 0; i < lines.size(); i++) {
+            int col = i % perRow;
+            int row = i / perRow;
+            int sx = x + col * pitchX + 1;
+            int syy = y + row * pitchY;
+            RewardOddsLine line = lines.get(i);
+            boolean hv = GuiRenderUtil.isHovering(mx, my, sx, syy, 20, 30);
+            EditorWidgets.checkerSlot(g, sx, syy, hv);
+            boolean hasIcon = line.icon() != null && !line.icon().isEmpty();
+            if (hasIcon) {
+                g.renderItem(line.icon(), sx + 2, syy + 2);
+                g.renderItemDecorations(this.font, line.icon(), sx + 2, syy + 2);
+            } else {
+                g.drawCenteredString(this.font, "§8?", sx + 10, syy + 6, GRAY);
+            }
+            String chance = (line.deliverable() ? "§e" : "§8") + line.chance();
+            g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, chance, pitchX - 2), sx + 10, syy + 22, WHITE);
+            if (hv) {
+                String odds = "§7概率: §e" + line.chance();
+                if (!line.deliverable()) odds += " §c不发放";
+                String qty = line.count().isEmpty() ? "" : "§7数量: §f" + line.count();
+                if (hasIcon) {
+                    previewHoverStack = line.icon();
+                    previewHoverName = qty.isEmpty() ? odds : qty;
+                    previewHoverExtra = qty.isEmpty() ? (line.deliverable() ? null : "§c商店不发放此项") : odds;
+                } else {
+                    previewHoverName = "§f" + line.name();
+                    previewHoverExtra = odds;
+                }
+            }
+            endY = syy + pitchY;
+        }
+        return endY;
+    }
+
+    /**
+     * 奖励表一行：图标 + 名称 + 数量区间 + 玩家可见的概率文案。
+     * {@code chance} 不含颜色码。{@code deliverable}=false 表示 FTBQ 表里的非物品奖励，商店抽到后不发放。
+     */
+    private record RewardOddsLine(ItemStack icon, String name, String count, String chance, boolean deliverable) {}
+
+    /**
+     * 详情页奖励表清单。本地池与 FTBQ 表都在这里把「有什么、多少、概率多少」画出来。
+     * 随机模式的百分比跟 FTBQ 奖励表悬浮一致（{@code WeightedReward.chanceString}，空权重不计入）。
+     * 全部模式每一项都是必得；自选模式百分比只是表内权重占比，真正给哪一项由玩家点选。
+     * @return 清单结束后的 y
+     */
+    private int drawRewardOdds(GuiGraphics g, int x, int y, ShopEntry entry, int maxW, int mx, int my) {
+        List<RewardOddsLine> lines = rewardOddsLines(entry);
+        if (lines == null) {
+            g.drawString(this.font, "§c奖励表未同步或不存在", x, y, DEEP_RED, true);
+            return y + 12;
+        }
+        if (lines.isEmpty()) {
+            g.drawString(this.font, "§8奖励表是空的", x, y, GRAY, true);
+            return y + 12;
+        }
+        boolean choice = rewardOddsChoice(entry);
+        if (choice) {
+            g.drawString(this.font, "§8百分比为表内权重", x, y, GRAY, true);
+            y += 10;
+        } else if (!rewardOddsAll(entry)) {
+            g.drawString(this.font, "§8百分比为单次抽取", x, y, GRAY, true);
+            y += 10;
+        }
+        int rowH = 18;
+        int end = y;
+        for (int i = 0; i < lines.size(); i++) {
+            RewardOddsLine line = lines.get(i);
+            int ry = y + i * rowH;
+            boolean hv = GuiRenderUtil.isHovering(mx, my, x, ry, maxW, rowH);
+            if (hv) g.fill(x, ry, x + maxW, ry + rowH - 1, 0x33FFFFFF);
+            boolean hasIcon = line.icon() != null && !line.icon().isEmpty();
+            if (hasIcon) {
+                g.renderItem(line.icon(), x, ry);
+                g.renderItemDecorations(this.font, line.icon(), x, ry);
+            }
+            String chance = (line.deliverable() ? "§e" : "§8") + line.chance();
+            String count = line.count().isEmpty() ? "" : "§7" + line.count();
+            int chanceW = this.font.width(chance);
+            int countW = count.isEmpty() ? 0 : this.font.width(count) + 2;
+            int iconW = hasIcon ? 18 : 0;
+            int nameMax = Math.max(8, maxW - iconW - countW - chanceW - 2);
+            String name = (line.deliverable() ? "§f" : "§8") + GuiRenderUtil.trimText(this.font, line.name(), nameMax);
+            int nameW = this.font.width(name);
+            g.drawString(this.font, name, x + iconW, ry + 4, WHITE, true);
+            if (!count.isEmpty()) g.drawString(this.font, count, x + iconW + nameW + 2, ry + 4, GRAY, true);
+            g.drawString(this.font, chance, x + maxW - chanceW, ry + 4, WHITE, true);
+            if (hv) {
+                String qty = line.count().isEmpty() ? "" : "§7数量: §f" + line.count();
+                String odds = "§7概率: §e" + line.chance();
+                if (!line.deliverable()) odds += " §c不发放";
+                if (hasIcon) {
+                    previewHoverStack = line.icon();
+                    previewHoverName = qty.isEmpty() ? odds : qty;
+                    previewHoverExtra = qty.isEmpty() ? (line.deliverable() ? null : "§c商店不发放此项") : odds;
+                } else {
+                    previewHoverName = "§f" + line.name();
+                    previewHoverExtra = odds;
+                }
+            }
+            end = ry + rowH;
+        }
+        return end;
+    }
+
+    /** 自选（本地池或 FTBQ 子模式）时，百分比不是抽取概率。 */
+    private static boolean rewardOddsChoice(ShopEntry entry) {
+        if (entry.getRewardMode() == ShopEntry.RewardMode.CHOICE) return true;
+        return entry.getRewardMode() == ShopEntry.RewardMode.FTBQ
+                && entry.getFtbqSubMode() == ShopEntry.RewardMode.CHOICE;
+    }
+
+    private static boolean rewardOddsAll(ShopEntry entry) {
+        if (entry.getRewardMode() == ShopEntry.RewardMode.ALL) return true;
+        return entry.getRewardMode() == ShopEntry.RewardMode.FTBQ
+                && entry.getFtbqSubMode() == ShopEntry.RewardMode.ALL;
+    }
+
+    /**
+     * 奖励表清单。FTBQ 表在客户端还没同步到时返回 null（跟「表是空的」区分开）。
+     */
+    private List<RewardOddsLine> rewardOddsLines(ShopEntry entry) {
+        if (entry.getRewardMode() == ShopEntry.RewardMode.FTBQ) return ftbqOddsLines(entry);
+        return localOddsLines(entry);
+    }
+
+    private static List<RewardOddsLine> localOddsLines(ShopEntry entry) {
+        List<ShopEntry.RewardOption> pool = entry.getRewardPool();
+        float total = 0f;
+        for (int i = 0; i < pool.size(); i++) total += pool.get(i).weight();
+        boolean all = entry.getRewardMode() == ShopEntry.RewardMode.ALL;
+        List<RewardOddsLine> lines = new ArrayList<>(pool.size());
+        for (int i = 0; i < pool.size(); i++) {
+            ShopEntry.RewardOption opt = pool.get(i);
+            ItemStack icon = opt.item().copy();
+            if (icon.getCount() != 1) icon.setCount(1);
+            String count = opt.minCount() == opt.maxCount() ? "×" + opt.minCount() : "×" + opt.minCount() + "-" + opt.maxCount();
+            String chance = all ? "必得" : ftbqChance(opt.weight(), total);
+            lines.add(new RewardOddsLine(icon, icon.getHoverName().getString(), count, chance, true));
+        }
+        return lines;
+    }
+
+    /** @return null 表示表还没同步到客户端，或 ID 对不上 */
+    private List<RewardOddsLine> ftbqOddsLines(ShopEntry entry) {
+        dev.ftb.mods.ftbquests.quest.loot.RewardTable table = clientFtbqTable(entry);
+        if (table == null) return null;
+        float total = table.getTotalWeight(false);
+        boolean all = rewardOddsAll(entry);
+        java.util.List<dev.ftb.mods.ftbquests.quest.loot.WeightedReward> rewards = table.getWeightedRewards();
+        List<RewardOddsLine> lines = new ArrayList<>(rewards.size());
+        for (int i = 0; i < rewards.size(); i++) {
+            dev.ftb.mods.ftbquests.quest.loot.WeightedReward wr = rewards.get(i);
+            dev.ftb.mods.ftbquests.quest.reward.Reward reward = wr.getReward();
+            boolean item = reward instanceof dev.ftb.mods.ftbquests.quest.reward.ItemReward;
+            ItemStack icon = ItemStack.EMPTY;
+            String name = reward.getTitle().getString();
+            String count = "";
+            if (item) {
+                dev.ftb.mods.ftbquests.quest.reward.ItemReward ir = (dev.ftb.mods.ftbquests.quest.reward.ItemReward) reward;
+                ItemStack raw = ir.getItem();
+                if (raw != null && !raw.isEmpty()) {
+                    icon = raw.copy();
+                    if (icon.getCount() != 1) icon.setCount(1);
+                    name = icon.getHoverName().getString();
+                }
+                count = "×" + ir.getButtonText();
+            }
+            String chance = !item ? ftbqChance(wr.getWeight(), total) : (all ? "必得" : ftbqChance(wr.getWeight(), total));
+            lines.add(new RewardOddsLine(icon, name, count, chance, item));
+        }
+        return lines;
+    }
+
+    private static dev.ftb.mods.ftbquests.quest.loot.RewardTable clientFtbqTable(ShopEntry entry) {
+        String id = entry.getFtbqTableId();
+        if (id == null || id.isEmpty()) return null;
+        dev.ftb.mods.ftbquests.client.ClientQuestFile file = dev.ftb.mods.ftbquests.client.ClientQuestFile.INSTANCE;
+        if (file == null) return null;
+        long code = dev.ftb.mods.ftbquests.quest.QuestObjectBase.parseCodeString(id);
+        if (code == 0L) return null;
+        return file.getRewardTable(code);
+    }
+
+    /** 与 FTBQ 奖励表悬浮同一套百分比（单次抽取、不含空权重）。 */
+    private static String ftbqChance(float weight, float total) {
+        return dev.ftb.mods.ftbquests.quest.loot.WeightedReward.chanceString(weight, total);
+    }
+
+    /** 网格悬停：把奖励表内容和概率附在商品 tooltip 上，详情页仍是完整清单。 */
+    private void appendRewardOddsTooltip(List<Component> lines, ShopEntry entry) {
+        if (entry.getRewardMode() == ShopEntry.RewardMode.NONE) return;
+        List<RewardOddsLine> odds = rewardOddsLines(entry);
+        lines.add(Component.literal("§7奖励内容:"));
+        if (odds == null) {
+            lines.add(Component.literal("§c奖励表未同步"));
+            return;
+        }
+        if (odds.isEmpty()) {
+            lines.add(Component.literal("§8空"));
+            return;
+        }
+        if (rewardOddsChoice(entry)) lines.add(Component.literal("§8百分比为表内权重，购买时自选"));
+        int limit = 10;
+        int n = Math.min(limit, odds.size());
+        for (int i = 0; i < n; i++) {
+            RewardOddsLine row = odds.get(i);
+            String count = row.count().isEmpty() ? "" : " §7" + row.count();
+            String mark = row.deliverable() ? "" : " §8不发放";
+            lines.add(Component.literal("§f" + row.name() + count + " §e" + row.chance() + mark));
+        }
+        if (odds.size() > limit) {
+            lines.add(Component.literal("§8… 还有 " + (odds.size() - limit) + " 项，详情页可看全部"));
+        }
     }
 
     /** 多元成本紧凑单行（星火/币种/物品/流体）。 */
@@ -4502,6 +4847,8 @@ public class ShopScreen extends ScaledScreen {
             }
             if (!e.allowsSell()) {
                 lines.add(Component.literal("§7出售回收: §c不可出售"));
+            } else if (e.getCost().isEmpty()) {
+                lines.add(Component.literal("§7出售回收: §c免费商品不可出售"));
             } else if (e.getRewardMode() != ShopEntry.RewardMode.NONE) {
                 lines.add(Component.literal("§7出售回收: §c奖励模式商品不可出售"));
             } else if (e.hasMultipleGoods() || e.getCost().hasPhysical()) {
@@ -4526,6 +4873,7 @@ public class ShopScreen extends ScaledScreen {
                 default -> "固定商品";
             };
             lines.add(Component.literal("§7奖励模式: §d" + rewardLabel));
+            appendRewardOddsTooltip(lines, e);
             if (e.getCost().hasPhysical()) {
                 int itemCount = e.getCost().items().size();
                 int fluidCount = e.getCost().fluids().size();

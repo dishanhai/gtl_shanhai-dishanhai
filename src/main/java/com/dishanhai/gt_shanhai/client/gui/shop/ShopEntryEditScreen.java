@@ -76,6 +76,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     // 多元成本草稿
     private BigInteger spark = BigInteger.ZERO;
     private BigInteger eu = BigInteger.ZERO; // 无线电网 EU 成本（第5通道，gtladditions/gtmthings，见 ShopWirelessEu）
+    private boolean freeGoods; // 真正免费：五通道全空，购买不扣任何东西。出售关闭，避免白扣物品。
     // 币种/物品：真实数量存 coinCounts/itemCounts（long），不再用 ItemStack.count（int，最多到 21 亿就截断，
     // 见反馈——旧版本 fillCost/buildCost 靠 stack.getCount() 存取，超 int 上限的配方悄悄被截断成 2,147,483,647）。
     // ItemStack 本身的 count 固定钉在 1（vanilla count!=1 才画数量角标，钉 1 就不会画出跟真实数量对不上的角标）。
@@ -217,6 +218,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     }
 
     private void fillCost(ShopCost cost) {
+        this.freeGoods = cost.isEmpty();
         this.spark = cost.spark;
         this.eu = cost.eu;
         for (var e : cost.coins.entrySet()) {
@@ -303,6 +305,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
     /** 限时折扣行：紧接周期限购下方，独立于两套限购机制之外的第三套（打折不减次数）。 */
     private int discountY() { return contentY(top + 104); }
     private int sparkY() { return contentY(top + 130); }
+    private int freeBtnX() { return cx() + 150; }
+    private int freeBtnY() { return sparkY() - 12; }
+    private static final int FREE_BTN_W = 56;
+    private static final int FREE_BTN_H = 12;
     private int coinY() { return contentY(top + 148); }
     private int itemY() { return contentY(top + 176); }
     private int fluidY() { return contentY(top + 204); }
@@ -500,6 +506,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         for (EditBox box : boxes) {
             if (box == null) continue;
             boolean visible = !overlayOpen && box.getY() + box.getHeight() >= topBound && box.getY() <= bottomBound;
+            if (freeGoods && (box == sparkBox || box == euBox)) visible = false;
             box.setVisible(visible);
         }
     }
@@ -652,7 +659,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         descArea = new MultiLineTextArea(this.font, descAreaW);
         descArea.setBounds(eb[0] + 8, eb[1] + 20, descAreaW, descAreaH);
         descArea.setValue(liveDesc);
-        descArea.setFocused(descEditorOpen);
+        descArea.setVisible(descEditorOpen);
         linkKeyBox = new EditBox(this.font, cx() + 60, linkKeyY(), 140, 12, Component.literal("别名"));
         linkKeyBox.setMaxLength(32);
         linkKeyBox.setValue(linkKey == null ? "" : linkKey);
@@ -702,6 +709,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         addRenderableWidget(linkToBox);
         addRenderableWidget(nameBox);
         addRenderableWidget(qtyEditBox);
+        addWidget(descArea);
+        if (descEditorOpen) setFocused(descArea);
         repositionEditorWidgets();
     }
 
@@ -856,15 +865,21 @@ public class ShopEntryEditScreen extends ScaledScreen {
         g.drawString(this.font, "§7分钟", discountMinutesBoxX() + DISCOUNT_MINUTES_W + 4, discountY() + 2, GRAY, true);
         g.drawString(this.font, "§8(1-90%；两框都填才生效，保存后重新编辑=按剩余时间续算)", discountHintX(), discountY() + 2, GRAY, true);
 
-        // 成本区
+        // 成本区。免费时五通道全部清空，购买不扣任何东西。
         g.drawString(this.font, "§6成本（五通道可并存）", c, sparkY() - 10, GOLD, true);
-        g.drawString(this.font, "§e★星火:", c, sparkY() + 2, GOLD, true);
-        // EU（无线电网，见 ShopWirelessEu）：星火框右侧同一行，纯钱包型通道，不需要单独占一排
-        g.drawString(this.font, "§d⚡EU:", euLabelX(), sparkY() + 2, GOLD, true);
-        // 币种 / 物品 / 流体 三排
-        drawCostIngredientRow(g, "§7币种", coins, coinCounts, coinY(), 1, mx, my);
-        drawCostIngredientRow(g, "§7物品", items, itemCounts, itemY(), 2, mx, my);
-        drawFluidRow(g, fluidY(), 3, mx, my);
+        drawBtn(g, freeBtnX(), freeBtnY(), FREE_BTN_W, FREE_BTN_H, freeGoods ? "§a免费中" : "§e设为免费", mx, my);
+        if (freeGoods) {
+            g.drawString(this.font, "§a免费：购买不消耗星火、币种、物品、流体、EU", c, sparkY() + 2, GOLD, true);
+            g.drawString(this.font, "§8再点「免费中」可恢复填写成本。免费商品不能出售。", c, sparkY() + 14, GRAY, true);
+        } else {
+            g.drawString(this.font, "§e★星火:", c, sparkY() + 2, GOLD, true);
+            // EU（无线电网，见 ShopWirelessEu）：星火框右侧同一行，纯钱包型通道，不需要单独占一排
+            g.drawString(this.font, "§d⚡EU:", euLabelX(), sparkY() + 2, GOLD, true);
+            // 币种 / 物品 / 流体 三排
+            drawCostIngredientRow(g, "§7币种", coins, coinCounts, coinY(), 1, mx, my);
+            drawCostIngredientRow(g, "§7物品", items, itemCounts, itemY(), 2, mx, my);
+            drawFluidRow(g, fluidY(), 3, mx, my);
+        }
 
         // 描述（框由 super.render 绘制）
         g.drawString(this.font, "§6描述（详情页显示）", c, descY(), GOLD, true);
@@ -991,10 +1006,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private void openDescEditor() {
         catPickerOpen = false;
         if (descArea != null) {
+            descArea.setVisible(true);
             descArea.setValue(description == null ? "" : description);
-            descArea.setFocused(true);
+            setFocused(descArea);
         }
-        setFocused(null); // Screen 级焦点清空：descArea 不接入控件树，靠 keyPressed/charTyped 手动转发
         descEditorOpen = true;
     }
 
@@ -1004,7 +1019,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             description = descArea.getValue();
             if (descBox != null) descBox.setValue(description);
         }
-        if (descArea != null) descArea.setFocused(false);
+        if (descArea != null) descArea.setVisible(false);
         descEditorOpen = false;
         setFocused(null);
     }
@@ -1023,10 +1038,12 @@ public class ShopEntryEditScreen extends ScaledScreen {
             closeDescEditor(true);
             return true;
         }
-        if (descArea != null) descArea.mouseClicked(mx, my);
-        if (!GuiRenderUtil.isHovering(mx, my, r[0], r[1], r[2], r[3])) {
-            closeDescEditor(false);
+        if (descArea != null) descArea.mouseClicked(mx, my, 0);
+        if (GuiRenderUtil.isHovering(mx, my, r[0], r[1], r[2], r[3])) {
+            setFocused(descArea);
+            return true;
         }
+        closeDescEditor(false);
         return true;
     }
 
@@ -1593,9 +1610,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
         int c = cx();
         // 商品排（奖励池接管时禁用，不响应点击）：左键选/重开选择器改数量，右键删（保底留 1 项），点「+」加新项
         if (!goodsLockedByReward() && goodsRowClicked(mx, my, btn)) return true;
-        if (costIngredientRowClicked(coins, coinCounts, coinY(), 1, mx, my, btn, this::openCurrencyPicker, true)) return true;
-        if (costIngredientRowClicked(items, itemCounts, itemY(), 2, mx, my, btn, () -> openMultiPicker(false), false)) return true;
-        if (fluidRowClicked(fluidY(), 3, mx, my, btn)) return true;
+        if (GuiRenderUtil.isHovering(mx, my, freeBtnX(), freeBtnY(), FREE_BTN_W, FREE_BTN_H)) {
+            setFreeGoods(!freeGoods);
+            return true;
+        }
+        if (!freeGoods && costIngredientRowClicked(coins, coinCounts, coinY(), 1, mx, my, btn, this::openCurrencyPicker, true)) return true;
+        if (!freeGoods && costIngredientRowClicked(items, itemCounts, itemY(), 2, mx, my, btn, () -> openMultiPicker(false), false)) return true;
+        if (!freeGoods && fluidRowClicked(fluidY(), 3, mx, my, btn)) return true;
         if (iconRowClicked(iconY(), Math.min(MAX_DISPLAY_ICONS, rowMax()), mx, my, btn)) return true;
         // 奖励模式循环按钮
         if (GuiRenderUtil.isHovering(mx, my, c, rewardModeY(), 56, 14)) {
@@ -1639,25 +1660,20 @@ public class ShopEntryEditScreen extends ScaledScreen {
         }
         if (descEditorOpen) {
             if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) { closeDescEditor(false); return true; }
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_TAB) {
+                if (descArea != null) setFocused(descArea);
+                return true;
+            }
             // Ctrl+回车快速保存关闭；普通回车交给 descArea 当换行处理（真多行编辑区，回车不再等于确认）
             if ((keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER)
                     && net.minecraft.client.gui.screens.Screen.hasControlDown()) {
                 closeDescEditor(true);
                 return true;
             }
-            if (descArea != null) descArea.keyPressed(keyCode);
-            return true;
+            // 交给已聚焦的 descArea。修饰键必须返回 false，输入法才能切中英文。
+            return super.keyPressed(keyCode, scanCode, modifiers);
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
-    }
-
-    @Override
-    public boolean charTyped(char c, int modifiers) {
-        if (descEditorOpen) {
-            if (descArea != null) descArea.charTyped(c);
-            return true;
-        }
-        return super.charTyped(c, modifiers);
     }
 
     @Override
@@ -1667,7 +1683,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             return true;
         }
         if (descEditorOpen) {
-            if (descArea != null) descArea.mouseDragged(mx, my);
+            if (descArea != null) descArea.dragSelect(mx, my);
             return true;
         }
         if (draggingCostRow != 0) {
@@ -1920,6 +1936,21 @@ public class ShopEntryEditScreen extends ScaledScreen {
         return new ShopCost(spark, coinMap, physical, eu);
     }
 
+    /** 打开免费会清空五通道，避免保存时还带着旧花费。关掉后要重新填成本。 */
+    private void setFreeGoods(boolean free) {
+        freeGoods = free;
+        if (!free) return;
+        spark = BigInteger.ZERO;
+        eu = BigInteger.ZERO;
+        coins.clear();
+        coinCounts.clear();
+        items.clear();
+        itemCounts.clear();
+        fluids.clear();
+        if (sparkBox != null) sparkBox.setValue("");
+        if (euBox != null) euBox.setValue("");
+    }
+
     private void submit() {
         if (!catalogSnapshotValid()) {
             showCatalogSnapshotExpired();
@@ -1958,10 +1989,15 @@ public class ShopEntryEditScreen extends ScaledScreen {
             if (p != null) p.displayClientMessage(Component.literal("§c[商店] 商品身份解析失败（FTBQ表里没有物品类奖励？），未保存"), false);
             return;
         }
-        ShopCost cost = buildCost();
+        ShopCost cost = freeGoods ? new ShopCost(BigInteger.ZERO, null, null, BigInteger.ZERO) : buildCost();
+        if (!freeGoods && cost.isEmpty()) {
+            var p = Minecraft.getInstance().player;
+            if (p != null) p.displayClientMessage(Component.literal("§c[商店] 成本不能为空。要免费请点「设为免费」，未保存"), false);
+            return;
+        }
         if (!cost.isValid()) {
             var p = Minecraft.getInstance().player;
-            if (p != null) p.displayClientMessage(Component.literal("§c[商店] 成本不能为空（至少一项星火/币种/物品/流体），未保存"), false);
+            if (p != null) p.displayClientMessage(Component.literal("§c[商店] 成本里有不存在的物品或流体，未保存"), false);
             return;
         }
         String cat = (category == null || category.isBlank()) ? ShopEntry.DEFAULT_CATEGORY : category.trim();

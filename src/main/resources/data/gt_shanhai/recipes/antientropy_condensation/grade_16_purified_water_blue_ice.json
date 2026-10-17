@@ -1,0 +1,49 @@
+{
+  "data": {
+    "euTier": 6
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 32768
+      }
+    ]
+  },
+  "type": "gtceu:antientropy_condensation",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 2000,
+          "value": [
+            {
+              "fluid": "gtceu:grade_16_purified_water"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "minecraft:blue_ice"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:antientropy_condensation/grade_16_purified_water_blue_ice",
+      "defaultEnabled": true
+    }
+  ]
+}

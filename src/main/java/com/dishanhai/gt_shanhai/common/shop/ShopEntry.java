@@ -757,7 +757,7 @@ public class ShopEntry {
         return goods.isEmpty() ? net.minecraft.world.item.Items.AIR : goods.get(0).item();
     }
 
-    /** 商品清单非空、清单内每一项都已在当前注册表中存在（物品查 ITEMS，流体查 FLUIDS） + 成本有效。购买结算拦截靠这个。 */
+    /** 商品清单非空、清单内每一项都在当前注册表中（物品查 ITEMS，流体查 FLUIDS），且成本有效。空成本是免费，也算有效。 */
     public boolean isValid() {
         if (goods.isEmpty() || !cost.isValid()) return false;
         for (GoodsStack g : goods) {
@@ -785,13 +785,13 @@ public class ShopEntry {
     }
 
     /**
-     * 结构合法性：商品清单、成本都至少配置了 1 项，不检查物品是否仍在当前注册表里存在。
+     * 结构合法性：商品清单至少 1 项。成本允许为空（免费商品）。不检查物品是否仍在当前注册表里存在。
      * 用于「要不要把这条目列进分类/网格」的判断——即使商品/成本引用的物品因为对应模组缺失查不到，
      * 条目本身仍算结构合法，要展示出来（走 FTBQ 风格「缺失物品」占位提示玩家/编辑者），
      * 真正拦购买的地方在 {@link #isValid}，两者刻意分开。
      */
     public boolean isStructurallyValid() {
-        return !goods.isEmpty() && !cost.isEmpty();
+        return !goods.isEmpty();
     }
 
     /** 商品清单里是否有任意一项已经不在当前物品/流体注册表（模组被卸载/物品被移除）。仅用于展示判断。 */

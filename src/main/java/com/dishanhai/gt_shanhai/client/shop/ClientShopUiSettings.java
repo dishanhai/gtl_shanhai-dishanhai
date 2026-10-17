@@ -14,6 +14,10 @@ public final class ClientShopUiSettings {
 
     public static final int DEFAULT_CARD_WIDTH = 70;
     public static final int DEFAULT_CARD_HEIGHT = 36;
+    /** 获取预览：方格（图标格）。奖励表格子下方是概率，获得和花费的格子下方是数量。 */
+    public static final String PREVIEW_GRID = "grid";
+    /** 获取预览：条形（名称列表）。奖励表右侧是概率，获得和花费的右侧是数量。 */
+    public static final String PREVIEW_BAR = "bar";
     private static final int MIN_CARD_WIDTH = 48;
     private static final int MAX_CARD_WIDTH = 120;
     private static final int MIN_CARD_HEIGHT = 28;
@@ -26,6 +30,7 @@ public final class ClientShopUiSettings {
     private static boolean loaded;
     private static int cardWidth = DEFAULT_CARD_WIDTH;
     private static int cardHeight = DEFAULT_CARD_HEIGHT;
+    private static String rewardPreview = PREVIEW_GRID;
 
     private ClientShopUiSettings() {}
 
@@ -39,10 +44,22 @@ public final class ClientShopUiSettings {
         return cardHeight;
     }
 
+    /** 详情「预计获得」和「花费预览」用条形名称列表。false 为原来的方格图标。 */
+    public static boolean rewardPreviewBar() {
+        ensureLoaded();
+        return PREVIEW_BAR.equals(rewardPreview);
+    }
+
     public static synchronized void setCardSize(int width, int height) {
+        ensureLoaded();
         cardWidth = clampCardWidth(width);
         cardHeight = clampCardHeight(height);
-        loaded = true;
+        save();
+    }
+
+    public static synchronized void setRewardPreviewBar(boolean bar) {
+        ensureLoaded();
+        rewardPreview = bar ? PREVIEW_BAR : PREVIEW_GRID;
         save();
     }
 
@@ -62,12 +79,16 @@ public final class ClientShopUiSettings {
         loaded = true;
         cardWidth = DEFAULT_CARD_WIDTH;
         cardHeight = DEFAULT_CARD_HEIGHT;
+        rewardPreview = PREVIEW_GRID;
         if (!SETTINGS_FILE.exists()) return;
         try (java.io.Reader reader = new java.io.InputStreamReader(
                 new java.io.FileInputStream(SETTINGS_FILE), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
             if (root.has("cardWidth")) cardWidth = clampCardWidth(root.get("cardWidth").getAsInt());
             if (root.has("cardHeight")) cardHeight = clampCardHeight(root.get("cardHeight").getAsInt());
+            if (root.has("rewardPreview") && PREVIEW_BAR.equals(root.get("rewardPreview").getAsString())) {
+                rewardPreview = PREVIEW_BAR;
+            }
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop_client_ui.json 失败: {}", e.getMessage());
         }
@@ -79,6 +100,7 @@ public final class ClientShopUiSettings {
             JsonObject root = new JsonObject();
             root.addProperty("cardWidth", cardWidth);
             root.addProperty("cardHeight", cardHeight);
+            root.addProperty("rewardPreview", rewardPreview);
             try (OutputStreamWriter writer = new OutputStreamWriter(
                     new FileOutputStream(SETTINGS_FILE), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));

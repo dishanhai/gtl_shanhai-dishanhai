@@ -922,6 +922,7 @@ public final class ShopPurchase {
         // 回收基准必须跟当前买价同口径（限时折扣+会员折扣后的有效价，见 affordAndDeduct:550），
         // 否则限时折扣 > (100-sellRatioPercent)% 期间「折后买入→原价基准卖回」是稳赚的刷钱循环
         ShopCost cost = entry.getEffectiveCost(ShopMembership.discountPercent(server, uuid));
+        if (cost.isEmpty()) return 0L; // 免费商品没有可退回的花费，出售只会白扣物品
         if (cost.hasPhysical()) return 0L; // 含实物成本的商品不支持出售（反向退实物语义不清）
         if (entry.hasMultipleGoods()) return 0L; // 组合商品不支持出售（反向该退哪几种、退多少语义不清）
         Item goods = entry.getGoodsItem();

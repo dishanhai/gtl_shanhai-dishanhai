@@ -19,7 +19,7 @@ import java.util.Map;
  *   <li>{@link #eu}：EU → 玩家绑定的<b>无线电网</b>余额（gtladditions/gtmthings，见 {@link ShopWirelessEu}）</li>
  * </ul>
  * 复用 {@link ExchangeEntry.Ingredient} 承载物品/流体成分。旧 shop.json 的单币条目
- * 由 {@link #singleCoin} 迁移成「1 个币种成分」。
+ * 由 {@link #singleCoin} 迁移成「1 个币种成分」。五条通道都为空是免费商品：购买不扣任何东西。
  */
 public final class ShopCost {
 
@@ -66,9 +66,11 @@ public final class ShopCost {
         return spark.signum() <= 0 && coins.isEmpty() && physical.isEmpty() && eu.signum() <= 0;
     }
 
-    /** 有效性：非空 + 所有币种/物品/流体 ID 在注册表中存在（星火除外，无对应物品）。 */
+    /**
+     * 有效性：空成本是免费商品，直接有效。有成分时，币种/物品/流体 ID 必须在注册表中存在
+     * （星火除外，无对应物品）。
+     */
     public boolean isValid() {
-        if (isEmpty()) return false;
         for (ResourceLocation id : coins.keySet()) {
             if (!ForgeRegistries.ITEMS.containsKey(id)) return false;
         }

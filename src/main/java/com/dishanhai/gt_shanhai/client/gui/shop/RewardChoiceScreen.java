@@ -96,9 +96,11 @@ public class RewardChoiceScreen extends ScaledScreen {
         g.fill(left + 5, top + 18, left + panelWidth - 5, top + panelHeight - 5, PANEL_INNER);
 
         g.drawString(this.font, "§6选择奖励", left + 8, top + 5, GOLD, true);
-        g.drawString(this.font, "§7" + GuiRenderUtil.trimText(this.font, entry.goodsDisplayName(), panelWidth - 16), left + 8, top + 14, GRAY, true);
+        g.drawString(this.font, "§7" + GuiRenderUtil.trimText(this.font, entry.goodsDisplayName() + "  §8百分比为表内权重", panelWidth - 16), left + 8, top + 14, GRAY, true);
 
         List<ShopEntry.RewardOption> pool = pool();
+        float totalWeight = 0f;
+        for (int w = 0; w < pool.size(); w++) totalWeight += pool.get(w).weight();
         int visible = visibleRows();
         int maxScroll = maxScroll();
         if (scroll > maxScroll) scroll = maxScroll;
@@ -114,11 +116,15 @@ public class RewardChoiceScreen extends ScaledScreen {
             g.renderItem(st, listX + 1, ry + 1);
             g.renderItemDecorations(this.font, st, listX + 1, ry + 1);
             String nm = st.getHoverName().getString();
-            String amount = opt.minCount() == opt.maxCount() ? "§7x" + opt.minCount()
-                    : "§7" + opt.minCount() + "-" + opt.maxCount() + "x";
+            String amount = opt.minCount() == opt.maxCount() ? "§7×" + opt.minCount()
+                    : "§7×" + opt.minCount() + "-" + opt.maxCount();
+            String chance = "§e" + dev.ftb.mods.ftbquests.quest.loot.WeightedReward.chanceString(opt.weight(), totalWeight);
+            String right = amount + " " + chance;
+            int rightW = this.font.width(right);
             String prefix = idx == selected ? "§a✔ §f" : "§f";
-            g.drawString(this.font, prefix + GuiRenderUtil.trimText(this.font, nm, listW - 22) + " " + amount,
+            g.drawString(this.font, prefix + GuiRenderUtil.trimText(this.font, nm, Math.max(8, listW - 22 - rightW - 4)),
                     listX + 22, ry + 6, WHITE, true);
+            g.drawString(this.font, right, listX + listW - rightW, ry + 6, WHITE, true);
         }
         if (pool.size() > visible) {
             g.drawString(this.font, "§8" + (scroll + 1) + "-" + Math.min(scroll + visible, pool.size()) + "/" + pool.size()

@@ -71,6 +71,10 @@ class SelectedRecipePatternTest {
         assertFalse(items.contains("SelectedRecipePattern.Tooltip"));
         assertTrue(lang.contains("tooltip.gt_shanhai.selected_recipe_pattern.open"));
         assertTrue(lang.contains("gui.gt_shanhai.selected_recipe_pattern.shown"));
+        assertTrue(lang.contains("gui.gt_shanhai.selected_recipe_pattern.group_generated"));
+        assertTrue(lang.contains("gui.gt_shanhai.selected_recipe_pattern.group_manual"));
+        assertTrue(behavior.contains("group_generated"));
+        assertTrue(behavior.contains("group_manual"));
     }
 
     @Test
@@ -109,6 +113,18 @@ class SelectedRecipePatternTest {
         assertEquals("gtceu:lathe", removed.recipeType());
         assertFalse(root.contains(SelectedRecipePattern.MANUAL_TAG));
         assertEquals("yes", root.getString("keep"));
+    }
+
+    @Test
+    void generatedIdsStayApartFromManualInserts() {
+        CompoundTag root = SelectedRecipePattern.write(new SelectedRecipePattern.Contents(
+                1, 1, "gtceu:lathe", List.of("gtceu:lathe/a", "gtceu:lathe/b")));
+        SelectedRecipePattern.syncManualRecipes(root,
+                List.of("gtceu:cutter/c"), List.of("gtceu:cutter"));
+        assertEquals(List.of("gtceu:lathe/a", "gtceu:lathe/b"), SelectedRecipePattern.generatedRecipeIds(root));
+        assertEquals(List.of("gtceu:cutter/c"), SelectedRecipePattern.manualRecipeIds(root));
+        assertEquals(List.of(), SelectedRecipePattern.generatedRecipeIds(null));
+        assertEquals(List.of(), SelectedRecipePattern.manualRecipeIds(null));
     }
 
     @Test

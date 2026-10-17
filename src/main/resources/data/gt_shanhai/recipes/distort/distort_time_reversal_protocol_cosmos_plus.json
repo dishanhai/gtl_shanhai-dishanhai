@@ -1,0 +1,1416 @@
+{
+  "data": {
+    "euTier": 14,
+    "ebf_temp": 0
+  },
+  "duration": 240,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 140799765315555
+      }
+    ]
+  },
+  "type": "gtceu:distort",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1310012,
+          "value": [
+            {
+              "fluid": "gtceu:helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 131000,
+          "value": [
+            {
+              "fluid": "gtceu:grade_16_purified_water"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 4
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "gtceu:eye_of_harmony"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:time_reversal_protocol"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 256000,
+          "value": [
+            {
+              "fluid": "gtceu:spacetime"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1310720,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1310720,
+          "value": [
+            {
+              "fluid": "gtceu:quark_gluon_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1310720,
+          "value": [
+            {
+              "fluid": "gtceu:heavy_quark_degenerate_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:neutronium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:heavy_lepton_mixture"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:nitrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:oxygen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:fluorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:chlorine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:bromine"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:neon"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:argon"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:krypton"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:xenon"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:radon"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:mercury"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:deuterium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:tritium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:helium_3"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:unknowwater"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 13107200,
+          "value": [
+            {
+              "fluid": "gtceu:uu_matter"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:carbon_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:phosphorus_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:sulfur_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:selenium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:iodine_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:boron_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:silicon_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:germanium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:arsenic_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:antimony_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:tellurium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:astatine_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:aluminium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:gallium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:indium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:tin_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:thallium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:lead_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:bismuth_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:polonium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:titanium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:vanadium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:chromium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:manganese_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:iron_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:cobalt_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:nickel_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:copper_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:zinc_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:zirconium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:niobium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:molybdenum_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:technetium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:ruthenium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:rhodium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:palladium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:silver_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:cadmium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:hafnium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:tantalum_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:tungsten_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:rhenium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:osmium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:iridium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:platinum_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:gold_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:beryllium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:magnesium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:calcium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:strontium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:barium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:radium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:yttrium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:lithium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:sodium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:potassium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:rubidium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:caesium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:francium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:scandium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:actinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:thorium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:protactinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:uranium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:neptunium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:plutonium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:americium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:curium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:berkelium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:californium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:einsteinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:fermium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:mendelevium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:nobelium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:lawrencium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:lanthanum_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:cerium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:praseodymium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:neodymium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:promethium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:samarium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:europium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:gadolinium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:terbium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:dysprosium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:holmium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:erbium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:thulium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:ytterbium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:lutetium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:rutherfordium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:dubnium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:seaborgium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:bohrium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:hassium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:meitnerium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:darmstadtium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:roentgenium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:copernicium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:nihonium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:flerovium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:moscovium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:livermorium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:tennessine_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:oganesson_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:jasper_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:naquadah_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:enriched_naquadah_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:naquadria_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:duranium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:tritanium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:mithril_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:orichalcum_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:enderium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:adamantine_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:vibranium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:infuscolium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:taranium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:draconium_dust"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 131072,
+          "ingredient": {
+            "item": "gtceu:starmetal_dust"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:distort/distort_time_reversal_protocol_cosmos_plus",
+      "defaultEnabled": true
+    }
+  ]
+}

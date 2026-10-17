@@ -411,6 +411,10 @@ public class ShopActionPacket {
             player.sendSystemMessage(Component.literal("§c[山海商店] 自选/随机/全部奖励商品不支持出售"));
             return;
         }
+        if (entry.getCost().isEmpty()) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 免费商品不能出售"));
+            return;
+        }
         if (!entry.allowsSell()) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品仅允许购买，不能出售"));
             return;
