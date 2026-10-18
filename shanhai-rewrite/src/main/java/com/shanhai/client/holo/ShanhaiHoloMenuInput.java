@@ -289,7 +289,11 @@ public final class ShanhaiHoloMenuInput {
             final boolean now = ShanhaiHoloMenuState.toggle();
             ShanhaiMod.LOGGER.info("{} holo_menu_toggled_by_item player={} hand={} now={} src={} {}",
                     PREFIX, lp.getGameProfile().getName(), hand, now, source, context);
-        } else if (action == ShanhaiHoloMenuInputRules.ACT_OPEN_EDITOR) {
+        } else if (action == ShanhaiHoloMenuInputRules.ACT_OPEN_EDITOR
+                || action == ShanhaiHoloMenuInputRules.ACT_OPEN_CREATIVE_ITEMS) {
+            // 🆕 2026-10-17：「现实物品」那一格与「配方修改」走【同一条】"请服务端开面板"的路 ——
+            //    客户端只发板号，开哪一个面板由服务端按板子的动作码分派（见 ShanhaiHoloMenuNetwork#onEditorRequest）。
+            //    这样客户端不需要知道"服务端会不会因为没模块而拒绝"，也就不可能画出假象。
             // 🔴 加载期间再点 ⇒ 【不再发包】。除了"同一 tick 只认第一拍"那道闸门，
             //    这里再加一道跨 tick 的闸门：从"点了"到"面板出来"之间那一整段都算加载中。
             if (!ShanhaiHoloMenuPending.begin(boardIndex, System.nanoTime())) {
@@ -323,6 +327,18 @@ public final class ShanhaiHoloMenuInput {
                     PREFIX, ShanhaiHoloMenuPanel.modeName(ShanhaiHoloMenuPanel.MODE_COMMAND),
                     ShanhaiHoloMenuBoards.boardNumber(boardIndex), boardIndex,
                     lp.getGameProfile().getName(), source, context);
+        } else if (action == ShanhaiHoloMenuInputRules.ACT_REALITY_PURGE) {
+            // 🆕 第 1 格「清除实体」——🔴 点一次【直接执行】（本轮把"再点一次确认"那套两拍机制整个删掉）。
+            //    ⚠️ 空手点击同样能触发（与别的板子同一条 decide 真值表：不拿模块才走到这里，
+            //       拿着模块的那一拍在上面被 ACT_TOGGLE_MENU 截走了）。
+            //    执行内容 = 与 /shanhai purge 完全同一段代码：客户端只发那条命令，
+            //    服务端 onCommandRequest 会再查一次"身上有没有模块"，然后跑同一个 ShanhaiPurge.purgeAll。
+            //    🔴 输入侧只留这一条日志（规格点名）：holo_purge_execute board=0 idx=0 player=… cmd=shanhai purge
+            ShanhaiMod.LOGGER.info("{} holo_purge_execute board={} idx={} player={} cmd={}",
+                    PREFIX, boardIndex, boardIndex, lp.getGameProfile().getName(), "shanhai purge");
+            lp.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                    "§c[清除实体] §7已发出抹除指令（服务端还要复核模块）"), true);
+            ShanhaiHoloMenuNetwork.requestCommand("shanhai purge");
         } else {
             // 认不出来的动作码（表里没有的那种）—— 不许静默：这是一条"点了没反应"的唯一痕迹
             ShanhaiMod.LOGGER.warn("{} holo_board_click_unhandled action={} board_idx={} player={} src={} {}",

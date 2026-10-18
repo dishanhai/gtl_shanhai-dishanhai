@@ -718,6 +718,46 @@ public final class ShanhaiItems {
     /** shanhai:world_fragments_creation（创造维度碎片）· 贴图 textures/item/world_fragments_creation.png */
     public static final ItemEntry<Item> WORLD_FRAGMENTS_CREATION = module("world_fragments_creation");
 
+    // ==================================================================
+    // 桶 ⑫ · 🆕 2026-10-17「自己新增物品」的 128 个占位壳（用户点单）
+    //    🔴 id = shanhai:reality_item_1 … _128（1 基，槽位号 = 后缀号）
+    //    🔴 必须在【加载期】注册（1.20.1 注册表冻结后造不出新物品，也没有 DataComponents）
+    //    ⇒ 运行期只改"长相"（显示名/图标/堆叠/稀有度/提示），改的是
+    //       com.shanhai.common.reality.ShanhaiRealityItemTable 那张表，不是物品本身。
+    //    ⚠️ 这一段【必须放在最后一个字段组】，让既有物品的数字 id 一个都不移位（存档安全）。
+    //    ⚠️ 未填名字的槽位【不进创造栏】⇒ JEI 也搜不到（见 ShanhaiCreativeModeTabs#fill）。
+    // ==================================================================
+
+    /** 128 个现实物品壳（下标 0 基；对外 id 后缀 = 下标 + 1）。 */
+    @SuppressWarnings("unchecked")
+    public static final ItemEntry<RealityShellItem>[] REALITY_ITEMS = realityItems();
+
+    /** 建 128 个壳：每个都是普通 {@link Item} + 静态模型（模型 json 见 resources/models/item）。 */
+    private static ItemEntry<RealityShellItem>[] realityItems() {
+        final int n = com.shanhai.common.reality.ShanhaiRealityItemTable.SLOT_COUNT;
+        final ItemEntry<RealityShellItem>[] out = (ItemEntry<RealityShellItem>[]) new ItemEntry<?>[n];
+        for (int i = 0; i < n; i++) {
+            final int slot = i;
+            out[i] = ShanhaiRegistration.REGISTRATE
+                    .item("reality_item_" + (i + 1), props -> new RealityShellItem(slot, props))
+                    .model(NonNullBiConsumer.noop())
+                    .register();
+        }
+        return out;
+    }
+
+    /** 第 {@code index} 号（0 基）现实物品的注册句柄。 */
+    public static ItemEntry<RealityShellItem> realityItem(int index) {
+        final ItemEntry<RealityShellItem>[] all = REALITY_ITEMS;
+        return index >= 0 && index < all.length ? all[index] : null;
+    }
+
+    /** 第 {@code index} 号（0 基）现实物品本体；越界 = {@code null}。 */
+    public static Item realityItemValue(int index) {
+        final ItemEntry<RealityShellItem> e = realityItem(index);
+        return e == null ? null : e.get();
+    }
+
     public static void init() {
         // 静态字段初始化即注册；本方法只为「显式触达类」而存在，不要在别处再塞逻辑。
     }

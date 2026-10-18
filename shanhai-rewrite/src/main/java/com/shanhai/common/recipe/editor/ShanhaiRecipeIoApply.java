@@ -154,6 +154,12 @@ public final class ShanhaiRecipeIoApply {
             ShanhaiMod.LOGGER.error("{} io_apply_unknown_table which={}", PREFIX, which);
             return -1;
         }
+        // 🆕 2026-10-16（用户点单）：**编程电路恒为催化剂（不消耗）**。
+        //    🔴 这里是【活配方】那一侧唯一的漏斗（JSON 表 ⇒ 活 GTRecipe 表的唯一入口）：
+        //       台账重建（ShanhaiRecipeBase.applyIoTo）、新建配方、自检全都经过它。
+        //       规范化逻辑只有一份，见 ShanhaiCircuitCatalyst（那里同时管住落盘漏斗 upsert）。
+        //    ⚠️ 只对 "inputs" 生效 —— 输出侧的 chance==0 是「0% 产出」，不是"不消耗"。
+        ShanhaiCircuitCatalyst.forceInTable(String.valueOf(recipe.id), which, json);
         int written = 0;
         // 🔴 顺序固定：先清空整张表，再按 JSON 里出现的键放回去。
         //    「先清空」是必须的 —— 不这么做的话，用户把某个 capability 的条目删光时，

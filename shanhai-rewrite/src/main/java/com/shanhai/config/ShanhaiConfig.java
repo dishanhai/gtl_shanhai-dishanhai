@@ -110,6 +110,41 @@ public final class ShanhaiConfig {
         /** 见 {@link Ui}。 */
         public ForgeConfigSpec.EnumValue<Ui> editorUi;
 
+        // ═══════════ 🆕 2026-10-17「创始现实修改模块」的三个功能开关（COMMON） ═══════════
+        //
+        // 为什么进 COMMON（= config/shanhai-common.toml）而不是 CLIENT：
+        //   AI 层与攻击端**跑在服务端**（LivingChangeTargetEvent / LivingAttackEvent / ServerTickEvent），
+        //   专用服务端也要读到同一个值 ⇒ 只能进两侧都加载的 COMMON。
+        //   （这与既有 recipe_editor.ui 那一项的存法同源：同一个 spec、同一个 save()，全息设置面板
+        //     本来也是靠 COMMON 读写它 ⇒ 本组三项沿用同一套存储，不另起一套。）
+        //
+        // 🔴 默认值就是用户口径：AI 层**关**（新功能，没开时一个字节都不改世界）、
+        //   攻击端**开**、死而无损**开**。
+
+        /** 🆕 AI 层开关（默认<b>关</b>）。 */
+        public ForgeConfigSpec.BooleanValue guardAiLayer;
+
+        /** 🆕 攻击端开关（默认<b>开</b>）。 */
+        public ForgeConfigSpec.BooleanValue guardAttackSide;
+
+        /** 🆕 死而无损开关（默认<b>开</b>）。 */
+        public ForgeConfigSpec.BooleanValue guardDeathLossless;
+
+        // ═══════════ 🆕 2026-10-17「反击退 ＋ 反挤压」两个开关（COMMON） ═══════════
+        //
+        // 🔴 用户口径（原话）：「我还需要反击退（包括碰撞箱挤压我），这个猫把我扔来扔去的」
+        //                「我不想做拉回，会误伤很多别的 mod 的东西」
+        //    ⇒ 只改速度/标志，一个坐标都不搬；只在"最近 20 tick 内我们确实拦过东西"的窗口里刹车。
+        //
+        // 为什么进 COMMON：判据跑在服务端每 tick（ServerTickEvent END），专用服务端也要读到同一个值
+        //   ⇒ 与上面那三项同源（同一个 spec、同一个 save()）。
+
+        /** 🆕 反击退主开关（默认<b>开</b>）。 */
+        public ForgeConfigSpec.BooleanValue guardKnockback;
+
+        /** 🆕 反击退左下角播报（默认<b>关</b> —— 用户口径「默认不播，避免刷屏」）。 */
+        public ForgeConfigSpec.BooleanValue guardKnockbackBroadcast;
+
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("primordial_omega_engine");
             primordialSphereStyle = builder
@@ -140,6 +175,58 @@ public final class ShanhaiConfig {
                             "COMMON 不跨端同步：单机两侧读的是同一个 config/shanhai-common.toml ⇒ 必然一致",
                             "游戏内改法：/shanhai edit ui ours|his，或全息设置面板里那一格（都会写回本文件）")
                     .defineEnum("ui", Ui.OURS);
+            builder.pop();
+
+            // ============================================================ 🆕 2026-10-17
+            //   [guard_module] —— 「创始现实修改模块」三件功能的开关。
+            //   ⚠️ 整节【追加在末尾】（没有把任何既有项挪位置）；默认值 = 用户拍板的那三个。
+            //   游戏内改法：/shanhai guard ai|attack|death|knockback on|off（写回本文件）。
+            builder.push("guard_module");
+            guardAiLayer = builder
+                    .comment("AI 层开关（默认 false = 关）",
+                            "true  = ①谁也不能把目标设成受保护玩家（LivingChangeTargetEvent 直接取消）",
+                            "        ②每 10 tick 扫一次受保护玩家周围 64 格的生物：目标是他的 ⇒ 目标清空",
+                            "        ③上面命中的生物 setNoAi(true)，并在它的持久数据打标记 shanhai_frozen=true",
+                            "⚠️ 只处理「目标是你」或「被这场开关冻过（带标记）」的生物；没标记的一只都不碰",
+                            "⚠️ 恢复口径：只有把本开关【关掉】时，才扫描带标记的生物把 noAi 还原为 false 并清标记",
+                            "   （不做按时间/距离的自动恢复 —— 用户原话：「noAi 是你关掉这个功能了 ai 才会恢复」）")
+                    .define("ai_layer", false);
+            guardAttackSide = builder
+                    .comment("攻击端开关（默认 true = 开）",
+                            "触发 A：受保护玩家受到攻击（LivingAttackEvent）⇒ 取消伤害后反手抹除攻击者本人",
+                            "         （召唤物/投射物一律不处理；玩家一律不处理）",
+                            "触发 B：/shanhai purge（或全息菜单第 1 块板「清除实体」点一次）⇒ 抹除游戏内所有实体",
+                            "         🔴 安全默认：跳过所有玩家（含自己）与 EntityType.PLAYER，跳过的数量记日志",
+                            "移除阶梯：L1 discard → L2 核实 → L3 setRemoved → L4 发包 → L5 摘实体账 → L6 隔离",
+                            "日志用 purge_channel=L1|L3|L4|L5|L6 分辨是哪一级解决掉的")
+                    .define("attack_side", true);
+            guardDeathLossless = builder
+                    .comment("死而无损开关（默认 true = 开）",
+                            "现有的 die() 拒绝已经让死亡不发生；本项是「万一真的走到死亡」时的兜底：",
+                            "还原 背包+副手+盔甲 / 经验等级与进度 / 位置与朝向 / 饥饿与饱和度 / 药水效果",
+                            "只在开关打开时生效；每还原一次记一行「死而无损：已还原 <哪几项>」")
+                    .define("death_lossless", true);
+            // ============================================================ 🆕 2026-10-17
+            //   反击退 ＋ 反挤压（用户口径：「我还需要反击退（包括碰撞箱挤压我），这个猫把我扔来扔去的」；
+            //   「我不想做拉回，会误伤很多别的 mod 的东西」）⇒ **只改速度/标志，一个坐标都不搬**。
+            guardKnockback = builder
+                    .comment("反击退 / 反挤压开关（默认 true = 开；关掉后本功能完全不动玩家）",
+                            "只管【受保护玩家】（身上带「创始现实修改模块」，或曾经带过）",
+                            "① Entity#hurtMarked == true ⇒ 置 false（原版 ServerEntity#sendChanges 会把它当击退速度发给客户端）",
+                            "② 只有在【我们最近 20 tick 内确实拦过东西】（拦伤害/拒死/补血/拦移除 任一）的窗口里，",
+                            "   且水平速度 hypot(dx,dz) > 0.6 格/tick ⇒ 把 deltaMovement 的 x/z 清零、y 原样保留",
+                            "③ 🔴 不搬人：没有位置快照、没有拉回、没有卡墙回退（用户明确否掉了拉回）",
+                            "豁免（代码里写死的四条）：鞘翅飞行 / 在载具里 / 旁观者 / 刚传送（换维度或复活后 2 tick）",
+                            "为什么阈值是 0.6：走路约 0.2、冲刺约 0.3、跳跃水平约 0.5 格/tick，都低于它 ⇒ 正常移动原样通过",
+                            "为什么窗口只认'我们拦过'：别的 mod 的弹射、跳板、技能推人没有攻击事件 ⇒ 窗口不打开 ⇒ 不会被误伤",
+                            "游戏内改法：/shanhai guard knockback on|off（写回本文件）")
+                    .define("knockback_guard", true);
+            guardKnockbackBroadcast = builder
+                    .comment("反击退是否在左下角（action bar）播报，默认 false = 不播",
+                            "🔴 默认不播：被推的时候每一下都播会刷屏",
+                            "打开后仍然是「每秒最多一行」（沿用守卫那套同类合并口径），且只发给受保护玩家本人",
+                            "⚠️ 本项【不会】把消息发到聊天栏（聊天栏那一路刻意不扩：聊天栏那条路只在拦到事情时才说话）")
+                    .define("knockback_broadcast", false);
             builder.pop();
         }
 

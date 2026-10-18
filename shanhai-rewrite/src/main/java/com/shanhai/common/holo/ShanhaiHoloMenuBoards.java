@@ -70,13 +70,19 @@ public final class ShanhaiHoloMenuBoards {
     /**
      * 板上的<b>中文主标题</b>（渲染器与输入判定的实际显示口径）。
      * <p>顺序 = 环绕档里 index 递增的方向。
+     * <p>🆕 本轮：idx=0 的中文主标题<b>定为「清除实体」</b>（用户点单改名；功能不变，
+     * 还是走 {@code /shanhai purge} 同一段代码，只是板上的字换了）。
      */
     public static final String[] LABEL_ZH = {
-            DISABLED_LABEL_ZH, "配方修改", DISABLED_LABEL_ZH, "命令", "设置"};
+            "清除实体", "配方修改", "现实物品", "命令", "设置"};
 
-    /** 板上的<b>英文副标题</b>。 */
+    /**
+     * 板上的<b>英文副标题</b>。
+     * <p>🆕 本轮：idx=0 用 {@code CLEAR ENTITIES}（用户给的词；英文口径用户还没最终拍板时，
+     * 这一格就是"先按这个写、写进报告待确认"的那一个）。
+     */
     public static final String[] LABEL_EN = {
-            DISABLED_LABEL_EN, "RECIPE EDIT", DISABLED_LABEL_EN, "COMMAND", "SETTINGS"};
+            "CLEAR ENTITIES", "RECIPE EDIT", "REALITY ITEMS", "COMMAND", "SETTINGS"};
 
     /**
      * 五个槽位<b>原本叫</b>什么（{@link #SLOT_ZH}）。
@@ -96,7 +102,7 @@ public final class ShanhaiHoloMenuBoards {
      * <p>⚠️ 以后要再借一格：<b>必须同时改这里</b>（改 {@code LABEL_ZH} 而不登记会被自检当场拦下）。
      */
     public static final java.util.Map<Integer, String> REPURPOSED_ZH =
-            java.util.Map.of(3, "命令");
+            java.util.Map.of(3, "命令", 2, "现实物品", 0, "清除实体");
 
     /** 第 {@code i} 块板<b>应当</b>显示的板上名字（可用 ⇒ 借用名或槽位名；停用 ⇒ 「未启用」）。 */
     public static String expectedLabelOf(int i, boolean enabledHere) {
@@ -110,9 +116,13 @@ public final class ShanhaiHoloMenuBoards {
     /**
      * 哪几块板<b>可用</b>。
      * <p>🔴 2026-10-06 第二次改动：{@link #ENABLED_INDEX}（配方修改）、{@link #SETTINGS_INDEX}（设置）、
-     * {@link #COMMAND_INDEX}（命令）三块可用；idx=0 与 idx=2 仍然「未启用」、点了没反应。
+     * {@link #COMMAND_INDEX}（命令）三块可用。
+     * <p>🆕 2026-10-17 第三次改动：{@link #CREATIVE_ITEMS_INDEX}（现实物品，idx=2）也启用了 ——
+     * 用户点单「入口两条都要：全息菜单第 3 块板（idx=2，现在写着「未启用」）点击 ＋ 指令」。
+     * <p>🆕 2026-10-20 第四次改动：{@link #PURGE_INDEX}（清除实体，idx=0）也启用了 ——
+     * 用户点单「主动触发挂到全息板 idx=0 那一格」⇒ <b>现在五块板全部可用</b>（没有「未启用」了）。
      */
-    public static final boolean[] ENABLED = {false, true, false, true, true};
+    public static final boolean[] ENABLED = {true, true, true, true, true};
 
     /** 「配方修改」那块板的下标 —— <b>唯一能开服务端配方面板</b>的那一块。 */
     public static final int ENABLED_INDEX = 1;
@@ -122,6 +132,20 @@ public final class ShanhaiHoloMenuBoards {
 
     /** 🆕 「命令」那块板的下标（点开是全息命令输入框；执行时以管理员身份发到服务端）。 */
     public static final int COMMAND_INDEX = 3;
+
+    /** 🆕 2026-10-17 「现实物品」那块板的下标（点开是「自己新增物品」面板）—— 就是原来 idx=2 那一格。 */
+    public static final int CREATIVE_ITEMS_INDEX = 2;
+
+    /**
+     * 🆕 <b>「清除实体」那块板的下标（= 0，原来唯一写着「未启用」的那一格）</b>。
+     *
+     * <p>用户点单：把它做成「主动触发抹除」的入口，板上名字叫<b>「清除实体」</b>
+     * （英文副标题 {@code CLEAR ENTITIES}）。🔴 <b>点一次就直接执行</b>（本轮把"再点一次确认"整个去掉了）：
+     * 执行的内容 = 与 {@code /shanhai purge} <b>完全同一段代码</b>
+     * （客户端只发一条命令，服务端跑 {@code ShanhaiPurge#purgeAll}，服务端还会再查一次模块）。
+     * <p>⚠️ 常量名 {@code PURGE_INDEX} / {@code ACTION_REALITY_PURGE} 是历史名（功能码没变、只改了板上的字）。
+     */
+    public static final int PURGE_INDEX = 0;
 
     /** 动作码：这块板什么都不做。 */
     public static final int ACTION_NONE = 0;
@@ -135,9 +159,16 @@ public final class ShanhaiHoloMenuBoards {
     /** 🆕 动作码：打开全息命令输入框（客户端开输入框；命令本身以管理员身份发到服务端执行）。 */
     public static final int ACTION_COMMAND = 3;
 
+    /** 🆕 2026-10-17 动作码：打开「自己新增物品」面板（服务端权威路径，要身上带模块）。 */
+    public static final int ACTION_CREATIVE_ITEMS = 4;
+
+    /** 🆕 动作码：「清除实体」—— 点一次就走与 {@code /shanhai purge} 同一段代码（常量名是历史名）。 */
+    public static final int ACTION_REALITY_PURGE = 5;
+
     /** 每块板的动作码。<b>与 {@link #ENABLED} 必须一致</b>（自检就是查这一条）。 */
     public static final int[] ACTION = {
-            ACTION_NONE, ACTION_RECIPE_EDIT, ACTION_NONE, ACTION_COMMAND, ACTION_HOLO_SETTINGS};
+            ACTION_REALITY_PURGE, ACTION_RECIPE_EDIT, ACTION_CREATIVE_ITEMS, ACTION_COMMAND,
+            ACTION_HOLO_SETTINGS};
 
     /** 本类所有日志行的前缀（便于 grep）。 */
     public static final String PREFIX = "[SHANHAI-HOLO]";
@@ -189,6 +220,45 @@ public final class ShanhaiHoloMenuBoards {
             return false;
         }
         return action != null && index < action.length && action[index] == ACTION_RECIPE_EDIT;
+    }
+
+    /**
+     * 🆕 2026-10-17 <b>服务端那条判据的第二半</b>：这块板能不能开「自己新增物品」面板。
+     *
+     * <p>🔴 与 {@link #canOpenEditor(int)} <b>必须互斥</b>：配方编辑器那一格绝不能被当成
+     * "现实物品"入口放行，反之亦然（自检里有这一条负对照）。门槛（身上带模块）不在这里判 ——
+     * 那需要玩家背包，由调用方（命令 / 全息网络）用
+     * {@code ShanhaiRealityItemTable#playerHasModule} 判。
+     */
+    public static boolean canOpenCreativeItems(int index) {
+        return canOpenCreativeItemsTable(ENABLED, ACTION, index);
+    }
+
+    /** {@link #canOpenCreativeItems(int)} 的参数化版（负对照用）。 */
+    public static boolean canOpenCreativeItemsTable(boolean[] enabled, int[] action, int index) {
+        if (enabled == null || index < 0 || index >= enabled.length || !enabled[index]) {
+            return false;
+        }
+        return action != null && index < action.length && action[index] == ACTION_CREATIVE_ITEMS;
+    }
+
+    /**
+     * 🆕 2026-10-20 <b>「清除实体」那块板的服务端判据</b>。
+     *
+     * <p>🔴 与另外两个入口<b>必须互斥</b>：配方编辑那一格绝不能被当成"抹除"放行，反之亦然
+     * （自检里有这条负对照）。门槛（身上带模块）不在这里判 —— 那需要玩家背包，
+     * 由命令／{@code ShanhaiHoloMenuNetwork#moduleInInventory} 判。
+     */
+    public static boolean canOpenRealityPurge(int index) {
+        return canOpenRealityPurgeTable(ENABLED, ACTION, index);
+    }
+
+    /** {@link #canOpenRealityPurge(int)} 的参数化版（负对照用）。 */
+    public static boolean canOpenRealityPurgeTable(boolean[] enabled, int[] action, int index) {
+        if (enabled == null || index < 0 || index >= enabled.length || !enabled[index]) {
+            return false;
+        }
+        return action != null && index < action.length && action[index] == ACTION_REALITY_PURGE;
     }
 
     // ------------------------------------------------------------------ 读数与自检
@@ -287,8 +357,9 @@ public final class ShanhaiHoloMenuBoards {
         int pass = 0;
         // ⚠️ 这个数必须与下面 pass++ 的处数逐一点得上：1 正对照（checkTable）
         //    + 7 条 checkTable 负对照（A..G）+ 5 条服务端判据（正对照 1 + 负对照 E/F/H 3
-        //    + "不该接受的却接受了" 1）= 13。
-        final int total = 13;
+        //    + "不该接受的却接受了" 1）+ 2 条「现实物品」判据（正 + 负）
+        //    + 🆕 2 条「清除实体」判据（正 + 互斥负对照）= 17。
+        final int total = 17;
 
         final String pos = checkTable(BOARD_COUNT, LABEL_ZH, ENABLED, ACTION);
         if (pos == null) {
@@ -314,20 +385,26 @@ public final class ShanhaiHoloMenuBoards {
             bad.append(" 负对照B没响（设置那格可用却没有动作码也判合规）;");
         }
 
+        // 🔴 2026-10-20：五块板现在【全部可用】⇒ "停用"的负对照不能再借用第 1 格（它已经是「清除实体」）。
+        //    改成"临时把第 3 格（现实物品）停用"，仍然只喂 checkTable，不动真表。
+        final boolean[] disabledWithActionOn = ENABLED.clone();
+        disabledWithActionOn[CREATIVE_ITEMS_INDEX] = false;
+        final String[] disabledWithActionLabels = LABEL_ZH.clone();
+        disabledWithActionLabels[CREATIVE_ITEMS_INDEX] = DISABLED_LABEL_ZH;
         final int[] disabledWithAction = ACTION.clone();
-        disabledWithAction[0] = ACTION_RECIPE_EDIT;
-        if (checkTable(BOARD_COUNT, LABEL_ZH, ENABLED, disabledWithAction) != null) {
+        disabledWithAction[CREATIVE_ITEMS_INDEX] = ACTION_RECIPE_EDIT;
+        if (checkTable(BOARD_COUNT, disabledWithActionLabels, disabledWithActionOn, disabledWithAction) != null) {
             pass++;
         } else {
-            bad.append(" 负对照C没响（停用的第 1 格挂着动作码也判合规）;");
+            bad.append(" 负对照C没响（停用的一格挂着动作码也判合规）;");
         }
 
         final String[] renamedDisabled = LABEL_ZH.clone();
-        renamedDisabled[0] = "设置";
-        if (checkTable(BOARD_COUNT, renamedDisabled, ENABLED, ACTION) != null) {
+        renamedDisabled[CREATIVE_ITEMS_INDEX] = REPURPOSED_ZH.get(CREATIVE_ITEMS_INDEX);
+        if (checkTable(BOARD_COUNT, renamedDisabled, disabledWithActionOn, ACTION) != null) {
             pass++;
         } else {
-            bad.append(" 负对照D没响（停用的第 1 格板上写着「设置」也判合规）;");
+            bad.append(" 负对照D没响（停用的一格板上写着它自己的名字也判合规）;");
         }
 
         final String[] settingsAsDisabled = LABEL_ZH.clone();
@@ -398,19 +475,55 @@ public final class ShanhaiHoloMenuBoards {
         // 负对照 H：🆕 把【真表】原样喂进去，第 4 格（设置）与第 5 格（命令）必须仍被服务端拒绝
         //   —— 证明"新启用的两格"没有顺带把服务端配方面板的门打开。
         if (!canOpenEditorTable(ENABLED, ACTION, SETTINGS_INDEX)
-                && !canOpenEditorTable(ENABLED, ACTION, COMMAND_INDEX)) {
+                && !canOpenEditorTable(ENABLED, ACTION, COMMAND_INDEX)
+                && !canOpenEditorTable(ENABLED, ACTION, CREATIVE_ITEMS_INDEX)) {
             pass++;
         } else {
-            bad.append(" 负对照H没响（设置/命令那两格被服务端当成了配方面板入口）;");
+            bad.append(" 负对照H没响（设置/命令/现实物品那三格被服务端当成了配方面板入口）;");
+        }
+
+        // ---- 🆕 现实物品入口那条判据的正/负对照 ----
+        //      正：idx=2 必须能开「自己新增物品」；
+        //      负：配方编辑那一格【绝不能】被当成现实物品入口（两个动作码互斥）。
+        if (canOpenCreativeItems(CREATIVE_ITEMS_INDEX)) {
+            pass++;
+        } else {
+            bad.append(" 现实物品判据把第 ").append(boardNumber(CREATIVE_ITEMS_INDEX)).append(" 格拒了;");
+        }
+        if (!canOpenCreativeItems(ENABLED_INDEX) && !canOpenCreativeItems(COMMAND_INDEX)
+                && !canOpenCreativeItems(PURGE_INDEX) && !canOpenCreativeItems(-1)
+                && !canOpenCreativeItems(BOARD_COUNT)) {
+            pass++;
+        } else {
+            bad.append(" 负对照I没响（别的格子/越界索引被当成了现实物品入口）;");
+        }
+
+        // ---- 🆕 2026-10-20 「清除实体」入口那条判据的正/负对照 ----
+        //      正：idx=0 必须能走"清除实体"（它原来唯一写着「未启用」）；
+        //      负：配方编辑 / 现实物品 / 越界索引【绝不能】被当成"抹除"入口（三个动作码互斥）。
+        if (canOpenRealityPurge(PURGE_INDEX)) {
+            pass++;
+        } else {
+            bad.append(" 清除实体判据把第 ").append(boardNumber(PURGE_INDEX)).append(" 格拒了;");
+        }
+        if (!canOpenRealityPurge(ENABLED_INDEX) && !canOpenRealityPurge(CREATIVE_ITEMS_INDEX)
+                && !canOpenRealityPurge(SETTINGS_INDEX) && !canOpenRealityPurge(COMMAND_INDEX)
+                && !canOpenRealityPurge(-1) && !canOpenRealityPurge(BOARD_COUNT)
+                // 反向也必须互斥：抹除那一格不能被当成"开配方面板/开现实物品"
+                && !canOpenEditor(PURGE_INDEX) && !canOpenCreativeItems(PURGE_INDEX)) {
+            pass++;
+        } else {
+            bad.append(" 负对照J没响（抹除那格与配方编辑/现实物品的动作码没互斥）;");
         }
 
         final String line = "holo_board_selftest " + pass + "/" + total + " PASS=" + (pass == total)
-                + " enabled_idx=[1(配方修改),4(设置),3(命令)]"
-                + " disabled_idx=[0,2]"
+                + " enabled_idx=[0(清除实体),1(配方修改),2(现实物品),3(命令),4(设置)]"
+                + " disabled_idx=[]"
                 + " enabled_label=" + LABEL_ZH[ENABLED_INDEX]
+                + " purge_label=" + LABEL_ZH[PURGE_INDEX]
                 + " disabled_label=" + DISABLED_LABEL_ZH
                 + "（判据：可用块上写它自己的名字（槽位名或被借用登记过的名字）且挂动作码／"
-                + "停用块写「未启用」且不挂动作码／面板入口必须在；另含 10 条负对照）";
+                + "停用块写「未启用」且不挂动作码／面板入口必须在；另含 12 条负对照）";
         if (bad.length() > 0) {
             ShanhaiMod.LOGGER.error("{} holo_board_selftest FAILED: {}", PREFIX, bad.toString());
         }

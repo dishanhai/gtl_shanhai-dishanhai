@@ -2277,6 +2277,9 @@ public final class ShanhaiRecipeEditorWorkspace {
         }
         countCell = index;
         pendingCount = Math.max(1, c.shownCount());
+        // 🆕 2026-10-16（用户点单「编程电路强制为催化剂」）：电路那一格打开小窗时先锁成催化剂，
+        //    于是小窗里那颗开关一开始就是"开"，且下面 togglePendingCatalyst 会拒绝关掉它。
+        c.applyCircuitCatalystLock();
         pendingChance = c.chance;
         pendingBoost = c.tierChanceBoost;
         pendingCatalyst = c.notConsumable;
@@ -2299,6 +2302,18 @@ public final class ShanhaiRecipeEditorWorkspace {
         return pendingCatalyst;
     }
 
+    /**
+     * 🆕 2026-10-16：小窗当前那一格是不是<b>编程电路</b>（⇒ 催化剂开关锁死、点了不生效）。
+     *
+     * <p>存在的理由：面板那颗按钮的文案必须能区分"用户自己开的"与"电路锁死的"，
+     * 否则他点了没反应只会以为按钮坏了。客户端与服务端两份状态都由 {@code countCell}
+     * 与服务端推下来的格子数据决定，不额外走包。
+     */
+    public boolean pendingCellIsProgrammedCircuit() {
+        final ShanhaiIoTable.Cell c = countCell < 0 ? null : io.cell(countCell);
+        return c != null && c.isProgrammedCircuit();
+    }
+
     public void setPendingChance(int v) {
         pendingChance = Math.max(1, Math.min(10000, v));
     }
@@ -2319,6 +2334,16 @@ public final class ShanhaiRecipeEditorWorkspace {
 
     /** 服务端：把开关翻一下并推给客户端（按钮回调两侧都会跑，由调用方判 clientSide）。 */
     public boolean togglePendingCatalyst() {
+        // 🆕 2026-10-16（用户点单「编程电路强制为催化剂」）：电路那一格【锁成开】——
+        //    用户点它不会有任何效果（不会关，也不会假装关掉再被静默改回来）。
+        final ShanhaiIoTable.Cell c = countCell < 0 ? null : io.cell(countCell);
+        if (c != null && c.isProgrammedCircuit()) {
+            pendingCatalyst = true;
+            ShanhaiMod.LOGGER.info("{} workspace_catalyst_toggle_ignored cell={} reason=programmed_circuit "
+                    + "(编程电路恒为催化剂，这一格不接受「消耗」这个状态)", PREFIX, countCell);
+            touch();
+            return true;
+        }
         pendingCatalyst = !pendingCatalyst;
         touch();
         return pendingCatalyst;

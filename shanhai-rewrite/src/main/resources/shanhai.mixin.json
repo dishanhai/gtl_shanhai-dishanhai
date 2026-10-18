@@ -9,7 +9,13 @@
     "ShanhaiInfiniteThreadDisplayMixin",
     "ShanhaiGeneratorWirelessEnergyJadeMixin",
     "ShanhaiSetBlockWatchMixin",
-    "ShanhaiRecipeTypeGetRecipeMixin"
+    "ShanhaiRecipeTypeGetRecipeMixin",
+    "ShanhaiSetHealthGuardMixin",
+    "ShanhaiLivingEntityDieGuardMixin",
+    "ShanhaiServerPlayerDieGuardMixin",
+    "ShanhaiEntitySetRemovedGuardMixin",
+    "ShanhaiItemStackOverrideMixin",
+    "ShanhaiItemDescriptionMixin"
   ],
   "client": [
     "ShanhaiFontStyleMixin",

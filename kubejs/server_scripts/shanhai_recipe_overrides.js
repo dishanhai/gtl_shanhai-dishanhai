@@ -83,9 +83,13 @@ function shanhaiOvrError(msg) {
 //    FP_STUB 是【如实交代】而不是【失败】：它的正确级别是 WARN。
 //    KubeJS 把 console.error 记成 ERROR（日志里带 '!' 前缀），用户在游戏里看到的横幅也是它。
 // ⇒ 本文件的规则：
-//      ERROR 只留给"用户必须知道且必须动手"的事（OVERLAY DISABLED / MISSING / STALE /
-//      NEEDS_RESAVE / ACCOUNTING MISMATCH）；
+//      ERROR 只留给"用户必须知道且必须动手"的事（OVERLAY DISABLED / MISSING /
+//      指纹不符的 STALE / NEEDS_RESAVE / ACCOUNTING MISMATCH）；
 //      单纯的"降级但已套用"一律走 WARN，且【同一个 id 每局只打一行】，末尾用汇总行报总数。
+// 🔴 2026-10-17（用户点单，原话）：「以后把这些重复配方设置成警告而不是报错，因为重复了配方还能正常加载」
+//    ⇒ op=add 撞到【已存在的 id】（重复添加，多半是"这条已经被固化进永久脚本了"）改走 WARN；
+//      语义一个字没变：仍然拒绝重复添加、仍然计入 stale 计数。改的只是级别，为了不再进
+//      KubeJS 的报错横幅（聊天栏那行 "KubeJS errors found [N]!"）。
 function shanhaiOvrWarn(msg) {
     console.warn(SHANHAI_OVR_TAG + ' ' + msg);
 }
@@ -1447,8 +1451,12 @@ function shanhaiOvrRun(event) {
         // ---------- add -----------------------------------------------------
         if (op === 'add') {
             if (cnt > 0) {
-                shanhaiOvrError(uid + ' STALE op=add id=' + id + ' type=' + type +
-                                ' -> id already exists (' + cnt + ' recipe(s)); refusing to add');
+                // 🔴 2026-10-17（用户点单）：重复添加走 WARN 不走 ERROR ——
+                //    原话「以后把这些重复配方设置成警告而不是报错，因为重复了配方还能正常加载」。
+                //    读数没变（仍 stale++、仍不套用），只是不再把红字推到聊天栏。
+                shanhaiOvrWarn(uid + ' DUPLICATE op=add id=' + id + ' type=' + type +
+                                ' -> id already exists (' + cnt + ' recipe(s)); refusing to add' +
+                                ' (无害：配方已在表里，多半是它已经固化进永久脚本了)');
                 stale++;
                 continue;
             }

@@ -1052,9 +1052,16 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         // 催化剂开关（按钮铺满 ＋ 上面盖 Label）
         final Widget catBtn = new ButtonWidget(184, 66, 142, 18, GuiTextures.BUTTON,
                 cd -> onToggleCatalyst());
+        // 🆕 2026-10-16（用户点单「编程电路强制为催化剂，免得我还要一直改，还老是忘了改」）：
+        //    这一格的 tooltip 必须把"为什么点不动"写出来，否则用户只会看到"按钮坏了"。
+        catBtn.setHoverTooltips(
+                net.minecraft.network.chat.Component.literal("§6编程电路恒为催化剂（不消耗）"),
+                net.minecraft.network.chat.Component.literal("§7这一格写的是编程电路 ⇒ 永远不消耗，开关锁死"),
+                net.minecraft.network.chat.Component.literal("§8其他物品：左键点它 = 在「不消耗 / 消耗」之间切换"));
         popup.addWidget(catBtn);
-        popup.addWidget(new LabelWidget(190, 71, ShanhaiLdlText.sup(() -> session.pendingCatalyst()
-                ? "§a催化剂：不消耗 = 开" : "§7催化剂：不消耗 = 关")));
+        popup.addWidget(new LabelWidget(190, 71, ShanhaiLdlText.sup(() -> session.pendingCellIsProgrammedCircuit()
+                ? "§6催化剂 = 开 §8· 电路锁定"
+                : (session.pendingCatalyst() ? "§a催化剂：不消耗 = 开" : "§7催化剂：不消耗 = 关"))));
 
         popup.addWidget(new ButtonWidget(70, 90, 48, 18, GuiTextures.BUTTON, cd -> onConfirmCount()));
         popup.addWidget(new LabelWidget(78, 95, ShanhaiLdlText.esc("§f确定")));

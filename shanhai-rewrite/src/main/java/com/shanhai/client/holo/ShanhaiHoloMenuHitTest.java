@@ -361,12 +361,19 @@ public final class ShanhaiHoloMenuHitTest {
                 raycast("ring", dist, eyeX + 100.0, anchorY, eyeZ, 0.0f,
                         eyeX, eyeY, eyeZ, d4[0], d4[1], d4[2]));
 
-        // ---- 与板表交叉：能打到 ≠ 能用（第 1 格是「未启用」）
+        // ---- 与板表交叉：能打到 ≠ 能用
+        // 🆕 第 1 格（idx=0）不再是「未启用」—— 用户点单把它做成「清除实体」入口
+        //   （点一次直接执行，不再是两拍确认）⇒ 这条交叉判据是「第 1 格必须可用、且动作码必须是清除实体」。
+        //   ⚠️ 它仍然是一条真判据：板表若把第 1 格退回停用，或把动作码换成别的，这里当场报红。
         n[1]++;
-        if (ShanhaiHoloMenuBoards.isEnabled(0)) {
-            bad.append(" 交叉判据失败：第 1 格居然是可用的（本轮它应当是「未启用」）;");
-        } else {
+        if (ShanhaiHoloMenuBoards.isEnabled(0)
+                && ShanhaiHoloMenuBoards.actionOf(0) == ShanhaiHoloMenuBoards.ACTION_REALITY_PURGE) {
             n[0]++;
+        } else {
+            bad.append(" 交叉判据失败：第 1 格应当是「清除实体」（可用且动作码 = ")
+                    .append(ShanhaiHoloMenuBoards.ACTION_REALITY_PURGE).append("），实际 enabled=")
+                    .append(ShanhaiHoloMenuBoards.isEnabled(0)).append(" action=")
+                    .append(ShanhaiHoloMenuBoards.actionOf(0)).append(';');
         }
 
         final String b = bad.length() == 0 ? null : bad.toString();

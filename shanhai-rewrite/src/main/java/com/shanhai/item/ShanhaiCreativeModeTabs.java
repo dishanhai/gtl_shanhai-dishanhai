@@ -12,6 +12,7 @@ import com.tterrag.registrate.util.entry.RegistryEntry;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * 本 mod 自己的创造模式物品栏（{@code shanhai}）—— 18 个物品 + B1a 的 131 个私货物品 + 主机控制器的归属。
@@ -130,6 +131,29 @@ public final class ShanhaiCreativeModeTabs {
      * {@code catch (RuntimeException e) { continue; }}），那会把整栏物品一起变成搜不到。
      */
     private static void fill(CreativeModeTab.ItemDisplayParameters parameters, CreativeModeTab.Output output) {
+        // 🆕 记下最近一次构建用的参数：运行期改表之后要【按同一份参数重建本栏】，
+        //    见 {@link #refreshContents()}。⚠️ 只是留个引用，不改它、不判断它。
+        lastParams = parameters;
+        // 🆕 2026-10-17「删除/抹除物品」执行面 ①：hidden/removed 的物品不进本栏。
+        //    本栏的 displayItems 同时是 JEI 物品表的来源（见类注释里那段取证）
+        //    ⇒ 这里摘掉 = 创造栏与 JEI 一起看不到。
+        //    ⚠️ 别的创造栏（原版 food_and_drinks 等）由
+        //    {@code ShanhaiItemRemovalHooks#onBuildTabContents} 统一处理。
+        final CreativeModeTab.Output rawOutput = output;
+        output = new CreativeModeTab.Output() {
+            public void accept(net.minecraft.world.item.ItemStack stack,
+                               CreativeModeTab.TabVisibility visibility) {
+                if (!com.shanhai.common.itemedit.ShanhaiItemRemovalOps.shouldHide(stack)) {
+                    rawOutput.accept(stack, visibility);
+                }
+            }
+
+            public void accept(net.minecraft.world.item.ItemStack stack) {
+                if (!com.shanhai.common.itemedit.ShanhaiItemRemovalOps.shouldHide(stack)) {
+                    rawOutput.accept(stack);
+                }
+            }
+        };
         MultiblockMachineDefinition engine = ShanhaiMachines.primordialOmegaEngine();
         MachineDefinition superWildcardBuffer = ShanhaiWildcardMachines.superWildcardPatternBuffer();
 
@@ -429,6 +453,61 @@ public final class ShanhaiCreativeModeTabs {
         output.accept(ShanhaiItems.UNIVERSAL_PARALLEL_CORE.asStack());
         output.accept(ShanhaiItems.GRAVITON_SHARD.asStack());
         output.accept(ShanhaiItems.WORLD_FRAGMENTS_CREATION.asStack());
+
+        // ==================================================================
+        // 桶 ⑫ · 🆕 现实物品（2026-10-17「自己新增物品」）
+        // 🔴 只有【已经填过名字】的槽位才进创造栏 ⇒ 未定义的槽位既不在创造栏里、也不在
+        //    JEI 里（JEI 的物品表是从 CATEGORY 物品栏的 displayItems 建的，见类注释）。
+        // 顺序 = 槽位号升序（1,2,3…），这样"1 号槽位"永远在最前面，好找。
+        // ==================================================================
+        for (int i = 0; i < com.shanhai.common.reality.ShanhaiRealityItemTable.SLOT_COUNT; i++) {
+            if (!com.shanhai.common.reality.ShanhaiRealityItemTable.isDefined(i)) {
+                continue;
+            }
+            final net.minecraft.world.item.Item it = ShanhaiItems.realityItemValue(i);
+            if (it != null) {
+                output.accept(new ItemStack(it));
+            }
+        }
+    }
+
+    /** 最近一次构建本栏用的参数（{@link #refreshContents()} 拿它重建）。 */
+    private static volatile CreativeModeTab.ItemDisplayParameters lastParams;
+
+    /**
+     * 🆕 <b>运行期重建本栏的内容</b>（「自己新增物品」保存之后立刻生效的那一半）。
+     *
+     * <h4>为什么这条路成立（不是猜的）</h4>
+     * Forge 补丁过的 {@code CreativeModeTab#buildContents(ItemDisplayParameters)} <b>没有缓存判断</b>
+     * —— 方法体直接 {@code new ItemDisplayBuilder(...)} → {@code ForgeHooks.onCreativeModeTabBuildContents(...)}
+     * → 重新赋值 {@code displayItems} / {@code displayItemsSearchTab} → {@code rebuildSearchTree()}。
+     * （取证：{@code forge-1.20.1-47.3.0_mapped_official_1.20.1-sources.jar} 里的
+     * {@code net/minecraft/world/item/CreativeModeTab.java:124-133}；解出的副本在
+     * {@code temp/creative-items/forge-src/}。）
+     *
+     * <p>⚠️ 与 {@code CreativeModeTabs.tryRebuildTabContents(...)} 的区别：那个<b>参数没变就返回
+     * false</b>（{@code cachedParameters.needsUpdate(...)} 为 false 时直接 {@code iconst_0; ireturn}），
+     * 所以"表变了但它不知道"这种情况它不干活 ⇒ 只能直接调 {@code buildContents}。
+     *
+     * @return true = 真的重建了
+     */
+    public static boolean refreshContents() {
+        final CreativeModeTab tab = SHANHAI.get();
+        final CreativeModeTab.ItemDisplayParameters p = lastParams;
+        if (tab == null || p == null) {
+            return false;
+        }
+        try {
+            // 🔴 传【新的一实例】：万一将来某个版本给 buildContents 加了"同一份参数就不再重建"的
+            //    身份判断，新实例也照样能穿过去（等价内容不影响生成器：fill() 只用它判权限位）。
+            tab.buildContents(new CreativeModeTab.ItemDisplayParameters(
+                    p.enabledFeatures(), p.hasPermissions(), p.holders()));
+            return true;
+        } catch (Throwable t) {
+            com.shanhai.ShanhaiMod.LOGGER.error("[SHANHAI-REALITY] creative_tab_refresh_failed err={}",
+                    t.toString(), t);
+            return false;
+        }
     }
 
     /**

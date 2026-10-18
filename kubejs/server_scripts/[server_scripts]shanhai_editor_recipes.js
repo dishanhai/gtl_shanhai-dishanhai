@@ -1,7 +1,7 @@
 // priority: 1
 // =============================================================================
 // [server_scripts]shanhai_editor_recipes.js
-//   —— 用户在【游戏内配方编辑器】里新建的 15 条配方，转成【永久配方】（KubeJS 版）
+//   —— 用户在【游戏内配方编辑器】里新建的 32 条配方，转成【永久配方】（KubeJS 版）
 //
 // 用户原话（逐字）：
 //   「你先帮我把这15条配方写入山海的永久配方」
@@ -50,32 +50,32 @@
 //         {"type":k,…字段…} ⇒ 形状不对称 ⇒ 整条配方 json 解析失败（不是"条件没生效"，是配方没了）。
 //
 // ── 本批覆盖范围（15 条，全部 op=add）─────────────────────────────────
-//   · 原初奇点反演（primordial_singularity_inversion）2 条
+//   · 永久配方 32 条 = GT 机器配方 31 条 ＋ 原版配方 1 条（minecraft:crafting_shaped）
+//   · 删除（event.remove）8 条 —— 单独一段，排在 add 段【之前】
+//   · 原初奇点反演（primordial_singularity_inversion）3 条
 //   · 光子分离（photon_separation）2 条
-//   · 物质锻造（matter_forging）2 条
-//   · 原初物质重组（primordial_matter_recombination）1 条
+//   · 物质锻造（matter_forging）3 条
+//   · 原初物质重组（primordial_matter_recombination）7 条
 //   · 原初物质解构（primordial_matter_deconstruction）1 条
 //   · 太虚熔炼（taixu_smelting）1 条
 //   · 世线板电路组装（wl_board_circuit_assembly）2 条
-//   · 原初因果编织（primordial_causal_weaving）2 条
+//   · 原初因果编织（primordial_causal_weaving）8 条
 //   · 原初世线切割（worldline_cutting）1 条
-//   · 物质流凝结（matter_flow_condensation）1 条
-//   · 槽位：物品输入 52（其中编程电路 12、催化剂 3、其余普通输入 37）
-//          流体输入 5、物品产出 19、流体产出 4
-//   · duration 全为 200（源里 recipe.duration，未改）
-//   · EUt：源里全为 8（tickInputs.eu.content ＝ 编辑器建配方时的默认值）
-//          ⇒ 发射值按用户选的档位对齐（源里档位 1,4,5,14 ⇒ EV→2048、IV→8192、LV→32、MAX→2147483647）
-//          ⚠️ 发射值 ≠ 源值 是【本轮的刻意改动】（口径②）；id / duration / 槽位 / 条件一个都没动。
-//   · 额外条件 9 条有（全部是物质模块等级 module_level）、6 条没有（不许凭空加）
-//
+//   · 物质流凝结（matter_flow_condensation）2 条
+//   · matter_module_casting（matter_module_casting）1 条
+//   · 原版 minecraft:crafting_shaped（原版 minecraft:crafting_shaped）1 条
+//   · GT 槽位：物品输入 124（其中编程电路 25、催化剂 5、其余普通输入 94）  ※"催化剂"这一列的口径 = 一切 chance:0 的不消耗输入（含非电路的）
+//          流体输入 21、物品产出 37、流体产出 5、概率产出 0
+//   · duration：全为 200（源里 recipe.duration）
+//   · EUt：发射值 8 / 32 / 2048 / 8192 / 32768 / 2147483647（档位 0,1,4,5,6,14 ⇒ ULV→8、LV→32、EV→2048、IV→8192、LuV→32768、MAX→2147483647；口径②：闸门与卡片显示同拍）
+//   · 额外条件 20 条有（全部是module_level/cleanroom/gravity）、12 条没有（不许凭空加）
 // ── 源覆盖文件的现状（🔴 2026-10-11 实测，不再是"仍然在"）──────────────────────
-//   源 recipe_overrides.json（实例 configshanhai）里那 15 条 op=add 的 entry
-//   【已经不在了】：活文件现在 603 B、entries=0、mtime 2026-10-10 21:47:20。
-//   ⇒ 旧版这里写的"它们会再建一遍同名配方，请你去编辑器里删掉"这条待办【已经不需要做】。
-//   ⇒ 抽取时那一份（33796 B / sha256 2e005b1f…）逐字节存档在
-//      tempperm-recipessource_snapshot.json，check.mjs 的 ① 判据跑的就是它。
-//   （本工程只读实例；这一条是读数，不是我们改的。）
-//
+//   🔴 本区由 sync.mjs 每次同步时【重写】，不是手写的读数（上面的数字永远等于当下）。
+//   活文件：<游戏实例>/config/shanhai/recipe_overrides.json
+//     bytes 2887   entries 1   sha256 df5ec336941ec45399005b47ac56ae3f50223b34887fb9e98bd7a5d7673a263e
+//     mtime 2026-10-17T01:43:28.461Z   schema_version 1
+//   逐条 op 分布：add=1
+//   上面的读数是 sync.mjs 本次同步时读到的（不是手写快照）。
 // ── 判据（进游戏后看这一行，可 grep）───────────────────────────────────────────
 //   [SHANHAI-EDITOR-PERM] 游戏内编辑器新建配方 … ok=15 failed=0 cond_applied=9 cond_failed=0 ✅
 // =============================================================================
@@ -84,11 +84,106 @@ ServerEvents.recipes(function (event) {
     var gtr = event.recipes.gtceu
     var PERM_OK = 0
     var PERM_BAD = 0
+    var PERM_RM_OK = 0
+    var PERM_RM_BAD = 0
     var PERM_COND_OK = 0
     var PERM_COND_BAD = 0
     var PERM_ERRS = ''
+    var GravityCondition = null
+    var CleanroomCondition = null
+    var CleanroomType = null
+    var GTLCleanroomType = null
+    try {
+        GravityCondition = Java.loadClass('org.gtlcore.gtlcore.common.recipe.condition.GravityCondition')
+        CleanroomCondition = Java.loadClass('com.gregtechceu.gtceu.common.recipe.condition.CleanroomCondition')
+        CleanroomType = Java.loadClass('com.gregtechceu.gtceu.api.machine.multiblock.CleanroomType')
+        GTLCleanroomType = Java.loadClass('org.gtlcore.gtlcore.api.machine.multiblock.GTLCleanroomType')
+    } catch (errPermCondCls) {
+        console.error('[SHANHAI-EDITOR-PERM] 条件类解析失败（挂条件的配方会整条不注册）：' + errPermCondCls)
+    }
 
-    // ── [01/15] 原初奇点反演 第 1 条（本类型共 2 条）
+    // ── 删除（编辑器 op=remove / op=disable）：8 条 ──────────────────────
+    // @perm rm index=1 op=remove id=cxhmz:extractor/extractor_machine_blastfurnace_to_resources type=gtceu:extractor
+    //     🔴 谓词只用 id：{output:…} 对 GT 配方恒 false（血账）
+    try {
+        event.remove({ id: 'cxhmz:extractor/extractor_machine_blastfurnace_to_resources' })
+        PERM_RM_OK = PERM_RM_OK + 1
+    } catch (errRm1) {
+        PERM_RM_BAD = PERM_RM_BAD + 1
+        PERM_ERRS = PERM_ERRS + '|remove cxhmz:extractor/extractor_machine_blastfurnace_to_resources <= ' + errRm1 + ' '
+    }
+
+    // @perm rm index=2 op=remove id=thetornproductionline:assembler/fission_reactor_module type=gtceu:assembler
+    //     🔴 谓词只用 id：{output:…} 对 GT 配方恒 false（血账）
+    try {
+        event.remove({ id: 'thetornproductionline:assembler/fission_reactor_module' })
+        PERM_RM_OK = PERM_RM_OK + 1
+    } catch (errRm2) {
+        PERM_RM_BAD = PERM_RM_BAD + 1
+        PERM_ERRS = PERM_ERRS + '|remove thetornproductionline:assembler/fission_reactor_module <= ' + errRm2 + ' '
+    }
+
+    // @perm rm index=3 op=remove id=thetornproductionline:large_chemical_reactor/easier_paracetamol_dust type=gtceu:large_chemical_reactor
+    //     🔴 谓词只用 id：{output:…} 对 GT 配方恒 false（血账）
+    try {
+        event.remove({ id: 'thetornproductionline:large_chemical_reactor/easier_paracetamol_dust' })
+        PERM_RM_OK = PERM_RM_OK + 1
+    } catch (errRm3) {
+        PERM_RM_BAD = PERM_RM_BAD + 1
+        PERM_ERRS = PERM_ERRS + '|remove thetornproductionline:large_chemical_reactor/easier_paracetamol_dust <= ' + errRm3 + ' '
+    }
+
+    // @perm rm index=4 op=remove id=thetornproductionline:large_chemical_reactor/easier_rad_away_dust type=gtceu:large_chemical_reactor
+    //     🔴 谓词只用 id：{output:…} 对 GT 配方恒 false（血账）
+    try {
+        event.remove({ id: 'thetornproductionline:large_chemical_reactor/easier_rad_away_dust' })
+        PERM_RM_OK = PERM_RM_OK + 1
+    } catch (errRm4) {
+        PERM_RM_BAD = PERM_RM_BAD + 1
+        PERM_ERRS = PERM_ERRS + '|remove thetornproductionline:large_chemical_reactor/easier_rad_away_dust <= ' + errRm4 + ' '
+    }
+
+    // @perm rm index=5 op=remove id=fastblasting:ad_astra/blasting/calorite_ingot_from_blasting_raw_calorite type=minecraft:blasting
+    //     🔴 谓词只用 id：{output:…} 对 GT 配方恒 false（血账）
+    try {
+        event.remove({ id: 'fastblasting:ad_astra/blasting/calorite_ingot_from_blasting_raw_calorite' })
+        PERM_RM_OK = PERM_RM_OK + 1
+    } catch (errRm5) {
+        PERM_RM_BAD = PERM_RM_BAD + 1
+        PERM_ERRS = PERM_ERRS + '|remove fastblasting:ad_astra/blasting/calorite_ingot_from_blasting_raw_calorite <= ' + errRm5 + ' '
+    }
+
+    // @perm rm index=6 op=remove id=fastsmelting:ad_astra/smelting/calorite_ingot_from_smelting_raw_calorite type=minecraft:smelting
+    //     🔴 谓词只用 id：{output:…} 对 GT 配方恒 false（血账）
+    try {
+        event.remove({ id: 'fastsmelting:ad_astra/smelting/calorite_ingot_from_smelting_raw_calorite' })
+        PERM_RM_OK = PERM_RM_OK + 1
+    } catch (errRm6) {
+        PERM_RM_BAD = PERM_RM_BAD + 1
+        PERM_ERRS = PERM_ERRS + '|remove fastsmelting:ad_astra/smelting/calorite_ingot_from_smelting_raw_calorite <= ' + errRm6 + ' '
+    }
+
+    // @perm rm index=7 op=remove id=thetornproductionline:large_chemical_reactor/faster_fission_reactor_1 type=gtceu:large_chemical_reactor
+    //     🔴 谓词只用 id：{output:…} 对 GT 配方恒 false（血账）
+    try {
+        event.remove({ id: 'thetornproductionline:large_chemical_reactor/faster_fission_reactor_1' })
+        PERM_RM_OK = PERM_RM_OK + 1
+    } catch (errRm7) {
+        PERM_RM_BAD = PERM_RM_BAD + 1
+        PERM_ERRS = PERM_ERRS + '|remove thetornproductionline:large_chemical_reactor/faster_fission_reactor_1 <= ' + errRm7 + ' '
+    }
+
+    // @perm rm index=8 op=remove id=thetornproductionline:large_chemical_reactor/faster_fission_reactor_2 type=gtceu:large_chemical_reactor
+    //     🔴 谓词只用 id：{output:…} 对 GT 配方恒 false（血账）
+    try {
+        event.remove({ id: 'thetornproductionline:large_chemical_reactor/faster_fission_reactor_2' })
+        PERM_RM_OK = PERM_RM_OK + 1
+    } catch (errRm8) {
+        PERM_RM_BAD = PERM_RM_BAD + 1
+        PERM_ERRS = PERM_ERRS + '|remove thetornproductionline:large_chemical_reactor/faster_fission_reactor_2 <= ' + errRm8 + ' '
+    }
+
+    // ── [01/32] 原初奇点反演 第 1 条（本类型共 2 条）
     //    运行期 id = shanhai:primordial_singularity_inversion/new_recipe_1
     // @perm index=1 id=shanhai:primordial_singularity_inversion/new_recipe_1 type=gtceu:primordial_singularity_inversion typePath=primordial_singularity_inversion kjsId=shanhai:new_recipe_1 seq=1 conditions=0
     try {
@@ -107,7 +202,7 @@ ServerEvents.recipes(function (event) {
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_singularity_inversion/new_recipe_1 <= ' + err1 + ' ' }
     }
 
-    // ── [02/15] 原初奇点反演 第 2 条（本类型共 2 条）
+    // ── [02/32] 原初奇点反演 第 2 条（本类型共 2 条）
     //    运行期 id = shanhai:primordial_singularity_inversion/new_recipe_2
     // @perm index=2 id=shanhai:primordial_singularity_inversion/new_recipe_2 type=gtceu:primordial_singularity_inversion typePath=primordial_singularity_inversion kjsId=shanhai:new_recipe_2 seq=2 conditions=0
     try {
@@ -126,7 +221,7 @@ ServerEvents.recipes(function (event) {
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_singularity_inversion/new_recipe_2 <= ' + err2 + ' ' }
     }
 
-    // ── [03/15] 光子分离 第 1 条（本类型共 2 条）
+    // ── [03/32] 光子分离 第 1 条（本类型共 2 条）
     //    运行期 id = shanhai:photon_separation/new_recipe_1
     // @perm index=3 id=shanhai:photon_separation/new_recipe_1 type=gtceu:photon_separation typePath=photon_separation kjsId=shanhai:new_recipe_1 seq=1 conditions=1
     try {
@@ -139,22 +234,17 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(8192)
             .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e3 = ShanhaiConditions.apply(b3, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
-        if (e3 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:photon_separation/new_recipe_1 <= ' + e3 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err3) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:photon_separation/new_recipe_1 <= ' + err3 + ' ' }
     }
 
-    // ── [04/15] 光子分离 第 2 条（本类型共 2 条）
+    // ── [04/32] 光子分离 第 2 条（本类型共 2 条）
     //    运行期 id = shanhai:photon_separation/new_recipe_2
     // @perm index=4 id=shanhai:photon_separation/new_recipe_2 type=gtceu:photon_separation typePath=photon_separation kjsId=shanhai:new_recipe_2 seq=2 conditions=1
     try {
@@ -167,22 +257,17 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(8192)
             .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e4 = ShanhaiConditions.apply(b4, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
-        if (e4 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:photon_separation/new_recipe_2 <= ' + e4 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err4) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:photon_separation/new_recipe_2 <= ' + err4 + ' ' }
     }
 
-    // ── [05/15] 物质锻造 第 1 条（本类型共 2 条）
+    // ── [05/32] 物质锻造 第 1 条（本类型共 2 条）
     //    运行期 id = shanhai:matter_forging/new_recipe_1
     // @perm index=5 id=shanhai:matter_forging/new_recipe_1 type=gtceu:matter_forging typePath=matter_forging kjsId=shanhai:new_recipe_1 seq=1 conditions=1
     try {
@@ -193,22 +278,17 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(8192)
             .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e5 = ShanhaiConditions.apply(b5, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
-        if (e5 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:matter_forging/new_recipe_1 <= ' + e5 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err5) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:matter_forging/new_recipe_1 <= ' + err5 + ' ' }
     }
 
-    // ── [06/15] 物质锻造 第 2 条（本类型共 2 条）
+    // ── [06/32] 物质锻造 第 2 条（本类型共 2 条）
     //    运行期 id = shanhai:matter_forging/new_recipe_2
     // @perm index=6 id=shanhai:matter_forging/new_recipe_2 type=gtceu:matter_forging typePath=matter_forging kjsId=shanhai:new_recipe_2 seq=2 conditions=1
     try {
@@ -221,22 +301,17 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(8192)
             .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e6 = ShanhaiConditions.apply(b6, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
-        if (e6 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:matter_forging/new_recipe_2 <= ' + e6 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err6) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:matter_forging/new_recipe_2 <= ' + err6 + ' ' }
     }
 
-    // ── [07/15] 原初物质重组 第 1 条（本类型共 1 条）
+    // ── [07/32] 原初物质重组 第 1 条（本类型共 1 条）
     //    运行期 id = shanhai:primordial_matter_recombination/new_recipe_1
     // @perm index=7 id=shanhai:primordial_matter_recombination/new_recipe_1 type=gtceu:primordial_matter_recombination typePath=primordial_matter_recombination kjsId=shanhai:new_recipe_1 seq=1 conditions=1
     try {
@@ -247,26 +322,21 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(2048)
             .addData('euTier', 4)
+            .addCondition(new ModuleLevelCondition('shanhai:virtual_image_material_module', 4))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:virtual_image_material_module level=4）
         //   2026-10-16：把用户在编辑器里设的那条条件**固化进脚本** —— 它原来靠实例的
         //   覆盖层（config\shanhai\recipe_overrides.json 的 op=set + base_fp 指纹）生效；
         //   电路号一改，配方 JSON 就变 ⇒ 指纹失配 ⇒ 那条会静默不生效。固化后不再依赖指纹。
         //   原文取自那条覆盖记录的 fields.conditions；时长 200 本来就一致（见上面的 .duration(200)）。
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e7 = ShanhaiConditions.apply(b7, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:virtual_image_material_module","level":4}]'))
-        if (e7 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:primordial_matter_recombination/new_recipe_1 <= ' + e7 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err7) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_matter_recombination/new_recipe_1 <= ' + err7 + ' ' }
     }
 
-    // ── [08/15] 原初物质解构 第 1 条（本类型共 1 条）
+    // ── [08/32] 原初物质解构 第 1 条（本类型共 1 条）
     //    运行期 id = shanhai:primordial_matter_deconstruction/new_recipe_2
     // @perm index=8 id=shanhai:primordial_matter_deconstruction/new_recipe_2 type=gtceu:primordial_matter_deconstruction typePath=primordial_matter_deconstruction kjsId=shanhai:new_recipe_2 seq=1 conditions=0
     try {
@@ -287,7 +357,7 @@ ServerEvents.recipes(function (event) {
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_matter_deconstruction/new_recipe_2 <= ' + err8 + ' ' }
     }
 
-    // ── [09/15] 太虚熔炼 第 1 条（本类型共 1 条）
+    // ── [09/32] 太虚熔炼 第 1 条（本类型共 1 条）
     //    运行期 id = shanhai:taixu_smelting/new_recipe_1
     // @perm index=9 id=shanhai:taixu_smelting/new_recipe_1 type=gtceu:taixu_smelting typePath=taixu_smelting kjsId=shanhai:new_recipe_1 seq=1 conditions=1
     try {
@@ -300,22 +370,17 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(8192)
             .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e9 = ShanhaiConditions.apply(b9, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
-        if (e9 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:taixu_smelting/new_recipe_1 <= ' + e9 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err9) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:taixu_smelting/new_recipe_1 <= ' + err9 + ' ' }
     }
 
-    // ── [10/15] 世线板电路组装 第 1 条（本类型共 2 条）
+    // ── [10/32] 世线板电路组装 第 1 条（本类型共 2 条）
     //    运行期 id = shanhai:wl_board_circuit_assembly/new_recipe_3
     // @perm index=10 id=shanhai:wl_board_circuit_assembly/new_recipe_3 type=gtceu:wl_board_circuit_assembly typePath=wl_board_circuit_assembly kjsId=shanhai:new_recipe_3 seq=1 conditions=0
     try {
@@ -333,7 +398,7 @@ ServerEvents.recipes(function (event) {
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:wl_board_circuit_assembly/new_recipe_3 <= ' + err10 + ' ' }
     }
 
-    // ── [11/15] 原初因果编织 第 1 条（本类型共 2 条）
+    // ── [11/32] 原初因果编织 第 1 条（本类型共 2 条）
     //    运行期 id = shanhai:primordial_causal_weaving/new_recipe_1
     // @perm index=11 id=shanhai:primordial_causal_weaving/new_recipe_1 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_1 seq=1 conditions=0
     try {
@@ -356,7 +421,7 @@ ServerEvents.recipes(function (event) {
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_causal_weaving/new_recipe_1 <= ' + err11 + ' ' }
     }
 
-    // ── [12/15] 原初世线切割 第 1 条（本类型共 1 条）
+    // ── [12/32] 原初世线切割 第 1 条（本类型共 1 条）
     //    运行期 id = shanhai:worldline_cutting/new_recipe_1
     // @perm index=12 id=shanhai:worldline_cutting/new_recipe_1 type=gtceu:worldline_cutting typePath=worldline_cutting kjsId=shanhai:new_recipe_1 seq=1 conditions=1
     try {
@@ -368,22 +433,17 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(8192)
             .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e12 = ShanhaiConditions.apply(b12, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
-        if (e12 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:worldline_cutting/new_recipe_1 <= ' + e12 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err12) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:worldline_cutting/new_recipe_1 <= ' + err12 + ' ' }
     }
 
-    // ── [13/15] 原初因果编织 第 2 条（本类型共 2 条）
+    // ── [13/32] 原初因果编织 第 2 条（本类型共 2 条）
     //    运行期 id = shanhai:primordial_causal_weaving/new_recipe_2
     // @perm index=13 id=shanhai:primordial_causal_weaving/new_recipe_2 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_2 seq=2 conditions=0
     try {
@@ -402,7 +462,7 @@ ServerEvents.recipes(function (event) {
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_causal_weaving/new_recipe_2 <= ' + err13 + ' ' }
     }
 
-    // ── [14/15] 物质流凝结 第 1 条（本类型共 1 条）
+    // ── [14/32] 物质流凝结 第 1 条（本类型共 1 条）
     //    运行期 id = shanhai:matter_flow_condensation/new_recipe_1
     // @perm index=14 id=shanhai:matter_flow_condensation/new_recipe_1 type=gtceu:matter_flow_condensation typePath=matter_flow_condensation kjsId=shanhai:new_recipe_1 seq=1 conditions=1
     try {
@@ -416,22 +476,17 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(8192)
             .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e14 = ShanhaiConditions.apply(b14, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
-        if (e14 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:matter_flow_condensation/new_recipe_1 <= ' + e14 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err14) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:matter_flow_condensation/new_recipe_1 <= ' + err14 + ' ' }
     }
 
-    // ── [15/15] 世线板电路组装 第 2 条（本类型共 2 条）
+    // ── [15/32] 世线板电路组装 第 2 条（本类型共 2 条）
     //    运行期 id = shanhai:wl_board_circuit_assembly/new_recipe_2
     // @perm index=15 id=shanhai:wl_board_circuit_assembly/new_recipe_2 type=gtceu:wl_board_circuit_assembly typePath=wl_board_circuit_assembly kjsId=shanhai:new_recipe_2 seq=2 conditions=1
     try {
@@ -448,26 +503,409 @@ ServerEvents.recipes(function (event) {
             .duration(200)
             .EUt(8192)
             .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
         PERM_OK = PERM_OK + 1
         // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
-        // 🔴 只走 Java 绑定（与 shanhai_recipe_overrides.js 同一个入口）；绝不 recipe.set('recipeConditions', …)
-        var e15 = ShanhaiConditions.apply(b15, JsonIO.parseRaw('[{"type":"module_level","module_id":"shanhai:material_recombination_module","level":5}]'))
-        if (e15 !== '') {
-            PERM_COND_BAD = PERM_COND_BAD + 1
-            PERM_ERRS = PERM_ERRS + '|cond shanhai:wl_board_circuit_assembly/new_recipe_2 <= ' + e15 + ' '
-        } else {
-            PERM_COND_OK = PERM_COND_OK + 1
-        }
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
     } catch (err15) {
         PERM_BAD = PERM_BAD + 1
         if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:wl_board_circuit_assembly/new_recipe_2 <= ' + err15 + ' ' }
     }
 
+    // ── [16/32] 物质锻造 第 3 条（本类型共 3 条）
+    //    运行期 id = shanhai:matter_forging/new_recipe_3
+    // @perm index=16 id=shanhai:matter_forging/new_recipe_3 type=gtceu:matter_forging typePath=matter_forging kjsId=shanhai:new_recipe_3 seq=3 conditions=1
+    try {
+        var b16 = gtr.matter_forging('shanhai:new_recipe_3')
+            .itemInputs('1024x shanhai:helium_ion')
+            .itemInputs('32767x shanhai:hydrogen_ion')
+            .itemInputs('64x shanhai:graviton')
+            .itemInputs('114514x shanhai:cosmic_dust')
+            .itemInputs('64000x shanhai:eta_meson')
+            .itemInputs('36863x shanhai:electron')
+            .circuit(9)
+            .inputFluids('shanhai:matter_fluid_zero 64000')
+            .inputFluids('shanhai:zero_point_energy 99999999')
+            .itemOutputs('1x shanhai:matter_singularity')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err16) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:matter_forging/new_recipe_3 <= ' + err16 + ' ' }
+    }
+
+    // ── [17/32] 原初物质重组 第 2 条（本类型共 7 条）
+    //    运行期 id = shanhai:primordial_matter_recombination/new_recipe_2
+    // @perm index=17 id=shanhai:primordial_matter_recombination/new_recipe_2 type=gtceu:primordial_matter_recombination typePath=primordial_matter_recombination kjsId=shanhai:new_recipe_2 seq=2 conditions=1
+    try {
+        var b17 = gtr.primordial_matter_recombination('shanhai:new_recipe_2')
+            .itemInputs('4x shanhai:hydrogen_ion')
+            .itemInputs('1x shanhai:helium_ion')
+            .itemInputs('16x shanhai:cosmic_dust')
+            .itemInputs('1x shanhai:taixu_liquid_droplet')
+            .itemInputs('4x shanhai:taixu_dust')
+            .circuit(5)
+            .itemOutputs('1x shanhai:hxsp')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err17) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_matter_recombination/new_recipe_2 <= ' + err17 + ' ' }
+    }
+
+    // ── [18/32] matter_module_casting 第 1 条（本类型共 1 条）
+    //    运行期 id = shanhai:matter_module_casting/new_recipe_1
+    // @perm index=18 id=shanhai:matter_module_casting/new_recipe_1 type=gtceu:matter_module_casting typePath=matter_module_casting kjsId=shanhai:new_recipe_1 seq=1 conditions=2
+    try {
+        var b18 = gtr.matter_module_casting('shanhai:new_recipe_1')
+            .itemInputs('2x shanhai:material_recombination_module')
+            .itemInputs('1x shanhai:matter_singularity')
+            .itemInputs('64x shanhai:navigate_prism')
+            .itemInputs('2042x shanhai:hxsp')
+            .itemInputs('4x shanhai:worldline_residual_fragment')
+            .itemInputs('16x shanhai:wl_board_iv')
+            .itemInputs('16x thetornproductionline:celestial_secret_deducing_module_iv')
+            .itemInputs('666x shanhai:primordial_divergence_heart')
+            .itemInputs('64x shanhai:wanxiang_core')
+            .inputFluids('shanhai:matter_fluid_basic 16000')
+            .inputFluids('shanhai:matter_fluid_virtual 8000')
+            .inputFluids('shanhai:matter_fluid_advanced 4000')
+            .inputFluids('shanhai:matter_fluid_zero 2000')
+            .itemOutputs('1x shanhai:zeroing_material_module')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+            .addCondition(new CleanroomCondition(CleanroomType.CLEANROOM))
+            .addCondition(new GravityCondition(false))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 2 条（cleanroom / gravity）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err18) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:matter_module_casting/new_recipe_1 <= ' + err18 + ' ' }
+    }
+
+    // ── [19/32] 原初因果编织 第 3 条（本类型共 8 条）
+    //    运行期 id = shanhai:primordial_causal_weaving/new_recipe_3
+    // @perm index=19 id=shanhai:primordial_causal_weaving/new_recipe_3 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_3 seq=3 conditions=1
+    try {
+        var b19 = gtr.primordial_causal_weaving('shanhai:new_recipe_3')
+            .itemInputs('1x gtceu:cold_ice_freezer')
+            .itemInputs('1x gtceu:blaze_blast_furnace')
+            .itemInputs('1x gtceu:assembly_line')
+            .itemInputs('1x gtceu:large_solidifier')
+            .itemInputs('1x gtceu:large_cutter')
+            .itemInputs('1x gtceu:large_extruder')
+            .itemInputs('1x gtceu:chemical_energy_devourer')
+            .itemInputs('1x gtceu:gas_mega_turbine')
+            .itemInputs('1x gtceu:large_sifting_funnel')
+            .itemInputs('1x gtceu:large_circuit_assembler')
+            .itemInputs('1x gtceu:fission_reactor')
+            .circuit(12)
+            .inputFluids('shanhai:matter_fluid_zero 64000')
+            .itemOutputs('1x shanhai:wanxiang_core')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err19) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_causal_weaving/new_recipe_3 <= ' + err19 + ' ' }
+    }
+
+    // ── [20/32] 原初因果编织 第 4 条（本类型共 8 条）
+    //    运行期 id = shanhai:primordial_causal_weaving/new_recipe_4
+    // @perm index=20 id=shanhai:primordial_causal_weaving/new_recipe_4 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_4 seq=4 conditions=0
+    try {
+        var b20 = gtr.primordial_causal_weaving('shanhai:new_recipe_4')
+            .circuit(2)
+            .itemInputs('4x shanhai:navigate_prism')
+            .itemInputs('1x gtceu:space_elevator')
+            .itemOutputs('1x shanhai:light_voyage')
+            .duration(200)
+            .EUt(8)
+            .addData('euTier', 0)
+        PERM_OK = PERM_OK + 1
+    } catch (err20) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_causal_weaving/new_recipe_4 <= ' + err20 + ' ' }
+    }
+
+    // ── [21/32] 原初因果编织 第 5 条（本类型共 8 条）
+    //    运行期 id = shanhai:primordial_causal_weaving/new_recipe_5
+    // @perm index=21 id=shanhai:primordial_causal_weaving/new_recipe_5 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_5 seq=5 conditions=0
+    try {
+        var b21 = gtr.primordial_causal_weaving('shanhai:new_recipe_5')
+            .circuit(2)
+            .itemInputs('4x shanhai:light_voyage')
+            .itemInputs('1x gtceu:uev_compressed_fusion_reactor')
+            .itemOutputs('1x shanhai:star_spark')
+            .duration(200)
+            .EUt(8)
+            .addData('euTier', 0)
+        PERM_OK = PERM_OK + 1
+    } catch (err21) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_causal_weaving/new_recipe_5 <= ' + err21 + ' ' }
+    }
+
+    // ── [22/32] 原初因果编织 第 6 条（本类型共 8 条）
+    //    运行期 id = shanhai:primordial_causal_weaving/new_recipe_6
+    // @perm index=22 id=shanhai:primordial_causal_weaving/new_recipe_6 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_6 seq=6 conditions=0
+    try {
+        var b22 = gtr.primordial_causal_weaving('shanhai:new_recipe_6')
+            .circuit(2)
+            .itemInputs('1x gtceu:qft')
+            .itemInputs('4x shanhai:star_spark')
+            .itemOutputs('1x shanhai:blue_son')
+            .duration(200)
+            .EUt(8)
+            .addData('euTier', 0)
+        PERM_OK = PERM_OK + 1
+    } catch (err22) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_causal_weaving/new_recipe_6 <= ' + err22 + ' ' }
+    }
+
+    // ── [23/32] 原初奇点反演 第 3 条（本类型共 3 条）
+    //    运行期 id = shanhai:primordial_singularity_inversion/new_recipe_3
+    // @perm index=23 id=shanhai:primordial_singularity_inversion/new_recipe_3 type=gtceu:primordial_singularity_inversion typePath=primordial_singularity_inversion kjsId=shanhai:new_recipe_3 seq=3 conditions=1
+    try {
+        var b23 = gtr.primordial_singularity_inversion('shanhai:new_recipe_3')
+            .itemInputs('4x gtceu:fission_reactor')
+            .itemInputs('128x gtlcore:cooler')
+            .itemInputs('128x gtlcore:fission_reactor_casing')
+            .itemInputs('128x gtlcore:fission_fuel_assembly')
+            .itemInputs('4x shanhai:wanxiang_core')
+            .itemInputs('1x shanhai:matter_singularity')
+            .itemOutputs('1x thetornproductionline:fission_reactor_module')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:zeroing_material_module', 6))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:zeroing_material_module level=6）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err23) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_singularity_inversion/new_recipe_3 <= ' + err23 + ' ' }
+    }
+
+    // ── [24/32] 原初物质重组 第 3 条（本类型共 7 条）
+    //    运行期 id = shanhai:primordial_matter_recombination/new_recipe_5
+    // @perm index=24 id=shanhai:primordial_matter_recombination/new_recipe_5 type=gtceu:primordial_matter_recombination typePath=primordial_matter_recombination kjsId=shanhai:new_recipe_5 seq=3 conditions=1
+    try {
+        var b24 = gtr.primordial_matter_recombination('shanhai:new_recipe_5')
+            .circuit(7)
+            .itemInputs('5x gtceu:potassium_dust')
+            .itemInputs('5x gtceu:iodine_dust')
+            .itemInputs('21x gtceu:iron_dust')
+            .itemInputs('124x gtceu:carbon_dust')
+            .inputFluids('gtceu:nitrogen 69000')
+            .inputFluids('gtceu:hydrogen 115000')
+            .inputFluids('gtceu:oxygen 50000')
+            .itemOutputs('1x gtceu:rad_away_dust')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:zeroing_material_module', 6))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:zeroing_material_module level=6）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err24) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_matter_recombination/new_recipe_5 <= ' + err24 + ' ' }
+    }
+
+    // ── [25/32] 原初物质重组 第 4 条（本类型共 7 条）
+    //    运行期 id = shanhai:primordial_matter_recombination/new_recipe_4
+    // @perm index=25 id=shanhai:primordial_matter_recombination/new_recipe_4 type=gtceu:primordial_matter_recombination typePath=primordial_matter_recombination kjsId=shanhai:new_recipe_4 seq=4 conditions=1
+    try {
+        var b25 = gtr.primordial_matter_recombination('shanhai:new_recipe_4')
+            .itemInputs('8x gtceu:carbon_dust')
+            .circuit(4)
+            .inputFluids('gtceu:hydrogen 9000')
+            .inputFluids('gtceu:nitrogen 1000')
+            .inputFluids('gtceu:oxygen 2000')
+            .itemOutputs('1x gtceu:paracetamol_dust')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:zeroing_material_module', 6))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:zeroing_material_module level=6）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err25) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_matter_recombination/new_recipe_4 <= ' + err25 + ' ' }
+    }
+
+    // ── [26/32] 原初物质重组 第 5 条（本类型共 7 条）
+    //    运行期 id = shanhai:primordial_matter_recombination/new_recipe_6
+    // @perm index=26 id=shanhai:primordial_matter_recombination/new_recipe_6 type=gtceu:primordial_matter_recombination typePath=primordial_matter_recombination kjsId=shanhai:new_recipe_6 seq=5 conditions=1
+    try {
+        var b26 = gtr.primordial_matter_recombination('shanhai:new_recipe_6')
+            .circuit(2)
+            .itemInputs('1x gtceu:sphalerite_dust')
+            .itemInputs('1x gtceu:galena_dust')
+            .itemOutputs('1x gtceu:indium_dust')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+            .addCondition(new ModuleLevelCondition('shanhai:material_recombination_module', 5))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:material_recombination_module level=5）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err26) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_matter_recombination/new_recipe_6 <= ' + err26 + ' ' }
+    }
+
+    // ── [27/32] 原初物质重组 第 6 条（本类型共 7 条）
+    //    运行期 id = shanhai:primordial_matter_recombination/new_recipe_7
+    // @perm index=27 id=shanhai:primordial_matter_recombination/new_recipe_7 type=gtceu:primordial_matter_recombination typePath=primordial_matter_recombination kjsId=shanhai:new_recipe_7 seq=6 conditions=1
+    try {
+        var b27 = gtr.primordial_matter_recombination('shanhai:new_recipe_7')
+            .itemInputs('3x gtceu:naquadah_dust')
+            .circuit(1)
+            .itemOutputs('1x gtceu:enriched_naquadah_dust')
+            .itemOutputs('1x gtceu:trinium_dust')
+            .itemOutputs('1x gtceu:naquadria_dust')
+            .duration(200)
+            .EUt(32768)
+            .addData('euTier', 6)
+            .addCondition(new ModuleLevelCondition('shanhai:zeroing_material_module', 6))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:zeroing_material_module level=6）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err27) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_matter_recombination/new_recipe_7 <= ' + err27 + ' ' }
+    }
+
+    // ── [28/32] 原初物质重组 第 7 条（本类型共 7 条）
+    //    运行期 id = shanhai:primordial_matter_recombination/new_recipe_8
+    // @perm index=28 id=shanhai:primordial_matter_recombination/new_recipe_8 type=gtceu:primordial_matter_recombination typePath=primordial_matter_recombination kjsId=shanhai:new_recipe_8 seq=7 conditions=1
+    try {
+        var b28 = gtr.primordial_matter_recombination('shanhai:new_recipe_8')
+            .circuit(1)
+            .inputFluids('gtceu:europium 16')
+            .itemOutputs('1x gtceu:raw_crystal_chip')
+            .duration(200)
+            .EUt(32768)
+            .addData('euTier', 6)
+            .addCondition(new ModuleLevelCondition('shanhai:zeroing_material_module', 6))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:zeroing_material_module level=6）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err28) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_matter_recombination/new_recipe_8 <= ' + err28 + ' ' }
+    }
+
+    // ── [29/32] undefined 第 1 条（本类型共 1 条）
+    //    运行期 id = shanhai:crafting/new_recipe_1
+    // @perm index=29 kind=vanilla id=shanhai:crafting/new_recipe_1 type=minecraft:crafting vanillaType=minecraft:crafting_shaped conditions=0
+    try {
+        var b29 = event.shaped('shanhai:primordial_cosmic_reactor', ['abc', 'bdb', 'cba'], { a: 'shanhai:material_recombination_module', b: 'gtceu:luv_fusion_reactor', c: 'shanhai:zeroing_material_module', d: 'shanhai:primordial_engine_core' }).id('shanhai:crafting/new_recipe_1')
+        PERM_OK = PERM_OK + 1
+    } catch (err29) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:crafting/new_recipe_1 <= ' + err29 + ' ' }
+    }
+
+    // ── [30/32] 原初因果编织 第 7 条（本类型共 8 条）
+    //    运行期 id = shanhai:primordial_causal_weaving/new_recipe_7
+    // @perm index=30 id=shanhai:primordial_causal_weaving/new_recipe_7 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_7 seq=7 conditions=0
+    try {
+        var b30 = gtr.primordial_causal_weaving('shanhai:new_recipe_7')
+            .circuit(3)
+            .notConsumable('1x thetornproductionline:fission_reactor_module')
+            .itemInputs('15x gtceu:plutonium_dust')
+            .itemInputs('90x gtceu:uranium_dust')
+            .itemOutputs('16x kubejs:nuclear_waste')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+        PERM_OK = PERM_OK + 1
+    } catch (err30) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_causal_weaving/new_recipe_7 <= ' + err30 + ' ' }
+    }
+
+    // ── [31/32] 原初因果编织 第 8 条（本类型共 8 条）
+    //    运行期 id = shanhai:primordial_causal_weaving/new_recipe_8
+    // @perm index=31 id=shanhai:primordial_causal_weaving/new_recipe_8 type=gtceu:primordial_causal_weaving typePath=primordial_causal_weaving kjsId=shanhai:new_recipe_8 seq=8 conditions=0
+    try {
+        var b31 = gtr.primordial_causal_weaving('shanhai:new_recipe_8')
+            .circuit(2)
+            .notConsumable('1x thetornproductionline:fission_reactor_module')
+            .itemInputs('15x gtceu:thorium_dust')
+            .itemOutputs('2x kubejs:nuclear_waste')
+            .itemOutputs('1x gtceu:uranium_dust')
+            .duration(200)
+            .EUt(8192)
+            .addData('euTier', 5)
+        PERM_OK = PERM_OK + 1
+    } catch (err31) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:primordial_causal_weaving/new_recipe_8 <= ' + err31 + ' ' }
+    }
+
+    // ── [32/32] 物质流凝结 第 2 条（本类型共 2 条）
+    //    运行期 id = shanhai:matter_flow_condensation/new_recipe_2
+    // @perm index=32 id=shanhai:matter_flow_condensation/new_recipe_2 type=gtceu:matter_flow_condensation typePath=matter_flow_condensation kjsId=shanhai:new_recipe_2 seq=2 conditions=1
+    try {
+        var b32 = gtr.matter_flow_condensation('shanhai:new_recipe_2')
+            .itemInputs('1x gtceu:uranium_rhodium_dinaquadide_ingot')
+            .itemInputs('1x gtceu:indium_tin_barium_titanium_cuprate_ingot')
+            .itemInputs('1x gtceu:naquadria_ingot')
+            .inputFluids('gtceu:duranium 144')
+            .inputFluids('gtceu:europium 144')
+            .outputFluids('shanhai:matter_fluid_darkstar 1000')
+            .duration(200)
+            .EUt(32768)
+            .addData('euTier', 6)
+            .addCondition(new ModuleLevelCondition('shanhai:zeroing_material_module', 6))
+        PERM_OK = PERM_OK + 1
+        // 额外条件 1 条（物质模块等级 shanhai:zeroing_material_module level=6）
+        // 🔴 走组件通道 .addCondition(new <条件类>…)（本工程先例：shanhai_recipes.js:2807）；绝不 recipe.set('recipeConditions', …)
+        PERM_COND_OK = PERM_COND_OK + 1
+    } catch (err32) {
+        PERM_BAD = PERM_BAD + 1
+        if (PERM_ERRS.length < 2000) { PERM_ERRS = PERM_ERRS + '|shanhai:matter_flow_condensation/new_recipe_2 <= ' + err32 + ' ' }
+    }
+
     // 一条汇总行（与 [server_scripts]shanhai_recipes.js 的 ok/failed 口径一致）
-    console.info('[SHANHAI-EDITOR-PERM] 游戏内编辑器新建配方 = ok=' + PERM_OK + ' failed=' + PERM_BAD
+    console.info('[SHANHAI-EDITOR-PERM] 游戏内编辑器配方 = ok=' + PERM_OK + ' failed=' + PERM_BAD
+        + ' rm_ok=' + PERM_RM_OK + ' rm_failed=' + PERM_RM_BAD
         + ' cond_applied=' + PERM_COND_OK + ' cond_failed=' + PERM_COND_BAD
-        + ' declared=15 表长=15'
-        + (PERM_OK === 15 && PERM_BAD === 0 && PERM_COND_BAD === 0 ? ' ✅' : ' 🔴 对不上'))
+        + ' declared=32 表长=32 rm_declared=8'
+        + (PERM_OK === 32 && PERM_BAD === 0 && PERM_RM_OK === 8 && PERM_RM_BAD === 0 && PERM_COND_BAD === 0 ? ' ✅' : ' 🔴 对不上'))
     if (PERM_ERRS.length > 0) {
         console.error('[SHANHAI-EDITOR-PERM] 失败明细：' + PERM_ERRS)
     }

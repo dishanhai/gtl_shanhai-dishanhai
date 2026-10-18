@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -25,6 +26,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.item.ItemTossEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
@@ -37,7 +39,7 @@ import net.minecraftforge.fml.common.Mod;
  *
  * <pre>
  *   ① 挡伤害      LivingAttackEvent      → setCanceled(true)     只对持有者
- *   ② 拦死亡      LivingDeathEvent       → setCanceled(true) 当场 setHealth(max)
+ *   ② 拦死亡      LivingDeathEvent       → setCanceled(true) 当场补满血（两条腿，见 ③″）
  *   ③ 每 tick 兜底 TickEvent.ServerTickEvent(END) → 补满 ＋ 复位 deathTime/hurtTime，只处理持有者
  *   ③b 丢出通道   ItemTossEvent          → 记下"他刚把模块丢出去了"（按键丢出＝主动放手）
  *   ④ 补回/放手   每 tick 里：只有【被动失去】才补回（背包没有 ＋ 非丢出通道 ＋ 打开的容器里没有 ＋ AE 里没有）
@@ -46,6 +48,21 @@ import net.minecraftforge.fml.common.Mod;
  *                 （前缀 [创始现实修改模块] ＋ 人话；**只发给他一个人**，绝不广播；
  *                  走同一套闸门 ⇒ 同类合并 ＋ 每秒最多一行；**日志那一路照旧保留，不是替换**）
  *   ④′ 死亡界面  ★不在这里★ —— 它在 com.shanhai.client.guard.ShanhaiGuardClientEvents（客户端那半边）
+ *   ★2026-10-17 值层兜底（对手直接写同步血量 / 直接判死，事件层拦不住）★
+ *   ③″ 两条腿补血  setHealth(max) → 自证 → 直写 DATA_HEALTH_ID（第二通道）→ 用【字段真值】再自证；
+ *                 日志必带 heal_channel=setHealth / direct / failed（不许只写成功/失败）
+ *   ③‴ 死亡流程复位 每 tick：isDeadOrDying ／ deathTime&gt;0 ／ 🔴 同步血量字段真值&lt;=0 任一为真
+ *                 ⇒ 两条腿补血 ＋ deathTime=0 ＋ hurtTime=0（独立类别 KIND_RESET，**不计入"补血成功"**）
+ *   ⑦ 拒绝死亡    LivingEntity#die ＋ ServerPlayer#die 的 HEAD（mixin）→ ci.cancel()
+ *                 ＋ 同一套复位动作；日志类别 KIND_DIE_REFUSED（走 logDetail/chat 闸门与文案表）
+ *   ⑦′ setHealth 入参  LivingEntity#setHealth(float) 的 @ModifyVariable（mixin）→ 受保护玩家被写 &lt;=0 ⇒ 改成满血
+ *   ⑧ 对手桥      ★2026-10-17★ 反射调对手自己的 public static（setHealthDelta / obtainHealthDelta /
+ *                 checkEntityDead）＋ 清它 ForgeData 里的锁存计数器 ⇒ 日志 omnimobs_bridge=counter_reset / delta_reset；
+ *                 ⚠ 这层依赖对手的类名/方法名，换版本就失效（失效只记一行 unavailable，自动退回值层）
+ *   ⑨ 反击退      ★2026-10-17★ 每 tick 只对受保护玩家：① {@code hurtMarked} 置 false
+ *                 ② 「刚被攻击」窗口（我们最近 20 tick 拦过东西）内 ＋ 水平速度 &gt; 0.6 格/tick
+ *                 ⇒ {@code setDeltaMovement} 的 x/z 清零、y 保留（🔴 只刹车，不搬人：没有 setPos / 没有拉回）
+ *                 ③ 豁免：鞘翅飞行 / 在载具里 / 旁观者 / 刚传送（2 tick）　④ 日志每秒最多一行、默认不播
  * </pre>
  *
  * <h2>🔴 为什么死亡界面那一段被搬走了（2026-10-10 专服崩溃）</h2>
@@ -93,9 +110,32 @@ public final class ShanhaiGuardEvents {
     private static final String KIND_DISARM = ShanhaiGuardCore.KIND_DISARM;
     private static final String KIND_ME = ShanhaiGuardCore.KIND_ME;
     private static final String KIND_RESCUED = ShanhaiGuardCore.KIND_RESCUED;
+    // 🔴 2026-10-17 新增两类（值层兜底：② 死亡流程复位 ／ ④ 拒绝死亡）
+    private static final String KIND_RESET = ShanhaiGuardCore.KIND_RESET;
+    private static final String KIND_DIE_REFUSED = ShanhaiGuardCore.KIND_DIE_REFUSED;
+    // 🔴 2026-10-17 新增一类（⑤ 对手桥维护：清它的 delta / 锁存计数器；诊断类，只进日志）
+    private static final String KIND_OMNIMOBS = ShanhaiGuardCore.KIND_OMNIMOBS;
+    // 🔴 2026-10-17 新增一类（反击退 / 反挤压；诊断类，只进日志、不进聊天栏）
+    private static final String KIND_KNOCKBACK = ShanhaiGuardCore.KIND_KNOCKBACK;
 
     /** 细节日志闸门：与 {@link #LOG} 同一套「同类合并 ＋ 每秒最多一行」，但带原因串（只打每窗口的"末次"）。 */
     private static final ShanhaiGuardCore.LogGate DETAIL = new ShanhaiGuardCore.LogGate();
+
+    /**
+     * 🔴 <b>⑤ 对手桥自己的闸门</b>（2026-10-17 加）：同样"同类合并 ＋ 每秒最多一行"，
+     * 但<b>单独一个</b> —— 它的原因串（{@code omnimobs_bridge=counter_reset / delta_reset}）很重要，
+     * 不能和同一秒里的别的类别挤在 {@link #DETAIL} 那一行里被"末次"顶掉。
+     */
+    private static final ShanhaiGuardCore.LogGate OMNI = new ShanhaiGuardCore.LogGate();
+
+    /**
+     * 🔴 <b>反击退自己的闸门</b>（2026-10-17 加）：同样"同类合并 ＋ 每秒最多一行"，
+     * 但<b>单独一个</b> —— 它的读数（{@code cleared=… braked=… ／ 末次：why=…}）很重要，
+     * 不能和同一秒里的别的类别挤在 {@link #DETAIL} 那一行里被"末次"顶掉。
+     *
+     * <p>用户口径：「日志每秒最多 1 行」「默认不播」—— 这一条闸门就是"每秒最多 1 行"的落实。
+     */
+    private static final ShanhaiGuardCore.LogGate KNOCK = new ShanhaiGuardCore.LogGate();
 
     /**
      * 🔴 <b>聊天栏闸门</b>（2026-10-10 加）—— 与日志同一套现成实现（{@link ShanhaiGuardCore.LogGate}：
@@ -132,6 +172,14 @@ public final class ShanhaiGuardEvents {
     /** 🔴 每个持有者一个「只在背包里没有的那一刻查一次 ME」闸门（绝不每 tick 查）。 */
     private static final Map<UUID, ShanhaiGuardCore.MeProbeGate> ME_GATES = new HashMap<>();
 
+    /**
+     * 🔴 <b>每个受保护玩家一份「反击退」状态</b>（键 = 玩家 UUID）：窗口记账 ＋ 刚传送豁免 ＋ 计数。
+     *
+     * <p>判据全在纯核 {@link ShanhaiGuardKnockback} 里（离线可跑同一份字节码）；这里只存状态。
+     * <b>不存坐标</b> —— 按用户新口径，本功能只改速度与标志，一个坐标都不记、不搬。
+     */
+    private static final Map<UUID, ShanhaiGuardKnockback.PlayerState> KB_STATES = new HashMap<>();
+
     // ═══════════════════════════════ ① 挡伤害 ═══════════════════════════════
 
     /**
@@ -154,6 +202,7 @@ public final class ShanhaiGuardEvents {
         event.setCanceled(true);
         log(KIND_DAMAGE);
         chat(player, KIND_DAMAGE);   // 🆕 聊天栏（只发给他本人；日志那一行照旧在上面）
+        noteIntercept(player);       // 🆕 反击退：这一拍把「刚被攻击」窗口打开了（20 tick）
     }
 
     // ═══════════════════════════════ ② 拦死亡 ═══════════════════════════════
@@ -178,13 +227,26 @@ public final class ShanhaiGuardEvents {
             return;
         }
         event.setCanceled(true);
-        final float missing = ShanhaiGuardCore.healAmount(true, player.getHealth(), maxHealth);
+        // 🔴 2026-10-17：补血改走【两条腿】（setHealth → 自证 → 直写同步血量 → 再自证）——
+        //    对手的杀人链不过 setHealth、且给 setHealth 挂了单向锁存的 cancel、给 getHealth() 加了偏移，
+        //    ⇒ 只走 setHealth 会把"其实没补上"当成功。日志里带 heal_channel=setHealth/direct/failed。
+        //    "缺不缺"也要用【字段真值】判（读不到才退回 getHealth()），不能只信 getHealth()。
+        final float missing = ShanhaiGuardCore.healAmount(true,
+                ShanhaiGuardCore.trustedHealth(player.getHealth(), ShanhaiGuardValueLayer.readHealthField(player)),
+                maxHealth);
         if (missing > 0f) {
-            player.setHealth(maxHealth);
-            verifyHeal(player, maxHealth); // 🔴 补件③：回完血当场读回复核（读回 != 期望 ⇒ 核里记一次失败，不静默）
+            final ShanhaiGuardValueLayer.HealOutcome heal = ShanhaiGuardValueLayer.healTwoLegs(player);
+            if (heal.landed()) {
+                logDetail(KIND_HEAL, heal.detail);
+                chat(player, KIND_HEAL);   // 🆕 聊天栏（日志那一行照旧在上面）
+            } else {
+                // 两条腿都没落地 ⇒ 明确报失败（不假装成功，也不发"已补回"）
+                logDetail(KIND_HEAL_FAIL, heal.detail);
+            }
         }
         log(KIND_DEATH);
         chat(player, KIND_DEATH);   // 🆕 聊天栏（只发给他本人；日志那一行照旧在上面）
+        noteIntercept(player);      // 🆕 反击退：拦到死亡也算"我们确实拦到了东西"
     }
 
     // ═══════════════════════════════ ③ 每 tick 兜底 ═══════════════════════════════
@@ -230,12 +292,18 @@ public final class ShanhaiGuardEvents {
                 continue;
             }
             guardOne(player, id);
+            // 🆕 2026-10-17 反击退 / 反挤压：只对【受保护玩家】跑；guardOne 里主动放手（丢了模块）会把他
+            //    从 REMEMBERED 里摘掉 ⇒ 这里再看一眼，摘掉的人一个字段都不碰。
+            if (REMEMBERED.contains(id)) {
+                guardKnockback(player, id);
+            }
         }
         // 名单里已经没有的人 ⇒ 连登记一起清掉（避免无限增长；也避免把离线玩家的坐标留着乱拉）
         REMEMBERED.retainAll(present);
         TRACKS.keySet().retainAll(present);
         ME_GATES.keySet().retainAll(present);
         TOSSED_AT.keySet().retainAll(present);
+        KB_STATES.keySet().retainAll(present);
     }
 
     /**
@@ -308,6 +376,7 @@ public final class ShanhaiGuardEvents {
             if (rescue.yes) {
                 logDetail(KIND_RESCUED, rescue.reason);
                 chat(player, KIND_RESCUED);   // 🆕 聊天栏
+                noteIntercept(player);        // 🆕 反击退：拦到"被移除"也算窗口内的一次拦截
             } else {
                 // 没救回来（或按规矩不动手）⇒ 一定留一行原因，绝不静默
                 logDetail(KIND_REMOVED, removed.reason + " ｜ 救回：" + rescue.reason);
@@ -315,20 +384,65 @@ public final class ShanhaiGuardEvents {
             }
         }
 
-        // ── ③ 回血 ＋ 当场读回复核（读回 != 期望 ⇒ 核里记一次失败） ──
+        // ── ⑤-1 🔴 2026-10-17 对手桥（补血之前）：清它的「单向锁存计数器」 ──
+        //    对手的判据是 `counter >= 5 && 新值 > 当前血 ⇒ cancel setHealth`，而 counter 单向锁存
+        //    ⇒ 不清它，我们下面两条腿里的第一条腿【永久无效】（这就是"中招后 setHealth 补血无效"的机制）。
+        final String omniCounter = ShanhaiGuardValueLayer.clearOmnimobsCounter(player);
+        if (omniCounter != null) {
+            logOmni(omniCounter);
+        }
+
+        // ── ③ 回血（两条腿）＋ 当场自证（两条腿都失败 ⇒ 核里记一次失败，不静默） ──
+        //    🔴 2026-10-17：对手的杀人链不过 setHealth、且给 setHealth 挂了单向锁存的 cancel
+        //    ⇒ 只走 setHealth 会"以为补上了、其实没补"。这里改走 ShanhaiGuardValueLayer#healTwoLegs：
+        //    setHealth → 自证 → 直写同步血量字段（第二通道）→ 用字段真值再自证；日志带 heal_channel=…。
+        //    "缺不缺"也要用【字段真值】判（读不到才退回 getHealth()，因为对手给 getHealth() 加了偏移）。
         final float maxHealth = player.getMaxHealth();
-        final float missing = ShanhaiGuardCore.healAmount(true, player.getHealth(), maxHealth);
+        final float fieldHealth = ShanhaiGuardValueLayer.readHealthField(player);
+        final float missing = ShanhaiGuardCore.healAmount(true,
+                ShanhaiGuardCore.trustedHealth(player.getHealth(), fieldHealth), maxHealth);
         if (missing > 0f) {
-            player.setHealth(maxHealth);
-            final ShanhaiGuardCore.Decision proof = ShanhaiGuardCore.healRoundTrip(
-                    ShanhaiGuardCore.healTarget(maxHealth), player.getHealth());
-            if (proof.yes) {
-                logDetail(KIND_HEAL_FAIL, proof.reason);
-                // 🔴 自证失败（setHealth 可能被 mixin 掉）⇒ **不**发"已补回"（那会是假话），只进日志。
-            } else {
-                log(KIND_HEAL);
+            final ShanhaiGuardValueLayer.HealOutcome heal = ShanhaiGuardValueLayer.healTwoLegs(player);
+            if (heal.landed()) {
+                logDetail(KIND_HEAL, heal.detail);   // 日志里带 heal_channel=setHealth/direct
                 chat(player, KIND_HEAL);   // 🆕 聊天栏（日志那一行照旧在上面）
+                noteIntercept(player);     // 🆕 反击退：补血也算窗口内的一次拦截
+            } else {
+                // 🔴 两条腿都没落地（setHealth 被 cancel ＋ 第二通道不可用/被改回）⇒ **不**发"已补回"（那会是假话）
+                logDetail(KIND_HEAL_FAIL, heal.detail);
             }
+        }
+
+        // ── ③′ 🔴 2026-10-17 新增：值层兜底·第二道 —— 把"已经进入死亡流程"的人拉回来 ──
+        //    判据在核里（deathFlowResetDecision，四条任一为真：isDeadOrDying / deathTime>0 /
+        //    🔴 同步血量字段真值 <= 0 / 🔴 ⑤ 对手自己的 checkEntityDead 说死）。
+        //    复位动作与 ④ die 拒绝共用同一个工具方法（两条腿补血 ＋ deathTime=0 ＋ hurtTime=0）。
+        //    ⚠️ 这一条【不】计入"补血成功"的计数：它是另一件事（把死亡流程拉回来），
+        //        日志用独立类别（KIND_RESET）＋ 独立闸门（DETAIL，每秒最多一行）。
+        final boolean dying = player.isDeadOrDying();
+        final int deathTimeBefore = player.deathTime;
+        final int hurtTimeBefore = player.hurtTime;
+        final float fieldHealthNow = ShanhaiGuardValueLayer.readHealthField(player);   // 复位前【重新读一次】（上面刚补过血）
+        final boolean omniSaysDead = ShanhaiGuardValueLayer.omnimobsSaysDead(player);  // ⑤ 它自己的判死
+        final ShanhaiGuardCore.Decision resetDecision = ShanhaiGuardCore.deathFlowResetDecision(
+                dying, deathTimeBefore, fieldHealthNow, omniSaysDead, ShanhaiGuardCore.enabled);
+        if (resetDecision.yes) {
+            final ShanhaiGuardValueLayer.HealOutcome reset = ShanhaiGuardValueLayer.resetDeathFlow(player);
+            logDetail(KIND_RESET, "isDeadOrDying=" + dying + " ／ deathTime 原值=" + deathTimeBefore
+                    + " ／ hurtTime 原值=" + hurtTimeBefore + " ／ 对手说死=" + omniSaysDead
+                    + " ／ " + reset.detail
+                    + " ／ " + ShanhaiGuardCore.trustedHealthReason(player.getHealth(), fieldHealthNow)
+                    + " ｜ " + resetDecision.reason);
+            chat(player, KIND_RESET);   // 聊天栏（只给他本人；同一套闸门，每秒最多一行）
+            noteIntercept(player);      // 🆕 反击退：把"已经进了死亡流程"的人拉回来也算一次拦截
+        }
+
+        // ── ⑤-3 🔴 2026-10-17 对手桥（补血之后，每 tick 兜一次）：清它的 getHealth() 偏移（delta）──
+        //    它的 getHealth() = 血量字段 + delta ⇒ delta 归零后读数才是真值，假死/假血一起消失。
+        //    清完再跑下面的读血交叉校验，"矛盾"才是真的矛盾（不是被 delta 造出来的）。
+        final String omniDelta = ShanhaiGuardValueLayer.clearOmnimobsDelta(player);
+        if (omniDelta != null) {
+            logOmni(omniDelta);
         }
 
         // ── ③b 读血交叉校验：getHealth() 与 isDeadOrDying/deathTime/hurtTime 互相矛盾 ⇒ 记一条 ──
@@ -383,6 +497,147 @@ public final class ShanhaiGuardEvents {
         // ── 原有兜底：🔴 无条件每 tick 复位（不是「只在血未满时复位」） ──
         player.deathTime = 0;
         player.hurtTime = 0;
+    }
+
+    // ═══════════════════════════════ ③c 🆕 2026-10-17 反击退 / 反挤压（只刹车，不搬人） ═══════════════════════════════
+    //
+    // 🔴 用户口径（逐字，两条都是规格）：
+    //   「我还需要反击退（包括碰撞箱挤压我），这个猫把我扔来扔去的」
+    //   「我不想做拉回，会误伤很多别的 mod 的东西」
+    // ⇒ 只改速度与标志：① hurtMarked 置 false ② 窗口内 + 水平速度 > 0.6 ⇒ deltaMovement 的 x/z 清零、y 保留。
+    //   🔴 没有位置快照、没有 setPos、没有"卡墙回退"（那是搬人，用户明确否掉）。
+    //
+    // 🔴 为什么"只改速度"也能挡住击退（读原版源码得到的顺序，不是猜；两处行号在报告里）：
+    //   ① ServerLevel#tick 的次序是「实体 tick（伤害/击退在这里发生，会 markHurt() 并把速度加到 deltaMovement）
+    //      → entityManager.tick()（ChunkMap#tick → ServerEntity#sendChanges）→ tick 结束」；
+    //   ② ServerEntity#sendChanges 里 `if (entity.hurtMarked) { broadcastAndSend(new ClientboundSetEntityMotionPacket(entity));
+    //      entity.hurtMarked = false; }` —— 它把实体当前 deltaMovement 当"击退速度"发给客户端；
+    //   ③ TickEvent.ServerTickEvent(END) 在 MinecraftServer#tickServer 的【最后一行】才触发 ⇒ 我们拿到手的
+    //      是"已经跑过 sendChanges"的那一帧 ⇒ 所以本方法做两件事：清掉标志（下一 tick 不会再被当成击退）
+    //      ＋ 把 x/z 清零后**再发一个速度包**（同一个连接上它排在原版那个包之后 ⇒ 客户端最终速度 = 刹住的那个）。
+    //   ⚠️ 以上顺序来自读 1.20.1 源码 + javap（见报告），**没有在游戏内实测**；报告里按"推断/未实测"标注。
+
+    /**
+     * 🆕 <b>反击退 / 反挤压</b>：每 tick 只对<b>这一个受保护玩家</b>跑（绝不遍历实体、绝不遍历世界）。
+     *
+     * <pre>
+     *   开关关（/shanhai guard knockback off）⇒ 一个字段都不碰
+     *   ① Entity#hurtMarked == true ⇒ 置 false（并记一次 cleared）
+     *   ② 「刚被攻击」窗口开着（我们最近 20 tick 内确实拦过东西）＋ 四条豁免都不命中
+     *      ＋ 水平速度 hypot(dx,dz) &gt; 0.6 ⇒ setDeltaMovement(0, y, 0)（只清 x/z）＋ 给本人补一个速度包
+     * </pre>
+     *
+     * <p>🔴 本方法里<b>不许出现</b> {@code setPos} ／ {@code teleportTo} ／ 位置快照 ／ {@code isInWall}
+     * （用户新口径：不搬人）。静态判据：对这两个新文件 grep 这几个词 ⇒ 0 命中（报告里给了读数）。
+     */
+    private static void guardKnockback(ServerPlayer player, UUID id) {
+        // 开关只读一次（读一个 volatile 布尔很便宜，但"读到一半变了"会让日志出现自相矛盾的读数）
+        final boolean enabled = ShanhaiGuardSwitches.knockbackGuard();
+        if (!enabled) {
+            return;   // 关掉 ⇒ 本功能完全不动玩家
+        }
+        final ShanhaiGuardKnockback.PlayerState state =
+                KB_STATES.computeIfAbsent(id, k -> new ShanhaiGuardKnockback.PlayerState());
+        final long nowTick = player.level().getGameTime();
+
+        // ── 「刚传送」豁免的记账（换维度 ／ 复活（实体 id 变了）／ ServerPlayer#isChangingDimension()）──
+        final String dim = player.level().dimension().location().toString();
+        final boolean justTeleported = state.observe(player.getId(), dim, player.isChangingDimension());
+
+        // ── ① 清零击退意图 ──
+        final ShanhaiGuardCore.Decision clear = ShanhaiGuardKnockback.hurtMarkedDecision(
+                true,          // 调用点已经按 REMEMBERED 过滤（只对受保护玩家跑）
+                player.hurtMarked,
+                enabled);
+        if (clear.yes) {
+            player.hurtMarked = false;   // Entity#hurtMarked 是 public 字段（javap 已确认）
+            state.noteHurtMarkedCleared();
+            ShanhaiGuardKnockback.noteHurtMarkedCleared();
+            logKnockback(player, "why=hurt_marked ／ " + clear.reason);
+        }
+
+        // ── ② 窗口内刹车：只清 x/z，y 原样保留（不搬人）──
+        final Vec3 delta = player.getDeltaMovement();
+        final ShanhaiGuardKnockback.Exempt exempt = ShanhaiGuardKnockback.exemptOf(
+                player.isSpectator(),          // Player#isSpectator（javap: public abstract，ServerPlayer 实现）
+                player.isFallFlying(),         // LivingEntity#isFallFlying（javap: public）
+                player.getVehicle() != null,   // Entity#getVehicle（javap: public）
+                justTeleported);
+        final ShanhaiGuardCore.Decision brake = ShanhaiGuardKnockback.brakeDecision(
+                delta.x, delta.z,
+                state.windowOpen(nowTick),
+                exempt,
+                enabled);
+        if (!brake.yes) {
+            return;
+        }
+        player.setDeltaMovement(0.0, delta.y, 0.0);   // 🔴 只清 x/z；y 保留（不下沉/不浮空）
+        state.noteBraked();
+        ShanhaiGuardKnockback.noteBraked();
+        // 让"刹车"真的到客户端：同一个连接上这个包排在原版那个击退包之后 ⇒ 客户端最终速度 = 0（x/z）
+        // ⚠️ 这是【速度包】（ClientboundSetEntityMotionPacket），不是位置包 —— 不搬人。
+        try {
+            if (player.connection != null) {
+                player.connection.send(new ClientboundSetEntityMotionPacket(player));
+            }
+        } catch (Throwable t) {
+            // 发包失败不影响"服务端已刹住"这件事实，但必须留痕（不静默）
+            ShanhaiMod.LOGGER.warn(ShanhaiGuardCore.LOG_PREFIX
+                    + "knockback_guard motion_packet_failed player=" + player.getName().getString()
+                    + " err=" + t);
+        }
+        logKnockback(player, "why=brake ／ " + brake.reason + " ／ 拦截于 tick=" + state.lastInterceptTick()
+                + " ／ y 保留=" + delta.y);
+    }
+
+    /**
+     * 🆕 记一次「我们确实拦到了东西」—— 这会打开/续上「刚被攻击」窗口（{@value ShanhaiGuardKnockback#INTERCEPT_WINDOW_TICKS} tick）。
+     *
+     * <p>只有这几条路会调它（用户口径：「拦到伤害/拒死/补血/拦移除任一都算」）：
+     * {@link #onLivingAttack}（拦伤害）／{@link #onLivingDeath}（拦死亡 ＋ 补血）／
+     * {@link #guardOne}（补血落地 ／ 死亡流程复位 ／ 救回被移除）／{@link #noteDieRefused}（拒死）。
+     * <b>别的 mod 的弹射 / 跳板 / 技能推人不会调它</b> ⇒ 窗口不打开 ⇒ 我们一条都不刹车。
+     */
+    private static void noteIntercept(Player player) {
+        if (!(player instanceof ServerPlayer sp)) {
+            return;
+        }
+        KB_STATES.computeIfAbsent(sp.getUUID(), k -> new ShanhaiGuardKnockback.PlayerState())
+                .noteIntercept(sp.level().getGameTime());
+    }
+
+    /**
+     * 🆕 反击退的日志（<b>每秒最多一行</b>，沿用 {@link ShanhaiGuardCore.LogGate} 的"同类合并"口径）
+     * ＋（播报开着时）**同一拍**给本人说一句左下角。
+     *
+     * <pre>
+     *   [SHANHAI-GUARD] knockback_guard 本秒 3 次 ｜ 逐次计数 cleared=12 braked=7 ｜ 机制=… ｜ 末次：why=brake ／ …
+     * </pre>
+     *
+     * <p>为什么播报挂在这个方法里、而不是单独的调用点：两者必须<b>同一拍</b>，
+     * 否则"日志一行 ＋ 播报一行"就变成两倍刷屏（用户口径：每秒最多 1 行、默认不播）。
+     */
+    private static void logKnockback(ServerPlayer player, String reason) {
+        final ShanhaiGuardCore.LogGate.Batch batch = KNOCK.admitBatch(KIND_KNOCKBACK, System.currentTimeMillis());
+        if (batch == null) {
+            return;   // 同一秒里已经有过一行 ⇒ 这一次只合并进下一行（不刷屏）
+        }
+        final long n = batch.merged().getOrDefault(KIND_KNOCKBACK, 0L);
+        ShanhaiMod.LOGGER.info(ShanhaiGuardCore.LOG_PREFIX + "knockback_guard 本秒 " + n + " 次 ｜ 逐次计数 cleared="
+                + ShanhaiGuardKnockback.hurtMarkedClearedTotal() + " braked="
+                + ShanhaiGuardKnockback.brakedTotal() + " ｜ 机制=" + ShanhaiGuardCore.MECH_KNOCKBACK
+                + " ｜ 末次：" + reason);
+        // ── 左下角播报（默认不播；只有 knockback_broadcast=true 才发，且只发给本人）──
+        if (!ShanhaiGuardSwitches.knockbackBroadcast()) {
+            return;
+        }
+        try {
+            player.displayClientMessage(
+                    net.minecraft.network.chat.Component.literal(ShanhaiGuardKnockback.broadcastText(n)), true);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn(ShanhaiGuardCore.LOG_PREFIX
+                    + "knockback_guard broadcast_failed player=" + player.getName().getString() + " err=" + t);
+        }
     }
 
     // ═══════════════════════════════ ③b 【主动放手】丢出通道 ═══════════════════════════════
@@ -493,13 +748,29 @@ public final class ShanhaiGuardEvents {
         return holdsGuard(player) || REMEMBERED.contains(player.getUUID());
     }
 
-    /** 回完血当场读回复核（补件③）；读回 != 期望 ⇒ 核里已经记了一次失败，这里只负责把原因打出来。 */
-    private static void verifyHeal(Player player, float maxHealth) {
-        final ShanhaiGuardCore.Decision proof = ShanhaiGuardCore.healRoundTrip(
-                ShanhaiGuardCore.healTarget(maxHealth), player.getHealth());
-        if (proof.yes) {
-            logDetail(KIND_HEAL_FAIL, proof.reason);
-        }
+    /**
+     * 🔴 <b>④ 拒绝死亡</b>（2026-10-17 新增）：mixin 在 {@code die(DamageSource)} 的 {@code HEAD} 判出
+     * "这是受保护玩家" ⇒ 取消死亡后，由这里<b>走与其它拦截同一套闸门与文案表</b>报出去：
+     *
+     * <pre>
+     *   日志一路：logDetail(KIND_DIE_REFUSED, "命中点=… ／ 两句读数")   ← [SHANHAI-GUARD] 拦截 拒绝死亡 …
+     *   聊天一路：chat(player, KIND_DIE_REFUSED)                      ← [创始现实修改模块] REFUSED die (…) xN
+     * </pre>
+     *
+     * <p>⚠️ 只发给<b>他本人</b>（{@link #chat} 里只有收件人一个）；两条路都走"同类合并 ＋ 每秒最多一行"，
+     * 所以即便有人每 tick 调一次 {@code die} 也不会刷屏。
+     *
+     * <p>⚠️ 这个方法由 {@code com.shanhai.common.guard.ShanhaiGuardValueLayer#refuseDie} 调用（mixin → 执行层 → 这里），
+     * 所以只能是包内可见（{@code private} 调不到）。
+     *
+     * @param player   被拒绝死亡的玩家（受保护的那一个）
+     * @param callSite 命中点（{@code LivingEntity#die} / {@code ServerPlayer#die}）
+     * @param reason   判据与两条腿补血的读数
+     */
+    static void noteDieRefused(ServerPlayer player, String callSite, String reason) {
+        logDetail(KIND_DIE_REFUSED, "命中点=" + callSite + " ／ " + reason);
+        chat(player, KIND_DIE_REFUSED);
+        noteIntercept(player);   // 🆕 反击退：拒死也算"我们确实拦到了东西"
     }
 
     /**
@@ -678,6 +949,21 @@ public final class ShanhaiGuardEvents {
      */
     private static void logDetail(String kind, String reason) {
         final String line = DETAIL.admit(kind, System.currentTimeMillis());
+        if (line != null) {
+            ShanhaiMod.LOGGER.warn(line + " ｜ 末次：" + reason);
+        }
+    }
+
+    /**
+     * 🔴 <b>⑤ 对手桥的行</b>（2026-10-17 加）：带 {@code omnimobs_bridge=counter_reset / delta_reset}，
+     * 走它自己的 {@link #OMNI} 闸门 —— 同样"同类合并 ＋ 每秒最多一行"，但不会被同窗口别的类别顶掉。
+     *
+     * <p>为什么单独一行：用户要求"日志里区分来源"（{@code heal_channel=…} 与
+     * {@code omnimobs_bridge=counter_reset|delta_reset}）—— 混在补血那一行里，读日志的人分不清
+     * "这次是值层补上的、还是把它的偏移清掉之后才补上的"。
+     */
+    private static void logOmni(String reason) {
+        final String line = OMNI.admit(KIND_OMNIMOBS, System.currentTimeMillis());
         if (line != null) {
             ShanhaiMod.LOGGER.warn(line + " ｜ 末次：" + reason);
         }
