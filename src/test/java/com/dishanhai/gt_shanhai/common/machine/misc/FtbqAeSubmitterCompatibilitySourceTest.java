@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.machine.misc;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -14,7 +16,6 @@ class FtbqAeSubmitterCompatibilitySourceTest {
             "src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "common", "machine", "misc", "FtbqAeSubmitterMachine.java");
     private static final Path BUILD = Path.of("build.gradle");
-    private static final Path UI_CONFIG = Path.of("gt_shanhai.mixin.json");
     private static final Path UI_BUTTON = Path.of(
             "src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "mixin", "FtbViewQuestPanelSubmitterButtonMixin.java");
@@ -44,7 +45,7 @@ class FtbqAeSubmitterCompatibilitySourceTest {
 
     @Test
     void ftbq422UiInjectionPointsRemainRegistered() throws IOException {
-        String config = Files.readString(UI_CONFIG);
+        String config = MixinConfigs.readAll();
         String button = Files.readString(UI_BUTTON);
         String shop = Files.readString(UI_SHOP);
         String edit = Files.readString(UI_EDIT);

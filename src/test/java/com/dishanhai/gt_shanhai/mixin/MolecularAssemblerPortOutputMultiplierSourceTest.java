@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -12,8 +14,6 @@ class MolecularAssemblerPortOutputMultiplierSourceTest {
 
     private static final Path MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "MolecularAssemblerPortOutputMultiplierMixin.java");
-    private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void portPublishesCachedEffectivePatternsButPushesSourcePatterns() throws Exception {
         String source = Files.readString(MIXIN);
@@ -49,6 +49,6 @@ class MolecularAssemblerPortOutputMultiplierSourceTest {
 
     @Test
     void portMixinIsRegistered() throws Exception {
-        assertTrue(Files.readString(CONFIG).contains("MolecularAssemblerPortOutputMultiplierMixin"));
+        assertTrue(MixinConfigs.readAll().contains("MolecularAssemblerPortOutputMultiplierMixin"));
     }
 }

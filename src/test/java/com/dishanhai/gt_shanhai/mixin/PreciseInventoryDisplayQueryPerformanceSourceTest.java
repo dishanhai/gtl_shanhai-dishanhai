@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -13,12 +15,10 @@ class PreciseInventoryDisplayQueryPerformanceSourceTest {
 
     private static final Path MIXIN_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "PreciseInventoryDisplayQueryMixin.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void queryMixinKeepsTheGtlcoreTraversalContractWhileRemovingStreamAllocation() throws IOException {
         String source = Files.readString(MIXIN_SOURCE);
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(source.contains("PreciseInventoryDisplayService$Query"));
         assertTrue(source.contains("private void visit(MEStorage storage, List<AEKey> requested, int depth)"));

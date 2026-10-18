@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.ae2;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -15,7 +17,7 @@ public class MachineCircuitDeliverySourceTest {
                 "src/main/java/com/dishanhai/gt_shanhai/common/ae2/MachineCircuitDelivery.java"));
         String mixin = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/mixin/PatternProviderLogicCircuitMixin.java"));
-        String config = Files.readString(Path.of("src/main/resources/gt_shanhai.mixin.json"));
+        String config = MixinConfigs.readAll();
 
         assertTrue(delivery.contains("pattern.getSparseInputs()"),
                 "必須讀樣板編碼裡的編程電路，不能改走規劃輸入");

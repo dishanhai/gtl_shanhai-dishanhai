@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -11,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GTLCorePatternPreviewCompatibilityMixinTest {
 
-    private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "GTLCorePatternPreviewCompatibilityMixin.java");
 
@@ -28,7 +29,7 @@ class GTLCorePatternPreviewCompatibilityMixinTest {
     @Test
     void redirectsOnlyGtlCoreControllerPreviewFormationCheck() throws Exception {
         String source = Files.readString(SOURCE);
-        String config = Files.readString(CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(source.contains("org.gtlcore.gtlcore.api.gui.PatternPreviewWidget"));
         assertTrue(source.contains("@Redirect(method = \"loadControllerFormed\""));

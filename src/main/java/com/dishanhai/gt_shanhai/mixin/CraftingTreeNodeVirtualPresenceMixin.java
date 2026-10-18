@@ -24,9 +24,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 // priority 必须高于 GTLCore 的 CraftingTreeNodeMixin(默认 1000)。
-// adaptiveRequest / fastRequest / ultraFastRequest / maxFastRequest /
+// fastRequest / ultraFastRequest / maxFastRequest /
 // gtlcore$runMaxFastPrefix 是 GTLCore 后加的。本 mixin 若先应用，
 // @ModifyVariable 只会命中原版 request，催化剂量仍会被下单次数放大。
+// 注意：1.2.3.2 起没有 adaptiveRequest，不要加回选择器。
 // 在场物品只改自己这个节点：已在场则直接记为满足，不抽取、不关闭上层 MAX_FAST。
 @Mixin(value = CraftingTreeNode.class, priority = 1500, remap = false)
 public abstract class CraftingTreeNodeVirtualPresenceMixin {
@@ -37,7 +38,7 @@ public abstract class CraftingTreeNodeVirtualPresenceMixin {
     @Shadow @Final private long amount;
 
     @ModifyVariable(
-            method = { "request", "adaptiveRequest", "fastRequest", "ultraFastRequest",
+            method = { "request", "fastRequest", "ultraFastRequest",
                     "maxFastRequest", "gtlcore$runMaxFastPrefix" },
             at = @At("HEAD"),
             argsOnly = true,

@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,7 +20,6 @@ class ShanhaiPatternModifierIntegrationSourceTest {
             "gt_shanhai", "common", "machine", "part", "RecipeTypePatternBufferPartMachine.java");
     private static final Path SEARCH_HELPER = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "item", "RecipeTypePatternSearchHelper.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
 
     @Test
     void debugToolOwnsAllProviderPatternModifierSettings() throws Exception {
@@ -94,7 +95,7 @@ class ShanhaiPatternModifierIntegrationSourceTest {
 
     @Test
     void oldGtlcorePatternModifierMixinIsNoLongerRegistered() throws Exception {
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertFalse(config.contains("PatternModifierMixins"));
     }

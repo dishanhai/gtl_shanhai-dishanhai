@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -10,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GtlCoreGraphPresenceCompatibilitySourceTest {
 
     private static final Path BUILD_GRADLE = Path.of("build.gradle");
-    private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path POLICY_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "GtlCoreGraphPresenceDispatchPolicyMixin.java");
     private static final Path CAPTURE_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
@@ -31,7 +32,7 @@ class GtlCoreGraphPresenceCompatibilitySourceTest {
 
     @Test
     void graphMixinsAreRegisteredAndCarryPresenceSemantics() throws Exception {
-        String config = Files.readString(CONFIG);
+        String config = MixinConfigs.readAll();
         String policy = Files.readString(POLICY_MIXIN);
         String capture = Files.readString(CAPTURE_MIXIN);
         String adapter = Files.readString(ADAPTER_MIXIN);

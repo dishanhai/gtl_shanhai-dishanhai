@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -19,8 +21,6 @@ class PatternAccessTermMenuIncrementalThrottleSourceTest {
 
     private static final Path MIXIN = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "mixin", "PatternAccessTermMenuIncrementalThrottleMixin.java");
-    private static final Path MIXIN_JSON = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void incrementalUpdateThrottledWithInteractionBurst() throws IOException {
         String source = Files.readString(MIXIN);
@@ -37,8 +37,8 @@ class PatternAccessTermMenuIncrementalThrottleSourceTest {
 
     @Test
     void mixinRegistered() throws IOException {
-        String json = Files.readString(MIXIN_JSON);
+        String json = MixinConfigs.readAll();
         assertTrue(json.contains("\"PatternAccessTermMenuIncrementalThrottleMixin\""),
-                "mixin 必须注册进 gt_shanhai.mixin.json 的 mixins 数组");
+                "mixin 必须注册进对应分组的 gt_shanhai.*.mixin.json 的 mixins 数组");
     }
 }

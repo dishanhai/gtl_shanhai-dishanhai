@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.ae2.quantum;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -16,8 +18,6 @@ class QuantumCraftingRedispatchSourceTest {
             "mixin", "QuantumCraftingCPUMenuMixin.java");
     private static final Path SCREEN = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "mixin", "CraftingCPUScreenRedispatchMixin.java");
-    private static final Path MIXINS = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void redispatchRefillsOnlyRealRemainingInputs() throws IOException {
         String logic = Files.readString(LOGIC);
@@ -59,7 +59,7 @@ class QuantumCraftingRedispatchSourceTest {
     void buttonOccupiesTheSlotImmediatelyLeftOfCancel() throws IOException {
         assertTrue(Files.exists(SCREEN));
         String screen = Files.readString(SCREEN);
-        String mixins = Files.readString(MIXINS);
+        String mixins = MixinConfigs.readAll();
 
         assertTrue(screen.contains("Component.literal(\"重发配\")"));
         assertTrue(screen.contains("this.leftPos + 108"));

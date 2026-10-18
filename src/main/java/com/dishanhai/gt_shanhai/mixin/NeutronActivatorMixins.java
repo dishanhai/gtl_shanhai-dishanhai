@@ -64,7 +64,7 @@ public final class NeutronActivatorMixins {
 
         // 这里曾有 gtShanhai$bypassEv(method="working") 与 gtShanhai$boostNeutronParallel(method="getMaxParallel")，
         // 两个注入目标在 NeutronActivatorMachine 上**都不存在**——该类只有 onWorking()，并且完全没有
-        // getMaxParallel()（javap/反编译源均确认）。由于 gt_shanhai.mixin.json 未设置 injectors.defaultRequire，
+        // getMaxParallel()（javap/反编译源均确认）。由于各 mixin 配置均未设置 injectors.defaultRequire，
         // 二者只是静默失效，从未生效过，已删除。对应能力其实早有正确的落点：
         //   · eV 门槛：recipeModifier 要求 ev_min < eV < ev_max，上面的 gtShanhai$adjustEvForRecipe
         //     已在其 HEAD 把 eV 调进区间，配合 gtShanhai$maintainEv 兜底；

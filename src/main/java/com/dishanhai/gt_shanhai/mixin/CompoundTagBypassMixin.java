@@ -16,7 +16,8 @@ public class CompoundTagBypassMixin {
 
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("gt_shanhai:temp");
 
-    @Inject(method = "getInt", at = @At("HEAD"), cancellable = true)
+    // 本项目无 refmap：CompoundTag.getInt 在产线是 m_128451_，必须 SRG 名 + remap=false。
+    @Inject(method = "m_128451_", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$bypassTemp(String key, CallbackInfoReturnable<Integer> cir) {
         if (!DShanhaiTempBypass.isActive()) return;
         if (key.contains("temp") || key.contains("Temp") || key.contains("ebf") || key.contains("blast")) {

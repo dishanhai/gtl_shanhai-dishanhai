@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.client.ae;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,7 +24,6 @@ class AeTerminalFavoritesSourceTest {
             "gt_shanhai", "client", "ClientInit.java");
     private static final Path KEY_MAPPINGS = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "client", "ShanhaiKeyMappings.java");
-    private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
 
     @Test
     void favoritesPersistExactAeKeysInInsertionOrder() throws Exception {
@@ -60,7 +61,7 @@ class AeTerminalFavoritesSourceTest {
         String accessor = Files.readString(SCREEN_ACCESSOR);
         String clientInit = Files.readString(CLIENT_INIT);
         String keyMappings = Files.readString(KEY_MAPPINGS);
-        String config = Files.readString(CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(config.contains("AeTerminalFavoritesScreenMixin"));
         assertTrue(config.contains("AeTerminalFavoritesScreenAccessor"));

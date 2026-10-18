@@ -1,0 +1,25 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.dishanhai.gt_shanhai.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "client": [
+    "RecipeEditorJeiBookmarkSideMixin",
+    "RecipeEditorJeiListSideMixin",
+    "JEIRecipeListMixin",
+    "JeiShopProductGridSourceMixin",
+    "JeiShopModeButtonMixin",
+    "JeiIngredientFilterApiAccessor",
+    "JeiIngredientFilterAccessor",
+    "JeiIconToggleButtonAccessor",
+    "JeiRecipesGuiAccessor",
+    "JeiRecipeGuiLogicAccessor",
+    "FluidHelperTooltipMixin",
+    "JEIAESearchPrefixMixin",
+    "JEIGuiRuntimeGuardMixin",
+    "JEICopyShortcutMixin",
+    "JEIRecipeGuiInfinityCellMixin",
+    "JEISdaElementDedupMixin",
+    "RecipeSlotTooltipMixin"
+  ]
+}

@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.shop;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -52,7 +54,7 @@ class ShopAutoCraftSourceTest {
                 "GTLCore's lazy inventory must also honor shop reservations");
         assertFalse(mixin.contains("list.set("),
                 "The native list is skipped by GTLCore and cannot enforce reservations");
-        assertTrue(Files.readString(Path.of("src/main/resources/gt_shanhai.mixin.json"))
+        assertTrue(MixinConfigs.readAll()
                 .contains("\"ShopCraftingSimulationInventoryMixin\""));
     }
 

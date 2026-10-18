@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,7 +19,6 @@ class VirtualCraftingPlanMarkerSourceTest {
             "CraftConfirmTableRendererVirtualMarkerMixin.java");
     private static final Path MARKER_ACCESS = Path.of("src/main/java/com/dishanhai/gt_shanhai/common/item",
             "CraftingPlanVirtualMarkerAccess.java");
-    private static final Path MIXIN_CONFIG = Path.of("src/main/resources/gt_shanhai.mixin.json");
     private static final Path ZH_CN = Path.of("src/main/resources/assets/gt_shanhai/lang/zh_cn.json");
 
     @Test
@@ -40,7 +41,7 @@ class VirtualCraftingPlanMarkerSourceTest {
     void craftingPlanRendersVisibleMarkerAndTooltip() throws IOException {
         assertTrue(Files.exists(CLIENT_MIXIN), "需要客户端合成计划渲染 Mixin");
         String source = Files.readString(CLIENT_MIXIN);
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
         String lang = Files.readString(ZH_CN);
 
         assertTrue(source.contains("method = \"getEntryDescription\""),
@@ -69,6 +70,6 @@ class VirtualCraftingPlanMarkerSourceTest {
         assertTrue(clientSource.contains("instanceof CraftingPlanVirtualMarkerAccess access"));
         assertFalse(commonSource.contains("interface EntryAccess"));
         assertFalse(clientSource.contains("CraftingPlanVirtualMarkerMixins.EntryAccess"),
-                "客户端不能直接加载受 gt_shanhai.mixin.json 管理的 Mixin 包类型");
+                "客户端不能直接加载受 gt_shanhai.*.mixin.json 管理的 Mixin 包类型");
     }
 }

@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.compat.eaep;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -16,7 +18,6 @@ class EaepProviderWarningMetadataSourceTest {
     private static final Path REQUEST = javaPath("mixin", "EaepRequestProvidersListRecipeTypesMixin.java");
     private static final Path PACKET = javaPath("mixin", "EaepProvidersListRecipeTypesMixin.java");
     private static final Path ACCESSOR = javaPath("mixin", "EaepProviderUploadPatternAccessor.java");
-    private static final Path MIXIN_CONFIG = ROOT.resolve("resources").resolve("gt_shanhai.mixin.json");
 
     @Test
     void providerPacketCarriesKnownStellarFlagsAndExactUploadType() throws IOException {
@@ -38,7 +39,7 @@ class EaepProviderWarningMetadataSourceTest {
         assertTrue(Files.exists(ACCESSOR));
         String accessor = Files.readString(ACCESSOR);
         String request = Files.readString(REQUEST);
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(accessor.contains("@Invoker(\"getPendingCtrlQPattern\")"));
         assertTrue(request.contains("PatternRecipeTypeHelper.readRecipeTypeId(uploadPattern)"));

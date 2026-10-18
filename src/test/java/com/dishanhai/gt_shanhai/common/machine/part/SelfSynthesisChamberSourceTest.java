@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -46,7 +48,7 @@ class SelfSynthesisChamberSourceTest {
                 "common", "machine", "part", "SelfSynthesisChamberPartMachine.java"));
         String mixin = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
                 "mixin", "SelfSynthesisCraftCancelMixin.java"));
-        String config = Files.readString(Path.of("src", "main", "resources", "gt_shanhai.mixin.json"));
+        String config = MixinConfigs.readAll();
         assertTrue(!machine.contains("details.getOutputs()"),
                 "自合成仓不能把样板产物注回网络");
         assertTrue(machine.contains("SelfSynthesisCraftCancel.mark()"),

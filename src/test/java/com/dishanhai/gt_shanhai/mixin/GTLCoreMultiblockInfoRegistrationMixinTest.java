@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -20,8 +22,6 @@ class GTLCoreMultiblockInfoRegistrationMixinTest {
             "gt_shanhai", "integration", "jei", "MultiblockPreviewRegistrationHelper.java");
     private static final Path MIXIN_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "GTLCoreMultiblockInfoRegistrationMixin.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void keepsValidPreviewsWhenOneFactoryFails() throws Exception {
         assertTrue(Files.exists(HELPER_SOURCE), "必須提供逐機器容錯的預覽收集器");
@@ -53,7 +53,7 @@ class GTLCoreMultiblockInfoRegistrationMixinTest {
     void replacesGtlCoreAllOrNothingRegistrationAtCaller() throws Exception {
         assertTrue(Files.exists(MIXIN_SOURCE), "必須提供 GTLCore 多方塊預覽註冊相容 Mixin");
         String source = Files.readString(MIXIN_SOURCE);
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(source.contains("GTJEIPlugin.class"),
                 "必須在 GTCEu JEI 外層註冊入口攔截，避開 GTLCore cancellable HEAD 的順序競爭");

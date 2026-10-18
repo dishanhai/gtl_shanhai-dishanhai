@@ -176,19 +176,8 @@ public abstract class QuantumCraftingCPUMenuMixin extends AEBaseMenu implements 
         target.cancelJob();
     }
 
-    @Inject(method = "selectCpu", at = @At("TAIL"))
-    private void gtShanhai$afterSelectCpu(int serial, CallbackInfo ci) {
-        if (isClientSide() || !((Object) this instanceof CraftingStatusMenuAccessor)) {
-            return;
-        }
-        CraftingStatusMenuAccessor accessor = (CraftingStatusMenuAccessor) (Object) this;
-        ICraftingCPU selectedCpu = accessor.gtShanhai$getSelectedCpuRaw();
-        if (selectedCpu instanceof QuantumCraftingCPU) {
-            gtShanhai$quantumCpu = (QuantumCraftingCPU) selectedCpu;
-            QuantumDiagnostics.hit("menu.selectQuantum",
-                    "serial=" + serial + " busy=" + gtShanhai$quantumCpu.isBusy());
-        }
-    }
+    // selectCpu(int) 只在 CraftingStatusMenu 上存在，CraftingCPUMenu 没有该方法；
+    // 量子 CPU 的选择记录已由 QuantumCraftingStatusMenuMixin / 本类 setCPU 注入覆盖。
 
     // removed(Player) = AbstractContainerMenu.m_6877_
     @Inject(method = "m_6877_", at = @At("TAIL"), remap = false, require = 0)

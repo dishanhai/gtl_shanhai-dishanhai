@@ -71,6 +71,8 @@ public class ClientInit {
         MinecraftForge.EVENT_BUS.addListener(ShanhaiKeyMappings::onClientTick);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onItemTooltip);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onClientTick);
+        MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey::onItemTooltip);
+        MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey::onClientTick);
         com.dishanhai.gt_shanhai.client.recipe.ShanhaiRecipeStackPicker.install();
     }
 
@@ -123,6 +125,7 @@ public class ClientInit {
         com.dishanhai.gt_shanhai.client.shop.ClientAeCurrencyBalance.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientShopQuestLinks.clear();
         com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey.reset();
+        com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey.reset();
     }
 
     /**

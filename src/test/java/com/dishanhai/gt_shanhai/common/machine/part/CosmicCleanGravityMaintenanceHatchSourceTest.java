@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -17,7 +19,6 @@ class CosmicCleanGravityMaintenanceHatchSourceTest {
             "gt_shanhai", "mixin", "GravityConditionMaintenanceMixin.java");
     private static final Path MACHINES = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "machine", "DShanhaiMachines.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path ZH_CN = Path.of("src", "main", "resources", "assets", "gt_shanhai",
             "lang", "zh_cn.json");
     private static final Path EN_US = Path.of("src", "main", "resources", "assets", "gt_shanhai",
@@ -69,7 +70,7 @@ class CosmicCleanGravityMaintenanceHatchSourceTest {
 
     @Test
     void mixinAndTranslationsAreRegistered() throws IOException {
-        String mixinConfig = Files.readString(MIXIN_CONFIG);
+        String mixinConfig = MixinConfigs.readAll();
         String zhCn = Files.readString(ZH_CN);
         String enUs = Files.readString(EN_US);
         String key = "block.gt_shanhai.cosmic_clean_gravity_maintenance_hatch";

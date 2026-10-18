@@ -14,8 +14,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = RecipeManager.class, priority = 900)
 public class ReverseEntropyRecipeMixin {
 
-    @Inject(method = "apply(Ljava/util/Map;Lnet/minecraft/server/packs/resources/ResourceManager;Lnet/minecraft/util/profiling/ProfilerFiller;)V",
-            at = @At("TAIL"))
+    // 本项目无 refmap：RecipeManager.apply 在产线是 m_5787_，必须 SRG 名 + remap=false。
+    @Inject(method = "m_5787_(Ljava/util/Map;Lnet/minecraft/server/packs/resources/ResourceManager;Lnet/minecraft/util/profiling/ProfilerFiller;)V",
+            at = @At("TAIL"), remap = false)
     private void gtShanhai$installReverseEntropyRecipes(CallbackInfo ci) {
         PrimordialReverseEntropyRecipes.install((RecipeManager) (Object) this);
     }

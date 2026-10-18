@@ -6,6 +6,7 @@ import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.WalletOpenRequestPacket;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.resources.ResourceLocation;
 
 /**
  * 客户端专用：打开山海商店界面。
@@ -24,6 +25,13 @@ public final class ShopScreenOpener {
     public static void requestOpenAt(long entryKey) {
         ShopCatalogManifest.Stub stub = ClientShopCatalog.stub(entryKey);
         ShopScreen.requestFocus(stub == null ? null : stub.stableId(), entryKey);
+        ShanhaiNetwork.CHANNEL.sendToServer(new WalletOpenRequestPacket());
+    }
+
+    /** 悬停 GT 币：先走钱包校验开店，商店起来后立刻进入货币中心并选中该币。 */
+    public static void requestOpenCurrency(ResourceLocation currency) {
+        if (currency == null) return;
+        ShopScreen.requestCurrency(currency);
         ShanhaiNetwork.CHANNEL.sendToServer(new WalletOpenRequestPacket());
     }
 }

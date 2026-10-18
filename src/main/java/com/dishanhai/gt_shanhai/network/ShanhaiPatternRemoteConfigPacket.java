@@ -21,7 +21,8 @@ public final class ShanhaiPatternRemoteConfigPacket {
         OPEN_SHARED_INPUTS,
         OPEN_PATTERN_BEHAVIOR,
         OPEN_REFUND,
-        TELEPORT
+        TELEPORT,
+        OPEN_STRONG_PATTERN_MATCH
     }
 
     private final int menuId;
@@ -87,6 +88,9 @@ public final class ShanhaiPatternRemoteConfigPacket {
         if (operation == Operation.OPEN_FULL_PATTERN) return ShanhaiStellarRemoteUIHolder.Mode.FULL_PATTERN;
         if (operation == Operation.OPEN_OUTPUT_MULTIPLIER) {
             return ShanhaiStellarRemoteUIHolder.Mode.OUTPUT_MULTIPLIER;
+        }
+        if (operation == Operation.OPEN_STRONG_PATTERN_MATCH) {
+            return ShanhaiStellarRemoteUIHolder.Mode.STRONG_PATTERN_MATCH;
         }
         if (operation == Operation.OPEN_WILDCARD) return ShanhaiStellarRemoteUIHolder.Mode.WILDCARD;
         if (operation == Operation.OPEN_SHARED_INPUTS) return ShanhaiStellarRemoteUIHolder.Mode.SHARED_INPUTS;

@@ -1,0 +1,19 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.dishanhai.gt_shanhai.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "FtbItemTaskDisplayCacheMixin",
+    "FtbQuestDependencyCacheMixin",
+    "FtbTeamDataRevisionMixin",
+    "TextComponentParserMixin"
+  ],
+  "client": [
+    "FtbViewQuestPanelSubmitterButtonMixin",
+    "FtbViewQuestPanelShopButtonMixin",
+    "FtbViewQuestPanelEditMenuMixin",
+    "FtbQuestButtonBulkTaskMixin",
+    "FtbQuestPanelBulkTaskMixin"
+  ]
+}

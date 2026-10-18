@@ -97,7 +97,7 @@ jar {
                 'Implementation-Title'    : mod_name,
                 'Implementation-Version'  : mod_version,
                 'Implementation-Vendor'   : mod_authors,
-                'MixinConfigs'            : 'gt_shanhai.mixin.json,gt_shanhai.enhancedcore.mixin.json',
+                'MixinConfigs'            : 'gt_shanhai.mixin.json,gt_shanhai.minecraft.mixin.json,gt_shanhai.gtceu.mixin.json,gt_shanhai.gtlcore.mixin.json,gt_shanhai.gtladditions.mixin.json,gt_shanhai.ae2.mixin.json,gt_shanhai.ae2addons.mixin.json,gt_shanhai.jei.mixin.json,gt_shanhai.ftb.mixin.json,gt_shanhai.ldlib.mixin.json,gt_shanhai.guideme.mixin.json,gt_shanhai.optional.mixin.json,gt_shanhai.enhancedcore.mixin.json',
         ])
     }
 }

@@ -144,6 +144,9 @@ public class ShopScreen extends ScaledScreen {
     private static long pendingFocusFallbackKey = -1L;
     // 记录时刻；开店请求可能被服务端拒（没带钱包），此时待定位会残留下来，超时作废免得污染下一次手动开店
     private static long pendingFocusAtMs;
+    private static ResourceLocation pendingCurrency;
+    private static long pendingCurrencyAtMs;
+    private ResourceLocation queuedCurrency;
     private static final long PENDING_FOCUS_TTL_MS = 10_000L;
     // initScaled 已切好分类、但该商品所在 chunk 还没到（entriesByKey 里还没有实体）时挂在这里，
     // 由 renderScaledBackground 每帧重试，chunk 一到就选中。-1 = 没有待选中的商品。
@@ -1102,6 +1105,33 @@ public class ShopScreen extends ScaledScreen {
         } else if (fresh && ClientShopUiSettings.rememberShopView()) {
             restoreRememberedSelection(ClientShopUiSettings.shopSelectedStableId());
         }
+        openPendingCurrency();
+    }
+
+    /** 悬停 GT 币的开店请求：记下币种，下一个商店界面起来后进入货币中心。没钱包时请求会被拒，超时作废。 */
+    public static void requestCurrency(ResourceLocation currency) {
+        pendingCurrency = currency;
+        pendingCurrencyAtMs = net.minecraft.Util.getMillis();
+    }
+
+    private void openPendingCurrency() {
+        ResourceLocation currency = pendingCurrency;
+        long requestedAtMs = pendingCurrencyAtMs;
+        pendingCurrency = null;
+        pendingCurrencyAtMs = 0L;
+        if (currency == null) return;
+        if (net.minecraft.Util.getMillis() - requestedAtMs > PENDING_FOCUS_TTL_MS) return;
+        // 留到 tick 再换屏。initScaled 里直接 setScreen 会在商店 init 未结束时嵌套打开货币中心。
+        this.queuedCurrency = currency;
+    }
+
+    @Override
+    public void tick() {
+        super.tick();
+        if (queuedCurrency == null || this.minecraft == null || this.minecraft.screen != this) return;
+        ResourceLocation currency = queuedCurrency;
+        queuedCurrency = null;
+        this.minecraft.setScreen(new CurrencyAtmScreen(this, currency));
     }
 
     /** 按 stableId 找回上次選中的商品。目錄還沒到就先掛起，到了再選。 */

@@ -1,0 +1,87 @@
+{
+  "data": {
+    "euTier": 12
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "module_id": "dishanhai:wzsw",
+      "level": 16,
+      "type": "module_level"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 134217728
+      }
+    ]
+  },
+  "type": "gtceu:matter_forging",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 128000,
+          "value": [
+            {
+              "fluid": "dishanhai:primal_chaos"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 6
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "dishanhai:beyond_taixu_thread"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "dishanhai:worldline_divergent_core"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "dishanhai:causal_essence"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:matter_forging/matter_forging_causal_essence",
+      "defaultEnabled": true
+    }
+  ]
+}

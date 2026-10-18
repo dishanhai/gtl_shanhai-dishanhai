@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -15,7 +17,6 @@ class MEDiskHatchPersistencePolicyTest {
             "gt_shanhai", "common", "machine", "part", "MEDiskHatchPartMachine.java");
     private static final Path DROP_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "misc", "DiskMachineDropHandler.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path STORAGE_SERVICE_DELTA_CACHE_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "StorageServiceDeltaCacheMixin.java");
     private static final Path ME_STORAGE_MENU_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
@@ -45,7 +46,7 @@ class MEDiskHatchPersistencePolicyTest {
 
     @Test
     void networkStorageIsNeverScannedByTheBackgroundFastClearMixin() throws IOException {
-        String mixinConfig = Files.readString(MIXIN_CONFIG);
+        String mixinConfig = MixinConfigs.readAll();
 
         assertFalse(mixinConfig.contains("StorageServiceFastClearMixin"),
                 "AE2 NetworkStorage 不是线程安全容器，不能从后台线程全量扫描");

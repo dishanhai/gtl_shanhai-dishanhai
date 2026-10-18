@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -23,8 +25,6 @@ class InactiveHostRecipeTypeVirtualExecutionSourceTest {
             "gt_shanhai", "mixin", "InactiveHostRecipeTypeLookupMixin.java");
     private static final Path TYPE_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "VirtualOwnedRecipeTypeMixin.java");
-    private static final Path MIXIN_JSON = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void nativeVirtualChainKeepsInactiveHostCachedRecipes() throws IOException {
         String source = Files.readString(SEARCH_HELPER);
@@ -55,7 +55,7 @@ class InactiveHostRecipeTypeVirtualExecutionSourceTest {
     void lookupAppendsInactiveHostTypesAfterGtlCoreFilter() throws IOException {
         String lookup = Files.readString(LOOKUP);
         String typeMixin = Files.readString(TYPE_MIXIN);
-        String json = Files.readString(MIXIN_JSON);
+        String json = MixinConfigs.readAll();
 
         assertTrue(lookup.contains("priority = 1500"),
                 "必须落在 GTLCore 改写后的 getRecipeIterator 上");

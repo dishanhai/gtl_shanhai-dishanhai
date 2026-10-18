@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -12,13 +14,11 @@ class JEIGuiRuntimeGuardMixinSourceTest {
 
     private static final Path SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "JEIGuiRuntimeGuardMixin.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void skipsJeiOverlayRenderingUntilRuntimeIsPublished() throws IOException {
         assertTrue(Files.exists(SOURCE), "必须提供 JEI Runtime 生命周期守卫");
         String source = Files.readString(SOURCE);
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(source.contains("mezz.jei.gui.events.GuiEventHandler"));
         assertTrue(source.contains("method = \"onDrawScreenPost\""));

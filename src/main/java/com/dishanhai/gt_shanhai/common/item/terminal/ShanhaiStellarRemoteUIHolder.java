@@ -22,7 +22,8 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
         WILDCARD,
         SHARED_INPUTS,
         PATTERN_BEHAVIOR,
-        REFUND
+        REFUND,
+        STRONG_PATTERN_MATCH
     }
 
     private final GlobalPos targetPos;
@@ -88,6 +89,9 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
         }
         if (mode == Mode.OUTPUT_MULTIPLIER) {
             return machine.createRemoteOutputMultiplierUI(player, this);
+        }
+        if (mode == Mode.STRONG_PATTERN_MATCH) {
+            return machine.createRemoteStrongPatternMatchUI(player, this);
         }
         if (mode == Mode.WILDCARD) {
             return machine.createRemoteWildcardUI(player, this, wildcardTypeIds, wildcardTypeNames);

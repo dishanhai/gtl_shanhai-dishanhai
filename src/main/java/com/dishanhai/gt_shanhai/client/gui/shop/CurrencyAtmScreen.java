@@ -65,6 +65,8 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private static final long AE_BALANCE_REFRESH_TICKS = 40L;
 
     private final ShopScreen parent;
+    private final ResourceLocation initialFocus;
+    private boolean appliedInitialFocus;
     private List<ResourceLocation> currencies = new ArrayList<>();
     private ResourceLocation selected;
     private int targetIdx = -1;   // 兑换目标币在 currencies 里的下标
@@ -93,8 +95,13 @@ public class CurrencyAtmScreen extends ScaledScreen {
     }
 
     public CurrencyAtmScreen(ShopScreen parent) {
+        this(parent, null);
+    }
+
+    public CurrencyAtmScreen(ShopScreen parent, ResourceLocation initialFocus) {
         super(Component.literal("货币中心"));
         this.parent = parent;
+        this.initialFocus = initialFocus;
         this.targetWidth = TARGET_W;
         this.targetHeight = TARGET_H;
         this.useOffset = false;
@@ -126,6 +133,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
             ratesLoadedOnce = true;
         }
         currencies = CurrencyRateConfig.getCurrencies();
+        applyInitialFocus();
         if (selected == null && !currencies.isEmpty()) selected = currencies.get(0);
         if ((targetIdx < 0 || targetIdx >= currencies.size()) && currencies.size() > 1) targetIdx = firstDifferent(0);
 
@@ -146,6 +154,19 @@ public class CurrencyAtmScreen extends ScaledScreen {
     }
 
     private int detailY(int off) { return listTop() + off; }
+
+    /** 从悬停的 GT 币跳进来时，选中该币并把列表滚到它。只应用一次，避免缩放窗口时把玩家滚走的位置拉回去。 */
+    private void applyInitialFocus() {
+        if (appliedInitialFocus || initialFocus == null) return;
+        appliedInitialFocus = true;
+        int idx = currencies.indexOf(initialFocus);
+        if (idx < 0) return;
+        selected = currencies.get(idx);
+        targetIdx = currencies.size() > 1 ? firstDifferent(idx) : -1;
+        int contentH = currencies.size() * ROW_H + 4;
+        int maxScroll = Math.max(0, contentH - listHeight());
+        scroll = Math.max(0, Math.min(maxScroll, idx * ROW_H));
+    }
 
     /** 从 start 起找第一个与 selected 不同的币下标（兑换目标）。 */
     private int firstDifferent(int start) {

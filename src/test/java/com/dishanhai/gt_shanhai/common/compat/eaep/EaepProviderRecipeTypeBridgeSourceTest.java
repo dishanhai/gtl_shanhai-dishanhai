@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.compat.eaep;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -10,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EaepProviderRecipeTypeBridgeSourceTest {
 
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path BRIDGE = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "common", "compat", "eaep", "EaepProviderRecipeTypeBridge.java");
     private static final Path REQUEST_MIXIN = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
@@ -22,7 +23,7 @@ class EaepProviderRecipeTypeBridgeSourceTest {
 
     @Test
     void eaepUploadMixinsAreRegisteredOnCorrectSides() throws IOException {
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(config.contains("\"EaepProvidersListRecipeTypesMixin\""),
                 "服务端/通用 packet mixin 必须注册");

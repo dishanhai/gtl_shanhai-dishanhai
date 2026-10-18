@@ -178,8 +178,9 @@ public final class PatternIdentityMatcher {
     // ---------------------------------------------------------------------
     // 配方输入 ⊆ 样板输入 判定
     //
-    // 语义：配方的每一路输入，其「候选物品集合」必须与样板输入指纹「有交集」，
-    // 即样板至少覆盖该路的一个可选项。全部路都被覆盖才算子集。
+    // 语义：配方的每一路输入，样板里至少有一个物品能被该路接受。全部路都被覆盖才算子集。
+    // 同标签多物品不能只看 getItems()：标签成分常常只缓存一个展示物品（例如寰宇处理器），
+    // 样板写的是同标签下另一种物品。Ingredient.test 走实时标签成员判断。
     // 例外：编程电路那一路被跳过（GTLCore 样板身份已剥离电路，见类头说明）。
     // ---------------------------------------------------------------------
 
@@ -244,6 +245,9 @@ public final class PatternIdentityMatcher {
     }
 
     private static boolean ingredientCoveredByItems(Ingredient ingredient, Set<Item> patternItems) {
+        if (patternItemAccepted(ingredient, patternItems)) {
+            return true;
+        }
         ItemStack[] stacks = ingredient.getItems();
         if (stacks == null || stacks.length == 0) {
             // 空 Ingredient 不构成约束
@@ -251,6 +255,25 @@ public final class PatternIdentityMatcher {
         }
         for (ItemStack stack : stacks) {
             if (stack != null && !stack.isEmpty() && patternItems.contains(stack.getItem())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 样板物品是否被该输入接受。标签成分用 {@link Ingredient#test} 认全体成员，
+     * 不要求样板物品等于 {@code getItems()} 里的展示项。
+     */
+    private static boolean patternItemAccepted(Ingredient ingredient, Set<Item> patternItems) {
+        if (ingredient == null || patternItems.isEmpty()) {
+            return false;
+        }
+        for (Item item : patternItems) {
+            if (item == null) {
+                continue;
+            }
+            if (ingredient.test(new ItemStack(item))) {
                 return true;
             }
         }

@@ -1,0 +1,75 @@
+{
+  "data": {
+    "euTier": 12
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "module_id": "dishanhai:wzsw",
+      "level": 16,
+      "type": "module_level"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 134217728
+      }
+    ]
+  },
+  "type": "gtceu:taixu_smelting",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 128000,
+          "value": [
+            {
+              "fluid": "dishanhai:primal_chaos"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 32,
+          "ingredient": {
+            "item": "dishanhai:ideal_ashes"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "dishanhai:worldline_divergent_core"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:beyond_taixu_thread"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:taixu_smelting/taixu_smelting_beyond_taixu_thread",
+      "defaultEnabled": true
+    }
+  ]
+}

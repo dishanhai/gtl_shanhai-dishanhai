@@ -1,0 +1,36 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.dishanhai.gt_shanhai.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "ThreadForceOverrideMixin",
+    "GTLAddParallelDisplayMixin",
+    "MacroAtomicStripperMixins$Controller",
+    "MacroAtomicStripperMixins$Logic",
+    "GTLAddParallelOverrideMixin",
+    "FOTCMixins$HostLock",
+    "FOTCMixins$ModuleBase",
+    "FOTCMixins$ModuleLogic",
+    "FOTCMixins$HeliophaseLeylineCrystallizerBypass",
+    "SuppressBaseThreadDisplayMixin",
+    "HelioFusionLockBypassMixin",
+    "RRFModuleRestrictionBypassMixin$BaseModule",
+    "RRFModuleRestrictionBypassMixin$WorkableModule",
+    "RRFModuleRestrictionBypassMixin$CatalyticCascade",
+    "RRFModuleRestrictionBypassMixin$MagnetorheologicalConvergence",
+    "RRFModuleRestrictionBypassMixin$SupratemporalBoosting",
+    "SpaceElevatorModuleMixins$AdvancedModule",
+    "GTLAddRecipesLogicMixins",
+    "MolecularAssemblerMixins$GtlAddController",
+    "MolecularAssemblerMixins$GtlAddInfinityRecipeLogic",
+    "AstralArrayCompressionTraitMixin",
+    "ArcanicAstrographCompressionResetMixin",
+    "ArcanicAstrographHubParallelMixin"
+  ],
+  "client": [
+    "ClientRingBlockHelperMixin",
+    "GTLytSlotItemCountFormatMixin",
+    "GTLytSlotGridOverflowMixin"
+  ]
+}

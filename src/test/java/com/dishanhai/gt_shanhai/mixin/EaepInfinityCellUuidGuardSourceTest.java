@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -11,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class EaepInfinityCellUuidGuardSourceTest {
 
-    private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path SOURCE = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "mixin", "EaepInfinityCellUuidGuardMixin.java");
 
@@ -24,7 +25,7 @@ class EaepInfinityCellUuidGuardSourceTest {
         assertTrue(source.contains("InfinityConstants.INFINITY_CELL_UUID"));
         assertTrue(source.contains("hasUUID(InfinityConstants.INFINITY_CELL_UUID)"));
         assertTrue(source.contains("putUUID"));
-        assertTrue(Files.readString(CONFIG).contains("EaepInfinityCellUuidGuardMixin"));
+        assertTrue(MixinConfigs.readAll().contains("EaepInfinityCellUuidGuardMixin"));
     }
 
     @Test

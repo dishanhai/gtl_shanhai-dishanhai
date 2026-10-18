@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.util;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -16,7 +18,7 @@ class HubMachineHelperTest {
                 "src/main/java/com/dishanhai/gt_shanhai/common/util/HubMachineHelper.java"));
         String mixin = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/mixin/ParallelOutputChanceBypassMixin.java"));
-        String mixinConfig = Files.readString(Path.of("src/main/resources/gt_shanhai.mixin.json"));
+        String mixinConfig = MixinConfigs.readAll();
 
         assertTrue(mixin.contains("public static GTRecipe getRecipeOutputChance("));
         assertTrue(mixin.contains("HubMachineHelper.hasChanceBypass(controller)"));

@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.jei;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -14,7 +16,6 @@ class JeiPatternQuickEncodeIntegrationSourceTest {
     private static final Path PACKET = source("network", "JeiPatternQuickEncodeRequestPacket.java");
     private static final Path NETWORK = source("network", "ShanhaiNetwork.java");
     private static final Path ACCESSOR = source("mixin", "PatternEncodingTermMenuAccessor.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path ZH_CN = lang("zh_cn.json");
     private static final Path EN_US = lang("en_us.json");
 
@@ -63,7 +64,7 @@ class JeiPatternQuickEncodeIntegrationSourceTest {
     @Test
     void blankPatternSlotAccessorIsAppliedAsCommonMixin() throws Exception {
         String accessor = Files.readString(ACCESSOR);
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(accessor.contains("@Mixin(value = PatternEncodingTermMenu.class, remap = false)"));
         assertTrue(accessor.contains("@Accessor(value = \"blankPatternSlot\", remap = false)"));

@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -17,8 +19,7 @@ class ArcanicAstrographHubSlotSourceTest {
         String parallel = Files.readString(Path.of(
                 "src", "main", "java", "com", "dishanhai", "gt_shanhai", "mixin",
                 "ArcanicAstrographHubParallelMixin.java"));
-        String mixinConfig = Files.readString(Path.of(
-                "src", "main", "resources", "gt_shanhai.mixin.json"));
+        String mixinConfig = MixinConfigs.readAll();
 
         assertTrue(slot.contains("method = \"testLimited\""));
         assertTrue(slot.contains("instanceof ArcanicAstrograph"));

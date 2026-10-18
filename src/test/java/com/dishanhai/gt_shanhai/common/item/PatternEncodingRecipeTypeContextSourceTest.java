@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,7 +18,6 @@ class PatternEncodingRecipeTypeContextSourceTest {
 
     private static final Path MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "PatternEncodingRecipeTypeContextMixin.java");
-    private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path HELPER = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "item", "PatternRecipeTypeHelper.java");
     private static final Path ENCODING_HELPER = Path.of("src", "main", "java", "com", "dishanhai",
@@ -29,7 +30,7 @@ class PatternEncodingRecipeTypeContextSourceTest {
     @Test
     void jeiSelectedRecipeTypeSurvivesUntilServerPatternEncoding() throws Exception {
         String source = Files.readString(MIXIN);
-        String config = Files.readString(CONFIG);
+        String config = MixinConfigs.readAll();
         String helper = Files.readString(HELPER);
 
         assertTrue(source.contains("gtShanhai$readPendingRecipeTypeId(this)"),
@@ -65,7 +66,7 @@ class PatternEncodingRecipeTypeContextSourceTest {
         String wrapMenuMixin = Files.readString(WRAP_MENU_MIXIN);
         String helper = Files.readString(HELPER);
         String encodingHelper = Files.readString(ENCODING_HELPER);
-        String config = Files.readString(CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(selectedMixin.contains("JEISelectedRecipeContextMixin"));
         assertTrue(selectedMixin.contains("recipe.id.toString()"),

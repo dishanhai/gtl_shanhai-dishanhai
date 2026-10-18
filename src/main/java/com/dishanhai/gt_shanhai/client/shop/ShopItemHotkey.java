@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.client.shop;
 
 import com.dishanhai.gt_shanhai.client.ShanhaiKeyMappings;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopScreenOpener;
+import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
 import com.dishanhai.gt_shanhai.common.shop.ShopGoodsIdentity;
 
 import com.mojang.blaze3d.platform.InputConstants;
@@ -34,7 +35,7 @@ public final class ShopItemHotkey {
             return;
         }
         ResourceLocation itemId = ForgeRegistries.ITEMS.getKey(event.getItemStack().getItem());
-        if (itemId == null) {
+        if (itemId == null || CurrencyRateConfig.has(itemId)) {
             HOLD_STATE.reset();
             return;
         }

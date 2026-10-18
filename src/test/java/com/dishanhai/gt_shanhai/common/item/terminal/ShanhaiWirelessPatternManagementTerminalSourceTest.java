@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.nio.file.Files;
@@ -20,7 +21,7 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         String integration = read("common/item/terminal/ShanhaiPatternTerminalIntegration.java");
         String items = read("common/item/DShanhaiItems.java");
         String mixin = read("mixin/Ae2wtlibTerminalRegistrationMixin.java");
-        String mixinConfig = Files.readString(Path.of("src", "main", "resources", "gt_shanhai.mixin.json"));
+        String mixinConfig = MixinConfigs.readAll();
         String mod = read("GTDishanhaiMod.java");
 
         assertTrue(item.contains("extends ItemWT implements ICurioItem"));
@@ -167,7 +168,7 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
         String factory = read("common/item/terminal/ShanhaiStellarRemoteUIFactory.java");
         String holder = read("common/item/terminal/ShanhaiStellarRemoteUIHolder.java");
         String machine = read("common/machine/part/RecipeTypePatternBufferPartMachine.java");
-        String config = Files.readString(Path.of("src", "main", "resources", "gt_shanhai.mixin.json"));
+        String config = MixinConfigs.readAll();
 
         assertTrue(mixin.contains("OpenProviderUiC2SPacket.class"));
         assertTrue(mixin.contains("lambda$handle$0"));

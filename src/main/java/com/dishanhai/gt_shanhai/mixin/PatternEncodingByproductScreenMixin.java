@@ -51,7 +51,8 @@ public abstract class PatternEncodingByproductScreenMixin<T extends AEBaseMenu> 
         super(menu, playerInventory, title);
     }
 
-    @Inject(method = "init", at = @At("TAIL"))
+    // 本项目无 refmap：AE2 覆写的 Screen.init 必须是 SRG 名 + remap=false。
+    @Inject(method = "m_7856_", at = @At("TAIL"), remap = false)
     private void gtShanhai$initByproductButtons(CallbackInfo ci) {
         if (!((Object) this instanceof PatternEncodingTermScreen)) return;
         this.gtShanhai$byproductMarkButton = new MarkButton(button -> {

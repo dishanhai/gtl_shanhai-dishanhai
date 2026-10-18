@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -14,13 +16,11 @@ class JeiShopModeMixinSourceTest {
             "gt_shanhai", "mixin", "JeiShopModeButtonMixin.java");
     private static final Path GRID_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "JeiShopProductGridSourceMixin.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void addsNativeBookmarkToolbarButtonAndScopesShopFilterToJeiOverlay() throws IOException {
         String buttonMixin = Files.readString(BUTTON_MIXIN);
         String gridMixin = Files.readString(GRID_MIXIN);
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(buttonMixin.contains("BookmarkOverlay.class"));
         assertTrue(buttonMixin.contains("historyArea.moveRight(22)"));

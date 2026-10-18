@@ -18,7 +18,7 @@ class RecipeTypePatternBufferVerticalSidebarTest {
             "api", "gui", "configurators", "FancyConfiguratorSidebarPage.java");
 
     @Test
-    void patternBufferUsesFiveSideTabsAndKeepsRefundAsOnlyFloatingControl() throws IOException {
+    void patternBufferUsesSixSideTabsAndKeepsRefundAsOnlyFloatingControl() throws IOException {
         String machine = Files.readString(MACHINE);
         int configuratorsStart = machine.indexOf("public void attachConfigurators");
         int sideTabsStart = machine.indexOf("public void attachSideTabs", configuratorsStart);
@@ -26,10 +26,14 @@ class RecipeTypePatternBufferVerticalSidebarTest {
 
         assertTrue(machine.contains("public void attachSideTabs"),
                 "星律必须通过 VerticalTabsWidget 的 attachSideTabs 注册配置入口");
-        assertEquals(5, countOccurrences(machine, "sideTabs.attachSubTab("),
-                "新增产出倍率页后，主页面之外必须固定注册五个连续侧栏页面");
+        assertEquals(6, countOccurrences(machine, "sideTabs.attachSubTab("),
+                "强匹配与产出倍率均使用独立侧栏页面");
         assertTrue(machine.contains("new OutputMultiplierConfigurator()"),
                 "星律必须提供独立的样板产出倍率侧栏页");
+        assertTrue(machine.contains("new StrongPatternMatchConfigurator()"),
+                "星律必须提供独立的强匹配侧栏页");
+        assertTrue(machine.contains("createRemoteStrongPatternMatchUI("),
+                "无线终端也必须能打开强匹配控制页");
         assertTrue(machine.contains("collectParentConfigurators()"),
                 "父类配置器必须先收集后迁移，不能复制私有配置逻辑");
         assertFalse(configurators.contains("super.attachConfigurators"),

@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.client;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -13,14 +15,12 @@ class EaepGtlCoreUploadButtonLayoutSourceTest {
 
     private static final Path MIXIN = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "mixin", "EaepGtlCoreUploadButtonLayoutMixin.java");
-    private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void movesUndoButtonAndItsCustomHitAreaAfterEaepPositioning() throws IOException {
         assertTrue(Files.exists(MIXIN), "必须新增 EAEP/GTLCore 上传按钮布局兼容 Mixin");
 
         String source = Files.readString(MIXIN);
-        String config = Files.readString(CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(config.contains("\"EaepGtlCoreUploadButtonLayoutMixin\""),
                 "布局兼容 Mixin 必须注册在客户端列表");

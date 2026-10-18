@@ -29,7 +29,8 @@ public abstract class CraftingCPUScreenRedispatchMixin<T extends AEBaseMenu> ext
         super(menu, inventory, title);
     }
 
-    @Inject(method = "init", at = @At("TAIL"))
+    // 本项目无 refmap：AE2 覆写的 Screen.init 必须是 SRG 名 + remap=false。
+    @Inject(method = "m_7856_", at = @At("TAIL"), remap = false)
     private void gtShanhai$addRedispatchButton(CallbackInfo ci) {
         if (!((Object) this instanceof CraftingCPUScreen<?>)) return;
         if (!(this.menu instanceof QuantumCraftingRedispatchMenu control)) return;

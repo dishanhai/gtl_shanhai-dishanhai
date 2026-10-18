@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -30,7 +32,6 @@ class PatternRecipeLookupPerformanceSourceTest {
             "gt_shanhai", "api", "machine", "SelectableRecipeTypeSetRecipeLogic.java");
     private static final Path PRIMORDIAL_MODULE_LOGIC = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "machine", "primordial", "PrimordialModuleRecipeLogic.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
 
     @Test
     void activeMarkedRecipeMergeOnlyCachesWithinTheSameServerTick() throws IOException {
@@ -106,7 +107,7 @@ class PatternRecipeLookupPerformanceSourceTest {
 
     @Test
     void doesNotRegisterReflectivePatternBufferActiveSlotOptimization() throws IOException {
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertFalse(config.contains("MEPatternBufferActiveSlotCacheMixin"),
                 "不得重新注册逐槽反射 isActive 的样板总成优化");

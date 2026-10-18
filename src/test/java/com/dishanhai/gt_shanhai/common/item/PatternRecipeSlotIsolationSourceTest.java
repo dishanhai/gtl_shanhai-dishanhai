@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -21,11 +23,9 @@ class PatternRecipeSlotIsolationSourceTest {
             "gt_shanhai", "mixin", "PatternIdentityGuardMixin.java");
     private static final Path SELECTABLE_RECIPE_LOGIC = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "api", "machine", "SelectableRecipeTypeSetRecipeLogic.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void registersPatternIdentityGuardForBothInputHandlers() throws IOException {
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(config.contains("\"MEPatternBufferSlot2PatternAccessor\""),
                 "样板身份守卫必须能读取槽位对应的处理样板");

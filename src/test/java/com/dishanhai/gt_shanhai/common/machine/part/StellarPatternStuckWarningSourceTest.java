@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.machine.part;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -21,7 +23,6 @@ class StellarPatternStuckWarningSourceTest {
             "StellarPatternCraftingContext.java"));
     private static final Path COMMANDS = MAIN.resolve(Path.of("command", "DShanhaiCommands.java"));
     private static final Path CONFIG = MAIN.resolve(Path.of("config", "DShanhaiConfig.java"));
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path CRAFTING_CPU_MIXIN = MAIN.resolve(Path.of("mixin",
             "CraftingCpuLogicStellarContextMixin.java"));
     private static final Path QUANTUM_CPU = MAIN.resolve(Path.of("common", "ae2", "quantum",
@@ -143,7 +144,7 @@ class StellarPatternStuckWarningSourceTest {
     void aeAndQuantumCraftingExposeExecutingJobPlayerIdAroundProviderPush() throws IOException {
         String context = Files.readString(CONTEXT);
         String mixin = Files.readString(CRAFTING_CPU_MIXIN);
-        String mixinConfig = Files.readString(MIXIN_CONFIG);
+        String mixinConfig = MixinConfigs.readAll();
         String quantum = Files.readString(QUANTUM_CPU);
 
         assertTrue(context.contains("ThreadLocal<Integer>"));

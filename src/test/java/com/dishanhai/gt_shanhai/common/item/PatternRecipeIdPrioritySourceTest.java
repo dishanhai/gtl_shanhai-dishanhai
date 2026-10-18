@@ -29,6 +29,17 @@ class PatternRecipeIdPrioritySourceTest {
         assertTrue(selectedPattern.contains("RECIPE_ID = \"gt_shanhai_bundle_recipe\""));
         assertTrue(helper.contains("PatternIdentityMatcher.matches(recipe, details)"),
                 "精確 ID 必須用樣板身份校驗，玩家改樣板後不能鎖死舊配方");
+        String matcher = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
+                "gt_shanhai", "api", "PatternIdentityMatcher.java"));
+        int coveredStart = matcher.indexOf("private static boolean ingredientCoveredByItems");
+        int coveredEnd = matcher.indexOf("private static boolean patternItemAccepted", coveredStart);
+        assertTrue(coveredStart >= 0 && coveredEnd > coveredStart, "應找到樣板物品覆蓋判斷");
+        String covered = matcher.substring(coveredStart, coveredEnd);
+        int testCall = covered.indexOf("patternItemAccepted(ingredient, patternItems)");
+        int enumeratedAccept = covered.indexOf("patternItems.contains(stack.getItem())");
+        assertTrue(testCall >= 0 && enumeratedAccept > testCall
+                        && matcher.contains("ingredient.test(new ItemStack(item))"),
+                "同標籤多物品必須先用 Ingredient.test 認樣板物品，不能只比對 getItems 展示項");
     }
 
     @Test
@@ -41,7 +52,7 @@ class PatternRecipeIdPrioritySourceTest {
         String lookup = source.substring(methodStart, methodEnd);
 
         int idRead = lookup.indexOf("PatternRecipeTypeHelper.readRecipeId(stack)");
-        int exactLookup = lookup.indexOf("PatternRecipeTypeHelper.resolveRecipe(recipeId)");
+        int exactLookup = lookup.indexOf("PatternRecipeTypeHelper.resolveRecipeForPattern(");
         int fitsPattern = lookup.indexOf(
                 "PatternRecipeTypeHelper.storedRecipeFitsPattern(stack, getLevel(), recipe)");
         int fallback = lookup.indexOf("PatternRecipeTypeHelper.peekRecipe(");
@@ -49,6 +60,8 @@ class PatternRecipeIdPrioritySourceTest {
                 "普通樣板槽需先讀取其配方 ID");
         assertTrue(exactLookup < fitsPattern && fitsPattern < fallback,
                 "樣板內容不再覆蓋該配方時，必須回到原有解析");
+        assertTrue(lookup.contains("PatternRecipeTypeHelper.readRecipeTypeId(stack)"),
+                "精確 ID 查找必須以樣板保存的配方類型縮小範圍");
     }
 
     @Test

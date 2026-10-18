@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -87,7 +89,7 @@ class VirtualCatalystMatchingSourceTest {
 
     @Test
     void cacheFallbackMixinIsRegistered() throws IOException {
-        String config = Files.readString(Path.of("src/main/resources/gt_shanhai.mixin.json"));
+        String config = MixinConfigs.readAll();
         assertTrue(config.contains("\"SlotCacheManagerVirtualProviderMixin\""));
         assertFalse(config.contains("\"GTLCoreMEPatternBufferRecipeHandlerVirtualProviderMixin\""),
                 "The obsolete per-item cleanup hook must not be woven.");

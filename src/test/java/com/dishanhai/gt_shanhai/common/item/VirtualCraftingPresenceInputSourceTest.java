@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.item;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -12,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VirtualCraftingPresenceInputSourceTest {
 
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path PRESENCE_EXTRACTOR = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "common", "item", "VirtualCraftingPatternInputExtractor.java");
     private static final Path CRAFTING_HELPER_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
@@ -78,7 +79,7 @@ class VirtualCraftingPresenceInputSourceTest {
     void nativeAndBulkExtractionSharePresenceSemantics() throws IOException {
         assertTrue(Files.exists(CRAFTING_HELPER_MIXIN), "AE 原生 CPU 抽取需要接入在场输入抽取器");
         assertTrue(Files.exists(AE_UTILS_MIXIN), "GTLCore 批量抽取需要接入同一在场输入抽取器");
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(config.contains("CraftingCpuHelperVirtualPatternInputsMixin"));
         assertTrue(config.contains("AeUtilsVirtualPatternInputsMixin"));
@@ -86,7 +87,7 @@ class VirtualCraftingPresenceInputSourceTest {
 
     @Test
     void submissionNoLongerBlocksMissingVirtualTargets() throws IOException {
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
         String quantumService = Files.readString(QUANTUM_SERVICE_MIXIN);
 
         assertFalse(Files.exists(OLD_INITIAL_MIXIN));
@@ -278,7 +279,7 @@ class VirtualCraftingPresenceInputSourceTest {
 
     @Test
     void planningDoesNotExpandReusablePresenceInputsOnePatternAtATime() throws IOException {
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(Files.exists(CRAFTING_TREE_PROCESS_MIXIN),
                 "需要在 AE2 合成树层解除虚拟返还项触发的逐次计算限制");

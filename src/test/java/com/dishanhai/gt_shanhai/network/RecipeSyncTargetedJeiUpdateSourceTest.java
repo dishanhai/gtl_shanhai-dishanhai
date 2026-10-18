@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.network;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -17,7 +19,7 @@ class RecipeSyncTargetedJeiUpdateSourceTest {
                 "src/main/java/com/dishanhai/gt_shanhai/api/JEIRecipeCache.java"));
         String viewSync = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/client/recipe/ShanhaiJeiRecipeViewSync.java"));
-        String mixins = Files.readString(Path.of("src/main/resources/gt_shanhai.mixin.json"));
+        String mixins = MixinConfigs.readAll();
 
         assertTrue(sync.contains("List.of(recipeTypeId)"),
                 "single-recipe sync must not include every runtime-rule recipe type");

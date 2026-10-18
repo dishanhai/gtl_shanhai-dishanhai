@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -14,12 +16,10 @@ class CraftingTreeVirtualPresenceGraphGuardSourceTest {
             "gt_shanhai", "mixin", "CraftingTreeNodeVirtualPresenceMixin.java");
     private static final Path EXECUTOR_SOURCE = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "MaxFastExecutorVirtualPresenceMixin.java");
-    private static final Path MIXIN_CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
-
     @Test
     void presenceNodesStayOnMaxFast() throws Exception {
         String source = Files.readString(MIXIN_SOURCE);
-        String config = Files.readString(MIXIN_CONFIG);
+        String config = MixinConfigs.readAll();
 
         assertTrue(config.contains("\"CraftingTreeNodeVirtualPresenceMixin\""));
         assertFalse(config.contains("\"MaxFastExecutorVirtualPresenceMixin\""),

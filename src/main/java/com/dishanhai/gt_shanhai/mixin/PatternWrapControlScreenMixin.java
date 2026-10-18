@@ -74,7 +74,8 @@ public abstract class PatternWrapControlScreenMixin<T extends AEBaseMenu> extend
         return (Object) this instanceof PatternEncodingTermScreen;
     }
 
-    @Inject(method = "init", at = @At("TAIL"))
+    // 本项目无 refmap：AE2 覆写的 Screen.init / Screen.render 必须是 SRG 名 + remap=false。
+    @Inject(method = "m_7856_", at = @At("TAIL"), remap = false)
     private void gtShanhai$initWrapModeButton(CallbackInfo ci) {
         if (!gtShanhai$isPatternEncodingScreen()) return;
         PatternWrapClientState.reset();
@@ -186,7 +187,7 @@ public abstract class PatternWrapControlScreenMixin<T extends AEBaseMenu> extend
         }
     }
 
-    @Inject(method = "render", at = @At("TAIL"))
+    @Inject(method = "m_88315_", at = @At("TAIL"), remap = false)
     private void gtShanhai$renderMarkedSlotHighlights(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
         if (!gtShanhai$isPatternEncodingScreen() || PatternWrapClientState.markedSlots.isEmpty()) return;
         if (!(this.menu instanceof PatternEncodingTermMenu patternMenu)) return;

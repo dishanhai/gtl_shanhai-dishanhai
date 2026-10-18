@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -10,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GTLCoreInfinityCellOverflowGuardSourceTest {
 
-    private static final Path CONFIG = Path.of("src", "main", "resources", "gt_shanhai.mixin.json");
     private static final Path ORDINARY = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "mixin", "GTLCoreInfinityCellOverflowGuardMixin.java");
     private static final Path FAST = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
@@ -32,7 +33,7 @@ class GTLCoreInfinityCellOverflowGuardSourceTest {
     @Test
     void fastInfinityCellUsesInt128SaturatedCounter() throws IOException {
         String source = Files.readString(FAST);
-        assertTrue(Files.readString(CONFIG).contains("GTLCoreFastInfinityCellOverflowGuardMixin"));
+        assertTrue(MixinConfigs.readAll().contains("GTLCoreFastInfinityCellOverflowGuardMixin"));
         assertTrue(source.contains("FastInfinityCellInventory"));
         assertTrue(source.contains("Int128"));
         assertTrue(source.contains("toBigInteger()"));
