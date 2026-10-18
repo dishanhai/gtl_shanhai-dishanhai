@@ -98,6 +98,57 @@ public final class PatternRecipeTypeHelper {
         }
     }
 
+    /** 强匹配拒绝时的身份原因。匹配成功返回空串。 */
+    public static String explainStoredRecipeMismatch(ItemStack stack, Level level, GTRecipe recipe) {
+        if (stack == null || stack.isEmpty()) return "样板物品为空";
+        if (level == null) return "世界为空";
+        if (recipe == null) return "配方为空";
+        try {
+            IPatternDetails details = PatternDetailsHelper.decodePattern(stack, level);
+            if (details == null) return "样板解码结果为空";
+            String mismatch = PatternIdentityMatcher.explainMismatch(recipe, details);
+            return mismatch == null ? "" : mismatch;
+        } catch (RuntimeException exception) {
+            String message = exception.getMessage();
+            return "样板解码异常 " + exception.getClass().getSimpleName()
+                    + (message == null || message.isBlank() ? "" : ": " + message);
+        }
+    }
+
+    /** 强匹配按 ID 解析失败时的原因。不改变解析结果。 */
+    public static String describeResolveMiss(Level level, String recipeTypeId, String recipeId) {
+        if (level == null) return "世界为空";
+        GTRecipeType recipeType = resolveRecipeType(recipeTypeId);
+        ResourceLocation expected = parseRecipeId(recipeId);
+        if (recipeType == null || recipeType.registryName == null) {
+            return "配方类型未注册 " + recipeTypeId;
+        }
+        if (expected == null) return "配方ID无法解析 " + recipeId;
+        String typePathPrefix = recipeType.registryName.getPath() + "/";
+        if (!expected.getPath().startsWith(typePathPrefix)) {
+            return "ID缺少类型前缀 期望前缀=" + typePathPrefix + " 实际=" + expected;
+        }
+        if (expected.getPath().substring(typePathPrefix.length()).isEmpty()) {
+            return "ID类型前缀后为空";
+        }
+        GTRecipe candidate;
+        try {
+            candidate = recipeType.getRecipe(level.getRecipeManager(), expected);
+        } catch (RuntimeException exception) {
+            return "按ID查询异常 " + exception.getClass().getSimpleName();
+        }
+        if (candidate == null || candidate.recipeType == null || candidate.recipeType.registryName == null
+                || candidate.getId() == null) {
+            return "该类型下没有这个配方ID";
+        }
+        String candidateTypeId = candidate.recipeType.registryName.toString();
+        String candidateId = candidate.getId().toString();
+        if (!PatternRecipeIdMatchPolicy.matches(recipeTypeId, expected.toString(), candidateTypeId, candidateId)) {
+            return "ID策略拒绝 查到=" + candidateTypeId + " " + candidateId;
+        }
+        return "解析应当成功";
+    }
+
     /**
      * 编码时权威写入：仅供已经拿到确切来源 {@link GTRecipe}（玩家实际选中/上传的那一个，零歧义）
      * 的调用点使用，如 {@code Ae2GtmProcessingPatternMixin}。写入后该样板永久跳过自愈重推断。

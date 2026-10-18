@@ -13,6 +13,8 @@ import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
@@ -66,6 +68,25 @@ public final class PatternIdentityMatcher {
             return false;
         }
         return matchesOutputs(recipe, pattern) && matchesInputs(recipe, pattern);
+    }
+
+    /**
+     * 强匹配失败时的一行原因。匹配成功返回 null。
+     * 只在拒绝路径调用，用来区分主产物、输入物品和输入流体。
+     */
+    public static String explainMismatch(GTRecipe recipe, IPatternDetails pattern) {
+        if (recipe == null || pattern == null) {
+            return "配方或样板为空";
+        }
+        if (matches(recipe, pattern)) {
+            return null;
+        }
+        String output = explainOutputMismatch(recipe, pattern);
+        if (output != null) {
+            return output;
+        }
+        String input = explainInputMismatch(recipe, pattern);
+        return input == null ? "身份不符但未定位到具体输入或输出" : input;
     }
 
     // ---------------------------------------------------------------------
@@ -278,6 +299,304 @@ public final class PatternIdentityMatcher {
             }
         }
         return false;
+    }
+
+    private static String explainOutputMismatch(GTRecipe recipe, IPatternDetails pattern) {
+        Set<Item> patternItems = new HashSet<>();
+        Set<Fluid> patternFluids = new HashSet<>();
+        collectPatternStacks(pattern.getOutputs(), patternItems, patternFluids);
+        boolean itemMatches = !patternItems.isEmpty() && primaryItemOutputMatches(
+                recipe.getOutputContents(ItemRecipeCapability.CAP), patternItems);
+        boolean fluidMatches = !patternFluids.isEmpty() && primaryFluidOutputMatches(
+                recipe.getOutputContents(FluidRecipeCapability.CAP), patternFluids);
+        if (itemMatches || fluidMatches) {
+            return null;
+        }
+        if (patternItems.isEmpty() && patternFluids.isEmpty()) {
+            return "样板没有输出";
+        }
+        if (!patternItems.isEmpty()) {
+            return "主产物不在样板输出中 " + describePrimaryItem(
+                    recipe.getOutputContents(ItemRecipeCapability.CAP), patternItems);
+        }
+        return "主流体不在样板输出中 " + describePrimaryFluid(
+                recipe.getOutputContents(FluidRecipeCapability.CAP), patternFluids);
+    }
+
+    private static String explainInputMismatch(GTRecipe recipe, IPatternDetails pattern) {
+        Set<Item> patternItems = new HashSet<>();
+        Set<Fluid> patternFluids = new HashSet<>();
+        collectPatternInputs(pattern, patternItems, patternFluids);
+        String item = firstUncoveredItem(recipe.getInputContents(ItemRecipeCapability.CAP), patternItems);
+        if (item != null) {
+            return "输入物品未覆盖 " + item;
+        }
+        String fluid = firstUncoveredFluid(recipe.getInputContents(FluidRecipeCapability.CAP), patternFluids);
+        if (fluid != null) {
+            return "输入流体未覆盖 " + fluid;
+        }
+        return null;
+    }
+
+    private static String describePrimaryItem(java.util.List<Content> contents, Set<Item> patternItems) {
+        if (contents == null || contents.isEmpty()) {
+            return "配方没有物品输出 样板=" + formatItems(patternItems, 6);
+        }
+        for (Content content : contents) {
+            if (content == null) {
+                continue;
+            }
+            Object raw = content.getContent();
+            if (!(raw instanceof Ingredient ingredient)) {
+                return "主产物内容类型=" + contentClass(raw) + " 样板=" + formatItems(patternItems, 6);
+            }
+            return describeIngredient(ingredient, patternItems);
+        }
+        return "配方没有可解析的物品输出 样板=" + formatItems(patternItems, 6);
+    }
+
+    private static String describePrimaryFluid(java.util.List<Content> contents, Set<Fluid> patternFluids) {
+        if (contents == null || contents.isEmpty()) {
+            return "配方没有流体输出 样板=" + formatFluids(patternFluids, 6);
+        }
+        for (Content content : contents) {
+            if (content == null) {
+                continue;
+            }
+            Object raw = content.getContent();
+            if (!(raw instanceof FluidIngredient fluidIngredient)) {
+                return "主流体内容类型=" + contentClass(raw) + " 样板=" + formatFluids(patternFluids, 6);
+            }
+            return describeFluidIngredient(fluidIngredient, patternFluids);
+        }
+        return "配方没有可解析的流体输出 样板=" + formatFluids(patternFluids, 6);
+    }
+
+    private static String firstUncoveredItem(java.util.List<Content> contents, Set<Item> patternItems) {
+        if (contents == null || contents.isEmpty()) {
+            return null;
+        }
+        int index = 0;
+        for (Content content : contents) {
+            if (content == null || content.chance <= 0) {
+                index++;
+                continue;
+            }
+            Object raw = content.getContent();
+            if (!(raw instanceof Ingredient ingredient)) {
+                index++;
+                continue;
+            }
+            if (isIntegratedCircuitIngredient(ingredient)) {
+                index++;
+                continue;
+            }
+            if (!ingredientCoveredByItems(ingredient, patternItems)) {
+                return "#" + index + " " + describeIngredient(ingredient, patternItems);
+            }
+            index++;
+        }
+        return null;
+    }
+
+    private static String firstUncoveredFluid(java.util.List<Content> contents, Set<Fluid> patternFluids) {
+        if (contents == null || contents.isEmpty()) {
+            return null;
+        }
+        int index = 0;
+        for (Content content : contents) {
+            if (content == null || content.chance <= 0) {
+                index++;
+                continue;
+            }
+            Object raw = content.getContent();
+            if (!(raw instanceof FluidIngredient fluidIngredient)) {
+                index++;
+                continue;
+            }
+            if (!fluidIngredientCoveredByFluids(fluidIngredient, patternFluids)) {
+                return "#" + index + " " + describeFluidIngredient(fluidIngredient, patternFluids);
+            }
+            index++;
+        }
+        return null;
+    }
+
+    private static String describeIngredient(Ingredient ingredient, Set<Item> patternItems) {
+        StringBuilder text = new StringBuilder();
+        text.append("class=").append(ingredient.getClass().getSimpleName());
+        text.append(" 样板=").append(formatItems(patternItems, 6));
+        text.append(" test=").append(formatItemTests(ingredient, patternItems, 6));
+        try {
+            ItemStack[] stacks = ingredient.getItems();
+            int length = stacks == null ? 0 : stacks.length;
+            text.append(" getItems=").append(length);
+            if (length > 0) {
+                text.append(" first=").append(formatStacks(stacks, 4));
+            }
+        } catch (RuntimeException exception) {
+            text.append(" getItems=EX:").append(exception.getClass().getSimpleName());
+        }
+        return text.toString();
+    }
+
+    private static String describeFluidIngredient(FluidIngredient fluidIngredient, Set<Fluid> patternFluids) {
+        StringBuilder text = new StringBuilder();
+        text.append("class=").append(fluidIngredient.getClass().getSimpleName());
+        text.append(" 样板=").append(formatFluids(patternFluids, 6));
+        try {
+            FluidStack[] stacks = fluidIngredient.getStacks();
+            int length = stacks == null ? 0 : stacks.length;
+            text.append(" getStacks=").append(length);
+            if (length > 0) {
+                text.append(" first=").append(formatFluidStacks(stacks, 4));
+            }
+        } catch (RuntimeException exception) {
+            text.append(" getStacks=EX:").append(exception.getClass().getSimpleName());
+        }
+        return text.toString();
+    }
+
+    private static String formatItemTests(Ingredient ingredient, Set<Item> patternItems, int limit) {
+        if (patternItems == null || patternItems.isEmpty()) {
+            return "[]";
+        }
+        StringBuilder text = new StringBuilder("[");
+        int shown = 0;
+        for (Item item : patternItems) {
+            if (item == null) {
+                continue;
+            }
+            if (shown >= limit) {
+                text.append(", ...");
+                break;
+            }
+            if (shown++ > 0) {
+                text.append(", ");
+            }
+            text.append(itemId(item)).append('=');
+            try {
+                text.append(ingredient.test(new ItemStack(item)));
+            } catch (RuntimeException exception) {
+                text.append("EX:").append(exception.getClass().getSimpleName());
+            }
+        }
+        text.append(']');
+        return text.toString();
+    }
+
+    private static String formatItems(Set<Item> items, int limit) {
+        if (items == null || items.isEmpty()) {
+            return "[]";
+        }
+        StringBuilder text = new StringBuilder("[");
+        int shown = 0;
+        int extra = 0;
+        for (Item item : items) {
+            if (item == null) {
+                continue;
+            }
+            if (shown >= limit) {
+                extra++;
+                continue;
+            }
+            if (shown++ > 0) {
+                text.append(", ");
+            }
+            text.append(itemId(item));
+        }
+        if (extra > 0) {
+            text.append(", +").append(extra);
+        }
+        text.append(']');
+        return text.toString();
+    }
+
+    private static String formatStacks(ItemStack[] stacks, int limit) {
+        StringBuilder text = new StringBuilder("[");
+        int shown = 0;
+        for (ItemStack stack : stacks) {
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            if (shown >= limit) {
+                text.append(", ...");
+                break;
+            }
+            if (shown++ > 0) {
+                text.append(", ");
+            }
+            text.append(itemId(stack.getItem()));
+        }
+        text.append(']');
+        return text.toString();
+    }
+
+    private static String formatFluids(Set<Fluid> fluids, int limit) {
+        if (fluids == null || fluids.isEmpty()) {
+            return "[]";
+        }
+        StringBuilder text = new StringBuilder("[");
+        int shown = 0;
+        int extra = 0;
+        for (Fluid fluid : fluids) {
+            if (fluid == null || fluid == Fluids.EMPTY) {
+                continue;
+            }
+            if (shown >= limit) {
+                extra++;
+                continue;
+            }
+            if (shown++ > 0) {
+                text.append(", ");
+            }
+            text.append(fluidId(fluid));
+        }
+        if (extra > 0) {
+            text.append(", +").append(extra);
+        }
+        text.append(']');
+        return text.toString();
+    }
+
+    private static String formatFluidStacks(FluidStack[] stacks, int limit) {
+        StringBuilder text = new StringBuilder("[");
+        int shown = 0;
+        for (FluidStack stack : stacks) {
+            if (stack == null || stack.isEmpty() || stack.getFluid() == null) {
+                continue;
+            }
+            if (shown >= limit) {
+                text.append(", ...");
+                break;
+            }
+            if (shown++ > 0) {
+                text.append(", ");
+            }
+            text.append(fluidId(stack.getFluid()));
+        }
+        text.append(']');
+        return text.toString();
+    }
+
+    private static String contentClass(Object raw) {
+        return raw == null ? "null" : raw.getClass().getName();
+    }
+
+    private static String itemId(Item item) {
+        if (item == null) {
+            return "null";
+        }
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
+        return id == null ? String.valueOf(item) : id.toString();
+    }
+
+    private static String fluidId(Fluid fluid) {
+        if (fluid == null) {
+            return "null";
+        }
+        ResourceLocation id = BuiltInRegistries.FLUID.getKey(fluid);
+        return id == null ? String.valueOf(fluid) : id.toString();
     }
 
     private static boolean fluidIngredientCoveredByFluids(FluidIngredient fluidIngredient, Set<Fluid> patternFluids) {

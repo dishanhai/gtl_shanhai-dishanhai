@@ -93,6 +93,22 @@ public final class PatternSlotScopedRecipe extends GTRecipe {
                 || recipe != null && decodeScope(recipe.id) != null;
     }
 
+    /**
+     * 强匹配要认的配方身份。并行概率折算会按 {@code recipe.id} 新建普通 {@link GTRecipe}，
+     * 那个字段带槽位作用域后缀，不能拿去和样板上保存的配方 ID 比。
+     */
+    public static ResourceLocation publicId(GTRecipe recipe) {
+        if (recipe == null) return null;
+        if (recipe instanceof PatternSlotScopedRecipe scoped && scoped.originalId != null) {
+            return scoped.originalId;
+        }
+        ScopeData encodedScope = decodeScope(recipe.id);
+        if (encodedScope != null && encodedScope.originalId != null) {
+            return encodedScope.originalId;
+        }
+        return recipe.getId();
+    }
+
     public record ShadowKey(GTRecipeType recipeType, ResourceLocation recipeId) {}
 
     public static ShadowKey shadowKeyForScoped(GTRecipe recipe) {

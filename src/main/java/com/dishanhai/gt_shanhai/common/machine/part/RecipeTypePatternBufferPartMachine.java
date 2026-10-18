@@ -18,9 +18,11 @@ import appeng.api.stacks.GenericStack;
 import appeng.api.stacks.KeyCounter;
 import appeng.api.storage.MEStorage;
 
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.api.gui.configurators.FancyConfiguratorSidebarPage;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
+import com.dishanhai.gt_shanhai.common.item.PatternSlotScopedRecipe;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeIdMatchPolicy;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypePatternSearchHelper;
@@ -43,6 +45,7 @@ import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.UITemplate;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
+import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.machine.multiblock.MultiblockControllerMachine;
 import com.gregtechceu.gtceu.api.machine.multiblock.part.MultiblockPartMachine;
@@ -99,6 +102,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -149,6 +153,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private static final int REMOTE_PLAYER_INVENTORY_HEIGHT = 80;
     private static final IGuiTexture STOCK_INPUT_ICON =
             new ResourceTexture("gt_shanhai:textures/gui/stock_input_panel.png");
+    private static final IGuiTexture STRONG_MATCH_ICON =
+            new ResourceTexture("gt_shanhai:textures/gui/strong_pattern_match.png");
     private static final IGuiTexture WILDCARD_INPUT_ICON = new TextTexture("*");
     /**
      * 宿主倍率来源是多方聚合（万象核心、维护仓、其他来源及固定广播），不能只靠某一个来源的回调。
@@ -205,6 +211,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private final String[] patternRecipeTypeIds;
     private final int[] patternRecipeTypeStackHashes;
     private final int[] strictRecipeIdWarningStackHashes;
+    private final int[] strongMatchLogStamps;
     @DescSynced
     private String warningSlots = "";
     private BitSet cachedWarningSlots = new BitSet();
@@ -218,6 +225,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private final Int2ReferenceOpenHashMap<Object2LongMap<AEFluidKey>> stuckRuntimeFluidSnapshots =
             new Int2ReferenceOpenHashMap<>();
     private final Int2ReferenceOpenHashMap<String> stuckRuntimeBroadcasts = new Int2ReferenceOpenHashMap<>();
+    private String cachedStrongMatchReport = "";
+    private long cachedStrongMatchReportTick = Long.MIN_VALUE;
+    private int cachedStrongMatchReportHash = Integer.MIN_VALUE;
 
     @Persisted
     private final ItemStackTransfer wildcardPatternInventory;
@@ -292,6 +302,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         Arrays.fill(this.patternRecipeTypeStackHashes, Integer.MIN_VALUE);
         this.strictRecipeIdWarningStackHashes = new int[patternsPerRow * rowsPerPage * maxPages];
         Arrays.fill(this.strictRecipeIdWarningStackHashes, Integer.MIN_VALUE);
+        this.strongMatchLogStamps = new int[patternsPerRow * rowsPerPage * maxPages];
+        Arrays.fill(this.strongMatchLogStamps, Integer.MIN_VALUE);
         this.wildcardPatterns = new ObjectArrayList<>();
         this.wildcardPreviewByMother = new ObjectArrayList<>();
         for (int previewSlot = 0; previewSlot < this.wildcardSlotCount; previewSlot++) {
@@ -321,6 +333,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 this::gtShanhai$isPatternSlotWarning,
                 getPatternInventory(),
                 this::patternPreviewLevel);
+        this.paginationUIManager.setSlotTooltip(this::gtShanhai$patternSlotTooltips);
     }
 
     @Override
@@ -348,6 +361,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     gtShanhai$getSlotFluidInventory(slot),
                     gtShanhai$hostRecipeTypeIds(),
                     gtShanhai$getPatternRecipeTypeId(slot),
+                    gtShanhai$getPatternRecipeId(slot),
                     StellarPatternCraftingContext.currentAePlayerId());
         }
         return accepted;
@@ -877,6 +891,19 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return typeId == null ? "" : typeId;
     }
 
+    /** 卡死告警用。普通槽讀樣板 NBT，通配展開槽讀已解析配方，不在推樣板熱路徑上重掃配方表。 */
+    public String gtShanhai$getPatternRecipeId(int slot) {
+        if (slot < 0) return "";
+        if (slot >= maxPatternCount) {
+            int localSlot = slot - maxPatternCount;
+            if (localSlot < 0 || localSlot >= wildcardResolvedRecipes.size()) return "";
+            GTRecipe recipe = wildcardResolvedRecipes.get(localSlot);
+            return recipe == null || recipe.id == null ? "" : recipe.id.toString();
+        }
+        if (slot >= getPatternInventory().getSlots()) return "";
+        return PatternRecipeTypeHelper.readRecipeId(getPatternInventory().getStackInSlot(slot));
+    }
+
     @Override
     public GTRecipe gtShanhai$getPatternRecipe(int slot) {
         return gtShanhai$getPatternRecipe(slot, gtShanhai$getPatternInferenceInputs());
@@ -896,6 +923,16 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
         if (strongPatternMatchMode && (recipeId.isEmpty() || recipeTypeId.isEmpty())) {
             gtShanhai$setStrongPatternMatchWarning(slot, true);
+            gtShanhai$logStrongMatchReject(slot, stack, recipeTypeId, recipeId, "",
+                    new StellarPatternStrongMatchMessages.Report(
+                            StellarPatternStrongMatchMessages.Kind.MISSING, "").line(500));
+            return null;
+        }
+        if (strongPatternMatchMode && !PatternRecipeIdMatchPolicy.hasTypePrefix(recipeTypeId, recipeId)) {
+            gtShanhai$setStrongPatternMatchWarning(slot, true);
+            gtShanhai$logStrongMatchReject(slot, stack, recipeTypeId, recipeId, "",
+                    new StellarPatternStrongMatchMessages.Report(
+                            StellarPatternStrongMatchMessages.Kind.PREFIX, recipeId).line(500));
             return null;
         }
         GTRecipe recipe = PatternRecipeTypeHelper.resolveRecipeForPattern(getLevel(), recipeTypeId, recipeId);
@@ -904,11 +941,23 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             patternRecipeTypeStackHashes[slot] = stackKeyHash(stack);
             if (strongPatternMatchMode) {
                 gtShanhai$setStrongPatternMatchWarning(slot, false);
+                if (slot < strongMatchLogStamps.length) {
+                    strongMatchLogStamps[slot] = Integer.MIN_VALUE;
+                }
             }
             return recipe;
         }
         if (strongPatternMatchMode) {
             gtShanhai$setStrongPatternMatchWarning(slot, true);
+            String resolvedId = recipe == null || recipe.getId() == null ? "" : recipe.getId().toString();
+            StellarPatternStrongMatchMessages.Report report = recipe == null
+                    ? new StellarPatternStrongMatchMessages.Report(
+                            StellarPatternStrongMatchMessages.Kind.UNRESOLVED,
+                            PatternRecipeTypeHelper.describeResolveMiss(getLevel(), recipeTypeId, recipeId))
+                    : new StellarPatternStrongMatchMessages.Report(
+                            StellarPatternStrongMatchMessages.Kind.IDENTITY,
+                            PatternRecipeTypeHelper.explainStoredRecipeMismatch(stack, getLevel(), recipe));
+            gtShanhai$logStrongMatchReject(slot, stack, recipeTypeId, recipeId, resolvedId, report.line(500));
             return null;
         }
         // 只读：本槽同时在向 AE 网络供货，绝不能像过去那样借"自愈"之机悄悄改写 NBT
@@ -920,6 +969,67 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             patternRecipeTypeStackHashes[slot] = stackKeyHash(stack);
         }
         return recipe;
+    }
+
+    private void gtShanhai$logStrongMatchReject(int slot, ItemStack stack, String recipeTypeId, String recipeId,
+            String resolvedId, String reason) {
+        if (isRemote() || slot < 0 || slot >= strongMatchLogStamps.length) return;
+        String text = reason == null ? "" : reason.replace('\n', ' ');
+        if (text.length() > 500) {
+            text = text.substring(0, 500);
+        }
+        int stamp = 31 * stackKeyHash(stack) + text.hashCode();
+        if (strongMatchLogStamps[slot] == stamp) return;
+        strongMatchLogStamps[slot] = stamp;
+        GTDishanhaiMod.LOGGER.info("[样板强匹配] pos={} slot={} type={} id={} resolved={} reason={}",
+                getPos(), slot, recipeTypeId == null || recipeTypeId.isEmpty() ? "<none>" : recipeTypeId,
+                recipeId == null || recipeId.isEmpty() ? "<none>" : recipeId,
+                resolvedId == null || resolvedId.isEmpty() ? "<none>" : resolvedId, text);
+    }
+
+    /**
+     * 卡死已经确认时打印。强匹配没拒绝就不会走进上面那条日志，所以取料失败要在这里单独记。
+     */
+    public void gtShanhai$logStuckDiagnosis(int slot) {
+        if (isRemote()) return;
+        ItemStack stack = gtShanhai$getPatternStack(slot);
+        String typeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
+        String recipeId = PatternRecipeTypeHelper.readRecipeId(stack);
+        GTRecipe resolved = PatternRecipeTypeHelper.resolveRecipeForPattern(getLevel(), typeId, recipeId);
+        String resolvedId = resolved == null || resolved.getId() == null ? "<none>" : resolved.getId().toString();
+        String resolveDetail = resolved == null
+                ? PatternRecipeTypeHelper.describeResolveMiss(getLevel(), typeId, recipeId) : "ok";
+        String fit = resolved == null ? "<no-recipe>"
+                : (PatternRecipeTypeHelper.storedRecipeFitsPattern(stack, getLevel(), resolved)
+                        ? "ok" : PatternRecipeTypeHelper.explainStoredRecipeMismatch(stack, getLevel(), resolved));
+        if (fit != null && fit.length() > 400) {
+            fit = fit.substring(0, 400);
+        }
+        boolean slotActive = slot >= 0 && slot < getInternalSlotCount() && getInternalSlot(slot).isActive();
+        long multiplier = resolvePatternOutputMultiplier(typeId);
+        GTDishanhaiMod.LOGGER.info(
+                "[样板卡死] pos={} slot={} strong={} active={} type={} id={} resolved={} resolve={} fit={} hostType={} multiplier={} outputMultiplierMode={}",
+                getPos(), slot, strongPatternMatchMode, slotActive,
+                typeId == null || typeId.isEmpty() ? "<none>" : typeId,
+                recipeId == null || recipeId.isEmpty() ? "<none>" : recipeId,
+                resolvedId, oneLineDiagnosis(resolveDetail), oneLineDiagnosis(fit),
+                gtShanhai$currentHostRecipeTypeIds(), multiplier, outputMultiplierModeEnabled);
+    }
+
+    private String gtShanhai$currentHostRecipeTypeIds() {
+        StringBuilder text = new StringBuilder();
+        for (IMultiController controller : getControllers()) {
+            if (!(controller.self() instanceof IRecipeLogicMachine logicMachine)) continue;
+            GTRecipeType type = logicMachine.getRecipeType();
+            if (text.length() > 0) text.append(", ");
+            text.append(type == null || type.registryName == null ? "<none>" : type.registryName.toString());
+        }
+        return text.length() == 0 ? "<none>" : text.toString();
+    }
+
+    private static String oneLineDiagnosis(String text) {
+        if (text == null || text.isBlank()) return "<none>";
+        return text.replace('\n', ' ').replace('\r', ' ');
     }
 
     @Override
@@ -1022,6 +1132,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public void setStrongPatternMatchMode(boolean enabled) {
         if (strongPatternMatchMode == enabled) return;
         strongPatternMatchMode = enabled;
+        gtShanhai$invalidateStrongMatchReport();
         markDirty();
         Arrays.fill(strictRecipeIdWarningStackHashes, Integer.MIN_VALUE);
         int[] activeSlots = gtShanhai$getActiveSlots();
@@ -1417,7 +1528,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             String patternRecipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
             String candidateRecipeTypeId = recipe == null || recipe.recipeType == null
                     || recipe.recipeType.registryName == null ? "" : recipe.recipeType.registryName.toString();
-            String candidateRecipeId = recipe == null || recipe.getId() == null ? "" : recipe.getId().toString();
+            ResourceLocation candidatePublicId = PatternSlotScopedRecipe.publicId(recipe);
+            String candidateRecipeId = candidatePublicId == null ? "" : candidatePublicId.toString();
             if (!PatternRecipeIdMatchPolicy.matches(
                     patternRecipeTypeId, patternRecipeId, candidateRecipeTypeId, candidateRecipeId)) {
                 return false;
@@ -1864,12 +1976,12 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
         @Override
         public IGuiTexture getIcon() {
-            return new TextTexture("!", -1);
+            return STRONG_MATCH_ICON;
         }
 
         @Override
         public Widget createConfigurator() {
-            WidgetGroup group = new WidgetGroup(0, 0, 160, 58);
+            WidgetGroup group = new WidgetGroup(0, 0, 176, 72);
             group.addWidget(new LabelWidget(6, 4, () -> Component.translatable(
                     isStrongPatternMatchMode()
                             ? "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.enabled"
@@ -1886,6 +1998,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                                     "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.off")));
             group.addWidget(new LabelWidget(24, 26, () -> Component.translatable(
                     "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.toggle").getString()));
+            group.addWidget(new LabelWidget(6, 46, RecipeTypePatternBufferPartMachine.this::gtShanhai$strongMatchReportLine));
             return group;
         }
     }
@@ -2516,7 +2629,6 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private String terminalStuckBroadcast() {
-        if (stuckRuntimeBroadcasts.isEmpty()) return "";
         StringBuilder builder = new StringBuilder();
         int shown = 0;
         for (int slot = stuckRuntimeWarningSlots.nextSetBit(0); slot >= 0 && shown < 4;
@@ -2532,7 +2644,32 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             if (builder.length() > 0) builder.append('\n');
             builder.append("还有 ").append(hidden).append(" 个卡死槽");
         }
+        String strong = terminalStrongMatchLines();
+        if (!strong.isEmpty()) {
+            if (builder.length() > 0) builder.append('\n');
+            builder.append(strong);
+        }
         return clip(builder.toString(), 960);
+    }
+
+    private String terminalStrongMatchLines() {
+        if (!strongPatternMatchMode || strictRecipeIdWarningSlots.isEmpty()) return "";
+        StringBuilder builder = new StringBuilder();
+        int shown = 0;
+        for (int slot = strictRecipeIdWarningSlots.nextSetBit(0); slot >= 0 && shown < 3;
+                slot = strictRecipeIdWarningSlots.nextSetBit(slot + 1)) {
+            String line = gtShanhai$strongMatchReason(slot);
+            if (line.isEmpty()) continue;
+            if (builder.length() > 0) builder.append('\n');
+            builder.append("槽位 ").append(slot + 1).append(' ').append(line);
+            shown++;
+        }
+        int hidden = strictRecipeIdWarningSlots.cardinality() - shown;
+        if (hidden > 0) {
+            if (builder.length() > 0) builder.append('\n');
+            builder.append("还有 ").append(hidden).append(" 个强匹配报错槽");
+        }
+        return builder.toString();
     }
 
     private static String clip(String text, int max) {
@@ -2753,6 +2890,82 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         patternRecipeTypeStackHashes[slot] = stackKeyHash(stack);
     }
 
+    private List<Component> gtShanhai$patternSlotTooltips(Integer slot) {
+        if (slot == null || !strongPatternMatchMode || !gtShanhai$isPatternSlotWarning(slot)) {
+            return List.of();
+        }
+        if (slot < 0 || slot >= getPatternInventory().getSlots()) return List.of();
+        ArrayList<Component> lines = new ArrayList<>(2);
+        StellarPatternStrongMatchMessages.explain(patternPreviewLevel(), getPatternInventory().getStackInSlot(slot))
+                .addTooltip(lines);
+        return lines;
+    }
+
+    /** 星律卡死告警用。强匹配没拒绝时返回空串，沿用原来的主机状态。 */
+    public String gtShanhai$strongMatchReason(int slot) {
+        if (!strongPatternMatchMode || slot < 0 || slot >= maxPatternCount
+                || slot >= getPatternInventory().getSlots()) {
+            return "";
+        }
+        return StellarPatternStrongMatchMessages.explain(getLevel(), getPatternInventory().getStackInSlot(slot))
+                .line(180);
+    }
+
+    public String gtShanhai$firstStrongMatchLine() {
+        if (!strongPatternMatchMode || strictRecipeIdWarningSlots.isEmpty()) return "";
+        for (int slot = strictRecipeIdWarningSlots.nextSetBit(0); slot >= 0;
+                slot = strictRecipeIdWarningSlots.nextSetBit(slot + 1)) {
+            String line = gtShanhai$strongMatchReason(slot);
+            if (!line.isEmpty()) return line;
+        }
+        return "";
+    }
+
+    private String gtShanhai$strongMatchReportLine() {
+        if (!strongPatternMatchMode) {
+            return Component.translatable("gt_shanhai.stellar.strong_match.report_off").getString();
+        }
+        int hash = gtShanhai$strongMatchInventoryHash();
+        long tick = getOffsetTimer();
+        if (hash == cachedStrongMatchReportHash
+                && tick - cachedStrongMatchReportTick >= 0L
+                && tick - cachedStrongMatchReportTick < 20L) {
+            return cachedStrongMatchReport;
+        }
+        int count = 0;
+        String first = "";
+        int slots = Math.min(maxPatternCount, getPatternInventory().getSlots());
+        Level level = patternPreviewLevel();
+        for (int slot = 0; slot < slots; slot++) {
+            StellarPatternStrongMatchMessages.Report report = StellarPatternStrongMatchMessages.explain(
+                    level, getPatternInventory().getStackInSlot(slot));
+            if (!report.failed()) continue;
+            count++;
+            if (first.isEmpty()) {
+                first = report.headline().getString();
+            }
+        }
+        cachedStrongMatchReportTick = tick;
+        cachedStrongMatchReportHash = hash;
+        cachedStrongMatchReport = count == 0
+                ? Component.translatable("gt_shanhai.stellar.strong_match.report_clear").getString()
+                : Component.translatable("gt_shanhai.stellar.strong_match.report_count", count, first).getString();
+        return cachedStrongMatchReport;
+    }
+
+    private int gtShanhai$strongMatchInventoryHash() {
+        int hash = Boolean.hashCode(strongPatternMatchMode);
+        int slots = Math.min(maxPatternCount, getPatternInventory().getSlots());
+        for (int slot = 0; slot < slots; slot++) {
+            hash = 31 * hash + stackKeyHash(getPatternInventory().getStackInSlot(slot));
+        }
+        return hash;
+    }
+
+    private void gtShanhai$invalidateStrongMatchReport() {
+        cachedStrongMatchReportTick = Long.MIN_VALUE;
+    }
+
     private void gtShanhai$setStrongPatternMatchWarning(int slot, boolean warning) {
         if (isRemote() || slot < 0 || slot >= maxPatternCount) return;
         if (slot < getPatternInventory().getSlots()) {
@@ -2764,6 +2977,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         } else {
             strictRecipeIdWarningSlots.clear(slot);
         }
+        gtShanhai$invalidateStrongMatchReport();
         gtShanhai$refreshPatternSlotWarning(slot);
     }
 

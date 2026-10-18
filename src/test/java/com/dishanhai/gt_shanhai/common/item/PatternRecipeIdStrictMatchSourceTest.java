@@ -65,6 +65,22 @@ class PatternRecipeIdStrictMatchSourceTest {
                 "強匹配不得接受沒有已存配方 ID 或配方類型的樣板");
         assertTrue(machine.contains("PatternRecipeIdMatchPolicy.matches("),
                 "扣料前必須再次以完整配方 ID 和配方類型拒絕替補");
+        assertTrue(machine.contains("PatternSlotScopedRecipe.publicId(recipe)"),
+                "扣料闸必须比对去掉槽位作用域后的配方 ID，不能直接用概率折算副本的 getId()");
+        assertTrue(machine.contains("StellarPatternStrongMatchMessages"),
+                "强匹配拒绝必须走星律报错文案");
+        assertTrue(machine.contains("gtShanhai$patternSlotTooltips"),
+                "样板槽悬停必须能看到强匹配报错");
+        String zh = Files.readString(Path.of("src", "main", "resources", "assets", "gt_shanhai", "lang", "zh_cn.json"));
+        String en = Files.readString(Path.of("src", "main", "resources", "assets", "gt_shanhai", "lang", "en_us.json"));
+        assertTrue(zh.contains("gt_shanhai.stellar.strong_match.missing")
+                        && zh.contains("gt_shanhai.stellar.strong_match.prefix")
+                        && zh.contains("gt_shanhai.stellar.strong_match.unresolved")
+                        && zh.contains("gt_shanhai.stellar.strong_match.identity"),
+                "强匹配四种拒绝都要有中文报错");
+        assertTrue(en.contains("gt_shanhai.stellar.strong_match.missing")
+                        && en.contains("gt_shanhai.stellar.strong_match.identity"),
+                "强匹配报错要有英文文案");
     }
 
     @Test

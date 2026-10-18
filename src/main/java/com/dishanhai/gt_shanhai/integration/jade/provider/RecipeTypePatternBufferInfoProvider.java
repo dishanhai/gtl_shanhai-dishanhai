@@ -79,6 +79,12 @@ public enum RecipeTypePatternBufferInfoProvider implements IBlockComponentProvid
                 tag.putBoolean("nodeActive", node != null && node.isActive());
                 tag.putInt("warningCount", machine.gtShanhai$getWarningSlotCount());
                 tag.putInt("stuckWarningCount", machine.gtShanhai$getStuckWarningSlotCount());
+                tag.putBoolean("strongMatch", machine.isStrongPatternMatchMode());
+                String strongMatchError = machine.gtShanhai$firstStrongMatchLine();
+                if (strongMatchError.length() > 80) {
+                    strongMatchError = strongMatchError.substring(0, 80);
+                }
+                tag.putString("strongMatchError", strongMatchError);
                 tag.putString("hostTypes", joinRecipeTypeNames(collectHostRecipeTypeIds(machine)));
                 tag.putString("patternTypes", joinRecipeTypeNames(collectPatternRecipeTypeIds(machine)));
             }
@@ -141,6 +147,12 @@ public enum RecipeTypePatternBufferInfoProvider implements IBlockComponentProvid
 
         tooltip.add(helper.text(Component.literal("§7◆ 异常槽位: §f" + data.getInt("warningCount")
                 + " §7/ §c卡死槽位: §f" + data.getInt("stuckWarningCount"))));
+        if (data.getBoolean("strongMatch")) {
+            String strongMatchError = data.getString("strongMatchError");
+            tooltip.add(helper.text(Component.literal(strongMatchError.isEmpty()
+                    ? "§7◆ 强匹配: §a开启"
+                    : "§7◆ 强匹配: §c" + strongMatchError)));
+        }
     }
 
     private static List<String> collectHostRecipeTypeIds(RecipeTypePatternBufferPartMachine machine) {

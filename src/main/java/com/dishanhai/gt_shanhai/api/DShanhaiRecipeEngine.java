@@ -468,7 +468,8 @@ public class DShanhaiRecipeEngine {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a💽 当前神人私货版本:v" + safeVersion(scriptVersion)));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a💽 当前gt_shanhai模组版本:v" + modVersion));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a💽 当前API总控系统版本为" + safeVersion(apiVersion)));
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("👌 你可以在Guime中查看配方引索,其会显示目前shanhai有哪些配方！"));
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&7👌 你可以在Guideme中查看配方引索,其会显示目前shanhai有哪些配方！"));
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§a😁 游戏最重要的是玩得开心！"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$body_aurora-欢迎来到GTL寰宇联合重工巨企"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$body_moss-此成功信息回执由JAVA侧: DShanhaiRecipeEngine 生成"));
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("&$body_silver-老大我们这样熬夜写私货心脏真的不会自己先休息吗"));

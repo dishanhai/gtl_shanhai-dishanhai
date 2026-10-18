@@ -52,6 +52,8 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(!machine.contains("slotIndex < maxPatternCount && !isRemote()"),
                 "星律通配样板展开后的槽位号大于 maxPatternCount，旧门槛会直接跳过告警");
         assertTrue(machine.contains("StellarPatternStuckWatch.schedule("));
+        assertTrue(machine.contains("gtShanhai$getPatternRecipeId(slot)"),
+                "卡死告警要带上样板保存的配方 ID，不能只报配方类型");
         assertTrue(machine.contains("gtShanhai$getSlotItemInventory(slot)"));
         assertTrue(machine.contains("gtShanhai$getSlotFluidInventory(slot)"));
     }
@@ -77,6 +79,10 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(watch.contains("module.getModuleConditionError()"),
                 "样板卡死必须带上原初模块的额外挂载失败原因");
         assertTrue(watch.contains("appendPlain(result, \"挂载\""));
+        assertTrue(watch.contains("collectStuckReason(machine, watch.slot)"),
+                "卡死原因必须带上槽位，才能写入该槽的强匹配报错");
+        assertTrue(watch.contains("machine.gtShanhai$strongMatchReason(slot)"),
+                "强匹配拒绝时，星律卡死告警要带上对应报错，而不是只写主机状态");
     }
 
     @Test
@@ -122,6 +128,9 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(watch.contains("machine.gtShanhai$describeStuckSlot(slot)"));
         assertTrue(notifier.contains("hostRecipeTypeIds"));
         assertTrue(notifier.contains("patternRecipeTypeId"));
+        assertTrue(notifier.contains("patternRecipeId"));
+        assertTrue(notifier.contains("样板配方ID"));
+        assertTrue(watch.contains("patternRecipeId"));
         assertTrue(notifier.contains("stuckInputs"));
         assertTrue(notifier.contains("stuckOutputs"));
         assertTrue(notifier.contains("broadcastBody"));

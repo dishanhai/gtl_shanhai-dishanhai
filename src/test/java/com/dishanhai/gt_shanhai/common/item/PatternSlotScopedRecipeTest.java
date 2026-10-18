@@ -80,6 +80,13 @@ class PatternSlotScopedRecipeTest {
         assertTrue(PatternSlotScopedRecipe.isScoped(chanceProcessed));
         assertTrue(PatternSlotScopedRecipe.matchesSource(chanceProcessed, DIMENSION, sourcePos, 14));
         assertFalse(PatternSlotScopedRecipe.matchesSource(chanceProcessed, DIMENSION, sourcePos, 12));
+        assertNotEquals(ORIGINAL_ID, chanceProcessed.id);
+        assertEquals(ORIGINAL_ID, PatternSlotScopedRecipe.publicId(chanceProcessed));
+        assertFalse(PatternRecipeIdMatchPolicy.matches(
+                "gtceu:distort", ORIGINAL_ID.toString(), "gtceu:distort", chanceProcessed.id.toString()));
+        assertTrue(PatternRecipeIdMatchPolicy.matches(
+                "gtceu:distort", ORIGINAL_ID.toString(), "gtceu:distort",
+                PatternSlotScopedRecipe.publicId(chanceProcessed).toString()));
     }
 
     private static GTRecipe emptyRecipe() {

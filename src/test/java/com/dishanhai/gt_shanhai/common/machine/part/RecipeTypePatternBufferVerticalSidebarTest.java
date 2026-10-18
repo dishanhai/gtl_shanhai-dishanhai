@@ -32,6 +32,10 @@ class RecipeTypePatternBufferVerticalSidebarTest {
                 "星律必须提供独立的样板产出倍率侧栏页");
         assertTrue(machine.contains("new StrongPatternMatchConfigurator()"),
                 "星律必须提供独立的强匹配侧栏页");
+        assertTrue(machine.contains("gt_shanhai:textures/gui/strong_pattern_match.png"),
+                "强匹配侧栏必须使用独立图标");
+        assertFalse(machine.contains("new TextTexture(\"!\", -1)"),
+                "强匹配侧栏不再使用感叹号文字图标");
         assertTrue(machine.contains("createRemoteStrongPatternMatchUI("),
                 "无线终端也必须能打开强匹配控制页");
         assertTrue(machine.contains("collectParentConfigurators()"),

@@ -14,6 +14,7 @@ import net.minecraft.world.level.Level;
 
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.Supplier;
@@ -43,6 +44,8 @@ public final class CachedPatternPaginationUIManager {
 
     @Nullable
     private IntConsumer onMiddleClicked;
+    @Nullable
+    private Function<Integer, List<Component>> slotTooltip;
 
     public CachedPatternPaginationUIManager(int patternsPerRow, int rowsPerPage, int maxPages,
                                             int uiWidth, int uiHeight,
@@ -62,6 +65,10 @@ public final class CachedPatternPaginationUIManager {
         this.isWarning = isWarning == null ? slot -> Boolean.FALSE : isWarning;
         this.patternInventory = patternInventory;
         this.levelSupplier = levelSupplier;
+    }
+
+    public void setSlotTooltip(@Nullable Function<Integer, List<Component>> slotTooltip) {
+        this.slotTooltip = slotTooltip;
     }
 
     public int getUiWidth() {
@@ -118,6 +125,12 @@ public final class CachedPatternPaginationUIManager {
             slot.setOnAddedTooltips((widget, tooltips) -> {
                 if (isCached.apply(finalSlot)) {
                     tooltips.add(Component.translatable("gtceu.machine.pattern.recipe.cache"));
+                }
+                if (slotTooltip != null) {
+                    List<Component> extra = slotTooltip.apply(finalSlot);
+                    if (extra != null && !extra.isEmpty()) {
+                        tooltips.addAll(extra);
+                    }
                 }
             });
             pageGroup.addWidget(slot);

@@ -34,7 +34,7 @@ public final class StellarPatternStuckNotifier {
 
     public static void notifyStuck(ServerLevel level, BlockPos pos, int slot, String slotLabel,
             @Nullable Integer aePlayerId, String reason, String stuckInputs, String stuckOutputs,
-            List<String> hostRecipeTypeIds, String patternRecipeTypeId) {
+            List<String> hostRecipeTypeIds, String patternRecipeTypeId, String patternRecipeId) {
         MinecraftServer server = level.getServer();
         Set<UUID> sent = new HashSet<>();
         double x = pos.getX() + 0.5D;
@@ -45,7 +45,7 @@ public final class StellarPatternStuckNotifier {
             if (player.distanceToSqr(x, y, z) > NEARBY_RADIUS_SQUARED) continue;
             if (sent.add(player.getUUID())) {
                 send(player, level, pos, slot, slotLabel, "附近 " + (int) NEARBY_RADIUS + " 格", reason,
-                        stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId);
+                        stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId, patternRecipeId);
             }
         }
 
@@ -53,7 +53,7 @@ public final class StellarPatternStuckNotifier {
             ServerPlayer player = IPlayerRegistry.getConnected(server, aePlayerId);
             if (player != null && sent.add(player.getUUID())) {
                 send(player, level, pos, slot, slotLabel, "AE 下单玩家", reason,
-                        stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId);
+                        stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId, patternRecipeId);
             }
         }
     }
@@ -104,7 +104,7 @@ public final class StellarPatternStuckNotifier {
 
     private static void send(ServerPlayer player, ServerLevel level, BlockPos pos, int slot, String slotLabel,
             String route, String reason, String stuckInputs, String stuckOutputs, List<String> hostRecipeTypeIds,
-            String patternRecipeTypeId) {
+            String patternRecipeTypeId, String patternRecipeId) {
         Component coordinate = coordinateLink(level, pos);
         player.sendSystemMessage(Component.literal("§c[星律样板告警] §f")
                 .append(Component.literal(route).withStyle(ChatFormatting.YELLOW))
@@ -112,21 +112,23 @@ public final class StellarPatternStuckNotifier {
                 .append(coordinate));
         player.sendSystemMessage(Component.literal("§7槽位: §f" + displaySlot(slot, slotLabel)
                 + " §7原因: §f" + reason));
+        player.sendSystemMessage(Component.literal("§7样板配方ID: §f" + oneLine(patternRecipeId)
+                + " §7样板配方类型: §f" + oneLine(patternRecipeTypeId)));
         player.sendSystemMessage(Component.literal("§7卡死原料: §f" + stuckInputs));
         player.sendSystemMessage(Component.literal("§7卡死输出: §f" + stuckOutputs));
-        player.sendSystemMessage(Component.literal("§7主机配方类型: §f"
-                + formatList(hostRecipeTypeIds)
-                + " §7样板配方类型: §f" + patternRecipeTypeId));
+        player.sendSystemMessage(Component.literal("§7主机配方类型: §f" + formatList(hostRecipeTypeIds)));
     }
 
     public static String broadcastBody(int slot, String slotLabel, String reason, String stuckInputs,
-            String stuckOutputs, List<String> hostRecipeTypeIds, String patternRecipeTypeId) {
+            String stuckOutputs, List<String> hostRecipeTypeIds, String patternRecipeTypeId,
+            String patternRecipeId) {
         String text = "槽位 " + displaySlot(slot, slotLabel)
+                + " 样板ID: " + oneLine(patternRecipeId)
+                + " 样板类型: " + oneLine(patternRecipeTypeId)
                 + " 原因: " + oneLine(reason)
                 + " | 原料: " + oneLine(stuckInputs)
                 + " | 输出: " + oneLine(stuckOutputs)
-                + " | 主机配方: " + oneLine(formatList(hostRecipeTypeIds))
-                + " | 样板配方: " + oneLine(patternRecipeTypeId);
+                + " | 主机配方: " + oneLine(formatList(hostRecipeTypeIds));
         return text.length() <= 220 ? text : text.substring(0, 220);
     }
 
