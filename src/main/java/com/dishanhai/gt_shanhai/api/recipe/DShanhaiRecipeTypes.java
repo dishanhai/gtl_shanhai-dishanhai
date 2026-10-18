@@ -58,6 +58,7 @@ public class DShanhaiRecipeTypes {
     public static GTRecipeType BLACK_HOLE_EVENT_HORIZON_BLAST;   // 事件视界爆破
     public static GTRecipeType COIN_FORGE;                       // 原初铸币工厂
     public static GTRecipeType PROXY_EXECUTION;                   // 代理执行占位类型
+    public static GTRecipeType PRIMORDIAL_REVERSE_ENTROPY_CONSTITUTION; // 原初逆熵构成
     public static final GTRecipeType[] NINE_INDUSTRIAL_MODES = new GTRecipeType[36]; // 36 水浒传模式显示类型
     private static final List<GTRecipeType> REGISTERED_TYPES = new ArrayList<>();
 
@@ -526,6 +527,16 @@ public class DShanhaiRecipeTypes {
                 .setMaxTooltips(1)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
+
+        // 1 流体入 / 1 物品出。分子解构是 1 粉 → 144mb，这里是反过来的槽位。
+        PRIMORDIAL_REVERSE_ENTROPY_CONSTITUTION = register("primordial_reverse_entropy_constitution", "multiblock")
+                .setMaxIOSize(0, 1, 1, 0)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_COMPRESS, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
+                .setSlotOverlay(false, false, true, GuiTextures.FLUID_SLOT)
+                .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
+                .setSound(GTSoundEntries.ARC);
 
         for (GTRecipeType type : REGISTERED_TYPES) {
             ModuleCatalystSlotUI.install(type);

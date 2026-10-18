@@ -46,8 +46,14 @@ public class CurrencyQuickSellPacket {
             String aeHint = pkt.includeAe && result.extracted().signum() > 0
                     ? "（已自動抽取 AE " + ShopPurchase.formatCount(result.extracted()) + " 枚）"
                     : "";
+            String skipHint = result.skippedLocked() > 0
+                    ? " §7跳过 " + result.skippedLocked() + " 种阶段未提交的货币"
+                    : "";
             player.sendSystemMessage(Component.literal("§b[货币中心] §a已快速售出全部货币，获得 §e"
-                    + ShopPurchase.formatCount(result.gained()) + " 星火 §7" + aeHint));
+                    + ShopPurchase.formatCount(result.gained()) + " 星火 §7" + aeHint + skipHint));
+        } else if (result.skippedLocked() > 0) {
+            player.sendSystemMessage(Component.literal(
+                    "§c[货币中心] 有币值的货币都还没提交对应阶段，和商店购买是同一份提交"));
         } else {
             player.sendSystemMessage(Component.literal(
                     "§c[货币中心] 没有可按币值售出的货币（特殊货币请前往兑换中心）"));

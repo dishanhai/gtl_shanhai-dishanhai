@@ -127,6 +127,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.LongValue shopRewardRollCap;
         /** 山海商店 — AE 模式下是否禁止把购买/兑换得到的物品注入 AE（只拉取/检索，不注入） */
         public ForgeConfigSpec.BooleanValue shopAeDeliverDisabled;
+        /** 山海商店 — AE 模式下单种物品少于此数量时进背包，达到才注入 AE */
+        public ForgeConfigSpec.LongValue shopAeInjectMin;
         /** 山海商店 — 是否把有内容 SDA 直接注入同网 ME 磁盘仓室 */
         public ForgeConfigSpec.BooleanValue shopSdaDirectDiskHatchInject;
         /** 山海商店 — 出售回收价占买价的百分比（价差，防买卖零损耗套利） */
@@ -377,6 +379,12 @@ public final class DShanhaiConfig {
                              "true = AE 模式只用来拉取材料付款/检索库存，购买完成后物品一律正常交付给玩家",
                              "（进背包，装不下或总量达标按 sdaPackThreshold 打包超级磁盘阵列——SDA 打包规则不受此项影响）")
                     .define("aeDeliverDisabled", false);
+            shopAeInjectMin = builder
+                    .comment("山海商店：AE 注入限额。单种物品本次交付数量低于此值时进背包，达到或超过才注入 AE",
+                             "默认 64。极小数量塞进 AE 后还得再抽出来用，进背包更直接",
+                             "设 1 等于旧行为：只要网络吃得下就注入。流体没有背包落点，不受此项影响",
+                             "「AE 模式禁止注入」开启时本项不生效。整批已达 SDA 打包阈值时，没进 AE 的仍随整批打包")
+                    .defineInRange("aeInjectMin", 64L, 1L, Long.MAX_VALUE);
             shopSdaDirectDiskHatchInject = builder
                     .comment("山海商店：将SDA直接注入磁盘仓室（默认 true）",
                              "开启后，兑换/购买得到的有内容 SDA、以及超限自动打包出的 SDA，会优先放入同一 AE 网络内可用的 ME 磁盘仓室并直接挂载存储",

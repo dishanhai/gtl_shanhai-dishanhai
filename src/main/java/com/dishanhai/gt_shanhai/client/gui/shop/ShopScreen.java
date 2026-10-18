@@ -19,6 +19,7 @@ import com.dishanhai.gt_shanhai.common.shop.ShopMembership;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
+import com.dishanhai.gt_shanhai.jei.JeiBookmarkBridge;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopActionPacket;
 import com.dishanhai.gt_shanhai.network.ShopCostPreviewRequestPacket;
@@ -30,6 +31,7 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fluids.FluidStack;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -146,6 +148,8 @@ public class ShopScreen extends ScaledScreen {
     // initScaled 已切好分类、但该商品所在 chunk 还没到（entriesByKey 里还没有实体）时挂在这里，
     // 由 renderScaledBackground 每帧重试，chunk 一到就选中。-1 = 没有待选中的商品。
     private long pendingSelectEntryKey = -1L;
+    /** 目錄還沒就緒時掛起的「記住選取」stableId。就緒後能解析就選中，解析不到就放棄。 */
+    private String pendingRestoreStableId;
     // 切页/切卡片切换动画：记下"数据集刚换过"的时刻，渲染时按经过时间算一个插值，
     // 纯几何变换（PoseStack translate/scale，不碰颜色/透明度），对物品图标渲染同样生效，不用担心改样式。
     private long gridSwitchAtMs;   // 主/子分类切页（网格数据集变了）触发；0=从未触发，视为动画已完成
@@ -281,6 +285,7 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void selectEntry(long entryKey, ShopEntry entry) {
+        pendingRestoreStableId = null;
         long newKey = entry == null ? -1L : entryKey;
         if (newKey != selectedEntryKey) {
             cardSwitchAtMs = System.currentTimeMillis(); // 真换了商品才弹一下，重复点同一张卡不重播
@@ -292,6 +297,7 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void clearSelection() {
+        pendingRestoreStableId = null;
         selectedEntryKey = -1L;
         selected = null;
         detailScroll = 0;
@@ -338,6 +344,7 @@ public class ShopScreen extends ScaledScreen {
     }
     private String previewHoverName; // 详情页花费预览槽悬停名（drawDetail 暂存 → renderTooltips 消费）
     private String previewHoverExtra; // 悬停槽的"拥有/缺少"提示行（drawPreviewSlot 暂存 → renderTooltips 消费），无数据（未同步/加载中）为 null
+    private String previewHoverOrder; // 悬停槽的「可下单/无样板」行，未核对时为 null
     private ItemStack previewHoverStack; // 获得/花费预览格悬停的真实物品（含 NBT），renderTooltips 画原版物品 tooltip
     private long previewRequestedKey = -1L;      // 花费预览最近一次发起请求时对应的商品；变了要重新请求
     private boolean previewRequestedAeMode = false; // 花费预览最近一次发起请求时的 AE 模式状态；切换要重新请求
@@ -373,6 +380,9 @@ public class ShopScreen extends ScaledScreen {
     // 「补齐全部缺口」按钮：花费预览格有确定不够的项、且开着 AE 模式才出现，跟链接/指南同一套暂存坐标+点击消费的路数
     private boolean autoCraftBtnVisible;
     private int autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH;
+    /** 「收藏缺失」：把花费里已经确定不够的物品/流体写入 JEI 书签，和 GTLCore 合成确认页同一用途。 */
+    private boolean favoriteMissingBtnVisible;
+    private int favoriteMissingBtnX, favoriteMissingBtnY, favoriteMissingBtnW, favoriteMissingBtnH;
     // 「购买原料」按钮：当前商品成本含商店可购买的物品原料时出现，服务端按实际缺口购买。
     private boolean buyMaterialsBtnVisible;
     private int buyMaterialsBtnX, buyMaterialsBtnY, buyMaterialsBtnW, buyMaterialsBtnH;
@@ -1014,7 +1024,12 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void initScaled() {
+        boolean fresh = searchBox == null;
+        String restoreStableId = null;
         if (observedCatalogRevision != ClientShopCatalog.revision()) {
+            if (ClientShopUiSettings.rememberShopView() && selected != null) {
+                restoreStableId = selected.getStableId();
+            }
             observedCatalogRevision = ClientShopCatalog.revision();
             clearSelection();
             scroll = 0;
@@ -1047,8 +1062,11 @@ public class ShopScreen extends ScaledScreen {
             selectedSub3 = "";
         }
 
-        // 搜索框（右侧详情列正上方）
+        // 搜索框（右侧详情列正上方）。新开的界面在「记住选取与搜索」打开时带回上次的词。
         String prev = searchBox != null ? searchBox.getValue() : "";
+        if (fresh && ClientShopUiSettings.rememberShopView()) {
+            prev = ClientShopUiSettings.shopSearch();
+        }
         searchBox = new EditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W, 12, Component.literal("搜索"));
         searchBox.setValue(prev);
         searchBox.setResponder(s -> { scroll = 0; recomputeVisible(); });
@@ -1077,7 +1095,35 @@ public class ShopScreen extends ScaledScreen {
         addRenderableWidget(amountBox);
 
         recomputeVisible();
-        if (focusKey >= 0L) focusOnEntry(focusKey);
+        if (focusKey >= 0L) {
+            focusOnEntry(focusKey);
+        } else if (restoreStableId != null) {
+            restoreRememberedSelection(restoreStableId);
+        } else if (fresh && ClientShopUiSettings.rememberShopView()) {
+            restoreRememberedSelection(ClientShopUiSettings.shopSelectedStableId());
+        }
+    }
+
+    /** 按 stableId 找回上次選中的商品。目錄還沒到就先掛起，到了再選。 */
+    private void restoreRememberedSelection(String stableId) {
+        if (stableId == null || stableId.isBlank() || selected != null) return;
+        long key = ClientShopCatalog.keyOfStableId(stableId);
+        if (key >= 0L) focusOnEntry(key);
+        else if (!ClientShopCatalog.ready()) pendingRestoreStableId = stableId;
+    }
+
+    /** 商店設置裡「記住選取與搜索」確認後調用：開著就收下當前畫面，關著就清掉已存的詞和商品。 */
+    public void onRememberShopViewSaved(boolean remember) {
+        if (remember) ClientShopUiSettings.setShopView(currentSearch(), currentStableId());
+        else ClientShopUiSettings.clearShopView();
+    }
+
+    private String currentSearch() {
+        return searchBox == null ? "" : searchBox.getValue();
+    }
+
+    private String currentStableId() {
+        return selected == null ? "" : selected.getStableId();
     }
 
     /**
@@ -1180,6 +1226,16 @@ public class ShopScreen extends ScaledScreen {
                 pendingSelectEntryKey = -1L;
             } else {
                 neededKeys.add(pendingSelectEntryKey);
+            }
+        }
+        if (pendingRestoreStableId != null && selected == null) {
+            long restoreKey = ClientShopCatalog.keyOfStableId(pendingRestoreStableId);
+            if (restoreKey >= 0L) {
+                pendingRestoreStableId = null;
+                focusOnEntry(restoreKey);
+                if (selectedEntryKey >= 0L) neededKeys.add(selectedEntryKey);
+            } else if (ClientShopCatalog.ready()) {
+                pendingRestoreStableId = null;
             }
         }
         if (selected != null && selected.hasLinkTarget()) {
@@ -2081,7 +2137,7 @@ public class ShopScreen extends ScaledScreen {
             return buttonTip("新增商品", "往当前商店目录加一条新商品。只在编辑模式开启时出现。");
         }
         if (canEdit && hit(smx, smy, settingsBtnX(), y, settingsBtnW(), h)) {
-            return buttonTip("商店设置", "调整奖励抽取上限、SDA 打包阈值、卡片大小、获取预览模式，以及 AE 注入开关。");
+            return buttonTip("商店设置", "调整奖励抽取上限、SDA 打包阈值、卡片大小、获取预览模式、是否记住选取与搜索，以及 AE 注入开关。");
         }
         if (hit(smx, smy, cartBtnX(), y, cartBtnW(), h)) {
             return buttonTip("购物车", "Ctrl+左键把商品加进来。打开后可改数量，再一次结算。");
@@ -2564,7 +2620,9 @@ public class ShopScreen extends ScaledScreen {
     private void drawDetail(GuiGraphics g, int mx, int my) {
         previewHoverName = null; // 每帧先清，命中预览格再置
         previewHoverExtra = null; // 每帧先清，命中预览格再置
+        previewHoverOrder = null;
         previewHoverStack = null; // 每帧先清，命中物品预览格再置
+        favoriteMissingBtnVisible = false;
         detailHoverStack = null; // 每帧先清，命中大图标再置
         descExpandVisible = false; // 每帧先清，描述非空才置
         submissionBtnVisible = false;
@@ -2668,7 +2726,10 @@ public class ShopScreen extends ScaledScreen {
         guideDetailBtnVisible = false;
         // 「补齐全部缺口」：只在确定（非"加载中"）有不够的项、且开着 AE 模式时出现——AE 自动合成只对着 AE 网络补，
         // 关了 AE 模式点这个没意义（缺口判定本身也不含 AE 那部分，见 hasCostShortfall）。
-        boolean showAutoCraftBtn = mode == Mode.BUY && aeMode && hasCostShortfall(dcost, amount, selectedEntryKey, aeMode);
+        boolean costShortfall = hasCostShortfall(dcost, amount, selectedEntryKey, aeMode);
+        // 「补齐全部缺口」只在 AE 模式有确定缺口时出现。收藏缺失不依赖 AE，缺口本身就能写进 JEI。
+        boolean showAutoCraftBtn = mode == Mode.BUY && aeMode && costShortfall;
+        boolean showFavoriteMissingBtn = mode == Mode.BUY && costShortfall;
         buyMaterialsBtnVisible = false;
         boolean showBuyMaterialsBtn = mode == Mode.BUY && hasShopPurchasableMaterialCostCached(selected, dcost);
         // 前置任务跳转行：条目配了前置任务就占一行（无论能否解析到，未同步/已删都要给玩家一个可见提示）
@@ -2796,6 +2857,13 @@ public class ShopScreen extends ScaledScreen {
         if (showAutoCraftBtn) {
             autoCraftBtnX = cx; autoCraftBtnY = actionY - detailScroll; autoCraftBtnW = detailInnerW; autoCraftBtnH = 10;
             drawButton(g, cx, actionY, autoCraftBtnW, autoCraftBtnH, "§b⚙ 补齐全部缺口（AE自动合成）", mx, hoverMy);
+            actionY += 12;
+        }
+        favoriteMissingBtnVisible = showFavoriteMissingBtn;
+        if (showFavoriteMissingBtn) {
+            favoriteMissingBtnX = cx; favoriteMissingBtnY = actionY - detailScroll;
+            favoriteMissingBtnW = detailInnerW; favoriteMissingBtnH = 10;
+            drawButton(g, cx, actionY, favoriteMissingBtnW, favoriteMissingBtnH, "§e收藏缺失", mx, hoverMy);
             actionY += 12;
         }
         buyMaterialsBtnVisible = showBuyMaterialsBtn;
@@ -2953,6 +3021,7 @@ public class ShopScreen extends ScaledScreen {
             String prefix = owned == null ? "§f" : (owned.compareTo(required) >= 0 ? "§a" : "§c");
             g.drawCenteredString(this.font, prefix + amount, sx + 10, sy + 22, WHITE);
             if (hover) {
+                previewHoverOrder = null;
                 previewHoverName = "§f" + ingredientName(requirement) + " §7×" + amount;
                 if (owned == null) {
                     previewHoverExtra = "§7库存核对中… §7提交数量: §f×" + amount;
@@ -3025,6 +3094,11 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     public void removed() {
+        if (ClientShopUiSettings.rememberShopView()) {
+            ClientShopUiSettings.setShopView(currentSearch(), currentStableId());
+        } else {
+            ClientShopUiSettings.clearShopView();
+        }
         ShopStageBlur.clear();
         super.removed();
     }
@@ -3290,6 +3364,11 @@ public class ShopScreen extends ScaledScreen {
             long entryKey = ClientShopCatalog.keyOf(selected);
             ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
                     ClientShopCatalog.revision(), entryKey, amount, aeMode));
+            return true;
+        }
+        if (inDetailViewport && favoriteMissingBtnVisible && selected != null
+                && hit(mx, my, favoriteMissingBtnX, favoriteMissingBtnY, favoriteMissingBtnW, favoriteMissingBtnH)) {
+            bookmarkMissingCosts();
             return true;
         }
         if (inDetailViewport && buyMaterialsBtnVisible && selected != null
@@ -4026,10 +4105,11 @@ public class ShopScreen extends ScaledScreen {
         final String name;                                      // 本地化名（悬停）
         final java.math.BigInteger need;                        // 需要量（已 ×购买次数）
         final java.math.BigInteger have;                        // 当前拥有量（null=未同步/加载中，不参与判定）
+        final int orderState;                                   // 0 未核对，1 有样板，2 无样板，3 未绑定 AE
         PreviewCell(ItemStack item, net.minecraft.world.level.material.Fluid fluid, boolean spark, String amount, String exact,
-                    String name, java.math.BigInteger need, java.math.BigInteger have) {
+                    String name, java.math.BigInteger need, java.math.BigInteger have, int orderState) {
             this.item = item; this.fluid = fluid; this.spark = spark; this.amount = amount; this.exact = exact;
-            this.name = name; this.need = need; this.have = have;
+            this.name = name; this.need = need; this.have = have; this.orderState = orderState;
         }
     }
 
@@ -4045,13 +4125,14 @@ public class ShopScreen extends ScaledScreen {
         if (cost.spark.signum() > 0) {
             java.math.BigInteger need = cost.spark.multiply(t);
             cells.add(new PreviewCell(ItemStack.EMPTY, null, true, formatBig(need), groupBig(need),
-                    "★星火（数字余额）", need, ClientWalletAccount.getDigital()));
+                    "★星火（数字余额）", need, ClientWalletAccount.getDigital(), 0));
         }
         for (Map.Entry<ResourceLocation, java.math.BigInteger> c : cost.coins.entrySet()) {
             java.math.BigInteger need = c.getValue().multiply(t);
             java.math.BigInteger have = ClientCostPreview.coinHave(entryKeyForPreview, aeModeForPreview, c.getKey());
             cells.add(new PreviewCell(currencyStack(c.getKey()), null, false,
-                    formatBig(need), groupBig(need), ShopPurchase.coinName(c.getKey()), need, have));
+                    formatBig(need), groupBig(need), ShopPurchase.coinName(c.getKey()), need, have,
+                    ClientCostPreview.coinOrder(entryKeyForPreview, aeModeForPreview, c.getKey())));
         }
         java.util.List<ExchangeEntry.Ingredient> itemIns = cost.items();
         for (int i = 0; i < itemIns.size(); i++) {
@@ -4060,7 +4141,8 @@ public class ShopScreen extends ScaledScreen {
             Long haveL = ClientCostPreview.itemHave(entryKeyForPreview, aeModeForPreview, i);
             java.math.BigInteger have = haveL != null ? java.math.BigInteger.valueOf(haveL) : null;
             cells.add(new PreviewCell(in.makeUnitStack(), null, false,
-                    formatBig(need), groupBig(need), ingredientName(in), need, have));
+                    formatBig(need), groupBig(need), ingredientName(in), need, have,
+                    ClientCostPreview.itemOrder(entryKeyForPreview, aeModeForPreview, i)));
         }
         java.util.List<ExchangeEntry.Ingredient> fluidIns = cost.fluids();
         for (int i = 0; i < fluidIns.size(); i++) {
@@ -4070,7 +4152,8 @@ public class ShopScreen extends ScaledScreen {
             Long haveL = ClientCostPreview.fluidHave(entryKeyForPreview, aeModeForPreview, i);
             java.math.BigInteger have = haveL != null ? java.math.BigInteger.valueOf(haveL) : null;
             cells.add(new PreviewCell(ItemStack.EMPTY, f, false,
-                    formatBig(need) + "mB", groupBig(need) + "mB", ingredientName(in), need, have));
+                    formatBig(need) + "mB", groupBig(need) + "mB", ingredientName(in), need, have,
+                    ClientCostPreview.fluidOrder(entryKeyForPreview, aeModeForPreview, i)));
         }
         return cells;
     }
@@ -4129,6 +4212,26 @@ public class ShopScreen extends ScaledScreen {
         } else {
             previewHoverExtra = "§c拥有: " + groupBig(cell.have) + " §7(缺 " + groupBig(cell.need.subtract(cell.have)) + ")";
         }
+        previewHoverOrder = orderHoverLine(cell.orderState);
+    }
+
+    /** 0 不顯示。1 網絡裏有樣板，2 沒有樣板，3 開了 AE 模式但沒綁定網絡。 */
+    private static String orderHoverLine(int state) {
+        return switch (state) {
+            case 1 -> "§a可下单: 网络里有样板";
+            case 2 -> "§c不可下单: 网络里没有样板";
+            case 3 -> "§7可下单: 未绑定 AE 网络";
+            default -> null;
+        };
+    }
+
+    private static String orderBarTag(int state) {
+        return switch (state) {
+            case 1 -> "§a可下单";
+            case 2 -> "§c无样板";
+            case 3 -> "§7未绑定";
+            default -> "";
+        };
     }
 
     /**
@@ -4193,9 +4296,14 @@ public class ShopScreen extends ScaledScreen {
             }
             boolean fluid = cell.fluid != null;
             String qty = costAmountColor(cell) + (fluid ? cell.amount : "×" + cell.amount);
+            String orderTag = orderBarTag(cell.orderState);
             int qtyW = this.font.width(qty);
-            int nameMax = Math.max(8, maxW - 22 - qtyW - 2);
+            int tagW = orderTag.isEmpty() ? 0 : this.font.width(orderTag) + 4;
+            int nameMax = Math.max(8, maxW - 22 - qtyW - tagW - 2);
             g.drawString(this.font, "§f" + GuiRenderUtil.trimText(this.font, cell.name, nameMax), x + 22, ry + 6, WHITE, true);
+            if (!orderTag.isEmpty()) {
+                g.drawString(this.font, orderTag, x + maxW - qtyW - tagW, ry + 6, WHITE, true);
+            }
             g.drawString(this.font, qty, x + maxW - qtyW, ry + 6, WHITE, true);
             if (hv) applyCostHover(cell);
             end = ry + rowH;
@@ -4687,6 +4795,53 @@ public class ShopScreen extends ScaledScreen {
         return false;
     }
 
+    /**
+     * 把當前花費裡已經確定不夠的幣種、物品、流體寫進 JEI 收藏。
+     * 和 GTLCore 合成確認頁的「收藏缺失」一樣：只收缺失項，已在收藏裡的不重複計。
+     */
+    private void bookmarkMissingCosts() {
+        if (selected == null) return;
+        ShopCost cost = mode == Mode.BUY
+                ? selected.getEffectiveCost(ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier()))
+                : selected.getCost();
+        java.math.BigInteger times = java.math.BigInteger.valueOf(Math.max(1L, amount));
+        java.util.List<ItemStack> items = new ArrayList<>();
+        java.util.List<FluidStack> fluids = new ArrayList<>();
+        for (Map.Entry<ResourceLocation, java.math.BigInteger> coin : cost.coins.entrySet()) {
+            java.math.BigInteger have = ClientCostPreview.coinHave(selectedEntryKey, aeMode, coin.getKey());
+            if (have == null || have.compareTo(coin.getValue().multiply(times)) >= 0) continue;
+            var item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(coin.getKey());
+            if (item != null) items.add(new ItemStack(item));
+        }
+        java.util.List<ExchangeEntry.Ingredient> itemIns = cost.items();
+        for (int i = 0; i < itemIns.size(); i++) {
+            ExchangeEntry.Ingredient in = itemIns.get(i);
+            Long have = ClientCostPreview.itemHave(selectedEntryKey, aeMode, i);
+            if (have == null || java.math.BigInteger.valueOf(have).compareTo(java.math.BigInteger.valueOf(in.count).multiply(times)) >= 0) continue;
+            ItemStack stack = in.makeUnitStack();
+            if (!stack.isEmpty()) items.add(stack);
+        }
+        java.util.List<ExchangeEntry.Ingredient> fluidIns = cost.fluids();
+        for (int i = 0; i < fluidIns.size(); i++) {
+            ExchangeEntry.Ingredient in = fluidIns.get(i);
+            Long have = ClientCostPreview.fluidHave(selectedEntryKey, aeMode, i);
+            if (have == null || java.math.BigInteger.valueOf(have).compareTo(java.math.BigInteger.valueOf(in.count).multiply(times)) >= 0) continue;
+            net.minecraft.world.level.material.Fluid fluid = net.minecraftforge.registries.ForgeRegistries.FLUIDS.getValue(in.id);
+            if (fluid != null && fluid != net.minecraft.world.level.material.Fluids.EMPTY) {
+                fluids.add(in.nbt() == null ? new FluidStack(fluid, 1000) : new FluidStack(fluid, 1000, in.nbt()));
+            }
+        }
+        JeiBookmarkBridge.MissingBookmarkResult result = JeiBookmarkBridge.addMissing(items, fluids);
+        String text = switch (result.status()) {
+            case ADDED -> "§a[山海商店] 已收藏缺失 " + result.added() + " 项";
+            case ALREADY -> "§7[山海商店] 缺失项都已在 JEI 收藏里";
+            case NOTHING -> "§7[山海商店] 没有可收藏的缺失";
+            case UNAVAILABLE -> "§c[山海商店] JEI 收藏不可用";
+            case FAILED -> "§c[山海商店] 收藏缺失失败";
+        };
+        showMessage(Component.literal(text));
+    }
+
     // 详情页每帧都要问「成本里有没有可在商店买到的实物」，而 hasShopGoodsId 是对全部 stub 的线性扫描
     // （O(实物原料数×商品总数)）——按选中条目+目录 revision 缓存一格，选中不变、目录不变就不再重扫
     private ShopEntry buyMatsCachedFor;
@@ -4793,6 +4948,7 @@ public class ShopScreen extends ScaledScreen {
                 List<Component> lines = new ArrayList<>(getTooltipFromItem(Minecraft.getInstance(), previewHoverStack));
                 if (previewHoverName != null) lines.add(Component.literal(previewHoverName));
                 if (previewHoverExtra != null) lines.add(Component.literal(previewHoverExtra));
+                if (previewHoverOrder != null) lines.add(Component.literal(previewHoverOrder));
                 g.renderTooltip(this.font, lines, previewHoverStack.getTooltipImage(), mx, my);
                 return;
             }
@@ -4802,6 +4958,7 @@ public class ShopScreen extends ScaledScreen {
                     List<Component> lines = new ArrayList<>();
                     lines.add(Component.literal(previewHoverName));
                     lines.add(Component.literal(previewHoverExtra));
+                    if (previewHoverOrder != null) lines.add(Component.literal(previewHoverOrder));
                     g.renderComponentTooltip(this.font, lines, mx, my);
                 } else {
                     g.renderTooltip(this.font, Component.literal(previewHoverName), mx, my);

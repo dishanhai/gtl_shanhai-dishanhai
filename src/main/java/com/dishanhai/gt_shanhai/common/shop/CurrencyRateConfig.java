@@ -26,8 +26,9 @@ import java.util.Map;
  * <pre>{ "dishanhai:copper_coin": 1, "dishanhai:dog_coins": -1, ... }</pre>
  * 每种货币映射到一个 <b>基准价值</b>（long，以 copper_coin=1 为锚）。</p>
  *
- * <p>用途：① ATM 币种清单（= 本表所有键）；② 币种兑换换算——
- * A→B 目标量 = floor(源量 × A币值 / B币值)。文件缺失时写出一份分档默认表。</p>
+ * <p>用途：① ATM 币种清单（= 本表所有键）；② 币种兑换与星火互转的面值锚点。
+ * 实际结算不直接用面值，而用 {@link #sparkValue}（见 {@link SparkMint}）：
+ * 白金及以下原价，更高档面值每 ×4、星火只 ×2。文件缺失时写出一份分档默认表。</p>
  *
  * <p><b>特殊货币</b>（值为负数，如 -1）：仍计入 ATM 币种清单（可充值/查看余额/提取实体币/
  * 作商品定价货币），但 {@link #getValue} 对外一律返回 0——即自动禁用比例兑换、转成星火、
@@ -46,11 +47,16 @@ public final class CurrencyRateConfig {
 
     private CurrencyRateConfig() {}
 
-    /** 币值（未定义 / 特殊货币一律返回 0，视为不可按比例兑换）。 */
+    /** 面值（未定义 / 特殊货币一律返回 0，视为不可按比例兑换）。不是兑星火价，见 {@link #sparkValue}。 */
     public static long getValue(ResourceLocation currency) {
         ensureLoaded();
         Long v = currency == null ? null : RATES.get(currency);
         return (v == null || v < 0L) ? 0L : v;
+    }
+
+    /** 一枚该币兑成星火的价格，也是币种互换的结算价。特殊货币 / 未配置返回 0。 */
+    public static long sparkValue(ResourceLocation currency) {
+        return SparkMint.perCoin(getValue(currency));
     }
 
     /** 是否已配置币值（可出现在 ATM；特殊货币也算已配置）。 */

@@ -3,6 +3,12 @@
     "euTier": 1
   },
   "duration": 40,
+  "recipeConditions": [
+    {
+      "type": "recipe_note",
+      "text": "需要虚数跃迁模块作为不消耗物"
+    }
+  ],
   "tickInputs": {
     "eu": [
       {
@@ -38,8 +44,8 @@
     "item": [
       {
         "content": {
-          "type": "gtceu:long",
-          "actualAmount": 8,
+          "type": "gtceu:sized",
+          "count": 16,
           "ingredient": {
             "item": "kubejs:essence"
           }

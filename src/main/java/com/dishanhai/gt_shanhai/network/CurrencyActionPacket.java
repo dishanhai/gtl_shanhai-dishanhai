@@ -82,6 +82,11 @@ public class CurrencyActionPacket {
                         : Component.literal("§c[货币中心] 背包里没有 " + ShopPurchase.coinName(pkt.currency)));
             }
             case EXCHANGE -> {
+                String stage = stageBlock(player, pkt.currency, pkt.target);
+                if (stage != null) {
+                    player.sendSystemMessage(stageMessage(stage));
+                    break;
+                }
                 ShopPurchase.ExchangeResult r = ShopPurchase.exchange(player, pkt.currency, pkt.target, pkt.amount);
                 player.sendSystemMessage(r.gained() > 0L
                         ? Component.literal("§b[货币中心] §a已兑换 §f" + ShopPurchase.formatCount(r.consumed()) + " "
@@ -97,6 +102,11 @@ public class CurrencyActionPacket {
                         : Component.literal("§c[货币中心] AE 抽取失败（无绑定在线 AE 网络 / 网络无此币）"));
             }
             case TO_DIGITAL -> {
+                String stage = stageBlock(player, pkt.currency, null);
+                if (stage != null) {
+                    player.sendSystemMessage(stageMessage(stage));
+                    break;
+                }
                 // pkt.amount 语义 = 想要转出的源币数量；结果同时包含 AE 自动补足后的实际消耗量。
                 ShopPurchase.DigitalResult conversion =
                         ShopPurchase.toDigitalResult(player, pkt.currency, pkt.amount, pkt.includeAe);
@@ -112,10 +122,15 @@ public class CurrencyActionPacket {
                 }
             }
             case FROM_DIGITAL -> {
-                // pkt.amount 语义 = 想要的目标币数量（非花的星火数），花费 = amount × 币值
+                String stage = stageBlock(player, pkt.currency, null);
+                if (stage != null) {
+                    player.sendSystemMessage(stageMessage(stage));
+                    break;
+                }
+                // pkt.amount 语义 = 想要的目标币数量（非花的星火数），花费 = amount × 兑星火价
                 long coins = ShopPurchase.fromDigital(player, pkt.currency, pkt.amount);
                 if (coins > 0L) {
-                    long value = CurrencyRateConfig.getValue(pkt.currency);
+                    long value = CurrencyRateConfig.sparkValue(pkt.currency);
                     BigInteger spentBig = BigInteger.valueOf(coins).multiply(BigInteger.valueOf(value));
                     long spent = spentBig.bitLength() < 63 ? spentBig.longValue() : Long.MAX_VALUE;
                     player.sendSystemMessage(Component.literal("§b[货币中心] §a已花 §e" + ShopPurchase.formatCount(spent) + " 星火 §a换得 §f"
@@ -133,5 +148,17 @@ public class CurrencyActionPacket {
             }
         }
         WalletAccountAPI.sync(player); // 回推账户快照，客户端界面即时刷新
+    }
+
+    /** 源币和目标币里，第一个还没提交的阶段路径。 */
+    private static String stageBlock(ServerPlayer player, net.minecraft.resources.ResourceLocation from,
+                                     net.minecraft.resources.ResourceLocation to) {
+        String missing = com.dishanhai.gt_shanhai.common.shop.CurrencyStageConfig.missingStage(player, from);
+        if (missing != null) return missing;
+        return to == null ? null : com.dishanhai.gt_shanhai.common.shop.CurrencyStageConfig.missingStage(player, to);
+    }
+
+    private static Component stageMessage(String stage) {
+        return Component.literal("§c[货币中心] 请先提交阶段「" + stage + "」的固定物品（和商店购买同一份）");
     }
 }

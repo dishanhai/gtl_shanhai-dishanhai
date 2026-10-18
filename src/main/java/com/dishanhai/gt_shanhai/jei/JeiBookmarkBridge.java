@@ -80,7 +80,7 @@ public final class JeiBookmarkBridge {
      * 批量把物品栈加入 JEI 书签。保持公开签名不暴露 JEI 类型；返回实际新增数量。
      */
     public static int addItemStacks(Collection<ItemStack> stacks) {
-        return addTypedStacks(stacks, "mezz.jei.api.constants.VanillaTypes", "ITEM_STACK");
+        return addTypedStacks(stacks, "mezz.jei.api.constants.VanillaTypes", "ITEM_STACK").added;
     }
 
     /**
@@ -88,7 +88,55 @@ public final class JeiBookmarkBridge {
      * JEI 去重仍由流体类型/NBT 身份决定。
      */
     public static int addFluidStacks(Collection<FluidStack> stacks) {
-        return addTypedStacks(stacks, "mezz.jei.api.forge.ForgeTypes", "FLUID_STACK");
+        return addTypedStacks(stacks, "mezz.jei.api.forge.ForgeTypes", "FLUID_STACK").added;
+    }
+
+    public enum MissingBookmarkStatus {
+        ADDED,
+        ALREADY,
+        NOTHING,
+        UNAVAILABLE,
+        FAILED
+    }
+
+    /** {@link #addMissing} 的結果。added 是這次新寫進 JEI 收藏的數量。 */
+    public record MissingBookmarkResult(MissingBookmarkStatus status, int added) {}
+
+    /**
+     * 把缺失的物品和流體寫進 JEI 收藏。已在收藏裡的不重複計。
+     * JEI 沒裝或運行時還沒就緒時回 {@link MissingBookmarkStatus#UNAVAILABLE}，不拋異常。
+     */
+    public static MissingBookmarkResult addMissing(Collection<ItemStack> items, Collection<FluidStack> fluids) {
+        if (runtimeRef == null) return new MissingBookmarkResult(MissingBookmarkStatus.UNAVAILABLE, 0);
+        if (countPresent(items) + countPresent(fluids) == 0) {
+            return new MissingBookmarkResult(MissingBookmarkStatus.NOTHING, 0);
+        }
+        AddCount itemCount = addTypedStacks(items, "mezz.jei.api.constants.VanillaTypes", "ITEM_STACK");
+        AddCount fluidCount = addTypedStacks(fluids, "mezz.jei.api.forge.ForgeTypes", "FLUID_STACK");
+        int added = itemCount.added + fluidCount.added;
+        if (itemCount.failed || fluidCount.failed) {
+            return new MissingBookmarkResult(MissingBookmarkStatus.FAILED, added);
+        }
+        if (added > 0) return new MissingBookmarkResult(MissingBookmarkStatus.ADDED, added);
+        if (itemCount.supported + fluidCount.supported > 0) {
+            return new MissingBookmarkResult(MissingBookmarkStatus.ALREADY, 0);
+        }
+        return new MissingBookmarkResult(MissingBookmarkStatus.NOTHING, 0);
+    }
+
+    private static int countPresent(Collection<?> stacks) {
+        if (stacks == null || stacks.isEmpty()) return 0;
+        int count = 0;
+        for (Object stack : stacks) {
+            if (stack != null && !isEmptyIngredient(stack)) count++;
+        }
+        return count;
+    }
+
+    private static final class AddCount {
+        int supported;
+        int added;
+        boolean failed;
     }
 
     /** 遍历当前书签列表，把每一项能解出的原始摄取物（ItemStack/FluidStack/其他）交给 consumer；解不出的静默跳过。 */
@@ -122,40 +170,48 @@ public final class JeiBookmarkBridge {
         }
     }
 
-    private static int addTypedStacks(Collection<?> stacks, String typeClassName, String typeFieldName) {
-        if (stacks == null || stacks.isEmpty()) return 0;
+    private static AddCount addTypedStacks(Collection<?> stacks, String typeClassName, String typeFieldName) {
+        AddCount count = new AddCount();
+        if (stacks == null || stacks.isEmpty()) return count;
         Object runtime = runtimeRef;
-        if (runtime == null) return 0;
+        if (runtime == null) {
+            count.failed = true;
+            return count;
+        }
         try {
             Object manager = invoke(runtime, "getIngredientManager");
             Object bookmarkOverlay = invoke(runtime, "getBookmarkOverlay");
-            if (manager == null || bookmarkOverlay == null) return 0;
+            if (manager == null || bookmarkOverlay == null) {
+                count.failed = true;
+                return count;
+            }
             Object bookmarkList = readField(bookmarkOverlay, "bookmarkList");
-            if (bookmarkList == null) return 0;
+            if (bookmarkList == null) {
+                count.failed = true;
+                return count;
+            }
 
             ClassLoader classLoader = bookmarkOverlay.getClass().getClassLoader();
-            Class<?> bookmarkType = Class.forName(
-                    "mezz.jei.gui.bookmarks.IBookmark", false, classLoader);
+            Class<?> bookmarkType = Class.forName("mezz.jei.gui.bookmarks.IBookmark", false, classLoader);
             Method add = bookmarkList.getClass().getMethod("add", bookmarkType);
-            Class<?> ingredientBookmark = Class.forName(
-                    "mezz.jei.gui.bookmarks.IngredientBookmark", false, classLoader);
-            Method create = ingredientBookmark.getMethod(
-                    "create",
+            Class<?> ingredientBookmark = Class.forName("mezz.jei.gui.bookmarks.IngredientBookmark", false, classLoader);
+            Method create = ingredientBookmark.getMethod("create",
                     Class.forName("mezz.jei.api.ingredients.ITypedIngredient", false, classLoader),
                     Class.forName("mezz.jei.api.runtime.IIngredientManager", false, classLoader));
 
-            int added = 0;
             for (Object stack : stacks) {
                 if (stack == null || isEmptyIngredient(stack)) continue;
                 Object optional = invokeTypedIngredient(manager, stack, typeClassName, typeFieldName);
                 if (!(optional instanceof java.util.Optional<?> typedOptional) || typedOptional.isEmpty()) continue;
+                count.supported++;
                 Object bookmark = create.invoke(null, typedOptional.get(), manager);
                 Object result = add.invoke(bookmarkList, bookmark);
-                if (Boolean.TRUE.equals(result)) added++;
+                if (Boolean.TRUE.equals(result)) count.added++;
             }
-            return added;
+            return count;
         } catch (Throwable ignored) {
-            return 0;
+            count.failed = true;
+            return count;
         }
     }
 

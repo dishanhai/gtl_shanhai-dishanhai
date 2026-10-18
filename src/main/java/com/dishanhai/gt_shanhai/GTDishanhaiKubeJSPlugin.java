@@ -1,9 +1,16 @@
 package com.dishanhai.gt_shanhai;
 
 import dev.latvian.mods.kubejs.KubeJSPlugin;
+import dev.latvian.mods.kubejs.recipe.RecipesEventJS;
 import dev.latvian.mods.kubejs.script.BindingsEvent;
 import dev.latvian.mods.kubejs.script.ScriptType;
 import dev.latvian.mods.kubejs.util.ClassFilter;
+
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeManager;
+
+import java.util.Map;
 
 import com.dishanhai.gt_shanhai.api.*;
 import com.dishanhai.gt_shanhai.api.pack.DShanhaiPackRegistry;
@@ -44,5 +51,11 @@ public class GTDishanhaiKubeJSPlugin extends KubeJSPlugin {
                 com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorOps.class);
         event.add("ShanhaiRecipeRebuild",
                 com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.class);
+    }
+
+    @Override
+    public void injectRuntimeRecipes(RecipesEventJS event, RecipeManager manager,
+                                     Map<ResourceLocation, Recipe<?>> recipes) {
+        com.dishanhai.gt_shanhai.common.recipe.PrimordialReverseEntropyRecipes.addToNameMap(recipes);
     }
 }

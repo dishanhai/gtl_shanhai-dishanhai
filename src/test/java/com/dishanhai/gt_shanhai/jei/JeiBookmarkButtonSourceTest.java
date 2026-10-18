@@ -48,7 +48,7 @@ class JeiBookmarkButtonSourceTest {
 
         assertTrue(bridge.contains("public static int addItemStacks(Collection<ItemStack> stacks)"));
         assertTrue(bridge.contains("public static int addFluidStacks(Collection<FluidStack> stacks)"));
-        assertTrue(bridge.contains("Class.forName(\"mezz.jei.gui.bookmarks.IngredientBookmark\")"));
+        assertTrue(bridge.contains("\"mezz.jei.gui.bookmarks.IngredientBookmark\""));
         assertTrue(bridge.contains("getMethod(\"add\", bookmarkType)"));
         assertTrue(bridge.contains("createTypedIngredient"));
         assertTrue(bridge.contains("getFluidIngredientType"));

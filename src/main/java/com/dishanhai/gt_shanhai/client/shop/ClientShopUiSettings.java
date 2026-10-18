@@ -14,9 +14,9 @@ public final class ClientShopUiSettings {
 
     public static final int DEFAULT_CARD_WIDTH = 70;
     public static final int DEFAULT_CARD_HEIGHT = 36;
-    /** 获取预览：方格（图标格）。奖励表格子下方是概率，获得和花费的格子下方是数量。 */
+    /** 获取预览：方格（图标格，旧版）。奖励表格子下方是概率，获得和花费的格子下方是数量。 */
     public static final String PREVIEW_GRID = "grid";
-    /** 获取预览：条形（名称列表）。奖励表右侧是概率，获得和花费的右侧是数量。 */
+    /** 获取预览：条形（名称列表，默认）。奖励表右侧是概率，获得和花费的右侧是数量。 */
     public static final String PREVIEW_BAR = "bar";
     private static final int MIN_CARD_WIDTH = 48;
     private static final int MAX_CARD_WIDTH = 120;
@@ -30,7 +30,11 @@ public final class ClientShopUiSettings {
     private static boolean loaded;
     private static int cardWidth = DEFAULT_CARD_WIDTH;
     private static int cardHeight = DEFAULT_CARD_HEIGHT;
-    private static String rewardPreview = PREVIEW_GRID;
+    private static String rewardPreview = PREVIEW_BAR;
+    /** 關閉商店再打開時，是否還原上次的搜索詞和選中商品。缺省為開。 */
+    private static boolean rememberShopView = true;
+    private static String shopSearch = "";
+    private static String shopSelectedStableId = "";
 
     private ClientShopUiSettings() {}
 
@@ -44,7 +48,7 @@ public final class ClientShopUiSettings {
         return cardHeight;
     }
 
-    /** 详情「预计获得」和「花费预览」用条形名称列表。false 为原来的方格图标。 */
+    /** 详情「预计获得」和「花费预览」用条形名称列表。false 为旧版方格图标。 */
     public static boolean rewardPreviewBar() {
         ensureLoaded();
         return PREVIEW_BAR.equals(rewardPreview);
@@ -60,6 +64,44 @@ public final class ClientShopUiSettings {
     public static synchronized void setRewardPreviewBar(boolean bar) {
         ensureLoaded();
         rewardPreview = bar ? PREVIEW_BAR : PREVIEW_GRID;
+        save();
+    }
+
+    /** 關閉商店再打開時還原搜索詞和選中商品。只存在這台客戶端。 */
+    public static boolean rememberShopView() {
+        ensureLoaded();
+        return rememberShopView;
+    }
+
+    public static String shopSearch() {
+        ensureLoaded();
+        return shopSearch;
+    }
+
+    public static String shopSelectedStableId() {
+        ensureLoaded();
+        return shopSelectedStableId;
+    }
+
+    public static synchronized void setRememberShopView(boolean remember) {
+        ensureLoaded();
+        rememberShopView = remember;
+        save();
+    }
+
+    /** 記住當前搜索和選中商品。開關關掉時不寫，避免把已經清空的偏好又存回去。 */
+    public static synchronized void setShopView(String search, String stableId) {
+        ensureLoaded();
+        if (!rememberShopView) return;
+        shopSearch = limit(search, 256);
+        shopSelectedStableId = limit(stableId, 128);
+        save();
+    }
+
+    public static synchronized void clearShopView() {
+        ensureLoaded();
+        shopSearch = "";
+        shopSelectedStableId = "";
         save();
     }
 
@@ -79,19 +121,33 @@ public final class ClientShopUiSettings {
         loaded = true;
         cardWidth = DEFAULT_CARD_WIDTH;
         cardHeight = DEFAULT_CARD_HEIGHT;
-        rewardPreview = PREVIEW_GRID;
+        rewardPreview = PREVIEW_BAR;
+        rememberShopView = true;
+        shopSearch = "";
+        shopSelectedStableId = "";
         if (!SETTINGS_FILE.exists()) return;
         try (java.io.Reader reader = new java.io.InputStreamReader(
                 new java.io.FileInputStream(SETTINGS_FILE), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
             if (root.has("cardWidth")) cardWidth = clampCardWidth(root.get("cardWidth").getAsInt());
             if (root.has("cardHeight")) cardHeight = clampCardHeight(root.get("cardHeight").getAsInt());
-            if (root.has("rewardPreview") && PREVIEW_BAR.equals(root.get("rewardPreview").getAsString())) {
-                rewardPreview = PREVIEW_BAR;
+            // 没写过这个键的旧文件保持新默认（条形）。只有明确存过 grid 才回到旧版方格。
+            if (root.has("rewardPreview") && PREVIEW_GRID.equals(root.get("rewardPreview").getAsString())) {
+                rewardPreview = PREVIEW_GRID;
+            }
+            if (root.has("rememberShopView")) rememberShopView = root.get("rememberShopView").getAsBoolean();
+            if (root.has("shopSearch")) shopSearch = limit(root.get("shopSearch").getAsString(), 256);
+            if (root.has("shopSelectedStableId")) {
+                shopSelectedStableId = limit(root.get("shopSelectedStableId").getAsString(), 128);
             }
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop_client_ui.json 失败: {}", e.getMessage());
         }
+    }
+
+    private static String limit(String value, int max) {
+        if (value == null || value.isEmpty()) return "";
+        return value.length() <= max ? value : value.substring(0, max);
     }
 
     private static void save() {
@@ -101,6 +157,9 @@ public final class ClientShopUiSettings {
             root.addProperty("cardWidth", cardWidth);
             root.addProperty("cardHeight", cardHeight);
             root.addProperty("rewardPreview", rewardPreview);
+            root.addProperty("rememberShopView", rememberShopView);
+            root.addProperty("shopSearch", shopSearch);
+            root.addProperty("shopSelectedStableId", shopSelectedStableId);
             try (OutputStreamWriter writer = new OutputStreamWriter(
                     new FileOutputStream(SETTINGS_FILE), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));

@@ -16,11 +16,11 @@ import net.minecraft.network.chat.Component;
  * 商店设置（山海署名，客户端，自建）。仅编辑权玩家可见入口（见 {@link ShopScreen} 顶栏「商店设置」按钮）。
  *
  * <p>运行期可调的商店行为：「奖励抽取次数上限」「SDA 打包阈值」「AE 模式禁止注入」
- * 「将SDA直接注入磁盘仓室」（对应 {@link ShopSettingsPacket}/
+ * 「AE 注入限额」「将SDA直接注入磁盘仓室」（对应 {@link ShopSettingsPacket}/
  * config「shop.rewardRollCap」「shop.sdaPackThreshold」）；显示值直接读本地 {@link DShanhaiConfig}
  * （单机/联机同一 JVM 场景下与服务端权威值一致，仿 {@link CurrencyAtmScreen} 直接读
  * {@code CurrencyRateConfig} 那套既有做法），确认后发包让服务端写回并落盘（服务端才是权威，见
- * {@link ShopSettingsPacket}）。卡片大小和获取预览模式是客户端显示偏好，只写
+ * {@link ShopSettingsPacket}）。卡片大小、获取预览模式、是否记住选取与搜索是客户端显示偏好，只写
  * {@link ClientShopUiSettings}，不进服务端包。</p>
  *
  * <p>标题和底栏按钮固定。中间选项区超出视口时可滚轮或拖右侧滚动条，输入框跟着内容走，
@@ -55,22 +55,29 @@ public class ShopSettingsScreen extends ScaledScreen {
     private static final int ROW_PREVIEW = 112;
     private static final int ROW_PREVIEW_HINT = 130;
     private static final int ROW_AE = 144;
-    private static final int ROW_DISK = 164;
-    private static final int ROW_DISK_HINT = 182;
-    private static final int CONTENT_H = 196;
+    private static final int ROW_AE_MIN_LABEL = 164;
+    private static final int ROW_AE_MIN_BOX = 176;
+    private static final int ROW_DISK = 196;
+    private static final int ROW_DISK_HINT = 214;
+    private static final int ROW_REMEMBER = 228;
+    private static final int ROW_REMEMBER_HINT = 246;
+    private static final int CONTENT_H = 260;
 
     private final ShopScreen parent;
     private String rollCap;
     private String sdaThreshold;
     private String cardWidth;
     private String cardHeight;
+    private String aeInjectMin;
     private boolean aeDeliverDisabled;
     private boolean sdaDirectDiskHatchInject;
     private boolean previewBar;
+    private boolean rememberShopView;
     private EditBox rollCapBox;
     private EditBox sdaThresholdBox;
     private EditBox cardWidthBox;
     private EditBox cardHeightBox;
+    private EditBox aeInjectMinBox;
     private int left, top, panelWidth, panelHeight;
     private int settingsScroll;
     private boolean scrollDrag;
@@ -88,8 +95,10 @@ public class ShopSettingsScreen extends ScaledScreen {
         this.cardWidth = Integer.toString(ClientShopUiSettings.cardWidth());
         this.cardHeight = Integer.toString(ClientShopUiSettings.cardHeight());
         this.aeDeliverDisabled = DShanhaiConfig.COMMON.shopAeDeliverDisabled.get();
+        this.aeInjectMin = Long.toString(DShanhaiConfig.COMMON.shopAeInjectMin.get());
         this.sdaDirectDiskHatchInject = DShanhaiConfig.COMMON.shopSdaDirectDiskHatchInject.get();
         this.previewBar = ClientShopUiSettings.rewardPreviewBar();
+        this.rememberShopView = ClientShopUiSettings.rememberShopView();
     }
 
     @Override
@@ -137,6 +146,15 @@ public class ShopSettingsScreen extends ScaledScreen {
         cardHeightBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
         cardHeightBox.setResponder(s -> cardHeight = s);
         addRenderableWidget(cardHeightBox);
+
+        aeInjectMinBox = new EditBox(this.font, left + 12, viewTop() + ROW_AE_MIN_BOX, fieldW, 14, Component.literal("AE 注入限额"));
+        aeInjectMinBox.setValue(aeInjectMin);
+        aeInjectMinBox.setMaxLength(19);
+        aeInjectMinBox.setBordered(true);
+        aeInjectMinBox.setTextColor(0xFFFFFF);
+        aeInjectMinBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+        aeInjectMinBox.setResponder(s -> aeInjectMin = s);
+        addRenderableWidget(aeInjectMinBox);
         layoutInputs();
     }
 
@@ -171,7 +189,7 @@ public class ShopSettingsScreen extends ScaledScreen {
         int previewY = visualY(ROW_PREVIEW);
         if (rowVisible(previewY, 16)) {
             drawBtn(g, x, previewY, fieldWidth(), 16,
-                    previewBar ? "§a获取预览模式: 条形（名称列表）" : "§a获取预览模式: 方格（图标格）",
+                    previewBar ? "§a获取预览模式: 条形（名称列表，默认）" : "§a获取预览模式: 方格（图标格，旧版）",
                     mx, my);
         }
         drawContentLine(g, "§7条形下：奖励表右侧为概率，获得和花费右侧为数量", x, ROW_PREVIEW_HINT, textW);
@@ -183,6 +201,7 @@ public class ShopSettingsScreen extends ScaledScreen {
                             : "§8AE 禁止注入: 关（原行为，能注入就注入 AE）",
                     mx, my);
         }
+        drawContentLine(g, "§7AE 注入限额（单种物品少于此数进背包，达到才注入 AE；设 1 恢复全注入）：", x, ROW_AE_MIN_LABEL, textW);
         int diskY = visualY(ROW_DISK);
         if (rowVisible(diskY, 16)) {
             drawBtn(g, x, diskY, fieldWidth(), 16,
@@ -191,6 +210,15 @@ public class ShopSettingsScreen extends ScaledScreen {
                     mx, my);
         }
         drawContentLine(g, "§7仅挂载同网 FTBQ AE提交器/商店终端可见的有内容 SDA；空 SDA 不挂载", x, ROW_DISK_HINT, textW);
+
+        int rememberY = visualY(ROW_REMEMBER);
+        if (rowVisible(rememberY, 16)) {
+            drawBtn(g, x, rememberY, fieldWidth(), 16,
+                    rememberShopView ? "§a记住选取与搜索: 开（关闭后再打开会还原）"
+                            : "§8记住选取与搜索: 关（每次打开都清空）",
+                    mx, my);
+        }
+        drawContentLine(g, "§7只记在这台客户端：当前商品和搜索词。分类页签本来就会保留", x, ROW_REMEMBER_HINT, textW);
 
         g.disableScissor();
         drawScrollbar(g, mx, my);
@@ -221,6 +249,10 @@ public class ShopSettingsScreen extends ScaledScreen {
             }
             if (hitContent(mx, contentMy, x, ROW_DISK, w, 16)) {
                 sdaDirectDiskHatchInject = !sdaDirectDiskHatchInject;
+                return true;
+            }
+            if (hitContent(mx, contentMy, x, ROW_REMEMBER, w, 16)) {
+                rememberShopView = !rememberShopView;
                 return true;
             }
         }
@@ -268,10 +300,15 @@ public class ShopSettingsScreen extends ScaledScreen {
         int height;
         try { height = cardHeight == null || cardHeight.isEmpty() ? ClientShopUiSettings.DEFAULT_CARD_HEIGHT : Integer.parseInt(cardHeight); }
         catch (NumberFormatException e) { height = ClientShopUiSettings.DEFAULT_CARD_HEIGHT; }
+        long aeMin;
+        try { aeMin = aeInjectMin == null || aeInjectMin.isEmpty() ? 64L : Long.parseLong(aeInjectMin); }
+        catch (NumberFormatException e) { aeMin = 64L; }
         ClientShopUiSettings.setCardSize(width, height);
         ClientShopUiSettings.setRewardPreviewBar(previewBar);
+        ClientShopUiSettings.setRememberShopView(rememberShopView);
+        parent.onRememberShopViewSaved(rememberShopView);
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
-                aeDeliverDisabled, sdaDirectDiskHatchInject));
+                aeDeliverDisabled, Math.max(1L, aeMin), sdaDirectDiskHatchInject));
         Minecraft.getInstance().setScreen(parent);
     }
 
@@ -305,6 +342,7 @@ public class ShopSettingsScreen extends ScaledScreen {
         place(sdaThresholdBox, x, ROW_SDA_BOX, w);
         place(cardWidthBox, x, ROW_CARD_BOX, boxW);
         place(cardHeightBox, x + boxW + 6, ROW_CARD_BOX, boxW);
+        place(aeInjectMinBox, x, ROW_AE_MIN_BOX, w);
     }
 
     /** 输入框用视觉坐标接收点击。滚出中间视口就隐藏，底栏和标题不会误触。 */

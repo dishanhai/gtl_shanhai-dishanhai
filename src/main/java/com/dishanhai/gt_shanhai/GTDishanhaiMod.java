@@ -265,6 +265,9 @@ public class GTDishanhaiMod {
                     // 等服务器起来、查找表定稿后再写一次，效果与 /山海 配方 重载 相同。
                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.reapplyPersistedLookupRules("server-started");
                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyPersistedRecipeToggles();
+                    // apply 末尾 GTCEu 会按数据包重建查找表。查找表定稿后再写一次逆熵构成。
+                    com.dishanhai.gt_shanhai.common.recipe.PrimordialReverseEntropyRecipes.install(
+                            e.getServer().getRecipeManager());
                 });
 
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(

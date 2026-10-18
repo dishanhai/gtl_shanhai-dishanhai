@@ -288,6 +288,11 @@ public final class DShanhaiConfigScreen {
                 .setDefaultValue(false)
                 .setTooltip(tip("开启后 AE 模式只用来拉取材料付款/检索库存，购买/兑换得到的物品一律正常交付（进背包/按 SDA 打包阈值打包），不再注入 AE 网络"))
                 .setSaveConsumer(cfg.shopAeDeliverDisabled::set).build());
+        shop.addEntry(e.startLongField(Component.literal("AE 注入限额"), cfg.shopAeInjectMin.get())
+                .setDefaultValue(64L).setMin(1L).setMax(Long.MAX_VALUE)
+                .setTooltip(tip("AE 模式下，单种物品本次数量低于此值时进背包，达到才注入 AE",
+                        "默认 64。设 1 恢复旧行为：能注入就注入。流体不受此项影响"))
+                .setSaveConsumer(cfg.shopAeInjectMin::set).build());
         shop.addEntry(e.startBooleanToggle(Component.literal("将SDA直接注入磁盘仓室"), cfg.shopSdaDirectDiskHatchInject.get())
                 .setDefaultValue(true)
                 .setTooltip(tip("开启后有内容 SDA 会优先放入同网 ME 磁盘仓室直接挂载",

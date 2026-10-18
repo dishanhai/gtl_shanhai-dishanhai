@@ -972,7 +972,9 @@ public class DShanhaiMachines {
                         GTLRecipeTypes.ULTIMATE_MATERIAL_FORGE_RECIPES,
                         GTLAddRecipesTypes.MOLECULAR_DECONSTRUCTION,
                         GTLAddRecipesTypes.INSTANCE.getCHAOTIC_ALCHEMY(),
-                        GTLAddRecipesTypes.INSTANCE.getSTELLAR_LGNITION())
+                        GTLAddRecipesTypes.INSTANCE.getSTELLAR_LGNITION(),
+                        // 追加在末尾，已保存的配方类型下标不变。
+                        DShanhaiRecipeTypes.PRIMORDIAL_REVERSE_ENTROPY_CONSTITUTION)
                 .pattern(PrimordialAssemblyLineModuleStructure::createPattern)
                 .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gtceu", "bronze_machine_casing")))
                 .workableCasingRenderer(new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
@@ -981,7 +983,7 @@ public class DShanhaiMachines {
         PRIMORDIAL_ETERNAL_SMELTING_FURNACE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createFireText("以永恒炉火统合超维熔炼、物质锻造与混沌炼金"));
             tooltips.add(Component.literal("§7配方类型：超维度熔炼 / 恒星热能熔炼 / 终极物质锻造"));
-            tooltips.add(Component.literal("§7分子解构 / 混沌炼金 / 星焰跃迁"));
+            tooltips.add(Component.literal("§7分子解构 / 混沌炼金 / 星焰跃迁 / 原初逆熵构成"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))

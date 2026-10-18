@@ -658,59 +658,83 @@ public final class ShopPurchase {
      * AE 网络那部分只在 aeMode 为真时才计入，对齐商店顶栏「AE模式」开关的玩家预期（该开关平时只管交付去向，
      * 这里额外用它来控制预览是否把 AE 存量算进"够不够"，避免没开 AE 模式却显示"够"实际却买不到的错觉）。
      * 不含星火——星火纯数字账户余额，客户端已有 {@link WalletAccountAPI} 同步的快照可直接比对，不必打这趟往返。
-     * @return coins 按 {@link ShopCost#coins} 同 key；items/fluids 顺序对齐 {@link ShopCost#items()}/{@link ShopCost#fluids()}
+     * AE 模式另附可下单状态：只问绑定网络里有没有产出该物品/流体的样板，不跑合成计算。
+     * @return coins 按 {@link ShopCost#coins} 同 key；items/fluids 顺序对齐 {@link ShopCost#items()}/{@link ShopCost#fluids()}。
+     *         coinOrder/itemOrder/fluidOrder 与之对齐：0 未核对，1 有样板，2 无样板，3 未绑定网络。
      */
     public static CostPreview previewHave(ServerPlayer player, ShopCost cost, boolean aeMode) {
         java.util.Map<ResourceLocation, BigInteger> coinsHave = new java.util.LinkedHashMap<>();
         java.util.List<Long> itemsHave = new java.util.ArrayList<>();
         java.util.List<Long> fluidsHave = new java.util.ArrayList<>();
-        if (player == null || cost == null) return new CostPreview(coinsHave, itemsHave, fluidsHave);
+        java.util.List<Integer> coinOrder = new java.util.ArrayList<>();
+        java.util.List<Integer> itemOrder = new java.util.ArrayList<>();
+        java.util.List<Integer> fluidOrder = new java.util.ArrayList<>();
+        if (player == null || cost == null) {
+            return new CostPreview(coinsHave, itemsHave, fluidsHave, coinOrder, itemOrder, fluidOrder);
+        }
         MinecraftServer server = player.getServer();
         UUID uuid = player.getUUID();
+        appeng.api.networking.IGrid orderGrid = aeMode ? ShopAeNetwork.findBoundGrid(player) : null;
 
         for (java.util.Map.Entry<ResourceLocation, BigInteger> c : cost.coins.entrySet()) {
             BigInteger have = server != null ? WalletAccountAPI.getCurrency(server, uuid, c.getKey()) : BigInteger.ZERO;
             Item coin = ForgeRegistries.ITEMS.getValue(c.getKey());
+            appeng.api.stacks.AEItemKey orderKey = null;
             if (coin != null) {
                 have = have.add(BigInteger.valueOf(countItem(player, coin)));
                 have = have.add(BigInteger.valueOf(ShopBackpack.countItem(player, coin, null)));
-                if (aeMode) {
-                    appeng.api.stacks.AEItemKey ck = appeng.api.stacks.AEItemKey.of(new ItemStack(coin));
-                    if (ck != null) have = have.add(BigInteger.valueOf(ShopAeNetwork.availableForPlayer(player, ck)));
+                orderKey = appeng.api.stacks.AEItemKey.of(new ItemStack(coin));
+                if (aeMode && orderKey != null) {
+                    have = have.add(BigInteger.valueOf(ShopAeNetwork.availableForPlayer(player, orderKey)));
                 }
             }
             coinsHave.put(c.getKey(), have);
+            coinOrder.add(orderState(aeMode, orderGrid, orderKey));
         }
         for (ExchangeEntry.Ingredient in : cost.items()) {
             Item item = ForgeRegistries.ITEMS.getValue(in.id);
             long have = 0L;
+            appeng.api.stacks.AEItemKey orderKey = null;
             if (item != null) {
                 long inv = countItem(player, item, in.nbt());
                 long backpack = ShopBackpack.countItem(player, item, in.nbt());
                 have = (inv > Long.MAX_VALUE - backpack) ? Long.MAX_VALUE : inv + backpack;
-                if (aeMode) {
-                    appeng.api.stacks.AEItemKey aek = appeng.api.stacks.AEItemKey.of(in.makeUnitStack());
-                    if (aek != null) {
-                        long ae = ShopAeNetwork.availableForPlayer(player, aek);
-                        have = (have > Long.MAX_VALUE - ae) ? Long.MAX_VALUE : have + ae;
-                    }
+                orderKey = appeng.api.stacks.AEItemKey.of(in.makeUnitStack());
+                if (aeMode && orderKey != null) {
+                    long ae = ShopAeNetwork.availableForPlayer(player, orderKey);
+                    have = (have > Long.MAX_VALUE - ae) ? Long.MAX_VALUE : have + ae;
                 }
             }
             itemsHave.add(have);
+            itemOrder.add(orderState(aeMode, orderGrid, orderKey));
         }
         for (ExchangeEntry.Ingredient in : cost.fluids()) {
             long have = 0L;
-            if (aeMode) {
-                net.minecraft.world.level.material.Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
-                if (fluid != null) have = ShopAeNetwork.availableForPlayer(player, appeng.api.stacks.AEFluidKey.of(fluid));
-            }
+            appeng.api.stacks.AEFluidKey orderKey = null;
+            net.minecraft.world.level.material.Fluid fluid = ForgeRegistries.FLUIDS.getValue(in.id);
+            if (fluid != null) orderKey = appeng.api.stacks.AEFluidKey.of(fluid);
+            if (aeMode && orderKey != null) have = ShopAeNetwork.availableForPlayer(player, orderKey);
             fluidsHave.add(have);
+            fluidOrder.add(orderState(aeMode, orderGrid, orderKey));
         }
-        return new CostPreview(coinsHave, itemsHave, fluidsHave);
+        return new CostPreview(coinsHave, itemsHave, fluidsHave, coinOrder, itemOrder, fluidOrder);
     }
 
-    /** {@link #previewHave} 的返回值：coins 按币种 ID，items/fluids 按 {@link ShopCost#items()}/{@link ShopCost#fluids()} 下标对齐。 */
-    public record CostPreview(java.util.Map<ResourceLocation, BigInteger> coins, java.util.List<Long> items, java.util.List<Long> fluids) {}
+    /** 0 未開 AE 模式；1 有樣板；2 沒有樣板；3 開了 AE 模式但沒有綁定網絡。只查樣板，不計算合成。 */
+    private static int orderState(boolean aeMode, appeng.api.networking.IGrid grid, appeng.api.stacks.AEKey key) {
+        if (!aeMode) return 0;
+        if (grid == null) return 3;
+        if (key == null) return 2;
+        return grid.getCraftingService().getCraftingFor(key).isEmpty() ? 2 : 1;
+    }
+
+    /**
+     * {@link #previewHave} 的返回值：coins 按币种 ID，items/fluids 按 {@link ShopCost#items()}/{@link ShopCost#fluids()} 下标对齐。
+     * 三份 order 列表与之对齐，取值见 {@link #orderState}。
+     */
+    public record CostPreview(java.util.Map<ResourceLocation, BigInteger> coins, java.util.List<Long> items,
+                              java.util.List<Long> fluids, java.util.List<Integer> coinOrder,
+                              java.util.List<Integer> itemOrder, java.util.List<Integer> fluidOrder) {}
 
     /**
      * 直接获取（作弊模式）：不结算任何成本，直接把 times 份商品交付给玩家。
@@ -778,9 +802,20 @@ public final class ShopPurchase {
     }
 
     /**
+     * 单种物品数量达到 {@code shop.aeInjectMin} 才允许注入 AE。低于限额的散件交给背包。
+     * 数量超出 long 时 AE API 接不住，同样不走注入。流体不经过这里。
+     */
+    private static boolean aeInjectAllowed(java.math.BigInteger total) {
+        if (total == null || total.signum() <= 0 || total.bitLength() >= 63) return false;
+        long min = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopAeInjectMin.get();
+        if (min < 1L) min = 1L;
+        return total.compareTo(java.math.BigInteger.valueOf(min)) >= 0;
+    }
+
+    /**
      * 分层交付一批物品给玩家（购买 / 兑换反向共用）。不扣款，只负责把 total 个 unit 送达。
-     * aeMode 且绑定在线 AE 能全额收下 → 注入 AE 网络（SIMULATE→MODULATE 防吞）
-     * 否则总量 ≥ 配置阈值 → 打包超级磁盘阵列赠送
+     * aeMode 且单种数量达到 AE 注入限额、绑定在线 AE 能全额收下 → 注入 AE 网络（SIMULATE→MODULATE 防吞）
+     * 低于限额的散件不进 AE，改走背包。否则总量 ≥ 配置阈值 → 打包超级磁盘阵列赠送
      * 否则进背包，装不下的余量再打包 SDA
      * @return 主交付方式 "ae"/"disk_hatch"/"sda"/"inventory"（null = 参数无效）
      */
@@ -799,10 +834,9 @@ public final class ShopPurchase {
         if (com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopAeDeliverDisabled.get()) aeMode = false;
         appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(unit);
         long threshold = com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.shopSdaPackThreshold.get();
-        boolean fitsLong = total.bitLength() < 63; // ≤ Long.MAX_VALUE，AE/背包按 long 处理
         boolean atThreshold = total.compareTo(java.math.BigInteger.valueOf(threshold)) >= 0;
         String via;
-        if (aeMode && key != null && fitsLong
+        if (aeMode && key != null && aeInjectAllowed(total)
                 && ShopAeNetwork
                         .canInjectForPlayer(player, key, total.longValue())) {
             via = "ae";
@@ -838,7 +872,8 @@ public final class ShopPurchase {
      * 与 {@link #deliverItems} 的关键区别：多种物品里凡是没进 AE、需要打包的部分，
      * 统一合并进<b>同一个</b>超级磁盘阵列，而不是每种物品各自开一个 SDA——避免大规模抽奖
      * （比如一次买 20 万次）炸出几十个「独立一片」的磁盘阵列，玩家还得一个个找。
-     * 进 AE 的（有绑定在线网络且吃得下）仍各走各的，AE 网络本身就是统一存储，不受这个问题影响。
+     * 进 AE 的（有绑定在线网络、单种数量达到 AE 注入限额、且吃得下）仍各走各的，AE 网络本身就是统一存储，不受这个问题影响。
+     * 低于限额的散件不注入 AE，改走背包；整批已达 SDA 阈值时仍随整批打包，避免同一批货散落。
      * 是否打包按<b>整批总量</b>（各物品 total 之和）判断，而非逐个物品各自的量——抽奖类商品
      * 常见「有的物品类型数量多、有的少」，若按单个物品各自判断阈值，总量早已达标的一批货里，
      * 数量没单独达标的类型会被漏判成散件塞进背包，同一批货一部分进 SDA、一部分散落背包，
@@ -877,8 +912,7 @@ public final class ShopPurchase {
             if (directSdaLeftover.signum() <= 0) continue;
             total = directSdaLeftover;
             appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(unit);
-            boolean fitsLong = total.bitLength() < 63;
-            if (aeMode && key != null && fitsLong
+            if (aeMode && key != null && aeInjectAllowed(total)
                     && ShopAeNetwork
                             .canInjectForPlayer(player, key, total.longValue())) {
                 ShopAeNetwork
@@ -1143,17 +1177,20 @@ public final class ShopPurchase {
     /**
      * 币种兑换：把账户里最多 amount 个 from 币按汇率换成 to 币。
      * 请求量超过账户余额时按<b>余额封顶</b>成交（而非要求精确匹配整体失败）；
-     * 目标量 = floor(consumed × from币值 / to币值)，BigInteger 全程无损；
+     * 目标量 = floor(consumed × from兑星火价 / to兑星火价)，BigInteger 全程无损。
+     * 互换走兑星火价而不是面值，避免先拆成铜币再转星火绕过高阶折损。
      * 封顶后源量≤0、目标量≤0 或币值未配置 → 返回 {@link ExchangeResult#FAIL}（不动账户）。
      * @return 实际消耗/换得（显示用，可能截断到 Long.MAX）
      */
     public static ExchangeResult exchange(ServerPlayer player, ResourceLocation from, ResourceLocation to, long amount) {
         if (player == null || from == null || to == null || from.equals(to) || amount <= 0L) return ExchangeResult.FAIL;
+        if (CurrencyStageConfig.missingStage(player, from) != null
+                || CurrencyStageConfig.missingStage(player, to) != null) return ExchangeResult.FAIL;
         MinecraftServer server = player.getServer();
         if (server == null) return ExchangeResult.FAIL;
         UUID uuid = player.getUUID();
-        long fromValue = CurrencyRateConfig.getValue(from);
-        long toValue = CurrencyRateConfig.getValue(to);
+        long fromValue = CurrencyRateConfig.sparkValue(from);
+        long toValue = CurrencyRateConfig.sparkValue(to);
         if (fromValue <= 0L || toValue <= 0L) return ExchangeResult.FAIL; // 未配置币值不可兑换
         BigInteger amt = WalletAccountAPI.getCurrency(server, uuid, from).min(BigInteger.valueOf(amount)); // 余额不足按余额最大值成交
         if (amt.signum() <= 0) return ExchangeResult.FAIL;
@@ -1199,9 +1236,9 @@ public final class ShopPurchase {
         return ShopAeNetwork.availableForPlayer(player, key);
     }
 
-    /** 快速售出全部货币的结果：获得的星火、从 AE 抽入账户的币数、实际换算币种数。 */
-    public record QuickSellResult(BigInteger gained, BigInteger extracted, int convertedCurrencies) {
-        public static final QuickSellResult EMPTY = new QuickSellResult(BigInteger.ZERO, BigInteger.ZERO, 0);
+    /** 快速售出全部货币的结果：获得的星火、从 AE 抽入账户的币数、实际换算币种数、因阶段未提交而跳过的币种数。 */
+    public record QuickSellResult(BigInteger gained, BigInteger extracted, int convertedCurrencies, int skippedLocked) {
+        public static final QuickSellResult EMPTY = new QuickSellResult(BigInteger.ZERO, BigInteger.ZERO, 0, 0);
     }
 
     /** 单币转星火的精确结果，供 ATM 消息显示实际消耗量。 */
@@ -1223,9 +1260,14 @@ public final class ShopPurchase {
         BigInteger gained = BigInteger.ZERO;
         BigInteger extracted = BigInteger.ZERO;
         int converted = 0;
+        int skippedLocked = 0;
         for (ResourceLocation currency : CurrencyRateConfig.getCurrencies()) {
             long value = CurrencyRateConfig.getValue(currency);
             if (value <= 0L) continue;
+            if (CurrencyStageConfig.missingStage(player, currency) != null) {
+                skippedLocked++;
+                continue;
+            }
             if (includeAe) {
                 long got = aeExtractCoin(player, currency, Long.MAX_VALUE);
                 if (got > 0L) extracted = extracted.add(BigInteger.valueOf(got));
@@ -1239,7 +1281,7 @@ public final class ShopPurchase {
                 converted++;
             }
         }
-        return new QuickSellResult(gained, extracted, converted);
+        return new QuickSellResult(gained, extracted, converted, skippedLocked);
     }
 
     /**
@@ -1263,6 +1305,7 @@ public final class ShopPurchase {
         MinecraftServer server = player.getServer();
         if (server == null) return DigitalResult.EMPTY;
         if (CurrencyRateConfig.getValue(currency) <= 0L) return DigitalResult.EMPTY;
+        if (CurrencyStageConfig.missingStage(player, currency) != null) return DigitalResult.EMPTY;
         if (includeAe) {
             BigInteger requested = BigInteger.valueOf(coins);
             BigInteger account = WalletAccountAPI.getCurrency(server, player.getUUID(), currency);
@@ -1287,6 +1330,7 @@ public final class ShopPurchase {
      */
     public static long fromDigital(ServerPlayer player, ResourceLocation currency, long coins) {
         if (player == null || currency == null || coins <= 0L) return 0L;
+        if (CurrencyStageConfig.missingStage(player, currency) != null) return 0L;
         MinecraftServer server = player.getServer();
         if (server == null) return 0L;
         BigInteger got = WalletAccountAPI.convertDigitalToCurrency(server, player.getUUID(), currency, BigInteger.valueOf(coins));

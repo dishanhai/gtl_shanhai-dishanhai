@@ -17,3 +17,4 @@ item_ids: [gt_shanhai:primordial_eternal_smelting_furnace]
 * `gtceu:molecular_deconstruction`：分子解构。
 * `gtceu:chaotic_alchemy`：混沌炼金。
 * `gtceu:stellar_lgnition`：星焰跃迁。
+* `gtceu:primordial_reverse_entropy_constitution`：原初逆熵构成。把分子解构的 1 粉 → 144mb 流体反过来，144mb 流体构成 1 粉。

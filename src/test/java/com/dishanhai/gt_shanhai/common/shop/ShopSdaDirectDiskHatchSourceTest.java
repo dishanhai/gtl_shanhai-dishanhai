@@ -49,6 +49,38 @@ class ShopSdaDirectDiskHatchSourceTest {
     }
 
     @Test
+    void aeInjectMinKeepsSmallItemCountsOutOfAe() throws Exception {
+        String config = Files.readString(CONFIG);
+        String packet = Files.readString(PACKET);
+        String settings = Files.readString(SETTINGS_SCREEN);
+        String configScreen = Files.readString(CONFIG_SCREEN);
+        String purchase = Files.readString(PURCHASE);
+        String deliver = extractBlock(purchase, "public static String deliverItems(");
+        String batch = extractBlock(purchase, "public static String deliverItemBatch(");
+        String fluids = extractBlock(purchase, "private static String deliverGoodsList(");
+
+        assertAll(
+                () -> assertTrue(config.contains("shopAeInjectMin"),
+                        "公共配置必须有独立的 AE 注入限额"),
+                () -> assertTrue(config.contains(".defineInRange(\"aeInjectMin\", 64L, 1L, Long.MAX_VALUE)"),
+                        "默认 64，设 1 才恢复少数量也注入"),
+                () -> assertTrue(packet.contains("aeInjectMin"),
+                        "商店设置包必须同步并保存限额"),
+                () -> assertTrue(settings.contains("AE 注入限额"),
+                        "商店设置 UI 必须能改限额"),
+                () -> assertTrue(configScreen.contains("AE 注入限额"),
+                        "模组配置屏也必须显示限额"),
+                () -> assertTrue(deliver.indexOf("aeInjectAllowed") >= 0
+                                && deliver.indexOf("aeInjectAllowed") < deliver.indexOf("canInjectForPlayer"),
+                        "单件交付要先看限额，再问 AE 能不能收下"),
+                () -> assertTrue(batch.indexOf("aeInjectAllowed") >= 0
+                                && batch.indexOf("aeInjectAllowed") < batch.indexOf("canInjectForPlayer"),
+                        "批量交付同样先看限额"),
+                () -> assertFalse(fluids.contains("aeInjectAllowed"),
+                        "流体没有背包落点，不能套用物品限额"));
+    }
+
+    @Test
     void autoPackedSdaTriesBoundDiskHatchBeforeInventoryFallback() throws Exception {
         String purchase = Files.readString(PURCHASE);
         String pack = extractBlock(purchase, "private static boolean packAsSdaBatch(");

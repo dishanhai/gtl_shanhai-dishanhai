@@ -17,6 +17,9 @@ import java.util.Map;
  *
  * <p>每个槽位记着自己是在哪个 AE 模式下抓的（{@link #matches} 会核对）——AE 模式切换后，
  * 所有槽位在往返刷新前都按"未知"处理（灰色，不瞎猜），避免显示切换前的余量。</p>
+ *
+ * <p>AE 模式还会带上可下单状态（0 未核对，1 有样板，2 无样板，3 未绑定网络）。
+ * 这只表示绑定网络里有没有对应样板，不是合成计算的结果。</p>
  */
 public final class ClientCostPreview {
 
@@ -27,12 +30,19 @@ public final class ClientCostPreview {
         final Map<ResourceLocation, BigInteger> coins;
         final List<Long> items;
         final List<Long> fluids;
+        final Map<ResourceLocation, Integer> coinOrder;
+        final List<Integer> itemOrder;
+        final List<Integer> fluidOrder;
 
-        Slot(boolean aeMode, Map<ResourceLocation, BigInteger> coins, List<Long> items, List<Long> fluids) {
+        Slot(boolean aeMode, Map<ResourceLocation, BigInteger> coins, List<Long> items, List<Long> fluids,
+             Map<ResourceLocation, Integer> coinOrder, List<Integer> itemOrder, List<Integer> fluidOrder) {
             this.aeMode = aeMode;
             this.coins = coins;
             this.items = items;
             this.fluids = fluids;
+            this.coinOrder = coinOrder;
+            this.itemOrder = itemOrder;
+            this.fluidOrder = fluidOrder;
         }
     }
 
@@ -59,11 +69,22 @@ public final class ClientCostPreview {
     }
 
     public static void apply(long entryKey, boolean aeMode, Map<ResourceLocation, BigInteger> newCoins,
-                              List<Long> newItems, List<Long> newFluids) {
-        slots.put(entryKey, new Slot(aeMode,
-                newCoins != null ? new LinkedHashMap<>(newCoins) : new LinkedHashMap<>(),
+                              List<Long> newItems, List<Long> newFluids,
+                              List<Integer> newCoinOrder, List<Integer> newItemOrder, List<Integer> newFluidOrder) {
+        Map<ResourceLocation, BigInteger> coins = newCoins != null ? new LinkedHashMap<>(newCoins) : new LinkedHashMap<>();
+        Map<ResourceLocation, Integer> coinOrder = new LinkedHashMap<>();
+        int index = 0;
+        for (ResourceLocation id : coins.keySet()) {
+            if (newCoinOrder == null || index >= newCoinOrder.size()) break;
+            Integer state = newCoinOrder.get(index++);
+            coinOrder.put(id, state == null ? 0 : state);
+        }
+        slots.put(entryKey, new Slot(aeMode, coins,
                 newItems != null ? newItems : List.of(),
-                newFluids != null ? newFluids : List.of()));
+                newFluids != null ? newFluids : List.of(),
+                coinOrder,
+                newItemOrder != null ? List.copyOf(newItemOrder) : List.of(),
+                newFluidOrder != null ? List.copyOf(newFluidOrder) : List.of()));
     }
 
     /** 该 entryKey 是否有对应这个 AE 模式状态的缓存；不匹配时任何 have 查询都应视为"未知"。 */
@@ -94,9 +115,33 @@ public final class ClientCostPreview {
         return s.fluids.get(index);
     }
 
+    /** 幣種可下單狀態。未同步或 AE 模式對不上時回 0（界面不顯示）。 */
+    public static int coinOrder(long checkEntryKey, boolean checkAeMode, ResourceLocation currency) {
+        if (currency == null) return 0;
+        Slot s = slots.get(checkEntryKey);
+        if (s == null || s.aeMode != checkAeMode) return 0;
+        Integer state = s.coinOrder.get(currency);
+        return state == null ? 0 : state;
+    }
+
+    public static int itemOrder(long checkEntryKey, boolean checkAeMode, int index) {
+        Slot s = slots.get(checkEntryKey);
+        if (s == null || s.aeMode != checkAeMode || index < 0 || index >= s.itemOrder.size()) return 0;
+        Integer state = s.itemOrder.get(index);
+        return state == null ? 0 : state;
+    }
+
+    public static int fluidOrder(long checkEntryKey, boolean checkAeMode, int index) {
+        Slot s = slots.get(checkEntryKey);
+        if (s == null || s.aeMode != checkAeMode || index < 0 || index >= s.fluidOrder.size()) return 0;
+        Integer state = s.fluidOrder.get(index);
+        return state == null ? 0 : state;
+    }
+
     public static void applyStage(String stagePath, boolean aeMode, List<Long> newItems) {
         if (stagePath == null || stagePath.isBlank()) return;
-        stageSlots.put(stagePath, new Slot(aeMode, Map.of(), newItems != null ? List.copyOf(newItems) : List.of(), List.of()));
+        stageSlots.put(stagePath, new Slot(aeMode, Map.of(), newItems != null ? List.copyOf(newItems) : List.of(),
+                List.of(), Map.of(), List.of(), List.of()));
     }
 
     public static Long stageItemHave(String stagePath, boolean aeMode, int index) {

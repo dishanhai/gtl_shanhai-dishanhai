@@ -58,7 +58,10 @@ class ShopScreenCardSizeSettingsSourceTest {
         assertTrue(settingsScreen.contains("ClientShopUiSettings.setRewardPreviewBar"),
                 "获取预览模式是客户端显示偏好，不能写进服务端设置包");
         assertTrue(uiSettings.contains("rewardPreview"));
-        assertTrue(uiSettings.contains("PREVIEW_GRID"));
+        assertTrue(uiSettings.contains("private static String rewardPreview = PREVIEW_BAR"),
+                "没单独保存过预览模式时，条形是默认，方格是旧版次选");
+        assertTrue(uiSettings.contains("PREVIEW_GRID.equals"),
+                "已经存过 grid 的客户端仍要能回到旧版方格");
         assertTrue(screen.contains("drawGoodsBars"), "普通商品的条形预览要单独画数量，不能复用概率列");
         assertTrue(screen.contains("drawCostBars"), "花费预览的条形也要画数量，并跟获取预览模式走同一个开关");
         assertTrue(screen.contains("drawRewardOddsGrid"), "方格模式仍要画出奖励表概率");

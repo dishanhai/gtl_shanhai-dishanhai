@@ -200,6 +200,7 @@
     "AeTerminalFavoritesScreenMixin",
     "AeTerminalFavoritesScreenAccessor",
     "EncodedPatternByproductTooltipMixin",
-    "PatternEncodingByproductScreenMixin"
+    "PatternEncodingByproductScreenMixin",
+    "ReverseEntropyRecipeMixin"
   ]
 }

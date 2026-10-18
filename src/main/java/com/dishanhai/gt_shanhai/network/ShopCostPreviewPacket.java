@@ -21,6 +21,7 @@ import java.util.function.Supplier;
  * {@link ShopPurchase#previewHave} 算出的只读余量推给客户端，写入 {@code ClientCostPreview} 缓存。
  * items/fluids 顺序对齐服务端 {@code ShopCost#items()}/{@code #fluids()}——客户端渲染花费预览格时按
  * 同一份 ShopCost 同序遍历取值，天然对齐，不用额外传物品 ID。
+ * coinOrder/itemOrder/fluidOrder 与余量列表对齐：0 未核对，1 有样板，2 无样板，3 未绑定网络。
  */
 public class ShopCostPreviewPacket {
 
@@ -31,6 +32,9 @@ public class ShopCostPreviewPacket {
     private final Map<ResourceLocation, BigInteger> coins;
     private final List<Long> items;
     private final List<Long> fluids;
+    private final List<Integer> coinOrder;
+    private final List<Integer> itemOrder;
+    private final List<Integer> fluidOrder;
 
     public ShopCostPreviewPacket(long entryKey, boolean aeMode, ShopPurchase.CostPreview preview) {
         this.entryKey = entryKey;
@@ -38,6 +42,9 @@ public class ShopCostPreviewPacket {
         this.coins = preview.coins();
         this.items = preview.items();
         this.fluids = preview.fluids();
+        this.coinOrder = preview.coinOrder() == null ? List.of() : preview.coinOrder();
+        this.itemOrder = preview.itemOrder() == null ? List.of() : preview.itemOrder();
+        this.fluidOrder = preview.fluidOrder() == null ? List.of() : preview.fluidOrder();
     }
 
     public ShopCostPreviewPacket(FriendlyByteBuf buf) {
@@ -54,6 +61,9 @@ public class ShopCostPreviewPacket {
         this.coins = coinsMap;
         this.items = readLongList(buf);
         this.fluids = readLongList(buf);
+        this.coinOrder = readStates(buf);
+        this.itemOrder = readStates(buf);
+        this.fluidOrder = readStates(buf);
     }
 
     private static List<Long> readLongList(FriendlyByteBuf buf) {
@@ -74,6 +84,22 @@ public class ShopCostPreviewPacket {
         }
         writeLongList(buf, items);
         writeLongList(buf, fluids);
+        writeStates(buf, coinOrder);
+        writeStates(buf, itemOrder);
+        writeStates(buf, fluidOrder);
+    }
+
+    private static List<Integer> readStates(FriendlyByteBuf buf) {
+        int n = buf.readVarInt();
+        if (n < 0 || n > MAX_ENTRIES) throw new DecoderException("Invalid cost preview order size: " + n);
+        List<Integer> list = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) list.add(buf.readByte() & 0xFF);
+        return list;
+    }
+
+    private static void writeStates(FriendlyByteBuf buf, List<Integer> states) {
+        buf.writeVarInt(states.size());
+        for (Integer state : states) buf.writeByte(state == null ? 0 : state);
     }
 
     private static void writeLongList(FriendlyByteBuf buf, List<Long> list) {
@@ -91,6 +117,7 @@ public class ShopCostPreviewPacket {
 
     @OnlyIn(Dist.CLIENT)
     private static void handleClient(ShopCostPreviewPacket pkt) {
-        com.dishanhai.gt_shanhai.client.shop.ClientCostPreview.apply(pkt.entryKey, pkt.aeMode, pkt.coins, pkt.items, pkt.fluids);
+        com.dishanhai.gt_shanhai.client.shop.ClientCostPreview.apply(pkt.entryKey, pkt.aeMode, pkt.coins, pkt.items, pkt.fluids,
+                pkt.coinOrder, pkt.itemOrder, pkt.fluidOrder);
     }
 }

@@ -99,6 +99,27 @@ public final class PatternRecipeTypeHelper {
     }
 
     /**
+     * 若樣板保存的配方仍匹配目前內容，執行時只允許該完整 ID；配方暫不可解析時也拒絕替代配方。
+     * 玩家改動樣板內容而使原配方不再匹配時，保留既有指紋匹配回退。
+     */
+    public static boolean storedRecipeIdAllowsCandidate(ItemStack stack, Level level, GTRecipe candidate) {
+        String storedRecipeId = readRecipeId(stack);
+        if (storedRecipeId.isEmpty()) return true;
+
+        ResourceLocation storedId = parseRecipeId(storedRecipeId);
+        ResourceLocation candidateId = candidate == null ? null : candidate.getId();
+        if (storedId == null || storedId.equals(candidateId)) return true;
+
+        GTRecipe storedRecipe = resolveRecipe(storedId.toString());
+        boolean enforceStoredId = storedRecipe == null || level == null
+                || storedRecipeFitsPattern(stack, level, storedRecipe);
+        return PatternRecipeIdExecutionPolicy.allowsCandidate(
+                storedId.toString(),
+                candidateId == null ? "" : candidateId.toString(),
+                enforceStoredId);
+    }
+
+    /**
      * 编码时权威写入：仅供已经拿到确切来源 {@link GTRecipe}（玩家实际选中/上传的那一个，零歧义）
      * 的调用点使用，如 {@code Ae2GtmProcessingPatternMixin}。写入后该样板永久跳过自愈重推断。
      */

@@ -4,8 +4,11 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.common.item.WalletItem;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
+import com.dishanhai.gt_shanhai.common.shop.CurrencyStageConfig;
+import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopPurchase;
 import com.dishanhai.gt_shanhai.client.shop.ClientAeCurrencyBalance;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.network.CurrencyActionPacket;
 import com.dishanhai.gt_shanhai.network.CurrencyAeBalanceRequestPacket;
@@ -245,8 +248,13 @@ public class CurrencyAtmScreen extends ScaledScreen {
             g.fill(lx + 1, ry, lx + lw - 1, ry + ROW_H - 1, sel ? SELECT_BG : (hover ? ROW_BG : 0));
             Item item = ForgeRegistries.ITEMS.getValue(cur);
             if (item != null) g.renderItem(new ItemStack(item), lx + 3, ry + 1);
-            String name = GuiRenderUtil.trimText(this.font, ShopPurchase.coinName(cur), lw - 28);
+            String badge = stageBadge(cur);
+            int badgeW = badge.isEmpty() ? 0 : this.font.width(badge) + 4;
+            String name = GuiRenderUtil.trimText(this.font, ShopPurchase.coinName(cur), lw - 28 - badgeW);
             g.drawString(this.font, name, lx + 22, ry + 2, sel ? GOLD : WHITE, true);
+            if (!badge.isEmpty()) {
+                g.drawString(this.font, badge, lx + lw - 5 - this.font.width(badge), ry + 2, GRAY, true);
+            }
             BigInteger bal = ClientWalletAccount.getCurrency(cur);
             Long aeBal = ClientAeCurrencyBalance.get(cur);
             String balanceLabel = "§7钱包 §e" + formatBig(bal);
@@ -273,10 +281,69 @@ public class CurrencyAtmScreen extends ScaledScreen {
             lines.add(Component.literal("§c特殊货币，不能按币值兑换或转星火"));
             lines.add(Component.literal("§7可以存进钱包、提取回背包。兑换去兑换中心。"));
         } else {
-            lines.add(Component.literal("§7币值: §f" + CurrencyRateConfig.getValue(cur)));
+            long face = CurrencyRateConfig.getValue(cur);
+            long spark = CurrencyRateConfig.sparkValue(cur);
+            lines.add(Component.literal("§7面值: §f" + face));
+            lines.add(Component.literal(spark == face
+                    ? "§7兑星火: §f" + spark + " §8(原价)"
+                    : "§7兑星火: §e" + spark + " §8(高阶折损，面值每×4星火只×2)"));
             lines.add(Component.literal("§8左键选中后，可以提交、兑换、转星火或提取"));
         }
+        appendStageTip(lines, cur);
         hoverTip = lines;
+    }
+
+    /**
+     * 币种阶段锁展示：货币名右侧的短标记只给阶段名和红绿状态，
+     * 这里补全阶段路径，并在未解锁时列出该阶段要一次性提交的固定物品，免得玩家点下去才发现被拒。
+     */
+    private static void appendStageTip(List<Component> lines, ResourceLocation cur) {
+        String path = CurrencyStageConfig.stagePath(cur);
+        if (path.isEmpty()) return;
+        String missing = CurrencyStageConfig.missingStageClient(cur);
+        lines.add(Component.literal("§7阶段: §f" + path + (missing == null ? " §a已解锁" : " §c未解锁")));
+        if (missing == null) return;
+        if (!missing.equals(path)) lines.add(Component.literal("§7当前卡在: §f" + missing));
+        List<ExchangeEntry.Ingredient> requirements = ClientShopUnlockState.stageRequirements(missing);
+        if (requirements.isEmpty()) return;
+        lines.add(Component.literal("§c兑换/转星火前需一次性提交:"));
+        int shown = Math.min(6, requirements.size());
+        for (int i = 0; i < shown; i++) {
+            ExchangeEntry.Ingredient ingredient = requirements.get(i);
+            ItemStack stack = ingredient.makeUnitStack();
+            String name = stack.isEmpty() ? ingredient.id.toString() : stack.getHoverName().getString();
+            lines.add(Component.literal("§8· §f" + name + " §7×" + ingredient.count));
+        }
+        if (requirements.size() > shown) {
+            lines.add(Component.literal("§8… 共 " + requirements.size() + " 种"));
+        }
+    }
+
+    /** 货币名右侧的阶段短标记（已解锁灰色、未解锁红色）；未配置阶段返回空串。 */
+    private static String stageBadge(ResourceLocation currency) {
+        String path = CurrencyStageConfig.stagePath(currency);
+        if (path.isEmpty()) return "";
+        String tier = path;
+        int slash = path.lastIndexOf('/');
+        if (slash >= 0) tier = path.substring(slash + 1);
+        boolean locked = CurrencyStageConfig.missingStageClient(currency) != null;
+        return (locked ? "§c" : "§7") + tier.toUpperCase(java.util.Locale.ROOT) + (locked ? "§c锁" : "");
+    }
+
+    /** 详情页货币名后面的阶段路径 + 解锁状态；悬停可看该阶段要提交的物品。 */
+    private void drawStageInfo(GuiGraphics g, int mx, int my, int x, int y, ResourceLocation currency) {
+        String path = CurrencyStageConfig.stagePath(currency);
+        if (path.isEmpty()) return;
+        String missing = CurrencyStageConfig.missingStageClient(currency);
+        String status = missing == null ? "§a已解锁" : "§c未解锁";
+        int avail = Math.max(40, detailX() + detailW() - 12 - x);
+        String prefix = "§8| §7阶段 " + status + " §f";
+        String text = prefix + GuiRenderUtil.trimText(this.font, path, Math.max(8, avail - this.font.width(prefix)));
+        g.drawString(this.font, text, x, y, GRAY, true);
+        if (hoverTip != null || !GuiRenderUtil.isHovering(mx, my, x, y - 1, this.font.width(text), 12)) return;
+        List<Component> lines = new ArrayList<>();
+        appendStageTip(lines, currency);
+        if (!lines.isEmpty()) hoverTip = lines;
     }
 
     private void drawOperationHints(GuiGraphics g) {
@@ -303,14 +370,18 @@ public class CurrencyAtmScreen extends ScaledScreen {
             hints.add("这种是特殊货币，不能按币值兑换");
             hints.add("比例兑换请去兑换中心");
         }
+        if (selected != null && !CurrencyStageConfig.stagePath(selected).isEmpty()) {
+            hints.add("币名右侧是阶段锁，未解锁时兑换/转星火会被拒");
+        }
         hints.add("左键左侧货币，再做存入或提取");
         hints.add("提交全部：背包里的这种币进钱包");
         hints.add("提取实体币：钱包余额回到背包");
         hints.add("数量框决定兑换、转星火和提取");
         hints.add("全部和百分比按当前余额填数量");
         if (!special) {
-            hints.add("兑换：按币值换成左右箭头选的币");
-            hints.add("转成星火，或用星火转回这种币");
+            hints.add("兑换：按兑星火价换成左右箭头选的币");
+            hints.add("白金及以下原价兑星火，更高的币会折损");
+            hints.add("转成星火，或用星火按同一价格转回");
             hints.add("快速售出：可计价的币全部换星火");
         }
         hints.add("AE 模式在商店顶栏开关");
@@ -346,9 +417,9 @@ public class CurrencyAtmScreen extends ScaledScreen {
         lines.add("§e提取实体币");
         lines.add("§7按数量从钱包取回背包");
         lines.add("§e兑换");
-        lines.add("§7按两边币值，把当前币换成目标币");
+        lines.add("§7按两边兑星火价互换，不能先拆成铜币绕过折损");
         lines.add("§e转成星火 / 星火转出");
-        lines.add("§7和顶栏的星火按币值互转");
+        lines.add("§7白金及以下原价。更高的币面值每×4，星火只×2");
         lines.add("§e快速售出");
         lines.add("§7所有配了币值的货币一次换成星火");
         lines.add("§e特殊货币");
@@ -388,15 +459,26 @@ public class CurrencyAtmScreen extends ScaledScreen {
         int cx = dx + 8;
         Item item = ForgeRegistries.ITEMS.getValue(selected);
         if (item != null) g.renderItem(new ItemStack(item), cx, dy + 8);
-        g.drawString(this.font, ShopPurchase.coinName(selected), cx + 22, dy + 8, WHITE, true);
+        String selectedName = ShopPurchase.coinName(selected);
+        g.drawString(this.font, selectedName, cx + 22, dy + 8, WHITE, true);
+        drawStageInfo(g, mx, my, cx + 22 + this.font.width(selectedName) + 10, dy + 8, selected);
         BigInteger bal = ClientWalletAccount.getCurrency(selected);
         Long aeBal = ClientAeCurrencyBalance.get(selected);
         g.drawString(this.font, "§7钱包余额: §e" + formatBig(bal), cx + 22, dy + 20, CYAN, true);
         g.drawString(this.font, "§7AE网络余额: §b" + (aeBal == null ? "查询中…" : formatBig(BigInteger.valueOf(aeBal))),
                 cx + 22, dy + 32, CYAN, true);
         boolean special = CurrencyRateConfig.isSpecial(selected);
-        String valueLabel = special ? "§c特殊（不参与币值兑换）" : "§f" + CurrencyRateConfig.getValue(selected);
-        g.drawString(this.font, "§7币值: " + valueLabel, cx + 22, dy + 44, GRAY, true);
+        long face = special ? 0L : CurrencyRateConfig.getValue(selected);
+        long sparkRate = special ? 0L : CurrencyRateConfig.sparkValue(selected);
+        String valueText = special ? "§7币值: §c特殊（不参与币值兑换）"
+                : "§7币值: §f" + face + (sparkRate == face ? " §8→星火同价" : " §7→星火 §e" + sparkRate);
+        g.drawString(this.font, GuiRenderUtil.trimText(this.font, valueText, Math.max(8, detailW() - 30)),
+                cx + 22, dy + 44, GRAY, true);
+        if (!special) {
+            armTip(mx, my, cx + 22, dy + 42, detailW() - 36, 12,
+                    "兑星火", "面值 " + face + "，兑星火 " + sparkRate
+                            + "。白金及以下（面值≤256）原价。再往上每升一档面值×4，星火只×2。币种互换也按兑星火价，先拆成铜币再转不会更多。");
+        }
 
         // 提交全部
         drawButton(g, cx, dy + 56, detailW() - 16, 14, "§a提交全部（背包→钱包）", mx, my,
@@ -441,8 +523,8 @@ public class CurrencyAtmScreen extends ScaledScreen {
         drawButton(g, cx, dy + 160, detailW() - 16, 14,
                 ShopScreen.isAeMode() ? "§d快速售出全部货币（含 AE）" : "§d快速售出全部货币（钱包）", mx, my,
                 "快速售出", ShopScreen.isAeMode()
-                        ? "把所有配了币值的货币换成星火。会先从绑定网络吸入，再连钱包余额一起换。特殊货币不动。"
-                        : "把钱包里所有配了币值的货币一次换成星火。特殊货币留在钱包里，不受影响。");
+                        ? "把所有配了币值的货币按兑星火价换成星火。白金以上会折损。会先从绑定网络吸入，再连钱包余额一起换。特殊货币不动。"
+                        : "把钱包里所有配了币值的货币按兑星火价一次换成星火。白金以上会折损。特殊货币留在钱包里。");
 
         // 兑换区（特殊货币不参与币值兑换，改引导去兑换中心；下面这串固定 Y 坐标见 ShopScreen 同类注释的教训，
         // 插行/改行高必须连带下移 ey，不能只加行不挪 ey）
@@ -464,8 +546,14 @@ public class CurrencyAtmScreen extends ScaledScreen {
         // ◀ 目标币 ▶
         drawButton(g, cx, ey + 12, 14, 14, "§e◀", mx, my,
                 "上一个目标", "换成清单里前一种可以兑换的货币。不会选中当前正在付出的这一种。");
-        String tname = target == null ? "§8无" : GuiRenderUtil.trimText(this.font, ShopPurchase.coinName(target), detailW() - 60);
+        String tname = target == null ? "§8无" : GuiRenderUtil.trimText(this.font, ShopPurchase.coinName(target), detailW() - 90);
         g.drawString(this.font, tname, cx + 20, ey + 16, GOLD, true);
+        if (target != null) {
+            String targetBadge = stageBadge(target);
+            if (!targetBadge.isEmpty()) {
+                g.drawString(this.font, targetBadge, cx + 26 + this.font.width(tname), ey + 16, GRAY, true);
+            }
+        }
         drawButton(g, cx + detailW() - 16 - 14, ey + 12, 14, 14, "§e▶", mx, my,
                 "下一个目标", "换成清单里后一种可以兑换的货币。");
         // 预计得到
@@ -474,18 +562,18 @@ public class CurrencyAtmScreen extends ScaledScreen {
                 + (target == null ? "" : ShopPurchase.coinName(target)), cx, ey + 30, GREEN, true);
         drawButton(g, cx, ey + 42, detailW() - 16, 14,
                 gain > 0 ? "§a兑换" : "§8兑换（数量太小/无目标）", mx, my,
-                "兑换", "付出数量框里的当前货币，按两边币值换成目标货币。得到的数量显示在按钮上方。");
+                "兑换", "付出数量框里的当前货币，按两边兑星火价换成目标货币。得到的数量显示在按钮上方。");
 
-        // 币种 ↔ 星火（自动币值）
-        long value = CurrencyRateConfig.getValue(selected);
+        // 币种 ↔ 星火（兑星火价，白金以上折损）
+        long value = sparkRate;
         BigInteger toSpark = value > 0L ? BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)) : BigInteger.ZERO;
         drawButton(g, cx, ey + 62, detailW() - 16, 14,
                 value > 0L ? "§d转成星火 " + (ShopScreen.isAeMode() ? "§7(钱包+AE)" : "§7(钱包)")
                         + " §7(付 " + formatBig(BigInteger.valueOf(amount)) + " → §e+" + formatBig(toSpark) + "星火§7)"
                         : "§8转成星火（币值未配置）", mx, my,
                 "转成星火", ShopScreen.isAeMode()
-                        ? "按币值把数量换成星火。钱包不够时，会从绑定网络补这一种货币。"
-                        : "按币值把钱包里的数量换成星火。得到的星火等于付出枚数乘币值。");
+                        ? "按兑星火价把数量换成星火。钱包不够时，会从绑定网络补这一种货币。白金以上会折损。"
+                        : "按兑星火价把钱包里的数量换成星火。白金及以下等于面值，更高的币会折损。");
         // 星火转出：amount = 想要的目标币数量（非花的星火数），花费 = amount × 币值
         BigInteger sparkNeeded = value > 0L ? BigInteger.valueOf(amount).multiply(BigInteger.valueOf(value)) : BigInteger.ZERO;
         boolean canFromDigital = value > 0L && ClientWalletAccount.getDigital().compareTo(sparkNeeded) >= 0;
@@ -498,7 +586,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
             fromDigitalLabel = "§8星火转出（星火余额不足，需 " + formatBig(sparkNeeded) + "）";
         }
         drawButton(g, cx, ey + 78, detailW() - 16, 14, fromDigitalLabel, mx, my,
-                "星火转出", "数量是想得到的货币枚数。花费的星火等于枚数乘币值，星火不够时按余额能换的上限成交。");
+                "星火转出", "数量是想得到的货币枚数。花费的星火等于枚数乘兑星火价，和转成星火是同一价格。星火不够时按余额能换的上限成交。");
 
         // 提取实体币（钱包余额 → 背包实体币，装不下打包超级磁盘阵列）
         drawButton(g, cx, ey + 94, detailW() - 16, 14,
@@ -515,7 +603,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
     /** 客户端预览兑换结果（服务端最终裁定）。 */
     private static long previewExchange(ResourceLocation from, ResourceLocation to, long amount) {
         if (from == null || to == null || from.equals(to) || amount <= 0) return 0;
-        long fv = CurrencyRateConfig.getValue(from), tv = CurrencyRateConfig.getValue(to);
+        long fv = CurrencyRateConfig.sparkValue(from), tv = CurrencyRateConfig.sparkValue(to);
         if (fv <= 0 || tv <= 0) return 0;
         BigInteger dst = BigInteger.valueOf(amount).multiply(BigInteger.valueOf(fv)).divide(BigInteger.valueOf(tv));
         return dst.bitLength() < 63 ? dst.longValue() : Long.MAX_VALUE;
@@ -619,8 +707,8 @@ public class CurrencyAtmScreen extends ScaledScreen {
             }
             return true;
         }
-        // 转成星火（币种 → 数字余额）
-        long value = CurrencyRateConfig.getValue(selected);
+        // 转成星火（币种 → 数字余额，白金以上按兑星火价折损）
+        long value = CurrencyRateConfig.sparkValue(selected);
         if (GuiRenderUtil.isHovering(mx, my, cx, ey + 62, fullW, 14)) {
             boolean includeAe = ShopScreen.isAeMode();
             send(CurrencyActionPacket.Op.TO_DIGITAL, selected, null, amount, includeAe);

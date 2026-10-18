@@ -1332,6 +1332,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     public boolean gtShanhai$slotAllowsRecipe(int slot, GTRecipe recipe) {
         if (slot >= maxPatternCount && gtShanhai$getPatternRecipe(slot) == null) return false;
         if (PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) return true;
+        if (slot >= 0 && slot < maxPatternCount && slot < getPatternInventory().getSlots()
+                && !PatternRecipeTypeHelper.storedRecipeIdAllowsCandidate(
+                        getPatternInventory().getStackInSlot(slot), getLevel(), recipe)) {
+            return false;
+        }
         String taggedTypeId = gtShanhai$getPatternRecipeTypeId(slot);
         if (PatternRecipeTypeHelper.recipeMatchesTypeId(recipe, taggedTypeId)) return true;
         // 星律共享搜索集：宿主原生搜索命中同组类型的等价配方（如大型化反命中化反槽）时也允许从本槽扣料；

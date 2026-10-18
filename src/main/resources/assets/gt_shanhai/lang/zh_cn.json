@@ -79,6 +79,8 @@
   "gtceu.recipe_type.primordial_matter_recombination": "原初物质重组",
   "gtceu.recipe_type.primordial_matter_deconstruction": "原初物质解构",
   "gtceu.primordial_matter_deconstruction": "原初物质解构",
+  "gtceu.recipe_type.primordial_reverse_entropy_constitution": "原初逆熵构成",
+  "gtceu.primordial_reverse_entropy_constitution": "原初逆熵构成",
   "gtceu.primordial_deep_space_extraction": "原初深空汲取",
   "gtceu.recipe_type.primordial_deep_space_extraction": "原初深空汲取",
   "gtceu.primordial_matter_recombination": "原初物质重组",
