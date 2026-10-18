@@ -1,0 +1,16 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.shanhai.mixin.probe",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "shanhai.refmap.json",
+  "mixins": [
+    "ShanhaiRecipeLogicProbeMixin",
+    "ShanhaiWorkableMultiblockProbeMixin",
+    "ShanhaiMutableRecipesLogicProbeMixin",
+    "ShanhaiGtlAddMultipleRecipesLogicProbeMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

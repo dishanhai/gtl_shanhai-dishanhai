@@ -76,3 +76,8 @@ docs/
 /v5_designs.py
 /v5_genesis.py
 /_evidence
+
+# ── 2026-10-18：临时调研目录与同步侧车（含本机绝对路径，永不入库）──
+temp-hostref/
+**/temp-selfcheck-out/
+*.stamp.json

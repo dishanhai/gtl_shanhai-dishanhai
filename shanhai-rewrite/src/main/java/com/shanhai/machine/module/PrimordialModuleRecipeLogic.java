@@ -1460,6 +1460,29 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
     private static long shanhai$lastLoggedReductionBits = Long.MIN_VALUE;
 
     /**
+     * 抬头因子日志的<b>最小间隔</b>：1000 ms（2026-10-18 父代理要求：每秒 ≤1 行，聚合）。
+     *
+     * <p>原来只在"两个因子都变了"时打，但这条逻辑是<b>每建一次配方</b>都会跑（跨配方并行/自动并行下
+     * 一秒能建几十次），而 {@code durationFactor} 会随上游配方变化 ⇒ 实际上就是"每次建配方一行"。
+     * 现在：1 秒窗口内只折叠计数，窗口到了打<b>一行</b>，行里带 {@code folded=}（这 1 秒折叠了多少次）
+     * 与 {@code calls=}（这 1 秒被调用了多少次）——<b>只限流不报数 = 静默</b>，
+     * 所以折叠次数必须出现在行里，"抖了多少次"与"什么都没发生"才区分得开。
+     *
+     * <p>⚠️ 若窗口内的变化之后<b>再也不变</b>，那一行不会补打（下游读到的是最后一次真打的值）；
+     * 这是刻意的：本日志的用途是"证明 tracker 真的被写进去了"，不是逐次审计。
+     */
+    private static final long SHANHAI$REDUCTION_LOG_MIN_INTERVAL_MS = 1_000L;
+
+    /** 上一次真打「抬头因子」行的墙钟。 */
+    private static long shanhai$lastReductionLogMs;
+
+    /** 本秒窗口内被折叠掉的"因子变化"次数。 */
+    private static int shanhai$reductionLogFolded;
+
+    /** 本秒窗口内本方法被调用的次数（= 建配方的次数，用来证明限流真的在起作用）。 */
+    private static int shanhai$reductionLogCalls;
+
+    /**
      * 把「总耗能倍率 / 总耗时倍率」两个<b>真实因子</b>写进 gtlcore 的显示追踪器
      * （{@code RecipeMultiplierTracker} → Jade 的 {@code RecipeMultiplierProvider}）。
      *
@@ -1544,21 +1567,35 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
             // ── ② 确认走的是 null 分支 ⇒ 写真实因子（覆盖探针写下的 1.0/1.0）──
             RecipeMultiplierTracker.captureReduction(machine, built, energyFactor, durationFactor);
 
-            // ── ③ 只在因子变化时打一行（不刷屏）：部署后这一行就是"tracker 真的写进去了"的实机证据 ──
+            // ── ③ 因子变化时才打，且【全局每秒 ≤1 行】（2026-10-18 父代理要求：聚合限流）──
+            //    部署后这一行就是"tracker 真的写进去了"的实机证据；folded= 是本秒被折叠掉的变化次数。
+            ++shanhai$reductionLogCalls;
             final long bits = Double.doubleToLongBits(energyFactor) * 31L
                     + Double.doubleToLongBits(durationFactor);
             if (bits != shanhai$lastLoggedReductionBits) {
                 shanhai$lastLoggedReductionBits = bits;
-                final RecipeMultiplierTracker.Multipliers readBack =
-                        RecipeMultiplierTracker.get(machine).orElse(null);
-                ShanhaiMod.LOGGER.info("[SHANHAI-MODULE] 抬头因子已写入 tracker："
-                                + "总耗能倍率={}（{}%）／总耗时倍率={}（{}%）"
-                                + "（口径 (Q)：energy×duration = N5 成本系数 f={}；"
-                                + "d0={} → T={}（批处理连跑 N={} 次，∴ 批处理前的成品时长 = T/N = {}）"
-                                + "⇒ duration=T/d0、energy=f×d0/(T/N)）；读回={} pos={}",
-                        energyFactor, energyFactor * 100.0D, durationFactor, durationFactor * 100.0D,
-                        PrimordialRecipeEffects.reductionFactor(gateBonus), originDuration, target, cycles,
-                        batchOffTarget, readBack, machine.getPos());
+                final long nowMs = System.currentTimeMillis();
+                if (nowMs - shanhai$lastReductionLogMs < SHANHAI$REDUCTION_LOG_MIN_INTERVAL_MS) {
+                    // 1 秒窗口内：只折叠（folded 会在下一次真打时出现在同一行里）
+                    ++shanhai$reductionLogFolded;
+                } else {
+                    final int folded = shanhai$reductionLogFolded;
+                    final int calls = shanhai$reductionLogCalls;
+                    shanhai$reductionLogFolded = 0;
+                    shanhai$reductionLogCalls = 0;
+                    shanhai$lastReductionLogMs = nowMs;
+                    final RecipeMultiplierTracker.Multipliers readBack =
+                            RecipeMultiplierTracker.get(machine).orElse(null);
+                    ShanhaiMod.LOGGER.info("[SHANHAI-MODULE] 抬头因子已写入 tracker："
+                                    + "总耗能倍率={}（{}%）／总耗时倍率={}（{}%）"
+                                    + "（口径 (Q)：energy×duration = N5 成本系数 f={}；"
+                                    + "d0={} → T={}（批处理连跑 N={} 次，∴ 批处理前的成品时长 = T/N = {}）"
+                                    + "⇒ duration=T/d0、energy=f×d0/(T/N)）；读回={} pos={}"
+                                    + " folded={} calls={}（聚合：每秒 ≤1 行）",
+                            energyFactor, energyFactor * 100.0D, durationFactor, durationFactor * 100.0D,
+                            PrimordialRecipeEffects.reductionFactor(gateBonus), originDuration, target, cycles,
+                            batchOffTarget, readBack, machine.getPos(), folded, calls);
+                }
             }
         } catch (Throwable t) {
             // 纯显示：任何异常都不允许影响配方装配本身（与主机 captureEngineReduction 同纪律）。

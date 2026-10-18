@@ -1,0 +1,12 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.minecraftforge.net/' }
+        maven { url = 'https://maven.parchmentmc.org' }
+    }
+}
+
+// 独立构建：不 include ../shanhai-rewrite（不做多项目、不做 composite，见
+// temp/modsplit/设计.md §7.1）。两个工程各自一份 gradle.properties / settings.gradle，
+// 这样"哪边坏了"在构建期一眼可见。
+rootProject.name = mod_id

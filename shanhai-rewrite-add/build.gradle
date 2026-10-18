@@ -1,0 +1,386 @@
+// ==========================================================================================
+// 山海：扩展（shanhai_add）· 阶段 1：只建骨架
+// ------------------------------------------------------------------------------------------
+// 拆分口径 / 归属表 / mixin 归属 / 部署 / 冒烟矩阵：temp/modsplit/设计.md（§1 §2 §7 §8 §9）。
+//
+// 本文件与 ../shanhai-rewrite/build.gradle 同构：
+//   · plugins + toolchain(21) + options.release=17 —— 逐项照本体
+//   · vendored 依赖目录 —— 直接复用 ../shanhai-rewrite/libs（add 不再建第二份）
+//   · refmap 那 96 行机制 —— 整段照抄，输出名换成 shanhai_add.refmap.json
+//
+// 🔴 两条单向依赖铁律（动这个文件之前先读）：
+//   ① add 认 body：本体 jar 走 compileOnly；运行期由 Forge 先加载本体
+//      （mods.toml: [[dependencies.shanhai_add]] mandatory=true + ordering="AFTER"）。
+//   ② body 不认 add：不许出现任何"本体必须装 add"的声明，本体工程一行都不动。
+//
+// ⚠️ 本项目【不配 runs】：add 的 dev-run 要额外把本体当 mod 塞进 run/mods，本仓历次验证都走
+//    temp/smoke-rig 的专用服务器（设计 §11 待确认 7）⇒ 依赖全部 compileOnly 足够。
+// ==========================================================================================
+
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'org.parchmentmc.librarian.forgegradle' version '1.+'
+}
+
+version = mod_version
+group = 'com.shanhai'
+
+java {
+    // 与本体同一套：JDK 21 工具链编、出 Java 17 字节码。
+    // 为什么非 21 不可：../shanhai-rewrite/libs 里已有 Java 21 字节码的 vendored 依赖
+    // （例 gtladditions-3.2.8Custom-fix2.jar 全是 class file v65），JDK 17 的 javac 直接拒读。
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    // 只改"用哪个 JDK 编"，不改"编出哪版字节码"：产物仍是 v61（Java 17），
+    // 这样 Java 17 / Java 21 两种运行时都能加载。
+    options.release = 17
+    options.compilerArgs += ['-Xlint:-processing', '-Xlint:-deprecation', '-Xlint:-removal']
+}
+
+base {
+    // 产物名：build/libs/shanhai_add-<mod_version>.jar（与本体 shanhai-<ver>.jar 区分，设计 §8.2）
+    archivesName = mod_id
+}
+
+sourceSets.main.resources { srcDirs = ['src/main/resources'] }
+
+repositories {
+    mavenCentral()   // org.spongepowered:mixin:0.8.5:processor 从这里取
+}
+
+// ---------------------------------------------------------------- 本体（body）依赖路径
+// 两个独立 Gradle 构建（各自 settings.gradle），不做多项目、不做 composite（设计 §7.1）：
+// add 只需要本体的 **jar**，不需要它的源码级联编。
+// 这里全部用相对本工程目录的路径 ⇒ 不写死任何绝对路径，仓库搬到哪都能编。
+def bodyDir = file('../shanhai-rewrite')
+def bodyGradlePropsFile = new File(bodyDir, 'gradle.properties')
+/** 本体产物。版本取本工程 gradle.properties 的 body_version（必须与本体 mod_version 同号）。 */
+def bodyJar = new File(bodyDir, "build/libs/shanhai-${body_version}.jar")
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // ① vendored 依赖：直接复用 ../shanhai-rewrite/libs（105 MB 不重复占盘，也不存在两份版本）。
+    //    为什么它【不会】被打进 add 的 jar：
+    //      · Gradle 的 jar 任务只打 sourceSets.main.output；没有 shadow/jarjar 插件就不会内联依赖；
+    //      · 这里用 compileOnly 而不是 implementation ⇒ 这些 jar 连 add 的运行时 classpath 都不进，
+    //        以后就算有人加了 shadow 或运行期任务，也不会顺手把它们（以及本体的类）卷进产物；
+    //      · 运行期这些 mod 由 Forge 从实例的 mods/ 目录加载，与本体重合。
+    compileOnly fileTree(dir: '../shanhai-rewrite/libs', include: '*.jar')
+
+    // ② 本体 jar：本工程唯一的外部自家依赖，同样 compileOnly。
+    //    compileOnly ⇒ 本体那几千个类不进 add 的 jar（两个 jar 各自管自己的类，绝不重复）；
+    //    运行期由 Forge 按 mods.toml 的 mandatory + ordering=AFTER 先加载本体，
+    //    add 的类才找得到 com.shanhai.*（签名漂了在编译期就红，比运行期 NoSuchMethodError 早）。
+    //    ⚠️ files() 里显式给出的缺失文件【不】做存在性校验（不报错、只是 classpath 上少一项）
+    //       ⇒ 所以必须有 verifyBodyJar 做 fail-fast。
+    compileOnly files(bodyJar)
+
+    // mixin 注解处理器：只用来生成 refmap（把 @Inject 的开发名翻成 SRG 名），不干别的。
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+// ==========================================================================================
+// Mixin refmap —— 整段照抄 ../shanhai-rewrite/build.gradle:63-159（那 96 行）
+// ------------------------------------------------------------------------------------------
+// 为什么 add 必须【自己再放一份】：
+//   Mixin 是按"mixin 配置所在的那个 jar"去找 refmap 的。两个 jar 共用 shanhai.refmap.json
+//   在 add 里就是"找不到" ⇒ 生产环境静默不重映射（dev 正常、线上失效），
+//   正是 ../shanhai-rewrite/build.gradle:59-60 记的上游失败形态（设计 §2.3 末段）。
+// ⇒ 文件名换 shanhai_add.refmap.json，输出目录用 add 自己的 build/mixinrefmap/。
+// ==========================================================================================
+
+/** Where the annotation processor writes the refmap. Same path is added to the jar root below. */
+def mixinRefMapProvider = layout.buildDirectory.file('mixinrefmap/shanhai_add.refmap.json')
+def mixinRefMapPath = mixinRefMapProvider.get().asFile.absolutePath
+
+/**
+ * Locates the development-name -> SRG TSRG mapping that the mixin annotation processor must read.
+ *
+ * ForgeGradle keeps it inside its per-user cache and FG 6.0.54 exposes no Gradle API for it
+ * (verified: `jar tf ForgeGradle-6.0.54.jar | grep -i mixin` -> no matches), so we look it up by hand.
+ * A silent miss is NOT acceptable: without this file the processor still writes a refmap, but an
+ * EMPTY one -> the mixin loads in dev and breaks in production (the exact upstream failure mode).
+ * So a miss is a hard build failure.
+ *
+ * ⚠️ 与本体一致：这个查找发生在【配置期】，缓存不在时连 `gradle tasks` 都会失败（本体同样如此）。
+ */
+def findObfTsrg = {
+    def wanted = "srg_to_parchment_${mappings_version}-${minecraft_version}.tsrg"
+    def root = new File(gradle.gradleUserHomeDir, 'caches/forge_gradle/minecraft_user_repo/de/oceanlabs/mcp/mcp_config')
+    def found = []
+    if (root.isDirectory()) {
+        root.eachFileRecurse { f -> if (f.isFile() && f.name == wanted) { found << f } }
+    }
+    if (found.isEmpty()) {
+        throw new GradleException(
+                "Mixin refmap: cannot find '${wanted}' under ${root}.\n" +
+                        "That file carries the dev-name -> SRG mapping the mixin annotation processor needs;\n" +
+                        "without it the generated refmap would be empty and the mixin would break in production.")
+    }
+    return found.max { it.lastModified() }.absolutePath
+}
+
+def obfTsrgPath = findObfTsrg()
+
+/**
+ * ForgeGradle's TSRG is written `srg -> develeopment` ("tsrg2 left right" header; left column = m_xxxxx_).
+ * The mixin processor needs the OPPOSITE direction: given the development name used in @Inject
+ * ("drawInBatch") it must find the SRG name ("m_272191_"). So we emit a column-swapped copy.
+ *
+ * Verified empirically: feeding the file as-is makes the processor report
+ *   "Unable to locate obfuscation mapping for @Inject target drawInBatch"
+ * and write a refmap WITHOUT any mappings.
+ */
+def obfTsrgReversed = layout.buildDirectory.file('mixinrefmap/obfuscation-tsrg-dev-to-srg.tsrg')
+def obfTsrgReversedPath = obfTsrgReversed.get().asFile.absolutePath
+
+tasks.register('mixinReverseTsrg') {
+    description = 'Swap the TSRG columns so the mixin processor can map dev names -> SRG names.'
+    def src = new File(obfTsrgPath)
+    inputs.file(src)
+    outputs.file(obfTsrgReversed)
+    doLast {
+        def out = obfTsrgReversed.get().asFile
+        out.parentFile.mkdirs()
+        def lines = src.readLines('UTF-8')
+        out.withWriter('UTF-8') { w ->
+            for (int i = 0; i < lines.size(); i++) {
+                String l = lines.get(i)
+                // Header + tsrg property/parameter lines (two tabs) stay untouched.
+                if (i == 0 || l.isEmpty() || l.startsWith('\t\t')) {
+                    w.writeLine(l)
+                    continue
+                }
+                if (l.startsWith('\t')) {
+                    def t = l.substring(1).trim().split(/\s+/)
+                    if (t.length == 2) {
+                        w.writeLine('\t' + t[1] + ' ' + t[0])                    // field:  <srg> <dev>
+                    } else if (t.length >= 3) {
+                        w.writeLine('\t' + t[2] + ' ' + t[1] + ' ' + t[0])        // method: <srg> <desc> <dev>
+                    } else {
+                        w.writeLine(l)
+                    }
+                    continue
+                }
+                def t = l.trim().split(/\s+/)
+                if (t.length == 2) {
+                    w.writeLine(t[1] + ' ' + t[0])                               // class: <srg> <dev>
+                } else {
+                    w.writeLine(l)
+                }
+            }
+        }
+    }
+}
+
+tasks.named('compileJava', JavaCompile) {
+    dependsOn 'mixinReverseTsrg'
+    // -A<name>=<value> flags are read by MixinAnnotationProcessor.
+    // The list mirrors what the MixinGradle plugin passes (extracted from mixingradle-0.7.38.jar
+    // strings: -AoutRefMapFile= -AdefaultObfuscationEnv= -AmappingTypes=tsrg -AreobfTsrgFile= -Adisable*).
+    options.compilerArgs += [
+            "-AoutRefMapFile=${mixinRefMapPath}",
+            "-AreobfTsrgFile=${obfTsrgReversedPath}",
+            '-AdefaultObfuscationEnv=searge',
+            '-AmappingTypes=tsrg',
+            '-AdisableTargetValidator=true',
+            '-AdisableTargetExport=true',
+            '-AdisableOverwriteChecker=true',
+    ]
+}
+
+// ==========================================================================================
+// 构建期校验（fail-fast）：宁可在构建期红，也不许"编过了但跑起来没桥 / 生产环境静默失效"
+// ==========================================================================================
+
+/**
+ * 🔴 本体 jar 必须在，且三处版本必须完全一致：
+ *   ① 本工程 mod_version      ② 本工程 body_version      ③ ../shanhai-rewrite/gradle.properties 的 mod_version
+ * 再加一道 ④：本体 **jar 内** META-INF/mods.toml 的 version —— 那才是 FML 真正拿来比
+ * versionRange 的值（设计 §8.2 的"机器可判的对齐检查"）。
+ */
+tasks.register('verifyBodyJar') {
+    group = 'verification'
+    description = 'fail-fast：本体 jar 必须在、且两边 mod_version 必须相等（别等运行期 FML 以缺依赖拒载 add）'
+    doLast {
+        // ① 本体工程得在（路径相对本工程根解析，不写死绝对路径）
+        if (!bodyGradlePropsFile.isFile()) {
+            throw new GradleException(
+                    "找不到本体的 gradle.properties: ${bodyGradlePropsFile}\n" +
+                    "目录布局要求：<仓库根>/shanhai-rewrite 与 <仓库根>/shanhai-rewrite-add 并列。")
+        }
+
+        // ② 本体声明的 mod_version（.properties 按 ISO-8859-1 读；本体那边约定只写 ASCII）
+        def bodyProps = new Properties()
+        bodyGradlePropsFile.withReader('ISO-8859-1') { bodyProps.load(it) }
+        def bodyModVersion = (bodyProps.getProperty('mod_version') ?: '').trim()
+
+        def problems = []
+        if (bodyModVersion != mod_version.toString()) {
+            problems << "本体 gradle.properties: mod_version=${bodyModVersion}  !=  本工程 mod_version=${mod_version}"
+        }
+        if (bodyModVersion != body_version.toString()) {
+            problems << "本体 gradle.properties: mod_version=${bodyModVersion}  !=  本工程 body_version=${body_version}"
+        }
+        if (problems) {
+            throw new GradleException(
+                    "版本号不一致，拒绝构建（两边 mod_version 必须相等，设计 §8.2）：\n  - " +
+                    problems.join("\n  - ") +
+                    "\n修法：把 ../shanhai-rewrite/gradle.properties 与 本工程 gradle.properties 的" +
+                    " mod_version / body_version 调成同一个值。")
+        }
+
+        // ③ 本体产物必须在（files() 对显式给出的缺失文件不做存在性校验，所以这一步不能省）
+        if (!bodyJar.isFile()) {
+            throw new GradleException(
+                    "本体 jar 不存在: ${bodyJar}\n" +
+                    "先构建本体（在 ../shanhai-rewrite 下跑 `gradle build`，产物是 build/libs/shanhai-<ver>.jar），" +
+                    "再构建本工程。add 只依赖本体的 jar，不依赖它的源码。")
+        }
+
+        // ④ 本体 jar 里 mods.toml 的 version（FML 真正比较的那个值）
+        def jarModVersion = null
+        def zip = new java.util.zip.ZipFile(bodyJar)
+        try {
+            def entry = zip.getEntry('META-INF/mods.toml')
+            if (entry == null) {
+                throw new GradleException("本体 jar 里没有 META-INF/mods.toml: ${bodyJar}")
+            }
+            def toml = zip.getInputStream(entry).getText('UTF-8')
+            def m = toml =~ /(?m)^\s*version\s*=\s*"([^"]+)"/
+            if (m.find()) {
+                jarModVersion = m.group(1)
+            }
+        } finally {
+            zip.close()
+        }
+        if (jarModVersion == null) {
+            throw new GradleException("本体 jar 的 META-INF/mods.toml 里找不到 version=\"...\": ${bodyJar}")
+        }
+        if (jarModVersion != mod_version.toString()) {
+            throw new GradleException(
+                    "本体 jar 内的 version=${jarModVersion}  !=  本工程 mod_version=${mod_version}\n" +
+                    "（jar 文件名对不上或本体构建产物过期；重新构建本体，或把 body_version 调成 jar 的真实版本）")
+        }
+
+        logger.lifecycle("[shanhai_add] verifyBodyJar OK: bodyModVersion=${bodyModVersion} " +
+                "bodyVersion=${body_version} jarModVersion=${jarModVersion} jar=${bodyJar.name}")
+
+        // ⑤ 本体 jar 是否比本体源码旧 —— 只 WARN，不 fail（另一条线可能正在改本体，构建时序由主代理掌握）。
+        //    为什么要报：版本号对不上能靠上面的硬校验抓住，但"版本号没变、内容变了"抓不住。
+        //    典型后果：阶段 2 之后 add 要 import com.shanhai.api.*，拿旧 jar 编就会
+        //    `cannot find symbol`，而报错信息完全不提"你的本体 jar 是旧的"。
+        def newestBodySource = 0L
+        def bodySrcDir = new File(bodyDir, 'src/main/java')
+        if (bodySrcDir.isDirectory()) {
+            bodySrcDir.eachFileRecurse { f ->
+                if (f.isFile() && f.name.endsWith('.java') && f.lastModified() > newestBodySource) {
+                    newestBodySource = f.lastModified()
+                }
+            }
+        }
+        if (newestBodySource > bodyJar.lastModified()) {
+            def fmt = new java.text.SimpleDateFormat('yyyy-MM-dd HH:mm:ss')
+            logger.warn("[shanhai_add] ⚠️ 本体 jar 比本体源码旧：jar=" + fmt.format(new java.util.Date(bodyJar.lastModified())) +
+                    " ，最新 .java=" + fmt.format(new java.util.Date(newestBodySource)) +
+                    " ⇒ 本工程编的是【旧】本体的 API。先重建本体（在 ../shanhai-rewrite 下 gradle build），再编 add。")
+        }
+    }
+}
+
+tasks.named('compileJava') { dependsOn 'verifyBodyJar' }
+
+/**
+ * refmap 非空校验（照本体的"空 refmap 是硬失败"口径，设计 §10.2 风险 4）。
+ *
+ * ⚠️ 阶段 1 本工程里**一个 mixin 类都没有** ⇒ 注解处理器不该产出映射，此时跳过（打一行日志）。
+ * 一旦 src/main/java/com/shanhai/add/mixin 下出现 .java（阶段 2 搬 mixin 进来），这里就变成硬失败：
+ * 缺 refmap 或 refmap 里没有 "mappings" ⇒ 生产环境静默不重映射，正是要防的那个坑。
+ */
+def mixinSrcDir = file('src/main/java/com/shanhai/add/mixin')
+tasks.register('verifyRefmap') {
+    group = 'verification'
+    description = 'fail-fast：一旦 add 里有了 mixin 源码，jar 根就必须有非空的 shanhai_add.refmap.json'
+    dependsOn 'compileJava'
+    doLast {
+        def mixinJava = fileTree(mixinSrcDir).matching { include '**/*.java' }.files
+        if (mixinJava.isEmpty()) {
+            logger.lifecycle("[shanhai_add] verifyRefmap: 本工程尚无 mixin 源码（阶段 1 空壳）⇒ 跳过 refmap 校验")
+            return
+        }
+        def refmapFile = mixinRefMapProvider.get().asFile
+        if (!refmapFile.isFile()) {
+            throw new GradleException(
+                    "add 里有 ${mixinJava.size()} 个 mixin 源码，但 refmap 没生成: ${refmapFile}\n" +
+                    "检查 compileJava 的 -AoutRefMapFile / -AreobfTsrgFile 是否还在（这 96 行是从本体抄来的）。")
+        }
+        def text = refmapFile.getText('UTF-8')
+        if (!text.contains('"mappings"')) {
+            throw new GradleException(
+                    "refmap 存在但没有 mappings（空 refmap = 生产环境静默失效）: ${refmapFile}\n" +
+                    "典型原因：-AreobfTsrgFile 指到了没有反转过的 TSRG，或找不到 srg_to_parchment_*.tsrg。")
+        }
+        logger.lifecycle("[shanhai_add] verifyRefmap OK: mixinSources=${mixinJava.size()} " +
+                "refmapBytes=${refmapFile.length()}")
+    }
+}
+
+tasks.named('jar') { dependsOn 'verifyRefmap' }
+
+minecraft {
+    mappings channel: mappings_channel, version: "${mappings_version}-${minecraft_version}"
+    // ⚠️ 刻意不配 runs：见文件头（设计 §11 待确认 7）。
+}
+
+processResources {
+    filteringCharset = 'UTF-8'
+    def replaceProperties = [
+            mod_id           : mod_id,
+            mod_name         : mod_name,
+            mod_version      : mod_version,
+            body_version     : body_version,
+            mod_authors      : mod_authors,
+            mod_description  : mod_description,
+            minecraft_version: minecraft_version,
+            forge_version    : forge_version,
+    ]
+    inputs.properties replaceProperties
+    filesMatching(['META-INF/mods.toml']) {
+        expand replaceProperties
+        filteringCharset = 'UTF-8'
+    }
+}
+
+jar {
+    manifest {
+        attributes([
+                'Specification-Title'   : mod_name,
+                'Specification-Vendor'  : mod_authors,
+                'Specification-Version' : '1',
+                'Implementation-Title'  : mod_name,
+                'Implementation-Version': mod_version,
+                'Implementation-Vendor' : mod_authors,
+                // Forge 1.20.1 从 META-INF/MANIFEST.MF 的 MixinConfigs 属性发现 mixin 配置
+                // （依据同本体 build.gradle:220-238）。
+                // 四份配置全部 `required: false`（fail-soft，同本体的 gtladditions/oculus 口径）：
+                // 注入挂不上时代价是"一行 WARN + 该功能不生效"，不是"整合包起不来"。
+                //   shanhai_add.mixin.json           4 免死注入（阶段 3b）+ 14 时钟 + 20 重力（阶段 3a 从本体搬来）
+                //   shanhai_add.gtlcore.mixin.json   1 条：冻结 gtlcore GlobalRenderClock
+                //   shanhai_add.ae2.mixin.json       3 条：暂停期间 AE 终端的进/出拦截
+                //   shanhai_add.oculus.mixin.json    1 条：冻结光影 frameTimeCounter
+                // 后三份原本是本体 resources 里的同名单文件（package 换成 com.shanhai.add.mixin.*）。
+                'MixinConfigs'          : 'shanhai_add.mixin.json,shanhai_add.gtlcore.mixin.json,shanhai_add.ae2.mixin.json,shanhai_add.oculus.mixin.json',
+        ])
+    }
+    // refmap 必须落在 jar 根：mixin 配置里写的是 "refmap": "shanhai_add.refmap.json"，
+    // Mixin 按 classpath 资源找它（不是按包路径）。
+    // 用闭包延迟求值：阶段 1 没有 mixin 类时不该让 jar 任务失败；一旦有了 mixin 源码，
+    // 上面的 verifyRefmap 会硬性要求这个文件存在且非空。
+    from({ mixinRefMapProvider.get().asFile.isFile() ? files(mixinRefMapProvider) : files() })
+}

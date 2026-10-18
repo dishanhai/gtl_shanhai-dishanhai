@@ -1,4 +1,6 @@
-package com.shanhai.common.guard;
+package com.shanhai.add.guard;
+
+import com.shanhai.common.guard.ShanhaiGuardCore;
 
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;

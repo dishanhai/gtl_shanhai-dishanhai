@@ -38,9 +38,19 @@ const path=require('path');
 // 🔴 路径来源纪律（上传前清理）：本脚本用到的路径【全部在仓库内】⇒ 一律按【脚本自身位置】
 //    (__dirname) 推；不写任何机器绝对路径，也不依赖"从哪个目录运行"（故不用 process.cwd()）。
 // ═══════════════════════════════════════════════════════════════════════════════
-const REPO=path.join(__dirname,'..','..');                    // kubejs\_generators → 仓库根
+// 仓库根 = 从本脚本逐级上溯，第一个含 .git 的目录（2026-10-18：originals\ 等搬进 temp\，别再靠相对深度数层数）
+function findRepoRoot(start) {
+  let d = start;
+  for (;;) {
+    if (fs.existsSync(path.join(d, '.git'))) return d;
+    const up = path.dirname(d);
+    if (up === d) throw new Error('findRepoRoot: 未找到含 .git 的仓库根，起始路径 = ' + start);
+    d = up;
+  }
+}
+const REPO=findRepoRoot(__dirname);                           // 上溯到仓库根
 const TMP=path.join(REPO,'temp')+path.sep;
-const EV=path.join(REPO,'originals','matdump','evidence')+path.sep;
+const EV=path.join(REPO,'temp','originals','matdump','evidence')+path.sep;
 const OUT=path.join(REPO,'kubejs','server_scripts','[server_scripts]shanhai_deconstruct_recipes.js');
 const mats=JSON.parse(fs.readFileSync(EV+'materials.json','utf8'));
 const pr=JSON.parse(fs.readFileSync(EV+'parse_results.json','utf8'));
@@ -94,7 +104,7 @@ function build(id){
 }
 // =============================================================================
 // 🔴 流体 id 修正：从【运行期实测的证据文件】读取（用户 2026-09-26 裁定）。
-//    originals/matdump/evidence/fluid_ids.json  ← 专服探针实测产物，可复用，不用再跑探针。
+//    temp/originals/matdump/evidence/fluid_ids.json  ← 专服探针实测产物，可复用，不用再跑探针。
 //    全表 958 个 propFluid=true：944 个的 <材质id> 就是真流体；14 个不是（查出来是 minecraft:empty）。
 //    fluidFix  = 改用它给的真流体 id   fluidDrop = 找不到真流体 => 不生成流体配方
 //    ⚠️ 不能用「有 liquid_ 兄弟就当假」那条规则：hydrogen/air/nether_air/ender_air/starlight
@@ -284,7 +294,7 @@ fs.writeFileSync(path.join(TMP, 'evidence', 'unmapped-tokens.txt'),
   ['token\t出现次数\t涉及材质(中文名)'].concat(keys.map(k=>[k,toks[k].n,toks[k].ids.map(i=>i+'('+cn(i)+')').join(' ')].join('\t'))).join('\n')+'\n','utf8');
 fs.writeFileSync(path.join(TMP, 'evidence', 'empty-output-materials.txt'),
   empties.map(i=>i+'\t'+cn(i)+'\t'+(mById[i]?mById[i].formula:'')).join('\n')+'\n','utf8');
-console.log('  空输出清单 -> _evidence\\empty-output-materials.txt ('+empties.length+' 行)');
+console.log('  空输出清单 -> temp\\evidence\\empty-output-materials.txt ('+empties.length+' 行)');
 console.log('  🔴 因【找不到真流体】而不生成流体配方的材质 = '+FLUID_DROPPED.length+' 条: '+JSON.stringify(FLUID_DROPPED));
 console.log('  🔴 因【式子是 ?】而不生成配方的材质 = '+QDROPPED.length+' 条: '+JSON.stringify(QDROPPED));
 console.log('');

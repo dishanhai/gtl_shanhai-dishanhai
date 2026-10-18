@@ -53,9 +53,12 @@ import net.minecraftforge.fml.common.Mod;
  *                 日志必带 heal_channel=setHealth / direct / failed（不许只写成功/失败）
  *   ③‴ 死亡流程复位 每 tick：isDeadOrDying ／ deathTime&gt;0 ／ 🔴 同步血量字段真值&lt;=0 任一为真
  *                 ⇒ 两条腿补血 ＋ deathTime=0 ＋ hurtTime=0（独立类别 KIND_RESET，**不计入"补血成功"**）
- *   ⑦ 拒绝死亡    LivingEntity#die ＋ ServerPlayer#die 的 HEAD（mixin）→ ci.cancel()
+ *   ⑦ 拒绝死亡    LivingEntity#die ＋ ServerPlayer#die 的 HEAD（mixin — 🔴 已搬进扩展 shanhai_add）→ ci.cancel()
  *                 ＋ 同一套复位动作；日志类别 KIND_DIE_REFUSED（走 logDetail/chat 闸门与文案表）
- *   ⑦′ setHealth 入参  LivingEntity#setHealth(float) 的 @ModifyVariable（mixin）→ 受保护玩家被写 &lt;=0 ⇒ 改成满血
+ *   ⑦′ setHealth 入参  LivingEntity#setHealth(float) 的 @ModifyVariable（mixin — 🔴 已搬进扩展 shanhai_add）
+ *                 → 受保护玩家被写 &lt;=0 ⇒ 改成满血
+ *                 ⚠ 只装本体时这两道不存在 ⇒ 本体这条路只剩"事件层 ＋ 每 tick 补血（③ ／ ③″）"，
+ *                 这也是用户 2026-10-18 拍板的口径（免死只做到事件层和 setHealth，不碰 mixin）。
  *   ⑧ 对手桥      ★2026-10-17★ 反射调对手自己的 public static（setHealthDelta / obtainHealthDelta /
  *                 checkEntityDead）＋ 清它 ForgeData 里的锁存计数器 ⇒ 日志 omnimobs_bridge=counter_reset / delta_reset；
  *                 ⚠ 这层依赖对手的类名/方法名，换版本就失效（失效只记一行 unavailable，自动退回值层）

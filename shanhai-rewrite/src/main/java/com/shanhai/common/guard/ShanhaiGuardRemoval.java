@@ -18,8 +18,8 @@ import java.io.PrintStream;
  *
  * <h2>本类回答三个问题（执行体分别在哪）</h2>
  * <pre>
- *   ① 这次 setRemoved(reason) 要不要拦下？        ⇒ 执行体 ShanhaiGuardEntityGuard ／ mixin
- *   ② 抹除阶梯走到第几级了、该播什么？            ⇒ 执行体 ShanhaiPurge
+ *   ① 这次 setRemoved(reason) 要不要拦下？        ⇒ 执行体在扩展里（setRemoved 的 mixin 那一路）
+ *   ② 抹除阶梯走到第几级了、该播什么？            ⇒ 执行体在扩展里（逐级抹除阶梯）
  *   ③ 死亡兜底要还原哪几项？                      ⇒ 执行体 ShanhaiDeathlessRestore
  * </pre>
  *

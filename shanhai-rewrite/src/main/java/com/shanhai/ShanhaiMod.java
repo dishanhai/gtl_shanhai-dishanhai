@@ -18,6 +18,7 @@ import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 import org.slf4j.Logger;
@@ -175,6 +176,33 @@ public class ShanhaiMod {
         LOGGER.info("{} 配方运行期编辑探针已挂上 FORGE 事件总线（默认不开；开关 = 环境变量 {} 或文件 {}）",
                 ShanhaiRecipeEditProbe.PREFIX, ShanhaiRecipeEditProbe.ENV_ENABLE,
                 ShanhaiRecipeEditProbe.FLAG_FILE);
+
+        // 🔴 世界时钟（暂停时间）的装配点（2026-10-17）已【搬进扩展 shanhai_add】：
+        //    指令树 + 网络通道 + 「冻结期间禁止改世界」的事件层，现在由扩展自己的时钟装配点
+        //    （扩展 @Mod 构造器里的 init 那一步）挂完；
+        //    冻结本身由搬过去的那批 *_Clock* mixin 完成。
+        //    🔴 本体这里【不许】再有任何时钟装配调用 —— 只装本体时相关能力应当整体消失，
+        //    而不是留下一个会 NoClassDefFoundError 的入口（拆分设计 §1.4）。
+
+        // 🔴 本体对外那一行「扩展在不在」的自证（设计 §8.4 A4）：
+        //    只装本体时日志里必须是 add_present=false（机器可判），且不许出现任何 add 的类名。
+        //    ⚠️ 时机不能是【本构造器】：mod 构造是按依赖顺序逐个跑的，本体先构造、扩展后构造
+        //    （add 的 mods.toml 声明 ordering="AFTER"），在本构造器里读桥必然是 false —— 那会在
+        //    "装了扩展"时打出假阴性。⇒ 挂 FMLCommonSetupEvent（所有 mod 的构造器都已跑完）。
+        modEventBus.addListener((FMLCommonSetupEvent event) -> LOGGER.info(
+                "[SHANHAI] add_present={}（false = 只装了本体：世界时钟/重力/逐级抹除不存在）",
+                com.shanhai.api.ShanhaiAddHolder.present()));
+
+        // 🔴 只读诊断探针 [SHANHAI-RLPROBE]（2026-10-18）：把「配方进度被清零」的三个静默入口分开。
+        //    它只打日志：全部注入点都是 @Inject(HEAD/RETURN) + require = 0，
+        //    非 cancellable / Redirect / ModifyVariable ⇒ GT 与上游的行为逐字节不变。
+        //    为什么挂在 ServerStartedEvent 而不是本构造器：本工程 2026-09 实测过
+        //    「构造器里反射看到的是【未混入】的类 ⇒ 打出一条假阴性的『探针未挂上』」
+        //    （见 ModuleSetBlockWatch#verifyArmed 的注释）⇒ 自证必须在类被变换之后做。
+        //    开关 = config/shanhai-common.toml 的 [diag] recipe_probe（默认 true）。
+        MinecraftForge.EVENT_BUS.addListener(com.shanhai.common.diag.ShanhaiRecipeProbeBootstrap::onServerStarted);
+        LOGGER.info("{} 配方逻辑只读探针已挂上 FORGE 事件总线（只打日志；启动后 grep 本前缀即可）",
+                com.shanhai.common.diag.RecipeProbe.PREFIX);
 
         LOGGER.info("[SHANHAI] {} 已加载（阶段 1）", MOD_ID);
     }

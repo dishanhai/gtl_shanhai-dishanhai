@@ -148,12 +148,36 @@ public final class GtlAddClientCompat {
     private static final int HIDE_SEEN_CAP = 256;
 
     /**
-     * <b>每台主机的「未成型起始 tick」</b>（{@code machinePos → level.getGameTime()}），用于 restore 去抖。
+     * <b>每台主机的「未成型起始时刻」</b>（{@code machinePos → }{@link #nowMs()}），用于 restore 去抖。
+     *
+     * <p>⚠️ 2026-10-18：值从 {@code level.getGameTime()}（tick）换成了<b>单调墙钟毫秒</b>
+     * —— 理由见 {@link #restoreRingsAt} 的"计时源"一节（暂停时 gameTime 不走，去抖会卡在窗口里）。
      *
      * <p>键只在该主机<b>连续未成型</b>期间存在；重新成型（{@link #hideRingsAt} 被调到的第一件事）
      * 或换维度时清除。{@link #restoreRingsAt} 一旦真的恢复了，也把自己的键清掉（下次从零重新计时）。
      */
     private static final Map<Long, Long> UNFORMED_SINCE = new HashMap<>();
+
+    /**
+     * <b>每台主机的「渲染闸门失守起始时刻」</b>（{@code machinePos → }{@link #nowMs()}），
+     * 用于 {@link #isFormedStable} 给<b>渲染可见性</b>做去抖（2026-10-18，缺陷「环特效忽隐忽现」）。
+     *
+     * <h2>为什么渲染也需要一份去抖（而 restore 那份保护不了它）</h2>
+     * {@code AbstractRingRenderer#render} 的绘制闸门原来是裸的 {@code controller.isFormed()}，
+     * 而 {@code isFormed()} 本身是<b>抖的</b>（结构部件所在区块卸载 ⇒ GTCEu {@code onPartUnload} ⇒
+     * {@code UNLOAD_ERROR} ⇒ 每 4 tick 异步重查；本文件 :91-96 记着实测"12 次成型 / 6 次 restore，
+     * 瞬时窗口最长 3.012 秒"）。原有的 {@link #UNFORMED_SINCE} 去抖只保护<b>方块写回</b>
+     * （restore 要连续未成型 ≥ 阈值才真的写），<b>不保护绘制</b> ⇒ 结构一瞬间报告未成型，
+     * 环特效就<b>消失一帧再回来</b> —— 正是用户说的"渲染特效突然没了，然后突然又有了"。
+     *
+     * <p>本闸门与 restore 用<b>同一份阈值、同一个起点口径</b>（首帧未成型开始计时）⇒
+     * 两者在时间上对齐：环特效消失的那一帧，正是方块被写回来的那一帧（不会出现"环没了但方块还藏着"）。
+     */
+    private static final Map<Long, Long> FORMED_LOST_SINCE = new HashMap<>();
+
+    /** {@link #FORMED_LOST_SINCE} 所属维度（换维度整表清空）。 */
+    @Nullable
+    private static ResourceKey<Level> latchDimension;
 
     /** {@code ring_drift} 体检的<b>扫描</b>限频表（{@code machinePos → 上次扫描的 tick}）。 */
     private static final Map<Long, Long> LAST_DRIFT_TICK = new HashMap<>();
@@ -317,6 +341,8 @@ public final class GtlAddClientCompat {
             LAST_HIDE_SUPPRESSED.clear();
             LAST_HIDE_SEEN.clear();
             LEDGER_INDEX.clear();
+            FORMED_LOST_SINCE.clear();   // 渲染闸门的去抖计时与台账同生同死
+            latchDimension = level.dimension();
             hiddenDimension = level.dimension();
         }
         // 🔴 进入 hide 路径 = 本帧结构是成型的 ⇒ 撤销 restore 去抖的计时（去抖的唯一复位点）。
@@ -587,6 +613,139 @@ public final class GtlAddClientCompat {
         }
     }
 
+    // ================================================================== ⑤ 自愈 / 渲染闸门（2026-10-18）
+
+    /**
+     * 本类所有"去抖/限流"用的时间源：<b>单调墙钟毫秒</b>。
+     *
+     * <p>🔴 为什么不用 {@code level.getGameTime()}：世界时钟暂停时 {@code ClientLevel#tickTime}
+     * 被钉住 ⇒ gameTime 不走 ⇒ 任何按 tick 计数的去抖都可能永久卡在窗口里（见
+     * {@link #restoreRingsAt} 与 {@link #isFormedStable} 的注释）。用 {@code nanoTime} 换算毫秒
+     * 是为了单调性（{@code currentTimeMillis} 会被系统对时往回拨）。
+     */
+    private static long nowMs() {
+        return System.nanoTime() / 1_000_000L;
+    }
+
+    /**
+     * <b>整表补扫一次藏环</b>：台账里凡是"当前还是非空气"的格子，重新写成 AIR。
+     *
+     * <h2>为什么需要它（缺陷 ⑤ 的自愈路径）</h2>
+     * 世界时钟的"世界写入硬网"曾经<b>不看 level 在哪一侧</b>、一律拒绝 {@code Level#setBlock}，
+     * 于是暂停期间客户端<b>藏环</b>的写入也被拦掉。而本类的台账是
+     * <b>先登记快照、后写 AIR</b>（{@code :380-387}）⇒ 被拦的那一轮留下
+     * "台账非空，但方块还是真方块"的状态，下一帧走 {@code :326-331} 的 O(1) 短路
+     * （"已 hide 过、且上一轮扫全了"）⇒ <b>永远不会自己补上</b> ——
+     * 用户看到的就是"环上那一整片实体方块露出来"。
+     *
+     * <p>修好按侧分流之后不会再有新的坏状态，但"已经坏掉的那一局"需要一次补扫才能自愈
+     * ⇒ 世界时钟在<b>每次暂停⇄恢复跳变</b>时调一次本方法（次数极少，成本 = 台账格数）。
+     *
+     * <h2>安全边界</h2>
+     * <ul>
+     *   <li>🔴 <b>只碰客户端</b>：第一行就判 {@code !level.isClientSide()} 直接返回
+     *       （写进服务端世界会落盘毁档，与 {@link #reassertHiddenAt} 同一条红线）；</li>
+     *   <li><b>只读台账、不写台账</b>（快照永不被覆盖，与 A 方案同一不变式）；</li>
+     *   <li>只处理"当前非空气"的格子；本来就是空气的自然跳过（幂等）。</li>
+     * </ul>
+     */
+    public static void reassertAllHidden(Level level) {
+        if (level == null || !level.isClientSide() || HIDDEN.isEmpty()) {
+            return;
+        }
+        int machines = 0;
+        int healed = 0;
+        int scanned = 0;
+        for (Map.Entry<Long, Map<Long, BlockState>> byMachine : HIDDEN.entrySet()) {
+            Map<Long, BlockState> mine = byMachine.getValue();
+            if (mine == null || mine.isEmpty()) {
+                continue;
+            }
+            int machineHealed = 0;
+            for (Long packed : mine.keySet()) {
+                BlockPos pos = BlockPos.of(packed);
+                if (!level.isLoaded(pos)) {
+                    continue;
+                }
+                ++scanned;
+                if (level.getBlockState(pos).isAir()) {
+                    continue;
+                }
+                level.setBlock(pos, Blocks.AIR.defaultBlockState(), FLAGS);
+                ++machineHealed;
+            }
+            if (machineHealed > 0) {
+                ++machines;
+                healed += machineHealed;
+                BlockPos base = BlockPos.of(byMachine.getKey());
+                ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] ring_heal machine=({},{},{}) healed={}",
+                        base.getX(), base.getY(), base.getZ(), machineHealed);
+            }
+        }
+        // 判据行：healed == 0 表示台账与画面一致（健康）；> 0 表示补回来了（原来是坏的）
+        ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] ring_heal_total machines={} healed={} scanned={} ledger={}",
+                machines, healed, scanned, HIDDEN.size());
+    }
+
+    /**
+     * <b>渲染闸门的去抖</b>：把抖动的 {@code isFormed()} 变成"连续失守 ≥ 阈值才算真的没了"。
+     *
+     * <h2>缺陷「环特效忽隐忽现」的根因与修法</h2>
+     * {@code AbstractRingRenderer#render} 的绘制闸门是裸 {@code controller.isFormed()}，
+     * 而它就是抖的（见 {@link #FORMED_LOST_SINCE} 的注释：实测 12 次成型 / 6 次 restore、
+     * 瞬时窗口最长 3.012 秒）⇒ 结构一瞬报告未成型，环特效就消失一帧再回来。
+     * 于是：<b>成型</b> ⇒ 立刻可见（不推迟"第一次出现"）；<b>未成型</b> ⇒ 只有连续撑满
+     * {@code ringRestoreDebounceTicks}（默认 100 tick = 5 秒）才真的不可见 —— 与 restore 完全同步。
+     *
+     * <h2>🔴 计时源 = 单调墙钟 {@link #nowMs()}（<b>不是</b> {@code level.getGameTime()}）</h2>
+     * 2026-10-18 父代理明确要求："去抖别用 {@code getGameTime()}"。理由（实机风险，不是洁癖）：
+     * {@code ClientLevel#tickTime} 被世界时钟<b>钉住</b>时 {@code getGameTime()} 根本不走；万一客户端
+     * 因为任何原因停在"以为还在暂停"的状态，任何用 tick 计数的去抖就<b>永久卡在窗口里</b>
+     * （环要么永远不消失、要么永远不出现），而且日志上看不出是"没到阈值"还是"时钟不走"。
+     * 墙钟是单调的、与 tick/暂停/帧率全都无关 ⇒ 这一类"卡死"从结构上不存在。
+     *
+     * <p>代价（如实写明）：暂停期间<b>真实时间照样在走</b> ⇒ 如果暂停中结构真的失守超过阈值，
+     * 环会在暂停期间消失。这与 {@code restoreRingsAt} 的阈值同源（见那里也换成了墙钟）⇒
+     * "环消失"与"方块写回"仍然发生在同一个窗口 ⇒ 不会出现"环没了、方块还藏着"的洞。
+     *
+     * @param level      客户端 level
+     * @param machinePos 主机 {@code BlockPos#asLong()}
+     * @param formed     本帧 {@code controller.isFormed()} 的原始值（抖的）
+     * @return 本帧应当用来决定"画不画环"的稳定值
+     */
+    public static boolean isFormedStable(Level level, long machinePos, boolean formed) {
+        if (formed) {
+            FORMED_LOST_SINCE.remove(machinePos);   // 重新成型 ⇒ 立刻复位（这条保证"第一次出现不推迟"）
+            return true;
+        }
+        if (level == null) {
+            return false;
+        }
+        if (latchDimension != level.dimension()) {
+            FORMED_LOST_SINCE.clear();
+            latchDimension = level.dimension();
+        }
+        long now = nowMs();
+        Long since = FORMED_LOST_SINCE.get(machinePos);
+        if (since == null) {
+            // 失守的第一帧：仍然按"可见"处理（下一帧起才开始计时），且打一行可判读的日志。
+            FORMED_LOST_SINCE.put(machinePos, now);
+            BlockPos base = BlockPos.of(machinePos);
+            ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] ring_flicker_gate machine=({},{},{}) state=lost at_ms={}（去抖窗口开始）",
+                    base.getX(), base.getY(), base.getZ(), now);
+            return true;
+        }
+        long debounceMs = restoreDebounceTicks() * 50L;
+        if (now - since < debounceMs) {
+            return true;    // 仍在去抖窗口内 ⇒ 继续可见（这一句就是"忽隐忽现"的止血点）
+        }
+        FORMED_LOST_SINCE.remove(machinePos);
+        BlockPos base = BlockPos.of(machinePos);
+        ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] ring_flicker_gate machine=({},{},{}) state=gone at_ms={} elapsed_ms={}（超过阈值，真消失）",
+                base.getX(), base.getY(), base.getZ(), now, now - since);
+        return false;
+    }
+
     /**
      * <b>只读</b>台账体检（任务 B，2026-09-21）。
      *
@@ -637,9 +796,11 @@ public final class GtlAddClientCompat {
      * <p>第一次调用<b>必打心跳行</b>（限频表里还没有这台机器）。
      */
     private static void logLedgerDrift(Level level, long machinePos, Map<Long, BlockState> ledger) {
-        long now = level.getGameTime();
+        // 2026-10-18：连"只读体检"的频率也换成单调墙钟 —— 否则暂停期间这一路会静默，
+        // 而用户正是在"暂停 60 秒盯环"这个窗口里需要它出数（阈值仍按 tick 配置，×50ms 换算）。
+        long now = nowMs();
         Long lastScan = LAST_DRIFT_TICK.get(machinePos);
-        if (lastScan != null && now - lastScan < DRIFT_SCAN_INTERVAL_TICKS) {
+        if (lastScan != null && now - lastScan < DRIFT_SCAN_INTERVAL_TICKS * 50L) {
             return;
         }
         LAST_DRIFT_TICK.put(machinePos, now);
@@ -662,7 +823,7 @@ public final class GtlAddClientCompat {
         final int bz = base.getZ();
         final int ledgerSize = ledger.size();
         final Long lastHeartbeat = LAST_HEARTBEAT_TICK.get(machinePos);
-        final boolean heartbeatDue = lastHeartbeat == null || now - lastHeartbeat >= DRIFT_HEARTBEAT_TICKS;
+        final boolean heartbeatDue = lastHeartbeat == null || now - lastHeartbeat >= DRIFT_HEARTBEAT_TICKS * 50L;
 
         if (notAir > 0) {
             boolean onset = DRIFTING.add(machinePos);   // add 返回 true ⇔ 集合里原本没有它 ⇔ 首次出现
@@ -706,25 +867,29 @@ public final class GtlAddClientCompat {
      * 默认 {@link ShanhaiConfig#DEFAULT_RING_RESTORE_DEBOUNCE_TICKS}（= 100 tick = 5 秒），
      * 远大于实测最长瞬时窗口 3.012 秒。
      *
-     * <h2>计时源：{@code level.getGameTime()}，不是帧数</h2>
+     * <h2>计时源：单调墙钟 {@link #nowMs()}（2026-10-18 由 {@code level.getGameTime()} 换过来）</h2>
      * 本方法由渲染路径<b>逐帧</b>调用。若按帧计数，同一个 3 秒窗口在 60fps 下是 180 "单位"、
      * 在 240fps 下是 720 "单位" —— 阈值会变成"玩家帧率越低越容易触发 restore"，语义完全不可控。
-     * {@code level.getGameTime()} 是<b>客户端等级自己的 tick 计数器</b>（每 tick +1，与帧率无关），
-     * 并且它<b>不需要我们挂任何 tick 订阅</b>（本类没有、也不该有 ticker）。
-     * 附带好处：单机暂停时 {@code gameTime} 停走 ⇒ 暂停不算"连续未成型"，不会被暂停菜单误触发。
+     * 所以<b>不能</b>用帧数。
      *
-     * <p>⚠️ 已知取舍：客户端 tick 与渲染帧不同步，所以真实触发时刻会在阈值后的 <b>1 tick 内</b>抖动；
-     * 对"5 秒去抖"这个量级无影响。
+     * <p>🔴 换成墙钟的原因（父代理 2026-10-18 明确要求）：世界时钟暂停时
+     * {@code ClientLevel#tickTime} 被钉住 ⇒ {@code gameTime} 不走 ⇒ 任何按 tick 计数的去抖
+     * 都可能<b>卡在窗口里</b>（尤其是客户端万一停在"以为还在暂停"的状态 ⇒ 永久卡住）。
+     * 墙钟单调、与 tick/暂停/帧率都无关 ⇒ 这一类卡死结构上不存在。
+     * 阈值仍以 <b>tick 为单位</b>（配置口径不变），换算 {@code ×50 ms} 后比较。
+     *
+     * <p>⚠️ 与之配套：{@link #isFormedStable}（渲染闸门）用<b>同一个</b> {@link #nowMs()} 与同一个阈值
+     * ⇒ "环消失"和"方块写回"落在同一个窗口里，不会出现"环没了、方块还藏着"的洞。
      */
     public static void restoreRingsAt(Level level, long machinePos, Direction frontFacing) {
-        long now = level.getGameTime();
+        long now = nowMs();
         Long since = UNFORMED_SINCE.get(machinePos);
         if (since == null) {
             // 本帧是"未成型"的第一帧（或刚换过维度）⇒ 只开始计时，不动任何方块。
             UNFORMED_SINCE.put(machinePos, now);
             return;
         }
-        if (now - since < restoreDebounceTicks()) {
+        if (now - since < restoreDebounceTicks() * 50L) {
             return; // 还没连续撑够阈值 ⇒ 什么都不做（这才是"去抖"）
         }
         UNFORMED_SINCE.remove(machinePos);   // 本轮未成型已兑现，下次重新计时

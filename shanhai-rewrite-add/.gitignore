@@ -1,0 +1,7 @@
+# 山海：扩展（shanhai_add）—— 与 ../shanhai-rewrite/.gitignore 同一口径：
+# 构建产物、Gradle 缓存、vendored 依赖都不入库（libs/ 那边有 README 清单，这里直接复用它的）。
+.gradle/
+build/
+libs/*
+!libs/README.md
+*.log

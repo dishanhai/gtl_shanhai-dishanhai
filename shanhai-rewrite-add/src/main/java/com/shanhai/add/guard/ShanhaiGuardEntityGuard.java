@@ -1,6 +1,10 @@
-package com.shanhai.common.guard;
+package com.shanhai.add.guard;
 
 import com.shanhai.ShanhaiMod;
+import com.shanhai.common.guard.ShanhaiGuardCallerTrace;
+import com.shanhai.common.guard.ShanhaiGuardCore;
+import com.shanhai.common.guard.ShanhaiGuardEvents;
+import com.shanhai.common.guard.ShanhaiGuardRemoval;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;

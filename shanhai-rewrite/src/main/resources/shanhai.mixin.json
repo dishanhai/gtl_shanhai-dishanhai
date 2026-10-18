@@ -10,10 +10,6 @@
     "ShanhaiGeneratorWirelessEnergyJadeMixin",
     "ShanhaiSetBlockWatchMixin",
     "ShanhaiRecipeTypeGetRecipeMixin",
-    "ShanhaiSetHealthGuardMixin",
-    "ShanhaiLivingEntityDieGuardMixin",
-    "ShanhaiServerPlayerDieGuardMixin",
-    "ShanhaiEntitySetRemovedGuardMixin",
     "ShanhaiItemStackOverrideMixin",
     "ShanhaiItemDescriptionMixin"
   ],

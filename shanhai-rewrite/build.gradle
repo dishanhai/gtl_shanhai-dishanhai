@@ -227,7 +227,25 @@ jar {
                 //       而不是把整合包启动打崩（用户点名的 fail-soft）。
                 //    刻意分成两个文件而不是塞进 shanhai.mixin.json：后者是 required:true，
                 //    混进去就等于「上游一改、整个 mod 起不来」。
-                'MixinConfigs'          : 'shanhai.mixin.json,shanhai.gtladditions.mixin.json',
+                // 🔴 2026-10-18 追加：第五个配置 `shanhai.probe.mixin.json`
+                //    只装「配方进度被清零」那一组【只读诊断探针】（P1..P5，前缀 [SHANHAI-RLPROBE]）。
+                //    ⚠️ 刻意独立成文件、且 `"required": false`：
+                //       ① 探针全部 `require = 0`，注入失败必须静默降级（不许把整合包启动打崩）；
+                //       ② 它挂的是 gtladditions 的 Kotlin 类，上游一改方法名就该"少几行日志"而不是"起不来"；
+                //       ③ 不许塞进 shanhai.mixin.json —— 那个是 required:true，
+                //          混进去就等于「探针挂不上 ⇒ 整个 mod 起不来」。
+                //    开关在 config/shanhai-common.toml 的 [diag] recipe_probe（默认 true）。
+                // 🔴 2026-10-18 拆分（阶段 3a）：以下三份配置**整份搬进扩展 shanhai_add**，
+                //    因此不再出现在本 MANIFEST 里（扩展那份是 shanhai_add.mixin.json /
+                //    shanhai_add.gtlcore.mixin.json / shanhai_add.ae2.mixin.json / shanhai_add.oculus.mixin.json）：
+                //      ① shanhai.gtlcore.mixin.json  —— 冻结 gtlcore GlobalRenderClock（时钟）
+                //      ② shanhai.ae2.mixin.json      —— 暂停期间 AE 终端的进/出拦截（时钟）
+                //      ③ shanhai.oculus.mixin.json   —— 冻结光影 frameTimeCounter（时钟）
+                //    为什么整份搬走而不是本文件里留一份：设计 §2.3「不许让一个 mixin.json 的 package
+                //    指向另一个 jar 里的类」；它们的 mixin 类已随时钟搬进 com.shanhai.add.mixin.*。
+                //    保留的三份都是本体自己的：主配置（required:true）、gtladditions 两台机器的
+                //    自动倍率（required:false）、[SHANHAI-RLPROBE] 只读探针（required:false）。
+                'MixinConfigs'          : 'shanhai.mixin.json,shanhai.gtladditions.mixin.json,shanhai.probe.mixin.json',
         ])
     }
     // The refmap must sit at the JAR ROOT: shanhai.mixin.json references it by

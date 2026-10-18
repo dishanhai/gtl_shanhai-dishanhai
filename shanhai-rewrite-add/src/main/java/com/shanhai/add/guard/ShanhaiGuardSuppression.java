@@ -1,6 +1,7 @@
-package com.shanhai.common.guard;
+package com.shanhai.add.guard;
 
 import com.shanhai.ShanhaiMod;
+import com.shanhai.common.guard.ShanhaiGuardCore;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

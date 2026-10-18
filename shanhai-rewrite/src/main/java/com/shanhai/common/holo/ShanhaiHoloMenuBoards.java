@@ -142,7 +142,7 @@ public final class ShanhaiHoloMenuBoards {
      * <p>用户点单：把它做成「主动触发抹除」的入口，板上名字叫<b>「清除实体」</b>
      * （英文副标题 {@code CLEAR ENTITIES}）。🔴 <b>点一次就直接执行</b>（本轮把"再点一次确认"整个去掉了）：
      * 执行的内容 = 与 {@code /shanhai purge} <b>完全同一段代码</b>
-     * （客户端只发一条命令，服务端跑 {@code ShanhaiPurge#purgeAll}，服务端还会再查一次模块）。
+     * （客户端只发一条命令，服务端跑同一套清除实体 —— 装扩展时走逐级阶梯，没装走 kill @e；服务端还会再查一次模块）。
      * <p>⚠️ 常量名 {@code PURGE_INDEX} / {@code ACTION_REALITY_PURGE} 是历史名（功能码没变、只改了板上的字）。
      */
     public static final int PURGE_INDEX = 0;

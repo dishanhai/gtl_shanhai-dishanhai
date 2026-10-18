@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <h2>限流：每局最多 3 次（两个标签各自记账）</h2>
  * {@code removal_caller} 与 {@code die_caller} 各有一本账（{@link #MAX_HITS_PER_LABEL}），
  * 用 {@link AtomicInteger} 的 CAS 记账 ⇒ 并发调也不会打出第 4 行。
- * 「一局」= 一个服务器实例：{@code ShanhaiPurge#onServerTick} 看到服务器实例变了就调
+ * 「一局」= 一个服务器实例：扩展里的逐级抹除阶梯每 tick 看到服务器实例变了就调
  * {@link #resetAll()}（换世界/重进存档 ⇒ 计数重新给 3 次）。
  * <pre>
  *   🔴 为什么必须先判 {@link #hasQuota(String)} 再抓栈：{@code new Throwable().getStackTrace()} 有实打实的开销，
@@ -48,8 +48,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * </pre>
  *
  * <h2>只在"受保护玩家被拦"时调用</h2>
- * 两个调用点都在<b>判据已经说"拦"之后</b>（{@code ShanhaiGuardEntityGuard#refuseSetRemoved} 的
- * {@code decision.yes} 分支、{@code ShanhaiGuardValueLayer#refuseDie} 的 {@code decision.yes} 分支），
+ * 两个调用点都在<b>判据已经说"拦"之后</b>（{@code setRemoved} 拦截那一路〔执行体已搬进扩展〕的
+ * {@code decision.yes} 分支、{@link ShanhaiGuardValueLayer} 的 {@code refuseDie} 里那个 {@code decision.yes} 分支），
  * ⇒ <b>普通实体的移除/死亡一次都不会抓到栈</b>（规格红线）。
  *
  * <h2>纯 JDK</h2>
@@ -304,11 +304,11 @@ public final class ShanhaiGuardCallerTrace {
         final StackTraceElement[] allKnown = {
                 frame("java.lang.Thread", "getStackTrace", 1600),
                 frame("com.shanhai.common.guard.ShanhaiGuardCallerTrace", "capture", 150),
-                frame("com.shanhai.common.guard.ShanhaiGuardEntityGuard", "refuseSetRemoved", 77),
+                frame("com.shanhai.common.guard.ShanhaiGuardValueLayer", "refuseDie", 621),
                 frame("net.minecraft.world.entity.Entity", "setRemoved", 545),
                 frame("net.minecraftforge.eventbus.EventBus", "post", 120),
                 frame("org.spongepowered.asm.mixin.injection.invoke", "inject", 10),
-                frame("com.shanhai.mixin.ShanhaiEntitySetRemovedGuardMixin", "shanhai$refuseSetRemoved", 62)};
+                frame("com.shanhai.mixin.ShanhaiSetBlockWatchMixin", "shanhai$watchSetBlockState", 87)};
         expect("①过滤", "全是已知前缀 ⇒ 一个外部帧都不剩", true,
                 externalFrameTexts(allKnown).isEmpty(),
                 "剩 " + externalFrameTexts(allKnown).size() + " 帧");
@@ -320,7 +320,7 @@ public final class ShanhaiGuardCallerTrace {
 
         // ── ② at= 就是第一个外部帧，frames= 按顺序最多 3 个 ──
         final StackTraceElement[] withBoss = {
-                frame("com.shanhai.common.guard.ShanhaiGuardEntityGuard", "refuseSetRemoved", 77),
+                frame("com.shanhai.common.guard.ShanhaiGuardValueLayer", "refuseDie", 621),
                 frame("net.minecraft.world.entity.Entity", "setRemoved", 545),
                 frame("com.example.mod.Boss", "onTick", 123),
                 frame("com.example.mod.Boss$1", "run", 45),

@@ -11,7 +11,17 @@ var path = require('path')
 //    · 仓库【内】的路径 ⇒ 按【脚本自身位置】(__dirname) 推（不用 process.cwd()）；
 //    · 仓库【外】的路径（游戏实例）⇒ 从环境变量读；缺了就【响亮抛错并退出】。
 // ═══════════════════════════════════════════════════════════════════════════════
-var REPO = path.join(__dirname, '..', '..')          // kubejs\_generators → 仓库根
+// 仓库根 = 从本脚本逐级上溯，第一个含 .git 的目录（2026-10-18：recipe-convert\ 等搬进 temp\，别再靠相对深度数层数）
+function findRepoRoot(start) {
+    var d = start
+    for (;;) {
+        if (fs.existsSync(path.join(d, '.git'))) return d
+        var up = path.dirname(d)
+        if (up === d) throw new Error('findRepoRoot: 未找到含 .git 的仓库根，起始路径 = ' + start)
+        d = up
+    }
+}
+var REPO = findRepoRoot(__dirname)                   // 上溯到仓库根
 function envPath(name, what, example) {
     var v = process.env[name]
     if (v === undefined || String(v).trim() === '') {
@@ -82,7 +92,7 @@ function scan(name, file) {
     return hits.length
 }
 
-var B = path.join(REPO, 'recipe-convert') + path.sep
+var B = path.join(REPO, 'temp', 'recipe-convert') + path.sep
 var V = path.join(INSTANCE, 'kubejs', 'server_scripts') + path.sep
 var n1 = scan('NEW DRAFT', B + 'shanhai_pf_recipes.NEW.js')
 var n2 = scan('OLD LIVE FILE', V + 'shanhai_pf_recipes.js')

@@ -2,7 +2,12 @@ package com.shanhai.common.guard;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.shanhai.ShanhaiMod;
+import com.shanhai.api.PurgeRoute;
+import com.shanhai.api.ShanhaiAdd;
+import com.shanhai.api.ShanhaiAddHolder;
 import com.shanhai.common.holo.ShanhaiHoloMenuNetwork;
+
+import java.util.function.IntSupplier;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -18,17 +23,25 @@ import net.minecraftforge.fml.common.Mod;
  *
  * <h2>命令树</h2>
  * <pre>
- *   /shanhai purge                      🔴 主动触发：抹除【全服所有实体】（跳过所有玩家）
+ *   /shanhai purge                      🔴 主动触发：清除【全服所有实体】（跳过所有玩家）
+ *                                       · 装了扩展且它肯接  ⇒ 扩展的逐级版（日志 purge_via=add）
+ *                                       · 否则（没装/未实现/抛异常）⇒ 本体 kill @e（日志 purge_via=simple）
  *   /shanhai purge count                只数不抹（安全读数；用来先看"范围内 X 只"）
- *   /shanhai suppress                   看压制表（= suppress list）
- *   /shanhai suppress list              逐条列出"现在还在压制窗口里的类型 + 剩余秒数"
- *   /shanhai suppress clear             清空压制表（立刻停止周期抹除）
+ *   /shanhai purge selfcheck            自检（本体这一半：拦/放行两条值 ＋ 通道 ＋ 隔离阈值 ＋ 四个开关）
  *   /shanhai guard                      看开关现在什么状态
  *   /shanhai guard ai on|off            AI 层（默认关）
  *   /shanhai guard attack on|off        攻击端（默认开）
  *   /shanhai guard death on|off         死而无损（默认开）
  *   /shanhai guard knockback on|off     🆕 反击退 / 反挤压（默认开；关掉后完全不动玩家）
  * </pre>
+ *
+ * <h2>🔴 本类只保留【本体那一半】（阶段 3b 拆命令）</h2>
+ * <pre>
+ *   留在这里：purge ／ purge count ／ purge selfcheck ／ guard ai|attack|death|knockback on|off
+ *   搬去扩展：suppress list|clear（压制表整块搬走了）＋ 逐级版的 /shanhai_add purge
+ * </pre>
+ * 🔴 本体<b>不许</b>注册 {@code /shanhai_add} 的任何东西；扩展<b>不许</b>往 {@code /shanhai} 上挂任何东西
+ * —— 否则"有没有装扩展"在命令树上分不出来。
  *
  * <h2>🔴 门槛（与既有命令同口径）</h2>
  * <b>玩家</b>执行时必须身上带着「创始现实修改模块」（{@link ShanhaiHoloMenuNetwork#moduleInInventory} ——
@@ -48,8 +61,6 @@ public final class ShanhaiGuardCommand {
     public static final String COMMAND_PURGE = "purge";
     /** 三个开关那个子命令名。 */
     public static final String COMMAND_GUARD = "guard";
-    /** 🆕 压制表那个子命令名。 */
-    public static final String COMMAND_SUPPRESS = "suppress";
 
     private ShanhaiGuardCommand() {}
 
@@ -59,16 +70,7 @@ public final class ShanhaiGuardCommand {
                 .executes(ctx -> purge(ctx, false))
                 .then(Commands.literal("count").executes(ctx -> purge(ctx, true)))
                 .then(Commands.literal("selfcheck").executes(ShanhaiGuardCommand::selfcheck))
-                .then(guardBranch())
-                .then(suppressBranch());
-    }
-
-    /** 🆕 {@code /shanhai suppress …}（门与 purge/guard 同一条：玩家身上要带模块）。 */
-    private static LiteralArgumentBuilder<CommandSourceStack> suppressBranch() {
-        return Commands.literal(COMMAND_SUPPRESS)
-                .executes(ShanhaiGuardCommand::suppressList)
-                .then(Commands.literal("list").executes(ShanhaiGuardCommand::suppressList))
-                .then(Commands.literal("clear").executes(ShanhaiGuardCommand::suppressClear));
+                .then(guardBranch());
     }
 
     /** {@code /shanhai guard …}。 */
@@ -106,8 +108,8 @@ public final class ShanhaiGuardCommand {
                 kids.append(c.getName()).append(' ');
             }
         }
-        ShanhaiMod.LOGGER.info("{} command_registered /shanhai {} + /shanhai {} + /shanhai {} ; shanhai_children=[{}]",
-                PREFIX, COMMAND_PURGE, COMMAND_GUARD, COMMAND_SUPPRESS, kids.toString().trim());
+        ShanhaiMod.LOGGER.info("{} command_registered /shanhai {} + /shanhai {} ; shanhai_children=[{}]",
+                PREFIX, COMMAND_PURGE, COMMAND_GUARD, kids.toString().trim());
     }
 
     // ═══════════════════════════════ 门槛 ═══════════════════════════════
@@ -132,6 +134,18 @@ public final class ShanhaiGuardCommand {
 
     // ═══════════════════════════════ /shanhai purge ═══════════════════════════════
 
+    /**
+     * {@code /shanhai purge} 与 {@code /shanhai purge count}（<b>两条路，一个入口</b>）。
+     *
+     * <h2>手段选择（设计 §3.4）</h2>
+     * <pre>
+     *   装了扩展 ＆ 它返回 &gt;= 0   ⇒ 用扩展的逐级版（日志 purge_via=add，回显里 channels={add=N}）
+     *   没装 ／ 未实现(-1) ／ 抛异常 ⇒ 本体 ShanhaiPurgeSimple：逐维度 kill @e（日志 purge_via=simple）
+     *   只数不抹(count)            ⇒ 一律本体只读遍历（扩展接口这一版没有 dryRun 参数 ⇒ 不调它，免得真删）
+     * </pre>
+     * 🔴 命令名、门槛（模块 ／ 攻击端开关）、回显格式<b>一个字都不许变</b>：只换数量来源。
+     * 判定本身在 {@link PurgeRoute#ask}（纯 JDK，可离线值表验证），这里只负责取值与执行。
+     */
     private static int purge(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx, boolean dryRun) {
         final CommandSourceStack source = ctx.getSource();
         final String denied = gate(source);
@@ -147,8 +161,24 @@ public final class ShanhaiGuardCommand {
         }
         final MinecraftServer server = source.getServer();
         final ServerPlayer owner = source.getPlayer();
-        ShanhaiPurge.noteOwner(owner);   // 左下角播报给执行者本人
-        final ShanhaiPurge.Result r = ShanhaiPurge.purgeAll(server, owner, dryRun);
+        // ① 先问扩展（唯一的跨 mod 调用点；阶段 2 它返回 -1 = 未实现）
+        //    取值、吞异常、四条分支的判定全在 PurgeRoute（纯 JDK，可离线值表验证）
+        final ShanhaiAdd bridge = ShanhaiAddHolder.optional();
+        final IntSupplier callAdd = bridge == null ? null : () -> bridge.purgeAll(owner);
+        final PurgeRoute.Decision route = PurgeRoute.ask(bridge != null, dryRun, callAdd);
+        if (route.error != null) {
+            // 扩展坏了不许把本体这条命令弄失败（"装了扩展反而更弱"是最不该出现的行为）
+            ShanhaiMod.LOGGER.warn(PREFIX + "purge_via=add status=threw ⇒ 回退 kill@e（扩展异常，命令照常成功）："
+                    + route.error);
+        }
+        // ② 按判定执行（两条路给出的读数形状完全一样 ⇒ 回显那段一个字都不用改）
+        final ShanhaiPurgeSimple.Result r = route.usesAdd()
+                ? ShanhaiPurgeSimple.fromBridge(server, route.removed)
+                : ShanhaiPurgeSimple.killAll(server, owner, dryRun);
+        ShanhaiMod.LOGGER.info("{} {} bridge_version={} levels={} removed={} skipped_players={} dry_run={}",
+                PREFIX, route.logLine(), bridgeVersion(bridge),
+                r.levels, r.removed, r.skippedPlayers, dryRun);
+        // ③ 回显（格式与拆分前逐字一致：只换了数字的来源）
         final String line = (dryRun ? "§b[勘数] §7范围内 §f" : "§a[已执行] §7已抹除 §f")
                 + (dryRun ? r.scanned : r.removed)
                 + (dryRun ? " §7只（未抹）" : " §7只")
@@ -159,7 +189,30 @@ public final class ShanhaiGuardCommand {
         return r.removed;
     }
 
-    /** {@code /shanhai purge selfcheck} —— 当场跑一遍纯判据自检（控制台可跑）。 */
+    /**
+     * 扩展的版本号（只进日志）。
+     *
+     * <p>拿不到（没装 ／ 扩展实现里抛了）就 {@code "-"} / {@code "?"} —— <b>取不到版本号不许影响命令</b>。
+     */
+    private static String bridgeVersion(ShanhaiAdd bridge) {
+        if (bridge == null) {
+            return "-";
+        }
+        try {
+            final String v = bridge.modVersion();
+            return v == null ? "?" : v;
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /**
+     * {@code /shanhai purge selfcheck} —— 当场跑一遍纯判据自检（控制台可跑）。
+     *
+     * <p>🔴 只跑<b>本体这一半</b>：判据（拦 ／ 放行两条值）、通道表、隔离阈值、四个开关、AI 层、死而无损。
+     * 压制表那一行（{@code suppress …}）与逐级阶梯的读数已经搬进扩展，走扩展自己的自检命令
+     * —— 本体这里读不到它们（本体不许引用扩展的任何类）。
+     */
     private static int selfcheck(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
         final ShanhaiGuardCore.Decision ok = ShanhaiGuardRemoval.refuseRemoval(
                 true, true, ShanhaiGuardRemoval.R_DISCARDED, false, false);
@@ -168,45 +221,11 @@ public final class ShanhaiGuardCommand {
         final String line = "guard_selftest 拦(DISCARDED)=" + ok.yes + " 放行(CHANGED_DIMENSION)=" + (!allow.yes)
                 + " 通道=" + String.join("/", ShanhaiGuardRemoval.purgeChannels())
                 + " 隔离阈值=" + ShanhaiGuardRemoval.ISOLATE_AFTER_REASSERTS
-                + " ／ " + ShanhaiGuardSuppression.statusLine()
                 + " ／ " + ShanhaiGuardSwitches.statusLine()
                 + " ／ " + ShanhaiAiLayer.statusLine()
                 + " ／ " + ShanhaiDeathlessRestore.statusLine();
         ctx.getSource().sendSuccess(() -> Component.literal("§a" + line), false);
         return ok.yes && !allow.yes ? 1 : 0;
-    }
-
-    // ═══════════════════════════════ 🆕 /shanhai suppress ═══════════════════════════════
-
-    /** {@code /shanhai suppress [list]} —— 逐条列出现在还在压制窗口里的类型。 */
-    private static int suppressList(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
-        final CommandSourceStack source = ctx.getSource();
-        final String denied = gate(source);
-        if (denied != null) {
-            source.sendFailure(Component.literal(denied));
-            return 0;
-        }
-        final java.util.List<String> lines = ShanhaiGuardSuppression.listLines(System.currentTimeMillis());
-        for (final String line : lines) {
-            source.sendSuccess(() -> Component.literal(line), false);
-        }
-        return 1;
-    }
-
-    /** {@code /shanhai suppress clear} —— 清空压制表（立刻停止周期抹除）。 */
-    private static int suppressClear(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
-        final CommandSourceStack source = ctx.getSource();
-        final String denied = gate(source);
-        if (denied != null) {
-            source.sendFailure(Component.literal(denied));
-            return 0;
-        }
-        final int n = ShanhaiGuardSuppression.clear();
-        final String line = "§a已清空压制表：§f" + n + " §7项（这些类型不再被每 "
-                + ShanhaiGuardSuppressWindow.SCAN_EVERY_TICKS + " tick 复查抹除）";
-        source.sendSuccess(() -> Component.literal(line), true);
-        ShanhaiMod.LOGGER.info("{} suppress_cleared items={}", PREFIX, n);
-        return n;
     }
 
     // ═══════════════════════════════ /shanhai guard ═══════════════════════════════

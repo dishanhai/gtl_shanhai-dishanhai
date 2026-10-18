@@ -332,7 +332,8 @@ public final class ShanhaiHoloMenuInput {
             //    ⚠️ 空手点击同样能触发（与别的板子同一条 decide 真值表：不拿模块才走到这里，
             //       拿着模块的那一拍在上面被 ACT_TOGGLE_MENU 截走了）。
             //    执行内容 = 与 /shanhai purge 完全同一段代码：客户端只发那条命令，
-            //    服务端 onCommandRequest 会再查一次"身上有没有模块"，然后跑同一个 ShanhaiPurge.purgeAll。
+            //    服务端 onCommandRequest 会再查一次"身上有没有模块"，然后跑同一套清除实体
+            //    （装了扩展时由本体委托给扩展的逐级阶梯，见 api\ShanhaiAdd#purgeAll）。
             //    🔴 输入侧只留这一条日志（规格点名）：holo_purge_execute board=0 idx=0 player=… cmd=shanhai purge
             ShanhaiMod.LOGGER.info("{} holo_purge_execute board={} idx={} player={} cmd={}",
                     PREFIX, boardIndex, boardIndex, lp.getGameProfile().getName(), "shanhai purge");

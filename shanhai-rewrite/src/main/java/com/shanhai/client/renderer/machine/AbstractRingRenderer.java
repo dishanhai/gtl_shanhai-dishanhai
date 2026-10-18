@@ -22,6 +22,7 @@ import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRender
 
 // 🔴 gtladditions 的引用经【客户端侧唯一网关】转手：本文件不出现 com.gtladd 包名。
 //    （旋转数学 RotatedRenderPosition 是本包内的本地实现，见该类注释的取证）
+import com.shanhai.api.ShanhaiClockHook;
 import com.shanhai.client.compat.GtlAddClientCompat;
 
 import org.joml.Quaternionf;
@@ -95,8 +96,16 @@ public abstract class AbstractRingRenderer extends WorkableCasingMachineRenderer
         //    要求"连续未成型 ≥ shanhai-common.toml 的 ringRestoreDebounceTicks（默认 100 tick = 5 秒）"
         //    才执行。本调用点仍然每帧调用（O(1)：只是查表 + 比较 tick），去抖状态与台账一起按主机存在网关里。
         var clientLevel = Minecraft.getInstance().level;
+        // 🔴 2026-10-18（缺陷「环特效忽隐忽现」）：绘制闸门改成"去抖后的成型态"。
+        //    controller.isFormed() 本身是抖的（结构部件区块卸载 ⇒ onPartUnload ⇒ UNLOAD_ERROR ⇒
+        //    每 4 tick 异步重查；上方注释记着实测 12 次成型 / 6 次 restore、瞬时窗口最长 3.012 秒），
+        //    原样拿它当绘制闸门 ⇒ 一瞬未成型 = 环特效消失一帧再回来 = 用户说的"突然没了，然后又有了"。
+        //    isFormedStable 的阈值与 restore 去抖同一个（默认 100 tick），计时源是
+        //    level.getGameTime()（暂停时它会停走 ⇒ 暂停期间环不会"计时到点消失"）。
+        boolean formedStable = controller.isFormed();
         if (clientLevel instanceof ClientLevel) {
             long posLong = blockEntity.getBlockPos().asLong();
+            formedStable = GtlAddClientCompat.isFormedStable(clientLevel, posLong, formedStable);
             if (controller.isFormed()) {
                 GtlAddClientCompat.hideRingsAt(clientLevel, posLong, facing);
             } else {
@@ -105,16 +114,24 @@ public abstract class AbstractRingRenderer extends WorkableCasingMachineRenderer
             }
         }
 
-        if (!controller.isFormed()) return;
+        if (!formedStable) return;
 
-        float smoothTick = getSmoothTick(meta, partialTick);
+        // ④ 暂停期间冻结"连续渲染时钟"（缺陷「机器动画还在动」）。
+        //    第一道在扩展（shanhai_add）的 gtlcore GlobalRenderClock mixin 上；这里是第二道：
+        //    万一那条 mixin 因为 gtlcore 换版本静默失效，我们的机器环仍然冻得住。
+        //    🔴 2026-10-18 拆分：时钟整块搬进扩展后，本体不再 import 它的类 ——
+        //    这里只问本体自己的接缝 ShanhaiClockHook（没装扩展 ⇒ 原值透传，等价"时钟恒 LIVE"）。
+        //    ⚠️ 这不是"全局钉 partialTick"——它只影响我们自己的环/恒星动画，玩家相机一点没碰。
+        float smoothTick = ShanhaiClockHook.smoothTick(getSmoothTick(meta, partialTick));
         boolean isWorking = smoothTick > 0;
 
         // 轨道环
         renderAllRings(getRingBuffers(meta), facing, smoothTick, isWorking, poseStack);
 
-        // 特殊效果（由子类自行处理 centerPos 定位）
-        renderSpecialEffects(meta, blockEntity, smoothTick, isWorking, facing, partialTick, poseStack, buffer);
+        // 特殊效果（由子类自行处理 centerPos 定位）。
+        // partialTick 在这里同样只被"我们自己的特效"消费 ⇒ 暂停时局部传 0（更窄的口子，不动全局 α）。
+        float effectPartialTick = ShanhaiClockHook.partialTick(partialTick);
+        renderSpecialEffects(meta, blockEntity, smoothTick, isWorking, facing, effectPartialTick, poseStack, buffer);
     }
 
     // ========== 轨道环渲染（共享） ==========

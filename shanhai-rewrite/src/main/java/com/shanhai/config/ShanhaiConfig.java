@@ -145,6 +145,29 @@ public final class ShanhaiConfig {
         /** 🆕 反击退左下角播报（默认<b>关</b> —— 用户口径「默认不播，避免刷屏」）。 */
         public ForgeConfigSpec.BooleanValue guardKnockbackBroadcast;
 
+        // 🔴 2026-10-18 mod 拆分：原「[gravity] multiplier」整节已【搬进扩展 shanhai_add】。
+        //    现址 = 扩展（shanhai_add）的 ShanhaiAddConfig 的 [gravity] multiplier
+        //        （文件 config/shanhai_add-common.toml；[gravity] 节名与 multiplier 键名都没变）。
+        //    为什么搬：重力调制按拆分口径整块归扩展（设计 §1.1 / §4）；本体只装本体时不该有这一节。
+        //    ⚠️ 旧的 config/shanhai-common.toml 里若还有 [gravity]，扩展启动时会做一次性迁移
+        //    （值不是 1.0 时搬到新文件；本体这份不再读它）。
+
+        // ═══════════ 🆕 2026-10-18「只读诊断探针」的总开关（COMMON） ═══════════
+        //
+        // 用户报：伪神之锻炉（GTAdditions）与我们自己的模块都会「配方进度清零、从头再跑」。
+        // 上游有三个【完全静默】的清零入口，日志上分不开是谁干的：
+        //   ① RecipeLogic#interruptRecipe()  ⇒ status=IDLE, progress=0, duration=0
+        //   ② RecipeLogic#doDamping()       ⇒ 进度回退（缺电 / 无线电网输入失败）
+        //   ③ 「先扣料、后判产出」的空窗     ⇒ 料没了、lastRecipe=null、机器空转
+        // ⇒ 加一组【只打日志、不改任何行为】的探针 [SHANHAI-RLPROBE]（P1..P5）把它们分开。
+        //
+        // 🔴 默认 true：这一轮就是要抓现场；关掉它 = 那组探针一行都不打（连 armed 自证行也没有）。
+        // 为什么进 COMMON：清零发生在【服务端】的 tick 里（RecipeLogic.serverTick / 上游的闸门），
+        //   专用服务端也要读同一个值 ⇒ 与上面那几组同源（同一个 spec、同一个 save()）。
+
+        /** 🆕 配方逻辑只读探针总开关（默认<b>开</b>）。 */
+        public ForgeConfigSpec.BooleanValue recipeProbe;
+
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("primordial_omega_engine");
             primordialSphereStyle = builder
@@ -227,6 +250,31 @@ public final class ShanhaiConfig {
                             "打开后仍然是「每秒最多一行」（沿用守卫那套同类合并口径），且只发给受保护玩家本人",
                             "⚠️ 本项【不会】把消息发到聊天栏（聊天栏那一路刻意不扩：聊天栏那条路只在拦到事情时才说话）")
                     .define("knockback_broadcast", false);
+            builder.pop();
+
+            // ============================================================ 🆕 2026-10-18
+            //   [gravity] —— 已整节搬进扩展（见 ConfigValues 里那条说明），本体不再定义。
+
+            // ============================================================ 🆕 2026-10-18
+            //   [diag] —— 只读诊断探针的总开关。
+            //   ⚠️ 整节【追加在末尾】（没有把任何既有项挪位置）；默认 true = 本轮就是要抓现场。
+            builder.push("diag");
+            recipeProbe = builder
+                    .comment("配方逻辑只读探针 [SHANHAI-RLPROBE] 的总开关（默认 true = 开）",
+                            "它只打日志、不改任何行为：全部注入点都是 @Inject(...HEAD/RETURN)，require = 0，",
+                            "  非 cancellable、非 Redirect、非 ModifyVariable ⇒ 关掉/开开，机器的行为逐字节一致",
+                            "作用 = 把「配方进度被清零」的三个静默入口分开：",
+                            "  ① interruptRecipe()（status=IDLE, progress=0, duration=0）",
+                            "  ② doDamping()（进度回退：缺电 / 无线电网输入失败）",
+                            "  ③ 「先扣料、后判产出」的空窗（料没了、lastRecipe=null、机器空转）",
+                            "启动时会在日志里打两行自证：",
+                            "  [SHANHAI-RLPROBE] config …   = 本项当前值（开没开可判）",
+                            "  [SHANHAI-RLPROBE] armed P1=true … = 混入到底挂上了没有（没数据 vs 没挂上可分开）",
+                            "限流：同一台机器同一类事件 2 秒最多 1 行（行尾 folded=N），每 60 秒一行 summary",
+                            "⚠️ 关掉后那四类事件行一行都不打，但启动时【仍然】打 config/armed 两行自证",
+                            "   （刻意如此：那两行是「这一轮到底开没开、探针到底挂没挂」的唯一机器证据）",
+                            "改完需要重启客户端/服务端才生效")
+                    .define("recipe_probe", true);
             builder.pop();
         }
 

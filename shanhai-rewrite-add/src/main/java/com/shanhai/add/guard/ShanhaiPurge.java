@@ -1,6 +1,12 @@
-package com.shanhai.common.guard;
+package com.shanhai.add.guard;
 
 import com.shanhai.ShanhaiMod;
+import com.shanhai.add.ShanhaiAdd;
+import com.shanhai.common.guard.ShanhaiGuardCallerTrace;
+import com.shanhai.common.guard.ShanhaiGuardCore;
+import com.shanhai.common.guard.ShanhaiGuardEvents;
+import com.shanhai.common.guard.ShanhaiGuardRemoval;
+import com.shanhai.common.guard.ShanhaiGuardSwitches;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -74,7 +80,7 @@ import net.minecraftforge.fml.common.Mod;
  *   多只      ⇒ 已抹除 &lt;名字&gt; 等 N 只
  * </pre>
  */
-@Mod.EventBusSubscriber(modid = ShanhaiMod.MOD_ID)
+@Mod.EventBusSubscriber(modid = ShanhaiAdd.MOD_ID)
 public final class ShanhaiPurge {
 
     private ShanhaiPurge() {}
