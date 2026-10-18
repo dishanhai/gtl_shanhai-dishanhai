@@ -14,11 +14,17 @@
 
 ## 安装
 
+
 1. 打开 [发布页](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases)，下载对应版本的完整包。
+- [Google网盘，你可能需要VPN](https://drive.google.com/open?id=1ltSQVhW7aIT79nOHMv7Jhjg0AAnquYE6&usp=drive_fs)
+- [123网盘，适合无VPN玩家](https://1828543941.share.123pan.cn/123pan/1cwljv-9ZYmd)
 2. 按包内说明放进 GTL 整合包。
 3. 进游戏后看更新公告。需要查机器和配方时，用指南书「山海的神人私货引索」。
 
 ---
+
+## 赞助
+- [爱发电](https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link)
 
 ## 依赖
 
