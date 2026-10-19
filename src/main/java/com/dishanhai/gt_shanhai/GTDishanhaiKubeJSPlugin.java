@@ -26,6 +26,7 @@ public class GTDishanhaiKubeJSPlugin extends KubeJSPlugin {
         filter.allow("com.dishanhai.gt_shanhai.api.TooltipEffectAPI");
         filter.allow("com.dishanhai.gt_shanhai.api.TooltipEffectRegistry");
         filter.allow("com.dishanhai.gt_shanhai.api.TooltipEffectLine");
+        filter.allow("com.dishanhai.gt_shanhai.api.DShanhaiAttributionAPI");
     }
 
     @Override
@@ -37,6 +38,7 @@ public class GTDishanhaiKubeJSPlugin extends KubeJSPlugin {
         event.add("TooltipEffectAPI", TooltipEffectAPI.class);
         event.add("DShanhaiItemTooltipAPI", DShanhaiItemTooltipAPI.class);
         event.add("DShanhaiFluidTooltipAPI", DShanhaiFluidTooltipAPI.class);
+        event.add("DShanhaiAttributionAPI", DShanhaiAttributionAPI.class);
         event.add("DShanhaiNBTAPI", DShanhaiNBTAPI.class);
         event.add("NBTBuilder", NBTBuilder.class);
         event.add("DShanhaiRecipeRegistry", DShanhaiRecipeRegistry.class);

@@ -1,0 +1,184 @@
+{
+  "data": {
+    "euTier": 12
+  },
+  "duration": 80,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 134217728
+      }
+    ]
+  },
+  "type": "gtceu:fragment_world_collection",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:world_fragments_creation"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:circuit",
+          "configuration": 1
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 64,
+          "ingredient": {
+            "item": "kubejs:eternity_catalyst"
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 100,
+          "value": [
+            {
+              "fluid": "kubejs:gelid_cryotheum"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:world_fragments_creation"
+          }
+        },
+        "chance": 50
+      },
+      {
+        "tierChanceBoost": 5,
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtlcore:mining_crystal"
+          }
+        },
+        "chance": 4000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtlcore:treasures_crystal"
+          }
+        },
+        "chance": 4000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtlcore:miracle_crystal"
+          }
+        },
+        "chance": 1000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_magmatter_dust"
+          }
+        },
+        "chance": 300
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_magnetohydrodynamicallyconstrainedstarmatter_dust"
+          }
+        },
+        "chance": 200
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_eternity_dust"
+          }
+        },
+        "chance": 300
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_cosmicneutronium_dust"
+          }
+        },
+        "chance": 500
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_cosmic_dust"
+          }
+        },
+        "chance": 300
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 16000,
+          "value": [
+            {
+              "fluid": "gtceu:spacetime"
+            }
+          ]
+        },
+        "chance": 5000
+      },
+      {
+        "content": {
+          "amount": 16000,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        },
+        "chance": 5000
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gtceu:fragment_world_collection/world_creation_1",
+      "defaultEnabled": true
+    }
+  ]
+}

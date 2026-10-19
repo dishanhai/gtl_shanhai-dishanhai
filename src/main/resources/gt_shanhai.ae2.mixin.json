@@ -54,7 +54,6 @@
     "AeTerminalRepoFavoritesMixin",
     "AeTerminalFavoritesScreenMixin",
     "AeTerminalFavoritesScreenAccessor",
-    "EncodedPatternByproductTooltipMixin",
-    "PatternEncodingByproductScreenMixin"
+    "EncodedPatternByproductTooltipMixin"
   ]
 }

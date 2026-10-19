@@ -396,6 +396,15 @@ public class DShanhaiItemTooltipAPI {
         return ENTRIES.keySet().toArray(new String[0]);
     }
 
+    /** 该物品是否注册过山海 tooltip 内容（简单行 / 按键行任一命中） */
+    public static boolean hasTooltip(String itemId) {
+        if (itemId == null || itemId.isEmpty()) return false;
+        List<String> lines = ENTRIES.get(itemId);
+        if (lines != null && !lines.isEmpty()) return true;
+        List<KeyTooltipEntry> keyEntries = KEY_ENTRIES.get(itemId);
+        return keyEntries != null && !keyEntries.isEmpty();
+    }
+
     // ====== 事件处理 ======
 
     @SubscribeEvent

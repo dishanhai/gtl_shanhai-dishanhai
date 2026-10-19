@@ -199,6 +199,7 @@ public class GTDishanhaiMod {
         // 注册 tooltip 事件（仅客户端有效 — DistExecutor 防止服务端加载客户端类）
         DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
             com.dishanhai.gt_shanhai.api.DShanhaiItemTooltipAPI.init();
+            com.dishanhai.gt_shanhai.api.DShanhaiAttributionAPI.init();
             com.dishanhai.gt_shanhai.common.misc.HaloEndTooltipHandler.init();
             com.dishanhai.gt_shanhai.common.misc.TooltipEffectHandler.init();
             com.dishanhai.gt_shanhai.common.misc.SuperDiskArrayTooltipHandler.init();
