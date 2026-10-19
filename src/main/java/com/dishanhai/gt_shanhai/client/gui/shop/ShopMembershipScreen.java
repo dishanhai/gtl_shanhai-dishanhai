@@ -44,12 +44,14 @@ public class ShopMembershipScreen extends ScaledScreen {
     private static final int BACK_W = 60;
     private static final int TAB_W = 72;
     private static final int TIER_ROW_H = 36;
-    private static final long POP_ANIM_MS = 150L;
+    private static final long POP_ANIM_MS = GuiRenderUtil.MOTION_MS;
     private static final long BANK_REFRESH_TICKS = 40L;
 
     private final ShopScreen parent;
     private int left, top, panelWidth, panelHeight;
     private int page = PAGE_MEMBER;
+    private long pageSwitchAtMs;
+    private int pageSlideDir = 1;
     private long amount = 10000L;
     private AnimatableEditBox amountBox;
 
@@ -137,6 +139,17 @@ public class ShopMembershipScreen extends ScaledScreen {
         boolean bank = page == PAGE_BANK;
         amountBox.setVisible(bank);
         amountBox.active = bank;
+        amountBox.setAnim(() -> GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS),
+                left + panelWidth / 2f, top + panelHeight / 2f);
+        amountBox.setSlideX(() -> GuiRenderUtil.slideOffsetX(pageSlideDir,
+                GuiRenderUtil.popAnimProgress(pageSwitchAtMs, POP_ANIM_MS)));
+    }
+
+    private void setPage(int next) {
+        if (next == page) return;
+        pageSlideDir = next > page ? 1 : -1;
+        page = next;
+        pageSwitchAtMs = System.currentTimeMillis();
     }
 
     private void renderPanel(GuiGraphics g, int mx, int my) {
@@ -153,8 +166,18 @@ public class ShopMembershipScreen extends ScaledScreen {
         drawButton(g, backBtnX(), top + 4, BACK_W, TOP_BAR_H, "§e← 返回", mx, my);
 
         maybeRequestBankQuery();
-        if (page == PAGE_MEMBER) renderMember(g, mx, my);
-        else renderBank(g, mx, my);
+        float pageT = GuiRenderUtil.popAnimProgress(pageSwitchAtMs, POP_ANIM_MS);
+        boolean sliding = pageT < 1f;
+        if (sliding) {
+            g.pose().pushPose();
+            GuiRenderUtil.slideInX(g, pageSlideDir, pageT);
+        }
+        try {
+            if (page == PAGE_MEMBER) renderMember(g, mx, my);
+            else renderBank(g, mx, my);
+        } finally {
+            if (sliding) g.pose().popPose();
+        }
         renderFlash(g);
     }
 
@@ -265,11 +288,11 @@ public class ShopMembershipScreen extends ScaledScreen {
             return true;
         }
         if (GuiRenderUtil.isHovering(mx, my, memberTabX(), tabY(), TAB_W, TOP_BAR_H)) {
-            page = PAGE_MEMBER;
+            setPage(PAGE_MEMBER);
             return true;
         }
         if (GuiRenderUtil.isHovering(mx, my, bankTabX(), tabY(), TAB_W, TOP_BAR_H)) {
-            page = PAGE_BANK;
+            setPage(PAGE_BANK);
             return true;
         }
         if (page == PAGE_MEMBER) return clickMember(mx, my) || super.universalMouseClicked(mx, my, btn);

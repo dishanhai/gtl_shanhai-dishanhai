@@ -58,7 +58,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private static final int HINT_H = 36;
     private static final long HINT_ROTATE_MS = 5000L;
     // 弹入动画节奏：跟 ShopScreen 系列界面统一（150ms ease-out），见 GuiRenderUtil#popScaleAt/popAnimProgress
-    private static final long POP_ANIM_MS = 150L;
+    private static final long POP_ANIM_MS = GuiRenderUtil.MOTION_MS;
     // AE 网络余额预览节流：选中币种切换立即重新请求，之外每 40 刻（2秒）兜底刷新一次
     // （跟 ShopScreen#PREVIEW_REFRESH_TICKS 同一节奏，见 maybeRequestAeBalance）
     private static final long AE_BALANCE_REFRESH_TICKS = 40L;
@@ -79,8 +79,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
     private int left, top, panelWidth, panelHeight;
 
-    private final long screenOpenAtMs = System.currentTimeMillis(); // 整个面板打开那一下的弹入动画起点
-    private long detailSwitchAtMs;        // 切换选中货币那一下，右侧详情面板的弹入动画起点
+    private final long screenOpenAtMs = System.currentTimeMillis();
     private List<Component> hoverTip;     // 本帧悬停到的操作说明，renderTooltips 消费
 
     private static String flashText;      // 含 § 颜色码，与聊天框一致
@@ -179,17 +178,15 @@ public class CurrencyAtmScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
-        if (amountBox != null) amountBox.setVisible(selected != null);
-        // 整个面板打开那一下弹入一次（跟 ShopScreen 系列大图层同一套节奏，见 GuiRenderUtil#popScaleAt）
         float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS);
-        if (openT < 1f) {
-            g.pose().pushPose();
-            GuiRenderUtil.popScaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openT);
-            renderPanel(g, mx, my);
-            g.pose().popPose();
-        } else {
-            renderPanel(g, mx, my);
+        if (amountBox != null) {
+            amountBox.setVisible(selected != null);
+            amountBox.setAnim(() -> GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS),
+                    left + panelWidth / 2f, top + panelHeight / 2f);
+            amountBox.setSlideX(() -> 0f);
         }
+        GuiRenderUtil.withPopScale(g, left + panelWidth / 2f, top + panelHeight / 2f, openT,
+                () -> renderPanel(g, mx, my));
     }
 
     private void renderPanel(GuiGraphics g, int mx, int my) {
@@ -218,21 +215,8 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
         drawList(g, mx, my);
         drawOperationHints(g);
-        // 右侧详情面板：切换选中货币那一下弹入一次，同 ShopScreen 详情卡片切换的同一套手法——
-        // amountBox 是 AnimatableEditBox，自己在 renderWidget 里套用同一锚点/进度做 PoseStack 缩放，
-        // 这里只需每帧把动画进度源和锚点告诉它，不用再手动 setY/setAlpha 去追它（那套做法两次都出了
-        // 布局错位，见反馈）。锚点须和 drawDetail 外面这层 popScaleAt 用同一个，视觉才同步。
-        float detailT = GuiRenderUtil.popAnimProgress(detailSwitchAtMs, POP_ANIM_MS);
-        float anchorCx = detailX() + detailW() / 2f, anchorCy = listTop() + listHeight() / 2f;
-        if (amountBox != null) amountBox.setAnim(() -> detailT, anchorCx, anchorCy);
-        if (detailT < 1f) {
-            g.pose().pushPose();
-            GuiRenderUtil.popScaleAt(g, anchorCx, anchorCy, detailT);
-            drawDetail(g, mx, my);
-            g.pose().popPose();
-        } else {
-            drawDetail(g, mx, my);
-        }
+        // 详情列一直在。换币种只换文字，不再次缩放。
+        drawDetail(g, mx, my);
 
         // 底部实时反馈横幅（[货币中心] 系统消息经 ShopChatMirror 镜像至此，聊天框仍保留）
         if (flashText != null && System.currentTimeMillis() < flashUntil) {
@@ -644,9 +628,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
                 int ry = ly + 2 + i * ROW_H - scroll;
                 if (ry + ROW_H <= ly || ry >= ly + lh) continue;
                 if (GuiRenderUtil.isHovering(mx, my, lx + 1, ry, lw - 2, ROW_H - 1)) {
-                    ResourceLocation prev = selected;
                     selected = currencies.get(i);
-                    if (!selected.equals(prev)) detailSwitchAtMs = System.currentTimeMillis(); // 换了不同货币才重播弹入
                     // targetIdx 上界也要挡：resize 重载 currency_rates.json 后 currencies 可能变短，残留旧下标会越界
                     if (targetIdx < 0 || targetIdx >= currencies.size()
                             || currencies.get(targetIdx).equals(selected)) targetIdx = firstDifferent(i);

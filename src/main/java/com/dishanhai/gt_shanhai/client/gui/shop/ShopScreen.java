@@ -26,7 +26,6 @@ import com.dishanhai.gt_shanhai.network.ShopStagePreviewRequestPacket;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -152,17 +151,31 @@ public class ShopScreen extends ScaledScreen {
     private long pendingSelectEntryKey = -1L;
     /** 目錄還沒就緒時掛起的「記住選取」stableId。就緒後能解析就選中，解析不到就放棄。 */
     private String pendingRestoreStableId;
-    // 切页/切卡片切换动画：记下"数据集刚换过"的时刻，渲染时按经过时间算一个插值，
-    // 纯几何变换（PoseStack translate/scale，不碰颜色/透明度），对物品图标渲染同样生效，不用担心改样式。
-    private long gridSwitchAtMs;   // 主/子分类切页（网格数据集变了）触发；0=从未触发，视为动画已完成
-    private long cardSwitchAtMs;   // 选中商品切换（详情面板内容变了）触发；0=从未触发，视为动画已完成
-    private int gridSlideDir = 1;  // 切页左右滑入方向：+1=新页在右侧滑入（切到的页签在原页签右边），-1=左侧滑入
-    private static final long TAB_SWITCH_ANIM_MS = 150L;
-    private static final long CARD_SWITCH_ANIM_MS = 150L;
-    private static final float TAB_SLIDE_DIST = 32f; // 切页横切滑入距离（约半个商品格宽，彰显"切"的方向感）
+    // 开场只缩放整块面板一次。切分类只横移网格。换商品只换详情文字，不再次缩放。
+    private final long screenOpenAtMs = System.currentTimeMillis();
+    private long gridSwitchAtMs;
+    private int gridSlideDir = 1;
+
+    // ===== 商品卡片 → 右侧详情面板的共享元素飞行 =====
+    // 点格子时，被点的卡片沿一条几何通道（位置 + 尺寸同时插值）长到详情面板大小；
+    // 源卡片留在原位，用磨砂 + 偏移重绘近似高斯模糊，配合残影模拟失焦（不采样 framebuffer）。
+    // 时钟是毫秒；弹簧只保留 value/velocity，落位即止。
+    private final GuiRenderUtil.FluidSpring cardFlightSpring = new GuiRenderUtil.FluidSpring();
+    private boolean cardFlightActive;
+    private ShopEntry cardFlightEntry;
+    private int cardFlightSrcX;
+    private int cardFlightSrcY;
+    private int cardFlightSrcW;
+    private int cardFlightSrcH;
+    private int cardFlightDstX;
+    private int cardFlightDstY;
+    private int cardFlightDstW;
+    private int cardFlightDstH;
+    // 最近几帧的进度，用来画残影（越旧越大、越淡），不需要保存整屏截图
+    private final float[] cardFlightTrails = new float[3];
     private long amount = 1L;      // 购买/出售次数，支持 Long.MAX
-    private EditBox searchBox;
-    private AnimatableEditBox amountBox; // AE 风格数量输入框，可被切卡片动画进度控制
+    private AnimatableEditBox searchBox;
+    private AnimatableEditBox amountBox;
     // AE 模式：交付优先注入绑定的 AE 网络。静态=跨界面实例保留（重开钱包不重置），仅本机会话级
     private static boolean aeMode = false;
     // 精妙背包模式：扣款/交付优先走随身穿戴的精妙背包（而不是随身背包），语义/生命周期对齐 aeMode
@@ -180,15 +193,16 @@ public class ShopScreen extends ScaledScreen {
         String text;
         long expireAtMs;          // 队列里正常展示的到期时刻（leaving 阶段不再看这个，看 leaveDeadlineMs）
         long leaveDeadlineMs;     // 滑出动画播完、可以彻底摘除的时刻，仅 leaving 阶段有意义
-        int fromSlot, toSlot;     // 动画起止槽位：0=最新（贴底），数值越大越靠上；-1=从底部滑入前的起点
-        long slotChangedAtMs;     // 上次目标槽位变化的时刻，供滑动插值用
+        float fromSlot;           // 当前视觉槽位。改目标时从这里接着走，不跳回旧目标
+        int toSlot;               // 目标槽位：0=最新（贴底），数值越大越靠上
+        long slotChangedAtMs;
     }
 
     private static final java.util.List<FlashMsg> flashActive = new java.util.ArrayList<>();  // 当前占着槽位的（≤FLASH_MAX_VISIBLE 条）
     private static final java.util.List<FlashMsg> flashLeaving = new java.util.ArrayList<>();  // 正在滑出动画中的，播完即摘除
     private static final int FLASH_MAX_VISIBLE = 3;
     private static final long FLASH_DISPLAY_MS = 5000L;
-    private static final long FLASH_SLIDE_MS = 180L;   // 滑动过渡时长
+    private static final long FLASH_SLIDE_MS = GuiRenderUtil.MOTION_MS;
     private static final int FLASH_ROW_H = 17;          // 每行高度（含 1px 行间隙）
 
     /** 由 {@link ShopChatMirror} 调用：推入一条商店消息，最多同时显示 {@link #FLASH_MAX_VISIBLE} 条。 */
@@ -202,7 +216,7 @@ public class ShopScreen extends ScaledScreen {
         FlashMsg m = new FlashMsg();
         m.text = msg.getString();
         m.expireAtMs = now + FLASH_DISPLAY_MS;
-        m.fromSlot = -1; // 从底部（比槽位0更低一层）滑入
+        m.fromSlot = -1f; // 从底部（比槽位0更低一层）滑入
         m.toSlot = 0;
         m.slotChangedAtMs = now;
         flashActive.add(0, m);
@@ -211,19 +225,19 @@ public class ShopScreen extends ScaledScreen {
 
     /** 消息离开 active 队列（自然到期或被挤）：改往上滑出可见区域，进 leaving 表播完动画再摘除。 */
     private static void beginLeave(FlashMsg m, long now) {
-        m.fromSlot = m.toSlot;
+        m.fromSlot = flashVisualSlot(m, now);
         m.toSlot = FLASH_MAX_VISIBLE;
         m.slotChangedAtMs = now;
         m.leaveDeadlineMs = now + FLASH_SLIDE_MS;
         flashLeaving.add(m);
     }
 
-    /** active 队列结构变化后，把每条消息的目标槽位（=当前下标）同步到最新结构；槽位没变的不打断其动画。 */
+    /** 改目标槽位时留下当前视觉位置，不把半路的消息拉回旧终点。 */
     private static void resyncFlashSlots(long now) {
         for (int i = 0; i < flashActive.size(); i++) {
             FlashMsg m = flashActive.get(i);
             if (m.toSlot != i) {
-                m.fromSlot = m.toSlot;
+                m.fromSlot = flashVisualSlot(m, now);
                 m.toSlot = i;
                 m.slotChangedAtMs = now;
             }
@@ -246,12 +260,14 @@ public class ShopScreen extends ScaledScreen {
         flashLeaving.removeIf(m -> now > m.leaveDeadlineMs);
     }
 
-    /** 按动画起止槽位做 ease-out 插值，算出这条消息当前该画在哪一行（世界坐标 Y）。 */
-    private static int flashRowY(FlashMsg m, long now, int baseY) {
+    private static float flashVisualSlot(FlashMsg m, long now) {
         float t = FLASH_SLIDE_MS <= 0 ? 1f : Math.min(1f, (now - m.slotChangedAtMs) / (float) FLASH_SLIDE_MS);
-        float eased = 1f - (1f - t) * (1f - t);
-        float slot = m.fromSlot + (m.toSlot - m.fromSlot) * eased;
-        return (int) (baseY - slot * FLASH_ROW_H);
+        return m.fromSlot + (m.toSlot - m.fromSlot) * GuiRenderUtil.easeOut(t);
+    }
+
+    /** 按当前视觉槽位算出这条消息该画在哪一行。静止时槽位是整数。 */
+    private static int flashRowY(FlashMsg m, long now, int baseY) {
+        return (int) (baseY - flashVisualSlot(m, now) * FLASH_ROW_H);
     }
     // 删除误触防护：需在窗口期内对同一条目再点一次「删除此商品」才真正执行；实例级=只跟当前这次打开的界面走
     private ShopEntry pendingDeleteEntry;
@@ -287,10 +303,16 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void selectEntry(long entryKey, ShopEntry entry) {
+        // 从别处（跳转链接、右键菜单、恢复上次选中）改选时，正在飞的旧卡片要立刻收掉，
+        // 避免残影落到一个已经不显示的条目上。点格子会先 beginCardFlight 再调本方法，不会误取消。
+        if (cardFlightActive && entry != cardFlightEntry) {
+            cardFlightActive = false;
+            cardFlightEntry = null;
+            ShopGaussBlur.clear();
+        }
         pendingRestoreStableId = null;
         long newKey = entry == null ? -1L : entryKey;
         if (newKey != selectedEntryKey) {
-            cardSwitchAtMs = System.currentTimeMillis(); // 真换了商品才弹一下，重复点同一张卡不重播
             detailScroll = 0;
             detailScrollMax = 0;
         }
@@ -304,6 +326,33 @@ public class ShopScreen extends ScaledScreen {
         selected = null;
         detailScroll = 0;
         detailScrollMax = 0;
+        cardFlightActive = false;
+        cardFlightEntry = null;
+        ShopGaussBlur.clear();
+    }
+
+    /**
+     * 登记一次“卡片飞进详情面板”。调用方必须紧跟着 {@link #selectEntry}，让飞行层拿到新选中项；
+     * 源矩形是点击时格子的绝对布局坐标（已经含滚动偏移），目标矩形是右侧详情列。
+     */
+    private void beginCardFlight(ShopEntry entry, int srcX, int srcY) {
+        if (entry == null) return;
+        this.cardFlightEntry = entry;
+        this.cardFlightSrcX = srcX;
+        this.cardFlightSrcY = srcY;
+        this.cardFlightSrcW = cellW();
+        this.cardFlightSrcH = cellH();
+        this.cardFlightDstX = detailX();
+        this.cardFlightDstY = contentTop();
+        this.cardFlightDstW = DETAIL_W;
+        this.cardFlightDstH = contentHeight();
+        // 离详情面板越远，飞得越久：用起手时两块矩形的中心距离换算弹簧 response（0.16s ~ 0.32s）。
+        double dx = (this.cardFlightDstX + this.cardFlightDstW / 2.0) - (this.cardFlightSrcX + this.cardFlightSrcW / 2.0);
+        double dy = (this.cardFlightDstY + this.cardFlightDstH / 2.0) - (this.cardFlightSrcY + this.cardFlightSrcH / 2.0);
+        double response = GuiRenderUtil.flightResponseForDistance(Math.hypot(dx, dy));
+        this.cardFlightSpring.start(System.currentTimeMillis(), response);
+        for (int i = 0; i < this.cardFlightTrails.length; i++) this.cardFlightTrails[i] = 0f;
+        this.cardFlightActive = true;
     }
 
     private boolean isBatchSelected(ShopEntry entry) {
@@ -427,11 +476,15 @@ public class ShopScreen extends ScaledScreen {
     // 购物车：顶栏微缩按键展开的独立大图层；Ctrl+左键网格卡片加入候选，按 stableId 引用条目（跨快照/跨重登有效，
     // 见 ClientShopCart），数量可调、可单独删除，结算=按候选清单逐项各自发起购买（异步、互不阻塞）。
     private boolean cartOverlayOpen;
-    private long cartOverlayOpenAtMs; // 打开瞬间的时间戳，驱动展开弹入动画（见 renderScaledForeground）
+    private long cartOverlayOpenAtMs;
+    private long descOverlayOpenAtMs;
+    private long guideOverlayOpenAtMs;
+    private long groupPickerOpenAtMs;
+    private long ctxMenuOpenAtMs;
+    private long stageLockShownAtMs;
     private int cartOverlayScroll;
     private final Map<Long, Long> cartPreviewRequestedAtGameTime = new java.util.HashMap<>();
     private boolean cartPreviewRequestedAeMode;
-    private static final long OVERLAY_POP_ANIM_MS = 150L;
     // 结算批次：点「结算购物车」时把当次涉及的 stableId 快照进来，底部按钮区在批次未全部回执前
     // 变成进度条（X/总数），全部回执后改回按钮，但已回执的行状态（成功戳记覆盖控件/失败原因）
     // 一直留到关闭购物车面板才清（见反馈：进度跑完要能直接在面板里看到哪些成功哪些失败）。
@@ -1021,6 +1074,8 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void initScaled() {
+        // 预编译后处理链，避免第一次点商品时才加载 shader 造成卡顿；失败会自动回退局部磨砂。
+        ShopGaussBlur.warmUp();
         boolean fresh = searchBox == null;
         String restoreStableId = null;
         if (observedCatalogRevision != ClientShopCatalog.revision()) {
@@ -1064,7 +1119,7 @@ public class ShopScreen extends ScaledScreen {
         if (fresh && ClientShopUiSettings.rememberShopView()) {
             prev = ClientShopUiSettings.shopSearch();
         }
-        searchBox = new EditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W, 12, Component.literal("搜索"));
+        searchBox = new AnimatableEditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W, 12, Component.literal("搜索"));
         searchBox.setValue(prev);
         searchBox.setResponder(s -> { scroll = 0; recomputeVisible(); });
         searchBox.setBordered(true);
@@ -1232,6 +1287,7 @@ public class ShopScreen extends ScaledScreen {
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
         stageLockPath = lockedStageForCurrentView();
         stageLockActive = stageLockPath != null;
+        if (!stageLockActive) stageLockShownAtMs = 0L;
         if (stageLockActive) maybeRequestStagePreview(stageLockPath);
         // 阶段锁定只影响商店内容区，不能把游戏世界送进全局后处理。
         ShopStageBlur.setActive(false);
@@ -1273,15 +1329,14 @@ public class ShopScreen extends ScaledScreen {
             }
         }
         ClientShopCatalog.ensureLoadedRange(neededKeys, 0, neededKeys.size());
-        // 数量框仅在选中商品时可见（本方法在 super.render 画控件之前执行，故此处同步安全）。
-        // amountBox 现在是 AnimatableEditBox：自己在 renderWidget 里套用跟 drawDetail 同一套
-        // 锚点/缓动公式做 PoseStack 缩放，这里只需每帧把动画进度源和锚点告诉它即可，不用再
-        // 手动 setX/setY/setWidth 去追坐标（见反馈：改成可被控制的组件，而不是动画期间藏起来）。
-        float cardT = GuiRenderUtil.popAnimProgress(cardSwitchAtMs, CARD_SWITCH_ANIM_MS);
-        if (amountBox != null) {
-            amountBox.setVisible(selected != null);
-            amountBox.setAnim(this::cardAnimProgress, detailX() + DETAIL_W / 2f, contentTop() + contentHeight() / 2f);
+        syncOpenMotionWidgets();
+        float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS);
+        boolean opening = openT < 1f;
+        if (opening) {
+            g.pose().pushPose();
+            GuiRenderUtil.popScaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openT);
         }
+        try {
         // 整体面板（KE 风格 4 层嵌套：金边→金→暗背景→内层）
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
@@ -1335,10 +1390,10 @@ public class ShopScreen extends ScaledScreen {
         // 滑入途中溢出的部分会被天然裁掉，不会盖到旁边的页签/详情栏）
         int gx = listLeft(), gy = contentTop(), gw = listWidth(), gh = contentHeight();
         g.fill(gx, gy, gx + gw, gy + gh, BOX_BG);
-        float gridT = GuiRenderUtil.popAnimProgress(gridSwitchAtMs, TAB_SWITCH_ANIM_MS);
+        float gridT = GuiRenderUtil.popAnimProgress(gridSwitchAtMs, GuiRenderUtil.MOTION_MS);
         if (gridT < 1f) {
             g.pose().pushPose();
-            slideInX(g, gridSlideDir, gridT);
+            GuiRenderUtil.slideInX(g, gridSlideDir, gridT);
             drawGrid(g, mx, my);
             g.pose().popPose();
         } else {
@@ -1346,15 +1401,8 @@ public class ShopScreen extends ScaledScreen {
         }
         drawGridHint(g);
 
-        // 右侧详情面板（同上，锚点换成详情列自己的中心；cardT 已在上面算过，amountBox 同步过了）
-        if (cardT < 1f) {
-            g.pose().pushPose();
-            GuiRenderUtil.popScaleAt(g, detailX() + DETAIL_W / 2f, gy + gh / 2f, cardT);
-            drawDetail(g, mx, my);
-            g.pose().popPose();
-        } else {
-            drawDetail(g, mx, my);
-        }
+        // 详情列一直在。换商品只换文字和数据，不再次缩放。
+        drawDetail(g, mx, my);
 
         // 实时消息横幅队列（商店交互反馈，5 秒后自动滑出消失）：面板底部居中，覆盖在最上层，
         // 最多同时显示 FLASH_MAX_VISIBLE 条，新消息从底部滑入，挤开的/到期的都走同一套滑出动画再摘除
@@ -1401,22 +1449,24 @@ public class ShopScreen extends ScaledScreen {
                 undoReorderLabel = null;
             }
         }
+        } finally {
+            if (opening) g.pose().popPose();
+        }
     }
 
-    /** 弹入动画进度 [0,1]（1=已播完）；atMs<=0（从未触发过）视为已播完，不做任何变换。 */
-    /**
-     * 切页横切滑入（dir&gt;0 从右侧滑入 / dir&lt;0 从左侧滑入，ease-out）：单纯水平平移，不缩放，
-     * 彰显"切"到下一页的方向感（而非弹入的"内容出现"感）。调用方须自行 pushPose/popPose 包住。
-     */
-    private static void slideInX(GuiGraphics g, int dir, float t) {
-        float eased = 1f - (1f - t) * (1f - t);
-        float offset = dir * TAB_SLIDE_DIST * (1f - eased);
-        g.pose().translate(offset, 0, 0);
+    /** 搜索框和数量框画在面板姿态外面，开场时用同一锚点跟上整块面板的缩放。 */
+    private void syncOpenMotionWidgets() {
+        float cx = left + panelWidth / 2f;
+        float cy = top + panelHeight / 2f;
+        if (searchBox != null) searchBox.setAnim(this::screenOpenProgress, cx, cy);
+        if (amountBox != null) {
+            amountBox.setVisible(selected != null);
+            amountBox.setAnim(this::screenOpenProgress, cx, cy);
+        }
     }
 
-    /** 详情面板切卡片弹入动画进度 [0,1]；供 amountBox（AnimatableEditBox）作为动画驱动源读取。 */
-    private float cardAnimProgress() {
-        return GuiRenderUtil.popAnimProgress(cardSwitchAtMs, CARD_SWITCH_ANIM_MS);
+    private float screenOpenProgress() {
+        return GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS);
     }
 
     /** 画一条消息横幅：按其动画槽位算出当前 Y，宽度随文字自适应，样式跟原先的单槽横幅一致。 */
@@ -1478,6 +1528,9 @@ public class ShopScreen extends ScaledScreen {
     /** 前景层（盖住所有控件）：描述详情大图层，FTBQ 风格全屏遮罩 + 居中面板 + 自动换行长文本，超出可视高度可滚动。 */
     @Override
     protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
+        // 卡片飞行层画在所有基础控件（搜索框/数量框）之后、各种大图层之前：
+        // 这样遮罩能一起压住输入框，模拟附近界面失焦；购物车/详情大图层仍可盖在它上面。
+        renderCardFlight(g);
         if (stageLockActive) {
             renderStageLockOverlay(g, mx, my);
             renderFlashMessagesOnTop(g);
@@ -1488,32 +1541,29 @@ public class ShopScreen extends ScaledScreen {
             return;
         }
         if (guideOverlayOpen && selected != null) {
-            renderGuideOverlay(g, mx, my);
+            g.fill(0, 0, vWidth, vHeight, 0xC0000000);
+            int[] r = guideOverlayBounds();
+            drawPopPanel(g, guideOverlayOpenAtMs, r[0], r[1], r[2], r[3], () -> renderGuideOverlay(g, mx, my));
             return;
         }
         if (groupPickerOpen && groupPickerEntry != null) {
-            renderGroupPicker(g, mx, my);
+            g.fill(0, 0, vWidth, vHeight, 0xC0000000);
+            int[] r = groupPickerBounds();
+            drawPopPanel(g, groupPickerOpenAtMs, r[0], r[1], r[2], r[3], () -> renderGroupPicker(g, mx, my));
             return;
         }
         if (cartOverlayOpen) {
-            // 展开弹入：跟切页/切卡片同一套锚点缩放公式，锚点换成购物车面板自己的中心（见反馈：需要动画补充）
+            g.fill(0, 0, vWidth, vHeight, 0xC0000000);
             int[] cr = cartOverlayBounds();
-            float cartT = GuiRenderUtil.popAnimProgress(cartOverlayOpenAtMs, OVERLAY_POP_ANIM_MS);
-            if (cartT < 1f) {
-                g.pose().pushPose();
-                GuiRenderUtil.popScaleAt(g, cr[0] + cr[2] / 2f, cr[1] + cr[3] / 2f, cartT);
-                renderCartOverlay(g, mx, my);
-                g.pose().popPose();
-            } else {
-                renderCartOverlay(g, mx, my);
-            }
+            drawPopPanel(g, cartOverlayOpenAtMs, cr[0], cr[1], cr[2], cr[3], () -> renderCartOverlay(g, mx, my));
             return;
         }
         if (!descOverlayOpen || selected == null) return;
         int[] r = descOverlayBounds();
         int ox = r[0], oy = r[1], ow = r[2];
 
-        g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
+        g.fill(0, 0, vWidth, vHeight, 0xC0000000);
+        drawPopPanel(g, descOverlayOpenAtMs, ox, oy, ow, r[3], () -> {
         renderBox(g, ox, oy, ow, r[3], GOLD_DARK, PANEL_BG);
 
         g.drawString(this.font, GuiRenderUtil.trimText(this.font,
@@ -1533,6 +1583,13 @@ public class ShopScreen extends ScaledScreen {
             ty += DESC_OVERLAY_LINE_H;
         }
         drawDescOverlayScrollbar(g, r, maxScroll, mx, my);
+        });
+    }
+
+    /** 浮层第一次出现只在自己的中心缩放。遮罩留在外面，不跟着缩。 */
+    private void drawPopPanel(GuiGraphics g, long atMs, int x, int y, int w, int h, Runnable draw) {
+        GuiRenderUtil.withPopScale(g, x + w / 2f, y + h / 2f,
+                GuiRenderUtil.popAnimProgress(atMs, GuiRenderUtil.MOTION_MS), draw);
     }
 
     /** 描述详情大图层右侧滚动条：轨道常驻绘制，超出可视行数时叠一段可拖拽把手（同 {@link #drawGridScrollbar} 风格）。 */
@@ -1581,7 +1638,6 @@ public class ShopScreen extends ScaledScreen {
         int[] r = guideOverlayBounds();
         int ox = r[0], oy = r[1], ow = r[2];
 
-        g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
         renderBox(g, ox, oy, ow, r[3], GOLD_DARK, PANEL_BG);
 
         g.drawString(this.font, GuiRenderUtil.trimText(this.font,
@@ -1651,6 +1707,7 @@ public class ShopScreen extends ScaledScreen {
         groupPickerBatchIds = List.of();
         groupPickerScroll = 0;
         groupPickerOpen = true;
+        groupPickerOpenAtMs = System.currentTimeMillis();
     }
 
     private void openGroupPickerBatch() {
@@ -1677,6 +1734,7 @@ public class ShopScreen extends ScaledScreen {
         groupPickerBatchIds = batchIdsSnapshot();
         groupPickerScroll = 0;
         groupPickerOpen = true;
+        groupPickerOpenAtMs = System.currentTimeMillis();
     }
 
     /** 快速分组大图层：树形列表（按 "/" 段数缩进），当前分组高亮，点一行直接分组并关闭图层。 */
@@ -1684,7 +1742,6 @@ public class ShopScreen extends ScaledScreen {
         int[] r = groupPickerBounds();
         int ox = r[0], oy = r[1], ow = r[2];
 
-        g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
         renderBox(g, ox, oy, ow, r[3], GOLD_DARK, PANEL_BG);
 
         String title = groupPickerBatchIds.isEmpty()
@@ -1815,7 +1872,6 @@ public class ShopScreen extends ScaledScreen {
     private void renderCartOverlay(GuiGraphics g, int mx, int my) {
         int[] r = cartOverlayBounds();
         int ox = r[0], oy = r[1], ow = r[2], oh = r[3];
-        g.fill(0, 0, vWidth, vHeight, 0xC0000000); // 全屏半透明遮罩
         renderBox(g, ox, oy, ow, oh, GOLD_DARK, PANEL_BG);
 
         Map<String, Long> cartMap = ClientShopCart.getAll();
@@ -3003,6 +3059,216 @@ public class ShopScreen extends ScaledScreen {
         }
     }
 
+    /**
+     * 绘制「商品卡片 → 详情面板」的飞行层。
+     *
+     * <p>只做一件事：把被点卡片的矩形沿弹簧进度 p 连续插值到详情列矩形。位置和尺寸是同一条
+     * 几何通道，不额外叠平移/缩放两套动画；图标与名称按同一 p 从卡片头部滑到详情头部，
+     * 落地时正好压在详情面板的同名元素上，再随遮罩一起淡出，避免换内容的硬切。</p>
+     *
+     * <p>源卡片保留在原位，用磨砂 + 偏移重绘近似高斯模糊；右侧详情面板则交给
+     * {@link ShopGaussBlur} 的两趟可分离高斯后处理，并挖掉正在飞行的卡片保持清晰。
+     * 后处理在界面帧末对 {@code minecraft:main} 做局部采样；源卡片仍是纯 {@code g.fill} 叠层。</p>
+     */
+    private void renderCardFlight(GuiGraphics g) {
+        if (!cardFlightActive || cardFlightEntry == null) return;
+
+        cardFlightSpring.update(System.currentTimeMillis());
+        float p = cardFlightSpring.value();
+        if (cardFlightSpring.settled()) {
+            cardFlightActive = false;
+            cardFlightEntry = null;
+            ShopGaussBlur.clear();
+            return;
+        }
+
+        // 记录最近几帧的进度（0=刚起手，越旧越靠后），残影直接复用这些值
+        for (int i = cardFlightTrails.length - 1; i > 0; i--) {
+            cardFlightTrails[i] = cardFlightTrails[i - 1];
+        }
+        cardFlightTrails[0] = p;
+
+        // 最后 7% 让飞行层和源卡片磨砂一起溶解，露出下面已经画好的详情面板；弹簧归位前就完成交接。
+        float fade = 1f - smoothstep(0.93f, 1f, p);
+        if (fade <= 0.01f) {
+            ShopGaussBlur.clear();
+            return;
+        }
+
+        int rx = flightValue(cardFlightSrcX, cardFlightDstX, p);
+        int ry = flightValue(cardFlightSrcY, cardFlightDstY, p);
+        int rw = flightValue(cardFlightSrcW, cardFlightDstW, p);
+        int rh = flightValue(cardFlightSrcH, cardFlightDstH, p);
+
+        g.flush(); // 网格/详情的物品图标先落盘，磨砂和飞行层才能稳定压在上面
+        g.pose().pushPose();
+        try {
+            // 用着色器颜色统一淡出飞行层（含物品图标），避免最后一下硬切
+            g.setColor(1f, 1f, 1f, fade);
+
+            // 右侧详情面板：真正的两趟可分离高斯后处理（ScreenEvent.Render.Post）。
+            // Rect 只覆盖详情列，Hole 把正在飞的卡片挖掉保持清晰；Progress 随落位 1 → 0 结束模糊。
+            float panelBlur = 1f - smoothstep(0.90f, 1f, p);
+            if (panelBlur > 0.01f) {
+                int detailLeft = detailX();
+                int detailTop = contentTop();
+                int detailW = DETAIL_W;
+                int detailH = contentHeight();
+                // 模糊半径按“虚拟单位 → 物理像素”的真实比例换算，避免 4K/高 GUI scale 下看起来不糊。
+                float pixelScale = (float) this.minecraft.getMainRenderTarget().width
+                        / (float) this.width;
+                float radiusPx = ShopGaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
+                ShopGaussBlur.request(
+                        toFramebufferX(detailLeft), toFramebufferY(detailTop),
+                        toFramebufferW(detailW), toFramebufferH(detailH),
+                        panelBlur, radiusPx,
+                        toFramebufferX(rx - 2), toFramebufferY(ry - 2),
+                        toFramebufferW(rw + 4), toFramebufferH(rh + 4));
+                if (!ShopGaussBlur.isReady()) {
+                    // 后处理资源加载失败时保留局部磨砂兜底；仍然只覆盖右侧面板，不会全屏刷白。
+                    int frostA = (int) (0x3A * panelBlur);
+                    int frostB = (int) (0x1C * panelBlur);
+                    g.fill(detailLeft, detailTop, detailLeft + detailW, detailTop + detailH,
+                            (frostA << 24) | 0x8E98A4);
+                    g.fill(detailLeft, detailTop, detailLeft + detailW, detailTop + detailH,
+                            (frostB << 24) | 0xB4BEC8);
+                }
+            } else {
+                ShopGaussBlur.clear();
+            }
+
+            // 源卡片保留在原位，只盖一层磨砂 + 低透明度偏移重绘，模拟高斯模糊；不再把卡片抠掉留空。
+            drawSourceCardBlur(g, fade);
+
+            // 卡片表面：与详情面板同款描边盒，落地时尺寸和底色都对齐
+            renderBox(g, rx, ry, rw, rh, GOLD, BOX_BG);
+            // 上沿一道随落位拉长的亮线，给“流体”一点方向感（不做循环扫光）
+            int sheenA = (int) (0x66 * (1f - clamp01(p)));
+            if (sheenA > 0 && rw > 4) {
+                g.fill(rx + 1, ry + 1, rx + rw - 1, ry + 2, (sheenA << 24) | 0xFFD98A);
+            }
+
+            // 残影：越旧的进度落后越多，轮廓沿当前卡片外扩一圈，叠在表面之上形成低频涟漪
+            for (int i = 0; i < cardFlightTrails.length; i++) {
+                float t = cardFlightTrails[i];
+                if (t <= 0.02f || t >= p - 0.003f) continue;
+                int ga = 0x30 - i * 0x0B;
+                if (ga <= 0) continue;
+                int pad = (i + 1) * 2 + Math.round(Math.min(10f, (p - t) * 30f));
+                renderOutline(g, rx - pad, ry - pad, rw + pad * 2, rh + pad * 2,
+                        (ga << 24) | 0xE8C070);
+            }
+
+            // 头部内容：图标与名称走同一条 p，起手贴在卡片原有位置，落地落在详情头部
+            int iconX = Math.round(cardFlightSrcX + 5f + (cardFlightDstX + 10f - (cardFlightSrcX + 5f)) * p);
+            int iconY = Math.round(cardFlightSrcY + 5f + (cardFlightDstY + 12f - (cardFlightSrcY + 5f)) * p);
+            drawFlightIcon(g, cardFlightEntry, iconX, iconY);
+
+            int nameX = Math.round(cardFlightSrcX + 26f + (cardFlightDstX + 32f - (cardFlightSrcX + 26f)) * p);
+            int nameY = Math.round(cardFlightSrcY + 4f + (cardFlightDstY + 10f - (cardFlightSrcY + 4f)) * p);
+            int nameW = Math.max(12, rw - 38);
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, cardFlightEntry.goodsDisplayName(), nameW),
+                    nameX, nameY, WHITE, true);
+        } finally {
+            g.setColor(1f, 1f, 1f, 1f);
+            g.pose().popPose();
+        }
+    }
+
+    /**
+     * 虚拟逻辑坐标 → framebuffer 像素。ScaledScreen 已经按自己的 guiScale
+     * 把虚拟画布缩到 Screen.width/height；再用 mainRenderTarget/Screen 的比例
+     * 换算到真实像素，避免依赖窗口 GUI scale 的具体类型。
+     */
+    private int toFramebufferX(float virtualX) {
+        int fbW = this.minecraft.getMainRenderTarget().width;
+        float screenX = this.offsetX + virtualX * this.guiScale;
+        return (int) Math.round((double) screenX * fbW / (double) this.width);
+    }
+
+    private int toFramebufferY(float virtualY) {
+        int fbH = this.minecraft.getMainRenderTarget().height;
+        float screenY = this.offsetY + virtualY * this.guiScale;
+        return (int) Math.round((double) screenY * fbH / (double) this.height);
+    }
+
+    private int toFramebufferW(float virtualWidth) {
+        int fbW = this.minecraft.getMainRenderTarget().width;
+        return Math.max(1, (int) Math.round((double) virtualWidth * this.guiScale
+                * fbW / (double) this.width));
+    }
+
+    private int toFramebufferH(float virtualHeight) {
+        int fbH = this.minecraft.getMainRenderTarget().height;
+        return Math.max(1, (int) Math.round((double) virtualHeight * this.guiScale
+                * fbH / (double) this.height));
+    }
+
+    /**
+     * 源卡片不抠掉，留在网格原位；用“磨砂底 + 多个偏移图标重绘”近似高斯模糊盖住它。
+     * 不采样 framebuffer，也不影响邻居布局，只在这块卡片矩形内叠加。
+     */
+    private void drawSourceCardBlur(GuiGraphics g, float fade) {
+        int x = cardFlightSrcX;
+        int y = cardFlightSrcY;
+        int w = cardFlightSrcW;
+        int h = cardFlightSrcH;
+
+        // 外圈柔光：让卡片边界先化开，避免磨砂矩形像一块硬色块
+        renderOutline(g, x - 2, y - 2, w + 4, h + 4, 0x18FFFFFF);
+        renderOutline(g, x - 1, y - 1, w + 2, h + 2, 0x28FFFFFF);
+
+        // 第一层磨砂：压掉卡片原本锐利的文字和 1px 描边
+        g.fill(x, y, x + w, y + h, 0x88C6D0DA);
+
+        // 高斯核近似：把图标在几个偏移位置低透明度重绘，叠出模糊拖影
+        float smear = 0.24f * fade;
+        if (smear > 0.01f && cardFlightEntry != null) {
+            g.setColor(1f, 1f, 1f, smear);
+            int ix = x + 5;
+            int iy = y + 5;
+            drawFlightIcon(g, cardFlightEntry, ix - 2, iy);
+            drawFlightIcon(g, cardFlightEntry, ix + 2, iy);
+            drawFlightIcon(g, cardFlightEntry, ix, iy - 2);
+            drawFlightIcon(g, cardFlightEntry, ix, iy + 2);
+            drawFlightIcon(g, cardFlightEntry, ix - 2, iy - 2);
+            drawFlightIcon(g, cardFlightEntry, ix + 2, iy + 2);
+            g.setColor(1f, 1f, 1f, fade);
+        }
+
+        // 第二层更淡的磨砂：统一柔化重绘出来的锐利边缘，卡片仍能隐约看见
+        g.fill(x, y, x + w, y + h, 0x50D8E2EA);
+    }
+
+    /** 飞行层头部图标：与网格卡片/详情面板保持同一套优先级（自定义组合 > 流体 > 物品）。 */
+    private void drawFlightIcon(GuiGraphics g, ShopEntry entry, int x, int y) {
+        List<ShopEntry.DisplayIcon> icons = entry.effectiveIcons();
+        if (!icons.isEmpty()) {
+            renderIconComposite(g, icons, x - 2, y - 2);
+        } else if (entry.isPrimaryGoodsFluid()) {
+            renderFluidIcon(g, x, y, 16, entry.primaryGoodsFluid());
+        } else {
+            ItemStack stack = entry.displayGoodsStack();
+            g.renderItem(stack, x, y);
+            g.renderItemDecorations(this.font, stack, x, y);
+        }
+    }
+
+    private static float clamp01(float v) {
+        return v < 0f ? 0f : (v > 1f ? 1f : v);
+    }
+
+    /** 同一条几何通道使用的进度插值：静止时四舍五入回整数坐标。 */
+    private static int flightValue(int from, int to, float t) {
+        return Math.round(from + (to - from) * t);
+    }
+
+    private static float smoothstep(float edge0, float edge1, float v) {
+        if (edge1 <= edge0) return v < edge0 ? 0f : 1f;
+        float t = clamp01((v - edge0) / (edge1 - edge0));
+        return t * t * (3f - 2f * t);
+    }
+
     /** 阶段/商品一次性提交材料预览，视觉上与花费预览共用物品槽和数量标签。 */
     private int drawSubmissionRequirementPreview(GuiGraphics g, int x, int y,
                                                   List<ExchangeEntry.Ingredient> requirements,
@@ -3069,6 +3335,7 @@ public class ShopScreen extends ScaledScreen {
         int areaW = detailX() + DETAIL_W - areaX;
         int areaH = contentHeight();
         renderStageLockBlur(g, areaX, areaY, areaW, areaH);
+        if (stageLockShownAtMs <= 0L) stageLockShownAtMs = System.currentTimeMillis();
 
         List<ExchangeEntry.Ingredient> requirements =
                 com.dishanhai.gt_shanhai.client.shop.ClientShopUnlockState.stageRequirements(stageLockPath);
@@ -3076,6 +3343,11 @@ public class ShopScreen extends ScaledScreen {
         int oh = Math.min(Math.max(150, areaH - 18), 190);
         int ox = areaX + (areaW - ow) / 2;
         int oy = areaY + (areaH - oh) / 2;
+        drawPopPanel(g, stageLockShownAtMs, ox, oy, ow, oh, () -> drawStageLockCard(g, mx, my, ox, oy, ow, oh, requirements));
+    }
+
+    private void drawStageLockCard(GuiGraphics g, int mx, int my, int ox, int oy, int ow, int oh,
+            List<ExchangeEntry.Ingredient> requirements) {
         renderBox(g, ox, oy, ow, oh, GOLD_DARK, PANEL_BG);
         g.drawCenteredString(this.font, "§c阶段未解锁", ox + ow / 2, oy + 10, RED);
         g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font,
@@ -3097,22 +3369,15 @@ public class ShopScreen extends ScaledScreen {
                 "§a提交阶段固定物品", mx, my);
     }
 
-    /** 只在商品列表与详情区域绘制霧化遮罩，避免模糊整个游戏世界。 */
+    /** 阶段锁定压暗商品区。半透明填充，不采样画面。 */
     private void renderStageLockBlur(GuiGraphics g, int x, int y, int w, int h) {
-        // 用較厚的局部磨砂層壓低商品輪廓；不再用全局後處理模糊世界背景。
-        g.fill(x, y, x + w, y + h, 0xB8181818);
-        int stripeStep = 2;
-        for (int stripeY = y + 1; stripeY < y + h; stripeY += stripeStep) {
-            g.fill(x, stripeY, x + w, Math.min(y + h, stripeY + 1), 0x54101010);
-        }
-        for (int stripeX = x + 1; stripeX < x + w; stripeX += stripeStep) {
-            g.fill(stripeX, y, Math.min(x + w, stripeX + 1), y + h, 0x40101010);
-        }
+        g.fill(x, y, x + w, y + h, 0xC8181818);
     }
 
     @Override
     public void onClose() {
         ShopStageBlur.clear();
+        ShopGaussBlur.clear();
         super.onClose();
     }
 
@@ -3124,6 +3389,7 @@ public class ShopScreen extends ScaledScreen {
             ClientShopUiSettings.clearShopView();
         }
         ShopStageBlur.clear();
+        ShopGaussBlur.clear();
         super.removed();
     }
 
@@ -3361,7 +3627,11 @@ public class ShopScreen extends ScaledScreen {
                     dragCardMx = mx; dragCardMy = my;
                     dragCardMoving = false;
                 } else {
-                    selectEntry(visibleEntryKeys.get(entryIndex), entry);
+                    long entryKey = visibleEntryKeys.get(entryIndex);
+                    int flightCol = entryIndex % gridColumns();
+                    int flightRow = entryIndex / gridColumns();
+                    beginCardFlight(entry, cellX(flightCol), cellY(flightRow));
+                    selectEntry(entryKey, entry);
                 }
             }
             return true;
@@ -3380,6 +3650,7 @@ public class ShopScreen extends ScaledScreen {
         }
         if (inDetailViewport && guideDetailBtnVisible && hit(mx, my, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH)) {
             guideOverlayOpen = true;
+            guideOverlayOpenAtMs = System.currentTimeMillis();
             guideOverlayScroll = 0;
             return true;
         }
@@ -3431,6 +3702,7 @@ public class ShopScreen extends ScaledScreen {
         // 展开描述详情（drawDetail 渲染时暂存的按钮坐标，命中即开大图层）
         if (inDetailViewport && descExpandVisible && hit(mx, my, descExpandX, descExpandY, descExpandW, descExpandH)) {
             descOverlayOpen = true;
+            descOverlayOpenAtMs = System.currentTimeMillis();
             descOverlayScroll = 0;
             return true;
         }
@@ -3662,7 +3934,11 @@ public class ShopScreen extends ScaledScreen {
                     }
                 }
             } else {
-                selectEntry(entryKey, entry); // 没越过拖拽阈值 = 普通点击，按原逻辑打开详情
+                // 没越过拖拽阈值 = 普通点击，按原逻辑打开详情；编辑权限下也走同一段飞行动画
+                int flightCol = oldIndex % gridColumns();
+                int flightRow = oldIndex / gridColumns();
+                beginCardFlight(entry, cellX(flightCol), cellY(flightRow));
+                selectEntry(entryKey, entry);
             }
             return true;
         }
@@ -3735,6 +4011,7 @@ public class ShopScreen extends ScaledScreen {
         ctxMenuY = y;
         ctxMenuW = 130;
         ctxMenuOpen = true;
+        ctxMenuOpenAtMs = System.currentTimeMillis();
     }
 
     private void closeContextMenu() {
@@ -3788,6 +4065,7 @@ public class ShopScreen extends ScaledScreen {
                 guideHitsFor = entry;
                 guideHits = hits;
                 guideOverlayOpen = true;
+                guideOverlayOpenAtMs = System.currentTimeMillis();
                 guideOverlayScroll = 0;
             }));
         }
@@ -4019,6 +4297,11 @@ public class ShopScreen extends ScaledScreen {
         for (ContextMenuItem item : ctxMenuItems) totalH += item.separatorBefore() ? CTX_MENU_ROW_H + 3 : CTX_MENU_ROW_H;
         if (ctxMenuX + ctxMenuW > vWidth - 4) ctxMenuX = Math.max(4, vWidth - 4 - ctxMenuW);
         if (ctxMenuY + totalH > vHeight - 4) ctxMenuY = Math.max(4, vHeight - 4 - totalH);
+        int menuX = ctxMenuX, menuY = ctxMenuY, menuH = totalH;
+        drawPopPanel(g, ctxMenuOpenAtMs, menuX, menuY, ctxMenuW, menuH, () -> drawContextMenuBody(g, mx, my, menuH));
+    }
+
+    private void drawContextMenuBody(GuiGraphics g, int mx, int my, int totalH) {
         g.fill(ctxMenuX - 1, ctxMenuY - 1, ctxMenuX + ctxMenuW + 1, ctxMenuY + totalH + 1, GOLD_DARK);
         g.fill(ctxMenuX, ctxMenuY, ctxMenuX + ctxMenuW, ctxMenuY + totalH, PANEL_BG);
         int ry = ctxMenuY + 2;

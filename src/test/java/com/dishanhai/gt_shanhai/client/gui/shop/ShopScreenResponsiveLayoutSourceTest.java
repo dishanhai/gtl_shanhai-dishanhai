@@ -28,7 +28,7 @@ class ShopScreenResponsiveLayoutSourceTest {
 
         assertTrue(source.contains("left + panelWidth - 2 - DETAIL_W - 6"),
                 "商品网格只能在固定购买面板左侧自行压缩，不能通过缩小购买面板换空间");
-        assertTrue(source.contains("new EditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W"),
+        assertTrue(source.contains("new AnimatableEditBox(this.font, searchBoxX(), searchBoxY(), SEARCH_W"),
                 "搜索框属于上方控件，不应随卡片尺寸/低分辨率缩放");
         assertTrue(source.contains("new AnimatableEditBox(this.font, detailX() + 8, contentTop() + 66, DETAIL_W - 16"),
                 "购买面板内数量输入框必须维持固定 DETAIL_W 布局");
