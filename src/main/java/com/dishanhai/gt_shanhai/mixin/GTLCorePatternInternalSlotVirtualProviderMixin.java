@@ -7,6 +7,7 @@ import appeng.api.stacks.AEItemKey;
 import com.dishanhai.gt_shanhai.common.item.PatternNotConsumableFilter;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarSuperPatternBufferPartMachine;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -42,6 +43,16 @@ import java.util.List;
 @Mixin(targets = "org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase$InternalSlot", remap = false)
 public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPatternBufferSlotAccess {
 
+    /** 内部类自带的宿主引用；用于把注入限定在星律样板总成，超级样板总成保持 GTLCore 原生行为。 */
+    @Shadow
+    @Final
+    org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase this$0;
+
+    @Unique
+    private boolean gtShanhai$isStellarSlot() {
+        return this$0 instanceof StellarSuperPatternBufferPartMachine;
+    }
+
     @Shadow
     @Final
     private Object2LongOpenHashMap<AEItemKey> itemInventory;
@@ -64,6 +75,7 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Override
     public void gtShanhai$addVirtualTarget(AEKey key, long amount) {
+        if (!gtShanhai$isStellarSlot()) return;
         if (key instanceof AEItemKey itemKey) {
             VirtualPatternBufferSlotState.addVirtualTarget(itemInventory, itemKey, amount);
             gtShanhai$rememberVirtualItem(itemKey);
@@ -75,6 +87,7 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Override
     public void gtShanhai$restoreVirtualTarget(AEKey key, long amount) {
+        if (!gtShanhai$isStellarSlot()) return;
         if (key instanceof AEItemKey itemKey) {
             VirtualPatternBufferSlotState.registerVirtualTarget(
                     itemInventory, itemKey, amount, gtShanhai$getItemCatalystInventory());
@@ -88,6 +101,7 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Override
     public boolean gtShanhai$hasVirtualTarget(AEKey key) {
+        if (!gtShanhai$isStellarSlot()) return false;
         if (key instanceof AEItemKey itemKey) {
             return VirtualPatternBufferSlotState.getVirtualTargets(itemInventory).containsKey(itemKey);
         }
@@ -99,18 +113,21 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Override
     public void gtShanhai$syncVirtualTargetsToCatalyst() {
+        if (!gtShanhai$isStellarSlot()) return;
         VirtualPatternBufferSlotState.copyVirtualTargets(itemInventory, gtShanhai$getItemCatalystInventory());
         VirtualPatternBufferSlotState.copyVirtualTargets(fluidInventory, gtShanhai$getFluidCatalystInventory());
     }
 
     @Override
     public void gtShanhai$stripVirtualTargetsFromCatalyst() {
+        if (!gtShanhai$isStellarSlot()) return;
         VirtualPatternBufferSlotState.removeVirtualTargets(itemInventory, gtShanhai$getItemCatalystInventory());
         VirtualPatternBufferSlotState.removeVirtualTargets(fluidInventory, gtShanhai$getFluidCatalystInventory());
     }
 
     @Override
     public void gtShanhai$stripVirtualTargets() {
+        if (!gtShanhai$isStellarSlot()) return;
         gtShanhai$stripVirtualItems();
         gtShanhai$stripVirtualFluids();
         gtShanhai$clearCatalystsIfDepleted();
@@ -118,16 +135,19 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Override
     public void gtShanhai$clearVirtualTargetsIfDepleted() {
+        if (!gtShanhai$isStellarSlot()) return;
         gtShanhai$clearCatalystsIfDepleted();
     }
 
     @Inject(method = "serializeNBT", at = @At("RETURN"), remap = false)
     private void gtShanhai$saveVirtualIdentity(CallbackInfoReturnable<CompoundTag> cir) {
+        if (!gtShanhai$isStellarSlot()) return;
         VirtualPatternBufferSlotState.writeVirtualTargets(itemInventory, fluidInventory, cir.getReturnValue());
     }
 
     @Inject(method = "deserializeNBT", at = @At("RETURN"), remap = false)
     private void gtShanhai$loadVirtualIdentity(CompoundTag tag, CallbackInfo ci) {
+        if (!gtShanhai$isStellarSlot()) return;
         VirtualPatternBufferSlotState.readVirtualTargets(itemInventory, fluidInventory, tag,
                 gtShanhai$getItemCatalystInventory(), gtShanhai$getFluidCatalystInventory());
         gtShanhai$syncVirtualTargetsToCatalyst();
@@ -242,6 +262,7 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
      */
     @Inject(method = "testVirtualItemInternal", at = @At("RETURN"), cancellable = true, remap = false)
     private void gtShanhai$presenceDoesNotFailItemRecipe(GTRecipe recipe, CallbackInfoReturnable<Boolean> cir) {
+        if (!gtShanhai$isStellarSlot()) return;
         if (cir.getReturnValueZ()) return;
         if (gtShanhai$consumedItemsArePresence(recipe)) {
             cir.setReturnValue(true);
@@ -250,6 +271,7 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @Inject(method = "testVirtualFluidInternal", at = @At("RETURN"), cancellable = true, remap = false)
     private void gtShanhai$presenceDoesNotFailFluidRecipe(GTRecipe recipe, CallbackInfoReturnable<Boolean> cir) {
+        if (!gtShanhai$isStellarSlot()) return;
         if (cir.getReturnValueZ()) return;
         if (gtShanhai$consumedFluidsArePresence(recipe)) {
             cir.setReturnValue(true);
@@ -258,12 +280,14 @@ public class GTLCorePatternInternalSlotVirtualProviderMixin implements VirtualPa
 
     @ModifyVariable(method = "handleItemInternal", at = @At("HEAD"), argsOnly = true, remap = false)
     private Object2LongMap<Ingredient> gtShanhai$exemptPresenceItems(Object2LongMap<Ingredient> left) {
+        if (!gtShanhai$isStellarSlot()) return left;
         gtShanhai$removePresenceItems(left);
         return left;
     }
 
     @ModifyVariable(method = "handleFluidInternal", at = @At("HEAD"), argsOnly = true, remap = false)
     private Object2LongMap<FluidIngredient> gtShanhai$exemptPresenceFluids(Object2LongMap<FluidIngredient> left) {
+        if (!gtShanhai$isStellarSlot()) return left;
         gtShanhai$removePresenceFluids(left);
         return left;
     }

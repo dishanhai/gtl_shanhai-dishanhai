@@ -3,6 +3,8 @@ plugins {
     id 'idea'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
     id 'org.parchmentmc.librarian.forgegradle' version '1.+'
+    // Kotlin 语言支持：编译 src/main/kotlin，版本需与 Gradle 8.8 / JVM 21 兼容
+    id 'org.jetbrains.kotlin.jvm' version '2.0.21'
 }
 
 java {
@@ -12,6 +14,16 @@ java {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+// Kotlin 编译目标与 Java toolchain 对齐（Java 21）
+// 注意：Mixin 的 annotationProcessor 只作用于 Java；若要用 Kotlin 写 @Mixin，需要额外接入 kapt（当前未启用）
+kotlin {
+    jvmToolchain(21)
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+        freeCompilerArgs.add('-Xjvm-default=all')
+    }
 }
 
 base {
@@ -24,8 +36,16 @@ repositories {
     mavenCentral()
 }
 
+configurations {
+    // 仅用于把 Kotlin 运行时内嵌进 mod jar（不要用 runtimeClasspath，会把 libs 里的模组一起打进去）
+    kotlinEmbedded
+}
+
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // Kotlin 运行时：编译期由 Kotlin 插件自动添加，这里单独声明用于打包
+    kotlinEmbedded 'org.jetbrains.kotlin:kotlin-stdlib:2.0.21'
 
     implementation fileTree(dir: 'libs', include: '*.jar',
             excludes: ['spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar'])
@@ -89,6 +109,13 @@ processResources {
 }
 
 jar {
+    // 内嵌 Kotlin 运行时，运行环境无需额外安装 Kotlin for Forge
+    from({
+        configurations.kotlinEmbedded.collect { zipTree(it) }
+    }) {
+        exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'META-INF/MANIFEST.MF'
+        exclude 'META-INF/versions/**/module-info.class', 'module-info.class'
+    }
     manifest {
         attributes([
                 'Specification-Title'     : mod_name,

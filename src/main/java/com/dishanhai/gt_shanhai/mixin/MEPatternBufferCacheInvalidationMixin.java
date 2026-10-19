@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarSuperPatternBufferPartMachine;
 
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachine;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,6 +14,7 @@ public class MEPatternBufferCacheInvalidationMixin {
 
     @Inject(method = "onLoad", at = @At("TAIL"), remap = false)
     private void gtShanhai$registerRecipeModifierCacheOwner(CallbackInfo ci) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return;
         DShanhaiRecipeModifierAPI.registerPatternCacheOwner(this);
     }
 
@@ -23,6 +25,7 @@ public class MEPatternBufferCacheInvalidationMixin {
      */
     @Inject(method = "onMachineRemoved", at = @At("HEAD"), remap = false)
     private void gtShanhai$unregisterRecipeModifierCacheOwner(CallbackInfo ci) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return;
         DShanhaiRecipeModifierAPI.unregisterPatternCacheOwner(this);
     }
 }

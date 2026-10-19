@@ -13,7 +13,7 @@ import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
-import com.gtladd.gtladditions.common.machine.multiblock.part.MESuperPatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarSuperPatternBufferPartMachine;
 import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
 
 import net.minecraft.world.item.ItemStack;
@@ -84,6 +84,7 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
 
     @Override
     public void gtShanhai$restoreVirtualTargetsFromPatterns(Iterable<IPatternDetails> patterns) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return;
         if (patterns == null) return;
         for (IPatternDetails details : patterns) {
             if (!VirtualPatternEncodingHelper.containsVirtualProviderPattern(details)) continue;
@@ -107,16 +108,10 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
     @Inject(method = "pushPattern", at = @At("HEAD"), cancellable = true, remap = false)
     private void gtShanhai$pushVirtualProviderPattern(IPatternDetails patternDetails, KeyCounter[] inputHolder,
             CallbackInfoReturnable<Boolean> cir) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return;
         if (!VirtualPatternEncodingHelper.containsVirtualProviderPattern(patternDetails)) {
             QuantumDiagnostics.hit("patternBuffer.pushPattern.notVirtual",
                     "machine=" + gtShanhai$describeSelf() + " pattern=" + patternDetails);
-            return;
-        }
-        MEPatternBufferPartMachineBase machine = (MEPatternBufferPartMachineBase) (Object) this;
-        // IV 主機必須接管整筆訂單；直接寫入普通樣板槽會讓主機看不到工作。
-        if (machine instanceof MESuperPatternBufferPartMachine && machine.getControllers().stream()
-                .anyMatch(controller -> controller.self().getDefinition().getId().toString()
-                        .equals("gtl_enhancedcore:universal_joint_factory"))) {
             return;
         }
         Integer slotIndex = getSlotIndexForPattern(patternDetails);
@@ -170,6 +165,7 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
     @Inject(method = "refundSlot", at = @At("HEAD"), remap = false)
     private void gtShanhai$stripVirtualTargetsBeforeRefund(Object2LongOpenHashMap<AEItemKey> itemInventory,
             Object2LongOpenHashMap<AEFluidKey> fluidInventory, org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return;
         if (!gtShanhai$hasVirtualRefundState(itemInventory, fluidInventory)) return;
         gtShanhai$stripVirtualTargetsFromCatalyst(itemInventory, fluidInventory);
         VirtualPatternBufferSlotState.stripVirtualTargets(itemInventory);
@@ -187,6 +183,7 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
     @Override
     public void gtShanhai$indexRefundSlot(Object slot, Object2LongOpenHashMap<AEItemKey> itemInventory,
             Object2LongOpenHashMap<AEFluidKey> fluidInventory) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return;
         if (slot == null) return;
         if (itemInventory != null) gtShanhai$slotByItemInventory.put(itemInventory, slot);
         if (fluidInventory != null) gtShanhai$slotByFluidInventory.put(fluidInventory, slot);
@@ -194,12 +191,14 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
 
     @Override
     public void gtShanhai$invalidateRefundSlotIndex() {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return;
         gtShanhai$slotByItemInventory.clear();
         gtShanhai$slotByFluidInventory.clear();
     }
 
     @Override
     public boolean gtShanhai$stripVirtualTargetsInSlot(int slotIndex) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return false;
         if (slotIndex < 0 || slotIndex >= getInternalSlotCount()) {
             return false;
         }
@@ -215,6 +214,7 @@ public abstract class GTLCoreMEPatternBufferVirtualProviderMixin implements Virt
 
     @Override
     public boolean gtShanhai$addVirtualTargetToSlot(int slotIndex, AEKey key, long amount) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return false;
         if (slotIndex < 0 || slotIndex >= getInternalSlotCount() || key == null || amount <= 0) {
             return false;
         }

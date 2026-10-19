@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarSuperPatternBufferPartMachine;
 
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachine;
 import org.spongepowered.asm.mixin.Mixin;
@@ -17,6 +18,7 @@ public class MEPatternBufferRecipeCacheRevisionMixin {
 
     @Inject(method = "hasRecipeCacheInSlot", at = @At("HEAD"), remap = false, require = 0)
     private void gtShanhai$invalidateStaleRecipeCache(int slot, CallbackInfoReturnable<Boolean> cir) {
+        if (!(((Object) this) instanceof StellarSuperPatternBufferPartMachine)) return;
         long currentRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
         if (gtShanhai$recipeCacheRevision == currentRevision) {
             return;

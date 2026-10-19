@@ -4,6 +4,7 @@ import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEItemKey;
 
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotAccess;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarSuperPatternBufferPartMachine;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -17,7 +18,10 @@ import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 
+import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachine;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -29,8 +33,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(targets = "org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachine$PatternBufferInternalSlot", remap = false)
 public class GTLCorePatternBufferCatalystVirtualGuardMixin {
 
+    /** 内部类自带的宿主引用；仅星律样板总成允许虚拟目标镜像进催化剂仓。 */
+    @Shadow
+    @Final
+    MEPatternBufferPartMachine this$0;
+
     @Inject(method = "testCatalystItemInternal", at = @At("RETURN"), cancellable = true, remap = false)
     private void gtShanhai$presenceIsLegalItemCatalyst(GTRecipe recipe, CallbackInfoReturnable<Boolean> cir) {
+        if (!(this$0 instanceof StellarSuperPatternBufferPartMachine)) return;
         if (cir.getReturnValueZ()) return;
         if (!((Object) this instanceof VirtualPatternBufferSlotAccess access)) return;
         if (gtShanhai$itemOverlapIsPresence(recipe, access)) {
@@ -40,6 +50,7 @@ public class GTLCorePatternBufferCatalystVirtualGuardMixin {
 
     @Inject(method = "testCatalystFluidInternal", at = @At("RETURN"), cancellable = true, remap = false)
     private void gtShanhai$presenceIsLegalFluidCatalyst(GTRecipe recipe, CallbackInfoReturnable<Boolean> cir) {
+        if (!(this$0 instanceof StellarSuperPatternBufferPartMachine)) return;
         if (cir.getReturnValueZ()) return;
         if (!((Object) this instanceof VirtualPatternBufferSlotAccess access)) return;
         if (gtShanhai$fluidOverlapIsPresence(recipe, access)) {

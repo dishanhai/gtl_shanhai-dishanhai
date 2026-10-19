@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.mixin;
 import com.dishanhai.gt_shanhai.common.item.PatternRecipeExecutionGuard;
 import com.dishanhai.gt_shanhai.common.item.PatternNotConsumableFilter;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferMachineAccess;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarSuperPatternBufferPartMachine;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 
@@ -54,6 +55,9 @@ public class MEPatternRecipeHandlePartVirtualProviderMixin {
             }
             Method method = gtShanhai$findMethod(meTrait.getClass(), "getMachine");
             Object machine = method.invoke(meTrait);
+            if (!(machine instanceof StellarSuperPatternBufferPartMachine)) {
+                return null;
+            }
             if (machine instanceof VirtualPatternBufferMachineAccess access) {
                 return access;
             }
