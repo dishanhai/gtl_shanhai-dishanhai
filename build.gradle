@@ -3,8 +3,8 @@ plugins {
     id 'idea'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
     id 'org.parchmentmc.librarian.forgegradle' version '1.+'
-    // Kotlin 语言支持：编译 src/main/kotlin，版本需与 Gradle 8.8 / JVM 21 兼容
-    id 'org.jetbrains.kotlin.jvm' version '2.0.21'
+    // 与 libs/kotlinforforge-4.12.0-all.jar 内的 stdlib 2.2.21 对齐
+    id 'org.jetbrains.kotlin.jvm' version '2.2.21'
 }
 
 java {
@@ -18,11 +18,11 @@ tasks.withType(JavaCompile).configureEach {
 
 // Kotlin 编译目标与 Java toolchain 对齐（Java 21）
 // 注意：Mixin 的 annotationProcessor 只作用于 Java；若要用 Kotlin 写 @Mixin，需要额外接入 kapt（当前未启用）
+// 2.2 起接口默认方法已是编译器默认行为，不再传 -Xjvm-default
 kotlin {
     jvmToolchain(21)
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
-        freeCompilerArgs.add('-Xjvm-default=all')
     }
 }
 
@@ -36,19 +36,17 @@ repositories {
     mavenCentral()
 }
 
-configurations {
-    // 仅用于把 Kotlin 运行时内嵌进 mod jar（不要用 runtimeClasspath，会把 libs 里的模组一起打进去）
-    kotlinEmbedded
-}
-
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    // Kotlin 运行时：编译期由 Kotlin 插件自动添加，这里单独声明用于打包
-    kotlinEmbedded 'org.jetbrains.kotlin:kotlin-stdlib:2.0.21'
+    // 核心 Kotlin：只认这颗 jar（stdlib 2.2.21）。不要再依赖插件自带的 kotlin-stdlib。
+    // 类不能解进 mod 根目录，否则和 thedarkcolour.kotlinforforge 抢 kotlin.* 导出。
+    // 运行时整包放进 META-INF/jarjar，让 Forge 在 gtladditions 自带的 4.11 和本包 4.12 之间选 4.12。
+    def kotlinForForge = files('libs/kotlinforforge-4.12.0-all.jar')
+    implementation kotlinForForge
 
     implementation fileTree(dir: 'libs', include: '*.jar',
-            excludes: ['spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar'])
+            excludes: ['spark-*.jar', 'jei-*.jar', '*gtlcore-1.2.3.2-fix3.jar', 'kotlinforforge-*.jar'])
     implementation files('libs/gtlcore-1.2.3.2-fix4.jar')
     implementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
     testImplementation files('libs/jei-1.20.1-forge-15.49.0.200.jar')
@@ -108,13 +106,40 @@ processResources {
     filesMatching(['pack.mcmeta']) { filteringCharset = 'UTF-8' }
 }
 
+def kotlinForForgeJar = file('libs/kotlinforforge-4.12.0-all.jar')
+def kotlinForForgeMetadata = layout.buildDirectory.file('generated/jarjar/metadata.json')
+
+tasks.register('writeKotlinForForgeMetadata') {
+    outputs.file(kotlinForForgeMetadata)
+    doLast {
+        def metadata = kotlinForForgeMetadata.get().asFile
+        metadata.parentFile.mkdirs()
+        metadata.setText('''{
+  "jars": [
+    {
+      "identifier": {
+        "group": "thedarkcolour",
+        "artifact": "kotlinforforge"
+      },
+      "version": {
+        "range": "[4.12.0,5.0.0)",
+        "artifactVersion": "4.12.0"
+      },
+      "path": "META-INF/jarjar/kotlinforforge-4.12.0-all.jar"
+    }
+  ]
+}
+''', 'UTF-8')
+    }
+}
+
 jar {
-    // 内嵌 Kotlin 运行时，运行环境无需额外安装 Kotlin for Forge
-    from({
-        configurations.kotlinEmbedded.collect { zipTree(it) }
-    }) {
-        exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'META-INF/MANIFEST.MF'
-        exclude 'META-INF/versions/**/module-info.class', 'module-info.class'
+    dependsOn 'writeKotlinForForgeMetadata'
+    from(kotlinForForgeJar) {
+        into 'META-INF/jarjar'
+    }
+    from(kotlinForForgeMetadata) {
+        into 'META-INF/jarjar'
     }
     manifest {
         attributes([
@@ -126,6 +151,30 @@ jar {
                 'Implementation-Vendor'   : mod_authors,
                 'MixinConfigs'            : 'gt_shanhai.mixin.json,gt_shanhai.minecraft.mixin.json,gt_shanhai.gtceu.mixin.json,gt_shanhai.gtlcore.mixin.json,gt_shanhai.gtladditions.mixin.json,gt_shanhai.ae2.mixin.json,gt_shanhai.ae2addons.mixin.json,gt_shanhai.jei.mixin.json,gt_shanhai.ftb.mixin.json,gt_shanhai.ldlib.mixin.json,gt_shanhai.guideme.mixin.json,gt_shanhai.optional.mixin.json,gt_shanhai.enhancedcore.mixin.json',
         ])
+    }
+    doLast {
+        def jarFile = archiveFile.get().asFile
+        def zip = new java.util.zip.ZipFile(jarFile)
+        try {
+            def bad = []
+            def entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                def name = entries.nextElement().name
+                def leaked = name.startsWith('kotlin/') || name.startsWith('kotlinx/') || name.startsWith('thedarkcolour/kotlinforforge/')
+                if (leaked) {
+                    bad.add(name)
+                }
+            }
+            if (!bad.isEmpty()) {
+                throw new GradleException('mod jar 根上出现了 Kotlin 包，会和 KotlinForForge 抢导出。例如: ' + bad.take(5))
+            }
+            if (zip.getEntry('META-INF/jarjar/kotlinforforge-4.12.0-all.jar') == null
+                    || zip.getEntry('META-INF/jarjar/metadata.json') == null) {
+                throw new GradleException('mod jar 缺少 KotlinForForge 4.12 Jar-in-Jar')
+            }
+        } finally {
+            zip.close()
+        }
     }
 }
 

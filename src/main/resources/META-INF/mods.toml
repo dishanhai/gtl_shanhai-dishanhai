@@ -39,6 +39,12 @@ description="Shanhai's private stash - Spacetime Wave Matrix"
     ordering="AFTER"
     side="BOTH"
 [[mods.dependencies]]
+    modId="kotlinforforge"
+    mandatory=true
+    versionRange="[4.12,5)"
+    ordering="AFTER"
+    side="BOTH"
+[[mods.dependencies]]
     modId="gtl_extend"
     mandatory=true
     versionRange="[0,)"

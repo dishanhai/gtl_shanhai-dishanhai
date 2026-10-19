@@ -1,16 +1,19 @@
 #version 150
 
-// 商店右侧详情面板的局部可分离高斯模糊。
+// 商店内容区的局部可分离高斯模糊。
 // 只处理 Rect 内部、Hole 外部的像素；Rect 外的像素原样输出，
-// 因此整屏后处理的成本基本只跟面板面积成正比。
+// 因此整屏后处理的成本基本只跟矩形面积成正比。
+// Smooth=0：5 次宽间距采样，给卡片飞行。文字会出残影，不要用在长文本上。
+// Smooth=1：步长约 radius/10 的密采样高斯，给描述详情和分组切页。
 uniform sampler2D DiffuseSampler;
 uniform vec2 InSize;
 uniform vec2 OutSize;
 uniform vec2 BlurDir;
 uniform float Radius;
 uniform float Progress;
+uniform float Smooth;
 uniform vec4 Rect;   // xy = 左下角 UV，zw = 右上角 UV
-uniform vec4 Hole;   // 正在飞行的卡片矩形，保持清晰
+uniform vec4 Hole;   // 正在飞行的卡片或浮层矩形，保持清晰
 
 in vec2 texCoord;
 in vec2 oneTexel;
@@ -44,9 +47,28 @@ void main() {
         return;
     }
 
-    vec2 dir = BlurDir * oneTexel * radius;
     vec2 lo = Rect.xy;
     vec2 hi = Rect.zw;
+
+    // 文字背后要连续的高斯，不能用下面那组宽间距 5-tap，否则字形会裂成残影。
+    if (Smooth > 0.5) {
+        float stepPx = max(1.0, radius / 10.0);
+        float sigma = max(radius / 2.5, stepPx);
+        vec2 step = BlurDir * oneTexel * stepPx;
+        vec4 sum = texture(DiffuseSampler, clamp(uv, lo, hi));
+        float wsum = 1.0;
+        for (int i = 1; i <= 10; i++) {
+            float dist = float(i) * stepPx;
+            float w = exp(-0.5 * (dist * dist) / (sigma * sigma));
+            sum += texture(DiffuseSampler, clamp(uv + step * float(i), lo, hi)) * w;
+            sum += texture(DiffuseSampler, clamp(uv - step * float(i), lo, hi)) * w;
+            wsum += w * 2.0;
+        }
+        fragColor = vec4(sum.rgb / wsum, 1.0);
+        return;
+    }
+
+    vec2 dir = BlurDir * oneTexel * radius;
 
     // 采样坐标夹在面板内部，避免把左侧网格/边框的颜色吸进面板边缘。
     vec4 sum = texture(DiffuseSampler, clamp(uv, lo, hi)) * W0;

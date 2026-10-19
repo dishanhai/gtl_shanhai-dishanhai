@@ -15,14 +15,14 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 商店右侧详情面板的局部高斯模糊。
+ * 商店内容区的局部高斯模糊。一帧最多两块矩形，共用同一条 {@link PostChain}，不另分配渲染目标。
  *
  * <p>实现路线按 {@code docs/blur-forge-高斯模糊技术分析-2026-10-19.md} 的结论收敛：</p>
  * <ul>
  *     <li>用原版 {@link PostChain} 做 2 趟可分离高斯（H → V），最后一趟落回 {@code minecraft:main}；</li>
- *     <li>5 次双线性采样近似 9-tap 高斯，权重 0.227 / 0.316 / 0.070，成本约 10 taps/px；</li>
- *     <li>{@code Rect} 把模糊限制在右侧商品面板，{@code Hole} 把正在飞的卡片挖掉保持清晰；</li>
- *     <li>{@code Progress} 随卡片落位从 1 淡到 0，模糊半径同步收缩。</li>
+ *     <li>默认 5 次宽间距采样，给卡片飞行；文字层走 {@link #requestSmooth} 的密采样高斯，避免字形残影；</li>
+ *     <li>{@code Rect} 把模糊限制在调用方给出的商店内矩形，{@code Hole} 把飞行卡片或浮层挖掉保持清晰；</li>
+ *     <li>{@code Progress} 由调用方驱动：飞行晚于位移淡入，浮层跟 150ms 弹入走。</li>
  * </ul>
  *
  * <p>执行时机是 {@link ScreenEvent.Render.Post}：它在 {@code Screen.render} 之后触发，
@@ -51,10 +51,17 @@ public final class ShopGaussBlur {
     private static boolean uniformFailed;
 
     private static boolean requested;
+    private static boolean requestSmooth;
     private static float requestStrength;
     private static float requestRadius = BLUR_RADIUS_VIRTUAL;
     private static float[] requestRect;
     private static float[] requestHole;
+    /** 同一帧的第二块矩形。飞行时用来糊源卡片；新的主请求会把它清掉。 */
+    private static boolean extraRequested;
+    private static float extraStrength;
+    private static float extraRadius = BLUR_RADIUS_VIRTUAL;
+    private static float[] extraRect;
+    private static float[] extraHole;
 
     private ShopGaussBlur() {
     }
@@ -72,7 +79,7 @@ public final class ShopGaussBlur {
             // 避免第一帧 isReady() 误报可用而闪烁一次。
             try {
                 uniformFailed = !applyUniforms(post, 1f, BLUR_RADIUS_VIRTUAL,
-                        new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f});
+                        new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f}, false);
             } catch (Exception e) {
                 uniformFailed = true;
                 GTDishanhaiMod.LOGGER.error("商店高斯模糊 uniform 预检失败，已回退为局部磨砂", e);
@@ -93,6 +100,11 @@ public final class ShopGaussBlur {
     public static void request(int x, int y, int w, int h, float strength,
                                float radiusPixels,
                                int holeX, int holeY, int holeW, int holeH) {
+        // 新的主矩形取代上一块，避免飞行模糊和浮层模糊在同一帧叠两次。
+        extraRequested = false;
+        extraRect = null;
+        extraHole = null;
+        requestSmooth = false;
         if (strength <= 0.01f || w <= 0 || h <= 0) {
             clear();
             return;
@@ -110,12 +122,49 @@ public final class ShopGaussBlur {
         requested = true;
     }
 
+    /**
+     * 同 {@link #request}，但走密采样高斯。描述详情和分组切页用这条，宽间距 5-tap 会把文字打成残影。
+     */
+    public static void requestSmooth(int x, int y, int w, int h, float strength,
+                                     float radiusPixels,
+                                     int holeX, int holeY, int holeW, int holeH) {
+        request(x, y, w, h, strength, radiusPixels, holeX, holeY, holeW, holeH);
+        if (requested) requestSmooth = true;
+    }
+
+    /**
+     * 同一帧的第二块矩形。不清除主请求。宽高小于等于 0 或强度过低时忽略。
+     * 坐标同样是 framebuffer 像素，原点在左上角。
+     */
+    public static void requestExtra(int x, int y, int w, int h, float strength,
+                                    float radiusPixels,
+                                    int holeX, int holeY, int holeW, int holeH) {
+        if (strength <= 0.01f || w <= 0 || h <= 0) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getMainRenderTarget() == null) return;
+        int fbW = mc.getMainRenderTarget().width;
+        int fbH = mc.getMainRenderTarget().height;
+        extraRect = toUvRect(x, y, w, h, fbW, fbH);
+        extraHole = holeW > 0 && holeH > 0
+                ? toUvRect(holeX, holeY, holeW, holeH, fbW, fbH)
+                : new float[]{0f, 0f, 0f, 0f};
+        extraStrength = clamp01(strength);
+        extraRadius = radiusPixels > 0f ? radiusPixels : BLUR_RADIUS_VIRTUAL;
+        extraRequested = true;
+    }
+
     public static void clear() {
         requested = false;
+        requestSmooth = false;
         requestStrength = 0f;
         requestRadius = BLUR_RADIUS_VIRTUAL;
         requestRect = null;
         requestHole = null;
+        extraRequested = false;
+        extraStrength = 0f;
+        extraRadius = BLUR_RADIUS_VIRTUAL;
+        extraRect = null;
+        extraHole = null;
     }
 
     /**
@@ -124,19 +173,35 @@ public final class ShopGaussBlur {
      */
     public static void onScreenRenderPost(ScreenEvent.Render.Post event) {
         boolean hadRequest = requested;
+        boolean smooth = requestSmooth;
         float strength = requestStrength;
         float radius = requestRadius;
         float[] rect = requestRect;
         float[] hole = requestHole;
+        boolean hadExtra = extraRequested;
+        float strength2 = extraStrength;
+        float radius2 = extraRadius;
+        float[] rect2 = extraRect;
+        float[] hole2 = extraHole;
         clear();
 
-        if (!hadRequest || rect == null || strength <= 0.01f) return;
+        boolean primary = hadRequest && rect != null && strength > 0.01f;
+        boolean extra = hadExtra && rect2 != null && strength2 > 0.01f;
+        if (!primary && !extra) return;
         if (!(event.getScreen() instanceof ShopScreen)) return;
         if (event.getGuiGraphics() != null) {
             event.getGuiGraphics().flush();
         }
-        render(Minecraft.getInstance(), strength, radius, rect,
-                hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, event.getPartialTick());
+        float partialTick = event.getPartialTick();
+        Minecraft mc = Minecraft.getInstance();
+        if (primary) {
+            render(mc, strength, radius, rect,
+                    hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, smooth, partialTick);
+        }
+        if (extra && isReady()) {
+            render(mc, strength2, radius2, rect2,
+                    hole2 == null ? new float[]{0f, 0f, 0f, 0f} : hole2, false, partialTick);
+        }
     }
 
     /**
@@ -155,7 +220,7 @@ public final class ShopGaussBlur {
     }
 
     private static void render(Minecraft mc, float strength, float radius,
-                               float[] rect, float[] hole, float partialTick) {
+                               float[] rect, float[] hole, boolean smooth, float partialTick) {
         PostChain post = ensureChain(mc);
         if (post == null) return;
         if (mc.getMainRenderTarget() == null) return;
@@ -168,7 +233,7 @@ public final class ShopGaussBlur {
             chainHeight = fbH;
         }
         // 反射/着色器 uniform 任一不可用就整个跳过，绝不让 Rect 落回默认的全屏值。
-        if (!applyUniforms(post, strength, radius, rect, hole)) {
+        if (!applyUniforms(post, strength, radius, rect, hole, smooth)) {
             uniformFailed = true;
             return;
         }
@@ -202,7 +267,7 @@ public final class ShopGaussBlur {
     }
 
     private static boolean applyUniforms(PostChain post, float strength, float radius,
-                                         float[] rect, float[] hole) {
+                                         float[] rect, float[] hole, boolean smooth) {
         List<PostPass> passes = passesOf(post);
         if (passes.isEmpty()) return false;
         boolean allReady = true;
@@ -210,13 +275,15 @@ public final class ShopGaussBlur {
             Uniform rectUniform = pass.getEffect().getUniform("Rect");
             Uniform holeUniform = pass.getEffect().getUniform("Hole");
             Uniform progressUniform = pass.getEffect().getUniform("Progress");
-            if (rectUniform == null || holeUniform == null || progressUniform == null) {
+            Uniform smoothUniform = pass.getEffect().getUniform("Smooth");
+            if (rectUniform == null || holeUniform == null || progressUniform == null || smoothUniform == null) {
                 allReady = false;
                 continue;
             }
             rectUniform.set(rect[0], rect[1], rect[2], rect[3]);
             holeUniform.set(hole[0], hole[1], hole[2], hole[3]);
             progressUniform.set(strength);
+            smoothUniform.set(smooth ? 1f : 0f);
             Uniform radiusUniform = pass.getEffect().getUniform("Radius");
             if (radiusUniform != null) {
                 radiusUniform.set(radius);

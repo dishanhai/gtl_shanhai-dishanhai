@@ -173,6 +173,11 @@ public class ShopScreen extends ScaledScreen {
     private int cardFlightDstH;
     // 最近几帧的进度，用来画残影（越旧越大、越淡），不需要保存整屏截图
     private final float[] cardFlightTrails = new float[3];
+    // 右侧高斯模糊比位移晚一拍。弹簧从速度 0 起手，若 Progress 第一帧就是 1，
+    // 玩家会先看到面板糊掉，卡片才离开原位。前 32ms 保持清晰，再用 48ms 淡入。
+    private static final float PANEL_BLUR_DELAY_MS = 32f;
+    private static final float PANEL_BLUR_IN_MS = 48f;
+    private long cardFlightStartMs;
     private long amount = 1L;      // 购买/出售次数，支持 Long.MAX
     private AnimatableEditBox searchBox;
     private AnimatableEditBox amountBox;
@@ -204,6 +209,10 @@ public class ShopScreen extends ScaledScreen {
     private static final long FLASH_DISPLAY_MS = 5000L;
     private static final long FLASH_SLIDE_MS = GuiRenderUtil.MOTION_MS;
     private static final int FLASH_ROW_H = 17;          // 每行高度（含 1px 行间隙）
+    /** 进场起点槽位。约 20px，第一帧就有约 4px 露在面板底缘内。 */
+    private static final float FLASH_ENTER_FROM = -1.18f;
+    /** 分组切页在 32px 基线滑入上再走的同向距离。仍是一条横向通道，不叠缩放。 */
+    private static final float GROUP_SLIDE_EXTRA = 24f;
 
     /** 由 {@link ShopChatMirror} 调用：推入一条商店消息，最多同时显示 {@link #FLASH_MAX_VISIBLE} 条。 */
     public static void showMessage(net.minecraft.network.chat.Component msg) {
@@ -216,7 +225,7 @@ public class ShopScreen extends ScaledScreen {
         FlashMsg m = new FlashMsg();
         m.text = msg.getString();
         m.expireAtMs = now + FLASH_DISPLAY_MS;
-        m.fromSlot = -1f; // 从底部（比槽位0更低一层）滑入
+        m.fromSlot = FLASH_ENTER_FROM; // 从面板底缘升起，不从已经露出来的位置硬切
         m.toSlot = 0;
         m.slotChangedAtMs = now;
         flashActive.add(0, m);
@@ -265,10 +274,6 @@ public class ShopScreen extends ScaledScreen {
         return m.fromSlot + (m.toSlot - m.fromSlot) * GuiRenderUtil.easeOut(t);
     }
 
-    /** 按当前视觉槽位算出这条消息该画在哪一行。静止时槽位是整数。 */
-    private static int flashRowY(FlashMsg m, long now, int baseY) {
-        return (int) (baseY - flashVisualSlot(m, now) * FLASH_ROW_H);
-    }
     // 删除误触防护：需在窗口期内对同一条目再点一次「删除此商品」才真正执行；实例级=只跟当前这次打开的界面走
     private ShopEntry pendingDeleteEntry;
     private long pendingDeleteArmedAtMs;
@@ -350,7 +355,9 @@ public class ShopScreen extends ScaledScreen {
         double dx = (this.cardFlightDstX + this.cardFlightDstW / 2.0) - (this.cardFlightSrcX + this.cardFlightSrcW / 2.0);
         double dy = (this.cardFlightDstY + this.cardFlightDstH / 2.0) - (this.cardFlightSrcY + this.cardFlightSrcH / 2.0);
         double response = GuiRenderUtil.flightResponseForDistance(Math.hypot(dx, dy));
-        this.cardFlightSpring.start(System.currentTimeMillis(), response);
+        long now = System.currentTimeMillis();
+        this.cardFlightStartMs = now;
+        this.cardFlightSpring.start(now, response);
         for (int i = 0; i < this.cardFlightTrails.length; i++) this.cardFlightTrails[i] = 0f;
         this.cardFlightActive = true;
     }
@@ -1385,17 +1392,21 @@ public class ShopScreen extends ScaledScreen {
             if (rowVisible(level)) renderTabRow(g, level, mx, my);
         }
 
-        // 左侧网格背景（切页横切滑入：纯 PoseStack 平移，方向按页签左右顺序走，彰显"切"的方向感，
-        // 见反馈：切页不该用缩放弹入，要左右横切；drawGrid 内部自带 scissor 裁到 gx..gx+gw，
-        // 滑入途中溢出的部分会被天然裁掉，不会盖到旁边的页签/详情栏）
+        // 左侧网格背景（分组切页：横向滑入，方向按页签左右顺序走。不叠缩放。
+        // drawGrid 内部自带 scissor，滑入途中溢出的部分不会盖到页签/详情栏。
+        // 滑入期间对网格做平滑高斯，落位后收干净，避免宽间距核把商品名打成残影。）
         int gx = listLeft(), gy = contentTop(), gw = listWidth(), gh = contentHeight();
         g.fill(gx, gy, gx + gw, gy + gh, BOX_BG);
         float gridT = GuiRenderUtil.popAnimProgress(gridSwitchAtMs, GuiRenderUtil.MOTION_MS);
         if (gridT < 1f) {
+            float arrive = GuiRenderUtil.easeOut(gridT);
             g.pose().pushPose();
             GuiRenderUtil.slideInX(g, gridSlideDir, gridT);
+            float extra = GROUP_SLIDE_EXTRA * (1f - arrive);
+            if (extra != 0f) g.pose().translate(gridSlideDir * extra, 0f, 0f);
             drawGrid(g, mx, my);
             g.pose().popPose();
+            requestGroupSwitchGauss(1f - arrive);
         } else {
             drawGrid(g, mx, my);
         }
@@ -1414,9 +1425,7 @@ public class ShopScreen extends ScaledScreen {
                 // 这类立即绘制的 flat quad 不在同一批次；不强制 flush 会导致图标在批次刷新时"跳"到横幅上层，
                 // 盖住文字（同 ShopEntryEditScreen 描述展开编写大图层的穿模成因，见其 renderScaledBackground 注释）。
                 g.flush();
-                int baseY = top + panelHeight - 24;
-                for (FlashMsg m : flashLeaving) drawFlashRow(g, m, now, baseY);
-                for (FlashMsg m : flashActive) drawFlashRow(g, m, now, baseY);
+                drawFlashStack(g, now);
             }
         }
 
@@ -1469,15 +1478,34 @@ public class ShopScreen extends ScaledScreen {
         return GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS);
     }
 
+    /** 提示从面板底缘升起。裁在面板内，动画中用小数 Y，落位后回到整数。 */
+    private void drawFlashStack(GuiGraphics g, long now) {
+        enableGridScissor(g, left + 2, top + 2, left + panelWidth - 2, top + panelHeight);
+        try {
+            int baseY = top + panelHeight - 24;
+            for (FlashMsg m : flashLeaving) drawFlashRow(g, m, now, baseY);
+            for (FlashMsg m : flashActive) drawFlashRow(g, m, now, baseY);
+        } finally {
+            g.disableScissor();
+        }
+    }
+
     /** 画一条消息横幅：按其动画槽位算出当前 Y，宽度随文字自适应，样式跟原先的单槽横幅一致。 */
     private void drawFlashRow(GuiGraphics g, FlashMsg m, long now, int baseY) {
-        int y = flashRowY(m, now, baseY);
+        float yf = baseY - flashVisualSlot(m, now) * FLASH_ROW_H;
+        float drawY = Math.abs(yf - Math.round(yf)) < 0.05f ? Math.round(yf) : yf;
         int w = this.font.width(m.text);
         int bannerW = Math.min(panelWidth - 12, w + 16);
         int bannerX = left + (panelWidth - bannerW) / 2;
-        g.fill(bannerX, y, bannerX + bannerW, y + 16, 0xE0101010);   // 半透明黑底
-        g.fill(bannerX, y, bannerX + bannerW, y + 1, 0xFF00C0C0);    // 顶部青线
-        g.drawCenteredString(this.font, m.text, left + panelWidth / 2, y + 4, 0xFFFFFF);
+        g.pose().pushPose();
+        try {
+            g.pose().translate(bannerX, drawY, 0);
+            g.fill(0, 0, bannerW, 16, 0xE0101010);   // 半透明黑底
+            g.fill(0, 0, bannerW, 1, 0xFF00C0C0);    // 顶部青线
+            g.drawCenteredString(this.font, m.text, bannerW / 2, 4, 0xFFFFFF);
+        } finally {
+            g.pose().popPose();
+        }
     }
 
     /** 绘制在阶段锁定层之后，避免锁定面板遮住提交失败/模式切换提示。 */
@@ -1486,9 +1514,7 @@ public class ShopScreen extends ScaledScreen {
         tickFlash(now);
         if (flashActive.isEmpty() && flashLeaving.isEmpty()) return;
         g.flush();
-        int baseY = top + panelHeight - 24;
-        for (FlashMsg m : flashLeaving) drawFlashRow(g, m, now, baseY);
-        for (FlashMsg m : flashActive) drawFlashRow(g, m, now, baseY);
+        drawFlashStack(g, now);
     }
 
     private static final int DESC_OVERLAY_CLOSE_W = 16;
@@ -1541,29 +1567,25 @@ public class ShopScreen extends ScaledScreen {
             return;
         }
         if (guideOverlayOpen && selected != null) {
-            g.fill(0, 0, vWidth, vHeight, 0xC0000000);
             int[] r = guideOverlayBounds();
-            drawPopPanel(g, guideOverlayOpenAtMs, r[0], r[1], r[2], r[3], () -> renderGuideOverlay(g, mx, my));
+            openBlurredOverlay(g, guideOverlayOpenAtMs, r[0], r[1], r[2], r[3], () -> renderGuideOverlay(g, mx, my));
             return;
         }
         if (groupPickerOpen && groupPickerEntry != null) {
-            g.fill(0, 0, vWidth, vHeight, 0xC0000000);
             int[] r = groupPickerBounds();
-            drawPopPanel(g, groupPickerOpenAtMs, r[0], r[1], r[2], r[3], () -> renderGroupPicker(g, mx, my));
+            openBlurredOverlay(g, groupPickerOpenAtMs, r[0], r[1], r[2], r[3], () -> renderGroupPicker(g, mx, my));
             return;
         }
         if (cartOverlayOpen) {
-            g.fill(0, 0, vWidth, vHeight, 0xC0000000);
             int[] cr = cartOverlayBounds();
-            drawPopPanel(g, cartOverlayOpenAtMs, cr[0], cr[1], cr[2], cr[3], () -> renderCartOverlay(g, mx, my));
+            openBlurredOverlay(g, cartOverlayOpenAtMs, cr[0], cr[1], cr[2], cr[3], () -> renderCartOverlay(g, mx, my));
             return;
         }
         if (!descOverlayOpen || selected == null) return;
         int[] r = descOverlayBounds();
         int ox = r[0], oy = r[1], ow = r[2];
 
-        g.fill(0, 0, vWidth, vHeight, 0xC0000000);
-        drawPopPanel(g, descOverlayOpenAtMs, ox, oy, ow, r[3], () -> {
+        openSmoothTextOverlay(g, descOverlayOpenAtMs, ox, oy, ow, r[3], () -> {
         renderBox(g, ox, oy, ow, r[3], GOLD_DARK, PANEL_BG);
 
         g.drawString(this.font, GuiRenderUtil.trimText(this.font,
@@ -1590,6 +1612,121 @@ public class ShopScreen extends ScaledScreen {
     private void drawPopPanel(GuiGraphics g, long atMs, int x, int y, int w, int h, Runnable draw) {
         GuiRenderUtil.withPopScale(g, x + w / 2f, y + h / 2f,
                 GuiRenderUtil.popAnimProgress(atMs, GuiRenderUtil.MOTION_MS), draw);
+    }
+
+    /**
+     * 大图层打开时，商品区跟同一条 150ms 弹入做高斯淡入。浮层矩形挖洞保持清晰。
+     * 商店外的世界只压暗，不进模糊矩形。
+     */
+    private void openBlurredOverlay(GuiGraphics g, long atMs, int x, int y, int w, int h, Runnable draw) {
+        float strength = GuiRenderUtil.easeOut(GuiRenderUtil.popAnimProgress(atMs, GuiRenderUtil.MOTION_MS));
+        int[] content = shopContentRect();
+        requestContentGauss(strength, x, y, w, h);
+        drawModalScrim(g, content[0], content[1], content[2], content[3]);
+        drawPopPanel(g, atMs, x, y, w, h, draw);
+    }
+
+    /**
+     * 描述详情是长文本，只用密采样高斯。宽间距 5-tap 会把背后的商品名打成残影。
+     * 浮层矩形仍然挖洞，面板本身保持清晰。
+     */
+    private void openSmoothTextOverlay(GuiGraphics g, long atMs, int x, int y, int w, int h, Runnable draw) {
+        float strength = GuiRenderUtil.easeOut(GuiRenderUtil.popAnimProgress(atMs, GuiRenderUtil.MOTION_MS));
+        int[] content = shopContentRect();
+        requestContentGauss(strength, x, y, w, h, true);
+        drawModalScrim(g, content[0], content[1], content[2], content[3]);
+        drawPopPanel(g, atMs, x, y, w, h, draw);
+    }
+
+    /** 网格 + 详情列。横幅占着底部时把模糊下沿抬上去，避免把提示文字糊掉。 */
+    private int[] shopContentRect() {
+        return clampToShopInner(listLeft(), contentTop(),
+                detailX() + DETAIL_W - listLeft(),
+                contentBlurBottom() - contentTop());
+    }
+
+    private int contentBlurBottom() {
+        int bottom = contentTop() + contentHeight();
+        if (!flashActive.isEmpty() || !flashLeaving.isEmpty()) {
+            bottom = Math.min(bottom, top + panelHeight - 28);
+        }
+        return bottom;
+    }
+
+    /** 夹到商店面板内缘，避免高斯采样到面板外的游戏世界。 */
+    private int[] clampToShopInner(int x, int y, int w, int h) {
+        int x0 = Math.max(x, left + 6);
+        int y0 = Math.max(y, top + TOP_BAR_H + 8);
+        int x1 = Math.min(x + w, left + panelWidth - 6);
+        int y1 = Math.min(y + h, top + panelHeight - 8);
+        if (x1 <= x0 || y1 <= y0) return new int[]{x0, y0, 0, 0};
+        return new int[]{x0, y0, x1 - x0, y1 - y0};
+    }
+
+    private void requestContentGauss(float strength, int holeX, int holeY, int holeW, int holeH) {
+        requestContentGauss(strength, holeX, holeY, holeW, holeH, false);
+    }
+
+    private void requestContentGauss(float strength, int holeX, int holeY, int holeW, int holeH, boolean smooth) {
+        int[] content = shopContentRect();
+        requestPanelGauss(content[0], content[1], content[2], content[3],
+                strength, holeX, holeY, holeW, holeH, smooth);
+    }
+
+    /** 分组切页只糊网格。落位后强度归零，商品名恢复清晰。横幅区域不进矩形。 */
+    private void requestGroupSwitchGauss(float strength) {
+        int topY = contentTop();
+        int h = contentBlurBottom() - topY;
+        requestPanelGauss(listLeft(), topY, listWidth(), h, strength, 0, 0, 0, 0, true);
+    }
+
+    private void requestPanelGauss(int x, int y, int w, int h, float strength,
+                                   int holeX, int holeY, int holeW, int holeH) {
+        requestPanelGauss(x, y, w, h, strength, holeX, holeY, holeW, holeH, false);
+    }
+
+    private void requestPanelGauss(int x, int y, int w, int h, float strength,
+                                   int holeX, int holeY, int holeW, int holeH, boolean smooth) {
+        if (strength <= 0.01f || w <= 0 || h <= 0) return;
+        if (this.minecraft == null || this.minecraft.getMainRenderTarget() == null) return;
+        int[] rect = clampToShopInner(x, y, w, h);
+        if (rect[2] <= 1 || rect[3] <= 1) return;
+        float pixelScale = (float) this.minecraft.getMainRenderTarget().width
+                / (float) Math.max(1, this.width);
+        float radiusPx = ShopGaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
+        int pad = 2;
+        boolean hole = holeW > 0 && holeH > 0;
+        int hx = hole ? toFramebufferX(holeX - pad) : 0;
+        int hy = hole ? toFramebufferY(holeY - pad) : 0;
+        int hw = hole ? toFramebufferW(holeW + pad * 2) : 0;
+        int hh = hole ? toFramebufferH(holeH + pad * 2) : 0;
+        if (smooth) {
+            ShopGaussBlur.requestSmooth(
+                    toFramebufferX(rect[0]), toFramebufferY(rect[1]),
+                    toFramebufferW(rect[2]), toFramebufferH(rect[3]),
+                    strength, radiusPx, hx, hy, hw, hh);
+        } else {
+            ShopGaussBlur.request(
+                    toFramebufferX(rect[0]), toFramebufferY(rect[1]),
+                    toFramebufferW(rect[2]), toFramebufferH(rect[3]),
+                    strength, radiusPx, hx, hy, hw, hh);
+        }
+    }
+
+    /** 世界和顶栏维持深遮罩；商品区只铺一层淡罩，让帧末高斯还能看见内容。着色器不可用时整屏回到深遮罩。 */
+    private void drawModalScrim(GuiGraphics g, int x, int y, int w, int h) {
+        int dim = 0xC0000000;
+        if (w <= 0 || h <= 0 || !ShopGaussBlur.isReady()) {
+            g.fill(0, 0, vWidth, vHeight, dim);
+            return;
+        }
+        int right = x + w;
+        int bottom = y + h;
+        if (y > 0) g.fill(0, 0, vWidth, y, dim);
+        if (bottom < vHeight) g.fill(0, bottom, vWidth, vHeight, dim);
+        if (x > 0) g.fill(0, y, x, bottom, dim);
+        if (right < vWidth) g.fill(right, y, vWidth, bottom, dim);
+        g.fill(x, y, right, bottom, 0x40000000);
     }
 
     /** 描述详情大图层右侧滚动条：轨道常驻绘制，超出可视行数时叠一段可拖拽把手（同 {@link #drawGridScrollbar} 风格）。 */
@@ -3066,9 +3203,9 @@ public class ShopScreen extends ScaledScreen {
      * 几何通道，不额外叠平移/缩放两套动画；图标与名称按同一 p 从卡片头部滑到详情头部，
      * 落地时正好压在详情面板的同名元素上，再随遮罩一起淡出，避免换内容的硬切。</p>
      *
-     * <p>源卡片保留在原位，用磨砂 + 偏移重绘近似高斯模糊；右侧详情面板则交给
-     * {@link ShopGaussBlur} 的两趟可分离高斯后处理，并挖掉正在飞行的卡片保持清晰。
-     * 后处理在界面帧末对 {@code minecraft:main} 做局部采样；源卡片仍是纯 {@code g.fill} 叠层。</p>
+     * <p>源卡片留在原位，磨砂叠层之外再交给 {@link ShopGaussBlur} 做第二块高斯；
+     * 右侧详情面板是第一块。两块都挖掉正在飞行的卡片。后处理在界面帧末对
+     * {@code minecraft:main} 做局部采样，不另分配渲染目标。</p>
      */
     private void renderCardFlight(GuiGraphics g) {
         if (!cardFlightActive || cardFlightEntry == null) return;
@@ -3107,8 +3244,11 @@ public class ShopScreen extends ScaledScreen {
             g.setColor(1f, 1f, 1f, fade);
 
             // 右侧详情面板：真正的两趟可分离高斯后处理（ScreenEvent.Render.Post）。
-            // Rect 只覆盖详情列，Hole 把正在飞的卡片挖掉保持清晰；Progress 随落位 1 → 0 结束模糊。
-            float panelBlur = 1f - smoothstep(0.90f, 1f, p);
+            // Rect 只覆盖详情列，Hole 把正在飞的卡片挖掉保持清晰。
+            // 模糊晚于位移：前 32ms 清晰，32→80ms 淡入，落位仍在 p 0.90→1 淡出。
+            float elapsed = (float) (System.currentTimeMillis() - this.cardFlightStartMs);
+            float blurIn = smoothstep(PANEL_BLUR_DELAY_MS, PANEL_BLUR_DELAY_MS + PANEL_BLUR_IN_MS, elapsed);
+            float panelBlur = blurIn * (1f - smoothstep(0.90f, 1f, p));
             if (panelBlur > 0.01f) {
                 int detailLeft = detailX();
                 int detailTop = contentTop();
@@ -3121,6 +3261,13 @@ public class ShopScreen extends ScaledScreen {
                 ShopGaussBlur.request(
                         toFramebufferX(detailLeft), toFramebufferY(detailTop),
                         toFramebufferW(detailW), toFramebufferH(detailH),
+                        panelBlur, radiusPx,
+                        toFramebufferX(rx - 2), toFramebufferY(ry - 2),
+                        toFramebufferW(rw + 4), toFramebufferH(rh + 4));
+                // 源卡片同一条进度再糊一块。主请求会清掉旧的第二矩形，所以必须紧跟在 request 后面。
+                ShopGaussBlur.requestExtra(
+                        toFramebufferX(cardFlightSrcX), toFramebufferY(cardFlightSrcY),
+                        toFramebufferW(cardFlightSrcW), toFramebufferH(cardFlightSrcH),
                         panelBlur, radiusPx,
                         toFramebufferX(rx - 2), toFramebufferY(ry - 2),
                         toFramebufferW(rw + 4), toFramebufferH(rh + 4));
@@ -3334,7 +3481,6 @@ public class ShopScreen extends ScaledScreen {
         int areaY = contentTop();
         int areaW = detailX() + DETAIL_W - areaX;
         int areaH = contentHeight();
-        renderStageLockBlur(g, areaX, areaY, areaW, areaH);
         if (stageLockShownAtMs <= 0L) stageLockShownAtMs = System.currentTimeMillis();
 
         List<ExchangeEntry.Ingredient> requirements =
@@ -3343,6 +3489,10 @@ public class ShopScreen extends ScaledScreen {
         int oh = Math.min(Math.max(150, areaH - 18), 190);
         int ox = areaX + (areaW - ow) / 2;
         int oy = areaY + (areaH - oh) / 2;
+        float strength = GuiRenderUtil.easeOut(
+                GuiRenderUtil.popAnimProgress(stageLockShownAtMs, GuiRenderUtil.MOTION_MS));
+        requestContentGauss(strength, ox, oy, ow, oh);
+        renderStageLockBlur(g, areaX, areaY, areaW, areaH, strength);
         drawPopPanel(g, stageLockShownAtMs, ox, oy, ow, oh, () -> drawStageLockCard(g, mx, my, ox, oy, ow, oh, requirements));
     }
 
@@ -3369,9 +3519,10 @@ public class ShopScreen extends ScaledScreen {
                 "§a提交阶段固定物品", mx, my);
     }
 
-    /** 阶段锁定压暗商品区。半透明填充，不采样画面。 */
-    private void renderStageLockBlur(GuiGraphics g, int x, int y, int w, int h) {
-        g.fill(x, y, x + w, y + h, 0xC8181818);
+    /** 阶段锁定压暗商品区。罩色随弹入加深；真正的糊由帧末高斯负责，这里不采样画面。 */
+    private void renderStageLockBlur(GuiGraphics g, int x, int y, int w, int h, float strength) {
+        int alpha = 0x78 + Math.round((0xC8 - 0x78) * clamp01(strength));
+        g.fill(x, y, x + w, y + h, (alpha << 24) | 0x181818);
     }
 
     @Override
@@ -4298,6 +4449,11 @@ public class ShopScreen extends ScaledScreen {
         if (ctxMenuX + ctxMenuW > vWidth - 4) ctxMenuX = Math.max(4, vWidth - 4 - ctxMenuW);
         if (ctxMenuY + totalH > vHeight - 4) ctxMenuY = Math.max(4, vHeight - 4 - totalH);
         int menuX = ctxMenuX, menuY = ctxMenuY, menuH = totalH;
+        float menuBlur = GuiRenderUtil.easeOut(
+                GuiRenderUtil.popAnimProgress(ctxMenuOpenAtMs, GuiRenderUtil.MOTION_MS));
+        int pad = 16;
+        requestPanelGauss(menuX - pad, menuY - pad, ctxMenuW + pad * 2, menuH + pad * 2,
+                menuBlur, menuX, menuY, ctxMenuW, menuH);
         drawPopPanel(g, ctxMenuOpenAtMs, menuX, menuY, ctxMenuW, menuH, () -> drawContextMenuBody(g, mx, my, menuH));
     }
 
