@@ -11,7 +11,6 @@ import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -56,8 +55,9 @@ public class ExchangeScreen extends ScaledScreen {
     private List<ExchangeEntry> entries = new ArrayList<>();
     private ExchangeEntry selected;
     private long times = 1L;
-    private EditBox timesBox;
+    private AnimatableEditBox timesBox;
     private int scroll = 0;
+    private final long screenOpenAtMs = System.currentTimeMillis();
 
     private int left, top, panelWidth, panelHeight;
 
@@ -98,7 +98,7 @@ public class ExchangeScreen extends ScaledScreen {
         if (selected == null && !entries.isEmpty()) selected = entries.get(0);
 
         int cx = detailX() + 8;
-        timesBox = new EditBox(this.font, cx, detailY(150), 120, 12, Component.literal("数量"));
+        timesBox = new AnimatableEditBox(this.font, cx, detailY(150), 120, 12, Component.literal("数量"));
         timesBox.setValue(Long.toString(Math.max(1L, times)));
         timesBox.setBordered(true);
         timesBox.setTextColor(0xFFFFFF);
@@ -125,7 +125,18 @@ public class ExchangeScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
-        if (timesBox != null) timesBox.setVisible(selected != null);
+        if (timesBox != null) {
+            timesBox.setVisible(selected != null);
+            timesBox.setAnim(() -> GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS),
+                    left + panelWidth / 2f, top + panelHeight / 2f);
+        }
+        float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS);
+        boolean opening = openT < 1f;
+        if (opening) {
+            g.pose().pushPose();
+            GuiRenderUtil.popScaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openT);
+        }
+        try {
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
         g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
@@ -139,6 +150,9 @@ public class ExchangeScreen extends ScaledScreen {
 
         drawList(g, mx, my);
         drawDetail(g, mx, my);
+        } finally {
+            if (opening) g.pose().popPose();
+        }
     }
 
     private void drawList(GuiGraphics g, int mx, int my) {

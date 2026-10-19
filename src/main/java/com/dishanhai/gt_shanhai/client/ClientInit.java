@@ -73,6 +73,9 @@ public class ClientInit {
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey::onClientTick);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey::onItemTooltip);
         MinecraftForge.EVENT_BUS.addListener(com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey::onClientTick);
+        // 商店右侧详情面板的局部高斯模糊：在 Screen.render 之后对 main 做后处理。
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
+                com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur::onScreenRenderPost);
         com.dishanhai.gt_shanhai.client.recipe.ShanhaiRecipeStackPicker.install();
     }
 
