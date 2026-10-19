@@ -19,7 +19,6 @@ import com.gregtechceu.gtceu.api.registry.registrate.MachineBuilder;
 
 import com.gregtechceu.gtceu.api.block.MetaMachineBlock;
 import com.gregtechceu.gtceu.api.blockentity.MetaMachineBlockEntity;
-import com.gregtechceu.gtceu.client.renderer.machine.MachineRenderer;
 import com.gregtechceu.gtceu.client.renderer.machine.MaintenanceHatchPartRenderer;
 import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRenderer;
 import com.gregtechceu.gtceu.common.data.GCyMRecipeTypes;
@@ -86,7 +85,6 @@ import com.dishanhai.gt_shanhai.common.machine.part.StarRailMEOutputMatrixPartMa
 import com.dishanhai.gt_shanhai.common.machine.structure.STRStructure;
 import com.dishanhai.gt_shanhai.client.renderer.machine.PrimordialOmegaEngineRenderer;
 import com.dishanhai.gt_shanhai.client.renderer.machine.SpacetimeWaveMatrixRenderer;
-import com.gtladd.gtladditions.utils.CommonUtils;
 
 import java.util.ArrayList;
 import java.util.List;

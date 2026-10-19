@@ -1,11 +1,9 @@
 package com.dishanhai.gt_shanhai.api;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-import com.dishanhai.gt_shanhai.api.recipe.DShanhaiRecipeTypes;
 import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.registries.ForgeRegistries;
 

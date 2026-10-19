@@ -272,10 +272,6 @@ public final class EaepProviderRecipeTypeBridge {
         return path;
     }
 
-    private static boolean tokenMatches(String token, String query) {
-        return tokenMatchScore(token, query) > 0;
-    }
-
     private static int tokenMatchScore(String token, String query) {
         if (token == null || token.isBlank()) {
             return 0;

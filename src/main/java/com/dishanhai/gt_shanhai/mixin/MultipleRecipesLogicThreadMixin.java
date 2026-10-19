@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.mixin;
 
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
-import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gtladd.gtladditions.api.machine.feature.IThreadModifierPart;

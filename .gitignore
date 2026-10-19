@@ -53,6 +53,7 @@ NUL
 .DS_Store
 Thumbs.db
 *.stackdump
+!technical-docs/*.md
 
 # 但保留 src/ 内的所有资源文件
 !src/**/*.json

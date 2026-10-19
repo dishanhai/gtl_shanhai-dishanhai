@@ -1,14 +1,8 @@
 package com.dishanhai.gt_shanhai.common.machine.spacetime;
 
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 
@@ -18,15 +12,10 @@ import com.gregtechceu.gtceu.api.pattern.MultiblockWorldSavedData;
 import net.minecraft.server.level.ServerLevel;
 import com.gtladd.gtladditions.api.machine.IThreadModifierMachine;
 import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
-import com.gtladd.gtladditions.common.machine.multiblock.structure.RingStructure;
 import com.google.common.primitives.Ints;
 import com.gtladd.gtladditions.utils.StarGradient;
 
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 public class SpacetimeWaveMatrixMachine extends GTLAddWirelessWorkableElectricMultipleRecipesMachine implements IThreadModifierMachine {
 

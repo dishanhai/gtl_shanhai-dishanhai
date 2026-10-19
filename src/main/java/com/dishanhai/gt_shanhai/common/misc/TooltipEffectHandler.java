@@ -2,8 +2,6 @@ package com.dishanhai.gt_shanhai.common.misc;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiStyleRegistry;
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
-import com.dishanhai.gt_shanhai.api.ShanhaiTextAPI;
-import com.dishanhai.gt_shanhai.api.TextFormatParser;
 import com.dishanhai.gt_shanhai.api.TooltipEffectLine;
 import com.dishanhai.gt_shanhai.api.TooltipEffectRegistry;
 import com.dishanhai.gt_shanhai.api.TooltipEffectRegistry.TooltipEffectConfig;
@@ -11,7 +9,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.client.event.RenderTooltipEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.player.ItemTooltipEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;

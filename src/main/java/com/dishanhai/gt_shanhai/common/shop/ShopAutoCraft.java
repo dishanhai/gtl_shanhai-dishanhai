@@ -6,7 +6,6 @@ import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPU;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopAutoCraftPlanPacket;
-import com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket;
 import com.dishanhai.gt_shanhai.mixin.ShopCraftingJobAccessors;
 import appeng.api.config.Actionable;
 import appeng.api.networking.IGrid;

@@ -6,7 +6,6 @@ import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingBlockEntity;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingCPUCluster;
 import com.dishanhai.gt_shanhai.common.ae2.quantum.QuantumCraftingUnitBlock;
-import com.dishanhai.gt_shanhai.common.block.DShanhaiAE2Blocks;
 
 import com.gregtechceu.gtceu.api.block.MetaMachineBlock;
 import com.gregtechceu.gtceu.api.blockentity.MetaMachineBlockEntity;

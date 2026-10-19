@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.common.item.terminal;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -291,38 +290,12 @@ public final class ShanhaiTerminalCraftingManager {
         }
     }
 
-    private static boolean hasPendingItems(Session session) {
-        for (WorkItem item : session.items) {
-            if (!item.submitted) return true;
-        }
-        return false;
-    }
-
     private static boolean hasPendingCalculation(Session session) {
         for (WorkItem item : session.items) {
             if (!item.submitted
                     && item.future != null && !item.future.isDone()) return true;
         }
         return false;
-    }
-
-    private static boolean startPendingCalculations(Session session, ServerPlayer player, Context ae) {
-        if (session.phase == Phase.RETRY_CALCULATING) return true;
-        ICraftingService crafting = ae.grid().getCraftingService();
-        boolean started = false;
-        for (WorkItem item : session.items) {
-            if (item.submitted || !crafting.isCraftable(item.key)) continue;
-            item.future = crafting.beginCraftingCalculation(
-                    player.level(), ae::source, item.key, item.amount,
-                    CalculationStrategy.REPORT_MISSING_ITEMS);
-            started = true;
-        }
-        if (!started) return false;
-        session.phase = Phase.RETRY_CALCULATING;
-        session.ticks = 0;
-        ACTIVE_CALCULATIONS.put(session.terminalId, session);
-        player.sendSystemMessage(Component.literal("§e[山海终端] 正在重试之前失败的合成任务"));
-        return true;
     }
 
     private static String describeFailedPlan(WorkItem item) {

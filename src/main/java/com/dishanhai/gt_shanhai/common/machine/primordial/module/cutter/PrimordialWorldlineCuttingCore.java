@@ -6,7 +6,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
-import com.dishanhai.gt_shanhai.api.recipe.DShanhaiRecipeTypes;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialModuleRecipeLogic;
 

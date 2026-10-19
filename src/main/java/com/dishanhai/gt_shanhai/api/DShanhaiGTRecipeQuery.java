@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.api;
 
-import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -12,12 +11,9 @@ import com.gregtechceu.gtceu.api.registry.GTRegistries;
 
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * GT 配方查询引擎 — 直接从 GTRegistries.RECIPE_TYPES 读取运行时注册表。

@@ -154,6 +154,9 @@ public class GTDishanhaiMod {
         // 注册配置文件 (config/gt_shanhai/gt_shanhai-common.toml)
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON_SPEC, "gt_shanhai/gt_shanhai-common.toml");
         LOGGER.info("Config registered");
+
+        // 多方块注册开关：必须在所有模组注册多方块之前读取；扫描与移除在 FMLCommonSetupEvent 完成。
+        com.dishanhai.gt_shanhai.config.MultiblockRegistryConfig.load();
         net.minecraftforge.common.crafting.CraftingHelper.register(
                 com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeEnabledCondition.Serializer.INSTANCE);
 
@@ -166,6 +169,9 @@ public class GTDishanhaiMod {
         com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.loadActivePresets();
 
         var bus = FMLJavaModLoadingContext.get().getModEventBus();
+
+        // 全部模组完成注册后扫描多方块并按模组写盘，再移除配置禁用的机器。
+        com.dishanhai.gt_shanhai.config.MultiblockRegistryConfig.init(bus);
 
         // 配方库缓存数据包：把 DShanhaiRecipeCache 落盘的 json 常驻注入成数据包，vanilla 原生加载
         bus.addListener(com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipePackFinder::onAddPackFinders);

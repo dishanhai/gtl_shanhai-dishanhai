@@ -3,7 +3,6 @@ package com.dishanhai.gt_shanhai.client;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.ChunkPos;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -15,7 +15,6 @@ import appeng.crafting.inv.ListCraftingInventory;
 import appeng.me.cluster.IAEMultiBlock;
 import appeng.util.NullConfigManager;
 import appeng.util.Platform;
-import appeng.util.iterators.ChainedIterator;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 
 import net.minecraft.Util;
@@ -35,7 +34,6 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 
 public class QuantumCraftingBlockEntity extends AENetworkBlockEntity

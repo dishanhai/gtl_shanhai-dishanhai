@@ -5,7 +5,6 @@ import com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorOps;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeQuery;
-import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
@@ -13,7 +12,6 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.fml.loading.FMLPaths;
 
-import java.util.ArrayList;
 import java.util.List;
 
 public final class ShanhaiRecipeEditorCommand {

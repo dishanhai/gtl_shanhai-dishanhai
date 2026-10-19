@@ -7,7 +7,6 @@ import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
 import appeng.api.storage.MEStorage;
 import appeng.api.storage.StorageCells;
-import appeng.api.storage.cells.StorageCell;
 import com.dishanhai.gt_shanhai.common.machine.part.MEDiskHatchPartMachine;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import net.minecraft.server.level.ServerPlayer;

@@ -15,7 +15,6 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.client.model.data.ModelData;
@@ -43,7 +42,6 @@ public class EternalGregTechWorkshopRenderer extends WorkableCasingMachineRender
     private static final float DECORATION_RING_RADIUS = 31.0f;
     private static final int PLANET_TRAIL_SEGMENTS = 72;
     private static final int PLANET_TRAIL_ACTIVE_SEGMENTS = 34;
-    private static final float MAX_RENDER_RADIUS = 70.0f;
     private static final List<ResourceLocation> LIGHT_HUNTER_SPHERES = List.of(
             new ResourceLocation("gtladditions", "obj/planets/the_nether"),
             new ResourceLocation("gtladditions", "obj/planets/overworld"),

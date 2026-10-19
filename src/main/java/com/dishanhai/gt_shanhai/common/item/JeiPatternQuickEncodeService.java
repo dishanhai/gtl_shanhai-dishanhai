@@ -637,12 +637,6 @@ public final class JeiPatternQuickEncodeService {
         return PatternRecipeTypeHelper.areRecipeTypeIdsEquivalent(encodedTypeId, recipeTypeId);
     }
 
-    private static PatternQuickUploadService.Target findAutomaticStellarTarget(ServerPlayer player,
-            IGridNode networkNode, ItemStack pattern) {
-        return selectAutomaticTarget(player.level().dimension(), player.blockPosition(),
-                findAutomaticStellarTargets(player, networkNode, pattern));
-    }
-
     private static String recipeTypeIdForPattern(ServerPlayer player, ItemStack pattern) {
         if (pattern == null || pattern.isEmpty()) return "";
         try {
@@ -1204,11 +1198,6 @@ public final class JeiPatternQuickEncodeService {
         } else {
             tag.put("gtlcore", gtlcoreTag);
         }
-    }
-
-    private static boolean supportsRecipeType(RecipeTypePatternBufferPartMachine stellar,
-            String recipeTypeId) {
-        return containsRecipeType(readHostRecipeTypeIds(stellar), recipeTypeId);
     }
 
     private static Set<ResourceLocation> readHostRecipeTypeIds(

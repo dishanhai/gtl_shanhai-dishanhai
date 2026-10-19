@@ -1,8 +1,6 @@
 package com.dishanhai.gt_shanhai.client.renderer.machine;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -12,7 +10,6 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
-import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRenderer;
 
 import com.gtladd.gtladditions.utils.CommonUtils;
 import com.gtladd.gtladditions.client.RenderMode;

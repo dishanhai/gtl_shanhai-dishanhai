@@ -4,10 +4,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
-import com.gregtechceu.gtceu.api.pattern.MultiblockWorldSavedData;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
-import com.dishanhai.gt_shanhai.api.recipe.DShanhaiRecipeTypes;
 
 import com.gtladd.gtladditions.api.machine.wireless.GTLAddWirelessWorkableElectricMultipleRecipesMachine;
 

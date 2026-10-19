@@ -1450,11 +1450,6 @@ public class DShanhaiRecipeEngine {
         try { dev.latvian.mods.kubejs.util.ConsoleJS.SERVER.warn("[DRE] " + msg); } catch (Throwable ignored) {}
     }
 
-    private static void kjsInfo(String msg) {
-        LOG.info("[DRE] {}", msg);
-        try { dev.latvian.mods.kubejs.util.ConsoleJS.SERVER.info("[DRE] " + msg); } catch (Throwable ignored) {}
-    }
-
     @FunctionalInterface
     private interface ArgConsumer { void accept(Object arg); }
 

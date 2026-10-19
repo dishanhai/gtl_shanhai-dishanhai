@@ -790,18 +790,6 @@ public final class VirtualPatternEncodingHelper {
         return getPatternAnalysis(stacks, outputs).containsVirtualInput();
     }
 
-    private static boolean isVirtualInput(GenericStack stack, GenericStack[] inputs, GenericStack[] outputs) {
-        return getVirtualTarget(stack, inputs, outputs) != null;
-    }
-
-    private static boolean isVirtualProvider(GenericStack stack) {
-        return getVirtualProviderTarget(stack) != null;
-    }
-
-    private static GenericStack getVirtualTarget(GenericStack stack, GenericStack[] inputs, GenericStack[] outputs) {
-        return getPatternAnalysis(inputs, outputs).targetFor(stack);
-    }
-
     public static GenericStack resolveVirtualTargetForPatternInput(GenericStack input, GTRecipe recipe) {
         if (input == null || input.what() == null || input.amount() <= 0) return null;
         GenericStack providerTarget = getVirtualProviderTarget(input);
@@ -827,15 +815,6 @@ public final class VirtualPatternEncodingHelper {
         if (stack == null || !(stack.what() instanceof AEItemKey key)) return null;
         if (!IntCircuitBehaviour.isIntegratedCircuit(key.toStack())) return null;
         return new GenericStack(stack.what(), 1);
-    }
-
-    private static boolean isVirtualFluidInput(GenericStack stack, GenericStack[] inputs, GenericStack[] outputs) {
-        return getVirtualFluidTarget(stack, inputs, outputs) != null;
-    }
-
-    private static GenericStack getVirtualFluidTarget(GenericStack stack, GenericStack[] inputs, GenericStack[] outputs) {
-        if (stack == null || !(stack.what() instanceof AEFluidKey) || inputs == null || outputs == null) return null;
-        return getPatternAnalysis(inputs, outputs).targetFor(stack);
     }
 
     private static PatternAnalysis getPatternAnalysis(GenericStack[] inputs, GenericStack[] outputs) {
@@ -1030,11 +1009,6 @@ public final class VirtualPatternEncodingHelper {
             }
             return cache;
         }
-    }
-
-    private static List<GTRecipe> nonConsumableRecipesInType(GTRecipeType requiredType) {
-        if (requiredType.getLookup() == null || requiredType.getLookup().getLookup() == null) return List.of();
-        return typeScopedRecipeCache().recipesFor(requiredType);
     }
 
     private static List<GTRecipe> nonConsumableRecipesSharingOutputs(GTRecipeType requiredType, Set<AEKey> outputKeys) {

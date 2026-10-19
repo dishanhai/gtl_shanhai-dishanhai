@@ -6,7 +6,6 @@ import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
-import appeng.crafting.execution.CraftingCpuHelper;
 import appeng.crafting.inv.ListCraftingInventory;
 import appeng.api.storage.MEStorage;
 

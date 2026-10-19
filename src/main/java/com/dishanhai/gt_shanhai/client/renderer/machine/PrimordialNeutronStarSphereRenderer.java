@@ -51,20 +51,6 @@ final class PrimordialNeutronStarSphereRenderer {
     private static final int MAX_MODULE_LEVEL = 17;
 
     /**
-     * 🔴 <b>硬上限 44.78</b>：上游 {@code getStartAngle} 用
-     * {@code asin(starRadius / sqrt(44.5^2 + 5.0^2))}（分母 = √2005.25 = <b>44.7805…</b>）⇒ 半径超过它
-     * asin 的参数就 &gt; 1，<b>返回 NaN 并把等离子体光束几何整个弄坏</b>。
-     * 本上限与 {@link #BEAM_ALPHA} 注释里那条约束是同一个数。
-     *
-     * <p>🔴 <b>2026-09-23 这个数从"防御性注释"变成了"真事故"</b>：用户把面板半径点到 44 后客户端闪退，
-     * 堆栈是 {@code AntichristBeamRenderer.packAlpha} 里 {@code roundToInt(NaN)} 抛
-     * {@code IllegalArgumentException: Cannot round NaN value}（crash-2026-09-23_19.53.02-client.txt）。
-     * ⇒ 这条上限<b>不是保险绳、是悬崖边</b>，{@code 44.78} 本身就在临界点上（{@code asin(1)} 只是恰好不 NaN）。
-     * 所以真正用来钳位的是下面留了余量的 {@link #SAFE_MAX_STAR_RADIUS}，本常量从此<b>只作留档/解释</b>。
-     */
-    private static final float HARD_MAX_RADIUS = 44.78f;
-
-    /**
      * 🔴 <b>实际钳位用的安全上限 44.6</b>（= 44.7805 留 0.18 余量）。
      *
      * <h2>为什么必须有它（2026-09-23 闪退根因）</h2>

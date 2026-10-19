@@ -2,7 +2,6 @@ package com.dishanhai.gt_shanhai.util;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
-import net.minecraft.nbt.Tag;
 
 import java.io.*;
 import java.nio.file.*;

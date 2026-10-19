@@ -1004,28 +1004,6 @@ public class DShanhaiRecipeModifierAPI {
         return changed;
     }
 
-    private static void addItemToMap(Map<RecipeCapability<?>, List<Content>> map, String newItem) {
-        var newStack = net.minecraft.world.item.ItemStack.EMPTY;
-        try {
-            var item = net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(new ResourceLocation(newItem));
-            if (item != null) newStack = new net.minecraft.world.item.ItemStack(item, 1);
-        } catch (Exception ignored) {}
-        if (newStack.isEmpty()) return;
-        var content = new Content(SizedIngredient.create(newStack), 1, 10000, 0, null, null);
-        map.computeIfAbsent(ItemRecipeCapability.CAP, k -> new ArrayList<>()).add(content);
-    }
-
-    private static void addFluidToMap(Map<RecipeCapability<?>, List<Content>> map, String newItem) {
-        var fluid = net.minecraftforge.registries.ForgeRegistries.FLUIDS.getValue(new ResourceLocation(newItem));
-        if (fluid == null) return;
-        try {
-            var fi = com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient.of(
-                    com.lowdragmc.lowdraglib.side.fluid.FluidStack.create(fluid, 1000, null));
-            var content = new Content(fi, 1, 10000, 0, null, null);
-            map.computeIfAbsent(FluidRecipeCapability.CAP, k -> new ArrayList<>()).add(content);
-        } catch (Exception ignored) {}
-    }
-
     public static int count(String recipeTypeId) {
         return JS_MODIFIERS.getOrDefault(recipeTypeId, Collections.emptyList()).size()
              + STRIP_RULES.getOrDefault(recipeTypeId, Collections.emptyList()).size();
@@ -1370,34 +1348,6 @@ public class DShanhaiRecipeModifierAPI {
                 reports.size(), STRIP_RULES.size(), REPLACE_RULES.size(), DELETE_RULES.size());
     }
 
-    private static void applyDeleteRules(String recipeTypeId, List<DeleteEntry> rules) {
-        var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-        if (type == null) return;
-        var lookup = type.getLookup();
-        if (lookup == null) return;
-        var branch = lookup.getLookup();
-        if (branch == null) return;
-        for (DeleteEntry rule : rules) {
-            Pattern p = Pattern.compile(rule.recipeRegex);
-            List<GTRecipe> allRecipes = new ArrayList<>();
-            branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
-            List<GTRecipe> keep = new ArrayList<>();
-            int removed = 0;
-            for (var r : allRecipes) {
-                if (r == null) continue;
-                String rid = r.getId() != null ? r.getId().toString() : "";
-                if (p.matcher(rid).find()) { removed++; }
-                else { keep.add(r); }
-            }
-            if (removed > 0) {
-                lookup.removeAllRecipes();
-                for (GTRecipe r : keep) lookup.addRecipe(r);
-                invalidatePatternCaches("deleteRule:" + recipeTypeId);
-                LOG.info("[ModAPI] 删除规则应用: {} regex=[{}] → {} 个配方", recipeTypeId, rule.recipeRegex, removed);
-            }
-        }
-    }
-
     private static void updateLookupRecipes(String recipeTypeId, List<StripEntry> rules) {
         rebuildLookupFromOriginals(recipeTypeId);
     }
@@ -1537,18 +1487,6 @@ public class DShanhaiRecipeModifierAPI {
             if (contents != null) count += contents.size();
         }
         return count;
-    }
-
-    private static boolean contentsEqual(Map<RecipeCapability<?>, List<Content>> a, Map<RecipeCapability<?>, List<Content>> b) {
-        if (a == b) return true;
-        if (a == null || b == null) return false;
-        if (a.size() != b.size()) return false;
-        for (var entry : a.entrySet()) {
-            List<Content> other = b.get(entry.getKey());
-            if (other == null) return false;
-            if (entry.getValue().size() != other.size()) return false;
-        }
-        return true;
     }
 
     // ====== 配置持久化 ======

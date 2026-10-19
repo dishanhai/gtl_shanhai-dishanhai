@@ -2,7 +2,6 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
-import com.dishanhai.gt_shanhai.common.item.WalletItem;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyStageConfig;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;

@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.common.machine.misc;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiRegistration;
-import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeHandler;

@@ -5,7 +5,6 @@ import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.IParallelHatch;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 
-import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 

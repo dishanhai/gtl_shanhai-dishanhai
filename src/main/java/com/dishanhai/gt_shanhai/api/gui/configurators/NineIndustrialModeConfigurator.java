@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.api.gui.configurators;
 
 import com.dishanhai.gt_shanhai.common.machine.misc.ShanhaiMachineModeMap;
-import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;

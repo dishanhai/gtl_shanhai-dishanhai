@@ -1,6 +1,5 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
-import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.shop.ClientCostPreview;
@@ -539,10 +538,6 @@ public class ShopScreen extends ScaledScreen {
         return missingStageSubmission(currentViewCategory());
     }
 
-    private boolean isStageLocked() {
-        return lockedStageForCurrentView() != null;
-    }
-
     private static String[] splitCardCategoryPath(String category) {
         String c = (category == null || category.isBlank()) ? ShopEntry.DEFAULT_CATEGORY : category.trim();
         String[] raw = c.split("/", 4);
@@ -926,7 +921,6 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private int detailX() { return listLeft() + listWidth() + 6; }
-    private int detailContentX() { return detailX() + 8; }
 
     // 搜索框仿 KE 放右侧详情列正上方（顶栏不再塞它）
     private int searchBoxX() { return detailX() + 4; }
@@ -4932,11 +4926,6 @@ public class ShopScreen extends ScaledScreen {
         if (p.getMainHandItem().getItem() instanceof WalletItem) return p.getMainHandItem();
         if (p.getOffhandItem().getItem() instanceof WalletItem) return p.getOffhandItem();
         return ItemStack.EMPTY;
-    }
-
-    private boolean isOp() {
-        var p = Minecraft.getInstance().player;
-        return p != null && p.hasPermissions(2);
     }
 
     @Override

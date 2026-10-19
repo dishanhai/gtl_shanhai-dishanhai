@@ -57,7 +57,6 @@ public class DShanhaiMaintenanceHatchMachine extends MultiblockPartMachine
     private static final float DURATION_STEP = 0.05f;
 
     private static final long DEFAULT_MAX_PARALLEL = 256L;
-    private static final long PARALLEL_STEP = 1L;
 
     /** 物质模块 ID → [minDuration, maxDuration]，顺序：初级→高级→终极→创造 */
     private static final Map<String, float[]> MODULE_RANGES = new LinkedHashMap<>();

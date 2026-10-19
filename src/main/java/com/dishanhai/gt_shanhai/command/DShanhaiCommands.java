@@ -3,7 +3,6 @@ package com.dishanhai.gt_shanhai.command;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -27,7 +26,6 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.io.FileOutputStream;
-import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
@@ -1293,17 +1291,6 @@ public class DShanhaiCommands {
                 .then(replacePatternCommand());
     }
 
-    private static int execStripClear(CommandSourceStack source, String type) {
-        if (type == null || type.isEmpty()) {
-            DShanhaiRecipeModifierAPI.clearAll();
-            source.sendSuccess(msg("§b[山海] 已清除所有剥离规则"), false);
-        } else {
-            boolean removed = DShanhaiRecipeModifierAPI.removeStripRule(type, "");
-            source.sendSuccess(msg("§b[山海] " + (removed ? "已清除" : "未找到") + " §f" + type + " §b的剥离规则"), false);
-        }
-        return 1;
-    }
-
     private static LiteralArgumentBuilder<CommandSourceStack> stripCommand() {
         return Commands.literal("strip")
                 .then(recipeTypeArg("type")
@@ -1494,19 +1481,6 @@ public class DShanhaiCommands {
         source.sendSuccess(msg("§b[山海] §f" + id + " §7状态: " + (enabled ? "§a已启用" : "§c已禁用")
                 + (type == null ? "" : " §7类型: §f" + type)), false);
         return 1;
-    }
-
-    private static JsonObject loadConfig() {
-        try {
-            Path path = Path.of(".").toRealPath();
-            java.io.File f = new java.io.File(path.toFile(), CONFIG_PATH);
-            if (!f.exists()) return new JsonObject();
-            try (FileReader r = new FileReader(f)) {
-                return JsonParser.parseReader(r).getAsJsonObject();
-            }
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     private static void saveConfig(JsonObject config) {

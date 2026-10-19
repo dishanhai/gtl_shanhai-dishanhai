@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.mixin;
 
+import com.dishanhai.gt_shanhai.config.MultiblockRegistryConfig;
 import com.dishanhai.gt_shanhai.integration.jei.MultiblockPreviewRegistrationHelper;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
@@ -32,7 +33,8 @@ public abstract class GTLCoreMultiblockInfoRegistrationMixin {
         List<MultiblockInfoWrapper> wrappers = MultiblockPreviewRegistrationHelper.collect(
                 GTRegistries.MACHINES.values(),
                 definition -> definition instanceof MultiblockMachineDefinition multiblock
-                        && multiblock.isRenderXEIPreview(),
+                        && multiblock.isRenderXEIPreview()
+                        && !MultiblockRegistryConfig.isDisabled(multiblock.getId()),
                 definition -> new MultiblockInfoWrapper((MultiblockMachineDefinition) definition),
                 (definition, error) -> {
                     failed.incrementAndGet();

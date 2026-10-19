@@ -1,7 +1,6 @@
 package com.dishanhai.gt_shanhai.client.renderer;
 
 import com.dishanhai.gt_shanhai.api.DShanhaiStyleRegistry;
-import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.Minecraft;
@@ -157,12 +156,5 @@ public class HaloEndTooltipRenderer {
         }
         BufferUploader.drawWithShader(buf.end());
         RenderSystem.disableBlend();
-    }
-
-    private static void addRect(BufferBuilder buf, Matrix4f mat, float x1, float y1, float x2, float y2, int color) {
-        buf.vertex(mat, x1, y1, 0).color(color).endVertex();
-        buf.vertex(mat, x2, y1, 0).color(color).endVertex();
-        buf.vertex(mat, x2, y2, 0).color(color).endVertex();
-        buf.vertex(mat, x1, y2, 0).color(color).endVertex();
     }
 }

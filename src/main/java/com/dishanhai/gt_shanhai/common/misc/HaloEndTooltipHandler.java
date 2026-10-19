@@ -9,7 +9,6 @@ import net.minecraftforge.event.entity.player.ItemTooltipEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.registries.ForgeRegistries;
 
-import com.dishanhai.gt_shanhai.api.DShanhaiStyleRegistry;
 import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 
 import java.util.HashMap;

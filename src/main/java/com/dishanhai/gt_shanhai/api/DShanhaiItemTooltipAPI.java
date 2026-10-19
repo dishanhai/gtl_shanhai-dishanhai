@@ -209,21 +209,6 @@ public class DShanhaiItemTooltipAPI {
         KEY_ENTRIES.put(itemId, next);
     }
 
-    private static void replaceKeyEntry(String itemId, KeyTooltipEntry nextEntry) {
-        KEY_ENTRIES.compute(itemId, (id, entries) -> {
-            List<KeyTooltipEntry> next = new ArrayList<>();
-            if (entries != null) {
-                for (KeyTooltipEntry entry : entries) {
-                    if (!entry.keyMode.equals(nextEntry.keyMode)) {
-                        next.add(entry);
-                    }
-                }
-            }
-            next.add(nextEntry);
-            return next;
-        });
-    }
-
     private static String normalizeKey(String key) {
         if (key == null) return "none";
         String normalized = key.trim().toLowerCase();
