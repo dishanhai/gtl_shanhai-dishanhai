@@ -1,7 +1,9 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeConfig;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
@@ -57,7 +59,7 @@ public class ExchangeScreen extends ScaledScreen {
     private long times = 1L;
     private AnimatableEditBox timesBox;
     private int scroll = 0;
-    private final long screenOpenAtMs = System.currentTimeMillis();
+    private final Spring openMotion = Spring.opening(Spring.PANEL);
 
     private int left, top, panelWidth, panelHeight;
 
@@ -125,16 +127,17 @@ public class ExchangeScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        openMotion.update(System.currentTimeMillis());
         if (timesBox != null) {
             timesBox.setVisible(selected != null);
-            timesBox.setAnim(() -> GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS),
+            timesBox.setAnim(() -> GuiMotion.panelScale(openMotion.value()),
                     left + panelWidth / 2f, top + panelHeight / 2f);
         }
-        float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS);
-        boolean opening = openT < 1f;
+        float openScale = GuiMotion.panelScale(openMotion.value());
+        boolean opening = openScale < 0.9995f;
         if (opening) {
             g.pose().pushPose();
-            GuiRenderUtil.popScaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openT);
+            GuiRenderUtil.scaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openScale);
         }
         try {
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);

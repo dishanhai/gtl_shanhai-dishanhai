@@ -14,7 +14,7 @@ import java.util.function.Supplier;
  */
 public class AnimatableEditBox extends EditBox {
 
-    private Supplier<Float> animProgress = () -> 1f;
+    private Supplier<Float> animScale = () -> 1f;
     private Supplier<Float> slideX = () -> 0f;
     private float anchorCx;
     private float anchorCy;
@@ -23,9 +23,12 @@ public class AnimatableEditBox extends EditBox {
         super(font, x, y, width, height, msg);
     }
 
-    /** 开场缩放。锚点用宿主面板中心，进度用同一条 {@link GuiRenderUtil#popAnimProgress}。 */
-    public void setAnim(Supplier<Float> animProgress, float anchorCx, float anchorCy) {
-        this.animProgress = animProgress == null ? () -> 1f : animProgress;
+    /**
+     * 开场缩放。锚点用宿主面板中心；供应器返回当前缩放系数（1 = 已落位），
+     * 通常是 {@code GuiMotion.panelScale(openMotion.value())}，和宿主面板用同一个值。
+     */
+    public void setAnim(Supplier<Float> animScale, float anchorCx, float anchorCy) {
+        this.animScale = animScale == null ? () -> 1f : animScale;
         this.anchorCx = anchorCx;
         this.anchorCy = anchorCy;
     }
@@ -37,15 +40,15 @@ public class AnimatableEditBox extends EditBox {
 
     @Override
     public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        float t = animProgress.get();
+        float s = animScale.get();
         float dx = slideX.get();
-        if (t >= 1f && dx == 0f) {
+        if (s >= 0.9995f && dx == 0f) {
             super.renderWidget(g, mouseX, mouseY, partialTick);
             return;
         }
         g.pose().pushPose();
         try {
-            if (t < 1f) GuiRenderUtil.popScaleAt(g, anchorCx, anchorCy, t);
+            if (s < 0.9995f) GuiRenderUtil.scaleAt(g, anchorCx, anchorCy, s);
             if (dx != 0f) g.pose().translate(dx, 0f, 0f);
             super.renderWidget(g, mouseX, mouseY, partialTick);
         } finally {

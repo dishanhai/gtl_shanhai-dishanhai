@@ -5,6 +5,8 @@ import com.mojang.blaze3d.shaders.Uniform;
 import com.mojang.blaze3d.systems.RenderSystem;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.PostPass;
 import net.minecraft.resources.ResourceLocation;
@@ -13,6 +15,7 @@ import net.minecraftforge.client.event.ScreenEvent;
 import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * 商店内容区的局部高斯模糊。一帧最多两块矩形，共用同一条 {@link PostChain}，不另分配渲染目标。
@@ -20,10 +23,15 @@ import java.util.List;
  * <p>实现路线按 {@code docs/blur-forge-高斯模糊技术分析-2026-10-19.md} 的结论收敛：</p>
  * <ul>
  *     <li>用原版 {@link PostChain} 做 2 趟可分离高斯（H → V），最后一趟落回 {@code minecraft:main}；</li>
- *     <li>默认 5 次宽间距采样，给卡片飞行；文字层走 {@link #requestSmooth} 的密采样高斯，避免字形残影；</li>
+ *     <li>默认 13 点高斯（步长 = σ/2，无重影），给卡片飞行；文字层走 {@link #requestSmooth} 的密采样高斯，避免字形残影；</li>
  *     <li>加载中的商品格走 {@link #requestSmoothCells}，一趟里最多 8 块，不另开渲染目标。</li>
  *     <li>{@code Rect} 把模糊限制在调用方给出的商店内矩形，{@code Hole} 把飞行卡片或浮层挖掉保持清晰；</li>
  *     <li>{@code Progress} 由调用方驱动：飞行晚于位移淡入，浮层跟 150ms 弹入走。</li>
+ *     <li>每块请求带一个 {@link ShopGlassStyle}：最后一趟叠色调/饱和度/颗粒/内缘亮边，第一趟做边缘折射，
+ *     {@code Hole} 外缘加柔阴影，让模糊区像一块液态玻璃；点击波用 {@link ShopGlassStyle#NONE}。</li>
+ *     <li>两趟共用同一个 scissor（{@code Rect} 外扩 2px），后处理像素成本跟矩形面积成正比，不再是整屏。</li>
+ *     <li>后处理读的是整张主画面，Screen 里画在模糊矩形上的东西（tooltip、提示横幅、悬浮按钮）会一起被糊。
+ *     这类要压在模糊之上的内容走 {@link #deferTopLayer}：Screen 帧内只登记，模糊跑完再画。</li>
  * </ul>
  *
  * <p>执行时机是 {@link ScreenEvent.Render.Post}：它在 {@code Screen.render} 之后触发，
@@ -59,12 +67,14 @@ public final class ShopGaussBlur {
     private static float requestRadius = BLUR_RADIUS_VIRTUAL;
     private static float[] requestRect;
     private static float[] requestHole;
+    private static ShopGlassStyle requestGlass = ShopGlassStyle.OVERLAY;
     /** 同一帧的第二块矩形。飞行时用来糊源卡片；新的主请求会把它清掉。 */
     private static boolean extraRequested;
     private static float extraStrength;
     private static float extraRadius = BLUR_RADIUS_VIRTUAL;
     private static float[] extraRect;
     private static float[] extraHole;
+    private static ShopGlassStyle extraGlass = ShopGlassStyle.OVERLAY;
     /** 加载格的 UV 矩形，最多 {@link #MAX_CELL_RECTS} 块，每块 4 个分量。0 表示只用主矩形。 */
     private static int cellCount;
     private static final float[] cellUv = new float[MAX_CELL_RECTS * 4];
@@ -91,6 +101,18 @@ public final class ShopGaussBlur {
     private static float waveOriginV;
     private static float[] waveRect;
 
+    /** 本帧要压在模糊之上的内容，Post 事件里模糊跑完再画，画完即清。owner 对不上说明是上一块界面留下的，丢掉。 */
+    private static Consumer<GuiGraphics> topLayer;
+    private static Screen topLayerOwner;
+    private static boolean topLayerWarned;
+
+    /** 玻璃样式 uniform 的临时数组，render 是单线程，复用即可。 */
+    private static final float[] glassTint = new float[4];
+    private static final float[] glassParams = new float[4];
+    private static final float[] glassEdge = new float[4];
+    /** scissor 在 Rect 外多放的像素，兜住双线性采样在矩形边界上多读的那一圈。 */
+    private static final int SCISSOR_MARGIN_PX = 2;
+
     private ShopGaussBlur() {
     }
 
@@ -108,7 +130,7 @@ public final class ShopGaussBlur {
             try {
                 uniformFailed = !applyUniforms(post, 1f, BLUR_RADIUS_VIRTUAL,
                         new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f}, false, 0, NO_CELLS,
-                        NO_WAVE);
+                        NO_WAVE, ShopGlassStyle.NONE);
             } catch (Exception e) {
                 uniformFailed = true;
                 GTDishanhaiMod.LOGGER.error("商店高斯模糊 uniform 预检失败，已回退为局部磨砂", e);
@@ -129,6 +151,14 @@ public final class ShopGaussBlur {
     public static void request(int x, int y, int w, int h, float strength,
                                float radiusPixels,
                                int holeX, int holeY, int holeW, int holeH) {
+        request(x, y, w, h, strength, radiusPixels, holeX, holeY, holeW, holeH, ShopGlassStyle.OVERLAY);
+    }
+
+    /** 同 {@link #request(int, int, int, int, float, float, int, int, int, int)}，另指定玻璃样式。 */
+    public static void request(int x, int y, int w, int h, float strength,
+                               float radiusPixels,
+                               int holeX, int holeY, int holeW, int holeH,
+                               ShopGlassStyle glass) {
         // 新的主矩形取代上一块，避免飞行模糊和浮层模糊在同一帧叠两次。
         extraRequested = false;
         extraRect = null;
@@ -149,6 +179,7 @@ public final class ShopGaussBlur {
                 : new float[]{0f, 0f, 0f, 0f};
         requestStrength = clamp01(strength);
         requestRadius = radiusPixels > 0f ? radiusPixels : BLUR_RADIUS_VIRTUAL;
+        requestGlass = glass == null ? ShopGlassStyle.OVERLAY : glass;
         requested = true;
     }
 
@@ -158,7 +189,14 @@ public final class ShopGaussBlur {
     public static void requestSmooth(int x, int y, int w, int h, float strength,
                                      float radiusPixels,
                                      int holeX, int holeY, int holeW, int holeH) {
-        request(x, y, w, h, strength, radiusPixels, holeX, holeY, holeW, holeH);
+        requestSmooth(x, y, w, h, strength, radiusPixels, holeX, holeY, holeW, holeH, ShopGlassStyle.OVERLAY);
+    }
+
+    public static void requestSmooth(int x, int y, int w, int h, float strength,
+                                     float radiusPixels,
+                                     int holeX, int holeY, int holeW, int holeH,
+                                     ShopGlassStyle glass) {
+        request(x, y, w, h, strength, radiusPixels, holeX, holeY, holeW, holeH, glass);
         if (requested) requestSmooth = true;
     }
 
@@ -168,6 +206,11 @@ public final class ShopGaussBlur {
      * 只有一块时退回 {@link #requestSmooth}，少做逐像素判断。
      */
     public static void requestSmoothCells(int[] xywh, int count, float strength, float radiusPixels) {
+        requestSmoothCells(xywh, count, strength, radiusPixels, ShopGlassStyle.LOADING);
+    }
+
+    public static void requestSmoothCells(int[] xywh, int count, float strength, float radiusPixels,
+                                          ShopGlassStyle glass) {
         if (xywh == null || count <= 0 || strength <= 0.01f) return;
         int n = Math.min(count, MAX_CELL_RECTS);
         int x0 = Integer.MAX_VALUE;
@@ -190,7 +233,7 @@ public final class ShopGaussBlur {
             filled++;
         }
         if (filled <= 0 || x1 <= x0 || y1 <= y0) return;
-        requestSmooth(x0, y0, x1 - x0, y1 - y0, strength, radiusPixels, 0, 0, 0, 0);
+        requestSmooth(x0, y0, x1 - x0, y1 - y0, strength, radiusPixels, 0, 0, 0, 0, glass);
         if (!requested || filled <= 1) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.getMainRenderTarget() == null) return;
@@ -267,9 +310,17 @@ public final class ShopGaussBlur {
     /**
      * 同一帧的第二块矩形。不清除主请求。宽高小于等于 0 或强度过低时忽略。
      * 坐标同样是 framebuffer 像素，原点在左上角。
-     */    public static void requestExtra(int x, int y, int w, int h, float strength,
+     */
+    public static void requestExtra(int x, int y, int w, int h, float strength,
                                     float radiusPixels,
                                     int holeX, int holeY, int holeW, int holeH) {
+        requestExtra(x, y, w, h, strength, radiusPixels, holeX, holeY, holeW, holeH, ShopGlassStyle.OVERLAY);
+    }
+
+    public static void requestExtra(int x, int y, int w, int h, float strength,
+                                    float radiusPixels,
+                                    int holeX, int holeY, int holeW, int holeH,
+                                    ShopGlassStyle glass) {
         if (strength <= 0.01f || w <= 0 || h <= 0) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.getMainRenderTarget() == null) return;
@@ -281,6 +332,7 @@ public final class ShopGaussBlur {
                 : new float[]{0f, 0f, 0f, 0f};
         extraStrength = clamp01(strength);
         extraRadius = radiusPixels > 0f ? radiusPixels : BLUR_RADIUS_VIRTUAL;
+        extraGlass = glass == null ? ShopGlassStyle.OVERLAY : glass;
         extraRequested = true;
     }
 
@@ -291,11 +343,13 @@ public final class ShopGaussBlur {
         requestRadius = BLUR_RADIUS_VIRTUAL;
         requestRect = null;
         requestHole = null;
+        requestGlass = ShopGlassStyle.OVERLAY;
         extraRequested = false;
         extraStrength = 0f;
         extraRadius = BLUR_RADIUS_VIRTUAL;
         extraRect = null;
         extraHole = null;
+        extraGlass = ShopGlassStyle.OVERLAY;
         cellCount = 0;
         waveRequested = false;
         waveRect = null;
@@ -308,21 +362,71 @@ public final class ShopGaussBlur {
     }
 
     /**
-     * 界面帧末执行。必须先 flush，否则商店最后一批 quad 还在 GuiGraphics 的缓冲里，
-     * 后处理读到的是不完整的画面。
+     * 登记本帧要压在模糊之上的内容（tooltip、提示横幅、悬浮按钮）。Screen.render 里只登记不画，
+     * {@link #onScreenRenderPost} 里模糊跑完再用事件自带的 GuiGraphics 调 {@code draw}。
+     * 每帧都要重新登记；后登记的取代先登记的。{@code draw} 拿到的 GuiGraphics 姿态是单位矩阵，
+     * 缩放/偏移和 Z 层要自己加。
+     */
+    public static void deferTopLayer(Screen owner, Consumer<GuiGraphics> draw) {
+        topLayerOwner = owner;
+        topLayer = draw;
+    }
+
+    /** 关界面时丢掉没来得及画的上层，免得下一次打开商店时先画一帧旧内容。 */
+    public static void clearTopLayer() {
+        topLayer = null;
+        topLayerOwner = null;
+    }
+
+    /**
+     * 界面帧末执行：先跑模糊，再画压在模糊之上的上层内容。
+     * 上层放在 finally 里，模糊不可用或抛异常时 tooltip 照样出来。
      */
     public static void onScreenRenderPost(ScreenEvent.Render.Post event) {
+        Consumer<GuiGraphics> top = topLayer;
+        Screen topOwner = topLayerOwner;
+        clearTopLayer();
+        try {
+            runBlurPasses(event);
+        } finally {
+            runTopLayer(event, top, topOwner);
+        }
+    }
+
+    private static void runTopLayer(ScreenEvent.Render.Post event, Consumer<GuiGraphics> top, Screen owner) {
+        if (top == null || owner == null || event.getScreen() != owner) return;
+        GuiGraphics g = event.getGuiGraphics();
+        if (g == null) return;
+        try {
+            top.accept(g);
+            // 事件之后 GameRenderer 才会再 flush 一次；这里先落盘，别的 Post 监听读主画面时已经是完整的。
+            g.flush();
+        } catch (RuntimeException e) {
+            if (!topLayerWarned) {
+                topLayerWarned = true;
+                GTDishanhaiMod.LOGGER.error("商店上层（tooltip/提示横幅）绘制失败，本次起每帧仍会重试", e);
+            }
+        }
+    }
+
+    /**
+     * 必须先 flush，否则商店最后一批 quad 还在 GuiGraphics 的缓冲里，
+     * 后处理读到的是不完整的画面。
+     */
+    private static void runBlurPasses(ScreenEvent.Render.Post event) {
         boolean hadRequest = requested;
         boolean smooth = requestSmooth;
         float strength = requestStrength;
         float radius = requestRadius;
         float[] rect = requestRect;
         float[] hole = requestHole;
+        ShopGlassStyle glass = requestGlass;
         boolean hadExtra = extraRequested;
         float strength2 = extraStrength;
         float radius2 = extraRadius;
         float[] rect2 = extraRect;
         float[] hole2 = extraHole;
+        ShopGlassStyle glass2 = extraGlass;
         int cells = cellCount;
         boolean hadWave = waveRequested && waveRect != null && waveStrength > 0.01f;
         float[] wave = {waveOriginU, waveOriginV, waveRadiusPx, waveBandPx, waveRefractPx, waveGlowAmount};
@@ -344,17 +448,17 @@ public final class ShopGaussBlur {
         if (primary) {
             render(mc, strength, radius, rect,
                     hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, smooth, cells, cellUvSnapshot,
-                    NO_WAVE, partialTick);
+                    NO_WAVE, glass, partialTick);
         }
         if (extra && isReady()) {
             render(mc, strength2, radius2, rect2,
                     hole2 == null ? new float[]{0f, 0f, 0f, 0f} : hole2, false, 0, NO_CELLS,
-                    NO_WAVE, partialTick);
+                    NO_WAVE, glass2, partialTick);
         }
         // 波放最后一趟：它要盖在飞行/浮层的模糊之上，否则点在商品格上会被飞行请求吃掉。
         if (hadWave && isReady()) {
             render(mc, waveStrength, waveRadius, waveRectCopy,
-                    new float[]{0f, 0f, 0f, 0f}, true, 0, NO_CELLS, wave, partialTick);
+                    new float[]{0f, 0f, 0f, 0f}, true, 0, NO_CELLS, wave, ShopGlassStyle.NONE, partialTick);
         }
     }
 
@@ -373,10 +477,25 @@ public final class ShopGaussBlur {
         return new float[]{u0, v0, u1, v1};
     }
 
+    /**
+     * UV 矩形（左下原点）→ glScissor 用的像素矩形 {x, y, w, h}，y 自底向上。
+     * 四边各放宽 {@code margin} 像素并夹在 framebuffer 内；退化矩形返回 w、h 为 0。
+     * 浮点误差用 1e-3 的容差吸收，避免 0.4f*100 这类值被 ceil 多算一个像素。
+     */
+    static int[] toScissorRect(float[] uv, int fbW, int fbH, int margin) {
+        if (uv == null || uv.length < 4 || fbW <= 0 || fbH <= 0) return new int[]{0, 0, 0, 0};
+        int x0 = Math.max(0, (int) Math.floor(uv[0] * fbW + 1e-3) - margin);
+        int y0 = Math.max(0, (int) Math.floor(uv[1] * fbH + 1e-3) - margin);
+        int x1 = Math.min(fbW, (int) Math.ceil(uv[2] * fbW - 1e-3) + margin);
+        int y1 = Math.min(fbH, (int) Math.ceil(uv[3] * fbH - 1e-3) + margin);
+        if (x1 <= x0 || y1 <= y0) return new int[]{0, 0, 0, 0};
+        return new int[]{x0, y0, x1 - x0, y1 - y0};
+    }
+
     private static void render(Minecraft mc, float strength, float radius,
                                float[] rect, float[] hole, boolean smooth,
                                int cells, float[] cellData,
-                               float[] wave, float partialTick) {
+                               float[] wave, ShopGlassStyle glass, float partialTick) {
         PostChain post = ensureChain(mc);
         if (post == null) return;
         if (mc.getMainRenderTarget() == null) return;
@@ -389,15 +508,21 @@ public final class ShopGaussBlur {
             chainHeight = fbH;
         }
         // 反射/着色器 uniform 任一不可用就整个跳过，绝不让 Rect 落回默认的全屏值。
-        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData, wave)) {
+        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData, wave, glass)) {
             uniformFailed = true;
             return;
         }
         uniformFailed = false;
 
+        // PostPass 会对 outTarget 调 clear()，glClear 受 scissor 约束，所以两趟都只动矩形内。
+        // 矩形外的主画面原样保留；放宽的边缘像素两趟都是直通，内容不变。
+        int[] scissor = toScissorRect(rect, fbW, fbH, SCISSOR_MARGIN_PX);
+        if (scissor[2] <= 0 || scissor[3] <= 0) return;
+
         RenderSystem.disableBlend();
         RenderSystem.disableDepthTest();
         RenderSystem.depthMask(false);
+        RenderSystem.enableScissor(scissor[0], scissor[1], scissor[2], scissor[3]);
         try {
             post.process(partialTick);
             failed = false;
@@ -408,6 +533,7 @@ public final class ShopGaussBlur {
             failedAtMs = System.currentTimeMillis();
             GTDishanhaiMod.LOGGER.error("商店高斯模糊执行失败，已回退为局部磨砂", e);
         } finally {
+            RenderSystem.disableScissor();
             // PostPass 解绑后会把默认 framebuffer 设回来；恢复 main，保证后续 GUI/最终 flush 仍写主画面。
             if (mc.getMainRenderTarget() != null) {
                 mc.getMainRenderTarget().bindWrite(false);
@@ -424,10 +550,14 @@ public final class ShopGaussBlur {
 
     private static boolean applyUniforms(PostChain post, float strength, float radius,
                                          float[] rect, float[] hole, boolean smooth,
-                                         int cells, float[] cellData, float[] wave) {
+                                         int cells, float[] cellData, float[] wave,
+                                         ShopGlassStyle glass) {
         List<PostPass> passes = passesOf(post);
         if (passes.isEmpty()) return false;
         boolean allReady = true;
+        // 虚拟 GUI 单位 → framebuffer 像素的比例，与模糊半径同一套换算。
+        float glassScale = (radius > 0f ? radius : BLUR_RADIUS_VIRTUAL) / BLUR_RADIUS_VIRTUAL;
+        (glass == null ? ShopGlassStyle.NONE : glass).write(glassScale, glassTint, glassParams, glassEdge);
         for (PostPass pass : passes) {
             Uniform rectUniform = pass.getEffect().getUniform("Rect");
             Uniform holeUniform = pass.getEffect().getUniform("Hole");
@@ -440,6 +570,13 @@ public final class ShopGaussBlur {
             Uniform waveThickUniform = pass.getEffect().getUniform("WaveThickness");
             Uniform waveRefractUniform = pass.getEffect().getUniform("WaveRefract");
             Uniform waveGlowUniform = pass.getEffect().getUniform("WaveGlow");
+            Uniform glassTintUniform = pass.getEffect().getUniform("GlassTint");
+            Uniform glassParamsUniform = pass.getEffect().getUniform("GlassParams");
+            Uniform glassEdgeUniform = pass.getEffect().getUniform("GlassEdge");
+            if (glassTintUniform == null || glassParamsUniform == null || glassEdgeUniform == null) {
+                allReady = false;
+                continue;
+            }
             if (rectUniform == null || holeUniform == null || progressUniform == null || smoothUniform == null
                     || cellCountUniform == null || cellRectsUniform == null
                     || waveOriginUniform == null || waveRadiusUniform == null
@@ -456,6 +593,9 @@ public final class ShopGaussBlur {
             waveThickUniform.set(wave[3]);
             waveRefractUniform.set(wave[4]);
             waveGlowUniform.set(wave[5]);
+            glassTintUniform.set(glassTint[0], glassTint[1], glassTint[2], glassTint[3]);
+            glassParamsUniform.set(glassParams[0], glassParams[1], glassParams[2], glassParams[3]);
+            glassEdgeUniform.set(glassEdge[0], glassEdge[1], glassEdge[2], glassEdge[3]);
             int n = cells > 1 && cellData != null ? Math.min(cells, MAX_CELL_RECTS) : 0;
             cellCountUniform.set(n);
             cellRectsUniform.set(n > 0 ? cellData : NO_CELLS);

@@ -447,10 +447,20 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         if (canMatch.test(oneLess)) {
             return oneLess;
         }
+        if (oneLess == 1L) {
+            return 0L;
+        }
 
-        long low = 1L;
+        // 并行 1 都过不了（输出倉滿、输入被别的配方吃光）= 整段单调区间全部失败，直接返回，
+        // 不必再二分。这是「堵塞状态每 5 tick 重试一轮」的主要开销：超限器下 log2(上限) 可达 60 轮，
+        // 每轮都复制一份缩放配方并做输入、输出两次 handler 匹配。
+        if (!canMatch.test(1L)) {
+            return 0L;
+        }
+
+        long low = 2L;
         long high = requestedParallel - 2L;
-        long best = 0L;
+        long best = 1L;
         while (low <= high) {
             long middle = low + ((high - low) >>> 1);
             if (canMatch.test(middle)) {

@@ -1,7 +1,9 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyStageConfig;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
@@ -57,8 +59,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private static final int BACK_W = 60;
     private static final int HINT_H = 36;
     private static final long HINT_ROTATE_MS = 5000L;
-    // 弹入动画节奏：跟 ShopScreen 系列界面统一（150ms ease-out），见 GuiRenderUtil#popScaleAt/popAnimProgress
-    private static final long POP_ANIM_MS = GuiRenderUtil.MOTION_MS;
+    // 弹入动画：跟 ShopScreen 系列界面统一，开场弹簧驱动缩放，见 openMotion / GuiMotion#panelScale
     // AE 网络余额预览节流：选中币种切换立即重新请求，之外每 40 刻（2秒）兜底刷新一次
     // （跟 ShopScreen#PREVIEW_REFRESH_TICKS 同一节奏，见 maybeRequestAeBalance）
     private static final long AE_BALANCE_REFRESH_TICKS = 40L;
@@ -79,7 +80,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
     private int left, top, panelWidth, panelHeight;
 
-    private final long screenOpenAtMs = System.currentTimeMillis();
+    private final Spring openMotion = Spring.opening(Spring.PANEL);
     private List<Component> hoverTip;     // 本帧悬停到的操作说明，renderTooltips 消费
 
     private static String flashText;      // 含 § 颜色码，与聊天框一致
@@ -178,15 +179,25 @@ public class CurrencyAtmScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
-        float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS);
+        openMotion.update(System.currentTimeMillis());
+        float openScale = GuiMotion.panelScale(openMotion.value());
         if (amountBox != null) {
             amountBox.setVisible(selected != null);
-            amountBox.setAnim(() -> GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS),
+            amountBox.setAnim(() -> GuiMotion.panelScale(openMotion.value()),
                     left + panelWidth / 2f, top + panelHeight / 2f);
             amountBox.setSlideX(() -> 0f);
         }
-        GuiRenderUtil.withPopScale(g, left + panelWidth / 2f, top + panelHeight / 2f, openT,
-                () -> renderPanel(g, mx, my));
+        if (openScale < 0.9995f) {
+            g.pose().pushPose();
+            try {
+                GuiRenderUtil.scaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openScale);
+                renderPanel(g, mx, my);
+            } finally {
+                g.pose().popPose();
+            }
+        } else {
+            renderPanel(g, mx, my);
+        }
     }
 
     private void renderPanel(GuiGraphics g, int mx, int my) {

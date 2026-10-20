@@ -91,10 +91,38 @@ public class GuiRenderUtil {
      */
     public static void popScaleAt(GuiGraphics g, float cx, float cy, float t) {
         if (t >= 1f) return;
-        float scale = 0.94f + 0.06f * easeOut(t);
+        scaleAt(g, cx, cy, popScale(t));
+    }
+
+    /** 以 (cx,cy) 为锚点按给定系数缩放。调用方须自行 pushPose/popPose。 */
+    public static void scaleAt(GuiGraphics g, float cx, float cy, float scale) {
         g.pose().translate(cx, cy, 0);
         g.pose().scale(scale, scale, 1f);
         g.pose().translate(-cx, -cy, 0);
+    }
+
+    /** 弹入缩放系数 0.94→1.0（ease-out）。{@link #popScaleAt} 和模糊挖洞共用，保证洞和面板同大小。 */
+    public static float popScale(float t) {
+        if (t >= 1f) return 1f;
+        return 0.94f + 0.06f * easeOut(t);
+    }
+
+    /**
+     * 矩形绕自身中心缩放，返回 {x, y, w, h}。x、y 向内取整、w、h 向内收，
+     * 缩小后的洞只会比面板略小，不会把面板外一圈挖出来。scale&gt;=1 原样返回。
+     */
+    public static int[] scaleRectAround(int x, int y, int w, int h, float scale) {
+        if (scale >= 1f || w <= 0 || h <= 0) return new int[]{x, y, w, h};
+        float cx = x + w / 2f;
+        float cy = y + h / 2f;
+        float nw = w * scale;
+        float nh = h * scale;
+        // 1e-3 的容差吸收 float 误差：200 * 0.94f 这类刚好整数的边不会被 ceil/floor 多吃一个像素。
+        int x0 = (int) Math.ceil(cx - nw / 2f - 1e-3f);
+        int y0 = (int) Math.ceil(cy - nh / 2f - 1e-3f);
+        int x1 = (int) Math.floor(cx + nw / 2f + 1e-3f);
+        int y1 = (int) Math.floor(cy + nh / 2f + 1e-3f);
+        return new int[]{x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0)};
     }
 
     /** 切页横向偏移。dir&gt;0 从右侧进入，dir&lt;0 从左侧进入。播完为 0。 */
@@ -120,6 +148,32 @@ public class GuiRenderUtil {
             popScaleAt(g, cx, cy, t);
             draw.run();
         } finally {
+            g.pose().popPose();
+        }
+    }
+
+    /**
+     * 弹簧值 {@code p} 驱动的浮层面板：以 (cx,cy) 为中心缩放 {@link GuiMotion#panelScale}，透明度 {@code clamp01(p)}。
+     * p 接近 1 时直接画。开和关走同一条曲线，中途被打断也连续。
+     * 透明度用着色器颜色（对 fill、文字、物品图标都生效，同卡片飞行的淡出）；批次必须在复位颜色前落盘。
+     */
+    public static void withPanelMotion(GuiGraphics g, float cx, float cy, float p, Runnable draw) {
+        if (p >= 0.999f) {
+            draw.run();
+            return;
+        }
+        float scale = GuiMotion.panelScale(p);
+        g.pose().pushPose();
+        try {
+            g.pose().translate(cx, cy, 0);
+            g.pose().scale(scale, scale, 1f);
+            g.pose().translate(-cx, -cy, 0);
+            g.flush();
+            g.setColor(1f, 1f, 1f, GuiMotion.clamp01(p));
+            draw.run();
+        } finally {
+            g.flush();
+            g.setColor(1f, 1f, 1f, 1f);
             g.pose().popPose();
         }
     }

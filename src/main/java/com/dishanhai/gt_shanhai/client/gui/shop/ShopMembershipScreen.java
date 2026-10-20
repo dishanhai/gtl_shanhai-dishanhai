@@ -1,7 +1,9 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopBank;
 import com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount;
 import com.dishanhai.gt_shanhai.common.shop.ShopMembership;
@@ -56,7 +58,7 @@ public class ShopMembershipScreen extends ScaledScreen {
     private AnimatableEditBox amountBox;
 
     private long bankRequestedAtGameTime = -BANK_REFRESH_TICKS;
-    private final long screenOpenAtMs = System.currentTimeMillis();
+    private final Spring openMotion = Spring.opening(Spring.PANEL);
 
     private static String flashText;
     private static long flashUntil;
@@ -122,11 +124,12 @@ public class ShopMembershipScreen extends ScaledScreen {
 
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        openMotion.update(System.currentTimeMillis());
         syncAmountBox();
-        float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS);
-        if (openT < 1f) {
+        float openScale = GuiMotion.panelScale(openMotion.value());
+        if (openScale < 0.9995f) {
             g.pose().pushPose();
-            GuiRenderUtil.popScaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openT);
+            GuiRenderUtil.scaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openScale);
             renderPanel(g, mx, my);
             g.pose().popPose();
         } else {
@@ -139,7 +142,7 @@ public class ShopMembershipScreen extends ScaledScreen {
         boolean bank = page == PAGE_BANK;
         amountBox.setVisible(bank);
         amountBox.active = bank;
-        amountBox.setAnim(() -> GuiRenderUtil.popAnimProgress(screenOpenAtMs, POP_ANIM_MS),
+        amountBox.setAnim(() -> GuiMotion.panelScale(openMotion.value()),
                 left + panelWidth / 2f, top + panelHeight / 2f);
         amountBox.setSlideX(() -> GuiRenderUtil.slideOffsetX(pageSlideDir,
                 GuiRenderUtil.popAnimProgress(pageSwitchAtMs, POP_ANIM_MS)));

@@ -19,6 +19,9 @@
     {"name": "WaveGlow", "type": "float", "count": 1, "values": [0.0]},
     {"name": "CellCount", "type": "int", "count": 1, "values": [0]},
     {"name": "CellRects", "type": "float", "count": 32, "values": [0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0, 0.0,0.0,0.0,0.0]},
+    {"name": "GlassTint", "type": "float", "count": 4, "values": [0.0,0.0,0.0,0.0]},
+    {"name": "GlassParams", "type": "float", "count": 4, "values": [0.0,0.0,0.0,0.0]},
+    {"name": "GlassEdge", "type": "float", "count": 4, "values": [0.0,0.0,0.0,0.0]},
     {"name": "Rect", "type": "float", "count": 4, "values": [0.0,0.0,1.0,1.0]},
     {"name": "Hole", "type": "float", "count": 4, "values": [0.0,0.0,0.0,0.0]}
   ]
