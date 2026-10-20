@@ -26,6 +26,7 @@ link: [[https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link](http
 - 文字层用密采样高斯。宽间距采样会把背后的商品名打成残影。分组切页只糊网格，落位后强度归零。底部消息横幅不进模糊矩形。采样限制在商店面板内缘，不会糊到外面的世界。
 - 打开商店时预热着色器，避免第一次点商品才编译。着色器不可用时退回原来的磨砂和深遮罩。
 - 浮层从 0.94 弹到 1。切页只横向平移 32 像素，不再叠一层缩放。消息横幅按槽位插值滑动。
+- 按下任意商店按键，点击点会扩出一圈液态玻璃波，持续 240 毫秒。波由三层叠成：波峰径向折射把画面往外推、圆盘内透镜放大、波峰高光带方向。波走独立的后处理槽位，跟卡片飞行、浮层模糊同帧并存——点在商品格上照样看得见。着色器不可用时退回直绘亮环，反馈不会丢。
 - 货币中心、兑换、银会的面板和数量框跟同一套 150 毫秒。
 
 ## 多方块注册开关
@@ -56,5 +57,4 @@ link: [[https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link](http
 
 ## 运行环境
 
-- 模组现在依赖 KotlinForForge，版本范围 `[4.12,5)`。jar 里用 Jar-in-Jar 带上 `kotlinforforge-4.12.0-all.jar`，放在 `META-INF/jarjar`。Forge 在 gtladditions 自带的 4.11 和这颗 4.12 之间选 4.12。
-- Kotlin 标准库不对齐进模组根目录，避免和 KotlinForForge 抢 `kotlin.*`。编译使用的 Kotlin 版本是 2.2.21，和这颗 jar 里的标准库一致。
+- 模组现在依赖 KotlinForForge，版本范围 `[4.12,5)`。jar 里用 Jar-in-Jar 带上 `kotlinforforge-4.12.0-all.jar`，放在 `META-INF/jarjar`中 所以你不需要自行下载 KotlinForForge。

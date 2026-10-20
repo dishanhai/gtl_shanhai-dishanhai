@@ -57,9 +57,15 @@ public class DShanhaiRecipeModifierAPI {
 
     private static final Map<String, List<JSRecipeModifier>> JS_MODIFIERS = new LinkedHashMap<>();
 
-    /** 已经写入 GTRecipeLookup 的规则副本，避免后续 lookup/机器路径重复套用静态规则。 */
-    private static final Map<GTRecipe, Boolean> CANONICAL_LOOKUP_RECIPES =
-            Collections.synchronizedMap(new WeakHashMap<>());
+    /**
+     * 已经写入 GTRecipeLookup 的规则副本，避免后续 lookup/机器路径重复套用静态规则。
+     *
+     * <p>按配方类型分组，用 {@link IdentityHashMap} 做标识比较。{@code GTRecipe.equals}
+     * 只比较 recipeId，若以配方对象本身作键，任何同 id 的新副本都会被误判成 canonical，
+     * 重建时的 strip/replace 就会整批失效。</p>
+     */
+    private static final Map<String, Set<GTRecipe>> CANONICAL_LOOKUP_RECIPES =
+            new ConcurrentHashMap<>();
 
     public static void register(String recipeTypeId, JSRecipeModifier modifier) {
         if (recipeTypeId == null || modifier == null) return;
@@ -151,7 +157,7 @@ public class DShanhaiRecipeModifierAPI {
         rules.add(rule);
         if (!LOADING_REPLACE.get() && !LOADING_PRESET_BATCH.get()) {
             saveReplaceRules();
-            rebuildLookup(recipeTypeId);
+            if (!deferRuleRebuild(recipeTypeId)) rebuildLookup(recipeTypeId);
         }
         LOG.info("已注册替换规则 [{}]: {}→{} ({}=>{})",
                 recipeTypeId, rule.oldItem, rule.newItem,
@@ -160,6 +166,9 @@ public class DShanhaiRecipeModifierAPI {
 
     private static final ThreadLocal<Boolean> LOADING_REPLACE = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> LOADING_STRIP   = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Integer> RULE_BATCH_DEPTH = ThreadLocal.withInitial(() -> 0);
+    private static final ThreadLocal<Set<String>> RULE_BATCH_TYPES =
+            ThreadLocal.withInitial(LinkedHashSet::new);
 
     /** 获取替换规则列表 */
     public static List<ReplaceEntry> getReplaceRules(String recipeTypeId) {
@@ -171,9 +180,8 @@ public class DShanhaiRecipeModifierAPI {
         var old = REPLACE_RULES.remove(recipeTypeId);
         if (old != null) {
             saveReplaceRules();
-            // 从原始缓存恢复配方（已缓存类型直接还原，未缓存类型重建模板）
-            var stripRules = STRIP_RULES.getOrDefault(recipeTypeId, Collections.emptyList());
-            updateLookupRecipes(recipeTypeId, stripRules);
+            // 规则已清空，从不可变快照统一重建
+            if (!deferRuleRebuild(recipeTypeId)) rebuildLookup(recipeTypeId);
         }
         return old != null;
     }
@@ -196,7 +204,7 @@ public class DShanhaiRecipeModifierAPI {
         rules.add(rule);
         if (!LOADING_DELETE.get() && !LOADING_PRESET_BATCH.get()) {
             saveDeleteRules();
-            rebuildLookup(recipeTypeId);
+            if (!deferRuleRebuild(recipeTypeId)) rebuildLookup(recipeTypeId);
         }
     }
 
@@ -208,43 +216,42 @@ public class DShanhaiRecipeModifierAPI {
     /** 移除指定配方类型的所有删除规则 */
     public static boolean removeDeleteRules(String recipeTypeId) {
         var old = DELETE_RULES.remove(recipeTypeId);
-        if (old != null) { saveDeleteRules(); rebuildLookup(recipeTypeId); }
+        if (old != null) {
+            saveDeleteRules();
+            if (!deferRuleRebuild(recipeTypeId)) rebuildLookup(recipeTypeId);
+        }
         return old != null;
     }
 
     /**
      * 按配方 ID 正则删除配方并注册为持久化规则。
+     * 只统计命中数量，实际删除交给统一重建，避免绕过双表写回。
      * @return 删除数量
      */
     public static int deleteRecipesById(String recipeTypeId, String recipeRegex) {
-        var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-        if (type == null) return 0;
-        var lookup = type.getLookup();
-        if (lookup == null) return 0;
-        var branch = lookup.getLookup();
-        if (branch == null) return 0;
-
+        if (recipeTypeId == null || recipeRegex == null) return 0;
         Pattern p = Pattern.compile(recipeRegex);
-        List<GTRecipe> allRecipes = new ArrayList<>();
-        branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
-        List<GTRecipe> keep = new ArrayList<>();
         int deleted = 0;
-        for (var r : allRecipes) {
-            if (r == null) continue;
-            String rid = r.getId() != null ? r.getId().toString() : "";
-            if (p.matcher(rid).find()) { deleted++; }
-            else { keep.add(r); }
+        for (GTRecipe recipe : snapshotRecipes(recipeTypeId)) {
+            String rid = recipe.getId() != null ? recipe.getId().toString() : "";
+            if (p.matcher(rid).find()) deleted++;
         }
-
         if (deleted > 0) {
             addDeleteRule(recipeTypeId, new DeleteEntry(recipeRegex));
-            lookup.removeAllRecipes();
-            for (GTRecipe r : keep) lookup.addRecipe(r);
-            invalidatePatternCaches("deleteById:" + recipeTypeId);
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
         }
         LOG.info("[DeleteById] {} regex=[{}] → 删除 {} 个配方", recipeTypeId, recipeRegex, deleted);
         return deleted;
+    }
+
+    /** 不可变快照的副本；类型还没有快照时返回空列表。 */
+    private static List<GTRecipe> snapshotRecipes(String recipeTypeId) {
+        List<GTRecipe> originals =
+                com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.originalsOfType(recipeTypeId);
+        List<GTRecipe> copies = new ArrayList<>(originals.size());
+        for (GTRecipe recipe : originals) {
+            if (recipe != null) copies.add(recipe.copy());
+        }
+        return copies;
     }
 
     private static final ThreadLocal<Boolean> LOADING_DELETE = ThreadLocal.withInitial(() -> false);
@@ -287,7 +294,7 @@ public class DShanhaiRecipeModifierAPI {
         rules.add(rule);
         if (!LOADING_STRIP.get() && !LOADING_PRESET_BATCH.get()) {
             saveStripRules();
-            rebuildLookup(recipeTypeId);
+            if (!deferRuleRebuild(recipeTypeId)) rebuildLookup(recipeTypeId);
         }
         LOG.info("已注册剥离规则 [{}]: {} {} {} {}", recipeTypeId,
                 rule.isFluid ? "流体" : "物品", rule.isInput ? "输入" : "输出",
@@ -302,7 +309,7 @@ public class DShanhaiRecipeModifierAPI {
         if (list.isEmpty()) STRIP_RULES.remove(recipeTypeId);
         if (removed) {
             saveStripRules();
-            rebuildLookup(recipeTypeId);
+            if (!deferRuleRebuild(recipeTypeId)) rebuildLookup(recipeTypeId);
         }
         return removed;
     }
@@ -312,7 +319,7 @@ public class DShanhaiRecipeModifierAPI {
         var old = STRIP_RULES.remove(recipeTypeId);
         if (old != null) {
             saveStripRules();
-            rebuildLookup(recipeTypeId);
+            if (!deferRuleRebuild(recipeTypeId)) rebuildLookup(recipeTypeId);
         }
         return old != null;
     }
@@ -327,10 +334,50 @@ public class DShanhaiRecipeModifierAPI {
         return Collections.unmodifiableMap(STRIP_RULES);
     }
 
-    /** 触发模板重建（规则变更时调用） */
+    /** 触发模板重建（规则变更时调用），统一走 RecipeRebuildService。 */
     private static void rebuildLookup(String recipeTypeId) {
-        var list = STRIP_RULES.get(recipeTypeId);
-        updateLookupRecipes(recipeTypeId, list != null ? list : Collections.emptyList());
+        com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildType(
+                recipeTypeId,
+                com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.RULE_CHANGED);
+    }
+
+    /**
+     * 批量注册规则时只重建一次。规则容器与 lookup 写回都留在伺服器執行緒，
+     * 避免每條規則各跑一次整類重建。
+     */
+    public static void runRuleBatch(Runnable action) {
+        if (action == null) return;
+        RULE_BATCH_DEPTH.set(RULE_BATCH_DEPTH.get() + 1);
+        try {
+            action.run();
+        } finally {
+            int depth = RULE_BATCH_DEPTH.get() - 1;
+            RULE_BATCH_DEPTH.set(depth);
+            if (depth > 0) return;
+            Set<String> types = new LinkedHashSet<>(RULE_BATCH_TYPES.get());
+            RULE_BATCH_TYPES.get().clear();
+            saveStripRules();
+            saveReplaceRules();
+            saveDeleteRules();
+            if (types.isEmpty()) return;
+            // 一個批次只做一輪失效、一輪重建、一個同步包
+            runPatternCacheInvalidationBatch("rule-batch", () -> {
+                for (String typeId : types) {
+                    com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildType(
+                            typeId,
+                            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.RULE_CHANGED,
+                            false);
+                }
+            });
+            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.notifyTypes(types);
+        }
+    }
+
+    /** 規則批次內只記錄待重建類型，由 {@link #runRuleBatch} 統一收尾。 */
+    private static boolean deferRuleRebuild(String recipeTypeId) {
+        if (RULE_BATCH_DEPTH.get() <= 0) return false;
+        if (recipeTypeId != null && !recipeTypeId.isEmpty()) RULE_BATCH_TYPES.get().add(recipeTypeId);
+        return true;
     }
 
     // ====== 核心调用 ======
@@ -546,182 +593,134 @@ public class DShanhaiRecipeModifierAPI {
         return value;
     }
 
-    // ====== 配方删除（从 GTRecipeLookup 中移除并可选重加修改版） ======
+    // ====== 配方删除（统一走规则 + 重建） ======
 
     /**
      * 从指定配方类型中删除包含 targetItem 的配方，可选重加去掉了 targetItem 的版本。
-     * @return 删除的配方数量
+     *
+     * <p>不直接改写 lookup：命中配方转成持久化规则（删除正则或剥离规则），
+     * 由 {@code RecipeRebuildService} 统一重建，雙表與快照才不會脱節。</p>
+     * @return 命中的配方数量
      */
     public static int deleteRecipes(String recipeTypeId, String targetItem, boolean reAdd) {
-        var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-        if (type == null) return 0;
-        var lookup = type.getLookup();
-        if (lookup == null) return 0;
-        var branch = lookup.getLookup();
-        if (branch == null) return 0;
-
-        // 1. 先收集所有配方
-        java.util.List<GTRecipe> allRecipes = new ArrayList<>();
-        branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
-
-        // 2. 遍历，标记要删除的和备加重加的
-        java.util.List<GTRecipe> toKeep = new ArrayList<>();
-        java.util.List<GTRecipe> toReAdd = new ArrayList<>();
-        int[] count = {0};
-
-        for (GTRecipe recipe : allRecipes) {
-            var items = recipe.inputs.get(ItemRecipeCapability.CAP);
-            if (items == null) { toKeep.add(recipe); continue; }
-            boolean hasTarget = items.stream().anyMatch(c -> {
-                if (c.content instanceof SizedIngredient si) {
-                    var stacks = si.getItems();
-                    return stacks.length > 0 && matchesItem(stacks[0], targetItem);
-                }
-                if (c.content instanceof ItemStack is) return matchesItem(is, targetItem);
-                return false;
-            });
-            if (!hasTarget) { toKeep.add(recipe); continue; }
-
-            count[0]++;
-            if (reAdd) {
-                var copy = recipe.copy();
-                var copyItems = copy.inputs.get(ItemRecipeCapability.CAP);
-                if (copyItems != null) {
-                    copyItems.removeIf(c -> {
-                        if (c.content instanceof SizedIngredient si) {
-                            var stacks = si.getItems();
-                            return stacks.length > 0 && matchesItem(stacks[0], targetItem);
-                        }
-                        if (c.content instanceof ItemStack is) return matchesItem(is, targetItem);
-                        return false;
-                    });
-                }
-                toReAdd.add(copy);
-            }
+        List<GTRecipe> matched = new ArrayList<>();
+        for (GTRecipe recipe : snapshotRecipes(recipeTypeId)) {
+            if (hasInputItem(recipe, targetItem)) matched.add(recipe);
         }
-
-        // 3. 删全部，重建
-        lookup.removeAllRecipes();
-        for (var r : toKeep) lookup.addRecipe(r);
-        for (var r : toReAdd) lookup.addRecipe(r);
-
-        if (count[0] > 0) invalidatePatternCaches("deleteRecipes:" + recipeTypeId);
-
-        LOG.info("[ModAPI] 删除了 {} 个配方 [{}] from {}, 重加 {} 个修改版",
-                count[0], targetItem, recipeTypeId, toReAdd.size());
-        return count[0];
+        if (matched.isEmpty()) {
+            LOG.info("[ModAPI] {} 无包含 {} 的配方", recipeTypeId, targetItem);
+            return 0;
+        }
+        runRuleBatch(() -> {
+            for (GTRecipe recipe : matched) {
+                if (recipe.getId() == null) continue;
+                String recipeId = recipe.getId().toString();
+                if (reAdd) {
+                    addStripRule(recipeTypeId, new StripEntry(targetItem, true, false, recipeId));
+                } else {
+                    addDeleteRule(recipeTypeId, new DeleteEntry(Pattern.quote(recipeId)));
+                }
+            }
+        });
+        LOG.info("[ModAPI] 删除规则已登记: {} 个配方 [{}] from {}, 模式={}",
+                matched.size(), targetItem, recipeTypeId, reAdd ? "剥离输入" : "整条删除");
+        return matched.size();
     }
 
-    /** 在指定配方类型中替换物品/流体（forceNotConsumable: true=强制不消耗, false=强制消耗, null=自动检测） */
+    private static boolean hasInputItem(GTRecipe recipe, String targetItem) {
+        if (recipe == null) return false;
+        var items = recipe.inputs.get(ItemRecipeCapability.CAP);
+        if (items == null) return false;
+        for (Content content : items) {
+            if (content == null) continue;
+            if (content.content instanceof SizedIngredient si) {
+                var stacks = si.getItems();
+                if (stacks.length > 0 && matchesItem(stacks[0], targetItem)) return true;
+            } else if (content.content instanceof ItemStack is && matchesItem(is, targetItem)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 统计一次替换规则会命中多少个配方。
+     *
+     * <p>实际修改由 {@link #addReplaceRule} 登记的规则完成并统一重建；
+     * 这里只从不可变快照统计数量，不再就地改写活 lookup。</p>
+     */
     public static int replaceInRecipes(String recipeTypeId, String oldItem, String newItem,
                                         boolean oldIsFluid, boolean newIsFluid, Boolean forceNotConsumable, int newItemCount, int circuitNumber,
                                         String filterRecipeId) {
-        var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-        if (type == null) return 0;
-        var lookup = type.getLookup();
-        if (lookup == null) return 0;
-        var branch = lookup.getLookup();
-        if (branch == null) return 0;
-
-        List<GTRecipe> allRecipes = new ArrayList<>();
-        branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
-
+        if (recipeTypeId == null || oldItem == null) return 0;
+        String filter = filterRecipeId == null ? "" : filterRecipeId;
         int count = 0;
-        List<GTRecipe> result = new ArrayList<>();
-        for (GTRecipe recipe : allRecipes) {
-            // recipeId 过滤：非空时仅匹配指定配方
-            if (!filterRecipeId.isEmpty()) {
-                String rid = recipe.getId() != null ? recipe.getId().toString() : "";
-                if (!matchesRecipeId(rid, filterRecipeId)) {
-                    result.add(recipe);
-                    continue;
-                }
-            }
-            GTRecipe copy = recipe.copy();
-            // 原地替换：匹配旧物品 → 直接改 Content 引用，保留 chance/amount 等属性
-            boolean found = false;
-            found |= replaceInMap(copy.inputs, oldItem, newItem, oldIsFluid, newItemCount, circuitNumber);
-            found |= replaceInMap(copy.outputs, oldItem, newItem, oldIsFluid, newItemCount, circuitNumber);
-            found |= replaceInMap(copy.tickInputs, oldItem, newItem, oldIsFluid, newItemCount, circuitNumber);
-            found |= replaceInMap(copy.tickOutputs, oldItem, newItem, oldIsFluid, newItemCount, circuitNumber);
-            if (!found) {
-                result.add(recipe);
+        for (GTRecipe recipe : snapshotRecipes(recipeTypeId)) {
+            if (recipe.getId() != null && !filter.isEmpty()
+                    && !matchesRecipeId(recipe.getId().toString(), filter)) {
                 continue;
             }
-            result.add(copy);
-            count++;
+            if (containsContent(recipe, oldItem, oldIsFluid)) count++;
         }
-
-        lookup.removeAllRecipes();
-        for (GTRecipe r : result) lookup.addRecipe(r);
-
-        if (count > 0) invalidatePatternCaches("replaceInRecipes:" + recipeTypeId);
-        LOG.info("[ModAPI] 替换完成: {} -> {} in {} ({} 个配方)", oldItem, newItem, recipeTypeId, count);
-        com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+        LOG.info("[ModAPI] 替换规则命中: {} -> {} in {} ({} 个配方)", oldItem, newItem, recipeTypeId, count);
         return count;
+    }
+
+    private static boolean containsContent(GTRecipe recipe, String targetItem, boolean isFluid) {
+        if (recipe == null) return false;
+        return containsContent(recipe.inputs, targetItem, isFluid)
+                || containsContent(recipe.outputs, targetItem, isFluid)
+                || containsContent(recipe.tickInputs, targetItem, isFluid)
+                || containsContent(recipe.tickOutputs, targetItem, isFluid);
+    }
+
+    private static boolean containsContent(
+            Map<RecipeCapability<?>, List<Content>> table, String targetItem, boolean isFluid) {
+        if (table == null) return false;
+        RecipeCapability<?> cap = isFluid ? FluidRecipeCapability.CAP : ItemRecipeCapability.CAP;
+        var contents = table.get(cap);
+        if (contents == null) return false;
+        for (Content content : contents) {
+            if (content == null || content.content == null) continue;
+            if (isFluid) {
+                if (content.content instanceof com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient fi
+                        && matchesFluidIngredient(fi, targetItem)) return true;
+                if (content.content instanceof com.lowdragmc.lowdraglib.side.fluid.FluidStack fs
+                        && matchesFluid(fs, targetItem)) return true;
+            } else {
+                if (content.content instanceof SizedIngredient si
+                        && matchesItemIngredient(si, targetItem)) return true;
+                if (content.content instanceof ItemStack is && matchesItem(is, targetItem)) return true;
+            }
+        }
+        return false;
     }
 
     /** 自动扫描注册表，配对 raw_X→X_ingot/dust，批量替换 */
     /** 批量精确替换——传入旧ID数组和新ID数组，一对一对改 */
     public static int replaceBatch(String recipeTypeId, String[] oldItems, String[] newItems) {
         if (oldItems == null || newItems == null || oldItems.length != newItems.length) return 0;
-        var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-        if (type == null) return 0;
-        var lookup = type.getLookup();
-        if (lookup == null) return 0;
-        var branch = lookup.getLookup();
-        if (branch == null) return 0;
-
         java.util.Map<Pattern, String> patterns = new java.util.LinkedHashMap<>();
         for (int i = 0; i < oldItems.length; i++)
             patterns.put(Pattern.compile(Pattern.quote(oldItems[i])), newItems[i]);
-
-        List<GTRecipe> allRecipes = new ArrayList<>();
-        branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
-        LOG.info("[RepBatch] {} 共{}配方 {}条映射", recipeTypeId, allRecipes.size(), patterns.size());
-
-        int total = 0;
-        List<GTRecipe> result = new ArrayList<>();
-        for (GTRecipe recipe : allRecipes) {
-            GTRecipe copy = recipe.copy();
-            isolateContentList(copy.inputs, ItemRecipeCapability.CAP);
-            isolateContentList(copy.inputs, FluidRecipeCapability.CAP);
-            isolateContentList(copy.outputs, ItemRecipeCapability.CAP);
-            isolateContentList(copy.outputs, FluidRecipeCapability.CAP);
-            isolateContentList(copy.tickInputs, ItemRecipeCapability.CAP);
-            isolateContentList(copy.tickInputs, FluidRecipeCapability.CAP);
-            isolateContentList(copy.tickOutputs, ItemRecipeCapability.CAP);
-            isolateContentList(copy.tickOutputs, FluidRecipeCapability.CAP);
+        if (patterns.isEmpty()) return 0;
+        int total = applyContentTransform(recipeTypeId, "replaceBatch", copy -> {
             boolean found = false;
             for (var entry : patterns.entrySet()) {
-                Pattern p = entry.getKey(); String newId = entry.getValue();
+                Pattern p = entry.getKey();
+                String newId = entry.getValue();
                 found |= replacePatternInMap(copy.inputs, copy, p, newId);
                 found |= replacePatternInMap(copy.outputs, copy, p, newId);
                 found |= replacePatternInMap(copy.tickInputs, copy, p, newId);
                 found |= replacePatternInMap(copy.tickOutputs, copy, p, newId);
             }
-            if (found) { result.add(copy); total++; }
-            else { result.add(recipe); }
-        }
-
-        if (total > 0 && result.size() == allRecipes.size()) {
-            lookup.removeAllRecipes();
-            for (GTRecipe r : result) lookup.addRecipe(r);
-            invalidatePatternCaches("replaceBatch:" + recipeTypeId);
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
-        }
-        LOG.info("[RepBatch] {} 完成: {}/{}配方已修改", recipeTypeId, total, allRecipes.size());
+            return found;
+        });
+        LOG.info("[RepBatch] {} 完成: {} 条配方已转写为覆写", recipeTypeId, total);
         return total;
     }
 
     public static int replaceAllRawOres(String recipeTypeId) {
-        var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-        if (type == null) return 0;
-        var lookup = type.getLookup();
-        if (lookup == null) return 0;
-        var branch = lookup.getLookup();
-        if (branch == null) return 0;
-
         java.util.Map<String, String> map = new java.util.LinkedHashMap<>();
         String[] SUFFIXES = {"_ingot", "_dust", "_gem", ""}; // 递减：ingot>dust>gem>裸名
         for (var e : net.minecraftforge.registries.ForgeRegistries.ITEMS.getEntries()) {
@@ -750,62 +749,56 @@ public class DShanhaiRecipeModifierAPI {
         for (var entry : map.entrySet())
             patterns.put(Pattern.compile(Pattern.quote(entry.getKey())), entry.getValue());
 
-        List<GTRecipe> allRecipes = new ArrayList<>();
-        branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
-        LOG.info("[RawOreRep] {} 共{}配方 {}条映射", recipeTypeId, allRecipes.size(), patterns.size());
-
-        int total = 0;
-        List<GTRecipe> result = new ArrayList<>();
-        for (GTRecipe recipe : allRecipes) {
-            GTRecipe copy = recipe.copy();
-            isolateContentList(copy.inputs, ItemRecipeCapability.CAP);
-            isolateContentList(copy.inputs, FluidRecipeCapability.CAP);
-            isolateContentList(copy.outputs, ItemRecipeCapability.CAP);
-            isolateContentList(copy.outputs, FluidRecipeCapability.CAP);
-            isolateContentList(copy.tickInputs, ItemRecipeCapability.CAP);
-            isolateContentList(copy.tickInputs, FluidRecipeCapability.CAP);
-            isolateContentList(copy.tickOutputs, ItemRecipeCapability.CAP);
-            isolateContentList(copy.tickOutputs, FluidRecipeCapability.CAP);
+        int total = applyContentTransform(recipeTypeId, "replaceAllRawOres", copy -> {
             boolean found = false;
             for (var entry : patterns.entrySet()) {
-                Pattern p = entry.getKey(); String newId = entry.getValue();
+                Pattern p = entry.getKey();
+                String newId = entry.getValue();
                 found |= replacePatternInMap(copy.inputs, copy, p, newId);
                 found |= replacePatternInMap(copy.outputs, copy, p, newId);
                 found |= replacePatternInMap(copy.tickInputs, copy, p, newId);
                 found |= replacePatternInMap(copy.tickOutputs, copy, p, newId);
             }
-            if (found) { result.add(copy); total++; }
-            else { result.add(recipe); }
-        }
-
-        if (total > 0 && result.size() == allRecipes.size()) {
-            lookup.removeAllRecipes();
-            for (GTRecipe r : result) lookup.addRecipe(r);
-            invalidatePatternCaches("replaceAllRawOres:" + recipeTypeId);
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
-        }
-        LOG.info("[RawOreRep] {} 完成: {}/{}配方已修改", recipeTypeId, total, allRecipes.size());
+            return found;
+        });
+        LOG.info("[RawOreRep] {} 完成: {} 条配方已转写为覆写", recipeTypeId, total);
         return total;
     }
 
     public static int replacePatternRecipes(String recipeTypeId, String oldRegex, String newPattern) {
-        var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-        if (type == null) return 0;
-        var lookup = type.getLookup();
-        if (lookup == null) return 0;
-        var branch = lookup.getLookup();
-        if (branch == null) return 0;
-
         Pattern oldPat = Pattern.compile(oldRegex);
-        List<GTRecipe> allRecipes = new ArrayList<>();
-        branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
-        LOG.info("[PatRep] {} 共{}配方 regex=[{}] new=[{}]", recipeTypeId, allRecipes.size(), oldRegex, newPattern);
+        int count = applyContentTransform(recipeTypeId, "replacePatternRecipes", copy -> {
+            boolean found = false;
+            found |= replacePatternInMap(copy.inputs, copy, oldPat, newPattern);
+            found |= replacePatternInMap(copy.outputs, copy, oldPat, newPattern);
+            found |= replacePatternInMap(copy.tickInputs, copy, oldPat, newPattern);
+            found |= replacePatternInMap(copy.tickOutputs, copy, oldPat, newPattern);
+            return found;
+        });
+        LOG.info("[ModAPI] 模式替换: {} regex=[{}]->[{}] ({} 条配方)", recipeTypeId, oldRegex, newPattern, count);
+        return count;
+    }
 
-        int count = 0;
-        List<GTRecipe> result = new ArrayList<>();
-        for (GTRecipe recipe : allRecipes) {
-            GTRecipe copy = recipe.copy();
-            // copy()可能是浅拷贝，原地替换每个map的Content列表为新列表，避免污染原始配方
+    /**
+     * 内容级变换统一入口：从不可变快照取副本、变换、写成编辑覆写，再做一次统一重建。
+     *
+     * <p>旧实现直接改写活 lookup，既不会写原版表，也会在下次重建时被快照覆盖。
+     * 写成覆写后规则、重建、双表与客户端同步都回到同一条主路径。</p>
+     */
+    private static int applyContentTransform(
+            String recipeTypeId, String reason,
+            java.util.function.Function<GTRecipe, Boolean> transform) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty() || transform == null) return 0;
+        com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore store =
+                new com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore(
+                        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides()));
+        Map<com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase, String> payloads =
+                new LinkedHashMap<>();
+        for (GTRecipe snapshot : com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService
+                .originalsOfType(recipeTypeId)) {
+            if (snapshot == null || snapshot.getId() == null) continue;
+            GTRecipe copy = snapshot.copy();
             isolateContentList(copy.inputs, ItemRecipeCapability.CAP);
             isolateContentList(copy.inputs, FluidRecipeCapability.CAP);
             isolateContentList(copy.outputs, ItemRecipeCapability.CAP);
@@ -814,27 +807,26 @@ public class DShanhaiRecipeModifierAPI {
             isolateContentList(copy.tickInputs, FluidRecipeCapability.CAP);
             isolateContentList(copy.tickOutputs, ItemRecipeCapability.CAP);
             isolateContentList(copy.tickOutputs, FluidRecipeCapability.CAP);
-            boolean found = false;
-            found |= replacePatternInMap(copy.inputs,     copy, oldPat, newPattern);
-            found |= replacePatternInMap(copy.outputs,    copy, oldPat, newPattern);
-            found |= replacePatternInMap(copy.tickInputs,  copy, oldPat, newPattern);
-            found |= replacePatternInMap(copy.tickOutputs, copy, oldPat, newPattern);
-            if (found) { result.add(copy); count++; }
-            else { result.add(recipe); }
+            if (!Boolean.TRUE.equals(transform.apply(copy))) continue;
+            com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase original =
+                    com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase.from(snapshot);
+            com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase edited =
+                    com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase.from(copy);
+            if (original == null || edited == null) continue;
+            payloads.put(edited,
+                    com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeFingerprint.of(original));
         }
-
-        if (count > 0 && result.size() == allRecipes.size()) {
-            LOG.info("[PatRep] 应用: {}个修改 (共{}配方)", count, allRecipes.size());
-            lookup.removeAllRecipes();
-            for (GTRecipe r : result) lookup.addRecipe(r);
-            invalidatePatternCaches("replacePatternRecipes:" + recipeTypeId);
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
-        } else if (count > 0) {
-            LOG.error("[ModAPI] 模式替换中止: 结果数量不匹配 ({} vs {})", result.size(), allRecipes.size());
+        if (payloads.isEmpty()) return 0;
+        try {
+            store.putAll(payloads, "shanhai-" + reason);
+        } catch (java.io.IOException e) {
+            LOG.warn("[ModAPI] 写入覆写失败 ({}): {}", recipeTypeId, e.getMessage());
             return 0;
         }
-        LOG.info("[ModAPI] 模式替换: {} regex=[{}]->[{}] ({} 个配方)", recipeTypeId, oldRegex, newPattern, count);
-        return count;
+        com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildType(
+                recipeTypeId,
+                com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.RULE_CHANGED);
+        return payloads.size();
     }
 
     private static void isolateContentList(Map<RecipeCapability<?>, List<Content>> map, RecipeCapability<?> cap) {
@@ -1033,12 +1025,56 @@ public class DShanhaiRecipeModifierAPI {
         if (matchesDeleteRule(typeId, copy)) {
             return null;
         }
-        CANONICAL_LOOKUP_RECIPES.put(copy, Boolean.TRUE);
+        markCanonicalLookupRecipe(typeId, copy);
         return copy;
     }
 
+    /** 标识比较的 canonical 集合，按类型隔离，重建该类型时整体替换。 */
+    public static void markCanonicalLookupRecipe(String recipeTypeId, GTRecipe recipe) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty() || recipe == null) return;
+        canonicalSet(recipeTypeId).add(recipe);
+    }
+
+    /** 用本次写回 lookup 的副本整体替换该类型的 canonical 标记。 */
+    public static void replaceCanonicalLookupRecipes(String recipeTypeId, Iterable<? extends GTRecipe> recipes) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty()) return;
+        Set<GTRecipe> marked = Collections.synchronizedSet(
+                Collections.newSetFromMap(new IdentityHashMap<>()));
+        if (recipes != null) {
+            for (GTRecipe recipe : recipes) {
+                if (recipe != null) marked.add(recipe);
+            }
+        }
+        CANONICAL_LOOKUP_RECIPES.put(recipeTypeId, marked);
+    }
+
+    /** 增量刷新时追加本次写回的副本。 */
+    public static void markCanonicalLookupRecipes(String recipeTypeId, Iterable<? extends GTRecipe> recipes) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty() || recipes == null) return;
+        Set<GTRecipe> marked = canonicalSet(recipeTypeId);
+        for (GTRecipe recipe : recipes) {
+            if (recipe != null) marked.add(recipe);
+        }
+    }
+
+    /** 增量刷新时摘掉被替换掉的旧副本，避免集合随着编辑次数一直增长。 */
+    public static void unmarkCanonicalLookupRecipe(String recipeTypeId, String recipeId) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty() || recipeId == null || recipeId.isEmpty()) return;
+        Set<GTRecipe> marked = CANONICAL_LOOKUP_RECIPES.get(recipeTypeId);
+        if (marked == null) return;
+        marked.removeIf(recipe -> recipe == null || recipe.getId() == null
+                || recipeId.equals(recipe.getId().toString()));
+    }
+
+    private static Set<GTRecipe> canonicalSet(String recipeTypeId) {
+        return CANONICAL_LOOKUP_RECIPES.computeIfAbsent(recipeTypeId, key ->
+                Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>())));
+    }
+
     public static boolean isCanonicalLookupRecipe(GTRecipe recipe) {
-        return recipe != null && CANONICAL_LOOKUP_RECIPES.containsKey(recipe);
+        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) return false;
+        Set<GTRecipe> marked = CANONICAL_LOOKUP_RECIPES.get(recipe.recipeType.registryName.toString());
+        return marked != null && marked.contains(recipe);
     }
 
     /**
@@ -1207,19 +1243,36 @@ public class DShanhaiRecipeModifierAPI {
             SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(false);
             SUPPRESS_GET_RECIPES_STRIP.set(false);
         }
+        DShanhaiRecipeModifierAPI.unmarkCanonicalLookupRecipe(recipeTypeId, recipeId);
+        markCanonicalLookupRecipe(recipeTypeId, replacement);
         invalidatePatternCaches("modifyRecipeField:" + recipeTypeId);
         DShanhaiRecipeEngine.clearRecipeCache();
         DShanhaiGTRecipeQuery.resetCache();
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
-        if (server != null) {
-            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildVanillaManager(
-                    server, java.util.Set.of(recipeTypeId));
+        if (server != null && replacement.getId() != null) {
+            // 只写回这一条，不再用快照整类覆盖（否则刚改的字段会被还原）
+            Map<ResourceLocation, net.minecraft.world.item.crafting.Recipe<?>> upserts =
+                    new LinkedHashMap<>();
+            upserts.put(replacement.getId(), replacement);
+            com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeTable
+                    .replaceEntries(server, recipeTypeId, upserts, Set.of());
         }
         com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeReverseIndex.invalidate();
-        com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
+        com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(recipeTypeId, recipeId);
     }
 
-    /** 运行期切换配方：禁用时移出 lookup，启用时恢复完整快照。 */
+    /** 移除与该配方 ID 完全一致的删除规则（配方开关的启用路径使用）。 */
+    private static boolean removeDeleteRuleExact(String recipeTypeId, String recipeId) {
+        var rules = DELETE_RULES.get(recipeTypeId);
+        if (rules == null || recipeId == null) return false;
+        String quoted = Pattern.quote(recipeId);
+        boolean removed = rules.removeIf(rule -> rule.recipeRegex.equals(quoted)
+                || rule.recipeRegex.equals(recipeId));
+        if (rules.isEmpty()) DELETE_RULES.remove(recipeTypeId);
+        return removed;
+    }
+
+    /** 运行期切换配方：状态由持久化删除规则表达，改动后统一重建。 */
     public static boolean setRecipeEnabled(String recipeId, boolean enabled) {
         String typeId = findRecipeTypeById(recipeId);
         String disabledKey = null;
@@ -1240,12 +1293,14 @@ public class DShanhaiRecipeModifierAPI {
         if (enabled) {
             GTRecipe saved = DISABLED_RECIPES.remove(key);
             removePersistedRecipeToggle(fullId);
-            if (saved == null) {
-                saveRecipeTogglesIfNeeded();
-                return current != null;
-            }
-            replaceLookupRecipe(typeId, fullId, saved);
+            removeDeleteRuleExact(typeId, fullId);
+            saveDeleteRules();
             saveRecipeTogglesIfNeeded();
+            if (saved == null && current != null) return true;
+            // 恢复由统一重建完成，保证 lookup 与原版表同步（批次内延后到批次收尾）
+            if (!deferRuleRebuild(typeId)) rebuildLookup(typeId);
+            DShanhaiRecipeEngine.clearRecipeCache();
+            DShanhaiGTRecipeQuery.resetCache();
             return true;
         }
         if (current == null) {
@@ -1259,7 +1314,7 @@ public class DShanhaiRecipeModifierAPI {
         DISABLED_RECIPES.putIfAbsent(key, current.copy());
         removePersistedRecipeToggle(fullId);
         PERSISTED_RECIPE_TOGGLES.put(fullId, Boolean.FALSE);
-        removeAndSync(typeId, fullId);
+        addDeleteRule(typeId, new DeleteEntry(Pattern.quote(fullId)));
         DShanhaiRecipeEngine.clearRecipeCache();
         DShanhaiGTRecipeQuery.resetCache();
         saveRecipeTogglesIfNeeded();
@@ -1283,14 +1338,19 @@ public class DShanhaiRecipeModifierAPI {
 
     public static void resetRecipeToggles() {
         List<GTRecipe> saved = new ArrayList<>(DISABLED_RECIPES.values());
+        Set<String> affectedTypes = new LinkedHashSet<>();
+        for (GTRecipe recipe : saved) {
+            if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null
+                    || recipe.getId() == null) continue;
+            String typeId = recipe.recipeType.registryName.toString();
+            affectedTypes.add(typeId);
+            removeDeleteRuleExact(typeId, recipe.getId().toString());
+        }
         DISABLED_RECIPES.clear();
         PERSISTED_RECIPE_TOGGLES.clear();
-        for (GTRecipe recipe : saved) {
-            if (recipe != null && recipe.recipeType != null && recipe.recipeType.registryName != null && recipe.getId() != null) {
-                replaceLookupRecipe(recipe.recipeType.registryName.toString(), recipe.getId().toString(), recipe);
-            }
-        }
         saveRecipeTogglesIfNeeded();
+        saveDeleteRules();
+        for (String typeId : affectedTypes) rebuildLookup(typeId);
     }
 
     public static void clearOriginalSnapshot(String recipeTypeId) {
@@ -1301,6 +1361,25 @@ public class DShanhaiRecipeModifierAPI {
 
     public static boolean hasRuntimeDeleteRules(String recipeTypeId) {
         return !DELETE_RULES.getOrDefault(recipeTypeId, Collections.emptyList()).isEmpty();
+    }
+
+    /** 覆寫檔中該類型涉及的所有配方 id（含被移除的來源配方）。 */
+    public static Set<String> overrideRecipeIdsFor(String recipeTypeId) {
+        if (recipeTypeId == null || recipeTypeId.isEmpty()) return Set.of();
+        com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore store =
+                new com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore(
+                        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides()));
+        Set<String> ids = new LinkedHashSet<>();
+        for (var entry : store.entriesForType(recipeTypeId).values()) {
+            if (entry == null) continue;
+            if (entry.recipeId() != null && !entry.recipeId().isEmpty()) ids.add(entry.recipeId());
+            if (!entry.keepOriginal() && entry.sourceRecipeId() != null
+                    && !entry.sourceRecipeId().isEmpty()) {
+                ids.add(entry.sourceRecipeId());
+            }
+        }
+        return Collections.unmodifiableSet(ids);
     }
 
     /** 返回需要运行时重建/同步的配方类型，避免刷新时触碰普通全局 JEI 配方。 */
@@ -1348,147 +1427,6 @@ public class DShanhaiRecipeModifierAPI {
                 reports.size(), STRIP_RULES.size(), REPLACE_RULES.size(), DELETE_RULES.size());
     }
 
-    private static void updateLookupRecipes(String recipeTypeId, List<StripEntry> rules) {
-        rebuildLookupFromOriginals(recipeTypeId);
-    }
-
-    /**
-     * 从同一份原始配方快取一次性生成 lookup 内容，避免从 Branch.getRecipes() 读取已经被 Mixin
-     * 修改过的副本。剥离、替换、删除在此处按固定顺序完成，保证索引与实际内容一致。
-     */
-    private static void rebuildLookupFromOriginals(String recipeTypeId) {
-        var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-        if (type == null) {
-            LOG.warn("[ModAPI] 配方类型未找到，跳过模板重建: {}", recipeTypeId);
-            return;
-        }
-        var lookup = type.getLookup();
-        if (lookup == null) return;
-
-        // 首次成功调用时缓存原始配方（此时 lookup 应为未修改状态）
-        List<GTRecipe> originals = RecipeOriginalSnapshotStore.copiesOf(recipeTypeId);
-        if (!RecipeOriginalSnapshotStore.hasSnapshot(recipeTypeId)) {
-            final Map<String, GTRecipe> freshById = new LinkedHashMap<>();
-            final List<GTRecipe> freshWithoutId = new ArrayList<>();
-            SUPPRESS_GET_RECIPES_STRIP.set(true);
-            try {
-                lookup.getLookup().getRecipes(true).forEach(r -> {
-                    if (r == null) return;
-                    if (r.getId() == null) {
-                        freshWithoutId.add(r.copy());
-                    } else {
-                        freshById.putIfAbsent(r.getId().toString(), r.copy());
-                    }
-                });
-            } finally {
-                SUPPRESS_GET_RECIPES_STRIP.set(false);
-            }
-            List<GTRecipe> fresh = new ArrayList<>(freshById.values());
-            fresh.addAll(freshWithoutId);
-            if (fresh.isEmpty()) {
-                LOG.warn("[ModAPI] {} 无任何配方，跳过模板重建", recipeTypeId);
-                return;
-            }
-            for (GTRecipe recipe : fresh) {
-                RecipeOriginalSnapshotStore.capture(recipeTypeId, recipe);
-            }
-            originals = RecipeOriginalSnapshotStore.copiesOf(recipeTypeId);
-            LOG.info("[ModAPI] 已缓存原始配方: {} ({} 条)", recipeTypeId, originals.size());
-        }
-
-        // 旧版本快照可能已由多个 Branch 路径收集出重复 ID；重建前统一压成一份。
-        Map<String, GTRecipe> uniqueById = new LinkedHashMap<>();
-        List<GTRecipe> uniqueWithoutId = new ArrayList<>();
-        for (GTRecipe original : originals) {
-            if (original == null) continue;
-            if (original.getId() == null) {
-                uniqueWithoutId.add(original);
-            } else {
-                uniqueById.putIfAbsent(original.getId().toString(), original);
-            }
-        }
-        originals = new ArrayList<>(uniqueById.values());
-        originals.addAll(uniqueWithoutId);
-        RecipeOriginalSnapshotStore.clear(recipeTypeId);
-        for (GTRecipe original : originals) {
-            RecipeOriginalSnapshotStore.capture(recipeTypeId, original);
-        }
-        originals = RecipeOriginalSnapshotStore.copiesOf(recipeTypeId);
-
-        var stripRules = STRIP_RULES.getOrDefault(recipeTypeId, Collections.emptyList());
-        var replaceRules = REPLACE_RULES.getOrDefault(recipeTypeId, Collections.emptyList());
-        var deleteRules = DELETE_RULES.getOrDefault(recipeTypeId, Collections.emptyList());
-        int stripped = 0;
-        int replaced = 0;
-        int deleted = 0;
-        List<GTRecipe> result = new ArrayList<>();
-        for (GTRecipe original : originals) {
-            GTRecipe copy = original.copy();
-            String id = original.getId() != null ? original.getId().toString() : "";
-            boolean remove = false;
-            for (DeleteEntry rule : deleteRules) {
-                if (Pattern.compile(rule.recipeRegex).matcher(id).find()) {
-                    remove = true;
-                    break;
-                }
-            }
-            if (remove) {
-                deleted++;
-                continue;
-            }
-
-            int beforeStrip = contentCount(copy);
-            for (StripEntry rule : stripRules) {
-                if (!rule.recipeId.isEmpty() && !matchesRecipeId(id, rule.recipeId)) continue;
-                applyStrip(copy, rule);
-            }
-            if (contentCount(copy) < beforeStrip) stripped++;
-
-            boolean replaceChanged = false;
-            for (ReplaceEntry rule : replaceRules) {
-                if (!rule.recipeId.isEmpty() && !matchesRecipeId(id, rule.recipeId)) continue;
-                replaceChanged |= replaceInMap(copy.inputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
-                replaceChanged |= replaceInMap(copy.outputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
-                replaceChanged |= replaceInMap(copy.tickInputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
-                replaceChanged |= replaceInMap(copy.tickOutputs, rule.oldItem, rule.newItem, rule.oldIsFluid, rule.count, rule.circuitNumber);
-            }
-            if (replaceChanged) replaced++;
-            if (!stripRules.isEmpty() || !replaceRules.isEmpty() || !deleteRules.isEmpty()) {
-                CANONICAL_LOOKUP_RECIPES.put(copy, Boolean.TRUE);
-            }
-            result.add(copy);
-        }
-
-        SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(true);
-        try {
-            lookup.removeAllRecipes();
-            for (GTRecipe r : result) {
-                lookup.addRecipe(r);
-            }
-        } finally {
-            SUPPRESS_LOOKUP_RECIPE_MODIFIERS.set(false);
-        }
-
-        invalidatePatternCaches("updateLookupRecipes:" + recipeTypeId);
-
-        LOG.info("[ModAPI] {}: 原始={}, 剥离配方={}, 替换配方={}, 删除配方={}, 写回={}",
-                recipeTypeId, originals.size(), stripped, replaced, deleted, result.size());
-    }
-
-    private static int contentCount(GTRecipe recipe) {
-        return contentCount(recipe.inputs) + contentCount(recipe.outputs)
-                + contentCount(recipe.tickInputs) + contentCount(recipe.tickOutputs);
-    }
-
-    private static int contentCount(Map<RecipeCapability<?>, List<Content>> map) {
-        if (map == null || map.isEmpty()) return 0;
-        int count = 0;
-        for (List<Content> contents : map.values()) {
-            if (contents != null) count += contents.size();
-        }
-        return count;
-    }
-
     // ====== 配置持久化 ======
 
     private static final java.io.File STRIP_FILE = com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
@@ -1533,9 +1471,14 @@ public class DShanhaiRecipeModifierAPI {
         LOADING_RECIPE_TOGGLES = true;
         int applied = 0;
         try {
-            for (String recipeId : recipeIds) {
-                if (setRecipeEnabled(recipeId, false)) applied++;
-            }
+            // 逐条禁用会各触发一次整类重建，这里收拢成一个批次
+            int[] counter = {0};
+            runRuleBatch(() -> {
+                for (String recipeId : recipeIds) {
+                    if (setRecipeEnabled(recipeId, false)) counter[0]++;
+                }
+            });
+            applied = counter[0];
         } finally {
             LOADING_RECIPE_TOGGLES = previous;
         }
@@ -1637,30 +1580,24 @@ public class DShanhaiRecipeModifierAPI {
      * 把已经在内存里的剥离/替换/删除/编辑覆盖写进 GTCEu lookup。
      * JEI 会在读取时自行套规则，所以重开后界面仍是新配方；
      * GTCEu 在 RecipeManager.apply 末尾会用数据包原配方重建 lookup，必须在那之后再写一次。
+     *
+     * <p>这里只做一次全量重建：{@code rebuildAll} 自身已包含 strip/replace/delete/override，
+     * 再叠加一次就是同一批类型被重建两轮、发两轮同步包。</p>
      */
     public static void reapplyPersistedLookupRules(String reason) {
         if (REAPPLYING_LOOKUP_RULES.get()) return;
-        if (getRuntimeRuleTypeIds().isEmpty()
-                && com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.overrideTypeIds().isEmpty()) {
-            return;
-        }
+        Set<String> typeIds =
+                com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.allTypeIds();
+        if (typeIds.isEmpty()) return;
         REAPPLYING_LOOKUP_RULES.set(true);
         try {
+            // 一次全量重建已含 strip/replace/delete/override 與雙表寫回，
+            // 不再疊加 applyAllReplaceRules（那會把同一批類型重建第二輪）
             updateAllLookupRecipes();
-            applyAllReplaceRules();
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
-            LOG.info("[ModAPI] 已把持久化规则写回 GTCEu 配方层 ({})", reason);
+            LOG.info("[ModAPI] 已把持久化规则写回 GTCEu 配方层 ({}, 类型={})", reason, typeIds.size());
         } finally {
             REAPPLYING_LOOKUP_RULES.set(false);
         }
-    }
-
-    /** 应用所有已持久化的替换规则（批量处理，一次重建配方表） */
-    public static void applyAllReplaceRules() {
-        List<com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReport> reports =
-                com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildAll(
-                        com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.RULE_CHANGED);
-        LOG.info("[ModAPI] 批量替换完成: {} 个类型（已与剥离/删除规则统一重建）", reports.size());
     }
 
     public static void registerPatternCacheOwner(Object owner) {
@@ -2305,8 +2242,8 @@ public class DShanhaiRecipeModifierAPI {
 
             if (!LOADING_PRESET_BATCH.get()) {
                 rememberActivePreset(presetName);
+                // rebuildAll 内部已包含同步包，这里不再叠加一次全量同步
                 updateAllLookupRecipes();
-                com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
             }
             LOG.info("[Preset] 已加载预设: {} (replace={}, type={})", presetName, replace, recipeType);
             return true;
@@ -2332,33 +2269,24 @@ public class DShanhaiRecipeModifierAPI {
      * @return 是否成功找到并移除
      */
     public static boolean removeAndSync(String recipeTypeId, String recipeId) {
-        try {
-            var type = GTRegistries.RECIPE_TYPES.get(new ResourceLocation(recipeTypeId));
-            if (type == null) return false;
-            var lookup = type.getLookup();
-            if (lookup == null) return false;
-            var branch = lookup.getLookup();
-            if (branch == null) return false;
-
-            java.util.List<GTRecipe> allRecipes = new java.util.ArrayList<>();
-            branch.getRecipes(true).forEach(r -> { if (r != null) allRecipes.add(r); });
-
-            boolean removed = allRecipes.removeIf(r -> r.getId() != null && r.getId().toString().equals(recipeId));
-            if (!removed) {
-                LOG.warn("[ModAPI] removeAndSync: 未找到配方 {} (类型 {})", recipeId, recipeTypeId);
-                return false;
-            }
-
-            lookup.removeAllRecipes();
-            for (GTRecipe r : allRecipes) lookup.addRecipe(r);
-            invalidatePatternCaches("removeAndSync:" + recipeTypeId);
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll();
-            LOG.info("[ModAPI] removeAndSync: 已移除并同步配方 {} (类型 {})", recipeId, recipeTypeId);
-            return true;
-        } catch (Exception e) {
-            LOG.warn("[ModAPI] removeAndSync 失败: {}", e.getMessage());
+        if (recipeTypeId == null || recipeTypeId.isEmpty() || recipeId == null || recipeId.isEmpty()) {
             return false;
         }
+        boolean exists = false;
+        for (GTRecipe recipe : snapshotRecipes(recipeTypeId)) {
+            if (recipe.getId() != null && recipe.getId().toString().equals(recipeId)) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            LOG.warn("[ModAPI] removeAndSync: 未找到配方 {} (类型 {})", recipeId, recipeTypeId);
+            return false;
+        }
+        // 移除通过持久化删除规则表达，由统一重建写回 lookup 与原版表
+        addDeleteRule(recipeTypeId, new DeleteEntry(Pattern.quote(recipeId)));
+        LOG.info("[ModAPI] removeAndSync: 已登记删除并重建配方 {} (类型 {})", recipeId, recipeTypeId);
+        return true;
     }
 
     public static void clearAll() {
@@ -2370,12 +2298,12 @@ public class DShanhaiRecipeModifierAPI {
         STRIP_RULES.clear();
         REPLACE_RULES.clear();
         DELETE_RULES.clear();
-        for (String typeId : affectedTypes) {
-            rebuildLookupFromOriginals(typeId);
-        }
         saveStripRules();
         saveReplaceRules();
         saveDeleteRules();
+        for (String typeId : affectedTypes) {
+            rebuildLookup(typeId);
+        }
         LOG.info("已清除所有配方修饰器、剥离规则、替换规则和删除规则");
     }
 

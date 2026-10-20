@@ -19,6 +19,8 @@
     "JEIGuiRuntimeGuardMixin",
     "JEICopyShortcutMixin",
     "JEIRecipeGuiInfinityCellMixin",
+    "JeiCheatInputHandlerAccessor",
+    "JeiRecipeLayoutHandlerAccessor",
     "JEISdaElementDedupMixin",
     "RecipeSlotTooltipMixin"
   ]

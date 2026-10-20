@@ -17,10 +17,10 @@ class ShanhaiRecipeJeiDropSourceTest {
         String editor = Files.readString(Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/common/recipe/editor/ShanhaiRecipeEditorWidget.java"));
 
-        assertTrue(ioWidget.contains("applyClientDraft(accepted, current)"));
+        assertTrue(ioWidget.contains("applyClientDraft(accepted, discoveredIndex, current)"));
         assertTrue(ioWidget.contains("current.clear();"));
         assertTrue(ioWidget.contains("target.setItem(stack, stack.getCount())"));
-        assertTrue(ioWidget.contains("target.setFluid(fluid)"));
+        assertTrue(ioWidget.contains("target.setFluid((FluidStack) normalized)"));
         assertFalse(ioWidget.contains("writeClientAction"));
         assertTrue(editor.contains("ioTable.json(\"inputs\")"));
     }

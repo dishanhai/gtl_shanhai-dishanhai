@@ -22,10 +22,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -36,8 +38,8 @@ import java.util.function.Supplier;
 public final class RecipeSyncPacket {
 
     private static final Logger LOG = LoggerFactory.getLogger("RecipeSync");
-    private static final String PROTOCOL = "2";
-    private static final int PAYLOAD_VERSION = 2;
+    private static final String PROTOCOL = "3";
+    private static final int PAYLOAD_VERSION = 3;
     private static final int MAX_ENTRIES = 4096;
     private static final int MAX_RECIPE_UPDATES = 64;
     private static final int MAX_STRING = 512;
@@ -45,7 +47,6 @@ public final class RecipeSyncPacket {
 
     private final long revision;
     private final List<String> typeIds;
-    private final List<String> recipeIds;
     private final boolean fullRefresh;
     private final Map<String, GTRecipe> recipeUpdates;
     private final List<String> removedRecipeIds;
@@ -54,28 +55,32 @@ public final class RecipeSyncPacket {
         CHANNEL = NetworkRegistry.newSimpleChannel(
                 new ResourceLocation("gt_shanhai", "recipe_sync"),
                 () -> PROTOCOL, PROTOCOL::equals, PROTOCOL::equals);
+        // 只允許伺服器 → 客戶端：本包在客戶端會碰 Minecraft / JEI 類，
+        // 若雙向可收，專用伺服器收到誤發或偽造的包就會走進客戶端專用路徑。
         CHANNEL.registerMessage(0, RecipeSyncPacket.class,
-                RecipeSyncPacket::encode, RecipeSyncPacket::decode, RecipeSyncPacket::handle);
+                RecipeSyncPacket::encode, RecipeSyncPacket::decode, RecipeSyncPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     public RecipeSyncPacket() {
-        this(0L, List.of(), List.of(), true, Map.of(), List.of());
+        this(0L, List.of(), true, Map.of(), List.of());
     }
 
-    public RecipeSyncPacket(long revision, List<String> typeIds, List<String> recipeIds, boolean fullRefresh) {
-        this(revision, typeIds, recipeIds, fullRefresh, Map.of(), List.of());
-    }
-
-    public RecipeSyncPacket(long revision, List<String> typeIds, List<String> recipeIds, boolean fullRefresh,
+    public RecipeSyncPacket(long revision, List<String> typeIds, boolean fullRefresh,
                             Map<String, GTRecipe> recipeUpdates, List<String> removedRecipeIds) {
         this.revision = revision;
         this.typeIds = bounded(typeIds);
-        this.recipeIds = bounded(recipeIds);
         this.fullRefresh = fullRefresh;
         this.recipeUpdates = boundedRecipes(recipeUpdates);
         this.removedRecipeIds = bounded(removedRecipeIds);
     }
 
+    /**
+     * 全量刷新信号：只帶受影響類型。
+     *
+     * <p>舊版還帶一份 {@code recipeIds}，但客戶端從未讀取，全量同步時最多白寫 4096 個 id 字串。
+     * 內容更新走 {@link #syncRecipeToAll} 的 {@code recipeUpdates}。</p>
+     */
     public static void syncToAll() {
         syncToAll(Set.of());
     }
@@ -85,64 +90,122 @@ public final class RecipeSyncPacket {
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null || server.getPlayerList() == null) return;
 
-        Set<String> typeSet = new LinkedHashSet<>(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
-        if (affectedTypeIds != null) {
+        Set<String> typeSet = new LinkedHashSet<>();
+        if (affectedTypeIds == null || affectedTypeIds.isEmpty()) {
+            typeSet.addAll(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+        } else {
+            // 有明確受影響類型時只發這些：以前每次都夾帶全部規則類型，
+            // 逐 type 重建就變成 N 個「全類型」刷新包。
             affectedTypeIds.stream()
                     .filter(typeId -> typeId != null && !typeId.isEmpty())
                     .forEach(typeSet::add);
         }
+        if (typeSet.isEmpty()) return;
         List<String> types = new ArrayList<>(typeSet);
-        List<String> recipes = new ArrayList<>();
-        for (String typeId : types) {
-            GTRecipeType type = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
-                    .get(new ResourceLocation(typeId));
-            if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) continue;
-            type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
-                if (recipe != null && recipe.getId() != null && recipes.size() < MAX_ENTRIES) {
-                    recipes.add(recipe.getId().toString());
-                }
-            });
-        }
         RecipeSyncPacket packet = new RecipeSyncPacket(
-                DShanhaiRecipeModifierAPI.getRecipeRevision(), types, recipes, false);
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            CHANNEL.sendTo(packet, player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
-        }
-        LOG.info("[RecipeSync] 已向 {} 个玩家发送配方同步包 rev={} types={} recipes={}",
-                server.getPlayerList().getPlayerCount(), packet.revision, packet.typeIds.size(), packet.recipeIds.size());
+                DShanhaiRecipeModifierAPI.getRecipeRevision(), types, false, Map.of(), List.of());
+        sendToAll(server, packet);
+        LOG.info("[RecipeSync] 已向 {} 个玩家发送配方同步包 rev={} types={}",
+                server.getPlayerList().getPlayerCount(), packet.revision, packet.typeIds.size());
     }
 
-    public static void syncRecipeToAll(String recipeTypeId, String recipeId) {
+    /**
+     * 定向同步：帶完整配方內容，專用伺服器上的 override 結果才會出現在客戶端 JEI。
+     * 一次最多 {@link #MAX_RECIPE_UPDATES} 條，超過的部分由後續全量刷新補上。
+     */
+    public static void syncRecipesToAll(String recipeTypeId, Collection<String> recipeIds) {
         if (CHANNEL == null || recipeTypeId == null || recipeTypeId.isEmpty()
-                || recipeId == null || recipeId.isEmpty()) return;
+                || recipeIds == null || recipeIds.isEmpty()) return;
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null || server.getPlayerList() == null) return;
         GTRecipeType type = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
                 .get(new ResourceLocation(recipeTypeId));
         if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) return;
 
+        Set<String> wanted = new LinkedHashSet<>();
+        for (String recipeId : recipeIds) {
+            if (recipeId != null && !recipeId.isEmpty()) wanted.add(recipeId);
+        }
         Map<String, GTRecipe> updates = new LinkedHashMap<>();
         List<String> removed = new ArrayList<>();
         type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
-            if (recipe != null && recipe.getId() != null && recipeId.equals(recipe.getId().toString())) {
-                updates.put(recipeId, recipe.copy());
+            if (recipe == null || recipe.getId() == null) return;
+            String id = recipe.getId().toString();
+            if (wanted.contains(id) && updates.size() < MAX_RECIPE_UPDATES) {
+                updates.put(id, recipe.copy());
             }
         });
-        if (updates.isEmpty()) removed.add(recipeId);
-
+        for (String recipeId : wanted) {
+            if (!updates.containsKey(recipeId)) removed.add(recipeId);
+        }
         RecipeSyncPacket packet = new RecipeSyncPacket(
                 DShanhaiRecipeModifierAPI.getRecipeRevision(),
-                List.of(recipeTypeId),
-                List.of(recipeId),
-                false,
-                updates,
-                removed);
+                List.of(recipeTypeId), false, updates, removed);
+        sendToAll(server, packet);
+        LOG.info("[RecipeSync] 定向同步 type={} 更新={} 移除={}", recipeTypeId,
+                packet.recipeUpdates.size(), packet.removedRecipeIds.size());
+    }
+
+    public static void syncRecipeToAll(String recipeTypeId, String recipeId) {
+        if (recipeId == null || recipeId.isEmpty()) return;
+        syncRecipesToAll(recipeTypeId, List.of(recipeId));
+    }
+
+    private static void sendToAll(net.minecraft.server.MinecraftServer server, RecipeSyncPacket packet) {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             CHANNEL.sendTo(packet, player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
         }
-        LOG.info("[RecipeSync] 已向 {} 个玩家发送配方变更 rev={} type={} recipe={} updated={}",
-                server.getPlayerList().getPlayerCount(), packet.revision, recipeTypeId, recipeId,
-                !packet.recipeUpdates.isEmpty());
+    }
+
+    /**
+     * 補發所有覆寫內容給單一玩家。專用伺服器上覆寫只存在伺服器，
+     * 客戶端若不收內容就只能看到規則（strip/replace）的結果。
+     */
+    public static void syncOverridesTo(ServerPlayer player) {
+        if (CHANNEL == null || player == null) return;
+        var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        Map<String, Set<String>> idsByType = overrideRecipeIds();
+        for (Map.Entry<String, Set<String>> entry : idsByType.entrySet()) {
+            RecipeSyncPacket packet = overridePacket(entry.getKey(), entry.getValue());
+            if (packet == null) continue;
+            CHANNEL.sendTo(packet, player.connection.connection, NetworkDirection.PLAY_TO_CLIENT);
+        }
+    }
+
+    /** 覆寫類型 → 受影響配方 id。 */
+    private static Map<String, Set<String>> overrideRecipeIds() {
+        Map<String, Set<String>> idsByType = new LinkedHashMap<>();
+        com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore store =
+                new com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore(
+                        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides()));
+        for (String typeId : store.typeIds()) {
+            Set<String> ids = DShanhaiRecipeModifierAPI.overrideRecipeIdsFor(typeId);
+            if (!ids.isEmpty()) idsByType.put(typeId, ids);
+        }
+        return idsByType;
+    }
+
+    private static RecipeSyncPacket overridePacket(String recipeTypeId, Set<String> recipeIds) {
+        GTRecipeType type = com.gregtechceu.gtceu.api.registry.GTRegistries.RECIPE_TYPES
+                .get(ResourceLocation.tryParse(recipeTypeId));
+        if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) return null;
+        Map<String, GTRecipe> updates = new LinkedHashMap<>();
+        List<String> removed = new ArrayList<>();
+        type.getLookup().getLookup().getRecipes(true).forEach(recipe -> {
+            if (recipe == null || recipe.getId() == null) return;
+            String id = recipe.getId().toString();
+            if (recipeIds.contains(id) && updates.size() < MAX_RECIPE_UPDATES) {
+                updates.put(id, recipe.copy());
+            }
+        });
+        for (String recipeId : recipeIds) {
+            if (!updates.containsKey(recipeId)) removed.add(recipeId);
+        }
+        if (updates.isEmpty() && removed.isEmpty()) return null;
+        return new RecipeSyncPacket(DShanhaiRecipeModifierAPI.getRecipeRevision(),
+                List.of(recipeTypeId), false, updates, removed);
     }
 
     public static void encode(RecipeSyncPacket msg, FriendlyByteBuf buf) {
@@ -150,7 +213,6 @@ public final class RecipeSyncPacket {
         buf.writeVarLong(msg.revision);
         buf.writeBoolean(msg.fullRefresh);
         writeStrings(buf, msg.typeIds);
-        writeStrings(buf, msg.recipeIds);
         buf.writeVarInt(msg.recipeUpdates.size());
         msg.recipeUpdates.forEach((id, recipe) -> {
             buf.writeUtf(id, MAX_STRING);
@@ -166,7 +228,6 @@ public final class RecipeSyncPacket {
         long revision = buf.readVarLong();
         boolean fullRefresh = buf.readBoolean();
         List<String> typeIds = readStrings(buf);
-        List<String> recipeIds = readStrings(buf);
         int updateCount = buf.readVarInt();
         if (updateCount < 0 || updateCount > MAX_RECIPE_UPDATES) {
             throw new IllegalArgumentException("invalid recipe update count");
@@ -178,7 +239,7 @@ public final class RecipeSyncPacket {
             updates.put(id.toString(), GTRecipeSerializer.SERIALIZER.fromNetwork(id, buf));
         }
         List<String> removed = readStrings(buf);
-        return new RecipeSyncPacket(revision, typeIds, recipeIds, fullRefresh, updates, removed);
+        return new RecipeSyncPacket(revision, typeIds, fullRefresh, updates, removed);
     }
 
     public static void handle(RecipeSyncPacket msg, Supplier<NetworkEvent.Context> ctx) {

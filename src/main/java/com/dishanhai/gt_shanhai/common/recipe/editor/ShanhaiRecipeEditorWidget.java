@@ -461,17 +461,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     private void applyCreateType(String typeId) {
         if (!creating || selectedBase == null || typeId == null || typeId.equals(selectedBase.recipeTypeId())) return;
         if (net.minecraft.resources.ResourceLocation.tryParse(typeId) == null) return;
-        selectedBase = new ShanhaiRecipeBase(
-                typeId,
-                selectedBase.recipeId(),
-                selectedBase.duration(),
-                selectedBase.eut(),
-                selectedBase.inputs(),
-                selectedBase.outputs(),
-                selectedBase.tickInputs(),
-                selectedBase.tickOutputs(),
-                selectedBase.conditions(),
-                selectedBase.blastTemp());
+        // 切換類型時保留已填的溫度與資料欄位，再依新類型補預設值
+        selectedBase = selectedBase.withRecipeTypeId(typeId);
         seedRecipeData(typeId, recipeData);
         panel.syncBlastChrome(showBlastTemp());
         scheduleDraftSave();

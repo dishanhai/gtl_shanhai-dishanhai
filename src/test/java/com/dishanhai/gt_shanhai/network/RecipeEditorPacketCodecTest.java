@@ -22,7 +22,9 @@ class RecipeEditorPacketCodecTest {
         assertTrue(source.contains("GTRecipeSerializer.SERIALIZER.fromNetwork"));
         assertTrue(source.contains("removedRecipeIds"));
         assertTrue(source.contains("syncRecipeToAll"));
-        assertTrue(source.contains("PAYLOAD_VERSION = 2"));
+        assertTrue(source.contains("PAYLOAD_VERSION = 3"));
+        // 封包只允許伺服器 → 客戶端
+        assertTrue(source.contains("NetworkDirection.PLAY_TO_CLIENT"));
         assertTrue(source.contains("lookup.removeAllRecipes()"));
         assertTrue(source.contains("byId.values().forEach(lookup::addRecipe)"));
         assertTrue(source.contains("withoutId.forEach(lookup::addRecipe)"));

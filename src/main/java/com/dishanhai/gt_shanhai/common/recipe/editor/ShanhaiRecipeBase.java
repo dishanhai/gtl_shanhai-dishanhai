@@ -269,7 +269,7 @@ public final class ShanhaiRecipeBase {
 
     public ShanhaiRecipeBase withDuration(int value) {
         return new ShanhaiRecipeBase(recipeTypeId, recipeId, value, eut,
-                inputs, outputs, tickInputs, tickOutputs, conditions);
+                inputs, outputs, tickInputs, tickOutputs, conditions, blastTemp, recipeData);
     }
 
     public ShanhaiRecipeBase withItemAmount(int amount) {
@@ -279,10 +279,48 @@ public final class ShanhaiRecipeBase {
             first.addProperty("count", amount);
         }
         return new ShanhaiRecipeBase(recipeTypeId, recipeId, duration, eut,
-                copy, outputs, tickInputs, tickOutputs, conditions);
+                copy, outputs, tickInputs, tickOutputs, conditions, blastTemp, recipeData);
     }
 
+    /** 以目前所有欄位為基礎改 id，避免 blastTemp / recipeData 在改名時被丢掉。 */
+    public ShanhaiRecipeBase withRecipeId(String value) {
+        return new ShanhaiRecipeBase(recipeTypeId, value, duration, eut,
+                inputs, outputs, tickInputs, tickOutputs, conditions, blastTemp, recipeData);
+    }
+
+    /** 以目前所有欄位為基礎改配方類型，避免切換類型時丢掉溫度與資料欄位。 */
+    public ShanhaiRecipeBase withRecipeTypeId(String value) {
+        return new ShanhaiRecipeBase(value, recipeId, duration, eut,
+                inputs, outputs, tickInputs, tickOutputs, conditions, blastTemp, recipeData);
+    }
+
+    /**
+     * 覆寫檔的序列化格式。
+     * {@code blastTemp} 與 {@code recipeData} 必須一起寫出：少了它們，編輯器改的溫度／
+     * 資料欄位在寫檔時就會被丢掉，重建後又從原配方還原，等同靜默回滾。
+     */
     public JsonObject payloadJson() {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("recipeTypeId", recipeTypeId);
+        payload.addProperty("recipeId", recipeId);
+        payload.addProperty("duration", duration);
+        payload.addProperty("eut", eut);
+        payload.add("inputs", inputs());
+        payload.add("outputs", outputs());
+        payload.add("tickInputs", tickInputs());
+        payload.add("tickOutputs", tickOutputs());
+        payload.add("conditions", conditions());
+        if (blastTemp >= 0) payload.addProperty("blastTemp", blastTemp);
+        if (recipeData.size() > 0) payload.add("recipeData", recipeData());
+        return payload;
+    }
+
+    /**
+     * 基準指紋的序列化格式。
+     * 刻意不含 {@code blastTemp}／{@code recipeData}：指紋用來判斷資料包配方是否被換掉，
+     * 溫度屬於可編輯欄位，納入會讓既有覆寫檔的 {@code baseFingerprint} 全部失效。
+     */
+    public JsonObject fingerprintJson() {
         JsonObject payload = new JsonObject();
         payload.addProperty("recipeTypeId", recipeTypeId);
         payload.addProperty("recipeId", recipeId);

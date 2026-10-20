@@ -136,7 +136,6 @@ public class DShanhaiCommands {
     public static void onRegisterCommands(RegisterCommandsEvent event) {
         var cmd = Commands.literal("shanhai")
                 .then(recipeCommand())
-                .then(ShanhaiRecipeEditorCommand.create())
                 .then(gtQueryCommand())
                 .then(materialsCommand("materials"))
                 .then(sdaCommand("sda"))
@@ -468,6 +467,7 @@ public class DShanhaiCommands {
                 Commands.literal("山海")
                         .requires(s -> s.hasPermission(2))
                         .then(cn配方)
+                        .then(ShanhaiRecipeEditorCommand.create())
                         .then(cnGT)
                         .then(materialsCommand("材料"))
                         .then(sdaCommand("SDA"))

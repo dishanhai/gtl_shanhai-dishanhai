@@ -233,6 +233,46 @@ public final class ShanhaiRecipeOverrideStore {
         writeRoot(root);
     }
 
+    /**
+     * 批量寫入原地覆寫：一次讀檔、一次落盤。
+     * 逐條 {@link #put} 會在配方量大時變成 O(n²) 的整檔重寫。
+     *
+     * @param payloads 配方 → 基準指紋
+     */
+    public void putAll(Map<ShanhaiRecipeBase, String> payloads, String updatedBy) throws IOException {
+        if (payloads == null || payloads.isEmpty()) return;
+        JsonObject root = loadRoot();
+        JsonArray kept = new JsonArray();
+        java.util.Set<String> replacedIds = new java.util.LinkedHashSet<>();
+        for (ShanhaiRecipeBase base : payloads.keySet()) {
+            if (base != null) replacedIds.add(base.recipeTypeId() + '|' + base.recipeId());
+        }
+        for (JsonElement element : root.getAsJsonArray("entries")) {
+            if (!element.isJsonObject()) {
+                kept.add(element);
+                continue;
+            }
+            JsonObject object = element.getAsJsonObject();
+            String key = storedType(object) + '|' + string(object, "recipeId", "");
+            if (!replacedIds.contains(key)) kept.add(object);
+        }
+        String stamp = java.time.Instant.now().toString();
+        for (Map.Entry<ShanhaiRecipeBase, String> item : payloads.entrySet()) {
+            ShanhaiRecipeBase base = item.getKey();
+            if (base == null) continue;
+            JsonObject entry = new JsonObject();
+            entry.addProperty("recipeId", base.recipeId());
+            entry.addProperty("recipeTypeId", base.recipeTypeId());
+            entry.addProperty("baseFingerprint", item.getValue() == null ? "" : item.getValue());
+            entry.addProperty("updatedBy", updatedBy == null ? "unknown" : updatedBy);
+            entry.addProperty("updatedAt", stamp);
+            entry.add("payload", base.payloadJson());
+            kept.add(entry);
+        }
+        root.add("entries", kept);
+        writeRoot(root);
+    }
+
     public void remove(String recipeId) throws IOException {
         remove("", recipeId);
     }

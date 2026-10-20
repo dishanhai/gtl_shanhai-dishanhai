@@ -17,7 +17,7 @@ public final class ShanhaiRecipeFingerprint {
     private ShanhaiRecipeFingerprint() {}
 
     public static String of(ShanhaiRecipeBase base) {
-        return fingerprint(base == null ? JsonNull.INSTANCE : base.payloadJson());
+        return fingerprint(base == null ? JsonNull.INSTANCE : base.fingerprintJson());
     }
 
     public static String legacySnapshotFingerprint(ShanhaiRecipeBase base) {

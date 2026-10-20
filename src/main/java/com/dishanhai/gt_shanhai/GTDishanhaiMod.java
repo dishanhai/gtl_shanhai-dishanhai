@@ -220,26 +220,18 @@ public class GTDishanhaiMod {
                 (net.minecraftforge.event.server.ServerAboutToStartEvent e) -> {
                     com.dishanhai.gt_shanhai.common.shop.ShopConfig.reload();
                     com.dishanhai.gt_shanhai.common.recipe.DShanhaiDynamicStarCoreStripperRecipes.register();
-                    com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildAll(
-                            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.STARTUP);
-                    java.util.Set<String> runtimeRecipeTypes =
-                            new java.util.LinkedHashSet<>(
-                                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
-                    runtimeRecipeTypes.addAll(
-                            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.overrideTypeIds());
-                    com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildVanillaManager(
-                            e.getServer(), runtimeRecipeTypes);
-                    com.dishanhai.gt_shanhai.common.misc.MekanismFurnaceRecipeStripper.strip(e.getServer());
                     // 配方库缓存：山海的配方库.js 源文件/gtlcore配置没变就跳过重导出；
                     // 变了就把这次 Rhino 真实注册出的配方从 RecipeManager 取出，编码成标准数据包 json 落盘，
                     // 交给 DShanhaiRecipePackFinder 常驻注入，下次开服直接走 vanilla 原生加载。
                     com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.exportIfNeeded(e.getServer());
                     // 必须在完整配方导出后再移除禁用配方，否则缓存会丢失可恢复的配方快照。
-                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.runPatternCacheInvalidationBatch(
-                            "apply-persisted-recipe-toggles", () ->
-                                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyPersistedRecipeToggles());
-                    com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildVanillaManager(
-                            e.getServer(), runtimeRecipeTypes);
+                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.runRuleBatch(
+                            com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI::applyPersistedRecipeToggles);
+                    // 禁用状态定稿后只做一次全量重建：重建本身已含 strip/replace/delete/override
+                    // 与双表写回，且只在批次收尾发一个同步包。
+                    com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.rebuildAll(
+                            com.dishanhai.gt_shanhai.common.recipe.RecipeRebuildService.RebuildReason.STARTUP);
+                    com.dishanhai.gt_shanhai.common.misc.MekanismFurnaceRecipeStripper.strip(e.getServer());
                 });
 
         // 限购总量剩余次数按存档隔离回填/初始化，见 ShopLimitSavedData（不能再等 shop.json 里
@@ -273,8 +265,8 @@ public class GTDishanhaiMod {
                     sdaAutoSyncTargetTick = e.getServer().getTickCount() + 100;
                     // ServerAboutToStart 时 GTCEu / KubeJS 还会用原数据包配方重建 lookup。
                     // 等服务器起来、查找表定稿后再写一次，效果与 /山海 配方 重载 相同。
+                    // 这里只做一轮：reapply 内部就是一次 rebuildAll，重建已含禁用状态与覆写。
                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.reapplyPersistedLookupRules("server-started");
-                    com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.applyPersistedRecipeToggles();
                     // apply 末尾 GTCEu 会按数据包重建查找表。查找表定稿后再写一次逆熵构成。
                     com.dishanhai.gt_shanhai.common.recipe.PrimordialReverseEntropyRecipes.install(
                             e.getServer().getRecipeManager());

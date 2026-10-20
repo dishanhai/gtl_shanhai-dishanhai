@@ -20,8 +20,10 @@ class RecipeRebuildServiceSourceTest {
         assertTrue(source.contains("lookup.removeAllRecipes()"));
         assertTrue(source.contains("lookup.addRecipe"));
         assertTrue(source.contains("runPatternCacheInvalidationBatch"));
-        assertTrue(source.contains("if (reason != RebuildReason.EDITOR_COMMIT)"));
-        assertTrue(source.contains("RecipeSyncPacket.syncToAll(Set.of(recipeTypeId))"));
+        assertTrue(source.contains("if (notify && reason != RebuildReason.EDITOR_COMMIT)"));
+        // 批次重建只在收尾發一次同步包；逐 type 發包會造成封包風暴
+        assertTrue(source.contains("notifyTypes"));
+        assertTrue(source.indexOf("if (!typeIds.isEmpty()) notifyTypes(typeIds)") > 0);
         assertTrue(source.indexOf("captureManagerOriginals") < source.indexOf("captureLookupOriginals"));
         assertTrue(source.contains("withoutSuperseded"));
         assertTrue(source.contains("refreshLookupEntries"));

@@ -93,10 +93,7 @@ public final class ShanhaiRecipeEditorOps {
     }
 
     private static ShanhaiRecipeBase withRecipeId(ShanhaiRecipeBase base, String recipeId) {
-        return new ShanhaiRecipeBase(
-                base.recipeTypeId(), recipeId, base.duration(), base.eut(),
-                base.inputs(), base.outputs(), base.tickInputs(), base.tickOutputs(),
-                base.conditions(), base.blastTemp());
+        return base.withRecipeId(recipeId);
     }
 
     /**
@@ -198,7 +195,9 @@ public final class ShanhaiRecipeEditorOps {
                 outputs == null ? source.outputs() : outputs,
                 tickInputs == null ? source.tickInputs() : tickInputs,
                 source.tickOutputs(),
-                source.conditions());
+                source.conditions(),
+                source.blastTemp(),
+                source.recipeData());
         return applyBaseEdit(new Edit(edited, ShanhaiRecipeFingerprint.of(source)), server, rebuildIndex, persist);
     }
 
@@ -223,21 +222,23 @@ public final class ShanhaiRecipeEditorOps {
                 outputs == null ? source.outputs() : outputs,
                 tickInputs == null ? source.tickInputs() : tickInputs,
                 source.tickOutputs(),
-                conditions == null ? source.conditions() : conditions);
+                conditions == null ? source.conditions() : conditions,
+                source.blastTemp(),
+                source.recipeData());
         return applyBaseEdit(new Edit(edited, ShanhaiRecipeFingerprint.of(source)), server, rebuildIndex, persist);
     }
 
     public Result removeRecipe(MinecraftServer server, GTRecipe target, boolean persist) {
         if (target == null || target.getId() == null) return invalidResult();
-        boolean removed = DShanhaiRecipeModifierAPI.setRecipeEnabled(target.getId().toString(), false);
+        String recipeId = target.getId().toString();
+        boolean removed = DShanhaiRecipeModifierAPI.setRecipeEnabled(recipeId, false);
         if (!removed) {
             return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-found", REVISION.get());
         }
+        // setRecipeEnabled 已登記刪除規則並統一重建該類型，這裡只補一次定向同步
         if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
-            String typeId = target.recipeType.registryName.toString();
-            RecipeRebuildService.refreshLookupEntries(typeId, Set.of(target.getId().toString()));
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
-                    typeId, target.getId().toString());
+                    target.recipeType.registryName.toString(), recipeId);
         }
         return new Result(Result.Status.SUCCESS, persist ? "recipe-removed-and-persisted" : "recipe-removed",
                 REVISION.incrementAndGet());
@@ -245,46 +246,56 @@ public final class ShanhaiRecipeEditorOps {
 
     public Result restore(MinecraftServer server, GTRecipe target) {
         if (target == null || target.getId() == null) return invalidResult();
-        boolean restored = DShanhaiRecipeModifierAPI.setRecipeEnabled(target.getId().toString(), true);
+        String recipeId = target.getId().toString();
+        boolean restored = DShanhaiRecipeModifierAPI.setRecipeEnabled(recipeId, true);
         if (!restored) return new Result(Result.Status.VALIDATION_ERROR, "recipe-not-disabled", REVISION.get());
         if (server != null && target.recipeType != null && target.recipeType.registryName != null) {
-            String typeId = target.recipeType.registryName.toString();
-            RecipeRebuildService.refreshLookupEntries(typeId, Set.of(target.getId().toString()));
             com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(
-                    typeId, target.getId().toString());
+                    target.recipeType.registryName.toString(), recipeId);
         }
         return new Result(Result.Status.SUCCESS, "recipe-restored", REVISION.incrementAndGet());
     }
 
     public Result rollback(String recipeId) {
-        try {
-            store.remove(recipeId);
-            return new Result(Result.Status.SUCCESS, "override-removed", REVISION.incrementAndGet());
-        } catch (Exception e) {
-            return new Result(Result.Status.REBUILD_FAILED, "override-remove-failed", REVISION.get());
-        }
+        return rollback("", recipeId, null);
     }
 
     public Result rollback(String recipeId, MinecraftServer server) {
-        Optional<ShanhaiRecipeOverrideStore.Entry> existing = store.find(recipeId);
-        Result removed = rollback(recipeId);
-        if (removed.status() != Result.Status.SUCCESS || server == null) {
-            return removed;
+        return rollback("", recipeId, server);
+    }
+
+    /**
+     * 帶配方類型的回滾：同名 path 可能同時存在於多個類型，
+     * 依類型定位才不會 {@code find("")} 亂猜，也不會重建錯類型。
+     */
+    public Result rollback(String recipeTypeId, String recipeId, MinecraftServer server) {
+        if (recipeId == null || recipeId.isEmpty()) return invalidResult();
+        String type = recipeTypeId == null ? "" : recipeTypeId;
+        Optional<ShanhaiRecipeOverrideStore.Entry> existing =
+                type.isEmpty() ? store.find(recipeId) : store.find(type, recipeId);
+        if (existing.isEmpty()) {
+            return new Result(Result.Status.VALIDATION_ERROR, "override-not-found", REVISION.get());
         }
-        String typeId = existing.flatMap(entry -> {
-            if (entry.payload().has("recipeTypeId")) {
-                return Optional.ofNullable(entry.payload().get("recipeTypeId").getAsString());
-            }
-            return Optional.empty();
-        }).orElseGet(() -> typeIdFor(recipeId));
-        if (typeId.isEmpty()) return removed;
         try {
-            RecipeRebuildService.RebuildReport report = RecipeRebuildService.refreshLookupEntries(
-                    typeId, Set.of(recipeId));
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(typeId, recipeId);
+            store.remove(type, recipeId);
+        } catch (Exception e) {
+            return new Result(Result.Status.REBUILD_FAILED, "override-remove-failed", REVISION.get());
+        }
+        String resolvedType = existing.get().recipeTypeId();
+        if (resolvedType == null || resolvedType.isEmpty()) resolvedType = typeIdFor(recipeId);
+        if (server == null || resolvedType.isEmpty()) {
+            return new Result(Result.Status.SUCCESS, "override-removed", REVISION.incrementAndGet());
+        }
+        String rebuildType = resolvedType;
+        try {
+            RecipeRebuildService.RebuildReport report =
+                    RecipeRebuildService.rebuildType(
+                            rebuildType, RecipeRebuildService.RebuildReason.RULE_CHANGED);
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipeToAll(rebuildType, recipeId);
             return new Result(Result.Status.SUCCESS, "override-removed-and-rebuilt", report.revision());
         } catch (Throwable t) {
-            return new Result(Result.Status.REBUILD_FAILED, "override-removed-rebuild-failed", REVISION.get());
+            return new Result(Result.Status.REBUILD_FAILED, "override-removed-rebuild-failed",
+                    REVISION.get());
         }
     }
 

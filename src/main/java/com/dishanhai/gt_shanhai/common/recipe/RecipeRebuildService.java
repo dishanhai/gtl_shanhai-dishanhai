@@ -51,6 +51,13 @@ public final class RecipeRebuildService {
     private RecipeRebuildService() {}
 
     public static RebuildReport rebuildType(String recipeTypeId, RebuildReason reason) {
+        return rebuildType(recipeTypeId, reason, true);
+    }
+
+    /**
+     * @param notify {@code false} 用於批次重建：由外層 {@link #rebuildAll} 收尾時只發一個同步包。
+     */
+    public static RebuildReport rebuildType(String recipeTypeId, RebuildReason reason, boolean notify) {
         GTRecipeType type = resolveType(recipeTypeId);
         if (type == null || type.getLookup() == null || type.getLookup().getLookup() == null) {
             return new RebuildReport(recipeTypeId, 0, 0, 0, 0,
@@ -98,6 +105,8 @@ public final class RecipeRebuildService {
                         var lookup = type.getLookup();
                         lookup.removeAllRecipes();
                         for (GTRecipe recipe : rebuilt) lookup.addRecipe(recipe);
+                        // 本次写回的副本才是 canonical：以本次集合整体替换，不再依赖历史残留
+                        DShanhaiRecipeModifierAPI.replaceCanonicalLookupRecipes(recipeTypeId, rebuilt);
                         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
                         if (server != null) {
                             com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiVanillaRecipeTable
@@ -112,8 +121,8 @@ public final class RecipeRebuildService {
                     }
                 });
 
-        if (reason != RebuildReason.EDITOR_COMMIT) {
-            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll(Set.of(recipeTypeId));
+        if (notify && reason != RebuildReason.EDITOR_COMMIT) {
+            notifyTypes(Set.of(recipeTypeId));
         }
         return new RebuildReport(
                 recipeTypeId,
@@ -122,6 +131,29 @@ public final class RecipeRebuildService {
                 dropped,
                 replaced,
                 DShanhaiRecipeModifierAPI.getPatternCacheRevision());
+    }
+
+    /**
+     * 同步受影響類型。
+     *
+     * <p>有覆寫的類型改為帶 {@code recipeUpdates} 的定向同步——覆寫檔只存在伺服器，
+     * 只發類型 id 時客戶端會用本地 lookup 重建 wrapper，看不到 override 的結果。
+     * 沒有覆寫的類型合併成一個全量刷新包，避免逐 type 發包。</p>
+     */
+    public static void notifyTypes(Set<String> typeIds) {
+        if (typeIds == null || typeIds.isEmpty()) return;
+        Set<String> plain = new LinkedHashSet<>();
+        for (String typeId : typeIds) {
+            Set<String> overrideIds = DShanhaiRecipeModifierAPI.overrideRecipeIdsFor(typeId);
+            if (overrideIds.isEmpty()) {
+                plain.add(typeId);
+            } else {
+                com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncRecipesToAll(typeId, overrideIds);
+            }
+        }
+        if (!plain.isEmpty()) {
+            com.dishanhai.gt_shanhai.network.RecipeSyncPacket.syncToAll(plain);
+        }
     }
 
     /**
@@ -159,11 +191,19 @@ public final class RecipeRebuildService {
                         var lookup = type.getLookup();
                         if (!unlinkRecipes(lookup.getLookup(), live.keySet(), removed)) {
                             lookup.removeAllRecipes();
-                            for (GTRecipe recipe : assemble(recipeTypeId, ensureOriginals(recipeTypeId, type), overrides)) {
-                                lookup.addRecipe(recipe);
-                            }
+                            List<GTRecipe> rebuilt =
+                                    assemble(recipeTypeId, ensureOriginals(recipeTypeId, type), overrides);
+                            for (GTRecipe recipe : rebuilt) lookup.addRecipe(recipe);
+                            DShanhaiRecipeModifierAPI.replaceCanonicalLookupRecipes(recipeTypeId, rebuilt);
                         } else {
+                            for (String recipeId : live.keySet()) {
+                                DShanhaiRecipeModifierAPI.unmarkCanonicalLookupRecipe(recipeTypeId, recipeId);
+                            }
+                            for (String recipeId : removed) {
+                                DShanhaiRecipeModifierAPI.unmarkCanonicalLookupRecipe(recipeTypeId, recipeId);
+                            }
                             for (GTRecipe recipe : live.values()) lookup.addRecipe(recipe);
+                            DShanhaiRecipeModifierAPI.markCanonicalLookupRecipes(recipeTypeId, live.values());
                         }
                         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
                         if (server != null) {
@@ -197,13 +237,21 @@ public final class RecipeRebuildService {
 
     public static List<RebuildReport> rebuildAll(RebuildReason reason) {
         List<RebuildReport> reports = new ArrayList<>();
-        Set<String> typeIds = new LinkedHashSet<>(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
-        typeIds.addAll(overrideTypeIds());
+        Set<String> typeIds = allTypeIds();
         DShanhaiRecipeModifierAPI.runPatternCacheInvalidationBatch(
                 "recipe-rebuild-all:" + reason.name().toLowerCase(), () -> {
-                    for (String typeId : typeIds) reports.add(rebuildType(typeId, reason));
+                    for (String typeId : typeIds) reports.add(rebuildType(typeId, reason, false));
                 });
+        // 批次內逐 type 發包會造成封包風暴；完成後只通知一次受影響類型
+        if (!typeIds.isEmpty()) notifyTypes(typeIds);
         return reports;
+    }
+
+    /** 有規則或有覆寫的全部配方類型。 */
+    public static Set<String> allTypeIds() {
+        Set<String> typeIds = new LinkedHashSet<>(DShanhaiRecipeModifierAPI.getRuntimeRuleTypeIds());
+        typeIds.addAll(overrideTypeIds());
+        return typeIds;
     }
 
     public static GTRecipe buildCanonical(String recipeTypeId, GTRecipe original) {
@@ -435,6 +483,11 @@ public final class RecipeRebuildService {
 
     public static Set<String> overrideTypeIds() {
         return defaultOverrideStore().typeIds();
+    }
+
+    /** 该类型在覆写档里出现过的配方 id，用于定向同步。 */
+    public static Set<String> overrideRecipeIdsFor(String recipeTypeId) {
+        return DShanhaiRecipeModifierAPI.overrideRecipeIdsFor(recipeTypeId);
     }
 
     private static ShanhaiRecipeOverrideStore defaultOverrideStore() {

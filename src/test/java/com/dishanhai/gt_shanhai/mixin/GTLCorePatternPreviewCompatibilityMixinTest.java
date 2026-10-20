@@ -19,11 +19,24 @@ class GTLCorePatternPreviewCompatibilityMixinTest {
     @Test
     void skipsOnlyPreviewSearchesThatExceedSafeBounds() throws Exception {
         assertFalse(shouldSkip(fixedAisles(128)));
-        assertTrue(shouldSkip(fixedAisles(129)));
+        // .mb 结构動輒 180~250 層，全部是固定層（線性匹配），不能因為層數多就被跳過
+        assertFalse(shouldSkip(fixedAisles(186)));
+        assertFalse(shouldSkip(fixedAisles(247)));
 
         assertFalse(shouldSkip(repeatableAisles(6, 1, 4)));
         assertTrue(shouldSkip(repeatableAisles(7, 1, 4)));
-        assertTrue(shouldSkip(new int[][]{{3, 2}}));
+        assertTrue(shouldSkip(new int[][] { { 3, 2 } }));
+        // 只有「可重複層」才需要受層數上限約束
+        assertTrue(shouldSkip(repeatableAisles(129, 1, 2)));
+        assertTrue(shouldSkip(repeatableAisles(200, 1, 2)));
+    }
+
+    @Test
+    void fixedAislePreviewSearchIsNeverSkippedForMbStructures() throws Exception {
+        for (int layers : new int[] { 9, 13, 15, 29, 31, 50, 73, 82, 186, 247 }) {
+            assertFalse(shouldSkip(fixedAisles(layers)),
+                    layers + " 層固定 .mb 結構的預覽不能被跳過，否則控制器不會成型且 JEI 清理時會 NPE");
+        }
     }
 
     @Test
