@@ -14,7 +14,8 @@ public final class PatternGeneratorPresets {
     private PatternGeneratorPresets() {}
 
     public static Path directory() {
-        return Minecraft.getInstance().gameDirectory.toPath().resolve("config/gt_shanhai/pattern-generator-presets");
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureDir(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.patternGeneratorPresetsDir());
     }
 
     public static PatternGeneratorPresetFiles.Listing list() throws IOException {

@@ -36,6 +36,20 @@ public class DShanhaiMBParser {
         return buildPattern(layers, charMapping);
     }
 
+    /** 带方向参数的文件版解析，等价于 parseRaw 的 ResourceLocation 版本 */
+    public static BlockPattern parse(ResourceLocation mbPath,
+            Function<Character, TraceabilityPredicate> charMapping,
+            RelativeDirection aisleDir, RelativeDirection rowDir, RelativeDirection colDir) {
+        List<String[]> layers = loadMB(mbPath);
+        return buildPattern(layers, charMapping, aisleDir, rowDir, colDir);
+    }
+
+    public static BlockPattern parse(String mbPath,
+            Function<Character, TraceabilityPredicate> charMapping,
+            RelativeDirection aisleDir, RelativeDirection rowDir, RelativeDirection colDir) {
+        return parse(new ResourceLocation(mbPath), charMapping, aisleDir, rowDir, colDir);
+    }
+
     public static BlockPattern parseTransposed(ResourceLocation mbPath,
             Function<Character, TraceabilityPredicate> charMapping) {
         List<String[]> layers = transposeLayers(loadMB(mbPath));

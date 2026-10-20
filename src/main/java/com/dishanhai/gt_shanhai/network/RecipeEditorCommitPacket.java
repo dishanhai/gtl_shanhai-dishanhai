@@ -15,7 +15,6 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.PacketDistributor;
 
@@ -185,8 +184,9 @@ public final class RecipeEditorCommitPacket {
             String validation = ShanhaiRecipeEditorValidation.validateBase(base);
             if (validation != null) return invalid(validation);
             ShanhaiRecipeEditorOps ops = new ShanhaiRecipeEditorOps(
-                    new ShanhaiRecipeOverrideStore(FMLPaths.GAMEDIR.get()
-                            .resolve("config/gt_shanhai/recipe_overrides.json")));
+                    new ShanhaiRecipeOverrideStore(
+                            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                                    com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides())));
             String liveId = RecipeEditorExportPacket.exportLocation(liveRaw, packet.recipeId).toString();
             ShanhaiRecipeEditorOps.Result result = ops.commit(
                     new ShanhaiRecipeEditorOps.Edit(base, packet.baseFingerprint),
@@ -218,8 +218,9 @@ public final class RecipeEditorCommitPacket {
         String validation = ShanhaiRecipeEditorValidation.validateBase(base);
         if (validation != null) return invalid(validation);
         ShanhaiRecipeEditorOps ops = new ShanhaiRecipeEditorOps(
-                new ShanhaiRecipeOverrideStore(FMLPaths.GAMEDIR.get()
-                        .resolve("config/gt_shanhai/recipe_overrides.json")));
+                new ShanhaiRecipeOverrideStore(
+                        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides())));
         ShanhaiRecipeEditorOps.Result result = ops.create(
                 new ShanhaiRecipeEditorOps.Edit(base, packet.baseFingerprint),
                 net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer());

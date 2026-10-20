@@ -22,7 +22,7 @@ import java.util.Map;
 /**
  * 兑换条目清单加载器（山海署名）。
  *
- * <p>读取 {@code config/gt_shanhai/exchanges.json}（可热改不重编译）。价格由玩家自定义，
+ * <p>读取 {@code config/gt_shanhai/shop/exchanges.json}（可热改不重编译）。价格由玩家自定义，
  * <b>默认空清单</b>（不预设固定值），玩家通过界面编辑器自己写。格式：</p>
  * <pre>
  * {
@@ -36,8 +36,10 @@ import java.util.Map;
  */
 public final class ExchangeConfig {
 
-    private static final String CONFIG_DIR = "config/gt_shanhai";
-    private static final File EXCHANGE_FILE = new File(CONFIG_DIR, "exchanges.json");
+    private static File exchangeFile() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.shopExchanges()).toFile();
+    }
     private static final com.google.gson.Gson GSON =
             new com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
@@ -108,7 +110,6 @@ public final class ExchangeConfig {
 
     public static synchronized void save() {
         try {
-            new File(CONFIG_DIR).mkdirs();
             JsonObject root = new JsonObject();
             JsonArray arr = new JsonArray();
             for (ExchangeEntry e : ENTRIES) {
@@ -121,7 +122,7 @@ public final class ExchangeConfig {
                 arr.add(o);
             }
             root.add("entries", arr);
-            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(EXCHANGE_FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(exchangeFile()), StandardCharsets.UTF_8)) {
                 w.write(GSON.toJson(root));
             }
             GTDishanhaiMod.LOGGER.info("[Exchange] 已保存 {} 个兑换条目到 exchanges.json", ENTRIES.size());
@@ -133,9 +134,9 @@ public final class ExchangeConfig {
     public static synchronized void reload() {
         ENTRIES.clear();
         loaded = true;
-        if (!EXCHANGE_FILE.exists()) writeDefault();
+        if (!exchangeFile().exists()) writeDefault();
         try (java.io.Reader r = new java.io.InputStreamReader(
-                new java.io.FileInputStream(EXCHANGE_FILE), StandardCharsets.UTF_8)) {
+                new java.io.FileInputStream(exchangeFile()), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(r).getAsJsonObject();
             JsonArray arr = root.has("entries") ? root.getAsJsonArray("entries") : new JsonArray();
             for (JsonElement el : arr) {
@@ -213,9 +214,8 @@ public final class ExchangeConfig {
     /** 默认写空清单——物品/流体兑换价由玩家自定义，不预设固定值。 */
     private static void writeDefault() {
         try {
-            new File(CONFIG_DIR).mkdirs();
             String def = "{\n  \"entries\": []\n}\n";
-            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(EXCHANGE_FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(exchangeFile()), StandardCharsets.UTF_8)) {
                 w.write(def);
             }
             GTDishanhaiMod.LOGGER.info("[Exchange] 已生成默认（空）exchanges.json");

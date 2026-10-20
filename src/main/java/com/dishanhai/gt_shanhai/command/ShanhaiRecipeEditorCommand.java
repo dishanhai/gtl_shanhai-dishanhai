@@ -10,7 +10,6 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.util.List;
 
@@ -95,8 +94,9 @@ public final class ShanhaiRecipeEditorCommand {
 
     private static int rollback(CommandSourceStack source, String recipeId) {
         ShanhaiRecipeEditorOps ops = new ShanhaiRecipeEditorOps(
-                new ShanhaiRecipeOverrideStore(FMLPaths.GAMEDIR.get()
-                        .resolve("config/gt_shanhai/recipe_overrides.json")));
+                new ShanhaiRecipeOverrideStore(
+                        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides())));
         ShanhaiRecipeEditorOps.Result result = ops.rollback(recipeId, source.getServer());
         source.sendSuccess(() -> Component.literal(
                 "[山海] 回滚 " + recipeId + " -> " + result.status()

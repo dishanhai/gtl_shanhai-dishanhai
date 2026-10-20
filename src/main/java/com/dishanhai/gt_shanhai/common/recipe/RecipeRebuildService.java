@@ -11,7 +11,6 @@ import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeBase;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorValidation;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeFingerprint;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeOverrideStore;
-import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -439,8 +438,9 @@ public final class RecipeRebuildService {
     }
 
     private static ShanhaiRecipeOverrideStore defaultOverrideStore() {
-        return new ShanhaiRecipeOverrideStore(FMLPaths.GAMEDIR.get()
-                .resolve("config/gt_shanhai/recipe_overrides.json"));
+        return new ShanhaiRecipeOverrideStore(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipeOverrides()));
     }
 
     public static void rebuildVanillaManager(MinecraftServer server, Set<String> typeIds) {

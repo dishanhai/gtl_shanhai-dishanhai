@@ -1,8 +1,8 @@
 package com.dishanhai.gt_shanhai.common.machine.worldline_cracking;
 
+import com.dishanhai.gt_shanhai.api.DShanhaiMBParser;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.pattern.BlockPattern;
-import com.gregtechceu.gtceu.api.pattern.FactoryBlockPattern;
 import com.gregtechceu.gtceu.api.pattern.Predicates;
 import com.gregtechceu.gtceu.api.pattern.util.RelativeDirection;
 import net.minecraft.world.level.block.Block;
@@ -71,110 +71,41 @@ public class WorldlineCrackingHubStructure {
     }
 
     public static BlockPattern createPattern(MultiblockMachineDefinition definition) {
-        return FactoryBlockPattern.start(RelativeDirection.BACK, RelativeDirection.UP, RelativeDirection.LEFT)
-            .aisle(STRData1.D1)
-            .aisle(STRData1.D2)
-            .aisle(STRData1.D3)
-            .aisle(STRData1.D4)
-            .aisle(STRData1.D5)
-            .aisle(STRData1.D6)
-            .aisle(STRData1.D7)
-            .aisle(STRData1.D8)
-            .aisle(STRData1.D9)
-            .aisle(STRData1.D10)
-            .aisle(STRData1.D11)
-            .aisle(STRData1.D12)
-            .aisle(STRData1.D13)
-            .aisle(STRData1.D14)
-            .aisle(STRData1.D15)
-            .aisle(STRData1.D16)
-            .aisle(STRData1.D17)
-            .aisle(STRData1.D18)
-            .aisle(STRData1.D19)
-            .aisle(STRData1.D20)
-            .aisle(STRData1.D21)
-            .aisle(STRData1.D22)
-            .aisle(STRData1.D23)
-            .aisle(STRData1.D24)
-            .aisle(STRData1.D25)
-            .aisle(STRData1.D26)
-            .aisle(STRData1.D27)
-            .aisle(STRData1.D28)
-            .aisle(STRData1.D29)
-            .aisle(STRData1.D30)
-            .aisle(STRData2.D31)
-            .aisle(STRData2.D32)
-            .aisle(STRData2.D33)
-            .aisle(STRData2.D34)
-            .aisle(STRData2.D35)
-            .aisle(STRData2.D36)
-            .aisle(STRData2.D37)
-            .aisle(STRData2.D38)
-            .aisle(STRData2.D39)
-            .aisle(STRData2.D40)
-            .aisle(STRData2.D41)
-            .aisle(STRData2.D42)
-            .aisle(STRData2.D43)
-            .aisle(STRData2.D44)
-            .aisle(STRData2.D45)
-            .aisle(STRData2.D46)
-            .aisle(STRData2.D47)
-            .aisle(STRData2.D48)
-            .aisle(STRData2.D49)
-            .aisle(STRData2.D50)
-            .aisle(STRData2.D51)
-            .aisle(STRData2.D52)
-            .aisle(STRData2.D53)
-            .aisle(STRData2.D54)
-            .aisle(STRData2.D55)
-            .aisle(STRData2.D56)
-            .aisle(STRData2.D57)
-            .aisle(STRData2.D58)
-            .aisle(STRData2.D59)
-            .aisle(STRData2.D60)
-            .aisle(STRData3.D61)
-            .aisle(STRData3.D62)
-            .aisle(STRData3.D63)
-            .aisle(STRData3.D64)
-            .aisle(STRData3.D65)
-            .aisle(STRData3.D66)
-            .aisle(STRData3.D67)
-            .aisle(STRData3.D68)
-            .aisle(STRData3.D69)
-            .aisle(STRData3.D70)
-            .aisle(STRData3.D71)
-            .aisle(STRData3.D72)
-            .aisle(STRData3.D73)
-
-            .where('A', Predicates.blocks(GRAY_CONCRETE))
-            .where('B', Predicates.blocks(HIGH_STRENGTH_CONCRETE))
-            .where('C', Predicates.blocks(PLASCRETE))
-            .where('D', Predicates.blocks(STRESS_PROOF_CASING))
-            .where('E', Predicates.blocks(POLISHED_DEEPSLATE_STAIRS))
-            .where('F', Predicates.blocks(GLASS_PANE))
-            .where('G', Predicates.blocks(POLISHED_DEEPSLATE_WALL))
-            .where('H', Predicates.blocks(OAK_LEAVES))
-            .where('I', Predicates.blocks(END_ROD))
-            .where('J', Predicates.blocks(CYAN_STAINED_GLASS_PANE))
-            .where('K', Predicates.blocks(NETHERITE_BLOCK))
-            .where('L', Predicates.blocks(LIGHT_BLUE_CONCRETE))
-            .where('M', Predicates.blocks(CYAN_STAINED_GLASS))
-            .where('N', Predicates.blocks(POLISHED_DEEPSLATE_SLAB))
-            .where('O', Predicates.blocks(REDSTONE_LAMP))
-            .where('P', Predicates.blocks(WATER))
-            .where('Q', Predicates.blocks(PRISMARINE_WALL))
-            .where('R', Predicates.blocks(SEA_LANTERN))
-            .where('S', Predicates.blocks(POLISHED_DEEPSLATE))
-            .where('T', Predicates.blocks(PRISMARINE_BRICK_SLAB))
-            .where('U', Predicates.blocks(PRISMARINE_BRICK_STAIRS))
-            .where('V', Predicates.blocks(WARPED_TRAPDOOR))
-            .where('W', Predicates.blocks(WARPED_FENCE))
-            .where('X', Predicates.blocks(LIGHTNING_ROD))
-            .where('Y', Predicates.blocks(BEACON))
-            .where('Z', Predicates.blocks(REDSTONE_WIRE))
-            .where('a', Predicates.blocks(PENTLANDITE_ORE))
-            .where(' ', Predicates.any())
-            .where('~', Predicates.controller(Predicates.blocks(definition.getBlock())))
-            .build();
+        return DShanhaiMBParser.parse(
+            new ResourceLocation("gt_shanhai", "worldline_cracking_hub"),
+            c -> {
+                switch (c) {
+                    case '~': return Predicates.controller(Predicates.blocks(definition.getBlock()));
+                    case 'A': return Predicates.blocks(GRAY_CONCRETE);
+                    case 'B': return Predicates.blocks(HIGH_STRENGTH_CONCRETE);
+                    case 'C': return Predicates.blocks(PLASCRETE);
+                    case 'D': return Predicates.blocks(STRESS_PROOF_CASING);
+                    case 'E': return Predicates.blocks(POLISHED_DEEPSLATE_STAIRS);
+                    case 'F': return Predicates.blocks(GLASS_PANE);
+                    case 'G': return Predicates.blocks(POLISHED_DEEPSLATE_WALL);
+                    case 'H': return Predicates.blocks(OAK_LEAVES);
+                    case 'I': return Predicates.blocks(END_ROD);
+                    case 'J': return Predicates.blocks(CYAN_STAINED_GLASS_PANE);
+                    case 'K': return Predicates.blocks(NETHERITE_BLOCK);
+                    case 'L': return Predicates.blocks(LIGHT_BLUE_CONCRETE);
+                    case 'M': return Predicates.blocks(CYAN_STAINED_GLASS);
+                    case 'N': return Predicates.blocks(POLISHED_DEEPSLATE_SLAB);
+                    case 'O': return Predicates.blocks(REDSTONE_LAMP);
+                    case 'P': return Predicates.blocks(WATER);
+                    case 'Q': return Predicates.blocks(PRISMARINE_WALL);
+                    case 'R': return Predicates.blocks(SEA_LANTERN);
+                    case 'S': return Predicates.blocks(POLISHED_DEEPSLATE);
+                    case 'T': return Predicates.blocks(PRISMARINE_BRICK_SLAB);
+                    case 'U': return Predicates.blocks(PRISMARINE_BRICK_STAIRS);
+                    case 'V': return Predicates.blocks(WARPED_TRAPDOOR);
+                    case 'W': return Predicates.blocks(WARPED_FENCE);
+                    case 'X': return Predicates.blocks(LIGHTNING_ROD);
+                    case 'Y': return Predicates.blocks(BEACON);
+                    case 'Z': return Predicates.blocks(REDSTONE_WIRE);
+                    case 'a': return Predicates.blocks(PENTLANDITE_ORE);
+                    default: return null;
+                }
+            },
+            RelativeDirection.BACK, RelativeDirection.UP, RelativeDirection.LEFT);
     }
 }

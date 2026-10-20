@@ -118,7 +118,8 @@ public class DShanhaiCommands {
 
     /** 检查预设文件是否已存在 */
     private static boolean fileExistsInPresets(String name) {
-        return new java.io.File("config/gt_shanhai/presets", name + ".json").exists();
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipePresetsDir()
+                .resolve(name + ".json").toFile().exists();
     }
 
     private static RequiredArgumentBuilder<CommandSourceStack, String> recipeTypeArg(String name) {
@@ -1548,7 +1549,7 @@ public class DShanhaiCommands {
     }
 
     /**
-     * 扫描 config/gt_shanhai/shop.json，提取商品 goodsNbt 模板里写死的 shanhai_sda_uuid
+     * 扫描 config/gt_shanhai/shop/shop.json，提取商品 goodsNbt 模板里写死的 shanhai_sda_uuid
      * （商品本体就是提前捕获的固定 SDA 时会有此字段），仅导出这些 UUID 对应的内容——
      * 精确对应「任务导出」在商店场景下的等价物。
      */
@@ -1556,7 +1557,7 @@ public class DShanhaiCommands {
         java.util.Set<java.util.UUID> shopUuids =
                 com.dishanhai.gt_shanhai.api.ae.DShanhaiSdaContentStore.scanShopJsonUuids();
         if (shopUuids.isEmpty()) {
-            source.sendSuccess(msg("§7[山海] 未在 config/gt_shanhai/shop.json 中找到 SDA UUID"), false);
+            source.sendSuccess(msg("§7[山海] 未在 config/gt_shanhai/shop/shop.json 中找到 SDA UUID"), false);
             return 0;
         }
         com.dishanhai.gt_shanhai.api.ae.DShanhaiVirtualCellSavedData data =

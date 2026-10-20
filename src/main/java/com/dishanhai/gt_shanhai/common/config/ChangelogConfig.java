@@ -4,7 +4,6 @@ import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -38,8 +37,7 @@ import java.util.regex.Pattern;
  */
 public final class ChangelogConfig {
 
-    private static final Path CHANGELOG_DIR = FMLPaths.CONFIGDIR.get()
-            .resolve(GTDishanhaiMod.MOD_ID).resolve("changelog");
+    private static final Path CHANGELOG_DIR = com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.changelog();
     private static final Path SEEN_FILE = CHANGELOG_DIR.resolve("changelog_seen.txt");
     private static final Pattern VERSION_IN_FILE_NAME = Pattern.compile(
             "(?:^|[-_])([0-9]+)\\.([0-9]+)\\.([0-9]+)(?:[-+]([0-9A-Za-z.-]+))?\\.md$",

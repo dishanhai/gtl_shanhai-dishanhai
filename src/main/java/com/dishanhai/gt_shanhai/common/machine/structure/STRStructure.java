@@ -1,10 +1,10 @@
 package com.dishanhai.gt_shanhai.common.machine.structure;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.api.DShanhaiMBParser;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.machine.multiblock.PartAbility;
 import com.gregtechceu.gtceu.api.pattern.BlockPattern;
-import com.gregtechceu.gtceu.api.pattern.FactoryBlockPattern;
 import com.gregtechceu.gtceu.api.pattern.Predicates;
 import com.gregtechceu.gtceu.api.pattern.util.RelativeDirection;
 import net.minecraft.resources.ResourceLocation;
@@ -52,87 +52,41 @@ public class STRStructure {
         Block spacetimeContinuumRipper = block("gtlcore:spacetimecontinuumripper");
         Block gravitationalWaveAntennaTransmitter = block("gt_shanhai:gravitational_wave_antenna_transmitter", definition.getBlock());
 
-        return FactoryBlockPattern.start(RelativeDirection.BACK, RelativeDirection.UP, RelativeDirection.LEFT)
-            .aisle(STRData1.D1)
-            .aisle(STRData1.D2)
-            .aisle(STRData1.D3)
-            .aisle(STRData1.D4)
-            .aisle(STRData1.D5)
-            .aisle(STRData1.D6)
-            .aisle(STRData1.D7)
-            .aisle(STRData1.D8)
-            .aisle(STRData1.D9)
-            .aisle(STRData1.D10)
-            .aisle(STRData1.D11)
-            .aisle(STRData1.D12)
-            .aisle(STRData1.D13)
-            .aisle(STRData1.D14)
-            .aisle(STRData1.D15)
-            .aisle(STRData1.D16)
-            .aisle(STRData1.D17)
-            .aisle(STRData1.D18)
-            .aisle(STRData1.D19)
-            .aisle(STRData1.D20)
-            .aisle(STRData1.D21)
-            .aisle(STRData1.D22)
-            .aisle(STRData1.D23)
-            .aisle(STRData1.D24)
-            .aisle(STRData1.D25)
-            .aisle(STRData1.D26)
-            .aisle(STRData1.D27)
-            .aisle(STRData1.D28)
-            .aisle(STRData1.D29)
-            .aisle(STRData1.D30)
-            .aisle(STRData2.D31)
-            .aisle(STRData2.D32)
-            .aisle(STRData2.D33)
-            .aisle(STRData2.D34)
-            .aisle(STRData2.D35)
-            .aisle(STRData2.D36)
-            .aisle(STRData2.D37)
-            .aisle(STRData2.D38)
-            .aisle(STRData2.D39)
-            .aisle(STRData2.D40)
-            .aisle(STRData2.D41)
-            .aisle(STRData2.D42)
-            .aisle(STRData2.D43)
-            .aisle(STRData2.D44)
-            .aisle(STRData2.D45)
-            .aisle(STRData2.D46)
-            .aisle(STRData2.D47)
-            .aisle(STRData2.D48)
-            .aisle(STRData2.D49)
-            .aisle(STRData2.D50)
-
-            .where('A', Predicates.blocks(dimensionallyTranscendentCasing))
-            .where('B', Predicates.blocks(dimensionalBridgeCasing))
-            .where('C', Predicates.blocks(highStrengthConcrete))
-            .where('D', Predicates.blocks(plascrete))
-            .where('E', Predicates.blocks(hollowCasing))
-            .where('F', Predicates.blocks(magicCore))
-            .where('G', Predicates.blocks(speedingPipe))
-            .where('H', Predicates.blocks(containmentFieldGenerator))
-            .where('I', Predicates.blocks(molecularCasing))
-            .where('J', Predicates.blocks(highPowerCasing))
-            .where('K', Predicates.blocks(degenerateRheniumConstrainedCasing))
-            .where('L', Predicates.blocks(rheniumReinforcedEnergyGlass))
-            .where('M', Predicates.blocks(lava))
-            .where('N', Predicates.blocks(annihilateCore))
-            .where('O', Predicates.blocks(dimensionalStabilityCasing))
-            .where('P', Predicates.blocks(spacetimeBendingCore))
-            .where('Q', Predicates.blocks(gravityStabilizationCasing))
-            .where('R', Predicates.blocks(spaceElevatorInternalSupport))
-            .where('S', Predicates.blocks(spacetimeContinuumRipper))
-            .where('T', Predicates.blocks(gravitationalWaveAntennaTransmitter))
-            .where('U', Predicates.blocks(dimensionallyTranscendentCasing, dimensionalBridgeCasing, molecularCasing)
-                    .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
-                    .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
-                    .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
-                    .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1))
-                    .or(Predicates.abilities(PartAbility.COMPUTATION_DATA_RECEPTION).setPreviewCount(1))
-                    .or(Predicates.abilities(PartAbility.COMPUTATION_DATA_TRANSMISSION).setPreviewCount(1)))
-            .where(' ', Predicates.any())
-            .where('~', Predicates.controller(Predicates.blocks(definition.getBlock())))
-            .build();
+        return DShanhaiMBParser.parse(
+            new ResourceLocation("gt_shanhai", "str_structure"),
+            c -> {
+                switch (c) {
+                    case '~': return Predicates.controller(Predicates.blocks(definition.getBlock()));
+                    case 'A': return Predicates.blocks(dimensionallyTranscendentCasing);
+                    case 'B': return Predicates.blocks(dimensionalBridgeCasing);
+                    case 'C': return Predicates.blocks(highStrengthConcrete);
+                    case 'D': return Predicates.blocks(plascrete);
+                    case 'E': return Predicates.blocks(hollowCasing);
+                    case 'F': return Predicates.blocks(magicCore);
+                    case 'G': return Predicates.blocks(speedingPipe);
+                    case 'H': return Predicates.blocks(containmentFieldGenerator);
+                    case 'I': return Predicates.blocks(molecularCasing);
+                    case 'J': return Predicates.blocks(highPowerCasing);
+                    case 'K': return Predicates.blocks(degenerateRheniumConstrainedCasing);
+                    case 'L': return Predicates.blocks(rheniumReinforcedEnergyGlass);
+                    case 'M': return Predicates.blocks(lava);
+                    case 'N': return Predicates.blocks(annihilateCore);
+                    case 'O': return Predicates.blocks(dimensionalStabilityCasing);
+                    case 'P': return Predicates.blocks(spacetimeBendingCore);
+                    case 'Q': return Predicates.blocks(gravityStabilizationCasing);
+                    case 'R': return Predicates.blocks(spaceElevatorInternalSupport);
+                    case 'S': return Predicates.blocks(spacetimeContinuumRipper);
+                    case 'T': return Predicates.blocks(gravitationalWaveAntennaTransmitter);
+                    case 'U': return Predicates.blocks(dimensionallyTranscendentCasing, dimensionalBridgeCasing, molecularCasing)
+                            .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
+                            .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
+                            .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
+                            .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1))
+                            .or(Predicates.abilities(PartAbility.COMPUTATION_DATA_RECEPTION).setPreviewCount(1))
+                            .or(Predicates.abilities(PartAbility.COMPUTATION_DATA_TRANSMISSION).setPreviewCount(1));
+                    default: return null;
+                }
+            },
+            RelativeDirection.BACK, RelativeDirection.UP, RelativeDirection.LEFT);
     }
 }

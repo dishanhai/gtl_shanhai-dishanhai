@@ -32,8 +32,7 @@ class AeTerminalFavoritesSourceTest {
         assertTrue(source.contains("LinkedHashSet<AEKey>"));
         assertTrue(source.contains("key.toTagGeneric()"));
         assertTrue(source.contains("AEKey.fromTagGeneric"));
-        assertTrue(source.contains("ae_terminal_favorites.nbt"));
-        assertTrue(source.contains("FMLPaths.CONFIGDIR"));
+        assertTrue(source.contains("ShanhaiConfigPaths.aeTerminalFavorites"));
         assertTrue(source.contains("AEItemKey") && source.contains("AEFluidKey"));
     }
 

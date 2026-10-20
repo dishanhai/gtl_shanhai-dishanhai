@@ -10,7 +10,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
-import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -25,9 +24,8 @@ import java.util.List;
 public final class AeTerminalFavorites {
 
     private static final String TAG_FAVORITES = "favorites";
-    private static final Path FILE = FMLPaths.CONFIGDIR.get()
-            .resolve("gt_shanhai")
-            .resolve("ae_terminal_favorites.nbt");
+    private static final Path FILE = com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.aeTerminalFavorites());
     private static final LinkedHashSet<AEKey> favorites = new LinkedHashSet<>();
     private static boolean loaded;
 

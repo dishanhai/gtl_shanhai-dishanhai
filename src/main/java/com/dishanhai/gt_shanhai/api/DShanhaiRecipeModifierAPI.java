@@ -1491,10 +1491,12 @@ public class DShanhaiRecipeModifierAPI {
 
     // ====== 配置持久化 ======
 
-    private static final String CONFIG_DIR = "config/gt_shanhai";
-    private static final java.io.File STRIP_FILE = new java.io.File(CONFIG_DIR, "strip_rules.json");
-    private static final java.io.File REPLACE_FILE = new java.io.File(CONFIG_DIR, "replace_rules.json");
-    private static final java.io.File DELETE_FILE = new java.io.File(CONFIG_DIR, "delete_rules.json");
+    private static final java.io.File STRIP_FILE = com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.stripRules()).toFile();
+    private static final java.io.File REPLACE_FILE = com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.replaceRules()).toFile();
+    private static final java.io.File DELETE_FILE = com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.deleteRules()).toFile();
     private static final java.io.File RECIPE_TOGGLE_FILE =
             new java.io.File(net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get().toFile(),
                     "kubejs/data/shanhai_recipe_load_config.json");
@@ -1565,10 +1567,9 @@ public class DShanhaiRecipeModifierAPI {
         }
     }
 
-    /** 保存剥离规则到 config/gt_shanhai/strip_rules.json */
+    /** 保存剥离规则到 config/gt_shanhai/recipe/strip_rules.json */
     public static void saveStripRules() {
         try {
-            new java.io.File(CONFIG_DIR).mkdirs();
             var obj = new com.google.gson.JsonObject();
             for (var entry : STRIP_RULES.entrySet()) {
                 var arr = new com.google.gson.JsonArray();
@@ -1936,7 +1937,6 @@ public class DShanhaiRecipeModifierAPI {
     /** 持久化删除规则 */
     public static void saveDeleteRules() {
         try {
-            new java.io.File(CONFIG_DIR).mkdirs();
             var obj = new com.google.gson.JsonObject();
             for (var entry : DELETE_RULES.entrySet()) {
                 var arr = new com.google.gson.JsonArray();
@@ -1975,7 +1975,6 @@ public class DShanhaiRecipeModifierAPI {
     }
     public static void saveReplaceRules() {
         try {
-            new java.io.File(CONFIG_DIR).mkdirs();
             var obj = new com.google.gson.JsonObject();
             for (var entry : REPLACE_RULES.entrySet()) {
                 var arr = new com.google.gson.JsonArray();
@@ -2035,8 +2034,12 @@ public class DShanhaiRecipeModifierAPI {
 
     // ====== 预设系统 ======
 
-    private static final java.io.File PRESET_DIR = new java.io.File(CONFIG_DIR, "presets");
-    private static final java.io.File ACTIVE_PRESETS_FILE = new java.io.File(CONFIG_DIR, "active_presets.json");
+    private static final java.io.File PRESET_DIR =
+            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureDir(
+                    com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.recipePresetsDir()).toFile();
+    private static final java.io.File ACTIVE_PRESETS_FILE =
+            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                    com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.activePresets()).toFile();
     private static final List<String> MIGRATION_PRESETS = Arrays.asList("太空采矿预设", "太空钻井预设");
     private static final ThreadLocal<Boolean> LOADING_PRESET_BATCH = ThreadLocal.withInitial(() -> false);
 
@@ -2102,7 +2105,6 @@ public class DShanhaiRecipeModifierAPI {
 
     private static void saveActivePresets(List<String> names) {
         try {
-            new java.io.File(CONFIG_DIR).mkdirs();
             var arr = new com.google.gson.JsonArray();
             for (String name : names) arr.add(name);
             try (var w = new java.io.FileWriter(ACTIVE_PRESETS_FILE)) {

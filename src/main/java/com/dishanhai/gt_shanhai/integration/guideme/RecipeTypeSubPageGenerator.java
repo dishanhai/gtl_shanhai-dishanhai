@@ -13,7 +13,6 @@ import java.io.BufferedWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
 
@@ -27,7 +26,9 @@ import java.util.*;
 public class RecipeTypeSubPageGenerator {
 
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("RecipeTypeSubPageGen");
-    private static final Path HOT_RELOAD_BASE = Paths.get("config/gt_shanhai/guides/gt_shanhai/guide/recipe/type");
+    private static final Path HOT_RELOAD_BASE =
+            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.guides()
+                    .resolve("gt_shanhai/guide/recipe/type");
 
     /** 防止一次会话内重复生成（配方每次同步都会触发 RecipesUpdatedEvent） */
     private static volatile boolean generated = false;

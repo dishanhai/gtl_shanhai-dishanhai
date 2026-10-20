@@ -11,7 +11,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Optional;
 
@@ -31,7 +30,8 @@ public final class GuideRegistration {
      * 这样 dev 文件 {@code .../gt_shanhai/guide/recipe/type/x.md}
      * → pageId {@code gt_shanhai:recipe/type/x.md}，与 jar 资源一致。</p>
      */
-    private static final Path DEV_GUIDES_DIR = Paths.get("config/gt_shanhai/guides/gt_shanhai/guide");
+    private static final Path DEV_GUIDES_DIR =
+            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.guides().resolve("gt_shanhai/guide");
 
     private GuideRegistration() {}
 

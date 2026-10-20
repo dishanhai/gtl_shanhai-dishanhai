@@ -155,6 +155,9 @@ public class GTDishanhaiMod {
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON_SPEC, "gt_shanhai/gt_shanhai-common.toml");
         LOGGER.info("Config registered");
 
+        // 旧版平铺配置 → 分组结构迁移；必须早于任何业务模块读配置
+        com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.migrateLegacyLayout();
+
         // 多方块注册开关：必须在所有模组注册多方块之前读取；扫描与移除在 FMLCommonSetupEvent 完成。
         com.dishanhai.gt_shanhai.config.MultiblockRegistryConfig.load();
         net.minecraftforge.common.crafting.CraftingHelper.register(
