@@ -1,5 +1,7 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
+import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
 import com.lowdragmc.lowdraglib.gui.widget.SelectorWidget;
 import java.util.List;
 import net.minecraft.client.gui.GuiGraphics;
@@ -91,6 +93,9 @@ public final class ShanhaiRecipeTypeSelector extends SelectorWidget {
         int shown = Math.max(1, Math.round(fullHeight * open));
         int x = popUp.getPositionX();
         int y = popUp.getPositionY();
+        GlassBlur.requestPopup(graphics,
+                new GuiRect(getPositionX(), getPositionY(), getSizeWidth(), getSizeHeight())
+                        .union(new GuiRect(x, y, popUp.getSizeWidth(), shown)), open);
         clip(graphics, x, y, x + popUp.getSizeWidth(), y + shown);
         graphics.pose().pushPose();
         graphics.pose().translate(0f, 0f, 200f);

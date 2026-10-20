@@ -1,5 +1,8 @@
 package com.dishanhai.gt_shanhai.common.shop;
 
+import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayInventory;
+import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
+
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -874,7 +877,8 @@ public class ShopEntry {
         } else {
             boolean primaryMissing = primaryGs != null && primaryGs.id() != null
                     && !ForgeRegistries.ITEMS.containsKey(primaryGs.id());
-            primary = primaryMissing ? "§c缺失物品:" + primaryGs.id() : makeGoodsStack().getHoverName().getString();
+            primary = primaryMissing ? "§c缺失物品:" + primaryGs.id()
+                    : makeGoodsStack().getHoverName().getString() + sdaUuidSuffix(primaryGs);
         }
         return hasMultipleGoods() ? primary + " 等" + goods.size() + "种" : primary;
     }
@@ -951,7 +955,17 @@ public class ShopEntry {
             }
         }
         if (g.id() != null && !ForgeRegistries.ITEMS.containsKey(g.id())) return "§c缺失物品:" + g.id();
-        return g.makeStack().getHoverName().getString();
+        return g.makeStack().getHoverName().getString() + sdaUuidSuffix(g);
+    }
+
+    /**
+     * SDA（超级磁盘阵列）商品的 UUID 短码后缀（如 " §8#1a2b3c4d"）：商品里的 SDA 是模板，NBT 通常没有真实 UUID，
+     * 解析为内容确定性 UUID（见 {@link SuperDiskArrayInventory#resolveDisplayUuid}），让同名不同内容的 SDA 能区分。
+     * 非 SDA / 流体商品返回空串。
+     */
+    private static String sdaUuidSuffix(GoodsStack g) {
+        if (g == null || g.isFluid() || !(g.item() instanceof SuperDiskArrayItem)) return "";
+        return " §8#" + SuperDiskArrayInventory.shortUuid(SuperDiskArrayInventory.resolveDisplayUuid(g.nbt()));
     }
 
     /**

@@ -22,4 +22,16 @@ class ShanhaiRecipeEditorAnimationTest {
                 100L + ShanhaiRecipeEditorAnimation.DURATION_MS));
         assertEquals(2, animation.currentStage());
     }
+
+    @Test
+    void linearProgressIsTheRawElapsedShareAndReadsOneWhenSettled() {
+        ShanhaiRecipeEditorAnimation animation = new ShanhaiRecipeEditorAnimation();
+        assertEquals(1.0f, animation.linear(0L), 1e-6f);
+
+        animation.reset(0, 0L);
+        animation.advance(1, 100L);
+        assertEquals(0.0f, animation.linear(100L), 1e-6f);
+        assertEquals(0.5f, animation.linear(100L + ShanhaiRecipeEditorAnimation.DURATION_MS / 2), 1e-3f);
+        assertEquals(1.0f, animation.linear(100L + ShanhaiRecipeEditorAnimation.DURATION_MS * 2), 1e-6f);
+    }
 }

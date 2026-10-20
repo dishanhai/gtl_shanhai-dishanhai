@@ -163,4 +163,39 @@ class ShopGaussBlurSourceTest {
                         .contains("scaleAt(g, cx, cy, popScale(t));"))
         );
     }
+
+    @Test
+    void motionAxisIsWiredEndToEnd() throws Exception {
+        String blur = read("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopGaussBlur.java");
+        String fsh = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.fsh");
+        String program = read("src/main/resources/assets/gt_shanhai/shaders/program/shop_gauss_blur.json");
+
+        assertAll(
+                // shader 与 program json 必须成对声明，缺任一个 Java 侧的空检查都会判定不可用
+                () -> assertTrue(fsh.contains("uniform vec4 MotionAxis")),
+                () -> assertTrue(program.contains("\"MotionAxis\"")),
+                () -> assertTrue(blur.contains("\"MotionAxis\"")),
+                // 趟倍率在 radius<0.5 提前返回之后才乘，V 趟半径被压成 0 时玻璃层仍然执行
+                () -> assertTrue(fsh.indexOf("if (!waveActive && radius < 0.5)")
+                        < fsh.indexOf("float axisRadius = radius * (firstPass ? MotionAxis.x : MotionAxis.y);")),
+                () -> assertTrue(blur.contains("public static void requestDirectional(")),
+                // 守衛可註冊，不再寫死商店界面
+                () -> assertTrue(blur.contains("public static void allowScreen(")),
+                () -> assertTrue(blur.contains("static boolean isAllowed(Screen screen)")),
+                () -> assertFalse(blur.contains("if (!(event.getScreen() instanceof ShopScreen)) return;")),
+                // 点击波 / 第二矩形固定 (1,1)；主请求带自己的方向轴；"NONE, partialTick" 相邻关系保持
+                () -> assertTrue(blur.contains("NO_WAVE, axisX, axisY, glass, partialTick")),
+                () -> assertTrue(blur.contains("NO_WAVE, 1f, 1f, glass2, partialTick")),
+                () -> assertTrue(blur.contains("wave, 1f, 1f, ShopGlassStyle.NONE, partialTick")),
+                () -> assertTrue(blur.contains("ShopGlassStyle.NONE, partialTick")),
+                // MotionAxis 缺失要走既有的降级路径，不能悄悄当成已就绪
+                () -> assertTrue(blur.contains("|| motionAxisUniform == null")),
+                // 三条取样分支都读 axisRadius，换页的方向模糊才不会退化成各向同性
+                () -> assertTrue(fsh.contains("if (axisRadius < 0.5) {")),
+                () -> assertTrue(fsh.contains("max(1.0, axisRadius / 10.0)")),
+                () -> assertTrue(fsh.contains("max(axisRadius / 2.5, stepPx)")),
+                () -> assertTrue(fsh.contains("oneTexel * axisRadius;")),
+                () -> assertFalse(fsh.contains("oneTexel * radius;"))
+        );
+    }
 }

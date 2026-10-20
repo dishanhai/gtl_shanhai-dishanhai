@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.lowdragmc.lowdraglib.utils.Size;
@@ -8,6 +9,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
+import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
+import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 
 /**
  * Square toggle beside the query slot. Opening it lists recent searches.
@@ -24,6 +28,7 @@ public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
     private final ShanhaiRecipeEditorWidget host;
     private final Toggle toggle;
     private final Popup popup;
+    private final Spring blurSpring = new Spring(Spring.PANEL);
     private boolean open;
 
     public ShanhaiRecipeHistoryWidget(ShanhaiRecipeEditorWidget host, int x, int y) {
@@ -43,7 +48,11 @@ public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
 
     void setOpen(boolean next) {
         open = next;
-        if (next) popup.scroll = 0;
+        blurSpring.snap(0f);
+        if (next) {
+            popup.scroll = 0;
+            blurSpring.setTarget(1f, System.currentTimeMillis());
+        }
         popup.fit();
         popup.setVisible(next);
         popup.setActive(next);
@@ -81,11 +90,11 @@ public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
             int x = getPositionX();
             int y = getPositionY();
             boolean hover = isMouseOverElement(mouseX, mouseY);
-            int frame = open || hover ? 0xFF69E8FF : ShanhaiIOWidget.FRAME_ITEM;
+            int frame = open || hover ? GlassPalette.ACCENT : GlassPalette.BUTTON_EDGE;
             graphics.fill(x, y, x + BUTTON, y + BUTTON, frame);
-            graphics.fill(x + 1, y + 1, x + BUTTON - 1, y + BUTTON - 1, 0xFF20374B);
+            graphics.fill(x + 1, y + 1, x + BUTTON - 1, y + BUTTON - 1, GlassPalette.ROW_ICON_BG);
             graphics.drawString(Minecraft.getInstance().font, open ? "收" : "历",
-                    x + 7, y + 7, 0xFFEAF7FF, false);
+                    x + 7, y + 7, GlassPalette.TEXT, false);
         }
 
         @Override
@@ -135,12 +144,19 @@ public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
             int x = getPositionX();
             int y = getPositionY();
             int height = getSizeHeight();
-            graphics.fill(x, y, x + POPUP_W, y + height, 0xFF69E8FF);
-            graphics.fill(x + 1, y + 1, x + POPUP_W - 1, y + height - 1, 0xFF111B2D);
+            graphics.fill(x, y, x + POPUP_W, y + height, GlassPalette.ACCENT);
+            graphics.fill(x + 1, y + 1, x + POPUP_W - 1, y + height - 1, GlassPalette.ROW_FILL);
             Font font = Minecraft.getInstance().font;
+            long now = System.currentTimeMillis();
+            blurSpring.update(now);
+            // The toggle sits right above the popup, so keep it inside the clear area.
+            GlassBlur.requestPopup(graphics,
+                    new GuiRect(x + POPUP_W - BUTTON, y - BUTTON - 2, BUTTON, BUTTON)
+                            .union(new GuiRect(x, y, POPUP_W, height)),
+                    Math.max(0f, Math.min(1f, blurSpring.value())));
             int count = host.queryHistoryCount();
             if (count == 0) {
-                graphics.drawString(font, "尚无查询历史", x + 6, y + 4, 0xFF8AA6B9, false);
+                graphics.drawString(font, "尚无查询历史", x + 6, y + 4, GlassPalette.TEXT_DIM, false);
                 return;
             }
             int shown = Math.min(VISIBLE, count);
@@ -150,9 +166,9 @@ public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
                 int rowY = y + i * ROW;
                 boolean hover = mouseX >= x && mouseX < x + POPUP_W
                         && mouseY >= rowY && mouseY < rowY + ROW;
-                if (hover) graphics.fill(x + 2, rowY + 1, x + POPUP_W - 2, rowY + ROW - 1, 0xFF19324A);
+                if (hover) graphics.fill(x + 2, rowY + 1, x + POPUP_W - 2, rowY + ROW - 1, GlassPalette.ROW_FILL_HOVER);
                 graphics.drawString(font, fitText(font, host.queryHistoryLabel(index), POPUP_W - 12),
-                        x + 6, rowY + 4, 0xFFEAF7FF, false);
+                        x + 6, rowY + 4, GlassPalette.TEXT, false);
             }
         }
     }

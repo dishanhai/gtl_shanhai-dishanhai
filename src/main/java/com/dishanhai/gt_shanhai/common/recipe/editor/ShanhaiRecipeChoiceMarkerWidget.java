@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import net.minecraft.client.gui.GuiGraphics;
 
@@ -91,7 +92,7 @@ public final class ShanhaiRecipeChoiceMarkerWidget extends Widget {
         if (width <= 0) return;
         int x = getPositionX() + left;
         int y = getPositionY();
-        graphics.fill(x, y, x + width, y + 2, 0xFF69E8FF);
+        graphics.fill(x, y, x + width, y + 2, GlassPalette.ACCENT);
     }
 
     private static float progress(long started) {

@@ -197,6 +197,25 @@ public class SuperDiskArrayInventory implements StorageCell {
     }
 
     /**
+     * 展示用 UUID 解析：已认领/已落盘的 SDA 读 NBT 里的真实 UUID；无 UUID 的展示模板（商店商品、JEI 展示栈）
+     * 回退到内容确定性 UUID。只读，不会把 UUID 写回栈，因此对 JEI 去重与商品身份无副作用。
+     */
+    public static UUID resolveDisplayUuid(CompoundTag tag) {
+        if (tag != null && tag.hasUUID(TAG_UUID)) return tag.getUUID(TAG_UUID);
+        return generateDeterministicUUID(tag == null ? new CompoundTag() : tag);
+    }
+
+    /** 该 NBT 是否带真实 UUID（false = {@link #resolveDisplayUuid} 返回的是模板确定性 UUID）。 */
+    public static boolean hasRealUuid(CompoundTag tag) {
+        return tag != null && tag.hasUUID(TAG_UUID);
+    }
+
+    /** UUID 短码（前 8 位），给商店卡片等窄位置显示。 */
+    public static String shortUuid(UUID uuid) {
+        return uuid.toString().substring(0, 8);
+    }
+
+    /**
      * JEI 子类型身份：真实 SDA 只按 UUID 区分；无 UUID 的展示模板额外按电量区分。
      * 这样动态电量不会拆分玩家物品，同时保留默认、空电和满电三种基础展示项。
      */

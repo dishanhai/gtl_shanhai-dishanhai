@@ -1,7 +1,11 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassMotion;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPanelTexture;
+import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.lowdragmc.lowdraglib.gui.ingredient.IGhostIngredientTarget;
 import com.lowdragmc.lowdraglib.gui.ingredient.Target;
 import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
@@ -9,6 +13,7 @@ import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
 import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
 import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
+import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SelectorWidget;
 import com.lowdragmc.lowdraglib.gui.widget.TextFieldWidget;
@@ -16,8 +21,6 @@ import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;
-import org.joml.Matrix4f;
-import org.joml.Vector4f;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,18 +39,17 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     public static final int FLUID_PAGE = ShanhaiIoTable.FLUID_IN;
     private static final int ITEM_COLS = 8;
     private static final int FLUID_COLS = 8;
-    private static final int PAGE_Y = 24;
+    static final int PAGE_Y = 24;
     private static final int GRID_STRIDE = 22;
-    /** Short slide for one IO page. The full-screen stage slide stays on its own clock. */
-    private static final long IO_PAGE_MS = 320L;
 
     private final ShanhaiRecipeEditorWidget host;
-    private final StagePage selectPage;
-    private final StagePage editPage;
-    private final StagePage reviewPage;
-    private final RecipeCardList resultList;
+    private final GlassStagePage selectPage;
+    private final GlassStagePage editPage;
+    private final GlassStagePage reviewPage;
+    private final GlassRecipeCardList resultList;
     /** Query page whose cards should open already scrolled to the bottom. -1 means top. */
     private int landAtEndPage = -1;
+    private boolean blurWarmed;
     private DraggableScrollableWidgetGroup conditionList;
     private DraggableScrollableWidgetGroup parameterList;
     private final List<ShanhaiIOWidget> inputItemCells = new ArrayList<>();
@@ -71,10 +73,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private LabelWidget parameterLabel;
     private final Map<String, TextFieldWidget> parameterFields = new LinkedHashMap<>();
     private boolean createChrome;
-    private IoGrid inputItemGrid;
-    private IoGrid inputFluidGrid;
-    private IoGrid outputItemGrid;
-    private IoGrid outputFluidGrid;
+    private GlassIoGrid inputItemGrid;
+    private GlassIoGrid inputFluidGrid;
+    private GlassIoGrid outputItemGrid;
+    private GlassIoGrid outputFluidGrid;
 
     public ShanhaiRecipeEditorPanel(ShanhaiRecipeEditorWidget host) {
         super(8, 32, ShanhaiRecipeEditorWidget.WIDTH - 16, 310);
@@ -86,10 +88,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         selectPage = page();
         editPage = page();
         reviewPage = page();
-        resultList = new RecipeCardList(4, 116, getSizeWidth() - 8, 110);
+        resultList = new GlassRecipeCardList(host, 4, 116, getSizeWidth() - 8, 110);
         resultList.setYScrollBarWidth(5)
                 .setYBarStyle(new ColorRectTexture(0xff79c9dd), GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.DISPLAY)
+                .setBackground(GlassPanelTexture.display())
                 .setUseScissor(true);
 
         addWidget(new ShanhaiRecipeTabBarWidget(host, 4, 2, getSizeWidth() - 8));
@@ -173,7 +175,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         int rowWidth = Math.max(80, conditionList.getSizeWidth() - 8);
         for (int i = 0; i < host.conditionEdits.size(); i++) {
             int index = i;
-            EnterRow row = new EnterRow(0, 2 + i * 16, rowWidth, 16, i, animate);
+            GlassEnterRow row = new GlassEnterRow(0, 2 + i * 16, rowWidth, 16, i, animate);
             row.addWidget(new LabelWidget(4, 2, () -> host.compact(host.conditionLabel(index), 16).replace("%", "%%")));
             row.addWidget(button(width - 40, 0, 36, 14, "改", () -> host.editCondition(index)));
             row.addWidget(button(width, 0, 36, 14, "移除", () -> host.removeCondition(index)));
@@ -197,7 +199,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         int rowWidth = Math.max(120, parameterList.getSizeWidth() - 8);
         List<ShanhaiRecipeConditions.Parameter> parameters = host.draftParameters();
         if (parameters.isEmpty()) {
-            EnterRow row = new EnterRow(0, 2, rowWidth, 16, 0, true);
+            GlassEnterRow row = new GlassEnterRow(0, 2, rowWidth, 16, 0, true);
             row.addWidget(new LabelWidget(4, 2, "§7选出条件后编辑参数"));
             parameterList.addWidget(row);
             return;
@@ -206,14 +208,14 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         int order = 0;
         for (ShanhaiRecipeConditions.Parameter parameter : parameters) {
             String path = parameter.path;
-            EnterRow row = new EnterRow(0, y, rowWidth, 16, order, true);
+            GlassEnterRow row = new GlassEnterRow(0, y, rowWidth, 16, order, true);
             row.addWidget(new LabelWidget(2, 2, host.compact(path, 12)));
             List<String> choices = host.parameterChoices(path);
             if (choices.size() > 1) {
-                SelectorWidget selector = new ShanhaiRecipeTypeSelector(62, 0, 160, 14, choices, 0xFF1A1A1A)
-                        .setButtonBackground(GuiTextures.VANILLA_BUTTON)
-                        .setBackground(GuiTextures.BACKGROUND)
-                        .setFontColor(0xFF1A1A1A)
+                SelectorWidget selector = new ShanhaiRecipeTypeSelector(62, 0, 160, 14, choices, GlassPalette.TEXT)
+                        .setButtonBackground(GlassPanelTexture.button())
+                        .setBackground(GlassPanelTexture.panel())
+                        .setFontColor(GlassPalette.TEXT)
                         .setMaxCount(8)
                         .setCandidatesSupplier(() -> host.parameterChoices(path))
                         .setSupplier(() -> host.parameterText(path))
@@ -339,6 +341,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     public void updateScreen() {
         super.updateScreen();
         layoutMotion(ShanhaiRecipeEditorAnimation.nowMs());
+        warmBlurOnce();
         refreshIo();
         if (keepToggle != null) keepToggle.setVisible(!host.creating);
         syncCreateChrome();
@@ -384,8 +387,31 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
 
     @Override
     public void drawInBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
-        layoutMotion(ShanhaiRecipeEditorAnimation.nowMs());
+        long now = ShanhaiRecipeEditorAnimation.nowMs();
+        layoutMotion(now);
+        requestSlideBlur(graphics, now);
         super.drawInBackground(graphics, mouseX, mouseY, partialTicks);
+    }
+
+    /**
+     * Once, from the client tick: compile the blur shader now instead of on the first page slide.
+     * Not from draw: building the post chain mid-render leaves the default framebuffer bound for the rest of that frame.
+     */
+    private void warmBlurOnce() {
+        if (blurWarmed) return;
+        blurWarmed = true;
+        GlassBlur.warmUp();
+    }
+
+    /**
+     * Horizontal motion blur while a stage slides. The viewport is the stationary page area,
+     * so the blur does not travel with the pose offset. A missing post chain simply skips it.
+     */
+    private void requestSlideBlur(GuiGraphics graphics, long now) {
+        if (!host.animation.moving(now)) return;
+        GuiRect viewport = new GuiRect(getPositionX(), getPositionY() + PAGE_Y,
+                getSizeWidth(), getSizeHeight() - PAGE_Y);
+        GlassBlur.requestPage(graphics, viewport, GlassMotion.pageSlide(host.animation.linear(now)));
     }
 
     /**
@@ -394,8 +420,8 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
      */
     private void layoutMotion(long now) {
         host.animation.advance(host.stage, now);
-        StagePage outgoing = (StagePage) page(host.fromStage);
-        StagePage incoming = (StagePage) page(host.stage);
+        GlassStagePage outgoing = page(host.fromStage);
+        GlassStagePage incoming = page(host.stage);
         if (host.animation.moving(now) && outgoing != incoming) {
             float progress = host.animation.progress(now);
             float travel = getSizeWidth();
@@ -403,7 +429,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
             show(outgoing, direction * travel * progress, false);
             show(incoming, -direction * travel * (1f - progress), false);
             int other = 3 - host.fromStage - host.stage;
-            if (other != host.fromStage && other != host.stage) show((StagePage) page(other), 0f, false, false);
+            if (other != host.fromStage && other != host.stage) show(page(other), 0f, false, false);
             return;
         }
         showSettled(selectPage, ShanhaiRecipeEditorWidget.STAGE_SELECT);
@@ -432,7 +458,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         showPage(outputFluidCells, shownFluidOut, editing);
     }
 
-    private static void fillPage(int[] dest, int page, int base, int count, int pageSize) {
+    static void fillPage(int[] dest, int page, int base, int count, int pageSize) {
         Arrays.fill(dest, -1);
         for (int i = 0; i < dest.length && i < pageSize; i++) {
             int section = page * pageSize + i;
@@ -519,10 +545,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private void buildEditPage() {
         recipeIdField = textField(4, 2, 488, 14, () -> host.recipeIdText, host::setRecipeIdText);
         editPage.addWidget(recipeIdField);
-        createTypeSelector = new ShanhaiRecipeTypeSelector(4, 2, 236, 16, List.of(), 0xFF1A1A1A)
-                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.BACKGROUND)
-                .setFontColor(0xFF1A1A1A)
+        createTypeSelector = new ShanhaiRecipeTypeSelector(4, 2, 236, 16, List.of(), GlassPalette.TEXT)
+                .setButtonBackground(GlassPanelTexture.button())
+                .setBackground(GlassPanelTexture.panel())
+                .setFontColor(GlassPalette.TEXT)
                 .setMaxCount(8)
                 .setCandidatesSupplier(() -> List.copyOf(host.machineTypeNames))
                 .setSupplier(host::createTypeLabel)
@@ -536,10 +562,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         editPage.addWidget(guessId);
         editPage.addWidget(new LabelWidget(4, 18, "§7耗时 / tick"));
         editPage.addWidget(new LabelWidget(150, 18, "§7EU/t"));
-        SelectorWidget voltage = new ShanhaiRecipeTypeSelector(188, 16, 64, 14, ShanhaiVoltageTiers.names(), 0xFF1A1A1A)
-                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.BACKGROUND)
-                .setFontColor(0xFF1A1A1A)
+        SelectorWidget voltage = new ShanhaiRecipeTypeSelector(188, 16, 64, 14, ShanhaiVoltageTiers.names(), GlassPalette.TEXT)
+                .setButtonBackground(GlassPanelTexture.button())
+                .setBackground(GlassPanelTexture.panel())
+                .setFontColor(GlassPalette.TEXT)
                 .setMaxCount(10)
                 .setCandidatesSupplier(ShanhaiVoltageTiers::names)
                 .setSupplier(host::voltageFace)
@@ -585,10 +611,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         editPage.addWidget(new LabelWidget(224, 190, "§7数量"));
         editPage.addWidget(textField(250, 186, 48, 16, () -> host.countText, host::setCountText));
         editPage.addWidget(new LabelWidget(4, 206, host::traitLine));
-        SelectorWidget match = new ShanhaiRecipeTypeSelector(268, 204, 228, 14, List.of("精确"), 0xFF1A1A1A)
-                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.BACKGROUND)
-                .setFontColor(0xFF1A1A1A)
+        SelectorWidget match = new ShanhaiRecipeTypeSelector(268, 204, 228, 14, List.of("精确"), GlassPalette.TEXT)
+                .setButtonBackground(GlassPanelTexture.button())
+                .setBackground(GlassPanelTexture.panel())
+                .setFontColor(GlassPalette.TEXT)
                 .setMaxCount(14)
                 .setCandidatesSupplier(host::matchChoices)
                 .setSupplier(host::matchFace)
@@ -606,7 +632,7 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         jsExport.setClientSideWidget();
         editPage.addWidget(jsExport);
         editPage.addWidget(new ButtonWidget(340, 256, 156, 18,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::reviewButtonFace)),
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(host::reviewButtonFace)),
                 click -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_REVIEW, true)));
         editPage.addWidget(voltage);
     }
@@ -619,21 +645,21 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         conditionList = new DraggableScrollableWidgetGroup(4, 134, 246, 108)
                 .setYScrollBarWidth(4)
                 .setYBarStyle(new ColorRectTexture(0xff79c9dd), GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.DISPLAY)
+                .setBackground(GlassPanelTexture.display())
                 .setUseScissor(true);
         reviewPage.addWidget(conditionList);
         parameterList = new DraggableScrollableWidgetGroup(258, 152, 236, 64)
                 .setYScrollBarWidth(4)
                 .setYBarStyle(new ColorRectTexture(0xff79c9dd), GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.DISPLAY)
+                .setBackground(GlassPanelTexture.display())
                 .setUseScissor(true);
         reviewPage.addWidget(parameterList);
         parameterLabel = new LabelWidget(258, 138, "§7条件参数");
         reviewPage.addWidget(parameterLabel);
-        dataKeySelector = new ShanhaiRecipeTypeSelector(258, 136, 100, 14, List.of(), 0xFF1A1A1A)
-                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.BACKGROUND)
-                .setFontColor(0xFF1A1A1A)
+        dataKeySelector = new ShanhaiRecipeTypeSelector(258, 136, 100, 14, List.of(), GlassPalette.TEXT)
+                .setButtonBackground(GlassPanelTexture.button())
+                .setBackground(GlassPanelTexture.panel())
+                .setFontColor(GlassPalette.TEXT)
                 .setMaxCount(12)
                 .setCandidatesSupplier(host::dataKeyChoices)
                 .setSupplier(host::dataKeyFace)
@@ -642,10 +668,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         dataKeySelector.setVisible(false);
         dataKeySelector.setHoverTooltips("温度、恒星热力容器、组件产线、纳米锻炉、中子活化、裂变热、研磨球、聚变启动 EU");
         reviewPage.addWidget(dataKeySelector);
-        coilSelector = new ShanhaiRecipeTypeSelector(362, 136, 132, 14, List.of(), 0xFF1A1A1A)
-                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.BACKGROUND)
-                .setFontColor(0xFF1A1A1A)
+        coilSelector = new ShanhaiRecipeTypeSelector(362, 136, 132, 14, List.of(), GlassPalette.TEXT)
+                .setButtonBackground(GlassPanelTexture.button())
+                .setBackground(GlassPanelTexture.panel())
+                .setFontColor(GlassPalette.TEXT)
                 .setMaxCount(14)
                 .setCandidatesSupplier(host::coilChoices)
                 .setSupplier(host::coilSelectFace)
@@ -662,10 +688,10 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         dataLine.setVisible(false);
         reviewPage.addWidget(dataLine);
         SelectorWidget conditionSelector = new ShanhaiRecipeTypeSelector(
-                258, 118, 188, 16, List.of(), 0xFF1A1A1A)
-                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.BACKGROUND)
-                .setFontColor(0xFF1A1A1A)
+                258, 118, 188, 16, List.of(), GlassPalette.TEXT)
+                .setButtonBackground(GlassPanelTexture.button())
+                .setBackground(GlassPanelTexture.panel())
+                .setFontColor(GlassPalette.TEXT)
                 .setMaxCount(12)
                 .setCandidatesSupplier(ShanhaiRecipeConditions::choices)
                 .setSupplier(() -> host.conditionPick.isEmpty() ? "添加条件" : host.conditionPick)
@@ -684,12 +710,12 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         reviewPage.addWidget(new LabelWidget(260, 40, host::eutDiffLine));
         reviewPage.addWidget(new LabelWidget(260, 54, host::codecHint));
         keepToggle = new ButtonWidget(260, 72, 88, 16,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::keepOriginalFace)),
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(host::keepOriginalFace)),
                 click -> host.toggleKeepOriginal());
         reviewPage.addWidget(keepToggle);
         reviewPage.addWidget(new LabelWidget(352, 76, host::keepOriginalHint));
         ButtonWidget enabledToggle = new ButtonWidget(260, 92, 88, 16,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::defaultEnabledFace)),
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(host::defaultEnabledFace)),
                 click -> host.toggleDefaultEnabled());
         enabledToggle.setClientSideWidget();
         enabledToggle.setHoverTooltips("导出 json 写入 defaultEnabled。关掉后提交会禁用当前配方");
@@ -702,14 +728,16 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         reviewPage.addWidget(button(4, 256, 150, 18, "返回图形编辑",
                 () -> host.setStage(ShanhaiRecipeEditorWidget.STAGE_EDIT, true)));
         reviewPage.addWidget(new ButtonWidget(340, 256, 156, 18,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(host::commitFace)),
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(host::commitFace)),
                 click -> host.commit()));
     }
 
-    private IoGrid addGrid(List<ShanhaiIOWidget> into, int[] shown, int count,
+    private GlassIoGrid addGrid(List<ShanhaiIOWidget> into, int[] shown, int count,
                            int x0, int y0, int cols) {
         int rows = Math.max(1, (count + cols - 1) / cols);
-        IoGrid grid = new IoGrid(x0, y0, cols * GRID_STRIDE, rows * GRID_STRIDE);
+        editPage.addWidget(new ImageWidget(x0 - 3, y0 - 3, cols * GRID_STRIDE + 4, rows * GRID_STRIDE + 4,
+                GlassPanelTexture.display()));
+        GlassIoGrid grid = new GlassIoGrid(x0, y0, cols * GRID_STRIDE, rows * GRID_STRIDE);
         for (int i = 0; i < count; i++) {
             int slot = i;
             ShanhaiIOWidget cell = new ShanhaiIOWidget(host.ioTable, () -> shown[slot],
@@ -726,176 +754,27 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         return grid;
     }
 
-    /**
-     * One item or fluid page. Adding a page changes the index immediately, and this
-     * viewport slides the old cells out before drawing the new ones. Positions stay
-     * put; only the pose moves, same as the stage pages.
-     */
-    private static final class IoGrid extends WidgetGroup {
-        private int fromPage;
-        private int visualPage = Integer.MIN_VALUE;
-        private int targetPage = Integer.MIN_VALUE;
-        private long started;
-        private boolean primed;
-        private int want;
-        private int base;
-        private int count;
-        private int pageSize;
-        private int[] shown = new int[0];
-
-        private IoGrid(int x, int y, int width, int height) {
-            super(x, y, width, height);
-        }
-
-        private void snap() {
-            visualPage = Integer.MIN_VALUE;
-            targetPage = Integer.MIN_VALUE;
-            fromPage = 0;
-            primed = false;
-        }
-
-        private void sync(int want, int base, int count, int pageSize, int[] shown) {
-            this.want = want;
-            this.base = base;
-            this.count = count;
-            this.pageSize = pageSize;
-            this.shown = shown;
-            this.primed = true;
-            apply();
-        }
-
-        private void apply() {
-            if (!primed || shown == null) return;
-            int page = visual(want);
-            fillPage(shown, page, base, count, pageSize);
-            setActive(!moving());
-            for (int i = 0; i < widgets.size() && i < shown.length; i++) {
-                widgets.get(i).setVisible(shown[i] >= 0);
-            }
-        }
-
-        private int visual(int next) {
-            if (visualPage == Integer.MIN_VALUE) {
-                visualPage = next;
-                targetPage = next;
-                fromPage = next;
-                return next;
-            }
-            if (next != targetPage) {
-                fromPage = visualPage;
-                targetPage = next;
-                started = ShanhaiRecipeEditorAnimation.nowMs();
-            }
-            if (progress() >= 0.5f) visualPage = targetPage;
-            return visualPage;
-        }
-
-        private boolean moving() {
-            return fromPage != targetPage && progress() < 1f;
-        }
-
-        private float progress() {
-            if (fromPage == targetPage) return 1f;
-            float linear = Math.min(1f, Math.max(0L,
-                    ShanhaiRecipeEditorAnimation.nowMs() - started) / (float) IO_PAGE_MS);
-            return linear * linear * (3f - 2f * linear);
-        }
-
-        private float offset() {
-            float amount = progress();
-            if (amount >= 1f || fromPage == targetPage) return 0f;
-            int direction = fromPage < targetPage ? -1 : 1;
-            float width = getSizeWidth();
-            if (amount < 0.5f) return direction * (amount / 0.5f) * width;
-            float tail = (amount - 0.5f) / 0.5f;
-            return -direction * (1f - tail) * width;
-        }
-
-        @Override
-        public List<Target> getPhantomTargets(Object ingredient) {
-            apply();
-            if (moving()) return List.of();
-            return super.getPhantomTargets(ingredient);
-        }
-
-        @Override
-        public boolean isMouseOverElement(double mouseX, double mouseY) {
-            if (moving()) return false;
-            return super.isMouseOverElement(mouseX, mouseY);
-        }
-
-        @Override
-        public void drawInBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
-            apply();
-            int x = getPositionX();
-            int y = getPositionY();
-            Matrix4f pose = graphics.pose().last().pose();
-            Vector4f min = pose.transform(new Vector4f(x, y, 0f, 1f));
-            Vector4f max = pose.transform(new Vector4f(x + getSizeWidth(), y + getSizeHeight(), 0f, 1f));
-            graphics.enableScissor((int) min.x, (int) min.y, (int) max.x, (int) max.y);
-            graphics.pose().pushPose();
-            graphics.pose().translate(offset(), 0f, 0f);
-            super.drawInBackground(graphics, mouseX, mouseY, partialTicks);
-            graphics.pose().popPose();
-            graphics.disableScissor();
-        }
+    private GlassStagePage page() {
+        return new GlassStagePage(this);
     }
 
-    /** One rebuilt row. Pose slides in; the hit box stays put so a click still lands. */
-    private static final class EnterRow extends WidgetGroup {
-        private static final long ENTER_MS = 200L;
-        private static final long STAGGER_MS = 28L;
-
-        private final int order;
-        private final long born;
-
-        private EnterRow(int x, int y, int width, int height, int order, boolean animate) {
-            super(x, y, width, height);
-            this.order = Math.max(0, order);
-            long delay = this.order * STAGGER_MS;
-            this.born = ShanhaiRecipeEditorAnimation.nowMs() - (animate ? 0L : ENTER_MS + delay);
-        }
-
-        @Override
-        public void drawInBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
-            float enter = enter();
-            graphics.pose().pushPose();
-            graphics.pose().translate(0f, (1f - enter) * 8f, 0f);
-            RenderSystem.setShaderColor(1f, 1f, 1f, 0.2f + 0.8f * enter);
-            super.drawInBackground(graphics, mouseX, mouseY, partialTicks);
-            graphics.pose().popPose();
-            RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
-        }
-
-        private float enter() {
-            long elapsed = ShanhaiRecipeEditorAnimation.nowMs() - born - order * STAGGER_MS;
-            if (elapsed <= 0L) return 0f;
-            float linear = Math.min(1f, elapsed / (float) ENTER_MS);
-            return linear * linear * (3f - 2f * linear);
-        }
-    }
-
-    private StagePage page() {
-        return new StagePage(this);
-    }
-
-    private StagePage page(int stage) {
+    private GlassStagePage page(int stage) {
         if (stage == ShanhaiRecipeEditorWidget.STAGE_EDIT) return editPage;
         if (stage == ShanhaiRecipeEditorWidget.STAGE_REVIEW) return reviewPage;
         return selectPage;
     }
 
-    private static void show(StagePage page, float slide, boolean active) {
+    private static void show(GlassStagePage page, float slide, boolean active) {
         show(page, slide, true, active);
     }
 
-    private static void show(StagePage page, float slide, boolean visible, boolean active) {
+    private static void show(GlassStagePage page, float slide, boolean visible, boolean active) {
         page.slide = slide;
         page.setVisible(visible);
         page.setActive(active && visible);
     }
 
-    private void showSettled(StagePage page, int stage) {
+    private void showSettled(GlassStagePage page, int stage) {
         boolean visible = host.stage == stage;
         show(page, 0f, visible, visible);
     }
@@ -908,90 +787,12 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
         }
     }
 
-    /**
-     * Select-page card list. A wheel tick that cannot move the scroll changes
-     * the query page: up at the top goes back, down at the bottom goes forward.
-     * The tick that first reaches the edge still only scrolls.
-     */
-    private final class RecipeCardList extends DraggableScrollableWidgetGroup {
-        private static final long EDGE_GAP_MS = 380L;
-        private long edgedAt;
-
-        private RecipeCardList(int x, int y, int width, int height) {
-            super(x, y, width, height);
-        }
-
-        void scrollToEnd() {
-            setScrollYOffset(Math.max(0, getMaxHeight() - getSize().height));
-        }
-
-        @Override
-        public boolean mouseWheelMove(double mouseX, double mouseY, double wheelDelta) {
-            if (!isMouseOverElement(mouseX, mouseY)) {
-                setFocus(false);
-                return false;
-            }
-            int before = getScrollYOffset();
-            super.mouseWheelMove(mouseX, mouseY, wheelDelta);
-            if (getScrollYOffset() != before) return true;
-            int step = wheelStep(wheelDelta);
-            if (step == 0) return true;
-            int max = Math.max(0, getMaxHeight() - getSize().height);
-            int dir = 0;
-            if (step < 0 && before <= 0) dir = -1;
-            else if (step > 0 && before >= max) dir = 1;
-            if (dir == 0) return true;
-            long now = ShanhaiRecipeEditorAnimation.nowMs();
-            if (now - edgedAt < EDGE_GAP_MS) return true;
-            edgedAt = now;
-            host.overscrollQueryPage(dir);
-            return true;
-        }
-
-        private static int wheelStep(double wheelDelta) {
-            double clamped = wheelDelta < -1d ? -1d : (wheelDelta > 1d ? 1d : wheelDelta);
-            return (int) ((-clamped) * 13d);
-        }
-    }
-
-    /**
-     * Clips a sliding page to the stationary viewport. The scissor follows the
-     * same pose transform LDLib uses for the recipe list, so the two nest.
-     */
-    private static final class StagePage extends WidgetGroup {
-        private final ShanhaiRecipeEditorPanel viewport;
-        private float slide;
-
-        private StagePage(ShanhaiRecipeEditorPanel viewport) {
-            super(0, PAGE_Y, viewport.getSizeWidth(), viewport.getSizeHeight() - PAGE_Y);
-            this.viewport = viewport;
-            setBackground(GuiTextures.BACKGROUND_INVERSE);
-        }
-
-        @Override
-        public void drawInBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
-            int x = viewport.getPositionX();
-            int y = viewport.getPositionY() + PAGE_Y;
-            int right = x + viewport.getSizeWidth();
-            int bottom = viewport.getPositionY() + viewport.getSizeHeight();
-            Matrix4f pose = graphics.pose().last().pose();
-            Vector4f min = pose.transform(new Vector4f(x, y, 0f, 1f));
-            Vector4f max = pose.transform(new Vector4f(right, bottom, 0f, 1f));
-            graphics.enableScissor((int) min.x, (int) min.y, (int) max.x, (int) max.y);
-            graphics.pose().pushPose();
-            graphics.pose().translate(slide, 0f, 0f);
-            super.drawInBackground(graphics, mouseX, mouseY, partialTicks);
-            graphics.pose().popPose();
-            graphics.disableScissor();
-        }
-    }
-
     private TextFieldWidget textField(int x, int y, int width, int height,
                                       java.util.function.Supplier<String> getter,
                                       java.util.function.Consumer<String> setter) {
         TextFieldWidget field = new TextFieldWidget(x, y, width, height, getter, setter)
                 .setMaxStringLength(256)
-                .setBackground(GuiTextures.DISPLAY);
+                .setBackground(GlassPanelTexture.display());
         field.setClientSideWidget();
         return field;
     }
@@ -999,26 +800,26 @@ public final class ShanhaiRecipeEditorPanel extends WidgetGroup implements IGhos
     private ButtonWidget modeButton(int x, int y, int width,
                                     ShanhaiRecipeQuery.SearchMode mode, String plain) {
         return new ButtonWidget(x, y, width, 16,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(() -> host.modeFace(mode, plain))),
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(() -> host.modeFace(mode, plain))),
                 click -> host.setSearchMode(mode));
     }
 
     private ButtonWidget kindButton(int x, int y, int width,
                                     ShanhaiRecipeQuery.IngredientKind kind, String plain) {
         return new ButtonWidget(x, y, width, 16,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(() -> host.kindFace(kind, plain))),
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(() -> host.kindFace(kind, plain))),
                 click -> host.setIngredientKind(kind));
     }
 
     private ButtonWidget sortButton(int x, int y, int width, String key, String plain) {
         return new ButtonWidget(x, y, width, 16,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(() -> host.sortFace(key, plain))),
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(() -> host.sortFace(key, plain))),
                 click -> host.setSort(key));
     }
 
     private ButtonWidget button(int x, int y, int width, int height, String text, Runnable action) {
         return new ButtonWidget(x, y, width, height,
-                new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture(text)),
+                new GuiTextureGroup(GlassPanelTexture.button(), new TextTexture(text)),
                 click -> {
                     if (action != null) action.run();
                 });

@@ -48,10 +48,16 @@ public final class ShanhaiRecipeEditorAnimation {
         return targetStage;
     }
 
-    public float progress(long nowMs) {
+    /** Elapsed share of the slide, 0..1, before any easing. Settled stages read 1. */
+    public float linear(long nowMs) {
         if (currentStage == targetStage) return 1.0f;
         long elapsed = Math.max(0L, nowMs - startedAt);
-        float linear = Math.min(1.0f, elapsed / (float) DURATION_MS);
+        return Math.min(1.0f, elapsed / (float) DURATION_MS);
+    }
+
+    public float progress(long nowMs) {
+        if (currentStage == targetStage) return 1.0f;
+        float linear = linear(nowMs);
         // Smoothstep removes the visible velocity jump at both ends of a page slide.
         return linear * linear * (3.0f - 2.0f * linear);
     }

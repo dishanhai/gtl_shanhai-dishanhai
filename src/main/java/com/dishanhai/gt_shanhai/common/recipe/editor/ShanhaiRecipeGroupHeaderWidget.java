@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -35,9 +36,10 @@ public final class ShanhaiRecipeGroupHeaderWidget extends Widget {
         graphics.pose().pushPose();
         graphics.pose().translate(0f, (1f - enter) * 8f, 0f);
         RenderSystem.setShaderColor(1f, 1f, 1f, 0.2f + 0.8f * enter);
-        graphics.fill(x, y, x + width, y + CH, 0xFF163044);
+        graphics.fill(x, y, x + width, y + CH, GlassPalette.GROUP_FILL);
+        graphics.fill(x, y, x + 2, y + CH, GlassPalette.ACCENT);
         var font = Minecraft.getInstance().font;
-        graphics.drawString(font, fit(font, title, width - 8), x + 4, y + 3, 0xFF9FD7FF, false);
+        graphics.drawString(font, fit(font, title, width - 8), x + 6, y + 3, GlassPalette.TEXT_HEAD, false);
         graphics.pose().popPose();
         RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
     }

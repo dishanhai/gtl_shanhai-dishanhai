@@ -142,4 +142,48 @@ class ShopMotionSourceTest {
         assertTrue(box.contains("GuiRenderUtil.scaleAt("));
         assertTrue(read(BASE + "scaled/GuiRenderUtil.java").contains("public static void scaleAt("));
     }
+
+    @Test
+    void currencyCenterMainInterfaceRunsOnTheSameFramework() throws Exception {
+        String atm = read(BASE + "shop/CurrencyAtmScreen.java");
+        String wheel = atm.substring(atm.indexOf("protected boolean universalMouseScrolled("),
+                atm.indexOf("private void cycleTarget("));
+        String button = atm.substring(atm.indexOf("private void drawButton("),
+                atm.indexOf("private void armTip("));
+        String list = atm.substring(atm.indexOf("private void drawList("),
+                atm.indexOf("private void armCurrencyTip("));
+        assertAll(
+                // 列表平滑滚动：显示值照旧给绘制和命中，滚轮只改目标
+                () -> assertTrue(atm.contains("private final Spring listScrollSpring = new Spring(Spring.SCROLL)")),
+                () -> assertTrue(atm.contains("private int scrollTarget")),
+                () -> assertTrue(atm.contains("private void snapListScroll(int value)")),
+                () -> assertTrue(atm.contains("private void advanceListScroll(long now)")),
+                () -> assertTrue(wheel.contains("scrollTarget = ")),
+                () -> assertFalse(wheel.contains("scroll = Math.max(0")),
+                // 初始定位到被悬停的币：直接到位，不滑
+                () -> assertTrue(atm.contains("snapListScroll(")),
+                // hover 渐变：行与按钮各一张表；按钮 key 不带会变的文案
+                () -> assertTrue(atm.contains("SpringTable<ResourceLocation> hoverRows = new SpringTable<>(Spring.HOVER)")),
+                () -> assertTrue(atm.contains("SpringTable<Long> hoverButtons = new SpringTable<>(Spring.HOVER)")),
+                () -> assertTrue(button.contains("hoverButtons.follow(")),
+                () -> assertTrue(button.contains("GuiMotion.lerpColor(")),
+                () -> assertFalse(button.contains("hashCode()")),
+                () -> assertTrue(list.contains("hoverRows.follow(")),
+                // 选中高亮块滑动 + 详情列切币淡入
+                () -> assertTrue(atm.contains("private final Spring selectIndicator = new Spring(Spring.INDICATOR)")),
+                () -> assertTrue(list.contains("selectIndicator.value()")),
+                () -> assertTrue(atm.contains("private final Spring detailFade")),
+                () -> assertTrue(atm.contains("detailFade.setTarget(1f")),
+                // 开场行错峰
+                () -> assertTrue(atm.contains("SpringTable<ResourceLocation> staggerRows = new SpringTable<>(Spring.STAGGER)")),
+                () -> assertTrue(atm.contains("private void startRowStagger(long now)")),
+                () -> assertTrue(list.contains("staggerRows.valueOr(")),
+                // 带透明度的绘制必须先 flush、finally 里还原
+                () -> assertTrue(atm.contains("g.setColor(1f, 1f, 1f, 1f)")),
+                // 逐帧推进 + 清扫
+                () -> assertTrue(atm.contains("advanceListScroll(nowMs)")),
+                () -> assertTrue(atm.contains("hoverRows.sweep(nowMs)")),
+                () -> assertTrue(atm.contains("hoverButtons.sweep(nowMs)"))
+        );
+    }
 }

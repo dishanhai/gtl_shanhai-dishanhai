@@ -15,7 +15,9 @@ import net.minecraftforge.client.event.ScreenEvent;
 import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * 商店内容区的局部高斯模糊。一帧最多两块矩形，共用同一条 {@link PostChain}，不另分配渲染目标。
@@ -68,6 +70,11 @@ public final class ShopGaussBlur {
     private static float[] requestRect;
     private static float[] requestHole;
     private static ShopGlassStyle requestGlass = ShopGlassStyle.OVERLAY;
+    /** 方向模糊的趟倍率：x = H 趟，y = V 趟。默认 (1,1) 等价各向同性；只属于主请求。 */
+    private static float requestAxisX = 1f;
+    private static float requestAxisY = 1f;
+    /** 商店以外的放行界面（如配方修改器）经 {@link #allowScreen} 登记；商店界面永远放行。 */
+    private static final List<Predicate<Screen>> SCREEN_GUARDS = new CopyOnWriteArrayList<>();
     /** 同一帧的第二块矩形。飞行时用来糊源卡片；新的主请求会把它清掉。 */
     private static boolean extraRequested;
     private static float extraStrength;
@@ -130,7 +137,7 @@ public final class ShopGaussBlur {
             try {
                 uniformFailed = !applyUniforms(post, 1f, BLUR_RADIUS_VIRTUAL,
                         new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f}, false, 0, NO_CELLS,
-                        NO_WAVE, ShopGlassStyle.NONE);
+                        NO_WAVE, 1f, 1f, ShopGlassStyle.NONE);
             } catch (Exception e) {
                 uniformFailed = true;
                 GTDishanhaiMod.LOGGER.error("商店高斯模糊 uniform 预检失败，已回退为局部磨砂", e);
@@ -160,6 +167,8 @@ public final class ShopGaussBlur {
                                int holeX, int holeY, int holeW, int holeH,
                                ShopGlassStyle glass) {
         // 新的主矩形取代上一块，避免飞行模糊和浮层模糊在同一帧叠两次。
+        requestAxisX = 1f;
+        requestAxisY = 1f;
         extraRequested = false;
         extraRect = null;
         extraHole = null;
@@ -340,6 +349,8 @@ public final class ShopGaussBlur {
         requested = false;
         requestSmooth = false;
         requestStrength = 0f;
+        requestAxisX = 1f;
+        requestAxisY = 1f;
         requestRadius = BLUR_RADIUS_VIRTUAL;
         requestRect = null;
         requestHole = null;
@@ -421,6 +432,8 @@ public final class ShopGaussBlur {
         float[] rect = requestRect;
         float[] hole = requestHole;
         ShopGlassStyle glass = requestGlass;
+        float axisX = requestAxisX;
+        float axisY = requestAxisY;
         boolean hadExtra = extraRequested;
         float strength2 = extraStrength;
         float radius2 = extraRadius;
@@ -439,7 +452,7 @@ public final class ShopGaussBlur {
         boolean primary = hadRequest && rect != null && strength > 0.01f;
         boolean extra = hadExtra && rect2 != null && strength2 > 0.01f;
         if (!primary && !extra && !hadWave) return;
-        if (!(event.getScreen() instanceof ShopScreen)) return;
+        if (!isAllowed(event.getScreen())) return;
         if (event.getGuiGraphics() != null) {
             event.getGuiGraphics().flush();
         }
@@ -448,17 +461,17 @@ public final class ShopGaussBlur {
         if (primary) {
             render(mc, strength, radius, rect,
                     hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, smooth, cells, cellUvSnapshot,
-                    NO_WAVE, glass, partialTick);
+                    NO_WAVE, axisX, axisY, glass, partialTick);
         }
         if (extra && isReady()) {
             render(mc, strength2, radius2, rect2,
                     hole2 == null ? new float[]{0f, 0f, 0f, 0f} : hole2, false, 0, NO_CELLS,
-                    NO_WAVE, glass2, partialTick);
+                    NO_WAVE, 1f, 1f, glass2, partialTick);
         }
         // 波放最后一趟：它要盖在飞行/浮层的模糊之上，否则点在商品格上会被飞行请求吃掉。
         if (hadWave && isReady()) {
             render(mc, waveStrength, waveRadius, waveRectCopy,
-                    new float[]{0f, 0f, 0f, 0f}, true, 0, NO_CELLS, wave, ShopGlassStyle.NONE, partialTick);
+                    new float[]{0f, 0f, 0f, 0f}, true, 0, NO_CELLS, wave, 1f, 1f, ShopGlassStyle.NONE, partialTick);
         }
     }
 
@@ -495,7 +508,8 @@ public final class ShopGaussBlur {
     private static void render(Minecraft mc, float strength, float radius,
                                float[] rect, float[] hole, boolean smooth,
                                int cells, float[] cellData,
-                               float[] wave, ShopGlassStyle glass, float partialTick) {
+                               float[] wave, float axisX, float axisY,
+                               ShopGlassStyle glass, float partialTick) {
         PostChain post = ensureChain(mc);
         if (post == null) return;
         if (mc.getMainRenderTarget() == null) return;
@@ -508,7 +522,7 @@ public final class ShopGaussBlur {
             chainHeight = fbH;
         }
         // 反射/着色器 uniform 任一不可用就整个跳过，绝不让 Rect 落回默认的全屏值。
-        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData, wave, glass)) {
+        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData, wave, axisX, axisY, glass)) {
             uniformFailed = true;
             return;
         }
@@ -551,6 +565,7 @@ public final class ShopGaussBlur {
     private static boolean applyUniforms(PostChain post, float strength, float radius,
                                          float[] rect, float[] hole, boolean smooth,
                                          int cells, float[] cellData, float[] wave,
+                                         float axisX, float axisY,
                                          ShopGlassStyle glass) {
         List<PostPass> passes = passesOf(post);
         if (passes.isEmpty()) return false;
@@ -573,7 +588,9 @@ public final class ShopGaussBlur {
             Uniform glassTintUniform = pass.getEffect().getUniform("GlassTint");
             Uniform glassParamsUniform = pass.getEffect().getUniform("GlassParams");
             Uniform glassEdgeUniform = pass.getEffect().getUniform("GlassEdge");
-            if (glassTintUniform == null || glassParamsUniform == null || glassEdgeUniform == null) {
+            Uniform motionAxisUniform = pass.getEffect().getUniform("MotionAxis");
+            if (glassTintUniform == null || glassParamsUniform == null || glassEdgeUniform == null
+                    || motionAxisUniform == null) {
                 allReady = false;
                 continue;
             }
@@ -596,6 +613,7 @@ public final class ShopGaussBlur {
             glassTintUniform.set(glassTint[0], glassTint[1], glassTint[2], glassTint[3]);
             glassParamsUniform.set(glassParams[0], glassParams[1], glassParams[2], glassParams[3]);
             glassEdgeUniform.set(glassEdge[0], glassEdge[1], glassEdge[2], glassEdge[3]);
+            motionAxisUniform.set(axisX, axisY, 0f, 0f);
             int n = cells > 1 && cellData != null ? Math.min(cells, MAX_CELL_RECTS) : 0;
             cellCountUniform.set(n);
             cellRectsUniform.set(n > 0 ? cellData : NO_CELLS);
@@ -660,6 +678,37 @@ public final class ShopGaussBlur {
             GTDishanhaiMod.LOGGER.error("商店高斯模糊加载失败，已回退为局部磨砂", e);
             return null;
         }
+    }
+
+    /**
+     * 登记一个放行界面的判定。商店界面永远放行；其他界面（如配方修改器）在客户端初始化时登记。
+     * 谓词在渲染线程里每个后处理事件被问一次，要保持廉价。
+     */
+    public static void allowScreen(Predicate<Screen> guard) {
+        if (guard != null) SCREEN_GUARDS.add(guard);
+    }
+
+    /** 这个界面的帧末后处理是否放行。 */
+    static boolean isAllowed(Screen screen) {
+        if (screen == null) return false;
+        if (screen instanceof ShopScreen) return true;
+        for (Predicate<Screen> guard : SCREEN_GUARDS) {
+            if (guard.test(screen)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 方向模糊：走密采样高斯，再给主请求记下 H / V 两趟的半径倍率。
+     * {@code axisX=1, axisY=0} 只糊水平方向，给水平滑动的页面；{@code (1,1)} 等价 {@link #requestSmooth}。
+     */
+    public static void requestDirectional(int x, int y, int w, int h, float strength,
+                                          float radiusPixels, float axisX, float axisY,
+                                          ShopGlassStyle glass) {
+        requestSmooth(x, y, w, h, strength, radiusPixels, 0, 0, 0, 0, glass);
+        if (!requested) return;
+        requestAxisX = clamp01(axisX);
+        requestAxisY = clamp01(axisY);
     }
 
     private static float clamp01(float value) {

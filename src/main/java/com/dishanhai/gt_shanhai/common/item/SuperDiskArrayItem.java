@@ -81,6 +81,9 @@ public class SuperDiskArrayItem extends PortableCellItem {
             tooltips.add(Component.literal("§7含 §d" + vc + " §7个虚拟磁盘单元"));
         }
         tooltips.add(Component.literal("§8可染色 — 右击染料改变颜色"));
+        CompoundTag uuidTag = stack.getTag();
+        tooltips.add(Component.literal("§7UUID: §f" + SuperDiskArrayInventory.resolveDisplayUuid(uuidTag)
+                + (SuperDiskArrayInventory.hasRealUuid(uuidTag) ? "" : " §8(模板)")));
         tooltips.add(Component.literal(""));
         super.appendHoverText(stack, level, tooltips, flag);
     }

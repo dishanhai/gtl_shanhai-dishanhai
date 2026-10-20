@@ -1,7 +1,7 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
-import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPanelTexture;
 import com.lowdragmc.lowdraglib.LDLib;
 import com.lowdragmc.lowdraglib.gui.factory.UIFactory;
 import com.lowdragmc.lowdraglib.gui.modular.IUIHolder;
@@ -61,7 +61,7 @@ public final class ShanhaiRecipeEditorFactory extends UIFactory<ShanhaiRecipeEdi
             ShanhaiRecipeEditorFactory holder, Player player) {
         return new ModularUI(ShanhaiRecipeEditorWidget.WIDTH, ShanhaiRecipeEditorWidget.HEIGHT, holder, player)
                 .widget(new ShanhaiRecipeEditorWidget(player))
-                .background(GuiTextures.BACKGROUND);
+                .background(GlassPanelTexture.root());
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
+import com.dishanhai.gt_shanhai.client.gui.scaled.SpringTable;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyRateConfig;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyStageConfig;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
@@ -27,6 +28,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 货币中心（ATM 子页面，客户端）。从 {@link ShopScreen} 顶栏「货币中心」按钮唤起，
@@ -73,7 +75,9 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private boolean ratesLoadedOnce; // 打开后只读一次盘（initScaled 每次 resize 都重跑，见其注释）
     private long amount = 1L;
     private AnimatableEditBox amountBox;
-    private int scroll = 0;
+    private int scroll = 0;        // 列表滚动像素（显示值：画、命中都读它；目标见 scrollTarget）
+    private int scrollTarget = 0;  // 滚轮改它，listScrollSpring 追它
+    private final Spring listScrollSpring = new Spring(Spring.SCROLL);
 
     // AE 网络余额预览往返节流状态（见 maybeRequestAeBalance）
     private long aeBalanceRequestedAtGameTime = Long.MIN_VALUE;
@@ -81,16 +85,36 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private int left, top, panelWidth, panelHeight;
 
     private final Spring openMotion = Spring.opening(Spring.PANEL);
+    // 主界面动效（同 ShopScreen 的一套弹簧）：行 / 按钮 hover 渐变、选中高亮块滑动、详情列切币淡入、开场行错峰
+    private static final long STAGGER_STEP_MS = 16L;
+    private static final long STAGGER_MAX_DELAY_MS = 240L;
+    private static final long STAGGER_TAIL_MS = 450L;
+    private static final float ROW_SLIDE_PX = 8f;
+    private static final float DETAIL_FADE_FROM = 0.45f;
+    private static final long FLASH_FADE_OUT_MS = 300L;
+    private static final float FLASH_RISE_PX = 8f;
+    private final SpringTable<ResourceLocation> hoverRows = new SpringTable<>(Spring.HOVER);
+    private final SpringTable<Long> hoverButtons = new SpringTable<>(Spring.HOVER);
+    private final SpringTable<ResourceLocation> staggerRows = new SpringTable<>(Spring.STAGGER);
+    private boolean pendingStagger = true;   // 开屏触发一次
+    private long staggerUntilMs;
+    private final Spring selectIndicator = new Spring(Spring.INDICATOR); // 选中行在列表内容坐标里的 Y（像素）
+    private boolean selectIndicatorReady;
+    private final Spring detailFade = new Spring(Spring.STAGGER, 1f);
+    private ResourceLocation detailShown;
+    private boolean detailShownReady;
     private List<Component> hoverTip;     // 本帧悬停到的操作说明，renderTooltips 消费
 
     private static String flashText;      // 含 § 颜色码，与聊天框一致
     private static long flashUntil;       // System.currentTimeMillis() 到期时刻
+    private static long flashAtMs;        // 横幅出现时刻，淡入上浮用
 
     /** 把带 [货币中心] 前缀的系统消息镜像进本屏底部横幅（见 {@link ShopChatMirror}）。 */
     public static void showMessage(Component msg) {
         if (msg == null) return;
         flashText = msg.getString();
-        flashUntil = System.currentTimeMillis() + 5000L;
+        flashAtMs = System.currentTimeMillis();
+        flashUntil = flashAtMs + 5000L;
     }
 
     public CurrencyAtmScreen(ShopScreen parent) {
@@ -162,9 +186,65 @@ public class CurrencyAtmScreen extends ScaledScreen {
         if (idx < 0) return;
         selected = currencies.get(idx);
         targetIdx = currencies.size() > 1 ? firstDifferent(idx) : -1;
-        int contentH = currencies.size() * ROW_H + 4;
-        int maxScroll = Math.max(0, contentH - listHeight());
-        scroll = Math.max(0, Math.min(maxScroll, idx * ROW_H));
+        snapListScroll(Math.max(0, Math.min(maxListScroll(), idx * ROW_H)));
+    }
+
+    private int maxListScroll() {
+        return Math.max(0, currencies.size() * ROW_H + 4 - listHeight());
+    }
+
+    /** 上下文变了（初始定位到被悬停的币）：目标和显示值一起到位，不滑。 */
+    private void snapListScroll(int value) {
+        scroll = value;
+        scrollTarget = value;
+        listScrollSpring.snap(value);
+    }
+
+    /** 每帧开头：目标夹进合法范围，弹簧追目标，显示值取整（整像素，和行坐标同口径）。 */
+    private void advanceListScroll(long now) {
+        int max = maxListScroll();
+        scrollTarget = Math.max(0, Math.min(max, scrollTarget));
+        if (listScrollSpring.target() != scrollTarget) listScrollSpring.setTarget(scrollTarget, now);
+        listScrollSpring.update(now);
+        scroll = Math.max(0, Math.min(max, Math.round(listScrollSpring.value())));
+    }
+
+    /** 选中高亮块追着选中行滑；第一次直接到位，不从 0 滑下来。选中行不在列表里时保持不动。 */
+    private void advanceSelectIndicator(long now) {
+        int idx = selected == null ? -1 : currencies.indexOf(selected);
+        if (idx < 0) return;
+        float want = idx * ROW_H;
+        if (!selectIndicatorReady) {
+            selectIndicator.snap(want);
+            selectIndicatorReady = true;
+        } else if (selectIndicator.target() != want) {
+            selectIndicator.setTarget(want, now);
+        }
+        selectIndicator.update(now);
+    }
+
+    /** 详情列换币（含开屏第一帧）时重新淡入：开屏从 0 起，换币只从半透明起，免得每次切换都闪一下空白。 */
+    private void advanceDetailFade(long now) {
+        if (!detailShownReady || !Objects.equals(detailShown, selected)) {
+            detailFade.snap(detailShownReady ? DETAIL_FADE_FROM : 0f);
+            detailFade.setTarget(1f, now);
+            detailShown = selected;
+            detailShownReady = true;
+        }
+        detailFade.update(now);
+    }
+
+    /** 开屏错峰：当前可见的每一行建一根 STAGGER 弹簧，按行序错开延迟后从 0 走向 1。 */
+    private void startRowStagger(long now) {
+        staggerRows.clear();
+        int ly = listTop(), lh = listHeight();
+        int n = 0;
+        for (int i = 0; i < currencies.size(); i++) {
+            int ry = ly + 2 + i * ROW_H - scroll;
+            if (ry + ROW_H <= ly || ry >= ly + lh) continue;
+            staggerRows.start(currencies.get(i), 0f, 1f, now, Math.min(STAGGER_MAX_DELAY_MS, n++ * STAGGER_STEP_MS));
+        }
+        staggerUntilMs = now + STAGGER_MAX_DELAY_MS + STAGGER_TAIL_MS;
     }
 
     /** 从 start 起找第一个与 selected 不同的币下标（兑换目标）。 */
@@ -179,7 +259,21 @@ public class CurrencyAtmScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
-        openMotion.update(System.currentTimeMillis());
+        long nowMs = System.currentTimeMillis();
+        openMotion.update(nowMs);
+        advanceListScroll(nowMs);
+        advanceSelectIndicator(nowMs);
+        advanceDetailFade(nowMs);
+        hoverRows.sweep(nowMs);
+        hoverButtons.sweep(nowMs);
+        if (pendingStagger && !currencies.isEmpty()) {
+            startRowStagger(nowMs);
+            pendingStagger = false;
+        }
+        if (staggerUntilMs > 0L && nowMs >= staggerUntilMs) {
+            staggerRows.clear();
+            staggerUntilMs = 0L;
+        }
         float openScale = GuiMotion.panelScale(openMotion.value());
         if (amountBox != null) {
             amountBox.setVisible(selected != null);
@@ -226,21 +320,52 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
         drawList(g, mx, my);
         drawOperationHints(g);
-        // 详情列一直在。换币种只换文字，不再次缩放。
-        drawDetail(g, mx, my);
+        // 详情列一直在。换币种只换文字，不再次缩放，只做一次淡入（amountBox 是控件，不跟着淡）。
+        float df = GuiMotion.clamp01(detailFade.value());
+        boolean detailFading = df < 0.999f;
+        if (detailFading) {
+            g.flush();
+            g.setColor(1f, 1f, 1f, df);
+        }
+        try {
+            drawDetail(g, mx, my);
+        } finally {
+            if (detailFading) {
+                g.flush();
+                g.setColor(1f, 1f, 1f, 1f);
+            }
+        }
 
         // 底部实时反馈横幅（[货币中心] 系统消息经 ShopChatMirror 镜像至此，聊天框仍保留）
-        if (flashText != null && System.currentTimeMillis() < flashUntil) {
+        long flashNow = System.currentTimeMillis();
+        if (flashText != null && flashNow < flashUntil) {
             // drawList/drawDetail 里的物品图标走 GuiGraphics 缓冲渲染层，不强制 flush 会在批次刷新时
             // "跳"到横幅上层盖住文字，同 ShopScreen 商店横幅一致的成因，见其对应注释。
             g.flush();
-            int flashW = this.font.width(flashText);
-            int bannerW = Math.min(panelWidth - 12, flashW + 16);
-            int bannerX = left + (panelWidth - bannerW) / 2;
-            int bannerY = top + panelHeight - 24;
-            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 16, 0xE0101010);
-            g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 1, 0xFF00C0C0);
-            g.drawCenteredString(this.font, flashText, left + panelWidth / 2, bannerY + 4, 0xFFFFFF);
+            // 出现时淡入并上浮，到期前最后 FLASH_FADE_OUT_MS 淡出
+            float rise = GuiRenderUtil.easeOut(GuiRenderUtil.popAnimProgress(flashAtMs, GuiRenderUtil.MOTION_MS));
+            float alpha = Math.min(rise, GuiMotion.clamp01((flashUntil - flashNow) / (float) FLASH_FADE_OUT_MS));
+            boolean flashAnimating = alpha < 0.999f;
+            if (flashAnimating) {
+                g.pose().pushPose();
+                g.pose().translate(0f, FLASH_RISE_PX * (1f - rise), 0f);
+                g.setColor(1f, 1f, 1f, alpha);
+            }
+            try {
+                int flashW = this.font.width(flashText);
+                int bannerW = Math.min(panelWidth - 12, flashW + 16);
+                int bannerX = left + (panelWidth - bannerW) / 2;
+                int bannerY = top + panelHeight - 24;
+                g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 16, 0xE0101010);
+                g.fill(bannerX, bannerY, bannerX + bannerW, bannerY + 1, 0xFF00C0C0);
+                g.drawCenteredString(this.font, flashText, left + panelWidth / 2, bannerY + 4, 0xFFFFFF);
+            } finally {
+                if (flashAnimating) {
+                    g.flush();
+                    g.setColor(1f, 1f, 1f, 1f);
+                    g.pose().popPose();
+                }
+            }
         }
     }
 
@@ -254,33 +379,62 @@ public class CurrencyAtmScreen extends ScaledScreen {
         g.enableScissor(
                 (int) (lx * guiScale) + offsetX, (int) (ly * guiScale) + offsetY,
                 (int) ((lx + lw) * guiScale) + offsetX, (int) ((ly + lh) * guiScale) + offsetY);
+        long now = System.currentTimeMillis();
+        // 选中高亮块：滑到选中行；开屏错峰期间随选中行的入场进度淡入，免得行还没浮出来金块先亮着
+        if (selected != null && selectIndicatorReady) {
+            int by = ly + 2 + Math.round(selectIndicator.value()) - scroll;
+            float showA = staggerRows.valueOr(selected, 1f, now);
+            g.fill(lx + 1, by, lx + lw - 1, by + ROW_H - 1,
+                    GuiMotion.lerpColor(SELECT_BG & 0x00FFFFFF, SELECT_BG, showA));
+        }
         for (int i = 0; i < currencies.size(); i++) {
             ResourceLocation cur = currencies.get(i);
             int ry = ly + 2 + i * ROW_H - scroll;
             if (ry + ROW_H <= ly || ry >= ly + lh) continue;
-            boolean sel = cur.equals(selected);
+            // 选中程度：高亮块压在这一行上的比例（0~1），文字色和 hover 底随它过渡
+            float selAmt = selectIndicatorReady
+                    ? GuiMotion.clamp01(1f - Math.abs(selectIndicator.value() - i * ROW_H) / ROW_H) : 0f;
             boolean hover = GuiRenderUtil.isHovering(mx, my, lx + 1, ry, lw - 2, ROW_H - 1);
-            g.fill(lx + 1, ry, lx + lw - 1, ry + ROW_H - 1, sel ? SELECT_BG : (hover ? ROW_BG : 0));
-            Item item = ForgeRegistries.ITEMS.getValue(cur);
-            if (item != null) g.renderItem(new ItemStack(item), lx + 3, ry + 1);
-            String badge = stageBadge(cur);
-            int badgeW = badge.isEmpty() ? 0 : this.font.width(badge) + 4;
-            String name = GuiRenderUtil.trimText(this.font, ShopPurchase.coinName(cur), lw - 28 - badgeW);
-            g.drawString(this.font, name, lx + 22, ry + 2, sel ? GOLD : WHITE, true);
-            if (!badge.isEmpty()) {
-                g.drawString(this.font, badge, lx + lw - 5 - this.font.width(badge), ry + 2, GRAY, true);
+            float hv = hoverRows.follow(cur, hover ? 1f : 0f, now) * (1f - selAmt);
+            // 开屏错峰：没登记的行（滚动新露出的）按已到位处理，滚动不触发错峰
+            float sv = staggerRows.valueOr(cur, 1f, now);
+            boolean staggered = sv < 0.999f;
+            if (staggered) {
+                g.flush();
+                g.pose().pushPose();
+                g.pose().translate(-ROW_SLIDE_PX * (1f - GuiMotion.clamp01(sv)), 0f, 0f);
+                g.setColor(1f, 1f, 1f, GuiMotion.clamp01(sv));
             }
-            BigInteger bal = ClientWalletAccount.getCurrency(cur);
-            Long aeBal = ClientAeCurrencyBalance.get(cur);
-            String balanceLabel = "§7钱包 §e" + formatBig(bal);
-            if (aeBal != null) {
-                balanceLabel += " §bAE §e" + formatBig(BigInteger.valueOf(aeBal));
-            } else {
-                balanceLabel += " §8AE …";
+            try {
+                g.fill(lx + 1, ry, lx + lw - 1, ry + ROW_H - 1,
+                        GuiMotion.lerpColor(ROW_BG & 0x00FFFFFF, ROW_BG, hv));
+                Item item = ForgeRegistries.ITEMS.getValue(cur);
+                if (item != null) g.renderItem(new ItemStack(item), lx + 3, ry + 1);
+                String badge = stageBadge(cur);
+                int badgeW = badge.isEmpty() ? 0 : this.font.width(badge) + 4;
+                String name = GuiRenderUtil.trimText(this.font, ShopPurchase.coinName(cur), lw - 28 - badgeW);
+                g.drawString(this.font, name, lx + 22, ry + 2, GuiMotion.lerpColor(WHITE, GOLD, selAmt), true);
+                if (!badge.isEmpty()) {
+                    g.drawString(this.font, badge, lx + lw - 5 - this.font.width(badge), ry + 2, GRAY, true);
+                }
+                BigInteger bal = ClientWalletAccount.getCurrency(cur);
+                Long aeBal = ClientAeCurrencyBalance.get(cur);
+                String balanceLabel = "§7钱包 §e" + formatBig(bal);
+                if (aeBal != null) {
+                    balanceLabel += " §bAE §e" + formatBig(BigInteger.valueOf(aeBal));
+                } else {
+                    balanceLabel += " §8AE …";
+                }
+                g.drawString(this.font, GuiRenderUtil.trimText(this.font, balanceLabel, lw - 28),
+                        lx + 22, ry + 11, GRAY, true);
+                armCurrencyTip(mx, my, lx + 1, ry, lw - 2, ROW_H - 1, cur, bal, aeBal);
+            } finally {
+                if (staggered) {
+                    g.flush();
+                    g.setColor(1f, 1f, 1f, 1f);
+                    g.pose().popPose();
+                }
             }
-            g.drawString(this.font, GuiRenderUtil.trimText(this.font, balanceLabel, lw - 28),
-                    lx + 22, ry + 11, GRAY, true);
-            armCurrencyTip(mx, my, lx + 1, ry, lw - 2, ROW_H - 1, cur, bal, aeBal);
         }
         g.disableScissor();
     }
@@ -773,9 +927,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
     protected boolean universalMouseScrolled(double mx, double my, double delta) {
         int lx = listLeft(), ly = listTop(), lw = LIST_W, lh = listHeight();
         if (GuiRenderUtil.isHovering(mx, my, lx, ly, lw, lh)) {
-            int contentH = currencies.size() * ROW_H + 4;
-            int maxScroll = Math.max(0, contentH - lh);
-            scroll = Math.max(0, Math.min(maxScroll, scroll - (int) (delta * ROW_H)));
+            scrollTarget = Math.max(0, Math.min(maxListScroll(), scrollTarget - (int) (delta * ROW_H)));
             return true;
         }
         return super.universalMouseScrolled(mx, my, delta);
@@ -863,10 +1015,16 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private void drawButton(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my,
                             String tipTitle, String tipBody) {
         boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
-        g.fill(x, y, x + w, y + h, GOLD_DARK);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hover ? BTN_HOVER : BTN_BG);
+        // key 只用位置：标签里带数量、余额，会逐帧变，拿它做 key 会让 hover 弹簧每次归零
+        float hv = hoverButtons.follow(widgetKey(x, y), hover ? 1f : 0f, System.currentTimeMillis());
+        g.fill(x, y, x + w, y + h, GuiMotion.lerpColor(GOLD_DARK, GOLD, hv));
+        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, GuiMotion.lerpColor(BTN_BG, BTN_HOVER, hv));
         g.drawCenteredString(this.font, label, x + w / 2, y + (h - 8) / 2, WHITE);
         if (tipTitle != null) armTip(mx, my, x, y, w, h, tipTitle, tipBody);
+    }
+
+    private static long widgetKey(int x, int y) {
+        return ((long) x << 32) ^ (y & 0xFFFFFFFFL);
     }
 
     private void armTip(int mx, int my, int x, int y, int w, int h, String title, String body) {

@@ -76,6 +76,10 @@ public class ClientInit {
         // 商店内容区局部高斯模糊：在 Screen.render 之后对 main 做后处理。
         MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
                 com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur::onScreenRenderPost);
+        // 配方修改器借用同一条模糊管线：登记放行谓词，并在编辑器界面关闭时收掉残留请求。
+        com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur.install();
+        MinecraftForge.EVENT_BUS.addListener(
+                com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur::onScreenClosing);
         com.dishanhai.gt_shanhai.client.recipe.ShanhaiRecipeStackPicker.install();
     }
 

@@ -12,6 +12,8 @@ class RecipeEditorUiSourceTest {
 
     private static final Path JAVA_ROOT =
             Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai");
+    private static final Path KOTLIN_ROOT =
+            Path.of("src", "main", "kotlin", "com", "dishanhai", "gt_shanhai");
 
     @Test
     void layeredEditorContainsFactoryWidgetAndAnimationContract() throws IOException {
@@ -48,8 +50,8 @@ class RecipeEditorUiSourceTest {
                 "common", "recipe", "editor", "ShanhaiRecipeEditorPanel.java")));
         String ioWidget = Files.readString(JAVA_ROOT.resolve(Path.of(
                 "common", "recipe", "editor", "ShanhaiIOWidget.java")));
-        String card = Files.readString(JAVA_ROOT.resolve(Path.of(
-                "common", "recipe", "editor", "ShanhaiRecipeCardWidget.java")));
+        String card = Files.readString(KOTLIN_ROOT.resolve(Path.of(
+                "common", "recipe", "editor", "ShanhaiRecipeCardWidget.kt")));
         assertTrue(panel.contains("IGhostIngredientTarget"));
         assertTrue(panel.contains("ShanhaiQuerySlotWidget"));
         assertTrue(panel.contains("ShanhaiRecipeTabBarWidget"));

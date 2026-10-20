@@ -14,7 +14,8 @@ import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPanelTexture;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SelectorWidget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
@@ -154,10 +155,10 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     }
 
     private SelectorWidget createTypeSelector() {
-        SelectorWidget selector = new ShanhaiRecipeTypeSelector(4, 30, 496, 18, List.of(), 0xFF1A1A1A)
-                .setButtonBackground(GuiTextures.VANILLA_BUTTON)
-                .setBackground(GuiTextures.BACKGROUND)
-                .setFontColor(0xFF1A1A1A)
+        SelectorWidget selector = new ShanhaiRecipeTypeSelector(4, 30, 496, 18, List.of(), GlassPalette.TEXT)
+                .setButtonBackground(GlassPanelTexture.button())
+                .setBackground(GlassPanelTexture.panel())
+                .setFontColor(GlassPalette.TEXT)
                 .setMaxCount(8)
                 .setCandidatesSupplier(() -> List.copyOf(machineTypeNames))
                 .setSupplier(() -> {

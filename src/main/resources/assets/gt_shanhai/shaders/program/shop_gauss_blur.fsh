@@ -27,6 +27,7 @@ uniform float WaveGlow;        // 波峰高光强度 0..1
 uniform vec4 GlassTint;        // rgb = 色调，a = 混合量
 uniform vec4 GlassParams;      // x = 饱和度增量，y = 颗粒幅度，z = 提亮，w = 亮边强度
 uniform vec4 GlassEdge;        // x = 边缘折射 px，y = 亮边宽 px，z = Hole 阴影半径 px，w = Hole 阴影强度
+uniform vec4 MotionAxis;       // x = 第一趟（H）半径倍率，y = 第二趟（V）半径倍率；默认 (1,1)，水平滑动用 (1,0)，zw 保留为 0
 uniform vec4 Rect;   // xy = 左下角 UV，zw = 右上角 UV
 uniform vec4 Hole;   // 正在飞行的卡片或浮层矩形，保持清晰
 // PostChain 的 float uniform 走 glUniform1fv，所以这里是 8 个矩形 × 4 分量，不是 vec4[8]。
@@ -173,6 +174,9 @@ void main() {
         return;
     }
 
+    // 方向模糊：按趟缩放半径。放在上面的提前返回之后，所以 V 趟半径被压成 0 时玻璃层照常执行。
+    float axisRadius = radius * (firstPass ? MotionAxis.x : MotionAxis.y);
+
     // ── 玻璃边缘：到 box 四边的像素距离，以及指向内侧的合成方向 ──────────────
     float rimW = max(GlassEdge.y, 1.0);
     vec2 toLo = (uv - lo) * InSize;
@@ -186,12 +190,12 @@ void main() {
     }
 
     vec3 rgb;
-    if (radius < 0.5) {
+    if (axisRadius < 0.5) {
         rgb = texture(DiffuseSampler, clamp(baseUv, lo, hi)).rgb;
     } else if (Smooth > 0.5) {
         // 文字背后要连续的高斯，步长细到 radius/10。
-        float stepPx = max(1.0, radius / 10.0);
-        float sigma = max(radius / 2.5, stepPx);
+        float stepPx = max(1.0, axisRadius / 10.0);
+        float sigma = max(axisRadius / 2.5, stepPx);
         vec2 step = BlurDir * oneTexel * stepPx;
         vec4 sum = texture(DiffuseSampler, clamp(baseUv, lo, hi));
         float wsum = 1.0;
@@ -206,7 +210,7 @@ void main() {
     } else {
         // σ = 2·radius，步长 = radius = σ/2，13 点覆盖 ±3σ。步长不超过 σ/2，高斯没有可见重影。
         // 采样坐标夹在面板内部，避免把左侧网格/边框的颜色吸进面板边缘。
-        vec2 step = BlurDir * oneTexel * radius;
+        vec2 step = BlurDir * oneTexel * axisRadius;
         vec4 sum = texture(DiffuseSampler, clamp(baseUv, lo, hi));
         float wsum = 1.0;
         for (int i = 1; i <= 6; i++) {

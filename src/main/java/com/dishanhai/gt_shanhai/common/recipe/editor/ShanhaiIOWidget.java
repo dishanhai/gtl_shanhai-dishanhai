@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.common.recipe.editor;
 
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassCell;
 import com.lowdragmc.lowdraglib.gui.ingredient.IGhostIngredientTarget;
 import com.lowdragmc.lowdraglib.gui.ingredient.Target;
 import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
@@ -185,14 +186,8 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         int x = getPositionX();
         int y = getPositionY();
         float strength = selected.getAsBoolean() ? (float) accent.getAsDouble() : 0f;
-        if (strength > 0.02f) {
-            int alpha = Math.min(255, Math.round(255f * strength));
-            int inset = Math.round((1f - strength) * 3f);
-            graphics.fill(x - 1 + inset, y - 1 + inset, x + CELL + 1 - inset, y + CELL + 1 - inset,
-                    (alpha << 24) | 0x0069E8FF);
-        }
-        graphics.fill(x, y, x + CELL, y + CELL, current.itemKind ? FRAME_ITEM : FRAME_FLUID);
-        graphics.fill(x + 1, y + 1, x + CELL - 1, y + CELL - 1, 0xFF272A35);
+        GlassCell.draw(graphics, x, y, CELL, current.itemKind ? FRAME_ITEM : FRAME_FLUID,
+                strength, isMouseOverElement(mouseX, mouseY));
         if (current.itemKind && !current.item.isEmpty()) {
             new ItemStackTexture(current.item).draw(graphics, mouseX, mouseY, x + 2, y + 2, 16, 16);
             graphics.renderItemDecorations(Minecraft.getInstance().font, current.item, x + 2, y + 2);
