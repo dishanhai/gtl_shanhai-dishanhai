@@ -233,6 +233,20 @@ public class ShopScreen extends ScaledScreen {
     private static final float FLASH_ENTER_FROM = -1.18f;
     /** 分组切页在 32px 基线滑入上再走的同向距离。仍是一条横向通道，不叠缩放。 */
     private static final float GROUP_SLIDE_EXTRA = 24f;
+    /**
+     * 按键按下：液态玻璃波从点击点向外扩。
+     * 光靠高斯糊不动纯色面板，所以这条动效由三层叠成：
+     * ① 波峰处的径向折射位移（画面被推开）、② 圆盘内的透镜放大、③ 波峰高光。
+     * 后两层在 shader 里做；③ 再叠一条 GUI 直绘的亮环兜底，shader 不可用时也看得见。
+     */
+    private static final float CLICK_WAVE_FROM_PX = 6f;
+    private static final float CLICK_WAVE_TO_PX = 46f;
+    /** 波峰厚度（虚拟像素）。太薄看不出来，太厚会糊成一团。 */
+    private static final float CLICK_WAVE_BAND_PX = 9f;
+    private static final long CLICK_WAVE_MS = 240L;
+    private long clickWaveAtMs;
+    private int clickWaveX;
+    private int clickWaveY;
 
     /** 由 {@link ShopChatMirror} 调用：推入一条商店消息，最多同时显示 {@link #FLASH_MAX_VISIBLE} 条。 */
     public static void showMessage(net.minecraft.network.chat.Component msg) {
@@ -835,6 +849,7 @@ public class ShopScreen extends ScaledScreen {
         if (level > 0) {
             int aw = Math.max(30, this.font.width("全部") + 10);
             if (hit(mx, my, x, y, aw, TAB_H)) {
+                armClickWave(mx, my);
                 beginTabAction(level, "", mx, my);
                 return true;
             }
@@ -844,6 +859,7 @@ public class ShopScreen extends ScaledScreen {
             int tw = Math.max(30, this.font.width(item) + 10);
             if (x + tw > tabsRight) break;
             if (hit(mx, my, x, y, tw, TAB_H)) {
+                armClickWave(mx, my);
                 if (btn == 1 && canEdit) {
                     String parentPath = rowOrderParentPath(level);
                     String stagePath = parentPath.isEmpty() ? item : parentPath + "/" + item;
@@ -1586,6 +1602,12 @@ public class ShopScreen extends ScaledScreen {
     /** 前景层（盖住所有控件）：描述详情大图层，FTBQ 风格全屏遮罩 + 居中面板 + 自动换行长文本，超出可视高度可滚动。 */
     @Override
     protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
+        drawShopForeground(g, mx, my, pt);
+        // 前景层全部画完再叠点击波：亮环要在最上面，后处理请求也必须是本帧最后一条。
+        requestClickWave(g);
+    }
+
+    private void drawShopForeground(GuiGraphics g, int mx, int my, float pt) {
         // 卡片飞行层画在所有基础控件（搜索框/数量框）之后、各种大图层之前：
         // 这样遮罩能一起压住输入框，模拟附近界面失焦；购物车/详情大图层仍可盖在它上面。
         renderCardFlight(g);
@@ -1610,7 +1632,7 @@ public class ShopScreen extends ScaledScreen {
         }
         if (cartOverlayOpen) {
             int[] cr = cartOverlayBounds();
-            openBlurredOverlay(g, cartOverlayOpenAtMs, cr[0], cr[1], cr[2], cr[3], () -> renderCartOverlay(g, mx, my));
+            openSmoothTextOverlay(g, cartOverlayOpenAtMs, cr[0], cr[1], cr[2], cr[3], () -> renderCartOverlay(g, mx, my));
             return;
         }
         if (!descOverlayOpen || selected == null) return;
@@ -2165,6 +2187,7 @@ public class ShopScreen extends ScaledScreen {
         int ox = r[0], oy = r[1], ow = r[2], oh = r[3];
         int closeX = ox + ow - DESC_OVERLAY_CLOSE_W - 4, closeY = oy + 4;
         if (!hit(mx, my, ox, oy, ow, oh) || hit(mx, my, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+            if (hit(mx, my, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) armClickWave(mx, my);
             cartOverlayOpen = false;
             // 结算结果不因关闭面板清掉——玩家结算后经常会先切出去看聊天栏/背包再切回来看结果，
             // 批次要撑到下一次点「结算购物车」才被替换（见反馈：关了一下再打开就看不到回执了）
@@ -2186,17 +2209,17 @@ public class ShopScreen extends ScaledScreen {
                 String stableId = stableIds.get(idx);
                 if (cartRowSettledSuccess(stableId)) continue; // 该行画的是成功戳记，不是数量步进/删除，不接受这块点击
                 int ry = rowY0 + i * CART_ROW_H;
-                if (hit(mx, my, minusX, ry, CART_STEP_W, CART_ROW_H - 2)) {
+                if (buttonHit(mx, my, minusX, ry, CART_STEP_W, CART_ROW_H - 2)) {
                     long cur = cartMap.getOrDefault(stableId, 1L);
                     ClientShopCart.setAmount(stableId, Math.max(1L, cur - step));
                     return true;
                 }
-                if (hit(mx, my, plusX, ry, CART_STEP_W, CART_ROW_H - 2)) {
+                if (buttonHit(mx, my, plusX, ry, CART_STEP_W, CART_ROW_H - 2)) {
                     long cur = cartMap.getOrDefault(stableId, 1L);
                     ClientShopCart.setAmount(stableId, addClamp(cur, step));
                     return true;
                 }
-                if (hit(mx, my, removeX, ry, CART_REMOVE_W, CART_ROW_H - 2)) {
+                if (buttonHit(mx, my, removeX, ry, CART_REMOVE_W, CART_ROW_H - 2)) {
                     ClientShopCart.remove(stableId);
                     return true;
                 }
@@ -2205,7 +2228,7 @@ public class ShopScreen extends ScaledScreen {
         int settleW = CART_SETTLE_BTN_W, settleX = ox + ow - 8 - settleW, settleY = oy + oh - CART_SETTLE_BTN_H - 2;
         int[] progress = cartBatchProgress();
         boolean settling = progress[1] > 0 && progress[0] < progress[1];
-        if (!settling && hit(mx, my, settleX, settleY, settleW, CART_SETTLE_BTN_H)) {
+        if (!settling && buttonHit(mx, my, settleX, settleY, settleW, CART_SETTLE_BTN_H)) {
             cartSettleBatch.clear();
             cartSettleBatchStartedAtMs = System.currentTimeMillis();
             int fired = 0;
@@ -3711,6 +3734,7 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     public void onClose() {
+        clickWaveAtMs = 0L;
         ShopStageBlur.clear();
         ShopGaussBlur.clear();
         super.onClose();
@@ -3741,14 +3765,14 @@ public class ShopScreen extends ScaledScreen {
             return handleCartOverlayClick(mx, my);
         }
         if (stageLockActive && hit(mx, my, listLeft(), contentTop(), detailX() + DETAIL_W - listLeft(), contentHeight())) {
-            if (stageLockAutoCraftVisible && hit(mx, my, stageLockAutoCraftX, stageLockAutoCraftY,
+            if (stageLockAutoCraftVisible && buttonHit(mx, my, stageLockAutoCraftX, stageLockAutoCraftY,
                     stageLockAutoCraftW, stageLockAutoCraftH) && stageLockPath != null) {
                 ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
                         com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.Target.STAGE,
                         0L, -1L, 1L, stageLockPath, aeMode));
                 return true;
             }
-            if (hit(mx, my, stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH)
+            if (buttonHit(mx, my, stageLockSubmitX, stageLockSubmitY, stageLockSubmitW, stageLockSubmitH)
                     && stageLockPath != null) {
                 ShanhaiNetwork.CHANNEL.sendToServer(
                         new com.dishanhai.gt_shanhai.network.ShopSubmitPacket(stageLockPath, aeMode, backpackMode));
@@ -3759,6 +3783,9 @@ public class ShopScreen extends ScaledScreen {
         if (descOverlayOpen) {
             int[] r = descOverlayBounds();
             if (!hit(mx, my, r[0], r[1], r[2], r[3]) || hit(mx, my, descOverlayCloseX(r), descOverlayCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                if (hit(mx, my, descOverlayCloseX(r), descOverlayCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                    armClickWave(mx, my);
+                }
                 descOverlayOpen = false;
                 return true;
             }
@@ -3770,6 +3797,9 @@ public class ShopScreen extends ScaledScreen {
         if (guideOverlayOpen) {
             int[] r = guideOverlayBounds();
             if (!hit(mx, my, r[0], r[1], r[2], r[3]) || hit(mx, my, guideOverlayCloseX(r), guideOverlayCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                if (hit(mx, my, guideOverlayCloseX(r), guideOverlayCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                    armClickWave(mx, my);
+                }
                 guideOverlayOpen = false;
                 return true;
             }
@@ -3791,6 +3821,9 @@ public class ShopScreen extends ScaledScreen {
         if (groupPickerOpen) {
             int[] r = groupPickerBounds();
             if (!hit(mx, my, r[0], r[1], r[2], r[3]) || hit(mx, my, groupPickerCloseX(r), groupPickerCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                if (hit(mx, my, groupPickerCloseX(r), groupPickerCloseY(r), DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H)) {
+                    armClickWave(mx, my);
+                }
                 groupPickerOpen = false;
                 return true;
             }
@@ -3817,7 +3850,7 @@ public class ShopScreen extends ScaledScreen {
         // 撤销删除按钮（悬浮在面板上，优先于其他点击判定）
         if (undoDeleteLabel != null && System.currentTimeMillis() < undoDeleteUntilMs) {
             int[] b = undoDeleteBtnBounds();
-            if (hit(mx, my, b[0], b[1], b[2], b[3])) {
+            if (buttonHit(mx, my, b[0], b[1], b[2], b[3])) {
                 send(ShopActionPacket.Action.UNDO_DELETE, null, 1L);
                 undoDeleteLabel = null;
                 return true;
@@ -3826,7 +3859,7 @@ public class ShopScreen extends ScaledScreen {
         // 撤销排序按钮（悬浮在面板上，优先于其他点击判定）
         if (undoReorderLabel != null && System.currentTimeMillis() < undoReorderUntilMs) {
             int[] b = undoReorderBtnBounds();
-            if (hit(mx, my, b[0], b[1], b[2], b[3])) {
+            if (buttonHit(mx, my, b[0], b[1], b[2], b[3])) {
                 ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopReorderPacket(
                         com.dishanhai.gt_shanhai.network.ShopReorderPacket.Action.UNDO, ClientShopCatalog.revision(), -1L));
                 undoReorderLabel = null;
@@ -3835,22 +3868,22 @@ public class ShopScreen extends ScaledScreen {
         }
 
         // 顶部买/卖页签：切换时打一条本地横幅提示当前模式，光靠页签颜色区分不够醒目，容易买卖模式点混
-        if (hit(mx, my, buyTabX(), top + 6, buyTabW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, buyTabX(), top + 6, buyTabW(), TOP_BAR_H)) {
             if (mode != Mode.BUY) showMessage(Component.literal("§b[山海商店] §a已切换至【购买】模式"));
             mode = Mode.BUY; clearSelection(); return true;
         }
-        if (hit(mx, my, sellTabX(), top + 6, sellTabW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, sellTabX(), top + 6, sellTabW(), TOP_BAR_H)) {
             if (mode != Mode.SELL) showMessage(Component.literal("§e[山海商店] §a已切换至【出售】模式"));
             mode = Mode.SELL; clearSelection(); return true;
         }
 
         // 关闭
-        if (hit(mx, my, closeBtnX(), top + 6, closeBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, closeBtnX(), top + 6, closeBtnW(), TOP_BAR_H)) {
             onClose();
             return true;
         }
         // 购物车：点开/收起大图层
-        if (hit(mx, my, cartBtnX(), top + 6, cartBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, cartBtnX(), top + 6, cartBtnW(), TOP_BAR_H)) {
             cartOverlayOpen = !cartOverlayOpen;
             if (cartOverlayOpen) cartOverlayOpenAtMs = System.currentTimeMillis();
             // 结算结果不因收起面板清掉，见 handleCartOverlayClick 关闭分支同款说明
@@ -3858,7 +3891,7 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         // 只看收藏筛选：跟主/子分类、搜索一起收窄网格，切换后立即重算可见列表
-        if (hit(mx, my, favBtnX(), top + 6, favBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, favBtnX(), top + 6, favBtnW(), TOP_BAR_H)) {
             favoritesOnly = !favoritesOnly;
             scroll = 0;
             recomputeVisible();
@@ -3868,7 +3901,7 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         // AE 模式切换：光靠按钮文字变色不够醒目，切换时打一条横幅明确告知当前状态
-        if (hit(mx, my, aeBtnX(), top + 6, aeBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, aeBtnX(), top + 6, aeBtnW(), TOP_BAR_H)) {
             // 关闭方向永远放行；开启方向须先有绑定的在线 AE 网络（商店终端/FTBQ提交器），
             // 否则玩家会误以为交易走了 AE，实际却被静默降级到背包/SDA（见反馈）。
             if (!aeMode && !ClientWalletAccount.hasBoundAeNetwork()) {
@@ -3883,7 +3916,7 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         // 精妙背包模式切换：开启后扣款/交付优先走随身穿戴的精妙背包（关闭则优先随身背包，跟原来一样）
-        if (hit(mx, my, backpackBtnX(), top + 6, backpackBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, backpackBtnX(), top + 6, backpackBtnW(), TOP_BAR_H)) {
             backpackMode = !backpackMode;
             showMessage(Component.literal(backpackMode
                     ? "§b[山海商店] §a精妙背包模式已开启，交易优先从精妙背包扣款/交付"
@@ -3891,32 +3924,32 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         // 充值全部
-        if (hit(mx, my, rechargeBtnX(), top + 6, rechargeBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, rechargeBtnX(), top + 6, rechargeBtnW(), TOP_BAR_H)) {
             send(ShopActionPacket.Action.DEPOSIT, null, 1L);
             return true;
         }
         // 货币中心（打开 ATM 子页）
-        if (hit(mx, my, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H)) {
             Minecraft.getInstance().setScreen(new CurrencyAtmScreen(this));
             return true;
         }
         // 兑换中心（打开兑换子页）
-        if (hit(mx, my, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H)) {
             Minecraft.getInstance().setScreen(new ExchangeScreen(this, canEdit));
             return true;
         }
         // 银会中心（打开会员购买+银行子页）
-        if (hit(mx, my, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H)) {
+        if (buttonHit(mx, my, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H)) {
             Minecraft.getInstance().setScreen(new ShopMembershipScreen(this));
             return true;
         }
         // 新增商品（编辑权 + 开了编辑模式）：分类默认继承当前所在子页（如「无限盘区/前期」）
-        if (catalogEditUnlocked && hit(mx, my, addBtnX(), top + 6, addBtnW(), TOP_BAR_H)) {
+        if (catalogEditUnlocked && buttonHit(mx, my, addBtnX(), top + 6, addBtnW(), TOP_BAR_H)) {
             ShopEntryEditor.openNew(this, currentViewCategory());
             return true;
         }
         // 商店设置（仅编辑权，不受编辑模式限制）：奖励抽取次数上限等运行期可调行为
-        if (canEdit && hit(mx, my, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H)) {
+        if (canEdit && buttonHit(mx, my, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H)) {
             Minecraft.getInstance().setScreen(new ShopSettingsScreen(this));
             return true;
         }
@@ -3938,6 +3971,7 @@ public class ShopScreen extends ScaledScreen {
         if (entryIndex >= 0) {
             ShopEntry entry = visibleEntry(entryIndex);
             if (entry != null) {
+                armClickWave(mx, my);
                 if (btn == 1) {
                     openContextMenu(entry, visibleEntryKeys.get(entryIndex), (int) mx, (int) my);
                 } else if (btn == 0 && net.minecraft.client.gui.screens.Screen.hasAltDown()) {
@@ -3983,26 +4017,26 @@ public class ShopScreen extends ScaledScreen {
             com.dishanhai.gt_shanhai.client.shop.ShopGuideLookup.open(Minecraft.getInstance().player, guideLinkHit);
             return true;
         }
-        if (inDetailViewport && guideDetailBtnVisible && hit(mx, my, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH)) {
+        if (inDetailViewport && guideDetailBtnVisible && buttonHit(mx, my, guideDetailBtnX, guideDetailBtnY, guideDetailBtnW, guideDetailBtnH)) {
             guideOverlayOpen = true;
             guideOverlayOpenAtMs = System.currentTimeMillis();
             guideOverlayScroll = 0;
             return true;
         }
         // 「补齐全部缺口」：向服务端起一轮 AE 自动合成计算，算完服务端会推确认框
-        if (inDetailViewport && autoCraftBtnVisible && selected != null && hit(mx, my, autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH)) {
+        if (inDetailViewport && autoCraftBtnVisible && selected != null && buttonHit(mx, my, autoCraftBtnX, autoCraftBtnY, autoCraftBtnW, autoCraftBtnH)) {
             long entryKey = ClientShopCatalog.keyOf(selected);
             ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
                     ClientShopCatalog.revision(), entryKey, amount, aeMode));
             return true;
         }
         if (inDetailViewport && favoriteMissingBtnVisible && selected != null
-                && hit(mx, my, favoriteMissingBtnX, favoriteMissingBtnY, favoriteMissingBtnW, favoriteMissingBtnH)) {
+                && buttonHit(mx, my, favoriteMissingBtnX, favoriteMissingBtnY, favoriteMissingBtnW, favoriteMissingBtnH)) {
             bookmarkMissingCosts();
             return true;
         }
         if (inDetailViewport && buyMaterialsBtnVisible && selected != null
-                && hit(mx, my, buyMaterialsBtnX, buyMaterialsBtnY, buyMaterialsBtnW, buyMaterialsBtnH)) {
+                && buttonHit(mx, my, buyMaterialsBtnX, buyMaterialsBtnY, buyMaterialsBtnW, buyMaterialsBtnH)) {
             send(ShopActionPacket.Action.BUY_MATERIALS, selected, amount);
             return true;
         }
@@ -4012,13 +4046,13 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         if (inDetailViewport && submissionBtnVisible && selected != null
-                && hit(mx, my, submissionBtnX, submissionBtnY, submissionBtnW, submissionBtnH)) {
+                && buttonHit(mx, my, submissionBtnX, submissionBtnY, submissionBtnW, submissionBtnH)) {
             ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopSubmitPacket(
                     ClientShopCatalog.revision(), ClientShopCatalog.keyOf(selected), aeMode, backpackMode));
             return true;
         }
         if (inDetailViewport && stageSubmissionAutoCraftVisible && selected != null
-                && hit(mx, my, stageSubmissionAutoCraftX, stageSubmissionAutoCraftY,
+                && buttonHit(mx, my, stageSubmissionAutoCraftX, stageSubmissionAutoCraftY,
                     stageSubmissionAutoCraftW, stageSubmissionAutoCraftH)) {
             String stage = missingStageSubmission(selected.getCategory());
             if (stage != null) ShanhaiNetwork.CHANNEL.sendToServer(
@@ -4028,14 +4062,14 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         if (inDetailViewport && stageSubmissionBtnVisible && selected != null
-                && hit(mx, my, stageSubmissionBtnX, stageSubmissionBtnY, stageSubmissionBtnW, stageSubmissionBtnH)) {
+                && buttonHit(mx, my, stageSubmissionBtnX, stageSubmissionBtnY, stageSubmissionBtnW, stageSubmissionBtnH)) {
             String stage = missingStageSubmission(selected.getCategory());
             if (stage != null) ShanhaiNetwork.CHANNEL.sendToServer(
                     new com.dishanhai.gt_shanhai.network.ShopSubmitPacket(stage, aeMode, backpackMode));
             return true;
         }
         // 展开描述详情（drawDetail 渲染时暂存的按钮坐标，命中即开大图层）
-        if (inDetailViewport && descExpandVisible && hit(mx, my, descExpandX, descExpandY, descExpandW, descExpandH)) {
+        if (inDetailViewport && descExpandVisible && buttonHit(mx, my, descExpandX, descExpandY, descExpandW, descExpandH)) {
             descOverlayOpen = true;
             descOverlayOpenAtMs = System.currentTimeMillis();
             descOverlayScroll = 0;
@@ -4052,7 +4086,7 @@ public class ShopScreen extends ScaledScreen {
             int btnY = dy + dh - 24;
             // 确认购买/出售：自选奖励（CHOICE，本地池或 FTBQ 表自选子模式）商品先弹选择界面，选完再发购买包；
             // 随机/全部/普通商品直接买
-            if (hit(mx, my, cx, btnY, btnW, 20)) {
+            if (buttonHit(mx, my, cx, btnY, btnW, 20)) {
                 if (mode == Mode.BUY && selected.hasMissingItems()) {
                     showMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买"));
                     return true;
@@ -4082,7 +4116,7 @@ public class ShopScreen extends ScaledScreen {
                 return true;
             }
             // 删除（编辑权 + 开了编辑模式，二次确认防误触：3 秒内对同一条目再点一次「删除此商品」才真正执行）
-            if (catalogEditUnlocked && hit(mx, my, cx, btnY - 22, btnW, 18)) {
+            if (catalogEditUnlocked && buttonHit(mx, my, cx, btnY - 22, btnW, 18)) {
                 boolean armed = pendingDeleteEntry == selected
                         && System.currentTimeMillis() - pendingDeleteArmedAtMs < DELETE_CONFIRM_WINDOW_MS;
                 if (!armed) {
@@ -4101,7 +4135,7 @@ public class ShopScreen extends ScaledScreen {
                 return true;
             }
             // 编辑条目（编辑权 + 开了编辑模式）
-            if (catalogEditUnlocked && hit(mx, my, cx, btnY - 44, btnW, 18)) {
+            if (catalogEditUnlocked && buttonHit(mx, my, cx, btnY - 44, btnW, 18)) {
                 ShopEntryEditor.openEdit(this, selected);
                 return true;
             }
@@ -4111,9 +4145,9 @@ public class ShopScreen extends ScaledScreen {
             int bw = (btnW - 9) / 4;
             for (int i = 0; i < 4; i++) {
                 int bx = cx + i * (bw + 3);
-                if (hit(mx, my, bx, dy + 82, bw, 12)) { amount = addClamp(amount, steps[i]); syncAmountBox(); return true; }
-                if (hit(mx, my, bx, dy + 96, bw, 12)) { amount = addClamp(amount, -steps[i]); syncAmountBox(); return true; }
-                if (hit(mx, my, bx, dy + 110, bw, 12)) {
+                if (buttonHit(mx, my, bx, dy + 82, bw, 12)) { amount = addClamp(amount, steps[i]); syncAmountBox(); return true; }
+                if (buttonHit(mx, my, bx, dy + 96, bw, 12)) { amount = addClamp(amount, -steps[i]); syncAmountBox(); return true; }
+                if (buttonHit(mx, my, bx, dy + 110, bw, 12)) {
                     amount = i < 2 ? mulClamp(amount, scales[i]) : divClamp(amount, scales[i]);
                     syncAmountBox();
                     return true;
@@ -4131,7 +4165,7 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         if (inDetailViewport && submissionAutoCraftVisible && selected != null
-                && hit(mx, my, submissionAutoCraftX, submissionAutoCraftY, submissionAutoCraftW, submissionAutoCraftH)) {
+                && buttonHit(mx, my, submissionAutoCraftX, submissionAutoCraftY, submissionAutoCraftW, submissionAutoCraftH)) {
             ShanhaiNetwork.CHANNEL.sendToServer(new com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket(
                     com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.Target.ENTRY_SUBMISSION,
                     ClientShopCatalog.revision(), ClientShopCatalog.keyOf(selected), 1L, "", aeMode));
@@ -4614,6 +4648,7 @@ public class ShopScreen extends ScaledScreen {
         for (ContextMenuItem item : ctxMenuItems) {
             if (item.separatorBefore()) ry += 3;
             if (hit(mx, my, ctxMenuX, ry, ctxMenuW, CTX_MENU_ROW_H)) {
+                armClickWave(mx, my);
                 Runnable action = item.action();
                 closeContextMenu();
                 action.run();
@@ -4637,7 +4672,7 @@ public class ShopScreen extends ScaledScreen {
                 GuiRenderUtil.popAnimProgress(ctxMenuOpenAtMs, GuiRenderUtil.MOTION_MS));
         int pad = 16;
         requestPanelGauss(menuX - pad, menuY - pad, ctxMenuW + pad * 2, menuH + pad * 2,
-                menuBlur, menuX, menuY, ctxMenuW, menuH);
+                menuBlur, menuX, menuY, ctxMenuW, menuH, true);
         drawPopPanel(g, ctxMenuOpenAtMs, menuX, menuY, ctxMenuW, menuH, () -> drawContextMenuBody(g, mx, my, menuH));
     }
 
@@ -4670,6 +4705,130 @@ public class ShopScreen extends ScaledScreen {
 
     private boolean hit(double mx, double my, int x, int y, int w, int h) {
         return GuiRenderUtil.isHovering(mx, my, x, y, w, h);
+    }
+
+    /** 按键命中。波纹只记点击点，不移动按钮，也不吞掉这次点击。 */
+    private boolean buttonHit(double mx, double my, int x, int y, int w, int h) {
+        if (!hit(mx, my, x, y, w, h)) return false;
+        armClickWave(mx, my);
+        return true;
+    }
+
+    private void armClickWave(double mx, double my) {
+        clickWaveAtMs = System.currentTimeMillis();
+        clickWaveX = (int) Math.round(mx);
+        clickWaveY = (int) Math.round(my);
+    }
+
+    /** 当前点击波的进度 [0,1]；没有进行中的波返回 -1。 */
+    private float clickWaveProgress() {
+        if (clickWaveAtMs <= 0L) return -1f;
+        float t = GuiRenderUtil.popAnimProgress(clickWaveAtMs, CLICK_WAVE_MS);
+        if (t >= 1f) {
+            clickWaveAtMs = 0L;
+            return -1f;
+        }
+        return t;
+    }
+
+    /**
+     * 点击后 {@link #CLICK_WAVE_MS} 内：一圈液态玻璃从点击点向外推开。
+     *
+     * <p>只用高斯是看不见的——商店面板大面积是纯色，糊完还是一样。所以波由三层组成：
+     * shader 侧的径向折射位移 + 圆盘透镜放大 + 波峰高光；外加 {@link #renderClickWaveRing}
+     * 直绘的亮环，后处理不可用（{@link ShopGaussBlur#isReady()} 为假）时也照样有反馈。</p>
+     *
+     * <p>波走独立槽位（{@link ShopGaussBlur#requestWave}），不和飞行/浮层的模糊抢位置；
+     * 点商品格必然同时开飞行，共用一个槽位就会整段让路，效果等于没有。</p>
+     */
+    private void requestClickWave(GuiGraphics g) {
+        float t = clickWaveProgress();
+        if (t < 0f) return;
+        renderClickWaveRing(g, t);
+        if (this.minecraft == null || this.minecraft.getMainRenderTarget() == null) return;
+        float ease = GuiRenderUtil.easeOut(t);
+        float strength = 0.95f * (1f - smoothstep(0.55f, 1f, t));
+        if (strength <= 0.01f) return;
+        float radiusVirtual = CLICK_WAVE_FROM_PX + (CLICK_WAVE_TO_PX - CLICK_WAVE_FROM_PX) * ease;
+        int reach = (int) Math.ceil(radiusVirtual) + 2;
+        int[] rect = clampClickWave(clickWaveX - reach, clickWaveY - reach, reach * 2, reach * 2);
+        if (rect[2] <= 1 || rect[3] <= 1) return;
+        int fbW = this.minecraft.getMainRenderTarget().width;
+        int fbH = this.minecraft.getMainRenderTarget().height;
+        if (fbW <= 0 || fbH <= 0) return;
+        float pixelScale = (float) fbW / (float) Math.max(1, this.width);
+        float toPx = this.guiScale * pixelScale;
+        // 圆盘内部只做轻糊：主要表现靠折射和透镜，糊太狠会变成一团糊掉的方块。
+        float kernelPx = 4.5f * toPx;
+        float wavePx = radiusVirtual * toPx;
+        float bandPx = CLICK_WAVE_BAND_PX * toPx;
+        // 折射/高光先强后弱：收尾时归零，避免定格时画面还歪着。
+        float puff = 1f - smoothstep(0.30f, 1f, t);
+        float refractPx = 7.5f * toPx * puff;
+        float glow = 0.85f * puff;
+        ShopGaussBlur.requestWave(
+                toFramebufferX(rect[0]), toFramebufferY(rect[1]),
+                toFramebufferW(rect[2]), toFramebufferH(rect[3]),
+                strength, kernelPx, wavePx, bandPx, refractPx, glow);
+        float fx = toFramebufferX(clickWaveX);
+        float fy = toFramebufferY(clickWaveY);
+        ShopGaussBlur.setWaveOrigin((fx + 0.5f) / (float) fbW, 1f - (fy + 0.5f) / (float) fbH);
+    }
+
+    /**
+     * 直绘的液态玻璃亮环：不依赖后处理，shader 挂掉、或这一帧被别的模糊占用时仍然看得见。
+     * 环上按光向左上衰减，做出折射高光的明暗差；再叠一条内圈表示透镜边缘。
+     */
+    private void renderClickWaveRing(GuiGraphics g, float t) {
+        float ease = GuiRenderUtil.easeOut(t);
+        float radius = CLICK_WAVE_FROM_PX + (CLICK_WAVE_TO_PX - CLICK_WAVE_FROM_PX) * ease;
+        float fade = 1f - smoothstep(0.28f, 1f, t);
+        if (fade <= 0.01f || radius < 1f) return;
+        int cx = clickWaveX;
+        int cy = clickWaveY;
+        int segments = Math.max(28, (int) (radius * 2.4f));
+        // 起点先亮一下：点击瞬间的玻璃被压下去，环还没铺开
+        int coreA = (int) (fade * 92f);
+        if (coreA > 0) {
+            int cr = 3 + (int) (ease * 5f);
+            g.fill(cx - cr, cy - cr, cx + cr, cy + cr, (coreA << 24) | 0xDCEFFF);
+        }
+        drawRingArc(g, cx, cy, radius, segments, fade, 2.4f, 0xC8E8FF, 1f);
+        drawRingArc(g, cx, cy, Math.max(1f, radius * 0.78f), segments, fade * 0.45f, 1.6f, 0x9FD4FF, 1f);
+    }
+
+    /**
+     * 沿圆周画一圈小方块。{@code lightScale} 控制整体亮度，环上的亮度按光方向衰减，
+     * 让环看起来是被折射出来的高光而不是描边。
+     */
+    private void drawRingArc(GuiGraphics g, int cx, int cy, float radius, int segments,
+                             float fade, float thickness, int rgb, float lightScale) {
+        int a0 = (int) (fade * 150f * lightScale);
+        if (a0 <= 2) return;
+        int th = Math.max(1, (int) Math.round(thickness));
+        for (int i = 0; i < segments; i++) {
+            double ang = (Math.PI * 2.0 * i) / segments;
+            // 光从左上来：dot(dir, (-0.65, 0.76))，屏幕 y 向下所以取反
+            double lit = 0.35 + 0.65 * (-0.65 * Math.cos(ang) - 0.76 * Math.sin(ang));
+            int a = (int) (a0 * Math.max(0.12, lit));
+            if (a <= 2) continue;
+            int px = cx + (int) Math.round(Math.cos(ang) * radius);
+            int py = cy + (int) Math.round(Math.sin(ang) * radius);
+            g.fill(px, py, px + th, py + th, (a << 24) | rgb);
+        }
+    }
+
+    /** 波纹可以盖到顶栏按键，但停在面板内侧，不采到面板外的游戏世界。 */
+    private int[] clampClickWave(int x, int y, int w, int h) {
+        int x0 = Math.max(x, left + 4);
+        int y0 = Math.max(y, top + 4);
+        int x1 = Math.min(x + w, left + panelWidth - 4);
+        int y1 = Math.min(y + h, top + panelHeight - 4);
+        if (!flashActive.isEmpty() || !flashLeaving.isEmpty()) {
+            y1 = Math.min(y1, top + panelHeight - 28);
+        }
+        if (x1 <= x0 || y1 <= y0) return new int[]{x0, y0, 0, 0};
+        return new int[]{x0, y0, x1 - x0, y1 - y0};
     }
 
     /**

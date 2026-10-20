@@ -70,6 +70,26 @@ public final class ShopGaussBlur {
     private static final float[] cellUv = new float[MAX_CELL_RECTS * 4];
     private static final float[] cellUvSnapshot = new float[MAX_CELL_RECTS * 4];
     private static final float[] NO_CELLS = new float[MAX_CELL_RECTS * 4];
+    /** 不带波：{u, v, radius, thickness, refract, glow}。 */
+    private static final float[] NO_WAVE = new float[6];
+
+    /**
+     * 点击波的专用槽位，跟主请求互不覆盖。
+     *
+     * <p>点商品格必定同时开卡片飞行，飞行会占掉主请求；如果波挤在主请求里，就只能整段让路，
+     * 玩家在格子上点永远看不到波。这里给波单独一条矩形，帧末排在主请求之后再跑一趟，
+     * 波就能盖在模糊之上。</p>
+     */
+    private static boolean waveRequested;
+    private static float waveStrength;
+    private static float waveKernelPx;
+    private static float waveRadiusPx;
+    private static float waveBandPx;
+    private static float waveRefractPx;
+    private static float waveGlowAmount;
+    private static float waveOriginU;
+    private static float waveOriginV;
+    private static float[] waveRect;
 
     private ShopGaussBlur() {
     }
@@ -87,7 +107,8 @@ public final class ShopGaussBlur {
             // 避免第一帧 isReady() 误报可用而闪烁一次。
             try {
                 uniformFailed = !applyUniforms(post, 1f, BLUR_RADIUS_VIRTUAL,
-                        new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f}, false, 0, NO_CELLS);
+                        new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f}, false, 0, NO_CELLS,
+                        NO_WAVE);
             } catch (Exception e) {
                 uniformFailed = true;
                 GTDishanhaiMod.LOGGER.error("商店高斯模糊 uniform 预检失败，已回退为局部磨砂", e);
@@ -195,10 +216,58 @@ public final class ShopGaussBlur {
     }
 
     /**
+     * 登记一次点击波，坐标是 framebuffer 像素、原点在左上角。
+     *
+     * <p>独立于 {@link #request}：同一帧的飞行/浮层模糊照常跑，波在它们之后再叠一趟。
+     * 每帧都要重新登记，没登记就等于没有波。</p>
+     *
+     * @param radiusPixels    波峰所在半径；<= 0.5 视为取消
+     * @param thicknessPixels 波峰厚度
+     * @param refractPixels   波峰处径向采样位移，正数把画面向外推开
+     * @param glow            波峰高光强度 0..1
+     */
+    public static void requestWave(int x, int y, int w, int h, float strength,
+                                   float kernelPixels,
+                                   float radiusPixels, float thicknessPixels,
+                                   float refractPixels, float glow) {
+        waveRequested = false;
+        waveRect = null;
+        if (strength <= 0.01f || w <= 0 || h <= 0 || radiusPixels <= 0.5f) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getMainRenderTarget() == null) return;
+        int fbW = mc.getMainRenderTarget().width;
+        int fbH = mc.getMainRenderTarget().height;
+        if (fbW <= 0 || fbH <= 0) return;
+        float[] uv = toUvRect(x, y, w, h, fbW, fbH);
+        if (uv[2] <= uv[0] || uv[3] <= uv[1]) return;
+        waveRect = uv;
+        waveStrength = clamp01(strength);
+        waveKernelPx = kernelPixels > 0f ? kernelPixels : BLUR_RADIUS_VIRTUAL;
+        waveRadiusPx = radiusPixels;
+        waveBandPx = Math.max(1f, thicknessPixels);
+        waveRefractPx = refractPixels;
+        waveGlowAmount = clamp01(glow);
+        waveOriginU = clamp01((x + w * 0.5f) / (float) fbW);
+        waveOriginV = clamp01(1f - (y + h * 0.5f) / (float) fbH);
+        waveRequested = true;
+    }
+
+    /** 点击波自己的圆心（UV），由 {@link #requestWave} 之后再覆盖成真实点击点。 */
+    public static void setWaveOrigin(float originU, float originV) {
+        if (!waveRequested) return;
+        waveOriginU = clamp01(originU);
+        waveOriginV = clamp01(originV);
+    }
+
+    /** 本帧是否已经排了点击波。 */
+    public static boolean hasWaveRequest() {
+        return waveRequested && waveRect != null;
+    }
+
+    /**
      * 同一帧的第二块矩形。不清除主请求。宽高小于等于 0 或强度过低时忽略。
      * 坐标同样是 framebuffer 像素，原点在左上角。
-     */
-    public static void requestExtra(int x, int y, int w, int h, float strength,
+     */    public static void requestExtra(int x, int y, int w, int h, float strength,
                                     float radiusPixels,
                                     int holeX, int holeY, int holeW, int holeH) {
         if (strength <= 0.01f || w <= 0 || h <= 0) return;
@@ -228,6 +297,14 @@ public final class ShopGaussBlur {
         extraRect = null;
         extraHole = null;
         cellCount = 0;
+        waveRequested = false;
+        waveRect = null;
+        waveStrength = 0f;
+        waveKernelPx = 0f;
+        waveRadiusPx = 0f;
+        waveBandPx = 0f;
+        waveRefractPx = 0f;
+        waveGlowAmount = 0f;
     }
 
     /**
@@ -247,12 +324,17 @@ public final class ShopGaussBlur {
         float[] rect2 = extraRect;
         float[] hole2 = extraHole;
         int cells = cellCount;
+        boolean hadWave = waveRequested && waveRect != null && waveStrength > 0.01f;
+        float[] wave = {waveOriginU, waveOriginV, waveRadiusPx, waveBandPx, waveRefractPx, waveGlowAmount};
+        float waveStrength = ShopGaussBlur.waveStrength;
+        float waveRadius = waveKernelPx;
+        float[] waveRectCopy = waveRect;
         System.arraycopy(cellUv, 0, cellUvSnapshot, 0, cellUv.length);
         clear();
 
         boolean primary = hadRequest && rect != null && strength > 0.01f;
         boolean extra = hadExtra && rect2 != null && strength2 > 0.01f;
-        if (!primary && !extra) return;
+        if (!primary && !extra && !hadWave) return;
         if (!(event.getScreen() instanceof ShopScreen)) return;
         if (event.getGuiGraphics() != null) {
             event.getGuiGraphics().flush();
@@ -261,11 +343,18 @@ public final class ShopGaussBlur {
         Minecraft mc = Minecraft.getInstance();
         if (primary) {
             render(mc, strength, radius, rect,
-                    hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, smooth, cells, cellUvSnapshot, partialTick);
+                    hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, smooth, cells, cellUvSnapshot,
+                    NO_WAVE, partialTick);
         }
         if (extra && isReady()) {
             render(mc, strength2, radius2, rect2,
-                    hole2 == null ? new float[]{0f, 0f, 0f, 0f} : hole2, false, 0, NO_CELLS, partialTick);
+                    hole2 == null ? new float[]{0f, 0f, 0f, 0f} : hole2, false, 0, NO_CELLS,
+                    NO_WAVE, partialTick);
+        }
+        // 波放最后一趟：它要盖在飞行/浮层的模糊之上，否则点在商品格上会被飞行请求吃掉。
+        if (hadWave && isReady()) {
+            render(mc, waveStrength, waveRadius, waveRectCopy,
+                    new float[]{0f, 0f, 0f, 0f}, true, 0, NO_CELLS, wave, partialTick);
         }
     }
 
@@ -286,7 +375,8 @@ public final class ShopGaussBlur {
 
     private static void render(Minecraft mc, float strength, float radius,
                                float[] rect, float[] hole, boolean smooth,
-                               int cells, float[] cellData, float partialTick) {
+                               int cells, float[] cellData,
+                               float[] wave, float partialTick) {
         PostChain post = ensureChain(mc);
         if (post == null) return;
         if (mc.getMainRenderTarget() == null) return;
@@ -299,7 +389,7 @@ public final class ShopGaussBlur {
             chainHeight = fbH;
         }
         // 反射/着色器 uniform 任一不可用就整个跳过，绝不让 Rect 落回默认的全屏值。
-        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData)) {
+        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData, wave)) {
             uniformFailed = true;
             return;
         }
@@ -334,7 +424,7 @@ public final class ShopGaussBlur {
 
     private static boolean applyUniforms(PostChain post, float strength, float radius,
                                          float[] rect, float[] hole, boolean smooth,
-                                         int cells, float[] cellData) {
+                                         int cells, float[] cellData, float[] wave) {
         List<PostPass> passes = passesOf(post);
         if (passes.isEmpty()) return false;
         boolean allReady = true;
@@ -345,8 +435,15 @@ public final class ShopGaussBlur {
             Uniform smoothUniform = pass.getEffect().getUniform("Smooth");
             Uniform cellCountUniform = pass.getEffect().getUniform("CellCount");
             Uniform cellRectsUniform = pass.getEffect().getUniform("CellRects");
+            Uniform waveOriginUniform = pass.getEffect().getUniform("WaveOrigin");
+            Uniform waveRadiusUniform = pass.getEffect().getUniform("WaveRadius");
+            Uniform waveThickUniform = pass.getEffect().getUniform("WaveThickness");
+            Uniform waveRefractUniform = pass.getEffect().getUniform("WaveRefract");
+            Uniform waveGlowUniform = pass.getEffect().getUniform("WaveGlow");
             if (rectUniform == null || holeUniform == null || progressUniform == null || smoothUniform == null
-                    || cellCountUniform == null || cellRectsUniform == null) {
+                    || cellCountUniform == null || cellRectsUniform == null
+                    || waveOriginUniform == null || waveRadiusUniform == null
+                    || waveThickUniform == null || waveRefractUniform == null || waveGlowUniform == null) {
                 allReady = false;
                 continue;
             }
@@ -354,6 +451,11 @@ public final class ShopGaussBlur {
             holeUniform.set(hole[0], hole[1], hole[2], hole[3]);
             progressUniform.set(strength);
             smoothUniform.set(smooth ? 1f : 0f);
+            waveOriginUniform.set(wave[0], wave[1]);
+            waveRadiusUniform.set(wave[2]);
+            waveThickUniform.set(wave[3]);
+            waveRefractUniform.set(wave[4]);
+            waveGlowUniform.set(wave[5]);
             int n = cells > 1 && cellData != null ? Math.min(cells, MAX_CELL_RECTS) : 0;
             cellCountUniform.set(n);
             cellRectsUniform.set(n > 0 ? cellData : NO_CELLS);
