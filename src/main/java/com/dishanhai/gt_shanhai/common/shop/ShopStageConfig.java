@@ -22,7 +22,10 @@ import java.util.Map;
 
 /** 分类阶段的提交物品配置，路径与 category 完全一致，例如 {@code 无限盘区/前期}。 */
 public final class ShopStageConfig {
-    private static final File FILE = new File("config/gt_shanhai/shop_stage_requirements.json");
+    private static File file() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.shopStageRequirements()).toFile();
+    }
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final Map<String, List<ExchangeEntry.Ingredient>> REQUIREMENTS = new LinkedHashMap<>();
 
@@ -30,8 +33,8 @@ public final class ShopStageConfig {
 
     public static synchronized void reload() {
         REQUIREMENTS.clear();
-        if (!FILE.exists()) return;
-        try (InputStreamReader reader = new InputStreamReader(new java.io.FileInputStream(FILE), StandardCharsets.UTF_8)) {
+        if (!file().exists()) return;
+        try (InputStreamReader reader = new InputStreamReader(new java.io.FileInputStream(file()), StandardCharsets.UTF_8)) {
             JsonElement root = JsonParser.parseReader(reader);
             if (!root.isJsonObject()) return;
             for (Map.Entry<String, JsonElement> entry : root.getAsJsonObject().entrySet()) {
@@ -97,7 +100,6 @@ public final class ShopStageConfig {
 
     public static synchronized void save() {
         try {
-            FILE.getParentFile().mkdirs();
             JsonObject root = new JsonObject();
             for (Map.Entry<String, List<ExchangeEntry.Ingredient>> entry : REQUIREMENTS.entrySet()) {
                 JsonArray array = new JsonArray();
@@ -110,7 +112,7 @@ public final class ShopStageConfig {
                 }
                 root.add(entry.getKey(), array);
             }
-            try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(file()), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));
             }
         } catch (Exception e) {

@@ -31,6 +31,7 @@ class ShopFluidMotionSourceTest {
                 () -> assertTrue(shop.contains("GuiRenderUtil.slideInX")),
                 () -> assertTrue(shop.contains("GROUP_SLIDE_EXTRA")),
                 () -> assertTrue(shop.contains("FLASH_ENTER_FROM")),
+                () -> assertTrue(shop.contains("LOAD_CELL_SLIDE_PX")),
                 () -> assertTrue(member.contains("GuiRenderUtil.slideInX")),
                 () -> assertTrue(exchange.contains("screenOpenAtMs")),
                 () -> assertFalse(shop.contains("dampingFraction")),

@@ -24,7 +24,7 @@ import java.util.Set;
 
 /**
  * 商店商品清单加载器。
- * 读取 config/gt_shanhai/shop.json（可热改不重编译），格式：
+ * 读取 config/gt_shanhai/shop/shop.json（可热改不重编译），格式：
  * <pre>
  * {
  *   "entries": [
@@ -37,9 +37,21 @@ import java.util.Set;
  */
 public final class ShopConfig {
 
-    private static final String CONFIG_DIR = "config/gt_shanhai";
-    private static final File SHOP_FILE = new File(CONFIG_DIR, "shop.json");
-    private static final File CATEGORY_ORDER_FILE = new File(CONFIG_DIR, "shop_category_order.json");
+    /** 商店配置目录 config/gt_shanhai/shop。 */
+    private static File configDir() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureDir(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.shopDir()).toFile();
+    }
+
+    private static File shopFile() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.shop()).toFile();
+    }
+
+    private static File categoryOrderFile() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.shopCategoryOrder()).toFile();
+    }
 
     private static volatile ShopCatalogSnapshot snapshot = ShopCatalogSnapshot.empty();
     private static volatile boolean loaded = false;
@@ -586,7 +598,6 @@ public final class ShopConfig {
     /** 把当前内存中的商品清单写回 shop.json（Gson 规范序列化，NBT 以 SNBT 字符串存 "nbt" 字段）。 */
     public static synchronized void save() {
         try {
-            new File(CONFIG_DIR).mkdirs();
             JsonObject root = new JsonObject();
             JsonArray arr = new JsonArray();
             List<ShopEntry> entries = snapshot().entries();
@@ -594,7 +605,7 @@ public final class ShopConfig {
                 arr.add(ShopEntryJsonCodec.toJson(e));
             }
             root.add("entries", arr);
-            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(SHOP_FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(shopFile()), StandardCharsets.UTF_8)) {
                 w.write(GSON.toJson(root));
             }
             GTDishanhaiMod.LOGGER.info("[Shop] 已保存 {} 个商品到 shop.json", entries.size());
@@ -606,9 +617,9 @@ public final class ShopConfig {
     /** 读取 shop_category_order.json（缺失 = 尚未有任何拖拽排序，留空 Map，全部按发现顺序显示）。 */
     private static synchronized void loadCategoryOrder() {
         categoryOrder = new LinkedHashMap<>();
-        if (!CATEGORY_ORDER_FILE.exists()) return;
+        if (!categoryOrderFile().exists()) return;
         try (java.io.Reader r = new java.io.InputStreamReader(
-                new java.io.FileInputStream(CATEGORY_ORDER_FILE), StandardCharsets.UTF_8)) {
+                new java.io.FileInputStream(categoryOrderFile()), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(r).getAsJsonObject();
             for (Map.Entry<String, JsonElement> e : root.entrySet()) {
                 if (!e.getValue().isJsonArray()) continue;
@@ -623,14 +634,13 @@ public final class ShopConfig {
 
     private static synchronized void saveCategoryOrder() {
         try {
-            new File(CONFIG_DIR).mkdirs();
             JsonObject root = new JsonObject();
             for (Map.Entry<String, List<String>> e : categoryOrder.entrySet()) {
                 JsonArray arr = new JsonArray();
                 for (String v : e.getValue()) arr.add(v);
                 root.add(e.getKey(), arr);
             }
-            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(CATEGORY_ORDER_FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(categoryOrderFile()), StandardCharsets.UTF_8)) {
                 w.write(GSON.toJson(root));
             }
         } catch (Exception e) {
@@ -705,14 +715,14 @@ public final class ShopConfig {
     public static synchronized void reload() {
         loadCategoryOrder(); // 先加载分类排序，publish() 建 manifest 时才能一并带上
         ShopStageConfig.reload();
-        if (!SHOP_FILE.exists()) {
+        if (!shopFile().exists()) {
             writeDefault();
         }
         List<ShopEntry> parsedEntries = new ArrayList<>();
         boolean needsStableIdMigration = false;
         // 必须显式 UTF-8：FileReader 用系统默认编码（Windows 为 GBK），会把 UTF-8 中文读成乱码
         try (java.io.Reader r = new java.io.InputStreamReader(
-                new java.io.FileInputStream(SHOP_FILE), StandardCharsets.UTF_8)) {
+                new java.io.FileInputStream(shopFile()), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(r).getAsJsonObject();
             JsonArray arr = root.has("entries") ? root.getAsJsonArray("entries") : new JsonArray();
             for (JsonElement el : arr) {
@@ -740,7 +750,6 @@ public final class ShopConfig {
 
     private static void writeDefault() {
         try {
-            new File(CONFIG_DIR).mkdirs();
             String def = "{\n"
                     + "  \"entries\": [\n"
                     + "    { \"goods\": \"minecraft:diamond\", \"count\": 1, \"currency\": \"dishanhai:dog_coins\", \"price\": 4, \"category\": \"矿物\" },\n"
@@ -751,7 +760,7 @@ public final class ShopConfig {
                     + "    { \"goods\": \"minecraft:torch\", \"count\": 64, \"currency\": \"dishanhai:dog_coins\", \"price\": 1, \"category\": \"杂货\" }\n"
                     + "  ]\n"
                     + "}\n";
-            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(SHOP_FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(shopFile()), StandardCharsets.UTF_8)) {
                 w.write(def);
             }
             GTDishanhaiMod.LOGGER.info("[Shop] 已生成默认 shop.json");

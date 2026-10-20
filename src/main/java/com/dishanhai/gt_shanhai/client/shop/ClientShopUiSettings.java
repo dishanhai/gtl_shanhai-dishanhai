@@ -22,8 +22,10 @@ public final class ClientShopUiSettings {
     private static final int MAX_CARD_WIDTH = 120;
     private static final int MIN_CARD_HEIGHT = 28;
     private static final int MAX_CARD_HEIGHT = 72;
-    private static final String CONFIG_DIR = "config/gt_shanhai";
-    private static final File SETTINGS_FILE = new File(CONFIG_DIR, "shop_client_ui.json");
+    private static File settingsFile() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.shopClientUi()).toFile();
+    }
     private static final com.google.gson.Gson GSON =
             new com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
@@ -125,9 +127,9 @@ public final class ClientShopUiSettings {
         rememberShopView = true;
         shopSearch = "";
         shopSelectedStableId = "";
-        if (!SETTINGS_FILE.exists()) return;
+        if (!settingsFile().exists()) return;
         try (java.io.Reader reader = new java.io.InputStreamReader(
-                new java.io.FileInputStream(SETTINGS_FILE), StandardCharsets.UTF_8)) {
+                new java.io.FileInputStream(settingsFile()), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
             if (root.has("cardWidth")) cardWidth = clampCardWidth(root.get("cardWidth").getAsInt());
             if (root.has("cardHeight")) cardHeight = clampCardHeight(root.get("cardHeight").getAsInt());
@@ -152,7 +154,6 @@ public final class ClientShopUiSettings {
 
     private static void save() {
         try {
-            new File(CONFIG_DIR).mkdirs();
             JsonObject root = new JsonObject();
             root.addProperty("cardWidth", cardWidth);
             root.addProperty("cardHeight", cardHeight);
@@ -161,7 +162,7 @@ public final class ClientShopUiSettings {
             root.addProperty("shopSearch", shopSearch);
             root.addProperty("shopSelectedStableId", shopSelectedStableId);
             try (OutputStreamWriter writer = new OutputStreamWriter(
-                    new FileOutputStream(SETTINGS_FILE), StandardCharsets.UTF_8)) {
+                    new FileOutputStream(settingsFile()), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));
             }
         } catch (Exception e) {

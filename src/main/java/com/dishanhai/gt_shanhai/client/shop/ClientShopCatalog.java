@@ -6,8 +6,11 @@ import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntryJsonCodec;
 import com.dishanhai.gt_shanhai.common.shop.ShopGoodsIdentity;
+import com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopCatalogChunkRequestPacket;
+
+import net.minecraft.client.Minecraft;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -140,6 +143,8 @@ public final class ClientShopCatalog {
     private static final Map<Long, ShopEntry> entriesByKey = new LinkedHashMap<>();
     private static final IdentityHashMap<ShopEntry, Long> keysByEntry = new IdentityHashMap<>();
     private static final ArrayDeque<PendingChunk> pendingChunks = new ArrayDeque<>();
+    /** 本帧可视范围的 chunk 暂存，避免每帧 new 一个 Set。只在客户端主线程使用。 */
+    private static final LinkedHashSet<Integer> neededChunkBuf = new LinkedHashSet<>();
     private static final LinkedHashMap<Integer, Set<Long>> cachedChunkKeys =
             new LinkedHashMap<>(16, 0.75F, true);
     private static Set<Integer> pinnedChunks = Set.of();
@@ -265,26 +270,29 @@ public final class ClientShopCatalog {
     /** 请求可视范围涉及但尚未收到的 chunk，并把这些块固定在 LRU 中。 */
     public static void ensureLoadedRange(List<Long> keys, int fromInclusive, int toExclusive) {
         if (keys == null || keys.isEmpty() || !STATE.ready()) {
-            pinnedChunks = Set.of();
+            if (!pinnedChunks.isEmpty()) pinnedChunks = Set.of();
             return;
         }
         int from = Math.max(0, Math.min(fromInclusive, keys.size()));
         int to = Math.max(from, Math.min(toExclusive, keys.size()));
-        LinkedHashSet<Integer> needed = new LinkedHashSet<>();
+        neededChunkBuf.clear();
         for (int i = from; i < to; i++) {
             ShopCatalogManifest.Stub stub = stubsByKey.get(keys.get(i));
-            if (stub != null && stub.chunkId() >= 0) needed.add(stub.chunkId());
+            if (stub != null && stub.chunkId() >= 0) neededChunkBuf.add(stub.chunkId());
         }
-        pinnedChunks = Set.copyOf(needed);
-        for (Integer chunkId : needed) {
+        if (!neededChunkBuf.equals(pinnedChunks)) {
+            pinnedChunks = Set.copyOf(neededChunkBuf);
+            evictOverflow();
+        }
+        long now = net.minecraft.Util.getMillis();
+        for (Integer chunkId : pinnedChunks) {
             if (cachedChunkKeys.containsKey(chunkId)) cachedChunkKeys.get(chunkId); // access-order touch
-            long requestId = STATE.beginRequest(chunkId, net.minecraft.Util.getMillis());
+            long requestId = STATE.beginRequest(chunkId, now);
             if (requestId > 0L) {
                 ShanhaiNetwork.CHANNEL.sendToServer(
                         new ShopCatalogChunkRequestPacket(STATE.revision(), requestId, chunkId));
             }
         }
-        evictOverflow();
     }
 
     public static boolean acceptChunk(long packetRevision, long requestId, int chunkId,
@@ -302,6 +310,7 @@ public final class ClientShopCatalog {
         int built = 0;
         boolean productsChanged = false;
         while (!pendingChunks.isEmpty() && System.nanoTime() < deadline) {
+            preferPinnedChunk();
             PendingChunk pending = pendingChunks.removeFirst();
             if (pending.done()) {
                 finishChunk(pending);
@@ -358,13 +367,16 @@ public final class ClientShopCatalog {
                 || !STATE.ready()) return;
         startJeiProductScan();
         if (ShopJeiProductCatalog.refreshPendingFtbqItems()) ClientShopJeiMode.productsChanged();
-        pumpMaterialization(1_500_000L);
+        // 商店开着时，解析预算留给界面那一帧，并且先喂可视格子。这里再泵 1.5ms 会抢在商品前面。
+        boolean shopOpen = shopScreenOpen();
+        if (!shopOpen) pumpMaterialization(1_500_000L);
 
         int sent = 0;
         int attempts = 0;
         int attemptLimit = Math.min(32, jeiProductChunkQueue.size());
+        int sendLimit = shopOpen ? 1 : 4;
         long now = net.minecraft.Util.getMillis();
-        while (sent < 4 && attempts < attemptLimit && !jeiProductChunkQueue.isEmpty()) {
+        while (sent < sendLimit && attempts < attemptLimit && !jeiProductChunkQueue.isEmpty()) {
             int chunkId = jeiProductChunkQueue.removeFirst();
             attempts++;
             if (jeiProductScannedChunks.contains(chunkId)) continue;
@@ -489,6 +501,27 @@ public final class ClientShopCatalog {
         for (String c : order) if (discovered.contains(c)) result.add(c);
         for (String c : discovered) if (!result.contains(c)) result.add(c);
         return List.copyOf(result);
+    }
+
+    /** 把商店正在看的 chunk 换到队首。正在解析的那一块如果已经是钉住的，就不动。 */
+    private static void preferPinnedChunk() {
+        if (pinnedChunks.isEmpty() || pendingChunks.size() < 2) return;
+        PendingChunk head = pendingChunks.peekFirst();
+        if (head != null && pinnedChunks.contains(head.chunkId())) return;
+        int n = pendingChunks.size();
+        for (int i = 0; i < n; i++) {
+            PendingChunk next = pendingChunks.removeFirst();
+            if (pinnedChunks.contains(next.chunkId())) {
+                pendingChunks.addFirst(next);
+                return;
+            }
+            pendingChunks.addLast(next);
+        }
+    }
+
+    private static boolean shopScreenOpen() {
+        Minecraft mc = Minecraft.getInstance();
+        return mc != null && mc.screen instanceof ShopScreen;
     }
 
     private static void finishChunk(PendingChunk pending) {

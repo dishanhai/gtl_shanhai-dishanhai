@@ -22,7 +22,7 @@ import java.util.Map;
 /**
  * 货币汇率 / 币值配置（山海署名）。
  *
- * <p>读取 {@code config/gt_shanhai/currency_rates.json}（可热改不重编译），格式：
+ * <p>读取 {@code config/gt_shanhai/shop/currency/currency_rates.json}（可热改不重编译），格式：
  * <pre>{ "dishanhai:copper_coin": 1, "dishanhai:dog_coins": -1, ... }</pre>
  * 每种货币映射到一个 <b>基准价值</b>（long，以 copper_coin=1 为锚）。</p>
  *
@@ -37,8 +37,10 @@ import java.util.Map;
  */
 public final class CurrencyRateConfig {
 
-    private static final String CONFIG_DIR = "config/gt_shanhai";
-    private static final File RATE_FILE = new File(CONFIG_DIR, "currency_rates.json");
+    private static File rateFile() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.currencyRates()).toFile();
+    }
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     /** 币种 → 基准价值（保序）。 */
@@ -85,11 +87,11 @@ public final class CurrencyRateConfig {
     public static synchronized void reload() {
         RATES.clear();
         loaded = true;
-        if (!RATE_FILE.exists()) {
+        if (!rateFile().exists()) {
             writeDefault();
         }
         // 必须显式 UTF-8：FileReader 用系统默认编码会把中文键读乱（本表键为纯 ASCII，但保持一致规范）
-        try (Reader r = new InputStreamReader(new FileInputStream(RATE_FILE), StandardCharsets.UTF_8)) {
+        try (Reader r = new InputStreamReader(new FileInputStream(rateFile()), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(r).getAsJsonObject();
             for (String key : root.keySet()) {
                 try {
@@ -129,8 +131,7 @@ public final class CurrencyRateConfig {
         for (String o : other) root.addProperty("dishanhai:" + o, 1L);
 
         try {
-            new File(CONFIG_DIR).mkdirs();
-            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(RATE_FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(rateFile()), StandardCharsets.UTF_8)) {
                 w.write(GSON.toJson(root));
             }
             GTDishanhaiMod.LOGGER.info("[CurrencyRate] 已生成默认 currency_rates.json");

@@ -29,8 +29,10 @@ import java.util.Map;
  */
 public final class ShopQuestLinkConfig {
 
-    private static final String CONFIG_DIR = "config/gt_shanhai";
-    private static final File LINKS_FILE = new File(CONFIG_DIR, "shop_quest_links.json");
+    private static File linksFile() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.shopQuestLinks()).toFile();
+    }
     private static final com.google.gson.Gson GSON =
             new com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
@@ -80,12 +82,12 @@ public final class ShopQuestLinkConfig {
     public static synchronized void reload() {
         Map<String, List<String>> next = new LinkedHashMap<>();
         loaded = true;
-        if (!LINKS_FILE.exists()) {
+        if (!linksFile().exists()) {
             links = next;
             return;
         }
         try (java.io.Reader r = new java.io.InputStreamReader(
-                new java.io.FileInputStream(LINKS_FILE), StandardCharsets.UTF_8)) {
+                new java.io.FileInputStream(linksFile()), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(r).getAsJsonObject();
             for (Map.Entry<String, JsonElement> e : root.entrySet()) {
                 if (!e.getValue().isJsonArray()) continue;
@@ -104,14 +106,13 @@ public final class ShopQuestLinkConfig {
 
     private static void save() {
         try {
-            new File(CONFIG_DIR).mkdirs();
             JsonObject root = new JsonObject();
             for (Map.Entry<String, List<String>> e : links.entrySet()) {
                 JsonArray arr = new JsonArray();
                 for (String v : e.getValue()) arr.add(v);
                 root.add(e.getKey(), arr);
             }
-            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(LINKS_FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter w = new OutputStreamWriter(new FileOutputStream(linksFile()), StandardCharsets.UTF_8)) {
                 w.write(GSON.toJson(root));
             }
         } catch (Exception e) {

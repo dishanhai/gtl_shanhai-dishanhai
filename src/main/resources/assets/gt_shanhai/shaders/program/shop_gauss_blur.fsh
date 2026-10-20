@@ -14,6 +14,10 @@ uniform float Progress;
 uniform float Smooth;
 uniform vec4 Rect;   // xy = 左下角 UV，zw = 右上角 UV
 uniform vec4 Hole;   // 正在飞行的卡片或浮层矩形，保持清晰
+// PostChain 的 float uniform 走 glUniform1fv，所以这里是 8 个矩形 × 4 分量，不是 vec4[8]。
+// CellCount=0 时忽略，行为与只有 Rect 的旧路径相同。
+uniform float CellRects[32];
+uniform int CellCount;
 
 in vec2 texCoord;
 in vec2 oneTexel;
@@ -27,18 +31,44 @@ const float W2 = 0.070270;
 const float O1 = 1.384615;
 const float O2 = 3.230769;
 
+bool insideBox(vec2 p, vec4 b) {
+    return p.x >= b.x && p.x <= b.z && p.y >= b.y && p.y <= b.w;
+}
+
 void main() {
     vec2 uv = texCoord;
 
-    bool insideRect = uv.x >= Rect.x && uv.x <= Rect.z
-            && uv.y >= Rect.y && uv.y <= Rect.w;
     bool insideHole = Hole.z > Hole.x && Hole.w > Hole.y
             && uv.x >= Hole.x && uv.x <= Hole.z
             && uv.y >= Hole.y && uv.y <= Hole.w;
-
-    if (!insideRect || insideHole) {
+    if (!insideBox(uv, Rect) || insideHole) {
         fragColor = texture(DiffuseSampler, uv);
         return;
+    }
+
+    vec4 box = Rect;
+    if (CellCount > 0) {
+        bool hit = false;
+        vec4 c0 = vec4(CellRects[0], CellRects[1], CellRects[2], CellRects[3]);
+        vec4 c1 = vec4(CellRects[4], CellRects[5], CellRects[6], CellRects[7]);
+        vec4 c2 = vec4(CellRects[8], CellRects[9], CellRects[10], CellRects[11]);
+        vec4 c3 = vec4(CellRects[12], CellRects[13], CellRects[14], CellRects[15]);
+        vec4 c4 = vec4(CellRects[16], CellRects[17], CellRects[18], CellRects[19]);
+        vec4 c5 = vec4(CellRects[20], CellRects[21], CellRects[22], CellRects[23]);
+        vec4 c6 = vec4(CellRects[24], CellRects[25], CellRects[26], CellRects[27]);
+        vec4 c7 = vec4(CellRects[28], CellRects[29], CellRects[30], CellRects[31]);
+        if (insideBox(uv, c0)) { box = c0; hit = true; }
+        else if (CellCount > 1 && insideBox(uv, c1)) { box = c1; hit = true; }
+        else if (CellCount > 2 && insideBox(uv, c2)) { box = c2; hit = true; }
+        else if (CellCount > 3 && insideBox(uv, c3)) { box = c3; hit = true; }
+        else if (CellCount > 4 && insideBox(uv, c4)) { box = c4; hit = true; }
+        else if (CellCount > 5 && insideBox(uv, c5)) { box = c5; hit = true; }
+        else if (CellCount > 6 && insideBox(uv, c6)) { box = c6; hit = true; }
+        else if (CellCount > 7 && insideBox(uv, c7)) { box = c7; hit = true; }
+        if (!hit) {
+            fragColor = texture(DiffuseSampler, uv);
+            return;
+        }
     }
 
     float radius = Radius * clamp(Progress, 0.0, 1.0);
@@ -47,8 +77,8 @@ void main() {
         return;
     }
 
-    vec2 lo = Rect.xy;
-    vec2 hi = Rect.zw;
+    vec2 lo = box.xy;
+    vec2 hi = box.zw;
 
     // 文字背后要连续的高斯，不能用下面那组宽间距 5-tap，否则字形会裂成残影。
     if (Smooth > 0.5) {

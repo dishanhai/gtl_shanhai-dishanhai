@@ -182,7 +182,7 @@ public final class DShanhaiSdaContentStore {
     }
 
     /**
-     * 扫描 config/gt_shanhai/shop.json，提取商品 goodsNbt 模板里写死的 shanhai_sda_uuid——
+     * 扫描 config/gt_shanhai/shop/shop.json，提取商品 goodsNbt 模板里写死的 shanhai_sda_uuid——
      * 商品本体就是提前捕获的固定 SDA（管理员在编辑器里选中一个已有 SDA 作为「商品」）时会带这个字段，
      * 与任务奖励同构（UUID 写死在可分发的配置文件里），复用同一套正则扫描。
      *
@@ -192,7 +192,7 @@ public final class DShanhaiSdaContentStore {
      */
     public static java.util.Set<UUID> scanShopJsonUuids() {
         java.util.Set<UUID> result = new java.util.LinkedHashSet<>();
-        java.io.File file = new java.io.File("config/gt_shanhai", "shop.json");
+        java.io.File file = com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.shop().toFile();
         if (!file.isFile()) return result;
         try {
             String text = new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);

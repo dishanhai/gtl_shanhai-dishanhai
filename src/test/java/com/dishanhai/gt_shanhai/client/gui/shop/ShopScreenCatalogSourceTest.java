@@ -22,6 +22,12 @@ class ShopScreenCatalogSourceTest {
                 () -> assertTrue(source.contains("ShopGridViewport.visibleRange")),
                 () -> assertTrue(source.contains("ShopGridViewport.indexAt")),
                 () -> assertTrue(source.contains("drawLoadingCell")),
+                () -> assertTrue(source.contains("GRID_LOAD_OVERSCAN")),
+                () -> assertTrue(source.contains("LOAD_PUMP_SETTLED_NS")),
+                () -> assertTrue(source.contains("frameLoadKeys")),
+                () -> assertTrue(Files.readString(Path.of(
+                        "src/main/java/com/dishanhai/gt_shanhai/client/shop/ClientShopCatalog.java"))
+                        .contains("preferPinnedChunk")),
                 () -> assertTrue(source.contains("cardCategoryBadge")),
                 () -> assertTrue(source.contains("GuiRenderUtil.trimText(this.font, categoryBadge")),
                 () -> assertFalse(source.contains("ShopConfig.getTopCategories")),

@@ -32,6 +32,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -155,6 +156,25 @@ public class ShopScreen extends ScaledScreen {
     private final long screenOpenAtMs = System.currentTimeMillis();
     private long gridSwitchAtMs;
     private int gridSlideDir = 1;
+    /** 开场或切页的 150ms 里少解析，避免把缩放/横移卡掉。落位后把预算留给可视格子。 */
+    private static final long LOAD_PUMP_MOTION_NS = 400_000L;
+    private static final long LOAD_PUMP_SETTLED_NS = 2_500_000L;
+    /** 绘制仍只超扫 1 行；预取再多 2 行，滚进去之前 chunk 已经在路上。 */
+    private static final int GRID_LOAD_OVERSCAN = 3;
+    /** 占位文字只横移这一段，格子和物品槽不动。 */
+    private static final float LOAD_CELL_SLIDE_PX = 6f;
+    private static final long LOAD_BLUR_PERIOD_MS = 900L;
+    private static final int LOAD_BLUR_CAP = ShopGaussBlur.MAX_CELL_RECTS;
+    private final Map<Long, Long> loadingCellAtMs = new HashMap<>();
+    private final ArrayList<Long> frameLoadKeys = new ArrayList<>();
+    private final int[] loadBlurVirtual = new int[LOAD_BLUR_CAP * 4];
+    private final int[] loadBlurFb = new int[LOAD_BLUR_CAP * 4];
+    private int loadBlurRuns;
+    private int loadSeen;
+    private int loadMissing;
+    private int unionX0, unionY0, unionX1, unionY1;
+    private boolean loadRunOpen;
+    private int loadRunX, loadRunY, loadRunR, loadRunB, loadRunRow, loadRunPrevIdx;
 
     // ===== 商品卡片 → 右侧详情面板的共享元素飞行 =====
     // 点格子时，被点的卡片沿一条几何通道（位置 + 尺寸同时插值）长到详情面板大小；
@@ -781,6 +801,7 @@ public class ShopScreen extends ScaledScreen {
         switchAt(level, value);
         clearSelection();
         scroll = 0;
+        loadingCellAtMs.clear();
         gridSwitchAtMs = System.currentTimeMillis();
         if (level == 3) recomputeVisible();
         else this.init(Minecraft.getInstance(), this.width, this.height);
@@ -1049,8 +1070,16 @@ public class ShopScreen extends ScaledScreen {
     private int cellY(int row) { return contentTop() + row * rowStride() - scroll; }
 
     private ShopGridViewport.Range visibleGridRange() {
+        return gridRange(1);
+    }
+
+    private ShopGridViewport.Range preloadGridRange() {
+        return gridRange(GRID_LOAD_OVERSCAN);
+    }
+
+    private ShopGridViewport.Range gridRange(int overscan) {
         return ShopGridViewport.visibleRange(
-                visibleEntryKeys.size(), gridColumns(), scroll, gridHeight(), rowStride(), 1);
+                visibleEntryKeys.size(), gridColumns(), scroll, gridHeight(), rowStride(), overscan);
     }
 
     private int entryIndexAt(double mouseX, double mouseY) {
@@ -1298,13 +1327,16 @@ public class ShopScreen extends ScaledScreen {
         if (stageLockActive) maybeRequestStagePreview(stageLockPath);
         // 阶段锁定只影响商店内容区，不能把游戏世界送进全局后处理。
         ShopStageBlur.setActive(false);
-        ClientShopCatalog.pumpMaterialization(1_500_000L);
-        ShopGridViewport.Range loadRange = visibleGridRange();
-        List<Long> neededKeys = new ArrayList<>();
+        long nowMs = System.currentTimeMillis();
+        boolean motionBusy = nowMs - screenOpenAtMs < GuiRenderUtil.MOTION_MS
+                || (gridSwitchAtMs > 0L && nowMs - gridSwitchAtMs < GuiRenderUtil.MOTION_MS);
+        ClientShopCatalog.pumpMaterialization(motionBusy ? LOAD_PUMP_MOTION_NS : LOAD_PUMP_SETTLED_NS);
+        ShopGridViewport.Range loadRange = preloadGridRange();
+        frameLoadKeys.clear();
         for (int i = loadRange.fromInclusive(); i < loadRange.toExclusive(); i++) {
-            neededKeys.add(visibleEntryKeys.get(i));
+            frameLoadKeys.add(visibleEntryKeys.get(i));
         }
-        if (selectedEntryKey >= 0L) neededKeys.add(selectedEntryKey);
+        if (selectedEntryKey >= 0L) frameLoadKeys.add(selectedEntryKey);
         // 任务书跳转挂起的商品：拉它所在 chunk，到货即选中（本帧 pump 刚好可能把它实体化出来）
         if (pendingSelectEntryKey >= 0L) {
             ShopEntry pending = ClientShopCatalog.get(pendingSelectEntryKey);
@@ -1312,7 +1344,7 @@ public class ShopScreen extends ScaledScreen {
                 selectEntry(pendingSelectEntryKey, pending);
                 pendingSelectEntryKey = -1L;
             } else {
-                neededKeys.add(pendingSelectEntryKey);
+                frameLoadKeys.add(pendingSelectEntryKey);
             }
         }
         if (pendingRestoreStableId != null && selected == null) {
@@ -1320,22 +1352,22 @@ public class ShopScreen extends ScaledScreen {
             if (restoreKey >= 0L) {
                 pendingRestoreStableId = null;
                 focusOnEntry(restoreKey);
-                if (selectedEntryKey >= 0L) neededKeys.add(selectedEntryKey);
+                if (selectedEntryKey >= 0L) frameLoadKeys.add(selectedEntryKey);
             } else if (ClientShopCatalog.ready()) {
                 pendingRestoreStableId = null;
             }
         }
         if (selected != null && selected.hasLinkTarget()) {
             long linked = ClientShopCatalog.linkedEntryKey(selected.getLinkTo());
-            if (linked >= 0L) neededKeys.add(linked);
+            if (linked >= 0L) frameLoadKeys.add(linked);
         }
         if (cartOverlayOpen) {
             for (String stableId : ClientShopCart.getAll().keySet()) {
                 long k = ClientShopCatalog.keyOfStableId(stableId);
-                if (k >= 0L) neededKeys.add(k);
+                if (k >= 0L) frameLoadKeys.add(k);
             }
         }
-        ClientShopCatalog.ensureLoadedRange(neededKeys, 0, neededKeys.size());
+        ClientShopCatalog.ensureLoadedRange(frameLoadKeys, 0, frameLoadKeys.size());
         syncOpenMotionWidgets();
         float openT = GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS);
         boolean opening = openT < 1f;
@@ -2391,15 +2423,28 @@ public class ShopScreen extends ScaledScreen {
             g.drawCenteredString(this.font, emptyGridHint(), gx + gw / 2, gy + 18, GRAY);
         }
         ShopGridViewport.Range range = visibleGridRange();
+        resetLoadBlurScan();
+        int drawnCellW = cellW();
+        int drawnCellH = cellH();
         for (int idx = range.fromInclusive(); idx < range.toExclusive(); idx++) {
             int col = idx % cols;
             int row = idx / cols;
             int cy = cellY(row);
-            if (cy + cellH() <= gy || cy >= gy + gh) continue; // 只画与网格相交的 cell
+            if (cy + drawnCellH <= gy || cy >= gy + gh) continue; // 只画与网格相交的 cell
             ShopEntry entry = visibleEntry(idx);
-            if (entry == null) drawLoadingCell(g, visibleEntryKeys.get(idx), cellX(col), cy);
-            else drawCell(g, entry, cellX(col), cy, mx, my);
+            int cx = cellX(col);
+            loadSeen++;
+            if (entry == null) {
+                drawLoadingCell(g, visibleEntryKeys.get(idx), cx, cy);
+                noteLoadingCell(idx, row, cx, cy, drawnCellW, drawnCellH, gx, gy, gw, gh);
+            } else {
+                loadingCellAtMs.remove(visibleEntryKeys.get(idx));
+                closeLoadBlurRun();
+                drawCell(g, entry, cx, cy, mx, my);
+            }
         }
+        closeLoadBlurRun();
+        requestLoadingGauss();
         // 商品卡片拖拽中：高亮当前悬停的目标格子（原格子照常显示，不做实时重排，见 dragCardEntryKey 注释）
         if (dragCardEntryKey != -1L && dragCardMoving) {
             int targetIdx = entryIndexAt(dragCardMx, dragCardMy);
@@ -2431,7 +2476,8 @@ public class ShopScreen extends ScaledScreen {
         g.fill(x + w - 1, y, x + w, y + h, color);
     }
 
-    /** 未收到完整 JSON 时只画轻量占位，不提前创建 ItemStack 或访问物品模型。 */
+    /** 未收到完整 JSON 时只画轻量占位，不提前创建 ItemStack 或访问物品模型。
+     *  格子和物品槽留在原位。名称只在面板已经落位后横移 6px 进来，不跟开场缩放或切页横移叠第二段。 */
     private void drawLoadingCell(GuiGraphics g, long entryKey, int cx, int cy) {
         int cellW = cellW();
         int cellH = cellH();
@@ -2443,8 +2489,6 @@ public class ShopScreen extends ScaledScreen {
         String label = "加载中…";
         if (stub != null && !stub.displayName().isEmpty()) label = stub.displayName();
         else if (stub != null && !stub.goodsIds().isEmpty()) label = stub.goodsIds().get(0);
-        g.drawString(this.font, GuiRenderUtil.trimText(this.font, label, cellW - 29),
-                slotX + 23, cy + 4, GRAY, true);
         if (stub != null && ClientShopFavorites.contains(stub.stableId())) {
             g.drawString(this.font, "§e★", cx + cellW - 10, cy + 14, GOLD, false);
         }
@@ -2452,7 +2496,147 @@ public class ShopScreen extends ScaledScreen {
             renderBatchSelectionOutline(g, cx, cy, cellW, cellH);
         }
         renderNumberBar(g, cx + 2, cy + cellH - 13, 34);
-        g.drawString(this.font, "§8加载中", cx + 5, cy + cellH - 11, GRAY, false);
+        float dx = loadingLabelDx(entryKey);
+        boolean slide = dx > 0.05f;
+        if (slide) {
+            g.pose().pushPose();
+            g.pose().translate(dx, 0f, 0f);
+        }
+        try {
+            g.drawString(this.font, GuiRenderUtil.trimText(this.font, label, cellW - 29),
+                    slotX + 23, cy + 4, GRAY, true);
+            g.drawString(this.font, "§8加载中", cx + 5, cy + cellH - 11, GRAY, false);
+        } finally {
+            if (slide) g.pose().popPose();
+        }
+    }
+
+    /** 占位第一次出现才记时刻。开场和切页已经在动，这段横移等它们落位再播，避免叠两条通道。 */
+    private float loadingLabelDx(long entryKey) {
+        long now = System.currentTimeMillis();
+        Long seen = loadingCellAtMs.get(entryKey);
+        if (seen == null) {
+            if (loadingCellAtMs.size() > 256) loadingCellAtMs.clear();
+            seen = now;
+            loadingCellAtMs.put(entryKey, seen);
+        }
+        if (!shopMotionSettled()) return 0f;
+        float t = GuiRenderUtil.popAnimProgress(seen, GuiRenderUtil.MOTION_MS);
+        if (t >= 1f) return 0f;
+        return LOAD_CELL_SLIDE_PX * (1f - GuiRenderUtil.easeOut(t));
+    }
+
+    private boolean shopMotionSettled() {
+        return GuiRenderUtil.popAnimProgress(screenOpenAtMs, GuiRenderUtil.MOTION_MS) >= 1f
+                && GuiRenderUtil.popAnimProgress(gridSwitchAtMs, GuiRenderUtil.MOTION_MS) >= 1f;
+    }
+
+    /** 加载没完成时强度在 0.42 和 0.85 之间来回，密采样，不扫光。落位后的商品不进这个矩形。 */
+    private static float loadingBlurStrength(long now) {
+        long phase = Math.floorMod(now, LOAD_BLUR_PERIOD_MS);
+        float p = phase / (float) LOAD_BLUR_PERIOD_MS;
+        float tri = p < 0.5f ? p * 2f : (1f - p) * 2f;
+        float s = tri * tri * (3f - 2f * tri);
+        return 0.42f + 0.43f * s;
+    }
+
+    private void resetLoadBlurScan() {
+        loadBlurRuns = 0;
+        loadSeen = 0;
+        loadMissing = 0;
+        unionX0 = Integer.MAX_VALUE;
+        unionY0 = Integer.MAX_VALUE;
+        unionX1 = Integer.MIN_VALUE;
+        unionY1 = Integer.MIN_VALUE;
+        loadRunOpen = false;
+        loadRunPrevIdx = -2;
+    }
+
+    private void noteLoadingCell(int idx, int row, int x, int y, int w, int h,
+                                 int gx, int gy, int gw, int gh) {
+        int x0 = Math.max(x, gx);
+        int y0 = Math.max(y, gy);
+        int x1 = Math.min(x + w, gx + gw);
+        int y1 = Math.min(y + h, Math.min(gy + gh, contentBlurBottom()));
+        if (x1 - x0 < 2 || y1 - y0 < 2) {
+            closeLoadBlurRun();
+            return;
+        }
+        loadMissing++;
+        if (x0 < unionX0) unionX0 = x0;
+        if (y0 < unionY0) unionY0 = y0;
+        if (x1 > unionX1) unionX1 = x1;
+        if (y1 > unionY1) unionY1 = y1;
+        boolean extend = loadRunOpen && idx == loadRunPrevIdx + 1 && row == loadRunRow;
+        if (extend) {
+            loadRunR = x1;
+            if (y0 < loadRunY) loadRunY = y0;
+            if (y1 > loadRunB) loadRunB = y1;
+        } else {
+            closeLoadBlurRun();
+            loadRunOpen = true;
+            loadRunX = x0;
+            loadRunY = y0;
+            loadRunR = x1;
+            loadRunB = y1;
+            loadRunRow = row;
+        }
+        loadRunPrevIdx = idx;
+    }
+
+    private void closeLoadBlurRun() {
+        if (!loadRunOpen) return;
+        loadRunOpen = false;
+        if (loadBlurRuns >= LOAD_BLUR_CAP) return;
+        int w = loadRunR - loadRunX;
+        int h = loadRunB - loadRunY;
+        if (w < 2 || h < 2) return;
+        int o = loadBlurRuns * 4;
+        loadBlurVirtual[o] = loadRunX;
+        loadBlurVirtual[o + 1] = loadRunY;
+        loadBlurVirtual[o + 2] = w;
+        loadBlurVirtual[o + 3] = h;
+        loadBlurRuns++;
+    }
+
+    /** 整页都在加载时糊一整块；掺着已加载商品时只糊连续的占位条，最多 8 条。开场和切页让给原有的那一趟。 */
+    private void requestLoadingGauss() {
+        if (loadMissing <= 0 || stageLockActive || !shopMotionSettled()) return;
+        if (this.minecraft == null || this.minecraft.getMainRenderTarget() == null) return;
+        float strength = loadingBlurStrength(System.currentTimeMillis());
+        float pixelScale = (float) this.minecraft.getMainRenderTarget().width
+                / (float) Math.max(1, this.width);
+        float radiusPx = ShopGaussBlur.BLUR_RADIUS_VIRTUAL * this.guiScale * pixelScale;
+        if (loadMissing == loadSeen && unionX1 > unionX0 && unionY1 > unionY0) {
+            int[] clipped = clampToShopInner(unionX0, unionY0, unionX1 - unionX0, unionY1 - unionY0);
+            if (clipped[2] <= 1 || clipped[3] <= 1) return;
+            ShopGaussBlur.requestSmooth(
+                    toFramebufferX(clipped[0]), toFramebufferY(clipped[1]),
+                    toFramebufferW(clipped[2]), toFramebufferH(clipped[3]),
+                    strength, radiusPx, 0, 0, 0, 0);
+            return;
+        }
+        int n = 0;
+        for (int i = 0; i < loadBlurRuns && n < LOAD_BLUR_CAP; i++) {
+            int o = i * 4;
+            int[] clipped = clampToShopInner(
+                    loadBlurVirtual[o], loadBlurVirtual[o + 1], loadBlurVirtual[o + 2], loadBlurVirtual[o + 3]);
+            if (clipped[2] <= 1 || clipped[3] <= 1) continue;
+            int d = n * 4;
+            loadBlurFb[d] = toFramebufferX(clipped[0]);
+            loadBlurFb[d + 1] = toFramebufferY(clipped[1]);
+            loadBlurFb[d + 2] = toFramebufferW(clipped[2]);
+            loadBlurFb[d + 3] = toFramebufferH(clipped[3]);
+            n++;
+        }
+        if (n <= 0) return;
+        if (n == 1) {
+            ShopGaussBlur.requestSmooth(
+                    loadBlurFb[0], loadBlurFb[1], loadBlurFb[2], loadBlurFb[3],
+                    strength, radiusPx, 0, 0, 0, 0);
+        } else {
+            ShopGaussBlur.requestSmoothCells(loadBlurFb, n, strength, radiusPx);
+        }
     }
 
     /**

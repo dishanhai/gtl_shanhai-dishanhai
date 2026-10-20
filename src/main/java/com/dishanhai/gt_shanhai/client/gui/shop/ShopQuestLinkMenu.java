@@ -26,7 +26,7 @@ import java.util.List;
  *
  * <p>手动指定「这个任务去商店买什么」，跟商品自己配的前置任务（被动反查）是两条独立来源，
  * 最终一起显示在跳转按钮上（见 {@code FtbViewQuestPanelShopButtonMixin}）。绑定关系存服务端
- * {@code config/gt_shanhai/shop_quest_links.json}，不写进 FTBQ 的任务数据，任务书导入导出不受影响。</p>
+ * {@code config/gt_shanhai/shop/shop_quest_links.json}，不写进 FTBQ 的任务数据，任务书导入导出不受影响。</p>
  */
 public final class ShopQuestLinkMenu {
 

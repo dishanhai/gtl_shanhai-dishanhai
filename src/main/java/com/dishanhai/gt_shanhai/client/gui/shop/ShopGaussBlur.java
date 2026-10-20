@@ -21,6 +21,7 @@ import java.util.List;
  * <ul>
  *     <li>用原版 {@link PostChain} 做 2 趟可分离高斯（H → V），最后一趟落回 {@code minecraft:main}；</li>
  *     <li>默认 5 次宽间距采样，给卡片飞行；文字层走 {@link #requestSmooth} 的密采样高斯，避免字形残影；</li>
+ *     <li>加载中的商品格走 {@link #requestSmoothCells}，一趟里最多 8 块，不另开渲染目标。</li>
  *     <li>{@code Rect} 把模糊限制在调用方给出的商店内矩形，{@code Hole} 把飞行卡片或浮层挖掉保持清晰；</li>
  *     <li>{@code Progress} 由调用方驱动：飞行晚于位移淡入，浮层跟 150ms 弹入走。</li>
  * </ul>
@@ -34,6 +35,8 @@ public final class ShopGaussBlur {
 
     /** 模糊半径（虚拟 GUI 单位）；实际像素半径按 ScaledScreen × 窗口 GUI scale 换算。 */
     public static final float BLUR_RADIUS_VIRTUAL = 5.0f;
+    /** 同一趟后处理能挖开的加载格矩形数。多出来的格子只画占位，不再各跑一趟。 */
+    public static final int MAX_CELL_RECTS = 8;
     private static final long RETRY_MS = 5_000L;
 
     /**
@@ -62,6 +65,11 @@ public final class ShopGaussBlur {
     private static float extraRadius = BLUR_RADIUS_VIRTUAL;
     private static float[] extraRect;
     private static float[] extraHole;
+    /** 加载格的 UV 矩形，最多 {@link #MAX_CELL_RECTS} 块，每块 4 个分量。0 表示只用主矩形。 */
+    private static int cellCount;
+    private static final float[] cellUv = new float[MAX_CELL_RECTS * 4];
+    private static final float[] cellUvSnapshot = new float[MAX_CELL_RECTS * 4];
+    private static final float[] NO_CELLS = new float[MAX_CELL_RECTS * 4];
 
     private ShopGaussBlur() {
     }
@@ -79,7 +87,7 @@ public final class ShopGaussBlur {
             // 避免第一帧 isReady() 误报可用而闪烁一次。
             try {
                 uniformFailed = !applyUniforms(post, 1f, BLUR_RADIUS_VIRTUAL,
-                        new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f}, false);
+                        new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f}, false, 0, NO_CELLS);
             } catch (Exception e) {
                 uniformFailed = true;
                 GTDishanhaiMod.LOGGER.error("商店高斯模糊 uniform 预检失败，已回退为局部磨砂", e);
@@ -105,6 +113,7 @@ public final class ShopGaussBlur {
         extraRect = null;
         extraHole = null;
         requestSmooth = false;
+        cellCount = 0;
         if (strength <= 0.01f || w <= 0 || h <= 0) {
             clear();
             return;
@@ -130,6 +139,59 @@ public final class ShopGaussBlur {
                                      int holeX, int holeY, int holeW, int holeH) {
         request(x, y, w, h, strength, radiusPixels, holeX, holeY, holeW, holeH);
         if (requested) requestSmooth = true;
+    }
+
+    /**
+     * 同一趟密采样高斯里糊多块加载格。{@code xywh} 是 framebuffer 像素，每块 4 个分量（x,y,w,h），
+     * 原点在左上角。主矩形取这些块的并集，着色器再把并集里已经加载好的格子挖掉。
+     * 只有一块时退回 {@link #requestSmooth}，少做逐像素判断。
+     */
+    public static void requestSmoothCells(int[] xywh, int count, float strength, float radiusPixels) {
+        if (xywh == null || count <= 0 || strength <= 0.01f) return;
+        int n = Math.min(count, MAX_CELL_RECTS);
+        int x0 = Integer.MAX_VALUE;
+        int y0 = Integer.MAX_VALUE;
+        int x1 = Integer.MIN_VALUE;
+        int y1 = Integer.MIN_VALUE;
+        int filled = 0;
+        for (int i = 0; i < n; i++) {
+            int o = i * 4;
+            if (o + 3 >= xywh.length) break;
+            int w = xywh[o + 2];
+            int h = xywh[o + 3];
+            if (w <= 0 || h <= 0) continue;
+            int x = xywh[o];
+            int y = xywh[o + 1];
+            x0 = Math.min(x0, x);
+            y0 = Math.min(y0, y);
+            x1 = Math.max(x1, x + w);
+            y1 = Math.max(y1, y + h);
+            filled++;
+        }
+        if (filled <= 0 || x1 <= x0 || y1 <= y0) return;
+        requestSmooth(x0, y0, x1 - x0, y1 - y0, strength, radiusPixels, 0, 0, 0, 0);
+        if (!requested || filled <= 1) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getMainRenderTarget() == null) return;
+        int fbW = mc.getMainRenderTarget().width;
+        int fbH = mc.getMainRenderTarget().height;
+        int written = 0;
+        for (int i = 0; i < n && written < MAX_CELL_RECTS; i++) {
+            int o = i * 4;
+            if (o + 3 >= xywh.length) break;
+            int w = xywh[o + 2];
+            int h = xywh[o + 3];
+            if (w <= 0 || h <= 0) continue;
+            float[] uv = toUvRect(xywh[o], xywh[o + 1], w, h, fbW, fbH);
+            int d = written * 4;
+            cellUv[d] = uv[0];
+            cellUv[d + 1] = uv[1];
+            cellUv[d + 2] = uv[2];
+            cellUv[d + 3] = uv[3];
+            written++;
+        }
+        for (int i = written * 4; i < cellUv.length; i++) cellUv[i] = 0f;
+        cellCount = written > 1 ? written : 0;
     }
 
     /**
@@ -165,6 +227,7 @@ public final class ShopGaussBlur {
         extraRadius = BLUR_RADIUS_VIRTUAL;
         extraRect = null;
         extraHole = null;
+        cellCount = 0;
     }
 
     /**
@@ -183,6 +246,8 @@ public final class ShopGaussBlur {
         float radius2 = extraRadius;
         float[] rect2 = extraRect;
         float[] hole2 = extraHole;
+        int cells = cellCount;
+        System.arraycopy(cellUv, 0, cellUvSnapshot, 0, cellUv.length);
         clear();
 
         boolean primary = hadRequest && rect != null && strength > 0.01f;
@@ -196,11 +261,11 @@ public final class ShopGaussBlur {
         Minecraft mc = Minecraft.getInstance();
         if (primary) {
             render(mc, strength, radius, rect,
-                    hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, smooth, partialTick);
+                    hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, smooth, cells, cellUvSnapshot, partialTick);
         }
         if (extra && isReady()) {
             render(mc, strength2, radius2, rect2,
-                    hole2 == null ? new float[]{0f, 0f, 0f, 0f} : hole2, false, partialTick);
+                    hole2 == null ? new float[]{0f, 0f, 0f, 0f} : hole2, false, 0, NO_CELLS, partialTick);
         }
     }
 
@@ -220,7 +285,8 @@ public final class ShopGaussBlur {
     }
 
     private static void render(Minecraft mc, float strength, float radius,
-                               float[] rect, float[] hole, boolean smooth, float partialTick) {
+                               float[] rect, float[] hole, boolean smooth,
+                               int cells, float[] cellData, float partialTick) {
         PostChain post = ensureChain(mc);
         if (post == null) return;
         if (mc.getMainRenderTarget() == null) return;
@@ -233,7 +299,7 @@ public final class ShopGaussBlur {
             chainHeight = fbH;
         }
         // 反射/着色器 uniform 任一不可用就整个跳过，绝不让 Rect 落回默认的全屏值。
-        if (!applyUniforms(post, strength, radius, rect, hole, smooth)) {
+        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData)) {
             uniformFailed = true;
             return;
         }
@@ -267,7 +333,8 @@ public final class ShopGaussBlur {
     }
 
     private static boolean applyUniforms(PostChain post, float strength, float radius,
-                                         float[] rect, float[] hole, boolean smooth) {
+                                         float[] rect, float[] hole, boolean smooth,
+                                         int cells, float[] cellData) {
         List<PostPass> passes = passesOf(post);
         if (passes.isEmpty()) return false;
         boolean allReady = true;
@@ -276,7 +343,10 @@ public final class ShopGaussBlur {
             Uniform holeUniform = pass.getEffect().getUniform("Hole");
             Uniform progressUniform = pass.getEffect().getUniform("Progress");
             Uniform smoothUniform = pass.getEffect().getUniform("Smooth");
-            if (rectUniform == null || holeUniform == null || progressUniform == null || smoothUniform == null) {
+            Uniform cellCountUniform = pass.getEffect().getUniform("CellCount");
+            Uniform cellRectsUniform = pass.getEffect().getUniform("CellRects");
+            if (rectUniform == null || holeUniform == null || progressUniform == null || smoothUniform == null
+                    || cellCountUniform == null || cellRectsUniform == null) {
                 allReady = false;
                 continue;
             }
@@ -284,6 +354,9 @@ public final class ShopGaussBlur {
             holeUniform.set(hole[0], hole[1], hole[2], hole[3]);
             progressUniform.set(strength);
             smoothUniform.set(smooth ? 1f : 0f);
+            int n = cells > 1 && cellData != null ? Math.min(cells, MAX_CELL_RECTS) : 0;
+            cellCountUniform.set(n);
+            cellRectsUniform.set(n > 0 ? cellData : NO_CELLS);
             Uniform radiusUniform = pass.getEffect().getUniform("Radius");
             if (radiusUniform != null) {
                 radiusUniform.set(radius);

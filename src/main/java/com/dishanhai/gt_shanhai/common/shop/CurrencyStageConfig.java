@@ -28,8 +28,10 @@ import java.util.Map;
  */
 public final class CurrencyStageConfig {
 
-    private static final String CONFIG_DIR = "config/gt_shanhai";
-    private static final File FILE = new File(CONFIG_DIR, "currency_stages.json");
+    private static File stageFile() {
+        return com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.ensureParent(
+                com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.currencyStages()).toFile();
+    }
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static final String DEFAULT_PREFIX = "杂货/正常";
 
@@ -102,8 +104,8 @@ public final class CurrencyStageConfig {
         TIERS.clear();
         prefix = DEFAULT_PREFIX;
         loaded = true;
-        if (!FILE.exists()) writeDefault();
-        try (InputStreamReader reader = new InputStreamReader(new FileInputStream(FILE), StandardCharsets.UTF_8)) {
+        if (!stageFile().exists()) writeDefault();
+        try (InputStreamReader reader = new InputStreamReader(new FileInputStream(stageFile()), StandardCharsets.UTF_8)) {
             JsonElement root = JsonParser.parseReader(reader);
             if (!root.isJsonObject()) return;
             JsonObject obj = root.getAsJsonObject();
@@ -155,8 +157,7 @@ public final class CurrencyStageConfig {
         root.addProperty("stagePrefix", DEFAULT_PREFIX);
         root.add("coins", coins);
         try {
-            new File(CONFIG_DIR).mkdirs();
-            try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(FILE), StandardCharsets.UTF_8)) {
+            try (OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(stageFile()), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));
             }
         } catch (Exception e) {
