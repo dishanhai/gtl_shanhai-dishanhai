@@ -47,6 +47,10 @@ object JeiShortcutInputInterceptor {
         // 复制类快捷键都是键盘 IMMEDIATE 输入，没有 SIMULATE/EXECUTE 配对问题。
         val action = JeiCopyShortcutHelper.copyAction(input)
         if (action == 0) return null
+        // 搜索框有键盘焦点时不抢 Ctrl 组合键，保持打字/Ctrl 操作原样。
+        if (Internal.getOptionalJeiRuntime().map { it.ingredientListOverlay.hasKeyboardFocus() }.orElse(false)) {
+            return null
+        }
 
         val handled = accessor.gtShanhaiFocusSource()
             .getIngredientUnderMouse(input, keyMappings)

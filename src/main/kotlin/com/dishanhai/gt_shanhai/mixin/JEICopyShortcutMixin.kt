@@ -39,7 +39,7 @@ open class JEICopyShortcutMixin {
     ) {
         val handled = JeiShortcutInputInterceptor.handleContainerInput(
             this as IUserInputHandler,
-            this as JeiCheatInputHandlerAccessor,
+            this as? JeiCheatInputHandlerAccessor ?: return,
             screen,
             input,
             keyMappings

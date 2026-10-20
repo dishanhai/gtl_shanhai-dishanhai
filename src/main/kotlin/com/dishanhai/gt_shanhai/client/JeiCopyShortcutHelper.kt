@@ -69,7 +69,9 @@ class JeiCopyShortcutHelper private constructor() {
             val key = input.key
             if (key.type != InputConstants.Type.KEYSYM) return 0
             if (key.value == org.lwjgl.glfw.GLFW.GLFW_KEY_UNKNOWN) return 0
-            if ((input.modifiers and org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL) == 0) return 0
+            // 鼠标事件拿不到 modifiers，键盘事件在部分界面也会传 0，所以两条路都认。
+            val ctrl = (input.modifiers and org.lwjgl.glfw.GLFW.GLFW_MOD_CONTROL) != 0 || Screen.hasControlDown()
+            if (!ctrl) return 0
             return when (key.value) {
                 org.lwjgl.glfw.GLFW.GLFW_KEY_C -> COPY_NAME
                 org.lwjgl.glfw.GLFW.GLFW_KEY_D -> COPY_TAG

@@ -31,9 +31,11 @@ open class JEIRecipeGuiInfinityCellMixin {
         keyMappings: IInternalKeyMappings,
         cir: CallbackInfoReturnable<Optional<IUserInputHandler>>
     ) {
+        // 访问器接口没合并进来时直接跳过，别让 JEI 输入链因为一次转型崩掉。
+        val accessor = this as? JeiRecipeLayoutHandlerAccessor ?: return
         val handled = JeiShortcutInputInterceptor.handleRecipeSlotInput(
             input,
-            (this as JeiRecipeLayoutHandlerAccessor).gtShanhaiRecipeLayout()
+            accessor.gtShanhaiRecipeLayout()
         )
         if (handled != null) cir.setReturnValue(handled)
     }
