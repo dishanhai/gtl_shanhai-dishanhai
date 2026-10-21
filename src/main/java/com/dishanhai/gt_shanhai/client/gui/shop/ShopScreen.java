@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ButtonFeedback;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.gui.scaled.SpringTable;
@@ -4475,15 +4476,21 @@ public class ShopScreen extends ScaledScreen {
                 return true;
             }
             // AE 风格步进按钮（两排 +1/+10/+100/+1000 与 -1/-10/-100/-1000，第三排 ×10/×100/÷10/÷100）
+            // ± 两排左键按住连发；×÷ 一排只单击，连发几下就会冲到 Long.MAX
             long[] steps = {1, 10, 100, 1000};
             long[] scales = {10, 100, 10, 100};
             int bw = (btnW - 9) / 4;
             for (int i = 0; i < 4; i++) {
                 int bx = cx + i * (bw + 3);
-                if (buttonHit(mx, my, bx, dy + 82, bw, 12)) { amount = addClamp(amount, steps[i]); syncAmountBox(); return true; }
-                if (buttonHit(mx, my, bx, dy + 96, bw, 12)) { amount = addClamp(amount, -steps[i]); syncAmountBox(); return true; }
+                if (buttonHit(mx, my, bx, dy + 82, bw, 12)) { beginStepHold(btn, pressKey(bx, dy + 82, bw, 12), steps[i]); return true; }
+                if (buttonHit(mx, my, bx, dy + 96, bw, 12)) { beginStepHold(btn, pressKey(bx, dy + 96, bw, 12), -steps[i]); return true; }
                 if (buttonHit(mx, my, bx, dy + 110, bw, 12)) {
-                    amount = i < 2 ? mulClamp(amount, scales[i]) : divClamp(amount, scales[i]);
+                    long next = i < 2 ? mulClamp(amount, scales[i]) : divClamp(amount, scales[i]);
+                    if (next == amount) {
+                        ShopUiSounds.limit();
+                        buttonFeedback.nudge(pressKey(bx, dy + 110, bw, 12), System.currentTimeMillis());
+                    }
+                    amount = next;
                     syncAmountBox();
                     return true;
                 }
@@ -4511,6 +4518,38 @@ public class ShopScreen extends ScaledScreen {
     }
 
     /** 数量加减夹取到 [1, Long.MAX]，防加法溢出。 */
+    /** 详情数量步进一次；已经到 1 或 Long.MAX、数量没变时返回 false。 */
+    private boolean stepAmount(long delta) {
+        long next = addClamp(amount, delta);
+        if (next == amount) return false;
+        amount = next;
+        syncAmountBox();
+        return true;
+    }
+
+    /**
+     * 按下 ± 步进按钮：先步进一次；左键按住再挂连发（{@link RepeatCurve#STEPPER}，越按越快，滴答声音高渐升）。
+     * 到了边界只低响一声、轻抖一下，连发随即停下。
+     */
+    private void beginStepHold(int btn, long stepPressKey, long delta) {
+        long now = System.currentTimeMillis();
+        if (!stepAmount(delta)) {
+            ShopUiSounds.limit();
+            buttonFeedback.nudge(stepPressKey, now);
+            return;
+        }
+        if (btn != 0) return;
+        buttonFeedback.holdRepeat(RepeatCurve.STEPPER, i -> {
+            if (stepAmount(delta)) {
+                ShopUiSounds.step(i);
+                return true;
+            }
+            ShopUiSounds.limit();
+            buttonFeedback.nudge(stepPressKey, System.currentTimeMillis());
+            return false;
+        }, now);
+    }
+
     private static long addClamp(long a, long delta) {
         if (delta > 0 && a > Long.MAX_VALUE - delta) return Long.MAX_VALUE;
         return Math.max(1L, a + delta);

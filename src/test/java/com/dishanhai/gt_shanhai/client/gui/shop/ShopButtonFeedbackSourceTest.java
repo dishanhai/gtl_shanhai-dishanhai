@@ -61,6 +61,21 @@ class ShopButtonFeedbackSourceTest {
     }
 
     @Test
+    void detailSteppersRepeatWhileHeldButCartSteppersDoNot() throws Exception {
+        String s = Files.readString(Path.of(SHOP));
+        String hold = extractBlock(s, "private void beginStepHold(");
+        assertTrue(hold.contains("buttonFeedback.holdRepeat(") && hold.contains("RepeatCurve.STEPPER"));
+        assertTrue(hold.contains("if (btn != 0) return;"), "只有左键按住才连发");
+        assertTrue(hold.contains("ShopUiSounds.step(") && hold.contains("ShopUiSounds.limit()"));
+        assertTrue(hold.contains("buttonFeedback.nudge("), "到边界轻抖一下");
+        String clicked = extractBlock(s, "protected boolean universalMouseClicked(");
+        assertTrue(clicked.contains("beginStepHold(btn, pressKey(bx, dy + 82, bw, 12), steps[i])"));
+        assertTrue(clicked.contains("beginStepHold(btn, pressKey(bx, dy + 96, bw, 12), -steps[i])"));
+        // 购物车 ± 每次都发 ShopCartEditPacket，连发会刷包
+        assertFalse(extractBlock(s, "private boolean handleCartOverlayClick(").contains("holdRepeat"));
+    }
+
+    @Test
     void buttonMotionRestoresThePoseStack() throws Exception {
         String util = Files.readString(Path.of(UTIL));
         String motion = extractBlock(util, "public static void withButtonMotion(");
