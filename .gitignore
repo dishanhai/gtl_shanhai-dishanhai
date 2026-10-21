@@ -67,6 +67,7 @@ Thumbs.db
 /.gradle-task21/
 /.gradle-task-cmd/
 /.manual-classes/
+/.kotlin/
 
 
 # 保留根目录的关键构建文件和配置

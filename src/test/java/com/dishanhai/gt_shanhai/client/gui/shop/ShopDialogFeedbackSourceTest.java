@@ -13,7 +13,8 @@ class ShopDialogFeedbackSourceTest {
 
     private static final String DIR = "src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/";
     private static final String[] DIALOGS = {
-            "ShopAutoCraftConfirmScreen.java", "RewardChoiceScreen.java", "FtbqRewardChoiceScreen.java"};
+            "ShopAutoCraftConfirmScreen.java", "RewardChoiceScreen.java", "FtbqRewardChoiceScreen.java",
+            "ShopSingleUseWarnScreen.java"};
 
     private static String src(String name) throws Exception {
         return Files.readString(Path.of(DIR + name));

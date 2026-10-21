@@ -2493,26 +2493,54 @@ public class ShopScreen extends ScaledScreen {
         int[] progress = cartBatchProgress();
         boolean settling = progress[1] > 0 && progress[0] < progress[1];
         if (!settling && buttonHit(mx, my, settleX, settleY, settleW, CART_SETTLE_BTN_H)) {
-            cartSettleBatch.clear();
-            cartSettleBatchStartedAtMs = System.currentTimeMillis();
-            int fired = 0;
-            for (Map.Entry<String, Long> e : cartMap.entrySet()) {
-                String stableId = e.getKey();
-                long entryKey = ClientShopCatalog.keyOfStableId(stableId);
-                ShopEntry entry = entryKey >= 0L ? ClientShopCatalog.get(entryKey) : null;
-                if (entry == null) continue; // 已下架/尚未加载完成，留在购物车里，不动它
-                long qty = e.getValue() == null ? 0L : e.getValue();
-                if (qty <= 0L) continue;
-                sendCartBuy(entry, qty); // 逐项各自发起购买，异步、互不阻塞；成交结果由 ShopCartPurchaseResultPacket 回执驱动行状态，见反馈
-                cartSettleBatch.add(stableId);
-                fired++;
+            List<String> warnLines = cartSingleUseWarnLines(cartMap);
+            if (!warnLines.isEmpty()) {
+                ShopUiSounds.warn();
+                ShopSingleUseWarnScreen.open(this, warnLines, () -> settleCart(ClientShopCart.getAll()));
+                return true;
             }
-            showMessage(Component.literal(fired > 0
-                    ? "§b[山海商店] §a已对 " + fired + " 件候选逐项发起结算，稍候在购物车面板查看每项结果"
-                    : "§c[山海商店] 购物车里的商品都还没加载完，稍后再试"));
+            settleCart(cartMap);
             return true;
         }
         return true; // 图层内其余点击原地吞掉，不下穿到网格/详情
+    }
+
+    /** 购物车里含 SDA/无限盘且数量达到警告线的商品，逐条列出；没有返回空列表。 */
+    private List<String> cartSingleUseWarnLines(Map<String, Long> cartMap) {
+        List<String> lines = new ArrayList<>();
+        for (Map.Entry<String, Long> e : cartMap.entrySet()) {
+            long entryKey = ClientShopCatalog.keyOfStableId(e.getKey());
+            ShopEntry entry = entryKey >= 0L ? ClientShopCatalog.get(entryKey) : null;
+            long qty = e.getValue() == null ? 0L : e.getValue();
+            if (entry == null || !entry.hasSingleUseStorage() || !ShopEntry.exceedsSingleUseAmount(qty)) continue;
+            lines.add("§f" + entry.goodsDisplayName() + " §7× §e" + qty + " §7份");
+        }
+        if (!lines.isEmpty()) {
+            lines.add("§eSDA 和无限盘一般只需要购买一次，数量多半是多余的。");
+            lines.add("§7确定要这样结算吗？");
+        }
+        return lines;
+    }
+
+    /** 购物车逐项发起结算。 */
+    private void settleCart(Map<String, Long> cartMap) {
+        cartSettleBatch.clear();
+        cartSettleBatchStartedAtMs = System.currentTimeMillis();
+        int fired = 0;
+        for (Map.Entry<String, Long> e : cartMap.entrySet()) {
+            String stableId = e.getKey();
+            long entryKey = ClientShopCatalog.keyOfStableId(stableId);
+            ShopEntry entry = entryKey >= 0L ? ClientShopCatalog.get(entryKey) : null;
+            if (entry == null) continue; // 已下架/尚未加载完成，留在购物车里，不动它
+            long qty = e.getValue() == null ? 0L : e.getValue();
+            if (qty <= 0L) continue;
+            sendCartBuy(entry, qty); // 逐项各自发起购买，异步、互不阻塞；成交结果由 ShopCartPurchaseResultPacket 回执驱动行状态，见反馈
+            cartSettleBatch.add(stableId);
+            fired++;
+        }
+        showMessage(Component.literal(fired > 0
+                ? "§b[山海商店] §a已对 " + fired + " 件候选逐项发起结算，稍候在购物车面板查看每项结果"
+                : "§c[山海商店] 购物车里的商品都还没加载完，稍后再试"));
     }
 
     /** 描述详情大图层滚动条点击/拖拽起手：命中整条轨道即可（不用精确点在把手上），随即按该点位置跳转。 */
@@ -4543,6 +4571,15 @@ public class ShopScreen extends ScaledScreen {
      * 红框（可交易性预判）不拦：花费预览可能还在加载、AE 库存与前置状态客户端看不全，以服务端为准。</p>
      */
     private void performConfirmTrade(boolean viaKeyboard) {
+        performConfirmTrade(viaKeyboard, false);
+    }
+
+    /**
+     * {@code singleUseWarned=true}：SDA/无限盘「买太多」警告已被玩家确认过，不再弹。警告在本地预检之后、
+     * 自选奖励界面与发包之前：数量 ≥ {@link ShopEntry#SINGLE_USE_WARN_AMOUNT} 且商品含 SDA/无限盘才弹，
+     * 玩家点「仍然购买」后回到这里重走一遍（商品或数量在弹窗期间变了就不继续，以免买到别的东西）。
+     */
+    private void performConfirmTrade(boolean viaKeyboard, boolean singleUseWarned) {
         if (selected == null) return;
         long now = System.currentTimeMillis();
         long key = confirmActionKey();
@@ -4567,6 +4604,19 @@ public class ShopScreen extends ScaledScreen {
             showMessage(Component.literal(precheck));
             buttonFeedback.flash(key, ButtonFeedback.Tone.FAILED, now);
             ShopUiSounds.fail();
+            return;
+        }
+        if (mode == Mode.BUY && !singleUseWarned && selected.hasSingleUseStorage()
+                && ShopEntry.exceedsSingleUseAmount(amount)) {
+            ShopEntry warnEntry = selected;
+            long warnAmount = amount;
+            ShopUiSounds.warn();
+            ShopSingleUseWarnScreen.open(this, List.of(
+                    "§f" + warnEntry.goodsDisplayName() + " §7× §e" + warnAmount + " §7份",
+                    "§eSDA 和无限盘一般只需要购买一次，买 " + warnAmount + " 份多半是多余的。",
+                    "§7确定要买这么多吗？"), () -> {
+                        if (selected == warnEntry && amount == warnAmount) performConfirmTrade(false, true);
+                    });
             return;
         }
         boolean localChoice = selected.getRewardMode() == ShopEntry.RewardMode.CHOICE;

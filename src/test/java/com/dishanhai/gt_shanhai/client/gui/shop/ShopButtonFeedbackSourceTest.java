@@ -79,7 +79,7 @@ class ShopButtonFeedbackSourceTest {
     void confirmTradeWaitsForTheServerAndFlashesTheResult() throws Exception {
         String s = Files.readString(Path.of(SHOP));
         assertTrue(extractBlock(s, "protected boolean universalMouseClicked(").contains("performConfirmTrade(false)"));
-        String trade = extractBlock(s, "private void performConfirmTrade(boolean viaKeyboard)");
+        String trade = extractBlock(s, "private void performConfirmTrade(boolean viaKeyboard, boolean singleUseWarned)");
         assertTrue(trade.contains("buttonFeedback.tryBegin(") && trade.contains("ShopUiSounds.busy()"),
                 "等待中或 300ms 内再点只提示忙，不重复下单");
         assertTrue(trade.contains("ClientShopActionResults.nextRequestId()") && trade.contains("buttonFeedback.pending("));
