@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.gt_shanhai.client.gui.scaled.ButtonFeedback;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
@@ -170,9 +171,19 @@ public class ShopScreen extends ScaledScreen {
     private final SpringTable<Long> hoverCells = new SpringTable<>(Spring.HOVER);
     private final SpringTable<Long> hoverButtons = new SpringTable<>(Spring.HOVER);
     private final SpringTable<Long> hoverTabs = new SpringTable<>(Spring.HOVER);
+    // 按键即时反馈：压下/回弹、连发、等待回执与结果闪色（见 ButtonFeedback）；hover 仍是上面的 hoverButtons。
+    private final ButtonFeedback buttonFeedback = new ButtonFeedback(hoverButtons);
+    // 本帧逻辑鼠标坐标：详情滚动区的按钮按内容坐标画，drawButton 靠它换回屏幕坐标，才对得上 buttonHit 记的 key
+    private int frameMx, frameMy;
+    private boolean reduceMotionFrame;
 
     private static long widgetKey(int x, int y, int salt) {
         return ((long) x * 73856093L) ^ ((long) y * 19349663L) ^ ((long) salt * 83492791L);
+    }
+
+    /** 按下态的 key：只由按钮几何决定（buttonHit 手上没有标签，标签还会变），和 hover 的 key 分开。 */
+    private static long pressKey(int x, int y, int w, int h) {
+        return widgetKey(x, y, (w << 12) ^ h ^ 0x5A5A0000);
     }
 
     private static final int TAB_STRIP_BUYSELL = 4;
@@ -1248,6 +1259,8 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void initScaled() {
+        // 按着按钮时切到子界面，松开事件落在别处；回到本界面时把按下态归零
+        buttonFeedback.cancel(System.currentTimeMillis());
         // 预编译后处理链，避免第一次点商品时才加载 shader 造成卡顿；失败会自动回退局部磨砂。
         ShopGaussBlur.warmUp();
         boolean fresh = searchBox == null;
@@ -1474,6 +1487,16 @@ public class ShopScreen extends ScaledScreen {
         hoverCells.sweep(nowMs);
         hoverButtons.sweep(nowMs);
         hoverTabs.sweep(nowMs);
+        frameMx = mx;
+        frameMy = my;
+        reduceMotionFrame = ClientShopUiSettings.reduceMotion();
+        // 松开可能没送到这里（按着时弹了别的界面）；鼠标实际已松开就补一次松开
+        if (buttonFeedback.holding() && this.minecraft != null
+                && !this.minecraft.mouseHandler.isLeftPressed() && !this.minecraft.mouseHandler.isRightPressed()) {
+            buttonFeedback.release(nowMs);
+        }
+        buttonFeedback.pointer(mx, my, nowMs);
+        buttonFeedback.tick(nowMs);
         boolean motionBusy = !openMotion.settled()
                 || (gridSwitchAtMs > 0L && nowMs - gridSwitchAtMs < GuiRenderUtil.MOTION_MS);
         ClientShopCatalog.pumpMaterialization(motionBusy ? LOAD_PUMP_MOTION_NS : LOAD_PUMP_SETTLED_NS);
@@ -3266,9 +3289,28 @@ public class ShopScreen extends ScaledScreen {
 
     /** KE 风格按钮：外框 + 内填充（hover 变色）+ 居中文字。 */
     private void renderButton(GuiGraphics g, int x, int y, int w, int h, boolean hover, String text, int border, int textColor) {
-        g.fill(x, y, x + w, y + h, border);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hover ? BUTTON_HOVER : BUTTON_BG);
-        g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, text, w - 4), x + w / 2, y + (h - 8) / 2, textColor);
+        renderButton(g, x, y, w, h, hover, text, border, textColor, pressKey(x, y, w, h));
+    }
+
+    /**
+     * 同上，另带反馈：压下按几何 key，等待流光与结果闪色按 {@code actionKey}
+     * （确认购买按钮混入了商品与买卖模式，换商品后旧结果不会闪到新商品上）。
+     */
+    private void renderButton(GuiGraphics g, int x, int y, int w, int h, boolean hover, String text,
+                              int border, int textColor, long actionKey) {
+        ButtonFeedback.Visual v = buttonFeedback.visual(pressKey(x, y, w, h), actionKey, true,
+                System.currentTimeMillis(), reduceMotionFrame);
+        int edge = ButtonFeedback.tint(border, v);
+        int fill = ButtonFeedback.shade(hover ? BUTTON_HOVER : BUTTON_BG, v);
+        int ink = ButtonFeedback.tint(textColor, v);
+        GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(), () -> {
+            g.fill(x, y, x + w, y + h, edge);
+            g.fill(x + 1, y + 1, x + w - 1, y + h - 1, fill);
+            if (v.pending() && !reduceMotionFrame) {
+                GuiRenderUtil.drawPendingSweep(g, x + 1, y + 1, w - 2, h - 2, v.pendingPhase(), 0xE0FFFFFF);
+            }
+            g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, text, w - 4), x + w / 2, y + (h - 8) / 2, ink);
+        });
     }
 
     /** 选中格的青色四边描边。 */
@@ -4038,6 +4080,7 @@ public class ShopScreen extends ScaledScreen {
         ShopStageBlur.clear();
         ShopGaussBlur.clear();
         ShopGaussBlur.clearTopLayer();
+        buttonFeedback.cancel(System.currentTimeMillis());
         super.removed();
     }
 
@@ -4413,6 +4456,7 @@ public class ShopScreen extends ScaledScreen {
                 if (!armed) {
                     pendingDeleteEntry = selected;
                     pendingDeleteArmedAtMs = System.currentTimeMillis();
+                    ShopUiSounds.warn();
                     showMessage(Component.literal("§e[山海商店] 再次点击「删除此商品」确认删除，3 秒内有效"));
                     return true;
                 }
@@ -4551,6 +4595,8 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseReleased(double mx, double my, int btn) {
+        // 先结束按下态与连发；不 return，下面的拖拽、滚动条照常收尾
+        buttonFeedback.release(System.currentTimeMillis());
         if (dragTabLevel != -1) {
             int level = dragTabLevel;
             String category = dragTabCategory;
@@ -4991,25 +5037,35 @@ public class ShopScreen extends ScaledScreen {
 
     private void drawButton(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my) {
         boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
-        float hv = hoverButtons.follow(widgetKey(x, y, label.hashCode()), hover ? 1f : 0f, System.currentTimeMillis());
-        renderBox(g, x, y, w, h,
-                GuiMotion.lerpColor(GOLD_DARK, GOLD, hv),
-                GuiMotion.lerpColor(BUTTON_BG, BUTTON_HOVER, hv));
-        g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, label, w - 4), x + w / 2, y + (h - 8) / 2, WHITE);
+        long now = System.currentTimeMillis();
+        float hv = hoverButtons.follow(widgetKey(x, y, label.hashCode()), hover ? 1f : 0f, now);
+        // 详情滚动区传进来的 my 已加过滚动量，按钮也按内容坐标画；减回去才是 buttonHit 记下的屏幕坐标
+        long pk = pressKey(x, y - (my - frameMy), w, h);
+        ButtonFeedback.Visual v = buttonFeedback.visual(pk, pk, true, now, reduceMotionFrame);
+        int border = ButtonFeedback.tint(GuiMotion.lerpColor(GOLD_DARK, GOLD, hv), v);
+        int fill = ButtonFeedback.shade(GuiMotion.lerpColor(BUTTON_BG, BUTTON_HOVER, hv), v);
+        GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(), () -> {
+            renderBox(g, x, y, w, h, border, fill);
+            g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, label, w - 4), x + w / 2, y + (h - 8) / 2, WHITE);
+        });
     }
 
     private boolean hit(double mx, double my, int x, int y, int w, int h) {
         return GuiRenderUtil.isHovering(mx, my, x, y, w, h);
     }
 
-    /** 按键命中。波纹只记点击点，不移动按钮，也不吞掉这次点击。 */
+    /** 按键命中：记下点击波并把按钮压下（松开在 universalMouseReleased）。按下即触发，不吞掉这次点击。 */
     private boolean buttonHit(double mx, double my, int x, int y, int w, int h) {
         if (!hit(mx, my, x, y, w, h)) return false;
         armClickWave(mx, my);
+        buttonFeedback.press(pressKey(x, y, w, h), x, y, w, h, true, System.currentTimeMillis());
         return true;
     }
 
     private void armClickWave(double mx, double my) {
+        ShopUiSounds.click();
+        // 减少动效：点击声照常，液态波纹不画
+        if (ClientShopUiSettings.reduceMotion()) return;
         clickWaveAtMs = System.currentTimeMillis();
         clickWaveX = (int) Math.round(mx);
         clickWaveY = (int) Math.round(my);
