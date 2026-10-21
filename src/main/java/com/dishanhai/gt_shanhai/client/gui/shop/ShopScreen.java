@@ -1265,7 +1265,8 @@ public class ShopScreen extends ScaledScreen {
     protected void initScaled() {
         // 按着按钮时切到子界面，松开事件落在别处；回到本界面时把按下态归零
         buttonFeedback.cancel(System.currentTimeMillis());
-        enterHeld = false;
+        // 在弹窗里按 Enter 确认后回到这里时键还按着：松开前的系统重复不能再下一单
+        enterHeld = ShopDialogUi.enterDown();
         // 预编译后处理链，避免第一次点商品时才加载 shader 造成卡顿；失败会自动回退局部磨砂。
         ShopGaussBlur.warmUp();
         boolean fresh = searchBox == null;
@@ -4587,6 +4588,22 @@ public class ShopScreen extends ScaledScreen {
         int requestId = ClientShopActionResults.nextRequestId();
         send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount, requestId);
         buttonFeedback.pending(key, requestId, now);
+    }
+
+    /**
+     * 自选奖励界面确认购买：带请求号发包，确认按钮进入等待，回到商店后照常闪成交结果。
+     * 返回 false 表示上一笔还在等回执（或 300ms 内重复），选择界面留着并提示忙。
+     */
+    boolean submitRewardChoice(long catalogRevision, long entryKey, long times,
+                               boolean ae, boolean bp, int chosenRewardIndex) {
+        long now = System.currentTimeMillis();
+        long key = confirmActionKey();
+        if (!buttonFeedback.tryBegin(key, now)) return false;
+        int requestId = ClientShopActionResults.nextRequestId();
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(ShopActionPacket.Action.BUY,
+                catalogRevision, entryKey, times, ae, bp, chosenRewardIndex, false, requestId));
+        buttonFeedback.pending(key, requestId, now);
+        return true;
     }
 
     /** 回执对上还在等的请求才闪色出声；对不上（已超时、界面已重建）就丢掉，横幅照常由聊天镜像显示。 */
