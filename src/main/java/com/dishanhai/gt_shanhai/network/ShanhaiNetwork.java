@@ -20,7 +20,7 @@ import java.util.function.Supplier;
  */
 public class ShanhaiNetwork {
 
-    private static final String PROTOCOL_VERSION = "6";
+    private static final String PROTOCOL_VERSION = "7";
     private static final ResourceLocation CHANNEL_NAME = new ResourceLocation(GTDishanhaiMod.MOD_ID, "main");
     private static int packetId = 0;
 
@@ -592,6 +592,15 @@ public class ShanhaiNetwork {
                 ShanhaiPatternStellarDetailPacket::encode,
                 ShanhaiPatternStellarDetailPacket::decode,
                 ShanhaiPatternStellarDetailPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
+        // 详情页买卖的结构化回执（驱动确认按钮的等待 / 成功 / 部分 / 未成交反馈）
+        CHANNEL.registerMessage(
+                packetId++,
+                ShopActionResultPacket.class,
+                ShopActionResultPacket::encode,
+                ShopActionResultPacket::new,
+                ShopActionResultPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
         RecipeSyncPacket.init();

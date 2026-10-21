@@ -11,9 +11,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 
 /**
- * 商店设置（山海署名，客户端，自建）。仅编辑权玩家可见入口（见 {@link ShopScreen} 顶栏「商店设置」按钮）。
+ * 商店设置（山海署名，客户端，自建）。入口是 {@link ShopScreen} 顶栏「商店设置」按钮，所有玩家都能开；
+ * 没有编辑权的玩家（{@code serverRows=false}）只看到本机显示偏好，服务端设置行不建、不画、不发包。
  *
  * <p>运行期可调的商店行为：「奖励抽取次数上限」「SDA 打包阈值」「AE 模式禁止注入」
  * 「AE 注入限额」「将SDA直接注入磁盘仓室」（对应 {@link ShopSettingsPacket}/
@@ -61,9 +63,16 @@ public class ShopSettingsScreen extends ScaledScreen {
     private static final int ROW_DISK_HINT = 214;
     private static final int ROW_REMEMBER = 228;
     private static final int ROW_REMEMBER_HINT = 246;
-    private static final int CONTENT_H = 260;
+    private static final int ROW_MOTION = ROW_REMEMBER_HINT + 14;
+    private static final int ROW_MOTION_HINT = ROW_MOTION + 18;
+    // 两段说明按宽度换行，后面的行位置与内容总高随之现算（见 rowSound / contentHeight）
+    private static final String MOTION_HINT =
+            "§7按钮不缩放、不抖、不走流光，也不画点击波纹；成交结果的颜色闪保留。只存在这台客户端";
+    private static final String SOUND_HINT =
+            "§7点击、步进连发与成交结果的提示音，用原版声音，跟随主音量。只存在这台客户端";
 
     private final ShopScreen parent;
+    private final boolean serverRows;
     private String rollCap;
     private String sdaThreshold;
     private String cardWidth;
@@ -73,6 +82,8 @@ public class ShopSettingsScreen extends ScaledScreen {
     private boolean sdaDirectDiskHatchInject;
     private boolean previewBar;
     private boolean rememberShopView;
+    private boolean reduceMotion;
+    private boolean uiSounds;
     private EditBox rollCapBox;
     private EditBox sdaThresholdBox;
     private EditBox cardWidthBox;
@@ -83,8 +94,14 @@ public class ShopSettingsScreen extends ScaledScreen {
     private boolean scrollDrag;
 
     public ShopSettingsScreen(ShopScreen parent) {
+        this(parent, true);
+    }
+
+    /** {@code serverRows}：是否显示并提交服务端设置（编辑权玩家）。为 false 时只有本机显示偏好。 */
+    public ShopSettingsScreen(ShopScreen parent, boolean serverRows) {
         super(Component.literal("商店设置"));
         this.parent = parent;
+        this.serverRows = serverRows;
         this.targetWidth = TARGET_W;
         this.targetHeight = TARGET_H;
         this.useOffset = false;
@@ -99,6 +116,8 @@ public class ShopSettingsScreen extends ScaledScreen {
         this.sdaDirectDiskHatchInject = DShanhaiConfig.COMMON.shopSdaDirectDiskHatchInject.get();
         this.previewBar = ClientShopUiSettings.rewardPreviewBar();
         this.rememberShopView = ClientShopUiSettings.rememberShopView();
+        this.reduceMotion = ClientShopUiSettings.reduceMotion();
+        this.uiSounds = ClientShopUiSettings.uiSounds();
     }
 
     @Override
@@ -110,23 +129,25 @@ public class ShopSettingsScreen extends ScaledScreen {
         settingsScroll = clampScroll(settingsScroll);
 
         int fieldW = fieldWidth();
-        rollCapBox = new EditBox(this.font, left + 12, viewTop() + ROW_ROLL_BOX, fieldW, 14, Component.literal("奖励抽取次数上限"));
-        rollCapBox.setValue(rollCap);
-        rollCapBox.setMaxLength(19);
-        rollCapBox.setBordered(true);
-        rollCapBox.setTextColor(0xFFFFFF);
-        rollCapBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
-        rollCapBox.setResponder(s -> rollCap = s);
-        addRenderableWidget(rollCapBox);
+        if (serverRows) {
+            rollCapBox = new EditBox(this.font, left + 12, viewTop() + ROW_ROLL_BOX, fieldW, 14, Component.literal("奖励抽取次数上限"));
+            rollCapBox.setValue(rollCap);
+            rollCapBox.setMaxLength(19);
+            rollCapBox.setBordered(true);
+            rollCapBox.setTextColor(0xFFFFFF);
+            rollCapBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+            rollCapBox.setResponder(s -> rollCap = s);
+            addRenderableWidget(rollCapBox);
 
-        sdaThresholdBox = new EditBox(this.font, left + 12, viewTop() + ROW_SDA_BOX, fieldW, 14, Component.literal("SDA 打包阈值"));
-        sdaThresholdBox.setValue(sdaThreshold);
-        sdaThresholdBox.setMaxLength(19);
-        sdaThresholdBox.setBordered(true);
-        sdaThresholdBox.setTextColor(0xFFFFFF);
-        sdaThresholdBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
-        sdaThresholdBox.setResponder(s -> sdaThreshold = s);
-        addRenderableWidget(sdaThresholdBox);
+            sdaThresholdBox = new EditBox(this.font, left + 12, viewTop() + ROW_SDA_BOX, fieldW, 14, Component.literal("SDA 打包阈值"));
+            sdaThresholdBox.setValue(sdaThreshold);
+            sdaThresholdBox.setMaxLength(19);
+            sdaThresholdBox.setBordered(true);
+            sdaThresholdBox.setTextColor(0xFFFFFF);
+            sdaThresholdBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+            sdaThresholdBox.setResponder(s -> sdaThreshold = s);
+            addRenderableWidget(sdaThresholdBox);
+        }
 
         int boxW = Math.max(20, (fieldW - 6) / 2);
         cardWidthBox = new EditBox(this.font, left + 12, viewTop() + ROW_CARD_BOX, boxW, 14, Component.literal("商品卡片宽"));
@@ -147,14 +168,16 @@ public class ShopSettingsScreen extends ScaledScreen {
         cardHeightBox.setResponder(s -> cardHeight = s);
         addRenderableWidget(cardHeightBox);
 
-        aeInjectMinBox = new EditBox(this.font, left + 12, viewTop() + ROW_AE_MIN_BOX, fieldW, 14, Component.literal("AE 注入限额"));
-        aeInjectMinBox.setValue(aeInjectMin);
-        aeInjectMinBox.setMaxLength(19);
-        aeInjectMinBox.setBordered(true);
-        aeInjectMinBox.setTextColor(0xFFFFFF);
-        aeInjectMinBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
-        aeInjectMinBox.setResponder(s -> aeInjectMin = s);
-        addRenderableWidget(aeInjectMinBox);
+        if (serverRows) {
+            aeInjectMinBox = new EditBox(this.font, left + 12, viewTop() + ROW_AE_MIN_BOX, fieldW, 14, Component.literal("AE 注入限额"));
+            aeInjectMinBox.setValue(aeInjectMin);
+            aeInjectMinBox.setMaxLength(19);
+            aeInjectMinBox.setBordered(true);
+            aeInjectMinBox.setTextColor(0xFFFFFF);
+            aeInjectMinBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
+            aeInjectMinBox.setResponder(s -> aeInjectMin = s);
+            addRenderableWidget(aeInjectMinBox);
+        }
         layoutInputs();
     }
 
@@ -168,7 +191,8 @@ public class ShopSettingsScreen extends ScaledScreen {
         g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
         g.fill(left + 5, top + 18, left + panelWidth - 5, top + panelHeight - 5, PANEL_INNER);
 
-        g.drawString(this.font, "§6商店设置 §7(仅编辑权可见)", left + 10, top + 5, GOLD, true);
+        g.drawString(this.font, serverRows ? "§6商店设置 §7(含服务端设置)" : "§6商店设置 §7(本机显示偏好)",
+                left + 10, top + 5, GOLD, true);
         drawBtn(g, left + 12, top + panelHeight - 22, 60, 14, "§c取消", mx, my);
         drawBtn(g, left + panelWidth - 12 - 70, top + panelHeight - 22, 70, 14, "§a确认保存", mx, my);
 
@@ -181,44 +205,59 @@ public class ShopSettingsScreen extends ScaledScreen {
         enableScaledScissor(g, left + 6, viewTop(), left + panelWidth - 6, viewBottom());
         int x = left + 12;
         int textW = fieldWidth();
-        drawContentLine(g, "§7奖励抽取次数上限（自选/随机/全部/FTBQ 单次购买最多独立随机次数）：", x, ROW_ROLL_LABEL, textW);
-        drawContentLine(g, "§7SDA 打包阈值（非 AE 模式下，购买总量≥此值打包成超级磁盘阵列而非塞背包）：", x, ROW_SDA_LABEL, textW);
-        drawContentLine(g, "§c调太大可能让服务端主线程卡死/崩溃，自己权衡", x, ROW_WARN, textW);
-        drawContentLine(g, "§7商品卡片大小（客户端显示偏好；默认 70×36，网格默认每行 10 格）：", x, ROW_CARD_LABEL, textW);
+        if (serverRows) {
+            drawContentLine(g, "§7奖励抽取次数上限（自选/随机/全部/FTBQ 单次购买最多独立随机次数）：", x, ROW_ROLL_LABEL, textW);
+            drawContentLine(g, "§7SDA 打包阈值（非 AE 模式下，购买总量≥此值打包成超级磁盘阵列而非塞背包）：", x, ROW_SDA_LABEL, textW);
+            drawContentLine(g, "§c调太大可能让服务端主线程卡死/崩溃，自己权衡", x, ROW_WARN, textW);
+        }
+        drawContentLine(g, "§7商品卡片大小（客户端显示偏好；默认 70×36，网格默认每行 10 格）：", x, row(ROW_CARD_LABEL), textW);
 
-        int previewY = visualY(ROW_PREVIEW);
+        int previewY = visualY(row(ROW_PREVIEW));
         if (rowVisible(previewY, 16)) {
             drawBtn(g, x, previewY, fieldWidth(), 16,
                     previewBar ? "§a获取预览模式: 条形（名称列表，默认）" : "§a获取预览模式: 方格（图标格，旧版）",
                     mx, my);
         }
-        drawContentLine(g, "§7条形下：奖励表右侧为概率，获得和花费右侧为数量", x, ROW_PREVIEW_HINT, textW);
+        drawContentLine(g, "§7条形下：奖励表右侧为概率，获得和花费右侧为数量", x, row(ROW_PREVIEW_HINT), textW);
 
-        int aeY = visualY(ROW_AE);
-        if (rowVisible(aeY, 16)) {
-            drawBtn(g, x, aeY, fieldWidth(), 16,
-                    aeDeliverDisabled ? "§aAE 禁止注入: 开（购买物品正常给到背包/SDA）"
-                            : "§8AE 禁止注入: 关（原行为，能注入就注入 AE）",
-                    mx, my);
+        if (serverRows) {
+            int aeY = visualY(ROW_AE);
+            if (rowVisible(aeY, 16)) {
+                drawBtn(g, x, aeY, fieldWidth(), 16,
+                        aeDeliverDisabled ? "§aAE 禁止注入: 开（购买物品正常给到背包/SDA）"
+                                : "§8AE 禁止注入: 关（原行为，能注入就注入 AE）",
+                        mx, my);
+            }
+            drawContentLine(g, "§7AE 注入限额（单种物品少于此数进背包，达到才注入 AE；设 1 恢复全注入）：", x, ROW_AE_MIN_LABEL, textW);
+            int diskY = visualY(ROW_DISK);
+            if (rowVisible(diskY, 16)) {
+                drawBtn(g, x, diskY, fieldWidth(), 16,
+                        sdaDirectDiskHatchInject ? "§a将SDA直接注入磁盘仓室: 开"
+                                : "§8将SDA直接注入磁盘仓室: 关",
+                        mx, my);
+            }
+            drawContentLine(g, "§7仅挂载同网 FTBQ AE提交器/商店终端可见的有内容 SDA；空 SDA 不挂载", x, ROW_DISK_HINT, textW);
         }
-        drawContentLine(g, "§7AE 注入限额（单种物品少于此数进背包，达到才注入 AE；设 1 恢复全注入）：", x, ROW_AE_MIN_LABEL, textW);
-        int diskY = visualY(ROW_DISK);
-        if (rowVisible(diskY, 16)) {
-            drawBtn(g, x, diskY, fieldWidth(), 16,
-                    sdaDirectDiskHatchInject ? "§a将SDA直接注入磁盘仓室: 开"
-                            : "§8将SDA直接注入磁盘仓室: 关",
-                    mx, my);
-        }
-        drawContentLine(g, "§7仅挂载同网 FTBQ AE提交器/商店终端可见的有内容 SDA；空 SDA 不挂载", x, ROW_DISK_HINT, textW);
 
-        int rememberY = visualY(ROW_REMEMBER);
+        int rememberY = visualY(row(ROW_REMEMBER));
         if (rowVisible(rememberY, 16)) {
             drawBtn(g, x, rememberY, fieldWidth(), 16,
                     rememberShopView ? "§a记住选取与搜索: 开（关闭后再打开会还原）"
                             : "§8记住选取与搜索: 关（每次打开都清空）",
                     mx, my);
         }
-        drawContentLine(g, "§7只记在这台客户端：当前商品和搜索词。分类页签本来就会保留", x, ROW_REMEMBER_HINT, textW);
+        drawContentLine(g, "§7只记在这台客户端：当前商品和搜索词。分类页签本来就会保留", x, row(ROW_REMEMBER_HINT), textW);
+
+        int motionY = visualY(row(ROW_MOTION));
+        if (rowVisible(motionY, 16)) {
+            drawBtn(g, x, motionY, fieldWidth(), 16, reduceMotion ? "§a减少动效: 开" : "§8减少动效: 关", mx, my);
+        }
+        drawWrappedContentLines(g, MOTION_HINT, x, row(ROW_MOTION_HINT), textW);
+        int soundY = visualY(row(rowSound()));
+        if (rowVisible(soundY, 16)) {
+            drawBtn(g, x, soundY, fieldWidth(), 16, uiSounds ? "§a商店音效: 开" : "§8商店音效: 关", mx, my);
+        }
+        drawWrappedContentLines(g, SOUND_HINT, x, row(rowSoundHint()), textW);
 
         g.disableScissor();
         drawScrollbar(g, mx, my);
@@ -239,20 +278,28 @@ public class ShopSettingsScreen extends ScaledScreen {
             int contentMy = (int) my + settingsScroll - viewTop();
             int x = left + 12;
             int w = fieldWidth();
-            if (hitContent(mx, contentMy, x, ROW_PREVIEW, w, 16)) {
+            if (hitContent(mx, contentMy, x, row(ROW_PREVIEW), w, 16)) {
                 previewBar = !previewBar;
                 return true;
             }
-            if (hitContent(mx, contentMy, x, ROW_AE, w, 16)) {
+            if (serverRows && hitContent(mx, contentMy, x, ROW_AE, w, 16)) {
                 aeDeliverDisabled = !aeDeliverDisabled;
                 return true;
             }
-            if (hitContent(mx, contentMy, x, ROW_DISK, w, 16)) {
+            if (serverRows && hitContent(mx, contentMy, x, ROW_DISK, w, 16)) {
                 sdaDirectDiskHatchInject = !sdaDirectDiskHatchInject;
                 return true;
             }
-            if (hitContent(mx, contentMy, x, ROW_REMEMBER, w, 16)) {
+            if (hitContent(mx, contentMy, x, row(ROW_REMEMBER), w, 16)) {
                 rememberShopView = !rememberShopView;
+                return true;
+            }
+            if (hitContent(mx, contentMy, x, row(ROW_MOTION), w, 16)) {
+                reduceMotion = !reduceMotion;
+                return true;
+            }
+            if (hitContent(mx, contentMy, x, row(rowSound()), w, 16)) {
+                uiSounds = !uiSounds;
                 return true;
             }
         }
@@ -306,9 +353,12 @@ public class ShopSettingsScreen extends ScaledScreen {
         ClientShopUiSettings.setCardSize(width, height);
         ClientShopUiSettings.setRewardPreviewBar(previewBar);
         ClientShopUiSettings.setRememberShopView(rememberShopView);
+        ClientShopUiSettings.setFeedbackPrefs(reduceMotion, uiSounds);
         parent.onRememberShopViewSaved(rememberShopView);
-        ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
-                aeDeliverDisabled, Math.max(1L, aeMin), sdaDirectDiskHatchInject));
+        if (serverRows) {
+            ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
+                    aeDeliverDisabled, Math.max(1L, aeMin), sdaDirectDiskHatchInject));
+        }
         Minecraft.getInstance().setScreen(parent);
     }
 
@@ -320,7 +370,27 @@ public class ShopSettingsScreen extends ScaledScreen {
 
     private int fieldWidth() { return Math.max(40, panelWidth - 28); }
 
-    private int scrollMax() { return Math.max(0, CONTENT_H - viewH()); }
+    private int scrollMax() { return Math.max(0, contentHeight() - viewH()); }
+
+    /** 只剩本机偏好时把客户端各行往上收拢，不留服务端行的空洞；有服务端行时原样返回。 */
+    private int row(int contentY) {
+        if (serverRows) return contentY;
+        int y = contentY - (ROW_CARD_LABEL - ROW_ROLL_LABEL);
+        if (contentY >= ROW_REMEMBER) y -= ROW_REMEMBER - ROW_AE;
+        return y;
+    }
+
+    /** 「商店音效」开关行（未收拢的内容坐标）：排在换行后的减少动效说明下面。 */
+    private int rowSound() { return ROW_MOTION_HINT + wrappedHeight(MOTION_HINT) + 4; }
+
+    private int rowSoundHint() { return rowSound() + 18; }
+
+    /** 选项区内容总高：最后一段说明换几行就长几行。 */
+    private int contentHeight() { return row(rowSoundHint()) + wrappedHeight(SOUND_HINT) + 4; }
+
+    private int wrappedHeight(String text) {
+        return Math.max(1, this.font.split(Component.literal(text), fieldWidth()).size()) * 10;
+    }
 
     private int clampScroll(int value) { return Math.max(0, Math.min(scrollMax(), value)); }
 
@@ -340,8 +410,8 @@ public class ShopSettingsScreen extends ScaledScreen {
         int boxW = Math.max(20, (w - 6) / 2);
         place(rollCapBox, x, ROW_ROLL_BOX, w);
         place(sdaThresholdBox, x, ROW_SDA_BOX, w);
-        place(cardWidthBox, x, ROW_CARD_BOX, boxW);
-        place(cardHeightBox, x + boxW + 6, ROW_CARD_BOX, boxW);
+        place(cardWidthBox, x, row(ROW_CARD_BOX), boxW);
+        place(cardHeightBox, x + boxW + 6, row(ROW_CARD_BOX), boxW);
         place(aeInjectMinBox, x, ROW_AE_MIN_BOX, w);
     }
 
@@ -360,6 +430,16 @@ public class ShopSettingsScreen extends ScaledScreen {
         int y = visualY(contentY);
         if (!rowVisible(y, 10)) return;
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, text, maxW), x, y, WHITE, true);
+    }
+
+    /** 多行说明：按可用宽度换行逐行画，不截断；放不下就往下占行，contentHeight 跟着长。 */
+    private void drawWrappedContentLines(GuiGraphics g, String text, int x, int contentY, int maxW) {
+        int lineY = contentY;
+        for (FormattedCharSequence line : this.font.split(Component.literal(text), maxW)) {
+            int y = visualY(lineY);
+            if (rowVisible(y, 10)) g.drawString(this.font, line, x, y, WHITE, true);
+            lineY += 10;
+        }
     }
 
     private void drawScrollbar(GuiGraphics g, int mx, int my) {

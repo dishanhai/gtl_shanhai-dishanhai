@@ -130,6 +130,7 @@ public class ClientInit {
         com.dishanhai.gt_shanhai.client.shop.ClientShopBank.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientCostPreview.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientAeCurrencyBalance.clear();
+        com.dishanhai.gt_shanhai.client.shop.ClientShopActionResults.clear();
         com.dishanhai.gt_shanhai.client.shop.ClientShopQuestLinks.clear();
         com.dishanhai.gt_shanhai.client.shop.ShopItemHotkey.reset();
         com.dishanhai.gt_shanhai.client.shop.CurrencyItemHotkey.reset();

@@ -179,6 +179,46 @@ public class GuiRenderUtil {
     }
 
     /**
+     * 按键压下与横抖（参数见 {@link ButtonFeedback.Visual}）：先整体横移 {@code shakeX}，再以按钮中心缩放 {@code scale}。
+     * 两者都在静止值时直接画，不碰矩阵。
+     */
+    public static void withButtonMotion(GuiGraphics g, int x, int y, int w, int h, float scale, float shakeX, Runnable draw) {
+        boolean scaled = Math.abs(scale - 1f) >= 0.001f;
+        if (!scaled && shakeX == 0f) {
+            draw.run();
+            return;
+        }
+        g.pose().pushPose();
+        try {
+            if (shakeX != 0f) g.pose().translate(shakeX, 0f, 0f);
+            if (scaled) scaleAt(g, x + w / 2f, y + h / 2f, scale);
+            draw.run();
+        } finally {
+            g.pose().popPose();
+        }
+    }
+
+    /**
+     * 等待回执的流光：按钮底边一段 1px 光段从左到右循环扫过，{@code phase} ∈ [0,1)。
+     * 光段两头半透明、中间实色，看起来是一道光而不是一根线。
+     */
+    public static void drawPendingSweep(GuiGraphics g, int x, int y, int w, int h, float phase, int argb) {
+        if (w <= 2 || h <= 0) return;
+        int seg = Math.max(6, w * 3 / 10);
+        int head = x - seg + Math.round((w + seg) * GuiMotion.clamp01(phase));
+        int by = y + h - 1;
+        int soft = (argb & 0x00FFFFFF) | (((argb >>> 24) / 3) << 24);
+        fillClipped(g, head, head + seg, by, x, x + w, soft);
+        fillClipped(g, head + seg / 3, head + seg - seg / 3, by, x, x + w, argb);
+    }
+
+    private static void fillClipped(GuiGraphics g, int x0, int x1, int y, int minX, int maxX, int argb) {
+        int a = Math.max(minX, x0);
+        int b = Math.min(maxX, x1);
+        if (b > a) g.fill(a, y, b, y + 1, argb);
+    }
+
+    /**
      * 共享元素飞行（商品卡片 → 右侧详情面板）用的单弹簧。
      *
      * <p>只保留 {@code value} 与 {@code velocity}，中途改目标不换系数；默认参数为

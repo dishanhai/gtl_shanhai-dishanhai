@@ -661,6 +661,29 @@ public class ShopEntry {
         return rewardPool;
     }
 
+    /** 一次购买份数达到此值，且商品含 SDA/无限盘，购买前要警告（盘一般买一次就够，取保守的 3 而不是 2）。 */
+    public static final long SINGLE_USE_WARN_AMOUNT = 3L;
+
+    /** 购买 {@code amount} 份时，是否该对 SDA/无限盘商品发出「买太多」的警告。 */
+    public static boolean exceedsSingleUseAmount(long amount) {
+        return amount >= SINGLE_USE_WARN_AMOUNT;
+    }
+
+    /** 商品清单或奖励池里是否含 SDA（超级磁盘阵列）或无限盘（expatternprovider:infinity_cell）。 */
+    public boolean hasSingleUseStorage() {
+        for (GoodsStack g : goods) {
+            if (!g.isFluid() && isSingleUseStorage(g.item())) return true;
+        }
+        for (RewardOption opt : rewardPool) {
+            if (isSingleUseStorage(opt.item().getItem())) return true;
+        }
+        return false;
+    }
+
+    private static boolean isSingleUseStorage(Item item) {
+        return item instanceof SuperDiskArrayItem || INFINITY_CELL_ID.equals(ForgeRegistries.ITEMS.getKey(item));
+    }
+
     /** 是否需要购买前弹出选择界面（CHOICE 模式）。 */
     public boolean isChoiceReward() {
         return rewardMode == RewardMode.CHOICE;

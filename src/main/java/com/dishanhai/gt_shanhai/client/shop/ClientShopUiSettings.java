@@ -37,6 +37,10 @@ public final class ClientShopUiSettings {
     private static boolean rememberShopView = true;
     private static String shopSearch = "";
     private static String shopSelectedStableId = "";
+    /** 减少动效：按钮不缩放、不抖、不走流光，也不画点击波纹，只保留颜色闪。缺省关。 */
+    private static boolean reduceMotion = false;
+    /** 商店界面音效（点击、连发、成交结果）。缺省开。 */
+    private static boolean uiSounds = true;
 
     private ClientShopUiSettings() {}
 
@@ -107,6 +111,24 @@ public final class ClientShopUiSettings {
         save();
     }
 
+    public static boolean reduceMotion() {
+        ensureLoaded();
+        return reduceMotion;
+    }
+
+    public static boolean uiSounds() {
+        ensureLoaded();
+        return uiSounds;
+    }
+
+    /** 按键反馈的两个个人偏好一起存。只存在这台客户端。 */
+    public static synchronized void setFeedbackPrefs(boolean reduce, boolean sounds) {
+        ensureLoaded();
+        reduceMotion = reduce;
+        uiSounds = sounds;
+        save();
+    }
+
     public static int clampCardWidth(int width) {
         return Math.max(MIN_CARD_WIDTH, Math.min(MAX_CARD_WIDTH, width));
     }
@@ -127,6 +149,8 @@ public final class ClientShopUiSettings {
         rememberShopView = true;
         shopSearch = "";
         shopSelectedStableId = "";
+        reduceMotion = false;
+        uiSounds = true;
         if (!settingsFile().exists()) return;
         try (java.io.Reader reader = new java.io.InputStreamReader(
                 new java.io.FileInputStream(settingsFile()), StandardCharsets.UTF_8)) {
@@ -142,6 +166,8 @@ public final class ClientShopUiSettings {
             if (root.has("shopSelectedStableId")) {
                 shopSelectedStableId = limit(root.get("shopSelectedStableId").getAsString(), 128);
             }
+            if (root.has("reduceMotion")) reduceMotion = root.get("reduceMotion").getAsBoolean();
+            if (root.has("uiSounds")) uiSounds = root.get("uiSounds").getAsBoolean();
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop_client_ui.json 失败: {}", e.getMessage());
         }
@@ -161,6 +187,8 @@ public final class ClientShopUiSettings {
             root.addProperty("rememberShopView", rememberShopView);
             root.addProperty("shopSearch", shopSearch);
             root.addProperty("shopSelectedStableId", shopSelectedStableId);
+            root.addProperty("reduceMotion", reduceMotion);
+            root.addProperty("uiSounds", uiSounds);
             try (OutputStreamWriter writer = new OutputStreamWriter(
                     new FileOutputStream(settingsFile()), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));

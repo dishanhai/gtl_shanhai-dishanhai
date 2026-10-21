@@ -1,11 +1,14 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
+import com.dishanhai.gt_shanhai.client.gui.scaled.ButtonFeedback;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.gui.scaled.SpringTable;
 import com.dishanhai.gt_shanhai.client.shop.ClientCostPreview;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopActionResults;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCart;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopFavorites;
@@ -170,9 +173,21 @@ public class ShopScreen extends ScaledScreen {
     private final SpringTable<Long> hoverCells = new SpringTable<>(Spring.HOVER);
     private final SpringTable<Long> hoverButtons = new SpringTable<>(Spring.HOVER);
     private final SpringTable<Long> hoverTabs = new SpringTable<>(Spring.HOVER);
+    // 按键即时反馈：压下/回弹、连发、等待回执与结果闪色（见 ButtonFeedback）；hover 仍是上面的 hoverButtons。
+    private final ButtonFeedback buttonFeedback = new ButtonFeedback(hoverButtons);
+    // 本帧逻辑鼠标坐标：详情滚动区的按钮按内容坐标画，drawButton 靠它换回屏幕坐标，才对得上 buttonHit 记的 key
+    private int frameMy;
+    private boolean reduceMotionFrame;
+    // 本次 Enter 已经触发过确认：按住时的系统重复一律吞掉，松开才复位
+    private boolean enterHeld;
 
     private static long widgetKey(int x, int y, int salt) {
         return ((long) x * 73856093L) ^ ((long) y * 19349663L) ^ ((long) salt * 83492791L);
+    }
+
+    /** 按下态的 key：只由按钮几何决定（buttonHit 手上没有标签，标签还会变），和 hover 的 key 分开。 */
+    private static long pressKey(int x, int y, int w, int h) {
+        return widgetKey(x, y, (w << 12) ^ h ^ 0x5A5A0000);
     }
 
     private static final int TAB_STRIP_BUYSELL = 4;
@@ -1135,7 +1150,7 @@ public class ShopScreen extends ScaledScreen {
     private static final int ADD_BTN_W = 64;
     private int addBtnX() { return memberBtnX() + memberBtnW() + 4; }
     private int addBtnW() { return ADD_BTN_W; }
-    // 「商店设置」按钮：仅编辑权玩家可见，不受编辑模式开关限制；新增商品隐藏时顶上来补位，不留空档
+    // 「商店设置」按钮：所有玩家可见（没有编辑权的只看到本机显示偏好），不受编辑模式开关限制；新增商品隐藏时顶上来补位，不留空档
     private static final int SETTINGS_BTN_W = 64;
     private int settingsBtnX() { return catalogEditUnlocked ? addBtnX() + addBtnW() + 4 : addBtnX(); }
     private int settingsBtnW() { return SETTINGS_BTN_W; }
@@ -1248,6 +1263,10 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected void initScaled() {
+        // 按着按钮时切到子界面，松开事件落在别处；回到本界面时把按下态归零
+        buttonFeedback.cancel(System.currentTimeMillis());
+        // 在弹窗里按 Enter 确认后回到这里时键还按着：松开前的系统重复不能再下一单
+        enterHeld = ShopDialogUi.enterDown();
         // 预编译后处理链，避免第一次点商品时才加载 shader 造成卡顿；失败会自动回退局部磨砂。
         ShopGaussBlur.warmUp();
         boolean fresh = searchBox == null;
@@ -1474,6 +1493,16 @@ public class ShopScreen extends ScaledScreen {
         hoverCells.sweep(nowMs);
         hoverButtons.sweep(nowMs);
         hoverTabs.sweep(nowMs);
+        frameMy = my;
+        reduceMotionFrame = ClientShopUiSettings.reduceMotion();
+        // 松开可能没送到这里（按着时弹了别的界面）；鼠标实际已松开就补一次松开
+        if (buttonFeedback.holding() && this.minecraft != null
+                && !this.minecraft.mouseHandler.isLeftPressed() && !this.minecraft.mouseHandler.isRightPressed()) {
+            buttonFeedback.release(nowMs);
+        }
+        ClientShopActionResults.drain(nowMs, this::onActionResult);
+        buttonFeedback.pointer(mx, my, nowMs);
+        buttonFeedback.tick(nowMs);
         boolean motionBusy = !openMotion.settled()
                 || (gridSwitchAtMs > 0L && nowMs - gridSwitchAtMs < GuiRenderUtil.MOTION_MS);
         ClientShopCatalog.pumpMaterialization(motionBusy ? LOAD_PUMP_MOTION_NS : LOAD_PUMP_SETTLED_NS);
@@ -1536,13 +1565,11 @@ public class ShopScreen extends ScaledScreen {
         drawButton(g, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H, "§6货币中心", mx, my);
         drawButton(g, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H, "§d兑换中心", mx, my);
         drawButton(g, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H, "§b银会中心", mx, my);
-        // 新增商品（编辑权 + 开了编辑模式）、商店设置（仅编辑权，不受编辑模式限制）
+        // 新增商品（编辑权 + 开了编辑模式）；商店设置所有人可见，没有编辑权的只看到本机显示偏好
         if (catalogEditUnlocked) {
             drawButton(g, addBtnX(), top + 6, addBtnW(), TOP_BAR_H, "§a新增商品", mx, my);
         }
-        if (canEdit) {
-            drawButton(g, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H, "§b商店设置", mx, my);
-        }
+        drawButton(g, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H, "§b商店设置", mx, my);
 
         // 顶栏右侧：购物车 → 精妙背包模式 → AE模式 → 充值全部 → 关闭
         int cartCount = ClientShopCart.size();
@@ -2466,26 +2493,54 @@ public class ShopScreen extends ScaledScreen {
         int[] progress = cartBatchProgress();
         boolean settling = progress[1] > 0 && progress[0] < progress[1];
         if (!settling && buttonHit(mx, my, settleX, settleY, settleW, CART_SETTLE_BTN_H)) {
-            cartSettleBatch.clear();
-            cartSettleBatchStartedAtMs = System.currentTimeMillis();
-            int fired = 0;
-            for (Map.Entry<String, Long> e : cartMap.entrySet()) {
-                String stableId = e.getKey();
-                long entryKey = ClientShopCatalog.keyOfStableId(stableId);
-                ShopEntry entry = entryKey >= 0L ? ClientShopCatalog.get(entryKey) : null;
-                if (entry == null) continue; // 已下架/尚未加载完成，留在购物车里，不动它
-                long qty = e.getValue() == null ? 0L : e.getValue();
-                if (qty <= 0L) continue;
-                sendCartBuy(entry, qty); // 逐项各自发起购买，异步、互不阻塞；成交结果由 ShopCartPurchaseResultPacket 回执驱动行状态，见反馈
-                cartSettleBatch.add(stableId);
-                fired++;
+            List<String> warnLines = cartSingleUseWarnLines(cartMap);
+            if (!warnLines.isEmpty()) {
+                ShopUiSounds.warn();
+                ShopSingleUseWarnScreen.open(this, warnLines, () -> settleCart(ClientShopCart.getAll()));
+                return true;
             }
-            showMessage(Component.literal(fired > 0
-                    ? "§b[山海商店] §a已对 " + fired + " 件候选逐项发起结算，稍候在购物车面板查看每项结果"
-                    : "§c[山海商店] 购物车里的商品都还没加载完，稍后再试"));
+            settleCart(cartMap);
             return true;
         }
         return true; // 图层内其余点击原地吞掉，不下穿到网格/详情
+    }
+
+    /** 购物车里含 SDA/无限盘且数量达到警告线的商品，逐条列出；没有返回空列表。 */
+    private List<String> cartSingleUseWarnLines(Map<String, Long> cartMap) {
+        List<String> lines = new ArrayList<>();
+        for (Map.Entry<String, Long> e : cartMap.entrySet()) {
+            long entryKey = ClientShopCatalog.keyOfStableId(e.getKey());
+            ShopEntry entry = entryKey >= 0L ? ClientShopCatalog.get(entryKey) : null;
+            long qty = e.getValue() == null ? 0L : e.getValue();
+            if (entry == null || !entry.hasSingleUseStorage() || !ShopEntry.exceedsSingleUseAmount(qty)) continue;
+            lines.add("§f" + entry.goodsDisplayName() + " §7× §e" + qty + " §7份");
+        }
+        if (!lines.isEmpty()) {
+            lines.add("§eSDA 和无限盘一般只需要购买一次，数量多半是多余的。");
+            lines.add("§7确定要这样结算吗？");
+        }
+        return lines;
+    }
+
+    /** 购物车逐项发起结算。 */
+    private void settleCart(Map<String, Long> cartMap) {
+        cartSettleBatch.clear();
+        cartSettleBatchStartedAtMs = System.currentTimeMillis();
+        int fired = 0;
+        for (Map.Entry<String, Long> e : cartMap.entrySet()) {
+            String stableId = e.getKey();
+            long entryKey = ClientShopCatalog.keyOfStableId(stableId);
+            ShopEntry entry = entryKey >= 0L ? ClientShopCatalog.get(entryKey) : null;
+            if (entry == null) continue; // 已下架/尚未加载完成，留在购物车里，不动它
+            long qty = e.getValue() == null ? 0L : e.getValue();
+            if (qty <= 0L) continue;
+            sendCartBuy(entry, qty); // 逐项各自发起购买，异步、互不阻塞；成交结果由 ShopCartPurchaseResultPacket 回执驱动行状态，见反馈
+            cartSettleBatch.add(stableId);
+            fired++;
+        }
+        showMessage(Component.literal(fired > 0
+                ? "§b[山海商店] §a已对 " + fired + " 件候选逐项发起结算，稍候在购物车面板查看每项结果"
+                : "§c[山海商店] 购物车里的商品都还没加载完，稍后再试"));
     }
 
     /** 描述详情大图层滚动条点击/拖拽起手：命中整条轨道即可（不用精确点在把手上），随即按该点位置跳转。 */
@@ -2645,8 +2700,10 @@ public class ShopScreen extends ScaledScreen {
         if (catalogEditUnlocked && hit(smx, smy, addBtnX(), y, addBtnW(), h)) {
             return buttonTip("新增商品", "往当前商店目录加一条新商品。只在编辑模式开启时出现。");
         }
-        if (canEdit && hit(smx, smy, settingsBtnX(), y, settingsBtnW(), h)) {
-            return buttonTip("商店设置", "调整奖励抽取上限、SDA 打包阈值、卡片大小、获取预览模式、是否记住选取与搜索，以及 AE 注入开关。");
+        if (hit(smx, smy, settingsBtnX(), y, settingsBtnW(), h)) {
+            return buttonTip("商店设置", canEdit
+                    ? "调整奖励抽取上限、SDA 打包阈值、卡片大小、获取预览模式、是否记住选取与搜索、减少动效与商店音效，以及 AE 注入开关。"
+                    : "调整卡片大小、获取预览模式、是否记住选取与搜索、减少动效与商店音效，只存在这台客户端。");
         }
         if (hit(smx, smy, cartBtnX(), y, cartBtnW(), h)) {
             return buttonTip("购物车", "Ctrl+左键把商品加进来。打开后可改数量，再一次结算。");
@@ -3266,9 +3323,28 @@ public class ShopScreen extends ScaledScreen {
 
     /** KE 风格按钮：外框 + 内填充（hover 变色）+ 居中文字。 */
     private void renderButton(GuiGraphics g, int x, int y, int w, int h, boolean hover, String text, int border, int textColor) {
-        g.fill(x, y, x + w, y + h, border);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hover ? BUTTON_HOVER : BUTTON_BG);
-        g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, text, w - 4), x + w / 2, y + (h - 8) / 2, textColor);
+        renderButton(g, x, y, w, h, hover, text, border, textColor, pressKey(x, y, w, h));
+    }
+
+    /**
+     * 同上，另带反馈：压下按几何 key，等待流光与结果闪色按 {@code actionKey}
+     * （确认购买按钮混入了商品与买卖模式，换商品后旧结果不会闪到新商品上）。
+     */
+    private void renderButton(GuiGraphics g, int x, int y, int w, int h, boolean hover, String text,
+                              int border, int textColor, long actionKey) {
+        ButtonFeedback.Visual v = buttonFeedback.visual(pressKey(x, y, w, h), actionKey, true,
+                System.currentTimeMillis(), reduceMotionFrame);
+        int edge = ButtonFeedback.tint(border, v);
+        int fill = ButtonFeedback.shade(hover ? BUTTON_HOVER : BUTTON_BG, v);
+        int ink = ButtonFeedback.tint(textColor, v);
+        GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(), () -> {
+            g.fill(x, y, x + w, y + h, edge);
+            g.fill(x + 1, y + 1, x + w - 1, y + h - 1, fill);
+            if (v.pending() && !reduceMotionFrame) {
+                GuiRenderUtil.drawPendingSweep(g, x + 1, y + 1, w - 2, h - 2, v.pendingPhase(), 0xE0FFFFFF);
+            }
+            g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, text, w - 4), x + w / 2, y + (h - 8) / 2, ink);
+        });
     }
 
     /** 选中格的青色四边描边。 */
@@ -3659,9 +3735,10 @@ public class ShopScreen extends ScaledScreen {
                 : (!selected.getCost().isEmpty() && !selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
                     && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, detailInnerW, 20);
+        long confirmKey = confirmActionKey();
         renderButton(g, cx, btnY, detailInnerW, 20, btnHover,
-                mode == Mode.BUY ? "§a确认购买" : "§e确认出售",
-                canTrade ? GREEN_DARK : DEEP_RED, canTrade ? (mode == Mode.BUY ? GREEN : GOLD) : DEEP_RED);
+                confirmLabel(confirmKey, System.currentTimeMillis()),
+                canTrade ? GREEN_DARK : DEEP_RED, canTrade ? (mode == Mode.BUY ? GREEN : GOLD) : DEEP_RED, confirmKey);
 
         // 编辑/删除按钮：都折进了编辑模式（catalogEditUnlocked），没开时两行一起隐藏
         if (catalogEditUnlocked) {
@@ -4038,6 +4115,7 @@ public class ShopScreen extends ScaledScreen {
         ShopStageBlur.clear();
         ShopGaussBlur.clear();
         ShopGaussBlur.clearTopLayer();
+        buttonFeedback.cancel(System.currentTimeMillis());
         super.removed();
     }
 
@@ -4239,9 +4317,9 @@ public class ShopScreen extends ScaledScreen {
             ShopEntryEditor.openNew(this, currentViewCategory());
             return true;
         }
-        // 商店设置（仅编辑权，不受编辑模式限制）：奖励抽取次数上限等运行期可调行为
-        if (canEdit && buttonHit(mx, my, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H)) {
-            Minecraft.getInstance().setScreen(new ShopSettingsScreen(this));
+        // 商店设置（所有人可开，不受编辑模式限制）：编辑权玩家另有奖励抽取次数上限等服务端运行期设置
+        if (buttonHit(mx, my, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H)) {
+            Minecraft.getInstance().setScreen(new ShopSettingsScreen(this, canEdit));
             return true;
         }
 
@@ -4375,35 +4453,9 @@ public class ShopScreen extends ScaledScreen {
             int dh = contentHeight();
             int btnW = DETAIL_W - 16;
             int btnY = dy + dh - 24;
-            // 确认购买/出售：自选奖励（CHOICE，本地池或 FTBQ 表自选子模式）商品先弹选择界面，选完再发购买包；
-            // 随机/全部/普通商品直接买
+            // 确认购买/出售（与 Enter 共用 performConfirmTrade）
             if (buttonHit(mx, my, cx, btnY, btnW, 20)) {
-                if (mode == Mode.BUY && selected.hasMissingItems()) {
-                    showMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买"));
-                    return true;
-                }
-                if (mode == Mode.BUY && !selected.allowsBuy()) {
-                    showMessage(Component.literal("§c[山海商店] 该商品仅允许出售，不能购买"));
-                    return true;
-                }
-                if (mode == Mode.SELL && selected.getCost().isEmpty()) {
-                    showMessage(Component.literal("§c[山海商店] 免费商品不能出售"));
-                    return true;
-                }
-                if (mode == Mode.SELL && !selected.allowsSell()) {
-                    showMessage(Component.literal("§c[山海商店] 该商品仅允许购买，不能出售"));
-                    return true;
-                }
-                boolean localChoice = selected.getRewardMode() == ShopEntry.RewardMode.CHOICE;
-                boolean ftbqChoice = selected.getRewardMode() == ShopEntry.RewardMode.FTBQ
-                        && selected.getFtbqSubMode() == ShopEntry.RewardMode.CHOICE;
-                if (mode == Mode.BUY && localChoice) {
-                    Minecraft.getInstance().setScreen(new RewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
-                } else if (mode == Mode.BUY && ftbqChoice) {
-                    Minecraft.getInstance().setScreen(new FtbqRewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
-                } else {
-                    send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount);
-                }
+                performConfirmTrade(false);
                 return true;
             }
             // 删除（编辑权 + 开了编辑模式，二次确认防误触：3 秒内对同一条目再点一次「删除此商品」才真正执行）
@@ -4413,6 +4465,7 @@ public class ShopScreen extends ScaledScreen {
                 if (!armed) {
                     pendingDeleteEntry = selected;
                     pendingDeleteArmedAtMs = System.currentTimeMillis();
+                    ShopUiSounds.warn();
                     showMessage(Component.literal("§e[山海商店] 再次点击「删除此商品」确认删除，3 秒内有效"));
                     return true;
                 }
@@ -4431,15 +4484,21 @@ public class ShopScreen extends ScaledScreen {
                 return true;
             }
             // AE 风格步进按钮（两排 +1/+10/+100/+1000 与 -1/-10/-100/-1000，第三排 ×10/×100/÷10/÷100）
+            // ± 两排左键按住连发；×÷ 一排只单击，连发几下就会冲到 Long.MAX
             long[] steps = {1, 10, 100, 1000};
             long[] scales = {10, 100, 10, 100};
             int bw = (btnW - 9) / 4;
             for (int i = 0; i < 4; i++) {
                 int bx = cx + i * (bw + 3);
-                if (buttonHit(mx, my, bx, dy + 82, bw, 12)) { amount = addClamp(amount, steps[i]); syncAmountBox(); return true; }
-                if (buttonHit(mx, my, bx, dy + 96, bw, 12)) { amount = addClamp(amount, -steps[i]); syncAmountBox(); return true; }
+                if (buttonHit(mx, my, bx, dy + 82, bw, 12)) { beginStepHold(btn, pressKey(bx, dy + 82, bw, 12), steps[i]); return true; }
+                if (buttonHit(mx, my, bx, dy + 96, bw, 12)) { beginStepHold(btn, pressKey(bx, dy + 96, bw, 12), -steps[i]); return true; }
                 if (buttonHit(mx, my, bx, dy + 110, bw, 12)) {
-                    amount = i < 2 ? mulClamp(amount, scales[i]) : divClamp(amount, scales[i]);
+                    long next = i < 2 ? mulClamp(amount, scales[i]) : divClamp(amount, scales[i]);
+                    if (next == amount) {
+                        ShopUiSounds.limit();
+                        buttonFeedback.nudge(pressKey(bx, dy + 110, bw, 12), System.currentTimeMillis());
+                    }
+                    amount = next;
                     syncAmountBox();
                     return true;
                 }
@@ -4467,6 +4526,198 @@ public class ShopScreen extends ScaledScreen {
     }
 
     /** 数量加减夹取到 [1, Long.MAX]，防加法溢出。 */
+    /**
+     * 详情列确认与 ± 步进按钮的悬停说明，按 180px 换行。确认按钮正在等待或闪结果时不弹（别盖住结果标签），
+     * 步进按住连发时也不弹。没悬停在这些按钮上返回 null。
+     */
+    private List<net.minecraft.util.FormattedCharSequence> detailButtonTip(int smx, int smy) {
+        if (selected == null || modalLayerOpen()) return null;
+        int cx = detailX() + 8;
+        int dy = contentTop();
+        int btnW = DETAIL_W - 16;
+        String text = null;
+        if (hit(smx, smy, cx, dy + contentHeight() - 24, btnW, 20)) {
+            if (buttonFeedback.phase(confirmActionKey(), System.currentTimeMillis()) == ButtonFeedback.Phase.IDLE) {
+                text = "§7左键或 Enter 确认；处理中再点不会重复下单";
+            }
+        } else if (!buttonFeedback.holding()) {
+            int bw = (btnW - 9) / 4;
+            for (int i = 0; i < 4 && text == null; i++) {
+                int bx = cx + i * (bw + 3);
+                if (hit(smx, smy, bx, dy + 82, bw, 12) || hit(smx, smy, bx, dy + 96, bw, 12)) {
+                    text = "§7按住连续调整，越按越快";
+                }
+            }
+        }
+        if (text == null) return null;
+        return this.font.split(Component.literal(text), 180);
+    }
+
+    /** 详情列确认购买/出售按钮的压下 key（与 drawDetail、universalMouseClicked 同一块几何）。 */
+    private long confirmPressKey() {
+        return pressKey(detailX() + 8, contentTop() + contentHeight() - 24, DETAIL_W - 16, 20);
+    }
+
+    /** 确认按钮的动作 key：混入当前商品与买卖模式，换商品、换模式后旧的等待与闪色不挡住也不闪到新商品上。 */
+    private long confirmActionKey() {
+        return confirmPressKey() ^ (selectedEntryKey * 0x9E3779B97F4A7C15L) ^ ((long) mode.ordinal() << 61);
+    }
+
+    /**
+     * 确认购买/出售，点击与 Enter 共用。
+     *
+     * <p>四个确定性的本地预检过不去就地红闪；自选奖励（CHOICE，本地池或 FTBQ 表自选子模式）先弹选择界面，
+     * 选完再发购买包；其余去抖后带请求号发包，按钮进入等待，回执到了再闪结果。
+     * 红框（可交易性预判）不拦：花费预览可能还在加载、AE 库存与前置状态客户端看不全，以服务端为准。</p>
+     */
+    private void performConfirmTrade(boolean viaKeyboard) {
+        performConfirmTrade(viaKeyboard, false);
+    }
+
+    /**
+     * {@code singleUseWarned=true}：SDA/无限盘「买太多」警告已被玩家确认过，不再弹。警告在本地预检之后、
+     * 自选奖励界面与发包之前：数量 ≥ {@link ShopEntry#SINGLE_USE_WARN_AMOUNT} 且商品含 SDA/无限盘才弹，
+     * 玩家点「仍然购买」后回到这里重走一遍（商品或数量在弹窗期间变了就不继续，以免买到别的东西）。
+     */
+    private void performConfirmTrade(boolean viaKeyboard, boolean singleUseWarned) {
+        if (selected == null) return;
+        long now = System.currentTimeMillis();
+        long key = confirmActionKey();
+        if (viaKeyboard) {
+            // 键盘没有鼠标按住，压一下即可：下一帧鼠标兜底会松开，正好是按一下再弹回
+            int x = detailX() + 8;
+            int y = contentTop() + contentHeight() - 24;
+            buttonFeedback.press(confirmPressKey(), x, y, DETAIL_W - 16, 20, true, now);
+            ShopUiSounds.click();
+        }
+        String precheck = null;
+        if (mode == Mode.BUY && selected.hasMissingItems()) {
+            precheck = "§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买";
+        } else if (mode == Mode.BUY && !selected.allowsBuy()) {
+            precheck = "§c[山海商店] 该商品仅允许出售，不能购买";
+        } else if (mode == Mode.SELL && selected.getCost().isEmpty()) {
+            precheck = "§c[山海商店] 免费商品不能出售";
+        } else if (mode == Mode.SELL && !selected.allowsSell()) {
+            precheck = "§c[山海商店] 该商品仅允许购买，不能出售";
+        }
+        if (precheck != null) {
+            showMessage(Component.literal(precheck));
+            buttonFeedback.flash(key, ButtonFeedback.Tone.FAILED, now);
+            ShopUiSounds.fail();
+            return;
+        }
+        if (mode == Mode.BUY && !singleUseWarned && selected.hasSingleUseStorage()
+                && ShopEntry.exceedsSingleUseAmount(amount)) {
+            ShopEntry warnEntry = selected;
+            long warnAmount = amount;
+            ShopUiSounds.warn();
+            ShopSingleUseWarnScreen.open(this, List.of(
+                    "§f" + warnEntry.goodsDisplayName() + " §7× §e" + warnAmount + " §7份",
+                    "§eSDA 和无限盘一般只需要购买一次，买 " + warnAmount + " 份多半是多余的。",
+                    "§7确定要买这么多吗？"), () -> {
+                        if (selected == warnEntry && amount == warnAmount) performConfirmTrade(false, true);
+                    });
+            return;
+        }
+        boolean localChoice = selected.getRewardMode() == ShopEntry.RewardMode.CHOICE;
+        boolean ftbqChoice = selected.getRewardMode() == ShopEntry.RewardMode.FTBQ
+                && selected.getFtbqSubMode() == ShopEntry.RewardMode.CHOICE;
+        if (mode == Mode.BUY && localChoice) {
+            Minecraft.getInstance().setScreen(new RewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
+            return;
+        }
+        if (mode == Mode.BUY && ftbqChoice) {
+            Minecraft.getInstance().setScreen(new FtbqRewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
+            return;
+        }
+        if (!buttonFeedback.tryBegin(key, now)) {
+            buttonFeedback.nudge(confirmPressKey(), now);
+            ShopUiSounds.busy();
+            return;
+        }
+        int requestId = ClientShopActionResults.nextRequestId();
+        send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount, requestId);
+        buttonFeedback.pending(key, requestId, now);
+    }
+
+    /**
+     * 自选奖励界面确认购买：带请求号发包，确认按钮进入等待，回到商店后照常闪成交结果。
+     * 返回 false 表示上一笔还在等回执（或 300ms 内重复），选择界面留着并提示忙。
+     */
+    boolean submitRewardChoice(long catalogRevision, long entryKey, long times,
+                               boolean ae, boolean bp, int chosenRewardIndex) {
+        long now = System.currentTimeMillis();
+        long key = confirmActionKey();
+        if (!buttonFeedback.tryBegin(key, now)) return false;
+        int requestId = ClientShopActionResults.nextRequestId();
+        ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(ShopActionPacket.Action.BUY,
+                catalogRevision, entryKey, times, ae, bp, chosenRewardIndex, false, requestId));
+        buttonFeedback.pending(key, requestId, now);
+        return true;
+    }
+
+    /** 回执对上还在等的请求才闪色出声；对不上（已超时、界面已重建）就丢掉，横幅照常由聊天镜像显示。 */
+    private void onActionResult(ClientShopActionResults.Result result) {
+        ButtonFeedback.Tone tone = switch (result.outcome()) {
+            case SUCCESS -> ButtonFeedback.Tone.SUCCESS;
+            case PARTIAL -> ButtonFeedback.Tone.PARTIAL;
+            case FAILED -> ButtonFeedback.Tone.FAILED;
+        };
+        if (!buttonFeedback.resolve(result.requestId(), tone, System.currentTimeMillis())) return;
+        switch (tone) {
+            case SUCCESS -> ShopUiSounds.success(result.action() == ShopActionPacket.Action.SELL);
+            case PARTIAL -> ShopUiSounds.partial();
+            default -> ShopUiSounds.fail();
+        }
+    }
+
+    /** 确认按钮标签随反馈阶段换：等待中、成交结果各一句短固定文字，按钮宽度内放得下。 */
+    private String confirmLabel(long actionKey, long nowMs) {
+        ButtonFeedback.Phase phase = buttonFeedback.phase(actionKey, nowMs);
+        if (phase == ButtonFeedback.Phase.PENDING) return "§7处理中…";
+        if (phase == ButtonFeedback.Phase.FLASH) {
+            switch (buttonFeedback.flashTone(actionKey, nowMs)) {
+                case SUCCESS -> { return mode == Mode.BUY ? "§a✓ 购买成功" : "§e✓ 出售成功"; }
+                case PARTIAL -> { return "§6~ 部分成交"; }
+                case FAILED -> { return "§c✗ 未成交"; }
+                default -> { }
+            }
+        }
+        return mode == Mode.BUY ? "§a确认购买" : "§e确认出售";
+    }
+
+    /** 详情数量步进一次；已经到 1 或 Long.MAX、数量没变时返回 false。 */
+    private boolean stepAmount(long delta) {
+        long next = addClamp(amount, delta);
+        if (next == amount) return false;
+        amount = next;
+        syncAmountBox();
+        return true;
+    }
+
+    /**
+     * 按下 ± 步进按钮：先步进一次；左键按住再挂连发（{@link RepeatCurve#STEPPER}，越按越快，滴答声音高渐升）。
+     * 到了边界只低响一声、轻抖一下，连发随即停下。
+     */
+    private void beginStepHold(int btn, long stepPressKey, long delta) {
+        long now = System.currentTimeMillis();
+        if (!stepAmount(delta)) {
+            ShopUiSounds.limit();
+            buttonFeedback.nudge(stepPressKey, now);
+            return;
+        }
+        if (btn != 0) return;
+        buttonFeedback.holdRepeat(RepeatCurve.STEPPER, i -> {
+            if (stepAmount(delta)) {
+                ShopUiSounds.step(i);
+                return true;
+            }
+            ShopUiSounds.limit();
+            buttonFeedback.nudge(stepPressKey, System.currentTimeMillis());
+            return false;
+        }, now);
+    }
+
     private static long addClamp(long a, long delta) {
         if (delta > 0 && a > Long.MAX_VALUE - delta) return Long.MAX_VALUE;
         return Math.max(1L, a + delta);
@@ -4551,6 +4802,8 @@ public class ShopScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseReleased(double mx, double my, int btn) {
+        // 先结束按下态与连发；不 return，下面的拖拽、滚动条照常收尾
+        buttonFeedback.release(System.currentTimeMillis());
         if (dragTabLevel != -1) {
             int level = dragTabLevel;
             String category = dragTabCategory;
@@ -4640,13 +4893,18 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void send(ShopActionPacket.Action action, ShopEntry entry, long times) {
+        send(action, entry, times, 0);
+    }
+
+    /** {@code requestId!=0}：服务端处理完回 ShopActionResultPacket，供详情页确认按钮显示等待与成交结果。 */
+    private void send(ShopActionPacket.Action action, ShopEntry entry, long times, int requestId) {
         long entryKey = entry != null ? ClientShopCatalog.keyOf(entry) : -1L;
         // aeMode 仅购买用（AE 模式优先注入网络，出售货款走虚拟钱包账户不涉及实物投放）；
         // backpackMode 购买/出售都要带（出售时决定优先扣随身背包还是精妙背包，见 ShopPurchase#sellBulk）
         boolean ae = (action == ShopActionPacket.Action.BUY || action == ShopActionPacket.Action.BUY_MATERIALS) && aeMode;
         boolean bp = backpackMode;
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(
-                action, ClientShopCatalog.revision(), entryKey, times, ae, bp));
+                action, ClientShopCatalog.revision(), entryKey, times, ae, bp, -1, false, requestId));
     }
 
     /** 购物车结算专用发包：标记 fromCart=true，服务端处理完会额外回一个 ShopCartPurchaseResultPacket
@@ -4680,7 +4938,10 @@ public class ShopScreen extends ScaledScreen {
         // 菜单项留给退场动画画，弹簧归零后由 updateOverlayMotion 清掉（连同 ctxMenuEntryKey）
     }
 
-    /** Esc 分层关闭：跟「点图层外关闭」同语义，先关最上层的右键菜单/大图层，全都没开才关整个商店。 */
+    /**
+     * Esc 分层关闭：跟「点图层外关闭」同语义，先关最上层的右键菜单/大图层，再退出搜索框/数量框，全都没有才关整个商店。
+     * Enter（含小键盘）：选中商品时等同点「确认购买/出售」；在搜索框里、或浮层/阶段锁盖着时不下单。
+     */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (keyCode == 256) {
@@ -4689,8 +4950,37 @@ public class ShopScreen extends ScaledScreen {
             if (cartOverlayOpen) { closeCartOverlay(); return true; } // 结算批次不清，见 handleCartOverlayClick 关闭分支
             if (descOverlayOpen) { closeDescOverlay(); return true; }
             if (guideOverlayOpen) { closeGuideOverlay(); return true; }
+            if (clearTextFocus()) return true;
+        }
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+            if (enterHeld) return true;
+            if (selected != null && !modalLayerOpen() && (searchBox == null || !searchBox.isFocused())) {
+                enterHeld = true;
+                performConfirmTrade(true);
+                return true;
+            }
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    /** Enter 松开才允许下一次确认。其余按键（含修饰键）一律交还原版，输入法切换中英要靠它。 */
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+            enterHeld = false;
+        }
+        return super.keyReleased(keyCode, scanCode, modifiers);
+    }
+
+    /** 搜索框或数量框有焦点时退出焦点并返回 true。 */
+    private boolean clearTextFocus() {
+        boolean searchFocused = searchBox != null && searchBox.isFocused();
+        boolean amountFocused = amountBox != null && amountBox.isFocused();
+        if (!searchFocused && !amountFocused) return false;
+        setFocused(null);
+        if (searchBox != null) searchBox.setFocused(false);
+        if (amountBox != null) amountBox.setFocused(false);
+        return true;
     }
 
     /**
@@ -4991,25 +5281,35 @@ public class ShopScreen extends ScaledScreen {
 
     private void drawButton(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my) {
         boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
-        float hv = hoverButtons.follow(widgetKey(x, y, label.hashCode()), hover ? 1f : 0f, System.currentTimeMillis());
-        renderBox(g, x, y, w, h,
-                GuiMotion.lerpColor(GOLD_DARK, GOLD, hv),
-                GuiMotion.lerpColor(BUTTON_BG, BUTTON_HOVER, hv));
-        g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, label, w - 4), x + w / 2, y + (h - 8) / 2, WHITE);
+        long now = System.currentTimeMillis();
+        float hv = hoverButtons.follow(widgetKey(x, y, label.hashCode()), hover ? 1f : 0f, now);
+        // 详情滚动区传进来的 my 已加过滚动量，按钮也按内容坐标画；减回去才是 buttonHit 记下的屏幕坐标
+        long pk = pressKey(x, y - (my - frameMy), w, h);
+        ButtonFeedback.Visual v = buttonFeedback.visual(pk, pk, true, now, reduceMotionFrame);
+        int border = ButtonFeedback.tint(GuiMotion.lerpColor(GOLD_DARK, GOLD, hv), v);
+        int fill = ButtonFeedback.shade(GuiMotion.lerpColor(BUTTON_BG, BUTTON_HOVER, hv), v);
+        GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(), () -> {
+            renderBox(g, x, y, w, h, border, fill);
+            g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, label, w - 4), x + w / 2, y + (h - 8) / 2, WHITE);
+        });
     }
 
     private boolean hit(double mx, double my, int x, int y, int w, int h) {
         return GuiRenderUtil.isHovering(mx, my, x, y, w, h);
     }
 
-    /** 按键命中。波纹只记点击点，不移动按钮，也不吞掉这次点击。 */
+    /** 按键命中：记下点击波并把按钮压下（松开在 universalMouseReleased）。按下即触发，不吞掉这次点击。 */
     private boolean buttonHit(double mx, double my, int x, int y, int w, int h) {
         if (!hit(mx, my, x, y, w, h)) return false;
         armClickWave(mx, my);
+        buttonFeedback.press(pressKey(x, y, w, h), x, y, w, h, true, System.currentTimeMillis());
         return true;
     }
 
     private void armClickWave(double mx, double my) {
+        ShopUiSounds.click();
+        // 减少动效：点击声照常，液态波纹不画
+        if (ClientShopUiSettings.reduceMotion()) return;
         clickWaveAtMs = System.currentTimeMillis();
         clickWaveX = (int) Math.round(mx);
         clickWaveY = (int) Math.round(my);
@@ -6021,6 +6321,11 @@ public class ShopScreen extends ScaledScreen {
             List<Component> topTip = topButtonTip(smx, smy);
             if (topTip != null) {
                 g.renderComponentTooltip(this.font, topTip, mx, my);
+                return;
+            }
+            List<net.minecraft.util.FormattedCharSequence> detailTip = detailButtonTip(smx, smy);
+            if (detailTip != null) {
+                g.renderTooltip(this.font, detailTip, mx, my);
                 return;
             }
             // 悬停货币栏：显示货币全名 + 精确余额
