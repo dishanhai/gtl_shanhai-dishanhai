@@ -1150,7 +1150,7 @@ public class ShopScreen extends ScaledScreen {
     private static final int ADD_BTN_W = 64;
     private int addBtnX() { return memberBtnX() + memberBtnW() + 4; }
     private int addBtnW() { return ADD_BTN_W; }
-    // 「商店设置」按钮：仅编辑权玩家可见，不受编辑模式开关限制；新增商品隐藏时顶上来补位，不留空档
+    // 「商店设置」按钮：所有玩家可见（没有编辑权的只看到本机显示偏好），不受编辑模式开关限制；新增商品隐藏时顶上来补位，不留空档
     private static final int SETTINGS_BTN_W = 64;
     private int settingsBtnX() { return catalogEditUnlocked ? addBtnX() + addBtnW() + 4 : addBtnX(); }
     private int settingsBtnW() { return SETTINGS_BTN_W; }
@@ -1564,13 +1564,11 @@ public class ShopScreen extends ScaledScreen {
         drawButton(g, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H, "§6货币中心", mx, my);
         drawButton(g, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H, "§d兑换中心", mx, my);
         drawButton(g, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H, "§b银会中心", mx, my);
-        // 新增商品（编辑权 + 开了编辑模式）、商店设置（仅编辑权，不受编辑模式限制）
+        // 新增商品（编辑权 + 开了编辑模式）；商店设置所有人可见，没有编辑权的只看到本机显示偏好
         if (catalogEditUnlocked) {
             drawButton(g, addBtnX(), top + 6, addBtnW(), TOP_BAR_H, "§a新增商品", mx, my);
         }
-        if (canEdit) {
-            drawButton(g, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H, "§b商店设置", mx, my);
-        }
+        drawButton(g, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H, "§b商店设置", mx, my);
 
         // 顶栏右侧：购物车 → 精妙背包模式 → AE模式 → 充值全部 → 关闭
         int cartCount = ClientShopCart.size();
@@ -2673,8 +2671,10 @@ public class ShopScreen extends ScaledScreen {
         if (catalogEditUnlocked && hit(smx, smy, addBtnX(), y, addBtnW(), h)) {
             return buttonTip("新增商品", "往当前商店目录加一条新商品。只在编辑模式开启时出现。");
         }
-        if (canEdit && hit(smx, smy, settingsBtnX(), y, settingsBtnW(), h)) {
-            return buttonTip("商店设置", "调整奖励抽取上限、SDA 打包阈值、卡片大小、获取预览模式、是否记住选取与搜索，以及 AE 注入开关。");
+        if (hit(smx, smy, settingsBtnX(), y, settingsBtnW(), h)) {
+            return buttonTip("商店设置", canEdit
+                    ? "调整奖励抽取上限、SDA 打包阈值、卡片大小、获取预览模式、是否记住选取与搜索、减少动效与商店音效，以及 AE 注入开关。"
+                    : "调整卡片大小、获取预览模式、是否记住选取与搜索、减少动效与商店音效，只存在这台客户端。");
         }
         if (hit(smx, smy, cartBtnX(), y, cartBtnW(), h)) {
             return buttonTip("购物车", "Ctrl+左键把商品加进来。打开后可改数量，再一次结算。");
@@ -4288,9 +4288,9 @@ public class ShopScreen extends ScaledScreen {
             ShopEntryEditor.openNew(this, currentViewCategory());
             return true;
         }
-        // 商店设置（仅编辑权，不受编辑模式限制）：奖励抽取次数上限等运行期可调行为
-        if (canEdit && buttonHit(mx, my, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H)) {
-            Minecraft.getInstance().setScreen(new ShopSettingsScreen(this));
+        // 商店设置（所有人可开，不受编辑模式限制）：编辑权玩家另有奖励抽取次数上限等服务端运行期设置
+        if (buttonHit(mx, my, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H)) {
+            Minecraft.getInstance().setScreen(new ShopSettingsScreen(this, canEdit));
             return true;
         }
 

@@ -38,6 +38,23 @@ class ShopFeedbackPrefsSourceTest {
         assertFalse(s.contains("GTDishanhaiMod.MOD_ID"), "只用原版音效，不引用模组资源");
     }
 
+    @Test
+    void settingsScreenTogglesFeedbackPrefsForEveryPlayer() throws Exception {
+        String settings = Files.readString(Path.of(ROOT + "client/gui/shop/ShopSettingsScreen.java"));
+        assertTrue(settings.contains("减少动效") && settings.contains("商店音效"));
+        assertTrue(settings.contains("ClientShopUiSettings.setFeedbackPrefs(reduceMotion, uiSounds)"));
+        assertTrue(settings.contains("this.font.split("), "说明文字换行，不截断");
+        String submit = extractBlock(settings, "private void submit()");
+        int guard = submit.indexOf("if (serverRows)");
+        int packet = submit.indexOf("new ShopSettingsPacket(");
+        assertTrue(guard >= 0 && guard < packet, "没有编辑权时只存本机偏好，不发服务端设置包");
+        assertTrue(settings.contains("public ShopSettingsScreen(ShopScreen parent, boolean serverRows)"));
+
+        String shop = Files.readString(Path.of(ROOT + "client/gui/shop/ShopScreen.java"));
+        assertTrue(shop.contains("new ShopSettingsScreen(this, canEdit)"));
+        assertFalse(shop.contains("canEdit && buttonHit(mx, my, settingsBtnX()"), "设置入口对所有玩家开放");
+    }
+
     private static String extractBlock(String source, String declaration) {
         int start = source.indexOf(declaration);
         assertTrue(start >= 0, "缺少方法声明: " + declaration);
