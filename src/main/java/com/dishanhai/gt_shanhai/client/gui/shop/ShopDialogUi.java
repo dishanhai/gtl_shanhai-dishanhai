@@ -88,6 +88,12 @@ final class ShopDialogUi {
         ShopUiSounds.busy();
     }
 
+    /** 动作没通过检查（比如保存时有栏位没填对）：按钮轻抖，出失败音。 */
+    void reject(int x, int y, int w, int h) {
+        feedback.nudge(key(x, y, w, h), System.currentTimeMillis());
+        ShopUiSounds.fail();
+    }
+
     /** 列表行选中：只出点击声，高亮由 {@link #rowHover} 渐变。 */
     void select() {
         ShopUiSounds.click();

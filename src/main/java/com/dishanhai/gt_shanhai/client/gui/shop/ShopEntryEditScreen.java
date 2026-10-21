@@ -416,8 +416,23 @@ public class ShopEntryEditScreen extends ScaledScreen {
     /** 页脚高：左边的提示文字换几行就多高，至少放得下按钮。 */
     private int footerH() { return Math.max(FOOTER_BTN_H + 12, footerLines().size() * LINE_H + 10); }
     private int footerTextW() { return cancelX() - 8 - cx(); }
-    private String footerText() { return KEY_HINT; }
-    private List<FormattedCharSequence> footerLines() { return wrap(footerText(), footerTextW()); }
+    /** 页脚左侧：目录过期 / 保存失败的原因优先，平时是快捷键提示。 */
+    private String footerText() {
+        if (!catalogSnapshotValid()) return "§c商品目录已更新，请关闭并重新打开编辑器";
+        if (showProblems) {
+            List<Problem> ps = problems();
+            if (!ps.isEmpty()) return "§c" + ps.get(0).tab().label + "：" + ps.get(0).message();
+        }
+        return KEY_HINT;
+    }
+
+    /** 页脚文字每次排版时算一次（{@link #layoutRows}），视口高度等处反复用到时不重算检查。 */
+    private List<FormattedCharSequence> footerLinesCache;
+
+    private List<FormattedCharSequence> footerLines() {
+        if (footerLinesCache == null) footerLinesCache = wrap(footerText(), footerTextW());
+        return footerLinesCache;
+    }
     private int footerBtnY() { return top + panelHeight - FOOTER_BTN_H - 6; }
     private int confirmX() { return left + panelWidth - 12 - CONFIRM_W; }
     private int cancelX() { return confirmX() - 6 - CANCEL_W; }
@@ -514,6 +529,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     /** 按当前状态算本页每行的高度与位置；每帧、每次点击/滚轮前都重算（免费开关、奖励模式会让行出现或消失）。 */
     private void layoutRows() {
+        footerLinesCache = wrap(footerText(), footerTextW());
         java.util.Arrays.fill(rowHs, 0);
         List<Row> rows = ShopEntryEditLayout.rowsOf(tab);
         int[] hs = new int[rows.size()];
@@ -555,7 +571,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int[] tabWidths() {
         Tab[] tabs = Tab.values();
         int[] w = new int[tabs.length];
-        for (int i = 0; i < tabs.length; i++) w[i] = Math.max(52, this.font.width(tabs[i].label) + 20);
+        // 宽度预留红点位置，挂上/摘掉红点时页签不跳动
+        for (int i = 0; i < tabs.length; i++) w[i] = Math.max(52, this.font.width(tabs[i].label + " ●") + 16);
         return w;
     }
 
@@ -573,9 +590,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
         Tab[] tabs = Tab.values();
         int[] w = tabWidths();
         int[] xs = ShopEntryEditLayout.tabXs(w, left + 8, TAB_GAP);
+        // 保存失败过才挂红点：哪页有没填对的栏位，一眼看到
+        java.util.EnumSet<Tab> bad = java.util.EnumSet.noneOf(Tab.class);
+        if (showProblems) for (Problem p : problems()) bad.add(p.tab());
         for (int i = 0; i < tabs.length; i++) {
             boolean active = tabs[i] == tab;
-            ui.draw(g, this.font, xs[i], tabY(), w[i], TAB_H, (active ? "§6" : "§7") + tabs[i].label, mx, my, true);
+            String label = (active ? "§6" : "§7") + tabs[i].label + (bad.contains(tabs[i]) ? " §c●" : "");
+            ui.draw(g, this.font, xs[i], tabY(), w[i], TAB_H, label, mx, my, true);
             if (active) g.fill(xs[i] + 2, tabY() + TAB_H - 2, xs[i] + w[i] - 2, tabY() + TAB_H, GOLD);
         }
     }
@@ -2357,28 +2378,41 @@ public class ShopEntryEditScreen extends ScaledScreen {
         if (euBox != null) euBox.setValue("");
     }
 
-    /** 保存按钮与 Ctrl+Enter 共用：目录已更新时只提示，不发包。 */
-    private void trySave() {
-        if (!catalogSnapshotValid()) {
-            showCatalogSnapshotExpired();
-            return;
+    /** 保存前查出的问题：在哪页哪行、怎么跟玩家说。 */
+    private record Problem(Tab tab, Row row, String message) {}
+
+    /** 第一次保存失败后，页签红点与页脚原因跟着草稿实时更新（改对了就消失）。 */
+    private boolean showProblems;
+
+    /** 按保存时的检查顺序列出所有问题；没有问题返回空表。 */
+    private List<Problem> problems() {
+        List<Problem> out = new ArrayList<>();
+        if (rewardMode == ShopEntry.RewardMode.FTBQ && ftbqTableId.isEmpty()) {
+            out.add(new Problem(Tab.REWARD, Row.REWARD_POOL, "奖励模式选了 FTBQ 表，但还没选表"));
         }
-        submit();
+        if (buildGoodsForSubmit().isEmpty()) {
+            out.add(goodsLockedByReward()
+                    ? new Problem(Tab.REWARD, Row.REWARD_POOL, "FTBQ 表里没有物品类奖励，定不了商品身份")
+                    : new Problem(Tab.GOODS, Row.GOODS, "还没选商品"));
+        }
+        ShopCost cost = currentCost();
+        if (!freeGoods && cost.isEmpty()) {
+            out.add(new Problem(Tab.PRICE, Row.FREE, "成本不能为空。要免费请点「设为免费」"));
+        } else if (!cost.isValid()) {
+            out.add(new Problem(Tab.PRICE, Row.FREE, "成本里有不存在的物品或流体"));
+        }
+        return out;
     }
 
-    private void submit() {
-        if (!catalogSnapshotValid()) {
-            showCatalogSnapshotExpired();
-            return;
-        }
-        capture();
-        if (rewardMode == ShopEntry.RewardMode.FTBQ && ftbqTableId.isEmpty()) {
-            var p = Minecraft.getInstance().player;
-            if (p != null) p.displayClientMessage(Component.literal("§c[商店] 奖励模式选了 FTBQ 但未选表，未保存"), false);
-            return;
-        }
-        // 商品清单：奖励池接管时只镜像池首项（身份占位，非空校验/兜底图标用）；否则用编辑器里的商品排——
-        // 首项数量吃独立的 count/countBox（与改造前单商品行为一致），第2项起用各自槽位自带数量（点槽位重开选择器改）
+    private ShopCost currentCost() {
+        return freeGoods ? new ShopCost(BigInteger.ZERO, null, null, BigInteger.ZERO) : buildCost();
+    }
+
+    /**
+     * 要发出去的商品清单：奖励池接管时只镜像池首项（身份占位，非空校验/兜底图标用）；否则用编辑器里的商品排——
+     * 首项数量吃独立的 count/countBox（与改造前单商品行为一致），第2项起用各自槽位自带数量（点槽位重开选择器改）。
+     */
+    private List<ShopEntry.GoodsStack> buildGoodsForSubmit() {
         boolean goodsLocked = goodsLockedByReward();
         List<ItemStack> sourceStacks = goodsLocked ? java.util.List.of(lockedGoodsDisplay()) : goodsList;
         List<ShopEntry.GoodsStack> goodsForSubmit = new ArrayList<>();
@@ -2399,22 +2433,38 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 goodsForSubmit.add(ShopEntry.GoodsStack.ofFluid(id, amt > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) amt));
             }
         }
-        if (goodsForSubmit.isEmpty()) {
-            var p = Minecraft.getInstance().player;
-            if (p != null) p.displayClientMessage(Component.literal("§c[商店] 商品身份解析失败（FTBQ表里没有物品类奖励？），未保存"), false);
+        return goodsForSubmit;
+    }
+
+    /** 保存按钮与 Ctrl+Enter 共用：目录已更新时只提示，不发包。 */
+    private void trySave() {
+        if (!catalogSnapshotValid()) {
+            showCatalogSnapshotExpired();
             return;
         }
-        ShopCost cost = freeGoods ? new ShopCost(BigInteger.ZERO, null, null, BigInteger.ZERO) : buildCost();
-        if (!freeGoods && cost.isEmpty()) {
-            var p = Minecraft.getInstance().player;
-            if (p != null) p.displayClientMessage(Component.literal("§c[商店] 成本不能为空。要免费请点「设为免费」，未保存"), false);
+        submit();
+    }
+
+    private void submit() {
+        if (!catalogSnapshotValid()) {
+            showCatalogSnapshotExpired();
             return;
         }
-        if (!cost.isValid()) {
-            var p = Minecraft.getInstance().player;
-            if (p != null) p.displayClientMessage(Component.literal("§c[商店] 成本里有不存在的物品或流体，未保存"), false);
+        capture();
+        List<Problem> found = problems();
+        if (!found.isEmpty()) {
+            // 不发聊天消息：跳到出错那页、把那一行滚出来，页脚写明原因，出错的页签挂红点
+            showProblems = true;
+            Problem p = found.get(0);
+            selectTab(p.tab());
+            layoutRows();
+            setScroll(ShopEntryEditLayout.scrollToShow(scroll(), rowYs[p.row().ordinal()], rowH(p.row()), viewH()));
+            layoutRows();
+            ui.reject(confirmX(), footerBtnY(), CONFIRM_W, FOOTER_BTN_H);
             return;
         }
+        List<ShopEntry.GoodsStack> goodsForSubmit = buildGoodsForSubmit();
+        ShopCost cost = currentCost();
         String cat = (category == null || category.isBlank()) ? ShopEntry.DEFAULT_CATEGORY : category.trim();
         String desc = description == null ? "" : description.trim();
         // 周期限购的周期在 UI 层用现实秒，发包前换算成 tick；两框须都非空才生效（半填在 ShopEntry 构造器里会被归一成不启用）

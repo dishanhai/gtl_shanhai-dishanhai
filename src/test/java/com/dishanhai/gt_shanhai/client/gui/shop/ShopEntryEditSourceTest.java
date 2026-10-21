@@ -133,6 +133,31 @@ class ShopEntryEditSourceTest {
         assertTrue(extractBlock(s, "protected void initScaled()").contains("ui.syncEnterHeld()"));
     }
 
+    // ===== E5 表单内错误提示 =====
+
+    @Test
+    void saveProblemsShowInTheFormNotInChat() throws Exception {
+        String s = src();
+        String submit = extractBlock(s, "private void submit()");
+        assertFalse(submit.contains("displayClientMessage"), "保存失败不再只发聊天消息，界面上看不出哪栏出错");
+        assertTrue(submit.contains("problems()"));
+        assertTrue(submit.contains("selectTab(") && submit.contains("ShopEntryEditLayout.scrollToShow("), "跳到出错那页并把那一行滚出来");
+        assertTrue(submit.contains("ui.reject("), "保存按钮轻抖并出失败音");
+        String problems = extractBlock(s, "private List<Problem> problems()");
+        assertTrue(problems.contains("Tab.GOODS") && problems.contains("Tab.PRICE") && problems.contains("Tab.REWARD"));
+        assertTrue(problems.contains("设为免费"), "成本为空时告诉玩家怎么做成免费商品");
+    }
+
+    @Test
+    void problemTabsGetARedDotAndTheFooterSaysWhy() throws Exception {
+        String s = src();
+        assertTrue(extractBlock(s, "private void drawTabs(").contains("showProblems"));
+        String footer = extractBlock(s, "private String footerText()");
+        assertTrue(footer.contains("catalogSnapshotValid()") && footer.contains("problems()"));
+        String ui = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopDialogUi.java"));
+        assertTrue(extractBlock(ui, "void reject(").contains("ShopUiSounds.fail()"));
+    }
+
     @Test
     void namesAndTitlesWrapInsteadOfBeingCut() throws Exception {
         String s = src();
