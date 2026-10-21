@@ -4725,13 +4725,18 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void send(ShopActionPacket.Action action, ShopEntry entry, long times) {
+        send(action, entry, times, 0);
+    }
+
+    /** {@code requestId!=0}：服务端处理完回 ShopActionResultPacket，供详情页确认按钮显示等待与成交结果。 */
+    private void send(ShopActionPacket.Action action, ShopEntry entry, long times, int requestId) {
         long entryKey = entry != null ? ClientShopCatalog.keyOf(entry) : -1L;
         // aeMode 仅购买用（AE 模式优先注入网络，出售货款走虚拟钱包账户不涉及实物投放）；
         // backpackMode 购买/出售都要带（出售时决定优先扣随身背包还是精妙背包，见 ShopPurchase#sellBulk）
         boolean ae = (action == ShopActionPacket.Action.BUY || action == ShopActionPacket.Action.BUY_MATERIALS) && aeMode;
         boolean bp = backpackMode;
         ShanhaiNetwork.CHANNEL.sendToServer(new ShopActionPacket(
-                action, ClientShopCatalog.revision(), entryKey, times, ae, bp));
+                action, ClientShopCatalog.revision(), entryKey, times, ae, bp, -1, false, requestId));
     }
 
     /** 购物车结算专用发包：标记 fromCart=true，服务端处理完会额外回一个 ShopCartPurchaseResultPacket
