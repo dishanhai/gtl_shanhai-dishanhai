@@ -605,6 +605,8 @@
   "gt_shanhai.machine.recipe_type_pattern_buffer.foa_mode.enabled": "样板倍增模式：已开启",
   "gt_shanhai.machine.recipe_type_pattern_buffer.foa_mode.disabled": "样板倍增模式：已关闭",
   "gt_shanhai.machine.recipe_type_pattern_buffer.foa_host_multiplier": "当前原初引擎倍率：%s×",
+  "gt_shanhai.machine.recipe_type_pattern_buffer.foa_pending_warning": "§e倍率变化可能卡住排队任务",
+  "gt_shanhai.machine.recipe_type_pattern_buffer.foa_pending_warning.detail": "手动调整、读取或自动跟随宿主倍率时，内部缓冲原料会退回 ME，AE 正在等待的旧样板产出不会自动重算。请先完成排队任务；若已卡住，请取消并重新提交。",
   "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.title": "样板强匹配",
   "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.enabled": "强匹配：已开启",
   "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.disabled": "强匹配：已关闭",

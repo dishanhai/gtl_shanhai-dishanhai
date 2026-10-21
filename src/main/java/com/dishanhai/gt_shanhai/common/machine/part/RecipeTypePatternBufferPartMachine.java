@@ -209,7 +209,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     private final CachedPatternPaginationUIManager paginationUIManager;
     private final String[] patternRecipeTypeIds;
-    private final int[] patternRecipeTypeStackHashes;
+    private final String[] patternRecipeTypeTags;
+    private final int[] inferredPatternStackHashes;
+    private final BitSet configuredPatternSlots = new BitSet();
     private final int[] strictRecipeIdWarningStackHashes;
     private final int[] strongMatchLogStamps;
     @DescSynced
@@ -300,8 +302,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 new int[patternsPerRow * rowsPerPage * maxPages + this.wildcardSlotCount];
         this.patternRecipeTypeIds = new String[patternsPerRow * rowsPerPage * maxPages];
         Arrays.fill(this.patternRecipeTypeIds, "");
-        this.patternRecipeTypeStackHashes = new int[patternsPerRow * rowsPerPage * maxPages];
-        Arrays.fill(this.patternRecipeTypeStackHashes, Integer.MIN_VALUE);
+        this.patternRecipeTypeTags = new String[patternsPerRow * rowsPerPage * maxPages];
+        this.inferredPatternStackHashes = new int[patternsPerRow * rowsPerPage * maxPages];
+        Arrays.fill(this.inferredPatternStackHashes, Integer.MIN_VALUE);
         this.strictRecipeIdWarningStackHashes = new int[patternsPerRow * rowsPerPage * maxPages];
         Arrays.fill(this.strictRecipeIdWarningStackHashes, Integer.MIN_VALUE);
         this.strongMatchLogStamps = new int[patternsPerRow * rowsPerPage * maxPages];
@@ -533,6 +536,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         gtShanhai$reconcilePatternInventorySize();
         gtShanhai$reconcileWildcardInventorySize();
         super.onLoad();
+        rebuildConfiguredPatternSlots();
         // 父类 onLoad 已通过 getRealPattern 构造并发布倍率样板，无需在首次 AE 查询时再解码一遍。
         outputMultiplierPatternsRefreshNeeded = false;
         if ((Object) this instanceof VirtualPatternBufferMachineAccess access) {
@@ -540,7 +544,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
         refreshPatternRecipeTypes();
         if (getLevel() instanceof ServerLevel serverLevel) {
-            serverLevel.getServer().tell(new TickTask(1, () -> refreshWildcardPatterns(true)));
+            serverLevel.getServer().tell(new TickTask(1, () -> {
+                // GTLCore 的載入建表可能排在 server.execute；在它完成後再核對一次。
+                rebuildConfiguredPatternSlots();
+                refreshWildcardPatterns(true);
+            }));
         }
         updateOutputMultiplierHostSyncSubscription();
     }
@@ -771,6 +779,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     protected void onPatternChange(int index) {
         clearOutputMultiplierPatternCache();
         super.onPatternChange(index);
+        if (configuredPatternSlots != null && index >= 0 && index < maxPatternCount) {
+            configuredPatternSlots.set(index, hasPatternInSlot(index));
+        }
         if (!isRemote()) {
             RecipeTypePatternSearchHelper.clearPatternSlotState(this, index);
         }
@@ -796,6 +807,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     protected void refreshAllByProduct() {
         clearOutputMultiplierPatternCache();
         super.refreshAllByProduct();
+        rebuildConfiguredPatternSlots();
         outputMultiplierPatternsRefreshNeeded = false;
         refreshPatternRecipeTypes();
         refreshWildcardRecipeTypes();
@@ -864,6 +876,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         boolean result = super.pasteFromTag(tag);
         // 数据棒可能从不同槽位配置的总成复制而来，同样存在尺寸错配。
         gtShanhai$reconcilePatternInventorySize();
+        rebuildConfiguredPatternSlots();
         refreshPatternRecipeTypes();
         return result;
     }
@@ -871,6 +884,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     @Override
     public net.minecraft.nbt.CompoundTag cutToTag(net.minecraft.nbt.CompoundTag tags) {
         net.minecraft.nbt.CompoundTag result = super.cutToTag(tags);
+        rebuildConfiguredPatternSlots();
         refreshPatternRecipeTypes();
         return result;
     }
@@ -882,7 +896,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (slot < patternRecipeTypeIds.length) {
             if (slot < getPatternInventory().getSlots()) {
                 ItemStack stack = getPatternInventory().getStackInSlot(slot);
-                if (patternRecipeTypeStackHashes[slot] != stackKeyHash(stack)) {
+                String taggedTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
+                // 明確標記類型的槽只讀單一欄位；推斷類型仍需偵測輸入／輸出被原地修改。
+                if (!Objects.equals(patternRecipeTypeTags[slot], taggedTypeId)
+                        || (!taggedTypeId.equals(patternRecipeTypeIds[slot])
+                                && inferredPatternStackHashes[slot] != stackKeyHash(stack))) {
                     refreshPatternRecipeType(slot);
                 }
             }
@@ -944,7 +962,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         GTRecipe recipe = PatternRecipeTypeHelper.resolveRecipeForPattern(getLevel(), recipeTypeId, recipeId);
         if (recipe != null && PatternRecipeTypeHelper.storedRecipeFitsPattern(stack, getLevel(), recipe)) {
             patternRecipeTypeIds[slot] = recipe.recipeType.registryName.toString();
-            patternRecipeTypeStackHashes[slot] = stackKeyHash(stack);
+            patternRecipeTypeTags[slot] = recipeTypeId;
+            if (!recipeTypeId.equals(patternRecipeTypeIds[slot])) {
+                inferredPatternStackHashes[slot] = stackKeyHash(stack);
+            }
             if (strongPatternMatchMode) {
                 gtShanhai$setStrongPatternMatchWarning(slot, false);
                 if (slot < strongMatchLogStamps.length) {
@@ -972,7 +993,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 stack, getLevel(), gtShanhai$mergePatternInferenceInputs(slot, availableCatalystInputs));
         if (recipe != null && recipe.recipeType != null && recipe.recipeType.registryName != null) {
             patternRecipeTypeIds[slot] = recipe.recipeType.registryName.toString();
-            patternRecipeTypeStackHashes[slot] = stackKeyHash(stack);
+            patternRecipeTypeTags[slot] = recipeTypeId;
+            if (!recipeTypeId.equals(patternRecipeTypeIds[slot])) {
+                inferredPatternStackHashes[slot] = stackKeyHash(stack);
+            }
         }
         return recipe;
     }
@@ -1546,7 +1570,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     @Override
     public boolean gtShanhai$slotAllowsRecipe(int slot, GTRecipe recipe) {
-        if (slot >= maxPatternCount && gtShanhai$getPatternRecipe(slot) == null) return false;
+        if (PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) return true;
+        if (gtShanhai$wildcardSlotRejectsRecipe(slot, recipe)) return false;
         if (strongPatternMatchMode && slot >= 0 && slot < gtShanhai$getPatternSlotCount()) {
             ItemStack stack = gtShanhai$getPatternStack(slot);
             String patternRecipeId = PatternRecipeTypeHelper.readRecipeId(stack);
@@ -1560,13 +1585,21 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                 return false;
             }
         }
-        if (PatternRecipeExecutionGuard.isAuxiliaryIORecipe(recipe)) return true;
         String taggedTypeId = gtShanhai$getPatternRecipeTypeId(slot);
         if (PatternRecipeTypeHelper.recipeMatchesTypeId(recipe, taggedTypeId)) return true;
         // 星律共享搜索集：宿主原生搜索命中同组类型的等价配方（如大型化反命中化反槽）时也允许从本槽扣料；
         // 样板身份指纹校验（PatternIdentityMatcher）不受影响，跨槽串配方仍会被拦。
         return recipe != null && recipe.recipeType != null && recipe.recipeType.registryName != null
                 && RecipeTypeSharedSearchSets.isShared(taggedTypeId, recipe.recipeType.registryName.toString());
+    }
+
+    /** 通配展開槽不在父類 slot2PatternMap；一律以已解析公開 ID 防止庫存驅動串單。 */
+    public boolean gtShanhai$wildcardSlotRejectsRecipe(int slot, GTRecipe recipe) {
+        if (slot < maxPatternCount) return false;
+        GTRecipe resolved = gtShanhai$getPatternRecipe(slot);
+        ResourceLocation candidateId = PatternSlotScopedRecipe.publicId(recipe);
+        return resolved == null || candidateId == null
+                || !candidateId.equals(PatternSlotScopedRecipe.publicId(resolved));
     }
 
     @Override
@@ -1699,7 +1732,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
 
         int activeCount = 0;
-        for (int slotIndex = 0; slotIndex < slotCount; slotIndex++) {
+        for (int slotIndex = configuredPatternSlots.nextSetBit(0); slotIndex >= 0 && slotIndex < slotCount;
+                slotIndex = configuredPatternSlots.nextSetBit(slotIndex + 1)) {
             MEPatternBufferPartMachineBase.InternalSlot internalSlot = getInternalSlot(slotIndex);
             if (internalSlot.isActive() && !hasRecipeCacheInSlot(slotIndex)) {
                 activeUncachedSlotsScratch[activeCount++] = slotIndex;
@@ -1712,8 +1746,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     @Override
     protected int[] getActiveSlots() {
-        gtShanhai$clearResolvedRuntimeWarnings();
-        return super.getActiveSlots();
+        return gtShanhai$getActiveSlots();
     }
 
     @Override
@@ -1725,7 +1758,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
 
         int activeCount = 0;
-        for (int slotIndex = 0; slotIndex < slotCount; slotIndex++) {
+        for (int slotIndex = configuredPatternSlots.nextSetBit(0); slotIndex >= 0 && slotIndex < slotCount;
+                slotIndex = configuredPatternSlots.nextSetBit(slotIndex + 1)) {
             if (getInternalSlot(slotIndex).isActive()) {
                 activeSlotsScratch[activeCount++] = slotIndex;
             }
@@ -1965,7 +1999,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
         @Override
         public Widget createConfigurator() {
-            WidgetGroup group = new WidgetGroup(0, 0, 160, 100);
+            WidgetGroup group = new WidgetGroup(0, 0, 160, 116);
             group.addWidget(new LabelWidget(6, 4, () -> outputMultiplierModeEnabled
                     ? "§a" + Component.translatable(
                             "gt_shanhai.machine.recipe_type_pattern_buffer.foa_mode.enabled").getString()
@@ -1988,6 +2022,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     click -> syncOutputMultiplierFromPattern()));
             group.addWidget(new ButtonWidget(6, 78, 148, 16, new TextTexture("§e刷新内部样板", -1),
                     click -> refreshOutputMultiplierPatterns()));
+            group.addWidget(new LabelWidget(6, 100, Component.translatable(
+                    "gt_shanhai.machine.recipe_type_pattern_buffer.foa_pending_warning").getString())
+                    .setHoverTooltips(Component.translatable(
+                            "gt_shanhai.machine.recipe_type_pattern_buffer.foa_pending_warning.detail")));
             return group;
         }
     }
@@ -2424,6 +2462,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             wildcardResolvedRecipes.add(expanded.recipe());
             wildcardAssignedRecipeTypeIds.add(expanded.assignedTypeId());
             wildcardInternalSlots.add(internalSlot);
+            configuredPatternSlots.set(globalSlot);
             wildcardPatternToSlot.put(expanded.pattern(), globalSlot);
         }
 
@@ -2462,6 +2501,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private void clearWildcardPatternData(boolean clearPendingPersistence) {
+        configuredPatternSlots.clear(maxPatternCount, Math.max(maxPatternCount, configuredPatternSlots.length()));
         if (wildcardPatterns != null) {
             for (int localSlot = 0; localSlot < wildcardPatterns.size(); localSlot++) {
                 int globalSlot = maxPatternCount + localSlot;
@@ -2900,19 +2940,28 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     private void refreshPatternRecipeTypes() {
         Arrays.fill(patternRecipeTypeIds, "");
-        Arrays.fill(patternRecipeTypeStackHashes, Integer.MIN_VALUE);
+        Arrays.fill(patternRecipeTypeTags, null);
+        Arrays.fill(inferredPatternStackHashes, Integer.MIN_VALUE);
+    }
+
+    private void rebuildConfiguredPatternSlots() {
+        configuredPatternSlots.clear(0, maxPatternCount);
+        for (int slot = 0; slot < Math.min(maxPatternCount, getPatternInventory().getSlots()); slot++) {
+            configuredPatternSlots.set(slot, hasPatternInSlot(slot));
+        }
     }
 
     private void refreshPatternRecipeType(int slot) {
         if (slot < 0 || slot >= patternRecipeTypeIds.length) return;
+        inferredPatternStackHashes[slot] = Integer.MIN_VALUE;
         if (slot >= getPatternInventory().getSlots()) {
             patternRecipeTypeIds[slot] = "";
-            patternRecipeTypeStackHashes[slot] = Integer.MIN_VALUE;
+            patternRecipeTypeTags[slot] = null;
             return;
         }
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
         patternRecipeTypeIds[slot] = PatternRecipeTypeHelper.readRecipeTypeId(stack);
-        patternRecipeTypeStackHashes[slot] = stackKeyHash(stack);
+        patternRecipeTypeTags[slot] = patternRecipeTypeIds[slot];
     }
 
     private List<Component> gtShanhai$patternSlotTooltips(Integer slot) {

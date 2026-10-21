@@ -391,6 +391,8 @@
   "gt_shanhai.machine.recipe_type_pattern_buffer.foa_mode.enabled": "Pattern multiplier mode: enabled",
   "gt_shanhai.machine.recipe_type_pattern_buffer.foa_mode.disabled": "Pattern multiplier mode: disabled",
   "gt_shanhai.machine.recipe_type_pattern_buffer.foa_host_multiplier": "Current primordial host multiplier: %sx",
+  "gt_shanhai.machine.recipe_type_pattern_buffer.foa_pending_warning": "§eMay stall queued jobs",
+  "gt_shanhai.machine.recipe_type_pattern_buffer.foa_pending_warning.detail": "Changing, reading or automatically following the host multiplier refunds buffered inputs to ME. AE jobs waiting for the old pattern outputs are not recalculated automatically. Finish queued jobs first; cancel and resubmit any stalled jobs.",
   "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.title": "Strong Pattern Matching",
   "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.enabled": "Strong matching: enabled",
   "gt_shanhai.machine.recipe_type_pattern_buffer.strong_match.disabled": "Strong matching: disabled",

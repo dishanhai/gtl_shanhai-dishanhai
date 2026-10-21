@@ -125,15 +125,15 @@ public final class PatternRecipeTypeHelper {
         }
         if (expected == null) return "配方ID无法解析 " + recipeId;
         String typePathPrefix = recipeType.registryName.getPath() + "/";
-        if (!expected.getPath().startsWith(typePathPrefix)) {
+        if (!PatternRecipeIdMatchPolicy.hasTypePrefix(recipeTypeId, recipeId)) {
             return "ID缺少类型前缀 期望前缀=" + typePathPrefix + " 实际=" + expected;
         }
-        if (expected.getPath().substring(typePathPrefix.length()).isEmpty()) {
+        if (expected.getPath().equals(typePathPrefix)) {
             return "ID类型前缀后为空";
         }
         GTRecipe candidate;
         try {
-            candidate = recipeType.getRecipe(level.getRecipeManager(), expected);
+            candidate = resolveRecipeForPattern(level, recipeTypeId, recipeId);
         } catch (RuntimeException exception) {
             return "按ID查询异常 " + exception.getClass().getSimpleName();
         }
@@ -472,11 +472,15 @@ public final class PatternRecipeTypeHelper {
         if (recipeType == null || recipeType.registryName == null || expected == null) return null;
 
         String typePathPrefix = recipeType.registryName.getPath() + "/";
-        if (!expected.getPath().startsWith(typePathPrefix)) return null;
-        String expectedSuffix = expected.getPath().substring(typePathPrefix.length());
-        if (expectedSuffix.isEmpty()) return null;
+        if (!PatternRecipeIdMatchPolicy.hasTypePrefix(recipeTypeId, recipeId)) return null;
+        if (expected.getPath().equals(typePathPrefix)) return null;
 
         GTRecipe candidate = recipeType.getRecipe(level.getRecipeManager(), expected);
+        if (candidate == null && GTCEU_ELECTRIC_FURNACE_RECIPE_TYPE_ID.equals(
+                canonicalRecipeTypeId(recipeTypeId))) {
+            SmeltingRecipe vanilla = resolveVanillaSmeltingRecipe(level, recipeId);
+            if (vanilla != null) candidate = toElectricFurnaceRecipe(vanilla);
+        }
         if (candidate == null || candidate.recipeType == null || candidate.recipeType.registryName == null
                 || candidate.getId() == null) {
             return null;

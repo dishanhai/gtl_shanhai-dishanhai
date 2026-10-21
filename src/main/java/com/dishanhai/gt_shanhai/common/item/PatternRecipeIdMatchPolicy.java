@@ -10,7 +10,7 @@ public final class PatternRecipeIdMatchPolicy {
 
     public static boolean matches(String patternRecipeTypeId, String patternRecipeId,
             String candidateRecipeTypeId, String candidateRecipeId) {
-        ResourceLocation patternType = parse(patternRecipeTypeId);
+        ResourceLocation patternType = parse(PatternRecipeTypeHelper.canonicalRecipeTypeId(patternRecipeTypeId));
         ResourceLocation patternId = parse(patternRecipeId);
         ResourceLocation candidateType = parse(candidateRecipeTypeId);
         ResourceLocation candidateId = parse(candidateRecipeId);
@@ -21,6 +21,10 @@ public final class PatternRecipeIdMatchPolicy {
         if (!PatternRecipeTypeHelper.canonicalRecipeTypeId(patternRecipeTypeId)
                 .equals(PatternRecipeTypeHelper.canonicalRecipeTypeId(candidateRecipeTypeId))) {
             return false;
+        }
+        // 電爐代理沿用原版 smelting ID；查詢端仍須在該類型或 smelting 表中找到它。
+        if (isElectricFurnace(patternType)) {
+            return patternId.equals(candidateId);
         }
         if (!hasTypePathPrefix(patternType, patternId) || !hasTypePathPrefix(patternType, candidateId)) {
             return false;
@@ -38,9 +42,14 @@ public final class PatternRecipeIdMatchPolicy {
     }
 
     public static boolean hasTypePrefix(String recipeTypeId, String recipeId) {
-        ResourceLocation recipeType = parse(recipeTypeId);
+        ResourceLocation recipeType = parse(PatternRecipeTypeHelper.canonicalRecipeTypeId(recipeTypeId));
         ResourceLocation recipe = parse(recipeId);
-        return recipeType != null && recipe != null && hasTypePathPrefix(recipeType, recipe);
+        return recipeType != null && recipe != null
+                && (isElectricFurnace(recipeType) || hasTypePathPrefix(recipeType, recipe));
+    }
+
+    private static boolean isElectricFurnace(ResourceLocation recipeType) {
+        return "gtceu".equals(recipeType.getNamespace()) && "electric_furnace".equals(recipeType.getPath());
     }
 
     private static boolean hasTypePathPrefix(ResourceLocation recipeType, ResourceLocation recipeId) {

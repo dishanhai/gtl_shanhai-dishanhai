@@ -15,10 +15,12 @@ import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -27,13 +29,15 @@ import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 @Mod.EventBusSubscriber(modid = GTDishanhaiMod.MOD_ID)
 public final class StellarPatternStuckWatch {
 
-    private static final List<Watch> PENDING = new ArrayList<>();
+    private static final Map<SlotKey, Watch> PENDING = new HashMap<>();
     private static final int TICKS_PER_SECOND = 20;
 
     private StellarPatternStuckWatch() {}
@@ -53,14 +57,17 @@ public final class StellarPatternStuckWatch {
                 List.copyOf(hostRecipeTypeIds),
                 patternRecipeTypeId == null || patternRecipeTypeId.isBlank() ? "<none>" : patternRecipeTypeId,
                 patternRecipeId == null || patternRecipeId.isBlank() ? "<none>" : patternRecipeId,
-                StellarPatternStuckNotifier.describeStuckInputs(snapshot.items, snapshot.fluids),
-                StellarPatternStuckNotifier.describePatternOutputs(patternDetails),
-                machine.gtShanhai$describeStuckSlot(slot),
-                aePlayerId);
+                patternDetails, aePlayerId);
 
         synchronized (PENDING) {
-            PENDING.removeIf(existing -> existing.sameSlot(watch));
-            PENDING.add(watch);
+            PENDING.put(new SlotKey(watch.dimension.location(), watch.pos.asLong(), slot), watch);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        synchronized (PENDING) {
+            PENDING.clear();
         }
     }
 
@@ -72,7 +79,7 @@ public final class StellarPatternStuckWatch {
         long now = server.getTickCount();
         List<Watch> due = new ArrayList<>();
         synchronized (PENDING) {
-            Iterator<Watch> iterator = PENDING.iterator();
+            Iterator<Watch> iterator = PENDING.values().iterator();
             while (iterator.hasNext()) {
                 Watch watch = iterator.next();
                 if (watch.dueTick <= now) {
@@ -91,6 +98,8 @@ public final class StellarPatternStuckWatch {
         if (level == null || !level.hasChunkAt(watch.pos)) return;
 
         if (!(MetaMachine.getMachine(level, watch.pos) instanceof RecipeTypePatternBufferPartMachine machine)) return;
+        Integer currentSlot = machine.getSlotIndexForPattern(watch.patternDetails);
+        if (currentSlot == null || currentSlot != watch.slot) return;
         Snapshot snapshot = watch.snapshot;
         Object2LongMap<AEItemKey> currentItems = machine.gtShanhai$getSlotItemInventory(watch.slot);
         Object2LongMap<AEFluidKey> currentFluids = machine.gtShanhai$getSlotFluidInventory(watch.slot);
@@ -103,11 +112,15 @@ public final class StellarPatternStuckWatch {
         machine.gtShanhai$setPatternSlotStuckWarning(watch.slot, snapshot.items, snapshot.fluids);
         machine.gtShanhai$logStuckDiagnosis(watch.slot);
         String reason = collectStuckReason(machine, watch.slot);
+        int slot = watch.slot;
+        String slotLabel = machine.gtShanhai$describeStuckSlot(slot);
+        String stuckInputs = StellarPatternStuckNotifier.describeStuckInputs(snapshot.items, snapshot.fluids);
+        String stuckOutputs = StellarPatternStuckNotifier.describePatternOutputs(watch.patternDetails);
         machine.gtShanhai$rememberStuckBroadcast(watch.slot, StellarPatternStuckNotifier.broadcastBody(
-                watch.slot, watch.slotLabel, reason, watch.stuckInputs, watch.stuckOutputs,
+                watch.slot, slotLabel, reason, stuckInputs, stuckOutputs,
                 watch.hostRecipeTypeIds, watch.patternRecipeTypeId, watch.patternRecipeId));
-        StellarPatternStuckNotifier.notifyStuck(level, watch.pos, watch.slot, watch.slotLabel, watch.aePlayerId,
-                reason, watch.stuckInputs, watch.stuckOutputs, watch.hostRecipeTypeIds,
+        StellarPatternStuckNotifier.notifyStuck(level, watch.pos, watch.slot, slotLabel, watch.aePlayerId,
+                reason, stuckInputs, stuckOutputs, watch.hostRecipeTypeIds,
                 watch.patternRecipeTypeId, watch.patternRecipeId);
     }
 
@@ -210,6 +223,29 @@ public final class StellarPatternStuckWatch {
         }
     }
 
+    static final class SlotKey {
+        private final ResourceLocation dimension;
+        private final long pos;
+        private final int slot;
+
+        SlotKey(ResourceLocation dimension, long pos, int slot) {
+            this.dimension = dimension;
+            this.pos = pos;
+            this.slot = slot;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof SlotKey key && slot == key.slot && pos == key.pos
+                    && dimension.equals(key.dimension);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * (31 * dimension.hashCode() + Long.hashCode(pos)) + slot;
+        }
+    }
+
     private static final class Watch {
         private final ResourceKey<Level> dimension;
         private final BlockPos pos;
@@ -219,15 +255,13 @@ public final class StellarPatternStuckWatch {
         private final List<String> hostRecipeTypeIds;
         private final String patternRecipeTypeId;
         private final String patternRecipeId;
-        private final String stuckInputs;
-        private final String stuckOutputs;
-        private final String slotLabel;
+        private final IPatternDetails patternDetails;
         @Nullable
         private final Integer aePlayerId;
 
         private Watch(ResourceKey<Level> dimension, BlockPos pos, int slot, long dueTick, Snapshot snapshot,
                 List<String> hostRecipeTypeIds, String patternRecipeTypeId, String patternRecipeId,
-                String stuckInputs, String stuckOutputs, String slotLabel, @Nullable Integer aePlayerId) {
+                IPatternDetails patternDetails, @Nullable Integer aePlayerId) {
             this.dimension = dimension;
             this.pos = pos;
             this.slot = slot;
@@ -236,16 +270,8 @@ public final class StellarPatternStuckWatch {
             this.hostRecipeTypeIds = hostRecipeTypeIds;
             this.patternRecipeTypeId = patternRecipeTypeId;
             this.patternRecipeId = patternRecipeId;
-            this.stuckInputs = stuckInputs;
-            this.stuckOutputs = stuckOutputs;
-            this.slotLabel = slotLabel == null ? "" : slotLabel;
+            this.patternDetails = patternDetails;
             this.aePlayerId = aePlayerId;
-        }
-
-        private boolean sameSlot(Watch other) {
-            return this.slot == other.slot
-                    && this.pos.equals(other.pos)
-                    && this.dimension.equals(other.dimension);
         }
     }
 }

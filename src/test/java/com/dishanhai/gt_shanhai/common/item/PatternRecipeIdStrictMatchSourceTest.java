@@ -133,11 +133,11 @@ class PatternRecipeIdStrictMatchSourceTest {
     void startupRecipeTypeRefreshOnlyInvalidatesTheLazyPerSlotCache() throws IOException {
         String machine = Files.readString(MACHINE);
         int start = machine.indexOf("private void refreshPatternRecipeTypes()");
-        int end = machine.indexOf("private void refreshPatternRecipeType(", start);
+        int end = machine.indexOf("\n    }", start);
         assertTrue(start >= 0 && end > start, "應找到批量配方類型快取失效入口");
         String refresh = machine.substring(start, end);
         assertTrue(refresh.contains("Arrays.fill(patternRecipeTypeIds, \"\")"));
-        assertTrue(refresh.contains("Arrays.fill(patternRecipeTypeStackHashes, Integer.MIN_VALUE)"));
+        assertTrue(refresh.contains("Arrays.fill(patternRecipeTypeTags, null)"));
         assertFalse(refresh.contains("for (int slot"),
                 "啟動和批量刷新只清空快取標記，不遍歷驗證樣板槽");
         assertFalse(machine.contains("peekRecipeTypeId(stack, getLevel())"),
