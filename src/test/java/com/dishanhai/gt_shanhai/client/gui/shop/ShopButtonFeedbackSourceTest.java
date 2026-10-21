@@ -107,6 +107,35 @@ class ShopButtonFeedbackSourceTest {
     }
 
     @Test
+    void enterConfirmsOnceAndEscapeLeavesTextFieldsFirst() throws Exception {
+        String s = Files.readString(Path.of(SHOP));
+        String keys = extractBlock(s, "public boolean keyPressed(int keyCode, int scanCode, int modifiers)");
+        assertTrue(keys.contains("GLFW_KEY_ENTER") && keys.contains("GLFW_KEY_KP_ENTER"));
+        assertTrue(keys.contains("performConfirmTrade(true)"));
+        assertTrue(keys.contains("enterHeld"), "按住 Enter 的系统重复只算一次");
+        assertTrue(keys.contains("searchBox.isFocused()"), "在搜索框里按 Enter 不下单");
+        assertTrue(keys.contains("modalLayerOpen()"), "浮层或阶段锁盖着时不下单");
+        int lastOverlay = keys.indexOf("closeGuideOverlay(); return true;");
+        int focus = keys.indexOf("clearTextFocus()");
+        assertTrue(lastOverlay >= 0 && focus > lastOverlay, "Esc 先关浮层，再退出输入框，最后才关店");
+        assertTrue(extractBlock(s, "private boolean clearTextFocus()").contains("setFocused(null)"));
+
+        String released = extractBlock(s, "public boolean keyReleased(int keyCode, int scanCode, int modifiers)");
+        assertTrue(released.contains("enterHeld = false"));
+        assertTrue(released.contains("return super.keyReleased("), "修饰键要交还原版，输入法才能切换");
+    }
+
+    @Test
+    void detailButtonsExplainThemselvesWithWrappedTooltips() throws Exception {
+        String s = Files.readString(Path.of(SHOP));
+        String tip = extractBlock(s, "private List<net.minecraft.util.FormattedCharSequence> detailButtonTip(");
+        assertTrue(tip.contains("this.font.split("), "提示换行，不截断");
+        assertTrue(tip.contains("左键或 Enter 确认；处理中再点不会重复下单"));
+        assertTrue(tip.contains("按住连续调整，越按越快"));
+        assertTrue(extractBlock(s, "private void drawTooltipLayer(").contains("detailButtonTip("));
+    }
+
+    @Test
     void buttonMotionRestoresThePoseStack() throws Exception {
         String util = Files.readString(Path.of(UTIL));
         String motion = extractBlock(util, "public static void withButtonMotion(");

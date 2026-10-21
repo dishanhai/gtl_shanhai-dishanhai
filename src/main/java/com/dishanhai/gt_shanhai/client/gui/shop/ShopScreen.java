@@ -176,8 +176,10 @@ public class ShopScreen extends ScaledScreen {
     // 按键即时反馈：压下/回弹、连发、等待回执与结果闪色（见 ButtonFeedback）；hover 仍是上面的 hoverButtons。
     private final ButtonFeedback buttonFeedback = new ButtonFeedback(hoverButtons);
     // 本帧逻辑鼠标坐标：详情滚动区的按钮按内容坐标画，drawButton 靠它换回屏幕坐标，才对得上 buttonHit 记的 key
-    private int frameMx, frameMy;
+    private int frameMy;
     private boolean reduceMotionFrame;
+    // 本次 Enter 已经触发过确认：按住时的系统重复一律吞掉，松开才复位
+    private boolean enterHeld;
 
     private static long widgetKey(int x, int y, int salt) {
         return ((long) x * 73856093L) ^ ((long) y * 19349663L) ^ ((long) salt * 83492791L);
@@ -1263,6 +1265,7 @@ public class ShopScreen extends ScaledScreen {
     protected void initScaled() {
         // 按着按钮时切到子界面，松开事件落在别处；回到本界面时把按下态归零
         buttonFeedback.cancel(System.currentTimeMillis());
+        enterHeld = false;
         // 预编译后处理链，避免第一次点商品时才加载 shader 造成卡顿；失败会自动回退局部磨砂。
         ShopGaussBlur.warmUp();
         boolean fresh = searchBox == null;
@@ -1489,7 +1492,6 @@ public class ShopScreen extends ScaledScreen {
         hoverCells.sweep(nowMs);
         hoverButtons.sweep(nowMs);
         hoverTabs.sweep(nowMs);
-        frameMx = mx;
         frameMy = my;
         reduceMotionFrame = ClientShopUiSettings.reduceMotion();
         // 松开可能没送到这里（按着时弹了别的界面）；鼠标实际已松开就补一次松开
@@ -4495,6 +4497,33 @@ public class ShopScreen extends ScaledScreen {
     }
 
     /** 数量加减夹取到 [1, Long.MAX]，防加法溢出。 */
+    /**
+     * 详情列确认与 ± 步进按钮的悬停说明，按 180px 换行。确认按钮正在等待或闪结果时不弹（别盖住结果标签），
+     * 步进按住连发时也不弹。没悬停在这些按钮上返回 null。
+     */
+    private List<net.minecraft.util.FormattedCharSequence> detailButtonTip(int smx, int smy) {
+        if (selected == null || modalLayerOpen()) return null;
+        int cx = detailX() + 8;
+        int dy = contentTop();
+        int btnW = DETAIL_W - 16;
+        String text = null;
+        if (hit(smx, smy, cx, dy + contentHeight() - 24, btnW, 20)) {
+            if (buttonFeedback.phase(confirmActionKey(), System.currentTimeMillis()) == ButtonFeedback.Phase.IDLE) {
+                text = "§7左键或 Enter 确认；处理中再点不会重复下单";
+            }
+        } else if (!buttonFeedback.holding()) {
+            int bw = (btnW - 9) / 4;
+            for (int i = 0; i < 4 && text == null; i++) {
+                int bx = cx + i * (bw + 3);
+                if (hit(smx, smy, bx, dy + 82, bw, 12) || hit(smx, smy, bx, dy + 96, bw, 12)) {
+                    text = "§7按住连续调整，越按越快";
+                }
+            }
+        }
+        if (text == null) return null;
+        return this.font.split(Component.literal(text), 180);
+    }
+
     /** 详情列确认购买/出售按钮的压下 key（与 drawDetail、universalMouseClicked 同一块几何）。 */
     private long confirmPressKey() {
         return pressKey(detailX() + 8, contentTop() + contentHeight() - 24, DETAIL_W - 16, 20);
@@ -4842,7 +4871,10 @@ public class ShopScreen extends ScaledScreen {
         // 菜单项留给退场动画画，弹簧归零后由 updateOverlayMotion 清掉（连同 ctxMenuEntryKey）
     }
 
-    /** Esc 分层关闭：跟「点图层外关闭」同语义，先关最上层的右键菜单/大图层，全都没开才关整个商店。 */
+    /**
+     * Esc 分层关闭：跟「点图层外关闭」同语义，先关最上层的右键菜单/大图层，再退出搜索框/数量框，全都没有才关整个商店。
+     * Enter（含小键盘）：选中商品时等同点「确认购买/出售」；在搜索框里、或浮层/阶段锁盖着时不下单。
+     */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (keyCode == 256) {
@@ -4851,8 +4883,37 @@ public class ShopScreen extends ScaledScreen {
             if (cartOverlayOpen) { closeCartOverlay(); return true; } // 结算批次不清，见 handleCartOverlayClick 关闭分支
             if (descOverlayOpen) { closeDescOverlay(); return true; }
             if (guideOverlayOpen) { closeGuideOverlay(); return true; }
+            if (clearTextFocus()) return true;
+        }
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+            if (enterHeld) return true;
+            if (selected != null && !modalLayerOpen() && (searchBox == null || !searchBox.isFocused())) {
+                enterHeld = true;
+                performConfirmTrade(true);
+                return true;
+            }
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    /** Enter 松开才允许下一次确认。其余按键（含修饰键）一律交还原版，输入法切换中英要靠它。 */
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+            enterHeld = false;
+        }
+        return super.keyReleased(keyCode, scanCode, modifiers);
+    }
+
+    /** 搜索框或数量框有焦点时退出焦点并返回 true。 */
+    private boolean clearTextFocus() {
+        boolean searchFocused = searchBox != null && searchBox.isFocused();
+        boolean amountFocused = amountBox != null && amountBox.isFocused();
+        if (!searchFocused && !amountFocused) return false;
+        setFocused(null);
+        if (searchBox != null) searchBox.setFocused(false);
+        if (amountBox != null) amountBox.setFocused(false);
+        return true;
     }
 
     /**
@@ -6193,6 +6254,11 @@ public class ShopScreen extends ScaledScreen {
             List<Component> topTip = topButtonTip(smx, smy);
             if (topTip != null) {
                 g.renderComponentTooltip(this.font, topTip, mx, my);
+                return;
+            }
+            List<net.minecraft.util.FormattedCharSequence> detailTip = detailButtonTip(smx, smy);
+            if (detailTip != null) {
+                g.renderTooltip(this.font, detailTip, mx, my);
                 return;
             }
             // 悬停货币栏：显示货币全名 + 精确余额
