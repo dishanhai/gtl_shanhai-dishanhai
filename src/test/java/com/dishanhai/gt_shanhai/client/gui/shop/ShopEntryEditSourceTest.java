@@ -90,6 +90,49 @@ class ShopEntryEditSourceTest {
         assertFalse(s.contains("draggingEditorScroll"), "拖动状态归共用件管，松开落在别处也能兜底");
     }
 
+    // ===== E4 键盘与未保存确认 =====
+
+    @Test
+    void escapeClosesOneLayerAtATimeAndNeverDropsTheWholeShop() throws Exception {
+        String s = src();
+        String keys = extractBlock(s, "public boolean keyPressed(int keyCode, int scanCode, int modifiers)");
+        int discard = keys.indexOf("discardConfirmOpen");
+        int qty = keys.indexOf("qtyEditorOpen");
+        int desc = keys.indexOf("descEditorOpen");
+        int picker = keys.indexOf("catPickerOpen = false");
+        int unfocus = keys.indexOf("setFocused(null)");
+        int close = keys.indexOf("requestClose()");
+        assertTrue(discard >= 0 && discard < qty && qty < desc && desc < picker && picker < unfocus && unfocus < close,
+                "Esc 依次：放弃确认框 → 数量框 → 描述大框 → 分类下拉 → 输入框焦点 → 回商店");
+        assertTrue(extractBlock(s, "public void onClose()").contains("requestClose()"), "原版 Esc 关闭也走同一条路，不会直接关掉整个商店");
+    }
+
+    @Test
+    void unsavedEditsAskBeforeLeaving() throws Exception {
+        String s = src();
+        String close = extractBlock(s, "private void requestClose()");
+        assertTrue(close.contains("capture()") && close.contains("draftFingerprint()") && close.contains("initialFingerprint"));
+        assertTrue(close.contains("discardConfirmOpen = true"));
+        assertTrue(extractBlock(s, "protected boolean universalMouseClicked(").contains("requestClose()"), "取消按钮也先问");
+        String fp = extractBlock(s, "private String draftFingerprint()");
+        for (String field : new String[]{"goodsList", "goodsFluids", "spark", "eu", "coinCounts", "itemCounts", "fluids",
+                "submissionCounts", "displayIcons", "rewardPool", "ftbqTableId", "prerequisiteQuestId", "linkTo", "displayName"}) {
+            assertTrue(fp.contains(field), "指纹要涵盖 " + field);
+        }
+    }
+
+    @Test
+    void ctrlShortcutsSaveAndSwitchTabs() throws Exception {
+        String s = src();
+        String keys = extractBlock(s, "public boolean keyPressed(int keyCode, int scanCode, int modifiers)");
+        assertTrue(keys.contains("hasControlDown()"));
+        assertTrue(keys.contains("ShopEntryEditLayout.tabForHotkey("), "Ctrl+1~5 切页");
+        assertTrue(keys.contains("GLFW_KEY_TAB") && keys.contains("ShopEntryEditLayout.cycle("), "Ctrl+Tab 轮换页签");
+        assertTrue(keys.contains("ui.takeEnter()"), "按住 Ctrl+Enter 只保存一次");
+        assertTrue(extractBlock(s, "public boolean keyReleased(").contains("ui.enterReleased("));
+        assertTrue(extractBlock(s, "protected void initScaled()").contains("ui.syncEnterHeld()"));
+    }
+
     @Test
     void namesAndTitlesWrapInsteadOfBeingCut() throws Exception {
         String s = src();

@@ -138,6 +138,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private boolean qtyEditIsCoin; // true=编辑 coins/coinCounts，false=编辑 items/itemCounts
     private int qtyEditIndex;
 
+    // 取消/Esc 回商店时，草稿和打开时不一样就先问一句「放弃修改？」
+    private final String initialFingerprint;
+    private boolean discardConfirmOpen;
+    private static final String DISCARD_TITLE = "§6放弃未保存的修改？";
+    private static final String DISCARD_BODY = "§7回到商店后，这次的改动都不会保存。§8Esc 继续编辑 · Enter 放弃修改";
+    private static final String KEY_HINT = "§8Ctrl+1~5 切页 · Ctrl+Tab 下一页 · Ctrl+Enter 保存 · Esc 返回";
+
     /**
      * @param defaultCategory 新增商品时的默认分类（继承自打开时所在的商店子页，如「无限盘区/前期」）；
      *                        编辑已有条目（entry != null）时忽略，为空/null 则回退 {@link ShopEntry#DEFAULT_CATEGORY}。
@@ -214,6 +221,73 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.oldCategory = null;
         }
         this.initialSaveUses = saveUses;
+        this.initialFingerprint = draftFingerprint();
+    }
+
+    /** 草稿的指纹：取消/Esc 时和打开时比，变了才问要不要放弃。涵盖所有会被保存的字段。 */
+    private String draftFingerprint() {
+        StringBuilder sb = new StringBuilder();
+        for (ItemStack st : goodsList) sb.append(stackKey(st)).append(';');
+        sb.append('|');
+        for (FluidStack fs : goodsFluids) sb.append(fluidKey(fs)).append(';');
+        sb.append('|').append(count).append('|').append(category).append('|').append(description)
+                .append('|').append(limit).append('|').append(saveUses)
+                .append('|').append(periodSeconds).append('|').append(periodCap)
+                .append('|').append(discountPercent).append('|').append(discountMinutes)
+                .append('|').append(spark).append('|').append(eu).append('|').append(freeGoods).append('|');
+        appendCounted(sb, coins, coinCounts);
+        appendCounted(sb, items, itemCounts);
+        appendCounted(sb, submissionItems, submissionCounts);
+        for (FluidStack fs : fluids) sb.append(fluidKey(fs)).append(';');
+        sb.append('|');
+        for (ShopEntry.DisplayIcon d : displayIcons) sb.append(d.isTexture() ? String.valueOf(d.texture()) : stackKey(d.item())).append(';');
+        sb.append('|').append(rewardMode).append('|');
+        for (ShopEntry.RewardOption o : rewardPool) {
+            sb.append(stackKey(o.item())).append(',').append(o.weight()).append(',')
+                    .append(o.minCount()).append(',').append(o.maxCount()).append(';');
+        }
+        sb.append('|').append(ftbqTableId).append('|').append(ftbqSubMode).append('|').append(hidden)
+                .append('|').append(linkKey).append('|').append(linkTo).append('|').append(displayName)
+                .append('|').append(tradeMode).append('|').append(prerequisiteQuestId);
+        return sb.toString();
+    }
+
+    private static void appendCounted(StringBuilder sb, List<ItemStack> stacks, List<Long> counts) {
+        for (int i = 0; i < stacks.size(); i++) {
+            sb.append(stackKey(stacks.get(i))).append('*').append(i < counts.size() ? counts.get(i) : 1L).append(';');
+        }
+        sb.append('|');
+    }
+
+    private static String stackKey(ItemStack st) {
+        if (st == null || st.isEmpty()) return "-";
+        return ForgeRegistries.ITEMS.getKey(st.getItem()) + "x" + st.getCount() + (st.hasTag() ? String.valueOf(st.getTag()) : "");
+    }
+
+    private static String fluidKey(FluidStack fs) {
+        return fs == null || fs.isEmpty() ? "-" : ForgeRegistries.FLUIDS.getKey(fs.getFluid()) + "x" + fs.getAmount();
+    }
+
+    /** 取消/Esc 回商店：有没保存的修改先问一句，免得一下全丢。 */
+    private void requestClose() {
+        capture();
+        if (!draftFingerprint().equals(initialFingerprint)) {
+            catPickerOpen = false;
+            setFocused(null);
+            discardConfirmOpen = true;
+            return;
+        }
+        Minecraft.getInstance().setScreen(parent);
+    }
+
+    private void discardAndClose() {
+        discardConfirmOpen = false;
+        Minecraft.getInstance().setScreen(parent);
+    }
+
+    @Override
+    public void onClose() {
+        requestClose();
     }
 
     private boolean catalogSnapshotValid() {
@@ -339,7 +413,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int viewTop() { return top + 38; }
     private int viewBottom() { return top + panelHeight - footerH(); }
     private int viewH() { return Math.max(20, viewBottom() - viewTop()); }
-    private int footerH() { return FOOTER_BTN_H + 12; }
+    /** 页脚高：左边的提示文字换几行就多高，至少放得下按钮。 */
+    private int footerH() { return Math.max(FOOTER_BTN_H + 12, footerLines().size() * LINE_H + 10); }
+    private int footerTextW() { return cancelX() - 8 - cx(); }
+    private String footerText() { return KEY_HINT; }
+    private List<FormattedCharSequence> footerLines() { return wrap(footerText(), footerTextW()); }
     private int footerBtnY() { return top + panelHeight - FOOTER_BTN_H - 6; }
     private int confirmX() { return left + panelWidth - 12 - CONFIRM_W; }
     private int cancelX() { return confirmX() - 6 - CANCEL_W; }
@@ -694,6 +772,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     protected void initScaled() {
         // 从选择器回来、改窗口大小都会重跑这里：按住的按钮没收到松开，先放掉
         ui.cancel();
+        ui.syncEnterHeld();
         left = Math.max(6, (vWidth - TARGET_W) / 2);
         top = Math.max(8, (vHeight - TARGET_H) / 2);
         panelWidth = Math.min(TARGET_W, vWidth - 12);
@@ -984,8 +1063,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
         ui.frame(mx, my);
         hoverRewardOption = null;
-        // 展开编写大图层/数量小弹窗打开时，原本的字段输入框全部隐藏（同帧同步，避免闪烁；本方法在 super.render 画控件前执行）
-        boolean editorOpen = descEditorOpen || qtyEditorOpen;
+        // 展开编写大图层/数量小弹窗/放弃确认框打开时，原本的字段输入框全部隐藏（同帧同步，避免闪烁；本方法在 super.render 画控件前执行）
+        boolean editorOpen = descEditorOpen || qtyEditorOpen || discardConfirmOpen;
         layoutRows();
         placeEditorWidgets(editorOpen);
         if (qtyEditBox != null) qtyEditBox.setVisible(qtyEditorOpen);
@@ -1005,6 +1084,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         g.disableScissor();
         drawEditorScrollbar(g, mx, my);
 
+        g.fill(left + 5, viewBottom(), left + panelWidth - 5, viewBottom() + 1, 0x40FFFFFF);
+        drawLines(g, footerLines(), cx(), viewBottom() + 5);
         ui.draw(g, this.font, cancelX(), footerBtnY(), CANCEL_W, FOOTER_BTN_H, "§c取消", mx, my, true);
         boolean saveable = catalogSnapshotValid();
         ui.draw(g, this.font, confirmX(), footerBtnY(), CONFIRM_W, FOOTER_BTN_H,
@@ -1226,6 +1307,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
     /** 前景层（在所有控件之上绘制）：分类下拉选择窗 / 描述展开编写大图层，故能盖住成本行与输入框。 */
     @Override
     protected void renderScaledForeground(GuiGraphics g, int mx, int my, float pt) {
+        if (discardConfirmOpen) {
+            renderDiscardConfirm(g, mx, my);
+            return;
+        }
         if (descEditorOpen) {
             renderDescEditorForeground(g, mx, my);
             return;
@@ -1282,6 +1367,39 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     private static final int EDITOR_CLOSE_W = 16;
     private static final int EDITOR_CLOSE_H = 12;
+
+    // ===== 放弃修改确认框（居中于编辑面板，正文换行、框跟着长高） =====
+    private int[] discardBounds() {
+        int w = Math.min(panelWidth - 40, 240);
+        int h = 8 + LINE_H + 4 + wrap(DISCARD_BODY, w - 16).size() * LINE_H + 8 + FOOTER_BTN_H + 8;
+        return new int[]{left + (panelWidth - w) / 2, top + (panelHeight - h) / 2, w, h};
+    }
+
+    private int discardBtnY(int[] b) { return b[1] + b[3] - FOOTER_BTN_H - 8; }
+    private int discardBtnW(int[] b) { return (b[2] - 24) / 2; }
+    private int discardKeepX(int[] b) { return b[0] + 8; }
+    private int discardDropX(int[] b) { return b[0] + 16 + discardBtnW(b); }
+
+    private void renderDiscardConfirm(GuiGraphics g, int mx, int my) {
+        int[] b = discardBounds();
+        g.fill(0, 0, vWidth, vHeight, 0xC0000000);
+        g.fill(b[0] - 1, b[1] - 1, b[0] + b[2] + 1, b[1] + b[3] + 1, GOLD_DARK);
+        g.fill(b[0], b[1], b[0] + b[2], b[1] + b[3], 0xFF101010);
+        g.drawString(this.font, DISCARD_TITLE, b[0] + 8, b[1] + 8, GOLD, true);
+        drawLines(g, wrap(DISCARD_BODY, b[2] - 16), b[0] + 8, b[1] + 8 + LINE_H + 4);
+        int y = discardBtnY(b), w = discardBtnW(b);
+        ui.draw(g, this.font, discardKeepX(b), y, w, FOOTER_BTN_H, "§a继续编辑", mx, my, true);
+        ui.draw(g, this.font, discardDropX(b), y, w, FOOTER_BTN_H, "§c放弃修改", mx, my, true);
+    }
+
+    /** 确认框开着时接管所有点击：继续编辑 / 放弃修改，其余位置吞掉不漏给下层。 */
+    private boolean handleDiscardClick(double mx, double my) {
+        int[] b = discardBounds();
+        int y = discardBtnY(b), w = discardBtnW(b);
+        if (ui.hit(mx, my, discardKeepX(b), y, w, FOOTER_BTN_H, true)) discardConfirmOpen = false;
+        else if (ui.hit(mx, my, discardDropX(b), y, w, FOOTER_BTN_H, true)) discardAndClose();
+        return true;
+    }
 
     /** 打开描述展开编写大图层：与分类下拉窗互斥，同步当前描述文本进编辑区。 */
     private void openDescEditor() {
@@ -1395,6 +1513,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
+        if (discardConfirmOpen) return true;
         if (descEditorOpen) {
             if (descArea != null && descArea.isHovering(mx, my)) descArea.scroll(d);
             return true;
@@ -1839,6 +1958,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     // ===== 交互 =====
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
+        if (discardConfirmOpen) return handleDiscardClick(mx, my);
         // 精确数量小弹窗打开时优先接管：点关闭/点弹窗外=丢弃改动关闭，点确认=写回关闭，
         // 点弹窗内其余位置（数量输入框本身）放行给正常控件点击，好定位光标（qtyEditBox 是真实控件，不用手动转发）
         if (qtyEditorOpen) {
@@ -1860,15 +1980,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
         }
         layoutRows();
         if (ui.hit(mx, my, cancelX(), footerBtnY(), CANCEL_W, FOOTER_BTN_H, true)) {
-            Minecraft.getInstance().setScreen(parent);
+            requestClose();
             return true;
         }
         if (ui.hit(mx, my, confirmX(), footerBtnY(), CONFIRM_W, FOOTER_BTN_H, catalogSnapshotValid())) {
-            if (!catalogSnapshotValid()) {
-                showCatalogSnapshotExpired();
-                return true;
-            }
-            submit();
+            trySave();
             return true;
         }
         Tab hitTab = tabHit(mx, my);
@@ -1886,9 +2002,23 @@ public class ShopEntryEditScreen extends ScaledScreen {
         return super.universalMouseClicked(mx, my, btn);
     }
 
-    /** 描述大图层打开时拦住 ESC/Enter：ESC 丢弃改动关闭，Enter/Shift+Enter 确认保存关闭（单行框无需换行 Enter）。 */
+    /**
+     * 键盘：Esc 一次只收一层（放弃确认框 → 数量框 → 描述大框 → 分类下拉 → 输入框焦点 → 回商店）；
+     * Ctrl+Enter 保存，Ctrl+1~5 切页，Ctrl+Tab / Ctrl+Shift+Tab 轮换页签。
+     */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        boolean enter = keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER;
+        if (discardConfirmOpen) {
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
+                discardConfirmOpen = false;
+            } else if (enter && ui.takeEnter()) {
+                int[] b = discardBounds();
+                ui.press(discardDropX(b), discardBtnY(b), discardBtnW(b), FOOTER_BTN_H, true);
+                discardAndClose();
+            }
+            return true;
+        }
         // 数量小弹窗打开时拦住 ESC/Enter：ESC 丢弃改动关闭，Enter 确认写回关闭；qtyEditBox 是真实控件，
         // 其余按键（数字输入/退格/方向键）走 super 走正常的 Screen 焦点路由，不用像 descArea 那样手动转发
         if (qtyEditorOpen) {
@@ -1914,7 +2044,44 @@ public class ShopEntryEditScreen extends ScaledScreen {
             // 交给已聚焦的 descArea。修饰键必须返回 false，输入法才能切中英文。
             return super.keyPressed(keyCode, scanCode, modifiers);
         }
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
+            if (catPickerOpen) {
+                catPickerOpen = false;
+                return true;
+            }
+            // 正在输入框里打字时，Esc 先退出输入框，再按一次才回商店
+            if (getFocused() instanceof EditBox) {
+                setFocused(null);
+                return true;
+            }
+            requestClose();
+            return true;
+        }
+        if (net.minecraft.client.gui.screens.Screen.hasControlDown()) {
+            if (enter) {
+                if (ui.takeEnter()) {
+                    ui.press(confirmX(), footerBtnY(), CONFIRM_W, FOOTER_BTN_H, catalogSnapshotValid());
+                    trySave();
+                }
+                return true;
+            }
+            if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_TAB) {
+                selectTab(ShopEntryEditLayout.cycle(tab, net.minecraft.client.gui.screens.Screen.hasShiftDown() ? -1 : 1));
+                return true;
+            }
+            Tab hotkey = ShopEntryEditLayout.tabForHotkey(keyCode - org.lwjgl.glfw.GLFW.GLFW_KEY_0);
+            if (hotkey != null) {
+                selectTab(hotkey);
+                return true;
+            }
+        }
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        ui.enterReleased(keyCode);
+        return super.keyReleased(keyCode, scanCode, modifiers);
     }
 
     @Override
@@ -2188,6 +2355,15 @@ public class ShopEntryEditScreen extends ScaledScreen {
         fluids.clear();
         if (sparkBox != null) sparkBox.setValue("");
         if (euBox != null) euBox.setValue("");
+    }
+
+    /** 保存按钮与 Ctrl+Enter 共用：目录已更新时只提示，不发包。 */
+    private void trySave() {
+        if (!catalogSnapshotValid()) {
+            showCatalogSnapshotExpired();
+            return;
+        }
+        submit();
     }
 
     private void submit() {
