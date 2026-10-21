@@ -26,6 +26,12 @@
 ## 赞助
 - [爱发电](https://afdian.com/a/dishanhai?utm_source=copylink&utm_medium=link)
 
+## 反馈
+
+- [问题反馈](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues)
+- [【腾讯文档】gt_shanhai 模组问题与建议反馈表](https://docs.qq.com/sheet/DYWFtSEtvTWVodkJn?tab=000002)
+- [新功能意见征集](https://github.com/dishanhai/gtl_shanhai-dishanhai/issues/13)
+
 ## 依赖
 
 装在 **Minecraft 1.20.1**、**Forge 47.4.16** 及以上。
