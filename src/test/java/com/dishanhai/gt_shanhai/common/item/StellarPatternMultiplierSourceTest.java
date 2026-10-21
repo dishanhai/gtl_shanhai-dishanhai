@@ -22,7 +22,7 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void stellarBufferPersistsMultiplierModeAndReadsPrimordialHost() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
 
         assertTrue(source.contains("@Persisted\n    private boolean outputMultiplierModeEnabled"));
         assertTrue(source.contains("@Persisted\n    private long patternOutputMultiplier = 1L"));
@@ -45,7 +45,7 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void stellarBufferAutoDetectsHostMultiplierEveryTickOnlyOnChange() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         String poll = extractBlock(source, "private void pollOutputMultiplierHostState()");
 
         assertTrue(source.contains("OUTPUT_MULTIPLIER_HOST_CHECK_TICKS = 1L"));
@@ -75,7 +75,7 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void realPatternReturnIsRewrittenOnlyForStellarBuffer() throws IOException {
-        String source = Files.readString(MIXIN);
+        String source = read(MIXIN);
 
         assertTrue(source.contains("priority = 1500"),
                 "山海注入必须晚于 GTLAdd 对 getRealPattern 的默认优先级(1000) Overwrite 应用——"
@@ -88,7 +88,7 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void stellarLifecycleMixinDoesNotChangeSuperPatternBufferBehavior() throws IOException {
-        String source = Files.readString(MIXIN);
+        String source = read(MIXIN);
         String onLoad = extractBlock(source, "private void gtShanhai$refreshLoadedPatternCache(");
 
         assertTrue(onLoad.contains("if (!(self instanceof RecipeTypePatternBufferPartMachine)) return;"),
@@ -109,12 +109,13 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void rewriteStartsFromBaseRecipeInsteadOfMultiplyingCurrentOutputsAgain() throws IOException {
-        String source = Files.readString(HELPER);
+        String source = read(HELPER);
 
         assertTrue(source.contains("rewritePatternOutputMultiplier"));
-        assertTrue(source.contains("createScaledRecipeOutputs(recipe, targetMultiplier)"));
+        assertTrue(source.contains("createScaledRecipeOutputs(recipe, targetMultiplier, outputContainers)"));
         assertTrue(source.contains("rewriteCycleContainerInputs"));
-        assertTrue(source.contains("rewritePatternOutputMultiplierDirect(processingPattern, level, requestedMultiplier)"),
+        assertTrue(source.contains("rewritePatternOutputMultiplierDirect(processingPattern, level,\n"
+                        + "                requestedMultiplier, containerMultiplier)"),
                 "反查 GTRecipe 失败时也要按神锻模式直接改写当前内部样板输出");
         assertTrue(source.contains("multiplyCycleContainerStacks(pattern.getSparseOutputs(), targetMultiplier, false)"));
         assertTrue(source.contains("PatternDetailsHelper.encodeProcessingPattern"));
@@ -122,7 +123,7 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void stellarBufferCachesRewrittenMultiplierPatterns() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         String method = extractBlock(source, "public IPatternDetails gtShanhai$applyOutputMultiplier(");
 
         assertTrue(source.contains("outputMultiplierPatternCache"),
@@ -131,9 +132,9 @@ class StellarPatternMultiplierSourceTest {
                 "倍率样板缓存必须随运行期配方修改失效");
         assertTrue(source.contains("patternDefinitionHash"),
                 "缓存键必须按样板定义 NBT 复用，不能绑定每次 decode 得到的新对象身份");
-        assertTrue(method.contains("makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, recipeRevision)"));
+        assertTrue(method.contains("makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, forgeMultiplier, recipeRevision)"));
         assertTrue(method.contains("outputMultiplierPatternCache.get(cacheKey)"));
-        assertTrue(method.contains("cached.matches(pattern, stack, recipeTypeId, multiplier, recipeRevision)"));
+        assertTrue(method.contains("cached.matches(pattern, stack, recipeTypeId, multiplier, forgeMultiplier, recipeRevision)"));
         assertTrue(method.contains("outputMultiplierPatternCache.put(cacheKey"));
         assertTrue(!source.contains("System.identityHashCode(pattern)"),
                 "getRealPattern 可能重新 decode，同一栈不应因对象 identity 变化穿透缓存");
@@ -143,7 +144,7 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void stellarBufferAppliesHostMultiplierPerRecipeType() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         String apply = extractBlock(source, "public IPatternDetails gtShanhai$applyOutputMultiplier(");
         String sync = extractBlock(source, "public void syncOutputMultiplierFromHost()");
         String poll = extractBlock(source, "private void pollOutputMultiplierHostState()");
@@ -167,8 +168,42 @@ class StellarPatternMultiplierSourceTest {
     }
 
     @Test
+    void forgeModeFollowsDynamicHostMultiplierAndOriginalContainerRules() throws IOException {
+        String machine = read(MACHINE);
+        String helper = read(HELPER);
+        String apply = extractBlock(machine, "public IPatternDetails gtShanhai$applyOutputMultiplier(");
+        String rewrite = extractBlock(helper, "public static IPatternDetails rewritePatternOutputMultiplier(IPatternDetails pattern, Level level,\n"
+                + "            String recipeTypeId, long requestedMultiplier, long forgeMultiplier)");
+
+        // 伪神倍率是 1~15 的连续值：缓存键、可见戳都要带上伪神自身倍率，封顶 15 之前每升一格都要重写
+        assertTrue(apply.contains("resolvePatternForgeMultiplier(recipeTypeId)"));
+        assertTrue(apply.contains("rewritePatternOutputMultiplier(\n"
+                        + "                pattern, getLevel(), recipeTypeId, multiplier, forgeMultiplier)"));
+        assertTrue(machine.contains("confirmedPatternForgeMultipliers.clear();"),
+                "宿主倍率确认变化后，伪神自身倍率的确认缓存必须一起失效");
+        assertTrue(machine.contains("OutputMultiplierResolver.resolveForgeOutputMultiplier(getControllers(), recipeTypeId)"));
+        assertTrue(machine.contains("visibleOutputMultiplierStampMatches(slot, patternStack, multiplier, forgeMultiplier)"),
+                "总倍率被手动倍率顶住时，伪神倍率升一格也必须让可见样板重写");
+
+        // 原版 copyAndModifyRecipe：容器输入只吃伪神倍率；叠加层(枢纽/线程/引力波)只放大产出
+        assertTrue(rewrite.contains("long containerMultiplier = forgeContext ? forgeMultiplier : targetMultiplier;"));
+        assertTrue(rewrite.contains("inputs, currentMultiplier, containerMultiplier, inputContainers"));
+        // 容器身份取配方内容的 recipe_cycle_container 槽名，未打标的 ultimate_material_forge / 子模块配方按普通物品放大
+        assertTrue(helper.contains("RecipeCalculationHelper.INSTANCE.isRecipeCycleContainerContent(content)"));
+        assertTrue(rewrite.contains("taggedContainerKeys(recipe.getInputContents(ItemRecipeCapability.CAP))"));
+        assertTrue(rewrite.contains("taggedContainerKeys(recipe.getOutputContents(ItemRecipeCapability.CAP))"));
+
+        // 空罐子：三条 stellar_forge 配方倍率 >= 2 时追加 单位量 x (倍率-1)
+        assertTrue(rewrite.contains("rewrittenInputs = appendForgeSpecialInput(rewrittenInputs, recipe, forgeMultiplier);"));
+        assertTrue(helper.contains("getFORGE_OF_THE_ANTICHRIST_SPECIAL_INPUT_RULES()"));
+        assertTrue(helper.contains("ForgeOutputMultiplier.specialInputExtra("));
+        assertTrue(helper.contains("AEProcessingPattern.MAX_INPUT_SLOTS"),
+                "追加输入不能撑爆 AE 加工样板 81 格输入上限");
+    }
+
+    @Test
     void stellarBufferPublishesRewrittenPatternsToAeCraftingProvider() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         String refreshOne = extractBlock(source, "private boolean refreshVisibleOutputMultiplierPattern(");
         String available = extractBlock(source, "public List<IPatternDetails> getAvailablePatterns()");
 
@@ -188,7 +223,7 @@ class StellarPatternMultiplierSourceTest {
                 "AE 查询可用样板前要自校正一次，防止加载后先暴露旧 1x pattern");
         assertTrue(available.contains("publishedProductOutputsMissMultiplier()"),
                 "AE 查询时若已发布样板仍是 1x，必须重新改写，不能把脏标记清掉后永远暴露 1x");
-        String helper = Files.readString(HELPER);
+        String helper = read(HELPER);
         assertTrue(helper.contains("productOutputsReflectMultiplier"),
                 "倍率改写不能在循环容器除不尽时直接退回 1x 样板");
         assertFalse(helper.contains("if (rewrittenInputs == null) return pattern"),
@@ -201,7 +236,7 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void availablePatternRefreshAvoidsRepeatedFullScansAndMapRebuilds() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         String refreshOne = extractBlock(source, "private boolean refreshVisibleOutputMultiplierPattern(");
         String onChange = extractBlock(source, "protected void onPatternChange(int index)");
         String onLoad = extractBlock(source, "public void onLoad()");
@@ -231,8 +266,8 @@ class StellarPatternMultiplierSourceTest {
 
     @Test
     void multiplierRefreshAvoidsQuadraticReflectiveRefundSlotLookup() throws IOException {
-        String machine = Files.readString(MACHINE);
-        String mixin = Files.readString(VIRTUAL_BUFFER_MIXIN);
+        String machine = read(MACHINE);
+        String mixin = read(VIRTUAL_BUFFER_MIXIN);
         String wildcardRefund = extractBlock(machine, "private void refundWildcardSlots()");
         String refund = extractBlock(mixin, "private void gtShanhai$stripVirtualTargetsBeforeRefund(");
         String findSlot = extractBlock(mixin, "private Object gtShanhai$findSlotByInventories(");
@@ -252,6 +287,11 @@ class StellarPatternMultiplierSourceTest {
                 "每次退款不得重新扫描全部 InternalSlot");
         assertTrue(mixin.contains("gtShanhai$getInternalSlotMethod"),
                 "兜底索引构建使用的反射 Method 必须只解析一次并复用");
+    }
+
+    /** 工作区按 autocrlf 检出成 CRLF，多行断言统一按 LF 比对。 */
+    private static String read(Path path) throws IOException {
+        return Files.readString(path).replace("\r\n", "\n");
     }
 
     private static String extractBlock(String source, String declaration) {

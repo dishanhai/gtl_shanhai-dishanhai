@@ -30,14 +30,13 @@ class RecipeEditorGlassStageSourceTest {
                 // 主请求必须先于子部件登记：ShopGaussBlur.request* 会清掉第二槽位（弹层模糊）
                 () -> assertTrue(panel.indexOf("requestSlideBlur(graphics, now);")
                         < panel.indexOf("super.drawInBackground(graphics, mouseX, mouseY, partialTicks);")),
-                // 只在换页进行中请求；视口取静止的页面区域
+                // 只在换页进行中请求；视口取静止的内容栏
                 () -> assertTrue(panel.contains("if (!host.animation.moving(now)) return;")),
-                () -> assertTrue(panel.contains("getPositionY() + PAGE_Y,")),
-                // 包私有（Kotlin 的 GlassStagePage 在同包读它）：前面不能有 private
-                () -> assertTrue(panel.contains("\n    static final int PAGE_Y = 24;")),
-                // 页面容器移植到 Kotlin：Panel 里不再有内部类，改用 new GlassStagePage(this)
+                () -> assertTrue(panel.contains("getPositionY() + BODY_Y,")),
+                () -> assertTrue(panel.contains("MAIN_W, BODY_H);")),
+                // 页面容器在 Kotlin：Panel 里没有内部类，内容页按内容栏裁剪
                 () -> assertFalse(panel.contains("class StagePage")),
-                () -> assertTrue(panel.contains("new GlassStagePage(this)")),
+                () -> assertTrue(panel.contains("new GlassStagePage(MAIN_X, BODY_Y, MAIN_W, BODY_H,")),
                 () -> assertTrue(page.contains("graphics.enableScissor(")),
                 () -> assertTrue(page.contains("graphics.pose().translate(slide, 0f, 0f)")),
                 () -> assertTrue(page.contains("graphics.disableScissor()")),

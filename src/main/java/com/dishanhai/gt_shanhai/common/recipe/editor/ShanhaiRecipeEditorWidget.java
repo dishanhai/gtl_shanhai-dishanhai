@@ -134,12 +134,12 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
         panel = new ShanhaiRecipeEditorPanel(this);
         panel.mountSelector(createTypeSelector());
-        addWidget(new LabelWidget(12, 6, "§b§l山海配方修改器"));
-        addWidget(new LabelWidget(12, 18, "§7机器映射 → 图形化编辑 → 差异审核"));
+        addWidget(new LabelWidget(RecipeEditorLayout.TITLE_X, RecipeEditorLayout.TITLE_Y, "§b§l山海配方修改器"));
+        addWidget(new GlassWrapLabel(RecipeEditorLayout.TITLE_X, RecipeEditorLayout.SUBTITLE_Y,
+                RecipeEditorLayout.TITLE_W, "§7机器映射 → 图形化编辑 → 差异审核"));
         addWidget(panel);
-        LabelWidget status = new LabelWidget(12, 336, () -> statusText);
-        status.setClientSideWidget();
-        addWidget(status);
+        addWidget(new GlassWrapLabel(RecipeEditorLayout.STATUS_X, RecipeEditorLayout.STATUS_Y,
+                RecipeEditorLayout.STATUS_W, () -> statusText));
         setStage(STAGE_SELECT, false);
         if (isClient()) {
             String[] opened = ShanhaiRecipeEditorLaunch.consume();
@@ -155,7 +155,8 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     }
 
     private SelectorWidget createTypeSelector() {
-        SelectorWidget selector = new ShanhaiRecipeTypeSelector(4, 30, 496, 18, List.of(), GlassPalette.TEXT)
+        SelectorWidget selector = new ShanhaiRecipeTypeSelector(RecipeEditorLayout.MAIN_X, RecipeEditorLayout.BODY_Y,
+                RecipeEditorLayout.MAIN_W, RecipeEditorLayout.BTN_H, List.of(), GlassPalette.TEXT)
                 .setButtonBackground(GlassPanelTexture.button())
                 .setBackground(GlassPanelTexture.panel())
                 .setFontColor(GlassPalette.TEXT)
@@ -907,9 +908,9 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
 
     String reviewIdLine() {
         if (selectedBase == null) return "§8没有待审核草稿";
-        if (!creating) return "§7配方 §f" + compact(selectedBase.recipeId(), 42);
+        if (!creating) return "§7配方 §f" + selectedBase.recipeId();
         String id = recipeIdText == null ? "" : recipeIdText.trim();
-        return id.isEmpty() ? "§e新建配方，尚未填写 id" : "§7新配方 §f" + compact(id, 42);
+        return id.isEmpty() ? "§e新建配方，尚未填写 id" : "§7新配方 §f" + id;
     }
 
     String reviewButtonFace() {
@@ -1405,7 +1406,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     String fingerprintLine() {
         if (selectedBase == null) return "§7指纹：—";
         if (creating) return "§7全新配方，不对照旧指纹";
-        return "§7打开时指纹 §f" + compact(ShanhaiRecipeFingerprint.of(selectedBase), 28);
+        return "§7打开时指纹 §f" + ShanhaiRecipeFingerprint.of(selectedBase);
     }
 
     String ioLine() {
@@ -1551,7 +1552,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 String[] lines = payload.split("\n", 3);
                 String where = lines[0] + (lines.length > 1 ? " " + lines[1] : "");
                 String diff = lines.length > 2 ? " " + lines[2] : "";
-                setStatus("§a已导出 " + compact(where, 40) + diff);
+                setStatus("§a已导出 " + where + diff);
             } else {
                 setStatus(statusLine(packet));
             }
@@ -1577,7 +1578,7 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
                 panel.bindTable(ioTable);
                 seedEditHistory();
                 panel.syncBlastChrome(showBlastTemp());
-                setStatus("§a已载入 " + compact(selectedBase.recipeId(), 48));
+                setStatus("§a已载入 " + selectedBase.recipeId());
             }
             return;
         }
@@ -1664,12 +1665,10 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
         if (card == null || !card.has(key) || !card.get(key).isJsonArray()) return "";
         JsonArray values = card.getAsJsonArray(key);
         StringBuilder text = new StringBuilder();
-        int limit = Math.min(3, values.size());
-        for (int i = 0; i < limit; i++) {
+        for (int i = 0; i < values.size(); i++) {
             if (i > 0) text.append(", ");
             text.append(ioBit(values.get(i)));
         }
-        if (values.size() > 3) text.append("…");
         return text.toString();
     }
 
@@ -2022,11 +2021,6 @@ public final class ShanhaiRecipeEditorWidget extends WidgetGroup {
     public static void receiveDraft(CompoundTag draft) {
         ShanhaiRecipeEditorWidget widget = ACTIVE_CLIENT;
         if (widget != null) widget.restoreDraft(draft == null ? new CompoundTag() : draft);
-    }
-
-    static String compact(String value, int max) {
-        if (value == null) return "";
-        return value.length() <= max ? value : value.substring(0, Math.max(0, max - 3)) + "...";
     }
 
     private static JsonArray parseConditions(String raw) {

@@ -24,7 +24,7 @@ class RecipeTypePatternBufferStockCachedLookupSourceTest {
 
     @Test
     void syncStockInputUsesCachedInventoryView() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         int start = source.indexOf("protected void syncStockInput()");
         assertTrue(start >= 0, "syncStockInput 覆写必须存在，否则回退父类全网遍历热点");
         int end = source.indexOf("gtShanhai$cachedConfiguredItemAmount", start);
@@ -39,7 +39,7 @@ class RecipeTypePatternBufferStockCachedLookupSourceTest {
 
     @Test
     void cachedViewOnlyAnswersSimulate() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         int start = source.indexOf("private static final class CachedNetworkAmountView");
         assertTrue(start >= 0, "缓存视图类必须存在");
         int end = source.indexOf("gtShanhai$cachedNetworkInventory()", start);
@@ -50,23 +50,27 @@ class RecipeTypePatternBufferStockCachedLookupSourceTest {
 
     @Test
     void realConsumePhaseStaysOnLiveQuery() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         for (String method : new String[] { "findStockItemKey", "findStockFluidKey" }) {
             int start = source.indexOf("protected AEItemKey " + method);
             if (start < 0) start = source.indexOf("protected AEFluidKey " + method);
             assertTrue(start >= 0, method + " 覆写必须存在");
-            int end = source.indexOf("return null;", start);
+            int end = source.indexOf("\n    }\n", start);
+            assertTrue(end > start, method + " 方法体必须能定位");
             String body = source.substring(start, end);
-            assertTrue(body.contains("includeCatalyst ? gtShanhai$cachedNetworkInventory() : null"),
-                    method + " 只允许模拟阶段（includeCatalyst=true）走缓存");
-            assertTrue(body.contains("super." + method + "("),
-                    method + " 真扣料阶段必须委托父类实时查询，守住防吞料保证");
+            String earlyReturn = "if (!includeCatalyst) {\n            return super." + method + "(";
+            int guard = body.indexOf(earlyReturn);
+            assertTrue(guard >= 0 && body.indexOf(", false);", guard) > guard,
+                    method + " 真扣料阶段（includeCatalyst=false）必须先于缓存早返回，委托父类实时查询，守住防吞料保证");
+            int cache = body.indexOf("gtShanhai$cachedNetworkInventory()");
+            assertTrue(cache > guard,
+                    method + " 只允许模拟阶段（includeCatalyst=true）走缓存，缓存读取必须在早返回之后");
         }
     }
 
     @Test
     void cachedAmountsAreGatedByConfiguredSlots() throws IOException {
-        String source = Files.readString(MACHINE);
+        String source = read(MACHINE);
         for (String helper : new String[] {
                 "gtShanhai$cachedConfiguredItemAmount", "gtShanhai$cachedConfiguredFluidAmount" }) {
             int start = source.indexOf("private long " + helper);
@@ -78,5 +82,9 @@ class RecipeTypePatternBufferStockCachedLookupSourceTest {
             assertTrue(body.contains("Math.max(0L, cached.get(key))"),
                     helper + " 必须钳制缓存计数的瞬时负值");
         }
+    }
+
+    private static String read(Path path) throws IOException {
+        return Files.readString(path).replace("\r\n", "\n");
     }
 }

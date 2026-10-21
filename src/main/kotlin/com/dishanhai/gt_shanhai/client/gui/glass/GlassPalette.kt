@@ -21,6 +21,10 @@ object GlassPalette {
     const val DISPLAY_EDGE = 0xFF1F3347.toInt()
     const val PAGE_FILL = 0xB30B1424.toInt()
 
+    // 换页时盖住左栏 / 底部按钮的遮罩色（只取 RGB）：PAGE_FILL 叠在 ROOT_FILL 上、以及 ROOT_FILL 本身
+    const val VEIL_PAGE = 0xFF0C1525.toInt()
+    const val VEIL_ROOT = 0xFF0E1726.toInt()
+
     // 按钮
     const val BUTTON_FILL = 0xE6183049.toInt()
     const val BUTTON_FILL_HOVER = 0xE6214A6B.toInt()

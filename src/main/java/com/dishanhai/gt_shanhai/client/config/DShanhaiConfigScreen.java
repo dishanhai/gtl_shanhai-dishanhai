@@ -204,7 +204,7 @@ public final class DShanhaiConfigScreen {
                 .setSaveConsumer(cfg.recipeTypeRowsPerPage::set).build());
         pattern.addEntry(e.startIntField(Component.literal("最大页数"), cfg.recipeTypeMaxPages.get())
                 .setDefaultValue(10).setMin(1).setMax(64)
-                .setTooltip(tip("总槽位 = 每行槽位 × 每页行数 × 最大页数",
+                .setTooltip(tip("总槽位 = 每行槽位 × 每页行数 × 最大页数，默认 10×10×10 = 1000",
                         "生效方式与裁剪风险同每行样板槽位数"))
                 .setSaveConsumer(cfg.recipeTypeMaxPages::set).build());
         pattern.addEntry(e.startIntField(Component.literal("通配符槽每页格数"), cfg.recipeTypeWildcardSlotsPerPage.get())

@@ -27,7 +27,7 @@ class RecipeEditorGlassPopupSourceTest {
                 () -> assertTrue(blur.contains("hole.x, hole.y, hole.w, hole.h,")),
                 () -> assertTrue(selector.contains(".union(new GuiRect(x, y, popUp.getSizeWidth(), shown)), open);")),
                 () -> assertTrue(history.contains(".union(new GuiRect(x, y, POPUP_W, height)),")),
-                () -> assertTrue(history.contains("new GuiRect(x + POPUP_W - BUTTON, y - BUTTON - 2, BUTTON, BUTTON)")),
+                () -> assertTrue(history.contains("new GuiRect(x, y - BUTTON - 2, BUTTON, BUTTON)")),
                 () -> assertTrue(history.contains("new Spring(Spring.PANEL)"))
         );
     }

@@ -1482,7 +1482,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7· 中键催化剂槽：多张样板共用一组催化剂和电路"));
             tooltips.add(Component.literal("§7· 写进样板的虚拟电路优先，下单不消耗，也能盖过共享电路"));
             tooltips.add(Component.literal("§7· 每槽默认记住一种配方，数量在界面里改"));
-            tooltips.add(Component.literal("§7· 20个通配符槽放入星律通配样板，按记录的配方展开"));
+            tooltips.add(Component.literal("§7· 通配符槽放入星律通配样板，按记录的配方展开（槽数在配置里改）"));
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§6供料"));
             tooltips.add(Component.literal("§7· 库存输入在界面里指定物品和流体，真正扣料时才从 ME 提取"));
@@ -1494,7 +1494,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7· 星律样板代理把同一组样板延伸到结构的其他面"));
             tooltips.add(Component.literal("§7· 山海无线样板管理终端(特殊适配)可远程管理；原初模块可给这里的样板单独倍率"));
             tooltips.add(Component.literal("§8和宿主配方类型对不上、或槽位卡死时，对应槽会亮红框"));
-            tooltips.add(Component.literal("§8行列和页数在配置里改，改完重新放置才生效"));
+            tooltips.add(Component.literal("§8行列和页数在配置里改，重启后已放置的总成也会采用；调小前先清空高位槽"));
             tooltips.add(Component.literal("§8无线供电的宿主要先绑定无线网络"));
         });
 

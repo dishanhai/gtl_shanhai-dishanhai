@@ -565,9 +565,7 @@ public final class ShanhaiIoTable {
         int circuit = circuitConfiguration(stack);
         if (circuit >= 0) return "电路 " + circuit;
         if (stack == null || !stack.hasTag() || stack.getTag().isEmpty()) return "";
-        String text = stack.getTag().toString();
-        if (text.length() > 96) text = text.substring(0, 93) + "...";
-        return text;
+        return stack.getTag().toString();
     }
 
     public void writeState(FriendlyByteBuf buffer, int[] indices) {

@@ -4,25 +4,35 @@ import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import net.minecraft.client.gui.GuiGraphics;
 
-/** Cyan bar that slides under the active sort button. */
+/**
+ * Cyan bar that slides under the active sort button. The buttons may sit on two rows,
+ * so the bar moves in y as well. Coordinates are relative to this widget's parent.
+ */
 public final class ShanhaiRecipeSortMarkerWidget extends Widget {
 
     private static final long MOVE_MS = 180L;
-    private static final int[] X = {160, 198, 236, 278, 332};
-    private static final int[] W = {36, 36, 40, 52, 52};
-    private static final String[] KEYS = {"id", "eut", "duration", "inputs", "outputs"};
+    static final String[] KEYS = {"id", "eut", "duration", "inputs", "outputs"};
 
     private final ShanhaiRecipeEditorWidget host;
+    private final int[] xs;
+    private final int[] ys;
+    private final int[] ws;
     private String key = "";
     private int fromX;
     private int toX;
+    private int fromY;
+    private int toY;
     private int fromW;
     private int toW;
     private long started;
 
-    public ShanhaiRecipeSortMarkerWidget(ShanhaiRecipeEditorWidget host, int x, int y, int width) {
-        super(x, y, width, 2);
+    /** One entry per {@link #KEYS} key: the bar's left edge, top and width under that button. */
+    public ShanhaiRecipeSortMarkerWidget(ShanhaiRecipeEditorWidget host, int[] xs, int[] ys, int[] ws) {
+        super(0, 0, 1, 1);
         this.host = host;
+        this.xs = xs;
+        this.ys = ys;
+        this.ws = ws;
     }
 
     @Override
@@ -30,9 +40,10 @@ public final class ShanhaiRecipeSortMarkerWidget extends Widget {
         retarget();
         float progress = progress();
         int left = Math.round(fromX + (toX - fromX) * progress);
+        int top = Math.round(fromY + (toY - fromY) * progress);
         int width = Math.round(fromW + (toW - fromW) * progress);
         int x = getPositionX() + left;
-        int y = getPositionY();
+        int y = getPositionY() + top;
         graphics.fill(x, y, x + Math.max(8, width), y + 2, GlassPalette.ACCENT);
     }
 
@@ -41,16 +52,20 @@ public final class ShanhaiRecipeSortMarkerWidget extends Widget {
         if (next.equals(key)) return;
         long now = ShanhaiRecipeEditorAnimation.nowMs();
         int shownX = Math.round(fromX + (toX - fromX) * progress());
+        int shownY = Math.round(fromY + (toY - fromY) * progress());
         int shownW = Math.round(fromW + (toW - fromW) * progress());
         int index = indexOf(next);
         if (key.isEmpty()) {
-            fromX = toX = X[index];
-            fromW = toW = W[index];
+            fromX = toX = xs[index];
+            fromY = toY = ys[index];
+            fromW = toW = ws[index];
         } else {
             fromX = shownX;
+            fromY = shownY;
             fromW = shownW;
-            toX = X[index];
-            toW = W[index];
+            toX = xs[index];
+            toY = ys[index];
+            toW = ws[index];
             started = now;
         }
         key = next;

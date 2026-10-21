@@ -22,7 +22,13 @@ import net.minecraft.world.level.material.Fluid
 import net.minecraft.world.level.material.Fluids
 import net.minecraftforge.client.extensions.common.IClientFluidTypeExtensions
 
-/** One recipe row on the select page. Clicking it opens the edit page. */
+/**
+ * One recipe row on the select page. Clicking it opens the edit page.
+ *
+ * Three groups of lines: the full recipe id (with the edit mark on the right),
+ * the full input and output brief, and type / duration / EU. Each group wraps,
+ * and the card is as tall as its text; nothing is cut to fit the column.
+ */
 class ShanhaiRecipeCardWidget(
     x: Int,
     y: Int,
@@ -30,7 +36,7 @@ class ShanhaiRecipeCardWidget(
     private val card: ShanhaiRecipeQuery.Card,
     order: Int,
     private val open: Runnable?,
-) : Widget(x, y, width, CH) {
+) : Widget(x, y, width, heightFor(card, width)) {
 
     constructor(x: Int, y: Int, width: Int, card: ShanhaiRecipeQuery.Card, open: Runnable?) :
         this(x, y, width, card, 0, open)
@@ -45,6 +51,7 @@ class ShanhaiRecipeCardWidget(
         val x = getPositionX()
         val y = getPositionY()
         val width = getSizeWidth()
+        val height = getSizeHeight()
         val now = ShanhaiRecipeEditorAnimation.nowMs()
         hover.setTarget(if (isMouseOverElement(mouseX.toDouble(), mouseY.toDouble())) 1f else 0f, now)
         hover.update(now)
@@ -53,29 +60,35 @@ class ShanhaiRecipeCardWidget(
         graphics.pose().translate(0f, (1f - enter) * 8f, 0f)
         val fade = 0.2f + 0.8f * enter
         RenderSystem.setShaderColor(1f, 1f, 1f, fade)
-        graphics.fill(x, y, x + width, y + CH,
+        graphics.fill(x, y, x + width, y + height,
             GuiMotion.lerpColor(GlassPalette.ROW_EDGE, GlassPalette.ACCENT, lift))
-        graphics.fill(x + 1, y + 1, x + width - 1, y + CH - 1,
+        graphics.fill(x + 1, y + 1, x + width - 1, y + height - 1,
             GuiMotion.lerpColor(GlassPalette.ROW_FILL, GlassPalette.ROW_FILL_HOVER, lift))
         graphics.fill(x + 4, y + 4, x + 22, y + 22, GlassPalette.ROW_ICON_BG)
         drawOutputIcon(graphics, x + 5, y + 6)
         RenderSystem.setShaderColor(1f, 1f, 1f, fade)
         val font = Minecraft.getInstance().font
-        val mark = "可编辑"
-        val markX = x + width - 8 - font.width(mark)
-        val name = fit(font, recipeLabel(card.recipeId()), maxOf(8, markX - (x + 28) - 4))
-        graphics.drawString(font, name, x + 28, y + 4, GlassPalette.TEXT, false)
-        val brief = ioBrief()
-        val briefX = x + 28 + font.width(name) + 6
-        if (brief.isNotEmpty() && briefX + 12 < markX) {
-            graphics.drawString(font, fit(font, brief, markX - briefX - 4), briefX, y + 4, GlassPalette.TEXT_DIM, false)
-        }
-        graphics.drawString(font,
-            trim(card.recipeTypeId() + "  " + card.duration() + "t  " + card.eut() + " EU/t", 48),
-            x + 28, y + 15, GlassPalette.TEXT_DIM, false)
-        graphics.drawString(font, mark, markX, y + 10, GlassPalette.OK, false)
+        val markX = x + width - PAD - font.width(MARK)
+        graphics.drawString(font, MARK, markX, y + PAD, GlassPalette.OK, false)
+        var lineY = y + PAD
+        lineY = drawLines(graphics, font, recipeLabel(card.recipeId()), x + TEXT_X, lineY,
+            titleWidth(font, width), GlassPalette.TEXT)
+        lineY = drawLines(graphics, font, ioBrief(card), x + TEXT_X, lineY,
+            bodyWidth(width), GlassPalette.TEXT_DIM)
+        drawLines(graphics, font, metaLine(card), x + TEXT_X, lineY, bodyWidth(width), GlassPalette.TEXT_DIM)
         graphics.pose().popPose()
         RenderSystem.setShaderColor(1f, 1f, 1f, 1f)
+    }
+
+    /** Draws every wrapped line and returns the next line's top. Empty text still takes its one line, as in [heightFor]. */
+    private fun drawLines(graphics: GuiGraphics, font: Font, text: String, x: Int, y: Int, width: Int, color: Int): Int {
+        val lines = GlassWrapLabel.lines(text, width)
+        var lineY = y
+        for (line in lines) {
+            graphics.drawString(font, line, x, lineY, color, false)
+            lineY += RecipeEditorLayout.LINE_H
+        }
+        return if (lines.isEmpty()) lineY + RecipeEditorLayout.LINE_H else lineY
     }
 
     private fun enterProgress(): Float {
@@ -145,33 +158,43 @@ class ShanhaiRecipeCardWidget(
         RenderSystem.disableBlend()
     }
 
-    private fun ioBrief(): String {
-        if (card.inputBrief().isEmpty() && card.outputBrief().isEmpty()) return ""
-        val inputs = if (card.inputBrief().isEmpty()) "-" else card.inputBrief()
-        val outputs = if (card.outputBrief().isEmpty()) "-" else card.outputBrief()
-        return "入 $inputs → 出 $outputs"
-    }
-
-    private fun fit(font: Font, value: String?, width: Int): String {
-        if (value.isNullOrEmpty() || width < 8) return ""
-        if (font.width(value) <= width) return value
-        val ellipsis = "…"
-        var keep = value.length
-        while (keep > 0 && font.width(value.substring(0, keep) + ellipsis) > width) keep--
-        return if (keep <= 0) "" else value.substring(0, keep) + ellipsis
-    }
-
-    /** Full recipe id, namespace included: `gtceu:qft/qft_hyper_stable_self_healing_adhesive`. */
-    private fun recipeLabel(value: String?): String =
-        if (value.isNullOrEmpty()) "未命名配方" else value
-
-    private fun trim(value: String?, max: Int): String {
-        if (value == null) return ""
-        return if (value.length <= max) value else value.substring(0, maxOf(0, max - 3)) + "..."
-    }
-
     companion object {
-        const val CH = 28
+        /** Shortest card: one line in each of the three groups. */
+        const val CH = 36
         private const val ENTER_MS = 200L
+        private const val PAD = 4
+        private const val TEXT_X = 28
+        private const val MARK = "可编辑"
+
+        /** Card height for its wrapped text. The plain minimum where there is no client font. */
+        @JvmStatic
+        fun heightFor(card: ShanhaiRecipeQuery.Card, width: Int): Int {
+            if (!GlassWrapLabel.canMeasure()) return CH
+            val font = Minecraft.getInstance().font
+            val lines = GlassWrapLabel.lineCount(recipeLabel(card.recipeId()), titleWidth(font, width)) +
+                GlassWrapLabel.lineCount(ioBrief(card), bodyWidth(width)) +
+                GlassWrapLabel.lineCount(metaLine(card), bodyWidth(width))
+            return maxOf(CH, PAD + lines * RecipeEditorLayout.LINE_H + 2)
+        }
+
+        /** The id line leaves room for the edit mark on its right. */
+        private fun titleWidth(font: Font, width: Int): Int =
+            maxOf(8, width - TEXT_X - PAD - font.width(MARK) - PAD)
+
+        private fun bodyWidth(width: Int): Int = maxOf(8, width - TEXT_X - PAD)
+
+        /** Full recipe id, namespace included: `gtceu:qft/qft_hyper_stable_self_healing_adhesive`. */
+        private fun recipeLabel(value: String?): String =
+            if (value.isNullOrEmpty()) "未命名配方" else value
+
+        private fun ioBrief(card: ShanhaiRecipeQuery.Card): String {
+            if (card.inputBrief().isEmpty() && card.outputBrief().isEmpty()) return ""
+            val inputs = if (card.inputBrief().isEmpty()) "-" else card.inputBrief()
+            val outputs = if (card.outputBrief().isEmpty()) "-" else card.outputBrief()
+            return "入 $inputs → 出 $outputs"
+        }
+
+        private fun metaLine(card: ShanhaiRecipeQuery.Card): String =
+            card.recipeTypeId() + "  " + card.duration() + "t  " + card.eut() + " EU/t"
     }
 }

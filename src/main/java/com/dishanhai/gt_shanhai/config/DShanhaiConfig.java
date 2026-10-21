@@ -307,17 +307,17 @@ public final class DShanhaiConfig {
                              "默认 10 秒，用于避开主机低并行/低吞吐刚开始吃料时的误报")
                     .defineInRange("stuckWarningSeconds", 10, 1, 3600);
             recipeTypePatternsPerRow = builder
-                    .comment("星律样板总成 UI 每行样板槽位数（默认 9）",
+                    .comment("星律样板总成 UI 每行样板槽位数（默认 10）",
                              "修改后重启生效：已放置的总成在下次区块加载时即采用新配置",
                              "调小会裁剪槽位——被裁槽位里的样板会掉落在机器位置，内部缓冲料无法保留，改小前请先清空高位槽")
                     .defineInRange("patternsPerRow", 10, 1, 16);
             recipeTypeRowsPerPage = builder
-                    .comment("星律样板总成 UI 每页行数（默认 6）",
+                    .comment("星律样板总成 UI 每页行数（默认 10）",
                              "生效方式与裁剪风险同 patternsPerRow")
                     .defineInRange("rowsPerPage", 10, 1, 16);
             recipeTypeMaxPages = builder
-                    .comment("星律样板总成最大页数（默认 3）",
-                             "总槽位 = patternsPerRow × rowsPerPage × maxPages",
+                    .comment("星律样板总成最大页数（默认 10）",
+                             "总槽位 = patternsPerRow × rowsPerPage × maxPages，默认 10×10×10 = 1000",
                              "生效方式与裁剪风险同 patternsPerRow")
                     .defineInRange("maxPages", 10, 1, 64);
             recipeTypeWildcardSlotsPerPage = builder

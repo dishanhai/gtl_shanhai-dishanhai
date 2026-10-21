@@ -21,7 +21,7 @@ class RecipeEditorGlassCardsSourceTest {
 
         assertAll(
                 () -> assertFalse(Files.exists(GlassSources.JAVA.resolve(EDITOR.resolve("ShanhaiRecipeCardWidget.java")))),
-                () -> assertTrue(card.contains("const val CH = 28")),
+                () -> assertTrue(card.contains("const val CH = 36")),
                 () -> assertTrue(card.contains("Spring(Spring.HOVER)")),
                 () -> assertTrue(card.contains("order * 28L")),
                 () -> assertTrue(card.contains("GlassPalette.ROW_FILL_HOVER")),
@@ -33,7 +33,7 @@ class RecipeEditorGlassCardsSourceTest {
                 () -> assertTrue(list.contains("else if (step > 0 && before >= max) dir = 1")),
                 () -> assertTrue(list.contains("fun scrollToEnd()")),
                 () -> assertFalse(panel.contains("class RecipeCardList")),
-                () -> assertTrue(panel.contains("new GlassRecipeCardList(host, 4, 116, getSizeWidth() - 8, 110)"))
+                () -> assertTrue(panel.contains("new GlassRecipeCardList(host, MAIN_X, listY, MAIN_W, PAGER_Y - GAP - listY)"))
         );
     }
 }

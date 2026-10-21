@@ -9,21 +9,27 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
 import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
 import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 
 /**
  * Square toggle beside the query slot. Opening it lists recent searches.
- * The group is taller than the button so the list can hang over the cards;
- * clicks miss both pieces and fall through to the widgets underneath.
+ * The group is only as big as the button; the list hangs below it, opening
+ * rightward over the content column, and is drawn in the foreground so the
+ * sidebar rows after it cannot paint over it. Each entry wraps in full and
+ * its row is as tall as its text. Clicks that miss both pieces fall through.
  */
 public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
 
-    static final int POPUP_W = 220;
+    static final int POPUP_W = 300;
     static final int BUTTON = 22;
     static final int ROW = 16;
     static final int VISIBLE = 6;
+    private static final int TEXT_W = POPUP_W - 12;
+    /** Above the 400 that TextTexture button faces draw at. */
+    private static final float POPUP_Z = 500f;
 
     private final ShanhaiRecipeEditorWidget host;
     private final Toggle toggle;
@@ -32,9 +38,9 @@ public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
     private boolean open;
 
     public ShanhaiRecipeHistoryWidget(ShanhaiRecipeEditorWidget host, int x, int y) {
-        super(x, y, POPUP_W, BUTTON + 2 + VISIBLE * ROW);
+        super(x, y, BUTTON, BUTTON);
         this.host = host;
-        toggle = new Toggle(POPUP_W - BUTTON, 0);
+        toggle = new Toggle(0, 0);
         popup = new Popup(0, BUTTON + 2, POPUP_W, ROW);
         addWidget(toggle);
         addWidget(popup);
@@ -112,12 +118,19 @@ public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
             super(x, y, width, height);
         }
 
+        /** Height of one entry: every wrapped line of it, never below {@link #ROW}. */
+        private int rowHeight(int index) {
+            int lines = GlassWrapLabel.lineCount(host.queryHistoryLabel(index), TEXT_W);
+            return Math.max(ROW, lines * 10 + 6);
+        }
+
         void fit() {
-            int rows = Math.max(1, host.queryHistoryCount());
-            int shown = Math.min(VISIBLE, rows);
-            setSize(new Size(POPUP_W, shown * ROW));
-            int max = Math.max(0, host.queryHistoryCount() - VISIBLE);
+            int count = host.queryHistoryCount();
+            int max = Math.max(0, count - VISIBLE);
             if (scroll > max) scroll = max;
+            int height = 0;
+            for (int i = 0; i < VISIBLE && scroll + i < count; i++) height += rowHeight(scroll + i);
+            setSize(new Size(POPUP_W, Math.max(ROW, height)));
         }
 
         @Override
@@ -127,60 +140,70 @@ public final class ShanhaiRecipeHistoryWidget extends WidgetGroup {
             if (max == 0) return true;
             int dir = wheelDelta > 0d ? -1 : 1;
             scroll = Math.max(0, Math.min(max, scroll + dir));
+            fit();
             return true;
         }
 
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
             if (button != 0 || !isMouseOverElement(mouseX, mouseY)) return false;
-            int row = scroll + (int) ((mouseY - getPositionY()) / ROW);
-            if (row >= 0 && row < host.queryHistoryCount()) host.applyQueryHistory(row);
+            int count = host.queryHistoryCount();
+            int rowY = getPositionY();
+            for (int i = 0; i < VISIBLE && scroll + i < count; i++) {
+                int height = rowHeight(scroll + i);
+                if (mouseY < rowY + height) {
+                    host.applyQueryHistory(scroll + i);
+                    return true;
+                }
+                rowY += height;
+            }
             return true;
         }
 
         @Override
         public void drawInBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
+            // Drawn in the foreground instead; see the class comment.
+        }
+
+        @Override
+        public void drawInForeground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
             fit();
             int x = getPositionX();
             int y = getPositionY();
             int height = getSizeHeight();
-            graphics.fill(x, y, x + POPUP_W, y + height, GlassPalette.ACCENT);
-            graphics.fill(x + 1, y + 1, x + POPUP_W - 1, y + height - 1, GlassPalette.ROW_FILL);
-            Font font = Minecraft.getInstance().font;
             long now = System.currentTimeMillis();
             blurSpring.update(now);
             // The toggle sits right above the popup, so keep it inside the clear area.
             GlassBlur.requestPopup(graphics,
-                    new GuiRect(x + POPUP_W - BUTTON, y - BUTTON - 2, BUTTON, BUTTON)
+                    new GuiRect(x, y - BUTTON - 2, BUTTON, BUTTON)
                             .union(new GuiRect(x, y, POPUP_W, height)),
                     Math.max(0f, Math.min(1f, blurSpring.value())));
+            graphics.pose().pushPose();
+            graphics.pose().translate(0f, 0f, POPUP_Z);
+            graphics.fill(x, y, x + POPUP_W, y + height, GlassPalette.ACCENT);
+            graphics.fill(x + 1, y + 1, x + POPUP_W - 1, y + height - 1, GlassPalette.ROW_FILL);
+            Font font = Minecraft.getInstance().font;
             int count = host.queryHistoryCount();
             if (count == 0) {
                 graphics.drawString(font, "尚无查询历史", x + 6, y + 4, GlassPalette.TEXT_DIM, false);
+                graphics.pose().popPose();
                 return;
             }
-            int shown = Math.min(VISIBLE, count);
-            for (int i = 0; i < shown; i++) {
+            int rowY = y;
+            for (int i = 0; i < VISIBLE && scroll + i < count; i++) {
                 int index = scroll + i;
-                if (index >= count) break;
-                int rowY = y + i * ROW;
+                int rowHeight = rowHeight(index);
                 boolean hover = mouseX >= x && mouseX < x + POPUP_W
-                        && mouseY >= rowY && mouseY < rowY + ROW;
-                if (hover) graphics.fill(x + 2, rowY + 1, x + POPUP_W - 2, rowY + ROW - 1, GlassPalette.ROW_FILL_HOVER);
-                graphics.drawString(font, fitText(font, host.queryHistoryLabel(index), POPUP_W - 12),
-                        x + 6, rowY + 4, GlassPalette.TEXT, false);
+                        && mouseY >= rowY && mouseY < rowY + rowHeight;
+                if (hover) graphics.fill(x + 2, rowY + 1, x + POPUP_W - 2, rowY + rowHeight - 1, GlassPalette.ROW_FILL_HOVER);
+                int lineY = rowY + 4;
+                for (FormattedCharSequence line : GlassWrapLabel.lines(host.queryHistoryLabel(index), TEXT_W)) {
+                    graphics.drawString(font, line, x + 6, lineY, GlassPalette.TEXT, false);
+                    lineY += 10;
+                }
+                rowY += rowHeight;
             }
+            graphics.pose().popPose();
         }
-    }
-
-    private static String fitText(Font font, String text, int width) {
-        if (text == null) return "";
-        if (font.width(text) <= width) return text;
-        String dots = "...";
-        int budget = width - font.width(dots);
-        if (budget <= 0) return dots;
-        String cut = text;
-        while (!cut.isEmpty() && font.width(cut) > budget) cut = cut.substring(0, cut.length() - 1);
-        return cut + dots;
     }
 }

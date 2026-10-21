@@ -142,9 +142,9 @@ import java.util.function.Supplier;
 public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBufferPartMachine
         implements RecipeTypePatternSlotAccess, ICraftingRequester {
 
-    public static final int DEFAULT_PATTERNS_PER_ROW = 9;
-    public static final int DEFAULT_ROWS_PER_PAGE = 6;
-    public static final int DEFAULT_MAX_PAGES = 3;
+    public static final int DEFAULT_PATTERNS_PER_ROW = 10;
+    public static final int DEFAULT_ROWS_PER_PAGE = 10;
+    public static final int DEFAULT_MAX_PAGES = 10;
     public static final int DEFAULT_PATTERN_COUNT = DEFAULT_PATTERNS_PER_ROW * DEFAULT_ROWS_PER_PAGE * DEFAULT_MAX_PAGES;
     public static final int DEFAULT_WILDCARD_SLOTS_PER_PAGE = 10;
     public static final int DEFAULT_WILDCARD_MAX_PAGES = 2;
@@ -259,6 +259,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private final Int2ReferenceMap<GTRecipe> wildcardRecipeCache;
     private final Int2ReferenceMap<OutputMultiplierPatternCacheEntry> outputMultiplierPatternCache;
     private final Object2LongOpenHashMap<String> confirmedPatternOutputMultipliers = new Object2LongOpenHashMap<>();
+    /** 伪神自身对各配方类型的量化倍率（0 = 无伪神来源）。容器输入/空罐子只吃这个，不含枢纽/线程/引力波叠加层。 */
+    private final Object2LongOpenHashMap<String> confirmedPatternForgeMultipliers = new Object2LongOpenHashMap<>();
     private final RecipeTypePatternWildcardPersistence wildcardPersistence;
     @Nullable
     private Supplier<Level> patternPreviewLevelFallback;
@@ -466,6 +468,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
      * 父类 onLoad 按 patternInventory.getSlots() 遍历并写 hasPatternArray[i]，越界直接 AIOOBE 崩服。
      * 必须在父类 onLoad 之前收缩库存；越界槽的样板延迟 1 tick 掉落在机器位置（此时 AE 网络未就绪无法退回）。
      * 被裁槽位的内部缓冲料在父类反序列化阶段已按新长度截断，此处无法挽回。
+     * 另：GTLCore 新版 loadCustomPersistedData 里 cacheRecipeCount 的 arraycopy 也会越界，
+     * 由 loadCustomPersistedData 先行截断（RecipeTypePatternCacheCountGuard）。
      */
     private void gtShanhai$reconcilePatternInventorySize() {
         ItemStackTransfer inv = getPatternInventory();
@@ -840,6 +844,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     @Override
     public void loadCustomPersistedData(@NotNull CompoundTag tag) {
+        // 先于 super：GTLCore 载入 cacheRecipeCount 时按存档长度 arraycopy，配置调小后会越界丢整台。
+        RecipeTypePatternCacheCountGuard.clampToSlotCount(tag, maxPatternCount);
         super.loadCustomPersistedData(tag);
         wildcardPersistence.load(tag);
         if (tag.contains(STOCK_ITEM_TRACKER) || tag.contains(STOCK_FLUID_TRACKER)) {
@@ -1107,17 +1113,19 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (!outputMultiplierModeEnabled || pattern == null || getLevel() == null) return pattern;
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
         long multiplier = resolvePatternOutputMultiplier(recipeTypeId);
+        long forgeMultiplier = resolvePatternForgeMultiplier(recipeTypeId);
         long recipeRevision = DShanhaiRecipeModifierAPI.getPatternCacheRevision();
-        int cacheKey = makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, recipeRevision);
+        int cacheKey = makeOutputMultiplierPatternCacheKey(pattern, stack, recipeTypeId, multiplier, forgeMultiplier, recipeRevision);
         OutputMultiplierPatternCacheEntry cached = outputMultiplierPatternCache.get(cacheKey);
-        if (cached != null && cached.matches(pattern, stack, recipeTypeId, multiplier, recipeRevision)) {
+        if (cached != null && cached.matches(pattern, stack, recipeTypeId, multiplier, forgeMultiplier, recipeRevision)) {
             return cached.pattern();
         }
         IPatternDetails rewritten = VirtualPatternEncodingHelper.rewritePatternOutputMultiplier(
-                pattern, getLevel(), recipeTypeId, multiplier);
+                pattern, getLevel(), recipeTypeId, multiplier, forgeMultiplier);
         // 改寫失敗也要記住。否則 AE 每次重建提供者都會再掃整份配方表。
         outputMultiplierPatternCache.put(cacheKey,
-                new OutputMultiplierPatternCacheEntry(pattern, stack, recipeTypeId, multiplier, recipeRevision, rewritten));
+                new OutputMultiplierPatternCacheEntry(pattern, stack, recipeTypeId, multiplier, forgeMultiplier,
+                        recipeRevision, rewritten));
         return rewritten;
     }
 
@@ -1213,8 +1221,19 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return resolved;
     }
 
+    private long resolvePatternForgeMultiplier(@Nullable String recipeTypeId) {
+        String key = recipeTypeId == null ? "" : recipeTypeId;
+        if (confirmedPatternForgeMultipliers.containsKey(key)) {
+            return confirmedPatternForgeMultipliers.getLong(key);
+        }
+        long resolved = OutputMultiplierResolver.resolveForgeOutputMultiplier(getControllers(), recipeTypeId);
+        confirmedPatternForgeMultipliers.put(key, resolved);
+        return resolved;
+    }
+
     private void invalidateConfirmedPatternOutputMultipliers() {
         confirmedPatternOutputMultipliers.clear();
+        confirmedPatternForgeMultipliers.clear();
     }
 
     private long getCachedHostOutputMultiplier() {
@@ -1304,8 +1323,10 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (patternStack.isEmpty()) return false;
         if (!((Object) this instanceof MEPatternBufferSlot2PatternAccessor access)) return false;
 
-        long multiplier = resolvePatternOutputMultiplier(PatternRecipeTypeHelper.readRecipeTypeId(patternStack));
-        if (!resetSlotCaches && visibleOutputMultiplierStampMatches(slot, patternStack, multiplier)) {
+        String slotRecipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(patternStack);
+        long multiplier = resolvePatternOutputMultiplier(slotRecipeTypeId);
+        long forgeMultiplier = resolvePatternForgeMultiplier(slotRecipeTypeId);
+        if (!resetSlotCaches && visibleOutputMultiplierStampMatches(slot, patternStack, multiplier, forgeMultiplier)) {
             return false;
         }
 
@@ -1316,7 +1337,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         IPatternDetails effectivePattern = gtShanhai$applyOutputMultiplier(basePattern, patternStack);
         if (effectivePattern == null) return false;
         if (VirtualPatternEncodingHelper.productOutputsReflectMultiplier(effectivePattern, multiplier)) {
-            rememberVisibleOutputMultiplierStamp(slot, patternStack, multiplier);
+            rememberVisibleOutputMultiplierStamp(slot, patternStack, multiplier, forgeMultiplier);
         }
         // 視圖和 1x 樣板共用 definition。產出數量沒變就不要再標 needPatternSync，否則 AE 每個 tick 重建提供者。
         if (sameVisiblePattern(currentPattern, effectivePattern)) {
@@ -1468,11 +1489,12 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private int makeOutputMultiplierPatternCacheKey(IPatternDetails pattern, ItemStack stack,
-            String recipeTypeId, long multiplier, long recipeRevision) {
+            String recipeTypeId, long multiplier, long forgeMultiplier, long recipeRevision) {
         int result = 31 + patternDefinitionHash(pattern);
         result = 31 * result + stackKeyHash(stack);
         result = 31 * result + Objects.hashCode(recipeTypeId);
         result = 31 * result + Long.hashCode(multiplier);
+        result = 31 * result + Long.hashCode(forgeMultiplier);
         result = 31 * result + Long.hashCode(recipeRevision);
         return result;
     }
@@ -1484,24 +1506,27 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
     }
 
-    private boolean visibleOutputMultiplierStampMatches(int slot, ItemStack stack, long multiplier) {
+    private boolean visibleOutputMultiplierStampMatches(int slot, ItemStack stack, long multiplier,
+            long forgeMultiplier) {
         int[] stamps = visibleOutputMultiplierStamps;
         if (stamps == null || slot < 0 || slot >= stamps.length) return false;
         int stamp = stamps[slot];
-        return stamp != 0 && stamp == visibleOutputMultiplierStamp(stack, multiplier);
+        return stamp != 0 && stamp == visibleOutputMultiplierStamp(stack, multiplier, forgeMultiplier);
     }
 
-    private void rememberVisibleOutputMultiplierStamp(int slot, ItemStack stack, long multiplier) {
+    private void rememberVisibleOutputMultiplierStamp(int slot, ItemStack stack, long multiplier,
+            long forgeMultiplier) {
         if (visibleOutputMultiplierStamps == null || slot < 0 || slot >= visibleOutputMultiplierStamps.length) {
             return;
         }
-        int stamp = visibleOutputMultiplierStamp(stack, multiplier);
+        int stamp = visibleOutputMultiplierStamp(stack, multiplier, forgeMultiplier);
         visibleOutputMultiplierStamps[slot] = stamp == 0 ? 1 : stamp;
     }
 
-    private int visibleOutputMultiplierStamp(ItemStack stack, long multiplier) {
+    private int visibleOutputMultiplierStamp(ItemStack stack, long multiplier, long forgeMultiplier) {
         int result = 31 + stackKeyHash(stack);
         result = 31 * result + Long.hashCode(multiplier);
+        result = 31 * result + Long.hashCode(forgeMultiplier);
         result = 31 * result + Long.hashCode(DShanhaiRecipeModifierAPI.getPatternCacheRevision());
         result = 31 * result + Boolean.hashCode(keepByProduct);
         return result;
@@ -3143,21 +3168,24 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
             int sourceStackHash,
             String recipeTypeId,
             long multiplier,
+            long forgeMultiplier,
             long recipeRevision,
             IPatternDetails pattern) {
 
         OutputMultiplierPatternCacheEntry(IPatternDetails sourcePattern, ItemStack sourceStack,
-                String recipeTypeId, long multiplier, long recipeRevision, IPatternDetails pattern) {
+                String recipeTypeId, long multiplier, long forgeMultiplier, long recipeRevision,
+                IPatternDetails pattern) {
             this(patternDefinitionHash(sourcePattern), stackKeyHash(sourceStack),
-                    recipeTypeId, multiplier, recipeRevision, pattern);
+                    recipeTypeId, multiplier, forgeMultiplier, recipeRevision, pattern);
         }
 
         boolean matches(IPatternDetails sourcePattern, ItemStack sourceStack,
-                String recipeTypeId, long multiplier, long recipeRevision) {
+                String recipeTypeId, long multiplier, long forgeMultiplier, long recipeRevision) {
             return sourcePatternDefinitionHash == patternDefinitionHash(sourcePattern)
                     && sourceStackHash == stackKeyHash(sourceStack)
                     && Objects.equals(this.recipeTypeId, recipeTypeId)
                     && this.multiplier == multiplier
+                    && this.forgeMultiplier == forgeMultiplier
                     && this.recipeRevision == recipeRevision;
         }
     }

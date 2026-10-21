@@ -4,14 +4,16 @@ import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.util.FormattedCharSequence;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 
-/** One recipe-type heading above the cards that share it. */
+/** One recipe-type heading above the cards that share it. A long title wraps and the heading grows. */
 public final class ShanhaiRecipeGroupHeaderWidget extends Widget {
 
     public static final int CH = 14;
 
     private static final long ENTER_MS = 200L;
+    private static final int TEXT_X = 6;
 
     private final String title;
     private final int order;
@@ -22,9 +24,18 @@ public final class ShanhaiRecipeGroupHeaderWidget extends Widget {
     }
 
     public ShanhaiRecipeGroupHeaderWidget(int x, int y, int width, String title, int order) {
-        super(x, y, width, CH);
+        super(x, y, width, heightFor(title, width));
         this.title = title == null ? "" : title;
         this.order = Math.max(0, order);
+    }
+
+    private static int heightFor(String title, int width) {
+        int lines = GlassWrapLabel.lineCount(title, textWidth(width));
+        return Math.max(CH, lines * RecipeEditorLayout.LINE_H + 4);
+    }
+
+    private static int textWidth(int width) {
+        return Math.max(8, width - TEXT_X - 2);
     }
 
     @Override
@@ -33,13 +44,18 @@ public final class ShanhaiRecipeGroupHeaderWidget extends Widget {
         int x = getPositionX();
         int y = getPositionY();
         int width = getSizeWidth();
+        int height = getSizeHeight();
         graphics.pose().pushPose();
         graphics.pose().translate(0f, (1f - enter) * 8f, 0f);
         RenderSystem.setShaderColor(1f, 1f, 1f, 0.2f + 0.8f * enter);
-        graphics.fill(x, y, x + width, y + CH, GlassPalette.GROUP_FILL);
-        graphics.fill(x, y, x + 2, y + CH, GlassPalette.ACCENT);
+        graphics.fill(x, y, x + width, y + height, GlassPalette.GROUP_FILL);
+        graphics.fill(x, y, x + 2, y + height, GlassPalette.ACCENT);
         var font = Minecraft.getInstance().font;
-        graphics.drawString(font, fit(font, title, width - 8), x + 6, y + 3, GlassPalette.TEXT_HEAD, false);
+        int lineY = y + 3;
+        for (FormattedCharSequence line : GlassWrapLabel.lines(title, textWidth(width))) {
+            graphics.drawString(font, line, x + TEXT_X, lineY, GlassPalette.TEXT_HEAD, false);
+            lineY += RecipeEditorLayout.LINE_H;
+        }
         graphics.pose().popPose();
         RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
     }
@@ -49,14 +65,5 @@ public final class ShanhaiRecipeGroupHeaderWidget extends Widget {
         if (elapsed <= 0L) return 0f;
         float linear = Math.min(1f, elapsed / (float) ENTER_MS);
         return linear * linear * (3f - 2f * linear);
-    }
-
-    private static String fit(net.minecraft.client.gui.Font font, String text, int width) {
-        if (text == null || text.isEmpty() || font.width(text) <= width) return text == null ? "" : text;
-        String shown = text;
-        while (shown.length() > 1 && font.width(shown + "…") > width) {
-            shown = shown.substring(0, shown.length() - 1);
-        }
-        return shown + "…";
     }
 }

@@ -12,7 +12,6 @@ import com.gtladd.gtladditions.common.machine.multiblock.controller.module.Forge
 import com.gtladd.gtladditions.common.machine.multiblock.controller.module.HelioFusionExoticizer;
 import com.gtladd.gtladditions.common.machine.multiblock.controller.module.HelioflarePowerForge;
 import com.gtladd.gtladditions.common.machine.multiblock.controller.module.HeliofluixMeltingCore;
-import com.gtladd.gtladditions.common.machine.multiblock.controller.module.HeliophaseLeylineCrystallizer;
 import com.gtladd.gtladditions.common.machine.multiblock.controller.module.HeliothermalPlasmaFabricator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -40,7 +39,6 @@ public final class OutputMultiplierResolver {
     private static final String HELIOFLUIX_CHAOS_ALCHEMY_ALIAS = "gtceu:chaos_alchemy";
     private static final String HELIOTHERMAL_FUSION = "gtceu:fusion_reactor";
     private static final String HELIOTHERMAL_SUPER_PARTICLE_COLLIDER = "gtceu:super_particle_collider";
-    private static final String HELIOPHASE_LEYLINE = "gtceu:leyline_crystallize";
 
     private OutputMultiplierResolver() {}
 
@@ -62,6 +60,27 @@ public final class OutputMultiplierResolver {
     public static long resolveUniversalHostOutputMultiplier(Iterable<?> controllers,
             @Nullable Level level, @Nullable BlockPos pos) {
         return resolveHostOutputMultiplier(controllers, level, pos, null, false);
+    }
+
+    /**
+     * 只含伪神自身（本体/子模块）对该配方类型的倍率，不叠枢纽/线程/引力波。
+     * 原版 FOTC 只按这个倍率放大带 {@code recipe_cycle_container} 标记的输入并追加空容器，
+     * 叠加层只放大产出；没有伪神来源时返回 0（区别于「伪神倍率为 1」）。
+     */
+    public static long resolveForgeOutputMultiplier(Iterable<?> controllers, @Nullable String recipeTypeId) {
+        String canonicalRecipeTypeId = PatternRecipeTypeHelper.canonicalRecipeTypeId(recipeTypeId);
+        if (controllers == null || canonicalRecipeTypeId.isEmpty()) return 0L;
+        Accumulator forgeOnly = new Accumulator();
+        for (Object controller : controllers) {
+            collectForgeOfTheAntichristMultiplier(controller, forgeOnly, canonicalRecipeTypeId, false);
+            if (!(controller instanceof IMultiController multiController)) continue;
+            Iterable<? extends IMultiPart> parts = multiController.getParts();
+            if (parts == null) continue;
+            for (IMultiPart part : parts) {
+                collectForgeOfTheAntichristMultiplier(part, forgeOnly, canonicalRecipeTypeId, false);
+            }
+        }
+        return forgeOnly.hasSources() ? forgeOnly.result() : 0L;
     }
 
     public static int resolveForgeRecipeTypeFingerprint(Iterable<?> controllers) {
@@ -130,7 +149,7 @@ public final class OutputMultiplierResolver {
     private static void collectForgeOfTheAntichristHostMultiplier(ForgeOfTheAntichrist host,
             Accumulator accumulator, String recipeTypeId, boolean includeAnyForgeRecipeType) {
         if (includeAnyForgeRecipeType || forgeHostSupportsRecipeType(recipeTypeId)) {
-            accumulator.addSource(host, sanitizeMultiplier(host.getRecipeOutputMultiply()));
+            accumulator.addSource(host, sanitizeForgeMultiplier(host.getRecipeOutputMultiply()));
             return;
         }
         for (Object module : host.getModules()) {
@@ -138,7 +157,7 @@ public final class OutputMultiplierResolver {
                     && forgeModule.isFormed()
                     && forgeModule.getHost() == host
                     && moduleSupportsForgeMultiplier(forgeModule, recipeTypeId)) {
-                accumulator.addSource(host, sanitizeMultiplier(host.getRecipeOutputMultiply()));
+                accumulator.addSource(host, sanitizeForgeMultiplier(host.getRecipeOutputMultiply()));
                 return;
             }
         }
@@ -149,8 +168,22 @@ public final class OutputMultiplierResolver {
         if (!module.isFormed()) return;
         if (!includeAnyForgeRecipeType && !moduleSupportsForgeMultiplier(module, recipeTypeId)) return;
         ForgeOfTheAntichrist host = module.getHost();
-        if (host == null) return;
-        accumulator.addSource(host, sanitizeMultiplier(host.getRecipeOutputMultiply()));
+        if (host == null) {
+            // FOTCMixins.ModuleLogic：模块脱离主机独立运行时 getRecipeOutputMultiply 被写死为 15.0D，是静态 15x。
+            if (standaloneModuleRunsWithoutHost(module)) {
+                accumulator.addSource(module, ForgeOutputMultiplier.STANDALONE_MODULE_MULTIPLIER);
+            }
+            return;
+        }
+        accumulator.addSource(host, sanitizeForgeMultiplier(host.getRecipeOutputMultiply()));
+    }
+
+    /**
+     * 只有走基类 calculateParallels 的模块吃得到 15.0D 兜底；HelioFusionExoticizer 自己重写了 calculateParallels
+     * 并对 host 做 checkNotNull，没有主机就不会产出，不能声明倍率。
+     */
+    private static boolean standaloneModuleRunsWithoutHost(ForgeOfTheAntichristModuleBase module) {
+        return DShanhaiConfig.COMMON.modulesWorkWithoutHost.get() && !(module instanceof HelioFusionExoticizer);
     }
 
     private static boolean forgeHostSupportsRecipeType(String recipeTypeId) {
@@ -174,9 +207,8 @@ public final class OutputMultiplierResolver {
             return HELIOTHERMAL_FUSION.equals(recipeTypeId)
                     || HELIOTHERMAL_SUPER_PARTICLE_COLLIDER.equals(recipeTypeId);
         }
-        if (module instanceof HeliophaseLeylineCrystallizer) {
-            return HELIOPHASE_LEYLINE.equals(recipeTypeId);
-        }
+        // HeliophaseLeylineCrystallizer 的 Logic 没有 enableModify 覆写，继承基类的 false，
+        // 宿主倍率根本不会作用在它的配方上（萊林配方的 1.5x 由 RecipesModify 在配方构建期写死）。
         return false;
     }
 
@@ -194,7 +226,7 @@ public final class OutputMultiplierResolver {
                 }
             }
         } else if (candidate instanceof ForgeOfTheAntichristModuleBase module
-                && module.getHost() != null) {
+                && (module.getHost() != null || standaloneModuleRunsWithoutHost(module))) {
             fingerprint = 31 * fingerprint + moduleRecipeTypeFingerprint(module);
         }
         return fingerprint;
@@ -215,9 +247,6 @@ public final class OutputMultiplierResolver {
             int result = HELIOTHERMAL_FUSION.hashCode();
             return 31 * result + HELIOTHERMAL_SUPER_PARTICLE_COLLIDER.hashCode();
         }
-        if (module instanceof HeliophaseLeylineCrystallizer) {
-            return HELIOPHASE_LEYLINE.hashCode();
-        }
         return 0;
     }
 
@@ -231,10 +260,9 @@ public final class OutputMultiplierResolver {
         return value <= 1L ? 1L : value;
     }
 
-    private static long sanitizeMultiplier(double value) {
-        if (!Double.isFinite(value) || value <= 1D) return 1L;
-        if (value >= Long.MAX_VALUE) return Long.MAX_VALUE;
-        return sanitizeMultiplier(Math.round(value));
+    /** 伪神倍率是连续 double，原版产出按 floor(数量 × 倍率) 截断，样板声明必须向下取整，见 {@link ForgeOutputMultiplier}。 */
+    private static long sanitizeForgeMultiplier(double value) {
+        return sanitizeMultiplier(ForgeOutputMultiplier.quantize(value));
     }
 
     private static final class Accumulator {
@@ -247,6 +275,10 @@ public final class OutputMultiplierResolver {
             long sanitized = sanitizeMultiplier(multiplier);
             Object key = sourceKey == null ? this : sourceKey;
             sourceMultipliers.merge(key, sanitized, Math::max);
+        }
+
+        boolean hasSources() {
+            return !sourceMultipliers.isEmpty();
         }
 
         void addThread(int threads) {

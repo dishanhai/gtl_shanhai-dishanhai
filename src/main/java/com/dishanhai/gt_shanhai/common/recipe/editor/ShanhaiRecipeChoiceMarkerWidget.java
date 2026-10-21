@@ -4,16 +4,21 @@ import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import net.minecraft.client.gui.GuiGraphics;
 
-/** Cyan bars that slide under the search-mode and ingredient-kind buttons. */
+/**
+ * Cyan bars that slide under the search-mode and ingredient-kind buttons.
+ * Each row has its own top; coordinates are relative to this widget's parent.
+ */
 public final class ShanhaiRecipeChoiceMarkerWidget extends Widget {
 
     private static final long MOVE_MS = 180L;
-    private static final int[] MODE_X = {4, 58, 104};
-    private static final int[] MODE_W = {52, 44, 44};
-    private static final int[] KIND_X = {152, 194};
-    private static final int[] KIND_W = {40, 40};
 
     private final ShanhaiRecipeEditorWidget host;
+    private final int[] modeXs;
+    private final int[] modeWs;
+    private final int modeY;
+    private final int[] kindXs;
+    private final int[] kindWs;
+    private final int kindY;
     private int mode = -1;
     private int kind = -1;
     private boolean kindOn;
@@ -28,33 +33,42 @@ public final class ShanhaiRecipeChoiceMarkerWidget extends Widget {
     private long modeStarted;
     private long kindStarted;
 
-    public ShanhaiRecipeChoiceMarkerWidget(ShanhaiRecipeEditorWidget host, int x, int y, int width) {
-        super(x, y, width, 2);
+    /** Mode entries follow RECIPE_ID, INGREDIENT, OUTPUT; kind entries follow ITEM, FLUID. */
+    public ShanhaiRecipeChoiceMarkerWidget(ShanhaiRecipeEditorWidget host,
+                                           int[] modeXs, int[] modeWs, int modeY,
+                                           int[] kindXs, int[] kindWs, int kindY) {
+        super(0, 0, 1, 1);
         this.host = host;
+        this.modeXs = modeXs;
+        this.modeWs = modeWs;
+        this.modeY = modeY;
+        this.kindXs = kindXs;
+        this.kindWs = kindWs;
+        this.kindY = kindY;
     }
 
     @Override
     public void drawInBackground(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         retargetMode();
         retargetKind();
-        fill(graphics, modeFromX, modeToX, modeFromW, modeToW, progress(modeStarted));
-        fill(graphics, kindFromX, kindToX, kindFromW, kindToW, progress(kindStarted));
+        fill(graphics, modeFromX, modeToX, modeFromW, modeToW, modeY, progress(modeStarted));
+        fill(graphics, kindFromX, kindToX, kindFromW, kindToW, kindY, progress(kindStarted));
     }
 
     private void retargetMode() {
         int index = modeIndex();
         if (mode < 0) {
             mode = index;
-            modeFromX = modeToX = MODE_X[index];
-            modeFromW = modeToW = MODE_W[index];
+            modeFromX = modeToX = modeXs[index];
+            modeFromW = modeToW = modeWs[index];
             return;
         }
         if (index == mode) return;
         float shown = progress(modeStarted);
         modeFromX = Math.round(modeFromX + (modeToX - modeFromX) * shown);
         modeFromW = Math.round(modeFromW + (modeToW - modeFromW) * shown);
-        modeToX = MODE_X[index];
-        modeToW = MODE_W[index];
+        modeToX = modeXs[index];
+        modeToW = modeWs[index];
         mode = index;
         modeStarted = ShanhaiRecipeEditorAnimation.nowMs();
     }
@@ -65,16 +79,16 @@ public final class ShanhaiRecipeChoiceMarkerWidget extends Widget {
         if (kind < 0) {
             kind = index;
             kindOn = on;
-            kindFromX = kindToX = KIND_X[index];
-            kindFromW = kindToW = on ? KIND_W[index] : 0;
+            kindFromX = kindToX = kindXs[index];
+            kindFromW = kindToW = on ? kindWs[index] : 0;
             return;
         }
         if (on == kindOn && index == kind) return;
         float shown = progress(kindStarted);
         kindFromX = Math.round(kindFromX + (kindToX - kindFromX) * shown);
         kindFromW = Math.round(kindFromW + (kindToW - kindFromW) * shown);
-        kindToX = KIND_X[index];
-        kindToW = on ? KIND_W[index] : 0;
+        kindToX = kindXs[index];
+        kindToW = on ? kindWs[index] : 0;
         kind = index;
         kindOn = on;
         kindStarted = ShanhaiRecipeEditorAnimation.nowMs();
@@ -86,12 +100,12 @@ public final class ShanhaiRecipeChoiceMarkerWidget extends Widget {
         return 0;
     }
 
-    private void fill(GuiGraphics graphics, int fromX, int toX, int fromW, int toW, float shown) {
+    private void fill(GuiGraphics graphics, int fromX, int toX, int fromW, int toW, int top, float shown) {
         int left = Math.round(fromX + (toX - fromX) * shown);
         int width = Math.round(fromW + (toW - fromW) * shown);
         if (width <= 0) return;
         int x = getPositionX() + left;
-        int y = getPositionY();
+        int y = getPositionY() + top;
         graphics.fill(x, y, x + width, y + 2, GlassPalette.ACCENT);
     }
 

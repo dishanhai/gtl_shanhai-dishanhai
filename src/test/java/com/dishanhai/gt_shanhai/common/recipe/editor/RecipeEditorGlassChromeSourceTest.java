@@ -42,9 +42,9 @@ class RecipeEditorGlassChromeSourceTest {
         }
         assertTrue(editor("ShanhaiRecipeEditorFactory.java").contains(".background(GlassPanelTexture.root())"));
         assertTrue(editor("ShanhaiRecipeEditorPanel.java").contains("GlassPanelTexture.button()"));
-        assertTrue(GlassSources.read(GlassSources.KOTLIN.resolve(
-                Path.of("common", "recipe", "editor", "GlassStagePage.kt")))
-                .contains("setBackground(GlassPanelTexture.page())"));
+        // 两栏底板由 Panel 静止绘制，页面本身只负责滑动 / 遮罩
+        assertTrue(editor("ShanhaiRecipeEditorPanel.java")
+                .contains("private final GlassPanelTexture mainBack = GlassPanelTexture.page();"));
     }
 
     @Test

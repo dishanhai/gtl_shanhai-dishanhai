@@ -13,6 +13,7 @@ import appeng.crafting.pattern.AEProcessingPattern;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.ae2.PatternByproductOrder;
+import com.dishanhai.gt_shanhai.common.machine.output.ForgeOutputMultiplier;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
@@ -40,6 +41,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -53,6 +55,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 /**
  * Rewrites GT non-consumable item and fluid inputs to self-describing virtual providers.
@@ -629,10 +632,23 @@ public final class VirtualPatternEncodingHelper {
 
     public static IPatternDetails rewritePatternOutputMultiplier(IPatternDetails pattern, Level level,
             String recipeTypeId, long requestedMultiplier) {
+        return rewritePatternOutputMultiplier(pattern, level, recipeTypeId, requestedMultiplier, 0L);
+    }
+
+    /**
+     * @param forgeMultiplier 伪神自身对该配方类型的量化倍率（{@code ForgeOutputMultiplier.quantize}）；0 表示没有伪神来源。
+     *                        有伪神来源时按原版 {@code ForgeOfTheAntichrist.copyAndModifyRecipe} 的口径改写：
+     *                        容器输入只按伪神倍率放大（枢纽/线程/引力波只放大产出），容器身份取配方内容的
+     *                        {@code recipe_cycle_container} 槽名，三条 stellar_forge 配方追加 {@code (倍率-1)} 个空容器。
+     */
+    public static IPatternDetails rewritePatternOutputMultiplier(IPatternDetails pattern, Level level,
+            String recipeTypeId, long requestedMultiplier, long forgeMultiplier) {
         if (!(pattern instanceof AEProcessingPattern processingPattern) || level == null) return pattern;
         long targetMultiplier = Math.max(1L, requestedMultiplier);
         if (targetMultiplier <= 1L) return pattern;
         if (productOutputsReflectMultiplier(processingPattern, targetMultiplier)) return processingPattern;
+        boolean forgeContext = forgeMultiplier > 0L;
+        long containerMultiplier = forgeContext ? forgeMultiplier : targetMultiplier;
 
         GenericStack[] inputs = processingPattern.getSparseInputs();
         GenericStack[] outputs = processingPattern.getSparseOutputs();
@@ -640,19 +656,27 @@ public final class VirtualPatternEncodingHelper {
         long currentMultiplier = recipe == null ? 0L
                 : detectRecipeOutputMultiplier(recipe, StackBag.of(outputs));
         if (recipe != null && currentMultiplier > 0L) {
+            Predicate<AEKey> inputContainers = forgeContext
+                    ? taggedContainerKeys(recipe.getInputContents(ItemRecipeCapability.CAP))
+                    : VirtualPatternEncodingHelper::isRecipeCycleContainerKey;
+            Predicate<AEKey> outputContainers = forgeContext
+                    ? taggedContainerKeys(recipe.getOutputContents(ItemRecipeCapability.CAP))
+                    : VirtualPatternEncodingHelper::isRecipeCycleContainerKey;
             GenericStack[] rewrittenInputs = rewriteCycleContainerInputs(
-                    inputs, currentMultiplier, targetMultiplier);
+                    inputs, currentMultiplier, containerMultiplier, inputContainers);
             // 循環容器除不盡時不能放棄整張樣板，否則 AE 會繼續按 1x 產出下單。
             if (rewrittenInputs == null) rewrittenInputs = inputs;
+            rewrittenInputs = appendForgeSpecialInput(rewrittenInputs, recipe, forgeMultiplier);
             IPatternDetails rewritten = encodeScaledPattern(processingPattern, rewrittenInputs,
-                    createScaledRecipeOutputs(recipe, targetMultiplier), level);
+                    createScaledRecipeOutputs(recipe, targetMultiplier, outputContainers), level);
             if (rewritten != null && keepsByproductOrder(processingPattern, rewritten)
                     && productOutputsReflectMultiplier(rewritten, targetMultiplier)
                     && coversPatternProducts(rewritten, outputs, currentMultiplier, targetMultiplier)) {
                 return rewritten;
             }
         }
-        IPatternDetails direct = rewritePatternOutputMultiplierDirect(processingPattern, level, requestedMultiplier);
+        IPatternDetails direct = rewritePatternOutputMultiplierDirect(processingPattern, level,
+                requestedMultiplier, containerMultiplier);
         if (direct != null && direct != processingPattern
                 && keepsByproductOrder(processingPattern, direct)
                 && productOutputsReflectMultiplier(direct, targetMultiplier)) {
@@ -662,10 +686,10 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private static IPatternDetails rewritePatternOutputMultiplierDirect(AEProcessingPattern pattern, Level level,
-            long requestedMultiplier) {
+            long requestedMultiplier, long containerMultiplier) {
         long targetMultiplier = Math.max(1L, requestedMultiplier);
         if (targetMultiplier <= 1) return pattern;
-        GenericStack[] rewrittenInputs = multiplyCycleContainerStacks(pattern.getSparseInputs(), targetMultiplier, true);
+        GenericStack[] rewrittenInputs = multiplyCycleContainerStacks(pattern.getSparseInputs(), containerMultiplier, true);
         GenericStack[] rewrittenOutputs = multiplyCycleContainerStacks(pattern.getSparseOutputs(), targetMultiplier, false);
         IPatternDetails rewritten = encodeScaledPattern(pattern, rewrittenInputs, rewrittenOutputs, level);
         return rewritten == null ? pattern : rewritten;
@@ -744,12 +768,12 @@ public final class VirtualPatternEncodingHelper {
     }
 
     private static GenericStack[] rewriteCycleContainerInputs(GenericStack[] inputs,
-            long currentMultiplier, long targetMultiplier) {
+            long currentMultiplier, long targetMultiplier, Predicate<AEKey> isContainer) {
         if (inputs == null) return null;
         GenericStack[] rewritten = new GenericStack[inputs.length];
         for (int i = 0; i < inputs.length; i++) {
             GenericStack input = inputs[i];
-            if (input == null || !isRecipeCycleContainerKey(input.what())) {
+            if (input == null || !isContainer.test(input.what())) {
                 rewritten[i] = input;
                 continue;
             }
@@ -760,16 +784,71 @@ public final class VirtualPatternEncodingHelper {
         return rewritten;
     }
 
-    private static GenericStack[] createScaledRecipeOutputs(GTRecipe recipe, long targetMultiplier) {
+    private static GenericStack[] createScaledRecipeOutputs(GTRecipe recipe, long targetMultiplier,
+            Predicate<AEKey> isContainer) {
         List<GenericStack> outputs = createRecipeOutputs(recipe);
         GenericStack[] rewritten = new GenericStack[outputs.size()];
         for (int i = 0; i < outputs.size(); i++) {
             GenericStack output = outputs.get(i);
-            long amount = isRecipeCycleContainerKey(output.what())
+            long amount = isContainer.test(output.what())
                     ? output.amount() : NumberUtils.saturatedMultiply(output.amount(), targetMultiplier);
             rewritten[i] = new GenericStack(output.what(), amount);
         }
         return rewritten;
+    }
+
+    /**
+     * 原版 FOTC 靠配方内容的 {@code recipe_cycle_container} 槽名认容器（RecipesModify 只给 dimensionally_transcendent_plasma_forge
+     * 与 stellar_forge 两类配方打标）。没打标的内容——ultimate_material_forge、各子模块的配方——一律按普通物品放大。
+     */
+    private static Predicate<AEKey> taggedContainerKeys(List<Content> contents) {
+        if (contents == null || contents.isEmpty()) return key -> false;
+        Set<AEKey> keys = new HashSet<>();
+        for (Content content : contents) {
+            if (content == null || !RecipeCalculationHelper.INSTANCE.isRecipeCycleContainerContent(content)) continue;
+            ItemStack stack = firstItemStack(content);
+            if (!stack.isEmpty()) keys.add(AEItemKey.of(stack));
+        }
+        return keys::contains;
+    }
+
+    /**
+     * 对应 {@code RecipeCalculationHelper.appendSpecificInput}：三条 stellar_forge 配方在伪神倍率 ≥ 2 时
+     * 追加 {@code 单位量 × (倍率 - 1)} 个空容器，否则 N 倍产物没有 N 个容器可装，机器会因缺罐子卡死。
+     */
+    private static GenericStack[] appendForgeSpecialInput(GenericStack[] inputs, GTRecipe recipe,
+            long forgeMultiplier) {
+        if (inputs == null || recipe == null || forgeMultiplier < 2L) return inputs;
+        GenericStack extraInput = forgeSpecialInput(recipe, forgeMultiplier);
+        if (extraInput == null) return inputs;
+        for (int i = 0; i < inputs.length; i++) {
+            if (inputs[i] == null) {
+                GenericStack[] filled = inputs.clone();
+                filled[i] = extraInput;
+                return filled;
+            }
+        }
+        if (inputs.length >= AEProcessingPattern.MAX_INPUT_SLOTS) return inputs;
+        GenericStack[] extended = Arrays.copyOf(inputs, inputs.length + 1);
+        extended[inputs.length] = extraInput;
+        return extended;
+    }
+
+    private static GenericStack forgeSpecialInput(GTRecipe recipe, long forgeMultiplier) {
+        if (recipe.getId() == null) return null;
+        Content rule;
+        try {
+            rule = RecipeCalculationHelper.INSTANCE.getFORGE_OF_THE_ANTICHRIST_SPECIAL_INPUT_RULES().get(recipe.getId());
+        } catch (RuntimeException ignored) {
+            // 规则表懒加载依赖 kubejs 物品注册；缺失时退回不追加，行为同改动前
+            return null;
+        }
+        if (rule == null) return null;
+        List<GenericStack> unit = new ArrayList<>(1);
+        appendItemStacks(List.of(rule), unit);
+        if (unit.isEmpty()) return null;
+        long extra = ForgeOutputMultiplier.specialInputExtra(unit.get(0).amount(), forgeMultiplier);
+        return extra <= 0L ? null : new GenericStack(unit.get(0).what(), extra);
     }
 
     private static GenericStack[] getSparseInputs(IPatternDetails details) {

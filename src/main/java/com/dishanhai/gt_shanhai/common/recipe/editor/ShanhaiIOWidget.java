@@ -239,13 +239,8 @@ public class ShanhaiIOWidget extends Widget implements IGhostIngredientTarget {
         if (current.matchTag != null && !current.matchTag.isEmpty()) {
             tips.add(Component.literal("标签 #" + current.matchTag).withStyle(ChatFormatting.AQUA));
         }
-        List<String> tags = ShanhaiIoTable.tagsOf(current);
-        int shown = Math.min(6, tags.size());
-        for (int i = 0; i < shown; i++) {
-            tips.add(Component.literal("#" + tags.get(i)).withStyle(ChatFormatting.GRAY));
-        }
-        if (tags.size() > shown) {
-            tips.add(Component.literal("…共 " + tags.size() + " 个标签").withStyle(ChatFormatting.DARK_GRAY));
+        for (String tag : ShanhaiIoTable.tagsOf(current)) {
+            tips.add(Component.literal("#" + tag).withStyle(ChatFormatting.GRAY));
         }
         return tips;
     }

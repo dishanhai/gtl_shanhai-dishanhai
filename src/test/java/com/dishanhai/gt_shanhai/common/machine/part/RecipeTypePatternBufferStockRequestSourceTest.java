@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RecipeTypePatternBufferStockRequestSourceTest {
 
     @Test
-    void stockPageKeepsFiveTabsAndAddsTagPullWithRequestLimits() throws Exception {
+    void stockPageKeepsSidebarTabsAndAddsTagPullWithRequestLimits() throws Exception {
         String machine = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
                 "common", "machine", "part", "RecipeTypePatternBufferPartMachine.java"));
         String ui = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
@@ -23,7 +23,14 @@ class RecipeTypePatternBufferStockRequestSourceTest {
         assertTrue(machine.contains("requestStockShortages()"));
         assertTrue(machine.contains("node.addService(ICraftingRequester.class"));
         assertTrue(machine.contains("storage.insert(what, amount, mode, this.actionSource)"));
-        assertEquals(5, count(machine, "sideTabs.attachSubTab("));
+        for (String page : new String[] { "createStockInputSidebarPage(parentConfigurators)",
+                "FancyConfiguratorSidebarPage.single(new WildcardPatternConfigurator())",
+                "FancyConfiguratorSidebarPage.single(new OutputMultiplierConfigurator())",
+                "FancyConfiguratorSidebarPage.single(new StrongPatternMatchConfigurator())",
+                "sharedInputsPage(parentConfigurators)", "patternBehaviorPage(parentConfigurators)" }) {
+            assertTrue(machine.contains("sideTabs.attachSubTab(" + page + ")"), "侧栏必须挂载 " + page);
+        }
+        assertEquals(6, count(machine, "sideTabs.attachSubTab("));
         assertTrue(ui.contains("machine::setStockTagWhite"));
         assertTrue(ui.contains("machine.submitStockRequest"));
         assertTrue(ui.contains("stock_request.amount"));
