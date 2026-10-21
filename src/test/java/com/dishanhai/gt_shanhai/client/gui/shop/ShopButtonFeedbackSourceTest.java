@@ -76,6 +76,37 @@ class ShopButtonFeedbackSourceTest {
     }
 
     @Test
+    void confirmTradeWaitsForTheServerAndFlashesTheResult() throws Exception {
+        String s = Files.readString(Path.of(SHOP));
+        assertTrue(extractBlock(s, "protected boolean universalMouseClicked(").contains("performConfirmTrade(false)"));
+        String trade = extractBlock(s, "private void performConfirmTrade(boolean viaKeyboard)");
+        assertTrue(trade.contains("buttonFeedback.tryBegin(") && trade.contains("ShopUiSounds.busy()"),
+                "等待中或 300ms 内再点只提示忙，不重复下单");
+        assertTrue(trade.contains("ClientShopActionResults.nextRequestId()") && trade.contains("buttonFeedback.pending("));
+        assertTrue(trade.contains("buttonFeedback.flash(") && trade.contains("ShopUiSounds.fail()"), "本地预检失败就地红闪");
+        assertFalse(trade.contains("canTrade"), "红框只是预告，余额与前置以服务端为准，照发");
+        for (String msg : new String[]{
+                "该商品引用的物品缺失（对应模组可能未安装），无法购买",
+                "该商品仅允许出售，不能购买",
+                "免费商品不能出售",
+                "该商品仅允许购买，不能出售"}) {
+            assertTrue(trade.contains(msg), "本地预检文案保留：" + msg);
+        }
+        assertTrue(trade.contains("new RewardChoiceScreen(") && trade.contains("new FtbqRewardChoiceScreen("),
+                "自选奖励照旧先弹选择界面");
+
+        assertTrue(extractBlock(s, "protected void renderScaledBackground(").contains("ClientShopActionResults.drain("));
+        String result = extractBlock(s, "private void onActionResult(");
+        assertTrue(result.contains("buttonFeedback.resolve(") && result.contains("ShopUiSounds.success("));
+
+        String label = extractBlock(s, "private String confirmLabel(");
+        for (String text : new String[]{"处理中", "购买成功", "出售成功", "部分成交", "未成交"}) {
+            assertTrue(label.contains(text), "确认按钮要显示：" + text);
+        }
+        assertTrue(extractBlock(s, "private void drawDetail(").contains("confirmActionKey()"));
+    }
+
+    @Test
     void buttonMotionRestoresThePoseStack() throws Exception {
         String util = Files.readString(Path.of(UTIL));
         String motion = extractBlock(util, "public static void withButtonMotion(");

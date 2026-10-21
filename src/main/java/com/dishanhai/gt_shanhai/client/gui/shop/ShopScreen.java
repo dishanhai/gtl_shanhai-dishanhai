@@ -8,6 +8,7 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.gui.scaled.SpringTable;
 import com.dishanhai.gt_shanhai.client.shop.ClientCostPreview;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopActionResults;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCart;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopFavorites;
@@ -1496,6 +1497,7 @@ public class ShopScreen extends ScaledScreen {
                 && !this.minecraft.mouseHandler.isLeftPressed() && !this.minecraft.mouseHandler.isRightPressed()) {
             buttonFeedback.release(nowMs);
         }
+        ClientShopActionResults.drain(nowMs, this::onActionResult);
         buttonFeedback.pointer(mx, my, nowMs);
         buttonFeedback.tick(nowMs);
         boolean motionBusy = !openMotion.settled()
@@ -3702,9 +3704,10 @@ public class ShopScreen extends ScaledScreen {
                 : (!selected.getCost().isEmpty() && !selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
                     && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
         boolean btnHover = hit(mx, my, cx, btnY, detailInnerW, 20);
+        long confirmKey = confirmActionKey();
         renderButton(g, cx, btnY, detailInnerW, 20, btnHover,
-                mode == Mode.BUY ? "§a确认购买" : "§e确认出售",
-                canTrade ? GREEN_DARK : DEEP_RED, canTrade ? (mode == Mode.BUY ? GREEN : GOLD) : DEEP_RED);
+                confirmLabel(confirmKey, System.currentTimeMillis()),
+                canTrade ? GREEN_DARK : DEEP_RED, canTrade ? (mode == Mode.BUY ? GREEN : GOLD) : DEEP_RED, confirmKey);
 
         // 编辑/删除按钮：都折进了编辑模式（catalogEditUnlocked），没开时两行一起隐藏
         if (catalogEditUnlocked) {
@@ -4419,35 +4422,9 @@ public class ShopScreen extends ScaledScreen {
             int dh = contentHeight();
             int btnW = DETAIL_W - 16;
             int btnY = dy + dh - 24;
-            // 确认购买/出售：自选奖励（CHOICE，本地池或 FTBQ 表自选子模式）商品先弹选择界面，选完再发购买包；
-            // 随机/全部/普通商品直接买
+            // 确认购买/出售（与 Enter 共用 performConfirmTrade）
             if (buttonHit(mx, my, cx, btnY, btnW, 20)) {
-                if (mode == Mode.BUY && selected.hasMissingItems()) {
-                    showMessage(Component.literal("§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买"));
-                    return true;
-                }
-                if (mode == Mode.BUY && !selected.allowsBuy()) {
-                    showMessage(Component.literal("§c[山海商店] 该商品仅允许出售，不能购买"));
-                    return true;
-                }
-                if (mode == Mode.SELL && selected.getCost().isEmpty()) {
-                    showMessage(Component.literal("§c[山海商店] 免费商品不能出售"));
-                    return true;
-                }
-                if (mode == Mode.SELL && !selected.allowsSell()) {
-                    showMessage(Component.literal("§c[山海商店] 该商品仅允许购买，不能出售"));
-                    return true;
-                }
-                boolean localChoice = selected.getRewardMode() == ShopEntry.RewardMode.CHOICE;
-                boolean ftbqChoice = selected.getRewardMode() == ShopEntry.RewardMode.FTBQ
-                        && selected.getFtbqSubMode() == ShopEntry.RewardMode.CHOICE;
-                if (mode == Mode.BUY && localChoice) {
-                    Minecraft.getInstance().setScreen(new RewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
-                } else if (mode == Mode.BUY && ftbqChoice) {
-                    Minecraft.getInstance().setScreen(new FtbqRewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
-                } else {
-                    send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount);
-                }
+                performConfirmTrade(false);
                 return true;
             }
             // 删除（编辑权 + 开了编辑模式，二次确认防误触：3 秒内对同一条目再点一次「删除此商品」才真正执行）
@@ -4518,6 +4495,101 @@ public class ShopScreen extends ScaledScreen {
     }
 
     /** 数量加减夹取到 [1, Long.MAX]，防加法溢出。 */
+    /** 详情列确认购买/出售按钮的压下 key（与 drawDetail、universalMouseClicked 同一块几何）。 */
+    private long confirmPressKey() {
+        return pressKey(detailX() + 8, contentTop() + contentHeight() - 24, DETAIL_W - 16, 20);
+    }
+
+    /** 确认按钮的动作 key：混入当前商品与买卖模式，换商品、换模式后旧的等待与闪色不挡住也不闪到新商品上。 */
+    private long confirmActionKey() {
+        return confirmPressKey() ^ (selectedEntryKey * 0x9E3779B97F4A7C15L) ^ ((long) mode.ordinal() << 61);
+    }
+
+    /**
+     * 确认购买/出售，点击与 Enter 共用。
+     *
+     * <p>四个确定性的本地预检过不去就地红闪；自选奖励（CHOICE，本地池或 FTBQ 表自选子模式）先弹选择界面，
+     * 选完再发购买包；其余去抖后带请求号发包，按钮进入等待，回执到了再闪结果。
+     * 红框（可交易性预判）不拦：花费预览可能还在加载、AE 库存与前置状态客户端看不全，以服务端为准。</p>
+     */
+    private void performConfirmTrade(boolean viaKeyboard) {
+        if (selected == null) return;
+        long now = System.currentTimeMillis();
+        long key = confirmActionKey();
+        if (viaKeyboard) {
+            // 键盘没有鼠标按住，压一下即可：下一帧鼠标兜底会松开，正好是按一下再弹回
+            int x = detailX() + 8;
+            int y = contentTop() + contentHeight() - 24;
+            buttonFeedback.press(confirmPressKey(), x, y, DETAIL_W - 16, 20, true, now);
+            ShopUiSounds.click();
+        }
+        String precheck = null;
+        if (mode == Mode.BUY && selected.hasMissingItems()) {
+            precheck = "§c[山海商店] 该商品引用的物品缺失（对应模组可能未安装），无法购买";
+        } else if (mode == Mode.BUY && !selected.allowsBuy()) {
+            precheck = "§c[山海商店] 该商品仅允许出售，不能购买";
+        } else if (mode == Mode.SELL && selected.getCost().isEmpty()) {
+            precheck = "§c[山海商店] 免费商品不能出售";
+        } else if (mode == Mode.SELL && !selected.allowsSell()) {
+            precheck = "§c[山海商店] 该商品仅允许购买，不能出售";
+        }
+        if (precheck != null) {
+            showMessage(Component.literal(precheck));
+            buttonFeedback.flash(key, ButtonFeedback.Tone.FAILED, now);
+            ShopUiSounds.fail();
+            return;
+        }
+        boolean localChoice = selected.getRewardMode() == ShopEntry.RewardMode.CHOICE;
+        boolean ftbqChoice = selected.getRewardMode() == ShopEntry.RewardMode.FTBQ
+                && selected.getFtbqSubMode() == ShopEntry.RewardMode.CHOICE;
+        if (mode == Mode.BUY && localChoice) {
+            Minecraft.getInstance().setScreen(new RewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
+            return;
+        }
+        if (mode == Mode.BUY && ftbqChoice) {
+            Minecraft.getInstance().setScreen(new FtbqRewardChoiceScreen(this, selected, amount, aeMode, backpackMode));
+            return;
+        }
+        if (!buttonFeedback.tryBegin(key, now)) {
+            buttonFeedback.nudge(confirmPressKey(), now);
+            ShopUiSounds.busy();
+            return;
+        }
+        int requestId = ClientShopActionResults.nextRequestId();
+        send(mode == Mode.BUY ? ShopActionPacket.Action.BUY : ShopActionPacket.Action.SELL, selected, amount, requestId);
+        buttonFeedback.pending(key, requestId, now);
+    }
+
+    /** 回执对上还在等的请求才闪色出声；对不上（已超时、界面已重建）就丢掉，横幅照常由聊天镜像显示。 */
+    private void onActionResult(ClientShopActionResults.Result result) {
+        ButtonFeedback.Tone tone = switch (result.outcome()) {
+            case SUCCESS -> ButtonFeedback.Tone.SUCCESS;
+            case PARTIAL -> ButtonFeedback.Tone.PARTIAL;
+            case FAILED -> ButtonFeedback.Tone.FAILED;
+        };
+        if (!buttonFeedback.resolve(result.requestId(), tone, System.currentTimeMillis())) return;
+        switch (tone) {
+            case SUCCESS -> ShopUiSounds.success(result.action() == ShopActionPacket.Action.SELL);
+            case PARTIAL -> ShopUiSounds.partial();
+            default -> ShopUiSounds.fail();
+        }
+    }
+
+    /** 确认按钮标签随反馈阶段换：等待中、成交结果各一句短固定文字，按钮宽度内放得下。 */
+    private String confirmLabel(long actionKey, long nowMs) {
+        ButtonFeedback.Phase phase = buttonFeedback.phase(actionKey, nowMs);
+        if (phase == ButtonFeedback.Phase.PENDING) return "§7处理中…";
+        if (phase == ButtonFeedback.Phase.FLASH) {
+            switch (buttonFeedback.flashTone(actionKey, nowMs)) {
+                case SUCCESS -> { return mode == Mode.BUY ? "§a✓ 购买成功" : "§e✓ 出售成功"; }
+                case PARTIAL -> { return "§6~ 部分成交"; }
+                case FAILED -> { return "§c✗ 未成交"; }
+                default -> { }
+            }
+        }
+        return mode == Mode.BUY ? "§a确认购买" : "§e确认出售";
+    }
+
     /** 详情数量步进一次；已经到 1 或 Long.MAX、数量没变时返回 false。 */
     private boolean stepAmount(long delta) {
         long next = addClamp(amount, delta);
