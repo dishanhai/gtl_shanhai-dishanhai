@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * 星律库存输入的标签拉取与可请求限额。
@@ -33,10 +34,39 @@ import java.util.Set;
 final class PatternBufferStockPull {
 
     private static final String INITIALIZED = "Initialized";
+    private static final long TAG_SCAN_INTERVAL_TICKS = 100L;
 
     private StellarTagFilter cachedFilter;
     private String cachedWhite;
     private String cachedBlack;
+    private final TagScanCache<AEItemKey> tagScanCache = new TagScanCache<>();
+
+    /** 山海：只快取候選 key；網內可用量仍由每次正常 stock 同步讀取。 */
+    static final class TagScanCache<T> {
+        private List<T> cachedMatches = List.of();
+        private Object cachedGrid;
+        private Object cachedFilter;
+        private long cachedRevision;
+        private long cachedTick;
+        private int cachedCapacity;
+        private boolean initialized;
+
+        List<T> matches(Object grid, Object filter, long revision, long tick, int capacity,
+                        Supplier<List<T>> scanner) {
+            if (!initialized || cachedGrid != grid || cachedFilter != filter
+                    || cachedRevision != revision || cachedCapacity != capacity
+                    || tick < cachedTick || tick - cachedTick >= TAG_SCAN_INTERVAL_TICKS) {
+                cachedMatches = List.copyOf(scanner.get());
+                cachedGrid = grid;
+                cachedFilter = filter;
+                cachedRevision = revision;
+                cachedTick = tick;
+                cachedCapacity = capacity;
+                initialized = true;
+            }
+            return cachedMatches;
+        }
+    }
 
     static final class Refresh {
         final CompoundTag manual;
@@ -55,7 +85,7 @@ final class PatternBufferStockPull {
         }
     }
 
-    Refresh refreshItems(ExportOnlyAESlot[] slots, KeyCounter network,
+    Refresh refreshItems(ExportOnlyAESlot[] slots, KeyCounter network, Object grid, long tick,
                          String white, String black,
                          CompoundTag manualTag, CompoundTag automaticTag, CompoundTag suppressedTag) {
         int capacity = slots.length;
@@ -79,7 +109,9 @@ final class PatternBufferStockPull {
         }
 
         boolean tagging = hasText(white) || hasText(black);
-        List<AEItemKey> matches = tagging ? scan(network, filter(white, black), capacity) : List.of();
+        StellarTagFilter filter = filter(white, black);
+        List<AEItemKey> matches = tagScanCache.matches(grid, filter, StellarTagFilter.revision(), tick, capacity,
+                () -> tagging ? scan(network, filter, capacity) : List.of());
         Set<AEKey> manualKeys = new HashSet<>();
         List<AEItemKey> manualKeysBySlot = new ArrayList<>(capacity);
         List<AEItemKey> previousAutomatic = new ArrayList<>(capacity);

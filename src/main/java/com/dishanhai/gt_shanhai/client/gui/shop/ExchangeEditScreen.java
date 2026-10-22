@@ -25,8 +25,8 @@ import java.util.List;
  * 兑换条目编辑器（FTBQ 式可视化槽位，客户端，山海署名）。替代原 FTBLib 长列表编辑器。
  *
  * <p>「付出 / 得到」两栏，每栏一排物品槽 + 一排流体槽 + 绿色「+物品/+流体」按钮 + 星火输入框。
- * 点已有槽调 {@link EditorWidgets} 的 FTBLib 单项选择器（自带数量/mB）编辑，右键槽位删除；
- * 点「+」改调 {@link MultiPickerScreen}（同商店编辑器，支持搜索/物品栏/多选一次加入）。
+ * 点已有槽调 {@link MultiPickerScreen} 的替换模式（同商店编辑器，支持搜索/物品栏/多选；原格内容预填进已选清单），
+ * 右键槽位删除；点「+」开同一选择器加入新项。
  * 确认打成 {@link ExchangeEditPacket} 发服务端持久化，关闭返回 {@link ExchangeScreen}。</p>
  */
 public class ExchangeEditScreen extends ScaledScreen {
@@ -259,8 +259,7 @@ public class ExchangeEditScreen extends ScaledScreen {
             int x = sx + i * PITCH;
             if (GuiRenderUtil.isHovering(mx, my, x, iy, SLOT, SLOT)) {
                 if (btn == 1) { side.items.remove(i); rebuild(); }
-                else { final int idx = i; capture(); EditorWidgets.openItemPicker(side.items.get(idx),
-                        st -> { if (st == null || st.isEmpty()) side.items.remove(idx); else side.items.set(idx, st); }); }
+                else openItemReplace(side, i);
                 return true;
             }
         }
@@ -280,8 +279,7 @@ public class ExchangeEditScreen extends ScaledScreen {
             int x = sx + j * PITCH;
             if (GuiRenderUtil.isHovering(mx, my, x, fy, SLOT, SLOT)) {
                 if (btn == 1) { side.fluids.remove(j); rebuild(); }
-                else { final int jdx = j; capture(); EditorWidgets.openFluidPicker(side.fluids.get(jdx),
-                        fs -> { if (fs == null || fs.isEmpty()) side.fluids.remove(jdx); else side.fluids.set(jdx, fs); }); }
+                else openFluidReplace(side, j);
                 return true;
             }
         }
@@ -296,6 +294,65 @@ public class ExchangeEditScreen extends ScaledScreen {
             }
         }
         return false;
+    }
+
+    /**
+     * 点已有物品格：开自建多选器的替换模式，原物品（含数量/NBT）先放进已选清单。确认后整份清单换掉这一格，
+     * 清空再确认 = 删掉这一格；顺手选的流体接在流体排末尾。取消不动。
+     */
+    private void openItemReplace(SideDraft side, int idx) {
+        capture();
+        ItemStack cur = side.items.get(idx);
+        List<ItemStack> picked = new ArrayList<>();
+        List<FluidStack> pickedFluids = new ArrayList<>();
+        MultiPickerScreen picker = new MultiPickerScreen(this, false,
+                (st, cnt) -> {
+                    if (st == null || st.isEmpty()) return;
+                    ItemStack copy = st.copy();
+                    copy.setCount((int) Math.max(1L, Math.min(Integer.MAX_VALUE, cnt)));
+                    picked.add(copy);
+                },
+                fs -> { if (fs != null && !fs.isEmpty()) pickedFluids.add(fs); }).replacing();
+        picker.preselect(cur, Math.max(1L, cur.getCount()));
+        picker.setAfterConfirm(() -> {
+            ShopEntryEditLayout.replaceAt(side.items, idx, picked);
+            if (!pickedFluids.isEmpty() && side.fluids.size() < FLUID_MAX) {
+                for (FluidStack fs : pickedFluids) {
+                    if (side.fluids.size() >= FLUID_MAX) break;
+                    side.fluids.add(fs);
+                }
+            }
+            rebuild();
+        });
+        Minecraft.getInstance().setScreen(picker);
+    }
+
+    /** 点已有流体格：同上，流体按 mB 预填；顺手选的物品接在物品排末尾。 */
+    private void openFluidReplace(SideDraft side, int idx) {
+        capture();
+        FluidStack cur = side.fluids.get(idx);
+        List<FluidStack> pickedFluids = new ArrayList<>();
+        List<ItemStack> pickedItems = new ArrayList<>();
+        MultiPickerScreen picker = new MultiPickerScreen(this, true,
+                (st, cnt) -> {
+                    if (st == null || st.isEmpty()) return;
+                    ItemStack copy = st.copy();
+                    copy.setCount((int) Math.max(1L, Math.min(Integer.MAX_VALUE, cnt)));
+                    pickedItems.add(copy);
+                },
+                fs -> { if (fs != null && !fs.isEmpty()) pickedFluids.add(fs); }).replacing();
+        picker.preselect(cur);
+        picker.setAfterConfirm(() -> {
+            ShopEntryEditLayout.replaceAt(side.fluids, idx, pickedFluids);
+            if (!pickedItems.isEmpty() && side.items.size() < ITEM_MAX) {
+                for (ItemStack st : pickedItems) {
+                    if (side.items.size() >= ITEM_MAX) break;
+                    side.items.add(st);
+                }
+            }
+            rebuild();
+        });
+        Minecraft.getInstance().setScreen(picker);
     }
 
     /** 删除槽位后就地重排（无子屏，手动重跑布局）。 */

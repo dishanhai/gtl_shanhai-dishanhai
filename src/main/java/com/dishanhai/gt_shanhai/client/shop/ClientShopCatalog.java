@@ -230,6 +230,12 @@ public final class ClientShopCatalog {
         return linkKeys.getOrDefault(linkKey, -1L);
     }
 
+    /** 山海跳转：新数据优先按 stableId；尚未迁移的快照仍兼容旧称呼。 */
+    public static long resolveLink(String linkTo) {
+        long key = keyOfStableId(linkTo);
+        return key >= 0L ? key : linkedEntryKey(linkTo);
+    }
+
     /**
      * 反查以该 FTBQ 任务为前置的商品 entryKey 列表（按 manifest 顺序，无命中返回空表）。
      * 只依赖全量 stub，不要求对应 chunk 已加载，所以玩家没逛过的分类也查得到。

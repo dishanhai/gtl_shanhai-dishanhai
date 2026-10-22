@@ -335,7 +335,13 @@ public final class PatternRecipeTypeHelper {
         if (recipeType == null || recipeType.getLookup() == null || recipeType.getLookup().getLookup() == null) {
             return false;
         }
-        return recipeType.getLookup().getLookup().getRecipes(true).iterator().hasNext();
+        return recipeType.getLookup().getLookup().getRecipes(true).findAny().isPresent();
+    }
+
+    /** 已標記類型的配方表尚未就緒時，呼叫方不可將暫時的失配寫入槽位快取。 */
+    public static boolean isRecipeLookupPending(ItemStack stack) {
+        String existing = readRecipeTypeId(stack);
+        return !existing.isEmpty() && !isRecipeTypeLookupPopulated(existing);
     }
 
     /**
@@ -359,17 +365,9 @@ public final class PatternRecipeTypeHelper {
 
     private static GTRecipe peekRecipe(ItemStack stack, Level level, String existing,
             GenericStack[] availableCatalystInputs) {
-
-        // 权威标记：零歧义来源，只在其类型域内解析，绝不回退全局搜索给出不同答案
-        // （否则某次瞬时失配就会让只读预览也跟着抖一下，虽不写 NBT 但仍是不必要的不一致）。
-        if (!existing.isEmpty() && isAuthoritative(stack)) {
-            return inferRecipe(stack, level, existing, availableCatalystInputs);
-        }
-
+        if (isRecipeLookupPending(stack)) return null;
+        // 已有類型是只讀解析的邊界；暫時失配不能跨域推斷成另一種配方。
         GTRecipe recipe = inferRecipe(stack, level, existing, availableCatalystInputs);
-        if (recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null) {
-            recipe = inferRecipe(stack, level, "", availableCatalystInputs);
-        }
         return recipe == null || recipe.recipeType == null || recipe.recipeType.registryName == null
                 ? null : recipe;
     }

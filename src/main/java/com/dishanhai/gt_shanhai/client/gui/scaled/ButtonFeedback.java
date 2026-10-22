@@ -60,6 +60,7 @@ public final class ButtonFeedback {
         Phase phase = Phase.IDLE;
         int requestId;
         long pendingAtMs;
+        long pendingTimeoutMs = PENDING_TIMEOUT_MS;
         Tone tone = Tone.NEUTRAL;
         long flashAtMs;
         long lastBeginMs = Long.MIN_VALUE / 2;
@@ -208,11 +209,17 @@ public final class ButtonFeedback {
 
     /** 已发包，等 {@code requestId} 的回执。 */
     public void pending(long actionKey, int requestId, long nowMs) {
+        pending(actionKey, requestId, nowMs, PENDING_TIMEOUT_MS);
+    }
+
+    /** 山海：AE 多目標計算可獨立等待較久，交易仍使用原本的五秒逾時。 */
+    public void pending(long actionKey, int requestId, long nowMs, long timeoutMs) {
         ActionState st = actions.computeIfAbsent(actionKey, k -> new ActionState());
         if (st.phase == Phase.PENDING) pendingIds.remove(st.requestId);
         st.phase = Phase.PENDING;
         st.requestId = requestId;
         st.pendingAtMs = nowMs;
+        st.pendingTimeoutMs = Math.max(1L, timeoutMs);
         pendingIds.put(requestId, actionKey);
     }
 
@@ -275,9 +282,9 @@ public final class ButtonFeedback {
     }
 
     private void advance(ActionState st, long nowMs) {
-        if (st.phase == Phase.PENDING && nowMs - st.pendingAtMs >= PENDING_TIMEOUT_MS) {
+        if (st.phase == Phase.PENDING && nowMs - st.pendingAtMs >= st.pendingTimeoutMs) {
             pendingIds.remove(st.requestId);
-            startFlash(st, Tone.NEUTRAL, st.pendingAtMs + PENDING_TIMEOUT_MS);
+            startFlash(st, Tone.NEUTRAL, st.pendingAtMs + st.pendingTimeoutMs);
         }
         if (st.phase == Phase.FLASH && nowMs - st.flashAtMs >= FLASH_MS) {
             st.phase = Phase.IDLE;

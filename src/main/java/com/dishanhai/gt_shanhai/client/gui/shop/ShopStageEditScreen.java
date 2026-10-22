@@ -2,6 +2,8 @@ package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.common.shop.ExchangeEntry;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.ShopStageEditPacket;
@@ -15,14 +17,17 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 分類頁籤階段提交限制編輯器；由編輯權玩家右鍵階段頁籤打開。 */
+/** 分类页签阶段提交限制编辑器（山海署名）；格子自动换行，超出视口时按像素纵向滚动。 */
 public final class ShopStageEditScreen extends ScaledScreen {
-    private static final int W = 360, H = 210, SLOT = 20, PITCH = 24;
+    private static final int W = 360, H = 210, SLOT = 20;
+    private static final int SLOT_ROW_H = SLOT + 10;
     private final ShopScreen parent;
     private final String path;
     private final List<ItemStack> items = new ArrayList<>();
     private final List<Long> counts = new ArrayList<>();
-    private int left, top, scroll;
+    private int left, top, scroll, shownScroll;
+    private final Spring scrollMotion = new Spring(Spring.SCROLL);
+    private final ShopDialogUi ui = new ShopDialogUi(-7710208, -22016, -14935012, -12303292);
 
     public ShopStageEditScreen(ShopScreen parent, String path) {
         super(Component.literal("阶段提交限制"));
@@ -44,38 +49,65 @@ public final class ShopStageEditScreen extends ScaledScreen {
 
     @Override
     protected void initScaled() {
+        ui.cancel();
         left = Math.max(8, (vWidth - W) / 2);
         top = Math.max(8, (vHeight - H) / 2);
+        snapScroll(scroll); // 山海：从选择器返回后保留原来的纵向位置。
     }
 
     private int rowY() { return top + 54; }
+    private int slotsX() { return left + 16; }
+    private int perLine() { return ShopEntryEditLayout.perLine(W - 32); }
+    private int viewBottom() { return top + H - 32; }
+    private int viewH() { return viewBottom() - rowY(); }
+    private int contentH() { return ShopSlotRows.height(items.size() + 1, perLine(), SLOT_ROW_H, SLOT_ROW_H); }
+    private int maxScroll() { return ShopEntryEditLayout.maxScroll(contentH(), viewH()); }
+    private int barX() { return left + W - 10; }
+    private boolean inViewport(double mx, double my) {
+        return GuiRenderUtil.isHovering(mx, my, slotsX(), rowY(), W - 32, viewH());
+    }
+
+    private void snapScroll(int target) {
+        scroll = ShopEntryEditLayout.clampScroll(target, contentH(), viewH());
+        shownScroll = scroll;
+        scrollMotion.snap(scroll);
+    }
+
+    private void updateScroll() {
+        scroll = ShopEntryEditLayout.clampScroll(scroll, contentH(), viewH());
+        long now = System.currentTimeMillis();
+        if (ClientShopUiSettings.reduceMotion()) scrollMotion.snap(scroll);
+        else {
+            if (scrollMotion.target() != scroll) scrollMotion.setTarget(scroll, now);
+            scrollMotion.update(now);
+        }
+        shownScroll = ShopEntryEditLayout.clampScroll(Math.round(scrollMotion.value()), contentH(), viewH());
+    }
 
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        ui.frame(mx, my);
+        updateScroll();
         g.fill(left, top, left + W, top + H, -7710208);
         g.fill(left + 1, top + 1, left + W - 1, top + H - 1, -22016);
         g.fill(left + 2, top + 2, left + W - 2, top + H - 2, -267382768);
         g.drawString(font, "§6阶段提交限制", left + 10, top + 7, -22016, true);
         g.drawString(font, "§7阶段: §f" + path, left + 10, top + 23, -1, true);
         g.drawString(font, "§8右键删除，留空后保存=取消限制；提交一次后永久解锁该阶段", left + 10, top + 37, -5592406, true);
-        int sx = left + 16;
-        int y = rowY();
-        int visible = Math.max(1, (W - 32) / PITCH);
-        int start = Math.max(0, Math.min(scroll, Math.max(0, items.size() + 1 - visible)));
-        int end = Math.min(items.size() + 1, start + visible);
-        g.enableScissor((int) (sx * guiScale) + offsetX, (int) ((y - 1) * guiScale) + offsetY,
-                (int) ((left + W - 12) * guiScale) + offsetX, (int) ((y + SLOT + 10) * guiScale) + offsetY);
-        for (int i = start; i < end; i++) {
-            int x = sx + (i - start) * PITCH;
+        g.enableScissor((int) ((slotsX() - 6) * guiScale) + offsetX, (int) (rowY() * guiScale) + offsetY,
+                (int) ((left + W - 16) * guiScale) + offsetX, (int) (viewBottom() * guiScale) + offsetY);
+        for (int i = 0; i <= items.size(); i++) {
+            int x = ShopEntryEditLayout.slotX(slotsX(), i, perLine());
+            int y = ShopEntryEditLayout.slotY(rowY() - shownScroll, i, perLine(), SLOT_ROW_H);
+            if (y + SLOT_ROW_H <= rowY() || y >= viewBottom()) continue;
+            boolean hover = inViewport(mx, my) && GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT);
             if (i < items.size()) {
-                EditorWidgets.itemSlot(g, font, x, y, items.get(i), GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT));
-                g.drawCenteredString(font, compact(counts.get(i)), x + 10, y + 21, -11141121);
-            } else EditorWidgets.plusSlot(g, font, x, y, GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT));
+                EditorWidgets.itemSlot(g, font, x, y, items.get(i), hover);
+                g.drawCenteredString(font, compact(i < counts.size() ? counts.get(i) : 1L), x + 10, y + 21, -11141121);
+            } else EditorWidgets.plusSlot(g, font, x, y, hover);
         }
         g.disableScissor();
-        if (items.size() + 1 > visible) {
-            g.drawString(font, "§8滚轮切换物品", left + 16, y + 34, -5592406, false);
-        }
+        ui.drawScrollbar(g, barX(), rowY(), viewH(), contentH(), viewH(), shownScroll, maxScroll(), mx, my);
         drawButton(g, left + 12, top + H - 25, 58, 14, "§c取消", mx, my);
         drawButton(g, left + W - 86, top + H - 25, 74, 14, "§a保存", mx, my);
     }
@@ -111,11 +143,15 @@ public final class ShopStageEditScreen extends ScaledScreen {
             Minecraft.getInstance().setScreen(parent);
             return true;
         }
-        int sx = left + 16, y = rowY(), visible = Math.max(1, (W - 32) / PITCH);
-        int start = Math.max(0, Math.min(scroll, Math.max(0, items.size() + 1 - visible)));
-        for (int i = start; i < Math.min(items.size() + 1, start + visible); i++) {
-            int x = sx + (i - start) * PITCH;
-            if (!GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) continue;
+        int target = btn == 0 ? ui.beginDrag(mx, my, barX(), rowY(), viewH(), contentH(), viewH(), maxScroll()) : -1;
+        if (target >= 0) {
+            snapScroll(target);
+            return true;
+        }
+        if (!inViewport(mx, my)) return true;
+        int i = ShopEntryEditLayout.slotIndexAt(mx, my + shownScroll, slotsX(), rowY(), items.size() + 1,
+                perLine(), SLOT_ROW_H, SLOT);
+        if (i >= 0) {
             if (i == items.size()) {
                 Minecraft.getInstance().setScreen(new MultiPickerScreen(this, false,
                         (stack, count) -> { if (stack != null && !stack.isEmpty()) { ItemStack copy = stack.copy(); copy.setCount(1); items.add(copy); counts.add(Math.max(1L, count)); } },
@@ -124,19 +160,69 @@ public final class ShopStageEditScreen extends ScaledScreen {
                 items.remove(i);
                 counts.remove(i);
             } else {
-                final int index = i;
-                EditorWidgets.openItemPicker(items.get(i), stack -> { if (stack == null || stack.isEmpty()) { items.remove(index); counts.remove(index); } else { stack.setCount(1); items.set(index, stack); } });
+                openItemReplace(i);
             }
             return true;
         }
         return true;
     }
 
+    /**
+     * 点已有物品格：开自建多选器的替换模式，原物品与精确数量先放进已选清单。确认后整份清单换掉这一格，
+     * 清空再确认 = 删掉这一格。与商店编辑器同一套，不再弹出 FTBLib 的选取页。
+     */
+    private void openItemReplace(int idx) {
+        ItemStack cur = items.get(idx);
+        long curCount = idx < counts.size() ? counts.get(idx) : Math.max(1L, cur.getCount());
+        List<ItemStack> picked = new ArrayList<>();
+        List<Long> pickedCounts = new ArrayList<>();
+        MultiPickerScreen picker = new MultiPickerScreen(this, false,
+                (stack, count) -> {
+                    if (stack == null || stack.isEmpty()) return;
+                    ItemStack copy = stack.copy();
+                    copy.setCount(1);
+                    picked.add(copy);
+                    pickedCounts.add(Math.max(1L, count));
+                },
+                fluid -> {}).replacing();
+        picker.preselect(cur, curCount);
+        picker.setAfterConfirm(() -> {
+            // 山海：按替换前的物品表补齐，避免一格换多项后多出数量尾巴。
+            while (counts.size() < items.size()) counts.add(1L);
+            ShopEntryEditLayout.replaceAt(items, idx, picked);
+            ShopEntryEditLayout.replaceAt(counts, idx, pickedCounts);
+        });
+        Minecraft.getInstance().setScreen(picker);
+    }
+
     @Override
     protected boolean universalMouseScrolled(double mx, double my, double d) {
-        int visible = Math.max(1, (W - 32) / PITCH);
-        scroll = Math.max(0, Math.min(Math.max(0, items.size() + 1 - visible), scroll - (int) d));
+        if (inViewport(mx, my)) {
+            scroll = ShopEntryEditLayout.clampScroll(scroll - (int) Math.signum(d) * SLOT_ROW_H, contentH(), viewH());
+        }
         return true;
+    }
+
+    @Override
+    protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
+        int target = ui.drag(my, rowY(), viewH(), contentH(), viewH(), maxScroll());
+        if (target >= 0) {
+            snapScroll(target);
+            return true;
+        }
+        return super.universalMouseDragged(mx, my, btn, dx, dy);
+    }
+
+    @Override
+    protected boolean universalMouseReleased(double mx, double my, int btn) {
+        ui.release();
+        return super.universalMouseReleased(mx, my, btn);
+    }
+
+    @Override
+    public void removed() {
+        ui.cancel();
+        super.removed();
     }
 
     @Override public boolean isPauseScreen() { return false; }

@@ -47,6 +47,7 @@ class ShopAutoCraftPacketCodecTest {
             assertEquals(1L, decoded.readVarLong());
             assertEquals("无限盘区/前期", decoded.readUtf(256));
             assertTrue(decoded.readBoolean());
+            assertEquals(0, decoded.readVarInt(), "原有階段請求不要求按鍵回饋");
             assertFalse(decoded.isReadable());
         } finally {
             encoded.release();
@@ -60,7 +61,7 @@ class ShopAutoCraftPacketCodecTest {
         FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
         FriendlyByteBuf decoded = new FriendlyByteBuf(Unpooled.buffer());
         try {
-            new ShopAutoCraftPlanPacket(id, true, List.of("wafer x7000000000"), List.of("missing pattern"))
+            new ShopAutoCraftPlanPacket(id, true, List.of("wafer x7000000000"), List.of("missing pattern"), 37, 1, 2)
                     .encode(encoded);
             new ShopAutoCraftPlanPacket(encoded).encode(decoded);
             assertEquals(id, decoded.readUUID());
@@ -69,6 +70,10 @@ class ShopAutoCraftPacketCodecTest {
             assertEquals("wafer x7000000000", decoded.readUtf(256));
             assertEquals(1, decoded.readVarInt());
             assertEquals("missing pattern", decoded.readUtf(256));
+            assertEquals(37, decoded.readVarInt());
+            assertEquals(1, decoded.readVarInt());
+            assertEquals(2, decoded.readVarInt());
+            assertTrue(decoded.readBoolean(), "方案預覽仍會開確認窗");
             assertFalse(decoded.isReadable());
         } finally {
             encoded.release();
@@ -88,6 +93,10 @@ class ShopAutoCraftPacketCodecTest {
             assertEquals(512, buffer.readVarInt());
             for (int i = 0; i < 512; i++) assertEquals(256, buffer.readUtf(256).length());
             assertEquals(0, buffer.readVarInt());
+            assertEquals(0, buffer.readVarInt());
+            assertEquals(0, buffer.readVarInt());
+            assertEquals(1, buffer.readVarInt());
+            assertTrue(buffer.readBoolean());
             assertFalse(buffer.isReadable());
         } finally {
             buffer.release();
@@ -104,6 +113,52 @@ class ShopAutoCraftPacketCodecTest {
             assertThrows(DecoderException.class, () -> new ShopAutoCraftPlanPacket(buffer));
         } finally {
             buffer.release();
+        }
+    }
+
+    @Test
+    void costRequestRoundTripPreservesTheFeedbackRequestId() {
+        FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
+        FriendlyByteBuf decoded = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            new ShopAutoCraftRequestPacket(9L, 42L, 7L, true, 123).encode(encoded);
+            new ShopAutoCraftRequestPacket(encoded).encode(decoded);
+            assertEquals(ShopAutoCraftRequestPacket.Target.COST, decoded.readEnum(ShopAutoCraftRequestPacket.Target.class));
+            assertEquals(9L, decoded.readLong());
+            assertEquals(42L, decoded.readLong());
+            assertEquals(7L, decoded.readVarLong());
+            assertEquals("", decoded.readUtf(256));
+            assertTrue(decoded.readBoolean());
+            assertEquals(123, decoded.readVarInt());
+            assertFalse(encoded.isReadable());
+            assertFalse(decoded.isReadable());
+        } finally {
+            encoded.release();
+            decoded.release();
+        }
+    }
+
+    @Test
+    void immediateSuccessAndFailureOnlyResolveFeedbackWithoutOpeningConfirmation() {
+        for (boolean success : new boolean[]{true, false}) {
+            FriendlyByteBuf encoded = new FriendlyByteBuf(Unpooled.buffer());
+            FriendlyByteBuf decoded = new FriendlyByteBuf(Unpooled.buffer());
+            try {
+                new ShopAutoCraftPlanPacket(78, success).encode(encoded);
+                new ShopAutoCraftPlanPacket(encoded).encode(decoded);
+                assertEquals(new UUID(0L, 0L), decoded.readUUID());
+                assertEquals(success, decoded.readBoolean());
+                assertEquals(0, decoded.readVarInt());
+                assertEquals(0, decoded.readVarInt());
+                assertEquals(78, decoded.readVarInt());
+                assertEquals(success ? 1 : 0, decoded.readVarInt());
+                assertEquals(1, decoded.readVarInt());
+                assertFalse(decoded.readBoolean());
+                assertFalse(decoded.isReadable());
+            } finally {
+                encoded.release();
+                decoded.release();
+            }
         }
     }
 }

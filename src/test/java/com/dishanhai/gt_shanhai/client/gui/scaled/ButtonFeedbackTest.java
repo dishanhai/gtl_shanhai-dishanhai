@@ -299,6 +299,30 @@ class ButtonFeedbackTest {
     }
 
     @Test
+    void slowCraftingCanWaitLongerWithoutChangingTradeTimeouts() {
+        ButtonFeedback fb = new ButtonFeedback();
+        fb.pending(A, 10, 0L, 60_000L);
+        fb.pending(B, 11, 0L);
+        assertEquals(ButtonFeedback.Phase.PENDING, fb.phase(A, 6_000L));
+        assertEquals(ButtonFeedback.Phase.IDLE, fb.phase(B, 6_000L));
+        assertTrue(fb.resolve(10, ButtonFeedback.Tone.SUCCESS, 7_000L));
+        fb.pending(A, 12, 8_000L, 60_000L);
+        assertEquals(ButtonFeedback.Phase.FLASH, fb.phase(A, 68_000L));
+        assertFalse(fb.resolve(12, ButtonFeedback.Tone.SUCCESS, 68_000L));
+    }
+
+    @Test
+    void serverOwnedCalculationTimeoutAllowsEveryValidMultiTargetPlan() {
+        ButtonFeedback fb = new ButtonFeedback();
+        fb.pending(A, 13, 0L, Long.MAX_VALUE);
+        // 31 個目標、每項 397 tick：都低於服務端單項 400 tick 上限，但整輪超過十分鐘。
+        long calculatedAt = 31L * 397L * 50L;
+        fb.tick(calculatedAt);
+        assertTrue(fb.visual(A, A, true, calculatedAt, false).pending());
+        assertTrue(fb.resolve(13, ButtonFeedback.Tone.SUCCESS, calculatedAt));
+    }
+
+    @Test
     void disabledPressOnlyNudges() {
         ButtonFeedback fb = new ButtonFeedback();
         assertFalse(fb.press(A, 0, 0, 20, 10, false, 0L));

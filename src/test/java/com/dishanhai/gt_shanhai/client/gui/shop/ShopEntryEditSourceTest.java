@@ -19,6 +19,25 @@ class ShopEntryEditSourceTest {
     // ===== E2 页签与排版 =====
 
     @Test
+    void slotRowsWrapAndOnlyTheWholePageScrolls() throws Exception {
+        String s = src();
+        for (String old : new String[]{"coinCostScroll", "itemCostScroll", "fluidCostScroll", "submissionScroll",
+                "goodsRowScroll", "draggingCostRow", "costRow", "drawCostRowScrollbar", "slotRowAt("}) {
+            assertFalse(s.contains(old), "移除横向滚动状态与分支: " + old);
+        }
+        assertTrue(s.contains("ShopEntryEditLayout.slotX(") && s.contains("ShopEntryEditLayout.slotY("));
+        assertTrue(s.contains("ShopEntryEditLayout.slotIndexAt("));
+        String measure = extractBlock(s, "private int measureRow(");
+        assertTrue(measure.contains("slotRowsHeight(") && measure.contains("rewardRowsHeight()"), "行高随全部格子增加");
+        assertTrue(extractBlock(s, "private int rewardMax()").contains("return MAX_REWARD_OPTIONS"), "奖励上限不被单行宽度截短");
+        for (String method : new String[]{"private void drawGoodsRow(", "private void drawCostIngredientRow(", "private void drawFluidRow("}) {
+            assertFalse(extractBlock(s, method).contains("Scissor"), "只保留整页裁切: " + method);
+        }
+        String slot = extractBlock(s, "private void drawSlot(");
+        assertTrue(slot.contains("idx + 1") && slot.contains("translate(dx, dy"), "删除后的跨行补位同时移动 x/y");
+    }
+
+    @Test
     void rowsAreStackedPerTabInsteadOfHardcodedOffsets() throws Exception {
         String s = src();
         assertFalse(s.contains("contentY(top + "), "不再手写每行的 y 偏移");
@@ -163,5 +182,123 @@ class ShopEntryEditSourceTest {
         String s = src();
         assertFalse(s.contains("trimText("), "商品名、FTBQ 表名、任务名、分类名都换行，不截断");
         assertTrue(s.contains("ShopDialogRows.fitFrom("), "分类下拉行高可变，按实际能放下几行翻页");
+    }
+
+    // ===== 槽位一律走商店自建选择器 =====
+
+    private static String picker() throws Exception {
+        return Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/MultiPickerScreen.java"));
+    }
+
+    @Test
+    void slotClicksNeverOpenTheFtbLibPickers() throws Exception {
+        String s = src();
+        assertFalse(s.contains("EditorWidgets.openItemPicker("), "点已有物品格不再开 FTBLib/FTBQ 的选取页");
+        assertFalse(s.contains("EditorWidgets.openFluidPicker("), "点流体格也一样");
+        assertTrue(s.contains(".replacing()") && s.contains(".preselect("), "开自建多选器的替换模式，原来的东西先放进已选清单");
+        assertTrue(s.contains("ShopEntryEditLayout.replaceAt("), "确认后整份清单换掉这一格");
+    }
+
+    @Test
+    void emptyGoodsPlaceholderOpensTheShopPicker() throws Exception {
+        String s = src();
+        assertTrue(extractBlock(s, "private boolean goodsRowClicked(").contains("openGoodsReplacePicker("),
+                "新商品的空占位格点了就开自建选择器");
+        String settle = extractBlock(s, "private void settleGoods(");
+        assertTrue(settle.contains("removeIf(ItemStack::isEmpty)"), "选好东西后空占位格让位");
+        assertTrue(settle.contains("count ="), "首项换了，新首项自带的数量挪进「每份数量」");
+        assertTrue(extractBlock(s, "private void openGoodsPicker()").contains("settleGoods("), "「+」加进来的也要顶掉空占位格");
+    }
+
+    @Test
+    void coinSlotsAreReplacedOnlyFromConfiguredCurrencies() throws Exception {
+        String open = extractBlock(src(), "private void openCostReplacePicker(");
+        assertTrue(open.contains("CurrencyRateConfig.getCurrencies()"), "币种格只能换成已配置的货币");
+        assertTrue(open.contains("preselect("), "原来的币种和精确数量先放进清单");
+    }
+
+    @Test
+    void theShopPickerHasAReplaceMode() throws Exception {
+        String p = picker();
+        assertTrue(p.contains("public MultiPickerScreen replacing()"));
+        assertTrue(p.contains("public MultiPickerScreen preselect(ItemStack"));
+        assertTrue(p.contains("public MultiPickerScreen preselect(FluidStack"));
+        assertTrue(p.contains("public MultiPickerScreen preselectTexture("), "贴图图标也能点开换");
+        assertTrue(p.contains("确认替换") && p.contains("移除这一格"), "按钮写明确认后会发生什么");
+    }
+
+    // ===== 动效与交互细节 =====
+
+    @Test
+    void motionStateLivesInOnePlaceAndHonoursReducedMotion() throws Exception {
+        String s = src();
+        assertTrue(s.contains("new ShopEntryEditMotion()"));
+        assertTrue(extractBlock(s, "protected void renderScaledBackground(")
+                .contains("motion.setReduceMotion(ClientShopUiSettings.reduceMotion())"));
+    }
+
+    @Test
+    void openingScalesInAndTabsSlideWithTheirInputs() throws Exception {
+        String s = src();
+        String bg = extractBlock(s, "protected void renderScaledBackground(");
+        assertTrue(bg.contains("motion.openScale(") && bg.contains("motion.slideX("));
+        assertTrue(extractBlock(s, "private void selectTab(").contains("motion.tabChanged("));
+        assertTrue(extractBlock(s, "private void drawTabs(").contains("motion.underline("), "下划线滑到新页签");
+        assertTrue(s.contains("new AnimatableEditBox("), "输入框跟着开场缩放和切页平移");
+        assertTrue(s.contains("setSlideX(") && s.contains("setAnim("));
+        assertFalse(s.contains("new EditBox(this.font, fx"), "页内输入框不再用不会动的原版框");
+    }
+
+    @Test
+    void pageScrollGlidesWhileHitTestsUseTheShownValue() throws Exception {
+        String s = src();
+        assertTrue(s.contains("motion.scroll(") && s.contains("motion.snapScroll("));
+        assertTrue(extractBlock(s, "protected boolean universalMouseScrolled(").contains("scrollTarget()"),
+                "连滚几格按目标累加，不被动画拖慢");
+        assertTrue(extractBlock(s, "private void layoutRows()").contains("setScroll(scrollTarget())"),
+                "排版只夹目标，不把动画中途的值当新目标");
+    }
+
+    @Test
+    void overlaysPopInAndFadeOut() throws Exception {
+        String s = src();
+        assertTrue(s.contains("GuiRenderUtil.withPanelMotion("));
+        String fg = extractBlock(s, "protected void renderScaledForeground(");
+        assertTrue(fg.contains("ShopEntryEditMotion.visible("), "关掉后还画着淡出");
+        for (String overlay : new String[]{"discardConfirmOpen", "descEditorOpen", "qtyEditorOpen", "catPickerOpen"}) {
+            assertTrue(s.contains("motion.panel(") && s.contains(overlay + ", now)"), overlay + " 走弹簧开合");
+        }
+    }
+
+    @Test
+    void slotsGlowPopSlideAndShake() throws Exception {
+        String s = src();
+        String slot = extractBlock(s, "private void drawSlot(");
+        assertTrue(slot.contains("ui.hoverAt("), "悬停外圈金光渐亮");
+        assertTrue(slot.contains("motion.slotScale(") && slot.contains("motion.slotShiftX("));
+        assertTrue(slot.contains("ui.withMotion("), "被拒时轻抖");
+        assertTrue(s.contains("motion.popSlots("), "从选择器回来，新放进的格子弹出来");
+        assertTrue(s.contains("motion.slotRemoved("), "右键删掉后后面的格子补位");
+        assertTrue(extractBlock(s, "private boolean goodsRowClicked(").contains("ui.reject("), "最后一件商品删不掉：轻抖并出失败音");
+        assertTrue(s.contains("motion.breath("), "空占位格的「?」提示可以点");
+        String ui = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/shop/ShopDialogUi.java"));
+        assertTrue(ui.contains("float hoverAt(") && ui.contains("void withMotion("));
+    }
+
+    @Test
+    void failedSaveFlashesTheRowAndNewRowsFadeIn() throws Exception {
+        String s = src();
+        assertTrue(extractBlock(s, "private void submit()").contains("motion.startFlash("), "出错那一行闪红");
+        String change = extractBlock(s, "private void changeRows(");
+        assertTrue(change.contains("motion.startReveal("), "免费/奖励模式切换后冒出来的行淡入");
+        String click = extractBlock(s, "private boolean clickRow(");
+        assertTrue(click.contains("changeRows(() -> setFreeGoods(") && click.contains("changeRows(this::cycleRewardMode)"));
+    }
+
+    @Test
+    void hoveringASlotExplainsWhatClicksDo() throws Exception {
+        String s = src();
+        assertTrue(extractBlock(s, "protected void renderTooltips(").contains("hoverSlotTip"));
+        assertTrue(s.contains("左键 替换") && s.contains("右键 删除"));
     }
 }

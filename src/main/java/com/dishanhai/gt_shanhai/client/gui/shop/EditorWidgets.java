@@ -1,10 +1,6 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import dev.architectury.fluid.FluidStack;
-import dev.ftb.mods.ftblibrary.config.FluidConfig;
-import dev.ftb.mods.ftblibrary.config.ItemStackConfig;
-import dev.ftb.mods.ftblibrary.config.ui.SelectFluidScreen;
-import dev.ftb.mods.ftblibrary.config.ui.SelectItemStackScreen;
 
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -12,15 +8,12 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
-import java.util.function.Consumer;
 
 /**
- * FTBQ 式编辑器共享控件（山海署名，客户端）：物品/流体槽位绘制 + 调用 FTBLib 选择器。
+ * FTBQ 式编辑器共享控件（山海署名，客户端）：物品/流体/贴图槽位绘制。
  *
- * <p>选择器（{@link SelectItemStackScreen}/{@link SelectFluidScreen}）自带数量/mB 输入框，
- * 选中即把结果（含数量）写回临时 config，回调读回。FTBLib 屏关闭后自动返回打开它时的当前屏
- * （即调用方的 {@link com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen}），
- * 触发其 init() 重新按草稿布局。</p>
+ * <p>只管画。选东西一律走商店自建的 {@link MultiPickerScreen}（可搜索/物品栏/多选/替换这一格），
+ * 不再调 FTBLib 的选区页——那条路会跳进 FTBQ 的选取界面，和商店风格也不一致。</p>
  */
 final class EditorWidgets {
 
@@ -237,32 +230,4 @@ final class EditorWidgets {
         } catch (Exception ignored) { return false; }
     }
 
-    /**
-     * 打开 FTBLib 物品选择器（含数量）。current 预填，选中/取消后回到调用时的当前屏。
-     * onPicked 收到最终 stack（取消则为 current，空表示清除）。
-     *
-     * <p><b>关键</b>：FTBLib 选择器的确认/取消按钮只调 {@code doAccept/doCancel → callback.save}，
-     * <b>不自行关闭界面</b>——关闭（返回上一屏）是回调的职责。故此处在回调里显式
-     * {@code setScreen(returnTo)}，否则点确认/取消不退出（只能 ESC）。</p>
-     */
-    static void openItemPicker(ItemStack current, Consumer<ItemStack> onPicked) {
-        net.minecraft.client.gui.screens.Screen returnTo = net.minecraft.client.Minecraft.getInstance().screen;
-        ItemStackConfig cfg = new ItemStackConfig(true, true); // 非固定数量 → 显示数量框；允许空
-        cfg.setValue(current == null ? ItemStack.EMPTY : current.copy());
-        new SelectItemStackScreen(cfg, changed -> {
-            onPicked.accept(cfg.getValue());
-            net.minecraft.client.Minecraft.getInstance().setScreen(returnTo);
-        }).openGui();
-    }
-
-    /** 打开 FTBLib 流体选择器（含 mB）。语义同 {@link #openItemPicker}（回调负责返回上一屏）。 */
-    static void openFluidPicker(FluidStack current, Consumer<FluidStack> onPicked) {
-        net.minecraft.client.gui.screens.Screen returnTo = net.minecraft.client.Minecraft.getInstance().screen;
-        FluidConfig cfg = new FluidConfig(true).showAmount(true);
-        cfg.setValue(current == null ? FluidStack.empty() : current.copy());
-        new SelectFluidScreen(cfg, changed -> {
-            onPicked.accept(cfg.getValue());
-            net.minecraft.client.Minecraft.getInstance().setScreen(returnTo);
-        }).openGui();
-    }
 }

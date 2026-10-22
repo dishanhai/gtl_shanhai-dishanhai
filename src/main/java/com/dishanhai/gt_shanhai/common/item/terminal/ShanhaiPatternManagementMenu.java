@@ -43,6 +43,7 @@ public final class ShanhaiPatternManagementMenu extends ContainerExPatternTermin
 
     private final ShanhaiPatternManagementMenuHost host;
     private final ToolboxMenu toolboxMenu;
+    private final MetadataSyncCadence metadataSyncCadence = new MetadataSyncCadence();
     private final Set<Long> stellarContainerIds = new HashSet<>();
     private final Map<Long, StellarTerminalDetail> stellarDetails = new HashMap<>();
     private Set<Long> lastSentStellarContainerIds = Set.of();
@@ -69,8 +70,20 @@ public final class ShanhaiPatternManagementMenu extends ContainerExPatternTermin
     public void broadcastChanges() {
         toolboxMenu.tick();
         super.broadcastChanges();
-        if (!isClientSide()) {
+        if (!isClientSide() && metadataSyncCadence.shouldSync(getPlayer().level().getGameTime())) {
             syncStellarContainerMetadata();
+        }
+    }
+
+    static final class MetadataSyncCadence {
+        private boolean synced;
+        private long lastSyncTick;
+
+        boolean shouldSync(long tick) {
+            if (synced && tick >= lastSyncTick && tick - lastSyncTick < 20) return false;
+            synced = true;
+            lastSyncTick = tick;
+            return true;
         }
     }
 

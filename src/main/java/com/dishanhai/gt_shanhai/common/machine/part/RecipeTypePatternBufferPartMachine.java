@@ -268,6 +268,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private Supplier<Level> patternPreviewLevelFallback;
     private final InternalInventory combinedTerminalPatternInventory;
     private boolean outputMultiplierPatternsRefreshNeeded = true;
+    private boolean refreshingOutputMultiplierPatterns;
     private int[] visibleOutputMultiplierStamps;
     private IntConsumer wildcardRemoveSlotFromMap;
     private boolean rebuildingWildcardPatterns;
@@ -622,7 +623,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     private void refreshStockTagConfiguration(KeyCounter network) {
         PatternBufferStockPull.Refresh refresh = stockPull.refreshItems(
-                stockItemHandler.getInventory(), network, stockTagWhite, stockTagBlack,
+                stockItemHandler.getInventory(), network, getMainNode().getGrid(), getLevel().getGameTime(),
+                stockTagWhite, stockTagBlack,
                 stockManualConfiguration, stockAutomaticConfiguration, stockSuppressedKeys);
         boolean dirty = false;
         if (refresh.manual != null && !refresh.manual.equals(stockManualConfiguration)) {
@@ -785,9 +787,8 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (!isRemote()) {
             RecipeTypePatternSearchHelper.clearPatternSlotState(this, index);
         }
-        outputMultiplierPatternsRefreshNeeded = false;
-        if (outputMultiplierModeEnabled && publishedProductOutputsMissMultiplier()) {
-            outputMultiplierPatternsRefreshNeeded = true;
+        if (!refreshingOutputMultiplierPatterns) {
+            outputMultiplierPatternsRefreshNeeded = publishedProductOutputsMissMultiplier();
         }
         refreshPatternRecipeType(index);
         if (index >= 0 && index < strictRecipeIdWarningStackHashes.length) {
@@ -943,6 +944,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (slot < 0 || slot >= patternRecipeTypeIds.length || slot >= getPatternInventory().getSlots()) return null;
         ItemStack stack = getPatternInventory().getStackInSlot(slot);
         if (stack.isEmpty()) return null;
+        if (PatternRecipeTypeHelper.isRecipeLookupPending(stack)) return null;
         String recipeId = PatternRecipeTypeHelper.readRecipeId(stack);
         String recipeTypeId = PatternRecipeTypeHelper.readRecipeTypeId(stack);
         if (strongPatternMatchMode && (recipeId.isEmpty() || recipeTypeId.isEmpty())) {
@@ -1313,15 +1315,31 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     public void refreshOutputMultiplierPatterns() {
-        if (isRemote()) return;
-        for (int slot = 0; slot < getPatternInventory().getSlots(); slot++) {
-            if (!getPatternInventory().getStackInSlot(slot).isEmpty()) {
-                onPatternChange(slot);
+        if (isRemote() || refreshingOutputMultiplierPatterns) return;
+        clearOutputMultiplierPatternCache();
+        refreshingOutputMultiplierPatterns = true;
+        try {
+            for (int slot = 0; slot < getPatternInventory().getSlots(); slot++) {
+                if (!getPatternInventory().getStackInSlot(slot).isEmpty()) {
+                    onPatternChange(slot);
+                }
             }
+            onWildcardPatternInventoryChanged();
+        } finally {
+            // 父類逐槽更新會要求重建反向索引；連同快取失效一起合併，例外也不留下舊索引。
+            refreshingOutputMultiplierPatterns = false;
+            outputMultiplierPatternsRefreshNeeded = true;
+            reCalculatePatternSlotMap();
+            invalidateRecipeCaches();
+            RecipeTypePatternSearchHelper.clearPatternState(this);
         }
-        onWildcardPatternInventoryChanged();
-        invalidateRecipeCaches();
-        RecipeTypePatternSearchHelper.clearPatternState(this);
+        outputMultiplierPatternsRefreshNeeded = publishedProductOutputsMissMultiplier();
+    }
+
+    @Override
+    protected void reCalculatePatternSlotMap() {
+        if (refreshingOutputMultiplierPatterns) return;
+        super.reCalculatePatternSlotMap();
     }
 
     private void refreshVisibleOutputMultiplierPatterns(boolean resetSlotCaches) {
@@ -1524,6 +1542,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     private void clearOutputMultiplierPatternCache() {
+        if (refreshingOutputMultiplierPatterns) return;
         outputMultiplierPatternCache.clear();
         if (visibleOutputMultiplierStamps != null) {
             Arrays.fill(visibleOutputMultiplierStamps, 0);

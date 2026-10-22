@@ -35,6 +35,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine;
 import org.gtlcore.gtlcore.api.machine.trait.MEPart.IMEPatternPartMachine;
 import org.gtlcore.gtlcore.api.machine.trait.MEPatternRecipeHandlePart;
@@ -54,8 +56,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.ToLongFunction;
 
 public final class RecipeTypePatternSearchHelper {
+
+    private static final Logger LOGGER = LogManager.getLogger(RecipeTypePatternSearchHelper.class);
 
     private RecipeTypePatternSearchHelper() {
     }
@@ -66,6 +71,8 @@ public final class RecipeTypePatternSearchHelper {
     private static final ConcurrentHashMap<Class<?>, ConcurrentHashMap<String, Optional<Method>>> METHOD_CACHE =
             new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<Class<?>, ConcurrentHashMap<String, Optional<Field>>> FIELD_CACHE =
+            new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Class<?>, Set<String>> REFLECTION_FAILURES_LOGGED =
             new ConcurrentHashMap<>();
     // findHandlerMachine 需要尝试 4 个混淆名，缓存每个 Class 哪个名字有效
     private static final ConcurrentHashMap<Class<?>, String> HANDLER_MACHINE_METHOD_CACHE =
@@ -100,6 +107,7 @@ public final class RecipeTypePatternSearchHelper {
     }
 
     private static GTRecipe peekRecipeCached(MEPatternBufferPartMachineBase buffer, int slot, ItemStack stack, Level level) {
+        if (PatternRecipeTypeHelper.isRecipeLookupPending(stack)) return null;
         int stackHash = System.identityHashCode(stack);
         synchronized (PATTERN_PEEK_CACHE) {
             it.unimi.dsi.fastutil.ints.Int2ObjectMap<PatternPeekCacheEntry> slotCache = PATTERN_PEEK_CACHE.get(buffer);
@@ -165,6 +173,7 @@ public final class RecipeTypePatternSearchHelper {
     private static GTRecipe getMarkedRecipeCached(MEPatternBufferPartMachineBase buffer,
             RecipeTypePatternSlotAccess access, int slot, GenericStack[] inferenceInputs,
             long sharedInferenceFingerprint) {
+        if (PatternRecipeTypeHelper.isRecipeLookupPending(access.gtShanhai$getPatternStack(slot))) return null;
         long inferenceInventoryFingerprint =
                 access.gtShanhai$getPatternInferenceFingerprint(slot, sharedInferenceFingerprint);
         int stackHash = System.identityHashCode(access.gtShanhai$getPatternStack(slot));
@@ -645,31 +654,21 @@ public final class RecipeTypePatternSearchHelper {
         Object actionSourceObj = readField(buffer, "actionSource");
         if (!(actionSourceObj instanceof IActionSource actionSource)) return;
         MEStorage storage = grid.getStorageService().getInventory();
-        long achievable = Math.min(remainingBudget, hostParallelLimit);
-        for (int i = 0; i < inputs.length; i++) {
-            GenericStack in = inputs[i];
-            if (in == null || in.amount() <= 0 || presenceTargets[i] != null) continue;
-            long available = storage.extract(in.what(), Long.MAX_VALUE, Actionable.SIMULATE, actionSource);
-            achievable = Math.min(achievable, available / in.amount());
-        }
-        if (achievable < 0) achievable = 0;
+        Object2LongMap<AEKey> consumableInputs = mergeConsumableInputs(inputs, presenceTargets);
+        long achievable = resolveVirtualSupplyParallel(consumableInputs,
+                Math.min(remainingBudget, hostParallelLimit),
+                key -> storage.extract(key, Long.MAX_VALUE, Actionable.SIMULATE, actionSource));
 
         if (achievable <= 0) return;
         boolean consumableExtracted = false;
-        for (int i = 0; i < inputs.length; i++) {
-            GenericStack in = inputs[i];
-            if (in == null || in.amount() <= 0) continue;
-            GenericStack presenceTarget = presenceTargets[i];
-            if (presenceTarget != null) {
-                continue;
-            }
-            long want = saturatedMultiply(in.amount(), achievable);
-            long extracted = storage.extract(in.what(), want, Actionable.MODULATE, actionSource);
+        for (Object2LongMap.Entry<AEKey> input : consumableInputs.object2LongEntrySet()) {
+            long want = saturatedMultiply(input.getLongValue(), achievable);
+            long extracted = storage.extract(input.getKey(), want, Actionable.MODULATE, actionSource);
             if (extracted > 0) {
                 if (bridge != null) {
-                    bridge.gtShanhai$addToSlot(slot, in.what(), extracted);
+                    bridge.gtShanhai$addToSlot(slot, input.getKey(), extracted);
                 } else {
-                    invokeAdd(internalSlot, in.what(), extracted);
+                    invokeAdd(internalSlot, input.getKey(), extracted);
                 }
                 consumableExtracted = true;
             }
@@ -677,6 +676,32 @@ public final class RecipeTypePatternSearchHelper {
         if (consumableExtracted) {
             decrementBudget(buffer, slot, achievable); // 这一单预算扣减，耗尽前允许下一轮继续补
         }
+    }
+
+    /** 山海：同一 AEKey 的消耗需求先相加；單份需求超出 long 時拒絕本輪供料。 */
+    static Object2LongMap<AEKey> mergeConsumableInputs(GenericStack[] inputs, GenericStack[] presenceTargets) {
+        Object2LongMap<AEKey> merged = new Object2LongOpenHashMap<>();
+        for (int i = 0; i < inputs.length; i++) {
+            GenericStack input = inputs[i];
+            if (input == null || input.amount() <= 0 || presenceTargets[i] != null) continue;
+            long previous = merged.getLong(input.what());
+            if (previous > Long.MAX_VALUE - input.amount()) return null;
+            merged.put(input.what(), previous + input.amount());
+        }
+        return merged;
+    }
+
+    /** 模擬與實際抽取共用合併需求，避免重複輸入各自占用同一份網路庫存。 */
+    static long resolveVirtualSupplyParallel(Object2LongMap<AEKey> consumableInputs, long limit,
+            ToLongFunction<AEKey> availableAmount) {
+        if (consumableInputs == null || consumableInputs.isEmpty() || limit <= 0) return 0L;
+        long achievable = limit;
+        for (Object2LongMap.Entry<AEKey> input : consumableInputs.object2LongEntrySet()) {
+            long available = Math.max(0L, availableAmount.applyAsLong(input.getKey()));
+            achievable = Math.min(achievable, available / input.getLongValue());
+            if (achievable == 0L) return 0L;
+        }
+        return achievable;
     }
 
     static long resolveHostParallelLimit(Object machine) {
@@ -863,35 +888,15 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static Object invokeWithInt(Object target, String methodName, int arg) {
         if (target == null) return null;
-        Class<?> startClass = target.getClass();
-        ConcurrentHashMap<String, Optional<Method>> classCache =
-                METHOD_CACHE.computeIfAbsent(startClass, k -> new ConcurrentHashMap<>());
         String cacheKey = methodName + "(int)";
-        Optional<Method> cached = classCache.get(cacheKey);
-        if (cached != null) {
-            if (!cached.isPresent()) return null;
-            try {
-                return cached.get().invoke(target, arg);
-            } catch (ReflectiveOperationException ignored) {
-                return null;
-            }
+        Method method = findMethod(target.getClass(), cacheKey, methodName, int.class);
+        if (method == null) return null;
+        try {
+            return method.invoke(target, arg);
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            warnReflectionFailure(target.getClass(), "method:" + cacheKey, exception);
+            return null;
         }
-        Class<?> type = startClass;
-        while (type != null) {
-            try {
-                Method method = type.getDeclaredMethod(methodName, int.class);
-                method.setAccessible(true);
-                classCache.put(cacheKey, Optional.of(method));
-                return method.invoke(target, arg);
-            } catch (NoSuchMethodException ignored) {
-                type = type.getSuperclass();
-            } catch (ReflectiveOperationException ignored) {
-                classCache.put(cacheKey, Optional.empty());
-                return null;
-            }
-        }
-        classCache.put(cacheKey, Optional.empty());
-        return null;
     }
 
     /**
@@ -901,36 +906,14 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static void invokeAdd(Object target, AEKey key, long amount) {
         if (target == null) return;
-        Class<?> startClass = target.getClass();
-        ConcurrentHashMap<String, Optional<Method>> classCache =
-                METHOD_CACHE.computeIfAbsent(startClass, k -> new ConcurrentHashMap<>());
         String cacheKey = "add(AEKey,long)";
-        Optional<Method> cached = classCache.get(cacheKey);
-        if (cached != null) {
-            if (!cached.isPresent()) return;
-            try {
-                cached.get().invoke(target, key, amount);
-            } catch (ReflectiveOperationException ignored) {
-                // ignored
-            }
-            return;
+        Method method = findMethod(target.getClass(), cacheKey, "add", AEKey.class, long.class);
+        if (method == null) return;
+        try {
+            method.invoke(target, key, amount);
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            warnReflectionFailure(target.getClass(), "method:" + cacheKey, exception);
         }
-        Class<?> type = startClass;
-        while (type != null) {
-            try {
-                Method method = type.getDeclaredMethod("add", AEKey.class, long.class);
-                method.setAccessible(true);
-                classCache.put(cacheKey, Optional.of(method));
-                method.invoke(target, key, amount);
-                return;
-            } catch (NoSuchMethodException ignored) {
-                type = type.getSuperclass();
-            } catch (ReflectiveOperationException ignored) {
-                classCache.put(cacheKey, Optional.empty());
-                return;
-            }
-        }
-        classCache.put(cacheKey, Optional.empty());
     }
 
     private static boolean containsSlot(int[] slots, int slot) {
@@ -1135,30 +1118,32 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static Object readField(Object target, String fieldName) {
         if (target == null) return null;
-        Class<?> startClass = target.getClass();
+        Field field = findField(target.getClass(), fieldName);
+        if (field == null) return null;
+        try {
+            return field.get(target);
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            warnReflectionFailure(target.getClass(), "field:" + fieldName, exception);
+            return null;
+        }
+    }
+
+    private static Field findField(Class<?> startClass, String fieldName) {
         ConcurrentHashMap<String, Optional<Field>> classCache =
                 FIELD_CACHE.computeIfAbsent(startClass, k -> new ConcurrentHashMap<>());
         Optional<Field> cached = classCache.get(fieldName);
-        if (cached != null) {
-            if (!cached.isPresent()) return null;
-            try {
-                return cached.get().get(target);
-            } catch (ReflectiveOperationException ignored) {
-                return null;
-            }
-        }
-        // 首次：走类层级搜索
+        if (cached != null) return cached.orElse(null);
         Class<?> type = startClass;
         while (type != null) {
             try {
                 Field field = type.getDeclaredField(fieldName);
                 field.setAccessible(true);
                 classCache.put(fieldName, Optional.of(field));
-                return field.get(target);
+                return field;
             } catch (NoSuchFieldException ignored) {
                 type = type.getSuperclass();
-            } catch (ReflectiveOperationException ignored) {
-                classCache.put(fieldName, Optional.empty());
+            } catch (RuntimeException exception) {
+                warnReflectionFailure(startClass, "field:" + fieldName, exception);
                 return null;
             }
         }
@@ -1172,35 +1157,44 @@ public final class RecipeTypePatternSearchHelper {
      */
     private static Object invokeNoArg(Object target, String methodName) {
         if (target == null) return null;
-        Class<?> startClass = target.getClass();
+        Method method = findMethod(target.getClass(), methodName, methodName);
+        if (method == null) return null;
+        try {
+            return method.invoke(target);
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            warnReflectionFailure(target.getClass(), "method:" + methodName, exception);
+            return null;
+        }
+    }
+
+    private static Method findMethod(Class<?> startClass, String cacheKey, String methodName,
+            Class<?>... parameterTypes) {
         ConcurrentHashMap<String, Optional<Method>> classCache =
                 METHOD_CACHE.computeIfAbsent(startClass, k -> new ConcurrentHashMap<>());
-        Optional<Method> cached = classCache.get(methodName);
-        if (cached != null) {
-            if (!cached.isPresent()) return null;
-            try {
-                return cached.get().invoke(target);
-            } catch (ReflectiveOperationException ignored) {
-                return null;
-            }
-        }
-        // 首次：走类层级搜索
+        Optional<Method> cached = classCache.get(cacheKey);
+        if (cached != null) return cached.orElse(null);
         Class<?> type = startClass;
         while (type != null) {
             try {
-                Method method = type.getDeclaredMethod(methodName);
+                Method method = type.getDeclaredMethod(methodName, parameterTypes);
                 method.setAccessible(true);
-                classCache.put(methodName, Optional.of(method));
-                return method.invoke(target);
+                classCache.put(cacheKey, Optional.of(method));
+                return method;
             } catch (NoSuchMethodException ignored) {
                 type = type.getSuperclass();
-            } catch (ReflectiveOperationException ignored) {
-                classCache.put(methodName, Optional.empty());
+            } catch (RuntimeException exception) {
+                warnReflectionFailure(startClass, "method:" + cacheKey, exception);
                 return null;
             }
         }
-        classCache.put(methodName, Optional.empty());
+        classCache.put(cacheKey, Optional.empty());
         return null;
+    }
+
+    private static void warnReflectionFailure(Class<?> type, String member, Exception exception) {
+        if (REFLECTION_FAILURES_LOGGED.computeIfAbsent(type, k -> ConcurrentHashMap.newKeySet()).add(member)) {
+            LOGGER.warn("[PatternSearch] 反射存取 {}#{} 失敗，後續仍將重試", type.getName(), member, exception);
+        }
     }
 
     private static Iterator<GTRecipe> searchType(GTRecipeType type, IRecipeLogicMachine machine) {

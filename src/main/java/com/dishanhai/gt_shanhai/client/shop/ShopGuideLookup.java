@@ -64,4 +64,10 @@ public final class ShopGuideLookup {
         if (player == null || hit == null) return;
         GuidesCommon.openGuide(player, hit.guideId(), hit.anchor());
     }
+
+    /** 山海：回饋按鍵需讀取 GuideME 真正的開啟結果；void 包裝會吞掉內部捕獲的失敗。 */
+    public static boolean tryOpen(Player player, GuideHit hit) {
+        if (player == null || hit == null) return false;
+        return guideme.internal.GuideMEProxy.instance().openGuide(player, hit.guideId(), hit.anchor());
+    }
 }

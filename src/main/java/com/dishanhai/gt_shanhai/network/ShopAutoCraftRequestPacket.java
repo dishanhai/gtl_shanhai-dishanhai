@@ -25,19 +25,30 @@ public class ShopAutoCraftRequestPacket {
     private final long times;
     private final boolean aeMode;
     private final String stagePath;
+    private final int requestId;
 
     public ShopAutoCraftRequestPacket(long catalogRevision, long entryKey, long times, boolean aeMode) {
         this(Target.COST, catalogRevision, entryKey, times, "", aeMode);
     }
 
+    public ShopAutoCraftRequestPacket(long catalogRevision, long entryKey, long times, boolean aeMode, int requestId) {
+        this(Target.COST, catalogRevision, entryKey, times, "", aeMode, requestId);
+    }
+
     public ShopAutoCraftRequestPacket(Target target, long catalogRevision, long entryKey,
                                       long times, String stagePath, boolean aeMode) {
+        this(target, catalogRevision, entryKey, times, stagePath, aeMode, 0);
+    }
+
+    private ShopAutoCraftRequestPacket(Target target, long catalogRevision, long entryKey,
+                                      long times, String stagePath, boolean aeMode, int requestId) {
         this.target = target == null ? Target.COST : target;
         this.catalogRevision = catalogRevision;
         this.entryKey = entryKey;
         this.times = times;
         this.aeMode = aeMode;
         this.stagePath = stagePath == null ? "" : stagePath;
+        this.requestId = requestId;
     }
 
     public ShopAutoCraftRequestPacket(FriendlyByteBuf buf) {
@@ -47,6 +58,7 @@ public class ShopAutoCraftRequestPacket {
         this.times = buf.readVarLong();
         this.stagePath = buf.readUtf(256);
         this.aeMode = buf.readBoolean();
+        this.requestId = buf.readVarInt();
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -56,6 +68,7 @@ public class ShopAutoCraftRequestPacket {
         buf.writeVarLong(times);
         buf.writeUtf(stagePath, 256);
         buf.writeBoolean(aeMode);
+        buf.writeVarInt(requestId);
     }
 
     public static void handle(ShopAutoCraftRequestPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -68,11 +81,14 @@ public class ShopAutoCraftRequestPacket {
                 return;
             }
             ShopEntry entry = ShopConfig.resolve(pkt.catalogRevision, pkt.entryKey);
-            if (entry == null) return;
+            if (entry == null) {
+                ShopAutoCraft.sendPlanFeedback(player, pkt.requestId, false);
+                return;
+            }
             if (pkt.target == Target.ENTRY_SUBMISSION) {
                 ShopAutoCraft.beginEntrySubmissionPlan(player, entry, pkt.aeMode);
             } else {
-                ShopAutoCraft.beginPlan(player, entry, Math.max(1L, pkt.times), pkt.aeMode);
+                ShopAutoCraft.beginPlan(player, entry, Math.max(1L, pkt.times), pkt.aeMode, pkt.requestId);
             }
         });
         context.setPacketHandled(true);

@@ -8,7 +8,8 @@ import java.util.Map;
 
 /**
  * 商品编辑器的页签与排版（山海署名，纯 Java）：五个页签各管哪些行，行按实际高度往下堆
- * （说明换行就长高，被隐藏的行不占位），超出可视区时按像素滚动。全是纯函数，编辑器每帧按当前行高现算。
+ * （说明换行就长高，被隐藏的行不占位），超出可视区时按像素滚动；外加槽位「替换这一格」的清单拼接。
+ * 全是纯函数，编辑器每帧按当前行高现算。
  */
 final class ShopEntryEditLayout {
 
@@ -47,6 +48,18 @@ final class ShopEntryEditLayout {
     }
 
     private ShopEntryEditLayout() {}
+
+    // 山海：换行规则写在 Kotlin，Java 画面保留薄入口。
+    static int perLine(int availableWidth) { return ShopSlotRows.perLine(availableWidth); }
+    static int lines(int slotCount, int perLine) { return ShopSlotRows.lines(slotCount, perLine); }
+    static int slotX(int originX, int index, int perLine) { return ShopSlotRows.slotX(originX, index, perLine); }
+    static int slotY(int originY, int index, int perLine, int rowPitch) {
+        return ShopSlotRows.slotY(originY, index, perLine, rowPitch);
+    }
+    static int slotIndexAt(double mx, double my, int originX, int originY, int slotCount,
+                           int perLine, int rowPitch, int hitHeight) {
+        return ShopSlotRows.slotIndexAt(mx, my, originX, originY, slotCount, perLine, rowPitch, hitHeight);
+    }
 
     static List<Row> rowsOf(Tab tab) {
         return ROWS.get(tab);
@@ -121,5 +134,20 @@ final class ShopEntryEditLayout {
             x += widths[i] + gap;
         }
         return xs;
+    }
+
+    /**
+     * 选择器「替换这一格」确认后：用 {@code picked} 按顺序换掉 {@code list} 第 {@code at} 项（空 = 删掉这一项）。
+     * {@code at} 越界（比如并行的数量表比格子短）就接在末尾。返回新内容插在哪。
+     */
+    static <T> int replaceAt(List<T> list, int at, List<? extends T> picked) {
+        if (at < 0 || at >= list.size()) {
+            int end = list.size();
+            list.addAll(picked);
+            return end;
+        }
+        list.remove(at);
+        list.addAll(at, picked);
+        return at;
     }
 }

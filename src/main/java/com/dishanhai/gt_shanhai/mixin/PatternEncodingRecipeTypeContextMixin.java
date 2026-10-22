@@ -41,6 +41,10 @@ public class PatternEncodingRecipeTypeContextMixin {
 
     @Inject(method = "encodeProcessingPattern", at = @At("HEAD"), require = 0, remap = false)
     private void gtShanhai$pushRecipeTypeForEncoding(CallbackInfoReturnable<ItemStack> cir) {
+        PatternRecipeTypeHelper.popSelectedEncodingRecipe();
+        PatternRecipeTypeHelper.popEncodingRecipeType();
+        gtShanhai$pushedSelectedEncodingRecipe = false;
+        gtShanhai$pushedEncodingRecipeType = false;
         if (this instanceof PatternWrapControlMenu control) {
             String selectedRecipeId = control.gtShanhai$getSelectedRecipeId();
             GTRecipe selectedRecipe = PatternRecipeTypeHelper.resolveRecipe(selectedRecipeId);

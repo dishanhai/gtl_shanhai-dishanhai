@@ -10,6 +10,7 @@ import net.minecraft.core.GlobalPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 
 public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
@@ -33,6 +34,9 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
     private final @Nullable ShanhaiPatternManagementMenuHost terminalHost;
     private final List<String> wildcardTypeIds;
     private final List<String> wildcardTypeNames;
+    private final WirelessCheckCadence wirelessCheckCadence = new WirelessCheckCadence();
+    private @Nullable IGridNode wirelessNode;
+    private @Nullable String wirelessFailure;
     private boolean invalidLogged;
 
     public ShanhaiStellarRemoteUIHolder(GlobalPos targetPos, Mode mode, int slot,
@@ -115,12 +119,39 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
         if (target.isInValid()) return reject("target_invalid");
         if (target.getLevel() == null) return reject("target_level_missing");
         if (!isTerminalStillPresent()) return reject("terminal_not_present");
-        if (!terminalHost.rangeCheck()) return reject("terminal_out_of_range");
-        if (!terminalHost.drainPower()) return reject("terminal_power_failed");
-        IGridNode node = terminalHost.getActionableNode();
+        refreshWirelessState();
+        if (wirelessFailure != null) return reject(wirelessFailure);
+        IGridNode node = wirelessNode;
         if (node == null) return reject("terminal_node_missing");
         if (node.getGrid() != target.getGrid()) return reject("grid_mismatch");
         return false;
+    }
+
+    private void refreshWirelessState() {
+        Level level = terminalHost.getPlayer().level();
+        // AE2 的扣電批次按呼叫次數累積；同 tick 重複判斷不可重複推進。
+        if (!wirelessCheckCadence.shouldCheck(level, level.getGameTime())) return;
+        wirelessNode = null;
+        if (!terminalHost.rangeCheck()) {
+            wirelessFailure = "terminal_out_of_range";
+        } else if (!terminalHost.drainPower()) {
+            wirelessFailure = "terminal_power_failed";
+        } else {
+            wirelessFailure = null;
+            wirelessNode = terminalHost.getActionableNode();
+        }
+    }
+
+    static final class WirelessCheckCadence {
+        private Object lastLevel;
+        private long lastTick;
+
+        boolean shouldCheck(Object level, long tick) {
+            if (lastLevel == level && lastTick == tick) return false;
+            lastLevel = level;
+            lastTick = tick;
+            return true;
+        }
     }
 
     private boolean reject(String reason) {

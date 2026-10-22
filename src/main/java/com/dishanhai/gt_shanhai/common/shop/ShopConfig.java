@@ -431,9 +431,15 @@ public final class ShopConfig {
 
     /** 保留完整商品元数据复制一份，按需替换分类/隐藏状态/交易方向。 */
     private static ShopEntry copyEntry(ShopEntry old, String category, boolean hidden, ShopEntry.TradeMode tradeMode) {
+        return copyEntry(old, category, hidden, tradeMode, old.getLinkTo());
+    }
+
+    /** 同上，另替换跳转目标（山海署名，重载时把旧式称呼引用换成 stableId，见 {@link #migrateLinkTargets}）。 */
+    private static ShopEntry copyEntry(ShopEntry old, String category, boolean hidden, ShopEntry.TradeMode tradeMode,
+                                       String linkTo) {
         ShopEntry copy = new ShopEntry(old.getGoodsList(), category, old.getCost(), old.getDescription(),
                 old.getServerUses(), old.getDisplayIcons(), old.getRewardMode(), old.getRewardPool(),
-                hidden, old.getLinkKey(), old.getLinkTo(), old.getDisplayName(), old.getFtbqTableId(),
+                hidden, old.getLinkKey(), linkTo, old.getDisplayName(), old.getFtbqTableId(),
                 old.getFtbqSubMode(), tradeMode, old.getPeriodTicks(), old.getPeriodLimit(),
                 old.getPrerequisiteQuestId(), old.getStableId(), old.getDiscountPercent(),
                 old.getDiscountStartMs(), old.getDiscountEndMs(), old.getSubmissionItems());
@@ -734,18 +740,41 @@ public final class ShopConfig {
                     if (!ShopEntryJsonCodec.hasStableId(o)) needsStableIdMigration = true;
                 }
             }
+            // 山海：旧式 linkTo 存目标称呼，发布前换成 stableId，目标改称呼后也不会断。
+            int linkRewrites = migrateLinkTargets(parsedEntries);
             publish(parsedEntries);
             GTDishanhaiMod.LOGGER.info("[Shop] 已加载 {} 个商品", parsedEntries.size());
             // 旧 shop.json 缺 stableId 的条目在上面 fromJson 时已由 ShopEntry 构造器补发新 UUID，
             // 这里立刻写回磁盘固化，否则下次重启又会各生成一个新的，购物车等跨重登引用就全部失效。
+            if (needsStableIdMigration || linkRewrites > 0) save();
             if (needsStableIdMigration) {
-                save();
                 GTDishanhaiMod.LOGGER.info("[Shop] 已为缺失 stableId 的旧商品条目补发身份并写回 shop.json");
+            }
+            if (linkRewrites > 0) {
+                GTDishanhaiMod.LOGGER.info("[Shop] 已将 {} 条旧式跳转称呼转为稳定引用", linkRewrites);
             }
         } catch (Exception e) {
             loaded = true; // 保留最后一个完整快照，避免每次读取都重复冲击损坏文件
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop.json 失败: {}", e.getMessage());
         }
+    }
+
+    /** 把旧式跳转称呼就地换成目标的 stableId（山海署名，规则见 {@link ShopLinkMigration}），返回改写了几条。 */
+    private static int migrateLinkTargets(List<ShopEntry> entries) {
+        List<String> ids = new ArrayList<>(entries.size());
+        List<String> keys = new ArrayList<>(entries.size());
+        List<String> tos = new ArrayList<>(entries.size());
+        for (ShopEntry entry : entries) {
+            ids.add(entry.getStableId());
+            keys.add(entry.getLinkKey());
+            tos.add(entry.getLinkTo());
+        }
+        Map<Integer, String> rewrites = ShopLinkMigration.rewrites(ids, keys, tos);
+        for (Map.Entry<Integer, String> rewrite : rewrites.entrySet()) {
+            ShopEntry old = entries.get(rewrite.getKey());
+            entries.set(rewrite.getKey(), copyEntry(old, old.getCategory(), old.isHidden(), old.getTradeMode(), rewrite.getValue()));
+        }
+        return rewrites.size();
     }
 
     private static void writeDefault() {

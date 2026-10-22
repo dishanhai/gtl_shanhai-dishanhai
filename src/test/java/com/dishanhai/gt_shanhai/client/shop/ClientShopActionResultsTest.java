@@ -77,4 +77,34 @@ class ClientShopActionResultsTest {
         ClientShopActionResults.drain(0L, r -> seen.add(r.requestId()));
         assertTrue(seen.isEmpty());
     }
+
+    @Test
+    void autoCraftResultsAreIndependentAndSurviveLongConfirmationViewing() {
+        ClientShopActionResults.offer(result(20, 100L));
+        ClientShopActionResults.offerAutoCraft(new ClientShopActionResults.AutoCraftResult(0, 1, 1, 100L));
+        ClientShopActionResults.offerAutoCraft(new ClientShopActionResults.AutoCraftResult(21, 0, 1, 0L));
+        ClientShopActionResults.offerAutoCraft(new ClientShopActionResults.AutoCraftResult(22, 1, 2, 100L));
+        List<Integer> seen = new ArrayList<>();
+        ClientShopActionResults.drainAutoCraft(1_000_000L, r -> seen.add(r.requestId()));
+        assertEquals(List.of(21, 22), seen, "方案回執保留到返回商店，不能在閱讀確認窗期間過期");
+        seen.clear();
+        ClientShopActionResults.drain(200L, r -> seen.add(r.requestId()));
+        assertEquals(List.of(20), seen);
+    }
+
+    @Test
+    void autoCraftInboxIsBoundedAndClearedOnDisconnect() {
+        for (int i = 1; i <= ClientShopActionResults.CAPACITY + 2; i++) {
+            ClientShopActionResults.offerAutoCraft(new ClientShopActionResults.AutoCraftResult(i, 1, 1, 0L));
+        }
+        List<Integer> seen = new ArrayList<>();
+        ClientShopActionResults.drainAutoCraft(1L, r -> seen.add(r.requestId()));
+        assertEquals(ClientShopActionResults.CAPACITY, seen.size());
+        assertEquals(3, seen.get(0));
+        ClientShopActionResults.offerAutoCraft(new ClientShopActionResults.AutoCraftResult(100, 1, 1, 0L));
+        ClientShopActionResults.clear();
+        seen.clear();
+        ClientShopActionResults.drainAutoCraft(1L, r -> seen.add(r.requestId()));
+        assertTrue(seen.isEmpty());
+    }
 }

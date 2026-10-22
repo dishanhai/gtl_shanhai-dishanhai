@@ -100,6 +100,7 @@ public final class ShopAutoCraft {
         final List<String> notes = new ArrayList<>();
         int nextItem;
         long ticks;
+        int requestId;
 
         Session(IGrid grid, ShopEntry entry, long times, Snapshot snapshot) {
             this(grid, entry, times, Target.COST, "", true, snapshot);
@@ -119,25 +120,42 @@ public final class ShopAutoCraft {
     }
 
     public static void beginPlan(ServerPlayer player, ShopEntry entry, long times, boolean aeMode) {
-        if (player == null || entry == null || !entry.isValid()) return;
+        beginPlan(player, entry, times, aeMode, 0);
+    }
+
+    /** 山海：結果跟隨原始請求，不能在發包瞬間就宣稱補齊成功。 */
+    public static void beginPlan(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, int requestId) {
+        if (player == null) return;
+        if (entry == null || !entry.isValid()) {
+            sendPlanFeedback(player, requestId, false);
+            return;
+        }
         if (!aeMode) {
             message(player, "§c請先開啟「AE模式」");
+            sendPlanFeedback(player, requestId, false);
             return;
         }
         IGrid grid = ShopAeNetwork.findBoundGrid(player);
         if (grid == null) {
             message(player, "§c未綁定在線 AE 網路");
+            sendPlanFeedback(player, requestId, false);
             return;
         }
         times = Math.max(1L, times);
         Session existing = CALCULATING.get(player.getUUID());
         if (existing == null) existing = READY.get(player.getUUID());
-        if (existing != null && existing.entry == entry && existing.times == times && existing.grid == grid) {
+        if (existing != null && existing.target == Target.COST
+                && existing.entry == entry && existing.times == times && existing.grid == grid) {
+            if (requestId != 0) {
+                if (existing.requestId != requestId) sendPlanFeedback(player, existing.requestId, false);
+                existing.requestId = requestId;
+            }
             if (READY.get(player.getUUID()) == existing) sendPlanToClient(player, existing);
             return;
         }
         cancelAll(player.getUUID());
         Session session = new Session(grid, entry, times, snapshot(player, entry, times, grid));
+        session.requestId = requestId;
         for (Map.Entry<AEKey, BigInteger> shortage : session.shortages.entrySet()) {
             AEKey key = shortage.getKey();
             String name = key.getDisplayName().getString();
@@ -155,6 +173,7 @@ public final class ShopAutoCraft {
         if (session.items.isEmpty()) {
             if (session.notes.isEmpty()) {
                 message(player, "§a目前沒有未下單的缺口（已扣除 AE 在製成品）");
+                sendPlanFeedback(player, requestId, true);
             } else {
                 READY.put(player.getUUID(), session);
                 sendPlanToClient(player, session);
@@ -336,7 +355,10 @@ public final class ShopAutoCraft {
             Session session = entry.getValue();
             ServerPlayer player = findPlayer(uuid);
             if (player == null || ShopAeNetwork.findBoundGrid(player) != session.grid) {
-                if (CALCULATING.remove(uuid, session)) cancelSession(session);
+                if (CALCULATING.remove(uuid, session)) {
+                    cancelSession(session);
+                    if (player != null) sendPlanFeedback(player, session.requestId, false);
+                }
                 continue;
             }
             PlanItem item = session.items.get(session.nextItem);
@@ -345,6 +367,7 @@ public final class ShopAutoCraft {
                 if (session.ticks > CALC_TIMEOUT_TICKS && CALCULATING.remove(uuid, session)) {
                     cancelSession(session);
                     message(player, "§c合成方案計算逾時，已取消");
+                    sendPlanFeedback(player, session.requestId, false);
                 }
                 continue;
             }
@@ -424,7 +447,15 @@ public final class ShopAutoCraft {
         }
         merged.forEach((key, amount) -> useLines.add("§a" + key.getDisplayName().getString() + " §7×" + amount));
         ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new ShopAutoCraftPlanPacket(session.planId, !willCraft.isEmpty(), useLines, notes));
+                new ShopAutoCraftPlanPacket(session.planId, !willCraft.isEmpty(), useLines, notes,
+                        session.requestId, willCraft.size(), session.items.size() + session.notes.size()));
+        session.requestId = 0;
+    }
+
+    public static void sendPlanFeedback(ServerPlayer player, int requestId, boolean success) {
+        if (player == null || requestId == 0) return;
+        ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new ShopAutoCraftPlanPacket(requestId, success));
     }
 
     public static void confirmPlan(ServerPlayer player, UUID planId) {
@@ -519,7 +550,10 @@ public final class ShopAutoCraft {
 
     private static void cancelAll(UUID playerId) {
         Session session = CALCULATING.remove(playerId);
-        if (session != null) cancelSession(session);
+        if (session != null) {
+            cancelSession(session);
+            sendPlanFeedback(findPlayer(playerId), session.requestId, false);
+        }
         READY.remove(playerId);
     }
 

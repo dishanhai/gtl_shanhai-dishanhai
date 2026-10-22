@@ -105,9 +105,7 @@ public class DShanhaiVirtualCellSavedData extends SavedData {
             long amount = entry.getValue() != null ? entry.getValue() : 0L;
             if (amount <= 0) continue;
             AEKey key = entry.getKey();
-            String hash = DShanhaiAEKeyCodec.stableHash(key);
-            keyTable.put(hash, DShanhaiAEKeyCodec.toNormalizedTag(key));
-            decodedKeyCache.put(hash, key);
+            String hash = registerKey(key);
             cell.amounts.put(hash, amount);
         }
         cells.put(uuid, cell);
@@ -128,9 +126,7 @@ public class DShanhaiVirtualCellSavedData extends SavedData {
             java.math.BigInteger amount = entry.getValue();
             if (amount == null || amount.signum() <= 0) continue;
             AEKey key = entry.getKey();
-            String hash = DShanhaiAEKeyCodec.stableHash(key);
-            keyTable.put(hash, DShanhaiAEKeyCodec.toNormalizedTag(key));
-            decodedKeyCache.put(hash, key);
+            String hash = registerKey(key);
             cell.bigAmounts.put(hash, amount);
             total = total.add(amount);
         }
@@ -221,6 +217,20 @@ public class DShanhaiVirtualCellSavedData extends SavedData {
             com.dishanhai.gt_shanhai.GTDishanhaiMod.LOGGER.info(
                     "[SDA] 启动刷新：已更新 {} 个已导出 SDA 单元", count);
         }
+    }
+
+    /**
+     * 註冊一把 key 並回傳其穩定雜湊。正規化 tag 只算一次（走 codec 快取），
+     * 已經在 keyTable 內的條目不再重複寫入，避免每輪持久化都重建整張表。
+     */
+    private String registerKey(AEKey key) {
+        DShanhaiAEKeyCodec.CachedKey cached = DShanhaiAEKeyCodec.cachedEntry(key);
+        String hash = cached.hash();
+        if (!keyTable.containsKey(hash)) {
+            keyTable.put(hash, cached.copyTag());
+        }
+        decodedKeyCache.put(hash, key);
+        return hash;
     }
 
     private AEKey getDecodedKey(String hash) {

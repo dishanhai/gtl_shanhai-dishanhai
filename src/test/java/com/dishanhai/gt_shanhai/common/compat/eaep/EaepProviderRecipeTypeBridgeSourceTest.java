@@ -58,6 +58,19 @@ class EaepProviderRecipeTypeBridgeSourceTest {
     }
 
     @Test
+    void recipeTypeNameFileStatsAreThrottledBeforeFilesystemAccess() throws IOException {
+        String bridge = Files.readString(BRIDGE).replace("\r\n", "\n");
+        int method = bridge.indexOf("private static synchronized Map<String, String> loadRecipeTypeNameMappings()");
+        String loader = bridge.substring(method, bridge.indexOf("private static void addBuiltinRecipeTypeNameMappings", method));
+
+        assertTrue(bridge.contains("RECIPE_TYPE_NAME_CHECK_NANOS = 1_000_000_000L"),
+                "映射檔磁碟 stat 必須約一秒節流");
+        assertOrder(loader, "System.nanoTime()", "Files.exists(", "先讀單調時鐘，避免系統時間回調破壞節流");
+        assertOrder(loader, "return recipeTypeNameCache;", "Files.exists(",
+                "節流期必須在 Files.exists/getLastModifiedTime 前返回快取");
+    }
+
+    @Test
     void screenUsesUploadRecipeTypeForPriorityAndFiveTypeHintLimit() throws IOException {
         String screenMixin = Files.readString(SCREEN_MIXIN);
         String bridge = Files.readString(BRIDGE);

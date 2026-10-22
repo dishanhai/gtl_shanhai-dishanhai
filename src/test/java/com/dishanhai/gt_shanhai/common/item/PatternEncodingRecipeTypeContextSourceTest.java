@@ -4,15 +4,25 @@ import com.dishanhai.gt_shanhai.testutil.MixinConfigs;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
 
+import com.dishanhai.gt_shanhai.mixin.PatternEncodingRecipeTypeContextMixin;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 class PatternEncodingRecipeTypeContextSourceTest {
 
@@ -26,6 +36,52 @@ class PatternEncodingRecipeTypeContextSourceTest {
             "gt_shanhai", "mixin", "JEISelectedRecipeContextMixin.java");
     private static final Path WRAP_MENU_MIXIN = Path.of("src", "main", "java", "com", "dishanhai",
             "gt_shanhai", "mixin", "PatternWrapControlMenuMixin.java");
+
+    @AfterEach
+    void clearEncodingContext() {
+        PatternRecipeTypeHelper.popSelectedEncodingRecipe();
+        PatternRecipeTypeHelper.popEncodingRecipeType();
+    }
+
+    @Test
+    void nextEncodingClearsAbandonedContextFromAnotherMenu() throws Exception {
+        assertAbandonedContextCleared(false);
+    }
+
+    @Test
+    void nextEncodingAlsoResetsFlagsLeftByAnInterruptedEncoding() throws Exception {
+        assertAbandonedContextCleared(true);
+    }
+
+    private static void assertAbandonedContextCleared(boolean staleFlags) throws Exception {
+        GTRecipe staleRecipe = new GTRecipe(null, new ResourceLocation("gtceu", "stale/recipe"),
+                new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
+                new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(),
+                new ArrayList<>(), new ArrayList<>(), new CompoundTag(), 20, false);
+        PatternRecipeTypeHelper.pushSelectedEncodingRecipe(staleRecipe);
+        PatternRecipeTypeHelper.pushEncodingRecipeType("gtceu:stale_type");
+        FakeEncodingMenu menu = new FakeEncodingMenu();
+        Field selectedFlag = PatternEncodingRecipeTypeContextMixin.class
+                .getDeclaredField("gtShanhai$pushedSelectedEncodingRecipe");
+        Field typeFlag = PatternEncodingRecipeTypeContextMixin.class
+                .getDeclaredField("gtShanhai$pushedEncodingRecipeType");
+        selectedFlag.setAccessible(true);
+        typeFlag.setAccessible(true);
+        selectedFlag.setBoolean(menu, staleFlags);
+        typeFlag.setBoolean(menu, staleFlags);
+        Method head = PatternEncodingRecipeTypeContextMixin.class.getDeclaredMethod(
+                "gtShanhai$pushRecipeTypeForEncoding", CallbackInfoReturnable.class);
+        head.setAccessible(true);
+
+        head.invoke(menu, new Object[] {null});
+
+        assertNull(PatternRecipeTypeHelper.currentSelectedEncodingRecipe(),
+                "沒有新選中配方的編碼不能繼承上一輪例外留下的權威來源");
+        assertEquals("", PatternRecipeTypeHelper.currentEncodingRecipeTypeId(),
+                "沒有 pending 類型時也必須清除上輪 ThreadLocal");
+        assertFalse(selectedFlag.getBoolean(menu));
+        assertFalse(typeFlag.getBoolean(menu));
+    }
 
     @Test
     void jeiSelectedRecipeTypeSurvivesUntilServerPatternEncoding() throws Exception {
@@ -95,5 +151,11 @@ class PatternEncodingRecipeTypeContextSourceTest {
         @SuppressWarnings("unused")
         private final ResourceLocation gTLCore$pendingQuickUploadRecipeTypeId =
                 new ResourceLocation("gtceu", "nano_forge");
+    }
+
+    private static final class FakeEncodingMenu extends PatternEncodingRecipeTypeContextMixin {
+
+        @SuppressWarnings("unused")
+        private ResourceLocation gTLCore$pendingQuickUploadRecipeTypeId;
     }
 }

@@ -31,6 +31,7 @@ import java.util.Set;
 public final class EaepProviderRecipeTypeBridge {
 
     private static final String EAEP_RECIPE_TYPE_NAMES = "extendedae_plus/recipe_type_names.json";
+    private static final long RECIPE_TYPE_NAME_CHECK_NANOS = 1_000_000_000L;
     private static final Gson GSON = new Gson();
     private static final ThreadLocal<List<List<String>>> INCOMING_PROVIDER_RECIPE_TYPES = new ThreadLocal<>();
     private static final ThreadLocal<List<Boolean>> INCOMING_STELLAR_PROVIDERS = new ThreadLocal<>();
@@ -38,6 +39,7 @@ public final class EaepProviderRecipeTypeBridge {
     private static final ThreadLocal<Boolean> INCOMING_WARNING_METADATA_KNOWN = new ThreadLocal<>();
     private static Map<String, String> recipeTypeNameCache = Collections.emptyMap();
     private static long recipeTypeNameCacheTime = Long.MIN_VALUE;
+    private static long recipeTypeNameLastCheckNanos = Long.MIN_VALUE;
 
     private EaepProviderRecipeTypeBridge() {
     }
@@ -131,10 +133,14 @@ public final class EaepProviderRecipeTypeBridge {
             return;
         }
         List<Integer> indices = new ArrayList<>(names.size());
+        int[] scores = new int[names.size()];
+        String normalizedQuery = normalize(query);
+        Map<String, String> mappings = loadRecipeTypeNameMappings();
         boolean hasMatch = false;
         for (int i = 0; i < names.size(); i++) {
             indices.add(i);
-            if (providerMatchesRecipeType(names.get(i), recipeTypesByName, query)) {
+            scores[i] = providerRecipeTypeMatchScore(names.get(i), recipeTypesByName, normalizedQuery, mappings);
+            if (scores[i] > 0) {
                 hasMatch = true;
             }
         }
@@ -142,8 +148,8 @@ public final class EaepProviderRecipeTypeBridge {
             return;
         }
         indices.sort((left, right) -> {
-            int leftScore = providerRecipeTypeMatchScore(names.get(left), recipeTypesByName, query);
-            int rightScore = providerRecipeTypeMatchScore(names.get(right), recipeTypesByName, query);
+            int leftScore = scores[left];
+            int rightScore = scores[right];
             if (leftScore != rightScore) {
                 return Integer.compare(rightScore, leftScore);
             }
@@ -215,16 +221,15 @@ public final class EaepProviderRecipeTypeBridge {
     }
 
     private static int providerRecipeTypeMatchScore(
-            String providerName, Map<String, Set<String>> recipeTypesByName, String query) {
+            String providerName, Map<String, Set<String>> recipeTypesByName, String normalizedQuery,
+            Map<String, String> mappings) {
         Set<String> typeIds = recipeTypesByName.get(providerName);
         if (typeIds == null || typeIds.isEmpty()) {
             return 0;
         }
-        String normalizedQuery = normalize(query);
         if (normalizedQuery.isEmpty()) {
             return 0;
         }
-        Map<String, String> mappings = loadRecipeTypeNameMappings();
         int bestScore = SelfSynthesisUpload.searchBonus(typeIds, normalizedQuery);
         for (String typeId : typeIds) {
             bestScore = Math.max(bestScore, recipeTypeMatchScore(typeId, normalizedQuery, mappings));
@@ -293,11 +298,17 @@ public final class EaepProviderRecipeTypeBridge {
     }
 
     private static synchronized Map<String, String> loadRecipeTypeNameMappings() {
+        long now = System.nanoTime();
+        boolean firstCheck = recipeTypeNameLastCheckNanos == Long.MIN_VALUE;
+        if (!firstCheck && now - recipeTypeNameLastCheckNanos < RECIPE_TYPE_NAME_CHECK_NANOS) {
+            return recipeTypeNameCache;
+        }
+        recipeTypeNameLastCheckNanos = now;
         try {
             Path cfgPath = FMLPaths.CONFIGDIR.get().resolve(EAEP_RECIPE_TYPE_NAMES);
             long modified = Files.exists(cfgPath, LinkOption.NOFOLLOW_LINKS)
                     ? Files.getLastModifiedTime(cfgPath).toMillis() : Long.MIN_VALUE;
-            if (modified == recipeTypeNameCacheTime) {
+            if (!firstCheck && modified == recipeTypeNameCacheTime) {
                 return recipeTypeNameCache;
             }
             recipeTypeNameCacheTime = modified;

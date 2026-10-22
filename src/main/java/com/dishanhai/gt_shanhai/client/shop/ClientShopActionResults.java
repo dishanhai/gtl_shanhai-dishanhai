@@ -20,10 +20,14 @@ public final class ClientShopActionResults {
     public record Result(int requestId, ShopActionPacket.Action action, long entryKey, long requested, long done,
                          ShopActionOutcome outcome, String reason, long receivedAtMs) {}
 
+    /** 山海：合成方案結果與買賣分開收取，避免互相消耗回執。 */
+    public record AutoCraftResult(int requestId, int planned, int total, long receivedAtMs) {}
+
     public static final int CAPACITY = 64;
     public static final long TTL_MS = 10_000L;
 
     private static final ArrayDeque<Result> INBOX = new ArrayDeque<>();
+    private static final ArrayDeque<AutoCraftResult> AUTO_CRAFT_INBOX = new ArrayDeque<>();
     private static int lastRequestId;
 
     private ClientShopActionResults() {}
@@ -56,5 +60,23 @@ public final class ClientShopActionResults {
 
     public static synchronized void clear() {
         INBOX.clear();
+        AUTO_CRAFT_INBOX.clear();
+    }
+
+    public static synchronized void offerAutoCraft(AutoCraftResult result) {
+        if (result == null || result.requestId() == 0) return;
+        if (AUTO_CRAFT_INBOX.size() >= CAPACITY) AUTO_CRAFT_INBOX.pollFirst();
+        AUTO_CRAFT_INBOX.addLast(result);
+    }
+
+    public static void drainAutoCraft(long nowMs, Consumer<AutoCraftResult> sink) {
+        List<AutoCraftResult> fresh;
+        synchronized (ClientShopActionResults.class) {
+            if (AUTO_CRAFT_INBOX.isEmpty()) return;
+            // 方案計算與閱讀用料可能很久；保留到原商店消化，斷線 clear、容量上限與 requestId 防止殘留誤用。
+            fresh = new ArrayList<>(AUTO_CRAFT_INBOX);
+            AUTO_CRAFT_INBOX.clear();
+        }
+        for (AutoCraftResult result : fresh) sink.accept(result);
     }
 }

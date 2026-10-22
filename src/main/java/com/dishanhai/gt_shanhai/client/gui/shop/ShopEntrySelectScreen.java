@@ -53,6 +53,12 @@ public class ShopEntrySelectScreen extends ScaledScreen {
     private boolean draggingScroll;
 
     public ShopEntrySelectScreen(Screen parent, Consumer<String> onPicked) {
+        this(parent, false, "", onPicked);
+    }
+
+    /** 山海编辑器可选隐藏商品并排除自己；任务绑定继续使用默认的可见商品入口。 */
+    public ShopEntrySelectScreen(Screen parent, boolean includeHidden, String excludeStableId,
+                                 Consumer<String> onPicked) {
         super(Component.literal("选择商店商品"));
         this.parent = parent;
         this.onPicked = onPicked;
@@ -61,9 +67,10 @@ public class ShopEntrySelectScreen extends ScaledScreen {
         this.useOffset = false;
         this.minScale = 0.1f;
         this.maxScale = Float.MAX_VALUE;
+        String exclude = excludeStableId == null ? "" : excludeStableId;
         for (ShopCatalogManifest.Stub stub : ClientShopCatalog.stubs()) {
-            // 隐藏商品不给选：它本来就不该在任何面向玩家的入口露出
-            if (stub.hidden() || stub.stableId().isEmpty()) continue;
+            if (stub.stableId().isEmpty() || stub.stableId().equals(exclude)) continue;
+            if (stub.hidden() && !includeHidden) continue;
             all.add(stub);
         }
     }
@@ -164,7 +171,7 @@ public class ShopEntrySelectScreen extends ScaledScreen {
             if (hover) g.fill(left + 6, ry, left + 6 + rowW, ry + ROW_H - 1, ROW_BG);
             String name = GuiRenderUtil.trimText(this.font, entryName(stub), rowW - 8);
             g.drawString(this.font, "§f" + name, left + 10, ry + 1, WHITE, true);
-            String path = GuiRenderUtil.trimText(this.font, categoryPath(stub), rowW - 8);
+            String path = GuiRenderUtil.trimText(this.font, (stub.hidden() ? "[隐藏] " : "") + categoryPath(stub), rowW - 8);
             g.drawString(this.font, "§8" + path, left + 10, ry + 10, GRAY, true);
         }
         drawScrollbar(g, mx, my, visible, maxScroll);
@@ -262,6 +269,12 @@ public class ShopEntrySelectScreen extends ScaledScreen {
         g.fill(x, y, x + w, y + h, GOLD_DARK);
         g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hv ? BTN_HOVER : BTN_BG);
         g.drawCenteredString(this.font, label, x + w / 2, y + (h - 8) / 2, WHITE);
+    }
+
+    /** 山海：取消挑选也回到持有草稿的父画面，Esc 不直接关闭整个编辑流程。 */
+    @Override
+    public void onClose() {
+        Minecraft.getInstance().setScreen(parent);
     }
 
     @Override

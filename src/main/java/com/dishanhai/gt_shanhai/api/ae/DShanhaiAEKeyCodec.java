@@ -16,7 +16,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Stable AEKey NBT codec used by SDA virtual cells and ME disk related storage. */
 public final class DShanhaiAEKeyCodec {
@@ -26,15 +28,20 @@ public final class DShanhaiAEKeyCodec {
     public static final String TAG_KEY = "key";
     public static final String TAG_AMOUNT = "amount";
 
+    /**
+     * 正規化 NBT / SHA-256 結果快取上限。
+     * AEKey 是不可變值物件，同一把 key 的正規化 tag 與雜湊在整個 JVM 生命週期內不會變化，
+     * 命中快取即可省掉 normalizeTag + canonicalString + MessageDigest 三段成本。
+     */
+    private static final int CACHE_LIMIT = 4096;
+
+    private static final Map<AEKey, CachedKey> CACHE = new BoundedKeyCache();
+    private static final CachedKey EMPTY = new CachedKey(new CompoundTag());
+
     private DShanhaiAEKeyCodec() {}
 
     public static CompoundTag toNormalizedTag(AEKey key) {
-        if (key == null) return new CompoundTag();
-        CompoundTag tag = normalizeTag(key.toTagGeneric());
-        if (tag.contains("tag", Tag.TAG_COMPOUND) && tag.getCompound("tag").isEmpty()) {
-            tag.remove("tag");
-        }
-        return tag;
+        return cachedEntry(key).copyTag();
     }
 
     public static AEKey fromNormalizedTag(CompoundTag tag) {
@@ -47,16 +54,34 @@ public final class DShanhaiAEKeyCodec {
     }
 
     public static String stableHash(AEKey key) {
-        return sha256(canonicalString(toNormalizedTag(key)));
+        return cachedEntry(key).hash();
     }
 
     public static CompoundTag writeHashedEntry(AEKey key, long amount) {
         CompoundTag entry = new CompoundTag();
-        CompoundTag keyTag = toNormalizedTag(key);
-        entry.putString(TAG_HASH, sha256(canonicalString(keyTag)));
-        entry.put(TAG_KEY, keyTag);
+        CachedKey cached = cachedEntry(key);
+        entry.putString(TAG_HASH, cached.hash());
+        entry.put(TAG_KEY, cached.copyTag());
         entry.putLong(TAG_AMOUNT, Math.max(0L, amount));
         return entry;
+    }
+
+    /** 取 key 的正規化結果與雜湊；null key 回傳空條目。 */
+    public static CachedKey cachedEntry(AEKey key) {
+        if (key == null) return EMPTY;
+        CachedKey cached = CACHE.get(key);
+        if (cached != null) return cached;
+        CachedKey created = new CachedKey(normalizeForKey(key));
+        CACHE.put(key, created);
+        return created;
+    }
+
+    private static CompoundTag normalizeForKey(AEKey key) {
+        CompoundTag tag = normalizeTag(key.toTagGeneric());
+        if (tag.contains("tag", Tag.TAG_COMPOUND) && tag.getCompound("tag").isEmpty()) {
+            tag.remove("tag");
+        }
+        return tag;
     }
 
     public static AEKey readHashedEntryKey(CompoundTag entry) {
@@ -164,5 +189,49 @@ public final class DShanhaiAEKeyCodec {
 
     private static ResourceLocation parseId(String id) {
         return id != null ? ResourceLocation.tryParse(id.trim()) : null;
+    }
+
+    /** 單一 key 的正規化 NBT（不可變持有）與其 SHA-256 雜湊。 */
+    public static final class CachedKey {
+        private final CompoundTag tag;
+        private final String hash;
+
+        private CachedKey(CompoundTag tag) {
+            this.tag = tag;
+            this.hash = sha256(canonicalString(tag));
+        }
+
+        public CompoundTag copyTag() {
+            return tag.copy();
+        }
+
+        public String hash() {
+            return hash;
+        }
+    }
+
+    /**
+     * 插入序保留、超過 {@link #CACHE_LIMIT} 就淘汰最舊項目的快取。
+     * 存取皆 synchronized：寫入可能在伺服器執行緒，客戶端 tooltip 亦會讀取。
+     */
+    private static final class BoundedKeyCache extends LinkedHashMap<AEKey, CachedKey> {
+        private BoundedKeyCache() {
+            super(64, 0.75f, false);
+        }
+
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<AEKey, CachedKey> eldest) {
+            return size() > CACHE_LIMIT;
+        }
+
+        @Override
+        public synchronized CachedKey get(Object key) {
+            return super.get(key);
+        }
+
+        @Override
+        public synchronized CachedKey put(AEKey key, CachedKey value) {
+            return super.put(key, value);
+        }
     }
 }

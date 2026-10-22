@@ -2,20 +2,40 @@ package com.dishanhai.gt_shanhai.common.machine.part;
 
 import appeng.api.stacks.AEItemKey;
 
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+
+import net.minecraftforge.event.TagsUpdatedEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+
 import java.util.HashMap;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
  * 与特大号标签过滤总线相同的通配规则：{@code forge:ores*}、{@code *raw*}、{@code @modid}。
  * 星空库存总成和星律样板总成的标签拉取共用这一份。
  */
-final class StellarTagFilter {
+@Mod.EventBusSubscriber(modid = GTDishanhaiMod.MOD_ID)
+public final class StellarTagFilter {
+
+    private static final AtomicLong TAG_REVISION = new AtomicLong();
 
     private final String[] whiteTags;
     private final String[] blackTags;
     private final boolean hasWhite;
     private final HashMap<Object, Boolean> cache = new HashMap<>();
+    private long cacheRevision = revision();
+
+    @SubscribeEvent
+    public static void onTagsUpdated(TagsUpdatedEvent event) {
+        TAG_REVISION.incrementAndGet();
+    }
+
+    static long revision() {
+        return TAG_REVISION.get();
+    }
 
     StellarTagFilter(String white, String black) {
         String whitelist = white == null ? "" : white.trim();
@@ -26,6 +46,11 @@ final class StellarTagFilter {
     }
 
     boolean isListed(AEItemKey itemKey) {
+        long revision = revision();
+        if (cacheRevision != revision) {
+            cache.clear();
+            cacheRevision = revision;
+        }
         Boolean cached = cache.get(itemKey.getPrimaryKey());
         if (cached != null) {
             return cached;

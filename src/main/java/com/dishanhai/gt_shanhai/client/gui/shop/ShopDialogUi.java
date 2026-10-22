@@ -103,6 +103,18 @@ final class ShopDialogUi {
         return feedback.hover(rowKey(index), hovered, System.currentTimeMillis());
     }
 
+    /** 自己画的格子（如编辑器槽位）的 hover 渐变 0..1，和按钮同一张弹簧表。 */
+    float hoverAt(int x, int y, int w, int h, boolean hovered) {
+        return feedback.hover(key(x, y, w, h), hovered, System.currentTimeMillis());
+    }
+
+    /** 自己画的格子按同一套压感与轻抖画：{@link #reject} 这个格子时它会轻抖。减少动效时原样画。 */
+    void withMotion(GuiGraphics g, int x, int y, int w, int h, Runnable draw) {
+        long k = key(x, y, w, h);
+        ButtonFeedback.Visual v = feedback.visual(k, k, true, System.currentTimeMillis(), reduceMotion);
+        GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(), draw);
+    }
+
     // ============ Enter ============
 
     /** Enter 此刻是否按着（物理键状态）。 */

@@ -1,9 +1,12 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
+import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
+import com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve;
 import com.dishanhai.gt_shanhai.client.gui.scaled.PinyinSearchBridge;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.jei.JeiBookmarkBridge;
 
 import dev.architectury.fluid.FluidStack;
@@ -127,6 +130,10 @@ public class MultiPickerScreen extends ScaledScreen {
     private Runnable afterConfirm; // 全部回调之后、回到父界面之前。取消不走这里。
     private final boolean restrictedMode;         // true = 仅限固定候选列表（如已配置货币），无模式切换/物品栏/流体
     private final boolean allowTexture;           // true = 浏览模式循环里加入「贴图」（仅显示图标选择器开启，物品/流体排选择器不受影响）
+    // 替换模式：编辑器点已有的格子（或商品空占位格）打开。已选清单预先放着原来的东西，确认后整份清单换掉那一格，
+    // 清空再确认 = 删掉那一格（由编辑器的 afterConfirm 处理）。取代原先点格子弹出的 FTBLib 单选页。
+    private boolean replacing;
+    private boolean hadOriginal;                  // 替换模式下原格子有东西（空占位格没有）
 
     private Mode mode;                            // 浏览模式：物品 / 物品栏 / 流体 / [贴图]（受限模式恒为 ITEM）
     private List<ItemStack> invStacks = new ArrayList<>();  // 物品栏模式：玩家背包实物（含 NBT）
@@ -150,8 +157,15 @@ public class MultiPickerScreen extends ScaledScreen {
     private int gridScroll;                       // 网格行偏移
     private int selScroll;                        // 已选清单行偏移
     private boolean suppressCount;                // 切换激活项时抑制数量框回调
-    private boolean draggingScroll;                // 正在拖拽网格滚动条
     private boolean itemCacheAppliedOnce;          // 本次开屏后台物品缓存建完那一刻，只强制刷新一次过滤结果
+
+    /** 按钮、滚动条、清单行 hover 全走和商店弹窗同一套反馈（山海署名）。 */
+    private final ShopDialogUi ui = new ShopDialogUi(GOLD_DARK, GOLD, BTN_BG, BTN_HOVER);
+    /** 刚加入清单的那一项：那一行和网格对应格子亮一下再淡掉，告诉玩家「加到这里了」。 */
+    private Sel lastAdded;
+    private long lastAddedAtMs;
+    /** 切换浏览模式（物品/物品栏/书签/流体/贴图）的那一刻：网格整片重新淡入，不硬切。 */
+    private long modeChangedAtMs;
 
     private EditBox searchBox, countBox;
     private int left, top, panelWidth, panelHeight;
@@ -160,6 +174,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private int selX, selY, selW;
 
     private ItemStack hoverItem;                  // 悬停网格物品（renderTooltips 消费）
+    private String hoverSelNameFull;              // 清单列名放不下时的完整名字（renderTooltips 消费）
     private List<Component> hoverFluidTip;        // 悬停网格流体名
 
     public MultiPickerScreen(Screen parent, boolean browseFluid, java.util.function.ObjLongConsumer<ItemStack> onAddItem, Consumer<FluidStack> onAddFluid) {
@@ -451,6 +466,8 @@ public class MultiPickerScreen extends ScaledScreen {
 
     @Override
     protected void initScaled() {
+        ui.cancel();        // 从上一个界面回来时不卡在按下态
+        ui.syncEnterHeld(); // 按 Enter 打开本框时，松开前的系统重复不算确认
         left = Math.max(6, (vWidth - TARGET_W) / 2);
         top = Math.max(8, (vHeight - TARGET_H) / 2);
         panelWidth = Math.min(TARGET_W, vWidth - 12);
@@ -658,6 +675,7 @@ public class MultiPickerScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        ui.frame(mx, my);
         // 后台物品缓存刚建完的那一帧：之前按"暂无条目"缓存的过滤结果已经过期，必须清掉重算一次，
         // 否则加载完成后如果搜索框内容没变，会一直卡在建缓存前算出来的空结果上（见反馈修复）。
         if (itemCacheReady && !itemCacheAppliedOnce) {
@@ -669,19 +687,22 @@ public class MultiPickerScreen extends ScaledScreen {
         }
         hoverItem = null;
         hoverFluidTip = null;
+        hoverSelNameFull = null;
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
         g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
         g.fill(left + 5, top + 18, left + panelWidth - 5, top + panelHeight - 5, PANEL_INNER);
 
-        String headerHint = restrictedMode
+        String headerHint = replacing
+                ? "§6替换这一格  §7右侧清单换掉原格（可改数量/换别的/多加几个）· 清空再确认=移除这一格"
+                : restrictedMode
                 ? "§6多选货币  §7左键=加入/选中 · 右键=加入/移除 · 仅列出已配置货币"
                 : "§6多选资源  §7左键=加入/选中 · 右键=加入/移除 · 物品栏模式取实物(带NBT) · Ctrl+Shift+左键=无限胞";
         g.drawString(this.font, headerHint, left + 10, top + 5, GOLD, true);
 
         // 浏览模式切换按钮（搜索框右侧，点一下循环：物品→物品栏→流体；受限模式无此按钮）
         int modeX = left + 12 + 200 + 8;
-        if (!restrictedMode) drawBtn(g, modeX, top + 21, 70, 16, modeLabel(), mx, my);
+        if (!restrictedMode) ui.draw(g, this.font, modeX, top + 21, 70, 16, modeLabel(), mx, my, true);
         // 数量框标签
         g.drawString(this.font, active != null && active.isFluid ? "§7mB:" : "§7数量:", left + panelWidth - 12 - COUNT_BOX_W - 30, top + 25, GRAY, true);
         drawCountSteps(g, mx, my);
@@ -691,8 +712,8 @@ public class MultiPickerScreen extends ScaledScreen {
         drawSelectedList(g, mx, my);
 
         // 底部按钮
-        drawBtn(g, confirmX(), top + panelHeight - 24, 90, 16, "§a确认加入 (" + selected.size() + ")", mx, my);
-        drawBtn(g, cancelX(), top + panelHeight - 24, 56, 16, "§c取消", mx, my);
+        ui.draw(g, this.font, confirmX(), top + panelHeight - 24, 90, 16, confirmLabel(), mx, my, true);
+        ui.draw(g, this.font, cancelX(), top + panelHeight - 24, 56, 16, "§c取消", mx, my, true);
     }
 
     private String modeLabel() {
@@ -716,9 +737,9 @@ public class MultiPickerScreen extends ScaledScreen {
         int bx0 = countStepX(), bw = countStepW();
         for (int i = 0; i < 4; i++) {
             int bx = bx0 + i * (bw + 3);
-            drawBtn(g, bx, countStepY(0), bw, COUNT_STEP_H, "§a+" + compactStep(COUNT_STEPS[i]), mx, my);
-            drawBtn(g, bx, countStepY(1), bw, COUNT_STEP_H, "§c-" + compactStep(COUNT_STEPS[i]), mx, my);
-            drawBtn(g, bx, countStepY(2), bw, COUNT_STEP_H, COUNT_SCALE_LABELS[i], mx, my);
+            ui.draw(g, this.font, bx, countStepY(0), bw, COUNT_STEP_H, "§a+" + compactStep(COUNT_STEPS[i]), mx, my, true);
+            ui.draw(g, this.font, bx, countStepY(1), bw, COUNT_STEP_H, "§c-" + compactStep(COUNT_STEPS[i]), mx, my, true);
+            ui.draw(g, this.font, bx, countStepY(2), bw, COUNT_STEP_H, COUNT_SCALE_LABELS[i], mx, my, true);
         }
     }
 
@@ -726,25 +747,28 @@ public class MultiPickerScreen extends ScaledScreen {
     private boolean countStepsClicked(double mx, double my) {
         if (active == null || active.isTexture) return false;
         int bx0 = countStepX(), bw = countStepW();
+        int row = stepRowAt(my);
+        if (row < 0) return false;
         for (int i = 0; i < 4; i++) {
             int bx = bx0 + i * (bw + 3);
-            if (GuiRenderUtil.isHovering(mx, my, bx, countStepY(0), bw, COUNT_STEP_H)) {
-                active.count = addClamp(active.count, COUNT_STEPS[i]);
-                syncCountBox();
-                return true;
-            }
-            if (GuiRenderUtil.isHovering(mx, my, bx, countStepY(1), bw, COUNT_STEP_H)) {
-                active.count = addClamp(active.count, -COUNT_STEPS[i]);
-                syncCountBox();
-                return true;
-            }
-            if (GuiRenderUtil.isHovering(mx, my, bx, countStepY(2), bw, COUNT_STEP_H)) {
-                active.count = i < 2 ? mulClamp(active.count, COUNT_SCALES[i]) : divClamp(active.count, COUNT_SCALES[i]);
-                syncCountBox();
-                return true;
-            }
+            if (!ui.hit(mx, my, bx, countStepY(row), bw, COUNT_STEP_H, true)) continue;
+            if (row == 0) active.count = addClamp(active.count, COUNT_STEPS[i]);
+            else if (row == 1) active.count = addClamp(active.count, -COUNT_STEPS[i]);
+            else active.count = i < 2 ? mulClamp(active.count, COUNT_SCALES[i]) : divClamp(active.count, COUNT_SCALES[i]);
+            syncCountBox();
+            ShopUiSounds.step(i);
+            return true;
         }
         return false;
+    }
+
+    /** 步进按钮三排：0=加、1=减、2=倍率；不在任何一排返回 -1。 */
+    private int stepRowAt(double my) {
+        for (int row = 0; row < 3; row++) {
+            int y = countStepY(row);
+            if (my >= y && my < y + COUNT_STEP_H) return row;
+        }
+        return -1;
     }
 
     private void syncCountBox() {
@@ -785,7 +809,9 @@ public class MultiPickerScreen extends ScaledScreen {
     private void drawGrid(GuiGraphics g, int mx, int my) {
         if (mode == Mode.ITEM && !itemCacheReady) {
             // 物品模式且后台缓存还没建完：给个明确的"加载中"占位，别让玩家误以为搜索没结果
-            g.drawCenteredString(this.font, "§e正在后台构建物品列表…", gridX + gridW / 2, gridY + (gridBottom - gridY) / 2 - 4, GRAY);
+            float pulse = 0.55f + 0.45f * (float) Math.sin((System.currentTimeMillis() % 1_200L) / 1_200.0 * Math.PI * 2.0);
+            g.drawCenteredString(this.font, "§e正在后台构建物品列表…", gridX + gridW / 2, gridY + (gridBottom - gridY) / 2 - 4,
+                    GuiMotion.lerpColor(0xFF808080, 0xFFFFE080, pulse));
             g.drawString(this.font, "§8物品列表加载中，请稍候…", gridX, gridBottom + 2, GRAY, true);
             return;
         }
@@ -796,59 +822,76 @@ public class MultiPickerScreen extends ScaledScreen {
         if (gridScroll > maxScroll) gridScroll = maxScroll;
         int start = gridScroll * cols;
         boolean textureMode = mode == Mode.TEXTURE;
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                int idx = start + r * cols + c;
-                if (idx >= total) break;
-                int x = gridX + c * PITCH;
-                int y = gridY + r * PITCH;
-                int resIdx = filtered.get(idx);
-                // BOOKMARK 模式物品+流体混页不分流，每格单独判断落在哪一段（见 isBookmarkFluidIndex）
-                boolean fluidHere = mode == Mode.FLUID || isBookmarkFluidIndex(resIdx);
-                boolean hv = GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT);
-                boolean chosen = findSelected(resIdx) >= 0;
-                EditorWidgets.checkerSlot(g, x, y, hv);
-                if (fluidHere) {
-                    EditorWidgets.fluidIcon(g, x + 2, y + 2, 16, curFluid(resIdx));
-                } else if (textureMode) {
-                    EditorWidgets.textureThumb(g, x + 2, y + 2, 16, ALL_TEXTURES.get(resIdx));
-                } else {
-                    ItemStack st = gridItem(resIdx);
-                    g.renderItem(st, x + 2, y + 2);
-                    if (st.hasTag()) { // 带 NBT 的实物 → 左下角小黄点提示
-                        g.fill(x + 2, y + 15, x + 5, y + 18, 0xFFFFD000);
+        long nowGrid = System.currentTimeMillis();
+        // 切浏览模式后整片网格重新淡入，别硬切
+        float appear = modeAppear();
+        g.pose().pushPose();
+        try {
+            if (appear < 1f) g.pose().translate(0f, (1f - appear) * 6f, 0f);
+            for (int r = 0; r < rows; r++) {
+                for (int c = 0; c < cols; c++) {
+                    int idx = start + r * cols + c;
+                    if (idx >= total) break;
+                    int x = gridX + c * PITCH;
+                    int y = gridY + r * PITCH;
+                    int resIdx = filtered.get(idx);
+                    // BOOKMARK 模式物品+流体混页不分流，每格单独判断落在哪一段（见 isBookmarkFluidIndex）
+                    boolean fluidHere = mode == Mode.FLUID || isBookmarkFluidIndex(resIdx);
+                    boolean hv = GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT);
+                    boolean chosen = findSelected(resIdx) >= 0;
+                    // 刚加进清单的那一项：外圈金光先画，压在槽位下面
+                    float fresh = chosen ? addFlash(addedFor(resIdx), nowGrid) : 0f;
+                    if (fresh > 0.01f) {
+                        g.fill(x - 2, y - 2, x + SLOT + 2, y + SLOT + 2, (Math.round(0xB0 * fresh) << 24) | 0xFFD040);
+                    }
+                    EditorWidgets.checkerSlot(g, x, y, hv);
+                    if (fluidHere) {
+                        EditorWidgets.fluidIcon(g, x + 2, y + 2, 16, curFluid(resIdx));
+                    } else if (textureMode) {
+                        EditorWidgets.textureThumb(g, x + 2, y + 2, 16, ALL_TEXTURES.get(resIdx));
+                    } else {
+                        ItemStack st = gridItem(resIdx);
+                        g.renderItem(st, x + 2, y + 2);
+                        if (st.hasTag()) { // 带 NBT 的实物 → 左下角小黄点提示
+                            g.fill(x + 2, y + 15, x + 5, y + 18, 0xFFFFD000);
+                        }
+                    }
+                    if (chosen) { // 已在清单里 → 绿色对勾角标
+                        g.fill(x + 13, y + 1, x + 19, y + 7, 0xCC1E7A2E);
+                        g.drawString(this.font, "§a✔", x + 13, y + 1, WHITE, false);
+                    }
+                    if (hv) {
+                        if (fluidHere) hoverFluidTip = List.of(Component.literal(fluidName(curFluid(resIdx))));
+                        else if (textureMode) hoverFluidTip = List.of(Component.literal(ALL_TEXTURES.get(resIdx).toString()));
+                        else hoverItem = gridItem(resIdx);
                     }
                 }
-                if (chosen) { // 已在清单里 → 绿色对勾角标
-                    g.fill(x + 13, y + 1, x + 19, y + 7, 0xCC1E7A2E);
-                    g.drawString(this.font, "§a✔", x + 13, y + 1, WHITE, false);
-                }
-                if (hv) {
-                    if (fluidHere) hoverFluidTip = List.of(Component.literal(fluidName(curFluid(resIdx))));
-                    else if (textureMode) hoverFluidTip = List.of(Component.literal(ALL_TEXTURES.get(resIdx).toString()));
-                    else hoverItem = gridItem(resIdx);
-                }
             }
+        } finally {
+            g.pose().popPose();
         }
         // 滚动/计数提示
         g.drawString(this.font, "§8匹配 " + total + " 项 · 滚轮翻页/拖动右侧滚动条", gridX, gridBottom + 2, GRAY, true);
     }
 
-    /** 网格右侧竖向滚动条（拖拽用），画在网格与已选清单之间的缝隙里。 */
+    /** 切浏览模式后网格淡入进度 0..1；减少动效时直接 1。 */
+    private float modeAppear() {
+        if (modeChangedAtMs <= 0L) return 1f;
+        if (ClientShopUiSettings.reduceMotion()) return 1f;
+        float t = GuiMotion.clamp01((System.currentTimeMillis() - modeChangedAtMs) / (float) GuiRenderUtil.MOTION_MS);
+        return GuiRenderUtil.easeOut(t);
+    }
+
+    /** 网格右侧竖向滚动条（拖拽用），画在网格与已选清单之间的缝隙里。走共用件：hover 变亮、可点轨道直达。 */
     private void drawGridScrollbar(GuiGraphics g, int mx, int my) {
         int trackX = scrollBarX();
         int trackY = gridY, trackH = gridBottom - gridY;
         g.fill(trackX, trackY, trackX + SCROLLBAR_W, trackY + trackH, PANEL_BG);
-        int maxScroll = gridMaxScroll();
-        int rows = gridRows(), totalRows = gridTotalRows();
-        if (maxScroll <= 0 || totalRows <= 0) {
+        if (gridMaxScroll() <= 0) {
             g.fill(trackX, trackY, trackX + SCROLLBAR_W, trackY + trackH, BTN_BG);
             return;
         }
-        int thumbH = Math.max(10, trackH * rows / totalRows);
-        int thumbY = trackY + (trackH - thumbH) * gridScroll / maxScroll;
-        boolean hv = draggingScroll || GuiRenderUtil.isHovering(mx, my, trackX, thumbY, SCROLLBAR_W, thumbH);
-        g.fill(trackX, thumbY, trackX + SCROLLBAR_W, thumbY + thumbH, hv ? BTN_HOVER : GOLD_DARK);
+        ui.drawScrollbar(g, trackX, trackY, trackH, gridTotalRows(), gridRows(), gridScroll, gridMaxScroll(), mx, my);
     }
 
     private void drawSelectedList(GuiGraphics g, int mx, int my) {
@@ -856,30 +899,41 @@ public class MultiPickerScreen extends ScaledScreen {
         g.fill(selX - 1, selY - 1, selX + selW + 1, gridBottom + 1, PANEL_BG);
         g.drawString(this.font, "§6已选清单 §7(" + selected.size() + ")", selX + 2, selY, GOLD, true);
         if (!selected.isEmpty()) {
-            drawBtn(g, syncAllX(), selY - 1, 32, 10, "§b同步", mx, my);
-            drawBtn(g, clearAllX(), selY - 1, 32, 10, "§c清空", mx, my);
+            ui.draw(g, this.font, syncAllX(), selY - 1, 32, 10, "§b同步", mx, my, true);
+            ui.draw(g, this.font, clearAllX(), selY - 1, 32, 10, "§c清空", mx, my, true);
         }
         int visible = selVisibleRows();
         int maxScroll = Math.max(0, selected.size() - visible);
         if (selScroll > maxScroll) selScroll = maxScroll;
         int baseY = selY + 14;
+        long now = System.currentTimeMillis();
         for (int i = 0; i < visible; i++) {
             int idx = selScroll + i;
             if (idx >= selected.size()) break;
             Sel s = selected.get(idx);
             int ry = baseY + i * SEL_ROW_H;
             boolean rowHover = GuiRenderUtil.isHovering(mx, my, selX, ry, selW, SEL_ROW_H);
+            // hover 渐变（和按钮同一张弹簧表），不是一下子变色
+            float glow = ui.rowHover(idx, rowHover);
             if (s == active) g.fill(selX, ry, selX + selW, ry + SEL_ROW_H, SEL_ACTIVE);
-            else if (rowHover) g.fill(selX, ry, selX + selW, ry + SEL_ROW_H, 0x33FFFFFF);
+            if (glow > 0.01f && s != active) {
+                g.fill(selX, ry, selX + selW, ry + SEL_ROW_H, GuiMotion.lerpColor(0x00000000, 0x33FFFFFF, glow));
+            }
+            // 刚加入的那一项：整行金光闪一下再淡掉
+            float fresh = addFlash(s, now);
+            if (fresh > 0.01f) {
+                g.fill(selX, ry, selX + selW, ry + SEL_ROW_H, (Math.round(0xB0 * fresh) << 24) | 0xFFD040);
+                g.fill(selX, ry, selX + 2, ry + SEL_ROW_H, (Math.round(0xFF * fresh) << 24) | 0xFFE080);
+            }
             // 图标
             if (s.isFluid) EditorWidgets.fluidIcon(g, selX + 1, ry + 1, 16, s.fluid);
             else if (s.isTexture) EditorWidgets.textureThumb(g, selX + 1, ry + 1, 16, s.textureId);
             else g.renderItem(s.itemIcon, selX, ry);
-            // 名称（带 NBT 的物品名前加 §e*；贴图显示资源路径）
+            // 名称（带 NBT 的物品名前加 §e*；贴图显示资源路径），长名换行不砍字
             String nm = s.isFluid ? fluidName(s.fluid)
                     : s.isTexture ? s.textureId.toString()
                     : (s.itemIcon.hasTag() ? "*" : "") + s.itemIcon.getHoverName().getString();
-            g.drawString(this.font, "§f" + GuiRenderUtil.trimText(this.font, nm, selW - 20 - 62), selX + 20, ry + 2, WHITE, true);
+            drawListName(g, "§f" + nm, selX + 20, ry + 2, selW - 20 - 62, rowHover);
             // 数量 + 单位（贴图无数量概念，不显示）
             if (!s.isTexture) {
                 String amt = groupLong(s.count) + (s.isFluid ? "mB" : "");
@@ -903,6 +957,9 @@ public class MultiPickerScreen extends ScaledScreen {
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
         if (hoverItem != null && !hoverItem.isEmpty()) {
             g.renderTooltip(this.font, hoverItem, mx, my);
+        } else if (hoverSelNameFull != null) {
+            // 清单里名字被折行截掉的，悬停看全名
+            g.renderComponentTooltip(this.font, java.util.List.of(Component.literal(hoverSelNameFull)), mx, my);
         } else if (hoverFluidTip != null) {
             g.renderComponentTooltip(this.font, hoverFluidTip, mx, my);
         } else if (GuiRenderUtil.isHovering(smx, smy, left + 12, top + 22, 200, 14)) {
@@ -923,11 +980,11 @@ public class MultiPickerScreen extends ScaledScreen {
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
         // 底部按钮
-        if (GuiRenderUtil.isHovering(mx, my, confirmX(), top + panelHeight - 24, 90, 16)) { confirm(); return true; }
-        if (GuiRenderUtil.isHovering(mx, my, cancelX(), top + panelHeight - 24, 56, 16)) { Minecraft.getInstance().setScreen(parent); return true; }
+        if (ui.hit(mx, my, confirmX(), top + panelHeight - 24, 90, 16, true)) { confirm(); return true; }
+        if (ui.hit(mx, my, cancelX(), top + panelHeight - 24, 56, 16, true)) { Minecraft.getInstance().setScreen(parent); return true; }
         // 浏览模式切换（循环：物品→物品栏→JEI书签→流体→[贴图，仅 allowTexture]；受限模式无此按钮）
         int modeX = left + 12 + 200 + 8;
-        if (!restrictedMode && GuiRenderUtil.isHovering(mx, my, modeX, top + 21, 70, 16)) {
+        if (!restrictedMode && ui.hit(mx, my, modeX, top + 21, 70, 16, true)) {
             mode = switch (mode) {
                 case ITEM -> Mode.INVENTORY;
                 case INVENTORY -> Mode.BOOKMARK;
@@ -937,17 +994,18 @@ public class MultiPickerScreen extends ScaledScreen {
             };
             if (mode == Mode.TEXTURE) ensureTextureCache(); // 懒加载：只有真的切进贴图模式才扫描资源包
             rebuildFilter();
+            modeChangedAtMs = System.currentTimeMillis(); // 网格整片重新淡入，不硬切
             return true;
         }
         // 数量快速填写三排步进按钮
         if (countStepsClicked(mx, my)) return true;
         // 已选清单「同步」：把顶部数量框当前值套用到全部已选项目
-        if (!selected.isEmpty() && GuiRenderUtil.isHovering(mx, my, syncAllX(), selY - 1, 32, 10)) {
+        if (!selected.isEmpty() && ui.hit(mx, my, syncAllX(), selY - 1, 32, 10, true)) {
             syncAllCounts();
             return true;
         }
         // 已选清单「清空」
-        if (!selected.isEmpty() && GuiRenderUtil.isHovering(mx, my, clearAllX(), selY - 1, 32, 10)) {
+        if (!selected.isEmpty() && ui.hit(mx, my, clearAllX(), selY - 1, 32, 10, true)) {
             clearAll();
             return true;
         }
@@ -977,34 +1035,23 @@ public class MultiPickerScreen extends ScaledScreen {
     }
 
     private boolean gridScrollbarClicked(double mx, double my) {
-        int trackX = scrollBarX();
-        if (mx < trackX || mx > trackX + SCROLLBAR_W || my < gridY || my > gridBottom) return false;
-        draggingScroll = true;
-        updateScrollFromDrag(my);
+        int first = ui.beginDrag(mx, my, scrollBarX(), gridY, gridBottom - gridY,
+                gridTotalRows(), gridRows(), gridMaxScroll());
+        if (first < 0) return false;
+        gridScroll = first; // 点轨道任意一处直接跳过去
         return true;
-    }
-
-    /** 按拖拽点的 Y 坐标反算 gridScroll（拇指块中心跟随鼠标）。 */
-    private void updateScrollFromDrag(double my) {
-        int maxScroll = gridMaxScroll();
-        if (maxScroll <= 0) { gridScroll = 0; return; }
-        int rows = gridRows(), totalRows = gridTotalRows();
-        int trackH = gridBottom - gridY;
-        int thumbH = Math.max(10, trackH * rows / totalRows);
-        double usable = Math.max(1, trackH - thumbH);
-        double rel = (my - gridY - thumbH / 2.0) / usable;
-        gridScroll = (int) Math.round(Math.max(0.0, Math.min(1.0, rel)) * maxScroll);
     }
 
     @Override
     protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
-        if (draggingScroll) { updateScrollFromDrag(my); return true; }
+        int first = ui.drag(my, gridY, gridBottom - gridY, gridTotalRows(), gridRows(), gridMaxScroll());
+        if (first >= 0) { gridScroll = first; return true; }
         return super.universalMouseDragged(mx, my, btn, dx, dy);
     }
 
     @Override
     protected boolean universalMouseReleased(double mx, double my, int btn) {
-        if (draggingScroll) { draggingScroll = false; return true; }
+        ui.release();
         return super.universalMouseReleased(mx, my, btn);
     }
 
@@ -1059,9 +1106,25 @@ public class MultiPickerScreen extends ScaledScreen {
         }
         selected.add(s);
         setActive(s);
+        markAdded(s);
+        ShopUiSounds.click();
         // 新增项滚到可见底部
         int visible = selVisibleRows();
         if (selected.size() > visible) selScroll = selected.size() - visible;
+    }
+
+    /** 記下剛加入的那一項，清單列和網格格子亮一下再淡掉。 */
+    private void markAdded(Sel s) {
+        lastAdded = s;
+        lastAddedAtMs = System.currentTimeMillis();
+    }
+
+    /** 剛加入那一項的閃光強度 0..1；跟它無關的項一直是 0。 */
+    private float addFlash(Sel s, long now) {
+        if (s != lastAdded || lastAddedAtMs <= 0L) return 0f;
+        if (ClientShopUiSettings.reduceMotion()) return 0f;
+        float t = GuiMotion.clamp01((now - lastAddedAtMs) / 600f);
+        return t >= 1f ? 0f : 1f - GuiRenderUtil.easeOut(t);
     }
 
     /**
@@ -1114,6 +1177,25 @@ public class MultiPickerScreen extends ScaledScreen {
         if (player != null) player.displayClientMessage(Component.literal(message), true);
     }
 
+    /** 網格第 {@code resIdx} 項對應的已選項（沒有就 null），給「剛加入」閃光對位用。 */
+    private Sel addedFor(int resIdx) {
+        if (lastAdded == null) return null;
+        int i = findSelected(resIdx);
+        return i >= 0 && selected.get(i) == lastAdded ? lastAdded : null;
+    }
+
+    /** 清單列名：一行放不下就在列內折成兩行；還放不下就靠懸停提示看全名（列高固定不改）。 */
+    private void drawListName(GuiGraphics g, String text, int x, int y, int w, boolean rowHover) {
+        java.util.List<net.minecraft.util.FormattedCharSequence> lines =
+                this.font.split(Component.literal(text), w);
+        int maxLines = Math.max(1, (SEL_ROW_H - 3) / this.font.lineHeight);
+        for (int i = 0; i < Math.min(lines.size(), maxLines); i++) {
+            g.drawString(this.font, lines.get(i), x, y + i * this.font.lineHeight, WHITE, true);
+        }
+        // 折行后还是放不下的，悬停那一列看全名（列高固定，不为了长名撑高整列）
+        if (rowHover && lines.size() > maxLines) hoverSelNameFull = text;
+    }
+
     private boolean selListClicked(double mx, double my, int btn) {
         int visible = selVisibleRows();
         int baseY = selY + 14;
@@ -1132,6 +1214,7 @@ public class MultiPickerScreen extends ScaledScreen {
         if (idx < 0 || idx >= selected.size()) return;
         Sel s = selected.remove(idx);
         if (active == s) setActive(selected.isEmpty() ? null : selected.get(Math.min(idx, selected.size() - 1)));
+        if (lastAdded == s) lastAdded = null;
     }
 
     private void setActive(Sel s) {
@@ -1207,17 +1290,81 @@ public class MultiPickerScreen extends ScaledScreen {
         this.afterConfirm = afterConfirm;
     }
 
+    /** 切到「替换这一格」：标题和确认按钮改说替换；清单清空时确认按钮写「移除这一格」。 */
+    public MultiPickerScreen replacing() {
+        this.replacing = true;
+        return this;
+    }
+
+    /** 预先放进已选清单并设为激活（数量框直接显示它的数量），网格上对应的那格带对勾。保留 NBT。 */
+    public MultiPickerScreen preselect(ItemStack stack, long count) {
+        if (stack == null || stack.isEmpty()) return this;
+        ItemStack proto = stack.copy();
+        proto.setCount(1);
+        return addPreselected(new Sel(false, ForgeRegistries.ITEMS.getKey(proto.getItem()), proto, null, Math.max(1L, count)));
+    }
+
+    /** 同上，流体按 mB。 */
+    public MultiPickerScreen preselect(FluidStack fluid) {
+        if (fluid == null || fluid.isEmpty()) return this;
+        Fluid f = fluid.getFluid();
+        return addPreselected(new Sel(true, ForgeRegistries.FLUIDS.getKey(f), null, f, Math.max(1L, fluid.getAmount())));
+    }
+
+    /** 同上，贴图图标（只有显示图标选择器用得到）。 */
+    public MultiPickerScreen preselectTexture(ResourceLocation texture) {
+        if (texture == null) return this;
+        return addPreselected(Sel.texture(texture));
+    }
+
+    private MultiPickerScreen addPreselected(Sel s) {
+        selected.add(s);
+        setActive(s);
+        hadOriginal = true;
+        return this;
+    }
+
+    private String confirmLabel() {
+        if (!replacing) return "§a确认加入 (" + selected.size() + ")";
+        if (selected.isEmpty()) return hadOriginal ? "§c移除这一格" : "§7确认 (0)";
+        return "§a确认替换 (" + selected.size() + ")";
+    }
+
     @Override
     public void onClose() {
+        ui.cancel();
         if (this.minecraft != null && parent != null) this.minecraft.setScreen(parent);
         else super.onClose();
     }
 
-    private void drawBtn(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my) {
-        boolean hv = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
-        g.fill(x, y, x + w, y + h, GOLD_DARK);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hv ? BTN_HOVER : BTN_BG);
-        g.drawCenteredString(this.font, label, x + w / 2, y + (h - 8) / 2, WHITE);
+    @Override
+    public void removed() {
+        // 跳去别的界面/关屏：按下态和拖拽都得归零，否则回来时按钮还是压着的
+        ui.cancel();
+        super.removed();
+    }
+
+    /** Enter 确认、Esc 先退出搜索框再关；其余按键照常交给搜索框。 */
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
+            if (ui.takeEnter()) {
+                ui.press(confirmX(), top + panelHeight - 24, 90, 16, true);
+                confirm();
+            }
+            return true;
+        }
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE && getFocused() instanceof EditBox) {
+            setFocused(null); // 先退出输入框，再按一次才关
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        ui.enterReleased(keyCode);
+        return super.keyReleased(keyCode, scanCode, modifiers);
     }
 
     @Override
