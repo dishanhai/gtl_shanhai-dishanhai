@@ -4,8 +4,11 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.AdvancedSearchUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
 import com.dishanhai.gt_shanhai.client.gui.scaled.GuiRenderUtil;
 import com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve;
-import com.dishanhai.gt_shanhai.client.gui.scaled.PinyinSearchBridge;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
+import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassGeometry;
+import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
+import com.dishanhai.gt_shanhai.client.gui.glass.PixelRect;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.jei.JeiBookmarkBridge;
 
@@ -69,15 +72,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private static final int PITCH = 22;
     /** ExtendedAE 无限胞物品 id：Ctrl+Shift+左键网格时直接写入已选清单的目标物品，见 addInfinityCellFromGrid。 */
     private static final ResourceLocation INFINITY_CELL_ID = ResourceLocation.tryParse("expatternprovider:infinity_cell");
-    private static final int SEL_ROW_H = 20;
     private static final int SCROLLBAR_W = 4;
-    // 数量框快速填写：跟 ShopScreen 购买页同款三排步进按钮（+1/+10/+100/+1k、-1/-10/-100/-1k、×10/×100/÷10/÷100），
-    // 对当前激活（顶部数量框绑定）的已选项直接改 count，见反馈：补上购买页的快速数字填写
-    private static final int COUNT_BOX_W = 140;
-    private static final int COUNT_STEP_H = 12;
-    private static final long[] COUNT_STEPS = {1, 10, 100, 1000};
-    private static final long[] COUNT_SCALES = {10, 100, 10, 100};
-    private static final String[] COUNT_SCALE_LABELS = {"§b×10", "§b×100", "§6÷10", "§6÷100"};
 
     /** 搜索框悬停提示：语法说明（同 JEI 习惯的 @/#/$/* 前缀）。 */
     private static final List<Component> SEARCH_HELP = List.of(
@@ -100,7 +95,7 @@ public class MultiPickerScreen extends ScaledScreen {
     private static List<String> ALL_TEXTURE_NAMES;
 
     /** 已选条目（物品/流体/贴图三选一，各自独立数量；贴图 count 恒为 1 无意义）。物品的 itemIcon 为原型（保留 NBT）。 */
-    private static final class Sel {
+    private static final class Sel implements PickerItem {
         final boolean isFluid;
         final boolean isTexture;
         final ResourceLocation id;
@@ -118,6 +113,10 @@ public class MultiPickerScreen extends ScaledScreen {
         static Sel texture(ResourceLocation tex) {
             return new Sel(false, true, tex, null, null, tex, 1L);
         }
+        @Override
+        public long getCount() { return count; }
+        @Override
+        public void setCount(long value) { count = isTexture ? 1L : PickerSelection.clampCount(value); }
     }
 
     private final Screen parent;
@@ -151,12 +150,12 @@ public class MultiPickerScreen extends ScaledScreen {
     private List<String> restrictedNames = new ArrayList<>();
     private List<String> restrictedTags = new ArrayList<>();
     private final java.util.Map<Integer, String> tooltipCache = new java.util.HashMap<>(); // 物品栏/受限模式的 $ 搜索会话内缓存
-    private final List<Sel> selected = new ArrayList<>();
+    private final PickerSelection<Sel> selection = new PickerSelection<>();
+    private final List<Sel> selected = selection.getItems();
     private Sel active;                           // 当前激活（顶部数量框编辑对象）
     private List<Integer> filtered = new ArrayList<>(); // 当前模式下过滤后的索引
     private int gridScroll;                       // 网格行偏移
     private int selScroll;                        // 已选清单行偏移
-    private boolean suppressCount;                // 切换激活项时抑制数量框回调
     private boolean itemCacheAppliedOnce;          // 本次开屏后台物品缓存建完那一刻，只强制刷新一次过滤结果
 
     /** 按钮、滚动条、清单行 hover 全走和商店弹窗同一套反馈（山海署名）。 */
@@ -172,6 +171,50 @@ public class MultiPickerScreen extends ScaledScreen {
     // 网格/清单几何（initScaled 计算）
     private int gridX, gridY, gridW, gridBottom, gridCols;
     private int selX, selY, selW;
+
+    private PickerGeometry geometry;
+    private List<PickerGridRow> gridModel = List.of();
+    private List<PickerSortEntry> sortEntries = List.of();
+    private List<String> sourceModules = List.of();
+    private List<String> moduleOrder = List.of();
+    private final java.util.Map<String, String> moduleNames = new java.util.HashMap<>();
+    private final java.util.Map<String, Integer> moduleCounts = new java.util.HashMap<>();
+    private final java.util.Map<String, Integer> filteredModuleCounts = new java.util.HashMap<>();
+    private final java.util.Map<String, List<Integer>> sortOrders = new java.util.HashMap<>();
+    private List<Integer> moduleHeights = List.of();
+    private int[] moduleStarts = new int[0];
+    private java.util.Map<String, Integer> headerHeights = java.util.Map.of();
+    private final Set<String> collapsedModules = new HashSet<>();
+    private final Set<Integer> dragVisited = new HashSet<>();
+    private final java.util.Map<Integer, Spring> slotHover = new java.util.HashMap<>();
+    private final Spring gridMotion = new Spring(Spring.SCROLL);
+    private final Spring selectedMotion = new Spring(Spring.SCROLL);
+    private final Spring opening = Spring.opening(Spring.PANEL);
+    private String pickerSort = ClientShopUiSettings.pickerSort();
+    private boolean groupByMod = ClientShopUiSettings.pickerGroupByMod();
+    private String moduleFilter = "";
+    private String sourceLanguage = "";
+    private long sourceVersion;
+    private long sortGeneration;
+    private String pendingSortKey = "";
+    private boolean sorting;
+    private boolean sortOpen;
+    private int shownGridScroll, shownSelScroll;
+    private int sidebarX, sidebarW, sortY, groupY, modulesY, moduleScroll;
+    private List<Integer> selectionHeights = List.of();
+    private int[] selectionStarts = new int[0];
+    private Sel editingQuantity, originalSelection, draggedSelection, heldQuantity;
+    private int heldQuantityY;
+    private boolean dragStarted;
+    private boolean gridGesture;
+    private int gestureButton = -1;
+    private int gestureOrigin = -1;
+    private double gestureX, gestureY;
+    private int insertion;
+    private int scrollbarOwner;
+    private long lastFrameMs;
+    private float gridVelocity;
+    private boolean confirmed;
 
     private ItemStack hoverItem;                  // 悬停网格物品（renderTooltips 消费）
     private String hoverSelNameFull;              // 清单列名放不下时的完整名字（renderTooltips 消费）
@@ -466,61 +509,59 @@ public class MultiPickerScreen extends ScaledScreen {
 
     @Override
     protected void initScaled() {
-        ui.cancel();        // 从上一个界面回来时不卡在按下态
-        ui.syncEnterHeld(); // 按 Enter 打开本框时，松开前的系统重复不算确认
+        commitQuantity();
+        ui.cancel();
+        ui.syncEnterHeld();
         left = Math.max(6, (vWidth - TARGET_W) / 2);
         top = Math.max(8, (vHeight - TARGET_H) / 2);
         panelWidth = Math.min(TARGET_W, vWidth - 12);
         panelHeight = Math.min(TARGET_H, vHeight - 16);
 
-        String keepQuery = searchBox != null ? searchBox.getValue() : ""; // resize 不丢已输入的搜索词
+        String keepQuery = searchBox != null ? searchBox.getValue() : "";
         if (!restrictedMode) { buildInventory(); buildBookmarks(); }
-        // INVENTORY/BOOKMARK 底层清单刚重建，过滤缓存和增量收窄状态记的都是重建前的下标——
-        // 清单变短时命中陈旧下标会在 gridItem() 越界崩溃，必须整体失效，随后由 setValue 触发重算
-        filterResultCache.clear();
-        lastFilterQuery = null;
-        lastFilterResult = null;
-
-        // 顶部：搜索框 + 数量框
-        searchBox = new EditBox(this.font, left + 12, top + 22, 200, 14, Component.literal("搜索"));
+        geometry = MultiPickerLayout.geometry(panelWidth, panelHeight, pickerHeaderExtraHeight());
+        GuiRect grid = geometry.getGrid();
+        GuiRect list = geometry.getSelection();
+        GuiRect sidebar = geometry.getSidebar();
+        GuiRect search = geometry.getSearch();
+        gridX = left + Math.round(grid.getX());
+        gridY = top + Math.round(grid.getY());
+        gridW = Math.round(grid.getW()) - 6;
+        gridBottom = gridY + Math.round(grid.getH());
+        gridCols = Math.max(1, (gridW + 2) / PITCH);
+        selX = left + Math.round(list.getX());
+        selY = top + Math.round(list.getY());
+        selW = Math.round(list.getW()) - 6;
+        sidebarX = left + Math.round(sidebar.getX());
+        sidebarW = Math.round(sidebar.getW());
+        searchBox = new EditBox(this.font, left + Math.round(search.getX()), top + Math.round(search.getY()),
+                Math.round(search.getW()) - 18, Math.round(search.getH()), Component.literal("搜索"));
         searchBox.setMaxLength(64);
         searchBox.setBordered(true);
         searchBox.setTextColor(0xFFFFFF);
         searchBox.setResponder(s -> rebuildFilter());
-        searchBox.setValue(keepQuery); // 触发 responder → 用重建后的清单+干净缓存重算 filtered
+        searchBox.setHint(Component.literal("§8@模组 #标签 $提示 *id"));
+        searchBox.setValue(keepQuery);
         searchBox.setFocused(true);
         setFocused(searchBox);
 
-        int cbW = COUNT_BOX_W;
-        countBox = new EditBox(this.font, left + panelWidth - 12 - cbW, top + 22, cbW, 14, Component.literal("数量"));
-        countBox.setMaxLength(12);
+        countBox = new EditBox(this.font, selX + 40, selY + 24, 130, 16, Component.literal("数量"));
+        countBox.setMaxLength(19);
         countBox.setBordered(true);
         countBox.setTextColor(0xFFFF55);
         countBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
-        countBox.setValue(active != null ? Long.toString(active.count) : "");
-        countBox.setResponder(s -> {
-            if (suppressCount || active == null) return;
-            long v = s.isEmpty() ? 1L : parseLong(s);
-            active.count = Math.max(1L, v);
-        });
+        countBox.visible = false;
+        countBox.active = false;
         addRenderableWidget(searchBox);
         addRenderableWidget(countBox);
 
-        // 几何：左网格 / 右清单。已选清单列顶部要给数量框下面的三排快速步进按钮让位，网格不用（见 countStepX/Y）
-        gridX = left + 12;
-        gridY = top + 44;
-        gridBottom = top + panelHeight - 28;
-        selW = 200;
-        gridW = panelWidth - 24 - selW - 8;
-        gridCols = Math.max(1, (gridW + 2) / PITCH);
-        selX = gridX + gridW + 8;
-        selY = countStepY(0) + 3 * (COUNT_STEP_H + 2) + 4;
-
-        rebuildFilter();
+        rebuildSource();
+        rebuildSelectionRows();
+        ShopGaussBlur.warmUp();
     }
 
     private static long parseLong(String s) {
-        try { return Long.parseLong(s); } catch (NumberFormatException e) { return 1L; }
+        try { return Long.parseLong(s); } catch (NumberFormatException e) { return s != null && s.matches("\\d+") ? Long.MAX_VALUE : 1L; }
     }
 
     private List<String> curNames() {
@@ -532,6 +573,105 @@ public class MultiPickerScreen extends ScaledScreen {
             case FLUID -> ALL_FLUID_NAMES;
             case TEXTURE -> ALL_TEXTURE_NAMES;
         };
+    }
+
+    private int pickerHeaderExtraHeight() {
+        if (originalSelection == null || !replacing) return 0;
+        int width = Math.max(1, Math.min(228, panelWidth - 270));
+        int lines = this.font.split(Component.literal("§8原格：" + selectionName(originalSelection)
+                + " ×" + originalSelection.count), width).size();
+        return Math.max(0, lines * this.font.lineHeight + 12 - 44);
+    }
+
+    private void refreshSourceNames() {
+        sourceLanguage = Minecraft.getInstance().getLanguageManager().getSelected();
+        if (restrictedMode) {
+            for (int index = 0; index < restrictedStacks.size(); index++)
+                restrictedNames.set(index, namedId(restrictedStacks.get(index).getHoverName().getString(), curIdForStack(restrictedStacks.get(index))));
+        }
+        if (itemCacheReady && ALL_ITEMS != null) {
+            List<String> names = new ArrayList<>(ALL_ITEMS.size());
+            for (ItemStack stack : ALL_ITEMS) names.add(namedId(stack.getHoverName().getString(), curIdForStack(stack)));
+            ALL_ITEM_NAMES = names;
+            ALL_ITEM_TOOLTIP = new String[ALL_ITEMS.size()];
+        }
+        if (invStacks != null) {
+            invNames = new ArrayList<>(invStacks.size());
+            for (ItemStack stack : invStacks) invNames.add(namedId(stack.getHoverName().getString(), curIdForStack(stack)));
+        }
+        if (bookmarkStacks != null && bookmarkFluids != null) {
+            bookmarkNames = new ArrayList<>(bookmarkStacks.size() + bookmarkFluids.size());
+            for (ItemStack stack : bookmarkStacks) bookmarkNames.add(namedId(stack.getHoverName().getString(), curIdForStack(stack)));
+            for (Fluid fluid : bookmarkFluids) bookmarkNames.add(namedId(fluidName(fluid), ForgeRegistries.FLUIDS.getKey(fluid)));
+        }
+        if (ALL_FLUIDS != null) {
+            List<String> names = new ArrayList<>(ALL_FLUIDS.size());
+            for (Fluid fluid : ALL_FLUIDS) names.add(namedId(fluidName(fluid), ForgeRegistries.FLUIDS.getKey(fluid)));
+            ALL_FLUID_NAMES = names;
+        }
+        if (ALL_TEXTURES != null)
+            ALL_TEXTURE_NAMES = ALL_TEXTURES.stream().map(id -> id.toString().toLowerCase(Locale.ROOT)).toList();
+    }
+
+    private static ResourceLocation curIdForStack(ItemStack stack) {
+        return ForgeRegistries.ITEMS.getKey(stack.getItem());
+    }
+
+    private static String namedId(String name, ResourceLocation id) {
+        return ((name == null ? "" : name) + " " + (id == null ? "" : id)).toLowerCase(Locale.ROOT);
+    }
+
+    /** 侧栏右侧数量列宽：取最宽的那个数量，所有行共用，名称在剩下的宽度里换行。 */
+    private int moduleCountColumnW() {
+        int widest = this.font.width(Integer.toString(curNames().size()));
+        for (int count : moduleCounts.values()) widest = Math.max(widest, this.font.width(Integer.toString(count)));
+        return widest;
+    }
+
+    private int moduleLabelWidth() {
+        return Math.max(1, sidebarW - 2 - 4 - moduleCountColumnW() - 3);
+    }
+
+    private void rebuildModuleRows() {
+        List<Integer> heights = new ArrayList<>(moduleOrder.size() + 1);
+        heights.add(22);
+        int labelWidth = moduleLabelWidth();
+        for (String id : moduleOrder) {
+            int lines = this.font.split(Component.literal(moduleNames.getOrDefault(id, id)), labelWidth).size();
+            heights.add(Math.max(22, lines * this.font.lineHeight + 6));
+        }
+        moduleHeights = List.copyOf(heights);
+        moduleStarts = MultiPickerLayout.rowStarts(moduleHeights);
+        int contentHeight = moduleStarts.length == 0 ? 0
+                : moduleStarts[moduleStarts.length - 1] + moduleHeights.get(moduleHeights.size() - 1);
+        moduleScroll = Math.max(0, Math.min(moduleScroll, contentHeight - Math.max(0, gridBottom - modulesY)));
+
+        java.util.Map<String, Integer> heightsByModule = new java.util.HashMap<>();
+        for (String id : moduleOrder) {
+            String label = (collapsedModules.contains(id) ? "▸ " : "▾ ")
+                    + moduleNames.getOrDefault(id, id) + " (" + filteredModuleCounts.getOrDefault(id, 0) + ")";
+            int lines = this.font.split(Component.literal(label), Math.max(1, gridW - 8)).size();
+            heightsByModule.put(id, Math.max(18, lines * this.font.lineHeight + 8));
+        }
+        headerHeights = java.util.Map.copyOf(heightsByModule);
+    }
+
+    private void rebuildFilteredModuleCounts() {
+        java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+        for (int index : filtered) counts.merge(sourceModules.get(index), 1, Integer::sum);
+        filteredModuleCounts.clear();
+        filteredModuleCounts.putAll(counts);
+        rebuildModuleRows();
+    }
+
+    private int moduleContentHeight() {
+        return moduleStarts.length == 0 ? 0
+                : moduleStarts[moduleStarts.length - 1] + moduleHeights.get(moduleHeights.size() - 1);
+    }
+
+    private int moduleRowAt(double y) {
+        return MultiPickerLayout.selectionRowAt(moduleStarts, moduleHeights,
+                (int) y - modulesY + moduleScroll);
     }
 
     /** 当前模式下网格第 resIdx 项的物品原型（仅物品/物品栏/受限模式，或 BOOKMARK 模式落在物品段时有效）。 */
@@ -553,37 +693,101 @@ public class MultiPickerScreen extends ScaledScreen {
                     return size() > 24;
                 }
             };
-    private String lastFilterQuery;
-    private List<Integer> lastFilterResult;
 
     private void rebuildFilter() {
+        if (geometry == null) return;
         String q = (searchBox != null ? searchBox.getValue().trim() : "").toLowerCase(Locale.ROOT);
-        String cacheKey = mode.name() + " " + q;
+        String cacheKey = sourceVersion + "|" + mode + "|" + pickerSort + "|" + moduleFilter + "|" + sourceLanguage + "|" + q;
         List<Integer> cached = filterResultCache.get(cacheKey);
         if (cached != null) {
             filtered = cached;
-            gridScroll = 0;
+            rebuildFilteredModuleCounts();
+            rebuildGridRows();
             return;
         }
-        List<String> names = curNames();
-        int n = names.size();
         List<Integer> out = new ArrayList<>();
-        // 增量收窄：新查询是在上次查询末尾接着打字打出来的（同模式、纯前缀扩展），且没启用拼音兜底
-        // （contains 语义下严格单调收窄：能匹配更长的串，必然也匹配它的前缀，见 AdvancedSearchUtil），
-        // 直接在上次结果集里再筛一遍，不用从全量重新扫描；拼音匹配不保证这个单调性，禁用时才走这条捷径。
-        boolean canNarrow = lastFilterResult != null && lastFilterQuery != null && !q.isEmpty()
-                && q.startsWith(lastFilterQuery) && q.length() > lastFilterQuery.length()
-                && !PinyinSearchBridge.available();
-        if (canNarrow) {
-            for (int i : lastFilterResult) if (matchIndex(i, q)) out.add(i);
-        } else {
-            for (int i = 0; i < n; i++) if (matchIndex(i, q)) out.add(i);
+        for (int index : currentOrder()) {
+            if ((moduleFilter.isEmpty() || moduleFilter.equals(sourceModules.get(index))) && matchIndex(index, q)) out.add(index);
         }
         filtered = out;
         filterResultCache.put(cacheKey, out);
-        lastFilterQuery = q;
-        lastFilterResult = out;
-        gridScroll = 0;
+        rebuildFilteredModuleCounts();
+        rebuildGridRows();
+    }
+
+    private void rebuildSource() {
+        sourceVersion++;
+        sortGeneration++;
+        sorting = false;
+        pendingSortKey = "";
+        refreshSourceNames();
+        tooltipCache.clear();
+        filterResultCache.clear();
+        sortOrders.clear();
+        slotHover.clear();
+        List<PickerSortEntry> entries = new ArrayList<>();
+        List<String> modules = new ArrayList<>();
+        moduleNames.clear();
+        moduleCounts.clear();
+        List<String> names = curNames();
+        for (int index = 0; index < names.size(); index++) {
+            String id = curIdOnly(index);
+            String namespace = id.contains(":") ? id.substring(0, id.indexOf(':')) : "minecraft";
+            String display = moduleNames.computeIfAbsent(namespace, key -> net.minecraftforge.fml.ModList.get().getModContainerById(key)
+                    .map(container -> container.getModInfo().getDisplayName()).orElse(key));
+            String name = names.get(index);
+            if (name.endsWith(" " + id)) name = name.substring(0, name.length() - id.length() - 1);
+            long count = mode == Mode.INVENTORY && index < invCounts.size() ? invCounts.get(index) : 1L;
+            entries.add(new PickerSortEntry(index, name, namespace, display, id, count));
+            modules.add(namespace);
+            moduleCounts.merge(namespace, 1, Integer::sum);
+        }
+        sortEntries = List.copyOf(entries);
+        sourceModules = List.copyOf(modules);
+        moduleOrder = PickerSort.modules(sortEntries, sourceLanguage);
+        rebuildModuleRows();
+        if (!moduleFilter.isEmpty() && !moduleCounts.containsKey(moduleFilter)) moduleFilter = "";
+        moduleScroll = 0;
+        rebuildFilter();
+    }
+
+    private List<Integer> currentOrder() {
+        String key = mode + "|" + pickerSort + "|" + sourceVersion + "|" + sourceLanguage;
+        List<Integer> cached = sortOrders.get(key);
+        if (cached != null) return cached;
+        List<Integer> fallback = sortEntries.stream().map(PickerSortEntry::getIndex).toList();
+        if ("default".equals(pickerSort) || ("count".equals(pickerSort) && mode != Mode.INVENTORY)) return fallback;
+        if (!key.equals(pendingSortKey)) {
+            pendingSortKey = key;
+            sorting = true;
+            long version = sourceVersion;
+            long generation = ++sortGeneration;
+            Mode requestedMode = mode;
+            String requestedSort = pickerSort;
+            String language = sourceLanguage;
+            List<PickerSortEntry> snapshot = List.copyOf(sortEntries);
+            java.util.concurrent.CompletableFuture.supplyAsync(
+                    () -> PickerSort.order(snapshot, requestedSort, requestedMode == Mode.INVENTORY, language),
+                    net.minecraft.Util.backgroundExecutor()).whenComplete((order, failure) -> Minecraft.getInstance().execute(() -> {
+                        if (generation != sortGeneration || version != sourceVersion || mode != requestedMode
+                                || !language.equals(sourceLanguage) || !requestedSort.equals(pickerSort)
+                                || Minecraft.getInstance().screen != this) return;
+                        sorting = false;
+                        pendingSortKey = "";
+                        sortOrders.put(key, failure == null ? List.copyOf(order) : fallback);
+                        filterResultCache.clear();
+                        rebuildFilter();
+                    }));
+        }
+        return fallback;
+    }
+
+    private void rebuildGridRows() {
+        gridModel = MultiPickerLayout.gridRows(filtered, sourceModules, moduleOrder, gridCols, groupByMod,
+                collapsedModules, headerHeights);
+        gridScroll = shownGridScroll = 0;
+        gridMotion.snap(0);
+        cancelHold();
     }
 
     /**
@@ -654,36 +858,144 @@ public class MultiPickerScreen extends ScaledScreen {
         return id == null ? "" : id.toString().toLowerCase(Locale.ROOT);
     }
 
-    private int gridRows() {
-        return Math.max(1, (gridBottom - gridY) / PITCH);
+    private int gridContentHeight() {
+        if (gridModel.isEmpty()) return 0;
+        PickerGridRow row = gridModel.get(gridModel.size() - 1);
+        return row.getY() + row.getHeight();
     }
 
-    private int gridTotalRows() {
-        return (int) Math.ceil(filtered.size() / (double) gridCols);
-    }
-
-    private int gridMaxScroll() {
-        return Math.max(0, gridTotalRows() - gridRows());
-    }
-
+    private int gridMaxScroll() { return Math.max(0, gridContentHeight() - (gridBottom - gridY)); }
     private int scrollBarX() { return gridX + gridW + 2; }
+    private int listTop() { return selY + 34; }
+    private int selectionContentHeight() {
+        int size = selectionHeights.size();
+        return size == 0 ? 0 : selectionStarts[size - 1] + selectionHeights.get(size - 1);
+    }
+    private int selectionMaxScroll() { return Math.max(0, selectionContentHeight() - (gridBottom - listTop())); }
+    private int confirmX() { return left + panelWidth - 102; }
+    private int cancelX() { return confirmX() - 62; }
+    private int clearAllX() { return selX + selW - 36; }
+    private int syncAllX() { return selX + 2; }
+    private int quantityY(int index) {
+        return listTop() + selectionStarts[index] - shownSelScroll + selectionHeights.get(index) - 20 - QUICK_BLOCK_H;
+    }
+    private int quantityWidth() { return 118; }
 
-    private int selVisibleRows() {
-        return Math.max(1, (gridBottom - (selY + 14)) / SEL_ROW_H);
+    private static final float GRID_HEADER_Z = 300f;
+
+    // 快速填数：每条已选项下方两排（减 / 加）从 1 到 1M 的十进位步长，符号用颜色与行首标记表示
+    private static final long[] QUICK_STEPS = {1L, 10L, 100L, 1_000L, 10_000L, 100_000L, 1_000_000L};
+    private static final String[] QUICK_LABELS = {"1", "10", "100", "1K", "10K", "100K", "1M"};
+    private static final int QUICK_H = 12;
+    private static final int QUICK_GAP = 2;
+    private static final int QUICK_SIGN_W = 12;
+    private static final int QUICK_BLOCK_H = QUICK_H * 2 + 1 + 3;
+    private static final int QUANTITY_ROW_H = 22;
+
+    private int quickChipsX() { return selX + 2 + QUICK_SIGN_W + QUICK_GAP; }
+    private int quickChipsW() { return selW - 4 - QUICK_SIGN_W - QUICK_GAP; }
+    private int quickChipBaseW() { return (quickChipsW() - (QUICK_STEPS.length - 1) * QUICK_GAP) / QUICK_STEPS.length; }
+    private int quickChipRemainder() { return (quickChipsW() - (QUICK_STEPS.length - 1) * QUICK_GAP) % QUICK_STEPS.length; }
+    private int quickChipX(int chip) { return quickChipsX() + chip * (quickChipBaseW() + QUICK_GAP) + Math.min(chip, quickChipRemainder()); }
+    private int quickChipW(int chip) { return quickChipBaseW() + (chip < quickChipRemainder() ? 1 : 0); }
+    /** row 0 = 减，row 1 = 加。 */
+    private int quickRowY(int index, int row) { return quantityY(index) + 18 + row * (QUICK_H + 1); }
+
+    private void rebuildSelectionRows() {
+        List<Integer> heights = new ArrayList<>();
+        for (Sel entry : selected) {
+            int lines = this.font.split(Component.literal(selectionName(entry)), Math.max(20, selW - 50)).size();
+            heights.add(Math.max(22, lines * this.font.lineHeight + 6) + (entry.isTexture ? 2 : QUANTITY_ROW_H + QUICK_BLOCK_H));
+        }
+        selectionHeights = heights;
+        selectionStarts = MultiPickerLayout.rowStarts(heights);
+        selScroll = Math.min(selScroll, selectionMaxScroll());
     }
 
-    // ===== 渲染 =====
+    private String selectionName(Sel entry) {
+        return entry.isFluid ? fluidName(entry.fluid) : entry.isTexture ? entry.textureId.toString()
+                : entry.itemIcon.getHoverName().getString();
+    }
+
+    private void cancelHold() {
+        if (heldQuantity != null) ui.cancel();
+        heldQuantity = null;
+    }
+
+    private void updateMotion(int mx, int my) {
+        long now = System.currentTimeMillis();
+        gridScroll = Math.max(0, Math.min(gridScroll, gridMaxScroll()));
+        selScroll = Math.max(0, Math.min(selScroll, selectionMaxScroll()));
+        if (draggedSelection != null && dragStarted) {
+            int distance = my < listTop() + 20 ? -1 : my > gridBottom - 20 ? 1 : 0;
+            if (distance != 0) {
+                long elapsed = lastFrameMs == 0 ? 16 : Math.min(50, now - lastFrameMs);
+                selScroll = Math.max(0, Math.min(selectionMaxScroll(), selScroll + distance * (int) Math.max(1, elapsed / 3)));
+            }
+        }
+        boolean reduced = ClientShopUiSettings.reduceMotion();
+        if (reduced) {
+            gridMotion.snap(gridScroll);
+            selectedMotion.snap(selScroll);
+            opening.snap(1);
+        } else {
+            gridMotion.setTarget(gridScroll, now);
+            selectedMotion.setTarget(selScroll, now);
+            gridMotion.update(now);
+            selectedMotion.update(now);
+            opening.update(now);
+        }
+        int previous = shownGridScroll;
+        shownGridScroll = Math.max(0, Math.min(gridMaxScroll(), Math.round(gridMotion.value())));
+        shownSelScroll = Math.max(0, Math.min(selectionMaxScroll(), Math.round(selectedMotion.value())));
+        gridVelocity = lastFrameMs == 0 || now == lastFrameMs ? 0 : (shownGridScroll - previous) * 1000f / Math.max(1, now - lastFrameMs);
+        lastFrameMs = now;
+        if (heldQuantity != null) {
+            int index = selected.indexOf(heldQuantity);
+            if (index < 0 || heldQuantityY != quantityY(index)) cancelHold();
+        }
+        if (editingQuantity != null) {
+            int index = selected.indexOf(editingQuantity);
+            if (index < 0 || quantityY(index) < listTop() || quantityY(index) + 16 > gridBottom) commitQuantity();
+            else countBox.setY(quantityY(index));
+        }
+        if (draggedSelection != null && dragStarted)
+            insertion = MultiPickerLayout.insertionIndex(selectionStarts, selectionHeights, (int) my - listTop() + shownSelScroll);
+    }
+
+    @Override
+    public void renderBackground(GuiGraphics g) {
+        try {
+            if (parent != null) {
+                g.pose().pushPose();
+                try {
+                    g.pose().translate(0, 0, -500);
+                    parent.render(g, -1, -1, 0);
+                } finally {
+                    g.pose().popPose();
+                }
+            }
+            else super.renderBackground(g);
+        } catch (Exception ignored) {
+            super.renderBackground(g);
+        }
+        if (!ShopGaussBlur.isReady()) g.fill(0, 0, this.width, this.height, 0xB0101018);
+    }
+
+    @Override
+    public void resize(Minecraft mc, int width, int height) {
+        if (parent != null) parent.init(mc, width, height);
+        super.resize(mc, width, height);
+    }
+
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        updateMotion(mx, my);
         ui.frame(mx, my);
-        // 后台物品缓存刚建完的那一帧：之前按"暂无条目"缓存的过滤结果已经过期，必须清掉重算一次，
-        // 否则加载完成后如果搜索框内容没变，会一直卡在建缓存前算出来的空结果上（见反馈修复）。
-        if (itemCacheReady && !itemCacheAppliedOnce) {
-            itemCacheAppliedOnce = true;
-            filterResultCache.clear();
-            lastFilterQuery = null;
-            lastFilterResult = null;
-            rebuildFilter();
+        if ((itemCacheReady && !itemCacheAppliedOnce)
+                || !sourceLanguage.equals(Minecraft.getInstance().getLanguageManager().getSelected())) {
+            itemCacheAppliedOnce = itemCacheReady;
+            rebuildSource();
         }
         hoverItem = null;
         hoverFluidTip = null;
@@ -691,426 +1003,566 @@ public class MultiPickerScreen extends ScaledScreen {
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
         g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
-        g.fill(left + 5, top + 18, left + panelWidth - 5, top + panelHeight - 5, PANEL_INNER);
-
-        String headerHint = replacing
-                ? "§6替换这一格  §7右侧清单换掉原格（可改数量/换别的/多加几个）· 清空再确认=移除这一格"
-                : restrictedMode
-                ? "§6多选货币  §7左键=加入/选中 · 右键=加入/移除 · 仅列出已配置货币"
-                : "§6多选资源  §7左键=加入/选中 · 右键=加入/移除 · 物品栏模式取实物(带NBT) · Ctrl+Shift+左键=无限胞";
-        g.drawString(this.font, headerHint, left + 10, top + 5, GOLD, true);
-
-        // 浏览模式切换按钮（搜索框右侧，点一下循环：物品→物品栏→流体；受限模式无此按钮）
-        int modeX = left + 12 + 200 + 8;
-        if (!restrictedMode) ui.draw(g, this.font, modeX, top + 21, 70, 16, modeLabel(), mx, my, true);
-        // 数量框标签
-        g.drawString(this.font, active != null && active.isFluid ? "§7mB:" : "§7数量:", left + panelWidth - 12 - COUNT_BOX_W - 30, top + 25, GRAY, true);
-        drawCountSteps(g, mx, my);
-
+        String title = replacing ? "替换这一格" : restrictedMode ? "多选货币" : allowTexture ? "多选显示图标" : "多选资源";
+        g.drawString(this.font, "§6" + title, left + 10, top + 7, GOLD, true);
+        g.drawString(this.font, "§8点选、拖过连选；右侧调整数量与顺序", left + 10, top + 21, GRAY, false);
+        if (originalSelection != null && replacing) {
+            List<net.minecraft.util.FormattedCharSequence> originalLines = this.font.split(
+                    Component.literal("§8原格：" + selectionName(originalSelection) + " ×" + originalSelection.count), selW);
+            for (int line = 0; line < originalLines.size(); line++)
+                g.drawString(this.font, originalLines.get(line), selX, top + 7 + line * this.font.lineHeight, GRAY, false);
+        }
+        int clearX = searchBox.getX() + searchBox.getWidth() + 2;
+        if (!searchBox.getValue().isEmpty()) ui.draw(g, this.font, clearX, searchBox.getY(), 16, 16, "×", mx, my, true);
+        g.drawString(this.font, "§7匹配 " + filtered.size() + " / " + curNames().size(), selX, searchBox.getY() + 4, GRAY, false);
+        drawSidebar(g, mx, my);
         drawGrid(g, mx, my);
         drawGridScrollbar(g, mx, my);
         drawSelectedList(g, mx, my);
-
-        // 底部按钮
+        String hint = sorting ? "§e排序中…" : GuiRenderUtil.isHovering(mx, my, selX, listTop(), selW, gridBottom - listTop())
+                ? "§8拖名字排序 · 数量滚轮/Shift/Ctrl" : "§8左拖加入 · 右拖移除 · Shift一组";
+        g.drawString(this.font, hint, left + 10, top + panelHeight - 20, GRAY, false);
         ui.draw(g, this.font, confirmX(), top + panelHeight - 24, 90, 16, confirmLabel(), mx, my, true);
         ui.draw(g, this.font, cancelX(), top + panelHeight - 24, 56, 16, "§c取消", mx, my, true);
     }
 
-    private String modeLabel() {
-        return switch (mode) {
-            case ITEM -> "§a物品▾";
-            case INVENTORY -> "§e物品栏▾";
-            case BOOKMARK -> "§6书签▾"; // 物品+流体混在同一页，不分流
-            case FLUID -> "§b流体▾";
-            case TEXTURE -> "§d贴图▾";
+    private List<Mode> availableModes() {
+        if (restrictedMode) return List.of();
+        return allowTexture ? List.of(Mode.ITEM, Mode.INVENTORY, Mode.BOOKMARK, Mode.FLUID, Mode.TEXTURE)
+                : List.of(Mode.ITEM, Mode.INVENTORY, Mode.BOOKMARK, Mode.FLUID);
+    }
+
+    private String modeLabel(Mode value) {
+        return switch (value) {
+            case ITEM -> "物品";
+            case INVENTORY -> "物品栏";
+            case BOOKMARK -> "JEI书签";
+            case FLUID -> "流体";
+            case TEXTURE -> "贴图";
         };
     }
 
-    private int countStepX() { return left + panelWidth - 12 - COUNT_BOX_W; }
-    private int countStepY(int row) { return top + 38 + row * (COUNT_STEP_H + 2); }
-    private int countStepW() { return (COUNT_BOX_W - 9) / 4; }
+    private int modeCount(Mode value) {
+        return switch (value) {
+            case ITEM -> restrictedMode ? restrictedStacks.size() : itemCacheReady ? ALL_ITEMS.size() : 0;
+            case INVENTORY -> invStacks.size();
+            case BOOKMARK -> bookmarkNames.size();
+            case FLUID -> ALL_FLUIDS == null ? 0 : ALL_FLUIDS.size();
+            case TEXTURE -> ALL_TEXTURES == null ? 0 : ALL_TEXTURES.size();
+        };
+    }
 
-    /** 数量快速填写：三排步进按钮（+1/+10/+100/+1k、-1/-10/-100/-1k、×10/×100/÷10/÷100），
-     * 对当前激活的已选项直接改 count；没有激活项/激活项是贴图（无数量概念）时不画。 */
-    private void drawCountSteps(GuiGraphics g, int mx, int my) {
-        if (active == null || active.isTexture) return;
-        int bx0 = countStepX(), bw = countStepW();
-        for (int i = 0; i < 4; i++) {
-            int bx = bx0 + i * (bw + 3);
-            ui.draw(g, this.font, bx, countStepY(0), bw, COUNT_STEP_H, "§a+" + compactStep(COUNT_STEPS[i]), mx, my, true);
-            ui.draw(g, this.font, bx, countStepY(1), bw, COUNT_STEP_H, "§c-" + compactStep(COUNT_STEPS[i]), mx, my, true);
-            ui.draw(g, this.font, bx, countStepY(2), bw, COUNT_STEP_H, COUNT_SCALE_LABELS[i], mx, my, true);
+    private List<String> sortOptions() {
+        return mode == Mode.INVENTORY ? List.of("default", "name", "mod", "id", "count") : List.of("default", "name", "mod", "id");
+    }
+
+    private String sortLabel(String sort) {
+        return switch (sort) {
+            case "name" -> "名称";
+            case "mod" -> "模组";
+            case "id" -> "ID";
+            case "count" -> "数量";
+            default -> "默认";
+        };
+    }
+
+    private void drawSidebar(GuiGraphics g, int mx, int my) {
+        int y = gridY;
+        for (Mode value : availableModes()) {
+            int modeX = sidebarX;
+            ui.draw(g, this.font, modeX, y, sidebarW, 18,
+                    (mode == value ? "§e" : "§7") + modeLabel(value) + " " + modeCount(value), mx, my, true);
+            y += 21;
         }
+        sortY = y + 4;
+        groupY = sortY + 24;
+        modulesY = groupY + 26;
+        ui.draw(g, this.font, sidebarX, sortY, sidebarW, 18, "排序: " + sortLabel(pickerSort) + " ▾", mx, my, true);
+        ui.draw(g, this.font, sidebarX, groupY, sidebarW, 18, (groupByMod ? "§a☑ " : "§7☐ ") + "按模组分区", mx, my, true);
+        clip(g, sidebarX, modulesY, sidebarW, gridBottom - modulesY);
+        try {
+            for (int index = 0; index < moduleHeights.size(); index++) {
+                int ry = modulesY + moduleStarts[index] - moduleScroll;
+                int height = moduleHeights.get(index);
+                if (ry + height <= modulesY || ry >= gridBottom) continue;
+                String id = index == 0 ? "" : moduleOrder.get(index - 1);
+                String label = index == 0 ? "全部模组" : moduleNames.getOrDefault(id, id);
+                int count = index == 0 ? curNames().size() : moduleCounts.getOrDefault(id, 0);
+                if (id.equals(moduleFilter)) g.fill(sidebarX, ry, sidebarX + sidebarW, ry + height, SEL_ACTIVE);
+                List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(label), moduleLabelWidth());
+                for (int line = 0; line < lines.size(); line++)
+                    g.drawString(this.font, lines.get(line), sidebarX + 2, ry + 3 + line * this.font.lineHeight, WHITE, false);
+                String countText = String.valueOf(count);
+                g.drawString(this.font, countText, sidebarX + sidebarW - 3 - this.font.width(countText), ry + 3, GRAY, false);
+                if (GuiRenderUtil.isHovering(mx, my, sidebarX, ry, sidebarW, height))
+                    hoverFluidTip = List.of(Component.literal(label + " (" + count + ")"));
+            }
+        } finally { g.disableScissor(); }
     }
 
-    /** 数量快速填写按钮点击；命中即改 active.count + 回写数量框，未命中返回 false。 */
-    private boolean countStepsClicked(double mx, double my) {
-        if (active == null || active.isTexture) return false;
-        int bx0 = countStepX(), bw = countStepW();
-        int row = stepRowAt(my);
-        if (row < 0) return false;
-        for (int i = 0; i < 4; i++) {
-            int bx = bx0 + i * (bw + 3);
-            if (!ui.hit(mx, my, bx, countStepY(row), bw, COUNT_STEP_H, true)) continue;
-            if (row == 0) active.count = addClamp(active.count, COUNT_STEPS[i]);
-            else if (row == 1) active.count = addClamp(active.count, -COUNT_STEPS[i]);
-            else active.count = i < 2 ? mulClamp(active.count, COUNT_SCALES[i]) : divClamp(active.count, COUNT_SCALES[i]);
-            syncCountBox();
-            ShopUiSounds.step(i);
-            return true;
-        }
-        return false;
+    private void clip(GuiGraphics g, int x, int y, int width, int height) {
+        g.enableScissor(Math.round(x * guiScale) + offsetX, Math.round(y * guiScale) + offsetY,
+                Math.round((x + width) * guiScale) + offsetX, Math.round((y + height) * guiScale) + offsetY);
     }
-
-    /** 步进按钮三排：0=加、1=减、2=倍率；不在任何一排返回 -1。 */
-    private int stepRowAt(double my) {
-        for (int row = 0; row < 3; row++) {
-            int y = countStepY(row);
-            if (my >= y && my < y + COUNT_STEP_H) return row;
-        }
-        return -1;
-    }
-
-    private void syncCountBox() {
-        if (countBox == null || active == null) return;
-        suppressCount = true;
-        countBox.setValue(Long.toString(active.count));
-        suppressCount = false;
-    }
-
-    private static String compactStep(long step) {
-        return step >= 1000 ? (step / 1000) + "k" : String.valueOf(step);
-    }
-
-    /** 数量加减夹取到 [1, Long.MAX]，防加法溢出。 */
-    private static long addClamp(long a, long delta) {
-        if (delta > 0 && a > Long.MAX_VALUE - delta) return Long.MAX_VALUE;
-        return Math.max(1L, a + delta);
-    }
-
-    /** 数量乘法夹取到 [1, Long.MAX]，防乘法溢出。 */
-    private static long mulClamp(long a, long factor) {
-        if (factor <= 0) return a;
-        if (a > Long.MAX_VALUE / factor) return Long.MAX_VALUE;
-        return Math.max(1L, a * factor);
-    }
-
-    /** 数量除法夹取到 [1, Long.MAX]（整除向下取整，最小 1）。 */
-    private static long divClamp(long a, long factor) {
-        if (factor <= 0) return a;
-        return Math.max(1L, a / factor);
-    }
-
-    private int confirmX() { return left + panelWidth - 12 - 90; }
-    private int cancelX() { return confirmX() - 6 - 56; }
-    private int clearAllX() { return selX + selW - 32; }
-    private int syncAllX() { return clearAllX() - 32 - 2; }
 
     private void drawGrid(GuiGraphics g, int mx, int my) {
-        if (mode == Mode.ITEM && !itemCacheReady) {
-            // 物品模式且后台缓存还没建完：给个明确的"加载中"占位，别让玩家误以为搜索没结果
-            float pulse = 0.55f + 0.45f * (float) Math.sin((System.currentTimeMillis() % 1_200L) / 1_200.0 * Math.PI * 2.0);
-            g.drawCenteredString(this.font, "§e正在后台构建物品列表…", gridX + gridW / 2, gridY + (gridBottom - gridY) / 2 - 4,
-                    GuiMotion.lerpColor(0xFF808080, 0xFFFFE080, pulse));
-            g.drawString(this.font, "§8物品列表加载中，请稍候…", gridX, gridBottom + 2, GRAY, true);
+        if (!restrictedMode && mode == Mode.ITEM && !itemCacheReady) {
+            g.drawCenteredString(this.font, "§e正在后台构建物品列表…", gridX + gridW / 2, gridY + 30, GOLD);
             return;
         }
-        int cols = gridCols;
-        int rows = gridRows();
-        int total = filtered.size();
-        int maxScroll = Math.max(0, (int) Math.ceil(total / (double) cols) - rows);
-        if (gridScroll > maxScroll) gridScroll = maxScroll;
-        int start = gridScroll * cols;
-        boolean textureMode = mode == Mode.TEXTURE;
-        long nowGrid = System.currentTimeMillis();
-        // 切浏览模式后整片网格重新淡入，别硬切
-        float appear = modeAppear();
-        g.pose().pushPose();
+        clip(g, gridX - 2, gridY, gridW + 3, gridBottom - gridY);
         try {
-            if (appear < 1f) g.pose().translate(0f, (1f - appear) * 6f, 0f);
-            for (int r = 0; r < rows; r++) {
-                for (int c = 0; c < cols; c++) {
-                    int idx = start + r * cols + c;
-                    if (idx >= total) break;
-                    int x = gridX + c * PITCH;
-                    int y = gridY + r * PITCH;
-                    int resIdx = filtered.get(idx);
-                    // BOOKMARK 模式物品+流体混页不分流，每格单独判断落在哪一段（见 isBookmarkFluidIndex）
-                    boolean fluidHere = mode == Mode.FLUID || isBookmarkFluidIndex(resIdx);
-                    boolean hv = GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT);
-                    boolean chosen = findSelected(resIdx) >= 0;
-                    // 刚加进清单的那一项：外圈金光先画，压在槽位下面
-                    float fresh = chosen ? addFlash(addedFor(resIdx), nowGrid) : 0f;
-                    if (fresh > 0.01f) {
-                        g.fill(x - 2, y - 2, x + SLOT + 2, y + SLOT + 2, (Math.round(0xB0 * fresh) << 24) | 0xFFD040);
-                    }
-                    EditorWidgets.checkerSlot(g, x, y, hv);
-                    if (fluidHere) {
-                        EditorWidgets.fluidIcon(g, x + 2, y + 2, 16, curFluid(resIdx));
-                    } else if (textureMode) {
-                        EditorWidgets.textureThumb(g, x + 2, y + 2, 16, ALL_TEXTURES.get(resIdx));
-                    } else {
-                        ItemStack st = gridItem(resIdx);
-                        g.renderItem(st, x + 2, y + 2);
-                        if (st.hasTag()) { // 带 NBT 的实物 → 左下角小黄点提示
-                            g.fill(x + 2, y + 15, x + 5, y + 18, 0xFFFFD000);
-                        }
-                    }
-                    if (chosen) { // 已在清单里 → 绿色对勾角标
-                        g.fill(x + 13, y + 1, x + 19, y + 7, 0xCC1E7A2E);
-                        g.drawString(this.font, "§a✔", x + 13, y + 1, WHITE, false);
-                    }
-                    if (hv) {
-                        if (fluidHere) hoverFluidTip = List.of(Component.literal(fluidName(curFluid(resIdx))));
-                        else if (textureMode) hoverFluidTip = List.of(Component.literal(ALL_TEXTURES.get(resIdx).toString()));
-                        else hoverItem = gridItem(resIdx);
+            for (PickerGridRow row : gridModel) {
+                int y = gridY + row.getY() - shownGridScroll;
+                if (y + row.getHeight() <= gridY || y >= gridBottom) continue;
+                if (row.getHeader()) drawGridHeader(g, row, y);
+                else for (int column = 0; column < row.getIndices().size(); column++)
+                    drawGridSlot(g, row.getIndices().get(column), gridX + column * PITCH, y, mx, my);
+            }
+            int sticky = MultiPickerLayout.stickyHeader(gridModel, shownGridScroll);
+            if (sticky >= 0) {
+                int height = gridModel.get(sticky).getHeight();
+                int y = gridY;
+                for (int index = sticky + 1; index < gridModel.size(); index++) {
+                    PickerGridRow next = gridModel.get(index);
+                    if (next.getHeader()) {
+                        y = Math.min(y, gridY + next.getY() - shownGridScroll - height);
+                        break;
                     }
                 }
+                drawGridHeader(g, gridModel.get(sticky), y);
             }
-        } finally {
-            g.pose().popPose();
+        } finally { g.disableScissor(); }
+    }
+
+    private void drawGridHeader(GuiGraphics g, PickerGridRow row, int y) {
+        // renderItem 把图标放在 z≈150，吸顶标题晚于格子绘制，不抬高 z 的话滚到标题下的图标会盖在字上
+        g.pose().pushPose();
+        try {
+            g.pose().translate(0, 0, GRID_HEADER_Z);
+            g.fill(gridX, y, gridX + gridW, y + row.getHeight(), 0xFF302C24);
+            String id = row.getModule();
+            String label = (collapsedModules.contains(id) ? "▸ " : "▾ ") + moduleNames.getOrDefault(id, id)
+                    + " (" + filteredModuleCounts.getOrDefault(id, 0) + ")";
+            List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(label), Math.max(1, gridW - 8));
+            for (int line = 0; line < lines.size(); line++)
+                g.drawString(this.font, lines.get(line), gridX + 2, y + 4 + line * this.font.lineHeight, GOLD, false);
+        } finally { g.pose().popPose(); }
+    }
+
+    private int stickyHeaderHeight() {
+        int index = MultiPickerLayout.stickyHeader(gridModel, shownGridScroll);
+        return index < 0 ? 0 : gridModel.get(index).getHeight();
+    }
+
+    private void drawGridSlot(GuiGraphics g, int index, int x, int y, int mx, int my) {
+        boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT) && my >= gridY && my < gridBottom
+                && (!groupByMod || my >= gridY + stickyHeaderHeight());
+        Spring spring = slotHover.computeIfAbsent(index, ignored -> new Spring(Spring.HOVER));
+        long now = System.currentTimeMillis();
+        if (ClientShopUiSettings.reduceMotion()) spring.snap(hover ? 1 : 0);
+        else { spring.setTarget(hover ? 1 : 0, now); spring.update(now); }
+        int selectedIndex = findSelected(index);
+        Sel entry = selectedIndex >= 0 ? selected.get(selectedIndex) : null;
+        float flash = addFlash(entry, now);
+        if (flash > 0) g.fill(x - 1, y - 1, x + SLOT + 1, y + SLOT + 1, (Math.round(160 * flash) << 24) | 0xFFD040);
+        g.pose().pushPose();
+        try {
+            float scale = 1 + spring.value() * 0.18f;
+            g.pose().translate(x + 10, y + 10, hover ? 50 : 0);
+            g.pose().scale(scale, scale, 1);
+            g.pose().translate(-x - 10, -y - 10, 0);
+            EditorWidgets.checkerSlot(g, x, y, hover);
+            if (mode == Mode.FLUID || isBookmarkFluidIndex(index)) EditorWidgets.fluidIcon(g, x + 2, y + 2, 16, curFluid(index));
+            else if (mode == Mode.TEXTURE) EditorWidgets.textureThumb(g, x + 2, y + 2, 16, ALL_TEXTURES.get(index));
+            else {
+                ItemStack stack = gridItem(index);
+                g.renderItem(stack, x + 2, y + 2);
+                if (stack.hasTag()) g.fill(x + 2, y + 15, x + 5, y + 18, 0xFFFFD000);
+            }
+            if (entry != null) {
+                g.drawString(this.font, "§a✔", x + 12, y, WHITE, false);
+                String compact = entry.count >= 1_000_000 ? entry.count / 1_000_000 + "M" : entry.count >= 1_000 ? entry.count / 1_000 + "k" : Long.toString(entry.count);
+                g.pose().pushPose();
+                g.pose().translate(x + 1, y + 14, 100);
+                g.pose().scale(0.65f, 0.65f, 1);
+                g.drawString(this.font, compact, 0, 0, CYAN, true);
+                g.pose().popPose();
+            }
+        } finally { g.pose().popPose(); }
+        if (hover) {
+            if (mode == Mode.FLUID || isBookmarkFluidIndex(index)) hoverFluidTip = List.of(Component.literal(fluidName(curFluid(index))));
+            else if (mode == Mode.TEXTURE) hoverFluidTip = List.of(Component.literal(ALL_TEXTURES.get(index).toString()));
+            else hoverItem = gridItem(index);
         }
-        // 滚动/计数提示
-        g.drawString(this.font, "§8匹配 " + total + " 项 · 滚轮翻页/拖动右侧滚动条", gridX, gridBottom + 2, GRAY, true);
     }
 
-    /** 切浏览模式后网格淡入进度 0..1；减少动效时直接 1。 */
-    private float modeAppear() {
-        if (modeChangedAtMs <= 0L) return 1f;
-        if (ClientShopUiSettings.reduceMotion()) return 1f;
-        float t = GuiMotion.clamp01((System.currentTimeMillis() - modeChangedAtMs) / (float) GuiRenderUtil.MOTION_MS);
-        return GuiRenderUtil.easeOut(t);
-    }
-
-    /** 网格右侧竖向滚动条（拖拽用），画在网格与已选清单之间的缝隙里。走共用件：hover 变亮、可点轨道直达。 */
     private void drawGridScrollbar(GuiGraphics g, int mx, int my) {
-        int trackX = scrollBarX();
-        int trackY = gridY, trackH = gridBottom - gridY;
-        g.fill(trackX, trackY, trackX + SCROLLBAR_W, trackY + trackH, PANEL_BG);
-        if (gridMaxScroll() <= 0) {
-            g.fill(trackX, trackY, trackX + SCROLLBAR_W, trackY + trackH, BTN_BG);
-            return;
-        }
-        ui.drawScrollbar(g, trackX, trackY, trackH, gridTotalRows(), gridRows(), gridScroll, gridMaxScroll(), mx, my);
+        ui.drawScrollbar(g, scrollBarX(), gridY, gridBottom - gridY, gridContentHeight(),
+                gridBottom - gridY, shownGridScroll, gridMaxScroll(), mx, my);
     }
 
     private void drawSelectedList(GuiGraphics g, int mx, int my) {
-        g.fill(selX - 2, selY - 2, selX + selW + 2, gridBottom + 2, GOLD_DARK);
-        g.fill(selX - 1, selY - 1, selX + selW + 1, gridBottom + 1, PANEL_BG);
-        g.drawString(this.font, "§6已选清单 §7(" + selected.size() + ")", selX + 2, selY, GOLD, true);
-        if (!selected.isEmpty()) {
-            ui.draw(g, this.font, syncAllX(), selY - 1, 32, 10, "§b同步", mx, my, true);
-            ui.draw(g, this.font, clearAllX(), selY - 1, 32, 10, "§c清空", mx, my, true);
-        }
-        int visible = selVisibleRows();
-        int maxScroll = Math.max(0, selected.size() - visible);
-        if (selScroll > maxScroll) selScroll = maxScroll;
-        int baseY = selY + 14;
-        long now = System.currentTimeMillis();
-        for (int i = 0; i < visible; i++) {
-            int idx = selScroll + i;
-            if (idx >= selected.size()) break;
-            Sel s = selected.get(idx);
-            int ry = baseY + i * SEL_ROW_H;
-            boolean rowHover = GuiRenderUtil.isHovering(mx, my, selX, ry, selW, SEL_ROW_H);
-            // hover 渐变（和按钮同一张弹簧表），不是一下子变色
-            float glow = ui.rowHover(idx, rowHover);
-            if (s == active) g.fill(selX, ry, selX + selW, ry + SEL_ROW_H, SEL_ACTIVE);
-            if (glow > 0.01f && s != active) {
-                g.fill(selX, ry, selX + selW, ry + SEL_ROW_H, GuiMotion.lerpColor(0x00000000, 0x33FFFFFF, glow));
+        g.fill(selX - 2, selY - 2, selX + selW + 6, gridBottom + 1, PANEL_BG);
+        g.drawString(this.font, "§6已选清单 (" + selected.size() + ")", selX + 2, selY + 1, GOLD, false);
+        ui.draw(g, this.font, syncAllX(), selY + 14, selW - 42, 16,
+                "§b全部设为 " + (active == null ? 1 : active.count), mx, my, active != null);
+        ui.draw(g, this.font, clearAllX(), selY + 14, 36, 16, "§c清空", mx, my, !selected.isEmpty());
+        clip(g, selX, listTop(), selW, gridBottom - listTop());
+        try {
+            for (int index = 0; index < selected.size(); index++) {
+                Sel entry = selected.get(index);
+                int y = listTop() + selectionStarts[index] - shownSelScroll;
+                int height = selectionHeights.get(index);
+                if (y + height <= listTop() || y >= gridBottom) continue;
+                boolean hover = GuiRenderUtil.isHovering(mx, my, selX, Math.max(listTop(), y), selW, Math.min(height, gridBottom - y));
+                float glow = ui.rowHover(index, hover);
+                if (entry == active) g.fill(selX, y, selX + selW, y + height - 1, SEL_ACTIVE);
+                else if (glow > 0) g.fill(selX, y, selX + selW, y + height - 1, GuiMotion.lerpColor(0, 0x33FFFFFF, glow));
+                float flash = addFlash(entry, System.currentTimeMillis());
+                if (flash > 0) g.fill(selX, y, selX + selW, y + height - 1, (Math.round(90 * flash) << 24) | 0xFFD040);
+                drawSelectionIcon(g, entry, selX + 2, y + 3);
+                drawListName(g, "§f" + selectionName(entry), selX + 24, y + 3, selW - 50, hover);
+                if (entry == originalSelection) g.drawString(this.font, "§6原", selX + 2, y + 20, GOLD, false);
+                ui.draw(g, this.font, selX + selW - 18, y + 2, 16, 14, "×", mx, my, true);
+                if (!entry.isTexture) drawQuantityRow(g, entry, quantityY(index), mx, my);
+                g.fill(selX, y + height - 1, selX + selW, y + height, 0x30606060);
             }
-            // 刚加入的那一项：整行金光闪一下再淡掉
-            float fresh = addFlash(s, now);
-            if (fresh > 0.01f) {
-                g.fill(selX, ry, selX + selW, ry + SEL_ROW_H, (Math.round(0xB0 * fresh) << 24) | 0xFFD040);
-                g.fill(selX, ry, selX + 2, ry + SEL_ROW_H, (Math.round(0xFF * fresh) << 24) | 0xFFE080);
+            if (selected.isEmpty()) {
+                drawListName(g, "§8点左侧格子加入 · 拖过可连选 · 右键移除", selX + 16, listTop() + 24, selW - 32, false);
             }
-            // 图标
-            if (s.isFluid) EditorWidgets.fluidIcon(g, selX + 1, ry + 1, 16, s.fluid);
-            else if (s.isTexture) EditorWidgets.textureThumb(g, selX + 1, ry + 1, 16, s.textureId);
-            else g.renderItem(s.itemIcon, selX, ry);
-            // 名称（带 NBT 的物品名前加 §e*；贴图显示资源路径），长名换行不砍字
-            String nm = s.isFluid ? fluidName(s.fluid)
-                    : s.isTexture ? s.textureId.toString()
-                    : (s.itemIcon.hasTag() ? "*" : "") + s.itemIcon.getHoverName().getString();
-            drawListName(g, "§f" + nm, selX + 20, ry + 2, selW - 20 - 62, rowHover);
-            // 数量 + 单位（贴图无数量概念，不显示）
-            if (!s.isTexture) {
-                String amt = groupLong(s.count) + (s.isFluid ? "mB" : "");
-                g.drawString(this.font, (s == active ? "§e" : "§b") + amt, selX + selW - 60, ry + 2, CYAN, true);
+            if (draggedSelection != null && dragStarted) {
+                int y = listTop() + (insertion >= selectionStarts.length ? selectionContentHeight() : selectionStarts[insertion]) - shownSelScroll;
+                g.fill(selX, y - 1, selX + selW, y + 1, 0xFFFFD040);
             }
-            // ✕ 移除：字形必须画在命中框（selListClicked 的 ry+1 起 12×12）内部，
-            // 之前画在 ry+11 时可见的 ✕ 几乎整个落在命中框下方，点它会误触「设为激活」
-            int rmX = selX + selW - 12;
-            boolean rmHv = GuiRenderUtil.isHovering(mx, my, rmX, ry + 1, 12, 12);
-            g.drawString(this.font, rmHv ? "§c§l✕" : "§7✕", rmX, ry + 2, WHITE, false);
+        } finally { g.disableScissor(); }
+        ui.drawScrollbar(g, selX + selW + 2, listTop(), gridBottom - listTop(), selectionContentHeight(),
+                gridBottom - listTop(), shownSelScroll, selectionMaxScroll(), mx, my);
+    }
+
+    private void drawSelectionIcon(GuiGraphics g, Sel entry, int x, int y) {
+        if (entry.isFluid) EditorWidgets.fluidIcon(g, x, y, 16, entry.fluid);
+        else if (entry.isTexture) EditorWidgets.textureThumb(g, x, y, 16, entry.textureId);
+        else g.renderItem(entry.itemIcon, x, y);
+    }
+
+    private void drawQuantityRow(GuiGraphics g, Sel entry, int y, int mx, int my) {
+        int minusX = selX + 24;
+        int plusX = minusX + 20 + quantityWidth();
+        ui.draw(g, this.font, minusX, y, 16, 16, "−", mx, my, true);
+        ui.draw(g, this.font, plusX, y, 16, 16, "+", mx, my, true);
+        if (entry != editingQuantity) {
+            g.fill(minusX + 19, y, plusX - 3, y + 16, 0x50202020);
+            g.drawCenteredString(this.font, Long.toString(entry.count), (minusX + 19 + plusX - 3) / 2, y + 4, CYAN);
         }
-        if (selected.isEmpty()) {
-            g.drawString(this.font, "§8点左侧网格加入…", selX + 4, baseY + 2, GRAY, true);
+        String unit = entry.isFluid ? "mB" : entry.itemIcon.hasTag() ? "NBT" : "个";
+        g.drawString(this.font, unit, plusX + 19, y + 4, GRAY, false);
+        for (int row = 0; row < 2; row++) {
+            int chipY = y + 18 + row * (QUICK_H + 1);
+            String color = row == 0 ? "§c" : "§a";
+            g.drawCenteredString(this.font, color + (row == 0 ? "−" : "+"), selX + 2 + QUICK_SIGN_W / 2, chipY + (QUICK_H - 8) / 2, WHITE);
+            for (int chip = 0; chip < QUICK_STEPS.length; chip++) {
+                boolean enabled = row == 1 || entry.count > 1;
+                ui.draw(g, this.font, quickChipX(chip), chipY, quickChipW(chip), QUICK_H,
+                        (enabled ? color : "§8") + QUICK_LABELS[chip], mx, my, enabled);
+            }
         }
-        if (selected.size() > visible) {
-            g.drawString(this.font, "§8" + (selScroll + 1) + "-" + Math.min(selScroll + visible, selected.size()) + "/" + selected.size(), selX + 2, gridBottom - 8, GRAY, true);
-        }
+    }
+
+    private PixelRect toPixels(GuiRect rect) {
+        Minecraft mc = Minecraft.getInstance();
+        GuiRect affine = GlassGeometry.applyAffine(rect, guiScale, guiScale, offsetX, offsetY);
+        return GlassGeometry.toPixels(affine, mc.getMainRenderTarget().width, mc.getMainRenderTarget().height, this.width, this.height);
     }
 
     @Override
     protected void renderTooltips(GuiGraphics g, int smx, int smy, int mx, int my) {
-        if (hoverItem != null && !hoverItem.isEmpty()) {
-            g.renderTooltip(this.font, hoverItem, mx, my);
-        } else if (hoverSelNameFull != null) {
-            // 清单里名字被折行截掉的，悬停看全名
-            g.renderComponentTooltip(this.font, java.util.List.of(Component.literal(hoverSelNameFull)), mx, my);
-        } else if (hoverFluidTip != null) {
-            g.renderComponentTooltip(this.font, hoverFluidTip, mx, my);
-        } else if (GuiRenderUtil.isHovering(smx, smy, left + 12, top + 22, 200, 14)) {
-            g.renderComponentTooltip(this.font, SEARCH_HELP, mx, my);
+        ShopGaussBlur.clear();
+        ShopGaussBlur.clearTopLayer();
+        Minecraft mc = Minecraft.getInstance();
+        if (ShopGaussBlur.isReady()) {
+            PixelRect grid = toPixels(new GuiRect(gridX, gridY, gridW, gridBottom - gridY));
+            float swap = Math.max(0, 1 - (System.currentTimeMillis() - modeChangedAtMs) / 180f);
+            float strength = ClientShopUiSettings.reduceMotion() ? 0 : Math.min(0.8f, Math.max(Math.abs(gridVelocity) / 1800f - 0.08f, swap * 0.65f));
+            if (strength > 0.01f) ShopGaussBlur.requestDirectional(grid.getX(), grid.getY(), grid.getW(), grid.getH(),
+                    strength, 8 * guiScale, 0, 1, ShopGlassStyle.SWAP);
+            PixelRect panel = toPixels(new GuiRect(left, top, panelWidth, panelHeight));
+            ShopGaussBlur.requestExtra(0, 0, mc.getMainRenderTarget().width, mc.getMainRenderTarget().height,
+                    Math.min(1, opening.value()) * 0.85f, 12 * guiScale,
+                    panel.getX(), panel.getY(), panel.getW(), panel.getH(), ShopGlassStyle.OVERLAY);
         }
+        ShopGaussBlur.deferTopLayer(this, topGraphics -> drawTopLayer(topGraphics, smx, smy, mx, my));
     }
 
-    private static String fluidName(Fluid f) {
-        return FluidStack.create(f, 1000).getName().getString();
+    private void drawTopLayer(GuiGraphics g, int smx, int smy, int mx, int my) {
+        g.pose().pushPose();
+        try {
+            g.pose().translate(offsetX, offsetY, 500);
+            g.pose().scale(guiScale, guiScale, 1);
+            if (sortOpen) {
+                int y = sortY + 20;
+                for (String option : sortOptions()) {
+                    ui.draw(g, this.font, sidebarX, y, sidebarW, 18, sortLabel(option), smx, smy, true);
+                    y += 20;
+                }
+            }
+            if (draggedSelection != null && dragStarted) {
+                g.fill(smx + 8, smy + 8, smx + 32, smy + 32, 0xD0303028);
+                drawSelectionIcon(g, draggedSelection, smx + 12, smy + 12);
+            }
+        } finally { g.pose().popPose(); }
+        if (sortOpen || draggedSelection != null && dragStarted) return;
+        if (hoverItem != null && !hoverItem.isEmpty()) g.renderTooltip(this.font, hoverItem, mx, my);
+        else if (hoverFluidTip != null) g.renderComponentTooltip(this.font, hoverFluidTip, mx, my);
+        else if (GuiRenderUtil.isHovering(smx, smy, searchBox.getX(), searchBox.getY(), searchBox.getWidth(), searchBox.getHeight()))
+            g.renderComponentTooltip(this.font, SEARCH_HELP, mx, my);
     }
 
-    /** 精确数量带千分位。 */
-    private static String groupLong(long v) {
-        return String.format(Locale.ROOT, "%,d", Math.max(0L, v));
+    private static String fluidName(Fluid fluid) {
+        return FluidStack.create(fluid, 1000).getName().getString();
     }
 
-    // ===== 交互 =====
+    private void changeMode(Mode next) {
+        commitQuantity();
+        cancelGestures();
+        mode = next;
+        if (mode == Mode.TEXTURE) ensureTextureCache();
+        moduleFilter = "";
+        collapsedModules.clear();
+        modeChangedAtMs = System.currentTimeMillis();
+        rebuildSource();
+    }
+
+    private void changePreferences() {
+        commitQuantity();
+        cancelGestures();
+        sortGeneration++;
+        pendingSortKey = "";
+        sorting = false;
+        filterResultCache.clear();
+        ClientShopUiSettings.setPickerPreferences(pickerSort, groupByMod);
+        modeChangedAtMs = System.currentTimeMillis();
+        rebuildFilter();
+    }
+
     @Override
     protected boolean universalMouseClicked(double mx, double my, int btn) {
-        // 底部按钮
-        if (ui.hit(mx, my, confirmX(), top + panelHeight - 24, 90, 16, true)) { confirm(); return true; }
-        if (ui.hit(mx, my, cancelX(), top + panelHeight - 24, 56, 16, true)) { Minecraft.getInstance().setScreen(parent); return true; }
-        // 浏览模式切换（循环：物品→物品栏→JEI书签→流体→[贴图，仅 allowTexture]；受限模式无此按钮）
-        int modeX = left + 12 + 200 + 8;
-        if (!restrictedMode && ui.hit(mx, my, modeX, top + 21, 70, 16, true)) {
-            mode = switch (mode) {
-                case ITEM -> Mode.INVENTORY;
-                case INVENTORY -> Mode.BOOKMARK;
-                case BOOKMARK -> Mode.FLUID;
-                case FLUID -> allowTexture ? Mode.TEXTURE : Mode.ITEM;
-                case TEXTURE -> Mode.ITEM;
-            };
-            if (mode == Mode.TEXTURE) ensureTextureCache(); // 懒加载：只有真的切进贴图模式才扫描资源包
-            rebuildFilter();
-            modeChangedAtMs = System.currentTimeMillis(); // 网格整片重新淡入，不硬切
+        if (btn != 0 && btn != 1) return super.universalMouseClicked(mx, my, btn);
+        cancelHold();
+        if (sortOpen) {
+            if (btn == 0) {
+                int index = (int) (my - sortY - 20) / 20;
+                if (my >= sortY + 20 && mx >= sidebarX && mx < sidebarX + sidebarW && index < sortOptions().size()) {
+                    pickerSort = sortOptions().get(index);
+                    changePreferences();
+                }
+            }
+            sortOpen = false;
             return true;
         }
-        // 数量快速填写三排步进按钮
-        if (countStepsClicked(mx, my)) return true;
-        // 已选清单「同步」：把顶部数量框当前值套用到全部已选项目
-        if (!selected.isEmpty() && ui.hit(mx, my, syncAllX(), selY - 1, 32, 10, true)) {
-            syncAllCounts();
-            return true;
+        if (editingQuantity != null && !GuiRenderUtil.isHovering(mx, my, countBox.getX(), countBox.getY(), countBox.getWidth(), countBox.getHeight()))
+            commitQuantity();
+        if (btn == 0) {
+            if (ui.hit(mx, my, confirmX(), top + panelHeight - 24, 90, 16, true)) { confirm(); return true; }
+            if (ui.hit(mx, my, cancelX(), top + panelHeight - 24, 56, 16, true)) { onClose(); return true; }
+            if (ui.hit(mx, my, searchBox.getX() + searchBox.getWidth() + 2, searchBox.getY(), 16, 16, !searchBox.getValue().isEmpty())) {
+                searchBox.setValue("");
+                setFocused(searchBox);
+                return true;
+            }
+            int y = gridY;
+            for (Mode value : availableModes()) {
+                if (ui.hit(mx, my, sidebarX, y, sidebarW, 18, true)) { changeMode(value); return true; }
+                y += 21;
+            }
+            if (ui.hit(mx, my, sidebarX, sortY, sidebarW, 18, true)) { cancelHold(); sortOpen = true; return true; }
+            if (ui.hit(mx, my, sidebarX, groupY, sidebarW, 18, true)) { groupByMod = !groupByMod; changePreferences(); return true; }
+            if (GuiRenderUtil.isHovering(mx, my, sidebarX, modulesY, sidebarW, gridBottom - modulesY)) {
+                int index = moduleRowAt(my);
+                if (index >= 0 && index < moduleHeights.size()) {
+                    moduleFilter = index == 0 ? "" : moduleOrder.get(index - 1);
+                    commitQuantity();
+                    rebuildFilter();
+                }
+                return true;
+            }
+            if (ui.hit(mx, my, syncAllX(), selY + 14, selW - 42, 16, active != null)) { syncAllCounts(); return true; }
+            if (ui.hit(mx, my, clearAllX(), selY + 14, 36, 16, !selected.isEmpty())) { clearAll(); return true; }
+            if (gridScrollbarClicked(mx, my)) return true;
+            int first = ui.beginDrag(mx, my, selX + selW + 2, listTop(), gridBottom - listTop(),
+                    selectionContentHeight(), gridBottom - listTop(), selectionMaxScroll());
+            if (first >= 0) { scrollbarOwner = 2; selScroll = first; return true; }
+            if (selListClicked(mx, my, btn)) return true;
         }
-        // 已选清单「清空」
-        if (!selected.isEmpty() && ui.hit(mx, my, clearAllX(), selY - 1, 32, 10, true)) {
-            clearAll();
-            return true;
-        }
-        // 网格滚动条（拖拽）
-        if (gridScrollbarClicked(mx, my)) return true;
-        // 网格
         if (gridClicked(mx, my, btn)) return true;
-        // 已选清单
-        if (selListClicked(mx, my, btn)) return true;
         return super.universalMouseClicked(mx, my, btn);
     }
 
     private void clearAll() {
+        commitQuantity();
+        cancelGestures();
         selected.clear();
         setActive(null);
-        selScroll = 0;
+        selScroll = shownSelScroll = 0;
+        selectedMotion.snap(0);
+        rebuildSelectionRows();
     }
 
-    /** 同步数值：把顶部数量框当前输入的值套用到已选清单里的全部项目（贴图无数量概念，跳过）。 */
     private void syncAllCounts() {
-        if (countBox == null) return;
-        String text = countBox.getValue();
-        long v = Math.max(1L, text.isEmpty() ? 1L : parseLong(text));
-        for (Sel s : selected) {
-            if (!s.isTexture) s.count = v;
-        }
+        commitQuantity();
+        cancelHold();
+        if (active != null) selection.setAll(active.count);
     }
 
     private boolean gridScrollbarClicked(double mx, double my) {
         int first = ui.beginDrag(mx, my, scrollBarX(), gridY, gridBottom - gridY,
-                gridTotalRows(), gridRows(), gridMaxScroll());
+                gridContentHeight(), gridBottom - gridY, gridMaxScroll());
         if (first < 0) return false;
-        gridScroll = first; // 点轨道任意一处直接跳过去
+        scrollbarOwner = 1;
+        gridScroll = first;
         return true;
+    }
+
+    private void cancelGestures() {
+        cancelHold();
+        scrollbarOwner = 0;
+        gridGesture = false;
+        gestureButton = -1;
+        gestureOrigin = -1;
+        draggedSelection = null;
+        dragStarted = false;
+        dragVisited.clear();
     }
 
     @Override
     protected boolean universalMouseDragged(double mx, double my, int btn, double dx, double dy) {
-        int first = ui.drag(my, gridY, gridBottom - gridY, gridTotalRows(), gridRows(), gridMaxScroll());
-        if (first >= 0) { gridScroll = first; return true; }
+        if (scrollbarOwner != 0) {
+            int first = scrollbarOwner == 1
+                    ? ui.drag(my, gridY, gridBottom - gridY, gridContentHeight(), gridBottom - gridY, gridMaxScroll())
+                    : ui.drag(my, listTop(), gridBottom - listTop(), selectionContentHeight(), gridBottom - listTop(), selectionMaxScroll());
+            if (first >= 0) {
+                if (scrollbarOwner == 1) gridScroll = first; else selScroll = first;
+                return true;
+            }
+        }
+        if (btn == gestureButton && (gridGesture || draggedSelection != null)) {
+            if (!dragStarted && Math.hypot(mx - gestureX, my - gestureY) > 3) {
+                dragStarted = true;
+                commitQuantity();
+                cancelHold();
+                if (gridGesture && btn == 1) {
+                    int existing = findSelected(gestureOrigin);
+                    if (existing >= 0) removeSelected(existing);
+                }
+            }
+            if (dragStarted && gridGesture) {
+                int index = gridIndexAt(mx, my);
+                if (index >= 0 && dragVisited.add(index)) {
+                    if (btn == 1) { int existing = findSelected(index); if (existing >= 0) removeSelected(existing); }
+                    else if (findSelected(index) < 0) onGridPick(index, false);
+                }
+            }
+            return true;
+        }
         return super.universalMouseDragged(mx, my, btn, dx, dy);
     }
 
     @Override
     protected boolean universalMouseReleased(double mx, double my, int btn) {
         ui.release();
+        if (gridGesture && btn == gestureButton && btn == 1 && !dragStarted)
+            onGridPick(gestureOrigin, true);
+        if (draggedSelection != null && dragStarted) {
+            int from = selected.indexOf(draggedSelection);
+            int target = MultiPickerLayout.insertionIndex(selectionStarts, selectionHeights, (int) my - listTop() + shownSelScroll);
+            selection.move(from, target > from ? target - 1 : target);
+            rebuildSelectionRows();
+            ensureSelectedVisible(draggedSelection);
+        }
+        cancelGestures();
         return super.universalMouseReleased(mx, my, btn);
     }
 
+    private int gridRowAt(double my) {
+        if (my < gridY || my >= gridBottom) return -1;
+        if (groupByMod && my < gridY + stickyHeaderHeight()) return MultiPickerLayout.stickyHeader(gridModel, shownGridScroll);
+        return MultiPickerLayout.rowAtY(gridModel, (int) my - gridY + shownGridScroll);
+    }
+
+    private int gridIndexAt(double mx, double my) {
+        if (mx < gridX || mx >= gridX + gridW) return -1;
+        int rowIndex = gridRowAt(my);
+        if (rowIndex < 0) return -1;
+        PickerGridRow row = gridModel.get(rowIndex);
+        if (row.getHeader()) return -1;
+        int x = (int) mx - gridX;
+        int y = (int) my - gridY + shownGridScroll - row.getY();
+        int column = x / PITCH;
+        return x % PITCH < SLOT && y >= 0 && y < SLOT && column < row.getIndices().size() ? row.getIndices().get(column) : -1;
+    }
+
     private boolean gridClicked(double mx, double my, int btn) {
-        int cols = gridCols, rows = gridRows(), total = filtered.size();
-        int start = gridScroll * cols;
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                int idx = start + r * cols + c;
-                if (idx >= total) return false;
-                int x = gridX + c * PITCH, y = gridY + r * PITCH;
-                if (GuiRenderUtil.isHovering(mx, my, x, y, SLOT, SLOT)) {
-                    int resIdx = filtered.get(idx);
-                    if (btn == 0 && Screen.hasControlDown() && Screen.hasShiftDown()) {
-                        addInfinityCellFromGrid(resIdx);
-                    } else {
-                        onGridPick(resIdx, btn == 1);
-                    }
-                    return true;
-                }
+        if (!GuiRenderUtil.isHovering(mx, my, gridX, gridY, gridW, gridBottom - gridY)) return false;
+        int rowIndex = gridRowAt(my);
+        if (rowIndex >= 0 && gridModel.get(rowIndex).getHeader()) {
+            if (btn == 0) {
+                String module = gridModel.get(rowIndex).getModule();
+                if (!collapsedModules.add(module)) collapsedModules.remove(module);
+                rebuildGridRows();
             }
+            return true;
         }
-        return false;
+        int index = gridIndexAt(mx, my);
+        if (index < 0) return true;
+        if (btn == 0 && Screen.hasControlDown() && Screen.hasShiftDown()) {
+            addInfinityCellFromGrid(index);
+            return true;
+        }
+        if (btn == 0) onGridPick(index, false);
+        gestureX = mx;
+        gestureY = my;
+        gestureButton = btn;
+        gestureOrigin = index;
+        gridGesture = true;
+        dragStarted = false;
+        dragVisited.clear();
+        dragVisited.add(index);
+        return true;
     }
 
-    /** 网格点击：左键加入/选中，右键加入/移除切换。 */
-    private void onGridPick(int resIdx, boolean rightClick) {
-        int existing = findSelected(resIdx);
-        if (rightClick) {
-            if (existing >= 0) { removeSelected(existing); return; }
-            addFromGrid(resIdx);
-        } else {
-            if (existing >= 0) { setActive(selected.get(existing)); return; }
-            addFromGrid(resIdx);
-        }
+    private void onGridPick(int index, boolean rightClick) {
+        int existing = findSelected(index);
+        if (rightClick && existing >= 0) { removeSelected(existing); return; }
+        if (existing < 0) addFromGrid(index);
+        else { setActive(selected.get(existing)); markAdded(active); ensureSelectedVisible(active); }
+        if (!rightClick && Screen.hasShiftDown() && active != null && !active.isTexture)
+            active.setCount(active.isFluid ? 1000 : 64);
     }
 
-    private void addFromGrid(int resIdx) {
-        Sel s;
-        if (mode == Mode.FLUID || isBookmarkFluidIndex(resIdx)) {
-            Fluid f = curFluid(resIdx);
-            s = new Sel(true, ForgeRegistries.FLUIDS.getKey(f), null, f, 1000L);
-        } else if (mode == Mode.TEXTURE) {
-            s = Sel.texture(ALL_TEXTURES.get(resIdx));
-        } else {
-            ItemStack proto = gridItem(resIdx).copy(); // 保留 NBT，独立于缓存/背包
-            proto.setCount(1);
-            // 物品栏模式：初始数量自动填玩家当前实际持有量，而不是恒为 1（其余模式无"持有量"概念，仍默认 1）
-            long initCount = mode == Mode.INVENTORY && resIdx < invCounts.size()
-                    ? Math.max(1L, invCounts.get(resIdx)) : 1L;
-            s = new Sel(false, ForgeRegistries.ITEMS.getKey(proto.getItem()), proto, null, initCount);
+    private static boolean sameSelection(Sel first, Sel second) {
+        if (first.isFluid != second.isFluid || first.isTexture != second.isTexture) return false;
+        if (first.isFluid || first.isTexture) return java.util.Objects.equals(first.id, second.id);
+        return ItemStack.isSameItemSameTags(first.itemIcon, second.itemIcon);
+    }
+
+    private void addFromGrid(int index) {
+        Sel entry;
+        if (mode == Mode.FLUID || isBookmarkFluidIndex(index)) {
+            Fluid fluid = curFluid(index);
+            entry = new Sel(true, ForgeRegistries.FLUIDS.getKey(fluid), null, fluid, 1000L);
+        } else if (mode == Mode.TEXTURE) entry = Sel.texture(ALL_TEXTURES.get(index));
+        else {
+            ItemStack prototype = gridItem(index).copy();
+            prototype.setCount(1);
+            long count = mode == Mode.INVENTORY && index < invCounts.size() ? Math.max(1, invCounts.get(index)) : 1;
+            entry = new Sel(false, ForgeRegistries.ITEMS.getKey(prototype.getItem()), prototype, null, count);
         }
-        selected.add(s);
-        setActive(s);
-        markAdded(s);
+        entry = selection.add(entry, MultiPickerScreen::sameSelection);
+        rebuildSelectionRows();
+        setActive(entry);
+        markAdded(entry);
         ShopUiSounds.click();
-        // 新增项滚到可见底部
-        int visible = selVisibleRows();
-        if (selected.size() > visible) selScroll = selected.size() - visible;
+        ensureSelectedVisible(entry);
     }
 
     /** 記下剛加入的那一項，清單列和網格格子亮一下再淡掉。 */
@@ -1165,10 +1617,11 @@ public class MultiPickerScreen extends ScaledScreen {
         cellStack.setTag(tag);
 
         Sel s = new Sel(false, ForgeRegistries.ITEMS.getKey(cellItem), cellStack, null, 1L);
-        selected.add(s);
+        s = selection.add(s, MultiPickerScreen::sameSelection);
+        rebuildSelectionRows();
         setActive(s);
-        int visible = selVisibleRows();
-        if (selected.size() > visible) selScroll = selected.size() - visible;
+        markAdded(s);
+        ensureSelectedVisible(s);
         showClientMessage("§a[山海] 已写入已选清单: §e" + cellStack.getHoverName().getString() + "§7（" + displayName + "）");
     }
 
@@ -1177,98 +1630,198 @@ public class MultiPickerScreen extends ScaledScreen {
         if (player != null) player.displayClientMessage(Component.literal(message), true);
     }
 
-    /** 網格第 {@code resIdx} 項對應的已選項（沒有就 null），給「剛加入」閃光對位用。 */
-    private Sel addedFor(int resIdx) {
-        if (lastAdded == null) return null;
-        int i = findSelected(resIdx);
-        return i >= 0 && selected.get(i) == lastAdded ? lastAdded : null;
-    }
-
-    /** 清單列名：一行放不下就在列內折成兩行；還放不下就靠懸停提示看全名（列高固定不改）。 */
-    private void drawListName(GuiGraphics g, String text, int x, int y, int w, boolean rowHover) {
-        java.util.List<net.minecraft.util.FormattedCharSequence> lines =
-                this.font.split(Component.literal(text), w);
-        int maxLines = Math.max(1, (SEL_ROW_H - 3) / this.font.lineHeight);
-        for (int i = 0; i < Math.min(lines.size(), maxLines); i++) {
-            g.drawString(this.font, lines.get(i), x, y + i * this.font.lineHeight, WHITE, true);
-        }
-        // 折行后还是放不下的，悬停那一列看全名（列高固定，不为了长名撑高整列）
-        if (rowHover && lines.size() > maxLines) hoverSelNameFull = text;
+    private void drawListName(GuiGraphics g, String text, int x, int y, int width, boolean rowHover) {
+        List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(text), width);
+        for (int index = 0; index < lines.size(); index++)
+            g.drawString(this.font, lines.get(index), x, y + index * this.font.lineHeight, WHITE, true);
     }
 
     private boolean selListClicked(double mx, double my, int btn) {
-        int visible = selVisibleRows();
-        int baseY = selY + 14;
-        for (int i = 0; i < visible; i++) {
-            int idx = selScroll + i;
-            if (idx >= selected.size()) break;
-            int ry = baseY + i * SEL_ROW_H;
-            int rmX = selX + selW - 12;
-            if (GuiRenderUtil.isHovering(mx, my, rmX, ry + 1, 12, 12)) { removeSelected(idx); return true; }
-            if (GuiRenderUtil.isHovering(mx, my, selX, ry, selW, SEL_ROW_H)) { setActive(selected.get(idx)); return true; }
+        if (!GuiRenderUtil.isHovering(mx, my, selX, listTop(), selW, gridBottom - listTop())) return false;
+        int index = MultiPickerLayout.selectionRowAt(selectionStarts, selectionHeights, (int) my - listTop() + shownSelScroll);
+        if (index < 0) return true;
+        Sel entry = selected.get(index);
+        int y = listTop() + selectionStarts[index] - shownSelScroll;
+        if (ui.hit(mx, my, selX + selW - 18, y + 2, 16, 14, true)) { removeSelected(index); return true; }
+        if (!entry.isTexture) {
+            int quantityY = quantityY(index);
+            int minusX = selX + 24;
+            int plusX = minusX + 20 + quantityWidth();
+            if (GuiRenderUtil.isHovering(mx, my, minusX, quantityY, 16, 16)) { startQuantityRepeat(entry, -1, quantityY); return true; }
+            if (GuiRenderUtil.isHovering(mx, my, plusX, quantityY, 16, 16)) { startQuantityRepeat(entry, 1, quantityY); return true; }
+            if (GuiRenderUtil.isHovering(mx, my, minusX + 19, quantityY, quantityWidth() - 3, 16)) {
+                if (editingQuantity != entry) beginQuantity(entry, quantityY);
+                else countBox.mouseClicked(mx, my, btn);
+                return true;
+            }
+            for (int row = 0; row < 2; row++) {
+                int chipY = quickRowY(index, row);
+                for (int chip = 0; chip < QUICK_STEPS.length; chip++) {
+                    boolean enabled = row == 1 || entry.count > 1;
+                    if (!ui.hit(mx, my, quickChipX(chip), chipY, quickChipW(chip), QUICK_H, enabled)) continue;
+                    if (enabled) quickStep(entry, row == 0 ? -QUICK_STEPS[chip] : QUICK_STEPS[chip]);
+                    return true;
+                }
+            }
         }
-        return false;
+        setActive(entry);
+        ui.select();
+        if (my < y + selectionHeights.get(index) - (entry.isTexture ? 0 : QUANTITY_ROW_H + QUICK_BLOCK_H)) {
+            gestureX = mx;
+            gestureY = my;
+            gestureButton = btn;
+            draggedSelection = entry;
+            dragStarted = false;
+        }
+        return true;
     }
 
-    private void removeSelected(int idx) {
-        if (idx < 0 || idx >= selected.size()) return;
-        Sel s = selected.remove(idx);
-        if (active == s) setActive(selected.isEmpty() ? null : selected.get(Math.min(idx, selected.size() - 1)));
-        if (lastAdded == s) lastAdded = null;
+    private void stepQuantity(Sel entry, long delta, int tick) {
+        selection.step(entry, delta);
+        ShopUiSounds.step(tick);
     }
 
-    private void setActive(Sel s) {
-        active = s;
-        suppressCount = true;
-        if (countBox != null) countBox.setValue(s != null ? Long.toString(s.count) : "");
-        suppressCount = false;
+    /** 快速填数：先收掉正在编辑的输入框，再把这一项设为当前项并加减；减到 1 为止。 */
+    private void quickStep(Sel entry, long delta) {
+        commitQuantity();
+        setActive(entry);
+        stepQuantity(entry, delta, 0);
     }
 
-    /** 在已选清单里找网格第 resIdx 项：物品按物品+NBT，流体按流体 id，贴图按贴图路径。 */
-    private int findSelected(int resIdx) {
-        if (mode == Mode.FLUID || isBookmarkFluidIndex(resIdx)) {
-            ResourceLocation id = ForgeRegistries.FLUIDS.getKey(curFluid(resIdx));
-            for (int i = 0; i < selected.size(); i++) {
-                Sel s = selected.get(i);
-                if (s.isFluid && s.id != null && s.id.equals(id)) return i;
+    private long quantityStep() {
+        return Screen.hasControlDown() ? Screen.hasShiftDown() ? 1000 : 100 : Screen.hasShiftDown() ? 10 : 1;
+    }
+
+    private void startQuantityRepeat(Sel entry, int sign, int y) {
+        commitQuantity();
+        setActive(entry);
+        ui.press(selX + 24 + (sign > 0 ? 20 + quantityWidth() : 0), y, 16, 16, true);
+        heldQuantity = entry;
+        heldQuantityY = y;
+        long delta = quantityStep() * sign;
+        stepQuantity(entry, delta, 0);
+        ui.holdRepeat(RepeatCurve.STEPPER, tick -> {
+            int index = selected.indexOf(entry);
+            if (heldQuantity == entry && index >= 0 && quantityY(index) == heldQuantityY) {
+                stepQuantity(entry, delta, tick);
+                return true;
+            }
+            return false;
+        });
+    }
+
+    private void beginQuantity(Sel entry, int y) {
+        commitQuantity();
+        cancelHold();
+        active = entry;
+        editingQuantity = entry;
+        countBox.setX(selX + 43);
+        countBox.setY(y);
+        countBox.setWidth(quantityWidth() - 3);
+        countBox.setValue(Long.toString(entry.count));
+        countBox.visible = true;
+        countBox.active = true;
+        setFocused(countBox);
+        countBox.setFocused(true);
+        countBox.setHighlightPos(0);
+    }
+
+    private void commitQuantity() {
+        if (editingQuantity == null || countBox == null) return;
+        if (selected.contains(editingQuantity)) editingQuantity.setCount(parseLong(countBox.getValue()));
+        editingQuantity = null;
+        countBox.visible = false;
+        countBox.active = false;
+        countBox.setFocused(false);
+        if (getFocused() == countBox) setFocused(null);
+    }
+
+    private void ensureSelectedVisible(Sel entry) {
+        int index = selected.indexOf(entry);
+        if (index < 0 || index >= selectionStarts.length) return;
+        int start = selectionStarts[index];
+        int end = start + selectionHeights.get(index);
+        if (start < selScroll) selScroll = start;
+        else if (end > selScroll + gridBottom - listTop())
+            selScroll = Math.min(start, end - (gridBottom - listTop()));
+        selScroll = Math.max(0, Math.min(selectionMaxScroll(), selScroll));
+        if (ClientShopUiSettings.reduceMotion()) {
+            selectedMotion.snap(selScroll);
+            shownSelScroll = selScroll;
+        }
+    }
+
+    private void removeSelected(int index) {
+        if (index < 0 || index >= selected.size()) return;
+        commitQuantity();
+        cancelHold();
+        Sel entry = selected.get(index);
+        selection.remove(entry);
+        if (active == entry) setActive(selected.isEmpty() ? null : selected.get(Math.min(index, selected.size() - 1)));
+        if (lastAdded == entry) lastAdded = null;
+        rebuildSelectionRows();
+    }
+
+    private void setActive(Sel entry) {
+        if (active != entry) { commitQuantity(); cancelHold(); }
+        active = entry;
+    }
+
+    private int findSelected(int index) {
+        if (mode == Mode.FLUID || isBookmarkFluidIndex(index)) {
+            ResourceLocation id = ForgeRegistries.FLUIDS.getKey(curFluid(index));
+            for (int selectedIndex = 0; selectedIndex < selected.size(); selectedIndex++) {
+                Sel entry = selected.get(selectedIndex);
+                if (entry.isFluid && java.util.Objects.equals(entry.id, id)) return selectedIndex;
             }
         } else if (mode == Mode.TEXTURE) {
-            ResourceLocation tex = ALL_TEXTURES.get(resIdx);
-            for (int i = 0; i < selected.size(); i++) {
-                Sel s = selected.get(i);
-                if (s.isTexture && tex.equals(s.textureId)) return i;
+            ResourceLocation texture = ALL_TEXTURES.get(index);
+            for (int selectedIndex = 0; selectedIndex < selected.size(); selectedIndex++) {
+                Sel entry = selected.get(selectedIndex);
+                if (entry.isTexture && texture.equals(entry.textureId)) return selectedIndex;
             }
         } else {
-            ItemStack grid = gridItem(resIdx);
-            for (int i = 0; i < selected.size(); i++) {
-                Sel s = selected.get(i);
-                if (!s.isFluid && !s.isTexture && ItemStack.isSameItemSameTags(s.itemIcon, grid)) return i;
+            ItemStack stack = gridItem(index);
+            for (int selectedIndex = 0; selectedIndex < selected.size(); selectedIndex++) {
+                Sel entry = selected.get(selectedIndex);
+                if (!entry.isFluid && !entry.isTexture && ItemStack.isSameItemSameTags(entry.itemIcon, stack)) return selectedIndex;
             }
         }
         return -1;
     }
 
     @Override
-    protected boolean universalMouseScrolled(double mx, double my, double d) {
-        // 已选清单区域滚动
-        if (GuiRenderUtil.isHovering(mx, my, selX, selY, selW, gridBottom - selY)) {
-            int visible = selVisibleRows();
-            if (selected.size() > visible) {
-                selScroll = Math.max(0, Math.min(selScroll - (int) Math.signum(d), selected.size() - visible));
+    protected boolean universalMouseScrolled(double mx, double my, double delta) {
+        if (sortOpen) return true;
+        commitQuantity();
+        cancelHold();
+        if (GuiRenderUtil.isHovering(mx, my, sidebarX, modulesY, sidebarW, gridBottom - modulesY)) {
+            int max = Math.max(0, moduleContentHeight() - (gridBottom - modulesY));
+            moduleScroll = Math.max(0, Math.min(max, moduleScroll - (int) Math.signum(delta) * 44));
+            return true;
+        }
+        if (GuiRenderUtil.isHovering(mx, my, selX, listTop(), selW + 6, gridBottom - listTop())) {
+            int index = MultiPickerLayout.selectionRowAt(selectionStarts, selectionHeights, (int) my - listTop() + shownSelScroll);
+            if (index >= 0 && !selected.get(index).isTexture && GuiRenderUtil.isHovering(mx, my,
+                    selX + 43, quantityY(index), quantityWidth() - 3, 16)) {
+                stepQuantity(selected.get(index), (long) Math.signum(delta) * quantityStep(), 0);
+                return true;
             }
+            selScroll = Math.max(0, Math.min(selectionMaxScroll(), selScroll - (int) Math.signum(delta) * 44));
             return true;
         }
-        // 网格区域滚动
-        if (GuiRenderUtil.isHovering(mx, my, gridX, gridY, gridW, gridBottom - gridY)) {
-            int cols = gridCols, rows = gridRows();
-            int maxScroll = Math.max(0, (int) Math.ceil(filtered.size() / (double) cols) - rows);
-            gridScroll = Math.max(0, Math.min(gridScroll - (int) Math.signum(d), maxScroll));
+        if (GuiRenderUtil.isHovering(mx, my, gridX, gridY, gridW + 6, gridBottom - gridY)) {
+            gridScroll = Math.max(0, Math.min(gridMaxScroll(), gridScroll - (int) Math.signum(delta) * PITCH * 3));
             return true;
         }
-        return super.universalMouseScrolled(mx, my, d);
+        return super.universalMouseScrolled(mx, my, delta);
     }
 
     private void confirm() {
+        if (confirmed) return;
+        commitQuantity();
+        cancelGestures();
+        confirmed = true;
         for (Sel s : selected) {
             if (s.isFluid) {
                 if (s.fluid != null && onAddFluid != null) onAddFluid.accept(FluidStack.create(s.fluid, Math.max(1L, s.count)));
@@ -1318,8 +1871,9 @@ public class MultiPickerScreen extends ScaledScreen {
     }
 
     private MultiPickerScreen addPreselected(Sel s) {
-        selected.add(s);
+        s = selection.add(s, MultiPickerScreen::sameSelection);
         setActive(s);
+        if (originalSelection == null) originalSelection = s;
         hadOriginal = true;
         return this;
     }
@@ -1332,30 +1886,52 @@ public class MultiPickerScreen extends ScaledScreen {
 
     @Override
     public void onClose() {
-        ui.cancel();
+        commitQuantity();
+        cancelGestures();
+        ShopGaussBlur.clear();
+        ShopGaussBlur.clearTopLayer();
         if (this.minecraft != null && parent != null) this.minecraft.setScreen(parent);
         else super.onClose();
     }
 
     @Override
     public void removed() {
-        // 跳去别的界面/关屏：按下态和拖拽都得归零，否则回来时按钮还是压着的
+        commitQuantity();
+        cancelGestures();
+        sortGeneration++;
         ui.cancel();
+        ShopGaussBlur.clear();
+        ShopGaussBlur.clearTopLayer();
         super.removed();
     }
 
     /** Enter 确认、Esc 先退出搜索框再关；其余按键照常交给搜索框。 */
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (Screen.hasControlDown() && keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_F) {
+            commitQuantity();
+            setFocused(searchBox);
+            return true;
+        }
+        if (Screen.hasControlDown() && keyCode >= org.lwjgl.glfw.GLFW.GLFW_KEY_1 && keyCode <= org.lwjgl.glfw.GLFW.GLFW_KEY_5) {
+            int index = keyCode - org.lwjgl.glfw.GLFW.GLFW_KEY_1;
+            if (index < availableModes().size()) changeMode(availableModes().get(index));
+            return true;
+        }
         if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) {
             if (ui.takeEnter()) {
+                if (editingQuantity != null) { commitQuantity(); return true; }
+                if (sortOpen) { sortOpen = false; return true; }
                 ui.press(confirmX(), top + panelHeight - 24, 90, 16, true);
                 confirm();
             }
             return true;
         }
-        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE && getFocused() instanceof EditBox) {
-            setFocused(null); // 先退出输入框，再按一次才关
+        if (keyCode == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
+            if (sortOpen) { sortOpen = false; return true; }
+            if (editingQuantity != null) { commitQuantity(); return true; }
+            if (getFocused() instanceof EditBox) { setFocused(null); return true; }
+            onClose();
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
@@ -1365,6 +1941,12 @@ public class MultiPickerScreen extends ScaledScreen {
     public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
         ui.enterReleased(keyCode);
         return super.keyReleased(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean charTyped(char character, int modifiers) {
+        if (!sortOpen && editingQuantity == null && !Screen.hasControlDown() && !searchBox.isFocused()) setFocused(searchBox);
+        return super.charTyped(character, modifiers);
     }
 
     @Override

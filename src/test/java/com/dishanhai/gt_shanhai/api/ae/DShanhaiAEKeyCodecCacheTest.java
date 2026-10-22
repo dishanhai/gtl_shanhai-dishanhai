@@ -61,8 +61,7 @@ class DShanhaiAEKeyCodecCacheTest {
         assertTrue(savedData.contains("if (!keyTable.containsKey(hash))"),
                 "已存在的 hash 不得每輪持久化重寫整張 key 表");
         assertFalse(savedData.contains(
-                        "keyTable.put(hash, DShanhaiAEKeyCodec.toNormalizedTag(key));".replace(
-                                "keyTable.put", "keyTable.put")),
+                        "keyTable.put(hash, DShanhaiAEKeyCodec.toNormalizedTag(key));"),
                 "updateCell / updateCellBig 不得各自正規化 key");
     }
 }

@@ -41,6 +41,8 @@ public final class ClientShopUiSettings {
     private static boolean reduceMotion = false;
     /** 商店界面音效（点击、连发、成交结果）。缺省开。 */
     private static boolean uiSounds = true;
+    private static String pickerSort = "default";
+    private static boolean pickerGroupByMod = false;
 
     private ClientShopUiSettings() {}
 
@@ -129,6 +131,23 @@ public final class ClientShopUiSettings {
         save();
     }
 
+    public static String pickerSort() {
+        ensureLoaded();
+        return pickerSort;
+    }
+
+    public static boolean pickerGroupByMod() {
+        ensureLoaded();
+        return pickerGroupByMod;
+    }
+
+    public static synchronized void setPickerPreferences(String sort, boolean grouped) {
+        ensureLoaded();
+        pickerSort = normalizePickerSort(sort);
+        pickerGroupByMod = grouped;
+        save();
+    }
+
     public static int clampCardWidth(int width) {
         return Math.max(MIN_CARD_WIDTH, Math.min(MAX_CARD_WIDTH, width));
     }
@@ -151,6 +170,8 @@ public final class ClientShopUiSettings {
         shopSelectedStableId = "";
         reduceMotion = false;
         uiSounds = true;
+        pickerSort = "default";
+        pickerGroupByMod = false;
         if (!settingsFile().exists()) return;
         try (java.io.Reader reader = new java.io.InputStreamReader(
                 new java.io.FileInputStream(settingsFile()), StandardCharsets.UTF_8)) {
@@ -168,6 +189,14 @@ public final class ClientShopUiSettings {
             }
             if (root.has("reduceMotion")) reduceMotion = root.get("reduceMotion").getAsBoolean();
             if (root.has("uiSounds")) uiSounds = root.get("uiSounds").getAsBoolean();
+            if (root.has("pickerSort") && root.get("pickerSort").isJsonPrimitive()
+                    && root.getAsJsonPrimitive("pickerSort").isString()) {
+                pickerSort = normalizePickerSort(root.get("pickerSort").getAsString());
+            }
+            if (root.has("pickerGroupByMod") && root.get("pickerGroupByMod").isJsonPrimitive()
+                    && root.getAsJsonPrimitive("pickerGroupByMod").isBoolean()) {
+                pickerGroupByMod = root.get("pickerGroupByMod").getAsBoolean();
+            }
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop_client_ui.json 失败: {}", e.getMessage());
         }
@@ -176,6 +205,14 @@ public final class ClientShopUiSettings {
     private static String limit(String value, int max) {
         if (value == null || value.isEmpty()) return "";
         return value.length() <= max ? value : value.substring(0, max);
+    }
+
+    private static String normalizePickerSort(String sort) {
+        if (sort == null) return "default";
+        return switch (sort) {
+            case "default", "name", "mod", "id", "count" -> sort;
+            default -> "default";
+        };
     }
 
     private static void save() {
@@ -189,6 +226,8 @@ public final class ClientShopUiSettings {
             root.addProperty("shopSelectedStableId", shopSelectedStableId);
             root.addProperty("reduceMotion", reduceMotion);
             root.addProperty("uiSounds", uiSounds);
+            root.addProperty("pickerSort", pickerSort);
+            root.addProperty("pickerGroupByMod", pickerGroupByMod);
             try (OutputStreamWriter writer = new OutputStreamWriter(
                     new FileOutputStream(settingsFile()), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));

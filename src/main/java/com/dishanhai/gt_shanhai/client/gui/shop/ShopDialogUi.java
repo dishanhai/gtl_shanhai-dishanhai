@@ -150,6 +150,10 @@ final class ShopDialogUi {
         dragging = false;
     }
 
+    void holdRepeat(com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve curve, ButtonFeedback.RepeatAction action) {
+        feedback.holdRepeat(curve, action, System.currentTimeMillis());
+    }
+
     void draw(GuiGraphics g, Font font, int x, int y, int w, int h, String label, int mx, int my, boolean enabled) {
         long now = System.currentTimeMillis();
         long k = key(x, y, w, h);

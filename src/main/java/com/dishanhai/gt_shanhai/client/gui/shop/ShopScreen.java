@@ -888,15 +888,12 @@ public class ShopScreen extends ScaledScreen {
     }
 
     /**
-     * 按下页签：value=""（「全部」伪页签，不可拖拽）或没有编辑权限时直接按原逻辑立即切页；
-     * 否则先记录按下起点，进入「潜在拖拽」追踪，真正是点击还是拖拽要等 mouseReleased 才知道
-     * （见 universalMouseDragged 的阈值判定、universalMouseReleased 的分支）。
+     * 按下页签：先记录按下起点，进入「潜在拖拽」追踪，真正是点击还是拖拽要等 mouseReleased 才知道
+     * （见 universalMouseDragged 的阈值判定、universalMouseReleased 的分支）。value=""（「全部」伪页签）
+     * 或没有编辑权限时不会越过拖拽阈值，松开即按原逻辑切页，按下反馈得以先播完压下。
      */
     private void beginTabAction(int level, String value, double mx, double my) {
-        if (value.isEmpty() || !canEdit) {
-            performTabSwitch(level, value);
-            return;
-        }
+        // 全部/无编辑权也先记按下、等松开再切页：否则切页触发的 init 会把刚压下的反馈直接归零
         dragTabLevel = level;
         dragTabCategory = value;
         dragTabStartX = mx;
@@ -916,6 +913,7 @@ public class ShopScreen extends ScaledScreen {
             int aw = Math.max(30, this.font.width("全部") + 10);
             if (hit(mx, my, x, y, aw, TAB_H)) {
                 armClickWave(mx, my);
+                buttonFeedback.press(pressKey(x, y, aw, TAB_H), x, y, aw, TAB_H, true, System.currentTimeMillis());
                 beginTabAction(level, "", mx, my);
                 return true;
             }
@@ -932,6 +930,7 @@ public class ShopScreen extends ScaledScreen {
                     Minecraft.getInstance().setScreen(new ShopStageEditScreen(this, stagePath));
                     return true;
                 }
+                buttonFeedback.press(pressKey(x, y, tw, TAB_H), x, y, tw, TAB_H, true, System.currentTimeMillis());
                 beginTabAction(level, item, mx, my);
                 return true;
             }
@@ -1020,10 +1019,17 @@ public class ShopScreen extends ScaledScreen {
         long now = System.currentTimeMillis();
         TabIndicator ind = tabIndicators[stripId];
         float[] hv = new float[xs.length];
+        // 按下反馈沿用按钮那套（压下缩放 + 回弹 + 底色压暗），key 与 buttonHit/tabRowClicked 记下的几何一致
+        ButtonFeedback.Visual[] fb = new ButtonFeedback.Visual[xs.length];
         for (int i = 0; i < xs.length; i++) {
             boolean hover = GuiRenderUtil.isHovering(mx, my, xs[i], y, ws[i], h);
             hv[i] = hoverTabs.follow(widgetKey(xs[i], y, stripId), hover ? 1f : 0f, now);
-            renderBox(g, xs[i], y, ws[i], h, GuiMotion.lerpColor(NUMBER_BAR_BORDER, GOLD_DARK, hv[i]), BOX_BG);
+            long pk = pressKey(xs[i], y, ws[i], h);
+            fb[i] = buttonFeedback.visual(pk, pk, true, now, reduceMotionFrame);
+            final int idx = i;
+            GuiRenderUtil.withButtonMotion(g, xs[i], y, ws[i], h, fb[i].scale(), fb[i].shakeX(), () ->
+                    renderBox(g, xs[idx], y, ws[idx], h, GuiMotion.lerpColor(NUMBER_BAR_BORDER, GOLD_DARK, hv[idx]),
+                            ButtonFeedback.shade(BOX_BG, fb[idx])));
         }
         float ix = 0f;
         float iw = 0f;
@@ -1031,7 +1037,12 @@ public class ShopScreen extends ScaledScreen {
             ind.follow(xs[selected], ws[selected], sig, now);
             ix = ind.x.value();
             iw = ind.w.value();
-            renderBox(g, Math.round(ix), y, Math.max(1, Math.round(iw)), h, GOLD, ROW_BG);
+            final int sel = selected;
+            final int fx = Math.round(ix);
+            final int fw = Math.max(1, Math.round(iw));
+            // 高亮块跟着被选中的那格一起压下，否则底盒缩了高亮块不动
+            GuiRenderUtil.withButtonMotion(g, xs[sel], y, ws[sel], h, fb[sel].scale(), fb[sel].shakeX(), () ->
+                    renderBox(g, fx, y, fw, h, GOLD, ButtonFeedback.shade(ROW_BG, fb[sel])));
         } else {
             ind.reset();
         }
@@ -1041,8 +1052,11 @@ public class ShopScreen extends ScaledScreen {
                     : 0f;
             int base = GuiMotion.lerpColor(GRAY, WHITE, hv[i]);
             int col = GuiMotion.lerpColor(base, GOLD, overlap);
-            g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, labels[i], ws[i] - 4),
-                    xs[i] + ws[i] / 2, y + (h - 8) / 2, col);
+            final int idx = i;
+            final int textColor = col;
+            GuiRenderUtil.withButtonMotion(g, xs[i], y, ws[i], h, fb[i].scale(), fb[i].shakeX(), () ->
+                    g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, labels[idx], ws[idx] - 4),
+                            xs[idx] + ws[idx] / 2, y + (h - 8) / 2, textColor));
         }
     }
 
@@ -4934,7 +4948,8 @@ public class ShopScreen extends ScaledScreen {
         if (dragTabLevel != -1) {
             dragTabMx = mx;
             dragTabMy = my;
-            if (!dragTabMoving && Math.hypot(mx - dragTabStartX, my - dragTabStartY) >= DRAG_TAB_THRESHOLD) {
+            if (!dragTabMoving && canEdit && !dragTabCategory.isEmpty()
+                    && Math.hypot(mx - dragTabStartX, my - dragTabStartY) >= DRAG_TAB_THRESHOLD) {
                 dragTabMoving = true;
             }
             return true;
