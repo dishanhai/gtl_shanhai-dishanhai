@@ -185,7 +185,7 @@ class ShopPickerFeedbackSourceTest {
         assertTrue(extractBlock(e, "private void openItemReplace(").contains("preselect("),
                 "原物品与数量先放进已选清单");
         assertTrue(extractBlock(e, "private void openFluidReplace(").contains("preselect("));
-        assertTrue(e.contains("ShopEntryEditLayout.replaceAt("), "确认后整份清单换掉这一格");
+        assertTrue(e.contains("ShopEntryEditLayout.replaceAll("), "确认后整份清单换掉这一排");
     }
 
     @Test
@@ -194,7 +194,7 @@ class ShopPickerFeedbackSourceTest {
         assertFalse(s.contains("EditorWidgets.openItemPicker("));
         String open = extractBlock(s, "private void openItemReplace(");
         assertTrue(open.contains(".replacing()") && open.contains("preselect("));
-        assertTrue(open.contains("ShopEntryEditLayout.replaceAt("), "精确数量跟着一起换");
+        assertTrue(open.contains("ShopEntryEditLayout.replaceAll("), "精确数量跟着一起换");
     }
 
     @Test
@@ -233,10 +233,23 @@ class ShopPickerFeedbackSourceTest {
         String s = read("ShopScreen.java");
         String strip = extractBlock(s, "private void drawTabStrip(");
         assertTrue(strip.contains("buttonFeedback.visual(pk, pk, true, now, reduceMotionFrame)"), "页签按几何 key 取压下态");
-        assertTrue(strip.contains("ButtonFeedback.shade("), "按下压暗底色");
-        assertTrue(extractBlock(s, "private boolean tabRowClicked(").contains("buttonFeedback.press(pressKey("),
+        assertTrue(strip.contains("tabPressScale("), "页签按下用放大的压下幅度，14px 高的页签 0.95 看不出");
+        assertTrue(strip.contains("fb[i].flashMix()"), "按下与闪色都把格子亮成金色");
+        assertTrue(extractBlock(s, "private boolean tabRowClicked(").contains("pressTab("),
                 "点中页签即压下");
+        assertTrue(extractBlock(s, "private void pressTab(").contains("buttonFeedback.flash("), "按下同时闪金色");
         assertFalse(extractBlock(s, "private void beginTabAction(").contains("performTabSwitch("),
                 "切页等到松开，否则 init 会把刚压下的反馈归零");
+    }
+
+    @Test
+    void replacePickersPrefillTheWholeRowAndReplaceItAsOne() throws Exception {
+        String picker = read("MultiPickerScreen.java");
+        assertTrue(picker.contains("public MultiPickerScreen focusPreselected("), "选择器能指出点中的是整排里的哪一格");
+        for (String f : new String[] {"ShopEntryEditScreen.java", "ExchangeEditScreen.java", "ShopStageEditScreen.java"}) {
+            String src = read(f);
+            assertTrue(src.contains("focusPreselected("), f + " 点已有格要整排预填");
+            assertFalse(src.contains("ShopEntryEditLayout.replaceAt("), f + " 确认后整排换，不再只换点中的那一格");
+        }
     }
 }

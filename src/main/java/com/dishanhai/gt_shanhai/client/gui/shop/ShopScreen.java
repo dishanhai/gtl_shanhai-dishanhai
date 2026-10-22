@@ -913,7 +913,7 @@ public class ShopScreen extends ScaledScreen {
             int aw = Math.max(30, this.font.width("全部") + 10);
             if (hit(mx, my, x, y, aw, TAB_H)) {
                 armClickWave(mx, my);
-                buttonFeedback.press(pressKey(x, y, aw, TAB_H), x, y, aw, TAB_H, true, System.currentTimeMillis());
+                pressTab(x, y, aw, TAB_H);
                 beginTabAction(level, "", mx, my);
                 return true;
             }
@@ -930,7 +930,7 @@ public class ShopScreen extends ScaledScreen {
                     Minecraft.getInstance().setScreen(new ShopStageEditScreen(this, stagePath));
                     return true;
                 }
-                buttonFeedback.press(pressKey(x, y, tw, TAB_H), x, y, tw, TAB_H, true, System.currentTimeMillis());
+                pressTab(x, y, tw, TAB_H);
                 beginTabAction(level, item, mx, my);
                 return true;
             }
@@ -1019,17 +1019,23 @@ public class ShopScreen extends ScaledScreen {
         long now = System.currentTimeMillis();
         TabIndicator ind = tabIndicators[stripId];
         float[] hv = new float[xs.length];
-        // 按下反馈沿用按钮那套（压下缩放 + 回弹 + 底色压暗），key 与 buttonHit/tabRowClicked 记下的几何一致
+        // 同一套按下弹簧与闪色，key 与 buttonHit/pressTab 记下的几何一致；但页签只有 14px 高，按钮的 0.95 缩放
+        // 加压暗在深色底上几乎看不出，这里放大压下幅度，并让按下的格子整块亮成金色（压暗改成压亮）
         ButtonFeedback.Visual[] fb = new ButtonFeedback.Visual[xs.length];
+        float[] sc = new float[xs.length];
+        float[] glow = new float[xs.length];
         for (int i = 0; i < xs.length; i++) {
             boolean hover = GuiRenderUtil.isHovering(mx, my, xs[i], y, ws[i], h);
             hv[i] = hoverTabs.follow(widgetKey(xs[i], y, stripId), hover ? 1f : 0f, now);
             long pk = pressKey(xs[i], y, ws[i], h);
             fb[i] = buttonFeedback.visual(pk, pk, true, now, reduceMotionFrame);
+            sc[i] = reduceMotionFrame ? 1f : tabPressScale(fb[i].press());
+            glow[i] = GuiMotion.clamp01(Math.max(fb[i].press() * 0.8f, fb[i].flashMix()));
             final int idx = i;
-            GuiRenderUtil.withButtonMotion(g, xs[i], y, ws[i], h, fb[i].scale(), fb[i].shakeX(), () ->
-                    renderBox(g, xs[idx], y, ws[idx], h, GuiMotion.lerpColor(NUMBER_BAR_BORDER, GOLD_DARK, hv[idx]),
-                            ButtonFeedback.shade(BOX_BG, fb[idx])));
+            int border = GuiMotion.lerpColor(GuiMotion.lerpColor(NUMBER_BAR_BORDER, GOLD_DARK, hv[i]), GOLD, glow[i]);
+            int fill = GuiMotion.lerpColor(BOX_BG, GOLD_DARK, 0.55f * glow[i]);
+            GuiRenderUtil.withButtonMotion(g, xs[i], y, ws[i], h, sc[i], fb[i].shakeX(), () ->
+                    renderBox(g, xs[idx], y, ws[idx], h, border, fill));
         }
         float ix = 0f;
         float iw = 0f;
@@ -1041,8 +1047,9 @@ public class ShopScreen extends ScaledScreen {
             final int fx = Math.round(ix);
             final int fw = Math.max(1, Math.round(iw));
             // 高亮块跟着被选中的那格一起压下，否则底盒缩了高亮块不动
-            GuiRenderUtil.withButtonMotion(g, xs[sel], y, ws[sel], h, fb[sel].scale(), fb[sel].shakeX(), () ->
-                    renderBox(g, fx, y, fw, h, GOLD, ButtonFeedback.shade(ROW_BG, fb[sel])));
+            final int selFill = GuiMotion.lerpColor(ROW_BG, GOLD_DARK, 0.7f * glow[sel]);
+            GuiRenderUtil.withButtonMotion(g, xs[sel], y, ws[sel], h, sc[sel], fb[sel].shakeX(), () ->
+                    renderBox(g, fx, y, fw, h, GOLD, selFill));
         } else {
             ind.reset();
         }
@@ -1051,13 +1058,27 @@ public class ShopScreen extends ScaledScreen {
                     ? GuiMotion.clamp01((Math.min(ix + iw, xs[i] + ws[i]) - Math.max(ix, xs[i])) / ws[i])
                     : 0f;
             int base = GuiMotion.lerpColor(GRAY, WHITE, hv[i]);
-            int col = GuiMotion.lerpColor(base, GOLD, overlap);
+            int col = GuiMotion.lerpColor(GuiMotion.lerpColor(base, GOLD, overlap), WHITE, glow[i]);
             final int idx = i;
             final int textColor = col;
-            GuiRenderUtil.withButtonMotion(g, xs[i], y, ws[i], h, fb[i].scale(), fb[i].shakeX(), () ->
+            GuiRenderUtil.withButtonMotion(g, xs[i], y, ws[i], h, sc[i], fb[i].shakeX(), () ->
                     g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, labels[idx], ws[idx] - 4),
                             xs[idx] + ws[idx] / 2, y + (h - 8) / 2, textColor));
         }
+    }
+
+    /** 页签压下缩放：压到底缩到 0.86，回弹越过 1 时略胀（同按钮的钳位范围）。 */
+    private static float tabPressScale(float press) {
+        float c = Math.max(-0.6f, Math.min(1.2f, press));
+        return 1f - 0.14f * c;
+    }
+
+    /** 按下页签：压下并立刻闪一下金色（闪色走 action 通道，切页触发的 init 不会清掉）。 */
+    private void pressTab(int x, int y, int w, int h) {
+        long now = System.currentTimeMillis();
+        long pk = pressKey(x, y, w, h);
+        buttonFeedback.press(pk, x, y, w, h, true, now);
+        buttonFeedback.flash(pk, ButtonFeedback.Tone.PARTIAL, now);
     }
 
     /** 渲染某一层页签行：拖拽中的页签本身不占位（原位置塌陷），改画成跟随鼠标的浮动块（高亮态）。 */

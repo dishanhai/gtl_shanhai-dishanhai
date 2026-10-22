@@ -2241,21 +2241,17 @@ public class ShopEntryEditScreen extends ScaledScreen {
         MultiPickerScreen picker = new MultiPickerScreen(this, fluidIdx >= 0,
                 (st, cnt) -> { if (st != null && !st.isEmpty()) pickedItems.add(st); },
                 fs -> { if (fs != null && !fs.isEmpty()) pickedFluids.add(fs); }).replacing();
-        if (itemIdx >= 0) {
-            ItemStack cur = goodsList.get(itemIdx);
-            if (!cur.isEmpty()) picker.preselect(cur, itemIdx == 0 ? count : cur.getCount());
-        } else {
-            picker.preselect(goodsFluids.get(fluidIdx));
+        // 整排预填：商品排的物品和流体是同一排，点哪一格都全拉进已选清单（空占位格不进清单，只占序号）
+        for (int i = 0; i < goodsList.size(); i++) {
+            ItemStack cur = goodsList.get(i);
+            picker.preselect(cur, i == 0 ? count : cur.getCount());
         }
+        for (FluidStack fs : goodsFluids) picker.preselect(fs);
+        picker.focusPreselected(itemIdx >= 0 ? itemIdx : goodsList.size() + fluidIdx);
         picker.setAfterConfirm(() -> {
             ItemStack oldHead = goodsList.isEmpty() ? null : goodsList.get(0);
-            if (itemIdx >= 0) {
-                ShopEntryEditLayout.replaceAt(goodsList, itemIdx, pickedItems);
-                goodsFluids.addAll(pickedFluids);
-            } else {
-                ShopEntryEditLayout.replaceAt(goodsFluids, fluidIdx, pickedFluids);
-                goodsList.addAll(pickedItems);
-            }
+            ShopEntryEditLayout.replaceAll(goodsList, pickedItems);
+            ShopEntryEditLayout.replaceAll(goodsFluids, pickedFluids);
             settleGoods(oldHead);
             popGoods(pickedItems, pickedFluids);
         });
@@ -2383,12 +2379,14 @@ public class ShopEntryEditScreen extends ScaledScreen {
                         collectInto(picked, pickedCounts))
                 : new MultiPickerScreen(this, false, collectInto(picked, pickedCounts),
                         fs -> { if (row == 2 && fs != null && !fs.isEmpty()) pickedFluids.add(fs); });
-        picker.replacing().preselect(list.get(idx), idx < counts.size() ? counts.get(idx) : 1L);
+        picker.replacing();
+        for (int i = 0; i < list.size(); i++) picker.preselect(list.get(i), i < counts.size() ? counts.get(i) : 1L);
+        picker.focusPreselected(idx);
         picker.setAfterConfirm(() -> {
             long now = System.currentTimeMillis();
-            while (counts.size() < list.size()) counts.add(1L); // 数量表先和格子一一对齐再拼
-            motion.popSlots(row, ShopEntryEditLayout.replaceAt(list, idx, picked), picked.size(), now);
-            ShopEntryEditLayout.replaceAt(counts, idx, pickedCounts);
+            int before = ShopEntryEditLayout.replaceAll(list, picked);
+            ShopEntryEditLayout.replaceAll(counts, pickedCounts);
+            if (picked.size() > before) motion.popSlots(row, before, picked.size() - before, now);
             if (!pickedFluids.isEmpty()) {
                 motion.popSlots(3, fluids.size(), pickedFluids.size(), now);
                 fluids.addAll(pickedFluids);
@@ -2404,10 +2402,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
         List<ItemStack> picked = new ArrayList<>();
         List<Long> pickedCounts = new ArrayList<>();
         MultiPickerScreen picker = new MultiPickerScreen(this, true, collectInto(picked, pickedCounts),
-                fs -> { if (fs != null && !fs.isEmpty()) pickedFluids.add(fs); }).replacing().preselect(fluids.get(idx));
+                fs -> { if (fs != null && !fs.isEmpty()) pickedFluids.add(fs); }).replacing();
+        for (FluidStack fs : fluids) picker.preselect(fs);
+        picker.focusPreselected(idx);
         picker.setAfterConfirm(() -> {
             long now = System.currentTimeMillis();
-            motion.popSlots(3, ShopEntryEditLayout.replaceAt(fluids, idx, pickedFluids), pickedFluids.size(), now);
+            int fluidsBefore = ShopEntryEditLayout.replaceAll(fluids, pickedFluids);
+            if (pickedFluids.size() > fluidsBefore) motion.popSlots(3, fluidsBefore, pickedFluids.size() - fluidsBefore, now);
             if (!picked.isEmpty()) {
                 while (itemCounts.size() < items.size()) itemCounts.add(1L);
                 motion.popSlots(2, items.size(), picked.size(), now);
@@ -2508,13 +2509,15 @@ public class ShopEntryEditScreen extends ScaledScreen {
                     picked.add(ShopEntry.DisplayIcon.ofItem(icon));
                 },
                 tex -> { if (tex != null) picked.add(ShopEntry.DisplayIcon.ofTexture(tex)); }).replacing();
-        ShopEntry.DisplayIcon cur = displayIcons.get(idx);
-        if (cur.isTexture()) picker.preselectTexture(cur.texture());
-        else picker.preselect(cur.item(), 1L);
+        for (ShopEntry.DisplayIcon cur : displayIcons) {
+            if (cur.isTexture()) picker.preselectTexture(cur.texture());
+            else picker.preselect(cur.item(), 1L);
+        }
+        picker.focusPreselected(idx);
         picker.setAfterConfirm(() -> {
-            int at = ShopEntryEditLayout.replaceAt(displayIcons, idx, picked);
+            int before = ShopEntryEditLayout.replaceAll(displayIcons, picked);
             while (displayIcons.size() > MAX_DISPLAY_ICONS) displayIcons.remove(displayIcons.size() - 1);
-            motion.popSlots(ICON_ROW, at, Math.min(picked.size(), displayIcons.size() - at), System.currentTimeMillis());
+            if (displayIcons.size() > before) motion.popSlots(ICON_ROW, before, displayIcons.size() - before, System.currentTimeMillis());
         });
         Minecraft.getInstance().setScreen(picker);
     }

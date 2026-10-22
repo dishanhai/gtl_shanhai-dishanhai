@@ -150,4 +150,15 @@ final class ShopEntryEditLayout {
         list.addAll(at, picked);
         return at;
     }
+
+    /**
+     * 选择器「编辑这一排」确认后：整排换成 {@code picked}（点格子时整排都已预填进已选清单，所以不是只换那一格）。
+     * 空 = 清空这一排。返回原来排里有几项，调用方拿它决定从哪起弹出新增的格子。
+     */
+    static <T> int replaceAll(List<T> list, List<? extends T> picked) {
+        int before = list.size();
+        list.clear();
+        list.addAll(picked);
+        return before;
+    }
 }

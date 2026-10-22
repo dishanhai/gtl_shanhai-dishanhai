@@ -302,7 +302,6 @@ public class ExchangeEditScreen extends ScaledScreen {
      */
     private void openItemReplace(SideDraft side, int idx) {
         capture();
-        ItemStack cur = side.items.get(idx);
         List<ItemStack> picked = new ArrayList<>();
         List<FluidStack> pickedFluids = new ArrayList<>();
         MultiPickerScreen picker = new MultiPickerScreen(this, false,
@@ -313,9 +312,12 @@ public class ExchangeEditScreen extends ScaledScreen {
                     picked.add(copy);
                 },
                 fs -> { if (fs != null && !fs.isEmpty()) pickedFluids.add(fs); }).replacing();
-        picker.preselect(cur, Math.max(1L, cur.getCount()));
+        // 整排预填：点哪一格都把这一排全拉进已选清单，点中的那格当激活项
+        for (ItemStack st : side.items) picker.preselect(st, Math.max(1L, st.getCount()));
+        picker.focusPreselected(idx);
         picker.setAfterConfirm(() -> {
-            ShopEntryEditLayout.replaceAt(side.items, idx, picked);
+            ShopEntryEditLayout.replaceAll(side.items, picked);
+            while (side.items.size() > ITEM_MAX) side.items.remove(side.items.size() - 1);
             if (!pickedFluids.isEmpty() && side.fluids.size() < FLUID_MAX) {
                 for (FluidStack fs : pickedFluids) {
                     if (side.fluids.size() >= FLUID_MAX) break;
@@ -330,7 +332,6 @@ public class ExchangeEditScreen extends ScaledScreen {
     /** 点已有流体格：同上，流体按 mB 预填；顺手选的物品接在物品排末尾。 */
     private void openFluidReplace(SideDraft side, int idx) {
         capture();
-        FluidStack cur = side.fluids.get(idx);
         List<FluidStack> pickedFluids = new ArrayList<>();
         List<ItemStack> pickedItems = new ArrayList<>();
         MultiPickerScreen picker = new MultiPickerScreen(this, true,
@@ -341,9 +342,11 @@ public class ExchangeEditScreen extends ScaledScreen {
                     pickedItems.add(copy);
                 },
                 fs -> { if (fs != null && !fs.isEmpty()) pickedFluids.add(fs); }).replacing();
-        picker.preselect(cur);
+        for (FluidStack fs : side.fluids) picker.preselect(fs);
+        picker.focusPreselected(idx);
         picker.setAfterConfirm(() -> {
-            ShopEntryEditLayout.replaceAt(side.fluids, idx, pickedFluids);
+            ShopEntryEditLayout.replaceAll(side.fluids, pickedFluids);
+            while (side.fluids.size() > FLUID_MAX) side.fluids.remove(side.fluids.size() - 1);
             if (!pickedItems.isEmpty() && side.items.size() < ITEM_MAX) {
                 for (ItemStack st : pickedItems) {
                     if (side.items.size() >= ITEM_MAX) break;

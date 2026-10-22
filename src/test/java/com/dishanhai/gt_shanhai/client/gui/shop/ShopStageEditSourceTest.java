@@ -37,12 +37,11 @@ class ShopStageEditSourceTest {
     }
 
     @Test
-    void replacementPadsCountsBeforeChangingTheItemsLength() throws Exception {
+    void replacementSwapsItemsAndCountsTogether() throws Exception {
         String open = extractBlock(src(), "private void openItemReplace(");
-        int pad = open.indexOf("while (counts.size() < items.size())");
-        int items = open.indexOf("ShopEntryEditLayout.replaceAt(items");
-        int counts = open.indexOf("ShopEntryEditLayout.replaceAt(counts");
-        assertTrue(pad >= 0 && pad < items && items < counts,
-                "按旧长度补数量，之后两表一起换；一换多后再添加不会消费多余的1L尾巴");
+        int items = open.indexOf("ShopEntryEditLayout.replaceAll(items");
+        int counts = open.indexOf("ShopEntryEditLayout.replaceAll(counts");
+        assertTrue(open.contains("picker.focusPreselected(idx)"), "整排预填，点中的那格当激活项");
+        assertTrue(items >= 0 && items < counts, "物品表与数量表整排一起换，数量不会留尾巴");
     }
 }

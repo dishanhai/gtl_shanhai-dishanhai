@@ -1,0 +1,193 @@
+{
+  "data": {
+    "euTier": 11
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 33554432
+      }
+    ]
+  },
+  "type": "gtceu:primordial_deep_space_extraction",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:ultimate_world_fragment_miner_module"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:world_fragments_creation"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 16000,
+          "value": [
+            {
+              "fluid": "gtceu:spacetime"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 16000,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 16000,
+          "value": [
+            {
+              "fluid": "gtceu:quark_gluon_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 16000,
+          "value": [
+            {
+              "fluid": "gtceu:heavy_quark_degenerate_matter_plasma"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 8000,
+          "value": [
+            {
+              "fluid": "gtceu:uu_matter"
+            }
+          ]
+        },
+        "chance": 8000
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:world_fragments_creation"
+          }
+        },
+        "chance": 100
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtlcore:mining_crystal"
+          }
+        },
+        "chance": 5000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtlcore:treasures_crystal"
+          }
+        },
+        "chance": 5000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtlcore:miracle_crystal"
+          }
+        },
+        "chance": 4000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_magmatter_dust"
+          }
+        },
+        "chance": 1000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_magnetohydrodynamicallyconstrainedstarmatter_dust"
+          }
+        },
+        "chance": 1000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_cosmicneutronium_dust"
+          }
+        },
+        "chance": 1000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_eternity_dust"
+          }
+        },
+        "chance": 1000
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 16,
+          "ingredient": {
+            "item": "gtceu:tiny_cosmic_dust"
+          }
+        },
+        "chance": 1000
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:primordial_deep_space_extraction/ultimate_world_fragment_miner_module_world_fragments_creation",
+      "defaultEnabled": true
+    }
+  ]
+}

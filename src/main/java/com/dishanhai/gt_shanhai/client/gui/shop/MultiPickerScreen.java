@@ -133,6 +133,9 @@ public class MultiPickerScreen extends ScaledScreen {
     // 清空再确认 = 删掉那一格（由编辑器的 afterConfirm 处理）。取代原先点格子弹出的 FTBLib 单选页。
     private boolean replacing;
     private boolean hadOriginal;                  // 替换模式下原格子有东西（空占位格没有）
+    // 整排替换：编辑器把这一排所有格子依次 preselect 进来，再用 focusPreselected 指出点的是哪一格；确认后整排换成已选清单
+    private final List<Sel> preselectOrder = new ArrayList<>(); // 每次 preselect 的结果，空格占一个 null，按调用序号找回
+    private boolean rowMode;
 
     private Mode mode;                            // 浏览模式：物品 / 物品栏 / 流体 / [贴图]（受限模式恒为 ITEM）
     private List<ItemStack> invStacks = new ArrayList<>();  // 物品栏模式：玩家背包实物（含 NBT）
@@ -1003,7 +1006,7 @@ public class MultiPickerScreen extends ScaledScreen {
         g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
         g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
         g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
-        String title = replacing ? "替换这一格" : restrictedMode ? "多选货币" : allowTexture ? "多选显示图标" : "多选资源";
+        String title = replacing ? (rowMode ? "编辑这一排" : "替换这一格") : restrictedMode ? "多选货币" : allowTexture ? "多选显示图标" : "多选资源";
         g.drawString(this.font, "§6" + title, left + 10, top + 7, GOLD, true);
         g.drawString(this.font, "§8点选、拖过连选；右侧调整数量与顺序", left + 10, top + 21, GRAY, false);
         if (originalSelection != null && replacing) {
@@ -1851,7 +1854,7 @@ public class MultiPickerScreen extends ScaledScreen {
 
     /** 预先放进已选清单并设为激活（数量框直接显示它的数量），网格上对应的那格带对勾。保留 NBT。 */
     public MultiPickerScreen preselect(ItemStack stack, long count) {
-        if (stack == null || stack.isEmpty()) return this;
+        if (stack == null || stack.isEmpty()) { preselectOrder.add(null); return this; }
         ItemStack proto = stack.copy();
         proto.setCount(1);
         return addPreselected(new Sel(false, ForgeRegistries.ITEMS.getKey(proto.getItem()), proto, null, Math.max(1L, count)));
@@ -1859,14 +1862,14 @@ public class MultiPickerScreen extends ScaledScreen {
 
     /** 同上，流体按 mB。 */
     public MultiPickerScreen preselect(FluidStack fluid) {
-        if (fluid == null || fluid.isEmpty()) return this;
+        if (fluid == null || fluid.isEmpty()) { preselectOrder.add(null); return this; }
         Fluid f = fluid.getFluid();
         return addPreselected(new Sel(true, ForgeRegistries.FLUIDS.getKey(f), null, f, Math.max(1L, fluid.getAmount())));
     }
 
     /** 同上，贴图图标（只有显示图标选择器用得到）。 */
     public MultiPickerScreen preselectTexture(ResourceLocation texture) {
-        if (texture == null) return this;
+        if (texture == null) { preselectOrder.add(null); return this; }
         return addPreselected(Sel.texture(texture));
     }
 
@@ -1874,13 +1877,26 @@ public class MultiPickerScreen extends ScaledScreen {
         s = selection.add(s, MultiPickerScreen::sameSelection);
         setActive(s);
         if (originalSelection == null) originalSelection = s;
+        preselectOrder.add(s);
         hadOriginal = true;
+        return this;
+    }
+
+    /**
+     * 整排替换：这一排的格子都 preselect 进来之后，指出点中的是第几次 preselect 的那一格——它设为激活项并当「原格」，
+     * 其余已在清单里。点中的是空占位格（没进清单）时只切到整排模式。确认后由编辑器把整排换成已选清单。
+     */
+    public MultiPickerScreen focusPreselected(int callIndex) {
+        rowMode = true;
+        Sel s = callIndex >= 0 && callIndex < preselectOrder.size() ? preselectOrder.get(callIndex) : null;
+        originalSelection = s;
+        if (s != null) setActive(s);
         return this;
     }
 
     private String confirmLabel() {
         if (!replacing) return "§a确认加入 (" + selected.size() + ")";
-        if (selected.isEmpty()) return hadOriginal ? "§c移除这一格" : "§7确认 (0)";
+        if (selected.isEmpty()) return hadOriginal ? (rowMode ? "§c清空这一排" : "§c移除这一格") : "§7确认 (0)";
         return "§a确认替换 (" + selected.size() + ")";
     }
 

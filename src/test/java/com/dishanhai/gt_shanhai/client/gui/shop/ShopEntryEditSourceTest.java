@@ -196,7 +196,7 @@ class ShopEntryEditSourceTest {
         assertFalse(s.contains("EditorWidgets.openItemPicker("), "点已有物品格不再开 FTBLib/FTBQ 的选取页");
         assertFalse(s.contains("EditorWidgets.openFluidPicker("), "点流体格也一样");
         assertTrue(s.contains(".replacing()") && s.contains(".preselect("), "开自建多选器的替换模式，原来的东西先放进已选清单");
-        assertTrue(s.contains("ShopEntryEditLayout.replaceAt("), "确认后整份清单换掉这一格");
+        assertTrue(s.contains("ShopEntryEditLayout.replaceAll("), "确认后整份清单换掉这一排");
     }
 
     @Test

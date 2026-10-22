@@ -172,8 +172,6 @@ public final class ShopStageEditScreen extends ScaledScreen {
      * 清空再确认 = 删掉这一格。与商店编辑器同一套，不再弹出 FTBLib 的选取页。
      */
     private void openItemReplace(int idx) {
-        ItemStack cur = items.get(idx);
-        long curCount = idx < counts.size() ? counts.get(idx) : Math.max(1L, cur.getCount());
         List<ItemStack> picked = new ArrayList<>();
         List<Long> pickedCounts = new ArrayList<>();
         MultiPickerScreen picker = new MultiPickerScreen(this, false,
@@ -185,12 +183,14 @@ public final class ShopStageEditScreen extends ScaledScreen {
                     pickedCounts.add(Math.max(1L, count));
                 },
                 fluid -> {}).replacing();
-        picker.preselect(cur, curCount);
+        for (int i = 0; i < items.size(); i++) {
+            ItemStack st = items.get(i);
+            picker.preselect(st, i < counts.size() ? counts.get(i) : Math.max(1L, st.getCount()));
+        }
+        picker.focusPreselected(idx);
         picker.setAfterConfirm(() -> {
-            // 山海：按替换前的物品表补齐，避免一格换多项后多出数量尾巴。
-            while (counts.size() < items.size()) counts.add(1L);
-            ShopEntryEditLayout.replaceAt(items, idx, picked);
-            ShopEntryEditLayout.replaceAt(counts, idx, pickedCounts);
+            ShopEntryEditLayout.replaceAll(items, picked);
+            ShopEntryEditLayout.replaceAll(counts, pickedCounts);
         });
         Minecraft.getInstance().setScreen(picker);
     }
