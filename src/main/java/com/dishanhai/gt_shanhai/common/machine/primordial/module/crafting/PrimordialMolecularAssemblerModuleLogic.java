@@ -16,6 +16,7 @@ import java.util.Map;
 
 public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRecipeLogic {
 
+    private static final boolean TRACE = PrimordialMolecularAssemblerModule.TRACE;
     private static final long IDLE_LOG_INTERVAL_TICKS = 100L;
     private long lastIdleLogTick = Long.MIN_VALUE;
 
@@ -58,18 +59,22 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
             return null;
         }
 
-        GTDishanhaiMod.LOGGER.info(
-                "{} extract-result module={} handler={} raw={}",
-                PrimordialMolecularAssemblerModule.LOG_PREFIX, module.getPos(),
-                handler.getClass().getName(), describeRecipe(raw));
+        if (TRACE) {
+            GTDishanhaiMod.LOGGER.info(
+                    "{} extract-result module={} handler={} raw={}",
+                    PrimordialMolecularAssemblerModule.LOG_PREFIX, module.getPos(),
+                    handler.getClass().getName(), describeRecipe(raw));
+        }
         // 原生分子操纵者直接运行 handler 返回的 raw recipe；只在此处复制并放大产出，
         // 不再经过无线配方包装，避免改变 MECraftHandler 的 LongIngredient 回传协议。
         int multiplier = module.getHostOutputMultiplier();
         GTRecipe amplified = PrimordialRecipeOutputAmplifier.apply(raw, multiplier);
-        GTDishanhaiMod.LOGGER.info(
-                "{} amplify-result module={} multiplier={} recipe={}",
-                PrimordialMolecularAssemblerModule.LOG_PREFIX, module.getPos(), multiplier,
-                describeRecipe(amplified));
+        if (TRACE) {
+            GTDishanhaiMod.LOGGER.info(
+                    "{} amplify-result module={} multiplier={} recipe={}",
+                    PrimordialMolecularAssemblerModule.LOG_PREFIX, module.getPos(), multiplier,
+                    describeRecipe(amplified));
+        }
         return amplified;
     }
 
@@ -80,16 +85,20 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
         setRecipeStatus(null);
         GTRecipe match = getGTRecipe();
         if (match != null) {
-            GTDishanhaiMod.LOGGER.info(
-                    "{} setup-before module={} previous={} match={} status={}",
-                    PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
-                    describeRecipe(before), describeRecipe(match), getStatus());
+            if (TRACE) {
+                GTDishanhaiMod.LOGGER.info(
+                        "{} setup-before module={} previous={} match={} status={}",
+                        PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
+                        describeRecipe(before), describeRecipe(match), getStatus());
+            }
             setRecipeStatus(RecipeResult.SUCCESS);
             setupRecipe(match);
-            GTDishanhaiMod.LOGGER.info(
-                    "{} setup-after module={} status={} progress={}/{} lastRecipe={}",
-                    PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
-                    getStatus(), progress, duration, describeRecipe(lastRecipe));
+            if (TRACE) {
+                GTDishanhaiMod.LOGGER.info(
+                        "{} setup-after module={} status={} progress={}/{} lastRecipe={}",
+                        PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
+                        getStatus(), progress, duration, describeRecipe(lastRecipe));
+            }
         }
     }
 
@@ -99,7 +108,7 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
         int beforeProgress = progress;
         int beforeDuration = duration;
         Status beforeStatus = getStatus();
-        boolean traceTick = beforeRecipe != null
+        boolean traceTick = TRACE && beforeRecipe != null
                 && (beforeDuration <= 1 || getMachine().getOffsetTimer() % 20L == 0L);
         if (traceTick) {
             GTDishanhaiMod.LOGGER.info(
@@ -110,7 +119,7 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
 
         super.serverTick();
 
-        if (traceTick || beforeRecipe != lastRecipe || beforeStatus != getStatus()) {
+        if (TRACE && (traceTick || beforeRecipe != lastRecipe || beforeStatus != getStatus())) {
             GTDishanhaiMod.LOGGER.info(
                     "{} tick-after module={} status={} progress={}/{} recipe={} changedRecipe={} changedStatus={}",
                     PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
@@ -121,13 +130,15 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
 
     @Override
     public void onRecipeFinish() {
-        GTDishanhaiMod.LOGGER.info(
-                "{} finish-enter module={} status={} progress={}/{} handlerPresent={} recipe={}",
-                PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
-                getStatus(), progress, duration,
-                getMachine() instanceof PrimordialMolecularAssemblerModule module
-                        && module.getMolecularAssemblerHandler() != null,
-                describeRecipe(lastRecipe));
+        if (TRACE) {
+            GTDishanhaiMod.LOGGER.info(
+                    "{} finish-enter module={} status={} progress={}/{} handlerPresent={} recipe={}",
+                    PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
+                    getStatus(), progress, duration,
+                    getMachine() instanceof PrimordialMolecularAssemblerModule module
+                            && module.getMolecularAssemblerHandler() != null,
+                    describeRecipe(lastRecipe));
+        }
         getMachine().afterWorking();
         if (lastRecipe != null && getMachine() instanceof PrimordialMolecularAssemblerModule module) {
             module.handleMolecularRecipeOutput(lastRecipe);
@@ -138,13 +149,16 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
         progress = 0;
         duration = 0;
         ((RecipeLogicAccessor) this).setIsActive(false);
-        GTDishanhaiMod.LOGGER.info(
-                "{} finish-exit module={} status={} progress={}/{} lastRecipe={}",
-                PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
-                getStatus(), progress, duration, describeRecipe(lastRecipe));
+        if (TRACE) {
+            GTDishanhaiMod.LOGGER.info(
+                    "{} finish-exit module={} status={} progress={}/{} lastRecipe={}",
+                    PrimordialMolecularAssemblerModule.LOG_PREFIX, getMachine().getPos(),
+                    getStatus(), progress, duration, describeRecipe(lastRecipe));
+        }
     }
 
     private void logIdleState(String event, PrimordialMolecularAssemblerModule module) {
+        if (!TRACE) return;
         long tick = getMachine().getOffsetTimer();
         if (lastIdleLogTick != Long.MIN_VALUE && tick - lastIdleLogTick >= 0L
                 && tick - lastIdleLogTick < IDLE_LOG_INTERVAL_TICKS) {

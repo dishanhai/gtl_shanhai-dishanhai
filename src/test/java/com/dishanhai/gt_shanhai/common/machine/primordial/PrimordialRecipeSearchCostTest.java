@@ -61,6 +61,49 @@ class PrimordialRecipeSearchCostTest {
     }
 
     @Test
+    void hintedSearchMatchesBruteForceForEveryHint() {
+        for (long requested = 1L; requested <= 40L; requested++) {
+            for (long threshold = 0L; threshold <= requested + 2L; threshold++) {
+                for (long hint = 0L; hint <= requested + 2L; hint++) {
+                    long limit = threshold;
+                    long[] lastPass = {0L};
+                    long found = PrimordialModuleRecipeLogic.findHighestMatchableParallel(requested, hint, p -> {
+                        boolean ok = p <= limit;
+                        if (ok) lastPass[0] = p;
+                        return ok;
+                    });
+                    assertEquals(Math.min(requested, limit), found,
+                            "requested=" + requested + " threshold=" + threshold + " hint=" + hint);
+                    if (found > 0L) {
+                        assertEquals(found, lastPass[0], "最后一次通过的探测必须等于结果（缓存命中依赖此点）");
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void hintedSearchNeedsFewProbesWhenResultIsStable() {
+        AtomicInteger calls = new AtomicInteger();
+        long found = PrimordialModuleRecipeLogic.findHighestMatchableParallel(
+                Long.MAX_VALUE, 123_456L,
+                parallel -> {
+                    calls.incrementAndGet();
+                    return parallel <= 123_456L;
+                });
+
+        assertEquals(123_456L, found);
+        assertTrue(calls.get() <= 7, "提示命中时探测次数应远小于二分，实际 " + calls.get());
+    }
+
+    @Test
+    void hintedSearchHandlesHugeRangeWithoutOverflow() {
+        long found = PrimordialModuleRecipeLogic.findHighestMatchableParallel(
+                Long.MAX_VALUE, Long.MAX_VALUE - 5L, parallel -> parallel <= Long.MAX_VALUE - 3L);
+        assertEquals(Long.MAX_VALUE - 3L, found);
+    }
+
+    @Test
     void amplifiedCandidatesAreReusedWhileSourceAndMultiplierStay() {
         AmplifiedCandidateCache<String> cache = new AmplifiedCandidateCache<>();
         AtomicInteger amplifyCalls = new AtomicInteger();

@@ -21,6 +21,12 @@ public class PrimordialMolecularAssemblerModule extends PrimordialOmegaEngineMod
 
     static final String LOG_PREFIX = "[PrimordialMolecular]";
 
+    /**
+     * 逐 tick/逐次提取的追踪日志总开关。为 false 时调用点的 {@code if (TRACE)} 整体被编译器消除，
+     * 连 describeRecipe 的字符串拼接都不会执行。排查分子操纵者问题时临时改 true，排查完改回。
+     */
+    static final boolean TRACE = false;
+
     private IMolecularAssemblerHandler molecularAssemblerHandler;
     private ISubscription molecularAssemblerSubscription;
 
@@ -107,14 +113,18 @@ public class PrimordialMolecularAssemblerModule extends PrimordialOmegaEngineMod
                     PrimordialMolecularAssemblerModuleLogic.describeRecipe(recipe));
             return;
         }
-        GTDishanhaiMod.LOGGER.info(
-                "{} output-return-before module={} handler={} recipe={}",
-                LOG_PREFIX, getPos(), describeHandler(),
-                PrimordialMolecularAssemblerModuleLogic.describeRecipe(recipe));
+        if (TRACE) {
+            GTDishanhaiMod.LOGGER.info(
+                    "{} output-return-before module={} handler={} recipe={}",
+                    LOG_PREFIX, getPos(), describeHandler(),
+                    PrimordialMolecularAssemblerModuleLogic.describeRecipe(recipe));
+        }
         molecularAssemblerHandler.handleRecipeOutput(recipe);
-        GTDishanhaiMod.LOGGER.info(
-                "{} output-return-after module={} handler={}",
-                LOG_PREFIX, getPos(), describeHandler());
+        if (TRACE) {
+            GTDishanhaiMod.LOGGER.info(
+                    "{} output-return-after module={} handler={}",
+                    LOG_PREFIX, getPos(), describeHandler());
+        }
     }
 
     private void initializeMolecularAssemblerParts() {
@@ -170,11 +180,13 @@ public class PrimordialMolecularAssemblerModule extends PrimordialOmegaEngineMod
         }
         molecularAssemblerHandler = handler;
         molecularAssemblerSubscription = handler.addChangedListener(() -> {
-            GTDishanhaiMod.LOGGER.info(
-                    "{} handler-changed module={} handler={} logicStatus={} progress={}/{} lastRecipe={}",
-                    LOG_PREFIX, getPos(), describeHandler(), getRecipeLogic().getStatus(),
-                    getRecipeLogic().getProgress(), getRecipeLogic().getMaxProgress(),
-                    PrimordialMolecularAssemblerModuleLogic.describeRecipe(getRecipeLogic().getLastRecipe()));
+            if (TRACE) {
+                GTDishanhaiMod.LOGGER.info(
+                        "{} handler-changed module={} handler={} logicStatus={} progress={}/{} lastRecipe={}",
+                        LOG_PREFIX, getPos(), describeHandler(), getRecipeLogic().getStatus(),
+                        getRecipeLogic().getProgress(), getRecipeLogic().getMaxProgress(),
+                        PrimordialMolecularAssemblerModuleLogic.describeRecipe(getRecipeLogic().getLastRecipe()));
+            }
             getRecipeLogic().updateTickSubscription();
         });
         GTDishanhaiMod.LOGGER.info(

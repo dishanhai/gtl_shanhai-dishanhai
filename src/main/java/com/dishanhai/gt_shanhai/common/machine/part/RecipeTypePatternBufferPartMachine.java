@@ -1475,9 +1475,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private void pollOutputMultiplierHostState() {
         if (!outputMultiplierModeEnabled) return;
         if (getOffsetTimer() % OUTPUT_MULTIPLIER_HOST_CHECK_TICKS != 0L) return;
-        long detected = resolveConnectedHostOutputMultiplier();
-        long detectedUniversal = resolveConnectedUniversalHostOutputMultiplier();
-        int fingerprint = resolveForgeRecipeTypeFingerprint();
+        OutputMultiplierResolver.HostSnapshot snapshot = OutputMultiplierResolver.resolveHostSnapshot(
+                getControllers(), getLevel(), getPos());
+        long detected = clampOutputMultiplier(snapshot.maxMultiplier());
+        long detectedUniversal = clampOutputMultiplier(snapshot.universalMultiplier());
+        int fingerprint = snapshot.forgeFingerprint();
         boolean hostStateChanged = false;
         boolean universalStateChanged = false;
         if (detected == lastDetectedHostOutputMultiplier
@@ -3018,9 +3020,12 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         if (!strongPatternMatchMode) {
             return Component.translatable("gt_shanhai.stellar.strong_match.report_off").getString();
         }
-        int hash = gtShanhai$strongMatchInventoryHash();
+        // 服务端的样板变化一定经 onPatternChange → gtShanhai$setStrongPatternMatchWarning 失效缓存，
+        // 窗口内不必再对全部槽的 NBT 求哈希；客户端收不到失效回调，仍用哈希发现同步过来的变化。
+        boolean remote = isRemote();
+        int hash = remote ? gtShanhai$strongMatchInventoryHash() : 0;
         long tick = getOffsetTimer();
-        if (hash == cachedStrongMatchReportHash
+        if ((!remote || hash == cachedStrongMatchReportHash)
                 && tick - cachedStrongMatchReportTick >= 0L
                 && tick - cachedStrongMatchReportTick < 20L) {
             return cachedStrongMatchReport;

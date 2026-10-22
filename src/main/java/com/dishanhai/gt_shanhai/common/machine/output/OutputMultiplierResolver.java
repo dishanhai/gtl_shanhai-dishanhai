@@ -98,6 +98,48 @@ public final class OutputMultiplierResolver {
         return fingerprint;
     }
 
+    /** 轮询一次要用到的三个读数：任意伪神配方类型的最大倍率、全局倍率、伪神配方类型指纹。 */
+    public record HostSnapshot(long maxMultiplier, long universalMultiplier, int forgeFingerprint) {}
+
+    /**
+     * 与分别调用 {@link #resolveMaxHostOutputMultiplier}、{@link #resolveUniversalHostOutputMultiplier}、
+     * {@link #resolveForgeRecipeTypeFingerprint} 结果完全一致，但只遍历一遍控制器与部件。
+     * 星律总成开启倍率模式后每 tick 轮询，三次独立遍历是常驻开销。
+     */
+    public static HostSnapshot resolveHostSnapshot(Iterable<?> controllers,
+            @Nullable Level level, @Nullable BlockPos pos) {
+        Accumulator max = new Accumulator();
+        Accumulator universal = new Accumulator();
+        int fingerprint = 1;
+        if (controllers != null) {
+            boolean hubThreads = DShanhaiConfig.COMMON.hubOutputMultiplier.get();
+            for (Object controller : controllers) {
+                collectOutputSource(controller, max);
+                collectOutputSource(controller, universal);
+                collectForgeOfTheAntichristMultiplier(controller, max, "", true);
+                fingerprint = 31 * fingerprint + forgeRecipeTypeFingerprint(controller);
+                if (!(controller instanceof IMultiController multiController)) continue;
+                Iterable<? extends IMultiPart> parts = multiController.getParts();
+                if (parts == null) continue;
+                for (IMultiPart part : parts) {
+                    collectOutputSource(part, max);
+                    collectOutputSource(part, universal);
+                    collectForgeOfTheAntichristMultiplier(part, max, "", true);
+                    if (hubThreads && part instanceof IThreadModifierPart threadPart) {
+                        int threads = threadPart.getThreadCount();
+                        max.addThread(threads);
+                        universal.addThread(threads);
+                    }
+                    fingerprint = 31 * fingerprint + forgeRecipeTypeFingerprint(part);
+                }
+            }
+        }
+        long fixed = resolveFixedBroadcastMultiplier(level, pos);
+        max.multiply(fixed);
+        universal.multiply(fixed);
+        return new HostSnapshot(max.result(), universal.result(), fingerprint);
+    }
+
     private static long resolveHostOutputMultiplier(Iterable<?> controllers,
             @Nullable Level level, @Nullable BlockPos pos, @Nullable String recipeTypeId,
             boolean includeAnyForgeRecipeType) {

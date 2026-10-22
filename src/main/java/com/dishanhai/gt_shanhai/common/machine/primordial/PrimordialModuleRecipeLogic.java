@@ -72,6 +72,9 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             new java.util.IdentityHashMap<>();
     private final java.util.IdentityHashMap<GTRecipe, MatchableScaledRecipe> matchableScaledRecipeCache =
             new java.util.IdentityHashMap<>();
+    // 仅作二分起点提示，错了只多几次探测，不影响结果；设上限避免持有已失效配方引用。
+    private static final int PARALLEL_HINT_LIMIT = 256;
+    private final java.util.IdentityHashMap<GTRecipe, Long> parallelHints = new java.util.IdentityHashMap<>();
 
     public PrimordialModuleRecipeLogic(GTLAddWirelessWorkableElectricMultipleRecipesMachine machine) {
         super((SelectableRecipeTypeSetMachine) machine);
@@ -133,6 +136,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         invalidateModuleConditionCaches();
         amplifiedRecipeCache.clear();
         matchableScaledRecipeCache.clear();
+        parallelHints.clear();
     }
 
     /**
@@ -366,10 +370,16 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     private MatchableScaledRecipe findMatchableScaledRecipe(GTRecipe recipe, long requestedParallel) {
         ScaledRecipeMatchContext context = new ScaledRecipeMatchContext(recipe);
-        long parallel = findHighestMatchableParallel(requestedParallel, context);
+        Long hint = parallelHints.get(recipe);
+        long parallel = findHighestMatchableParallel(requestedParallel, hint == null ? 0L : hint, context);
         if (parallel <= 0L) {
+            parallelHints.remove(recipe);
             return null;
         }
+        if (parallelHints.size() >= PARALLEL_HINT_LIMIT) {
+            parallelHints.clear();
+        }
+        parallelHints.put(recipe, parallel);
         if (context.matchedParallel == parallel && context.matchedRecipe != null) {
             return new MatchableScaledRecipe(parallel, context.matchedRecipe);
         }
@@ -433,6 +443,15 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     }
 
     static long findHighestMatchableParallel(long requestedParallel, LongPredicate canMatch) {
+        return findHighestMatchableParallel(requestedParallel, 0L, canMatch);
+    }
+
+    /**
+     * hintParallel 是同一配方上次的可匹配并行。输出受限的稳态下每轮结果几乎不变，
+     * 先测提示值再向两侧倍增划出区间，探测约 2–4 次；提示无效（≤1 或 ≥ 上界）时退化为原二分。
+     * 与二分一样依赖「可匹配性随并行单调」；最后一次通过的探测恒为最终结果，调用方的缓存命中依赖这一点。
+     */
+    static long findHighestMatchableParallel(long requestedParallel, long hintParallel, LongPredicate canMatch) {
         if (requestedParallel <= 0L || canMatch == null) {
             return 0L;
         }
@@ -458,19 +477,47 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             return 0L;
         }
 
-        long low = 2L;
-        long high = requestedParallel - 2L;
-        long best = 1L;
-        while (low <= high) {
-            long middle = low + ((high - low) >>> 1);
-            if (canMatch.test(middle)) {
-                best = middle;
-                low = middle + 1L;
+        // lo 已知可过，hi 已知不可过。
+        long lo = 1L;
+        long hi = oneLess;
+        if (hintParallel > lo && hintParallel < hi) {
+            long step = 1L;
+            if (canMatch.test(hintParallel)) {
+                lo = hintParallel;
+                while (true) {
+                    long probe = lo + step;
+                    if (probe >= hi || probe < 0L) break;
+                    if (canMatch.test(probe)) {
+                        lo = probe;
+                        step <<= 1;
+                    } else {
+                        hi = probe;
+                        break;
+                    }
+                }
             } else {
-                high = middle - 1L;
+                hi = hintParallel;
+                while (true) {
+                    long probe = hi - step;
+                    if (probe <= lo) break;
+                    if (canMatch.test(probe)) {
+                        lo = probe;
+                        break;
+                    }
+                    hi = probe;
+                    step <<= 1;
+                }
             }
         }
-        return best;
+        while (hi - lo > 1L) {
+            long middle = lo + ((hi - lo) >>> 1);
+            if (canMatch.test(middle)) {
+                lo = middle;
+            } else {
+                hi = middle;
+            }
+        }
+        return lo;
     }
 
     private BigInteger calculateRecipeEu(GTRecipe recipe, long parallel, double euMultiplier) {

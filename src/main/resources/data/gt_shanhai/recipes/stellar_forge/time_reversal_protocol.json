@@ -1,0 +1,47 @@
+{
+  "data": {
+    "euTier": 0,
+    "SCTier": 0
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 8
+      }
+    ]
+  },
+  "type": "gtceu:stellar_forge",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:time_reversal_protocol"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "type": "gtceu:circuit",
+            "configuration": 25
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:stellar_forge/time_reversal_protocol",
+      "defaultEnabled": true
+    }
+  ]
+}
