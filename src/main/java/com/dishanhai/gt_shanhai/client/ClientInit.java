@@ -80,6 +80,8 @@ public class ClientInit {
         com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur.install();
         com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.MultiPickerScreen);
+        com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
+                screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.generator.PatternGeneratorScreen);
         MinecraftForge.EVENT_BUS.addListener(
                 com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur::onScreenClosing);
         com.dishanhai.gt_shanhai.client.recipe.ShanhaiRecipeStackPicker.install();

@@ -20,7 +20,7 @@ import java.util.function.Supplier;
  */
 public class ShanhaiNetwork {
 
-    private static final String PROTOCOL_VERSION = "8";
+    private static final String PROTOCOL_VERSION = "9";
     private static final ResourceLocation CHANNEL_NAME = new ResourceLocation(GTDishanhaiMod.MOD_ID, "main");
     private static int packetId = 0;
 
@@ -603,6 +603,18 @@ public class ShanhaiNetwork {
                 ShopActionResultPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        CHANNEL.registerMessage(packetId++, PatternGeneratorOpenPacket.class,
+                PatternGeneratorOpenPacket::encode, PatternGeneratorOpenPacket::new,
+                PatternGeneratorOpenPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(packetId++, PatternGeneratorActionPacket.class,
+                PatternGeneratorActionPacket::encode, PatternGeneratorActionPacket::new,
+                PatternGeneratorActionPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(packetId++, PatternGeneratorStatePacket.class,
+                PatternGeneratorStatePacket::encode, PatternGeneratorStatePacket::new,
+                PatternGeneratorStatePacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(packetId++, PatternGeneratorPresetPacket.class,
+                PatternGeneratorPresetPacket::encode, PatternGeneratorPresetPacket::new,
+                PatternGeneratorPresetPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         RecipeSyncPacket.init();
     }
 

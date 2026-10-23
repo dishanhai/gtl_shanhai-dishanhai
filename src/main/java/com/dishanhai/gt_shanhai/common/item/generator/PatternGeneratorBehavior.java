@@ -1,13 +1,8 @@
 package com.dishanhai.gt_shanhai.common.item.generator;
 
-import com.dishanhai.gt_shanhai.common.gui.generator.PatternGeneratorWidget;
-import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.item.component.IAddInformation;
 import com.gregtechceu.gtceu.api.item.component.IItemLifeCycle;
-import com.gregtechceu.gtceu.api.item.component.IItemUIFactory;
-
-import com.lowdragmc.lowdraglib.gui.factory.HeldItemUIFactory;
-import com.lowdragmc.lowdraglib.gui.modular.ModularUI;
+import com.gregtechceu.gtceu.api.item.component.IInteractionItem;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -34,26 +29,16 @@ import java.util.List;
  * {@code gtceu:ev_emitter} 与 {@code gtceu:soldering_alloy}。
  * 本物品的 NBT、预设格式和材质独立，不读取 Enhanced Core 的设置。行为本身无状态。
  */
-public final class PatternGeneratorBehavior implements IItemUIFactory, IItemLifeCycle, IAddInformation {
+public final class PatternGeneratorBehavior implements IInteractionItem, IItemLifeCycle, IAddInformation {
     public static final PatternGeneratorBehavior INSTANCE = new PatternGeneratorBehavior();
 
     private PatternGeneratorBehavior() {}
 
     @Override
-    public ModularUI createUI(HeldItemUIFactory.HeldItemHolder holder, Player player) {
-        return new ModularUI(PatternGeneratorWidget.WIDTH, PatternGeneratorWidget.HEIGHT, holder, player)
-                .background(GuiTextures.BACKGROUND)
-                .widget(new PatternGeneratorWidget(holder));
-    }
-
-    @Override
     public InteractionResultHolder<ItemStack> use(Item item, Level level, Player player, InteractionHand hand) {
         if (player instanceof ServerPlayer serverPlayer) {
             PatternGeneratorTransfer.cancel(serverPlayer);
-            var settings = PatternGeneratorSettings.load(player.getItemInHand(hand));
-            settings.transferArmed = false;
-            player.getItemInHand(hand).getOrCreateTag().put(PatternGeneratorSettings.TAG, settings.write());
-            HeldItemUIFactory.INSTANCE.openUI(serverPlayer, hand);
+            PatternGeneratorSessions.open(serverPlayer, hand);
         }
         return new InteractionResultHolder<>(InteractionResult.SUCCESS, player.getItemInHand(hand));
     }
