@@ -82,6 +82,8 @@ public final class ShopGaussBlur {
     private static float[] extraRect;
     private static float[] extraHole;
     private static ShopGlassStyle extraGlass = ShopGlassStyle.OVERLAY;
+    /** 第二矩形的软边宽度（像素），0 为旧行为；>0 是弹层外圈：外缘淡出、取样绕开 Hole。 */
+    private static float extraFeather;
     /** 加载格的 UV 矩形，最多 {@link #MAX_CELL_RECTS} 块，每块 4 个分量。0 表示只用主矩形。 */
     private static int cellCount;
     private static final float[] cellUv = new float[MAX_CELL_RECTS * 4];
@@ -137,7 +139,7 @@ public final class ShopGaussBlur {
             try {
                 uniformFailed = !applyUniforms(post, 1f, BLUR_RADIUS_VIRTUAL,
                         new float[]{0f, 0f, 1f, 1f}, new float[]{0f, 0f, 0f, 0f}, false, 0, NO_CELLS,
-                        NO_WAVE, 1f, 1f, ShopGlassStyle.NONE);
+                        NO_WAVE, 1f, 1f, ShopGlassStyle.NONE, 0f);
             } catch (Exception e) {
                 uniformFailed = true;
                 GTDishanhaiMod.LOGGER.error("商店高斯模糊 uniform 预检失败，已回退为局部磨砂", e);
@@ -330,6 +332,17 @@ public final class ShopGaussBlur {
                                     float radiusPixels,
                                     int holeX, int holeY, int holeW, int holeH,
                                     ShopGlassStyle glass) {
+        requestExtra(x, y, w, h, strength, radiusPixels, holeX, holeY, holeW, holeH, glass, 0f);
+    }
+
+    /**
+     * 弹层外圈版：{@code featherPx > 0} 时 Rect 外缘向外淡出到原图，取样绕开 Hole（不把弹层里的字吸进外圈），
+     * 也不画 Rect 内缘亮边。{@code featherPx} 应略小于 Rect 比 Hole 外扩的像素数，Hole 外缘才是满强度。
+     */
+    public static void requestExtra(int x, int y, int w, int h, float strength,
+                                    float radiusPixels,
+                                    int holeX, int holeY, int holeW, int holeH,
+                                    ShopGlassStyle glass, float featherPx) {
         if (strength <= 0.01f || w <= 0 || h <= 0) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.getMainRenderTarget() == null) return;
@@ -342,6 +355,7 @@ public final class ShopGaussBlur {
         extraStrength = clamp01(strength);
         extraRadius = radiusPixels > 0f ? radiusPixels : BLUR_RADIUS_VIRTUAL;
         extraGlass = glass == null ? ShopGlassStyle.OVERLAY : glass;
+        extraFeather = Math.max(0f, featherPx);
         extraRequested = true;
     }
 
@@ -361,6 +375,7 @@ public final class ShopGaussBlur {
         extraRect = null;
         extraHole = null;
         extraGlass = ShopGlassStyle.OVERLAY;
+        extraFeather = 0f;
         cellCount = 0;
         waveRequested = false;
         waveRect = null;
@@ -440,6 +455,7 @@ public final class ShopGaussBlur {
         float[] rect2 = extraRect;
         float[] hole2 = extraHole;
         ShopGlassStyle glass2 = extraGlass;
+        float feather2 = extraFeather;
         int cells = cellCount;
         boolean hadWave = waveRequested && waveRect != null && waveStrength > 0.01f;
         float[] wave = {waveOriginU, waveOriginV, waveRadiusPx, waveBandPx, waveRefractPx, waveGlowAmount};
@@ -461,17 +477,17 @@ public final class ShopGaussBlur {
         if (primary) {
             render(mc, strength, radius, rect,
                     hole == null ? new float[]{0f, 0f, 0f, 0f} : hole, smooth, cells, cellUvSnapshot,
-                    NO_WAVE, axisX, axisY, glass, partialTick);
+                    NO_WAVE, axisX, axisY, glass, partialTick, 0f);
         }
         if (extra && isReady()) {
             render(mc, strength2, radius2, rect2,
                     hole2 == null ? new float[]{0f, 0f, 0f, 0f} : hole2, false, 0, NO_CELLS,
-                    NO_WAVE, 1f, 1f, glass2, partialTick);
+                    NO_WAVE, 1f, 1f, glass2, partialTick, feather2);
         }
         // 波放最后一趟：它要盖在飞行/浮层的模糊之上，否则点在商品格上会被飞行请求吃掉。
         if (hadWave && isReady()) {
             render(mc, waveStrength, waveRadius, waveRectCopy,
-                    new float[]{0f, 0f, 0f, 0f}, true, 0, NO_CELLS, wave, 1f, 1f, ShopGlassStyle.NONE, partialTick);
+                    new float[]{0f, 0f, 0f, 0f}, true, 0, NO_CELLS, wave, 1f, 1f, ShopGlassStyle.NONE, partialTick, 0f);
         }
     }
 
@@ -509,7 +525,7 @@ public final class ShopGaussBlur {
                                float[] rect, float[] hole, boolean smooth,
                                int cells, float[] cellData,
                                float[] wave, float axisX, float axisY,
-                               ShopGlassStyle glass, float partialTick) {
+                               ShopGlassStyle glass, float partialTick, float featherPx) {
         PostChain post = ensureChain(mc);
         if (post == null) return;
         if (mc.getMainRenderTarget() == null) return;
@@ -522,7 +538,7 @@ public final class ShopGaussBlur {
             chainHeight = fbH;
         }
         // 反射/着色器 uniform 任一不可用就整个跳过，绝不让 Rect 落回默认的全屏值。
-        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData, wave, axisX, axisY, glass)) {
+        if (!applyUniforms(post, strength, radius, rect, hole, smooth, cells, cellData, wave, axisX, axisY, glass, featherPx)) {
             uniformFailed = true;
             return;
         }
@@ -566,7 +582,7 @@ public final class ShopGaussBlur {
                                          float[] rect, float[] hole, boolean smooth,
                                          int cells, float[] cellData, float[] wave,
                                          float axisX, float axisY,
-                                         ShopGlassStyle glass) {
+                                         ShopGlassStyle glass, float featherPx) {
         List<PostPass> passes = passesOf(post);
         if (passes.isEmpty()) return false;
         boolean allReady = true;
@@ -613,7 +629,7 @@ public final class ShopGaussBlur {
             glassTintUniform.set(glassTint[0], glassTint[1], glassTint[2], glassTint[3]);
             glassParamsUniform.set(glassParams[0], glassParams[1], glassParams[2], glassParams[3]);
             glassEdgeUniform.set(glassEdge[0], glassEdge[1], glassEdge[2], glassEdge[3]);
-            motionAxisUniform.set(axisX, axisY, 0f, 0f);
+            motionAxisUniform.set(axisX, axisY, featherPx, 0f);
             int n = cells > 1 && cellData != null ? Math.min(cells, MAX_CELL_RECTS) : 0;
             cellCountUniform.set(n);
             cellRectsUniform.set(n > 0 ? cellData : NO_CELLS);

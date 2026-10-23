@@ -145,7 +145,7 @@ public final class CurrencyStageConfig {
         coins.addProperty("dishanhai:coin_secondary", "uiv");
         coins.addProperty("dishanhai:neutron_coin", "uev");
         coins.addProperty("dishanhai:infinite_coin", "uxv");
-        coins.addProperty("dishanhai:transcendentmetal_coin", "max");
+        coins.addProperty("dishanhai:transcendentmetal_coin", "uxv");
         coins.addProperty("dishanhai:chaos_coin", "opv");
         coins.addProperty("dishanhai:cosmic_coin", "opv");
         coins.addProperty("dishanhai:magmatter_coin", "opv");

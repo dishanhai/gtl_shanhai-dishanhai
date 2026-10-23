@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.recipe.editor;
 
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.GenericStack;
+import com.dishanhai.gt_shanhai.client.gui.generator.MachinePicker;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.lowdragmc.lowdraglib.gui.ingredient.IGhostIngredientTarget;
 import com.lowdragmc.lowdraglib.gui.ingredient.Target;
@@ -74,11 +75,11 @@ public final class ShanhaiRecipeMachineSlotWidget extends Widget
         super.updateScreen();
         ItemStack stack = value.get();
         setHoverTooltips(stack == null || stack.isEmpty()
-                ? List.of(Component.literal("把 GT 机器从 JEI 拖入这里，自动映射配方类型"))
+                ? List.of(Component.literal("左键打开机器选取器，也可把 GT 机器从 JEI 拖入这里，自动映射配方类型"))
                 : List.of(stack.getHoverName(),
                         Component.literal("已映射 " + ShanhaiRecipeMachineMapping.recipeTypes(stack).size()
                                 + " 个配方类型"),
-                        Component.literal("右键清除机器映射")));
+                        Component.literal("左键更换机器 · 右键清除机器映射")));
     }
 
     @Override
@@ -89,7 +90,24 @@ public final class ShanhaiRecipeMachineSlotWidget extends Widget
             writeClientAction(ACT_CLEAR, buffer -> {});
             return true;
         }
+        if (button == 0) {
+            // 与样板生成器同一套选机器逻辑；确认后走与 JEI 拖入相同的设置与服务端同步。
+            ItemStack current = value.get();
+            MachinePicker.open(current == null ? ItemStack.EMPTY : current, this::applyChosen);
+            return true;
+        }
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    private void applyChosen(ItemStack chosen) {
+        if (chosen.isEmpty()) {
+            changed.accept(ItemStack.EMPTY);
+            writeClientAction(ACT_CLEAR, buffer -> {});
+            return;
+        }
+        ItemStack copy = chosen.copyWithCount(1);
+        changed.accept(copy);
+        writeClientAction(ACT_SET, buffer -> buffer.writeItem(copy));
     }
 
     @Override

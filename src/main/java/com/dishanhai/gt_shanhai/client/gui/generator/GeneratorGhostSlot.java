@@ -10,7 +10,6 @@ import com.gregtechceu.gtceu.api.item.MetaMachineItem;
 import com.lowdragmc.lowdraglib.gui.widget.PhantomFluidWidget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import java.util.function.Consumer;
@@ -46,18 +45,18 @@ public final class GeneratorGhostSlot {
     boolean isSelected() { return highlighted.getAsBoolean(); }
     void open(PatternGeneratorScreen screen) {
         selected.run();
-        GenericStack[] result = {null};
         GenericStack original=value.get();
-        MultiPickerScreen picker;
         if (machine) {
-            var allowedIds = BuiltInRegistries.ITEM.stream().filter(item -> item instanceof MetaMachineItem)
-                    .map(BuiltInRegistries.ITEM::getKey).toList();
-            picker = new MultiPickerScreen(screen,allowedIds,(stack,count)->result[0]=new GenericStack(AEItemKey.of(stack),1));
-        } else {
-            picker = new MultiPickerScreen(screen,false,(stack,count)->result[0]=identify(stack),
-                    fluid -> result[0]=original!=null && original.what() instanceof AEFluidKey old && old.getFluid()==fluid.getFluid()
-                            ?new GenericStack(old,1):new GenericStack(AEFluidKey.of(fluid.getFluid(),fluid.getTag()),1));
+            // 機器格與配方修改器共用 MachinePicker：只列 GT 機器、替換這一格、預選目前的機器。
+            ItemStack current = original != null && original.what() instanceof AEItemKey item ? item.toStack(1) : ItemStack.EMPTY;
+            screen.openPicker(MachinePicker.create(screen,current,
+                    stack -> accept(stack.isEmpty() ? null : new GenericStack(AEItemKey.of(stack),1))));
+            return;
         }
+        GenericStack[] result = {null};
+        MultiPickerScreen picker = new MultiPickerScreen(screen,false,(stack,count)->result[0]=identify(stack),
+                fluid -> result[0]=original!=null && original.what() instanceof AEFluidKey old && old.getFluid()==fluid.getFluid()
+                        ?new GenericStack(old,1):new GenericStack(AEFluidKey.of(fluid.getFluid(),fluid.getTag()),1));
         picker.replacing();
         if (original != null && original.what() instanceof AEItemKey item) picker.preselect(item.toStack(1),1);
         else if (original != null && original.what() instanceof AEFluidKey fluid)

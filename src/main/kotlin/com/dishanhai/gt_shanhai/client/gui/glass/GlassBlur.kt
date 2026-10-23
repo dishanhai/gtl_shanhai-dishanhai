@@ -62,12 +62,16 @@ object GlassBlur {
     }
 
     private const val POPUP_STRENGTH = 0.85f
-    private const val POPUP_MARGIN_VIRTUAL = 14f
+    // 外圈要宽到盖住 13 点核的有效半径（约 4×BLUR_RADIUS_VIRTUAL），否则外缘处的取样会全夹在矩形边上拖出竖纹。
+    private const val POPUP_MARGIN_VIRTUAL = 24f
+    // 软边宽度略小于外扩量：Hole 外缘处淡出系数恰为 1，外缘处严格等于原图，没有一圈生硬的矩形边。
+    private const val POPUP_FEATHER_VIRTUAL = 20f
     private const val MIN_STRENGTH = 0.01f
 
     /**
      * 下拉 / 历史弹层打开时：[popup]（弹层本体，调用方可并上锚点按钮）保持清晰并带柔影（Hole），
-     * 周围一圈被糊开（Rect = [popup] 外扩 [POPUP_MARGIN_VIRTUAL]）。[openAmount] 是 0..1 的打开量。
+     * 周围一圈被糊开（Rect = [popup] 外扩 [POPUP_MARGIN_VIRTUAL]），外缘向外淡出到原图、取样绕开弹层本体。
+     * [openAmount] 是 0..1 的打开量。
      * 走第二矩形槽位；`ShopGaussBlur.request*` 会清掉第二槽位，所以必须在同一帧的换页主请求之后登记
      * （Panel.drawInBackground 先 requestSlideBlur 再 super.drawInBackground，弹层在后面的遍历里登记）。
      */
@@ -83,7 +87,8 @@ object GlassBlur {
             ring.x, ring.y, ring.w, ring.h,
             strength, ShopGaussBlur.BLUR_RADIUS_VIRTUAL * view.pixelScale,
             hole.x, hole.y, hole.w, hole.h,
-            ShopGlassStyle.OVERLAY,
+            ShopGlassStyle.POPUP,
+            POPUP_FEATHER_VIRTUAL * view.pixelScale,
         )
     }
 

@@ -32,6 +32,8 @@ public final class PatternGeneratorScreen extends ScaledScreen {
     public static final String BUNDLE_BUTTON_ID="shanhai_pattern_generator.bundle";
     private static final String PREFIX="gt_shanhai.gui.pattern_generator.";
     private static final int PANEL_W=460, PANEL_H=300, CONTENT_W=436;
+    // 畫布比面板大一圈：面板約佔視窗 2/3，整體縮放隨之變小。
+    private static final int TARGET_W=700, TARGET_H=460;
     final PatternGeneratorClientState model;
     private final InteractionHand hand;
     private final EnumMap<Page,GeneratorView> views=new EnumMap<>(Page.class);
@@ -86,7 +88,7 @@ public final class PatternGeneratorScreen extends ScaledScreen {
 
     public PatternGeneratorScreen(InteractionHand hand,PatternGeneratorState state) {
         super(tr("title")); this.hand=hand; model=new PatternGeneratorClientState(state);
-        targetWidth=500; targetHeight=340; renderRenderablesOnly=true;
+        targetWidth=TARGET_W; targetHeight=TARGET_H; renderRenderablesOnly=true;
         views.put(Page.MAIN,new MainView()); views.put(Page.PREVIEW,new PreviewView());
         views.put(Page.FILTER,new FilterView()); views.put(Page.CIRCUIT,new CircuitView());
         views.put(Page.EXTENSION,new ExtensionView()); views.put(Page.PRESET,new PresetView());

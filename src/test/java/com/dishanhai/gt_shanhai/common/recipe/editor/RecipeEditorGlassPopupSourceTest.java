@@ -20,10 +20,10 @@ class RecipeEditorGlassPopupSourceTest {
                 // 走第二矩形槽位，不覆盖换页的主请求；弹层本身作为 Hole 保持清晰
                 () -> assertTrue(blur.contains("fun requestPopup(graphics: GuiGraphics, popup: GuiRect, openAmount: Float)")),
                 () -> assertTrue(blur.contains("ShopGaussBlur.requestExtra(")),
-                () -> assertTrue(blur.contains("ShopGlassStyle.OVERLAY")),
-                () -> assertTrue(blur.contains("POPUP_MARGIN_VIRTUAL = 14f")),
+                () -> assertTrue(blur.contains("ShopGlassStyle.POPUP")),
+                () -> assertTrue(blur.contains("POPUP_MARGIN_VIRTUAL = 24f")),
                 // 弹层本体作 Hole，并上锚点按钮：弹层一打开，触发它的按钮也要保持清晰
-                () -> assertTrue(blur.contains("ShopGlassStyle.OVERLAY,")),
+                () -> assertTrue(blur.contains("ShopGlassStyle.POPUP,")),
                 () -> assertTrue(blur.contains("hole.x, hole.y, hole.w, hole.h,")),
                 () -> assertTrue(selector.contains(".union(new GuiRect(x, y, popUp.getSizeWidth(), shown)), open);")),
                 () -> assertTrue(history.contains(".union(new GuiRect(x, y, POPUP_W, height)),")),

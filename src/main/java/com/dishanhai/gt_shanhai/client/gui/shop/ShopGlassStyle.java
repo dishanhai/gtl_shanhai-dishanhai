@@ -15,6 +15,9 @@ public final class ShopGlassStyle {
     /** 卡片飞行：略轻，飞行时间短，不要抢走卡片本身。 */
     public static final ShopGlassStyle FLIGHT = new ShopGlassStyle(
             0.78f, 0.90f, 1.0f, 0.08f, 0.15f, 0.025f, 0.020f, 0.60f, 4f, 6f, 8f, 0.40f);
+    /** 下拉/历史弹层的外圈：不要折射和内缘亮边（外圈的矩形边不是玻璃的边），只留色调、轻颗粒和弹层外缘的光晕与柔影。 */
+    public static final ShopGlassStyle POPUP = new ShopGlassStyle(
+            0.78f, 0.90f, 1.0f, 0.08f, 0.15f, 0.020f, 0.015f, 0.60f, 0f, 7f, 10f, 0.45f);
     /** 分组切页：只上色加一点颗粒，不要亮边，否则网格边缘每次切页都闪一圈。 */
     public static final ShopGlassStyle SWAP = new ShopGlassStyle(
             0.78f, 0.90f, 1.0f, 0.05f, 0.10f, 0.020f, 0f, 0f, 0f, 0f, 0f, 0f);

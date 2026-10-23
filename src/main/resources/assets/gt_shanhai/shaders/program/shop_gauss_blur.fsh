@@ -27,7 +27,8 @@ uniform float WaveGlow;        // 波峰高光强度 0..1
 uniform vec4 GlassTint;        // rgb = 色调，a = 混合量
 uniform vec4 GlassParams;      // x = 饱和度增量，y = 颗粒幅度，z = 提亮，w = 亮边强度
 uniform vec4 GlassEdge;        // x = 边缘折射 px，y = 亮边宽 px，z = Hole 阴影半径 px，w = Hole 阴影强度
-uniform vec4 MotionAxis;       // x = 第一趟（H）半径倍率，y = 第二趟（V）半径倍率；默认 (1,1)，水平滑动用 (1,0)，zw 保留为 0
+uniform vec4 MotionAxis;       // x = 第一趟（H）半径倍率，y = 第二趟（V）半径倍率；默认 (1,1)，水平滑动用 (1,0)
+                               // z = 软边宽度 px：>0 时按“弹层外圈”处理——Rect 外缘向外淡出、取样绕开 Hole、不画 Rect 内缘亮边；0 为旧行为，w 保留为 0
 uniform vec4 Rect;   // xy = 左下角 UV，zw = 右上角 UV
 uniform vec4 Hole;   // 正在飞行的卡片或浮层矩形，保持清晰
 // PostChain 的 float uniform 走 glUniform1fv，所以这里是 8 个矩形 × 4 分量，不是 vec4[8]。
@@ -47,6 +48,22 @@ const vec2 LIGHT_DIR = vec2(-0.6502, 0.7598);
 
 bool insideBox(vec2 p, vec4 b) {
     return p.x >= b.x && p.x <= b.z && p.y >= b.y && p.y <= b.w;
+}
+
+// 软边（弹层外圈）取样：先夹进 Rect，再把落进 Hole 的采样点推回 Hole 外缘。
+// 否则外圈的垂直/水平模糊会把弹层里清晰的文字吸进来，在弹层上下左右拖出重影和竖纹。
+// origin 是当前像素，它一定在 Hole 外，所以沿模糊方向落进 Hole 的点只可能来自 origin 所在的那一侧。
+vec2 fetchUv(vec2 p, vec2 origin, vec2 lo, vec2 hi) {
+    p = clamp(p, lo, hi);
+    if (MotionAxis.z > 0.0 && Hole.z > Hole.x && Hole.w > Hole.y
+            && p.x >= Hole.x && p.x <= Hole.z && p.y >= Hole.y && p.y <= Hole.w) {
+        if (BlurDir.x > 0.5) {
+            p.x = origin.x < Hole.x ? Hole.x - oneTexel.x * 1.5 : Hole.z + oneTexel.x * 1.5;
+        } else {
+            p.y = origin.y < Hole.y ? Hole.y - oneTexel.y * 1.5 : Hole.w + oneTexel.y * 1.5;
+        }
+    }
+    return p;
 }
 
 // 距边 d 像素处的权重：贴边为 1，到 w 像素处衰减到 0，二次曲线让边缘折射集中在最外圈。
@@ -191,19 +208,19 @@ void main() {
 
     vec3 rgb;
     if (axisRadius < 0.5) {
-        rgb = texture(DiffuseSampler, clamp(baseUv, lo, hi)).rgb;
+        rgb = texture(DiffuseSampler, fetchUv(baseUv, uv, lo, hi)).rgb;
     } else if (Smooth > 0.5) {
         // 文字背后要连续的高斯，步长细到 radius/10。
         float stepPx = max(1.0, axisRadius / 10.0);
         float sigma = max(axisRadius / 2.5, stepPx);
         vec2 step = BlurDir * oneTexel * stepPx;
-        vec4 sum = texture(DiffuseSampler, clamp(baseUv, lo, hi));
+        vec4 sum = texture(DiffuseSampler, fetchUv(baseUv, uv, lo, hi));
         float wsum = 1.0;
         for (int i = 1; i <= 10; i++) {
             float dist = float(i) * stepPx;
             float w = exp(-0.5 * (dist * dist) / (sigma * sigma));
-            sum += texture(DiffuseSampler, clamp(baseUv + step * float(i), lo, hi)) * w;
-            sum += texture(DiffuseSampler, clamp(baseUv - step * float(i), lo, hi)) * w;
+            sum += texture(DiffuseSampler, fetchUv(baseUv + step * float(i), uv, lo, hi)) * w;
+            sum += texture(DiffuseSampler, fetchUv(baseUv - step * float(i), uv, lo, hi)) * w;
             wsum += w * 2.0;
         }
         rgb = sum.rgb / wsum;
@@ -211,20 +228,34 @@ void main() {
         // σ = 2·radius，步长 = radius = σ/2，13 点覆盖 ±3σ。步长不超过 σ/2，高斯没有可见重影。
         // 采样坐标夹在面板内部，避免把左侧网格/边框的颜色吸进面板边缘。
         vec2 step = BlurDir * oneTexel * axisRadius;
-        vec4 sum = texture(DiffuseSampler, clamp(baseUv, lo, hi));
+        vec4 sum = texture(DiffuseSampler, fetchUv(baseUv, uv, lo, hi));
         float wsum = 1.0;
         for (int i = 1; i <= 6; i++) {
             float w = exp(-0.125 * float(i * i));
-            sum += texture(DiffuseSampler, clamp(baseUv + step * float(i), lo, hi)) * w;
-            sum += texture(DiffuseSampler, clamp(baseUv - step * float(i), lo, hi)) * w;
+            sum += texture(DiffuseSampler, fetchUv(baseUv + step * float(i), uv, lo, hi)) * w;
+            sum += texture(DiffuseSampler, fetchUv(baseUv - step * float(i), uv, lo, hi)) * w;
             wsum += w * 2.0;
         }
         rgb = sum.rgb / wsum;
     }
 
     rgb += GLASS_LIGHT * glowAdd;
+    bool soft = MotionAxis.z > 0.0;
+    float rimEdgeD = edgeD;
+    vec2 rimInward = inward;
+    if (soft) {
+        // 软边：Rect 外缘不是玻璃的边，不画内缘亮边（距离取极大、方向取 0）；弹层自己的外缘光晕与柔影照常。
+        rimEdgeD = 1.0e5;
+        rimInward = vec2(0.0);
+    }
     if (lastPass) {
-        rgb = applyGlass(rgb, k, edgeD, inward, uv);
+        rgb = applyGlass(rgb, k, rimEdgeD, rimInward, uv);
+    }
+    if (soft) {
+        // 外缘淡出：Rect 最外一圈 = 原图，往里逐渐过渡到模糊+玻璃层，不再有一圈生硬的矩形边。
+        // 两趟各做一次，叠起来仍然单调、在外缘处严格等于原图。
+        float fade = smoothstep(0.0, MotionAxis.z, edgeD);
+        rgb = mix(texture(DiffuseSampler, uv).rgb, rgb, fade);
     }
     fragColor = vec4(rgb, 1.0);
 }
