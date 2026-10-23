@@ -27,6 +27,7 @@ import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.gregtechceu.gtceu.api.pattern.BlockPattern;
 
 
 import com.gtladd.gtladditions.api.machine.IThreadModifierMachine;
@@ -68,6 +69,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     private PrimordialOmegaEngineMachine host;
     private boolean hostConnected;
     private TickableSubscription hostScanSubs;
+    private final PrimordialStructureCheck structureCheck = new PrimordialStructureCheck();
     private String lastModuleConditionError;
     private GTRecipeType[] cachedRecipeTypesRef;
     private Set<String> cachedRecipeTypeNames = Collections.emptySet();
@@ -383,6 +385,22 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     // 但该列表没有任何消费者（样板配方的发现走 GTLCore 原生 lookup + marked 路径），整套已删除。
 
     @Override
+    public BlockPattern getPattern() {
+        return PrimordialStructurePattern.optimize(super.getPattern());
+    }
+
+    @Override
+    public void asyncCheckPattern(long period) {
+        structureCheck.asyncCheck(this, period);
+    }
+
+    @Override
+    public void onUnload() {
+        structureCheck.cancel();
+        super.onUnload();
+    }
+
+    @Override
     public void onStructureFormed() {
         super.onStructureFormed();
         if (!tryConnectToHost()) {
@@ -402,6 +420,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     @Override
     public void onStructureInvalid() {
+        structureCheck.cancel();
         super.onStructureInvalid();
         if (host != null) {
             host.removeModule(this);

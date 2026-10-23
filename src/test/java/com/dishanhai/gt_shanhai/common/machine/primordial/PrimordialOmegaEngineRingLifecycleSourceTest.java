@@ -18,8 +18,6 @@ class PrimordialOmegaEngineRingLifecycleSourceTest {
     void formedInvalidAndRemovedLifecycleSyncsClientRingStateFromServer() throws IOException {
         String source = Files.readString(ENGINE);
 
-        assertTrue(source.contains("import com.gregtechceu.gtceu.api.machine.feature.IMachineLife;"));
-        assertTrue(source.contains("implements IModularMachineHost<PrimordialOmegaEngineMachine>, IMachineLife"));
         assertTrue(source.contains("import com.dishanhai.gt_shanhai.network.SHideRingPacket;"));
         assertTrue(source.contains("import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;"));
         assertFalse(source.contains("ClientRingBlockHelper"),
@@ -36,6 +34,8 @@ class PrimordialOmegaEngineRingLifecycleSourceTest {
                 "invalidated host must push a restore packet before renderer state can become stranded");
         assertTrue(removed.contains("syncRingVisibility(false);"),
                 "removed host must restore rings after the block entity stops rendering");
+        assertTrue(removed.contains("super.onMachineRemoved();"),
+                "移除時仍須執行父類生命週期，不依賴重複宣告已繼承的介面");
         assertTrue(sync.contains("getLevel() instanceof ServerLevel serverLevel"));
         assertTrue(sync.contains("ShanhaiNetwork.sendHideRingToClients(serverLevel,"));
         assertTrue(sync.contains("new SHideRingPacket(getPos(), getFrontFacing(), hide)"));
@@ -45,17 +45,24 @@ class PrimordialOmegaEngineRingLifecycleSourceTest {
     void patternFormationDefersWorldMutationToServerThread() throws IOException {
         String source = Files.readString(ENGINE);
         String asyncCheck = extractBlock(source, "public void asyncCheckPattern(long period) {");
+        assertTrue(asyncCheck.contains("structureCheck.asyncCheck(this, period)"));
+        String checker = Files.readString(ENGINE.resolveSibling("PrimordialStructureCheck.java"));
 
-        assertTrue(asyncCheck.contains("checkPatternWithTryLock()"),
+        assertTrue(checker.contains("getPatternLock().tryLock()"),
                 "异步结构扫描必须先用 tryLock，避免与主线程结构变更互相等待");
-        assertTrue(asyncCheck.contains("serverLevel.getServer().execute"),
+        assertTrue(checker.contains("level.getServer().execute"),
                 "结构成型回调必须回到 Minecraft server thread 执行");
-        assertTrue(asyncCheck.contains("getPatternLock().lock()"),
+        String formation = checker.substring(checker.indexOf("level.getServer().execute"));
+        assertTrue(formation.contains("getPatternLock().lock()"),
                 "回到主线程后仍需持有结构锁再读取成型状态");
-        assertTrue(asyncCheck.contains("finally"),
+        assertTrue(formation.indexOf("machine.checkPattern()") < formation.indexOf("machine.onStructureFormed()"),
+                "真正成型前必須重新檢測，不能採用等待期間已失效的結果");
+        assertTrue(formation.contains("machine.isInValid()") && formation.contains("gate.isCurrent(ticket)"),
+                "控制器卸載或任務取消後不得成型");
+        assertTrue(formation.contains("finally"),
                 "结构锁必须在异常路径释放");
-        assertFalse(asyncCheck.contains("if (checkPattern())"),
-                "不能直接在异步搜索线程执行成型回调");
+        assertFalse(checker.substring(0, checker.indexOf("level.getServer().execute"))
+                .contains("machine.onStructureFormed()"), "不能在異步探測執行緒執行成型回調");
     }
 
     private static String extractBlock(String source, String declaration) {

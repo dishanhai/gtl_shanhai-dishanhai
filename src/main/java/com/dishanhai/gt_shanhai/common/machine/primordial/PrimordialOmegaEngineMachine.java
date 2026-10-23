@@ -13,7 +13,7 @@ import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
-import com.gregtechceu.gtceu.api.pattern.MultiblockWorldSavedData;
+import com.gregtechceu.gtceu.api.pattern.BlockPattern;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 
@@ -63,6 +63,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     private final Set<IModularMachineModule<PrimordialOmegaEngineMachine, ?>> modules = new ReferenceOpenHashSet<>();
     private final OutputMultiplierCache outputMultiplierCache = new OutputMultiplierCache();
+    private final PrimordialStructureCheck structureCheck = new PrimordialStructureCheck();
 
     /**
      * modules 的不可变快照（copy-on-write）：只在模块增删时于锁内重建一次。
@@ -171,29 +172,22 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         return Long.MAX_VALUE;
     }
 
-    // ========== 结构检测（187层巨构，同步检测避免死锁） ==========
+    // ========== 結構檢測（稀疏匹配；異步探測、主執行緒成型） ==========
+
+    @Override
+    public BlockPattern getPattern() {
+        return PrimordialStructurePattern.optimize(super.getPattern());
+    }
 
     @Override
     public void asyncCheckPattern(long period) {
-        if (!getMultiblockState().hasError() && isFormed()) return;
-        if ((getHolder().getOffset() + period) % 4 != 0) return;
-        if (!checkPatternWithTryLock()) return;
-        if (getLevel() instanceof ServerLevel serverLevel) {
-            serverLevel.getServer().execute(() -> {
-                getPatternLock().lock();
-                try {
-                    if (isFormed()) return;
-                    setFlipped(getMultiblockState().isNeededFlip());
-                    onStructureFormed();
-                    MultiblockWorldSavedData worldData =
-                            MultiblockWorldSavedData.getOrCreate(serverLevel);
-                    worldData.addMapping(getMultiblockState());
-                    worldData.removeAsyncLogic(this);
-                } finally {
-                    getPatternLock().unlock();
-                }
-            });
-        }
+        structureCheck.asyncCheck(this, period);
+    }
+
+    @Override
+    public void onUnload() {
+        structureCheck.cancel();
+        super.onUnload();
     }
 
     // ========== 模块接口 ==========
@@ -283,6 +277,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     @Override
     public void onStructureInvalid() {
+        structureCheck.cancel();
         super.onStructureInvalid();
         syncRingVisibility(false);
         safeClearModules();
