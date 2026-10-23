@@ -42,6 +42,11 @@ public class ShanhaiJEIPlugin implements IModPlugin {
     }
 
     @Override
+    public void registerGuiHandlers(mezz.jei.api.registration.IGuiHandlerRegistration registration) {
+        com.dishanhai.gt_shanhai.client.gui.generator.PatternGeneratorJeiHandler.register(registration);
+    }
+
+    @Override
     public void registerAdvanced(IAdvancedRegistration registration) {
         var guiHelper = registration.getJeiHelpers().getGuiHelper();
         ClientShopJeiMode.setButtonIcons(

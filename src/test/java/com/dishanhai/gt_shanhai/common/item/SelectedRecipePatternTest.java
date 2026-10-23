@@ -49,13 +49,15 @@ class SelectedRecipePatternTest {
         String machine = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
                 "common", "machine", "part", "RecipeTypePatternBufferPartMachine.java"));
         String widget = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
-                "common", "gui", "generator", "PatternGeneratorWidget.java"));
+                "common", "item", "generator", "PatternGeneratorSession.java"));
         assertTrue(machine.contains("SelectedRecipePattern.isPattern"));
         assertTrue(machine.contains("SelectedRecipePattern.expand"));
         assertTrue(machine.contains("acceptsWildcardMother"));
         assertFalse(machine.contains("setFilter(WildcardPatternBridge::isWildcardPattern)"));
         assertTrue(widget.contains("generateBundle"));
-        assertTrue(widget.contains("shanhai_pattern_generator.bundle"));
+        String screen = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
+                "client", "gui", "generator", "PatternGeneratorScreen.java"));
+        assertTrue(screen.contains("shanhai_pattern_generator.bundle"));
         String behavior = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
                 "common", "item", "SelectedRecipePatternBehavior.java"));
         String items = Files.readString(Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
