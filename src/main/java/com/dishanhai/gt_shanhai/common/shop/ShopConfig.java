@@ -284,16 +284,64 @@ public final class ShopConfig {
         return restored;
     }
 
-    /** 用新条目替换旧条目并写回；返回是否替换成功。 */
+    /** 用新条目替换旧条目并写回；返回是否替换成功。主支被改时，跟随它的分支副本会同步内容。 */
     public static synchronized boolean replaceEntry(ShopEntry oldEntry, ShopEntry newEntry) {
+        return replaceEntry(oldEntry, newEntry, false);
+    }
+
+    /**
+     * 同上；{@code pushToMaster} 为真且 newEntry 是分支副本时，把它的内容推给主支，再由主支同步给其余副本
+     * （阶段自己的字段——成本、限购、折扣等——各副本照旧各留各的，见 {@link ShopBranch}）。
+     */
+    public static synchronized boolean replaceEntry(ShopEntry oldEntry, ShopEntry newEntry, boolean pushToMaster) {
         if (oldEntry == null || newEntry == null) return false;
         List<ShopEntry> updated = new ArrayList<>(getEntries());
         int idx = updated.indexOf(oldEntry);
         if (idx < 0) return false;
         updated.set(idx, newEntry);
+        ShopEntry root = newEntry;
+        if (pushToMaster && !newEntry.getBranchSource().isEmpty()) {
+            int masterIdx = indexOfStableId(updated, newEntry.getBranchSource());
+            if (masterIdx >= 0) {
+                root = ShopBranch.merge(newEntry, updated.get(masterIdx));
+                updated.set(masterIdx, root);
+            }
+        }
+        ShopBranch.propagate(updated, root);
         publish(updated);
         save();
         return true;
+    }
+
+    /**
+     * 把 {@code sourcePath} 分类子树复制到每个目标阶段之下并保持内容同步；重复执行等于重新同步。
+     * 返回结果（供回显创建/同步/跳过数）；没有任何变化时不发布。
+     */
+    public static synchronized ShopBranch.CopyResult copyBranch(String sourcePath, Collection<String> targetParents) {
+        ShopBranch.CopyResult result = ShopBranch.copy(getEntries(), sourcePath, targetParents);
+        if (result.changed()) {
+            publish(result.entries());
+            save();
+        }
+        return result;
+    }
+
+    /** 把若干商品各复制一份到不同分组（副本落在目标分类本身），内容同步规则同 {@link #copyBranch}。 */
+    public static synchronized ShopBranch.CopyResult copyEntriesToGroups(Collection<String> stableIds,
+                                                                         Collection<String> targetCategories) {
+        ShopBranch.CopyResult result = ShopBranch.copyEntries(getEntries(), stableIds, targetCategories);
+        if (result.changed()) {
+            publish(result.entries());
+            save();
+        }
+        return result;
+    }
+
+    private static int indexOfStableId(List<ShopEntry> entries, String stableId) {
+        for (int i = 0; i < entries.size(); i++) {
+            if (stableId.equals(entries.get(i).getStableId())) return i;
+        }
+        return -1;
     }
 
     /** 批量切换隐藏状态；一次发布目录，避免连续单项包造成 revision 冲突。 */
@@ -444,7 +492,7 @@ public final class ShopConfig {
                 old.getPrerequisiteQuestId(), old.getStableId(), old.getDiscountPercent(),
                 old.getDiscountStartMs(), old.getDiscountEndMs(), old.getSubmissionItems());
         copy.overrideRemainingUses(old.getRemainingUses());
-        return copy;
+        return copy.withBranchSource(old.getBranchSource());
     }
 
     // 撤销上一次排序（前移/后移/置顶）：记住移动前"紧邻在它前面的那个条目"（身份锚点，不是数字下标），

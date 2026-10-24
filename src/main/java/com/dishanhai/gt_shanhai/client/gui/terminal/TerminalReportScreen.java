@@ -3,7 +3,9 @@ package com.dishanhai.gt_shanhai.client.gui.terminal;
 import com.dishanhai.gt_shanhai.client.gui.glass.*;
 import com.dishanhai.gt_shanhai.client.gui.scaled.*;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur;
+import com.dishanhai.gt_shanhai.client.ShanhaiStructureHighlightClient;
 import com.dishanhai.gt_shanhai.client.gui.shop.ShopUiSounds;
+import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorAnimation;
 import net.minecraft.ChatFormatting;
@@ -15,6 +17,7 @@ import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,15 +35,28 @@ public final class TerminalReportScreen extends ScaledScreen {
     // 欄線：色條 / 類別 / 目標方塊與坐標；表頭與每一組共用同一組常量。
     private static final int COL_KIND = 8, COL_KIND_W = 108, COL_NAME = 124, COL_NAME_W = CONTENT_W - COL_NAME - 4;
     private static final int STAGGER_ROWS = 24;
+    // 坐標列表超過 FOLD_LINES 行就折疊，按「展開」才顯示全文；「顯示坐標方框」把整組坐標在世界裡畫成方框。
+    private static final int FOLD_LINES = 3, BTN_GAP = 4, BOX_SECONDS = 30, BOX_MAX = 4096;
+    // 坐標按等寬欄對齊排成網格，只畫看得見的行；不再整段換行（上萬個坐標的換行計算會卡死）。
+    private static final int COORD_PAD = 10;
+    // 列表在畫面線程上分片載入：每幀最多花這麼久，其餘留給下一幀，載入期間顯示動畫。
+    private static final long LOAD_BUDGET_NS = 6_000_000L;
     // 仓室卡片：兩欄網格，圖示格 20px、文字緊跟其後。
     private static final int CELL_COLS = 2, CELL_GAP = 4, CELL_ICON = 20, CELL_MIN_H = 26;
 
     private record Chip(String key, Component text, int category, int x, int y, int w, int h) {}
-    private record Group(int category, int name, List<BlockPos> positions) {}
+    private record Group(int category, int name, List<BlockPos> positions) {
+        long key() { return ((long) category << 32) | name; }
+    }
     private record Cell(ItemStack stack, Component text, int x, int y, int w, int h) {}
-    // 坐標列表在佈局時只換行一次並快取；大型施工報告的單組坐標可達上萬字，逐幀重新換行會卡。
-    private record Row(Group group, Component kind, List<FormattedCharSequence> detailLines,
-                       List<FormattedCharSequence> coordLines, List<Cell> cells, int gridH, int y, int h) {}
+    private record Row(Group group, Component kind, List<FormattedCharSequence> detailLines, Component coordsHeader,
+                       int coordCols, int coordCellW, int coordShown, List<Cell> cells, int gridH,
+                       boolean foldable, boolean open, boolean boxable, int btnY, int y, int h) {
+        Row at(int newY) {
+            return new Row(group, kind, detailLines, coordsHeader, coordCols, coordCellW, coordShown, cells, gridH,
+                    foldable, open, boxable, btnY, newY, h);
+        }
+    }
 
     private final ShanhaiTerminalReport report;
     private final List<Group> groups = new ArrayList<>();
@@ -48,6 +64,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     private final int distinctPositions;
     private final List<Chip> chips = new ArrayList<>();
     private final List<Row> rows = new ArrayList<>();
+    private final Set<Long> expanded = new HashSet<>();
     private final Spring opening = new Spring(Spring.PANEL);
     private final Spring scroll = new Spring(Spring.SCROLL);
     private final SpringTable<String> selection = new SpringTable<>(Spring.HOVER);
@@ -56,7 +73,9 @@ public final class TerminalReportScreen extends ScaledScreen {
     private final ShanhaiRecipeEditorAnimation transition = new ShanhaiRecipeEditorAnimation();
     private TerminalGlassUi ui;
     private int filter = -1, stage, left, top, headerBottom, listHeight, contentHeight, scrollTarget;
-    private boolean warmed, draggingBar;
+    private List<Group> layoutGroups = List.of();
+    private int layoutCursor, layoutY;
+    private boolean warmed, draggingBar, loading;
     private Component notice = Component.empty();
     private long noticeUntil;
 
@@ -96,7 +115,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     @Override protected void initScaled() {
         left = (vWidth - PANEL_W) / 2; top = (vHeight - PANEL_H) / 2;
         ui = new TerminalGlassUi(font);
-        layoutHeader(); layoutRows();
+        layoutHeader(); startLayout();
     }
     private Component counts() {
         int[] c = report.counts();
@@ -134,15 +153,6 @@ public final class TerminalReportScreen extends ScaledScreen {
         headerBottom = y + font.lineHeight + 6;
         listHeight = PANEL_H - FOOTER_H - headerBottom;
     }
-    private Component coordsText(List<BlockPos> positions) {
-        StringBuilder text = new StringBuilder();
-        for (int i = 0; i < positions.size(); i++) {
-            if (i > 0) text.append("   ");
-            BlockPos pos = positions.get(i);
-            text.append(pos.getX()).append(',').append(pos.getY()).append(',').append(pos.getZ());
-        }
-        return tr("coords", positions.size()).copy().append(Component.literal(text.toString()));
-    }
     /** 把一組方塊排成兩欄卡片網格（相對名稱欄原點），回傳網格總高；文字換行、卡片隨之長高。 */
     private int layoutCells(List<net.minecraft.world.item.Item> items, List<Cell> out) {
         int cellW = (COL_NAME_W - CELL_GAP * (CELL_COLS - 1)) / CELL_COLS;
@@ -160,27 +170,72 @@ public final class TerminalReportScreen extends ScaledScreen {
         }
         return Math.max(0, y - CELL_GAP);
     }
-    private void layoutRows() {
+    private static int digits(int value) {
+        int len = value < 0 ? 1 : 0;
+        long v = Math.abs((long) value);
+        do { len++; v /= 10; } while (v > 0);
+        return len;
+    }
+    /** 重新開始載入列表：清空後由 pumpLayout 每幀分片補齊，畫面不會被一次性佈局卡住。 */
+    private void startLayout() {
         rows.clear();
-        int y = 0;
-        for (Group group : groups) {
-            if (filter >= 0 && group.category() != filter) continue;
-            var category = report.categories().get(group.category());
-            net.minecraft.network.chat.MutableComponent kind = category.label().copy().withStyle(style -> style.withColor(category.color()));
-            if (!isCraft()) kind.append(Component.literal(" ×" + group.positions().size()).withStyle(ChatFormatting.WHITE));
-            Component name = report.names().get(group.name());
-            List<FormattedCharSequence> coordLines = isCraft() ? List.of() : font.split(coordsText(group.positions()), COL_NAME_W);
-            Component detail = report.details().get(group.name());
-            List<FormattedCharSequence> detailLines = detail.getString().isEmpty() ? List.of() : font.split(detail, COL_NAME_W);
-            int belowH = (detailLines.size() + coordLines.size()) * font.lineHeight;
-            List<Cell> cells = new ArrayList<>();
-            int gridH = layoutCells(report.icons().get(group.name()), cells);
-            if (cells.isEmpty()) gridH = ui.height(name, COL_NAME_W);
-            int h = Math.max(ui.height(kind, COL_KIND_W), gridH + (belowH > 0 ? 3 : 0) + belowH) + 8;
-            rows.add(new Row(group, kind, detailLines, coordLines, cells, gridH, y, Math.max(20, h)));
-            y += Math.max(20, h) + 2;
+        layoutY = 0; layoutCursor = 0; contentHeight = 0;
+        List<Group> shown = new ArrayList<>();
+        for (Group group : groups) if (filter < 0 || group.category() == filter) shown.add(group);
+        layoutGroups = shown;
+        loading = !shown.isEmpty();
+        scrollTarget = 0; scroll.snap(0);
+    }
+    private void pumpLayout(long budgetNs) {
+        if (!loading || ui == null) return;
+        long start = System.nanoTime();
+        do {
+            if (layoutCursor >= layoutGroups.size()) break;
+            Row row = buildRow(layoutGroups.get(layoutCursor++), layoutY);
+            rows.add(row);
+            layoutY += row.h() + 2;
+        } while (System.nanoTime() - start < budgetNs);
+        contentHeight = layoutY;
+        if (layoutCursor >= layoutGroups.size()) loading = false;
+    }
+    private Row buildRow(Group group, int y) {
+        var category = report.categories().get(group.category());
+        net.minecraft.network.chat.MutableComponent kind = category.label().copy().withStyle(style -> style.withColor(category.color()));
+        if (!isCraft()) kind.append(Component.literal(" ×" + group.positions().size()).withStyle(ChatFormatting.WHITE));
+        Component name = report.names().get(group.name());
+        List<BlockPos> positions = group.positions();
+        int cols = 1, cellW = COL_NAME_W, gridLines = 0;
+        if (!isCraft() && !positions.isEmpty()) {
+            int maxLen = 0;
+            for (BlockPos pos : positions)
+                maxLen = Math.max(maxLen, digits(pos.getX()) + digits(pos.getY()) + digits(pos.getZ()) + 2);
+            cellW = font.width("0".repeat(maxLen)) + COORD_PAD;
+            cols = Math.max(1, COL_NAME_W / cellW);
+            gridLines = (positions.size() + cols - 1) / cols;
         }
-        contentHeight = y;
+        boolean foldable = gridLines > FOLD_LINES, open = expanded.contains(group.key());
+        int shown = foldable && !open ? FOLD_LINES : gridLines;
+        boolean boxable = !isCraft() && !positions.isEmpty();
+        Component detail = report.details().get(group.name());
+        List<FormattedCharSequence> detailLines = detail.getString().isEmpty() ? List.of() : font.split(detail, COL_NAME_W);
+        int belowH = (detailLines.size() + (gridLines > 0 ? 1 + shown : 0)) * font.lineHeight;
+        List<Cell> cells = new ArrayList<>();
+        int gridH = layoutCells(report.icons().get(group.name()), cells);
+        if (cells.isEmpty()) gridH = ui.height(name, COL_NAME_W);
+        int btnY = 4 + gridH + (belowH > 0 ? 3 : 0) + belowH + BTN_GAP;
+        int h = Math.max(ui.height(kind, COL_KIND_W), btnY - 4 + (foldable || boxable ? font.lineHeight + 10 + BTN_GAP : 0)) + 8;
+        return new Row(group, kind, detailLines, gridLines > 0 ? tr("coords", positions.size()) : Component.empty(),
+                cols, cellW, gridLines > 0 ? shown : 0, cells, gridH, foldable, open, boxable, btnY, y, Math.max(20, h));
+    }
+    /** 折疊／展開只重算這一行，後面的行整體平移，不重新載入整個列表。 */
+    private void relayoutRow(int index) {
+        Row old = rows.get(index);
+        Row fresh = buildRow(old.group(), old.y());
+        int delta = fresh.h() - old.h();
+        rows.set(index, fresh);
+        for (int j = index + 1; j < rows.size(); j++) rows.set(j, rows.get(j).at(rows.get(j).y() + delta));
+        layoutY += delta;
+        contentHeight = layoutY;
         scrollTarget = Math.min(scrollTarget, Math.max(0, contentHeight - listHeight));
         if (scroll.value() > Math.max(0, contentHeight - listHeight)) scroll.snap(scrollTarget);
     }
@@ -189,9 +244,9 @@ public final class TerminalReportScreen extends ScaledScreen {
         filter = next; scrollTarget = 0; scroll.snap(0);
         transition.advance(++stage, now());
         if (reduced()) transition.reset(stage, now());
-        layoutRows();
+        startLayout();
         stagger.clear();
-        for (int i = 0; i < Math.min(STAGGER_ROWS, rows.size()); i++)
+        for (int i = 0; i < Math.min(STAGGER_ROWS, layoutGroups.size()); i++)
             stagger.start("row." + i, reduced() ? 1 : 0, 1, now(), Math.min(240L, i * 12L));
     }
 
@@ -203,6 +258,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     // ---------- 繪製 ----------
     @Override protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
         long at = now(); ShopGaussBlur.clear(); ShopGaussBlur.clearTopLayer();
+        pumpLayout(LOAD_BUDGET_NS);
         float open = spring(opening, 1, at);
         spring(scroll, scrollTarget, at);
         ui.frame(mx, my, at); selection.sweep(at);
@@ -237,7 +293,11 @@ public final class TerminalReportScreen extends ScaledScreen {
         });
     }
     private void drawRows(GuiGraphics g, int mx, int my, long at) {
-        if (rows.isEmpty()) { ui.wrap(g, tr("empty"), listX() + 4, listY() + 4, CONTENT_W - 8, GlassPalette.TEXT_MUTED); return; }
+        if (rows.isEmpty()) {
+            if (loading) drawSpinner(g, listX() + CONTENT_W / 2, listY() + listHeight / 2, 14, at);
+            else ui.wrap(g, tr("empty"), listX() + 4, listY() + 4, CONTENT_W - 8, GlassPalette.TEXT_MUTED);
+            return;
+        }
         TerminalGlassUi.scissor(g, listX(), listY(), CONTENT_W, listHeight);
         try {
             int scrollY = Math.round(scroll.value());
@@ -252,6 +312,7 @@ public final class TerminalReportScreen extends ScaledScreen {
                 boolean over = hit(mx, my, x, y, CONTENT_W, row.h()) && hit(mx, my, listX(), listY(), CONTENT_W, listHeight);
                 float hot = follow(selection, "hot." + i, over ? 1 : 0, at);
                 int rowY = y;
+                int rowIndex = i;
                 GuiRenderUtil.withPanelMotion(g, x + CONTENT_W / 2f, y + row.h() / 2f, appear, () -> {
                     g.pose().pushPose(); g.pose().translate(0, (1 - appear) * 8, 0);
                     g.fill(x, rowY, x + CONTENT_W, rowY + row.h(), GuiMotion.lerpColor(GlassPalette.ROW_FILL, GlassPalette.ROW_FILL_HOVER, hot));
@@ -267,16 +328,38 @@ public final class TerminalReportScreen extends ScaledScreen {
                             g.drawString(font, line, x + COL_NAME, lineY, GlassPalette.TEXT_MUTED, false);
                         lineY += font.lineHeight;
                     }
-                    for (FormattedCharSequence line : row.coordLines()) {
-                        if (lineY + font.lineHeight >= listY() && lineY <= listY() + listHeight)
-                            g.drawString(font, line, x + COL_NAME, lineY, GlassPalette.TEXT_DIM, false);
+                    if (row.coordShown() > 0) {
+                        ui.wrap(g, row.coordsHeader(), x + COL_NAME, lineY, COL_NAME_W, GlassPalette.TEXT_DIM);
                         lineY += font.lineHeight;
+                        List<BlockPos> positions = row.group().positions();
+                        for (int k = 0; k < row.coordShown(); k++, lineY += font.lineHeight) {
+                            if (lineY + font.lineHeight < listY() || lineY > listY() + listHeight) continue;
+                            for (int c = 0; c < row.coordCols(); c++) {
+                                int index = k * row.coordCols() + c;
+                                if (index >= positions.size()) break;
+                                BlockPos pos = positions.get(index);
+                                g.drawString(font, pos.getX() + "," + pos.getY() + "," + pos.getZ(),
+                                        x + COL_NAME + c * row.coordCellW(), lineY, GlassPalette.TEXT_DIM, false);
+                            }
+                        }
                     }
+                    int bx = x + COL_NAME;
+                    if (row.foldable()) {
+                        int w = btnW(expandLabel(row));
+                        ui.button(g, "exp." + rowIndex, bx, rowY + row.btnY(), w, btnH(), expandLabel(row), Math.max(1, w - 12), true, mx, my, null);
+                        bx += w + BTN_GAP;
+                    }
+                    if (row.boxable())
+                        ui.button(g, "box." + rowIndex, bx, rowY + row.btnY(), btnW(boxLabel()), btnH(), boxLabel(), Math.max(1, btnW(boxLabel()) - 12), true, mx, my, null);
                     g.pose().popPose();
                 });
             }
         } finally { g.disableScissor(); }
     }
+    private Component expandLabel(Row row) { return tr(row.open() ? "collapse" : "expand"); }
+    private Component boxLabel() { return tr("show_boxes"); }
+    private int btnW(Component label) { return font.width(label) + 16; }
+    private int btnH() { return font.lineHeight + 10; }
     private void drawCells(GuiGraphics g, Row row, int originX, int originY, int mx, int my) {
         boolean inList = hit(mx, my, listX(), listY(), CONTENT_W, listHeight);
         for (Cell cell : row.cells()) {
@@ -288,6 +371,18 @@ public final class TerminalReportScreen extends ScaledScreen {
             GlassCell.draw(g, x + 3, y + 3, CELL_ICON, GlassPalette.ROW_EDGE, 0, over);
             g.renderItem(cell.stack(), x + 5, y + 5);
             ui.wrap(g, cell.text(), x + CELL_ICON + 7, y + 5, cell.w() - CELL_ICON - 10, GlassPalette.TEXT);
+        }
+    }
+    /** 載入動畫：一圈小方塊，亮點沿圓周旋轉並拖出漸暗的尾巴。 */
+    private void drawSpinner(GuiGraphics g, int cx, int cy, int radius, long at) {
+        if (reduced()) return;
+        int dots = 8, head = (int) ((at / 90L) % dots);
+        for (int i = 0; i < dots; i++) {
+            double angle = Math.PI * 2 * i / dots;
+            int px = cx + (int) Math.round(Math.cos(angle) * radius) - 1, py = cy + (int) Math.round(Math.sin(angle) * radius) - 1;
+            int age = (head - i + dots) % dots;
+            int alpha = 255 - age * (200 / dots);
+            g.fill(px, py, px + 3, py + 3, (alpha << 24) | (GlassPalette.ACCENT & 0xFFFFFF));
         }
     }
     private int thumbHeight() { return Math.max(14, listHeight * listHeight / Math.max(1, contentHeight)); }
@@ -302,7 +397,12 @@ public final class TerminalReportScreen extends ScaledScreen {
         int y = top + PANEL_H - FOOTER_H + 6;
         boolean flashing = at < noticeUntil;
         Component line = flashing ? notice : tr(isCraft() ? "copy_hint_craft" : "copy_hint");
-        ui.wrap(g, line, left + 12, y, CONTENT_W, flashing ? GlassPalette.OK : GlassPalette.TEXT_MUTED);
+        int textX = left + 12;
+        if (loading) {
+            drawSpinner(g, left + 18, y + 4, 5, at);
+            textX += 20; line = tr("loading", layoutCursor, layoutGroups.size());
+        }
+        ui.wrap(g, line, textX, y, CONTENT_W - (textX - left - 12), flashing && !loading ? GlassPalette.OK : GlassPalette.TEXT_MUTED);
         if (report.omitted() > 0)
             ui.wrap(g, tr("omitted", report.omitted()).copy().withStyle(ChatFormatting.YELLOW), left + 12,
                     y + ui.height(line, CONTENT_W) + 2, CONTENT_W, GlassPalette.TEXT_MUTED);
@@ -322,8 +422,24 @@ public final class TerminalReportScreen extends ScaledScreen {
         }
         if (!hit(mx, my, listX(), listY(), CONTENT_W, listHeight)) return false;
         int scrollY = Math.round(scroll.value());
-        for (Row row : rows) {
+        for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
+            Row row = rows.get(rowIndex);
             if (!hit(mx, my, listX(), listY() + row.y() - scrollY, CONTENT_W, row.h())) continue;
+            int by = listY() + row.y() - scrollY + row.btnY(), bx = listX() + COL_NAME;
+            if (row.foldable()) {
+                int w = btnW(expandLabel(row));
+                if (hit(mx, my, bx, by, w, btnH())) {
+                    ui.feedback.press(("exp." + rowIndex).hashCode(), bx, by, w, btnH(), true, now());
+                    ShopUiSounds.click();
+                    if (!expanded.remove(row.group().key())) expanded.add(row.group().key());
+                    relayoutRow(rowIndex); return true;
+                }
+                bx += w + BTN_GAP;
+            }
+            if (row.boxable() && hit(mx, my, bx, by, btnW(boxLabel()), btnH())) {
+                ui.feedback.press(("box." + rowIndex).hashCode(), bx, by, btnW(boxLabel()), btnH(), true, now());
+                ShopUiSounds.click(); showBoxes(row.group()); return true;
+            }
             if (isCraft()) {
                 String text = report.names().get(row.group().name()).getString();
                 String detail = report.details().get(row.group().name()).getString();
@@ -341,6 +457,22 @@ public final class TerminalReportScreen extends ScaledScreen {
             ShopUiSounds.click(); return true;
         }
         return false;
+    }
+    /** 把整組坐標在世界裡畫成方框（沿用結構高亮），然後關閉界面讓玩家看到世界。 */
+    private void showBoxes(Group group) {
+        var mc = Minecraft.getInstance();
+        if (mc.level == null || mc.player == null) return;
+        int color = report.categories().get(group.category()).color();
+        List<BlockPos> positions = group.positions();
+        int shown = Math.min(positions.size(), BOX_MAX);
+        List<ShanhaiStructureHighlightPacket.Marker> markers = new ArrayList<>(shown);
+        for (int i = 0; i < shown; i++) markers.add(new ShanhaiStructureHighlightPacket.Marker(positions.get(i), color));
+        ShanhaiStructureHighlightClient.highlightAsync(mc.level.dimension(),
+                System.currentTimeMillis() + BOX_SECONDS * 1000L, Collections.unmodifiableList(markers));
+        mc.player.displayClientMessage(shown < positions.size()
+                ? tr("boxes_capped", shown, positions.size(), BOX_SECONDS)
+                : tr("boxes_shown", shown, BOX_SECONDS), true);
+        onClose();
     }
     private void dragTo(double my) {
         int range = Math.max(1, listHeight - thumbHeight());

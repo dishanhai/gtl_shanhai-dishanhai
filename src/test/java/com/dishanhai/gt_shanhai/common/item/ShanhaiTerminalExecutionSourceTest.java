@@ -119,8 +119,8 @@ class ShanhaiTerminalExecutionSourceTest {
 
         int dismantleMethod = executor.indexOf("public Result dismantle");
         String dismantleSource = executor.substring(dismantleMethod);
-        assertTrue(dismantleSource.contains("canStoreDismantled(player, ae, dismantleReturns)"));
-        assertTrue(dismantleSource.contains("storeDismantled(player, ae, removedStacks)"));
+        assertTrue(dismantleSource.contains("canStoreDismantled(player, ae, dismantleReturns, fluidReturns)"));
+        assertTrue(dismantleSource.contains("storeDismantled(player, ae, removedStacks, fluidReturns)"));
         assertTrue(dismantleSource.indexOf("canStoreDismantled") < dismantleSource.indexOf("removeExisting"));
         assertFalse(dismantleSource.contains("materials.refund(player"));
         assertFalse(dismantleSource.contains("entry.kind() != ShanhaiStructurePlan.Kind.BLOCKED"));
@@ -147,7 +147,7 @@ class ShanhaiTerminalExecutionSourceTest {
 
         assertTrue(plan.contains("boolean currentMatchesStructure"));
         assertTrue(plan.contains("public boolean canDismantle()"));
-        assertTrue(plan.contains("return currentMatchesStructure && !current.isEmpty() && kind != Kind.MANUAL;"),
+        assertTrue(plan.contains("if (!currentMatchesStructure || kind == Kind.MANUAL) return false;"),
                 "有方塊、或被標記為待強制替換／倉室提示，都不代表它屬於結構");
     }
 
@@ -171,6 +171,85 @@ class ShanhaiTerminalExecutionSourceTest {
         assertTrue(planner.contains("boolean currentMatchesStructure = currentAllowed"));
         assertTrue(planner.contains("|| (replacementApplies && contains(replacementFamily, currentBlock))"),
                 "已完成升級的目標等級即使不在原候選列表，也仍是結構部件");
+    }
+
+    @Test
+    void bucketlessFluidTargetsCanBePlacedAndForceReplaced() throws Exception {
+        String planner = Files.readString(EXECUTOR.resolveSibling("ShanhaiStructurePlanner.java"));
+        assertTrue(planner.contains("boolean hasBuildTarget = !desired.isEmpty()"));
+        assertTrue(planner.contains("|| desiredState.getBlock() instanceof LiquidBlock"));
+        assertTrue(planner.contains("kind = hasBuildTarget ? ShanhaiStructurePlan.Kind.PLACE"));
+        assertTrue(planner.contains("isAbsoluteReplaceMode(terminal) && hasBuildTarget"));
+    }
+
+    @Test
+    void dismantleAcceptsFluidSourcesWithoutAFalseBlockItemAndSkipsFlowingFluid() throws Exception {
+        String plan = Files.readString(EXECUTOR.resolveSibling("ShanhaiStructurePlan.java"));
+        int eligibility = plan.indexOf("public boolean canDismantle()");
+        String body = plan.substring(eligibility, plan.indexOf("private static boolean matchesStructure", eligibility));
+        assertTrue(body.contains("if (currentFluid() != Fluids.EMPTY)"));
+        assertTrue(body.contains("return currentState.getFluidState().isSource();"),
+                "流動液體不能當成完整 1000 mB 源方塊回收");
+        assertTrue(body.contains("return !current.isEmpty();"));
+    }
+
+    @Test
+    void dismantleMergesFluidAmountsBeforeRemovingBlocksAndKeepsFluidRollbackEntries() throws Exception {
+        String executor = Files.readString(EXECUTOR).replace("\r\n", "\n");
+        int start = executor.indexOf("public Result dismantle(");
+        String body = executor.substring(start, executor.indexOf("private Result validateBuildHeight", start));
+        assertTrue(body.contains("Map<AEFluidKey, Long> fluidReturns = new LinkedHashMap<>()"));
+        assertTrue(body.contains("fluidReturns.merge(AEFluidKey.of(entry.currentFluid())"));
+        assertTrue(body.indexOf("fluidReturns.merge") < body.indexOf("canStoreDismantled"));
+        assertTrue(body.contains("removedEntries.add(entry);\n            removedStacks.add(removed);"),
+                "流體沒有 BlockItem，但回收失敗時仍須保留其回滾紀錄");
+        assertFalse(body.contains("if (!removed.isEmpty()) {\n                removedEntries.add(entry);"));
+    }
+
+    @Test
+    void fluidDismantlePreservesAeFluidKeysAndPacksExactRemaindersIntoSda() throws Exception {
+        String materials = Files.readString(MATERIALS);
+        assertTrue(materials.contains("Map<AEFluidKey, Long> fluids"));
+        assertTrue(materials.contains("aggregateDismantledAmounts(stacks, fluids)"));
+        assertTrue(materials.contains("Map<AEKey, Long> amounts"));
+        assertTrue(materials.contains("amount - inserted"),
+                "AE 只接收部分時，只能打包未接收量，不能把已存入部分還原回世界");
+        assertTrue(materials.contains("packDismantledAsSda(player, remainders)"));
+    }
+
+    @Test
+    void fluidPlacementUsesTheSourceVariantAndChecksTheWorldWrite() throws Exception {
+        String executor = Files.readString(EXECUTOR);
+        int start = executor.indexOf("private boolean placeFluid(");
+        String body = executor.substring(start, executor.indexOf("private boolean restoreFluid", start));
+        assertTrue(body.contains("entry.desiredFluid().defaultFluidState().createLegacyBlock()"));
+        assertTrue(body.contains("if (!level.setBlock(entry.pos(), sourceState, 3)) return false;"));
+        assertTrue(body.contains("getFluidState().isSource()"));
+        assertTrue(body.contains("level.setBlock(entry.pos(), entry.currentState(), 3)"),
+                "放置後若流體立即反應成其他方塊，退料前必須清理殘留結果");
+        String plan = Files.readString(EXECUTOR.resolveSibling("ShanhaiStructurePlan.java"));
+        assertTrue(plan.contains("fluid instanceof FlowingFluid flowing ? flowing.getSource() : fluid"));
+    }
+
+    @Test
+    void replacingFlowingFluidDoesNotRefundAWholeBucket() throws Exception {
+        String plan = Files.readString(EXECUTOR.resolveSibling("ShanhaiStructurePlan.java"));
+        String executor = Files.readString(EXECUTOR);
+        assertTrue(plan.contains("public long currentFluidAmount()"));
+        assertTrue(plan.contains("currentState.getFluidState().isSource()"));
+        assertTrue(executor.contains("entry.currentFluidAmount(), Long::sum"));
+        assertTrue(executor.contains("restoreFluid(player, ae, removedFluid, entry.currentFluidAmount())"));
+    }
+
+    @Test
+    void flowingFluidIsFilledAsAMissingSourceInsteadOfBeingConsideredSatisfied() throws Exception {
+        String planner = Files.readString(EXECUTOR.resolveSibling("ShanhaiStructurePlanner.java"));
+        assertTrue(planner.contains("&& (!(currentBlock instanceof LiquidBlock) || currentState.getFluidState().isSource())"),
+                "只有同種流體源能視為已完成，不能僅比較 LiquidBlock 種類");
+        assertTrue(planner.contains("boolean fillingFlow = currentBlock instanceof LiquidBlock"));
+        assertTrue(planner.contains("currentBlock == desiredState.getBlock()"));
+        assertTrue(planner.contains("currentState.isAir() || fillingFlow"),
+                "同種流動液體補成源方塊屬於放置，不應要求絕對替換模式");
     }
 
     @Test

@@ -84,9 +84,9 @@ public final class ShanhaiStructureExecutor {
             } else if (!reservePreviewMaterial(availablePreview, entry.desired())) {
                 continue;
             }
-            if (entry.currentFluid() != Fluids.EMPTY) {
+            if (entry.currentFluidAmount() > 0) {
                 fluidReturns.merge(AEFluidKey.of(entry.currentFluid()),
-                        (long) net.minecraftforge.fluids.FluidType.BUCKET_VOLUME, Long::sum);
+                        entry.currentFluidAmount(), Long::sum);
             }
             if (entry.current().isEmpty()) continue;
             if (entry.kind() == ShanhaiStructurePlan.Kind.REPLACE) {
@@ -166,7 +166,7 @@ public final class ShanhaiStructureExecutor {
                     return new Result(false, changed + 1, "旧部件回收失败", details);
                 }
             }
-            if (removedFluid != Fluids.EMPTY && !restoreFluid(player, ae, removedFluid)) {
+            if (removedFluid != Fluids.EMPTY && !restoreFluid(player, ae, removedFluid, entry.currentFluidAmount())) {
                 restoreExisting(level, entry, removed, removedFluid);
                 if (entry.requiresFluid()) {
                     restoreFluid(player, ae, reservedFluid);
@@ -219,7 +219,7 @@ public final class ShanhaiStructureExecutor {
             if (entry.kind() == ShanhaiStructurePlan.Kind.REPLACE || forced) {
                 removedFluid = entry.currentFluid();
                 if (!materials.canRefundFluidForStructure(player, ae, removedFluid,
-                        net.minecraftforge.fluids.FluidType.BUCKET_VOLUME)) {
+                        entry.currentFluidAmount())) {
                     storeCreativeForcedReturns(player, ae, forcedReturns);
                     return new Result(false, changed, "旧流体无回收空间", details);
                 }
@@ -231,7 +231,7 @@ public final class ShanhaiStructureExecutor {
                 return new Result(false, changed, "方块放置失败: " + entry.pos().toShortString(), details);
             }
             if (forced && !removed.isEmpty()) forcedReturns.add(removed);
-            if (removedFluid != Fluids.EMPTY) restoreFluid(player, ae, removedFluid);
+            if (removedFluid != Fluids.EMPTY) restoreFluid(player, ae, removedFluid, entry.currentFluidAmount());
             changed++;
             changedEntries.add(entry);
             details.add(detail(entry, placedOutcome(entry)));
@@ -260,7 +260,13 @@ public final class ShanhaiStructureExecutor {
         List<ItemStack> dismantleReturns = plan.entries().stream()
                 .filter(ShanhaiStructurePlan.Entry::canDismantle)
                 .map(ShanhaiStructurePlan.Entry::current).toList();
-        if (!materials.canStoreDismantled(player, ae, dismantleReturns)) {
+        Map<AEFluidKey, Long> fluidReturns = new LinkedHashMap<>();
+        for (ShanhaiStructurePlan.Entry entry : plan.entries()) {
+            if (!entry.canDismantle() || entry.currentFluid() == Fluids.EMPTY) continue;
+            fluidReturns.merge(AEFluidKey.of(entry.currentFluid()),
+                    entry.currentFluidAmount(), Long::sum);
+        }
+        if (!materials.canStoreDismantled(player, ae, dismantleReturns, fluidReturns)) {
             return new Result(false, 0, "拆解物无回收空间");
         }
         int changed = 0;
@@ -270,14 +276,12 @@ public final class ShanhaiStructureExecutor {
         for (ShanhaiStructurePlan.Entry entry : plan.entries()) {
             if (!entry.canDismantle()) continue;
             ItemStack removed = removeExisting(level, entry);
-            if (!removed.isEmpty()) {
-                removedEntries.add(entry);
-                removedStacks.add(removed);
-            }
+            removedEntries.add(entry);
+            removedStacks.add(removed);
             changed++;
             details.add(detail(entry, Outcome.DISMANTLED));
         }
-        if (!materials.storeDismantled(player, ae, removedStacks)) {
+        if (!materials.storeDismantled(player, ae, removedStacks, fluidReturns)) {
             for (int i = 0; i < removedEntries.size(); i++) {
                 restoreExisting(level, removedEntries.get(i), removedStacks.get(i),
                         removedEntries.get(i).currentFluid());
@@ -355,13 +359,23 @@ public final class ShanhaiStructureExecutor {
 
     private boolean placeFluid(ServerLevel level, ShanhaiStructurePlan.Entry entry) {
         if (entry.desiredState().getFluidState().isEmpty()) return false;
-        level.setBlock(entry.pos(), entry.desiredState(), 3);
-        return level.getBlockState(entry.pos()).getFluidState().getType() == entry.desiredFluid();
+        BlockState sourceState = entry.desiredFluid().defaultFluidState().createLegacyBlock();
+        if (sourceState.getFluidState().isEmpty()) return false;
+        if (!level.setBlock(entry.pos(), sourceState, 3)) return false;
+        BlockState placed = level.getBlockState(entry.pos());
+        if (placed.getFluidState().getType() == entry.desiredFluid()
+                && placed.getFluidState().isSource()) return true;
+        level.setBlock(entry.pos(), entry.currentState(), 3);
+        return false;
     }
 
     private boolean restoreFluid(ServerPlayer player, Context ae, Fluid fluid) {
-        if (fluid == null || fluid == Fluids.EMPTY) return true;
-        return materials.refundFluidForStructure(player, ae, fluid, net.minecraftforge.fluids.FluidType.BUCKET_VOLUME);
+        return restoreFluid(player, ae, fluid, net.minecraftforge.fluids.FluidType.BUCKET_VOLUME);
+    }
+
+    private boolean restoreFluid(ServerPlayer player, Context ae, Fluid fluid, long amount) {
+        if (fluid == null || fluid == Fluids.EMPTY || amount <= 0) return true;
+        return materials.refundFluidForStructure(player, ae, fluid, amount);
     }
 
     private void orientPlacedBlocks(ServerLevel level, ShanhaiStructurePlan plan,

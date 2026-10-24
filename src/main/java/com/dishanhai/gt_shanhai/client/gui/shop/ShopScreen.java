@@ -408,14 +408,16 @@ public class ShopScreen extends ScaledScreen {
     private final Spring detailScrollSpring = new Spring(Spring.SCROLL);
     // 触底反弹：滚到头还继续滚时，内容被多拉出去一小段再欠阻尼弹回（橡皮筋）。偏移只影响绘制，不改滚动范围。
     private static final Spring.Preset BOUNCE_PRESET = new Spring.Preset(0.30, 0.38, 0.05f, 1.0f);
-    private static final int BOUNCE_KICK_PX = 12;
     private static final int BOUNCE_MAX_PX = 18;
+    /** 力度→冲量的饱和曲线：kick = MAX·(1−e^(−k·力度))，力度以滚轮格数计；k 越大越快顶到上限。 */
+    private static final float BOUNCE_FORCE_K = 0.45f;
     private final Spring gridBounceSpring = new Spring(BOUNCE_PRESET);
     private final Spring detailBounceSpring = new Spring(BOUNCE_PRESET);
     private int gridBounce = 0; // 本帧网格反弹偏移（整像素，正=内容再往上拉，即越过底边）
     private int detailBounce = 0; // 本帧详情页反弹偏移，同上
-    private int gridBouncePending = 0; // 滚轮在边界外还想滚：-1 顶 / +1 底，等显示值真正到边再弹
-    private int detailBouncePending = 0;
+    // 滚轮在边界外还想滚的力度（滚轮格数，带符号：负=顶 / 正=底，连续滚会累加），等显示值真正到边再按力度弹
+    private float gridBouncePending = 0f;
+    private float detailBouncePending = 0f;
     private int detailScrollMax = 0; // drawDetail 每帧按真实内容高度回填
     private boolean draggingDetailScroll; // 正在拖拽详情页中段滚动条
     private final boolean canEdit; // 服务端下发的编辑权（OP 或白名单）：决定编辑条目/商店设置/排序等按钮显隐
@@ -902,6 +904,11 @@ public class ShopScreen extends ScaledScreen {
         else this.init(Minecraft.getInstance(), this.width, this.height);
     }
 
+    /** 服务端是否已为本玩家开启商店编辑模式（复制分支、拖拽等管理动作的前提）。 */
+    boolean isCatalogEditUnlocked() {
+        return catalogEditUnlocked;
+    }
+
     /** 拖拽（页签排序、商品重排/快速分组）只在有编辑权且已开启编辑模式时启用；否则按下即普通点击。 */
     private boolean dragEnabled() {
         return canEdit && catalogEditUnlocked;
@@ -1308,19 +1315,36 @@ public class ShopScreen extends ScaledScreen {
      * 推进一条反弹弹簧；有待处理的越界滚动且显示值已贴到对应边界时，给弹簧一个反向冲量。
      * 减少动效时不弹。返回清算后的 pending。
      */
-    private int advanceBounce(Spring bounce, int pending, float shownScroll, int max, long now) {
-        if (pending != 0) {
+    private float advanceBounce(Spring bounce, float pending, float shownScroll, int max, long now) {
+        if (pending != 0f) {
             if (ClientShopUiSettings.reduceMotion() || max <= 0) {
-                pending = 0;
-            } else if (Math.abs(shownScroll - (pending > 0 ? max : 0)) < 1.5f) {
-                float v = Math.max(-BOUNCE_MAX_PX, Math.min(BOUNCE_MAX_PX, bounce.value() + pending * BOUNCE_KICK_PX));
+                pending = 0f;
+            } else if (Math.abs(shownScroll - (pending > 0f ? max : 0)) < 1.5f) {
+                float v = Math.max(-BOUNCE_MAX_PX, Math.min(BOUNCE_MAX_PX,
+                        bounce.value() + Math.signum(pending) * bounceKick(Math.abs(pending))));
                 bounce.snap(v);
                 bounce.setTarget(0f, now);
-                pending = 0;
+                pending = 0f;
             }
         }
         bounce.update(now);
         return pending;
+    }
+
+    /** 越界力度（滚轮格数）→ 反弹冲量像素：轻轻碰边只颤一下，猛滚才顶到上限。 */
+    static float bounceKick(float notches) {
+        return BOUNCE_MAX_PX * (1f - (float) Math.exp(-BOUNCE_FORCE_K * Math.max(0f, notches)));
+    }
+
+    /**
+     * 这次滚轮想滚到 {@code wanted}，合法范围是 [0, max]：超出边界的那部分就是「滚动力度」，按一格 {@code stride} 像素折成格数，
+     * 带符号（底 +，顶 −）；没越界返回 0。同方向的未结算力度累加，所以连续猛滚比单滚一格弹得更狠。
+     */
+    static float bounceForce(int wanted, int max, int stride, float pending) {
+        int over = wanted > max ? wanted - max : wanted < 0 ? wanted : 0;
+        if (over == 0 || stride <= 0) return 0f;
+        float force = Math.abs(over) / (float) stride * (over > 0 ? 1f : -1f);
+        return Math.signum(pending) == Math.signum(force) ? pending + force : force;
     }
 
     private void snapDetailScroll(int value) {
@@ -5103,7 +5127,7 @@ public class ShopScreen extends ScaledScreen {
         }
         if (selected != null && GuiRenderUtil.isHovering(mx, my, detailX(), detailViewportTop(), DETAIL_W, detailViewportHeight())) {
             int wanted = detailScrollTarget - (int) d * 18;
-            detailBouncePending = wanted > detailScrollMax ? 1 : wanted < 0 ? -1 : 0;
+            detailBouncePending = bounceForce(wanted, detailScrollMax, 18, detailBouncePending);
             detailScrollTarget = clampDetailScroll(wanted);
             return true;
         }
@@ -5111,7 +5135,7 @@ public class ShopScreen extends ScaledScreen {
         if (GuiRenderUtil.isHovering(mx, my, gx, gy, listWidth(), gh)) {
             int maxScroll = maxGridScroll();
             int wanted = scrollTarget - (int) d * rowStride();
-            gridBouncePending = wanted > maxScroll ? 1 : wanted < 0 ? -1 : 0;
+            gridBouncePending = bounceForce(wanted, maxScroll, rowStride(), gridBouncePending);
             scrollTarget = Math.max(0, Math.min(maxScroll, wanted));
             return true;
         }
@@ -5389,6 +5413,8 @@ public class ShopScreen extends ScaledScreen {
                 items.add(new ContextMenuItem("§b编辑条目", true, () -> ShopEntryEditor.openEdit(this, entry)));
                 items.add(new ContextMenuItem("§a复制为新条目", false, () -> ShopEntryEditor.openDuplicate(this, entry)));
                 items.add(new ContextMenuItem("§d⇄ 快速分组", false, () -> openGroupPicker(entry, entryKey)));
+                items.add(new ContextMenuItem("§b⎘ 分支到分组…", false,
+                        () -> Minecraft.getInstance().setScreen(new ShopBranchCopyScreen(this, this, List.of(entry)))));
             }
             if (batchMode) {
                 List<ShopEntry> selectedEntries = batchEntries();
@@ -5412,6 +5438,8 @@ public class ShopScreen extends ScaledScreen {
                         com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.TOP, null)));
                 if (catalogEditUnlocked) {
                     items.add(new ContextMenuItem("§d⇄ 批量快速分组", false, () -> openGroupPickerBatch()));
+                    items.add(new ContextMenuItem("§b⎘ 批量分支到分组…", false,
+                            () -> Minecraft.getInstance().setScreen(new ShopBranchCopyScreen(this, this, selectedEntries))));
                     items.add(new ContextMenuItem("§b批量设为仅购买", false, () -> sendBatchManage(
                             com.dishanhai.gt_shanhai.network.ShopBatchManagePacket.Action.SET_TRADE_MODE,
                             null, ShopEntry.TradeMode.BUY_ONLY)));

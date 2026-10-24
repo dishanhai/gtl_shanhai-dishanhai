@@ -70,6 +70,8 @@ public class ShopEntry {
      *  新增/复制（生成新的）或编辑（沿用旧的）时才会变，专供需要跨快照/跨重登引用同一条目的场景使用
      *  （例如购物车、收藏）。旧 shop.json 缺这个字段的条目由 {@link ShopConfig} 加载时补发并写回磁盘固化。 */
     private final String stableId;
+    /** 分支主支的 stableId，空串 = 非副本；见 {@link #getBranchSource}。建造后只经 {@link #withBranchSource} 设置。 */
+    private String branchSource = "";
     /** 限时折扣百分比（1-90，0=不打折）；见 {@link #isDiscountActive}/{@link #getEffectiveCost}。 */
     private final int discountPercent;
     /** 折扣生效窗口起点（{@link System#currentTimeMillis} 绝对时间戳）；discountPercent=0 时为 -1。 */
@@ -635,6 +637,22 @@ public class ShopEntry {
     /** 稳定身份 ID（UUID 字符串，恒非空）；见 {@link #stableId} 字段注释。 */
     public String getStableId() {
         return stableId;
+    }
+
+    /**
+     * 分支主支的 stableId；空串 = 不是分支副本（独立商品，或自己就是主支）。
+     * 副本的商品内容（清单/名称/描述/图标/奖励/交易方向）跟随主支同步，成本、限购、折扣、前置、提交、分类等留在副本自己手里，
+     * 规则见 {@link ShopBranch}。
+     */
+    public String getBranchSource() {
+        return branchSource;
+    }
+
+    /** 标记本条目是 {@code masterStableId} 的分支副本（建造期调用，之后视为不可变）；传空/自己的 ID 清除标记。 */
+    public ShopEntry withBranchSource(String masterStableId) {
+        this.branchSource = masterStableId == null || masterStableId.isBlank() || masterStableId.equals(stableId)
+                ? "" : masterStableId.trim();
+        return this;
     }
 
     /** 主商品（列表首项）NBT 快照（可空）。返回副本。 */

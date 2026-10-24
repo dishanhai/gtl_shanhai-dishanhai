@@ -73,12 +73,20 @@ class ShanhaiTerminalReportTest {
         // 施工/拆解结果：逐位置明细也走报告界面，聊天栏只留摘要与连结。
         assertTrue(behavior.contains("sendBuildReport(serverPlayer, plan, result)"));
         assertTrue(Files.readString(ROOT.resolve("common/item/terminal/ShanhaiStructureExecutor.java")).contains("details.add(detail(entry, Outcome.SKIPPED))"));
-        assertTrue(screen.contains("title_build") && screen.contains("coordLines"));
+        assertTrue(screen.contains("title_build") && screen.contains("coordShown"));
         // 合成明细：缺口逐项进报告，下单功能在终端主界面有独立开关。
         String crafting = Files.readString(ROOT.resolve("common/item/terminal/ShanhaiTerminalCraftingManager.java"));
         assertTrue(crafting.contains("sendCraftReport(player, session, Stage.CALCULATED"));
         assertTrue(crafting.contains("sendCraftReport(player, session, Stage.SUBMITTED"));
         assertTrue(screen.contains("title_craft") && screen.contains("detailLines"));
+        // 坐标过长折叠（按展开才显示全文），并可把整组坐标在世界里画成方框。
+        // 目标很多时分片载入（带加载动画）而不是一次性佈局，坐标用网格而不是整段换行。
+        assertTrue(screen.contains("pumpLayout(LOAD_BUDGET_NS)") && screen.contains("drawSpinner("));
+        assertFalse(screen.contains("coordsText("));
+        assertTrue(screen.contains("highlightAsync(") && Files.readString(ROOT.resolve("client/ShanhaiStructureHighlightClient.java")).contains("BATCH_PER_TICK"));
+        assertTrue(screen.contains("FOLD_LINES") && screen.contains("expanded.contains(group.key())"));
+        assertTrue(screen.contains("ShanhaiStructureHighlightClient.highlightAsync(mc.level.dimension()"));
+        assertTrue(Files.readString(ROOT.resolve("client/ShanhaiStructureHighlightClient.java")).contains("Iterable<ShanhaiStructureHighlightPacket.Marker> markers"));
         assertTrue(Files.readString(ROOT.resolve("client/gui/terminal/UltimateTerminalScreen.java")).contains("Field.ORDER_MODE"));
         assertTrue(Files.readString(ROOT.resolve("network/UltimateTerminalConfigPacket.java")).contains("case ORDER_MODE"));
         assertTrue(behavior.contains("isOrderMode(terminal)"));

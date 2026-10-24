@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ShopBatchOperationsSourceTest {
@@ -249,5 +250,55 @@ class ShopBatchOperationsSourceTest {
                 "页签拖拽与商品拖拽都要走 dragEnabled");
         assertTrue(screen.contains("DRAG_TAB_THRESHOLD = 14.0") && screen.contains("DRAG_CARD_THRESHOLD = 28.0"),
                 "拖拽阈值调高，降低灵敏度");
+    }
+
+    @Test
+    void bounceStrengthFollowsHowHardTheWheelOvershoots() {
+        // 贴着边再滚一格（行高 40）= 1 格力度；同方向未结算力度累加；没越界为 0
+        assertEquals(1f, ShopScreen.bounceForce(140, 100, 40, 0f), 1e-6f);
+        assertEquals(3f, ShopScreen.bounceForce(180, 100, 40, 1f), 1e-6f);
+        assertEquals(-2f, ShopScreen.bounceForce(-80, 100, 40, 0f), 1e-6f);
+        assertEquals(0f, ShopScreen.bounceForce(60, 100, 40, 2f), 1e-6f);
+        // 反方向不累加，换成新方向的力度
+        assertEquals(-1f, ShopScreen.bounceForce(-40, 100, 40, 2f), 1e-6f);
+        // 力度越大冲量越大，但有上限（18px）
+        float one = ShopScreen.bounceKick(1f);
+        float four = ShopScreen.bounceKick(4f);
+        float huge = ShopScreen.bounceKick(100f);
+        assertTrue(one > 0f && one < four && four < huge && huge <= 18f + 1e-4f, "冲量应随力度饱和递增");
+    }
+
+    @Test
+    void branchCopyIsWiredFromStageScreenToServerAndEditor() throws Exception {
+        String stage = source("client/gui/shop/ShopStageEditScreen.java");
+        String copyScreen = source("client/gui/shop/ShopBranchCopyScreen.java");
+        String packet = source("network/ShopBranchCopyPacket.java");
+        String net = source("network/ShanhaiNetwork.java");
+        String cfg = source("common/shop/ShopConfig.java");
+        String edit = source("client/gui/shop/ShopEntryEditScreen.java");
+        String editPacket = source("network/ShopEditPacket.java");
+        assertTrue(stage.contains("new ShopBranchCopyScreen(this, parent, path)"), "阶段页应能进入复制分支");
+        assertTrue(copyScreen.contains("new ShopBranchCopyPacket(ClientShopCatalog.revision(), sourcePath, picked)"),
+                "复制分支应带目录版本发往服务端");
+        assertTrue(packet.contains("ShopEditMode.isEnabled(") && packet.contains("current.revision() != pkt.catalogRevision"),
+                "服务端要校验编辑模式与目录版本");
+        assertTrue(net.contains("ShopBranchCopyPacket::handle"), "复制分支包要注册到频道");
+        assertTrue(cfg.contains("ShopBranch.propagate(updated, root)") && cfg.contains("pushToMaster"),
+                "替换条目时主支要同步给副本，副本可推给主支");
+        assertTrue(edit.contains("pkt.withPushToMaster(true)") && editPacket.contains("entry.withBranchSource(old.getBranchSource())"),
+                "编辑副本可选同步到主支，且副本身份不经客户端传输");
+    }
+
+    @Test
+    void singleAndBatchEntriesCanBranchIntoGroupsFromTheContextMenu() throws Exception {
+        String screen = source("client/gui/shop/ShopScreen.java");
+        String copyScreen = source("client/gui/shop/ShopBranchCopyScreen.java");
+        String packet = source("network/ShopBranchCopyPacket.java");
+        assertTrue(screen.contains("分支到分组…") && screen.contains("new ShopBranchCopyScreen(this, this, List.of(entry))"),
+                "右键菜单应能把单个商品分支到不同分组");
+        assertTrue(screen.contains("批量分支到分组…") && screen.contains("new ShopBranchCopyScreen(this, this, selectedEntries)"),
+                "批量名单也能一起分支到不同分组");
+        assertTrue(copyScreen.contains("ShopBranchCopyPacket.forEntries("), "商品模式应走 forEntries");
+        assertTrue(packet.contains("ShopConfig.copyEntriesToGroups("), "服务端商品模式落到 copyEntriesToGroups");
     }
 }

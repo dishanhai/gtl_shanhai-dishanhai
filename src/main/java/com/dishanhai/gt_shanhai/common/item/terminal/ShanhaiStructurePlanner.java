@@ -117,12 +117,17 @@ public final class ShanhaiStructurePlanner {
                         .orElse(new Candidate(ItemStack.EMPTY, Blocks.AIR.defaultBlockState()));
         ItemStack desired = desiredCandidate.item();
         BlockState desiredState = desiredCandidate.state();
+        boolean hasBuildTarget = !desired.isEmpty()
+                || desiredState.getBlock() instanceof LiquidBlock;
         Block currentBlock = currentState.getBlock();
         boolean currentAllowed = allCandidates.stream()
                 .map(candidate -> candidate.state().getBlock())
-                .anyMatch(block -> block == currentBlock);
+                .anyMatch(block -> block == currentBlock)
+                && (!(currentBlock instanceof LiquidBlock) || currentState.getFluidState().isSource());
         boolean currentMatchesStructure = currentAllowed
                 || (replacementApplies && contains(replacementFamily, currentBlock));
+        boolean fillingFlow = currentBlock instanceof LiquidBlock
+                && currentBlock == desiredState.getBlock() && !currentState.getFluidState().isSource();
 
         ShanhaiStructurePlan.Kind kind;
         if (replacementApplies && contains(replacementFamily, currentBlock)
@@ -130,10 +135,10 @@ public final class ShanhaiStructurePlanner {
             kind = ShanhaiStructurePlan.Kind.REPLACE;
         } else if (currentAllowed) {
             kind = ShanhaiStructurePlan.Kind.SATISFIED;
-        } else if (currentState.isAir()) {
-            kind = desired.isEmpty() ? ShanhaiStructurePlan.Kind.MANUAL : ShanhaiStructurePlan.Kind.PLACE;
+        } else if (currentState.isAir() || fillingFlow) {
+            kind = hasBuildTarget ? ShanhaiStructurePlan.Kind.PLACE : ShanhaiStructurePlan.Kind.MANUAL;
         } else {
-            kind = ShanhaiUltimateTerminalConfig.isAbsoluteReplaceMode(terminal) && !desired.isEmpty()
+            kind = ShanhaiUltimateTerminalConfig.isAbsoluteReplaceMode(terminal) && hasBuildTarget
                     ? ShanhaiStructurePlan.Kind.FORCE_REPLACE
                     : ShanhaiStructurePlan.Kind.BLOCKED;
         }

@@ -427,6 +427,45 @@ public final class ShanhaiTerminalMaterialService {
         return returnWithoutAeUsingSda(player, stacks);
     }
 
+    /** 山海：流體源以 1000 mB 回收，沒有可用 AE 網路時與物品一同存入 SDA。 */
+    public boolean canStoreDismantled(ServerPlayer player, Context ae, List<ItemStack> stacks,
+                                      Map<AEFluidKey, Long> fluids) {
+        if (fluids.isEmpty()) return canStoreDismantled(player, ae, stacks);
+        Map<AEKey, Long> amounts = aggregateDismantledAmounts(stacks, fluids);
+        if (amounts == null || player.getServer() == null) return false;
+        return ae == null || canInsertAllToAe(ae, amounts);
+    }
+
+    public boolean storeDismantled(ServerPlayer player, Context ae, List<ItemStack> stacks,
+                                   Map<AEFluidKey, Long> fluids) {
+        if (fluids.isEmpty()) return storeDismantled(player, ae, stacks);
+        Map<AEKey, Long> amounts = aggregateDismantledAmounts(stacks, fluids);
+        if (amounts == null || player.getServer() == null) return false;
+        if (ae != null && !canInsertAllToAe(ae, amounts)) return false;
+        Map<AEKey, BigInteger> remainders = new LinkedHashMap<>();
+        for (Map.Entry<AEKey, Long> entry : amounts.entrySet()) {
+            long amount = entry.getValue();
+            long inserted = ae == null ? 0 : ae.storage().insert(
+                    entry.getKey(), amount, Actionable.MODULATE, ae.source());
+            inserted = Math.max(0, Math.min(amount, inserted));
+            if (inserted < amount) remainders.put(entry.getKey(), BigInteger.valueOf(amount - inserted));
+        }
+        // AE 在預檢後容量若改變，只打包尚未接收的量，不能把已存入部分還原回世界。
+        return remainders.isEmpty() || packDismantledAsSda(player, remainders);
+    }
+
+    private Map<AEKey, Long> aggregateDismantledAmounts(List<ItemStack> stacks, Map<AEFluidKey, Long> fluids) {
+        Map<AEItemKey, Long> items = aggregateItemAmounts(stacks);
+        if (items == null) return null;
+        Map<AEKey, Long> amounts = new LinkedHashMap<>(items);
+        for (Map.Entry<AEFluidKey, Long> entry : fluids.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null || entry.getValue() < 0) return null;
+            if (entry.getValue() > 0) amounts.merge(entry.getKey(), entry.getValue(),
+                    ShanhaiTerminalMaterialService::saturatedAdd);
+        }
+        return amounts;
+    }
+
     public boolean refund(ServerPlayer player, Context ae, ItemStack stack) {
         ItemStack remainder = returnToPlayer(player, stack);
         remainder = returnToAe(ae, remainder);
@@ -550,9 +589,9 @@ public final class ShanhaiTerminalMaterialService {
         return new FluidContainerMutation(filled, handler.getContainer());
     }
 
-    private boolean canInsertAllToAe(Context ae, Map<AEItemKey, Long> amounts) {
+    private boolean canInsertAllToAe(Context ae, Map<? extends AEKey, Long> amounts) {
         if (ae == null) return false;
-        for (Map.Entry<AEItemKey, Long> entry : amounts.entrySet()) {
+        for (Map.Entry<? extends AEKey, Long> entry : amounts.entrySet()) {
             if (ae.storage().insert(entry.getKey(), entry.getValue(), Actionable.SIMULATE, ae.source())
                     < entry.getValue()) return false;
         }

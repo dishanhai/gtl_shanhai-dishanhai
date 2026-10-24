@@ -92,6 +92,9 @@ public final class ShopEntryJsonCodec {
             out.addProperty("discountEndMs", entry.getDiscountEndMs());
         }
         out.addProperty("stableId", entry.getStableId());
+        if (!entry.getBranchSource().isEmpty()) {
+            out.addProperty("branchSource", entry.getBranchSource());
+        }
         return out;
     }
 
@@ -177,7 +180,8 @@ public final class ShopEntryJsonCodec {
             return new ShopEntry(goodsList, category, cost, description, limit,
                     icons, rewardMode, rewardPool, hidden, linkKey, linkTo, displayName,
                     ftbqTableId, ftbqSubMode, tradeMode, periodTicks, periodLimit, prerequisiteQuestId, stableId,
-                    discountPercent, discountStartMs, discountEndMs, submissionItems);
+                    discountPercent, discountStartMs, discountEndMs, submissionItems)
+                    .withBranchSource(stringOrNull(json, "branchSource"));
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 跳过非法商品条目: {}", e.getMessage());
             return null;

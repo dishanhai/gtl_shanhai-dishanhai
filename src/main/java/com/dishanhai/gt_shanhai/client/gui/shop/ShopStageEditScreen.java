@@ -55,6 +55,11 @@ public final class ShopStageEditScreen extends ScaledScreen {
         snapScroll(scroll); // 山海：从选择器返回后保留原来的纵向位置。
     }
 
+    private static final int BRANCH_BTN_W = 96;
+
+    /** 底栏居中的「复制分支到阶段」：夹在「取消」和「保存」之间。 */
+    private int branchBtnX() { return left + (W - BRANCH_BTN_W) / 2; }
+
     private int rowY() { return top + 54; }
     private int slotsX() { return left + 16; }
     private int perLine() { return ShopEntryEditLayout.perLine(W - 32); }
@@ -109,6 +114,7 @@ public final class ShopStageEditScreen extends ScaledScreen {
         g.disableScissor();
         ui.drawScrollbar(g, barX(), rowY(), viewH(), contentH(), viewH(), shownScroll, maxScroll(), mx, my);
         drawButton(g, left + 12, top + H - 25, 58, 14, "§c取消", mx, my);
+        drawButton(g, branchBtnX(), top + H - 25, BRANCH_BTN_W, 14, "§b复制分支到阶段", mx, my);
         drawButton(g, left + W - 86, top + H - 25, 74, 14, "§a保存", mx, my);
     }
 
@@ -130,6 +136,11 @@ public final class ShopStageEditScreen extends ScaledScreen {
     protected boolean universalMouseClicked(double mx, double my, int btn) {
         if (GuiRenderUtil.isHovering(mx, my, left + 12, top + H - 25, 58, 14)) {
             Minecraft.getInstance().setScreen(parent);
+            return true;
+        }
+        if (GuiRenderUtil.isHovering(mx, my, branchBtnX(), top + H - 25, BRANCH_BTN_W, 14)) {
+            // 阶段页签本身就是一个分支：把它整棵子树（含商品）复制到别的阶段下，内容保持同步
+            Minecraft.getInstance().setScreen(new ShopBranchCopyScreen(this, parent, path));
             return true;
         }
         if (GuiRenderUtil.isHovering(mx, my, left + W - 86, top + H - 25, 74, 14)) {

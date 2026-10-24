@@ -30,7 +30,7 @@ final class ShopEntryEditLayout {
         DISCOUNT(Tab.PRICE),
         USES(Tab.LIMIT), PERIOD(Tab.LIMIT), TRADE(Tab.LIMIT), PREREQ(Tab.LIMIT), SUBMISSION(Tab.LIMIT),
         REWARD_MODE(Tab.REWARD), REWARD_POOL(Tab.REWARD),
-        HIDDEN(Tab.LINK), LINK_KEY(Tab.LINK), LINK_TO(Tab.LINK);
+        HIDDEN(Tab.LINK), LINK_KEY(Tab.LINK), LINK_TO(Tab.LINK), BRANCH(Tab.LINK);
 
         final Tab tab;
 

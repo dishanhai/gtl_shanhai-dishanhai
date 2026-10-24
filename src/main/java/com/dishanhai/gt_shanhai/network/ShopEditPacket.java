@@ -42,6 +42,7 @@ public class ShopEditPacket {
     private final int oldEntryIndex;          // 旧协议兼容字段，不再参与原条目解析
     private final long limit;                 // 服務端次數（舊 limit）；-1=不限
     private Long saveUses;                    // null=未編輯存檔次數，保留即時餘量；-1=不限
+    private boolean pushToMaster;             // 編輯分支副本時：把內容同步給主支（再由主支轉給其餘副本）
     private final List<ShopEntry.DisplayIcon> displayIcons; // 自定义显示图标（1 主+最多4附属，物品/贴图二选一），空=用商品本身图标
     private final ShopEntry.RewardMode rewardMode; // 奖励模式：NONE=普通固定商品
     private final List<ShopEntry.RewardOption> rewardPool; // 奖励池（各自权重+数量区间），仅 rewardMode != NONE 时有意义
@@ -223,6 +224,13 @@ public class ShopEditPacket {
         }
         this.submissionItems = submits;
         this.saveUses = buf.readBoolean() ? buf.readLong() : null;
+        this.pushToMaster = buf.readBoolean();
+    }
+
+    /** 編輯分支副本時勾「同步到主支」：內容推給主支，再同步給同一主支的其餘副本。 */
+    public ShopEditPacket withPushToMaster(boolean value) {
+        this.pushToMaster = value;
+        return this;
     }
 
     /** 僅明確修改存檔欄位時攜帶覆寫值，避免一般編輯覆蓋開啟編輯器後發生的交易。 */
@@ -287,6 +295,7 @@ public class ShopEditPacket {
         }
         buf.writeBoolean(saveUses != null);
         if (saveUses != null) buf.writeLong(saveUses);
+        buf.writeBoolean(pushToMaster);
     }
 
     private static void writeCost(FriendlyByteBuf buf, ShopCost cost) {
@@ -380,6 +389,8 @@ public class ShopEditPacket {
                 pkt.submissionItems);
         entry.overrideRemainingUses(pkt.saveUses != null ? pkt.saveUses
                 : old != null ? old.getRemainingUses() : entry.getServerUses());
+        // 分支副本的身份标记不经客户端传输：编辑沿用旧条目的，新增（含复制为新条目）一律是独立商品
+        if (old != null) entry.withBranchSource(old.getBranchSource());
         String limitTip = " §d(存檔次數:" + usesText(entry.getRemainingUses())
                 + "，服務端次數:" + usesText(entry.getServerUses()) + ")";
 
@@ -395,7 +406,7 @@ public class ShopEditPacket {
             return;
         }
 
-        boolean ok = ShopConfig.replaceEntry(old, entry);
+        boolean ok = ShopConfig.replaceEntry(old, entry, pkt.pushToMaster);
         if (ok && (old.hasSubmissionRequirement() != entry.hasSubmissionRequirement()
                 || old.hasSubmissionRequirement() && !sameSubmissionItems(old, entry))) {
             com.dishanhai.gt_shanhai.common.shop.ShopSubmissionSavedData.get(player.getServer())

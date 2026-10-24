@@ -106,6 +106,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private ShopEntry.RewardOption hoverRewardOption; // 悬停奖励池槽位时暂存，renderTooltips 消费
     private String ftbqTableId = ""; // FTBQ 奖励表 ID（十六进制），仅 rewardMode==FTBQ 时有意义
     private ShopEntry.RewardMode ftbqSubMode = ShopEntry.RewardMode.RANDOM; // FTBQ 表内交付子模式：自选/随机/全部
+    private String branchSource = ""; // 本条目若是分支副本，所跟随主支的 stableId；空 = 非副本
+    private boolean pushToMaster;     // 保存时把本副本的内容同步给主支（再转给其余副本）
     private boolean hidden;   // 隐藏商品：不出现在分类网格/枚举里，只能被跳转直达（仿 FTBQ 隐藏任务）
     private String linkKey = ""; // 称呼：其他商品跳到这里时显示的名字，留空用商品名称
     private String linkTo = "";  // 跳转到：目标 stableId；旧数据可为称呼，保存时转换
@@ -208,6 +210,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
             this.ftbqTableId = entry.getFtbqTableId();
             this.ftbqSubMode = entry.getFtbqSubMode();
             this.hidden = entry.isHidden();
+            this.branchSource = isNew ? "" : entry.getBranchSource(); // 复制为新条目 = 独立商品，不继承副本身份
             // 复制模式不继承称呼：避免两个商品使用同一个称呼，混淆旧式引用
             this.linkKey = isNew ? "" : entry.getLinkKey();
             this.linkTo = entry.getLinkTo();
@@ -257,7 +260,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         }
         sb.append('|').append(ftbqTableId).append('|').append(ftbqSubMode).append('|').append(hidden)
                 .append('|').append(linkKey).append('|').append(linkTo).append('|').append(displayName)
-                .append('|').append(tradeMode).append('|').append(prerequisiteQuestId);
+                .append('|').append(tradeMode).append('|').append(prerequisiteQuestId).append('|').append(pushToMaster);
         return sb.toString();
     }
 
@@ -409,6 +412,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private static final String REWARD_MODE_HINT = "§8自选=购买前选1项 · 随机=系统随机给1项 · 全部=一次性全给 · FTBQ表=用任务书奖励表。"
             + "奖励池非空才生效，生效后商品栏改由奖励池接管。";
     private static final String REWARD_POOL_HINT = "§8左键改权重与数量区间，右键删除，悬停看概率。";
+    private static final String BRANCH_HINT = "§7这是分支副本：商品内容默认跟随主支，主支一改这里就跟着改；"
+            + "成本、限购、折扣等只改本副本。勾「同步到主支」保存时，会把本副本的内容推给主支，再同步给其余副本。";
     private static final String HIDDEN_HINT = "§8隐藏商品不进分类网格，只能靠其他商品「跳转到」直达。";
     private static final String LINK_TO_UNSET_HINT = "§8点「选择商品」挑一个商品（隐藏商品也能选），详情页会显示跳转入口。";
     private static final int LINK_PICK_W = 56;
@@ -524,6 +529,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private int iconHintX() { return slotsX() + MAX_DISPLAY_ICONS * PITCH + 6; }
     private int freeHintX() { return freeBtnX() + FREE_BTN_W + 6; }
     private int hiddenHintX() { return fieldX() + 56 + 6; }
+    private int branchHintX() { return fieldX() + BRANCH_BTN_W + 6; }
+    private static final int BRANCH_BTN_W = 84;
     private int linkHintX() { return fieldX() + 140 + 6; }
 
     private int linkClearX() { return fieldX() + LINK_PICK_W + 4; }
@@ -632,6 +639,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
             case REWARD_POOL -> rewardMode == ShopEntry.RewardMode.FTBQ ? Math.max(SLOT, ftbqTableLines().size() * LINE_H)
                     : rewardRowsHeight() + 2 + wrap(REWARD_POOL_HINT, fullW).size() * LINE_H;
             case HIDDEN -> Math.max(FIELD_H, wrap(HIDDEN_HINT, contentRight() - hiddenHintX()).size() * LINE_H);
+            case BRANCH -> branchSource.isEmpty() ? 0
+                    : Math.max(FIELD_H, wrap(BRANCH_HINT, contentRight() - branchHintX()).size() * LINE_H);
             case LINK_KEY -> Math.max(FIELD_H, wrap(linkKeyHint(), contentRight() - linkHintX()).size() * LINE_H);
             case LINK_TO -> Math.max(FIELD_H, linkTargetLines().size() * LINE_H);
         };
@@ -1275,6 +1284,12 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 ui.draw(g, this.font, fieldX(), y, 56, FIELD_H, hidden ? "§c隐藏中" : "§a未隐藏", mx, my, true);
                 drawSideHint(g, wrap(HIDDEN_HINT, contentRight() - hiddenHintX()), hiddenHintX(), y, rowH(r));
             }
+            case BRANCH -> {
+                label(g, "分支", y);
+                ui.draw(g, this.font, fieldX(), y, BRANCH_BTN_W, FIELD_H,
+                        pushToMaster ? "§a同步到主支" : "§7只改本副本", mx, my, true);
+                drawSideHint(g, wrap(BRANCH_HINT, contentRight() - branchHintX()), branchHintX(), y, rowH(r));
+            }
             case LINK_KEY -> {
                 label(g, "称呼", y);
                 drawSideHint(g, wrap(linkKeyHint(), contentRight() - linkHintX()), linkHintX(), y, rowH(r));
@@ -1344,6 +1359,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
             case HIDDEN:
                 if (!ui.hit(mx, my, fieldX(), y, 56, FIELD_H, true)) return false;
                 hidden = !hidden;
+                return true;
+            case BRANCH:
+                if (branchSource.isEmpty() || !ui.hit(mx, my, fieldX(), y, BRANCH_BTN_W, FIELD_H, true)) return false;
+                pushToMaster = !pushToMaster;
                 return true;
             case LINK_TO:
                 if (ui.hit(mx, my, fieldX(), y, LINK_PICK_W, FIELD_H, true)) {
@@ -2690,6 +2709,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 periodTicksToSend, periodCap, prerequisiteQuestId, catalogRevision, oldEntryKey,
                 discountPercent, discountStartMs, discountEndMs, submissionsForSubmit);
         if (isNew ? saveUses != limit : saveUses != initialSaveUses) pkt.withSaveUses(saveUses);
+        if (!isNew && pushToMaster && !branchSource.isEmpty()) pkt.withPushToMaster(true);
         ShanhaiNetwork.CHANNEL.sendToServer(pkt);
         Minecraft.getInstance().setScreen(parent);
     }

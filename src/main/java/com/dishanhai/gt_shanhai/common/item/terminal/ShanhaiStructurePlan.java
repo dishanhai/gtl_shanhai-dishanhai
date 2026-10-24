@@ -11,8 +11,10 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
+import net.minecraft.world.level.material.FlowingFluid;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.fluids.FluidType;
 
 public final class ShanhaiStructurePlan {
 
@@ -80,12 +82,14 @@ public final class ShanhaiStructurePlan {
 
         /** 山海：位置在結構範圍內不代表原有方塊屬於結構，尤其是未施工的強制替換位置。 */
         public boolean canDismantle() {
-            return currentMatchesStructure && !current.isEmpty() && kind != Kind.MANUAL;
+            if (!currentMatchesStructure || kind == Kind.MANUAL) return false;
+            if (currentFluid() != Fluids.EMPTY) return currentState.getFluidState().isSource();
+            return !current.isEmpty();
         }
 
         private static boolean matchesStructure(Kind kind, ItemStack current, List<ItemStack> candidates) {
-            if (current == null || current.isEmpty()) return false;
             if (kind == Kind.SATISFIED || kind == Kind.REPLACE) return true;
+            if (current == null || current.isEmpty()) return false;
             return candidates != null && candidates.stream().anyMatch(candidate -> candidate != null
                     && !candidate.isEmpty() && ItemStack.isSameItem(current, candidate));
         }
@@ -93,13 +97,20 @@ public final class ShanhaiStructurePlan {
         public Fluid desiredFluid() {
             if (desiredState == null || !(desiredState.getBlock() instanceof LiquidBlock)
                     || desiredState.getFluidState().isEmpty()) return Fluids.EMPTY;
-            return desiredState.getFluidState().getType();
+            Fluid fluid = desiredState.getFluidState().getType();
+            return fluid instanceof FlowingFluid flowing ? flowing.getSource() : fluid;
         }
 
         public Fluid currentFluid() {
             if (currentState == null || !(currentState.getBlock() instanceof LiquidBlock)
                     || currentState.getFluidState().isEmpty()) return Fluids.EMPTY;
-            return currentState.getFluidState().getType();
+            Fluid fluid = currentState.getFluidState().getType();
+            return fluid instanceof FlowingFluid flowing ? flowing.getSource() : fluid;
+        }
+
+        public long currentFluidAmount() {
+            return currentFluid() != Fluids.EMPTY && currentState.getFluidState().isSource()
+                    ? FluidType.BUCKET_VOLUME : 0;
         }
 
         private static BlockState stateFromItem(ItemStack stack) {

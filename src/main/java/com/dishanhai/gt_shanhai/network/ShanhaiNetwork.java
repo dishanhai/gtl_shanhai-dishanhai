@@ -621,6 +621,9 @@ public class ShanhaiNetwork {
         CHANNEL.registerMessage(packetId++, ShanhaiTerminalReportPacket.class,
                 ShanhaiTerminalReportPacket::encode, ShanhaiTerminalReportPacket::new,
                 ShanhaiTerminalReportPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(packetId++, ShopBranchCopyPacket.class,
+                ShopBranchCopyPacket::encode, ShopBranchCopyPacket::new,
+                ShopBranchCopyPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         RecipeSyncPacket.init();
     }
 

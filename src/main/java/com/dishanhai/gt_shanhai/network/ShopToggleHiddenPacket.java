@@ -64,7 +64,7 @@ public class ShopToggleHiddenPacket {
                 old.getServerUses(), old.getDisplayIcons(), old.getRewardMode(), old.getRewardPool(),
                 !old.isHidden(), old.getLinkKey(), old.getLinkTo(), old.getDisplayName(), old.getFtbqTableId(),
                 old.getFtbqSubMode(), old.getTradeMode(), old.getPeriodTicks(), old.getPeriodLimit(),
-                old.getPrerequisiteQuestId(), old.getStableId());
+                old.getPrerequisiteQuestId(), old.getStableId()).withBranchSource(old.getBranchSource());
         updated.overrideRemainingUses(old.getRemainingUses());
         boolean ok = ShopConfig.replaceEntry(old, updated);
         player.sendSystemMessage(ok
