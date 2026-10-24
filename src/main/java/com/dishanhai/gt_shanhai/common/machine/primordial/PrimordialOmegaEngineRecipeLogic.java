@@ -42,7 +42,7 @@ public class PrimordialOmegaEngineRecipeLogic extends SelectableRecipeTypeSetRec
         if (recipes.isEmpty() || !(getMachine() instanceof PrimordialOmegaEngineMachine engine)) {
             return recipes;
         }
-        int multiplier = engine.getMountedOutputMultiplier();
+        int multiplier = engine.getRecipeOutputMultiplier();
         if (multiplier <= 1) {
             return recipes;
         }

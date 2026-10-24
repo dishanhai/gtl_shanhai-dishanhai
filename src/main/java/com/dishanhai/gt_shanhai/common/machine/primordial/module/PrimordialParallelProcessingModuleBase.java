@@ -66,7 +66,7 @@ public abstract class PrimordialParallelProcessingModuleBase extends PrimordialO
 
     private void scanBoostItem() {
         var stack = machineStorage.storage.getStackInSlot(0);
-        long base = ITEM_PARALLEL_MAP.getOrDefault(stack.getItem(), DEFAULT_PARALLEL);
+        long base = ITEM_PARALLEL_MAP.getOrDefault(effectiveParallelItem(stack.getItem()), DEFAULT_PARALLEL);
         currentParallel = applyModuleCountParallelMultiplier(base, stack.getCount());
     }
 

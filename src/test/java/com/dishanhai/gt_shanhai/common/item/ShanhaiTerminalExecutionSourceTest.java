@@ -275,6 +275,28 @@ class ShanhaiTerminalExecutionSourceTest {
     }
 
     @Test
+    void dismantleModeTakesPriorityOverCreativeBuildAndSneakingBuildConfirmation() throws Exception {
+        String behavior = Files.readString(BEHAVIOR);
+        int start = behavior.indexOf("private InteractionResult handleUseOn(");
+        String body = behavior.substring(start, behavior.indexOf("public boolean scanOnly", start));
+        int dismantle = body.indexOf("executor.dismantle(serverPlayer, plan, ae)");
+        int creative = body.indexOf("if (serverPlayer.isCreative())");
+        int confirmation = body.indexOf("ShanhaiTerminalCraftingManager.consumeBuildConfirmation");
+
+        assertTrue(dismantle >= 0 && dismantle < creative,
+                "創造模式開啟拆解時必須拆解，不能先進入創造建造分支");
+        assertTrue(dismantle < confirmation,
+                "拆解模式也不能落入潛行施工確認");
+        int branch = body.lastIndexOf("if (ShanhaiUltimateTerminalConfig.isDismantleMode(terminal))", dismantle);
+        String dismantleBody = body.substring(branch, creative);
+        assertTrue(dismantleBody.contains("ShanhaiTerminalCraftingManager.clear(terminal)"));
+        assertTrue(dismantleBody.contains("return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;"),
+                "拆解失敗也必須立即返回，不能改做建造");
+        assertFalse(dismantleBody.contains("rejectOutOfBuildHeight("),
+                "拆解不應受到創造建造的高度預檢阻擋");
+    }
+
+    @Test
     void buildHeightGuardStopsEveryBuildPathBeforeMutationOrAeRequests() throws Exception {
         String behavior = Files.readString(BEHAVIOR);
         String executor = Files.readString(EXECUTOR);

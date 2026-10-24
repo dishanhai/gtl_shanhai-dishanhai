@@ -61,6 +61,19 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         return MANAGED_FIELD_HOLDER;
     }
 
+    /** 山海：子主機的持久化欄位必須延續完整父 holder。 */
+    public static ManagedFieldHolder managedFieldHolder() {
+        return MANAGED_FIELD_HOLDER;
+    }
+
+    public int getHostMatterLevelOverride() {
+        return 0;
+    }
+
+    public int getMaxModuleCount() {
+        return 16;
+    }
+
     private final Set<IModularMachineModule<PrimordialOmegaEngineMachine, ?>> modules = new ReferenceOpenHashSet<>();
     private final OutputMultiplierCache outputMultiplierCache = new OutputMultiplierCache();
     private final PrimordialStructureCheck structureCheck = new PrimordialStructureCheck();
@@ -235,9 +248,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         long[] counts = new long[MODULE_LEVEL_ARRAY_SIZE];
         for (IModularMachineModule<PrimordialOmegaEngineMachine, ?> module : moduleSnapshot) {
             if (!(module instanceof PrimordialOmegaEngineModuleBase mb)) continue;
-            String slotId = mb.getModuleItemId();
-            if (slotId == null) continue;
-            int lv = PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
+            int lv = mb.getModuleLevel();
             if (lv <= 0 || lv >= counts.length) continue;
             int stackCount = mb.getModuleCount();
             if (stackCount <= 0) continue;
@@ -294,7 +305,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         clearInventory(matterBonusSlot.storage);
     }
 
-    private void syncRingVisibility(boolean hide) {
+    protected void syncRingVisibility(boolean hide) {
         if (getLevel() instanceof ServerLevel serverLevel) {
             ShanhaiNetwork.sendHideRingToClients(serverLevel,
                     new SHideRingPacket(getPos(), getFrontFacing(), hide));
@@ -360,6 +371,11 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     public int getMountedOutputMultiplier() {
         // 传不可变快照：缓存未命中时可在锁外安全遍历，get() 不再需要锁内复制一份集合。
         return outputMultiplierCache.get(getOffsetTimer(), moduleSnapshot);
+    }
+
+    /** 子主機可追加自己的增產；模組提供的倍率出口保持原語義。 */
+    public int getRecipeOutputMultiplier() {
+        return getMountedOutputMultiplier();
     }
 
     public void invalidateMountedOutputMultiplier() {
@@ -553,7 +569,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         return Math.round(300.0F * level / 17.0F);
     }
 
-    private static boolean isMatterModuleStack(ItemStack stack) {
+    public static boolean isMatterModuleStack(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return true;
         var key = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return key != null

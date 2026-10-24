@@ -68,6 +68,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     private List<ShanhaiHeatGate.SlotContent> cachedGateMountContents;
     private String cachedModuleItemId;
     private int cachedModuleCount = Integer.MIN_VALUE;
+    private int cachedEffectiveModuleLevel = Integer.MIN_VALUE;
     private final java.util.IdentityHashMap<GTRecipe, AmplifiedRecipeCacheEntry> amplifiedRecipeCache =
             new java.util.IdentityHashMap<>();
     private final java.util.IdentityHashMap<GTRecipe, MatchableScaledRecipe> matchableScaledRecipeCache =
@@ -802,13 +803,16 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         }
         String moduleItemId = mod.getModuleItemId();
         int moduleCount = mod.getModuleCount();
-        if (java.util.Objects.equals(cachedModuleItemId, moduleItemId) && cachedModuleCount == moduleCount) {
+        int moduleLevel = mod.getModuleLevel();
+        if (java.util.Objects.equals(cachedModuleItemId, moduleItemId) && cachedModuleCount == moduleCount
+                && cachedEffectiveModuleLevel == moduleLevel) {
             return;
         }
         invalidateModuleConditionCaches();
         invalidateLookupSetCache();
         cachedModuleItemId = moduleItemId;
         cachedModuleCount = moduleCount;
+        cachedEffectiveModuleLevel = moduleLevel;
     }
 
     private void invalidateModuleConditionCaches() {

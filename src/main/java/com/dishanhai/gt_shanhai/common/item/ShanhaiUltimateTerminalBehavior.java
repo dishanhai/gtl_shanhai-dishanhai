@@ -109,6 +109,17 @@ public final class ShanhaiUltimateTerminalBehavior implements IInteractionItem, 
             return InteractionResult.PASS;
         }
 
+        // 山海：操作模式優先於遊戲模式，拆解不能落入創造建造或潛行施工確認。
+        if (ShanhaiUltimateTerminalConfig.isDismantleMode(terminal)) {
+            ShanhaiTerminalCraftingManager.clear(terminal);
+            ShanhaiStructureExecutor.Result result = executor.dismantle(serverPlayer, plan, ae);
+            serverPlayer.sendSystemMessage(Component.literal(
+                    (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
+                            + "，回收 " + result.changed() + " 处"));
+            sendBuildReport(serverPlayer, plan, result);
+            return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+        }
+
         if (serverPlayer.isCreative()) {
             if (rejectOutOfBuildHeight(serverPlayer, terminal, plan)) {
                 return InteractionResult.FAIL;
@@ -134,15 +145,6 @@ public final class ShanhaiUltimateTerminalBehavior implements IInteractionItem, 
             serverPlayer.sendSystemMessage(Component.literal(
                     (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
                             + "，变更 " + result.changed() + " 处"));
-            sendBuildReport(serverPlayer, plan, result);
-            return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
-        }
-
-        if (ShanhaiUltimateTerminalConfig.isDismantleMode(terminal)) {
-            ShanhaiStructureExecutor.Result result = executor.dismantle(serverPlayer, plan, ae);
-            serverPlayer.sendSystemMessage(Component.literal(
-                    (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
-                            + "，回收 " + result.changed() + " 处"));
             sendBuildReport(serverPlayer, plan, result);
             return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
         }

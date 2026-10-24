@@ -153,6 +153,8 @@ public class GTDishanhaiMod {
 
         // 注册配置文件 (config/gt_shanhai/gt_shanhai-common.toml)
         ModLoadingContext.get().registerConfig(ModConfig.Type.COMMON, com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON_SPEC, "gt_shanhai/gt_shanhai-common.toml");
+        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT,
+                com.dishanhai.gt_shanhai.config.GuixuClientConfig.SPEC, "gt_shanhai/guixu-client.toml");
         LOGGER.info("Config registered");
 
         // 旧版平铺配置 → 分组结构迁移；必须早于任何业务模块读配置

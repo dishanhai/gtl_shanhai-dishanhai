@@ -98,6 +98,7 @@ public class DShanhaiMachines {
     
     public static MultiblockMachineDefinition SPACETIME_WAVE_MATRIX;
     public static MultiblockMachineDefinition PRIMORDIAL_OMEGA_ENGINE;
+    public static MultiblockMachineDefinition GUIXU_VISION_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_VOID_INDUCTION_ARMATURE;
     public static MultiblockMachineDefinition PRIMORDIAL_MASS_ENERGY_CORE;
     public static MultiblockMachineDefinition PRIMORDIAL_BIOLOGICAL_CORE;
@@ -292,6 +293,8 @@ public class DShanhaiMachines {
                 .register();
 
         PRIMORDIAL_OMEGA_ENGINE.setTooltipBuilder(DShanhaiMachines::buildTooltipPrimordial);
+        com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachines.init();
+        GUIXU_VISION_CORE = com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachines.guixuVisionCore();
 
         PRIMORDIAL_VOID_INDUCTION_ARMATURE = GTDishanhaiRegistration.REGISTRATE
                 .multiblock("primordial_void_induction_armature", PrimordialOmegaVoidInductionArmature::new)

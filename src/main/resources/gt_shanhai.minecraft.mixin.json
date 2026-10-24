@@ -9,6 +9,7 @@
     "ReverseEntropyRecipeMixin"
   ],
   "client": [
+    "ShanhaiBlackHoleGameRendererMixin",
     "RecipeEditorPickerHoldMixin",
     "WobbleFontMixin",
     "ComponentWrapFcsNormalizeMixin",

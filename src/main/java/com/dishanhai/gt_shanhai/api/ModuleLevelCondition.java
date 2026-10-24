@@ -135,10 +135,8 @@ public class ModuleLevelCondition extends RecipeCondition {
     public boolean checkModuleLevel(MetaMachine machine) {
         // 模块机器路径（PrimordialModuleRecipeLogic 调用）：只看自己的槽
         if (machine instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase mb) {
-            String slotId = mb.getModuleItemId();
             int requiredLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(moduleId);
-            if (slotId == null) return false;
-            int slotLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
+            int slotLv = mb.getModuleLevel();
             return isRequirementSatisfied(slotLv, mb.getModuleCount(), requiredLv, requiredLevel);
         }
 
@@ -171,9 +169,7 @@ public class ModuleLevelCondition extends RecipeCondition {
         long count = 0L;
         for (Object mod : modules) {
             if (!(mod instanceof com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase mb)) continue;
-            String slotId = mb.getModuleItemId();
-            if (slotId == null) continue;
-            int slotLv = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase.getModuleLevelById(slotId);
+            int slotLv = mb.getModuleLevel();
             if (slotLv >= requiredLv) {
                 long equivalent = calculateEquivalentCount(slotLv, mb.getModuleCount(), requiredLv);
                 if (equivalent == Long.MAX_VALUE || count > Long.MAX_VALUE - equivalent) return true;

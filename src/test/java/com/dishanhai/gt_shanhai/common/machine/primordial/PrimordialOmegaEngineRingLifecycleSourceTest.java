@@ -26,7 +26,7 @@ class PrimordialOmegaEngineRingLifecycleSourceTest {
         String formed = extractBlock(source, "public void onStructureFormed() {");
         String invalid = extractBlock(source, "public void onStructureInvalid() {");
         String removed = extractBlock(source, "public void onMachineRemoved() {");
-        String sync = extractBlock(source, "private void syncRingVisibility(boolean hide) {");
+        String sync = extractBlock(source, "protected void syncRingVisibility(boolean hide) {");
 
         assertTrue(formed.contains("syncRingVisibility(true);"),
                 "formed host must push a hide packet even if the renderer has not run yet");

@@ -175,5 +175,54 @@ public class PrimordialOmegaEngineStructure {
                 .build();
     }
 
+    /** 山海：歸墟沿用 master 現有的全部原初模組控制器。 */
+    public static java.util.List<Block> allModuleBlocks() {
+        String[] ids = {
+            "primordial_void_induction_armature",
+            "primordial_mass_energy_core",
+            "primordial_biological_core",
+            "primordial_chaotic_ephemeral_deconstruction_crystallization_furnace",
+            "primordial_matter_recombinator_core",
+            "primordial_causal_weaving_matrix",
+            "primordial_singularity_inversion_core",
+            "primordial_world_fragments_collector",
+            "primordial_assembly_line_module",
+            "primordial_critical_processing_module",
+            "primordial_multidimensional_implosion_core",
+            "primordial_supercritical_matter_generation_core",
+            "primordial_cosmic_reactor",
+            "primordial_molecular_rift_core",
+            "primordial_tianqiong_assembly_core",
+            "primordial_eternal_smelting_furnace",
+            "primordial_worldline_traversal_matrix",
+            "primordial_quantum_distortion_matrix",
+            "primordial_shaoguang_aggregation_core",
+            "primordial_weiyang_reconstruction_module",
+            "primordial_engraving_module",
+            "taixu_smelting_furnace",
+            "primordial_anti_entropy_condensation_core",
+            "primordial_divergence_generator",
+            "primordial_matter_caster",
+            "primordial_coin_forge",
+            "primordial_flame_cracking_kiln",
+            "primordial_abyssal_refinery",
+            "primordial_cosmic_origin_core",
+            "primordial_sixfold_resource_core",
+            "primordial_deep_space_extraction_core",
+            "primordial_myriad_proliferation_core",
+            "primordial_molecular_assembler_module",
+            "primordial_universe_simulation_core",
+        };
+        var blocks = new java.util.ArrayList<Block>(ids.length);
+        for (String id : ids) {
+            Block block = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gt_shanhai", id));
+            if (block == null || block == net.minecraft.world.level.block.Blocks.AIR) {
+                throw new IllegalStateException("[SHANHAI-HOST] 未註冊模組：" + id);
+            }
+            blocks.add(block);
+        }
+        return java.util.List.copyOf(blocks);
+    }
+
     private PrimordialOmegaEngineStructure() {}
 }

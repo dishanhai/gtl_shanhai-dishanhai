@@ -282,7 +282,42 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     /** 获取当前搭载的物质模块等级（1~16），无模块时返回 0 */
     public int getModuleLevel() {
         refreshModuleSlotCache();
-        return cachedModuleLevel;
+        return Math.max(cachedModuleLevel, getHostMatterLevelOverride());
+    }
+
+    /** 山海：只有仍成型且維持雙向連接的歸墟主機才提供等級下限。 */
+    public int getHostMatterLevelOverride() {
+        PrimordialOmegaEngineMachine current = getHost();
+        return current != null && current.isFormed() && current.getModuleSet().contains(this)
+                ? current.getHostMatterLevelOverride() : 0;
+    }
+
+    public static int getModuleLevelByStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0;
+        var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return key == null ? 0 : getModuleLevelById(key.toString());
+    }
+
+    public static boolean isMatterModuleStack(ItemStack stack) {
+        return stack == null || stack.isEmpty() || getModuleLevelByStack(stack) > 0;
+    }
+
+    /** 保留實物與數量，只用主機的較高等級選取並行表項目。 */
+    protected Item effectiveParallelItem(Item item) {
+        int hostLevel = getHostMatterLevelOverride();
+        if (hostLevel <= 0) return item;
+        var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(item);
+        if (key != null && getModuleLevelById(key.toString()) >= hostLevel) return item;
+        String id = canonicalModuleIdForLevel(hostLevel);
+        return id == null ? item : net.minecraftforge.registries.ForgeRegistries.ITEMS.getValue(
+                new net.minecraft.resources.ResourceLocation(id));
+    }
+
+    static String canonicalModuleIdForLevel(int level) {
+        for (var entry : MODULE_LEVELS.entrySet()) {
+            if (entry.getValue() == level) return entry.getKey();
+        }
+        return null;
     }
 
     /** 获取当前物质模块槽中的物品堆叠数量 */
@@ -377,7 +412,18 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     @Override
     public BlockPos[] getHostScanPositions() {
-        return AntichristPosHelper.INSTANCE.calculatePossibleHostPositions(getPos(), getFrontFacing());
+        var positions = new java.util.LinkedHashSet<BlockPos>();
+        java.util.Collections.addAll(positions,
+                AntichristPosHelper.INSTANCE.calculatePossibleHostPositions(getPos(), getFrontFacing()));
+        positions.addAll(com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuHostGeometry
+                .candidateHostPositions(getPos(), getFrontFacing()));
+        return positions.toArray(BlockPos[]::new);
+    }
+
+    @Override
+    public boolean isValidHost(MetaMachine machine) {
+        return machine instanceof PrimordialOmegaEngineMachine engine && engine.isFormed()
+                && java.util.Arrays.asList(engine.getModuleScanPositions()).contains(getPos());
     }
 
     // ========== 生命周期 ==========
@@ -466,13 +512,13 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     private boolean tryConnectToHost() {
         if (getLevel() == null) return false;
-        BlockPos[] positions = AntichristPosHelper.INSTANCE.calculatePossibleHostPositions(getPos(), getFrontFacing());
+        BlockPos[] positions = getHostScanPositions();
         for (BlockPos pos : positions) {
             if (!getLevel().hasChunkAt(pos)) continue;
             BlockEntity be = getLevel().getBlockEntity(pos);
             if (be instanceof IMachineBlockEntity machineBE) {
                 MetaMachine machine = machineBE.getMetaMachine();
-                if (machine instanceof PrimordialOmegaEngineMachine engine && engine.isFormed()) {
+                if (machine instanceof PrimordialOmegaEngineMachine engine && isValidHost(engine)) {
                     engine.addModule(this);
                     setHost(engine);
                     setHostPosition(pos);
