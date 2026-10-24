@@ -4,7 +4,7 @@
 [![Forge](https://img.shields.io/badge/Forge-47.4.16-orange.svg)](https://files.minecraftforge.net/)
 [![版本](https://img.shields.io/badge/版本-4.5.1-blue.svg)](https://github.com/dishanhai/gtl_shanhai-dishanhai/releases)
 
-给 GTL 整合包用的格雷附属模组。当前版本 **4.5.1**。作者：dishanhai/山海恒长在。
+给 GTL 整合包用的格雷附属模组。当前版本 **4.7.0**。作者：dishanhai/山海恒长在。
 
 请安装发布页里的完整包。只放模组文件本身，游戏里不会有这套内容。
 
