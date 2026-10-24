@@ -13,38 +13,6 @@
   },
   "type": "gtceu:distort",
   "inputs": {
-    "fluid": [
-      {
-        "content": {
-          "amount": 1310012,
-          "value": [
-            {
-              "fluid": "gtceu:hydrogen"
-            }
-          ]
-        }
-      },
-      {
-        "content": {
-          "amount": 1310012,
-          "value": [
-            {
-              "fluid": "gtceu:helium"
-            }
-          ]
-        }
-      },
-      {
-        "content": {
-          "amount": 131000,
-          "value": [
-            {
-              "fluid": "gtceu:raw_star_matter_plasma"
-            }
-          ]
-        }
-      }
-    ],
     "item": [
       {
         "content": {
@@ -84,6 +52,38 @@
           "ingredient": {
             "item": "dishanhai:hxsp"
           }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 231001,
+          "value": [
+            {
+              "fluid": "gtceu:hydrogen"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 231001,
+          "value": [
+            {
+              "fluid": "gtceu:helium"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 231000,
+          "value": [
+            {
+              "fluid": "gtceu:raw_star_matter_plasma"
+            }
+          ]
         }
       }
     ]
@@ -244,5 +244,13 @@
         }
       }
     ]
-  }
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:distort/distort_cosmos_simulation_hxsp",
+      "defaultEnabled": true
+    }
+  ]
 }

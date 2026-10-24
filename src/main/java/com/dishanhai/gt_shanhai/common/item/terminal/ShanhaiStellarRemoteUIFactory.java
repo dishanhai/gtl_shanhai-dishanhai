@@ -61,7 +61,7 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
         boolean opened = openUI(new ShanhaiStellarRemoteUIHolder(
                 GlobalPos.of(machine.getLevel().dimension(), machine.getPos()),
                 mode, slot, machine, terminalHost, typeIds, typeNames), player);
-        GTDishanhaiMod.LOGGER.info(
+        GTDishanhaiMod.LOGGER.debug(
                 "[StellarRemoteUI] server open mode={} slot={} target={} opened={}",
                 mode, slot, machine.getPos(), opened);
         return opened;
@@ -93,7 +93,7 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
             typeNames = List.copyOf(names);
         }
         RecipeTypePatternBufferPartMachine mirror = createClientMirror();
-        GTDishanhaiMod.LOGGER.info(
+        GTDishanhaiMod.LOGGER.debug(
                 "[StellarRemoteUI] client read mode={} slot={} target={} mirror={}",
                 mode, slot, pos, mirror == null ? "missing" : mirror.getClass().getName());
         return new ShanhaiStellarRemoteUIHolder(pos, mode, slot, mirror, null, typeIds, typeNames);

@@ -209,6 +209,11 @@ public class WalletAccount {
         return new LinkedHashMap<>(periodWindow);
     }
 
+    /** 全部 key 在各自窗口内的已用次数（副本，保序），随账户快照推给客户端展示"本周期已购 X/Y 次"。 */
+    public Map<String, Long> getPeriodUsedAll() {
+        return new LinkedHashMap<>(periodUsed);
+    }
+
     /** 覆盖写某 key 的周期窗口状态（新窗口开始时 window 变了，used 从 0 重新计）；used≤0 时移除保持干净。 */
     public void setPeriodState(String key, long window, long used) {
         if (key == null) return;

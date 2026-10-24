@@ -112,10 +112,19 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
     void remotePagesReuseTheExistingStellarWidgets() throws Exception {
         String machine = read("common/machine/part/RecipeTypePatternBufferPartMachine.java");
 
-        assertTrue(machine.contains("createRemoteSlotCatalystUI"));
-        assertTrue(machine.contains("new MEPatternCatalystUIManager"));
-        assertTrue(machine.contains("createRemoteStockInputUI"));
-        assertTrue(machine.contains("new AEDualConfigWidget"));
+        String catalyst = method(machine, "public ModularUI createRemoteSlotCatalystUI(");
+        assertTrue(catalyst.contains("new MEPatternCatalystUIManager("));
+        assertTrue(catalyst.contains("root.addWidget(manager)"));
+        assertTrue(catalyst.contains("manager.toggleFor(slot)"),
+                "遠端催化頁必須開啟所選樣板槽的既有管理器");
+
+        String remoteStock = method(machine, "public ModularUI createRemoteStockInputUI(");
+        assertTrue(remoteStock.contains("return createRemoteSidebarUI(player, holder,\n"
+                + "                createStockInputSidebarPage(collectParentConfigurators()));"),
+                "遠端庫存頁必須委派共用庫存側欄，保留父類配置器");
+        String sideTabs = method(machine, "public void attachSideTabs(");
+        assertTrue(sideTabs.contains("sideTabs.attachSubTab(createStockInputSidebarPage(parentConfigurators))"),
+                "機器本體與遠端庫存頁必須使用同一個側欄建構入口");
     }
 
     @Test
@@ -235,7 +244,16 @@ class ShanhaiWirelessPatternManagementTerminalSourceTest {
     }
 
     private static String read(String relative) throws Exception {
-        return Files.readString(ROOT.resolve(relative.replace('/', java.io.File.separatorChar)));
+        return Files.readString(ROOT.resolve(relative.replace('/', java.io.File.separatorChar)))
+                .replace("\r\n", "\n");
+    }
+
+    private static String method(String source, String signature) {
+        int start = source.indexOf(signature);
+        assertTrue(start >= 0, "找不到方法：" + signature);
+        int end = source.indexOf("\n    }\n", start);
+        assertTrue(end > start, "找不到方法結尾：" + signature);
+        return source.substring(start, end);
     }
 
     private static JsonObject readRecipe(String name) throws Exception {

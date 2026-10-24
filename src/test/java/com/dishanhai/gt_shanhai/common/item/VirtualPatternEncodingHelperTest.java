@@ -31,8 +31,18 @@ public class VirtualPatternEncodingHelperTest {
                 "权威编码类型已知时，早期不完整索引 miss 必须查询该类型的当前 lookup");
         assertTrue(source.contains("requiredType.getLookup().getLookup().getRecipes(true)"),
                 "兜底必须读取已知 GTRecipeType 的实时服务端配方表");
-        assertTrue(source.contains("nonConsumableRecipesInType"),
-                "同一 revision 内不得按样板重复展开整棵 lookup");
+        int cacheStart = source.indexOf("private List<GTRecipe> recipesFor(GTRecipeType type)");
+        int cacheEnd = source.indexOf("private List<GTRecipe> sharingOutputKeys(", cacheStart);
+        assertTrue(cacheStart >= 0 && cacheEnd > cacheStart);
+        String cachedLookup = source.substring(cacheStart, cacheEnd);
+        int cachedReturn = cachedLookup.indexOf("if (cached != null) return cached;");
+        int collect = cachedLookup.indexOf("collectNonConsumableRecipes(type)");
+        assertTrue(cachedLookup.contains("List<GTRecipe> cached = byType.get(type);"));
+        assertTrue(cachedReturn >= 0 && collect > cachedReturn,
+                "類型快取命中必須先返回，不能每張樣板重新展開 lookup");
+        assertTrue(cachedLookup.contains("byType.putIfAbsent(type, built)"));
+        assertTrue(source.contains("cache != null && cache.revision == revision"),
+                "類型快取只能在同一配方 revision 內重用");
         assertTrue(source.contains("nonConsumableRecipesSharingOutputs"),
                 "类型域兜底必须按产出键收窄候选，不能对每张样板线性扫描该类型全部不消耗配方");
         assertTrue(source.contains("recipeOutputSnapshot"),
@@ -148,10 +158,24 @@ public class VirtualPatternEncodingHelperTest {
     @Test
     void bulkDispatchDoesNotMultiplyReusableVirtualTargets() throws IOException {
         String source = Files.readString(Path.of(
-                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"));
+                "src/main/java/com/dishanhai/gt_shanhai/common/item/VirtualPatternEncodingHelper.java"))
+                .replace("\r\n", "\n");
 
-        assertTrue(source.contains("virtualTargetSink.accept(virtualTarget.what(), Math.max(1L, virtualTarget.amount()));"),
-                "不消耗目标只需一份在场数量，不能乘整批下单次数");
+        int presenceStart = source.indexOf("if (virtualTarget != null || (presenceKeys != null && presenceKeys.contains(key)))");
+        int consumableStart = source.indexOf("long available = allInputs.get(key);", presenceStart);
+        assertTrue(presenceStart >= 0 && consumableStart > presenceStart);
+        String presenceBranch = source.substring(presenceStart, consumableStart);
+        assertTrue(presenceBranch.contains("AEKey target = virtualTarget == null ? key : virtualTarget.what();"));
+        assertTrue(presenceBranch.contains("long once = virtualTarget == null ? Math.max(1L, amount) : Math.max(1L, virtualTarget.amount());"),
+                "虛擬目標與普通 presence 都只取一份在場量");
+        int dispatch = presenceBranch.indexOf("virtualTargetSink.accept(target, once);");
+        assertTrue(dispatch >= 0 && presenceBranch.indexOf("continue;", dispatch) > dispatch,
+                "在場輸入送往虛擬 sink 後必須跳過後續消耗輸入扣減");
+        assertFalse(presenceBranch.contains("patternMultiplier"),
+                "不消耗目標不能乘整批下單次數");
+        assertTrue(source.indexOf("long scaledAmount = multiplyAmount(amount, patternMultiplier);", consumableStart)
+                        > consumableStart,
+                "消耗輸入仍必須依批次放大");
         assertFalse(source.contains("virtualTarget.amount()), patternMultiplier"),
                 "批量次数不得放大虚拟库存并持久化到样板总成");
     }

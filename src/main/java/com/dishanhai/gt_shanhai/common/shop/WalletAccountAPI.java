@@ -457,6 +457,12 @@ public final class WalletAccountAPI {
         return acc == null ? new LinkedHashMap<>() : acc.getPeriodWindows();
     }
 
+    /** 读全部 key 在各自窗口内的已用次数（副本，保序），与 {@link #getAllPeriodAnchors} 配对推给客户端。 */
+    public static Map<String, Long> getAllPeriodUsed(MinecraftServer server, UUID uuid) {
+        WalletAccount acc = data(server).get(uuid);
+        return acc == null ? new LinkedHashMap<>() : acc.getPeriodUsedAll();
+    }
+
     // ===================== 币值互转（阶段 B） =====================
 
     /**
@@ -511,6 +517,6 @@ public final class WalletAccountAPI {
                 new WalletAccountSyncPacket(getAllCurrencies(server, uuid), getDigital(server, uuid),
                         getAllPurchaseCounts(server, uuid), getAllPeriodAnchors(server, uuid),
                         ShopWirelessEu.getBalance(player), ShopAeNetwork.hasBoundNetwork(player),
-                        getMemberTier(server, uuid)));
+                        getMemberTier(server, uuid), getAllPeriodUsed(server, uuid)));
     }
 }

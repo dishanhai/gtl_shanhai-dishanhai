@@ -18,7 +18,7 @@ class ShanhaiTerminalCraftingManagerSourceTest {
 
     @Test
     void submitFailuresDoNotBlockPartialBuildConfirmation() throws IOException {
-        String source = Files.readString(MANAGER);
+        String source = read(MANAGER);
 
         assertTrue(source.contains("boolean submitted"),
                 "每个任务必须记录是否已成功提交，不能用 Session.phase 覆盖单项状态");
@@ -39,8 +39,8 @@ class ShanhaiTerminalCraftingManagerSourceTest {
 
     @Test
     void terminalInteractionNoLongerBlocksOnAeRetryState() throws IOException {
-        String behavior = Files.readString(BEHAVIOR);
-        String source = Files.readString(MANAGER);
+        String behavior = read(BEHAVIOR);
+        String source = read(MANAGER);
 
         assertFalse(behavior.contains("Phase.RETRY_CALCULATING"),
                 "终端普通右击不得再进入失败任务重算等待流程");
@@ -75,7 +75,7 @@ class ShanhaiTerminalCraftingManagerSourceTest {
 
     @Test
     void serverTickOnlyScansActiveCalculationsWithoutSnapshotAllocation() throws IOException {
-        String source = Files.readString(MANAGER);
+        String source = read(MANAGER);
 
         assertTrue(source.contains("ACTIVE_CALCULATIONS"),
                 "完成但尚未施工的会话不得继续进入每 tick 轮询");
@@ -87,5 +87,9 @@ class ShanhaiTerminalCraftingManagerSourceTest {
                 "终端等待 Future 时不得每 tick 分配 Stream 管线");
         assertTrue(source.contains("ACTIVE_CALCULATIONS.remove(session.terminalId, session)"),
                 "结束或替换计算时必须按 Session 身份移除，避免误删新会话");
+    }
+
+    private static String read(Path path) throws IOException {
+        return Files.readString(path).replace("\r\n", "\n");
     }
 }

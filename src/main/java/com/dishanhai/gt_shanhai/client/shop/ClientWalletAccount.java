@@ -21,6 +21,7 @@ public final class ClientWalletAccount {
     private static BigInteger digital = BigInteger.ZERO;
     private static Map<String, Long> purchaseCounts = new LinkedHashMap<>();
     private static Map<String, Long> periodAnchors = new LinkedHashMap<>();
+    private static Map<String, Long> periodUsed = new LinkedHashMap<>();
     private static BigInteger wirelessEu = BigInteger.ZERO; // 玩家绑定的无线电网 EU 余额（gtladditions/gtmthings）
     private static boolean hasBoundAeNetwork = false; // 玩家当前是否有绑定的在线 AE 网络（商店终端/FTBQ提交器，见 ShopAeNetwork）
     private static int memberTier = -1; // 付费会员档位（-1=未购买），永久买断，见 ShopMembership
@@ -34,6 +35,7 @@ public final class ClientWalletAccount {
         digital = BigInteger.ZERO;
         purchaseCounts = new LinkedHashMap<>();
         periodAnchors = new LinkedHashMap<>();
+        periodUsed = new LinkedHashMap<>();
         wirelessEu = BigInteger.ZERO;
         hasBoundAeNetwork = false;
         memberTier = -1;
@@ -43,7 +45,9 @@ public final class ClientWalletAccount {
     /** 应用服务端全量快照（权威覆盖）。 */
     public static void apply(Map<ResourceLocation, BigInteger> newCurrencies, BigInteger newDigital,
                               Map<String, Long> newPurchaseCounts, Map<String, Long> newPeriodAnchors,
-                              BigInteger newWirelessEu, boolean newHasBoundAeNetwork, int newMemberTier) {
+                              BigInteger newWirelessEu, boolean newHasBoundAeNetwork, int newMemberTier,
+                              Map<String, Long> newPeriodUsed) {
+        periodUsed = newPeriodUsed != null ? new LinkedHashMap<>(newPeriodUsed) : new LinkedHashMap<>();
         currencies = newCurrencies != null ? new LinkedHashMap<>(newCurrencies) : new LinkedHashMap<>();
         digital = newDigital != null ? newDigital : BigInteger.ZERO;
         purchaseCounts = newPurchaseCounts != null ? new LinkedHashMap<>(newPurchaseCounts) : new LinkedHashMap<>();
@@ -71,6 +75,13 @@ public final class ClientWalletAccount {
         if (key == null) return -1L;
         Long v = periodAnchors.get(key);
         return v == null ? -1L : v;
+    }
+
+    /** 某商品条目在当前周期窗口内的已用次数（见 ShopPeriodLimiter）；窗口是否已过期由调用方按锚点判断，未同步/未买过为 0。 */
+    public static long getPeriodUsed(String key) {
+        if (key == null) return 0L;
+        Long v = periodUsed.get(key);
+        return v == null ? 0L : v;
     }
 
     public static boolean isSynced() {

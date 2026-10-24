@@ -3530,8 +3530,11 @@ public class ShopScreen extends ScaledScreen {
         String costLabel = anyDiscount
                 ? "§7成本: §8" + costInline(selected.getCost()) + " §a→ " + costInline(selected.getEffectiveCost(memberPct)) + saleTag + memberTag
                 : "§7成本: " + costInline(selected.getCost());
-        g.drawString(this.font, GuiRenderUtil.trimText(this.font, costLabel,
-                dx + dw - 6 - cx), cx, dy + 42, CYAN, true);
+        // 头部这一行位置固定（下面输入框/步进按钮都按固定 Y 命中），放不下时这里只给指引，
+        // 完整成本在滚动区第一块换行全文显示，文字一个不删。
+        int costLineW = dx + dw - 6 - cx;
+        boolean costFitsHeader = this.font.width(costLabel) <= costLineW;
+        g.drawString(this.font, costFitsHeader ? costLabel : "§7成本: §8（较长，完整内容见下方）", cx, dy + 42, CYAN, true);
 
         // 数量标签 + AE 风格步进按钮（文本框 amountBox 由 initScaled 定位、super.render 绘制）
         g.drawString(this.font, (mode == Mode.BUY ? "§7购买次数（可输入）:" : "§7出售次数（可输入）:"), cx, dy + 56, WHITE, true);
@@ -3604,31 +3607,46 @@ public class ShopScreen extends ScaledScreen {
             case SELL_ONLY -> "  §e[仅出售]";
             default -> "";
         };
-        g.drawString(this.font, GuiRenderUtil.trimText(this.font, txLine + tradeModeTip, costTrimW), cx, py, WHITE, true);
-        int contentY = py;
+        // 滚动区自上而下流式排版：每块文字按宽度换行，flowY 是下一块的起点；单行仍占 12px，与旧版间距一致
+        int flowY = py;
+        if (!costFitsHeader) {
+            flowY += drawWrappedBlock(g, costLabel, cx, flowY, costTrimW, CYAN);
+        }
+        flowY += drawWrappedBlock(g, txLine + tradeModeTip, cx, flowY, costTrimW, WHITE);
         if (selected.isPeriodLimited()) {
             long periodTicks = selected.getPeriodTicks();
-            String periodCfgLine = "§d周期限购: §f" + (periodTicks / 20L) + "秒限" + formatBig(java.math.BigInteger.valueOf(selected.getPeriodLimit())) + "次";
-            g.drawString(this.font, GuiRenderUtil.trimText(this.font, periodCfgLine, costTrimW), cx, py + 12, WHITE, true);
+            long periodLimit = selected.getPeriodLimit();
+            flowY += drawWrappedBlock(g, "§d周期限购: §f" + formatDuration(periodTicks / 20L) + "限"
+                    + formatBig(java.math.BigInteger.valueOf(periodLimit)) + "次", cx, flowY, costTrimW, WHITE);
             long anchor = ClientWalletAccount.getPeriodAnchor(key);
             net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
             long gameTime = lvl != null ? lvl.getGameTime() : 0L;
             long remainingTicks = anchor >= 0L ? anchor + periodTicks - gameTime : -1L;
+            // 窗口没开（从没买过）或已过期都算 0 已用；服务端 ShopPeriodLimiter 同口径
+            long periodUsed = remainingTicks > 0L ? ClientWalletAccount.getPeriodUsed(key) : 0L;
+            long periodLeft = Math.max(0L, periodLimit - periodUsed);
+            flowY += drawWrappedBlock(g, "§7本周期已购: " + (periodLeft <= 0L ? "§c" : "§6")
+                    + formatBig(java.math.BigInteger.valueOf(periodUsed)) + "§7/§f"
+                    + formatBig(java.math.BigInteger.valueOf(periodLimit)) + "§7次  剩余: "
+                    + (periodLeft <= 0L ? "§c" : "§a") + formatBig(java.math.BigInteger.valueOf(periodLeft)) + "§7次",
+                    cx, flowY, costTrimW, WHITE);
             if (remainingTicks > 0L) {
-                g.drawString(this.font, "§7剩余刷新: §f" + (remainingTicks / 20L) + "秒", cx, py + 24, WHITE, true);
+                flowY += drawWrappedBlock(g, "§7剩余刷新: §f" + formatDuration(remainingTicks / 20L), cx, flowY, costTrimW, WHITE);
             } else {
-                g.drawString(this.font, "§a限额充足无需刷新", cx, py + 24, GREEN, true);
+                flowY += drawWrappedBlock(g, "§a限额充足无需刷新", cx, flowY, costTrimW, GREEN);
             }
-            contentY = py + 24;
         }
+        int contentY = flowY - 12; // 下游的「预计…」各行都按 contentY+12 起排
         boolean previewBar = ClientShopUiSettings.rewardPreviewBar();
         boolean normalGoods = selected.getRewardMode() == ShopEntry.RewardMode.NONE;
         // 方格 + 组合商品走原来的图标格。条形、以及奖励表的两种预览，底边记在 oddsBottom。
         boolean comboGrid = mode == Mode.BUY && normalGoods && !previewBar && selected.hasMultipleGoods();
         int rewardEndY = contentY + 66; // 单行组合预览的旧终点；多行时由 drawRewardPreview 回写
         int oddsBottom = -1; // 条形或奖励表方格的底边；<0 表示这次没画这块
+        int physicalHintExtra = 0; // 实物成本提示换成多行后比原来单行多占的高度，花费预览要跟着下移
         if (mode == Mode.BUY) {
-            g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计消耗: " + costInlineTimes(dcost, amount), costTrimW), cx, contentY + 12, CYAN, true);
+            // 预计消耗可能很长（多元成本），换行后把后面所有块整体下移
+            contentY += drawWrappedBlock(g, "§7预计消耗: " + costInlineTimes(dcost, amount), cx, contentY + 12, costTrimW, CYAN) - 12;
             ShopEntry.RewardMode rm = selected.getRewardMode();
             int physicalHintY;
             if (comboGrid) {
@@ -3659,24 +3677,29 @@ public class ShopScreen extends ScaledScreen {
                         : drawRewardOddsGrid(g, cx, contentY + 36, selected, detailInnerW, mx, hoverMy);
                 physicalHintY = oddsBottom;
             }
-            if (dcost.hasPhysical()) g.drawString(this.font, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, physicalHintY, GRAY, true);
+            if (dcost.hasPhysical()) {
+                physicalHintExtra = drawWrappedBlock(g, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, physicalHintY, costTrimW, GRAY) - 12;
+            }
         } else if (selected.hasMultipleGoods()) {
             g.drawString(this.font, "§c组合商品，不支持出售", cx, contentY + 12, DEEP_RED, true);
         } else {
             g.drawString(this.font, "§7预计消耗: §e" + formatBig(total) + " §7个商品", cx, contentY + 12, CYAN, true);
+            int sellGetH = 12;
             if (dcost.hasPhysical()) {
                 g.drawString(this.font, "§c含实物成本，不支持出售", cx, contentY + 24, DEEP_RED, true);
             } else {
-                g.drawString(this.font, GuiRenderUtil.trimText(this.font, "§7预计获得: " + costInlineTimes(dcost, amount), costTrimW), cx, contentY + 24, GREEN, true);
+                sellGetH = drawWrappedBlock(g, "§7预计获得: " + costInlineTimes(dcost, amount), cx, contentY + 24, costTrimW, GREEN);
             }
             int held = ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem());
-            g.drawString(this.font, "§7背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, contentY + 36, held > 0 ? GREEN : DEEP_RED, true);
+            g.drawString(this.font, "§7背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, contentY + 24 + sellGetH, held > 0 ? GREEN : DEEP_RED, true);
+            physicalHintExtra = sellGetH - 12;
         }
 
         maybeRequestCostPreview(dcost);
         int costPreviewY = comboGrid ? rewardEndY + 14
                 : oddsBottom >= 0 ? (dcost.hasPhysical() ? oddsBottom + 14 : oddsBottom + 4)
                 : contentY + 50;
+        costPreviewY += physicalHintExtra;
         int cursorY = drawCostPreview(g, cx, costPreviewY, dcost, amount, detailInnerW, py + viewportH + 2048, mx, hoverMy);
         contentEndY = Math.max(contentEndY, cursorY);
         int actionY = cursorY + 2;
@@ -5890,35 +5913,39 @@ public class ShopScreen extends ScaledScreen {
      * 数量颜色仍表示够不够。花费没有概率。
      */
     private int drawCostBars(GuiGraphics g, int x, int y, java.util.List<PreviewCell> cells, int maxW, int maxBottom, int mx, int my) {
-        int rowH = 20;
         int end = y;
         for (int i = 0; i < cells.size(); i++) {
-            int ry = y + i * rowH;
-            if (ry + rowH > maxBottom) {
+            int ry = end;
+            if (ry + BAR_ROW_MIN_H > maxBottom) {
                 g.drawString(this.font, "§7… 还有 " + (cells.size() - i) + " 项", x, ry + 2, GRAY, true);
                 return ry + 12;
             }
             PreviewCell cell = cells.get(i);
-            boolean hv = GuiRenderUtil.isHovering(mx, my, x, ry, maxW, rowH);
-            if (hv) g.fill(x, ry, x + maxW, ry + rowH - 1, 0x33FFFFFF);
-            if (cell.spark) {
-                g.drawCenteredString(this.font, "§e★", x + 10, ry + 6, WHITE);
-            } else if (cell.fluid != null) {
-                renderFluidIcon(g, x + 2, ry + 2, 16, cell.fluid);
-            } else if (cell.item != null && !cell.item.isEmpty()) {
-                g.renderItem(cell.item, x + 2, ry + 2);
-            }
             boolean fluid = cell.fluid != null;
             String qty = costAmountColor(cell) + (fluid ? cell.amount : "×" + cell.amount);
             String orderTag = orderBarTag(cell.orderState);
             int qtyW = this.font.width(qty);
             int tagW = orderTag.isEmpty() ? 0 : this.font.width(orderTag) + 4;
             int nameMax = Math.max(8, maxW - 22 - qtyW - tagW - 2);
-            g.drawString(this.font, "§f" + GuiRenderUtil.trimText(this.font, cell.name, nameMax), x + 22, ry + 6, WHITE, true);
-            if (!orderTag.isEmpty()) {
-                g.drawString(this.font, orderTag, x + maxW - qtyW - tagW, ry + 6, WHITE, true);
+            // 名称放不下就换行、行高随之增长，不再用省略号截断
+            List<net.minecraft.util.FormattedCharSequence> nameLines = this.font.split(Component.literal("§f" + cell.name), nameMax);
+            int rowH = barRowHeight(nameLines.size());
+            boolean hv = GuiRenderUtil.isHovering(mx, my, x, ry, maxW, rowH);
+            if (hv) g.fill(x, ry, x + maxW, ry + rowH - 1, 0x33FFFFFF);
+            int iconY = ry + (rowH - 16) / 2;
+            if (cell.spark) {
+                g.drawCenteredString(this.font, "§e★", x + 10, ry + (rowH - 8) / 2, WHITE);
+            } else if (cell.fluid != null) {
+                renderFluidIcon(g, x + 2, iconY, 16, cell.fluid);
+            } else if (cell.item != null && !cell.item.isEmpty()) {
+                g.renderItem(cell.item, x + 2, iconY);
             }
-            g.drawString(this.font, qty, x + maxW - qtyW, ry + 6, WHITE, true);
+            drawBarNameLines(g, nameLines, x + 22, ry, rowH);
+            int midY = ry + (rowH - 8) / 2;
+            if (!orderTag.isEmpty()) {
+                g.drawString(this.font, orderTag, x + maxW - qtyW - tagW, midY, WHITE, true);
+            }
+            g.drawString(this.font, qty, x + maxW - qtyW, midY, WHITE, true);
             if (hv) {
                 previewTipKey = widgetKey(x, ry, 2);
                 applyCostHover(cell);
@@ -5926,6 +5953,35 @@ public class ShopScreen extends ScaledScreen {
             end = ry + rowH;
         }
         return end;
+    }
+
+    /**
+     * 在 (x,y) 起按 maxW 把整段文字换行画出，一个字都不删。单行返回 12（与旧版逐行 12px 的间距一致），
+     * 多行返回 行数×10+2。供详情滚动区流式排版累加 y 用。
+     */
+    private int drawWrappedBlock(GuiGraphics g, String text, int x, int y, int maxW, int color) {
+        List<net.minecraft.util.FormattedCharSequence> lines = this.font.split(Component.literal(text), Math.max(8, maxW));
+        for (int i = 0; i < lines.size(); i++) {
+            g.drawString(this.font, lines.get(i), x, y + i * 10, color, true);
+        }
+        return lines.size() <= 1 ? 12 : lines.size() * 10 + 2;
+    }
+
+    /** 条形预览单行的最小行高（图标 16px + 上下边距）。 */
+    private static final int BAR_ROW_MIN_H = 20;
+
+    /** 条形预览一行的实际高度：名称换成 n 行时每行 10px，不低于 {@link #BAR_ROW_MIN_H}。 */
+    private static int barRowHeight(int nameLineCount) {
+        return Math.max(BAR_ROW_MIN_H, Math.max(1, nameLineCount) * 10 + 4);
+    }
+
+    /** 把已换行的名称在该行内垂直居中画出；单行时落在 ry+6，与旧版一致。 */
+    private void drawBarNameLines(GuiGraphics g, List<net.minecraft.util.FormattedCharSequence> lines, int tx, int ry, int rowH) {
+        int ty = ry + (rowH - Math.max(1, lines.size()) * 10) / 2 + 1;
+        for (net.minecraft.util.FormattedCharSequence line : lines) {
+            g.drawString(this.font, line, tx, ty, WHITE, true);
+            ty += 10;
+        }
     }
 
     /**
@@ -6039,22 +6095,23 @@ public class ShopScreen extends ScaledScreen {
             g.drawString(this.font, "§8无", x, y, GRAY, true);
             return y + 12;
         }
-        int rowH = 20;
         int end = y;
         for (int i = 0; i < cells.size(); i++) {
             RewardCell cell = cells.get(i);
-            int ry = y + i * rowH;
-            boolean hv = GuiRenderUtil.isHovering(mx, my, x, ry, maxW, rowH);
-            if (hv) g.fill(x, ry, x + maxW, ry + rowH - 1, 0x33FFFFFF);
-            if (cell.icons() != null && !cell.icons().isEmpty()) {
-                renderIconComposite(g, cell.icons(), x, ry);
-            }
+            int ry = end;
             boolean fluid = cell.amount().endsWith("mB");
             String qty = "§e" + (fluid ? cell.amount() : "×" + cell.amount());
             int qtyW = this.font.width(qty);
             int nameMax = Math.max(8, maxW - 22 - qtyW - 2);
-            g.drawString(this.font, "§f" + GuiRenderUtil.trimText(this.font, cell.name(), nameMax), x + 22, ry + 6, WHITE, true);
-            g.drawString(this.font, qty, x + maxW - qtyW, ry + 6, WHITE, true);
+            List<net.minecraft.util.FormattedCharSequence> nameLines = this.font.split(Component.literal("§f" + cell.name()), nameMax);
+            int rowH = barRowHeight(nameLines.size());
+            boolean hv = GuiRenderUtil.isHovering(mx, my, x, ry, maxW, rowH);
+            if (hv) g.fill(x, ry, x + maxW, ry + rowH - 1, 0x33FFFFFF);
+            if (cell.icons() != null && !cell.icons().isEmpty()) {
+                renderIconComposite(g, cell.icons(), x, ry + (rowH - BAR_ROW_MIN_H) / 2);
+            }
+            drawBarNameLines(g, nameLines, x + 22, ry, rowH);
+            g.drawString(this.font, qty, x + maxW - qtyW, ry + (rowH - 8) / 2, WHITE, true);
             if (hv) {
                 previewTipKey = widgetKey(x, ry, 5);
                 if (cell.tip() != null && !cell.tip().isEmpty()) {

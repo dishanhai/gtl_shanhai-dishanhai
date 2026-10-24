@@ -92,4 +92,26 @@ class ShopBatchOperationsSourceTest {
         assertTrue(screen.contains("奖励模式"),
                 "商品悬停详情应展示奖励模式");
     }
+
+    @Test
+    void periodLimitDetailShowsUsedAndRemainingCounts() throws Exception {
+        String screen = source("client/gui/shop/ShopScreen.java");
+        String packet = source("network/WalletAccountSyncPacket.java");
+        String client = source("client/shop/ClientWalletAccount.java");
+        assertTrue(screen.contains("本周期已购") && screen.contains("ClientWalletAccount.getPeriodUsed(key)"),
+                "详情页应显示周期限购的已购/剩余具体次数");
+        assertTrue(packet.contains("periodUsed") && client.contains("getPeriodUsed"),
+                "钱包同步应带上周期已用次数");
+    }
+
+    @Test
+    void detailPanelWrapsLongTextInsteadOfTrimming() throws Exception {
+        String screen = source("client/gui/shop/ShopScreen.java");
+        assertTrue(screen.contains("drawWrappedBlock(g, \"§7预计消耗: \""),
+                "预计消耗应换行显示全文");
+        assertTrue(screen.contains("drawWrappedBlock(g, \"§8含实物成本"),
+                "实物成本提示应换行显示全文");
+        assertTrue(screen.contains("drawBarNameLines"),
+                "花费/获得预览条形的名称应换行而不是省略号截断");
+    }
 }
