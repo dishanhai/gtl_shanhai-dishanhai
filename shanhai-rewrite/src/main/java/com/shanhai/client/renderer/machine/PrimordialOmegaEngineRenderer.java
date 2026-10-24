@@ -12,6 +12,7 @@ import com.gregtechceu.gtceu.api.machine.MetaMachine;
 
 import org.gtlcore.gtlcore.utils.RenderUtil;
 
+import com.shanhai.api.ShanhaiClockHook;
 import com.shanhai.common.machine.PrimordialOmegaEngineMachine;
 import com.shanhai.common.machine.PrimordialSphereStyle;
 import com.shanhai.config.ShanhaiConfig;
@@ -110,7 +111,12 @@ public class PrimordialOmegaEngineRenderer extends AbstractRingRenderer {
             // 🔴 2026-09-23 第二次：加【彩虹变化周期】传参。默认 0 = 不变化（用户拍板）
             //    ⇒ 不按那个按钮时颜色逐位不变；相位复用上面同一个连续时钟（没有第二口时钟）。
             PrimordialNeutronStarSphereRenderer.enqueue(
-                    blockEntity, facing, RenderUtil.getSmoothTick(machine, partialTick), isWorking,
+                    // 🔴 2026-10-18：这一处是【绕过 AbstractRingRenderer 的直调】，必须自己再过一遍冻结闸门
+                    //    （同一口时钟，见 gtlcore RenderUtil#getSmoothTick → GlobalRenderClock）。
+                    //    不包这一层的话：gtlcore 那条 mixin 一旦静默失效，恒星球的旋转/呼吸在暂停期间照转。
+                    //    ⚠️ 拆分后这里调的是本体接缝 ShanhaiClockHook（没装扩展 ⇒ 原值透传）。
+                    blockEntity, facing,
+                    ShanhaiClockHook.smoothTick(RenderUtil.getSmoothTick(machine, partialTick)), isWorking,
                     moduleSlotBonusOf(machine),
                     starRadiusOverrideOf(machine),
                     starHueOverrideOf(machine),

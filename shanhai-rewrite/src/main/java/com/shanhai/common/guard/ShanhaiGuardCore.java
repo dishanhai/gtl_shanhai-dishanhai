@@ -28,7 +28,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *       不是只返回 boolean ⇒ 日志有话可说。</li>
  *   <li>{@link #healVerified(float, float)} ＋ {@link #healFailureCount()}：<b>回血要能自证</b> ——
  *       对方可能 mixin 掉 {@code setHealth}/{@code heal}，我们的回血会<b>静默失效</b>，必须自己抓着。
- *       第二通道（直写同步血量）{@link SecondChannelHeal} <b>先只留接口</b>。</li>
+ *       第二通道（直写同步血量）{@link SecondChannelHeal} —— <b>2026-10-17 已实现</b>：
+ *       对手的杀人链<b>不过 {@code setHealth}</b>（直接裸写 {@code DATA_HEALTH_ID} 同步血量字段），
+ *       并且给 {@code setHealth} 挂了"单向锁存后取消任何加血"的 {@code @Inject}、给 {@code getHealth()} 加了偏移
+ *       ⇒ 只走第一条通道补血会永久无效，必须有第二条腿（见 ⑧ 值层兜底）。</li>
  *   <li>{@link #looksDead(float, boolean, int, int)}：<b>读血不可全信</b> ——
  *       {@code getHealth()} 可能已被改写/假血 ⇒ 用死亡标志与计时器交叉校验。</li>
  * </ol>
@@ -326,10 +329,11 @@ public final class ShanhaiGuardCore {
     }
 
     /**
-     * 🔴 <b>第二通道：直写同步血量</b>（先把接口留着，Forge 侧后接）。
+     * 🔴 <b>第二通道：直写同步血量</b>。
      *
-     * <p>第一通道（{@code setHealth}/{@code heal}）可能被人 mixin 掉；第二通道绕过去直接写。
-     * <b>本类不实现它</b>，只提供插槽；没接就<b>不假报成功</b>。
+     * <p>第一通道（{@code setHealth}/{@code heal}）可能被人 mixin 掉；第二通道绕过去直接写
+     * {@code LivingEntity.DATA_HEALTH_ID}（1.20.1 的 {@code f_20961_}）那个同步血量字段。
+     * <b>本类不实现它</b>（本类零 Minecraft 依赖），只提供插槽；没接就<b>不假报成功</b>。
      */
     public interface SecondChannelHeal {
 
@@ -342,18 +346,84 @@ public final class ShanhaiGuardCore {
 
     /** 走第二通道直写，并给出原因串（未接入 ⇒ 明确说"未接入"，不假装成功）。 */
     public static Decision healViaSecondChannel(float expected) {
-        final SecondChannelHeal ch = secondChannel;
-        if (ch == null) {
-            return Decision.of(false, "第二通道未接入（只留接口）⇒ 未直写同步血量 " + expected);
+        return healViaSecondChannel(secondChannel, expected);
+    }
+
+    /**
+     * 🔴 走<b>指定的</b>第二通道直写（不碰全局插槽）—— 生产路径用这一个：
+     * 每个实体一个 {@link SecondChannelHeal} 适配器实例（线程安全、不会把"别人的玩家"写错）。
+     *
+     * @param channel  通道实现（null ⇒ 明确报"未接入"）
+     * @param expected 要写进去的血量
+     * @return {@code yes} = 真的写进去了
+     */
+    public static Decision healViaSecondChannel(SecondChannelHeal channel, float expected) {
+        if (channel == null) {
+            return Decision.of(false, "第二通道未接入（channel=null）⇒ 未直写同步血量 " + expected);
         }
         final boolean ok;
         try {
-            ok = ch.writeHealth(expected);
+            ok = channel.writeHealth(expected);
         } catch (Throwable t) {
             return Decision.of(false, "第二通道抛异常：" + t);
         }
         return Decision.of(ok, ok ? "第二通道已直写同步血量 = " + expected : "第二通道直写失败（返回 false）");
     }
+
+    /**
+     * 🔴 <b>第一腿自证</b>（{@code setHealth} 之后）：{@code yes} = <b>自证失败</b>。
+     *
+     * <p>能读到字段真值就<b>只信字段真值</b>（对手给 {@code getHealth()} 的每条 {@code return} 加了偏移，
+     * 那个读数可能比真血高 ⇒ "该补血"的信号会被吃掉）；
+     * 字段真值读不到（NaN = 第二通道未就绪）才退回 {@code getHealth()}，并在原因串里写明"退化读数"。
+     *
+     * @param expected          期望值（{@link #healTarget(float)}）
+     * @param fieldHealthValue  字段真值（{@code getEntityData().get(DATA_HEALTH_ID)}；读不到 = {@code Float.NaN}）
+     * @param getHealthValue    {@code getHealth()} 的读数（只在字段真值读不到时使用）
+     */
+    public static Decision setHealthProof(float expected, float fieldHealthValue, float getHealthValue) {
+        if (!Float.isNaN(fieldHealthValue)) {
+            return proofAgainst(expected, fieldHealthValue, "字段真值");
+        }
+        return proofAgainst(expected, getHealthValue,
+                "getHealth()（字段真值读不到 ⇒ 退化读数，可能被加了偏移）");
+    }
+
+    /**
+     * 🔴 <b>第二腿自证</b>（直写同步血量之后）：{@code yes} = <b>自证失败</b>。
+     *
+     * <p>🔴 必须用<b>字段真值</b>核对，<b>不许</b>用 {@code getHealth()} ——
+     * 对手给 {@code getHealth()} 加了偏移，用它核对会把"直写没落地"判成成功（自欺）。
+     *
+     * @param expected         期望值
+     * @param wrote            第二通道自己报的"写进去了吗"
+     * @param fieldHealthValue 写完之后的字段真值（NaN = 读不到）
+     */
+    public static Decision directWriteProof(float expected, boolean wrote, float fieldHealthValue) {
+        if (!wrote) {
+            return Decision.of(true, "第二通道不可用：没能直写同步血量字段（accessor 没拿到 / 写入抛异常）");
+        }
+        if (Float.isNaN(fieldHealthValue)) {
+            return Decision.of(true, "第二通道写完了，但字段真值读不到（NaN）⇒ 不当成功");
+        }
+        return proofAgainst(expected, fieldHealthValue, "字段真值（直写后）");
+    }
+
+    /**
+     * 「读回值 == 期望」的判据本体（{@code yes} = 不通过；原因串里带读数来源）。
+     *
+     * <p>NaN 读数一律判不通过（"读不到"不等于"补上了"）。
+     */
+    public static Decision proofAgainst(float expected, float readBack, String source) {
+        if (Float.isNaN(readBack)) {
+            return Decision.of(true, source + " 读到 NaN ⇒ 这次补血【不成立】");
+        }
+        if (Math.abs(readBack - expected) <= EPS) {
+            return Decision.of(false, source + " 与期望一致（" + readBack + " / " + expected + "）");
+        }
+        return Decision.of(true, source + " " + readBack + " != 期望 " + expected + " ⇒ 这次补血【没落地】");
+    }
+
 
     // ═══════════════════════════════ 口径③：读血不可全信 ═══════════════════════════════
 
@@ -451,6 +521,200 @@ public final class ShanhaiGuardCore {
             return false;
         }
         return cancelDeathScreenDecision(DEATH_SCREEN_SIMPLE, holdingModule, enabled).yes;
+    }
+
+    // ═══════════ ⑧ 值层兜底（2026-10-17 新增：对手直接写同步血量 / 直接判死，事件层拦不住） ═══════════
+    //
+    // 🔴 起因（实机复现 ＋ 对手字节码，两条证据指向同一结论；**不推翻任何一条既有事实**）：
+    //   · 事件层：伤害 / 死亡 / 死亡界面 三条拦截都在生效，补血自证也成功（回血自证失败 = 0 次）；
+    //   · 但玩家最终进入「死但没死透」：死亡界面被压住，人却僵住不能动。
+    //   · 对手的杀人链【不过 setHealth】：
+    //       EntityUtil.damageHealth：算 `真血 - 伤害`（没有 max(0, ·)）→ EntityUtil.forceSetHealth
+    //       → forceSetEntityData(LivingEntity.f_20961_ /* DATA_HEALTH_ID */, 值)  ← 直接裸写同步血量字段
+    //   · 它另在 setHealth 上挂 `@Inject(HEAD, cancellable=true)`：counter>=5 且新值 > getHealth() ⇒ 直接 cancel，
+    //     而 counter 是【单向锁存】⇒ 一旦中招，我们的 setHealth 补血永久无效；
+    //   · 它给 getHealth() 的每条 return 插了 `+ delta`（delta 存同步数据里，客户端同样带偏移）
+    //     ⇒ **读回值不等于真实血量**。
+    //
+    // ⇒ 三条结论（本段就是它们的判据）：
+    //   ⑴ 只拦 setHealth 不够（它不走那条路）         ⇒ ② 每 tick 看门狗改用【字段真值】判"死没死"；
+    //   ⑵ 只信 getHealth() 不够（读数带偏移）          ⇒ {@link #trustedHealth} / {@link #deathFlowResetDecision}；
+    //   ⑶ 只走 setHealth 补血不够（可能被 cancel）     ⇒ 回血两条腿：setHealth → 自证 → 直写字段 → 再自证
+    //                                                     （{@link #setHealthProof} / {@link #directWriteProof}）。
+
+    /**
+     * 🔴 <b>这次补血最终走的是哪一条通道</b> —— 日志里必须写出来（{@code heal_channel=setHealth / direct / failed}），
+     * 只写"成功/失败"会把"是第一条腿成的还是第二条腿救回来的"这件事吞掉。
+     */
+    public enum HealChannel {
+
+        /** 第一条通道：{@code setHealth(max)}（可能被别人的 {@code @Inject(HEAD, cancellable)} 取消）。 */
+        SET_HEALTH("setHealth"),
+
+        /** 第二条通道：直写同步血量字段 {@code DATA_HEALTH_ID}（绕开 {@code setHealth}）。 */
+        DIRECT("direct"),
+
+        /** 两条腿都没把血落盘 ⇒ 明确报失败，<b>绝不假装成功</b>。 */
+        FAILED("failed");
+
+        private final String label;
+
+        HealChannel(String label) {
+            this.label = label;
+        }
+
+        /** 日志里用的字面量（{@code heal_channel=<label>}）。 */
+        public String label() {
+            return label;
+        }
+    }
+
+    /**
+     * 🔴 <b>该信哪个血量读数</b>：字段真值（{@code getEntityData().get(DATA_HEALTH_ID)}）可用就用它，
+     * 读不到（NaN）才退回 {@code getHealth()}。
+     *
+     * <p>为什么：对手给 {@code getHealth()} 的每条 {@code return} 加了偏移（delta 还同步给客户端）
+     * ⇒ 那个读数<b>偏高</b>时"该补血"的信号会被吃掉（血已经是 0 了却以为还满着），<b>偏低</b>时会误判成快死。
+     *
+     * @param getHealthValue    {@code player.getHealth()}
+     * @param fieldHealthValue  字段真值（读不到 = {@code Float.NaN}）
+     */
+    public static float trustedHealth(float getHealthValue, float fieldHealthValue) {
+        return Float.isNaN(fieldHealthValue) ? getHealthValue : fieldHealthValue;
+    }
+
+    /** {@link #trustedHealth} 的"为什么用这个读数"（进日志；两个读数不一致时点明"疑似加偏移"）。 */
+    public static String trustedHealthReason(float getHealthValue, float fieldHealthValue) {
+        if (Float.isNaN(fieldHealthValue)) {
+            return "字段真值读不到（第二通道未就绪）⇒ 退回 getHealth()=" + getHealthValue;
+        }
+        if (Math.abs(getHealthValue - fieldHealthValue) > EPS) {
+            return "以字段真值 " + fieldHealthValue + " 为准；getHealth()=" + getHealthValue
+                    + " ⚠ 与真值不一致（疑似被加偏移）";
+        }
+        return "以字段真值 " + fieldHealthValue + " 为准（getHealth() 与之一致）";
+    }
+
+    /**
+     * ① 值层兜底：{@code LivingEntity#setHealth(float)} 的入参要不要被改写成满血上限。
+     *
+     * <pre>
+     *   值 &gt; 0（正常写血）                 ⇒ false（一个字节都不改；NaN 也在这里放行）
+     *   开关关 / 不是 ServerPlayer / 不受保护 ⇒ false
+     *   受保护玩家 ＋ 值 &lt;= 0               ⇒ true（改写成 getMaxHealth()）
+     * </pre>
+     */
+    public static Decision rewriteHealthDecision(float value, boolean isServerPlayer, boolean guarded,
+                                                 boolean enabledFlag) {
+        // 🔴 最便宜的判据放最前面：正常值（含 NaN）一律不动
+        if (!(value <= 0f)) {
+            return Decision.of(false, "传入值 " + value + " 不小于等于 0 ⇒ 原样放行（一个字节都不改）");
+        }
+        if (!enabledFlag) {
+            return Decision.of(false, "开关关闭（enabled=false）⇒ 不碰血量");
+        }
+        if (!isServerPlayer) {
+            return Decision.of(false, "不是服务端玩家（ServerPlayer=false）⇒ 原样放行");
+        }
+        if (!guarded) {
+            return Decision.of(false, "不是受保护玩家 ⇒ 原样放行");
+        }
+        return Decision.of(true, "受保护玩家 ＋ 传入值 " + value + " <= 0 ⇒ 改写成满血上限");
+    }
+
+    /** 同上（只要结论）。 */
+    public static boolean shouldRewriteHealth(float value, boolean isServerPlayer, boolean guarded,
+                                              boolean enabledFlag) {
+        return rewriteHealthDecision(value, isServerPlayer, guarded, enabledFlag).yes;
+    }
+
+    /**
+     * ② 服务端每 tick 看门狗：这个人是不是<b>已经进入死亡流程</b>（该把血和两个计时器拉回来）。
+     *
+     * <p>四条判据（任一为真 ⇒ 复位）：
+     * <ol>
+     *   <li>{@code isDeadOrDying()} = true —— 原版判据（内部就是 {@code getHealth() <= 0}）；</li>
+     *   <li>{@code deathTime > 0} —— 死亡计时器在走（有人每 tick 把它推到 20 直接处决）；</li>
+     *   <li>🔴 <b>2026-10-17 新增：同步血量字段真值 &lt;= 0</b> —— 因为对手给 {@code getHealth()} 加了偏移，
+     *       {@code isDeadOrDying()} 与 {@code deathTime} 这两条都可能被绕过 ⇒ 直接看字段真值；
+     *       字段读不到（NaN）时这一条<b>不参与判断</b>（原因串里会点出来，不静默）。</li>
+     *   <li>🔴 <b>2026-10-17 新增（⑤ 对手桥）：对手自己的 {@code checkEntityDead} 说是死</b> ——
+     *       它自己的判死可能比我们这三条都宽（coremod=true 满功率时）⇒ 并进来一起判。</li>
+     * </ol>
+     */
+    public static Decision deathFlowResetDecision(boolean isDeadOrDying, int deathTime, float fieldHealth,
+                                                  boolean omnimobsSaysDead, boolean enabledFlag) {
+        if (!enabledFlag) {
+            return Decision.of(false, "开关关闭（enabled=false）⇒ 不复位");
+        }
+        final String fieldNote = Float.isNaN(fieldHealth)
+                ? "字段真值读不到（这一条不参与判断）" : ("字段真值=" + fieldHealth);
+        if (isDeadOrDying) {
+            return Decision.of(true, "isDeadOrDying()=true ⇒ 复位（" + fieldNote + "）");
+        }
+        if (deathTime > 0) {
+            return Decision.of(true, "deathTime=" + deathTime + " > 0 ⇒ 复位（" + fieldNote + "）");
+        }
+        if (!Float.isNaN(fieldHealth) && fieldHealth <= EPS) {
+            return Decision.of(true, "同步血量字段 <= 0（" + fieldHealth
+                    + "）⇒ 复位（getHealth() 可能带偏移，不可信）");
+        }
+        if (omnimobsSaysDead) {
+            return Decision.of(true, "对手自检 checkEntityDead=true ⇒ 复位（它的判死比我们这三条宽；"
+                    + fieldNote + "）");
+        }
+        return Decision.of(false, "血 > 0 且 deathTime=0 且对手也不说死 ⇒ 不用复位（" + fieldNote + "）");
+    }
+
+    /** 同上，用类里的开关（生产调用点只关心"要不要复位"）。 */
+    public static boolean needsDeathFlowReset(boolean isDeadOrDying, int deathTime, float fieldHealth,
+                                             boolean omnimobsSaysDead) {
+        return deathFlowResetDecision(isDeadOrDying, deathTime, fieldHealth, omnimobsSaysDead, enabled).yes;
+    }
+
+    /**
+     * ⑤ 对手桥：玩家 ForgeData 里那个「单向锁存计数器」要不要清零。
+     *
+     * <p>对手的判据是 {@code counter >= 5 && 新值 > 当前血 ⇒ cancel setHealth}，而 counter 单向锁存
+     * ⇒ 不清零的话我们的 {@code setHealth} <b>永久无效</b>。
+     *
+     * @param counterValue 从 {@code player.getPersistentData().getInt("omnimobs_counter_data")} 读到的值
+     *                     （键不存在 ⇒ 原版 {@code getInt} 返回 0 ⇒ 不用清）
+     */
+    public static boolean shouldResetOmnimobsCounter(int counterValue) {
+        return counterValue >= OMNIMOBS_COUNTER_LOCKED;
+    }
+
+    /** 同上，带原因串（进日志）。 */
+    public static Decision omnimobsCounterDecision(int counterValue) {
+        if (shouldResetOmnimobsCounter(counterValue)) {
+            return Decision.of(true, "counter=" + counterValue + " >= " + OMNIMOBS_COUNTER_LOCKED
+                    + "（对手已锁存）⇒ 清零，否则我们的 setHealth 会被它 cancel");
+        }
+        return Decision.of(false, "counter=" + counterValue + " < " + OMNIMOBS_COUNTER_LOCKED
+                + " ⇒ 没锁，不动它");
+    }
+
+    /**
+     * ④ 值层兜底：这次 {@code die(DamageSource)} 要不要<b>直接拒绝</b>（只认受保护的服务端玩家）。
+     *
+     * <p>为什么这是"最干净的一道"：{@code die} 在 {@code HEAD} 被 cancel ⇒ 死亡流程
+     * （{@code dead = true} ／ 死亡动画 ／ 掉落 ／ 死亡界面）<b>一步都不会开始</b>，
+     * 不用跟任何人比谁先把血写回去。
+     */
+    public static Decision refuseDieDecision(boolean enabledFlag, boolean guarded) {
+        if (!enabledFlag) {
+            return Decision.of(false, "开关关闭（enabled=false）⇒ 放行");
+        }
+        if (!guarded) {
+            return Decision.of(false, "不是受保护玩家 ⇒ 放行（一个字节都不改）");
+        }
+        return Decision.of(true, "受保护玩家 ⇒ HEAD 拒绝 die(...)（死亡流程一步都不开始）");
+    }
+
+    /** 同上（只要结论）。 */
+    public static boolean shouldRefuseDie(boolean enabledFlag, boolean guarded) {
+        return refuseDieDecision(enabledFlag, guarded).yes;
     }
 
     /**
@@ -1251,6 +1515,50 @@ public final class ShanhaiGuardCore {
     public static final String KIND_RESCUED = "已救回";
     /** 死亡界面（客户端那半边用）。 */
     public static final String KIND_SCREEN = "死亡界面";
+    /** 🔴 2026-10-17 新增：死亡流程复位（② 服务端每 tick 看门狗那一路）。 */
+    public static final String KIND_RESET = "死亡流程复位";
+    /** 🔴 2026-10-17 新增：拒绝死亡（④ {@code LivingEntity#die} / {@code ServerPlayer#die} 的 HEAD 注入）。 */
+    public static final String KIND_DIE_REFUSED = "拒绝死亡";
+    /** 🔴 2026-10-17 新增：客户端死亡态复位（③ 客户端每 tick；<b>诊断类</b>，只进日志、不进聊天栏）。 */
+    public static final String KIND_CLIENT_RESET = "客户端死亡态复位";
+    /** 🔴 2026-10-17 新增：对手桥维护（⑤ 反射清它的 delta / 计数器；<b>诊断类</b>，只进日志、不进聊天栏）。 */
+    public static final String KIND_OMNIMOBS = "对手桥维护";
+    /**
+     * 🔴 2026-10-17 新增：<b>反击退 / 反挤压</b>（清零 {@code hurtMarked} ＋ 窗口内把 {@code deltaMovement}
+     * 的 x/z 清零）。<b>诊断类</b>：只进日志、<b>不进聊天栏</b>（用户口径「不播报」）；
+     * 要播就播左下角（{@code knockback_broadcast}，默认关），那一路在
+     * {@link ShanhaiGuardKnockback#broadcastText} 里，与本表分开。
+     */
+    public static final String KIND_KNOCKBACK = "反击退";
+
+    // ═══════════ ⑤ 对手桥（2026-10-17 新增：用对手自己的 public API 反向修复；失效自动退回值层） ═══════════
+    //
+    // 对手（coremod=true 满功率）那三件套，以及本工程怎么反向修复：
+    //   ① getHealth() 的每条 return 加 delta（delta 存在同步数据里，客户端同样带偏移）
+    //        ⇒ 调它自己的 public static `setHealthDelta(LivingEntity, float)` 把 delta 写成 0
+    //          ⇒ 它的 getHealth() = 血量字段 + 0 = 真值（假死/假血一起消失）
+    //   ② setHealth 上挂【单向锁存】：counter>=5 且新值 > 当前血 ⇒ cancel
+    //        ⇒ counter 存在玩家 ForgeData 的 `omnimobs_counter_data`
+    //          （实测：`/data get entity @s ForgeData.omnimobs_counter_data`）
+    //          ⇒ 读到 >= 5 就 putInt(..., 0) ⇒ 我们的 setHealth 又能生效
+    //   ③ 它自己的"判死"：`checkEntityDead(LivingEntity)` ⇒ 每 tick 问一次，true 就并入复位判据
+    //
+    // 🔴 这些常量是【对手的类名/方法名/数据键】的原样抄写：**换版本就失效**。
+    //    失效时的行为：只记一行 `omnimobs_bridge unavailable: <原因>`，之后不再重试；
+    //    值层（setHealth ／ 直写 DATA_HEALTH_ID）照旧工作 ⇒ 功能不会因此消失，只是少一层。
+
+    /** 对手的工具类（三个都是 {@code public static}；javap 已确认）。 */
+    public static final String OMNIMOBS_UTIL_CLASS = "flashfur.omnimobs.util.GetHealthModifyUtil";
+    /** 对手：写 {@code getHealth()} 的偏移（{@code setHealthDelta(LivingEntity, float)}）。 */
+    public static final String OMNIMOBS_METHOD_SET_DELTA = "setHealthDelta";
+    /** 对手：读 {@code getHealth()} 的偏移（{@code obtainHealthDelta(LivingEntity)}）。 */
+    public static final String OMNIMOBS_METHOD_GET_DELTA = "obtainHealthDelta";
+    /** 对手：它自己的"判死"（{@code checkEntityDead(LivingEntity)}）。 */
+    public static final String OMNIMOBS_METHOD_CHECK_DEAD = "checkEntityDead";
+    /** 对手的"单向锁存计数器"在玩家 ForgeData 里的键（实测命令读到的就是它）。 */
+    public static final String OMNIMOBS_COUNTER_KEY = "omnimobs_counter_data";
+    /** 对手锁住的阈值：{@code counter >= 5} 起，它对任何"加血"的 {@code setHealth} 一律 cancel。 */
+    public static final int OMNIMOBS_COUNTER_LOCKED = 5;
 
     // ═══════════════ 机制名（用户追加口径：必须回答"拦了哪个事件 / 哪条代码路"） ═══════════════
     //
@@ -1281,6 +1589,31 @@ public final class ShanhaiGuardCore {
     public static final String MECH_RE_ADD = "ServerLevel.addFreshEntity()";
     /** 补回一件模块那一步（{@code giveModule} → {@code Inventory#add}）。 */
     public static final String MECH_INVENTORY_ADD = "inventory.add";
+    /**
+     * 🔴 2026-10-17 新增：死亡流程复位那一步（{@code setHealth(max)} ＋ {@code deathTime = 0} ＋ {@code hurtTime = 0}）。
+     *
+     * <p>按用户样例写作 {@code RESET deathTime (ServerTickEvent)}：动作（RESET）＋ 被复位的字段（deathTime）
+     * ＋ 走的是哪一条路（{@code ServerTickEvent} 每 tick 兜底）。② 服务端与 ③ 客户端用的是同一份复位动作。
+     */
+    public static final String MECH_RESET_DEATH_TIME = "RESET deathTime (ServerTickEvent)";
+    /**
+     * 🔴 2026-10-17 新增：拒绝死亡的那两个注入点（{@code @Inject(HEAD, cancellable)} ⇒ {@code ci.cancel()}）。
+     *
+     * <p>为什么写<b>两个</b>：javap 证明 {@code ServerPlayer#die} 从不调 {@code super.die(...)}
+     * ⇒ 只挂基类对真实玩家永远打不到；两条都挂才叫"谁都不许判死"。
+     */
+    public static final String MECH_DIE_REFUSED = "die (LivingEntity#die / ServerPlayer#die)";
+
+    /**
+     * 🔴 2026-10-17 新增：<b>反击退</b>那一步走的是哪两条原版代码路（日志行里逐字写出来）。
+     *
+     * <p>证据（javap ＋ 原版源码）：{@code Entity#hurtMarked} 是 <b>public 字段</b>
+     * （{@code ServerEntity#sendChanges} 读到它就 {@code broadcastAndSend(new ClientboundSetEntityMotionPacket(entity))}）；
+     * 刹车的动作是 {@code Entity#setDeltaMovement(Vec3)}（javap 确认 public）。
+     * ⚠️ <b>这里没有任何对手 mod 的类名 / 方法名</b>：判据只用原版状态（{@code hurtMarked}）与几何量
+     * （{@code hypot(dx, dz)}）。见 {@link ShanhaiGuardKnockback}。
+     */
+    public static final String MECH_KNOCKBACK = "ServerTickEvent - Entity.hurtMarked / Entity.setDeltaMovement";
 
     /**
      * 🔴 <b>类别 → 机制名</b>（用户 2026-10-11 追加口径的那一条）。
@@ -1316,6 +1649,14 @@ public final class ShanhaiGuardCore {
                 return MECH_REVIVE;
             case KIND_SCREEN:
                 return MECH_SCREEN_OPENING;
+            case KIND_RESET:
+                return MECH_RESET_DEATH_TIME;
+            case KIND_DIE_REFUSED:
+                return MECH_DIE_REFUSED;
+            case KIND_KNOCKBACK:
+                // 🔴 2026-10-17：**诊断类** —— 用户口径「不播报」（每被推一下就播会刷屏）。
+                //    要播只播左下角，那一路在 ShanhaiGuardKnockback#broadcastText，与这张表分家。
+                return null;
             default:
                 return null;   // 诊断类与不认识的类别
         }
@@ -1382,6 +1723,17 @@ public final class ShanhaiGuardCore {
                 return "DISARMED guard (" + MECH_ITEM_TOSS + ": module handed over)";
             case KIND_RESCUED:
                 return "RESCUED entity (" + MECH_REVIVE + " + " + MECH_RE_ADD + ")";
+            case KIND_RESET:
+                // 2026-10-17 新增：② 服务端每 tick 把"已经进入死亡流程"的人拉回来（③ 客户端用的是同一份动作，
+                // 但客户端那一路只进日志、由 KIND_CLIENT_RESET 报，不进聊天栏）
+                return MECH_RESET_DEATH_TIME + x;
+            case KIND_DIE_REFUSED:
+                // 2026-10-17 新增：④ 在 die(...) 的 HEAD 直接拒绝；一次拒绝报一次，叠加次数（xN）
+                return "REFUSED " + MECH_DIE_REFUSED + x;
+            case KIND_KNOCKBACK:
+                // 🔴 2026-10-17：**诊断类** —— 不进聊天栏（用户口径「不播报」）；要播走左下角，
+                //    那一路的正文在 ShanhaiGuardKnockback#broadcastText（与这张表刻意分家）。
+                return null;
             default:
                 return null;   // 诊断类与不认识的类别：不发给玩家
         }
@@ -1545,6 +1897,128 @@ public final class ShanhaiGuardCore {
         return rescueOrderCorrect(List.of(STEP_ADD, STEP_REVIVE, STEP_RESTORE_POSITION));
     }
 
+    // ─────────── ⑧ 值层兜底那三条判据的「活性证明」用的突变体（2026-10-17 新增）───────────
+
+    /** ① setHealth 入参改写判据的函数形态（正样本 = {@link #shouldRewriteHealth}）。 */
+    private interface RewriteFn {
+        boolean apply(float value, boolean isServerPlayer, boolean guarded, boolean enabledFlag);
+    }
+
+    /**
+     * 🔴 ① 的判据本体：改写必须<b>只</b>发生在「值 &lt;= 0 ＋ 是服务端玩家 ＋ 受保护 ＋ 开关开」这四条同时成立时。
+     *
+     * <p>带正样本（该改的两个）与反样本（不该改的四个）⇒ 把"见 0 就改、不看 guarded/enabled"的突变体喂进来必须报红。
+     */
+    private static boolean rewriteOnlyForGuardedZero(RewriteFn fn) {
+        final boolean positives = fn.apply(0.0f, true, true, true) && fn.apply(-3.5f, true, true, true);
+        final boolean negatives = !fn.apply(0.5f, true, true, true)     // 还有血 ⇒ 不许动（正常伤害）
+                && !fn.apply(20.0f, true, true, true)                   // 满血 ⇒ 不许动
+                && !fn.apply(0.0f, false, true, true)                   // 不是 ServerPlayer ⇒ 不许动
+                && !fn.apply(0.0f, true, false, true)                   // 不受保护 ⇒ 不许动
+                && !fn.apply(0.0f, true, true, false)                   // 开关关 ⇒ 不许动
+                && !fn.apply(Float.NaN, true, true, true);              // 怪值 ⇒ 不许动
+        return positives && negatives;
+    }
+
+    /** 【故意写坏】见 {@code <= 0} 就改写（**不看** guarded / enabled / 是不是玩家）—— 判据必须报红。 */
+    private static boolean mutantRewriteIgnoresGuard(float value, boolean isServerPlayer, boolean guarded,
+                                                     boolean enabledFlag) {
+        return value <= 0f;
+    }
+
+    /** ② 死亡流程复位判据的函数形态（正样本 = {@link #needsDeathFlowReset}）。 */
+    private interface ResetFn {
+        boolean apply(boolean isDeadOrDying, int deathTime, float fieldHealth, boolean omnimobsSaysDead);
+    }
+
+    /** 🔴 ② 的判据本体：复位必须<b>只</b>在「死亡标志 ／ deathTime&gt;0 ／ 字段真值&lt;=0 ／ 对手自检说死」任一为真时发生。 */
+    private static boolean resetOnlyWhenInDeathFlow(ResetFn fn) {
+        final boolean positives = fn.apply(true, 0, 20.0f, false)    // 死亡标志（血读数还满着也算死）
+                && fn.apply(false, 5, 20.0f, false)                  // 计时器在走
+                && fn.apply(false, 0, 0.0f, false)                   // 🔴 两个读接口都被绕过，只剩字段真值 = 0
+                && fn.apply(false, 0, -1.0f, false)                  // 字段真值是负的
+                && fn.apply(false, 0, 20.0f, true);                  // 🔴 ⑤ 对手自己的 checkEntityDead 说死
+        final boolean negatives = !fn.apply(false, 0, 20.0f, false)  // 活得好好的 ⇒ 不许动
+                && !fn.apply(false, 0, Float.NaN, false);            // 字段读不到 ＋ 别的判据都说没死 ⇒ 不许动
+        return positives && negatives;
+    }
+
+    /** 【故意写坏】只看 {@code deathTime > 0}（把另三条判据都漏掉）。 */
+    private static boolean mutantResetOnlyDeathTime(boolean isDeadOrDying, int deathTime, float fieldHealth,
+                                                    boolean omnimobsSaysDead) {
+        return deathTime > 0;
+    }
+
+    /** ④ die 拒绝判据的函数形态（正样本 = {@link #shouldRefuseDie}）。 */
+    private interface RefuseFn {
+        boolean apply(boolean enabledFlag, boolean guarded);
+    }
+
+    /** 🔴 ④ 的判据本体：拒绝必须<b>只</b>对「开关开 ＋ 受保护」为真（别人一个字节都不许改）。 */
+    private static boolean refuseOnlyForGuarded(RefuseFn fn) {
+        return fn.apply(true, true)
+                && !fn.apply(true, false)
+                && !fn.apply(false, true)
+                && !fn.apply(false, false);
+    }
+
+    /** 【故意写坏】开关一开就拒所有人（把 guarded 整个漏掉）—— 判据必须报红。 */
+    private static boolean mutantRefuseEveryoneWhenEnabled(boolean enabledFlag, boolean guarded) {
+        return enabledFlag;
+    }
+
+    /**
+     * 🔴 <b>第二通道自证的判据本体</b>：直写之后的核对必须用<b>字段真值</b>，不许用 {@code getHealth()}。
+     *
+     * <p>样本 = 对手那套「字段真值 0（真血早没了）＋ getHealth() 被加偏移到 20」：
+     * <ul>
+     *   <li>正样本（用字段真值）⇒ 必须判<b>没落地</b>（{@code yes}）；</li>
+     *   <li>突变体（用 getHealth() 核对）⇒ 会判"成功"，同一条判据必须能把它逮住。</li>
+     * </ul>
+     */
+    private interface DirectProofFn {
+        Decision apply(float expected, boolean wrote, float fieldHealthValue, float getHealthValue);
+    }
+
+    private static boolean directProofRejectsOffsetHealth(DirectProofFn fn) {
+        // 真血（字段）= 0，读接口被加偏移成 20 ⇒ 期望 20 的补血其实【没落地】
+        final boolean mustFail = fn.apply(20.0f, true, 0.0f, 20.0f).yes;
+        // 真写进去了（字段 = 20）⇒ 必须判落地
+        final boolean mustPass = !fn.apply(20.0f, true, 20.0f, 20.0f).yes;
+        // 没写（wrote=false）/ 字段读不到 ⇒ 必须判失败
+        final boolean mustFailNoWrite = fn.apply(20.0f, false, 20.0f, 20.0f).yes;
+        final boolean mustFailNaN = fn.apply(20.0f, true, Float.NaN, 20.0f).yes;
+        return mustFail && mustPass && mustFailNoWrite && mustFailNaN;
+    }
+
+    /** 【故意写坏】用 {@code getHealth()} 核对直写结果（对手给 getHealth() 加了偏移 ⇒ 会把"没落地"判成成功）。 */
+    private static Decision mutantDirectProofUsesGetHealth(float expected, boolean wrote, float fieldHealthValue,
+                                                           float getHealthValue) {
+        return proofAgainst(expected, wrote ? getHealthValue : Float.NaN, "getHealth()（故意写坏）");
+    }
+
+    /**
+     * 正样本的适配器：把 {@link #directWriteProof(float, boolean, float)} 套成四参数形态。
+     *
+     * <p>🔴 这里<b>故意不读 {@code getHealthValue}</b>——"该用哪个读数"正是这条判据要证明的事
+     * （突变体 {@link #mutantDirectProofUsesGetHealth} 反过来用它，必须被同一条判据逮住）。
+     */
+    private static Decision realDirectProof(float expected, boolean wrote, float fieldHealthValue,
+                                           float getHealthValue) {
+        return directWriteProof(expected, wrote, fieldHealthValue);
+    }
+
+    /** ⑤ 计数器判据的函数形态（正样本 = {@link #shouldResetOmnimobsCounter}）。 */
+    private interface CounterFn {
+        boolean apply(int counterValue);
+    }
+
+    /** 🔴 ⑤ 的判据本体：只在 {@code counter >= 5} 时清零（4 ／ 0 ／ -1 一律不动别人的数据）。 */
+    private static boolean resetCounterOnlyFromFive(CounterFn fn) {
+        return fn.apply(5) && fn.apply(7) && fn.apply(1234)
+                && !fn.apply(4) && !fn.apply(0) && !fn.apply(-1);
+    }
+
     /** 记录调用的救回实现（离线判据用；{@code addReturns} 就是要喂给判据的返回值）。 */
     private static RescueOps recorder(List<String> trace, boolean addReturns) {
         return new RescueOps() {
@@ -1701,7 +2175,7 @@ public final class ShanhaiGuardCore {
      * </ul>
      *
      * <p>自检里带负对照：把核里的原因串（带 {@code shanhai:…}）喂进来必须报红，
-     * 而九类真文案（含 {@code Entity.isRemoved()} 那种）必须全绿。
+     * 而十一类真文案（含 {@code Entity.isRemoved()} 那种）必须全绿。
      */
     private static boolean leaksInternal(String line) {
         if (line == null) {
@@ -2317,8 +2791,10 @@ public final class ShanhaiGuardCore {
             { "主动放手", KIND_DISARM,   "你把模块交了出去，保护已卸下",     "DISARMED guard (ItemTossEvent: module handed over)" },
             { "已救回",   KIND_RESCUED,  "你被外力移除后，已经救回来了",     "RESCUED entity (Entity.revive() + ServerLevel.addFreshEntity())" },
             { "死亡界面", KIND_SCREEN,   "拦下了 1 次死亡界面",              "CANCELLED ScreenEvent.Opening x1" },
+            { "死亡流程复位", KIND_RESET, "被写进死亡流程，已经拉回来了 1 次", "RESET deathTime (ServerTickEvent) x1" },
+            { "拒绝死亡",   KIND_DIE_REFUSED, "有人想直接判死，已拒绝 3 次",   "REFUSED die (LivingEntity#die / ServerPlayer#die) x3" },
         };
-        final long[] MAP_COUNTS = { 176L, 176L, 160L, 1L, 1L, 1L, 1L, 1L, 1L };
+        final long[] MAP_COUNTS = { 176L, 176L, 160L, 1L, 1L, 1L, 1L, 1L, 1L, 1L, 3L };
         int mapOk = 0;
         int mechInBodyOk = 0;
         for (int i = 0; i < MAP.length; i++) {
@@ -2368,8 +2844,9 @@ public final class ShanhaiGuardCore {
 
         // 🔴 正向扫全类：每一个"给玩家看"的类别都必须产出【纯 ASCII ＋ 以前缀开头】的整行
         final String[] CHAT_KINDS = { KIND_DAMAGE, KIND_DEATH, KIND_HEAL, KIND_TELEPORT,
-                KIND_REMOVED, KIND_RESTORE, KIND_DISARM, KIND_RESCUED, KIND_SCREEN };
-        final long[] CHAT_COUNTS = { 1L, 7L, 1L, 3L, 5L, 1L, 1L, 2L, 9L };
+                KIND_REMOVED, KIND_RESTORE, KIND_DISARM, KIND_RESCUED, KIND_SCREEN,
+                KIND_RESET, KIND_DIE_REFUSED };
+        final long[] CHAT_COUNTS = { 1L, 7L, 1L, 3L, 5L, 1L, 1L, 2L, 9L, 2L, 4L };
         int asciiOk = 0;
         int prefixOk = 0;
         final StringBuilder detail = new StringBuilder();
@@ -2534,7 +3011,7 @@ public final class ShanhaiGuardCore {
 
         // ─────── 🔴 本轮新增的正式负对照：文案【只有动作、没有机制名】必须报红 ───────
         OUT.println("── ⑭【机制名判据】每一类都必须带机制名（带「只有动作」的负对照） ──");
-        expect("⑭机制名", "🔴 逐类断言：正文必须含该类的机制名（9/9）", true,
+        expect("⑭机制名", "🔴 逐类断言：正文必须含该类的机制名（" + MAP.length + "/" + MAP.length + "）", true,
                 mechInBodyOk == MAP.length, mechInBodyOk + "/" + MAP.length + " 类含机制名");
         // 负对照①：把机制名抠掉、只留动作 ⇒ 必须报红（正样本同时为真 ⇒ 证明判据有牙）
         final String actionOnly = "CANCELLED DAMAGE x1";
@@ -2550,7 +3027,8 @@ public final class ShanhaiGuardCore {
                 "张冠李戴那条=" + wrongMech + " 含该类机制名=" + wrongMech.contains(chatMechanism(KIND_DAMAGE)));
         // 机制名表本身：该给的都给、不该给的一律 null（诊断类不许漏出去）
         final String[] MECH_KINDS = { KIND_DAMAGE, KIND_DEATH, KIND_HEAL, KIND_TELEPORT,
-                KIND_REMOVED, KIND_RESTORE, KIND_DISARM, KIND_RESCUED, KIND_SCREEN };
+                KIND_REMOVED, KIND_RESTORE, KIND_DISARM, KIND_RESCUED, KIND_SCREEN,
+                KIND_RESET, KIND_DIE_REFUSED };
         int mechGiven = 0;
         final StringBuilder mechList = new StringBuilder();
         for (final String k : MECH_KINDS) {
@@ -2561,7 +3039,7 @@ public final class ShanhaiGuardCore {
             mechList.append("\n      ").append(String.format("%-14s → %s", k, m));
         }
         OUT.println("· 类别 → 机制名（逐类真实读数）：" + mechList);
-        expect("⑭机制名", "9 类都给了机制名", true, mechGiven == MECH_KINDS.length,
+        expect("⑭机制名", MECH_KINDS.length + " 类都给了机制名", true, mechGiven == MECH_KINDS.length,
                 mechGiven + "/" + MECH_KINDS.length + " 类有机制名");
         expect("⑭机制名", "三种诊断类 ⇒ chatMechanism 返回 null（不许漏给玩家）", true,
                 chatMechanism(KIND_BLOOD) == null && chatMechanism(KIND_HEAL_FAIL) == null
@@ -2573,7 +3051,165 @@ public final class ShanhaiGuardCore {
                 "新类别=" + chatMechanism("某种新类别") + " ；null=" + chatMechanism(null));
         expect("⑭机制名", "机制名与「哪一类该不该给玩家看」同进同出（phrase 与 mechanism 的同空性）", true,
                 mechAgreeOnNullability(MECH_KINDS),
-                "9 类逐个比对 (chatPhrase==null) == (chatMechanism==null) ⇒ " + mechAgreeOnNullability(MECH_KINDS));
+                MECH_KINDS.length + " 类逐个比对 (chatPhrase==null) == (chatMechanism==null) ⇒ "
+                        + mechAgreeOnNullability(MECH_KINDS));
+        // ─────── ⑮【值层兜底】2026-10-17 新增：对手直接写同步血量 / 直接判死，事件层拦不住 ───────
+        OUT.println("── ⑮【值层兜底】①setHealth 入参 ②死亡流程复位 ④die 拒绝 ＋ 第二通道自证 ──");
+        OUT.println("· 对手杀人链（反编译实证）：damageHealth 算 `真血 - 伤害`（**没有** max(0,·)）→ forceSetHealth"
+                + " → 裸写 LivingEntity.f_20961_（DATA_HEALTH_ID 同步血量字段）；setHealth 另挂单向锁存 cancel；"
+                + " getHealth() 每条 return 加 delta");
+        OUT.println("· ⇒ 只拦 setHealth 不够（它不走那条路）／只信 getHealth() 不够（读数带偏移）"
+                + "／只走 setHealth 补血不够（可能被 cancel）");
+
+        // ① LivingEntity#setHealth(float) 的入参改写
+        expect("⑮①", "受保护玩家 ＋ 传入 0 ⇒ 改写成满血上限", true,
+                shouldRewriteHealth(0.0f, true, true, true), "→ " + rewriteHealthDecision(0.0f, true, true, true).reason);
+        expect("⑮①", "受保护玩家 ＋ 传入 -3.5 ⇒ 改写成满血上限", true,
+                shouldRewriteHealth(-3.5f, true, true, true), "→ " + rewriteHealthDecision(-3.5f, true, true, true).reason);
+        expect("⑮①", "⚠ 传入 0.5（还有血）⇒【不许】改（那是正常伤害，改了等于锁血）", false,
+                shouldRewriteHealth(0.5f, true, true, true), "→ " + rewriteHealthDecision(0.5f, true, true, true).reason);
+        expect("⑮①", "传入 20（满血）⇒ 不改", false, shouldRewriteHealth(MAX, true, true, true),
+                "→ " + rewriteHealthDecision(MAX, true, true, true).reason);
+        expect("⑮①", "不是 ServerPlayer（生物 / 客户端 LocalPlayer）⇒ 不改", false,
+                shouldRewriteHealth(0.0f, false, true, true), "→ " + rewriteHealthDecision(0.0f, false, true, true).reason);
+        expect("⑮①", "不是受保护玩家 ⇒ 不改", false, shouldRewriteHealth(0.0f, true, false, true),
+                "→ " + rewriteHealthDecision(0.0f, true, false, true).reason);
+        expect("⑮①", "enabled=false ⇒ 不改", false, shouldRewriteHealth(0.0f, true, true, false),
+                "→ " + rewriteHealthDecision(0.0f, true, true, false).reason);
+        expect("⑮①", "NaN 入参 ⇒ 不改（怪值原样放行）", false, shouldRewriteHealth(Float.NaN, true, true, true),
+                "→ " + rewriteHealthDecision(Float.NaN, true, true, true).reason);
+        expect("⑮①", "判据本体对【本工程实现】成立（该改的 2 个 ＋ 不该改的 6 个）", true,
+                rewriteOnlyForGuardedZero(ShanhaiGuardCore::shouldRewriteHealth),
+                "→ " + rewriteOnlyForGuardedZero(ShanhaiGuardCore::shouldRewriteHealth));
+        expect("⑮①负对照", "突变体「见 0 就改」（不看 guarded / enabled / 是不是玩家）⇒ 判据【报红】", false,
+                rewriteOnlyForGuardedZero(ShanhaiGuardCore::mutantRewriteIgnoresGuard),
+                "→ " + rewriteOnlyForGuardedZero(ShanhaiGuardCore::mutantRewriteIgnoresGuard));
+
+        // ② 服务端每 tick 看门狗：判"是不是已经进了死亡流程"
+        expect("⑮②", "isDeadOrDying=true（血读数还满着）⇒ 要复位", true,
+                needsDeathFlowReset(true, 0, MAX, false),
+                "→ " + deathFlowResetDecision(true, 0, MAX, false, true).reason);
+        expect("⑮②", "deathTime=5 > 0 ⇒ 要复位", true,
+                needsDeathFlowReset(false, 5, MAX, false),
+                "→ " + deathFlowResetDecision(false, 5, MAX, false, true).reason);
+        expect("⑮②", "🔴 两个读接口都被绕过：字段真值=0（getHealth 说 20）⇒ 仍要复位", true,
+                needsDeathFlowReset(false, 0, 0.0f, false),
+                "→ " + deathFlowResetDecision(false, 0, 0.0f, false, true).reason);
+        expect("⑮②", "字段真值=-1 ⇒ 要复位", true,
+                needsDeathFlowReset(false, 0, -1.0f, false),
+                "→ " + deathFlowResetDecision(false, 0, -1.0f, false, true).reason);
+        expect("⑮②", "🔴 ⑤ 我们三条都说没死、对手自己的 checkEntityDead 说死 ⇒ 仍要复位", true,
+                needsDeathFlowReset(false, 0, MAX, true),
+                "→ " + deathFlowResetDecision(false, 0, MAX, true, true).reason);
+        expect("⑮②", "字段真值=20 ＋ 没死 ＋ 计时器归零 ＋ 对手也不说死 ⇒ 不复位（不许每 tick 动活人）", false,
+                needsDeathFlowReset(false, 0, MAX, false),
+                "→ " + deathFlowResetDecision(false, 0, MAX, false, true).reason);
+        expect("⑮②", "字段真值读不到（NaN）＋ 别的判据都说没死 ⇒ 不复位（这一条不参与判断）", false,
+                needsDeathFlowReset(false, 0, Float.NaN, false),
+                "→ " + deathFlowResetDecision(false, 0, Float.NaN, false, true).reason);
+        expect("⑮②", "enabled=false ⇒ 不复位", false,
+                deathFlowResetDecision(true, 5, 0.0f, true, false).yes,
+                "→ " + deathFlowResetDecision(true, 5, 0.0f, true, false).reason);
+        expect("⑮②", "判据本体对【本工程实现】成立（5 个该复位 ＋ 2 个不该）", true,
+                resetOnlyWhenInDeathFlow(ShanhaiGuardCore::needsDeathFlowReset),
+                "→ " + resetOnlyWhenInDeathFlow(ShanhaiGuardCore::needsDeathFlowReset));
+        expect("⑮②负对照", "突变体「只看 deathTime>0」漏掉另外三条 ⇒ 判据【报红】", false,
+                resetOnlyWhenInDeathFlow(ShanhaiGuardCore::mutantResetOnlyDeathTime),
+                "→ " + resetOnlyWhenInDeathFlow(ShanhaiGuardCore::mutantResetOnlyDeathTime));
+
+        // ④ die(DamageSource) 直接拒绝
+        expect("⑮④", "开关开 ＋ 受保护 ⇒ 拒绝死亡", true, shouldRefuseDie(true, true),
+                "→ " + refuseDieDecision(true, true).reason);
+        expect("⑮④", "开关开 ＋ 不受保护 ⇒ 放行（一个字节都不改）", false, shouldRefuseDie(true, false),
+                "→ " + refuseDieDecision(true, false).reason);
+        expect("⑮④", "开关关 ＋ 受保护 ⇒ 放行", false, shouldRefuseDie(false, true),
+                "→ " + refuseDieDecision(false, true).reason);
+        expect("⑮④", "判据本体对【本工程实现】成立（只有 开关开＋受保护 才拒）", true,
+                refuseOnlyForGuarded(ShanhaiGuardCore::shouldRefuseDie),
+                "→ " + refuseOnlyForGuarded(ShanhaiGuardCore::shouldRefuseDie));
+        expect("⑮④负对照", "突变体「开关一开就拒所有人」⇒ 判据【报红】", false,
+                refuseOnlyForGuarded(ShanhaiGuardCore::mutantRefuseEveryoneWhenEnabled),
+                "→ " + refuseOnlyForGuarded(ShanhaiGuardCore::mutantRefuseEveryoneWhenEnabled));
+
+        // 血量读数：字段真值优先（对手给 getHealth() 加了偏移）
+        expect("⑮读数", "字段真值 0 ／ getHealth 20 ⇒ 以字段真值 0 为准", true,
+                trustedHealth(20.0f, 0.0f) == 0.0f, "→ " + trustedHealthReason(20.0f, 0.0f));
+        expect("⑮读数", "字段真值读不到（NaN）⇒ 退回 getHealth()", true,
+                trustedHealth(20.0f, Float.NaN) == 20.0f, "→ " + trustedHealthReason(20.0f, Float.NaN));
+        expect("⑮读数", "两个读数不一致时，原因串里点明「偏移」", true,
+                trustedHealthReason(20.0f, 0.0f).contains("偏移"), "→ " + trustedHealthReason(20.0f, 0.0f));
+
+        // 两条腿：第一腿（setHealth）自证 ＋ 第二腿（直写同步血量）自证
+        final float TARGET = healTarget(MAX);
+        expect("⑮第一腿", "字段真值=期望 ⇒ 自证通过", false,
+                setHealthProof(TARGET, TARGET, 999.0f).yes, "→ " + setHealthProof(TARGET, TARGET, 999.0f).reason);
+        expect("⑮第一腿", "字段真值 0（setHealth 被 cancel 了）⇒ 自证失败", true,
+                setHealthProof(TARGET, 0.0f, TARGET).yes, "→ " + setHealthProof(TARGET, 0.0f, TARGET).reason);
+        expect("⑮第一腿", "字段读不到 ⇒ 退回 getHealth() 核对（读数相等 ⇒ 通过）", false,
+                setHealthProof(TARGET, Float.NaN, TARGET).yes, "→ " + setHealthProof(TARGET, Float.NaN, TARGET).reason);
+        expect("⑮第二腿", "直写成功且字段真值=期望 ⇒ 自证通过", false,
+                directWriteProof(TARGET, true, TARGET).yes, "→ " + directWriteProof(TARGET, true, TARGET).reason);
+        expect("⑮第二腿", "直写后字段真值仍是 0 ⇒ 自证失败（不假装成功）", true,
+                directWriteProof(TARGET, true, 0.0f).yes, "→ " + directWriteProof(TARGET, true, 0.0f).reason);
+        expect("⑮第二腿", "通道没写（wrote=false）⇒ 自证失败", true,
+                directWriteProof(TARGET, false, TARGET).yes, "→ " + directWriteProof(TARGET, false, TARGET).reason);
+        expect("⑮第二腿", "直写后字段读不到（NaN）⇒ 自证失败", true,
+                directWriteProof(TARGET, true, Float.NaN).yes, "→ " + directWriteProof(TARGET, true, Float.NaN).reason);
+        expect("⑮第二腿", "判据本体对【本工程实现】成立", true,
+                directProofRejectsOffsetHealth(ShanhaiGuardCore::realDirectProof),
+                "→ " + directProofRejectsOffsetHealth(ShanhaiGuardCore::realDirectProof));
+        expect("⑮第二腿负对照", "突变体「用 getHealth() 核对」（被加偏移）⇒ 同一条判据【报红】", false,
+                directProofRejectsOffsetHealth(ShanhaiGuardCore::mutantDirectProofUsesGetHealth),
+                "→ " + directProofRejectsOffsetHealth(ShanhaiGuardCore::mutantDirectProofUsesGetHealth));
+
+        // 第二通道插槽（核里那个空插槽的两个入口：全局 slot 与 per-通道 版本）
+        final SecondChannelHeal okChannel = value -> true;
+        final SecondChannelHeal badChannel = value -> false;
+        expect("⑮第二通道", "通道返回 true ⇒ 判「已直写」", true, healViaSecondChannel(okChannel, TARGET).yes,
+                "→ " + healViaSecondChannel(okChannel, TARGET).reason);
+        expect("⑮第二通道", "通道返回 false ⇒ 不假装成功", false, healViaSecondChannel(badChannel, TARGET).yes,
+                "→ " + healViaSecondChannel(badChannel, TARGET).reason);
+        expect("⑮第二通道", "channel=null ⇒ 明确报「未接入」（不假报成功）", false,
+                healViaSecondChannel(null, TARGET).yes, "→ " + healViaSecondChannel(null, TARGET).reason);
+        expect("⑮第二通道", "通道抛异常 ⇒ 报出来（不是炸 tick）", false,
+                healViaSecondChannel(value -> {
+                    throw new IllegalStateException("故意抛（自检样本）");
+                }, TARGET).yes,
+                "→ " + healViaSecondChannel(value -> {
+                    throw new IllegalStateException("故意抛（自检样本）");
+                }, TARGET).reason);
+
+        // 日志口径：通道名要写出来（heal_channel=…）
+        expect("⑮日志口径", "三条通道的日志标签逐字 = setHealth / direct / failed", true,
+                "setHealth".equals(HealChannel.SET_HEALTH.label())
+                        && "direct".equals(HealChannel.DIRECT.label())
+                        && "failed".equals(HealChannel.FAILED.label()),
+                "SET_HEALTH=" + HealChannel.SET_HEALTH.label() + " ／ DIRECT=" + HealChannel.DIRECT.label()
+                        + " ／ FAILED=" + HealChannel.FAILED.label());
+
+        // ─────── ⑯【⑤ 对手桥】用对手自己的 public API 反向修复（阈值判据；失效自动退回值层） ───────
+        OUT.println("── ⑯【⑤ 对手桥】清对手的单向锁存计数器（" + OMNIMOBS_COUNTER_KEY
+                + "，阈值 " + OMNIMOBS_COUNTER_LOCKED + "）──");
+        OUT.println("· 对手类/方法（反射调用，全部 public static）：" + OMNIMOBS_UTIL_CLASS + "."
+                + OMNIMOBS_METHOD_SET_DELTA + " / " + OMNIMOBS_METHOD_GET_DELTA + " / " + OMNIMOBS_METHOD_CHECK_DEAD);
+        OUT.println("· ⚠ 这层【依赖对手的类名/方法名/数据键】：换版本就失效 ⇒ 失效时只记一行"
+                + " `omnimobs_bridge unavailable` 并自动退回值层");
+        expect("⑯计数", "counter=5（刚好锁存）⇒ 清零", true, shouldResetOmnimobsCounter(5),
+                "→ " + omnimobsCounterDecision(5).reason);
+        expect("⑯计数", "counter=7 ⇒ 清零", true, shouldResetOmnimobsCounter(7),
+                "→ " + omnimobsCounterDecision(7).reason);
+        expect("⑯计数", "counter=4（还没锁存）⇒ 不动它", false, shouldResetOmnimobsCounter(4),
+                "→ " + omnimobsCounterDecision(4).reason);
+        expect("⑯计数", "counter=0（键不存在时 getInt 的读数）⇒ 不动它", false, shouldResetOmnimobsCounter(0),
+                "→ " + omnimobsCounterDecision(0).reason);
+        expect("⑯计数", "counter=-1（怪值）⇒ 不动它（不许乱写别人的数据）", false, shouldResetOmnimobsCounter(-1),
+                "→ " + omnimobsCounterDecision(-1).reason);
+        expect("⑯计数", "判据本体对【本工程实现】成立（5/7/1234 该清，4/0/-1 不该）", true,
+                resetCounterOnlyFromFive(ShanhaiGuardCore::shouldResetOmnimobsCounter),
+                "→ " + resetCounterOnlyFromFive(ShanhaiGuardCore::shouldResetOmnimobsCounter));
+        expect("⑯计数负对照", "阈值写成 >=6 的突变体（counter=5 时不清）⇒ 判据【报红】", false,
+                resetCounterOnlyFromFive(value -> value >= 6),
+                "→ " + resetCounterOnlyFromFive(value -> value >= 6));
         OUT.println();
 
         OUT.println("=== 汇总：判据 " + checks + " 条，报红 " + reds + " 条 ⇒ "

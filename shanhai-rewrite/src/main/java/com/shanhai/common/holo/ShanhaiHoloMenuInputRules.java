@@ -50,6 +50,18 @@ public final class ShanhaiHoloMenuInputRules {
     /** 🆕 打开全息命令输入框（输入框本身是客户端；命令以管理员身份发到服务端执行）。 */
     public static final int ACT_OPEN_COMMAND = 4;
 
+    /** 🆕 2026-10-17：点「现实物品」那块板 ⇒ 请求开「自己新增物品」面板（也是走服务端权威路径）。 */
+    public static final int ACT_OPEN_CREATIVE_ITEMS = 5;
+
+    /**
+     * 🆕 点第 1 格「清除实体」⇒ <b>直接执行抹除</b>（本轮去掉了"再点一次确认"的两拍机制）。
+     *
+     * <p>⚠️ 本类只回答"这一格该走哪条动作"；执行体是
+     * {@code client.holo.ShanhaiHoloMenuInput}（它只发一条 {@code shanhai purge} 命令）。
+     * 执行内容 = 与 {@code /shanhai purge} <b>完全同一段代码</b>（客户端只发命令）。
+     */
+    public static final int ACT_REALITY_PURGE = 6;
+
     /**
      * 按<b>真实板表</b>判定；参数含义见类注释 §2。
      *
@@ -109,6 +121,11 @@ public final class ShanhaiHoloMenuInputRules {
             case ShanhaiHoloMenuBoards.ACTION_RECIPE_EDIT -> ACT_OPEN_EDITOR;
             case ShanhaiHoloMenuBoards.ACTION_HOLO_SETTINGS -> ACT_OPEN_SETTINGS;
             case ShanhaiHoloMenuBoards.ACTION_COMMAND -> ACT_OPEN_COMMAND;
+            // 🆕 2026-10-17：现实物品那格走的是同一条"请服务端开面板"的路
+            //    （客户端只发板号；能不能开、要不要模块，全在服务端再判一次）
+            case ShanhaiHoloMenuBoards.ACTION_CREATIVE_ITEMS -> ACT_OPEN_CREATIVE_ITEMS;
+            // 🆕 清除实体那格（点一次直接执行；本表只管"该走哪条动作"）
+            case ShanhaiHoloMenuBoards.ACTION_REALITY_PURGE -> ACT_REALITY_PURGE;
             default -> ACT_NONE;
         };
     }
@@ -120,6 +137,8 @@ public final class ShanhaiHoloMenuInputRules {
             case ACT_OPEN_EDITOR -> "打开配方面板";
             case ACT_OPEN_SETTINGS -> "打开设置面板";
             case ACT_OPEN_COMMAND -> "打开命令输入框";
+            case ACT_OPEN_CREATIVE_ITEMS -> "打开现实物品面板";
+            case ACT_REALITY_PURGE -> "清除实体（点一次直接执行）";
             default -> "无动作";
         };
     }
@@ -197,6 +216,16 @@ public final class ShanhaiHoloMenuInputRules {
                 decide(false, true, true, ShanhaiHoloMenuBoards.SETTINGS_INDEX, true, true), ACT_OPEN_SETTINGS);
         c(bad, n, "没拿模块点『命令』=打开命令输入框",
                 decide(false, true, true, ShanhaiHoloMenuBoards.COMMAND_INDEX, true, true), ACT_OPEN_COMMAND);
+        // 🆕 2026-10-17：现实物品那格（没有它，"新板子能点"这条判据恒绿）
+        c(bad, n, "没拿模块点『现实物品』=打开现实物品面板",
+                decide(false, true, true, ShanhaiHoloMenuBoards.CREATIVE_ITEMS_INDEX, true, true),
+                ACT_OPEN_CREATIVE_ITEMS);
+        // 🆕 清除实体那格（点一次直接执行；动作码必须对得上）
+        c(bad, n, "没拿模块点『清除实体』=清除实体(点一次直接执行)",
+                decide(false, true, true, ShanhaiHoloMenuBoards.PURGE_INDEX, true, true),
+                ACT_REALITY_PURGE);
+        c(bad, n, "拿着模块点『清除实体』=切换投影(不是抹除)",
+                decide(true, true, true, ShanhaiHoloMenuBoards.PURGE_INDEX, true, true), ACT_TOGGLE_MENU);
         // 规格 ④ 的优先级对新板子同样成立（拿着模块点『设置』= 切换投影，绝不是开设置）
         c(bad, n, "拿着模块点『设置』=切换投影(不是开设置)",
                 decide(true, true, true, ShanhaiHoloMenuBoards.SETTINGS_INDEX, true, true), ACT_TOGGLE_MENU);

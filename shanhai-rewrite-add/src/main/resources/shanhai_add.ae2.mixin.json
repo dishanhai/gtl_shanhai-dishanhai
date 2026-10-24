@@ -1,0 +1,15 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.shanhai.add.mixin.ae2",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "shanhai_add.refmap.json",
+  "mixins": [
+    "ShanhaiAeInteractionPacketMixin",
+    "ShanhaiAeInventoryActionPacketMixin",
+    "ShanhaiAeStorageMenuMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

@@ -6,11 +6,11 @@
 | 包根 | `com.shanhai` |
 | MC / Forge | 1.20.1 / 47.4.16 |
 | 构建产物 | `build/libs/shanhai-0.1.0.jar` |
-| 规格来源 | `../docs/specs/phase-1-spec.md`（冻结 v1.0，冲突以它为准） |
-| 接口契约 | `../docs/specs/phase-1-interface-contract.md`（写代码时随手对照） |
+| 规格来源 | `../temp/docs/specs/phase-1-spec.md`（冻结 v1.0，冲突以它为准） |
+| 接口契约 | `../temp/docs/specs/phase-1-interface-contract.md`（写代码时随手对照） |
 
 本工程是**独立新工程**，不继承上游 `gtl_shanhai-dishanhai` 的代码；上游只作为行为参照
-（见 `../originals/upstream/gtl_shanhai-dishanhai/`）与 `libs/` 来源。
+（见 `../temp/originals/upstream/gtl_shanhai-dishanhai/`）与 `libs/` 来源。
 
 ---
 

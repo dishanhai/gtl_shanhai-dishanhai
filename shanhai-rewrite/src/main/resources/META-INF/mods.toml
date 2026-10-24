@@ -28,22 +28,33 @@ description='''山海的神人私货 第一阶段：原始终焉引擎主机 + 1
 # gtl_extend 一律不声明（规格 §1.2 明令禁止）。
 #
 # forge / minecraft 保持 mandatory=true：它们是加载器与游戏本体，不是"外部 mod 依赖"。
+#
+# 🔴 2026-10-18 修正：段名必须是 dependencies.本mod的modId（两层方括号）。
+#   原来写的 mods.dependencies FML 根本不读（ModInfo.getDependencies() =
+#   getConfigList("dependencies", modId)，javap 对 fmlloader 1.20.1-47.4.16 取证；
+#   libs 里 34 个真实 mod 也全部用 dependencies.xxx 形式）⇒ 这 5 段声明当时完全不生效。
+#   现已改成 dependencies.shanhai。
+#   🔴 段名里不能写占位符（会让 TOML 解析直接失败 ⇒ 游戏起不来，因为 TOML 的裸键
+#      只允许字母数字下划线横线，美元符号与花括号非法；而占位符展开发生在解析之后）。
+#      ⇒ modId 这里必须写死字面量 shanhai，改 modId 时要同步改这一处。
+#   ⚠️ 本文件会被 processResources 的 Groovy 模板展开 ⇒ 注释里不要出现反引号，
+#      也不要出现美元花括号表达式（会当模板求值/报词法错）。
 
-[[mods.dependencies]]
+[[dependencies.shanhai]]
     modId="forge"
     mandatory=true
     versionRange="[${forge_version},)"
     ordering="NONE"
     side="BOTH"
 
-[[mods.dependencies]]
+[[dependencies.shanhai]]
     modId="minecraft"
     mandatory=true
     versionRange="[${minecraft_version}]"
     ordering="NONE"
     side="BOTH"
 
-[[mods.dependencies]]
+[[dependencies.shanhai]]
     modId="gtceu"
     mandatory=false
     versionRange="[1.4.4,)"
@@ -51,7 +62,7 @@ description='''山海的神人私货 第一阶段：原始终焉引擎主机 + 1
     side="BOTH"
 
 # gtlcore provides IModularMachineHost / IModularMachineModule - the frozen host<->module contract.
-[[mods.dependencies]]
+[[dependencies.shanhai]]
     modId="gtlcore"
     mandatory=false
     versionRange="[1.2.3.2,)"
@@ -59,7 +70,7 @@ description='''山海的神人私货 第一阶段：原始终焉引擎主机 + 1
     side="BOTH"
 
 # gtladditions provides the ForgeOfTheAntichrist multiblock structure data we reuse.
-[[mods.dependencies]]
+[[dependencies.shanhai]]
     modId="gtladditions"
     mandatory=false
     versionRange="[3.1,)"

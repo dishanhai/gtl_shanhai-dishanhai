@@ -306,6 +306,14 @@ public final class ShanhaiRecipeOverrideStore {
             ShanhaiMod.LOGGER.error("{} upsert_refused reason=entry_has_no_id", PREFIX);
             return -1;
         }
+        // 🆕 2026-10-16（用户点单：「编程电路强制为催化剂，免得我还要一直改，还老是忘了改」）：
+        //    🔴 这里是【落盘】那一侧唯一的漏斗 —— 覆盖文件 recipe_overrides.json 只有本方法
+        //       会"加/改条目"（takeover / removeEntryById / removeEntriesByUidPrefix /
+        //       clearAllEntries 只会删或只改元数据，不可能引入一条电路输入）。
+        //       所以 setIo / applyEdits / 面板保存 / 新建（op=add）/ 新建后再保存 /
+        //       原版配方 这些路径全都被这一句覆盖，不需要在七八个调用点各打一个补丁。
+        //       实现只有一份：ShanhaiCircuitCatalyst。
+        ShanhaiCircuitCatalyst.forceInEntry(entry);
         final JsonObject root = loadRoot();
         final int foreign = dropForeignIfUnowned(root);
         final JsonArray entries = root.getAsJsonArray("entries");

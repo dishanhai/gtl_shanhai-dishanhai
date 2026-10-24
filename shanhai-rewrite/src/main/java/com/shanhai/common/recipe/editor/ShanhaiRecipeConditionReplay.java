@@ -3,6 +3,8 @@ package com.shanhai.common.recipe.editor;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.gregtechceu.gtceu.api.recipe.RecipeCondition;
+import com.gregtechceu.gtceu.integration.kjs.recipe.GTRecipeSchema;
 import com.shanhai.ShanhaiMod;
 
 import dev.latvian.mods.kubejs.recipe.RecipeJS;
@@ -88,8 +90,15 @@ public final class ShanhaiRecipeConditionReplay {
     /**
      * <b>把这一份条件装回这条 KubeJS 配方</b>（下一局开机时覆盖层调它）。
      *
-     * <p>三步：① 解码校验（fail-closed）→ ② 重新编码后写进 {@code recipe.json.recipeConditions}
-     * → ③ 把 KubeJS 那个键的 {@code write} 标志压成 false，并 {@code recipe.save()}。
+     * <p>三步：① 解码校验（fail-closed）→ ② <b>先走组件通道 {@code .addCondition(…)}</b>
+     * → ③ 走不了组件通道的才回写平铺 {@code recipeConditions}，再把那个键的 {@code write} 标志压成 false，
+     * 并 {@code recipe.save()}。
+     *
+     * <p>🔴 <b>2026-10-17 修正（有专服读回证据）</b>：只改 {@code recipe.json} 那一条路<b>不生效</b> ——
+     * 配方事件期 {@code json} 里明明有条件、当场 {@code createRecipe()} 也能拿到，
+     * 但 {@code RecipesEventJS.post()} 收尾那一拍之后活配方的 {@code conditions} 是 <b>0 条</b>；
+     * 改走组件通道后，31 条里 19 条带条件的活配方逐字段读回一致（cleanroom 档位也带得过去）。
+     * 所以本方法的主路是 {@code .addCondition}，json 只是兜底。
      *
      * @return 空串 = 成功；否则是原因（脚本据此把整条 entry 判 SKIPPED 并打 ERROR）
      */
@@ -97,20 +106,39 @@ public final class ShanhaiRecipeConditionReplay {
         if (recipe == null) {
             return "recipe_is_null";
         }
+        final List<RecipeCondition> typed;
         final JsonArray normalized;
         try {
             final ShanhaiRecipeConditions.Decoded d = ShanhaiRecipeConditions.decode(arr);
             if (!d.ok()) {
                 return d.error();
             }
-            normalized = ShanhaiRecipeConditions.encode(d.list());
-            if (normalized.size() != d.list().size()) {
+            typed = d.list();
+            normalized = ShanhaiRecipeConditions.encode(typed);
+            if (normalized.size() != typed.size()) {
                 // encode() 在任何一条算不出来时会整串拒收（返回空数组）——这里必须如实报，不许静默
-                return "conditions_reencode_lost_entries want=" + d.list().size()
+                return "conditions_reencode_lost_entries want=" + typed.size()
                         + " got=" + normalized.size();
             }
         } catch (Throwable t) {
             return "conditions_decode_threw " + t.getClass().getSimpleName() + ": " + t.getMessage();
+        }
+
+        // 🆕 2026-10-17：先走【组件通道】.addCondition(...)，走不了的才回落 json（理由见方法注释）。
+        final JsonArray legacy = new JsonArray();
+        int pushed = 0;
+        if (recipe instanceof GTRecipeSchema.GTRecipeJS gtRecipe) {
+            for (RecipeCondition c : typed) {
+                final String key = ShanhaiRecipeConditions.typeKeyOf(c);
+                if (DEGRADES_ON_COMPONENT.contains(key)) {
+                    legacy.add(ShanhaiRecipeConditions.encodeOne(c));
+                    continue;
+                }
+                gtRecipe.addCondition(c);
+                pushed++;
+            }
+        } else {
+            legacy.addAll(normalized);   // 非 GT 配方（原版合成台等）⇒ 组件通道不存在，老路照旧
         }
 
         final JsonObject json;
@@ -122,7 +150,11 @@ public final class ShanhaiRecipeConditionReplay {
         if (json == null) {
             return "recipe_json_is_null";
         }
-        json.add(ShanhaiRecipeConditions.RECIPE_JSON_KEY, normalized);
+        // 🔴 只回写【没走组件通道】的那几条；全走组件通道时这一句整段跳过
+        //   （为什么必须跳过：手写进 recipe.json 的键在收尾那一拍会被冲掉，写了也没用，反而误导）
+        if (!legacy.isEmpty() || pushed == 0) {
+            json.add(ShanhaiRecipeConditions.RECIPE_JSON_KEY, legacy);
+        }
 
         // ② 把 KubeJS 那个 component 的写回标志压掉（理由见类注释 §1.2）。
         final String flag = suppressComponentWrite(recipe);
@@ -131,9 +163,10 @@ public final class ShanhaiRecipeConditionReplay {
         } catch (Throwable t) {
             return "recipe_save_threw " + t;
         }
-        ShanhaiMod.LOGGER.info("{} conditions_replay_applied id={} n={} types={} write_flag={} "
-                        + "（直接写 GT 认的平铺 JSON，绕过 KubeJS 那个 read/write 不对称的 component）",
-                PREFIX, safeId(recipe), normalized.size(), ShanhaiRecipeConditions.summary(normalized), flag);
+        ShanhaiMod.LOGGER.info("{} conditions_replay_applied id={} n={} component={} legacy={} types={} write_flag={} "
+                        + "（主路 = 组件通道 .addCondition；只改 recipe.json 那条在 post() 之后会掉）",
+                PREFIX, safeId(recipe), normalized.size(), pushed, legacy.size(),
+                ShanhaiRecipeConditions.summary(normalized), flag);
 
         // 🆕🔴 2026-10-07（显示层缺口）：条件装上了【服务端】，还必须让【客户端 JEI 那一份】也带上 ——
         //    否则 JEI 配方页里那一行催化剂槽看不见：ModuleCatalystSlotUI.firstGateModule 读的就是
@@ -144,6 +177,15 @@ public final class ShanhaiRecipeConditionReplay {
         noteToJei(recipe, json, normalized);
         return "";
     }
+
+    /**
+     * 走组件通道【已知会退化】的条件类型（命中 ⇒ 保留旧 json 路，不动它）。
+     *
+     * <p>🔴 <b>目前是空集</b>：2026-10-17 在冒烟专服上实测过 {@code cleanroom} ——
+     * 组件通道传 {@code STERILE_CLEANROOM}，读回就是 {@code sterile_cleanroom}，没有退回默认值。
+     * 留这个常量是为了以后真发现哪一类退化时有一处可挂，而不是现在先塞一个猜的。
+     */
+    private static final java.util.Set<String> DEGRADES_ON_COMPONENT = java.util.Set.of();
 
     /**
      * 把"这一条刚被重放装上条件"交给 JEI 那条现成的通道（{@link ShanhaiJeiBridge}）。

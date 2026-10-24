@@ -307,12 +307,54 @@ public final class ShanhaiHoloMenuNetwork {
             ShanhaiMod.LOGGER.warn("{} holo_editor_request REJECTED reason=no_sender board={}", PREFIX, board);
             return;
         }
-        if (!accepts(boardIndex)) {
+        // 🆕 2026-10-17：闸门从"只有配方编辑那格能进"放宽成"启用的板 + 按动作码分派"。
+        //    ⚠️ 放宽的只是【板】这一层；两种面板各自的判据一点没松：
+        //    · 配方编辑 ⇒ 仍然只认 ACTION_RECIPE_EDIT（accepts() = canOpenEditor）；
+        //    · 现实物品 ⇒ 只认 ACTION_CREATIVE_ITEMS，并且【服务端自己再查一次背包】。
+        if (!ShanhaiHoloMenuBoards.isEnabled(boardIndex)) {
             ShanhaiMod.LOGGER.warn("{} holo_editor_request REJECTED reason=board_not_enabled board={} idx={} "
                             + "label={} enabled={} action={} player={}",
                     PREFIX, board, boardIndex, ShanhaiHoloMenuBoards.labelOf(boardIndex),
                     ShanhaiHoloMenuBoards.isEnabled(boardIndex),
                     ShanhaiHoloMenuBoards.actionOf(boardIndex), player.getName().getString());
+            return;
+        }
+        final int boardAction = ShanhaiHoloMenuBoards.actionOf(boardIndex);
+
+        // ---- 🆕 现实物品那一格 ----
+        if (boardAction == ShanhaiHoloMenuBoards.ACTION_CREATIVE_ITEMS) {
+            if (!ShanhaiHoloMenuBoards.canOpenCreativeItems(boardIndex)) {
+                ShanhaiMod.LOGGER.warn("{} holo_creative_items_request REJECTED reason=predicate board={} idx={}",
+                        PREFIX, board, boardIndex);
+                return;
+            }
+            // 🔴 门槛（第 ⑥ 条）：服务端自己再查一次背包，不信客户端
+            if (!com.shanhai.common.reality.ShanhaiRealityItemTable.playerHasModule(player)) {
+                ShanhaiMod.LOGGER.warn("{} holo_creative_items_request REJECTED reason=no_module board={} "
+                        + "player={}", PREFIX, board, player.getName().getString());
+                player.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                        com.shanhai.common.reality.ShanhaiRealityItemTable.moduleRequiredText()), false);
+                return;
+            }
+            boolean opened = false;
+            try {
+                opened = com.shanhai.common.reality.ShanhaiCreativeItemsFactory.open(player);
+            } catch (Throwable t) {
+                ShanhaiMod.LOGGER.error("{} holo_creative_items_open_threw board={} player={} err={}",
+                        PREFIX, board, player.getName().getString(), t.toString(), t);
+            }
+            ShanhaiMod.LOGGER.info("{} holo_creative_items_opened board={} idx={} label={} player={} ok={}",
+                    PREFIX, board, boardIndex, ShanhaiHoloMenuBoards.labelOf(boardIndex),
+                    player.getName().getString(), opened);
+            return;
+        }
+
+        // ---- 配方编辑那一格（既有行为，一个字没改）----
+        if (boardAction != ShanhaiHoloMenuBoards.ACTION_RECIPE_EDIT) {
+            ShanhaiMod.LOGGER.warn("{} holo_editor_request REJECTED reason=unhandled_action board={} idx={} "
+                            + "action={} label={} player={}",
+                    PREFIX, board, boardIndex, boardAction, ShanhaiHoloMenuBoards.labelOf(boardIndex),
+                    player.getName().getString());
             return;
         }
         boolean ok = false;

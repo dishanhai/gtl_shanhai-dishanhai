@@ -1,0 +1,71 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="山海：扩展"
+authors="山海的神人私货项目组"
+description='''本体「山海：神人私货」的扩展：世界时钟（暂停 / 倒流 / 加速）、重力调制、额外防护手段
+（逐级清除实体、Entity#setRemoved / LivingEntity#setHealth 注入）。
+🔴 必须与本体同时安装（本体 modId=shanhai）；本体不依赖本 mod，只装本体照样能玩。'''
+
+# ==========================================================================================
+# 依赖声明（Forge 1.20.1 的写法：[[dependencies.<本 mod 的 modId>]]）
+# ------------------------------------------------------------------------------------------
+# 为什么 key 一定是 `dependencies.shanhai_add` 而不是 `mods.dependencies`：
+#   Forge 的解析器只读 "dependencies.<modId>" 这一条路径 —— 取证：
+#   net.minecraftforge.fml.loading.moddiscovery.ModInfo 的字节码（fmlloader-1.20.1-47.4.16.jar）里
+#   getDependencies() 就是 getConfigList("dependencies", modId)；另：../shanhai-rewrite/libs 下
+#   34 个真实 mod 的 mods.toml 全是 [[dependencies.xxx]]，没有一个是 [[mods.dependencies]]。
+#   ⚠️（本体 mods.toml 用的是 [[mods.dependencies]] ⇒ 那 5 段目前是**不生效**的，只作记录，本工程不改本体。）
+#
+# mandatory=true + ordering="AFTER" 是 1.20.1 FML 支持的组合（设计 §7.5 末段）：
+#   缺本体 ⇒ 玩家看到"缺少强制依赖"界面（这是对的，add 单独装没有意义），
+#   而不是 add 里第一句 com.shanhai.* 就 NoClassDefFoundError。
+# ==========================================================================================
+
+[[dependencies.shanhai_add]]
+    modId="forge"
+    mandatory=true
+    versionRange="[${forge_version},)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.shanhai_add]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[${minecraft_version}]"
+    ordering="NONE"
+    side="BOTH"
+
+# 🔴 唯一强制依赖：本体。ordering=AFTER 让 FML 先加载 body（桥接口 / 共用判据类得先存在）。
+[[dependencies.shanhai_add]]
+    modId="shanhai"
+    mandatory=true
+    versionRange="[${body_version},)"
+    ordering="AFTER"
+    side="BOTH"
+
+# 与本体同一批：只做加载顺序，不强制（本体那份同样是 mandatory=false，理由见本体 mods.toml:23-30）。
+[[dependencies.shanhai_add]]
+    modId="gtceu"
+    mandatory=false
+    versionRange="[1.4.4,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.shanhai_add]]
+    modId="gtlcore"
+    mandatory=false
+    versionRange="[1.2.3.2,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.shanhai_add]]
+    modId="gtladditions"
+    mandatory=false
+    versionRange="[3.1,)"
+    ordering="AFTER"
+    side="BOTH"

@@ -1500,13 +1500,16 @@ var shanhaiPfGt = [
         notConsumable: [],
         moduleLevelRequirement: '1x shanhai:genesis_reality_modification_module',
         moduleLevelFallbackCatalyst: '1x shanhai:genesis_reality_modification_module',
-        itemInputs: ['1x minecraft:cobblestone'],
+        // 🔴 2026-10-18 固化：用户在游戏里对这条做过 op=set（覆盖层 e-editor-261018-024916），
+        //    原形是「1x minecraft:cobblestone → 1x gtceu:creative_chest、EUt = MAX+8」（上方那段 MAX+8 的算式注释即由此而来，现已过期）。
+        //    固化后：输入只剩电路 32（催化、不消耗）／产出 5 件／EUt = 2147483647（= MAX，档位自动 = 14）。
+        itemInputs: [],
         inputFluids: [],
-        itemOutputs: ['1x gtceu:creative_chest'],
+        itemOutputs: ['1x gtceu:creative_chest', '1x shanhai:zwf', '1x shanhai:test_item', '1x shanhai:test_dynamic_text', '1x shanhai:primordial_debug_module'],
         outputFluids: [],
         chancedOutputs: [],
         duration: 60,
-        EUt: 140737488355328
+        EUt: 2147483647
     }
 ,
     // ▶ PF.txt 第 41 条（本次新增）｜元件「处理样板-星门(MAX+16)」｜纸：类型「量子化现实重构」／耗时「3s」｜输出 1x shanhai:primordial_debug_module

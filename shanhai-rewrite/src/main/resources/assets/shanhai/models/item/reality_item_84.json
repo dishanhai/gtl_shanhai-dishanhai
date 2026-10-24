@@ -1,0 +1,5 @@
+{
+  "loader": "shanhai:reality_item",
+  "slot": 84,
+  "fallback": "shanhai:item/reality_shell_3"
+}

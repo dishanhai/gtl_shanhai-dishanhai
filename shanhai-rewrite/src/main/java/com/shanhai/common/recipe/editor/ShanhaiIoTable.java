@@ -273,8 +273,12 @@ public final class ShanhaiIoTable {
          * 而是把 {@code maxChance} 补回满值 —— 补上之后 GT 自己就会把它画成红字「不消耗」。
          */
         public void setChanceAndCatalyst(int newChance, int newBoost, boolean catalyst) {
-            this.notConsumable = catalyst;
-            if (catalyst) {
+            // 🆕 2026-10-16（用户点单「编程电路强制为催化剂」）：电路那一格的开关【忽略用户的关操作】。
+            //    在唯一的 setter 里拦，而不是在按钮回调里拦 —— 面板按钮、客户端包、自检
+            //    所有调用方都经过这里，漏不掉。界面上那颗按钮也会显示成锁死的（见编辑器面板）。
+            final boolean wanted = catalyst || isProgrammedCircuit();
+            this.notConsumable = wanted;
+            if (wanted) {
                 this.chance = 0;
                 this.maxChance = MAX_CHANCE_VALUE;   // ← 曾经是 0，产出 NaN%
                 this.tierChanceBoost = 0;
@@ -291,6 +295,30 @@ public final class ShanhaiIoTable {
 
         public boolean empty() {
             return itemKind ? item.isEmpty() : fluid.isEmpty();
+        }
+
+        /**
+         * 🆕 2026-10-16（用户点单「编程电路强制为催化剂，免得我还要一直改，还老是忘了改」）：
+         * <b>这一格是不是编程电路</b>（⇒ 界面上"不消耗"那个开关必须锁死在开）。
+         *
+         * <p>判据用 GT 自己的 {@code IntCircuitBehaviour.isIntegratedCircuit}，与
+         * {@link #circuitOf} 同一个出处 —— 它认的是<b>物品</b>（{@code gtceu:programmed_circuit}），
+         * 所以"带号的电路"与"NBT 里没有 Configuration 的裸芯片"<b>都</b>算，
+         * 与 {@link ShanhaiCircuitCatalyst} 在 JSON 上认的两种形状一一对应。
+         *
+         * <p>⚠️ 为什么不用 {@code circuitOf(stack) >= 0}：那个对"没有号的裸芯片"给 {@code -1}
+         * （它回答的是"第几号"），拿它当"是不是电路"会漏掉裸芯片那一支。
+         */
+        public boolean isProgrammedCircuit() {
+            if (!itemKind || item == null || item.isEmpty()) {
+                return false;
+            }
+            try {
+                return IntCircuitBehaviour.isIntegratedCircuit(item);
+            } catch (Throwable t) {
+                // 读不出来 ⇒ 当作"不是电路"（宁可少锁一个开关，也不锁错一格）
+                return false;
+            }
         }
 
         /** 显示用数量（物品 = 个数、流体 = mB）。 */
@@ -330,6 +358,40 @@ public final class ShanhaiIoTable {
                 item.setCount(Math.min(MAX_ITEM_COUNT, Math.max(1, count)));
             }
             dirty = true;
+            // 🆕 2026-10-16：编程电路一落进格子就锁成催化剂（这是【唯一】一处把规则写进格子状态的地方）。
+            //    为什么在这里：所有"往格子放物品"的路（JEI 拖入的 offerIngredient、自检、
+            //    任何未来的调用方）都只经过 setItem ⇒ 不需要在 UI 的几个回调里各打一次补丁。
+            if (isProgrammedCircuit()) {
+                applyCircuitCatalystLock();
+            }
+        }
+
+        /**
+         * <b>编程电路恒为催化剂</b> —— 把这一格的状态锁成 GT 原生的
+         * {@code (chance=0, maxChance=10000, tierChanceBoost=0, notConsumable=true)}。
+         *
+         * <p>数值口径与 {@link #setChanceAndCatalyst(int, int, boolean)} 的催化剂那一支<b>逐字相同</b>
+         * （那是 A6 取证定下来的：{@code maxChance} 必须是 10000，写 0 会被 GT 画成黄字 {@code NaN%}）。
+         *
+         * @return true = 这一格是编程电路、已经锁上
+         */
+        public boolean applyCircuitCatalystLock() {
+            if (!isProgrammedCircuit()) {
+                return false;
+            }
+            final boolean changed = !notConsumable || chance != 0 || maxChance != MAX_CHANCE_VALUE
+                    || tierChanceBoost != 0;
+            notConsumable = true;
+            chance = 0;
+            maxChance = MAX_CHANCE_VALUE;
+            tierChanceBoost = 0;
+            catalystRepair = false;
+            // 只在"本来不是催化剂"时才置脏 —— 打开看一眼又直接保存，不该被判成有改动。
+            if (changed) {
+                chanceDirty = true;
+                dirty = true;
+            }
+            return true;
         }
 
         public void setFluid(FluidStack stack) {

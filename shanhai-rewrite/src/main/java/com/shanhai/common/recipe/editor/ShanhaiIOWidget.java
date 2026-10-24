@@ -336,6 +336,10 @@ public final class ShanhaiIOWidget extends Widget implements IGhostIngredientTar
             tooltipTexts.clear();
             if (c != null && !c.empty()) {
                 tooltipTexts.add(Component.literal(describeCell(c)));
+                // 🆕 2026-10-16（用户点单「编程电路强制为催化剂」）：把"为什么这一格改不了"写出来。
+                if (c.isProgrammedCircuit()) {
+                    tooltipTexts.add(Component.literal("§6编程电路恒为催化剂（不消耗）§7 —— 保存时一律 chance=0"));
+                }
                 tooltipTexts.add(Component.literal("§8外框：§7灰§8=物品格 · §9蓝§8=流体格"));
                 tooltipTexts.add(Component.literal("§8内框：§e金§8=正在改数量的那一格 · §f白§8=鼠标悬停"));
                 tooltipTexts.add(Component.literal("§8左键从 JEI 拖入 · 右键删 · 中键改数量/概率/催化剂"));

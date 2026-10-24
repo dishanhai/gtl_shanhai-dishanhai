@@ -20,7 +20,7 @@ const NS = 'shanhai'                              // 配方 id 命名空间
 function fail(name, msg) { throw new Error('🔴 [' + name + '] ' + msg) }
 
 // ── 单个物品槽 → KJS 片段 ───────────────────────────────────────────────────
-// 口径（全部由字节码/实测锚定，见 handoff 报告 §2）：
+// 口径（全部由字节码/实测锚定，见 temp\handoff 报告 §2）：
 //   · chance=10000（默认）        → .itemInputs('Nx item' / 'Nx #tag')
 //   · chance=0 且 ingredient 是电路 → .circuit(N)
 //   · chance=0 且是普通物品        → .notConsumable('Nx item')
@@ -177,7 +177,7 @@ function jsonToRow(name, j) {
     return row
 }
 
-// GTUtil.getTierByVoltage(long) 的【等价实现】（字节码逐句翻译，见 handoff 报告 §2.4）：
+// GTUtil.getTierByVoltage(long) 的【等价实现】（字节码逐句翻译，见 temp\handoff 报告 §2.4）：
 //   v > 2147483647        → 14
 //   v <= V[0] (=8)        → 0
 //   否则                  → (62 - numberOfLeadingZeros(v-1)) >> 1
