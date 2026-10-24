@@ -50,6 +50,9 @@ public class GTDishanhaiMod {
     // 否则会卡住玩家登录；改成记录目标 tick，交给下面的 ServerTickEvent 延迟触发，登录流程不再等它。
     private static long sdaAutoSyncTargetTick = -1;
 
+    /** 开发者 Markdown 导出延迟触发 tick（-1 表示未安排）。放在登录流程之后，避免启动卡顿。 */
+    private static long devExportTargetTick = -1;
+
     // 活性中子机械方块 (大明科技外壳)
     public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, MOD_ID);
     public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
@@ -265,6 +268,10 @@ public class GTDishanhaiMod {
                 net.minecraftforge.eventbus.api.EventPriority.LOWEST,
                 (net.minecraftforge.event.server.ServerStartedEvent e) -> {
                     sdaAutoSyncTargetTick = e.getServer().getTickCount() + 100;
+                    if (com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.developerExportContents.get()
+                            || com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.developerExportRecipes.get()) {
+                        devExportTargetTick = e.getServer().getTickCount() + 120;
+                    }
                     // ServerAboutToStart 时 GTCEu / KubeJS 还会用原数据包配方重建 lookup。
                     // 等服务器起来、查找表定稿后再写一次，效果与 /山海 配方 重载 相同。
                     // 这里只做一轮：reapply 内部就是一次 rebuildAll，重建已含禁用状态与覆写。
@@ -294,6 +301,18 @@ public class GTDishanhaiMod {
                             .prewarmRecipeOutputIndexesAsync("server started +100t");
                     // 登入橫幅會掃全部配方 JSON。提前在伺服器執行緒做完，玩家登入只讀快照。
                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine.warmRecipeStats(e.getServer());
+                });
+
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
+                (net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
+                    if (e.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
+                    if (devExportTargetTick < 0) return;
+                    if (e.getServer().getTickCount() < devExportTargetTick) return;
+                    devExportTargetTick = -1;
+                    com.dishanhai.gt_shanhai.common.debug.DevContentExport.run(
+                            com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths.devExportDir(),
+                            com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.developerExportContents.get(),
+                            com.dishanhai.gt_shanhai.config.DShanhaiConfig.COMMON.developerExportRecipes.get());
                 });
 
         // 客户端初始化推迟到 FMLClientSetupEvent（此时 RegistryObject 已可用）

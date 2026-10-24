@@ -155,6 +155,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.ConfigValue<List<? extends String>> jeiBookmarkExclusions;
         /** 开发模式 — 配方修改器 json 直接写入模组源码 recipes 目录 */
         public ForgeConfigSpec.BooleanValue developerMode;
+        public ForgeConfigSpec.BooleanValue developerExportContents;
+        public ForgeConfigSpec.BooleanValue developerExportRecipes;
 
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("tag_filter_bus");
@@ -474,6 +476,20 @@ public final class DShanhaiConfig {
                             "文件落在配方 id 的路径上，例如 gt_shanhai:qft/foo → recipes/qft/foo.json",
                             "只在这台开发机打开。其他机器没有这个目录，导出会失败。")
                     .define("developerMode", false);
+            developerExportContents = builder
+                    .comment("开发者导出：GT 物品与流体清单（默认关闭）",
+                            "开启后服务器启动完成时写出 config/gt_shanhai/dev-export/gt-contents.md",
+                            "只收录 gtceu / kubejs / gtlcore / gtladditions / gt_shanhai / dishanhai",
+                            "按模组分组，组内按 ID 字母排序；列为中文名、英文 ID、前两个 tag",
+                            "内容较大，只在需要查表时临时开启")
+                    .define("exportContents", false);
+            developerExportRecipes = builder
+                    .comment("开发者导出：GT 配方清单（默认关闭）",
+                            "开启后服务器启动完成时写出 config/gt_shanhai/dev-export/gt-recipes.md",
+                            "按配方 ID 的命名空间分组，组内按 ID 字母排序",
+                            "列为配方 ID、机器类型、前两输入与前两输出（物品/流体合并计数）",
+                            "内容较大，只在需要查配方时临时开启")
+                    .define("exportRecipes", false);
             builder.pop();
         }
     }

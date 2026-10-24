@@ -21,6 +21,14 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineM
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import com.gtladd.gtladditions.api.machine.gui.LimitedDurationConfigurator;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
+import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
+import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.gregtechceu.gtceu.api.recipe.RecipeHelper;
+import com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe;
+import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
+import com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler;
+import org.gtlcore.gtlcore.api.machine.trait.IRecipeStatus;
+import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -34,6 +42,12 @@ import org.slf4j.Logger;
 
 import java.util.List;
 import java.util.Locale;
+import java.math.BigInteger;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 
 /**
  * 山海：由 Integrate/acb081f 移植的歸墟視界樞核。
@@ -111,6 +125,131 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
      */
     @DescSynced
     private boolean hostFormedSync = false;
+
+    @DescSynced
+    private int operationStateId;
+    @DescSynced
+    private int activeModuleCount;
+    private GuixuEnergyHandler guixuEnergy;
+    private final GuixuVisualState visualState = new GuixuVisualState();
+
+    @Override
+    public GuixuEnergyHandler getWirelessNetworkEnergyHandler() {
+        if (guixuEnergy == null) guixuEnergy = new GuixuEnergyHandler(this);
+        return guixuEnergy;
+    }
+
+    public GuixuOperationState getOperationState() { return GuixuOperationState.fromId(operationStateId); }
+    public int getActiveModuleCount() { return activeModuleCount; }
+    public GuixuVisualState.Profile getVisualProfile(double seconds) {
+        return visualState.advance(getOperationState(), seconds);
+    }
+
+    /** 山海：原生多選集合在本機限制為一種方向，防止混合發電與耗電批次。 */
+    @Override
+    public GTRecipeType[] getSelectedRecipeTypes() {
+        GTRecipeType[] selected = super.getSelectedRecipeTypes();
+        return selected.length <= 1 ? selected : new GTRecipeType[]{selected[0]};
+    }
+
+    @Override
+    public boolean isRecipeTypeSelected(GTRecipeType type) {
+        GTRecipeType[] selected = getSelectedRecipeTypes();
+        return selected.length == 1 && selected[0] == type;
+    }
+
+    @Override
+    public void setRecipeTypeSelected(GTRecipeType type, boolean selected) {
+        if (selected) selectOnlyRecipeType(type);
+    }
+
+    @Override
+    public void selectAllRecipeTypes() { selectFirstRecipeType(); }
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (!isRemote() && super.getSelectedRecipeTypes().length != 1) {
+            GTRecipeType[] selected = getSelectedRecipeTypes();
+            GTRecipeType[] available = getAllSelectableRecipeTypes();
+            if (selected.length > 0) selectOnlyRecipeType(selected[0]);
+            else if (available.length > 0) selectOnlyRecipeType(available[0]);
+        }
+    }
+
+    @Override
+    public void attachSideTabs(TabsWidget tabs) {
+        tabs.setMainTab(this);
+        tabs.attachSubTab(GuixuControlPanels.modes(this));
+        attachCleanSideTabs(tabs);
+    }
+
+    @Override
+    protected void attachCleanSideTabs(TabsWidget tabs) {
+        super.attachCleanSideTabs(tabs);
+        tabs.attachSubTab(GuixuControlPanels.modules(this));
+    }
+
+    /** 只觀察有效回連且區塊已載入的模組，始終渲染開關不參與工作判定。 */
+    public void refreshOperationState() {
+        if (isRemote()) return;
+        boolean working = isFormed() && getRecipeLogic().isWorking();
+        boolean generating = working && isGenerating(getRecipeLogic());
+        boolean blocked = isFormed() && isBlocked(getRecipeLogic());
+        int active = 0;
+        if (isFormed()) {
+            for (var candidate : getModuleSet()) {
+                if (!(candidate instanceof PrimordialOmegaEngineModuleBase module)
+                        || module.getHost() != this || !module.isFormed()
+                        || getLevel() == null || !getLevel().hasChunkAt(module.getPos())) continue;
+                if (module.getRecipeLogic().isWorking()) {
+                    active++;
+                    working = true;
+                    generating |= isGenerating(module.getRecipeLogic());
+                }
+                blocked |= isBlocked(module.getRecipeLogic());
+            }
+        }
+        int next = GuixuOperationState.resolve(working, generating, blocked).ordinal();
+        if (operationStateId != next || activeModuleCount != active) {
+            operationStateId = next;
+            activeModuleCount = active;
+            notifyBlockUpdate();
+        }
+    }
+
+    static boolean isBlocked(RecipeLogic logic) {
+        if (!logic.isWorkingEnabled()) return false;
+        if (logic.isWaiting() || logic.isHasNotEnoughEnergy()) return true;
+        if (logic instanceof IRecipeStatus statuses) {
+            RecipeResult result = statuses.getWorkingStatus();
+            if (result == null || result.isSuccess()) result = statuses.getRecipeStatus();
+            return result != null && !result.isSuccess() && !result.equals(RecipeResult.FAIL_FIND);
+        }
+        return false;
+    }
+
+    static boolean isGenerating(RecipeLogic logic) {
+        var recipe = logic.getLastRecipe();
+        if (recipe instanceof IWirelessGTRecipe wireless) {
+            BigInteger amount = wireless.getWirelessEuTickInputs();
+            return GuixuEnergyTransfer.generatesEnergy(amount);
+        }
+        return recipe != null && RecipeHelper.getOutputEUt(recipe) > 0L;
+    }
+
+    /** 去重後的原生能量能力；不把輸入和輸出存量混合。 */
+    public List<IEnergyContainer> getGuixuEnergyContainers(IO io) {
+        List<IEnergyContainer> result = new ArrayList<>();
+        var seen = Collections.newSetFromMap(new IdentityHashMap<IEnergyContainer, Boolean>());
+        List<IRecipeHandler<?>> handlers = getCapabilitiesProxy().get(io, EURecipeCapability.CAP);
+        if (handlers != null) {
+            for (IRecipeHandler<?> handler : handlers) {
+                if (handler instanceof IEnergyContainer energy && seen.add(energy)) result.add(energy);
+            }
+        }
+        return result;
+    }
 
     /** 给客户端渲染器读的"服务端成型位"（{@code @DescSynced} 镜像）。 */
     public boolean isHostFormedSync() {
@@ -195,7 +334,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         }
         final java.util.List<String> problems = new java.util.ArrayList<>();
         for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride",
-                "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel"}) {
+                "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel",
+                "operationStateId", "activeModuleCount"}) {
             if (!names.contains(required)) {
                 problems.add("缺字段 " + required);
             }
@@ -285,7 +425,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     }
 
     public int getFormedModuleCount() {
-        return (int) getModuleSet().stream().filter(IModularMachineModule::isFormed).count();
+        return (int) getModuleSet().stream().filter(module -> module.isFormed() && module.getHost() == this).count();
     }
 
     @Override
@@ -335,6 +475,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     @Override
     public void onStructureInvalid() {
         setHostFormedSync(false);
+        operationStateId = GuixuOperationState.IDLE.ordinal();
+        activeModuleCount = 0;
         super.onStructureInvalid();
     }
 
@@ -375,7 +517,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     }
 
     /** 槽位短标签：外环 E0..N3 / 上柱 UE..UN / 下柱 LE..LN（只用于日志可读性）。 */
-    private static String slotLabel(int index) {
+    static String slotLabel(int index) {
         final List<GuixuHostGeometry.Slot> slots = GuixuHostGeometry.slots();
         if (index < 0 || index >= slots.size()) {
             return "?";
@@ -473,23 +615,18 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
      *
      * <p>纯读：任何异常都退回 {@code (0,0)}，绝不打断抬头渲染。
      */
-    private long[] energyTotals(IO io) {
-        long stored = 0L;
-        long capacity = 0L;
+    private BigInteger[] energyTotals(IO io) {
+        BigInteger stored = BigInteger.ZERO;
+        BigInteger capacity = BigInteger.ZERO;
         try {
-            final List<IRecipeHandler<?>> handlers = getCapabilitiesProxy().get(io, EURecipeCapability.CAP);
-            if (handlers != null) {
-                for (IRecipeHandler<?> handler : handlers) {
-                    if (handler instanceof IEnergyContainer container) {
-                        stored += container.getEnergyStored();
-                        capacity += container.getEnergyCapacity();
-                    }
-                }
+            for (IEnergyContainer container : getGuixuEnergyContainers(io)) {
+                stored = stored.add(BigInteger.valueOf(container.getEnergyStored()));
+                capacity = capacity.add(BigInteger.valueOf(container.getEnergyCapacity()));
             }
         } catch (Throwable ignored) {
             // 纯读：显示用，异常 ⇒ 当作"没有仓"
         }
-        return new long[]{stored, capacity};
+        return new BigInteger[]{stored, capacity};
     }
 
     // ------------------------------------------------------------------ 显示文案（别放假数据）
@@ -519,10 +656,35 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 .append(Component.literal("结构已成型").withStyle(ChatFormatting.GREEN)));
         textList.add(Component.literal("已连接模块：" + getFormedModuleCount() + " / " + getMaxModuleCount())
                 .withStyle(ChatFormatting.GRAY));
+        textList.add(Component.literal("運作：" + getOperationState().label + "｜工作模組 " + activeModuleCount)
+                .withStyle(ChatFormatting.AQUA));
+        GTRecipeType mode = getPrimarySelectedRecipeType();
+        if (mode != null) textList.add(Component.literal("模式：")
+                .append(Component.translatable("gtceu." + mode.registryName.getPath())));
+        if (getRecipeLogic().isWorking() || getRecipeLogic().isWaiting()) {
+            textList.add(Component.literal("本批進度：" + getRecipeLogic().getProgress() + " / "
+                    + getRecipeLogic().getMaxProgress() + " tick；剩餘 "
+                    + Math.max(0, getRecipeLogic().getMaxProgress() - getRecipeLogic().getProgress()) / 20.0 + " 秒"));
+            var recipe = getRecipeLogic().getLastRecipe();
+            if (recipe instanceof IWirelessGTRecipe wireless && wireless.getWirelessEuTickInputs() != null) {
+                BigInteger eut = wireless.getWirelessEuTickInputs();
+                textList.add(Component.literal((eut.signum() > 0 ? "本批發電：" : "本批耗電：") + eut.abs() + " EU/t"));
+            }
+            if (recipe != null) {
+                BigInteger items = BigInteger.ZERO;
+                BigInteger fluids = BigInteger.ZERO;
+                for (var stack : RecipeHelper.getOutputItems(recipe)) items = items.add(BigInteger.valueOf(stack.getCount()));
+                for (var fluid : RecipeHelper.getOutputFluids(recipe)) fluids = fluids.add(BigInteger.valueOf(fluid.getAmount()));
+                int ticks = Math.max(1, getRecipeLogic().getMaxProgress());
+                textList.add(Component.literal("本批預估產出：" + outputRate(items, ticks)
+                        + " 個/s，" + outputRate(fluids, ticks) + " mB/s"));
+            }
+            if (getRecipeLogic().isWaiting()) textList.addAll(getRecipeLogic().getFancyTooltip());
+        }
 
         // ── 能量双仓：两行分别显示（默认那条已被本覆写挡掉，不重复）──
-        final long[] input = energyTotals(IO.IN);
-        final long[] output = energyTotals(IO.OUT);
+        final BigInteger[] input = energyTotals(IO.IN);
+        final BigInteger[] output = energyTotals(IO.OUT);
         textList.add(Component.literal("能源仓 (IN)：" + input[0] + " / " + input[1] + " EU")
                 .withStyle(ChatFormatting.AQUA));
         textList.add(Component.literal("动力仓 (OUT)：" + output[0] + " / " + output[1] + " EU")
@@ -544,5 +706,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         textList.add(Component.literal(String.format(Locale.ROOT,
                 "耗能减免：x%.4f 耗电（同主机那套）",
                 getHostEnergyReductionFactor(bonus))).withStyle(ChatFormatting.GRAY));
+    }
+
+    private static String outputRate(BigInteger amount, int ticks) {
+        return new BigDecimal(amount).multiply(BigDecimal.valueOf(20))
+                .divide(BigDecimal.valueOf(ticks), 2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
     }
 }

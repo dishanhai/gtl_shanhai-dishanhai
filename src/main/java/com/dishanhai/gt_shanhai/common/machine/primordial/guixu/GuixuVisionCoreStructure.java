@@ -116,13 +116,16 @@ public final class GuixuVisionCoreStructure {
      * 两侧的存量在抬头里<b>分两行</b>画（{@link GuixuVisionCoreMachine#addDisplayText}），
      * 机器等级不卡（沿用 {@code PrimordialOmegaEngineMachine#getMaxVoltage()} = {@code Long.MAX_VALUE}）。
      *
-     * <p>⚠️ 本阶段<b>只放这两种</b>电仓：物品/流体仓的贴附点等阶段 3 接了三个自有配方类型之后再加，
-     * 免得现在放上去一堆"能装但机器不认"的仓。
+     * <p>山海：專屬模式另接受物品／流體進出料倉，沿用原生 capability 聚合及 ME 倉能力。
      */
     public static TraceabilityPredicate ringBandPredicate() {
         return Predicates.blocks(appearanceBlock())
                 .or(Predicates.abilities(PartAbility.INPUT_ENERGY).setPreviewCount(1))
-                .or(Predicates.abilities(PartAbility.OUTPUT_ENERGY).setPreviewCount(1));
+                .or(Predicates.abilities(PartAbility.OUTPUT_ENERGY).setPreviewCount(1))
+                .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
+                .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
+                .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
+                .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1));
     }
 
     /** 外观方块句柄（注册期惰性取）。 */

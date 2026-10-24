@@ -22,7 +22,7 @@ import org.lwjgl.opengl.GL11;
 import java.util.List;
 
 /**
- * 归墟视界枢核 · <b>唯一保留的自绘特效</b>：6 条光束（4 条提取 + 黑洞上下 2 条）。
+ * 歸墟視界樞核 · 六條光束提交，並提供星辰吸入共用的加性渲染層。
  *
  * <h2>内环与飞船去哪了</h2>
  * 已经不在这里画了 —— 按用户口径改成"真方块跟着转"（{@link HostFxBaked} + {@link HostFxRingGroups}）。
@@ -128,7 +128,8 @@ public final class HostFxDraw {
      * （同一对 {@code RenderSystem.blendFunc(SRC_ALPHA, ONE)}），所以两处"加性"的观感一致。
      * {@code sortOnUpload = false}：加性混合与顺序无关，每帧 2304 个 quad 不值得排一次序。
      */
-    private static RenderType beamLayer() {
+    // 山海：星辰吸入與光束共用加性混合、深度測試及批次狀態。
+    static RenderType beamLayer() {
         if (beamLayer == null) {
             beamLayer = RenderType.create(
                     "shanhai_hostfx_beam",
@@ -160,7 +161,7 @@ public final class HostFxDraw {
     public static void drawBeams(PoseStack poseStack, float cx, float cy, float cz, Direction facing,
                                  BlockPos controllerPos,
                                  double camWorldX, double camWorldY, double camWorldZ,
-                                 float holeSurfaceR, float spinDeg) {
+                                 float holeSurfaceR, float spinDeg, float brightness) {
         lastQuads = 0;
         lastBatches = 0;
         // 相机换算到"环心本地"帧：先反旋转回生成器方向，再减掉环心
@@ -192,7 +193,7 @@ public final class HostFxDraw {
                 final float r = clamp(q.r());
                 final float g = clamp(q.g());
                 final float b = clamp(q.b());
-                final float a = clamp(q.a());
+                final float a = clamp(q.a() * brightness);
                 vc.vertex(m, p[0], p[1], p[2]).color(r, g, b, a).endVertex();
                 vc.vertex(m, p[3], p[4], p[5]).color(r, g, b, a).endVertex();
                 vc.vertex(m, p[6], p[7], p[8]).color(r, g, b, a).endVertex();

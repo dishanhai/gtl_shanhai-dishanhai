@@ -2,6 +2,7 @@ package com.dishanhai.gt_shanhai.common.item;
 
 import appeng.api.crafting.IPatternDetails;
 import appeng.api.crafting.PatternDetailsHelper;
+import appeng.api.stacks.GenericStack;
 
 import com.dishanhai.gt_shanhai.common.item.generator.PatternGeneratorRecipes;
 import com.dishanhai.gt_shanhai.common.item.generator.PatternGeneratorScale;
@@ -30,6 +31,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -57,6 +59,9 @@ public final class SelectedRecipePattern {
     public record Contents(int scale, int outputScale, String recipeType, List<String> recipes) {}
 
     public record Expanded(IPatternDetails pattern, ItemStack stack, GTRecipe recipe) {}
+
+    /** 终端搜索用：通配样板内全部配方的产物名与原料名，去重后保持配方顺序。 */
+    public record SearchNames(Set<String> outputs, Set<String> inputs) {}
 
     public static ItemStack create(Contents contents) {
         CompoundTag tag = write(contents);
@@ -454,6 +459,29 @@ public final class SelectedRecipePattern {
             if (one != null) expanded.add(one);
         }
         return expanded;
+    }
+
+    /** 只读配方内容取名，不编码样板。客户端终端搜索母槽时用，配方未同步到的条目直接略过。 */
+    public static SearchNames searchNames(ItemStack bundle, @Nullable Level level) {
+        Set<String> outputs = new LinkedHashSet<>();
+        Set<String> inputs = new LinkedHashSet<>();
+        Contents contents = bundle == null ? null : read(bundle.getTag());
+        if (contents == null || level == null) return new SearchNames(outputs, inputs);
+        for (String id : contents.recipes()) {
+            ResourceLocation key = ResourceLocation.tryParse(id);
+            if (key == null) continue;
+            if (!(level.getRecipeManager().byKey(key).orElse(null) instanceof GTRecipe recipe)) continue;
+            PatternGeneratorRecipes.Entry entry = PatternGeneratorRecipes.describe(recipe);
+            collectNames(entry.encodedOutputs(), outputs);
+            collectNames(entry.encodedInputs(), inputs);
+        }
+        return new SearchNames(outputs, inputs);
+    }
+
+    private static void collectNames(List<GenericStack> stacks, Set<String> names) {
+        for (GenericStack stack : stacks) {
+            if (stack != null) names.add(stack.what().getDisplayName().getString());
+        }
     }
 
     @Nullable

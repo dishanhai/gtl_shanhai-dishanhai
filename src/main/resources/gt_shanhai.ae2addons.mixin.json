@@ -12,6 +12,7 @@
     "EaepOpenProviderUiStellarMixin"
   ],
   "client": [
-    "EaepProviderSelectScreenRecipeTypeMixin"
+    "EaepProviderSelectScreenRecipeTypeMixin",
+    "ExPatternTerminalBundleSearchMixin"
   ]
 }

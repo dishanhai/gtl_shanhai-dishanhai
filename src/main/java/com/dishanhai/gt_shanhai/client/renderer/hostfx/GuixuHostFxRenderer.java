@@ -7,6 +7,8 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.config.GuixuClientConfig;
 import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleTuning;
+import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleLensMath;
+import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleLensRenderer;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
 
 import net.minecraft.client.Minecraft;
@@ -259,7 +261,7 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
                 logGate("not_baked", "台账还没建起来（HostFxHide 尚未藏块，先不画，免得和真方块叠成两层）");
             }
 
-            // ⑦ 唯一保留的自绘特效：6 条光束（4 条径向 + 黑洞上下 2 条）
+            // ⑦ 六條光束（4 條徑向＋黑洞上下 2 條），星辰效果在下方另批提交。
             //    几何在 HostFxGeometry.buildBeamQuads（32 段 × 12 片圆 / 五次贝塞尔 / 亮色包络），
             //    状态与一次性 flush 在 HostFxDraw（加性、不写深度、真的关剔除）。
             final Vec3 cam = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
@@ -280,8 +282,24 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
                 }
             }
 
+            final double effectSeconds = (clientLevel.getGameTime() + (double) partialTick) / 20.0;
+            final var profile = host.getVisualProfile(effectSeconds);
             HostFxDraw.drawBeams(poseStack, cx, cy, cz, facing, controllerPos, cam.x, cam.y, cam.z,
-                    holeR, HostFxGeometry.ringDeg(seconds));
+                    holeR, HostFxGeometry.ringDeg(seconds), profile.brightness());
+
+            // 山海：以目前黑洞尺寸收束星辰；與成型／總特效共用早退閘門，無世界粒子殘留。
+            final double starHorizon = BlackHoleLensRenderer.rsBlocks() * BlackHoleLensMath.B_CRIT;
+            if (BlackHoleTuning.enabled()) {
+                final float[] camLocal = HostFxBlackHole.cameraLocal(facing, cam.x, cam.y, cam.z, controllerPos);
+                poseStack.pushPose();
+                try {
+                    HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
+                    GuixuStarRenderer.render(poseStack, camLocal,
+                            effectSeconds, starHorizon, profile.density(), profile.brightness(), profile.jets());
+                } finally {
+                    poseStack.popPose();
+                }
+            }
 
             // 🔴 "到底画了没有"的唯一判据：这一行（带计数与台账核对）。每 5 秒最多一条。
             logDraw(ships, formedByController, formedBySync,

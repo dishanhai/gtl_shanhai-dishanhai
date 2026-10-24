@@ -5,7 +5,7 @@ import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.gregtechceu.gtceu.GTCEu;
 import com.gregtechceu.gtceu.api.data.RotationState;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
-import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
+import com.dishanhai.gt_shanhai.api.recipe.DShanhaiRecipeTypes;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 
@@ -25,8 +25,9 @@ public final class GuixuVisionCoreMachines {
         definition = GTDishanhaiRegistration.REGISTRATE
                 .multiblock(ID, GuixuVisionCoreMachine::new)
                 .rotationState(RotationState.NON_Y_AXIS)
-                // 來源版尚未定義正式配方類型，保留組裝機占位。
-                .recipeTypes(GTRecipeTypes.ASSEMBLER_RECIPES)
+                .recipeTypes(DShanhaiRecipeTypes.GUIXU_MATTER_DECOMPRESSION,
+                        DShanhaiRecipeTypes.GUIXU_ENERGY_EXTRACTION,
+                        DShanhaiRecipeTypes.GUIXU_PARADIGM_SIMPLIFICATION)
                 .pattern(GuixuVisionCoreStructure::createPattern)
                 .workableCasingRenderer(casing, overlay)
                 .renderer(() -> new com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuHostFxRenderer(casing, overlay))

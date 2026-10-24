@@ -72,6 +72,7 @@ public final class ShanhaiConfigPaths {
     public static final String MACHINE_DIR_NAME = "machine";
     public static final String CLIENT_DIR_NAME = "client";
     public static final String CLIENT_PATTERN_PRESETS_DIR_NAME = "pattern-generator-presets";
+    public static final String DEV_EXPORT_DIR_NAME = "dev-export";
 
     /** 旧版平铺文件名 → 新相对路径（相对模组配置根目录）。 */
     private static final List<LegacyFile> LEGACY_FILES = List.of(
@@ -236,6 +237,13 @@ public final class ShanhaiConfigPaths {
     /** {@code <root>/client/pattern-generator-presets} */
     public static Path patternGeneratorPresetsDir() {
         return clientDir().resolve(CLIENT_PATTERN_PRESETS_DIR_NAME);
+    }
+
+    // ====== dev-export ======
+
+    /** {@code <root>/dev-export}：开发者选项导出的 Markdown。 */
+    public static Path devExportDir() {
+        return root().resolve(DEV_EXPORT_DIR_NAME);
     }
 
     // ====== 目录创建 ======

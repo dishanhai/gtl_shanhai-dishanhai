@@ -17,6 +17,9 @@ import java.util.List;
 public class DShanhaiRecipeTypes {
 
     public static GTRecipeType SPACETIME_DISTORTION;
+    public static GTRecipeType GUIXU_MATTER_DECOMPRESSION;
+    public static GTRecipeType GUIXU_ENERGY_EXTRACTION;
+    public static GTRecipeType GUIXU_PARADIGM_SIMPLIFICATION;
     public static GTRecipeType KU_MING_YUAN_YANG;
     public static GTRecipeType PRIMORDIAL_POWER_GENERATOR;
     public static GTRecipeType PRIMORDIAL_MYRIAD_ASCENSION_TIER_2;
@@ -71,6 +74,17 @@ public class DShanhaiRecipeTypes {
     }
 
     public static void init() {
+        // 山海：歸墟三種專屬模式；具體配方與倍率消耗另行定義。
+        GUIXU_MATTER_DECOMPRESSION = register("guixu_matter_decompression", "multiblock")
+                .setMaxIOSize(9, 9, 4, 4).setEUIO(IO.IN)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+        GUIXU_ENERGY_EXTRACTION = register("guixu_energy_extraction", "multiblock")
+                .setMaxIOSize(9, 9, 4, 4).setEUIO(IO.OUT)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+        GUIXU_PARADIGM_SIMPLIFICATION = register("guixu_paradigm_simplification", "multiblock")
+                .setMaxIOSize(9, 9, 4, 4).setEUIO(IO.IN)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+
         SPACETIME_DISTORTION = register("spacetime_distortion", "multiblock")
                 .setMaxIOSize(9, 6, 6, 5)
                 .setEUIO(IO.IN)

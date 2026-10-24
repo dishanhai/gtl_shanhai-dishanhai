@@ -350,6 +350,24 @@ public final class DShanhaiConfigScreen {
                         "只在这台开发机打开。其他机器没有该目录，导出会失败"))
                 .setSaveConsumer(cfg.developerMode::set).build());
 
+        developer.addEntry(e.startBooleanToggle(Component.literal("导出 GT 物品与流体清单"), cfg.developerExportContents.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("服务器启动完成时写出 config/gt_shanhai/dev-export/gt-contents.md",
+                        "修改后需要重启服务器才会导出",
+                        "只收录 gtceu / kubejs / gtlcore / gtladditions / gt_shanhai / dishanhai",
+                        "按模组分组、组内按 ID 字母排序",
+                        "列为中文名、英文 ID、前两个标签 ID",
+                        "内容较大，查完建议关掉"))
+                .setSaveConsumer(cfg.developerExportContents::set).build());
+        developer.addEntry(e.startBooleanToggle(Component.literal("导出 GT 配方清单"), cfg.developerExportRecipes.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("服务器启动完成时写出 config/gt_shanhai/dev-export/gt-recipes.md",
+                        "修改后需要重启服务器才会导出",
+                        "按配方 ID 的命名空间分组、组内按 ID 字母排序",
+                        "列为配方 ID、机器类型、前两输入、前两输出",
+                        "物品与流体合并计数；内容较大，查完建议关掉"))
+                .setSaveConsumer(cfg.developerExportRecipes::set).build());
+
         return builder.build();
     }
 
