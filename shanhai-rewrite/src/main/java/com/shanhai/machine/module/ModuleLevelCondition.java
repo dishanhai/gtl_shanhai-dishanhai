@@ -512,8 +512,11 @@ public class ModuleLevelCondition extends RecipeCondition {
      */
     public boolean checkModuleLevel(@Nullable MetaMachine machine) {
         // ── 模块机器路径（本工程 PrimordialModuleRecipeLogic 会走到这里）：只看本机自己的物质模块槽 ──
+        // 🔴 2026-10-23：改读【有效等级】= max(自己槽里的等级, 主机复写等级)。
+        //    老主机 getHostMatterLevelOverride() 恒 0 ⇒ max(自己, 0) == 自己 ⇒ 行为逐位不变；
+        //    主机侧没启用复写时同样逐位不变（见 PrimordialModuleMachine#getEffectiveMatterModuleLevel）。
         if (machine instanceof PrimordialModuleMachine module) {
-            return meetsLevelRequirement(module.getMatterModuleLevel(), requiredLevelForGate());
+            return meetsLevelRequirement(module.getEffectiveMatterModuleLevel(), requiredLevelForGate());
         }
 
         // ── ⛔ 主机聚合分支【未移植】（见类注释 §4）────────────────────────────────

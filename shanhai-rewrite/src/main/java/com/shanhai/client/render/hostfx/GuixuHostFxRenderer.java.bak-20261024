@@ -1,0 +1,207 @@
+package com.shanhai.client.render.hostfx;
+
+import com.gregtechceu.gtceu.api.machine.MetaMachine;
+import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
+import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRenderer;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.shanhai.ShanhaiMod;
+import com.shanhai.client.config.ShanhaiClientConfig;
+import com.shanhai.client.render.blackhole.BlackHoleTuning;
+import com.shanhai.machine.host.GuixuVisionCoreMachine;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+
+import org.lwjgl.opengl.GL11;
+
+/**
+ * 归墟视界枢核 · <b>动态特效渲染器</b>（TESR）。
+ *
+ * <h2>画什么（全部是渲染，方块不变）</h2>
+ * <ol>
+ *   <li><b>内环绕中心轴转</b> —— 真方块先被藏起来（{@link HostFxHide}），再画一圈转动的环带；</li>
+ *   <li><b>上下 8 艘磁悬浮飞船</b> —— 上方 4 艘顺时针、下方 4 艘逆时针，沿环飞行；</li>
+ *   <li><b>黑洞</b> —— <b>不在这里画</b>：把中心点喂给既有的 {@link BlackHoleTuning#setCenter}，
+ *       由 {@code com.shanhai.client.render.blackhole.BlackHoleLensRenderer} 那套（吸积盘 + 光子环 +
+ *       真透镜 + 三级兜底）去画。<b>不重写第二套</b>；</li>
+ *   <li><b>内外环之间的动态光束</b> + <b>黑洞两极喷流</b>。</li>
+ * </ol>
+ *
+ * <h2>三条纪律</h2>
+ * <ol>
+ *   <li><b>只在成型时画</b>：{@code controller.isFormed()} 为假 ⇒ 立即返回（并走去抖恢复真块）；</li>
+ *   <li><b>距离裁剪</b>：玩家离环心 &gt; {@code ShanhaiClientConfig.hostFxMaxDistance()}（默认 64 格）⇒ 不画；</li>
+ *   <li><b>任何一步失败都不许出黑块/紫黑块</b>：几何一律走无贴图的 {@code RenderType.debugFilledBox()}，
+ *       出异常就 {@link HostFxFallback#degrade} 降级并打 {@code [SHANHAI-HOSTFX] fallback=…}。</li>
+ * </ol>
+ */
+public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
+
+    /** 上一次喂给黑洞的中心（用来判断"该不该清掉"，避免覆盖玩家用命令设的中心）。 */
+    private static double[] lastCenter;
+
+    /** 上一帧所在的 Level（换维度/离开世界时用来复位台账与降级级别，不依赖任何外部事件类）。 */
+    private static Level lastLevel;
+
+    public GuixuHostFxRenderer(ResourceLocation baseCasing, ResourceLocation workableModel) {
+        super(baseCasing, workableModel);
+    }
+
+    @Override
+    public boolean hasTESR(BlockEntity blockEntity) {
+        return true;
+    }
+
+    @Override
+    public boolean isGlobalRenderer(BlockEntity blockEntity) {
+        return true;
+    }
+
+    @Override
+    public int getViewDistance() {
+        return 384;
+    }
+
+    /**
+     * 从方块实体取机器（{@code IMachineBlockEntity#getMetaMachine()}）。
+     *
+     * <p>⚠️ 这个 helper <b>不</b>继承自任何渲染器基类 —— 老的 {@code AbstractRingRenderer} 里那几个字是
+     * 它自己的 {@code protected static} 方法（实测 {@code javap} 在 {@code MachineRenderer} /
+     * {@code TextureOverrideRenderer} / {@code WorkableCasingMachineRenderer} 上都查不到），所以这里自带一份。
+     */
+    protected static MetaMachine getMetaMachine(BlockEntity blockEntity) {
+        return (blockEntity instanceof com.gregtechceu.gtceu.api.machine.IMachineBlockEntity holder)
+                ? holder.getMetaMachine()
+                : null;
+    }
+
+    /**
+     * 每帧渲染。所有异常都被兜住 ⇒ 最坏情况是"这一帧不画"，绝不把异常抛到渲染线程。
+     */
+    @Override
+    public void render(BlockEntity blockEntity, float partialTick, PoseStack poseStack,
+                       MultiBufferSource buffer, int packedLight, int packedOverlay) {
+        try {
+            final MetaMachine meta = getMetaMachine(blockEntity);
+            if (!(meta instanceof GuixuVisionCoreMachine) || !(meta instanceof IMultiController controller)) {
+                return;
+            }
+            final Level level = blockEntity.getLevel();
+            if (!(level instanceof net.minecraft.client.multiplayer.ClientLevel clientLevel)) {
+                return;
+            }
+            final BlockPos controllerPos = blockEntity.getBlockPos();
+            final Direction facing = meta.getFrontFacing();
+
+            // ⓪ 换维度 / 离开世界：台账与降级级别一起复位（不依赖任何外部事件类，纯渲染侧自管）
+            if (lastLevel != clientLevel) {
+                if (lastLevel != null) {
+                    HostFxHide.clearAll();
+                    HostFxFallback.reset();
+                }
+                lastLevel = clientLevel;
+            }
+
+            // ① 成型闸门：未成型 ⇒ 走"去抖恢复真块"，本帧不画
+            if (!controller.isFormed()) {
+                HostFxHide.restore(clientLevel, controllerPos, System.currentTimeMillis());
+                clearBlackHoleIfOurs();
+                return;
+            }
+
+            // ② 距离裁剪（用玩家与环心的距离；不画时把真块恢复出来，让远处仍是普通结构）
+            final BlockPos center = HostFxGeometry.centerWorld(controllerPos, facing);
+            final Minecraft mc = Minecraft.getInstance();
+            double dist = Double.MAX_VALUE;
+            if (mc.player != null) {
+                dist = Math.sqrt(mc.player.distanceToSqr(
+                        center.getX() + 0.5D, center.getY() + 0.5D, center.getZ() + 0.5D));
+            }
+            final int maxDist = ShanhaiClientConfig.hostFxMaxDistance();
+            final boolean draw = ShanhaiClientConfig.hostFxEnabled()
+                    && HostFxFallback.drawAnything()
+                    && dist <= maxDist;
+            if (!draw) {
+                HostFxHide.restore(clientLevel, controllerPos, System.currentTimeMillis());
+                clearBlackHoleIfOurs();
+                return;
+            }
+
+            // ③ 藏真块（可用配置关掉：关掉时就是"静帧真块 + 动效叠加"两层，但绝不会留幽灵方块）
+            if (HostFxFallback.hideBlocks() && ShanhaiClientConfig.hostFxHideRealBlocks()) {
+                HostFxHide.hide(clientLevel, controllerPos, facing);
+            }
+
+            // ④ 时间基：用世界时间（暂停时 gameTime 不走 ⇒ 动效自然冻结）
+            final float seconds = (clientLevel.getGameTime() + partialTick) / 20.0F;
+            final float ringAngle = seconds * 12.0F;      // 内环：12 度/秒
+            final float shipAngle = seconds * 9.0F;       // 飞船：9 度/秒（上下反向）
+
+            // ⑤ 相对控制器的环心坐标（TESR 的 PoseStack 已在控制器原点）
+            final float cx = 0.5F + (center.getX() - controllerPos.getX());
+            final float cy = 0.5F + (center.getY() - controllerPos.getY());
+            final float cz = 0.5F + (center.getZ() - controllerPos.getZ());
+
+            final VertexConsumer vc = buffer.getBuffer(RenderType.debugFilledBox());
+            // 自己关掉背面剔除：所有盒子都是手写顶点环绕，某些面从背面看会消失；
+            // 关掉之后"双面可见"，不会再出现"某一侧看不见"这种假故障。渲染完必须恢复。
+            final boolean cullWasOn = GL11.glIsEnabled(GL11.GL_CULL_FACE);
+            if (cullWasOn) {
+                GL11.glDisable(GL11.GL_CULL_FACE);
+            }
+            try {
+                HostFxDraw.drawInnerRing(poseStack, vc, cx, cy, cz,
+                        (float) HostFxGeometry.INNER_R, 1.6F, ringAngle, seconds);
+                if (HostFxFallback.drawShips()) {
+                    HostFxDraw.drawShips(poseStack, vc, cx, cy, cz,
+                            (float) HostFxGeometry.SHIP_RADIAL_CENTER, shipAngle, seconds);
+                }
+                HostFxDraw.drawBeams(poseStack, vc, cx, cy, cz,
+                        (float) HostFxGeometry.INNER_R,
+                        (float) (HostFxGeometry.INNER_R + 13.0D), seconds);
+                HostFxDraw.drawJets(poseStack, vc, cx, cy, cz, seconds);
+            } finally {
+                if (cullWasOn) {
+                    GL11.glEnable(GL11.GL_CULL_FACE);
+                }
+            }
+
+            // ⑥ 黑洞：把中心喂给既有渲染器（它自己负责吸积盘/光子环/透镜/兜底/距离裁剪）
+            feedBlackHole(center);
+        } catch (Throwable t) {
+            // 判据③：任何一步失败 ⇒ 降级 + 一行可 grep 的日志，绝不把异常抛到渲染线程
+            HostFxFallback.degrade(HostFxFallback.LEVEL_OFF,
+                    "渲染异常 " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            ShanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] 渲染异常已兜住（本帧不画）", t);
+        }
+    }
+
+    /** 把环心喂给既有黑洞渲染器（+0.5 让它落在方块中心）。 */
+    private static void feedBlackHole(BlockPos center) {
+        final double[] c = {center.getX() + 0.5D, center.getY() + 0.5D, center.getZ() + 0.5D};
+        lastCenter = c;
+        BlackHoleTuning.setCenter(c);
+    }
+
+    /** 停止画时清掉我们设的中心（只清"还是我们设的那个"，绝不覆盖玩家/命令设的值）。 */
+    private static void clearBlackHoleIfOurs() {
+        final double[] ours = lastCenter;
+        if (ours == null) {
+            return;
+        }
+        final double[] now = BlackHoleTuning.centerOverride();
+        if (now != null && Math.abs(now[0] - ours[0]) < 1.0e-6D
+                && Math.abs(now[1] - ours[1]) < 1.0e-6D
+                && Math.abs(now[2] - ours[2]) < 1.0e-6D) {
+            BlackHoleTuning.setCenter(null);
+        }
+        lastCenter = null;
+    }
+}

@@ -750,8 +750,20 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
         // 🔴 尾链走 **A 专用入口**：N6 直接接受上面算出的 A 目标，
         //    否则 applyHostTailEffects 内部那个 min 会把它**静默抹掉**（连绊线都不响，
         //    因为它的 auditDurationWithin 用的是同一个 min 目标 —— 这是 2026-09-22 查出来的最坏形态）。
+        // 🔴🔴 2026-10-24（队长选 A）：改走【7 参重载】—— 倍率与耗电系数由**宿主**给，不再在尾链里写死。
+        //    · 倍率     = outputMultiplier(gateBonus) + host.getHostProductionBonusExtra()
+        //                 老主机 getHostProductionBonusExtra() == 0 ⇒ 1+0 == 1 ⇒ **逐位不变**；
+        //                 归墟视界枢核门控生效时 +5（只在 64 个物质模块那一档）。
+        //    · 耗电系数 = host.getHostEnergyReductionFactor(gateBonus)
+        //                 老主机该钩子直接 return PrimordialRecipeEffects.reductionFactor(gateBonus)
+        //                 ⇒ 与改动前【同一个函数、同一个实参】⇒ 逐位不变；
+        //                 归墟覆写返回同一个值（"同款"减免），但从此减免也是宿主可覆写的点。
+        //    ⇒ 这两处是引擎路径**唯一**能让"+5 / 减免"由宿主决定的落点
+        //      （本路径完全不经过 RecipeModifierList.apply，所以原生 .recipeModifier 链在这里是死的）。
         final GTRecipe modified = PrimordialRecipeEffects.applyHostTailEffectsA(
-                balanced, gateBonus, targetDuration, originDuration, "主机-多配方引擎");
+                balanced, gateBonus, targetDuration, originDuration, "主机-多配方引擎",
+                PrimordialRecipeEffects.outputMultiplier(gateBonus) + host.getHostProductionBonusExtra(),
+                host.getHostEnergyReductionFactor(gateBonus));
 
         // 抬头（Jade）两行的显示因子：本路径上 begin() 没人调 ⇒ tracker 的 context 恒为 null，
         // 所以必须由我们自己把【真实因子】写进去（修饰链那条路是 begin/finish 包着的，不能照抄）。

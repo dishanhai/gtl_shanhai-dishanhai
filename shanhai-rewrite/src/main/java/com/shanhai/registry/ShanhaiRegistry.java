@@ -13,6 +13,7 @@ import com.shanhai.item.ShanhaiCreativeModeTabs;
 import com.shanhai.item.ShanhaiItems;
 import com.shanhai.machine.ShanhaiMachines;
 import com.shanhai.machine.module.ModuleRegistry;
+import com.shanhai.machine.stellar.ShanhaiStellarMachines;
 import com.shanhai.machine.wildcard.ShanhaiWildcardMachines;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
@@ -264,6 +265,9 @@ public final class ShanhaiRegistry {
         //    ⚠️ 必须排在 ShanhaiMachines.init() 之后：后者末尾有「模块表为空就抛」的硬校验，
         //       那一段的失败语义是"模块链坏了"；把本行插在它前面会让该判据指向错的元凶。
         ShanhaiWildcardMachines.init();
+        // ⑥ 星律样板总成（阶段一骨架）：普通样板槽 1080 格（9×6×20 页）、可翻页。
+        //    ⚠️ 同样必须排在 ShanhaiMachines.init() 之后，理由与上一行相同。
+        ShanhaiStellarMachines.init();
     }
 
     /** CommonSetup（全部注册表已冻结）兜底：机器定义句柄必须已经就位。 */

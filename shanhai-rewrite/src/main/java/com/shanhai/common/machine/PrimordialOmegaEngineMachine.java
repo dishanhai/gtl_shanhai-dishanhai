@@ -785,6 +785,22 @@ public class PrimordialOmegaEngineMachine
     }
 
     /**
+     * <b>给子类用的父 holder 读取口</b>（2026-10-23 新增，唯一调用点是归墟视界枢核）。
+     *
+     * <p>子类的 {@code @Persisted}/{@code @DescSynced} 字段要落盘/同步，必须覆写
+     * {@code getFieldHolder()} 返回 {@code new ManagedFieldHolder(子类.class, 父holder)}，
+     * 而字段 {@link #MANAGED_FIELD_HOLDER} 是 {@code private}。
+     * <p>⚠️ 子类<b>不许</b>图省事写成 {@code WorkableElectricMultiblockMachine.MANAGED_FIELD_HOLDER} ——
+     * 那会<b>跳级</b>、把本类的字段（{@code matterBonusSlot} / {@code limitedDuration} / 球体风格…）
+     * 从子类的 holder 链上整段丢掉，表现同样是"编译通过、游戏不报错、字段永不落盘"。
+     *
+     * <p>本方法<b>纯读一个静态常量</b>，对既有行为零影响。
+     */
+    public static ManagedFieldHolder managedFieldHolder() {
+        return MANAGED_FIELD_HOLDER;
+    }
+
+    /**
      * 中心球体的渲染风格（{@link PrimordialSphereStyle} 的 {@code ordinal}）。
      *
      * <p>TESR 只跑在客户端，所以必须 {@code @DescSynced} 才能让玩家在 GUI 里的切换实时反映到渲染；
@@ -798,7 +814,11 @@ public class PrimordialOmegaEngineMachine
     // ═══════════════════ 中子星渲染面板（2026-09-22 用户裁决「A + C 都要」） ═══════════════════
 
     /**
-     * 允许调整中子星渲染的<b>最低专属槽等级</b> = <b>15</b> = 物质创造模块。
+     * 🔴 <b>已停用（2026-10-18）</b>：用户要求去掉中子星外观面板的模块等级门槛 ⇒
+     * {@link #canControlStarRender()} 改为恒 {@code true}，本常量<b>不再参与任何判据</b>，
+     * 保留仅为记录当初那个口径（⛔ 不要再拿它当门）。
+     *
+     * <p>允许调整中子星渲染的<b>最低专属槽等级</b> = <b>15</b> = 物质创造模块。
      *
      * <p>用户原话：「当主机填入 <b>64 个物质创造模块或者更高等级的模块</b> 时允许玩家通过这个面版来控制
      * 中子星的大小、颜色（甚至可以是彩色）」。
@@ -806,7 +826,7 @@ public class PrimordialOmegaEngineMachine
      * {@code shanhai:material_creation_module → 15}（⛔ 不是 16 —— 16 是现实锚点模块、17 是创始现实修改模块）。
      * ⇒ {@code >= 15} 一次性覆盖「物质创造 / 现实锚点 / 创始现实修改」三种，即"或更高等级"。
      * <p>🔴 <b>「64 个」不在这里判</b>：那个口径的唯一实现在 {@code computeMatterBonusLevel()}
-     * （{@code stack.getCount() == 64}），本常量只判"够不够格调外观"。
+     * （{@code stack.getCount() == 64}），本常量当初只判"够不够格调外观"。
      */
     public static final int STAR_PANEL_MIN_MODULE_LEVEL = 15;
 
@@ -994,13 +1014,18 @@ public class PrimordialOmegaEngineMachine
     private boolean starAlwaysWorking = false;
 
     /**
-     * <b>本轮的启用判据</b>：专属槽里放满 64 个「物质创造模块或更高等级」的模块时返回 {@code true}。
+     * <b>外观面板的启用判据 —— 2026-10-18 起恒为 {@code true}</b>（用户要求：外观面板不再受模块等级限制）。
      *
-     * <p>与服务端 setter、渲染侧的覆盖取值<b>共用这一个方法</b>（阈值只有 {@link #STAR_PANEL_MIN_MODULE_LEVEL} 一处）。
-     * 客户端读到的是 {@code @DescSynced} 镜像，所以槽被抽空时按钮会自己变灰、覆盖值自己失效。
+     * <p>签名刻意保留：服务端 5 个 setter 与渲染侧 4 处覆盖取值仍<b>共用这一个方法</b>调用它
+     * （全工程唯一的汇合点）⇒ 恒 {@code true} 就把那 9 处判据一起放开了，不需要逐个删。
+     * 等级不再决定"能不能调"，<b>只</b>决定「跟随等级」档的自动大小/颜色
+     * （{@link #moduleSlotBonus()} / {@code computeMatterBonusLevel()} 一个字未动）。
+     *
+     * <p>⚠️ 历史：旧实现是 {@code moduleSlotBonus() >= STAR_PANEL_MIN_MODULE_LEVEL}
+     * （专属槽放满 64 个 Lv.15+ 模块才开门）；该常量保留但已不参与任何判据。
      */
     public boolean canControlStarRender() {
-        return moduleSlotBonus() >= STAR_PANEL_MIN_MODULE_LEVEL;
+        return true;
     }
 
     public int getStarRenderMode() {
@@ -1053,7 +1078,7 @@ public class PrimordialOmegaEngineMachine
      *
      * <p>三道闸门（与 {@link #toggleStarPalette()} 同款，多一道"必须彩虹档"）：
      * <ol>
-     *   <li>{@code canControlStarRender()} —— 专属槽等级不足时拒写（防伪造包，UI 的灰态只是提示）；</li>
+     *   <li>{@code canControlStarRender()} —— 外观门控已停用（恒 {@code true}，2026-10-18），此行保留不删；</li>
      *   <li>{@code isStarRenderManual()} —— 手动档颜色走色相环，推进周期<b>看不到任何效果</b>；</li>
      *   <li>{@code starPalette == STAR_PALETTE_RAINBOW} —— 光谱档是静态 7 档，同理无效。</li>
      * </ol>
@@ -1125,7 +1150,8 @@ public class PrimordialOmegaEngineMachine
      *   <li><b>服务端兜底钳位</b>到 {@code [13, STAR_RADIUS_MAX]}：网络包不保证只带合法值，
      *       而半径越过上游 {@code asin} 的域（44.7805）会让光束几何变 NaN ⇒ <b>客户端闪退</b>
      *       （2026-09-23 真事故，见 {@link #STAR_RADIUS_MAX}）；</li>
-     *   <li><b>门控不足时拒写</b>：客户端可以伪造 {@code writeClientAction}，所以"条件不满足"必须服务端拦，
+     *   <li><b>门控不足时拒写</b>（⚠️ 外观门控已于 2026-10-18 停用 ⇒ 本条对等级不再生效，钳位仍然有效）：
+     *       客户端可以伪造 {@code writeClientAction}，所以"条件不满足"必须服务端拦，
      *       UI 上的变灰只是提示、不是安全边界。</li>
      * </ol>
      */
@@ -1483,6 +1509,60 @@ public class PrimordialOmegaEngineMachine
     // 删除理由 + 原文留档 = 上方整节「中子星的『运行时间』（🟡 已作废 · 原文留档）」：
     //   用户裁定【颜色改随物质模块等级，不随时间】⇒ 本字段与它的同步链不再有任何读者。
     // 收益：少一处 @DescSynced 方块实体同步（原本每台主机每秒 ≤ 1 个更新包）+ 少一个服务端 20-tick 订阅。
+
+    // ------------------------------------------------------- 「模块等级复写」的主机侧出口（默认不启用）
+
+    /**
+     * <b>材料增产的额外倍率</b>（加在 N3 的 {@code outputMultiplier(门控等级)} 之上）：{@code 0} = 不加。
+     *
+     * <h2>谁读它</h2>
+     * 多配方引擎路径的尾链（{@code PrimordialEngineRecipeLogic#buildFinalNormalRecipe}）在调用
+     * {@code PrimordialRecipeEffects.applyHostTailEffectsA(..., 倍率, 耗电系数)} 时把它加进倍率；
+     * 原生修饰链那条路（{@code #applyHostRecipeModifier} / 子类覆写）读同一个钩子 ⇒ 两条路同源。
+     *
+     * <h2>🔴 为什么老主机必须返回 0</h2>
+     * {@code 1 + 0 == 1} ⇒ 倍率与改动前<b>逐位相同</b>。归墟视界枢核覆写它返回 {@code 5}
+     * （只在门控生效即 64 个物质模块时非零）。
+     */
+    public int getHostProductionBonusExtra() {
+        return 0;
+    }
+
+    /**
+     * <b>主机侧 N5 耗电成本系数</b>（乘到 EUt 上的那个 {@code f}）：默认 = 现有的
+     * {@link PrimordialRecipeEffects#reductionFactor(int)}（即老主机的现行公式，逐位不变）。
+     *
+     * <h2>为什么要有这个出口</h2>
+     * 引擎路径的尾链是<b>静态方法</b>（拿不到宿主），原先在里面直接调 {@code reductionFactor(gateBonus)}，
+     * 宿主无法参与。把它变成"宿主给数、尾链接数"，才能让"这台主机用哪套减免"由宿主决定
+     * （归墟视界枢核：与原始终焉引擎<b>同款</b>，所以覆写后返回同一个值；这条出口是为将来换减免公式留的）。
+     *
+     * <p>🔴 默认实现<b>必须</b>保持与改动前完全等价：返回值仍是 {@code reductionFactor(gateBonus)}。
+     *
+     * @param gateBonus 门控等级（{@code moduleSlotBonus()}，0 = 未生效 ⇒ 返回 1.0 = 不减免）
+     */
+    public double getHostEnergyReductionFactor(int gateBonus) {
+        return PrimordialRecipeEffects.reductionFactor(gateBonus);
+    }
+    /**
+     * 主机侧「物质模块等级复写」的等级：{@code 0} = <b>没有复写</b>（本类恒返回 0）。
+     *
+     * <h2>它是给谁读的</h2>
+     * 模块侧 {@code PrimordialModuleMachine#getHostMatterLevelOverride()} 会向宿主问这个数，
+     * 再算「有效等级 = {@code max(模块自己槽里的等级, 本值)}」（用户原话：「若模块上安装的物质模块等级
+     * 大于主机等级则不复写」）。
+     *
+     * <h2>🔴 为什么老主机必须返回 0</h2>
+     * 老主机（原始终焉引擎）没有这个功能；返回 0 时模块侧的 {@code max(自己, 0) == 自己}
+     * ⇒ <b>行为与加这个钩子之前逐位相同</b>。这是本钩子"可 fail-open"的结构性保证，
+     * 不是"恰好没影响"。
+     *
+     * <p>归墟视界枢核覆写它（见 {@code GuixuVisionCoreMachine#getHostMatterLevelOverride()}）：
+     * 那台主机的第二个专属槽放满 64 个物质模块 ⇒ 返回 1..17。
+     */
+    public int getHostMatterLevelOverride() {
+        return 0;
+    }
 
     // ------------------------------------------------------- 「物质模块槽」门控（N3/N7 共用）
 
@@ -2305,8 +2385,8 @@ public class PrimordialOmegaEngineMachine
      * <p>⚠️ <b>刻意不做任何门控</b>（不判 {@link #canControlStarRender()}、不判球体风格档）：
      * 它改的是 {@code getSmoothTick}，而<b>轨道环与（宇宙模式的）行星同样吃这个值</b>
      * ⇒ 两种球体风格下都有可见效果，不存在"按了没反应的假开关"。
-     * 这与 ④ 球体风格开关（同样无门控）是同一档东西，而<b>不是</b>中子星面板里那批
-     * "需要专属槽满 64"的外观旋钮。
+     * 这与 ④ 球体风格开关（同样无门控）是同一档东西，而<b>不是</b>中子星面板里那批外观旋钮
+     * （那批旋钮 2026-10-18 起也已不再受专属槽等级门控）。
      */
     public void setStarAlwaysWorking(boolean value) {
         if (starAlwaysWorking == value) return;

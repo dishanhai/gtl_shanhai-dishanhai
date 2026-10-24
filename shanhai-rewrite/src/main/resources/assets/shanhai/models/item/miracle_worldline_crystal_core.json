@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "shanhai:item/miracle_worldline_crystal_core"
+  }
+}

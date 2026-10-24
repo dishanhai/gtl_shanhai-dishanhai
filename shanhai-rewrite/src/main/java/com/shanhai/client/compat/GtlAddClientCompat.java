@@ -172,10 +172,31 @@ public final class GtlAddClientCompat {
      *
      * <p>本闸门与 restore 用<b>同一份阈值、同一个起点口径</b>（首帧未成型开始计时）⇒
      * 两者在时间上对齐：环特效消失的那一帧，正是方块被写回来的那一帧（不会出现"环没了但方块还藏着"）。
+     *
+     * <p>⚠️ 值可能等于 {@link #FORMED_LOST_LOCKED}：那是"已到点、已打过 {@code gone} 行、锁死 false"
+     * 的哨兵。超阈值后<b>不再删键</b>（删键会让下一帧重新变回"失守第一帧"），只有重新成型才移除。
      */
     private static final Map<Long, Long> FORMED_LOST_SINCE = new HashMap<>();
 
-    /** {@link #FORMED_LOST_SINCE} 所属维度（换维度整表清空）。 */
+    /**
+     * {@link #FORMED_LOST_SINCE} 的<b>锁死哨兵值</b>（刻意远小于任何 {@link #nowMs()} 的量级）。
+     *
+     * <p>为什么需要它：去掉"到点删键"之后，超过阈值的<b>每一帧</b>都满足
+     * {@code now - since >= debounceMs}；没有哨兵就每帧打一行 {@code state=gone}（渲染路径是逐帧调用的）。
+     */
+    private static final long FORMED_LOST_LOCKED = Long.MIN_VALUE;
+
+    /**
+     * <b>曾经成型过</b>的机器位置（{@code formed == true} 时记入，换维度整表清空）。
+     *
+     * <p>2026-10-18 二次修复"方块一放下就画"：旧实现把<b>失守的第一帧</b>（{@code since == null}）
+     * 当成可见；而方块刚放下（结构未成型）时 {@code isFormed()} 恒为 {@code false}，
+     * 于是它<b>永远</b>走"第一帧"这条分支 ⇒ 一直在画。现在只有<b>本会话里真的成型过</b>的机器
+     * 才享有去抖宽限；从未成型过 ⇒ 直接不可见。
+     */
+    private static final Set<Long> EVER_FORMED = new HashSet<>();
+
+    /** {@link #FORMED_LOST_SINCE} / {@link #EVER_FORMED} 所属维度（换维度整表清空）。 */
     @Nullable
     private static ResourceKey<Level> latchDimension;
 
@@ -342,6 +363,7 @@ public final class GtlAddClientCompat {
             LAST_HIDE_SEEN.clear();
             LEDGER_INDEX.clear();
             FORMED_LOST_SINCE.clear();   // 渲染闸门的去抖计时与台账同生同死
+            EVER_FORMED.clear();         // "曾经成型过"的台账同理（换维度后旧位置无意义）
             latchDimension = level.dimension();
             hiddenDimension = level.dimension();
         }
@@ -697,6 +719,18 @@ public final class GtlAddClientCompat {
      * 于是：<b>成型</b> ⇒ 立刻可见（不推迟"第一次出现"）；<b>未成型</b> ⇒ 只有连续撑满
      * {@code ringRestoreDebounceTicks}（默认 100 tick = 5 秒）才真的不可见 —— 与 restore 完全同步。
      *
+     * <h2>2026-10-18 二次修复（"方块一放下就一直在画"）</h2>
+     * 上一版有两个<b>互补</b>缺陷，只修一个就会换出同族的另一个：
+     * <ol>
+     *   <li><b>失守第一帧被当成可见</b>（{@code since == null} 分支）—— 而方块刚放下、结构未成型时
+     *       {@code isFormed()} 每帧都是 {@code false} ⇒ 从未成型过的主机永远走这条分支；</li>
+     *   <li>到点后又 {@code FORMED_LOST_SINCE.remove(machinePos)} 把计时键删掉 ⇒ 下一帧又变回
+     *       "第一帧" ⇒ 死循环"5 秒可见 / 1 帧不可见"，观感就是<b>一直在画</b>。</li>
+     * </ol>
+     * 现在：从未成型过（{@link #EVER_FORMED} 里没有）⇒ <b>第一帧就不可见</b>；到点后写
+     * {@link #FORMED_LOST_LOCKED} <b>锁死</b> false（{@code gone} 行每个失守周期只打一次），
+     * 只有再次 {@code formed == true} 才复位。成型后的渲染路径与上一版逐字相同。
+     *
      * <h2>🔴 计时源 = 单调墙钟 {@link #nowMs()}（<b>不是</b> {@code level.getGameTime()}）</h2>
      * 2026-10-18 父代理明确要求："去抖别用 {@code getGameTime()}"。理由（实机风险，不是洁癖）：
      * {@code ClientLevel#tickTime} 被世界时钟<b>钉住</b>时 {@code getGameTime()} 根本不走；万一客户端
@@ -716,6 +750,7 @@ public final class GtlAddClientCompat {
     public static boolean isFormedStable(Level level, long machinePos, boolean formed) {
         if (formed) {
             FORMED_LOST_SINCE.remove(machinePos);   // 重新成型 ⇒ 立刻复位（这条保证"第一次出现不推迟"）
+            EVER_FORMED.add(machinePos);            // 记入"曾经成型过"（从未成型过的主机不画）
             return true;
         }
         if (level == null) {
@@ -723,23 +758,35 @@ public final class GtlAddClientCompat {
         }
         if (latchDimension != level.dimension()) {
             FORMED_LOST_SINCE.clear();
+            EVER_FORMED.clear();        // 与失守计时同生同死，否则换维度后旧位置的记录会串台
             latchDimension = level.dimension();
+        }
+        if (!EVER_FORMED.contains(machinePos)) {
+            // 从未成型过（方块刚放下 / 结构从未拼起来）⇒ 第一帧就不可见，不进去抖窗口。
+            return false;
         }
         long now = nowMs();
         Long since = FORMED_LOST_SINCE.get(machinePos);
         if (since == null) {
-            // 失守的第一帧：仍然按"可见"处理（下一帧起才开始计时），且打一行可判读的日志。
+            // 【成型过】的机器失守的第一帧：仍然按"可见"处理（下一帧起才开始计时），且打一行可判读的日志。
             FORMED_LOST_SINCE.put(machinePos, now);
             BlockPos base = BlockPos.of(machinePos);
             ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] ring_flicker_gate machine=({},{},{}) state=lost at_ms={}（去抖窗口开始）",
                     base.getX(), base.getY(), base.getZ(), now);
             return true;
         }
+        if (since.longValue() == FORMED_LOST_LOCKED) {
+            // 已经判过"真消失"：锁死 false，直到 formed == true 复位。
+            // 🔴 这里【不许】打日志：渲染路径逐帧进来，打一行就是每帧一行。
+            return false;
+        }
         long debounceMs = restoreDebounceTicks() * 50L;
         if (now - since < debounceMs) {
             return true;    // 仍在去抖窗口内 ⇒ 继续可见（这一句就是"忽隐忽现"的止血点）
         }
-        FORMED_LOST_SINCE.remove(machinePos);
+        // 🔴 到点后【不删键】（旧实现就在这里 remove ⇒ 下一帧又变回"第一帧" ⇒ 死循环）。
+        //    改成写锁死哨兵：gone 行每个失守周期只打这一次，之后逐帧在上面的分支直接 return false。
+        FORMED_LOST_SINCE.put(machinePos, FORMED_LOST_LOCKED);
         BlockPos base = BlockPos.of(machinePos);
         ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] ring_flicker_gate machine=({},{},{}) state=gone at_ms={} elapsed_ms={}（超过阈值，真消失）",
                 base.getX(), base.getY(), base.getZ(), now, now - since);

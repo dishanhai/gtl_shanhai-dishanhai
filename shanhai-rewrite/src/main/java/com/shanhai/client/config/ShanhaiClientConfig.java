@@ -131,6 +131,23 @@ public final class ShanhaiClientConfig {
     private static final ForgeConfigSpec.DoubleValue YSM_ROT_Z;
     private static final ForgeConfigSpec.DoubleValue YSM_SCALE;
 
+    // ---- 🆕 [debug] 黑洞渲染件（com.shanhai.client.render.blackhole）----
+    //   4 个键 = 4 个【默认值】：总开关 / 调试中心 / 视界倍率 / 偏折强度。
+    //   🔴 运行期以 `/shanhai bh …` 命令为准（命令不落盘，重启后回这里的默认值）。
+    //   读它们的是客户端渲染，服务端一处不读 ⇒ CLIENT。
+    private static final ForgeConfigSpec.BooleanValue BLACKHOLE_ENABLED;
+    private static final ForgeConfigSpec.ConfigValue<String> BLACKHOLE_CENTER;
+    private static final ForgeConfigSpec.DoubleValue BLACKHOLE_SCALE;
+    private static final ForgeConfigSpec.DoubleValue BLACKHOLE_STRENGTH;
+    /** 🔴 2026-10-25：光影下黑洞兜底贴图（默认 true；false ⇒ 回到"宁可不画"）。 */
+    private static final ForgeConfigSpec.BooleanValue BLACKHOLE_FALLBACK_TEXTURE;
+    // 🔴 2026-10-24：归墟视界枢核「动态特效」的两个键（**追加在末尾**，老键一个没动、默认值一个没改）
+    //    ⛔ `maxDistance`（距离裁剪）已在同一天删除 —— 用户原话「走到 65 格以外 特效全停、
+    //       真方块回来这个功能我不要」。删它还有一层原因：控制室天然离环心约 73 格，
+    //       旧判定让特效从站体里永远看不见（这正是"特效一点没看见"的根因）。
+    private static final ForgeConfigSpec.BooleanValue HOSTFX_ENABLED;
+    private static final ForgeConfigSpec.BooleanValue HOSTFX_HIDE_REAL_BLOCKS;
+
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
 
@@ -253,6 +270,70 @@ public final class ShanhaiClientConfig {
         //    （实测踩过：多一次 pop ⇒ 类初始化抛
         //     IllegalArgumentException: Attempted to pop 1 elements when we only had: []）。
         // ⚠️ 层级账（push/pop 必须配平）：halo_end 已在 190 行关掉 ⇒ 本节的三个 push 各自配一个 pop。
+
+        // ================================================================ 🆕 2026-10-19
+        //   [debug] —— 只给"主机中心那颗黑洞"的渲染件用的两个调试开关。
+        //   为什么必须有：主机本体还没做出来，而黑洞效果只能在游戏里判 ⇒ 用一行坐标就能先看效果。
+        //   为什么在 CLIENT：读它的是客户端渲染（BlackHoleLensRenderer），服务端一处不读。
+        //   为什么默认空 = 不画：装上本 mod 的人不该平白无故在世界上看见一颗黑盘。
+        b.comment("调试用。[debug] 段只给黑洞渲染件（主机中心那颗）用，不影响任何正式玩法。",
+                        "blackhole_center 填 \"x y z\"（三个数字、空白分隔、世界坐标）⇒ 那个位置画一颗黑洞；",
+                        "空 = 什么都不画（默认）。单位 = 方块，一般填主机中心的方块坐标。",
+                        "blackhole_enabled = 总开关；false ⇒ 连调试坐标也不看。",
+                        "⚠️ 改完要重启游戏（Forge 配置文件只在启动时加载）。")
+                .push("debug");
+
+        BLACKHOLE_ENABLED = b.comment("黑洞渲染件的总开关（默认 true；只有填了 blackhole_center 才看得见东西）。")
+                .define("blackhole_enabled", true);
+
+        BLACKHOLE_CENTER = b.comment("黑洞中心的世界坐标，格式 \"x y z\"（例如 \"120.5 64 -33\"）。",
+                        "空串 = 不画（默认）。格式不对 ⇒ 打一行 WARN（[SHANHAI-BH] center_malformed）并当作没填。",
+                        "整数维会自动按方块中心补 +0.5（120 ⇒ 120.5），并打一行 center_snapped 说明补了多少。",
+                        "运行期可用 /shanhai bh center <x> <y> <z>（支持 ~）当场改，不落盘。")
+                .define("blackhole_center", "");
+
+        BLACKHOLE_SCALE = b.comment("【默认值】视界半径倍率（运行期用 /shanhai bh scale 覆盖）。",
+                        "史瓦西半径 = 1.0 格 × 本倍率；黑盘半径 = 2.598 × 史瓦西半径。",
+                        "范围 [0.05, 8]。")
+                .defineInRange("blackhole_scale", 1.0D, 0.05D, 8.0D);
+
+        BLACKHOLE_STRENGTH = b.comment("【默认值】引力偏折强度倍率（运行期用 /shanhai bh strength 覆盖）。",
+                        "0 = 背景不弯（吸积盘/光子环照旧）、1 = 物理弱场偏折、2 = 夸张效果。",
+                        "范围 [0, 2]。")
+                .defineInRange("blackhole_strength", 1.0D, 0.0D, 2.0D);
+
+        // 🔴 2026-10-25 追加（父代理批准第四节那两条）：光影下也要画黑洞的【安全兜底】
+        BLACKHOLE_FALLBACK_TEXTURE = b.comment(
+                        "光影包生效（或一级透镜画不出来）时，用一张【程序化生成的常规贴图】给黑洞兜底（默认 true）。",
+                        "true  ⇒ 光影下也能看见黑洞；贴图走 NativeImage + TextureManager（MC 自己的上传路径），",
+                        "        这条路上【没有】任何 _genTexture/_texImage2D 裸调用 —— 2026-10-24 驱动崩溃那条路径不会被走回来。",
+                        "false ⇒ 回到 2026-10-24 的「宁可不画」：光影下一律不画黑洞（[SHANHAI-BH] fallback=3 reason=fallback_off_by_config）。",
+                        "⚠️ 改完要重启游戏（Forge 配置文件只在启动时加载）。")
+                .define("blackhole_fallback_texture", true);
+
+        b.pop();   // debug
+
+        // ═════════════════════════════ 归墟视界枢核 · 动态特效（2026-10-24 追加） ═════════════════════════════
+        //   这些键都是【纯客户端】：读它们的是 client/render/hostfx/** 的 TESR，服务端一处不读。
+        b.comment("归墟视界枢核（主机）的【动态特效】：内环绕中心轴转动、上下 8 艘磁悬浮飞船、",
+                        "内外环之间的动态光束、黑洞两极喷流，以及把黑洞挂到控制室那台机器的中心。",
+                        "⚠️ 只是渲染，方块一个都不变。⚠️ 改完要重启游戏（Forge 配置文件只在启动时加载）。")
+                .push("hostfx");
+
+        HOSTFX_ENABLED = b.comment("总开关。false ⇒ 这些特效一律不画（真方块也不藏，就是普通结构）。")
+                .define("enabled", true);
+
+        // ⛔ 2026-10-24 删除 `maxDistance`（距离裁剪整条移除）：用户原话「走到 65 格以外 特效全停、
+        //    真方块回来这个功能我不要」。另一层原因：控制室天然离环心约 73 格 ⇒ 旧判定让特效
+        //    从站体里永远看不见（这就是"特效一点没看见"的根因）。老 toml 里残留这个键不会报错（Forge 忽略未知键）。
+
+        HOSTFX_HIDE_REAL_BLOCKS = b.comment("是否把内环带与 8 艘飞船的【真方块】在客户端临时藏起来（默认 true）。",
+                        "true ⇒ 看到的是「转动的环 + 飞行的飞船」（造型里那些静止真块被藏起来，未成型时按台账写回）；",
+                        "false ⇒ 真块留着，动效叠在上面（两层的观感，但没有客户端写方块这一层风险）。",
+                        "⚠️ 只有在特效真的出问题时才建议关掉它。")
+                .define("hideRealBlocks", true);
+
+        b.pop();   // hostfx
 
         CLIENT_SPEC = b.build();
 
@@ -420,6 +501,92 @@ public final class ShanhaiClientConfig {
     public static boolean haloEnabled() {
         try {
             return HALO_ENABLED.get();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    // ==================================================================== 🆕 [debug] 黑洞渲染件
+
+    /**
+     * {@code [debug] blackhole_enabled}。
+     *
+     * <p>读不到（配置还没加载 / 键不存在）⇒ <b>false</b>：宁可这一帧不动画面，也不要在
+     * 配置半加载状态下去建 GL 资源。
+     */
+    public static boolean blackholeEnabled() {
+        try {
+            return BLACKHOLE_ENABLED.get();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * {@code [debug] blackhole_center} 的<b>原始字符串</b>（不在这里解析：解析器是
+     * {@code com.shanhai.client.render.blackhole.BlackHoleDebugSpec}，它可以离线跑值表）。
+     *
+     * <p>读不到 ⇒ 空串（= 不画）。
+     */
+    public static String blackholeCenter() {
+        try {
+            return BLACKHOLE_CENTER.get();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * {@code [debug] blackhole_scale} 的<b>默认值</b>（运行期以 {@code /shanhai bh scale} 为准）。
+     *
+     * <p>读不到 ⇒ 1.0（= 不做任何缩放，即本件原来的行为）。
+     */
+    public static double blackholeScale() {
+        return dv(BLACKHOLE_SCALE, 1.0D);
+    }
+
+    /**
+     * {@code [debug] blackhole_strength} 的<b>默认值</b>（运行期以 {@code /shanhai bh strength} 为准）。
+     *
+     * <p>读不到 ⇒ 1.0（= 物理弱场偏折 {@code α = 2Rs/b}）。
+     */
+    public static double blackholeStrength() {
+        return dv(BLACKHOLE_STRENGTH, 1.0D);
+    }
+
+    /**
+     * {@code [debug] blackhole_fallback_texture} —— 光影下黑洞<b>兜底贴图</b>开关。
+     *
+     * <p>读不到 ⇒ {@code true}（<b>默认开</b>：用户就是要看见黑洞）。
+     * <p>关掉它 = 回到 2026-10-24 的「宁可不画」：光影下一律不画黑洞。
+     * 打开时走的是 {@code NativeImage + TextureManager}（MC 自己的上传路径），
+     * <b>不经过任何裸 GL 纹理调用</b>。
+     */
+    public static boolean blackholeFallbackTexture() {
+        try {
+            return BLACKHOLE_FALLBACK_TEXTURE.get();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    // ═════════════════════ 归墟视界枢核 · 动态特效（2026-10-24 追加，读不到一律回到"默认行为"） ═════════════════════
+
+    /** 动态特效总开关；读不到 ⇒ {@code true}（默认开）。 */
+    public static boolean hostFxEnabled() {
+        try {
+            return HOSTFX_ENABLED.get();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    // ⛔ 2026-10-24 删除 hostFxMaxDistance()：距离裁剪整条移除（用户明确不要；且它是"一点没看见"的根因）。
+
+    /** 是否在客户端把内环带与 8 艘飞船的真方块临时藏起来；读不到 ⇒ {@code true}（默认藏）。 */
+    public static boolean hostFxHideRealBlocks() {
+        try {
+            return HOSTFX_HIDE_REAL_BLOCKS.get();
         } catch (Throwable t) {
             return true;
         }

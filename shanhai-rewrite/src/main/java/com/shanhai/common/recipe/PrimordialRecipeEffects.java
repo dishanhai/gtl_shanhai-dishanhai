@@ -2283,6 +2283,33 @@ public final class PrimordialRecipeEffects {
      */
     public static GTRecipe applyHostTailEffectsA(GTRecipe recipe, int gateBonus,
                                                  int targetDuration, int originalDuration, String tag) {
+        // 🔴 2026-10-23（队长选 A 之后新增）：5 参入口 = 7 参入口的"原样委托"。
+        //    两个实参与改动前【逐位相同】：outputMultiplier(gateBonus) / reductionFactor(gateBonus)
+        //    ⇒ 老主机（以及任何没改的调用点）行为一个字节都没变。
+        return applyHostTailEffectsA(recipe, gateBonus, targetDuration, originalDuration, tag,
+                outputMultiplier(gateBonus), reductionFactor(gateBonus));
+    }
+
+    /**
+     * 🔴 <b>2026-10-23 新增（队长选 A：让"宿主可覆写"的倍率与耗电系数进入引擎路径）。</b>
+     *
+     * <p>为什么要多这两个形参：多配方引擎路径<b>不经过</b> {@code RecipeModifierList.apply}
+     * （见 {@code PrimordialEngineRecipeLogic} 的注释与字节码），所以
+     * {@code GuixuVisionCoreMachine#applyGuixuRecipeModifier} 那条原生修饰链在引擎路径上
+     * <b>永远不会被调用</b>。要让"材料增产额外 +5"真正生效，唯一干净的位置就是这里的 N3 一步 ——
+     * 由调用方（引擎）把宿主算好的倍率与耗电系数传进来。
+     *
+     * <h2>与 5 参入口的关系（不许漂移）</h2>
+     * 5 参入口 = 本方法 + {@code (outputMultiplier(gateBonus), reductionFactor(gateBonus))}
+     * ⇒ 两条入口的算术只有"这两个数从哪来"不同，步骤/顺序/绊线逐字相同。
+     *
+     * @param multiplier   N3 的产出倍率（调用方算；老主机 = {@code outputMultiplier(gateBonus)}）
+     * @param energyFactor N5 的耗电成本系数（调用方算；老主机 = {@code reductionFactor(gateBonus)}）。
+     *                     {@code 1.0} ⇒ 不减免（{@code reduceEnergy} 内部对 ≥1 原样返回入参）。
+     */
+    public static GTRecipe applyHostTailEffectsA(GTRecipe recipe, int gateBonus,
+                                                 int targetDuration, int originalDuration, String tag,
+                                                 int multiplier, double energyFactor) {
         if (recipe == null) {
             return null;
         }
@@ -2290,7 +2317,7 @@ public final class PrimordialRecipeEffects {
         final int target = Math.max(1, targetDuration);
 
         // ② N3 产出倍率（只动产出，与时长无关）
-        GTRecipe modified = multiplyOutputs(recipe, outputMultiplier(gateBonus));
+        GTRecipe modified = multiplyOutputs(recipe, multiplier);
         modified = auditDuration(modified, durationAtEntry, tag + "-N3-倍率后");
 
         // ③ N6（A1）：**直接采用调用方给定的目标**，本入口自己不算 min
@@ -2301,7 +2328,7 @@ public final class PrimordialRecipeEffects {
         modified = auditDuration(modified, target, tag + "-N6-终检");
 
         // ④ N5 耗电减免（主机只吃这半边）
-        modified = reduceEnergy(modified, reductionFactor(gateBonus));
+        modified = reduceEnergy(modified, energyFactor);
         modified = auditDuration(modified, target, tag + "-N5-耗电后");
 
         return modified;

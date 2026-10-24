@@ -2690,6 +2690,13 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
                     + ShanhaiTextParser.stripStyleCode(displayNameOfMatterModule())
                     + "§7 (Lv." + level + ")"));
         }
+        // 🔴 2026-10-23：主机等级复写生效时如实画出来（"生效了就必须看得见"；没生效时一行都不多画）。
+        //    判定与并行/配方条件读的是同一个 getEffectiveMatterModuleLevel()，不是另算一遍。
+        final int hostOverride = getHostMatterLevelOverride();
+        if (hostOverride > level) {
+            textList.add(Component.literal("§d主机等级复写：Lv." + level + " → §bLv." + hostOverride
+                    + "§7（并行与配方等级需求按后者判定）"));
+        }
         addSharedEffectDisplayText(textList);
         // ───── 2026-09-25（任务 A）：并行 / 跨配方线程两行（24 台统一由基类出，子类只覆写取值） ─────
         addParallelDisplayText(textList);
@@ -2957,7 +2964,68 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
             //    已随 ParallelTable.BASE 一起删除。删它的意义 = 让"这台机器的并行不随物质模块变"
             //    这件事在编译期就不可能写出来（旧原文与理由见 ParallelTable 的留档）。
         }
+        // 🔴 2026-10-23（用户规格「含并行」）：主机等级复写也要作用到【并行基数】上。
+        //    语义 = 若主机复写等级 > 本机自己的物质模块等级，就把 base 换成"那个等级的规范模块 id"
+        //    在当前表里的并行值；否则（含任何查不到）原样返回 ⇒ 与今天逐位一致。
+        base = shanhai$parallelBaseWithHostOverride(base);
         currentParallel = applyStackMultiplier(base, stack.getCount());
+    }
+
+    /** {@code shanhai$parallelBaseWithHostOverride} 的 WARN 只打一次（避免每 3 tick 刷屏）。 */
+    private static boolean shanhai$hostOverrideWarned = false;
+
+    /**
+     * 【主机「物质模块等级复写」的并行落点】把并行基数换成"主机复写等级"对应的值。
+     *
+     * <h2>口径（用户原话「包括并行」＋ 队长 2026-10-23 定死）</h2>
+     * <pre>
+     *   主机没有复写（返回 0）              ⇒ 原样返回 ownBase（今天的行为）
+     *   主机复写等级 ≤ 本机自己的等级        ⇒ 原样返回 ownBase（"模块自己更高则不复写"）
+     *   主机复写等级 &gt; 本机自己的等级 ⇒ 用 MODULE_LEVELS 反查出该等级的规范模块 id，
+     *                                         再在本机所用的那张并行表里取值 ⇒ 返回它
+     *   反查不到 id / 表里没有这个 id / 任何异常 ⇒ 原样返回 ownBase + 一行 WARN（fail-open）
+     * </pre>
+     *
+     * <p>🔴 <b>fail-open 是硬要求</b>：查不到时既不返回 0（并行直接归零，机器等于停摆）、
+     * 也不放大（用户没要求的值）；只有"真的查到了"才替换。
+     *
+     * <p>调用点在 {@link #scanMatterSlot()} 里、乘堆叠倍率<b>之前</b> ⇒ 堆叠（每 16 个翻倍）
+     * 的既有语义不变，只是"基数"从"自己那只模块的并行"换成"主机复写等级那只模块的并行"。
+     */
+    private long shanhai$parallelBaseWithHostOverride(long ownBase) {
+        try {
+            final int hostLevel = getHostMatterLevelOverride();
+            if (hostLevel <= 0 || hostLevel <= getMatterModuleLevel()) {
+                return ownBase;
+            }
+            final Map<String, Long> table = parallelTable() == ParallelTable.ENHANCED
+                    ? PARALLEL_TABLE_ENHANCED
+                    : PARALLEL_TABLE_STANDARD;
+            final String canonicalId = canonicalModuleIdForLevel(hostLevel, table);
+            if (canonicalId == null) {
+                shanhai$warnHostOverrideMiss(hostLevel, "该等级在 MODULE_LEVELS 里反查不到规范模块 id（或它不在当前并行表里）");
+                return ownBase;
+            }
+            final long value = table.getOrDefault(canonicalId, -1L);
+            if (value <= 0L) {
+                shanhai$warnHostOverrideMiss(hostLevel, "并行表里 " + canonicalId + " 的值不可用（" + value + "）");
+                return ownBase;
+            }
+            return value;
+        } catch (Throwable ignored) {
+            // fail-open：判定链上的任何异常都不许打断并行重算
+            return ownBase;
+        }
+    }
+
+    /** 复写查不到时的 WARN（全进程只打一次；带等级与原因，便于定位）。 */
+    private static void shanhai$warnHostOverrideMiss(int hostLevel, String why) {
+        if (shanhai$hostOverrideWarned) {
+            return;
+        }
+        shanhai$hostOverrideWarned = true;
+        ShanhaiMod.LOGGER.warn("[SHANHAI-HOST-OVERRIDE] 主机等级复写 Lv.{} 查不到并行值 ⇒ 已 fail-open 回模块自己的并行；原因：{}",
+                hostLevel, why);
     }
 
     /**
@@ -3457,6 +3525,74 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     public int getMatterModuleLevel() {
         String id = getMatterModuleId();
         return id == null ? 0 : MODULE_LEVELS.getOrDefault(id, 0);
+    }
+
+    // ═══════════════════ 主机侧「物质模块等级复写」（2026-10-23 新增 · fail-open） ═══════════════════
+    //   用户规格：主机多一格专属槽，放满 64 个物质模块 ⇒ 用它复写【装在身上的模块】的物质模块等级
+    //   （含并行与配方等级需求）；「若模块自己装的等级 > 主机复写的等级，则不复写」。
+    //   ⇒ 那就是 max(自己, 主机)：主机高才生效，模块高则完全不为所动。
+    //   🔴 fail-open：没连主机 / 老主机（返回 0）/ 任何异常 ⇒ 0 ⇒ max(自己,0)==自己 ⇒ 与今天逐位一致。
+
+    /**
+     * 宿主给的「物质模块等级复写」下限；{@code 0} = 没有复写。
+     *
+     * <p>来源 = {@link PrimordialOmegaEngineMachine#getHostMatterLevelOverride()}：
+     * 老主机（原始终焉引擎）恒返回 0；归墟视界枢核返回「第二个专属槽满 64 个物质模块」的等级。
+     *
+     * <p>🔴 <b>任何异常都退回 0</b>：这个值会进入并行与配方条件的判定，
+     * "读不到就当没有"比"抛异常打断配方"安全（fail-open 而非 fail-closed）。
+     */
+    public int getHostMatterLevelOverride() {
+        try {
+            final PrimordialOmegaEngineMachine host = getHost();
+            return host == null ? 0 : host.getHostMatterLevelOverride();
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    /**
+     * <b>有效物质模块等级</b> = {@code max(自己槽里的等级, 主机复写等级)}。
+     *
+     * <p>这就是用户原话「若模块上安装的物质模块等级大于主机等级则不复写」的实现
+     * （模块自己更高 ⇒ max 取自己 ⇒ 不为所动）。
+     *
+     * <p>⚠️ 与 {@link #getMatterModuleLevel()} 的分工：
+     * <ul>
+     *   <li>{@code getMatterModuleLevel()} = <b>这台模块自己槽里</b>的真实等级（存档/物品事实，永不被改）；</li>
+     *   <li>{@code getEffectiveMatterModuleLevel()} = <b>判定用</b>的等级（= 事实 + 主机复写下限）。</li>
+     * </ul>
+     * 判定链上（配方等级需求、并行基数、抬头显示）读的是后者；前者一条都没改。
+     */
+    public int getEffectiveMatterModuleLevel() {
+        return Math.max(getMatterModuleLevel(), getHostMatterLevelOverride());
+    }
+
+    /**
+     * 等级 ⇒ 该等级的<b>规范模块 id</b>（{@link #MODULE_LEVELS} 的唯一反向查表）。
+     *
+     * <p>为什么需要它：并行表（{@code PARALLEL_TABLE_STANDARD/ENHANCED}）是<b>按物品 id 存</b>的，
+     * 而主机复写给的是<b>等级</b> ⇒ 必须先把等级换成"那个等级的标准模块 id"，才查得到并行值。
+     *
+     * <p>确定性：{@code MODULE_LEVELS} 是 {@code LinkedHashMap} 且<b>一个等级恰好一个 id</b>
+     * （17 条 / 等级 1..17，逐条见静态块）；这里仍按迭代顺序取第一个命中项，并对
+     * "该 id 在当前表里"做一次存在性检查 —— 查不到就返回 {@code null}，由调用方 fail-open。
+     *
+     * @param level  1..17（&le;0 直接返回 null）
+     * @param table  当前模块所用的那张并行表（STANDARD / ENHANCED）
+     */
+    @Nullable
+    static String canonicalModuleIdForLevel(int level, Map<String, Long> table) {
+        if (level <= 0 || table == null) {
+            return null;
+        }
+        for (Map.Entry<String, Integer> entry : MODULE_LEVELS.entrySet()) {
+            final Integer value = entry.getValue();
+            if (value != null && value == level && table.containsKey(entry.getKey())) {
+                return entry.getKey();
+            }
+        }
+        return null;
     }
 
     /** 物质模块堆叠数量；空槽返回 0。 */

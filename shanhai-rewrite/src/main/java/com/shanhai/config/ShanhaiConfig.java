@@ -168,6 +168,12 @@ public final class ShanhaiConfig {
         /** 🆕 配方逻辑只读探针总开关（默认<b>开</b>）。 */
         public ForgeConfigSpec.BooleanValue recipeProbe;
 
+        /** 星律样板总成：普通样板区每页行数（默认 6 = 既有行为；列数固定 9）。 */
+        public ForgeConfigSpec.IntValue stellarPatternRowsPerPage;
+
+        /** 星律样板总成：普通样板区最多页数（默认 20 = 既有行为；可见槽数上限 1080）。 */
+        public ForgeConfigSpec.IntValue stellarPatternPages;
+
         void init(ForgeConfigSpec.Builder builder) {
             builder.push("primordial_omega_engine");
             primordialSphereStyle = builder
@@ -275,6 +281,30 @@ public final class ShanhaiConfig {
                             "   （刻意如此：那两行是「这一轮到底开没开、探针到底挂没挂」的唯一机器证据）",
                             "改完需要重启客户端/服务端才生效")
                     .define("recipe_probe", true);
+            builder.pop();
+
+            // ============================================================ 阶段八 ③：星律样板总成的版面
+            //   [stellar] —— 普通样板槽的「行数 / 页数」（列数固定 9，见下）。
+            //   🔴 默认值 = 加这两项之前的行为：9 列 × 6 行 × 20 页 = 1080 槽
+            //      ⇒ 不改配置就与以前逐字节一致（这两项只影响「界面分页」与「可见槽数上界」）。
+            //   ⚠️ 为什么列数不做成配置：gtlcore 的 PaginationUIManager 把 9 列的几何写死在字节码里
+            //      （x = 8 + (i % patternsPerRow) * 18，面板宽 18*cols+16），列数可配就得自己重写分页器
+            //      ⇒ 风险明显不划算（父代理 2026-10 的口径：列数固定 9）。
+            //   ⚠️ 为什么页数变小不会弄丢样板：底层 storage 仍然是 1080 格（构造参数不变），
+            //      这两项只决定「界面翻得到几页」；超出可见页的样板【数据仍在存档里】，
+            //      只是暂时看不到 —— 日志会打一条 WARN 说明有多少格因此不可见。
+            builder.push("stellar");
+            stellarPatternRowsPerPage = builder
+                    .comment("星律样板总成：普通样板区每页几行（默认 6 = 既有行为）",
+                            "列数固定 9（上游分页器的几何写死 9 列，不开放配置）",
+                            "本项 × 9 = 每页格数；与下一项相乘 = 界面可见槽数上界（上限 1080）",
+                            "改完需要重新打开界面才看到变化；已放置的样板不会因为调小而消失")
+                    .defineInRange("patternRowsPerPage", 6, 1, 8);
+            stellarPatternPages = builder
+                    .comment("星律样板总成：普通样板区最多几页（默认 20 = 既有行为）",
+                            "可见槽数 = 9 × 行数 × 页数，超过 1080 的部分会被夹到 1080（上限）",
+                            "⚠️ 调小后超出的样板不会丢，只是翻不到；日志会打一条 WARN 指出有多少格不可见")
+                    .defineInRange("patternPages", 20, 1, 120);
             builder.pop();
         }
 

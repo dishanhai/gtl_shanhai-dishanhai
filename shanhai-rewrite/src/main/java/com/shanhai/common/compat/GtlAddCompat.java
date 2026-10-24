@@ -73,6 +73,33 @@ public final class GtlAddCompat {
     }
 
     /**
+     * <b>归墟视界枢核</b>（{@code shanhai:guixu_vision_core}）主机几何 —— 我们<b>自己的</b> {@code .bin}。
+     *
+     * <p>与 {@link #hostPattern()} 走<b>同一条</b>安全入口（每次 {@code FactoryBlockPattern.start()}
+     * 新建实例、绝不碰 {@code MultiBlockStructure} 那个共享可变单例），区别只在资源路径：
+     * <ul>
+     *   <li>资源 = {@code multiblock/guixu_vision_core.bin}（由 {@code temp/host-shape/gen5.mjs} 的
+     *       {@code --bin} 生成：148×135×131、18,533 个方块、24 个模块槽 'M'、1 个控制器 '~'）；</li>
+     *   <li>id = {@code guixu_vision_core}（loader 会校验 .bin 头里的 id，不一致直接抛）；</li>
+     *   <li>方向三元组与 {@link #hostPattern()} <b>完全相同</b>的 {@code (LEFT, DOWN, BACK)} ——
+     *       实测轴映射是「aisle 轴 = 机器朝向的反方向、row 轴 = -Y、col 轴 = UP × 朝向」，
+     *       {@code com.shanhai.machine.host.GuixuHostGeometry#rotate} 按同一套写（两处必须同源）。</li>
+     * </ul>
+     *
+     * <p>🔴 <b>文件为什么放在 {@code assets/gtladditions/structures/multiblock/} 下</b>：
+     * {@code StructureResourceLoader} 的根路径是<b>写死</b>的
+     * {@code "assets/gtladditions/structures"}（反编译实证：{@code ROOT_PATH} 常量），
+     * 且它用 {@code getClass().getClassLoader().getResourceAsStream(...)} 按<b>类路径</b>取资源、
+     * 不区分是哪个 jar。所以我们把自己的 {@code .bin} 放进本 mod jar 的同一路径即可被它读到；
+     * <b>不需要</b>、也<b>不允许</b>去改 gtladditions 的 jar。文件名带 {@code guixu_} 前缀避免重名。
+     */
+    public static FactoryBlockPattern guixuVisionCorePattern() {
+        return StructureResourceLoader.INSTANCE.loadFactoryPattern(
+                "multiblock/guixu_vision_core.bin", "guixu_vision_core",
+                RelativeDirection.LEFT, RelativeDirection.DOWN, RelativeDirection.BACK);
+    }
+
+    /**
      * 16 个模块槽位（主机侧正算）。纯函数、无共享状态。
      *
      * <p>委托给 {@link AntichristPosHelper}，与 gtladditions 那台<b>在游戏里正常工作</b>的主机
