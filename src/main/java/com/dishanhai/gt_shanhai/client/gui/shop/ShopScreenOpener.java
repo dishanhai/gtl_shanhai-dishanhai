@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.client.gui.shop;
 
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCatalog;
+import com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings;
 import com.dishanhai.gt_shanhai.common.shop.ShopCatalogManifest;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
 import com.dishanhai.gt_shanhai.network.WalletOpenRequestPacket;
@@ -18,7 +19,10 @@ public final class ShopScreenOpener {
     private ShopScreenOpener() {}
 
     public static void open(boolean canEdit, boolean catalogEditUnlocked) {
-        Minecraft.getInstance().setScreen(new ShopScreen(canEdit, catalogEditUnlocked));
+        ShopScreen shop = new ShopScreen(canEdit, catalogEditUnlocked);
+        // 这台客户端第一次开商店：先走初始化向导（功能介绍 + 偏好），结束后再进商店本体
+        Minecraft.getInstance().setScreen(ClientShopUiSettings.setupDone()
+                ? shop : new ShopWelcomeScreen(() -> shop));
     }
 
     /** 复用任务书跳转链路：记录目标后由服务端校验钱包并下发最新目录，再自动定位商品。 */

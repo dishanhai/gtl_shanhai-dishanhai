@@ -34,7 +34,15 @@ public final class ShanhaiStructurePlan {
             ItemStack current,
             BlockState currentState,
             List<ItemStack> candidates,
-            boolean chamberCapable) {
+            boolean chamberCapable,
+            boolean currentMatchesStructure) {
+
+        public Entry(BlockPos pos, Kind kind, ItemStack desired, BlockState desiredState,
+                     ItemStack current, BlockState currentState, List<ItemStack> candidates,
+                     boolean chamberCapable) {
+            this(pos, kind, desired, desiredState, current, currentState, candidates, chamberCapable,
+                    matchesStructure(kind, current, candidates));
+        }
 
         public Entry(BlockPos pos, Kind kind, ItemStack desired, ItemStack current,
                      List<ItemStack> candidates, boolean chamberCapable) {
@@ -68,6 +76,18 @@ public final class ShanhaiStructurePlan {
         public boolean requiresBuild() {
             return (kind == Kind.PLACE || kind == Kind.REPLACE || kind == Kind.FORCE_REPLACE)
                     && (!desired.isEmpty() || desiredFluid() != Fluids.EMPTY);
+        }
+
+        /** 山海：位置在結構範圍內不代表原有方塊屬於結構，尤其是未施工的強制替換位置。 */
+        public boolean canDismantle() {
+            return currentMatchesStructure && !current.isEmpty() && kind != Kind.MANUAL;
+        }
+
+        private static boolean matchesStructure(Kind kind, ItemStack current, List<ItemStack> candidates) {
+            if (current == null || current.isEmpty()) return false;
+            if (kind == Kind.SATISFIED || kind == Kind.REPLACE) return true;
+            return candidates != null && candidates.stream().anyMatch(candidate -> candidate != null
+                    && !candidate.isEmpty() && ItemStack.isSameItem(current, candidate));
         }
 
         public Fluid desiredFluid() {

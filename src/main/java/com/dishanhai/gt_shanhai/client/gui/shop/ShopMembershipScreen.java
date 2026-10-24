@@ -30,15 +30,8 @@ public class ShopMembershipScreen extends ScaledScreen {
     private static final int PAGE_BANK = 1;
 
     private static final int GOLD = -22016;
-    private static final int GOLD_DARK = -7710208;
-    private static final int PANEL_BG = -267382768;
-    private static final int PANEL_INNER = -266724838;
-    private static final int BOX_BG = -300674028;
-    private static final int ROW_BG = -300476649;
     private static final int GRAY = -5592406;
     private static final int WHITE = -1;
-    private static final int BTN_BG = -14935012;
-    private static final int BTN_HOVER = -12303292;
 
     private static final int TARGET_W = 640;
     private static final int TARGET_H = 420;
@@ -51,6 +44,8 @@ public class ShopMembershipScreen extends ScaledScreen {
 
     private final ShopScreen parent;
     private int left, top, panelWidth, panelHeight;
+    /** 本帧主题（结构色、毛玻璃），每帧开头按商店设置取一次。 */
+    private ShopTheme theme = ShopTheme.CLASSIC;
     private int page = PAGE_MEMBER;
     private long pageSwitchAtMs;
     private int pageSlideDir = 1;
@@ -124,6 +119,7 @@ public class ShopMembershipScreen extends ScaledScreen {
 
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        theme = ShopTheme.current();
         openMotion.update(System.currentTimeMillis());
         syncAmountBox();
         float openScale = GuiMotion.panelScale(openMotion.value());
@@ -156,10 +152,8 @@ public class ShopMembershipScreen extends ScaledScreen {
     }
 
     private void renderPanel(GuiGraphics g, int mx, int my) {
-        g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
-        g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
-        g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
-        g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
+        theme.rootPanel(g, left, top, panelWidth, panelHeight,
+                left + 6, top + TOP_BAR_H + 6, panelWidth - 12, panelHeight - TOP_BAR_H - 12);
 
         g.drawString(this.font, "§6银会中心", left + 10, top + 5, GOLD, true);
         String spark = fitSpark(formatExact(ClientWalletAccount.getDigital()), memberTabX() - (left + 78) - 8);
@@ -235,7 +229,7 @@ public class ShopMembershipScreen extends ScaledScreen {
 
     private void drawCard(GuiGraphics g, int x, int y, int w, int h, String title,
                           BigInteger principal, BigInteger interest, BigInteger total, String extra) {
-        g.fill(x, y, x + w, y + h, BOX_BG);
+        theme.region(g, x, y, w, h);
         g.drawString(this.font, title, x + 6, y + 4, GOLD, true);
         if (principal == null) {
             g.drawString(this.font, "§8查询中…", x + 6, y + 18, GRAY, true);
@@ -262,7 +256,7 @@ public class ShopMembershipScreen extends ScaledScreen {
     private void drawTierRow(GuiGraphics g, int x, int y, int w, int tier, int currentTier, int mx, int my) {
         boolean owned = currentTier >= tier;
         boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, TIER_ROW_H - 4);
-        g.fill(x, y, x + w, y + TIER_ROW_H - 4, hover ? ROW_BG : BOX_BG);
+        theme.region(g, x, y, w, TIER_ROW_H - 4, hover ? theme.rowBg : theme.boxBg);
         String name = ShopMembership.tierNameForTier(tier);
         int pct = ShopMembership.discountPercentForTier(tier);
         BigInteger price = BigInteger.valueOf(ShopMembership.priceOf(tier));
@@ -362,9 +356,13 @@ public class ShopMembershipScreen extends ScaledScreen {
 
     private void drawButton(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my) {
         boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
-        g.fill(x, y, x + w, y + h, GOLD_DARK);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hover ? BTN_HOVER : BTN_BG);
-        g.drawCenteredString(this.font, label, x + w / 2, y + (h - 8) / 2, WHITE);
+        theme.button(g, this.font, x, y, w, h, label,
+                hover && theme.glass ? theme.frame : theme.frameDark, hover ? theme.buttonHover : theme.buttonBg, WHITE);
+    }
+
+    @Override
+    public void renderBackground(GuiGraphics g) {
+        if (!ShopTheme.current().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
     }
 
     private String fitSpark(String text, int maxPx) {

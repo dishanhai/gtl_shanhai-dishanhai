@@ -39,19 +39,11 @@ import java.util.Objects;
 public class CurrencyAtmScreen extends ScaledScreen {
 
     private static final int GOLD = -22016;
-    private static final int GOLD_DARK = -7710208;
-    private static final int PANEL_BG = -267382768;
-    private static final int PANEL_INNER = -266724838;
-    private static final int BOX_BG = -300674028;
-    private static final int ROW_BG = -300476649;
-    private static final int SELECT_BG = -299421158;
     private static final int GREEN = -11141291;
     private static final int GREEN_DARK = -13661393;
     private static final int CYAN = -11141121;
     private static final int GRAY = -5592406;
     private static final int WHITE = -1;
-    private static final int BTN_BG = -14935012;
-    private static final int BTN_HOVER = -12303292;
 
     private static final int TARGET_W = 900;
     private static final int TARGET_H = 430;
@@ -83,6 +75,8 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private long aeBalanceRequestedAtGameTime = Long.MIN_VALUE;
 
     private int left, top, panelWidth, panelHeight;
+    /** 本帧主题（结构色、毛玻璃），每帧开头按商店设置取一次。 */
+    private ShopTheme theme = ShopTheme.CLASSIC;
 
     private final Spring openMotion = Spring.opening(Spring.PANEL);
     // 主界面动效（同 ShopScreen 的一套弹簧）：行 / 按钮 hover 渐变、选中高亮块滑动、详情列切币淡入、开场行错峰
@@ -259,6 +253,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        theme = ShopTheme.current();
         long nowMs = System.currentTimeMillis();
         openMotion.update(nowMs);
         advanceListScroll(nowMs);
@@ -297,10 +292,8 @@ public class CurrencyAtmScreen extends ScaledScreen {
     private void renderPanel(GuiGraphics g, int mx, int my) {
         hoverTip = null;
         // 面板
-        g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
-        g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
-        g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
-        g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
+        theme.rootPanel(g, left, top, panelWidth, panelHeight,
+                left + 6, top + TOP_BAR_H + 6, panelWidth - 12, panelHeight - TOP_BAR_H - 12);
 
         g.drawString(this.font, "§6货币中心 §7- ATM", left + 10, top + 5, GOLD, true);
         String sparkLabel = "§d星火 §e" + formatBig(ClientWalletAccount.getDigital());
@@ -371,7 +364,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
     private void drawList(GuiGraphics g, int mx, int my) {
         int lx = listLeft(), ly = listTop(), lw = LIST_W, lh = listHeight();
-        g.fill(lx, ly, lx + lw, ly + lh, BOX_BG);
+        theme.region(g, lx, ly, lw, lh);
         if (currencies.isEmpty()) {
             g.drawCenteredString(this.font, "§7还没有货币", lx + lw / 2, ly + 18, GRAY);
             g.drawCenteredString(this.font, "§8检查 currency_rates.json", lx + lw / 2, ly + 32, GRAY);
@@ -385,7 +378,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
             int by = ly + 2 + Math.round(selectIndicator.value()) - scroll;
             float showA = staggerRows.valueOr(selected, 1f, now);
             g.fill(lx + 1, by, lx + lw - 1, by + ROW_H - 1,
-                    GuiMotion.lerpColor(SELECT_BG & 0x00FFFFFF, SELECT_BG, showA));
+                    GuiMotion.lerpColor(theme.selectBg & 0x00FFFFFF, theme.selectBg, showA));
         }
         for (int i = 0; i < currencies.size(); i++) {
             ResourceLocation cur = currencies.get(i);
@@ -407,7 +400,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
             }
             try {
                 g.fill(lx + 1, ry, lx + lw - 1, ry + ROW_H - 1,
-                        GuiMotion.lerpColor(ROW_BG & 0x00FFFFFF, ROW_BG, hv));
+                        GuiMotion.lerpColor(theme.rowBg & 0x00FFFFFF, theme.rowBg, hv));
                 Item item = ForgeRegistries.ITEMS.getValue(cur);
                 if (item != null) g.renderItem(new ItemStack(item), lx + 3, ry + 1);
                 String badge = stageBadge(cur);
@@ -614,7 +607,7 @@ public class CurrencyAtmScreen extends ScaledScreen {
 
     private void drawDetail(GuiGraphics g, int mx, int my) {
         int dx = detailX(), dy = listTop(), dw = detailW(), dh = detailHeight();
-        g.fill(dx, dy, dx + dw, dy + dh, BOX_BG);
+        theme.region(g, dx, dy, dw, dh);
         // 背景大块填充和后面的图标/文字/按钮走不同 RenderType（fill 用 positioncolor，物品图标/文字各自一套），
         // GuiGraphics 按类型分桶缓冲，实际提交 GPU 的顺序不一定等于调用顺序——不在这里强制 flush，深色背景块
         // 有几率在批次刷新时"晚于"图标/文字提交，同 Z（都是 0）下 LEQUAL 深度测试直接把内容盖成空白
@@ -1011,15 +1004,19 @@ public class CurrencyAtmScreen extends ScaledScreen {
         if (have > 0) ClientWalletAccount.optimisticAddCurrency(cur, BigInteger.valueOf(have));
     }
 
+    @Override
+    public void renderBackground(GuiGraphics g) {
+        if (!ShopTheme.current().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
+    }
+
     // ===== 小工具 =====
     private void drawButton(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my,
                             String tipTitle, String tipBody) {
         boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
         // key 只用位置：标签里带数量、余额，会逐帧变，拿它做 key 会让 hover 弹簧每次归零
         float hv = hoverButtons.follow(widgetKey(x, y), hover ? 1f : 0f, System.currentTimeMillis());
-        g.fill(x, y, x + w, y + h, GuiMotion.lerpColor(GOLD_DARK, GOLD, hv));
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, GuiMotion.lerpColor(BTN_BG, BTN_HOVER, hv));
-        g.drawCenteredString(this.font, label, x + w / 2, y + (h - 8) / 2, WHITE);
+        theme.button(g, this.font, x, y, w, h, label, GuiMotion.lerpColor(theme.frameDark, theme.frame, hv),
+                GuiMotion.lerpColor(theme.buttonBg, theme.buttonHover, hv), WHITE);
         if (tipTitle != null) armTip(mx, my, x, y, w, h, tipTitle, tipBody);
     }
 

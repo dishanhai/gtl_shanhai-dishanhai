@@ -32,8 +32,6 @@ public class ShopSettingsScreen extends ScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;
-    private static final int PANEL_BG = -267382768;
-    private static final int PANEL_INNER = -266724838;
     private static final int GRAY = -5592406;
     private static final int WHITE = -1;
     private static final int BTN_BG = -14935012;
@@ -71,6 +69,9 @@ public class ShopSettingsScreen extends ScaledScreen {
     private static final String SOUND_HINT =
             "§7点击、步进连发与成交结果的提示音，用原版声音，跟随主音量。只存在这台客户端";
 
+    private static final String THEME_HINT =
+            "§7动态玻璃与山海样板生成器同一套：半透明分层底板、左上受光亮边、外缘柔影；文字颜色不变。本页即时预览，保存后商店生效。只存在这台客户端";
+
     private final ShopScreen parent;
     private final boolean serverRows;
     private String rollCap;
@@ -84,6 +85,7 @@ public class ShopSettingsScreen extends ScaledScreen {
     private boolean rememberShopView;
     private boolean reduceMotion;
     private boolean uiSounds;
+    private boolean glassTheme;
     private EditBox rollCapBox;
     private EditBox sdaThresholdBox;
     private EditBox cardWidthBox;
@@ -118,6 +120,17 @@ public class ShopSettingsScreen extends ScaledScreen {
         this.rememberShopView = ClientShopUiSettings.rememberShopView();
         this.reduceMotion = ClientShopUiSettings.reduceMotion();
         this.uiSounds = ClientShopUiSettings.uiSounds();
+        this.glassTheme = ClientShopUiSettings.glassTheme();
+    }
+
+    @Override
+    public void renderBackground(GuiGraphics g) {
+        if (!theme().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
+    }
+
+    /** 本页按尚未保存的选择即时预览主题。 */
+    private ShopTheme theme() {
+        return glassTheme ? ShopTheme.GLASS : ShopTheme.CLASSIC;
     }
 
     @Override
@@ -186,14 +199,15 @@ public class ShopSettingsScreen extends ScaledScreen {
         settingsScroll = clampScroll(settingsScroll);
         layoutInputs();
 
-        g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
-        g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
-        g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
-        g.fill(left + 5, top + 18, left + panelWidth - 5, top + panelHeight - 5, PANEL_INNER);
+        ShopTheme t = theme();
+        t.rootPanel(g, left, top, panelWidth, panelHeight, left + 5, top + 18, panelWidth - 10, panelHeight - 23);
+        // 玻璃主题：选项滚动区单独一层区域毛玻璃，和标题/底栏分开（经典主题原样没有这块）
+        if (t.glass) t.region(g, left + 6, viewTop(), panelWidth - 12, viewH());
 
         g.drawString(this.font, serverRows ? "§6商店设置 §7(含服务端设置)" : "§6商店设置 §7(本机显示偏好)",
                 left + 10, top + 5, GOLD, true);
         drawBtn(g, left + 12, top + panelHeight - 22, 60, 14, "§c取消", mx, my);
+        drawBtn(g, guideBtnX(), top + panelHeight - 22, GUIDE_BTN_W, 14, "§b新手引导", mx, my);
         drawBtn(g, left + panelWidth - 12 - 70, top + panelHeight - 22, 70, 14, "§a确认保存", mx, my);
 
         enableScaledScissor(g, left + 6, viewTop(), left + panelWidth - 6, viewBottom());
@@ -258,6 +272,12 @@ public class ShopSettingsScreen extends ScaledScreen {
             drawBtn(g, x, soundY, fieldWidth(), 16, uiSounds ? "§a商店音效: 开" : "§8商店音效: 关", mx, my);
         }
         drawWrappedContentLines(g, SOUND_HINT, x, row(rowSoundHint()), textW);
+        int themeY = visualY(row(rowTheme()));
+        if (rowVisible(themeY, 16)) {
+            drawBtn(g, x, themeY, fieldWidth(), 16,
+                    glassTheme ? "§b界面主题: 动态玻璃（同样板生成器）" : "§6界面主题: 经典金框（默认）", mx, my);
+        }
+        drawWrappedContentLines(g, THEME_HINT, x, row(rowThemeHint()), textW);
 
         g.disableScissor();
         drawScrollbar(g, mx, my);
@@ -271,6 +291,11 @@ public class ShopSettingsScreen extends ScaledScreen {
         }
         if (GuiRenderUtil.isHovering(mx, my, left + panelWidth - 12 - 70, top + panelHeight - 22, 70, 14)) {
             submit();
+            return true;
+        }
+        if (GuiRenderUtil.isHovering(mx, my, guideBtnX(), top + panelHeight - 22, GUIDE_BTN_W, 14)) {
+            // 重看向导：向导自己会存偏好，所以回来时重开设置页（未保存的改动作废），避免旧状态覆盖向导的选择
+            Minecraft.getInstance().setScreen(new ShopWelcomeScreen(() -> new ShopSettingsScreen(parent, serverRows)));
             return true;
         }
         if (scrollbarClicked(mx, my)) return true;
@@ -300,6 +325,10 @@ public class ShopSettingsScreen extends ScaledScreen {
             }
             if (hitContent(mx, contentMy, x, row(rowSound()), w, 16)) {
                 uiSounds = !uiSounds;
+                return true;
+            }
+            if (hitContent(mx, contentMy, x, row(rowTheme()), w, 16)) {
+                glassTheme = !glassTheme;
                 return true;
             }
         }
@@ -354,6 +383,7 @@ public class ShopSettingsScreen extends ScaledScreen {
         ClientShopUiSettings.setRewardPreviewBar(previewBar);
         ClientShopUiSettings.setRememberShopView(rememberShopView);
         ClientShopUiSettings.setFeedbackPrefs(reduceMotion, uiSounds);
+        ClientShopUiSettings.setShopTheme(glassTheme ? ClientShopUiSettings.THEME_GLASS : ClientShopUiSettings.THEME_CLASSIC);
         parent.onRememberShopViewSaved(rememberShopView);
         if (serverRows) {
             ShanhaiNetwork.CHANNEL.sendToServer(new ShopSettingsPacket(Math.max(1L, roll), Math.max(1L, sda),
@@ -361,6 +391,11 @@ public class ShopSettingsScreen extends ScaledScreen {
         }
         Minecraft.getInstance().setScreen(parent);
     }
+
+    private static final int GUIDE_BTN_W = 70;
+
+    /** 底栏居中的「新手引导」：夹在左边「取消」和右边「确认保存」之间。 */
+    private int guideBtnX() { return left + (panelWidth - GUIDE_BTN_W) / 2; }
 
     private int viewTop() { return top + HEADER_H; }
 
@@ -385,8 +420,13 @@ public class ShopSettingsScreen extends ScaledScreen {
 
     private int rowSoundHint() { return rowSound() + 18; }
 
+    /** 「界面主题」开关行：排在换行后的音效说明下面。 */
+    private int rowTheme() { return rowSoundHint() + wrappedHeight(SOUND_HINT) + 4; }
+
+    private int rowThemeHint() { return rowTheme() + 18; }
+
     /** 选项区内容总高：最后一段说明换几行就长几行。 */
-    private int contentHeight() { return row(rowSoundHint()) + wrappedHeight(SOUND_HINT) + 4; }
+    private int contentHeight() { return row(rowThemeHint()) + wrappedHeight(THEME_HINT) + 4; }
 
     private int wrappedHeight(String text) {
         return Math.max(1, this.font.split(Component.literal(text), fieldWidth()).size()) * 10;
@@ -446,14 +486,15 @@ public class ShopSettingsScreen extends ScaledScreen {
         int trackX = left + panelWidth - 10;
         int trackY = viewTop();
         int trackH = viewH();
-        g.fill(trackX, trackY, trackX + SCROLLBAR_W, trackY + trackH, SCROLL_TRACK);
+        ShopTheme t = theme();
+        g.fill(trackX, trackY, trackX + SCROLLBAR_W, trackY + trackH, t.glass ? t.barBg : SCROLL_TRACK);
         int max = scrollMax();
         if (max <= 0) return;
         int contentH = trackH + max;
         int thumbH = Math.max(10, trackH * trackH / Math.max(1, contentH));
         int thumbY = trackY + (trackH - thumbH) * settingsScroll / Math.max(1, max);
         boolean hv = scrollDrag || GuiRenderUtil.isHovering(mx, my, trackX, thumbY, SCROLLBAR_W, thumbH);
-        g.fill(trackX, thumbY, trackX + SCROLLBAR_W, thumbY + thumbH, hv ? GOLD : GOLD_DARK);
+        g.fill(trackX, thumbY, trackX + SCROLLBAR_W, thumbY + thumbH, hv ? t.frame : t.frameDark);
     }
 
     private boolean scrollbarClicked(double mx, double my) {
@@ -484,9 +525,16 @@ public class ShopSettingsScreen extends ScaledScreen {
 
     private void drawBtn(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my) {
         boolean hv = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
-        g.fill(x, y, x + w, y + h, GOLD_DARK);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hv ? BTN_HOVER : BTN_BG);
-        g.drawCenteredString(this.font, GuiRenderUtil.trimText(this.font, label, w - 6), x + w / 2, y + (h - 8) / 2, WHITE);
+        ShopTheme t = theme();
+        if (t.glass) {
+            t.controlBackdrop(g, x, y, w, h);
+            t.box(g, x, y, w, h, hv ? t.frame : t.frameDark, hv ? t.buttonHover : t.buttonBg);
+        } else {
+            g.fill(x, y, x + w, y + h, GOLD_DARK);
+            g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hv ? BTN_HOVER : BTN_BG);
+        }
+        t.drawCentered(g, this.font, GuiRenderUtil.trimText(this.font, t.label(label), w - 6), x + w / 2, y + (h - 8) / 2,
+                t.ink(label, WHITE));
     }
 
     @Override

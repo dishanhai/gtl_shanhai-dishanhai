@@ -76,12 +76,19 @@ public class ClientInit {
         // 商店内容区局部高斯模糊：在 Screen.render 之后对 main 做后处理。
         MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
                 com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur::onScreenRenderPost);
+        // 商店玻璃主题的 tooltip：LOWEST 让别的模组先改完，我们再接管绘制
+        MinecraftForge.EVENT_BUS.addListener(EventPriority.LOWEST,
+                com.dishanhai.gt_shanhai.client.gui.shop.ShopGlassTooltip::onTooltipPre);
         // 配方修改器借用同一条模糊管线：登记放行谓词，并在编辑器界面关闭时收掉残留请求。
         com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur.install();
         com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.shop.MultiPickerScreen);
         com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
                 screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.generator.PatternGeneratorScreen);
+        com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
+                screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.terminal.UltimateTerminalScreen);
+        com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur.allowScreen(
+                screen -> screen instanceof com.dishanhai.gt_shanhai.client.gui.terminal.TerminalReportScreen);
         MinecraftForge.EVENT_BUS.addListener(
                 com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur::onScreenClosing);
         com.dishanhai.gt_shanhai.client.recipe.ShanhaiRecipeStackPicker.install();
@@ -101,7 +108,8 @@ public class ClientInit {
         if (clickEvent == null || clickEvent.getAction() != ClickEvent.Action.RUN_COMMAND) return;
 
         if (RecipeExportChatLink.reveal(clickEvent.getValue())
-                || JeiChatLinkHelper.runSearchCommand(clickEvent.getValue())) {
+                || JeiChatLinkHelper.runSearchCommand(clickEvent.getValue())
+                || ShanhaiTerminalReportClient.run(clickEvent.getValue())) {
             event.setCanceled(true);
         }
     }

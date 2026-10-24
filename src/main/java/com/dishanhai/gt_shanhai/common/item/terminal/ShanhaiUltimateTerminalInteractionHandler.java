@@ -25,6 +25,8 @@ public final class ShanhaiUltimateTerminalInteractionHandler {
         if (!(MetaMachine.getMachine(event.getLevel(), event.getPos()) instanceof IMultiController)) return;
 
         event.setCanceled(true);
+        // 一次左鍵還會收到停止／中止挖掘事件；全部阻止挖掘，僅起始事件檢查。
+        if (event.getAction() != PlayerInteractEvent.LeftClickBlock.Action.START) return;
         if (event.getEntity() instanceof ServerPlayer serverPlayer) {
             ShanhaiUltimateTerminalBehavior.INSTANCE.scanOnly(serverPlayer, terminal, event.getPos());
         }

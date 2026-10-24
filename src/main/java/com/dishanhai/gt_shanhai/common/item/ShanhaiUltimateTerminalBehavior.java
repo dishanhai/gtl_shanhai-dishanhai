@@ -14,57 +14,59 @@ import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStructurePlanner;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalAeBinding;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalCraftingManager;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalMaterialService;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
+import com.dishanhai.gt_shanhai.network.ShanhaiTerminalReportPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiStructureHighlightPacket;
-import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.item.component.IAddInformation;
-import com.gregtechceu.gtceu.api.item.component.IItemUIFactory;
+import com.gregtechceu.gtceu.api.item.component.IInteractionItem;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
-import com.hepdd.gtmthings.api.gui.widget.TerminalInputWidget;
-import com.lowdragmc.lowdraglib.gui.editor.ColorPattern;
-import com.lowdragmc.lowdraglib.gui.factory.HeldItemUIFactory;
-import com.lowdragmc.lowdraglib.gui.modular.ModularUI;
-import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
-import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
-import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
-import com.lowdragmc.lowdraglib.gui.widget.DraggableScrollableWidgetGroup;
-import com.lowdragmc.lowdraglib.gui.widget.SwitchWidget;
-import com.lowdragmc.lowdraglib.gui.widget.Widget;
-import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraftforge.common.util.Lazy;
-import org.gtlcore.gtlcore.api.gui.BlockMapSelectorWidget;
-import org.gtlcore.gtlcore.api.gui.ExtendLabelWidget;
-import org.gtlcore.gtlcore.common.block.BlockMap;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import org.jetbrains.annotations.Nullable;
 
-public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IAddInformation {
+public final class ShanhaiUltimateTerminalBehavior implements IInteractionItem, IAddInformation {
 
     public static final ShanhaiUltimateTerminalBehavior INSTANCE = new ShanhaiUltimateTerminalBehavior();
     private static final int MAX_HIGHLIGHTS = 256;
-    private static final int MAX_DETAIL_LINES = 12;
+    private static final int MAX_DETAIL_LINES = 3;
     private static final int MODULE_HIGHLIGHT_COLOR = 0x00FFFF;
 
     private final ShanhaiTerminalMaterialService materials = new ShanhaiTerminalMaterialService();
     private final ShanhaiStructureExecutor executor = new ShanhaiStructureExecutor(materials);
 
     private ShanhaiUltimateTerminalBehavior() {}
+
+    /** 設定介面是純客戶端玻璃 Screen；設定經 {@code UltimateTerminalConfigPacket} 寫回伺服器上的手持物。 */
+    @Override
+    public InteractionResultHolder<ItemStack> use(Item item, Level level, Player player, InteractionHand hand) {
+        ItemStack held = player.getItemInHand(hand);
+        if (level.isClientSide) {
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
+                    com.dishanhai.gt_shanhai.client.gui.terminal.UltimateTerminalScreenOpener.open(hand));
+        }
+        return InteractionResultHolder.sidedSuccess(held, level.isClientSide);
+    }
 
     @Override
     public InteractionResult onItemUseFirst(ItemStack itemStack, UseOnContext context) {
@@ -116,6 +118,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             serverPlayer.sendSystemMessage(Component.literal(
                     (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
                             + "，变更 " + result.changed() + " 处"));
+            sendBuildReport(serverPlayer, plan, result);
             return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
         }
 
@@ -131,6 +134,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             serverPlayer.sendSystemMessage(Component.literal(
                     (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
                             + "，变更 " + result.changed() + " 处"));
+            sendBuildReport(serverPlayer, plan, result);
             return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
         }
 
@@ -139,6 +143,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             serverPlayer.sendSystemMessage(Component.literal(
                     (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
                             + "，回收 " + result.changed() + " 处"));
+            sendBuildReport(serverPlayer, plan, result);
             return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
         }
 
@@ -174,6 +179,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         serverPlayer.sendSystemMessage(Component.literal(
                 (result.success() ? "§a" : "§c") + "[山海终端] " + result.message()
                         + "，变更 " + result.changed() + " 处"));
+        sendBuildReport(serverPlayer, plan, result);
         return result.success() ? InteractionResult.SUCCESS : InteractionResult.FAIL;
     }
 
@@ -208,7 +214,8 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
 
     private void requestMissingOrders(ServerPlayer player, ItemStack terminal, ShanhaiStructurePlan plan,
                                       ShanhaiTerminalAeBinding.Context ae) {
-        if (!ShanhaiUltimateTerminalConfig.isAeMode(terminal)) return;
+        if (!ShanhaiUltimateTerminalConfig.isAeMode(terminal)
+                || !ShanhaiUltimateTerminalConfig.isOrderMode(terminal)) return;
         if (ae == null) {
             if (!materials.preflight(plan, player, null).success()) {
                 player.sendSystemMessage(Component.literal(
@@ -256,6 +263,10 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
                 + " §b| 替换 §f" + replace + " §b| 阻塞 §f" + blocked
                 + " §b| 手动 §f" + manual + " §b| 可放仓室 §f" + chambers));
 
+        // 聊天栏只放前几条；完整条目走报告封包，由聊天连结开启界面查看。
+        ShanhaiTerminalReport.Builder report = new ShanhaiTerminalReport.Builder(
+                ShanhaiTerminalReport.Type.SCAN, plan.target().pos(),
+                (int) place, (int) replace, (int) blocked, (int) manual, (int) chambers);
         int lines = 0;
         long expiry = System.currentTimeMillis() + 15000;
         List<ShanhaiStructureHighlightPacket.Marker> highlights = new ArrayList<>();
@@ -274,21 +285,103 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             if (highlights.size() < MAX_HIGHLIGHTS) {
                 highlights.add(new ShanhaiStructureHighlightPacket.Marker(entry.pos(), color));
             }
-            if (lines++ >= MAX_DETAIL_LINES) continue;
-            String desired = chamber.map(selection -> selection.candidate().getHoverName().getString())
+            Component desired = chamber.map(selection -> selection.candidate().getHoverName())
                     .orElseGet(() -> entry.desired().isEmpty()
-                            ? "手动选择" : entry.desired().getHoverName().getString());
+                            ? Component.translatable("message.gt_shanhai.ultimate_terminal.manual_choice")
+                            : entry.desired().getHoverName());
+            // 仓室位置：同一位置所有仓室候选按类型分组，报告按类型完整列出具体仓室。
+            var groups = chamberHint
+                    ? ShanhaiChamberClassifier.classifyAll(entry.candidates()) : null;
+            if (groups == null || groups.isEmpty()) {
+                report.add(entry.pos(),
+                        chamber.map(selection -> selection.type().name()).orElseGet(() -> entry.kind().name()),
+                        chamber.map(selection -> (Component) Component.translatable(selection.type().translationKey()))
+                                .orElseGet(() -> Component.translatable(
+                                        "gui.gt_shanhai.ultimate_terminal.report.kind."
+                                                + entry.kind().name().toLowerCase(java.util.Locale.ROOT))),
+                        color, desired, entry.desired().isEmpty() ? List.of() : List.of(entry.desired()));
+            } else {
+                groups.forEach((type, stacks) -> report.add(entry.pos(), type.name(),
+                        Component.translatable(type.translationKey()), type.color(), joinNames(stacks), stacks));
+            }
+            if (lines++ >= MAX_DETAIL_LINES) continue;
             MutableComponent prefix = chamber
                     .map(selection -> Component.translatable(selection.type().translationKey()))
                     .orElseGet(() -> Component.literal(entry.kind().name()));
             prefix.withStyle(style -> style.withColor(TextColor.fromRgb(color)))
                     .append(Component.literal(" @ " + entry.pos().toShortString() + " ")
                             .withStyle(ChatFormatting.GRAY))
-                    .append(Component.literal(desired).withStyle(ChatFormatting.WHITE));
+                    .append(desired.copy().withStyle(ChatFormatting.WHITE));
             player.sendSystemMessage(prefix);
         }
         ShanhaiStructureHighlightPacket.sendTo(
                 player, plan.target().dimension(), expiry, highlights);
+        sendReportLink(player, report, Math.min(lines, MAX_DETAIL_LINES), lines);
+    }
+
+    private static Component joinNames(List<ItemStack> stacks) {
+        MutableComponent joined = Component.empty();
+        for (int i = 0; i < stacks.size(); i++) {
+            if (i > 0) joined.append(Component.literal("、"));
+            joined.append(stacks.get(i).getHoverName());
+        }
+        return joined;
+    }
+
+    /** 报告有条目没能放进聊天栏时：先送完整报告，再发一行带点击连结的提示。 */
+    private static void sendReportLink(ServerPlayer player, ShanhaiTerminalReport.Builder report, int shown, int total) {
+        if (total <= shown) return;
+        sendReportLink(player, report.build(), Component.translatable(
+                "message.gt_shanhai.ultimate_terminal.report_more", total - shown),
+                "message.gt_shanhai.ultimate_terminal.report_link");
+    }
+
+    public static void sendReportLink(ServerPlayer player, ShanhaiTerminalReport built, MutableComponent prefix, String linkKey) {
+        ShanhaiTerminalReportPacket.sendTo(player, built);
+        player.sendSystemMessage(prefix
+                .append(Component.translatable(linkKey)
+                        .withStyle(style -> style.withColor(ChatFormatting.AQUA).withUnderlined(true)
+                                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,
+                                        ShanhaiTerminalReport.CHAT_COMMAND + built.id()))
+                                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                                        Component.translatable("message.gt_shanhai.ultimate_terminal.report_hover"))))));
+    }
+
+    /** 施工／拆解结果：聊天栏保留一行摘要，逐位置明细走报告封包，点击连结开启施工报告界面。 */
+    private static void sendBuildReport(ServerPlayer player, ShanhaiStructurePlan plan, ShanhaiStructureExecutor.Result result) {
+        if (result.details().isEmpty()) return;
+        java.util.EnumMap<ShanhaiStructureExecutor.Outcome, Integer> counts =
+                new java.util.EnumMap<>(ShanhaiStructureExecutor.Outcome.class);
+        for (var detail : result.details()) counts.merge(detail.outcome(), 1, Integer::sum);
+        int skipped = counts.getOrDefault(ShanhaiStructureExecutor.Outcome.SKIPPED, 0);
+        int dismantled = counts.getOrDefault(ShanhaiStructureExecutor.Outcome.DISMANTLED, 0);
+        int changed = counts.getOrDefault(ShanhaiStructureExecutor.Outcome.PLACED, 0)
+                + counts.getOrDefault(ShanhaiStructureExecutor.Outcome.REPLACED, 0);
+        ShanhaiTerminalReport.Builder report = new ShanhaiTerminalReport.Builder(
+                ShanhaiTerminalReport.Type.BUILD, plan.target().pos(), changed, skipped, dismantled)
+                .summary(Component.literal(result.message()).withStyle(
+                        result.success() ? ChatFormatting.GREEN : ChatFormatting.RED));
+        // 缺材料跳过的最先列出（最需要处理），其次替换、放置、拆解。
+        for (ShanhaiStructureExecutor.Outcome outcome : new ShanhaiStructureExecutor.Outcome[]{
+                ShanhaiStructureExecutor.Outcome.SKIPPED, ShanhaiStructureExecutor.Outcome.REPLACED,
+                ShanhaiStructureExecutor.Outcome.PLACED, ShanhaiStructureExecutor.Outcome.DISMANTLED}) {
+            int color = switch (outcome) {
+                case SKIPPED -> 0xFF5555;
+                case REPLACED -> 0xFFAA00;
+                case PLACED -> 0x55FF55;
+                case DISMANTLED -> 0x55FFFF;
+            };
+            for (var detail : result.details()) {
+                if (detail.outcome() != outcome) continue;
+                report.add(detail.pos(), outcome.name(),
+                        Component.translatable("gui.gt_shanhai.ultimate_terminal.report.outcome."
+                                + outcome.name().toLowerCase(java.util.Locale.ROOT)),
+                        color, detail.name(), detail.stack().isEmpty() ? List.of() : List.of(detail.stack()));
+            }
+        }
+        sendReportLink(player, report.build(), Component.translatable(
+                "message.gt_shanhai.ultimate_terminal.build_report_more"),
+                "message.gt_shanhai.ultimate_terminal.build_report_link");
     }
 
     private void reportModulePositions(ServerPlayer player, ShanhaiStructurePlan plan) {
@@ -301,11 +394,17 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
         }
 
         List<ShanhaiStructureHighlightPacket.Marker> highlights = new ArrayList<>();
+        ShanhaiTerminalReport.Builder report = new ShanhaiTerminalReport.Builder(
+                ShanhaiTerminalReport.Type.MODULES, plan.target().pos(), modulePositions.size());
         for (BlockPos pos : modulePositions) {
             if (highlights.size() < MAX_HIGHLIGHTS) {
                 highlights.add(new ShanhaiStructureHighlightPacket.Marker(
                         pos, MODULE_HIGHLIGHT_COLOR));
             }
+            report.add(pos, "MODULE",
+                    Component.translatable("gui.gt_shanhai.ultimate_terminal.report.kind.module"),
+                    MODULE_HIGHLIGHT_COLOR, player.level().getBlockState(pos).getBlock().getName(),
+                    List.of(new ItemStack(player.level().getBlockState(pos).getBlock())));
         }
 
         if (modulePositions.isEmpty()) {
@@ -317,6 +416,7 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
                 "message.gt_shanhai.ultimate_terminal.module_positions", modulePositions.size()));
         ShanhaiStructureHighlightPacket.sendTo(player, plan.target().dimension(),
                 System.currentTimeMillis() + 15000, highlights);
+        sendReportLink(player, report, 0, modulePositions.size());
     }
 
     private static long count(ShanhaiStructurePlan plan, ShanhaiStructurePlan.Kind kind) {
@@ -337,118 +437,6 @@ public final class ShanhaiUltimateTerminalBehavior implements IItemUIFactory, IA
             case MANUAL -> 0xFFFFFF;
             case CHAMBER_HINT, SATISFIED -> 0xFFFFFF;
         };
-    }
-
-    @Override
-    public ModularUI createUI(HeldItemUIFactory.HeldItemHolder heldItemHolder, Player player) {
-        ItemStack terminal = heldItemHolder.getHeld();
-        return new ModularUI(200, 176, heldItemHolder, player).widget(createSettings(terminal));
-    }
-
-    private Widget createSettings(ItemStack terminal) {
-        WidgetGroup root = new WidgetGroup(0, 0, 200, 136);
-        DraggableScrollableWidgetGroup settings = new DraggableScrollableWidgetGroup(4, 4, 192, 128)
-                .setBackground(GuiTextures.DISPLAY)
-                .setYScrollBarWidth(2)
-                .setYBarStyle((IGuiTexture) null, ColorPattern.T_WHITE.rectTexture().setRadius(1));
-        settings.addWidget(new ExtendLabelWidget(54, 8,
-                Component.translatable("gui.gt_shanhai.ultimate_terminal.title")));
-        settings.addWidget(new ExtendLabelWidget(14, 26,
-                Component.translatable("gui.gt_shanhai.ultimate_terminal.tier_blocks")));
-        settings.addWidget(new ExtendLabelWidget(14, 46,
-                Component.translatable("gui.gt_shanhai.ultimate_terminal.repeat")));
-        settings.addWidget(new TerminalInputWidget(140, 45, 36, 12,
-                () -> ShanhaiUltimateTerminalConfig.getRepeatCount(terminal),
-                value -> ShanhaiUltimateTerminalConfig.setRepeatCount(terminal, value))
-                .setMin(0).setMax(648));
-        settings.addWidget(toggle(terminal, 63, "gui.gt_shanhai.ultimate_terminal.mirror",
-                ShanhaiUltimateTerminalConfig.isMirrored(terminal),
-                value -> ShanhaiUltimateTerminalConfig.setMirrored(terminal, value)));
-        settings.addWidget(toggle(terminal, 83, "gui.gt_shanhai.ultimate_terminal.replace",
-                ShanhaiUltimateTerminalConfig.isReplaceMode(terminal),
-                value -> ShanhaiUltimateTerminalConfig.setReplaceMode(terminal, value)));
-        settings.addWidget(toggle(terminal, 103, "gui.gt_shanhai.ultimate_terminal.absolute_replace",
-                ShanhaiUltimateTerminalConfig.isAbsoluteReplaceMode(terminal),
-                value -> ShanhaiUltimateTerminalConfig.setAbsoluteReplaceMode(terminal, value)));
-        settings.addWidget(toggle(terminal, 123, "gui.gt_shanhai.ultimate_terminal.ae_mode",
-                ShanhaiUltimateTerminalConfig.isAeMode(terminal), value -> {
-                    ShanhaiUltimateTerminalConfig.setAeMode(terminal, value);
-                    if (!value) ShanhaiTerminalCraftingManager.clear(terminal);
-                }));
-        settings.addWidget(toggle(terminal, 143, "gui.gt_shanhai.ultimate_terminal.no_chamber",
-                ShanhaiUltimateTerminalConfig.isNoChamberMode(terminal),
-                value -> ShanhaiUltimateTerminalConfig.setNoChamberMode(terminal, value)));
-        settings.addWidget(toggle(terminal, 163, "gui.gt_shanhai.ultimate_terminal.dismantle",
-                ShanhaiUltimateTerminalConfig.isDismantleMode(terminal),
-                value -> ShanhaiUltimateTerminalConfig.setDismantleMode(terminal, value)));
-        settings.addWidget(toggle(terminal, 183, "gui.gt_shanhai.ultimate_terminal.module_check",
-                ShanhaiUltimateTerminalConfig.isModuleCheckMode(terminal),
-                value -> ShanhaiUltimateTerminalConfig.setModuleCheckMode(terminal, value)));
-
-        ExtendLabelWidget replacement = new ExtendLabelWidget(47, 26, replacementLabel(terminal));
-        BlockMapSelectorWidget selector = new BlockMapSelectorWidget(
-                0, root.getSizeHeight() + 4, settings.getSizeWidth(), (family, tier) -> {
-            if (family == null || tier == null) return;
-            ShanhaiUltimateTerminalConfig.setReplacement(terminal, family, tier);
-            replacement.setComponent(replacementLabel(terminal));
-        }, (family, tier) -> family != null && tier != null
-                && family.equals(ShanhaiUltimateTerminalConfig.getReplacementFamily(terminal))
-                && tier == ShanhaiUltimateTerminalConfig.getReplacementTier(terminal, family));
-        initializeReplacementSelector(selector, terminal);
-        settings.addWidget(new SwitchWidget(14, 26, 30, 16,
-                (click, open) -> selector.showType(open))
-                .setHoverTooltips(Component.translatable("gui.gt_shanhai.ultimate_terminal.replacement")));
-        settings.addWidget(replacement);
-        root.addWidget(settings).addWidget(selector)
-                .setBackground(GuiTextures.BACKGROUND_INVERSE);
-        return root;
-    }
-
-    private Widget toggle(ItemStack terminal, int y, String key, boolean initial,
-                          java.util.function.Consumer<Boolean> setter) {
-        WidgetGroup row = new WidgetGroup(0, y, 180, 18);
-        row.addWidget(new ExtendLabelWidget(14, 3, Component.translatable(key)));
-        row.addWidget(new SwitchWidget(140, 0, 36, 14,
-                (click, pressed) -> setter.accept(pressed))
-                .setPressed(initial)
-                .setTexture(new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture("OFF")),
-                        new GuiTextureGroup(GuiTextures.BUTTON, new TextTexture("ON"))));
-        return row;
-    }
-
-    private Component replacementLabel(ItemStack terminal) {
-        String family = ShanhaiUltimateTerminalConfig.getReplacementFamily(terminal);
-        Lazy<Block[]> lazyBlocks = BlockMap.tierBlockMap.get(family);
-        if (family.isEmpty() || lazyBlocks == null) {
-            return Component.translatable("gui.gt_shanhai.ultimate_terminal.replacement_none");
-        }
-        Block[] blocks = lazyBlocks.get();
-        if (blocks.length == 0) {
-            return Component.translatable("gui.gt_shanhai.ultimate_terminal.replacement_none");
-        }
-        int tier = Math.min(ShanhaiUltimateTerminalConfig.getReplacementTier(terminal, family), blocks.length - 1);
-        try {
-            return Component.literal("(")
-                    .append(BlockMapSelectorWidget.getBlock(family))
-                    .append(Component.literal(" : "))
-                    .append(blocks[tier].getName())
-                    .append(Component.literal(")"));
-        } catch (IllegalStateException ignored) {
-            return Component.translatable("gui.gt_shanhai.ultimate_terminal.replacement_none");
-        }
-    }
-
-    private void initializeReplacementSelector(BlockMapSelectorWidget selector, ItemStack terminal) {
-        String family = ShanhaiUltimateTerminalConfig.getReplacementFamily(terminal);
-        Lazy<Block[]> lazyBlocks = BlockMap.tierBlockMap.get(family);
-        if (family.isEmpty() || lazyBlocks == null || lazyBlocks.get().length == 0) return;
-
-        ItemStack selectorState = terminal.copy();
-        CompoundTag selectorTag = selectorState.getOrCreateTag();
-        selectorTag.putString("blocks", family);
-        selectorTag.putInt("Tier", Math.min(
-                ShanhaiUltimateTerminalConfig.getReplacementTier(terminal, family), lazyBlocks.get().length - 1));
-        selector.setInit(selectorState);
     }
 
     @Override

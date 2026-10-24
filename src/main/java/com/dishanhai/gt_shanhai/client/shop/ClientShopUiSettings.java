@@ -18,6 +18,10 @@ public final class ClientShopUiSettings {
     public static final String PREVIEW_GRID = "grid";
     /** 获取预览：条形（名称列表，默认）。奖励表右侧是概率，获得和花费的右侧是数量。 */
     public static final String PREVIEW_BAR = "bar";
+    /** 界面主题：经典金框（默认）。 */
+    public static final String THEME_CLASSIC = "classic";
+    /** 界面主题：与山海样板生成器相同的动态玻璃。 */
+    public static final String THEME_GLASS = "glass";
     private static final int MIN_CARD_WIDTH = 48;
     private static final int MAX_CARD_WIDTH = 120;
     private static final int MIN_CARD_HEIGHT = 28;
@@ -43,8 +47,22 @@ public final class ClientShopUiSettings {
     private static boolean uiSounds = true;
     private static String pickerSort = "default";
     private static boolean pickerGroupByMod = false;
+    private static String shopTheme = THEME_CLASSIC;
+    /** 初始化向导（ShopWelcomeScreen）是否已走完或跳过。新客户端没有配置文件 = 未完成；旧配置文件没这个键 = 老玩家，视为已完成。 */
+    private static boolean setupDone;
 
     private ClientShopUiSettings() {}
+
+    public static boolean setupDone() {
+        ensureLoaded();
+        return setupDone;
+    }
+
+    public static synchronized void setSetupDone(boolean done) {
+        ensureLoaded();
+        setupDone = done;
+        save();
+    }
 
     public static int cardWidth() {
         ensureLoaded();
@@ -131,6 +149,26 @@ public final class ClientShopUiSettings {
         save();
     }
 
+    /** 商店界面主题（见 {@code ShopTheme}）。只存在这台客户端。 */
+    public static String shopTheme() {
+        ensureLoaded();
+        return shopTheme;
+    }
+
+    public static boolean glassTheme() {
+        return THEME_GLASS.equals(shopTheme());
+    }
+
+    public static synchronized void setShopTheme(String theme) {
+        ensureLoaded();
+        shopTheme = normalizeTheme(theme);
+        save();
+    }
+
+    private static String normalizeTheme(String theme) {
+        return THEME_GLASS.equals(theme) ? THEME_GLASS : THEME_CLASSIC;
+    }
+
     public static String pickerSort() {
         ensureLoaded();
         return pickerSort;
@@ -172,10 +210,13 @@ public final class ClientShopUiSettings {
         uiSounds = true;
         pickerSort = "default";
         pickerGroupByMod = false;
+        shopTheme = THEME_CLASSIC;
+        setupDone = false;
         if (!settingsFile().exists()) return;
         try (java.io.Reader reader = new java.io.InputStreamReader(
                 new java.io.FileInputStream(settingsFile()), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+            setupDone = !root.has("setupDone") || root.get("setupDone").getAsBoolean();
             if (root.has("cardWidth")) cardWidth = clampCardWidth(root.get("cardWidth").getAsInt());
             if (root.has("cardHeight")) cardHeight = clampCardHeight(root.get("cardHeight").getAsInt());
             // 没写过这个键的旧文件保持新默认（条形）。只有明确存过 grid 才回到旧版方格。
@@ -196,6 +237,10 @@ public final class ClientShopUiSettings {
             if (root.has("pickerGroupByMod") && root.get("pickerGroupByMod").isJsonPrimitive()
                     && root.getAsJsonPrimitive("pickerGroupByMod").isBoolean()) {
                 pickerGroupByMod = root.get("pickerGroupByMod").getAsBoolean();
+            }
+            if (root.has("shopTheme") && root.get("shopTheme").isJsonPrimitive()
+                    && root.getAsJsonPrimitive("shopTheme").isString()) {
+                shopTheme = normalizeTheme(root.get("shopTheme").getAsString());
             }
         } catch (Exception e) {
             GTDishanhaiMod.LOGGER.warn("[Shop] 读取 shop_client_ui.json 失败: {}", e.getMessage());
@@ -228,6 +273,8 @@ public final class ClientShopUiSettings {
             root.addProperty("uiSounds", uiSounds);
             root.addProperty("pickerSort", pickerSort);
             root.addProperty("pickerGroupByMod", pickerGroupByMod);
+            root.addProperty("shopTheme", shopTheme);
+            root.addProperty("setupDone", setupDone);
             try (OutputStreamWriter writer = new OutputStreamWriter(
                     new FileOutputStream(settingsFile()), StandardCharsets.UTF_8)) {
                 writer.write(GSON.toJson(root));

@@ -24,6 +24,18 @@ public final class ShopGlassStyle {
     /** 加载占位：呼吸式强度变化下只保留颗粒和一点色调。 */
     public static final ShopGlassStyle LOADING = new ShopGlassStyle(
             0.78f, 0.90f, 1.0f, 0.06f, 0f, 0.030f, 0.010f, 0f, 0f, 0f, 0f, 0f);
+    /** 商店玻璃主题的毛玻璃底：只糊面板后面的世界，叠一点冷色调与提亮，亮边由面板自己画。 */
+    public static final ShopGlassStyle BACKDROP = new ShopGlassStyle(
+            0.70f, 0.85f, 1.0f, 0.12f, 0.25f, 0.020f, 0.030f, 0f, 0f, 0f, 0f, 0f);
+    /**
+     * 玻璃主题的区域分隔（余额栏、网格区、详情区）：在根板毛玻璃之上再糊一层，色调压向深海军蓝、去饱和，
+     * 区域比根板暗一档，分区边界一眼可见，区域里的浅色字也更清楚。
+     */
+    public static final ShopGlassStyle REGION = new ShopGlassStyle(
+            0.05f, 0.09f, 0.15f, 0.30f, -0.30f, 0.015f, 0f, 0f, 0f, 0f, 0f, 0f);
+    /** 玻璃主题的按钮/页签底：压得比区域更深、几乎去色，背后再花的画面也不会和按钮字抢对比度。 */
+    public static final ShopGlassStyle CONTROL = new ShopGlassStyle(
+            0.04f, 0.07f, 0.12f, 0.50f, -0.45f, 0.012f, 0f, 0f, 0f, 0f, 0f, 0f);
     /** 完全不加玻璃层，等价于旧的纯高斯。点击波用它，波自己带折射和高光。 */
     public static final ShopGlassStyle NONE = new ShopGlassStyle(
             0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);

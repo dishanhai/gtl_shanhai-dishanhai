@@ -437,6 +437,10 @@ public final class ShanhaiTerminalMaterialService {
         return refundFluidAmount(player, ae, fluid, amount);
     }
 
+    public boolean canRefundFluidForStructure(ServerPlayer player, Context ae, Fluid fluid, long amount) {
+        return canRefundFluidAmount(player, ae, fluid, amount);
+    }
+
     private ItemStack returnToPlayer(ServerPlayer player, ItemStack stack) {
         if (stack.isEmpty()) return ItemStack.EMPTY;
         IItemHandler root = player.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
@@ -469,13 +473,35 @@ public final class ShanhaiTerminalMaterialService {
 
     private boolean refundFluidAmount(ServerPlayer player, Context ae, Fluid fluid, long amount) {
         if (fluid == null || fluid == Fluids.EMPTY || amount <= 0) return true;
+        if (!canRefundFluidAmount(player, ae, fluid, amount)) return false;
         long remaining = amount;
         long returnedToAe = returnFluidToAe(ae, fluid, remaining);
         remaining -= returnedToAe;
         while (remaining > 0) {
             int chunk = (int) Math.min(remaining, FluidType.BUCKET_VOLUME);
-            if (!returnFluidToPlayer(player, fluid, chunk)) return false;
-            remaining -= chunk;
+            int returned = returnFluidToPlayer(player, fluid, chunk);
+            if (returned <= 0) return false;
+            remaining -= returned;
+        }
+        return true;
+    }
+
+    private boolean canRefundFluidAmount(ServerPlayer player, Context ae, Fluid fluid, long amount) {
+        if (fluid == null || fluid == Fluids.EMPTY || amount <= 0) return true;
+        long accepted = ae == null ? 0 : ae.storage().insert(
+                AEFluidKey.of(fluid), amount, Actionable.SIMULATE, ae.source());
+        long remaining = amount - Math.max(0, Math.min(amount, accepted));
+        if (remaining == 0) return true;
+
+        // 在物品副本上累計填充，讓同一容器的容量只計算一次，且不改動真實背包。
+        IItemHandler root = player.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
+        ItemStackHandler shadow = shadowInventory(root);
+        while (remaining > 0) {
+            int chunk = (int) Math.min(remaining, FluidType.BUCKET_VOLUME);
+            int filled = fillFluidRecursive(shadow, fluid, chunk,
+                    Collections.newSetFromMap(new IdentityHashMap<>()));
+            if (filled <= 0) return false;
+            remaining -= filled;
         }
         return true;
     }
@@ -488,25 +514,26 @@ public final class ShanhaiTerminalMaterialService {
         return ae.storage().insert(key, Math.min(accepted, amount), Actionable.MODULATE, ae.source());
     }
 
-    private boolean returnFluidToPlayer(ServerPlayer player, Fluid fluid, int amount) {
+    private int returnFluidToPlayer(ServerPlayer player, Fluid fluid, int amount) {
         IItemHandler root = player.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
-        return fillFluidRecursive(root, fluid, amount, Collections.newSetFromMap(new IdentityHashMap<>())) >= amount;
+        return fillFluidRecursive(root, fluid, amount, Collections.newSetFromMap(new IdentityHashMap<>()));
     }
 
     private int fillFluidRecursive(IItemHandler handler, Fluid fluid, int amount, Set<IItemHandler> visited) {
         if (handler == null || amount <= 0 || !visited.add(handler)) return 0;
-        for (int slot = 0; slot < handler.getSlots(); slot++) {
+        int filled = 0;
+        for (int slot = 0; slot < handler.getSlots() && filled < amount; slot++) {
             ItemStack stack = handler.getStackInSlot(slot);
-            FluidContainerMutation filled = fillFluidIntoStack(stack, fluid, amount);
-            if (filled.amount() > 0) {
-                replaceContainer(handler, slot, filled.container());
-                return (int) filled.amount();
+            FluidContainerMutation mutation = fillFluidIntoStack(stack, fluid, amount - filled);
+            if (mutation.amount() > 0) {
+                replaceContainer(handler, slot, mutation.container());
+                filled += (int) mutation.amount();
+                continue;
             }
             IItemHandler nested = stack.getCapability(ForgeCapabilities.ITEM_HANDLER).resolve().orElse(null);
-            int nestedFilled = fillFluidRecursive(nested, fluid, amount, visited);
-            if (nestedFilled > 0) return nestedFilled;
+            filled += fillFluidRecursive(nested, fluid, amount - filled, visited);
         }
-        return 0;
+        return filled;
     }
 
     private FluidContainerMutation fillFluidIntoStack(ItemStack stack, Fluid fluid, int amount) {

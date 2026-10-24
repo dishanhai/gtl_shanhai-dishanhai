@@ -92,6 +92,32 @@ object GlassBlur {
         )
     }
 
+    // 毛玻璃底的模糊半径（虚拟 GUI 单位）：比换页的方向模糊更大，背景要糊到看不清细节只剩色块
+    private const val BACKDROP_RADIUS_VIRTUAL = 9f
+
+    /**
+     * 毛玻璃底：立刻把 [rect] 后面已经画好的世界/背景糊掉（见 [ShopGaussBlur.blurNow]），
+     * 必须在面板本体画之前调用。商店玻璃主题每帧用一次。
+     */
+    @JvmStatic
+    fun backdrop(graphics: GuiGraphics, rect: GuiRect) = backdrop(graphics, rect, 1f)
+
+    /** 同上，[strength] 0..1 给弹层开关时随弹簧淡入淡出。 */
+    @JvmStatic
+    fun backdrop(graphics: GuiGraphics, rect: GuiRect, strength: Float) =
+        backdrop(graphics, rect, strength, ShopGlassStyle.BACKDROP, BACKDROP_RADIUS_VIRTUAL)
+
+    /** 同上，自选玻璃样式与半径（虚拟 GUI 单位）：按钮/区域在根板毛玻璃之上再压一层深色调做对比度。 */
+    @JvmStatic
+    fun backdrop(graphics: GuiGraphics, rect: GuiRect, strength: Float, style: ShopGlassStyle, radiusVirtual: Float) {
+        if (rect.isEmpty || strength <= MIN_STRENGTH || !ShopGaussBlur.isReady()) return
+        val view = capture(graphics) ?: return
+        val px = view.toPixels(rect)
+        if (px.isEmpty) return
+        ShopGaussBlur.blurNow(graphics, px.x, px.y, px.w, px.h, strength.coerceIn(0f, 1f),
+            radiusVirtual * view.pixelScale, style)
+    }
+
     /** 一帧内的换算上下文：framebuffer 尺寸、GUI 尺寸，以及当前 pose 的缩放与平移。 */
     private class View(
         val fbW: Int,

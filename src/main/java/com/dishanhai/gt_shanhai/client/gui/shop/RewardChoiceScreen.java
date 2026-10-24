@@ -29,8 +29,6 @@ public class RewardChoiceScreen extends ScaledScreen {
 
     private static final int GOLD = -22016;
     private static final int GOLD_DARK = -7710208;
-    private static final int PANEL_BG = -267382768;
-    private static final int PANEL_INNER = -266724838;
     private static final int GRAY = -5592406;
     private static final int WHITE = -1;
     private static final int BTN_BG = -14935012;
@@ -142,12 +140,15 @@ public class RewardChoiceScreen extends ScaledScreen {
     }
 
     @Override
+    public void renderBackground(GuiGraphics g) {
+        if (!ShopTheme.current().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
+    }
+
+    @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
         ui.frame(mx, my);
-        g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
-        g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
-        g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
-        g.fill(left + 5, top + 18, left + panelWidth - 5, top + panelHeight - 5, PANEL_INNER);
+        ShopTheme.current().rootPanel(g, left, top, panelWidth, panelHeight,
+                left + 5, top + 18, panelWidth - 10, panelHeight - 23);
 
         g.drawString(this.font, "§6选择奖励", left + 8, top + 5, GOLD, true);
         for (int i = 0; i < subtitle.size(); i++) {

@@ -97,8 +97,8 @@ class ShanhaiTerminalStructureSourceTest {
         assertTrue(planner.contains("!noChambers && entry.chamberCapable()"));
         assertTrue(planner.contains("ShanhaiStructurePlan.Kind.CHAMBER_HINT"));
         assertTrue(planner.contains("ordinaryCandidates"));
-        assertTrue(behavior.contains("gui.gt_shanhai.ultimate_terminal.no_chamber"));
-        assertTrue(behavior.contains("ShanhaiUltimateTerminalConfig.setNoChamberMode"));
+        assertTrue(Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/terminal/UltimateTerminalScreen.java")).contains("\"no_chamber\""));
+        assertTrue(Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/network/UltimateTerminalConfigPacket.java")).contains("ShanhaiUltimateTerminalConfig.setNoChamberMode"));
         assertTrue(lang.contains("\"gui.gt_shanhai.ultimate_terminal.no_chamber\": \"无仓室模式\""));
     }
 
@@ -124,7 +124,7 @@ class ShanhaiTerminalStructureSourceTest {
         assertTrue(behavior.contains("ShanhaiModuleClassifier.hostModulePositions("));
         assertTrue(behavior.contains("LinkedHashSet<BlockPos> modulePositions"));
         assertTrue(behavior.contains("MODULE_HIGHLIGHT_COLOR = 0x00FFFF"));
-        assertTrue(behavior.contains("gui.gt_shanhai.ultimate_terminal.module_check"));
+        assertTrue(Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/terminal/UltimateTerminalScreen.java")).contains("\"module_check\""));
         assertTrue(lang.contains("\"gui.gt_shanhai.ultimate_terminal.module_check\": \"模块检查\""));
     }
 
@@ -144,8 +144,8 @@ class ShanhaiTerminalStructureSourceTest {
         assertTrue(planner.contains("ShanhaiUltimateTerminalConfig.isAbsoluteReplaceMode(terminal)"));
         assertTrue(planner.contains("!desired.isEmpty()"));
         assertTrue(planner.contains("ShanhaiStructurePlan.Kind.FORCE_REPLACE"));
-        assertTrue(behavior.contains("gui.gt_shanhai.ultimate_terminal.absolute_replace"));
-        assertTrue(behavior.contains("ShanhaiUltimateTerminalConfig.setAbsoluteReplaceMode"));
+        assertTrue(Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/terminal/UltimateTerminalScreen.java")).contains("\"absolute_replace\""));
+        assertTrue(Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/network/UltimateTerminalConfigPacket.java")).contains("ShanhaiUltimateTerminalConfig.setAbsoluteReplaceMode"));
         assertTrue(lang.contains("\"gui.gt_shanhai.ultimate_terminal.absolute_replace\": \"绝对替换模式\""));
     }
 }

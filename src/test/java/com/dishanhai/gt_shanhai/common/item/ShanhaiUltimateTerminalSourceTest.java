@@ -130,15 +130,17 @@ class ShanhaiUltimateTerminalSourceTest {
 
     @Test
     void replacementSelectorMatchesTheOriginalFieldWithoutSharingItsPersistentNbt() throws Exception {
-        String behavior = Files.readString(BEHAVIOR);
+        String screen = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/client/gui/terminal/UltimateTerminalScreen.java"));
+        String packet = Files.readString(Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/network/UltimateTerminalConfigPacket.java"));
 
-        assertTrue(behavior.contains("gui.gt_shanhai.ultimate_terminal.tier_blocks"));
-        assertTrue(behavior.contains("BlockMapSelectorWidget.getBlock(family)"));
-        assertTrue(behavior.contains("blocks[tier].getName()"));
-        assertTrue(behavior.contains("ItemStack selectorState = terminal.copy()"));
-        assertTrue(behavior.contains("selector.setInit(selectorState)"));
-        assertTrue(behavior.contains("ShanhaiUltimateTerminalConfig.setReplacement(terminal, family, tier)"));
-        assertFalse(behavior.contains("Component.literal(family + \" : \""));
+        assertTrue(screen.contains("tr(\"tier_blocks\")"));
+        assertTrue(screen.contains("BlockMapSelectorWidget.getBlock(key)"));
+        assertTrue(screen.contains("getName()"));
+        assertTrue(screen.contains("ItemStack copy = Minecraft.getInstance().player.getItemInHand(hand).copy()"));
+        assertTrue(packet.contains("ShanhaiUltimateTerminalConfig.setReplacement(terminal, packet.text, packet.value)"));
+        assertFalse(screen.contains("Component.literal(family + \" : \""));
     }
 
     @Test
@@ -158,6 +160,17 @@ class ShanhaiUltimateTerminalSourceTest {
         assertTrue(rightClick >= 0 && scanOnly > rightClick && report > scanOnly);
         assertFalse(behavior.substring(rightClick, scanOnly).contains("reportPlan("));
         assertTrue(behavior.substring(scanOnly, report).contains("reportPlan("));
+    }
+
+    @Test
+    void leftClickOnlyScansTheStartActionAndCancelsEveryMiningPhase() throws Exception {
+        String interaction = Files.readString(INTERACTION);
+        int cancel = interaction.indexOf("event.setCanceled(true)");
+        int start = interaction.indexOf("event.getAction() != PlayerInteractEvent.LeftClickBlock.Action.START");
+        int scan = interaction.indexOf("ShanhaiUltimateTerminalBehavior.INSTANCE.scanOnly");
+
+        assertTrue(start > cancel, "STOP / ABORT 仍須取消挖掘，但不得重複掃描");
+        assertTrue(scan > start, "只有 START 可以執行掃描及發送報告");
     }
 
     @Test

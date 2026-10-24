@@ -32,18 +32,10 @@ import java.util.List;
 public class ExchangeScreen extends ScaledScreen {
 
     private static final int GOLD = -22016;
-    private static final int GOLD_DARK = -7710208;
-    private static final int PANEL_BG = -267382768;
-    private static final int PANEL_INNER = -266724838;
-    private static final int BOX_BG = -300674028;
-    private static final int ROW_BG = -300476649;
-    private static final int SELECT_BG = -299421158;
     private static final int GREEN = -11141291;
     private static final int CYAN = -11141121;
     private static final int GRAY = -5592406;
     private static final int WHITE = -1;
-    private static final int BTN_BG = -14935012;
-    private static final int BTN_HOVER = -12303292;
 
     private static final int TARGET_W = 980;
     private static final int TARGET_H = 470;
@@ -62,6 +54,8 @@ public class ExchangeScreen extends ScaledScreen {
     private final Spring openMotion = Spring.opening(Spring.PANEL);
 
     private int left, top, panelWidth, panelHeight;
+    /** 本帧主题（结构色、毛玻璃），每帧开头按商店设置取一次。 */
+    private ShopTheme theme = ShopTheme.CLASSIC;
 
     public ExchangeScreen(ShopScreen parent, boolean canEdit) {
         super(Component.literal("兑换中心"));
@@ -127,6 +121,7 @@ public class ExchangeScreen extends ScaledScreen {
     // ===== 渲染 =====
     @Override
     protected void renderScaledBackground(GuiGraphics g, int mx, int my, float pt) {
+        theme = ShopTheme.current();
         openMotion.update(System.currentTimeMillis());
         if (timesBox != null) {
             timesBox.setVisible(selected != null);
@@ -140,10 +135,8 @@ public class ExchangeScreen extends ScaledScreen {
             GuiRenderUtil.scaleAt(g, left + panelWidth / 2f, top + panelHeight / 2f, openScale);
         }
         try {
-        g.fill(left, top, left + panelWidth, top + panelHeight, GOLD_DARK);
-        g.fill(left + 1, top + 1, left + panelWidth - 1, top + panelHeight - 1, GOLD);
-        g.fill(left + 2, top + 2, left + panelWidth - 2, top + panelHeight - 2, PANEL_BG);
-        g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
+        theme.rootPanel(g, left, top, panelWidth, panelHeight,
+                left + 6, top + TOP_BAR_H + 6, panelWidth - 12, panelHeight - TOP_BAR_H - 12);
 
         String spark = formatBig(ClientWalletAccount.getDigital());
         g.drawString(this.font, "§6兑换中心 §7· 星火 §e" + spark, left + 10, top + 5, GOLD, true);
@@ -160,7 +153,7 @@ public class ExchangeScreen extends ScaledScreen {
 
     private void drawList(GuiGraphics g, int mx, int my) {
         int lx = listLeft(), ly = listTop(), lw = LIST_W, lh = listHeight();
-        g.fill(lx, ly, lx + lw, ly + lh, BOX_BG);
+        theme.region(g, lx, ly, lw, lh);
         g.enableScissor(
                 (int) (lx * guiScale) + offsetX, (int) (ly * guiScale) + offsetY,
                 (int) ((lx + lw) * guiScale) + offsetX, (int) ((ly + lh) * guiScale) + offsetY);
@@ -174,7 +167,7 @@ public class ExchangeScreen extends ScaledScreen {
             if (ry + ROW_H <= ly || ry >= ly + lh) continue;
             boolean sel = e == selected;
             boolean hover = GuiRenderUtil.isHovering(mx, my, lx + 1, ry, lw - 2, ROW_H - 1);
-            g.fill(lx + 1, ry, lx + lw - 1, ry + ROW_H - 1, sel ? SELECT_BG : (hover ? ROW_BG : 0));
+            g.fill(lx + 1, ry, lx + lw - 1, ry + ROW_H - 1, sel ? theme.selectBg : (hover ? theme.rowBg : 0));
             String name = GuiRenderUtil.trimText(this.font, e.displayName(), lw - 10);
             g.drawString(this.font, name, lx + 5, ry + 2, sel ? GOLD : WHITE, true);
             String summary = GuiRenderUtil.trimText(this.font, sideSummary(e.getCost()) + " §7→ " + sideSummary(e.getResult()), lw - 10);
@@ -196,7 +189,7 @@ public class ExchangeScreen extends ScaledScreen {
 
     private void drawDetail(GuiGraphics g, int mx, int my) {
         int dx = detailX(), dy = listTop(), dw = detailW(), dh = listHeight();
-        g.fill(dx, dy, dx + dw, dy + dh, BOX_BG);
+        theme.region(g, dx, dy, dw, dh);
         int cx = dx + 8;
         if (selected == null) {
             g.drawCenteredString(this.font, "§7← 选择兑换条目", dx + dw / 2, dy + 18, GRAY);
@@ -356,9 +349,13 @@ public class ExchangeScreen extends ScaledScreen {
     // ===== 小工具 =====
     private void drawButton(GuiGraphics g, int x, int y, int w, int h, String label, int mx, int my) {
         boolean hover = GuiRenderUtil.isHovering(mx, my, x, y, w, h);
-        g.fill(x, y, x + w, y + h, GOLD_DARK);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hover ? BTN_HOVER : BTN_BG);
-        g.drawCenteredString(this.font, label, x + w / 2, y + (h - 8) / 2, WHITE);
+        theme.button(g, this.font, x, y, w, h, label,
+                hover && theme.glass ? theme.frame : theme.frameDark, hover ? theme.buttonHover : theme.buttonBg, WHITE);
+    }
+
+    @Override
+    public void renderBackground(GuiGraphics g) {
+        if (!ShopTheme.current().renderBackdropDim(g, this.width, this.height)) super.renderBackground(g);
     }
 
     private static String compactStep(long step) {

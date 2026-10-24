@@ -36,6 +36,17 @@ class ShopGaussBlurUvTest {
     }
 
     @Test
+    void immediateBlurIsClippedToTheCallersScissorBox() {
+        // 200 高的 framebuffer，GL 裁剪框自底 y=100、高 50 → 左上原点 y 50..100；
+        // 按钮 (10,80) 30x40 只有 y 80..100 在框里
+        int[] box = {0, 100, 100, 50};
+        assertArrayEquals(new int[]{10, 80, 30, 20}, ShopGaussBlur.clipToScissor(10, 80, 30, 40, box, 200));
+        // 完全滚出裁剪框的按钮不糊
+        int[] out = ShopGaussBlur.clipToScissor(10, 150, 30, 10, box, 200);
+        assertEquals(0, out[2] * out[3]);
+    }
+
+    @Test
     void returnsEmptyForDegenerateInput() {
         assertEquals(0f, ShopGaussBlur.toUvRect(0, 0, 0, 10, 100, 100)[2], 1e-6f);
         assertEquals(0f, ShopGaussBlur.toUvRect(0, 0, 10, 10, 0, 100)[2], 1e-6f);

@@ -130,6 +130,50 @@ class ShanhaiTerminalExecutionSourceTest {
     }
 
     @Test
+    void dismantleOnlyReservesAndRemovesRecognizedStructureParts() throws Exception {
+        String executor = Files.readString(EXECUTOR);
+        int dismantle = executor.indexOf("public Result dismantle(");
+        String body = executor.substring(dismantle, executor.indexOf("private Result validateBuildHeight", dismantle));
+
+        assertTrue(body.contains(".filter(ShanhaiStructurePlan.Entry::canDismantle)"),
+                "容量預檢必須先排除未替換的草方塊等非結構方塊");
+        assertTrue(body.contains("if (!entry.canDismantle()) continue;"),
+                "實際拆除必須使用同一個結構部件判定");
+    }
+
+    @Test
+    void dismantleEligibilityRequiresPositiveStructureMembership() throws Exception {
+        String plan = Files.readString(EXECUTOR.resolveSibling("ShanhaiStructurePlan.java"));
+
+        assertTrue(plan.contains("boolean currentMatchesStructure"));
+        assertTrue(plan.contains("public boolean canDismantle()"));
+        assertTrue(plan.contains("return currentMatchesStructure && !current.isEmpty() && kind != Kind.MANUAL;"),
+                "有方塊、或被標記為待強制替換／倉室提示，都不代表它屬於結構");
+    }
+
+    @Test
+    void chamberHintsPreserveMembershipInsteadOfTreatingTheWholeFootprintAsStructure() throws Exception {
+        String planner = Files.readString(EXECUTOR.resolveSibling("ShanhaiStructurePlanner.java"));
+
+        assertTrue(planner.contains("candidateItems, chamberCapable, currentMatchesStructure"),
+                "只有候選部件或已識別的同系列升級部件可回收");
+        String preserved = "entry.candidates(), true, entry.currentMatchesStructure()";
+        int first = planner.indexOf(preserved);
+        assertTrue(first >= 0 && planner.indexOf(preserved, first + 1) > first,
+                "轉成倉室提示時仍須保留原有結構匹配結果");
+        assertFalse(planner.contains("chamberCapable, currentAllowed || kind == ShanhaiStructurePlan.Kind.FORCE_REPLACE"));
+    }
+
+    @Test
+    void dismantleRecognizesBothOldAndSelectedReplacementFamilyTiers() throws Exception {
+        String planner = Files.readString(EXECUTOR.resolveSibling("ShanhaiStructurePlanner.java"));
+
+        assertTrue(planner.contains("boolean currentMatchesStructure = currentAllowed"));
+        assertTrue(planner.contains("|| (replacementApplies && contains(replacementFamily, currentBlock))"),
+                "已完成升級的目標等級即使不在原候選列表，也仍是結構部件");
+    }
+
+    @Test
     void creativePlayersBuildImmediatelyWithoutInventoryOrAeResources() throws Exception {
         String behavior = Files.readString(BEHAVIOR);
         String executor = Files.readString(EXECUTOR);
@@ -202,7 +246,7 @@ class ShanhaiTerminalExecutionSourceTest {
         assertTrue(behavior.contains("executor.execute(serverPlayer, plan, ae)"));
         assertTrue(behavior.contains("executor.dismantle(serverPlayer, plan, ae)"));
         assertTrue(behavior.contains("ShanhaiTerminalCraftingManager.clear(terminal)"));
-        assertTrue(behavior.contains("gui.gt_shanhai.ultimate_terminal.ae_mode"));
+        assertTrue(Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/client/gui/terminal/UltimateTerminalScreen.java")).contains("\"ae_mode\""));
         assertTrue(lang.contains("\"gui.gt_shanhai.ultimate_terminal.ae_mode\": \"AE 模式\""));
     }
 
@@ -224,6 +268,52 @@ class ShanhaiTerminalExecutionSourceTest {
         assertTrue(creativeBuild.contains("entry.kind() == ShanhaiStructurePlan.Kind.FORCE_REPLACE"));
         assertTrue(creativeBuild.contains("storeDismantled(player, ae, forcedReturns)"));
         assertTrue(creativeBuild.contains("storeDismantled(player, null, forcedReturns)"));
+    }
+
+    @Test
+    void fluidRefundChecksCapacityBeforeDepositingAndAccumulatesContainers() throws Exception {
+        String materials = Files.readString(MATERIALS);
+        int refund = materials.indexOf("private boolean refundFluidAmount(");
+        String refundBody = materials.substring(refund, materials.indexOf("private long returnFluidToAe", refund));
+        int capacityCheck = refundBody.indexOf("canRefundFluidAmount(player, ae, fluid, amount)");
+        assertTrue(capacityCheck >= 0 && capacityCheck < refundBody.indexOf("returnFluidToAe("),
+                "回收空間不足時不可先部分存入 AE，否則世界回滾會重複舊流體");
+        assertTrue(refundBody.contains("remaining -= returned"), "只能扣除實際回收量");
+
+        int fill = materials.indexOf("private int fillFluidRecursive(");
+        String fillBody = materials.substring(fill, materials.indexOf("private FluidContainerMutation fillFluidIntoStack", fill));
+        assertTrue(fillBody.contains("filled +="), "同一批流體需累計多個容器的接收量");
+        assertFalse(fillBody.contains("return (int) filled.amount()"), "第一個容器僅收一部分時不能提前結束");
+        assertFalse(fillBody.contains("if (nestedFilled > 0) return nestedFilled"));
+    }
+
+    @Test
+    void creativeFluidReplacementAlsoChecksCapacityBeforeRemovingTheOldBlock() throws Exception {
+        String executor = Files.readString(EXECUTOR);
+        int creative = executor.indexOf("public Result executeCreative(");
+        String creativeBody = executor.substring(creative, executor.indexOf("public Result dismantle("));
+        int capacityCheck = creativeBody.indexOf("materials.canRefundFluidForStructure(");
+        assertTrue(capacityCheck >= 0 && capacityCheck < creativeBody.indexOf("removeExisting("));
+    }
+
+    @Test
+    void rollbackRestoresTheScannedBlockStateInsteadOfTheDefaultFacing() throws Exception {
+        String executor = Files.readString(EXECUTOR);
+        int restore = executor.indexOf("private void restoreExisting(");
+        String restoreBody = executor.substring(restore, executor.indexOf("private boolean place(", restore));
+        assertTrue(restoreBody.contains("entry.currentState()"));
+        assertFalse(restoreBody.contains("block.defaultBlockState()"),
+                "回滾必須保留原有朝向與其他方塊屬性");
+    }
+
+    @Test
+    void rollbackAfterSuccessfulPlacementRefundsTheConsumedMaterial() throws Exception {
+        String executor = Files.readString(EXECUTOR);
+        int fluidRollback = executor.indexOf("if (removedFluid != Fluids.EMPTY && !restoreFluid(");
+        String rollbackBody = executor.substring(fluidRollback, executor.indexOf("changed++;", fluidRollback));
+        assertTrue(rollbackBody.contains("materials.refund(player, ae, entry.desired().copyWithCount(1))"),
+                "成功放置已消耗 material，回滾必須按施工計畫退還一個材料");
+        assertFalse(rollbackBody.contains("materials.refund(player, ae, material)"));
     }
 
     private static int count(String value, String needle) {

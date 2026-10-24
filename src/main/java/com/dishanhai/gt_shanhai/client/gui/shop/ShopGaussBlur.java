@@ -11,6 +11,7 @@ import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.PostPass;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.client.event.ScreenEvent;
+import org.lwjgl.opengl.GL11;
 
 import java.lang.reflect.Field;
 import java.util.Collections;
@@ -712,6 +713,63 @@ public final class ShopGaussBlur {
             if (guard.test(screen)) return true;
         }
         return false;
+    }
+
+    /**
+     * 立即糊一块（不等帧末）：用于毛玻璃底——在面板画上去之前调用，糊到的只有面板后面的世界与背景，
+     * 面板与文字之后再画在模糊结果上，保持清晰。坐标是 framebuffer 像素、左上原点。
+     * 先 flush 掉已登记的 GUI 批次，否则后处理读不到它们；不可用时静默跳过，调用方退回半透明底板。
+     */
+    public static void blurNow(GuiGraphics g, int x, int y, int w, int h, float strength,
+                               float radiusPixels, ShopGlassStyle glass) {
+        if (!isReady() || w <= 0 || h <= 0 || strength <= 0.01f) return;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getMainRenderTarget() == null) return;
+        if (g != null) g.flush();
+        int fbW = mc.getMainRenderTarget().width;
+        int fbH = mc.getMainRenderTarget().height;
+        // 调用方可能正处在 GuiGraphics 的 scissor 里（详情滚动区里的按钮）：模糊不能糊出裁剪框，
+        // render 收尾会关掉 scissor，跑完要把调用方的裁剪框原样还回去，否则后面的内容会画出滚动区。
+        boolean clipped = GL11.glIsEnabled(GL11.GL_SCISSOR_TEST);
+        int[] box = new int[4];
+        if (clipped) {
+            GL11.glGetIntegerv(GL11.GL_SCISSOR_BOX, box);
+            int[] r = clipToScissor(x, y, w, h, box, fbH);
+            x = r[0];
+            y = r[1];
+            w = r[2];
+            h = r[3];
+        }
+        // render 收尾把 shader 颜色复位成白；调用方可能正在 setColor 淡入（货币中心详情列），跑完还原。
+        float[] color = RenderSystem.getShaderColor().clone();
+        try {
+            if (w > 0 && h > 0) {
+                float[] rect = toUvRect(x, y, w, h, fbW, fbH);
+                render(mc, clamp01(strength), radiusPixels > 0f ? radiusPixels : BLUR_RADIUS_VIRTUAL, rect,
+                        new float[]{0f, 0f, 0f, 0f}, true, 0, NO_CELLS, NO_WAVE, 1f, 1f,
+                        glass == null ? ShopGlassStyle.NONE : glass, mc.getFrameTime(), 0f);
+            }
+        } finally {
+            if (clipped) RenderSystem.enableScissor(box[0], box[1], box[2], box[3]);
+            RenderSystem.setShaderColor(color[0], color[1], color[2], color[3]);
+        }
+    }
+
+    /**
+     * 左上原点的像素矩形与 GL 裁剪框（{x, y, w, h}，y 自底向上）取交集，返回左上原点的 {x, y, w, h}；
+     * 不相交时 w、h 为 0。
+     */
+    static int[] clipToScissor(int x, int y, int w, int h, int[] scissorBox, int fbH) {
+        int sx0 = scissorBox[0];
+        int sx1 = scissorBox[0] + scissorBox[2];
+        int sy0 = fbH - (scissorBox[1] + scissorBox[3]);
+        int sy1 = fbH - scissorBox[1];
+        int x0 = Math.max(x, sx0);
+        int y0 = Math.max(y, sy0);
+        int x1 = Math.min(x + w, sx1);
+        int y1 = Math.min(y + h, sy1);
+        if (x1 <= x0 || y1 <= y0) return new int[]{x0, y0, 0, 0};
+        return new int[]{x0, y0, x1 - x0, y1 - y0};
     }
 
     /**

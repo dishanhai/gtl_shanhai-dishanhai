@@ -11,13 +11,19 @@ import appeng.api.networking.crafting.CalculationStrategy;
 import appeng.api.networking.crafting.ICraftingPlan;
 import appeng.api.networking.crafting.ICraftingService;
 import appeng.api.networking.crafting.ICraftingSubmitResult;
+import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
+import appeng.api.stacks.KeyCounter;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.common.item.ShanhaiUltimateTerminalBehavior;
 import com.dishanhai.gt_shanhai.common.item.ShanhaiUltimateTerminalConfig;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalAeBinding.Context;
 
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.TickEvent;
@@ -45,6 +51,7 @@ public final class ShanhaiTerminalCraftingManager {
         Future<ICraftingPlan> future;
         ICraftingPlan plan;
         boolean submitted;
+        String submitError;
 
         WorkItem(AEKey key, long amount, String displayName) {
             this.key = key;
@@ -62,6 +69,8 @@ public final class ShanhaiTerminalCraftingManager {
         final List<WorkItem> items;
         Phase phase = Phase.CALCULATING;
         long ticks;
+        /** 没有合成流程、没进入计算的缺口；合成报告里单独列出。 */
+        List<WorkItem> unavailable = List.of();
 
         Session(UUID playerId, UUID terminalId, GlobalPos target, GlobalPos binding,
                 String planFingerprint, List<WorkItem> items) {
@@ -102,9 +111,11 @@ public final class ShanhaiTerminalCraftingManager {
         ICraftingService crafting = ae.grid().getCraftingService();
         List<WorkItem> items = new ArrayList<>();
         List<String> unavailable = new ArrayList<>();
+        List<WorkItem> unavailableItems = new ArrayList<>();
         for (ShanhaiTerminalMaterialService.RequestTarget shortage : shortages) {
             if (!crafting.isCraftable(shortage.key())) {
                 unavailable.add(shortage.displayName());
+                unavailableItems.add(new WorkItem(shortage.key(), shortage.amount(), shortage.displayName()));
                 continue;
             }
             WorkItem item = new WorkItem(shortage.key(), shortage.amount(), shortage.displayName());
@@ -117,10 +128,16 @@ public final class ShanhaiTerminalCraftingManager {
             player.sendSystemMessage(Component.literal(
                     "§c[山海终端] 无可用合成流程: §f" + String.join("、", unavailable)));
         }
-        if (items.isEmpty()) return false;
+        if (items.isEmpty()) {
+            Session none = new Session(player.getUUID(), terminalId, plan.target(), null, plan.fingerprint(), items);
+            none.unavailable = unavailableItems;
+            sendCraftReport(player, none, Stage.CALCULATED, "全部缺口都没有可用合成流程", ChatFormatting.RED);
+            return false;
+        }
         Session session = new Session(
                 player.getUUID(), terminalId, plan.target(),
                 ShanhaiUltimateTerminalConfig.getBoundAe(terminal), plan.fingerprint(), items);
+        session.unavailable = unavailableItems;
         Session previous = ORDER_SESSIONS.put(terminalId, session);
         if (previous != null) ACTIVE_CALCULATIONS.remove(terminalId, previous);
         cancel(previous);
@@ -162,6 +179,7 @@ public final class ShanhaiTerminalCraftingManager {
                 item.submitted = true;
                 submitted++;
             } else {
+                item.submitError = String.valueOf(result.errorCode());
                 failed.add(item.displayName + "(" + result.errorCode() + ")");
             }
         }
@@ -181,11 +199,15 @@ public final class ShanhaiTerminalCraftingManager {
         if (submitted == 0) {
             player.sendSystemMessage(Component.literal(
                     "§e[山海终端] 未成功提交 AE 合成任务；可继续按现有材料施工，缺材料位置跳过"));
+            sendCraftReport(player, session, Stage.SUBMITTED,
+                    "未成功提交 AE 合成任务；可继续按现有材料施工，缺材料位置跳过", ChatFormatting.YELLOW);
             return true;
         }
         player.sendSystemMessage(Component.literal(
                 "§b[山海终端] 已提交 §f" + submitted
                         + " §b项缺口下单；可继续按现有材料施工，缺材料位置跳过"));
+        sendCraftReport(player, session, Stage.SUBMITTED,
+                "已提交 " + submitted + " 项缺口下单；可继续按现有材料施工，缺材料位置跳过", ChatFormatting.AQUA);
         return true;
     }
 
@@ -270,6 +292,9 @@ public final class ShanhaiTerminalCraftingManager {
                     player.sendSystemMessage(Component.literal(usable == 0
                             ? "§e[山海终端] 失败任务暂时仍不可提交；材料或配方就绪后再次普通右击重试"
                             : "§e[山海终端] 失败任务的合成方案已就绪；再次右击控制器确认补单"));
+                    sendCraftReport(player, session, Stage.CALCULATED, usable == 0
+                            ? "失败任务暂时仍不可提交；材料或配方就绪后再次普通右击重试"
+                            : "失败任务的合成方案已就绪；再次右击控制器确认补单", ChatFormatting.YELLOW);
                 }
                 continue;
             }
@@ -281,13 +306,101 @@ public final class ShanhaiTerminalCraftingManager {
                 if (player != null) player.sendSystemMessage(Component.literal(
                         "§c[山海终端] 合成方案均不可提交: §f" + summarize(failures)
                                 + " §7补料后请开关一次 AE 模式再试"));
+                if (player != null) sendCraftReport(player, session, Stage.CALCULATED,
+                        "合成方案均不可提交；补料后请开关一次 AE 模式再试", ChatFormatting.RED);
                 continue;
             }
             session.phase = Phase.READY_TO_SUBMIT;
             if (player != null) player.sendSystemMessage(Component.literal(
                     "§e[山海终端] 合成方案已就绪；再次右击同一控制器确认下单"
                             + (failures.isEmpty() ? "" : " §7（跳过 " + failures.size() + " 项）")));
+            if (player != null) sendCraftReport(player, session, Stage.CALCULATED,
+                    "合成方案已就绪；再次右击同一控制器确认下单"
+                            + (failures.isEmpty() ? "" : "（跳过 " + failures.size() + " 项）"), ChatFormatting.YELLOW);
         }
+    }
+
+    // ---------- 合成报告 ----------
+    private enum Stage { CALCULATED, SUBMITTED }
+
+    private static final String LANG = "gui.gt_shanhai.ultimate_terminal.report.craft.";
+
+    private record Status(String key, int color) {}
+    // 排序即显示顺序：最需要处理的在前。
+    private static final Status SUBMIT_FAILED = new Status("submit_failed", 0xFF5555);
+    private static final Status FAILED = new Status("failed", 0xFF5555);
+    private static final Status UNAVAILABLE = new Status("unavailable", 0xFFAA00);
+    private static final Status READY = new Status("ready", 0x55FF55);
+    private static final Status SUBMITTED = new Status("submitted", 0x55FFFF);
+    private static final List<Status> STATUS_ORDER = List.of(SUBMIT_FAILED, FAILED, UNAVAILABLE, READY, SUBMITTED);
+
+    private static Status statusOf(WorkItem item, boolean unavailable, Stage stage) {
+        if (unavailable) return UNAVAILABLE;
+        if (item.submitted) return SUBMITTED;
+        boolean usable = item.plan != null && !item.plan.simulation();
+        if (!usable) return FAILED;
+        return stage == Stage.SUBMITTED ? SUBMIT_FAILED : READY;
+    }
+
+    private static Component keysText(KeyCounter counter) {
+        MutableComponent joined = Component.empty();
+        boolean first = true;
+        for (var entry : counter) {
+            if (!first) joined.append(Component.literal("、"));
+            first = false;
+            joined.append(entry.getKey().getDisplayName()).append(Component.literal(" ×" + entry.getLongValue()));
+        }
+        return joined;
+    }
+
+    private static Component detailOf(WorkItem item, Status status) {
+        if (status == UNAVAILABLE) return Component.translatable(LANG + "detail_unavailable");
+        if (status == SUBMIT_FAILED)
+            return Component.translatable(LANG + "detail_submit_failed", String.valueOf(item.submitError));
+        if (status == FAILED) {
+            if (item.plan == null) return Component.translatable(LANG + "detail_error");
+            Component missing = keysText(item.plan.missingItems());
+            return missing.getString().isEmpty() ? Component.translatable(LANG + "detail_none")
+                    : Component.translatable(LANG + "detail_missing", missing);
+        }
+        if (status == READY && item.plan != null) {
+            MutableComponent detail = Component.translatable(LANG + "detail_bytes", item.plan.bytes());
+            Component used = keysText(item.plan.usedItems());
+            if (!used.getString().isEmpty()) detail.append(Component.literal("   ")).append(Component.translatable(LANG + "detail_used", used));
+            return detail;
+        }
+        return Component.empty();
+    }
+
+    /** 合成明细：每个缺口一行（图标 + 名称 ×数量 + 缺料/占用说明），聊天栏只留摘要与连结。 */
+    private static void sendCraftReport(ServerPlayer player, Session session, Stage stage,
+                                        String summary, ChatFormatting color) {
+        if (player == null) return;
+        List<WorkItem> all = new ArrayList<>(session.items);
+        all.addAll(session.unavailable);
+        Map<Status, List<WorkItem>> grouped = new java.util.HashMap<>();
+        int ready = 0, bad = 0, submitted = 0;
+        for (WorkItem item : all) {
+            Status status = statusOf(item, session.unavailable.contains(item), stage);
+            grouped.computeIfAbsent(status, key -> new ArrayList<>()).add(item);
+            if (status == READY) ready++;
+            else if (status == SUBMITTED) submitted++;
+            else bad++;
+        }
+        ShanhaiTerminalReport.Builder report = new ShanhaiTerminalReport.Builder(
+                ShanhaiTerminalReport.Type.CRAFT, session.target.pos(), all.size(), ready, bad, submitted)
+                .summary(Component.literal(summary).withStyle(color));
+        for (Status status : STATUS_ORDER) {
+            for (WorkItem item : grouped.getOrDefault(status, List.of())) {
+                List<ItemStack> icon = item.key instanceof AEItemKey itemKey ? List.of(itemKey.toStack()) : List.of();
+                // 合成项没有世界坐标，坐标栏不使用。
+                report.add(BlockPos.ZERO, status.key(), Component.translatable(LANG + status.key()), status.color(),
+                        Component.literal(item.displayName + " ×" + item.amount), icon, detailOf(item, status));
+            }
+        }
+        ShanhaiUltimateTerminalBehavior.sendReportLink(player, report.build(),
+                Component.translatable("message.gt_shanhai.ultimate_terminal.craft_report_more"),
+                "message.gt_shanhai.ultimate_terminal.craft_report_link");
     }
 
     private static boolean hasPendingCalculation(Session session) {

@@ -65,13 +65,13 @@ public final class ShanhaiStructurePlanner {
                 normalized.add(new ShanhaiStructurePlan.Entry(entry.pos(),
                         ShanhaiStructurePlan.Kind.CHAMBER_HINT, entry.desired(), entry.desiredState(),
                         entry.current(), entry.currentState(),
-                        entry.candidates(), true));
+                        entry.candidates(), true, entry.currentMatchesStructure()));
             } else if (entry.chamberCapable()
                     && entry.kind() == ShanhaiStructurePlan.Kind.SATISFIED) {
                 normalized.add(new ShanhaiStructurePlan.Entry(entry.pos(),
                         ShanhaiStructurePlan.Kind.CHAMBER_HINT, entry.desired(), entry.desiredState(),
                         entry.current(), entry.currentState(),
-                        entry.candidates(), true));
+                        entry.candidates(), true, entry.currentMatchesStructure()));
             } else {
                 normalized.add(entry);
             }
@@ -121,6 +121,8 @@ public final class ShanhaiStructurePlanner {
         boolean currentAllowed = allCandidates.stream()
                 .map(candidate -> candidate.state().getBlock())
                 .anyMatch(block -> block == currentBlock);
+        boolean currentMatchesStructure = currentAllowed
+                || (replacementApplies && contains(replacementFamily, currentBlock));
 
         ShanhaiStructurePlan.Kind kind;
         if (replacementApplies && contains(replacementFamily, currentBlock)
@@ -136,7 +138,7 @@ public final class ShanhaiStructurePlanner {
                     : ShanhaiStructurePlan.Kind.BLOCKED;
         }
         return new ShanhaiStructurePlan.Entry(pos, kind, desired, desiredState,
-                current, currentState, candidateItems, chamberCapable);
+                current, currentState, candidateItems, chamberCapable, currentMatchesStructure);
     }
 
     private static List<Candidate> collectCandidates(TraceabilityPredicate predicate, CandidateCache candidateCache) {

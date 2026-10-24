@@ -22,6 +22,7 @@ public final class ShanhaiUltimateTerminalConfig {
     private static final String REPLACE_KEY = "ReplaceMode";
     private static final String ABSOLUTE_REPLACE_KEY = "AbsoluteReplaceMode";
     private static final String AE_MODE_KEY = "AeMode";
+    private static final String ORDER_MODE_KEY = "AeOrderMode";
     private static final String LEGACY_AE_REQUEST_KEY = "AeRequestMode";
     private static final String NO_CHAMBER_KEY = "NoChamberMode";
     private static final String DISMANTLE_KEY = "DismantleMode";
@@ -91,6 +92,16 @@ public final class ShanhaiUltimateTerminalConfig {
 
     public static void setAeMode(ItemStack stack, boolean aeMode) {
         get(stack).putBoolean(AE_MODE_KEY, aeMode);
+    }
+
+    /** 下单功能：AE 模式下缺口自动计算合成方案并下单；旧终端没有此标记，默认开启以保持原行为。 */
+    public static boolean isOrderMode(ItemStack stack) {
+        CompoundTag config = get(stack);
+        return !config.contains(ORDER_MODE_KEY) || config.getBoolean(ORDER_MODE_KEY);
+    }
+
+    public static void setOrderMode(ItemStack stack, boolean orderMode) {
+        get(stack).putBoolean(ORDER_MODE_KEY, orderMode);
     }
 
     public static boolean isNoChamberMode(ItemStack stack) {

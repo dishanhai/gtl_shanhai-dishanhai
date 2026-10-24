@@ -159,13 +159,14 @@ final class ShopDialogUi {
         long k = key(x, y, w, h);
         float hv = feedback.hover(k, enabled && GuiRenderUtil.isHovering(mx, my, x, y, w, h), now);
         ButtonFeedback.Visual v = feedback.visual(k, k, enabled, now, reduceMotion);
-        int b = ButtonFeedback.tint(GuiMotion.lerpColor(border, borderHover, hv), v);
-        int f = ButtonFeedback.shade(GuiMotion.lerpColor(fill, fillHover, hv), v);
-        GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(), () -> {
-            g.fill(x, y, x + w, y + h, b);
-            g.fill(x + 1, y + 1, x + w - 1, y + h - 1, f);
-            g.drawCenteredString(font, label, x + w / 2, y + (h - 8) / 2, 0xFFFFFFFF);
-        });
+        // 玻璃主题：金框换成主题青框、底换成玻璃按钮底；警告弹窗的红框是语义色，原样保留
+        ShopTheme t = ShopTheme.current();
+        boolean themed = t.glass && border == ShopTheme.CLASSIC.frameDark;
+        int b = ButtonFeedback.tint(GuiMotion.lerpColor(themed ? t.frameDark : border, themed ? t.frame : borderHover, hv), v);
+        int f = ButtonFeedback.shade(t.glass ? GuiMotion.lerpColor(t.buttonBg, t.buttonHover, hv)
+                : GuiMotion.lerpColor(fill, fillHover, hv), v);
+        GuiRenderUtil.withButtonMotion(g, x, y, w, h, v.scale(), v.shakeX(),
+                () -> t.button(g, font, x, y, w, h, label, b, f, 0xFFFFFFFF));
     }
 
     // ============ 滚动条 ============

@@ -615,6 +615,12 @@ public class ShanhaiNetwork {
         CHANNEL.registerMessage(packetId++, PatternGeneratorPresetPacket.class,
                 PatternGeneratorPresetPacket::encode, PatternGeneratorPresetPacket::new,
                 PatternGeneratorPresetPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(packetId++, UltimateTerminalConfigPacket.class,
+                UltimateTerminalConfigPacket::encode, UltimateTerminalConfigPacket::new,
+                UltimateTerminalConfigPacket::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(packetId++, ShanhaiTerminalReportPacket.class,
+                ShanhaiTerminalReportPacket::encode, ShanhaiTerminalReportPacket::new,
+                ShanhaiTerminalReportPacket::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
         RecipeSyncPacket.init();
     }
 

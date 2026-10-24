@@ -1,9 +1,13 @@
 package com.dishanhai.gt_shanhai.common.item.terminal;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -14,6 +18,7 @@ import com.gregtechceu.gtceu.api.machine.multiblock.part.MultiblockPartMachine;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -69,6 +74,25 @@ public final class ShanhaiChamberClassifier {
             return Optional.of(new Selection(type, candidate));
         }
         return Optional.empty();
+    }
+
+    /**
+     * 同一位置所有仓室候选按类型分组（保持候选原有顺序、同物品去重），
+     * 供报告完整列出“输入仓室 ⇒ ME 输入总成、MAX 输入仓…”这类条目，不再只取第一个候选。
+     */
+    public static Map<Type, List<ItemStack>> classifyAll(List<ItemStack> candidates) {
+        Map<Type, List<ItemStack>> result = new EnumMap<>(Type.class);
+        if (candidates == null) return result;
+        Set<Item> seen = new HashSet<>();
+        for (ItemStack candidate : candidates) {
+            if (candidate == null || candidate.isEmpty() || !seen.add(candidate.getItem())) continue;
+            Block block = Block.byItem(candidate.getItem());
+            if (!isChamberBlock(block)) continue;
+            var id = ForgeRegistries.BLOCKS.getKey(block);
+            Type type = id == null ? Type.OTHER : classifyPath(id.getPath());
+            result.computeIfAbsent(type, key -> new ArrayList<>()).add(candidate.copyWithCount(1));
+        }
+        return result;
     }
 
     static Type classifyPath(String path) {
