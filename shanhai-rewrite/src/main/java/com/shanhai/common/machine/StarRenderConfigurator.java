@@ -108,6 +108,12 @@ import java.util.List;
  * {@code getIcon()} 在条件不满足时返回<b>同一个贴图的暗色副本</b>。
  * 这只是<b>提示</b>：真正的边界是 {@code PrimordialOmegaEngineMachine} 的 setter 里那道
  * {@code canControlStarRender()} 闸门（防伪造包）。
+ *
+ * <h2>🔴 2026-10-18：上面这一节已停用（原文保留）</h2>
+ * 用户要求去掉外观面板的模块等级门槛 ⇒ {@code getIcon()} 恒返回 {@link #ICON_ACTIVE}、
+ * 7 个控件恒可用；{@link #ICON_DISABLED} 不再被引用。
+ * 等级仍决定「跟随等级」档的自动大小/颜色（机器侧 {@code moduleSlotBonus()} 未动），
+ * 只是不再是操作前提。
  */
 public final class StarRenderConfigurator implements IFancyConfigurator {
 
@@ -119,7 +125,10 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
     private static final IGuiTexture ICON_ACTIVE = new ResourceTexture(ICON);
 
     /**
-     * 条件不足时的暗色副本。
+     * 🔴 <b>已停用（2026-10-18）</b>：外观面板不再受模块等级限制 ⇒ 图标恒亮，
+     * 本暗色副本不再被引用；保留仅为留档（⛔ 别再拿它当门）。
+     *
+     * <p>条件不足时的暗色副本。
      *
      * <p>{@code 0xFF3F3F3F} 是"与白相乘后的灰度系数"—— LDLib 的 {@code setColor} 语义就是色乘子
      * （同类用法见 GTCEu 自己：{@code FancyMachineUIWidget} 里
@@ -213,7 +222,8 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
 
     @Override
     public IGuiTexture getIcon() {
-        return machine.canControlStarRender() ? ICON_ACTIVE : ICON_DISABLED;
+        // 2026-10-18：外观面板不再受模块等级限制 ⇒ 图标恒亮（ICON_DISABLED 已停用，保留）。
+        return ICON_ACTIVE;
     }
 
     /**
@@ -227,7 +237,6 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
     public List<Component> getTooltips() {
         return List.of(
                 Component.literal("中子星的大小与颜色").withStyle(ChatFormatting.AQUA),
-                Component.literal("条件：专属槽放满 64 个 Lv.15 及以上的物质模块").withStyle(ChatFormatting.GRAY),
                 Component.literal("改的是机器状态，").withStyle(ChatFormatting.GRAY)
                         .append(Component.literal("所有人都会看到").withStyle(ChatFormatting.GOLD))
                         .append(Component.literal("（会随存档保存）").withStyle(ChatFormatting.GRAY)),
@@ -236,15 +245,16 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
 
     @Override
     public Widget createConfigurator() {
-        final boolean enabled = machine.canControlStarRender();
+        // 2026-10-18：外观面板不再受模块等级限制 ⇒ 灰态判断恒为可用
+        //（等级只决定「跟随等级」档的自动大小/颜色，不是操作前提）。
+        final boolean enabled = true;
 
         WidgetGroup group = new WidgetGroup(0, 0, PANEL_W, PANEL_H);
         group.setBackground(GuiTextures.BACKGROUND_INVERSE);
 
-        // ── 第 0 行：条件状态 ───────────────────────────────────────────────
-        group.addWidget(new LabelWidget(4, 3, () -> machine.canControlStarRender()
-                ? "§a✔ 专属槽：Lv." + machine.moduleSlotBonus() + " 生效 · 可调"
-                : "§c✘ 需专属槽放满 64 个 Lv.15+ 物质模块"));
+        // ── 第 0 行：外观状态（中性说明；等级是「跟随等级」档的自动值，不再是门槛） ──
+        group.addWidget(new LabelWidget(4, 3, () -> "§7外观可调 · 默认随等级 Lv."
+                + machine.moduleSlotBonus()));
 
         // ── 第 1 行：既有读数（用户要求"面板顺带显示读数"；全部取现成方法，不新增计算） ──
         group.addWidget(new LabelWidget(4, 15, this::readoutText));
@@ -281,8 +291,7 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
         modeButton.setHoverTooltips(
                 Component.literal("点击切换：跟随等级 ⇄ 手动（自己定大小/颜色）")
                         .withStyle(ChatFormatting.GRAY),
-                Component.literal("跟随等级 = 尺寸与颜色都由专属槽的模块等级决定").withStyle(ChatFormatting.DARK_GRAY),
-                Component.literal("条件不满足时点了无效").withStyle(ChatFormatting.DARK_GRAY));
+                Component.literal("跟随等级 = 尺寸与颜色都由专属槽的模块等级决定").withStyle(ChatFormatting.DARK_GRAY));
         group.addWidget(modeButton);
         group.addWidget(new LabelWidget(10, 64, () -> machine.isStarRenderManual()
                 ? "§d手动" : "§b跟随等级"));
@@ -347,10 +356,10 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
         group.addWidget(periodButton);
         group.addWidget(new LabelWidget(10, 101, this::rainbowPeriodLabelText));
 
-        // ── 条件不足 / 档位不适用时把 7 个旋钮置为"不可用" ──────────────────
-        // 🔴 这只是【提示】：真正的边界是 PrimordialOmegaEngineMachine 各 setter 里那道
-        //    canControlStarRender() 闸门（客户端可以伪造 writeClientAction，UI 拦不住）。
-        // ⚠️ 刻意【不】再往面板上叠一行文字：第 0 行那句红字已经把"为什么不满足"说清楚了，
+        // ── 档位不适用时把 7 个旋钮置为"不可用" ─────────────────────────────
+        // 2026-10-18：模块等级门控已停用 ⇒ 7 个控件不再因等级变灰（enabled 恒 true），
+        //    这里只剩下面那条"周期按钮按档位置灰"的真实理由。
+        // ⚠️ 刻意【不】再往面板上叠一行文字：第 0 行已说明"等级只决定默认值"，
         //    再叠一层只会压在第 4 行按钮上（控件重叠是 LDLib 里最常见的"看不清"来源）。
         for (Widget w : List.of(radiusMinus, radiusPlus, modeButton, paletteButton, hueMinus, huePlus,
                 periodButton)) {
@@ -359,7 +368,7 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
         // 🔴 周期按钮比上面更严：它在【手动档】与【光谱档】下都无效 ⇒ 必须置灰，
         //    否则就是一个"按了没反应又不说为什么"的假开关（本项目明规，见 paletteButton 的注释）。
         // ⚠️ 诚实标注一个【既有】限制：setActive 是 build 期快照（enabled 在 createConfigurator()
-        //    里只取一次），所以打开 GUI 后再切档/抽走模块，灰态不会实时刷新
+        //    里只取一次），所以打开 GUI 后再切档，灰态不会实时刷新
         //    —— 既有 6 个按钮也是这样，不是本次引入的退化；要实时刷新得在 WidgetGroup.updateScreen
         //    里逐帧 setActive，本轮不做。
         periodButton.setActive(enabled

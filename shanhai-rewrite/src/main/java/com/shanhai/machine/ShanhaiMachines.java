@@ -13,6 +13,7 @@ import com.shanhai.common.machine.PrimordialEngineRecipeLogic;
 import com.shanhai.common.machine.PrimordialOmegaEngineMachine;
 import com.shanhai.machine.engine.EngineBlocks;
 import com.shanhai.machine.engine.PrimordialOmegaEngineStructure;
+import com.shanhai.machine.host.GuixuVisionCoreMachines;
 import com.shanhai.machine.module.ModuleRegistry;
 import com.shanhai.registry.ShanhaiRegistration;
 import net.minecraft.network.chat.Component;
@@ -241,6 +242,11 @@ public final class ShanhaiMachines {
 
         // ③ 原初模块（物资重组核心等）。java-module 的实现是幂等的，重复调用安全。
         ModuleRegistry.init();
+
+        // ④ 归墟视界枢核（新主机；2026-10-23 起）。
+        //    ⚠️ 必须排在 ModuleRegistry.init() 之后：它的 M 谓词要读 ModuleRegistry.allModuleBlocks()。
+        //    本阶段只做「能成型 + 24 接口可回连」，配方逻辑/并行/双向仓全部留到阶段 3。
+        GuixuVisionCoreMachines.init();
 
         // ④ fail-fast：模块表为空 = 上一步没生效，此时若放行，主机的 J 谓词会退化成
         //    「只认占位方块」⇒ 装了模块的结构永久不成型且无异常。宁可在这里炸。

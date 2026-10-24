@@ -1,0 +1,2750 @@
+package com.shanhai.machine.stellar;
+
+import appeng.api.crafting.IPatternDetails;
+import appeng.api.inventories.InternalInventory;
+import appeng.api.stacks.AEItemKey;
+import appeng.api.stacks.AEKey;
+import appeng.api.stacks.GenericStack;
+import appeng.api.stacks.KeyCounter;
+import appeng.api.storage.MEStorage;
+import com.gregtechceu.gtceu.api.capability.recipe.IO;
+import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
+import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
+import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidList;
+import com.gregtechceu.gtceu.integration.ae2.slot.IConfigurableSlot;
+import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
+import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
+import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
+import com.lowdragmc.lowdraglib.gui.texture.TextTexture;
+import com.lowdragmc.lowdraglib.gui.widget.ButtonWidget;
+import com.lowdragmc.lowdraglib.gui.widget.ImageWidget;
+import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
+import com.lowdragmc.lowdraglib.gui.widget.Widget;
+import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
+import com.lowdragmc.lowdraglib.misc.ItemStackTransfer;
+import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
+import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
+import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
+import com.shanhai.machine.wildcard.ShanhaiForgePatternMode;
+import com.shanhai.machine.wildcard.ShanhaiWildcardCompat;
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+import org.gtlcore.gtlcore.api.machine.trait.MEStock.IMESlot;
+import org.gtlcore.gtlcore.api.gui.MEPatternCatalystUIManager;
+import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigWidget;
+import org.gtlcore.gtlcore.common.machine.multiblock.part.PaginationUIManager;
+import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachineBase;
+import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine;
+import org.gtlcore.gtlcore.integration.ae2.widget.AEPatternViewExtendSlotWidget;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * <b>星律样板总成</b> —— 「山海」版的上游同名机器 {@code gt_shanhai:recipe_type_pattern_buffer}
+ * （类 {@code RecipeTypePatternBufferPartMachine}，3450 行）。
+ * <b>阶段一（已交）</b>：能注册、能插进多方块、能开 GUI、能翻页；1080 个普通样板槽是真的。
+ * <br><b>阶段二（本轮）</b>：① 50 个通配符样板槽（10×5 一页）＋ 母槽中间配置（写/清
+ * {@code gt_shanhai_recipe_type}）；② 只读的四来源配方类型读取层
+ * （{@link ShanhaiPatternTypeReader} + 别名表 {@link ShanhaiRecipeTypeIds}）；
+ * ③ {@code [SHANHAI-STELLAR]} 日志闸（{@link ShanhaiStellarLog}，默认关）。
+ * 下标/风险推演见交付报告「阶段二」一节 —— <b>本类刻意不覆写任何会按槽号索引父类数组的方法</b>，
+ * 理由写在 §七。
+ *
+ * <h2>一、🔴 继承路线 = C 路（字节码依据，逐条可复核）</h2>
+ * <pre>
+ *   public class MEStockingPatternBufferPartMachine
+ *          extends MEPatternBufferPartMachine
+ *          implements MEPart.IModifiableSyncOffset
+ * </pre>
+ * 取证命令（现成产物：{@code temp\stellar-ground\javap-MEStockingPatternBufferPartMachine.txt}）：
+ * <pre>
+ *   javap -p -cp shanhai-rewrite\libs\gtlcore-1.2.3.2-fix3.jar \
+ *       org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEStockingPatternBufferPartMachine
+ * </pre>
+ * 选它的四条理由（每条都是字节码事实，不是估值）：
+ * <ol>
+ *   <li><b>类声明可用</b>：{@code flags: (0x0021) ACC_PUBLIC, ACC_SUPER}
+ *       —— public、<b>没有 ACC_FINAL</b>，构造器也是 public ⇒ 跨包继承合法。</li>
+ *   <li><b>样板槽数就是构造参数</b>：它的构造器是
+ *       {@code (IMachineBlockEntity, int maxPatternCount, IO)}，并把那个 int 原样上抛
+ *       {@code MEPatternBufferPartMachine.<init>(holder, maxPatternCount, io)}；后者用它一次性 new 出
+ *       {@code hasPatternArray} / {@code cacheRecipe} / {@code internalInventory} / {@code catalystItems} /
+ *       {@code catalystFluids} / {@code cacheRecipeCount} / {@code patternInventory}
+ *       （{@code javap -c} 偏移 47–135，全是 {@code iload_2 → newarray/anewarray}）。
+ *       ⇒ <b>「1080 个普通样板槽」不需要覆写任何方法</b>，构造器传 1080 就够。
+ *       （{@code maxPatternCount} 自身是父类 {@code protected final int} ⇒ 子类读得到。）</li>
+ *   <li><b>库存输入（32 物品 + 32 流体）是现成的</b>：{@code protected final stockItemHandler} /
+ *       {@code stockFluidHandler}，{@code CONFIG_SIZE = 32}（常量池 {@code #50 = Integer 32}）；
+ *       每槽的 {@code createInternalSlot} 返回 {@code StockingPatternBufferInternalSlot}
+ *       （覆写了 8 个方法：isItemActive / isFluidActive / getLimitItemStackInput /
+ *       getLimitFluidStackInput / getItemStackInputMap / getFluidStackInputMap /
+ *       handleItemInternal / handleFluidInternal）⇒ 这一整套不用抄。</li>
+ *   <li><b>不踩「getMachine() 会 checkcast」那个坑</b>：
+ *       {@code MEPatternBufferRecipeHandlerTrait$MEItemInputHandler.getMachine()} 会
+ *       {@code checkcast MEPatternBufferPartMachine} ⇒ 继承层级只要<b>在其之上</b>就安全；
+ *       本类经 MEStocking 继承到 MEPatternBufferPartMachine，满足。</li>
+ * </ol>
+ *
+ * <h2>二、🔴 「分页」上游没有 —— 但 gtlcore 有现成的 {@link PaginationUIManager}</h2>
+ * 上游那个 {@code createUIWidget()} 的版面是<b>死的不分页</b>（{@code javap -c} 偏移 0–10）：
+ * <pre>
+ *   int cols = 9;                      // bipush 9
+ *   int rows = maxPatternCount / 9;    // getfield maxPatternCount; idiv
+ *   width  = 18 * cols + 16;           // = 178
+ *   height = 18 * rows + 16;           // maxPatternCount=1080 ⇒ rows=120 ⇒ 2176
+ *   ... new WidgetGroup(0, 0, width, height + 6 + 12 + 95)   // 面板高 ≈ 2289 px
+ * </pre>
+ * ⇒ 直接把 1080 交给它 = 一个 2289 px 高的窗口，<b>不可用</b>。
+ * ⚠️ 它那个 {@code page} 字段<b>也不是给样板槽翻页的</b>：唯一消费者是末尾那块
+ * {@code AEDualConfigWidget}（库存配置 32+32 的分页，偏移 380–419）⇒ 继承下来的分页只管库存配置。
+ *
+ * <p>真正的分页件是 gtlcore 的
+ * {@code org.gtlcore.gtlcore.common.machine.multiblock.part.PaginationUIManager}：
+ * <pre>
+ *   // 7 参重载（本类用的这个）：第 3 个参数是【maxPatternCount】，maxPages 由它自己算
+ *   PaginationUIManager(int patternsPerRow, int rowsPerPage, int maxPatternCount,
+ *                       int uiWidth, int uiHeight, IntConsumer onPatternChange, IItemTransfer patternInventory)
+ *       → this.maxPatternCount = 第3参;  this.maxPages = ceil(第3参 / (rowsPerPage*patternsPerRow))
+ *   // 8 参重载：第 3 个参数是【maxPages】，maxPatternCount 由它自己算（两个重载第 3 参含义相反！）
+ *   WidgetGroup createPaginationUI(IntConsumer onMiddleClicked)
+ * </pre>
+ * 上游那台机器就是用它拼出「9 × 6 × 20」的（{@code DShanhaiMachines.java:1456-1461} 的构造实参
+ * {@code recipeTypePatternsPerRow / RowsPerPage / MaxPages / WildcardSlotsPerPage / WildcardMaxPages}）。
+ * 它的版面几何（{@code javap -c} 实测，全部是它自己写死的常数）：
+ * <pre>
+ *   rebuildPatternSlots : 槽区子组 = WidgetGroup(0, 16, uiWidth, rowsPerPage*18)
+ *                         每格 x = 8 + (i % patternsPerRow)*18，y = (i / patternsPerRow)*18
+ *   createPageControls  : labelY = 16 + rowsPerPage*18 + 4
+ *                         上一页按钮 (8, labelY, 30, 12)  下一页按钮 (uiWidth-38, labelY, 30, 12)
+ *                         页码标签 ((uiWidth-12)/2, labelY+2)，文案 = "当前页+1 / maxPages"
+ *   refreshPage(p)      : currentPageIndex = p → clearAllWidgets() → 重建第 p 页的格（越界用 Math.min 夹住）
+ * </pre>
+ * ⇒ 本类的 UI = 这个类 + 一行联机状态标签，<b>不自己写翻页逻辑</b>（自己写要多一份「页面重建」的维护面，
+ * 而那正是 {@code SuperWildcardPatternBufferPartMachine} 里记过的越界崩溃来源）。
+ *
+ * <h2>三、🔴 产物回 ME 网络：不写一行代码，但有一条硬条件</h2>
+ * 通道是现成的：{@code meHandleRecipeOutputInner} 把产物写进
+ * {@code MEPatternBufferPartMachineBase.buffer}（内存 map）→ {@code MEPatternBufferPartMachine$Ticker}
+ * → {@code AEUtils.reFunds}。<b>Ticker 只在 {@code io == IO.BOTH} 时注册</b>
+ * （{@code MEPatternBufferPartMachine} 构造器 {@code javap -c} 偏移 247–274：
+ * {@code getstatic IO.BOTH; if_acmpne 275; … addService(IGridTickable.class, new Ticker(this))}）
+ * ⇒ 构造器<b>必须</b>传 {@link IO#BOTH}，已照做。
+ * <p>⚠️ {@code buffer} <b>不持久化</b>：断线 / 区块卸载 / 拆机时还没退款的产物会消失。
+ * <b>本轮不动</b>，只标 {@code TODO(阶段四)}。
+ *
+ * <h2>四、🔴 本轮真做到 / 明确做不到</h2>
+ * <b>做到</b>：
+ * <ul>
+ *   <li>能注册（{@code ShanhaiStellarMachines}）、能插进多方块（4 个 PartAbility 与上游那台、
+ *       以及本工程已验收的超级通配符样板总成一致）；</li>
+ *   <li>能开 GUI：右击打开，9 列 × 6 行 / 页、共 20 页，页码 "1 / 20" 由 {@link PaginationUIManager}
+ *       自己画，前后翻页按钮可用；</li>
+ *   <li>1080 个普通样板槽<b>是真的</b>：父类按 {@code maxPatternCount} 建的 {@code patternInventory}
+ *       长度就是 1080，界面槽号 = 页号×54 + 格号，是<b>同一个下标空间</b>（所以不会出现
+ *       「界面位置数 ≠ 容器格数」那类越界）；</li>
+ *   <li>库存输入 32+32、每槽 {@code StockingPatternBufferInternalSlot}、产物回 ME
+ *       —— 全部继承自 MEStocking / MEPatternBufferPartMachine，<b>不是重写的</b>。</li>
+ * </ul>
+ * <b>做不到（阶段二~四，逐条有 TODO）</b>：
+ * <ul>
+ *   <li>通配符样板槽（10×5 = 50 格）：本类<b>只有常量</b>，一个通配符容器都没建；</li>
+ *   <li>库存配置界面（上游那块 32+32 的 {@code AEDualConfigWidget}）与催化剂面板
+ *       （中键 {@code MEPatternCatalystUIManager.toggleFor(槽号)}）在本版 UI 里<b>都没有</b>
+ *       —— 中键现在什么都不做；</li>
+ *   <li>翻页页号不落盘（{@code PaginationUIManager.currentPageIndex} 是 UI 实例状态，重开界面回第 1 页）；</li>
+ *   <li>产物 buffer 持久化。</li>
+ * </ul>
+ *
+ * <h2>五、🔴 四条上游坑，在本类里的落点</h2>
+ * <ol>
+ *   <li>{@code createInternalSlot} / {@code createRecipeHandler} / {@code createMETrait} /
+ *       {@code createNodeHolder} 都在<b>超类构造器里</b>就被调用 ⇒ 那一刻子类字段还是 null。
+ *       ⇒ 本类<b>不覆写这四个方法</b>；阶段三必须覆写时，一律只读 {@code static} 常量。</li>
+ *   <li>{@code MEItemInputHandler.getMachine()} 的 {@code checkcast MEPatternBufferPartMachine}
+ *       ⇒ 已满足（见 §一.4）。</li>
+ *   <li>gtladditions 的 mixin <b>@Overwrite 压在</b> {@code MEPatternBufferPartMachineBase.onUse}
+ *       与 {@code MEPatternBufferPartMachine.getRealPattern} 上（{@code javap -v} 实证：
+ *       {@code MEPatternBufferPartMachineMixin} methods=2，常量池 {@code Overwrite → getRealPattern}；
+ *       {@code MEPatternBufferPartMachineBaseMixin} 常量池 {@code Overwrite → onUse}）
+ *       ⇒ 本类<b>绝不覆写 onUse / getRealPattern</b>（后者本来就是 private，覆写不了）。</li>
+ *   <li>已占用字段名（{@code stockItemHandler} / {@code stockFluidHandler} / {@code syncOffset} /
+ *       {@code page} / {@code maxPatternCount} / {@code catalystItems} / {@code catalystFluids} /
+ *       {@code internalInventory} / {@code patternInventory} / {@code cacheRecipeCount} / …）
+ *       ⇒ 阶段一：一个实例字段都没有；阶段二新增的 3 个字段
+ *       （{@code wildcardPatternInventory} / {@code wildcardConfigSlot} / {@code wildcardConfigType}）
+ *       与上表逐个比对过，<b>不撞名</b>。</li>
+ * </ol>
+ *
+ * <h2>七、🔴 阶段二的下标推演结论（为什么本类<b>不</b>把通配符槽塞进父类的槽号空间）</h2>
+ * 父类有 6 处<b>直接用下标访问</b> {@code internalInventory[]}（{@code javap -p -c} 实证，
+ * 明细见 {@code temp\stellar-p1\javap-arrayindex.txt}）：
+ * <pre>
+ *   onPatternChange(int)      9: getfield internalInventory → 13: aaload     ← 无边界检查！
+ *   getInternalSlot(int)      1: getfield internalInventory →  5: aaload     ← 无边界检查
+ *   getInternalSlotCount()    1: getfield internalInventory →  4: arraylength
+ *   reCalculateCatalystItemMap / reCalculateCatalystFluidMap / onLoad / getRealPattern /
+ *   gtlcore$graphDiagnostic              同样直接吃 internalInventory
+ * </pre>
+ * ⇒ 若采用「数组仍是 1080、但逻辑槽号扩到 1130」的写法，任何一条
+ * {@code onPatternChange(1080)} 就会 {@code ArrayIndexOutOfBoundsException}。
+ * 上游那台机器的写法是 <b>另开一份 50 格 {@code ItemStackTransfer} + 覆写
+ * {@code getInternalSlotCount()/getInternalSlot(int)}</b>（见
+ * {@code temp/stellar-ground/upstream-RecipeTypePatternBufferPartMachine.java:1628/1734/1741}），
+ * 并且它必须自己接管全部会越界的入口。
+ *
+ * <p><b>阶段二的选择</b>：通配符槽用<b>独立的 {@link #wildcardPatternInventory}（50 格）</b>，
+ * 但<b>不</b>改 {@code getInternalSlotCount()/getInternalSlot(int)} ⇒ 父类看到的槽号空间<b>仍然只有 0..1079</b>
+ * ⇒ <b>不存在任何一个 ≥1080 的下标进得了父类数组</b>（越界风险 = 0，而不是「小心一点」）。
+ * 代价（写清楚，不许含糊）：<b>通配符槽里的样板阶段二<b>不参与</b> AE 的配方推送</b>
+ * —— 它现在是一个「能放、能配类型、能存档」的容器；让它们真的出样板是阶段三「展开 + 三道闸」的事。
+ * 阶段三要做的事就是把上游那三个覆写（{@code getInternalSlotCount} / {@code getInternalSlot} /
+ * 越界入口接管）补上，并把 {@code onPatternChange} 对通配符槽号短路。
+ *
+ * <h2>六、为什么不继承「超级通配符样板总成」（本工程已验收那台）</h2>
+ * 它继承的是 {@code MEPatternBufferPartMachineBase}（更靠上的一层），拿不到
+ * {@code MEPatternBufferPartMachine} 的「每槽一个 InternalSlot + 配方缓存 + 库存输入」，
+ * 而且它的通配符槽是 10 格写死、无分页（{@code WILDCARD_SLOT_COUNT = 10}）。
+ * ⇒ 那台只作<b>注册写法 / UI 写法 / lang 键的只读参考</b>，<b>一个字都没改</b>。
+ */
+public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPartMachine {
+
+    // ---------------------------------------------------------------- 规格（用户给的数字）
+
+    /** 每行几个普通样板槽（与上游 {@code createUIWidget} 的 {@code bipush 9} 逐值相同）。 */
+    public static final int PATTERN_COLUMNS = 9;
+
+    /** 每页几行普通样板槽。 */
+    public static final int PATTERN_ROWS_PER_PAGE = 6;
+
+    /** 每页普通样板槽数 = 9 × 6 = 54。 */
+    public static final int PATTERN_SLOTS_PER_PAGE = PATTERN_COLUMNS * PATTERN_ROWS_PER_PAGE;
+
+    /** 普通样板总页数。 */
+    public static final int PATTERN_PAGE_COUNT = 20;
+
+    /**
+     * 普通样板槽总数 = 9 × 6 × 20 = <b>1080</b>。
+     *
+     * <p>🔴 它<b>不是</b>界面占位数，而是父类构造器的 {@code maxPatternCount}：
+     * {@code MEPatternBufferPartMachine} 用它 new 出 {@code patternInventory}（长度 1080）、
+     * {@code internalInventory[1080]}、{@code catalystItems[1080]}、{@code catalystFluids[1080]} 等
+     * （{@code javap -c} 偏移 47–135）⇒ <b>槽位是真的 1080 个</b>。
+     * <p>⚠️ 同一条事实的另一面：构造 1080 槽意味着 1080 个 {@code StockingPatternBufferInternalSlot}
+     * ＋ 1080×9 个物品催化剂格 ＋ 1080×9 个流体催化剂罐（后者由父类 {@code lambda$new$3/4} 生成）
+     * ⇒ <b>单台机器的对象数是万级</b>。这是设计要的规模，不是 bug，但它是「进游戏 30 秒判据」之一
+     * （见交付报告第 5 节）。
+     */
+    public static final int PATTERN_SLOT_COUNT = PATTERN_SLOTS_PER_PAGE * PATTERN_PAGE_COUNT;
+
+    /** 通配符样板：每页 10 列。 */
+    public static final int WILDCARD_COLUMNS = 10;
+
+    /** 通配符样板：每页 5 行。 */
+    public static final int WILDCARD_ROWS_PER_PAGE = 5;
+
+    /**
+     * 通配符样板槽数 = 10 × 5 = <b>50</b>（对齐本工程已验收那台「超级通配符样板总成」一页的规模）。
+     *
+     * <p>🔴 阶段二起它是<b>真槽位</b>：{@link #wildcardPatternInventory}（独立 50 格
+     * {@code ItemStackTransfer}，{@code @Persisted}）。但它<b>不</b>进父类的槽号空间
+     * —— 原因见类注释 §七（越界风险 = 0 的写法）。
+     */
+    public static final int WILDCARD_SLOT_COUNT = WILDCARD_COLUMNS * WILDCARD_ROWS_PER_PAGE;
+
+    /** 通配符槽的<b>对外槽号起点</b>：API 里 {@code 0..1079} 是普通槽，{@code 1080..1129} 是通配符槽。 */
+    public static final int WILDCARD_API_SLOT_OFFSET = PATTERN_SLOT_COUNT;
+
+    // ---------------------------------------------------------------- 版面常量（像素）
+
+    /**
+     * 面板宽 = 9 列 × 18 + 16 边距 = <b>178</b>。
+     *
+     * <p>与上游 {@code createUIWidget} 的 {@code 18*cols+16} 逐值相同；
+     * {@link PaginationUIManager} 自己把首列画在 x=8、下一列 +18（见类注释 §二的字节码），
+     * 所以末列右缘 = 8 + 8×18 + 18 = 168 ≤ 178。
+     */
+    private static final int PANEL_WIDTH = 18 * PATTERN_COLUMNS + 16;
+
+    /**
+     * 面板高 = 16（顶部留白）+ 6 行 × 18 + 4（间隙）+ 12（翻页按钮）= <b>140</b>。
+     *
+     * <p>这四个数<b>不是我定的</b>，是 {@link PaginationUIManager} 里写死的（见类注释 §二）：
+     * 槽区子组固定在 y=16，页码/按钮行在 y = 16 + 18×行数 + 4。
+     * ⇒ 面板高必须 ≥ 140，否则翻页按钮会被裁掉。
+     */
+    private static final int PANEL_HEIGHT = 16 + 18 * PATTERN_ROWS_PER_PAGE + 4 + 12;
+
+    // ---------------------------------------------------------------- 通配符区版面（阶段二）
+
+    /** 通配符区标题行 y（紧贴普通区下沿）。 */
+    private static final int WILDCARD_TITLE_Y = PANEL_HEIGHT + 6;
+
+    /** 通配符 10×5 格区左上角。 */
+    private static final int WILDCARD_GRID_X = 8;
+
+    private static final int WILDCARD_GRID_Y = WILDCARD_TITLE_Y + 12;
+
+    /** 母槽配置行：标签 y / 输入框 y。 */
+    private static final int WILDCARD_CONFIG_LABEL_Y = WILDCARD_GRID_Y + 18 * WILDCARD_ROWS_PER_PAGE + 4;
+
+    private static final int WILDCARD_CONFIG_INPUT_Y = WILDCARD_CONFIG_LABEL_Y + 12;
+
+    /**
+     * 面板总宽 / 总高（= 普通区宽 178 ∪ 通配符区宽 8+10×18+8=196 ⇒ 取 196；高 = 配置行 + 输入框 + 留白）。
+     *
+     * <p>⚠️ 这两个数按 {@link PaginationUIManager} 与格区的写死几何推出来的（见 §二），
+     * 不是估算；**没在真客户端看过**是唯一残余不确定性（报告 §5 已列）。
+     */
+    private static final int ROOT_WIDTH = Math.max(PANEL_WIDTH, WILDCARD_GRID_X + 18 * WILDCARD_COLUMNS + 8);
+
+    private static final int ROOT_HEIGHT = WILDCARD_CONFIG_INPUT_Y + 10 + 6;
+
+    // ---------------------------------------------------------------- 页内版面（阶段七：四页各自从 (0,0) 起排）
+
+    /**
+     * 通配符页的 10×5 格区左上角 y（页内坐标）。
+     *
+     * <p>旧版是「页面从通配符标题 146 开始」，现在通配符<b>自己是一页</b> ⇒ 从 y=16 起排
+     * （上面 2..12 留给标题行）。格的 x 仍然复用 {@link #WILDCARD_GRID_X}（= 8）。
+     */
+    private static final int WILDCARD_PAGE_GRID_Y = 16;
+
+    /** 通配符页：母槽配置标签 y。 */
+    private static final int WILDCARD_PAGE_CONFIG_LABEL_Y = WILDCARD_PAGE_GRID_Y + 18 * WILDCARD_ROWS_PER_PAGE + 4;
+
+    /** 通配符页：母槽配置输入框 y。 */
+    private static final int WILDCARD_PAGE_CONFIG_INPUT_Y = WILDCARD_PAGE_CONFIG_LABEL_Y + 12;
+
+    // ---------------------------------------------------------------- lang 键（阶段七：页签 + 左下角按钮 + 标签页）
+
+    /** 页① 页签名（短，要塞进 28×28）。 */
+    private static final String LANG_TAB_PATTERNS = "shanhai.machine.stellar_sample_assembler.tab.patterns";
+
+    /** 页② 页签名。 */
+    private static final String LANG_TAB_WILDCARD = "shanhai.machine.stellar_sample_assembler.tab.wildcard";
+
+    /** 页③ 页签名。 */
+    private static final String LANG_TAB_STOCK = "shanhai.machine.stellar_sample_assembler.tab.stock";
+
+    /** 页④ 页签名。 */
+    private static final String LANG_TAB_TAG = "shanhai.machine.stellar_sample_assembler.tab.tag";
+
+    /** 左下角：闸按钮名。 */
+    private static final String LANG_BTN_GATE = "shanhai.machine.stellar_sample_assembler.btn.gate";
+
+    /** 左下角：神锻按钮名。 */
+    private static final String LANG_BTN_FORGE = "shanhai.machine.stellar_sample_assembler.btn.forge";
+
+    /** 闸 tooltip（%s = 开/关）。 */
+    private static final String LANG_TIP_GATE = "shanhai.machine.stellar_sample_assembler.tip.gate";
+
+    /** 神锻 tooltip（%s = 开/关，%s = 倍率）。 */
+    private static final String LANG_TIP_FORGE = "shanhai.machine.stellar_sample_assembler.tip.forge";
+
+    /** 标签页标题。 */
+    private static final String LANG_TAG_SECTION = "shanhai.machine.stellar_sample_assembler.tag.section";
+
+    /** 标签页：白名单标签名。 */
+    private static final String LANG_TAG_WHITE = "shanhai.machine.stellar_sample_assembler.tag.white";
+
+    /** 标签页：白名单输入框 tooltip。 */
+    private static final String LANG_TAG_WHITE_HINT = "shanhai.machine.stellar_sample_assembler.tag.whiteHint";
+
+    /** 标签页：黑名单标签名。 */
+    private static final String LANG_TAG_BLACK = "shanhai.machine.stellar_sample_assembler.tag.black";
+
+    /** 标签页：黑名单输入框 tooltip。 */
+    private static final String LANG_TAG_BLACK_HINT = "shanhai.machine.stellar_sample_assembler.tag.blackHint";
+
+    /** 标签页说明行 1。 */
+    private static final String LANG_TAG_EXPLAIN_1 = "shanhai.machine.stellar_sample_assembler.tag.explain1";
+
+    /** 标签页说明行 2。 */
+    private static final String LANG_TAG_EXPLAIN_2 = "shanhai.machine.stellar_sample_assembler.tag.explain2";
+
+    /** 库存输入页标题（%s = 格数，%s = 页数）。 */
+    private static final String LANG_STOCK_SECTION = "shanhai.machine.stellar_sample_assembler.stock.section";
+
+    /** GUI：闸拦截计数（%s = 未标注射，%s = 歧义数）。 */
+    private static final String LANG_GATE_COUNT = "shanhai.machine.stellar_sample_assembler.gate.count";
+
+    /** GUI：没有样板被拦。 */
+    private static final String LANG_GATE_COUNT_NONE = "shanhai.machine.stellar_sample_assembler.gate.countNone";
+    /** 通用「开」（tooltip 用）。 */
+    private static final String LANG_STATE_ON = "shanhai.machine.stellar_sample_assembler.state.on";
+
+    /** 通用「关」（tooltip 用）。 */
+    private static final String LANG_STATE_OFF = "shanhai.machine.stellar_sample_assembler.state.off";
+
+    /** 标签页：匹配预览（%s = 命中数，%s = 扫描总数）。 */
+    private static final String LANG_TAG_PREVIEW = "shanhai.machine.stellar_sample_assembler.tag.preview";
+
+    /** 标签页：还没有库存快照。 */
+    private static final String LANG_TAG_PREVIEW_NO_DATA = "shanhai.machine.stellar_sample_assembler.tag.previewNoData";
+
+    /** 标签页：表达式语法错（%s = 错误原文）。 */
+    private static final String LANG_TAG_PREVIEW_ERROR = "shanhai.machine.stellar_sample_assembler.tag.previewError";
+    /** 标签页：当前生效的白/黑名单（%s = 白，%s = 黑）。 */
+    private static final String LANG_TAG_CURRENT = "shanhai.machine.stellar_sample_assembler.tag.current";
+
+    // ---------------------------------------------------------------- lang 键（阶段二新增）
+
+    private static final String LANG_WILDCARD_SECTION = "shanhai.machine.stellar_sample_assembler.wildcard.section";
+
+    private static final String LANG_WILDCARD_CONFIG = "shanhai.machine.stellar_sample_assembler.wildcard.config";
+
+    private static final String LANG_WILDCARD_AUTO = "shanhai.machine.stellar_sample_assembler.wildcard.auto";
+
+    private static final String LANG_WILDCARD_HINT = "shanhai.machine.stellar_sample_assembler.wildcard.hint";
+
+    // ---------------------------------------------------------------- 阶段二：新增字段（3 个，已逐条比对不与父类撞名）
+
+    /**
+     * 本类自己的 {@code ManagedFieldHolder}。
+     *
+     * <p>🔴 <b>没有它，本轮新增的 {@code @Persisted} 字段就是死字段</b>：LDLib 只认
+     * {@code getFieldHolder()} 返回的那条链上登记过的字段 —— 子类不重写 holder，
+     * 新增字段既不会落盘也不会同步，而且<b>不报错</b>（又一个「静默不发生」）。
+     * <p>构造签名 {@code (子类.class, 父类 holder)} 与本工程已验收的
+     * {@code SuperWildcardPatternBufferPartMachine.MANAGED_FIELD_HOLDER} 逐字同形。
+     */
+    protected static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
+            StellarSampleAssemblerPartMachine.class, MEStockingPatternBufferPartMachine.MANAGED_FIELD_HOLDER);
+
+    /**
+     * 通配符样板槽（{@value #WILDCARD_SLOT_COUNT} 格）——<b>与父类 {@code patternInventory} 完全分离</b>的一份容器。
+     *
+     * <h2>为什么不塞进父类那 1080 格的数组（这是本轮最重要的一条设计决定）</h2>
+     * 见类注释 §七：父类有 6 处直接 {@code internalInventory[slot]} 且<b>没有边界检查</b>，
+     * 逻辑槽号一旦扩到 1130，任何一条 {@code onPatternChange(1080)} 就是
+     * {@code ArrayIndexOutOfBoundsException}。独立容器 + <b>不改父类槽号空间</b> ⇒ 越界风险 = 0。
+     *
+     * <p>过滤：只收<b>通配符样板</b>（{@link ShanhaiWildcardCompat#isWildcardPattern(ItemStack)}，
+     * 语义与 gtlcore 的包私有 {@code WildcardPatternCompatImpl.isWildcardPattern} 逐字等价）。
+     * ⚠️ 宿主没装 {@code wildcard_pattern} 时该判断恒 false ⇒ 这 50 格会<b>拒绝一切物品</b>
+     * （与已验收那台通配符总成同一行为，不新增风险）。
+     *
+     * <p>只标 {@code @Persisted}、<b>不标 {@code @DescSynced}</b>：与父类 {@code patternInventory} 逐字同款
+     * （{@code javap -v} 实证它也只有 {@code @Persisted}），槽内物品由服务端权威、界面在创建时读取。
+     */
+    @Persisted
+    private final ItemStackTransfer wildcardPatternInventory;
+
+    /**
+     * 「母槽中间配置」的<b>当前目标格</b>（0 基；{@code -1} = 还没选）。
+     *
+     * <p>设置方式：<b>中键</b>点通配符格。中键在本控件里的执行路径是
+     * {@code mouseClicked} → {@code writeClientAction(10, …)} → 服务端
+     * {@code handleClientAction(10, …)} 再跑一次 {@code onMiddleClick}（javap 实证，偏移 23–57 / 6–28）
+     * ⇒ 服务端会真的执行，然后 {@code @DescSynced} 把这个 int 同步回客户端给标签显示。
+     * <p>⚠️ 客户端也会本地跑一次同一个 lambda ⇒ handler 里必须 {@code if (isRemote()) return;}，
+     * 否则客户端会写一个永远发不出去的本地值（父类 {@code onPatternChange} 也是这么防的）。
+     */
+    @DescSynced
+    @Persisted
+    private int wildcardConfigSlot = -1;
+
+    /**
+     * 当前目标格上<b>手填</b>的配方类型（归一化后的 id；{@code ""} = 没填 = 自动识别）。
+     *
+     * <p>🔴 它是<b>派生显示值</b>，唯一写入点是 {@link #shanhaiRefreshWildcardConfigType()}
+     * （读目标格样板 NBT 里的 {@code gt_shanhai_recipe_type}）——<b>不是</b>第二份真相：
+     * 权威永远是那块样板的 NBT，本字段只做「服务端算出、同步给标签画」。
+     * <p>为什么必须同步：界面标签在客户端取值，而样板 NBT 所在的 {@code wildcardPatternInventory}
+     * <b>不是</b> {@code @DescSynced}（见上）⇒ 客户端读不到它，只能读这个字符串。
+     * <p>为什么用 {@code String} 而不是 {@code String[]}（50 个值）：LDLib 的
+     * {@code @Persisted/@DescSynced} 复杂数组要么元素是 {@code IContentChangeAware}/{@code IManaged}、
+     * 要么必须 {@code @LazyManaged}，写错就是启动/开界面期 {@code IllegalStateException}
+     * （本工程 {@code catalystFluids} 那条血账）。单值 String 是已验证的安全类型
+     * （本工程 {@code SuperWildcardPatternBufferPartMachine#autoForgeMultiplierReason} 就是
+     * {@code @DescSynced String}）。50 个值各自存在<b>各自的样板 NBT</b> 里，不需要数组字段。
+     */
+    @DescSynced
+    private String wildcardConfigType = "";
+
+    // ---------------------------------------------------------------- 阶段三：新增字段（4 个，均已比对不撞名）
+
+    /**
+     * 闸开关：<b>歧义样板是否禁止参与推送</b>（默认 <b>true</b> = 禁止）。
+     *
+     * <p>语义（严格执行「不猜」）：
+     * <ul>
+     *   <li>唯一类型（UNIQUE）⇒ 放行；</li>
+     *   <li>未标注（NONE）⇒ 放行（绝大多数样板压根没人写类型键，禁掉会让全机停摆）；</li>
+     *   <li><b>歧义（AMBIGUOUS）⇒ 拦截</b>：同一块样板被多个来源写成了不同类型，说明样板自己都没说清，
+     *       放它跑就是需求①「串配方」的入口。</li>
+     * </ul>
+     * <p>调 {@code false} 可临时全放行（排查用），但**默认真值必须是 true**。
+     */
+    @DescSynced
+    @Persisted
+    private boolean blockAmbiguousPatterns = true;
+
+    /** 闸缓存：被拦下的槽号（{@link #getAvailablePatterns()} 每次都会读，不能每次重算 NBT）。 */
+    private final java.util.Set<Integer> gateBlockedSlots = new java.util.HashSet<>();
+
+    /**
+     * <b>槽号 → 该槽的样板</b>反表（阶段九：样板内虚拟电路要用它）。
+     *
+     * <p>🔴 为什么要自建：父类的 {@code patternSlotMap} 是 <b>private</b>、
+     * {@code getRealPattern(int, ItemStack)} 也是 <b>private</b>（且被 gtladditions {@code @Overwrite}）
+     * ⇒ 源码层面拿不到「这个槽是哪个样板」。唯一可用的公开/受保护面是
+     * {@code getAvailablePatterns()}（public）+ {@code getSlotIndexForPattern(pattern)}（protected）
+     * —— 正好够反推，且与闸缓存同一个脏标记（样板一变就重建）。
+     */
+    private final java.util.Map<Integer, IPatternDetails> shanhaiPatternBySlot = new java.util.HashMap<>();
+    /** 被闸拦下的「未标注类型」槽号（GUI/Jade 计数与 WARN 用）。 */
+    private List<Integer> shanhaiUntypedBlockedSlots = List.of();
+
+    /** 被闸拦下的「歧义」槽号。 */
+    private List<Integer> shanhaiAmbiguousBlockedSlots = List.of();
+
+    /**
+     * 被拦下的「未标注配方类型」样板数（{@code @DescSynced}：GUI 与 Jade 都读它）。
+     *
+     * <p>🔴 为什么要同步：用户明确要求「拦截必须看得出来」——只在日志里打一行不算看得见。
+     */
+    @DescSynced
+    private int shanhaiUntypedPatternCount = 0;
+
+    /** 被拦下的「歧义」样板数。 */
+    @DescSynced
+    private int shanhaiAmbiguousPatternCount = 0;
+
+    /** 闸缓存是否过期（样板变了 / 手填类型变了 ⇒ 置脏）。 */
+    private boolean gateCacheDirty = true;
+
+    /** 歧义 WARN 的节流：上一次的槽号集合指纹 + 时间。 */
+    private int lastAmbiguousWarnHash = 0;
+
+    private long lastAmbiguousWarnTick = Long.MIN_VALUE;
+
+    // ---------------------------------------------------------------- 阶段四：新增字段
+
+    /** ④ 神锻样板模式开关（默认关；开了只改「对 AE 声明的产出」）。 */
+    @DescSynced
+    @Persisted
+    private boolean forgePatternMode = false;
+
+    /** ④ 神锻倍率（1..30，默认 15）。 */
+    @DescSynced
+    @Persisted
+    private int forgePatternMultiplier = ShanhaiForgePatternMode.DEFAULT_MULTIPLIER;
+
+    /**
+     * ⑤ 通配符 50 格的<b>歧义位掩码</b>（bit i = 第 i 格是歧义）。
+     *
+     * <p>🔴 为什么是一位掩码而不是 {@code boolean[]}/`Verdict[]`：界面角标在<b>客户端</b>画，
+     * 而样板 NBT 所在的 {@code wildcardPatternInventory} 不是 {@code @DescSynced}（客户端读不到），
+     * 复杂数组又要么必须 {@code IContentChangeAware} 要门 {@code @LazyManaged}（本工程
+     * {@code catalystFluids} 的血账）。一个 {@code long} 是「简单类型」，同步零风险，50 位够用。
+     */
+    @DescSynced
+    private long wildcardAmbiguousMask = 0L;
+
+    /**
+     * 普通 1080 格的歧义位掩码（**十六进制串**，bit i = 槽 i；1080 bit ⇒ 270 字符）。
+     *
+     * <p>为什么是 String 而不是 {@code long[]}：1080 bit 装不进一个 long；
+     * 而 LDLib 的「复杂数组」同步要么元素必须 IContentChangeAware、要么必须 {@code @LazyManaged}
+     * （本工程 {@code catalystFluids} 的血账）⇒ 用**简单类型 String** 最安全。
+     * <p>角标在客户端画，而样板 NBT 所在的 {@code patternInventory} 不是 {@code @DescSynced}
+     * （客户端读不到）⇒ 只能靠这个串同步「哪些格是歧义」。
+     */
+    @DescSynced
+    private String patternAmbiguousMaskHex = "";
+
+    /**
+     * 神锻改写后的样板 → 原槽号。
+     *
+     * <p>🔴 用 {@link java.util.IdentityHashMap}：AE 持有的是我们返回的那份实例，
+     * 靠 <b>identity</b> 反查才不会被「两个内容相同的改写样板」互相覆盖。
+     */
+    private final java.util.Map<IPatternDetails, Integer> rewrittenToSlot = new java.util.IdentityHashMap<>();
+
+    /** 神锻改写结果的快照（与 {@link #rewrittenToSlot} 同生共死；AE 每 tick 都会读它）。 */
+    private final List<IPatternDetails> forgePatternSnapshot = new ArrayList<>();
+
+    /** 神锻改写快照是否过期。 */
+    private boolean forgeCacheDirty = true;
+
+    // ---------------------------------------------------------------- 阶段五：展开器字段
+
+    /**
+     * 通配符<b>展开槽</b>（{@link ShanhaiWildcardLayout#EXPAND_COUNT} 个 = 50 × K）。
+     *
+     * <p>🔴 每条展开一份独立的 {@code InternalSlot} ⇒ 各自有自己的 itemInventory / fluidInventory /
+     * 催化剂数组 ⇒ {@code pushPattern(stacks)} 只写进自己那一格 ⇒ **4 条展开不可能互相串料**。
+     * 这正是需求①「防串配方」在物料层的落点（纯算术部分见 {@link ShanhaiWildcardLayout} 类注释 §四）。
+     */
+    private final List<MEPatternBufferPartMachineBase.InternalSlot> expandInternalSlots =
+            new ArrayList<>(ShanhaiWildcardLayout.EXPAND_COUNT);
+
+    /** 母槽号 → 该母槽本次展开出来的样板清单（截断到 K 条）。 */
+    private final java.util.Map<Integer, List<IPatternDetails>> expansionsByMother = new java.util.HashMap<>();
+
+    /** 展开出来的样板 → 展开槽号（identity 语义：AE 拿到的就是我们给的那份实例）。 */
+    private final java.util.Map<IPatternDetails, Integer> expandedToSlot = new java.util.IdentityHashMap<>();
+
+    /** 展开表是否过期。 */
+    private boolean expandCacheDirty = true;
+
+    /** 上一次截断告警的指纹（避免每次重建都刷屏）。 */
+    private int lastTruncationStamp = 0;
+
+    // ---------------------------------------------------------------- 阶段六 ⑦：库存输入 160（8×2×10）
+
+    /**
+     * ⑦ 的库存输入配置（<b>物品，160 格</b>）—— 与父类那份 32 格<b>并存</b>，不替换。
+     *
+     * <h2>为什么另建一份（字节码事实，不是选择）</h2>
+     * 父类的 {@code stockItemHandler} 是 {@code protected final} 且容量在<b>超类构造器</b>里用常量
+     * {@code CONFIG_SIZE = 32} 建死（{@code javap -v}：{@code ConstantValue: int 32}）⇒ 子类没有
+     * 任何赋值机会，只能另建一份。
+     *
+     * <h2>为什么 {@code @Persisted} 能让 {@code final} 字段落盘</h2>
+     * LDLib 对 {@code IManaged} 类型的持久化字段<b>不替换对象</b>，而是「就地反序列化」：
+     * {@code IManagedAccessor.writeToReadonlyField} → {@code writePersistedFields(tag, value.getSyncStorage().getPersistedFields())}
+     * （{@code javap -c} 实证，偏移 238–266）⇒ final 也没关系。父类那两份 handler 用的正是同一条路。
+     * <p>它自己的持久化形状（同一套 LDLib 管线推出来的，样本见报告阶段六 §A）：
+     * <pre>
+     *   &lt;BE tag&gt;/shanhaiStockItemHandler = { inventory: [ {t:&lt;byte&gt;, p:{config:{id, #c, #}, stock:{...}}}, ... ] }
+     * </pre>
+     * 字段名就是键名（{@code @Persisted.key()} 默认空 ⇒ {@code IRef.getPersistedKey()} 回落字段名，
+     * {@code javap -c} 偏移 7–24 实证）。
+     */
+    @Persisted
+    private final MEStockingPatternBufferPartMachine.ExportOnlyAEStockingItemList shanhaiStockItemHandler;
+
+    /**
+     * ⑦ 分页组件的<b>形状伙伴</b>：{@link AEDualConfigWidget} 的构造函数要求物品/流体两份列表等长
+     * （它的 {@code marge()} 把两份 inventory 首尾相接，{@code init()} 再按 {@code length/2} 切
+     * 「哪一半画成物品格」（{@code javap -c} 实证））⇒ 物品侧 160 就必须配一份 160 的流体列表。
+     *
+     * <p>🔴 <b>它只有形状作用，<u>不</u>持久化、<u>不</u>参与任何库存逻辑</b>：
+     * 该组件的最大页数 = {@code 物品size / pageSize = 160/16 = 10}，页面只会翻到合并数组的
+     * {@code 0..159}（正好全是物品格）⇒ 这 160 个流体格<b>永远显示不到</b>，
+     * 玩家不可能在这上面配出「看着有、其实没用」的东西。
+     * <p>流体侧的库存输入<b>仍然只有父类那 32 格</b>（行为零改动）。
+     */
+    private final ExportOnlyAEFluidList shanhaiStockFluidShapeOnly;
+
+    /**
+     * ⑦ 的当前页号（1..10）。持久化 + 同步：翻页只是界面状态，但用户重开界面回到上次那页更顺手。
+     *
+     * <p>它由 {@link AEDualConfigWidget} 的 {@code pageSetter} 回调写入；越界一律夹住。
+     */
+    @DescSynced
+    @Persisted
+    private int shanhaiStockPage = 1;
+
+    /**
+     * 旧 32 条配置<b>已经迁移过</b>的标记（幂等闸）。
+     *
+     * <p>🔴 为什么必须有它，而不是「只在我们的 160 格为空时迁移」：
+     * 用户可能把迁过来的 160 条<b>全删掉</b>；那种情况下父类那 32 格仍留着旧数据
+     * （我们刻意不动它，留作回滚/取证），若只按「我们为空」判断，删光后重进存档会把
+     * 32 条旧配置<b>当成幽灵复活</b>。所以迁移<b>只做一次</b>，之后永不再做。
+     */
+    @Persisted
+    private boolean shanhaiStockMigrated = false;
+
+    /** ⑦ 的「有配置」缓存（{@code findStockItemKey} 每次解析配方都要问，不能每次扫 160 格）。 */
+    private final java.util.Set<AEItemKey> shanhaiStockItemKeys = new java.util.LinkedHashSet<>();
+
+    /** ⑦ 的库存快照（每游戏 tick 最多重建一次；{@code findStockItemKey} 判「够不够」用它）。 */
+    private KeyCounter shanhaiStockSnapshot;
+
+    /** 库存快照对应的游戏时间（{@link Long#MIN_VALUE} = 还没有）。 */
+    private long shanhaiStockSnapshotTick = Long.MIN_VALUE;
+
+    /** 迁移日志只打一次（进游戏看日志时不会刷屏）。 */
+    private boolean shanhaiStockMigrationLogged = false;
+
+    // ---------------------------------------------------------------- 阶段七 ⑧ 标签过滤页（白/黑名单）
+
+    /**
+     * 标签过滤页：<b>白名单表达式</b>（空 = 不过滤）。
+     *
+     * <p>类型选 {@code @DescSynced String} 而不是数组：本工程已验证 String 是最安全的同步类型
+     * （阶段二 {@code wildcardConfigType} 的先例），而这一个字符串本身就是用户输入的全部内容。
+     * <p>⚠️ 它<b>只被标签页的预览与（将来的）过滤使用</b>；本阶段不参与库存扣料逻辑（见页注释）。
+     */
+    @DescSynced
+    @Persisted
+    private String shanhaiTagWhite = "";
+
+    /** 标签过滤页：<b>黑名单表达式</b>（黑名单命中 ⇒ 排除，优先于白名单）。 */
+    @DescSynced
+    @Persisted
+    private String shanhaiTagBlack = "";
+
+    /**
+     * 标签过滤页：<b>匹配预览</b>（服务端算出来的一行文字，同步给客户端显示）。
+     *
+     * <p>它让这一页「有真信息」：数字来自当前 ME 库存快照 + {@link ShanhaiTagFilterExpression} 实算。
+     * <p>为什么不 {@code @Persisted}：它是派生值（库存一变就过期），存进存档只会变成「上次关服时的旧数」。
+     */
+    @DescSynced
+    private String shanhaiTagPreview = "";
+
+
+    /**
+     * 构造器。
+     *
+     * <p>🔴 三个实参的来历，一个都不能改：
+     * <ul>
+     *   <li>{@code holder} —— 透传；</li>
+     *   <li>{@code PATTERN_SLOT_COUNT}（1080）—— 父类用它建<b>全部</b>样板槽相关数组（见常量注释）；
+     *       ⚠️ 阶段二<b>没有</b>把它改成 1130：见类注释 §七（那样会让父类数组越界）。</li>
+     *   <li>{@link IO#BOTH} —— <b>硬条件</b>：{@code MEPatternBufferPartMachine} 构造器
+     *       {@code if (io == IO.BOTH) getMainNode().addService(IGridTickable.class, new Ticker(this))}
+     *       （{@code javap -c} 偏移 247–274）。传别的值 ⇒ 产物永远不退给 ME 网络，
+     *       而且<b>不报错</b>（悄悄吞产物）。</li>
+     * </ul>
+     */
+    public StellarSampleAssemblerPartMachine(IMachineBlockEntity holder, IO io) {
+        super(holder, PATTERN_SLOT_COUNT, io);
+        this.wildcardPatternInventory = new ItemStackTransfer(WILDCARD_SLOT_COUNT);
+        this.wildcardPatternInventory.setFilter(ShanhaiWildcardCompat::isWildcardPattern);
+        this.wildcardPatternInventory.setOnContentsChanged(this::shanhaiOnWildcardInventoryChanged);
+        // ---- 阶段三：把 50 格通配符槽接进「槽号空间」
+        // ① 父类那份终端库存句柄先取下来（合并视图要用它当 0..1079 那一段）。
+        this.baseTerminalPatternInventory = super.getTerminalPatternInventory();
+        this.combinedTerminalPatternInventory = new CombinedTerminalPatternInventory();
+        // ② 50 个 InternalSlot：**自己造**（父类构造器那个循环只到 1080，且给它挂的内容变更回调会写
+        //    cacheRecipe[slot] —— 通配符槽绝不能走那条路）。
+        for (int i = 0; i < WILDCARD_SLOT_COUNT; i++) {
+            final MEPatternBufferPartMachineBase.InternalSlot slot = this.createInternalSlot(PATTERN_SLOT_COUNT + i);
+            // 空回调：只保证 getOnContentsChanged() 非 null（别处调用时不会 NPE），
+            // **不**接父类那套 recipe-cache 失效逻辑。
+            slot.setOnContentsChanged(() -> { });
+            this.wildcardInternalSlots.add(slot);
+        }
+        // ③ 阶段五：展开槽（母槽 i 的第 j 条 ⇒ i*K+j）。同样不挂父类回调（它会写 cacheRecipe[slot]）。
+        for (int i = 0; i < ShanhaiWildcardLayout.EXPAND_COUNT; i++) {
+            final MEPatternBufferPartMachineBase.InternalSlot slot =
+                    this.createInternalSlot(ShanhaiWildcardLayout.EXPAND_OFFSET + i);
+            slot.setOnContentsChanged(() -> { });
+            this.expandInternalSlots.add(slot);
+        }
+        // ---- 阶段六 ⑦：库存输入 160 格（8×2×10）
+        // ① 真正干活的 160 格：**自己 new**（父类那份 32 格还在，见字段注释）。
+        //    🔴 构造器签名修正（阶段六实证）：javap 打出来的是
+        //    `ExportOnlyAEStockingItemList(MEStockingPatternBufferPartMachine, MetaMachine, int)`，
+        //    其中**第一个参数是内嵌类的 encloser 实例**，显式参数只有 `(MetaMachine, int)`。
+        //    阶段五报告把它读成 `(MEStocking, MetaMachine, int)` 是误读 —— 以本轮 javac 的报错与
+        //    javap 的 `this$0` 字段为准（写错会直接编译失败，不会静默）。
+        this.shanhaiStockItemHandler =
+                new ExportOnlyAEStockingItemList(this, ShanhaiStockConfigLayout.CONFIG_SIZE);
+        // ② 分页组件要求物品/流体两份列表等长 ⇒ 一份 160 格的「形状伙伴」（不持久化、不参与库存逻辑）。
+        this.shanhaiStockFluidShapeOnly = new ExportOnlyAEFluidList(this, ShanhaiStockConfigLayout.CONFIG_SIZE);
+        // TODO(阶段五)：产物 buffer（MEPatternBufferPartMachineBase#buffer）不落盘 ——
+        //  断线 / 区块卸载 / 拆机器时里面还没退款的产物会消失。修法见交付报告「分刀计划」第五刀。
+        //  本轮【刻意不做】：它要动 saveCustomPersistedData/loadCustomPersistedData 的成对读写，
+        //  做歪了会把库存输入一起写坏。
+    }
+
+    @Override
+    public ManagedFieldHolder getFieldHolder() {
+        return MANAGED_FIELD_HOLDER;
+    }
+
+
+    // ---------------------------------------------------------------- 阶段八 ③：版面配置读取
+
+    /** 配置的行数（夹到 1..8；读不到配置时用默认 6）。 */
+    private static int shanhaiConfiguredPatternRows() {
+        try {
+            return ShanhaiStellarUiLayout.clampPatternRows(
+                    com.shanhai.config.ShanhaiConfig.COMMON.stellarPatternRowsPerPage.get());
+        } catch (Throwable unavailable) {
+            return ShanhaiStellarUiLayout.DEFAULT_PATTERN_ROWS_PER_PAGE;
+        }
+    }
+
+    /** 配置的页数（夹到 1..120；读不到配置时用默认 20）。 */
+    private static int shanhaiConfiguredPatternPages() {
+        try {
+            return ShanhaiStellarUiLayout.clampPatternPages(
+                    com.shanhai.config.ShanhaiConfig.COMMON.stellarPatternPages.get());
+        } catch (Throwable unavailable) {
+            return ShanhaiStellarUiLayout.DEFAULT_PATTERN_PAGES;
+        }
+    }
+
+    /** 界面可见的普通样板槽数（= 分页器的 maxPatternCount）。 */
+    private static int shanhaiConfiguredVisiblePatternSlots() {
+        return ShanhaiStellarUiLayout.patternVisibleSlots(
+                shanhaiConfiguredPatternRows(), shanhaiConfiguredPatternPages());
+    }
+
+    /**
+     * 配置把可见槽数调小后，检查「有没有样板被挤到看不见的地方」并打一条 WARN。
+     *
+     * <p>🔴 用户要求：<b>页数变小不能把已有样板弄丢</b>。本实现里<b>数据根本不会丢</b>
+     * （底层 storage 与槽号空间都没变），但「看不见」也必须说出来 —— 否则用户会以为样板消失。
+     */
+    private void shanhaiWarnInvisiblePatterns(@NotNull String where) {
+        if (this.isRemote()) {
+            return;
+        }
+        final int visible = shanhaiConfiguredVisiblePatternSlots();
+        if (visible >= PATTERN_SLOT_COUNT) {
+            return;
+        }
+        int hidden = 0;
+        final java.util.List<Integer> firstFew = new ArrayList<>();
+        for (int slot = visible; slot < PATTERN_SLOT_COUNT; slot++) {
+            if (this.hasPatternInSlot(slot)) {
+                hidden++;
+                if (firstFew.size() < 8) {
+                    firstFew.add(slot);
+                }
+            }
+        }
+        if (hidden > 0) {
+            ShanhaiStellarLog.warn("版面配置（{}）：可见槽数被设为 {}（行×页 配置），有 {} 个样板在可见范围之外"
+                    + "（例如槽 {}）—— 数据仍在存档里，只是界面翻不到；调回页数即可重新看到",
+                    where, visible, hidden, firstFew);
+        }
+    }
+    // ---------------------------------------------------------------- GUI（阶段七：左侧竖排页签 + 四页）
+
+    /**
+     * 本机主界面 = <b>左侧一列页签（4 页 + 2 个开关按钮）＋ 右侧页区</b>。
+     *
+     * <h2>🔴 复用的上游组件：LDLib 的 {@code TabContainer} / {@code TabButton}（不是自造）</h2>
+     * <pre>
+     *   com.lowdragmc.lowdraglib.gui.widget.TabContainer   // 竖排页签容器（TABS_LEFT 贴图）
+     *   com.lowdragmc.lowdraglib.gui.widget.TabButton      // 单个页签（SwitchWidget，pressed = 高亮）
+     *   addTab(TabButton, WidgetGroup)                     // 页 = 一个 WidgetGroup；首个 tab 自动成为 focus
+     *   switchTag(WidgetGroup)                             // 切页只做 setPressed/setVisible/setActive
+     * </pre>
+     * 依据（{@code javap -c}）：{@code TabContainer.initTemplate} 的页签惯例是
+     * {@code new TabButton(-28, 0, 32, 28)} + {@code TABS_LEFT.getSubTexture(...)}（x 为负 ⇒ 伸到容器左外侧）；
+     * {@code addTab} 把页加进 {@code containerGroup}、把按钮加进 {@code buttonGroup}，并给非 focus 页
+     * {@code setVisible(false)}；{@code switchTag} 对旧页 {@code setPressed(false)/setVisible(false)/setActive(false)}、
+     * 对新页反之。
+     * <p>⇒ <b>切页不重建控件</b>（页对象只被显示/隐藏）⇒ 输入框里已经敲了一半的内容、翻页器当前页等
+     * 界面态<b>不会丢</b>（这也是本实现的验收判据之一）。
+     *
+     * <h2>🔴 页号只存在客户端本地</h2>
+     * 当前页是 {@code TabContainer.focus} 自己的状态（页签点击由 {@code SwitchWidget.setPressed} 走
+     * 客户端动作同步到服务端做同样的 setVisible），<b>本类不新增任何 @Persisted/@DescSynced 的页号字段</b>
+     * —— 界面态不该进存档（阶段一~六已两次踩过「把界面状态当机器状态」的坑）。
+     *
+     * <h2>为什么普通区仍然用 {@link PaginationUIManager}</h2>
+     * 那是「1080 个样板槽自己翻页」的分页器（9 列 × 6 行 × 20 页），与页签是<b>两层不同的东西</b>：
+     * 页签管「四块功能」，分页器管「样板槽的第几页」。两者互不影响。
+     */
+    @NotNull
+    @Override
+    public Widget createUIWidget() {
+        final WidgetGroup root = new WidgetGroup(0, 0,
+                ShanhaiStellarUiLayout.ROOT_WIDTH, ShanhaiStellarUiLayout.ROOT_HEIGHT);
+        // 页签容器放在 PAGE_X：侧栏贴图占 [PAGE_X-28, PAGE_X+4)，页区从 PAGE_X 起（相邻不重叠，探针 A 组断言）
+        final com.lowdragmc.lowdraglib.gui.widget.TabContainer tabs =
+                new com.lowdragmc.lowdraglib.gui.widget.TabContainer(
+                        ShanhaiStellarUiLayout.PAGE_X, 0,
+                        ShanhaiStellarUiLayout.PAGE_W, ShanhaiStellarUiLayout.PAGE_H);
+        tabs.addTab(this.shanhaiTab(ShanhaiStellarUiLayout.Page.PATTERNS, LANG_TAB_PATTERNS),
+                this.shanhaiPatternPage());
+        tabs.addTab(this.shanhaiTab(ShanhaiStellarUiLayout.Page.WILDCARD, LANG_TAB_WILDCARD),
+                this.shanhaiWildcardPage());
+        tabs.addTab(this.shanhaiTab(ShanhaiStellarUiLayout.Page.STOCK, LANG_TAB_STOCK),
+                this.shanhaiStockPage());
+        tabs.addTab(this.shanhaiTab(ShanhaiStellarUiLayout.Page.TAG_FILTER, LANG_TAB_TAG),
+                this.shanhaiTagFilterPage());
+        root.addWidget(tabs);
+        // ---- 左下角那一列：闸 / 锻 两个图标按钮（同一列，排在四个页签下面）
+        root.addWidget(this.shanhaiToggleButton(0, LANG_BTN_GATE,
+                () -> this.blockAmbiguousPatterns,
+                this::shanhaiGateTooltip,
+                this::shanhaiToggleGate));
+        root.addWidget(this.shanhaiToggleButton(1, LANG_BTN_FORGE,
+                this::isForgePatternMode,
+                this::shanhaiForgeTooltip,
+                this::shanhaiToggleForge));
+        return root;
+    }
+
+    /**
+     * 一个页签按钮：{@code TABS_LEFT} 的方角贴图 + 文字标记（不新增任何 png 资产）。
+     *
+     * <p>贴图取法与 LDLib 自己的模板逐值一致（{@code getSubTexture(0,0,0.5,0.333)} 底图 /
+     * {@code getSubTexture(0.5,0,0.5,0.333)} 按下图）⇒ 外观与这库里其它带页签的 GUI 同款。
+     */
+    private @NotNull com.lowdragmc.lowdraglib.gui.widget.TabButton shanhaiTab(
+            @NotNull ShanhaiStellarUiLayout.Page page, @NotNull String langKey) {
+        final int index = page.ordinal();
+        final com.lowdragmc.lowdraglib.gui.widget.TabButton tab =
+                new com.lowdragmc.lowdraglib.gui.widget.TabButton(
+                        ShanhaiStellarUiLayout.tabXLocal(),
+                        ShanhaiStellarUiLayout.tabY(index),
+                        ShanhaiStellarUiLayout.TAB_SIZE,
+                        ShanhaiStellarUiLayout.TAB_SIZE);
+        tab.setTexture(
+                new GuiTextureGroup(
+                        com.lowdragmc.lowdraglib.gui.widget.TabContainer.TABS_LEFT
+                                .getSubTexture(0.0f, 0.0f, 0.5f, 0.33333334f),
+                        new TextTexture(Component.translatable(langKey).getString())),
+                new GuiTextureGroup(
+                        com.lowdragmc.lowdraglib.gui.widget.TabContainer.TABS_LEFT
+                                .getSubTexture(0.5f, 0.0f, 0.5f, 0.33333334f),
+                        new TextTexture(Component.translatable(langKey).getString())));
+        tab.setHoverTooltips(Component.translatable(langKey));
+        return tab;
+    }
+
+    /**
+     * 左列的开关按钮（闸 / 锻）：<b>开 = 高亮底色、关 = 暗底色</b>，文字不变（只有两三个字），
+     * tooltip 每帧按真实字段重算。
+     *
+     * <p>「高亮与真实开关一致」的落地方式：底色纹理是一个按 {@code state} <b>每帧</b>选图的
+     * {@link IGuiTexture}，{@code state} 就是那两处 {@code @Persisted @DescSynced} 字段本身
+     * （{@code blockAmbiguousPatterns} / {@code forgePatternMode}）——不存在第二份「按钮亮不亮」的状态。
+     */
+    private @NotNull ButtonWidget shanhaiToggleButton(int index,
+                                                      @NotNull String langKey,
+                                                      java.util.function.BooleanSupplier state,
+                                                      java.util.function.Supplier<Component> tooltip,
+                                                      @NotNull Runnable action) {
+        final ButtonWidget button = new ButtonWidget(
+                ShanhaiStellarUiLayout.toggleXLocal(),
+                ShanhaiStellarUiLayout.toggleYLocal(index),
+                ShanhaiStellarUiLayout.TOGGLE_W,
+                ShanhaiStellarUiLayout.TOGGLE_H,
+                shanhaiStateTexture(state),
+                clickData -> action.run()) {
+            @Override
+            public void updateScreen() {
+                super.updateScreen();
+                // tooltip 跟着字段走（「神锻样板：开/关（倍率 N）」必须显示真实倍率）
+                this.tooltipTexts.clear();
+                this.tooltipTexts.add(tooltip.get());
+            }
+        };
+        button.setHoverTooltips(tooltip.get());
+        return button;
+    }
+
+    /**
+     * 按 {@code state} 每帧选一张底图（开 = 亮、关 = 暗）。
+     *
+     * <p>为什么不给 {@code ButtonWidget} 传两个固定纹理：它的纹理是构造期定死的，
+     * 而「开/关」会变 ⇒ 一个按帧选图的 {@link IGuiTexture} 是最小改动（且不新增状态）。
+     */
+    private static @NotNull IGuiTexture shanhaiStateTexture(@NotNull java.util.function.BooleanSupplier state) {
+        final IGuiTexture on = new GuiTextureGroup(GuiTextures.BUTTON, shanhaiRect(0x5500FF66));
+        final IGuiTexture off = new GuiTextureGroup(GuiTextures.BUTTON, shanhaiRect(0x55000000));
+        return new IGuiTexture() {
+            @Override
+            public void draw(net.minecraft.client.gui.GuiGraphics graphics, int mouseX, int mouseY,
+                             float x, float y, int width, int height) {
+                (state.getAsBoolean() ? on : off).draw(graphics, mouseX, mouseY, x, y, width, height);
+            }
+        };
+    }
+
+    // ---------------------------------------------------------------- 页 ①：普通样板槽（1080，分页）
+
+    private @NotNull WidgetGroup shanhaiPatternPage() {
+        final WidgetGroup page = new WidgetGroup(0, 0,
+                ShanhaiStellarUiLayout.PAGE_W, ShanhaiStellarUiLayout.PAGE_H);
+        // 联机状态（与上游逐字同一个 lang 键：gtceu.gui.me_network.online / offline）。
+        page.addWidget(new LabelWidget(8, 4,
+                () -> this.isOnline ? "gtceu.gui.me_network.online" : "gtceu.gui.me_network.offline"));
+        // 🔴 7 参重载的第 3 个参数是【maxPatternCount】，不是「页数」—— 这是 javap 读出来的，不是猜的：
+        //   7 参构造器字节码偏移 14–31 原文
+        //     iload_3 → putfield maxPatternCount;  iload_3 / (rowsPerPage*patternsPerRow) → Math.ceil → maxPages
+        //   而 8 参重载的第 3 个参数才是 maxPages（偏移 19–25: patternsPerRow*rowsPerPage*maxPages → maxPatternCount）。
+        //   ⇒ 这里必须传 1080，传 20 会得到「maxPatternCount=20、maxPages=1」= 一页只有 20 格。
+        // 阶段八 ③：行数/页数从 Forge config 读（默认 6 行 × 20 页 = 1080 = 既有行为）；
+        // 列数固定 9（上游分页器几何写死）。可见槽数 = min(9*rows*pages, 1080)。
+        final int configuredRows = shanhaiConfiguredPatternRows();
+        final int configuredVisible = shanhaiConfiguredVisiblePatternSlots();
+        final RecordingPagination pager = new RecordingPagination(
+                PATTERN_COLUMNS,
+                configuredRows,
+                configuredVisible,
+                PANEL_WIDTH,
+                PANEL_HEIGHT,
+                this::onPatternChange,
+                this.getPatternInventory());
+        // 阶段五 ②：普通 1080 格的歧义角标（54 个 5×5 小点，坐标与 PaginationUIManager 的格坐标逐字一致）。
+        for (int cell = 0; cell < PATTERN_SLOTS_PER_PAGE; cell++) {
+            final int cellX = 8 + (cell % PATTERN_COLUMNS) * 18 + 12;
+            final int cellY = 16 + (cell / PATTERN_COLUMNS) * 18 + 12;
+            final int cellIndex = cell;
+            page.addWidget(new ImageWidget(cellX, cellY, 5, 5,
+                    () -> this.shanhaiPatternMarker(shanhaiPatternSlotAt(pager.currentPage, cellIndex))));
+        }
+        // 阶段七：闸拦下了多少（用户要求「拦截必须看得出来」）——同一对字段也喂 GUI 与 Jade
+        page.addWidget(new LabelWidget(8, ShanhaiStellarUiLayout.PAGE_H - 20, this::shanhaiGateCountLine));
+        // ---- 阶段八 ①：中键 = 这一格的专用催化剂面板（**复用上游面板**，不是自画）
+        // 上游用法（javap -c 偏移 114–150）：new MEPatternCatalystUIManager(面板宽+4, catalystItems,
+        // catalystFluids, cacheRecipeCount, slot -> 缓存数变更回调)，再把面板挂到 GUI 上。
+        // 我们这台的四份东西是父类现成的（catalystItems / catalystFluids / cacheRecipeCount 都是
+        // MEPatternBufferPartMachine 的 protected final 字段），所以零新增存储。
+        final MEPatternCatalystUIManager catalystUI = new MEPatternCatalystUIManager(
+                ShanhaiStellarUiLayout.PAGE_W + 4,
+                this.catalystItems,
+                this.catalystFluids,
+                this.cacheRecipeCount,
+                slot -> this.removeSlotFromGTRecipeCache(slot));
+        page.waitToAdded(catalystUI);
+        page.addWidget(pager.createPaginationUI(catalystUI::toggleFor));
+        return page;
+    }
+
+    // ---------------------------------------------------------------- 页 ②：通配符样板槽（50，10×5）
+
+    private @NotNull WidgetGroup shanhaiWildcardPage() {
+        final WidgetGroup page = new WidgetGroup(0, 0,
+                ShanhaiStellarUiLayout.PAGE_W, ShanhaiStellarUiLayout.PAGE_H);
+        page.addWidget(new LabelWidget(4, 2,
+                Component.translatable(LANG_WILDCARD_SECTION, WILDCARD_SLOT_COUNT)));
+        for (int i = 0; i < WILDCARD_SLOT_COUNT; i++) {
+            final int wildcardSlot = i;
+            final int x = WILDCARD_GRID_X + (i % WILDCARD_COLUMNS) * 18;
+            final int y = WILDCARD_PAGE_GRID_Y + (i / WILDCARD_COLUMNS) * 18;
+            // 与上游同一套控件/同一套回调语义：样板变了 ⇒ 通知机器；中键 ⇒ 选为配置目标。
+            final AEPatternViewExtendSlotWidget slotWidget =
+                    new AEPatternViewExtendSlotWidget(this.wildcardPatternInventory, wildcardSlot, x, y);
+            slotWidget.setOnPatternSlotChanged(() -> this.shanhaiOnWildcardSlotChanged(wildcardSlot));
+            slotWidget.setOnMiddleClick(() -> this.shanhaiSelectWildcardConfigSlot(wildcardSlot));
+            slotWidget.setBackground(GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY);
+            page.addWidget(slotWidget);
+            // 阶段四 ⑤：歧义角标（5×5，画在格内右下角）
+            page.addWidget(new ImageWidget(x + 12, y + 12, 5, 5, () -> this.shanhaiWildcardMarker(wildcardSlot)));
+        }
+        page.addWidget(new LabelWidget(4, WILDCARD_PAGE_CONFIG_LABEL_Y, this::shanhaiWildcardConfigLine));
+        page.addWidget(new AETextInputButtonWidget(4, WILDCARD_PAGE_CONFIG_INPUT_Y, 150, 10)
+                .setText("")
+                .setOnConfirm(this::shanhaiApplyWildcardTypeFromText)
+                .setButtonTooltips(Component.translatable(LANG_WILDCARD_HINT)));
+        return page;
+    }
+
+    // ---------------------------------------------------------------- 页 ③：库存输入（160，8×2×10）
+
+    private @NotNull WidgetGroup shanhaiStockPage() {
+        final WidgetGroup page = new WidgetGroup(0, 0,
+                ShanhaiStellarUiLayout.PAGE_W, ShanhaiStellarUiLayout.PAGE_H);
+        page.addWidget(new LabelWidget(4, 2,
+                Component.translatable(LANG_STOCK_SECTION, ShanhaiStockConfigLayout.CONFIG_SIZE,
+                        ShanhaiStockConfigLayout.PAGE_COUNT)));
+        // 🔴 这是 gtlcore 的 AEDualConfigWidget，**不是** PaginationUIManager：它的第 8 个参数是
+        //    【行数】而不是页数（pageSize = rows*8；MAX_PAGE = itemList.size()/pageSize，javap -c 偏移 69–135）。
+        //    传 2 ⇒ 每页 16 格、160 格 ⇒ 10 页。传 10 会得到「一页 80 格、2 页」。
+        page.addWidget(new AEDualConfigWidget(4, 16,
+                this.shanhaiStockItemHandler,
+                this.shanhaiStockFluidShapeOnly,
+                this::shanhaiSetStockPage,
+                this.shanhaiStockPage,
+                true,
+                ShanhaiStockConfigLayout.ROWS_PER_PAGE));
+        return page;
+    }
+
+    // ---------------------------------------------------------------- 页 ④：标签过滤输入
+
+    /**
+     * ⑧ 的页：<b>白名单 + 黑名单两个输入框 ＋ 语法说明 ＋ 匹配预览</b>。
+     *
+     * <p>本页在阶段七<b>只做界面与真实预览</b>：预览的数字是服务端拿当前 ME 库存快照、
+     * 用 {@link ShanhaiTagFilterExpression} <b>真算</b>出来的（不是占位文本）；
+     * 但「把命中的物品自动灌进库存输入」这条<b>还没接</b>（阶段六 §G-4 已列为待确认）——
+     * 也就是说本页现在<b>告诉你它会收哪些东西，但还不会真的替你收</b>，报告里写清、页面说明里也写清。
+     */
+    private @NotNull WidgetGroup shanhaiTagFilterPage() {
+        final WidgetGroup page = new WidgetGroup(0, 0,
+                ShanhaiStellarUiLayout.PAGE_W, ShanhaiStellarUiLayout.PAGE_H);
+        page.addWidget(new LabelWidget(4, 2, Component.translatable(LANG_TAG_SECTION)));
+        page.addWidget(new LabelWidget(4, 16, Component.translatable(LANG_TAG_WHITE)));
+        page.addWidget(new AETextInputButtonWidget(4, 26, 186, 10)
+                .setText("")
+                .setOnConfirm(this::shanhaiApplyTagWhite)
+                .setButtonTooltips(Component.translatable(LANG_TAG_WHITE_HINT)));
+        page.addWidget(new LabelWidget(4, 42, Component.translatable(LANG_TAG_BLACK)));
+        page.addWidget(new AETextInputButtonWidget(4, 52, 186, 10)
+                .setText("")
+                .setOnConfirm(this::shanhaiApplyTagBlack)
+                .setButtonTooltips(Component.translatable(LANG_TAG_BLACK_HINT)));
+        // 说明（逐字来自求值器自己，避免文案与实现两套）
+        page.addWidget(new LabelWidget(4, 70, Component.literal(ShanhaiTagFilterExpression.syntaxHint())));
+        page.addWidget(new LabelWidget(4, 82, Component.translatable(LANG_TAG_EXPLAIN_1)));
+        page.addWidget(new LabelWidget(4, 94, Component.translatable(LANG_TAG_EXPLAIN_2)));
+        // 当前生效的白/黑名单（每帧读 @DescSynced 字段）
+        page.addWidget(new LabelWidget(4, 112, this::shanhaiTagCurrentLine));
+        // 匹配预览（服务端算、同步过来；空 = 还没算）
+        page.addWidget(new LabelWidget(4, 124, this::shanhaiTagPreviewLine));
+        return page;
+    }
+
+    /** 页面上的「当前白名单 / 黑名单」一行（读同步字段，不读输入框）。 */
+    private @NotNull String shanhaiTagCurrentLine() {
+        final String white = this.shanhaiTagWhite == null || this.shanhaiTagWhite.isEmpty()
+                ? Component.translatable(LANG_WILDCARD_AUTO).getString() : this.shanhaiTagWhite;
+        final String black = this.shanhaiTagBlack == null || this.shanhaiTagBlack.isEmpty()
+                ? Component.translatable(LANG_WILDCARD_AUTO).getString() : this.shanhaiTagBlack;
+        return Component.translatable(LANG_TAG_CURRENT, white, black).getString();
+    }
+
+    /** 匹配预览一行。 */
+    private @NotNull String shanhaiTagPreviewLine() {
+        return this.shanhaiTagPreview == null ? "" : this.shanhaiTagPreview;
+    }
+
+    // ---------------------------------------------------------------- 阶段七：左下角两个开关（闸 / 神锻）
+
+    /** 闸计数行（GUI；与 Jade 两行、WARN 同一对字段）。 */
+    private @NotNull String shanhaiGateCountLine() {
+        if (this.shanhaiUntypedPatternCount <= 0 && this.shanhaiAmbiguousPatternCount <= 0) {
+            return Component.translatable(LANG_GATE_COUNT_NONE).getString();
+        }
+        return Component.translatable(LANG_GATE_COUNT, this.shanhaiUntypedPatternCount,
+                this.shanhaiAmbiguousPatternCount).getString();
+    }
+
+    /**
+     * 闸按钮 tooltip：{@code 闸（拦歧义样板）：开/关}。
+     *
+     * <p>语义一个字都没动 —— 仍然只读 {@link #blockAmbiguousPatterns}；
+     * 变的只是「呈现方式」（原来是页面上一个 30 px 的文字按钮，现在是左侧一列的高亮/暗图标按钮）。
+     */
+    private @NotNull Component shanhaiGateTooltip() {
+        return Component.translatable(LANG_TIP_GATE,
+                Component.translatable(this.blockAmbiguousPatterns
+                        ? LANG_STATE_ON : LANG_STATE_OFF));
+    }
+
+    /** 神锻按钮 tooltip：{@code 神锻样板：开/关（倍率 N）}。 */
+    private @NotNull Component shanhaiForgeTooltip() {
+        return Component.translatable(LANG_TIP_FORGE,
+                Component.translatable(this.forgePatternMode
+                        ? LANG_STATE_ON : LANG_STATE_OFF),
+                this.forgePatternMultiplier);
+    }
+
+    // ---------------------------------------------------------------- 阶段七：标签过滤页的输入/预览
+
+    /** 标签页：白名单输入框回调（服务端；空串 = 不过滤）。 */
+    private void shanhaiApplyTagWhite(@Nullable String text) {
+        if (this.isRemote()) {
+            return;
+        }
+        this.shanhaiTagWhite = text == null ? "" : text.trim();
+        this.shanhaiRefreshTagPreview();
+        ShanhaiStellarLog.info("标签过滤：白名单 => [{}]（{}）", this.shanhaiTagWhite,
+                this.shanhaiTagPreview);
+    }
+
+    /** 标签页：黑名单输入框回调（服务端；空串 = 不排除）。 */
+    private void shanhaiApplyTagBlack(@Nullable String text) {
+        if (this.isRemote()) {
+            return;
+        }
+        this.shanhaiTagBlack = text == null ? "" : text.trim();
+        this.shanhaiRefreshTagPreview();
+        ShanhaiStellarLog.info("标签过滤：黑名单 => [{}]（{}）", this.shanhaiTagBlack,
+                this.shanhaiTagPreview);
+    }
+
+    /**
+     * 重算标签页的匹配预览（<b>服务端</b>）。
+     *
+     * <p>数据源 = {@link #shanhaiStockSnapshot}（ME 网络可用物品的每 ≤1 秒快照）；
+     * 判据 = {@link ShanhaiTagFilterExpression}（白名单为空 ⇒ 全收；黑名单命中 ⇒ 排除；语法错 ⇒ 报错原文）。
+     * <p>⚠️ 只统计<b>物品</b>（标签在物品注册表里；流体是另一套 registry，本阶段不混算）。
+     */
+    private void shanhaiRefreshTagPreview() {
+        if (this.isRemote()) {
+            return;
+        }
+        if (this.shanhaiStockSnapshot == null) {
+            this.shanhaiTagPreview = Component.translatable(LANG_TAG_PREVIEW_NO_DATA).getString();
+            return;
+        }
+        final String white = this.shanhaiTagWhite == null ? "" : this.shanhaiTagWhite.trim();
+        final String black = this.shanhaiTagBlack == null ? "" : this.shanhaiTagBlack.trim();
+        int matched = 0;
+        int total = 0;
+        try {
+            for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<AEKey> entry : this.shanhaiStockSnapshot) {
+                if (!(entry.getKey() instanceof AEItemKey itemKey)) {
+                    continue;
+                }
+                total++;
+                final java.util.List<String> tags = this.shanhaiItemTagStrings(itemKey);
+                final boolean whiteOk = white.isEmpty() || ShanhaiTagFilterExpression.matches(white, tags);
+                final boolean blackHit = !black.isEmpty() && ShanhaiTagFilterExpression.matches(black, tags);
+                if (whiteOk && !blackHit) {
+                    matched++;
+                }
+            }
+        } catch (IllegalArgumentException badExpression) {
+            // 表达式写错 ⇒ 把错误原文显示出来（不静默当成全收/全不收）
+            this.shanhaiTagPreview = Component.translatable(LANG_TAG_PREVIEW_ERROR,
+                    String.valueOf(badExpression.getMessage())).getString();
+            return;
+        }
+        this.shanhaiTagPreview = Component.translatable(LANG_TAG_PREVIEW, matched, total).getString();
+    }
+
+    /** 一个 AE 物品键身上的标签串（{@code forge:ores} 这种形式）。 */
+    private @NotNull java.util.List<String> shanhaiItemTagStrings(@NotNull AEItemKey key) {
+        final ItemStack stack = key.getReadOnlyStack();
+        if (stack.isEmpty()) {
+            return java.util.List.of();
+        }
+        final java.util.List<String> out = new java.util.ArrayList<>();
+        stack.getTags().forEach(tag -> out.add(tag.location().toString()));
+        return out;
+    }
+
+    // ---------------------------------------------------------------- 槽号 ↔ 样板（对外 API）
+
+    /**
+     * 对外槽号 → 那块样板。<b>唯一的槽号换算点</b>。
+     *
+     * <p>槽号空间（对外）：{@code 0 .. 1079} = 普通样板（父类 {@code patternInventory}），
+     * {@code 1080 .. 1129} = 通配符样板（本类 {@link #wildcardPatternInventory}）。
+     * <p>⚠️ 这个「对外空间」<b>只用于本类的 API/日志/界面</b>，<b>绝不</b>回灌父类方法 ——
+     * 父类只认 0..1079（类注释 §七）。
+     *
+     * @return 越界/空槽 ⇒ 空栈；{@code null} 只可能来自真正越界的槽号
+     */
+    public @Nullable ItemStack patternStackOf(int apiSlot) {
+        if (apiSlot >= 0 && apiSlot < PATTERN_SLOT_COUNT) {
+            return this.getPatternInventory().getStackInSlot(apiSlot);
+        }
+        if (apiSlot >= WILDCARD_API_SLOT_OFFSET && apiSlot < WILDCARD_API_SLOT_OFFSET + WILDCARD_SLOT_COUNT) {
+            return this.wildcardPatternInventory.getStackInSlot(apiSlot - WILDCARD_API_SLOT_OFFSET);
+        }
+        return null;
+    }
+
+    /**
+     * <b>③ 的对外 API（只读）</b>：这块样板被读出来的<b>归一化配方类型 id</b>。
+     *
+     * <ul>
+     *   <li>空表 ⇒ 四个来源都没写（= 自动识别）；</li>
+     *   <li>1 个 ⇒ 唯一采信；</li>
+     *   <li>≥2 个 ⇒ <b>歧义</b>（不猜，把候选原样交出去，由调用方决定怎么办）。</li>
+     * </ul>
+     * 方法名与语义按父代理给的口径；本方法<b>不产生任何副作用</b>（不写 NBT、不改缓存、不做闸）。
+     */
+    public @NotNull List<String> getRecipeTypeIdsForSlot(int apiSlot) {
+        return this.resolveRecipeTypeForSlot(apiSlot).ids();
+    }
+
+    /** 同上，但把「四个来源各读到了什么 / 有没有歧义 / 哪些 id 在注册表里查不到」一并交出去。 */
+    public @NotNull ShanhaiPatternTypeReader.Resolution resolveRecipeTypeForSlot(int apiSlot) {
+        final ItemStack stack = this.patternStackOf(apiSlot);
+        return stack == null ? ShanhaiPatternTypeReader.resolve(ItemStack.EMPTY)
+                : ShanhaiPatternTypeReader.resolve(stack);
+    }
+
+    // ---------------------------------------------------------------- 母槽中间配置（⑤）
+
+    /**
+     * <b>⑤ 的写入口</b>：给某个通配符槽的样板写入（或清除）它<b>手动指定</b>的配方类型。
+     *
+     * <p>「中间配置」落在<b>样板物品自己的 NBT</b> 上（键 {@code gt_shanhai_recipe_type}），不是机器的数组字段：
+     * <ul>
+     *   <li>清掉 = 删键 = 回自动识别（本方法 {@code raw} 为空即如此）；</li>
+     *   <li>这份配置<b>跟着样板走</b>：把这块通配符样板挪到另一台同款机器，指定关系不丢；</li>
+     *   <li>机器侧<b>零新增数组字段</b> ⇒ 绕开 LDLib「复杂数组必须 IContentChangeAware/@LazyManaged」
+     *       那一整类崩溃（见 {@link #wildcardConfigType} 的注释）。</li>
+     * </ul>
+     * ⚠️ 代价（写清楚）：配置<b>不</b>跟「槽号」绑定 —— 换一块样板进来，读到的是新样板自己的配置。
+     * 若用户要「配置钉在槽上、换样板仍保留」，那是另一种语义，需要 {@code @Persisted @LazyManaged String[]}，
+     * 属显式设计变更（报告「待确认」里已列）。
+     *
+     * @param wildcardSlot 0 .. {@value #WILDCARD_SLOT_COUNT}-1
+     * @param raw          要写的类型 id（任意写法，走 {@link ShanhaiRecipeTypeIds#canonical}）；
+     *                     空/null = 清除
+     * @return 真的改了东西 ⇒ true；槽空/越界/客户端侧 ⇒ false
+     */
+    public boolean applyWildcardRecipeType(int wildcardSlot, @Nullable String raw) {
+        if (this.isRemote()) {
+            return false;
+        }
+        if (wildcardSlot < 0 || wildcardSlot >= WILDCARD_SLOT_COUNT) {
+            ShanhaiStellarLog.warn("applyWildcardRecipeType 槽号越界：{}（合法 0..{}）", wildcardSlot,
+                    WILDCARD_SLOT_COUNT - 1);
+            return false;
+        }
+        final ItemStack stack = this.wildcardPatternInventory.getStackInSlot(wildcardSlot);
+        if (stack.isEmpty()) {
+            ShanhaiStellarLog.type("applyType 跳过：通配符槽 {} 是空的", wildcardSlot);
+            return false;
+        }
+        final String normalized = ShanhaiRecipeTypeIds.canonical(raw);
+        // 改的是【副本】再塞回去：ItemStackTransfer 的 setStackInSlot 会触发 contents-changed，
+        // 直接 in-place 改 tag 不触发（那样会「看起来改了、其实没存档」）。
+        final ItemStack updated = stack.copy();
+        final CompoundTag tag = updated.getOrCreateTag();
+        if (normalized.isEmpty()) {
+            tag.remove(ShanhaiRecipeTypeIds.KEY_RECIPE_TYPE);
+        } else {
+            tag.putString(ShanhaiRecipeTypeIds.KEY_RECIPE_TYPE, normalized);
+        }
+        if (tag.isEmpty()) {
+            updated.setTag(null);
+        }
+        this.wildcardPatternInventory.setStackInSlot(wildcardSlot, updated);
+        this.shanhaiRefreshWildcardConfigType();
+        this.shanhaiRefreshWildcardMask();
+        this.shanhaiInvalidateGateCache();
+        if (ShanhaiStellarLog.isTypeLogEnabled()) {
+            final ShanhaiPatternTypeReader.Resolution after =
+                    ShanhaiPatternTypeReader.resolve(this.wildcardPatternInventory.getStackInSlot(wildcardSlot));
+            ShanhaiStellarLog.logSlotType("applyType", WILDCARD_API_SLOT_OFFSET + wildcardSlot,
+                    this.wildcardPatternInventory.getStackInSlot(wildcardSlot), after);
+        }
+        return true;
+    }
+
+    /** 输入框回调（服务端执行）。空串 = 清除。 */
+    private void shanhaiApplyWildcardTypeFromText(@Nullable String text) {
+        this.applyWildcardRecipeType(this.wildcardConfigSlot, text);
+    }
+
+    /** 中键：把这一格设为配置目标（**服务端**执行才有效，客户端那次本地执行被守卫掉）。 */
+    private void shanhaiSelectWildcardConfigSlot(int wildcardSlot) {
+        if (this.isRemote()) {
+            return;
+        }
+        this.wildcardConfigSlot = wildcardSlot;
+        this.shanhaiRefreshWildcardConfigType();
+        ShanhaiStellarLog.type("select wildcardSlot={} apiSlot={}", wildcardSlot,
+                WILDCARD_API_SLOT_OFFSET + wildcardSlot);
+    }
+
+    /** 样板格内容变了（服务端回调）：刷新显示用的手填值 + 打开开关时打一行。 */
+    private void shanhaiOnWildcardSlotChanged(int wildcardSlot) {
+        if (this.isRemote()) {
+            return;
+        }
+        this.shanhaiRefreshWildcardConfigType();
+        this.shanhaiRefreshWildcardMask();
+        this.forgeCacheDirty = true;
+        if (ShanhaiStellarLog.isTypeLogEnabled()) {
+            final ItemStack stack = this.wildcardPatternInventory.getStackInSlot(wildcardSlot);
+            ShanhaiStellarLog.logSlotType("wildcardChanged", WILDCARD_API_SLOT_OFFSET + wildcardSlot, stack,
+                    ShanhaiPatternTypeReader.resolve(stack));
+        }
+    }
+
+    /** 50 格容器的 contents-changed（`setStackInSlot` / 玩家拖入都会走到这里）。 */
+    private void shanhaiOnWildcardInventoryChanged() {
+        if (this.isRemote()) {
+            return;
+        }
+        this.shanhaiRefreshWildcardConfigType();
+        this.shanhaiRefreshWildcardMask();
+        this.forgeCacheDirty = true;
+        this.shanhaiInvalidateGateCache();
+    }
+
+    /**
+     * 把「当前目标格上手填的类型」重新读一遍（<b>唯一写入点</b>）。
+     *
+     * <p>权威 = 那块样板 NBT 里的 {@code gt_shanhai_recipe_type}；这里只是把它归一化后放进
+     * {@link #wildcardConfigType} 给客户端标签用。
+     */
+    private void shanhaiRefreshWildcardConfigType() {
+        final int slot = this.wildcardConfigSlot;
+        String manual = "";
+        if (slot >= 0 && slot < WILDCARD_SLOT_COUNT) {
+            final ItemStack stack = this.wildcardPatternInventory.getStackInSlot(slot);
+            if (!stack.isEmpty() && stack.getTag() != null) {
+                manual = stack.getTag().getString(ShanhaiRecipeTypeIds.KEY_RECIPE_TYPE);
+            }
+        }
+        this.wildcardConfigType = ShanhaiRecipeTypeIds.canonical(manual);
+    }
+
+    /** 配置行文案：{@code 目标：第 N 格 / 手填类型：X（空 = 自动）}。 */
+    private String shanhaiWildcardConfigLine() {
+        final int slot = this.wildcardConfigSlot;
+        final String slotText = slot < 0 || slot >= WILDCARD_SLOT_COUNT
+                ? "-" : String.valueOf(slot + 1);
+        final String typeText = this.wildcardConfigType == null || this.wildcardConfigType.isEmpty()
+                ? Component.translatable(LANG_WILDCARD_AUTO).getString()
+                : this.wildcardConfigType;
+        return Component.translatable(LANG_WILDCARD_CONFIG, slotText, typeText).getString();
+    }
+
+    // ---------------------------------------------------------------- 日志（③ 的可断言面）
+
+    /**
+     * {@code onLoad}：先让父类完成它那套接线，再（仅在开关打开时）把全部槽的读取结果打出来。
+     *
+     * <p>⚠️ 服务端判据用 {@code isRemote()}（与父类 {@code onPatternChange} 同款），
+     * 客户端那份不打日志（否则同一台机器两份读数，日志里会互相矛盾）。
+     */
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (this.isRemote()) {
+            return;
+        }
+        this.shanhaiRefreshWildcardConfigType();
+        this.shanhaiRefreshWildcardMask();
+        this.forgeCacheDirty = true;
+        this.shanhaiInvalidateGateCache();
+        // ---- 阶段六 ⑦：迁移 + 缓存 + 首轮同步
+        // （onLoad 早于/晚于 loadCustomPersistedData 都不影响正确性：迁移有 once 标记，重复调用是无操作）
+        this.shanhaiMigrateLegacyStockConfigs("onLoad");
+        this.shanhaiWarnInvisiblePatterns("onLoad");
+        if (this.shanhaiStockItemHandler != null) {
+            this.shanhaiStockItemHandler.onConfigChanged();
+        }
+        this.shanhaiRebuildStockItemKeys();
+        this.shanhaiSyncStock();
+        if (ShanhaiStellarLog.isTypeLogEnabled()) {
+            this.shanhaiDumpStockConfig("onLoad");
+        }
+        if (ShanhaiStellarLog.isTypeLogEnabled()) {
+            this.shanhaiDumpRecipeTypesToLog("onLoad");
+        }
+    }
+
+    /**
+     * 把「普通 1080 槽 + 通配符 50 槽」里<b>有样板</b>的那些逐槽打一行，最后打一行汇总。
+     *
+     * <p>只在开关打开时做任何事（{@link ShanhaiStellarLog#isTypeLogEnabled()}）；
+     * 关着时连循环都不进那两次字符串拼接（逐槽拼接在 1130 槽上是实打实的开销）。
+     *
+     * <p>调用点：{@link #onLoad()}（开服/放机器时一次）、以及阶段三把它挂到命令上做现场断言。
+     */
+    public void shanhaiDumpRecipeTypesToLog(@NotNull String where) {
+        if (!ShanhaiStellarLog.isTypeLogEnabled()) {
+            return;
+        }
+        int unique = 0;
+        int ambiguous = 0;
+        int none = 0;
+        int total = 0;
+        final int maxApiSlot = WILDCARD_API_SLOT_OFFSET + WILDCARD_SLOT_COUNT;
+        for (int apiSlot = 0; apiSlot < maxApiSlot; apiSlot++) {
+            final ItemStack stack = this.patternStackOf(apiSlot);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            total++;
+            final ShanhaiPatternTypeReader.Resolution resolution = ShanhaiPatternTypeReader.resolve(stack);
+            switch (resolution.verdict()) {
+                case UNIQUE -> unique++;
+                case AMBIGUOUS -> ambiguous++;
+                default -> none++;
+            }
+            ShanhaiStellarLog.logSlotType(where, apiSlot, stack, resolution);
+        }
+        ShanhaiStellarLog.logSummary(where, unique, ambiguous, none, total);
+    }
+
+    // ================================================================ 阶段三：槽号空间接入（第 1 项）
+
+    /** 本槽号是不是通配符槽（{@code 1080..1129}）。<b>唯一的判定点</b>。 */
+    private static boolean shanhaiIsWildcardSlot(int slot) {
+        return slot >= PATTERN_SLOT_COUNT && slot < PATTERN_SLOT_COUNT + WILDCARD_SLOT_COUNT;
+    }
+
+    /**
+     * 通配符槽的 {@code InternalSlot}（50 个，下标 = 槽号 − 1080）。
+     *
+     * <p>🔴 <b>自己造，不交给父类的 {@code createInternalSlot} 循环</b>，理由有两个：
+     * <ol>
+     *   <li>父类那个循环跑在<b>超类构造器里</b>，长度是 {@code internalInventory.length}（1080）
+     *       —— 它根本不会碰 ≥1080；</li>
+     *   <li>父类构造器给每个槽挂的 {@code setOnContentsChanged} 会调 {@code removeSlotFromGTRecipeCache(slot)}，
+     *       那里第一条就是 {@code cacheRecipe[slot] = false}（{@code javap -c} 实证）——
+     *       {@code cacheRecipe} 长度只有 1080 ⇒ 通配符槽<b>绝不能</b>挂父类那套回调。
+     *       本类给它们挂的是空回调（只保证「非 null」，不让别处的 {@code getOnContentsChanged().run()} NPE）。</li>
+     * </ol>
+     * <p>⚠️ 数量固定 50（不是「有样板的条数」）：上游用活动数，那样槽号↔下标会随样板增减漂移；
+     * 固定 50 + 纯位移映射（槽号−1080）让外部拿到的下标<b>永远指同一格</b>。
+     */
+    private final List<MEPatternBufferPartMachineBase.InternalSlot> wildcardInternalSlots =
+            new ArrayList<>(WILDCARD_SLOT_COUNT);
+
+    /** 父类的终端样板库存（1080 格），构造器里取一次，供合并视图用。 */
+    private final InternalInventory baseTerminalPatternInventory;
+
+    /** 合并视图（1080 + 50），构造器里建一次；{@link #getTerminalPatternInventory()} 返回它。 */
+    private final InternalInventory combinedTerminalPatternInventory;
+
+    /**
+     * AE 终端看到的样板库存 = <b>1080 普通 + 50 通配符</b> 的合并视图。
+     *
+     * <p>为什么必须合并：父类的 {@code getTerminalPatternInventory()} 返回的是
+     * {@code internalPatternInventory}（一个只认 {@code patternInventory} 的匿名类，长度 1080）
+     * ⇒ 不合并的话，AE 终端里**看不到**那 50 格通配符样板。上游也是这么处理的
+     * （{@code upstream-RecipeTypePatternBufferPartMachine.java:331}
+     * {@code createCombinedTerminalPatternInventory(super.getTerminalPatternInventory())}）。
+     *
+     * <p>{@code InternalInventory} 只有 3 个抽象方法（{@code javap} 实证：{@code size()} /
+     * {@code getStackInSlot(int)} / {@code setItemDirect(int, ItemStack)}；{@code isItemValid} 有 default）。
+     */
+    private final class CombinedTerminalPatternInventory implements InternalInventory {
+
+        @Override
+        public int size() {
+            return PATTERN_SLOT_COUNT + WILDCARD_SLOT_COUNT;
+        }
+
+        @Override
+        public ItemStack getStackInSlot(int slot) {
+            if (slot < 0 || slot >= size()) {
+                return ItemStack.EMPTY;
+            }
+            if (slot < PATTERN_SLOT_COUNT) {
+                return CombinedTerminalPatternInventory.this.baseRef().getStackInSlot(slot);
+            }
+            return StellarSampleAssemblerPartMachine.this.wildcardPatternInventory
+                    .getStackInSlot(slot - PATTERN_SLOT_COUNT);
+        }
+
+        @Override
+        public void setItemDirect(int slot, ItemStack stack) {
+            if (slot < 0 || slot >= size()) {
+                return;
+            }
+            if (slot < PATTERN_SLOT_COUNT) {
+                CombinedTerminalPatternInventory.this.baseRef().setItemDirect(slot, stack);
+                return;
+            }
+            // 通配符槽：走我们自己的容器（setStackInSlot 会触发 contents-changed ⇒ 会存档）。
+            StellarSampleAssemblerPartMachine.this.wildcardPatternInventory
+                    .setStackInSlot(slot - PATTERN_SLOT_COUNT, stack);
+            StellarSampleAssemblerPartMachine.this.onPatternChange(slot);
+        }
+
+        private InternalInventory baseRef() {
+            return StellarSampleAssemblerPartMachine.this.baseTerminalPatternInventory;
+        }
+    }
+
+    /**
+     * 槽数 = <b>1080 + 50 = 1130</b>（固定）。
+     *
+     * <p>🔴 覆写它是阶段三第 1 项的核心：Base 类所有「遍历全部槽」的方法
+     * （{@code getActiveSlots()} / {@code getActiveAndUnCachedSlots()} / {@code getMergedInternalSlot()} /
+     * {@code pushPattern} 里找空槽 等）都以它为界，并且<b>只通过 {@link #getInternalSlot(int)} 取槽</b>
+     * （Base 里没有 {@code internalInventory} 这个字段 —— 它住在 {@code MEPatternBufferPartMachine}）
+     * ⇒ 把这两个方法成对覆写，Base 的循环就永远不会碰父类数组。
+     */
+    @Override
+    protected int getInternalSlotCount() {
+        return ShanhaiWildcardLayout.SLOT_SPACE_TOTAL;
+    }
+
+    /**
+     * 槽号 → InternalSlot。<b>这是唯一一处把 ≥1080 的下标接住的地方</b>。
+     *
+     * <p>🔴 越界时<b>抛</b>而不是回落：本类的 {@link #getInternalSlotCount()} 与映射是同一个常量对，
+     * 越界只可能来自「有人算错了槽号」这种真 bug。抛出来带着槽号与范围，
+     * 比悄悄返回一个别的槽（会让配方跑错格子）或返回 null（会在下游 NPE，堆栈离现场很远）都好。
+     */
+    @Override
+    protected MEPatternBufferPartMachineBase.InternalSlot getInternalSlot(int slot) {
+        if (ShanhaiWildcardLayout.isMotherSlot(slot)) {
+            return this.wildcardInternalSlots.get(slot - ShanhaiWildcardLayout.MOTHER_OFFSET);
+        }
+        if (ShanhaiWildcardLayout.isExpandSlot(slot)) {
+            return this.expandInternalSlots.get(slot - ShanhaiWildcardLayout.EXPAND_OFFSET);
+        }
+        if (ShanhaiWildcardLayout.isPatternSlot(slot)) {
+            return super.getInternalSlot(slot);
+        }
+        throw new IndexOutOfBoundsException("星律样板总成：槽号 " + slot + " 越界（合法 0.."
+                + (ShanhaiWildcardLayout.SLOT_SPACE_TOTAL - 1) + "：" + ShanhaiWildcardLayout.describe()
+                + "）—— 这是槽号计算 bug，不是数据问题");
+    }
+
+    /**
+     * 通配符槽的「有样板」判定 = 那 50 格里有东西。
+     *
+     * <p>为什么要覆写：父类那份是 {@code hasPatternArray[slot]} 且<b>自带边界检查</b>
+     * （{@code slot < 0 || slot >= hasPatternArray.length → false}，偏移 0–27），
+     * 于是通配符槽会一律被判成「没样板」⇒ {@code InternalSlot.isItemActive} 恒 false ⇒
+     * 槽永远不活跃。覆写后：普通槽走父类原逻辑（一字不差），通配符槽读自己的容器。
+     */
+    @Override
+    protected boolean hasPatternInSlot(int slot) {
+        if (ShanhaiWildcardLayout.isMotherSlot(slot)) {
+            return !this.wildcardPatternInventory.getStackInSlot(slot - ShanhaiWildcardLayout.MOTHER_OFFSET).isEmpty();
+        }
+        if (ShanhaiWildcardLayout.isExpandSlot(slot)) {
+            // 这一条展开"存在" ⇔ 母槽有样板且展开条数 > 分支号（展开表在 getAvailablePatterns 路径里重建）
+            return this.shanhaiExpansionCountFor(this.shanhaiMotherOfExpandSlot(slot)) > ShanhaiWildcardLayout.branchOf(slot);
+        }
+        return super.hasPatternInSlot(slot);
+    }
+
+    /**
+     * 通配符槽<b>一律当作「已有配方缓存」</b>（= 不参与 gtlcore 的配方搜索）。
+     *
+     * <p>🔴 为什么本轮必须这样，写清楚不许含糊：父类那份实现直接 {@code cacheRecipe[slot]}
+     * （偏移 4 {@code baload}，数组长度 1080）⇒ 通配符槽走父类就是 AIOOBE。
+     * 而「返回 false（= 需要搜索）」会让 gtlcore 的搜索路径拿着通配符槽去查配方 ——
+     * 那块样板目前<b>还没有展开器</b>（阶段三后段/下一刀才做），搜也搜不出正确结果，
+     * 反而可能把「按通配符样板查出来的某条配方」写进缓存 = 正是需求①要防的「串配方」。
+     * ⇒ 本轮语义：<b>通配符槽不进配方搜索</b>（既不崩、也不会串）。等展开器上了再改这一行。
+     */
+    @Override
+    protected boolean hasRecipeCacheInSlot(int slot) {
+        if (ShanhaiWildcardLayout.isMotherSlot(slot) || ShanhaiWildcardLayout.isExpandSlot(slot)) {
+            // 母槽：不参与搜索；展开槽：它的"配方缓存"由展开表本身代表（阶段五不写 cacheRecipe）
+            return true;
+        }
+        return super.hasRecipeCacheInSlot(slot);
+    }
+
+    /**
+     * 🔴 <b>对通配符槽号短路</b> —— 阶段三第 1 项里最要命的那一条。
+     *
+     * <p>父类 {@code onPatternChange(int)} 的第一句就是 {@code internalInventory[slot]}（{@code aaload}，
+     * 偏移 9/13，<b>没有边界检查</b>），紧接着调 {@code getRealPattern(slot, stack)} ——
+     * 而 {@code getRealPattern} 在 gtladditions 里是 <b>@Overwrite</b>，
+     * 它自己也 {@code internalInventory[slot]}（{@code javap -c} 偏移 9/14）⇒
+     * 任何 ≥1080 的槽号走到父类那条路 = 当场 {@code ArrayIndexOutOfBoundsException}，
+     * <b>而且子类无法通过覆写 getRealPattern 来救</b>（mixin 覆写的是父类方法，我们只能绕开）。
+     *
+     * <p>⇒ 本覆写是「结构性隔离」的落点：通配符槽号<b>永不</b>调 {@code super.onPatternChange}。
+     * 普通槽号一字不差地转交父类（行为零变化）。
+     */
+    @Override
+    protected void onPatternChange(int slot) {
+        if (ShanhaiWildcardLayout.isMotherSlot(slot) || ShanhaiWildcardLayout.isExpandSlot(slot)) {
+            // 通配符槽：只走本类自己的账本（阶段二/三都还没有 InternalSlot 缓存，
+            // 这里只做「失效闸缓存 + 日志 + 让终端重读」），绝不进父类数组。
+            this.shanhaiInvalidateGateCache();
+            this.shanhaiOnWildcardSlotChanged(slot - ShanhaiWildcardLayout.MOTHER_OFFSET);
+            return;
+        }
+        super.onPatternChange(slot);
+        this.shanhaiInvalidateGateCache();
+    }
+
+    /** AE 终端看到的样板库存 = 合并视图（见 {@link CombinedTerminalPatternInventory}）。 */
+    @Override
+    public InternalInventory getTerminalPatternInventory() {
+        return this.combinedTerminalPatternInventory;
+    }
+
+    // ================================================================ 阶段三 第 2 项：① 防串配方（零 mixin）
+
+    /**
+     * <b>零 mixin 的闸</b>：在 AE 看到「这台机器有哪些样板」的那一步做过滤。
+     *
+     * <h2>为什么这条路是零注入（关键证据）</h2>
+     * AE 的 {@code PatternContainer#getAvailablePatterns()} 是<b>父类实现的一个普通 public 方法</b>
+     * （{@code MEPatternBufferPartMachine.getAvailablePatterns()} = {@code patternSlotMap.keySet()}，
+     * {@code javap -c} 偏移 0–19），我们<b>在自己类里覆写它</b>就能改变 AE 拿到的清单 ——
+     * 全程没有 mixin、没有反射，也没碰任何别人的类。
+     * <br>旁证：<b>上游那台机器自己也是这么干的</b>（{@code upstream-RecipeTypePatternBufferPartMachine.java:1823-1826}
+     * 在同一方法里把通配符展开出来的样板 {@code combined.addAll(wildcardPatterns)}）
+     * ⇒ 这就是「控制 AE 看见什么」的官方缝。
+     *
+     * <h2>闸规则（与 {@link #blockAmbiguousPatterns} 一致）</h2>
+     * <pre>
+     *   UNIQUE   ⇒ 放行
+     *   NONE     ⇒ 放行（未标注 ≠ 歧义；绝大多数样板没有类型键）
+     *   AMBIGUOUS⇒ 拦截（并打一条独立 WARN，见 {#shanhaiWarnAmbiguous}）
+     * </pre>
+     * ⚠️ 被拦下的样板<b>不是「悄悄消失」</b>：它有专门的 WARN 行（槽号 + 候选），
+     * 且 {@link #snapshotPatternTypes()} 里能查到它属于 {@code ambiguousSlots}。
+     *
+     * <h2>性能</h2>
+     * 这个方法在 AE 算料期会被频繁调用 ⇒ 用 {@link #gateBlockedSlots} 缓存，
+     * 只在「样板变了 / 手填类型变了 / 载入」时置脏（{@link #shanhaiInvalidateGateCache()}）。
+     */
+    @Override
+    public List<IPatternDetails> getAvailablePatterns() {
+        return this.shanhaiApplyForgeRewrite(this.shanhaiAppendWildcardExpansions(this.shanhaiGatedPatterns()));
+    }
+
+    /** 阶段三那道闸（只拦歧义）；抽成独立方法，好让阶段四的神锻改写叠在它之后。 */
+    private List<IPatternDetails> shanhaiGatedPatterns() {
+        final List<IPatternDetails> all = super.getAvailablePatterns();
+        if (!this.blockAmbiguousPatterns || all.isEmpty()) {
+            if (!this.blockAmbiguousPatterns) {
+                // 闸关时计数归零（GUI/Jade 不能显示「上闸时的旧数」）
+                this.shanhaiUntypedPatternCount = 0;
+                this.shanhaiAmbiguousPatternCount = 0;
+                this.shanhaiUntypedBlockedSlots = List.of();
+                this.shanhaiAmbiguousBlockedSlots = List.of();
+            }
+            return all;
+        }
+        this.shanhaiRefreshGateCache();
+        if (this.gateBlockedSlots.isEmpty()) {
+            return all;
+        }
+        final List<IPatternDetails> kept = new ArrayList<>(all.size());
+        for (IPatternDetails pattern : all) {
+            final Integer slot = super.getSlotIndexForPattern(pattern);
+            if (slot != null && this.gateBlockedSlots.contains(slot)) {
+                continue;
+            }
+            kept.add(pattern);
+        }
+        // 拦截必须看得见：两类各一条 WARN（带槽号）；GUI/Jade 另读那两个 @DescSynced 计数
+        this.shanhaiWarnBlocked(this.shanhaiUntypedBlockedSlots, this.shanhaiAmbiguousBlockedSlots);
+        return kept;
+    }
+
+    // ================================================================ 阶段四 第 1 项：④ 神锻样板模式
+
+    /**
+     * <b>神锻改写层</b>：把闸放行的样板再过一道「只改对 AE 声明的产出」。
+     *
+     * <h2>🔴 为什么这条路是可行的（`pushPattern` 调用链的字节码结论）</h2>
+     * {@code MEPatternBufferPartMachineBase.pushPattern(pattern, stacks)} 全body只有 4 步（{@code javap -c} 偏移 0–57）：
+     * <pre>
+     *   0: getMainNode().isActive()            // 网格在不在
+     *  16: getSlotIndexForPattern(pattern)     // ← **唯一**一次「这是哪一格」
+     *  20: if (slot == null || slot &lt; 0 || slot &gt;= getInternalSlotCount()) return false;
+     *  47: getInternalSlot(slot).pushPattern(stacks);  return true;
+     * </pre>
+     * ⇒ AE 把「它从 {@code getAvailablePatterns()} 拿到的那个对象」原样传回来时，
+     * 父类只需要能用它反查到槽号。<b>而 {@code getSlotIndexForPattern} 是 protected、可覆写、且不在
+     * gtladditions 的 @Overwrite 名单里</b> ⇒ 我们只要「先查父表、查不到再查改写表」就能让改写样板正常推料。
+     * <b>不需要</b>改 pushPattern 的其它任何一跳。
+     *
+     * <h2>反向映射的键为什么必须是「改写后的对象本身」</h2>
+     * AE 持有的是我们返回的那份实例；`MEBufferPatternHelper` 每次改写都会 new 一份新的 {@code IPatternDetails}
+     * ⇒ 只能用 <b>identity</b> 语义的 map（{@code HashMap} 默认 equals，但 {@code IPatternDetails} 的实现
+     * 没有覆写 equals 的话就是 identity；为稳妥，本类用 {@code java.util.IdentityHashMap}）。
+     */
+    private List<IPatternDetails> shanhaiApplyForgeRewrite(@NotNull List<IPatternDetails> gated) {
+        if (!this.forgePatternMode || gated.isEmpty() || !ShanhaiForgePatternMode.isAvailable()) {
+            if (!this.forgePatternSnapshot.isEmpty()) {
+                this.forgePatternSnapshot.clear();
+                this.rewrittenToSlot.clear();
+            }
+            return gated;
+        }
+        if (this.forgeCacheDirty) {
+            this.forgeCacheDirty = false;
+            this.forgePatternSnapshot.clear();
+            this.rewrittenToSlot.clear();
+            final net.minecraft.world.level.Level level = this.getLevel();
+            for (IPatternDetails pattern : gated) {
+                IPatternDetails rewritten = null;
+                try {
+                    rewritten = ShanhaiForgePatternMode.rewrite(pattern, level, true, this.forgePatternMultiplier);
+                } catch (Throwable t) {
+                    // 改写失败 ⇒ 该样板按原样放行（绝不因为改写失败就把样板吞掉）
+                    ShanhaiStellarLog.warn("神锻改写抛异常（该样板按原样放行）：{}", String.valueOf(t));
+                }
+                if (rewritten != null && rewritten != pattern) {
+                    final Integer slot = super.getSlotIndexForPattern(pattern);
+                    if (slot != null) {
+                        this.rewrittenToSlot.put(rewritten, slot);
+                        this.forgePatternSnapshot.add(rewritten);
+                        continue;
+                    }
+                }
+                this.forgePatternSnapshot.add(pattern);
+            }
+            ShanhaiStellarLog.type("神锻改写重建：gated={} rewritten={}", gated.size(), this.rewrittenToSlot.size());
+        }
+        return List.copyOf(this.forgePatternSnapshot);
+    }
+
+    /**
+     * 🔴 反向查槽：<b>父表优先</b>（普通样板一字不差走老路），查不到再查神锻改写表。
+     *
+     * <p>这一处覆写让 {@code pushPattern}（偏移 16 那一次调用）对「改写后的样板」也能拿到原槽号，
+     * 于是推料路径不需要任何其它改动。写成「父表优先」也保证了<b>改写关闭时行为与阶段三完全一致</b>。
+     */
+    @Override
+    protected Integer getSlotIndexForPattern(IPatternDetails pattern) {
+        final Integer direct = super.getSlotIndexForPattern(pattern);
+        if (direct != null) {
+            return direct;
+        }
+        if (this.expandCacheDirty) {
+            this.shanhaiRebuildExpansions();
+        }
+        final Integer expanded = this.expandedToSlot.get(pattern);
+        if (expanded != null) {
+            return expanded;
+        }
+        return this.rewrittenToSlot.get(pattern);
+    }
+
+    /** 神锻倍率（1..30，默认 15；越界自动夹住）。 */
+    public void setForgePatternMultiplier(int multiplier) {
+        final int clamped = Math.max(ShanhaiForgePatternMode.MIN_MULTIPLIER,
+                Math.min(ShanhaiForgePatternMode.MAX_MULTIPLIER, multiplier));
+        this.forgePatternMultiplier = clamped;
+        this.forgeCacheDirty = true;
+    }
+
+    public int getForgePatternMultiplier() {
+        return this.forgePatternMultiplier;
+    }
+
+    public boolean isForgePatternMode() {
+        return this.forgePatternMode;
+    }
+
+    // ================================================================ 阶段四 第 3 项：⑤ 界面标记 + 开关
+
+    /** 角标：歧义 = 红点；其余（含未标注）= 透明。 */
+    private static final IGuiTexture MARKER_AMBIGUOUS = shanhaiRect(0xFFFF3030);
+
+    private static final IGuiTexture MARKER_NONE = shanhaiRect(0x00000000);
+
+    private static IGuiTexture shanhaiRect(int argb) {
+        final ColorRectTexture texture = new ColorRectTexture();
+        texture.color = argb;
+        return texture;
+    }
+
+    /**
+     * 某一格通配符槽要画的角标。
+     *
+     * <p>⚠️ 只标<b>歧义</b>（红）—— <b>未标注是绝大多数样板的常态</b>（没人写类型键就是未标注），
+     * 全标等于整屏飘红、等于没标。若确实要标未标注，把这里的判断加一条即可（一行）。
+     */
+    private IGuiTexture shanhaiWildcardMarker(int localSlot) {
+        final long bit = 1L << localSlot;
+        return (this.wildcardAmbiguousMask & bit) != 0L ? MARKER_AMBIGUOUS : MARKER_NONE;
+    }
+
+    /** 重算 50 格的歧义位掩码（服务端算，`@DescSynced` 同步给客户端画角标）。 */
+    private void shanhaiRefreshWildcardMask() {
+        long mask = 0L;
+        for (int i = 0; i < WILDCARD_SLOT_COUNT; i++) {
+            final ItemStack stack = this.wildcardPatternInventory.getStackInSlot(i);
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (ShanhaiPatternTypeReader.resolve(stack).verdict() == ShanhaiPatternTypeReader.Verdict.AMBIGUOUS) {
+                mask |= (1L << i);
+            }
+        }
+        this.wildcardAmbiguousMask = mask;
+    }
+
+    // 阶段七：原来这里的两个「闸:开/关」「锻:开/关」文字按钮已删除 —— 它们现在由左侧竖排的图标按钮
+    // 呈现（{@link #shanhaiToggleButton}），文案走 lang 键，tooltip 每帧按真实字段重算。
+    // 语义（{@link #blockAmbiguousPatterns} / {@link #forgePatternMode} 的两个 toggle 方法）一个字没动。
+
+    /** 闸开关（服务端执行；客户端那次本地执行被守卫掉，与中键同款）。 */
+    private void shanhaiToggleGate() {
+        if (this.isRemote()) {
+            return;
+        }
+        this.blockAmbiguousPatterns = !this.blockAmbiguousPatterns;
+        this.shanhaiInvalidateGateCache();
+        ShanhaiStellarLog.info("闸（拦歧义样板）=> {}", this.blockAmbiguousPatterns ? "开" : "关");
+    }
+
+    /** 神锻开关（服务端执行）。 */
+    private void shanhaiToggleForge() {
+        if (this.isRemote()) {
+            return;
+        }
+        this.forgePatternMode = !this.forgePatternMode;
+        this.forgeCacheDirty = true;
+        this.shanhaiInvalidateGateCache();
+        ShanhaiStellarLog.info("神锻样板模式 => {}（倍率 {}，上游实现可用={}）",
+                this.forgePatternMode ? "开" : "关", this.forgePatternMultiplier,
+                ShanhaiForgePatternMode.isAvailable());
+    }
+
+    /** 闸缓存置脏（样板变更 / 手填类型变更 / 载入存档 都会走到）。 */
+    private void shanhaiInvalidateGateCache() {
+        this.gateCacheDirty = true;
+        this.expandCacheDirty = true;
+    }
+
+    /**
+     * 重算闸缓存：扫「有样板」的槽，只把<b>歧义</b>的槽号收进来。
+     *
+     * <p>⚠️ 槽号空间：本类的 {@code InternalSlot} 下标与「对外 API 槽号」在此处<b>重合</b>
+     * （0..1079 普通、1080..1129 通配符）—— 所以 {@link #patternStackOf(int)} 可以直接吃内部下标。
+     */
+    private void shanhaiRefreshGateCache() {
+        if (!this.gateCacheDirty) {
+            return;
+        }
+        this.gateCacheDirty = false;
+        this.gateBlockedSlots.clear();
+        final List<Integer> untyped = new ArrayList<>();
+        final List<Integer> ambiguous = new ArrayList<>();
+        final java.util.BitSet patternAmbiguous = new java.util.BitSet(ShanhaiWildcardLayout.PATTERN_SLOTS);
+        final java.util.BitSet patternUntyped = new java.util.BitSet(ShanhaiWildcardLayout.PATTERN_SLOTS);
+        final int count = this.getInternalSlotCount();
+        for (int slot = 0; slot < count; slot++) {
+            if (!this.hasPatternInSlot(slot)) {
+                continue;
+            }
+            final ItemStack stack = this.patternStackOf(slot);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            final ShanhaiPatternTypeReader.Verdict verdict =
+                    ShanhaiPatternTypeReader.resolve(stack).verdict();
+            // 🔴 闸的唯一判定点（阶段七：NONE 与 AMBIGUOUS 都拦；UNIQUE 放行；闸关时全放行）
+            if (!ShanhaiPatternTypeReader.gateBlocks(verdict, this.blockAmbiguousPatterns)) {
+                continue;
+            }
+            this.gateBlockedSlots.add(slot);
+            if (verdict == ShanhaiPatternTypeReader.Verdict.AMBIGUOUS) {
+                ambiguous.add(slot);
+                if (ShanhaiWildcardLayout.isPatternSlot(slot)) {
+                    patternAmbiguous.set(slot);
+                }
+            } else {
+                untyped.add(slot);
+                if (ShanhaiWildcardLayout.isPatternSlot(slot)) {
+                    patternUntyped.set(slot);
+                }
+            }
+        }
+        this.patternAmbiguousMaskHex = ShanhaiWildcardLayout.toHexMask(patternAmbiguous.toLongArray());
+        // 阶段九：同一拍重建「槽 → 样板」反表（虚拟电路要用；与闸共用脏标记，不会每 tick 扫）
+        this.shanhaiPatternBySlot.clear();
+        for (IPatternDetails pattern : super.getAvailablePatterns()) {
+            final Integer mapped = super.getSlotIndexForPattern(pattern);
+            if (mapped != null && ShanhaiWildcardLayout.isPatternSlot(mapped)) {
+                this.shanhaiPatternBySlot.putIfAbsent(mapped, pattern);
+            }
+        }
+        this.shanhaiUntypedBlockedSlots = untyped;
+        this.shanhaiAmbiguousBlockedSlots = ambiguous;
+        this.shanhaiUntypedPatternCount = untyped.size();
+        this.shanhaiAmbiguousPatternCount = ambiguous.size();
+    }
+
+    /** 当前被拦下的「未标注类型」槽数（@DescSynced，GUI/Jade 都读它）。 */
+    public int shanhaiUntypedPatternCount() {
+        return this.shanhaiUntypedPatternCount;
+    }
+
+    /** 当前被拦下的「歧义」槽数。 */
+    public int shanhaiAmbiguousPatternCount() {
+        return this.shanhaiAmbiguousPatternCount;
+    }
+
+    /**
+     * 被拦下就得<b>看得出来</b>（阶段七要求：不许静默）。两类各一条 WARN，<b>都带槽号</b>。
+     *
+     * <p>节流：槽号集合指纹相同 + 距上次 &lt;200 tick（≈10 秒）就不重复打，
+     * 但<b>集合一变就立刻打</b>（新出现的未标注/歧义不许被压掉）。
+     */
+    private void shanhaiWarnBlocked(@NotNull List<Integer> untyped, @NotNull List<Integer> ambiguous) {
+        if (untyped.isEmpty() && ambiguous.isEmpty()) {
+            return;
+        }
+        final int hash = 31 * untyped.hashCode() + ambiguous.hashCode();
+        final long now = this.getLevel() == null ? 0L : this.getLevel().getGameTime();
+        if (hash == this.lastAmbiguousWarnHash && now - this.lastAmbiguousWarnTick < 200L) {
+            return;
+        }
+        this.lastAmbiguousWarnHash = hash;
+        this.lastAmbiguousWarnTick = now;
+        if (!untyped.isEmpty()) {
+            ShanhaiStellarLog.warn("配方类型【未标注 ⇒ 已拦截，不参与推送】：{} 个槽 {}（填了类型才会执行）",
+                    untyped.size(), untyped);
+        }
+        if (!ambiguous.isEmpty()) {
+            final List<String> candidates = new ArrayList<>();
+            for (Integer slot : ambiguous) {
+                candidates.add(slot + "→" + this.resolveRecipeTypeForSlot(slot).ids());
+            }
+            ShanhaiStellarLog.warn("配方类型【歧义 ⇒ 已拦截，不参与推送】：{} 个槽 {}",
+                    ambiguous.size(), candidates);
+        }
+    }
+
+    // ================================================================ 阶段三 第 3 项：③ 机器侧只读查询 API
+
+    /**
+     * <b>给控制器的只读 API</b>：这台机器上<b>有唯一类型</b>的样板一共涉及哪些配方类型。
+     *
+     * <p>🔴 语义（与需求「零类型与歧义都不得静默当默认类型跑」对齐）：
+     * 返回集合里<b>只</b>有「四来源去重后恰好 1 个」的类型；
+     * 未标注（NONE）与歧义（AMBIGUOUS）的槽<b>不进</b>这个集合 ——
+     * 调用方因此拿不到任何「看起来像默认类型」的假值。
+     * 要区分「未标注/歧义」请用 {@link #snapshotPatternTypes()}。
+     */
+    public @NotNull List<String> machineRecipeTypeIds() {
+        return this.snapshotPatternTypes().machineTypeIds();
+    }
+
+    /**
+     * 整机快照：类型集合 + 每槽类型 + 未标注槽 + 歧义槽（全部带槽号）。
+     *
+     * <p>实现是「本类扫槽 → 用纯函数 {@link ShanhaiPatternTypeReader#summarize} 聚合」，
+     * 聚合规则因此可被无头探针实跑验证（{@code temp\stellar-p1\probe3\SnapshotProbe.java}）。
+     */
+    public @NotNull ShanhaiPatternTypeReader.Snapshot snapshotPatternTypes() {
+        final List<ShanhaiPatternTypeReader.SlotType> slots = new ArrayList<>();
+        final int count = this.getInternalSlotCount();
+        for (int slot = 0; slot < count; slot++) {
+            if (!this.hasPatternInSlot(slot)) {
+                continue;
+            }
+            final ItemStack stack = this.patternStackOf(slot);
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            final ShanhaiPatternTypeReader.Resolution resolution = ShanhaiPatternTypeReader.resolve(stack);
+            slots.add(new ShanhaiPatternTypeReader.SlotType(slot, resolution.verdict(), resolution.ids()));
+        }
+        return ShanhaiPatternTypeReader.summarize(slots);
+    }
+
+    /**
+     * 把整机快照打一行（受「类型日志开关」控制；命令/排查用）。
+     *
+     * <p>与 {@link #shanhaiDumpRecipeTypesToLog(String)} 的区别：那个是<b>逐槽</b>明细，
+     * 这个是<b>一次聚合</b>，一行就能看出「有几块没标 / 有几块歧义 / 在哪几号槽」。
+     */
+    public void shanhaiDumpTypeSnapshot(@NotNull String where) {
+        if (!ShanhaiStellarLog.isTypeLogEnabled()) {
+            return;
+        }
+        ShanhaiStellarLog.type("SNAPSHOT where={} {}", where, this.snapshotPatternTypes().describe());
+    }
+
+
+    // ================================================================ 阶段五 第 2 项：普通 1080 格的角标
+
+    /**
+     * 普通格角标要读的槽号 = <b>页号 × 54 + 格内序号</b>。
+     *
+     * <h2>🔴 定位推演（父代理要求先给推演）</h2>
+     * <pre>
+     *   PaginationUIManager 的槽区子组固定在 (0, 16)，格距 18：
+     *     格内序号 c ∈ [0,54) 的格坐标  x = 8 + (c % 9) * 18,  y = 16 + (c / 9) * 18   （javap 偏移 37–82 实证）
+     *   而它给槽 c 绑定的容器下标 = 页号 * 54 + c（rebuildPatternSlots：from = page*rows*perRow，to = from+54）
+     *   ⇒ 角标只要摆在同一个 (x,y)，并按 `page * 54 + c` 去查掩码，位置与数据就永远同源。
+     * </pre>
+     * ⚠️ 唯一的前提：**知道当前页号**。`PaginationUIManager.currentPageIndex` 是 private 且无 getter，
+     * 所以本类改用 {@link RecordingPagination}（覆写它 public 的 {@link RecordingPagination#refreshPage(int)} 记录页号）。
+     */
+    private static int shanhaiPatternSlotAt(int page, int cell) {
+        return page * PATTERN_SLOTS_PER_PAGE + cell;
+    }
+
+    /** 第 {@code apiSlot} 格要不要画歧义角标（读同步过来的 hex 掩码）。 */
+    private IGuiTexture shanhaiPatternMarker(int apiSlot) {
+        return ShanhaiWildcardLayout.maskBit(this.patternAmbiguousMaskHex, apiSlot) ? MARKER_AMBIGUOUS : MARKER_NONE;
+    }
+
+    /**
+     * 只比父类多记一个「当前页号」的分页器。
+     *
+     * <p>父类 {@code currentPageIndex} 是 **private 且没有 getter**（{@code javap -p} 实证），
+     * 而它的 {@code refreshPage(int)} 是 <b>public</b> ⇒ 覆写它记下页号即可，不改父类任何行为。
+     */
+    private static final class RecordingPagination extends PaginationUIManager {
+
+        private int currentPage;
+
+        private RecordingPagination(int patternsPerRow, int rowsPerPage, int maxPatternCount,
+                                    int uiWidth, int uiHeight,
+                                    java.util.function.IntConsumer onPatternChange,
+                                    com.lowdragmc.lowdraglib.side.item.IItemTransfer patternInventory) {
+            super(patternsPerRow, rowsPerPage, maxPatternCount, uiWidth, uiHeight, onPatternChange, patternInventory);
+        }
+
+        @Override
+        public void refreshPage(int page) {
+            this.currentPage = page;
+            super.refreshPage(page);
+        }
+    }
+    // ================================================================ 阶段五 第 3 项：通配符展开器（K=4）
+
+    /** 展开槽 → 母槽号（越界即 bug，响亮失败）。 */
+    private int shanhaiMotherOfExpandSlot(int expandSlot) {
+        return ShanhaiWildcardLayout.motherOf(expandSlot);
+    }
+
+    /** 某个母槽当前展开出几条（0 = 没展开 / 没有样板）。 */
+    private int shanhaiExpansionCountFor(int mother) {
+        if (this.expandCacheDirty) {
+            this.shanhaiRebuildExpansions();
+        }
+        final List<IPatternDetails> list = this.expansionsByMother.get(mother);
+        return list == null ? 0 : list.size();
+    }
+
+    /**
+     * 把展开出来的样板接在闸放行的清单后面。
+     *
+     * <p>顺序是刻意的：<b>闸 → 展开 → 神锻</b>。
+     * 展开在闸之后 ⇒ 被闸拦掉的样板不会浪费展开成本；神锻在展开之后 ⇒ 展开出来的样板也能被改写
+     * （否则「通配符 + 神锻」这个组合就是空功能）。
+     */
+    private List<IPatternDetails> shanhaiAppendWildcardExpansions(@NotNull List<IPatternDetails> gated) {
+        if (this.expandCacheDirty) {
+            this.shanhaiRebuildExpansions();
+        }
+        if (this.expansionsByMother.isEmpty()) {
+            return gated;
+        }
+        int extra = 0;
+        for (List<IPatternDetails> list : this.expansionsByMother.values()) {
+            extra += list.size();
+        }
+        final List<IPatternDetails> out = new ArrayList<>(gated.size() + extra);
+        out.addAll(gated);
+        for (List<IPatternDetails> list : this.expansionsByMother.values()) {
+            out.addAll(list);
+        }
+        return out;
+    }
+
+    /**
+     * 重建展开表：逐母槽 {@code expandPatterns} → 截断到 K 条 → 登记「样板 → 展开槽号」。
+     *
+     * <p>🔴 三条风险的对策就写在这里：
+     * <ol>
+     *   <li><b>内存/存档 ×K</b>：展开槽是固定 200 个 InternalSlot（不随样板数增长），
+     *       代价是「空槽也要占位」——这是刻意的：槽号必须固定不漂移（阶段三 ① 的结论）；</li>
+     *   <li><b>遍历 GT 材料表不便宜</b>：只在 {@link #expandCacheDirty} 时重建，重建点只有
+     *       「母槽内容变 / 手填类型变 / onLoad / 开关变」，<b>绝不每 tick 展开</b>；</li>
+     *   <li><b>K 可调</b>：K 只在 {@link ShanhaiWildcardLayout#BRANCHES} 一处；改它会改槽号空间，
+     *       必须同步改阶段三的证明与审计断言（该类注释 §三 已写明）。</li>
+     * </ol>
+     * <p>截断（一块母槽展开条数 &gt; K）⇒ **不静默丢**：记 WARN，写明母槽号 / 需要几条 / 只放几条。
+     */
+    private void shanhaiRebuildExpansions() {
+        this.expandCacheDirty = false;
+        this.expansionsByMother.clear();
+        this.expandedToSlot.clear();
+        final net.minecraft.world.level.Level level = this.getLevel();
+        if (level == null) {
+            return;   // 客户端 / 未加载：不展开（AE 只在服务端问 getAvailablePatterns）
+        }
+        int truncatedMothers = 0;
+        final List<String> truncated = new ArrayList<>();
+        for (int mother = 0; mother < ShanhaiWildcardLayout.MOTHER_COUNT; mother++) {
+            final ItemStack stack = this.wildcardPatternInventory.getStackInSlot(mother);
+            if (stack.isEmpty() || !ShanhaiWildcardCompat.isWildcardPattern(stack)) {
+                continue;
+            }
+            final List<IPatternDetails> expanded = ShanhaiWildcardCompat.expandPatterns(stack, level);
+            if (expanded.isEmpty()) {
+                continue;
+            }
+            final List<IPatternDetails> kept = new ArrayList<>(ShanhaiWildcardLayout.BRANCHES);
+            int branch = 0;
+            for (IPatternDetails pattern : expanded) {
+                if (branch >= ShanhaiWildcardLayout.BRANCHES) {
+                    truncatedMothers++;
+                    truncated.add(mother + "(" + expanded.size() + "条>K=" + ShanhaiWildcardLayout.BRANCHES + ")");
+                    break;
+                }
+                this.expandedToSlot.put(pattern, ShanhaiWildcardLayout.expandSlot(mother, branch));
+                kept.add(pattern);
+                branch++;
+            }
+            if (!kept.isEmpty()) {
+                this.expansionsByMother.put(mother, List.copyOf(kept));
+            }
+        }
+        if (truncatedMothers > 0 && truncated.hashCode() != this.lastTruncationStamp) {
+            this.lastTruncationStamp = truncated.hashCode();
+            ShanhaiStellarLog.warn("通配符展开被截断（K={}）：{} 个母槽超限 {}", ShanhaiWildcardLayout.BRANCHES,
+                    truncatedMothers, truncated);
+        }
+        ShanhaiStellarLog.type("展开表重建：母槽命中={} 展开条数={}", this.expansionsByMother.size(),
+                this.expandedToSlot.size());
+    }
+
+    /**
+     * <b>「展开后的各条各自扣自己的料」的取证接口</b>（阶段五判据②要用它）。
+     *
+     * <p>逐母槽列出：分支号 → 展开槽号 → 该槽 <b>自己的</b> itemInventory / fluidInventory 里现在有什么。
+     * 只要两行出现在<b>不同的展开槽号</b>且各自只含自己的输入 ⇒ 就证明它们没有共用物料池。
+     * <p>格式稳定、一行一个母槽（便于 grep）：
+     * <pre>
+     *   [SHANHAI-STELLAR] EXPAND mother=7 slot=1158 items={gtceu:iron_ingot=64} fluids={}
+     * </pre>
+     */
+    public void shanhaiDumpExpansionLayout(@NotNull String where) {
+        if (this.expandCacheDirty) {
+            this.shanhaiRebuildExpansions();
+        }
+        ShanhaiStellarLog.info("展开布局（{}）：{}", where, ShanhaiWildcardLayout.describe());
+        for (java.util.Map.Entry<Integer, List<IPatternDetails>> entry : this.expansionsByMother.entrySet()) {
+            final int mother = entry.getKey();
+            int branch = 0;
+            for (IPatternDetails ignored : entry.getValue()) {
+                final int slot = ShanhaiWildcardLayout.expandSlot(mother, branch);
+                final MEPatternBufferPartMachineBase.InternalSlot internalSlot = this.getInternalSlot(slot);
+                ShanhaiStellarLog.info("EXPAND mother={} branch={} slot={} items={} fluids={}",
+                        mother, branch, slot,
+                        String.valueOf(internalSlot.getItemInventory()),
+                        String.valueOf(internalSlot.getFluidInventory()));
+                branch++;
+            }
+        }
+    }
+    // ================================================================ 阶段九 ②：样板内虚拟电路
+
+    /**
+     * <b>这一格该用哪个电路</b>：样板里填了电路 ⇒ 用样板那条（覆盖共享电路，且不消耗任何物品）；
+     * 样板没填 ⇒ 原样交回父类（父类的实现是「缓存里的电路 → 共享电路槽 → 空」，见 Stage 九报告 §2.1）。
+     *
+     * <p>🔴 <b>为什么这里不可能"消耗"电路</b>：本方法只<b>读</b>样板输入里的电路号并<b>构造</b>一个
+     * {@code ItemStack} 返回；既不碰共享电路库存，也不碰 ME 网络（审计 G4 用字节码断言：
+     * 本方法体里不许出现 extract/consume 类调用）。
+     *
+     * <p>方法名/签名来自 {@code MEPatternBufferPartMachineBase.getCircuitForRecipe(int)}（public、可覆写，
+     * 不在 gtladditions 的 @Overwrite 名单里）。
+     */
+    @Override
+    public ItemStack getCircuitForRecipe(int slot) {
+        if (this.shanhaiPatternBySlot.isEmpty() && this.gateCacheDirty) {
+            this.shanhaiRefreshGateCache();
+        }
+        final int fromPattern = ShanhaiPatternCircuit.circuitInPattern(this.shanhaiPatternBySlot.get(slot));
+        final int fromSuper = ShanhaiPatternCircuit.circuitOfStack(super.getCircuitForRecipe(slot));
+        final int resolved = ShanhaiPatternCircuit.resolve(fromPattern, fromSuper);
+        if (resolved < 0) {
+            return ItemStack.EMPTY;
+        }
+        if (resolved == fromPattern) {
+            // 样板自带：**现造一份**（不引用任何库存里的那一个，也就不存在被消耗的可能）
+            return ShanhaiPatternCircuit.stackOf(resolved);
+        }
+        return super.getCircuitForRecipe(slot);
+    }
+    // ================================================================ 阶段六 ⑦：库存输入 160（8×2×10）
+
+    /**
+     * <b>⑦ 的核心：把「每个样板槽用哪份库存配置、扣谁的料」从父类那 32 格换成我们的 160 格。</b>
+     *
+     * <h2>🔴 为什么只能覆写 {@code createInternalSlot}（三处字节码事实）</h2>
+     * <ol>
+     *   <li>{@code StockingPatternBufferInternalSlot.isItemActive} 直接
+     *       {@code getfield this$0.stockItemHandler}（{@code javap -c} 偏移 76/102 实证）⇒
+     *       普通 0..1079 槽<b>永远只认父类那 32 格</b>，我们新造的 160 格对它们完全不可见；</li>
+     *   <li>{@code hasActiveSlot()} / {@code performStockSync()} 是 <b>private</b>（{@code javap -p} 实证）
+     *       ⇒ 父类不会替我们的 160 格做同步；</li>
+     *   <li>而 {@code createInternalSlot} 是 {@code protected}、在<b>超类构造器</b>里就被调用
+     *       （{@code MEPatternBufferPartMachine} 构造器循环 0..maxPatternCount-1）⇒
+     *       覆写它就能替所有普通槽换掉「用哪份配置」，但<b>那一刻子类字段还是 null</b>。</li>
+     * </ol>
+     * ⇒ 本槽子类<b>构造期一个字段都不读</b>（构造函数只把 slot 号交给父类），
+     * 全部字段读取都发生在 {@code isItemActive} / {@code handleItemInternal} 这些<b>使用期</b>方法里。
+     *
+     * <h2>🔴 为什么不是「照抄父类那 8 个方法」而是「父类优先 + 我们的补一层」</h2>
+     * 逐个核过父类的 8 个方法（{@code javap -c} 全文见报告阶段六 §B.2）：
+     * <ul>
+     *   <li>{@code getLimitItemStackInput()} / {@code getItemStackInputMap()} 只是
+     *       {@code super} 的结果 <b>+ 机器侧的 {@code appendStockItemContents} / {@code addStockItemMap}</b>
+     *       ⇒ 覆写<b>机器侧那两个方法</b>即可，槽这边不用动；</li>
+     *   <li>{@code isItemActive} / {@code handleItemInternal} 是唯一两处<b>直接读父类字段</b>的
+     *       ⇒ 只覆写这两个，且都写成「父类成立 ⇒ 直接返回父类结果；父类不成立 ⇒ 再看我们」，
+     *       这样<b>父类原有 32 格的行为逐字节不变</b>（阶段一~五的既有行为不回归）。</li>
+     * </ul>
+     */
+    private final class ShanhaiStockingSlot extends MEStockingPatternBufferPartMachine.StockingPatternBufferInternalSlot {
+
+        /**
+         * @param slot 内部槽号（0..1079）
+         *             <p>⚠️ 构造期只做一件事：把 slot 号交给父类。**不许读本类的任何字段**
+         *             （此刻 {@code shanhaiStockItemHandler} 还没赋值 —— 父类构造器正在跑）。
+         */
+        private ShanhaiStockingSlot(int slot) {
+            StellarSampleAssemblerPartMachine.this.super(slot);
+        }
+
+        /**
+         * 活跃判定 = 父类判定 <b>或</b>（本槽有样板 且 我们的 160 格里有配置）。
+         *
+         * <p>与父类逐分支对照（{@code javap -c} 偏移 0–116）：父类的返回值为
+         * {@code hasPatternInSlot(slot) && (若干催化剂/电路分支 || stockItemHandler.hasConfig())}。
+         * 本覆写把最后那个 {@code hasConfig()} 换成「父类那份 或 我们那份」：
+         * 当 {@code super} 已经为 true ⇒ 原样 true；为 false 时只可能在「没有样板」或
+         * 「所有分支都空且没有配置」两种情形 ⇒ 前者我们也不该激活（故显式再查一次
+         * {@code hasPatternInSlot}），后者才是我们要补的那种。
+         */
+        @Override
+        public boolean isItemActive(boolean simulate) {
+            if (super.isItemActive(simulate)) {
+                return true;
+            }
+            return StellarSampleAssemblerPartMachine.this.hasPatternInSlot(this.getSlotIndex())
+                    && StellarSampleAssemblerPartMachine.this.shanhaiHasStockItemConfig();
+        }
+
+        /**
+         * 推料：父类成立走父类（32 格原样）；否则走「我们这层」的等价实现。
+         *
+         * <p>逐跳照抄 {@code StockingPatternBufferInternalSlot.handleItemInternal}
+         * （{@code javap -c} 偏移 0–329，全文见报告阶段六 §B.2），<b>唯一区别</b>是
+         * 第一跳的 {@code stockItemHandler.hasConfig()} 换成 {@code shanhaiHasStockItemConfig()}，
+         * 而 {@code findStockItemKey} / {@code consumeStockItem} 会再走回父类（父类优先），
+         * 所以「我们这层」既覆盖新 160 格，也覆盖父类那 32 格。
+         */
+        @Override
+        public boolean handleItemInternal(Object2LongMap<Ingredient> map, int circuit, boolean simulate) {
+            if (!StellarSampleAssemblerPartMachine.this.shanhaiHasStockItemConfig()) {
+                return super.handleItemInternal(map, circuit, simulate);
+            }
+            if (map.isEmpty() && circuit < 0) {
+                return true;
+            }
+            // 电路不匹配 ⇒ 这个槽不该跑（与父类同一判据：getCacheManager().getCircuitCache()）
+            if (simulate && circuit > 0 && circuit != this.getCacheManager().getCircuitCache()) {
+                return false;
+            }
+            final Object2LongOpenHashMap<AEItemKey> itemInventory = this.getItemInventory();
+            final Object2LongMap<AEItemKey> catalysts = this.getItemCatalystInventory();
+            for (Object2LongMap.Entry<Ingredient> entry : it.unimi.dsi.fastutil.objects.Object2LongMaps.fastIterable(map)) {
+                final Ingredient ingredient = entry.getKey();
+                final long amount = entry.getLongValue();
+                if (amount <= 0) {
+                    continue;
+                }
+                final AEItemKey key = StellarSampleAssemblerPartMachine.this
+                        .findStockItemKey(ingredient, itemInventory, catalysts, amount, simulate);
+                if (key == null) {
+                    return false;
+                }
+            }
+            if (!simulate) {
+                final it.unimi.dsi.fastutil.objects.ObjectIterator<Object2LongMap.Entry<Ingredient>> iterator =
+                        it.unimi.dsi.fastutil.objects.Object2LongMaps.fastIterator(map);
+                while (iterator.hasNext()) {
+                    final Object2LongMap.Entry<Ingredient> entry = iterator.next();
+                    final Ingredient ingredient = entry.getKey();
+                    final long amount = entry.getLongValue();
+                    if (amount <= 0) {
+                        iterator.remove();
+                        continue;
+                    }
+                    final AEItemKey key = StellarSampleAssemblerPartMachine.this
+                            .findStockItemKey(ingredient, itemInventory,
+                                    it.unimi.dsi.fastutil.objects.Object2LongMaps.emptyMap(), amount, false);
+                    if (key == null
+                            || !StellarSampleAssemblerPartMachine.this.consumeStockItem(itemInventory, key, amount)) {
+                        return false;
+                    }
+                    iterator.remove();
+                }
+            }
+            return true;
+        }
+    }
+
+    /**
+     * 🔴 <b>本类唯一覆写的「造槽」方法</b>：普通槽换成 {@link ShanhaiStockingSlot}，其余原样交给父类。
+     *
+     * <p>⚠️ 它<b>在超类构造器里</b>就被调用 ⇒ 方法体只许读 {@code static} 常量与入参，
+     * 不许读任何实例字段（那时它们全是 null / 0）。
+     */
+    @Override
+    protected MEPatternBufferPartMachineBase.InternalSlot createInternalSlot(int slot) {
+        if (ShanhaiWildcardLayout.isPatternSlot(slot)) {
+            return new ShanhaiStockingSlot(slot);
+        }
+        return super.createInternalSlot(slot);
+    }
+
+    /** 我们的 160 格（或父类 32 格）里到底有没有配置 —— 唯一判定点。 */
+    private boolean shanhaiHasStockItemConfig() {
+        if (this.shanhaiStockItemHandler != null && this.shanhaiStockItemHandler.hasConfig()) {
+            return true;
+        }
+        return this.stockItemHandler != null && this.stockItemHandler.hasConfig();
+    }
+
+    /**
+     * 库存同步：<b>父类先跑（32 格行为零改动）</b>，再让我们那 160 格同步 + 刷新缓存。
+     *
+     * <p>为什么覆写这里而不是 {@code update()}：父类的 {@code update()}
+     * （{@code javap -c} 偏移 0–35）只在「{@code getOffsetTimer() % 周期 == 0}」时调
+     * {@code syncStockInput()}，周期计算也在里面；覆写 {@code syncStockInput()} 就<b>沿用了同一个节拍</b>，
+     * 不用把 {@code ME_UPDATE_INTERVAL} 那段复制一遍（它是父类的静态字段，访问面还不确定）。
+     */
+    @Override
+    protected void syncStockInput() {
+        super.syncStockInput();
+        this.shanhaiSyncStock();
+    }
+
+    /** 让 160 格做一次 {@code syncStock}（填每格的 stock，界面显示用）+ 重建键缓存 + 取库存快照。 */
+    private void shanhaiSyncStock() {
+        if (this.shanhaiStockItemHandler == null) {
+            return;
+        }
+        final net.minecraft.world.level.Level level = this.getLevel();
+        final appeng.api.networking.IGrid grid = this.getMainNode().getGrid();
+        if (grid == null) {
+            // 掉线：清空库存显示（与父类 performStockSync 对 grid==null 的处置同义）
+            this.shanhaiStockItemHandler.clearStocks();
+            this.shanhaiStockSnapshot = null;
+            this.shanhaiStockSnapshotTick = Long.MIN_VALUE;
+            return;
+        }
+        final MEStorage storage = grid.getStorageService().getInventory();
+        // ⚠️ syncStock 内部用的是 handler 自己的 actionSource（它属于本机）⇒ 我们不需要、也拿不到那个字段
+        this.shanhaiStockItemHandler.syncStock(storage);
+        this.shanhaiRebuildStockItemKeys();        // 清单快照 = 一次「全网络列举」，不便宜 ⇒ 最多每 20 游戏刻（1 秒）重建一次。
+        // 与父类那套 stockMap 的「同步周期内是陈旧值」同一量级的代价，不额外加负担。
+        final long now = level == null ? 0L : level.getGameTime();
+        if (this.shanhaiStockSnapshot == null
+                || this.shanhaiStockSnapshotTick == Long.MIN_VALUE
+                || now < this.shanhaiStockSnapshotTick
+                || now - this.shanhaiStockSnapshotTick >= 20L) {
+            this.shanhaiStockSnapshot = storage.getAvailableStacks();
+            this.shanhaiStockSnapshotTick = now;
+        }
+        // 闸计数：让 GUI/Jade 的数字也跟着刷新（脏标记挡住重算，不会每拍扫 1330 格 NBT）
+        this.shanhaiRefreshGateCache();
+        // 标签过滤页的匹配预览：跟着库存快照更新（同一节拍，因为它的数据源就是这份快照）
+        this.shanhaiRefreshTagPreview();
+    }
+
+    /** 重扫 160 格，缓存「哪些键被配置过」（{@code findStockItemKey} 每个配方都要问，不能每次扫 160 格）。 */
+    private void shanhaiRebuildStockItemKeys() {
+        this.shanhaiStockItemKeys.clear();
+        if (this.shanhaiStockItemHandler == null) {
+            return;
+        }
+        final int count = Math.min(this.shanhaiStockItemHandler.getConfigurableSlots(),
+                ShanhaiStockConfigLayout.CONFIG_SIZE);
+        for (int i = 0; i < count; i++) {
+            final IConfigurableSlot slot = this.shanhaiStockItemHandler.getConfigurableSlot(i);
+            if (slot == null) {
+                continue;
+            }
+            final GenericStack config = slot.getConfig();
+            if (config != null && config.what() instanceof AEItemKey itemKey) {
+                this.shanhaiStockItemKeys.add(itemKey);
+            }
+        }
+    }
+
+    /** 当前 160 格里配置过的物品键（只读视图，调用方不许改）。 */
+    private java.util.Set<AEItemKey> shanhaiConfiguredItemKeys() {
+        if (this.shanhaiStockItemKeys.isEmpty() && this.shanhaiStockItemHandler != null
+                && this.shanhaiStockItemHandler.hasConfig()) {
+            this.shanhaiRebuildStockItemKeys();
+        }
+        return this.shanhaiStockItemKeys;
+    }
+
+    /**
+     * 某个键现在在 ME 网络里<b>可取的量</b>。
+     *
+     * <p>用 {@code MEStorage.getAvailableStacks()} 的<b>每 tick 一次</b>快照，而不是逐个键 SIMULATE 抽取：
+     * 抽取需要 {@code IActionSource}，而父类的 {@code actionSource} 是 <b>mixin 加进去的字段</b>
+     * （{@code javap -p} 里没有，源码层面引用不到）⇒ 为了不靠反射，本类改用「清单快照」这一路。
+     * <p>⚠️ 二者语义差异（写清楚，不藏）：清单里可能有<b>不可抽取</b>的键（例如只读存储），
+     * 于是「判够」可能偏乐观；但真正扣料走的是父类 {@code consumeStockItem → extractStock}
+     * （那是<b>真抽取</b>，用机器自己的 actionSource），扣不到就返回 false ⇒ <b>不会凭空造物</b>。
+     */
+    private long shanhaiAvailableItem(@Nullable AEItemKey key) {
+        if (key == null) {
+            return 0L;
+        }
+        if (this.shanhaiStockSnapshot == null) {
+            return 0L;
+        }
+        return this.shanhaiStockSnapshot.get(key);
+    }
+
+    /** 饱和加法（与父类的 {@code NumberUtils.saturatedAdd} 同义：溢出就停在 Long.MAX_VALUE）。 */
+    private static long shanhaiSaturatedAdd(long a, long b) {
+        final long sum = a + b;
+        if (((a ^ sum) & (b ^ sum)) < 0L) {
+            return a > 0 ? Long.MAX_VALUE : Long.MIN_VALUE;
+        }
+        return sum;
+    }
+
+    /**
+     * ⑦ 的解析入口：<b>父类优先</b>（32 格路径逐字节不变），父类找不到再按我们的 160 格找。
+     *
+     * <p>父类的实现（{@code javap -c} 偏移 0–208）：① 先按 Ingredient 的候选栈逐个算
+     * 「槽内已有 + {@code stockItemHandler.getAvailableAmount}」；② 再遍历父类
+     * {@code configList} 里 {@code matches(ingredient)} 的键；都没有就返回 null。
+     * 我们补的就是「②那份清单的 160 格版本」。
+     */
+    @Override
+    protected AEItemKey findStockItemKey(Ingredient ingredient, Object2LongMap<AEItemKey> stockMap,
+                                         Object2LongMap<AEItemKey> pendingMap, long amount, boolean simulate) {
+        final AEItemKey direct = super.findStockItemKey(ingredient, stockMap, pendingMap, amount, simulate);
+        if (direct != null) {
+            return direct;
+        }
+        for (AEItemKey key : this.shanhaiConfiguredItemKeys()) {
+            if (key == null || !key.matches(ingredient)) {
+                continue;
+            }
+            long available = shanhaiSaturatedAdd(stockMap.getLong(key), this.shanhaiAvailableItem(key));
+            if (simulate) {
+                available = shanhaiSaturatedAdd(available, pendingMap.getLong(key));
+            }
+            if (available >= amount) {
+                return key;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 界面/统计用：把 160 格里「有货」的那些也追加进去（父类那 32 格的结果保持原样）。
+     *
+     * <p>槽子类的 {@code getLimitItemStackInput()} = {@code super} 结果 + 本方法
+     * （{@code javap -c} 偏移 0–14 实证）⇒ 覆写本方法即覆盖整条展示链。
+     */
+    @Override
+    protected void appendStockItemContents(List<ItemStack> contents) {
+        super.appendStockItemContents(contents);
+        if (this.shanhaiStockItemHandler == null) {
+            return;
+        }
+        for (AEItemKey key : this.shanhaiConfiguredItemKeys()) {
+            final long available = this.shanhaiAvailableItem(key);
+            if (available > 0L) {
+                contents.add(key.toStack((int) Math.min(available, Integer.MAX_VALUE)));
+            }
+        }
+    }
+
+    /** 同上，给 {@code getItemStackInputMap()} 用。 */
+    @Override
+    protected void addStockItemMap(Object2LongOpenHashMap<ItemStack> map) {
+        super.addStockItemMap(map);
+        if (this.shanhaiStockItemHandler == null) {
+            return;
+        }
+        for (AEItemKey key : this.shanhaiConfiguredItemKeys()) {
+            final long available = this.shanhaiAvailableItem(key);
+            if (available > 0L) {
+                map.addTo(key.toStack(), available);
+            }
+        }
+    }
+
+    /** 配置变了 ⇒ 重建键缓存（父类的 {@code onStockInputConfigChanged} 会先跑它自己那套）。 */
+    @Override
+    protected void onStockInputConfigChanged(boolean invalidateRecipeCaches) {
+        super.onStockInputConfigChanged(invalidateRecipeCaches);
+        this.shanhaiRebuildStockItemKeys();
+        this.shanhaiStockSnapshot = null;
+        this.shanhaiStockSnapshotTick = Long.MIN_VALUE;
+    }
+
+    // ---------------------------------------------------------------- ⑦ 旧 32 条配置迁移（幂等）
+
+    /**
+     * <b>旧存档迁移</b>：父类那 32 格配置 ⇒ 我们的 160 格（只做一次）。
+     *
+     * <h2>🔴 为什么这里<b>不需要</b>任何 NBT 键名</h2>
+     * 迁移发生在 {@code loadCustomPersistedData} 的末尾 —— 那一刻 LDLib 已经把
+     * <b>两份 handler 都就地还原好了</b>（{@code loadManagedPersistentData} 先
+     * {@code IManagedAccessor.writePersistedFields(tag, getPersistedFields())}
+     * 再调 {@code loadCustomPersistedData(tag)}，{@code javap -c} 实证，见报告 §A.3）。
+     * ⇒ 我们直接<b>读对象</b>（{@code stockItemHandler.getConfigurableSlot(i).getConfig()}）就行，
+     * 不用碰 raw tag ⇒ <b>不存在「猜键名猜错 = 静默不迁移」这一类失败</b>。
+     *
+     * <h2>幂等</h2>
+     * 三条闸：① {@link #shanhaiStockMigrated}（落盘的 once 标记，删光配置也不会「幽灵复活」）；
+     * ② 我们的 160 格已经有配置 ⇒ 直接认定迁过；③ 父类 32 格没有任何配置 ⇒ 认定迁过（新机器）。
+     *
+     * <h2>绝不静默丢</h2>
+     * 旧配置条数 &gt; 160 时打 WARN 写明条数（实际上父类只有 32 格，不可能触发，
+     * 但这段是为了「将来有人把 32 改大」时不静默）。
+     */
+    private void shanhaiMigrateLegacyStockConfigs(@NotNull String where) {
+        if (this.shanhaiStockItemHandler == null) {
+            return;
+        }
+        if (this.stockItemHandler == null) {
+            return;
+        }
+        final int ourConfigured = this.shanhaiCountConfigured(this.shanhaiStockItemHandler);
+        final int legacyConfigured = this.shanhaiCountConfigured(this.stockItemHandler);
+        // 🔴 闸门只在 ShanhaiStockConfigLayout.migrationAction 一处（纯函数，探针实跑真值表）
+        final ShanhaiStockConfigLayout.MigrationAction action =
+                ShanhaiStockConfigLayout.migrationAction(this.shanhaiStockMigrated, ourConfigured, legacyConfigured);
+        switch (action) {
+            case SKIP_ALREADY_MIGRATED -> {
+                return;
+            }
+            case SKIP_ALREADY_CONFIGURED -> {
+                this.shanhaiStockMigrated = true;
+                this.shanhaiStockItemHandler.onConfigChanged();
+                this.shanhaiRebuildStockItemKeys();
+                this.shanhaiLogMigrationOnce(where, -1, 0);
+                return;
+            }
+            case NOTHING_TO_COPY -> {
+                // 不置 once 标记！onLoad 可能早于 loadCustomPersistedData（见 MigrationAction#NOTHING_TO_COPY）
+                this.shanhaiLogMigrationOnce(where, 0, 0);
+                return;
+            }
+            default -> {
+                // COPY：继续往下
+            }
+        }
+        final int legacySize = this.stockItemHandler.getConfigurableSlots();
+        final List<GenericStack> legacy = new ArrayList<>();
+        for (int i = 0; i < legacySize; i++) {
+            final IConfigurableSlot slot = this.stockItemHandler.getConfigurableSlot(i);
+            final GenericStack config = slot == null ? null : slot.getConfig();
+            if (config != null && config.what() instanceof AEItemKey) {
+                legacy.add(config);
+            }
+        }
+        int copied = 0;
+        for (int i = 0; i < legacy.size() && i < ShanhaiStockConfigLayout.CONFIG_SIZE; i++) {
+            final IConfigurableSlot target = this.shanhaiStockItemHandler.getConfigurableSlot(i);
+            if (target == null) {
+                continue;
+            }
+            if (target instanceof IMESlot silent) {
+                // 不触发逐格回调（160 次回调会让 syncStockInput 跑 160 遍）
+                silent.setConfigWithoutNotify(legacy.get(i));
+            } else {
+                target.setConfig(legacy.get(i));
+            }
+            copied++;
+        }
+        this.shanhaiStockItemHandler.onConfigChanged();
+        this.shanhaiRebuildStockItemKeys();
+        this.shanhaiStockMigrated = true;
+        this.shanhaiLogMigrationOnce(where, legacy.size(), copied);
+        if (legacy.size() > copied) {
+            ShanhaiStellarLog.warn("库存输入迁移被截断：旧配置 {} 条，只灌入 {} 条（新上限 {}）",
+                    legacy.size(), copied, ShanhaiStockConfigLayout.CONFIG_SIZE);
+        }
+    }
+
+    /** 数一份 handler 上有几条配置（只用 public API）。 */
+    private int shanhaiCountConfigured(@NotNull MEStockingPatternBufferPartMachine.ExportOnlyAEStockingItemList handler) {
+        int count = 0;
+        final int slots = Math.min(handler.getConfigurableSlots(), ShanhaiStockConfigLayout.CONFIG_SIZE);
+        for (int i = 0; i < slots; i++) {
+            final IConfigurableSlot slot = handler.getConfigurableSlot(i);
+            if (slot != null && slot.getConfig() != null) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** 迁移日志只打一次（{@code legacy < 0} = 早就迁过/我们已有配置）。 */
+    private void shanhaiLogMigrationOnce(@NotNull String where, int legacy, int copied) {
+        if (this.shanhaiStockMigrationLogged) {
+            return;
+        }
+        this.shanhaiStockMigrationLogged = true;
+        if (legacy < 0) {
+            ShanhaiStellarLog.info("库存输入迁移（{}）：我们的 160 格已有配置，跳过迁移（幂等）", where);
+        } else if (legacy == 0) {
+            ShanhaiStellarLog.info("库存输入迁移（{}）：旧 32 格没有配置，无需迁移（已标记 once）", where);
+        } else {
+            ShanhaiStellarLog.info("库存输入迁移（{}）：旧 32 格读出 {} 条 ⇒ 已灌入 160 格 {} 条（once 标记已置）",
+                    where, legacy, copied);
+        }
+    }
+
+    /**
+     * 载入存档的最后一跳：先让 LDLib 把两份 handler 都还原，再做一次性迁移。
+     *
+     * <p>⚠️ 父类<b>没有</b>覆写本方法（{@code javap -p} 实证：MEStocking / MEPatternBufferPartMachine /
+     * Base 三个类里都没有 {@code saveCustomPersistedData} / {@code loadCustomPersistedData}）⇒
+     * {@code super} 走的是 {@code MetaMachine} 的实现，不会把任何东西写坏。
+     */
+    @Override
+    public void loadCustomPersistedData(CompoundTag tag) {
+        super.loadCustomPersistedData(tag);
+        this.shanhaiMigrateLegacyStockConfigs("loadCustomPersistedData");
+    }
+
+    // ---------------------------------------------------------------- ⑦ 页面 + 取证接口
+
+    /** ⑦ 的分页回调（{@link AEDualConfigWidget} 翻页时调；越界一律夹住）。 */
+    private void shanhaiSetStockPage(int page) {
+        this.shanhaiStockPage = Math.max(1, Math.min(ShanhaiStockConfigLayout.PAGE_COUNT, page));
+    }
+
+    /**
+     * <b>⑦ 的取证接口</b>（「旧存档 32 条还在」这条判据要用它）。
+     *
+     * <p>一行一格、格式稳定便于 grep：
+     * <pre>
+     *   [SHANHAI-STELLAR] STOCKCFG where=onLoad slot=7 config={...} stock={...}
+     *   [SHANHAI-STELLAR] STOCKCFG-SUMMARY where=onLoad configured=32 migrated=true page=1/10 slots=160
+     * </pre>
+     */
+    public void shanhaiDumpStockConfig(@NotNull String where) {
+        if (this.shanhaiStockItemHandler == null) {
+            ShanhaiStellarLog.warn("STOCKCFG where={} 我们的 160 格还没建（构造器没跑完？）", where);
+            return;
+        }
+        int configured = 0;
+        for (int i = 0; i < ShanhaiStockConfigLayout.CONFIG_SIZE; i++) {
+            final IConfigurableSlot slot = this.shanhaiStockItemHandler.getConfigurableSlot(i);
+            final GenericStack config = slot == null ? null : slot.getConfig();
+            if (config == null) {
+                continue;
+            }
+            configured++;
+            ShanhaiStellarLog.info("STOCKCFG where={} slot={} page={} config={} stock={}",
+                    where, i, ShanhaiStockConfigLayout.pageOf(i), config,
+                    slot.getStock());
+        }
+        ShanhaiStellarLog.info("STOCKCFG-SUMMARY where={} configured={} legacy={} migrated={} page={}/{} {}",
+                where, configured, this.shanhaiCountConfigured(this.stockItemHandler),
+                this.shanhaiStockMigrated, this.shanhaiStockPage, ShanhaiStockConfigLayout.PAGE_COUNT,
+                ShanhaiStockConfigLayout.describe());
+    }
+
+    // ---------------------------------------------------------------- 阶段划分（本轮之后）
+
+    // TODO(阶段三)：① 三道闸 + ④ 神锻样板模式。
+    //   闸的第一件事就是让通配符槽真的进 AE 的槽号空间，也就是把阶段二【刻意】没做的三件事补上：
+    //     ① 覆写 getInternalSlotCount() → maxPatternCount + 通配符槽实际有样板数；
+    //     ② 覆写 getInternalSlot(int) → 越界段分派到自己的 InternalSlot 列表；
+    //     ③ 覆写 onPatternChange(int) 对通配符槽号【短路】（父类那一行是 `internalInventory[slot]` aaload，
+    //        没有边界检查 —— 这是唯一会 AIOOBE 的入口，javap 偏移 9/13）。
+    //   ⚠️ 不许照抄「超级通配符样板总成」的展开逻辑就完事：那台的槽位数写死 10、且它继承的是更上层的 Base；
+    //      本机的通配符槽必须和 1080 个普通槽共用同一个 InternalSlot 空间才会被 ME 一起看到
+    //      （上游 RecipeTypePatternBufferPartMachine 3450 行做的就是这件事，行号 1628/1734/1741）。
+    //   ④ 神锻样板模式：复用本工程现有那套反射（ShanhaiForgePatternMode / ShanhaiAutoForgeMultiplierDriver），
+    //      **不要**抄上游的「产出倍率」语义。
+    //
+    // TODO(阶段四)：⑦ 库存输入页 8×2×10 ＋ ⑧ 标签过滤输入页 8×2×10（两页各 160 格）。
+    //   库存那页的底座是父类的 stockItemHandler/stockFluidHandler（32+32），
+    //   要先把它们扩到 160 格才谈得上「8×2×10」；标签过滤页本机<层>一点现成的都没有，属新写。
+    //
+    // TODO(阶段五)：⑥ 输出/返还 —— 已大半继承（buffer → Ticker → AEUtils.reFunds），
+    //   本刀只需补「buffer 持久化」+「产物真的回到 ME 的验法」。
+    //   验收判据：往 buffer 里塞产物 → 保存退出 → 重进 → 产物应当还在（或已退款，二者其一）。
+    //
+    // TODO(阶段二收尾，未做)：把类型日志开关挂到命令上（现在只能靠 -Dshanhai.stellar.typeLog=true）。
+    //   要动命令注册入口（现有文件），按任务书「只新增文件」的约束本轮没做。
+}

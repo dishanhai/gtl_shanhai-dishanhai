@@ -5,6 +5,7 @@ import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.shanhai.fluid.ShanhaiFluids;
 import com.shanhai.machine.ShanhaiMachines;
 import com.shanhai.machine.module.ModuleRegistry;
+import com.shanhai.machine.stellar.ShanhaiStellarMachines;
 import com.shanhai.machine.wildcard.ShanhaiWildcardMachines;
 import com.shanhai.registry.ShanhaiRegistration;
 import com.tterrag.registrate.util.entry.ItemEntry;
@@ -156,6 +157,7 @@ public final class ShanhaiCreativeModeTabs {
         };
         MultiblockMachineDefinition engine = ShanhaiMachines.primordialOmegaEngine();
         MachineDefinition superWildcardBuffer = ShanhaiWildcardMachines.superWildcardPatternBuffer();
+        MachineDefinition stellarSampleAssembler = ShanhaiStellarMachines.stellarSampleAssembler();
 
         // ==================================================================
         // 段 1 · 主机 + 26 台原初模块 + 机器/方块物品 + 通配符总成（🔴 冻结，逐位未变）
@@ -219,6 +221,11 @@ public final class ShanhaiCreativeModeTabs {
         if (superWildcardBuffer != null) {
             output.accept(superWildcardBuffer.asStack());
         }
+        // 星律样板总成（阶段一骨架）：创建栏与 JEI 的唯一入口就在这里，
+        // 不放进来 ⇒ 游戏里搜不到（同本段开头的 JEI 取证）。
+        if (stellarSampleAssembler != null) {
+            output.accept(stellarSampleAssembler.asStack());
+        }
 
         // ==================================================================
         // 段 2 · 17 个物质模块（等级 1..17）
@@ -241,6 +248,9 @@ public final class ShanhaiCreativeModeTabs {
         output.accept(ShanhaiItems.WORLDLINE_IMAGINARY_STRING.asStack());
         output.accept(ShanhaiItems.WORLDLINE_GENESIS_EMBRYO.asStack());
         output.accept(ShanhaiItems.WORLDLINE_CRYSTAL_CORE.asStack());
+        // 🟢 2026-10-18 用户点单新增：3 个物品进栏（2 个晶核紧跟在世线晶核之后）
+        output.accept(ShanhaiItems.ADVANCED_WORLDLINE_CRYSTAL_CORE.asStack());
+        output.accept(ShanhaiItems.MIRACLE_WORLDLINE_CRYSTAL_CORE.asStack());
         output.accept(ShanhaiItems.PRIMORDIAL_WORLDLINE_SEED.asStack());
         output.accept(ShanhaiItems.WL_BOARD_ULV.asStack());
         output.accept(ShanhaiItems.WL_BOARD_LV.asStack());
@@ -453,6 +463,8 @@ public final class ShanhaiCreativeModeTabs {
         output.accept(ShanhaiItems.UNIVERSAL_PARALLEL_CORE.asStack());
         output.accept(ShanhaiItems.GRAVITON_SHARD.asStack());
         output.accept(ShanhaiItems.WORLD_FRAGMENTS_CREATION.asStack());
+        // 🟢 2026-10-18 用户点单新增：物质模块批产模块-MK1（加在本段末尾，与 ShanhaiItems 的字段位置同口径）
+        output.accept(ShanhaiItems.MATERIAL_MODULE_MASS_PRODUCTION_MODULE_MK1.asStack());
 
         // ==================================================================
         // 桶 ⑫ · 🆕 现实物品（2026-10-17「自己新增物品」）
@@ -468,6 +480,13 @@ public final class ShanhaiCreativeModeTabs {
             if (it != null) {
                 output.accept(new ItemStack(it));
             }
+        }
+        // 🟢 2026-10-23 新增：归墟视界枢核（新主机）。
+        //    追加在本栏最末 —— 上面每一段的顺序一个字节都没动（上面那几段有"逐位未变"的冻结约定）。
+        com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition guixuVisionCore =
+                com.shanhai.machine.host.GuixuVisionCoreMachines.guixuVisionCore();
+        if (guixuVisionCore != null) {
+            output.accept(guixuVisionCore.asStack());
         }
     }
 

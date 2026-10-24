@@ -11,7 +11,8 @@ import net.minecraft.world.item.Item;
  * <p>🔴 条数历史：18 → 149（2026-09-23 加入 B1a；B1a 原本是 132 条，
  * 减掉必须跳过的 {@code dishanhai:primordial_engine_core} 后为 131 条 —— 原因见下文 B1a 段注释）
  * → 150（{@code worldline_crystal_core}）→ 167（B1b/B1c 的 17 条 gt_shanhai: 物品）
- * → <b>186</b>（<b>2026-10-03 加入 18 个新粒子</b>，同日再加 <b>1 个「创造维度碎片」</b>，见文末两段）。
+ * → <b>186</b>（<b>2026-10-03 加入 18 个新粒子</b>，同日再加 <b>1 个「创造维度碎片」</b>，见文末两段）
+ * → <b>189</b>（<b>2026-10-18 加入 3 个：高级世线晶核 / 奇迹世线晶核 / 物质模块批产模块-MK1</b>）。
  * 现有字段数可用 {@code Select-String -Pattern 'module\("'} 直接数出来（本行写明的数必须与它一致）。
  *
  * <p>⛔ <b>已作废的旧段落描述（逐字留档，供对照）</b>：
@@ -241,6 +242,12 @@ public final class ShanhaiItems {
      *    ⚠️ 在那之前该物品会显示为缺贴图（不会崩）。
      */
     public static final ItemEntry<Item> WORLDLINE_CRYSTAL_CORE = module("worldline_crystal_core");
+
+    /** 🟢 2026-10-18 用户点单新增：<b>高级世线晶核</b>（&$electric-高级世线晶核）· 图标随 jar 提供（textures/item/advanced_worldline_crystal_core.png）。 */
+    public static final ItemEntry<Item> ADVANCED_WORLDLINE_CRYSTAL_CORE = module("advanced_worldline_crystal_core");
+
+    /** 🟢 2026-10-18 用户点单新增：<b>奇迹世线晶核</b>（&$ultimateRainbow-奇迹世线晶核）· 图标随 jar 提供（textures/item/miracle_worldline_crystal_core.png）。 */
+    public static final ItemEntry<Item> MIRACLE_WORLDLINE_CRYSTAL_CORE = module("miracle_worldline_crystal_core");
 
     /** dishanhai:primordial_worldline_seed（&$ultimate-太初世线之种）· 贴图 bagua_animated.png */
     public static final ItemEntry<Item> PRIMORDIAL_WORLDLINE_SEED = module("primordial_worldline_seed");
@@ -717,6 +724,10 @@ public final class ShanhaiItems {
 
     /** shanhai:world_fragments_creation（创造维度碎片）· 贴图 textures/item/world_fragments_creation.png */
     public static final ItemEntry<Item> WORLD_FRAGMENTS_CREATION = module("world_fragments_creation");
+
+    /** 🟢 2026-10-18 用户点单新增：<b>物质模块批产模块-MK1</b>（&$golden-物质模块批产模块-MK1，本段末尾）· 图标随 jar 提供（textures/item/material_module_mass_production_module_mk1.png）。 */
+    public static final ItemEntry<Item> MATERIAL_MODULE_MASS_PRODUCTION_MODULE_MK1 =
+            module("material_module_mass_production_module_mk1");
 
     // ==================================================================
     // 桶 ⑫ · 🆕 2026-10-17「自己新增物品」的 128 个占位壳（用户点单）

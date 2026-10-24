@@ -16,7 +16,8 @@
   "client": [
     "ShanhaiFontStyleMixin",
     "ShanhaiJeiRecipeOrderMixin",
-    "ShanhaiJeiBookmarkMixin"
+    "ShanhaiJeiBookmarkMixin",
+    "ShanhaiBlackHoleGameRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

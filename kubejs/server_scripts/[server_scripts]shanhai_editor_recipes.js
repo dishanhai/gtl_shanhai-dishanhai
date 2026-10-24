@@ -1099,7 +1099,7 @@ ServerEvents.recipes(function (event) {
             .inputFluids('shanhai:matter_fluid_darkstar 1024000')
             .inputFluids('shanhai:matter_fluid_zero 2048000')
             .inputFluids('shanhai:matter_fluid_advanced 4096000')
-            .itemOutputs('1x shanhai:reality_item_1')
+            .itemOutputs('1x shanhai:material_module_mass_production_module_mk1')
             .duration(200)
             .EUt(32768)
             .addData('euTier', 6)
@@ -1214,7 +1214,7 @@ ServerEvents.recipes(function (event) {
             .itemInputs('1024x shanhai:taixu_crystal_core')
             .itemInputs('32767x shanhai:primordial_divergence_heart')
             .inputFluids('shanhai:matter_fluid_transition 99000')
-            .itemOutputs('1x shanhai:reality_item_2')
+            .itemOutputs('1x shanhai:advanced_worldline_crystal_core')
             .duration(200)
             .EUt(131072)
             .addData('euTier', 7)
@@ -1282,7 +1282,7 @@ ServerEvents.recipes(function (event) {
     // @perm index=46 id=shanhai:matter_module_casting/new_recipe_3 type=gtceu:matter_module_casting typePath=matter_module_casting kjsId=shanhai:new_recipe_3 seq=3 conditions=0
     try {
         var b46 = gtr.matter_module_casting('shanhai:new_recipe_3')
-            .notConsumable('1x shanhai:reality_item_1')
+            .notConsumable('1x shanhai:material_module_mass_production_module_mk1')
             .circuit(32)
             .itemInputs('1x shanhai:first_light')
             .itemOutputs('1x shanhai:introductory_material_module')
@@ -1300,7 +1300,7 @@ ServerEvents.recipes(function (event) {
     // @perm index=47 id=shanhai:matter_module_casting/new_recipe_4 type=gtceu:matter_module_casting typePath=matter_module_casting kjsId=shanhai:new_recipe_4 seq=4 conditions=0
     try {
         var b47 = gtr.matter_module_casting('shanhai:new_recipe_4')
-            .notConsumable('1x shanhai:reality_item_1')
+            .notConsumable('1x shanhai:material_module_mass_production_module_mk1')
             .circuit(32)
             .itemInputs('1x shanhai:introductory_material_module')
             .itemInputs('1x shanhai:first_light')
@@ -1319,7 +1319,7 @@ ServerEvents.recipes(function (event) {
     // @perm index=48 id=shanhai:matter_module_casting/new_recipe_5 type=gtceu:matter_module_casting typePath=matter_module_casting kjsId=shanhai:new_recipe_5 seq=5 conditions=0
     try {
         var b48 = gtr.matter_module_casting('shanhai:new_recipe_5')
-            .notConsumable('1x shanhai:reality_item_1')
+            .notConsumable('1x shanhai:material_module_mass_production_module_mk1')
             .circuit(32)
             .itemInputs('1x shanhai:basic_material_module')
             .itemInputs('2x shanhai:first_light')
@@ -1338,7 +1338,7 @@ ServerEvents.recipes(function (event) {
     // @perm index=49 id=shanhai:matter_module_casting/new_recipe_6 type=gtceu:matter_module_casting typePath=matter_module_casting kjsId=shanhai:new_recipe_6 seq=6 conditions=0
     try {
         var b49 = gtr.matter_module_casting('shanhai:new_recipe_6')
-            .notConsumable('1x shanhai:reality_item_1')
+            .notConsumable('1x shanhai:material_module_mass_production_module_mk1')
             .circuit(32)
             .itemInputs('1x shanhai:material_deduction_module')
             .itemInputs('1x shanhai:navigate_prism')
@@ -1357,7 +1357,7 @@ ServerEvents.recipes(function (event) {
     // @perm index=50 id=shanhai:matter_module_casting/new_recipe_7 type=gtceu:matter_module_casting typePath=matter_module_casting kjsId=shanhai:new_recipe_7 seq=7 conditions=0
     try {
         var b50 = gtr.matter_module_casting('shanhai:new_recipe_7')
-            .notConsumable('1x shanhai:reality_item_1')
+            .notConsumable('1x shanhai:material_module_mass_production_module_mk1')
             .circuit(32)
             .itemInputs('1x shanhai:virtual_image_material_module')
             .itemInputs('2x shanhai:navigate_prism')
