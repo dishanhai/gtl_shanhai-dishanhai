@@ -87,7 +87,8 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
     @Override
     public void onStructureInvalid() {
         if (!isRemote() && field.forceCollapse() == GuixuContainmentField.Event.COLLAPSED) {
-            GuixuVisionCoreMachine guixu = guixuHost();
+            // 鎖定那條不要求主機已成型
+            GuixuVisionCoreMachine guixu = getHost() instanceof GuixuVisionCoreMachine g ? g : null;
             LOGGER.info("[SHANHAI-CONTAINMENT] 遏制場 @{} 失穩期間結構失效，視同坍縮", getPos());
             if (guixu != null) guixu.startContainmentLock();
             markDirty();
@@ -139,16 +140,16 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
                     ItemStack stack = handler.getStackInSlot(i);
                     if (stack.isEmpty()) continue;
                     ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
-                    GuixuContainmentField.Event event = GuixuContainmentField.Event.NONE;
-                    if (SEED.equals(id) || HYPER_SEED.equals(id)) {
-                        event = field.open(HYPER_SEED.equals(id));
-                    } else if (COLLAPSER.equals(id)) {
-                        event = field.shutDown();
-                    }
-                    if (event == GuixuContainmentField.Event.NONE) continue;
-                    stack.shrink(1);
-                    handler.setStackInSlot(i, stack.isEmpty() ? ItemStack.EMPTY : stack);
-                    handler.onContentsChanged();
+                    boolean isSeed = SEED.equals(id) || HYPER_SEED.equals(id);
+                    boolean isCollapser = COLLAPSER.equals(id);
+                    // 先按物品 id 判斷這次投入會不會成立，不成立的物品原樣留著
+                    if (isSeed ? field.status() != GuixuContainmentField.Status.CLOSED
+                            : !isCollapser || !field.isOpen()) continue;
+                    // 走內部路徑真正扣除（直接寫回槽位對 ME 總線不會扣 AE 庫存）；扣成功才推進狀態機
+                    ItemStack taken = handler.extractItemInternal(i, 1, false);
+                    if (taken.isEmpty()) continue;
+                    GuixuContainmentField.Event event = isSeed
+                            ? field.open(HYPER_SEED.equals(id)) : field.shutDown();
                     LOGGER.info("[SHANHAI-CONTAINMENT] 遏制場 @{} {}（{}）", getPos(),
                             event == GuixuContainmentField.Event.OPENED ? "開啟" : "主動關閉", id);
                     markDirty();
@@ -158,7 +159,7 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
         }
     }
 
-    /** 先加總所有輸入流體倉的時空流體，夠才逐倉扣除；不夠就一滴不扣。 */
+    /** 先模擬加總所有輸入流體倉能扣的時空流體，夠才逐倉實扣；不夠就一滴不扣。 */
     private boolean drainSpacetime(long need) {
         Fluid spacetime = ForgeRegistries.FLUIDS.getValue(SPACETIME);
         if (spacetime == null || spacetime == Fluids.EMPTY) {
@@ -175,26 +176,17 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
             for (var trait : machine.getTraits()) {
                 if (!(trait instanceof NotifiableFluidTank tank) || tank.handlerIO != IO.IN) continue;
                 tanks.add(tank);
-                for (int i = 0; i < tank.getTanks(); i++) {
-                    FluidStack stack = tank.getFluidInTank(i);
-                    if (stack.isEmpty() || stack.getFluid() != spacetime) continue;
-                    long amount = stack.getAmount();
-                    available = available > Long.MAX_VALUE - amount ? Long.MAX_VALUE : available + amount;
-                }
+                long amount = tank.drainInternal(FluidStack.create(spacetime, need), true).getAmount();
+                available = available > Long.MAX_VALUE - amount ? Long.MAX_VALUE : available + amount;
             }
         }
         if (available < need) return false;
         long remaining = need;
         for (NotifiableFluidTank tank : tanks) {
-            for (int i = 0; i < tank.getTanks() && remaining > 0L; i++) {
-                FluidStack stack = tank.getFluidInTank(i);
-                if (stack.isEmpty() || stack.getFluid() != spacetime) continue;
-                long take = Math.min(remaining, stack.getAmount());
-                long left = stack.getAmount() - take;
-                tank.setFluidInTank(i, left <= 0L ? FluidStack.empty() : FluidStack.create(spacetime, left));
-                remaining -= take;
-            }
             if (remaining <= 0L) break;
+            // 內部路徑：會真正扣 ME 輸入倉的 AE 庫存（直接寫回儲罐不會）
+            FluidStack drained = tank.drainInternal(FluidStack.create(spacetime, remaining), false);
+            remaining -= drained.getAmount();
         }
         return true;
     }

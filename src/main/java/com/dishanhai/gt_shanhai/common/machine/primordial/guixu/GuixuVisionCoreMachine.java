@@ -155,8 +155,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     /** 坍縮鎖定剩餘 tick。落盤在主機上，拆掉遏制場也清不掉。 */
     @Persisted
     private int containmentLockTicks;
-    /** 上一秒生效的遏制場是否處於失穩（用來判定「失穩期間被拆」）。 */
-    private boolean containmentWasUnstable;
+    /** 上一秒生效且處於失穩的遏制場（用來判定「失穩期間消失／被換掉」），不落盤。 */
+    private GuixuPenroseContainmentModule containmentLastUnstable;
     private TickableSubscription containmentSubs;
     private long containmentCacheTick = Long.MIN_VALUE;
     private GuixuPenroseContainmentModule containmentCacheModule;
@@ -659,6 +659,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         for (var candidate : getModuleSet()) {
             if (candidate instanceof GuixuPenroseContainmentModule module && module.isFormed()
                     && module.getHost() == this
+                    && !module.isInValid() && module.getLevel() != null
+                    && module.getLevel().hasChunkAt(module.getPos())
                     && (best == null || module.getPos().asLong() < best.getPos().asLong())) {
                 best = module;
             }
@@ -703,9 +705,17 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         }
         if (getOffsetTimer() % 20 != 0) return;
         GuixuPenroseContainmentModule module = getEffectiveContainment();
-        if (containmentWasUnstable && module == null) startContainmentLock();
-        containmentWasUnstable = module != null
-                && module.field().status() == GuixuContainmentField.Status.UNSTABLE;
+        GuixuPenroseContainmentModule last = containmentLastUnstable;
+        if (last != null && module != last && !isContainmentLocked()) {
+            Level lastLevel = last.getLevel();
+            // 區塊卸載 ⇒ 凍結，不罰；其餘（被拆、斷開、被換成冗餘）⇒ 視同坍縮
+            if (lastLevel != null && lastLevel.hasChunkAt(last.getPos())) {
+                if (last.field().forceCollapse() == GuixuContainmentField.Event.COLLAPSED) last.markDirty();
+                startContainmentLock();
+            }
+        }
+        containmentLastUnstable = module != null
+                && module.field().status() == GuixuContainmentField.Status.UNSTABLE ? module : null;
     }
 
     // ------------------------------------------------------------------ 成型日志
@@ -748,7 +758,14 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     public void onStructureInvalid() {
         cancelEngineLink();
         cancelContainment();
-        containmentWasUnstable = false;
+        if (!isRemote()) {
+            GuixuPenroseContainmentModule containment = getEffectiveContainment();
+            if (containment != null && containment.field().forceCollapse() == GuixuContainmentField.Event.COLLAPSED) {
+                containment.markDirty();
+                startContainmentLock();
+            }
+        }
+        containmentLastUnstable = null;
         engineLinkReady = false;
         setHostFormedSync(false);
         operationStateId = GuixuOperationState.IDLE.ordinal();

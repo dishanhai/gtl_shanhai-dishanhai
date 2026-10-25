@@ -57,6 +57,19 @@ class GuixuPenroseContainmentWiringTest {
     }
 
     @Test
+    void moduleConsumesThroughInternalPathAndHostRejectsStaleModules() throws Exception {
+        String module = read(GUIXU + "GuixuPenroseContainmentModule.java");
+        assertTrue(module.contains("drainInternal("), "流體要走內部路徑實扣 ME 倉");
+        assertTrue(module.contains("extractItemInternal("), "物品要走內部路徑實扣 ME 總線");
+        assertFalse(module.contains("setFluidInTank"), "ME 輸入倉寫回無效");
+        assertFalse(module.contains("setStackInSlot"), "ME 輸入總線寫回無效");
+        String host = read(GUIXU + "GuixuVisionCoreMachine.java");
+        assertTrue(host.contains("hasChunkAt(module.getPos())"), "排除區塊卸載殘留實例");
+        assertTrue(host.contains("containmentLastUnstable"));
+        assertFalse(host.contains("containmentWasUnstable"));
+    }
+
+    @Test
     void hostRecipeLogicAppliesBonus() throws Exception {
         String logic = read(GUIXU + "GuixuVisionCoreRecipeLogic.java");
         assertTrue(logic.contains("host.isContainmentLocked()"));
