@@ -1,0 +1,66 @@
+{
+  "data": {
+    "euTier": 14
+  },
+  "duration": 40,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2147483647
+      }
+    ]
+  },
+  "type": "gtceu:assembler",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 32,
+          "ingredient": {
+            "item": "gtceu:uxv_machine_casing"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "gtceu:double_neutronium_plate"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "dishanhai:worldline_divergent_core"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 32,
+          "ingredient": {
+            "item": "dishanhai:particle_beam_guidance_pipe_casing"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:assembler/assembler_particle_beam_guidance_pipe_casing",
+      "defaultEnabled": true
+    }
+  ]
+}
