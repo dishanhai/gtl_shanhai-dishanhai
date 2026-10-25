@@ -9,14 +9,93 @@ import com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe;
 import net.minecraft.network.chat.Component;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import java.util.Objects;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Comparator;
+import com.gregtechceu.gtceu.api.capability.recipe.IO;
+import com.gregtechceu.gtceu.api.recipe.content.Content;
+import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
+import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
+import com.gtladd.gtladditions.common.data.ParallelData;
+import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
 /** 山海：在原生無線 EU/t 讀點減免，之後再由原生聚合並行數與耗時。 */
 public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic {
     private final GuixuVisionCoreMachine host;
+    private int plannedTicks = 1;
+    private int plannedBaseTicks = 1;
+    private long plannedParallels;
 
     public GuixuVisionCoreRecipeLogic(GuixuVisionCoreMachine host) {
         super(host);
         this.host = host;
+    }
+
+    /** 先規劃整批共享功率，原生 buildFinalWirelessRecipe 才真正扣料。 */
+    @Override
+    protected ParallelData calculateParallels() {
+        boolean consumer = isEnergyConsumer();
+        BigInteger power = host.getGuixuHatchPower(consumer ? IO.IN : IO.OUT).power();
+        plannedParallels = 0L;
+        if (power.signum() <= 0) return null;
+        var recipes = new ArrayList<GTRecipe>();
+        var costs = new ArrayList<BigInteger>();
+        BigInteger referenceEut = BigInteger.ONE;
+        int baseTicks = 1;
+        // 穩定次序使剩餘預算分配不受 HashSet 迭代次序影響。
+        var candidates = new ArrayList<>(lookupRecipeIterator());
+        candidates.sort(Comparator.comparing(recipe -> recipe.id.toString()));
+        for (GTRecipe recipe : candidates) {
+            BigInteger cost = BigDecimal.valueOf((double) Math.max(1, recipe.duration) * getEuMultiplier())
+                    .multiply(BigDecimal.valueOf(Math.max(0L, getWirelessRecipeEut(recipe))))
+                    .setScale(0, RoundingMode.CEILING).toBigIntegerExact().max(BigInteger.ONE);
+            BigInteger eut = GuixuPowerBudget.ceilDivide(cost, BigInteger.valueOf(Math.max(1, recipe.duration)));
+            if (eut.compareTo(power) > 0 || getMaxParallel(recipe, 1L) <= 0) continue;
+            recipes.add(recipe);
+            costs.add(cost);
+            referenceEut = referenceEut.max(eut);
+            baseTicks = Math.max(baseTicks, recipe.duration);
+        }
+        if (recipes.isEmpty()) {
+            invalidateLookupSetCache();
+            return null;
+        }
+        plannedBaseTicks = baseTicks;
+        plannedTicks = GuixuPowerBudget.duration(power, referenceEut, baseTicks, host.getLimitedDuration());
+        BigInteger stored = consumer ? host.getWirelessNetworkEnergyHandler().getMaxAvailableEnergy() : null;
+        BigInteger budget = power.multiply(BigInteger.valueOf(plannedTicks));
+        if (stored != null) budget = budget.min(stored);
+        long limit = GuixuPowerBudget.parallelLimit(power, referenceEut, baseTicks,
+                host.getLimitedDuration(), getTotalParallelLimit());
+        long[] wants = new long[recipes.size()];
+        for (int i = 0; i < wants.length; i++) {
+            long affordable = budget.divide(costs.get(i)).min(BigInteger.valueOf(limit)).longValueExact();
+            wants[i] = affordable <= 0L ? 0L : getMaxParallel(recipes.get(i), affordable);
+        }
+        long[] parallels = GuixuPowerBudget.allocate(power, plannedTicks, costs.toArray(BigInteger[]::new),
+                wants, stored, limit);
+        var selected = new ArrayList<GTRecipe>();
+        var amounts = new it.unimi.dsi.fastutil.longs.LongArrayList();
+        for (int i = 0; i < parallels.length; i++) {
+            if (parallels[i] <= 0L) continue;
+            selected.add(recipes.get(i));
+            amounts.add(parallels[i]);
+            plannedParallels += parallels[i]; // allocate 已限制總和不超過 long 上限。
+        }
+        return selected.isEmpty() ? null : new ParallelData(selected, amounts.toLongArray(), true, null);
+    }
+
+    @Override
+    protected WirelessGTRecipe buildWirelessRecipe(ObjectArrayList<Content> items, ObjectArrayList<Content> fluids,
+                                                   BigInteger totalEu) {
+        var recipe = RecipeCalculationHelper.INSTANCE.buildWirelessRecipe(items, fluids, plannedTicks,
+                GuixuPowerBudget.roundForTicks(totalEu, plannedTicks), GTRecipeTypes.DUMMY_RECIPES);
+        recipe.data.putInt("sh_guixu_base_ticks", plannedBaseTicks);
+        recipe.data.putLong("sh_guixu_parallel_budget", plannedParallels);
+        return recipe;
     }
 
     @Override

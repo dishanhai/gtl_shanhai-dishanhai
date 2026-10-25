@@ -7,6 +7,7 @@ import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeHandler;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
+import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.multiblock.MultiblockControllerMachine;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
@@ -133,6 +134,21 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     private GuixuEnergyHandler guixuEnergy;
     private final GuixuVisualState visualState = new GuixuVisualState();
 
+    /**
+     * 歸墟超維度鏈接：被接管的原始終焉引擎所在的維度（空字串 = 未綁定）與座標（{@code BlockPos.asLong()}）。
+     * 只落盤不同步：接管只發生在服務端。
+     */
+    @Persisted
+    private String linkedEngineDim = "";
+    @Persisted
+    private long linkedEnginePos;
+    /** 上一輪調和時鏈接是否有效（只用於顯示與模組位上限，不落盤）。 */
+    private boolean engineLinkReady;
+    private TickableSubscription engineLinkSubs;
+
+    /** 原始終焉引擎的模組位數（基類 {@code getMaxModuleCount()} 的 16）；鏈接生效時加進本機上限。 */
+    private static final int LINKED_ENGINE_MODULE_SLOTS = 16;
+
     @Override
     public GuixuEnergyHandler getWirelessNetworkEnergyHandler() {
         if (guixuEnergy == null) guixuEnergy = new GuixuEnergyHandler(this);
@@ -199,9 +215,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         int active = 0;
         if (isFormed()) {
             for (var candidate : getModuleSet()) {
+                // 被接管的模組可能在別的維度：區塊要問模組自己的世界，不是本機的
                 if (!(candidate instanceof PrimordialOmegaEngineModuleBase module)
                         || module.getHost() != this || !module.isFormed()
-                        || getLevel() == null || !getLevel().hasChunkAt(module.getPos())) continue;
+                        || module.getLevel() == null || !module.getLevel().hasChunkAt(module.getPos())) continue;
                 if (module.getRecipeLogic().isWorking()) {
                     active++;
                     working = true;
@@ -249,6 +266,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             }
         }
         return result;
+    }
+
+    public GuixuHatchPower getGuixuHatchPower(IO io) {
+        return GuixuHatchPower.read(getGuixuEnergyContainers(io), io == IO.IN);
     }
 
     /** 给客户端渲染器读的"服务端成型位"（{@code @DescSynced} 镜像）。 */
@@ -335,7 +356,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         final java.util.List<String> problems = new java.util.ArrayList<>();
         for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride",
                 "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel",
-                "operationStateId", "activeModuleCount"}) {
+                "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos"}) {
             if (!names.contains(required)) {
                 problems.add("缺字段 " + required);
             }
@@ -442,10 +463,141 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         return GuixuHostGeometry.slotPositions(getPos(), getFrontFacing());
     }
 
-    /** 本机 24 个模块位（基类常量 {@code MAX_MODULE_COUNT = 16} 是原始终焉引擎的）。 */
+    /** 本机 24 个模块位（基类常量 {@code MAX_MODULE_COUNT = 16} 是原始终焉引擎的）；超维度鏈接生效時再加引擎的 16 位。 */
     @Override
     public int getMaxModuleCount() {
-        return GuixuHostGeometry.SLOT_COUNT;
+        return GuixuHostGeometry.SLOT_COUNT + (engineLinkReady ? LINKED_ENGINE_MODULE_SLOTS : 0);
+    }
+
+    // ------------------------------------------------------------------ 歸墟超維度鏈接（接管原始終焉引擎的模組）
+
+    public boolean hasEngineLink() {
+        return !linkedEngineDim.isEmpty();
+    }
+
+    public boolean isEngineLinkReady() {
+        return engineLinkReady;
+    }
+
+    public String getLinkedEngineDim() {
+        return linkedEngineDim;
+    }
+
+    public BlockPos getLinkedEnginePos() {
+        return BlockPos.of(linkedEnginePos);
+    }
+
+    public boolean isLinkedTo(String dimension, BlockPos pos) {
+        return hasEngineLink() && linkedEngineDim.equals(dimension) && linkedEnginePos == pos.asLong();
+    }
+
+    /**
+     * 這台引擎的模組目前是否已被<b>另一台</b>歸墟接管。
+     * 不另存「誰佔了引擎」：直接看引擎模組位上的模組現在掛在誰名下，並確認那台歸墟的鏈接確實指向這台引擎。
+     */
+    public boolean isEngineClaimedByOther(PrimordialOmegaEngineMachine engine) {
+        Level engineLevel = engine.getLevel();
+        if (engineLevel == null) return false;
+        String dim = GuixuEngineLink.dimensionOf(engineLevel);
+        for (BlockPos pos : engine.getModuleScanPositions()) {
+            if (!engineLevel.hasChunkAt(pos)) continue;
+            if (MetaMachine.getMachine(engineLevel, pos) instanceof PrimordialOmegaEngineModuleBase module
+                    && module.getHost() instanceof GuixuVisionCoreMachine other
+                    && other != this && other.isFormed() && other.isLinkedTo(dim, engine.getPos())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 服務端：建立綁定並立即調和一次。 */
+    public void linkEngine(PrimordialOmegaEngineMachine engine) {
+        if (isRemote() || engine.getLevel() == null) return;
+        String dim = GuixuEngineLink.dimensionOf(engine.getLevel());
+        if (hasEngineLink() && !isLinkedTo(dim, engine.getPos())) unlinkEngine();
+        linkedEngineDim = dim;
+        linkedEnginePos = engine.getPos().asLong();
+        markDirty();
+        if (isFormed()) {
+            subscribeEngineLink();
+            reconcileLinkedEngine();
+        }
+    }
+
+    /** 服務端：解除綁定，被接管的模組立刻還給引擎。 */
+    public void unlinkEngine() {
+        if (isRemote()) return;
+        Level level = getLevel();
+        GuixuEngineLink.Resolved resolved = level == null ? null
+                : GuixuEngineLink.resolve(level.getServer(), linkedEngineDim, linkedEnginePos);
+        linkedEngineDim = "";
+        linkedEnginePos = 0L;
+        engineLinkReady = false;
+        markDirty();
+        releaseRemoteModules();
+        if (resolved != null && resolved.engine() != null) resolved.engine().scanAndConnectModules();
+    }
+
+    private void subscribeEngineLink() {
+        engineLinkSubs = subscribeServerTick(engineLinkSubs, () -> {
+            if (getOffsetTimer() % 20 == 0) reconcileLinkedEngine();
+        });
+    }
+
+    private void cancelEngineLink() {
+        if (engineLinkSubs != null) {
+            engineLinkSubs.unsubscribe();
+            engineLinkSubs = null;
+        }
+    }
+
+    /**
+     * 每秒調和一次：引擎仍在 ⇒ 把它模組位上還沒掛在本機名下的已成型模組接過來；
+     * 區塊沒載入 ⇒ 不動；引擎已消失或未成型 ⇒ 把接管的模組放回去。
+     * 引擎自己重新成型時會 {@code scanAndConnectModules} 把模組搶回去，下一輪這裡再接管，無需額外同步。
+     */
+    private void reconcileLinkedEngine() {
+        if (isRemote() || !isFormed() || !hasEngineLink()) return;
+        Level level = getLevel();
+        if (level == null) return;
+        GuixuEngineLink.Resolved resolved = GuixuEngineLink.resolve(level.getServer(), linkedEngineDim, linkedEnginePos);
+        switch (resolved.state()) {
+            case UNLOADED -> { return; }
+            case MISSING -> {
+                if (engineLinkReady) {
+                    engineLinkReady = false;
+                    releaseRemoteModules();
+                }
+                return;
+            }
+            default -> { }
+        }
+        PrimordialOmegaEngineMachine engine = resolved.engine();
+        engineLinkReady = true;
+        Level engineLevel = engine.getLevel();
+        if (engineLevel == null || isEngineClaimedByOther(engine)) {
+            engineLinkReady = false;
+            return;
+        }
+        for (BlockPos pos : engine.getModuleScanPositions()) {
+            if (!engineLevel.hasChunkAt(pos)) continue;
+            if (MetaMachine.getMachine(engineLevel, pos) instanceof PrimordialOmegaEngineModuleBase module
+                    && module.isFormed() && module.getHost() != this) {
+                module.connectToHost(this);
+            }
+        }
+    }
+
+    /** 放回所有不在本機 24 個槽位上的模組（= 超維度接管來的）；它們會自己找回原引擎。 */
+    private void releaseRemoteModules() {
+        java.util.Set<BlockPos> own = new java.util.HashSet<>(java.util.Arrays.asList(getModuleScanPositions()));
+        for (var candidate : new ArrayList<>(getModuleSet())) {
+            // 別的維度可能有同座標的模組：維度不同一律算外來
+            if (candidate instanceof PrimordialOmegaEngineModuleBase module
+                    && (module.getLevel() != getLevel() || !own.contains(module.getPos()))) {
+                module.removeFromHost(this);
+            }
+        }
     }
 
     // ------------------------------------------------------------------ 成型日志
@@ -467,13 +619,25 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         // 成型时按槽内实况重算一次等级复写（存档读回后 @DescSynced 的值可能还没跟上）
         if (!isRemote()) {
             refreshMatterLevelOverride();
+            if (hasEngineLink()) subscribeEngineLink();
         }
         logModuleSlots();
+    }
+
+    @Override
+    public void onUnload() {
+        // 本機卸載而被接管的模組還在載入區塊裡：不放回去它們就會一直掛著一台已經不 tick 的主機
+        cancelEngineLink();
+        if (!isRemote()) releaseRemoteModules();
+        engineLinkReady = false;
+        super.onUnload();
     }
 
     /** 结构失效：把成型位翻回 false 并推同步（渲染器据此停特效并恢复真方块）。 */
     @Override
     public void onStructureInvalid() {
+        cancelEngineLink();
+        engineLinkReady = false;
         setHostFormedSync(false);
         operationStateId = GuixuOperationState.IDLE.ordinal();
         activeModuleCount = 0;
@@ -620,9 +784,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         BigInteger capacity = BigInteger.ZERO;
         try {
             for (IEnergyContainer container : getGuixuEnergyContainers(io)) {
-                stored = stored.add(BigInteger.valueOf(container.getEnergyStored()));
+                if (io != IO.IN) stored = stored.add(BigInteger.valueOf(container.getEnergyStored()));
                 capacity = capacity.add(BigInteger.valueOf(container.getEnergyCapacity()));
             }
+            if (io == IO.IN) stored = getWirelessNetworkEnergyHandler().getMaxAvailableEnergy();
         } catch (Throwable ignored) {
             // 纯读：显示用，异常 ⇒ 当作"没有仓"
         }
@@ -658,6 +823,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 .withStyle(ChatFormatting.GRAY));
         textList.add(Component.literal("運作：" + getOperationState().label + "｜工作模組 " + activeModuleCount)
                 .withStyle(ChatFormatting.AQUA));
+        if (hasEngineLink()) {
+            BlockPos engine = getLinkedEnginePos();
+            textList.add(Component.literal("超維度鏈接：" + linkedEngineDim + " [" + engine.getX() + ", "
+                    + engine.getY() + ", " + engine.getZ() + "]｜" + (engineLinkReady ? "已接管" : "等待引擎"))
+                    .withStyle(engineLinkReady ? ChatFormatting.LIGHT_PURPLE : ChatFormatting.GRAY));
+        }
         GTRecipeType mode = getPrimarySelectedRecipeType();
         if (mode != null) textList.add(Component.literal("模式：")
                 .append(Component.translatable("gtceu." + mode.registryName.getPath())));
@@ -671,6 +842,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 textList.add(Component.literal((eut.signum() > 0 ? "本批發電：" : "本批耗電：") + eut.abs() + " EU/t"));
             }
             if (recipe != null) {
+                if (recipe.data.contains("sh_guixu_base_ticks")) {
+                    textList.add(Component.literal(String.format(Locale.ROOT,
+                            "本批並行預算：%d｜批次速率：×%.2f",
+                            recipe.data.getLong("sh_guixu_parallel_budget"),
+                            (double) recipe.data.getInt("sh_guixu_base_ticks") / Math.max(1, recipe.duration))));
+                }
                 BigInteger items = BigInteger.ZERO;
                 BigInteger fluids = BigInteger.ZERO;
                 for (var stack : RecipeHelper.getOutputItems(recipe)) items = items.add(BigInteger.valueOf(stack.getCount()));
@@ -689,6 +866,17 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 .withStyle(ChatFormatting.AQUA));
         textList.add(Component.literal("动力仓 (OUT)：" + output[0] + " / " + output[1] + " EU")
                 .withStyle(ChatFormatting.AQUA));
+        for (IO side : new IO[]{IO.IN, IO.OUT}) {
+            var power = getGuixuHatchPower(side);
+            int tier = com.gregtechceu.gtceu.utils.GTUtil.getTierByVoltage(power.highestVoltage());
+            String tierName = power.count() == 0 ? "無" : power.unlimited() ? "無上限"
+                    : com.gregtechceu.gtceu.api.GTValues.VN[tier];
+            textList.add(Component.literal((side == IO.IN ? "能源倉" : "動力倉") + "：" + power.count()
+                    + " 個｜最高 " + tierName + "｜總功率 " + power.powerLabel() + " EU/t")
+                    .withStyle(ChatFormatting.AQUA));
+        }
+        textList.add(Component.literal("倉室成長：功率共同分配給並行與速度；最短耗時 "
+                + getLimitedDuration() + " tick").withStyle(ChatFormatting.GRAY));
 
         // ── 物质模块槽门控 ⇒ 增产 / 减免（生效了就必须看得见）──
         final int bonus = moduleSlotBonus();

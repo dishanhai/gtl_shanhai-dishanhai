@@ -20,6 +20,7 @@ import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraftforge.registries.RegistryObject;
 
 import com.dishanhai.gt_shanhai.common.item.EternalGregTechWorkshopDataModuleItem;
+import com.dishanhai.gt_shanhai.common.item.GuixuHyperdimensionalLinkModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GravitonShardItem;
 import com.dishanhai.gt_shanhai.common.item.GuideBookItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
@@ -80,6 +81,11 @@ public class GTDishanhaiMod {
     public static final RegistryObject<Item> ETERNAL_WORKSHOP_DATA_MODULE = ITEMS.register(
         "eternal_workshop_data_module",
         () -> new EternalGregTechWorkshopDataModuleItem(new Item.Properties()
+            .stacksTo(1)
+            .rarity(Rarity.EPIC)));
+    public static final RegistryObject<Item> GUIXU_HYPERDIMENSIONAL_LINK_MODULE = ITEMS.register(
+        "guixu_hyperdimensional_link_module",
+        () -> new GuixuHyperdimensionalLinkModuleItem(new Item.Properties()
             .stacksTo(1)
             .rarity(Rarity.EPIC)));
     public static final RegistryObject<Item> GRAVITON_SHARD = ITEMS.register(
@@ -251,10 +257,14 @@ public class GTDishanhaiMod {
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(
                 net.minecraftforge.eventbus.api.EventPriority.HIGHEST,
                 (net.minecraftforge.event.entity.player.PlayerInteractEvent.RightClickBlock event) -> {
-                    if (!(event.getItemStack().getItem() instanceof EternalGregTechWorkshopDataModuleItem item)) {
+                    net.minecraft.world.InteractionResult result;
+                    if (event.getItemStack().getItem() instanceof EternalGregTechWorkshopDataModuleItem item) {
+                        result = item.handleBlockUse(event.getLevel(), event.getEntity(), event.getItemStack(), event.getPos());
+                    } else if (event.getItemStack().getItem() instanceof GuixuHyperdimensionalLinkModuleItem item) {
+                        result = item.handleBlockUse(event.getLevel(), event.getEntity(), event.getItemStack(), event.getPos());
+                    } else {
                         return;
                     }
-                    var result = item.handleBlockUse(event.getLevel(), event.getEntity(), event.getItemStack(), event.getPos());
                     if (result.consumesAction()) {
                         event.setCanceled(true);
                         event.setCancellationResult(result);

@@ -91,4 +91,20 @@ class GuixuEnergyHandlerTest {
         assertEquals(40, output.stored);
         assertNotNull(GuixuVisionCoreRecipeLogic.class.getDeclaredMethod("getWirelessMachine"));
     }
+
+    @Test
+    void twoTerminalsSharingOnePoolNeverDoubleCountOrOverdrawItsBalance() {
+        Store pool = new Store(100, 1000);
+        var first = pool.container();
+        var second = pool.container();
+        var uuid = java.util.UUID.fromString("c5e5ddce-4aa0-4b4b-9c08-7672dd53cc8a");
+        var handler = new GuixuEnergyHandler(() -> List.of(first, second), List::of,
+                () -> true, () -> false, container -> uuid);
+        assertEquals(BigInteger.valueOf(100), handler.getMaxAvailableEnergy());
+        assertFalse(handler.consumeEnergy(-150L));
+        assertEquals(100L, pool.stored);
+        assertTrue(handler.consumeEnergy(-80L));
+        assertEquals(20L, pool.stored);
+        assertEquals(BigInteger.valueOf(20), handler.getMaxAvailableEnergy());
+    }
 }
