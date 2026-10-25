@@ -34,6 +34,21 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
         this.host = host;
     }
 
+    /** 遏制場坍縮鎖定期間不開新批次。 */
+    @Override
+    public void findAndHandleRecipe() {
+        if (host.isContainmentLocked()) {
+            setWaiting(Component.literal("黑洞坍縮，鎖定剩餘 " + host.getContainmentLockSeconds() + " 秒"));
+            return;
+        }
+        super.findAndHandleRecipe();
+    }
+
+    @Override
+    protected long getTotalParallelLimit() {
+        return host.getContainmentBonus().scaleParallel(super.getTotalParallelLimit());
+    }
+
     /** 先規劃整批共享功率，原生 buildFinalWirelessRecipe 才真正扣料。 */
     @Override
     protected ParallelData calculateParallels() {
@@ -91,8 +106,15 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
     @Override
     protected WirelessGTRecipe buildWirelessRecipe(ObjectArrayList<Content> items, ObjectArrayList<Content> fluids,
                                                    BigInteger totalEu) {
-        var recipe = RecipeCalculationHelper.INSTANCE.buildWirelessRecipe(items, fluids, plannedTicks,
-                GuixuPowerBudget.roundForTicks(totalEu, plannedTicks), GTRecipeTypes.DUMMY_RECIPES);
+        GuixuContainmentBonus bonus = host.getContainmentBonus();
+        if (isEnergyConsumer() && bonus.shouldSwallow(java.util.concurrent.ThreadLocalRandom.current().nextDouble())) {
+            items.clear();
+            fluids.clear();
+        }
+        // 預算以未縮短的 plannedTicks 計算；耗時縮短只作用在最終批次上（總耗電不變）。
+        int ticks = bonus.scaleDuration(plannedTicks);
+        var recipe = RecipeCalculationHelper.INSTANCE.buildWirelessRecipe(items, fluids, ticks,
+                GuixuPowerBudget.roundForTicks(totalEu, ticks), GTRecipeTypes.DUMMY_RECIPES);
         recipe.data.putInt("sh_guixu_base_ticks", plannedBaseTicks);
         recipe.data.putLong("sh_guixu_parallel_budget", plannedParallels);
         return recipe;
@@ -102,7 +124,8 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
     protected long getWirelessRecipeEut(GTRecipe recipe) {
         if (recipe.recipeType == DShanhaiRecipeTypes.GUIXU_ENERGY_EXTRACTION) return RecipeHelper.getOutputEUt(recipe);
         // 父類 getTotalEuOfRecipe 恆回傳 0；buildFinalWirelessRecipe 實際讀的是此方法。
-        return GuixuRecipeMath.reducedEnergyEut(super.getWirelessRecipeEut(recipe), host.moduleSlotBonus());
+        return host.getContainmentBonus().scaleEnergy(
+                GuixuRecipeMath.reducedEnergyEut(super.getWirelessRecipeEut(recipe), host.moduleSlotBonus()));
     }
 
     @Override
