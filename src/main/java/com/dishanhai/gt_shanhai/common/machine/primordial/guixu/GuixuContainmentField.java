@@ -96,7 +96,8 @@ public final class GuixuContainmentField {
             return;
         }
         status = values[statusOrdinal];
-        stability = savedStability;
+        stability = Float.isNaN(savedStability) ? MAX_STABILITY
+                : Math.max(COLLAPSE_STABILITY, Math.min(MAX_STABILITY, savedStability));
         costModifier = Math.max(1L, Math.min(MAX_COST_MODIFIER, savedCostModifier));
         catalysisCounter = Math.max(0, Math.min(CATALYSIS_PER_DOUBLING - 1, savedCounter));
     }

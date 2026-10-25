@@ -104,6 +104,17 @@ class GuixuContainmentFieldTest {
     }
 
     @Test
+    void restoreClampsCorruptStability() {
+        GuixuContainmentField field = new GuixuContainmentField();
+        field.restore(Status.CONTAINED.ordinal(), Float.NaN, 1L, 0);
+        assertEquals(100.0F, field.stability());
+        field.restore(Status.UNSTABLE.ordinal(), -5000.0F, 1L, 0);
+        assertEquals(-900.0F, field.stability());
+        field.restore(Status.CONTAINED.ordinal(), 5000.0F, 1L, 0);
+        assertEquals(100.0F, field.stability());
+    }
+
+    @Test
     void restoreRejectsInvalidStatus() {
         GuixuContainmentField field = new GuixuContainmentField();
         field.restore(99, 3.0F, 8L, 5);
