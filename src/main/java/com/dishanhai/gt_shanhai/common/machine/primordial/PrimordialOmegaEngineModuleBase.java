@@ -1180,6 +1180,11 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                         .withStyle(ChatFormatting.RED));
             }
         }
+        if (host instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine guixu
+                && guixu.isContainmentLocked()) {
+            textList.add(Component.literal("歸墟黑洞坍縮：模組鎖定剩餘 " + guixu.getContainmentLockSeconds() + " 秒")
+                    .withStyle(ChatFormatting.RED));
+        }
         // 物质模块搭载信息（所有子类的 addDisplayText 都调用了此方法，确保可见）
         if (showsModuleAndThreadSlots()) {
             addModuleSlotDisplay(textList);

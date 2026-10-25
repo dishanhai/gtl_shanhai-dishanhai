@@ -4,6 +4,8 @@ import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuContainmentBonus;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
@@ -19,6 +21,7 @@ import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.RecipeCondition;
 import com.gregtechceu.gtceu.api.recipe.condition.RecipeConditionType;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
+import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
 import com.gregtechceu.gtceu.common.recipe.condition.CleanroomCondition;
 import com.gregtechceu.gtceu.common.recipe.condition.DimensionCondition;
 import com.gregtechceu.gtceu.common.recipe.condition.ResearchCondition;
@@ -30,6 +33,8 @@ import org.gtlcore.gtlcore.api.recipe.RecipeCacheStrategy;
 import org.gtlcore.gtlcore.api.recipe.RecipeExtensionCopier;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
+
+import com.google.common.primitives.Ints;
 
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -69,6 +74,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     private String cachedModuleItemId;
     private int cachedModuleCount = Integer.MIN_VALUE;
     private int cachedEffectiveModuleLevel = Integer.MIN_VALUE;
+    private int cachedHostCountMultiplier = Integer.MIN_VALUE;
     private final java.util.IdentityHashMap<GTRecipe, AmplifiedRecipeCacheEntry> amplifiedRecipeCache =
             new java.util.IdentityHashMap<>();
     private final java.util.IdentityHashMap<GTRecipe, MatchableScaledRecipe> matchableScaledRecipeCache =
@@ -153,8 +159,17 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     @Override
     public GTRecipe getGTRecipe() {
+        // 歸墟遏制場坍縮鎖定：不開新批次（提示由 addHostStatusDisplay 顯示）。
+        if (containmentBonus().locked()) return null;
         // 模块等级门控已在 lookupRecipeIterator 按真实候选配方逐一过滤，这里只叠加额外挂载效果。
         return applyExtraMountRecipeEffects(super.getGTRecipe());
+    }
+
+    /** 主機是歸墟時讀遏制場增益；其他主機一律 NONE（行為逐位不變）。 */
+    private GuixuContainmentBonus containmentBonus() {
+        return getMachine() instanceof PrimordialOmegaEngineModuleBase mod
+                ? GuixuVisionCoreMachine.containmentBonusOf(mod.getHost())
+                : GuixuContainmentBonus.NONE;
     }
 
     private GTRecipe applyExtraMountRecipeEffects(GTRecipe recipe) {
@@ -238,7 +253,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             // getAdditionalThread() 的 int 轉型或 GTLAdd 的固定執行緒上限。
             return Long.MAX_VALUE;
         }
-        return super.getTotalParallelLimit();
+        return containmentBonus().scaleParallel(super.getTotalParallelLimit());
     }
 
     private void invalidateLookupSetCacheIfConfigured() {
@@ -278,8 +293,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         try {
             IRecipeCapabilityHolder machine = getMachine();
             BigInteger maxTotalEu = wirelessTrait.getMaxAvailableEnergy();
-            double euMultiplier = getEuMultiplier();
             boolean energyConsumer = isEnergyConsumer();
+            double euMultiplier = getEuMultiplier() * containmentBonus().energyFactor(energyConsumer);
 
             int size = parallelData.getOriginRecipeList().size();
             // 预分配容量，减少 ArrayList 扩容开销（假设每个配方平均 2 个输出）
@@ -351,12 +366,32 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         }
     }
 
+    /**
+     * 歸墟遏制場：縮短批次最終耗時（下限 1 tick）並按機率吞掉產出。
+     * 沒有影響時走父類，與原本逐位一致；父類同樣用 DUMMY 配方類型與 limitedDuration。
+     */
+    @Override
+    protected WirelessGTRecipe buildWirelessRecipe(ObjectArrayList<Content> itemOutputs,
+                                                   ObjectArrayList<Content> fluidOutputs, BigInteger totalEu) {
+        GuixuContainmentBonus bonus = containmentBonus();
+        if (!bonus.affectsRecipes()) {
+            return super.buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
+        }
+        if (isEnergyConsumer() && bonus.shouldSwallow(java.util.concurrent.ThreadLocalRandom.current().nextDouble())) {
+            itemOutputs.clear();
+            fluidOutputs.clear();
+        }
+        int ticks = bonus.scaleDuration(getLimited().getLimitedDuration());
+        return RecipeCalculationHelper.INSTANCE.buildWirelessRecipe(itemOutputs, fluidOutputs, ticks, totalEu,
+                GTRecipeTypes.DUMMY_RECIPES);
+    }
+
     private GTRecipe amplifyForMountedCore(GTRecipe recipe) {
         MetaMachine machine = getMachine();
         if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
             return recipe;
         }
-        int multiplier = module.getHostOutputMultiplier();
+        int multiplier = Ints.saturatedCast((long) module.getHostOutputMultiplier() + containmentBonus().extraOutput());
         if (multiplier <= 1) {
             return recipe;
         }
@@ -804,8 +839,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         String moduleItemId = mod.getModuleItemId();
         int moduleCount = mod.getModuleCount();
         int moduleLevel = mod.getModuleLevel();
+        // 歸墟遏制場會倍增主機的物質模塊數量；倍率一變，舊的條件判定就不能再用。
+        int hostCountMultiplier = mod.getHost() == null ? 1 : mod.getHost().moduleCountMultiplier();
         if (java.util.Objects.equals(cachedModuleItemId, moduleItemId) && cachedModuleCount == moduleCount
-                && cachedEffectiveModuleLevel == moduleLevel) {
+                && cachedEffectiveModuleLevel == moduleLevel && cachedHostCountMultiplier == hostCountMultiplier) {
             return;
         }
         invalidateModuleConditionCaches();
@@ -813,6 +850,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         cachedModuleItemId = moduleItemId;
         cachedModuleCount = moduleCount;
         cachedEffectiveModuleLevel = moduleLevel;
+        cachedHostCountMultiplier = hostCountMultiplier;
     }
 
     private void invalidateModuleConditionCaches() {
