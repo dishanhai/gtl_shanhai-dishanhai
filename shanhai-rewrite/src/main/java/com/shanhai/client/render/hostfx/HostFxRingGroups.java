@@ -15,23 +15,22 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 归墟视界枢核 · <b>跟着转的三批东西</b>：内环带（真方块烘焙）＋ 4 座物质解压机（自绘）＋ 8 艘飞船（自绘小模型）。
+ * 归墟视界枢核 · <b>跟着转的三批东西</b>：内环带（真方块烘焙）＋ 4 座物质解压机（自绘）＋ 8 艘飞船（真方块烘焙）。
  *
- * <h2>🔴 2026-10-25 二次修正：飞船回到<b>外环外侧 63 格</b>、角速度回到 <b>+9 / −9 °/s</b></h2>
- * 用户实机看完后的原话：「这个飞船啊，<b>它是要在外环外侧飞的，就原本好好的，你这一改就不好了</b>」
- * ⇒ 上一轮"与内环同角速度、同枢轴"这条<b>已撤销</b>：
+ * <h2>🔴 2026-10-25 第三改：三组<b>各自独立</b>——内环 / 上 4 艘 / 下 4 艘，三份缓冲、三个角速度</h2>
+ * 用户口径（要求 ①）：「外圈选择的 8 个小飞船可以角速度和内环不一样」
  * <ul>
- *   <li>半径回到 63 格（生成器 {@code shipRadialCenter}，真方块就在 rad 61..65）；</li>
- *   <li>角速度回到上组 +9°/s、下组 −9°/s（{@link HostFxGeometry#shipOrbitDeg(float, boolean)}），
- *       与内环 12°/s <b>故意不同</b>；枢轴仍是环心那条竖轴（这点没变）；</li>
- *   <li>只保留用户没否定的那条：舰体包围盒 2.52×1.88×1.62 格、<b>单件 ≤1 格</b>。</li>
+ *   <li>三份 {@link HostFxBaked}：{@link #ring} / {@link #shipUp} / {@link #shipDown}
+ *       ⇒ 各有一套 {@code VertexBuffer}，<b>不是同一份静态 VBO</b>；</li>
+ *   <li>三个角速度常量：{@link HostFxGeometry#RING_DEG_PER_SEC}（12）、
+ *       {@link HostFxGeometry#SHIP_UP_DEG_PER_SEC}（+9）、{@link HostFxGeometry#SHIP_DOWN_DEG_PER_SEC}（−9）
+ *       ⇒ 想改哪一组就改哪一个，互不牵连；</li>
+ *   <li>判据：{@link HostFxGeometry#selfCheckGroupAngles()} 逐秒比对三者两两不相等、上下异号，
+ *       首次烘焙时打一行 {@code group_angles_ok}（或 {@code group_angles_mismatch}）。</li>
  * </ul>
  *
- * <h2>2026-10-25 首批改动（仍有效）：飞船从"真方块烘焙"改成"自绘 ≤3×2×2 小模型"</h2>
- * <ul>
- *   <li>「飞船体积要更小、建模更精细，要模仿《群星》物质解压机」 ⇒ 自绘 21 个分件；</li>
- *   <li>真方块那 888 格照旧被 {@link HostFxHide} 藏成 AIR（不留残影）。</li>
- * </ul>
+ * <h2>2026-10-25 首批改动（仍有效）</h2>
+ * 飞船体积更小、建模更精细（后来整批改成真方块），真方块那 888 格照旧被 {@link HostFxHide} 藏成 AIR（不留残影）。
  *
  * <h2>2026-10-25 第二批：4 条辐条 → 4 座物质解压机</h2>
  * 辐条的 224 格（去重）<b>不再烘进环缓冲</b>，由 {@link HostFxDraw#drawMatterDecompressors} 画 4 座机器；
@@ -73,6 +72,16 @@ public final class HostFxRingGroups {
      * 另外 144 格是烘着的 —— 若留着，它们会从机器内部穿出来，看起来像"机器里卡着一堆方块"。
      */
     private static int cellsArms;
+    /**
+     * 台账里属于<b>内环摘除段</b>的格数（用户第 4 条：「红框那段内环方块可以不渲染」）。
+     *
+     * <p>🔴 2026-10-25 第五改：这 4 段（4 个喷口各一段，见 {@link HostFxGeometry#mdMouthCutCells()}）
+     * <b>继续藏在台账里</b>（世界里的真方块写成 AIR），但<b>不再烘进环缓冲</b> ——
+     * 否则它们会跟着环转到机器口前面，就是用户截图里那段"内环玻璃方块"。
+     * 这几个位置由解压机前部（{@link HostFxGeometry#mdFrontBoxes()}，与 {@code drawMatterDecompressors}
+     * 同一份几何）填上。
+     */
+    private static int cellsMouthCut;
     /** 判据②：三组格数之和 == 台账格数。 */
     private static boolean groupsMatchLedger;
     /** 判据②的一半（坐标部分）：台账本地坐标能否还原回原来那一格；null = 全对。 */
@@ -127,16 +136,21 @@ public final class HostFxRingGroups {
         return cellsArms;
     }
 
+    /** 台账里被"摘出环渲染"的内环段格数（第五改；这 4 段由解压机前部填上）。 */
+    public static int cellsMouthCut() {
+        return cellsMouthCut;
+    }
+
     /**
-     * 4 条辐条在<b>本地整数网格</b>里的键（与 {@link HostFxBaked.Cell} 的 {@code gx/gy/gz} 同一口径）。
+     * 一组格子在<b>本地整数网格</b>里的键（与 {@link HostFxBaked.Cell} 的 {@code gx/gy/gz} 同一口径）。
      *
      * <p>换算路径与烘焙完全一样（{@code worldFromGenerator → worldToLocal → round(l + CELL_CENTER)}），
      * 所以这里拿到的键与 {@code cells()} 里的键<b>逐格可比</b>（不是"另算一套坐标"）。
      */
-    private static Set<Long> armGridKeys(BlockPos controllerPos, Direction facing) {
-        final List<BlockPos> arms = HostFxGeometry.armCells();
-        final Set<Long> out = new HashSet<>(arms.size() * 2);
-        for (BlockPos gen : arms) {
+    private static Set<Long> gridKeys(List<BlockPos> generatorCells, BlockPos controllerPos,
+                                      Direction facing) {
+        final Set<Long> out = new HashSet<>(generatorCells.size() * 2);
+        for (BlockPos gen : generatorCells) {
             final BlockPos world = HostFxGeometry.worldFromGenerator(controllerPos, facing,
                     gen.getX(), gen.getY(), gen.getZ());
             final float[] l = HostFxGeometry.worldToLocal(controllerPos, facing, world);
@@ -145,6 +159,11 @@ public final class HostFxRingGroups {
                     Math.round(l[2] + HostFxGeometry.CELL_CENTER)));
         }
         return out;
+    }
+
+    /** 4 条辐条在本地整数网格里的键。 */
+    private static Set<Long> armGridKeys(BlockPos controllerPos, Direction facing) {
+        return gridKeys(HostFxGeometry.armCells(), controllerPos, facing);
     }
 
     private static long gridKey(HostFxBaked.Cell c) {
@@ -220,14 +239,23 @@ public final class HostFxRingGroups {
         final List<HostFxBaked.Cell> all = HostFxBaked.cells(ledger, controllerPos, facing);
         roundTripMismatch = HostFxBaked.roundTripMismatch(all, controllerPos, facing);
         final Set<Long> armKeys = armGridKeys(controllerPos, facing);
+        // 🔴 2026-10-25 第五改：内环靠 4 个喷口的那 4 段【不再烘进环】——
+        //    它们的格仍藏在台账里（世界 = AIR），但画面上由解压机前部（mdFrontBoxes）填上。
+        final Set<Long> mouthKeys = gridKeys(HostFxGeometry.mdMouthCutCells(), controllerPos, facing);
         final List<HostFxBaked.Cell> g0 = new ArrayList<>(all.size());
         final List<HostFxBaked.Cell> gUp = new ArrayList<>(512);
         final List<HostFxBaked.Cell> gDown = new ArrayList<>(512);
         int arms = 0;
+        int mouthCut = 0;
         for (HostFxBaked.Cell c : all) {
             // 🔴 辐条那批先摘出去（它们由 4 座解压机取代，见 cellsArms 的注释）
             if (armKeys.contains(gridKey(c))) {
                 arms++;
+                continue;
+            }
+            // 🔴 内环摘除段：只藏不烘（由解压机前部取代，见 cellsMouthCut 的注释）
+            if (mouthKeys.contains(gridKey(c))) {
+                mouthCut++;
                 continue;
             }
             switch (HostFxGeometry.groupOf(c.ly())) {
@@ -240,8 +268,9 @@ public final class HostFxRingGroups {
         cellsUp = gUp.size();
         cellsDown = gDown.size();
         cellsArms = arms;
-        // 判据②：四组格数之和 == 台账格数（对数，不是"三个 list 加起来"那种恒真校验）
-        groupsMatchLedger = (cellsRing + cellsArms + cellsUp + cellsDown) == ledgerCells;
+        cellsMouthCut = mouthCut;
+        // 判据②：五组格数之和 == 台账格数（对数，不是"三个 list 加起来"那种恒真校验）
+        groupsMatchLedger = (cellsRing + cellsArms + cellsMouthCut + cellsUp + cellsDown) == ledgerCells;
         ring = HostFxBaked.bake(HostFxGeometry.groupName(0), g0);
         // 🔴 2026-10-24 傍晚：8 艘飞船回到「真方块跟着转」—— 上组/下组各烘一份，
         //    角速度仍是 +9°/s / −9°/s（HostFxGeometry.shipOrbitDeg），位置就在真方块原来的
@@ -256,12 +285,87 @@ public final class HostFxRingGroups {
             selfCheckLogged = true;
             final String bad = HostFxGeometry.selfCheckNozzleBeam();
             if (bad == null) {
-                ShanhaiMod.LOGGER.info("[SHANHAI-HOSTFX] nozzle_beam_ok 判据：4 条径向光柱起点 == "
+                ShanhaiMod.LOGGER.info("[SHANHAI-HOSTFX] nozzle_beam_ok 判据：4 条主光柱起点 == "
                                 + "4 座解压机喷口中心（容差 1e-5），喷口 r={} 格、倾角 {}°、末端偏差 0.000000",
                         String.format(java.util.Locale.ROOT, "%.3f", HostFxGeometry.mdNozzleRadius()),
                         HostFxGeometry.MD_TILT_DEG);
             } else {
                 ShanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] nozzle_beam_mismatch {}", bad);
+            }
+            // 🔴 2026-10-25 第三改：三组角速度 / 解压机件数 / 细紫光束 各一条一次性自检
+            final String badAngles = HostFxGeometry.selfCheckGroupAngles();
+            if (badAngles == null) {
+                ShanhaiMod.LOGGER.info("[SHANHAI-HOSTFX] group_angles_ok 判据：内环 {}°/s ≠ 上舰 {}°/s ≠ 下舰 {}°/s"
+                                + "（三组各自独立烘焙、各自独立 spin，互不相等且上下对转）",
+                        HostFxGeometry.RING_DEG_PER_SEC, HostFxGeometry.SHIP_UP_DEG_PER_SEC,
+                        -HostFxGeometry.SHIP_DOWN_DEG_PER_SEC);
+            } else {
+                ShanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] group_angles_mismatch {}", badAngles);
+            }
+            final String badParts = HostFxGeometry.selfCheckMdParts();
+            if (badParts == null) {
+                ShanhaiMod.LOGGER.info("[SHANHAI-HOSTFX] md_parts_ok 判据：每座 {} 件（≥{}，单件最大半长 {} 格），"
+                                + "横置后仍在红框 11×11×11 内",
+                        HostFxGeometry.mdBoxCount(), HostFxGeometry.MD_MIN_BOXES,
+                        String.format(java.util.Locale.ROOT, "%.2f", HostFxGeometry.mdMaxHalf()));
+            } else {
+                ShanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] md_parts_mismatch {}", badParts);
+            }
+            final String badThin = HostFxGeometry.selfCheckThinBeams();
+            if (badThin == null) {
+                // 🔴 第七改：细光束改成"每座解压机 3 条"，所以判据行的读法整体换了
+                final float[] dir = HostFxGeometry.thinBeamDirection();
+                ShanhaiMod.LOGGER.info("[SHANHAI-HOSTFX] thin_beams_ok 判据：{} 条细光束 = 4 座 × {} 条，"
+                                + "每座绕<b>本座喷口轴</b> r={} 格、互成 120.000°（120/120/120），"
+                                + "每条方向与本座主柱方向夹角 0.000000°（0 号机方向 {}）、"
+                                + "起点 == 该座发射器口中心、色 {}、峰值半径 {} 格",
+                        HostFxGeometry.THIN_BEAM_COUNT, HostFxGeometry.THIN_BEAMS_PER_MD,
+                        HostFxGeometry.THIN_BEAM_RING_R,
+                        HostFxGeometry.vecText(dir),
+                        HostFxGeometry.rgbText(HostFxGeometry.THIN_BEAM_COLOR),
+                        HostFxGeometry.THIN_BEAM_PEAK_RADIUS);
+            } else {
+                ShanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] thin_beams_mismatch {}", badThin);
+            }
+            // 🔴 第七改：4 条解压机主喷口光柱 = 伪神同款（与中央两根同一套）
+            final String badMdBeam = HostFxGeometry.selfCheckMdBeams();
+            if (badMdBeam == null) {
+                ShanhaiMod.LOGGER.info("[SHANHAI-HOSTFX] md_beam_ok 判据：4 条解压机主柱 = 伪神同款 —— "
+                                + "外层 {}→{} 格（区间 1.2~1.6、比中央 {} 细）、内芯 ×{} = {}→{} 格、"
+                                + "2 遍 Intensity 2.0/4.0、发光色 {}（可配，与中央那 2 根互不影响）、"
+                                + "起点 == 喷口、末端 == 洞面",
+                        HostFxGeometry.MD_BEAM_OUTER_R0, HostFxGeometry.MD_BEAM_OUTER_R1,
+                        HostFxGeometry.PILLAR_OUTER_R0, HostFxGeometry.MD_BEAM_INNER_SCALE,
+                        HostFxGeometry.MD_BEAM_OUTER_R0 * HostFxGeometry.MD_BEAM_INNER_SCALE,
+                        HostFxGeometry.MD_BEAM_OUTER_R1 * HostFxGeometry.MD_BEAM_INNER_SCALE,
+                        HostFxGeometry.rgbText(HostFxGeometry.mdBeamGlowRgb()));
+            } else {
+                ShanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] md_beam_mismatch {}", badMdBeam);
+            }
+            final String badPillar = HostFxGeometry.selfCheckPillar();
+            if (badPillar == null) {
+                ShanhaiMod.LOGGER.info("[SHANHAI-HOSTFX] pillar_ok 判据：上下两根同一套 —— 外层 {}→{} 格、"
+                                + "内芯 ×{} = {}→{} 格（改前 0.62→0.30）、2 遍 Intensity 2.0/4.0、"
+                                + "伪神 shader + space_layer 贴图",
+                        HostFxGeometry.PILLAR_OUTER_R0, HostFxGeometry.PILLAR_OUTER_R1,
+                        HostFxGeometry.PILLAR_INNER_SCALE,
+                        HostFxGeometry.PILLAR_OUTER_R0 * HostFxGeometry.PILLAR_INNER_SCALE,
+                        HostFxGeometry.PILLAR_OUTER_R1 * HostFxGeometry.PILLAR_INNER_SCALE);
+            } else {
+                ShanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] pillar_mismatch {}", badPillar);
+            }
+            final String badCut = HostFxGeometry.selfCheckMouthCut();
+            if (badCut == null) {
+                final float[] fr = HostFxGeometry.mdFrontRadialRange();
+                ShanhaiMod.LOGGER.info("[SHANHAI-HOSTFX] mouth_cut_ok 判据：内环摘除 {} 段共 {} 格"
+                                + "（每段切向半宽 {} 格、径向 r=47/48/49 三层），由解压机前部 {} 件"
+                                + "（径向 {}..{} 格）填上",
+                        HostFxGeometry.MD_COUNT, HostFxGeometry.mdMouthCutCells().size(),
+                        HostFxGeometry.MD_MOUTH_CUT_HALF, HostFxGeometry.mdFrontBoxCount(),
+                        String.format(java.util.Locale.ROOT, "%.2f", fr[0]),
+                        String.format(java.util.Locale.ROOT, "%.2f", fr[1]));
+            } else {
+                ShanhaiMod.LOGGER.warn("[SHANHAI-HOSTFX] mouth_cut_mismatch {}", badCut);
             }
         }
         return true;
@@ -274,10 +378,21 @@ public final class HostFxRingGroups {
      * 上组飞船 {@code spin(shipOrbitDeg(t,true)=+9t)} → 下组 {@code spin(shipOrbitDeg(t,false)=−9t)}。
      * 🔴 别再写成"环与舰同角速度"：2026-10-25 用户否掉了那一版。
      *
+     * <h2>🔴 2026-10-25 第二十改：{@code spinSeconds} 是【动画时钟】，不是世界时间</h2>
+     * 调用方传的是 {@link HostFxSwitch#spinSeconds()}（= {@code HostFxState.animSeconds()}）：
+     * <ul>
+     *   <li>特效开 ⇒ 按墙钟累加，环 12°/s、舰 ±9°/s 与改前<b>逐帧相同</b>；</li>
+     *   <li>特效关（降级态）⇒ 那条时钟<b>冻结</b> ⇒ 本方法每一句 {@code spin} 都收到同一个角度
+     *       ⇒ <b>环与舰原地不动、但仍完整绘制</b>（用户原话：「关闭之后……内环和 8 个小飞船不转」）；</li>
+     *   <li>🔴 冻结值是<b>上一次的相位</b>，不是 0 —— 传 0 会让它们"瞬移回初始姿态"，
+     *       那是这一步唯一要避免的形态（{@code HostFxState.animSeconds} 的两条不许改的语义）。</li>
+     * </ul>
+     *
      * @param ships 是否连飞船一起画；<b>现在恒为 true</b>（飞船真方块已被藏成 AIR，少画一组就留一个洞）
+     * @param spinSeconds 自转时钟（秒）= {@link HostFxSwitch#spinSeconds()}；<b>降级态是冻结值</b>
      */
     public static void render(PoseStack poseStack, Direction facing, float cx, float cy, float cz,
-                              float seconds, boolean ships) {
+                              float spinSeconds, boolean ships) {
         lastGroups = "none";
         lastShipBoxes = 0;
         final StringBuilder submitted = new StringBuilder(16);
@@ -286,7 +401,7 @@ public final class HostFxRingGroups {
             HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
             if (ring != null && !ring.isEmpty()) {
                 poseStack.pushPose();
-                HostFxRingTransforms.spin(poseStack, HostFxGeometry.ringDeg(seconds));
+                HostFxRingTransforms.spin(poseStack, HostFxGeometry.ringDeg(spinSeconds));
                 // 加厚箍 + 配重脊：与环带<b>同一个自转角</b>，补足"3 层 → ≈5 层"的体量
                 HostFxDraw.drawRingExtras(poseStack);
                 ring.render(poseStack);
@@ -297,14 +412,14 @@ public final class HostFxRingGroups {
             //    所以必须与环带<b>同一个枢轴、同一个自转角</b> —— 与辐条原来的转向逐角度一致。
             poseStack.pushPose();
             try {
-                HostFxRingTransforms.spin(poseStack, HostFxGeometry.ringDeg(seconds));
+                HostFxRingTransforms.spin(poseStack, HostFxGeometry.ringDeg(spinSeconds));
                 lastMdBoxes = HostFxDraw.drawMatterDecompressors(poseStack);
             } finally {
                 poseStack.popPose();
             }
             submitted.append(submitted.length() == 0 ? "md" : "+md");
             if (ships) {
-                posedShipDraw(poseStack, seconds);
+                posedShipDraw(poseStack, spinSeconds);
                 submitted.append(submitted.length() == 0 ? "ships" : "+ships");
             } else {
                 // 不画飞船也必须<b>先把真方块还原</b>？不需要：ship buffers 与 ring 同一份台账，
@@ -329,8 +444,10 @@ public final class HostFxRingGroups {
      *
      * <p>为什么要<b>两次</b> {@code pushPose}：上/下两组的自转角不同，缓冲区却各自独立，
      * 所以各套一次 pose；枢轴仍是环心那条竖轴（与环带同一个）。
+     *
+     * @param spinSeconds 自转时钟（秒）= {@link HostFxSwitch#spinSeconds()}（降级态冻结 ⇒ 舰原地不动）
      */
-    private static void posedShipDraw(PoseStack poseStack, float seconds) {
+    private static void posedShipDraw(PoseStack poseStack, float spinSeconds) {
         int blocks = 0;
         int quads = 0;
         for (int half = 1; half >= 0; half--) {
@@ -341,7 +458,7 @@ public final class HostFxRingGroups {
             }
             poseStack.pushPose();
             try {
-                HostFxRingTransforms.spin(poseStack, HostFxGeometry.shipOrbitDeg(seconds, up));
+                HostFxRingTransforms.spin(poseStack, HostFxGeometry.shipOrbitDeg(spinSeconds, up));
                 baked.render(poseStack);
                 blocks += baked.blocks();
                 quads += baked.quads();
@@ -369,11 +486,13 @@ public final class HostFxRingGroups {
         shipUp = null;
         shipDown = null;
         bakedKey = Long.MIN_VALUE;
+        HostFxPillarBeam.reset();               // 🔴 第五改：主光柱的 VertexBuffer / shader 也一起丢
         ledgerCells = 0;
         cellsRing = 0;
         cellsUp = 0;
         cellsDown = 0;
         cellsArms = 0;
+        cellsMouthCut = 0;
         groupsMatchLedger = true;
         roundTripMismatch = null;
         ringBakedBlocks = 0;
@@ -396,11 +515,17 @@ public final class HostFxRingGroups {
         }
         sb.append(" 台账 ").append(ledgerCells).append(" 格（环 ").append(cellsRing)
                 .append(" / 辐条→解压机 ").append(cellsArms)
+                .append(" / 内环摘除→解压机前部 ").append(cellsMouthCut)
                 .append(" / 上舰 ").append(cellsUp).append(" / 下舰 ").append(cellsDown)
                 .append("，match=").append(groupsMatchLedger).append(')')
+                // 🔴 2026-10-25 第三改：三组角速度各自独立（12 / +9 / −9，互不相等）
+                .append(" | 角速度 内环 ").append(HostFxGeometry.RING_DEG_PER_SEC)
+                .append("°/s / 上舰 +").append(HostFxGeometry.SHIP_UP_DEG_PER_SEC)
+                .append("°/s / 下舰 −").append(HostFxGeometry.SHIP_DOWN_DEG_PER_SEC).append("°/s")
+                .append("（三组独立烘焙独立 spin，互不相等）")
                 .append(" | 解压机 4×").append(HostFxGeometry.mdBoxCount()).append(" 件 = ")
-                .append(lastMdBoxes).append(" 方盒（单件≤1 格，横置 "
-                        + HostFxGeometry.MD_TILT_DEG + "°，喷口 r="
+                .append(lastMdBoxes).append(" 方盒（单件≤1 格，≥").append(HostFxGeometry.MD_MIN_BOXES)
+                .append(" 件，横置 " + HostFxGeometry.MD_TILT_DEG + "°，喷口 r="
                         + String.format(java.util.Locale.ROOT, "%.2f", HostFxGeometry.mdNozzleRadius())
                         + " 格）")
                 // 🔴 2026-10-24 傍晚：飞船不再自绘 ⇒ 这里报的是"真方块烘焙"的块数，

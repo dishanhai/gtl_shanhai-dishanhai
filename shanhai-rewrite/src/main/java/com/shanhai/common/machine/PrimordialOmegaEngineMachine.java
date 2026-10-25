@@ -31,6 +31,8 @@ import com.shanhai.common.recipe.PrimordialRecipeEffects;
 import com.shanhai.common.thread.ShanhaiParallelBudget;
 import com.shanhai.config.ShanhaiConfig;
 import com.shanhai.machine.engine.ModuleSlotDiagnostics;
+import com.shanhai.machine.host.GuixuVisionCoreMachine;
+import com.shanhai.machine.host.HostFxConfigurators;
 import com.shanhai.machine.module.ModuleSetBlockWatch;
 import com.shanhai.machine.module.PrimordialModuleMachine;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
@@ -1564,6 +1566,185 @@ public class PrimordialOmegaEngineMachine
         return 0;
     }
 
+    /**
+     * <b>本主机是否给它挂载的模块授予「跨配方种类并行」</b>：{@code true} = 授予。
+     *
+     * <h2>授予之后模块变成什么样（口径 = 用户 2026-10-23 原话，逐字）</h2>
+     * <pre>
+     *   「使安装在它上面的模块也获得跨配方种类并行，且<b>跨配方种类并行等于原机器的线程数</b>，
+     *     也就相当于把他的<b>跨配方线程变成了跨配方种类并行</b>」
+     * </pre>
+     * ⇒ 模块的候选集来源从「{@code getRecipeTypes()[activeRecipeType]} <b>一个</b>类型」换成
+     * 「按类型数组顺序<b>逐类型取 1 条</b>、凑够<b>线程数</b>即停」；
+     * 其余全部不动 —— 下游本来就把 N 条候选<b>塌缩成一条配方</b>（共用一份 {@code progress}、
+     * 逐条各扣各的料、产出拼接后一次结算），那套口径与"这 N 条来自几个类型"无关。
+     * 落点见 {@code PrimordialModuleRecipeLogic#lookupRecipeSet()}。
+     *
+     * <h2>🔴 为什么默认 {@code false}（本钩子的全部安全性都在这一行）</h2>
+     * 老主机（原始终焉引擎）没有这个功能，{@code false} ⇒ 模块走原有的单类型路径，
+     * <b>与加这个钩子之前逐位相同</b>（候选集、截断顺序、扣料顺序、日志一行都不变）。
+     * 这是「可 fail-open」的<b>结构性</b>保证而不是「恰好没影响」：判定点只有一个
+     * （{@code PrimordialModuleRecipeLogic#shanhai$isCrossTypeEnabled()}），默认值一关就整条新路都不执行。
+     *
+     * <p>归墟视界枢核覆写它返回 {@code true}（{@code GuixuVisionCoreMachine#grantsCrossTypeParallel()}）。
+     * ⚠️ 模块侧<b>每次 lookup 都现读</b>本方法、<b>不缓存</b> ⇒ 主机成型 / 拆解 / 授予条件变化都立刻生效。
+     */
+    public boolean grantsCrossTypeParallel() {
+        return false;
+    }
+
+    // ═══════════════ 「机器模式」显示名（用户 2026-10-25 定稿；⭐ 改名只改下面两行里的字符串） ═══════════════
+    //
+    // 为什么要这一对常量（用户原话）：
+    //   「伪神也是跨配方种类并行，它 jade 里面显示是「群星烧却」（一个新的名字），我们的主机和模块
+    //     跨配方种类并行还是老的单个配方的名字，会引起歧义，所以你也分别给模块和主机起个新的名字
+    //     放到 jade 还有机器里面显示」
+    // ⇒ 跨配方种类并行真在生效时，「机器模式」那一行不再画「当前激活的那个配方类型名」
+    //   （如「视界物质解压」「车床」—— 那只代表"本轮恰好轮到哪个类型"，会被读成"这台机器只会跑这一类"），
+    //   改画下面这个名字。未生效时【一个字符都不改】：调用方一律不换名、不加行。
+
+    /**
+     * 🔴 <b>主机（归墟视界枢核）在「跨配方种类并行」生效时的机器模式名</b>。
+     *
+     * <p>⭐ <b>用户要改名，只改这一行的字符串</b>（改完重新构建，两个显示点一起变：
+     * Jade 的「机器模式」行 + 机器 GUI 抬头那一行 —— 两处读的都是
+     * {@link #crossTypeModeDisplayName()}，见该方法的说明）。
+     */
+    public static final String CROSS_TYPE_MODE_NAME_HOST = "视界物质并流";
+
+    /**
+     * 🔴 <b>任意模块在「跨配方种类并行」生效时的机器模式名</b>。
+     *
+     * <p>⭐ <b>用户要改名，只改这一行的字符串</b>（同上：Jade 与机器 GUI 两处一起变）。
+     */
+    public static final String CROSS_TYPE_MODE_NAME_MODULE = "原初并流加工";
+
+    /**
+     * <b>纯函数：跨类型生效 ⇒ 给出要显示的新名字；否则 ⇒ {@code null}（= 叫调用方"照原样显示"）。</b>
+     *
+     * <h2>两个分支各自保证什么</h2>
+     * <pre>
+     *   crossTypeInEffect == false          ⇒ null ⇒ 调用方【不加行、不换名】
+     *                                        ⇒ Jade / GUI 与加这个功能之前【逐字相同】
+     *   crossTypeInEffect == true 但名字为空 ⇒ null ⇒ 同样照原样（绝不画一行空名字出来）
+     *   crossTypeInEffect == true 且名字非空 ⇒ 返回该名字
+     * </pre>
+     *
+     * <p>★ 这是本功能<b>唯一的判定点</b>：Jade 那一路（服务端写 NBT / 客户端画行）与 GUI 那一路
+     * （{@code addDisplayText}）都调用它 ⇒ 两侧不可能分叉。
+     *
+     * @param crossTypeInEffect 「跨配方种类并行」此刻是否<b>真的在生效</b>（各机器自己按状态判，见子类覆写）
+     * @param crossTypeModeName 要显示的新名字（只能是上面两个常量之一）
+     */
+    public static @Nullable String resolveCrossTypeModeName(final boolean crossTypeInEffect,
+                                                           final @Nullable String crossTypeModeName) {
+        if (!crossTypeInEffect) {
+            return null;
+        }
+        if (crossTypeModeName == null || crossTypeModeName.isBlank()) {
+            return null;
+        }
+        return crossTypeModeName;
+    }
+
+    /**
+     * <b>本机此刻该显示的「机器模式」新名字；{@code null} = 不换名（照上游/照原样显示）。</b>
+     *
+     * <h2>默认实现为什么必须返回 {@code null}</h2>
+     * 老主机（原始终焉引擎）没有这个功能 ⇒ {@code null} ⇒ Jade 与 GUI
+     * <b>与加这个功能之前逐字相同</b>（这就是"可 fail-open"的结构性保证，不是"恰好没影响"）。
+     *
+     * <h2>两个显示点（都只读<b>这一个</b>方法）</h2>
+     * <ol>
+     *   <li><b>Jade</b>：{@code com.shanhai.mixin.ShanhaiMachineModeNameMixin} ——
+     *       服务端在 GTCEu {@code MachineModeProvider#appendServerData} 的 RETURN 处读本方法，
+     *       非 {@code null} 才往 Jade 的服务端数据里写一个字符串键；客户端在
+     *       {@code #appendTooltip} 的 HEAD 处读那个键，命中才把「机器模式」那一行换成新名字并取消上游渲染。
+     *       <b>键不存在时一个字节都不写</b> ⇒ 未生效的机器完全走上游原路径。</li>
+     *   <li><b>机器 GUI</b>：{@code addDisplayText(...)}（本工程主机 / 模块各自的实现）——
+     *       非 {@code null} 才<b>多画一行</b>「机器模式：&lt;新名字&gt;」。</li>
+     * </ol>
+     *
+     * <h2>⚠️ 为什么必须是"状态相关"的而不是常量</h2>
+     * 用户要求「只在真跨类型跑时换名」⇒ 未授予（老主机）、锁了配方（玩家明确指定了单条配方）、
+     * 结构未成型 等退化情形<b>一律显示原来的配方类型名</b>。各子类怎么判见它们的覆写。
+     */
+    public @Nullable String crossTypeModeDisplayName() {
+        return null;
+    }
+
+    /**
+     * 🔴 <b>纯函数：这一次挂侧栏时，要不要把「机器模式」选择器子页藏起来</b>
+     * （用户 2026-10-25 拍板原话逐字：「<b>我说的是「机器模式」子页，那个要不然你就在机器是跨配方种类
+     * 并行的情况下隐藏掉得了</b>」）。
+     *
+     * <h2>为什么这个子页在跨类型生效时【没有意义】</h2>
+     * 那个子页是 GTCEu 的 {@code MachineModeFancyConfigurator}，它只做一件事：改
+     * {@code activeRecipeType}（{@code IRecipeLogicMachine#setActiveRecipeType(int)}）。
+     * 而跨配方种类并行生效时，模块侧取候选的入口被整段换掉了 ——
+     * {@code PrimordialModuleRecipeLogic#lookupRecipeSet()} 在 {@code shanhai$isCrossTypeEnabled()}
+     * 为真时<b>无视 {@code activeRecipeType}</b>、按本机的<b>全部</b>配方类型轮转取候选
+     * ⇒ 玩家在那页手选哪一类都<b>不会</b>改变机器跑什么，只会被读成"这台机器只跑这一类"（误导）。
+     * 未生效时（老主机 / 锁了配方 / 未成型 / 发电模块）它确实是<b>唯一</b>能决定"跑哪一类"的控件
+     * ⇒ 那时必须<b>逐字还原</b>：照上游默认挂上、照常可选。
+     *
+     * <h2>判据只有一行，而且与「机器模式」改名【同一个判据】</h2>
+     * <pre>
+     *   crossTypeModeDisplayName == null  ⇒ false ⇒ 子页照挂（= 上游 GTCEu 默认行为，一个字节都不动）
+     *   crossTypeModeDisplayName != null  ⇒ true  ⇒ 子页不挂（= 跨配方种类并行正在生效）
+     * </pre>
+     * ⚠️ 两者共用 {@link #crossTypeModeDisplayName()} 这一个方法 ⇒ 界面上不可能出现
+     * "名字已经换成「原初并流加工」、选择器却还能手选类型"这种自相矛盾的状态。
+     *
+     * <h2>⚠️ 调用方必须【现场】判、不许缓存</h2>
+     * 跨类型在不在生效是<b>会变</b>的（主机成型/拆解、锁/解锁配方、模块换主机）。
+     * 侧栏每次都是"整列清空后重挂"（{@code FancyMachineUIWidget#setupSideTabs} 偏移 4
+     * {@code clearSubTabs()}、偏移 12 {@code attachSideTabs(...)}，javap 已核）
+     * ⇒ 在挂载那一刻现取 {@code crossTypeModeDisplayName()} 就自动跟随机器状态，
+     * 玩家关掉界面再打开即更新，<b>不需要</b>任何"状态变了要重挂"的补偿逻辑。
+     *
+     * <h2>🔴 2026-10-25 补充：客户端必须传【同步镜像】的值，不能传本地现算的值</h2>
+     * 这个判据的调用点有一个在<b>客户端</b>（GUI：{@code attachSideTabs} 两侧都会跑 ——
+     * LDLib {@code UIFactory#initClientUI} 在客户端也调 {@code createUITemplate} +
+     * {@code initWidgets}，javap 偏移 22 / 35），而模块的 {@code getHost()} 是
+     * <b>纯服务端字段</b>（唯一写者 {@code findAndConnectToHost()} 只从 {@code onStructureFormed}
+     * 与 {@code subscribeServerTick} 进，前者在 GTCEu 里唯一调用点是 {@code asyncCheckPattern} 的
+     * {@code ServerLevel} lambda）⇒ 客户端本地现算恒 {@code null} ⇒ 恒不隐藏。
+     * 所以模块侧现在传的是服务端 {@code @DescSynced} 下来的 {@code shanhai$crossTypeModeActive}。
+     * <b>将来谁再加调用点，先问一句"这份值在客户端拿得到吗"。</b>
+     *
+     * @param crossTypeModeDisplayName 调用方现场取的 {@link #crossTypeModeDisplayName()}（可为 {@code null}）
+     */
+    public static boolean shouldHideMachineModeTab(final @Nullable String crossTypeModeDisplayName) {
+        return crossTypeModeDisplayName != null;
+    }
+
+    /**
+     * <b>某个配方逻辑是否被玩家"锁配方"了</b>（只读，供上面那些显示判定用）。
+     *
+     * <h2>为什么需要它（而不是直接 {@code getRecipeLogic().isLock()}）</h2>
+     * {@code isLock()} 不在 GTCEu 的 {@code RecipeLogic} 上，而在 gtlcore 的
+     * {@code org.gtlcore.gtlcore.api.machine.trait.ILockRecipe}（{@code default boolean isLock()}，
+     * javap 已核）—— 本工程的配方逻辑（{@code PrimordialEngineRecipeLogic} /
+     * {@code PrimordialModuleRecipeLogic}）经由 gtladditions 的 {@code MutableRecipesLogic}
+     * 实现了那个接口。而 {@code IRecipeLogicMachine#getRecipeLogic()} 的静态类型是 {@code RecipeLogic}
+     * ⇒ 必须 {@code instanceof} 一下才能调。
+     *
+     * <h2>为什么是 {@code static}（吃一个 Object）而不是本类的实例方法</h2>
+     * 模块（{@code PrimordialModuleMachine}）<b>不是</b>本类的子类（它是
+     * {@code WorkableElectricMultiblockMachine} 的抽象子类，见该类的 {@code extends} 那一行）
+     * ⇒ 实例方法它调不到。显示判据两边必须是<b>同一份实现</b>（否则主机会漂移成"模块锁了配方还换名"）。
+     *
+     * <p>纯读、不缓存（与"锁配方"开关同 ttl）、任何异常都按"没锁"处理（显示路径不许抛）。
+     */
+    public static boolean isRecipeLockedForDisplay(final @Nullable Object recipeLogic) {
+        try {
+            return recipeLogic instanceof org.gtlcore.gtlcore.api.machine.trait.ILockRecipe lock && lock.isLock();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     // ------------------------------------------------------- 「物质模块槽」门控（N3/N7 共用）
 
     /**
@@ -2466,14 +2647,41 @@ public class PrimordialOmegaEngineMachine
         //    gtlcore 的重排挂在 attachConfigurators 的 TAIL 上，开关之前挂的 tab 要等下一次挂载才被重排。
         ConfiguratorTabGridCompat.enableTabGrid(panel);
         super.attachConfigurators(panel);
-        panel.attachConfigurators(new IFancyConfiguratorButton.Toggle(
-                        GuiTextures.BUTTON_SWITCH_VIEW.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D),
-                        GuiTextures.BUTTON_SWITCH_VIEW.getSubTexture(0.0D, 0.5D, 1.0D, 0.5D),
-                        () -> getSphereStyle() == PrimordialSphereStyle.NEUTRON_STAR,
-                        (clickData, pressed) -> setSphereStyle(Boolean.TRUE.equals(pressed)
-                                ? PrimordialSphereStyle.NEUTRON_STAR
-                                : PrimordialSphereStyle.UNIVERSE))
-                .setTooltipsSupplier(PrimordialOmegaEngineMachine::sphereStyleTooltips));
+
+        // ───────────────────────── 三个控件的"双形态"总开关 ─────────────────────────
+        // 🔴 2026-10-25 第十九改（用户原话）：
+        //     ①「这个角速度干脆让玩家可以在主机控制器里面调得了，可以修改那个没用的调整中子星的大小
+        //        与颜色的按钮」
+        //     ②「中心球体渲染风格，你直接改成可以修改黑洞的半径和是否开启引力透镜效果得了」
+        //     ③「然后始终渲染为工作状态的按钮你也用起来，直接做成开关特效渲染」
+        //
+        // 🔴 为什么必须分支、而不是无条件把这三个控件换成新的：
+        //   挂载点在本类（基类），而本类本体 = 老主机 `shanhai:primordial_omega_engine`，
+        //   它仍然注册着、仍然能摆（`ShanhaiMachines:182`）。新的 6 个字段只在
+        //   `GuixuVisionCoreMachine` 上 ⇒ 无条件替换的话老主机会得到【三个点了没反应的假开关】
+        //   （本工程明令禁止的形态），并且丢掉它唯一的中子星外观入口。
+        //   ⇒ 归墟视界枢核 = 新用途；老主机 = 原来的三个控件，一字未改。
+        final GuixuVisionCoreMachine guixuVisionCore =
+                this instanceof GuixuVisionCoreMachine host ? host : null;
+        if (guixuVisionCore == null) {
+            // ③ 球体风格（老主机原样保留）
+            panel.attachConfigurators(new IFancyConfiguratorButton.Toggle(
+                            GuiTextures.BUTTON_SWITCH_VIEW.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D),
+                            GuiTextures.BUTTON_SWITCH_VIEW.getSubTexture(0.0D, 0.5D, 1.0D, 0.5D),
+                            () -> getSphereStyle() == PrimordialSphereStyle.NEUTRON_STAR,
+                            (clickData, pressed) -> setSphereStyle(Boolean.TRUE.equals(pressed)
+                                    ? PrimordialSphereStyle.NEUTRON_STAR
+                                    : PrimordialSphereStyle.UNIVERSE))
+                    .setTooltipsSupplier(PrimordialOmegaEngineMachine::sphereStyleTooltips));
+        } else {
+            // ③ 🔴 2026-10-25 第二十一改：归墟视界枢核的这 3 个渲染按钮【合并成一个】了
+            //    （用户原话：「把主机那 3 个调整渲染的按钮合并成一个吧，然后再新增一个功能开关…」）。
+            //    ⇒ 位置 ③ / ⑤ / ⑥ 这三格在本机上一个都不挂，改由位置 ⑥ 那一个「渲染参数」面板承载
+            //    6 + 1 项（角速度×3 / 洞径 / 引力透镜 / 特效渲染 / AR 遮罩）。
+            //    ⚠️ 为什么不在这里挂、再由别处"删掉另外两个"：`ConfiguratorPanel` 没有移除单个
+            //       configurator 的 API（`clear()` 会把所有 tab 一起清掉，见 canConfigureBatchProcessing
+            //       那段的 javadoc ②）⇒ 合并只能在【挂载点】上做。
+        }
 
         // ─────────────────────────── N6：配方最短耗时（侧栏） ───────────────────────────
         // 直接复用 gtladditions 的原版组件（不自己写 widget）：
@@ -2493,10 +2701,19 @@ public class PrimordialOmegaEngineMachine
         //    ⇒ 最后挂的这一个正好落在【左下角最下面】，即用户指定的位置。
         // 🔴 按钮的外观、尺寸（24×24）、图标区（16×16，落在 (+4,+4)）、间距（2px）全部由 GTCEu 画，
         //    我们只需要给一个 getIcon() —— 见 `StarRenderConfigurator`。
-        panel.attachConfigurators(new StarRenderConfigurator(this));
+        // 🔴 2026-10-25 第十九改：类名与挂载点都没动，但**内容分形态** ——
+        //    归墟视界枢核 ⇒ 标题「角速度」+ 3 个 IntInputWidget（内环/上舰/下舰）；
+        //    本类本体（老主机）⇒ 原来的「中子星渲染」面板，一字未改。
+        //    分形态的判断在 `StarRenderConfigurator` 的构造器里（`machine instanceof GuixuVisionCoreMachine`）
+        //    ⇒ 这里既不分支也不多传参数，挂载顺序/数量/位置逐位不变。
+        // 🔴 2026-10-25 第二十一改：归墟视界枢核<b>不再挂这一格</b>（它的三个角速度已经被搬进
+        //    位置 ⑥ 那个合并后的「渲染参数」面板）；老主机仍然挂原来的「中子星渲染」面板，一字未改。
+        if (guixuVisionCore == null) {
+            panel.attachConfigurators(new StarRenderConfigurator(this));
+        }
 
-        // ────────── 「始终渲染为工作状态」（★ 2026-09-24 新增 = 按钮列的第 7 个） ──────────
-        // 🔴 形态照抄上面 ④ 球体风格开关（同一台机器上已有的先例），【不是】新机制：
+        // ────────── 「特效渲染」总开关（原「始终渲染为工作状态」的位置 ⑥）──────────
+        // 🔴 形态照抄上面 ③ 球体风格开关（同一台机器上已有的先例），【不是】新机制：
         //    IFancyConfiguratorButton.Toggle 是"点一下直接改状态"的官方按钮形态 ——
         //    它的 getTitle()/createConfigurator() 两个 default 都直接抛 NotImplementedException，
         //    且 ConfiguratorPanel$Tab 的构造器里 `instanceof IFancyConfiguratorButton` 那一支
@@ -2504,30 +2721,42 @@ public class PrimordialOmegaEngineMachine
         //    ⇒ 它【结构上不存在面板】，点一下就是一次 onClick 回调。
         // 🔴 位置：attach 顺序 = 自上而下（Tab 的 y = index*(tabSize+2)），整条【底对齐】
         //    （FancyMachineUIWidget.setupFancyUI 把它设成 guiHeight-panelHeight-4）
-        //    ⇒ 最后挂的这一个落在整条【最下面】＝用户指定的「左下角」。
+        //    ⇒ 位置 ⑥ 就在这一格（最后挂的是并行数）。
         // 🔴 图标：GuiTextures.BUTTON_WORKING_ENABLE（gtceu:textures/gui/widget/button_working_enable.png，
         //    20x40 = 上下两帧 20x20）的【上半帧】= 一枚干净的齿轮 = "在工作"。
         //    ⚠️ 【刻意不用】它真实存在的下半帧（同一枚齿轮 + 一个大红叉）：那帧语义是"工作被禁用"，
-        //       把它当"未按下"画出来会被读成"这台机器坏了"，而不是"没有强制常亮"。
-        //       改用与本文件 ICON_DISABLED 同款的【色乘子】区分两态（暗 = 未开，原色 = 已开），
-        //       与 ① 工作开关"灰=关 / 蓝=开"的既有惯例一致。
+        //       把它当"未按下"画出来会被读成"这台机器坏了"。改用与本文件 ICON_DISABLED 同款的
+        //       【色乘子】区分两态（暗 = 未开，原色 = 已开），与 ① 工作开关"灰=关 / 蓝=开"的惯例一致。
         //    ⚠️ 贴图对象必须在【本方法内】新建，不能放进 static 字段：GuiTextures 是客户端侧常量类，
         //       本类会在专用服务端加载 —— 静态初始化器里碰它等于让服务端去加载客户端类。
         //       （本方法与 GuiTextures.BUTTON_SWITCH_VIEW 那行同理，只在客户端 GUI 打开时被调用。）
         // ⚠️ getSubTexture 返回的是 new ResourceTexture（javap：字节码 new #2）
         //    ⇒ 对返回对象 setColor 不会污染 GuiTextures 里那份共享常量。
-        IGuiTexture alwaysWorkingOn =
-                GuiTextures.BUTTON_WORKING_ENABLE.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D);
-        IGuiTexture alwaysWorkingOff =
-                GuiTextures.BUTTON_WORKING_ENABLE.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D)
-                        .setColor(0xFF5A5A5A);
-        panel.attachConfigurators(new IFancyConfiguratorButton.Toggle(
-                        alwaysWorkingOff,
-                        alwaysWorkingOn,
-                        this::isStarAlwaysWorking,
-                        (clickData, pressed) ->
-                                setStarAlwaysWorking(Boolean.TRUE.equals(pressed)))
-                .setTooltipsSupplier(PrimordialOmegaEngineMachine::starAlwaysWorkingTooltips));
+        //
+        // 🔴 2026-10-25 第十九改的语义变化（用户原话：「然后始终渲染为工作状态的按钮你也用起来，
+        //    直接做成开关特效渲染」）：
+        //    · 归墟视界枢核 ⇒ 绑**新字段** hostFxEnabled（只管特效）；基类的 starAlwaysWorking
+        //      **保留原义、但不再有 UI**（它还连着 isActive() ⇒ 机壳/贴图的工作态外观）
+        //      ⇒ 顺带的可见变化：机壳外观回到"按真实工作态显示"，已写进交付报告。
+        //    · 老主机 ⇒ 仍然绑 starAlwaysWorking（一字未改）。
+        if (guixuVisionCore == null) {
+            IGuiTexture alwaysWorkingOn =
+                    GuiTextures.BUTTON_WORKING_ENABLE.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D);
+            IGuiTexture alwaysWorkingOff =
+                    GuiTextures.BUTTON_WORKING_ENABLE.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D)
+                            .setColor(0xFF5A5A5A);
+            panel.attachConfigurators(new IFancyConfiguratorButton.Toggle(
+                            alwaysWorkingOff,
+                            alwaysWorkingOn,
+                            this::isStarAlwaysWorking,
+                            (clickData, pressed) ->
+                                    setStarAlwaysWorking(Boolean.TRUE.equals(pressed)))
+                    .setTooltipsSupplier(PrimordialOmegaEngineMachine::starAlwaysWorkingTooltips));
+        } else {
+            // ⑥ 🔴 2026-10-25 第二十一改：这里现在是【唯一】的渲染面板 —— 原来 ③⑤⑥ 三个按钮
+            //    合并成这一个「渲染参数」面板（6 项旧值 + 1 项新增的 AR 遮罩开关）。
+            panel.attachConfigurators(HostFxConfigurators.renderPanel(guixuVisionCore));
+        }
 
         // ─────────────────── 🔴 并行数（2026-09-27 新增 · 侧栏【最后一个】= 左下角最下面） ───────────────────
         // 用户原话：「在模块和主机的左下角再新增一个全新的按钮，他可以调节主机或者模块的并行数，

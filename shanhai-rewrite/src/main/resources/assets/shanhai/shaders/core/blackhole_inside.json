@@ -1,0 +1,25 @@
+{
+    "vertex": "shanhai:blackhole_inside",
+    "fragment": "shanhai:blackhole_inside",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [
+        { "name": "Sampler0" }
+    ],
+    "uniforms": [
+        { "name": "uCenterPx",   "type": "float", "count": 2, "values": [ 960.0, 540.0 ] },
+        { "name": "uSrcHalfPx",  "type": "float", "count": 1, "values": [ 540.0 ] },
+        { "name": "uBgRect",     "type": "float", "count": 4, "values": [ 0.0, 0.0, 1.0, 1.0 ] },
+        { "name": "uBgTexel",    "type": "float", "count": 2, "values": [ 0.00048828125, 0.00048828125 ] },
+        { "name": "uBandNrm",    "type": "float", "count": 2, "values": [ 0.0, 1.0 ] },
+        { "name": "uBandOff",    "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "uTime",       "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "uSolid",      "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "uP0",         "type": "float", "count": 4, "values": [ 0.9, 0.5, 0.3, 0.85 ] },
+        { "name": "uP1",         "type": "float", "count": 4, "values": [ 1.45, 1.0, 1.1, 6.0 ] },
+        { "name": "uP2",         "type": "float", "count": 4, "values": [ 0.14, 6.0, 0.03, 0.9 ] },
+        { "name": "uP3",         "type": "float", "count": 4, "values": [ 0.1, 1.1, 1.6, 1.15 ] },
+        { "name": "uP4",         "type": "float", "count": 4, "values": [ 0.7, 0.55, 1.1, 0.01 ] }
+    ]
+}

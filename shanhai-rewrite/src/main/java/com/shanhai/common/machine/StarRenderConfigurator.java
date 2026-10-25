@@ -2,6 +2,7 @@ package com.shanhai.common.machine;
 
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfigurator;
+import com.gregtechceu.gtceu.api.gui.widget.IntInputWidget;
 import com.lowdragmc.lowdraglib.gui.texture.ColorRectTexture;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
@@ -17,6 +18,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
 import com.shanhai.common.recipe.PrimordialRecipeEffects;
+import com.shanhai.machine.host.GuixuVisionCoreMachine;
 
 import java.util.List;
 
@@ -53,18 +55,54 @@ import java.util.List;
  * 本类取 150×116（2026-09-23 由 96 加高，见 {@link #PANEL_H}）⇒ 弹出面板实际为 158×144，
  * 标题条 (9,4,121,20) 与控件<b>不重叠</b>。
  *
- * <h2>🔴 为什么控件用 ButtonWidget + LabelWidget，而不用 IntInputWidget</h2>
+ * <h2>🔴 2026-10-25 第十九改：这个 tab 在「归墟视界枢核」上已经<b>换用途</b>了（中子星外观 → 角速度）</h2>
+ * 用户原话（逐字）：「这个角速度干脆让玩家可以在主机控制器里面调得了，<b>可以修改那个没用的调整中子星的
+ * 大小与颜色的按钮</b>」。
+ *
+ * <p>⇒ 本类现在是<b>双形态</b>，挂载点（{@code attachConfigurators} 里的位置 ⑤）与类名都没动：
+ * <pre>
+ *   宿主是 {@link GuixuVisionCoreMachine}（归墟视界枢核） ⇒ 标题「角速度」，面板 = 3 个 IntInputWidget
+ *   其它（原始终焉引擎 = 基类本体）                   ⇒ 标题「中子星渲染」，面板 = 原来那 7 个控件（一字未改）
+ * </pre>
+ * 🔴 <b>为什么要分形态</b>：这个 tab 挂在<b>基类</b> {@code PrimordialOmegaEngineMachine} 上，而那台
+ * 老主机（{@code shanhai:primordial_omega_engine}）<b>仍然注册着、仍然能摆</b>
+ * （{@code ShanhaiMachines:182}）。新的 6 个字段只在 {@link GuixuVisionCoreMachine} 里
+ * ⇒ 若把面板无条件换成角速度，老主机上就会出现<b>三个点了没反应的控件</b>（本工程明令禁止的"假开关"），
+ * 同时它的中子星外观面板（唯一入口）会消失。分形态 = 老主机逐位不变、新主机换用途。
+ *
+ * <h2>角速度面板的口径（与机器字段同源，见 {@code GuixuVisionCoreMachine} 的同名常量）</h2>
+ * <pre>
+ *   内环  1..60 °/s（默认 12）     上舰  0..60 °/s（默认  9）     下舰  0..60 °/s（默认  9，玩家填正数）
+ * </pre>
+ * 输入框用的是 GTCEu 的 {@code IntInputWidget}（文本框 + ± 按钮，默认 100×20）—— 与侧栏
+ * 「配方最短耗时」（gtladditions 的 {@code LimitedDurationConfigurator}）<b>同一款</b>，
+ * 玩家已经会这个交互。钳位不在这里做第二道（与半径按钮同一条纪律：真正要防的是伪造的
+ * {@code writeClientAction} 包，那只能服务端拦）⇒ 钳位在机器侧 setter。
+ *
+ * <h2>面板尺寸</h2>
+ * 角速度面板与外观面板<b>共用</b> {@link #PANEL_W} / {@link #PANEL_H} = 150×116
+ * ⇒ 弹出面板仍是 <b>158×144</b>，与改造前<b>逐像素相同</b>（用户已验收过这个占位，不动它）。
+ *
+ * <h2>🔴 为什么控件用 ButtonWidget + LabelWidget，而不用 IntInputWidget（<b>2026-10-18 的旧结论，已部分作废</b>）</h2>
  * <b>本工程编译期吃的是 {@code libs/ldlib-forge-1.20.1-1.0.33.b.jar}，它里面【没有】
  * {@code com.lowdragmc.lowdraglib.gui.widget.IntInputWidget}</b>
  * （逐条列举过该 jar 的 {@code gui/widget/} 与 {@code gui/texture/} 目录；
  * {@code IntInputWidget} / {@code ColorTexture} 都不在）。
  * 侧栏第 5 个控件能用它、是因为 gtladditions 自己那套 LDLib 里有 —— 我们引用的是<b>它的类</b>
  * （{@code LimitedDurationConfigurator}），不是自己 new。
- * ⇒ 本面板只用<b>已核实存在</b>的件：
+ * ⇒ 外观面板只用<b>已核实存在</b>的件：
  * {@code ButtonWidget(…, IGuiTexture, Consumer<ClickData>)}、
  * {@code LabelWidget(int,int,Supplier&lt;String&gt;)}、
  * {@code ImageWidget(int,int,int,int,Supplier&lt;IGuiTexture&gt;)}、
  * {@code ColorRectTexture(int)}、{@code GuiTextures.BUTTON}。
+ *
+ * <p>✅ <b>2026-10-25 订正</b>：上面这段只对 <b>LDLib 那个包名</b>成立。角速度面板用的是
+ * <b>GTCEu 的</b> {@code com.gregtechceu.gtceu.api.gui.widget.IntInputWidget}
+ * （{@code gtceu-1.20.1-1.4.4.jar} 里有、public、四个构造器全可用 —— {@code javap} 实证见交付报告），
+ * 而且<b>同一台机器</b>的侧栏第 ④ 个 tab「配方最短耗时」就是它
+ * （{@code LimitedDurationConfigurator.createConfigurator()} 的字节码原文：
+ * {@code new IntInputWidget(getter,setter).setMin(10).setMax(200)} 塞进 {@code WidgetGroup(0,0,100,20)}）
+ * ⇒ 这个类在本机的 UI 上早就在跑了，不是新依赖。
  *
  * <h2>点击怎么到达服务端（没有新网络代码）</h2>
  * {@code ButtonWidget.mouseClicked} 的实现是「{@code writeClientAction(1, …)} + 本地也调一次回调」
@@ -209,20 +247,33 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
 
     private final PrimordialOmegaEngineMachine machine;
 
+    /**
+     * 宿主如果是「归墟视界枢核」则非 {@code null} ⇒ 本 tab 显示<b>角速度</b>面板；
+     * {@code null}（= 原始终焉引擎本体）⇒ 显示原来的<b>中子星外观</b>面板。见类注释"双形态"一节。
+     */
+    private final GuixuVisionCoreMachine host;
+
+    /**
+     * @param machine 挂载它的那台机器（基类）。内部按 {@code instanceof} 分形态 ——
+     *                {@code attachConfigurators} 那边<b>不需要</b>分支，一个构造器通吃。
+     */
     public StarRenderConfigurator(PrimordialOmegaEngineMachine machine) {
         this.machine = machine;
+        this.host = machine instanceof GuixuVisionCoreMachine guixu ? guixu : null;
     }
 
     @Override
     public Component getTitle() {
         // 字面量而不是 translatable：与本工程既有约定一致（lang 归 java-assets 管，
         // 缺条目时 translatable 会把裸 key 直接画在 GUI 上）。
-        return Component.literal("中子星渲染");
+        return Component.literal(host != null ? "角速度" : "中子星渲染");
     }
 
     @Override
     public IGuiTexture getIcon() {
         // 2026-10-18：外观面板不再受模块等级限制 ⇒ 图标恒亮（ICON_DISABLED 已停用，保留）。
+        // 2026-10-25：图标<b>两个形态共用</b>这一枚（同一张贴图、同一个位置）
+        //   ⇒ 玩家看到的是"原来那个按钮还在原地，只是点开的东西换了"，不会找不到。
         return ICON_ACTIVE;
     }
 
@@ -235,6 +286,22 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
      */
     @Override
     public List<Component> getTooltips() {
+        if (host != null) {
+            return List.of(
+                    Component.literal("三组角速度（°/s，整数）").withStyle(ChatFormatting.AQUA),
+                    Component.literal("§7内环 §f" + GuixuVisionCoreMachine.HOST_RING_DEG_MIN + "–"
+                                    + GuixuVisionCoreMachine.HOST_RING_DEG_MAX + "§7 · 上舰 §f"
+                                    + GuixuVisionCoreMachine.HOST_SHIP_DEG_MIN + "–"
+                                    + GuixuVisionCoreMachine.HOST_SHIP_DEG_MAX + "§7 · 下舰 §f"
+                                    + GuixuVisionCoreMachine.HOST_SHIP_DEG_MIN + "–"
+                                    + GuixuVisionCoreMachine.HOST_SHIP_DEG_MAX)
+                            .withStyle(ChatFormatting.GRAY),
+                    Component.literal("改的是机器状态，").withStyle(ChatFormatting.GRAY)
+                            .append(Component.literal("所有人都会看到").withStyle(ChatFormatting.GOLD))
+                            .append(Component.literal("（会随存档保存）").withStyle(ChatFormatting.GRAY)),
+                    Component.literal("§8下舰填正数即可：方向本来就是逆向（渲染侧取负号）")
+                            .withStyle(ChatFormatting.DARK_GRAY));
+        }
         return List.of(
                 Component.literal("中子星的大小与颜色").withStyle(ChatFormatting.AQUA),
                 Component.literal("改的是机器状态，").withStyle(ChatFormatting.GRAY)
@@ -245,6 +312,92 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
 
     @Override
     public Widget createConfigurator() {
+        // 双形态：归墟视界枢核 ⇒ 角速度（用户 2026-10-25 的"改这个没用的按钮"）；
+        //         原始终焉引擎本体 ⇒ 原来的外观面板（一字未改，老存档不受影响）。
+        return host != null ? createAngularSpeedPanel() : createAppearancePanel();
+    }
+
+    /**
+     * 「角速度」面板（<b>归墟视界枢核</b>）：标题行 + 三个 {@code IntInputWidget}（内环 / 上舰 / 下舰）。
+     *
+     * <h2>几何（150 × 116，与外观面板同一个 {@link #PANEL_W}/{@link #PANEL_H}）</h2>
+     * <pre>
+     *   y=3   "§7角速度（单位 §f°/s§7，整数）"                 ← 说明行
+     *   y=17  "内环°/s"  + IntInputWidget(48, 17, 98, 20)     ← 输入框真实高度恒 20（± 按钮 20 高）
+     *   y=45  "上舰°/s"  + IntInputWidget(48, 45, 98, 20)
+     *   y=73  "下舰°/s"  + IntInputWidget(48, 73, 98, 20)     ← 底 93
+     *   y=99  "§8下舰为逆向，填正数即可"                        ← 底 107 < 116
+     * </pre>
+     * 输入框内部布局是 {@code NumberInputWidget.buildUI} 算的（{@code javap -c} 实证）：
+     * {@code buttonWidth = clamp(w/5, 15, 40)}、文本框宽 = {@code w − 2·buttonWidth − 4}
+     * ⇒ 本面板 98 宽 ⇒ 两个 ± 各 19、文本框 56 宽（够 2 位数，上限 60）。
+     *
+     * <h2>为什么不在这里钳位</h2>
+     * 与半径按钮同一条纪律：真正要防的是<b>伪造的 {@code writeClientAction} 包</b>，
+     * 那只能服务端拦（{@code GuixuVisionCoreMachine#setHostRingDegPerSec} 等已经钳过）。
+     * 面板再钳一次只会让"UI 看着没越界、包里越界"更难发现。
+     */
+    private WidgetGroup createAngularSpeedPanel() {
+        WidgetGroup group = new WidgetGroup(0, 0, PANEL_W, PANEL_H);
+        group.setBackground(GuiTextures.BACKGROUND_INVERSE);
+
+        group.addWidget(new LabelWidget(4, 3, "§7角速度（单位 §f°/s§7，整数）"));
+
+        group.addWidget(new LabelWidget(4, 21, "§7内环§8°/s"));
+        group.addWidget(new IntInputWidget(48, 17, 98, 20,
+                host::getHostRingDegPerSec,
+                host::setHostRingDegPerSec)
+                .setMin(GuixuVisionCoreMachine.HOST_RING_DEG_MIN)
+                .setMax(GuixuVisionCoreMachine.HOST_RING_DEG_MAX)
+                .setHoverTooltips(
+                        Component.literal("§b内环带自转速度"),
+                        Component.literal("§7单位 §f°/s§7（每秒转多少度）"),
+                        Component.literal("§7范围 §f" + GuixuVisionCoreMachine.HOST_RING_DEG_MIN + "–"
+                                + GuixuVisionCoreMachine.HOST_RING_DEG_MAX + "§7，默认 §f"
+                                + GuixuVisionCoreMachine.HOST_RING_DEG_DEFAULT),
+                        Component.literal("§8点击 − / + 微调，或直接在框里输数字"),
+                        Component.literal("§8· 光柱环（内外环之间那圈粗光柱）跟着内环一起转")));
+
+        group.addWidget(new LabelWidget(4, 49, "§7上舰§8°/s"));
+        group.addWidget(new IntInputWidget(48, 45, 98, 20,
+                host::getHostShipUpDegPerSec,
+                host::setHostShipUpDegPerSec)
+                .setMin(GuixuVisionCoreMachine.HOST_SHIP_DEG_MIN)
+                .setMax(GuixuVisionCoreMachine.HOST_SHIP_DEG_MAX)
+                .setHoverTooltips(
+                        Component.literal("§b上组 4 艘飞船的绕行速度"),
+                        Component.literal("§7单位 §f°/s§7，范围 §f"
+                                + GuixuVisionCoreMachine.HOST_SHIP_DEG_MIN + "–"
+                                + GuixuVisionCoreMachine.HOST_SHIP_DEG_MAX
+                                + "§7，默认 §f" + GuixuVisionCoreMachine.HOST_SHIP_UP_DEG_DEFAULT),
+                        Component.literal("§8方向与内环相同（顺行）"),
+                        Component.literal("§8· 填 §f0 §8= 这一组不转")));
+
+        group.addWidget(new LabelWidget(4, 77, "§7下舰§8°/s"));
+        group.addWidget(new IntInputWidget(48, 73, 98, 20,
+                host::getHostShipDownDegPerSec,
+                host::setHostShipDownDegPerSec)
+                .setMin(GuixuVisionCoreMachine.HOST_SHIP_DEG_MIN)
+                .setMax(GuixuVisionCoreMachine.HOST_SHIP_DEG_MAX)
+                .setHoverTooltips(
+                        Component.literal("§b下组 4 艘飞船的绕行速度"),
+                        Component.literal("§7单位 §f°/s§7，范围 §f"
+                                + GuixuVisionCoreMachine.HOST_SHIP_DEG_MIN + "–"
+                                + GuixuVisionCoreMachine.HOST_SHIP_DEG_MAX
+                                + "§7，默认 §f" + GuixuVisionCoreMachine.HOST_SHIP_DOWN_DEG_DEFAULT),
+                        Component.literal("§8🔴 填正数即可：方向本来就是逆向（渲染侧取负号）"),
+                        Component.literal("§8· 填 §f0 §8= 这一组不转")));
+
+        group.addWidget(new LabelWidget(4, 99, "§8下舰为逆向，填正数即可"));
+        return group;
+    }
+
+    /**
+     * 原来的「中子星渲染」面板（<b>原始终焉引擎</b>本体用；2026-10-25 之后内容一字未改）。
+     *
+     * <p>⚠️ 不要把它删掉：这是老主机<b>唯一</b>的中子星大小/颜色入口（见类注释"双形态"一节）。
+     */
+    private WidgetGroup createAppearancePanel() {
         // 2026-10-18：外观面板不再受模块等级限制 ⇒ 灰态判断恒为可用
         //（等级只决定「跟随等级」档的自动大小/颜色，不是操作前提）。
         final boolean enabled = true;
@@ -437,7 +590,20 @@ public final class StarRenderConfigurator implements IFancyConfigurator {
         if (bonus <= 0) {
             return "§8产出 ×1 · 耗电 ×1（未生效）";
         }
-        final int multiplier = PrimordialRecipeEffects.outputMultiplier(bonus);
+        // 🔴 2026-10-25 修正：倍率必须问【主机自己】，本面板一个字都不许重算。
+        //    这里以前写的是 PrimordialRecipeEffects.outputMultiplier(bonus)（= 1+等级，**不含**宿主的额外量），
+        //    于是同一台归墟主机上：它自己 GUI 印「材料增产：x23」、这个侧栏印「产出 ×18」—— 两行打架，
+        //    而且 18 不是任何一台机器真实生效的数（真实是 23）。
+        //    现在改用「宿主的钩子 + 全工程唯一算式」这一个出口：
+        //      · 归墟：getHostProductionBonusExtra() 门控生效时给 5 ⇒ 与
+        //        GuixuVisionCoreMachine#productionMultiplier() **逐位相同**（那边的方法体就是
+        //        productionMultiplierOf(moduleSlotBonus(), getHostProductionBonusExtra())，同一个算式、同一个钩子）；
+        //      · 老主机（原始终焉引擎）：getHostProductionBonusExtra() 恒 0 ⇒ base + 0 == base
+        //        ⇒ 与改前的 outputMultiplier(bonus) **逐字不变**（×2…×18 一个都不动）；
+        //      · 空槽 / 未满 64 格：上面 bonus <= 0 已经提前返回，额外量不加在"未生效"之上。
+        //    ⚠️ 不许把 base + extra 抄到这里 —— 抄一份就多一个会漂的数（这次的事故形态就是"两处各算一份"）。
+        final int multiplier = PrimordialRecipeEffects.productionMultiplierOf(
+                bonus, machine.getHostProductionBonusExtra());
         final double energyFactor = PrimordialRecipeEffects.reductionFactor(bonus);
         return "§7产出 §f×" + multiplier + "§7 · 耗电 §f×"
                 + String.format(java.util.Locale.ROOT, "%.4f", energyFactor);

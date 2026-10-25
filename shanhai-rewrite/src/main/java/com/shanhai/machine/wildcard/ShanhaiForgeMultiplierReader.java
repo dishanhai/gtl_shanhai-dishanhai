@@ -19,16 +19,20 @@ import java.util.concurrent.ConcurrentHashMap;
  * <table border="1">
  *   <tr><th>来源</th><th>怎么读</th><th>真源（唯一）</th></tr>
  *   <tr>
- *     <td>① 原始终焉引擎（本工程自己的机器）</td>
- *     <td><b>直接调 API</b>（<b>不用反射</b>）：<br>
- *         {@code PrimordialRecipeEffects.outputMultiplier(engine.moduleSlotBonus())}</td>
- *     <td>{@code PrimordialRecipeEffects#outputMultiplier(int)}
- *         —— 它<b>就是</b>那台机器 GUI 上印的「产出倍率：×N」，
- *         也就是 {@code applyHostTailEffects} 里真正乘进配方产出的那个数
- *         （源码双向核对：{@code outputMultiplier(gateBonus) = gateBonus <= 0 ? 1 : 1 + gateBonus}，
- *         而 {@code gateBonus} 的<b>唯一</b>入口是
- *         {@code PrimordialOmegaEngineMachine#moduleSlotBonus()}，
- *         它也就是那个 {@code @DescSynced} 镜像 {@code matterBonusLevel} 的实况重算）。</td>
+ *     <td>① 原始终焉引擎 / 归墟视界枢核（本工程自己的机器）</td>
+ *     <td><b>直接调 API</b>（<b>不用反射</b>）：
+ *         {@code PrimordialRecipeEffects.productionMultiplierOf(engine.moduleSlotBonus(),
+ *         engine.getHostProductionBonusExtra())}</td>
+ *     <td>{@code PrimordialRecipeEffects#productionMultiplierOf(int, int)}
+ *         —— <b>全工程唯一</b>一份"实际产出倍率"算式
+ *         （{@code base = outputMultiplier(gateBonus)}；{@code base > 1 ? base + max(0, extra) : base}），
+ *         加上宿主自己的那个钩子 {@code PrimordialOmegaEngineMachine#getHostProductionBonusExtra()}
+ *         （归墟门控生效时返回 5，老主机恒 0）。它<b>就是</b>这两台机器 GUI 上印的那个数：
+ *         归墟的 {@code GuixuVisionCoreMachine#productionMultiplier()} 方法体逐字就是
+ *         {@code productionMultiplierOf(moduleSlotBonus(), getHostProductionBonusExtra())}。
+ *         ⚠️ {@code gateBonus} 的<b>唯一</b>入口是
+ *         {@code PrimordialOmegaEngineMachine#moduleSlotBonus()}（{@code @DescSynced} 镜像
+ *         {@code matterBonusLevel} 的实况重算）。</td>
  *   </tr>
  *   <tr>
  *     <td>② 伪神之锻炉控制器（gtladditions 上游那台）</td>
@@ -173,11 +177,13 @@ public final class ShanhaiForgeMultiplierReader {
      * <h2>🔴 来源分派顺序（用户修正① + 追加 A「模块也能提供额外产出」）</h2>
      * <ol>
      *   <li>{@code null} ⇒ {@link ShanhaiAutoForgeMultiplier#REASON_NO_CONTROLLER}；</li>
-     *   <li><b>本工程自己的原始终焉引擎</b> ⇒ {@link #readPrimordialEngine}
+     *   <li><b>本工程自己的原始终焉引擎 / 归墟视界枢核</b> ⇒ {@link #readPrimordialEngine}
      *       （<b>直接调 API</b>，不用反射）；</li>
      *   <li><b>本工程自己的模块</b>（原初临界加工模块那一脉）⇒ 直接调 API，读<b>它主机</b>的产出倍率
-     *       （它自己的 {@code addSharedEffectDisplayText} 就是这么算的：
-     *       {@code outputMultiplier(getHost().moduleSlotBonus())}）；</li>
+     *       （模块自己的 {@code addSharedEffectDisplayText} 读的是同一个数：
+     *       {@code PrimordialModuleMachine#n3ProductionMultiplierOf(isGenerator(), getHost(), gateBonus)}，
+     *       ⚠️ 2026-10-25 订正：那句旧注释写的是 {@code outputMultiplier(getHost().moduleSlotBonus())}，
+     *       那是漏了宿主额外量的旧口径）；</li>
      *   <li><b>gtladditions 的伪神之锻炉</b> ⇒ 反射 {@code getRecipeOutputMultiply()}；</li>
      *   <li><b>gtladditions 的伪神之锻炉模块</b> ⇒ 反射 {@code getHost()} 拿到它主机
      *       （就是那台伪神之锻炉），再按第 4 条读；</li>
@@ -305,27 +311,42 @@ public final class ShanhaiForgeMultiplierReader {
     }
 
     /**
-     * <b>来源①：原始终焉引擎</b>（本工程自己的机器）。
+     * <b>来源①：原始终焉引擎 / 归墟视界枢核</b>（本工程自己的机器）。
      *
-     * <h2>唯一真源（用户修正①点名的那一脉）</h2>
+     * <h2>唯一真源（用户修正①点名的那一脉；2026-10-25 订正过一版）</h2>
      * <pre>
-     *   PrimordialRecipeEffects.outputMultiplier(engine.moduleSlotBonus())
-     *       = gateBonus &lt;= 0 ? 1 : 1 + gateBonus          ⇒ 值域 【1, 18】
+     *   extra = engine.getHostProductionBonusExtra()
+     *       = 宿主给的那份额外量：老主机（原始终焉引擎）恒 0；
+     *         归墟视界枢核在"物质模块专属槽满 64 ⇒ moduleSlotBonus() &gt; 0"时给 5，空槽仍 0
+     *   multiplier = PrimordialRecipeEffects.productionMultiplierOf(gateBonus, extra)
+     *       base = outputMultiplier(gateBonus) = gateBonus &lt;= 0 ? 1 : 1 + gateBonus   ⇒ base ∈ 【1, 18】
+     *       = base &gt; 1 ? base + max(0, extra) : base
+     *       ⇒ 老主机 【1, 18】（extra 恒 0 ⇒ 与改前逐位相同）
+     *       ⇒ 归墟    【1, 23】（Lv.17 + 5 ⇒ 23）
      *   gateBonus = PrimordialOmegaEngineMachine#moduleSlotBonus()
      *       = 主机「物质模块专属槽」内单一物品类型且数量 == 64 时的模块等级，否则 0
      * </pre>
      * <p><b>判据（为什么这就是"当前生效的额外产出倍率"）</b>：
      * <ol>
-     *   <li>它<b>就是</b>那台机器 GUI 上印的那一行 ——
-     *       {@code PrimordialOmegaEngineMachine#addDisplayText} 里
-     *       {@code int outputMultiplier = PrimordialRecipeEffects.outputMultiplier(bonus);}
-     *       然后印「产出倍率：×N（额外产出 N 份）」；</li>
-     *   <li>它<b>同时</b>是真正乘进配方产出的那个数 ——
-     *       {@code PrimordialRecipeEffects.applyHostTailEffects(recipe, gateBonus, …)} 里
-     *       {@code multiplyOutputs(recipe, outputMultiplier(gateBonus))}
-     *       （{@code applyHostTailEffectsA} 同款）；</li>
-     *   <li>全库 grep {@code outputMultiplier} 的调用点只有这几处（机器 GUI / 引擎配方逻辑 /
-     *       模块侧 / 星体渲染），<b>没有任何第二份"额外产出倍率"的定义</b>。</li>
+     *   <li>它<b>就是</b>主机 GUI 上印的那一行 —— 归墟那边
+     *       {@code GuixuVisionCoreMachine#productionMultiplier()} 的方法体<b>逐字</b>是
+     *       {@code productionMultiplierOf(moduleSlotBonus(), getHostProductionBonusExtra())}，
+     *       印成「材料增产：xN（主机那套 + 5）」；老主机那边基类
+     *       {@code PrimordialOmegaEngineMachine#addDisplayText} 印的是
+     *       {@code outputMultiplier(bonus)}，而 {@code extra == 0} 时本方法的结果与它<b>逐位相同</b>；</li>
+     *   <li>它<b>同时</b>是真正乘进配方产出的那个数 —— 主机两条链都读同一对输入：
+     *       原生修饰链 {@code GuixuVisionCoreMachine#applyGuixuRecipeModifier} 是
+     *       {@code productionMultiplierOf(gateBonus, host.getHostProductionBonusExtra())}、
+     *       引擎尾链 {@code PrimordialEngineRecipeLogic#buildFinalNormalRecipe} 读同一个钩子，
+     *       模块侧（{@code PrimordialModuleMachine#n3ProductionMultiplierOf}）也是同一个算式；</li>
+     *   <li>🔴 <b>【2026-10-25 订正】旧版本这里写过"全库没有任何第二份额外产出倍率的定义"——那句是【错的】</b>：
+     *       当时 grep 的是 {@code outputMultiplier} 这个名字，于是<b>恰好漏掉</b>了另一份定义
+     *       {@code getHostProductionBonusExtra()}（+5，归墟覆写）+ {@code productionMultiplierOf}。
+     *       事实是"额外产出倍率"有两个入口、<b>一个算式</b>：
+     *       钩子 {@code getHostProductionBonusExtra()}（谁给数）+ 算式
+     *       {@code PrimordialRecipeEffects#productionMultiplierOf}（怎么算）。
+     *       ⇒ 判据应改成：<b>本类只读那一对（钩子 + 算式），不读 {@code outputMultiplier} 单参版本</b>，
+     *       因为单参版本<b>按定义就不含额外量</b>（这正是本类曾经读到 18 的原因）。</li>
      * </ol>
      * <p>⚠️ {@link PrimordialOmegaEngineMachine#moduleSlotBonus()} 在服务端是<b>实况重算</b>
      * （{@code refreshMatterBonusLevel()}），所以这里读到的就是此刻生效的值，
@@ -334,7 +355,14 @@ public final class ShanhaiForgeMultiplierReader {
     private static Result readPrimordialEngine(PrimordialOmegaEngineMachine engine, int min, int max, String source) {
         try {
             final int gateBonus = engine.moduleSlotBonus();
-            final int raw = PrimordialRecipeEffects.outputMultiplier(gateBonus);
+            // 🔴 2026-10-25：这里以前是 PrimordialRecipeEffects.outputMultiplier(gateBonus) —— 单参版本，
+            //    **按定义就不含**宿主的额外量 ⇒ 同一台归墟主机上，主机 GUI 印 ×23、本读取器读到 18
+            //    （用户报的「自动倍率对归墟主机读到 18」就是这个）。
+            //    现在改成"宿主的钩子 + 全工程唯一算式"，与归墟自己的 productionMultiplier() 逐位同源；
+            //    老主机 getHostProductionBonusExtra() 恒 0 ⇒ base + 0 == base ⇒ 与改前逐字不变。
+            //    ⚠️ 不许在这里写 base + extra —— 抄一份就多一个会漂的数。
+            final int raw = PrimordialRecipeEffects.productionMultiplierOf(
+                    gateBonus, engine.getHostProductionBonusExtra());
             final int normalized = ShanhaiAutoForgeMultiplier.normalizeRead(raw, min, max);
             return normalized == ShanhaiAutoForgeMultiplier.NO_READ
                     ? Result.none(ShanhaiAutoForgeMultiplier.REASON_ILLEGAL_VALUE)

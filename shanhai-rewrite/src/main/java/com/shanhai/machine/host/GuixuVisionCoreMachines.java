@@ -3,10 +3,12 @@ package com.shanhai.machine.host;
 import com.gregtechceu.gtceu.GTCEu;
 import com.gregtechceu.gtceu.api.data.RotationState;
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
-import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
+import com.shanhai.common.recipe.ShanhaiRecipeTypes;
 import com.shanhai.registry.ShanhaiRegistration;
 
 import net.minecraft.resources.ResourceLocation;
+
+import org.gtlcore.gtlcore.GTLCore;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -27,7 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>结构图案 = {@link GuixuVisionCoreStructure}（读我们自己的 {@code .bin}，见那个类的注释）。</li>
  * </ul>
  *
- * <h2>当前进度（2026-10-23）</h2>
+ * <h2>当前进度（2026-10-25）</h2>
  * <ul>
  *   <li>✅ 能摆出来、能成型、24 个槽位能识别并回连（第一轮）；</li>
  *   <li>✅ <b>能量双仓</b>：结构同时收能源仓与动力仓（{@link GuixuVisionCoreStructure#ringBandPredicate()}），
@@ -35,19 +37,42 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>✅ <b>材料增产</b>（主机那套 + 5）与 <b>耗能减免</b>（同款）：整条链 =
  *       {@link GuixuVisionCoreMachine#applyGuixuRecipeModifier}（已挂在本定义的 {@code .recipeModifier}）；</li>
  *   <li>✅ <b>始终渲染为工作状态</b>：基类那个侧栏开关 + {@link GuixuVisionCoreMachine#isActive()} 覆写；</li>
- *   <li>⛔ <b>还没做</b>：三个自有配方类型（视界物质解压／视界能流抽取／原初范式简化 —— 用户明确
- *       「id 等他写配方时定」）、<b>模块等级复写</b>（需要在模块侧加等级读点，等用户点头）、
- *       并行数的玩家覆盖、自己的外壳贴图与 overlay。</li>
+ *   <li>✅ <b>三个自有配方类型</b>（2026-10-25 落地）：视界物质解压 {@code gtceu:vision_matter_decompression} ／
+ *       视界能流抽取 {@code gtceu:vision_energy_extraction} ／ 原初范式简化
+ *       {@code gtceu:primordial_paradigm_simplification} —— 见下一节「配方类型」。三者**都还没有配方**
+ *       （用户自己写；IO 上限是先按拍板定的，写配方时要按实际用量复核）；</li>
+ *   <li>⛔ <b>还没做</b>：<b>模块等级复写</b>（需要在模块侧加等级读点，等用户点头）、
+ *       并行数的玩家覆盖、<b>自己的外壳贴图</b>（{@code CASING_TEXTURE} 现借"时空扭曲者"的）与 overlay。</li>
  * </ul>
  *
- * <h2>⚠️ 一个临时挂载（必须知道）</h2>
- * {@code .recipeTypes(GTRecipeTypes.ASSEMBLER_RECIPES)} 是<b>占位</b>，不是本机的正式配方类型。
- * 原因：{@code WorkableMultiblockMachine#getRecipeType()} 的实现是
- * {@code recipeTypes[activeRecipeType]}（反编译实证：没有越界检查），
- * 而 {@code RecipeLogic} 每 tick 都会走这条路 ⇒ <b>recipeTypes 为空数组会在首次 tick 抛
- * ArrayIndexOutOfBoundsException</b>。本机本阶段<b>一个部件仓都没有</b>（图案里没挂任何
- * {@code PartAbility}），所以它捡不到任何输入、只会待机 —— 挂一个真类型是"能跑起来"的最小代价。
- * 阶段 3 把这里换成三个自有类型（视界物质解压／视界能流抽取／原初范式简化）。
+ * <h2>配方类型（2026-10-25 起是三个真类型，不再是占位）</h2>
+ * {@code .recipeTypes(ShanhaiRecipeTypes.VISION_MATTER_DECOMPRESSION,
+ * ShanhaiRecipeTypes.VISION_ENERGY_EXTRACTION,
+ * ShanhaiRecipeTypes.PRIMORDIAL_PARADIGM_SIMPLIFICATION)} ——
+ * 三个类型都在 {@code common\recipe\ShanhaiRecipeTypes} 里注册（**走它的 {@code register(name, category)}
+ * 入口**，那条入口才会自动登记进 {@code REGISTERED_TYPES} ⇒ JEI 物质模块展示槽、类型条数 fail-fast
+ * 都会自动带上它们）。
+ *
+ * <p>🔴 <b>为什么 recipeTypes 不能留空数组</b>（2026-10-23 换占位时就实证过，现在仍然成立）：
+ * {@code WorkableMultiblockMachine#getRecipeType()} 的实现是 {@code recipeTypes[activeRecipeType]}
+ * （javap 实证：{@code getfield recipeTypes} → {@code getfield activeRecipeType} → {@code aaload}，
+ * <b>没有越界检查</b>），而 {@code RecipeLogic} 每 tick 都会走这条路 ⇒ 空数组会在首次 tick 抛
+ * ArrayIndexOutOfBoundsException。
+ *
+ * <p>📜 <b>历史</b>：2026-10-23 → 2026-10-25 之间这里挂的是 {@code GTRecipeTypes.ASSEMBLER_RECIPES}
+ * （纯占位，只为"不炸"；当时本机一个部件仓都没有，捡不到输入、只会待机）。三个真类型落地后
+ * **占位已移除**：本文件现在既没有 `GTRecipeTypes` 的 import、也没有它的任何活代码引用
+ * （`GTRecipeTypes` 这个词只剩本段与下面 `.recipeTypes(...)` 上那两句历史注记）。
+ *
+ * <p>🔴 <b>选中态（{@code activeRecipeType}）不会越界</b>（换 3 个类型时逐条核过字节码）：
+ * 它是 {@code @Persisted int}、默认 0；唯一写者是 GTCEu 的 {@code MachineModeFancyConfigurator}
+ * （侧栏「机器模式」页），而那一页**只在 {@code getRecipeTypes().length > 1} 时才被挂上**
+ * （{@code IFancyUIMachine#attachSideTabs} 字节码偏移 20-39：{@code getRecipeTypes().length} 与 1 比较、
+ * {@code if_icmple} 跳过），按钮按 {@code length} 逐条生成（{@code 2 + i*20}，下标恒 0..n-1）
+ * ⇒ 本机从本轮起才第一次出现这个页，且填进去的下标永远合法。
+ * 配方检索每 tick **现读** {@code machine.getRecipeType()}
+ * （{@code MutableRecipesLogic#findAndHandleMultipleRecipe} 偏移 20 / 119 两次 {@code getRecipeType()}）
+ * ⇒ 切换类型后下一轮就按新类型找配方，**不需要**额外的 dirty 标记。
  */
 public final class GuixuVisionCoreMachines {
 
@@ -56,19 +81,32 @@ public final class GuixuVisionCoreMachines {
 
     /**
      * 外壳贴图：{@code workableCasingRenderer} 的第一个参数（是<b>贴图</b>不是方块）。
-     * 暂用 GT 自带的深色机壳（{@code machine_casing_robust_tungstensteel}）—— 阶段 3 换自己的贴图。
+     *
+     * <p>用户 2026-10-25 点单：「给主机控制器方块换个贴图，换成 add 中时空扭曲者的」⇒ 就是这张。
+     * 取值来源（反编译实证，不是猜的）：gtladditions 的 {@code TimeSpaceDistorterRenderer} 构造器
+     * 第一句就是 {@code GTLCore.id("block/casings/dimension_injection_casing")}，
+     * 第二句是它的 overlay 目录 {@code gtceu.id("block/multiblock/fusion_reactor")}；
+     * 该机器定义的 appearanceBlock 也是 {@code GTLBlocks.DIMENSION_INJECTION_CASING}（同一个方块）⇒
+     * 用这张贴图 = 控制器方块长得和「时空扭曲者」一模一样。
+     * 贴图本体在 {@code gtlcore-*.jar!/assets/gtlcore/textures/block/casings/dimension_injection_casing.png}
+     * （带 {@code .png.mcmeta} ⇒ 它是<b>动态贴图</b>）。
      */
     private static final ResourceLocation CASING_TEXTURE =
-            GTCEu.id("block/casings/solid/machine_casing_robust_tungstensteel");
+            GTLCore.id("block/casings/dimension_injection_casing");
 
     /**
-     * 工作面 overlay 目录：目前<b>故意指向一个不存在的路径</b>。
-     * 反编译实证 {@code WorkableOverlayModel} 对缺失的贴图是
-     * {@code if (resManager.getResource(png).isPresent()) ... else continue} ⇒ 静默少一个面，
-     * 机器照样成型、只是不显示"运行中"的环。等有了自己的 overlay 再填这里。
+     * 工作面 overlay 目录 = <b>与「时空扭曲者」同一个</b>（用户 2026-10-25 实测反馈：
+     * 「你这个前面这个图没上去啊，就换了个壳」）。
+     *
+     * <p>原来这里故意指向一个不存在的 {@code block/multiblock/guixu_vision_core}：
+     * {@code WorkableOverlayModel} 对缺失的贴图是 {@code if (…isPresent()) … else continue}
+     * ⇒ 正面那张"面孔图"整片不画，只剩外壳贴图。用户要的是<b>连正面也对齐时空扭曲者</b>
+     * ⇒ 取 gtladditions {@code TimeSpaceDistorterRenderer} 构造器第二句那个目录
+     * {@code gtceu:block/multiblock/fusion_reactor}（已核：该目录在 gtceu jar 里存在，
+     * 含 {@code overlay_front.png} / {@code overlay_front_active.png} 等整套面片）。
      */
     private static final ResourceLocation OVERLAY_DIR =
-            GTCEu.id("block/multiblock/guixu_vision_core");
+            GTCEu.id("block/multiblock/fusion_reactor");
 
     private static final AtomicBoolean INITIALIZED = new AtomicBoolean(false);
     private static MultiblockMachineDefinition definition;
@@ -88,8 +126,12 @@ public final class GuixuVisionCoreMachines {
         definition = ShanhaiRegistration.REGISTRATE
                 .multiblock(ID, GuixuVisionCoreMachine::new)
                 .rotationState(RotationState.NON_Y_AXIS)
-                // 占位配方类型，理由见类注释「一个临时挂载」
-                .recipeTypes(GTRecipeTypes.ASSEMBLER_RECIPES)
+                // 本机的三个自有配方类型（2026-10-25；不再是占位 ASSEMBLER）。
+                // 🔴 顺序 = 侧栏「机器模式」页里按钮的顺序，也是 activeRecipeType 的下标口径 ⇒
+                //    **只允许往后追加，不许插到前面**（否则已有存档里玩家的选择会指向另一个类型）。
+                .recipeTypes(ShanhaiRecipeTypes.VISION_MATTER_DECOMPRESSION,
+                        ShanhaiRecipeTypes.VISION_ENERGY_EXTRACTION,
+                        ShanhaiRecipeTypes.PRIMORDIAL_PARADIGM_SIMPLIFICATION)
                 // 材料增产（主机那套 + 5）／耗能减免（同款）／并行 —— 整条链见那个方法
                 // ⚠️ 2026-10-23 实查发现：本机继承的配方逻辑是基类的多配方引擎
                 //    （PrimordialEngineRecipeLogic，构造器里 setUseMultipleRecipes(true)），

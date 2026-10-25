@@ -24,6 +24,7 @@
 // ============================================================================================
 
 uniform sampler2D Sampler0;      // 背景：同一帧主渲染目标的一块颜色拷贝（1:1 像素，左下原点）
+uniform sampler2D Sampler1;      // 🔴 深度：同一块矩形的【窗口深度】拷贝（NEAREST；uDepthGate=1 时才有意义）
 
 uniform mat4  uProjMat;          // 事件给的投影矩阵（只用来把"弯折后的方向"投回屏幕坐标）
 uniform vec3  uBhView;           // 黑洞中心（相机空间，方块）
@@ -40,6 +41,39 @@ uniform float uTime;             // 秒（渲染刻 + partialTick）
 uniform float uDiskGain;         // 盘亮度总增益
 uniform float uRingGain;         // 光子环亮度总增益
 uniform float uStrength;         // 偏折强度倍率（/shanhai bh strength；0 = 不弯背景但盘/环还在）
+
+// 🔴 2026-10-25 新增：<b>"只有比黑洞更远的像素才参与弯折"</b>（用户原话：
+//   「AR 字…为什么会受到黑洞引力透镜的影响，它在黑洞的前面啊，而且我发现黑洞前面的物体
+//     也会被黑洞的引力透镜影响，这不对，应该是只有黑洞后面的物体才会受到影响」）
+//
+// 改前只有<b>写入门</b>（quad 的 z = 洞心平面 + GL depth test LEQUAL）：前景像素自己确实
+// 不会被覆盖，但**采样侧没有门** —— 一个背景像素的弯折采样点可能落在前景物体的像素上，
+// 于是"前景的颜色"被搬到别处（绿字/方块在黑洞周围多出一层鬼影）。那就是用户看到的现象。
+// 现在两道门：
+//   ① 写入门：GL depth test（不变）；
+//   ② 采样门：采样点若落在"比洞心平面更近"的像素上 ⇒ 一律退回<b>本像素自己</b>（warp 归 0，
+//      颜色与已经画好的背景逐像素相同），前景的像素一个都不许被搬走。
+uniform float uDepthGate;        // 1 = 深度可用（已拷进 Sampler1）⇒ 启用采样门；0 = 退回改前行为
+// 黑洞【中心平面】的窗口深度（0..1）。🔴 2026-10-25 第四改：它<b>必须被真的读</b>
+//   （读它的地方是下面 ④b 的 `refDepth = max(dSelf, uHoleDepth)`），原因有两条，缺一不可：
+//
+//   ① 语义：背景不可能比洞面更近 ⇒ 采样点比「max(本像素深度, 洞面深度)」还近就一定是前景。
+//      纯用 dSelf 时，若某像素的深度没数据/被 clamp 到洞面之前，门就整体失效；用 max 兜住它。
+//   ② 🔴 结构：**GLSL 编译器会把"只声明、从不读取"的 uniform 整条删掉** —— 链接后的程序里没有它的
+//      location（glGetUniformLocation 返回 -1），vanilla 的 ShaderInstance#updateLocations 会打一行
+//      `Shader shanhai:blackhole could not find uniform named uHoleDepth in the specified shader program.`
+//      并且**不把它放进 uniformMap** ⇒ 我们自己的「必需 uniform 缺失 ⇒ 降二级」检查判定着色器坏了 ⇒
+//      **整条一级引力透镜永久降成二级静态贴图**。实机日志就是这么死的（用户原话
+//      「现在引力透镜完全不显示了」）：一行 `could not find uniform named uHoleDepth` 之后 2 毫秒
+//      就是 `fallback=2 reason=uniform_missing:uHoleDepth`，此后 422 行全是 `path=fallback-quad level=2`。
+//      ⇒ 本工程同类事故**第二次**（前一次是 uScreenSize 声明未读 ⇒ 洞内一帧都不渲染）。
+//   ⇒ 改这一段时只有两条路：① 保留对它的读取；② 把它登记进 BlackHoleLensSpec.OPTIONAL_UNIFORMS
+//      （那一侧**已经登记**，是双保险：就算哪天有人又把这个 uniform 删掉，也只丢一行日志，不会掉级）。
+uniform float uHoleDepth;
+// 🔴 2026-10-25 新增：采样门容差（窗口深度单位）= Java 侧"沿视线轴 0.75 格"换算值，下限 2e-4。
+//   取法规矩见 BlackHoleLensRenderer#windowDepth / Frame#gateEps。JSON 里必须登记默认值，
+//   否则 safeGetUniform 拿到的是 DUMMY（本工程有先例：缺 uniform 不抛异常但也不生效）。
+uniform float uGateEps;
 
 out vec4 fragColor;
 
@@ -157,7 +191,60 @@ void main() {
     }
     vec2 uvMax  = uBgRect.zw * uBgTexel;
     vec2 uvBentC = clamp(uvBent, vec2(0.0), uvMax);
-    vec2 uv     = clamp(mix(uvSelf, uvBentC, warp), vec2(0.0), uvMax);
+    vec2 uvSelfC = clamp(uvSelf, vec2(0.0), uvMax);
+    vec2 uv     = clamp(mix(uvSelfC, uvBentC, warp), vec2(0.0), uvMax);
+
+    // ---------------------------------------------------------------------------------------
+    // ④b 🔴 采样侧深度门（2026-10-25，2026-10-25 深夜【判据改过一次】，看下面的"为什么不再和洞心比"）
+    //    · dSamp：**实际采样点**（已经过 mix 的那个点）的深度；
+    //    · dSelf：**这个像素自己**的深度（uvSelfC 就是它自己的 texel）；
+    //    · 判据：采样点比"我要替换掉的那个像素"更近（差超过 uGateEps）⇒ 它采到了前景 ⇒ 退回 uvSelfC
+    //      （= 这个像素原本的颜色，warp 归 0）⇒ 前景的颜色绝不会被搬到别处。
+    //
+    //    🔴 为什么**不**和洞心平面常数比（改前写法 `dSamp < uHoleDepth - 1e-6` 的三个毛病）：
+    //      ① 语义不对：鬼影的定义是"我采到的那个点比我要替换的像素更近"，与洞心在哪个深度无关；
+    //      ② 整条门押在一个常数上：uHoleDepth ≈ 0.9999（远处黑洞），它偏一丁点就【全拦】或【全放】——
+    //         并且全拦的表现是"整屏一点弯折都没有"，正是用户报的那句
+    //         「现在它连黑洞后面的方块也不影响了」；
+    //      ③ 贴图没数据（dSamp 恒 0）时，`0 < 0.9999 - 1e-6` 恒成立 ⇒ 每个像素都被判成前景 ⇒
+    //         **失败形态是"完全不弯折"**。现在换成自比之后，dSamp=0 ⇒ 条件不成立 ⇒ 退回"全都弯折"
+    //         （= 2026-10-25 之前的行为）。**门的失败形态从此变成"少拦"，不可能再变成"一点都不弯"**。
+    //
+    //    ④ 🔴 2026-10-25 第四改：参照深度 = **max(dSelf, uHoleDepth)**，不是纯 dSelf。
+    //       · 为什么不是纯 dSelf：dSelf 只是"这一个像素的深度"，它可能没有数据（0）、也可能被 clamp
+    //         到洞面之前。这时门就整体失效（或反过来整体收紧）。而"背景不可能比洞面更近"是硬约束
+    //         ⇒ 用洞面深度给 dSelf 一个**下界**：dSelf 正常（≈ 洞面之后）时 max 就等于 dSelf，
+    //         与改前逐像素等价；dSelf 落到洞面之前时用洞面兜住，门退化成"比洞面近就拦"，仍比全放安全。
+    //         （**门不再"整条押在一个常数上"**：常数只当下界参与 max，正常情形由 dSelf 决定。）
+    //       · 为什么**必须**在这里保留对 uHoleDepth 的读取（结构原因，比语义原因更要命）：
+    //         GLSL 编译器会删掉"只声明、从不读取"的 uniform ⇒ 程序里没有 location ⇒
+    //         Java 侧 getUniform 返回 null ⇒ 「必需 uniform 缺失 ⇒ 降二级」把整条一级透镜永久降成
+    //         静态贴图（实机：`fallback=2 reason=uniform_missing:uHoleDepth`，透镜完全消失）。
+    //         本工程第二次踩这个坑（前一次 uScreenSize）；另一侧的双保险是
+    //         BlackHoleLensSpec.OPTIONAL_UNIFORMS 里登记了 uHoleDepth —— 但**别指望它**：
+    //         一个 uniform 只该在"缺了画面逐像素不变"时才登记成可选，而这里它本来就该被读到。
+    //    · `dSamp > 1e-6 && dSamp < 0.999999`：这张贴图这一格**确实有深度数据**（0 = 近平面/没数据，
+    //      1 = 远平面/天空），挡住 0/1 两种坏值把门变成"全拦"。
+    //    · `uGateEps` 由 Java 侧按"沿视线轴 0.75 格"换算成窗口深度差（下限 1e-5 ⇒ 近距离时物理项胜出，
+    //      约 60 格以外才由下限接手），见 Frame#gateEps。⚠️ 别把"下限"写成 2e-4：那个数在 55 格处
+    //      ≈ **12 格**容差，门会形同虚设（2026-10-25 实机回滚过一次，就是这条）。
+    //    ⚠️ 这里【故意不做 discard】：写入门交给 GL depth test（2026-10-24 起就在、实机 447/447 帧验过）。
+    //      原因：万一 Sampler1 没绑上（取到的是 0 号纹理 = 黑），discard 会把整张 pass 吞掉 → 黑洞整块消失；
+    //      而只做采样门的最坏结果是"背景不弯折"，黑洞本体/光子环/盘照旧在 ⇒ 失败形态是"退化"，不是"消失"。
+    //    uDepthGate = 0（光影生效 / 深度拷不出来 / /shanhai bh depthgate off）时整段跳过
+    //    ⇒ 行为与改前逐字一致。
+    // ---------------------------------------------------------------------------------------
+    if (uDepthGate > 0.5) {
+        float dSamp = texture(Sampler1, uv).r;          // 采样点深度
+        float dSelf = texture(Sampler1, uvSelfC).r;     // 本像素深度（写入门已保证它在洞面之后）
+        // 🔴 参照深度 = max(本像素深度, 洞心平面深度)：正常情形 = dSelf（与改前逐像素等价），
+        //    dSelf 落在洞面之前时由洞面兜住 —— 语义上"背景不可能比洞面更近"，结构上保证
+        //    uHoleDepth 被真的读到（读不到 = 被 GLSL 优化掉 = 一级透镜整条降级，见 ④b ④ 与声明处注释）。
+        float refDepth = max(dSelf, uHoleDepth);
+        if (dSamp > 1e-6 && dSamp < 0.999999 && dSamp < refDepth - uGateEps) {
+            uv = uvSelfC;                               // 采样点压在前景上 ⇒ 不弯折（采自己）
+        }
+    }
     vec3 bg     = texture(Sampler0, uv).rgb;
 
     // ---------------------------------------------------------------------------------------

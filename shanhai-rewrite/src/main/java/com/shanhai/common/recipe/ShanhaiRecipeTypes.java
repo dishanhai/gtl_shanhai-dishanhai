@@ -519,6 +519,57 @@ public final class ShanhaiRecipeTypes {
      */
     public static GTRecipeType PRIMORDIAL_DEEP_SPACE_EXTRACTION;
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 🆕 2026-10-25 新增的第 47／48／49 条 —— 归墟视界枢核（{@code shanhai:guixu_vision_core}）的
+    //    三个自有配方类型。**中文名是用户定的，不许改**：视界物质解压 / 视界能流抽取 / 原初范式简化。
+    //
+    // 来历：用户 2026-10 先定下了这三个中文名，当时的口径是「id 等他写配方时定」
+    //   （原文见 {@code machine\host\GuixuVisionCoreMachines} 的类注释「当前进度」那节）；
+    //   2026-10-25 他点单「可以去实现了」⇒ 本轮落地，**英文 id 由本代理按中文名直译定**
+    //   （三个 id 都是"中文名逐词直译"，他写配方时照 {@code gtceu:<id>} 用即可）。
+    //
+    // 🔴 IO 四元组 = {@code setMaxIOSize(6, 144, 3, 32)}【主代理拍的，不是从配方现算的 ——
+    //    这三个类型到本轮为止**一条配方都没有**，数不出实际用量】。拍板理由（原文）：
+    //      · 三个都是"黑洞里往外掏东西"的玩法 ⇒ 产出会很多 ⇒ 物品出取 <b>144</b>；
+    //      · 144 = <b>16 列 × 9 行</b>的既有验证过的排布（"他看惯的高度"，见
+    //        {@link #PRIMORDIAL_DEEP_SPACE_EXTRACTION} 2026-10-16 那一刀）；流体出
+    //        <b>32</b> = 16 列 × 2 行；
+    //      · 物品入 <b>6</b> / 流体入 <b>3</b> 给配方输入留够余量。
+    //    ⚠️ 这是**上限**，不是任何一条配方的实际占用。本工程既有纪律：上限必须 ≥ 实际占用
+    //      （否则 JEI 会少显示产出）⇒ 配方写出来之后要按实际用量复核这三个四元组。
+    //
+    // 🔴 .rtui（JEI 页尺寸的唯一来源；机理 = {@code GTRecipeTypeUI.getCustomUI()} 按
+    //    {@code "ui/recipe_type/%s.rtui".formatted(registryName.getPath())} 查表，
+    //    详见 {@link #PRIMORDIAL_BIOLOGICAL_CORE} 那段「第二轮」注释）：
+    //    {@code assets/gtceu/ui/recipe_type/} 下三份**独立**文件（文件名 = 类型 path）——
+    //    {@code vision_matter_decompression.rtui} / {@code vision_energy_extraction.rtui} /
+    //    {@code primordial_paradigm_simplification.rtui}，三份同一套几何、root 都是 <b>298×240</b>：
+    //      物品入 6 格 (5,1)…(95,1) → 流体入 3 格 (113,1)(131,1)(149,1) → 进度条 (174,1)
+    //      物品出 144 = 16 列 × 9 行（x=5..275，y=37..181）→ 流体出 32 = 16 列 × 2 行（y=199 / 217）
+    //    ⚠️ **不能省**：读不到 .rtui 时它会回落到"固定 3 列、行数 = Σ⌈上限/3⌉"
+    //      ⇒ 144 个物品出 = 48 行 ⇒ JEI 页高约 1240px（既有注释里量过：92 项 = 31 行 ≈ 620px）。
+    //    ⚠️ 与任务书的一句话不同（**我拍的**）：任务书写 item_in 6 =「3 列 × 2 行」，
+    //      实际落的是**单头行 9 格**（6 物品入 ＋ 3 流体入）。三条理由：① 既有三个模板的输入
+    //      全排在同一头行（1+1 / 1+3 / 2+0）；② 换成两行会把物品出首行从 y=37 压到 55、
+    //      root 高 240 ⇒ 258，正好丢掉"他看惯的 240"；③ 9 格头行只占到 x=167，而 16 列输出网格
+    //      本来就宽 293 ⇒ 头行没有任何拥挤，换行纯属多余。
+    //
+    // 🔴 挂载点 = 归墟视界枢核（{@code machine\host\GuixuVisionCoreMachines#init()} 的
+    //    {@code .recipeTypes(...)}；本轮把原来那个占位 {@code GTRecipeTypes.ASSEMBLER_RECIPES} 换掉）。
+    //    ⇒ 正面副作用：JEI 右键「归墟视界枢核」就能看到这三个分类
+    //      （{@code GTRecipeTypeCategory#registerRecipeCatalysts} 用**引用相等**比
+    //      {@code MachineDefinition.getRecipeTypes()[i] == recipeType}）。
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    /** 🆕 视界物质解压 —— 挂「归墟视界枢核」；IO 上限 (6, 144, 3, 32)「我拍的」，尚无配方。 */
+    public static GTRecipeType VISION_MATTER_DECOMPRESSION;
+
+    /** 🆕 视界能流抽取 —— 挂「归墟视界枢核」；IO 上限 (6, 144, 3, 32)「我拍的」，尚无配方。 */
+    public static GTRecipeType VISION_ENERGY_EXTRACTION;
+
+    /** 🆕 原初范式简化 —— 挂「归墟视界枢核」；IO 上限 (6, 144, 3, 32)「我拍的」，尚无配方。 */
+    public static GTRecipeType PRIMORDIAL_PARADIGM_SIMPLIFICATION;
+
     /**
      * 🆕 两条新类型的【配方条数声明值】—— 只用于**由 id 可 grep 的证据行**与 KJS 侧对账。
      *
@@ -578,10 +629,13 @@ public final class ShanhaiRecipeTypes {
      * 41 已经在 2026-09-30 变成 43、2026-10-01 变成 44，本轮的真值是 44 → 45）。
      * <b>2026-10-04：45 → 46</b>（用户点单新增「原初深空汲取」
      * {@code primordial_deep_space_extraction}；见 {@link #PRIMORDIAL_DEEP_SPACE_EXTRACTION}）。
+     * <b>2026-10-25：46 → 49</b>（用户点单「可以去实现了」⇒ 归墟视界枢核的三个自有类型：
+     * {@code vision_matter_decompression} / {@code vision_energy_extraction} /
+     * {@code primordial_paradigm_simplification}；见 {@link #VISION_MATTER_DECOMPRESSION} 那一节的注释）。
      * 这个数字同时被 {@link #countMissingReal()} 与 {@code ShanhaiRegistry#verifyRecipeTypesRegistered}
      * 使用，<b>改类型数量必须同步改这里与那个数组</b>，否则 fail-fast 只查一部分、其余静默缺失。
      */
-    public static final int REAL_TYPE_COUNT = 46;
+    public static final int REAL_TYPE_COUNT = 49;
 
     /**
      * 幂等闸门。与 {@code ShanhaiMachines.INITIALIZED} / {@code ModuleRegistry} 同款写法。
@@ -1425,6 +1479,30 @@ public final class ShanhaiRecipeTypes {
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
 
+        // ═════════════ 2026-10-25 新增第 47／48／49 条（归墟视界枢核的三个自有类型）═════════════
+        // 🔴 本条【无上游原型】⇒ IO 四元组 (6, 144, 3, 32) 是【主代理拍的】，不是从配方现算的
+        //    （这三个类型到本轮为止一条配方都没有）。拍板理由与 .rtui 几何见字段区那段长注释。
+        //    三个都各自有一份 .rtui（root 均 298×240），文件名 = 类型 path。
+        //    链尾照同批新类型（第 42..46 条）的惯例：setEUIO(IN) ＋ setMaxTooltips(4) ＋
+        //    PROGRESS_BAR_ARROW/LEFT_TO_RIGHT，**不挂 setSound**（用户 2026-09-22 裁决省略）。
+        VISION_MATTER_DECOMPRESSION = register("vision_matter_decompression", "multiblock")
+                .setMaxIOSize(6, 144, 3, 32)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+
+        VISION_ENERGY_EXTRACTION = register("vision_energy_extraction", "multiblock")
+                .setMaxIOSize(6, 144, 3, 32)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+
+        PRIMORDIAL_PARADIGM_SIMPLIFICATION = register("primordial_paradigm_simplification", "multiblock")
+                .setMaxIOSize(6, 144, 3, 32)
+                .setEUIO(IO.IN)
+                .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
+
         // ───────── fail-fast（就地）：任何一条静默没生效，就在这里响亮地失败 ─────────
         int realMissing = countMissingReal();
         if (realMissing > 0) {
@@ -1444,7 +1522,11 @@ public final class ShanhaiRecipeTypes {
                         // 🔴 2026-09-26 订正：这句原写「2026-09-23 裁剪后仅保留被 24 台模块引用的类型」——
                         //    用户 2026-09-26 点单"40 条"已把那 24 条恢复 ⇒ 旧话术不再是事实，故改写。
                         //    ⚠️ 那个「51」不是手写数字，是下面两个 {} 之外的常量；见 REAL_TYPE_COUNT=40 / 显示类型 0。
-                        + "（2026-09-26 用户点单恢复：40 条真类型全部注册；"
+                        // 🔴 2026-10-25：下面这句原文写「40 条真类型全部注册」—— 现在实际是 49 条，
+                        //    照原样打出来会与本行自己的「真类型 49 / 49」自相矛盾 ⇒ 补一句"权威数字以常量
+                        //    为准"（**不写死数字**，免得下次新增类型时这里又变成假话）。
+                        + "（历史：2026-09-26 用户点单恢复 40 条真类型全部注册，此后逐条新增至本轮；"
+                        + "权威数字以 REAL_TYPE_COUNT 为准，本行两个 {} 即它；"
                         + "逐条照抄原版 DShanhaiRecipeTypes.java；只注册、不挂机器；"
                         + "36 条 GTNH 显示类型仍不恢复 —— 用户 2026-09-22「那个 GTNH 是我重制版不会添加的」；"
                         + "链尾 gtladditions 的 setSound 按用户 2026-09-22 裁决省略）",
@@ -1473,6 +1555,19 @@ public final class ShanhaiRecipeTypes {
                         + "挂「原初临界加工模块」；配方以 KubeJS 形式装"
                         + "（kubejs\\server_scripts\\[server_scripts]shanhai_primordial_forming.js））",
                 PRIMORDIAL_MATTER_FORMING.registryName, PRIMORDIAL_MATTER_FORMING_DECLARED_RECIPES);
+
+        // ───────── 🆕 2026-10-25：归墟视界枢核三个自有类型的【可 grep 证据行】─────────
+        // 🔴 这里**故意不带"配方条数"**：既有三条带条数的 [SHANHAI-NEWTYPE] 行（激光蚀刻/蜂群铸造/
+        //    物质定型）之所以能写条数，是因为各有一份「配方条数声明值」常量可以跟 KJS 侧对账
+        //    （LASER_ETCH_DECLARED_RECIPES / SWARM_CAST_DECLARED_RECIPES /
+        //    PRIMORDIAL_MATTER_FORMING_DECLARED_RECIPES）。这三个类型到本轮为止**一条配方都没有**
+        //    ⇒ 编一个条数就是假数据（本工程红线：宁可缺，不可假）。等配方写出来再补常量与对账行。
+        ShanhaiMod.LOGGER.info("[SHANHAI-NEWTYPE] 归墟视界枢核三个自有配方类型已注册：{} / {} / {}"
+                        + "（挂载点 = shanhai:guixu_vision_core；IO 上限统一 6/144/3/32「主代理拍的」；"
+                        + "各自 .rtui = assets/gtceu/ui/recipe_type/<typePath>.rtui，root 均 298x240；"
+                        + "本轮尚无配方 —— 配方由用户自己写，届时按实际用量复核这三个上限）",
+                VISION_MATTER_DECOMPRESSION.registryName, VISION_ENERGY_EXTRACTION.registryName,
+                PRIMORDIAL_PARADIGM_SIMPLIFICATION.registryName);
 
         // ───────── JEI 展示层：给"带等级门槛"的配方插一个物质模块催化剂槽（不碰任何配方数据）─────────
         installModuleCatalystSlotUi();
@@ -2019,7 +2114,9 @@ public final class ShanhaiRecipeTypes {
                 // ───── 🆕 2026-10-03 新增的第 45 条（用户点单「原初山海调试」）─────
                 PRIMORDIAL_DEBUG,
                 // ───── 🆕 2026-10-04 新增的第 46 条（用户点单「原初深空汲取」）─────
-                PRIMORDIAL_DEEP_SPACE_EXTRACTION};
+                PRIMORDIAL_DEEP_SPACE_EXTRACTION,
+                // ───── 🆕 2026-10-25 新增的第 47／48／49 条（归墟视界枢核的三个自有类型）─────
+                VISION_MATTER_DECOMPRESSION, VISION_ENERGY_EXTRACTION, PRIMORDIAL_PARADIGM_SIMPLIFICATION};
     }
 
     /**

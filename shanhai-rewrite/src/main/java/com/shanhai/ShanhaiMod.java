@@ -204,6 +204,15 @@ public class ShanhaiMod {
         LOGGER.info("{} 配方逻辑只读探针已挂上 FORGE 事件总线（只打日志；启动后 grep 本前缀即可）",
                 com.shanhai.common.diag.RecipeProbe.PREFIX);
 
+        // 🆕 2026-10-25 归墟视界枢核「成型检查合并」：把同一 tick 内同一台主机的多次方块变化
+        //    压成该 tick 末尾的一次 MultiblockState#onBlockStateChanged（每 tick 最多一次全量检查）。
+        //    为什么需要：上游 ChunkMixin 每次 setBlockState 都排一次全量检查，而本机图案是
+        //    148×135×131 ≈ 261.7 万格 ⇒ 一键搭建铺两万多格 = 两万多次全量检查 ⇒ 单 tick 卡几十秒。
+        //    🔴 只作用于 GuixuVisionCoreMachine；其它多方块一律不动。
+        //    🔴 代价：结构失效/重新成型最多晚 1 tick（≈50ms）才发现，这是合并的必然代价。
+        //    开关 = config/shanhai-common.toml 的 [diag] pattern_check_coalesce（默认 true）。
+        MinecraftForge.EVENT_BUS.addListener(com.shanhai.common.diag.ShanhaiPatternCheckCoalescer::onServerTick);
+
         LOGGER.info("[SHANHAI] {} 已加载（阶段 1）", MOD_ID);
     }
 }

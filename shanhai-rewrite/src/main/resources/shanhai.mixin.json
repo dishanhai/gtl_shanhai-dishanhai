@@ -8,10 +8,14 @@
     "ShanhaiSmokeMixin",
     "ShanhaiInfiniteThreadDisplayMixin",
     "ShanhaiGeneratorWirelessEnergyJadeMixin",
+    "ShanhaiMachineModeNameMixin",
     "ShanhaiSetBlockWatchMixin",
     "ShanhaiRecipeTypeGetRecipeMixin",
     "ShanhaiItemStackOverrideMixin",
-    "ShanhaiItemDescriptionMixin"
+    "ShanhaiItemDescriptionMixin",
+    "ShanhaiUniversalSupplyMixin",
+    "ShanhaiQuickUploadMultiTypeMixin",
+    "ShanhaiSlotTypeGateMixin"
   ],
   "client": [
     "ShanhaiFontStyleMixin",
