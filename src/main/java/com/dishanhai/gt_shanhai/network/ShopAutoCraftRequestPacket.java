@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  */
 public class ShopAutoCraftRequestPacket {
 
-    public enum Target { COST, STAGE, ENTRY_SUBMISSION }
+    public enum Target { COST, STAGE, ENTRY_SUBMISSION, CART }
 
     private final Target target;
     private final long catalogRevision;
@@ -33,6 +33,11 @@ public class ShopAutoCraftRequestPacket {
 
     public ShopAutoCraftRequestPacket(long catalogRevision, long entryKey, long times, boolean aeMode, int requestId) {
         this(Target.COST, catalogRevision, entryKey, times, "", aeMode, requestId);
+    }
+
+    /** 购物车「AE下单补齐缺口」：购物车内容存在服务端，请求里不带商品。 */
+    public static ShopAutoCraftRequestPacket cart(long catalogRevision, boolean aeMode, int requestId) {
+        return new ShopAutoCraftRequestPacket(Target.CART, catalogRevision, 0L, 1L, "", aeMode, requestId);
     }
 
     public ShopAutoCraftRequestPacket(Target target, long catalogRevision, long entryKey,
@@ -78,6 +83,10 @@ public class ShopAutoCraftRequestPacket {
             if (player == null) return;
             if (pkt.target == Target.STAGE) {
                 ShopAutoCraft.beginStagePlan(player, pkt.stagePath, pkt.aeMode);
+                return;
+            }
+            if (pkt.target == Target.CART) {
+                ShopAutoCraft.beginCartPlan(player, pkt.aeMode, pkt.requestId);
                 return;
             }
             ShopEntry entry = ShopConfig.resolve(pkt.catalogRevision, pkt.entryKey);

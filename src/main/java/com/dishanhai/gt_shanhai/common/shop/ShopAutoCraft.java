@@ -21,6 +21,7 @@ import appeng.api.stacks.GenericStack;
 import appeng.me.cluster.implementations.CraftingCPUCluster;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.TickEvent;
@@ -55,12 +56,16 @@ public final class ShopAutoCraft {
     private static final Map<UUID, Session> CALCULATING = new ConcurrentHashMap<>();
     private static final Map<UUID, Session> READY = new ConcurrentHashMap<>();
 
-    /** 补齐目标种类：商品成本 / 阶段解锁前置 / 商品一次性提交前置。 */
+    /** 补齐目标种类：商品成本 / 阶段解锁前置 / 商品一次性提交前置 / 整个购物车的合并成本。 */
     public enum Target {
         COST,
         STAGE,
-        ENTRY_SUBMISSION
+        ENTRY_SUBMISSION,
+        CART
     }
+
+    /** 购物车里一件候选：商品 + 候选购买次数。 */
+    private record CartLine(ShopEntry entry, long times) {}
 
     private static final class PlanItem {
         final AEKey key;
@@ -95,6 +100,7 @@ public final class ShopAutoCraft {
         final String stagePath;
         final Map<AEKey, BigInteger> shortages;
         final Map<AEKey, BigInteger> retained;
+        final List<CartLine> lines;
         final Map<AEKey, BigInteger> reserved = new LinkedHashMap<>();
         final List<PlanItem> items = new ArrayList<>();
         final List<String> notes = new ArrayList<>();
@@ -107,7 +113,13 @@ public final class ShopAutoCraft {
         }
 
         Session(IGrid grid, ShopEntry entry, long times, Target target, String stagePath, boolean aeMode, Snapshot snapshot) {
+            this(grid, entry, times, target, stagePath, aeMode, snapshot, List.of());
+        }
+
+        Session(IGrid grid, ShopEntry entry, long times, Target target, String stagePath, boolean aeMode,
+                Snapshot snapshot, List<CartLine> lines) {
             this.grid = grid;
+            this.lines = lines;
             this.entry = entry;
             this.times = times;
             this.aeMode = aeMode;
@@ -155,6 +167,42 @@ public final class ShopAutoCraft {
         }
         cancelAll(player.getUUID());
         Session session = new Session(grid, entry, times, snapshot(player, entry, times, grid));
+        launchCostSession(player, session, requestId);
+    }
+
+    /** 购物车「AE下单补齐缺口」：把购物车里所有可买候选的成本合并成一份缺口，一次出方案、一次确认。 */
+    public static void beginCartPlan(ServerPlayer player, boolean aeMode, int requestId) {
+        if (player == null) return;
+        if (!aeMode) {
+            message(player, "§c請先開啟「AE模式」");
+            sendPlanFeedback(player, requestId, false);
+            return;
+        }
+        IGrid grid = ShopAeNetwork.findBoundGrid(player);
+        if (grid == null) {
+            message(player, "§c未綁定在線 AE 網路");
+            sendPlanFeedback(player, requestId, false);
+            return;
+        }
+        List<CartLine> lines = new ArrayList<>();
+        for (Map.Entry<String, Long> candidate : ShopCartAPI.getAll(player.getServer(), player.getUUID()).entrySet()) {
+            ShopEntry entry = ShopConfig.resolveByStableId(candidate.getKey());
+            long times = candidate.getValue() == null ? 0L : candidate.getValue();
+            if (entry == null || times <= 0L || !entry.isValid() || !entry.allowsBuy() || entry.hasMissingItems()) continue;
+            lines.add(new CartLine(entry, times));
+        }
+        if (lines.isEmpty()) {
+            message(player, "§c購物車裡沒有可補齊的商品");
+            sendPlanFeedback(player, requestId, false);
+            return;
+        }
+        cancelAll(player.getUUID());
+        Session session = new Session(grid, null, 1L, Target.CART, "", true, snapshotLines(player, lines, grid), lines);
+        launchCostSession(player, session, requestId);
+    }
+
+    private static void launchCostSession(ServerPlayer player, Session session, int requestId) {
+        IGrid grid = session.grid;
         session.requestId = requestId;
         for (Map.Entry<AEKey, BigInteger> shortage : session.shortages.entrySet()) {
             AEKey key = shortage.getKey();
@@ -245,27 +293,45 @@ public final class ShopAutoCraft {
     }
 
     private static Snapshot snapshot(ServerPlayer player, ShopEntry entry, long times, IGrid grid) {
-        ShopCost cost = entry.getEffectiveCost(ShopMembership.discountPercent(player.getServer(), player.getUUID()));
-        BigInteger multiplier = BigInteger.valueOf(times);
+        return snapshotLines(player, List.of(new CartLine(entry, times)), grid);
+    }
+
+    /** 多件商品的成本合并成一份需求：錢包餘額、隨身物品、AE 庫存都只扣一次，不按件重複抵銷。 */
+    private static Snapshot snapshotLines(ServerPlayer player, List<CartLine> lines, IGrid grid) {
         Map<AEKey, BigInteger> demand = new LinkedHashMap<>();
-        for (var coin : cost.coins.entrySet()) {
+        Map<ResourceLocation, BigInteger> coinTotals = new LinkedHashMap<>();
+        List<ShopCost> costs = new ArrayList<>(lines.size());
+        List<BigInteger> multipliers = new ArrayList<>(lines.size());
+        for (CartLine line : lines) {
+            ShopEntry entry = line.entry();
+            ShopCost cost = entry.getEffectiveCost(ShopMembership.discountPercent(player.getServer(), player.getUUID()));
+            BigInteger multiplier = BigInteger.valueOf(line.times());
+            costs.add(cost);
+            multipliers.add(multiplier);
+            for (var coin : cost.coins.entrySet()) {
+                ShopAutoCraftAmounts.add(coinTotals, coin.getKey(), coin.getValue().multiply(multiplier));
+            }
+        }
+        for (var coin : coinTotals.entrySet()) {
             var item = ForgeRegistries.ITEMS.getValue(coin.getKey());
             if (item == null) continue;
             AEItemKey key = AEItemKey.of(new ItemStack(item));
-            ShopAutoCraftAmounts.add(demand, key, coin.getValue().multiply(multiplier));
-            // 錢包餘額只能抵銷幣種成本，不能抵銷同種物品的實物成本。
+            ShopAutoCraftAmounts.add(demand, key, coin.getValue());
+            // 錢包餘額只能抵銷幣種成本，不能抵銷同種物品的實物成本（實物成本在下面才加進來）。
             ShopAutoCraftAmounts.consume(demand, key,
                     WalletAccountAPI.getCurrency(player.getServer(), player.getUUID(), coin.getKey()));
         }
-        for (ExchangeEntry.Ingredient ingredient : cost.physical) {
-            AEKey key;
-            if (ingredient.isFluid) {
-                var fluid = ForgeRegistries.FLUIDS.getValue(ingredient.id);
-                key = fluid == null ? null : AEFluidKey.of(fluid);
-            } else {
-                key = AEItemKey.of(ingredient.makeUnitStack());
+        for (int i = 0; i < costs.size(); i++) {
+            for (ExchangeEntry.Ingredient ingredient : costs.get(i).physical) {
+                AEKey key;
+                if (ingredient.isFluid) {
+                    var fluid = ForgeRegistries.FLUIDS.getValue(ingredient.id);
+                    key = fluid == null ? null : AEFluidKey.of(fluid);
+                } else {
+                    key = AEItemKey.of(ingredient.makeUnitStack());
+                }
+                ShopAutoCraftAmounts.add(demand, key, BigInteger.valueOf(ingredient.count).multiply(multipliers.get(i)));
             }
-            ShopAutoCraftAmounts.add(demand, key, BigInteger.valueOf(ingredient.count).multiply(multiplier));
         }
         Map<AEKey, BigInteger> carried = new LinkedHashMap<>();
         var inventory = player.getInventory();
@@ -503,6 +569,12 @@ public final class ShopAutoCraft {
 
     private static boolean targetStillValid(Session session) {
         if (!session.aeMode) return false;
+        if (session.target == Target.CART) {
+            for (CartLine line : session.lines) {
+                if (!ShopConfig.getEntries().contains(line.entry())) return false;
+            }
+            return !session.lines.isEmpty();
+        }
         if (session.target == Target.COST) return session.entry != null && ShopConfig.getEntries().contains(session.entry);
         if (session.target == Target.STAGE) return !session.stagePath.isBlank() && !ShopStageConfig.get(session.stagePath).isEmpty();
         return session.entry != null && ShopConfig.getEntries().contains(session.entry) && session.entry.hasSubmissionRequirement();
@@ -512,6 +584,7 @@ public final class ShopAutoCraft {
         return switch (session.target) {
             case STAGE -> snapshotIngredients(player, ShopStageConfig.get(session.stagePath), grid);
             case ENTRY_SUBMISSION -> snapshotIngredients(player, session.entry.getSubmissionItems(), grid);
+            case CART -> snapshotLines(player, session.lines, grid);
             default -> snapshot(player, session.entry, session.times, grid);
         };
     }
@@ -519,6 +592,7 @@ public final class ShopAutoCraft {
     private static void restartPlan(ServerPlayer player, Session session) {
         if (session.target == Target.STAGE) beginStagePlan(player, session.stagePath, true);
         else if (session.target == Target.ENTRY_SUBMISSION) beginEntrySubmissionPlan(player, session.entry, true);
+        else if (session.target == Target.CART) beginCartPlan(player, true, 0);
         else beginPlan(player, session.entry, session.times, true);
     }
 

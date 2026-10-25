@@ -316,7 +316,7 @@ public class ShopScreen extends ScaledScreen {
     private static final float CLICK_WAVE_TO_PX = 46f;
     /** 波峰厚度（虚拟像素）。太薄看不出来，太厚会糊成一团。 */
     private static final float CLICK_WAVE_BAND_PX = 9f;
-    private static final long CLICK_WAVE_MS = 240L;
+    private static final long CLICK_WAVE_MS = 320L;
     private long clickWaveAtMs;
     private int clickWaveX;
     private int clickWaveY;
@@ -1204,9 +1204,49 @@ public class ShopScreen extends ScaledScreen {
     private int searchBoxX() { return detailX() + 4; }
     private int searchBoxY() { return tabsY() + 1; }
 
-    private int buyTabX() { return left + 14; }
+    // ===== 顶栏左侧按钮条（购买…商店设置）：放不下时可左右滚动，编辑模式多出「新增商品」也不再压到标题和右侧按钮 =====
+    private static final int TOP_STRIP_STEP = 40;
+    private final Spring topStripSpring = new Spring(Spring.SCROLL);
+    private int topStripTarget;
+    private int topStripScroll;
+
+    private int topStripOriginX() { return left + 14; }
+    /** 可视区右缘：停在右侧按钮组（收藏）左边留 6px。 */
+    private int topStripViewRight() { return favBtnX() - 6; }
+    /** 按钮条内容总宽（不含滚动偏移）。 */
+    private int topStripContentW() { return settingsBtnX() + settingsBtnW() + topStripScroll - topStripOriginX(); }
+    private int topStripMaxScroll() { return Math.max(0, topStripContentW() - (topStripViewRight() - topStripOriginX())); }
+
+    private void snapTopStripScroll(int value) {
+        topStripScroll = value;
+        topStripTarget = value;
+        topStripSpring.snap(value);
+    }
+
+    private void advanceTopStripScroll(long now) {
+        topStripTarget = Math.max(0, Math.min(topStripMaxScroll(), topStripTarget));
+        if (topStripSpring.target() != topStripTarget) topStripSpring.setTarget(topStripTarget, now);
+        topStripSpring.update(now);
+        topStripScroll = Math.max(0, Math.min(topStripMaxScroll(), Math.round(topStripSpring.value())));
+    }
+
+    private boolean inTopStripView(double mx, double my) {
+        return mx >= topStripOriginX() && mx < topStripViewRight()
+                && my >= top + 6 && my < top + 6 + TOP_BAR_H;
+    }
+
+    /** 按钮条里的按钮命中：被可视区裁掉的部分不响应。 */
+    private boolean stripHit(double mx, double my, int x, int w) {
+        return mx >= topStripOriginX() && mx < topStripViewRight() && hit(mx, my, x, top + 6, w, TOP_BAR_H);
+    }
+
+    private boolean stripButtonHit(double mx, double my, int x, int w) {
+        return mx >= topStripOriginX() && mx < topStripViewRight() && buttonHit(mx, my, x, top + 6, w, TOP_BAR_H);
+    }
+
+    private int buyTabX() { return topStripOriginX() - topStripScroll; }
     private int buyTabW() { return BUY_TAB_W; }
-    private int sellTabX() { return left + 14 + buyTabW() + 2; }
+    private int sellTabX() { return buyTabX() + buyTabW() + 2; }
     private int sellTabW() { return SELL_TAB_W; }
     // 「货币中心」按钮：出售页签右侧，始终可见（打开 ATM 子页）
     private static final int CURRENCY_BTN_W = 64;
@@ -1715,10 +1755,14 @@ public class ShopScreen extends ScaledScreen {
             g.fill(left + 6, top + TOP_BAR_H + 6, left + panelWidth - 6, top + panelHeight - 6, PANEL_INNER);
         }
 
-        // 顶部买/卖页签
+        // 顶栏左侧按钮条：裁在可视区内，放不下就左右滚动（滚轮）
+        advanceTopStripScroll(nowMs);
+        int stripViewRight = topStripViewRight();
+        enableGridScissor(g, topStripOriginX(), top + 3, Math.max(topStripOriginX(), stripViewRight), top + 6 + TOP_BAR_H + 3);
+        // 顶部买/卖页签（sig 跟滚动量走：滚动时高亮块直接跟位，不拖尾）
         drawTabStrip(g, TAB_STRIP_BUYSELL, top + 6, TOP_BAR_H,
                 new int[]{buyTabX(), sellTabX()}, new int[]{buyTabW(), sellTabW()},
-                new String[]{"购买", "出售"}, mode == Mode.BUY ? 0 : 1, 0, mx, my);
+                new String[]{"购买", "出售"}, mode == Mode.BUY ? 0 : 1, topStripScroll, mx, my);
         // 货币中心 + 兑换中心（始终可见）
         drawButton(g, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H, "§6货币中心", mx, my);
         drawButton(g, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H, "§d兑换中心", mx, my);
@@ -1728,6 +1772,20 @@ public class ShopScreen extends ScaledScreen {
             drawButton(g, addBtnX(), top + 6, addBtnW(), TOP_BAR_H, "§a新增商品", mx, my);
         }
         drawButton(g, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H, "§b商店设置", mx, my);
+        g.disableScissor();
+        // 还能滚的那一侧画个箭头提示
+        int stripMax = topStripMaxScroll();
+        if (stripMax > 0) {
+            int ay = top + 6 + (TOP_BAR_H - 8) / 2;
+            if (topStripScroll > 0) {
+                g.fill(topStripOriginX(), top + 6, topStripOriginX() + 9, top + 6 + TOP_BAR_H, BOX_BG);
+                g.drawString(this.font, "§e«", topStripOriginX() + 2, ay, WHITE, false);
+            }
+            if (topStripScroll < stripMax) {
+                g.fill(stripViewRight - 9, top + 6, stripViewRight, top + 6 + TOP_BAR_H, BOX_BG);
+                g.drawString(this.font, "§e»", stripViewRight - 7, ay, WHITE, false);
+            }
+        }
 
         // 顶栏右侧：购物车 → 精妙背包模式 → AE模式 → 充值全部 → 关闭
         int cartCount = ClientShopCart.size();
@@ -1741,9 +1799,13 @@ public class ShopScreen extends ScaledScreen {
         drawButton(g, rechargeBtnX(), top + 6, rechargeBtnW(), TOP_BAR_H, "§b充值全部", mx, my);
         drawButton(g, closeBtnX(), top + 6, closeBtnW(), TOP_BAR_H, "§c关闭", mx, my);
 
-        // 标题（居中于整个面板，KE 做法）
-        g.drawCenteredString(this.font, theme.glass ? "钱包商店" : "§6钱包商店", titleX(), top + 9,
-                theme.glass ? com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette.TEXT_HEAD : GOLD);
+        // 标题（居中于整个面板，KE 做法）；左侧按钮条或右侧按钮组伸到它跟前时让位，不叠字
+        String titleText = theme.glass ? "钱包商店" : "§6钱包商店";
+        int titleHalf = this.font.width(titleText) / 2 + 6;
+        if (topStripOriginX() + topStripContentW() <= titleX() - titleHalf && titleX() + titleHalf <= favBtnX()) {
+            g.drawCenteredString(this.font, titleText, titleX(), top + 9,
+                    theme.glass ? com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette.TEXT_HEAD : GOLD);
+        }
 
         // 余额行（KE 货币栏：图标 + 紧凑数字 横排）
         int by = balanceY();
@@ -2497,6 +2559,47 @@ public class ShopScreen extends ScaledScreen {
         return r[0] + r[2] - 8 - CART_CTRL_BLOCK_W;
     }
 
+    private static final String CART_AUTO_CRAFT_IDLE = "§b⚙ AE下单补齐缺口";
+
+    /** 购物车「AE下单补齐缺口」按钮：标题行右侧、关闭键左边。宽度按常态文案定，换状态文字不跳位。 */
+    private int[] cartAutoCraftBounds(int[] r) {
+        int w = this.font.width(CART_AUTO_CRAFT_IDLE) + 12;
+        int x = r[0] + r[2] - DESC_OVERLAY_CLOSE_W - 4 - 4 - w;
+        return new int[]{x, r[1] + 4, w, DESC_OVERLAY_CLOSE_H};
+    }
+
+    private long cartAutoCraftKey(int[] b) {
+        return pressKey(b[0], b[1], b[2], b[3]) ^ 0x2B7E151628AED2A6L;
+    }
+
+    private String cartAutoCraftLabel(long key) {
+        long now = System.currentTimeMillis();
+        ButtonFeedback.Phase phase = buttonFeedback.phase(key, now);
+        if (phase == ButtonFeedback.Phase.PENDING) return "§b正在计算合成方案…";
+        if (phase != ButtonFeedback.Phase.FLASH) return CART_AUTO_CRAFT_IDLE;
+        return switch (buttonFeedback.flashTone(key, now)) {
+            case SUCCESS -> "§a✓ 方案已就绪";
+            case PARTIAL -> "§6~ 部分可合成";
+            case FAILED -> "§c✗ 无可用合成方案";
+            default -> CART_AUTO_CRAFT_IDLE;
+        };
+    }
+
+    /** 把购物车全部候选的缺口合并，向绑定的 AE 网络算一份合成方案；算好后弹确认窗。 */
+    private void requestCartAutoCraft(int[] b) {
+        long now = System.currentTimeMillis();
+        long key = cartAutoCraftKey(b);
+        if (!buttonFeedback.tryBegin(key, now)) {
+            buttonFeedback.nudge(pressKey(b[0], b[1], b[2], b[3]), now);
+            ShopUiSounds.busy();
+            return;
+        }
+        int requestId = ClientShopActionResults.nextRequestId();
+        buttonFeedback.pending(key, requestId, now, Long.MAX_VALUE);
+        ShanhaiNetwork.CHANNEL.sendToServer(com.dishanhai.gt_shanhai.network.ShopAutoCraftRequestPacket.cart(
+                ClientShopCatalog.revision(), aeMode, requestId));
+    }
+
     /** 购物车条目行的花费预览请求节流：跟详情页那套（previewRequestedKey 单槽）各自独立，
      * 允许购物车里的多件商品同时各自发起请求（见 ClientCostPreview 已扩成按 entryKey 多槽缓存）。 */
     private void maybeRequestCartCostPreview(long entryKey, ShopCost cost) {
@@ -2529,10 +2632,19 @@ public class ShopScreen extends ScaledScreen {
         // 全部成交的行会被移出购物车 map 但仍要留在面板里画成功戳记，行索引三处才对得上
         List<String> stableIds = cartDisplayIds();
 
+        // AE 模式下标题行多一个「AE下单补齐缺口」；标题让出它的位置
+        boolean showCartAutoCraft = aeMode && !stableIds.isEmpty();
+        int[] autoCraftB = cartAutoCraftBounds(r);
+        int titleMaxW = showCartAutoCraft ? autoCraftB[0] - 6 - (ox + 8) : ow - DESC_OVERLAY_CLOSE_W - 20;
         g.drawString(this.font, GuiRenderUtil.trimText(this.font,
-                "§6购物车 §7(" + cartMap.size() + " 件候选)", ow - DESC_OVERLAY_CLOSE_W - 20), ox + 8, oy + 8, GOLD, true);
+                "§6购物车 §7(" + cartMap.size() + " 件候选)", titleMaxW), ox + 8, oy + 8, GOLD, true);
         int closeX = ox + ow - DESC_OVERLAY_CLOSE_W - 4, closeY = oy + 4;
         drawButton(g, closeX, closeY, DESC_OVERLAY_CLOSE_W, DESC_OVERLAY_CLOSE_H, "§cX", mx, my);
+        if (showCartAutoCraft) {
+            long autoCraftKey = cartAutoCraftKey(autoCraftB);
+            drawButton(g, autoCraftB[0], autoCraftB[1], autoCraftB[2], autoCraftB[3],
+                    cartAutoCraftLabel(autoCraftKey), mx, my, autoCraftKey);
+        }
 
         if (stableIds.isEmpty()) {
             g.drawCenteredString(this.font, "§7购物车是空的——Ctrl+左键网格商品加入候选", ox + ow / 2, oy + oh / 2 - 4, GRAY);
@@ -2654,6 +2766,13 @@ public class ShopScreen extends ScaledScreen {
         }
         Map<String, Long> cartMap = ClientShopCart.getAll();
         List<String> stableIds = cartDisplayIds(); // 必须跟 renderCartOverlay 用同一份清单，行索引才对得上
+        if (aeMode && !stableIds.isEmpty()) {
+            int[] autoCraftB = cartAutoCraftBounds(r);
+            if (buttonHit(mx, my, autoCraftB[0], autoCraftB[1], autoCraftB[2], autoCraftB[3])) {
+                requestCartAutoCraft(autoCraftB);
+                return true;
+            }
+        }
         if (!stableIds.isEmpty()) {
             int visible = cartOverlayVisibleRows(r);
             int rowY0 = oy + 22;
@@ -2877,25 +2996,25 @@ public class ShopScreen extends ScaledScreen {
     private List<Component> topButtonTip(int smx, int smy) {
         int y = top + 6;
         int h = TOP_BAR_H;
-        if (hit(smx, smy, buyTabX(), y, buyTabW(), h)) {
+        if (stripHit(smx, smy, buyTabX(), buyTabW())) {
             return buttonTip("购买", "从商店买东西。先点左侧商品，改次数，再点确认。");
         }
-        if (hit(smx, smy, sellTabX(), y, sellTabW(), h)) {
+        if (stripHit(smx, smy, sellTabX(), sellTabW())) {
             return buttonTip("出售", "把商品卖回商店，按回收价入账。仅购买的商品不能卖。");
         }
-        if (hit(smx, smy, currencyBtnX(), y, currencyBtnW(), h)) {
+        if (stripHit(smx, smy, currencyBtnX(), currencyBtnW())) {
             return buttonTip("货币中心", "把背包里的货币存进钱包，或按汇率把一种币换成另一种。");
         }
-        if (hit(smx, smy, exchangeBtnX(), y, exchangeBtnW(), h)) {
+        if (stripHit(smx, smy, exchangeBtnX(), exchangeBtnW())) {
             return buttonTip("兑换中心", "按兑换条目付出物品、流体或星火，换取另一侧。");
         }
-        if (hit(smx, smy, memberBtnX(), y, memberBtnW(), h)) {
+        if (stripHit(smx, smy, memberBtnX(), memberBtnW())) {
             return buttonTip("银会中心", "购买会员折扣，或办理定期存款和贷款。");
         }
-        if (catalogEditUnlocked && hit(smx, smy, addBtnX(), y, addBtnW(), h)) {
+        if (catalogEditUnlocked && stripHit(smx, smy, addBtnX(), addBtnW())) {
             return buttonTip("新增商品", "往当前商店目录加一条新商品。只在编辑模式开启时出现。");
         }
-        if (hit(smx, smy, settingsBtnX(), y, settingsBtnW(), h)) {
+        if (stripHit(smx, smy, settingsBtnX(), settingsBtnW())) {
             return buttonTip("商店设置", canEdit
                     ? "调整奖励抽取上限、SDA 打包阈值、卡片大小、获取预览模式、是否记住选取与搜索、减少动效与商店音效，以及 AE 注入开关。"
                     : "调整卡片大小、获取预览模式、是否记住选取与搜索、减少动效与商店音效，只存在这台客户端。");
@@ -4484,11 +4603,11 @@ public class ShopScreen extends ScaledScreen {
         }
 
         // 顶部买/卖页签：切换时打一条本地横幅提示当前模式，光靠页签颜色区分不够醒目，容易买卖模式点混
-        if (buttonHit(mx, my, buyTabX(), top + 6, buyTabW(), TOP_BAR_H)) {
+        if (stripButtonHit(mx, my, buyTabX(), buyTabW())) {
             if (mode != Mode.BUY) showMessage(Component.literal("§b[山海商店] §a已切换至【购买】模式"));
             mode = Mode.BUY; clearSelection(); return true;
         }
-        if (buttonHit(mx, my, sellTabX(), top + 6, sellTabW(), TOP_BAR_H)) {
+        if (stripButtonHit(mx, my, sellTabX(), sellTabW())) {
             if (mode != Mode.SELL) showMessage(Component.literal("§e[山海商店] §a已切换至【出售】模式"));
             mode = Mode.SELL; clearSelection(); return true;
         }
@@ -4547,27 +4666,27 @@ public class ShopScreen extends ScaledScreen {
             return true;
         }
         // 货币中心（打开 ATM 子页）
-        if (buttonHit(mx, my, currencyBtnX(), top + 6, currencyBtnW(), TOP_BAR_H)) {
+        if (stripButtonHit(mx, my, currencyBtnX(), currencyBtnW())) {
             Minecraft.getInstance().setScreen(new CurrencyAtmScreen(this));
             return true;
         }
         // 兑换中心（打开兑换子页）
-        if (buttonHit(mx, my, exchangeBtnX(), top + 6, exchangeBtnW(), TOP_BAR_H)) {
+        if (stripButtonHit(mx, my, exchangeBtnX(), exchangeBtnW())) {
             Minecraft.getInstance().setScreen(new ExchangeScreen(this, canEdit));
             return true;
         }
         // 银会中心（打开会员购买+银行子页）
-        if (buttonHit(mx, my, memberBtnX(), top + 6, memberBtnW(), TOP_BAR_H)) {
+        if (stripButtonHit(mx, my, memberBtnX(), memberBtnW())) {
             Minecraft.getInstance().setScreen(new ShopMembershipScreen(this));
             return true;
         }
         // 新增商品（编辑权 + 开了编辑模式）：分类默认继承当前所在子页（如「无限盘区/前期」）
-        if (catalogEditUnlocked && buttonHit(mx, my, addBtnX(), top + 6, addBtnW(), TOP_BAR_H)) {
+        if (catalogEditUnlocked && stripButtonHit(mx, my, addBtnX(), addBtnW())) {
             ShopEntryEditor.openNew(this, currentViewCategory());
             return true;
         }
         // 商店设置（所有人可开，不受编辑模式限制）：编辑权玩家另有奖励抽取次数上限等服务端运行期设置
-        if (buttonHit(mx, my, settingsBtnX(), top + 6, settingsBtnW(), TOP_BAR_H)) {
+        if (stripButtonHit(mx, my, settingsBtnX(), settingsBtnW())) {
             Minecraft.getInstance().setScreen(new ShopSettingsScreen(this, canEdit));
             return true;
         }
@@ -5123,6 +5242,11 @@ public class ShopScreen extends ScaledScreen {
             int[] r = cartOverlayBounds();
             int maxScroll = cartOverlayMaxScroll(r, cartDisplayIds().size()); // 跟渲染/点击同一份清单口径
             cartOverlayScroll = Math.max(0, Math.min(maxScroll, cartOverlayScroll - (int) d));
+            return true;
+        }
+        // 顶栏左侧按钮条：悬停时滚轮横向滚动（放得下就不拦，交给下面）
+        if (inTopStripView(mx, my) && topStripMaxScroll() > 0) {
+            topStripTarget = Math.max(0, Math.min(topStripMaxScroll(), topStripTarget - (int) Math.signum(d) * TOP_STRIP_STEP));
             return true;
         }
         if (selected != null && GuiRenderUtil.isHovering(mx, my, detailX(), detailViewportTop(), DETAIL_W, detailViewportHeight())) {
@@ -5775,41 +5899,94 @@ public class ShopScreen extends ScaledScreen {
      * 环上按光向左上衰减，做出折射高光的明暗差；再叠一条内圈表示透镜边缘。
      */
     private void renderClickWaveRing(GuiGraphics g, float t) {
+        float span = CLICK_WAVE_TO_PX - CLICK_WAVE_FROM_PX;
         float ease = GuiRenderUtil.easeOut(t);
-        float radius = CLICK_WAVE_FROM_PX + (CLICK_WAVE_TO_PX - CLICK_WAVE_FROM_PX) * ease;
-        float fade = 1f - smoothstep(0.28f, 1f, t);
+        float radius = CLICK_WAVE_FROM_PX + span * ease;
+        float fade = 1f - smoothstep(0.35f, 1f, t);
         if (fade <= 0.01f || radius < 1f) return;
         int cx = clickWaveX;
         int cy = clickWaveY;
-        int segments = Math.max(28, (int) (radius * 2.4f));
-        // 起点先亮一下：点击瞬间的玻璃被压下去，环还没铺开
-        int coreA = (int) (fade * 92f);
-        if (coreA > 0) {
-            int cr = 3 + (int) (ease * 5f);
-            g.fill(cx - cr, cy - cr, cx + cr, cy + cr, (coreA << 24) | 0xDCEFFF);
+        // ① 按下瞬间的光斑：玻璃被压下去的一团柔光，前 60% 里很快淡掉
+        float glowA = 0.5f * (1f - smoothstep(0f, 0.6f, t));
+        if (glowA > 0.01f) drawSoftDisc(g, cx, cy, 8f + 16f * ease, glowA, 0xEAF6FF);
+        // ② 主环：边缘羽化的亮带，越扩越细（水膜被拉薄）
+        drawRingArc(g, cx, cy, radius, 2.8f - 1.6f * t, 0.72f * fade, 0xD6EEFF);
+        // ③ 余波：晚 20% 起步、扩得更近的一圈淡环，带出水纹的层次
+        float t2 = (t - 0.2f) / 0.8f;
+        if (t2 > 0f) {
+            float r2 = CLICK_WAVE_FROM_PX + span * 0.68f * GuiRenderUtil.easeOut(t2);
+            drawRingArc(g, cx, cy, r2, 1.7f, 0.34f * (1f - smoothstep(0.2f, 1f, t2)), 0xA5D8FF);
         }
-        drawRingArc(g, cx, cy, radius, segments, fade, 2.4f, 0xC8E8FF, 1f);
-        drawRingArc(g, cx, cy, Math.max(1f, radius * 0.78f), segments, fade * 0.45f, 1.6f, 0x9FD4FF, 1f);
+    }
+
+    /** 光从左上来：返回 [0.25, 1] 的亮度系数。屏幕 y 向下，所以 sin 项取反。 */
+    private static float waveLight(float cos, float sin) {
+        return Math.max(0.25f, 0.35f + 0.65f * (-0.65f * cos - 0.76f * sin));
     }
 
     /**
-     * 沿圆周画一圈小方块。{@code lightScale} 控制整体亮度，环上的亮度按光方向衰减，
-     * 让环看起来是被折射出来的高光而不是描边。
+     * 画一圈羽化的圆环：中线最亮、内外缘淡到 0，用顶点色插值做抗锯齿，不再是一粒粒方块。
+     * 环上的亮度按光方向衰减，看起来是折射出来的高光而不是描边。
+     * 顶点顺序与 {@link GuiGraphics#fill} 一致（左上→左下→右下→右上），GUI 渲染类型开着背面剔除，不能反。
      */
-    private void drawRingArc(GuiGraphics g, int cx, int cy, float radius, int segments,
-                             float fade, float thickness, int rgb, float lightScale) {
-        int a0 = (int) (fade * 150f * lightScale);
-        if (a0 <= 2) return;
-        int th = Math.max(1, (int) Math.round(thickness));
+    private void drawRingArc(GuiGraphics g, int cx, int cy, float radius, float halfWidth, float alpha, int rgb) {
+        if (alpha <= 0.01f || radius < 1f || halfWidth <= 0f) return;
+        int segments = Math.max(24, Math.min(96, (int) (radius * 1.8f)));
+        float feather = halfWidth * 1.8f;
+        float rIn = Math.max(0f, radius - feather);
+        float rOut = radius + feather;
+        org.joml.Matrix4f mat = g.pose().last().pose();
+        com.mojang.blaze3d.vertex.VertexConsumer vc =
+                g.bufferSource().getBuffer(net.minecraft.client.renderer.RenderType.gui());
+        int r = (rgb >> 16) & 0xFF, gr = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+        float step = (float) (Math.PI * 2.0 / segments);
+        float c0 = 1f, s0 = 0f;
+        float a0 = alpha * waveLight(c0, s0);
+        for (int i = 1; i <= segments; i++) {
+            float ang = step * i;
+            float c1 = (float) Math.cos(ang), s1 = (float) Math.sin(ang);
+            float a1 = alpha * waveLight(c1, s1);
+            // 内缘→中线、中线→外缘各一块四边形；两端 alpha=0，中线取该角度的亮度
+            ringQuad(vc, mat, cx, cy, c0, s0, c1, s1, rIn, 0f, 0f, radius, a0, a1, r, gr, b);
+            ringQuad(vc, mat, cx, cy, c0, s0, c1, s1, radius, a0, a1, rOut, 0f, 0f, r, gr, b);
+            c0 = c1;
+            s0 = s1;
+            a0 = a1;
+        }
+    }
+
+    private static void ringQuad(com.mojang.blaze3d.vertex.VertexConsumer vc, org.joml.Matrix4f mat, int cx, int cy,
+                                 float c0, float s0, float c1, float s1,
+                                 float rA, float aA0, float aA1, float rB, float aB0, float aB1,
+                                 int r, int g, int b) {
+        vertex(vc, mat, cx + c0 * rA, cy + s0 * rA, r, g, b, aA0);
+        vertex(vc, mat, cx + c1 * rA, cy + s1 * rA, r, g, b, aA1);
+        vertex(vc, mat, cx + c1 * rB, cy + s1 * rB, r, g, b, aB1);
+        vertex(vc, mat, cx + c0 * rB, cy + s0 * rB, r, g, b, aB0);
+    }
+
+    private static void vertex(com.mojang.blaze3d.vertex.VertexConsumer vc, org.joml.Matrix4f mat,
+                               float x, float y, int r, int g, int b, float alpha) {
+        vc.vertex(mat, x, y, 0f).color(r, g, b, Math.max(0, Math.min(255, Math.round(alpha * 255f)))).endVertex();
+    }
+
+    /** 柔光圆盘：圆心最亮、边缘淡到 0。每个扇形是一块退化四边形（圆心、边、边、圆心）。 */
+    private void drawSoftDisc(GuiGraphics g, int cx, int cy, float radius, float alpha, int rgb) {
+        if (alpha <= 0.01f || radius < 1f) return;
+        int segments = Math.max(20, Math.min(64, (int) (radius * 1.8f)));
+        org.joml.Matrix4f mat = g.pose().last().pose();
+        com.mojang.blaze3d.vertex.VertexConsumer vc =
+                g.bufferSource().getBuffer(net.minecraft.client.renderer.RenderType.gui());
+        int r = (rgb >> 16) & 0xFF, gr = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+        float step = (float) (Math.PI * 2.0 / segments);
         for (int i = 0; i < segments; i++) {
-            double ang = (Math.PI * 2.0 * i) / segments;
-            // 光从左上来：dot(dir, (-0.65, 0.76))，屏幕 y 向下所以取反
-            double lit = 0.35 + 0.65 * (-0.65 * Math.cos(ang) - 0.76 * Math.sin(ang));
-            int a = (int) (a0 * Math.max(0.12, lit));
-            if (a <= 2) continue;
-            int px = cx + (int) Math.round(Math.cos(ang) * radius);
-            int py = cy + (int) Math.round(Math.sin(ang) * radius);
-            g.fill(px, py, px + th, py + th, (a << 24) | rgb);
+            float ang0 = step * i, ang1 = step * (i + 1);
+            float x0 = cx + (float) Math.cos(ang0) * radius, y0 = cy + (float) Math.sin(ang0) * radius;
+            float x1 = cx + (float) Math.cos(ang1) * radius, y1 = cy + (float) Math.sin(ang1) * radius;
+            vertex(vc, mat, cx, cy, r, gr, b, alpha);
+            vertex(vc, mat, x1, y1, r, gr, b, 0f);
+            vertex(vc, mat, x0, y0, r, gr, b, 0f);
+            vertex(vc, mat, cx, cy, r, gr, b, alpha);
         }
     }
 
