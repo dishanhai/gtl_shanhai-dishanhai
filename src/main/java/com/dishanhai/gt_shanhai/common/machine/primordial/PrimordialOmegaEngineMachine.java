@@ -246,18 +246,27 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
             return moduleLevelCounts;
         }
         long[] counts = new long[MODULE_LEVEL_ARRAY_SIZE];
+        long countMultiplier = Math.max(1, moduleCountMultiplier());
         for (IModularMachineModule<PrimordialOmegaEngineMachine, ?> module : moduleSnapshot) {
             if (!(module instanceof PrimordialOmegaEngineModuleBase mb)) continue;
             int lv = mb.getModuleLevel();
             if (lv <= 0 || lv >= counts.length) continue;
             int stackCount = mb.getModuleCount();
             if (stackCount <= 0) continue;
-            long next = counts[lv] + stackCount;
+            long next = counts[lv] + stackCount * countMultiplier;
             counts[lv] = next < counts[lv] ? Long.MAX_VALUE : next;
         }
         moduleLevelCounts = counts;
         moduleLevelCountsTick = tick;
         return counts;
+    }
+
+    /**
+     * 物質模塊<b>數量</b>那一維的倍率（大等級 1～17 不受影響）。
+     * 原始引擎恆為 1；歸墟按遏制場狀態覆寫（見 {@code GuixuVisionCoreMachine}）。
+     */
+    protected int moduleCountMultiplier() {
+        return 1;
     }
 
     @Override

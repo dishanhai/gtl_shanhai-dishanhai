@@ -149,6 +149,19 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     /** 原始終焉引擎的模組位數（基類 {@code getMaxModuleCount()} 的 16）；鏈接生效時加進本機上限。 */
     private static final int LINKED_ENGINE_MODULE_SLOTS = 16;
 
+    /** 遏制場坍縮後的鎖定時長：60 秒。 */
+    public static final int CONTAINMENT_LOCK_TICKS = 1200;
+
+    /** 坍縮鎖定剩餘 tick。落盤在主機上，拆掉遏制場也清不掉。 */
+    @Persisted
+    private int containmentLockTicks;
+    /** 上一秒生效的遏制場是否處於失穩（用來判定「失穩期間被拆」）。 */
+    private boolean containmentWasUnstable;
+    private TickableSubscription containmentSubs;
+    private long containmentCacheTick = Long.MIN_VALUE;
+    private GuixuPenroseContainmentModule containmentCacheModule;
+    private GuixuContainmentBonus containmentCache = GuixuContainmentBonus.NONE;
+
     @Override
     public GuixuEnergyHandler getWirelessNetworkEnergyHandler() {
         if (guixuEnergy == null) guixuEnergy = new GuixuEnergyHandler(this);
@@ -356,7 +369,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         final java.util.List<String> problems = new java.util.ArrayList<>();
         for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride",
                 "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel",
-                "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos"}) {
+                "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos",
+                "containmentLockTicks"}) {
             if (!names.contains(required)) {
                 problems.add("缺字段 " + required);
             }
@@ -600,6 +614,100 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         }
     }
 
+    // ------------------------------------------------------------------ 歸墟彭羅斯黑洞遏制場
+
+    /** 任意主機的遏制場增益：不是歸墟或未成型 ⇒ {@link GuixuContainmentBonus#NONE}。 */
+    public static GuixuContainmentBonus containmentBonusOf(PrimordialOmegaEngineMachine host) {
+        return host instanceof GuixuVisionCoreMachine guixu && guixu.isFormed()
+                ? guixu.getContainmentBonus() : GuixuContainmentBonus.NONE;
+    }
+
+    public boolean isContainmentLocked() {
+        return containmentLockTicks > 0;
+    }
+
+    public int getContainmentLockSeconds() {
+        return (containmentLockTicks + 19) / 20;
+    }
+
+    /** 開始（或續滿）60 秒鎖定；重複呼叫不會疊加。 */
+    public void startContainmentLock() {
+        if (isRemote() || containmentLockTicks >= CONTAINMENT_LOCK_TICKS) return;
+        containmentLockTicks = CONTAINMENT_LOCK_TICKS;
+        containmentCacheTick = Long.MIN_VALUE;
+        markDirty();
+        LOGGER.info("[SHANHAI-CONTAINMENT] 歸墟 @{} 黑洞坍縮，鎖定 {} 秒", getPos(), CONTAINMENT_LOCK_TICKS / 20);
+    }
+
+    /** 唯一生效的遏制場：已成型、掛在本機名下、座標 {@code asLong()} 最小者；沒有則 null。 */
+    public GuixuPenroseContainmentModule getEffectiveContainment() {
+        refreshContainmentCache();
+        return containmentCacheModule;
+    }
+
+    public GuixuContainmentBonus getContainmentBonus() {
+        refreshContainmentCache();
+        return containmentCache;
+    }
+
+    /** 每 tick 最多重算一次（配方查找會高頻讀取）。 */
+    private void refreshContainmentCache() {
+        long tick = getOffsetTimer();
+        if (containmentCacheTick == tick) return;
+        containmentCacheTick = tick;
+        GuixuPenroseContainmentModule best = null;
+        for (var candidate : getModuleSet()) {
+            if (candidate instanceof GuixuPenroseContainmentModule module && module.isFormed()
+                    && module.getHost() == this
+                    && (best == null || module.getPos().asLong() < best.getPos().asLong())) {
+                best = module;
+            }
+        }
+        containmentCacheModule = best;
+        if (containmentLockTicks > 0) {
+            containmentCache = GuixuContainmentBonus.LOCKED;
+        } else if (best == null) {
+            containmentCache = GuixuContainmentBonus.NONE;
+        } else {
+            containmentCache = GuixuContainmentBonus.of(best.field().status(), best.field().stability());
+        }
+    }
+
+    @Override
+    protected int moduleCountMultiplier() {
+        return getContainmentBonus().matterCountMultiplier();
+    }
+
+    private void subscribeContainment() {
+        containmentSubs = subscribeServerTick(containmentSubs, this::containmentTick);
+    }
+
+    private void cancelContainment() {
+        if (containmentSubs != null) {
+            containmentSubs.unsubscribe();
+            containmentSubs = null;
+        }
+    }
+
+    /** 鎖定倒數每 tick 走；「失穩期間遏制場消失 ⇒ 鎖定」每秒判一次。 */
+    private void containmentTick() {
+        if (containmentLockTicks > 0) {
+            containmentLockTicks--;
+            if (containmentLockTicks == 0) {
+                containmentCacheTick = Long.MIN_VALUE;
+                markDirty();
+                LOGGER.info("[SHANHAI-CONTAINMENT] 歸墟 @{} 鎖定結束", getPos());
+            } else if (containmentLockTicks % 20 == 0) {
+                markDirty();
+            }
+        }
+        if (getOffsetTimer() % 20 != 0) return;
+        GuixuPenroseContainmentModule module = getEffectiveContainment();
+        if (containmentWasUnstable && module == null) startContainmentLock();
+        containmentWasUnstable = module != null
+                && module.field().status() == GuixuContainmentField.Status.UNSTABLE;
+    }
+
     // ------------------------------------------------------------------ 成型日志
 
     /**
@@ -620,6 +728,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         if (!isRemote()) {
             refreshMatterLevelOverride();
             if (hasEngineLink()) subscribeEngineLink();
+            subscribeContainment();
         }
         logModuleSlots();
     }
@@ -628,6 +737,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     public void onUnload() {
         // 本機卸載而被接管的模組還在載入區塊裡：不放回去它們就會一直掛著一台已經不 tick 的主機
         cancelEngineLink();
+        cancelContainment();
         if (!isRemote()) releaseRemoteModules();
         engineLinkReady = false;
         super.onUnload();
@@ -637,6 +747,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     @Override
     public void onStructureInvalid() {
         cancelEngineLink();
+        cancelContainment();
+        containmentWasUnstable = false;
         engineLinkReady = false;
         setHostFormedSync(false);
         operationStateId = GuixuOperationState.IDLE.ordinal();
@@ -743,7 +855,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
 
     /** 本机当前的实际倍率（显示用）。 */
     public int productionMultiplier() {
-        return productionMultiplierOf(moduleSlotBonus(), getHostProductionBonusExtra());
+        int base = productionMultiplierOf(moduleSlotBonus(), getHostProductionBonusExtra());
+        return Ints.saturatedCast((long) base + getContainmentBonus().extraOutput());
     }
 
     // ------------------------------------------------------------------ 始终渲染为工作状态
@@ -823,6 +936,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 .withStyle(ChatFormatting.GRAY));
         textList.add(Component.literal("運作：" + getOperationState().label + "｜工作模組 " + activeModuleCount)
                 .withStyle(ChatFormatting.AQUA));
+        GuixuPenroseContainmentModule containment = getEffectiveContainment();
+        textList.add(Component.literal(GuixuContainmentText.hostSummary(
+                        containment == null ? null : containment.field(), getContainmentLockSeconds()))
+                .withStyle(ChatFormatting.LIGHT_PURPLE));
         if (hasEngineLink()) {
             BlockPos engine = getLinkedEnginePos();
             textList.add(Component.literal("超維度鏈接：" + linkedEngineDim + " [" + engine.getX() + ", "

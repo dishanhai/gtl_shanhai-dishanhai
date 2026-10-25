@@ -212,6 +212,7 @@ public class PrimordialOmegaEngineStructure {
             "primordial_myriad_proliferation_core",
             "primordial_molecular_assembler_module",
             "primordial_universe_simulation_core",
+            "guixu_penrose_containment_field",
         };
         var blocks = new java.util.ArrayList<Block>(ids.length);
         for (String id : ids) {
