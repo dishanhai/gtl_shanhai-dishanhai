@@ -706,7 +706,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         if (getOffsetTimer() % 20 != 0) return;
         GuixuPenroseContainmentModule module = getEffectiveContainment();
         GuixuPenroseContainmentModule last = containmentLastUnstable;
-        if (last != null && module != last && !isContainmentLocked()) {
+        if (last != null && module != last && !last.isInValid() && !isContainmentLocked()) {
             Level lastLevel = last.getLevel();
             // 區塊卸載 ⇒ 凍結，不罰；其餘（被拆、斷開、被換成冗餘）⇒ 視同坍縮
             if (lastLevel != null && lastLevel.hasChunkAt(last.getPos())) {

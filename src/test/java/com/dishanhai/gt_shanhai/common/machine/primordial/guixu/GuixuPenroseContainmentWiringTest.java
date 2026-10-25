@@ -67,6 +67,12 @@ class GuixuPenroseContainmentWiringTest {
         assertTrue(host.contains("hasChunkAt(module.getPos())"), "排除區塊卸載殘留實例");
         assertTrue(host.contains("containmentLastUnstable"));
         assertFalse(host.contains("containmentWasUnstable"));
+        assertTrue(host.contains("!last.isInValid()"), "重載後的舊實例不可誤鎖");
+        assertTrue(module.contains("時空流體實扣不足"), "實扣不足要警告");
+        int warnAt = module.indexOf("時空流體實扣不足");
+        assertTrue(warnAt >= 0 && module.indexOf("return false;", warnAt) > warnAt
+                && module.indexOf("return false;", warnAt) < module.indexOf("return true;", warnAt),
+                "實扣不足要判為未供給");
     }
 
     @Test

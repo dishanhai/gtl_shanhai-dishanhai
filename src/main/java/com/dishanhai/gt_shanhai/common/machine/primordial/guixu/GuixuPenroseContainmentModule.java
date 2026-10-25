@@ -188,6 +188,11 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
             FluidStack drained = tank.drainInternal(FluidStack.create(spacetime, remaining), false);
             remaining -= drained.getAmount();
         }
+        // 兩個 ME 倉接同一 AE 網路時模擬會重複計算；實扣不足就判為未供給（已扣的不退）
+        if (remaining > 0L) {
+            LOGGER.warn("[SHANHAI-CONTAINMENT] 遏制場 @{} 時空流體實扣不足：需 {}，缺 {}", getPos(), need, remaining);
+            return false;
+        }
         return true;
     }
 
