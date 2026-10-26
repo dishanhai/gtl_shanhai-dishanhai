@@ -61,10 +61,15 @@ public final class GuixuVisionCoreStructure {
             {"D", "kubejs:high_strength_concrete"},
             {"E", "gtceu:high_power_casing"},
             {"F", "kubejs:containment_field_generator"},
-            {"G", "gtlcore:power_module_5"},
+            {"G", "gtlcore:power_module_4"},
             {"H", "gtlcore:hyper_mechanical_casing"},
             {"I", "kubejs:restraint_device"},
-            {"J", "kubejs:molecular_coil"},
+            {"J", "gtceu:fusion_glass"},
+            {"N", "gtlcore:molecular_casing"},
+            {"P", "gtlcore:molecular_casing"},
+            {"Q", "gtlcore:molecular_casing"},
+            {"T", "gtceu:bronze_machine_casing"},
+            {"S", "gtceu:industrial_steam_casing"},
     };
 
     /**
@@ -78,6 +83,11 @@ public final class GuixuVisionCoreStructure {
 
     /** 模块槽符号（24 个）。 */
     public static final char MODULE_SLOT = 'M';
+    public static final char MODULE_SLOT_FILLED = 'N';
+    public static final char MODULE_CAVITY_FILLED = 'P';
+    public static final char CAVITY_MOUTH_FILLED = 'Q';
+    public static final char MODULE_SHELL_BRONZE = 'T';
+    public static final char MODULE_SHELL_STEAM = 'S';
     /** 控制器符号（恰好 1 个）。 */
     public static final char CONTROLLER = '~';
 
@@ -94,12 +104,23 @@ public final class GuixuVisionCoreStructure {
                 RelativeDirection.LEFT, RelativeDirection.DOWN, RelativeDirection.BACK);
         for (String[] entry : SYMBOL_BLOCKS) {
             final char symbol = entry[0].charAt(0);
+            if (symbol == MODULE_SLOT_FILLED || symbol == MODULE_CAVITY_FILLED
+                    || symbol == CAVITY_MOUTH_FILLED || symbol == MODULE_SHELL_BRONZE
+                    || symbol == MODULE_SHELL_STEAM) continue;
             // 'A' 是唯一的倉室貼附點：分子機械方塊允許被能源倉／動力倉替換。
             pattern.where(symbol, symbol == RING_BAND
                     ? ringBandPredicate()
                     : Predicates.blocks(requireBlock(entry[1])));
         }
         pattern.where(MODULE_SLOT, moduleSlotPredicate());
+        pattern.where(MODULE_SLOT_FILLED, filledModuleSlotPredicate());
+        // 來源新增的模組腔體與外殼只提供預覽；實際模組獨立檢查自己的結構。
+        pattern.where(MODULE_CAVITY_FILLED, Predicates.air().or(Predicates.any()));
+        pattern.where(CAVITY_MOUTH_FILLED, Predicates.blocks(appearanceBlock()).or(Predicates.any()));
+        pattern.where(MODULE_SHELL_BRONZE,
+                Predicates.blocks(requireBlock("gtceu:bronze_machine_casing")).or(Predicates.any()));
+        pattern.where(MODULE_SHELL_STEAM,
+                Predicates.blocks(requireBlock("gtceu:industrial_steam_casing")).or(Predicates.any()));
         pattern.where(CONTROLLER, Predicates.controller(Predicates.blocks(definition.getBlock())));
         return pattern.build();
     }
@@ -144,13 +165,22 @@ public final class GuixuVisionCoreStructure {
      * 绝不放行成"谓词只认空气"那种静默失败）。
      */
     public static TraceabilityPredicate moduleSlotPredicate() {
+        return moduleSlotPredicate(false);
+    }
+
+    public static TraceabilityPredicate filledModuleSlotPredicate() {
+        return moduleSlotPredicate(true);
+    }
+
+    private static TraceabilityPredicate moduleSlotPredicate(boolean filled) {
         final java.util.List<Block> moduleBlocks = PrimordialOmegaEngineStructure.allModuleBlocks();
         if (moduleBlocks.isEmpty()) {
             throw new IllegalStateException("[SHANHAI-HOST] 模块方块表为空，拒绝生成 M 谓词："
                     + "那会让装了模块的主机结构恒不成型，且不抛异常、不打日志。"
                     + "請確認 DShanhaiMachines 的模組註冊已完成。");
         }
-        TraceabilityPredicate predicate = Predicates.air();
+        TraceabilityPredicate casing = Predicates.blocks(appearanceBlock());
+        TraceabilityPredicate predicate = filled ? casing.or(Predicates.air()) : Predicates.air().or(casing);
         for (Block block : moduleBlocks) {
             predicate = predicate.or(Predicates.blocks(block));
         }

@@ -23,6 +23,7 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineM
 import com.gtladd.gtladditions.api.machine.gui.LimitedDurationConfigurator;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
 import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.RecipeHelper;
 import com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe;
@@ -53,7 +54,7 @@ import java.util.IdentityHashMap;
 /**
  * 山海：由 Integrate/acb081f 移植的歸墟視界樞核。
  * 沿用 master 的原初主機與多配方引擎，提供 24 個模組位、獨立等級覆寫槽、
- * 門控增產額外 +5、同款能源減免，以及獨立的動態環帶和黑洞渲染。
+ * 常駐增產額外 +5、同款能源減免，以及獨立的動態環帶和黑洞渲染。
  * 原始實作：shanhai-rewrite/com/shanhai/machine/host。
  */
 public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
@@ -61,11 +62,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     private static final Logger LOGGER = LogUtils.getLogger();
 
     /**
-     * 材料增产的<b>额外</b>倍率：在原始终焉引擎那套（{@code 1 + 物质模块槽等级}）之上再加 5。
-     *
-     * <p>只加在"门控已生效"（等级 ≥ 1）的情况：门控未生效时倍率仍是 1
-     * （空槽主机白得 6 倍产出不是"沿用那套 + 5"）。若以后要改成"永远 +5"，
-     * 倍率由 {@link #productionMultiplierOf(int, int)} 統一計算。
+     * 山海：歸墟常駐額外 +5；空槽 ×6，物質模組 Lv.17 時 ×23。
+     * 物質模組槽只決定等級部分，耗能減免仍沿用原門控。
      */
     public static final int PRODUCTION_BONUS_EXTRA = 5;
 
@@ -127,6 +125,968 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     @DescSynced
     private boolean hostFormedSync = false;
 
+    public static final int HOST_RING_DEG_MIN = 1;
+
+    public static final int HOST_RING_DEG_MAX = 60;
+
+    public static final int HOST_RING_DEG_DEFAULT = 12;
+
+    public static final int HOST_SHIP_DEG_MIN = 0;
+
+    public static final int HOST_SHIP_DEG_MAX = 60;
+
+    public static final int HOST_SHIP_UP_DEG_DEFAULT = 9;
+
+    public static final int HOST_SHIP_DOWN_DEG_DEFAULT = 9;
+
+    public static final int HOST_HOLE_RADIUS_TENTHS_MIN = 10;
+
+    public static final int HOST_HOLE_RADIUS_TENTHS_MAX = 120;
+
+    public static final int HOST_HOLE_RADIUS_TENTHS_DEFAULT = 52;
+
+    @Persisted
+    @DescSynced
+    private boolean hostFxEnabled = true;
+
+    @Persisted
+    @DescSynced
+    private int hostRingDegPerSec = HOST_RING_DEG_DEFAULT;
+
+    @Persisted
+    @DescSynced
+    private int hostShipUpDegPerSec = HOST_SHIP_UP_DEG_DEFAULT;
+
+    @Persisted
+    @DescSynced
+    private int hostShipDownDegPerSec = HOST_SHIP_DOWN_DEG_DEFAULT;
+
+    @Persisted
+    @DescSynced
+    private int hostBlackHoleRadiusTenths = HOST_HOLE_RADIUS_TENTHS_DEFAULT;
+
+    @Persisted
+    @DescSynced
+    private boolean hostLensEnabled = true;
+
+    @Persisted
+    @DescSynced
+    private boolean hostArMaskEnabled = true;
+
+    @DescSynced
+    private long hostModuleMask = 0L;
+
+    @DescSynced
+    private byte[] hostModProgressPct = sentinelBytes(SNAP_SLOTS);
+
+    @DescSynced
+    private long[] hostModEuPerTick = sentinelLongs(SNAP_SLOTS);
+
+    @DescSynced
+    private int[] hostModParallel = sentinelInts(SNAP_SLOTS);
+
+    @DescSynced
+    private int[] hostModThreads = sentinelInts(SNAP_SLOTS);
+
+    @DescSynced
+    private int[] hostModRemainSec = sentinelInts(SNAP_SLOTS);
+
+    @DescSynced
+    private int hostSnapSeq = 0;
+
+    @DescSynced
+    private int hostRecipeProgressPct = -1;
+
+    @DescSynced
+    private int hostRecipeRemainSec = -1;
+
+    @DescSynced
+    private int hostRecipeParallel = -1;
+
+    @DescSynced
+    private int hostRecipeThreads = -1;
+
+    @DescSynced
+    private long hostEuPerTick = -1L;
+
+    @DescSynced
+    private long hostTotalOutputCount = -1L;
+
+    @DescSynced
+    private int hostTotalOutputKinds = -1;
+
+    @DescSynced
+    private long hostTotalEuUsedPerTick = -1L;
+
+    @DescSynced
+    private long hostTotalEuGenPerTick = -1L;
+    /** 山海：全部已載入掛接模組的當前耗能，包含跨維度接管；-1 表示有讀數未知。 */
+    @DescSynced
+    private long hostModuleEuPerTick = -1L;
+
+    @DescSynced
+    private int hostInstalledModules = -1;
+
+    @DescSynced
+    private int[] hostModOutCount = sentinelInts(SNAP_SLOTS);
+
+    @DescSynced
+    private int[] hostModOutItem = sentinelInts(SNAP_SLOTS * OUT_PER_MODULE);
+
+    @DescSynced
+    private int[] hostModOutAmount = sentinelInts(SNAP_SLOTS * OUT_PER_MODULE);
+
+    @DescSynced
+    private int[] hostOutItem = sentinelInts(HOST_OUT_MAX);
+
+    @DescSynced
+    private int[] hostOutAmount = sentinelInts(HOST_OUT_MAX);
+
+    @DescSynced
+    private int hostOutKinds = -1;
+
+    @DescSynced
+    private long hostEnergyInStored = -1L;
+
+    @DescSynced
+    private long hostEnergyInCapacity = -1L;
+
+    @DescSynced
+    private long hostEnergyOutStored = -1L;
+
+    @DescSynced
+    private long hostEnergyOutCapacity = -1L;
+
+    private com.gregtechceu.gtceu.api.machine.TickableSubscription snapTick;
+
+    private long snapTickCalls = 0L;
+
+    private long snapRefreshCalls = 0L;
+
+    private long snapProgressPushes = 0L;
+
+    private long snapLogCount = 0L;
+
+    private boolean snapErrorLogged = false;
+
+    private final BigInteger[] powerInRing = new BigInteger[2];
+
+    private final BigInteger[] powerOutRing = new BigInteger[2];
+
+    private int powerRingFill = 0;
+
+    public static final int SNAP_SLOTS = 24;
+
+    public static final int OUT_PER_MODULE = 2;
+
+    public static final int HOST_OUT_MAX = 3;
+
+    public static final int SNAPSHOT_INTERVAL_TICKS = 10;
+
+    public static final int POWER_WINDOW_TICKS = 20;
+
+    static int[] sentinelInts(int n) {
+        final int[] a = new int[n];
+        java.util.Arrays.fill(a, -1);
+        return a;
+    }
+
+    static long[] sentinelLongs(int n) {
+        final long[] a = new long[n];
+        java.util.Arrays.fill(a, -1L);
+        return a;
+    }
+
+    static byte[] sentinelBytes(int n) {
+        final byte[] a = new byte[n];
+        java.util.Arrays.fill(a, (byte) -1);
+        return a;
+    }
+
+    public boolean isHostFxEnabled() {
+        return hostFxEnabled;
+    }
+
+    public void setHostFxEnabled(boolean value) {
+        if (hostFxEnabled == value) {
+            return;
+        }
+        hostFxEnabled = value;
+        pushHostFxSync();
+    }
+
+    public int getHostRingDegPerSec() {
+        return hostRingDegPerSec;
+    }
+
+    public void setHostRingDegPerSec(int degPerSec) {
+        final int v = clampInt(degPerSec, HOST_RING_DEG_MIN, HOST_RING_DEG_MAX);
+        if (hostRingDegPerSec == v) {
+            return;
+        }
+        hostRingDegPerSec = v;
+        pushHostFxSync();
+    }
+
+    public int getHostShipUpDegPerSec() {
+        return hostShipUpDegPerSec;
+    }
+
+    public void setHostShipUpDegPerSec(int degPerSec) {
+        final int v = clampInt(degPerSec, HOST_SHIP_DEG_MIN, HOST_SHIP_DEG_MAX);
+        if (hostShipUpDegPerSec == v) {
+            return;
+        }
+        hostShipUpDegPerSec = v;
+        pushHostFxSync();
+    }
+
+    public int getHostShipDownDegPerSec() {
+        return hostShipDownDegPerSec;
+    }
+
+    public void setHostShipDownDegPerSec(int degPerSec) {
+        final int v = clampInt(degPerSec, HOST_SHIP_DEG_MIN, HOST_SHIP_DEG_MAX);
+        if (hostShipDownDegPerSec == v) {
+            return;
+        }
+        hostShipDownDegPerSec = v;
+        pushHostFxSync();
+    }
+
+    public int getHostBlackHoleRadiusTenths() {
+        return hostBlackHoleRadiusTenths;
+    }
+
+    public float getHostBlackHoleRadiusBlocks() {
+        return hostBlackHoleRadiusTenths / 10.0F;
+    }
+
+    public void setHostBlackHoleRadiusTenths(int tenths) {
+        final int v = clampInt(tenths, HOST_HOLE_RADIUS_TENTHS_MIN, HOST_HOLE_RADIUS_TENTHS_MAX);
+        if (hostBlackHoleRadiusTenths == v) {
+            return;
+        }
+        hostBlackHoleRadiusTenths = v;
+        pushHostFxSync();
+    }
+
+    public boolean isHostLensEnabled() {
+        return hostLensEnabled;
+    }
+
+    public boolean isHostArMaskEnabled() {
+        return hostArMaskEnabled;
+    }
+
+    public void setHostArMaskEnabled(boolean value) {
+        if (hostArMaskEnabled == value) {
+            return;
+        }
+        hostArMaskEnabled = value;
+        pushHostFxSync();
+    }
+
+    public long hostModuleMask() {
+        return hostModuleMask;
+    }
+
+    public int hostModuleCountAuthoritative() {
+        return isRemote() ? hostInstalledModules : getFormedModuleCount();
+    }
+
+    private void refreshModuleMask() {
+        if (isRemote()) {
+            return;
+        }
+
+        ensureSnapshotTick();
+        final Level level = getLevel();
+        long mask = 0L;
+        if (level != null && isFormed()) {
+            final BlockPos[] positions = getModuleScanPositions();
+            for (int i = 0; i < positions.length && i < Long.SIZE; i++) {
+                final MetaMachine machine = snapshotModuleAt(level, positions[i]);
+                if (machine instanceof IModularMachineModule<?, ?> module
+                        && module.isFormed() && module.getHost() == this) {
+                    mask |= 1L << i;
+                }
+            }
+        }
+        if (mask == hostModuleMask) {
+            return;
+        }
+        hostModuleMask = mask;
+        notifyBlockUpdate();
+    }
+
+    public void setHostLensEnabled(boolean value) {
+        if (hostLensEnabled == value) {
+            return;
+        }
+        hostLensEnabled = value;
+        pushHostFxSync();
+    }
+
+    private void pushHostFxSync() {
+        if (!isRemote()) {
+            notifyBlockUpdate();
+        }
+    }
+
+    public int hostSnapSeq() {
+        return hostSnapSeq;
+    }
+
+    public byte[] hostModProgressPct() {
+        return hostModProgressPct;
+    }
+
+    public long[] hostModEuPerTick() {
+        return hostModEuPerTick;
+    }
+
+    public int[] hostModParallel() {
+        return hostModParallel;
+    }
+
+    public int[] hostModThreads() {
+        return hostModThreads;
+    }
+
+    public int[] hostModRemainSec() {
+        return hostModRemainSec;
+    }
+
+    public int hostRecipeProgressPct() {
+        return hostRecipeProgressPct;
+    }
+
+    public int hostRecipeRemainSec() {
+        return hostRecipeRemainSec;
+    }
+
+    public int hostRecipeParallel() {
+        return hostRecipeParallel;
+    }
+
+    public int hostRecipeThreads() {
+        return hostRecipeThreads;
+    }
+
+    public long hostEuPerTick() {
+        return hostEuPerTick;
+    }
+
+    public long hostTotalOutputCount() {
+        return hostTotalOutputCount;
+    }
+
+    public int hostTotalOutputKinds() {
+        return hostTotalOutputKinds;
+    }
+
+    public long hostTotalEuUsedPerTick() {
+        return hostTotalEuUsedPerTick;
+    }
+
+    public long hostTotalEuGenPerTick() {
+        return hostTotalEuGenPerTick;
+    }
+
+    public long hostModuleEuPerTick() {
+        return hostModuleEuPerTick;
+    }
+
+    public int hostInstalledModules() {
+        return hostInstalledModules;
+    }
+
+    public int[] hostModOutCount() {
+        return hostModOutCount;
+    }
+
+    public int[] hostModOutItem() {
+        return hostModOutItem;
+    }
+
+    public int[] hostModOutAmount() {
+        return hostModOutAmount;
+    }
+
+    public int[] hostOutItem() {
+        return hostOutItem;
+    }
+
+    public int[] hostOutAmount() {
+        return hostOutAmount;
+    }
+
+    public int hostOutKinds() {
+        return hostOutKinds;
+    }
+
+    public long hostEnergyInStored() {
+        return hostEnergyInStored;
+    }
+
+    public long hostEnergyInCapacity() {
+        return hostEnergyInCapacity;
+    }
+
+    public long hostEnergyOutStored() {
+        return hostEnergyOutStored;
+    }
+
+    public long hostEnergyOutCapacity() {
+        return hostEnergyOutCapacity;
+    }
+
+    public void refreshHostRuntimeSnapshot() {
+        if (isRemote()) {
+            return;
+        }
+        snapRefreshCalls++;
+        boolean failed = false;
+        Throwable failure = null;
+        try {
+            refreshHostRuntimeSnapshot$body();
+        } catch (Throwable t) {
+            failed = true;
+            failure = t;
+            if (!snapErrorLogged) {
+                snapErrorLogged = true;
+                LOGGER.warn("[SHANHAI-HOSTSNAP] 第 {} 次快照讀取失敗；保留上一份有效快照（本訊息只記一次）",
+                        snapRefreshCalls, t);
+            }
+        }
+        snapLogCount++;
+
+        if (snapLogCount <= 3 || snapLogCount % 40 == 0) {
+            LOGGER.info("[SHANHAI-HOSTSNAP] seq={} refresh#{} progress#{} tick#{} formed={} modules={}"
+                            + " (installed={}) energyIn={} EU/t energyOut={} EU/t failed={}{}",
+                    hostSnapSeq, snapRefreshCalls, snapProgressPushes, snapTickCalls, isFormed(),
+                    getFormedModuleCount(), hostInstalledModules,
+                    hostTotalEuUsedPerTick, hostTotalEuGenPerTick, failed,
+                    failed ? (" err=" + (failure == null ? "?" : failure.getClass().getSimpleName())) : "");
+        }
+    }
+
+    private void refreshHostRuntimeSnapshot$body() {
+        refreshModuleMask();
+        final Level level = getLevel();
+        final BlockPos[] positions = level == null ? new BlockPos[0] : getModuleScanPositions();
+
+        final byte[] pct = sentinelBytes(SNAP_SLOTS);
+        final long[] eu = sentinelLongs(SNAP_SLOTS);
+        final int[] par = sentinelInts(SNAP_SLOTS);
+        final int[] thr = sentinelInts(SNAP_SLOTS);
+        final int[] rem = sentinelInts(SNAP_SLOTS);
+        final int[] outCount = sentinelInts(SNAP_SLOTS);
+        final int[] outItem = sentinelInts(SNAP_SLOTS * OUT_PER_MODULE);
+        final int[] outAmount = sentinelInts(SNAP_SLOTS * OUT_PER_MODULE);
+
+        long outEntries = 0L;
+        final java.util.LinkedHashMap<Integer, Integer> hostOut = new java.util.LinkedHashMap<>();
+        final java.util.HashSet<Integer> kinds = new java.util.HashSet<>();
+
+        if (level != null) {
+            for (int i = 0; i < SNAP_SLOTS && i < positions.length; i++) {
+                final MetaMachine machine = snapshotModuleAt(level, positions[i]);
+                if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
+                    continue;                                  // 空槽 / 不是模块 ⇒ 整行留 -1
+                }
+                if (!module.isFormed() || module.getHost() != this) {
+                    continue;                                  // 没连上本机 ⇒ 也留 -1
+                }
+                final ModuleReading reading = readModule(module);
+                applyReading(i, reading, pct, eu, par, thr, rem, outCount, outItem, outAmount);
+            }
+        }
+
+        // 山海：摘要包含主機與跨維度接管模組；兩條可見輸出不應截斷總數。
+        outEntries = collectSnapshotOutputs(getRecipeLogic(), hostOut, kinds);
+        List<BigInteger> moduleEuRates = new ArrayList<>();
+        for (var candidate : getModuleSet()) {
+            if (!(candidate instanceof PrimordialOmegaEngineModuleBase module)
+                    || module.getHost() != this || !module.isFormed()
+                    || !snapshotChunkLoaded(module.getLevel(), module.getPos(), Level::hasChunkAt)) continue;
+            moduleEuRates.add(snapshotModuleSignedEu(module));
+            try {
+                outEntries = saturatedAdd(outEntries, collectSnapshotOutputs(module.getRecipeLogic(), hostOut, kinds));
+            } catch (RuntimeException ignored) {
+                // 山海：單台模組輸出暫不可讀，不應阻止未知耗能 (-1) 的權威快照下發。
+            }
+        }
+        long moduleEuTotal = snapshotModuleEuTotal(moduleEuRates.toArray(BigInteger[]::new));
+
+        int hostPct = -1;
+        int hostRemain = -1;
+        int hostParallel = -1;
+        long hostEu = -1L;
+        try {
+            final com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic = getRecipeLogic();
+            if (logic != null) {
+
+                final int[] pr = progressOf(logic.getProgress(), logic.getMaxProgress(), logic.isWorking());
+                hostPct = pr[0];
+                hostRemain = pr[1];
+                final GTRecipe last = logic.getLastRecipe();
+                if (last != null) {
+                    hostEu = logic.isWorking() ? snapshotLong(snapshotSignedEuPerTick(last).max(BigInteger.ZERO)) : 0L;
+                    if (last.data.contains("sh_guixu_parallel_budget")) {
+                        hostParallel = Ints.saturatedCast(last.data.getLong("sh_guixu_parallel_budget"));
+                    }
+                } else {
+                    hostEu = logic.isWorking() ? -1L : 0L;
+                }
+            }
+        } catch (Throwable ignored) {
+            hostPct = -1;
+            hostRemain = -1;
+            hostEu = -1L;
+        }
+
+        final BigInteger rateInPer20 = sumEnergyRatePer20(IO.IN, true);
+        final BigInteger rateOutPer20 = sumEnergyRatePer20(IO.OUT, false);
+        powerInRing[1] = powerInRing[0];
+        powerInRing[0] = rateInPer20;
+        powerOutRing[1] = powerOutRing[0];
+        powerOutRing[0] = rateOutPer20;
+        if (powerRingFill < 2) {
+            powerRingFill++;
+        }
+        final long euUsedPower = averagePerTick(powerInRing, powerRingFill);
+        final long euGenPower = averagePerTick(powerOutRing, powerRingFill);
+
+        final BigInteger[] in = energyTotals(IO.IN);
+        final BigInteger[] out = energyTotals(IO.OUT);
+
+        final int[] hostOutIds = sentinelInts(HOST_OUT_MAX);
+        final int[] hostOutAmounts = sentinelInts(HOST_OUT_MAX);
+        int hostIdx = 0;
+        for (java.util.Map.Entry<Integer, Integer> e : hostOut.entrySet()) {
+            if (hostIdx >= HOST_OUT_MAX) {
+                break;
+            }
+            hostOutIds[hostIdx] = e.getKey();
+            hostOutAmounts[hostIdx] = e.getValue();
+            hostIdx++;
+        }
+
+        final int installedNow = hostModuleCountAuthoritative();
+        final int kindsNow = kinds.size();
+        final boolean changed =
+                installedNow != hostInstalledModules
+                        || hostParallel != hostRecipeParallel
+                        || hostPct != hostRecipeProgressPct
+                        || hostRemain != hostRecipeRemainSec
+                        || hostEu != hostEuPerTick
+                        || kindsNow != hostOutKinds
+                        || outEntries != hostTotalOutputCount
+                        || euUsedPower != hostTotalEuUsedPerTick
+                        || euGenPower != hostTotalEuGenPerTick
+                        || moduleEuTotal != hostModuleEuPerTick
+                        || snapshotLong(in[0]) != hostEnergyInStored || snapshotLong(in[1]) != hostEnergyInCapacity
+                        || snapshotLong(out[0]) != hostEnergyOutStored || snapshotLong(out[1]) != hostEnergyOutCapacity
+                        || !java.util.Arrays.equals(pct, hostModProgressPct)
+                        || !java.util.Arrays.equals(eu, hostModEuPerTick)
+                        || !java.util.Arrays.equals(par, hostModParallel)
+                        || !java.util.Arrays.equals(thr, hostModThreads)
+                        || !java.util.Arrays.equals(rem, hostModRemainSec)
+                        || !java.util.Arrays.equals(outCount, hostModOutCount)
+                        || !java.util.Arrays.equals(outItem, hostModOutItem)
+                        || !java.util.Arrays.equals(outAmount, hostModOutAmount)
+                        || !java.util.Arrays.equals(hostOutIds, hostOutItem)
+                        || !java.util.Arrays.equals(hostOutAmounts, hostOutAmount);
+        if (!changed) {
+            return;
+        }
+
+        hostInstalledModules = installedNow;
+        hostRecipeProgressPct = hostPct;
+        hostRecipeRemainSec = hostRemain;
+        hostEuPerTick = hostEu;
+
+        hostRecipeParallel = hostParallel;
+        hostRecipeThreads = -1;
+        hostOutKinds = kindsNow;
+        hostTotalOutputKinds = kindsNow;
+        hostTotalOutputCount = outEntries;
+        hostTotalEuUsedPerTick = euUsedPower;
+        hostTotalEuGenPerTick = euGenPower;
+        hostModuleEuPerTick = moduleEuTotal;
+        hostEnergyInStored = snapshotLong(in[0]);
+        hostEnergyInCapacity = snapshotLong(in[1]);
+        hostEnergyOutStored = snapshotLong(out[0]);
+        hostEnergyOutCapacity = snapshotLong(out[1]);
+        hostModProgressPct = pct;
+        hostModEuPerTick = eu;
+        hostModParallel = par;
+        hostModThreads = thr;
+        hostModRemainSec = rem;
+        hostModOutCount = outCount;
+        hostModOutItem = outItem;
+        hostModOutAmount = outAmount;
+        hostOutItem = hostOutIds;
+        hostOutAmount = hostOutAmounts;
+        hostSnapSeq++;
+    }
+
+    private BigInteger sumEnergyRatePer20(IO io, boolean input) {
+        try {
+            List<IEnergyContainer> containers = getGuixuEnergyContainers(io);
+            if (containers.isEmpty()) return BigInteger.valueOf(-1L);
+            BigInteger sum = BigInteger.ZERO;
+            for (IEnergyContainer container : containers) {
+                long value = snapshotEnergyRatePer20(container, input);
+                if (value < 0L) return BigInteger.valueOf(-1L);
+                sum = sum.add(BigInteger.valueOf(value));
+            }
+            return sum;
+        } catch (RuntimeException ignored) {
+            return BigInteger.valueOf(-1L);
+        }
+    }
+
+    /** 山海：耗能是從輸入倉取走；發電是存入輸出倉，與外部充電／外送相反。 */
+    static long snapshotEnergyRatePer20(IEnergyContainer container, boolean consumption) {
+        return consumption ? container.getOutputPerSec() : container.getInputPerSec();
+    }
+
+    static <L> boolean snapshotChunkLoaded(L moduleLevel, BlockPos pos,
+            java.util.function.BiPredicate<L, BlockPos> loaded) {
+        return moduleLevel != null && loaded.test(moduleLevel, pos);
+    }
+
+    /** 正耗能、負發電；任何有效模組讀數未知則整體未知，空集合是真實零值。 */
+    static long snapshotModuleEuTotal(BigInteger[] signedRates) {
+        BigInteger sum = BigInteger.ZERO;
+        for (BigInteger rate : signedRates) {
+            if (rate == null) return -1L;
+            sum = sum.add(rate.max(BigInteger.ZERO));
+        }
+        return snapshotLong(sum);
+    }
+
+    private static BigInteger snapshotModuleSignedEu(PrimordialOmegaEngineModuleBase module) {
+        try {
+            RecipeLogic logic = module.getRecipeLogic();
+            if (logic == null) return null;
+            if (!logic.isWorking()) return BigInteger.ZERO;
+            GTRecipe recipe = logic.getLastRecipe();
+            if (recipe == null) return null;
+            if (recipe instanceof IWirelessGTRecipe wireless && wireless.getWirelessEuTickInputs() == null) return null;
+            return snapshotSignedEuPerTick(recipe);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    static long averagePerTick(long[] ring, int fill) {
+        BigInteger[] samples = new BigInteger[ring.length];
+        for (int i = 0; i < ring.length; i++) samples[i] = BigInteger.valueOf(ring[i]);
+        return averagePerTick(samples, fill);
+    }
+
+    static long averagePerTick(BigInteger[] ring, int fill) {
+        if (fill <= 0 || fill > ring.length) return -1L;
+        BigInteger sum = BigInteger.ZERO;
+        for (int i = 0; i < fill; i++) {
+            if (ring[i] == null || ring[i].signum() < 0) return -1L;
+            sum = sum.add(ring[i]);
+        }
+        return snapshotLong(sum.divide(BigInteger.valueOf((long) fill * POWER_WINDOW_TICKS)));
+    }
+
+    static final class ModuleReading {
+
+        int progressPct = -1;
+        long euPerTick = -1L;
+        long genPerTick = -1L;
+        int parallel = -1;
+        int threads = -1;
+        int remainSec = -1;
+        final int[] outItem = sentinelInts(OUT_PER_MODULE);
+        final int[] outAmount = sentinelInts(OUT_PER_MODULE);
+
+        ModuleReading noOutputs() {
+            for (int k = 0; k < OUT_PER_MODULE; k++) {
+                outItem[k] = -1;
+                outAmount[k] = -1;
+            }
+            return this;
+        }
+    }
+
+    static void applyReading(int slot, ModuleReading r,
+                             byte[] pct, long[] eu, int[] par, int[] thr, int[] rem,
+                             int[] outCount, int[] outItem, int[] outAmount) {
+        if (slot < 0 || slot >= SNAP_SLOTS) {
+            return;
+        }
+        final boolean known = r != null;
+        pct[slot] = (byte) (known ? clampPct(r.progressPct) : -1);
+        eu[slot] = known ? r.euPerTick : -1L;
+        par[slot] = known ? r.parallel : -1;
+        thr[slot] = known ? r.threads : -1;
+        rem[slot] = known ? r.remainSec : -1;
+        int count = 0;
+        for (int k = 0; k < OUT_PER_MODULE; k++) {
+            final int idx = slot * OUT_PER_MODULE + k;
+            final int id = known ? r.outItem[k] : -1;
+            final int amount = known ? r.outAmount[k] : -1;
+            final boolean valid = id >= 0 && amount > 0;
+            outItem[idx] = valid ? id : -1;
+            outAmount[idx] = valid ? amount : -1;
+            if (valid) {
+                count++;
+            }
+        }
+        outCount[slot] = known ? count : -1;
+    }
+
+    static int clampPct(int pct) {
+        if (pct < 0) {
+            return -1;
+        }
+        return Math.min(100, pct);
+    }
+
+    static ModuleReading readModule(PrimordialOmegaEngineModuleBase module) {
+        final ModuleReading r = new ModuleReading();
+        try {
+            final com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic = module.getRecipeLogic();
+            if (logic == null) {
+                return r;
+            }
+            final boolean working = logic.isWorking();
+
+            final int[] pr = progressOf(logic.getProgress(), logic.getMaxProgress(), working);
+            r.progressPct = pr[0];                    // −1 = 未知；0..100 = 真读数
+            r.remainSec = pr[1];
+            final GTRecipe last = logic.getLastRecipe();
+            if (last != null) {
+
+                r.euPerTick = working ? snapshotLong(snapshotSignedEuPerTick(last).max(BigInteger.ZERO)) : 0L;
+                r.genPerTick = working ? snapshotLong(snapshotSignedEuPerTick(last).negate().max(BigInteger.ZERO)) : 0L;
+                final java.util.List<ItemStack> outs =
+                        com.gregtechceu.gtceu.api.recipe.RecipeHelper.getOutputItems(last);
+                if (outs != null) {
+                    int k = 0;
+                    for (ItemStack stack : outs) {
+                        if (k >= OUT_PER_MODULE) {
+                            break;
+                        }
+                        if (stack == null || stack.isEmpty()) {
+                            continue;
+                        }
+                        final int id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getId(
+                                stack.getItem());
+                        if (id < 0) {
+                            continue;
+                        }
+                        r.outItem[k] = id;
+                        r.outAmount[k] = stack.getCount();
+                        k++;
+                    }
+                }
+            } else {
+
+                r.euPerTick = working ? -1L : 0L;
+                r.genPerTick = working ? -1L : 0L;
+            }
+            r.parallel = -1; // 上限不能冒充本批實際並行。
+            r.threads = Ints.saturatedCast(module.getRecipeLogicThreadMultiplier());
+        } catch (Throwable ignored) {
+            return new ModuleReading();                        // 全 -1
+        }
+        return r;
+    }
+
+
+
+    private void ensureSnapshotTick() {
+        if (isRemote() || snapTick != null || !(getLevel() instanceof net.minecraft.server.level.ServerLevel)) {
+            return;
+        }
+        snapTick = subscribeServerTick(this::shanhai$snapshotTick);
+        if (snapTick == null) {
+
+            LOGGER.warn("[SHANHAI-HOSTSNAP] subscribeServerTick returned null @{} —— 快照不会跑",
+                    getPos());
+        }
+    }
+
+    private void shanhai$snapshotTick() {
+        if (isRemote()) {
+            return;
+        }
+        snapTickCalls++;
+
+        refreshProgressTick();
+        if (getOffsetTimer() % SNAPSHOT_INTERVAL_TICKS != 0L) {
+            return;
+        }
+        refreshHostRuntimeSnapshot();
+    }
+
+    private static final int[] PROGRESS_UNKNOWN = {-1, -1};
+
+    private static final int[] PROGRESS_ZERO = {0, 0};
+
+    static int[] progressOf(int progress, int maxProgress, boolean working) {
+        if (maxProgress > 0) {
+            final int pct = (int) Math.max(0L, Math.min(100L, (long) progress * 100L / maxProgress));
+            return new int[]{pct, (int) Math.max(0L, ((long) maxProgress - progress + 19L) / 20L)};
+        }
+
+        return working ? PROGRESS_UNKNOWN : PROGRESS_ZERO;
+    }
+
+    private void refreshProgressTick() {
+        final Level level = getLevel();
+        if (level == null) {
+            return;
+        }
+        boolean changed = false;
+
+        try {
+            final com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic = getRecipeLogic();
+            if (logic != null) {
+                final int[] pr = progressOf(logic.getProgress(), logic.getMaxProgress(), logic.isWorking());
+                if (pr[0] != hostRecipeProgressPct) {
+                    hostRecipeProgressPct = pr[0];
+                    changed = true;
+                }
+                if (pr[1] != hostRecipeRemainSec) {
+                    hostRecipeRemainSec = pr[1];
+                    changed = true;
+                }
+            }
+        } catch (Throwable ignored) {
+
+        }
+
+        final long mask = hostModuleMask;
+        if (mask != 0L) {
+            final BlockPos[] positions = getModuleScanPositions();
+            byte[] pct = null;                       // 懒复制：真变了才换新数组
+            int[] rem = null;
+            for (int i = 0; i < SNAP_SLOTS && i < positions.length; i++) {
+                if ((mask & (1L << i)) == 0L) {
+                    continue;                        // 空槽：保持 -1（由完整快照维护，本来就是 -1）
+                }
+                final int[] pr = slotProgressAt(level, positions[i]);
+                final int p = clampPct(pr[0]);        // -1 保持 -1；0..100 原样
+                if (p == hostModProgressPct[i] && pr[1] == hostModRemainSec[i]) {
+                    continue;
+                }
+                if (pct == null) {
+                    pct = hostModProgressPct.clone();
+                    rem = hostModRemainSec.clone();
+                }
+                pct[i] = (byte) p;
+                rem[i] = pr[1];
+                changed = true;
+            }
+            if (pct != null && rem != null) {
+                hostModProgressPct = pct;
+                hostModRemainSec = rem;
+            }
+        }
+
+        if (!changed) {
+            return;                                  // 空转：一个字节都不发
+        }
+        hostSnapSeq++;
+        snapProgressPushes++;
+    }
+
+    private int[] slotProgressAt(Level level, BlockPos pos) {
+        try {
+            final MetaMachine machine = snapshotModuleAt(level, pos);
+            if (machine instanceof PrimordialOmegaEngineModuleBase module
+                    && module.isFormed() && module.getHost() == this) {
+                return moduleProgressOf(module);
+            }
+        } catch (Throwable ignored) {
+
+        }
+        return PROGRESS_UNKNOWN;
+    }
+
+    static int[] moduleProgressOf(PrimordialOmegaEngineModuleBase module) {
+        try {
+            final com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic = module.getRecipeLogic();
+            if (logic == null) {
+                return PROGRESS_UNKNOWN;
+            }
+            return progressOf(logic.getProgress(), logic.getMaxProgress(), logic.isWorking());
+        } catch (Throwable t) {
+            return PROGRESS_UNKNOWN;                 // 读不到 ⇒ --，绝不写 0
+        }
+    }
+
+
+
+    private static int clampInt(int value, int min, int max) {
+        return value < min ? min : (value > max ? max : value);
+    }
+
+    public String hostFxParamsLine() {
+        return "fx=" + hostFxEnabled
+                + " 环=" + hostRingDegPerSec + "°/s"
+                + " 上舰=+" + hostShipUpDegPerSec + "°/s"
+                + " 下舰=−" + hostShipDownDegPerSec + "°/s"
+                + " 洞半径=" + String.format(Locale.ROOT, "%.1f", getHostBlackHoleRadiusBlocks())
+                + "格(" + hostBlackHoleRadiusTenths + "×0.1)"
+                + " 透镜=" + (hostLensEnabled ? "开" : "关");
+    }
+
+
+    /** 山海：快照不載入區塊，也不讀已失效結構上的舊模組。 */
+    private PrimordialOmegaEngineModuleBase snapshotModuleAt(Level level, BlockPos pos) {
+        if (!isFormed() || level == null || !level.hasChunkAt(pos)) return null;
+        MetaMachine machine = MetaMachine.getMachine(level, pos);
+        return machine instanceof PrimordialOmegaEngineModuleBase module
+                && module.isFormed() && module.getHost() == this && getModuleSet().contains(module) ? module : null;
+    }
+
+    /** 顯示約定：正耗能、負發電；無線封裝的原生符號恰好相反。 */
+    static BigInteger snapshotSignedEuPerTick(com.gregtechceu.gtceu.api.recipe.GTRecipe recipe) {
+        if (recipe instanceof IWirelessGTRecipe wireless) {
+            BigInteger nativeEu = wireless.getWirelessEuTickInputs();
+            if (nativeEu != null) return nativeEu.negate();
+        }
+        return BigInteger.valueOf(RecipeHelper.getInputEUt(recipe))
+                .subtract(BigInteger.valueOf(RecipeHelper.getOutputEUt(recipe)));
+    }
+
+    /** 僅顯示飽和；能源規劃與扣電仍使用原本 BigInteger 路徑。 */
+    static long snapshotLong(BigInteger value) {
+        return value.max(BigInteger.ZERO).min(BigInteger.valueOf(Long.MAX_VALUE)).longValue();
+    }
+
+    private static long saturatedAdd(long left, long right) {
+        return left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
+    }
+
+    private static long collectSnapshotOutputs(RecipeLogic logic,
+            java.util.LinkedHashMap<Integer, Integer> outputs, java.util.Set<Integer> kinds) {
+        if (logic == null || !logic.isWorking() || logic.getLastRecipe() == null) return 0L;
+        long count = 0L;
+        for (ItemStack stack : RecipeHelper.getOutputItems(logic.getLastRecipe())) {
+            if (stack == null || stack.isEmpty()) continue;
+            int id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getId(stack.getItem());
+            if (id < 0) continue;
+            kinds.add(id);
+            count = saturatedAdd(count, stack.getCount());
+            outputs.merge(id, stack.getCount(), (left, right) -> Ints.saturatedCast((long) left + right));
+        }
+        return count;
+    }
+
     @DescSynced
     private int operationStateId;
     @DescSynced
@@ -143,6 +1103,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     @Persisted
     private long linkedEnginePos;
     /** 上一輪調和時鏈接是否有效（只用於顯示與模組位上限，不落盤）。 */
+    @DescSynced
     private boolean engineLinkReady;
     private TickableSubscription engineLinkSubs;
 
@@ -174,42 +1135,41 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         return visualState.advance(getOperationState(), seconds);
     }
 
-    /** 山海：原生多選集合在本機限制為一種方向，防止混合發電與耗電批次。 */
+    /** 山海：三類配方全開；批次規劃器分隔耗電與發電方向後輪轉。 */
     @Override
     public GTRecipeType[] getSelectedRecipeTypes() {
-        GTRecipeType[] selected = super.getSelectedRecipeTypes();
-        return selected.length <= 1 ? selected : new GTRecipeType[]{selected[0]};
+        return getAllSelectableRecipeTypes();
+    }
+
+    @Override
+    public boolean hasSelectedRecipeTypes() {
+        return getAllSelectableRecipeTypes().length > 0;
     }
 
     @Override
     public boolean isRecipeTypeSelected(GTRecipeType type) {
         GTRecipeType[] selected = getSelectedRecipeTypes();
-        return selected.length == 1 && selected[0] == type;
+        for (GTRecipeType candidate : selected) if (candidate == type) return true;
+        return false;
     }
 
     @Override
     public void setRecipeTypeSelected(GTRecipeType type, boolean selected) {
-        if (selected) selectOnlyRecipeType(type);
+        // 山海：三類配方均參與輪轉，保留舊選擇存檔供回退使用。
     }
 
     @Override
-    public void selectAllRecipeTypes() { selectFirstRecipeType(); }
+    public void selectAllRecipeTypes() { }
 
     @Override
     public void onLoad() {
         super.onLoad();
-        if (!isRemote() && super.getSelectedRecipeTypes().length != 1) {
-            GTRecipeType[] selected = getSelectedRecipeTypes();
-            GTRecipeType[] available = getAllSelectableRecipeTypes();
-            if (selected.length > 0) selectOnlyRecipeType(selected[0]);
-            else if (available.length > 0) selectOnlyRecipeType(available[0]);
-        }
+        ensureSnapshotTick();
     }
 
     @Override
     public void attachSideTabs(TabsWidget tabs) {
         tabs.setMainTab(this);
-        tabs.attachSubTab(GuixuControlPanels.modes(this));
         attachCleanSideTabs(tabs);
     }
 
@@ -369,8 +1329,15 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         final java.util.List<String> problems = new java.util.ArrayList<>();
         for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride",
                 "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel",
-                "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos",
-                "containmentLockTicks"}) {
+                "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos", "engineLinkReady",
+                "containmentLockTicks", "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
+                "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
+                "hostModuleMask", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
+                "hostModRemainSec", "hostSnapSeq", "hostRecipeProgressPct", "hostRecipeRemainSec",
+                "hostRecipeParallel", "hostRecipeThreads", "hostEuPerTick", "hostTotalOutputCount",
+                "hostTotalOutputKinds", "hostTotalEuUsedPerTick", "hostTotalEuGenPerTick", "hostModuleEuPerTick", "hostInstalledModules",
+                "hostModOutCount", "hostModOutItem", "hostModOutAmount", "hostOutItem", "hostOutAmount", "hostOutKinds",
+                "hostEnergyInStored", "hostEnergyInCapacity", "hostEnergyOutStored", "hostEnergyOutCapacity"}) {
             if (!names.contains(required)) {
                 problems.add("缺字段 " + required);
             }
@@ -739,12 +1706,19 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             refreshMatterLevelOverride();
             if (hasEngineLink()) subscribeEngineLink();
             subscribeContainment();
+            ensureSnapshotTick();
+            refreshModuleMask();
+            refreshHostRuntimeSnapshot();
         }
         logModuleSlots();
     }
 
     @Override
     public void onUnload() {
+        if (snapTick != null) {
+            snapTick.unsubscribe();
+            snapTick = null;
+        }
         // 本機卸載而被接管的模組還在載入區塊裡：不放回去它們就會一直掛著一台已經不 tick 的主機
         cancelEngineLink();
         cancelContainment();
@@ -771,6 +1745,36 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         operationStateId = GuixuOperationState.IDLE.ordinal();
         activeModuleCount = 0;
         super.onStructureInvalid();
+        if (!isRemote()) {
+            hostModuleMask = 0L;
+            refreshHostRuntimeSnapshot();
+        }
+    }
+
+    /** 山海：沿用 master 集合快照與倍率快取維護，再更新 AR 權威位圖。 */
+    @Override
+    public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void addModule(M module) {
+        super.addModule(module);
+        refreshModuleMask();
+    }
+
+    @Override
+    public <M extends IModularMachineModule<PrimordialOmegaEngineMachine, M>> void removeModule(M module) {
+        super.removeModule(module);
+        refreshModuleMask();
+    }
+
+    @Override
+    public boolean grantsCrossTypeParallel() {
+        return true;
+    }
+
+    @Override
+    public String crossTypeModeDisplayName() {
+        return PrimordialOmegaEngineMachine.resolveCrossTypeModeName(isFormed()
+                && getRecipeLogic().isWorkingEnabled() && !isContainmentLocked()
+                && !PrimordialOmegaEngineMachine.isRecipeLockedForDisplay(getRecipeLogic()),
+                PrimordialOmegaEngineMachine.CROSS_TYPE_MODE_NAME_HOST);
     }
 
     /** 打那一行槽位/回连日志（服务端跑；客户端没有世界时直接跳过）。 */
@@ -834,17 +1838,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
 
     // ------ 两个宿主钩子（引擎路径读它们；见 PrimordialEngineRecipeLogic#buildFinalNormalRecipe）------
 
-    /**
-     * <b>材料增产的额外倍率</b>（第 3 项：用户原话「沿用原始终焉引擎那套…并且把增产倍率额外 +5」）。
-     *
-     * <p>🔴 <b>只在门控生效时非零</b>：{@code moduleSlotBonus() > 0}（= 主机那个物质模块专属槽放满 64 个）
-     * 才返回 {@link #PRODUCTION_BONUS_EXTRA}；空槽返回 0 ⇒ 倍率仍是 {@code outputMultiplier(0) == 1}
-     * （空槽白得 ×6 产出不是"沿用那套 + 5"）。
-     *
-     * <p>引擎路径与原生修饰链读的是<b>同一个方法</b> ⇒ 两条路的倍率不可能漂移。
-     */
+    /** 山海：Integrate 新口徑，歸墟常駐 +5；不依賴物質模組專屬槽。 */
     public int getHostProductionBonusExtra() {
-        return moduleSlotBonus() > 0 ? PRODUCTION_BONUS_EXTRA : 0;
+        return PRODUCTION_BONUS_EXTRA;
     }
 
     /**
@@ -858,16 +1854,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         return GuixuRecipeMath.reductionFactor(gateBonus);
     }
 
-    /**
-     * 门控等级 + 额外倍率 ⇒ 实际倍率。
-     *
-     * <p>{@code outputMultiplier(gate)}：门控未生效（0）⇒ 1；生效 ⇒ {@code 1+等级}。
-     * 额外量只加在"已生效"上：{@code extra <= 0} 或门控为 0 时结果就是 {@code outputMultiplier} 本身
-     * ⇒ 老主机（extra 恒 0）与本机空槽（extra 恒 0）都退化成今天的行为。
-     */
+    /** 山海：等級部分與非負常駐倍率相加；飽和避免顯示或配方倍率翻負。 */
     public static int productionMultiplierOf(int gateBonus, int extra) {
-        final int base = GuixuRecipeMath.outputMultiplier(gateBonus);
-        return base > 1 ? base + Math.max(0, extra) : base;
+        return Ints.saturatedCast(1L + Math.max(0, gateBonus) + Math.max(0, extra));
     }
 
     /** 本机当前的实际倍率（显示用）。 */
@@ -950,6 +1939,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         textList.add(Component.literal("[归墟视界枢核] ").withStyle(ChatFormatting.GOLD)
                 .append(Component.literal("结构已成型").withStyle(ChatFormatting.GREEN)));
         textList.add(Component.literal("已连接模块：" + getFormedModuleCount() + " / " + getMaxModuleCount())
+                .withStyle(ChatFormatting.GRAY));
+        String crossTypeName = crossTypeModeDisplayName();
+        if (crossTypeName != null) {
+            textList.add(Component.literal("機器模式：" + crossTypeName).withStyle(ChatFormatting.AQUA));
+        }
+        textList.add(Component.literal("跨配方種類並行：主機三類配方輪轉；模組沿用自身配方種類與執行緒")
                 .withStyle(ChatFormatting.GRAY));
         textList.add(Component.literal("運作：" + getOperationState().label + "｜工作模組 " + activeModuleCount)
                 .withStyle(ChatFormatting.AQUA));

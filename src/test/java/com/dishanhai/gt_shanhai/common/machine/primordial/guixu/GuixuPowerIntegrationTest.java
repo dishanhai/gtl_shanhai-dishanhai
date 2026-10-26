@@ -32,6 +32,9 @@ class GuixuPowerIntegrationTest {
     @Test void nativeBatchDispatchesToTheGuixuPlannerBeforeConsumingInputs() throws Exception {
         assertNotNull(GuixuVisionCoreRecipeLogic.class.getDeclaredMethod("calculateParallels"));
         var calls = calls(GuixuVisionCoreRecipeLogic.class.getName().replace('.', '/'), "calculateParallels");
+        assertTrue(calls.contains("GuixuVisionCoreRecipeLogic.planDirection"), calls.toString());
+        assertFalse(calls.stream().anyMatch(s -> s.endsWith(".handleRecipeInput")));
+        calls = calls(GuixuVisionCoreRecipeLogic.class.getName().replace('.', '/'), "planDirection");
         assertTrue(calls.contains("GuixuPowerBudget.allocate"), calls.toString());
         assertTrue(calls.contains("GuixuPowerBudget.duration"), calls.toString());
         assertTrue(calls.contains("GuixuPowerBudget.parallelLimit"), calls.toString());

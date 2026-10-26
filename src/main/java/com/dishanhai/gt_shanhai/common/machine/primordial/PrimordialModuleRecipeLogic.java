@@ -225,7 +225,10 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         long[] parallels = new long[recipes.size()];
         int index = 0;
         ObjectArrayList<GTRecipe> recipeList = new ObjectArrayList<>(recipes.size());
+        long crossTypeThreads = getMachine() instanceof PrimordialOmegaEngineModuleBase module
+                && module.isCrossTypeParallelActive() ? module.getRecipeLogicThreadMultiplier() : Long.MAX_VALUE;
         for (GTRecipe recipe : recipes) {
+            if (recipeList.size() >= crossTypeThreads) break;
             MatchableScaledRecipe matchable = findMaxMatchableScaledRecipe(recipe, totalParallel);
             if (matchable == null) {
                 continue;
@@ -577,6 +580,12 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
      */
     @Override
     protected Set<GTRecipe> lookupRecipeIterator() {
+        boolean crossType = getMachine() instanceof PrimordialOmegaEngineModuleBase module && module.isCrossTypeParallelActive();
+        if (crossType != lastCrossType) {
+            lastCrossType = crossType;
+            invalidateLookupSetCache();
+            cachedModuleConditionSource = null;
+        }
         refreshModuleConditionContext();
         List<ShanhaiHeatGate.SlotContent> mounts = currentGateMountContents();
         if (mounts != cachedGateMountContents) {
@@ -598,7 +607,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             applyCachedModuleConditionError();
             return cachedModuleConditionRecipes;
         }
-        Set<GTRecipe> result = new ObjectOpenHashSet<>(base.size());
+        Set<GTRecipe> result = crossType ? new java.util.LinkedHashSet<>() : new ObjectOpenHashSet<>(base.size());
         boolean moduleConditionFailed = false;
         String firstConditionError = null;
         for (GTRecipe recipe : base) {
@@ -625,9 +634,19 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             setConditionError(firstConditionError);
         }
         cachedModuleConditionSource = base;
+        if (crossType) {
+            var groups = new java.util.LinkedHashMap<GTRecipeType, java.util.List<GTRecipe>>();
+            for (GTRecipeType type : getMachine().getRecipeTypes()) groups.put(type, new java.util.ArrayList<>());
+            result.stream().sorted(java.util.Comparator.comparing(recipe -> recipe.id.toString()))
+                    .forEach(recipe -> groups.computeIfAbsent(recipe.recipeType, ignored -> new java.util.ArrayList<>()).add(recipe));
+            result = com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuRecipeRotation.roundRobin(
+                    new java.util.ArrayList<>(groups.values()));
+        }
         cachedModuleConditionRecipes = result;
         return result;
     }
+
+    private boolean lastCrossType;
 
     private ShanhaiHeatGate.Outcome shanhai$gateOutcome;
 

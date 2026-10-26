@@ -7,8 +7,8 @@ import com.dishanhai.gt_shanhai.GTDishanhaiMod;
  *
  * <h2>四个等级（只升不降）</h2>
  * <pre>
- *   LEVEL_FULL   = 1  全画（内环带 + 飞船 + 6 条光束 + 黑洞）+ 藏真块
- *   LEVEL_SIMPLE = 2  全画（内环带 + 飞船 + 6 条光束 + 黑洞）+ 藏真块；"简化"只允许减光束这类可选减法
+ *   LEVEL_FULL   = 1  全画（内环带 + 飞船 + 18 条光束 + 黑洞）+ 藏真块
+ *   LEVEL_SIMPLE = 2  全画（内环带 + 飞船 + 18 条光束 + 黑洞）+ 藏真块；"简化"只允许减光束这类可选减法
  *   LEVEL_HIDDEN = 3  不藏、不画（渲染出问题先停手；已藏的格由渲染器的 restore 闸门按台账还回去）
  *   LEVEL_OFF    = 4  不藏、不画（彻底退出，真方块保持原样）
  * </pre>
@@ -27,7 +27,7 @@ import com.dishanhai.gt_shanhai.GTDishanhaiMod;
  * <h2>🔴 纪律</h2>
  * <ul>
  *   <li><b>任何一步失败都不许画出黑块/紫黑方块</b>：三组烘焙用的是真方块模型自己的 RenderType
- *       （贴图来自方块图集，不会缺），6 条光束是<b>无贴图</b>的 {@code POSITION_COLOR} ⇒ 结构上不可能出现
+ *       （贴图来自方块图集，不会缺），18 条光束是<b>无贴图</b>的 {@code POSITION_COLOR} ⇒ 结构上不可能出现
  *       "缺贴图"的紫黑格子；</li>
  *   <li>降级必须留一行可 grep 的日志：{@code [SHANHAI-HOSTFX] fallback=<级别> reason=<原因>}；</li>
  *   <li><b>只升不降</b>：降级后不在运行期"自己好起来"（否则会反复抖：画坏一帧 → 降级 → 又画）。

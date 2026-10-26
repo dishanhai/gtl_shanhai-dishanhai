@@ -80,12 +80,12 @@ class GuixuMigrationTest {
         var slices = com.gtladd.gtladditions.common.machine.multiblock.structure.StructureResourceLoader.INSTANCE
                 .loadShapeInfoSlices("multiblock/guixu_vision_core.bin", "guixu_vision_core",
                         (col, aisle, row, symbol) -> {
-                            if (symbol == 'M' || symbol == '~') {
+                            if (symbol == 'M' || symbol == 'N' || symbol == '~') {
                                 var position = new BlockPos(
                                         aisle + GuixuHostGeometry.TEMPLATE_MIN_X,
                                         GuixuHostGeometry.TEMPLATE_SIZE_Y - 1 - row + GuixuHostGeometry.TEMPLATE_MIN_Y,
                                         col + GuixuHostGeometry.TEMPLATE_MIN_Z);
-                                if (symbol == 'M') modules.add(position);
+                                if (symbol == 'M' || symbol == 'N') modules.add(position);
                                 else controllers.add(position);
                             }
                             return symbol;
@@ -102,8 +102,8 @@ class GuixuMigrationTest {
     }
 
     @Test
-    void gateIsRequiredForBonusAndEnergyReductionMatchesSource() {
-        assertEquals(1, GuixuVisionCoreMachine.productionMultiplierOf(0, 5));
+    void inherentBonusIncludesEmptySlotAndEnergyReductionMatchesSource() {
+        assertEquals(6, GuixuVisionCoreMachine.productionMultiplierOf(0, 5));
         assertEquals(7, GuixuVisionCoreMachine.productionMultiplierOf(1, 5));
         assertEquals(23, GuixuVisionCoreMachine.productionMultiplierOf(17, 5));
         assertEquals(1.0D, GuixuRecipeMath.reductionFactor(0));

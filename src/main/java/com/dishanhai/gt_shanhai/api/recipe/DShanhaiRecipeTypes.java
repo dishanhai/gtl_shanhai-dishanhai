@@ -76,13 +76,13 @@ public class DShanhaiRecipeTypes {
     public static void init() {
         // 山海：歸墟三種專屬模式；具體配方與倍率消耗另行定義。
         GUIXU_MATTER_DECOMPRESSION = register("guixu_matter_decompression", "multiblock")
-                .setMaxIOSize(9, 9, 4, 4).setEUIO(IO.IN)
+                .setMaxIOSize(9, 144, 4, 32).setEUIO(IO.IN)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
         GUIXU_ENERGY_EXTRACTION = register("guixu_energy_extraction", "multiblock")
-                .setMaxIOSize(9, 9, 4, 4).setEUIO(IO.OUT)
+                .setMaxIOSize(9, 144, 4, 32).setEUIO(IO.OUT)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
         GUIXU_PARADIGM_SIMPLIFICATION = register("guixu_paradigm_simplification", "multiblock")
-                .setMaxIOSize(9, 9, 4, 4).setEUIO(IO.IN)
+                .setMaxIOSize(9, 144, 4, 32).setEUIO(IO.IN)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
 
         SPACETIME_DISTORTION = register("spacetime_distortion", "multiblock")

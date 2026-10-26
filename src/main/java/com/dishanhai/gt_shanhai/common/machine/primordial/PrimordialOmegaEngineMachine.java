@@ -53,6 +53,21 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     private static final long MAX_PARALLEL = 9223372036854775807L;
 
+    public static final String CROSS_TYPE_MODE_NAME_HOST = "視界物質並流";
+    public static final String CROSS_TYPE_MODE_NAME_MODULE = "原初並流加工";
+
+    public boolean grantsCrossTypeParallel() { return false; }
+
+    public String crossTypeModeDisplayName() { return null; }
+
+    public static String resolveCrossTypeModeName(boolean enabled, String name) {
+        return enabled && name != null && !name.isBlank() ? name : null;
+    }
+
+    public static boolean isRecipeLockedForDisplay(Object logic) {
+        return logic instanceof org.gtlcore.gtlcore.api.machine.trait.ILockRecipe lock && lock.isLock();
+    }
+
     private static final ManagedFieldHolder MANAGED_FIELD_HOLDER =
             new ManagedFieldHolder(PrimordialOmegaEngineMachine.class, CleanSelectableRecipeTypeSetMachine.MANAGED_FIELD_HOLDER);
 
@@ -621,6 +636,10 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     @Override
     protected void attachCleanConfigurators(ConfiguratorPanel panel) {
         super.attachCleanConfigurators(panel);
+        if (this instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine guixu) {
+            panel.attachConfigurators(com.dishanhai.gt_shanhai.common.machine.primordial.guixu.HostFxConfigurators.renderPanel(guixu));
+            return;
+        }
         panel.attachConfigurators(new IFancyConfiguratorButton.Toggle(
                 GuiTextures.BUTTON_SWITCH_VIEW.getSubTexture(0.0D, 0.0D, 1.0D, 0.5D),
                 GuiTextures.BUTTON_SWITCH_VIEW.getSubTexture(0.0D, 0.5D, 1.0D, 0.5D),

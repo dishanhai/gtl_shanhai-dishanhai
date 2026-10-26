@@ -24,8 +24,8 @@ public final class GuixuVisionCoreMachines {
         if (definition != null) return;
         GuixuHostGeometry.verify();
         GuixuVisionCoreMachine.assertFieldHolderComplete();
-        var casing = new ResourceLocation("gtlcore", "block/molecular_casing");
-        var overlay = GTCEu.id("block/multiblock/guixu_vision_core");
+        var casing = new ResourceLocation("gtlcore", "block/casings/dimension_injection_casing");
+        var overlay = GTCEu.id("block/multiblock/fusion_reactor");
         definition = GTDishanhaiRegistration.REGISTRATE
                 .multiblock(ID, GuixuVisionCoreMachine::new)
                 .rotationState(RotationState.NON_Y_AXIS)

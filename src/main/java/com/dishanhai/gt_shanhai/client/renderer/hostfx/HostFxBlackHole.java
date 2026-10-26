@@ -171,8 +171,24 @@ public final class HostFxBlackHole {
                 owner, path, BlackHoleLensRenderer.levelNow(), why);
     }
 
-    /** 黑洞表面半径（格）：优先用 blackhole 包这一帧真正用的视界半径 × B_CRIT（黑盘半径）。 */
+    /**
+     * 黑洞表面半径（格）：<b>主机接管优先</b>，否则用 blackhole 包这一帧真正用的视界半径 × B_CRIT。
+     *
+     * <h2>🔴 2026-10-25 第二十改</h2>
+     * 归墟视界枢核的机器字段 {@code hostBlackHoleRadiusBlocks} 是<b>可见半径（格）</b>，
+     * 由 {@code GuixuHostFxRenderer} 每帧喂进 {@link BlackHoleTuning#setHostRadiusBlocks(float)}。
+     * 有接管时这里<b>直接用那个数</b>（再夹一次 0.8..12.0：下限是本类几何的退化保护，
+     * 上限与 {@code HostFxState.HOLE_MAX_BLOCKS} 同值 —— 否则"面板能填、画面不变"就是假控件）。
+     *
+     * <p>为什么不能只靠 {@link BlackHoleFrameStats#lastRsBlocks()}：那份读数来自"真黑洞这一帧画过"
+     * 的那条路；本类顶上的场合恰恰是**真路径一帧都没画**（{@code LEVEL_NONE}）⇒ 那份读数可能是
+     * 很久以前的（甚至是"上次别的位置那个黑洞"的）⇒ 兜底黑盘会跟着一个过时半径。
+     */
     public static float surfaceRadius() {
+        if (BlackHoleTuning.hasHostRadiusBlocks()) {
+            final float host = BlackHoleTuning.hostRadiusBlocks();
+            return Math.max(0.8F, Math.min(host, 12.0F));
+        }
         final double rs = BlackHoleFrameStats.lastRsBlocks();
         if (!(rs > 1.0e-3D)) {
             return HostFxGeometry.HOLE_SURFACE_R;

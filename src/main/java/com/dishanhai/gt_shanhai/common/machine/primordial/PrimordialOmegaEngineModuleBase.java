@@ -68,6 +68,60 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     private BlockPos hostPosition;
     private PrimordialOmegaEngineMachine host;
     private boolean hostConnected;
+    @com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced
+    private boolean crossTypeModeActive;
+    private static final com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder MODULE_FIELD_HOLDER =
+            new com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder(PrimordialOmegaEngineModuleBase.class,
+                    MANAGED_FIELD_HOLDER);
+
+    @Override
+    public com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder getFieldHolder() {
+        return MODULE_FIELD_HOLDER;
+    }
+
+    public boolean isCrossTypeParallelActive() {
+        if (isRemote()) return crossTypeModeActive;
+        var current = getHost();
+        boolean active = isFormed() && current != null && current.isFormed()
+                && current.grantsCrossTypeParallel() && !getDefinition().isGenerator()
+                && !(current instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine guixu
+                        && guixu.isContainmentLocked())
+                && !PrimordialOmegaEngineMachine.isRecipeLockedForDisplay(getRecipeLogic());
+        if (active != crossTypeModeActive) {
+            crossTypeModeActive = active;
+            markDirty();
+        }
+        return active;
+    }
+
+    public String crossTypeModeDisplayName() {
+        return PrimordialOmegaEngineMachine.resolveCrossTypeModeName(isCrossTypeParallelActive(),
+                PrimordialOmegaEngineMachine.CROSS_TYPE_MODE_NAME_MODULE);
+    }
+
+    @Override
+    public GTRecipeType[] getSelectedRecipeTypes() {
+        return isCrossTypeParallelActive() ? getAllSelectableRecipeTypes() : super.getSelectedRecipeTypes();
+    }
+
+    @Override
+    public boolean hasSelectedRecipeTypes() {
+        return isCrossTypeParallelActive() ? getAllSelectableRecipeTypes().length > 0 : super.hasSelectedRecipeTypes();
+    }
+
+    @Override
+    public boolean isRecipeTypeSelected(GTRecipeType type) {
+        if (isCrossTypeParallelActive()) {
+            for (var available : getAllSelectableRecipeTypes()) if (available == type) return true;
+            return false;
+        }
+        return super.isRecipeTypeSelected(type);
+    }
+
+    @Override
+    public boolean shouldShowRecipeTypeSetTab() {
+        return !isCrossTypeParallelActive() && super.shouldShowRecipeTypeSetTab();
+    }
     private TickableSubscription hostScanSubs;
     private final PrimordialStructureCheck structureCheck = new PrimordialStructureCheck();
     private String lastModuleConditionError;
@@ -375,6 +429,13 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         var currentHost = getHost();
         if (currentHost == null || !currentHost.isFormed()) {
             return 1;
+        }
+        if (currentHost instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine guixu) {
+            int guixuMultiplier = com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine.productionMultiplierOf(
+                    guixu.moduleSlotBonus(), guixu.getHostProductionBonusExtra());
+            // 山海：遏制場的額外產出由模組配方邏輯統一加一次，此處只帶主機固有倍率。
+            return com.google.common.primitives.Ints.saturatedCast(
+                    (long) currentHost.getMountedOutputMultiplier() * guixuMultiplier);
         }
         return currentHost.getMountedOutputMultiplier();
     }
@@ -1358,6 +1419,8 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     @Override
     public void addDisplayText(List<Component> textList) {
+        String modeName = crossTypeModeDisplayName();
+        if (modeName != null) textList.add(Component.literal("機器模式：" + modeName).withStyle(ChatFormatting.AQUA));
         if (isFormed()) {
             addHostStatusDisplay(textList);
             addEnergyDisplay(textList);

@@ -5,7 +5,8 @@
         "Position"
     ],
     "samplers": [
-        { "name": "Sampler0" }
+        { "name": "Sampler0" },
+        { "name": "Sampler1" }
     ],
     "uniforms": [
         { "name": "uProjMat",      "type": "matrix4x4", "count": 16, "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
@@ -22,6 +23,9 @@
         { "name": "uTime",         "type": "float", "count": 1, "values": [ 0.0 ] },
         { "name": "uDiskGain",     "type": "float", "count": 1, "values": [ 1.0 ] },
         { "name": "uRingGain",     "type": "float", "count": 1, "values": [ 1.0 ] },
-        { "name": "uStrength",     "type": "float", "count": 1, "values": [ 1.0 ] }
+        { "name": "uStrength",     "type": "float", "count": 1, "values": [ 1.0 ] },
+        { "name": "uDepthGate",    "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "uHoleDepth",    "type": "float", "count": 1, "values": [ 1.0 ] },
+        { "name": "uGateEps",      "type": "float", "count": 1, "values": [ 0.00001 ] }
     ]
 }

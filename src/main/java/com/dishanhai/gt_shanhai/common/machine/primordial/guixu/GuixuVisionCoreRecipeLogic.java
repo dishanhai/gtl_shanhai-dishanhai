@@ -28,6 +28,8 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
     private int plannedTicks = 1;
     private int plannedBaseTicks = 1;
     private long plannedParallels;
+    private boolean plannedConsumer = true;
+    private boolean preferGeneration;
 
     public GuixuVisionCoreRecipeLogic(GuixuVisionCoreMachine host) {
         super(host);
@@ -52,8 +54,23 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
     /** 先規劃整批共享功率，原生 buildFinalWirelessRecipe 才真正扣料。 */
     @Override
     protected ParallelData calculateParallels() {
-        boolean consumer = isEnergyConsumer();
-        BigInteger power = host.getGuixuHatchPower(consumer ? IO.IN : IO.OUT).power();
+        var candidates = new ArrayList<>(lookupRecipeIterator());
+        candidates.sort(Comparator.comparing(recipe -> recipe.id.toString()));
+        // 原生一次只封裝一個 EU 方向；輪轉類型時不能把燃料發電與耗電配方混成一批。
+        for (boolean consumer : new boolean[]{!preferGeneration, preferGeneration}) {
+            plannedConsumer = consumer;
+            ParallelData plan = planDirection(consumer, candidates);
+            if (plan != null) {
+                preferGeneration = consumer;
+                return plan;
+            }
+        }
+        invalidateLookupSetCache();
+        return null;
+    }
+
+    private ParallelData planDirection(boolean consumer, java.util.List<GTRecipe> candidates) {
+        BigInteger power = getDirectionalHatchPower(consumer);
         plannedParallels = 0L;
         if (power.signum() <= 0) return null;
         var recipes = new ArrayList<GTRecipe>();
@@ -61,9 +78,8 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
         BigInteger referenceEut = BigInteger.ONE;
         int baseTicks = 1;
         // 穩定次序使剩餘預算分配不受 HashSet 迭代次序影響。
-        var candidates = new ArrayList<>(lookupRecipeIterator());
-        candidates.sort(Comparator.comparing(recipe -> recipe.id.toString()));
         for (GTRecipe recipe : candidates) {
+            if (recipeConsumesEnergy(recipe) != consumer) continue;
             BigInteger cost = BigDecimal.valueOf((double) Math.max(1, recipe.duration) * getEuMultiplier())
                     .multiply(BigDecimal.valueOf(Math.max(0L, getWirelessRecipeEut(recipe))))
                     .setScale(0, RoundingMode.CEILING).toBigIntegerExact().max(BigInteger.ONE);
@@ -103,6 +119,11 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
         return selected.isEmpty() ? null : new ParallelData(selected, amounts.toLongArray(), true, null);
     }
 
+    /** 獨立世界邊界，方向規劃本身只處理精確功率。 */
+    protected BigInteger getDirectionalHatchPower(boolean consumer) {
+        return host.getGuixuHatchPower(consumer ? IO.IN : IO.OUT).power();
+    }
+
     @Override
     protected WirelessGTRecipe buildWirelessRecipe(ObjectArrayList<Content> items, ObjectArrayList<Content> fluids,
                                                    BigInteger totalEu) {
@@ -130,7 +151,11 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
 
     @Override
     protected boolean isEnergyConsumer() {
-        return host.getRecipeType() != DShanhaiRecipeTypes.GUIXU_ENERGY_EXTRACTION;
+        return plannedConsumer;
+    }
+
+    private static boolean recipeConsumesEnergy(GTRecipe recipe) {
+        return recipe.recipeType != DShanhaiRecipeTypes.GUIXU_ENERGY_EXTRACTION;
     }
 
     @Override
