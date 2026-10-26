@@ -762,7 +762,9 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
         //      （本路径完全不经过 RecipeModifierList.apply，所以原生 .recipeModifier 链在这里是死的）。
         final GTRecipe modified = PrimordialRecipeEffects.applyHostTailEffectsA(
                 balanced, gateBonus, targetDuration, originDuration, "主机-多配方引擎",
-                PrimordialRecipeEffects.outputMultiplier(gateBonus) + host.getHostProductionBonusExtra(),
+                // 🔴 2026-10-25 收口：这里原来是手写的 base+extra（**第二份**算式，且少了 base>1 那道闸）
+                // ⇒ 改为唯一算式 productionMultiplierOf(gate, extra)（与模块 N3、归墟、侧栏、自动倍率四点同源）。
+                PrimordialRecipeEffects.productionMultiplierOf(gateBonus, host.getHostProductionBonusExtra()),
                 host.getHostEnergyReductionFactor(gateBonus));
 
         // 抬头（Jade）两行的显示因子：本路径上 begin() 没人调 ⇒ tracker 的 context 恒为 null，
@@ -775,7 +777,8 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
         //       （T = max(1, dx, L) 是 N6 之后的真实时长，A 下限）—— 原文保留，**实参换成 T**。
         captureEngineReduction(parallelData, gateBonus, targetDuration, balanced);
 
-        logEngineEvidence(parallelData, gateBonus, targetDuration, engineDuration, modified);
+        logEngineEvidence(parallelData, gateBonus, targetDuration, engineDuration, modified,
+                host.getHostProductionBonusExtra());
         return modified;
     }
 
@@ -1000,7 +1003,7 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
      * 避免每轮配方刷屏。{@code latest.log} 里 grep {@code SHANHAI-ENGINE} 即可。
      */
     private void logEngineEvidence(ParallelData parallelData, int gateBonus, int targetDuration,
-                                   int engineDuration, GTRecipe modified) {
+                                   int engineDuration, GTRecipe modified, int extraBonus) {
         if (shanhai$engineAnnounced) {
             return;
         }
@@ -1028,7 +1031,9 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
                     parallels.length,
                     totalParallel,
                     gateBonus,
-                    PrimordialRecipeEffects.outputMultiplier(gateBonus),
+                    // 🔴 2026-10-25 收口：日志这里原来用单参 outputMultiplier ⇒ 归墟下日志说 ×18、
+                    // 实际乘 ×23（"日志印旧数"）。改用唯一算式，与生产链同一个数。
+                    PrimordialRecipeEffects.productionMultiplierOf(gateBonus, extraBonus),
                     String.format(java.util.Locale.ROOT, "%.4f", f),
                     modified.duration,
                     originDuration,

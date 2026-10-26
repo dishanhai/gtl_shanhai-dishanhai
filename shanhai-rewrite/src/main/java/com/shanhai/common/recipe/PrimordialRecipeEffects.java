@@ -495,6 +495,60 @@ public final class PrimordialRecipeEffects {
     }
 
     /**
+     * 🔴 <b>N3 的【实际】产出倍率 = {@link #outputMultiplier(int)} + 宿主给的额外量</b>
+     * —— 全工程<b>唯一</b>一份算式（2026-10-23 新增）。
+     *
+     * <h2>为什么必须收成一个出口（这条不是洁癖，是一次真实事故）</h2>
+     * "N3 倍率"在工程里有<b>四个</b>读者：
+     * <pre>
+     *   ① 主机原生修饰链  GuixuVisionCoreMachine#applyGuixuRecipeModifier
+     *   ② 主机引擎尾链    PrimordialEngineRecipeLogic#buildFinalNormalRecipe
+     *   ③ 模块引擎尾链    PrimordialModuleRecipeLogic#buildFinalNormalRecipe   ← 本次的落点
+     *   ④ 显示            主机面板 + 模块面板（{@code addSharedEffectDisplayText}）
+     * </pre>
+     * ① 与 ② 当时就按"额外 +5"改了，③ 与 ④ 没有 ⇒ 同一台归墟主机下
+     * <b>主机面板写 ×23（1+17+5）、模块面板写 ×18，而模块的产出<b>真的</b>只有 ×18</b>
+     * （模块走多配方引擎，引擎路径<b>不经过</b> {@code RecipeModifierList.apply}
+     *  ⇒ ① 那条链对模块是死代码；字节码实证：gtladditions {@code MutableRecipesLogic}
+     *  与 {@code RecipeCalculationHelper} 的常量池里没有任何 {@code RecipeModifier} 引用）。
+     * 用户报的原话就是「<b>模块的额外产出少了 +5</b>」。
+     * <p>⇒ 额外量的<b>唯一来源</b>是 {@code PrimordialOmegaEngineMachine#getHostProductionBonusExtra()}
+     * （归墟覆写成"门控生效时 5"），算式只有本方法这一处 —— 谁都不许再写第二个 {@code +5}。
+     *
+     * <h2>🔴 两条不变式（任一条破掉就是回归）</h2>
+     * <pre>
+     *   extra &le; 0 ⇒ 结果 == outputMultiplier(gateBonus)    （老主机 extra 恒 0 ⇒ 逐位不变）
+     *   extra &gt; 0 ⇒ 结果 == outputMultiplier(gateBonus) + extra
+     *              ⇒ (0, +5) = 6    (17, +5) = 23    (17, 0) = 18    (0, 0) = 1
+     * </pre>
+     *
+     * <h2>🔴 2026-10-25 用户裁决：额外量【恒】参与 —— 删掉了旧的「{@code base > 1} 才加」那道闸</h2>
+     * 用户原话（逐字）：「<b>2通过（但是专属槽清空 应该是×6）</b>」。
+     * <p>旧实现写的是 {@code base > 1 ? base + Math.max(0, extra) : base}，于是
+     * <b>专属槽一清空</b> ⇒ {@code gateBonus == 0} ⇒ {@code base == 1} ⇒ 那道闸把 {@code extra}
+     * 也一起挡掉了 ⇒ 显示 <b>×1</b>；用户要的是 <b>×6</b>（= 1 + 额外 5）。
+     * 旧注释把这写成「空槽白得 ×6 产出不是『沿用那套 +5』」—— <b>那条口径已被用户推翻</b>，
+     * 归墟视界枢核的 +5 是<b>主机自带的常驻增产</b>，与专属槽满不满无关
+     * （专属槽只管那 0..17 级的门控部分）。原文留档在本条下面。
+     * <p>⛔ <b>作废口径（只留档、不生效）</b>：「{@code gateBonus ≤ 0 ⇒ 结果 == 1}」／
+     * 「额外量只加在『门控已生效』之上」。
+     *
+     * <p>⚠️ <b>本方法不知道"这台机器是不是发电机"</b>：发电那台吃的 {@code tickOutputs} 是
+     * <b>输出语义的 EU</b>（放大 N3 = 凭空多发电），本倍率对它不成立
+     * ⇒ <b>调用方必须自己判 {@code isGenerator()} 再决定要不要走本方法</b>
+     * （模块侧已经收在 {@code PrimordialModuleMachine#n3ProductionMultiplierOf} 里，
+     * 发电那一支在**调用本方法之前**就短路成 {@code outputMultiplier(gateBonus)}）。
+     *
+     * @param gateBonus 门控等级（{@code moduleSlotBonus()}；调用方<b>只读一次</b>，与 N5 同源）
+     * @param extra     宿主给的额外倍率（{@code getHostProductionBonusExtra()}；&le;0 = 不加）
+     */
+    public static int productionMultiplierOf(int gateBonus, int extra) {
+        // 🔴 2026-10-25：`base > 1 ? … : base` 那道闸已删 —— extra 恒参与（用户："专属槽清空 应该是×6"）。
+        final int base = outputMultiplier(gateBonus);
+        return base + Math.max(0, extra);
+    }
+
+    /**
      * <b>只放大产出</b>：缩放产出数量，并把产出概率拉满。
      *
      * <h2>🔴 2026-09 队长裁决：改用<b>旧私货语义</b>（不再做阉割版）</h2>

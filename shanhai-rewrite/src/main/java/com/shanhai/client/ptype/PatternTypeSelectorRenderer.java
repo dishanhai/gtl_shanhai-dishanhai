@@ -1,14 +1,18 @@
 package com.shanhai.client.ptype;
 
 import appeng.menu.me.items.PatternEncodingTermMenu;
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.shanhai.ShanhaiMod;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
+import org.lwjgl.opengl.GL11;
 
 import java.util.List;
 
@@ -148,9 +152,13 @@ public final class PatternTypeSelectorRenderer {
         PatternTypeSelectorState.PanelState panel = PatternTypeSelectorState.panel();
         PatternTypeSelectorLayout.Rect rect = PatternTypeSelectorLayout.panel(screen);
 
+        // 🔴 第一件事：把"我们之前已经画完的那些像素"清出深度缓冲，见 beginOverlay 的注释。
+        beginOverlay(graphics);
+
         // 半透明遮罩：把后面的 AE2 界面压暗一档，暗示这是模态层
         graphics.fill(0, 0, screen.width, screen.height, 0x60000000);
 
+        // ---- 不透明底板（alpha 全 FF；见 PatternTypeSelectorLayout.COLOR_PANEL_BG 的注释）
         graphics.fill(rect.x(), rect.y(), rect.right(), rect.bottom(), PatternTypeSelectorLayout.COLOR_PANEL_BG);
         outline(graphics, rect, PatternTypeSelectorLayout.COLOR_PANEL_BORDER);
         outline(graphics, new PatternTypeSelectorLayout.Rect(rect.x() + 1, rect.y() + 1, rect.w() - 2, rect.h() - 2),
@@ -193,12 +201,15 @@ public final class PatternTypeSelectorRenderer {
         graphics.drawString(font, trim(font, TEXT_CLEAR, clear.w() - 4), clear.x() + 2, clear.y() + 2,
                 PatternTypeSelectorLayout.COLOR_CLEAR_TEXT, false);
 
-        // ---- 列表
+        // ---- 列表（先铺一层不透明的凹底，再裁剪着画行）
         PatternTypeSelectorLayout.Rect list = PatternTypeSelectorLayout.listArea(rect);
         List<RecipeTypeCatalog.Entry> entries = panel.filtered();
+        graphics.fill(list.x(), list.y(), list.right(), list.bottom(), PatternTypeSelectorLayout.COLOR_LIST_BG);
 
         graphics.enableScissor(list.x(), list.y(), list.right(), list.bottom());
         int visible = PatternTypeSelectorLayout.visibleRows(list);
+        int hoveredRow = -1;
+        RecipeTypeCatalog.Entry hoveredEntry = null;
         if (entries.isEmpty()) {
             String message = RecipeTypeCatalog.all().isEmpty() ? TEXT_FAILED : TEXT_EMPTY;
             graphics.drawString(font, message, list.x() + 2, list.y() + 2,
@@ -225,14 +236,19 @@ public final class PatternTypeSelectorRenderer {
                 int nameColor = isSelected
                         ? PatternTypeSelectorLayout.COLOR_TITLE_TEXT
                         : PatternTypeSelectorLayout.COLOR_BODY_TEXT;
-                String idText = entry.id().toString();
-                int idWidth = font.width(idText);
-                int nameRoom = row.w() - 6 - (idWidth + 6);
-                String nameText = trim(font, entry.name(), Math.max(20, nameRoom));
-                graphics.drawString(font, nameText, row.x() + 4, row.y() + 1, nameColor, false);
-                if (idWidth + 6 < row.w() / 2) {
-                    graphics.drawString(font, idText, row.right() - 3 - idWidth, row.y() + 1,
-                            PatternTypeSelectorLayout.COLOR_DIM_TEXT, false);
+                // 🔴 名字优先：id 只有在「名字 + 空隙 + id 都放得下」时才画（见 Layout#rowLabels）
+                PatternTypeSelectorLayout.RowLabels labels = PatternTypeSelectorLayout.rowLabels(
+                        entry.name(), entry.id().toString(), row.w(), font::width);
+                graphics.drawString(font, labels.name(), row.x() + PatternTypeSelectorLayout.ROW_TEXT_LEFT,
+                        row.y() + 1, nameColor, false);
+                if (labels.id() != null) {
+                    graphics.drawString(font, labels.id(),
+                            row.right() - PatternTypeSelectorLayout.ROW_TEXT_RIGHT - font.width(labels.id()),
+                            row.y() + 1, PatternTypeSelectorLayout.COLOR_DIM_TEXT, false);
+                }
+                if (hovered) {
+                    hoveredRow = i;
+                    hoveredEntry = entry;
                 }
             }
         }
@@ -253,10 +269,14 @@ public final class PatternTypeSelectorRenderer {
                             : PatternTypeSelectorLayout.COLOR_SCROLL_THUMB);
         }
 
-        // ---- 底部统计（左：条数；右：本地选择 + 样板里的真实值）
+        // ---- 底部统计（🔴 画在列表【之后】+ 自带不透明底条 ⇒ 既不会被列表盖住，也不会被后面的东西穿透）
         PatternTypeSelectorLayout.Rect footer = PatternTypeSelectorLayout.footer(rect);
+        graphics.fill(footer.x(), footer.y(), footer.right(), footer.bottom(),
+                PatternTypeSelectorLayout.COLOR_FOOTER_BG);
+        graphics.fill(footer.x(), footer.y(), footer.right(), footer.y() + 1,
+                PatternTypeSelectorLayout.COLOR_PANEL_BORDER_SOFT);
         String counts = "共 " + RecipeTypeCatalog.all().size() + " · 匹配 " + entries.size();
-        graphics.drawString(font, counts, footer.x(), footer.y(),
+        graphics.drawString(font, counts, footer.x() + 1, footer.y() + 2,
                 PatternTypeSelectorLayout.COLOR_DIM_TEXT, false);
 
         String realText = "样板内：" + (written.empty()
@@ -264,11 +284,54 @@ public final class PatternTypeSelectorRenderer {
                 : RecipeTypeCatalog.nameOf(written.first()) + (written.count() > 1 ? " 等" + written.count() + "项" : ""));
         String localText = "已选：" + (local == null ? "无" : RecipeTypeCatalog.nameOf(local));
         String rightText = localText + "  " + realText;
-        String trimmedRight = trim(font, rightText, Math.max(0, footer.w() - font.width(counts) - 8));
+        String trimmedRight = trim(font, rightText, Math.max(0, footer.w() - font.width(counts) - 10));
         if (!trimmedRight.isEmpty()) {
-            graphics.drawString(font, trimmedRight, footer.right() - font.width(trimmedRight), footer.y(),
-                    PatternTypeSelectorLayout.COLOR_DIM_TEXT, false);
+            graphics.drawString(font, trimmedRight, footer.right() - 1 - font.width(trimmedRight),
+                    footer.y() + 2, PatternTypeSelectorLayout.COLOR_DIM_TEXT, false);
         }
+
+        // ---- 行 tooltip：🔴 画在最后 ⇒ 永远在最上层（本方法返回后本帧不再有我们的绘制）
+        if (hoveredEntry != null && hoveredRow >= 0) {
+            graphics.renderComponentTooltip(font, List.of(
+                    Component.literal(hoveredEntry.name()).withStyle(ChatFormatting.WHITE),
+                    Component.literal(hoveredEntry.id().toString()).withStyle(ChatFormatting.DARK_GRAY)),
+                    mouseX, mouseY);
+        }
+    }
+
+    /**
+     * 把选择器遮罩层压到<b>所有已画内容之上</b>。
+     *
+     * <h2>为什么必须做（用户报「后面的物品图标 / tooltip 会露出来」的真根因）</h2>
+     * {@code GuiGraphics.fill} 用的是 {@code RenderType.gui()}，javap 实证它的状态是
+     * <b>{@code LEQUAL_DEPTH_TEST}</b>（{@code RenderType.<clinit>} offset 1732
+     * {@code getstatic LEQUAL_DEPTH_TEST}），而同一批 GUI 里：
+     * <ul>
+     *   <li>{@code GuiGraphics.fill(...)} 的 z = <b>0</b>（{@code fill(IIIIII)} offset 6 {@code iconst_0}）；</li>
+     *   <li>物品图标 z = <b>150</b>（{@code GuiGraphics#renderItem} offset 47 {@code sipush 150}）；</li>
+     *   <li>物品数量等装饰 z = <b>200</b>（{@code renderItemDecorations} offset 52 {@code ldc 200.0f}）；</li>
+     *   <li>tooltip z = <b>400</b>（{@code renderTooltipInternal} offset 230 {@code ldc 400.0f}）。</li>
+     * </ul>
+     * GUI 的正交投影里 z 越大越靠近镜头 ⇒ 这些像素在深度缓冲里的值<b>比我们的 z=0 小</b>，
+     * 于是我们的填充以 {@code LEQUAL} 去比<b>全部失败</b>：面板上正好被"打洞"，
+     * 物品图标 / 数量 / tooltip 原样穿出来 —— 这跟底色 alpha 是多少<b>无关</b>，
+     * 就算 alpha=0xFF 也挡不住。
+     *
+     * <h2>修法</h2>
+     * <ol>
+     *   <li>{@code graphics.flush()}：先把还排在顶点缓冲里的 GUI 批次真正画出去
+     *       （tooltip 走 {@code drawManaged} 会自己 flush，物品则不一定在同一个缓冲里排队）；
+     *       少了这一步，后面的清深度会"清在排队之前"，那些像素会在我们之后才落屏、反而压在上面。</li>
+     *   <li>{@code RenderSystem.clear(GL_DEPTH_BUFFER_BIT)}：把深度清成 1.0 ⇒
+     *       此后本帧任何 z（0 / 150 / 200 / 400 …）都能过 {@code LEQUAL}，
+     *       我们按提交顺序叠在最上层。</li>
+     * </ol>
+     * 为什么可以一口清掉：本方法是 {@code ScreenEvent.Render.Post} 里最后一件事，
+     * 本帧之后不再有"需要靠深度互相遮挡"的 GUI 绘制；而深度缓冲在每帧 GUI 渲染开始时本来就会被清。
+     */
+    private static void beginOverlay(GuiGraphics graphics) {
+        graphics.flush();
+        RenderSystem.clear(GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
     }
 
     // ------------------------------------------------------------------ 工具
@@ -281,27 +344,8 @@ public final class PatternTypeSelectorRenderer {
         graphics.fill(rect.right() - 1, rect.y() + 1, rect.right(), rect.bottom() - 1, color);
     }
 
-    /** 按像素宽截断并补省略号。 */
+    /** 按像素宽截断并补省略号（宽度函数是 {@link Font} 的；排布规则与离线装置共用 Layout 里那份）。 */
     static String trim(Font font, String text, int maxWidth) {
-        if (text == null || text.isEmpty() || maxWidth <= 0) {
-            return "";
-        }
-        if (font.width(text) <= maxWidth) {
-            return text;
-        }
-        String ellipsis = "…";
-        int ellipsisWidth = font.width(ellipsis);
-        StringBuilder builder = new StringBuilder(text.length());
-        int width = 0;
-        for (int i = 0; i < text.length(); i++) {
-            String ch = String.valueOf(text.charAt(i));
-            int charWidth = font.width(ch);
-            if (width + charWidth + ellipsisWidth > maxWidth) {
-                break;
-            }
-            builder.append(ch);
-            width += charWidth;
-        }
-        return builder.append(ellipsis).toString();
+        return PatternTypeSelectorLayout.trim(text, maxWidth, font::width);
     }
 }

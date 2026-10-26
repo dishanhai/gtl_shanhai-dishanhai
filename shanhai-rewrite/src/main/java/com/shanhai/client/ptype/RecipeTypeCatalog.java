@@ -3,6 +3,7 @@ package com.shanhai.client.ptype;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.shanhai.ShanhaiMod;
+import com.shanhai.machine.stellar.ShanhaiRecipeTypeLabels;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.api.distmarker.Dist;
@@ -30,14 +31,14 @@ import java.util.Map;
  * ⇒ GTCEu + gtladditions + 本模组自己注册的配方类型会<b>自动</b>全部出现在列表里，
  * 上游删/加类型时本界面不需要改一行代码。
  *
- * <h2>2. 中文名怎么来（和 gtlcore 显示完全同源）</h2>
- * 用 gtlcore 自己的公开工具 {@code PatternQuickUploadMetadata.recipeTypeName(id)}。
- * 它的字节码是 {@code Component.translatable(namespace + "." + path)}
- * （{@code makeConcatWithConstants} 的配方串就是「占位符 点 占位符」，两段各喂 namespace / path）⇒ gtceu 的
- * {@code assets/gtceu/lang/zh_cn.json} 里正好就是 {@code "gtceu.macerator": "研磨机"} 这种键
- * （已实证读 jar：assembler/chemical_reactor/distillery/electric_furnace/macerator 全部命中）。
- * <p>键不存在时（第三方 addon 自定义类型常见）{@code getString()} 会原样返回键本身，
- * 所以这里判等后走 {@link #prettify(ResourceLocation)} 兜底（下划线换空格 + 首字母大写）。
+ * <h2>2. 中文名怎么来（回退链复用本工程已有实现）</h2>
+ * 走 {@link ShanhaiRecipeTypeLabels#displayName} —— 它是上游 {@code wildcardRecipeTypeDisplayName}
+ * 逐字照抄的 5 级 lang 键回退（{@code ns.path} → {@code gtceu.path} → {@code gtceu.recipe_type.path}
+ * → {@code recipe_type.path} → {@code gtceu.recipe_type.ns.path}），判据是「译文 ≠ 键」。
+ * 之后再用 gtlcore 的公开工具 {@code PatternQuickUploadMetadata.recipeTypeName(id)} 兜一层
+ * （它的键就是第 ① 级，与 JEI 快速上传同源），都拿不到就<b>直接显示 {@code ns:path}</b>。
+ * <p>{@code gtceu} 的 {@code assets/gtceu/lang/zh_cn.json} 里正好就是 {@code "gtceu.macerator": "研磨机"}
+ * 这种键（已实证读 jar：assembler/chemical_reactor/distillery/electric_furnace/macerator 全部命中）。
  *
  * <h2>3. 排序</h2>
  * 按<b>中文名</b>排序：用 {@link Collator}（{@code Locale.CHINA}，JDK/CLDR 中文排序＝拼音序），
@@ -138,7 +139,7 @@ public final class RecipeTypeCatalog {
         }
     }
 
-    /** 中文名（解析顺序：gtlcore 的 translatable 键 → 兜底美化；带缓存，见 {@link #NAME_CACHE}）。 */
+    /** 中文名（解析顺序：既有 5 级 lang 回退链 → gtlcore 的同一套键 → {@code ns:path}；带缓存）。 */
     public static String nameOf(ResourceLocation id) {
         if (id == null) {
             return "?";
@@ -152,7 +153,27 @@ public final class RecipeTypeCatalog {
         return resolved;
     }
 
+    /**
+     * 名字解析（<b>回退链复用本工程已有实现，不另写一套</b>）。
+     *
+     * <ol>
+     *   <li>{@link ShanhaiRecipeTypeLabels#displayName} —— 上游
+     *       {@code wildcardRecipeTypeDisplayName} 逐字照抄的 5 级键：
+     *       {@code ns.path}（= {@code toLanguageKey()}）→ {@code gtceu.path}
+     *       → {@code gtceu.recipe_type.path} → {@code recipe_type.path}
+     *       → {@code gtceu.recipe_type.ns.path}；判据是「译文 ≠ 键」；</li>
+     *   <li>gtlcore 的 {@code PatternQuickUploadMetadata.recipeTypeName(id)}（与 JEI 快速上传同源，
+     *       它的键其实就是第 ①级；放在这里是为了"上游改键时我们跟着改"的兼容位）；</li>
+     *   <li>都拿不到 ⇒ <b>直接显示 {@code ns:path}</b>（用户口径：「取不到中文名就显示 ns:path」）。
+     *       旧实现在这里会 {@link #prettify} 成英文，与实际显示预期不符，已不再用于本界面。</li>
+     * </ol>
+     */
     private static String resolveName(ResourceLocation id) {
+        String chained = ShanhaiRecipeTypeLabels.displayName(id.getNamespace(), id.getPath(),
+                key -> Component.translatable(key).getString());
+        if (!chained.equals(id.getPath()) && !ShanhaiRecipeTypeLabels.UNKNOWN.equals(chained)) {
+            return chained;
+        }
         String key = id.getNamespace() + "." + id.getPath();
         try {
             Component component = org.gtlcore.gtlcore.integration.ae2.pattern.PatternQuickUploadMetadata
@@ -162,9 +183,9 @@ public final class RecipeTypeCatalog {
                 return translated;
             }
         } catch (Throwable ignored) {
-            // gtlcore 缺席 / 该 id 让它抛异常 ⇒ 走下面的兜底
+            // gtlcore 缺席 / 该 id 让它抛异常 ⇒ 走下面的 ns:path
         }
-        return prettify(id);
+        return id.toString();
     }
 
     /**

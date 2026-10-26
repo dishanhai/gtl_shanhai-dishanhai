@@ -35,6 +35,66 @@ public final class BlackHoleLensSpec {
 
     private BlackHoleLensSpec() {}
 
+    // ==========================================================================================
+    // 🔴 着色器 uniform 的「可选集合」—— 与 BlackHoleLensRenderer.REQUIRED_UNIFORMS 配套
+    // ==========================================================================================
+
+    /**
+     * <b>可选 uniform</b>：链接后的程序里取不到它 ⇒ <b>只打一行 INFO，不降级</b>。
+     *
+     * <h2>判据：「着色器里没人读它」和「着色器坏了」是两件事</h2>
+     * <ul>
+     *   <li>GLSL 编译器会把<b>只声明、从不读取</b>的 uniform 整条删掉 ⇒
+     *       {@code glGetUniformLocation} 返回 −1 ⇒ vanilla 的 {@code ShaderInstance#updateLocations}
+     *       打一行 {@code could not find uniform named …} 并且<b>不把它放进 uniformMap</b> ⇒
+     *       {@code ShaderInstance#getUniform} 返回 {@code null}。这是<b>正常</b>的优化结果，不是故障。</li>
+     *   <li>「真的坏了」（名字打错 / fsh 里没声明 / 链接失败 / 驱动不给编译）<b>同样</b>表现为
+     *       {@code getUniform == null}。两种 null 在调用处长得一模一样，只能靠这份名单区分：
+     *       <br>· <b>在名单里</b> ⇒ 只 {@code LOGGER.info} 一行 {@link #optionalMissingLine}，
+     *       <b>不降级</b>，一级透镜照旧画（缺了它画面逐像素不变）；
+     *       <br>· <b>不在名单里</b> ⇒ 保持原行为：{@code WARN} + 降二级
+     *       （那说明真的坏了 —— 宁可画贴图，也别画出一坨错的）。</li>
+     * </ul>
+     *
+     * <h2>什么时候才可以把一项登记进来</h2>
+     * 只有当它<b>只用于日志 / 诊断 / 契约占位</b>、画面缺了它<b>逐像素不变</b>时才登记。
+     * 参与画面的（颜色、几何、门控）一律<b>不许</b>登记 —— 那种项必须在 shader 里真的读它。
+     *
+     * <h2>本工程已经踩过两次（同一个形态）</h2>
+     * <ol>
+     *   <li>{@code uScreenSize}：声明了但没读 ⇒ 被优化掉 ⇒ 判成缺失 ⇒ <b>洞内一帧都不渲染</b>
+     *       （实机 {@code fallback=2 reason=inside_uniform_missing:uScreenSize}）。</li>
+     *   <li>{@code uHoleDepth}：采样门改成「逐像素自比」之后没人读它了 ⇒ 被优化掉 ⇒ 判成缺失 ⇒
+     *       <b>整条一级透镜永久降二级静态贴图</b>，用户原话「<b>现在引力透镜完全不显示了</b>」
+     *       （实机 {@code fallback=2 reason=uniform_missing:uHoleDepth} ×13，每一次之前 2 ms 都有
+     *       vanilla 的 {@code could not find uniform named uHoleDepth}）。</li>
+     * </ol>
+     * ⇒ <b>铁律</b>：新增 / 改动任何 uniform 时，<b>要么真的读它，要么把它登记到这里</b>。
+     * 只有这两种合法状态；"声明了却谁都不读"必然被编译器删掉。
+     */
+    public static final java.util.List<String> OPTIONAL_UNIFORMS = java.util.List.of(
+            // 洞心平面的窗口深度。首选做法是让 shader 真的读它（fsh 里 `refDepth = max(dSelf, uHoleDepth)`）；
+            // 这里登记是第二道保险：万一哪天那个 max 又被改掉，也只是少一行日志，不会把整条透镜降级。
+            "uHoleDepth"
+    );
+
+    /** 是不是「缺了不影响画面、只该打一行日志」的可选项。 */
+    public static boolean isOptionalUniform(String name) {
+        return name != null && OPTIONAL_UNIFORMS.contains(name);
+    }
+
+    /**
+     * 可选 uniform 取不到时<b>那唯一一行 INFO</b>（格式固定、可被日志断言；一面会话一次）。
+     *
+     * <pre>
+     *   [SHANHAI-BH] lens_uniform_optional_missing name=uHoleDepth note=该项只用于日志/诊断，缺了不影响画面
+     * </pre>
+     */
+    public static String optionalMissingLine(String name) {
+        return BlackHoleFallbackGuard.PREFIX + " lens_uniform_optional_missing name="
+                + BlackHoleFallbackGuard.sanitize(name) + " note=该项只用于日志/诊断，缺了不影响画面";
+    }
+
     /** 临界碰撞参数 / Rs = 3√3/2（与着色器 {@code B_CRIT} 同值）。 */
     public static final double B_CRIT = 2.598076211353316D;
 
@@ -111,10 +171,34 @@ public final class BlackHoleLensSpec {
     /**
      * "相机在洞里"的判定倍率：{@code dist ≤ 可见黑盘半径 × 这个值} ⇒ 走<b>洞内视角</b>。
      *
-     * <p>可见黑盘半径 = {@link #shadowRadiusBlocks}（{@code B_CRIT × rsBlocks}）；乘 1.02 留 2% 余量，
-     * 避免正好卡在球面上时来回抖。
+     * <h2>🔴 2026-10-25 傍晚：{@code 1.02 → 1.6}（<b>这就是"里面往外看什么都不画"的真因</b>）</h2>
+     * 用户实机原话：「<b>黑洞我在里面往外看还是不能渲染</b>」。日志 {@code GTL山海9.10test\logs\latest.log}
+     * 里 15896 行、{@code inside=true} <b>0 行</b>；{@code dist=} 的最小值是 <b>5.3</b>
+     * （另有 7.8 / 13.1 / 17 / 18.8 / 22.1 / 28 / 28.3）。而改前的阈值恰好是：
+     * <pre>
+     *   可见黑盘半径 = B_CRIT × rsBlocks = 2.598 × 2.0 = 5.196 格
+     *   改前阈值     = 5.196 × 1.02        = 5.30 格   ← 与日志最小值 5.3 逐位相同
+     * </pre>
+     * ⇒ 那 2% 的"余量"小于玩家一帧的行走位移、也小于浮点误差的量级，<b>判据实际永远不成立</b>：
+     * 走得更近一点就 {@code inside=true}，可那一刻起日志行又被另一处早退吞掉了 —— 两头都看不见。
+     *
+     * <h2>改后的阈值（两个口径取大者，见 {@link #insideThresholdBlocks}）</h2>
+     * <pre>
+     *   ① 可见黑盘半径 × 1.6           = 8.31 格
+     *   ② 可见黑盘半径 + 2.0 格        = 7.20 格        ⇒ max = 8.31 格
+     * </pre>
+     * 为什么是"1.6 倍 / +2 格"而不是贴着脸（1.02）：视界半径 5.196 格的球，玩家身体宽 0.6 格、
+     * 眼高 1.62 格 ⇒ <b>相机"实际进到球里"时 dist 还在 4~6 格之间</b>；要把"刚跨进球面但还没到球心"
+     * 这一段也当成洞内，阈值必须比球面明显外扩。<b>+2 格</b>那条是给 {@code /shanhai bh scale}
+     * 调小的场合兜底（scale 很小时 1.6 倍只多出零点几格，会再次卡在边界上）。
      */
-    public static final double INSIDE_FACTOR = 1.02D;
+    public static final double INSIDE_FACTOR = 1.6D;
+
+    /** 洞内判据的<b>绝对余量</b>（格）：阈值再取 {@code 可见黑盘半径 + 这个值} 一起比大（见类注释）。 */
+    public static final double INSIDE_MARGIN_BLOCKS = 2.0D;
+
+    /** 改前的阈值倍率（只用于日志/报告的"改前 → 改后"对照，代码里不再使用）。 */
+    public static final double INSIDE_FACTOR_BEFORE = 1.02D;
 
     /** 吸积盘内缘 / Rs（= 史瓦西 ISCO；与着色器 {@code DISK_INNER} 同值）。 */
     public static final double DISK_INNER_RS = 3.0D;
@@ -185,6 +269,34 @@ public final class BlackHoleLensSpec {
         return DISK_OUTER_RS * rsBlocks;
     }
 
+    /**
+     * <b>洞内判据的阈值（格）</b>：{@code max(可见黑盘半径 × INSIDE_FACTOR, 可见黑盘半径 + INSIDE_MARGIN_BLOCKS)}。
+     *
+     * <p>这是"相机在洞里"这件事的<b>唯一</b>判据来源 —— 渲染器、日志里的 {@code insideThr=}、
+     * 离线出图器全都调这一个函数，不允许任何一处另写一遍"× 1.02"。
+     *
+     * @param rsBlocks 运行期视界半径（格）= {@code RS_BLOCKS × BlackHoleTuning.scale()}
+     */
+    public static double insideThresholdBlocks(double rsBlocks) {
+        final double shadow = shadowRadiusBlocks(rsBlocks);
+        return Math.max(shadow * INSIDE_FACTOR, shadow + INSIDE_MARGIN_BLOCKS);
+    }
+
+    /** {@link #insideThresholdBlocks} 的反解：给定距离，返回 {@code dist / 阈值}（1.0 = 正好在判据边界）。 */
+    public static double insideRatioOf(double distBlocks, double rsBlocks) {
+        final double thr = insideThresholdBlocks(rsBlocks);
+        return thr > 1.0E-9D ? distBlocks / thr : 0.0D;
+    }
+
+    /** 一行写清"洞内阈值"（进日志的 {@code insideThr=} 与报告都用它，避免两处各写一遍口径）。 */
+    public static String describeInside(double rsBlocks) {
+        final double shadow = shadowRadiusBlocks(rsBlocks);
+        return String.format(java.util.Locale.ROOT,
+                "可见黑盘半径=%.2f格 阈值=%.2f格(=max(%.2f×%.2f, %.2f+%.1f)) 改前阈值=%.2f格(×%.2f)",
+                shadow, insideThresholdBlocks(rsBlocks), shadow, INSIDE_FACTOR, shadow,
+                INSIDE_MARGIN_BLOCKS, shadow * INSIDE_FACTOR_BEFORE, INSIDE_FACTOR_BEFORE);
+    }
+
     /** 黑盘占"半宽"的比例（贴图里也是这个数，两条路靠它对齐）。 */
     public static double shadowFraction() {
         return B_CRIT / LENS_RANGE_RS;
@@ -194,11 +306,12 @@ public final class BlackHoleLensSpec {
     public static String describe(double rsBlocks) {
         return String.format(java.util.Locale.ROOT,
                 "rs=%.2f格 黑盘半径=%.2f格 透镜半径=%.2f格 吸积盘=%.2f..%.2f格 盘/黑盘=%.2fx "
-                        + "盘倾角=%.1f° DISK_GAIN=%.2f RING_GAIN=%.2f 兜底贴图=%d²",
+                        + "盘倾角=%.1f° DISK_GAIN=%.2f RING_GAIN=%.2f 兜底贴图=%d² 洞内阈值=%.2f格(×%.2f)",
                 rsBlocks, shadowRadiusBlocks(rsBlocks), lensRadiusBlocks(rsBlocks),
                 diskInnerBlocks(rsBlocks), diskOuterBlocks(rsBlocks),
                 diskOuterBlocks(rsBlocks) / Math.max(1.0E-9D, shadowRadiusBlocks(rsBlocks)),
-                DISK_TILT_DEG, (double) DISK_GAIN, (double) RING_GAIN, FALLBACK_TEX_SIDE);
+                DISK_TILT_DEG, (double) DISK_GAIN, (double) RING_GAIN, FALLBACK_TEX_SIDE,
+                insideThresholdBlocks(rsBlocks), INSIDE_FACTOR);
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════

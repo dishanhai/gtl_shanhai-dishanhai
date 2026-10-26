@@ -168,6 +168,20 @@ public final class ShanhaiConfig {
         /** 🆕 配方逻辑只读探针总开关（默认<b>开</b>）。 */
         public ForgeConfigSpec.BooleanValue recipeProbe;
 
+        /**
+         * 🆕 归墟视界枢核的<b>成型检查合并</b>开关（默认<b>开</b>）。
+         *
+         * <p>开：同一 tick 内同一台主机结构的多次方块变化，压成该 tick 末尾的<b>一次</b>
+         * {@code MultiblockState#onBlockStateChanged} ⇒ 每 tick 最多一次全量图案检查
+         * （归墟视界枢核的图案是 148×135×131 ≈ 261.7 万格，一次检查几十到上千毫秒）。
+         * 关：逐字节回到上游行为（每次方块变化都立刻全量检查一次）。
+         *
+         * <p>🔴 只作用于 {@code com.shanhai.machine.host.GuixuVisionCoreMachine}；
+         * 其它 mod 与 gtceu/gtlcore 的多方块一律不受影响。
+         * <p>🔴 代价：结构失效/重新成型最多晚 1 tick（≈50 ms）才发现 —— 这是合并的必然代价。
+         */
+        public ForgeConfigSpec.BooleanValue patternCheckCoalesce;
+
         /** 星律样板总成：普通样板区每页行数（默认 6 = 既有行为；列数固定 9）。 */
         public ForgeConfigSpec.IntValue stellarPatternRowsPerPage;
 
@@ -281,6 +295,19 @@ public final class ShanhaiConfig {
                             "   （刻意如此：那两行是「这一轮到底开没开、探针到底挂没挂」的唯一机器证据）",
                             "改完需要重启客户端/服务端才生效")
                     .define("recipe_probe", true);
+            patternCheckCoalesce = builder
+                    .comment("归墟视界枢核的成型检查【合并】开关（默认 true = 开）",
+                            "开 = 同一 tick 内同一台主机的多次方块变化，压成该 tick 末尾的一次 onBlockStateChanged",
+                            "     ⇒ 每 tick 最多一次全量图案检查（本机图案 148×135×131 ≈ 261.7 万格）",
+                            "     ⇒ 一键搭建铺两万多格时，上游原本会做两万多次全量检查（卡服几十秒）",
+                            "关 = 逐字节回到上游行为（每次方块变化都立刻全量检查一次）",
+                            "🔴 只作用于 GuixuVisionCoreMachine（我们那台主机）；其它 mod / gtceu / gtlcore 的多方块不受影响",
+                            "🔴 代价：结构失效 / 重新成型最多晚 1 tick（≈50ms）才发现 —— 拆方块后多等半秒内掉成型，属预期",
+                            "🔴 拿不到服务器线程 / 拿不到 controller 时一律【不合并】，宁可慢不可错；异步检查那条路完全不动",
+                            "自证：启动后第一次 ServerTickEvent.End 打一行 [SHANHAI-PATCOALESCE] armed=… threshold=200000",
+                            "合并的实际账目在 [SHANHAI-PATPROBE] summary 的 deferred= / applied= / applied_max_ms= 里",
+                            "改完需要重启客户端/服务端才生效")
+                    .define("pattern_check_coalesce", true);
             builder.pop();
 
             // ============================================================ 阶段八 ③：星律样板总成的版面

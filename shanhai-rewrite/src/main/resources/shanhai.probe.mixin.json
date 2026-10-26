@@ -8,7 +8,10 @@
     "ShanhaiRecipeLogicProbeMixin",
     "ShanhaiWorkableMultiblockProbeMixin",
     "ShanhaiMutableRecipesLogicProbeMixin",
-    "ShanhaiGtlAddMultipleRecipesLogicProbeMixin"
+    "ShanhaiGtlAddMultipleRecipesLogicProbeMixin",
+    "ShanhaiPatternTimingProbeMixin",
+    "ShanhaiHostFormedProbeMixin",
+    "ShanhaiMultiblockStateCoalescerMixin"
   ],
   "injectors": {
     "defaultRequire": 0

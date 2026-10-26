@@ -16,6 +16,8 @@ import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
+import com.gregtechceu.gtceu.api.machine.trait.IRecipeHandlerTrait;
+import com.gregtechceu.gtceu.api.machine.trait.NotifiableFluidTank;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.integration.ae2.gui.widget.AETextInputButtonWidget;
 import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEFluidList;
@@ -40,6 +42,9 @@ import com.lowdragmc.lowdraglib.syncdata.annotation.DescSynced;
 import com.lowdragmc.lowdraglib.syncdata.annotation.LazyManaged;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
+import com.shanhai.api.machine.IShanhaiNormalSupplyPart;
+import com.shanhai.api.machine.ShanhaiSupplyOnlyFluidHandler;
+import com.shanhai.api.machine.ShanhaiSupplyOnlyItemHandler;
 import com.shanhai.machine.wildcard.AutoForgeMultiplierHost;
 import com.shanhai.machine.wildcard.AutoForgeMultiplierPanel;
 import com.shanhai.machine.wildcard.ShanhaiAutoForgeMultiplier;
@@ -244,7 +249,8 @@ import java.util.List;
 //    抽成 17 个方法，本机逐个对上（映射表见类尾 §AutoForgeMultiplierHost 那一节）。
 //    依据：用户原话「我要和超级样板总成的那个一模一样，不要你这乱搞」。
 public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPartMachine
-        implements AutoForgeMultiplierHost {
+        implements AutoForgeMultiplierHost, IShanhaiNormalSupplyPart,
+                com.shanhai.api.machine.ShanhaiPatternTypeBlockSource {
 
     // ---------------------------------------------------------------- 规格（用户给的数字）
 
@@ -652,10 +658,18 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
 
     // ---------------------------------------------------------------- 阶段四：新增字段
 
-    /** ④ 神锻样板模式开关（默认关；开了只改「对 AE 声明的产出」）。 */
+    /**
+     * ④ 神锻样板模式开关。
+     *
+     * <p>🔴 <b>2026-10-25 用户点单：默认【开】</b>（原话「星律样板总成的神锻模式也默认开启」）。
+     * 开了只改「对 AE 声明的产出」，不动宿主产量语义。
+     *
+     * <p>⚠️ 因为字段是 {@code @Persisted}，**已经存在的那台**读档时仍会用它自己存档里的值（可能是关）
+     * ⇒ 老机器需要在面板上手动点一下「神锻模式」；本改动只影响新建/未写档的机器。
+     */
     @DescSynced
     @Persisted
-    private boolean forgePatternMode = false;
+    private boolean forgePatternMode = true;
 
     /** ④ 神锻倍率（1..30，默认 15）。 */
     @DescSynced
@@ -734,30 +748,424 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     private String patternAmbiguousMaskHex = "";
 
     /**
-     * 神锻改写后的样板 → 原槽号。
+     * <b>C2（2026-10-27）：第二张 identity 表已删除，只留 {@link #expandedToSlot} 一份登记。</b>
      *
-     * <p>🔴 用 {@link java.util.IdentityHashMap}：AE 持有的是我们返回的那份实例，
-     * 靠 <b>identity</b> 反查才不会被「两个内容相同的改写样板」互相覆盖。
+     * <p>改前是「raw 与 effective 两份都登记 + 另有一张 rewrittenToSlot 身份表」⇒ 同一个槽号
+     * 在两张 identity 表里各有一份键，AE 手里拿到的可能是 raw（上一次的实例）也可能是 effective
+     * —— <b>这正是"两个池对同一条配方"的结构性入口</b>（用户口径：一个池只对应一条配方）。
+     * <p>现在：<b>AE 拿到的（{@link #effectivePatterns} 的元素）= {@link #expandedToSlot} 的键</b>，
+     * 一一对应、只有一份。{@code rewritten} 的条数改由 {@link #shanhaiForgedCount} 记。
      */
-    private final java.util.Map<IPatternDetails, Integer> rewrittenToSlot = new java.util.IdentityHashMap<>();
+    private int shanhaiForgedCount;
 
-    /** 神锻改写结果的快照（与 {@link #rewrittenToSlot} 同生共死；AE 每 tick 都会读它）。 */
-    private final List<IPatternDetails> forgePatternSnapshot = new ArrayList<>();
+    /**
+     * <b>C4：读路径永不重建 —— 重建时机与次数记在这里。</b>
+     *
+     * <p>纯逻辑核见 {@link ShanhaiPatternRebuildPolicy}（离线探针可跑正向/负对照）。
+     * 机器侧只在三个事件点 + {@code update()} 跳消费本策略的脏标记。
+     */
+    private final ShanhaiPatternRebuildPolicy shanhaiRebuildPolicy = new ShanhaiPatternRebuildPolicy();
 
-    /** 神锻改写快照是否过期。 */
+    /**
+     * <b>C3：通配符展开槽号的动态分配器</b>（原版无上限；K=128 截断已删除）。
+     *
+     * <p>槽号 = {@link ShanhaiWildcardLayout#EXPAND_OFFSET} + 本分配器发放的"相对下标"；
+     * {@link #getInternalSlotCount()} 因此是<b>动态</b>的（= 1130 + 已分配数）。
+     */
+    private final ShanhaiWildcardSlotAllocator shanhaiSlotAllocator =
+            new ShanhaiWildcardSlotAllocator(ShanhaiWildcardLayout.MOTHER_COUNT);
+
+    /** 槽 → 该槽声明的类型 id（per-slot 类型闸的缓存；{@link #shanhaiInvalidateGateCache()} 清）。 */
+    private final java.util.Map<Integer, List<String>> shanhaiSlotDeclaredTypeCache = new java.util.HashMap<>();
+
+    /** 闸缓存里顺带算出来的：本机不支持的那个"样板声明类型"（{@code null} = 没有）。 */
+    private String shanhaiUnsupportedDeclaredType;
+
+    /** 闸缓存里顺带算出来的：有未声明类型的样板正被闸拦着。 */
+    private boolean shanhaiUndeclaredBlocked;
+
+    /** TYPEROUTE 槽级判据行的限流（同形 20 tick 一条）。 */
+    private String shanhaiSlotGateLogState = "";
+
+    private long shanhaiSlotGateLogTick = Long.MIN_VALUE;
+
+    /**
+     * 🔴 <b>AE 看到的那份清单 = 这个字段本身（的只读视图），不重建、不拷贝元素。</b>
+     *
+     * <h2>为什么必须是「一个字段 + 一次遍历」</h2>
+     * 原版 gtlcore 的 {@code MEWildcardPatternBufferPartMachine#getAvailablePatterns}
+     * （{@code javap -c} 偏移 0–7）= {@code Collections.unmodifiableList(this.expandedPatterns)}，
+     * 而 {@code expandedPatterns} 与 {@code patternToSlotMap} 是<b>同一个循环</b>里一起填的
+     * （{@code refreshPatterns} 偏移 35–146）⇒「AE 手里那个对象」<b>永远</b>等于「认领表里的键」，
+     * 孤儿状态在结构上不存在。
+     *
+     * <p>本类原来的三层拼接（闸 → 展开 → 神锻；两趟遍历 + 两张脏标记 + 两张 identity 表）破掉了这个等式：
+     * 展开表一重建，AE 手里的实例立刻失效 ⇒ {@code pushPattern} 恒 false
+     * （实机读数 {@code RECIPE claim … ok=false reason=patternNotOurs}）。
+     *
+     * <p>现在照那个形状合并：{@link #shanhaiRebuildPatternTables()} <b>一次遍历</b>同时产出
+     * 「{@link #expandedToSlot} 的键」与「本清单的元素」——两者是<b>同一批实例</b>。
+     */
+    private final List<IPatternDetails> effectivePatterns = new ArrayList<>();
+
+    /**
+     * {@link #effectivePatterns} 的只读视图 —— <b>构造期建一次</b>，之后只换内容不换对象。
+     *
+     * <p>与上游同款语义（它们每次 new 一个 view、元素集不变）。这里连 view 都只建一次，
+     * 于是「AE 两次拿到的清单是不是同一个对象」也变成可断言的（纯逻辑探针 ③ 就断言这一点）。
+     */
+    private final List<IPatternDetails> effectivePatternView =
+            java.util.Collections.unmodifiableList(this.effectivePatterns);
+
+    /**
+     * 重建请求标记 —— 与 {@link #expandCacheDirty} <b>合流</b>：任一为 true 都整体重建一次。
+     *
+     * <p>保留本字段是为了不动既有的置脏点（2034 / 3719 / 3745 / 4065 / 4630 / 4747 / 5017 / 5552 等）：
+     * 它们原来只置「神锻快照脏」，现在等价于「整表脏」。两张标记在
+     * {@link #shanhaiRebuildPatternTables()} 末尾<b>一起清零</b>。
+     */
     private boolean forgeCacheDirty = true;
+
+    /** 当前这次 {@link #getAvailablePatterns()} 是否由 AE 亲自发问（给 EXPAND 判据算 {@code aeSync=}）。 */
+    private boolean shanhaiInAePatternQuery = false;
+
+    /** EXPAND 判据的指纹 + 打点（同一指纹 20 tick 内只打一行）。 */
+    private String shanhaiExpandLogState = "";
+    private long shanhaiExpandLogTick = Long.MIN_VALUE;
+    /**
+     * <b>展开槽 → 该样板已预解析并绑定的 GTRecipe</b>（J7 的落地表）。
+     *
+     * <h2>为什么需要第二张表（而不只是交给父类的槽缓存）</h2>
+     * 父类那份槽缓存是 {@code protected final boolean[] cacheRecipe}（长度 = 1080）+
+     * {@code Int2ReferenceMap}，下标一越过 {@link ShanhaiWildcardLayout#PATTERN_SLOTS} 就 AIOOBE
+     * （{@link ShanhaiMEPatternTrait#setSlotCacheRecipe} 原来就是因此对通配符段直接 {@code return}）。
+     * ⇒ 展开槽的"已绑定配方"只能另存一份；本表与 {@link #expandedToSlot} <b>同一次遍历、同一个脏标记</b>重建，
+     * 生命周期完全一致（不存在"认领表换了、绑定还是旧的"）。
+     *
+     * <h2>它怎么进候选表</h2>
+     * {@code MEPatternRecipeHandlePart#getCachedGTRecipe()}（= {@link ShanhaiMEPatternTrait#getCachedGTRecipe()}
+     * 的覆写）把它并进去 ⇒ gtladditions 的 {@code GTRecipeLookupMixin#getRecipeIterator} 偏移 93 会收集它、
+     * 偏移 140–147 交给 {@code IAdditionalRecipeIterator.setAdditionalRecipes(...)}。
+     * <p>⚠️ <b>但它在候选顺序里是"最后"</b>：{@code RecipeIteratorMixin#hasNext()} 偏移 0–62 先把
+     * 原候选（= 控制器当前激活类型）跑完，<b>偏移 65–69 才轮到 additional</b>。⇒ 绑定只保证"这条配方在候选里"，
+     * 不保证"它先被选中"。要强行抢先，唯一在仓室侧可达的闸是
+     * {@code MEPatternBufferRecipeHandlerTraitBase$MEItemInputHandlerBase#meHandleRecipeInner} 的槽级类型过滤
+     * （= 老山海闸① {@code MEPatternBufferItemRecipeTypeFilterMixin}），那要经
+     * {@code createRecipeHandler(IO)} → {@code createMEItemHandler(IO)} 换掉内层 handler，
+     * 本轮<b>没有</b>做（理由与代价见 {@code temp\crossrecipe-impl\报告.md} 的「没做到」一节）。
+     */
+    private final java.util.Map<Integer, com.gregtechceu.gtceu.api.recipe.GTRecipe> shanhaiSlotBoundRecipe =
+            new java.util.HashMap<>();
+
+    /** 最近一次重建：成功绑定的条数 / 因类型反查失败被剔掉的条数（给 EXPAND 判据）。 */
+    private int shanhaiBoundCount = 0;
+    private int shanhaiTypeDroppedCount = 0;
+
+    /** XRECIPE 判据的指纹 + 打点（同槽号同结果 20 tick 内只打一行）。 */
+    private String shanhaiXrecipeLogState = "";
+    private long shanhaiXrecipeLogTick = Long.MIN_VALUE;
+    /** 反查失败 WARN / identity 闸 WARN 的节流指纹（各一条，按母槽|类型 / 槽|类型对）。 */
+    private String shanhaiBindWarnState = "";
+    private String shanhaiGateWarnState = "";
 
     // ---------------------------------------------------------------- 阶段五：展开器字段
 
     /**
-     * 通配符<b>展开槽</b>（{@link ShanhaiWildcardLayout#EXPAND_COUNT} 个 = 50 × K）。
+     * 通配符<b>展开槽</b>（C3 起数量 = 分配器水位 = 实际展开条数；不再有编译期上界）。
      *
      * <p>🔴 每条展开一份独立的 {@code InternalSlot} ⇒ 各自有自己的 itemInventory / fluidInventory /
      * 催化剂数组 ⇒ {@code pushPattern(stacks)} 只写进自己那一格 ⇒ **4 条展开不可能互相串料**。
      * 这正是需求①「防串配方」在物料层的落点（纯算术部分见 {@link ShanhaiWildcardLayout} 类注释 §四）。
      */
-    private final List<MEPatternBufferPartMachineBase.InternalSlot> expandInternalSlots =
-            new ArrayList<>(ShanhaiWildcardLayout.EXPAND_COUNT);
+    /**
+     * 通配符<b>展开槽</b>的 InternalSlot（下标 = 槽号 - {@link ShanhaiWildcardLayout#EXPAND_OFFSET}）。
+     *
+     * <h2>🔴 为什么是"引用数组 + 懒创建"而不是"全量 new"（2026-10-26，K 从 4 提到 128 的代价）</h2>
+     * K=4 时这一段是 200 格，构造器里全量 new 无所谓；<b>K=128 就是 6400 格</b>：
+     * <pre>
+     *   一个 StockingPatternBufferInternalSlot 的组成（{@code javap -p} 逐字段核过）：
+     *      2 × Object2LongOpenHashMap（fastutil 默认 16 容量：Object[16] + long[16]）
+     *      4 × ObjectOpenHashSet     （Object[16]）
+     *      2 × Object2LongArrayMap   （空时只有两个 null 引用）
+     *      1 × SlotCacheManager      （内含 2 个 Object2ObjectOpenHashMap）
+     *   ⇒ 无头实测 ≈ 2.82 KB / 个（temp\stellar-expand\probe\MemoryProbe.java）
+     *   全量 new 6400 个 ≈ 17.2 MB（每台机器！）  ← 这才是真正的"撑爆"
+     * </pre>
+     * 而这些槽在绝大多数机器上是<b>一个都用不到</b>的（没插通配符样板 = 展开条数 0）。
+     * ⇒ 改成「槽号空间是固定上界、对象按需生成」：槽号仍然只由 (母槽, 分支) 决定，
+     * <b>不漂移</b>；只是<b>没被用到的那些格不占内存</b>。
+     *
+     * <h2>⚠️ 懒创建的前提：不许有任何人"按 getInternalSlotCount() 裸扫"</h2>
+     * 只要有一个循环从 0 扫到 {@code getInternalSlotCount()} 再调 {@link #getInternalSlot(int)}，
+     * 6400 个对象就会在一次扫里全被造出来（懒创建等于白做）。所以本类把父类那 4 个
+     * "扫全部槽"的方法<b>全部覆写</b>成「只扫 {@link #shanhaiCandidateSlots()}」：
+     * {@link #getActiveSlots()} / {@link #getActiveAndUnCachedSlots()} /
+     * {@link #getActiveInternalSlots()} / {@link #getMergedInternalSlot()}
+     * （前两个在配方查找里是热路径，见 {@link #shanhaiCandidateSlots()} 的注释）。
+     */
+    /**
+     * 🔴 <b>C3（2026-10-27）：数组按"已分配数"增长，不再有 6400 的编译期上界。</b>
+     *
+     * <p>改前长度 = {@code EXPAND_COUNT}（50×K=128=6400）。现在 K 没了 ⇒
+     * 展开条数就是"这块母样板展开出几条"，数组随 {@link #shanhaiSlotAllocator} 的水位增长；
+     * 元素仍然<b>懒创建</b>（{@link #shanhaiExpandSlotAt(int)} 第一次被问才 new）。
+     */
+    private MEPatternBufferPartMachineBase.InternalSlot[] expandInternalSlots =
+            new MEPatternBufferPartMachineBase.InternalSlot[16];
+
+    /** 已经被懒创建出来的展开槽个数（诊断用；不是槽号上界）。 */
+    private int shanhaiExpandSlotsMaterialized = 0;
+
+    /**
+     * 懒创建/取一个展开槽的 InternalSlot（<b>唯一</b>的创建点）。
+     *
+     * @param index 0 .. 分配器已分配数-1（C3：动态，见 {@link ShanhaiWildcardSlotAllocator}）
+     */
+    private @NotNull MEPatternBufferPartMachineBase.InternalSlot shanhaiExpandSlotAt(int index) {
+        if (index < 0) {
+            throw new IndexOutOfBoundsException("展开槽相对下标不能为负：" + index);
+        }
+        if (index >= this.expandInternalSlots.length) {
+            // 只在"真的分配出这么多条展开"时增长（分配器水位 = 已分配数）。
+            this.expandInternalSlots = java.util.Arrays.copyOf(this.expandInternalSlots,
+                    Math.max(index + 1, this.expandInternalSlots.length * 2));
+        }
+        MEPatternBufferPartMachineBase.InternalSlot slot = this.expandInternalSlots[index];
+        if (slot == null) {
+            // 与母槽同一套：空回调（只保证 getOnContentsChanged() 非 null），绝不接父类那套
+            // recipe-cache 失效逻辑（它会写 cacheRecipe[slot]，而那个数组只有 1080 长）。
+            slot = this.createInternalSlot(ShanhaiWildcardLayout.EXPAND_OFFSET + index);
+            slot.setOnContentsChanged(() -> { });
+            this.expandInternalSlots[index] = slot;
+            this.shanhaiExpandSlotsMaterialized++;
+        }
+        return slot;
+    }
+
+    /**
+     * <b>C3：回收一个展开槽（展开条数变少 / 母样板被拿走时）</b>。
+     *
+     * <p>为什么必须清空：槽号会被<b>后一次</b>重建里的别的母槽复用（见
+     * {@link ShanhaiWildcardSlotAllocator} 的"先复用再抬高水位"）—— 池里残留的料如果不清，
+     * 复用者一上来就带着别人的库存 ⇒ <b>这才是真正的"串料"</b>。
+     * <p>做法：把 item/fluid 两份库存 map 清空、把内部对象<b>丢掉</b>（下次用到时重新 new），
+     * 并把 {@code hasPatternInSlot} 依赖的展开计数交给分配器（那边已经置 -1）。
+     */
+    private void shanhaiDropExpandSlot(int index) {
+        if (index < 0 || index >= this.expandInternalSlots.length) {
+            return;
+        }
+        final MEPatternBufferPartMachineBase.InternalSlot slot = this.expandInternalSlots[index];
+        this.expandInternalSlots[index] = null;
+        if (slot == null) {
+            return;
+        }
+        try {
+            slot.getItemInventory().clear();
+        } catch (Throwable ignored) {
+        }
+        try {
+            slot.getFluidInventory().clear();
+        } catch (Throwable ignored) {
+        }
+        try {
+            slot.clearVirtualSupply();
+        } catch (Throwable ignored) {
+        }
+        this.shanhaiExpandSlotsMaterialized--;
+    }
+
+    /**
+     * <b>需要被"遍历"的槽号</b> = {@code [0, 1130)} 全段 ＋ 当前<b>真正展开出来</b>的那些展开槽。
+     *
+     * <h2>🔴 为什么必须收窄（不只是省内存，是省时间）</h2>
+     * 父类 {@code getActiveSlots()} / {@code getActiveAndUnCachedSlots()} 的实现是
+     * {@code int[] slots = new int[getInternalSlotCount()]; for (i < count) …}
+     * （{@code temp\machine-principle\out\...\MEPatternBufferPartMachineBase.java:398/412} 逐行核过）：
+     * <ul>
+     *   <li>K=4（旧）：1330 个下标 ⇒ 每次调用 {@code new int[1330]}（5.3 KB）＋ 1330 次虚调用；</li>
+     *   <li>K=128 但照旧裸扫：7530 个下标 ⇒ {@code new int[7530]}（<b>30 KB</b>）＋ 7530 次虚调用；</li>
+     * </ul>
+     * 而 {@code getActiveAndUnCachedSlots()} 是<b>配方查找</b>的入口
+     * （{@code MEPatternBufferRecipeHandlerTraitBase:201} → {@code GTRecipeLookupMixin#gtlCore$fromHolder:144}），
+     * 一 tick 里会被问很多次 ⇒ 30 KB/次 的临时数组是实打实的 GC 压力。
+     * <p>收窄是<b>语义等价</b>的：被跳过的那些展开槽 {@code hasPatternInSlot(slot)} 恒 false
+     * （分支号 ≥ 展开条数）⇒ {@code isActive()} 恒 false ⇒ 本来就不可能进任何活跃名单。
+     * <p>顺序仍然是<b>槽号升序</b>（母槽段在前的固定段 → 再按母槽号、分支号升序），与父类一致。
+     */
+    private int[] shanhaiCandidateSlots() {
+        // 🔴 C4：读路径【不重建】（改前这里有一句 `if (expandCacheDirty) rebuild`）。
+        //    展开表由事件点 + update() 消费脏标记来建（见 shanhaiBuildPatternTablesIfDirty）。
+        final int live = this.shanhaiSlotAllocator.slotCount();
+        final int[] out = new int[ShanhaiWildcardLayout.MOTHER_END + live];
+        int n = 0;
+        for (int slot = 0; slot < ShanhaiWildcardLayout.MOTHER_END; slot++) {
+            out[n++] = slot;
+        }
+        // 🔴 C3：展开段 = 分配器已发放的那些相对下标（槽号升序 = 下标升序）。
+        for (int rel = 0; rel < live; rel++) {
+            out[n++] = ShanhaiWildcardLayout.EXPAND_OFFSET + rel;
+        }
+        return out;
+    }
+
+    /**
+     * 父类「扫全部槽拿活跃名单」那一套的收窄版（见 {@link #shanhaiCandidateSlots()}）。
+     *
+     * <p>⚠️ 覆写 protected 方法在这条继承链上是合法的：{@code getActiveSlots()} /
+     * {@code getActiveAndUnCachedSlots()} / {@code getActiveInternalSlots()} 在
+     * {@code MEPatternBufferPartMachineBase} 里都是 {@code protected}、非 final
+     * （{@code javap -p} 实证）⇒ 动态分派生效，trait 侧
+     * {@code MEPatternBufferRecipeHandlerTraitBase.getMachine().getActiveSlots()} 拿到的就是本实现。
+     *
+     * <p>🔴 真正的覆写点在下面「库存直供放行」那一节（{@code getActiveSlots()} /
+     * {@code getActiveAndUnCachedSlots()} 已各有一份、要带上放行名单）；这里只提供
+     * <b>「扫候选集」的那半段</b>，让它们把 {@code super.xxx()} 换成它。
+     */
+    private int[] shanhaiActiveAndUnCachedCandidates() {
+        final int[] candidates = this.shanhaiCandidateSlots();
+        final int[] slots = new int[candidates.length];
+        int size = 0;
+        for (int slot : candidates) {
+            if (this.getInternalSlot(slot).isActive() && !this.hasRecipeCacheInSlot(slot)) {
+                slots[size++] = slot;
+            }
+        }
+        return size == slots.length ? slots : java.util.Arrays.copyOf(slots, size);
+    }
+
+    /** {@link #getActiveSlots()} 的"扫候选集"部分（= 父类实现，只是不扫那 6400 个空展开槽）。 */
+    private int[] shanhaiCandidateActiveSlots() {
+        final int[] candidates = this.shanhaiCandidateSlots();
+        final int[] slots = new int[candidates.length];
+        int size = 0;
+        for (int slot : candidates) {
+            if (this.getInternalSlot(slot).isActive()) {
+                slots[size++] = slot;
+            }
+        }
+        return size == slots.length ? slots : java.util.Arrays.copyOf(slots, size);
+    }
+
+    /**
+     * 活跃 InternalSlot 的迭代视图（父类 {@code getMergedInternalSlot()} 用它做 Jade 合并显示）。
+     *
+     * <p>覆写理由同上：父类版本会从 0 扫到 {@code getInternalSlotCount()} ⇒ 懒创建全废。
+     */
+    @Override
+    protected Iterable<MEPatternBufferPartMachineBase.InternalSlot> getActiveInternalSlots() {
+        final int[] candidates = this.shanhaiCandidateSlots();
+        final List<MEPatternBufferPartMachineBase.InternalSlot> slots = new ArrayList<>(candidates.length);
+        for (int slot : candidates) {
+            final MEPatternBufferPartMachineBase.InternalSlot internal = this.getInternalSlot(slot);
+            if (internal.isActive()) {
+                slots.add(internal);
+            }
+        }
+        return slots;
+    }
+
+    /**
+     * Jade 的合并视图（活跃槽的料 + <b>全部槽</b>的催化剂）。
+     *
+     * <p>父类版本第二段是 {@code for (slotIndex < getInternalSlotCount())} ⇒ 7530 次
+     * {@code getInternalSlot()}（懒创建下会把 6400 个对象全造出来）⇒ 必须覆写。
+     * 语义不变：只有 {@code [0, 1130)} 与真正展开出来的槽可能有催化剂内容。
+     *
+     * <p>⚠️ 上游的 {@code MEPatternBufferJadeMerger} 是<b>包私有</b>类（{@code javap -p}：
+     * {@code final class …} 且方法无 {@code public}）⇒ 本类跨包拿不到，只能在这里
+     * <b>逐行等价复刻</b>它那四个 static 方法（{@code amount > 0} 才累加、键取
+     * {@code AEItemKey#getItem()} / {@code AEFluidKey#getFluid()}）。改上游语义时这里要跟着改。
+     */
+    @Override
+    public it.unimi.dsi.fastutil.Pair<it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<net.minecraft.world.item.Item>,
+            it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<net.minecraft.world.level.material.Fluid>>
+            getMergedInternalSlot() {
+        final it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<net.minecraft.world.item.Item> items =
+                new it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<>();
+        final it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<net.minecraft.world.level.material.Fluid> fluids =
+                new it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<>();
+        for (MEPatternBufferPartMachineBase.InternalSlot slot : this.getActiveInternalSlots()) {
+            shanhaiMergeItemKeys(items, slot.getItemInventory());
+            shanhaiMergeFluidKeys(fluids, slot.getFluidInventory());
+        }
+        for (int slotIndex : this.shanhaiCandidateSlots()) {
+            final MEPatternBufferPartMachineBase.InternalSlot slot = this.getInternalSlot(slotIndex);
+            shanhaiMergeItemKeys(items, slot.getItemCatalystInventory());
+            shanhaiMergeFluidKeys(fluids, slot.getFluidCatalystInventory());
+        }
+        shanhaiMergeItemStacks(items, this.sharedCatalystInventory.getContents());
+        shanhaiMergeFluidStacks(fluids, this.sharedCatalystTank.getContents());
+        return it.unimi.dsi.fastutil.Pair.of(items, fluids);
+    }
+
+    /** 等价 {@code MEPatternBufferJadeMerger.mergeItemKeys}（包私有，见上）。 */
+    private static void shanhaiMergeItemKeys(
+            @NotNull it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<net.minecraft.world.item.Item> target,
+            @NotNull it.unimi.dsi.fastutil.objects.Object2LongMap<AEItemKey> source) {
+        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<AEItemKey> entry
+                : it.unimi.dsi.fastutil.objects.Object2LongMaps.fastIterable(source)) {
+            final long amount = entry.getLongValue();
+            if (amount > 0L && entry.getKey() != null) {
+                target.addTo(entry.getKey().getItem(), amount);
+            }
+        }
+    }
+
+    /** 等价 {@code MEPatternBufferJadeMerger.mergeFluidKeys}（包私有，见上）。 */
+    private static void shanhaiMergeFluidKeys(
+            @NotNull it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<net.minecraft.world.level.material.Fluid> target,
+            @NotNull it.unimi.dsi.fastutil.objects.Object2LongMap<AEFluidKey> source) {
+        for (it.unimi.dsi.fastutil.objects.Object2LongMap.Entry<AEFluidKey> entry
+                : it.unimi.dsi.fastutil.objects.Object2LongMaps.fastIterable(source)) {
+            final long amount = entry.getLongValue();
+            if (amount > 0L && entry.getKey() != null) {
+                target.addTo(entry.getKey().getFluid(), amount);
+            }
+        }
+    }
+
+    /** 等价 {@code MEPatternBufferJadeMerger.mergeItemStacks}。 */
+    private static void shanhaiMergeItemStacks(
+            @NotNull it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<net.minecraft.world.item.Item> target,
+            @NotNull Iterable<?> source) {
+        for (Object value : source) {
+            if (value instanceof ItemStack stack && !stack.isEmpty()) {
+                target.addTo(stack.getItem(), stack.getCount());
+            }
+        }
+    }
+
+    /** 等价 {@code MEPatternBufferJadeMerger.mergeFluidStacks}。 */
+    private static void shanhaiMergeFluidStacks(
+            @NotNull it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap<net.minecraft.world.level.material.Fluid> target,
+            @NotNull Iterable<?> source) {
+        for (Object value : source) {
+            if (value instanceof com.lowdragmc.lowdraglib.side.fluid.FluidStack stack && !stack.isEmpty()) {
+                target.addTo(stack.getFluid(), stack.getAmount());
+            }
+        }
+    }
+
+    /**
+     * 「退款全部」按钮：父类版本从 0 扫到 {@code getInternalSlotCount()}（{@code MEPatternBufferPartMachineBase:223}）。
+     *
+     * <p>K=128 之后那会是 7530 次 {@code getInternalSlot()} ⇒ 在<b>懒创建</b>下等于"点一下就把 6400 个
+     * InternalSlot 全造出来"（≈17.2 MB，且这些格永远不会有料）。所以按候选集扫（0..1129 + 真正展开出来的槽），
+     * <b>语义不变</b>：被跳过的展开槽既没样板也没料，父类那版对它们也只是两次空 map 遍历。
+     */
+    @Override
+    protected void refundAll(com.lowdragmc.lowdraglib.gui.util.ClickData clickData) {
+        if (!clickData.isRemote) {
+            for (int slotIndex : this.shanhaiCandidateSlots()) {
+                final MEPatternBufferPartMachineBase.InternalSlot slot = this.getInternalSlot(slotIndex);
+                this.refundSlot(slot.getItemInventory(), slot.getFluidInventory());
+                slot.clearVirtualSupply();
+            }
+            org.gtlcore.gtlcore.integration.ae2.AEUtils.reFunds(
+                    this.buffer, this.getMainNode().getGrid(), this.actionSource);
+        }
+    }
 
     /** 母槽号 → 该母槽本次展开出来的样板清单（截断到 K 条）。 */
     private final java.util.Map<Integer, List<IPatternDetails>> expansionsByMother = new java.util.HashMap<>();
@@ -885,7 +1293,8 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      *
      * <p>类型选 {@code @DescSynced String} 而不是数组：本工程已验证 String 是最安全的同步类型
      * （阶段二 {@code wildcardConfigType} 的先例），而这一个字符串本身就是用户输入的全部内容。
-     * <p>⚠️ 它<b>只被标签页的预览与（将来的）过滤使用</b>；本阶段不参与库存扣料逻辑（见页注释）。
+     * <p>🔴 2026-10-25 起它<b>真的参与拉取</b>：{@link #shanhaiTagPull} 用它过滤 AE 缓存库存，
+     * 命中的键写进我们那 160 格（物品）／160 格（流体）的 config（同一对名单同时判物品标签与流体标签）。
      */
     @DescSynced
     @Persisted
@@ -899,7 +1308,11 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     /**
      * 标签过滤库存输入**总开关**（默认 false = 这个功能等于没装）。
      *
-     * <p>关 ⇒ 不做匹配、不供料（连匹配预览都不算）；开 ⇒ 才按白/黑名单从 ME 里供应（与 ME 共享内容物，不搬物品）。
+     * <p>🔴 <b>语义（用户 2026-10-25 拍的互斥规则）：开关 = 开 ⇒ 接管这 160 格</b>。
+     * 开 ⇒ 每库存同步周期按白/黑名单从 ME 缓存库存里取命中的键，<b>整体重写</b>我们那两份 160 格的
+     * config（并清尾）⇒ 面板上的手配会被覆盖（库存页会显式写「标签接管中」，日志有 {@code TAGPULL} 行）。
+     * 关 ⇒ <b>不再覆写</b>，但<b>不清空</b>已经写进去的配置（那 160 格立刻回到可手配状态，理由见
+     * {@link #shanhaiToggleTagFilter()}）；连匹配预览都不算。
      */
     @DescSynced
     @Persisted
@@ -913,6 +1326,97 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      */
     @DescSynced
     private String shanhaiTagPreview = "";
+
+    // ---------------------------------------------------------------- ⑧ 标签命中集合 = 独立供料源（读数与快照）
+    //
+    // 🔴 2026-10-25 用户原话（纠正上一轮的口径）：
+    //    「星律样板总成的标签拉取把库存的位置填了，但是实际上它们应该分开各不干扰」
+    //    ⇒ 上一轮那套「开关开 = 接管那 160 格（重写 config + 清尾）」**整体作废**。
+    //    现在的形态：标签命中的键集合 = **一个独立的供料源**，由
+    //    ShanhaiTagSupplyHandlers.Item / .Fluid 两份 handler 从 `shanhaiNormalSupplyHandlers()` 交出去；
+    //    那两份 handler **一次都不碰** `shanhaiStockItemHandler/…FluidHandler` 的 config。
+    //    ⇒ 手配的 160 格逐格原样（探针 `E` 组断言），标签关也好开也好都不改它。
+    //
+    // 下面这些字段全是**派生读数 / 快照**（不落盘）：写进存档只会变成「上次关服时的旧数」。
+
+    /**
+     * 标签命中集合的一行读数（服务端算、{@code @DescSynced} 给客户端画在标签页底部）。
+     *
+     * <p>只在<b>文字真的变了</b>时赋值（见 {@link #shanhaiSetTagPullLine(String)}），不每周期刷同步。
+     */
+    @DescSynced
+    private String shanhaiTagPullLine = "";
+
+    /**
+     * 这一轮<b>标签供料处于什么状态</b>：{@code ""} = 还没跑过；{@code ok} = 命中集合有效、这一路在供料；
+     * {@code disabled} = 开关关；{@code pending} = 刚开开关、等下一次库存同步；
+     * {@code emptyExpression} = 白/黑名单都空；{@code noGrid} = 没连上 ME；
+     * {@code noInventory} = 取不到缓存库存；{@code badExpression:…} = 表达式语法错。
+     *
+     * <p>🔴 它<b>必须 @DescSynced</b>：库存页与标签页那两行文案就是按它算的，而这段算在**客户端**
+     * （{@code createUIWidget} 两侧都建控件树）。不同步的话客户端会永远显示旧状态 —— 界面说谎，比不显示更糟。
+     * <p>⚠️ 它<b>不是</b>持久化字段：它是"这一刻的处境"，读档重算即可。
+     * <p>⚠️ 状态码与上一轮<b>逐字相同</b>（{@link ShanhaiTagPullPlanner.Gate#code()}）⇒ 日志判读表不用改；
+     * 变的只是含义：{@code ok} 以前表示「已接管那 160 格」，现在表示「命中集合有效、这一路在独立供料」。
+     */
+    @DescSynced
+    private String shanhaiTagPullSkip = "";
+
+    /** 上一轮打出去的 TAGSUPPLY 状态串（**只**用于「变化了才打一行」，不参与任何判定）。 */
+    private String shanhaiTagPullLogState = "";
+
+    /**
+     * 标签命中集合的<b>物品</b>键快照（不可变；只在集合真的变了时整份替换）。
+     *
+     * <p>它是 {@link ShanhaiTagSupplyHandlers.Item} 的唯一数据源 ⇒ <b>getContents()/handleRecipeInner
+     * 都现读这一份</b>，不每 tick 重扫 AE。
+     */
+    private java.util.List<AEItemKey> shanhaiTagSupplyItemKeys = java.util.List.of();
+
+    /** 标签命中集合的<b>流体</b>键快照（同上）。 */
+    private java.util.List<AEFluidKey> shanhaiTagSupplyFluidKeys = java.util.List.of();
+
+    /**
+     * 命中集合的版本号：集合一变就 +1。
+     *
+     * <p>两份 handler 用它对 {@code getContents()} 做缓存 —— 实机日志里 {@code getContents()}
+     * 被问过 18 万次，每次重建 200+ 个 {@code ItemStack} 是纯浪费。
+     */
+    private long shanhaiTagSupplyVersion = 0L;
+
+    /** 上一轮算出来的物品命中指纹（{@link ShanhaiTagPullPlanner#signature}；只用于「变了才换快照」）。 */
+    private long shanhaiTagSupplyItemSig = 0L;
+
+    /** 上一轮算出来的流体命中指纹（同上）。 */
+    private long shanhaiTagSupplyFluidSig = 0L;
+
+    // 最后一轮的读数（面板文字 + 日志判读用；物品侧主，流体侧并列）
+    private int shanhaiTagSupplyItemScanned = 0;
+    private int shanhaiTagSupplyItemMatched = 0;
+    private int shanhaiTagSupplyFluidScanned = 0;
+    private int shanhaiTagSupplyFluidMatched = 0;
+    private boolean shanhaiTagSupplyItemTruncated = false;
+    private boolean shanhaiTagSupplyFluidTruncated = false;
+
+    /**
+     * 命中集合的上限（<b>安全阀，不是格子数</b>）。
+     *
+     * <p>上一轮的 160 是「库存配置有 160 格」带来的；现在这一路不占格子 ⇒ 没有 160 的理由。
+     * 但也不能无界：命中几千条时 {@code getContents()} 的快照与逐条匹配都会变贵。
+     * 1024 条远超实际（用户这局缓存库存一共 370 项），真超了会在日志里打 {@code truncated=true}。
+     */
+    private static final int TAG_SUPPLY_MAX = 1024;
+
+    // 供料源自己的打点（SUPPLYCHAIN 判据 + 报告读数）
+    private long shanhaiTagSupplyItemHandles = 0L;
+    private long shanhaiTagSupplyFluidHandles = 0L;
+    private long shanhaiTagSupplyItemContents = 0L;
+    private long shanhaiTagSupplyFluidContents = 0L;
+    private long shanhaiTagSupplyItemExtracts = 0L;
+    private long shanhaiTagSupplyFluidExtracts = 0L;
+
+    /** 给 {@link #shanhaiNormalSupplyHandlers()} 那两份 handler 用的供料源（机器侧实现，只读 + 真抽取）。 */
+    private final ShanhaiTagSupplyHandlers.Source shanhaiTagSupplySource = new ShanhaiTagSupplySource();
 
     // ================================================================ C 刀 · A 段：通配符格的中键面板
 
@@ -1132,6 +1636,22 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     /** STOCKSLOT 那条现场日志的上一次打点（节流 200 tick；初值 Long.MIN_VALUE 表示「还没打过」）。 */
     private long shanhaiProbeLogTick = Long.MIN_VALUE;
 
+    /**
+     * <b>自证探针正在跑</b>（2026-10-25 修一个会把排查带偏的读数）。
+     *
+     * <p>🔴 病因（实机日志实证）：{@code STOCKSLOT … calls[isItemActive=0 handleItem=0 hasCache=4 …]} 里的
+     * {@code hasCache=4} 和 {@code hi[…hasCache=2]} 竟然在「一个活跃槽都没有」时也有值。
+     * 逐条对过：那 4 次正是 {@link #shanhaiLogBoundaryProof()} 自己打的
+     * （{@code hiFirst / hiLast / loFirst / loLast} 各一次，其中两次槽号 ≥1080 ⇒ {@code hi=2}）。
+     * ⇒ 读日志的人会以为「配方匹配问过 4 个槽」，而真相是 {@code handleRecipe} 一次都没跑。
+     * <p>它把「诊断」混进了「被诊断的读数」——本工程明令禁止的那一类。修法：探针自己打的那几次
+     * <b>不计入</b>生产计数器，日志里另有一个 {@code selfProbe} 字段老实交代「我自己问过几次」。
+     */
+    private boolean shanhaiInSelfProbe = false;
+
+    /** 自证探针自己对 {@code hasCacheInSlot} 的调用次数（<b>不计入</b>生产计数器，只在日志里自曝）。 */
+    private long shanhaiProbeSelfHasCache = 0L;
+
     /** STOCKSAFE 那条「不会越界」的边界证明只打一次（Long.MIN_VALUE = 还没打）。 */
     private long shanhaiSafeLoggedTick = Long.MIN_VALUE;
 
@@ -1198,13 +1718,12 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             slot.setOnContentsChanged(() -> { });
             this.wildcardInternalSlots.add(slot);
         }
-        // ③ 阶段五：展开槽（母槽 i 的第 j 条 ⇒ i*K+j）。同样不挂父类回调（它会写 cacheRecipe[slot]）。
-        for (int i = 0; i < ShanhaiWildcardLayout.EXPAND_COUNT; i++) {
-            final MEPatternBufferPartMachineBase.InternalSlot slot =
-                    this.createInternalSlot(ShanhaiWildcardLayout.EXPAND_OFFSET + i);
-            slot.setOnContentsChanged(() -> { });
-            this.expandInternalSlots.add(slot);
-        }
+        // ③ 阶段五：展开槽（母槽 i 的第 j 条 ⇒ EXPAND_OFFSET + i*K + j）。
+        //    🔴 2026-10-26（K 4⇒128）：这里**不再**预先 new 出 EXPAND_COUNT 个对象。
+        //    K=128 ⇒ 6400 个，单个 ≈2.82 KB（实测）⇒ 全量就是 ≈17.2 MB/台机器（而这些格绝大多数永远用不到）。
+        //    改成"引用数组（6400 × 4B = 25.6 KB）+ 第一次被问到时懒创建"，
+        //    槽号仍然只由 (母槽,分支) 决定 ⇒ **固定上界、槽号不漂移**，阶段三的证明不变。
+        //    细节与前提（所有"扫全部槽"的父类方法都必须收窄）见 expandInternalSlots 的注释。
         // ---- 阶段六 ⑦：库存输入 160 格（8×2×10）
         // ① 真正干活的 160 格：**自己 new**（父类那份 32 格还在，见字段注释）。
         //    🔴 构造器签名修正（阶段六实证）：javap 打出来的是
@@ -1212,14 +1731,13 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         //    其中**第一个参数是内嵌类的 encloser 实例**，显式参数只有 `(MetaMachine, int)`。
         //    阶段五报告把它读成 `(MEStocking, MetaMachine, int)` 是误读 —— 以本轮 javac 的报错与
         //    javap 的 `this$0` 字段为准（写错会直接编译失败，不会静默）。
-        this.shanhaiStockItemHandler =
-                new ExportOnlyAEStockingItemList(this, ShanhaiStockConfigLayout.CONFIG_SIZE);
+        this.shanhaiStockItemHandler = new ShanhaiStockItemList();
         // ② 流体侧（方案 C）：**自己也 new 一份 160 格**，与物品侧等长 ⇒ 面板直接接它，不需要转发窗口。
         //    javap 依据：ExportOnlyAEStockingFluidList 是 public 内嵌类，构造器 public，
         //    显式参数 `(MetaMachine, int)`（第一参 this$0 由 javac 隐式补齐，与上一行物品侧同形）。
         //    它的抽取/同步都用 this$0.actionSource + this$0.getMainNode() ⇒ 抽料走本机自己的账。
-        this.shanhaiStockFluidHandler =
-                new ExportOnlyAEStockingFluidList(this, ShanhaiStockConfigLayout.CONFIG_SIZE);
+        //    🔴 2026-10-25：类型改成我们的子类（只多计数 + 一条 SUPPLYCHAIN 日志，行为转发 super）。
+        this.shanhaiStockFluidHandler = new ShanhaiStockFluidList();
         // ---- C 刀 · A 段：通配符母槽的三份「每槽存储」（面板要用的那些）
         // ① 「实际配方数量」出厂 1 —— 与父类构造器 `Arrays.fill(cacheRecipeCount, (byte) 1)` 同值。
         java.util.Arrays.fill(this.shanhaiWildcardCacheCount, (byte) 1);
@@ -1247,6 +1765,200 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         return MANAGED_FIELD_HOLDER;
     }
 
+
+    // ================================================================ 2026-10-25：万能仓室供料链的现场计数
+    //
+    //  用户原话：「什么都不填时预览 133/133（ME 里有料、过滤没挡），但机器不动」，日志
+    //  `STOCKSLOT space=1330 active=0 supply=0 calls[isItemActive=0 handleItem=0 …]`。
+    //  实机 STOCKPAT 同时给出容器真值 `basePatterns=0 wildcardInv=0`（1330 格里一块样板都没有）
+    //  ⇒ 「样板槽 → 库存供料」这条链按设计**不会被调用**（它的入口是样板槽号，见
+    //  shanhaiRebuildStockSupplySlots 的入选三条件）⇒ 这条场景下唯一可能生效的是
+    //  「万能仓室」那条（{@link #shanhaiNormalSupplyHandlers()} 把 160 格库存交给主机，
+  //  连样板都不需要）。
+    //
+    //  🔴 但那条路上原先**一个读数都没有**：注入日志只说「视图插进去了」，说不出
+    //  「主机到底有没有问过这两份 handler」（= ②getContents 报没报出去 / ③handleRecipeInner
+    //  有没有被调 / ④被调了 simulate 是否直接放行）。这两个子类的唯一职责就是把它变成读数，
+    //  **语义逐字节转发上游**（super 调完就返回），不改任何供料行为。
+
+    /** 万能仓室链：物品侧 handleRecipeInner 被调用次数（③的判据）。 */
+    private long shanhaiSupplyItemHandleCalls = 0L;
+
+    /** 万能仓室链：物品侧 getContents 被调用次数（②的判据：>0 说明主机来问过内容物）。 */
+    private long shanhaiSupplyItemContentsCalls = 0L;
+
+    private long shanhaiSupplyFluidHandleCalls = 0L;
+
+    private long shanhaiSupplyFluidContentsCalls = 0L;
+
+    /** SUPPLYCHAIN 的节流（100 tick = 5 秒；与 STOCKSLOT 不同节拍，避免两行互相盖住）。 */
+    private long shanhaiSupplyLogTick = Long.MIN_VALUE;
+
+    private boolean shanhaiSupplyTraceLogged = false;
+
+    // ---- 2026-10-26 五修：HANDLEPOOL（「我们的 part 到底在哪」）＋ SUPPLYVIEW（「构造期空表」踩没踩到）
+    //
+    //  取证报告 temp\handlernotcalled\报告.md 的硬结论：handleRecipeInner 的默认实现是纯透传，
+    //  calls=0 只能是「含我们 handler 的 RecipeHandlePart 从来没被问」⇒ 必须直接读池子本身。
+    //  两个读数都只打日志（ShanhaiHandlePoolProbe 只调 getter，不改任何行为）。
+
+    /** HANDLEPOOL 的等待计数：拿到主机之后再等这么多 tick（让 upDate→rebuildRecipeHandleParts 至少跑完一轮）。 */
+    private int shanhaiHandlePoolWait = 0;
+
+    /** HANDLEPOOL 打过没有（每台机只打 1 次；结构成型/拆掉时复位 ⇒ 「成型变化时再打一次」）。 */
+    private boolean shanhaiHandlePoolLogged = false;
+
+    /** 视图因为「父类构造器还没跑完」被跳过的次数（SUPPLYVIEW 那一行的节流依据）。 */
+    private long shanhaiSupplyViewSkipCount = 0L;
+
+    // ---- 2026-10-25（「stock 恒 0」这一刀）：SYNCSTOCK 的调用计数与节流
+    //
+    //  用户原话：「星律没修好，机器还是不工作」（而输入框已经能保留了）。
+    //  实机 12:33 的三条 SUPPLYCHAIN 只给出结果（物品 cfg=0 stock=0 / 流体 cfg=1 stock=0），
+    //  但「stock 为什么是 0」有四种成因（掉线 / extract 被拒 / 写进了另一份 handler / 键不对），
+    //  必须由同步链自己在写完之后报读数才能分辨 ⇒ SYNCSTOCK（判读表见 shanhaiLogSyncStock 的 javadoc）。
+
+    /** SYNCSTOCK 打了几次（前 3 次无条件打，之后每 200 tick 一行）。 */
+    private long shanhaiSyncStockCalls = 0L;
+
+    /** SYNCSTOCK 的上一次打点游戏时间（初值 0L，不用 Long.MIN_VALUE —— 那个会溢出成负数，见 STOCKFIND 的踩坑记录）。 */
+    private long shanhaiSyncStockLogTick = 0L;
+
+    // ---- 2026-10-25（「通配符样板不进 AE 合成」这一刀）：AE 侧样板缓存的重推闸
+    //
+    //  用户原话：「星律里面配置好通配符样板，但是 ae 里面没有显示可以合成这个物品」。
+    //  AE2 15.4.10 把 provider 的样板缓存在 NetworkCraftingProviders 里，只在「节点加入网格」
+    //  与「ICraftingProvider.requestUpdate」两处重建；上游只对**普通样板槽**置 needPatternSync ⇒
+    //  改我们的 wildcardPatternInventory 不会触发任何刷新 ⇒ 展开出来的样板对 AE 不存在。
+    //  ⇒ 下面这三个字段 + shanhaiTickAePatternExport() 就是补上这一次重推。
+
+    /** 样板清单变了（通配符/手填类型/展开条数）⇒ 下一 tick 让 AE 重读一次。 */
+    private boolean shanhaiAePatternDirty = false;
+
+    /** 这次重推是被谁触发的（写进 PATEXPORT 的 from=，便于对照用户操作）。 */
+    private String shanhaiAePatternReason = "";
+
+    /**
+     * 脏标记「推不出去」告警的上一次打点（600 tick 节流）。
+     *
+     * <p>🔴 2026-10-26：上一轮实机里 `PATEXPORT` 只有 `from=onLoad` 一条，之后<b>再没有任何一次
+     * 容器变更触发的推送</b>。这有两种完全不同的成因，旧代码在 grid==null 时<b>静默返回</b>，
+     * 分不出来：
+     * <ol>
+     *   <li>脏标记压根没被置（容器回调没跑）⇒ 现在由 {@code RECIPE claim} / {@code TICKER} 反证
+     *       {@code update()} 到底有没有在跑；</li>
+     *   <li>脏标记置了、但 node/grid 一直不可用 ⇒ 由这条 WARN 明说。</li>
+     * </ol>
+     */
+    private long shanhaiAeDirtyWarnTick = Long.MIN_VALUE;
+
+    /**
+     * 打一行 {@code SUPPLYCHAIN}（节流 100 tick + 第一次一定打）。
+     *
+     * <p>判读：{@code handle=0 且 contents=0} ⇒ 主机<b>从没问过</b>这两份 handler
+     * （⇒ 候选配方里根本没有「用这些料」的配方，问题不在供料，在配方/结构）；
+     * {@code contents>0 但 handle=0} ⇒ 主机看得到料、却没拿它试配方；
+     * {@code handle>0 且 left=0} ⇒ 供料成功（真的扣料）；
+     * {@code handle>0 且 left>0 且 simulate=true} ⇒ 模拟阶段就没满足（料不够/键不对）。
+     */
+    private void shanhaiLogSupplyTrace(@NotNull String state) {
+        if (this.isRemote() || this.getLevel() == null) {
+            return;
+        }
+        final long now = this.getLevel().getGameTime();
+        if (this.shanhaiSupplyTraceLogged
+                && this.shanhaiSupplyLogTick != Long.MIN_VALUE
+                && now - this.shanhaiSupplyLogTick < 100L) {
+            return;
+        }
+        this.shanhaiSupplyTraceLogged = true;
+        this.shanhaiSupplyLogTick = now;
+        ShanhaiStellarLog.info("SUPPLYCHAIN {}", state);
+    }
+
+    /** 万能仓室链的物品 handler（行为 = 上游 {@code ExportOnlyAEStockingItemList}，只多计数与一条日志）。 */
+    private final class ShanhaiStockItemList
+            extends MEStockingPatternBufferPartMachine.ExportOnlyAEStockingItemList {
+
+        private ShanhaiStockItemList() {
+            super(StellarSampleAssemblerPartMachine.this, ShanhaiStockConfigLayout.CONFIG_SIZE);
+        }
+
+        @Override
+        public java.util.List<Ingredient> handleRecipeInner(IO io, com.gregtechceu.gtceu.api.recipe.GTRecipe recipe,
+                                                           java.util.List<Ingredient> left,
+                                                           @Nullable String slotName, boolean simulate) {
+            StellarSampleAssemblerPartMachine.this.shanhaiSupplyItemHandleCalls++;
+            final int in = left == null ? -1 : left.size();
+            final java.util.List<Ingredient> out = super.handleRecipeInner(io, recipe, left, slotName, simulate);
+            // 2026-10-26 四修：out == null 才是「把料吃干 = 短路」（父类契约：非 null = 还缺这些）
+            if (out == null) {
+                StellarSampleAssemblerPartMachine.this.shanhaiStockItemNullReturns++;
+            }
+            StellarSampleAssemblerPartMachine.this.shanhaiLogSupplyTrace(
+                    "kind=item handle in=" + in + " left=" + (out == null ? -1 : out.size())
+                            + " simulate=" + simulate + " io=" + io
+                            + " calls[h=" + StellarSampleAssemblerPartMachine.this.shanhaiSupplyItemHandleCalls
+                            + " c=" + StellarSampleAssemblerPartMachine.this.shanhaiSupplyItemContentsCalls + "]"
+                            + " cfg=" + this.configList.size() + " stock=" + this.stockMap.size());
+            return out;
+        }
+
+        @Override
+        public java.util.List<Object> getContents() {
+            StellarSampleAssemblerPartMachine.this.shanhaiSupplyItemContentsCalls++;
+            final java.util.List<Object> contents = super.getContents();
+            StellarSampleAssemblerPartMachine.this.shanhaiLogSupplyTrace(
+                    "kind=item contents n=" + (contents == null ? -1 : contents.size())
+                            + " calls[h=" + StellarSampleAssemblerPartMachine.this.shanhaiSupplyItemHandleCalls
+                            + " c=" + StellarSampleAssemblerPartMachine.this.shanhaiSupplyItemContentsCalls + "]"
+                            + " cfg=" + this.configList.size() + " stock=" + this.stockMap.size());
+            return contents;
+        }
+    }
+
+    /** 万能仓室链的流体 handler（同上，只多计数与一条日志）。 */
+    private final class ShanhaiStockFluidList
+            extends MEStockingPatternBufferPartMachine.ExportOnlyAEStockingFluidList {
+
+        private ShanhaiStockFluidList() {
+            super(StellarSampleAssemblerPartMachine.this, ShanhaiStockConfigLayout.CONFIG_SIZE);
+        }
+
+        @Override
+        public java.util.List<com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient> handleRecipeInner(
+                IO io, com.gregtechceu.gtceu.api.recipe.GTRecipe recipe,
+                java.util.List<com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient> left,
+                @Nullable String slotName, boolean simulate) {
+            StellarSampleAssemblerPartMachine.this.shanhaiSupplyFluidHandleCalls++;
+            final int in = left == null ? -1 : left.size();
+            final java.util.List<com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient> out =
+                    super.handleRecipeInner(io, recipe, left, slotName, simulate);
+            // 2026-10-26 四修：同上（out == null = 吃干 = 短路）
+            if (out == null) {
+                StellarSampleAssemblerPartMachine.this.shanhaiStockFluidNullReturns++;
+            }
+            StellarSampleAssemblerPartMachine.this.shanhaiLogSupplyTrace(
+                    "kind=fluid handle in=" + in + " left=" + (out == null ? -1 : out.size())
+                            + " simulate=" + simulate + " io=" + io
+                            + " calls[h=" + StellarSampleAssemblerPartMachine.this.shanhaiSupplyFluidHandleCalls
+                            + " c=" + StellarSampleAssemblerPartMachine.this.shanhaiSupplyFluidContentsCalls + "]"
+                            + " cfg=" + this.configList.size() + " stock=" + this.stockMap.size());
+            return out;
+        }
+
+        @Override
+        public java.util.List<Object> getContents() {
+            StellarSampleAssemblerPartMachine.this.shanhaiSupplyFluidContentsCalls++;
+            final java.util.List<Object> contents = super.getContents();
+            StellarSampleAssemblerPartMachine.this.shanhaiLogSupplyTrace(
+                    "kind=fluid contents n=" + (contents == null ? -1 : contents.size())
+                            + " calls[h=" + StellarSampleAssemblerPartMachine.this.shanhaiSupplyFluidHandleCalls
+                            + " c=" + StellarSampleAssemblerPartMachine.this.shanhaiSupplyFluidContentsCalls + "]"
+                            + " cfg=" + this.configList.size() + " stock=" + this.stockMap.size());
+            return contents;
+        }
+    }
 
     // ---------------------------------------------------------------- 阶段八 ③：版面配置读取
 
@@ -1483,6 +2195,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         this.forgePatternMultiplier = clamped;
         this.forgeCacheDirty = true;
         this.shanhaiInvalidateGateCache();
+        this.shanhaiRequestAePatternSync("forgeMultiplier:" + clamped);
         ShanhaiStellarLog.info("神锻倍率（面板）= {}（夹到 {}..{}）", clamped,
                 com.shanhai.machine.wildcard.ShanhaiForgePatternMode.MIN_MULTIPLIER,
                 com.shanhai.machine.wildcard.ShanhaiForgePatternMode.MAX_MULTIPLIER);
@@ -1735,7 +2448,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     /**
      * 通配符页「母槽 → 展开」那一组循环预览的取样：<b>按母槽号顺序</b>拼平。
      *
-     * <p>⚠️ 这里<b>不</b>调 {@code shanhaiRebuildExpansions()}：那一步会写字段、打日志，
+     * <p>⚠️ 这里<b>不</b>调 {@code shanhaiRebuildPatternTables()}：那一步会写字段、打日志，
      * 而本方法可能被客户端每帧调用（控件 supplier）。展开表是服务端算好的，客户端读现成的即可
      * （与 {@code shanhaiWildcardExpansionIcon} 同一条纪律）。
      */
@@ -1779,11 +2492,8 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         return n;
     }
 
-    /** 当前展开出来的总条数。 */
+    /** 当前展开出来的总条数（🔴 C4：读路径不重建，只读现有表）。 */
     private int shanhaiWildcardExpandedCount() {
-        if (this.expandCacheDirty) {
-            this.shanhaiRebuildExpansions();
-        }
         int n = 0;
         for (List<IPatternDetails> list : this.expansionsByMother.values()) {
             n += list.size();
@@ -1799,9 +2509,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             }
         }
         int expanded = 0;
-        if (this.expandCacheDirty) {
-            this.shanhaiRebuildExpansions();
-        }
+        // 🔴 C4：读路径不重建（改前这里会顺手 rebuild）。
         for (List<IPatternDetails> list : this.expansionsByMother.values()) {
             expanded += list.size();
         }
@@ -1830,9 +2538,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         if (mother < 0 || mother >= WILDCARD_SLOT_COUNT) {
             return IGuiTexture.EMPTY;
         }
-        if (this.expandCacheDirty) {
-            this.shanhaiRebuildExpansions();
-        }
+        // 🔴 C4：读路径不重建（改前这里会顺手 rebuild）。
         final List<IPatternDetails> list = this.expansionsByMother.get(mother);
         if (list == null || index >= list.size()) {
             return IGuiTexture.EMPTY;
@@ -1871,7 +2577,55 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         // 阶段二十三：库存页那一行只读统计（让配完立刻看得出来"配置有没有进去 / ME 认不认"）
         page.addWidget(new LabelWidget(4, ShanhaiStellarUiLayout.PAGE_H - 12,
                 (java.util.function.Supplier<String>) (() -> this.shanhaiStockDiagLine)));
+        // 🔴 2026-10-25（口径纠正，用户原话：「标签拉取把库存的位置填了，但是实际上它们应该分开各不干扰」）：
+        //    这一行现在**只是通知**「标签那一路另有一个独立供料源、现在匹配了多少种」，
+        //    它<b>不再</b>声明「接管 / 手配会被覆盖」——那套已经整条删除（见 shanhaiTagPull 的 javadoc）。
+        //    文字逐帧从 @DescSynced 字段读（两侧都建控件树）；标签关着时返回空串 ⇒ 这一行不占视觉。
+        page.addWidget(new LabelWidget(4, 120,
+                (java.util.function.Supplier<String>) (() -> this.shanhaiTagSupplyLine()))
+                .setHoverTooltips(Component.literal(
+                        "标签过滤是**独立的一路供料源**：命中的物品/流体直接从 ME 网络供料（真扣 ME），"
+                                + "**不占用**下面这 160 格（物品）+ 160 格（流体）。那 320 格纯手配，"
+                                + "标签开也好关也好都不会改写或清空它 —— 两套各不干扰。")));
         return page;
+    }
+
+    /**
+     * 库存页那一行「标签那一路现在什么状态」的文字（{@code ""} = 标签关，这一行整块不显示）。
+     *
+     * <p>🔴 <b>2026-10-25 改语义</b>：上一轮这里写的是「标签接管中（手配会被覆盖）」——
+     * 那个口径已被用户否掉。现在这一行<b>只报告</b>这一路匹配了多少种，并明确写出
+     * 「独立于下面这 160 格」，让玩家一眼知道<b>这 320 格是自己的、标签不会动它</b>。
+     */
+    private @NotNull String shanhaiTagSupplyLine() {
+        if (!this.shanhaiTagFilterEnabled) {
+            return "";
+        }
+        if (this.shanhaiTagPullSkip.isEmpty() || "pending".equals(this.shanhaiTagPullSkip)) {
+            return "标签过滤：等待第一次库存同步…（独立于下面这 160 格）";
+        }
+        if (ShanhaiTagPullPlanner.Gate.OK.code().equals(this.shanhaiTagPullSkip)) {
+            final StringBuilder out = new StringBuilder();
+            out.append("标签过滤：已匹配 ").append(this.shanhaiTagSupplyItemMatched).append(" 种物品");
+            if (this.shanhaiTagSupplyFluidMatched > 0) {
+                out.append(" + ").append(this.shanhaiTagSupplyFluidMatched).append(" 种流体");
+            }
+            out.append("（独立于下面这 160 格）");
+            return out.toString();
+        }
+        if (this.shanhaiTagPullSkip.startsWith("badExpression")) {
+            return "标签过滤：暂停 —— 表达式有错（见标签页）；下面这 160 格手配原样";
+        }
+        if ("emptyExpression".equals(this.shanhaiTagPullSkip)) {
+            return "标签过滤：暂停 —— 白/黑名单都空；下面这 160 格手配原样";
+        }
+        if ("noGrid".equals(this.shanhaiTagPullSkip)) {
+            return "标签过滤：暂停 —— 没连上 ME 网络；下面这 160 格手配原样";
+        }
+        if ("noInventory".equals(this.shanhaiTagPullSkip)) {
+            return "标签过滤：暂停 —— 取不到 AE 库存；下面这 160 格手配原样";
+        }
+        return "标签过滤：暂停（" + this.shanhaiTagPullSkip + "）；下面这 160 格手配原样";
     }
 
     // ---------------------------------------------------------------- 流体侧：不再有「转发窗口」
@@ -1894,15 +2648,42 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         return this.shanhaiTagFilterEnabled;
     }
 
-    /** 标签过滤总开关：服务端执行（与闸/锻同款：客户端那次本地执行被守卫掉）。 */
+    /**
+     * 标签过滤总开关：服务端执行（与闸/锻同款：客户端那次本地执行被守卫掉）。
+     *
+     * <h2>🔴 2026-10-25 口径纠正（用户原话）</h2>
+     * 「<b>星律样板总成的标签拉取把库存的位置填了，但是实际上它们应该分开各不干扰</b>」。
+     * <p>⇒ 这个开关现在只控制「<b>标签这一路独立供料源</b>要不要供料」，
+     * <b>完全不管</b>库存那 160 格（物品）+ 160 格（流体）：
+     * <ul>
+     *   <li><b>开</b> ⇒ 下一周期按白/黑名单算命中集合 ⇒ {@code ShanhaiTagSupplyHandlers} 那两份
+     *       handler 开始从 ME 供料（真扣 ME）；<b>手配的 320 格一格不动</b>；</li>
+     *   <li><b>关</b> ⇒ 命中集合立即清空 ⇒ 那两份 handler 回到「等于没有它」
+     *       （{@code getContents()} 空、{@code handleRecipeInner} 原样退回）；
+     *       <b>手配的 320 格依旧一格不动</b>（不清空、也不恢复什么 —— 它从来没被改过）。</li>
+     * </ul>
+     * <p>上一轮那段「关掉不清空」的三条理由现在<b>不适用</b>了：已经没有"写进去又清空"这件事。
+     */
     private void shanhaiToggleTagFilter() {
         if (this.isRemote()) {
             return;
         }
         this.shanhaiTagFilterEnabled = !this.shanhaiTagFilterEnabled;
+        // 立刻把界面那一行刷成开关后的样子（否则要等一个同步周期，界面会短暂自相矛盾）。
+        // 开 ⇒ "pending"（等下一次库存同步真算完才敢说"在供料"，不抢跑）；
+        // 关 ⇒ "disabled" + 立刻清命中集合（这一路当场停止供料，不等下一周期）。
+        this.shanhaiTagPullSkip = this.shanhaiTagFilterEnabled ? "pending" : "disabled";
+        if (!this.shanhaiTagFilterEnabled) {
+            this.shanhaiClearTagSupply("toggle:off");
+        }
+        this.shanhaiSetTagPullLine(this.shanhaiTagPullLineText());
         this.shanhaiRefreshTagPreview();
-        ShanhaiStellarLog.info("标签过滤总开关 => {}（关 = 完全不参与：不匹配、不供料）",
-                this.shanhaiTagFilterEnabled ? "开" : "关");
+        ShanhaiStellarLog.info("标签过滤总开关 => {}（{}）",
+                this.shanhaiTagFilterEnabled ? "开" : "关",
+                this.shanhaiTagFilterEnabled
+                        ? "标签成为**独立供料源**：按白/黑名单从 ME 供料（真扣 ME），"
+                        + "**不占用**也不会改写库存那 320 格"
+                        : "这一路停止供料（命中集合已清空）；库存那 320 格手配**依旧原样**，从未被改过");
     }
 
     /** 标签页最上面那一行：总开关按钮（亮=开、暗=关）+ 文案。 */
@@ -1917,7 +2698,10 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
                                 () -> this.shanhaiTagToggleText())),
                 clickData -> { });
         row.setOnPressCallback(clickData -> this.shanhaiToggleTagFilter());
-        row.setHoverTooltips(Component.translatable(LANG_TAG_ENABLED_TIP));
+        // 两行 tooltip：第一行 = 「它是什么」，第二行 = 「它<b>现在真的</b>怎么做」（tag.explain2 以前写的是
+        // 「自动灌进库存输入尚未接上」，与本页的功能自相矛盾；2026-10-25 起那句已改成实话，见 zh_cn.json）。
+        row.setHoverTooltips(Component.translatable(LANG_TAG_ENABLED_TIP),
+                Component.translatable(LANG_TAG_EXPLAIN_2));
         return row;
     }
 
@@ -1927,12 +2711,25 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     }
 
     /**
-     * ⑧ 的页：<b>白名单 + 黑名单两个输入框 ＋ 语法说明 ＋ 匹配预览</b>。
+     * ⑧ 的页：<b>白名单 + 黑名单两个输入框 ＋ 语法说明 ＋ 匹配预览 ＋ 供料读数</b>。
      *
-     * <p>本页在阶段七<b>只做界面与真实预览</b>：预览的数字是服务端拿当前 ME 库存快照、
-     * 用 {@link ShanhaiTagFilterExpression} <b>真算</b>出来的（不是占位文本）；
-     * 但「把命中的物品自动灌进库存输入」这条<b>还没接</b>（阶段六 §G-4 已列为待确认）——
-     * 也就是说本页现在<b>告诉你它会收哪些东西，但还不会真的替你收</b>，报告里写清、页面说明里也写清。
+     * <p>🔴 <b>2026-10-25 口径纠正</b>（用户原话：「星律样板总成的标签拉取把库存的位置填了，
+     * 但是实际上它们应该分开各不干扰」）：
+     * 开关打开后，{@link #shanhaiTagPull} 只把「命中的键」记进<b>本类自己的快照</b>，
+     * 由 {@link ShanhaiTagSupplyHandlers} 那两份 handler 当<b>独立供料源</b>用（直接从 ME 供料、真扣 ME）。
+     * 它<b>不会</b>写库存那 160 格的 config，也<b>不会</b>清空任何格子 ⇒ 库存页的 {@code cfg}
+     * 只反映<b>玩家手配</b>。
+     *
+     * <p>本页的三行读数各有分工，别混：
+     * <ul>
+     *   <li>{@code 匹配预览：238 / 370} = 「按当前 ME 库存，你的名单会收多少种」——
+     *       数据源是库存快照（物品侧，判据，不是结果）；</li>
+     *   <li>{@code 标签供料：已匹配 238 种物品（独立供料源，不占用库存 160 格）}
+     *       = 「<b>真的</b>成为供料源的有多少种、这一路开没开」——
+     *       这一行才是"到底有没有生效"的读数（{@code @DescSynced} 的 {@link #shanhaiTagPullLine}）；</li>
+     *   <li>上面的 16 格只读格 = 本机库存配置的<b>前 16 格回显</b>（那是<b>手配</b>的，
+     *       标签这一路既不写它也不清它）。</li>
+     * </ul>
      */
     private @NotNull WidgetGroup shanhaiTagFilterPage() {
         final WidgetGroup page = new WidgetGroup(0, 0,
@@ -1941,13 +2738,18 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         // 阶段十九：标签过滤总开关（最上面一行；亮=开、暗=关；默认关）
         page.addWidget(this.shanhaiTagToggleRow());
         page.addWidget(new LabelWidget(4, 14, Component.translatable(LANG_TAG_WHITE).getString()));
+        // 🔴 2026-10-25 修（用户原话：「重新打开星律样板总成之后，输入框清空了」）：
+        //    原来这里写死 `.setText("")` ⇒ 每次重建这一页（关界面/翻页/重开）都把<b>已经生效</b>的
+        //    白/黑名单在界面上抹掉，而机器字段里其实还留着（{@link #shanhaiTagWhite} 是
+        //    {@code @Persisted @DescSynced}）⇒ 用户看到的是「输入框空着」，机器按「旧的（空）」算，
+        //    两边读数不一致。现在**从字段回填**：字段是唯一真值，widget 只是它的显示。
         page.addWidget(new AETextInputButtonWidget(52, 13, 140, 10)
-                .setText("")
+                .setText(this.shanhaiTagWhite == null ? "" : this.shanhaiTagWhite)
                 .setOnConfirm(this::shanhaiApplyTagWhite)
                 .setButtonTooltips(Component.translatable(LANG_TAG_WHITE_HINT)));
         page.addWidget(new LabelWidget(4, 27, Component.translatable(LANG_TAG_BLACK).getString()));
         page.addWidget(new AETextInputButtonWidget(52, 26, 140, 10)
-                .setText("")
+                .setText(this.shanhaiTagBlack == null ? "" : this.shanhaiTagBlack)
                 .setOnConfirm(this::shanhaiApplyTagBlack)
                 .setButtonTooltips(Component.translatable(LANG_TAG_BLACK_HINT)));
         page.addWidget(new LabelWidget(4, 40, Component.literal(ShanhaiTagFilterExpression.syntaxHint()).getString()));
@@ -1989,6 +2791,17 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         // ---- 底部标签行：当前生效的白/黑名单 + 匹配预览（都是同步字段，客户端读得到）
         page.addWidget(new LabelWidget(4, 144, this::shanhaiTagLabelRow));
         page.addWidget(new LabelWidget(4, 156, this::shanhaiTagPreviewLine));
+        // 🔴 2026-10-25 改读数口径：这一行现在说的是「**标签这一路当独立供料源**现在匹配了多少种」，
+        //    **不再**是「写进库存几格 / 清了几格尾巴」（那是上一轮被否掉的做法）。
+        //    文字 = {@code @DescSynced} 的 {@link #shanhaiTagPullLine}（服务端每轮算完才写，见 shanhaiTagPull）。
+        page.addWidget(new LabelWidget(4, 168, (java.util.function.Supplier<String>)
+                () -> this.shanhaiTagPullLine)
+                .setHoverTooltips(Component.literal(
+                        "这一行是真读数：本轮按白/黑名单在 ME 缓存库存里**匹配到多少种**物品/流体。"
+                                + "命中的东西成为**独立的一路供料源**（直接从 ME 供料，真扣 ME），"
+                                + "**不占用**库存那 160 格（物品）+ 160 格（流体）——那 320 格纯手配，"
+                                + "标签开也好关也好都不会改写或清空它。"
+                                + "安全阀上限 " + TAG_SUPPLY_MAX + " 条（命中更多时按 ME 现量降序截断，日志 truncated=true）。")));
         return page;
     }
 
@@ -2233,6 +3046,440 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         return out;
     }
 
+    /**
+     * 一个 AE <b>流体</b>键身上的标签串（{@code forge:water} / {@code minecraft:water} 这种形式）。
+     *
+     * <p>走 {@code Fluid#builtInRegistryHolder().tags()}（{@code javap -p} 实证：
+     * {@code net.minecraft.world.level.material.Fluid#builtInRegistryHolder(): Holder.Reference<Fluid>}，
+     * {@code net.minecraft.core.Holder#tags(): Stream<TagKey<T>>}）—— 与物品侧
+     * {@code ItemStack#getTags()} 同一条「Holder 反查标签」的路，<b>不</b>扫全注册表、
+     * <b>不</b>建反向索引（tag 重载后不会有陈旧缓存）。
+     */
+    private @NotNull java.util.List<String> shanhaiFluidTagStrings(@NotNull AEFluidKey key) {
+        final java.util.List<String> out = new java.util.ArrayList<>();
+        try {
+            final net.minecraft.world.level.material.Fluid fluid = key.getFluid();
+            if (fluid == null) {
+                return out;
+            }
+            fluid.builtInRegistryHolder().tags().forEach(tag -> out.add(tag.location().toString()));
+        } catch (Throwable ignored) {
+            // 取不到标签 = 这个键不算命中（宁可少收，不许把"不知道"当成"全收"）
+        }
+        return out;
+    }
+
+    // ---------------------------------------------------------------- ⑧ 标签命中集合 = 独立供料源
+
+    /**
+     * <b>刷新「标签命中集合」</b>——它现在是一个<b>独立的供料源</b>，<b>不写</b>那 160 格库存配置。
+     *
+     * <h2>🔴 与上一轮的根本差别（用户 2026-10-25 原话纠正口径）</h2>
+     * 用户原话：「<b>星律样板总成的标签拉取把库存的位置填了，但是实际上它们应该分开各不干扰</b>」。
+     * <ul>
+     *   <li>上一轮：开关开 ⇒ 每周期把命中的键<b>写进库存配置 + 清尾</b>（手配被覆盖）；</li>
+     *   <li>本轮：命中集合只写进本类自己的两个<b>快照字段</b>
+     *       （{@link #shanhaiTagSupplyItemKeys} / {@link #shanhaiTagSupplyFluidKeys}），
+     *       由 {@link ShanhaiTagSupplyHandlers} 那两份 handler 当<b>独立供料源</b>用。
+     *       ⇒ 本方法<b>零</b> {@code setConfig*} / {@code clearInventory} / {@code onConfigChanged} 调用，
+     *       手配的 160+160 格<b>逐格原样</b>（探针 `E` 组断言）。</li>
+     * </ul>
+     *
+     * <h2>每一轮做什么</h2>
+     * <ol>
+     *   <li>闸（{@link ShanhaiTagPullPlanner#gate} 的纯函数，闸序 = 开关 → 名单 → 网络 → 库存）；</li>
+     *   <li>扫 {@code IStorageService#getCachedInventory()}（<b>AE2 缓存库存</b>，与上游
+     *       {@code TagFilterMEStockBusPartMachine#refreshList} 同一条 API）；</li>
+     *   <li>物品 / 流体各走一遍 {@link ShanhaiTagPullPlanner#plan}（过滤 + 按量降序 + 安全阀截断）；</li>
+     *   <li>命中指纹变了才整份替换快照并 {@code version++}（handler 的 {@code getContents()} 缓存靠它）；</li>
+     *   <li>打<b>一行</b> {@code TAGSUPPLY …}（仅当结果变了，见 {@link #shanhaiLogTagPullOnce}）。</li>
+     * </ol>
+     *
+     * <h2>🔴 每一道闸都是「<b>这一路不供料</b>」，而不是「动那些格子」</h2>
+     * <ul>
+     *   <li>开关关 ⇒ 命中集合清空（handler 立刻回到"与没有它时逐字节相同"），
+     *       <b>手配那 160 格原样</b>；</li>
+     *   <li>名单都空 ⇒ 同上（刻意<b>不</b>把「空」当「全收」：那会把整张网络都变成供料源）；</li>
+     *   <li>表达式语法错 ⇒ 同上，且错误原文进日志与面板（既不静默全收也不静默清空）。</li>
+     * </ul>
+     *
+     * @param grid 本机主节点所在的网络（{@code null} = 没连上；此时这一路不供料）
+     */
+    private void shanhaiTagPull(@Nullable appeng.api.networking.IGrid grid) {
+        if (this.isRemote()) {
+            return;
+        }
+        final String white = this.shanhaiTagWhite == null ? "" : this.shanhaiTagWhite.trim();
+        final String black = this.shanhaiTagBlack == null ? "" : this.shanhaiTagBlack.trim();
+        // 取 AE2 缓存库存（与上游 refreshList 同一个 API：KeyCounter）。取不到 ⇒ 记成 hasInventory=false。
+        KeyCounter cached = null;
+        if (grid != null) {
+            try {
+                cached = grid.getStorageService().getCachedInventory();
+            } catch (Throwable unavailable) {
+                cached = null;
+            }
+        }
+        // ---- 闸（纯函数，顺序就是语义；探针 temp\tagpull2\probe 对它跑真值表）
+        final ShanhaiTagPullPlanner.Gate gate = ShanhaiTagPullPlanner.gate(
+                this.shanhaiTagFilterEnabled, white, black, grid != null, cached != null);
+        if (gate != ShanhaiTagPullPlanner.Gate.OK) {
+            this.shanhaiTagPullSkip = gate.code();
+            this.shanhaiClearTagSupply("gate:" + gate.code());
+            this.shanhaiLogTagPullOnce("skip=" + gate.code(),
+                    "TAGSUPPLY enabled={} matched=0（item=0 fluid=0）skipped={} ⇒ {}",
+                    Boolean.valueOf(this.shanhaiTagFilterEnabled), gate.code(), this.shanhaiTagGateHint(gate));
+            this.shanhaiSetTagPullLine(this.shanhaiTagPullLineText());
+            return;
+        }
+        // ---- 候选：一次遍历，物品/流体分两桶（物流体的条目才收，别的类型一律跳过）
+        final java.util.List<ShanhaiTagPullPlanner.Candidate<AEItemKey>> itemCandidates = new ArrayList<>();
+        final java.util.List<ShanhaiTagPullPlanner.Candidate<AEFluidKey>> fluidCandidates = new ArrayList<>();
+        try {
+            for (Object2LongMap.Entry<AEKey> entry : cached) {
+                final AEKey key = entry.getKey();
+                final long amount = entry.getLongValue();
+                if (key instanceof AEItemKey itemKey) {
+                    itemCandidates.add(new ShanhaiTagPullPlanner.Candidate<>(itemKey,
+                            this.shanhaiItemIdOf(itemKey), amount, this.shanhaiItemTagStrings(itemKey)));
+                } else if (key instanceof AEFluidKey fluidKey) {
+                    fluidCandidates.add(new ShanhaiTagPullPlanner.Candidate<>(fluidKey,
+                            String.valueOf(fluidKey.getId()), amount, this.shanhaiFluidTagStrings(fluidKey)));
+                }
+            }
+        } catch (Throwable broken) {
+            this.shanhaiTagPullSkip = "noInventory";
+            this.shanhaiClearTagSupply("iter:" + broken.getClass().getSimpleName());
+            this.shanhaiLogTagPullOnce("skip=noInventory|iter",
+                    "TAGSUPPLY enabled=true matched=0（item=0 fluid=0）skipped=noInventory err=[{}]",
+                    String.valueOf(broken.getMessage()));
+            this.shanhaiSetTagPullLine(this.shanhaiTagPullLineText());
+            return;
+        }
+        // ---- 规划（表达式语法错在这里抛 ⇒ 这一路不供料，但**一格都不动**）
+        final ShanhaiTagPullPlanner.Plan<AEItemKey> itemPlan;
+        final ShanhaiTagPullPlanner.Plan<AEFluidKey> fluidPlan;
+        try {
+            itemPlan = ShanhaiTagPullPlanner.plan(white, black, itemCandidates, TAG_SUPPLY_MAX);
+            fluidPlan = ShanhaiTagPullPlanner.plan(white, black, fluidCandidates, TAG_SUPPLY_MAX);
+        } catch (IllegalArgumentException badExpression) {
+            this.shanhaiTagPullSkip = "badExpression:" + badExpression.getMessage();
+            this.shanhaiClearTagSupply("badExpression:" + badExpression.getMessage());
+            this.shanhaiLogTagPullOnce("skip=badExpression|" + badExpression.getMessage(),
+                    "TAGSUPPLY enabled=true matched=0（item=0 fluid=0）skipped=badExpression err=[{}]"
+                            + "（表达式写错了 ⇒ 这一路暂停；库存那 160 格一格未动）",
+                    String.valueOf(badExpression.getMessage()));
+            this.shanhaiSetTagPullLine(this.shanhaiTagPullLineText());
+            return;
+        }
+        this.shanhaiTagPullSkip = "ok";
+        // ---- 🔴 这里**只**动本类自己的两个快照字段，绝不碰那两份 160 格 handler ----
+        //   上一轮那套 `IMESlot#setConfigWithoutNotify` / `onConfigChanged()` / 清尾（`tailOccupied`）
+        //   **整体删除**。用户 2026-10-25 原话：
+        //   「星律样板总成的标签拉取把库存的位置填了，但是实际上它们应该分开各不干扰」
+        //   ⇒ 命中集合只是「这一路能供什么」，手配的 160+160 格由玩家自己填，两套各不干扰。
+        final long itemSig = ShanhaiTagPullPlanner.signature(itemPlan.hits);
+        final long fluidSig = ShanhaiTagPullPlanner.signature(fluidPlan.hits);
+        if (itemSig != this.shanhaiTagSupplyItemSig) {
+            this.shanhaiTagSupplyItemSig = itemSig;
+            this.shanhaiTagSupplyItemKeys = shanhaiKeysOf(itemPlan.hits);
+            this.shanhaiTagSupplyVersion++;          // handler 的 getContents() 缓存靠它失效
+        }
+        if (fluidSig != this.shanhaiTagSupplyFluidSig) {
+            this.shanhaiTagSupplyFluidSig = fluidSig;
+            this.shanhaiTagSupplyFluidKeys = shanhaiKeysOf(fluidPlan.hits);
+            this.shanhaiTagSupplyVersion++;
+        }
+        // ---- 记读数（面板 + 日志用）
+        this.shanhaiTagSupplyItemScanned = itemPlan.candidates;
+        this.shanhaiTagSupplyItemMatched = itemPlan.matched;
+        this.shanhaiTagSupplyItemTruncated = itemPlan.truncated > 0;
+        this.shanhaiTagSupplyFluidScanned = fluidPlan.candidates;
+        this.shanhaiTagSupplyFluidMatched = fluidPlan.matched;
+        this.shanhaiTagSupplyFluidTruncated = fluidPlan.truncated > 0;
+        // ---- 一行日志（**只在结果变化时**打：同一份库存 + 同一份名单 ⇒ 一行都不多打）
+        // 末尾四位（migrated/legacyCfg/…）是**顺手带上**的迁移闸读数：用户怀疑
+        // 「@Persisted 的 160 格读档为空 ⇒ 一次性迁移闸再也不会跑」，这四个数就是否决它的现场证据
+        // （migrated=true 且 legacyCfg>0 ⇒ 确实"旧 32 格还有东西但不会再迁"；推理见交付报告 §5）。
+        final int legacyItemCfg = this.shanhaiCountConfigured(this.stockItemHandler);
+        final int legacyFluidCfg = this.shanhaiCountConfiguredFluid(this.stockFluidHandler);
+        final String logState = itemSig + "|" + fluidSig + "|" + white + "|" + black;
+        this.shanhaiLogTagPullOnce(logState,
+                "TAGSUPPLY enabled=true matched={}（item={} fluid={}）scanned[item={} fluid={}]"
+                        + " truncated[item={} fluid={}] source=independent（不占库存 160 格、手配原样）"
+                        + " migrated={} legacyCfg={} fluidMigrated={} legacyFluidCfg={} white=[{}] black=[{}]",
+                Integer.valueOf(itemPlan.matched + fluidPlan.matched),
+                Integer.valueOf(itemPlan.matched), Integer.valueOf(fluidPlan.matched),
+                Integer.valueOf(itemPlan.candidates), Integer.valueOf(fluidPlan.candidates),
+                Boolean.valueOf(this.shanhaiTagSupplyItemTruncated),
+                Boolean.valueOf(this.shanhaiTagSupplyFluidTruncated),
+                Boolean.valueOf(this.shanhaiStockMigrated), Integer.valueOf(legacyItemCfg),
+                Boolean.valueOf(this.shanhaiStockFluidMigrated), Integer.valueOf(legacyFluidCfg),
+                white, black);
+        this.shanhaiSetTagPullLine(this.shanhaiTagPullLineText());
+    }
+
+    /** 命中集合 → 键快照（不可变）。{@code Candidate.payload} 为 null 的直接跳过。 */
+    private static <T> java.util.List<T> shanhaiKeysOf(
+            @NotNull java.util.List<ShanhaiTagPullPlanner.Candidate<T>> hits) {
+        if (hits.isEmpty()) {
+            return java.util.List.of();
+        }
+        final java.util.List<T> out = new java.util.ArrayList<>(hits.size());
+        for (int i = 0; i < hits.size(); i++) {
+            final T payload = hits.get(i).payload;
+            if (payload != null) {
+                out.add(payload);
+            }
+        }
+        return java.util.List.copyOf(out);
+    }
+
+    /**
+     * 命中集合清空（某道闸没过时用）：让那两份 handler 立刻回到「等于没有它」。
+     *
+     * <p>🔴 只清<b>本类自己的快照</b>——库存那 160+160 格<b>一个字节都不动</b>。
+     * <p>⚠️ 本来就是空的时候直接返回（不动版本号）：否则每个同步周期都会让 handler 白重建一次缓存。
+     */
+    private void shanhaiClearTagSupply(@NotNull String why) {
+        final boolean hadItems = !this.shanhaiTagSupplyItemKeys.isEmpty();
+        final boolean hadFluids = !this.shanhaiTagSupplyFluidKeys.isEmpty();
+        this.shanhaiTagSupplyItemMatched = 0;
+        this.shanhaiTagSupplyFluidMatched = 0;
+        if (!hadItems && !hadFluids) {
+            return;
+        }
+        this.shanhaiTagSupplyItemKeys = java.util.List.of();
+        this.shanhaiTagSupplyFluidKeys = java.util.List.of();
+        this.shanhaiTagSupplyItemSig = ShanhaiTagPullPlanner.signature(java.util.List.of());
+        this.shanhaiTagSupplyFluidSig = ShanhaiTagPullPlanner.signature(java.util.List.of());
+        this.shanhaiTagSupplyVersion++;
+        ShanhaiStellarLog.info("TAGSUPPLY 命中集合清空（{}）⇒ 这一路不再供料；库存那 160 格一格未动", why);
+    }
+
+    /** 闸没过的中文原因（日志与面板共用同一套措辞，不另写一份）。 */
+    private @NotNull String shanhaiTagGateHint(@NotNull ShanhaiTagPullPlanner.Gate gate) {
+        switch (gate) {
+            case DISABLED:
+                return "标签关：这一路不供料（库存那 160 格恢复纯手配，原样保留）";
+            case EMPTY_EXPRESSION:
+                return "白/黑名单都空：刻意不当「全收」（那会把整张网络变成供料源）—— 先填一个白名单或黑名单";
+            case NO_GRID:
+                return "本机主节点不在网上 ⇒ 扫不到 ME 缓存库存";
+            case NO_INVENTORY:
+                return "取不到 AE 缓存库存（getStorageService().getCachedInventory()）";
+            default:
+                return "未知闸状态：" + gate.code();
+        }
+    }
+
+    /**
+     * 标签页底部那一行<b>真读数</b>的文字（{@code @DescSynced} 下发，见 {@link #shanhaiTagPullLine}）。
+     *
+     * <p>🔴 2026-10-25 改口径：它<b>不再</b>说「接管了几格库存配置」（那是上一轮的做法，已作废），
+     * 而是说「<b>已匹配几种</b>」+「<b>独立供料源，不占用库存 160 格</b>」。
+     */
+    private @NotNull String shanhaiTagPullLineText() {
+        if (!this.shanhaiTagFilterEnabled) {
+            return "标签供料：已关闭（这一路不供料；下面那 160 格手配原样）";
+        }
+        if (this.shanhaiTagPullSkip.isEmpty()) {
+            return "标签供料：等待第一次库存同步…";
+        }
+        if (!"ok".equals(this.shanhaiTagPullSkip)) {
+            return "标签供料：暂停（" + this.shanhaiTagPullSkip + "）—— 这一路不供料，160 格手配原样";
+        }
+        final StringBuilder out = new StringBuilder();
+        out.append("标签供料：已匹配 ").append(this.shanhaiTagSupplyItemMatched).append(" 种物品");
+        if (this.shanhaiTagSupplyFluidMatched > 0) {
+            out.append(" + ").append(this.shanhaiTagSupplyFluidMatched).append(" 种流体");
+        }
+        out.append("（独立供料源，不占用库存 160 格）");
+        if (this.shanhaiTagSupplyItemTruncated || this.shanhaiTagSupplyFluidTruncated) {
+            out.append("｜命中超过 ").append(TAG_SUPPLY_MAX).append(" 条，已截断");
+        }
+        return out.toString();
+    }
+
+    // ---------------------------------------------------------------- 供料源实现（给 ShanhaiTagSupplyHandlers 用）
+
+    /**
+     * 机器侧实现的那份 {@link ShanhaiTagSupplyHandlers.Source}：<b>只读快照 + 真抽取</b>。
+     *
+     * <h2>🔴 到底扣不扣 ME、在哪扣（一句话）</h2>
+     * <b>扣</b>。扣在 {@link #shanhaiTagSupplyExtract(AEKey, long, boolean)} 里那一句
+     * {@code MEStorage#extract(key, n, Actionable.MODULATE, actionSource)}，
+     * 它只会在 {@code handleRecipeInner(..., simulate=false)}（= 配方<b>真跑</b>那一遍）被调用；
+     * {@code simulate=true}（配方匹配/算料）走 {@code Actionable.SIMULATE}，<b>ME 里的量一个都不动</b>。
+     *
+     * <p>⚠️ 别把这一路误会成 {@code ShanhaiSupplyOnlyItemHandler} 那种「只声明能供、永不抽取」——
+     * 那种是给<b>催化剂</b>用的（催化剂本来就不该被消耗）；放在<b>配方原料</b>上会凭空造物。
+     * 这里与库存输入仓 {@code ExportOnlyAEStocking*List} 同一条语义：
+     * <b>与 ME 共享内容物、不搬物品</b>（没有本地缓冲，扣的时候直接从网络里抽走）。
+     */
+    private final class ShanhaiTagSupplySource implements ShanhaiTagSupplyHandlers.Source {
+
+        @Override
+        public boolean shanhaiTagSupplyEnabled() {
+            // 开关开 + 闸全过（"ok" 只在上面的 plan 成功后才写）⇒ 这一路才供料。
+            // 其余任何处境（关 / 名单空 / 没连网 / 取不到库存 / 表达式错）都是"不供料"，
+            // **绝不**顺手去改库存那 160 格。
+            return StellarSampleAssemblerPartMachine.this.shanhaiTagFilterEnabled
+                    && ShanhaiTagPullPlanner.Gate.OK.code()
+                    .equals(StellarSampleAssemblerPartMachine.this.shanhaiTagPullSkip);
+        }
+
+        @Override
+        public long shanhaiTagSupplyVersion() {
+            return StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyVersion;
+        }
+
+        @Override
+        public java.util.List<AEItemKey> shanhaiTagSupplyItems() {
+            return StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyItemKeys;
+        }
+
+        @Override
+        public java.util.List<AEFluidKey> shanhaiTagSupplyFluids() {
+            return StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyFluidKeys;
+        }
+
+        @Override
+        public long shanhaiTagSupplyAmount(AEKey key) {
+            if (key == null) {
+                return 0L;
+            }
+            final KeyCounter snapshot = StellarSampleAssemblerPartMachine.this.shanhaiStockSnapshot;
+            if (snapshot == null) {
+                return 0L;
+            }
+            return snapshot.get(key);
+        }
+
+        @Override
+        public long shanhaiTagSupplyExtract(AEKey key, long amount, boolean simulate) {
+            if (key == null || amount <= 0L) {
+                return 0L;
+            }
+            final MEStorage storage = shanhaiTagSupplyStorage();
+            if (storage == null) {
+                return 0L;
+            }
+            try {
+                final long got = storage.extract(key, amount,
+                        simulate ? appeng.api.config.Actionable.SIMULATE : appeng.api.config.Actionable.MODULATE,
+                        StellarSampleAssemblerPartMachine.this.actionSource);
+                if (!simulate && got > 0L) {
+                    if (key instanceof AEFluidKey) {
+                        StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyFluidExtracts++;
+                    } else {
+                        StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyItemExtracts++;
+                    }
+                }
+                return got;
+            } catch (Throwable broken) {
+                ShanhaiStellarLog.warn("TAGSUPPLY 抽取失败 key={} amount={} simulate={} err=[{}]",
+                        key, Long.valueOf(amount), Boolean.valueOf(simulate),
+                        String.valueOf(broken.getMessage()));
+                return 0L;
+            }
+        }
+
+        @Override
+        public long shanhaiTagSupplyReinsert(AEKey key, long amount) {
+            if (key == null || amount <= 0L) {
+                return 0L;
+            }
+            final MEStorage storage = shanhaiTagSupplyStorage();
+            if (storage == null) {
+                ShanhaiStellarLog.warn("TAGSUPPLY 无法回滚：网络已断开，key={} amount={}（这部分料丢了，如实记）",
+                        key, Long.valueOf(amount));
+                return 0L;
+            }
+            try {
+                final long back = storage.insert(key, amount, appeng.api.config.Actionable.MODULATE,
+                        StellarSampleAssemblerPartMachine.this.actionSource);
+                if (back < amount) {
+                    ShanhaiStellarLog.warn("TAGSUPPLY 回滚不全：key={} 应回 {} 实回 {}（差额如实记，不装作成功）",
+                            key, Long.valueOf(amount), Long.valueOf(back));
+                }
+                return back;
+            } catch (Throwable broken) {
+                ShanhaiStellarLog.warn("TAGSUPPLY 回滚抛异常：key={} amount={} err=[{}]",
+                        key, Long.valueOf(amount), String.valueOf(broken.getMessage()));
+                return 0L;
+            }
+        }
+
+        @Override
+        public void shanhaiTagSupplyCount(boolean fluid, boolean contents, int n, boolean simulate) {
+            if (contents) {
+                if (fluid) {
+                    StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyFluidContents++;
+                } else {
+                    StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyItemContents++;
+                }
+                // 🔴 这条路**不打日志**：{@code getContents()} 是超高频调用（实机 18 万次），
+                //    而 shanhaiLogSupplyTrace 是 100 tick（5 秒）一行的**全局窗口** ——
+                //    在这条路上打点会把窗口全占满，把「库存那两份 handler 的
+                //    SUPPLYCHAIN kind=item handle … calls[h=」这条关键判据挤掉（上一轮留下的实机判据）。
+                //    计数照样有：下面 handle 那行的 {@code c=} 就是它。
+                return;
+            }
+            if (fluid) {
+                StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyFluidHandles++;
+            } else {
+                StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyItemHandles++;
+            }
+            final String kind = fluid ? "fluid" : "item";
+            StellarSampleAssemblerPartMachine.this.shanhaiLogSupplyTrace(
+                    "kind=" + kind + "-tag handle left=" + n + " simulate=" + simulate
+                            + " calls[h=" + StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyItemHandles
+                            + '/' + StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyFluidHandles
+                            + " c=" + StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyItemContents
+                            + '/' + StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyFluidContents + "]"
+                            + " matched=" + StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyItemMatched
+                            + '/' + StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyFluidMatched
+                            + " extract=" + StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyItemExtracts
+                            + '/' + StellarSampleAssemblerPartMachine.this.shanhaiTagSupplyFluidExtracts);
+        }
+
+        /** 本机主节点上的 ME 库存对象（掉线 ⇒ null）。 */
+        private @Nullable MEStorage shanhaiTagSupplyStorage() {
+            try {
+                final appeng.api.networking.IManagedGridNode node =
+                        StellarSampleAssemblerPartMachine.this.getMainNode();
+                final appeng.api.networking.IGrid grid = node == null ? null : node.getGrid();
+                return grid == null ? null : grid.getStorageService().getInventory();
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+    }
+
+    /** 改 {@link #shanhaiTagPullLine} 的唯一入口（文字没变就不赋值 ⇒ 不白刷同步包）。 */
+    private void shanhaiSetTagPullLine(@NotNull String text) {
+        if (text.equals(this.shanhaiTagPullLine)) {
+            return;
+        }
+        this.shanhaiTagPullLine = text;
+    }
+
+    /**
+     * TAGPULL 那一行的<b>唯一发出口</b>：同一份 {@code state} 只打一次。
+     *
+     * <p>为什么按状态去重而不是按时间节流：这一行要看的是「<b>库存配置变没变</b>」，
+     * 每 200 tick 打一遍同样的数字只会把日志刷成噪声（用户明确要求「不要改成刷屏」）；
+     * 而真变化（换了白名单 / ME 里多了一样命中的东西 / 被清尾了）一定会改 {@code state}。
+     */
+    private void shanhaiLogTagPullOnce(@NotNull String state, @NotNull String message, Object... args) {
+        if (state.equals(this.shanhaiTagPullLogState)) {
+            return;
+        }
+        this.shanhaiTagPullLogState = state;
+        ShanhaiStellarLog.info(message, args);
+    }
+
     // ---------------------------------------------------------------- 槽号 ↔ 样板（对外 API）
 
     /**
@@ -2326,6 +3573,10 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         this.shanhaiRefreshWildcardConfigType();
         this.shanhaiRefreshWildcardMask();
         this.shanhaiInvalidateGateCache();
+        // 🔴 2026-10-25：手填类型会改「哪些槽过闸」与样板 NBT ⇒ AE 侧那一份缓存必须重推
+        this.shanhaiRequestAePatternSync("applyType:" + wildcardSlot);
+        // 🔴 C4：③ 母槽类型变化 ⇒ 建一次（用户口径的第三个触发点）。
+        this.shanhaiBuildPatternTablesIfDirty("applyType:" + wildcardSlot);
         ShanhaiStellarLog.info("通配符配方种类写回：母槽={} 类型=[{}] 键={} 内容有变化={}",
                 wildcardSlot + 1, normalized, ShanhaiWildcardTypeNbt.KEY, changed);
         if (ShanhaiStellarLog.isTypeLogEnabled()) {
@@ -2389,6 +3640,8 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
         ShanhaiStellarLog.info("通配符「实际配方数量」变更：母槽={} 新值={}",
                 wildcardSlot + 1, this.shanhaiWildcardCacheCount[wildcardSlot]);
+        // 展开条数直接决定 AE 能看见几条 ⇒ 同一处置
+        this.shanhaiRequestAePatternSync("cacheCount:" + wildcardSlot);
     }
 
     /** 某母槽的编程电路（{@link ShanhaiSlotCircuit#NONE} = 未设置）。 */
@@ -2421,6 +3674,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
         this.shanhaiWildcardCircuit[wildcardSlot] = (byte) normalized;
         this.expandCacheDirty = true;
+        this.shanhaiRequestAePatternSync("wildcardCircuit:" + wildcardSlot + "=" + normalized);
         ShanhaiStellarLog.info("通配符编程电路写入：母槽={} 电路={}（{} = 清除）",
                 wildcardSlot + 1, normalized, ShanhaiSlotCircuit.NONE);
     }
@@ -2506,12 +3760,23 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     public void addedToController(@NotNull IMultiController controller) {
         super.addedToController(controller);
         this.shanhaiRefreshHostRecipeTypeIds();
+        // 2026-10-26 五修：结构成型 ⇒ HANDLEPOOL 复位。等 40 tick 再打，那时这一次
+        // rebuildRecipeHandleParts 至少已经跑过一轮（「改前/改后」比的就是这一行）。
+        this.shanhaiHandlePoolWait = 0;
+        this.shanhaiHandlePoolLogged = false;
+        // 2026-10-26 四修：结构成型那一刻打一次 HANDLERS（顺序 + 谁短路）＋ BUFFERGATE（就绪闸）。
+        // 放在这里而不是 update()：成型是「一次性事件」，这两行就是要在那个时刻留档。
+        this.shanhaiLogHandlersOnce("formed");
+        this.shanhaiLogBufferGate("formed");
     }
 
     @Override
     public void removedFromController(@NotNull IMultiController controller) {
         super.removedFromController(controller);
         this.shanhaiRefreshHostRecipeTypeIds();
+        // 2026-10-26 五修：拆结构 ⇒ HANDLEPOOL 复位（下次成型会再打一次读数）。
+        this.shanhaiHandlePoolWait = 0;
+        this.shanhaiHandlePoolLogged = false;
     }
 
     // ================================================================ C 刀 · A 段：催化剂 → InternalSlot
@@ -2618,6 +3883,17 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         this.shanhaiRefreshWildcardConfigType();
         this.shanhaiRefreshWildcardMask();
         this.forgeCacheDirty = true;
+        // 🔴 2026-10-26（四修 ③）：原来这一处**只**置 forgeCacheDirty —— 少了闸/展开/放行名单三份缓存，
+        //    于是「把某一格通配符样板换成另一块 / 清空」这条路上，`getAvailablePatterns()` 仍读陈旧的
+        //    gateBlockedSlots 与 expansionsByMother ⇒ AE 拿到的清单和容器真值不一致。
+        //    与 {@link #shanhaiOnWildcardInventoryChanged()} 对齐（那里早就调了）。
+        this.shanhaiInvalidateGateCache();
+        // 🔴 2026-10-25：样板格内容变了 ⇒ 展开表会变 ⇒ AE 那边的「可合成」清单必须重推一次
+        // ⚠️ 2026-10-26：调用点可能是**展开槽**（`onPatternChange` 只按 MOTHER_OFFSET 平移），
+        //    那时 wildcardSlot 会 ≥50 ⇒ 读容器前必须夹范围（否则越界读写到别的东西）。
+        final boolean slotEmpty = wildcardSlot < 0 || wildcardSlot >= WILDCARD_SLOT_COUNT
+                || this.wildcardPatternInventory.getStackInSlot(wildcardSlot).isEmpty();
+        this.shanhaiRequestAePatternSync("wildcardSlot:" + wildcardSlot + (slotEmpty ? ":empty" : ":set"));
         if (ShanhaiStellarLog.isTypeLogEnabled()) {
             final ItemStack stack = this.wildcardPatternInventory.getStackInSlot(wildcardSlot);
             ShanhaiStellarLog.logSlotType("wildcardChanged", WILDCARD_API_SLOT_OFFSET + wildcardSlot, stack,
@@ -2625,7 +3901,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
     }
 
-    /** 50 格容器的 contents-changed（`setStackInSlot` / 玩家拖入都会走到这里）。 */
+    /** 50 格容器的 contents-changed（`setStackInSlot` / 玩家拖入 / **取出**都会走到这里）。 */
     private void shanhaiOnWildcardInventoryChanged() {
         if (this.isRemote()) {
             return;
@@ -2633,7 +3909,20 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         this.shanhaiRefreshWildcardConfigType();
         this.shanhaiRefreshWildcardMask();
         this.forgeCacheDirty = true;
+        // 🔴 2026-10-26（四修 ③）：这条回调同时挂在「加」和「删」上，所以它必须把三份缓存一起放倒 ——
+        //    只置 forgeCacheDirty 时，**删**掉一块通配符母槽之后 expansionsByMother 还留着它的展开条，
+        //    重推给 AE 的还是那批已经不存在的样板（这就是「AE 继续往没样板的机器派单」的成因之一）。
         this.shanhaiInvalidateGateCache();
+        // 🔴 2026-10-25：拖入/取出通配符样板是**最常见**的那条路（用户就是拖进去的）⇒
+        //    这一处不重推，AE 终端永远看不到新产物「可以合成」。
+        //    2026-10-26：`from=` 里带上容器真值（非空格数）—— 取空时它会变成 0，一眼能看出是"删"不是"加"。
+        int nonEmpty = 0;
+        for (int i = 0; i < WILDCARD_SLOT_COUNT; i++) {
+            if (!this.wildcardPatternInventory.getStackInSlot(i).isEmpty()) {
+                nonEmpty++;
+            }
+        }
+        this.shanhaiRequestAePatternSync("wildcardInv:" + nonEmpty);
     }
 
     /**
@@ -2908,7 +4197,23 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     @Override
     protected void update() {
         super.update();
+        // 🔴 C4（2026-10-27）：**读路径不再重建** ⇒ 脏标记在这里消费（每 tick 一次判断，脏才建）。
+        //    于是"连续两次 getAvailablePatterns() 之间不重建"成立：AE 怎么问都只是读字段，
+        //    真正建表发生在 ①样板格变 ②读档 ③母槽类型变 以及这里这一跳，建完立刻请求 AE 刷新。
+        this.shanhaiBuildPatternTablesIfDirty("tick");
+        // 🔴 2026-10-25：通配符样板/类型变了 ⇒ 让 AE 重新读一次我们的样板清单（否则终端永远看不到
+        //    「可以合成」）。放在 super.update() 之后：上游那套 needPatternSync 先跑完，
+        //    我们这一次是**补**上它覆盖不到的通配符容器。
+        this.shanhaiTickAePatternExport();
         this.shanhaiTickAutoForgeMultiplier();
+        // ---- 2026-10-26 四修：三组"一条日志判死"的读数（全部自带节流，且不改行为）
+        //      TICKER  —— buffer / pushed / refunded（本机有没有被派单、产物有没有回流）
+        this.shanhaiTickTickerProbe();
+        //      HANDLERS（只一次）+ BUFFERGATE（卡住时每 300 tick 一行）—— 顺序与就绪闸
+        this.shanhaiLogHandlersOnce("update");
+        this.shanhaiLogBufferGate("update");
+        //      HANDLEPOOL（每台机一次）—— 「承载我们 handler 的 RecipeHandlePart 到底存不存在」
+        this.shanhaiLogHandlePoolOnce();
     }
 
     /**
@@ -2925,8 +4230,14 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
         this.shanhaiRefreshWildcardConfigType();
         this.shanhaiRefreshWildcardMask();
+        // 🔴 2026-10-25：读档时展开表是空的（expandCacheDirty 初值 true），而 AE 的 provider 缓存
+        //    在节点加入网格那一刻就把「当时的清单」登记进去了 ⇒ 必须显式重推一次，
+        //    否则存档里已有的通配符样板在终端里永远不显示「可以合成」。
+        this.shanhaiRequestAePatternSync("onLoad");
         this.forgeCacheDirty = true;
         this.shanhaiInvalidateGateCache();
+        // 🔴 C4：② 读档 ⇒ 建一次（改前是等 AE 来问才建；现在读档当场建好并请求 AE 刷新）。
+        this.shanhaiBuildPatternTablesIfDirty("onLoad");
         // C 刀 · B 段：把「宿主支持的配方类型」算出来（结构成型那一路上 addedToController 已经算过，
         // 这里再算一次是为了覆盖「onLoad 晚于结构成型」与「读档后控制器列表已就绪」两种时序）。
         this.shanhaiRefreshHostRecipeTypeIds();
@@ -2951,7 +4262,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         ShanhaiStellarLog.info("STOCKCFG 配置变化：我们的键数={}（160 格）", Integer.valueOf(this.shanhaiConfiguredItemKeys().size()));
         this.shanhaiRebuildStockItemKeys();
         this.shanhaiRebuildStockFluidKeys();
-        this.shanhaiSyncStock();
+        this.shanhaiSyncStock("onLoad");
         if (ShanhaiStellarLog.isTypeLogEnabled()) {
             this.shanhaiDumpStockConfig("onLoad");
         }
@@ -3077,7 +4388,11 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     }
 
     /**
-     * 槽数 = <b>1080 + 50 = 1130</b>（固定）。
+     * 槽号空间总长 = <b>1080 + 50 + 已分配展开数</b>（🔴 C3：<b>动态</b>，不再有 7530 这种编译期上界）。
+     *
+     * <p>展开段长度 = {@link ShanhaiWildcardSlotAllocator#slotCount()}（"实际展开出几条"）；
+     * 母样板变少 ⇒ 尾部槽号回收、水位下降 ⇒ 本方法返回值跟着变小。
+     * 展开段的 InternalSlot 仍按需创建（见 {@link #expandInternalSlots}）。
      *
      * <p>🔴 覆写它是阶段三第 1 项的核心：Base 类所有「遍历全部槽」的方法
      * （{@code getActiveSlots()} / {@code getActiveAndUnCachedSlots()} / {@code getMergedInternalSlot()} /
@@ -3087,7 +4402,28 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      */
     @Override
     protected int getInternalSlotCount() {
-        return ShanhaiWildcardLayout.SLOT_SPACE_TOTAL;
+        // 🔴 C3（2026-10-27）：动态 —— 普通 1080 ＋ 母槽 50 ＋ 已分配展开数（原版无上限）。
+        //    ⚠️ 构造期（父类构造器里）本字段还是 null ⇒ 那时只报固定段长（与阶段三"父类只看 0..1079"同义）。
+        final ShanhaiWildcardSlotAllocator alloc = this.shanhaiSlotAllocator;
+        return ShanhaiWildcardLayout.EXPAND_OFFSET + (alloc == null ? 0 : alloc.slotCount());
+    }
+
+    /** 本对象现在的槽号空间描述（日志/探针用；槽号空间是动态的 ⇒ 不许再打印编译期常量）。 */
+    public @NotNull String shanhaiSlotSpaceDescribe() {
+        return "pattern=0.." + (ShanhaiWildcardLayout.PATTERN_SLOTS - 1)
+                + " mother=" + ShanhaiWildcardLayout.MOTHER_OFFSET + ".." + (ShanhaiWildcardLayout.EXPAND_OFFSET - 1)
+                + " expand=" + ShanhaiWildcardLayout.EXPAND_OFFSET + ".." + (this.getInternalSlotCount() - 1)
+                + " allocated=" + this.shanhaiSlotAllocator.slotCount()
+                + " (total=" + this.getInternalSlotCount() + ")";
+    }
+
+    /** 槽号是不是"本对象当前的"展开槽（动态边界 —— 分配器水位会收缩；构造期分配器还是 null）。 */
+    private boolean shanhaiIsExpandSlotNow(int slot) {
+        if (slot < ShanhaiWildcardLayout.EXPAND_OFFSET) {
+            return false;
+        }
+        final ShanhaiWildcardSlotAllocator alloc = this.shanhaiSlotAllocator;
+        return alloc != null && slot < ShanhaiWildcardLayout.EXPAND_OFFSET + alloc.slotCount();
     }
 
     /**
@@ -3102,14 +4438,17 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         if (ShanhaiWildcardLayout.isMotherSlot(slot)) {
             return this.wildcardInternalSlots.get(slot - ShanhaiWildcardLayout.MOTHER_OFFSET);
         }
-        if (ShanhaiWildcardLayout.isExpandSlot(slot)) {
-            return this.expandInternalSlots.get(slot - ShanhaiWildcardLayout.EXPAND_OFFSET);
+        if (this.shanhaiIsExpandSlotNow(slot)) {
+            // 🔴 懒创建：第一次被问到才 new（见 expandInternalSlots 的注释）。
+            //    这里**必须**返回非 null —— 父类/本类的调用点都直接 `.isActive()` / `.pushPattern()`。
+            //    ⚠️ C3 起展开段长度 = 分配器水位（动态），没有 6400 的固定扫描。
+            return this.shanhaiExpandSlotAt(slot - ShanhaiWildcardLayout.EXPAND_OFFSET);
         }
         if (ShanhaiWildcardLayout.isPatternSlot(slot)) {
             return super.getInternalSlot(slot);
         }
         throw new IndexOutOfBoundsException("星律样板总成：槽号 " + slot + " 越界（合法 0.."
-                + (ShanhaiWildcardLayout.SLOT_SPACE_TOTAL - 1) + "：" + ShanhaiWildcardLayout.describe()
+                + (this.getInternalSlotCount() - 1) + "：" + this.shanhaiSlotSpaceDescribe()
                 + "）—— 这是槽号计算 bug，不是数据问题");
     }
 
@@ -3126,9 +4465,15 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         if (ShanhaiWildcardLayout.isMotherSlot(slot)) {
             return !this.wildcardPatternInventory.getStackInSlot(slot - ShanhaiWildcardLayout.MOTHER_OFFSET).isEmpty();
         }
-        if (ShanhaiWildcardLayout.isExpandSlot(slot)) {
-            // 这一条展开"存在" ⇔ 母槽有样板且展开条数 > 分支号（展开表在 getAvailablePatterns 路径里重建）
-            return this.shanhaiExpansionCountFor(this.shanhaiMotherOfExpandSlot(slot)) > ShanhaiWildcardLayout.branchOf(slot);
+        if (this.shanhaiIsExpandSlotNow(slot)) {
+            // 这一条展开"存在" ⇔ 分配器里这个下标真的分配给了某条展开（C3：槽号由分配器发放，
+            // 不再由 (母槽, 分支) 算术推出来）。
+            final int rel = slot - ShanhaiWildcardLayout.EXPAND_OFFSET;
+            final int mother = this.shanhaiSlotAllocator.motherOf(rel);
+            if (mother < 0) {
+                return false;
+            }
+            return this.shanhaiExpansionCountFor(mother) > this.shanhaiSlotAllocator.branchOf(rel);
         }
         return super.hasPatternInSlot(slot);
     }
@@ -3158,7 +4503,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      */
     @Override
     protected boolean hasRecipeCacheInSlot(int slot) {
-        if (ShanhaiWildcardLayout.isMotherSlot(slot) || ShanhaiWildcardLayout.isExpandSlot(slot)) {
+        if (ShanhaiWildcardLayout.isMotherSlot(slot) || this.shanhaiIsExpandSlotNow(slot)) {
             return false;
         }
         return super.hasRecipeCacheInSlot(slot);
@@ -3179,15 +4524,30 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      */
     @Override
     protected void onPatternChange(int slot) {
-        if (ShanhaiWildcardLayout.isMotherSlot(slot) || ShanhaiWildcardLayout.isExpandSlot(slot)) {
-            // 通配符槽：只走本类自己的账本（阶段二/三都还没有 InternalSlot 缓存，
-            // 这里只做「失效闸缓存 + 日志 + 让终端重读」），绝不进父类数组。
+        if (ShanhaiWildcardLayout.isMotherSlot(slot) || this.shanhaiIsExpandSlotNow(slot)) {
+            // 通配符槽：只走本类自己的账本（失效闸缓存 + 日志 + 让终端重读），绝不进父类数组。
             this.shanhaiInvalidateGateCache();
-            this.shanhaiOnWildcardSlotChanged(slot - ShanhaiWildcardLayout.MOTHER_OFFSET);
+            if (ShanhaiWildcardLayout.isMotherSlot(slot)) {
+                this.shanhaiOnWildcardSlotChanged(slot - ShanhaiWildcardLayout.MOTHER_OFFSET);
+            }
+            // 🔴 C4：样板格内容变化 ⇒ 当场建一次（用户口径的三个触发点之一）。
+            this.shanhaiBuildPatternTablesIfDirty("wildcardSlot:" + slot);
             return;
         }
         super.onPatternChange(slot);
         this.shanhaiInvalidateGateCache();
+        // 🔴 2026-10-26（四修 ③）：**「删」这条路也必须留下 AE 重推的读数**。
+        //    事实（{@code javap -c} MEPatternBufferPartMachine#onPatternChange 偏移 66 与 163
+        //    两处 {@code putfield needPatternSync}）：这个分支无论「加」还是「删」都会置
+        //    {@code needPatternSync=true} ⇒ 父类 {@code update()} 里那次 {@code requestUpdate} 会跑。
+        //    但它是**父类**的账，我们看不到 —— 上一轮实机「PATEXPORT 只有 from=onLoad 一条」正是
+        //    因为这条重推走的是父类那条路、不进我们的 {@code from=}。
+        //    ⇒ 现在这里显式标一次脏：AE 侧同样重读，而日志里会多一条
+        //    `PATEXPORT from=patternSlot:<槽>:empty`（删）/`:set`（加）—— 一眼分清是哪条路触发的刷新。
+        this.shanhaiRequestAePatternSync("patternSlot:" + slot
+                + (this.hasPatternInSlot(slot) ? ":set" : ":empty"));
+        // 🔴 C4：① 样板格内容变化 ⇒ 当场建一次（读路径不再重建）。
+        this.shanhaiBuildPatternTablesIfDirty("patternSlot:" + slot);
     }
 
     /** AE 终端看到的样板库存 = 合并视图（见 {@link CombinedTerminalPatternInventory}）。 */
@@ -3225,10 +4585,26 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      */
     @Override
     public List<IPatternDetails> getAvailablePatterns() {
-        return this.shanhaiApplyForgeRewrite(this.shanhaiAppendWildcardExpansions(this.shanhaiGatedPatterns()));
+        // 🔴 一个字段、一次遍历（形状见 #effectivePatterns 的注释）：
+        //    AE 拿到的就是认领表（#expandedToSlot）里的那批实例 —— 不再每层拼一个新 list。
+        //
+        // 🔴🔴 C4（2026-10-27）：**这一跳绝不重建**（改前是 `shanhaiEnsurePatternTables()`）。
+        //    原版时机是"样板格内容变化 / 读档 / 母槽类型变化"时建一次，建完主动请求 AE 刷新
+        //    （见 shanhaiBuildPatternTablesIfDirty）；AE 问多少次都只是读同一份字段。
+        //    判据：连续两次本方法之间不重建（重建只发生事件点/update 那一跳，并打一行 PATREBUILD）。
+        //    ⚠️ 负对照位（生产 false）打开时，这里每次调用都会重建 ⇒ 用于证明判据能翻红。
+        if (this.shanhaiRebuildPolicy != null && this.shanhaiRebuildPolicy.shouldBuildOnRead()) {
+            this.shanhaiRebuildPatternTables("read-negative-control");
+        }
+        this.shanhaiInAePatternQuery = true;
+        try {
+            return this.effectivePatternView;
+        } finally {
+            this.shanhaiInAePatternQuery = false;
+        }
     }
 
-    /** 阶段三那道闸（只拦歧义）；抽成独立方法，好让阶段四的神锻改写叠在它之后。 */
+    /** 阶段三那道闸（只拦歧义）；抽成独立方法，由 {@link #shanhaiRebuildPatternTables()} 调用。 */
     private List<IPatternDetails> shanhaiGatedPatterns() {
         final List<IPatternDetails> all = super.getAvailablePatterns();
         if (!this.blockAmbiguousPatterns || all.isEmpty()) {
@@ -3261,69 +4637,37 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     // ================================================================ 阶段四 第 1 项：④ 神锻样板模式
 
     /**
-     * <b>神锻改写层</b>：把闸放行的样板再过一道「只改对 AE 声明的产出」。
+     * <b>「脏了就在这一跳建一次」的唯一入口（C4）</b>。
      *
-     * <h2>🔴 为什么这条路是可行的（`pushPattern` 调用链的字节码结论）</h2>
-     * {@code MEPatternBufferPartMachineBase.pushPattern(pattern, stacks)} 全body只有 4 步（{@code javap -c} 偏移 0–57）：
-     * <pre>
-     *   0: getMainNode().isActive()            // 网格在不在
-     *  16: getSlotIndexForPattern(pattern)     // ← **唯一**一次「这是哪一格」
-     *  20: if (slot == null || slot &lt; 0 || slot &gt;= getInternalSlotCount()) return false;
-     *  47: getInternalSlot(slot).pushPattern(stacks);  return true;
-     * </pre>
-     * ⇒ AE 把「它从 {@code getAvailablePatterns()} 拿到的那个对象」原样传回来时，
-     * 父类只需要能用它反查到槽号。<b>而 {@code getSlotIndexForPattern} 是 protected、可覆写、且不在
-     * gtladditions 的 @Overwrite 名单里</b> ⇒ 我们只要「先查父表、查不到再查改写表」就能让改写样板正常推料。
-     * <b>不需要</b>改 pushPattern 的其它任何一跳。
+     * <p>两张脏标记（{@link #expandCacheDirty} / {@link #forgeCacheDirty}）在
+     * {@link #shanhaiRebuildPatternTables(String)} 里<b>一起清零</b>。
      *
-     * <h2>反向映射的键为什么必须是「改写后的对象本身」</h2>
-     * AE 持有的是我们返回的那份实例；`MEBufferPatternHelper` 每次改写都会 new 一份新的 {@code IPatternDetails}
-     * ⇒ 只能用 <b>identity</b> 语义的 map（{@code HashMap} 默认 equals，但 {@code IPatternDetails} 的实现
-     * 没有覆写 equals 的话就是 identity；为稳妥，本类用 {@code java.util.IdentityHashMap}）。
+     * <p>🔴 只有<b>事件点</b>（样板格内容变化 / 读档 / 母槽类型变化 / 神锻·闸开关 / 通配符电路）
+     * 与 {@code update()} 每 tick 的那一跳会调它 —— 读路径
+     * （{@code getAvailablePatterns} / {@code getSlotIndexForPattern} / 候选槽枚举）<b>一次都不调</b>。
+     * 建完立刻 {@link #shanhaiRequestAePatternSync(String)}（"建完主动请求 AE 刷新"）。
      */
-    private List<IPatternDetails> shanhaiApplyForgeRewrite(@NotNull List<IPatternDetails> gated) {
-        if (!this.forgePatternMode || gated.isEmpty() || !ShanhaiForgePatternMode.isAvailable()) {
-            if (!this.forgePatternSnapshot.isEmpty()) {
-                this.forgePatternSnapshot.clear();
-                this.rewrittenToSlot.clear();
-            }
-            return gated;
+    private void shanhaiBuildPatternTablesIfDirty(@NotNull String reason) {
+        if (this.isRemote() || this.getLevel() == null) {
+            // 客户端 / 读档途中：不能算（rewrite 拿不到 level 会原样返回），脏标记留着。
+            return;
         }
-        if (this.forgeCacheDirty) {
-            this.forgeCacheDirty = false;
-            this.forgePatternSnapshot.clear();
-            this.rewrittenToSlot.clear();
-            final net.minecraft.world.level.Level level = this.getLevel();
-            for (IPatternDetails pattern : gated) {
-                IPatternDetails rewritten = null;
-                try {
-                    // 🔴 2026-10-24：这里用【生效倍率】而不是手填值 —— 自动倍率开着时就是控制器读数，
-                    //    关着时等于手填值（getEffectiveForgePatternMultiplier 的语义，见方法注释）。
-                    rewritten = ShanhaiForgePatternMode.rewrite(pattern, level, true, this.getEffectiveForgePatternMultiplier());
-                } catch (Throwable t) {
-                    // 改写失败 ⇒ 该样板按原样放行（绝不因为改写失败就把样板吞掉）
-                    ShanhaiStellarLog.warn("神锻改写抛异常（该样板按原样放行）：{}", String.valueOf(t));
-                }
-                if (rewritten != null && rewritten != pattern) {
-                    final Integer slot = super.getSlotIndexForPattern(pattern);
-                    if (slot != null) {
-                        this.rewrittenToSlot.put(rewritten, slot);
-                        this.forgePatternSnapshot.add(rewritten);
-                        continue;
-                    }
-                }
-                this.forgePatternSnapshot.add(pattern);
-            }
-            ShanhaiStellarLog.type("神锻改写重建：gated={} rewritten={}", gated.size(), this.rewrittenToSlot.size());
+        if (!this.expandCacheDirty && !this.forgeCacheDirty) {
+            return;
         }
-        return List.copyOf(this.forgePatternSnapshot);
+        this.shanhaiRebuildPatternTables(reason);
+        this.shanhaiRequestAePatternSync("rebuild:" + reason);
     }
 
     /**
-     * 🔴 反向查槽：<b>父表优先</b>（普通样板一字不差走老路），查不到再查神锻改写表。
+     * 🔴 反向查槽：<b>父表优先</b>（普通样板一字不差走老路），查不到再查展开认领表。
      *
      * <p>这一处覆写让 {@code pushPattern}（偏移 16 那一次调用）对「改写后的样板」也能拿到原槽号，
-     * 于是推料路径不需要任何其它改动。写成「父表优先」也保证了<b>改写关闭时行为与阶段三完全一致</b>。
+     * 于是推料路径不需要任何其它改动。
+     *
+     * <p>🔴 C2 + C4（2026-10-27）：<b>不再有第二张 identity 表</b>（{@code rewrittenToSlot} 已删），
+     * 也<b>不再在读路径重建</b>（改前这里有一句 {@code if (expandCacheDirty) rebuild}）。
+     * 于是「AE 手里的对象」与「认领表的键」只剩一份对应关系：一个池 ⇔ 一条配方。
      */
     @Override
     protected Integer getSlotIndexForPattern(IPatternDetails pattern) {
@@ -3331,14 +4675,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         if (direct != null) {
             return direct;
         }
-        if (this.expandCacheDirty) {
-            this.shanhaiRebuildExpansions();
-        }
-        final Integer expanded = this.expandedToSlot.get(pattern);
-        if (expanded != null) {
-            return expanded;
-        }
-        return this.rewrittenToSlot.get(pattern);
+        return this.expandedToSlot.get(pattern);
     }
 
     /**
@@ -3421,9 +4758,42 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     /**
      * 切换神锻样板模式（上游面板第①行那个开关的唯一入口）。
      *
-     * <p>值没变就一个字节都不动（上游 {@code setForgePatternModeEnabled} 同款「变了才重算」）。
-     * <p>⚠️ 客户端那次调用<b>不写日志</b>：LDLib 的开关在两侧都会触发，日志只留服务端那一行
-     * （否则一次点击刷两条，看着像点了两下）。
+     * <p>值没变就一个字节都不动（上游 {@code setForgePatternModeEnabled} 同款「变了才重算」）——
+     * 这一条是<b>语义</b>不是优化：面板每帧都读 getter，但 setter 只在点击时被调；若「值没变」也走
+     * 一遍全量重算，开一次面板就等于把 1130 格重算好几遍。
+     * <p>⚠️ 客户端那次调用<b>不写日志、不做重活</b>：LDLib 的开关在两侧都会触发
+     * （{@code SwitchWidget.mouseClicked} 偏移 34–44 先 {@code writeClientAction} 发服务端、再本地
+     * {@code onPressCallback.accept}；服务端在 {@code handleClientAction} 偏移 18–38 里 accept 第二遍）
+     * ⇒ 日志只留服务端那一行，否则一次点击刷两条、看着像点了两下。
+     *
+     * <h2>🔴 2026-10-26 修：开关一变就【当场】重算，不再等玩家把样板拿出来再放回去</h2>
+     * 用户原话：「我要是开启星律样板总成的神锻模式，里面的样板并没有立即生效，
+     * 必须要把样板拿出来再放回去才能生效」。
+     * <p>改前这里只有「写字段 + {@code forgeCacheDirty = true} + 清闸缓存」，
+     * <b>没有任何人消费那个脏标记</b>：AE2 只在<b>①节点入网 ②显式
+     * {@code ICraftingProvider.requestUpdate}</b> 两处重建样板缓存（字节码结论见
+     * {@link #shanhaiTickAePatternExport()} 的注释），而开关既不入网也不 requestUpdate
+     * ⇒ {@code getAvailablePatterns()} 根本没被再问一次 ⇒ 改写快照永远不会重建。
+     * <p><b>「拿出来再放回去」为什么就生效（另一条路径，点名）</b>：那条走的是
+     * {@code onPatternChange(slot)} → 父类置 {@code needPatternSync = true}
+     * （我们的真实父类链是 {@code MEStockingPatternBufferPartMachine} → gtlcore 的
+     * {@code MEPatternBufferPartMachine}：{@code onPatternChange} 在第 243–268 行，
+     * 第 266 行就是 {@code this.needPatternSync = true;}；
+     * 反编译件见 {@code temp/machine-principle/out/gtlcore/part/ae/MEPatternBufferPartMachine.java}）
+     * → 下一 tick 上游 {@code update()} 里
+     * {@code if (needPatternSync) ICraftingProvider.requestUpdate(getMainNode());}
+     * （{@code MEPatternBufferPartMachineBase.update()} 第 153–158 行，同上目录）
+     * ⇒ <b>是它替我们叫醒了 AE</b>，我们那个 {@code forgeCacheDirty} 才被消费。
+     * ⇒ 缺的从来不是「置脏」，是「叫醒 AE」这一环。
+     * <p>⚠️ 注意「知道它为什么生效」≠「该照它做」：同一个 {@code onPatternChange} 第 265 行还有
+     * {@code reCalculatePatternSlotMap()}（扫全部 1080 格重建映射），第 261–262 行有
+     * {@code refundSlot(...)} ＋ {@code AEUtils.reFunds(...)}（真把料退回 ME）⇒ 逐槽调 1130 次 =
+     * 1130 遍「全表重建 + 退款检查」，所以本方法<b>不</b>复用那条路，只复用它的最后一步（叫醒 AE）。
+     *
+     * <h2>开↔关对称</h2>
+     * 关掉走<b>同一条链</b>：{@link #shanhaiRebuildPatternTables()} 里 {@code forgeMode == false} 那一支
+     * 不登记 {@code rewrittenToSlot}，于是 AE 拿到的是原样板（等同于把改写全部撤下）。
+     * 判据里 {@code rewritten=} 在关的一侧报的是「这次确实撤下的改写条数」，同样不为 0 才算绿。
      */
     @Override
     public void setForgePatternModeEnabled(boolean enabled) {
@@ -3433,11 +4803,96 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         this.forgePatternMode = enabled;
         this.forgeCacheDirty = true;
         this.shanhaiInvalidateGateCache();
-        if (!this.isRemote()) {
-            ShanhaiStellarLog.info("神锻样板模式 => {}（倍率 {}，上游实现可用={}）",
-                    enabled ? "开" : "关", this.forgePatternMultiplier,
-                    ShanhaiForgePatternMode.isAvailable());
+        if (this.isRemote()) {
+            // 客户端：只写本地字段（面板靠自己的 isPressed / @DescSynced 刷新）。
+            // 🔴 重算绝不能在这里做：patternInventory 不是 @DescSynced，客户端压根读不到样板内容。
+            return;
         }
+        // ① 先标脏 —— 复用上一轮那条通道（下一 tick requestUpdate，并用 isCraftable 回读判死）。
+        //    放在重算之前，判据行里的 aeDirty 才是「本次切换真的叫醒了 AE」而不是上一次的残留。
+        this.shanhaiRequestAePatternSync("forgeToggle:on=" + enabled);
+        // ② 再当场重算一次 —— 只在这一刻做一次，绝不下沉到 getAvailablePatterns() / update()。
+        this.shanhaiRefreshForgePatternsNow(enabled);
+        ShanhaiStellarLog.info("神锻样板模式 => {}（倍率 {}，上游实现可用={}）",
+                enabled ? "开" : "关", this.forgePatternMultiplier,
+                ShanhaiForgePatternMode.isAvailable());
+    }
+
+    /**
+     * <b>【开关切换当场重算全部样板】—— 唯一调用方是
+     * {@link #setForgePatternModeEnabled(boolean)}（每 tick 路径里没有它）。</b>
+     *
+     * <h2>为什么走 {@link #getAvailablePatterns()}，而不是「逐槽 {@code onPatternChange(slot)}」</h2>
+     * 任务书给的候选是「对所有非空样板槽逐个 onPatternChange」。核实后<b>没有选它</b>，因为字节码证明
+     * 那不是改写发生的地方，而且它的代价是<b>每槽 O(全部槽数)</b>：
+     * <pre>
+     *   onPatternChange(int)  ← gtlcore MEPatternBufferPartMachine 第 243–268 行，逐句：
+     *       slot2PatternMap.put/remove + hasPatternArray[index]=true/false
+     *       （内容真不同才）clearAllCaches + clearVirtualSupply + removeSlotFromGTRecipeCache
+     *                       + refundSlot(...) + AEUtils.reFunds(...)   ← 真把料退回 ME
+     *       reCalculatePatternSlotMap()                                  ← 第 265 行：扫全部 1080 格重建映射
+     *       needPatternSync = true                                       ← 第 266 行：它只【通知 AE】
+     *   改写只发生在 shanhaiRebuildPatternTables()，唯一入口 = getAvailablePatterns()
+     * </pre>
+     * ⇒ 逐槽调用 1130 次会：① 重新 {@code getRealPattern}/{@code decodePattern} 1130 次；
+     * ② 触发 {@code refundSlot}/{@code AEUtils.reFunds} —— <b>那是玩家看得见的副作用</b>，
+     * 与「拨一个开关」完全不相称（还可能把正在跑的配方原料退回去）；
+     * ③ 把 {@code reCalculatePatternSlotMap()} 跑 1130 遍（≈1130×1080 次映射写）。
+     * 而 {@code getAvailablePatterns()} 只扫<b>闸放行过的</b>那批样板一遍，与 AE 在 requestUpdate 之后
+     * 自己要做的事<b>逐字相同</b>，我们只是提前到这一刻做。选它 = 用 AE 的眼睛做这次重算。
+     *
+     * <h2>为什么一次性做完，不分批</h2>
+     * 分批会让 {@code getAvailablePatterns()} 在批与批之间返回<b>半改写</b>的清单
+     * （一半样板 ×15 产出、一半 ×1）⇒ AE 的合成索引在这几 tick 内自相矛盾（玩家会看到「同一个产物
+     * 一会儿能合成一会儿不能」），比「晚一 tick 生效」更糟。代价由 {@code ms=} 量出来：
+     * <b>真机上如果 ms 大到影响手感，正确的改法是「先建影子表、最后整体交换」，
+     * 而不是边建边把半成品暴露给 AE</b>（那时 pending 会变成 >0 的判据）。
+     *
+     * @param enabling 本次是开（true）还是关（false）—— 只用于挑判据里报哪个 N，不改行为
+     */
+    private void shanhaiRefreshForgePatternsNow(boolean enabling) {
+        final long t0 = System.nanoTime();
+        // 关：这一批要被撤下的改写条数 —— 必须在重建前抓（重建会把 shanhaiForgedCount 改写）
+        final int carried = this.shanhaiForgedCount;
+        // 扫「全部非空样板槽」：0..1079 普通 + 1080..1129 通配母槽（patternStackOf 覆盖这段对外空间）。
+        // 只数，不改任何东西 —— 它的唯一用途是让判据能证明「确实扫遍了」，而不是只扫了个空表。
+        int slots = 0;
+        for (int apiSlot = 0; apiSlot < WILDCARD_API_SLOT_OFFSET + WILDCARD_SLOT_COUNT; apiSlot++) {
+            final ItemStack stack = this.patternStackOf(apiSlot);
+            if (stack != null && !stack.isEmpty()) {
+                slots++;
+            }
+        }
+        // 🔴 没加载（读档途中 / 客户端）⇒ 绝不能算：此时 rewrite 拿不到 level 会「原样返回」，
+        //    一算就会把【还没改写】的画面烘进快照，而且 forgeCacheDirty 被消费掉 ⇒ 之后再也不重算。
+        //    这种情况保留脏标记，交给下一次（真服务端、有 level）的 AE 询问去算。
+        final boolean canRewrite = this.getLevel() != null;
+        int rewrittenNow = 0;
+        int listSize = 0;
+        if (canRewrite) {
+            // 与 AE 在 requestUpdate 之后自己会调的那一个方法【完全相同】的一条链：
+            //   闸（拦歧义）→ 通配符展开 → 神锻改写
+            // 🔴 C4：这条链现在只在事件点跑一次（原来是把 AE 的读路径当触发器）。
+            this.shanhaiBuildPatternTablesIfDirty("forgeToggle:on=" + enabling);
+            final List<IPatternDetails> now = this.getAvailablePatterns();
+            rewrittenNow = this.shanhaiForgedCount;
+            listSize = now.size();
+        }
+        // pending = 还没重算的条数。同步做完 ⇒ 0；连算都没法算（level==null）⇒ 全部欠着。
+        final int pending = canRewrite ? 0 : slots;
+        final long ms = (System.nanoTime() - t0) / 1_000_000L;
+        // 🔴 判据行（每次切换只打一行，服务端）：
+        //   on        : 这次是开(true)还是关(false)
+        //   rewritten : 开 = 本次真正被改写的样板条数（取自 shanhaiForgedCount，不是「我调了」）；
+        //               关 = 本次真正被撤下（回到原样）的改写条数 ⇒ 两个方向都能翻红
+        //   slots     : 扫描到的非空样板槽数（1080 普通 + 50 通配母槽）
+        //   pending   : 还没重算的条数（同步 ⇒ 0；若将来改分批，这里 >0 说明尾巴没做完）
+        //   ms        : 本次重算耗时（真机读数用；决定要不要改分批）
+        //   aeDirty   : 是否已标脏让 AE 重新登记（必须 true，否则终端不会刷新）
+        //   list      : 重建后 AE 可见的清单条数
+        ShanhaiStellarLog.info("FORGETOGGLE on={} rewritten={} slots={} pending={} ms={} aeDirty={} list={}{}",
+                enabling, enabling ? rewrittenNow : carried, slots, pending, ms, this.shanhaiAePatternDirty, listSize,
+                canRewrite ? "" : " (level==null：保留脏标记，等下一次 AE 询问再重算)");
     }
 
     /**
@@ -3467,6 +4922,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         this.autoForgeMultiplier = enabled;
         this.forgeCacheDirty = true;
         this.shanhaiInvalidateGateCache();
+        this.shanhaiRequestAePatternSync("autoForgeMultiplier:" + enabled);
         if (!this.isRemote()) {
             // 立刻复读一次：开 ⇒ 马上把控制器上的数读进来；关 ⇒ 读数清成 NO_READ（显示「手动」）
             this.shanhaiAutoForgeMultiplierDriver.refresh();
@@ -3513,7 +4969,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      *
      * <h2>谁在读它（说清，免得后来人接错线）</h2>
      * <ul>
-     *   <li>{@link #shanhaiApplyForgeRewrite(List)} —— <b>唯一</b>把它交给
+     *   <li>{@link #shanhaiRebuildPatternTables()} —— <b>唯一</b>把它交给
      *       {@code ShanhaiForgePatternMode.rewrite(...)} 的地方（= 算法侧）；</li>
      *   <li>面板那一行（经驱动的 {@code text()}，= 界面侧）；</li>
      *   <li>{@link ShanhaiAutoForgeMultiplierDriver#tick()}（= 变化检测）；
@@ -3633,7 +5089,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * 重算「本仓室装在哪」（<b>只在该方法内写 {@link #shanhaiForgeHostName}</b>）。
      *
      * <p>服务端调用点两处：① {@code createUIWidget}（开界面那一刻，玩家立刻看到对的字）；
-     * ② {@link #shanhaiSyncStock()}（周期性自愈：结构成型/拆掉、控制器被替换都会在一个同步周期内反映）。
+     * ② {@link #shanhaiSyncStock(String)}（周期性自愈：结构成型/拆掉、控制器被替换都会在一个同步周期内反映）。
      * <p>客户端调用直接返回 {@code false}（一个字都不动）。
      *
      * @return 这次有没有改动字段（改了就返回 true，调用方可以据此打日志）
@@ -3727,7 +5183,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     /**
      * 把生效倍率落到机器上 —— 本机没有 {@code rebuildPatterns()}，等价的落地点是
      * 「<b>让神锻改写缓存失效</b>」：{@code forgeCacheDirty = true} 之后，
-     * 下一次 {@link #shanhaiApplyForgeRewrite(List)} 会用新的生效倍率重算全部样板
+     * 下一次 {@link #shanhaiRebuildPatternTables()} 会用新的生效倍率重算全部样板
      * （那条路径与「玩家手改倍率」完全相同，见 {@link #shanhaiSetForgeMultiplierFromUi(int)}）。
      *
      * <p>⚠️ 入参只用于语义完整（接口要求带值）；真正被读的是同步字段里的读数 ——
@@ -3737,6 +5193,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
     public void shanhaiApplyForgeMultiplier(int multiplier) {
         this.forgeCacheDirty = true;
         this.shanhaiInvalidateGateCache();
+        this.shanhaiRequestAePatternSync("forgeMultiplierApplied:" + multiplier);
     }
 
     /** 日志前缀（与 {@link ShanhaiStellarLog} 的前缀同一个串，grep 一次看全）。 */
@@ -3799,15 +5256,31 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
         this.blockAmbiguousPatterns = !this.blockAmbiguousPatterns;
         this.shanhaiInvalidateGateCache();
+        this.shanhaiRequestAePatternSync("gate:" + this.blockAmbiguousPatterns);
         ShanhaiStellarLog.info("闸（拦歧义样板）=> {}", this.blockAmbiguousPatterns ? "开" : "关");
     }
 
-    /** 闸缓存置脏（样板变更 / 手填类型变更 / 载入存档 都会走到）。 */
+    /**
+     * 闸缓存置脏（样板变更 / 手填类型变更 / 通配符电路变更 / 载入存档 都会走到）。
+     *
+     * <p>🔴 <b>2026-10-26 六修：这里顺手叫醒 AE。</b>改前本方法只放倒缓存，
+     * 「叫不叫醒 AE」全靠<b>调用点</b>自己记得 —— 实测 12 个入口里有 <b>5 个忘了</b>
+     * （2035 手改倍率 / 3518 通配符电路 / 4748 自动倍率开关 / 5018 自动倍率落地 / 5080 闸开关），
+     * 后果是「表重建了、AE 手里还是旧实例」⇒ {@code pushPattern} 恒 false（{@code reason=patternNotOurs}）。
+     * ⇒ 把「叫醒」下沉到本方法：<b>任何</b>置脏都连带一次重推。调用点自己的
+     * {@code shanhaiRequestAePatternSync("...")} 仍然保留，只为给出更具体的 {@code reason=}
+     * （{@link #shanhaiRequestAePatternSync(String)} 后写的覆盖先写的）。
+     *
+     * <p>⚠️ 本方法<b>不会</b>被每 tick 调（全部入口都是事件：容器回调 / 界面动作 / 读档），
+     * 所以这次 requestUpdate 不会刷屏。
+     */
     private void shanhaiInvalidateGateCache() {
         this.gateCacheDirty = true;
         this.expandCacheDirty = true;
         // 样板变了 ⇒「哪些槽可以靠库存供料」的快照也要重算（它按 hasPatternInSlot 选槽）
         this.shanhaiMarkStockSupplyDirty();
+        // 🔴 兜底：任何置脏都必须叫醒 AE（否则重建出来的新实例没人认 —— 见方法注释）
+        this.shanhaiRequestAePatternSync("gateCache");
     }
 
     /**
@@ -3822,11 +5295,19 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
         this.gateCacheDirty = false;
         this.gateBlockedSlots.clear();
+        // 🔴 2026-10-27：槽级类型闸的解析缓存与闸缓存同一个脏标记（样板/类型/读档一变全清）。
+        this.shanhaiSlotDeclaredTypeCache.clear();
         final List<Integer> untyped = new ArrayList<>();
         final List<Integer> ambiguous = new ArrayList<>();
         final java.util.BitSet patternAmbiguous = new java.util.BitSet(ShanhaiWildcardLayout.PATTERN_SLOTS);
         final java.util.BitSet patternUntyped = new java.util.BitSet(ShanhaiWildcardLayout.PATTERN_SLOTS);
-        final int count = this.getInternalSlotCount();
+        // 顺带算「本机不支持的那个声明类型」（Jade 追加二用；与这里同一份判定，不另扫一遍 NBT）。
+        final List<String> machineTypes = ShanhaiRecipeTypeLabels.splitIds(this.shanhaiHostRecipeTypeIds);
+        String unsupported = null;
+        boolean undeclared = false;
+        // 🔴 只扫 [0, 1130)：闸的输入是 patternStackOf(slot)（**样板物品的 NBT**），
+        //    而展开槽没有样板物品（patternStackOf 对它们恒返回 null）⇒ 扫展开段一定是空转。
+        final int count = ShanhaiWildcardLayout.MOTHER_END;
         for (int slot = 0; slot < count; slot++) {
             if (!this.hasPatternInSlot(slot)) {
                 continue;
@@ -3835,8 +5316,26 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             if (stack == null || stack.isEmpty()) {
                 continue;
             }
-            final ShanhaiPatternTypeReader.Verdict verdict =
-                    ShanhaiPatternTypeReader.resolve(stack).verdict();
+            final ShanhaiPatternTypeReader.Resolution resolution = ShanhaiPatternTypeReader.resolve(stack);
+            final ShanhaiPatternTypeReader.Verdict verdict = resolution.verdict();
+            if (verdict == ShanhaiPatternTypeReader.Verdict.UNIQUE && unsupported == null
+                    && !machineTypes.isEmpty()) {
+                // ② 追加二：样板声明了、本机一个可执行类型都不支持 ⇒ 记下来（Jade 要报这个，不报"材料不足"）。
+                boolean anySupported = false;
+                for (String id : resolution.ids()) {
+                    if (machineTypes.contains(id)) {
+                        anySupported = true;
+                        break;
+                    }
+                }
+                if (!anySupported && !resolution.ids().isEmpty()) {
+                    unsupported = resolution.ids().get(0);
+                }
+            }
+            if (verdict != ShanhaiPatternTypeReader.Verdict.UNIQUE) {
+                // ③ 追加一：未声明/歧义 ⇒ 闸开时被拦（Jade 与槽级闸都读这个）。
+                undeclared = true;
+            }
             // 🔴 闸的唯一判定点（阶段七：NONE 与 AMBIGUOUS 都拦；UNIQUE 放行；闸关时全放行）
             if (!ShanhaiPatternTypeReader.gateBlocks(verdict, this.blockAmbiguousPatterns)) {
                 continue;
@@ -3854,6 +5353,8 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
                 }
             }
         }
+        this.shanhaiUnsupportedDeclaredType = unsupported;
+        this.shanhaiUndeclaredBlocked = undeclared;
         this.patternAmbiguousMaskHex = ShanhaiWildcardLayout.toHexMask(patternAmbiguous.toLongArray());
         // 阶段九：同一拍重建「槽 → 样板」反表（虚拟电路要用；与闸共用脏标记，不会每 tick 扫）
         this.shanhaiPatternBySlot.clear();
@@ -3910,6 +5411,256 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
     }
 
+    // ================================================================ 2026-10-27：两条"定位铜导线不跑"的探针
+
+    /** PUSHSLOT / ACTIVESLOTS 的节流状态（40 tick + 同形去重）。 */
+    private String shanhaiPushSlotLogState = "";
+
+    private long shanhaiPushSlotLogTick = Long.MIN_VALUE;
+
+    private String shanhaiActiveSlotsLogState = "";
+
+    private long shanhaiActiveSlotsLogTick = Long.MIN_VALUE;
+
+    /**
+     * <b>PUSHSLOT</b>：AE 派单时「这条样板被解析成哪个槽号、要推多少件」。
+     *
+     * <p>为什么必须有：配方逻辑看不到铜，第一分叉点就是"铜到底塞进了哪个槽"。
+     * 槽号语义见 {@link ShanhaiWildcardLayout}：{@code <1080} 普通样板槽 /
+     * {@code 1080..1129} 通配符母槽 / {@code ≥1130} 展开槽。
+     *
+     * <p>⚠️ 拿不到样板 id 时打 {@code class=} 与 {@code identity=}（identityHashCode），
+     * 这样即使 {@code toString} 不可读，也能与展开表里的实例对上号。
+     * <p>节流：同形 40 tick 一条（一次 AE 派单会连续推几十件，不闸就刷屏）。
+     */
+    private void shanhaiPushSlotProbe(@NotNull appeng.api.crafting.IPatternDetails pattern,
+                                      appeng.api.stacks.KeyCounter[] stacks) {
+        if (this.isRemote() || this.getLevel() == null) {
+            return;
+        }
+        final Integer slotObj = this.getSlotIndexForPattern(pattern);
+        final String slotText = slotObj == null ? "none" : String.valueOf(slotObj.intValue());
+        int count = 0;
+        if (stacks != null) {
+            for (appeng.api.stacks.KeyCounter counter : stacks) {
+                if (counter != null) {
+                    count += counter.size();
+                }
+            }
+        }
+        final String state = slotText + "|" + count + "|" + System.identityHashCode(pattern);
+        final long now = this.getLevel().getGameTime();
+        if (state.equals(this.shanhaiPushSlotLogState) && this.shanhaiPushSlotLogTick != Long.MIN_VALUE
+                && now - this.shanhaiPushSlotLogTick < 40L) {
+            return;
+        }
+        this.shanhaiPushSlotLogState = state;
+        this.shanhaiPushSlotLogTick = now;
+        String patternText;
+        try {
+            patternText = String.valueOf(pattern);
+        } catch (Throwable t) {
+            patternText = "?";
+        }
+        ShanhaiStellarLog.info("PUSHSLOT pos={} pattern={} class={} identity={} slot={} stacks={}"
+                        + "（槽号语义：<1080 普通槽 / 1080..1129 母槽 / ≥1130 展开槽）",
+                this.shanhaiPos(), patternText.length() > 80 ? patternText.substring(0, 80) : patternText,
+                pattern.getClass().getSimpleName(), Integer.valueOf(System.identityHashCode(pattern)),
+                slotText, Integer.valueOf(count));
+    }
+
+    /**
+     * <b>ACTIVESLOTS</b>：{@code getActiveSlots()} 的返回值读数 —— 直接回答
+     * 「配方逻辑枚举输入时，看到的槽里有没有 ≥1080 的展开槽」。
+     *
+     * <pre>
+     *   ACTIVESLOTS pos=… active=… first=[…前5] last=[…后5] withItems=… expandedInList=…
+     * </pre>
+     * 判读（写进报告）：
+     * <ul>
+     *   <li>{@code expandedInList=0} ⇒ <b>展开槽没进候选视野</b>（首嫌疑）；</li>
+     *   <li>{@code expandedInList>0} 但仍不跑 ⇒ 视野没问题，问题在内容物枚举；</li>
+     *   <li>{@code active=0} ⇒ 一条活跃槽都没有（引擎压根没料可匹配）。</li>
+     * </ul>
+     * 节流：同形 40 tick 一条。
+     */
+    private void shanhaiActiveSlotsProbe(@NotNull int[] slots) {
+        if (this.isRemote() || this.getLevel() == null) {
+            return;
+        }
+        int expanded = 0;
+        int withItems = 0;
+        for (int slot : slots) {
+            if (slot >= ShanhaiWildcardLayout.PATTERN_SLOTS) {
+                expanded++;
+            }
+            final MEPatternBufferPartMachineBase.InternalSlot internal = this.getInternalSlot(slot);
+            if (internal != null && internal.isActive()) {
+                withItems++;
+            }
+        }
+        final StringBuilder first = new StringBuilder();
+        for (int i = 0; i < Math.min(5, slots.length); i++) {
+            if (first.length() > 0) {
+                first.append(',');
+            }
+            first.append(slots[i]);
+        }
+        final StringBuilder last = new StringBuilder();
+        for (int i = Math.max(0, slots.length - 5); i < slots.length; i++) {
+            if (last.length() > 0) {
+                last.append(',');
+            }
+            last.append(slots[i]);
+        }
+        final String state = slots.length + "|" + expanded + "|" + withItems;
+        final long now = this.getLevel().getGameTime();
+        if (state.equals(this.shanhaiActiveSlotsLogState) && this.shanhaiActiveSlotsLogTick != Long.MIN_VALUE
+                && now - this.shanhaiActiveSlotsLogTick < 40L) {
+            return;
+        }
+        this.shanhaiActiveSlotsLogState = state;
+        this.shanhaiActiveSlotsLogTick = now;
+        ShanhaiStellarLog.info("ACTIVESLOTS pos={} active={} first=[{}] last=[{}] withItems={} expandedInList={}",
+                this.shanhaiPos(), Integer.valueOf(slots.length), first, last,
+                Integer.valueOf(withItems), Integer.valueOf(expanded));
+    }
+    // ================================================================ 槽级类型闸的样板侧（2026-10-27 第二轮）
+
+    /**
+     * <b>引擎拿一条配方问某个槽时，这个槽的判定（唯一入口，mixin 调的就是它）。</b>
+     *
+     * <h2>判据（用户口径：样板声明 ∩ 机器可执行，<u>对那单独一个槽</u>）</h2>
+     * <pre>
+     *   该槽声明类型 ∩ 机器可执行类型 里 包含 recipeType ⇒ 放行
+     *   不包含（且槽确实有声明）                    ⇒ 拒
+     *   槽没有声明类型                              ⇒ 闸开拦截 / 闸关放行
+     *   读不到（配方类型空 / 机器类型表空 / 槽号不认识） ⇒ 放行（不猜）
+     * </pre>
+     *
+     * <p>⚠️ 这里<b>不再</b>回答"整机该搜哪些类型"（上一批的全局收窄已按用户指令拆除）——
+     * 候选配方照旧由引擎/控制器按机器能力搜，本方法只让某个槽在轮到自己时选择不接。
+     *
+     * <p>热路径：{@code meHandleRecipeInner} 会被反复调用 ⇒ 槽声明类型走
+     * {@link #shanhaiSlotDeclaredTypeCache}（{@link #shanhaiInvalidateGateCache()} 清），
+     * 机器类型表走已有的 {@code shanhaiHostRecipeTypeIds}。
+     */
+    public ShanhaiSlotTypeGate.@NotNull Outcome shanhaiSlotTypeVerdict(int slot, @Nullable String recipeType) {
+        // 🔴 母槽（1080..1129）自己【不跑配方】（它只存样板物品 + 母槽配置）⇒ 不进本闸。
+        //    不能让它落到"无声明"那一支：闸开时会把母槽拒掉，那是把"不跑配方的槽"和
+        //    "声明缺失的执行槽"混为一谈（用户要求三类情况互不混淆）。
+        if (!ShanhaiWildcardLayout.isPatternSlot(slot) && !this.shanhaiIsExpandSlotNow(slot)) {
+            return ShanhaiSlotTypeGate.Outcome.PASS_NO_DECLARATION;
+        }
+        final List<String> machineTypes = ShanhaiRecipeTypeLabels.splitIds(this.shanhaiHostRecipeTypeIds);
+        if (machineTypes.isEmpty()) {
+            // 仓室读不到控制器 ⇒ 不知道本机能跑什么 ⇒ 放行（不猜）。
+            return ShanhaiSlotTypeGate.Outcome.PASS_NO_DECLARATION;
+        }
+        final List<String> declared = this.shanhaiSlotDeclaredTypes(slot);
+        final ShanhaiSlotTypeGate.Outcome outcome =
+                ShanhaiSlotTypeGate.decide(declared, machineTypes, recipeType == null ? "" : recipeType,
+                        this.blockAmbiguousPatterns);
+        this.shanhaiLogSlotGate(slot, recipeType, declared, outcome);
+        return outcome;
+    }
+
+    /**
+     * <b>该槽声明的配方类型</b>（0..1..n 个 id；空表 = 没声明）。
+     *
+     * <pre>
+     *   0..1079  普通样板槽：读样板物品的 NBT（四个来源，ShanhaiPatternTypeReader）
+     *                        —— UNIQUE 采信；AMBIGUOUS 把这几个候选都算"声明"
+     *                        （闸开时它们本来就被拦在 AE 之外，这里再拦一次也不矛盾）；
+     *                        NONE ⇒ 空表。
+     *   1080..1129 母槽：它自己不跑配方 ⇒ 空表（不进本闸）。
+     *   ≥1130     展开槽：读它母槽的 gt_shanhai_recipe_type（空串 ⇒ 空表）。
+     * </pre>
+     * <p>结果缓存在 {@link #shanhaiSlotDeclaredTypeCache}（样板变 / 类型变 / 读档都会清）。
+     */
+    public @NotNull List<String> shanhaiSlotDeclaredTypes(int slot) {
+        final List<String> cached = this.shanhaiSlotDeclaredTypeCache.get(slot);
+        if (cached != null) {
+            return cached;
+        }
+        final List<String> computed;
+        if (this.shanhaiIsExpandSlotNow(slot)) {
+            final String assigned = this.shanhaiAssignedTypeOfSlot(slot);
+            computed = assigned.isEmpty() ? List.of() : List.of(assigned);
+        } else if (ShanhaiWildcardLayout.isPatternSlot(slot)) {
+            final ItemStack stack = this.patternStackOf(slot);
+            if (stack == null || stack.isEmpty()) {
+                computed = List.of();
+            } else {
+                final ShanhaiPatternTypeReader.Resolution resolution = ShanhaiPatternTypeReader.resolve(stack);
+                computed = resolution.verdict() == ShanhaiPatternTypeReader.Verdict.NONE
+                        ? List.of() : List.copyOf(resolution.ids());
+            }
+        } else {
+            // 母槽（1080..1129）/ 越界：不参与本闸。
+            computed = List.of();
+        }
+        this.shanhaiSlotDeclaredTypeCache.put(slot, computed);
+        return computed;
+    }
+
+    /** 槽级判据行（同形 20 tick 一条 —— 这是热路径，必须限流）。 */
+    private void shanhaiLogSlotGate(int slot, @Nullable String recipeType, @NotNull List<String> declared,
+                                    ShanhaiSlotTypeGate.@NotNull Outcome outcome) {
+        final String state = slot + "|" + outcome.name() + "|" + recipeType + "|" + declared;
+        final long now = this.getLevel() == null ? 0L : this.getLevel().getGameTime();
+        if (state.equals(this.shanhaiSlotGateLogState) && this.shanhaiSlotGateLogTick != Long.MIN_VALUE
+                && now - this.shanhaiSlotGateLogTick < 20L) {
+            return;
+        }
+        this.shanhaiSlotGateLogState = state;
+        this.shanhaiSlotGateLogTick = now;
+        ShanhaiStellarLog.info("TYPEROUTE pos={} slot={} {} machine={} gate={} ⇒ {}",
+                this.shanhaiPos(), Integer.valueOf(slot),
+                ShanhaiSlotTypeGate.describe(outcome, recipeType, declared),
+                this.shanhaiHostRecipeTypeIds, Boolean.valueOf(this.blockAmbiguousPatterns),
+                outcome.allows() ? "放行（这个槽可以跑这条配方）" : "拒绝（这个槽不接这条配方，引擎换下一槽）");
+        if (outcome == ShanhaiSlotTypeGate.Outcome.BLOCK_UNSUPPORTED) {
+            // 追加二要求的那条可 grep 证据行（Jade 文案同源）。
+            ShanhaiStellarLog.warn("[SHANHAI-TYPEROUTE] pos={} slot={} unsupported_declared={} machine={}"
+                            + " ⇒ jade=本机不支持该样板声明的配方类型",
+                    this.shanhaiPos(), Integer.valueOf(slot), declared, this.shanhaiHostRecipeTypeIds);
+        } else if (outcome == ShanhaiSlotTypeGate.Outcome.BLOCK_UNDECLARED) {
+            ShanhaiStellarLog.warn("[SHANHAI-TYPEROUTE] pos={} slot={} undeclared slot（闸开 ⇒ 拦下）"
+                            + " ⇒ jade=样板未声明类型", this.shanhaiPos(), Integer.valueOf(slot));
+        }
+    }
+
+    // ---------------------------------------------------------------- ShanhaiPatternTypeBlockSource
+
+    /**
+     * ② 「类型不支持」那一条：本机一个可执行类型都不支持的、样板声明的类型 id。
+     *
+     * <p>数据来源 = {@link #shanhaiRefreshGateCache()} 那一趟扫描顺手记下的
+     * {@link #shanhaiUnsupportedDeclaredType}（同一份判定，不另扫一遍 NBT）。
+     */
+    @Override
+    public @Nullable String shanhaiUnsupportedDeclaredType() {
+        this.shanhaiRefreshGateCache();
+        return this.shanhaiUnsupportedDeclaredType;
+    }
+
+    /** ③ 「样板未声明类型」那一条（闸开着才算 —— 闸关时它们是放行的，不许报拦截）。 */
+    @Override
+    public boolean shanhaiUndeclaredBlocked() {
+        this.shanhaiRefreshGateCache();
+        return this.blockAmbiguousPatterns && this.shanhaiUndeclaredBlocked;
+    }
+
+    @Override
+    public @NotNull String shanhaiTypeBlockDescribe() {
+        return "unsupportedDeclared=" + (this.shanhaiUnsupportedDeclaredType == null ? "none"
+                : this.shanhaiUnsupportedDeclaredType)
+                + " undeclaredBlocked=" + this.shanhaiUndeclaredBlocked
+                + " gate=" + this.blockAmbiguousPatterns
+                + " machineTypes=" + this.shanhaiHostRecipeTypeIds;
+    }
+
     // ================================================================ 阶段三 第 3 项：③ 机器侧只读查询 API
 
     /**
@@ -3933,7 +5684,8 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      */
     public @NotNull ShanhaiPatternTypeReader.Snapshot snapshotPatternTypes() {
         final List<ShanhaiPatternTypeReader.SlotType> slots = new ArrayList<>();
-        final int count = this.getInternalSlotCount();
+        // 只扫 [0,1130)：展开槽没有样板物品（patternStackOf 恒 null），扫它们纯空转（K=128 时是 6400 格）。
+        final int count = ShanhaiWildcardLayout.MOTHER_END;
         for (int slot = 0; slot < count; slot++) {
             if (!this.hasPatternInSlot(slot)) {
                 continue;
@@ -4009,104 +5761,562 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             super.refreshPage(page);
         }
     }
-    // ================================================================ 阶段五 第 3 项：通配符展开器（K=4）
+    // ================================================================ 阶段五 第 3 项：通配符展开器（C3：无上限）
 
-    /** 展开槽 → 母槽号（越界即 bug，响亮失败）。 */
+    /** 展开槽 → 母槽号（越界即 bug，响亮失败）。C3：改由分配器反查（槽号是动态发放的）。 */
     private int shanhaiMotherOfExpandSlot(int expandSlot) {
-        return ShanhaiWildcardLayout.motherOf(expandSlot);
+        final int mother = this.shanhaiSlotAllocator.motherOf(expandSlot - ShanhaiWildcardLayout.EXPAND_OFFSET);
+        if (mother < 0) {
+            throw new IllegalArgumentException("不是已分配的展开槽号：" + expandSlot
+                    + "（当前 " + this.shanhaiSlotSpaceDescribe() + "）");
+        }
+        return mother;
     }
 
-    /** 某个母槽当前展开出几条（0 = 没展开 / 没有样板）。 */
+    /**
+     * 某个母槽当前展开出几条（0 = 没展开 / 没有样板）。
+     *
+     * <p>🔴 C3 + C4：改由<b>分配器</b>回答（它记的就是"实际分配了几条"），
+     * 而且<b>读路径不重建</b>（改前这里有 {@code if (expandCacheDirty) rebuild}）。
+     */
     private int shanhaiExpansionCountFor(int mother) {
-        if (this.expandCacheDirty) {
-            this.shanhaiRebuildExpansions();
-        }
-        final List<IPatternDetails> list = this.expansionsByMother.get(mother);
-        return list == null ? 0 : list.size();
+        return this.shanhaiSlotAllocator.count(mother);
     }
 
+
     /**
-     * 把展开出来的样板接在闸放行的清单后面。
+     * <b>把「通配符样板 → AE 可合成清单」这一跳显式推一次，并把结果读回来（PATEXPORT）。</b>
      *
-     * <p>顺序是刻意的：<b>闸 → 展开 → 神锻</b>。
-     * 展开在闸之后 ⇒ 被闸拦掉的样板不会浪费展开成本；神锻在展开之后 ⇒ 展开出来的样板也能被改写
-     * （否则「通配符 + 神锻」这个组合就是空功能）。
+     * <h2>🔴 为什么必须显式推（AE2 15.4.10 字节码实证）</h2>
+     * AE 的合成计算<b>不是</b>每次现问 {@code getAvailablePatterns()}，而是把每个 provider 的样板
+     * 缓存进 {@code NetworkCraftingProviders}（三个 map：{@code craftingProviders} /
+     * {@code craftingMethods} / {@code craftableItems}）。缓存只在两处重建：
+     * <pre>
+     *   ① 节点加入网格：CraftingService.addNode → NetworkCraftingProviders.addProvider(node)
+     *   ② 显式刷新：ICraftingProvider.requestUpdate(node)
+     *      → ICraftingService.refreshNodeCraftingProvider(node)（javap -c 偏移 0–16：
+     *        removeProvider(node); addProvider(node);）
+     *        → addProvider 里重新调 provider.getAvailablePatterns()（= 我们的覆写，含通配符展开）
+     * </pre>
+     * 上游自己就是靠 ② 更新的：{@code MEPatternBufferPartMachineBase.update()}（javap -c 偏移 0–19）
+     * = {@code if (needPatternSync) { ICraftingProvider.requestUpdate(getMainNode()); needPatternSync = false; }}
+     * 而 {@code needPatternSync} 只在**普通样板槽**变化时被置位。
+     *
+     * <h2>⇒ 断点在哪</h2>
+     * 我们的通配符样板放在**另一份容器** {@code wildcardPatternInventory}（50 格）里，改它<b>不会</b>
+     * 让 {@code needPatternSync} 变 true ⇒ 上游那套自动刷新<b>永远看不到展开出来的样板</b> ⇒
+     * AE 终端里那个产物「不显示可以合成」（用户 2026-10-25 报的第二条）。
+     * 而机器配方照样会在别的路径上被问（所以日志里 handle 次数很大），
+     * 两条症状看起来无关、其实是同一个「AE 缓存没重建」。
+     *
+     * <h2>本方法做什么</h2>
+     * 脏标记 → 下一 tick（**不在 {@code getAvailablePatterns()} 里做，避免 addProvider 递归**）
+     * 重建展开表 → {@code ICraftingProvider.requestUpdate(node)} → 用
+     * {@code ICraftingService.isCraftable(产出键)} 把结果<b>读回来</b>打一行 PATEXPORT。
+     *
+     * <p>判读：{@code craftable=[<key>=1]} ⇒ AE 侧已经认得（终端搜那个产物应显示"可合成"）；
+     * {@code =0} ⇒ 缓存还没重建 / 展开表为空（{@code expanded=0}）/ 该键有别的来源。
      */
-    private List<IPatternDetails> shanhaiAppendWildcardExpansions(@NotNull List<IPatternDetails> gated) {
-        if (this.expandCacheDirty) {
-            this.shanhaiRebuildExpansions();
+    private void shanhaiTickAePatternExport() {
+        if (this.isRemote() || !this.shanhaiAePatternDirty || this.getLevel() == null) {
+            return;
         }
-        if (this.expansionsByMother.isEmpty()) {
-            return gated;
+        final appeng.api.networking.IManagedGridNode node = this.getMainNode();
+        final appeng.api.networking.IGrid grid = node == null ? null : node.getGrid();
+        if (grid == null) {
+            // 掉线：脏标记留着，联网后的第一 tick 再推（不要在这里清掉）
+            // 🔴 2026-10-26：**挂住的脏标记必须出声** —— 上一轮实机「PATEXPORT 只在 from=onLoad 推过一次」
+            //    有两种完全不同的成因：(a) 脏标记压根没被置（容器回调没跑），(b) 置了但一直推不出去。
+            //    这一行把 (b) 钉死（每 600 tick 一行，不会刷屏）。
+            final long nowTick = this.getLevel().getGameTime();
+            if (this.shanhaiAeDirtyWarnTick == Long.MIN_VALUE
+                    || nowTick - this.shanhaiAeDirtyWarnTick >= 600L) {
+                this.shanhaiAeDirtyWarnTick = nowTick;
+                ShanhaiStellarLog.warn("PATEXPORT pos={} from={} 脏标记从上次之后**一直没推出去**"
+                                + "（getMainNode()={} grid=null）：AE 侧那份样板缓存仍是旧的",
+                        this.shanhaiPos(), this.shanhaiAePatternReason,
+                        node == null ? "null" : "notInGrid");
+            }
+            return;
         }
-        int extra = 0;
+        // 🔴 C4：这一跳是「叫醒 AE 之前」，脏就建一次（走唯一入口，不在这里写第二份重建）。
+        this.shanhaiBuildPatternTablesIfDirty("aeExport");
+        // 🔴 2026-10-26：闸缓存也必须**在算 ours 之前**摆平 —— 否则 `ours=` 里混着
+        //    「上次闸判定时被拦下的槽」，读数就不是「现在真的几条」。
+        //    （`ours` 的定义 = 过闸 + 追加展开之后交给 AE 的条数，闸陈旧时它天然不准。）
+        this.shanhaiRefreshGateCache();
+        int expanded = 0;
         for (List<IPatternDetails> list : this.expansionsByMother.values()) {
-            extra += list.size();
+            expanded += list.size();
         }
-        final List<IPatternDetails> out = new ArrayList<>(gated.size() + extra);
-        out.addAll(gated);
+        // 🔴 2026-10-26：容器真值（不经过展开表，也不经过闸）—— 判「删光之后 ours 有没有跟着变 0」要用它。
+        int wildcardInv = 0;
+        for (int i = 0; i < WILDCARD_SLOT_COUNT; i++) {
+            if (!this.wildcardPatternInventory.getStackInSlot(i).isEmpty()) {
+                wildcardInv++;
+            }
+        }
+        int pushed = 0;
+        try {
+            appeng.api.networking.crafting.ICraftingProvider.requestUpdate(node);
+            pushed = 1;
+        } catch (Throwable t) {
+            ShanhaiStellarLog.warn("PATEXPORT requestUpdate 抛异常（AE 侧不会刷新）：{}", String.valueOf(t));
+        }
+        // 🔴 放在 requestUpdate 之后清：重建恰好发生在这一跳里时，EXPAND 的 aeSync= 才读得到真值。
+        this.shanhaiAePatternDirty = false;
+        // 探针：AE 现在认不认这些产出（isCraftable 读的正是刚被 addProvider 重建的那份缓存）
+        final StringBuilder craftable = new StringBuilder();
+        int probes = 0;
         for (List<IPatternDetails> list : this.expansionsByMother.values()) {
-            out.addAll(list);
+            for (IPatternDetails pattern : list) {
+                if (probes >= 3) {
+                    break;
+                }
+                final appeng.api.stacks.GenericStack[] outs;
+                try {
+                    outs = pattern == null ? null : pattern.getOutputs();
+                } catch (Throwable ignored) {
+                    continue;
+                }
+                if (outs == null || outs.length == 0 || outs[0] == null || outs[0].what() == null) {
+                    continue;
+                }
+                final appeng.api.stacks.AEKey key = outs[0].what();
+                boolean now = false;
+                try {
+                    now = grid.getCraftingService().isCraftable(key);
+                } catch (Throwable ignored) {
+                }
+                if (craftable.length() > 0) {
+                    craftable.append(',');
+                }
+                craftable.append(key.getId()).append('=').append(now ? 1 : 0);
+                probes++;
+            }
         }
-        return out;
+        final String verdict;
+        if (expanded == 0) {
+            verdict = wildcardInv == 0
+                    ? "通配符容器现在**真的一块样板都没有**（wildcardInv=0）⇒ 这次重推会把 AE 里那批旧样板清掉"
+                    + "（这正是「删了样板但 AE 还派单」的根治点）"
+                    : "容器里有 " + wildcardInv + " 块样板但展开表空（解不开类型）⇒ 看通配符槽内容与类型键";
+        } else if (probes == 0) {
+            verdict = "有展开但没有可读产出 ⇒ 展开出来的样板 getOutputs() 为空，查通配符内容";
+        } else if (craftable.indexOf("=1") >= 0) {
+            verdict = "AE 已重新登记（craftable=1）⇒ 终端搜该产物应显示可合成；若仍不显示，是终端回执延迟，重开终端再看";
+        } else {
+            verdict = "推了但 AE 仍不认（craftable=0）⇒ 看 from 是否通配符变更事件、以及该产物是否被别的容器抢注";
+        }
+        // 🔴 2026-10-26：`ours=` 与容器真值的**硬对账** —— 删光之后 ours 必须跟着归零。
+        //    这一条是「样板删了、AE 缓存还留着」的直接判据（以前只能靠人眼比对两行）。
+        final int ours = this.getAvailablePatterns().size();
+        if (wildcardInv == 0 && ours > 0) {
+            ShanhaiStellarLog.warn("PATEXPORT pos={} ours={} 但通配符容器是空的 ⇒ 展开表没被重建"
+                            + "（旧实例还挂在 expansionsByMother 里），AE 会继续按已经不存在的样板派单",
+                    this.shanhaiPos(), Integer.valueOf(ours));
+        }
+        ShanhaiStellarLog.info("PATEXPORT pos={} from={} mothers={} expanded={} wildcardInv={} requestUpdate={} "
+                        + "craftable=[{}] ours={} ⇒ {}",
+                this.shanhaiPos(), this.shanhaiAePatternReason, Integer.valueOf(this.expansionsByMother.size()),
+                Integer.valueOf(expanded), Integer.valueOf(wildcardInv), pushed == 1 ? "ok" : "fail",
+                craftable.length() == 0 ? "none" : craftable.toString(),
+                Integer.valueOf(ours),
+                verdict);
     }
 
     /**
-     * 重建展开表：逐母槽 {@code expandPatterns} → 截断到 K 条 → 登记「样板 → 展开槽号」。
+     * 标脏：下一 tick 让 AE 重新读一次我们的样板清单（{@link #shanhaiTickAePatternExport()}）。
      *
-     * <p>🔴 三条风险的对策就写在这里：
+     * <p>为什么不在调用点直接 {@code requestUpdate}：几个调用点都在「容器回调 / 界面动作」里跑，
+     * 而 {@code addProvider} 会**同步**回调 {@code getAvailablePatterns()}；放到下一 tick 做，
+     * 既能保证「这一轮的内容已经全部写进容器」，也不会在回调里递归。
+     */
+    private void shanhaiRequestAePatternSync(@NotNull String reason) {
+        if (this.isRemote()) {
+            return;
+        }
+        this.shanhaiAePatternDirty = true;
+        this.shanhaiAePatternReason = reason;
+    }
+
+    /**
+     * 🔴 <b>唯一一次遍历：闸 → 展开（截断到 K）→ 神锻改写 → 同时写两张表。</b>
+     *
+     * <h2>形状照抄「超级通配符 ME 样板总成」的 buildEffectivePatterns</h2>
+     * {@code SuperWildcardPatternBufferPartMachine:686-696} 逐句：
+     * <pre>
+     *   for (raw : rawExpandedPatterns) {
+     *       effective = ShanhaiForgePatternMode.rewrite(raw, level, forgeMode, multiplier);   // 688
+     *       expandedPatterns.add(effective);                                                 // 689
+     *       patternToSlotMap.put(effective, index);                                          // 690
+     *       activeSlotIndices.add(index);                                                    // 691
+     *       internalSlots.add(new ShanhaiPatternBufferInternalSlot(index));                  // 692-694
+     *   }
+     * </pre>
+     * 本方法把「展开表」与「神锻快照」两张表<b>合到这一个循环里</b>，于是
+     * <b>「AE 手里的对象」=「{@link #expandedToSlot} 的键」=「{@link #effectivePatterns} 的元素」</b>。
+     *
+     * <h2>三条不变式（改这里之前先读）</h2>
      * <ol>
-     *   <li><b>内存/存档 ×K</b>：展开槽是固定 200 个 InternalSlot（不随样板数增长），
-     *       代价是「空槽也要占位」——这是刻意的：槽号必须固定不漂移（阶段三 ① 的结论）；</li>
-     *   <li><b>遍历 GT 材料表不便宜</b>：只在 {@link #expandCacheDirty} 时重建，重建点只有
-     *       「母槽内容变 / 手填类型变 / onLoad / 开关变」，<b>绝不每 tick 展开</b>；</li>
-     *   <li><b>K 可调</b>：K 只在 {@link ShanhaiWildcardLayout#BRANCHES} 一处；改它会改槽号空间，
-     *       必须同步改阶段三的证明与审计断言（该类注释 §三 已写明）。</li>
+     *   <li><b>raw 与 effective 都登记，且登记到同一个槽号</b>。effective 是 AE 这次会拿到的；
+     *       raw 是「上一次 AE 拿到的那份」—— 重建若发生在两次 {@code getAvailablePatterns()} 之间，
+     *       AE 手里还挂着旧实例，登记 raw 让它在下一 tick 仍能认领（否则就是 patternNotOurs）。</li>
+     *   <li><b>槽号由分配器发放（C3）</b>：同一次重建里 (母槽, 分支) → 唯一槽号，绝不共享；
+     *       跨重建若某块母样板变少，它尾部腾出的槽号会被后一次重建复用
+     *       （见 {@link ShanhaiWildcardSlotAllocator} 的类注释"AE 样板身份会不会变"）；
+     *       每次重建之后都会 requestUpdate，AE 整份重读 ⇒ 不会拿着旧槽号解释新表。</li>
+     *   <li><b>重建之后必须叫醒 AE</b>：{@link #shanhaiInvalidateGateCache()} 已经兜住
+     *       （它内部调 {@link #shanhaiRequestAePatternSync(String)}），
+     *       判据见 {@link #shanhaiLogExpanded(int, int, int)} 的 {@code aeSync=}。</li>
      * </ol>
-     * <p>截断（一块母槽展开条数 &gt; K）⇒ **不静默丢**：记 WARN，写明母槽号 / 需要几条 / 只放几条。
+     *
+     * <h2>代价</h2>
+     * 遍历 GT 材料表不便宜：只在脏标记为 true 时跑，重建点只有
+     * 「母样板内容变 / 手填类型变 / 通配符电路变 / 神锻开关或倍率变 / 闸变 / 读档」，<b>绝不每 tick</b>。
      */
-    private void shanhaiRebuildExpansions() {
+    private void shanhaiRebuildPatternTables(@NotNull String reason) {
         this.expandCacheDirty = false;
+        this.forgeCacheDirty = false;
         this.expansionsByMother.clear();
-        this.expandedToSlot.clear();
+
+        this.effectivePatterns.clear();
+        // 🔴 J6/J7：绑定表与认领表**同一个脏标记、同一次遍历**重建（这是上一轮 patternNotOurs 不再复发的前提）。
+        this.shanhaiSlotBoundRecipe.clear();
+        this.shanhaiBoundCount = 0;
+        this.shanhaiTypeDroppedCount = 0;
+        // ① 父表那批样板原样放行：它们是父类 patternSlotMap 里的稳定实例，认领走 super，不进本类的表。
+        this.effectivePatterns.addAll(this.shanhaiGatedPatterns());
         final net.minecraft.world.level.Level level = this.getLevel();
         if (level == null) {
-            return;   // 客户端 / 未加载：不展开（AE 只在服务端问 getAvailablePatterns）
+            // ② 客户端 / 未加载：不展开（AE 只在服务端问 getAvailablePatterns）。
+            //    保留脏标记，等真服务端来问那一跳再算 —— 与改前一致（绝不把「没改写」的画面烘成定局）。
+            this.expandCacheDirty = true;
+            this.forgeCacheDirty = true;
+            return;
         }
-        int truncatedMothers = 0;
-        final List<String> truncated = new ArrayList<>();
+        final boolean forgeMode = this.forgePatternMode && ShanhaiForgePatternMode.isAvailable();
+        // ⚠️ 这里【只读】已经同步好的字段，绝不触发驱动 refresh：
+        //    驱动落地时会调 shanhaiApplyForgeMultiplier() ⇒ 置脏，在本循环里调它会造成「重建中又置脏」的自激。
+        final int multiplier = this.getEffectiveForgePatternMultiplier();
+        int mothers = 0;
+        int expanded = 0;
+        int forged = 0;
         for (int mother = 0; mother < ShanhaiWildcardLayout.MOTHER_COUNT; mother++) {
             final ItemStack stack = this.wildcardPatternInventory.getStackInSlot(mother);
             if (stack.isEmpty() || !ShanhaiWildcardCompat.isWildcardPattern(stack)) {
+                // 🔴 C3：这个母槽这轮没有展开 ⇒ 把它的槽号<b>还回分配器</b>（水位可能因此下降）。
+                this.shanhaiReleaseMotherSlots(mother, 0);
                 continue;
             }
-            final List<IPatternDetails> expanded = ShanhaiWildcardCompat.expandPatterns(stack, level);
-            if (expanded.isEmpty()) {
+            final List<IPatternDetails> expandedList = ShanhaiWildcardCompat.expandPatterns(stack, level);
+            if (expandedList.isEmpty()) {
+                this.shanhaiReleaseMotherSlots(mother, 0);
                 continue;
             }
-            final List<IPatternDetails> kept = new ArrayList<>(ShanhaiWildcardLayout.BRANCHES);
+            mothers++;
+            // 🔴 J6：母槽手填类型（{@code gt_shanhai_recipe_type}）—— 本跳唯一的类型来源。
+            //    空串 = 自动识别（保持改前行为，不做类型内反查）。
+            final String assignedType = ShanhaiWildcardTypeNbt.readCanonical(stack.getTag());
+            final List<IPatternDetails> kept = new ArrayList<>(expandedList.size());
+            // 🔴 C3：**没有 K 上限**（原版无上限）。先按实际条数把槽号要够，再逐条填。
+            //    条数变少时 setCount 会把尾部槽号还回去（并收缩水位）。
+            final int want = expandedList.size();
+            this.shanhaiSlotAllocator.setCount(mother, want);
             int branch = 0;
-            for (IPatternDetails pattern : expanded) {
-                if (branch >= ShanhaiWildcardLayout.BRANCHES) {
-                    truncatedMothers++;
-                    truncated.add(mother + "(" + expanded.size() + "条>K=" + ShanhaiWildcardLayout.BRANCHES + ")");
-                    break;
+            for (IPatternDetails raw : expandedList) {
+                final int slot = ShanhaiWildcardLayout.EXPAND_OFFSET + this.shanhaiSlotAllocator.slotFor(mother, branch);
+                IPatternDetails effective = null;
+                try {
+                    effective = ShanhaiForgePatternMode.rewrite(raw, level, forgeMode, multiplier);
+                } catch (Throwable t) {
+                    // 改写失败 ⇒ 该样板按原样放行（绝不因为改写失败就把样板吞掉）
+                    ShanhaiStellarLog.warn("神锻改写抛异常（该样板按原样放行）：{}", String.valueOf(t));
                 }
-                this.expandedToSlot.put(pattern, ShanhaiWildcardLayout.expandSlot(mother, branch));
-                kept.add(pattern);
+                if (effective == null) {
+                    effective = raw;
+                }
+                // 🔴 2026-10-26 七修：绑定降级为【只读诊断】——**不再决定这条样板去不去**。
+                //    类型闸的落点已按用户 2026-10-27 口径移到【槽上】（ShanhaiSlotTypeGateMixin），不在这里。
+                this.shanhaiRecordSlotBinding(slot, effective, assignedType, mother, branch);
+                // 🔴 C2（2026-10-27）：**只登记实际那一份**（effective）。raw 不再登记 ——
+                //    一张 identity 表、一个槽号、一条配方（用户口径："只会一个池对于一条配方"）。
+                this.expandedToSlot.put(effective, slot);
+                if (effective != raw) {
+                    forged++;
+                }
+                this.effectivePatterns.add(effective);
+                kept.add(effective);
+                expanded++;
                 branch++;
             }
-            if (!kept.isEmpty()) {
-                this.expansionsByMother.put(mother, List.copyOf(kept));
+            this.expansionsByMother.put(mother, List.copyOf(kept));
+        }
+        // 🔴 让所有母槽的分配数与表一致（条数变少 ⇒ 尾部回收；回收的槽号下一次重建可复用）。
+        for (int mother = 0; mother < ShanhaiWildcardLayout.MOTHER_COUNT; mother++) {
+            final List<IPatternDetails> list = this.expansionsByMother.get(mother);
+            this.shanhaiReleaseMotherSlots(mother, list == null ? 0 : list.size());
+        }
+        this.shanhaiForgedCount = forged;
+        final int no = this.shanhaiRebuildPolicy.onBuilt(reason);
+        // 🔴 C4 判据行：**只在重建时**出现（行数 = 重建次数），连续两次 getAvailablePatterns() 之间不增加。
+        ShanhaiStellarLog.info("PATREBUILD no={} reason={} mothers={} expanded={} forged={} slots={} aeDirty={}"
+                        + " ⇒ 本行只会在【变化时建一次】的时机出现（读路径不再重建）",
+                Integer.valueOf(no), reason, Integer.valueOf(mothers), Integer.valueOf(expanded),
+                Integer.valueOf(forged), Integer.valueOf(this.getInternalSlotCount()),
+                Boolean.valueOf(this.shanhaiAePatternDirty));
+        this.shanhaiLogExpanded(mothers, expanded, forged);
+    }
+
+    /**
+     * <b>C3：把母槽 {@code mother} 的展开条数对齐到 {@code count}，并回收多出来的槽。</b>
+     *
+     * <p>回收动作 = ① 分配器释放槽号（可能收缩水位）② 把对应的 {@link #expandInternalSlots} 对象
+     * 清空并丢弃（否则复用者会带着别人的库存上来 = 真"串料"）。
+     */
+    private void shanhaiReleaseMotherSlots(int mother, int count) {
+        final int before = this.shanhaiSlotAllocator.count(mother);
+        if (before <= count) {
+            if (before < count) {
+                this.shanhaiSlotAllocator.setCount(mother, count);
             }
+            return;
         }
-        if (truncatedMothers > 0 && truncated.hashCode() != this.lastTruncationStamp) {
-            this.lastTruncationStamp = truncated.hashCode();
-            ShanhaiStellarLog.warn("通配符展开被截断（K={}）：{} 个母槽超限 {}", ShanhaiWildcardLayout.BRANCHES,
-                    truncatedMothers, truncated);
+        // 逐条收：先记下被释放的相对下标，再让分配器回收（这样还能按槽号丢 InternalSlot）。
+        final int[] released = new int[before - count];
+        for (int b = count; b < before; b++) {
+            released[b - count] = this.shanhaiSlotAllocator.slotFor(mother, b);
         }
-        ShanhaiStellarLog.type("展开表重建：母槽命中={} 展开条数={}", this.expansionsByMother.size(),
-                this.expandedToSlot.size());
+        this.shanhaiSlotAllocator.setCount(mother, count);
+        for (int rel : released) {
+            this.shanhaiDropExpandSlot(rel);
+        }
+    }
+
+    /**
+     * <b>只读诊断：把「这一条展开样板 → 它在这个类型下的 GTRecipe」记进
+     * {@link #shanhaiSlotBoundRecipe}，供 {@code XRECIPE} 判据行读。</b>
+     *
+     * <h2>🔴 2026-10-26 七修：它<b>不再</b>决定任何一条样板的去留</h2>
+     * 上一轮这里返回 {@code boolean}，解析不到就 {@code continue}（= 不交给 AE）。
+     * 原版线路取证把这个做法判错了：
+     * <ul>
+     *   <li>原版「超级样板总成」里<b>没有任何一条</b>比较"样板类型 vs 配方类型"
+     *       （{@code meHandleRecipeInner} 偏移 0–96 = isItemActive + testCatalyst + testVirtual +
+     *       handleItemInternal）；</li>
+     *   <li>类型闸的正解落点是 <b>{@code meHandleRecipeInner}</b>：在那一跳 {@code return false}，
+     *       {@code handleRecipe} 的下一槽逻辑（偏移 242–245 / 341–344）自动接手
+     *       ⇒ 一次解释两个现象（不再出杆、也不再拿错槽的料）。</li>
+     * </ul>
+     * ⇒ 在展开循环里"提前砍样板"会在跨类型主机上误杀本来能跑的样板，故降级为纯记录。
+     *
+     * <h2>它记什么、记不到时打什么</h2>
+     * <ul>
+     *   <li>反查到 ⇒ {@code shanhaiSlotBoundRecipe.put(slot, recipe)}，{@link #shanhaiBoundCount}++；</li>
+     *   <li>反查不到 ⇒ {@link #shanhaiTypeDroppedCount}++（名字沿用，语义 = "没配上"），
+     *       并按 {@code 母槽|类型|verdict} 节流打一行 WARN + 一行 {@code XRECIPE … verdict=…}。
+     *       <b>样板照样交给 AE</b>。</li>
+     * </ul>
+     */
+    private void shanhaiRecordSlotBinding(int slot, IPatternDetails pattern, String assignedType,
+                                          int mother, int branch) {
+        if (assignedType == null || assignedType.isEmpty()) {
+            // 自动识别：不反查、不绑定（改前行为）。
+            return;
+        }
+        final ShanhaiWildcardRecipeBinding.Result result = ShanhaiWildcardRecipeBinding.find(pattern, assignedType);
+        if (result.found()) {
+            this.shanhaiSlotBoundRecipe.put(slot, result.recipe);
+            this.shanhaiBoundCount++;
+            return;
+        }
+        this.shanhaiTypeDroppedCount++;
+        // 失败必须出声（本工程红线）；按 (母槽|类型|verdict) 节流，免得一块样板展开 60 条刷 60 行。
+        final String fingerprint = mother + "|" + assignedType + "|" + result.verdict;
+        if (!fingerprint.equals(this.shanhaiBindWarnState)) {
+            this.shanhaiBindWarnState = fingerprint;
+            ShanhaiStellarLog.warn("通配符样板按类型反查失败（**样板仍交给 AE**，只影响 XRECIPE 判据与绑定）："
+                            + "母槽={} 分支={} 类型=[{}] 结论={} 产物={}",
+                    mother, branch, assignedType, result, shanhaiPatternDigest(pattern));
+            // 🔴 零风险判据：把「没配上」与「宿主压根没这个类型」分开。
+            //    hostLacksType=true ⇒ 宿主当前支持的配方类型里没有它（面板上选了本机不支持的类型）；
+            //    false ⇒ 宿主支持该类型，但该类型下反查不到这条样板。
+            final boolean hostHas = this.shanhaiHostSupportsRecipeType(assignedType);
+            ShanhaiStellarLog.warn("XRECIPE slot={} claimOut={} slotType={} execRecipe=none execType=none host={}"
+                            + " hostLacksType={} claimOk=false verdict={}（只读诊断：样板仍交给 AE）",
+                    Integer.valueOf(slot), shanhaiPatternDigest(pattern), assignedType, this.shanhaiHostKind(),
+                    Boolean.valueOf(!hostHas),
+                    hostHas ? result.verdict.name() : "NO_ACTIVE_TYPE");
+        }
+    }
+
+
+    /**
+     * 宿主当前支持的配方类型集合里有没有 {@code typeId} —— <b>只用于日志分类，不参与任何行为判定</b>。
+     *
+     * <p>数据源就是面板选择器用的那一份 {@link #shanhaiHostRecipeTypeIds}（{@code applyWildcardRecipeType}
+     * 里对它的用法在 3866 行）。判不出（列表还没算出来 / 解析异常）⇒ 当作"支持"，
+     * 于是日志退化成原来的 {@code verdict}，<b>不影响任何一条样板的去留</b>。
+     */
+    private boolean shanhaiHostSupportsRecipeType(@NotNull String typeId) {
+        if (typeId.isEmpty()) {
+            return true;
+        }
+        try {
+            return ShanhaiRecipeTypeLabels.splitIds(this.shanhaiHostRecipeTypeIds).contains(typeId);
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+
+    /** 母槽手填类型（空串 = 未填）。展开槽走母槽；其它槽返回空串。 */
+    private @NotNull String shanhaiAssignedTypeOfSlot(int slot) {
+        if (!this.shanhaiIsExpandSlotNow(slot)) {
+            return "";
+        }
+        final int mother = this.shanhaiSlotAllocator.motherOf(slot - ShanhaiWildcardLayout.EXPAND_OFFSET);
+        if (mother < 0 || mother >= ShanhaiWildcardLayout.MOTHER_COUNT) {
+            return "";
+        }
+        final ItemStack stack = this.wildcardPatternInventory.getStackInSlot(mother);
+        return stack.isEmpty() ? "" : ShanhaiWildcardTypeNbt.readCanonical(stack.getTag());
+    }
+    /**
+     * <b>宿主形态</b>：{@code cross} = 挂在授予「跨配方种类并行」的主机上；{@code normal} = 多类型主机；
+     * {@code single} = 单类型 / 读不到控制器。
+     *
+     * <p>判定口径与模块侧<b>逐字同源</b>（{@code PrimordialModuleRecipeLogic#shanhai$isCrossTypeEnabled()}）：
+     * {@code host != null && host.grantsCrossTypeParallel()}；老主机那个方法默认 {@code false}
+     * ⇒ 普通机器上的判定结果与改动前一致。
+     */
+    private @NotNull String shanhaiHostKind() {
+        try {
+            final java.util.List<? extends com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController> controllers =
+                    this.getControllers();
+            if (controllers == null || controllers.isEmpty()) {
+                return "single";
+            }
+            int maxTypes = 0;
+            boolean cross = false;
+            for (Object controller : controllers) {
+                if (controller instanceof com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine logicMachine) {
+                    final com.gregtechceu.gtceu.api.recipe.GTRecipeType[] types = logicMachine.getRecipeTypes();
+                    if (types != null) {
+                        maxTypes = Math.max(maxTypes, types.length);
+                    }
+                }
+                if (controller instanceof com.shanhai.common.machine.PrimordialOmegaEngineMachine host
+                        && host.grantsCrossTypeParallel()) {
+                    cross = true;
+                }
+            }
+            if (cross) {
+                return "cross";
+            }
+            return maxTypes > 1 ? "normal" : "single";
+        } catch (Throwable t) {
+            return "single";
+        }
+    }
+
+    /**
+     * <b>XRECIPE 判据</b>（一条判死「认领的样板」与「要跑的配方」是否分叉）。
+     *
+     * <pre>
+     *   XRECIPE slot=1362 claimOut=gtceu:copper_single_wirex2 slotType=gtceu:wiremill
+     *           execRecipe=gtceu:copper_single_wire execType=gtceu:wiremill host=cross
+     *           claimOk=true verdict=OK
+     * </pre>
+     * 判读：
+     * <ul>
+     *   <li>{@code verdict=OK} ⇒ 槽里绑的配方类型 = 手填类型 ⇒ 这条样板会被正确类型跑；</li>
+     *   <li>{@code CROSS_TYPE} ⇒ <b>绑错了</b>（执行层拿到的是另一类型的配方）—— 实机「要导线出杆」就是这个；</li>
+     *   <li>{@code NO_BIND} ⇒ 该槽还没绑定配方（J7 缺口 / 该样板是自己认领上来的而类型为空）。</li>
+     * </ul>
+     * 节流：同 (槽|verdict|类型) 指纹 20 tick 内只打一行。
+     */
+    private void shanhaiXrecipeProbe(@Nullable appeng.api.crafting.IPatternDetails pattern, boolean claimOk) {
+        if (this.isRemote() || this.getLevel() == null) {
+            return;
+        }
+        final Integer slotObj = this.getSlotIndexForPattern(pattern);
+        if (slotObj == null) {
+            return;
+        }
+        final int slot = slotObj.intValue();
+        final String slotType = this.shanhaiAssignedTypeOfSlot(slot);
+        final com.gregtechceu.gtceu.api.recipe.GTRecipe bound = this.shanhaiSlotBoundRecipe.get(slot);
+        final String execType = bound == null ? "none" : ShanhaiWildcardRecipeBinding.typeIdOf(bound);
+        final String verdict;
+        if (bound == null) {
+            verdict = slotType.isEmpty() ? "NO_BIND" : "NO_BIND";
+        } else if (!slotType.isEmpty() && !slotType.equals(execType)) {
+            verdict = "CROSS_TYPE";
+        } else {
+            verdict = "OK";
+        }
+        final String state = slot + "|" + verdict + "|" + slotType + "|" + execType;
+        final long now = this.getLevel().getGameTime();
+        if (state.equals(this.shanhaiXrecipeLogState) && this.shanhaiXrecipeLogTick != Long.MIN_VALUE
+                && now - this.shanhaiXrecipeLogTick < 20L) {
+            return;
+        }
+        this.shanhaiXrecipeLogState = state;
+        this.shanhaiXrecipeLogTick = now;
+        ShanhaiStellarLog.info("XRECIPE slot={} claimOut={} slotType={} execRecipe={} execType={} host={} claimOk={} verdict={}",
+                Integer.valueOf(slot), shanhaiPatternDigest(pattern),
+                slotType.isEmpty() ? "none" : slotType,
+                ShanhaiWildcardRecipeBinding.describe(bound),
+                execType.isEmpty() ? "none" : execType,
+                this.shanhaiHostKind(), Boolean.valueOf(claimOk), verdict);
+    }
+
+    /**
+     * <b>EXPAND 判据</b>：一次重建一行 —— 「重建完了，而且这批新实例 AE 一定拿得到」。
+     *
+     * <pre>
+     *   EXPAND pos=uselessdim@1821,91,273 mothers=3 expanded=57 forged=57 aeSync=true reason=forgeMultiplier:20
+     * </pre>
+     * 字段判读（下一次实机就照这个读）：
+     * <ul>
+     *   <li>{@code forged == expanded} ⇒ 每条展开样板都过了神锻（倍率真的乘上去了）；</li>
+     *   <li>{@code forged=0} 而 {@code expanded>0} ⇒ 一条都没改写：看 {@code forge} 开关、
+     *       生效倍率是否 &le; 1、{@link ShanhaiForgePatternMode#isAvailable()}；</li>
+     *   <li>{@code aeSync=false} ⇒ <b>重建了但没人叫醒 AE</b>（也不是 AE 自己在问）
+     *       ⇒ AE 手里那批旧实例已失效，这就是 {@code reason=patternNotOurs} 的成因，必须为 true。</li>
+     * </ul>
+     * 节流：同一指纹 20 tick 内只打一行（重建本身是事件驱动的，一次变化正常只出一行）。
+     */
+    private void shanhaiLogExpanded(int mothers, int expanded, int forged) {
+        if (this.isRemote() || this.getLevel() == null) {
+            return;
+        }
+        // aeSync 的定义 = 「这批新实例 AE 一定会看到」：要么脏标记挂着（下一 tick requestUpdate），
+        // 要么这次重建就是 AE 亲自来问触发的（它当场就拿到了）。
+        final boolean aeSync = this.shanhaiAePatternDirty || this.shanhaiInAePatternQuery;
+        final String state = mothers + "|" + expanded + "|" + forged + "|" + aeSync + "|" + this.shanhaiAePatternReason;
+        final long now = this.getLevel().getGameTime();
+        if (state.equals(this.shanhaiExpandLogState) && this.shanhaiExpandLogTick != Long.MIN_VALUE
+                && now - this.shanhaiExpandLogTick < 20L) {
+            return;
+        }
+        this.shanhaiExpandLogState = state;
+        this.shanhaiExpandLogTick = now;
+        final String verdict;
+        if (!aeSync) {
+            verdict = "⚠️ 重建后既没标脏、也不是 AE 来问 ⇒ 这批新实例没人认"
+                    + "（查该置脏点有没有走 shanhaiInvalidateGateCache / shanhaiRequestAePatternSync）";
+        } else if (expanded > 0 && forged == expanded) {
+            verdict = "每条展开样板都过了神锻（倍率生效）";
+        } else if (expanded > 0 && forged == 0) {
+            verdict = "一条都没改写：看 forge 开关 / 生效倍率是否 <=1 / ShanhaiForgePatternMode.isAvailable()";
+        } else {
+            verdict = "部分改写（forge=" + forged + "/" + expanded + "）";
+        }
+        ShanhaiStellarLog.info("EXPAND pos={} mothers={} expanded={} forged={} aeSync={} reason={} ⇒ {}",
+                this.shanhaiPos(), Integer.valueOf(mothers), Integer.valueOf(expanded), Integer.valueOf(forged),
+                Boolean.valueOf(aeSync), this.shanhaiAePatternReason, verdict);
     }
 
     /**
@@ -4120,15 +6330,13 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * </pre>
      */
     public void shanhaiDumpExpansionLayout(@NotNull String where) {
-        if (this.expandCacheDirty) {
-            this.shanhaiRebuildExpansions();
-        }
-        ShanhaiStellarLog.info("展开布局（{}）：{}", where, ShanhaiWildcardLayout.describe());
+        // 🔴 C4：诊断也不重建（要看最新的先让事件点跑一次）。
+        ShanhaiStellarLog.info("展开布局（{}）：{}", where, this.shanhaiSlotSpaceDescribe());
         for (java.util.Map.Entry<Integer, List<IPatternDetails>> entry : this.expansionsByMother.entrySet()) {
             final int mother = entry.getKey();
             int branch = 0;
             for (IPatternDetails ignored : entry.getValue()) {
-                final int slot = ShanhaiWildcardLayout.expandSlot(mother, branch);
+                final int slot = ShanhaiWildcardLayout.EXPAND_OFFSET + this.shanhaiSlotAllocator.slotFor(mother, branch);
                 final MEPatternBufferPartMachineBase.InternalSlot internalSlot = this.getInternalSlot(slot);
                 ShanhaiStellarLog.info("EXPAND mother={} branch={} slot={} items={} fluids={}",
                         mother, branch, slot,
@@ -4182,14 +6390,14 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * 槽号 → 它的<b>通配符母槽号</b>；不是通配符槽 ⇒ {@code -1}。
      *
      * <p>两种槽都归到同一个母槽：母槽本身（{@code 1080..1129}）与它展开出来的槽
-     * （{@code EXPAND_OFFSET..SLOT_SPACE_TOTAL}，{@code ShanhaiWildcardLayout.motherOf} 反查）。
+     * （{@code EXPAND_OFFSET..getInternalSlotCount()-1}，由分配器反查 —— C3 起槽号是动态发放的）。
      */
     private int shanhaiWildcardMotherOfSlot(int slot) {
         if (slot >= WILDCARD_API_SLOT_OFFSET && slot < WILDCARD_API_SLOT_OFFSET + WILDCARD_SLOT_COUNT) {
             return slot - WILDCARD_API_SLOT_OFFSET;
         }
-        if (slot >= ShanhaiWildcardLayout.EXPAND_OFFSET && slot < ShanhaiWildcardLayout.SLOT_SPACE_TOTAL) {
-            return ShanhaiWildcardLayout.motherOf(slot);
+        if (this.shanhaiIsExpandSlotNow(slot)) {
+            return this.shanhaiSlotAllocator.motherOf(slot - ShanhaiWildcardLayout.EXPAND_OFFSET);
         }
         return -1;
     }
@@ -4418,30 +6626,82 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
 
         /**
-         * 通配符段（>= 1080）<b>不碰数组</b>直接回答 true；0..1079 原样交给父类（那段行为一个字不变）。
+         * 🔴 <b>2026-10-26 七修：恢复无条件 {@code super} —— 绑定表不再影响候选。</b>
          *
-         * <p>判据顺序<b>必须</b>是先比槽号、再调 super —— 反过来的话越界已经发生了。
+         * <h2>为什么撤销上一轮那个"J7 候选注入"</h2>
+         * 原版线路取证（{@code temp\origchain\报告.md}）给了两条决定性事实：
+         * <ol>
+         *   <li>原版 {@code GTRecipeLookupMixin#getRecipeIterator} 偏移 <b>105–128</b> 本来就有
+         *       {@code recipe.recipeType == this.recipeType} 过滤 ⇒「缓存配方只是补充候选」是原版既有语义；</li>
+         *   <li>{@code RecipeIteratorMixin#hasNext()} 偏移 0–62 先跑原候选、<b>65–69 才轮到 additional</b>
+         *       ⇒ 我们注入的绑定<b>永远排在激活类型之后</b>，抬高不了优先级。</li>
+         * </ol>
+         * ⇒ 这层注入唯一的效果是在跨类型主机上"多给候选"，而"该不该跑"原本要由
+         * {@code meHandleRecipeInner} 的类型闸决定 —— <b>那道闸已于 2026-10-27 按用户指令整体拆除</b>
+         * （否决式筛选失效，改走「每个样板独立池 / 分池收口」；见 {@code temp\typeroute\报告.md}）。
+         * 放在这里只会让判定更模糊，所以撤掉。
+         *
+         * <p>{@link #shanhaiSlotBoundRecipe} 仍然保留，但已降级为<b>只读诊断表</b>
+         * （只喂 {@code XRECIPE} 判据行），<b>不参与任何返回值与判定</b>。
          */
         @Override
-        public boolean hasCacheInSlot(int slot) {
-            if (slot >= ShanhaiWildcardLayout.PATTERN_SLOTS) {
-                StellarSampleAssemblerPartMachine.this.shanhaiProbeHasCache++;
-                if (slot < ShanhaiWildcardLayout.SLOT_SPACE_TOTAL) {
-                    StellarSampleAssemblerPartMachine.this.shanhaiProbeHiHasCache++;
-                }
-                return true;
-            }
-            StellarSampleAssemblerPartMachine.this.shanhaiProbeHasCache++;
-            return super.hasCacheInSlot(slot);
+        public it.unimi.dsi.fastutil.objects.ObjectSet<com.gregtechceu.gtceu.api.recipe.GTRecipe> getCachedGTRecipe() {
+            return super.getCachedGTRecipe();
         }
 
-        /** 通配符段不记缓存（父类体内两处定长数组下标都在 1080 处截断，见类注释）。 */
+        /**
+         * 🔴 <b>2026-10-26 七修：恢复无条件 {@code super}（≥1080 仍然直接 return —— 那不是闸，是防越界）。</b>
+         *
+         * <h2>为什么撤掉上一轮那道"记账闸"</h2>
+         * 原版线路取证：{@code MEPatternRecipeHandlePart#handleRecipe} 里
+         * <b>{@code setSlotCacheRecipe} 在偏移 403、{@code return slot} 在 408–410</b>
+         * ⇒ 记账发生在<b>认领之后</b>。把闸装在这里最多只能"事后不记账"，
+         * <b>拦不住本次认领</b>（本次那条错配方照样被认领、照样消费这一槽的料）。
+         * ⇒ 闸的正确落点是 {@code meHandleRecipeInner}，但<b>该闸已按用户指令整体拆除</b>
+         * （2026-10-27：否决式筛选失效 ⇒ 改「每个样板独立池」= 分池收口），本方法回归纯记账。
+         *
+         * <h2>为什么 ≥1080 仍然直接 return（这不是类型闸）</h2>
+         * 父类 {@code MEPatternTrait#setSlotCacheRecipe} 体内会写 {@code cacheRecipe[slot]}，
+         * 该数组长度 = 1080（运行时读数见 {@link #shanhaiProveCacheArrayBounds(String)}）
+         * ⇒ 展开槽传下去就是当场 AIOOBE。这一条从阶段一就在，<b>与本轮的类型闸无关</b>。
+         */
         @Override
         public void setSlotCacheRecipe(int slot, com.gregtechceu.gtceu.api.recipe.GTRecipe recipe) {
             if (slot >= ShanhaiWildcardLayout.PATTERN_SLOTS) {
                 return;
             }
             super.setSlotCacheRecipe(slot, recipe);
+        }
+
+        /**
+         * 🔴 <b>2026-10-25 八修（崩服修复）：这一段以前【只写在 javadoc 里，从来没实现过】。</b>
+         *
+         * <h2>现场（实机 crash-reports 原文，16:36:55）</h2>
+         * <pre>
+         * java.lang.ArrayIndexOutOfBoundsException: Index 1080 out of bounds for length 1080
+         *   at MEPatternBufferPartMachine$MEPatternTrait.hasCacheInSlot(MEPatternBufferPartMachine.java:1014)
+         *   at StellarSampleAssemblerPartMachine.shanhaiLogBoundaryProof(…:6305)
+         *   at StellarSampleAssemblerPartMachine.shanhaiSyncStock(…:7651)
+         *   at …syncStockInput(…:6583) ← MEStockingPatternBufferPartMachine.update(…:106)
+         * </pre>
+         * 父类 {@code hasCacheInSlot} 直接读 {@code cacheRecipe[slot]}，该数组长度 = <b>1080</b>
+         * （= 父类构造参数 maxPatternCount），而本机槽号空间 = 1080 + 通配展开 ⇒ 拿 ≥1080 的槽号去问就是当场 AIOOBE。
+         *
+         * <h2>为什么必须在这里短路（不是可选优化）</h2>
+         * 生产路径 {@code MEPatternRecipeHandlePart#handleRecipe} 偏移 378 对<b>每个槽</b>都调
+         * {@code IMEPatternTrait#hasCacheInSlot(slot)}，槽号正是 {@code getInternalSlotCount()} 那套
+         * ⇒ <b>探针只是先撞上而已，正常认领迟早也会撞</b>。
+         *
+         * <h2>语义（与 {@link #hasRecipeCacheInSlot(int)} 对齐）</h2>
+         * 通配符段一律视为「已进缓存表」⇒ {@code handleRecipe} 会跳过事后记账（那块由我们自己的展开表管），
+         * 并且<b>绝不进父类数组</b>。
+         */
+        @Override
+        public boolean hasCacheInSlot(int slot) {
+            if (slot >= ShanhaiWildcardLayout.PATTERN_SLOTS) {
+                return true;
+            }
+            return super.hasCacheInSlot(slot);
         }
     }
 
@@ -4452,7 +6712,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * <ul>
      *   <li>{@code cacheRecipeLen} —— 直接读父类那个 {@code protected final boolean[] cacheRecipe} 的
      *       {@code length}（<b>不是</b>硬编码常量，读的就是运行时那个数组）；</li>
-     *   <li>{@code slotSpace} —— {@code getInternalSlotCount()}（本类覆写 = 1330）。</li>
+     *   <li>{@code slotSpace} —— {@code getInternalSlotCount()}（本类覆写 = 7530；K=128）。</li>
      * </ul>
      * {@code cacheRecipeLen < slotSpace} ⇒ 「下标 >= cacheRecipeLen 的读一定会抛 AIOOBE」这件事成立；
      * 而 {@code guardHi=1} 证明这些下标<b>根本不进数组</b>（{@link ShanhaiMEPatternTrait#hasCacheInSlot} 先比槽号）。
@@ -4473,19 +6733,53 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         final int arrayLen = this.cacheRecipe.length;
         final int slotSpace = this.getInternalSlotCount();
         final IMEPatternTrait trait = this.getMETrait();
-        // 现场探针：通配符段两端 + 一段之外一格（1330 已越出槽号空间，只是证明「这个判定纯粹是算术、
-        // 不看槽号空间」；它不会进任何数组，因为 >= 1080 一律短路）。
-        final boolean hiFirst = trait != null && trait.hasCacheInSlot(ShanhaiWildcardLayout.MOTHER_OFFSET);
-        final boolean hiLast = trait != null && trait.hasCacheInSlot(ShanhaiWildcardLayout.SLOT_SPACE_TOTAL - 1);
-        final boolean loFirst = trait != null && trait.hasCacheInSlot(0);
-        final boolean loLast = trait != null && trait.hasCacheInSlot(ShanhaiWildcardLayout.PATTERN_SLOTS - 1);
-        ShanhaiStellarLog.info("STOCKSAFE cacheRecipeLen={} slotSpace={} gap={} guard=[hiFirst={} hiLast={} loFirst={} loLast={}]"
+        // 现场探针：通配符段两端 + 通配符段内一格 + 普通段末一格。
+        // 🔴 2026-10-25 八修：**每个下标都必须先过 arrayLen 闸**——取证读数（STOCKSAFE 那一行）要的是
+        //    「父类数组有多长 / 本机槽号空间有多大」，不是「父类会不会抛异常」。
+        //    上一版把这 4 次调用裸放，第 1 个（MOTHER_OFFSET=1080）就 AIOOBE 崩了整个服务端线程。
+        // 🔴 2026-10-25：这 4 次调用必须打上「自证探针」标记，否则它会把自己算进 STOCKSLOT 的
+        //    calls[] 里（实机日志里那句 hasCache=4 / hi hasCache=2 就是它自己，见 shanhaiInSelfProbe）。
+        boolean hiFirst = false;
+        boolean hiLast = false;
+        boolean loFirst = false;
+        boolean loLast = false;
+        int skipped = 0;
+        if (trait != null) {
+            this.shanhaiInSelfProbe = true;
+            try {
+                final int[] probeSlots = {
+                        ShanhaiWildcardLayout.MOTHER_OFFSET,
+                        this.getInternalSlotCount() - 1,
+                        0,
+                        ShanhaiWildcardLayout.PATTERN_SLOTS - 1,
+                };
+                final boolean[] out = new boolean[probeSlots.length];
+                for (int i = 0; i < probeSlots.length; i++) {
+                    final int slot = probeSlots[i];
+                    if (slot < 0 || slot >= arrayLen) {
+                        // 越界下标一律不喂给父类（这正是刚才那次崩服的形态）；记一次 skipped 供判读。
+                        out[i] = false;
+                        skipped++;
+                    } else {
+                        out[i] = trait.hasCacheInSlot(slot);
+                    }
+                }
+                hiFirst = out[0];
+                hiLast = out[1];
+                loFirst = out[2];
+                loLast = out[3];
+            } finally {
+                this.shanhaiInSelfProbe = false;
+            }
+        }
+        ShanhaiStellarLog.info("STOCKSAFE cacheRecipeLen={} slotSpace={} gap={} guard=[hiFirst={} hiLast={} loFirst={} loLast={} skipped={}]"
                         + " trait={} ⇒ {}",
                 Integer.valueOf(arrayLen), Integer.valueOf(slotSpace), Integer.valueOf(slotSpace - arrayLen),
                 Boolean.valueOf(hiFirst), Boolean.valueOf(hiLast), Boolean.valueOf(loFirst), Boolean.valueOf(loLast),
+                Integer.valueOf(skipped),
                 trait == null ? "null" : trait.getClass().getSimpleName(),
                 arrayLen < slotSpace
-                        ? "下标 " + arrayLen + ".." + (slotSpace - 1) + " 若进数组必 AIOOBE；通配符段一律短路返回 true ⇒ 不越界"
+                        ? "下标 " + arrayLen + ".." + (slotSpace - 1) + " 若进数组必 AIOOBE；本探针已按 cacheRecipeLen 过滤（skipped 即被挡下的探针次数）"
                         : "数组长度已覆盖槽号空间（本轮应当不会走到这一支）");
     }
 
@@ -4518,12 +6812,23 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      */
     @Override
     protected int[] getActiveSlots() {
-        final int[] base = super.getActiveSlots();
+        // 🔴 2026-10-26（K=4⇒128）：**不能**调 super —— 父类那份是
+        //   `new int[getInternalSlotCount()]` + 从 0 扫到 7530（`MEPatternBufferPartMachineBase:398`）。
+        //   本类的候选集 = [0,1130) + 真正展开出来的展开槽 ⇒ 语义等价、槽号升序不变、每次少扫 6400 格。
+        final int[] base = this.shanhaiCandidateActiveSlots();
         final int[] extra = this.shanhaiStockSupplyActiveSlots();
-        if (extra.length == 0) {
-            return base;
+        final int[] result = extra.length == 0 ? base : shanhaiMergeSlotArrays(base, extra);
+        // 🔴 2026-10-27 ACTIVESLOTS：**配方逻辑枚举输入时看到的槽**（40 tick 节流，带 pos）。
+        //    判读口径（用户口径）：
+        //      active=0                    ⇒ 一条活跃槽都没有 ⇒ 引擎压根没料可匹配；
+        //      expandedInList=0            ⇒ 列表里没有 ≥1080 的槽 ⇒ 展开槽没进候选视野（首嫌疑）；
+        //      withItems=0                 ⇒ 槽在，但槽里没有物品 ⇒ 推料落点/内容物枚举问题。
+        try {
+            this.shanhaiActiveSlotsProbe(result);
+        } catch (Throwable ignored) {
+            // 探针永远不许影响配方查找
         }
-        return shanhaiMergeSlotArrays(base, extra);
+        return result;
     }
 
     /**
@@ -4575,7 +6880,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * <p>刻意<b>不</b>看 {@code blockAmbiguousPatterns} / {@code gateBlockedSlots}：闸只决定「哪块样板能被执行」，
      * 不决定「库存能不能供料」。
      *
-     * <h2>🔴 二修（2026-10-24）：这一段为什么现在是 0..1329 而不是 0..1079</h2>
+     * <h2>🔴 二修（2026-10-24）：这一段为什么现在是 0..7530 而不是 0..1079</h2>
      * 上一轮只收 0..1079，理由是这个数组会进 {@code MEPatternRecipeHandlePart#handleRecipe} 的兜底循环，
      * 那里对每个槽都会调 {@code IMEPatternTrait#hasCacheInSlot(slot)}，而父类实现直接读
      * {@code MEPatternBufferPartMachine.cacheRecipe[slot]}（{@code javap -c} 偏移 0–9），该数组长度 = 1080
@@ -4593,7 +6898,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * <p>顺序 = 槽号升序（普通槽 → 母槽 → 展开槽），所以上限先吃普通槽；母槽/展开槽被砍时 WARN 里的数字会说出来。
      */
     /**
-     * 放行名单覆盖到的槽号<b>上界</b> —— 二修之后就是<b>整段槽号空间</b>（{@code getInternalSlotCount()} = 1330）。
+     * 放行名单覆盖到的槽号<b>上界</b> —— 二修之后就是<b>整段槽号空间</b>（{@code getInternalSlotCount()} = 7530）。
      *
      * <p>🔴 单独抽成一个方法，是为了让「放行到底覆盖哪一段」变成<b>一处可断言的落点</b>：
      * 结构审计 <b>W4</b> 盯这一行，负对照把这里的返回值改回「只到 1079」时 W4 必红
@@ -4628,7 +6933,8 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      */
     @Override
     protected int[] getActiveAndUnCachedSlots() {
-        final int[] base = super.getActiveAndUnCachedSlots();
+        // 同上：不调 super（那次调用会扫 7530 格、分配 30 KB 的 int[]，而这条是配方查找热路径）。
+        final int[] base = this.shanhaiActiveAndUnCachedCandidates();
         final int[] extra = this.shanhaiStockSupplyActiveSlots();
         if (extra.length == 0) {
             return base;
@@ -4643,14 +6949,17 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             this.shanhaiStockSupplySlots = new int[0];
             return;
         }
-        // 二修：整段槽号空间（0..1329）。原来这里是 Math.min(..., PATTERN_SLOTS) —— 那正是
+        // 二修：整段槽号空间（0..SLOT_SPACE_TOTAL-1）。原来这里是 Math.min(..., PATTERN_SLOTS) —— 那正是
         // 「样板都在通配符段 ⇒ 放行名单为空 ⇒ 库存一次都没被问」的直接原因。
-        final int count = this.shanhaiStockSupplySlotSpace();
+        // 🔴 2026-10-26（K 4⇒128）：扫的是候选集，而不是 7530 格 —— 空展开槽
+        //    `hasPatternInSlot` 恒 false，本来就进不了名单（语义等价，代价从 7530 降到 ~1130+展开数）。
+        final int[] candidates = this.shanhaiCandidateSlots();
+        final int count = Math.min(this.shanhaiStockSupplySlotSpace(), this.getInternalSlotCount());
         final int limit = Math.min(count, SHANHAI_STOCK_SUPPLY_SLOT_CAP);
         final int[] out = new int[limit];
         int n = 0;
         int dropped = 0;
-        for (int slot = 0; slot < count; slot++) {
+        for (int slot : candidates) {
             if (!this.hasPatternInSlot(slot)) {
                 continue;
             }
@@ -4742,7 +7051,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         super.syncStockInput();
         // C 刀 · A 段：通配符母槽的催化剂 map 跟着这个节拍对一遍（流体侧没有内容变更回调，见方法注释）
         this.shanhaiRefreshAllWildcardCatalysts();
-        this.shanhaiSyncStock();
+        this.shanhaiSyncStock("tick");
     }
 
     /** 库存页那行只读统计（服务端现算，@DescSynced 下发；不每帧反射）。 */
@@ -4850,10 +7159,14 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
                         : "库存不会被问：本机一块样板都没有");
     }
 
-    /** 本机有没有任何一块样板（1330 格里随便一块；只在 5 分钟节流的那条判据里调，不每 tick 跑）。 */
+    /**
+     * 本机有没有任何一块样板（只在 5 分钟节流的那条判据里调，不每 tick 跑）。
+     *
+     * <p>2026-10-26（K 4⇒128）：扫的<b>不是</b> 7530 格，而是候选集（[0,1130) + 真正展开出来的槽）
+     * —— 被跳过的展开槽 {@code hasPatternInSlot} 恒 false，语义等价。
+     */
     private boolean shanhaiAnyPattern() {
-        final int count = this.getInternalSlotCount();
-        for (int slot = 0; slot < count; slot++) {
+        for (int slot : this.shanhaiCandidateSlots()) {
             if (this.hasPatternInSlot(slot)) {
                 return true;
             }
@@ -4930,9 +7243,14 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             claimed.append('?');
         }
         // 一句话结论（先算成局部变量，别写成四层嵌套三元 —— 括号一多就看不出谁套谁）
+        // 🔴 2026-10-25 改：active=0 时原来说「配方匹配这一轮根本没问过任何槽」，读的人没法判断
+        //    「是没样板 ⇒ 本来就不该跑」还是「有样板但没被放行 ⇒ 我们的锅」。这里把「本机样板数」
+        //    也摆进结论（与 STOCKPAT 的容器真值同一口径，且它只在节流命中后才算）。
         final String verdict;
         if (active == null || active.length == 0) {
-            verdict = "活跃名单为空：配方匹配这一轮根本没问过任何槽";
+            final int patterns = this.shanhaiAnyPattern() ? 1 : 0;
+            verdict = "活跃名单为空：配方匹配这一轮根本没问过任何槽（本机有样板=" + patterns
+                    + "；=0 ⇒ 没有可跑的配方，库存供料这条链按设计不会被调用，不是供料坏了）";
         } else if (this.shanhaiProbeIsItemActive == 0L) {
             verdict = "有活跃槽但 isItemActive 一次没被调 ⇒ handleRecipe 没走到这里";
         } else if (this.shanhaiProbeHandleItem == 0L) {
@@ -4943,14 +7261,14 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             verdict = "供料链通了（库存被问过），剩下的看 STOCKSUPPLY 的 hit=";
         }
         ShanhaiStellarLog.info("STOCKSLOT space={} active={} supply={} calls[isItemActive={} handleItem={} "
-                        + "hasCache={} findItem={} findFluid={}] hi[isItemActive={} handleItem={} hasCache={}] "
+                        + "hasCache={} findItem={} findFluid={} selfProbe={}] hi[isItemActive={} handleItem={} hasCache={}] "
                         + "claimed=[{}] ⇒ {} {}",
                 Integer.valueOf(this.getInternalSlotCount()),
                 Integer.valueOf(active == null ? 0 : active.length),
                 Integer.valueOf(supply == null ? 0 : supply.length),
                 Long.valueOf(this.shanhaiProbeIsItemActive), Long.valueOf(this.shanhaiProbeHandleItem),
                 Long.valueOf(this.shanhaiProbeHasCache), Long.valueOf(this.shanhaiProbeFindItem),
-                Long.valueOf(this.shanhaiProbeFindFluid),
+                Long.valueOf(this.shanhaiProbeFindFluid), Long.valueOf(this.shanhaiProbeSelfHasCache),
                 Long.valueOf(this.shanhaiProbeHiIsItemActive), Long.valueOf(this.shanhaiProbeHiHandleItem),
                 Long.valueOf(this.shanhaiProbeHiHasCache),
                 claimed.length() == 0 ? "none" : claimed.toString(),
@@ -4962,8 +7280,9 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         final String seg;
         if (ShanhaiWildcardLayout.isMotherSlot(slot)) {
             seg = "mother" + (slot - ShanhaiWildcardLayout.MOTHER_OFFSET);
-        } else if (ShanhaiWildcardLayout.isExpandSlot(slot)) {
-            seg = "expand" + ShanhaiWildcardLayout.motherOf(slot) + "." + ShanhaiWildcardLayout.branchOf(slot);
+        } else if (this.shanhaiIsExpandSlotNow(slot)) {
+            final int rel = slot - ShanhaiWildcardLayout.EXPAND_OFFSET;
+            seg = "expand" + this.shanhaiSlotAllocator.motherOf(rel) + "." + this.shanhaiSlotAllocator.branchOf(rel);
         } else {
             seg = "pattern";
         }
@@ -5012,9 +7331,15 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      *
      * <p>格式（一行 grep）：
      * <pre>
-     *   STOCKPAT slots=1330 lo=N hi=M supply=S gateBlocked=G containers=[basePatterns=B wildcardInv=W mothers=Mth expands=Me]
-     *            hiSlots=[1080,1120] ⇒ 判读
+     *   STOCKPAT pos=uselessdim@1887,90,225 slots=1330 lo=N hi=M supply=S gateBlocked=G
+     *            containers=[basePatterns=B wildcardInv=W mothers=Mth expands=Me] hiSlots=[1080,1120] ⇒ 判读
      * </pre>
+     *
+     * <p>🔴 <b>{@code pos=} 是 2026-10-26 补的（风险 0）</b>：实机日志里至少有 8 个不同坐标的星律
+     * （{@code overworld@-14,94,13 / 0,108,13 / 0,108,25}、{@code uselessdim@1812/1821/1830/1839,90,273}、
+     * {@code uselessdim@1887,90,225}），而这一行原来<b>没打坐标</b> ⇒ 14:42 那两条
+     * {@code basePatterns=0 wildcardInv=0 mothers=0} 到底说的是哪台机，事后无法判定。
+     * 格式 = {@code <维度id>@<x>,<y>,<z>}（{@link #shanhaiPos()}）。
      */
     private void shanhaiLogPatternCensus() {
         if (this.isRemote() || this.getLevel() == null) {
@@ -5025,8 +7350,10 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         int lo = 0;
         int hi = 0;
         final StringBuilder hiSlots = new StringBuilder();
-        final int space = this.getInternalSlotCount();
-        for (int slot = 0; slot < space; slot++) {
+        // 2026-10-26（K 4⇒128）：扫候选集而不是 7530 格（空展开槽本来就不会计数）。
+        final int[] censusCandidates = this.shanhaiCandidateSlots();
+        final int space = censusCandidates.length;
+        for (int slot : censusCandidates) {
             if (!this.hasPatternInSlot(slot)) {
                 continue;
             }
@@ -5069,10 +7396,9 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             }
         }
         int expands = 0;
-        for (int i = 0; i < ShanhaiWildcardLayout.EXPAND_COUNT; i++) {
-            if (this.hasPatternInSlot(ShanhaiWildcardLayout.EXPAND_OFFSET + i)) {
-                expands++;
-            }
+        // 2026-10-26（K 4⇒128）：不能按 EXPAND_COUNT 扫（那是 6400 格），按真正展开出来的条数扫。
+        for (List<IPatternDetails> live : this.expansionsByMother.values()) {
+            expands += live.size();
         }
         final int supply = this.shanhaiStockSupplySlots == null ? 0 : this.shanhaiStockSupplySlots.length;
         final int gateBlocked = this.gateBlockedSlots == null ? 0 : this.gateBlockedSlots.size();
@@ -5089,13 +7415,15 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             verdict = "⚠️ 覆写与容器真值不一致：父类那 1080 格容器里有 " + basePatterns
                     + " 格有样板，而 hasPatternInSlot 只报 " + lo + " ⇒ 覆写判错（把这条发我）";
         } else if (lo == 0 && hi == 0 && basePatterns <= 0 && wildcardInv == 0) {
-            verdict = "本机（星律）1330 格里真的一块样板都没有 —— 样板不在本机，看同一节的 STOCKWHO 说在谁身上";
+            verdict = "本机（星律）" + this.getInternalSlotCount()
+                    + " 格槽号空间里真的一块样板都没有 —— 样板不在本机，看同一节的 STOCKWHO 说在谁身上";
         } else {
             verdict = "本机有样板：普通段 " + lo + " 块、通配符段 " + hi + " 块"
                     + (hi > 0 ? "（母槽 " + mothers + " + 展开 " + expands + "）" : "") + "；覆写与容器一致";
         }
-        ShanhaiStellarLog.info("STOCKPAT slots={} lo={} hi={} supply={} gateBlocked={} "
+        ShanhaiStellarLog.info("STOCKPAT pos={} slots={} lo={} hi={} supply={} gateBlocked={} "
                         + "containers=[basePatterns={} wildcardInv={} mothers={} expands={}] hiSlots=[{}] ⇒ {}",
+                this.shanhaiPos(),
                 Integer.valueOf(space), Integer.valueOf(lo), Integer.valueOf(hi), Integer.valueOf(supply),
                 Integer.valueOf(gateBlocked), Integer.valueOf(basePatterns), Integer.valueOf(wildcardInv),
                 Integer.valueOf(mothers), Integer.valueOf(expands),
@@ -5114,9 +7442,12 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      *
      * <h2>判据（一次 grep 就知道样板在谁身上）</h2>
      * <pre>
-     *   STOCKWHO controllers=1 parts=7 providers=[MESuperPatternBufferPartMachine=12, StellarSampleAssemblerPartMachine=0]
+     *   STOCKWHO pos=uselessdim@1887,90,225 controllers=1 parts=7
+     *            providers=[MESuperPatternBufferPartMachine=12, StellarSampleAssemblerPartMachine=0]
      *            own=0 ⇒ 样板不在本机，在 MESuperPatternBufferPartMachine（12 条）
      * </pre>
+     * <p>🔴 {@code pos=} 是 2026-10-26 补的：这一行原来只说「样板在谁身上」，不说「本机是哪一台」，
+     * 多台星律同时在线时无法把 {@code providers=[…=0]} 对回具体那台机。
      * <ul>
      *   <li>{@code providers} 的每一项 = 一个实现了 {@code ICraftingProvider} 的仓室（= 能给 AE 供样板的那种）
      *       及其 {@code getAvailablePatterns().size()}；本机永远在列表里（便于对照）；</li>
@@ -5192,10 +7523,541 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         } else {
             verdict = "整个结构里没有任何仓室持有样板 ⇒ 请先放样板（这条与库存无关）";
         }
-        ShanhaiStellarLog.info("STOCKWHO controllers={} parts={} providers=[{}] own={} ⇒ {}",
+        ShanhaiStellarLog.info("STOCKWHO pos={} controllers={} parts={} providers=[{}] own={} ⇒ {}",
+                this.shanhaiPos(),
                 Integer.valueOf(this.getControllers() == null ? 0 : this.getControllers().size()),
                 Integer.valueOf(partCount), providers.length() == 0 ? "none" : providers.toString(),
                 Integer.valueOf(own), verdict);
+    }
+
+    // ================================================================ 2026-10-26 四修：让下一次实机「一条日志判死」
+    //
+    //  用户报「通配符下单卡住」＋ AE 屏 `合成状态 - 2562047:47:16`。上一轮只读取证已钉死：
+    //    ① 那串数字 = AE 的 ETA 溢出饱和（`progress == 0` 且 `startItemCount = 2147483647`
+    //       ⇒ `eta = elapsed × 2.1e9` 饱和成 `Long.MAX`），**不是**"等料"、**不是**配方时长异常；
+    //    ② `addMaxItems`（已开工）只在 `executeCrafting` 里 `pushPattern` **成功**时调
+    //       ⇒ AE 确实把 46 件派出去了；
+    //    ③ 但产物一件都没回：`meHandleRecipeOutputInner → buffer → Ticker → AEUtils.reFunds`
+    //       这条链的 `buffer` 是空的（`buffer` 是内存 map，**唯一写入点**就是 `meHandleRecipeOutputInner`）。
+    //
+    //  ⇒ 本节补的不是"再猜一次"，而是三组能把上面三件事**分别**钉死的读数：
+    //    · {@link #shanhaiLogClaim}（RECIPE claim）   —— 这单到底有没有被**本机**认领；
+    //    · {@link #shanhaiTickTickerProbe}（TICKER）  —— 产物有没有进 buffer、有没有被退回网络；
+    //    · {@link #shanhaiLogHandlersOnce}（HANDLERS）＋ {@link #shanhaiLogBufferGate}（BUFFERGATE）
+    //         —— 本机在 capability 链里排第几、产物该由谁写进 buffer、就绪闸卡在哪一条。
+    //
+    //  ⚠️ 三组读数**都不改行为**：只读字段/只数次数，且全部带节流（见各自注释）。
+
+    /**
+     * 本机位置的统一写法 {@code <维度id>@<x>,<y>,<z>}。
+     *
+     * <h2>🔴 为什么 must have（实机日志实证，不是洁癖）</h2>
+     * 用户那份日志里至少有 <b>8 个不同坐标</b>的星律同时在跑：
+     * <pre>
+     *   overworld@-14,94,13     overworld@0,108,13     overworld@0,108,25
+     *   uselessdim@1812,90,273  uselessdim@1821,90,273 uselessdim@1830,90,273
+     *   uselessdim@1839,90,273  uselessdim@1887,90,225
+     * </pre>
+     * 而 {@code STOCKPAT / STOCKWHO / PATEXPORT} 三行<b>一个坐标都没打</b>
+     * ⇒ 14:42 那两条 {@code STOCKPAT … basePatterns=0 wildcardInv=0 mothers=0}
+     * 到底说的是哪一台机，事后<b>无法判定</b>；整轮取证都困在"多台机器混在一起"的日志里对账。
+     *
+     * <p>永不抛（探针自己抛异常会把 tick 带崩）；取不到维度时写 {@code ?}。
+     */
+    private @NotNull String shanhaiPos() {
+        try {
+            final net.minecraft.world.level.Level level = this.getLevel();
+            final net.minecraft.resources.ResourceLocation dim =
+                    level == null ? null : level.dimension().location();
+            final net.minecraft.core.BlockPos pos = this.getPos();
+            return (dim == null ? "?" : dim.toString())
+                    + '@' + pos.getX() + ',' + pos.getY() + ',' + pos.getZ();
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    // ---- ②-1 TICKER（buffer / pushed / refunded）的字段
+    //
+    //  「refunded」的诚实定义：`AEUtils.reFunds` 在父类 `MEPatternBufferPartMachine$Ticker` 里被调，
+    //  那个类是本类**够不到**的（private static final 内嵌类，字段都是 package-private）。
+    //  但 `buffer` 的**唯一写入点**是本机的 `meHandleRecipeOutputInner`（产物入账），
+    //  **唯一清空者**就是 Ticker 里那次 `AEUtils.reFunds`（退款成功才会被清掉）
+    //  ⇒ 「buffer 从非空变成空」这一次跃变，与「AEUtils.reFunds 成功」是同一事件。
+    //  所以这里数的是**跃变次数**（drains），不是把 reFunds 包一层 —— 既不碰上游，也不会双退款。
+
+    /** 上次打印时的状态指纹（变了立刻打，否则 100 tick 一行）。 */
+    private String shanhaiTickerState = "";
+
+    /** TICKER 的上一次打点游戏时间。 */
+    private long shanhaiTickerLogTick = Long.MIN_VALUE;
+
+    /** 上一 tick 的 buffer 条目数（用来抓「>0 → 0」这次跃变 = 一次退款成功）。 */
+    private int shanhaiTickerLastBufferSize = 0;
+
+    /** 累计退款清空次数（= AEUtils.reFunds 成功次数，见上面口径说明）。 */
+    private long shanhaiTickerRefundDrains = 0L;
+
+    /** 距上次打印以来 `pushPattern` 成功的次数（= 本次窗口里 AE 派给本机的件数）。 */
+    private long shanhaiTickerPushOkSinceLog = 0L;
+
+    /** 累计 `pushPattern` 成功次数。 */
+    private long shanhaiTickerPushOkTotal = 0L;
+
+    /** buffer 连续非空的 tick 数（判「产物压着不退」）。 */
+    private long shanhaiTickerBusyTicks = 0L;
+
+    /** TICKER 是否已经打过第一行（第一行无条件打）。 */
+    private boolean shanhaiTickerFirstLogged = false;
+
+    // ---- ②-3 RECIPE claim 的字段
+
+    /** `pushPattern` 被调用总次数。 */
+    private long shanhaiClaimCalls = 0L;
+
+    /** `pushPattern` 返回 true 的次数。 */
+    private long shanhaiClaimOk = 0L;
+
+    /** 已经打出去几行 RECIPE claim（节流用）。 */
+    private long shanhaiClaimLogged = 0L;
+
+    /** 上次打印时的成败（-1 = 还没打过）；成败翻转必打一行。 */
+    private int shanhaiClaimLastOk = -1;
+
+    // ---- ②-2 HANDLERS / ③-2 BUFFERGATE 的字段
+
+    /** HANDLERS 只在「结构成型后」打一次。 */
+    private boolean shanhaiHandlersLogged = false;
+
+    /** BUFFERGATE 的上一次打点（300 tick 节流）。 */
+    private long shanhaiBufferGateTick = Long.MIN_VALUE;
+
+    /** 本机两个库存 handler「把料吃干后返回 null（= 短路）」的次数（HANDLERS 的判据）。 */
+    private long shanhaiStockItemNullReturns = 0L;
+
+    private long shanhaiStockFluidNullReturns = 0L;
+
+    /**
+     * <b>TICKER</b>：一行说清「产物在不在 buffer / 有没有被退回网络 / AE 到底派了多少件给本机」。
+     *
+     * <h2>为什么这一行能判死 ③</h2>
+     * 上一轮的结论是「buffer 是空的 ⇒ 产物一件都没回」。但<b>空 buffer</b> 有三种完全不同的含义，
+     * 只看"空"分不出来：
+     * <ol>
+     *   <li>{@code buffer=0 且 pushedTotal=0} ⇒ AE <b>从没</b>把单派给本机（这台的卡点不在产物返还，
+     *       在"AE 认不认这台机的样板"，看 RECIPE claim / STOCKWHO）；</li>
+     *   <li>{@code buffer=0 且 pushedTotal>0} ⇒ AE 派过单、本机也认领了，<b>但一件产物都没进 buffer</b>
+     *       ⇒ `meHandleRecipeOutputInner` 根本没被调（看 BUFFERGATE 的就绪闸）；</li>
+     *   <li>{@code buffer>0} ⇒ 产物进来了、只是没退回去（看 busyTicks / grid / CPU）。</li>
+     * </ol>
+     *
+     * <p>格式（字段名固定，便于 grep 与断言）：
+     * <pre>
+     *   TICKER pos=uselessdim@1887,90,225 buffer=0 pushed=46 refunded=0 pushedTotal=46 busyTicks=0 ⇒ 判读
+     * </pre>
+     * 字段含义：{@code buffer} = 当前 buffer 条目数；{@code pushed} = <b>本次窗口</b>内 pushPattern 成功次数；
+     * {@code refunded} = 累计「buffer 非空→空」跃变次数（= AEUtils.reFunds 成功次数，口径见字段注释）；
+     * {@code pushedTotal} = 累计成功次数；{@code busyTicks} = buffer 已连续非空几 tick。
+     */
+    private void shanhaiTickTickerProbe() {
+        if (this.isRemote() || this.getLevel() == null) {
+            return;
+        }
+        final int n = this.buffer == null ? -1 : this.buffer.size();
+        if (this.shanhaiTickerLastBufferSize > 0 && n == 0) {
+            this.shanhaiTickerRefundDrains++;
+        }
+        this.shanhaiTickerLastBufferSize = n;
+        if (n > 0) {
+            this.shanhaiTickerBusyTicks++;
+        } else {
+            this.shanhaiTickerBusyTicks = 0L;
+        }
+        final long now = this.getLevel().getGameTime();
+        final String state = n + "|" + this.shanhaiTickerPushOkTotal + "|" + this.shanhaiTickerRefundDrains
+                + "|" + (this.shanhaiTickerBusyTicks >= 60L ? 1 : 0);
+        // 硬下限 20 tick：46 件的单会在几十 tick 内连续 pushPattern，每次 push 都算"变化"，
+        // 不设下限就会刷 46 行。被压下的变化不会丢 —— 指纹只在**打印时**写，下次一定还"不一样"。
+        if (this.shanhaiTickerFirstLogged
+                && this.shanhaiTickerLogTick != Long.MIN_VALUE
+                && now - this.shanhaiTickerLogTick < 20L) {
+            return;
+        }
+        if (this.shanhaiTickerFirstLogged
+                && state.equals(this.shanhaiTickerState)
+                && this.shanhaiTickerPushOkSinceLog == 0L
+                && this.shanhaiTickerLogTick != Long.MIN_VALUE
+                && now - this.shanhaiTickerLogTick < 100L) {
+            return;
+        }
+        this.shanhaiTickerFirstLogged = true;
+        this.shanhaiTickerState = state;
+        this.shanhaiTickerLogTick = now;
+        final long pushed = this.shanhaiTickerPushOkSinceLog;
+        this.shanhaiTickerPushOkSinceLog = 0L;
+        final String verdict;
+        if (n > 0) {
+            verdict = this.shanhaiTickerBusyTicks >= 60L
+                    ? "产物压在 buffer 里已经 " + this.shanhaiTickerBusyTicks
+                    + " tick 没退 ⇒ Ticker 没在跑（grid 掉线 / io 不是 IO.BOTH / CPU 不接）"
+                    : "产物刚写进 buffer（下一 tick 应被 Ticker 退掉；连续几次都 >0 就是退不掉）";
+        } else if (this.shanhaiTickerPushOkTotal > 0L) {
+            verdict = "AE 已把单派给本机（累计 pushPattern ok=" + this.shanhaiTickerPushOkTotal
+                    + " 次）但 buffer 一次都没非空过 ⇒ 产物没走到 meHandleRecipeOutputInner"
+                    + "（谁的锅看 BUFFERGATE 那一行的 slotsWith…/meOut）";
+        } else {
+            verdict = "本机还没被 AE 派过单（pushPattern 一次没成功）⇒ 这台的卡点不在产物返还，"
+                    + "看 RECIPE claim 的 reason 与 STOCKWHO 的 own=";
+        }
+        ShanhaiStellarLog.info("TICKER pos={} buffer={} pushed={} refunded={} pushedTotal={} busyTicks={} ⇒ {}",
+                this.shanhaiPos(), Integer.valueOf(n), Long.valueOf(pushed),
+                Long.valueOf(this.shanhaiTickerRefundDrains), Long.valueOf(this.shanhaiTickerPushOkTotal),
+                Long.valueOf(this.shanhaiTickerBusyTicks), verdict);
+    }
+
+    /**
+     * <b>RECIPE claim</b>：这单<b>有没有被本机认领</b>（在 `pushPattern` 的真实返回值处打）。
+     *
+     * <h2>为什么要打它（上一轮的取证缺的就是这一条）</h2>
+     * 「AE 把 46 件派出去了」是<b>由 `addMaxItems` 反推</b>出来的（它只在 `pushPattern` 成功时调）——
+     * 那是<b>结论</b>，不是<b>证据</b>。而实机里有 <b>8 台</b>星律，谁认领的、认领了几件，
+     * 日志里<b>一个字都没有</b> ⇒ 只能靠推断。这一行把它变成读数。
+     *
+     * <h2>reason 的四种取值（对应父类 pushPattern 的 4 步字节码，偏移 0–57）</h2>
+     * <pre>
+     *   accepted              成功（0: grid active / 16: 槽号查到 / 47: InternalSlot.pushPattern 已执行）
+     *   gridInactive          getMainNode() 为 null 或 !isActive()（本机没连上网）
+     *   patternNotOurs         getSlotIndexForPattern 返回 null（AE 拿回来的实例不是本机给的）
+     *   slotOutOfRange:&lt;n&gt;    槽号越界
+     *   internalSlotReject:&lt;n&gt; 槽号合法但推料仍被拒
+     * </pre>
+     * <p>节流：前 5 次 + 成败翻转 + 之后每 200 次（46 件的单会连打 46 次，不能全打）。
+     */
+    private void shanhaiLogClaim(@Nullable appeng.api.crafting.IPatternDetails pattern, boolean ok,
+                                 @NotNull String reason) {
+        if (this.isRemote()) {
+            return;
+        }
+        final int okFlag = ok ? 1 : 0;
+        final boolean changed = this.shanhaiClaimLastOk != okFlag;
+        this.shanhaiClaimLastOk = okFlag;
+        if (!changed && this.shanhaiClaimLogged >= 5L && this.shanhaiClaimCalls % 200L != 0L) {
+            return;
+        }
+        this.shanhaiClaimLogged++;
+        // 字段名按任务书原文：`RECIPE claim machine=<pos> pattern=<id> ok=<bool> reason=<…>`
+        // （machine= 与其它行的 pos= 是同一个字符串，见 {@link #shanhaiPos()}）
+        ShanhaiStellarLog.info("RECIPE claim machine={} pattern={} ok={} reason={} calls={} okTotal={}",
+                this.shanhaiPos(), shanhaiPatternDigest(pattern), Boolean.valueOf(ok), reason,
+                Long.valueOf(this.shanhaiClaimCalls), Long.valueOf(this.shanhaiClaimOk));
+    }
+
+    /** 「本机为什么拒了这单」——逐条对应父类 `pushPattern` 的 4 步，**不猜**。 */
+    private @NotNull String shanhaiClaimRejectReason(@Nullable appeng.api.crafting.IPatternDetails pattern) {
+        try {
+            final appeng.api.networking.IManagedGridNode node = this.getMainNode();
+            if (node == null || !node.isActive()) {
+                return "gridInactive";
+            }
+            final Integer slot = this.getSlotIndexForPattern(pattern);
+            if (slot == null) {
+                return "patternNotOurs";
+            }
+            if (slot < 0 || slot >= this.getInternalSlotCount()) {
+                return "slotOutOfRange:" + slot;
+            }
+            return "internalSlotReject:" + slot;
+        } catch (Throwable t) {
+            return "unknown:" + t.getClass().getSimpleName();
+        }
+    }
+
+    /** 样板一眼可读的 id：取第一条产出的 `id x count`；拿不到就退化成类名（绝不编）。 */
+    private static @NotNull String shanhaiPatternDigest(@Nullable appeng.api.crafting.IPatternDetails pattern) {
+        if (pattern == null) {
+            return "null";
+        }
+        try {
+            final appeng.api.stacks.GenericStack[] outs = pattern.getOutputs();
+            if (outs != null && outs.length > 0 && outs[0] != null && outs[0].what() != null) {
+                return outs[0].what().getId() + "x" + outs[0].amount();
+            }
+        } catch (Throwable ignored) {
+            // 落到下面的类名
+        }
+        return pattern.getClass().getSimpleName();
+    }
+
+    /**
+     * <b>HANDLERS</b>：只在「结构成型后」打一次 —— 本机在 capability 链里<b>排第几</b>、
+     * 以及<b>第一个把料吃干（返回 null = 短路）的 handler 是不是我们自己的</b>。
+     *
+     * <h2>为什么顺序重要</h2>
+     * gtlcore 的 `RecipeHandlePart#handleRecipe` 按 `getParts()` 的顺序遍历仓室、
+     * 每个仓室再按 trait 顺序遍历 `IRecipeHandler`；<b>谁先返回 null，后面的这一轮就不再被问</b>。
+     * 上一轮的实机日志里同一个结构既有本机、又有 `MESuperPatternBufferPartMachine`
+     * ⇒ 「本机的 handler 到底有没有机会被问」这件事，只能用顺序回答。
+     *
+     * <h2>字段</h2>
+     * <ul>
+     *   <li>{@code order=[下标:类名, …]} = 本机 {@code getTraits()} 里**所有实现了 IRecipeHandler 的 trait**，
+     *       按 trait 列表下标升序 —— 这就是主机遍历本机时看到的顺序（不是猜的，是列表现读）；</li>
+     *   <li>{@code short=[ShanhaiStockItemList calls=h nulls=n, …]} = 本机这两个 handler 被调次数与
+     *       「返回 null 把料吃干」的次数；</li>
+     *   <li>{@code firstShort=<类名|none(ours)>} = 按上面的顺序，第一个 nulls&gt;0 的那一个。
+     *       <b>本机之外的仓室看不到 ⇒ 不会瞎写</b>（拿不到就写 {@code none(ours)} 并在判读里说明）。</li>
+     * </ul>
+     */
+    private void shanhaiLogHandlersOnce(@NotNull String where) {
+        if (this.isRemote() || this.getLevel() == null || this.shanhaiHandlersLogged) {
+            return;
+        }
+        this.shanhaiHandlersLogged = true;
+        final StringBuilder order = new StringBuilder();
+        String firstShort = null;
+        try {
+            final java.util.List<com.gregtechceu.gtceu.api.machine.trait.MachineTrait> traits = this.getTraits();
+            if (traits != null) {
+                for (int i = 0; i < traits.size(); i++) {
+                    final com.gregtechceu.gtceu.api.machine.trait.MachineTrait trait = traits.get(i);
+                    if (!(trait instanceof com.gregtechceu.gtceu.api.capability.recipe.IRecipeHandler<?>)) {
+                        continue;
+                    }
+                    final String name = trait.getClass().getSimpleName();
+                    if (order.length() > 0) {
+                        order.append(", ");
+                    }
+                    order.append(i).append(':').append(name);
+                    if (firstShort == null && this.shanhaiNullReturnsOf(name) > 0L) {
+                        firstShort = name;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            order.append("?").append(t.getClass().getSimpleName());
+        }
+        final String shortText = "ShanhaiStockItemList calls=" + this.shanhaiSupplyItemHandleCalls
+                + " nulls=" + this.shanhaiStockItemNullReturns
+                + ", ShanhaiStockFluidList calls=" + this.shanhaiSupplyFluidHandleCalls
+                + " nulls=" + this.shanhaiStockFluidNullReturns;
+        final long oursCalls = this.shanhaiSupplyItemHandleCalls + this.shanhaiSupplyFluidHandleCalls;
+        final String verdict;
+        if (firstShort != null) {
+            verdict = "本机的 " + firstShort + " 有一轮把料吃干了（返回 null = 短路）⇒ 那一轮它后面的仓室没被问"
+                    + "（证明本机至少有一轮是「供料方」，不是旁观者）";
+        } else if (oursCalls == 0L) {
+            verdict = "本机这两个库存 handler 一次都没被调过 ⇒ 主机没把本机算进「能处理这份配方」的仓室名单"
+                    + "（看 STOCKWHO 的 own= 与配方类型，不是产物返还的问题）";
+        } else {
+            verdict = "本机 handler 被调过 " + oursCalls + " 次却一次都没把料吃干 ⇒ 短路发生在**别的仓室**"
+                    + "（不在本机，本机看不到它的名字 —— 不编）；那次派单的料不是本机供的";
+        }
+        ShanhaiStellarLog.info("HANDLERS pos={} where={} order=[{}] short=[{}] firstShort={} ⇒ {}",
+                this.shanhaiPos(), where, order.length() == 0 ? "none" : order.toString(),
+                shortText, firstShort == null ? "none(ours)" : firstShort, verdict);
+        // 一次性把「产物该由谁写进 buffer」的静态事实也打出来（下一轮实机可以直接照这条核对）
+        ShanhaiStellarLog.info("BUFFERPATH pos={} chain=配方真跑完成 → 主机把输出推给本机 ME handler"
+                        + " → meHandleRecipeOutputInner 写 buffer → Ticker(构造时 io==IO.BOTH 才注册)"
+                        + " → AEUtils.reFunds; gate=[simulate=true 时直接 return List.of()（偏移 0–7）⇒ 只有真跑那遍会写；"
+                        + "io 必须含 OUT；buffer 是内存 map、唯一写入点就是它]",
+                this.shanhaiPos());
+    }
+
+    /** 按类名取「返回 null（把料吃干）」的次数 —— 只认本机那两个我们自己写的 handler。 */
+    private long shanhaiNullReturnsOf(@NotNull String simpleName) {
+        if ("ShanhaiStockItemList".equals(simpleName)) {
+            return this.shanhaiStockItemNullReturns;
+        }
+        if ("ShanhaiStockFluidList".equals(simpleName)) {
+            return this.shanhaiStockFluidNullReturns;
+        }
+        return 0L;
+    }
+
+    /**
+     * <b>HANDLEPOOL 的挂点</b>：结构成型后打<b>一次</b>，回答「我们那两份 handler 到底在哪一份
+     * {@code RecipeHandlePart} 里」——这是「{@code handleRecipeInner} calls=0」这件事的<b>直接</b>读数。
+     *
+     * <h2>一、为什么必须直接读池子（而不是再猜一次）</h2>
+     * {@code IRecipeHandler#handleRecipe} 的默认实现（{@code javap -p -c} 偏移 0–75）是<b>纯透传</b>：
+     * {@code copyContent} 之后直接调 {@code handleRecipeInner} 并返回，<b>不看</b>
+     * {@code getHandlerIO()}/{@code getCapability()}/{@code isProxy()}/{@code isDistinct()}。
+     * ⇒ 只要有一份含我们 handler 的 part 被「问」，计数就必然 &gt; 0
+     * ⇒ <b>{@code calls=0} 只能意味着「没有那份 part」，或者那份 part 从未被匹配流程问到</b>。
+     * 这两种情形在本行里的长相完全不同（{@code oursInNormal} / {@code shared} / ★ 的位置）。
+     *
+     * <h2>二、为什么在 {@code update()} 里打、还要先等 40 tick</h2>
+     * 池子是在 {@code upDate()} 里 rebuild 的，而 {@code upDate()} 的触发点是「成型」与「ME 缓冲变更」。
+     * 成型那一瞬间我们很可能正好排在 rebuild <b>之前</b> ⇒ 立刻读会读到<b>上一轮</b>（甚至是空表）的状态，
+     * 那会把「还没轮到」误判成「池子里没有」。等 40 tick（2 秒）能让至少一轮 rebuild 跑完；
+     * 而每台机只打一次 ⇒ 不会刷屏（这一行的代价是几份 getter，没有遍历机器的开销）。
+     *
+     * <p>主机取不到（{@code getControllers()} 还没填）时<b>不消耗等待计数、也不打</b>，
+     * 下一 tick 再看 —— 绝不把「还没接上主机」写成「池子是空的」。
+     * 全部读数与判读在 {@link ShanhaiHandlePoolProbe#log} 里（那个类只读、永不抛）。
+     */
+    private void shanhaiLogHandlePoolOnce() {
+        if (this.isRemote() || this.getLevel() == null || this.shanhaiHandlePoolLogged) {
+            return;
+        }
+        final Object host = this.shanhaiHostRecipeCapabilityMachine();
+        if (host == null) {
+            // 主机还没接上 ⇒ 这一刻读数没有意义（别把"没接上"写成"池子空"）。
+            return;
+        }
+        if (++this.shanhaiHandlePoolWait < 40) {
+            return;
+        }
+        this.shanhaiHandlePoolLogged = true;
+        try {
+            ShanhaiHandlePoolProbe.log(this.shanhaiPos(),
+                    (org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine) host,
+                    this.shanhaiStockItemHandler, this.shanhaiStockFluidHandler,
+                    this.shanhaiSupplyItemHandleCalls, this.shanhaiSupplyFluidHandleCalls);
+        } catch (Throwable ignored) {
+            // 探针永远不许把 tick 带崩（那一行的全部价值就是"别改行为"）。
+        }
+    }
+
+    /**
+     * 取「本机所在多方块的主机」，并且它必须已经实现
+     * {@code IRecipeCapabilityMachine}（gtlcore 的 mixin 把它加到 {@code WorkableMultiblockMachine} 上）。
+     *
+     * <p>{@code IMultiPart#getControllers()} 是 <b>public abstract</b>（{@code javap} 实证，本类多处已在用），
+     * 所以不需要新增任何访问器；返回 {@code null} 表示「还没接上主机」，调用方必须当成"没有读数"。
+     */
+    private @Nullable Object shanhaiHostRecipeCapabilityMachine() {
+        try {
+            final List<IMultiController> controllers = this.getControllers();
+            if (controllers != null) {
+                for (int i = 0; i < controllers.size(); i++) {
+                    final IMultiController controller = controllers.get(i);
+                    if (controller instanceof org.gtlcore.gtlcore.api.machine.trait.IRecipeCapabilityMachine) {
+                        return controller;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // 同上：探针不许抛
+        }
+        return null;
+    }
+
+    /**
+     * <b>BUFFERGATE</b>：`buffer` 为空时，把「谁该往里写 / 就绪闸卡在哪一条」摆出来。
+     *
+     * <h2>判读（三种成因，一次分清）</h2>
+     * <pre>
+     *   buffer>0                            ⇒ 产物进来了，没退（看 TICKER busyTicks）
+     *   buffer=0 且 slotsWithItems/Fluids>0 ⇒ 料已推进本机槽里、却零产物
+     *                                       ⇒ 配方没跑到「完成」那一步（不是产物返还的问题）
+     *   buffer=0 且 两者都 0                ⇒ 这一台根本没在跑配方
+     *                                       ⇒ 派单落在别的机器上（对照 RECIPE claim 的 pos）
+     * </pre>
+     * <p>节流 300 tick（5 秒），且只在 {@code buffer} 为空或第一次时打 —— 就是为"卡住"这个场景服务的。
+     */
+    private void shanhaiLogBufferGate(@NotNull String where) {
+        if (this.isRemote() || this.getLevel() == null) {
+            return;
+        }
+        final int bufferSize = this.buffer == null ? -1 : this.buffer.size();
+        final long now = this.getLevel().getGameTime();
+        final boolean first = this.shanhaiBufferGateTick == Long.MIN_VALUE;
+        if (!first && bufferSize <= 0 && this.shanhaiBufferGateTick != Long.MIN_VALUE
+                && now - this.shanhaiBufferGateTick < 300L) {
+            return;
+        }
+        if (!first && bufferSize > 0) {
+            return;   // 有产物时这一行不重要（TICKER 已经在说）
+        }
+        this.shanhaiBufferGateTick = now;
+        int slotsWithItems = 0;
+        int slotsWithFluids = 0;
+        try {
+            for (int slot : this.shanhaiCandidateSlots()) {
+                final MEPatternBufferPartMachineBase.InternalSlot internal = this.getInternalSlot(slot);
+                if (!internal.getItemInventory().isEmpty()) {
+                    slotsWithItems++;
+                }
+                if (!internal.getFluidInventory().isEmpty()) {
+                    slotsWithFluids++;
+                }
+            }
+        } catch (Throwable t) {
+            slotsWithItems = -1;
+            slotsWithFluids = -1;
+        }
+        String meItem = "?";
+        String meFluid = "?";
+        String recipeHandler = "?";
+        try {
+            final Object pair = this.getMERecipeHandlerTraits();
+            if (pair instanceof it.unimi.dsi.fastutil.Pair<?, ?> p) {
+                meItem = p.left() == null ? "null" : p.left().getClass().getSimpleName();
+                meFluid = p.right() == null ? "null" : p.right().getClass().getSimpleName();
+            }
+        } catch (Throwable t) {
+            meItem = "?" + t.getClass().getSimpleName();
+        }
+        try {
+            recipeHandler = this.recipeHandler == null ? "null" : this.recipeHandler.getClass().getSimpleName();
+        } catch (Throwable ignored) {
+            recipeHandler = "?";
+        }
+        final String verdict;
+        if (bufferSize > 0) {
+            verdict = "产物在 buffer 里等着退（下一秒应看到 TICKER 的 refunded 增加）";
+        } else if (slotsWithItems > 0 || slotsWithFluids > 0) {
+            verdict = "本机槽里压着料（物品格 " + slotsWithItems + " / 流体格 " + slotsWithFluids
+                    + "）却零产物 ⇒ 配方没跑到「完成」那一步，**不是**产物返还的问题";
+        } else {
+            verdict = "本机既没料也没产物 ⇒ 这一台根本没在跑配方（派单落在别的机器上，"
+                    + "对照 RECIPE claim 的 pos= 与 STOCKWHO 的 own=）";
+        }
+        ShanhaiStellarLog.info("BUFFERGATE pos={} where={} buffer={} slotsWithItems={} slotsWithFluids={} "
+                        + "recipeHandler={} meOut=[item={}, fluid={}] ⇒ {}",
+                this.shanhaiPos(), where, Integer.valueOf(bufferSize),
+                Integer.valueOf(slotsWithItems), Integer.valueOf(slotsWithFluids),
+                recipeHandler, meItem, meFluid, verdict);
+    }
+
+    /**
+     * <b>②-3 探针的挂点</b>：在 {@code pushPattern} 的<b>真实返回值</b>处打 RECIPE claim（行为一字不改）。
+     *
+     * <p>为什么必须覆写这一跳、而不在别处推断：AE 侧「派出去了几件」唯一可信的来源就是这个方法的返回值
+     * （{@code CraftingCpuLogic#executeCrafting} 只在它返回 true 时 {@code addMaxItems}）。
+     * 父类实现只有 4 步（{@code javap -c} 偏移 0–57），所以 ok=false 的原因也只可能是那 4 步之一
+     * ⇒ {@link #shanhaiClaimRejectReason} 逐条对应，不猜。
+     */
+    @Override
+    public boolean pushPattern(appeng.api.crafting.IPatternDetails pattern, appeng.api.stacks.KeyCounter[] stacks) {
+        final boolean ok = super.pushPattern(pattern, stacks);
+        // XRECIPE 判据（认领产物 / 该槽手填类型 / 该槽绑定配方的类型 / 宿主形态 / 判定）
+        try {
+            this.shanhaiXrecipeProbe(pattern, ok);
+        } catch (Throwable ignored) {
+            // 探针永远不许把派单带崩
+        }
+        // 🔴 2026-10-27 PUSHSLOT：**推料落点**判据（40 tick 节流，带 pos）——
+        //    「铜到底被塞进了哪个槽」是"配方枚举看不到铜"的第一分叉点：
+        //    槽号 <1080 ⇒ 进的是普通样板槽；≥1080 ⇒ 进的是展开段（母槽 1080..1129 / 展开 1130..）。
+        try {
+            this.shanhaiPushSlotProbe(pattern, stacks);
+        } catch (Throwable ignored) {
+            // 探针永远不许把派单带崩
+        }
+        this.shanhaiClaimCalls++;
+        if (ok) {
+            this.shanhaiClaimOk++;
+            this.shanhaiTickerPushOkSinceLog++;
+            this.shanhaiTickerPushOkTotal++;
+        }
+        try {
+            this.shanhaiLogClaim(pattern, ok, ok ? "accepted" : this.shanhaiClaimRejectReason(pattern));
+        } catch (Throwable ignored) {
+            // 探针永远不许把派单带崩（它的全部价值就是"别改行为"）
+        }
+        return ok;
     }
 
     /**
@@ -5204,7 +8066,7 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
      * <p>物品侧与流体侧<b>同一个节拍、同一份 MEStorage</b>；哪一份漏了，面板上那一半的格子就会永远显示 0
      * （流体的 {@code syncStock} 自带，{@code javap -p} 实证：{@code public void syncStock(MEStorage)}）。
      */
-    private void shanhaiSyncStock() {
+    private void shanhaiSyncStock(@NotNull String where) {
         if (this.shanhaiStockItemHandler == null) {
             return;
         }
@@ -5212,7 +8074,15 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         // 最迟一个同步周期内就会反映到 getActiveSlots()（重建是 1080 次数组读，不贵）。
         this.shanhaiMarkStockSupplyDirty();
         final net.minecraft.world.level.Level level = this.getLevel();
-        final appeng.api.networking.IGrid grid = this.getMainNode().getGrid();
+        final appeng.api.networking.IManagedGridNode node = this.getMainNode();
+        final appeng.api.networking.IGrid grid = node == null ? null : node.getGrid();
+        // 🔴 2026-10-25 **口径改写**（用户原话：「标签拉取把库存的位置填了，但是实际上它们应该分开各不干扰」）：
+        //    标签这一路现在**不写**任何 config ⇒ 它与紧接着的两处 `syncStock` **完全无耦合**，
+        //    放在这里只是因为「它就是跟着库存同步周期跑」这件事没变（同一节拍，不另开计时器）。
+        //    上一轮那道 `shanhaiTagPullBusy` 防重入闸**已删除**：它存在的唯一理由是
+        //    「写 config ⇒ onStockInputConfigChanged ⇒ syncStockInput ⇒ 回到本方法」，
+        //    而现在这个方法里一次 config 写入都没有 ⇒ 不存在那条递归路径。
+        this.shanhaiTagPull(grid);
         if (grid == null) {
             // 掉线：清空库存显示（与父类 performStockSync 对 grid==null 的处置同义）
             this.shanhaiStockItemHandler.clearStocks();
@@ -5220,6 +8090,10 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
             this.shanhaiStockFluidHandler.clearStocks();
             this.shanhaiStockSnapshot = null;
             this.shanhaiStockSnapshotTick = Long.MIN_VALUE;
+            // 🔴 2026-10-25：**这一支也必须留读数** —— 「stock 恒 0」最常见的一种成因就是
+            //    `getMainNode().getGrid() == null`（机器没连上网/节点没上线），此时 syncStock
+            //    一次都没跑，下游的 SUPPLYCHAIN 只会看到 stock=0，看不出是"没连网"。
+            this.shanhaiLogSyncStock(where + "/noGrid", node, null);
             return;
         }
         final MEStorage storage = grid.getStorageService().getInventory();
@@ -5241,6 +8115,9 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         }
         // 闸计数：让 GUI/Jade 的数字也跟着刷新（脏标记挡住重算，不会每拍扫 1330 格 NBT）
         this.shanhaiRefreshGateCache();
+        // 🔴 2026-10-25：「stock 恒 0」的取证行（判读表见方法 javadoc）。
+        //    位置放在两处 syncStock 之后 ⇒ 打出来的就是**这一次真实写进去**的结果。
+        this.shanhaiLogSyncStock(where, node, storage);
         // 标签过滤页的匹配预览：跟着库存快照更新（同一节拍，因为它的数据源就是这份快照）
         this.shanhaiRefreshTagPreview();
         // 库存页那行只读统计（服务端现算；@DescSynced 下发，界面只读）
@@ -5258,6 +8135,198 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
         if (this.shanhaiRefreshForgeHostName()) {
             ShanhaiStellarLog.info("神锻面板：本仓室所在控制器 => {}", this.shanhaiForgeHostName);
         }
+    }
+
+    /**
+     * <b>SYNCSTOCK</b>：把「库存同步链」一次跑完的<b>实际读数</b>打出来（前 3 次 + 之后每 200 tick）。
+     *
+     * <h2>为什么必须有这一行</h2>
+     * 实机 12:33 那三条 {@code SUPPLYCHAIN} 只给了<b>结果</b>（{@code cfg=1 stock=0} ⇒ 配了却没库存），
+     * 而库存是 {@code syncStock(MEStorage)} 写进去的。同一个 {@code stock=0} 至少有四种成因，
+     * 这条日志把它们<b>分开</b>：
+     * <pre>
+     *   ① syncStock 没被调（掉线 / 节拍没到）      → where=…/noGrid 或 node=0
+     *   ② 被调了，但 ME 侧 extract(SIMULATE) 返回 0 → net&gt;0 且 me=0
+     *   ③ 写进了另一份 handler（父类 32 格）        → p32/f32&gt;0 而 cfg=0
+     *   ④ 配置槽里的键与 ME 里的键不是同一个        → net=0
+     * </pre>
+     *
+     * <h2>字段判读</h2>
+     * <ul>
+     *   <li>{@code node}/{@code active}/{@code storage}：主节点在不在网上、{@code getGrid()} 拿到没有、库存对象是谁；</li>
+     *   <li>{@code item[cfg/stock]}、{@code fluid[cfg/stock]}：<b>我们那两份 160 格</b>里
+     *       「有配置的格数 / 有库存的格数（= {@code IConfigurableSlot#getStock() != null}）」；</li>
+     *   <li>{@code p32}/{@code f32}：<b>父类那 32+32 格</b>的配置格数 —— 「配进了另一份 handler」的唯一判据；</li>
+     *   <li>{@code probes=[key:net/me ...]}：对每个配置键同时报两个数 ——
+     *       {@code net} = {@code storage.getAvailableStacks().get(key)}（ME 里有没有这东西），
+     *       {@code me} = {@code storage.extract(key, MAX, SIMULATE, 本机 actionSource)}（= {@code syncStock} 内部那一句）。
+     *       <b>{@code net>0 但 me=0} ⇒ 抽取被拒（安全终端 / actionSource），库存永远填不进去</b>。</li>
+     * </ul>
+     * 采样上限：物品 3 个键、流体 2 个键（一次 {@code extract} 对全网来说不便宜，别刷）。
+     */
+    private void shanhaiLogSyncStock(@NotNull String where,
+                                     @Nullable appeng.api.networking.IManagedGridNode node,
+                                     @Nullable MEStorage storage) {
+        if (this.isRemote() || this.getLevel() == null) {
+            return;
+        }
+        final long now = this.getLevel().getGameTime();
+        final long calls = ++this.shanhaiSyncStockCalls;
+        if (calls > 3L && now - this.shanhaiSyncStockLogTick < 200L) {
+            return;
+        }
+        this.shanhaiSyncStockLogTick = now;
+        final appeng.api.networking.IGrid grid = node == null ? null : node.getGrid();
+        final int[] item = this.shanhaiCfgAndStock(this.shanhaiStockItemHandler);
+        final int[] fluid = this.shanhaiCfgAndStock(this.shanhaiStockFluidHandler);
+        final int p32 = this.shanhaiCountConfigured(this.stockItemHandler);
+        final int f32 = this.shanhaiCountConfiguredFluid(this.stockFluidHandler);
+        // ---- 逐键探针：net（ME 有没有）vs me（extract SIMULATE 给不给）
+        final StringBuilder probes = new StringBuilder();
+        int sampled = 0;
+        for (AEItemKey key : this.shanhaiConfiguredItemKeys()) {
+            if (sampled >= 3) {
+                break;
+            }
+            this.shanhaiAppendStockProbe(probes, key, storage);
+            sampled++;
+        }
+        int sampledFluid = 0;
+        for (AEFluidKey key : this.shanhaiConfiguredFluidKeys()) {
+            if (sampledFluid >= 2) {
+                break;
+            }
+            this.shanhaiAppendStockProbe(probes, key, storage);
+            sampledFluid++;
+        }
+        ShanhaiStellarLog.info("SYNCSTOCK where={} calls={} node={} active={} grid={} storage={} tag={} "
+                        + "item[cfg={} stock={}] fluid[cfg={} stock={}] p32={} f32={} probes=[{}] ⇒ {}",
+                where, Long.valueOf(calls),
+                Integer.valueOf(node == null ? 0 : 1),
+                Integer.valueOf(node != null && node.isActive() ? 1 : 0),
+                Integer.valueOf(grid == null ? 0 : 1),
+                storage == null ? "null" : storage.getClass().getSimpleName(),
+                this.shanhaiTagPullTagFlag(),
+                Integer.valueOf(item[0]), Integer.valueOf(item[1]),
+                Integer.valueOf(fluid[0]), Integer.valueOf(fluid[1]),
+                Integer.valueOf(p32), Integer.valueOf(f32),
+                probes.length() == 0 ? "none" : probes.toString(),
+                this.shanhaiSyncStockVerdict(item, fluid, p32, f32, storage, grid));
+    }
+
+    /**
+     * SYNCSTOCK 行里那个 {@code tag=} 读数。
+     *
+     * <p>🔴 <b>2026-10-25 改语义</b>：它<b>不再</b>表示「这 160 格现在归谁」
+     * （标签那一刀已经改成<b>独立供料源</b>，一次都不碰那 320 格的 config），
+     * 而是「标签那一路<b>独立供料源</b>现在什么状态」：
+     * <ul>
+     *   <li>{@code off} = 标签关（这一路不供料）；</li>
+     *   <li>{@code on:N} = 命中 N 种（物品+流体），这一路<b>正在</b>独立供料；</li>
+     *   <li>{@code on:wait} = 开着但还没跑过一轮；</li>
+     *   <li>{@code on:<原因>} = 开着但这一路暂停（{@code emptyExpression} / {@code badExpression} /
+     *       {@code noGrid} / {@code noInventory} / {@code pending}）。</li>
+     * </ul>
+     * <p>⚠️ <b>判据提醒</b>：{@code tag=on:N} 与 {@code item[cfg=…]} <b>互不影响</b> ——
+     * 后者只数<b>玩家手配</b>的那 160 格。看到 {@code tag=on:238 item[cfg=0]} 是<b>正确</b>的
+     * （标签在供料、库存格没配）——上一轮那种「tag=on 就必须 cfg=160」的判读已经作废。
+     */
+    private @NotNull String shanhaiTagPullTagFlag() {
+        if (!this.shanhaiTagFilterEnabled) {
+            return "off";
+        }
+        if (ShanhaiTagPullPlanner.Gate.OK.code().equals(this.shanhaiTagPullSkip)) {
+            return "on:" + (this.shanhaiTagSupplyItemMatched + this.shanhaiTagSupplyFluidMatched);
+        }
+        if (this.shanhaiTagPullSkip.isEmpty()) {
+            return "on:wait";
+        }
+        final int colon = this.shanhaiTagPullSkip.indexOf(':');
+        return "on:" + (colon < 0 ? this.shanhaiTagPullSkip : this.shanhaiTagPullSkip.substring(0, colon));
+    }
+
+    /** SYNCSTOCK 的一句话判读（把「四种成因」直接写成中文，省得每轮再推一遍）。 */
+    private @NotNull String shanhaiSyncStockVerdict(int[] item, int[] fluid, int p32, int f32,
+                                                    @Nullable MEStorage storage,
+                                                    @Nullable appeng.api.networking.IGrid grid) {
+        if (grid == null) {
+            return "主节点不在网上（getGrid()==null）⇒ syncStock 一次都没跑，先接电/接线";
+        }
+        if (storage == null) {
+            return "库存对象拿不到（getStorageService().getInventory()==null）";
+        }
+        if (item[0] == 0 && fluid[0] == 0) {
+            if (p32 + f32 > 0) {
+                return "我们那 320 格一条配置都没有，但父类 32+32 有 " + (p32 + f32)
+                        + " 条 ⇒ 配到了另一份 handler（③），供料链读的不是它";
+            }
+            if (this.shanhaiTagFilterEnabled && ShanhaiTagPullPlanner.Gate.OK.code().equals(this.shanhaiTagPullSkip)) {
+                return "手配的 160 格是空的（cfg=0）—— 这是正常的：标签那一路是**独立供料源**，"
+                        + "不经库存格（看 SYNCSTOCK 的 tag=on:N 与 SUPPLYCHAIN 里 kind=item-tag 的行）";
+            }
+            return "两份 160 格都没配置（cfg=0）⇒ 不是同步坏了，是压根没配（库存页没写进来）";
+        }
+        if (item[1] + fluid[1] > 0) {
+            return "库存已填上（stock>0）⇒ 同步链是通的，往下看 SUPPLYCHAIN/STOCKSUPPLY";
+        }
+        return "配了但 stock 全 0 ⇒ 看 probes[]：net=0 是键不对（④），net>0/me=0 是抽取被拒（②）";
+    }
+
+    /**
+     * 一个键的 {@code net/me} 双读数（{@link #shanhaiLogSyncStock} 用）。
+     *
+     * <p>{@code net} 走库存<b>清单快照</b>（不需要 actionSource），{@code me} 走<b>真 SIMULATE 抽取</b>
+     * （用本机 {@code actionSource}，与 {@code syncStock} 内部那一句逐字同参）。
+     * 两者分开就能分辨「ME 里没有」与「ME 有但不给抽」。
+     */
+    private void shanhaiAppendStockProbe(@NotNull StringBuilder out, @Nullable appeng.api.stacks.AEKey key,
+                                         @Nullable MEStorage storage) {
+        if (key == null) {
+            return;
+        }
+        if (out.length() > 0) {
+            out.append(' ');
+        }
+        out.append(key.getId()).append(':');
+        long net = 0L;
+        try {
+            net = this.shanhaiStockSnapshot == null ? 0L : this.shanhaiStockSnapshot.get(key);
+        } catch (Throwable ignored) {
+        }
+        out.append(net).append('/');
+        long me = -1L;
+        if (storage != null) {
+            try {
+                me = storage.extract(key, Long.MAX_VALUE, appeng.api.config.Actionable.SIMULATE,
+                        this.actionSource);
+            } catch (Throwable t) {
+                me = -2L;   // -1 = 没测（storage 为 null）；-2 = 抽取抛异常（安全终端/节点异常）
+            }
+        }
+        out.append(me);
+    }
+
+    /** 一份 160 格 handler 的「有配置格数 / 有库存格数」（只用公开 API，不碰 protected 字段）。 */
+    private int[] shanhaiCfgAndStock(@Nullable com.gregtechceu.gtceu.integration.ae2.slot.IConfigurableSlotList handler) {
+        if (handler == null) {
+            return new int[]{-1, -1};
+        }
+        int cfg = 0;
+        int stock = 0;
+        final int slots = handler.getConfigurableSlots();
+        for (int i = 0; i < slots; i++) {
+            final IConfigurableSlot slot = handler.getConfigurableSlot(i);
+            if (slot == null) {
+                continue;
+            }
+            if (slot.getConfig() != null) {
+                cfg++;
+            }
+            if (slot.getStock() != null) {
+                stock++;
+            }
+        }
+        return new int[]{cfg, stock};
     }
 
     /** 重扫 160 格，缓存「哪些键被配置过」（{@code findStockItemKey} 每个配方都要问，不能每次扫 160 格）。 */
@@ -5917,6 +8986,187 @@ public class StellarSampleAssemblerPartMachine extends MEStockingPatternBufferPa
                 where, configured, this.shanhaiCountConfigured(this.stockItemHandler),
                 this.shanhaiStockMigrated, this.shanhaiStockPage, ShanhaiStockConfigLayout.PAGE_COUNT,
                 ShanhaiStockConfigLayout.describe());
+    }
+
+    // ---------------------------------------------------------------- 万能仓室：普通供料名单（2026-10-24）
+
+    /**
+     * 「<b>万能仓室</b>」的对外声明 —— <b>星律这台仓室本身</b>就是万能仓室，
+     * 本次注入让它<b>自己</b>那几份 handler 进入「普通供料名单」：
+     * <b>不需要样板</b>（不走样板认领那条路）、也不需要玩家再额外摆一台库存输入总线/仓。
+     *
+     * <h2>一、为什么需要这个方法（问题原文）</h2>
+     * 星律的宿主机是 {@code IMEFilterIOPartMachine}（父类 {@code MEPatternBufferPartMachineBase}
+     * implements {@code IMEPatternPartMachine}）。gtlcore 的
+     * {@code WorkableMultiblockMachineMixin#rebuildRecipeHandleParts} 在<b>偏移 45</b> 用
+     * {@code instanceof IMEFilterIOPartMachine} 把<b>所有 ME 仓室</b>整体分给 ME 分支
+     * （偏移 63 {@code handleMETraitPart}），而<b>偏移 92 的 {@code handleNormalPart}
+     * （那里才 {@code part.getRecipeHandlers()}）根本不会为它执行</b>
+     * ⇒ 本机身上这两份「本来就是普通 {@code IRecipeHandlerTrait}」的库存 list
+     * <b>永远进不了 {@code normalCapabilities}</b>，只能被样板槽的三道闸
+     * （{@code hasPatternInSlot → isItemActive → hasConfig()}）间接问到。
+     *
+     * <h2>二、本方法交出去的<b>五份</b>（库存 2 + 只匹配不抽取 3）</h2>
+     * <table border="1">
+     *   <tr><th>字段</th><th>格数</th><th>handlerIO</th><th>交不交</th></tr>
+     *   <tr><td>{@link #shanhaiStockItemHandler}</td><td>160（8×2×10）</td><td>{@code IO.IN}</td><td><b>交</b></td></tr>
+     *   <tr><td>{@link #shanhaiStockFluidHandler}</td><td>160（8×2×10）</td><td>{@code IO.IN}</td><td><b>交</b></td></tr>
+     *   <tr><td>父类 {@code stockItemHandler}/{@code stockFluidHandler}（32+32）</td><td>32+32</td><td>IN</td>
+     *       <td>不交 —— 它们是「样板槽的补充通道」，语义不是整机共享池</td></tr>
+     *   <tr><td>{@code patternInventory}（1080 格样板）</td><td>1080</td><td>—</td>
+     *       <td>🔴 <b>永不交</b>：样板库存不是原料</td></tr>
+     *   <tr><td>{@code catalystItems}/{@code catalystFluids}（每槽 3×3）</td><td>1080×9×2</td><td>—</td>
+     *       <td>🔴 <b>永不交</b>：类型是 LDLib 的 {@code ItemStackTransfer[]}/{@code FluidTransferList[]}，
+     *           <b>根本不是</b> {@code IRecipeHandlerTrait}；且按槽归属 = 「样板认领」语义</td></tr>
+     *   <tr><td>🔶 通用催化剂（物品）：父类 {@code sharedCatalystInventory}</td><td>n</td><td>IN</td>
+     *       <td><b>交</b>，但走<b>新类</b> {@link ShanhaiSupplyOnlyItemHandler}（不是上游那个 handler）：
+     *           上游 {@code CatalystItemStackHandler#handleRecipeInner} 命中即 {@code return left}
+     *           （<b>永不返回 null</b>），而 gtlcore {@code RecipeHandlePart#handleRecipe} 偏移 54–60
+     *           <b>只认 null 为满足</b> ⇒ 直接用一点料都供不了。新类 = 够就 {@code null}、不够就原样退回、
+     *           <b>一件都不抽</b>（探针 E1–E8）。详见报告 §2.6.2b</td></tr>
+     *   <tr><td>🔶 通用催化剂（流体）：父类 {@code sharedCatalystTank}</td><td>n</td><td>IN</td>
+     *       <td><b>交</b>，走新类 {@link ShanhaiSupplyOnlyFluidHandler}（上游流体版偏移 164 同样 {@code return left}）</td></tr>
+     *   <tr><td>🔶 通用编程电路：父类 {@code sharedCircuitInventory}（实例是
+     *       {@code NotifiableCircuitItemStackHandler}）</td><td>1</td><td>IN</td>
+     *       <td><b>交</b>，也走 {@link ShanhaiSupplyOnlyItemHandler}：上游那个 handler 偏移 <b>0–6</b> 是
+     *           {@code if (!simulate) return left;} ⇒ 真扣料阶段不认账，直接用会「匹配上却启动失败」。
+     *           新类把「配置对不对」交给 {@code IntCircuitIngredient#test} 自己判，够就 {@code null} 且不扣</td></tr>
+     *   <tr><td>{@code getMERecipeHandlerTraits()} 那一对 ME handler</td><td>—</td><td>—</td>
+     *       <td>不交：它们不是 {@code IRecipeHandler}，本来就由 ME 分支受理</td></tr>
+     * </table>
+     *
+     * <h2>三、这两份 handler 被交出去之后，配方怎么用它们（不用样板）</h2>
+     * 接进 gtlcore 的是 {@code com.shanhai.mixin.ShanhaiUniversalSupplyMixin}（唯一一个注入点：
+     * {@code upDate()} 里 {@code getParts()} 的返回值）。它给本机<b>额外</b>追加一个
+     * 「只含本方法返回值」的视图，于是 gtlcore <b>自己那份</b> {@code handleNormalPart}
+     * 会照常处理这个视图，落点与<b>普通输入仓</b>完全相同：
+     * <ul>
+     *   <li>主机 {@code isDistinct == false}（默认）⇒ 两份 handler 进
+     *       {@code sharedInputRecipeHandlePart}（整机共享输入池）；
+     *       流体由 {@code RecipeRunner#handleInputNotDistinct} 偏移 <b>307–358</b> 直接取共享池，
+     *       物品由同一方法偏移 <b>539–610</b> 的<b>兜底</b>取共享池；</li>
+     *   <li>主机 {@code isDistinct == true} ⇒ 进 {@code normalCapabilities[IN]}（本机自成一组）。</li>
+     * </ul>
+     * <p>⚠️ 与「样板认领」的根本差别：这条路上<b>没有</b> {@code hasPatternInSlot} 这道闸，
+     * 也<b>没有</b>数量配置（配置格只决定「抽哪种」，抽多少由配方决定）。
+     *
+     * <h2>四、安全边界</h2>
+     * <ul>
+     *   <li>只有<b>带 {@link IShanhaiNormalSupplyPart} 标记的仓室</b>会被额外插入视图
+     *       ⇒ 未标记的 ME 仓室（别的样板总成、别的 ME 总线）<b>行为逐字节不变</b>；</li>
+     *   <li>视图的 {@code getRecipeHandlers()} <b>只返回本方法的值</b>，不回读
+     *       {@code part.getRecipeHandlers()} ⇒ 样板槽/样板库存/催化剂<b>结构上进不来</b>；</li>
+     *   <li>本机<b>原来的 ME 身份完全保留</b>：真实 part 仍走 {@code handleMETraitPart}
+     *       （样板认领、缓冲变更监听、{@code mePatternRecipeHandleParts} 照旧）。</li>
+     * </ul>
+     *
+     * <h2>五、验收判据（进游戏看日志，一行就能判）</h2>
+     * <pre>
+     *   [SHANHAI-UNIVERSAL] 注入生效：upDate#getParts 已被接管（…）
+     *   [SHANHAI-UNIVERSAL] 普通供料注入：parts A → B        ← B = A + 1（就是本机这一台）
+     * </pre>
+     * <p>然后：往本机 160 格库存页配一种<b>没有样板</b>的配方原料，主机配方应能<b>直接匹配并扣料</b>
+     * （日志/进度条会走；ME 网络里的数量会减少）。
+     *
+     * @return 只含「应该参与普通配方匹配」的两份库存 handler；构造器还没跑完时返回空列表
+     */
+    @Override
+    public List<IRecipeHandlerTrait> shanhaiNormalSupplyHandlers() {
+        final MEStockingPatternBufferPartMachine.ExportOnlyAEStockingItemList items = this.shanhaiStockItemHandler;
+        final MEStockingPatternBufferPartMachine.ExportOnlyAEStockingFluidList fluids =
+                this.shanhaiStockFluidHandler;
+        if (items == null || fluids == null || this.shanhaiTagSupplySource == null) {
+            // 父类构造器还在跑（两个字段是 final，赋值在构造器里）⇒ 这一刻等于「没标记」。
+            // 供料源同理：它是普通字段（声明在构造器赋值之后），没初始化完就不交出标签那两路。
+            //
+            // 🔴 2026-10-26 五修：这一分支**必须有日志**。它返回空表 ⇒ mixin 的
+            //    shanhai$normalSupplyView 返回 null ⇒ expandForNormalSupply 因
+            //    「一个视图都没造出来」退回**同一个 List 实例**（ShanhaiNormalSupplyBridge:110-112）
+            //    ⇒ 那一次 rebuild 的池子里**没有我们**，而 upDate() 之后可能很久不再触发
+            //    ⇒ 表观与「材料不足」完全一样。取证报告 §3.2 把它列为「最值得先排除的时序分支」。
+            // 节流：本实例第 1 次 + 之后每 500 次一行（一条就够判"踩没踩到"，又不会把日志刷爆）。
+            if (this.shanhaiSupplyViewSkipCount++ % 500L == 0L) {
+                ShanhaiStellarLog.warn("SUPPLYVIEW skipped=constructing pos={} times={} items={} fluids={} source={}",
+                        this.shanhaiPos(), Long.valueOf(this.shanhaiSupplyViewSkipCount),
+                        items == null ? "null" : "ok",
+                        fluids == null ? "null" : "ok",
+                        this.shanhaiTagSupplySource == null ? "null" : "ok");
+            }
+            return List.of();
+        }
+        // 🔴 放行清单 = 7 项（2026-10-24 父代理拍板的方案②；2026-10-25 追加标签两路）。
+        //    顺序有讲究：**库存 160 格在前**（有料就先扣料，走正常消耗）、
+        //    标签命中集合其次（**独立供料源**，只在库存那 160 格供不上时才接手，且真抽 ME）、
+        //    「只匹配不抽取」的三份在最后（催化剂/电路本来就是"不该被消耗"的东西，兜底且一件不扣）。
+        //    gtlcore 的 RecipeHandlePart 内部按 getCapability() 分组、组内按本 list 的顺序逐个试。
+        return List.of(
+                // ① ② 库存本体（真抽 ME 网络；**玩家手配的那 320 格**，标签任何操作都不改它）
+                items,
+                fluids,
+                // ③ ④ 标签命中集合（**独立供料源**：不占库存格、不写任何 config、命中即真抽 ME）
+                //     关掉标签 / 名单空 / 没连网 ⇒ 它们 getContents() 为空、handleRecipeInner 原样退回
+                //     ⇒ 行为与没有这两项时逐字节相同（探针 F 组断言）。
+                new ShanhaiTagSupplyHandlers.Item("tagSupplyItems", this.shanhaiTagSupplySource),
+                new ShanhaiTagSupplyHandlers.Fluid("tagSupplyFluids", this.shanhaiTagSupplySource),
+                // ⑤ 通用催化剂·物品（只匹配、绝不抽取）
+                new ShanhaiSupplyOnlyItemHandler("sharedCatalystInventory",
+                        () -> shanhaiReadItemContents(this.sharedCatalystInventory)),
+                // ⑥ 通用催化剂·流体（同上）
+                new ShanhaiSupplyOnlyFluidHandler("sharedCatalystTank",
+                        () -> shanhaiReadFluidContents(this.sharedCatalystTank)),
+                // ⑦ 通用编程电路（同上；"配置对不对"由 IntCircuitIngredient#test 自己判）
+                new ShanhaiSupplyOnlyItemHandler("sharedCircuitInventory",
+                        () -> shanhaiReadItemContents(this.sharedCircuitInventory)));
+    }
+
+    /**
+     * 把「物品 handler 的当前内容」读成一份<b>只读快照</b>（给
+     * {@link ShanhaiSupplyOnlyItemHandler} 用）。
+     *
+     * <p>🔴 只读：这里只有 {@code getSlots()/getStackInSlot(i)}，**没有**任何 {@code extractItem/setStackInSlot}。
+     *
+     * @param transfer 任意物品容器（{@code sharedCatalystInventory} 与 {@code sharedCircuitInventory}
+     *                 都是 {@code NotifiableItemStackHandler}，都实现 {@code IItemTransfer}）
+     * @return 非空栈的列表（引用来自容器，调用方只读）
+     */
+    private static List<ItemStack> shanhaiReadItemContents(IItemTransfer transfer) {
+        if (transfer == null) {
+            return List.of();
+        }
+        final int slots = transfer.getSlots();
+        final List<ItemStack> out = new java.util.ArrayList<>(slots);
+        for (int i = 0; i < slots; i++) {
+            final ItemStack stack = transfer.getStackInSlot(i);
+            if (stack != null && !stack.isEmpty()) {
+                out.add(stack);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 把「流体 handler 的当前内容」读成一份<b>只读快照</b>（给
+     * {@link ShanhaiSupplyOnlyFluidHandler} 用）。
+     *
+     * <p>🔴 只读：只有 {@code getTanks()/getFluidInTank(i)}，**没有** {@code drain/fill}。
+     *
+     * @param tank {@code sharedCatalystTank}（{@code CatalystFluidStackHandler extends NotifiableFluidTank}）
+     * @return 非空流体的列表
+     */
+    private static List<com.lowdragmc.lowdraglib.side.fluid.FluidStack> shanhaiReadFluidContents(
+            NotifiableFluidTank tank) {
+        if (tank == null) {
+            return List.of();
+        }
+        final int tanks = tank.getTanks();
+        final List<com.lowdragmc.lowdraglib.side.fluid.FluidStack> out = new java.util.ArrayList<>(tanks);
+        for (int i = 0; i < tanks; i++) {
+            final com.lowdragmc.lowdraglib.side.fluid.FluidStack fluid = tank.getFluidInTank(i);
+            if (fluid != null && fluid.getAmount() > 0L) {
+                out.add(fluid);
+            }
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------- 阶段划分（本轮之后）

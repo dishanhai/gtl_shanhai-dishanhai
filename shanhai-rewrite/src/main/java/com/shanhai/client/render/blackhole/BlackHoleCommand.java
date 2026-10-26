@@ -159,6 +159,101 @@ public final class BlackHoleCommand {
                                                     ? " §8（夹到 " + BlackHoleTuning.ranges() + "）" : ""));
                                     return 1;
                                 })))
+                // ---- 洞内：窗口半径倍率（两个可调参数之一）----
+                .then(Commands.literal("window")
+                        .then(Commands.argument("mul", DoubleArgumentType.doubleArg(
+                                        BlackHoleInsideSpec.WINDOW_MUL_MIN,
+                                        BlackHoleInsideSpec.WINDOW_MUL_MAX))
+                                .executes(ctx -> {
+                                    final double want = DoubleArgumentType.getDouble(ctx, "mul");
+                                    final double got = BlackHoleTuning.setInsideWindowMul(want);
+                                    log("window=" + got, ctx.getSource());
+                                    reply(ctx.getSource(), "洞内窗口半径：§b×" + f3(got)
+                                            + " §7（乘在「随进洞变小的那条曲线」上："
+                                            + "刚进球内 " + f2(BlackHoleInsideSpec.WINDOW_R_AT_EDGE)
+                                            + " → 球心 " + f2(BlackHoleInsideSpec.WINDOW_R_AT_CENTER)
+                                            + "，单位=屏幕半高）"
+                                            + (Math.abs(got - want) > 1e-9
+                                                    ? " §8（夹到 " + BlackHoleTuning.ranges() + "）" : ""));
+                                    return 1;
+                                })))
+                // ---- 洞内：径向拖影强度（两个可调参数之二）----
+                .then(Commands.literal("streak")
+                        .then(Commands.literal("auto").executes(ctx -> {
+                            BlackHoleTuning.setInsideStreakOverride(-1.0D);
+                            log("streak=auto", ctx.getSource());
+                            reply(ctx.getSource(), "洞内拖影：§b自动 §7（随进洞加深 "
+                                    + f2(BlackHoleInsideSpec.STREAK_BASE) + " → "
+                                    + f2(BlackHoleInsideSpec.STREAK_BASE
+                                            + BlackHoleInsideSpec.STREAK_DEPTH_GAIN) + "）");
+                            return 1;
+                        }))
+                        .then(Commands.argument("value", DoubleArgumentType.doubleArg(0.0D, 1.0D))
+                                .executes(ctx -> {
+                                    final double want = DoubleArgumentType.getDouble(ctx, "value");
+                                    final double got = BlackHoleTuning.setInsideStreakOverride(want);
+                                    log("streak=" + got, ctx.getSource());
+                                    reply(ctx.getSource(), "洞内拖影强度：§b" + f2(got)
+                                            + " §7（0 = 完全无拖影，1 = 最长的放射状条纹；"
+                                            + "§f/shanhai bh streak auto§7 回到自动）");
+                                    return 1;
+                                })))
+                // ---- 洞内：诊断隔离位（任务书第 2 条；默认 sample = 一行都不多走）----
+                .then(Commands.literal("insidedebug")
+                        .then(Commands.literal("solid").executes(ctx -> {
+                            BlackHoleTuning.setInsideDebug(BlackHoleTuning.InsideDebug.SOLID);
+                            log("insidedebug=solid", ctx.getSource());
+                            reply(ctx.getSource(), "洞内诊断：§a纯亮绿全屏 §7（§e不采样、不看参数§7）");
+                            reply(ctx.getSource(), "§7看到绿 ⇒ 四边形提交这一路（RenderType/深度/FBO/注入点/"
+                                    + "着色器）是通的，黑屏只能在§e采样§7那一段；"
+                                    + "看不到绿 ⇒ 与采样无关（没提交 / 被后面的 pass 盖掉）");
+                            reply(ctx.getSource(), "§7看完用 §f/shanhai bh insidedebug sample§7 回正常采样。"
+                                    + "每段都会往日志打一行 §f[SHANHAI-BH] inside_probe stage=…§7，"
+                                    + "读数行末尾还有 §finside_break=§7 直接写断在哪一段");
+                            return 1;
+                        }))
+                        .then(Commands.literal("sample").executes(ctx -> {
+                            BlackHoleTuning.setInsideDebug(BlackHoleTuning.InsideDebug.SAMPLE);
+                            log("insidedebug=sample", ctx.getSource());
+                            reply(ctx.getSource(), "洞内诊断：§b正常采样 §7（§f默认§7，与改前行为逐像素一致）");
+                            return 1;
+                        }))
+                        .then(Commands.literal("off").executes(ctx -> {
+                            BlackHoleTuning.setInsideDebug(BlackHoleTuning.InsideDebug.OFF);
+                            log("insidedebug=off", ctx.getSource());
+                            reply(ctx.getSource(), "洞内诊断：§b关掉调试色块 §7（= 现行为，与 §fsample§7 等价）");
+                            return 1;
+                        })))
+                // ---- 采样侧深度门的 A/B 开关（2026-10-25 修 bug 用；进游戏 5 秒内判定）----
+                .then(Commands.literal("depthgate")
+                        .then(Commands.literal("on").executes(ctx -> {
+                            BlackHoleTuning.setDepthGate(true);
+                            log("depthgate=on", ctx.getSource());
+                            reply(ctx.getSource(), "采样侧深度门：§a开 §7（默认 = 只让黑洞【后面】的东西参与弯折）");
+                            reply(ctx.getSource(), "§7判据看日志 §f[SHANHAI-BH] lens_gate§7 那行的 "
+                                    + "§fgate=on depthProbe=…verdict=ok§7；"
+                                    + "若 §fdepthProbeVerdict=empty§7 说明深度贴图没内容，门会自动关掉（画面照旧弯）");
+                            return 1;
+                        }))
+                        .then(Commands.literal("off").executes(ctx -> {
+                            BlackHoleTuning.setDepthGate(false);
+                            log("depthgate=off", ctx.getSource());
+                            reply(ctx.getSource(), "采样侧深度门：§c关 §7（= §e2026-10-25 之前的行为§7："
+                                    + "背景全部弯折，黑洞前面的物体也会被搬动）");
+                            reply(ctx.getSource(), "§7用法：§f关掉后画面弯了§7 ⇒ 病在深度数据/门这一侧；"
+                                    + "§f关掉后还不弯§7 ⇒ 与门无关，别再来查深度");
+                            return 1;
+                        }))
+                        .then(Commands.literal("status").executes(ctx -> {
+                            final boolean on = BlackHoleTuning.depthGate();
+                            log("depthgate=status(" + (on ? "on" : "off") + ")", ctx.getSource());
+                            reply(ctx.getSource(), "采样侧深度门：§b" + (on ? "开" : "关")
+                                    + " §7（uDepthGate=" + (on ? "1" : "0") + "）");
+                            final String gate = BlackHoleLensRenderer.lensGateLine();
+                            ShanhaiMod.LOGGER.info(PREFIX + " " + gate);
+                            reply(ctx.getSource(), "§8· " + gate);
+                            return 1;
+                        })))
                 // ---- 一级/二级的取舍 ----
                 .then(Commands.literal("lens")
                         .then(Commands.literal("auto").executes(ctx -> {
@@ -256,8 +351,21 @@ public final class BlackHoleCommand {
         final int tier = BlackHoleLensRenderer.statusTier();
         reply(source, "§b黑洞 §7fallback=" + tier + " §7（0=一级正常 / 1=贴图兜底 / 2=什么都不画）");
         reply(source, "§7" + stripPrefix(line));
+        // 洞内那条链的分阶段探针（任务书第 1 条）：一行说清"断点 / 走到哪一段 / 哪几段已经打过"
+        final String probe = BlackHoleInsideProbe.statusLine();
+        ShanhaiMod.LOGGER.info(PREFIX + " " + probe);
+        reply(source, "§8· 洞内链：§f" + probe);
+        final String uni = BlackHoleLensRenderer.insideUniformLine();
+        ShanhaiMod.LOGGER.info(PREFIX + " " + uni);
+        reply(source, "§8· " + uni);
+        // 采样侧深度门（2026-10-25）：只有比黑洞更远的像素才参与弯折。这一行进游戏就能判。
+        final String gate = BlackHoleLensRenderer.lensGateLine();
+        ShanhaiMod.LOGGER.info(PREFIX + " " + gate);
+        reply(source, "§8· " + gate);
         reply(source, "§8· 完整读数也写进了日志（grep §f" + PREFIX + " status§8）；"
-                + "调参数：§f/shanhai bh scale|strength|disk|center|lens|on|off");
+                + "调参数：§f/shanhai bh scale|strength|disk|center|lens|on|off"
+                + "§8；洞内：§f/shanhai bh window|streak|insidedebug solid|sample|off"
+                + "§8；深度门 A/B：§f/shanhai bh depthgate on|off|status");
     }
 
     // ------------------------------------------------------------------ 小工具
@@ -295,6 +403,10 @@ public final class BlackHoleCommand {
 
     private static String f3(double v) {
         return String.format(java.util.Locale.ROOT, "%.3f", v);
+    }
+
+    private static String f2(double v) {
+        return String.format(java.util.Locale.ROOT, "%.2f", v);
     }
 
     /** 聊天栏里去掉日志前缀（那一行本身已经写进日志了）。 */

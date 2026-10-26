@@ -51,6 +51,29 @@ public final class BlackHoleLensMath {
 
     private BlackHoleLensMath() {}
 
+    // ------------------------------------------------------------------ 半径的两个口径
+
+    /**
+     * 反算：要让 <b>可见表面半径 = {@code holeRadiusBlocks} 格</b>，视界半径 {@code rsBlocks} 该是多少。
+     *
+     * <h2>为什么需要（2026-10-25 第二十改）</h2>
+     * 屏幕上黑盘半径的唯一口径是 {@code B_CRIT × rsBlocks}（见 {@link #B_CRIT}）。
+     * 而归墟视界枢核的机器字段 {@code hostBlackHoleRadiusBlocks} 是<b>玩家口径的"几格"</b>
+     * —— 那是<b>表面半径</b>，不是 {@code rsBlocks}。两个口径之间就差这一个除法：
+     * <pre>
+     *   rsBlocks = 表面半径 / B_CRIT
+     *   ⇒ B_CRIT × rsBlocks == 表面半径（逐位回得去，离线探针直接量这个等式）
+     * </pre>
+     * 🔴 不许在这里再乘一次 {@code RS_BLOCKS}：{@code RS_BLOCKS} 是"默认倍率 2.0 格"那一套，
+     * 它与机器字段是<b>两套来源</b> —— 主机在用时只认机器字段（{@code BlackHoleLensRenderer.rsBlocks()}）。
+     *
+     * @param holeRadiusBlocks 可见表面半径（格）
+     * @return 对应视界半径（格）
+     */
+    public static double rsBlocksForHoleRadius(double holeRadiusBlocks) {
+        return holeRadiusBlocks / B_CRIT;
+    }
+
     // ------------------------------------------------------------------ 变换
 
     /**

@@ -13,6 +13,7 @@ import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
 import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
+import com.gregtechceu.gtceu.api.machine.fancyconfigurator.MachineModeFancyConfigurator;
 import com.gregtechceu.gtceu.api.machine.feature.IMachineLife;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.machine.multiblock.WorkableElectricMultiblockMachine;
@@ -1117,6 +1118,39 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     /** 主机强引用；{@code removeFromHost} 会置 null。 */
     @Nullable
     private PrimordialOmegaEngineMachine host;
+
+    /**
+     * 🔴 <b>「跨配方种类并行此刻真在生效」的服务端镜像</b>（2026-10-25 新增，治「机器模式子页判据在 GUI 里
+     * 永远为 false」这个回归）。
+     *
+     * <h2>为什么非要一个镜像字段（这是 bug ② 的根因，不是洁癖）</h2>
+     * 这条判据的两个读者里，<b>一个在服务端、一个在客户端</b>，而它们读的
+     * {@code host} 字段<b>只有服务端有值</b>：
+     * <pre>
+     *   ✗ {@link #attachSideTabs} / {@link #addDisplayText}：GUI 两侧都会建 ——
+     *     LDLib {@code UIFactory#initClientUI} 在<b>客户端</b>也调 {@code createUITemplate(...)} ＋
+     *     {@code ModularUI.initWidgets()}（javap 逐指令：偏移 22 / 35），
+     *     而 {@code setupSideTabs} 就在 {@code initWidgets} 这条链上
+     *     ⇒ 客户端本地的 {@code attachSideTabs} 也会跑一遍，且它<b>才是玩家看到的那一份结构</b>。
+     *   ✗ 客户端 {@code host} 恒 null：唯一写它的 {@code findAndConnectToHost()} 只从
+     *     {@code onStructureFormed()}（GTCEu {@code MultiblockControllerMachine} 里唯一调用点是
+     *     {@code asyncCheckPattern} 的 {@code ServerLevel} lambda ⇒ 服务端专属）与
+     *     {@code subscribeServerTick} 的重连里跑；{@code host} 字段本身<b>没有</b>
+     *     {@code @DescSynced}／{@code @Persisted}。
+     * </pre>
+     * ⇒ 客户端本地算出来的判定<b>必然</b>是 false（{@code getHost() == null}）⇒ 「跨类型生效 ⇒ 子页移除」
+     * 这条在 GUI 上<b>从来没有发生过</b>（用户原话：「新主机上面的模块的模块左侧栏反而没隐藏」）。
+     *
+     * <h2>所以：服务端算，客户端读这一份</h2>
+     * 服务端每 {@link #PARALLEL_SCAN_INTERVAL} tick（挂在 {@link #scanMatterSlot()} 末尾）＋
+     * 连/断主机时重算一次，<b>只在值变化时</b>写字段并 {@code notifyBlockUpdate()}
+     * （本类 {@code parallelOverride} 那一对注解的既有纪律：{@code @DescSynced} 必须靠它送到客户端）。
+     * <p>不标 {@code @Persisted}：这是<b>派生状态</b>，落盘只会留下过期值；玩家重新进服时
+     * 服务端第一次重算（≤3 tick）就会把它纠正，期间取 {@code false} = <b>子页照旧出现</b>
+     * （fail-open：宁可多给玩家一个选择器，也不要凭空藏掉一页）。
+     */
+    @DescSynced
+    private boolean shanhai$crossTypeModeActive = false;
     /** 未连上主机时的 20 tick 重试订阅。 */
     @Nullable
     private TickableSubscription reconnectSubs;
@@ -1441,6 +1475,39 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     @Override
     public void attachSideTabs(TabsWidget tabs) {
         super.attachSideTabs(tabs);
+        // 🔴 2026-10-25（用户拍板，原话逐字：「我说的是「机器模式」子页，那个要不然你就在机器是
+        //    跨配方种类并行的情况下隐藏掉得了」）：跨配方种类并行【正在生效】⇒ 把 GTCEu 刚挂上的
+        //    「机器模式」子页摘掉。
+        //
+        // 为什么是"事后摘掉"而不是"复刻一遍挂载体再少挂一个"：
+        //   ① 上游那一支在 IFancyUIMachine#attachSideTabs 的**默认方法**里（偏移 19..41：
+        //      getRecipeTypes().length > 1 ⇒ new MachineModeFancyConfigurator(this) ⇒ attachSubTab），
+        //      不是 attachConfigurators 里 —— 本方法 super 一跑它就一定已经挂上了；
+        //   ② TabsWidget 的 subTabs 是**普通 ArrayList**、getSubTabs() 直接返回那个字段
+        //      （javap 已核：<init> 偏移 216 new ArrayList + putfield subTabs；
+        //        getSubTabs() 只有 getfield + areturn；attachSubTab 只有 subTabs.add）
+        //      ⇒ removeIf 摘的是**活的那一份**，不会退化成一个改不动的副本；
+        //   ③ 这样上游那段挂载逻辑**逐字保持原样**（本工程主机侧另有一份"复刻挂载体"的写法，
+        //      两份都在，但模块这里选零复刻：上游若改了挂载顺序/新增了子页，这里不需要跟着改）。
+        //
+        // 判据与 Jade / GUI 那两处的「机器模式」改名【同一个方法】：
+        //    crossTypeModeDisplayName() != null ⇒ 摘掉；null（老主机 / 锁配方 / 未成型 / 发电 /
+        //    未连主机）⇒ 一个字都不动，子页照常出现、照常可选。
+        // ⚠️ 现场判、不缓存成字段：setupSideTabs 每次都 clearSubTabs() 后整列重挂
+        //    （FancyMachineUIWidget#setupSideTabs 偏移 4 / 12，javap 已核）⇒ 关掉界面再打开就跟随状态。
+        //
+        // 🔴 2026-10-25（bug ② 的根因与修法，别再把这里改回"直接读 getHost()"）：
+        //    本方法是【GUI 侧】的 —— LDLib UIFactory#initClientUI 在客户端也会调
+        //    createUITemplate + ModularUI.initWidgets（javap：偏移 22 / 35），而 setupSideTabs
+        //    就在 initWidgets 这条链上 ⇒ 客户端本地这一份【才是玩家看到的结构】。
+        //    而客户端 getHost() 恒 null（host 是纯服务端字段，见 shanhai$crossTypeModeActive 的 javadoc）
+        //    ⇒ 旧写法（本地现算 getHost().grantsCrossTypeParallel()）在客户端恒 false
+        //    ⇒ 「跨类型生效 ⇒ 子页移除」从来没在 GUI 上发生过（用户：「新主机上面的模块的模块左侧栏反而没隐藏」）。
+        //    现在 crossTypeModeDisplayName() 在客户端读服务端同步来的 shanhai$crossTypeModeActive 镜像
+        //    ⇒ 两侧判据同源，这条 if 一个字符都不用改。
+        if (PrimordialOmegaEngineMachine.shouldHideMachineModeTab(crossTypeModeDisplayName())) {
+            tabs.getSubTabs().removeIf(tab -> tab instanceof MachineModeFancyConfigurator);
+        }
         tabs.attachSubTab(new ExtraMountPageProvider());
     }
 
@@ -1885,12 +1952,16 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     @Override
     public void onConnected(@NotNull PrimordialOmegaEngineMachine host) {
         stopReconnectTicker();
+        // 🔴 2026-10-25：连上/换主机后立刻重算「跨类型是否生效」并同步给客户端（不等下一次 3 tick 扫描）。
+        shanhai$publishCrossTypeMode(shanhai$computeCrossTypeModeActive());
         onHostConnected(host);
     }
 
     /** 断开回调。 */
     @Override
     public void onDisconnected() {
+        // 🔴 2026-10-25：断开就是"不生效"（子页必须回来），立刻发布，别让客户端还停在旧值上。
+        shanhai$publishCrossTypeMode(false);
         onHostDisconnected();
     }
 
@@ -2663,8 +2734,125 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         return "主机在线";
     }
 
+    /**
+     * 🔴 <b>本模块此刻该显示的「机器模式」新名字</b>（用户 2026-10-25：「分别给模块和主机起个新的名字
+     * 放到 jade 还有机器里面显示」）—— 名字本体是
+     * {@link PrimordialOmegaEngineMachine#CROSS_TYPE_MODE_NAME_MODULE}（<b>改名只改那一行</b>）。
+     *
+     * <p>⚠️ <b>本类不是 {@code PrimordialOmegaEngineMachine} 的子类</b>
+     * （它是 {@code WorkableElectricMultiblockMachine} 的抽象子类）⇒ 这里<b>没有</b> {@code @Override}：
+     * 与主机那个同名方法是"同一个显示契约的两份实现"，契约本体写在基类的
+     * {@code PrimordialOmegaEngineMachine#crossTypeModeDisplayName()} 上。
+     * Jade 那条通道（{@code ShanhaiMachineModeNameMixin}）对两种机器分别强转调用，
+     * <b>返回值语义两边逐字相同</b>（{@code null} = 照原样）。
+     *
+     * <h2>判据（四条合取；任一条不成立 ⇒ {@code null} ⇒ Jade 与 GUI 都逐字保持原样）</h2>
+     * <ol>
+     *   <li>{@link #isFormed()} —— 未成型时配方逻辑根本不跑；</li>
+     *   <li>{@code !getDefinition().isGenerator()} —— <b>发电那台不参与跨配方种类并行</b>
+     *       （它在配方逻辑的 {@code shanhai$resolveRouting()} 里已被
+     *       {@code setUseMultipleRecipes(false)} 退回原生链）；这一条与配方逻辑里那个判据<b>同源</b>；</li>
+     *   <li>主机存在且 {@link PrimordialOmegaEngineMachine#grantsCrossTypeParallel()} ——
+     *       这三条合起来<b>就是</b> {@code PrimordialModuleRecipeLogic#shanhai$isCrossTypeEnabled()}
+     *       的实现（该方法 {@code private}，本轮不许改配方逻辑文件 ⇒ 在这里<b>镜像</b>同一组判据；
+     *       将来改那三条中的任何一条时，两处必须一起改）；</li>
+     *   <li>{@code !isLock()} —— 玩家锁了配方 ⇒ 配方逻辑里那条跨类型分支
+     *       （{@code if (shanhai$isCrossTypeEnabled() && !isLock())}）<b>不会执行</b>，
+     *       走的就是单条配方 ⇒ 这里必须显示原来的配方类型名。</li>
+     * </ol>
+     *
+     * <h2>🔴 诚实边界：有一个退化情形本方法看不到（明写在此，不当结论藏着）</h2>
+     * 配方逻辑在"跨类型一条候选都没有"时会<b>回退父类单类型结果</b>
+     * （{@code lookupRecipeSet} 里那句 {@code shanhai$observeCandidates(super.lookupRecipeSet())}）。
+     * 那个"回退发生过没有"的标记只在 {@code PrimordialModuleRecipeLogic} 内部、<b>没有对外字段</b>，
+     * 而本轮不许改配方逻辑 ⇒ 本方法分不清"正在跨类型跑"与"跨类型没找到候选、正在回退"。
+     * <b>不判它的理由</b>：
+     * <ul>
+     *   <li>轮转的<b>第 0 位就是激活类型</b>，所以"跨类型为空"必然蕴含"激活类型也为空"
+     *       ⇒ 那一刻机器<b>一条配方都跑不了</b>，界面上不存在"正在按单类型跑"的事实可误导；</li>
+     *   <li>若为此加一个字段，就得改配方逻辑（本轮红线）⇒ 取舍是<b>宁可少一个瞬时区分，不动语义</b>。</li>
+     * </ul>
+     *
+     * <h2>两个显示点（都只读这一个方法）</h2>
+     * <ul>
+     *   <li><b>Jade</b>：{@code ShanhaiMachineModeNameMixin}（服务端写 NBT → 客户端换「机器模式」那一行）；</li>
+     *   <li><b>机器 GUI</b>：本类的 {@link #addDisplayText(List)}（下面那段「机器模式：…」）。</li>
+     * </ul>
+     */
+    public @Nullable String crossTypeModeDisplayName() {
+        // 🔴 2026-10-25（bug ②）：客户端读服务端同步来的镜像，不在本地重算。
+        //    理由见 shanhai$crossTypeModeActive 的 javadoc：客户端 getHost() 恒 null，
+        //    本地重算永远 false ⇒ 子页在新主机下也摘不掉。
+        if (isRemote()) {
+            return PrimordialOmegaEngineMachine.resolveCrossTypeModeName(
+                    shanhai$crossTypeModeActive,
+                    PrimordialOmegaEngineMachine.CROSS_TYPE_MODE_NAME_MODULE);
+        }
+        final boolean crossTypeInEffect = shanhai$computeCrossTypeModeActive();
+        // 服务端顺手把结论发布给客户端（只在值变化时写 + notifyBlockUpdate，见该字段的 javadoc）。
+        shanhai$publishCrossTypeMode(crossTypeInEffect);
+        return PrimordialOmegaEngineMachine.resolveCrossTypeModeName(
+                crossTypeInEffect, PrimordialOmegaEngineMachine.CROSS_TYPE_MODE_NAME_MODULE);
+    }
+
+    /**
+     * <b>判据本体（唯一一份）</b>：跨配方种类并行此刻是否真在生效。
+     *
+     * <p>= {@code isFormed() ∧ !isGenerator() ∧ host != null ∧ host.grantsCrossTypeParallel() ∧ !isLock()}
+     * —— 与 {@code PrimordialModuleRecipeLogic#shanhai$isCrossTypeEnabled()}
+     * ＋ {@code !isLock()} <b>同一个合取式</b>（那个方法是 private，这里镜像；改动任一处必须两处一起改）。
+     * <p>⚠️ <b>只许在服务端调用</b>（客户端 {@code getHost()} 恒 null ⇒ 恒 false）。
+     */
+    private boolean shanhai$computeCrossTypeModeActive() {
+        final PrimordialOmegaEngineMachine hostNow = getHost();
+        return isFormed()
+                && getDefinition() != null
+                && !getDefinition().isGenerator()
+                && hostNow != null
+                && hostNow.grantsCrossTypeParallel()
+                && !PrimordialOmegaEngineMachine.isRecipeLockedForDisplay(getRecipeLogic());
+    }
+
+    /**
+     * 把「跨配方种类并行此刻真在生效」发布给客户端（<b>只在值变化时</b>写字段 + {@code notifyBlockUpdate()}）。
+     *
+     * <p>调用点：{@link #scanMatterSlot()}（服务端每 3 tick）、{@link #onConnected}／{@link #onDisconnected}
+     * （连/断主机立刻跟上）、以及 {@link #crossTypeModeDisplayName()} 的服务端分支（Jade 查询时顺带刷新）。
+     * <p>客户端调用会直接返回（那份值是服务端写过来的，客户端不许反向覆盖）。
+     */
+    private void shanhai$publishCrossTypeMode(boolean active) {
+        if (isRemote() || shanhai$crossTypeModeActive == active) {
+            return;
+        }
+        shanhai$crossTypeModeActive = active;
+        // @DescSynced 字段送到客户端的唯一动作（与 parallelOverride 同一条纪律）。
+        notifyBlockUpdate();
+        // 🔴 只在【变化】时打一行（不是每 tick）：这是用户/我们能 grep 的唯一证据 ——
+        //    「机器模式子页该不该摘」在这台模块上到底算成了什么。
+        if (active) {
+            final PrimordialOmegaEngineMachine h = getHost();
+            ShanhaiMod.LOGGER.info("[SHANHAI-MODE] 跨配方种类并行【生效】⇒「机器模式」子页摘掉、显示名改为「{}」"
+                            + "（模块 {} @{}，主机 {}）",
+                    PrimordialOmegaEngineMachine.CROSS_TYPE_MODE_NAME_MODULE,
+                    getDefinition() == null ? "?" : getDefinition().getId(), getPos(),
+                    h == null ? "?" : h.getPos());
+        } else {
+            ShanhaiMod.LOGGER.info("[SHANHAI-MODE] 跨配方种类并行【未生效】⇒「机器模式」子页照旧出现、照旧显示原配方类型名"
+                            + "（模块 {} @{}；判据：成型 ∧ 非发电 ∧ 有主机 ∧ 主机授予 ∧ 未锁配方）",
+                    getDefinition() == null ? "?" : getDefinition().getId(), getPos());
+        }
+    }
+
     @Override
     public void addDisplayText(@NotNull List<Component> textList) {
+        // 🔴 2026-10-25（用户验收第 5 条不过）：上游那行「当前机器模式：<激活配方类型名>」不是本类画的 ——
+        //    它是 GTCEu {@code WorkableElectricMultiblockMachine#addDisplayText} 里的
+        //    {@code addMachineModeLine(this.getRecipeType())}（javap -c 偏移 111/115/118，
+        //    gtceu-1.20.1-1.4.4）。它只认【激活配方类型】，压根不知道跨配方种类并行这回事
+        //    ⇒ 归墟上跨类型真在生效时它也照旧画「原初物质定型」。
+        //    所以这里只记一个起点，等 super 把我们这份列表画完，再按翻译键【就地】换掉那一行
+        //    （见 shanhai$replaceUpstreamMachineModeLine；同文件 addEnergyTierDisplayText 是同一套找行写法）。
+        final int upstreamStart = textList.size();
         super.addDisplayText(textList);
         if (!isFormed()) {
             return;
@@ -2701,6 +2889,20 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         // ───── 2026-09-25（任务 A）：并行 / 跨配方线程两行（24 台统一由基类出，子类只覆写取值） ─────
         addParallelDisplayText(textList);
         addModuleDisplayText(textList);
+        // ── 🔴 机器模式名（用户 2026-10-25：「也分别给模块和主机起个新的名字放到 jade 还有机器里面显示」）──
+        //    判据与 Jade 那一行【同一个方法】：返回 null ⇒ 这里【一个字节都不动】
+        //    （= 未授予 / 未连主机 / 锁配方 / 发电那台 / 未成型 ⇒ GUI 与改动前逐字相同）。
+        //    🔴 2026-10-25 第 N 改（用户验收第 5 条）：不再是"另起一行"，而是把上游那行
+        //       「当前机器模式：<激活配方类型名>」就换成新名字 —— 三个显示点（Jade / 子页 / 机器抬头）
+        //       从此读同一个 crossTypeModeDisplayName()，不会再出现"一行写新模式、一行写老类型名"。
+        final String crossTypeModeName = crossTypeModeDisplayName();
+        if (crossTypeModeName != null
+                && !shanhai$replaceUpstreamMachineModeLine(textList, upstreamStart, crossTypeModeName)) {
+            // 兜底（上游换了实现 ⇒ 这段里找不到那一行）：保持换名之前的旧行为，另起一行。
+            // 绝不因为"没找到上游那一行"就把名字吞掉 —— 宁可两行，不能没有。
+            textList.add(Component.literal("机器模式：§b" + crossTypeModeName
+                    + "§7（跨配方种类并行：本机的全部配方类型按线程轮转取配方）"));
+        }
         // ⛔ 2026-09-26（用户交办，原话逐字：「然后这一段可以删掉了，我们已经去除这个功能了」）：
         //    这里原本画 【配方最短耗时（下限）：N tick（模块耗时 = max(此下限, 原耗时 × 减免系数)；侧栏可调 10-200）】。
         //    已删除。为什么删（两条，都留档）：
@@ -2716,6 +2918,159 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         //         · 现行公式 = min(原时长, max(1, round(原时长 × 减免系数))) ⇒ 不再有 20 tick 下限
         //       ⇒ 于是「GUI 上不再画这一行」与「代码里不再有这件事」**终于一致**了，
         //         不再存在"文字删了、功能还在"这种界面与实现不符的状态。
+    }
+
+    /**
+     * GTCEu「当前机器模式：%s」那一行的翻译键（= {@code gtceu.gui.machinemode}；
+     * zh_cn 逐字：「当前机器模式：%s」，见 gtceu 的 {@code assets/gtceu/lang/zh_cn.json}）。
+     *
+     * <h2>谁画它（javap -c 实证，不是从类名猜）</h2>
+     * <pre>
+     *   GTCEu MultiblockDisplayText$Builder#addMachineModeLine(GTRecipeType)   ← 唯一产出点
+     *     方法体：textList.add(translatable("gtceu.gui.machinemode",
+     *                                      translatable(recipeType.registryName)).withStyle(AQUA))
+     *   上游唯一调用点：WorkableElectricMultiblockMachine#addDisplayText（javap 偏移 111/115/118）
+     *   ⇒ 也就是本类 super.addDisplayText(textList) 那一句（本类的直接父类就是它）。
+     * </pre>
+     * <p>⚠️ {@code addMachineModeLine} 自己带 {@code if (!isStructureFormed) return} ⇒ <b>未成型时这一行不存在</b>，
+     * 本类替换逻辑必须允许"找不到"（返回 {@code false}，由调用方兜底）。
+     */
+    private static final String GT_MACHINE_MODE_LINE_KEY = "gtceu.gui.machinemode";
+
+    /**
+     * 🔴 <b>把上游画的那行「当前机器模式：&lt;激活配方类型名&gt;」就地换成同源的新名字</b>
+     * （用户验收第 5 条：模块 GUI 这一行还是「原初物质定型」，而 Jade 与左侧栏子页已经换名
+     * ⇒ 同一台机器的三个显示点必须同源）。
+     *
+     * <h2>1. 那行原来是由谁给的（调用链，全部有 javap / 源码依据）</h2>
+     * <pre>
+     *   PrimordialModuleMachine#addDisplayText(list)                  ← 本类，super 之前记下 upstreamStart
+     *     └ super.addDisplayText(list)
+     *        └ GTCEu WorkableElectricMultiblockMachine#addDisplayText
+     *           └ MultiblockDisplayText.builder(list, isFormed())
+     *                .addEnergyUsageLine(...)
+     *                .addEnergyTierLine(...)
+     *                .addMachineModeLine(this.getRecipeType())   ← ★ 这一行就是「当前机器模式：<类型名>」
+     *                .addParallelsLine(...)
+     *                .addWorkingStatusLine()
+     *                .addProgressLine(...)
+     * </pre>
+     * ⇒ 它<b>只读 {@code getRecipeType()}</b>，与 {@link #crossTypeModeDisplayName()} 没有任何关系。
+     * <b>这就是它没吃到镜像的全部原因</b>：不是镜像坏了（Jade 已证镜像在客户端拿得到），
+     * 而是<b>这条路径压根没走镜像</b> —— 它连我们的方法名都没提到。
+     *
+     * <h2>2. 为什么只能"改列表"，不能覆写某个方法</h2>
+     * 「表头 + 类型名」写死在 {@code addMachineModeLine} 的方法体里，机器类没有任何钩子能换掉它的实参；
+     * 而 {@code getRecipeType()} 的语义是「配方逻辑按哪个类型跑」，<b>绝不能为了显示去改它</b>
+     * （那会把配方逻辑一起改掉）。同文件的 {@link #addEnergyTierDisplayText} 早有同款先例
+     * （按 {@code TranslatableContents#getKey()} 找「最大功率」那一行、插到它后面）
+     * ⇒ 本方法沿用同一条纪律：<b>按翻译键结构匹配</b>，不按渲染后的字符串猜
+     * （换语言 / 客户端缺 lang 条目都不影响匹配）。
+     *
+     * <h2>3. 只有这一段会被看（{@code [from, size)}）</h2>
+     * {@code from} = 调 {@code super} 之前记下的 size ⇒ <b>只会碰上游刚画的那几行</b>，
+     * 调用方自己加的行、以及将来上游新增的行都不受影响。
+     *
+     * <h2>4. 退化情形为什么"一个字节都不动"</h2>
+     * 本方法只在 {@code newName != null} 时被调用，而 {@code newName} 的唯一来源是
+     * {@link #crossTypeModeDisplayName()}（客户端读 {@code @DescSynced} 镜像
+     * {@code shanhai$crossTypeModeActive}，服务端现算同一个合取式）。
+     * ⇒ 未成型 / 未连主机 / 老主机（不授予）/ 锁配方 / 发电那台 ⇒ {@code null} ⇒ <b>本方法根本不会被调用</b>，
+     * 列表里那一行仍是 GTCEu 原构造 ⇒ 逐字不变。
+     *
+     * <h2>5. 客户端/服务端两侧都对</h2>
+     * GTCEu 的 {@code WorkableElectricMultiblockMachine#createUIWidget} 给面板的是
+     * {@code .textSupplier(isClientSide ? null : this::addDisplayText)}：LDLib
+     * {@code ComponentPanelWidget#detectAndSendChanges}（javap）每次现造一个 {@code ArrayList} 喂给
+     * 那个 supplier、变了就整表发客户端（{@code readUpdateInfo} 收下再 {@code formatDisplayText}）
+     * ⇒ <b>玩家看到的是服务端算的那一份</b>；而服务端那一份里 {@code crossTypeModeDisplayName()} 是现算的
+     * （不依赖镜像）⇒ 两侧结论必然相同，不存在"服务端说新模式、客户端画老名字"。
+     *
+     * @param textList 上游刚画完的那份列表（<b>原地改</b>，{@code set} 同一位置，不改变行序）
+     * @param from     上游开始画的起点（见第 3 条）
+     * @param newName  要显示的新名字（非 {@code null}）
+     * @return {@code true} = 找到并替换了；{@code false} = 这段里没有那一行（上游改实现 / 未成型 ⇒ 调用方兜底）
+     */
+    private boolean shanhai$replaceUpstreamMachineModeLine(@NotNull final List<Component> textList,
+                                                           final int from,
+                                                           @NotNull final String newName) {
+        try {
+            for (int i = Math.max(0, from); i < textList.size(); i++) {
+                final Component line = textList.get(i);
+                if (line == null || !(line.getContents() instanceof TranslatableContents contents)) {
+                    continue;
+                }
+                if (!GT_MACHINE_MODE_LINE_KEY.equals(contents.getKey())) {
+                    continue;
+                }
+                // 与上游【同一个键】：表头「当前机器模式：」与中英翻译仍取自上游 lang
+                // （少一份会漂移的重复实现），只把 %s 从"激活配方类型"换成同源的新名字。
+                // 颜色照上游 AQUA ⇒ 除了名字，这一行看起来与换名前完全一样；
+                // 尾巴那句灰字 = 换名前那行"机器模式：…（跨配方种类并行：…）"里唯一的说明，不能丢。
+                textList.set(i, Component.translatable(GT_MACHINE_MODE_LINE_KEY, Component.literal(newName))
+                        .withStyle(ChatFormatting.AQUA)
+                        .append(Component.literal("（跨配方种类并行：本机的全部配方类型按线程轮转取配方）")
+                                .withStyle(ChatFormatting.GRAY)));
+                return true;
+            }
+        } catch (Throwable ignored) {
+            // 纯显示路径：任何异常都不许把 GUI 打崩 —— 最坏情况 = 没换名（= 换名前的样子）。
+        }
+        return false;
+    }
+
+    /**
+     * 🔴 <b>本模块在 N3 上【实际】吃到的产出倍率</b> —— 生产与显示共用的唯一入口
+     * （读自己主机那一次；调用方已经有 {@code gateBonus} 时用静态那一个）。
+     *
+     * <h2>它治的是什么（用户报的 bug）</h2>
+     * 用户原话：「<b>又发现个bug，模块的额外产出少了+5</b>」。现场：同一台归墟视界枢核下
+     * <pre>
+     *   主机面板：材料增产 ×23   （= 1 + Lv.17 + 额外 5）
+     *   模块面板：产出倍率 ×18   （= 1 + Lv.17  ← 额外的 5 丢了）
+     * </pre>
+     * 而且<b>不只是显示</b>：模块的产出量也真的只有 ×18 ——
+     * 模块（24 台非发电）走的是多配方引擎路径 {@code PrimordialModuleRecipeLogic#buildFinalNormalRecipe}，
+     * 那一步当时写的是 {@code outputMultiplier(gateBonus)}（不含额外量），
+     * 而"额外 +5"只接在了主机那两条链上。
+     *
+     * <h2>🔴 为什么显示与生产必须是同一个方法</h2>
+     * 本项目红线「活的界面上不许放假数据」有反向的一半：<b>生效了就必须看得见</b>。
+     * 反过来说，<b>看得见的数必须就是生效的那个数</b> —— 两处各写一份算式，
+     * 就会出现"显示 23、产出 18"这种<b>静默</b>分叉（正是这次的事故形态）。
+     *
+     * @see #n3ProductionMultiplierOf(boolean, PrimordialOmegaEngineMachine, int)
+     */
+    public int getN3ProductionMultiplier() {
+        final PrimordialOmegaEngineMachine h = getHost();
+        final int gateBonus = h == null ? 0 : h.moduleSlotBonus();
+        return n3ProductionMultiplierOf(getDefinition().isGenerator(), h, gateBonus);
+    }
+
+    /**
+     * {@link #getN3ProductionMultiplier()} 的<b>静态形态</b>：调用方<b>先读一次</b> {@code gateBonus}
+     * 再传进来（N3 倍率与 N5 减免必须同源；配方逻辑那边就是这么用的，
+     * 见 {@code PrimordialModuleRecipeLogic#buildFinalNormalRecipe}）。
+     *
+     * <h2>🔴 三条不变式（与 {@code PrimordialRecipeEffects#productionMultiplierOf} 一一对应）</h2>
+     * <pre>
+     *   发电那台（isGenerator）          ⇒ 结果 == outputMultiplier(gateBonus)（额外量一个都不加）
+     *   老主机（extra 恒 0）             ⇒ 结果 == outputMultiplier(gateBonus)（逐位不变）
+     *   空槽 / 未满 64 格（gateBonus=0） ⇒ 结果 == 1 + extra（归墟 ⇒ ×6；老主机 ⇒ ×1）
+     * </pre>
+     * 🔴 第三行是 2026-10-25 用户裁决后的口径（原话逐字：「<b>2通过（但是专属槽清空 应该是×6）</b>」）：
+     * 空槽**不再**把额外量挡掉。作废口径留档：「结果 == 1（额外量不加在『未生效』之上）」。
+     * 发电那条是结构性的：发电机 {@code tickOutputs} 里装的是<b>输出语义的 EU</b>，
+     * 放大 N3 等于凭空发电 ⇒ 它<b>一个额外量都不许吃</b>（它本来也不进引擎路径，
+     * 见 {@code PrimordialModuleRecipeLogic#shanhai$resolveRouting()}；这里是第二道保险）。
+     */
+    public static int n3ProductionMultiplierOf(boolean generator, @Nullable PrimordialOmegaEngineMachine host,
+                                               int gateBonus) {
+        if (generator) {
+            return PrimordialRecipeEffects.outputMultiplier(gateBonus);
+        }
+        return PrimordialRecipeEffects.productionMultiplierOf(gateBonus,
+                host == null ? 0 : host.getHostProductionBonusExtra());
     }
 
     /**
@@ -2746,7 +3101,12 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     protected void addSharedEffectDisplayText(@NotNull List<Component> textList) {
         PrimordialOmegaEngineMachine hostMachine = getHost();
         int gateBonus = hostMachine == null ? 0 : hostMachine.moduleSlotBonus();
-        int multiplier = PrimordialRecipeEffects.outputMultiplier(gateBonus);
+        // 🔴 2026-10-23：这一行以前是 `PrimordialRecipeEffects.outputMultiplier(gateBonus)`，
+        //    于是显示与生产<b>同时</b>漏掉了宿主的额外 +5（用户报：「模块的额外产出少了 +5」）。
+        //    现在两边都走 {@link #n3ProductionMultiplierOf} —— 显示与生产同源，不许另算一套。
+        final int multiplier = n3ProductionMultiplierOf(
+                getDefinition().isGenerator(), hostMachine, gateBonus);
+        final int hostExtra = hostMachine == null ? 0 : Math.max(0, hostMachine.getHostProductionBonusExtra());
         double factor = PrimordialRecipeEffects.reductionFactor(gateBonus);
         double ratio = 1.0D - factor;
         // 🔴 2026-09-25 用户定案（原话逐字）：「哦对了我忘记了它吃了*18倍的产出，那就不吃产出加成了，
@@ -2763,7 +3123,12 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
                     + " §7（发电不吃产出倍率 ×" + multiplier + "，改吃耗能系数的倒数 —— 用户 2026-09-25 定案）"));
         } else {
             textList.add(Component.literal("主机加成: " + (gateBonus > 0 ? "§bLv." + gateBonus : "§7未生效")
-                    + " §7· 产出倍率: §d×" + multiplier));
+                    + " §7· 产出倍率: §d×" + multiplier
+                    // 额外量非零时把"这个 ×N 是怎么来的"写清：1+等级（主机那套）+ 额外。
+                    // 归墟主机专属槽放满 64 个物质模块时才非零 ⇒ 平时一行都不多画（与既有风格一致）。
+                    + (hostExtra > 0
+                            ? "§7（主机那套 1+" + gateBonus + "，另加主机额外 +" + hostExtra + "）"
+                            : "")));
         }
         // 🔴 2026-09-21 改正方向：这里的 factor 是【成本系数】= 1 − 减免比例，
         //    即「原耗时/原耗电 × factor」；旧口径印的是减免比例本身，导致 Lv.1 显示 0.4181
@@ -2969,6 +3334,10 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         //    在当前表里的并行值；否则（含任何查不到）原样返回 ⇒ 与今天逐位一致。
         base = shanhai$parallelBaseWithHostOverride(base);
         currentParallel = applyStackMultiplier(base, stack.getCount());
+        // 🔴 2026-10-25：顺手把「跨配方种类并行是否生效」的镜像刷给客户端
+        //    （本方法只由 startMatterSlotScan() 的 subscribeServerTick 驱动 ⇒ 服务端专属，每 3 tick）。
+        //    这是「机器模式子页 / 机器模式名」在客户端能算对的前提，见 shanhai$crossTypeModeActive 的 javadoc。
+        shanhai$publishCrossTypeMode(shanhai$computeCrossTypeModeActive());
     }
 
     /** {@code shanhai$parallelBaseWithHostOverride} 的 WARN 只打一次（避免每 3 tick 刷屏）。 */

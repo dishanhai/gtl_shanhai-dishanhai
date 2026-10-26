@@ -1,6 +1,7 @@
 package com.shanhai.machine.module;
 
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
+import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.multiblock.CleanroomType;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
@@ -21,8 +22,11 @@ import com.shanhai.common.machine.CandidateSetConsistency;
 import com.shanhai.common.machine.EnergyHatchPower;
 import com.shanhai.common.machine.ParallelOverrideMachine;
 import com.shanhai.common.machine.ParallelPowerBudget;
+import com.shanhai.common.machine.PrimordialOmegaEngineMachine;
 import com.shanhai.common.recipe.PrimordialRecipeEffects;
+import com.shanhai.api.machine.ShanhaiPatternTypeBlockSource;
 import com.shanhai.common.thread.ShanhaiParallelBudget;
+import com.shanhai.machine.stellar.ShanhaiWildcardRecipeBinding;
 
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -139,7 +143,53 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
         shanhai$pendingFailIsModuleLevel = false;
         shanhai$pendingFailIsExtraMount = false;
         super.findAndHandleRecipe();
+        // 🔴 2026-10-27 追加二（用户口径）：如果这一轮一条都没跑起来，而"没跑起来"的原因是【类型】
+        //    而不是用料，就必须把类型那条原因写进 RecipeResult（Jade / 机器 GUI 读的就是它）——
+        //    改前这里会留着引擎自己那句「配方失败原因：输入材料不足」，用户已明确判定那是错的提示。
+        if (shanhai$pendingFailReason == null) {
+            shanhai$recordPatternTypeBlock();
+        }
         shanhai$publishFailReason();
+    }
+
+    /**
+     * <b>三类情况必须互不混淆（用户 2026-10-27 追加二的判据）</b>：
+     * <pre>
+     *   ① 槽声明类型 ∩ 机器可执行 = 空  ⇒ 本机不支持该样板声明的配方类型   ← 本方法写这条
+     *   ② 类型支持但没料                ⇒ 才允许走材料类原因（引擎自己的，不动）
+     *   ③ 未声明类型 + 闸开             ⇒ 样板未声明类型（被规范闸拦下）   ← 本方法也写这条
+     * </pre>
+     * 数据来源 = 仓室实现 {@link ShanhaiPatternTypeBlockSource}（星律）。
+     * 只在这台机器上<b>确实存在</b>这样的样板时才写 —— 没被类型拦过就一个字都不写（不许瞎报）。
+     */
+    private void shanhai$recordPatternTypeBlock() {
+        try {
+            for (com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart part : getMachine().getParts()) {
+                if (!(part instanceof ShanhaiPatternTypeBlockSource source)) {
+                    continue;
+                }
+                final String unsupported = source.shanhaiUnsupportedDeclaredType();
+                if (unsupported != null && !unsupported.isEmpty()) {
+                    shanhai$pendingFailReason = Component.translatable(
+                            "shanhai.recipe.fail.pattern_type_unsupported", unsupported);
+                    ShanhaiMod.LOGGER.info("[SHANHAI-TYPEROUTE] machine={} unsupported_declared={} machine={} "
+                                    + "⇒ jade=本机不支持该样板声明的配方类型（不是材料不足）",
+                            getMachine().getDefinition().getId(), unsupported, source.shanhaiTypeBlockDescribe());
+                    return;
+                }
+                if (source.shanhaiUndeclaredBlocked()) {
+                    shanhai$pendingFailReason = Component.translatable("shanhai.recipe.fail.pattern_type_undeclared");
+                    ShanhaiMod.LOGGER.info("[SHANHAI-TYPEROUTE] machine={} undeclaredBlocked=true {} "
+                                    + "⇒ jade=样板未声明配方类型（闸开 ⇒ 已拦下）",
+                            getMachine().getDefinition().getId(), source.shanhaiTypeBlockDescribe());
+                    return;
+                }
+            }
+        } catch (Throwable t) {
+            // 原因行不许把机器弄停：异常 ⇒ 不写（宁可不显示，也不显示错的）。
+            ShanhaiMod.LOGGER.warn("[SHANHAI-TYPEROUTE] 取样板类型拦截原因时异常（本次不写原因行）：{}",
+                    String.valueOf(t));
+        }
     }
 
     /**
@@ -694,11 +744,44 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
      *   <li><b>候选不够 N 条</b>：{@code all.size() &lt;= threads} ⇒ 直接返回 {@code all}（= 全部），
      *       与上游同形，不是错误。</li>
      * </ul>
+     *
+     * <h2>🆕 2026-10-25：主机授予「跨配方种类并行」时，候选来源换成<b>全部类型</b></h2>
+     * <pre>
+     *   未授予（老主机 / 本钩子默认）⇒ 就是本节上面那套逻辑，<b>一个字节都没动</b>
+     *                                （候选 = getRecipeType() 这【一个】类型）
+     *   授予（归墟视界枢核）⇒ 候选来源 = getRecipeTypes() 的【全部】类型：
+     *        <b>轮转取</b>（每圈每类型各 1 条），凑够 threads 即停 ⇒ <b>每种类型不限条数，只受线程数约束</b>
+     *        （2026-10-25 用户点单：原"每类型最多 1 条"作废）；
+     *        轮转没凑满 ⇒ 剩余额度回落到<b>当前激活类型内并行</b>
+     *   两条路都返回 {@link LinkedHashSet}（保序：类型数组序 → 类型内迭代序）并都经过
+     *   {@link #shanhai$observeCandidates(Set)} 探针
+     * </pre>
+     * 判定见 {@link #shanhai$isCrossTypeEnabled()}，候选见 {@link #shanhai$lookupCrossTypeSet(int)}。
      */
     @Override
     protected @NotNull Set<GTRecipe> lookupRecipeSet() {
-        final Set<GTRecipe> all = super.lookupRecipeSet();
         final int threads = Math.max(1, getMultipleThreads());
+        // 🔴🔴 2026-10-27 二修（用户口径）：**上一批的「全局收窄候选类型集」已整体拆除**。
+        //    用户原话：「样板声明 ∩ 机器可执行，是对于那单独一个槽（池）的，这就是为什么我说要先分池，
+        //    这样只会一个池对于一条配方，根本不可能会串」。
+        //    ⇒ 候选类型来源回到这台机器自己的类型集（下面两条既有路径逐字未改）：
+        //      未授予跨类型 ⇒ 当前激活类型那一个；已授予 ⇒ getRecipeTypes() 全部。
+        //    「样板说了算」这件事改由【槽】来回答：引擎拿一条配方问某个槽时，那个槽自己
+        //    按「槽声明类型 ∩ 机器可执行」决定接不接（mixin：ShanhaiSlotTypeGateMixin）。
+        // 🔴 跨配方种类并行（用户 2026-10-23 规格）：主机授予时，候选来源从"一个类型"换成"全部类型"。
+        //    ⚠️ 判定【每次 lookup 都现读】，不许缓存成字段 —— 主机成型 / 拆解、授予条件变化都会改结果。
+        //    ⚠️ 锁配方（isLock()）时【不走】跨类型：玩家锁了哪一条就是哪一条（与上游锁分支同义）。
+        if (shanhai$isCrossTypeEnabled() && !isLock()) {
+            final LinkedHashSet<GTRecipe> crossType = shanhai$lookupCrossTypeSet(threads);
+            if (!crossType.isEmpty()) {
+                return shanhai$observeCandidates(crossType);
+            }
+            // 跨类型一条都没匹配上 ⇒ 退回父类单类型的结果（宁可少跑，也不要返回空集让机器"不动"）。
+            return shanhai$observeCandidates(super.lookupRecipeSet());
+        }
+
+        // ══════════ 以下 = 【未被授予跨类型】时的原有路径，逐字未改 ══════════
+        final Set<GTRecipe> all = super.lookupRecipeSet();
         if (all.size() <= threads) {
             return shanhai$observeCandidates(all);
         }
@@ -714,6 +797,193 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
         }
         // 兜底：万一上游换了遍历实现导致一条都没匹配上，宁可退回父类的结果，也不要返回空集（"机器不动"）。
         return shanhai$observeCandidates(limited.isEmpty() ? all : limited);
+    }
+
+    // ═══════════════ 跨配方种类并行（用户 2026-10-23 规格） ═══════════════
+    //     判定 = 主机授予（{@link PrimordialOmegaEngineMachine#grantsCrossTypeParallel()}）；
+    //     候选 = 全部类型（本类新增的那条来源）。未授予时上面那条老路径逐字不变。
+
+    /** 跨类型证据行的限流：上一次落盘的时刻（毫秒）与形态串（同形不重复打）。 */
+    private long shanhai$lastCrossTypeLogMillis;
+
+    /** 上一次落盘的形态串；{@code null} = 还没打过。 */
+    @Nullable
+    private String shanhai$lastCrossTypeShape;
+
+    /**
+     * 🔴 <b>本次 lookup 是否走「跨配方种类并行」—— 每次都现读，<u>不许缓存成字段</u>。</b>
+     *
+     * <h2>判定（三条合取）</h2>
+     * <ol>
+     *   <li><b>不是发电模块</b>：全 24 台里唯一 {@code getDefinition().isGenerator()} 的那台在
+     *       {@link #shanhai$resolveRouting()} 里已经 {@code setUseMultipleRecipes(false)} 退回原生链
+     *       （它的配方 EUt 是输出语义，引擎会把 totalEu 算成深负值）⇒ 它<b>根本不会走到</b>
+     *       {@link #lookupRecipeSet()}。这里再显式判一次，是为了让"发电模块不参与跨类型"
+     *       在代码里<b>可 grep</b>，而不是只靠一个远处的 {@code setUseMultipleRecipes(false)}；</li>
+     *   <li><b>主机存在</b>：模块与主机的通路是 {@link PrimordialModuleMachine#getHost()}
+     *       （{@code IModularMachineModule} 的实现，返回类型已经是 {@link PrimordialOmegaEngineMachine}，
+     *       {@code null} = 未连接）⇒ 等价于规格里的 {@code host instanceof PrimordialOmegaEngineMachine}；</li>
+     *   <li><b>主机授予</b>：{@link PrimordialOmegaEngineMachine#grantsCrossTypeParallel()} 为真
+     *       （老主机默认 {@code false} ⇒ 行为与改动前逐位相同）。</li>
+     * </ol>
+     *
+     * <h2>🔴 为什么必须"每 tick / 每次 lookup 现读"</h2>
+     * 主机会<b>成型 / 拆解 / 被拆掉</b>，模块会在世界加载时重连主机（{@code RECONNECT_INTERVAL}）。
+     * 若把结果缓存成字段，就会出现三种错状态：拆了主机模块还在跨类型、主机刚成型模块要等重启、
+     * 以及{@link PrimordialModuleMachine#setHost} 之后读到旧值。本方法与 {@code getCrossRecipeThreads()}
+     * 一样，只做<b>两次虚调用</b>，没有任何遍历 ⇒ 每 5 tick 调一次的代价可以忽略。
+     */
+    private boolean shanhai$isCrossTypeEnabled() {
+        if (getMachine().getDefinition().isGenerator()) {
+            return false;
+        }
+        final PrimordialOmegaEngineMachine host = getMachine().getHost();
+        return host != null && host.grantsCrossTypeParallel();
+    }
+
+    /**
+     * 🔴 <b>跨类型的候选集：按类型数组顺序【轮转】取，每圈每类型各 1 条，凑够 {@code threads} 即停。</b>
+     *
+     * <h2>口径（用户 2026-10-23 原话，逐字）</h2>
+     * <pre>
+     *   「使安装在它上面的模块也获得跨配方种类并行，且<b>跨配方种类并行等于原机器的线程数</b>，
+     *     也就相当于把他的<b>跨配方线程变成了跨配方种类并行</b>」
+     * </pre>
+     * ⇒ {@code threads} 同时是 ①父类的并行预算倍数（<b>未改</b>）②"本轮最多选几条候选"（本方法）。
+     *
+     * <h2>🔴 2026-10-25 口径反转（用户点单，原话）</h2>
+     * <pre>「每种类型最多 1 条是不行的，每种类应该不限制（只要线程够用）」</pre>
+     * ⇒ 原实现"每类型最多 1 条"作废 ⇒ 现在按 <b>轮转（round-robin）</b>：
+     * <pre>
+     *   一圈 = 类型数组顺序各取 1 条；圈数不限，直到 picked 数 = threads 或某一圈再无新候选。
+     *   threads = 4、类型 = 2、各类型都有 10 条可跑 ⇒ 每类型 2 条（共 4 条）
+     *   threads = 4、类型 = 8 ⇒ 前 4 个类型各 1 条（共 4 条）
+     *   threads = 1 ⇒ 取类型数组里【第一个有候选】的类型的那 1 条（= 跨类型的退化态）
+     * </pre>
+     * 选轮转而不是"第一个类型先填满"：后者会让排在前面的类型吃光全部额度（= 用户报过的"挤占"）。
+     *
+     * <h2>🔴 为什么返回 {@link LinkedHashSet}，绝对不能用 {@code ObjectOpenHashSet}</h2>
+     * 下游 {@code buildFinalNormalRecipe} 是<b>按 {@code getOriginRecipeList()} 的顺序逐条扣料</b>的
+     * （上游字节码 {@code @106–161}，取证报告 F6）⇒ <b>集合顺序 = 玩家看到的扣料顺序</b>。
+     * 上游 {@code MutableRecipesLogic#lookupRecipeSet} 返回 {@code ObjectOpenHashSet}（哈希序）：
+     * 单类型时"先扣给 A 还是 B"就已经不确定（取证报告 <b>R4</b>），跨类型后这个漂移会放大成
+     * 「<b>先扣给哪一类</b>」—— 玩家会看到扣料顺序乱跳，且无法复现、无法写进验收清单。
+     * ⇒ 本方法的插入顺序是 <b>①类型数组顺序（{@code getRecipeTypes()} 下标序，与 {@code activeRecipeType} 同一口径）
+     * → ②类型内 {@code getRecipeIterator} 的真实顺序</b>，两者都确定
+     * ⇒ 同一批输入永远选出同一批配方、按同一个顺序扣料。
+     *
+     * <h2>为什么逐类型取候选必须复用 {@code this::checkRecipe}</h2>
+     * 那是父类 {@code lookupRecipeSet} 里 {@code invokedynamic} 捕获的<b>同一个虚方法</b>
+     * （本类覆写了它：额外挂载槽闸门 → 电压闸门 → 配方条件）。<b>不另写一份过滤</b> ——
+     * 否则"父类认的"与"本方法认的"会分叉，症状是"单类型能跑、跨类型跑不了"，而且无从解释。
+     *
+     * <h2>代价（诚实边界）</h2>
+     * 每轮多扫 {@code min(类型数, threads)} 个类型的 {@code RecipeIterator}（取证报告 R3：
+     * 上游对"扫全部类型"不加闸，说明可接受）；且本方法<b>凑够就停</b>，不扫完全部类型。
+     * <p>⚠️ <b>2026-10-25 实测订正（取证报告 R3 那句"最多 10 个类型"偏小）</b>：
+     * {@code ModuleRegistry} 里最大的那张数组是 {@code RECIPE_CRITICAL_PROCESSING} = <b>37 个类型</b>
+     * （{@code RECIPE_ORE_PROCESSING} = 9、{@code RECIPE_BIO} = 6、{@code RECIPE_VOID_INDUCTION_ARMATURE} = 1）。
+     * 线程数 ≥ 37 时最坏单次 lookup 会扫 37 个类型 ⇒ 扫描量放大约 37 倍（不是 10 倍）。
+     * 缓解是结构性的：<b>类型数组第 0 位就是激活类型</b>，它一有候选就只扫 1 个类型
+     * （= 今天的开销）；只有"激活类型空"和线程数很大时才会摊开扫。**未做计时测量。**
+     *
+     * @param threads 候选条数上限（= {@link #getMultipleThreads()}，已由调用方钳到 ≥ 1）
+     */
+    private @NotNull LinkedHashSet<GTRecipe> shanhai$lookupCrossTypeSet(int threads) {
+        final PrimordialModuleMachine module = getMachine();
+        final GTRecipeType[] types = module.getRecipeTypes();
+        final LinkedHashSet<GTRecipe> picked = new LinkedHashSet<>();
+        // 「每个候选来自哪个类型」—— 证据行 order=… 的实测值（与 picked 同序、同长度）。
+        final List<String> order = new ArrayList<>();
+        final int typeCount = types == null ? 0 : types.length;
+
+        // ① 轮转取候选：一遍一遍地过类型数组，【每圈每个类型各取 1 条】，直到凑够 threads 或一整圈
+        //    再无新候选。这样"每种类型不限制条数（只要线程够）"与"不让第一个类型一口气吃光额度"同时成立。
+        //    🔴 2026-10-25 用户点单：原先是"每类型最多 1 条"，他明确说不行 ⇒ 改成轮转、只受 threads 约束。
+        if (types != null) {
+            final List<Iterator<GTRecipe>> its = new ArrayList<>(types.length);
+            for (GTRecipeType type : types) {
+                // 注册期已有 requireNoNullRecipeTypes 挡 null，这里只是兜底
+                its.add(type == null ? null : type.getLookup()
+                        .getRecipeIterator(getMachine(), this::checkRecipe));
+            }
+            boolean progressed = true;
+            while (picked.size() < threads && progressed) {
+                progressed = false;
+                for (int i = 0; i < its.size() && picked.size() < threads; i++) {
+                    final Iterator<GTRecipe> it = its.get(i);
+                    if (it == null) {
+                        continue;
+                    }
+                    while (it.hasNext()) {
+                        // 同一个 id 可能被两个类型同时注册（GTRecipe.equals 比的是 id）⇒
+                        // add 返回 false 时继续取本类型的下一条，别把额度浪费掉。
+                        if (picked.add(it.next())) {
+                            order.add(shanhai$typeId(types[i]));
+                            progressed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // ② 第二轮（兜底）：轮转结束后额度还有剩（通常因为某些类型已无候选）⇒ 回落到【当前激活类型】内继续并。
+        //    ⚠️ 它只处理"轮转没凑满"这一种情况；正常情况下轮转已经能把 threads 用满。
+        if (picked.size() < threads) {
+            final GTRecipeType active = module.getRecipeType();
+            if (active != null) {
+                final Iterator<GTRecipe> it = active.getLookup()
+                        .getRecipeIterator(getMachine(), this::checkRecipe);
+                while (it.hasNext() && picked.size() < threads) {
+                    if (picked.add(it.next())) {
+                        order.add(shanhai$typeId(active));
+                    }
+                }
+            }
+        }
+
+        // ③ 证据行：给用户实机判读的唯一凭据（on=false 不打；on=true 每 5 秒最多一条、同形不重复打）
+        shanhai$logCrossType(typeCount, picked.size(), order);
+        return picked;
+    }
+
+    /** 配方类型在日志里的可 grep 标识：{@code namespace:path}（与 lang 键/`.rtui` 文件同名）。 */
+    private static String shanhai$typeId(@NotNull GTRecipeType type) {
+        return type.registryName != null ? type.registryName.toString() : String.valueOf(type);
+    }
+
+    /**
+     * 🔴 <b>跨类型证据行</b>：{@code [SHANHAI-CROSSTYPE] module=… on=true types=… picked=… order=…}。
+     *
+     * <p>为什么必须有：这个功能<b>只能实机验</b>（冒烟专服里没有成型的模块在跑配方，无头那边一行都不会出现），
+     * 而玩家在 GUI 里看不到"这一轮到底从几个类型各取了哪一条" ⇒ 没有这一行，用户报"跨类型没生效"
+     * 时无从判读。字段全部是<b>实测值</b>（{@code types} = 类型数组长度、{@code picked} = 真正选中的条数、
+     * {@code order} = 每条候选来自哪个类型，与 {@code picked} 同序同长度）。
+     *
+     * <h2>限流（两条硬闸门，缺一条就会刷屏）</h2>
+     * <pre>
+     *   ① on=false（未授予 / 发电模块）⇒ 本方法根本不被调用（调用点在 shanhai$lookupCrossTypeSet 里）
+     *   ② 同一形态（types+picked+order 全同）⇒ 不再重复打
+     *      ← 24 台模块每 5 tick 各扫一轮，不闸的话 1 秒能打上百行
+     *   ③ 每 5 秒最多一条 ← 用户点单的硬上限（形态变了也要等窗口过去）
+     * </pre>
+     * ③ 之所以不"一变就当场打"：跨类型每轮都在同一个窗口里反复调用（电上限一次、分配一次），
+     * 无闸会变成每 tick 一行。5 秒窗口对"实机判读"足够（机器跑一条配方远长于 5 秒）。
+     */
+    private void shanhai$logCrossType(int typeCount, int pickedCount, @NotNull List<String> order) {
+        final String shape = "types=" + typeCount + " picked=" + pickedCount + " order=" + order;
+        if (shape.equals(shanhai$lastCrossTypeShape)) {
+            return;     // 同形：已经如实告知过，不再打
+        }
+        final long now = System.currentTimeMillis();
+        if (now - shanhai$lastCrossTypeLogMillis < 5_000L) {
+            return;     // 每 5 秒最多一条（形态变了也等窗口）
+        }
+        shanhai$lastCrossTypeLogMillis = now;
+        shanhai$lastCrossTypeShape = shape;
+        ShanhaiMod.LOGGER.info("[SHANHAI-CROSSTYPE] module={} on=true types={} picked={} order={}",
+                getMachine().getDefinition().getId(), typeCount, pickedCount, String.join(",", order));
     }
 
     /**
@@ -894,7 +1164,14 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
         }
 
         // ② 热力（只在那 7 个类型 + 那三台机器上）
-        final GTRecipeType type = module.getRecipeType();
+        // 🔴 2026-10-25（跨配方种类并行配套修正，1 行）：类型改取【<b>候选配方自己的类型</b>】，
+        //    不再取【机器当前激活的类型】。
+        //    理由：跨类型后候选可能来自任何一个类型；若仍拿 {@code getRecipeType()}（= recipeTypes[activeRecipeType]）
+        //    判"这个格子算不算热力"，则「激活类型不在热力白名单、候选是 EBF/SCT」时
+        //    {@code heatReachable=false} ⇒ 温度需求压根不生成 ⇒ EBF 配方会绕开温度照样跑（真实漏洞）。
+        //    ⚠️ 单类型世界里两者恒等（候选全部来自 getRecipeType() 的 lookup）⇒ 本行【不改变今天的行为】；
+        //    只有当候选确实来自另一个类型（= 跨类型开启）时才可能不同。
+        final GTRecipeType type = recipe.recipeType != null ? recipe.recipeType : module.getRecipeType();
         final boolean heatReachable = type != null
                 && ShanhaiHeatGate.isGated(type.registryName.toString())
                 && module.canUseExtraMountAsHeatSource();
@@ -1353,9 +1630,23 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
         // ── 时长钉回 d0：引擎的 D 自带硬编码 20 下限，N5/N6 必须在【原时长】上算 ──
         //    用共用的 min 天花板函数（applyHostDurationCap，现在只有模块侧在调）表达"上限 = 原时长"⇒ 结果恒为 d0。
         modified = PrimordialRecipeEffects.applyHostDurationCap(modified, originDuration, originDuration);
-        // ── ② N3 产出倍率 ──
-        modified = PrimordialRecipeEffects.multiplyOutputs(
-                modified, PrimordialRecipeEffects.outputMultiplier(gateBonus));
+        // ── ② N3 产出倍率（🔴 含宿主的额外量；与显示、与主机自己那两条链【同一个算式】）──
+        //    🔴 2026-10-23 修 bug（用户原话：「又发现个bug，模块的额外产出少了+5」）：
+        //       这里原来写的是 PrimordialRecipeEffects.outputMultiplier(gateBonus) —— **不含额外量**，
+        //       而主机的两条链（原生修饰链 / 引擎尾链）早已按「1+等级+额外」算
+        //       ⇒ 同一台归墟视界枢核下 主机 ×23、模块 ×18，而且模块的产出<b>真的</b>只有 ×18
+        //       （不只是显示：模块走的就是本方法，引擎路径不经过 RecipeModifierList.apply，
+        //         所以主机那条带 +5 的原生链对模块是死代码 —— 字节码实证见报告）。
+        //       现在统一走 PrimordialModuleMachine#n3ProductionMultiplierOf：
+        //         · 老主机 getHostProductionBonusExtra() 恒 0 ⇒ 结果 == outputMultiplier ⇒ 逐位不变；
+        //         · 空槽 / 未满 64 格（gateBonus = 0）⇒ 1（额外量不加在"未生效"之上）；
+        //         · 发电那台 ⇒ 恒等于 outputMultiplier（不吃额外量）；它本来也不进本方法。
+        //    ⚠️ gateBonus 仍是本方法入口读的那【一次】—— 与下面 ⑤ 的 N5 同源，不在这里重读。
+        //    ⚠️ 影子对账（shanhai$applyNativeAuthority）第 ② 步必须用<b>同一个</b>数，
+        //       否则将来若把对账扩展到产出表，它会拿旧口径去"纠正"新口径（静默错数）。
+        final int n3Multiplier = PrimordialModuleMachine.n3ProductionMultiplierOf(
+                module.getDefinition().isGenerator(), module.getHost(), gateBonus);
+        modified = PrimordialRecipeEffects.multiplyOutputs(modified, n3Multiplier);
         // ── ③ N5 耗时减免 ──
         modified = PrimordialRecipeEffects.applyDurationReduction(
                 modified, PrimordialRecipeEffects.reductionFactor(gateBonus));
@@ -1741,8 +2032,13 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
                 }
                 shanhai$logAggregateAuthority(originCount, aggregateEut, p);
             }
-            expected = PrimordialRecipeEffects.multiplyOutputs(
-                    expected, PrimordialRecipeEffects.outputMultiplier(gateBonus));
+            // 🔴 2026-10-23：与真实链第 ② 步<b>同源同一个方法</b>（含宿主的额外量）。
+            //    用同一个 gateBonus、同一台机器 ⇒ 必然得到与链上完全相同的那个 int，
+            //    不存在"重放用旧口径、真配方用新口径"的静默分叉。
+            final PrimordialModuleMachine n3Machine = getMachine();
+            expected = PrimordialRecipeEffects.multiplyOutputs(expected,
+                    PrimordialModuleMachine.n3ProductionMultiplierOf(
+                            n3Machine.getDefinition().isGenerator(), n3Machine.getHost(), gateBonus));
             expected = PrimordialRecipeEffects.applyDurationReduction(
                     expected, PrimordialRecipeEffects.reductionFactor(gateBonus));
             expected = PrimordialRecipeEffects.applyModuleDuration(expected, originDuration);

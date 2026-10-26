@@ -1,0 +1,19 @@
+#version 150
+
+in vec3 Position;
+in vec2 UV0;
+in ivec2 UV1;
+
+uniform mat4 ModelViewMat;
+uniform mat4 ProjMat;
+
+out vec2 texCoord;
+out vec2 localPosition;
+out float transparency;
+
+void main() {
+    texCoord = UV0;
+    localPosition = Position.xy;
+    transparency = float(UV1.x) / 10000.0;
+    gl_Position = ProjMat * ModelViewMat * vec4(Position, 1.0);
+}
