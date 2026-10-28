@@ -38,8 +38,8 @@ class IntegrateGuixuSnapshotTest {
         int start = source.indexOf("public int getHostOutputMultiplier()");
         int end = source.indexOf("\n    @Override", start);
         String method = source.substring(start, end);
-        assertTrue(method.contains("GuixuVisionCoreMachine.productionMultiplierOf"));
-        assertTrue(method.contains("guixu.getHostProductionBonusExtra()"));
+        assertTrue(method.contains("return currentHost.getRecipeOutputMultiplier();"),
+                "主機統一彙總常駐、萬象與遏制場倍率，所有子模組共用");
     }
 
     @Test void snapshotReadsOnlyLoadedSlotsAndKeepsSignedBigIntegerEnergy() throws Exception {
@@ -155,5 +155,6 @@ class IntegrateGuixuSnapshotTest {
         @Override public boolean isFormed() { return formed; }
         @Override public int moduleSlotBonus() { return level; }
         @Override public int getMountedOutputMultiplier() { return mounted; }
+        @Override public GuixuContainmentBonus getContainmentBonus() { return GuixuContainmentBonus.NONE; }
     }
 }
