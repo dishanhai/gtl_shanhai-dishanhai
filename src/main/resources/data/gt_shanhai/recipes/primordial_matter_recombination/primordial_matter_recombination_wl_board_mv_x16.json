@@ -56,7 +56,8 @@
           "ingredient": {
             "item": "gt_shanhai:universe_circuit_reassembly_unit"
           }
-        }
+        },
+        "chance": 0
       }
     ],
     "fluid": [
@@ -86,8 +87,8 @@
     "item": [
       {
         "content": {
-          "type": "gtceu:sized",
-          "count": 16,
+          "type": "gtceu:long",
+          "actualAmount": 16,
           "ingredient": {
             "item": "dishanhai:wl_board_mv"
           }
@@ -98,7 +99,7 @@
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",
-      "recipeId": "dishanhai:primordial_matter_recombination/primordial_matter_recombination_wl_board_mv_x16",
+      "recipeId": "gt_shanhai:primordial_matter_recombination/primordial_matter_recombination_wl_board_mv_x16",
       "defaultEnabled": true
     }
   ]
