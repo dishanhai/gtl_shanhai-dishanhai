@@ -19,6 +19,14 @@ public final class DShanhaiConfig {
         COMMON_SPEC = builder.build();
     }
 
+    /** 配置未加载时按未禁用处理，避免注册期读到空配置把机器误删。 */
+    public static boolean isCoinForgeDisabled() {
+        if (!COMMON_SPEC.isLoaded()) {
+            return false;
+        }
+        return COMMON.disableCoinForge.get();
+    }
+
     public static class ConfigValues {
         public enum VirtualProviderMode {
             AE_TARGET_CHECK,
@@ -73,6 +81,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue nineIndustrialShuffle;
         /** 模块机器 — 是否允许脱离主机独立运行 */
         public ForgeConfigSpec.BooleanValue modulesWorkWithoutHost;
+        /** 原初铸币工厂 — 开启后不注册机器，也不加载对应配方 */
+        public ForgeConfigSpec.BooleanValue disableCoinForge;
         /** 原初模块 — 是否启用旧式无限制模式（正常模式不限制研究/数据访问） */
         public ForgeConfigSpec.BooleanValue primordialModuleUnrestrictedMode;
         /** 递归反演阵列 — 是否破除已连接子模块内部运行限制 */
@@ -215,6 +225,15 @@ public final class DShanhaiConfig {
                              "false=模块必须有主机才能运行",
                              "true=模块脱离主机后可独立运行配方")
                     .define("workWithoutHost", false);
+            builder.pop();
+
+            builder.push("coin_forge");
+            disableCoinForge = builder
+                    .comment("禁用原初铸币工厂（默认关闭）",
+                             "false=正常注册机器，并加载 coin_forge 配方",
+                             "true=不注册 gt_shanhai:primordial_coin_forge，加载后移除 coin_forge 配方以及产出该机器的配方",
+                             "修改后需要重启游戏/服务端。已放置的铸币工厂会因方块未注册而丢失")
+                    .define("disabled", false);
             builder.pop();
 
             builder.push("recursive_reverse_array");

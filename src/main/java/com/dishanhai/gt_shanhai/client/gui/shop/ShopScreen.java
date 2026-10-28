@@ -3772,14 +3772,16 @@ public class ShopScreen extends ScaledScreen {
         String saleTag = selected.isDiscountActive()
                 ? " §6(限时-" + selected.getDiscountPercent() + "% 剩" + formatDuration(selected.discountRemainingMs() / 1000L) + ")" : "";
         String memberTag = memberPct > 0 ? " §d[会员" + ShopMembership.tierNameForTier(memberTier) + "-" + memberPct + "%]" : "";
-        String costLabel = anyDiscount
+        String costLabel = mode == Mode.SELL
+                ? "§7每份回收价: " + costInline(selected.getEffectiveCost(memberPct).scaledTo(ShopPurchase.sellRatioPercent()))
+                : anyDiscount
                 ? "§7成本: §8" + costInline(selected.getCost()) + " §a→ " + costInline(selected.getEffectiveCost(memberPct)) + saleTag + memberTag
                 : "§7成本: " + costInline(selected.getCost());
         // 头部这一行位置固定（下面输入框/步进按钮都按固定 Y 命中），放不下时这里只给指引，
         // 完整成本在滚动区第一块换行全文显示，文字一个不删。
         int costLineW = dx + dw - 6 - cx;
         boolean costFitsHeader = this.font.width(fcsSplit(costLabel).clean()) <= costLineW;
-        g.drawString(this.font, costFitsHeader ? costLabel : "§7成本: §8（较长，完整内容见下方）", cx, dy + 42, CYAN, true);
+        g.drawString(this.font, costFitsHeader ? costLabel : (mode == Mode.BUY ? "§7成本" : "§7每份回收价") + ": §8（较长，完整内容见下方）", cx, dy + 42, CYAN, true);
 
         // 数量标签 + AE 风格步进按钮（文本框 amountBox 由 initScaled 定位、super.render 绘制）
         g.drawString(this.font, (mode == Mode.BUY ? "§7购买次数（可输入）:" : "§7出售次数（可输入）:"), cx, dy + 56, WHITE, true);
@@ -3802,11 +3804,10 @@ public class ShopScreen extends ScaledScreen {
         java.math.BigInteger amt = java.math.BigInteger.valueOf(amount);
         java.math.BigInteger total = (selected.hasEnergyGoods() ? selected.getGoodsList().get(0).energyAmount()
                 : java.math.BigInteger.valueOf(selected.getGoodsCount())).multiply(amt);
-        // 买价：限时折扣 + 会员折扣叠加（见 ShopMembership）；出售：按价差折价拿回（见 ShopPurchase#sellRatioPercent），
-        // 出售不是「反向打折」，走独立的口径，不受买价折扣影响
+        // 出售按折后有效买价再乘回收比例，与服务端 sellBulk 使用同一口径。
         ShopCost dcost = mode == Mode.BUY
                 ? selected.getEffectiveCost(ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier()))
-                : selected.getCost().scaledTo(ShopPurchase.sellRatioPercent());
+                : selected.getEffectiveCost(memberPct).scaledTo(ShopPurchase.sellRatioPercent());
         int py = dy + 128;
         int costTrimW = dx + dw - 10 - cx;
         String key = WalletAccountAPI.purchaseKey(selected);
@@ -3847,7 +3848,7 @@ public class ShopScreen extends ScaledScreen {
         g.pose().pushPose();
         g.pose().translate(0.0f, -detailScroll - detailBounce, 0.0f);
 
-        String txLine = "§7交易次数: §f" + formatBig(amt) + "  §7已购买: §6" + formatBig(java.math.BigInteger.valueOf(bought));
+        String txLine = "§7交易次数: §f" + formatBig(amt) + "  §7累计购买: §6" + formatBig(java.math.BigInteger.valueOf(bought));
         String tradeModeTip = switch (selected.getTradeMode()) {
             case BUY_ONLY -> "  §b[仅购买]";
             case SELL_ONLY -> "  §e[仅出售]";
@@ -3862,7 +3863,7 @@ public class ShopScreen extends ScaledScreen {
         if (selected.isPeriodLimited()) {
             long periodTicks = selected.getPeriodTicks();
             long periodLimit = selected.getPeriodLimit();
-            flowY += drawWrappedBlock(g, "§d周期限购: §f" + formatDuration(periodTicks / 20L) + "限"
+            flowY += drawWrappedBlock(g, "§d周期额度（买卖共用）: §f" + formatDuration(periodTicks / 20L) + "限"
                     + formatBig(java.math.BigInteger.valueOf(periodLimit)) + "次", cx, flowY, costTrimW, WHITE);
             if (!ClientWalletAccount.isSynced() || Minecraft.getInstance().level == null) {
                 flowY += drawWrappedBlock(g, "§7周期额度同步中…", cx, flowY, costTrimW, WHITE);
@@ -3873,7 +3874,7 @@ public class ShopScreen extends ScaledScreen {
                 // 窗口没开（从没买过）或已过期都算 0 已用；服务端 ShopPeriodLimiter 同口径
                 long periodUsed = remainingTicks > 0L ? ClientWalletAccount.getPeriodUsed(selected) : 0L;
                 long periodLeft = Math.max(0L, periodLimit - periodUsed);
-                flowY += drawWrappedBlock(g, "§7本周期已购: " + (periodLeft <= 0L ? "§c" : "§6")
+                flowY += drawWrappedBlock(g, "§7本周期已用: " + (periodLeft <= 0L ? "§c" : "§6")
                         + formatBig(java.math.BigInteger.valueOf(periodUsed)) + "§7/§f"
                         + formatBig(java.math.BigInteger.valueOf(periodLimit)) + "§7次  剩余: "
                         + (periodLeft <= 0L ? "§c" : "§a") + formatBig(java.math.BigInteger.valueOf(periodLeft)) + "§7次",
@@ -3942,6 +3943,12 @@ public class ShopScreen extends ScaledScreen {
             g.drawString(this.font, "§c电力商品不支持出售", cx, contentY + 12, DEEP_RED, true);
         } else if (selected.hasMultipleGoods()) {
             g.drawString(this.font, "§c组合商品，不支持出售", cx, contentY + 12, DEEP_RED, true);
+        } else if (selected.getRewardMode() != ShopEntry.RewardMode.NONE) {
+            g.drawString(this.font, "§c奖励类商品不支持出售", cx, contentY + 12, DEEP_RED, true);
+        } else if (selected.getCost().isEmpty()) {
+            g.drawString(this.font, "§c免费商品不能出售", cx, contentY + 12, DEEP_RED, true);
+        } else if (!selected.allowsSell()) {
+            g.drawString(this.font, "§c该商品仅允许购买，不能出售", cx, contentY + 12, DEEP_RED, true);
         } else {
             g.drawString(this.font, "§7预计消耗: §e" + formatBig(total) + " §7个商品", cx, contentY + 12, CYAN, true);
             int sellGetH = 12;
@@ -3951,16 +3958,18 @@ public class ShopScreen extends ScaledScreen {
                 sellGetH = drawFoldedBlock(g, "sellget", "§7预计获得: " + costInlineTimes(dcost, amount), cx, contentY + 24, costTrimW, GREEN);
             }
             int held = ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem());
-            g.drawString(this.font, "§7背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, contentY + 24 + sellGetH, held > 0 ? GREEN : DEEP_RED, true);
-            physicalHintExtra = sellGetH - 12;
+            int sellHintY = contentY + 24 + sellGetH;
+            sellHintY += drawWrappedBlock(g, "§7随身背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, sellHintY, costTrimW, WHITE);
+            sellHintY += drawWrappedBlock(g, "§7精妙背包及绑定 AE 网络也可供出售，实际数量以服务器为准", cx, sellHintY, costTrimW, GRAY);
+            physicalHintExtra = sellHintY - (contentY + 50);
         }
 
-        maybeRequestCostPreview(dcost);
+        if (mode == Mode.BUY) maybeRequestCostPreview(dcost);
         int costPreviewY = comboGrid ? rewardEndY + 14
                 : oddsBottom >= 0 ? (dcost.hasPhysical() ? oddsBottom + 14 : oddsBottom + 4)
                 : contentY + 50;
         costPreviewY += physicalHintExtra;
-        int cursorY = drawCostPreview(g, cx, costPreviewY, dcost, amount, detailInnerW, py + viewportH + 2048, mx, hoverMy);
+        int cursorY = mode == Mode.BUY ? drawCostPreview(g, cx, costPreviewY, dcost, amount, detailInnerW, py + viewportH + 2048, mx, hoverMy) : costPreviewY;
         contentEndY = Math.max(contentEndY, cursorY);
         int actionY = cursorY + 2;
         if (linkTarget != null) {
@@ -7225,7 +7234,7 @@ public class ShopScreen extends ScaledScreen {
             } else if (e.hasMultipleGoods() || e.getCost().hasPhysical()) {
                 lines.add(Component.literal("§7出售回收: §c组合/实物成本商品不可出售"));
             } else {
-                lines.add(Component.literal("§7出售回收: §e" + costInline(e.getCost().scaledTo(ShopPurchase.sellRatioPercent()))));
+                lines.add(Component.literal("§7出售回收: §e" + costInline(e.getEffectiveCost(ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier())).scaledTo(ShopPurchase.sellRatioPercent()))));
             }
             if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
             if (e.isPeriodLimited()) {

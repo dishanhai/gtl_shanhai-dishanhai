@@ -1,5 +1,6 @@
 package com.dishanhai.gt_shanhai.api.recipe;
 
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.integration.jei.ModuleCatalystSlotUI;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
@@ -534,6 +535,10 @@ public class DShanhaiRecipeTypes {
                 .setSlotOverlay(true, false, true, GuiTextures.FLUID_SLOT)
                 .setSlotOverlay(true, false, false, GuiTextures.DUST_OVERLAY)
                 .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
+
+        if (DShanhaiConfig.isCoinForgeDisabled()) {
+            COIN_FORGE.setXEIVisible(false);
+        }
 
         PROXY_EXECUTION = register("proxy_execution", "multiblock")
                 .setMaxIOSize(0, 0, 0, 0)

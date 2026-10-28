@@ -289,6 +289,8 @@ public class GTDishanhaiMod {
                     // apply 末尾 GTCEu 会按数据包重建查找表。查找表定稿后再写一次逆熵构成。
                     com.dishanhai.gt_shanhai.common.recipe.PrimordialReverseEntropyRecipes.install(
                             e.getServer().getRecipeManager());
+                    com.dishanhai.gt_shanhai.common.recipe.CoinForgeLoadGate.stripLoaded(
+                            e.getServer().getRecipeManager());
                 });
 
         net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(

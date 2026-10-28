@@ -19,5 +19,6 @@ public class ReverseEntropyRecipeMixin {
             at = @At("TAIL"), remap = false)
     private void gtShanhai$installReverseEntropyRecipes(CallbackInfo ci) {
         PrimordialReverseEntropyRecipes.install((RecipeManager) (Object) this);
+        com.dishanhai.gt_shanhai.common.recipe.CoinForgeLoadGate.stripLoaded((RecipeManager) (Object) this);
     }
 }

@@ -113,7 +113,8 @@ public class PrimordialCoinForgeModule extends PrimordialOmegaEngineModuleBase {
     private void scanBoostItem() {
         var stack = machineStorage.storage.getStackInSlot(0);
         long base = ITEM_PARALLEL_MAP.getOrDefault(effectiveParallelItem(stack.getItem()), DEFAULT_PARALLEL);
-        currentParallel = applyModuleCountParallelMultiplier(base, stack.getCount());
+        long normal = applyModuleCountParallelMultiplier(base, stack.getCount());
+        currentParallel = CoinForgeMintGate.quarterParallel(normal);
     }
 
     @Override
@@ -146,10 +147,12 @@ public class PrimordialCoinForgeModule extends PrimordialOmegaEngineModuleBase {
 
     @Override
     public int getMaxParallel() {
+        if (hasParallelOverdriver()) return Integer.MAX_VALUE;
         return Ints.saturatedCast(currentParallel);
     }
 
     public long getCurrentParallel() {
+        if (hasParallelOverdriver()) return Long.MAX_VALUE;
         return currentParallel;
     }
 
@@ -177,6 +180,14 @@ public class PrimordialCoinForgeModule extends PrimordialOmegaEngineModuleBase {
         textList.add(Component.literal("")
             .append(DShanhaiTextUtil.createElectricText("铸币并行: "))
             .append(parallelText));
+        textList.add(Component.literal("")
+            .append(DShanhaiTextUtil.createElectricText("铸币权限: "))
+            .append(DShanhaiTextUtil.createAuroraText(
+                    CoinForgeMintGate.permissionText(getModuleLevel()))));
+        if (!hasParallelOverdriver()) {
+            textList.add(Component.literal("正常并行的 1/4，寰宇超限器不受限")
+                    .withStyle(ChatFormatting.GRAY));
+        }
         addThreadBoostDisplay(textList);
     }
 

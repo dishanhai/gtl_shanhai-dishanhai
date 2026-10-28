@@ -92,6 +92,12 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("false=模块必须有主机才能运行",
                         "true=模块脱离主机后可独立运行配方"))
                 .setSaveConsumer(cfg.modulesWorkWithoutHost::set).build());
+        machine.addEntry(e.startBooleanToggle(Component.literal("禁用铸币工厂"), cfg.disableCoinForge.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("默认关闭：注册原初铸币工厂并加载 coin_forge 配方",
+                        "开启后不注册该机器，并移除 coin_forge 配方和产出该机器的配方",
+                        "需重启生效。已放置的铸币工厂会因方块未注册而丢失"))
+                .setSaveConsumer(cfg.disableCoinForge::set).build());
         machine.addEntry(e.startBooleanToggle(Component.literal("原初模块旧式无限制模式"),
                         cfg.primordialModuleUnrestrictedMode.get())
                 .setDefaultValue(false)

@@ -1,12 +1,16 @@
 package com.dishanhai.gt_shanhai.common.machine.primordial;
 
+import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
+
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition;
 import com.gregtechceu.gtceu.api.pattern.BlockPattern;
 import com.gregtechceu.gtceu.api.pattern.Predicates;
+import com.gregtechceu.gtceu.api.pattern.TraceabilityPredicate;
 import com.gregtechceu.gtceu.api.machine.multiblock.PartAbility;
 
 import com.gtladd.gtladditions.common.machine.multiblock.structure.MultiBlockStructure;
@@ -158,7 +162,7 @@ public class PrimordialOmegaEngineStructure {
                         .or(Predicates.blocks(divergenceGenerator))
                         .or(Predicates.blocks(matterCaster))
                         .or(Predicates.blocks(engravingModule))
-                        .or(Predicates.blocks(coinForge))
+                        .or(optionalModule(coinForge))
                         .or(Predicates.blocks(massEnergyCore))
                         .or(Predicates.blocks(flameCrackingKiln))
                         .or(Predicates.blocks(abyssalRefinery))
@@ -216,13 +220,23 @@ public class PrimordialOmegaEngineStructure {
         };
         var blocks = new java.util.ArrayList<Block>(ids.length);
         for (String id : ids) {
+            if ("primordial_coin_forge".equals(id) && DShanhaiConfig.isCoinForgeDisabled()) {
+                continue;
+            }
             Block block = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gt_shanhai", id));
-            if (block == null || block == net.minecraft.world.level.block.Blocks.AIR) {
+            if (block == null || block == Blocks.AIR) {
                 throw new IllegalStateException("[SHANHAI-HOST] 未注册模组：" + id);
             }
             blocks.add(block);
         }
         return java.util.List.copyOf(blocks);
+    }
+
+    private static TraceabilityPredicate optionalModule(Block block) {
+        if (block == null || block == Blocks.AIR) {
+            return Predicates.blocks(Blocks.BARRIER);
+        }
+        return Predicates.blocks(block);
     }
 
     private PrimordialOmegaEngineStructure() {}

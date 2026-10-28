@@ -50,8 +50,15 @@ public final class CurrencyStageConfig {
     public static String stagePath(ResourceLocation currency) {
         ensureLoaded();
         if (currency == null) return "";
+        return join(prefix, tierOf(currency));
+    }
+
+    /** 商店货币阶段名，如 {@code ulv}。没写阶段返回空串。 */
+    public static String tierOf(ResourceLocation currency) {
+        ensureLoaded();
+        if (currency == null) return "";
         String tier = TIERS.get(currency);
-        return join(prefix, tier);
+        return tier == null ? "" : tier;
     }
 
     static String join(String stagePrefix, String tier) {

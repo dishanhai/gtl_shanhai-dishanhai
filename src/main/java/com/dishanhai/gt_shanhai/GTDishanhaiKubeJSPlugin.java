@@ -58,6 +58,7 @@ public class GTDishanhaiKubeJSPlugin extends KubeJSPlugin {
     @Override
     public void injectRuntimeRecipes(RecipesEventJS event, RecipeManager manager,
                                      Map<ResourceLocation, Recipe<?>> recipes) {
+        com.dishanhai.gt_shanhai.common.recipe.CoinForgeLoadGate.stripNameMap(recipes);
         com.dishanhai.gt_shanhai.common.recipe.PrimordialReverseEntropyRecipes.addToNameMap(recipes);
     }
 }

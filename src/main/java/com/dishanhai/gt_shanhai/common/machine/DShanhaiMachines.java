@@ -1138,31 +1138,35 @@ public class DShanhaiMachines {
         });
 
         // ========== 原初铸币工厂 ==========
-        PRIMORDIAL_COIN_FORGE = GTDishanhaiRegistration.REGISTRATE
-                .multiblock("primordial_coin_forge",
-                        PrimordialCoinForgeModule::new)
-                .rotationState(RotationState.ALL)
-                .recipeTypes(DShanhaiRecipeTypes.COIN_FORGE)
-                .pattern(PrimordialCoinForgeStructure::createPattern)
-                .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
-                        new ResourceLocation("gtceu", "bronze_machine_casing")))
-                .workableCasingRenderer(
-                        new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
-                        new ResourceLocation(MOD_ID, "block/machine/primordial_coin_forge"))
-                .register();
+        if (DShanhaiConfig.isCoinForgeDisabled()) {
+            GTDishanhaiMod.LOGGER.info("[铸币工厂] 配置已禁用，跳过 primordial_coin_forge 注册");
+        } else {
+            PRIMORDIAL_COIN_FORGE = GTDishanhaiRegistration.REGISTRATE
+                    .multiblock("primordial_coin_forge",
+                            PrimordialCoinForgeModule::new)
+                    .rotationState(RotationState.ALL)
+                    .recipeTypes(DShanhaiRecipeTypes.COIN_FORGE)
+                    .pattern(PrimordialCoinForgeStructure::createPattern)
+                    .appearanceBlock(() -> ForgeRegistries.BLOCKS.getValue(
+                            new ResourceLocation("gtceu", "bronze_machine_casing")))
+                    .workableCasingRenderer(
+                            new ResourceLocation("gtceu", "block/casings/steam/bronze/side"),
+                            new ResourceLocation(MOD_ID, "block/machine/primordial_coin_forge"))
+                    .register();
 
-        PRIMORDIAL_COIN_FORGE.setTooltipBuilder((stack, tooltips) -> {
-            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("原初铸币工厂"));
-            tooltips.add(Component.literal(""));
-            tooltips.add(DShanhaiTextUtil.createElectricText("从原初物质中铸造GT币的专用工厂"));
-            tooltips.add(DShanhaiTextUtil.createAuroraText("物质模块控制并行上限，线程增强槽扩展跨配方线程"));
-            tooltips.add(Component.literal("§7需安装在原初奥米伽引擎模块位"));
-            tooltips.add(Component.literal("§7配方类型：铸币工厂（coin_forge）"));
-            tooltips.add(Component.literal("§7需安装在引擎模块位"));
-            tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
-                    .append(Component.literal("§f，直接从电网取电")));
-        });
+            PRIMORDIAL_COIN_FORGE.setTooltipBuilder((stack, tooltips) -> {
+                tooltips.add(DShanhaiTextUtil.createUltimateRainbow("原初铸币工厂"));
+                tooltips.add(Component.literal(""));
+                tooltips.add(DShanhaiTextUtil.createElectricText("从原初物质中铸造GT币的专用工厂"));
+                tooltips.add(DShanhaiTextUtil.createAuroraText("物质模块控制并行上限，线程增强槽扩展跨配方线程"));
+                tooltips.add(Component.literal("§7需安装在原初奥米伽引擎模块位"));
+                tooltips.add(Component.literal("§7配方类型：铸币工厂（coin_forge）"));
+                tooltips.add(Component.literal("§7需安装在引擎模块位"));
+                tooltips.add(Component.literal("")
+                        .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                        .append(Component.literal("§f，直接从电网取电")));
+            });
+        }
         var wlsRecipeTypes = new java.util.ArrayList<com.gregtechceu.gtceu.api.recipe.GTRecipeType>();
         wlsRecipeTypes.add(GTLRecipeTypes.COSMOS_SIMULATION_RECIPES);
         wlsRecipeTypes.add(GTLRecipeTypes.ELEMENT_COPYING_RECIPES);
