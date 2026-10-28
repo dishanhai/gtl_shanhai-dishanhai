@@ -116,6 +116,9 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private String prerequisiteQuestId = ""; // 前置 FTBQ 任务 ID（十六进制），可空 = 不要求前置
 
     private EditBox countBox, catBox, sparkBox, euBox, descBox, limitBox, linkKeyBox, nameBox, periodSecondsBox, periodCapBox;
+    private EditBox energyGoodsBox;
+    private boolean energyGoods;
+    private String energyGoodsAmount = "1";
     private EditBox discountPercentBox, discountMinutesBox, saveUsesBox;
     private MultiLineTextArea descArea;       // 描述「展开编写」大图层里的多行编辑区（与 descBox 同源，双向同步）
     private boolean descEditorOpen;           // 描述展开编写大图层开关
@@ -177,7 +180,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
             int firstItemCount = 1;
             boolean sawFirstItem = false;
             for (ShopEntry.GoodsStack gs : entry.getGoodsList()) {
-                if (gs.isFluid()) {
+                if (gs.isEnergy()) {
+                    energyGoods = true;
+                    energyGoodsAmount = gs.energyAmount().toString();
+                } else if (gs.isFluid()) {
                     Fluid fluid = gs.fluid();
                     if (fluid != net.minecraft.world.level.material.Fluids.EMPTY) {
                         goodsFluids.add(FluidStack.create(fluid, Math.max(1L, gs.count())));
@@ -242,7 +248,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         for (ItemStack st : goodsList) sb.append(stackKey(st)).append(';');
         sb.append('|');
         for (FluidStack fs : goodsFluids) sb.append(fluidKey(fs)).append(';');
-        sb.append('|').append(count).append('|').append(category).append('|').append(description)
+        sb.append('|').append(energyGoods).append('|').append(energyGoodsAmount).append('|').append(count).append('|').append(category).append('|').append(description)
                 .append('|').append(limit).append('|').append(saveUses)
                 .append('|').append(periodSeconds).append('|').append(periodCap)
                 .append('|').append(discountPercent).append('|').append(discountMinutes)
@@ -544,6 +550,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private String draftGoodsName() {
         String custom = nameBox != null ? nameBox.getValue().trim() : (displayName == null ? "" : displayName.trim());
         if (!custom.isEmpty()) return custom;
+        if (energyGoods) return "无线电力";
         String primary = "";
         int kinds = 0;
         for (ItemStack st : goodsList) {
@@ -739,7 +746,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private static final int USES_BOX_W = 110;
     private int limitLabelX() { return fieldX() + USES_BOX_W + 12; }
 
-    private int limitBoxX() { return limitLabelX() + this.font.width("服務端次數") + 6; }
+    private int limitBoxX() { return limitLabelX() + this.font.width("服务端次数") + 6; }
 
     /** 显示名称独占一行，不再和商品排抢宽度。 */
     private static final int NAME_BOX_W = 200;
@@ -762,6 +769,9 @@ public class ShopEntryEditScreen extends ScaledScreen {
     private void placeEditorWidgets(boolean overlayOpen) {
         placeBox(nameBox, Row.NAME, overlayOpen);
         placeBox(countBox, Row.COUNT, overlayOpen);
+        placeBox(energyGoodsBox, Row.COUNT, overlayOpen);
+        countBox.setVisible(countBox.visible && !energyGoods);
+        energyGoodsBox.setVisible(energyGoodsBox.visible && energyGoods);
         placeBox(catBox, Row.CATEGORY, overlayOpen);
         placeBox(descBox, Row.DESC, overlayOpen);
         placeBox(sparkBox, Row.SPARK, overlayOpen);
@@ -812,13 +822,18 @@ public class ShopEntryEditScreen extends ScaledScreen {
 
         int fx = fieldX();
         countBox = mkNumBox(fx, countY(), 60, Integer.toString(count), 1, COUNT_MAX, v -> count = v);
+        energyGoodsBox = new AnimatableEditBox(this.font, fx, countY(), 160, 12, Component.literal("每份 EU"));
+        energyGoodsBox.setMaxLength(256);
+        energyGoodsBox.setFilter(s -> s.isEmpty() || s.matches("[0-9]+"));
+        energyGoodsBox.setValue(energyGoodsAmount);
+        energyGoodsBox.setResponder(s -> energyGoodsAmount = s);
         catBox = new AnimatableEditBox(this.font, fx, catY(), CAT_BOX_W, 12, Component.literal("分类"));
         catBox.setMaxLength(32);
         catBox.setValue(category == null ? "" : category);
         catBox.setBordered(true);
         catBox.setTextColor(0xFFFFFF);
         catBox.setResponder(s -> category = s);
-        limitBox = new AnimatableEditBox(this.font, limitBoxX(), usesY(), USES_BOX_W, 12, Component.literal("服務端次數"));
+        limitBox = new AnimatableEditBox(this.font, limitBoxX(), usesY(), USES_BOX_W, 12, Component.literal("服务端次数"));
         limitBox.setMaxLength(19);
         limitBox.setValue(limit < 0L ? "" : Long.toString(limit));
         limitBox.setBordered(true);
@@ -833,7 +848,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 if (saveUsesBox != null) saveUsesBox.setValue(saveUses < 0L ? "" : Long.toString(saveUses));
             }
         });
-        saveUsesBox = new AnimatableEditBox(this.font, fieldX(), usesY(), USES_BOX_W, 12, Component.literal("存檔次數"));
+        saveUsesBox = new AnimatableEditBox(this.font, fieldX(), usesY(), USES_BOX_W, 12, Component.literal("存档次数"));
         saveUsesBox.setMaxLength(19);
         saveUsesBox.setValue(saveUses < 0L ? "" : Long.toString(saveUses));
         saveUsesBox.setBordered(true);
@@ -946,6 +961,7 @@ public class ShopEntryEditScreen extends ScaledScreen {
         animate(countBox, catBox, limitBox, saveUsesBox, periodSecondsBox, periodCapBox, discountPercentBox,
                 discountMinutesBox, sparkBox, euBox, descBox, linkKeyBox, nameBox);
         addRenderableWidget(countBox);
+        addRenderableWidget(energyGoodsBox);
         addRenderableWidget(catBox);
         addRenderableWidget(limitBox);
         addRenderableWidget(saveUsesBox);
@@ -1202,7 +1218,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
         switch (r) {
             case GOODS -> {
                 // 奖励模式启用且池非空时，交付内容完全由奖励池决定：商品栏禁用手动选择、镜像池首项
-                if (goodsLockedByReward()) {
+                if (energyGoods) {
+                    label(g, "商品", y);
+                    g.drawString(this.font, "§e无线 EU 电力商品", fieldX(), y + 6, GRAY, true);
+                } else if (goodsLockedByReward()) {
                     g.drawString(this.font, "§7商品", cx(), y + 6, GRAY, true);
                     EditorWidgets.itemSlot(g, this.font, slotsX(), y, lockedGoodsDisplay(), false);
                     drawSideHint(g, lockedGoodsLines(), slotTextX(), y, rowH(r));
@@ -1211,7 +1230,10 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 }
             }
             case NAME -> label(g, "显示名称", y);
-            case COUNT -> label(g, "每份数量", y);
+            case COUNT -> {
+                label(g, energyGoods ? "每份 EU" : "每份数量", y);
+                ui.draw(g, this.font, fieldX() + 170, y, 70, FIELD_H, energyGoods ? "§e电力商品" : "§b切换电力", mx, my, true);
+            }
             case CATEGORY -> {
                 label(g, "分类", y);
                 ui.draw(g, this.font, catCycleX(), y - 1, 18, 14, "§e▾", mx, my, true);
@@ -1247,8 +1269,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
                 drawLines(g, wrap(DISCOUNT_HINT, fullW), fieldX(), y + FIELD_H + 2);
             }
             case USES -> {
-                g.drawString(this.font, "§7存檔次數", cx(), y + 3, GRAY, true);
-                g.drawString(this.font, "§7服務端次數", limitLabelX(), y + 3, GRAY, true);
+                g.drawString(this.font, "§7存档次数", cx(), y + 3, GRAY, true);
+                g.drawString(this.font, "§7服务端次数", limitLabelX(), y + 3, GRAY, true);
             }
             case PERIOD -> {
                 // 两框都空=不启用，独立于永久总量，每玩家各自计数，到点自动刷新
@@ -1312,7 +1334,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
         switch (r) {
             case GOODS:
                 // 奖励池接管时禁用，不响应点击
-                return !goodsLockedByReward() && slotClick(goodsRowClicked(mx, my, btn));
+                return !energyGoods && !goodsLockedByReward() && slotClick(goodsRowClicked(mx, my, btn));
+            case COUNT:
+                if (!ui.hit(mx, my, fieldX() + 170, y, 70, FIELD_H, true)) return false;
+                energyGoods = !energyGoods;
+                return true;
             case CATEGORY:
                 if (!ui.hit(mx, my, catCycleX(), y - 1, 18, 14, true)) return false;
                 capture();
@@ -2605,8 +2631,11 @@ public class ShopEntryEditScreen extends ScaledScreen {
         if (rewardMode == ShopEntry.RewardMode.FTBQ && ftbqTableId.isEmpty()) {
             out.add(new Problem(Tab.REWARD, Row.REWARD_POOL, "奖励模式选了 FTBQ 表，但还没选表"));
         }
+        if (energyGoods && rewardMode != ShopEntry.RewardMode.NONE) {
+            out.add(new Problem(Tab.REWARD, Row.REWARD_MODE, "电力商品不能启用奖励模式"));
+        }
         if (buildGoodsForSubmit().isEmpty()) {
-            out.add(goodsLockedByReward()
+            out.add(energyGoods ? new Problem(Tab.GOODS, Row.COUNT, "请输入大于零的 EU 数量（最多 256 位）") : goodsLockedByReward()
                     ? new Problem(Tab.REWARD, Row.REWARD_POOL, "FTBQ 表里没有物品类奖励，定不了商品身份")
                     : new Problem(Tab.GOODS, Row.GOODS, "还没选商品"));
         }
@@ -2628,6 +2657,13 @@ public class ShopEntryEditScreen extends ScaledScreen {
      * 首项数量吃独立的 count/countBox（与改造前单商品行为一致），第2项起用各自槽位自带数量（点槽位重开选择器改）。
      */
     private List<ShopEntry.GoodsStack> buildGoodsForSubmit() {
+        if (energyGoods) {
+            try {
+                return List.of(ShopEntry.GoodsStack.ofEnergy(new BigInteger(energyGoodsAmount)));
+            } catch (RuntimeException ex) {
+                return List.of();
+            }
+        }
         boolean goodsLocked = goodsLockedByReward();
         List<ItemStack> sourceStacks = goodsLocked ? java.util.List.of(lockedGoodsDisplay()) : goodsList;
         List<ShopEntry.GoodsStack> goodsForSubmit = new ArrayList<>();

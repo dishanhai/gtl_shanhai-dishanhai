@@ -77,11 +77,25 @@ public final class ClientWalletAccount {
         return v == null ? -1L : v;
     }
 
+    /** 周期限购仍按商品 ID 与分类聚合，与稳定 ID 的购买统计分开。 */
+    public static long getPeriodAnchor(com.dishanhai.gt_shanhai.common.shop.ShopEntry entry) {
+        return getPeriodAnchor(periodKey(entry));
+    }
+
     /** 某商品条目在当前周期窗口内的已用次数（见 ShopPeriodLimiter）；窗口是否已过期由调用方按锚点判断，未同步/未买过为 0。 */
     public static long getPeriodUsed(String key) {
         if (key == null) return 0L;
         Long v = periodUsed.get(key);
         return v == null ? 0L : v;
+    }
+
+    public static long getPeriodUsed(com.dishanhai.gt_shanhai.common.shop.ShopEntry entry) {
+        return getPeriodUsed(periodKey(entry));
+    }
+
+    private static String periodKey(com.dishanhai.gt_shanhai.common.shop.ShopEntry entry) {
+        return entry == null ? null : com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI.purchaseKey(
+                entry.getGoodsId(), entry.getCategory());
     }
 
     public static boolean isSynced() {

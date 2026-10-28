@@ -365,11 +365,16 @@ public class ShopEditPacket {
             return;
         }
         for (ShopEntry.GoodsStack gs : pkt.goodsList) {
-            boolean ok = gs.isFluid() ? ForgeRegistries.FLUIDS.containsKey(gs.id()) : ForgeRegistries.ITEMS.containsKey(gs.id());
+            boolean ok = gs.isEnergy() ? gs.energyAmount().signum() > 0 : gs.isFluid() ? ForgeRegistries.FLUIDS.containsKey(gs.id()) : ForgeRegistries.ITEMS.containsKey(gs.id());
             if (!ok) {
                 player.sendSystemMessage(Component.literal("§c[山海商店] 商品" + (gs.isFluid() ? "流体" : "物品") + "不存在: " + gs.id()));
                 return;
             }
+        }
+        if (pkt.goodsList.stream().anyMatch(ShopEntry.GoodsStack::isEnergy)
+                && (pkt.goodsList.size() != 1 || pkt.rewardMode != ShopEntry.RewardMode.NONE)) {
+            player.sendSystemMessage(Component.literal("§c[山海商店] 电力商品不可与其他商品或奖励混用"));
+            return;
         }
         if (!pkt.cost.isValid()) {
             player.sendSystemMessage(Component.literal("§c[山海商店] 成本无效（物品或流体不存在）"));
@@ -391,8 +396,8 @@ public class ShopEditPacket {
                 : old != null ? old.getRemainingUses() : entry.getServerUses());
         // 分支副本的身份标记不经客户端传输：编辑沿用旧条目的，新增（含复制为新条目）一律是独立商品
         if (old != null) entry.withBranchSource(old.getBranchSource());
-        String limitTip = " §d(存檔次數:" + usesText(entry.getRemainingUses())
-                + "，服務端次數:" + usesText(entry.getServerUses()) + ")";
+        String limitTip = " §d(存档次数:" + usesText(entry.getRemainingUses())
+                + "，服务端次数:" + usesText(entry.getServerUses()) + ")";
 
         if (pkt.action == Action.ADD) {
             if (pkt.oldEntryKey != -1L) {

@@ -239,6 +239,10 @@ public final class ShopPurchase {
      */
     private static String deliverGoodsList(ServerPlayer player, ShopEntry entry, long times, boolean aeMode, boolean backpackMode) {
         java.math.BigInteger t = java.math.BigInteger.valueOf(times);
+        if (entry.hasEnergyGoods()) {
+            ShopWirelessEu.add(player, entry.getGoodsList().get(0).energyAmount().multiply(t));
+            return "wireless_eu";
+        }
         java.util.List<ItemDelivery> deliveries = new java.util.ArrayList<>(entry.getGoodsList().size());
         boolean fluidDelivered = false;
         for (ShopEntry.GoodsStack gs : entry.getGoodsList()) {
@@ -947,7 +951,7 @@ public final class ShopPurchase {
      * @return 实际出售份数
      */
     public static long sellBulk(ServerPlayer player, ShopEntry entry, long times, boolean backpackMode) {
-        if (player == null || entry == null || !entry.isValid() || times <= 0L) {
+        if (player == null || entry == null || entry.hasEnergyGoods() || !entry.isValid() || times <= 0L) {
             return 0L;
         }
         MinecraftServer server = player.getServer();

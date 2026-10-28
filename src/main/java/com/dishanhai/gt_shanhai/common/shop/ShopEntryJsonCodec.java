@@ -46,7 +46,7 @@ public final class ShopEntryJsonCodec {
         if (nbt != null && !nbt.isEmpty()) {
             out.addProperty("nbt", nbt.toString());
         }
-        if (entry.hasMultipleGoods() || entry.hasFluidGoods()) {
+        if (entry.hasMultipleGoods() || entry.hasFluidGoods() || entry.hasEnergyGoods()) {
             out.add("goodsList", goodsListToJson(entry.getGoodsList()));
         }
         if (entry.hasCustomIcons()) {

@@ -294,6 +294,7 @@ public class ShopActionPacket {
         long remainingPeriodBefore = entry.isPeriodLimited()
                 ? com.dishanhai.gt_shanhai.common.shop.ShopPeriodLimiter.remaining(player, entry, periodKey) : -1L;
         if (!cheat && entry.isPeriodLimited() && remainingPeriodBefore <= 0L) {
+            WalletAccountAPI.sync(player);
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品本周期购买额度已用完，下个周期自动刷新"));
             sendResult(player, pkt, 0L, "本周期购买额度已用完");
             return;
@@ -363,6 +364,7 @@ public class ShopActionPacket {
             WalletAccountAPI.sync(player);
         }
         String viaText = switch (r.via() == null ? "" : r.via()) {
+            case "wireless_eu" -> " §7→ 已注入无线 EU 电网";
             case "ae" -> " §7→ 已注入 AE 网络";
             case "disk_hatch" -> " §7→ 已注入磁盘仓室";
             case "sda" -> " §7→ 已打包为超级磁盘阵列";
@@ -457,6 +459,7 @@ public class ShopActionPacket {
         if (entry.isPeriodLimited()) {
             String periodKey = WalletAccountAPI.purchaseKey(entry.getGoodsId(), entry.getCategory());
             if (com.dishanhai.gt_shanhai.common.shop.ShopPeriodLimiter.remaining(player, entry, periodKey) <= 0L) {
+                WalletAccountAPI.sync(player);
                 player.sendSystemMessage(Component.literal("§c[山海商店] 该商品本周期出售额度已用完，下个周期自动刷新"));
                 sendResult(player, pkt, 0L, "本周期出售额度已用完");
                 return;

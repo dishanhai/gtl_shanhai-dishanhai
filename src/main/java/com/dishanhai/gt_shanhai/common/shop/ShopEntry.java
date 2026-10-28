@@ -208,6 +208,8 @@ public class ShopEntry {
     /** 商品清单单项：物品/流体（isFluid） + 数量（流体=mB） + NBT（仅物品，流体不支持，同 {@link ExchangeEntry.Ingredient}）。
      *  {@link #goods} 列表 ≥2 项即「组合商品」，购买时一次性交付每一项。 */
     public static final class GoodsStack {
+        public static final ResourceLocation ENERGY_ID = new ResourceLocation("gt_shanhai", "wireless_eu");
+        private static final String ENERGY_AMOUNT = "ShanhaiWirelessEu";
         private final ResourceLocation id;
         private final boolean isFluid;
         private final int count;
@@ -227,6 +229,23 @@ public class ShopEntry {
         /** 流体商品：count 为 mB，不支持 NBT。购买交付强制走绑定 AE 网络注入，见 {@link ShopPurchase}。 */
         public static GoodsStack ofFluid(ResourceLocation id, int amountMb) {
             return new GoodsStack(id, true, amountMb, null);
+        }
+
+        public static GoodsStack ofEnergy(java.math.BigInteger amount) {
+            if (amount == null || amount.signum() <= 0 || amount.toString().length() > 256)
+                throw new IllegalArgumentException("Invalid wireless EU amount");
+            net.minecraft.nbt.CompoundTag tag = new net.minecraft.nbt.CompoundTag();
+            tag.putString(ENERGY_AMOUNT, amount.toString());
+            return new GoodsStack(ENERGY_ID, false, 1, tag);
+        }
+
+        public boolean isEnergy() { return !isFluid && ENERGY_ID.equals(id); }
+
+        public java.math.BigInteger energyAmount() {
+            if (!isEnergy() || nbt == null) return java.math.BigInteger.ZERO;
+            String value = nbt.getString(ENERGY_AMOUNT);
+            if (value.isEmpty() || value.length() > 256 || !value.matches("[0-9]+")) return java.math.BigInteger.ZERO;
+            return new java.math.BigInteger(value);
         }
 
         public ResourceLocation id() { return id; }
@@ -764,12 +783,12 @@ public class ShopEntry {
 
     /** 是否允许玩家从商店购买这条目（SELL_ONLY 时禁止）。 */
     public boolean allowsBuy() {
-        return tradeMode != TradeMode.SELL_ONLY;
+        return hasEnergyGoods() || tradeMode != TradeMode.SELL_ONLY;
     }
 
     /** 是否允许玩家把这条目卖回商店（BUY_ONLY 时禁止）。 */
     public boolean allowsSell() {
-        return tradeMode != TradeMode.BUY_ONLY;
+        return !hasEnergyGoods() && tradeMode != TradeMode.BUY_ONLY;
     }
 
     /** 主商品身份（列表首项）——同物品多条目定位、网格分类等场景仍按这个身份识别整条商品条目。 */
@@ -804,11 +823,18 @@ public class ShopEntry {
     /** 商品清单非空、清单内每一项都在当前注册表中（物品查 ITEMS，流体查 FLUIDS），且成本有效。空成本是免费，也算有效。 */
     public boolean isValid() {
         if (goods.isEmpty() || !cost.isValid()) return false;
+        if (hasEnergyGoods()) return goods.size() == 1 && goods.get(0).energyAmount().signum() > 0
+                && rewardMode == RewardMode.NONE;
         for (GoodsStack g : goods) {
             boolean ok = g.isFluid() ? ForgeRegistries.FLUIDS.containsKey(g.id()) : ForgeRegistries.ITEMS.containsKey(g.id());
             if (!ok) return false;
         }
         return true;
+    }
+
+    public boolean hasEnergyGoods() {
+        for (GoodsStack g : goods) if (g.isEnergy()) return true;
+        return false;
     }
 
     /** 商品清单里是否有任意一项是流体。流体商品没有背包/精妙背包容器可落地，购买交付强制要求开启 AE 模式
@@ -841,6 +867,7 @@ public class ShopEntry {
     /** 商品清单里是否有任意一项已经不在当前物品/流体注册表（模组被卸载/物品被移除）。仅用于展示判断。 */
     public boolean hasMissingGoods() {
         for (GoodsStack g : goods) {
+            if (g.isEnergy()) continue;
             if (g.id() == null) continue;
             boolean ok = g.isFluid() ? ForgeRegistries.FLUIDS.containsKey(g.id()) : ForgeRegistries.ITEMS.containsKey(g.id());
             if (!ok) return true;
@@ -888,6 +915,7 @@ public class ShopEntry {
     public ItemStack displayGoodsStack() {
         if (goods.isEmpty()) return ItemStack.EMPTY;
         GoodsStack primary = goods.get(0);
+        if (primary.isEnergy()) return new ItemStack(net.minecraft.world.item.Items.REDSTONE);
         if (primary.isFluid()) return ItemStack.EMPTY; // 流体主商品无 ItemStack 表达，调用方须先查 isPrimaryGoodsFluid()
         if (primary.id() != null && !ForgeRegistries.ITEMS.containsKey(primary.id())) {
             return missingItemStack(primary.id(), primary.count());
@@ -903,6 +931,7 @@ public class ShopEntry {
     public String goodsDisplayName() {
         if (hasCustomName()) return displayName;
         GoodsStack primaryGs = goods.isEmpty() ? null : goods.get(0);
+        if (primaryGs != null && primaryGs.isEnergy()) return "无线电力";
         String primary;
         if (primaryGs != null && primaryGs.isFluid()) {
             net.minecraft.world.level.material.Fluid f = primaryGs.fluid();
@@ -986,6 +1015,7 @@ public class ShopEntry {
      * 口径同 {@link #goodsDisplayName()} 对主商品缺失的处理。供「预计获得」「成分」等按单项展示复用。
      */
     public static String goodsSlotDisplayName(GoodsStack g) {
+        if (g.isEnergy()) return "无线电力";
         if (g.isFluid()) {
             net.minecraft.world.level.material.Fluid f = g.fluid();
             if (f == net.minecraft.world.level.material.Fluids.EMPTY) return "§c缺失流体:" + g.id();

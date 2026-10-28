@@ -3755,7 +3755,7 @@ public class ShopScreen extends ScaledScreen {
         int textX = cx + 24;
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, selected.goodsDisplayName(), dx + dw - 6 - textX),
                 textX, dy + 10, WHITE, true);
-        String countLine = selected.hasMultipleGoods()
+        String countLine = selected.hasEnergyGoods() ? "§7每份无线 EU（完整数量见下方）" : selected.hasMultipleGoods()
                 ? "§7组合商品 §f" + selected.getGoodsList().size() + " §7种"
                 : "§7每份 §f" + selected.getGoodsCount() + " §7个";
         if (selected.isLimited()) {
@@ -3800,7 +3800,8 @@ public class ShopScreen extends ScaledScreen {
 
         // 预计（BigInteger 防溢出，紧凑显示）；成本多元 → 显示整条成本 ×次数
         java.math.BigInteger amt = java.math.BigInteger.valueOf(amount);
-        java.math.BigInteger total = java.math.BigInteger.valueOf(selected.getGoodsCount()).multiply(amt);
+        java.math.BigInteger total = (selected.hasEnergyGoods() ? selected.getGoodsList().get(0).energyAmount()
+                : java.math.BigInteger.valueOf(selected.getGoodsCount())).multiply(amt);
         // 买价：限时折扣 + 会员折扣叠加（见 ShopMembership）；出售：按价差折价拿回（见 ShopPurchase#sellRatioPercent），
         // 出售不是「反向打折」，走独立的口径，不受买价折扣影响
         ShopCost dcost = mode == Mode.BUY
@@ -3863,22 +3864,25 @@ public class ShopScreen extends ScaledScreen {
             long periodLimit = selected.getPeriodLimit();
             flowY += drawWrappedBlock(g, "§d周期限购: §f" + formatDuration(periodTicks / 20L) + "限"
                     + formatBig(java.math.BigInteger.valueOf(periodLimit)) + "次", cx, flowY, costTrimW, WHITE);
-            long anchor = ClientWalletAccount.getPeriodAnchor(key);
-            net.minecraft.client.multiplayer.ClientLevel lvl = Minecraft.getInstance().level;
-            long gameTime = lvl != null ? lvl.getGameTime() : 0L;
-            long remainingTicks = anchor >= 0L ? anchor + periodTicks - gameTime : -1L;
-            // 窗口没开（从没买过）或已过期都算 0 已用；服务端 ShopPeriodLimiter 同口径
-            long periodUsed = remainingTicks > 0L ? ClientWalletAccount.getPeriodUsed(key) : 0L;
-            long periodLeft = Math.max(0L, periodLimit - periodUsed);
-            flowY += drawWrappedBlock(g, "§7本周期已购: " + (periodLeft <= 0L ? "§c" : "§6")
-                    + formatBig(java.math.BigInteger.valueOf(periodUsed)) + "§7/§f"
-                    + formatBig(java.math.BigInteger.valueOf(periodLimit)) + "§7次  剩余: "
-                    + (periodLeft <= 0L ? "§c" : "§a") + formatBig(java.math.BigInteger.valueOf(periodLeft)) + "§7次",
-                    cx, flowY, costTrimW, WHITE);
-            if (remainingTicks > 0L) {
-                flowY += drawWrappedBlock(g, "§7剩余刷新: §f" + formatDuration(remainingTicks / 20L), cx, flowY, costTrimW, WHITE);
+            if (!ClientWalletAccount.isSynced() || Minecraft.getInstance().level == null) {
+                flowY += drawWrappedBlock(g, "§7周期额度同步中…", cx, flowY, costTrimW, WHITE);
             } else {
-                flowY += drawWrappedBlock(g, "§a限额充足无需刷新", cx, flowY, costTrimW, GREEN);
+                long anchor = ClientWalletAccount.getPeriodAnchor(selected);
+                long gameTime = Minecraft.getInstance().level.getGameTime();
+                long remainingTicks = anchor >= 0L ? anchor + periodTicks - gameTime : -1L;
+                // 窗口没开（从没买过）或已过期都算 0 已用；服务端 ShopPeriodLimiter 同口径
+                long periodUsed = remainingTicks > 0L ? ClientWalletAccount.getPeriodUsed(selected) : 0L;
+                long periodLeft = Math.max(0L, periodLimit - periodUsed);
+                flowY += drawWrappedBlock(g, "§7本周期已购: " + (periodLeft <= 0L ? "§c" : "§6")
+                        + formatBig(java.math.BigInteger.valueOf(periodUsed)) + "§7/§f"
+                        + formatBig(java.math.BigInteger.valueOf(periodLimit)) + "§7次  剩余: "
+                        + (periodLeft <= 0L ? "§c" : "§a") + formatBig(java.math.BigInteger.valueOf(periodLeft)) + "§7次",
+                        cx, flowY, costTrimW, WHITE);
+                if (remainingTicks > 0L) {
+                    flowY += drawWrappedBlock(g, "§7剩余刷新: §f" + formatDuration(remainingTicks / 20L), cx, flowY, costTrimW, WHITE);
+                } else {
+                    flowY += drawWrappedBlock(g, "§a限额充足无需刷新", cx, flowY, costTrimW, GREEN);
+                }
             }
         }
         int contentY = flowY - 12; // 下游的「预计…」各行都按 contentY+12 起排
@@ -3894,7 +3898,16 @@ public class ShopScreen extends ScaledScreen {
             contentY += drawFoldedBlock(g, "need", "§7预计消耗: " + costInlineTimes(dcost, amount), cx, contentY + 12, costTrimW, CYAN) - 12;
             ShopEntry.RewardMode rm = selected.getRewardMode();
             int physicalHintY;
-            if (comboGrid) {
+            if (selected.hasEnergyGoods()) {
+                java.math.BigInteger perUnit = selected.getGoodsList().get(0).energyAmount();
+                physicalHintY = contentY + 24 + drawWrappedBlock(g, "§7每份电力: §e" + perUnit + " EU", cx, contentY + 24, costTrimW, GREEN);
+                physicalHintY += drawWrappedBlock(g, "§7每份电压阶段: §e"
+                        + com.dishanhai.gt_shanhai.common.shop.ShopEnergyVoltage.label(perUnit), cx, physicalHintY, costTrimW, GREEN);
+                physicalHintY += drawWrappedBlock(g, "§7预计注入无线电网: §e" + total + " EU", cx, physicalHintY, costTrimW, GREEN);
+                physicalHintY += drawWrappedBlock(g, "§7总量电压阶段: §e"
+                        + com.dishanhai.gt_shanhai.common.shop.ShopEnergyVoltage.label(total), cx, physicalHintY, costTrimW, GREEN);
+                oddsBottom = physicalHintY;
+            } else if (comboGrid) {
                 rewardEndY = drawRewardPreview(g, cx, contentY + 24, selected.getGoodsList(), amount, detailInnerW, mx, hoverMy);
                 physicalHintY = rewardEndY;
             } else if (normalGoods && previewBar) {
@@ -3925,6 +3938,8 @@ public class ShopScreen extends ScaledScreen {
             if (dcost.hasPhysical()) {
                 physicalHintExtra = drawWrappedBlock(g, "§8含实物成本：物品需在背包 / 流体需绑定 AE", cx, physicalHintY, costTrimW, GRAY) - 12;
             }
+        } else if (selected.hasEnergyGoods()) {
+            g.drawString(this.font, "§c电力商品不支持出售", cx, contentY + 12, DEEP_RED, true);
         } else if (selected.hasMultipleGoods()) {
             g.drawString(this.font, "§c组合商品，不支持出售", cx, contentY + 12, DEEP_RED, true);
         } else {
@@ -7170,7 +7185,11 @@ public class ShopScreen extends ScaledScreen {
             }
             List<Component> lines = new ArrayList<>();
             lines.add(Component.literal("§f" + e.goodsDisplayName()));
-            if (e.hasMultipleGoods()) {
+            if (e.hasEnergyGoods()) {
+                lines.add(Component.literal("§7每份 " + e.getGoodsList().get(0).energyAmount() + " EU"));
+                lines.add(Component.literal("§7电压阶段: §e"
+                        + com.dishanhai.gt_shanhai.common.shop.ShopEnergyVoltage.label(e.getGoodsList().get(0).energyAmount())));
+            } else if (e.hasMultipleGoods()) {
                 StringBuilder gc = new StringBuilder("§7成分: §f");
                 for (ShopEntry.GoodsStack gs : e.getGoodsList()) {
                     gc.append(gs.count()).append('×').append(ShopEntry.goodsSlotDisplayName(gs)).append(' ');
@@ -7179,7 +7198,7 @@ public class ShopScreen extends ScaledScreen {
             } else {
                 lines.add(Component.literal("§7每份 " + e.getGoodsCount() + " 个"));
             }
-            String tradeLabel = switch (e.getTradeMode()) {
+            String tradeLabel = e.hasEnergyGoods() ? "仅购买" : switch (e.getTradeMode()) {
                 case BUY_ONLY -> "仅购买";
                 case SELL_ONLY -> "仅出售";
                 default -> "不限";
