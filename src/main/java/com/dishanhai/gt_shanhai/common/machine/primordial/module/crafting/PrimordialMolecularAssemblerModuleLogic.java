@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.common.machine.primordial.module.crafting;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialModuleRecipeLogic;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialRecipeOutputAmplifier;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuContainmentBonus;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
@@ -37,6 +38,9 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
 
     @Override
     public GTRecipe getGTRecipe() {
+        GuixuContainmentBonus bonus = containmentBonus();
+        // 山海：AE 提取會消耗待回傳任務，必須在提取前檢查全體遏制場鎖定。
+        if (bonus.locked()) return null;
         if (!(getMachine() instanceof PrimordialMolecularAssemblerModule module)
                 || !module.canRunMolecularAssembly()) {
             logIdleState("extract-unavailable", null);
@@ -69,6 +73,17 @@ public class PrimordialMolecularAssemblerModuleLogic extends PrimordialModuleRec
         // 不再经过无线配方包装，避免改变 MECraftHandler 的 LongIngredient 回传协议。
         int multiplier = module.getHostOutputMultiplier();
         GTRecipe amplified = PrimordialRecipeOutputAmplifier.apply(raw, multiplier);
+        // 原生 AE 配方沒有 EU，並行已是 Long.MAX_VALUE、提取耗時已是 1 tick；
+        // 仍套用遏制場耗時下限與失穩吞產出，並保留原配方與 handler 回傳協議。
+        if (bonus.affectsRecipes()) {
+            if (amplified == raw) amplified = raw.copy();
+            amplified.duration = bonus.scaleDuration(amplified.duration);
+            if (bonus.swallowChance() > 0.0D
+                    && bonus.shouldSwallow(java.util.concurrent.ThreadLocalRandom.current().nextDouble())) {
+                amplified.outputs.clear();
+                amplified.tickOutputs.clear();
+            }
+        }
         if (TRACE) {
             GTDishanhaiMod.LOGGER.info(
                     "{} amplify-result module={} multiplier={} recipe={}",

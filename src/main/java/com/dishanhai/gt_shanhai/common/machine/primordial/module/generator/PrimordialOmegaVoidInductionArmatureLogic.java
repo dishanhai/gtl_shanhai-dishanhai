@@ -18,6 +18,7 @@ public class PrimordialOmegaVoidInductionArmatureLogic extends PrimordialModuleR
 
     @Override
     public GTRecipe getGTRecipe() {
+        if (containmentBonus().locked()) return null;
         if (!checkBeforeWorking()) return null;
         var recipes = lookupRecipeIterator();
         if (recipes == null || recipes.isEmpty()) return null;

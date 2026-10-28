@@ -91,10 +91,12 @@ class GuixuPenroseContainmentWiringTest {
         assertTrue(logic.contains("containmentBonus().locked()"));
         assertTrue(logic.contains("containmentBonus().scaleParallel(super.getTotalParallelLimit())"));
         assertTrue(logic.contains("containmentBonus().energyFactor(energyConsumer)"));
-        assertTrue(logic.contains("containmentBonus().extraOutput()"));
+        assertTrue(logic.contains("int multiplier = module.getHostOutputMultiplier();"),
+                "遏制場增產已由主機彙總，配方邏輯不得再額外加一次");
         assertTrue(logic.contains("protected WirelessGTRecipe buildWirelessRecipe("));
         assertTrue(logic.contains("cachedHostCountMultiplier"));
         String base = read(PRIMORDIAL + "PrimordialOmegaEngineModuleBase.java");
+        assertTrue(base.contains("return currentHost.getRecipeOutputMultiplier();"));
         assertTrue(base.contains("isContainmentLocked()"));
     }
 }

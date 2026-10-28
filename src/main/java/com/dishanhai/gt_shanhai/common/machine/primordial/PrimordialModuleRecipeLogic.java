@@ -34,8 +34,6 @@ import org.gtlcore.gtlcore.api.recipe.RecipeExtensionCopier;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
 import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 
-import com.google.common.primitives.Ints;
-
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
@@ -166,7 +164,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     }
 
     /** 主機是歸墟時讀遏制場增益；其他主機一律 NONE（行為逐位不變）。 */
-    private GuixuContainmentBonus containmentBonus() {
+    protected final GuixuContainmentBonus containmentBonus() {
         return getMachine() instanceof PrimordialOmegaEngineModuleBase mod
                 ? GuixuVisionCoreMachine.containmentBonusOf(mod.getHost())
                 : GuixuContainmentBonus.NONE;
@@ -394,7 +392,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
             return recipe;
         }
-        int multiplier = Ints.saturatedCast((long) module.getHostOutputMultiplier() + containmentBonus().extraOutput());
+        int multiplier = module.getHostOutputMultiplier();
         if (multiplier <= 1) {
             return recipe;
         }

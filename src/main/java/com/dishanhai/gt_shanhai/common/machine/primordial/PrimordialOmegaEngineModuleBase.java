@@ -430,12 +430,9 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         if (currentHost == null || !currentHost.isFormed()) {
             return 1;
         }
-        if (currentHost instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine guixu) {
-            int guixuMultiplier = com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine.productionMultiplierOf(
-                    guixu.moduleSlotBonus(), guixu.getHostProductionBonusExtra());
-            // 山海：遏制場的額外產出由模組配方邏輯統一加一次，此處只帶主機固有倍率。
-            return com.google.common.primitives.Ints.saturatedCast(
-                    (long) currentHost.getMountedOutputMultiplier() * guixuMultiplier);
+        if (currentHost instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine) {
+            // 山海：萬象與遏制場由主機彙總，所有掛載模組共用同一最終倍率。
+            return currentHost.getRecipeOutputMultiplier();
         }
         return currentHost.getMountedOutputMultiplier();
     }
@@ -1243,7 +1240,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         }
         if (host instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine guixu
                 && guixu.isContainmentLocked()) {
-            textList.add(Component.literal("歸墟黑洞坍縮：模組鎖定剩餘 " + guixu.getContainmentLockSeconds() + " 秒")
+            textList.add(Component.literal("归墟黑洞坍缩：模组锁定剩余 " + guixu.getContainmentLockSeconds() + " 秒")
                     .withStyle(ChatFormatting.RED));
         }
         // 物质模块搭载信息（所有子类的 addDisplayText 都调用了此方法，确保可见）
@@ -1420,7 +1417,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     @Override
     public void addDisplayText(List<Component> textList) {
         String modeName = crossTypeModeDisplayName();
-        if (modeName != null) textList.add(Component.literal("機器模式：" + modeName).withStyle(ChatFormatting.AQUA));
+        if (modeName != null) textList.add(Component.literal("机器模式：" + modeName).withStyle(ChatFormatting.AQUA));
         if (isFormed()) {
             addHostStatusDisplay(textList);
             addEnergyDisplay(textList);
