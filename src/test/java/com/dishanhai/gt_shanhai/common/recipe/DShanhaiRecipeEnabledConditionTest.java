@@ -111,8 +111,8 @@ class DShanhaiRecipeEnabledConditionTest {
                 id -> true);
         assertTrue(hint.contains("未知物品 dishanhai:quantum_chromodynamic_charge_super"));
         assertFalse(hint.contains("kubejs:quantum_chromodynamic_charge"));
-        assertTrue(hint.contains("未知流體 gtceu:missing_plasma"));
-        assertFalse(hint.contains("未知配方類型"));
+        assertTrue(hint.contains("未知流体 gtceu:missing_plasma"));
+        assertFalse(hint.contains("未知配方类型"));
     }
 
     @Test
@@ -120,7 +120,7 @@ class DShanhaiRecipeEnabledConditionTest {
         JsonObject recipe = JsonParser.parseString("{\"type\":\"gtceu:no_such_machine\"}").getAsJsonObject();
         String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
                 recipe, "gtceu:no_such_machine", id -> true, id -> true, id -> false);
-        assertEquals("未知配方類型 gtceu:no_such_machine", hint);
+        assertEquals("未知配方类型 gtceu:no_such_machine", hint);
     }
 
     @Test
@@ -130,7 +130,7 @@ class DShanhaiRecipeEnabledConditionTest {
                 .getAsJsonObject();
         String hint = DShanhaiJsonRecipeStats.explainLoadFailure(
                 recipe, "gtceu:electric_implosion_compressor", id -> true, id -> true, id -> true);
-        assertEquals("已寫入資料包，但沒有進入配方表", hint);
+        assertEquals("已写入资料包，但没有进入配方表", hint);
     }
 
     @Test
@@ -177,8 +177,8 @@ class DShanhaiRecipeEnabledConditionTest {
                 id -> true,
                 id -> true,
                 id -> true);
-        assertEquals("已寫入資料包，但沒有進入配方表", hint);
-        assertFalse(hint.contains("重複"));
+        assertEquals("已写入资料包，但没有进入配方表", hint);
+        assertFalse(hint.contains("重复"));
         hint = DShanhaiJsonRecipeStats.explainLoadFailure(
                 "gt_shanhai:precision_laser_engraver/wafer/fm_wafer",
                 withCatalyst,
@@ -187,7 +187,7 @@ class DShanhaiRecipeEnabledConditionTest {
                 id -> true,
                 id -> true,
                 List.of("lens_module:precision/fm_wafer5"));
-        assertEquals("與 lens_module:precision/fm_wafer5 輸入（含不消耗材料）和產物相同，被當成重複配方移除", hint);
+        assertEquals("与 lens_module:precision/fm_wafer5 输入（含不消耗材料）和产物相同，被当成重复配方移除", hint);
     }
 
     @Test
@@ -210,13 +210,13 @@ class DShanhaiRecipeEnabledConditionTest {
                 id -> true,
                 id -> true,
                 id -> true);
-        assertTrue(hint.contains("已寫入資料包，但沒有進入配方表"));
-        assertTrue(hint.contains("萬數量用了 gtceu:sized"));
+        assertTrue(hint.contains("已写入资料包，但没有进入配方表"));
+        assertTrue(hint.contains("万数量用了 gtceu:sized"));
         assertTrue(hint.contains("gtceu:osmium_dust"));
         assertTrue(hint.contains("gtceu:long 的 actualAmount"));
         assertTrue(hint.contains("gtceu:distort 缺少 data.ebf_temp"));
-        assertTrue(hint.contains("recipe_enabled 寫成 gt_shanhai:wzcz2_iridium_dust"));
-        assertTrue(hint.contains("檔案 id 是 gt_shanhai:distort/wzcz2_iridium_dust"));
+        assertTrue(hint.contains("recipe_enabled 写成 gt_shanhai:wzcz2_iridium_dust"));
+        assertTrue(hint.contains("档案 id 是 gt_shanhai:distort/wzcz2_iridium_dust"));
     }
 
     @Test
@@ -233,7 +233,7 @@ class DShanhaiRecipeEnabledConditionTest {
         assertTrue(hint.contains("非法 id Minecraft:Stone"));
         assertFalse(hint.contains("未知物品 Minecraft:Stone"));
         assertTrue(hint.contains("gtceu:long 缺少 actualAmount"));
-        assertTrue(hint.contains("未知原料類型 gtceu:item"));
+        assertTrue(hint.contains("未知原料类型 gtceu:item"));
         assertFalse(hint.contains("缺少 data.ebf_temp"));
     }
 }

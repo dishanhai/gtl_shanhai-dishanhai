@@ -44,7 +44,7 @@ public class CurrencyQuickSellPacket {
         ShopPurchase.QuickSellResult result = ShopPurchase.quickSellAllCurrencies(player, pkt.includeAe);
         if (result.gained().signum() > 0) {
             String aeHint = pkt.includeAe && result.extracted().signum() > 0
-                    ? "（已自動抽取 AE " + ShopPurchase.formatCount(result.extracted()) + " 枚）"
+                    ? "（已自动抽取 AE " + ShopPurchase.formatCount(result.extracted()) + " 枚）"
                     : "";
             String skipHint = result.skippedLocked() > 0
                     ? " §7跳过 " + result.skippedLocked() + " 种阶段未提交的货币"

@@ -84,7 +84,7 @@ public final class DevContentExport {
         try {
             Files.createDirectories(outputDir);
         } catch (IOException e) {
-            LOG.warn("[dev-export] 建立輸出目錄失敗 {}: {}", outputDir, e.getMessage());
+            LOG.warn("[dev-export] 建立输出目录失败 {}: {}", outputDir, e.getMessage());
             return;
         }
         if (contents) {
@@ -103,9 +103,9 @@ public final class DevContentExport {
         try {
             String markdown = supplier.get();
             Files.writeString(file, markdown, StandardCharsets.UTF_8);
-            LOG.info("[dev-export] 已寫入 {} ({} 字元)", file, markdown.length());
+            LOG.info("[dev-export] 已写入 {} ({} 字元)", file, markdown.length());
         } catch (Exception e) {
-            LOG.warn("[dev-export] 匯出 {} 失敗: {}", file.getFileName(), e.toString());
+            LOG.warn("[dev-export] 汇出 {} 失败: {}", file.getFileName(), e.toString());
         }
     }
 
@@ -139,16 +139,16 @@ public final class DevContentExport {
         int fluidTotal = total(fluids);
 
         StringBuilder out = new StringBuilder(128 * 1024);
-        out.append("# GT 物品與流體 ID 清單\n\n");
-        out.append("> 由 gt_shanhai 開發者選項匯出；分組為模組命名空間，組內按 ID 字母排序。\n");
-        out.append("> 物品 ").append(itemTotal).append(" 項，流體 ").append(fluidTotal).append(" 項。\n\n");
+        out.append("# GT 物品与流体 ID 清单\n\n");
+        out.append("> 由 gt_shanhai 开发者选项汇出；分组为模组命名空间，组内按 ID 字母排序。\n");
+        out.append("> 物品 ").append(itemTotal).append(" 项，流体 ").append(fluidTotal).append(" 项。\n\n");
 
         out.append("## 物品\n\n");
         for (Map.Entry<String, List<ItemRow>> group : items.entrySet()) {
             List<ItemRow> rows = group.getValue();
             rows.sort(Comparator.comparing(row -> row.id.toString()));
             out.append("### ").append(group.getKey()).append("（").append(rows.size()).append("）\n\n");
-            out.append("| 中文名 | 英文 ID | 標籤 1 | 標籤 2 |\n");
+            out.append("| 中文名 | 英文 ID | 标签 1 | 标签 2 |\n");
             out.append("| --- | --- | --- | --- |\n");
             for (ItemRow row : rows) {
                 out.append("| ").append(cell(row.name)).append(" | ").append(row.id).append(" | ")
@@ -157,12 +157,12 @@ public final class DevContentExport {
             out.append('\n');
         }
 
-        out.append("## 流體\n\n");
+        out.append("## 流体\n\n");
         for (Map.Entry<String, List<FluidRow>> group : fluids.entrySet()) {
             List<FluidRow> rows = group.getValue();
             rows.sort(Comparator.comparing(row -> row.id.toString()));
             out.append("### ").append(group.getKey()).append("（").append(rows.size()).append("）\n\n");
-            out.append("| 中文名 | 英文 ID | 標籤 1 | 標籤 2 |\n");
+            out.append("| 中文名 | 英文 ID | 标签 1 | 标签 2 |\n");
             out.append("| --- | --- | --- | --- |\n");
             for (FluidRow row : rows) {
                 out.append("| ").append(cell(row.name)).append(" | ").append(row.id).append(" | ")
@@ -407,7 +407,7 @@ public final class DevContentExport {
                     total++;
                 }
             } catch (Exception e) {
-                LOG.warn("[dev-export] 遍歷配方類型 {} 失敗: {}", typeId, e.getMessage());
+                LOG.warn("[dev-export] 遍历配方类型 {} 失败: {}", typeId, e.getMessage());
             }
         }
 
@@ -417,15 +417,15 @@ public final class DevContentExport {
     /** 純格式化：輸入已收集的配方分組，輸出 Markdown。 */
     static String renderRecipes(Map<String, List<RecipeRow>> groups, int total) {
         StringBuilder out = new StringBuilder(512 * 1024);
-        out.append("# GT 配方清單\n\n");
-        out.append("> 由 gt_shanhai 開發者選項匯出；分組為配方 ID 的命名空間，組內按配方 ID 字母排序。\n");
-        out.append("> 共 ").append(total).append(" 個配方。每欄只列前兩項輸入/輸出，物品與流體合併計數。\n\n");
+        out.append("# GT 配方清单\n\n");
+        out.append("> 由 gt_shanhai 开发者选项汇出；分组为配方 ID 的命名空间，组内按配方 ID 字母排序。\n");
+        out.append("> 共 ").append(total).append(" 个配方。每栏只列前两项输入/输出，物品与流体合并计数。\n\n");
 
         for (Map.Entry<String, List<RecipeRow>> group : groups.entrySet()) {
             List<RecipeRow> rows = group.getValue();
             rows.sort(Comparator.comparing(row -> row.recipeId.toString()));
             out.append("### ").append(group.getKey()).append("（").append(rows.size()).append("）\n\n");
-            out.append("| 配方 ID | 機器類型 | 輸入 1 | 輸入 2 | 輸出 1 | 輸出 2 |\n");
+            out.append("| 配方 ID | 机器类型 | 输入 1 | 输入 2 | 输出 1 | 输出 2 |\n");
             out.append("| --- | --- | --- | --- | --- | --- |\n");
             for (RecipeRow row : rows) {
                 out.append("| ").append(row.recipeId).append(" | ").append(cell(row.typeId)).append(" | ")

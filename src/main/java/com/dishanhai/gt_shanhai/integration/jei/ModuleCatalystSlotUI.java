@@ -40,7 +40,7 @@ public final class ModuleCatalystSlotUI {
         try {
             type.getRecipeUI().setUiBuilder(ModuleCatalystSlotUI::append);
         } catch (Throwable t) {
-            GTDishanhaiMod.LOGGER.warn("[SHANHAI-JEI] 配方類型 {} 的物質模組展示回呼掛載失敗",
+            GTDishanhaiMod.LOGGER.warn("[SHANHAI-JEI] 配方类型 {} 的物质模组展示回呼挂载失败",
                     type.registryName, t);
         }
     }
@@ -77,7 +77,7 @@ public final class ModuleCatalystSlotUI {
         } catch (Throwable t) {
             String key = t.getClass().getName();
             if (WARNED.add(key)) {
-                GTDishanhaiMod.LOGGER.warn("[SHANHAI-JEI] 配方 {} 的物質模組展示槽建立失敗",
+                GTDishanhaiMod.LOGGER.warn("[SHANHAI-JEI] 配方 {} 的物质模组展示槽建立失败",
                         recipe == null ? "null" : recipe.id, t);
             }
         }

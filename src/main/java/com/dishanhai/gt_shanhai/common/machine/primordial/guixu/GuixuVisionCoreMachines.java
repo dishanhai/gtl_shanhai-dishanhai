@@ -42,10 +42,10 @@ public final class GuixuVisionCoreMachines {
             var renderer = definition.getRenderer();
             if (!renderer.getClass().getName().equals(
                     "com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuHostFxRenderer")) {
-                throw new IllegalStateException("[SHANHAI-HOST] 動態特效渲染器未掛上：" + renderer.getClass().getName());
+                throw new IllegalStateException("[SHANHAI-HOST] 动态特效渲染器未挂上：" + renderer.getClass().getName());
             }
         }
-        GTDishanhaiMod.LOGGER.info("[SHANHAI-HOST] 已註冊 {}", ID);
+        GTDishanhaiMod.LOGGER.info("[SHANHAI-HOST] 已注册 {}", ID);
         registerContainment(casing, overlay);
     }
 
@@ -60,14 +60,14 @@ public final class GuixuVisionCoreMachines {
                 .workableCasingRenderer(casing, overlay)
                 .register();
         containmentDefinition.setTooltipBuilder((stack, tooltips) -> {
-            tooltips.add(Component.literal("§7需安裝在歸墟視界樞核的模組位"));
-            tooltips.add(Component.literal("§7投入黑洞種子開啟；每秒消耗時空流體維持穩定"));
-            tooltips.add(Component.literal("§d遏制中：整台歸墟並行 ×4、耗時 ×0.5、增產 +5、耗電 ×0.5、物質模塊數量 ×2"));
-            tooltips.add(Component.literal("§d穩定度低於 50／20 時，並行與速度各再 ×2"));
-            tooltips.add(Component.literal("§c失穩會吞噬產出；坍縮時整台歸墟停機 60 秒"));
-            tooltips.add(Component.literal("§7投入黑洞坍縮器可安全關閉"));
+            tooltips.add(Component.literal("§7需安装在归墟视界枢核的模组位"));
+            tooltips.add(Component.literal("§7投入黑洞种子开启；每秒消耗时空流体维持稳定"));
+            tooltips.add(Component.literal("§d遏制中：整台归墟并行 ×4、耗时 ×0.5、增产 +5、耗电 ×0.5、物质模块数量 ×2"));
+            tooltips.add(Component.literal("§d稳定度低于 50／20 时，并行与速度各再 ×2"));
+            tooltips.add(Component.literal("§c失稳会吞噬产出；坍缩时整台归墟停机 60 秒"));
+            tooltips.add(Component.literal("§7投入黑洞坍缩器可安全关闭"));
         });
-        GTDishanhaiMod.LOGGER.info("[SHANHAI-CONTAINMENT] 已註冊 {}", CONTAINMENT_ID);
+        GTDishanhaiMod.LOGGER.info("[SHANHAI-CONTAINMENT] 已注册 {}", CONTAINMENT_ID);
     }
 
     public static MultiblockMachineDefinition guixuPenroseContainment() {

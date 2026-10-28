@@ -66,7 +66,7 @@ public final class GuixuPenroseContainmentStructure {
         ResourceLocation rl = ResourceLocation.tryParse(id);
         Block block = rl == null ? null : ForgeRegistries.BLOCKS.getValue(rl);
         if (block == null || block == net.minecraft.world.level.block.Blocks.AIR) {
-            throw new IllegalStateException("[SHANHAI-CONTAINMENT] 註冊表裡沒有方塊 " + id);
+            throw new IllegalStateException("[SHANHAI-CONTAINMENT] 注册表里没有方块 " + id);
         }
         return block;
     }

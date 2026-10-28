@@ -89,7 +89,7 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
         if (!isRemote() && field.forceCollapse() == GuixuContainmentField.Event.COLLAPSED) {
             // 鎖定那條不要求主機已成型
             GuixuVisionCoreMachine guixu = getHost() instanceof GuixuVisionCoreMachine g ? g : null;
-            LOGGER.info("[SHANHAI-CONTAINMENT] 遏制場 @{} 失穩期間結構失效，視同坍縮", getPos());
+            LOGGER.info("[SHANHAI-CONTAINMENT] 遏制场 @{} 失稳期间结构失效，视同坍缩", getPos());
             if (guixu != null) guixu.startContainmentLock();
             markDirty();
         }
@@ -120,9 +120,9 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
         long need = field.requiredSpacetime();
         GuixuContainmentField.Event event = field.tickSecond(need > 0L && drainSpacetime(need));
         if (event == GuixuContainmentField.Event.DESTABILIZED) {
-            LOGGER.info("[SHANHAI-CONTAINMENT] 遏制場 @{} 失穩", getPos());
+            LOGGER.info("[SHANHAI-CONTAINMENT] 遏制场 @{} 失稳", getPos());
         } else if (event == GuixuContainmentField.Event.COLLAPSED) {
-            LOGGER.info("[SHANHAI-CONTAINMENT] 遏制場 @{} 坍縮", getPos());
+            LOGGER.info("[SHANHAI-CONTAINMENT] 遏制场 @{} 坍缩", getPos());
             guixu.startContainmentLock();
         }
         markDirty();
@@ -150,8 +150,8 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
                     if (taken.isEmpty()) continue;
                     GuixuContainmentField.Event event = isSeed
                             ? field.open(HYPER_SEED.equals(id)) : field.shutDown();
-                    LOGGER.info("[SHANHAI-CONTAINMENT] 遏制場 @{} {}（{}）", getPos(),
-                            event == GuixuContainmentField.Event.OPENED ? "開啟" : "主動關閉", id);
+                    LOGGER.info("[SHANHAI-CONTAINMENT] 遏制场 @{} {}（{}）", getPos(),
+                            event == GuixuContainmentField.Event.OPENED ? "开启" : "主动关闭", id);
                     markDirty();
                     return;
                 }
@@ -165,7 +165,7 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
         if (spacetime == null || spacetime == Fluids.EMPTY) {
             if (!missingSpacetimeWarned) {
                 missingSpacetimeWarned = true;
-                LOGGER.warn("[SHANHAI-CONTAINMENT] 找不到流體 {}，視為時空流體不足", SPACETIME);
+                LOGGER.warn("[SHANHAI-CONTAINMENT] 找不到流体 {}，视为时空流体不足", SPACETIME);
             }
             return false;
         }
@@ -190,7 +190,7 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
         }
         // 兩個 ME 倉接同一 AE 網路時模擬會重複計算；實扣不足就判為未供給（已扣的不退）
         if (remaining > 0L) {
-            LOGGER.warn("[SHANHAI-CONTAINMENT] 遏制場 @{} 時空流體實扣不足：需 {}，缺 {}", getPos(), need, remaining);
+            LOGGER.warn("[SHANHAI-CONTAINMENT] 遏制场 @{} 时空流体实扣不足：需 {}，缺 {}", getPos(), need, remaining);
             return false;
         }
         return true;
@@ -229,9 +229,9 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
             addHostStatusDisplay(textList);
             GuixuVisionCoreMachine guixu = guixuHost();
             if (guixu == null) {
-                textList.add(Component.literal("需安裝在歸墟視界樞核的模組位").withStyle(ChatFormatting.RED));
+                textList.add(Component.literal("需安装在归墟视界枢核的模组位").withStyle(ChatFormatting.RED));
             } else if (guixu.getEffectiveContainment() != this) {
-                textList.add(Component.literal("冗餘（本機已有生效的遏制場）").withStyle(ChatFormatting.GRAY));
+                textList.add(Component.literal("冗余（本机已有生效的遏制场）").withStyle(ChatFormatting.GRAY));
             } else {
                 for (String line : GuixuContainmentText.moduleLines(field, guixu.getContainmentLockSeconds())) {
                     textList.add(Component.literal(line).withStyle(ChatFormatting.LIGHT_PURPLE));

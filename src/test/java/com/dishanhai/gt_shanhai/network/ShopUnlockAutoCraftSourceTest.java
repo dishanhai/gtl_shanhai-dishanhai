@@ -15,7 +15,7 @@ class ShopUnlockAutoCraftSourceTest {
         assertTrue(text.contains("beginStagePlan("));
         assertTrue(text.contains("ShopStageConfig.get(stagePath)"));
         assertTrue(text.contains("\"stage:\" + stagePath"));
-        assertTrue(text.contains("请先開啟「AE模式」"));
+        assertTrue(text.contains("请先开启「AE模式」"));
     }
 
     @Test

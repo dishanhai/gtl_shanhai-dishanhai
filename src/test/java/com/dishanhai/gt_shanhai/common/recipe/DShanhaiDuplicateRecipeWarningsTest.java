@@ -15,7 +15,7 @@ class DShanhaiDuplicateRecipeWarningsTest {
     void packShadowNamesTheWinnerAndTheCoveredPacks() {
         DShanhaiDuplicateRecipeWarnings.Warning warning = DShanhaiDuplicateRecipeWarnings.packShadow(
                 "gt_shanhai:assembler/a", List.of("kubejs", "gt_shanhai"));
-        assertEquals("gt_shanhai:assembler/a | 保留 kubejs | 被蓋掉 gt_shanhai", warning.line());
+        assertEquals("gt_shanhai:assembler/a | 保留 kubejs | 被盖掉 gt_shanhai", warning.line());
         assertNull(DShanhaiDuplicateRecipeWarnings.packShadow("gt_shanhai:assembler/a", List.of("gt_shanhai")));
     }
 
@@ -25,7 +25,7 @@ class DShanhaiDuplicateRecipeWarningsTest {
                 "dishanhai:line", List.of(DShanhaiDuplicateRecipeWarnings.CACHE_PACK)));
         DShanhaiDuplicateRecipeWarnings.Warning warning = DShanhaiDuplicateRecipeWarnings.kjsShadowsPacks(
                 "dishanhai:line", List.of(DShanhaiDuplicateRecipeWarnings.CACHE_PACK, "gt_shanhai"));
-        assertEquals("dishanhai:line | 保留 KJS | 被蓋掉 gt_shanhai", warning.line());
+        assertEquals("dishanhai:line | 保留 KJS | 被盖掉 gt_shanhai", warning.line());
     }
 
     @Test
@@ -39,7 +39,7 @@ class DShanhaiDuplicateRecipeWarningsTest {
                 true,
                 List.of(new DShanhaiDuplicateRecipeWarnings.PrintedRecipe("dishanhai:line", fingerprint)));
         assertEquals(1, warnings.size());
-        assertEquals("保留 " + DShanhaiDuplicateRecipeWarnings.CACHE_PACK + " | 被蓋掉 gt_shanhai", warnings.get(0).hint());
+        assertEquals("保留 " + DShanhaiDuplicateRecipeWarnings.CACHE_PACK + " | 被盖掉 gt_shanhai", warnings.get(0).hint());
     }
 
     @Test
@@ -49,7 +49,7 @@ class DShanhaiDuplicateRecipeWarningsTest {
         List<DShanhaiDuplicateRecipeWarnings.Warning> warnings = DShanhaiDuplicateRecipeWarnings.contentDuplicates(List.of(
                 new DShanhaiDuplicateRecipeWarnings.PrintedRecipe("gt_shanhai:b", fingerprint),
                 new DShanhaiDuplicateRecipeWarnings.PrintedRecipe("gt_shanhai:a", fingerprint)));
-        assertEquals("gt_shanhai:a | 與 gt_shanhai:b 內容相同", warnings.get(0).line());
+        assertEquals("gt_shanhai:a | 与 gt_shanhai:b 内容相同", warnings.get(0).line());
     }
 
     @Test
@@ -71,7 +71,7 @@ class DShanhaiDuplicateRecipeWarningsTest {
     void repeatedRegistrationClears() {
         DShanhaiDuplicateRecipeWarnings.clear();
         DShanhaiDuplicateRecipeWarnings.noteRepeatedRegistration("gt_shanhai:once");
-        assertEquals("gt_shanhai:once | KJS 再次註冊，後寫的覆蓋先寫的",
+        assertEquals("gt_shanhai:once | KJS 再次注册，后写的覆盖先写的",
                 DShanhaiDuplicateRecipeWarnings.repeatedRegistrations().get(0).line());
         DShanhaiDuplicateRecipeWarnings.clear();
         assertTrue(DShanhaiDuplicateRecipeWarnings.repeatedRegistrations().isEmpty());

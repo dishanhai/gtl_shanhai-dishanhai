@@ -68,7 +68,7 @@ class IntegrateHostFxTest {
         format.setAccessible(true);
         String summary = (String) format.invoke(null, 2, 10L);
         assertTrue(summary.contains("物品"));
-        assertTrue(summary.contains("ID類"));
+        assertTrue(summary.contains("ID类"));
         Class<?> stateType = Class.forName(PACKAGE + "HostFxGlassArModel$State");
         Object model = type.getMethod("build", stateType).invoke(null, stateType.getConstructor().newInstance());
         var texts = (java.util.List<?>) model.getClass().getField("texts").get(model);
@@ -84,7 +84,7 @@ class IntegrateHostFxTest {
             assertTrue(x >= 0 && x + line.codePointCount(0, line.length()) * 9 <= 1100);
             assertTrue(y >= 0 && y + 8 <= 200, "說明文字必須留在22×4格AR面板內");
         }
-        assertEquals(java.util.List.of("物品按ID彙總；流體與NBT明細", "以配方／輸出倉為準"), notes);
+        assertEquals(java.util.List.of("物品按ID汇总；流体与NBT明细", "以配方／输出仓为准"), notes);
     }
 
     private static Object field(Object object, String name) throws Exception {

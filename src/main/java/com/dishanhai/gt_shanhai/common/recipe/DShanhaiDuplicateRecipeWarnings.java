@@ -53,9 +53,9 @@ public final class DShanhaiDuplicateRecipeWarnings {
 
     public static void noteRepeatedRegistration(String recipeId) {
         if (recipeId == null || recipeId.isEmpty()) return;
-        Warning warning = new Warning(recipeId, "KJS 再次註冊，後寫的覆蓋先寫的");
+        Warning warning = new Warning(recipeId, "KJS 再次注册，后写的覆盖先写的");
         REPEATED_REGISTRATIONS.add(warning);
-        LOG.warn("[DRE] 配方重複: {}", warning.line());
+        LOG.warn("[DRE] 配方重复: {}", warning.line());
     }
 
     public static List<Warning> repeatedRegistrations() {
@@ -69,7 +69,7 @@ public final class DShanhaiDuplicateRecipeWarnings {
         if (recipeId == null || recipeId.isEmpty() || packsHighestFirst == null || packsHighestFirst.size() < 2) {
             return null;
         }
-        return new Warning(recipeId, "保留 " + packsHighestFirst.get(0) + " | 被蓋掉 " + join(packsHighestFirst, 1));
+        return new Warning(recipeId, "保留 " + packsHighestFirst.get(0) + " | 被盖掉 " + join(packsHighestFirst, 1));
     }
 
     /**
@@ -86,7 +86,7 @@ public final class DShanhaiDuplicateRecipeWarnings {
             }
         }
         if (others.isEmpty()) return null;
-        return new Warning(recipeId, "保留 KJS | 被蓋掉 " + String.join(", ", others));
+        return new Warning(recipeId, "保留 KJS | 被盖掉 " + String.join(", ", others));
     }
 
     public static String fingerprint(String type, int duration, List<String> lines) {
@@ -113,7 +113,7 @@ public final class DShanhaiDuplicateRecipeWarnings {
             if (ids.size() < 2) continue;
             List<String> sorted = new ArrayList<>(ids);
             Collections.sort(sorted);
-            warnings.add(new Warning(sorted.get(0), "與 " + String.join(", ", sorted.subList(1, sorted.size())) + " 內容相同"));
+            warnings.add(new Warning(sorted.get(0), "与 " + String.join(", ", sorted.subList(1, sorted.size())) + " 内容相同"));
         }
         return warnings;
     }
@@ -153,12 +153,12 @@ public final class DShanhaiDuplicateRecipeWarnings {
         try {
             scanned = scanServer(server, kjsIds, cacheHit);
         } catch (RuntimeException e) {
-            LOG.warn("[DRE] 配方重複掃描失敗: {}", e.toString());
+            LOG.warn("[DRE] 配方重复扫描失败: {}", e.toString());
             scanned = List.of();
         }
         scanCache = scanned;
         for (Warning warning : scanned) {
-            LOG.warn("[DRE] 配方重複: {}", warning.line());
+            LOG.warn("[DRE] 配方重复: {}", warning.line());
         }
         return scanned;
     }

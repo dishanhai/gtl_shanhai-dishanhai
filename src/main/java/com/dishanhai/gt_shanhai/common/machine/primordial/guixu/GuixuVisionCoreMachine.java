@@ -556,7 +556,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             failure = t;
             if (!snapErrorLogged) {
                 snapErrorLogged = true;
-                LOGGER.warn("[SHANHAI-HOSTSNAP] 第 {} 次快照讀取失敗；保留上一份有效快照（本訊息只記一次）",
+                LOGGER.warn("[SHANHAI-HOSTSNAP] 第 {} 次快照读取失败；保留上一份有效快照（本讯息只记一次）",
                         snapRefreshCalls, t);
             }
         }
@@ -1603,7 +1603,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         containmentLockTicks = CONTAINMENT_LOCK_TICKS;
         containmentCacheTick = Long.MIN_VALUE;
         markDirty();
-        LOGGER.info("[SHANHAI-CONTAINMENT] 歸墟 @{} 黑洞坍縮，鎖定 {} 秒", getPos(), CONTAINMENT_LOCK_TICKS / 20);
+        LOGGER.info("[SHANHAI-CONTAINMENT] 归墟 @{} 黑洞坍缩，锁定 {} 秒", getPos(), CONTAINMENT_LOCK_TICKS / 20);
     }
 
     /** 唯一生效的遏制場：已成型、掛在本機名下、座標 {@code asLong()} 最小者；沒有則 null。 */
@@ -1665,7 +1665,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             if (containmentLockTicks == 0) {
                 containmentCacheTick = Long.MIN_VALUE;
                 markDirty();
-                LOGGER.info("[SHANHAI-CONTAINMENT] 歸墟 @{} 鎖定結束", getPos());
+                LOGGER.info("[SHANHAI-CONTAINMENT] 归墟 @{} 锁定结束", getPos());
             } else if (containmentLockTicks % 20 == 0) {
                 markDirty();
             }
@@ -1942,11 +1942,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 .withStyle(ChatFormatting.GRAY));
         String crossTypeName = crossTypeModeDisplayName();
         if (crossTypeName != null) {
-            textList.add(Component.literal("機器模式：" + crossTypeName).withStyle(ChatFormatting.AQUA));
+            textList.add(Component.literal("机器模式：" + crossTypeName).withStyle(ChatFormatting.AQUA));
         }
-        textList.add(Component.literal("跨配方種類並行：主機三類配方輪轉；模組沿用自身配方種類與執行緒")
+        textList.add(Component.literal("跨配方种类并行：主机三类配方轮转；模组沿用自身配方种类与执行绪")
                 .withStyle(ChatFormatting.GRAY));
-        textList.add(Component.literal("運作：" + getOperationState().label + "｜工作模組 " + activeModuleCount)
+        textList.add(Component.literal("运作：" + getOperationState().label + "｜工作模组 " + activeModuleCount)
                 .withStyle(ChatFormatting.AQUA));
         GuixuPenroseContainmentModule containment = getEffectiveContainment();
         textList.add(Component.literal(GuixuContainmentText.hostSummary(
@@ -1954,7 +1954,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 .withStyle(ChatFormatting.LIGHT_PURPLE));
         if (hasEngineLink()) {
             BlockPos engine = getLinkedEnginePos();
-            textList.add(Component.literal("超維度鏈接：" + linkedEngineDim + " [" + engine.getX() + ", "
+            textList.add(Component.literal("超维度链接：" + linkedEngineDim + " [" + engine.getX() + ", "
                     + engine.getY() + ", " + engine.getZ() + "]｜" + (engineLinkReady ? "已接管" : "等待引擎"))
                     .withStyle(engineLinkReady ? ChatFormatting.LIGHT_PURPLE : ChatFormatting.GRAY));
         }
@@ -1962,18 +1962,18 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         if (mode != null) textList.add(Component.literal("模式：")
                 .append(Component.translatable("gtceu." + mode.registryName.getPath())));
         if (getRecipeLogic().isWorking() || getRecipeLogic().isWaiting()) {
-            textList.add(Component.literal("本批進度：" + getRecipeLogic().getProgress() + " / "
-                    + getRecipeLogic().getMaxProgress() + " tick；剩餘 "
+            textList.add(Component.literal("本批进度：" + getRecipeLogic().getProgress() + " / "
+                    + getRecipeLogic().getMaxProgress() + " tick；剩余 "
                     + Math.max(0, getRecipeLogic().getMaxProgress() - getRecipeLogic().getProgress()) / 20.0 + " 秒"));
             var recipe = getRecipeLogic().getLastRecipe();
             if (recipe instanceof IWirelessGTRecipe wireless && wireless.getWirelessEuTickInputs() != null) {
                 BigInteger eut = wireless.getWirelessEuTickInputs();
-                textList.add(Component.literal((eut.signum() > 0 ? "本批發電：" : "本批耗電：") + eut.abs() + " EU/t"));
+                textList.add(Component.literal((eut.signum() > 0 ? "本批发电：" : "本批耗电：") + eut.abs() + " EU/t"));
             }
             if (recipe != null) {
                 if (recipe.data.contains("sh_guixu_base_ticks")) {
                     textList.add(Component.literal(String.format(Locale.ROOT,
-                            "本批並行預算：%d｜批次速率：×%.2f",
+                            "本批并行预算：%d｜批次速率：×%.2f",
                             recipe.data.getLong("sh_guixu_parallel_budget"),
                             (double) recipe.data.getInt("sh_guixu_base_ticks") / Math.max(1, recipe.duration))));
                 }
@@ -1982,8 +1982,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 for (var stack : RecipeHelper.getOutputItems(recipe)) items = items.add(BigInteger.valueOf(stack.getCount()));
                 for (var fluid : RecipeHelper.getOutputFluids(recipe)) fluids = fluids.add(BigInteger.valueOf(fluid.getAmount()));
                 int ticks = Math.max(1, getRecipeLogic().getMaxProgress());
-                textList.add(Component.literal("本批預估產出：" + outputRate(items, ticks)
-                        + " 個/s，" + outputRate(fluids, ticks) + " mB/s"));
+                textList.add(Component.literal("本批预估产出：" + outputRate(items, ticks)
+                        + " 个/s，" + outputRate(fluids, ticks) + " mB/s"));
             }
             if (getRecipeLogic().isWaiting()) textList.addAll(getRecipeLogic().getFancyTooltip());
         }
@@ -1998,13 +1998,13 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         for (IO side : new IO[]{IO.IN, IO.OUT}) {
             var power = getGuixuHatchPower(side);
             int tier = com.gregtechceu.gtceu.utils.GTUtil.getTierByVoltage(power.highestVoltage());
-            String tierName = power.count() == 0 ? "無" : power.unlimited() ? "無上限"
+            String tierName = power.count() == 0 ? "无" : power.unlimited() ? "无上限"
                     : com.gregtechceu.gtceu.api.GTValues.VN[tier];
-            textList.add(Component.literal((side == IO.IN ? "能源倉" : "動力倉") + "：" + power.count()
-                    + " 個｜最高 " + tierName + "｜總功率 " + power.powerLabel() + " EU/t")
+            textList.add(Component.literal((side == IO.IN ? "能源仓" : "动力仓") + "：" + power.count()
+                    + " 个｜最高 " + tierName + "｜总功率 " + power.powerLabel() + " EU/t")
                     .withStyle(ChatFormatting.AQUA));
         }
-        textList.add(Component.literal("倉室成長：功率共同分配給並行與速度；最短耗時 "
+        textList.add(Component.literal("仓室成长：功率共同分配给并行与速度；最短耗时 "
                 + getLimitedDuration() + " tick").withStyle(ChatFormatting.GRAY));
 
         // ── 物质模块槽门控 ⇒ 增产 / 减免（生效了就必须看得见）──

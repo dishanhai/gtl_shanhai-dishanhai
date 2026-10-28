@@ -218,7 +218,7 @@ public class PrimordialOmegaEngineStructure {
         for (String id : ids) {
             Block block = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gt_shanhai", id));
             if (block == null || block == net.minecraft.world.level.block.Blocks.AIR) {
-                throw new IllegalStateException("[SHANHAI-HOST] 未註冊模組：" + id);
+                throw new IllegalStateException("[SHANHAI-HOST] 未注册模组：" + id);
             }
             blocks.add(block);
         }

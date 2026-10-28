@@ -41,7 +41,7 @@ public final class PickerUiSettings {
         try (var writer = Files.newBufferedWriter(ShanhaiConfigPaths.ensureParent(path()), StandardCharsets.UTF_8)) {
             new GsonBuilder().setPrettyPrinting().create().toJson(root, writer);
         } catch (Exception exception) {
-            GTDishanhaiMod.LOGGER.warn("山海資源選擇器偏好儲存失敗", exception);
+            GTDishanhaiMod.LOGGER.warn("山海资源选择器偏好储存失败", exception);
         }
     }
 
@@ -58,7 +58,7 @@ public final class PickerUiSettings {
             if (root.has("pickerSort")) pickerSort = normalizePickerSort(root.get("pickerSort").getAsString());
             if (root.has("pickerGroupByMod")) pickerGroupByMod = root.get("pickerGroupByMod").getAsBoolean();
         } catch (Exception exception) {
-            GTDishanhaiMod.LOGGER.warn("山海資源選擇器偏好讀取失敗", exception);
+            GTDishanhaiMod.LOGGER.warn("山海资源选择器偏好读取失败", exception);
         }
     }
 

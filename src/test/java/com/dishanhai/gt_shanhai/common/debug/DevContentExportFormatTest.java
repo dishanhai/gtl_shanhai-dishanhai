@@ -47,9 +47,9 @@ class DevContentExportFormatTest {
 
         String markdown = DevContentExport.renderContents(items, Map.of());
 
-        assertTrue(markdown.contains("| 中文名 | 英文 ID | 標籤 1 | 標籤 2 |"));
+        assertTrue(markdown.contains("| 中文名 | 英文 ID | 标签 1 | 标签 2 |"));
         assertTrue(markdown.contains("| 鐵錠 | gtceu:iron_ingot | forge:ingots/iron | c:ingots/iron |"));
-        assertTrue(markdown.contains("物品 1 項，流體 0 項"));
+        assertTrue(markdown.contains("物品 1 项，流体 0 项"));
     }
 
     @Test
@@ -68,12 +68,12 @@ class DevContentExportFormatTest {
         String markdown = DevContentExport.renderRecipes(groups, 2);
 
         assertTrue(markdown.contains("### gtceu（2）"));
-        assertTrue(markdown.contains("| 配方 ID | 機器類型 | 輸入 1 | 輸入 2 | 輸出 1 | 輸出 2 |"));
+        assertTrue(markdown.contains("| 配方 ID | 机器类型 | 输入 1 | 输入 2 | 输出 1 | 输出 2 |"));
         assertTrue(markdown.indexOf("gtceu:assembler/a") < markdown.indexOf("gtceu:assembler/b"),
                 "組內需按配方 ID 字母排序");
         assertTrue(markdown.contains(
                 "| gtceu:assembler/a | gtceu:assembler | 1x gtceu:copper_ingot |  | 1x gtceu:pump | 2x gtceu:wire |"));
-        assertTrue(markdown.contains("共 2 個配方"));
+        assertTrue(markdown.contains("共 2 个配方"));
     }
 
     @Test

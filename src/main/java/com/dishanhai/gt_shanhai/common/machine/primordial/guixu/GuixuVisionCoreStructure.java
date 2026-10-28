@@ -177,7 +177,7 @@ public final class GuixuVisionCoreStructure {
         if (moduleBlocks.isEmpty()) {
             throw new IllegalStateException("[SHANHAI-HOST] 模块方块表为空，拒绝生成 M 谓词："
                     + "那会让装了模块的主机结构恒不成型，且不抛异常、不打日志。"
-                    + "請確認 DShanhaiMachines 的模組註冊已完成。");
+                    + "请确认 DShanhaiMachines 的模组注册已完成。");
         }
         TraceabilityPredicate casing = Predicates.blocks(appearanceBlock());
         TraceabilityPredicate predicate = filled ? casing.or(Predicates.air()) : Predicates.air().or(casing);

@@ -1193,7 +1193,7 @@ public final class RecipeTypePatternSearchHelper {
 
     private static void warnReflectionFailure(Class<?> type, String member, Exception exception) {
         if (REFLECTION_FAILURES_LOGGED.computeIfAbsent(type, k -> ConcurrentHashMap.newKeySet()).add(member)) {
-            LOGGER.warn("[PatternSearch] 反射存取 {}#{} 失敗，後續仍將重試", type.getName(), member, exception);
+            LOGGER.warn("[PatternSearch] 反射存取 {}#{} 失败，后续仍将重试", type.getName(), member, exception);
         }
     }
 

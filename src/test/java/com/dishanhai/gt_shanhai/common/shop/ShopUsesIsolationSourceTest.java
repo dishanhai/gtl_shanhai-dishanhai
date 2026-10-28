@@ -17,8 +17,8 @@ class ShopUsesIsolationSourceTest {
     @Test
     void editorHasIndependentFieldsAndDoesNotSendUntouchedSaveBalance() throws Exception {
         String editor = source("client/gui/shop/ShopEntryEditScreen.java");
-        assertTrue(editor.contains("Component.literal(\"存檔次數\")"));
-        assertTrue(editor.contains("Component.literal(\"服務端次數\")"));
+        assertTrue(editor.contains("Component.literal(\"存档次数\")"));
+        assertTrue(editor.contains("Component.literal(\"服务端次数\")"));
         assertTrue(editor.contains("this.limit = entry.getServerUses()"));
         assertTrue(editor.contains("saveUses != initialSaveUses"));
         assertTrue(editor.contains("pkt.withSaveUses(saveUses)"));

@@ -93,8 +93,8 @@ public final class DShanhaiJsonRecipeStats {
                 recipeId = new ResourceLocation(file.getNamespace(), recipePath);
             } catch (RuntimeException invalidId) {
                 String brokenId = file.getNamespace() + ":" + recipePath;
-                String hint = "配方 id 不合法，路徑只能用小寫、數字和 / . _ -：" + shortMessage(invalidId);
-                GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方載入失敗: {} {}", brokenId, hint);
+                String hint = "配方 id 不合法，路径只能用小写、数字和 / . _ -：" + shortMessage(invalidId);
+                GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方载入失败: {} {}", brokenId, hint);
                 add(counts, "unknown", 1);
                 failures.add(new Failure(brokenId, "unknown", hint));
                 continue;
@@ -104,8 +104,8 @@ public final class DShanhaiJsonRecipeStats {
                 JsonElement element = JsonParser.parseReader(reader);
                 json = element.getAsJsonObject();
             } catch (Exception e) {
-                String hint = "JSON 無法讀取: " + shortMessage(e);
-                GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方載入失敗: {} {}", recipeId, hint);
+                String hint = "JSON 无法读取: " + shortMessage(e);
+                GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方载入失败: {} {}", recipeId, hint);
                 add(counts, "unknown", 1);
                 failures.add(new Failure(recipeId.toString(), "unknown", hint));
                 continue;
@@ -122,7 +122,7 @@ public final class DShanhaiJsonRecipeStats {
                 add(counts, type, 2);
             } else {
                 String hint = explainUnload(server, recipeId.toString(), rawType, json);
-                GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方載入失敗: {} [{}] {}", recipeId, rawType, hint);
+                GTDishanhaiMod.LOGGER.warn("[DRE] JSON 配方载入失败: {} [{}] {}", recipeId, rawType, hint);
                 add(counts, type, 1);
                 failures.add(new Failure(recipeId.toString(), rawType, hint));
             }
@@ -241,10 +241,10 @@ public final class DShanhaiJsonRecipeStats {
         StringBuilder hint = new StringBuilder();
         appendIds(hint, "非法 id", illegalIds);
         appendIds(hint, "未知物品", unknownItems);
-        appendIds(hint, "未知流體", unknownFluids);
+        appendIds(hint, "未知流体", unknownFluids);
         if (rawType != null && rawType.indexOf(':') >= 0
                 && recipeTypeExists != null && !recipeTypeExists.test(rawType)) {
-            appendPart(hint, "未知配方類型 " + rawType);
+            appendPart(hint, "未知配方类型 " + rawType);
         }
         if ("gtceu:distort".equals(rawType) && !hasEbfTemp(json)) {
             shape.lines.add("gtceu:distort 缺少 data.ebf_temp");
@@ -252,13 +252,13 @@ public final class DShanhaiJsonRecipeStats {
         String mismatch = enabledIdMismatch(json, recipeId);
         if (mismatch != null) shape.lines.add(mismatch);
         String unloaded = duplicateRemovalHint(duplicateIds);
-        if (unloaded == null) unloaded = "已寫入資料包，但沒有進入配方表";
+        if (unloaded == null) unloaded = "已写入资料包，但没有进入配方表";
         if (hint.length() == 0 && shape.lines.isEmpty()) return unloaded;
         if (hint.length() == 0) appendPart(hint, unloaded);
         int shown = 0;
         for (String line : shape.lines) {
             if (shown == 4) {
-                appendPart(hint, "另有 " + (shape.lines.size() - shown) + " 條形狀問題");
+                appendPart(hint, "另有 " + (shape.lines.size() - shown) + " 条形状问题");
                 break;
             }
             appendPart(hint, line);
@@ -301,7 +301,7 @@ public final class DShanhaiJsonRecipeStats {
             shown++;
         }
         if (shown == 0) return null;
-        return "與 " + names + " 輸入（含不消耗材料）和產物相同，被當成重複配方移除";
+        return "与 " + names + " 输入（含不消耗材料）和产物相同，被当成重复配方移除";
     }
 
     private static String explainUnload(MinecraftServer server, String selfId, String rawType, JsonObject json) {
@@ -472,8 +472,8 @@ public final class DShanhaiJsonRecipeStats {
 
         private void finish() {
             if (!bigSized.isEmpty()) {
-                lines.add("萬數量用了 gtceu:sized：" + joinSamples(bigSized)
-                        + "，應改 gtceu:long 的 actualAmount");
+                lines.add("万数量用了 gtceu:sized：" + joinSamples(bigSized)
+                        + "，应改 gtceu:long 的 actualAmount");
             }
             if (!missingLong.isEmpty()) {
                 lines.add("gtceu:long 缺少 actualAmount：" + joinSamples(missingLong));
@@ -482,8 +482,8 @@ public final class DShanhaiJsonRecipeStats {
                 lines.add("gtceu:sized 缺少 count：" + joinSamples(missingCount));
             }
             if (!unknownTypes.isEmpty()) {
-                lines.add("未知原料類型 " + joinSamples(unknownTypes)
-                        + "，物品數量要用 gtceu:sized 或 gtceu:long");
+                lines.add("未知原料类型 " + joinSamples(unknownTypes)
+                        + "，物品数量要用 gtceu:sized 或 gtceu:long");
             }
         }
 
@@ -573,7 +573,7 @@ public final class DShanhaiJsonRecipeStats {
                 && "gtceu:circuit".equals(ingredient.get("type").getAsString())) {
             String configuration = ingredient.has("configuration") && ingredient.get("configuration").isJsonPrimitive()
                     ? ingredient.get("configuration").getAsString() : "?";
-            return "電路 " + configuration;
+            return "电路 " + configuration;
         }
         return "";
     }
@@ -593,11 +593,11 @@ public final class DShanhaiJsonRecipeStats {
             if (!condition.has("type") || !condition.get("type").isJsonPrimitive()) continue;
             if (!DShanhaiRecipeEnabledCondition.ID.toString().equals(condition.get("type").getAsString())) continue;
             if (!condition.has("recipeId") || !condition.get("recipeId").isJsonPrimitive()) {
-                return "recipe_enabled 缺少 recipeId，檔案 id 是 " + recipeId;
+                return "recipe_enabled 缺少 recipeId，档案 id 是 " + recipeId;
             }
             String written = condition.get("recipeId").getAsString();
             if (!recipeId.equals(written)) {
-                return "recipe_enabled 寫成 " + written + "，檔案 id 是 " + recipeId;
+                return "recipe_enabled 写成 " + written + "，档案 id 是 " + recipeId;
             }
         }
         return null;

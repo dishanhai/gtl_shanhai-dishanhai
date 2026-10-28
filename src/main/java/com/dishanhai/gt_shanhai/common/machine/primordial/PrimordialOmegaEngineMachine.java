@@ -53,8 +53,8 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     private static final long MAX_PARALLEL = 9223372036854775807L;
 
-    public static final String CROSS_TYPE_MODE_NAME_HOST = "視界物質並流";
-    public static final String CROSS_TYPE_MODE_NAME_MODULE = "原初並流加工";
+    public static final String CROSS_TYPE_MODE_NAME_HOST = "视界物质并流";
+    public static final String CROSS_TYPE_MODE_NAME_MODULE = "原初并流加工";
 
     public boolean grantsCrossTypeParallel() { return false; }
 

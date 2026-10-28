@@ -417,7 +417,7 @@ public class DShanhaiRecipeEngine {
         try {
             getRecipeStats();
         } catch (RuntimeException e) {
-            LOG.warn("[DRE] 配方統計預熱失敗: {}", e.toString());
+            LOG.warn("[DRE] 配方统计预热失败: {}", e.toString());
         }
     }
 
@@ -480,18 +480,18 @@ public class DShanhaiRecipeEngine {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ 失败: §e" + failed + "§c 个"));
             if (disabled > 0L) {
                 player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                        "§e⚠ 禁用: §e" + disabled + "§e 个（成功 + 失敗 + 禁用 = 總計）"));
+                        "§e⚠ 禁用: §e" + disabled + "§e 个（成功 + 失败 + 禁用 = 总计）"));
             }
             long accounted = success + failed + disabled;
             if (accounted != total) {
                 player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                        "§c✗ 未歸類: §e" + (total - accounted) + "§c 个"));
+                        "§c✗ 未归类: §e" + (total - accounted) + "§c 个"));
             }
             if ((Long) stats.get("jsonFailed") > 0) {
                 sendJsonFailureHints(player, stats);
             }
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c⚠ 警告: 配方库错误，反馈联系 qq:1982932217"));
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c⚠ 此错误回执由JAVA侧: DShanhaiRecipeEngine 生成，請檢查 KJS 與 JSON 配方日誌"));
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c⚠ 此错误回执由JAVA侧: DShanhaiRecipeEngine 生成，请检查 KJS 与 JSON 配方日志"));
             List<String> recent = getRecentErrors(3);
             if (!recent.isEmpty()) {
                 player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c❌ 最近失败详情:"));
@@ -511,7 +511,7 @@ public class DShanhaiRecipeEngine {
         Object raw = stats.get("duplicateWarnings");
         if (!(raw instanceof List<?> warnings) || warnings.isEmpty()) return;
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                "§e⚠ 配方重複: §e" + warnings.size() + "§e 組"));
+                "§e⚠ 配方重复: §e" + warnings.size() + "§e 组"));
         int shown = Math.min(3, warnings.size());
         for (int i = 0; i < shown; i++) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
@@ -519,7 +519,7 @@ public class DShanhaiRecipeEngine {
         }
         if (warnings.size() > shown) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                    "  §7... 還有 " + (warnings.size() - shown) + " 條，詳見服務端日誌"));
+                    "  §7... 还有 " + (warnings.size() - shown) + " 条，详见服务端日志"));
         }
     }
 
@@ -527,11 +527,11 @@ public class DShanhaiRecipeEngine {
         Object raw = stats.get("jsonFailureHints");
         if (!(raw instanceof List<?> hints) || hints.isEmpty()) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                    "§c✗ 其中 JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个，詳見服務端日誌"));
+                    "§c✗ 其中 JSON 配方载入失败: §e" + stats.get("jsonFailed") + "§c 个，详见服务端日志"));
             return;
         }
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                "§c✗ 其中 JSON 配方載入失敗: §e" + stats.get("jsonFailed") + "§c 个"));
+                "§c✗ 其中 JSON 配方载入失败: §e" + stats.get("jsonFailed") + "§c 个"));
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal("§c✗ 解析提示:"));
         int shown = Math.min(8, hints.size());
         for (int i = 0; i < shown; i++) {
@@ -540,7 +540,7 @@ public class DShanhaiRecipeEngine {
         }
         if (hints.size() > shown) {
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                    "  §7... 還有 " + (hints.size() - shown) + " 條解析提示，詳見服務端日誌"));
+                    "  §7... 还有 " + (hints.size() - shown) + " 条解析提示，详见服务端日志"));
         }
     }
 
@@ -661,9 +661,9 @@ public class DShanhaiRecipeEngine {
 
         private static String shapeCause(String detail) {
             if (detail == null || detail.isEmpty()) return "";
-            if (detail.contains("Non [a-z0-9")) return "配方 id 含大寫或非法字元，路徑只能用小寫、數字和 / . _ -";
-            if (detail.contains("actualAmount")) return "gtceu:long 需要 actualAmount，不能只寫 count";
-            if (detail.contains("gtceu:item")) return "gtceu:item 不是原料類型，要用 gtceu:sized 或 gtceu:long";
+            if (detail.contains("Non [a-z0-9")) return "配方 id 含大写或非法字元，路径只能用小写、数字和 / . _ -";
+            if (detail.contains("actualAmount")) return "gtceu:long 需要 actualAmount，不能只写 count";
+            if (detail.contains("gtceu:item")) return "gtceu:item 不是原料类型，要用 gtceu:sized 或 gtceu:long";
             return "";
         }
     }

@@ -85,7 +85,7 @@ public final class ShopMaterialPurchase {
             if (entry.isPrimaryGoodsFluid()) continue;
             if (entry.getGoodsList().isEmpty()) continue;
             ShopEntry.GoodsStack goods = entry.getGoodsList().get(0);
-            if (goods == null || goods.isFluid()) continue;
+            if (goods == null || goods.isFluid() || goods.isEnergy()) continue;
             result.putIfAbsent(IngredientKey.of(goods), new MaterialOffer(entry, goods.count()));
         }
         return result;

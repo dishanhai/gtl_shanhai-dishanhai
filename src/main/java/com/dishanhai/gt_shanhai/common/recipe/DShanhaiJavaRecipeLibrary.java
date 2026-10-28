@@ -15,6 +15,6 @@ public final class DShanhaiJavaRecipeLibrary {
     public static void registerRecipes(Consumer<FinishedRecipe> provider) {
         Objects.requireNonNull(provider, "provider");
         // 後續各配方組在此呼叫，並透過 GTRecipeBuilder.save(provider) 輸出。
-        GTDishanhaiMod.LOGGER.info("[JavaRecipeLibrary] 配方入口已載入，目前註冊 0 條配方");
+        GTDishanhaiMod.LOGGER.info("[JavaRecipeLibrary] 配方入口已载入，目前注册 0 条配方");
     }
 }

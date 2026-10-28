@@ -104,7 +104,7 @@ public final class GuixuEnergyHandler implements IWirelessNetworkEnergyHandler {
                 // 原生倉室在同一服務端執行緒預檢後應可完整結算；拒絕部分成交。
                 for (int j = i; j >= 0; j--) {
                     if (applied[j] != 0L && containers.get(j).changeEnergy(-applied[j]) != -applied[j]) {
-                        throw new IllegalStateException("[SHANHAI-GUIXU] 能源倉違反回滾契約");
+                        throw new IllegalStateException("[SHANHAI-GUIXU] 能源仓违反回滚契约");
                     }
                 }
                 return false;

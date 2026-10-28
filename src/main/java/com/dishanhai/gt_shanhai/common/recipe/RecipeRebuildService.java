@@ -558,10 +558,10 @@ public final class RecipeRebuildService {
             try {
                 store.remove(recipeTypeId, entry.recipeId());
             } catch (IOException e) {
-                GTDishanhaiMod.LOGGER.warn("[配方修改器] 無法移除過期標註: {}", entry.recipeId(), e);
+                GTDishanhaiMod.LOGGER.warn("[配方修改器] 无法移除过期标注: {}", entry.recipeId(), e);
             }
             GTDishanhaiMod.LOGGER.warn(
-                    "[配方修改器] 資料包已有新配方，移除 config 標註，避免和 jar JSON 並行衝突: {}",
+                    "[配方修改器] 资料包已有新配方，移除 config 标注，避免和 jar JSON 并行冲突: {}",
                     entry.recipeId());
         }
         return kept;
@@ -623,7 +623,7 @@ public final class RecipeRebuildService {
             unlinkBranch(root, ids);
             return true;
         } catch (IllegalAccessException e) {
-            GTDishanhaiMod.LOGGER.warn("[配方修改器] 無法增量更新配方層，改為整類重建", e);
+            GTDishanhaiMod.LOGGER.warn("[配方修改器] 无法增量更新配方层，改为整类重建", e);
             return false;
         }
     }

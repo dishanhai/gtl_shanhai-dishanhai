@@ -1091,9 +1091,9 @@ public final class HostFxGlassArModel {
         }
         // 山海：摘要只有 registry ID 與數量，兩行完整說明放在表格下方的牆面留白。
         texts.add(new Txt(z, 102, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), px(3.62F),
-                "物品按ID彙總；流體與NBT明細", C_DIM));
+                "物品按ID汇总；流体与NBT明细", C_DIM));
         texts.add(new Txt(z, 103, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), px(3.80F),
-                "以配方／輸出倉為準", C_DIM));
+                "以配方／输出仓为准", C_DIM));
         // ── 数据行 ─────────────────────────────────────────────────────────────────
         final int[] slots = st.moduleSlots;
         if (slots == null || slots.length == 0) {
@@ -1652,12 +1652,12 @@ public final class HostFxGlassArModel {
             return "物品 --（快照未到）";
         }
         if (kinds < 0) {
-            return "物品 ID類數 -- · " + compactMagnitude(count) + " 件";
+            return "物品 ID类数 -- · " + compactMagnitude(count) + " 件";
         }
         if (count < 0L) {
-            return "物品 ID類數 " + kinds + " · 件數 --";
+            return "物品 ID类数 " + kinds + " · 件数 --";
         }
-        return "物品 ID類數 " + kinds + " · " + compactMagnitude(count) + " 件";
+        return "物品 ID类数 " + kinds + " · " + compactMagnitude(count) + " 件";
     }
 
     /**
@@ -1718,7 +1718,7 @@ public final class HostFxGlassArModel {
 
     /** 种类数：{@code <0} ⇒ {@code --}，否则 {@code n 类}。 */
     static String kindsText(int v) {
-        return v < 0 ? "--" : v + " ID類";
+        return v < 0 ? "--" : v + " ID类";
     }
 
     /** 物质模块等级：{@code <0} ⇒ --、{@code 0} ⇒ 未生效、{@code >0} ⇒ Lv.n / 17。 */

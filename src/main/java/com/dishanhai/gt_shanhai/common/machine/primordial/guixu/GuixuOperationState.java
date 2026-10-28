@@ -2,10 +2,10 @@ package com.dishanhai.gt_shanhai.common.machine.primordial.guixu;
 
 /** 山海：工作位來自服務端配方邏輯，與「始終渲染」開關分開。 */
 public enum GuixuOperationState {
-    IDLE("待機", 0.25F, 0.28F),
+    IDLE("待机", 0.25F, 0.28F),
     PROCESSING("加工", 1.0F, 1.0F),
-    GENERATING("發電", 1.0F, 1.0F),
-    BLOCKED("等待資源／輸出", 0.10F, 0.12F);
+    GENERATING("发电", 1.0F, 1.0F),
+    BLOCKED("等待资源／输出", 0.10F, 0.12F);
 
     public final String label;
     public final float density;

@@ -38,12 +38,12 @@ public abstract class GTLCoreMultiblockInfoRegistrationMixin {
                 definition -> new MultiblockInfoWrapper((MultiblockMachineDefinition) definition),
                 (definition, error) -> {
                     failed.incrementAndGet();
-                    LOG.warn("[山海JEI] 跳過無法建立結構預覽的多方塊: {}",
+                    LOG.warn("[山海JEI] 跳过无法建立结构预览的多方块: {}",
                             definition.getId(), error);
                 });
 
         registry.addRecipes(MultiblockInfoCategory.RECIPE_TYPE, wrappers);
-        LOG.info("[山海JEI] GTCEu 多方塊結構預覽已註冊: {}, 跳過失敗: {}",
+        LOG.info("[山海JEI] GTCEu 多方块结构预览已注册: {}, 跳过失败: {}",
                 wrappers.size(), failed.get());
     }
 }

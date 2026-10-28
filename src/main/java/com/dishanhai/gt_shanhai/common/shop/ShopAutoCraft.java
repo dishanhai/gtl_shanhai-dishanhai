@@ -143,13 +143,13 @@ public final class ShopAutoCraft {
             return;
         }
         if (!aeMode) {
-            message(player, "§c請先開啟「AE模式」");
+            message(player, "§c请先开启「AE模式」");
             sendPlanFeedback(player, requestId, false);
             return;
         }
         IGrid grid = ShopAeNetwork.findBoundGrid(player);
         if (grid == null) {
-            message(player, "§c未綁定在線 AE 網路");
+            message(player, "§c未绑定在线 AE 网络");
             sendPlanFeedback(player, requestId, false);
             return;
         }
@@ -174,13 +174,13 @@ public final class ShopAutoCraft {
     public static void beginCartPlan(ServerPlayer player, boolean aeMode, int requestId) {
         if (player == null) return;
         if (!aeMode) {
-            message(player, "§c請先開啟「AE模式」");
+            message(player, "§c请先开启「AE模式」");
             sendPlanFeedback(player, requestId, false);
             return;
         }
         IGrid grid = ShopAeNetwork.findBoundGrid(player);
         if (grid == null) {
-            message(player, "§c未綁定在線 AE 網路");
+            message(player, "§c未绑定在线 AE 网络");
             sendPlanFeedback(player, requestId, false);
             return;
         }
@@ -192,7 +192,7 @@ public final class ShopAutoCraft {
             lines.add(new CartLine(entry, times));
         }
         if (lines.isEmpty()) {
-            message(player, "§c購物車裡沒有可補齊的商品");
+            message(player, "§c购物车里没有可补齐的商品");
             sendPlanFeedback(player, requestId, false);
             return;
         }
@@ -208,11 +208,11 @@ public final class ShopAutoCraft {
             AEKey key = shortage.getKey();
             String name = key.getDisplayName().getString();
             if (shortage.getValue().compareTo(LONG_MAX) > 0) {
-                session.notes.add("§c" + name + " 缺口超出 AE 單次數量上限，請減少購買次數");
+                session.notes.add("§c" + name + " 缺口超出 AE 单次数量上限，请减少购买次数");
             } else if (!grid.getCraftingService().isCraftable(key)) {
-                session.notes.add("§7✗ " + name + " §c無可用合成流程");
+                session.notes.add("§7✗ " + name + " §c无可用合成流程");
             } else if (session.items.size() >= MAX_PLAN_ITEMS) {
-                session.notes.add("§c目標種類過多，請拆分下單");
+                session.notes.add("§c目标种类过多，请拆分下单");
                 break;
             } else {
                 session.items.add(new PlanItem(key, shortage.getValue().longValueExact()));
@@ -220,7 +220,7 @@ public final class ShopAutoCraft {
         }
         if (session.items.isEmpty()) {
             if (session.notes.isEmpty()) {
-                message(player, "§a目前沒有未下單的缺口（已扣除 AE 在製成品）");
+                message(player, "§a目前没有未下单的缺口（已扣除 AE 在制成品）");
                 sendPlanFeedback(player, requestId, true);
             } else {
                 READY.put(player.getUUID(), session);
@@ -230,14 +230,14 @@ public final class ShopAutoCraft {
         }
         CALCULATING.put(player.getUUID(), session);
         startNextCalculation(player, session);
-        message(player, "§7正在計算合成方案（" + session.items.size() + " 項）");
+        message(player, "§7正在计算合成方案（" + session.items.size() + " 项）");
     }
 
     public static void beginStagePlan(ServerPlayer player, String stagePath, boolean aeMode) {
         if (player == null || stagePath == null || stagePath.isBlank()) return;
-        if (!aeMode) { message(player, "§c請先開啟「AE模式」"); return; }
+        if (!aeMode) { message(player, "§c请先开启「AE模式」"); return; }
         IGrid grid = ShopAeNetwork.findBoundGrid(player);
-        if (grid == null) { message(player, "§c未綁定在線 AE 網路"); return; }
+        if (grid == null) { message(player, "§c未绑定在线 AE 网络"); return; }
         List<ExchangeEntry.Ingredient> requirements = ShopStageConfig.get(stagePath);
         if (requirements.isEmpty()) return;
         startIngredientPlan(player, null, Target.STAGE, stagePath, requirements, grid);
@@ -245,9 +245,9 @@ public final class ShopAutoCraft {
 
     public static void beginEntrySubmissionPlan(ServerPlayer player, ShopEntry entry, boolean aeMode) {
         if (player == null || entry == null || !entry.isValid() || !entry.hasSubmissionRequirement()) return;
-        if (!aeMode) { message(player, "§c請先開啟「AE模式」"); return; }
+        if (!aeMode) { message(player, "§c请先开启「AE模式」"); return; }
         IGrid grid = ShopAeNetwork.findBoundGrid(player);
-        if (grid == null) { message(player, "§c未綁定在線 AE 網路"); return; }
+        if (grid == null) { message(player, "§c未绑定在线 AE 网络"); return; }
         startIngredientPlan(player, entry, Target.ENTRY_SUBMISSION, entry.getStableId(), entry.getSubmissionItems(), grid);
     }
 
@@ -263,9 +263,9 @@ public final class ShopAutoCraft {
         for (Map.Entry<AEKey, BigInteger> shortage : session.shortages.entrySet()) {
             AEKey key = shortage.getKey();
             if (shortage.getValue().compareTo(LONG_MAX) > 0) {
-                session.notes.add("§c" + key.getDisplayName().getString() + " 缺口超出 AE 單次數量上限");
+                session.notes.add("§c" + key.getDisplayName().getString() + " 缺口超出 AE 单次数量上限");
             } else if (!session.grid.getCraftingService().isCraftable(key)) {
-                session.notes.add("§7✗ " + key.getDisplayName().getString() + " §c無可用合成流程");
+                session.notes.add("§7✗ " + key.getDisplayName().getString() + " §c无可用合成流程");
             } else if (session.items.size() < MAX_PLAN_ITEMS) {
                 session.items.add(new PlanItem(key, shortage.getValue().longValueExact()));
             }
@@ -273,7 +273,7 @@ public final class ShopAutoCraft {
         if (session.items.isEmpty()) { READY.put(player.getUUID(), session); sendPlanToClient(player, session); return; }
         CALCULATING.put(player.getUUID(), session);
         startNextCalculation(player, session);
-        message(player, "§7正在計算合成方案（" + session.items.size() + " 項）");
+        message(player, "§7正在计算合成方案（" + session.items.size() + " 项）");
     }
 
     private static Snapshot snapshotIngredients(ServerPlayer player, List<ExchangeEntry.Ingredient> requirements, IGrid grid) {
@@ -404,7 +404,7 @@ public final class ShopAutoCraft {
             item.future = session.grid.getCraftingService().beginCraftingCalculation(
                     player.level(), () -> source, item.key, item.amount, CalculationStrategy.REPORT_MISSING_ITEMS);
         } catch (RuntimeException exception) {
-            item.error = "計算啟動失敗";
+            item.error = "计算启动失败";
             GTDishanhaiMod.LOGGER.warn("Shop crafting calculation could not start", exception);
         }
         session.ticks = 0L;
@@ -432,7 +432,7 @@ public final class ShopAutoCraft {
             if (item.future != null && !item.future.isDone()) {
                 if (session.ticks > CALC_TIMEOUT_TICKS && CALCULATING.remove(uuid, session)) {
                     cancelSession(session);
-                    message(player, "§c合成方案計算逾時，已取消");
+                    message(player, "§c合成方案计算逾时，已取消");
                     sendPlanFeedback(player, session.requestId, false);
                 }
                 continue;
@@ -445,10 +445,10 @@ public final class ShopAutoCraft {
                             || item.result.finalOutput().amount() != item.amount
                             || !CraftingPlanOverflowDetector.collectOverflowKeys(item.result).isEmpty()) {
                         item.result = null;
-                        item.error = "計算數量不可信，請減少購買次數";
+                        item.error = "计算数量不可信，请减少购买次数";
                     }
                 } catch (Exception exception) {
-                    item.error = "計算失敗";
+                    item.error = "计算失败";
                     GTDishanhaiMod.LOGGER.warn("Shop crafting calculation failed", exception);
                 }
             }
@@ -495,21 +495,21 @@ public final class ShopAutoCraft {
                 willCraft.add("§b" + name + " §7×" + item.amount);
                 realUsedItems(item.result).forEach((key, amount) -> ShopAutoCraftAmounts.add(merged, key, amount));
             } else if (item.result != null && item.result.simulation()) {
-                notes.add("§c" + name + " 基礎材料不足，未下單");
+                notes.add("§c" + name + " 基础材料不足，未下单");
                 int shown = 0;
                 for (var missing : item.result.missingItems()) {
-                    if (shown++ >= 6) { notes.add("§7其餘缺料已省略"); break; }
+                    if (shown++ >= 6) { notes.add("§7其余缺料已省略"); break; }
                     notes.add("§7  " + missing.getKey().getDisplayName().getString() + " ×" + missing.getLongValue());
                 }
             } else {
-                notes.add("§c" + name + " " + (item.error == null ? "計算失敗" : item.error));
+                notes.add("§c" + name + " " + (item.error == null ? "计算失败" : item.error));
             }
         }
         List<String> useLines = new ArrayList<>();
         if (!willCraft.isEmpty()) {
-            useLines.add("§b將會補齊（" + willCraft.size() + " 項任務）");
+            useLines.add("§b将会补齐（" + willCraft.size() + " 项任务）");
             useLines.addAll(willCraft);
-            useLines.add("§a將會消耗");
+            useLines.add("§a将会消耗");
         }
         merged.forEach((key, amount) -> useLines.add("§a" + key.getDisplayName().getString() + " §7×" + amount));
         ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
@@ -532,7 +532,7 @@ public final class ShopAutoCraft {
         if (!READY.remove(player.getUUID(), session)) return;
         IGrid grid = ShopAeNetwork.findBoundGrid(player);
         if (session.grid != grid || !targetStillValid(session)) {
-            message(player, "§cAE 網路或商品已改變，請重新計算");
+            message(player, "§cAE 网络或商品已改变，请重新计算");
             return;
         }
         Snapshot current = snapshotForSession(player, session, grid);
@@ -544,7 +544,7 @@ public final class ShopAutoCraft {
                     "[ShopAutoCraft] plan invalidated player={} planId={} shortagesChanged={} retainedChanged={} reservedStockAvailable={}",
                     player.getGameProfile().getName(), planId,
                     shortagesChanged, retainedChanged, reservedStockAvailable);
-            message(player, "§e庫存、價格或在製數量已改變，正在重新計算，請再次確認");
+            message(player, "§e库存、价格或在制数量已改变，正在重新计算，请再次确认");
             restartPlan(player, session);
             return;
         }
@@ -563,8 +563,8 @@ public final class ShopAutoCraft {
                 GTDishanhaiMod.LOGGER.warn("Shop crafting submission failed", exception);
             }
         }
-        if (submitted > 0) message(player, "§a已提交 " + submitted + " 項合成任務到 AE 網路");
-        if (!failures.isEmpty()) message(player, "§c提交失敗：" + String.join("、", failures));
+        if (submitted > 0) message(player, "§a已提交 " + submitted + " 项合成任务到 AE 网络");
+        if (!failures.isEmpty()) message(player, "§c提交失败：" + String.join("、", failures));
     }
 
     private static boolean targetStillValid(Session session) {

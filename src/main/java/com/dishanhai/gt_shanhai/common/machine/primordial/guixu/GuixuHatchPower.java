@@ -36,5 +36,5 @@ public record GuixuHatchPower(int count, long highestVoltage, BigInteger power, 
                 ? power.multiply(BigInteger.valueOf(ParallelPowerBudget.NET_CAPACITY_FACTOR)) : power;
     }
 
-    public String powerLabel() { return unlimited ? "無上限" : power.toString(); }
+    public String powerLabel() { return unlimited ? "无上限" : power.toString(); }
 }

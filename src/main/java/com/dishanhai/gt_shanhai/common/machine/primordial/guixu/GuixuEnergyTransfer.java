@@ -11,7 +11,7 @@ public final class GuixuEnergyTransfer {
     }
 
     public static long[] plan(BigInteger amount, long[] available) {
-        if (amount.signum() < 0) throw new IllegalArgumentException("能量需求不得為負");
+        if (amount.signum() < 0) throw new IllegalArgumentException("能量需求不得为负");
         long[] plan = new long[available.length];
         BigInteger remaining = amount;
         for (int i = 0; i < available.length && remaining.signum() > 0; i++) {

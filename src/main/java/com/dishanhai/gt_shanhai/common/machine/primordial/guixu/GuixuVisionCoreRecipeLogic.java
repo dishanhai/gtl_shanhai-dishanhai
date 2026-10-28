@@ -40,7 +40,7 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
     @Override
     public void findAndHandleRecipe() {
         if (host.isContainmentLocked()) {
-            setWaiting(Component.literal("黑洞坍縮，鎖定剩餘 " + host.getContainmentLockSeconds() + " 秒"));
+            setWaiting(Component.literal("黑洞坍缩，锁定剩余 " + host.getContainmentLockSeconds() + " 秒"));
             return;
         }
         super.findAndHandleRecipe();
@@ -174,10 +174,10 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
         // 原生 Mixin 在無線扣存失敗後統一寫「輸入能源不足」；只校正本次真實交易失敗。
         if (host != null && Objects.equals(reason, RecipeResult.FAIL_NO_ENOUGH_EU_IN.reason())) {
             reason = switch (host.getWirelessNetworkEnergyHandler().getLastFailure()) {
-                case INPUT -> Component.literal("能源倉可用 EU 不足");
-                case OUTPUT -> Component.literal("動力倉可用容量不足");
-                case TRANSACTION -> Component.literal("能源倉未完成整筆結算，已回滾");
-                case DISCONNECTED -> Component.literal("主機能源接口未就緒");
+                case INPUT -> Component.literal("能源仓可用 EU 不足");
+                case OUTPUT -> Component.literal("动力仓可用容量不足");
+                case TRANSACTION -> Component.literal("能源仓未完成整笔结算，已回滚");
+                case DISCONNECTED -> Component.literal("主机能源接口未就绪");
                 default -> reason;
             };
         }
