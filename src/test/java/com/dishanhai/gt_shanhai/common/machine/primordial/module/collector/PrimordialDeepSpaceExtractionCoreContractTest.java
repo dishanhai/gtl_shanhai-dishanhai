@@ -52,7 +52,7 @@ class PrimordialDeepSpaceExtractionCoreContractTest {
         String structure = Files.readString(Path.of("src", "main", "java", "com", "dishanhai",
                 "gt_shanhai", "common", "machine", "primordial", "PrimordialOmegaEngineStructure.java"));
         assertTrue(structure.contains("\"primordial_deep_space_extraction_core\""));
-        assertTrue(structure.contains("Predicates.blocks(deepSpaceExtractionCore)"));
+        assertTrue(structure.contains("optionalPrimordialModule(deepSpaceExtractionCore)"));
     }
 
     @Test

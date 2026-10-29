@@ -93,8 +93,9 @@ class PrimordialSixfoldResourceCoreContractTest {
                 new\\s+ResourceLocation\\(\\s*\"gt_shanhai\"\\s*,\\s*\"primordial_sixfold_resource_core\"\\s*\\)
                 \\s*\\)\\s*;
                 """, 1);
+        // 模組位一律經由 optionalPrimordialModule 過濾，禁用的原初模組才不會被主機結構接受。
         assertPatternCount(moduleSlotPredicate,
-                "\\.or\\(\\s*Predicates\\.blocks\\(\\s*sixfoldResourceCore\\s*\\)\\s*\\)", 1);
+                "\\.or\\(\\s*optionalPrimordialModule\\(\\s*sixfoldResourceCore\\s*\\)\\s*\\)", 1);
         assertTrue(moduleSlotPredicate.startsWith(".where('J',"), "新核心必须绑定 J 模块位谓词");
     }
 

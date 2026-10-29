@@ -68,7 +68,7 @@ class PrimordialMyriadProliferationCoreRegistrationTest {
                 \\s*\\)\\s*;
                 """, 1);
         assertPatternCount(moduleSlotPredicate,
-                "\\.or\\(\\s*Predicates\\.blocks\\(\\s*myriadProliferationCore\\s*\\)\\s*\\)", 1);
+                "\\.or\\(\\s*optionalPrimordialModule\\(\\s*myriadProliferationCore\\s*\\)\\s*\\)", 1);
         assertEquals(1, countExact(source, "\"gt_shanhai\", \"primordial_myriad_proliferation_core\""),
                 "模块方块只应查表一次");
         assertTrue(moduleSlotPredicate.startsWith(".where('J',"), "新核心必须绑定 J 模块位谓词");
