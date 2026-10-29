@@ -7,6 +7,8 @@
   "gt_shanhai.ae_steam_cover.tooltip": "Attach to a steam machine or steam hatch; automatically binds using an AE Steam Binder carried in your inventory",
   "gt_shanhai.ae_steam_cover.exact": "Consumes only gtceu:steam on demand at the machine's steam rate; stops when the bound node is offline or its chunk is unloaded",
   "gt_shanhai.ae_steam_binder.tooltip": "Right-click an AE Steam Binder block to record its position; carry this item to auto-bind new covers. Right-click an unbound cover to bind, right-click again to unbind; sneak-right-click also clears. Priority: offhand, main hand, then inventory slot order",
+  "gt_shanhai.ae_steam_binder.remove_tooltip": "Hold this item and Shift + left-click a steam cover to remove it; preserves its binding and prepaid steam. Drops if your inventory is full",
+  "gt_shanhai.ae_steam_binder.removed": "AE Steam Cover removed",
   "gt_shanhai.ae_steam_binder.cleared": "Steam cover AE binding cleared",
   "gt_shanhai.ae_steam_binder.bound": "Steam cover bound to the selected AE network",
   "gt_shanhai.ae_steam_binder.select_first": "Record an AE Steam Binder block with the binder item first",

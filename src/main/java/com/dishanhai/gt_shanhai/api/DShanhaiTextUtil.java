@@ -27,6 +27,14 @@ public class DShanhaiTextUtil {
         CYCLE, BREATHE, SCAN, STATIC, TWINKLE, DISTORT, WOBBLE
     }
 
+    public enum AllTextEffect {
+        FLOW, REVERSE, TIME_JUMP, WAVE_Y, WAVE_X, SHAKE, CIRCLE, BOUNCE,
+        SCAN, BREATHE, CHASE, TWINKLE, GLITCH
+    }
+
+    public record AllTextFrame(AllTextEffect effect, long time, float strength) {}
+    private static final AllTextEffect[] ALL_TEXT_EFFECTS = AllTextEffect.values();
+
 
     // ========== RGB 平滑色板（电光设计：对称 + 高反差 + 各具特色峰色） ==========
 
@@ -258,15 +266,19 @@ public class DShanhaiTextUtil {
     static final int[] PALETTE_RANDOM = {0x020202};
     static final int[] PALETTE_FULL_RANDOM = {0x030303};
 
-    /** 「全」在每套预设上停留的毫秒。各预设等时，不按色板长度摊。 */
+    /** 「全」每套預設的基準毫秒；各輪總時長在基準的 75%～125% 間隨機變化。 */
     static final long ALL_PRESET_MS = 800L;
-    /** 随机模式切到下一套预设的窗口。末段与下一套交叉淡化。 */
+    /** 隨機模式每套預設的基準窗口；一輪洗牌後各用一次，輪長同樣隨機變化。 */
     static final long RANDOM_WINDOW_MS = 1400L;
     /** 完全随机：每个字在两个随机亮色关键帧之间过渡的窗口。 */
     static final long FULL_RANDOM_WINDOW_MS = 480L;
 
     private static volatile int[][] presetCache;
     private static volatile int presetCacheCount = -1;
+    private static final long PRESET_SEED = java.util.concurrent.ThreadLocalRandom.current().nextLong();
+    private record PresetOrder(long cycle, int[] indices) {}
+    private static volatile PresetOrder presetOrderCache;
+    private static volatile PresetOrder adjacentPresetOrderCache;
 
     // ========== 多行同步支持 ==========
 
@@ -667,11 +679,104 @@ public class DShanhaiTextUtil {
     }
 
     static int pickPreset(long slot, int count) {
-        long x = slot * 0x9E3779B97F4A7C15L + 0xBF58476D1CE4E5B9L;
-        x ^= x >>> 30;
-        x *= 0x94D049BB133111EBL;
-        x ^= x >>> 27;
-        return (int) Math.floorMod(x, count);
+        long cycle = Math.floorDiv(slot, count);
+        int index = Math.floorMod(slot, count);
+        PresetOrder order = presetOrderCache;
+        if (order == null || order.cycle() != cycle || order.indices().length != count) {
+            order = adjacentPresetOrderCache;
+            if (order == null || order.cycle() != cycle || order.indices().length != count) {
+                int[] indices = shufflePresets(cycle, count);
+                if (count > 2) {
+                    int[] previous = shufflePresets(cycle - 1, count);
+                    if (indices[0] == previous[count - 1]) {
+                        // 只交換首位與中間位，保留末位，前後輪即可獨立計算。
+                        int first = indices[0];
+                        indices[0] = indices[1];
+                        indices[1] = first;
+                    }
+                }
+                order = new PresetOrder(cycle, indices);
+                adjacentPresetOrderCache = presetOrderCache;
+                presetOrderCache = order;
+            }
+        }
+        return order.indices()[index];
+    }
+
+    private static int[] shufflePresets(long cycle, int count) {
+        int[] indices = new int[count];
+        for (int i = 0; i < count; i++) indices[i] = i;
+        // 只有兩套時必須維持相同順序，跨輪才能繼續交替而不連抽。
+        java.util.SplittableRandom random = new java.util.SplittableRandom(
+                PRESET_SEED ^ (count <= 2 ? 0L : cycle * 0x9E3779B97F4A7C15L));
+        for (int i = count - 1; i > 0; i--) {
+            int j = random.nextInt(i + 1);
+            int value = indices[i];
+            indices[i] = indices[j];
+            indices[j] = value;
+        }
+        return indices;
+    }
+
+    static double presetCycleStart(long cycle, int count) {
+        if (cycle == 0) return 0;
+        long hash = PRESET_SEED ^ (cycle * 0x9E3779B97F4A7C15L);
+        hash = (hash ^ (hash >>> 30)) * 0xBF58476D1CE4E5B9L;
+        hash = (hash ^ (hash >>> 27)) * 0x94D049BB133111EBL;
+        hash ^= hash >>> 31;
+        // 邊界偏移 ±12.5%，相鄰邊界的距離便是基準輪長的 75%～125%。
+        return (double) cycle * count + ((hash >>> 11) * 0x1.0p-53 - 0.5) * count * 0.25;
+    }
+
+    /** 將真實時間映射到連續的色板槽位；直接定位輪次，長時間未渲染也無須補跑。 */
+    private static double presetPosition(double travel, int count) {
+        long cycle = (long) Math.floor(travel / count);
+        double start = presetCycleStart(cycle, count);
+        double end = presetCycleStart(cycle + 1, count);
+        if (travel < start) {
+            end = start;
+            start = presetCycleStart(--cycle, count);
+        } else if (travel >= end) {
+            start = end;
+            end = presetCycleStart(++cycle + 1, count);
+        }
+        return (double) cycle * count + (travel - start) * count / (end - start);
+    }
+
+    /** 「全」整段共用一個效果；只回傳局部動畫時間，不修改全域速度、方向或鎖時。 */
+    public static AllTextFrame allTextFrame(int[] palette, boolean isBody) {
+        if (palette != PALETTE_ALL) return null;
+        int count = flowPresets().length;
+        if (count == 0) return null;
+        long now = getTime();
+        long window = scaledWindow(isBody ? ALL_PRESET_MS * 2L : ALL_PRESET_MS);
+        double position = presetPosition(now / (double) window, count);
+        long slot = (long) Math.floor(position);
+        double local = position - slot;
+        AllTextEffect effect = allTextEffect(slot);
+        float strength = (float) allEffectStrength(local);
+        long effectTime = switch (effect) {
+            case REVERSE -> -now;
+            case TIME_JUMP -> now + (long) Math.floor(local * 8.0) * 30_000L;
+            default -> now;
+        };
+        return new AllTextFrame(effect, effectTime, strength);
+    }
+
+    static AllTextEffect allTextEffect(long slot) {
+        return ALL_TEXT_EFFECTS[pickPreset(slot, ALL_TEXT_EFFECTS.length)];
+    }
+
+    private static double allEffectStrength(double local) {
+        return smoothstep(local / 0.15) * smoothstep((1.0 - local) / 0.25);
+    }
+
+    static double allPaletteFraction(double local, AllTextEffect effect) {
+        return switch (effect) {
+            case REVERSE -> 1.0 - local;
+            case TIME_JUMP -> local + Math.floor(local * 8.0) * 0.38196601125;
+            default -> local;
+        };
     }
 
     private static boolean isMetaName(String name) {
@@ -703,7 +808,8 @@ public class DShanhaiTextUtil {
     }
 
     /**
-     * 全：等时走过每一套流动色板。一段末尾 25% 淡入下一套的起点，避免色板相接时跳色。
+     * 全：每輪依序走過全部流動色板，輪內各段等時、輪長隨機。
+     * 一段末尾 25% 淡入下一套的起點，避免色板相接時跳色。
      * 相邻字符错开约 0.18 段，短名字仍能看见当前这套色板自己的渐变。
      */
     private static int sampleAll(int charIndex, boolean isBody) {
@@ -713,31 +819,36 @@ public class DShanhaiTextUtil {
         long per = scaledWindow(isBody ? ALL_PRESET_MS * 2L : ALL_PRESET_MS);
         double travel = getTime() / (double) per;
         double spread = 0.18 * colorDirection;
-        double pos = floorMod(travel + charIndex * spread, n);
-        int idx = (int) pos;
-        if (idx >= n) idx = 0;
-        double local = pos - idx;
-        int current = samplePaletteFraction(presets[idx], local);
+        double pos = presetPosition(travel + charIndex * spread, n);
+        long slot = (long) Math.floor(pos);
+        int idx = Math.floorMod(slot, n);
+        double local = pos - slot;
+        double effectPosition = presetPosition(travel, n);
+        long effectSlot = (long) Math.floor(effectPosition);
+        AllTextEffect effect = allTextEffect(effectSlot);
+        double strength = allEffectStrength(effectPosition - effectSlot);
+        double fraction = local + (allPaletteFraction(local, effect) - local) * strength;
+        int current = samplePaletteFraction(presets[idx], fraction);
         if (local < 0.75) return current;
         double t = smoothstep((local - 0.75) / 0.25);
-        int upcoming = samplePaletteFraction(presets[(idx + 1) % n], 0);
+        int upcoming = samplePaletteFraction(presets[(idx + 1) % n], allPaletteFraction(0, effect) * strength);
         return lerpSrgb(current, upcoming, t);
     }
 
-    /** 随机：整段文字共用一套预设，窗口末段平滑交到另一套。池子与「全」相同。 */
+    /** 隨機：每輪洗牌且輪內不重複，隨機輪長；整段共用預設，末段淡入下一套。 */
     private static int sampleRandom(int charIndex, int totalLen, boolean isBody) {
         int[][] presets = flowPresets();
         int n = presets.length;
         if (n == 0) return sampleFullRandom(charIndex);
         long window = scaledWindow(isBody ? RANDOM_WINDOW_MS + 800L : RANDOM_WINDOW_MS);
         long now = getTime();
-        long slot = Math.floorDiv(now, window);
-        double fade = (double) Math.floorMod(now, window) / window;
+        double position = presetPosition(now / (double) window, n);
+        long slot = (long) Math.floor(position);
+        double fade = position - slot;
         int i0 = pickPreset(slot, n);
         int current = samplePaletteTime(presets[i0], charIndex, totalLen, isBody);
         if (fade < 0.72) return current;
         int i1 = pickPreset(slot + 1, n);
-        if (i1 == i0 && n > 1) i1 = (i0 + 1) % n;
         int upcoming = samplePaletteTime(presets[i1], charIndex, totalLen, isBody);
         double t = smoothstep((fade - 0.72) / 0.28);
         return lerpSrgb(current, upcoming, t);
@@ -876,6 +987,7 @@ public class DShanhaiTextUtil {
             if (!snake.equals(s)) def = DShanhaiStyleRegistry.get(snake);
         }
         if (def != null) {
+            if (def.rgb() == PALETTE_ALL) return TextFormatParser.createFcsComponent("", text, s);
             return switch (def.anim()) {
                 case BREATHE -> perCharGradientRGBBreathe(text, def.rgb(), def.isBody());
                 case SCAN -> perCharGradientRGBScan(text, def.rgb(), def.isBody());

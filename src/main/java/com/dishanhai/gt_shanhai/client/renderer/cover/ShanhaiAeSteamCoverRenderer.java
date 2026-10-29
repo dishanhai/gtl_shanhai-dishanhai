@@ -17,10 +17,13 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 
 import java.util.List;
 
-/** 山海：獨立覆蓋板貼圖；位於原生機器表面及 ±0.001 工作覆層之外，避免深度衝突。 */
+/** 山海：覆蓋板在機殼之外、原生 overlay 之內，保留主機圖案與工作狀態顯示。 */
 public final class ShanhaiAeSteamCoverRenderer extends SimpleCoverRenderer {
     public static final ResourceLocation TEXTURE = new ResourceLocation("gt_shanhai", "block/cover/ae_steam_cover");
-    public static final AABB SURFACE_BOUNDS = new AABB(-0.002, -0.002, -0.002, 1.002, 1.002, 1.002);
+    // 蒸汽倉 front overlay 為 0.001/16 格，比加工機的 0.001 更近；取其內側的獨立層。
+    private static final double SURFACE_OFFSET = 1.0 / 32768.0;
+    public static final AABB SURFACE_BOUNDS = new AABB(-SURFACE_OFFSET, -SURFACE_OFFSET, -SURFACE_OFFSET,
+            1 + SURFACE_OFFSET, 1 + SURFACE_OFFSET, 1 + SURFACE_OFFSET);
 
     public ShanhaiAeSteamCoverRenderer() {
         super(TEXTURE);

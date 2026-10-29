@@ -61,8 +61,8 @@ public final class DShanhaiStyleRegistry {
         reg("starlight",     DShanhaiTextUtil.STARLIGHT_RGB, false, CYCLE, "星辉白金");
         reg("abyss",         DShanhaiTextUtil.ABYSS_RGB, false, CYCLE, "深渊蓝光");
 
-        // ===== 元色板：全 = 全部流动预设等时统合；随机从同一池平滑切换；完全随机逐字亮色 =====
-        reg("all",           DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素：统合全部流动色板");
+        // ===== 元色板：全依序遍歷、隨機每輪洗牌不重複；兩者輪長隨機；完全隨機逐字亮色 =====
+        reg("all",           DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素：全部流动色板与随机文字动画");
         reg("quan",          DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素别名");
         reg("全",            DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素别名");
         reg("random",        DShanhaiTextUtil.PALETTE_RANDOM, false, CYCLE, "随机：在全部流动色板间平滑切换");

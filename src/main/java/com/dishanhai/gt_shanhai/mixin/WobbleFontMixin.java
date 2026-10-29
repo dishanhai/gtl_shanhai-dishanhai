@@ -128,6 +128,9 @@ public class WobbleFontMixin {
         String raw = comp.getString();
 
         boolean hasAmp = TextFormatParser.containsSpecialFormatting(raw);
+        String insertion = comp.getStyle().getInsertion();
+        // 保留子組件的每字 Style，由原版轉入 FCS 後按 insertion 樣式段繪製。
+        if (!hasAmp && insertion != null && insertion.startsWith("fcs:")) return;
         TextFormatParser.ParseResult pr;
 
         if (hasAmp) {
@@ -137,32 +140,7 @@ public class WobbleFontMixin {
             if (restoredRaw != null && TextFormatParser.containsSpecialFormatting(restoredRaw)) {
                 pr = TextFormatParser.parseFormatting(restoredRaw);
             } else {
-            // 从 Component style.insertion 恢复 FCS 信息
-            String insertion = comp.getStyle().getInsertion();
-            if (insertion != null && insertion.startsWith("fcs:")) {
-                String fcsInfo = insertion.substring(4);
-                String theme = fcsInfo.contains("|") ? fcsInfo.substring(0, fcsInfo.indexOf('|')) : fcsInfo;
-                if (theme.isEmpty()) return;
-                int[] pal = DShanhaiStyleRegistry.getRGB(theme.toLowerCase(java.util.Locale.ROOT));
-                if (pal == null || pal.length == 0) return;
-                TextFormatParser.FormatFlags f = new TextFormatParser.FormatFlags();
-                f.gradientTheme = theme;
-                f.palette = pal;
-                if (fcsInfo.contains("@")) f.circle = true;
-                if (fcsInfo.contains("~")) f.floatY = true;
-                if (fcsInfo.contains("*")) f.floatX = true;
-                if (fcsInfo.contains("%")) f.shake = true;
-                if (fcsInfo.contains("!")) f.bounce = true;
-                if (fcsInfo.contains("#")) f.outline = true;
-                if (fcsInfo.contains("^")) f.scan = true;
-                if (fcsInfo.contains("?")) f.glitch = true;
-                if (fcsInfo.contains("+")) f.breathe = true;
-                if (fcsInfo.contains(">")) f.chase = true;
-                if (fcsInfo.contains("`")) f.obfuscated = true;
-                pr = new TextFormatParser.ParseResult(raw, f, "", -1);
-            } else {
                 return;
-            }
             }
         }
         if (pr.cleanText.isEmpty() || pr.flags.palette == null || pr.flags.palette.length == 0) return;
@@ -173,6 +151,7 @@ public class WobbleFontMixin {
         int fcsLen = txt.length() - pxLen;
         int[] pal = pr.flags.palette;
         boolean body = pr.flags.gradientTheme != null && DShanhaiStyleRegistry.isBody(pr.flags.gradientTheme);
+        var allFrame = DShanhaiTextUtil.allTextFrame(pal, body);
         // 宽度差补正：rawW 通过宽度 mixin 得到不含 & 码的瘦宽度
         int rawW = self.width(comp);
         // txt = cleanText = prefix + actualText
@@ -215,6 +194,10 @@ public class WobbleFontMixin {
                     if (pr.flags.breathe) cc = TextFormatParser.applyBreatheColor(cc, fcsIdx, now);
                     if (pr.flags.chase) cc = TextFormatParser.applyChaseColor(cc, fcsIdx, fcsLen, now);
                     if (pr.flags.glitch) cc = TextFormatParser.applyGlitchColor(cc, fcsIdx, now);
+
+                    float[] allOffset = TextFormatParser.calcAllEffectOffset(allFrame, fcsIdx);
+                    if (allOffset != null) { xOff += allOffset[0]; yOff += allOffset[1]; }
+                    cc = TextFormatParser.applyAllEffectColor(cc, allFrame, fcsIdx, fcsLen);
 
                     Style charStyle = Style.EMPTY.withColor(TextColor.fromRgb(cc));
                     if (pr.flags.obfuscated) charStyle = charStyle.withObfuscated(true);
@@ -259,6 +242,32 @@ public class WobbleFontMixin {
             });
             String rawText = sb.toString();
             if (rawText.isEmpty()) return;
+
+            if (!TextFormatParser.containsSpecialFormatting(rawText)
+                    && TextFormatParser.hasMixedFcsInsertions(charStyles)) {
+                Font splitFont = (Font) (Object) this;
+                float runX = x;
+                for (int start = 0; start < rawText.length();) {
+                    String insertion = charStyles.get(start).getInsertion();
+                    int end = start + 1;
+                    while (end < rawText.length()
+                            && java.util.Objects.equals(insertion, charStyles.get(end).getInsertion())) end++;
+                    final int runStart = start;
+                    final int runEnd = end;
+                    FormattedCharSequence run = acceptor -> {
+                        for (int i = runStart; i < runEnd; i++) {
+                            if (!acceptor.accept(i - runStart, charStyles.get(i), rawText.charAt(i))) return false;
+                        }
+                        return true;
+                    };
+                    // 同一段 insertion 相同，不會再次進入拆段；保留每字原始樣式與正常前綴。
+                    runX = splitFont.drawInBatch(run, runX, y, color, shadow, matrix, buffer,
+                            mode, packedLight, packedOverlay);
+                    start = end;
+                }
+                cir.setReturnValue(Math.round(runX));
+                return;
+            }
 
             // 解析 § 码：构建 cleanedText（去掉 § 码字符对）+ legacyStyles（每个可见字符对应的 § 码 Style）
             StringBuilder cleaned = new StringBuilder();
@@ -438,6 +447,9 @@ public class WobbleFontMixin {
                 }
             }
 
+            var allFrame = DShanhaiTextUtil.allTextFrame(palette, isBody);
+            if (allFrame != null) hasEffects = true;
+
             // ===== 5. 无效果 + 无 wobble → 纯色板单次渲染 =====
             if (!hasEffects && !hasWobble) {
                 float curX = x + widthOffset + centerOffset;
@@ -499,6 +511,14 @@ public class WobbleFontMixin {
                     } else {
                         perLinePalette = ls;
                     }
+                }
+            }
+
+            if (hasWobble) {
+                String effectiveStyle = !perLinePalette.isEmpty() ? perLinePalette : DShanhaiTextUtil.WOBBLE_STYLE.get();
+                if (effectiveStyle != null) {
+                    allFrame = DShanhaiTextUtil.allTextFrame(DShanhaiStyleRegistry.getRGB(effectiveStyle),
+                            DShanhaiStyleRegistry.isBody(effectiveStyle));
                 }
             }
 
@@ -585,6 +605,11 @@ public class WobbleFontMixin {
                         }
                     }
 
+                    if (useFcs) {
+                        float[] allOffset = TextFormatParser.calcAllEffectOffset(allFrame, fcsCharCount);
+                        if (allOffset != null) { xOff += allOffset[0]; yOff += allOffset[1]; }
+                    }
+
                     int charColor = color;
                     Style charStyle = Style.EMPTY;
                     if (hasLegacyColor) {
@@ -602,7 +627,7 @@ public class WobbleFontMixin {
                             }
                         }
                         if (charColor == color) {
-                            String wobbleStyle = DShanhaiTextUtil.WOBBLE_STYLE.get();
+                            String wobbleStyle = hasWobble ? DShanhaiTextUtil.WOBBLE_STYLE.get() : null;
                             if (wobbleStyle != null) {
                                 int[] stylePalette = DShanhaiStyleRegistry.getRGB(wobbleStyle);
                                 if (stylePalette != null && stylePalette.length > 0) {
@@ -619,7 +644,8 @@ public class WobbleFontMixin {
                             if (flags.chase) charColor = TextFormatParser.applyChaseColor(charColor, fcsIdx, fcsLen, now);
                             if (flags.glitch) charColor = TextFormatParser.applyGlitchColor(charColor, fcsIdx, now);
                         }
-                        charStyle = Style.EMPTY.withColor(TextColor.fromRgb(charColor));
+                        charColor = TextFormatParser.applyAllEffectColor(charColor, allFrame, fcsIdx, fcsLen);
+                        charStyle = (allFrame != null ? legacyStyle : Style.EMPTY).withColor(TextColor.fromRgb(charColor));
                         if (flags != null && flags.obfuscated) charStyle = charStyle.withObfuscated(true);
                     } else if (hasLegacyObfuscated) {
                         charStyle = legacyStyle;

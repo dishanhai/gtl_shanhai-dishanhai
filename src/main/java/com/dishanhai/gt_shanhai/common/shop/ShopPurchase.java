@@ -963,16 +963,19 @@ public final class ShopPurchase {
         if (cost.isEmpty()) return 0L; // 免费商品没有可退回的花费，出售只会白扣物品
         if (cost.hasPhysical()) return 0L; // 含实物成本的商品不支持出售（反向退实物语义不清）
         if (entry.hasMultipleGoods()) return 0L; // 组合商品不支持出售（反向该退哪几种、退多少语义不清）
-        Item goods = entry.getGoodsItem();
         int per = entry.getGoodsCount();
         if (per <= 0) return 0L;
+        boolean fluidGoods = entry.isPrimaryGoodsFluid();
+        Item goods = entry.getGoodsItem();
+        appeng.api.stacks.AEFluidKey fluidKey = fluidGoods ? appeng.api.stacks.AEFluidKey.of(entry.primaryGoodsFluid()) : null;
         // 出售的货源同购买成本一样，背包 + 精妙背包 + 绑定AE网络合计可用量，不再只认随身背包
-        long inv = countItem(player, goods);
-        long backpack = ShopBackpack.countItem(player, goods, null);
+        long inv = fluidGoods ? 0 : countItem(player, goods);
+        long backpack = fluidGoods ? 0 : ShopBackpack.countItem(player, goods, null);
         long invPlusBackpack = (inv > Long.MAX_VALUE - backpack) ? Long.MAX_VALUE : inv + backpack;
         long ae = 0L;
-        appeng.api.stacks.AEItemKey key = appeng.api.stacks.AEItemKey.of(new ItemStack(goods));
-        if (key != null) ae = ShopAeNetwork.availableForPlayer(player, key);
+        appeng.api.stacks.AEItemKey key = fluidGoods ? null : appeng.api.stacks.AEItemKey.of(new ItemStack(goods));
+        if (fluidGoods && fluidKey != null) ae = ShopAeNetwork.availableForPlayer(player, fluidKey);
+        else if (key != null) ae = ShopAeNetwork.availableForPlayer(player, key);
         long held = (invPlusBackpack > Long.MAX_VALUE - ae) ? Long.MAX_VALUE : invPlusBackpack + ae;
         long sell = Math.min(times, held / per);
         sell = entry.clampByUses(sell); // 限购商品：出售与购买共享同一剩余次数
@@ -980,9 +983,17 @@ public final class ShopPurchase {
         sell = ShopPeriodLimiter.clamp(player, entry, periodKey, sell); // 周期限购：出售与购买共享同一周期窗口额度（每玩家独立）
         if (sell <= 0L) return 0L;
         long need = sell * per; // ≤ held，不溢出
-        long fromAe = deductFromCarried(player, goods, null, need, backpackMode); // 先扣背包/精妙背包（顺序看模式），不足再从绑定AE抽
-        if (fromAe > 0 && key != null) {
-            ShopAeNetwork.extractForPlayer(player, key, fromAe);
+        if (fluidGoods) {
+            ShopFluidSale.Result result = ShopFluidSale.extract(sell, per,
+                    amount -> ShopAeNetwork.extractForPlayer(player, fluidKey, amount),
+                    amount -> ShopAeNetwork.injectForPlayer(player, fluidKey, amount));
+            if (result.unreturned() > 0) player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "§c[山海商店] AE 网络未能退回 " + result.unreturned() + " mB 未满一份的流体，请检查网络"));
+            sell = result.sold();
+            if (sell <= 0) return 0L;
+        } else {
+            long fromAe = deductFromCarried(player, goods, null, need, backpackMode); // 先扣随身物品，不足再抽 AE
+            if (fromAe > 0 && key != null) ShopAeNetwork.extractForPlayer(player, key, fromAe);
         }
         // 退回纯钱包成本（星火 + 币种 + EU）× 份数，按出售价差折价（回收价=买价×sellRatioPercent%，
         // 防止「买了立刻卖回零损耗」的套利，见 config「shop.sellRatioPercent」）

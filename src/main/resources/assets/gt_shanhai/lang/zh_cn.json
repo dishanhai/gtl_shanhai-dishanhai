@@ -7,6 +7,8 @@
   "gt_shanhai.ae_steam_cover.tooltip": "安装在蒸汽机器／蒸汽仓上；放置时自动读取物品栏中 AE 蒸汽绑定器记录的网络",
   "gt_shanhai.ae_steam_cover.exact": "仅直接消耗 gtceu:steam；沿用机器耗汽倍率，不预抽到本机；网络离线或目标区块未加载时停止供汽",
   "gt_shanhai.ae_steam_binder.tooltip": "右键 AE 蒸汽绑定器方块记录位置，放在物品栏即可自动绑定新装的覆盖板；右键未绑定的覆盖板进行绑定，再次右键解除，潜行右键也可清除。多支时优先副手，其次主手和靠前槽位",
+  "gt_shanhai.ae_steam_binder.remove_tooltip": "手持此物品，Shift＋左键蒸汽覆盖板即可拆下；保留绑定与已预付蒸汽，物品栏已满时掉落",
+  "gt_shanhai.ae_steam_binder.removed": "已拆下 AE 蒸汽覆盖板",
   "gt_shanhai.ae_steam_binder.cleared": "已清除蒸汽覆盖板的 AE 绑定",
   "gt_shanhai.ae_steam_binder.bound": "蒸汽覆盖板已绑定所选 AE 网络",
   "gt_shanhai.ae_steam_binder.select_first": "请先用物品绑定器右键 AE 蒸汽绑定器方块记录位置",

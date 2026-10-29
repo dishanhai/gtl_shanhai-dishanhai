@@ -467,6 +467,11 @@ public class ShopActionPacket {
         }
         long sold = ShopPurchase.sellBulk(player, entry, times, pkt.backpackMode);
         if (sold <= 0L) {
+            if (entry.isPrimaryGoodsFluid()) {
+                player.sendSystemMessage(Component.literal("§c[山海商店] 绑定 AE 网络未连接或流体数量不足：" + entry.goodsDisplayName()));
+                sendResult(player, pkt, 0L, "AE 网络未连接或流体不足");
+                return;
+            }
             player.sendSystemMessage(Component.literal("§c[山海商店] 背包里没有足够的 " + entry.goodsDisplayName()));
             sendResult(player, pkt, 0L, "背包里商品不足");
             return;

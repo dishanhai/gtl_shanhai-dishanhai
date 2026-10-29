@@ -80,10 +80,10 @@ public class ShanhaiTextAPI {
     /** 深渊蓝光逐字渐变 */
     public static Component abyss(String text) { return DShanhaiTextUtil.createAbyssText(text); }
 
-    /** 全元素：等时统合全部流动色板，段与段之间平滑衔接。FCS：{@code &$全-} / {@code &$all-} */
+    /** 全元素：遍歷全部色板，隨機輪長及 FCS 動畫（含跳時、反向）。FCS：{@code &$全-} / {@code &$all-} */
     public static Component all(String text) { return DShanhaiTextUtil.createStyled(text, "all"); }
 
-    /** 随机：与「全」共用预设池，整段文字在各色板之间平滑切换。FCS：{@code &$随机-} */
+    /** 隨機：與「全」共用預設池，每輪洗牌不重複、輪長隨機並平滑切換。FCS：{@code &$随机-} */
     public static Component random(String text) { return DShanhaiTextUtil.createStyled(text, "random"); }
 
     /** 完全随机：逐字独立亮色，关键帧之间平滑过渡。FCS：{@code &$全随机-} / {@code &$完全随机-} */

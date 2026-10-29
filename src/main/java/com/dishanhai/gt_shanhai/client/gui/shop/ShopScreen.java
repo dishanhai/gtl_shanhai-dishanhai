@@ -3757,7 +3757,7 @@ public class ShopScreen extends ScaledScreen {
                 textX, dy + 10, WHITE, true);
         String countLine = selected.hasEnergyGoods() ? "§7每份无线 EU（完整数量见下方）" : selected.hasMultipleGoods()
                 ? "§7组合商品 §f" + selected.getGoodsList().size() + " §7种"
-                : "§7每份 §f" + selected.getGoodsCount() + " §7个";
+                : "§7每份 §f" + selected.getGoodsCount() + (selected.isPrimaryGoodsFluid() ? " §7mB" : " §7个");
         if (selected.isLimited()) {
             countLine += " §7剩§d" + formatBig(java.math.BigInteger.valueOf(selected.getRemainingUses())) + "§7次";
         }
@@ -3950,17 +3950,21 @@ public class ShopScreen extends ScaledScreen {
         } else if (!selected.allowsSell()) {
             g.drawString(this.font, "§c该商品仅允许购买，不能出售", cx, contentY + 12, DEEP_RED, true);
         } else {
-            g.drawString(this.font, "§7预计消耗: §e" + formatBig(total) + " §7个商品", cx, contentY + 12, CYAN, true);
+            g.drawString(this.font, "§7预计消耗: §e" + formatBig(total) + (selected.isPrimaryGoodsFluid() ? " §7mB 流体" : " §7个商品"), cx, contentY + 12, CYAN, true);
             int sellGetH = 12;
             if (dcost.hasPhysical()) {
                 g.drawString(this.font, "§c含实物成本，不支持出售", cx, contentY + 24, DEEP_RED, true);
             } else {
                 sellGetH = drawFoldedBlock(g, "sellget", "§7预计获得: " + costInlineTimes(dcost, amount), cx, contentY + 24, costTrimW, GREEN);
             }
-            int held = ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem());
             int sellHintY = contentY + 24 + sellGetH;
-            sellHintY += drawWrappedBlock(g, "§7随身背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, sellHintY, costTrimW, WHITE);
-            sellHintY += drawWrappedBlock(g, "§7精妙背包及绑定 AE 网络也可供出售，实际数量以服务器为准", cx, sellHintY, costTrimW, GRAY);
+            if (selected.isPrimaryGoodsFluid()) {
+                sellHintY += drawWrappedBlock(g, "§7流体从绑定 AE 网络提取，实际数量以服务器为准", cx, sellHintY, costTrimW, GRAY);
+            } else {
+                int held = ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem());
+                sellHintY += drawWrappedBlock(g, "§7随身背包持有: " + (held > 0 ? "§a" : "§c") + held, cx, sellHintY, costTrimW, WHITE);
+                sellHintY += drawWrappedBlock(g, "§7精妙背包及绑定 AE 网络也可供出售，实际数量以服务器为准", cx, sellHintY, costTrimW, GRAY);
+            }
             physicalHintExtra = sellHintY - (contentY + 50);
         }
 
@@ -4106,7 +4110,7 @@ public class ShopScreen extends ScaledScreen {
         boolean canTrade = mode == Mode.BUY
                 ? (canAffordClient(dcost, amount) && prereqSatisfiedClient && submissionsSatisfiedClient) // dcost 已含限时折扣+会员折扣（BUY 分支同一个值）
                 : (!selected.getCost().isEmpty() && !selected.getCost().hasPhysical() && !selected.hasMultipleGoods()
-                    && ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount());
+                    && (selected.isPrimaryGoodsFluid() || ShopPurchase.countItem(Minecraft.getInstance().player, selected.getGoodsItem()) >= selected.getGoodsCount()));
         boolean btnHover = hit(mx, my, cx, btnY, detailInnerW, 20);
         long confirmKey = confirmActionKey();
         renderButton(g, cx, btnY, detailInnerW, 20, btnHover,

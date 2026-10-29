@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class RgbTextFlowTest {
@@ -38,16 +40,18 @@ public class RgbTextFlowTest {
         assertSame(all, DShanhaiStyleRegistry.getRGB("quan"));
 
         assertEquals(presets[0][0], DShanhaiTextUtil.getDynamicColor(all, 0, 4, false));
-        DShanhaiTextUtil.lockTimeAt(DShanhaiTextUtil.ALL_PRESET_MS);
-        assertEquals(presets[1][0], DShanhaiTextUtil.getDynamicColor(all, 0, 4, false));
+        DShanhaiTextUtil.lockTimeAt(presetBoundary(0, 1, DShanhaiTextUtil.ALL_PRESET_MS));
+        assertTrue(channelDelta(presets[1][0],
+                DShanhaiTextUtil.getDynamicColor(all, 0, 4, false)) <= 2);
     }
 
     @Test
     void allPresetBoundaryDoesNotJump() {
         int[] all = DShanhaiTextUtil.PALETTE_ALL;
-        DShanhaiTextUtil.lockTimeAt(DShanhaiTextUtil.ALL_PRESET_MS - 1);
+        long boundary = presetBoundary(0, 1, DShanhaiTextUtil.ALL_PRESET_MS);
+        DShanhaiTextUtil.lockTimeAt(boundary - 1);
         int before = DShanhaiTextUtil.getDynamicColor(all, 0, 4, false);
-        DShanhaiTextUtil.lockTimeAt(DShanhaiTextUtil.ALL_PRESET_MS);
+        DShanhaiTextUtil.lockTimeAt(boundary);
         int after = DShanhaiTextUtil.getDynamicColor(all, 0, 4, false);
         assertTrue(channelDelta(before, after) <= 48, "全元素换段应已淡入下一段，实际差 " + channelDelta(before, after));
     }
@@ -74,11 +78,216 @@ public class RgbTextFlowTest {
         int picked = presets[DShanhaiTextUtil.pickPreset(0, presets.length)][0];
         assertEquals(picked, color);
 
-        DShanhaiTextUtil.lockTimeAt(1007);
+        long firstWindow = presetBoundary(0, 1, DShanhaiTextUtil.RANDOM_WINDOW_MS);
+        long fadeStart = Math.round(firstWindow * 0.72);
+        DShanhaiTextUtil.lockTimeAt(fadeStart - 1);
         int before = DShanhaiTextUtil.getDynamicColor(random, 0, 4, false);
-        DShanhaiTextUtil.lockTimeAt(1008);
+        DShanhaiTextUtil.lockTimeAt(fadeStart);
         int after = DShanhaiTextUtil.getDynamicColor(random, 0, 4, false);
         assertTrue(channelDelta(before, after) <= 24, "随机切换起点不应跳色");
+    }
+
+    @Test
+    void randomNeverRepeatsAPresetWithinOneCycle() {
+        int count = DShanhaiTextUtil.flowPresets().length;
+        for (int cycle = 0; cycle < 100; cycle++) {
+            java.util.Set<Integer> used = new java.util.HashSet<>();
+            for (int index = 0; index < count; index++) {
+                int picked = DShanhaiTextUtil.pickPreset((long) cycle * count + index, count);
+                assertTrue(used.add(picked), "同一輪重複抽取色板：" + picked + "，輪次 " + cycle);
+            }
+            assertEquals(count, used.size());
+        }
+    }
+
+    @Test
+    void randomRenderingFollowsTheBagEvenAfterLargeTimeJumps() {
+        int[][] presets = DShanhaiTextUtil.flowPresets();
+        int count = presets.length;
+        java.util.Set<String> orders = new java.util.HashSet<>();
+        for (long cycle : new long[]{0, 1, 2, 30_000_000, 0}) {
+            int[] order = new int[count];
+            for (int index = 0; index < count; index++) {
+                order[index] = DShanhaiTextUtil.pickPreset(cycle * count + index, count);
+                long time = presetBoundary(cycle, index, DShanhaiTextUtil.RANDOM_WINDOW_MS) + 1;
+                DShanhaiTextUtil.lockTimeAt(time);
+                for (int direction : new int[]{1, -1}) {
+                    DShanhaiTextUtil.setDirection(direction);
+                    for (int character : new int[]{0, 3}) {
+                        int expected = DShanhaiTextUtil.getDynamicColor(presets[order[index]], character, 4, false);
+                        assertEquals(expected, DShanhaiTextUtil.getDynamicColor(
+                                DShanhaiTextUtil.PALETTE_RANDOM, character, 4, false));
+                    }
+                }
+            }
+            orders.add(java.util.Arrays.toString(order));
+        }
+        assertTrue(orders.size() > 1, "新一輪必須重新洗牌");
+    }
+
+    @Test
+    void randomDoesNotRepeatAcrossCycleBoundaries() {
+        for (int count : new int[]{1, 2, 3, DShanhaiTextUtil.flowPresets().length}) {
+            for (int cycle = 1; cycle < 100; cycle++) {
+                long slot = (long) cycle * count;
+                int previous = DShanhaiTextUtil.pickPreset(slot - 1, count);
+                int next = DShanhaiTextUtil.pickPreset(slot, count);
+                if (count == 1) assertEquals(0, next);
+                else assertNotEquals(previous, next, "輪次交界不得連續使用同一色板");
+            }
+        }
+    }
+
+    @Test
+    void cycleDurationChangesWithoutSkippingOrReorderingPresets() {
+        int count = DShanhaiTextUtil.flowPresets().length;
+        java.util.Set<Long> durations = new java.util.HashSet<>();
+        int[] all = DShanhaiTextUtil.PALETTE_ALL;
+        int[][] presets = DShanhaiTextUtil.flowPresets();
+        for (int cycle = 0; cycle < 20; cycle++) {
+            double start = DShanhaiTextUtil.presetCycleStart(cycle, count);
+            double end = DShanhaiTextUtil.presetCycleStart(cycle + 1, count);
+            double duration = end - start;
+            assertTrue(duration >= count * 0.75 && duration <= count * 1.25);
+            durations.add(Math.round(duration * 1000));
+            for (int index = 0; index < count; index++) {
+                long time = presetBoundary(cycle, index, DShanhaiTextUtil.ALL_PRESET_MS);
+                DShanhaiTextUtil.lockTimeAt(time);
+                assertTrue(channelDelta(presets[index][0],
+                        DShanhaiTextUtil.getDynamicColor(all, 0, 4, false)) <= 4,
+                        "全色板在隨機輪長下仍須完整依序遍歷");
+            }
+        }
+        assertTrue(durations.size() > 1, "各輪的循環時長必須隨機變化");
+    }
+
+    @Test
+    void metaTransitionsStayContinuousIncludingCycleBoundariesAndBodySpeed() {
+        int count = DShanhaiTextUtil.flowPresets().length;
+        for (int speed : new int[]{40, 80, 160}) {
+            DShanhaiTextUtil.setSpeed(speed);
+            for (boolean body : new boolean[]{false, true}) {
+                for (int[] palette : new int[][]{DShanhaiTextUtil.PALETTE_ALL, DShanhaiTextUtil.PALETTE_RANDOM}) {
+                    boolean all = palette == DShanhaiTextUtil.PALETTE_ALL;
+                    long window = (all ? DShanhaiTextUtil.ALL_PRESET_MS * (body ? 2 : 1)
+                            : DShanhaiTextUtil.RANDOM_WINDOW_MS + (body ? 800 : 0)) * speed / 80;
+                    for (int cycle = 0; cycle < 3; cycle++) {
+                        for (int index = 1; index <= count; index++) {
+                            long time = presetBoundary(cycle, index, window);
+                            for (int character : new int[]{0, 3}) {
+                                DShanhaiTextUtil.lockTimeAt(time - 1);
+                                int before = DShanhaiTextUtil.getDynamicColor(palette, character, 4, body);
+                                DShanhaiTextUtil.lockTimeAt(time);
+                                int after = DShanhaiTextUtil.getDynamicColor(palette, character, 4, body);
+                                assertTrue(channelDelta(before, after) <= 48,
+                                        "切換、跨輪及正文速度下淡化必須連續");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void allCanActuallyJumpItsAnimationPhase() {
+        int count = DShanhaiTextUtil.flowPresets().length;
+        int biggestJump = 0;
+        for (int cycle = 0; cycle < 4; cycle++) {
+            for (int index = 0; index < count; index++) {
+                long start = presetBoundary(cycle, index, DShanhaiTextUtil.ALL_PRESET_MS);
+                long end = presetBoundary(cycle, index + 1, DShanhaiTextUtil.ALL_PRESET_MS);
+                for (int step = 1; step < 6; step++) {
+                    long time = Math.round(start + (end - start) * step / 8.0);
+                    DShanhaiTextUtil.lockTimeAt(time - 1);
+                    int before = DShanhaiTextUtil.getDynamicColor(DShanhaiTextUtil.PALETTE_ALL, 0, 4, false);
+                    DShanhaiTextUtil.lockTimeAt(time + 1);
+                    int after = DShanhaiTextUtil.getDynamicColor(DShanhaiTextUtil.PALETTE_ALL, 0, 4, false);
+                    biggestJump = Math.max(biggestJump, channelDelta(before, after));
+                }
+            }
+        }
+        assertTrue(biggestJump > 80, "全模式須實際抽到大幅跳時效果，不能只有外部測試跳時");
+    }
+
+    @Test
+    void allEffectBagIncludesEveryAnimationOnce() {
+        int count = DShanhaiTextUtil.AllTextEffect.values().length;
+        java.util.Set<DShanhaiTextUtil.AllTextEffect> used = java.util.EnumSet.noneOf(DShanhaiTextUtil.AllTextEffect.class);
+        for (int index = 0; index < count; index++) {
+            assertTrue(used.add(DShanhaiTextUtil.allTextEffect(index)), "效果池一輪內不得重複");
+        }
+        assertEquals(count, used.size());
+        assertTrue(used.contains(DShanhaiTextUtil.AllTextEffect.REVERSE));
+        assertTrue(used.contains(DShanhaiTextUtil.AllTextEffect.TIME_JUMP));
+    }
+
+    @Test
+    void allFramesShareEffectsAndKeepTheirTimeLocal() {
+        int effectCount = DShanhaiTextUtil.AllTextEffect.values().length;
+        int[] fire = DShanhaiStyleRegistry.getRGB("fire");
+        for (int index = 0; index < effectCount; index++) {
+            long start = presetBoundary(0, index, DShanhaiTextUtil.ALL_PRESET_MS);
+            long end = presetBoundary(0, index + 1, DShanhaiTextUtil.ALL_PRESET_MS);
+            long time = Math.round(start + (end - start) * 0.4);
+            DShanhaiTextUtil.lockTimeAt(time);
+            int original = DShanhaiTextUtil.getDynamicColor(fire, 3, 4, false);
+            var frame = DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_ALL, false);
+            assertEquals(DShanhaiTextUtil.allTextEffect(index), frame.effect());
+            assertEquals(1.0f, frame.strength(), 0.001f);
+            assertEquals(frame, DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_ALL, false));
+            switch (frame.effect()) {
+                case REVERSE -> assertEquals(-time, frame.time());
+                case TIME_JUMP -> assertTrue(frame.time() >= time + 90_000);
+                default -> assertEquals(time, frame.time());
+            }
+            assertEquals(original, DShanhaiTextUtil.getDynamicColor(fire, 3, 4, false),
+                    "隨機效果不得修改其他色板的時間或方向");
+        }
+        assertNull(DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_RANDOM, false));
+        assertNull(DShanhaiTextUtil.allTextFrame(fire, false));
+    }
+
+    @Test
+    void reverseAndTimeJumpChangeTheActualPalettePhase() {
+        assertEquals(0.8, DShanhaiTextUtil.allPaletteFraction(0.2, DShanhaiTextUtil.AllTextEffect.REVERSE), 0.00001);
+        assertEquals(0.2, DShanhaiTextUtil.allPaletteFraction(0.2, DShanhaiTextUtil.AllTextEffect.FLOW), 0.00001);
+        double before = DShanhaiTextUtil.allPaletteFraction(0.49999, DShanhaiTextUtil.AllTextEffect.TIME_JUMP);
+        double after = DShanhaiTextUtil.allPaletteFraction(0.50001, DShanhaiTextUtil.AllTextEffect.TIME_JUMP);
+        assertTrue(after - before > 0.3, "跳時須大幅改變色板相位");
+    }
+
+    @Test
+    void allEffectsFadeOutAndPreserveFcsMarkers() {
+        for (var effect : DShanhaiTextUtil.AllTextEffect.values()) {
+            var frame = new DShanhaiTextUtil.AllTextFrame(effect, 12345, 0);
+            assertNull(TextFormatParser.calcAllEffectOffset(frame, 3));
+            assertEquals(0x224466, TextFormatParser.applyAllEffectColor(0x224466, frame, 3, 4));
+        }
+        var frame = new DShanhaiTextUtil.AllTextFrame(DShanhaiTextUtil.AllTextEffect.WAVE_Y, 12345, 1);
+        assertEquals(TextFormatParser.calcWaveY(3, 12345), TextFormatParser.calcAllEffectOffset(frame, 3)[1]);
+        var breathe = new DShanhaiTextUtil.AllTextFrame(DShanhaiTextUtil.AllTextEffect.BREATHE, 12345, 1);
+        assertEquals(TextFormatParser.applyBreatheColor(0x224466, 3, 12345),
+                TextFormatParser.applyAllEffectColor(0x224466, breathe, 3, 4));
+
+        var api = ShanhaiTextAPI.all("山海");
+        assertEquals("山海", api.getString());
+        assertEquals("fcs:all", api.getStyle().getInsertion());
+        var parsed = TextFormatParser.parseClean("&~$全-山海");
+        assertEquals("山海", parsed.getString());
+        assertEquals("fcs:全|~", parsed.getStyle().getInsertion());
+    }
+
+    @Test
+    void nestedAllMarkersAreDetectedWithoutChangingPlainOrUniformRuns() {
+        var plain = net.minecraft.network.chat.Style.EMPTY;
+        var all = ShanhaiTextAPI.all("山海").getStyle();
+        var scan = TextFormatParser.createFcsComponent("^", "掃光", "all").getStyle();
+        assertTrue(TextFormatParser.hasMixedFcsInsertions(java.util.List.of(plain, all, all, plain)));
+        assertTrue(TextFormatParser.hasMixedFcsInsertions(java.util.List.of(all, scan)));
+        assertFalse(TextFormatParser.hasMixedFcsInsertions(java.util.List.of(all, all)));
+        assertFalse(TextFormatParser.hasMixedFcsInsertions(java.util.List.of(plain, plain.withColor(0x123456))));
+        assertFalse(TextFormatParser.hasMixedFcsInsertions(java.util.List.of()));
     }
 
     @Test
@@ -146,6 +355,13 @@ public class RgbTextFlowTest {
         assertEquals("完全随机", complete.flags.gradientTheme);
         assertEquals("山海", complete.cleanText);
         assertSame(DShanhaiTextUtil.PALETTE_FULL_RANDOM, complete.flags.palette);
+    }
+
+    private static long presetBoundary(long cycle, int index, long window) {
+        int count = DShanhaiTextUtil.flowPresets().length;
+        double start = DShanhaiTextUtil.presetCycleStart(cycle, count);
+        double end = DShanhaiTextUtil.presetCycleStart(cycle + 1, count);
+        return Math.round((start + (end - start) * index / count) * window);
     }
 
     private static int channelDelta(int a, int b) {

@@ -133,6 +133,25 @@ public class TextFormatParser {
         return FCS_PREFIX_MAP.get(cleanText);
     }
 
+    /** 子組件的 FCS insertion 不一定在首字；只有混合段落才需要拆段繪製。 */
+    public static boolean hasMixedFcsInsertions(List<Style> styles) {
+        if (styles.isEmpty()) return false;
+        String first = fcsInsertion(styles.get(0));
+        boolean hasFcs = first != null;
+        boolean mixed = false;
+        for (Style style : styles) {
+            String insertion = fcsInsertion(style);
+            hasFcs |= insertion != null;
+            mixed |= !Objects.equals(first, insertion);
+        }
+        return hasFcs && mixed;
+    }
+
+    private static String fcsInsertion(Style style) {
+        String insertion = style.getInsertion();
+        return insertion != null && insertion.startsWith("fcs:") ? insertion : null;
+    }
+
     private static String findStylePrefix(String text) {
         String lower = text.toLowerCase(Locale.ROOT);
         String[] names = DShanhaiStyleRegistry.getAllNames();
@@ -316,9 +335,48 @@ public class TextFormatParser {
         return (r << 16) | (g << 8) | b;
     }
 
+    /** 「全」的隨機位置效果，重用顯式 FCS 效果算法；色彩效果不配置位移陣列。 */
+    public static float[] calcAllEffectOffset(DShanhaiTextUtil.AllTextFrame frame, int charIndex) {
+        if (frame == null || frame.strength() <= 0) return null;
+        long time = frame.time();
+        float[] offset = switch (frame.effect()) {
+            case REVERSE, TIME_JUMP, WAVE_Y -> new float[]{0, calcWaveY(charIndex, time)};
+            case WAVE_X -> new float[]{calcWaveX(charIndex, time), 0};
+            case SHAKE -> calcShakeOffset(charIndex, time);
+            case CIRCLE -> calcCircleOffset(charIndex, time);
+            case BOUNCE -> new float[]{0, calcBounceY(charIndex, time)};
+            case GLITCH -> new float[]{calcGlitchX(charIndex, time), calcGlitchY(charIndex, time)};
+            default -> null;
+        };
+        if (offset != null) {
+            offset[0] *= frame.strength();
+            offset[1] *= frame.strength();
+        }
+        return offset;
+    }
+
+    public static int applyAllEffectColor(int color, DShanhaiTextUtil.AllTextFrame frame,
+                                         int charIndex, int totalLen) {
+        if (frame == null || frame.strength() <= 0) return color;
+        long time = frame.time();
+        int changed = switch (frame.effect()) {
+            case SCAN -> applyScanColor(color, charIndex, totalLen, time);
+            case BREATHE -> applyBreatheColor(color, charIndex, time);
+            case CHASE -> applyChaseColor(color, charIndex, totalLen, time);
+            case GLITCH -> applyGlitchColor(color, charIndex, time);
+            case TWINKLE -> mixColor(color, 0xFFFFFF,
+                    (float) Math.pow(Math.max(0, Math.sin(time * 0.012 + charIndex * 2.4)), 8));
+            default -> color;
+        };
+        return mixColor(color, changed, frame.strength());
+    }
+
     // ===== Component 构建（备选，不依赖 mixin 时使用） =====
 
     public static Component createStyled(String text, FormatFlags flags) {
+        if (flags != null && flags.palette == DShanhaiTextUtil.PALETTE_ALL) {
+            return Component.literal(text).withStyle(s -> s.withInsertion(toFcsInsertion(flags)));
+        }
         MutableComponent result = Component.literal("");
         int[] palette = flags != null ? flags.palette : null;
         for (int i = 0; i < text.length(); i++) {
