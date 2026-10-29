@@ -8,6 +8,7 @@ categories:
 
 # 机器索引
 
+* [蒸汽生成机](steam_generator.md)
 * [原初引擎与模块](primordial_index.md)
 * [终焉与世线](worldline_index.md)
 * [高阶多方块](multiblock_index.md)
