@@ -1,0 +1,24 @@
+{
+  "type": "gtceu:steam_generation",
+  "duration": 20,
+  "inputs": {
+    "fluid": [
+      {
+        "content": {"amount": 2000, "value": [{"fluid": "minecraft:water"}]},
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  },
+  "outputs": {
+    "fluid": [
+      {
+        "content": {"amount": 1000, "value": [{"fluid": "gtceu:steam"}]},
+        "chance": 10000,
+        "maxChance": 10000,
+        "tierChanceBoost": 0
+      }
+    ]
+  }
+}

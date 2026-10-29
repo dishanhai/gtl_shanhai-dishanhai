@@ -235,6 +235,9 @@ public class GTDishanhaiMod {
                     // 变了就把这次 Rhino 真实注册出的配方从 RecipeManager 取出，编码成标准数据包 json 落盘，
                     // 交给 DShanhaiRecipePackFinder 常驻注入，下次开服直接走 vanilla 原生加载。
                     com.dishanhai.gt_shanhai.common.recipe.DShanhaiRecipeCache.exportIfNeeded(e.getServer());
+                    // 「禁用原初系列機器」：移除產出被禁機器的配方，時機與鑄幣工廠一致，都在完整匯出後。
+                    com.dishanhai.gt_shanhai.common.recipe.PrimordialSeriesRecipeGate.stripLoaded(
+                            e.getServer().getRecipeManager());
                     // 必须在完整配方导出后再移除禁用配方，否则缓存会丢失可恢复的配方快照。
                     com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI.runRuleBatch(
                             com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI::applyPersistedRecipeToggles);

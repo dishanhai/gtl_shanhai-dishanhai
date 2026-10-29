@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["Q", "P"],
+  "key": {
+    "Q": {"item": "ae2:certus_quartz_crystal"},
+    "P": {"item": "gtceu:bronze_pipe_casing"}
+  },
+  "result": {"item": "gt_shanhai:ae_steam_binder", "count": 1}
+}

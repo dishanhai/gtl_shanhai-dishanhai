@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/orientable",
+  "textures": {
+    "side": "gt_shanhai:block/ae_steam_binder_side",
+    "front": "gt_shanhai:block/ae_steam_binder_front",
+    "top": "gt_shanhai:block/ae_steam_binder_top"
+  }
+}

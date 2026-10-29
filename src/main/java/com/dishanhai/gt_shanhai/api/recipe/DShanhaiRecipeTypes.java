@@ -17,6 +17,8 @@ import java.util.List;
 
 public class DShanhaiRecipeTypes {
 
+    public static GTRecipeType STEAM_GENERATION;
+
     public static GTRecipeType SPACETIME_DISTORTION;
     public static GTRecipeType GUIXU_MATTER_DECOMPRESSION;
     public static GTRecipeType GUIXU_ENERGY_EXTRACTION;
@@ -75,6 +77,10 @@ public class DShanhaiRecipeTypes {
     }
 
     public static void init() {
+        // 山海：只有流體投入／產出，完全不要求 EU 能力或燃料。
+        STEAM_GENERATION = register("steam_generation", "multiblock")
+                .setMaxIOSize(0, 0, 1, 1).setEUIO(IO.NONE)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
         // 山海：歸墟三種專屬模式；具體配方與倍率消耗另行定義。
         GUIXU_MATTER_DECOMPRESSION = register("guixu_matter_decompression", "multiblock")
                 .setMaxIOSize(9, 144, 4, 32).setEUIO(IO.IN)

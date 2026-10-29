@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["CBC", "PFP", "CBC"],
+  "key": {
+    "C": {"item": "gtceu:bronze_machine_casing"},
+    "B": {"item": "gtceu:bronze_gearbox"},
+    "P": {"item": "gtceu:bronze_pipe_casing"},
+    "F": {"item": "ae2:fluix_crystal"}
+  },
+  "result": {"item": "gt_shanhai:ae_steam_cover", "count": 1}
+}

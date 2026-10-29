@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["GPG", "PCP", "FFF"],
+  "key": {
+    "G": {"item": "gtceu:bronze_gearbox"},
+    "P": {"item": "gtceu:bronze_pipe_casing"},
+    "C": {"item": "gtceu:hp_steam_solid_boiler"},
+    "F": {"item": "gtceu:bronze_firebox_casing"}
+  },
+  "result": {"item": "gt_shanhai:steam_generator", "count": 1}
+}

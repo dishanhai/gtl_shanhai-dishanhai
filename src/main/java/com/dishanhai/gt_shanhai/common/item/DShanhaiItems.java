@@ -13,6 +13,8 @@ import static com.dishanhai.gt_shanhai.GTDishanhaiRegistration.REGISTRATE;
 public final class DShanhaiItems {
 
     public static ItemEntry<ComponentItem> DEBUG_PATTERN_TEST;
+    public static ItemEntry<ComponentItem> AE_STEAM_COVER;
+    public static ItemEntry<ComponentItem> AE_STEAM_BINDER;
     public static ItemEntry<ComponentItem> ULTIMATE_TERMINAL;
     public static ItemEntry<ComponentItem> ADVANCED_PATTERN_BOX;
     public static ItemEntry<ComponentItem> PATTERN_BUFFER_TOOLKIT;
@@ -21,6 +23,15 @@ public final class DShanhaiItems {
     public static ItemEntry<ShanhaiWirelessPatternManagementTerminalItem> WIRELESS_PATTERN_MANAGEMENT_TERMINAL;
 
     public static void init() {
+        var steamCover = com.dishanhai.gt_shanhai.common.cover.ShanhaiAeSteamCover.register();
+        AE_STEAM_COVER = REGISTRATE.item("ae_steam_cover", ComponentItem::create)
+                .onRegister(GTItems.attach(new com.gregtechceu.gtceu.common.item.CoverPlaceBehavior(steamCover),
+                        com.dishanhai.gt_shanhai.common.cover.ShanhaiAeSteamCover.ITEM_TOOLTIP))
+                .model(NonNullBiConsumer.noop()).register();
+        AE_STEAM_BINDER = REGISTRATE.item("ae_steam_binder", ComponentItem::create)
+                .properties(properties -> properties.stacksTo(1))
+                .onRegister(GTItems.attach(com.dishanhai.gt_shanhai.common.cover.ShanhaiAeSteamBinderBehavior.INSTANCE))
+                .model(NonNullBiConsumer.noop()).register();
         DEBUG_PATTERN_TEST = REGISTRATE.item("debug_pattern_test", ComponentItem::create)
                 .onRegister(GTItems.attach(ShanhaiPatternTestBehavior.INSTANCE))
                 .model(NonNullBiConsumer.noop())

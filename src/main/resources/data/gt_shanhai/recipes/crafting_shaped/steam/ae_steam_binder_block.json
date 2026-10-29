@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [" B ", "PFP", " G "],
+  "key": {
+    "B": {"item": "gtceu:bronze_machine_casing"},
+    "P": {"item": "gtceu:bronze_pipe_casing"},
+    "F": {"item": "ae2:fluix_crystal"},
+    "G": {"item": "gtceu:bronze_gearbox"}
+  },
+  "result": {"item": "gt_shanhai:ae_steam_binder_block", "count": 1}
+}
