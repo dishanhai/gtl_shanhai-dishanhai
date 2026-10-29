@@ -27,6 +27,17 @@ public final class DShanhaiConfig {
         return COMMON.disableCoinForge.get();
     }
 
+    /**
+     * 「禁用原初系列機器」開關。
+     * <p>配置尚未載入時一律視為未禁用：註冊期讀到空配置就砍機器，會造成不可回復的註冊缺口。
+     */
+    public static boolean isPrimordialSeriesDisabled() {
+        if (!COMMON_SPEC.isLoaded()) {
+            return false;
+        }
+        return COMMON.disablePrimordialSeriesMachines.get();
+    }
+
     public static class ConfigValues {
         public enum VirtualProviderMode {
             AE_TARGET_CHECK,
@@ -83,6 +94,8 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue modulesWorkWithoutHost;
         /** 原初铸币工厂 — 开启后不注册机器，也不加载对应配方 */
         public ForgeConfigSpec.BooleanValue disableCoinForge;
+        /** 禁用原初系列机器 — 仅禁用「全部配方类型都来自外部模组」的原初模块；有 gt_shanhai 自建类型的机器保留 */
+        public ForgeConfigSpec.BooleanValue disablePrimordialSeriesMachines;
         /** 原初模块 — 是否启用旧式无限制模式（正常模式不限制研究/数据访问） */
         public ForgeConfigSpec.BooleanValue primordialModuleUnrestrictedMode;
         /** 递归反演阵列 — 是否破除已连接子模块内部运行限制 */
@@ -233,6 +246,18 @@ public final class DShanhaiConfig {
                              "false=正常注册机器，并加载 coin_forge 配方",
                              "true=不注册 gt_shanhai:primordial_coin_forge，加载后移除 coin_forge 配方以及产出该机器的配方",
                              "修改后需要重启游戏/服务端。已放置的铸币工厂会因方块未注册而丢失")
+                    .define("disabled", false);
+            builder.pop();
+
+            builder.push("primordial_series");
+            disablePrimordialSeriesMachines = builder
+                    .comment("禁用原初系列机器（默认关闭）",
+                             "只禁用全部配方类型都来自 gtceu / gtlcore / gtladditions 的原初模块；",
+                             "例如原初临界加工模块（无 gt_shanhai 自建配方类型）。",
+                             "任何带 gt_shanhai 自建配方类型的机器（如原初分歧发生器）不会被禁用，因为自写配方要用。",
+                             "被动模块（质能核心、归墟彭罗斯遏制场）与主机本体（原始终焉引擎、归墟视界枢核）始终保留。",
+                             "禁用语义：方块/物品仍注册，只从 GT 机器注册表移除，JEI 结构与催化物同步隐藏；已有存档不会损坏方块。",
+                             "修改后需要重启游戏/服务端生效")
                     .define("disabled", false);
             builder.pop();
 

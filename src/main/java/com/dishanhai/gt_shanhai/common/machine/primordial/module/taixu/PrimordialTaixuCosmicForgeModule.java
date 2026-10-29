@@ -33,7 +33,7 @@ import java.util.UUID;
 public class PrimordialTaixuCosmicForgeModule extends PrimordialOmegaEngineModuleBase {
 
     private static final java.util.Map<Item, Long> ITEM_PARALLEL_MAP = new java.util.HashMap<>();
-    private static final long DEFAULT_PARALLEL = 64L;
+    public static final long DEFAULT_PARALLEL = 64L;
 
     private static Item ITEM_WZRM;
     private static Item ITEM_WZJC;
@@ -133,6 +133,14 @@ public class PrimordialTaixuCosmicForgeModule extends PrimordialOmegaEngineModul
         ITEM_PARALLEL_MAP.put(ITEM_WZHY, 1048576L);
         ITEM_PARALLEL_MAP.put(ITEM_WZDF, 536870912L);
 
+    }
+
+    /** 山海：供蒸汽階段機器復用原初物質模組基準及堆疊倍率，不套用宿主增益。 */
+    public static long getMatterModuleParallel(net.minecraft.world.item.ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return DEFAULT_PARALLEL;
+        initItems();
+        long base = ITEM_PARALLEL_MAP.getOrDefault(stack.getItem(), DEFAULT_PARALLEL);
+        return applyModuleCountParallelMultiplier(base, stack.getCount());
     }
 
     private void scanBoostItem() {

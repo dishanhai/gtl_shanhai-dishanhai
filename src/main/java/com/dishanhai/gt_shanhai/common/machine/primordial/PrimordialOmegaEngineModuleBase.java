@@ -623,6 +623,11 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             return cachedCanWork;
         }
         cachedCanWorkTick = tick;
+        if (PrimordialSeriesMachines.isDisabled(getDefinition())) {
+            cachedCanWork = false;
+            setModuleConditionError("§c该原初模块已被配置禁用");
+            return false;
+        }
         if (hasLiveHost()) {
             cachedCanWork = true;
             return cachedCanWork;

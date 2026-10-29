@@ -138,40 +138,40 @@ public class PrimordialOmegaEngineStructure {
                 // J: 16顶点模块位 — 首选 steam_assembly_block，模块控制器为候选
                 .where('J', Predicates.blocks(ForgeRegistries.BLOCKS.getValue(
                         new ResourceLocation("kubejs", "steam_assembly_block")))
-                        .or(Predicates.blocks(voidInductionArmature))
-                        .or(Predicates.blocks(biologicalCore))
-                        .or(Predicates.blocks(chaoticEphemeralFurnace))
-                        .or(Predicates.blocks(matterRecombinatorCore))
-                        .or(Predicates.blocks(causalWeavingMatrix))
-                        .or(Predicates.blocks(singularityInversionCore))
-                        .or(Predicates.blocks(worldFragmentsCollector))
-                        .or(Predicates.blocks(assemblyLineModule))
-                        .or(Predicates.blocks(criticalProcessingModule))
-                        .or(Predicates.blocks(multidimensionalImplosionCore))
-                        .or(Predicates.blocks(supercriticalMatterGenerationCore))
-                        .or(Predicates.blocks(cosmicReactor))
-                        .or(Predicates.blocks(molecularRiftCore))
-                        .or(Predicates.blocks(tianqiongAssemblyCore))
-                        .or(Predicates.blocks(eternalSmeltingFurnace))
-                        .or(Predicates.blocks(worldlineTraversalMatrix))
-                        .or(Predicates.blocks(quantumDistortionMatrix))
-                        .or(Predicates.blocks(shaoguangAggregationCore))
-                        .or(Predicates.blocks(weiyangReconstructionModule))
-                        .or(Predicates.blocks(taixuSmeltingFurnace))
-                        .or(Predicates.blocks(antiEntropyCondensationCore))
-                        .or(Predicates.blocks(divergenceGenerator))
-                        .or(Predicates.blocks(matterCaster))
-                        .or(Predicates.blocks(engravingModule))
+                        .or(optionalPrimordialModule(voidInductionArmature))
+                        .or(optionalPrimordialModule(biologicalCore))
+                        .or(optionalPrimordialModule(chaoticEphemeralFurnace))
+                        .or(optionalPrimordialModule(matterRecombinatorCore))
+                        .or(optionalPrimordialModule(causalWeavingMatrix))
+                        .or(optionalPrimordialModule(singularityInversionCore))
+                        .or(optionalPrimordialModule(worldFragmentsCollector))
+                        .or(optionalPrimordialModule(assemblyLineModule))
+                        .or(optionalPrimordialModule(criticalProcessingModule))
+                        .or(optionalPrimordialModule(multidimensionalImplosionCore))
+                        .or(optionalPrimordialModule(supercriticalMatterGenerationCore))
+                        .or(optionalPrimordialModule(cosmicReactor))
+                        .or(optionalPrimordialModule(molecularRiftCore))
+                        .or(optionalPrimordialModule(tianqiongAssemblyCore))
+                        .or(optionalPrimordialModule(eternalSmeltingFurnace))
+                        .or(optionalPrimordialModule(worldlineTraversalMatrix))
+                        .or(optionalPrimordialModule(quantumDistortionMatrix))
+                        .or(optionalPrimordialModule(shaoguangAggregationCore))
+                        .or(optionalPrimordialModule(weiyangReconstructionModule))
+                        .or(optionalPrimordialModule(taixuSmeltingFurnace))
+                        .or(optionalPrimordialModule(antiEntropyCondensationCore))
+                        .or(optionalPrimordialModule(divergenceGenerator))
+                        .or(optionalPrimordialModule(matterCaster))
+                        .or(optionalPrimordialModule(engravingModule))
                         .or(optionalModule(coinForge))
-                        .or(Predicates.blocks(massEnergyCore))
-                        .or(Predicates.blocks(flameCrackingKiln))
-                        .or(Predicates.blocks(abyssalRefinery))
-                        .or(Predicates.blocks(cosmicOriginCore))
-                        .or(Predicates.blocks(sixfoldResourceCore))
-                        .or(Predicates.blocks(deepSpaceExtractionCore))
-                        .or(Predicates.blocks(myriadProliferationCore))
-                        .or(Predicates.blocks(molecularAssemblerModule))
-                        .or(Predicates.blocks(universeSimulationCore)))
+                        .or(optionalPrimordialModule(massEnergyCore))
+                        .or(optionalPrimordialModule(flameCrackingKiln))
+                        .or(optionalPrimordialModule(abyssalRefinery))
+                        .or(optionalPrimordialModule(cosmicOriginCore))
+                        .or(optionalPrimordialModule(sixfoldResourceCore))
+                        .or(optionalPrimordialModule(deepSpaceExtractionCore))
+                        .or(optionalPrimordialModule(myriadProliferationCore))
+                        .or(optionalPrimordialModule(molecularAssemblerModule))
+                        .or(optionalPrimordialModule(universeSimulationCore)))
                 // K: 内部填充 — 青铜砖块（不再与 A 冲突）
                 .where('K', Predicates.blocks(bronzeBrickCasing))
                 .where('~', Predicates.controller(Predicates.blocks(definition.getBlock())))
@@ -223,6 +223,9 @@ public class PrimordialOmegaEngineStructure {
             if ("primordial_coin_forge".equals(id) && DShanhaiConfig.isCoinForgeDisabled()) {
                 continue;
             }
+            if (PrimordialSeriesMachines.isDisabled(new ResourceLocation("gt_shanhai", id))) {
+                continue;
+            }
             Block block = ForgeRegistries.BLOCKS.getValue(new ResourceLocation("gt_shanhai", id));
             if (block == null || block == Blocks.AIR) {
                 throw new IllegalStateException("[SHANHAI-HOST] 未注册模组：" + id);
@@ -234,6 +237,17 @@ public class PrimordialOmegaEngineStructure {
 
     private static TraceabilityPredicate optionalModule(Block block) {
         if (block == null || block == Blocks.AIR) {
+            return Predicates.blocks(Blocks.BARRIER);
+        }
+        return Predicates.blocks(block);
+    }
+
+    /** 已禁用的原初系列模組在結構裡等同不存在。 */
+    private static TraceabilityPredicate optionalPrimordialModule(Block block) {
+        if (block == null || block == Blocks.AIR) {
+            return Predicates.blocks(Blocks.BARRIER);
+        }
+        if (PrimordialSeriesMachines.isDisabled(ForgeRegistries.BLOCKS.getKey(block))) {
             return Predicates.blocks(Blocks.BARRIER);
         }
         return Predicates.blocks(block);

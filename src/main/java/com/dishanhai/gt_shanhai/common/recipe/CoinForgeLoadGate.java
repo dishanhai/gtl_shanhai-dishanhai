@@ -75,6 +75,41 @@ public final class CoinForgeLoadGate {
         return isCoinForgeType(gt.getType()) || outputsMachine(gt);
     }
 
+    /** 供原初系列禁用共用：這條配方是否產出指定機器。 */
+    public static boolean outputsMachineId(Recipe<?> recipe, ResourceLocation machineId) {
+        return recipe instanceof GTRecipe gt && containsMachineId(gt.outputs, machineId);
+    }
+
+    private static boolean containsMachineId(Map<RecipeCapability<?>, List<Content>> contents,
+                                             ResourceLocation machineId) {
+        if (contents == null || machineId == null) {
+            return false;
+        }
+        List<Content> items = contents.get(ItemRecipeCapability.CAP);
+        if (items == null) {
+            return false;
+        }
+        for (Content content : items) {
+            if (content == null || content.content == null) {
+                continue;
+            }
+            Object value = content.content;
+            if (value instanceof SizedIngredient sized) {
+                for (ItemStack stack : sized.getItems()) {
+                    if (machineId.equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) return true;
+                }
+            } else if (value instanceof Ingredient ingredient) {
+                for (ItemStack stack : ingredient.getItems()) {
+                    if (machineId.equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) return true;
+                }
+            } else if (value instanceof ItemStack stack
+                    && machineId.equals(ForgeRegistries.ITEMS.getKey(stack.getItem()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static int stripManager(RecipeManager manager) {
         RecipeManagerReflectionUtil.RecipeManagerMaps maps = RecipeManagerReflectionUtil.resolve(manager);
         if (maps == null) {

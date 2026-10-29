@@ -227,6 +227,7 @@ public final class MultiblockRegistryConfig {
         }
 
         List<ResourceLocation> toRemove = new ArrayList<>();
+        java.util.Set<ResourceLocation> primordialDisabled = new java.util.LinkedHashSet<>();
         for (MachineDefinition definition : machines) {
             if (!(definition instanceof MultiblockMachineDefinition)) {
                 continue;
@@ -234,6 +235,34 @@ public final class MultiblockRegistryConfig {
             ResourceLocation id = definition.getId();
             if (id != null && isDisabled(id)) {
                 toRemove.add(id);
+            }
+        }
+
+        // 「禁用原初系列機器」：只作用於配方類型全為外部的原初模組，主機與被動模組靠白名單排除。
+        if (com.dishanhai.gt_shanhai.config.DShanhaiConfig.isPrimordialSeriesDisabled()) {
+            for (MachineDefinition definition : machines) {
+                if (!(definition instanceof MultiblockMachineDefinition)) {
+                    continue;
+                }
+                ResourceLocation id = definition.getId();
+                if (!com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialSeriesMachines
+                        .isPrimordialSeriesId(id)) {
+                    continue;
+                }
+                if (!com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialSeriesMachines
+                        .isDisabled(id)) {
+                    continue;
+                }
+                if (com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialSeriesMachines
+                        .hasModOwnedRecipeType(definition)) {
+                    continue;
+                }
+                if (primordialDisabled.add(id)) {
+                    toRemove.add(id);
+                }
+            }
+            if (!primordialDisabled.isEmpty()) {
+                LOG.info("[山海原初] 禁用原初系列机器：{}", primordialDisabled);
             }
         }
 

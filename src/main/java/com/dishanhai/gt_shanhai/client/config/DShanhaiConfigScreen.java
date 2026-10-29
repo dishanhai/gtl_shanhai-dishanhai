@@ -98,6 +98,15 @@ public final class DShanhaiConfigScreen {
                         "开启后不注册该机器，并移除 coin_forge 配方和产出该机器的配方",
                         "需重启生效。已放置的铸币工厂会因方块未注册而丢失"))
                 .setSaveConsumer(cfg.disableCoinForge::set).build());
+        machine.addEntry(e.startBooleanToggle(Component.literal("禁用原初系列机器"),
+                        cfg.disablePrimordialSeriesMachines.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("只禁用配方类型全部来自 gtceu / gtlcore / gtladditions 的原初模块",
+                        "例：原初临界加工模块（没有 gt_shanhai 自建配方类型）",
+                        "带 gt_shanhai 自建配方类型的机器不会被禁用（如原初分歧发生器）",
+                        "被动模块与主机本体始终保留",
+                        "方块仍注册、旧存档不损坏；需重启生效"))
+                .setSaveConsumer(cfg.disablePrimordialSeriesMachines::set).build());
         machine.addEntry(e.startBooleanToggle(Component.literal("原初模块旧式无限制模式"),
                         cfg.primordialModuleUnrestrictedMode.get())
                 .setDefaultValue(false)
