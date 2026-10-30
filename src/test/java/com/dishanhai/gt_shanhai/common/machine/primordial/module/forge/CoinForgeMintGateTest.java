@@ -7,6 +7,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 class CoinForgeMintGateTest {
+    @Test
+    void lockedMintDiagnosticsReportTheSameRequiredLevelAsTheGate() {
+        assertEquals("", CoinForgeMintGate.restrictionText(1, 1));
+        assertEquals("", CoinForgeMintGate.restrictionText(0, 0));
+        String first = CoinForgeMintGate.restrictionText(0, CoinForgeMintGate.requiredModuleLevel("ulv"));
+        assertTrue(first.contains("未解锁"));
+        assertTrue(first.contains("入门物质模块"));
+        assertTrue(first.contains("Lv.1"));
+        String higher = CoinForgeMintGate.restrictionText(1, CoinForgeMintGate.requiredModuleLevel("hv"));
+        assertTrue(higher.contains("Lv.1"));
+        assertTrue(higher.contains("Lv.4"));
+        assertTrue(higher.contains(CoinForgeMintGate.permissionText(1)));
+        assertFalse(CoinForgeMintGate.allowsRequiredLevel(1, 4));
+        assertTrue(CoinForgeMintGate.allowsRequiredLevel(17, 17));
+    }
+
 
     @Test
     void entryModuleUnlocksOnlyCopper() {

@@ -2,6 +2,8 @@ package com.dishanhai.gt_shanhai.common.machine.primordial.module.forge;
 
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialModuleRecipeLogic;
 import com.dishanhai.gt_shanhai.common.shop.CurrencyStageConfig;
+import appeng.api.crafting.IPatternDetails;
+import appeng.api.stacks.AEItemKey;
 import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
@@ -49,40 +51,71 @@ public class PrimordialCoinForgeLogic extends PrimordialModuleRecipeLogic {
     }
 
     private static boolean mintAllowed(int moduleLevel, GTRecipe recipe) {
-        return recipe != null
-                && outputsAllowed(moduleLevel, recipe.outputs)
-                && outputsAllowed(moduleLevel, recipe.tickOutputs);
+        return recipe != null && CoinForgeMintGate.allowsRequiredLevel(moduleLevel, requiredMintModuleLevel(recipe));
     }
 
-    private static boolean outputsAllowed(int moduleLevel, Map<RecipeCapability<?>, List<Content>> contents) {
-        if (contents == null) return true;
+    public static int requiredMintModuleLevel(GTRecipe recipe) {
+        if (recipe == null) return 0;
+        return Math.max(requiredOutputModuleLevel(recipe.outputs), requiredOutputModuleLevel(recipe.tickOutputs));
+    }
+
+    public long getMintParallelLimit() { return getTotalParallelLimit(); }
+
+    /** 只讀診斷：優先用精確配方輸出，無 ID 的舊樣板按其 AE 產物讀同一貨幣階段表。 */
+    public String describeMintRestriction(GTRecipe recipe, IPatternDetails pattern) {
+        if (!(getMachine() instanceof PrimordialCoinForgeModule forge)) return "";
+        int required = requiredMintModuleLevel(recipe);
+        if (recipe == null && pattern != null) {
+            for (var output : pattern.getOutputs()) {
+                if (output != null && output.what() instanceof AEItemKey item) {
+                    required = Math.max(required, CoinForgeMintGate.requiredModuleLevel(CurrencyStageConfig.tierOf(item.getId())));
+                }
+            }
+        }
+        String reason = CoinForgeMintGate.restrictionText(forge.getModuleLevel(), required);
+        if (reason.isEmpty()) return "";
+        var modules = PrimordialCoinForgeModule.registeredModuleIds();
+        if (required > 0 && required <= modules.size()) {
+            String moduleId = modules.get(required - 1);
+            var module = ForgeRegistries.ITEMS.getValue(new ResourceLocation(moduleId));
+            reason += "；所需模块: " + (module == null || module == net.minecraft.world.item.Items.AIR
+                    ? moduleId : module.getDescription().getString())
+                    + " (" + moduleId + ")";
+        }
+        return reason;
+    }
+
+    private static int requiredOutputModuleLevel(Map<RecipeCapability<?>, List<Content>> contents) {
+        if (contents == null) return 0;
         List<Content> items = contents.get(ItemRecipeCapability.CAP);
-        if (items == null) return true;
+        if (items == null) return 0;
+        int required = 0;
         for (Content content : items) {
             if (content == null || content.content == null) continue;
             Object value = content.content;
             if (value instanceof SizedIngredient sized) {
-                if (!stacksAllowed(moduleLevel, sized.getItems())) return false;
+                required = Math.max(required, requiredStackModuleLevel(sized.getItems()));
             } else if (value instanceof Ingredient ingredient) {
-                if (!stacksAllowed(moduleLevel, ingredient.getItems())) return false;
-            } else if (value instanceof ItemStack stack && !stackAllowed(moduleLevel, stack)) {
-                return false;
+                required = Math.max(required, requiredStackModuleLevel(ingredient.getItems()));
+            } else if (value instanceof ItemStack stack) {
+                required = Math.max(required, requiredStackModuleLevel(stack));
             }
         }
-        return true;
+        return required;
     }
 
-    private static boolean stacksAllowed(int moduleLevel, ItemStack[] stacks) {
-        if (stacks == null) return true;
+    private static int requiredStackModuleLevel(ItemStack[] stacks) {
+        if (stacks == null) return 0;
+        int required = 0;
         for (ItemStack stack : stacks) {
-            if (!stackAllowed(moduleLevel, stack)) return false;
+            required = Math.max(required, requiredStackModuleLevel(stack));
         }
-        return true;
+        return required;
     }
 
-    private static boolean stackAllowed(int moduleLevel, ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return true;
+    private static int requiredStackModuleLevel(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return 0;
         ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
-        return CoinForgeMintGate.allows(moduleLevel, CurrencyStageConfig.tierOf(id));
+        return CoinForgeMintGate.requiredModuleLevel(CurrencyStageConfig.tierOf(id));
     }
 }

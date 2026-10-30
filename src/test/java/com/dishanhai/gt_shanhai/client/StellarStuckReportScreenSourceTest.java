@@ -63,6 +63,16 @@ class StellarStuckReportScreenSourceTest {
     }
 
     @Test
+    void reportLinksRunBeforeTheWholeRowCopyFallback() throws Exception {
+        String source = screen();
+        assertTrue(source.contains("componentStyleAtWidth"), "換行後仍須按實際字形命中連結");
+        int link = source.indexOf("handleComponentClicked(link)");
+        int copy = source.indexOf("setClipboard(detail.isEmpty()");
+        assertTrue(link >= 0 && copy > link);
+        assertTrue(source.contains("renderComponentHoverEffect"));
+    }
+
+    @Test
     void bothSupportedLanguagesProvideStellarReportLabels() throws Exception {
         for (String locale : new String[]{"zh_cn", "en_us"}) {
             String language = Files.readString(LANG.resolve(locale + ".json"));

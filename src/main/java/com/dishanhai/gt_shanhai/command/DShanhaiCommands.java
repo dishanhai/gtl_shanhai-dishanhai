@@ -44,6 +44,11 @@ import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarPatternStuckReport;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIFactory;
+import com.dishanhai.gt_shanhai.network.ShanhaiTerminalReportPacket;
 import com.dishanhai.gt_shanhai.common.recipe.DShanhaiJsonRecipeStats;
 import com.dishanhai.gt_shanhai.common.recipe.editor.ShanhaiRecipeEditorFactory;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
@@ -141,6 +146,7 @@ public class DShanhaiCommands {
                 .then(sdaCommand("sda"))
                 .then(shopCommand("shop"))
                 .then(stellarTeleportCommand())
+                .then(stellarSlotCommand())
                 .then(cacheCommand())
                 .then(Commands.literal("patternByproduct")
                         .executes(ctx -> PatternByproductOrder.toggleCommand(ctx.getSource())));
@@ -1132,6 +1138,57 @@ public class DShanhaiCommands {
                                                         IntegerArgumentType.getInteger(ctx, "x"),
                                                         IntegerArgumentType.getInteger(ctx, "y"),
                                                         IntegerArgumentType.getInteger(ctx, "z")))))));
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> stellarSlotCommand() {
+        return Commands.literal("stellar_slot")
+                .then(Commands.argument("dimension", ResourceLocationArgument.id())
+                        .then(Commands.argument("x", IntegerArgumentType.integer())
+                                .then(Commands.argument("y", IntegerArgumentType.integer())
+                                        .then(Commands.argument("z", IntegerArgumentType.integer())
+                                                .then(Commands.argument("slot", IntegerArgumentType.integer(0))
+                                                        .executes(ctx -> execStellarSlot(ctx.getSource(),
+                                                                ResourceLocationArgument.getId(ctx, "dimension"),
+                                                                new BlockPos(IntegerArgumentType.getInteger(ctx, "x"),
+                                                                        IntegerArgumentType.getInteger(ctx, "y"),
+                                                                        IntegerArgumentType.getInteger(ctx, "z")),
+                                                                IntegerArgumentType.getInteger(ctx, "slot"))))))));
+    }
+
+    private static int execStellarSlot(CommandSourceStack source, ResourceLocation dimension,
+                                      BlockPos pos, int slot) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        ServerLevel level = source.getServer().getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
+        if (level == null || !level.hasChunkAt(pos)) {
+            source.sendFailure(Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_unavailable"));
+            return 0;
+        }
+        if (!(player.containerMenu instanceof ShanhaiPatternManagementMenu)
+                && !ShanhaiPatternTerminalOpenHelper.openFirst(player)) {
+            source.sendFailure(Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_terminal_required"));
+            return 0;
+        }
+        if (!(player.containerMenu instanceof ShanhaiPatternManagementMenu menu) || !menu.stillValid(player)) return 0;
+        // 新開的終端先讓 AE2 建立追蹤表，沿用其範圍、供電、安全與同網路檢查。
+        menu.broadcastChanges();
+        RecipeTypePatternBufferPartMachine stellar = menu.resolveStellarContainer(level, pos);
+        if (stellar == null) {
+            source.sendFailure(Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_unavailable"));
+            return 0;
+        }
+        if (stellar.isValidRemotePatternSlot(slot)) {
+            return ShanhaiStellarRemoteUIFactory.INSTANCE.openSlot(player, stellar, menu.getWirelessHost(), slot) ? 1 : 0;
+        }
+        // 通配展開槽沒有普通槽位設定，遠端顯示該展開槽本身的完整資料。
+        var entry = stellar.gtShanhai$getStuckReportEntry(slot);
+        if (entry == null) {
+            source.sendFailure(Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_unavailable"));
+            return 0;
+        }
+        player.closeContainer();
+        ShanhaiTerminalReportPacket.sendAndOpenTo(player,
+                StellarPatternStuckReport.build(dimension, pos, List.of(entry)));
+        return 1;
     }
 
     private static int execStellarTeleport(CommandSourceStack source, ResourceLocation dimension,

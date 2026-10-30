@@ -1,6 +1,6 @@
 {
   "data": {
-    "SEPMTier": 0
+    "SEPMTier": 1
   },
   "duration": 100,
   "type": "gtceu:assembler_module",
@@ -78,46 +78,46 @@
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 100,
           "ingredient": {
             "item": "gtceu:uv_electric_piston"
-          },
-          "actualAmount": 100
+          }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 100,
           "ingredient": {
             "item": "gtceu:uv_sensor"
-          },
-          "actualAmount": 100
+          }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 100,
           "ingredient": {
             "item": "gtceu:uv_robot_arm"
-          },
-          "actualAmount": 100
+          }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 100,
           "ingredient": {
             "item": "gtceu:uv_conveyor_module"
-          },
-          "actualAmount": 100
+          }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 100,
           "ingredient": {
             "item": "gtceu:uv_electric_motor"
-          },
-          "actualAmount": 100
+          }
         }
       }
     ]

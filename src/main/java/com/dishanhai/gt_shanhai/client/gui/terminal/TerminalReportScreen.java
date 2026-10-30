@@ -13,6 +13,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import java.util.ArrayList;
@@ -114,6 +115,11 @@ public final class TerminalReportScreen extends ScaledScreen {
     private int listX() { return left + 12; }
     private int listY() { return top + headerBottom; }
     private static String posText(BlockPos pos) { return pos.getX() + ", " + pos.getY() + ", " + pos.getZ(); }
+    private Component targetLine() {
+        return isStellarStuck() && !report.summary().getString().isEmpty()
+                ? report.summary() : tr("target", posText(report.target()));
+    }
+    private boolean hasSeparateSummary() { return !isStellarStuck() && !report.summary().getString().isEmpty(); }
 
     // ---------- 佈局 ----------
     @Override protected void initScaled() {
@@ -131,9 +137,9 @@ public final class TerminalReportScreen extends ScaledScreen {
     }
     private void layoutHeader() {
         int y = 10 + ui.height(getTitle(), PANEL_W - 66) + 4;
-        y += ui.height(tr("target", posText(report.target())), CONTENT_W) + 2;
+        y += ui.height(targetLine(), CONTENT_W) + 2;
         y += ui.height(counts(), CONTENT_W);
-        if (!report.summary().getString().isEmpty()) y += 2 + ui.height(report.summary(), CONTENT_W);
+        if (hasSeparateSummary()) y += 2 + ui.height(report.summary(), CONTENT_W);
         y += GAP;
         chips.clear();
         int x = 0, rowH = 0;
@@ -277,11 +283,11 @@ public final class TerminalReportScreen extends ScaledScreen {
             ui.wrap(g, getTitle(), left + 12, y, PANEL_W - 66, GlassPalette.TEXT_HEAD);
             ui.button(g, "close", left + PANEL_W - 40, top + 8, 28, 22, Component.literal("×"), 16, true, mx, my, null);
             y += ui.height(getTitle(), PANEL_W - 66) + 4;
-            Component target = tr("target", posText(report.target()));
+            Component target = targetLine();
             ui.wrap(g, target, left + 12, y, CONTENT_W, GlassPalette.TEXT_MUTED);
             y += ui.height(target, CONTENT_W) + 2;
             ui.wrap(g, counts(), left + 12, y, CONTENT_W, GlassPalette.TEXT);
-            if (!report.summary().getString().isEmpty())
+            if (hasSeparateSummary())
                 ui.wrap(g, report.summary(), left + 12, y + ui.height(counts(), CONTENT_W) + 2, CONTENT_W, GlassPalette.TEXT);
             for (Chip chip : chips) {
                 ui.button(g, chip.key(), listX() + chip.x(), top + chip.y(), chip.w(), chip.h(), chip.text(), Math.max(1, chip.w() - 12), true, mx, my, null);
@@ -295,6 +301,8 @@ public final class TerminalReportScreen extends ScaledScreen {
             drawRows(g, mx, my, at);
             drawScrollbar(g);
             drawFooter(g, at);
+            Style hoveredLink = reportLinkAt(mx, my);
+            if (hoveredLink != null) g.renderComponentHoverEffect(font, hoveredLink, mx, my);
             if (!reduced() && transition.moving(at))
                 GlassBlur.requestPage(g, new GuiRect(listX(), listY(), CONTENT_W, listHeight), GlassMotion.pageSlide(transition.linear(at)));
         });
@@ -430,6 +438,12 @@ public final class TerminalReportScreen extends ScaledScreen {
         if (contentHeight > listHeight && hit(mx, my, listX() + CONTENT_W, listY(), BAR_W, listHeight)) {
             draggingBar = true; dragTo(my); return true;
         }
+        Style link = reportLinkAt(mx, my);
+        if (link != null && handleComponentClicked(link)) {
+            ShopUiSounds.click();
+            onClose();
+            return true;
+        }
         if (!hit(mx, my, listX(), listY(), CONTENT_W, listHeight)) return false;
         int scrollY = Math.round(scroll.value());
         for (int rowIndex = 0; rowIndex < rows.size(); rowIndex++) {
@@ -467,6 +481,34 @@ public final class TerminalReportScreen extends ScaledScreen {
             ShopUiSounds.click(); return true;
         }
         return false;
+    }
+    /** 按繪製後的換行字形命中，避免把整個診斷列都當成複製按鈕。 */
+    private Style reportLinkAt(double mx, double my) {
+        if (!isStellarStuck()) return null;
+        int targetY = top + 10 + ui.height(getTitle(), PANEL_W - 66) + 4;
+        if (hit(mx, my, left + 12, targetY, CONTENT_W, ui.height(targetLine(), CONTENT_W))) {
+            return linkInLines(font.split(targetLine(), CONTENT_W), mx - left - 12, my - targetY);
+        }
+        if (!hit(mx, my, listX(), listY(), CONTENT_W, listHeight)) return null;
+        int x = listX() + COL_NAME;
+        if (mx < x || mx >= x + COL_NAME_W) return null;
+        for (Row row : rows) {
+            int y = listY() + row.y() - Math.round(scroll.value()) + 4;
+            if (my < y || my >= y + row.h()) continue;
+            List<FormattedCharSequence> lines = font.split(report.names().get(row.group().name()), COL_NAME_W);
+            Style style = linkInLines(lines, mx - x, my - y);
+            if (style != null) return style;
+            return linkInLines(row.detailLines(), mx - x, my - y - row.gridH() - 3);
+        }
+        return null;
+    }
+
+    private Style linkInLines(List<FormattedCharSequence> lines, double x, double y) {
+        if (y < 0) return null;
+        int index = (int) (y / font.lineHeight);
+        if (index >= lines.size() || x >= font.width(lines.get(index))) return null;
+        Style style = font.getSplitter().componentStyleAtWidth(lines.get(index), (int) x);
+        return style != null && (style.getClickEvent() != null || style.getHoverEvent() != null) ? style : null;
     }
     /** 把整組坐標在世界裡畫成方框（沿用結構高亮），然後關閉界面讓玩家看到世界。 */
     private void showBoxes(Group group) {

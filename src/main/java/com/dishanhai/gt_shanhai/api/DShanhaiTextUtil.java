@@ -743,13 +743,13 @@ public class DShanhaiTextUtil {
         return (double) cycle * count + (travel - start) * count / (end - start);
     }
 
-    /** 「全」整段共用一個效果；只回傳局部動畫時間，不修改全域速度、方向或鎖時。 */
+    /** 舊 API 名稱；現僅為「隨機」返回整段共用效果，不修改全域速度、方向或鎖時。 */
     public static AllTextFrame allTextFrame(int[] palette, boolean isBody) {
-        if (palette != PALETTE_ALL) return null;
+        if (palette != PALETTE_RANDOM) return null;
         int count = flowPresets().length;
         if (count == 0) return null;
         long now = getTime();
-        long window = scaledWindow(isBody ? ALL_PRESET_MS * 2L : ALL_PRESET_MS);
+        long window = scaledWindow(isBody ? RANDOM_WINDOW_MS + 800L : RANDOM_WINDOW_MS);
         double position = presetPosition(now / (double) window, count);
         long slot = (long) Math.floor(position);
         double local = position - slot;
@@ -771,14 +771,6 @@ public class DShanhaiTextUtil {
         return smoothstep(local / 0.15) * smoothstep((1.0 - local) / 0.25);
     }
 
-    static double allPaletteFraction(double local, AllTextEffect effect) {
-        return switch (effect) {
-            case REVERSE -> 1.0 - local;
-            case TIME_JUMP -> local + Math.floor(local * 8.0) * 0.38196601125;
-            default -> local;
-        };
-    }
-
     private static boolean isMetaName(String name) {
         return isAllStyle(name) || isRandomStyle(name) || isFullRandomStyle(name);
     }
@@ -794,10 +786,14 @@ public class DShanhaiTextUtil {
 
     /** 普通色板：时间相位 + 字符偏移，相邻停靠点 sRGB 插值。 */
     private static int samplePaletteTime(int[] palette, int charIndex, int totalLen, boolean isBody) {
+        return samplePaletteTimeAt(palette, charIndex, totalLen, isBody, getTime());
+    }
+
+    private static int samplePaletteTimeAt(int[] palette, int charIndex, int totalLen, boolean isBody, long now) {
         int len = palette.length;
         long interval = Math.max(1L, getEffectiveInterval(isBody, totalLen));
         long cycle = interval * len;
-        long masked = Math.floorMod(getTime(), cycle);
+        long masked = Math.floorMod(now, cycle);
         double rawPhase = (double) masked / interval;
         int intPhase = (int) rawPhase;
         double frac = rawPhase - intPhase;
@@ -823,15 +819,10 @@ public class DShanhaiTextUtil {
         long slot = (long) Math.floor(pos);
         int idx = Math.floorMod(slot, n);
         double local = pos - slot;
-        double effectPosition = presetPosition(travel, n);
-        long effectSlot = (long) Math.floor(effectPosition);
-        AllTextEffect effect = allTextEffect(effectSlot);
-        double strength = allEffectStrength(effectPosition - effectSlot);
-        double fraction = local + (allPaletteFraction(local, effect) - local) * strength;
-        int current = samplePaletteFraction(presets[idx], fraction);
+        int current = samplePaletteFraction(presets[idx], local);
         if (local < 0.75) return current;
         double t = smoothstep((local - 0.75) / 0.25);
-        int upcoming = samplePaletteFraction(presets[(idx + 1) % n], allPaletteFraction(0, effect) * strength);
+        int upcoming = samplePaletteFraction(presets[(idx + 1) % n], 0);
         return lerpSrgb(current, upcoming, t);
     }
 
@@ -845,13 +836,41 @@ public class DShanhaiTextUtil {
         double position = presetPosition(now / (double) window, n);
         long slot = (long) Math.floor(position);
         double fade = position - slot;
+        AllTextEffect effect = allTextEffect(slot);
+        double strength = allEffectStrength(fade);
+        double elapsed = 0;
+        if (effect == AllTextEffect.REVERSE) {
+            long cycleIndex = Math.floorDiv(slot, n);
+            double cycleStart = presetCycleStart(cycleIndex, n);
+            double cycleEnd = presetCycleStart(cycleIndex + 1, n);
+            double slotStart = (cycleStart + (cycleEnd - cycleStart) * Math.floorMod(slot, n) / n) * window;
+            elapsed = now - slotStart;
+        }
         int i0 = pickPreset(slot, n);
-        int current = samplePaletteTime(presets[i0], charIndex, totalLen, isBody);
+        int current = sampleRandomEffect(presets[i0], charIndex, totalLen, isBody, now, fade, elapsed, effect, strength);
         if (fade < 0.72) return current;
         int i1 = pickPreset(slot + 1, n);
-        int upcoming = samplePaletteTime(presets[i1], charIndex, totalLen, isBody);
+        int upcoming = sampleRandomEffect(presets[i1], charIndex, totalLen, isBody, now, fade, elapsed, effect, strength);
         double t = smoothstep((fade - 0.72) / 0.28);
         return lerpSrgb(current, upcoming, t);
+    }
+
+    static int sampleRandomEffect(int[] palette, int charIndex, int totalLen, boolean isBody,
+                                  long now, double fade, double elapsed, AllTextEffect effect, double strength) {
+        if (effect != AllTextEffect.REVERSE && effect != AllTextEffect.TIME_JUMP) {
+            return samplePaletteTimeAt(palette, charIndex, totalLen, isBody, now);
+        }
+        long interval = Math.max(1L, getEffectiveInterval(isBody, totalLen));
+        long cycle = interval * palette.length;
+        double phase = Math.floorMod(now, cycle) / (double) cycle;
+        double delta;
+        if (effect == AllTextEffect.REVERSE) {
+            delta = -2.0 * elapsed / cycle;
+        } else {
+            delta = Math.floor(fade * 8.0) * 0.38196601125;
+        }
+        double fraction = phase + delta * strength + (double) colorDirection * charIndex / palette.length;
+        return samplePaletteFraction(palette, fraction);
     }
 
     /** 完全随机：每个字独立的亮色关键帧，窗口内 sRGB 过渡，不抽预设。 */
@@ -987,7 +1006,8 @@ public class DShanhaiTextUtil {
             if (!snake.equals(s)) def = DShanhaiStyleRegistry.get(snake);
         }
         if (def != null) {
-            if (def.rgb() == PALETTE_ALL) return TextFormatParser.createFcsComponent("", text, s);
+            if (def.rgb() == PALETTE_ALL || def.rgb() == PALETTE_RANDOM)
+                return TextFormatParser.createFcsComponent("", text, s);
             return switch (def.anim()) {
                 case BREATHE -> perCharGradientRGBBreathe(text, def.rgb(), def.isBody());
                 case SCAN -> perCharGradientRGBScan(text, def.rgb(), def.isBody());

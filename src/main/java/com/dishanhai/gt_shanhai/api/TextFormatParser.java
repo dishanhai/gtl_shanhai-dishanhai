@@ -335,7 +335,7 @@ public class TextFormatParser {
         return (r << 16) | (g << 8) | b;
     }
 
-    /** 「全」的隨機位置效果，重用顯式 FCS 效果算法；色彩效果不配置位移陣列。 */
+    /** 「隨機」的位置效果；保留既有方法名稱以相容外部調用。 */
     public static float[] calcAllEffectOffset(DShanhaiTextUtil.AllTextFrame frame, int charIndex) {
         if (frame == null || frame.strength() <= 0) return null;
         long time = frame.time();
@@ -374,7 +374,8 @@ public class TextFormatParser {
     // ===== Component 构建（备选，不依赖 mixin 时使用） =====
 
     public static Component createStyled(String text, FormatFlags flags) {
-        if (flags != null && flags.palette == DShanhaiTextUtil.PALETTE_ALL) {
+        if (flags != null && (flags.palette == DShanhaiTextUtil.PALETTE_ALL
+                || flags.palette == DShanhaiTextUtil.PALETTE_RANDOM)) {
             return Component.literal(text).withStyle(s -> s.withInsertion(toFcsInsertion(flags)));
         }
         MutableComponent result = Component.literal("");

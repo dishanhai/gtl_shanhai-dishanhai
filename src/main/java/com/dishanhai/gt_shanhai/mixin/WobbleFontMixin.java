@@ -449,6 +449,9 @@ public class WobbleFontMixin {
 
             var allFrame = DShanhaiTextUtil.allTextFrame(palette, isBody);
             if (allFrame != null) hasEffects = true;
+            // 「全」雖不自動套用效果，仍須逐字保留原有樣式與 § 色。
+            boolean preserveAllStyle = flags != null && DShanhaiTextUtil.isAllStyle(flags.gradientTheme);
+            if (preserveAllStyle) hasEffects = true;
 
             // ===== 5. 无效果 + 无 wobble → 纯色板单次渲染 =====
             if (!hasEffects && !hasWobble) {
@@ -517,6 +520,7 @@ public class WobbleFontMixin {
             if (hasWobble) {
                 String effectiveStyle = !perLinePalette.isEmpty() ? perLinePalette : DShanhaiTextUtil.WOBBLE_STYLE.get();
                 if (effectiveStyle != null) {
+                    preserveAllStyle |= DShanhaiTextUtil.isAllStyle(effectiveStyle);
                     allFrame = DShanhaiTextUtil.allTextFrame(DShanhaiStyleRegistry.getRGB(effectiveStyle),
                             DShanhaiStyleRegistry.isBody(effectiveStyle));
                 }
@@ -645,7 +649,8 @@ public class WobbleFontMixin {
                             if (flags.glitch) charColor = TextFormatParser.applyGlitchColor(charColor, fcsIdx, now);
                         }
                         charColor = TextFormatParser.applyAllEffectColor(charColor, allFrame, fcsIdx, fcsLen);
-                        charStyle = (allFrame != null ? legacyStyle : Style.EMPTY).withColor(TextColor.fromRgb(charColor));
+                        charStyle = (allFrame != null || preserveAllStyle ? legacyStyle : Style.EMPTY)
+                                .withColor(TextColor.fromRgb(charColor));
                         if (flags != null && flags.obfuscated) charStyle = charStyle.withObfuscated(true);
                     } else if (hasLegacyObfuscated) {
                         charStyle = legacyStyle;

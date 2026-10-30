@@ -1712,6 +1712,11 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return StellarPatternStuckReport.build(getLevel().dimension().location(), getPos(), entries);
     }
 
+    public @Nullable StellarPatternStuckReport.Entry gtShanhai$getStuckReportEntry(int slot) {
+        gtShanhai$clearResolvedRuntimeWarnings();
+        return stuckRuntimeReports.get(slot);
+    }
+
     public void gtShanhai$clearPatternSlotRuntimeWarning(int slot) {
         if (!gtShanhai$isRuntimeTrackableSlot(slot)) return;
         gtShanhai$clearPatternSlotRuntimeSnapshot(slot);
@@ -2799,12 +2804,27 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         WidgetGroup root = new WidgetGroup(0, 0, 176, 180);
         root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
                 "gui.gt_shanhai.remote_pattern_catalyst", slot + 1).getString()));
+        root.addWidget(new SlotWidget(getPatternInventory(), slot, 150, 134, false, false)
+                .setBackground(GuiTextures.SLOT));
         MEPatternCatalystUIManager manager = new MEPatternCatalystUIManager(
                 8, this.catalystItems, this.catalystFluids,
                 this.cacheRecipeCount, this::removeSlotFromGTRecipeCache);
         root.addWidget(manager);
         manager.toggleFor(slot);
         layoutRemoteCatalystContainers(manager);
+        root.addWidget(new ButtonWidget(8, 158, 100, 16, new TextTexture(
+                Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_info").getString()), click -> {
+                    if (!(player instanceof ServerPlayer serverPlayer)) return;
+                    StellarPatternStuckReport.Entry entry = gtShanhai$getStuckReportEntry(slot);
+                    if (entry == null) {
+                        serverPlayer.sendSystemMessage(Component.translatable(
+                                "gui.gt_shanhai.ultimate_terminal.report.slot_resolved"));
+                        return;
+                    }
+                    serverPlayer.closeContainer();
+                    com.dishanhai.gt_shanhai.network.ShanhaiTerminalReportPacket.sendAndOpenTo(serverPlayer,
+                            StellarPatternStuckReport.build(getLevel().dimension().location(), getPos(), List.of(entry)));
+                }));
         root.addWidget(new ButtonWidget(112, 158, 56, 16, new TextTexture(
                 Component.translatable("gui.gt_shanhai.remote_pattern_return").getString()), click -> {
                     if (player instanceof ServerPlayer serverPlayer) {

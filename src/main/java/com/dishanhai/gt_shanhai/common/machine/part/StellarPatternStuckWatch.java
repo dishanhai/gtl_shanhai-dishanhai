@@ -8,11 +8,15 @@ import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
+import com.dishanhai.gt_shanhai.api.PatternIdentityMatcher;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
+import com.dishanhai.gt_shanhai.common.item.PatternRecipeTypeHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialModuleRecipeLogic;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.PrimordialCoinForgeModule;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.forge.CoinForgeMintGate;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
@@ -136,6 +140,8 @@ public final class StellarPatternStuckWatch {
         MachineAssessment assessment = assessments.computeIfAbsent(new MachineKey(watch.dimension, watch.pos),
                 ignored -> collectParallelAssessment(machine));
         boolean waiting = evaluateParallelWait(machine, watch, assessment, now);
+        // 明確的權限拒絕不能繼續沿用其他配方忙碌時延長的等待期限。
+        if (!waiting && !watch.mintRestrictions.isEmpty()) watch.warningTick = Math.min(watch.warningTick, watch.initialWarningTick);
         if (waiting || now < watch.warningTick) {
             watch.dueTick = now + Math.min(TICKS_PER_SECOND, watch.timeout);
             synchronized (PENDING) {
@@ -147,6 +153,7 @@ public final class StellarPatternStuckWatch {
         machine.gtShanhai$setPatternSlotStuckWarning(watch.slot, snapshot.items, snapshot.fluids);
         machine.gtShanhai$logStuckDiagnosis(watch.slot);
         String reason = collectStuckReason(machine, watch.slot) + "；并行评估: " + watch.parallelAssessment;
+        if (!watch.mintRestrictions.isEmpty()) reason += "；铸币限制: " + String.join(" | ", watch.mintRestrictions.values());
         int slot = watch.slot;
         String slotLabel = machine.gtShanhai$describeStuckSlot(slot);
         String stuckInputs = StellarPatternStuckNotifier.describeStuckInputs(snapshot.items, snapshot.fluids);
@@ -163,6 +170,7 @@ public final class StellarPatternStuckWatch {
                                                                 Watch watch, MachineAssessment assessment) {
         if (!machine.gtShanhai$fullStrongMatchReason(watch.slot).isEmpty())
             return StellarPatternStuckReport.Cause.STRONG_MATCH;
+        if (!watch.mintRestrictions.isEmpty()) return StellarPatternStuckReport.Cause.COIN_MINT_LOCKED;
         boolean found = false, allPaused = true, failed = false;
         for (HostAssessment host : assessment.hosts) {
             if (!supportsType(host.types, watch.patternRecipeTypeId, assessment.onlyHost)) continue;
@@ -250,12 +258,27 @@ public final class StellarPatternStuckWatch {
                                                 MachineAssessment assessment, long now) {
         boolean waiting = false;
         boolean strongFailure = !machine.gtShanhai$strongMatchReason(watch.slot).isEmpty();
+        watch.mintRestrictions.clear();
+        GTRecipe mintRecipe = null;
+        boolean resolvedMintRecipe = false;
         List<String> details = new ArrayList<>();
         for (HostAssessment host : assessment.hosts) {
             if (!supportsType(host.types, watch.patternRecipeTypeId, assessment.onlyHost)) continue;
+            boolean mintFailure = false;
+            if (host.machine instanceof PrimordialCoinForgeModule forge) {
+                if (!resolvedMintRecipe) {
+                    mintRecipe = PatternRecipeTypeHelper.resolveRecipeForPattern(machine.getLevel(),
+                            watch.patternRecipeTypeId, watch.patternRecipeId);
+                    if (mintRecipe != null && !PatternIdentityMatcher.matches(mintRecipe, watch.patternDetails)) mintRecipe = null;
+                    resolvedMintRecipe = true;
+                }
+                String restriction = forge.getRecipeLogic().describeMintRestriction(mintRecipe, watch.patternDetails);
+                mintFailure = !restriction.isEmpty();
+                if (mintFailure) watch.mintRestrictions.put(host.machine, host.machine.getPos().toShortString() + " " + restriction);
+            }
             var policy = watch.hostProgress.computeIfAbsent(host.machine, ignored -> new StellarPatternWaitPolicy());
             boolean deferred = policy.observe(now, watch.timeout, host.capacity, host.allocated, host.queued,
-                    host.working, host.failed || strongFailure, host.progress, host.successfulTicks, host.duration, host.batch);
+                    host.working, host.failed || strongFailure || mintFailure, host.progress, host.successfulTicks, host.duration, host.batch);
             waiting |= deferred;
             if (deferred) watch.warningTick = Math.max(watch.warningTick, policy.progressDeadline(watch.timeout));
             details.add(host.machine.getPos().toShortString() + " " + host.capacityLabel + "="
@@ -337,6 +360,13 @@ public final class StellarPatternStuckWatch {
             if (logicMachine instanceof PrimordialOmegaEngineModuleBase module) {
                 appendPlain(result, "挂载", module.getModuleConditionError());
             }
+            if (logicMachine instanceof PrimordialCoinForgeModule forge) {
+                appendPlain(result, "铸币限制", "物质模块 Lv." + forge.getModuleLevel()
+                        + "；铸币权限: " + CoinForgeMintGate.permissionText(forge.getModuleLevel())
+                        + "；铸币基础并行（已折算）: " + forge.getCurrentParallel()
+                        + "；每配方有效上限: " + forge.getRecipeLogic().getMintParallelLimit()
+                        + (forge.hasParallelOverdriver() ? "（寰宇超限器不受 1/4 限制）" : "（正常并行的 1/4）"));
+            }
             if (logicMachine.getRecipeLogic() instanceof IRecipeStatus status) {
                 appendStatus(result, "配方", status.getRecipeStatus());
                 appendStatus(result, "工作", status.getWorkingStatus());
@@ -402,8 +432,10 @@ public final class StellarPatternStuckWatch {
         private final int slot;
         private long dueTick;
         private long warningTick;
+        private final long initialWarningTick;
         private final long timeout;
         private final Map<MetaMachine, StellarPatternWaitPolicy> hostProgress = new HashMap<>();
+        private final Map<MetaMachine, String> mintRestrictions = new HashMap<>();
         private String parallelAssessment = "";
         private final Snapshot snapshot;
         private final List<String> hostRecipeTypeIds;
@@ -421,6 +453,7 @@ public final class StellarPatternStuckWatch {
             this.slot = slot;
             this.timeout = (long) DShanhaiConfig.COMMON.recipeTypePatternStuckWarningSeconds.get() * TICKS_PER_SECOND;
             this.warningTick = dueTick;
+            this.initialWarningTick = dueTick;
             this.dueTick = dueTick - timeout + Math.min(TICKS_PER_SECOND, timeout);
             this.snapshot = snapshot;
             this.hostRecipeTypeIds = hostRecipeTypeIds;

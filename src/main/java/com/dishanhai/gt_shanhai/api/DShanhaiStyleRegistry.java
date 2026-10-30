@@ -62,10 +62,10 @@ public final class DShanhaiStyleRegistry {
         reg("abyss",         DShanhaiTextUtil.ABYSS_RGB, false, CYCLE, "深渊蓝光");
 
         // ===== 元色板：全依序遍歷、隨機每輪洗牌不重複；兩者輪長隨機；完全隨機逐字亮色 =====
-        reg("all",           DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素：全部流动色板与随机文字动画");
+        reg("all",           DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素：依序遍历全部流动色板");
         reg("quan",          DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素别名");
         reg("全",            DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素别名");
-        reg("random",        DShanhaiTextUtil.PALETTE_RANDOM, false, CYCLE, "随机：在全部流动色板间平滑切换");
+        reg("random",        DShanhaiTextUtil.PALETTE_RANDOM, false, CYCLE, "随机：在全部流动色板和文字效果间切换");
         reg("rand",          DShanhaiTextUtil.PALETTE_RANDOM, false, CYCLE, "随机别名");
         reg("随机",          DShanhaiTextUtil.PALETTE_RANDOM, false, CYCLE, "随机别名");
         reg("fullrandom",    DShanhaiTextUtil.PALETTE_FULL_RANDOM, false, CYCLE, "完全随机：逐字独立亮色平滑过渡");

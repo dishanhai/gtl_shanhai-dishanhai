@@ -10,6 +10,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.resources.ResourceLocation;
 
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 
 /** 山海：卡死告警的完整資料，與管理終端的短廣播文字分開保存。 */
@@ -21,10 +22,11 @@ public final class StellarPatternStuckReport {
     /** 來源為實際主機狀態，不能從已翻譯的長診斷字串猜測等級。 */
     public enum Cause {
         STRONG_MATCH("strong_match", "error", 0xF07878),
+        COIN_MINT_LOCKED("coin_mint_locked", "error", 0xF07878),
         NO_HOST("no_host", "error", 0xF07878),
         HOST_FAILURE("host_failure", "error", 0xF07878),
-        PAUSED("paused", "info", 0x78C8F0),
-        UNCONSUMED("unconsumed", "warning", 0xF0C878);
+        UNCONSUMED("unconsumed", "warning", 0xF0C878),
+        PAUSED("paused", "info", 0x78C8F0);
 
         private final String key, level;
         private final int color;
@@ -36,9 +38,10 @@ public final class StellarPatternStuckReport {
         }
 
         public int color() { return color; }
+        public Component summary() { return Component.translatable(PREFIX + "reason_" + key); }
         public Component label() {
             return Component.translatable(PREFIX + "severity_" + level).append(" · ")
-                    .append(Component.translatable(PREFIX + "reason_" + key));
+                    .append(summary());
         }
     }
 
@@ -72,9 +75,12 @@ public final class StellarPatternStuckReport {
         String target = dimension + " " + pos.getX() + " " + pos.getY() + " " + pos.getZ();
         Component coordinates = action(Component.literal(pos.getX() + ", " + pos.getY() + ", " + pos.getZ()),
                 "/shanhai stellar_tp " + target, "teleport_hint");
-        for (Entry entry : entries) {
+        report.summary(action(Component.translatable(PREFIX + "target_dimension", dimension.toString(), coordinates),
+                "/shanhai stellar_tp " + target, "teleport_hint"));
+        for (Entry entry : entries.stream().sorted(Comparator.comparingInt((Entry e) -> e.cause().ordinal())
+                .thenComparingInt(Entry::slot)).toList()) {
             Component name = Component.translatable(PREFIX + "slot_summary", entry.displaySlot(),
-                    Component.translatable(PREFIX + "reason_unconsumed"));
+                    entry.cause().summary());
             name = action(name, "/shanhai stellar_slot " + target + " " + entry.slot(), "slot_open_hint");
             Component details = Component.translatable(PREFIX + "detail_stellar",
                     entry.displaySlot(), dimension.toString(), coordinates, entry.reason(),

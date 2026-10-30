@@ -174,8 +174,10 @@ public final class StellarPatternStuckNotifier {
                         ShanhaiTerminalReport.CHAT_COMMAND + report.id()))
                 .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
                         Component.translatable(PREFIX + "link_details_hint"))));
+        int color = report.categories().stream().mapToInt(ShanhaiTerminalReport.Category::color)
+                .filter(value -> value == 0xF07878 || value == 0xF0C878).findFirst().orElse(0x78C8F0);
         player.sendSystemMessage(Component.translatable(PREFIX + "notification_stellar_group", route, report.lines().size())
-                .withStyle(ChatFormatting.RED).append(" ").append(coordinateLink(level, pos))
+                .withStyle(style -> style.withColor(color)).append(" ").append(coordinateLink(level, pos))
                 .append(" ").append(link));
     }
 

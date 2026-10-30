@@ -190,24 +190,40 @@ public class RgbTextFlowTest {
     }
 
     @Test
-    void allCanActuallyJumpItsAnimationPhase() {
+    void randomAloneReceivesAutomaticCharacterEffects() {
+        for (int index = 0; index < DShanhaiTextUtil.AllTextEffect.values().length; index++) {
+            long start = presetBoundary(0, index, DShanhaiTextUtil.RANDOM_WINDOW_MS);
+            long end = presetBoundary(0, index + 1, DShanhaiTextUtil.RANDOM_WINDOW_MS);
+            DShanhaiTextUtil.lockTimeAt(Math.round(start + (end - start) * 0.4));
+            assertNull(DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_ALL, false));
+            var frame = DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_RANDOM, false);
+            assertEquals(DShanhaiTextUtil.allTextEffect(index), frame.effect());
+            assertEquals(1.0f, frame.strength(), 0.001f);
+        }
+        assertNull(DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_FULL_RANDOM, false));
+        assertEquals("fcs:random", ShanhaiTextAPI.random("山海").getStyle().getInsertion());
+        assertEquals("fcs:随机|~", TextFormatParser.parseClean("&~$随机-山海").getStyle().getInsertion());
+    }
+
+    @Test
+    void randomCanActuallyJumpItsAnimationPhase() {
         int count = DShanhaiTextUtil.flowPresets().length;
         int biggestJump = 0;
-        for (int cycle = 0; cycle < 4; cycle++) {
+        for (int cycle = 0; cycle < 20; cycle++) {
             for (int index = 0; index < count; index++) {
-                long start = presetBoundary(cycle, index, DShanhaiTextUtil.ALL_PRESET_MS);
-                long end = presetBoundary(cycle, index + 1, DShanhaiTextUtil.ALL_PRESET_MS);
+                long start = presetBoundary(cycle, index, DShanhaiTextUtil.RANDOM_WINDOW_MS);
+                long end = presetBoundary(cycle, index + 1, DShanhaiTextUtil.RANDOM_WINDOW_MS);
                 for (int step = 1; step < 6; step++) {
                     long time = Math.round(start + (end - start) * step / 8.0);
                     DShanhaiTextUtil.lockTimeAt(time - 1);
-                    int before = DShanhaiTextUtil.getDynamicColor(DShanhaiTextUtil.PALETTE_ALL, 0, 4, false);
+                    int before = DShanhaiTextUtil.getDynamicColor(DShanhaiTextUtil.PALETTE_RANDOM, 0, 4, false);
                     DShanhaiTextUtil.lockTimeAt(time + 1);
-                    int after = DShanhaiTextUtil.getDynamicColor(DShanhaiTextUtil.PALETTE_ALL, 0, 4, false);
+                    int after = DShanhaiTextUtil.getDynamicColor(DShanhaiTextUtil.PALETTE_RANDOM, 0, 4, false);
                     biggestJump = Math.max(biggestJump, channelDelta(before, after));
                 }
             }
         }
-        assertTrue(biggestJump > 80, "全模式須實際抽到大幅跳時效果，不能只有外部測試跳時");
+        assertTrue(biggestJump > 80, "隨機模式須實際抽到大幅跳時效果");
     }
 
     @Test
@@ -223,19 +239,19 @@ public class RgbTextFlowTest {
     }
 
     @Test
-    void allFramesShareEffectsAndKeepTheirTimeLocal() {
+    void randomFramesShareEffectsAndKeepTheirTimeLocal() {
         int effectCount = DShanhaiTextUtil.AllTextEffect.values().length;
         int[] fire = DShanhaiStyleRegistry.getRGB("fire");
         for (int index = 0; index < effectCount; index++) {
-            long start = presetBoundary(0, index, DShanhaiTextUtil.ALL_PRESET_MS);
-            long end = presetBoundary(0, index + 1, DShanhaiTextUtil.ALL_PRESET_MS);
+            long start = presetBoundary(0, index, DShanhaiTextUtil.RANDOM_WINDOW_MS);
+            long end = presetBoundary(0, index + 1, DShanhaiTextUtil.RANDOM_WINDOW_MS);
             long time = Math.round(start + (end - start) * 0.4);
             DShanhaiTextUtil.lockTimeAt(time);
             int original = DShanhaiTextUtil.getDynamicColor(fire, 3, 4, false);
-            var frame = DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_ALL, false);
+            var frame = DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_RANDOM, false);
             assertEquals(DShanhaiTextUtil.allTextEffect(index), frame.effect());
             assertEquals(1.0f, frame.strength(), 0.001f);
-            assertEquals(frame, DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_ALL, false));
+            assertEquals(frame, DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_RANDOM, false));
             switch (frame.effect()) {
                 case REVERSE -> assertEquals(-time, frame.time());
                 case TIME_JUMP -> assertTrue(frame.time() >= time + 90_000);
@@ -244,17 +260,30 @@ public class RgbTextFlowTest {
             assertEquals(original, DShanhaiTextUtil.getDynamicColor(fire, 3, 4, false),
                     "隨機效果不得修改其他色板的時間或方向");
         }
-        assertNull(DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_RANDOM, false));
+        assertNull(DShanhaiTextUtil.allTextFrame(DShanhaiTextUtil.PALETTE_ALL, false));
         assertNull(DShanhaiTextUtil.allTextFrame(fire, false));
     }
 
     @Test
     void reverseAndTimeJumpChangeTheActualPalettePhase() {
-        assertEquals(0.8, DShanhaiTextUtil.allPaletteFraction(0.2, DShanhaiTextUtil.AllTextEffect.REVERSE), 0.00001);
-        assertEquals(0.2, DShanhaiTextUtil.allPaletteFraction(0.2, DShanhaiTextUtil.AllTextEffect.FLOW), 0.00001);
-        double before = DShanhaiTextUtil.allPaletteFraction(0.49999, DShanhaiTextUtil.AllTextEffect.TIME_JUMP);
-        double after = DShanhaiTextUtil.allPaletteFraction(0.50001, DShanhaiTextUtil.AllTextEffect.TIME_JUMP);
-        assertTrue(after - before > 0.3, "跳時須大幅改變色板相位");
+        int[] palette = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFFFF};
+        DShanhaiTextUtil.lockTimeAt(120);
+        int forward = DShanhaiTextUtil.sampleRandomEffect(palette, 0, 4, false, 120, 0.4, 40,
+                DShanhaiTextUtil.AllTextEffect.FLOW, 1);
+        int reverse = DShanhaiTextUtil.sampleRandomEffect(palette, 0, 4, false, 120, 0.4, 40,
+                DShanhaiTextUtil.AllTextEffect.REVERSE, 1);
+        int jumped = DShanhaiTextUtil.sampleRandomEffect(palette, 0, 4, false, 120, 0.4, 40,
+                DShanhaiTextUtil.AllTextEffect.TIME_JUMP, 1);
+        int earlier = DShanhaiTextUtil.sampleRandomEffect(palette, 0, 4, false, 40, 0.4, 0,
+                DShanhaiTextUtil.AllTextEffect.FLOW, 1);
+        int reversedNext = DShanhaiTextUtil.sampleRandomEffect(palette, 0, 4, false, 121, 0.4, 41,
+                DShanhaiTextUtil.AllTextEffect.REVERSE, 1);
+        int earlierNext = DShanhaiTextUtil.sampleRandomEffect(palette, 0, 4, false, 39, 0.4, 0,
+                DShanhaiTextUtil.AllTextEffect.FLOW, 1);
+        assertNotEquals(forward, reverse, "反向須改變實際色板相位");
+        assertNotEquals(forward, jumped, "跳時須改變實際色板相位");
+        assertEquals(earlier, reverse);
+        assertEquals(earlierNext, reversedNext, "反向時時間前進，色板應向相反方向流動");
     }
 
     @Test

@@ -1,7 +1,7 @@
 {
   "data": {
-    "euTier": 12,
-    "SEPMTier": 0
+    "SEPMTier": 4,
+    "euTier": 12
   },
   "duration": 100,
   "tickInputs": {
@@ -59,56 +59,56 @@
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "dishanhai:wzsw"
-          },
-          "actualAmount": 1
+          }
         },
         "chance": 0
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 1000000,
           "ingredient": {
             "item": "kubejs:space_drone_mk4"
-          },
-          "actualAmount": 1000000
+          }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 10000,
           "ingredient": {
             "tag": "gtceu:circuits/uiv"
-          },
-          "actualAmount": 10000
+          }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 1000000,
           "ingredient": {
             "item": "gtceu:naquadah_alloy_drill_head"
-          },
-          "actualAmount": 1000000
+          }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 4,
           "ingredient": {
             "item": "dishanhai:space_elevator_miner_module_mk3"
-          },
-          "actualAmount": 4
+          }
         }
       },
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 1000,
           "ingredient": {
             "item": "kubejs:precision_circuit_assembly_robot_mk3"
-          },
-          "actualAmount": 1000
+          }
         }
       }
     ]
@@ -118,10 +118,10 @@
       {
         "content": {
           "type": "gtceu:long",
+          "actualAmount": 1,
           "ingredient": {
             "item": "dishanhai:space_elevator_miner_module_mk4"
-          },
-          "actualAmount": 1
+          }
         }
       }
     ]

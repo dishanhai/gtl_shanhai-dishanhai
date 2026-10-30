@@ -17,6 +17,34 @@ class StellarPatternStuckReportSourceTest {
     }
 
     @Test
+    void coinRestrictionsPreventBusyHostsFromDeferringDeniedRecipes() throws IOException {
+        String watch = read("common/machine/part/StellarPatternStuckWatch.java");
+        assertTrue(watch.contains("forge.getRecipeLogic().describeMintRestriction("));
+        assertTrue(watch.contains("host.failed || strongFailure || mintFailure"));
+        assertTrue(watch.contains("Cause.COIN_MINT_LOCKED"));
+        String logic = read("common/machine/primordial/module/forge/PrimordialCoinForgeLogic.java");
+        assertTrue(logic.contains("requiredMintModuleLevel(recipe)"));
+        assertTrue(logic.contains("requiredOutputModuleLevel(recipe.outputs)"));
+        assertTrue(logic.contains("requiredOutputModuleLevel(recipe.tickOutputs)"));
+        assertTrue(logic.contains("CurrencyStageConfig.tierOf("));
+    }
+
+    @Test
+    void slotLinksRequireAnAvailableTerminalAndTheSameTrackedGrid() throws IOException {
+        String commands = read("command/DShanhaiCommands.java");
+        assertTrue(commands.contains("Commands.literal(\"stellar_slot\")"));
+        int start = commands.indexOf("private static int execStellarSlot(");
+        assertTrue(start >= 0);
+        String action = commands.substring(start, commands.indexOf("private static int execStellarTeleport(", start));
+        assertTrue(action.contains("level.hasChunkAt(pos)"));
+        assertTrue(action.contains("ShanhaiPatternTerminalOpenHelper.openFirst(player)"));
+        assertTrue(action.contains("menu.stillValid(player)"));
+        assertTrue(action.indexOf("menu.resolveStellarContainer(level, pos)") < action.indexOf(".openSlot("));
+        assertTrue(action.contains("stellar.isValidRemotePatternSlot(slot)"));
+        assertTrue(action.contains("sendAndOpenTo"), "通配展開槽必須開自己的資訊，不能被當成普通槽號");
+    }
+
+    @Test
     void fullReportKeepsEverySlotAndAllDiagnosticFieldsOutsideClippedBroadcast() throws IOException {
         Path file = MAIN.resolve("common/machine/part/StellarPatternStuckReport.java");
         assertTrue(Files.exists(file), "完整告警必須保存獨立資料，不能從已裁短廣播還原");
@@ -37,7 +65,7 @@ class StellarPatternStuckReportSourceTest {
         String source = read("common/machine/part/StellarPatternStuckReport.java");
         assertTrue(source.contains("Component name = Component.translatable(PREFIX + \"slot_summary\""),
                 "收起列也要顯示槽號與簡短原因");
-        assertTrue(source.contains("Component.translatable(PREFIX + \"reason_unconsumed\")"));
+        assertTrue(source.contains("entry.cause().summary()"), "摘要必須顯示實際原因分類");
         assertTrue(source.contains("coordinates, entry.reason()"), "完整原因仍須原樣放入展開詳情");
         for (String language : new String[]{"zh_cn", "en_us"}) {
             String lang = Files.readString(Path.of("src/main/resources/assets/gt_shanhai/lang/" + language + ".json"));

@@ -25,7 +25,7 @@ class WobbleFontPerformanceSourceTest {
     }
 
     @Test
-    void allEffectsReachBothComponentAndFcsRenderPaths() throws IOException {
+    void randomEffectsReachBothComponentAndFcsRenderPaths() throws IOException {
         String source = Files.readString(SOURCE);
         int componentStart = source.indexOf("private void onDrawInBatchComponent(");
         int fcsStart = source.indexOf("private void onDrawInBatchFCS(");
@@ -33,12 +33,12 @@ class WobbleFontPerformanceSourceTest {
         String component = source.substring(componentStart, fcsStart);
         String fcs = source.substring(fcsStart);
         for (String renderPath : new String[]{component, fcs}) {
-            assertTrue(renderPath.contains("DShanhaiTextUtil.allTextFrame("), "兩種繪製入口都須取得全模式效果");
+            assertTrue(renderPath.contains("DShanhaiTextUtil.allTextFrame("), "兩種繪製入口都須取得隨機模式效果");
             assertTrue(renderPath.contains("TextFormatParser.calcAllEffectOffset("), "隨機位移須進入實際繪製");
             assertTrue(renderPath.contains("TextFormatParser.applyAllEffectColor("), "隨機亮度須進入實際繪製");
         }
         assertTrue(fcs.indexOf("if (allFrame != null) hasEffects = true;")
-                < fcs.indexOf("if (!hasEffects && !hasWobble)"), "全模式不得被純色板快速路徑跳過");
+                < fcs.indexOf("if (!hasEffects && !hasWobble)"), "隨機模式不得被純色板快速路徑跳過");
     }
 
     @Test
@@ -61,9 +61,20 @@ class WobbleFontPerformanceSourceTest {
     }
 
     @Test
-    void allSlowPathDoesNotReadFilteredOutWobbleStyles() throws IOException {
+    void randomSlowPathDoesNotReadFilteredOutWobbleStyles() throws IOException {
         String source = Files.readString(SOURCE);
         assertTrue(source.contains("String wobbleStyle = hasWobble ? DShanhaiTextUtil.WOBBLE_STYLE.get() : null;"),
-                "未通過 wobble 過濾的全模式，不得被殘留的 wobble 色板覆蓋");
+                "未通過 wobble 過濾的隨機模式，不得被殘留的 wobble 色板覆蓋");
+    }
+
+    @Test
+    void allWithoutAutomaticEffectsStillPreservesCharacterStyles() throws IOException {
+        String source = Files.readString(SOURCE);
+        assertTrue(source.contains("if (preserveAllStyle) hasEffects = true;"),
+                "全模式須保留逐字樣式，不能退回會覆蓋 § 色的快速路徑");
+        assertTrue(source.contains("allFrame != null || preserveAllStyle ? legacyStyle : Style.EMPTY"),
+                "全模式的非顏色格式須保留");
+        assertTrue(source.contains("preserveAllStyle |= DShanhaiTextUtil.isAllStyle(effectiveStyle);"),
+                "展開文字以 wobble 指定全色板時，也須保留逐字樣式");
     }
 }
