@@ -22,7 +22,7 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
                                     List<List<Item>> icons, List<Component> details,
                                     List<Line> lines, int omitted) {
 
-    public enum Type { SCAN, MODULES, BUILD, CRAFT }
+    public enum Type { SCAN, MODULES, BUILD, CRAFT, STELLAR_STUCK }
 
     /** 聊天連結指令前綴；客戶端攔截點擊後開啟報告介面，指令本身不會送到伺服器。 */
     public static final String CHAT_COMMAND = "/gtshanhai_terminal_report ";

@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_17",
   "mixins": [
     "ThreadForceOverrideMixin",
+    "StellarPatternAddParallelObservationMixin",
     "GTLAddParallelDisplayMixin",
     "MacroAtomicStripperMixins$Controller",
     "MacroAtomicStripperMixins$Logic",

@@ -69,6 +69,12 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
         return null;
     }
 
+    /** 山海星律告警讀取本邏輯的實際共享功率規劃，不沿用未執行的父類快照。 */
+    @Override
+    public long gtShanhai$getLastAllocatedParallel() {
+        return plannedParallels;
+    }
+
     private ParallelData planDirection(boolean consumer, java.util.List<GTRecipe> candidates) {
         BigInteger power = getDirectionalHatchPower(consumer);
         plannedParallels = 0L;

@@ -55,6 +55,7 @@ import java.util.function.LongPredicate;
 public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
 
     private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;
+    private long stellarLastAllocatedRecipes;
 
     // checkModuleCondition 缓存：避免每次都查静态注册表和遍历 conditions。
     // true / false 均为短期缓存（各带 TTL），过期后重新检查，避免一次瞬时结果被永久固化。
@@ -206,6 +207,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     @Override
     @Nullable
     protected ParallelData calculateParallels() {
+        stellarLastAllocatedRecipes = 0L;
         matchableScaledRecipeCache.clear();
         Set<GTRecipe> recipes = lookupRecipeIterator();
         if (recipes.isEmpty()) {
@@ -243,7 +245,20 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         // 原初模組已在上方逐配方完成輸入/輸出可行性計算，這裡必須標記為可處理，
         // 讓 buildFinalWirelessRecipe 進入真實扣料分支。GTLAdd 的 helper 在空餘配額為
         // 0 時固定回傳 shouldProcess=false；直接使用該結果會只收集輸出而跳過扣料。
+        stellarLastAllocatedRecipes = recipeList.size();
         return new ParallelData((List<GTRecipe>) recipeList, parallels, true, null);
+    }
+
+    /** 山海星律：本邏輯逐配方獨立並行，真正競爭的是同時容納幾個配方。 */
+    @Override
+    public long gtShanhai$getStuckWatchParallelLimit() {
+        return getMachine() instanceof PrimordialOmegaEngineModuleBase module && module.isCrossTypeParallelActive()
+                ? Math.max(1L, module.getRecipeLogicThreadMultiplier()) : Long.MAX_VALUE;
+    }
+
+    @Override
+    public long gtShanhai$getLastAllocatedParallel() {
+        return stellarLastAllocatedRecipes;
     }
 
     @Override

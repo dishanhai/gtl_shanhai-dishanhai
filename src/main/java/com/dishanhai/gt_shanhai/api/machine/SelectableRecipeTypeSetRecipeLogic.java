@@ -63,6 +63,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     private static final long DEFAULT_LOOKUP_CACHE_TICKS = 20L;
     private long cachedLookupTick = Long.MIN_VALUE;
     private Set<GTRecipe> cachedLookupRecipes;
+    private long stellarLastAllocatedParallel;
 
     // 按配方类型拆分的子缓存 + 稳态自适应退避：解决"选中多个配方类型时，每次真正重搜（整集缓存过期/
     // 结果变化）都要对每个选中类型各调一次昂贵的 type.getLookup().getRecipeIterator()"的开销。
@@ -498,6 +499,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     @Override
     @Nullable
     protected ParallelData calculateParallels() {
+        stellarLastAllocatedParallel = 0L;
         Set<GTRecipe> recipes = lookupRecipeIterator();
         if (recipes.isEmpty()) {
             invalidateLookupSetCache();
@@ -541,12 +543,29 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
             }
             return null;
         }
-        return RecipeCalculationHelper.INSTANCE.getFinalParallelData(
+        ParallelData allocation = RecipeCalculationHelper.INSTANCE.getFinalParallelData(
                 remaining,
                 parallels,
                 (LongList) remainingWants,
                 (IntList) remainingIndices,
                 (ObjectList<GTRecipe>) recipeList);
+        if (allocation != null) {
+            for (long amount : allocation.getParallels()) {
+                long positive = Math.max(0L, amount);
+                stellarLastAllocatedParallel = positive > Long.MAX_VALUE - stellarLastAllocatedParallel
+                        ? Long.MAX_VALUE : stellarLastAllocatedParallel + positive;
+            }
+        }
+        return allocation;
+    }
+
+    /** 山海星律告警只讀觀測：沿用本邏輯（包括子類）的實際容量公式。 */
+    public long gtShanhai$getStuckWatchParallelLimit() {
+        return getTotalParallelLimit();
+    }
+
+    public long gtShanhai$getLastAllocatedParallel() {
+        return stellarLastAllocatedParallel;
     }
 
     protected long getTotalParallelLimit() {

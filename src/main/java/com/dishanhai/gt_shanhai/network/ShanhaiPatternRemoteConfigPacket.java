@@ -22,7 +22,8 @@ public final class ShanhaiPatternRemoteConfigPacket {
         OPEN_PATTERN_BEHAVIOR,
         OPEN_REFUND,
         TELEPORT,
-        OPEN_STRONG_PATTERN_MATCH
+        OPEN_STRONG_PATTERN_MATCH,
+        OPEN_STUCK_REPORT
     }
 
     private final int menuId;
@@ -67,6 +68,12 @@ public final class ShanhaiPatternRemoteConfigPacket {
         RecipeTypePatternBufferPartMachine stellar = menu.resolveStellarContainer(packet.serverId);
         if (stellar == null) return;
 
+        if (packet.operation == Operation.OPEN_STUCK_REPORT) {
+            var report = stellar.gtShanhai$buildStuckReport();
+            player.closeContainer();
+            ShanhaiTerminalReportPacket.sendAndOpenTo(player, report);
+            return;
+        }
         if (packet.operation == Operation.TELEPORT) {
             DShanhaiCommands.teleportPlayerToStellar(player, stellar);
             return;

@@ -81,7 +81,7 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(watch.contains("appendPlain(result, \"挂载\""));
         assertTrue(watch.contains("collectStuckReason(machine, watch.slot)"),
                 "卡死原因必须带上槽位，才能写入该槽的强匹配报错");
-        assertTrue(watch.contains("machine.gtShanhai$strongMatchReason(slot)"),
+        assertTrue(watch.contains("machine.gtShanhai$fullStrongMatchReason(slot)"),
                 "强匹配拒绝时，星律卡死告警要带上对应报错，而不是只写主机状态");
     }
 
@@ -129,7 +129,10 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(notifier.contains("hostRecipeTypeIds"));
         assertTrue(notifier.contains("patternRecipeTypeId"));
         assertTrue(notifier.contains("patternRecipeId"));
-        assertTrue(notifier.contains("样板配方ID"));
+        String report = Files.readString(MAIN.resolve("common/machine/part/StellarPatternStuckReport.java"));
+        assertTrue(report.contains("entry.patternRecipeId()"), "完整配方 ID 改由詳情報告承載");
+        assertTrue(report.contains("entry.inputs()") && report.contains("entry.outputs()"));
+        assertTrue(notifier.contains("ShanhaiTerminalReportPacket.sendTo"));
         assertTrue(watch.contains("patternRecipeId"));
         assertTrue(notifier.contains("stuckInputs"));
         assertTrue(notifier.contains("stuckOutputs"));

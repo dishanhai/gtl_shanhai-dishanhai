@@ -7,11 +7,19 @@ import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
+import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
+import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
+import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
+import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialModuleRecipeLogic;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiController;
+import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gtladd.gtladditions.api.machine.logic.GTLAddMultipleRecipesLogic;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -26,6 +34,8 @@ import net.minecraftforge.fml.common.Mod;
 
 import org.gtlcore.gtlcore.api.machine.trait.IRecipeStatus;
 import org.gtlcore.gtlcore.api.recipe.RecipeResult;
+import org.gtlcore.gtlcore.api.machine.multiblock.ParallelMachine;
+import org.gtlcore.gtlcore.common.machine.trait.MultipleRecipesLogic;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -58,6 +68,17 @@ public final class StellarPatternStuckWatch {
                 patternRecipeTypeId == null || patternRecipeTypeId.isBlank() ? "<none>" : patternRecipeTypeId,
                 patternRecipeId == null || patternRecipeId.isBlank() ? "<none>" : patternRecipeId,
                 patternDetails, aePlayerId);
+        long now = level.getServer().getTickCount();
+        // 只讀便宜的進度基線，不在推樣板路徑掃描候選配方或格式化詳情。
+        for (IMultiController controller : machine.getControllers()) {
+            if (controller.self() instanceof IRecipeLogicMachine host) {
+                RecipeLogic logic = host.getRecipeLogic();
+                var policy = new StellarPatternWaitPolicy();
+                policy.observe(now, watch.timeout, -1L, 0L, 0L, false, false,
+                        logic.getProgress(), logic.getTotalContinuousRunningTime(), logic.getDuration(), logic.getLastRecipe());
+                watch.hostProgress.put(controller.self(), policy);
+            }
+        }
 
         synchronized (PENDING) {
             PENDING.put(new SlotKey(watch.dimension.location(), watch.pos.asLong(), slot), watch);
@@ -88,12 +109,14 @@ public final class StellarPatternStuckWatch {
                 }
             }
         }
+        Map<MachineKey, MachineAssessment> assessments = new HashMap<>();
         for (Watch watch : due) {
-            process(server, watch);
+            process(server, watch, assessments);
         }
     }
 
-    private static void process(MinecraftServer server, Watch watch) {
+    private static void process(MinecraftServer server, Watch watch,
+                                Map<MachineKey, MachineAssessment> assessments) {
         ServerLevel level = server.getLevel(watch.dimension);
         if (level == null || !level.hasChunkAt(watch.pos)) return;
 
@@ -109,9 +132,21 @@ public final class StellarPatternStuckWatch {
             return;
         }
 
+        long now = server.getTickCount();
+        MachineAssessment assessment = assessments.computeIfAbsent(new MachineKey(watch.dimension, watch.pos),
+                ignored -> collectParallelAssessment(machine));
+        boolean waiting = evaluateParallelWait(machine, watch, assessment, now);
+        if (waiting || now < watch.warningTick) {
+            watch.dueTick = now + Math.min(TICKS_PER_SECOND, watch.timeout);
+            synchronized (PENDING) {
+                PENDING.putIfAbsent(new SlotKey(watch.dimension.location(), watch.pos.asLong(), watch.slot), watch);
+            }
+            return;
+        }
+
         machine.gtShanhai$setPatternSlotStuckWarning(watch.slot, snapshot.items, snapshot.fluids);
         machine.gtShanhai$logStuckDiagnosis(watch.slot);
-        String reason = collectStuckReason(machine, watch.slot);
+        String reason = collectStuckReason(machine, watch.slot) + "；并行评估: " + watch.parallelAssessment;
         int slot = watch.slot;
         String slotLabel = machine.gtShanhai$describeStuckSlot(slot);
         String stuckInputs = StellarPatternStuckNotifier.describeStuckInputs(snapshot.items, snapshot.fluids);
@@ -121,8 +156,123 @@ public final class StellarPatternStuckWatch {
                 watch.hostRecipeTypeIds, watch.patternRecipeTypeId, watch.patternRecipeId));
         StellarPatternStuckNotifier.notifyStuck(level, watch.pos, watch.slot, slotLabel, watch.aePlayerId,
                 reason, stuckInputs, stuckOutputs, watch.hostRecipeTypeIds,
-                watch.patternRecipeTypeId, watch.patternRecipeId);
+                watch.patternRecipeTypeId, watch.patternRecipeId, classifyCause(machine, watch, assessment));
     }
+
+    private static StellarPatternStuckReport.Cause classifyCause(RecipeTypePatternBufferPartMachine machine,
+                                                                Watch watch, MachineAssessment assessment) {
+        if (!machine.gtShanhai$fullStrongMatchReason(watch.slot).isEmpty())
+            return StellarPatternStuckReport.Cause.STRONG_MATCH;
+        boolean found = false, allPaused = true, failed = false;
+        for (HostAssessment host : assessment.hosts) {
+            if (!supportsType(host.types, watch.patternRecipeTypeId, assessment.onlyHost)) continue;
+            found = true;
+            boolean paused = host.machine instanceof IRecipeLogicMachine logic && !logic.isWorkingEnabled();
+            allPaused &= paused;
+            failed |= host.failed && !paused;
+        }
+        if (!found) return StellarPatternStuckReport.Cause.NO_HOST;
+        if (failed) return StellarPatternStuckReport.Cause.HOST_FAILURE;
+        return allPaused ? StellarPatternStuckReport.Cause.PAUSED : StellarPatternStuckReport.Cause.UNCONSUMED;
+    }
+
+    private static MachineAssessment collectParallelAssessment(RecipeTypePatternBufferPartMachine machine) {
+        int[] activeSlots = machine.gtShanhai$getActiveSlots();
+        List<String> queuedTypes = new ArrayList<>(activeSlots.length);
+        for (int slot : activeSlots) queuedTypes.add(machine.gtShanhai$getPatternRecipeTypeId(slot));
+        List<HostAssessment> hosts = new ArrayList<>();
+        for (IMultiController controller : machine.getControllers()) {
+            if (!(controller.self() instanceof IRecipeLogicMachine host) || !controller.isFormed()) continue;
+            RecipeLogic logic = host.getRecipeLogic();
+            List<String> types = new ArrayList<>();
+            for (var type : WildcardPatternRecipeTypeBinding.collectHostRecipeTypes(List.of(controller))) {
+                if (type != null && type.registryName != null) types.add(type.registryName.toString());
+            }
+            if (host instanceof SelectableRecipeTypeSetMachine selectable) {
+                types.removeIf(type -> {
+                    for (var selected : selectable.getSelectedRecipeTypes()) {
+                        if (selected != null && selected.registryName != null
+                                && RecipeTypeSharedSearchSets.isShared(type, selected.registryName.toString())) return false;
+                    }
+                    return true;
+                });
+            }
+            long capacity = -1L;
+            long threads = 1L;
+            if (logic instanceof SelectableRecipeTypeSetRecipeLogic selectable) {
+                capacity = selectable.gtShanhai$getStuckWatchParallelLimit();
+                threads = selectable.getMultipleThreads();
+            } else if (logic instanceof GTLAddMultipleRecipesLogic multiple) {
+                threads = multiple.getMultipleThreads();
+                capacity = StellarPatternWaitPolicy.multiply(multiple.getParallel().getMaxParallel(), threads);
+            } else if (logic instanceof MultipleRecipesLogic multiple) {
+                threads = 64L;
+                capacity = StellarPatternWaitPolicy.multiply(multiple.getParallel().getMaxParallel(), threads);
+            } else if (host instanceof ParallelMachine parallel) {
+                capacity = parallel.getMaxParallel();
+            }
+            GTRecipe batch = logic.getLastRecipe();
+            long allocated = 0L;
+            if (host.isActive() && batch != null) {
+                allocated = logic instanceof SelectableRecipeTypeSetRecipeLogic selectable
+                        ? selectable.gtShanhai$getLastAllocatedParallel()
+                        : logic instanceof StellarPatternParallelState observed
+                                ? observed.gtShanhai$getObservedAllocatedParallel() : -1L;
+            }
+            long queued = 0L;
+            for (String type : queuedTypes) {
+                if (supportsType(types, type, machine.getControllers().size() == 1)) queued++;
+            }
+            boolean failed = !host.isWorkingEnabled();
+            if (host instanceof PrimordialOmegaEngineModuleBase module) {
+                String error = module.getModuleConditionError();
+                failed |= error != null && !error.isBlank();
+            }
+            if (logic instanceof IRecipeStatus status) {
+                RecipeResult work = status.getWorkingStatus();
+                failed |= work != null && !work.isSuccess();
+            }
+            String capacityLabel = logic instanceof PrimordialModuleRecipeLogic ? "并发配方容量" : "总并行";
+            hosts.add(new HostAssessment(controller.self(), types, capacityLabel, capacity, threads, allocated, queued,
+                    logic.isWorking() && host.isWorkingEnabled(), failed,
+                    logic.getProgress(), logic.getDuration(), logic.getTotalContinuousRunningTime(), batch));
+        }
+        return new MachineAssessment(hosts, machine.getControllers().size() == 1);
+    }
+
+    private static boolean supportsType(List<String> types, String type, boolean onlyHost) {
+        if (type == null || type.isBlank() || "<none>".equals(type)) return onlyHost;
+        for (String candidate : types) if (RecipeTypeSharedSearchSets.isShared(candidate, type)) return true;
+        return false;
+    }
+
+    private static boolean evaluateParallelWait(RecipeTypePatternBufferPartMachine machine, Watch watch,
+                                                MachineAssessment assessment, long now) {
+        boolean waiting = false;
+        boolean strongFailure = !machine.gtShanhai$strongMatchReason(watch.slot).isEmpty();
+        List<String> details = new ArrayList<>();
+        for (HostAssessment host : assessment.hosts) {
+            if (!supportsType(host.types, watch.patternRecipeTypeId, assessment.onlyHost)) continue;
+            var policy = watch.hostProgress.computeIfAbsent(host.machine, ignored -> new StellarPatternWaitPolicy());
+            boolean deferred = policy.observe(now, watch.timeout, host.capacity, host.allocated, host.queued,
+                    host.working, host.failed || strongFailure, host.progress, host.successfulTicks, host.duration, host.batch);
+            waiting |= deferred;
+            if (deferred) watch.warningTick = Math.max(watch.warningTick, policy.progressDeadline(watch.timeout));
+            details.add(host.machine.getPos().toShortString() + " " + host.capacityLabel + "="
+                    + (host.capacity > 0L ? host.capacity : "未知") + " 线程倍率=" + host.threads
+                    + " 本轮分配=" + (host.allocated >= 0L ? host.allocated : "未知") + " 等待槽=" + host.queued
+                    + " 进度=" + host.progress + "/" + host.duration
+                    + (deferred ? " 等待并行" : "未满足并行等待条件"));
+        }
+        watch.parallelAssessment = details.isEmpty() ? "无可用的对应配方主机" : String.join(" | ", details);
+        return waiting;
+    }
+
+    private record MachineKey(ResourceKey<Level> dimension, BlockPos pos) {}
+    private record MachineAssessment(List<HostAssessment> hosts, boolean onlyHost) {}
+    private record HostAssessment(MetaMachine machine, List<String> types, String capacityLabel, long capacity, long threads,
+                                  long allocated, long queued, boolean working, boolean failed,
+                                  int progress, int duration, long successfulTicks, GTRecipe batch) {}
 
     public static String currentHostStatus(RecipeTypePatternBufferPartMachine machine) {
         if (machine == null) return "";
@@ -165,7 +315,7 @@ public final class StellarPatternStuckWatch {
     }
 
     private static String collectStuckReason(RecipeTypePatternBufferPartMachine machine, int slot) {
-        String strong = machine.gtShanhai$strongMatchReason(slot);
+        String strong = machine.gtShanhai$fullStrongMatchReason(slot);
         String base = "原料仍停留在星律槽位，"
                 + DShanhaiConfig.COMMON.recipeTypePatternStuckWarningSeconds.get()
                 + " 秒内未被主机取用";
@@ -250,7 +400,11 @@ public final class StellarPatternStuckWatch {
         private final ResourceKey<Level> dimension;
         private final BlockPos pos;
         private final int slot;
-        private final long dueTick;
+        private long dueTick;
+        private long warningTick;
+        private final long timeout;
+        private final Map<MetaMachine, StellarPatternWaitPolicy> hostProgress = new HashMap<>();
+        private String parallelAssessment = "";
         private final Snapshot snapshot;
         private final List<String> hostRecipeTypeIds;
         private final String patternRecipeTypeId;
@@ -265,7 +419,9 @@ public final class StellarPatternStuckWatch {
             this.dimension = dimension;
             this.pos = pos;
             this.slot = slot;
-            this.dueTick = dueTick;
+            this.timeout = (long) DShanhaiConfig.COMMON.recipeTypePatternStuckWarningSeconds.get() * TICKS_PER_SECOND;
+            this.warningTick = dueTick;
+            this.dueTick = dueTick - timeout + Math.min(TICKS_PER_SECOND, timeout);
             this.snapshot = snapshot;
             this.hostRecipeTypeIds = hostRecipeTypeIds;
             this.patternRecipeTypeId = patternRecipeTypeId;

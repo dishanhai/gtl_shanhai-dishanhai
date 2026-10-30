@@ -34,6 +34,7 @@ import com.dishanhai.gt_shanhai.common.item.VirtualPatternBufferSlotState;
 import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternBridge;
 import com.dishanhai.gt_shanhai.common.item.terminal.StellarTerminalDetail;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.mixin.MEPatternBufferSlot2PatternAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
@@ -227,6 +228,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     private final Int2ReferenceOpenHashMap<Object2LongMap<AEFluidKey>> stuckRuntimeFluidSnapshots =
             new Int2ReferenceOpenHashMap<>();
     private final Int2ReferenceOpenHashMap<String> stuckRuntimeBroadcasts = new Int2ReferenceOpenHashMap<>();
+    private final Int2ReferenceOpenHashMap<StellarPatternStuckReport.Entry> stuckRuntimeReports = new Int2ReferenceOpenHashMap<>();
     private String cachedStrongMatchReport = "";
     private long cachedStrongMatchReportTick = Long.MIN_VALUE;
     private int cachedStrongMatchReportHash = Integer.MIN_VALUE;
@@ -1699,6 +1701,17 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         stuckRuntimeBroadcasts.put(slot, text);
     }
 
+    public void gtShanhai$rememberStuckReport(int slot, StellarPatternStuckReport.Entry entry) {
+        if (gtShanhai$isRuntimeTrackableSlot(slot) && entry != null) stuckRuntimeReports.put(slot, entry);
+    }
+
+    public ShanhaiTerminalReport gtShanhai$buildStuckReport() {
+        gtShanhai$clearResolvedRuntimeWarnings();
+        List<StellarPatternStuckReport.Entry> entries = new ArrayList<>(stuckRuntimeReports.values());
+        entries.sort(java.util.Comparator.comparingInt(StellarPatternStuckReport.Entry::slot));
+        return StellarPatternStuckReport.build(getLevel().dimension().location(), getPos(), entries);
+    }
+
     public void gtShanhai$clearPatternSlotRuntimeWarning(int slot) {
         if (!gtShanhai$isRuntimeTrackableSlot(slot)) return;
         gtShanhai$clearPatternSlotRuntimeSnapshot(slot);
@@ -2998,12 +3011,21 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     /** 星律卡死告警用。强匹配没拒绝时返回空串，沿用原来的主机状态。 */
     public String gtShanhai$strongMatchReason(int slot) {
+        return gtShanhai$strongMatchReason(slot, 180);
+    }
+
+    /** 完整告警詳情專用，保留原摘要 API 的長度限制。 */
+    public String gtShanhai$fullStrongMatchReason(int slot) {
+        return gtShanhai$strongMatchReason(slot, 0);
+    }
+
+    private String gtShanhai$strongMatchReason(int slot, int maxDetail) {
         if (!strongPatternMatchMode || slot < 0 || slot >= maxPatternCount
                 || slot >= getPatternInventory().getSlots()) {
             return "";
         }
         return StellarPatternStrongMatchMessages.explain(getLevel(), getPatternInventory().getStackInSlot(slot))
-                .line(180);
+                .line(maxDetail);
     }
 
     public String gtShanhai$firstStrongMatchLine() {
@@ -3173,6 +3195,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         stuckRuntimeItemSnapshots.remove(slot);
         stuckRuntimeFluidSnapshots.remove(slot);
         stuckRuntimeBroadcasts.remove(slot);
+        stuckRuntimeReports.remove(slot);
     }
 
     private void gtShanhai$clearPatternSlotRuntimeSnapshots() {
@@ -3180,6 +3203,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         stuckRuntimeItemSnapshots.clear();
         stuckRuntimeFluidSnapshots.clear();
         stuckRuntimeBroadcasts.clear();
+        stuckRuntimeReports.clear();
     }
 
     private static <T> Object2LongOpenHashMap<T> gtShanhai$copyPositiveSnapshot(@Nullable Object2LongMap<T> source) {

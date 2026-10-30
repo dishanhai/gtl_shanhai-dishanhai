@@ -7,6 +7,7 @@
     "GravityConditionMaintenanceMixin",
     "ParallelOutputChanceBypassMixin",
     "MultipleRecipesLogicThreadMixin",
+    "StellarPatternCoreParallelObservationMixin",
     "HarmonyMachineBypassMixin",
     "SuprachronalModuleDisplayMixin",
     "SpaceElevatorModuleMixins$TimeModifierRemove",
@@ -39,6 +40,7 @@
     "GTLCoreFastInfinityCellOverflowGuardMixin",
     "SlotCacheManagerAccessor",
     "RecipeRunnerHelperOutputMixin",
+    "StellarPatternInputParallelObservationMixin",
     "SuperPatternAutoMatchMixin",
     "ArcanicAstrographInputBypassMixin",
     "NotifiableCircuitItemStackHandlerAdvancedCircuitMixin"

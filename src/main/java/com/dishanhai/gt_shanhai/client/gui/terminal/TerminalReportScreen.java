@@ -85,6 +85,7 @@ public final class TerminalReportScreen extends ScaledScreen {
             case MODULES -> "title_modules";
             case BUILD -> "title_build";
             case CRAFT -> "title_craft";
+            case STELLAR_STUCK -> "title_stellar_stuck";
         }));
         this.report = report;
         targetWidth = TARGET_W; targetHeight = TARGET_H; renderRenderablesOnly = true;
@@ -100,12 +101,15 @@ public final class TerminalReportScreen extends ScaledScreen {
         groups.addAll(grouped.values());
         // 同類別排在一起；類別內保持掃描出現順序。
         groups.sort((a, b) -> Integer.compare(a.category(), b.category()));
-        // 合成報告的條目沒有世界坐標，「全部」直接計條目數。
-        distinctPositions = isCraft() ? report.lines().size() : distinct.size();
+        // 合成與告警報告按條目計數；多個告警槽可以來自同一個座標。
+        distinctPositions = isTextReport() ? report.lines().size() : distinct.size();
         opening.setTarget(1, now()); transition.reset(0, now());
     }
 
     private boolean isCraft() { return report.type() == ShanhaiTerminalReport.Type.CRAFT; }
+    private boolean isStellarStuck() { return report.type() == ShanhaiTerminalReport.Type.STELLAR_STUCK; }
+    private boolean isTextReport() { return isCraft() || isStellarStuck(); }
+    private boolean hasWorldCoordinates() { return !isTextReport(); }
     private static Component tr(String key, Object... args) { return Component.translatable(PREFIX + key, args); }
     private int listX() { return left + 12; }
     private int listY() { return top + headerBottom; }
@@ -119,6 +123,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     }
     private Component counts() {
         int[] c = report.counts();
+        if (isStellarStuck()) return tr("counts_stellar_stuck", c.length > 0 ? c[0] : 0);
         if (report.type() == ShanhaiTerminalReport.Type.MODULES) return tr("counts_modules", c.length > 0 ? c[0] : 0);
         if (report.type() == ShanhaiTerminalReport.Type.BUILD) return tr("counts_build", c[0], c[1], c[2]);
         if (isCraft()) return tr("counts_craft", c[0], c[1], c[2], c[3]);
@@ -201,11 +206,11 @@ public final class TerminalReportScreen extends ScaledScreen {
     private Row buildRow(Group group, int y) {
         var category = report.categories().get(group.category());
         net.minecraft.network.chat.MutableComponent kind = category.label().copy().withStyle(style -> style.withColor(category.color()));
-        if (!isCraft()) kind.append(Component.literal(" ×" + group.positions().size()).withStyle(ChatFormatting.WHITE));
+        if (hasWorldCoordinates()) kind.append(Component.literal(" ×" + group.positions().size()).withStyle(ChatFormatting.WHITE));
         Component name = report.names().get(group.name());
         List<BlockPos> positions = group.positions();
         int cols = 1, cellW = COL_NAME_W, gridLines = 0;
-        if (!isCraft() && !positions.isEmpty()) {
+        if (hasWorldCoordinates() && !positions.isEmpty()) {
             int maxLen = 0;
             for (BlockPos pos : positions)
                 maxLen = Math.max(maxLen, digits(pos.getX()) + digits(pos.getY()) + digits(pos.getZ()) + 2);
@@ -213,11 +218,13 @@ public final class TerminalReportScreen extends ScaledScreen {
             cols = Math.max(1, COL_NAME_W / cellW);
             gridLines = (positions.size() + cols - 1) / cols;
         }
-        boolean foldable = gridLines > FOLD_LINES, open = expanded.contains(group.key());
+        boolean foldable = isStellarStuck() || gridLines > FOLD_LINES, open = expanded.contains(group.key());
         int shown = foldable && !open ? FOLD_LINES : gridLines;
-        boolean boxable = !isCraft() && !positions.isEmpty();
+        boolean boxable = hasWorldCoordinates() && !positions.isEmpty();
         Component detail = report.details().get(group.name());
-        List<FormattedCharSequence> detailLines = detail.getString().isEmpty() ? List.of() : font.split(detail, COL_NAME_W);
+        // 告警預設只畫摘要；展開該槽才物化完整文字並換行，避免一次處理全部長報錯。
+        List<FormattedCharSequence> detailLines = isStellarStuck() && !open ? List.of()
+                : detail.getString().isEmpty() ? List.of() : font.split(detail, COL_NAME_W);
         int belowH = (detailLines.size() + (gridLines > 0 ? 1 + shown : 0)) * font.lineHeight;
         List<Cell> cells = new ArrayList<>();
         int gridH = layoutCells(report.icons().get(group.name()), cells);
@@ -283,7 +290,7 @@ public final class TerminalReportScreen extends ScaledScreen {
             }
             int headY = top + headerBottom - font.lineHeight - 4;
             ui.wrap(g, tr("col_kind"), listX() + COL_KIND, headY, COL_KIND_W, GlassPalette.TEXT_DIM);
-            ui.wrap(g, tr(isCraft() ? "col_block_craft" : "col_block"), listX() + COL_NAME, headY, COL_NAME_W, GlassPalette.TEXT_DIM);
+            ui.wrap(g, tr(isStellarStuck() ? "col_stellar_stuck" : isCraft() ? "col_block_craft" : "col_block"), listX() + COL_NAME, headY, COL_NAME_W, GlassPalette.TEXT_DIM);
             display.draw(g, mx, my, listX() - 3, listY() - 3, CONTENT_W + 6, listHeight + 6);
             drawRows(g, mx, my, at);
             drawScrollbar(g);
@@ -356,7 +363,10 @@ public final class TerminalReportScreen extends ScaledScreen {
             }
         } finally { g.disableScissor(); }
     }
-    private Component expandLabel(Row row) { return tr(row.open() ? "collapse" : "expand"); }
+    private Component expandLabel(Row row) {
+        return tr(isStellarStuck() ? (row.open() ? "collapse_details" : "expand_details")
+                : row.open() ? "collapse" : "expand");
+    }
     private Component boxLabel() { return tr("show_boxes"); }
     private int btnW(Component label) { return font.width(label) + 16; }
     private int btnH() { return font.lineHeight + 10; }
@@ -396,7 +406,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     private void drawFooter(GuiGraphics g, long at) {
         int y = top + PANEL_H - FOOTER_H + 6;
         boolean flashing = at < noticeUntil;
-        Component line = flashing ? notice : tr(isCraft() ? "copy_hint_craft" : "copy_hint");
+        Component line = flashing ? notice : tr(isStellarStuck() ? "copy_hint_stellar_stuck" : isCraft() ? "copy_hint_craft" : "copy_hint");
         int textX = left + 12;
         if (loading) {
             drawSpinner(g, left + 18, y + 4, 5, at);
@@ -440,11 +450,11 @@ public final class TerminalReportScreen extends ScaledScreen {
                 ui.feedback.press(("box." + rowIndex).hashCode(), bx, by, btnW(boxLabel()), btnH(), true, now());
                 ShopUiSounds.click(); showBoxes(row.group()); return true;
             }
-            if (isCraft()) {
+            if (isTextReport()) {
                 String text = report.names().get(row.group().name()).getString();
                 String detail = report.details().get(row.group().name()).getString();
                 Minecraft.getInstance().keyboardHandler.setClipboard(detail.isEmpty() ? text : text + "\n" + detail);
-                notice = tr("copied_craft"); noticeUntil = now() + 2500L;
+                notice = tr(isStellarStuck() ? "copied_stellar_stuck" : "copied_craft"); noticeUntil = now() + 2500L;
                 ShopUiSounds.click(); return true;
             }
             StringBuilder coords = new StringBuilder();
@@ -460,6 +470,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     }
     /** 把整組坐標在世界裡畫成方框（沿用結構高亮），然後關閉界面讓玩家看到世界。 */
     private void showBoxes(Group group) {
+        if (!hasWorldCoordinates()) return;
         var mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null) return;
         int color = report.categories().get(group.category()).color();

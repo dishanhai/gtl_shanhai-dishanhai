@@ -16,33 +16,47 @@ import net.minecraftforge.network.PacketDistributor;
 public final class ShanhaiTerminalReportPacket {
 
     private final ShanhaiTerminalReport report;
+    private final boolean open;
 
     public ShanhaiTerminalReportPacket(ShanhaiTerminalReport report) {
+        this(report, false);
+    }
+
+    private ShanhaiTerminalReportPacket(ShanhaiTerminalReport report, boolean open) {
         this.report = report;
+        this.open = open;
     }
 
     public ShanhaiTerminalReportPacket(FriendlyByteBuf buf) {
+        this.open = buf.readBoolean();
         this.report = ShanhaiTerminalReport.decode(buf);
     }
 
     public void encode(FriendlyByteBuf buf) {
+        buf.writeBoolean(open);
         report.encode(buf);
     }
 
     public static void handle(ShanhaiTerminalReportPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
         NetworkEvent.Context context = contextSupplier.get();
         if (context.getDirection().getReceptionSide().isClient()) {
-            context.enqueueWork(() -> applyClient(packet.report));
+            context.enqueueWork(() -> applyClient(packet.report, packet.open));
         }
         context.setPacketHandled(true);
     }
 
     @OnlyIn(Dist.CLIENT)
-    private static void applyClient(ShanhaiTerminalReport report) {
+    private static void applyClient(ShanhaiTerminalReport report, boolean open) {
         ShanhaiTerminalReportClient.store(report);
+        if (open) ShanhaiTerminalReportClient.run(ShanhaiTerminalReport.CHAT_COMMAND + report.id());
     }
 
     public static void sendTo(ServerPlayer player, ShanhaiTerminalReport report) {
         ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new ShanhaiTerminalReportPacket(report));
+    }
+
+    public static void sendAndOpenTo(ServerPlayer player, ShanhaiTerminalReport report) {
+        ShanhaiNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new ShanhaiTerminalReportPacket(report, true));
     }
 }

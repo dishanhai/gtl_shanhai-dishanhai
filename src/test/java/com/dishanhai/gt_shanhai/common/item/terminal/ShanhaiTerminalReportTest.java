@@ -50,6 +50,26 @@ class ShanhaiTerminalReportTest {
         assertEquals(5, ShanhaiTerminalReport.decode(buffer).omitted());
     }
 
+    @Test void stellarWarningsPreserveEverySlotAndLongDetailsAcrossThePacket() {
+        var target = new BlockPos(10, 64, -20);
+        var builder = new ShanhaiTerminalReport.Builder(ShanhaiTerminalReport.Type.STELLAR_STUCK, target, 2);
+        String details = "长配方ID、输入、输出与主机状态\n".repeat(200);
+        builder.add(target, "STUCK", Component.literal("卡死告警"), 0xFF3B30,
+                Component.literal("槽位 1"), java.util.List.of(), Component.literal(details));
+        builder.add(target, "STUCK", Component.literal("卡死告警"), 0xFF3B30,
+                Component.literal("槽位 2"), java.util.List.of(), Component.literal("第二个槽位"));
+        var buffer = new FriendlyByteBuf(Unpooled.buffer());
+        builder.build().encode(buffer);
+        var decoded = ShanhaiTerminalReport.decode(buffer);
+        assertEquals(ShanhaiTerminalReport.Type.STELLAR_STUCK, decoded.type());
+        assertArrayEquals(new int[]{2}, decoded.counts());
+        assertEquals(2, decoded.lines().size());
+        assertEquals(2, decoded.names().size());
+        assertNotEquals(decoded.lines().get(0).name(), decoded.lines().get(1).name());
+        assertEquals(details, decoded.details().get(0).getString());
+        assertEquals("第二个槽位", decoded.details().get(1).getString());
+    }
+
     @Test void chatShowsOnlyAFewLinesAndLinksToTheReportScreen() throws Exception {
         String behavior = Files.readString(ROOT.resolve("common/item/ShanhaiUltimateTerminalBehavior.java"));
         assertTrue(behavior.contains("MAX_DETAIL_LINES = 3"));

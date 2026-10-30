@@ -8,6 +8,11 @@ import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 
+import com.dishanhai.gt_shanhai.GTDishanhaiMod;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
+import com.dishanhai.gt_shanhai.network.ShanhaiTerminalReportPacket;
+import com.gregtechceu.gtceu.api.machine.MetaMachine;
+
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.ClickEvent;
@@ -16,26 +21,86 @@ import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.server.ServerStoppedEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 
 import org.jetbrains.annotations.Nullable;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.UUID;
 
+@Mod.EventBusSubscriber(modid = GTDishanhaiMod.MOD_ID)
 public final class StellarPatternStuckNotifier {
 
     private static final double NEARBY_RADIUS = 500.0D;
     private static final double NEARBY_RADIUS_SQUARED = NEARBY_RADIUS * NEARBY_RADIUS;
+    private static final String PREFIX = "gui.gt_shanhai.ultimate_terminal.report.";
+    // 每台星律同一 tick 的多個槽合成一份報告，避免洗版及擠出客戶端報告快取。
+    private static final Map<BatchKey, Batch> PENDING = new LinkedHashMap<>();
+
+    private record BatchKey(ResourceLocation dimension, long pos) {}
+
+    private static final class Batch {
+        private final ResourceKey<Level> dimension;
+        private final BlockPos pos;
+        private final Map<Integer, StellarPatternStuckReport.Entry> entries = new LinkedHashMap<>();
+        private final Set<Integer> aePlayerIds = new HashSet<>();
+
+        private Batch(ServerLevel level, BlockPos pos) {
+            dimension = level.dimension();
+            this.pos = pos.immutable();
+        }
+    }
 
     private StellarPatternStuckNotifier() {}
 
     public static void notifyStuck(ServerLevel level, BlockPos pos, int slot, String slotLabel,
             @Nullable Integer aePlayerId, String reason, String stuckInputs, String stuckOutputs,
-            List<String> hostRecipeTypeIds, String patternRecipeTypeId, String patternRecipeId) {
+            List<String> hostRecipeTypeIds, String patternRecipeTypeId, String patternRecipeId,
+            StellarPatternStuckReport.Cause cause) {
+        StellarPatternStuckReport.Entry entry = new StellarPatternStuckReport.Entry(slot, slotLabel,
+                reason, stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId, patternRecipeId, cause);
+        if (MetaMachine.getMachine(level, pos) instanceof RecipeTypePatternBufferPartMachine machine) {
+            machine.gtShanhai$rememberStuckReport(slot, entry);
+        }
+        Batch batch = PENDING.computeIfAbsent(new BatchKey(level.dimension().location(), pos.asLong()),
+                ignored -> new Batch(level, pos));
+        batch.entries.put(slot, entry);
+        if (aePlayerId != null) batch.aePlayerIds.add(aePlayerId);
+    }
+
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || PENDING.isEmpty()) return;
+        List<Batch> batches = List.copyOf(PENDING.values());
+        PENDING.clear();
+        for (Batch batch : batches) {
+            ServerLevel level = event.getServer().getLevel(batch.dimension);
+            if (level != null) notifyBatch(level, batch);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onServerStopped(ServerStoppedEvent event) {
+        PENDING.clear();
+    }
+
+    private static void notifyBatch(ServerLevel level, Batch batch) {
         MinecraftServer server = level.getServer();
+        BlockPos pos = batch.pos;
+        ShanhaiTerminalReport report = StellarPatternStuckReport.build(
+                batch.dimension.location(), pos, batch.entries.values());
         Set<UUID> sent = new HashSet<>();
         double x = pos.getX() + 0.5D;
         double y = pos.getY() + 0.5D;
@@ -44,16 +109,14 @@ public final class StellarPatternStuckNotifier {
         for (ServerPlayer player : level.players()) {
             if (player.distanceToSqr(x, y, z) > NEARBY_RADIUS_SQUARED) continue;
             if (sent.add(player.getUUID())) {
-                send(player, level, pos, slot, slotLabel, "附近 " + (int) NEARBY_RADIUS + " 格", reason,
-                        stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId, patternRecipeId);
+                send(player, level, pos, "附近 " + (int) NEARBY_RADIUS + " 格", report);
             }
         }
 
-        if (aePlayerId != null) {
+        for (Integer aePlayerId : batch.aePlayerIds) {
             ServerPlayer player = IPlayerRegistry.getConnected(server, aePlayerId);
             if (player != null && sent.add(player.getUUID())) {
-                send(player, level, pos, slot, slotLabel, "AE 下单玩家", reason,
-                        stuckInputs, stuckOutputs, hostRecipeTypeIds, patternRecipeTypeId, patternRecipeId);
+                send(player, level, pos, "AE 下单玩家", report);
             }
         }
     }
@@ -102,21 +165,18 @@ public final class StellarPatternStuckNotifier {
         return text.isBlank() ? "<empty>" : text;
     }
 
-    private static void send(ServerPlayer player, ServerLevel level, BlockPos pos, int slot, String slotLabel,
-            String route, String reason, String stuckInputs, String stuckOutputs, List<String> hostRecipeTypeIds,
-            String patternRecipeTypeId, String patternRecipeId) {
-        Component coordinate = coordinateLink(level, pos);
-        player.sendSystemMessage(Component.literal("§c[星律样板告警] §f")
-                .append(Component.literal(route).withStyle(ChatFormatting.YELLOW))
-                .append(Component.literal(" §c检测到样板槽卡死："))
-                .append(coordinate));
-        player.sendSystemMessage(Component.literal("§7槽位: §f" + displaySlot(slot, slotLabel)
-                + " §7原因: §f" + reason));
-        player.sendSystemMessage(Component.literal("§7样板配方ID: §f" + oneLine(patternRecipeId)
-                + " §7样板配方类型: §f" + oneLine(patternRecipeTypeId)));
-        player.sendSystemMessage(Component.literal("§7卡死原料: §f" + stuckInputs));
-        player.sendSystemMessage(Component.literal("§7卡死输出: §f" + stuckOutputs));
-        player.sendSystemMessage(Component.literal("§7主机配方类型: §f" + formatList(hostRecipeTypeIds)));
+    private static void send(ServerPlayer player, ServerLevel level, BlockPos pos,
+            String route, ShanhaiTerminalReport report) {
+        ShanhaiTerminalReportPacket.sendTo(player, report);
+        Component link = Component.translatable(PREFIX + "link_details").withStyle(style -> style
+                .withColor(ChatFormatting.AQUA).withUnderlined(true)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,
+                        ShanhaiTerminalReport.CHAT_COMMAND + report.id()))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.translatable(PREFIX + "link_details_hint"))));
+        player.sendSystemMessage(Component.translatable(PREFIX + "notification_stellar_group", route, report.lines().size())
+                .withStyle(ChatFormatting.RED).append(" ").append(coordinateLink(level, pos))
+                .append(" ").append(link));
     }
 
     public static String broadcastBody(int slot, String slotLabel, String reason, String stuckInputs,

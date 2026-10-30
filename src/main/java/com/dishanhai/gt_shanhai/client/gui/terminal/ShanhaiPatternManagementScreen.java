@@ -64,7 +64,8 @@ public final class ShanhaiPatternManagementScreen
             Operation.OPEN_WILDCARD,
             Operation.OPEN_SHARED_INPUTS,
             Operation.OPEN_PATTERN_BEHAVIOR,
-            Operation.OPEN_REFUND
+            Operation.OPEN_REFUND,
+            Operation.OPEN_STUCK_REPORT
     };
     private static final String[] CONTROL_LABELS = {
             "gui.gt_shanhai.stellar_remote.pattern",
@@ -74,7 +75,8 @@ public final class ShanhaiPatternManagementScreen
             "gui.gt_shanhai.stellar_remote.wildcard",
             "gui.gt_shanhai.stellar_remote.shared",
             "gui.gt_shanhai.stellar_remote.behavior",
-            "gui.gt_shanhai.stellar_remote.refund"
+            "gui.gt_shanhai.stellar_remote.refund",
+            "gui.gt_shanhai.stellar_remote.detail.open_stuck_report"
     };
 
     private static final Field EAEP_OPEN_UI_BUTTONS_FIELD = findNamedField("openUIButtons");
@@ -218,9 +220,10 @@ public final class ShanhaiPatternManagementScreen
 
     private boolean handleControlClick(int localX, int localY) {
         if (detailContains(localX, localY)) {
-            if (teleportLineContains(localX, localY)) {
+            Operation action = detailOperationAt(localX, localY);
+            if (action != null) {
                 ShanhaiNetwork.CHANNEL.sendToServer(new ShanhaiPatternRemoteConfigPacket(
-                        getMenu().containerId, selectedServerId, Operation.TELEPORT, 0));
+                        getMenu().containerId, selectedServerId, action, 0));
             }
             return true;
         }
@@ -340,11 +343,11 @@ public final class ShanhaiPatternManagementScreen
         for (DetailLine line : lines) {
             Component shown = trimDetail(line.text());
             graphics.drawString(font, shown, textX, textY, line.color(), false);
-            if (line.teleport()) {
+            if (line.action() != null) {
                 int underline = Math.min(font.width(shown), DETAIL_WIDTH - 8);
                 graphics.fill(textX, textY + 9, textX + underline, textY + 10, line.color());
             }
-            if (line.tooltip() != null || line.teleport()) {
+            if (line.tooltip() != null || line.action() != null) {
                 detailHits.add(new DetailHit(textX, textY, DETAIL_WIDTH - 8, ROW_STRIDE,
                         line.tooltip(), line.teleport()));
             }
@@ -409,6 +412,8 @@ public final class ShanhaiPatternManagementScreen
             lines.add(new DetailLine(Component.translatable(
                     "gui.gt_shanhai.stellar_remote.detail.warnings", detail.warnings()),
                     DETAIL_WARN, null, false));
+            Component reportLink = Component.translatable("gui.gt_shanhai.stellar_remote.detail.open_stuck_report");
+            lines.add(new DetailLine(reportLink, DETAIL_LINK, reportLink, Operation.OPEN_STUCK_REPORT));
         }
         if (detail.stuckBroadcast() != null && !detail.stuckBroadcast().isEmpty()) {
             String[] parts = detail.stuckBroadcast().split("\n", -1);
@@ -436,18 +441,18 @@ public final class ShanhaiPatternManagementScreen
         return Component.translatable("gui.gt_shanhai.stellar_remote.detail.host_running");
     }
 
-    private boolean teleportLineContains(int localX, int localY) {
+    private Operation detailOperationAt(int localX, int localY) {
         List<DetailLine> lines = detailLines(selectedDetail());
         int y = detailY(6 + lines.size() * ROW_STRIDE) + 3;
         int x = detailX();
         for (DetailLine line : lines) {
-            if (line.teleport() && localX >= x && localX < x + DETAIL_WIDTH
+            if (line.action() != null && localX >= x && localX < x + DETAIL_WIDTH
                     && localY >= y && localY < y + ROW_STRIDE) {
-                return true;
+                return line.action();
             }
             y += ROW_STRIDE;
         }
-        return false;
+        return null;
     }
 
     private DetailHit detailHitAt(int localX, int localY) {
@@ -591,7 +596,13 @@ public final class ShanhaiPatternManagementScreen
         return partial;
     }
 
-    private record DetailLine(Component text, int color, Component tooltip, boolean teleport) {}
+    private record DetailLine(Component text, int color, Component tooltip, Operation action) {
+        private DetailLine(Component text, int color, Component tooltip, boolean teleport) {
+            this(text, color, tooltip, teleport ? Operation.TELEPORT : null);
+        }
+
+        private boolean teleport() { return action == Operation.TELEPORT; }
+    }
 
     private record DetailHit(int x, int y, int width, int height, Component tooltip, boolean teleport) {}
 
