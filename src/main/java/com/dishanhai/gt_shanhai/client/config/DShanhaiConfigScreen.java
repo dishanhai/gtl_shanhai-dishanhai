@@ -16,6 +16,7 @@ import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 山海模组配置界面（客户端，基于 cloth-config）。
@@ -107,6 +108,23 @@ public final class DShanhaiConfigScreen {
                         "被动模块与主机本体始终保留",
                         "方块仍注册、旧存档不损坏；需重启生效"))
                 .setSaveConsumer(cfg.disablePrimordialSeriesMachines::set).build());
+        machine.addEntry(e.startBooleanToggle(Component.literal("允许引擎无条件安装任意原初模块"),
+                        cfg.primordialEngineAllowAnyModule.get())
+                .setDefaultValue(false)
+                .setTooltip(tip("默认关闭：按下方物品 ID 黑名单限制普通原始终焉引擎",
+                        "开启后忽略此黑名单，允许普通引擎运行任意原初模块",
+                        "仅控制宿主准入；机器禁用与配方其他运行条件仍按原配置检查"))
+                .setSaveConsumer(cfg.primordialEngineAllowAnyModule::set).build());
+        machine.addEntry(e.startStrList(Component.literal("原始引擎模块物品 ID 黑名单"),
+                        new ArrayList<>(cfg.primordialEngineBlockedModuleItemIds.get()))
+                .setDefaultValue(new ArrayList<>(cfg.primordialEngineBlockedModuleItemIds.getDefault()))
+                .setTooltip(tip("默认十种高阶原初模块，可自行增删完整物品 ID：命名空间:物品名",
+                        "删除 ID 即允许该模块在普通引擎运行；清空列表表示全部允许",
+                        "名单内模块可安装，但必须接入已成型归墟或由归墟超维度链接接管才能工作",
+                        "上方全局开关开启时不使用此名单，保存后最迟下一工作 tick 生效"))
+                .setCellErrorSupplier(id -> DShanhaiConfig.isValidModuleItemId(id) ? Optional.empty()
+                        : Optional.of(Component.literal("请输入完整物品 ID：命名空间:物品名")))
+                .setSaveConsumer(list -> cfg.primordialEngineBlockedModuleItemIds.set(list)).build());
         machine.addEntry(e.startBooleanToggle(Component.literal("原初模块旧式无限制模式"),
                         cfg.primordialModuleUnrestrictedMode.get())
                 .setDefaultValue(false)

@@ -17,6 +17,14 @@ class StellarPatternStuckReportSourceTest {
     }
 
     @Test
+    void cancellingTheLinkIsObservedEvenBeforeTheCpuProcessesItsNextTick() throws IOException {
+        String source = read("mixin/StellarPatternCraftingLinkStateMixin.java");
+        assertTrue(source.contains("\"cancel\", \"markDone\""));
+        assertTrue(source.contains("server.isSameThread()"));
+        assertTrue(source.contains("StellarPatternWarningHistory.observeTerminal("));
+    }
+
+    @Test
     void takingInputsOnlyClearsRuntimeWarningsAndHistoryUsesIndependentAeOutcomes() throws IOException {
         String machine = read("common/machine/part/RecipeTypePatternBufferPartMachine.java");
         int start = machine.indexOf("private void gtShanhai$clearPatternSlotRuntimeSnapshot(");

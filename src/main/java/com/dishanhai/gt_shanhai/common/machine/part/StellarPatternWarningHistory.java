@@ -12,7 +12,6 @@ import java.util.*;
 
 /** 山海：跨槽位紅框生命週期保存的告警歷史，以 AE 訂單 ID 接收完成／取消結果。 */
 public final class StellarPatternWarningHistory extends SavedData {
-    private static final int MAX_TERMINAL_HISTORY = 512;
     public record MachineKey(ResourceLocation dimension, BlockPos pos) {
         public MachineKey { pos = pos.immutable(); }
     }
@@ -20,7 +19,6 @@ public final class StellarPatternWarningHistory extends SavedData {
         private long reportId = ShanhaiTerminalReport.nextId();
         private final LinkedHashMap<String, StellarPatternStuckReport.Entry> entries = new LinkedHashMap<>();
         private final Set<Integer> requesters = new HashSet<>();
-        private int archived;
     }
     private final Map<MachineKey, Log> machines = new LinkedHashMap<>();
     private final Map<String, Set<MachineKey>> byOrder = new HashMap<>();
@@ -39,12 +37,12 @@ public final class StellarPatternWarningHistory extends SavedData {
         log.entries.put(incident, entry);
         if (requester != null) log.requesters.add(requester);
         index(key, entry);
-        trim(key, log);
         setDirty();
     }
 
     private void index(MachineKey key, StellarPatternStuckReport.Entry entry) {
-        if (!entry.order().id().isBlank()) byOrder.computeIfAbsent(entry.order().id(), ignored -> new HashSet<>()).add(key);
+        if (!entry.order().id().isBlank() && !entry.order().state().terminal())
+            byOrder.computeIfAbsent(entry.order().id(), ignored -> new HashSet<>()).add(key);
     }
 
     public Set<MachineKey> updateOrder(String id, StellarPatternOrderInfo.State state, long remaining) {
@@ -55,13 +53,13 @@ public final class StellarPatternWarningHistory extends SavedData {
             if (log == null) continue;
             log.entries.replaceAll((incident, entry) -> {
                 if (!entry.order().id().equals(id) || entry.order().state().terminal()) return entry;
-                var order = entry.order().withOutcome(state, remaining);
+                var order = entry.order().withOutcome(state, remaining < 0L ? entry.order().remaining() : remaining);
                 if (order.equals(entry.order())) return entry;
                 changed.add(key);
                 return entry.withOrder(order);
             });
-            trim(key, log);
         }
+        byOrder.remove(id);
         if (!changed.isEmpty()) setDirty();
         return changed;
     }
@@ -93,28 +91,7 @@ public final class StellarPatternWarningHistory extends SavedData {
 
     public ShanhaiTerminalReport build(ResourceLocation dimension, BlockPos pos) {
         Log log = machines.computeIfAbsent(new MachineKey(dimension, pos), ignored -> { setDirty(); return new Log(); });
-        var report = StellarPatternStuckReport.build(log.reportId, dimension, pos, log.entries.values());
-        if (log.archived == 0) return report;
-        var summary = net.minecraft.network.chat.Component.empty().append(report.summary()).append("\n")
-                .append(net.minecraft.network.chat.Component.translatable("gui.gt_shanhai.ultimate_terminal.report.history_archived", log.archived));
-        return new ShanhaiTerminalReport(report.id(), report.type(), report.target(), report.counts(), summary,
-                report.categories(), report.names(), report.icons(), report.details(), report.lines(), report.omitted());
-    }
-
-    private void trim(MachineKey key, Log log) {
-        long terminal = log.entries.values().stream().filter(entry -> entry.order().state().terminal()).count();
-        if (terminal <= MAX_TERMINAL_HISTORY) return;
-        var iterator = log.entries.values().iterator();
-        while (iterator.hasNext() && terminal > MAX_TERMINAL_HISTORY) {
-            var entry = iterator.next();
-            if (!entry.order().state().terminal()) continue;
-            iterator.remove(); terminal--; log.archived++;
-            String id = entry.order().id();
-            if (log.entries.values().stream().noneMatch(other -> other.order().id().equals(id))) {
-                Set<MachineKey> locations = byOrder.get(id);
-                if (locations != null) { locations.remove(key); if (locations.isEmpty()) byOrder.remove(id); }
-            }
-        }
+        return StellarPatternStuckReport.build(log.reportId, dimension, pos, log.entries.values());
     }
 
     @Override
@@ -123,7 +100,7 @@ public final class StellarPatternWarningHistory extends SavedData {
         for (var item : machines.entrySet()) {
             var saved = new CompoundTag();
             saved.putString("dimension", item.getKey().dimension().toString()); saved.putLong("pos", item.getKey().pos().asLong());
-            Log log = item.getValue(); saved.putLong("reportId", log.reportId); saved.putInt("archived", log.archived);
+            Log log = item.getValue(); saved.putLong("reportId", log.reportId);
             saved.putIntArray("requesters", log.requesters.stream().mapToInt(Integer::intValue).toArray());
             var entries = new ListTag();
             for (var entry : log.entries.values()) entries.add(entry.save());
@@ -140,7 +117,7 @@ public final class StellarPatternWarningHistory extends SavedData {
             ResourceLocation dimension = ResourceLocation.tryParse(saved.getString("dimension"));
             if (dimension == null) continue;
             MachineKey key = new MachineKey(dimension, BlockPos.of(saved.getLong("pos")));
-            Log log = new Log(); log.reportId = saved.getLong("reportId"); log.archived = saved.getInt("archived");
+            Log log = new Log(); log.reportId = saved.getLong("reportId");
             for (int requester : saved.getIntArray("requesters")) log.requesters.add(requester);
             var entries = saved.getList("entries", Tag.TAG_COMPOUND);
             for (int j = 0; j < entries.size(); j++) {

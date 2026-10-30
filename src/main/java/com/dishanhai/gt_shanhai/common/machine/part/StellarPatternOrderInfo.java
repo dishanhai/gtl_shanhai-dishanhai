@@ -17,7 +17,7 @@ public record StellarPatternOrderInfo(String id, String requester, String cpu, S
     public StellarPatternOrderInfo {
         id = id == null ? "" : id;
         requester = requester == null ? "" : requester;
-        cpu = cpu == null ? "" : cpu;
+        cpu = cpu == null || cpu.isBlank() ? "未命名 CPU" : cpu;
         output = output == null ? "" : output;
         outputId = outputId == null ? "" : outputId;
         requested = Math.max(0, requested);

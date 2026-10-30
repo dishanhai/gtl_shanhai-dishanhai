@@ -158,6 +158,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     @Override
     public GTRecipe getGTRecipe() {
+        // 山海：在候選查找、配方縮放與扣料之前阻擋未由歸墟接管的高階模組。
+        if (getMachine() instanceof PrimordialOmegaEngineModuleBase mod && mod.isGuixuHostBlocked()) return null;
         // 歸墟遏制場坍縮鎖定：不開新批次（提示由 addHostStatusDisplay 顯示）。
         if (containmentBonus().locked()) return null;
         // 模块等级门控已在 lookupRecipeIterator 按真实候选配方逐一过滤，这里只叠加额外挂载效果。

@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.config;
 import com.dishanhai.gt_shanhai.jei.JeiBookmarkExclusions;
 
 import net.minecraftforge.common.ForgeConfigSpec;
+import net.minecraft.resources.ResourceLocation;
 
 import java.util.List;
 
@@ -36,6 +37,25 @@ public final class DShanhaiConfig {
             return false;
         }
         return COMMON.disablePrimordialSeriesMachines.get();
+    }
+
+    /** 山海：完整物品 ID 精確匹配；未載入配置時沿用預設限制。 */
+    public static boolean isPrimordialEngineModuleBlocked(ResourceLocation itemId) {
+        if (itemId == null) return false;
+        boolean loaded = COMMON_SPEC.isLoaded();
+        boolean allowAny = loaded ? COMMON.primordialEngineAllowAnyModule.get()
+                : COMMON.primordialEngineAllowAnyModule.getDefault();
+        if (allowAny) return false;
+        List<? extends String> blocked = loaded ? COMMON.primordialEngineBlockedModuleItemIds.get()
+                : COMMON.primordialEngineBlockedModuleItemIds.getDefault();
+        return blocked.contains(itemId.toString());
+    }
+
+    /** 配置與畫面共用的語法驗證，不依賴尚未完成載入的物品登錄表。 */
+    public static boolean isValidModuleItemId(Object value) {
+        if (!(value instanceof String id) || id.indexOf(':') <= 0) return false;
+        ResourceLocation parsed = ResourceLocation.tryParse(id);
+        return parsed != null && !parsed.getPath().isEmpty();
     }
 
     public static class ConfigValues {
@@ -98,6 +118,10 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.BooleanValue disablePrimordialSeriesMachines;
         /** 原初模块 — 是否启用旧式无限制模式（正常模式不限制研究/数据访问） */
         public ForgeConfigSpec.BooleanValue primordialModuleUnrestrictedMode;
+        /** 原始終焉引擎 — 略過模組宿主黑名單，允許任意原初模組 */
+        public ForgeConfigSpec.BooleanValue primordialEngineAllowAnyModule;
+        /** 原始終焉引擎 — 必須改接歸墟才能運作的模組完整物品 ID */
+        public ForgeConfigSpec.ConfigValue<List<? extends String>> primordialEngineBlockedModuleItemIds;
         /** 递归反演阵列 — 是否破除已连接子模块内部运行限制 */
         public ForgeConfigSpec.BooleanValue recursiveReverseArrayBypassModuleRestrictions;
         /** ME 磁盘仓室 — 槽位数 */
@@ -278,6 +302,29 @@ public final class DShanhaiConfig {
             builder.pop();
 
             builder.push("primordial_omega_engine");
+            primordialEngineAllowAnyModule = builder
+                    .comment("允许引擎无条件安装任意原初模块（默认关闭）",
+                            "true=忽略 blockedModuleItemIds 宿主黑名单，原始终焉引擎可运行任意原初模块",
+                            "false=黑名单内模块必须直接接入归墟视界枢核，或由归墟超维度链接模块接管所在引擎",
+                            "本项只控制宿主准入；机器禁用、配方材料与其他运行条件仍由各自配置控制")
+                    .define("allowAnyPrimordialModule", false);
+            primordialEngineBlockedModuleItemIds = builder
+                    .comment("原始终焉引擎不能运行的原初模块物品 ID 黑名单",
+                            "填写完整 ID：命名空间:物品名，精确匹配；可自行新增、删除，空列表表示不限制任何模块",
+                            "默认包含十种高阶原初模块；从列表删除 ID 后，该模块允许在普通引擎运行",
+                            "受限模块仍可安装，但会停机并报错；已成型归墟直接挂载或超维度接管后可运行",
+                            "allowAnyPrimordialModule=true 时本列表不生效；修改后最迟下一工作 tick 生效")
+                    .defineListAllowEmpty(List.of("blockedModuleItemIds"), List.of(
+                            "gt_shanhai:primordial_weiyang_reconstruction_module",
+                            "gt_shanhai:primordial_shaoguang_aggregation_core",
+                            "gt_shanhai:primordial_eternal_smelting_furnace",
+                            "gt_shanhai:primordial_tianqiong_assembly_core",
+                            "gt_shanhai:primordial_universe_simulation_core",
+                            "gt_shanhai:primordial_quantum_distortion_matrix",
+                            "gt_shanhai:primordial_multidimensional_implosion_core",
+                            "gt_shanhai:primordial_supercritical_matter_generation_core",
+                            "gt_shanhai:primordial_causal_weaving_matrix",
+                            "gt_shanhai:primordial_singularity_inversion_core"), DShanhaiConfig::isValidModuleItemId);
             primordialSphereStyle = builder
                     .comment("原始终焉引擎中心球体的渲染风格覆盖（纯客户端显示偏好）",
                              "COMMON 配置不同步：多人环境下各玩家读自己本地的 gt_shanhai-common.toml，只影响自己的画面",

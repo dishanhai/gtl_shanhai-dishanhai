@@ -9,7 +9,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class StellarPatternWarningHistoryTest {
     @Test
-    void historyRetentionKeepsEveryUnfinishedOrderAndExplicitlyReportsArchivedTerminalRecords() {
+    void directLinkCancellationPreservesTheLastObservedQuantityWhenCpuInformationIsUnavailable() {
+        var history = new StellarPatternWarningHistory();
+        history.record(DIM, POS, warning("job-a", 3), 7);
+        history.updateOrder("job-a", StellarPatternOrderInfo.State.CANCELLED, -1);
+        assertEquals(StellarPatternOrderInfo.State.CANCELLED, history.entries(DIM, POS).getFirst().order().state());
+        assertEquals(48, history.entries(DIM, POS).getFirst().order().remaining());
+    }
+    @Test
+    void completingNewOrdersDoesNotDeleteOlderHistoryOrUnfinishedOrders() {
         var history = new StellarPatternWarningHistory();
         history.record(DIM, POS, warning("unfinished", 9000), 7);
         for (int index = 0; index < 513; index++) {
@@ -17,11 +25,10 @@ class StellarPatternWarningHistoryTest {
             history.record(DIM, POS, warning(id, index), 7);
             history.updateOrder(id, StellarPatternOrderInfo.State.COMPLETED, 0);
         }
-        assertEquals(513, history.entries(DIM, POS).size());
+        assertEquals(514, history.entries(DIM, POS).size());
         assertTrue(history.entries(DIM, POS).stream().anyMatch(entry -> entry.order().id().equals("unfinished")));
-        assertFalse(history.entries(DIM, POS).stream().anyMatch(entry -> entry.order().id().equals("finished-0")));
-        assertTrue(net.minecraft.network.chat.Component.Serializer.toJson(history.build(DIM, POS).summary()).contains("history_archived"));
-        assertEquals(513, StellarPatternWarningHistory.load(history.save(new CompoundTag())).entries(DIM, POS).size());
+        assertTrue(history.entries(DIM, POS).stream().anyMatch(entry -> entry.order().id().equals("finished-0")));
+        assertEquals(514, StellarPatternWarningHistory.load(history.save(new CompoundTag())).entries(DIM, POS).size());
     }
     @Test
     void onlyTheRealLinkDoneFlagResolvesAndCancellationTakesPrecedence() {

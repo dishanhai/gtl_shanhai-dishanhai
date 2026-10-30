@@ -28,6 +28,7 @@
     "ShopCraftingJobAccessors$Job",
     "CraftingCpuLogicVirtualPresenceMixin",
     "CraftingCpuLogicStellarContextMixin",
+    "StellarPatternCraftingLinkStateMixin",
     "SelfSynthesisCraftCancelMixin",
     "CraftingCpuLogicStellarContextMixin$ExecutingCraftingJobAccessor",
     "KeyCounterListsAccessor",

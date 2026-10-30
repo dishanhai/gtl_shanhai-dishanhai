@@ -14,6 +14,7 @@ import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.output.IOutputMultiplierSource;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatSources;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
@@ -27,6 +28,7 @@ import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.pattern.BlockPattern;
 
 
@@ -461,6 +463,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     @Override
     public void setHost(PrimordialOmegaEngineMachine host) {
         this.host = host;
+        cachedCanWorkTick = Long.MIN_VALUE;
     }
 
     @Override
@@ -616,11 +619,17 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     public void setModuleConditionError(String msg) { this.lastModuleConditionError = msg; }
     public String getModuleConditionError() { return lastModuleConditionError; }
 
+    /** 遠端模組由既有超維度調和流程將實際宿主切為歸墟，不另存可過期的解鎖旗標。 */
+    protected boolean isGuixuHostBlocked() {
+        return DShanhaiConfig.isPrimordialEngineModuleBlocked(getDefinition().getId())
+                && !(host instanceof GuixuVisionCoreMachine && host.isFormed());
+    }
+
     /** 模块是否可以运行（连接了主机，或启用了独立模式） */
     protected boolean canModuleWork() {
         long tick = getOffsetTimer();
         if (cachedCanWorkTick == tick) {
-            return cachedCanWork;
+            return cachedCanWork && !isGuixuHostBlocked();
         }
         cachedCanWorkTick = tick;
         if (PrimordialSeriesMachines.isDisabled(getDefinition())) {
@@ -629,15 +638,15 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
             return false;
         }
         if (hasLiveHost()) {
-            cachedCanWork = true;
+            cachedCanWork = !isGuixuHostBlocked();
             return cachedCanWork;
         }
         if (isFormed() && tick % 20 == 0 && tryConnectToHost()) {
             hostConnected = true;
-            cachedCanWork = true;
+            cachedCanWork = !isGuixuHostBlocked();
             return cachedCanWork;
         }
-        cachedCanWork = canWorkWithoutHost();
+        cachedCanWork = canWorkWithoutHost() && !isGuixuHostBlocked();
         return cachedCanWork;
     }
 
@@ -667,6 +676,11 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     @Override
     public boolean keepSubscribing() {
         return true;
+    }
+
+    @Override
+    public boolean beforeWorking(GTRecipe recipe) {
+        return !isGuixuHostBlocked() && super.beforeWorking(recipe);
     }
 
     @Override
@@ -1234,6 +1248,10 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     /** 添加主机连接/独立模式状态显示，子类可调用 */
     protected void addHostStatusDisplay(List<Component> textList) {
+        if (isGuixuHostBlocked()) {
+            textList.add(Component.translatable("gt_shanhai.machine.primordial_omega_engine.requires_guixu_host")
+                    .withStyle(ChatFormatting.RED));
+        }
         if (!hostConnected) {
             if (canWorkWithoutHost()) {
                 textList.add(DShanhaiTextUtil.createAuroraText(
