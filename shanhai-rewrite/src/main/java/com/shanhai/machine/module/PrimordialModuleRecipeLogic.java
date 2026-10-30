@@ -16,7 +16,9 @@ import com.gregtechceu.gtceu.common.recipe.condition.ResearchCondition;
 import com.gtladd.gtladditions.api.machine.logic.MutableRecipesLogic;
 import com.gtladd.gtladditions.common.data.ParallelData;
 import com.shanhai.ShanhaiMod;
+import com.shanhai.common.heat.ShanhaiExtraMountGate;
 import com.shanhai.common.heat.ShanhaiHeatGate;
+import com.shanhai.common.heat.ShanhaiHostMountSource;
 import com.shanhai.common.log.ShanhaiLogThrottle;
 import com.shanhai.common.machine.CandidateSetConsistency;
 import com.shanhai.common.machine.EnergyHatchPower;
@@ -1140,61 +1142,107 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
      */
     private boolean shanhai$extraMountGateAllows(@NotNull GTRecipe recipe) {
         final PrimordialModuleMachine module = getMachine();
-        final List<ShanhaiHeatGate.Requirement> needs = new ArrayList<>();
-
-        // ① 四类配方条件
-        for (RecipeCondition condition : recipe.conditions) {
-            // 反向条件（isReverse）一律交回原版：槽是"提供"语义，给"不提供 X"这种否定条件当不了依据。
-            // （本包实测：56903 条配方里 isReverse 真值 0 条 ⇒ 这条分支在本包里从不触发。）
-            if (condition.isReverse()) {
-                continue;
-            }
-            final ShanhaiHeatGate.Requirement need = shanhai$requirementOf(condition);
-            if (need == null) {
-                continue;       // 不是这四类（module_level / rock_breaker / …）⇒ 原版管
-            }
-            if (need.kind == ShanhaiHeatGate.Kind.RESEARCH) {
-                needs.add(need);                    // 🔴 研究一律要槽（原版恒 true）
-                continue;
-            }
-            if (condition.test(recipe, this) != condition.isReverse()) {
-                continue;                           // 原版已经满足 ⇒ 这条与槽无关
-            }
-            needs.add(need);
-        }
-
-        // ② 热力（只在那 7 个类型 + 那三台机器上）
-        // 🔴 2026-10-25（跨配方种类并行配套修正，1 行）：类型改取【<b>候选配方自己的类型</b>】，
-        //    不再取【机器当前激活的类型】。
-        //    理由：跨类型后候选可能来自任何一个类型；若仍拿 {@code getRecipeType()}（= recipeTypes[activeRecipeType]）
-        //    判"这个格子算不算热力"，则「激活类型不在热力白名单、候选是 EBF/SCT」时
-        //    {@code heatReachable=false} ⇒ 温度需求压根不生成 ⇒ EBF 配方会绕开温度照样跑（真实漏洞）。
-        //    ⚠️ 单类型世界里两者恒等（候选全部来自 getRecipeType() 的 lookup）⇒ 本行【不改变今天的行为】；
-        //    只有当候选确实来自另一个类型（= 跨类型开启）时才可能不同。
+        // 🔴🔴 2026-10-25（T3「复写」）：条件的折算【整体搬走】了 ——
+        //    现在只有一份实现：{@link ShanhaiExtraMountGate#requirementsOf}（判定核仍是
+        //    {@link ShanhaiHeatGate#evaluate}），归墟视界枢核也调它。
+        //    本类留下的只有"机器侧的那一层壳"：哪条类型算热力可达、日志、失败原因落点。
+        //
+        //    ⚠️ 搬走前的两条口径**逐字保留在收件方**（不要在本地重新实现）：
+        //    ① 反向条件（isReverse）交回原版；② 研究一律要槽（原版 {@code ResearchCondition.test} 恒 true）；
+        //    ③ 类型取【候选配方自己的类型】而不是机器当前激活的类型
+        //       （跨配方种类并行之后两者可能不同；用后者会让 EBF/SCT 配方绕开温度闸门）。
         final GTRecipeType type = recipe.recipeType != null ? recipe.recipeType : module.getRecipeType();
+        // 🆕 2026-10-25（「复写」）：**多一个来源 —— 挂它的那台主机**。
+        //   用户原话（逐字）：「开，而且我说的是**复写**，归墟视界枢核的配方虽然没有，
+        //   **但是他模块的配方需要啊**」⇒ 可用源 = 模块自己的 3 格 ∪ 主机的 3 格。
+        //   🔴 老主机不实现 {@link ShanhaiHostMountSource} ⇒ contentsOf 返回 null ⇒
+        //      heatReachable 与 slots 与今天**逐位相同**（老主机/其它机器行为一个数都不变）。
+        final Object host = module.getHost();
+        final List<ShanhaiHeatGate.SlotContent> hostSlots = ShanhaiHostMountSource.contentsOf(host);
+        final boolean hostHeat = host instanceof ShanhaiHostMountSource src && src.hostProvidesHeatSource();
         final boolean heatReachable = type != null
                 && ShanhaiHeatGate.isGated(type.registryName.toString())
-                && module.canUseExtraMountAsHeatSource();
-        if (heatReachable) {
-            final int needTemp = shanhai$readRecipeInt(recipe.data, ShanhaiHeatGate.KEY_EBF_TEMP);
-            final int needTier = shanhai$readRecipeInt(recipe.data, ShanhaiHeatGate.KEY_SC_TIER);
-            if (needTemp > 0) {
-                needs.add(ShanhaiHeatGate.Requirement.heatTemp(needTemp));
-            }
-            if (needTier > 0) {
-                needs.add(ShanhaiHeatGate.Requirement.scTier(needTier));
-            }
-        }
-
-        final ShanhaiHeatGate.Outcome outcome =
-                ShanhaiHeatGate.evaluate(needs, module.getExtraMountContents());
+                && (module.canUseExtraMountAsHeatSource() || hostHeat);
+        final ShanhaiExtraMountGate.Result gate = ShanhaiExtraMountGate.evaluate(
+                recipe, type, heatReachable, this, module.getExtraMountContents(), hostSlots);
+        final ShanhaiHeatGate.Outcome outcome = gate.outcome();
         shanhai$gateOutcome = outcome;
         shanhai$logExtraMountGate(type, outcome, heatReachable);
+        if (gate.usedHostSource()) {
+            shanhai$logHostSource(host, gate, outcome);
+        }
         if (outcome.allowed) {
             return true;
         }
         shanhai$recordExtraBlock(outcome);
         return false;
+    }
+
+    // ── 🆕 2026-10-25「主机补上的」证据行（20 tick 一条，可 grep） ──────────────────────────
+
+    /** 「主机供源」那条日志的前缀（与归墟侧 `GuixuVisionCoreRecipeLogic#PREFIX` 同一个词，方便一次 grep）。 */
+    public static final String HOST_GATE_PREFIX = "[SHANHAI-HOSTGATE]";
+
+    /** 上一次打「主机供源」那行的游戏时间（20 tick 节流用）。 */
+    private long shanhai$lastHostSourceLogTick = Long.MIN_VALUE;
+
+    /**
+     * <b>模块因为【主机那 3 格】才满足条件</b>时打一行 —— 这是"复写到底有没有生效"的唯一现场判据。
+     *
+     * <p>形如：
+     * <pre>[SHANHAI-HOSTGATE] host=归墟视界枢核 module=shanhai:xxx_module cond=heat satisfied_by=host slots=64/64</pre>
+     *
+     * <p>🔴 判据（用户/我们一眼可读）：<b>这一行出现 = 主机真的补上了</b>；
+     * 不出现 = 要么模块自己就够了（那是对的，模块更高级不被压低），要么根本没这条需求。
+     * <p>20 tick 节流：判定每 tick 每线程都会跑，不节流会把日志刷爆（本工程的既有纪律）。
+     * <p>整段 try/catch：这是<b>日志</b>，绝不允许它把"配方能不能跑"弄坏。
+     */
+    private void shanhai$logHostSource(@Nullable Object host, @NotNull ShanhaiExtraMountGate.Result gate,
+                                       @NotNull ShanhaiHeatGate.Outcome outcome) {
+        try {
+            final PrimordialModuleMachine module = getMachine();
+            final long now = module.getLevel() == null ? 0L : module.getLevel().getGameTime();
+            if (shanhai$lastHostSourceLogTick != Long.MIN_VALUE
+                    && now - shanhai$lastHostSourceLogTick < 20L) {
+                return;
+            }
+            shanhai$lastHostSourceLogTick = now;
+            final StringBuilder cond = new StringBuilder();
+            for (ShanhaiHeatGate.Requirement r : gate.hostProvided()) {
+                if (cond.length() > 0) {
+                    cond.append('+');
+                }
+                cond.append(humanKind(r.kind));
+            }
+            // slots=N/64：热力那两条是"放满 64 个才生效"，所以报"实际达到的数量/要求"；
+            // 其余三类（超净间/重力/维度/研究）一格就算 ⇒ 报 1/1 那种形状没有意义，报实际格数。
+            final ShanhaiHeatGate.Requirement first = gate.hostProvided().get(0);
+            final String slotsText = switch (first.kind) {
+                case HEAT_TEMP, SC_TIER -> ShanhaiExtraMountGate.countOfKind(first.kind, outcome)
+                        + "/" + ShanhaiHeatGate.REQUIRED_COUNT;
+                default -> "1/" + ShanhaiHeatGate.SLOT_COUNT;
+            };
+            ShanhaiMod.LOGGER.info("{} host={} module={} cond={} satisfied_by=host slots={}",
+                    HOST_GATE_PREFIX,
+                    host instanceof ShanhaiHostMountSource src ? src.hostExtraMountSourceName() : "?",
+                    module.getDefinition() == null || module.getDefinition().getId() == null
+                            ? "?" : module.getDefinition().getId(),
+                    cond, slotsText);
+        } catch (Throwable ignored) {
+            // 日志不许影响判定
+        }
+    }
+
+    /** 需求种类 → 日志里的短名（`cond=` 那一栏）。 */
+    private static String humanKind(@NotNull ShanhaiHeatGate.Kind kind) {
+        return switch (kind) {
+            case CLEANROOM -> "cleanroom";
+            case GRAVITY -> "gravity";
+            case DIMENSION -> "dimension";
+            case RESEARCH -> "research";
+            case HEAT_TEMP -> "heat";
+            case SC_TIER -> "heatsctier";
+        };
     }
 
     /**
@@ -1222,109 +1270,40 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
      * ⇒ 维度条件天生走 OR 组这条路，本方法<b>必须</b>照抄分组语义，不能按单条判。
      */
     private boolean shanhai$conditionsPass(@NotNull GTRecipe recipe) {
-        final ShanhaiHeatGate.Outcome outcome = shanhai$gateOutcome;
-        if (outcome == null || outcome.satisfied.isEmpty()) {
-            return recipe.checkConditions(this).isSuccess();
-        }
-        // 值 = "该 OR 组到目前为止是不是【全组都失败】"（首项取反，后续按与合并）。
-        final Map<RecipeConditionType<?>, Boolean> orGroupAllFail = new LinkedHashMap<>();
-        for (RecipeCondition condition : recipe.conditions) {
-            final boolean ok = shanhai$conditionSatisfied(condition, recipe, outcome);
-            if (condition.isOr()) {
-                orGroupAllFail.merge(condition.getType(), !ok, (a, b) -> a && b);
-            } else if (!ok) {
-                return false;
-            }
-        }
-        for (Boolean allFail : orGroupAllFail.values()) {
-            if (Boolean.TRUE.equals(allFail)) {
-                return false;
-            }
-        }
-        return true;
+        // 🔴 2026-10-25：整段实现搬到 {@link ShanhaiExtraMountGate#conditionsPass}（与归墟共用一份）。
+        //    语义逐字未变：没有需求被槽满足 ⇒ 原样委托回原版 {@code checkConditions}。
+        return ShanhaiExtraMountGate.conditionsPass(recipe, this, shanhai$gateOutcome);
     }
 
     /** 这条条件过没过 —— 原版满足，或<b>槽提供了对应的物项</b>。 */
     private boolean shanhai$conditionSatisfied(@NotNull RecipeCondition condition, @NotNull GTRecipe recipe,
                                                @NotNull ShanhaiHeatGate.Outcome outcome) {
-        if (condition.test(recipe, this) != condition.isReverse()) {
-            return true;
-        }
-        final ShanhaiHeatGate.Requirement need = shanhai$requirementOf(condition);
-        return need != null && outcome.satisfied.contains(need);
+        return ShanhaiExtraMountGate.isConditionSatisfied(condition, recipe, this, outcome);
     }
 
     /**
      * 把一条原版配方条件翻译成"槽需求"；<b>不是本闸门管的（或认不出来）返回 {@code null}</b>。
      *
-     * <p>认不出来的情形必须返回 null（⇒ 交回原版判），而不是"猜一个档位"：
-     * 例如将来某个 mod 注册了第 4 种 {@code CleanroomType}，
-     * {@link ShanhaiHeatGate#cleanroomTierOfName} 会返回 0，这里就交回原版 —— 后果是"槽帮不上忙"，
-     * 而不是"槽用错的档位放行"。
+     * <p>🔴 2026-10-25：实现已搬到 {@link ShanhaiExtraMountGate#requirementOf}
+     * （与归墟视界枢核共用一份，`instanceof` 四连不再有两份）。
      */
     @Nullable
     private ShanhaiHeatGate.Requirement shanhai$requirementOf(@NotNull RecipeCondition condition) {
-        if (condition instanceof CleanroomCondition cleanroom) {
-            final CleanroomType type = cleanroom.getCleanroom();
-            final int tier = ShanhaiHeatGate.cleanroomTierOfName(type == null ? null : type.getName());
-            return tier == ShanhaiHeatGate.CLEANROOM_NONE ? null : ShanhaiHeatGate.Requirement.cleanroom(tier);
-        }
-        if (condition instanceof DimensionCondition dimension) {
-            final ResourceLocation dim = dimension.getDimension();
-            return dim == null ? null : ShanhaiHeatGate.Requirement.dimension(dim.toString());
-        }
-        if (condition instanceof ResearchCondition) {
-            return ShanhaiHeatGate.Requirement.research();
-        }
-        if (condition instanceof GravityCondition) {
-            // ⚠️ gtlcore 的 GravityCondition 里 zero 是 private 且无 getter ⇒ 这里【不区分】无重力/强重力，
-            //    一律"需要重力控制"。依据：带重力的维护仓是可配置的（isConfig 字段），两种都能给。
-            //    详见 ShanhaiHeatSources#HATCH_GRAVITY_IDS 的注释。
-            return ShanhaiHeatGate.Requirement.gravity();
-        }
-        return null;
-    }
-
-    /** 读配方 {@code data} 里的一个整数字段；不存在算 0（= 这条配方没有该门槛）。 */
-    private static int shanhai$readRecipeInt(@NotNull CompoundTag data, @NotNull String key) {
-        return data.contains(key) ? data.getInt(key) : 0;
+        return ShanhaiExtraMountGate.requirementOf(condition);
     }
 
     /**
      * 把拒绝原因按 {@link ShanhaiHeatGate.Deny} 渲成**具体**文案（走 lang 键，不硬编码中文）。
+     * <p>🔴 2026-10-25：文案已整段搬到 {@link ShanhaiExtraMountGate#denyReason}（与归墟共用一份），
+     * 本方法只保留"写进本机失败原因"这一步。
      *
-     * <h2>句式口径（2026-09-30 用户选择题答案逐字「A. 改」定下的）</h2>
-     * 一律「<u>先说这个配方需要什么，再说槽里实际是什么</u>」—— 旧句式先否定你放的东西、再说其实要什么，
-     * 读起来像"说反了"。2026-10-03 合并到额外挂载槽后<b>沿用同一套句式</b>，只是把"恒星热力槽"换成"额外挂载槽"。
-     * <pre>
-     *   SLOT_EMPTY     ：这个配方需要【%s】，但 3 个额外挂载槽全是空的
-     *   WRONG_ITEM     ：这个配方需要【%s】，但额外挂载槽里放的是【%s】
-     *   NOT_FULL       ：这个配方需要放满 %s 个【%s】才生效，槽里只有 %s 个
-     *   CLEANROOM_TIER ：这个配方需要【%s】，但槽里的维护仓只提供【%s】
-     *   HEAT_TEMP      ：这个配方需要 %sK 炉温，但槽里的线圈只有 %sK
-     *   SC_TIER        ：这个配方需要 %s 级恒星热力容器，但槽里的是 %s 级
-     * </pre>
      * <p>⚠️ 只给<b>原因</b>，不带「配方失败原因：」前缀 —— 前缀由 Jade 的
      * {@code gtceu.recipe.fail.reason}（"配方失败原因：%s"）加，加了会变成两层（与物质模块等级那条同纪律）。
      */
     private void shanhai$recordExtraBlock(@NotNull ShanhaiHeatGate.Outcome o) {
-        final ShanhaiHeatGate.Requirement need = o.blocked;
-        if (need == null) {
-            return;
-        }
-        final Component what = shanhai$requirementLabel(need);
-        final Component reason = switch (o.deny) {
-            case SLOT_EMPTY -> Component.translatable("shanhai.recipe.fail.extra_slot_empty", what);
-            case WRONG_ITEM -> Component.translatable("shanhai.recipe.fail.extra_slot_wrong", what,
-                    shanhai$extraActualNames());
-            case NOT_FULL -> Component.translatable("shanhai.recipe.fail.extra_slot_not_full",
-                    ShanhaiHeatGate.REQUIRED_COUNT, what, shanhai$extraCountOfKind(need.kind, o));
-            case CLEANROOM_TIER -> Component.translatable("shanhai.recipe.fail.extra_cleanroom_tier",
-                    what, shanhai$cleanroomLabel(o.have));
-            case HEAT_TEMP -> Component.translatable("shanhai.recipe.fail.heat_coil_temp", need.number, o.have);
-            case SC_TIER -> Component.translatable("shanhai.recipe.fail.heat_sc_tier", need.number, o.have);
-            default -> null;
-        };
+        // 🔴 2026-10-25：文案整段搬到 {@link ShanhaiExtraMountGate#denyReason}
+        //    （归墟视界枢核要报同样的话；两处各写一份必然漂移）。
+        final Component reason = ShanhaiExtraMountGate.denyReason(o, shanhai$extraMountStacks());
         if (reason == null) {
             return;
         }
@@ -1332,92 +1311,15 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
         shanhai$pendingFailReason = reason;
     }
 
-    /**
-     * 一条需求的中文标签（**走 lang 键**）。
-     * <p>超净间那一档用 GTCEu/gtlcore <b>自己的</b> {@code CleanroomType#getTranslationKey()}
-     * （{@code gtceu.recipe.cleanroom.display_name} / {@code _sterile_} / {@code _law_}），
-     * 不另写一份中文 —— 上游改名时这里自动跟着走。
-     */
+    /** 三格现读物品（只为"槽里实际放的是什么"那一句；顺序 = 槽序号）。 */
     @NotNull
-    private Component shanhai$requirementLabel(@NotNull ShanhaiHeatGate.Requirement r) {
-        return switch (r.kind) {
-            case CLEANROOM -> shanhai$cleanroomLabel(r.number);
-            case GRAVITY -> Component.translatable("shanhai.recipe.fail.extra_need_gravity");
-            case DIMENSION -> Component.translatable("shanhai.recipe.fail.extra_need_dimension", r.text);
-            case RESEARCH -> Component.translatable("shanhai.recipe.fail.extra_need_research");
-            case HEAT_TEMP -> Component.translatable("shanhai.recipe.fail.extra_need_coil_temp", r.number);
-            case SC_TIER -> Component.translatable("shanhai.recipe.fail.extra_need_sc_tier", r.number);
-        };
-    }
-
-    /** 超净间档位 → 上游自己的可翻译名；查不到（理论上不会）退化成注册名。 */
-    @NotNull
-    private static Component shanhai$cleanroomLabel(int tier) {
-        final CleanroomType type = CleanroomType.getByName(ShanhaiHeatGate.cleanroomName(tier));
-        return type == null
-                ? Component.literal(ShanhaiHeatGate.cleanroomName(tier))
-                : Component.translatable(type.getTranslationKey());
-    }
-
-    /**
-     * <b>额外挂载槽里实际放的是什么</b> —— 用【物品显示名】，🔴 <b>不是 id</b>（玩家看不懂 id）。
-     *
-     * <h2>🔴 为什么传 {@link Component} 而不是 {@code String}</h2>
-     * 这条原因要经 gtlcore 的 {@code RecipeLogicProviderMixin} 送进 Jade 的<b>服务端 NBT</b>
-     * （字节码实证：{@code Component$Serializer.toJson(component)} → {@code CompoundTag.putString("reason", …)}），
-     * 而<b>专用服务端不加载客户端 lang</b> —— 如果在这里先 {@code getString()} 成 String，
-     * 到了客户端就只剩一个键名/英文回退，中文永远出不来。
-     * 传 Component 则整棵子树被 JSON 序列化过去，<b>客户端才翻译</b> ⇒ 中文正确显示。
-     *
-     * <h2>退化（用户硬要求 ①）</h2>
-     * 三格全空 / 拿不到显示名 / 任何异常 ⇒ <b>退化成 lang 键
-     * {@code shanhai.recipe.fail.heat_slot_actual.unknown}（「其它物品」），不报错、不留空</b>。
-     * <p>吞掉 {@code Throwable} 是有意的：这一句是在<b>报错路径上</b>跑的，
-     * 报错路径自己抛异常会把"配方为什么没跑"这条唯一线索也弄没。
-     */
-    @NotNull
-    private Component shanhai$extraActualNames() {
-        final Component unknown = Component.translatable("shanhai.recipe.fail.heat_slot_actual.unknown");
-        try {
-            final PrimordialModuleMachine module = getMachine();
-            final MutableComponent out = Component.empty();
-            boolean first = true;
-            for (int i = 0; i < PrimordialModuleMachine.EXTRA_MOUNT_SLOT_COUNT; i++) {
-                final ItemStack stack = module.getExtraMountStack(i);
-                if (stack == null || stack.isEmpty()) {
-                    continue;
-                }
-                final Component name = stack.getHoverName();
-                if (name == null) {
-                    continue;
-                }
-                if (!first) {
-                    out.append(Component.translatable("shanhai.recipe.fail.extra_slot_sep"));
-                }
-                out.append(name);
-                first = false;
-            }
-            return first ? unknown : out;
-        } catch (Throwable t) {
-            return unknown;
+    private List<ItemStack> shanhai$extraMountStacks() {
+        final PrimordialModuleMachine module = getMachine();
+        final List<ItemStack> stacks = new ArrayList<>(PrimordialModuleMachine.EXTRA_MOUNT_SLOT_COUNT);
+        for (int i = 0; i < PrimordialModuleMachine.EXTRA_MOUNT_SLOT_COUNT; i++) {
+            stacks.add(module.getExtraMountStack(i));
         }
-    }
-
-    /** 该需求对应的物项在某一格里最多放了多少（给"没放满"那条文案报读数）。 */
-    private static int shanhai$extraCountOfKind(@NotNull ShanhaiHeatGate.Kind kind,
-                                                @NotNull ShanhaiHeatGate.Outcome o) {
-        int best = 0;
-        for (ShanhaiHeatGate.SlotContent s : o.slots) {
-            final boolean relevant = switch (kind) {
-                case HEAT_TEMP -> s.coilTemperature > 0;
-                case SC_TIER -> s.containmentTier > 0;
-                default -> true;
-            };
-            if (relevant) {
-                best = Math.max(best, s.count);
-            }
-        }
-        return best;
+        return stacks;
     }
 
     // ── 一条可 grep 的证据行（哪台机器 / 配方类型 / 三格各是什么 / 需求 / 判定结果） ──

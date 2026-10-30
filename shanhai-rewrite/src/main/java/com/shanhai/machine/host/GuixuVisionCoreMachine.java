@@ -5,7 +5,10 @@ import com.gregtechceu.gtceu.api.capability.IEnergyContainer;
 import com.gregtechceu.gtceu.api.capability.recipe.EURecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeHandler;
+import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
+import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
+import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
 import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
@@ -15,6 +18,9 @@ import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.logic.OCParams;
 import com.gregtechceu.gtceu.api.recipe.logic.OCResult;
+import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
+import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
+import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
@@ -32,10 +38,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
 import org.gtlcore.gtlcore.api.recipe.RecipeMultiplierTracker;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
@@ -84,7 +92,8 @@ import java.util.Locale;
  * {@link #onStructureFormed()} 先调 {@code super}（基类做"调和式重扫"），再打<b>一行</b>
  * {@code [SHANHAI-HOST]} 日志。<b>不挂任何周期扫描</b>。
  */
-public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
+public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
+        implements com.shanhai.common.heat.ShanhaiHostMountSource {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -310,6 +319,38 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     private long hostModuleMask = 0L;
 
     // ═══════════════════════════════════════════════════════════════════════════════════
+    //  「额外挂载槽 ×3」—— 2026-10-25 用户点单（T3「复写」）
+    //
+    //  用户原话（逐字）：「然后我说的**配方条件（就是模块上面那 3 个槽）复写**你还没做，你也给他做了，
+    //                    **接口 gui 就和模块的一样**」
+    //
+    //  ⇒ 与模块（{@code PrimordialModuleMachine#extraMountSlots}）**同语义、同一套控件与位置**：
+    //    · 3 格，{@link com.shanhai.common.heat.ShanhaiHeatGate#SLOT_COUNT}（唯一真源）；
+    //    · 每格放满 {@link com.shanhai.common.heat.ShanhaiHeatGate#REQUIRED_COUNT} 个才生效；
+    //    · 可满足配方的额外条件（cleanroom / gravity / dimension / research）与热力门槛；
+    //    · 判定核 = {@link com.shanhai.common.heat.ShanhaiExtraMountGate}（模块也调它，只有一份实现）。
+    //
+    //  🔴 必须 {@code @Persisted}（与模块那三个槽同款）：LDLib 的字段登记失败是**完全静默**的
+    //  （编译过、游戏不报错、字段永不落盘）⇒ 名字同时加进 {@link #assertFieldHolderComplete()} 的
+    //  required 数组，那是唯一能在没有玩家操作时抓住它的地方。
+    //
+    //  ⚠️ 不设过滤器：与模块同一条纪律（用户 2026-10-03 的负对照要求「放错必须仍然失败」
+    //  ⇒ 收窄会让"放错了"这个负对照做不出来，而且中途加过滤器会让老存档里的物品变成取不出来的死格）。
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /** 额外挂载槽的格数 —— <b>唯一真源</b>是 {@code ShanhaiHeatGate.SLOT_COUNT}（模块侧同源）。 */
+    public static final int EXTRA_MOUNT_SLOT_COUNT = com.shanhai.common.heat.ShanhaiHeatGate.SLOT_COUNT;
+
+    /** 额外挂载槽 ×3（玩家从 GUI 左侧「额外挂载」页放置）。 */
+    @Persisted
+    private final NotifiableItemStackHandler extraMountSlots;
+
+    /** {@link #getExtraMountContents()} 的逐格缓存（避免每 tick 查注册表）。 */
+    private List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> extraMountCache = List.of();
+    /** 缓存对应的三格快照（逐格 {@code ItemStack} 相等才算命中）。 */
+    private ItemStack[] extraMountCacheKeys = new ItemStack[0];
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
     //  AR 右侧信息栏：主机 / 每模块的运行快照（2026-10-25 第二十二改新增）
     //
     //  用户口径（原话）：「右侧空出来这么大块地方都可以显示模块和主机的运行配方的信息，
@@ -350,6 +391,59 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     /** 每个扫描位"还剩几秒"；{@code <0} = 未知。 */
     @DescSynced
     private int[] hostModRemainSec = sentinelInts(SNAP_SLOTS);
+
+    /**
+     * 每个扫描位的<b>「这一拍为什么没在跑」原因码</b>（2026-10-25 第三十三改）——
+     * 取值见 {@link #REASON_NONE} / {@link #REASON_WORKING} / {@link #REASON_NO_POWER} /
+     * {@link #REASON_OUTPUT_FULL} / {@link #REASON_BLOCKED}；{@code <0} = 读不到（客户端不画标签）。
+     *
+     * <h2>用户口径（原话）</h2>
+     * <pre>
+     *   「机器"不工作"的四种形态你判断是对的，就按照你说的这4种」
+     *   ⇒ ① 缺电 ② 输出满 ③ 被拦（类型闸 / 额外条件） ④ 正在跑（进度在涨）
+     *   （"等料"这一档【不要】：GT 里料不够就匹配不到配方，不表现为"在跑但不动"）
+     * </pre>
+     *
+     * <h2>🔴 取数来源（每一条都是已有信号，逐条见 {@link #reasonOf} 的注释）</h2>
+     * <ul>
+     *   <li><b>在跑</b>：{@code RecipeLogic#isWorking()}；</li>
+     *   <li><b>缺电 / 输出满 / 被拦</b>：gtlcore 的 <b>已发布</b>配方状态
+     *       {@code IRecipeStatus#getWorkingStatus() / getRecipeStatus()}
+     *       （{@code RecipeResult.of(machine, …)} 写入的那一份，Jade / 机器 GUI 读的也是它）——
+     *       按 {@code TranslatableContents#getKey()} 分类，键名逐字抄自
+     *       {@code RecipeResult} 静态初始化的 {@code ldc}（javap 实证，见 {@link #KEY_EU_IN}）；</li>
+     *   <li>未发布原因但确实在 waiting ⇒ 再用<b>能量实读</b>兜一层（{@link #energyShortFor}）；</li>
+     *   <li>全部读不到 ⇒ {@link #REASON_NONE}（客户端不画标签，<b>绝不编</b>）。</li>
+     * </ul>
+     *
+     * <p>同步成本：{@code byte[24]}，与其余模块快照数组同一个 10 tick 推送节奏，只在<b>内容变了</b>时才换引用。
+     */
+    @DescSynced
+    private byte[] hostModReason = sentinelBytes(SNAP_SLOTS);
+
+    // ── 原因码（唯一的定义处；客户端 HostFxGlassArModel 有同名副本，两处必须逐值相同）──────
+    /** 没在跑（也没查到原因）。 */
+    public static final byte REASON_NONE = 0;
+    /** 正在跑（进度在涨）。 */
+    public static final byte REASON_WORKING = 1;
+    /** 缺电（输入电力不足）。 */
+    public static final byte REASON_NO_POWER = 2;
+    /** 输出满（产出来的东西放不下）。 */
+    public static final byte REASON_OUTPUT_FULL = 3;
+    /** 被拦（配方条件 / 类型闸 / 额外挂载 / 温度 / 燃料 … 一切非电力、非输出的拦截）。 */
+    public static final byte REASON_BLOCKED = 4;
+
+    /**
+     * 「输入电力不足」的 gtlcore 原因键 —— <b>逐字抄自字节码</b>：
+     * {@code RecipeResult.<clinit>} 偏移 56：{@code ldc "gtceu.recipe.fail.no.enough.eu.in"} ⇒
+     * {@code FAIL_NO_ENOUGH_EU_IN}。
+     */
+    private static final String KEY_EU_IN = "gtceu.recipe.fail.no.enough.eu.in";
+    /**
+     * 「输出放不下」的 gtlcore 原因键 —— {@code RecipeResult.<clinit>} 偏移 34：
+     * {@code ldc "gtceu.recipe.fail.Output"} ⇒ {@code FAIL_OUTPUT}（注意大写 O，不是拼错）。
+     */
+    private static final String KEY_OUTPUT = "gtceu.recipe.fail.Output";
     /** 快照序号：<b>0 = 一次都没快照过 ⇒ 客户端整片画 {@code --}</b>；每推一次 +1。 */
     @DescSynced
     private int hostSnapSeq = 0;
@@ -743,6 +837,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         return hostModRemainSec;
     }
 
+    /** 每模块「为什么没在跑」原因码（{@code <0} = 读不到；取值见 {@link #REASON_NONE}…{@link #REASON_BLOCKED}）。 */
+    public byte[] hostModReason() {
+        return hostModReason;
+    }
+
     public int hostRecipeProgressPct() {
         return hostRecipeProgressPct;
     }
@@ -835,6 +934,64 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         return hostEnergyOutCapacity;
     }
 
+    /** 上一次打 {@code [SHANHAI-HOSTBONUS]} 的那组读数（只在变化时打）。 */
+    private String bonusLoggedKey = "";
+
+    /**
+     * 🔴 <b>缺陷 A 的判据行</b>（用户原话：「<b>主机吃不到物质模块的额外产出加成</b>」）。
+     *
+     * <h2>取证：这条链在代码里有 5 环（改前逐环核过，<b>一环都没断</b>）</h2>
+     * <pre>
+     *   ① 面板/槽   基类 {@code matterBonusSlot}（1 格，容量 64，:1299）
+     *   ② 门控      {@code PrimordialOmegaEngineMachine#computeMatterBonusLevel()}（:1771）
+     *              ⇒ 必须 64 个<b>同种</b>物质模块才返回 1..17
+     *   ③ 读数口    {@code moduleSlotBonus()}（:1803 → refreshMatterBonusLevel :1816）
+     *   ④ 算式      {@code PrimordialRecipeEffects#productionMultiplierOf(gate, extra)}（:545）
+     *              = (1 + gate) + max(0, extra)
+     *   ⑤ 两条消费者
+     *        引擎路径：{@code PrimordialEngineRecipeLogic#buildFinalNormalRecipe:687}
+     *                  gate = host.moduleSlotBonus() ⇒ :767 productionMultiplierOf(gate, host.getHostProductionBonusExtra())
+     *                  ⇒ applyHostTailEffectsA(...) :2377 multiplyOutputs(recipe, multiplier)
+     *        原生链  ：{@link #applyGuixuRecipeModifier}（:2442）—— ⚠️ 引擎路径不经过它（死代码，留档）
+     * </pre>
+     * ⇒ <b>结论（取证结论，不是猜）</b>：③→⑤ 全在，<b>能断的只有 ①②</b> ——
+     * 即「物质模块槽里的东西<b>没有达到 64 个同种</b>」或「槽根本不是玩家以为的那一格」。
+     * 最可能的现场：玩家把 64 个物质模块放进了 <b>{@code levelOverrideSlot}</b>（本类的「模块等级复写」槽，
+     * 语义是"复写装在上面的模块的等级"，<b>不影响主机自己的增产</b>）或新增的 <b>3 个额外挂载槽</b>
+     * （那是 cleanroom/重力/维度/研究/热力用的），而不是基类的「物质模块专属槽」。
+     * 这一行日志把 ①②③④ 的读数一次打出来，<b>下次一看就知道断在哪一环</b>。
+     *
+     * <p>判据（用户可读）：
+     * <pre>
+     *   槽放满 64 个同种物质模块 ⇒ gate 必须 1..17；gate=0 ⇒ 槽没放满/放错槽（②没成立）
+     *   产出倍率 mult = (1 + gate) + extra ⇒ 空槽 = 6；满槽 Lv17 = 23
+     *   mult 对了但产出没变 ⇒ 断在 ⑤ 的 multiplyOutputs（那是引擎路径的事，看 [SHANHAI-DUR] 同一批日志）
+     * </pre>
+     */
+    private void logProductionBonusOnce() {
+        if (isRemote()) {
+            return;
+        }
+        try {
+            final int gate = moduleSlotBonus();
+            final int extra = getHostProductionBonusExtra();
+            final int mult = com.shanhai.common.recipe.PrimordialRecipeEffects
+                    .productionMultiplierOf(gate, extra);
+            final String key = gate + "/" + extra + "/" + mult;
+            if (key.equals(bonusLoggedKey)) {
+                return;
+            }
+            bonusLoggedKey = key;
+            LOGGER.info("[SHANHAI-HOSTBONUS] 归墟 gate(物质模块槽等级)={} extra(主机钩子)={} mult={}"
+                            + " —— 判据：槽里放满 64 个【同种】物质模块时 gate 必须 1..17"
+                            + "（=0 ⇒ 槽没放满 / 放进了 levelOverrideSlot 或 3 个额外挂载槽 = 不放错就是这原因）；"
+                            + "mult = (1+gate)+extra ⇒ 空槽 6、满槽 Lv17 23",
+                    gate, extra, mult);
+        } catch (Throwable ignored) {
+            // 纯诊断，绝不影响机器
+        }
+    }
+
     /**
      * 重算 AR 右侧信息栏那份快照（<b>只在服务端跑</b>，由 {@link #SNAPSHOT_INTERVAL_TICKS} 的
      * tick 钩子驱动，见 {@link #onLoad()}）。
@@ -892,6 +1049,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                         snapRefreshCalls, t);
             }
         }
+        // 🆕 2026-10-25（缺陷 A）：材料增产那一条链的**判据行**（每 10 tick 判一次，值变了才打）
+        logProductionBonusOnce();
         snapLogCount++;
         // 2026-10-25 第二十七改：一行里同时给出 3 个节拍（前 3 次 + 之后每 40 次一行，约 20 秒）：
         //   refresh#   = 完整快照（10 tick 一次 ⇒ ≈2/秒，慢变量）
@@ -923,6 +1082,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         final int[] outCount = sentinelInts(SNAP_SLOTS);
         final int[] outItem = sentinelInts(SNAP_SLOTS * OUT_PER_MODULE);
         final int[] outAmount = sentinelInts(SNAP_SLOTS * OUT_PER_MODULE);
+        // 2026-10-25 第三十三改：每模块「为什么没在跑」（0..4；-1 = 读不到）
+        final byte[] reason = sentinelBytes(SNAP_SLOTS);
 
         int installed = 0;
         long euPerTickSum = 0L;
@@ -943,6 +1104,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 installed++;
                 final ModuleReading reading = readModule(module);
                 applyReading(i, reading, pct, eu, par, thr, rem, outCount, outItem, outAmount);
+                // 2026-10-25 第三十三改：原因码（只读；异常 ⇒ NONE，绝不影响机器）
+                reason[i] = reasonOf(module);
                 if (reading.euPerTick >= 0L) {
                     euPerTickSum += reading.euPerTick;
                 }
@@ -973,7 +1136,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 final int[] pr = progressOf(logic.getProgress(), logic.getMaxProgress(), logic.isWorking());
                 hostPct = pr[0];
                 hostRemain = pr[1];
-                final GTRecipe last = logic.getLastRecipe();
+                // 🔴 2026-10-25 第三十四改：同样回落 getLastOriginRecipe()（**只读**，不换口径）
+                GTRecipe last = logic.getLastRecipe();
+                if (last == null) {
+                    last = logic.getLastOriginRecipe();
+                }
                 if (last != null) {
                     hostEu = Math.max(0L, com.gregtechceu.gtceu.api.recipe.RecipeHelper.getInputEUt(last));
                 } else {
@@ -1045,6 +1212,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                         || !java.util.Arrays.equals(par, hostModParallel)
                         || !java.util.Arrays.equals(thr, hostModThreads)
                         || !java.util.Arrays.equals(rem, hostModRemainSec)
+                        || !java.util.Arrays.equals(reason, hostModReason)
                         || !java.util.Arrays.equals(outCount, hostModOutCount)
                         || !java.util.Arrays.equals(outItem, hostModOutItem)
                         || !java.util.Arrays.equals(outAmount, hostModOutAmount)
@@ -1075,6 +1243,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         hostModParallel = par;
         hostModThreads = thr;
         hostModRemainSec = rem;
+        hostModReason = reason;
         hostModOutCount = outCount;
         hostModOutItem = outItem;
         hostModOutAmount = outAmount;
@@ -1228,7 +1397,15 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             final int[] pr = progressOf(logic.getProgress(), logic.getMaxProgress(), working);
             r.progressPct = pr[0];                    // −1 = 未知；0..100 = 真读数
             r.remainSec = pr[1];
-            final GTRecipe last = logic.getLastRecipe();
+            // 🔴 2026-10-25 第三十四改：lastRecipe 为空时回落 getLastOriginRecipe()（**只读**）。
+            //    为什么：引擎路径（gtladditions MutableRecipesLogic）装配出的成品配方不一定写进 lastRecipe，
+            //    而 getLastOriginRecipe() 是 GT 自己的兜底字段（javap 有 getter）⇒ 只认 lastRecipe 会
+            //    导致"在跑却拿不到配方"⇒ 耗能/输出整列 `--`（用户这次的两条回归之一）。
+            //    ⚠️ lastRecipe 非空时行为与改动前逐字相同；last 因此不能再是 final。
+            GTRecipe last = logic.getLastRecipe();
+            if (last == null) {
+                last = logic.getLastOriginRecipe();
+            }
             if (last != null) {
                 final long in = com.gregtechceu.gtceu.api.recipe.RecipeHelper.getInputEUt(last);
                 final long out = com.gregtechceu.gtceu.api.recipe.RecipeHelper.getOutputEUt(last);
@@ -1269,6 +1446,164 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         return r;
     }
 
+    // ------------------------------------------------------------------ 快照：原因码（第三十三改）
+
+    /**
+     * 一台模块<b>这一拍为什么没在跑</b>（0/1/2/3/4，见 {@link #REASON_NONE}…{@link #REASON_BLOCKED}）。
+     *
+     * <h2>🔴 每条判据的信号来源（没有一条是猜的）</h2>
+     * <table border="1">
+     *   <tr><th>码</th><th>含义</th><th>信号（类#方法/字段）</th></tr>
+     *   <tr><td>1</td><td>正在跑</td><td>{@code RecipeLogic#isWorking()}
+     *       （= {@code getStatus() == Status.WORKING}；字节码：{@code handleRecipeWorking} 在
+     *       {@code handleTickRecipe} 成功那一刻 {@code setStatus(WORKING)} 再 {@code progress++}）</td></tr>
+     *   <tr><td>2</td><td>缺电</td>
+     *       <td>① gtlcore 已发布原因键 = {@link #KEY_EU_IN}（= {@code RecipeResult.FAIL_NO_ENOUGH_EU_IN}，
+     *       键名 javap 实证）；② 没有已发布原因但确实在等：{@link #energyShortFor} 实测
+     *       「这一 tick 要的电 &gt; 仓里现存的电」</td></tr>
+     *   <tr><td>3</td><td>输出满</td><td>已发布原因键 = {@link #KEY_OUTPUT}
+     *       （= {@code RecipeResult.FAIL_OUTPUT}）</td></tr>
+     *   <tr><td>4</td><td>被拦</td><td>有已发布原因但是其它键（电压等级 / 输入不足 / 温度 / 超净 /
+     *       本工程的类型闸与额外挂载原因 → 都是 {@code RecipeResult.fail(Component)}）；
+     *       或 {@code isWaiting()} 却查不到具体键</td></tr>
+     *   <tr><td>0</td><td>没在跑</td><td>既不在工作也不在等（{@code IDLE} / {@code SUSPEND}），
+     *       或任何读取抛异常</td></tr>
+     * </table>
+     *
+     * <h2>为什么读"已发布状态"而不是自己重算</h2>
+     * {@code handleRecipeWorking()} 的字节码（{@code javap -c RecipeLogic}）已经把四种结局分开了：
+     * <pre>
+     *   checkConditions 失败        ⇒ setWaiting(actionResult.reason())   ← 被拦（条件）
+     *   handleFuelRecipe 失败       ⇒ setWaiting("gtceu.recipe_logic.insufficient_fuel")
+     *   handleTickRecipe 失败       ⇒ setWaiting(actionResult.reason())   ← 缺电 / 输出满 都在这里
+     *   然后  if (isWaiting()) doDamping();                              ← 🔴 damp 的触发点
+     * </pre>
+     * 也就是说 <b>{@code doDamping()} 的触发条件就是 {@code isWaiting()}</b>（不是某个独立的"缺电"标志：
+     * {@code isHasNotEnoughEnergy()} 的字节码是 {@code return isWaiting();}）⇒ 想区分"缺电"与"输出满"
+     * <b>只能</b>看那条 reason；而 gtlcore 的 {@code RecipeResult.of(...)} 正是把那条 reason 落到
+     * {@code IRecipeStatus} 上（Jade / 机器 GUI 读的同一份）⇒ 复用它 = 复用 damp 现场的同一条证据，
+     * 不需要 mixin、也不需要每帧遍历机器。
+     */
+    static byte reasonOf(PrimordialModuleMachine module) {
+        try {
+            final com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic = module.getRecipeLogic();
+            if (logic == null) {
+                return REASON_NONE;
+            }
+            if (logic.isWorking()) {
+                return REASON_WORKING;
+            }
+            // 只在这两种情形下信任"已发布原因"（= 它一定是【本轮】的）：
+            //   ① 正在 waiting（每 tick 都在重写 reason）；
+            //   ② 手上没有任何配方（本工程的 PrimordialModuleRecipeLogic#shanhai$publishFailReason
+            //      写原因的闸门之一就是 getLastRecipe() == null，两条判据同源）。
+            final boolean fresh = logic.isWaiting() || logic.getLastRecipe() == null;
+            final String key = fresh ? publishedFailKey(logic) : null;
+            if (KEY_EU_IN.equals(key)) {
+                return REASON_NO_POWER;
+            }
+            if (KEY_OUTPUT.equals(key)) {
+                return REASON_OUTPUT_FULL;
+            }
+            if (key != null) {
+                return REASON_BLOCKED;
+            }
+            if (!logic.isWaiting()) {
+                return REASON_NONE;
+            }
+            // 在等、但没有已发布原因（例如原生链只 setWaiting 了一个 Component、没走 RecipeResult）
+            // ⇒ 用能量实读兜最后一层；仍然说不清 ⇒ 被拦。
+            return energyShortFor(module, logic.getLastRecipe()) ? REASON_NO_POWER : REASON_BLOCKED;
+        } catch (Throwable t) {
+            return REASON_NONE;                      // 读不到 ⇒ 0（客户端不画标签，绝不编）
+        }
+    }
+
+    /**
+     * 已发布配方状态的<b>原因键</b>；{@code null} = 没有失败原因（或这一侧不是 gtlcore 的
+     * {@code IRecipeStatus} 实现），{@code ""} = 有失败但不是可翻译文本（= 有原因、认不出是哪条）。
+     *
+     * <p>先看 {@code getWorkingStatus()}（"在跑却卡住"的那份），再看 {@code getRecipeStatus()}
+     * （"这一轮没找到/没跑起来"的那份）—— 两者的写入方分别是 gtlcore 的 RecipeLogic mixin 与
+     * 本工程的 {@code shanhai$publishFailReason}。
+     */
+    private static String publishedFailKey(com.gregtechceu.gtceu.api.machine.trait.RecipeLogic logic) {
+        try {
+            if (!(logic instanceof org.gtlcore.gtlcore.api.machine.trait.IRecipeStatus status)) {
+                return null;                         // 上游换实现 ⇒ 查不到（走兜底，不编）
+            }
+            final String working = resultKeyOf(status.getWorkingStatus());
+            if (working != null) {
+                return working;
+            }
+            return resultKeyOf(status.getRecipeStatus());
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** {@code RecipeResult} → 原因键；{@code null} = 成功/没有；{@code ""} = 有失败但认不出键。 */
+    private static String resultKeyOf(org.gtlcore.gtlcore.api.recipe.RecipeResult result) {
+        if (result == null || result.isSuccess()) {
+            return null;
+        }
+        try {
+            final net.minecraft.network.chat.Component reason = result.reason();
+            if (reason == null) {
+                return "";
+            }
+            if (reason.getContents()
+                    instanceof net.minecraft.network.chat.contents.TranslatableContents translatable) {
+                return translatable.getKey();
+            }
+            return "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * 「这一 tick 要的电 &gt; 仓里现存的电」——<b>只读</b>，用作没有已发布原因时的兜底。
+     *
+     * <p>语义：{@code need = RecipeHelper.getInputEUt(recipe)}（该配方每 tick 的输入 EU，正是面板
+     * ⑦「耗能EU/t」那一列的同源读数）；{@code have = Σ 各能源仓 getEnergyStored()}（饱和加，避免
+     * 无限仓的 {@code Long.MAX_VALUE} 溢出成负数）。<b>只在真不够时返回 true</b>（充要条件不敢说，
+     * 充分条件敢说：连一 tick 的电都付不出，一定跑不动）。
+     */
+    private static boolean energyShortFor(PrimordialModuleMachine module,
+                                         com.gregtechceu.gtceu.api.recipe.GTRecipe recipe) {
+        if (recipe == null) {
+            return false;
+        }
+        try {
+            final long need = com.gregtechceu.gtceu.api.recipe.RecipeHelper.getInputEUt(recipe);
+            if (need <= 0L) {
+                return false;                        // 不耗电（发电机 / 纯条件配方）⇒ 不是缺电
+            }
+            final List<IRecipeHandler<?>> handlers =
+                    module.getCapabilitiesProxy().get(IO.IN, EURecipeCapability.CAP);
+            if (handlers == null) {
+                return false;
+            }
+            boolean any = false;
+            long have = 0L;
+            for (IRecipeHandler<?> handler : handlers) {
+                if (!(handler instanceof IEnergyContainer container)) {
+                    continue;
+                }
+                any = true;
+                final long stored = container.getEnergyStored();
+                if (stored <= 0L) {
+                    continue;
+                }
+                have = (have > Long.MAX_VALUE - stored) ? Long.MAX_VALUE : have + stored;
+            }
+            return any && have < need;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     // ------------------------------------------------------------------ 快照：tick 钩子
 
     /**
@@ -1290,6 +1625,56 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     public void onLoad() {
         super.onLoad();
         ensureSnapshotTick();
+        logRecipeCounts();
+    }
+
+    /**
+     * 🆕 2026-10-25（T1 的<b>可核对读数</b>）：把本机三个配方类型在<b>运行时配方表</b>里的条数打进日志。
+     *
+     * <h2>为什么需要这一行</h2>
+     * 用户报「三个配方类型在<b>配方编辑器</b>里找不到」。原因不是类型没注册，而是
+     * <b>类型注册了、但一条配方都没有</b> —— 而编辑器的类型列表是<b>从配方表现算</b>出来的
+     * （{@code ShanhaiRecipeEditorWorkspace#buildTypeRows}：{@code ShanhaiRecipeReverseIndex.all()}
+     * 里出现过的类型 ∪ 开机快照），零配方的类型在<b>两个来源里都不存在</b> ⇒ 界面上根本没有它。
+     * 这条日志把"注册 / 配方数"两件事分开报出来，就是那条判据的读数：
+     * <pre>
+     *   改前： type=gtceu:vision_matter_decompression registered=true recipes=0   ⇒ 编辑器里看不到
+     *   改后： type=gtceu:vision_matter_decompression registered=true recipes=1   ⇒ 编辑器里(1 条)、JEI 里都有
+     * </pre>
+     * 判据：把本机放下去（或读一个已有存档）后 grep {@code [SHANHAI-HOSTRECIPE]}。
+     * 读的是 {@code RecipeManager#getRecipes()} 的全量拉平（与编辑器的列表来源同一条路），
+     * <b>不是</b> GT 的输入索引（索引为空不代表配方不存在，见 {@code ShanhaiRecipeEditorWorkspaceCheck}
+     * 里那条"空配方插不进树"的实证）。
+     */
+    private void logRecipeCounts() {
+        if (isRemote()) {
+            return;                     // 客户端那张表是同步下来的，读数以服务端为准
+        }
+        final Level level = getLevel();
+        if (level == null || level.getRecipeManager() == null) {
+            return;
+        }
+        try {
+            final java.util.Collection<?> all = level.getRecipeManager().getRecipes();
+            final com.gregtechceu.gtceu.api.recipe.GTRecipeType[] types = getRecipeTypes();
+            for (com.gregtechceu.gtceu.api.recipe.GTRecipeType type : types) {
+                if (type == null) {
+                    continue;
+                }
+                int n = 0;
+                for (Object o : all) {
+                    if (o instanceof GTRecipe gt && gt.getType() == type) {
+                        n++;
+                    }
+                }
+                LOGGER.info("[SHANHAI-HOSTRECIPE] type={} registered=true recipes={}"
+                                + "（0 ⇒ 配方编辑器里列不出这个类型，因为它的类型列表是从配方表现算的；"
+                                + "≥1 ⇒ 编辑器与 JEI 都能看到）",
+                        type.registryName, n);
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("[SHANHAI-HOSTRECIPE] 读配方表失败（不影响机器）: {}", t.toString());
+        }
     }
 
     /**
@@ -1544,6 +1929,180 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 }
             }
         }.setFilter(PrimordialModuleMachine::isMatterModuleStack);
+
+        // 「额外挂载槽 ×3」（2026-10-25 T3）：与模块侧**同构造**（3 格、IO.NONE/IO.BOTH、不设过滤器）。
+        // ⚠️ 构造器里只给形状，不读任何别的字段（基类的 createRecipeLogic 在更早的 super(holder) 里就跑过了，
+        //    那边只 new 逻辑、不碰这三个槽 ⇒ 顺序安全；这条坑见 PrimordialOmegaEngineMachine#createRecipeLogic）。
+        this.extraMountSlots = new NotifiableItemStackHandler(this, EXTRA_MOUNT_SLOT_COUNT, IO.NONE, IO.BOTH);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  配方逻辑（2026-10-25 T3）：换成"带额外挂载槽闸门"的那一支
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 🔴 <b>引擎替换点</b>：基类在这里 {@code new PrimordialEngineRecipeLogic(this)}（javap 实证，
+     * {@code PrimordialOmegaEngineMachine#createRecipeLogic} 只有一个 ctor 实参），
+     * 本机换成 {@link GuixuVisionCoreRecipeLogic} —— 它只多一件事：在
+     * {@code checkRecipe} 里插一段「额外挂载槽 ×3」闸门，<b>判定核与模块同一个</b>
+     * （{@code ShanhaiExtraMountGate} → {@code ShanhaiHeatGate}）。
+     *
+     * <p>⚠️ {@code args} 原样不转发（与基类同一条纪律）：那个逻辑的构造器只吃机器自己，
+     * 而本方法的调用点在基类构造器里、字段都还没初始化 ⇒ 构造器里不许读本类的任何字段。
+     */
+    @Override
+    protected com.gregtechceu.gtceu.api.machine.trait.RecipeLogic createRecipeLogic(Object... args) {
+        return new GuixuVisionCoreRecipeLogic(this);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  「额外挂载槽 ×3」—— 读口（GUI / tooltip / 判定核三方共用，不许各算一份）
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /** 某一格的物品（越界返回空栈）。 */
+    @NotNull
+    public ItemStack getExtraMountStack(int index) {
+        if (extraMountSlots == null || index < 0 || index >= EXTRA_MOUNT_SLOT_COUNT) {
+            return ItemStack.EMPTY;
+        }
+        final ItemStack s = extraMountSlots.storage.getStackInSlot(index);
+        return s == null ? ItemStack.EMPTY : s;
+    }
+
+    /** 某一格的数量（越界 0）。 */
+    public int getExtraMountCount(int index) {
+        return getExtraMountStack(index).getCount();
+    }
+
+    /** 三格现读物品（顺序 = 槽序号）—— 只给"槽里实际放的是什么"那句文案用。 */
+    @NotNull
+    public List<ItemStack> getExtraMountStacks() {
+        final List<ItemStack> out = new java.util.ArrayList<>(EXTRA_MOUNT_SLOT_COUNT);
+        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            out.add(getExtraMountStack(i));
+        }
+        return out;
+    }
+
+    /**
+     * 三格现读内容（{@link com.shanhai.common.heat.ShanhaiHeatGate.SlotContent}），<b>逐格缓存</b>。
+     *
+     * <p>🔴 为什么必须缓存：{@code ShanhaiHeatSources#slotContentOf} 要查注册表，
+     * 而 {@code checkRecipe} 是<b>每次找配方都调</b>的（每 tick 每线程）⇒ 不缓存就是每 tick 几十次注册表查询。
+     * 缓存键 = 三格 {@code ItemStack} 的"物品 + 数量"，命中就复用上一份。
+     *
+     * <p>与模块侧 {@code PrimordialModuleMachine#getExtraMountContents} 同一套写法（同一语义、同一退化路径），
+     * 但<b>判定</b>不在本方法里 —— 判定只经 {@code ShanhaiExtraMountGate}。
+     */
+    @NotNull
+    public List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> getExtraMountContents() {
+        final ItemStack[] now = new ItemStack[EXTRA_MOUNT_SLOT_COUNT];
+        boolean hit = extraMountCache.size() == EXTRA_MOUNT_SLOT_COUNT
+                && extraMountCacheKeys.length == EXTRA_MOUNT_SLOT_COUNT;
+        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            now[i] = getExtraMountStack(i);
+            if (hit) {
+                final ItemStack old = extraMountCacheKeys[i];
+                hit = old != null && ItemStack.matches(old, now[i]);
+            }
+        }
+        if (hit) {
+            return extraMountCache;
+        }
+        final List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> computed =
+                new java.util.ArrayList<>(EXTRA_MOUNT_SLOT_COUNT);
+        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            computed.add(com.shanhai.common.heat.ShanhaiHeatSources.slotContentOf(now[i]));
+        }
+        extraMountCache = computed;
+        extraMountCacheKeys = now;
+        return computed;
+    }
+
+    /**
+     * 这台机器的三格<b>允不允许当热力源</b>（{@code ebf_temp} / {@code SCTier} 那两条门槛）。
+     *
+     * <p>用的是<b>同一个</b>白名单判定 {@code ShanhaiHeatGate#hasHeatSlot}（模块侧
+     * {@code PrimordialModuleMachine#canUseExtraMountAsHeatSource} 也是它）——
+     * 归墟的机器 id 不在那份白名单里 ⇒ 恒 {@code false} ⇒ <b>热力门槛不加到本机上</b>
+     * （用户点单的是"配方条件（cleanroom/gravity/dimension/research）复写"，不是给主机加炉温门槛）。
+     * <p>要放开只需把本机 id 加进 {@code ShanhaiHeatGate#HEAT_SLOT_MACHINE_IDS}（一处，闸门自动跟着走）。
+     */
+    public boolean canUseExtraMountAsHeatSource() {
+        final var def = getDefinition();
+        if (def == null || def.getId() == null) {
+            return false;
+        }
+        return com.shanhai.common.heat.ShanhaiHeatGate.hasHeatSlot(def.getId().toString());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  🆕 2026-10-25 收尾：「复写」—— 把这 3 格【供源给挂在身上的模块】
+    //
+    //  用户原话（逐字）：「**开**，而且我说的是**复写**，归墟视界枢核的配方虽然没有，
+    //  **但是他模块的配方需要啊**」
+    //  ⇒ 模块跑任何配方时，额外条件（cleanroom / gravity / dimension / research ＋ 热力
+    //    ebf_temp / SCTier）的可用源 = 模块自己的 3 格 ∪ 本机这 3 格，取两者中更满足的那一个。
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 模块侧经 {@code module.getHost() instanceof ShanhaiHostMountSource} 取到本方法。
+     *
+     * <p>🔴 <b>只有归墟实现这个接口</b> ⇒ 老主机 {@code PrimordialOmegaEngineMachine} 不实现
+     * ⇒ 模块拿到 {@code null} ⇒ 老主机与其它机器上的模块行为<b>一个数都不变</b>；
+     * 也不需要动基类（{@code common/machine} 不在本轮的写入范围里）。
+     *
+     * <p>为什么不抛异常：这是模块每次找配方都会走的路（每 tick 每线程）⇒ 实现必须"拿不到就当空"。
+     */
+    @Override
+    public java.util.List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> hostExtraMountContents() {
+        try {
+            return getExtraMountContents();
+        } catch (Throwable t) {
+            return java.util.List.of();      // 供源坏了 ⇒ 模块退回"只有自己那 3 格"（原行为）
+        }
+    }
+
+    /** 给模块日志用的显示名（`host=` 那一栏）。 */
+    @Override
+    public String hostExtraMountSourceName() {
+        return "归墟视界枢核";
+    }
+
+    /** 一行可 grep 的三格读数（日志与 tooltip 共用）。 */
+    @NotNull
+    public String describeExtraMounts() {
+        final List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> contents = getExtraMountContents();
+        final StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < contents.size(); i++) {
+            sb.append('[').append(i + 1).append(']').append(contents.get(i).describe()).append(' ');
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 三格各自 tooltip —— <b>与模块侧逐句同源</b>（{@code ShanhaiHeatSources#slotContentOf} 现读，
+     * 不写死任何"放什么有用"的文案；放错了就照实说"不是任何一种挂载物"）。
+     */
+    @NotNull
+    public Component[] extraMountTooltips(int index) {
+        final ItemStack stack = getExtraMountStack(index);
+        final com.shanhai.common.heat.ShanhaiHeatGate.SlotContent c =
+                com.shanhai.common.heat.ShanhaiHeatSources.slotContentOf(stack);
+        if (c.isBlank()) {
+            return new Component[]{
+                    Component.literal("§e额外挂载槽 " + (index + 1) + " / " + EXTRA_MOUNT_SLOT_COUNT),
+                    Component.literal("§7可放：维护仓（超净间/重力）· 维度碎片 · 创造模式数据访问仓 · 线圈 / 恒星热力容器"),
+                    Component.literal("§7一个条件占一格；热力源要 §f放满 "
+                            + com.shanhai.common.heat.ShanhaiHeatGate.REQUIRED_COUNT + " 个§7 才生效")};
+        }
+        return new Component[]{
+                Component.literal("§e额外挂载槽 " + (index + 1) + " / " + EXTRA_MOUNT_SLOT_COUNT),
+                Component.literal("§7现读：" + c.describe()),
+                Component.literal(c.count >= com.shanhai.common.heat.ShanhaiHeatGate.REQUIRED_COUNT
+                        ? "§a已放满，可以满足对应条件"
+                        : "§c只有 " + c.count + " 个（热力源需 §f"
+                        + com.shanhai.common.heat.ShanhaiHeatGate.REQUIRED_COUNT + "§c 个）")};
     }
 
     // ------------------------------------------------------------------ 模块等级复写（门控 + 出口）
@@ -1616,7 +2175,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 "hostModOutCount", "hostModOutItem", "hostModOutAmount",
                 "hostOutItem", "hostOutAmount", "hostOutKinds",
                 "hostEnergyInStored", "hostEnergyInCapacity",
-                "hostEnergyOutStored", "hostEnergyOutCapacity"}) {
+                "hostEnergyOutStored", "hostEnergyOutCapacity",
+                // 🔴 2026-10-25 第二十八改（T3）：额外挂载槽 ×3 —— 不落盘的表现是"放满 64 个、
+                //    关掉 GUI 再打开就回到空"，且完全静默 ⇒ 必须逐个登记。
+                "extraMountSlots"}) {
             if (!names.contains(required)) {
                 problems.add("缺字段 " + required);
             }
@@ -1804,12 +2366,60 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             return;
         }
         tabs.setMainTab(this);
+        // ⛔⛔ 2026-10-25 用户撤回（原话逐字）：「**我不是让你重新显示主机的这个页面**」
+        //    ⇒ 上一版在这里挂 {@code MachineModeFancyConfigurator} 是**判错了动机**，已撤掉，
+        //      回到改前状态（**不挂**「机器模式」子页）。
+        //    🔴 仍然成立、写在这里免得下一个人再判错的事实：
+        //      · 三个配方类型的**注册**没问题（`GuixuVisionCoreMachines` 的 `.recipeTypes(...)`）；
+        //      · Jade 的「机器模式」行读 `definition.getRecipeTypes()`（3 个）⇒ 它上报的本来就是 3 种；
+        //      · 用户说的"只显示 1 种"= **JEI 里只看到 1 个分类**，真因是另外两个类型
+        //        **一条配方都没有**（读数：`[SHANHAI-HOSTRECIPE] … recipes=0`）。
+        //        解法在**配方编辑器**（让它列出"已注册但 0 条"的类型 = 缺陷 E，落点
+        //        `ShanhaiRecipeTypes#seedEditorRosterWithRegisteredTypes()`），**不是**挂这一页。
         // 朝向页照挂（本机是多方块控制器，of(...) 对它返回 null ⇒ 这里自然什么都不加；
         // 保留这一句是为了"只差机器模式"这件事在代码上一眼可见，而不是顺手删干净）
         final CombinedDirectionalFancyConfigurator directional =
                 CombinedDirectionalFancyConfigurator.of(self(), self());
         if (directional != null) {
             tabs.attachSubTab(directional);
+        }
+        // 🆕 2026-10-25（T3）：「额外挂载」子页 —— 与模块**同一个控件、同一套位置**。
+        tabs.attachSubTab(new ExtraMountPageProvider());
+    }
+
+    /**
+     * 「额外挂载」子页：3 个槽（<b>布局逐字照抄模块侧</b> {@code PrimordialModuleMachine#ExtraMountPageProvider}
+     * —— 用户原话「接口 gui 就和模块的一样」）。
+     *
+     * <p>尺寸 126×78 / {@code BACKGROUND_INVERSE} 底 / 标题 (8,8) /
+     * 三个 {@code SlotWidget} 在 y=30、x = 8 + i×34 / 底注 (8,58) —— 六个数字一个不差，
+     * 就是为了让玩家在两台机器上看到的是<b>同一个界面</b>，而不是"差不多"。
+     */
+    private final class ExtraMountPageProvider implements IFancyUIProvider {
+        @Override
+        public Component getTitle() {
+            return Component.literal("§b额外挂载");
+        }
+
+        @Override
+        public IGuiTexture getTabIcon() {
+            return new ItemStackTexture(Items.HOPPER);
+        }
+
+        @Override
+        public Widget createMainPage(FancyMachineUIWidget widget) {
+            WidgetGroup group = new WidgetGroup(0, 0, 126, 78);
+            group.setBackground(GuiTextures.BACKGROUND_INVERSE);
+            group.addWidget(new LabelWidget(8, 8, () -> "额外挂载槽"));
+            for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+                SlotWidget slot = new SlotWidget(extraMountSlots.storage, i,
+                        8 + i * 34, 30, true, true);
+                slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
+                slot.setHoverTooltips(extraMountTooltips(i));
+                group.addWidget(slot);
+            }
+            group.addWidget(new LabelWidget(8, 58, () -> "满足配方的额外要求（见各格说明）"));
+            return group;
         }
     }
 

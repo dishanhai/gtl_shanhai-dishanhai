@@ -475,5 +475,13 @@
   "shanhai.machine.stellar_sample_assembler.forge.installed": "Installed on %s",
   "shanhai.machine.stellar_sample_assembler.forge.autoUnavailable": "Auto multiplier unavailable (this hatch cannot see a controller; set the multiplier by hand)",
   "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.enabled": "Auto multiplier: enabled",
-  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.disabled": "Auto multiplier: disabled"
+  "shanhai.machine.super_wildcard_pattern_buffer.auto_multiplier.disabled": "Auto multiplier: disabled",
+  "shanhai.multiblock.guixu_vision_core.tooltip.0": "§7§oWhere all rivers return to the void, time sinks to the seabed and light freezes upon the rings",
+  "shanhai.multiblock.guixu_vision_core.tooltip.1": "§7§oTwenty-four wells face twenty-four universes, each dredging up its own sky",
+  "shanhai.multiblock.guixu_vision_core.tooltip.2": "§7§oThe core only watches — within the horizon, nothing goes uncounted",
+  "shanhai.multiblock.guixu_vision_core.tooltip.3": "§7====================================",
+  "shanhai.multiblock.guixu_vision_core.tooltip.4": "§6§l24§r module mounts across the outer ring and the vertical pillars; mounted modules run in parallel on §btheir own recipe types§r",
+  "shanhai.multiblock.guixu_vision_core.tooltip.5": "Material yield: with §6§l64§r identical matter modules in the dedicated slot the level stacks, on top of a base §6§l+5§r (empty slot ×6, Lv.17 ×23); energy discount shares the same gate",
+  "shanhai.multiblock.guixu_vision_core.tooltip.6": "The §6§l3§r slots of the Extra Mount page: maintenance hatch for cleanroom/gravity, a fragment for the dimension, a creative data access hatch for research, coils and stellar containment casings (§6§l64§r) for heat; these 3 slots also §bfeed the modules mounted on this machine§r (a stronger module keeps its own value)",
+  "shanhai.multiblock.guixu_vision_core.tooltip.7": "The minimum recipe duration is a §bfloor§r (it only slows down recipes that are too short); three own recipe types: Vision Matter Decompression / Vision Energy Extraction / Primordial Paradigm Simplification"
 }

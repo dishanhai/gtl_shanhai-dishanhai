@@ -291,6 +291,20 @@ public final class HostFxGlassArModel {
          */
         public int[] moduleSlots;
 
+        /**
+         * ⑦ 模块列表的<b>显示顺序</b>（{@link #moduleSlots} 的一个<b>置换</b>，不是另一个集合）。
+         *
+         * <p>🔴 2026-10-25 第三十二改（用户：「优先显示正在工作的机器，按最近一次运行时间从上往下排」）：
+         * 这个数组由 {@link HostFxGlassArSort.Tracker} 在<b>"数据推送的那一拍"</b>算好
+         * （{@code HostFxGlassArText#updateModuleOrder}，每 tick 一次、面板不可见时根本不跑），
+         * {@code build()} 每帧<b>只读不排</b> —— 排序绝不在渲染帧里发生。
+         *
+         * <p>{@code null} = 还没有顺序 ⇒ 面板按 {@link #moduleSlots} <b>原序</b>画（喂料侧给的就是
+         * 槽号升序 ⇒ 也就是改动前的行为）。长度/集合与 {@link #moduleSlots} 对不上时同样退回原序
+         * （见 {@link HostFxGlassArModel#displayOrder}），保证"漏行 / 同一台机器画两行"结构上不可能发生。
+         */
+        public int[] moduleOrder;
+
         // ── 2026-10-25 第二十二改新增：主机 / 每模块的运行快照（AR 右侧信息栏） ─────────
         /**
          * 每个扫描位（0..23）的<b>配方进度百分比</b>（0..100）。
@@ -308,6 +322,18 @@ public final class HostFxGlassArModel {
         public int[] modThreads;
         /** 每个扫描位"还有几秒做完"（{@code < 0} = 读不到）。 */
         public int[] modRemainSeconds;
+        /**
+         * 每个扫描位<b>「为什么没在跑」原因码</b>（服务端 {@code hostModReason} 的副本；
+         * {@code null} / 元素 {@code < 0} = 读不到 ⇒ <b>不画标签</b>）。
+         *
+         * <p>取值见 {@link #REASON_NONE} / {@link #REASON_WORKING} / {@link #REASON_NO_POWER} /
+         * {@link #REASON_OUTPUT_FULL} / {@link #REASON_BLOCKED} —— 与
+         * {@code GuixuVisionCoreMachine.REASON_*} <b>逐值相同</b>（两处必须同步改）。
+         *
+         * <p>🔴 2026-10-25 第三十三改（用户：「机器"不工作"的四种形态…就按照你说的这4种」）。
+         * 它<b>只影响 ⑦ 行末那个小标签</b>：不参与排序键、不改任何数值、读不到就什么都不画。
+         */
+        public byte[] modReason;
         /** 每个扫描位的输出（每项形如 {@code 名字×数量}），最多 2 项；{@code null} = 读不到。 */
         public String[][] modOutputs;
 
@@ -369,6 +395,93 @@ public final class HostFxGlassArModel {
     public static final int ENERGY_KIND_CREATIVE = 1;
     /** 见 {@link State#energyInKind}：无线电网输入终端（无限供电）。 */
     public static final int ENERGY_KIND_NET_TERMINAL = 2;
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  ⑦ 行末「为什么没在跑」标签（2026-10-25 第三十三改）
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /** 没在跑（也没查到原因）—— 不画标签。与 {@code GuixuVisionCoreMachine.REASON_NONE} 同值。 */
+    public static final int REASON_NONE = 0;
+    /** 正在跑 —— 不画标签（它已经排在最上面了）。 */
+    public static final int REASON_WORKING = 1;
+    /** 缺电 —— 红。 */
+    public static final int REASON_NO_POWER = 2;
+    /** 输出满 —— 橙。 */
+    public static final int REASON_OUTPUT_FULL = 3;
+    /** 被拦（类型闸 / 额外条件 / 温度 / 燃料 …）—— 黄。 */
+    public static final int REASON_BLOCKED = 4;
+
+    /**
+     * <b>原因码 → 行末标签文字的【唯一映射表】</b>（下标 = 原因码；{@code null} = 这一档不画）。
+     *
+     * <p>为什么做成表而不是一串 {@code if}：① 探针要能逐档断言"码 → 字"；② 负对照要能<b>一行清空整张表</b>
+     * （{@code temp/arsort/run-probe.ps1} 的 NEG-D 就是这么做的）——如果文字散在 {@code if} 里，
+     * 那条负对照就只能靠改逻辑，不干净。
+     * <p>{@code 1 = 正在跑} 刻意<b>不画</b>（用户：正在跑不显示，它已经排在列表最前面）。
+     * <p>{@code 0 = 没在跑} 也<b>不画</b>：那既不是故障也不是工作，一个空格子比一个"闲"更安静。
+     */
+    private static final String[] REASON_TAG = {"", null, "缺电", "输出满", "被拦"};
+
+    /**
+     * <b>原因码 → 标签颜色</b>（与 {@link #REASON_TAG} 同下标、同长度；0 = 不画）。
+     *
+     * <p>红 {@code 0xFFFF4D4D} / 橙 {@code 0xFFFF9A40} / 黄 {@code 0xFFFFE24D} ——
+     * 与既有的 {@link #C_WARN}（琥珀）区分得开，且三个都够亮（这面玻璃后面是黑洞，暗色会被吃掉）。
+     */
+    private static final int[] REASON_ARGB = {0, 0, 0xFFFF4D4D, 0xFFFF9A40, 0xFFFFE24D};
+
+    /**
+     * 原因码 → 行末标签文字（{@code null} = 不画）。
+     *
+     * <p>越界 / 负数（= 客户端拿不到服务端快照）一律 {@code null} ⇒ 什么都不画 ——
+     * <b>"不知道"绝不画成一个标签</b>（本工程红线：宁可缺，不可假）。
+     */
+    static String reasonTag(int reason) {
+        if (reason < 0 || reason >= REASON_TAG.length) {
+            return null;
+        }
+        final String tag = REASON_TAG[reason];
+        return tag == null || tag.isEmpty() ? null : tag;
+    }
+
+    /** 原因码 → 标签颜色（只对 {@link #reasonTag} 非 {@code null} 的码有意义）。 */
+    static int reasonArgb(int reason) {
+        if (reason < 0 || reason >= REASON_ARGB.length) {
+            return 0;
+        }
+        return REASON_ARGB[reason];
+    }
+
+    /**
+     * 进度条/标签的<b>统计串</b>：{@code 原因=[缺电2 输出满0 被拦1 在跑3]}（只统计已装槽位）。
+     *
+     * <p>进 {@code HostFxGlassArText#stats()} 那条每 5 秒的日志 —— 判据：
+     * 这三个数与 {@code 在跑=} 相加应当 ≤ 已装模块数；长期全 0 而模块明显卡着 ⇒ 断在同步或分类。
+     */
+    public static String reasonCounts(State st) {
+        final byte[] r = st.modReason;
+        final int[] slots = st.moduleSlots;
+        int noPower = 0;
+        int outFull = 0;
+        int blocked = 0;
+        int working = 0;
+        if (r != null && slots != null) {
+            for (int slot : slots) {
+                if (slot < 0 || slot >= r.length) {
+                    continue;
+                }
+                switch (r[slot]) {
+                    case REASON_WORKING -> working++;
+                    case REASON_NO_POWER -> noPower++;
+                    case REASON_OUTPUT_FULL -> outFull++;
+                    case REASON_BLOCKED -> blocked++;
+                    default -> {
+                    }
+                }
+            }
+        }
+        return "原因=[缺电" + noPower + " 输出满" + outFull + " 被拦" + blocked + " 在跑" + working + "]";
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════════════
     //  输出：图元 / 文字 / 模型
@@ -969,8 +1082,9 @@ public final class HostFxGlassArModel {
         final String[] a = {
                 "主机 · 配方执行",
                 "进度 " + pct + " 剩 " + remain,
-                "耗能 " + euText(st.hostEuPerTick) + " EU/t 并行 " + countOrDash(st.hostParallel)
-                        + " 线程 " + countOrDash(st.hostThreads),
+                // 🔴 2026-10-25 第三十四改（用户：「其余量 -- 要变成真值；真拿不到就写「读不到」而不是 --」）
+                "耗能 " + hostEuText(st.hostEuPerTick) + " EU/t 并行 " + hostCountText(st.hostParallel)
+                        + " 线程 " + hostCountText(st.hostThreads),
                 hostOutputLine(st, 0),
                 hostOutputLine(st, 1),
                 hostOutputLine(st, 2),
@@ -1070,6 +1184,19 @@ public final class HostFxGlassArModel {
      *
      * <p>🔴 <b>数组是"按扫描位下标"的</b>（{@code [24]}），不是"按已装顺序"的：
      * 已装顺序由 {@link State#moduleSlots} 给出，两者用槽位号对齐 —— 这样服务端不用知道客户端画第几行。
+     *
+     * <h2>🔴 2026-10-25 第三十二改：行的顺序 = {@link State#moduleOrder}（不再等于槽号顺序）</h2>
+     * 用户原话：「<b>优先显示正在工作的机器</b>，就是把机器<b>按照最近一次运行时间从上往下排</b>，
+     * 因为后面机器多了它肯定写不下去」。
+     * <ul>
+     *   <li>顺序在<b>数据推送的那一拍</b>由 {@link HostFxGlassArSort} 算好，本方法<b>只按顺序取行</b>
+     *       ⇒ 渲染帧里没有任何排序/遍历（成本与改动前逐字相同：同样只画 ≤7 行）；</li>
+     *   <li><b>行里印的槽号仍然是真槽号</b>（{@link State#moduleSlots} 的原值）⇒ 排序只影响"第几行画谁"；</li>
+     *   <li>名字必须<b>按槽号</b>取（{@code moduleNames[r]} 与 {@code moduleSlots[r]} 一一对应）——
+     *       一旦重排还按下标取名字，名字就会张冠李戴（本轮专门修了这一点，见
+     *       {@link #moduleNameAt(State, int[], int)}）；</li>
+     *   <li>{@code moduleOrder} 为 {@code null} / 不是同一个集合 ⇒ 退回 {@code moduleSlots} 原序（旧行为）。</li>
+     * </ul>
      */
     private static void buildModuleList(State st, List<Prim> prims, List<Txt> texts) {
         final int z = Z_MODLIST;
@@ -1095,18 +1222,21 @@ public final class HostFxGlassArModel {
                     installed < 0 ? "模块列表 --（等伺服同步）" : "模块列表 --（槽位位图未到）", C_DIM));
             return;
         }
-        final int total = slots.length;
+        // 显示顺序（槽号的一个置换；null / 不是同一个集合 ⇒ 退回 moduleSlots 原序）
+        final int[] order = displayOrder(st);
+        final int total = order.length;
         final boolean overflow = total > HostFxGlassArPanel.MODLIST_ROWS;
+        // 装不下时最后一行留给"+N 台未显示"（本轮的截断策略，见类注释与报告）
         final int rows = overflow ? HostFxGlassArPanel.MODLIST_ROWS - 1 : total;
         for (int r = 0; r < rows; r++) {
-            final int slot = slots[r];
+            final int slot = order[r];
             final float y = px(zo.v + HostFxGlassArPanel.MODLIST_ROW_V0
                     + r * HostFxGlassArPanel.MODLIST_ROW_DV);
             // 槽位号
             texts.add(new Txt(z, 200 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), y,
                     String.valueOf(slot), C_DIM));
             // 名字（截到 MOD_NAME_CHARS；取不到 ⇒ 槽#N）
-            final String name = moduleNameAt(st, r, slot);
+            final String name = moduleNameAt(st, slots, slot);
             texts.add(new Txt(z, 201 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_NAME_U), y,
                     clip(name, HostFxGlassArPanel.MOD_NAME_CHARS), C_MAIN));
             // 进度条（几何）+ 百分比
@@ -1130,25 +1260,85 @@ public final class HostFxGlassArModel {
             texts.add(new Txt(z, 205 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_THR_U), y,
                     countOrDash(thr), thr < 0 ? C_DIM : C_MAIN));
             // 输出（最多 2 项）
+            // 🔴 2026-10-25 第三十四改（用户回归「ar的物品输出不显示了」）—— 提交顺序反过来：
+            //    **标签先提交、输出后提交**（同一批文字里后画的盖前画的）⇒ 万一将来宽度又算错，
+            //    被盖住的一定是标签，**绝不会是输出**。
+            //    上一版的两个病根（数字见 temp/arsort/报告.md §10）：
+            //      ① 输出列只有 MOD_LABEL_U − MOD_OUT_U = 105 px，而"两项 × 8 当量"最坏 148 px
+            //         ⇒ 输出伸进标签列 43 px，且标签是后画的 ⇒ 第二项被整块盖住；
+            //      ② 有标签时又把输出砍到 1 项 ⇒ 看起来就是"物品输出不显示了"。
+            //    ⇒ 现在：标签挪到 9.74 格（宽 18 px = 2 字），输出列 3.54 格 = 177 px，
+            //      **输出恒为 2 项**，再按 18 当量的预算裁（先截数字、绝不丢整项）。
+            final int reason = perModuleByte(st.modReason, slot);
+            final String reasonTag = reasonTag(reason);
+            if (reasonTag != null) {
+                texts.add(new Txt(z, HostFxGlassArPanel.MOD_LABEL_SLOT0 + r * 10,
+                        px(zo.u + HostFxGlassArPanel.MOD_LABEL_U), y,
+                        reasonTag, reasonArgb(reason)));
+            }
+            // 输出（恒 2 项；超出预算的部分按当量裁 —— 输出优先，标签不参与裁剪）
             final String[] outs = perModuleOutputs(st.modOutputs, slot);
+            final String outLine = clip(outputsText(outs, HostFxGlassArPanel.MOD_ROW_OUTPUTS),
+                    HostFxGlassArPanel.MOD_OUT_LINE_CHARS);
             texts.add(new Txt(z, 206 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_OUT_U), y,
-                    outputsText(outs, HostFxGlassArPanel.MOD_ROW_OUTPUTS), outs == null ? C_DIM : C_MAIN));
+                    outLine, outs == null ? C_DIM : C_MAIN));
         }
         if (overflow) {
+            // 截断策略（本轮定稿，写进报告）：**装不下就截断，最后一行只写"+N 台未显示"，不逐台列**。
+            // 为什么选这一条：被截掉的必然是最久没跑过的那些（排序已把在跑/最近跑过的顶到最上面），
+            // 逐台列出来占的全是"最不重要"的行；而一个总数足够让人知道"下面还有"。
             texts.add(new Txt(z, 101, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U),
                     px(zo.v + HostFxGlassArPanel.MODLIST_ROW_V0
                             + rows * HostFxGlassArPanel.MODLIST_ROW_DV),
-                    "…（还有 " + (total - rows) + " 个）", C_DIM));
+                    "+" + (total - rows) + " 台未显示", C_DIM));
         }
     }
 
-    /** 第 {@code r} 个已装模块的名字；读不到 ⇒ {@code 槽#slot}（不编名字）。 */
-    private static String moduleNameAt(State st, int r, int slot) {
-        if (st.moduleNamesUnavailable || st.moduleNames == null || r >= st.moduleNames.length) {
+    /**
+     * ⑦ 的显示顺序：{@link State#moduleOrder} 是 {@link State#moduleSlots} 的<b>置换</b>时才用它，
+     * 否则退回 {@link State#moduleSlots} 的<b>原序</b>（= 喂料侧给的槽号升序 = 改动前的行为）。
+     *
+     * <p>两道校验，任一不过就退回原序，<b>绝不画错</b>：
+     * <ol>
+     *   <li>长度相同；</li>
+     *   <li>恰为同一集合（{@link HostFxGlassArSort#sameSet}）——
+     *       面板是只读的，"漏一台机器"和"同一台画两行"都比"顺序不对"严重得多。</li>
+     * </ol>
+     * <p>为什么退回的是"原序"而不是"重新排序一次"：这是改动前的逐字行为（{@code moduleSlots} 本来就
+     * 由喂料侧按槽号升序建出来），退回它 = 零行为差异、零每帧分配。
+     */
+    static int[] displayOrder(State st) {
+        final int[] slots = st.moduleSlots;
+        final int[] ord = st.moduleOrder;
+        if (slots == null || ord == null || ord.length != slots.length) {
+            return slots;
+        }
+        return HostFxGlassArSort.sameSet(slots, ord) ? ord : slots;
+    }
+
+    /**
+     * 第 {@code slot} 号槽位上那台模块的名字（<b>按槽号</b>取，不是按显示行号取）。
+     *
+     * <p>🔴 2026-10-25 第三十二改：{@link State#moduleNames} 与 {@link State#moduleSlots}
+     * <b>按数组下标一一对应</b>（喂料侧同时建的），而行的顺序改成"最近运行时间"之后就<b>不再</b>
+     * 等于那个下标 ⇒ 必须先在下标里找到这个槽，再取同下标的那个名字。
+     * 不这么改的话，重排之后名字会整体错位（槽 3 显示槽 17 的名字），而槽号仍然是对的 ——
+     * 那是最难被发现的一种错。
+     *
+     * <p>取不到 ⇒ {@code 槽#slot}（<b>绝不编名字</b>）。
+     */
+    private static String moduleNameAt(State st, int[] slots, int slot) {
+        if (st.moduleNamesUnavailable || st.moduleNames == null) {
             return "槽#" + slot;
         }
-        final String n = st.moduleNames[r];
-        return n == null || n.isEmpty() ? "槽#" + slot : n;
+        for (int i = 0; i < slots.length && i < st.moduleNames.length; i++) {
+            if (slots[i] != slot) {
+                continue;
+            }
+            final String n = st.moduleNames[i];
+            return n == null || n.isEmpty() ? "槽#" + slot : n;
+        }
+        return "槽#" + slot;
     }
 
     /** 按扫描位下标取一个 int（数组短了 / 缺了 ⇒ −1）。 */
@@ -1193,17 +1383,83 @@ public final class HostFxGlassArModel {
         return sb.length() == 0 ? "--" : sb.toString();
     }
 
-    /** 主机节第 {@code i} 条输出（i ≥ 上限或读不到 ⇒ {@code --}）。 */
+    /**
+     * 主机节第 {@code i} 条输出 —— <b>三种状态必须分开写</b>（2026-10-25 第三十四改）：
+     * <pre>
+     *   {@code outs == null}      ⇒ 「输出① <b>读不到</b>」  ← 通道没到（服务端没推 / 客户端没解码出来）
+     *   {@code outs.length == 0}  ⇒ 「输出① <b>无</b>」     ← 真没有输出（这是真读数）
+     *   有这一条                  ⇒ 「输出① 名字×数量」
+     * </pre>
+     * 用户原话：「真拿不到就写"读不到"而不是 {@code --}（{@code --} 看起来像没数据显示，无法区分）」。
+     */
     private static String hostOutputLine(State st, int i) {
         final String[] outs = st.hostOutputs;
         final String tag = "输出" + (char) ('①' + i);
-        if (outs == null || outs.length == 0) {
-            return tag + " --";
+        if (outs == null) {
+            return tag + " 读不到";
         }
         if (i >= outs.length || outs[i] == null || outs[i].isEmpty()) {
-            return tag + " --";
+            return tag + " 无";
         }
         return tag + " " + clip(outs[i], 12);
+    }
+
+    /**
+     * 主机级 {@code EU/t}：{@code <0}（读不到）⇒ <b>「读不到」</b>，不是 {@code --}。
+     *
+     * <p>为什么必须与 {@code --} 分开：{@code --} 在面板上同时表示"没数据"和"这格没意义"，
+     * 用户没法判断是机器没跑、还是读不到（他这次就是被这一点困住的）。
+     */
+    static String hostEuText(long v) {
+        return v < 0L ? "读不到" : compactMagnitude(v);
+    }
+
+    /** 主机级计数（并行 / 线程）：{@code <0} ⇒ 「读不到」。 */
+    static String hostCountText(int v) {
+        return v < 0 ? "读不到" : compactMagnitude(v);
+    }
+
+    /**
+     * 主机块<b>六个量</b>的一行读数（日志判死用）：
+     * {@code 主机=[耗能=1.2M 并行=读不到 线程=读不到 输出=1/3]}（输出 = 有效条数 / 应有条数）。
+     */
+    public static String hostBlockCounts(State st) {
+        final String[] outs = st.hostOutputs;
+        final int have = outs == null ? -1 : outs.length;
+        return "主机=[耗能=" + hostEuText(st.hostEuPerTick)
+                + " 并行=" + hostCountText(st.hostParallel)
+                + " 线程=" + hostCountText(st.hostThreads)
+                + " 输出=" + (have < 0 ? "读不到" : have + "/" + st.hostOutputTotal) + "]";
+    }
+
+    /**
+     * 主机块「有配方在跑时至少 4 个量非空」的判据（探针与自检共用）。
+     *
+     * <p>为什么是 4 而不是 6：并行 / 线程在本机<b>没有权威现值</b>（服务端写 −1，
+     * 见 {@code refreshHostRuntimeSnapshot$body} 里"绝不拿上限冒充现值"那段）⇒ 它们本来就该是「读不到」；
+     * 剩下 4 个（进度 / 剩 / 耗能 / 输出）必须都有真值。
+     */
+    public static int hostFilledCount(State st) {
+        int n = 0;
+        if (st.hostProgressPct >= 0) {
+            n++;
+        }
+        if (st.hostRemainSeconds >= 0) {
+            n++;
+        }
+        if (st.hostEuPerTick >= 0L) {
+            n++;
+        }
+        if (st.hostOutputs != null && st.hostOutputs.length > 0) {
+            n++;
+        }
+        if (st.hostOutputTotal >= 0) {
+            n++;
+        }
+        if (st.hostParallel >= 0 || st.hostThreads >= 0) {
+            n++;
+        }
+        return n;
     }
 
     /** 把字符串截到 {@code chars} 个"汉字当量"（ASCII 算半个；超了补 {@code …}）。 */

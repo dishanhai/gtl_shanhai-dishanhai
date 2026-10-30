@@ -264,7 +264,8 @@ public final class GuixuVisionCoreStructure {
     }
 
     /**
-     * 'A' 的谓词 = {@link #RING_BAND_BLOCK}（外环桁架带）∪ <b>能源仓</b> ∪ <b>动力仓</b>。
+     * 'A' 的谓词 = {@link #RING_BAND_BLOCK}（外环桁架带）∪ <b>能源仓</b> ∪ <b>动力仓</b>
+     * ∪ <b>物品/流体输入输出仓</b> ∪ <b>样板总成白名单</b>。
      *
      * <p>为什么要两种电仓（用户交办原话「结构同时收能源仓与动力仓」）：
      * <ul>
@@ -272,16 +273,96 @@ public final class GuixuVisionCoreStructure {
      *   <li><b>动力仓</b>（{@code OUTPUT_ENERGY}）—— 机器往外送电的那一侧
      *       （阶段 3 的「视界能流抽取」要用；本阶段先让结构收得下、装得上）。</li>
      * </ul>
-     * 两侧的存量在抬头里<b>分两行</b>画（{@link GuixuVisionCoreMachine#addDisplayText}），
-     * 机器等级不卡（沿用 {@code PrimordialOmegaEngineMachine#getMaxVoltage()} = {@code Long.MAX_VALUE}）。
      *
-     * <p>⚠️ 本阶段<b>只放这两种</b>电仓：物品/流体仓的贴附点等阶段 3 接了三个自有配方类型之后再加，
-     * 免得现在放上去一堆"能装但机器不认"的仓。
+     * <h2>🆕 2026-10-25（T2）：放行样板总成 / 任意输入输出仓</h2>
+     * 用户原话（逐字）：「现在归墟视界枢核<b>不能放样板总成</b>，只能放动力仓和能源仓，
+     * 你让它可以放<b>样板总成</b>（或者任意输入输出）」。
+     *
+     * <p>两条路，缺一不可：
+     * <ol>
+     *   <li><b>按能力放行</b>（{@code PartAbility}）：物入 / 物出 / 流入 / 流出 四种 —— 与
+     *       <b>基类主机（原始终焉引擎）的同一条放行清单逐条相同</b>
+     *       （{@code PrimordialOmegaEngineStructure} 第 66-69 行）。⇒ 所有声明了这四种能力的
+     *       标准仓室（1x/4x/9x 流体仓、各类物品总线、ME 仓…）自动收得下，不需要列 id。</li>
+     *   <li><b>按方块 id 放行</b>（{@link #EXTRA_PART_BLOCK_IDS}）：样板总成<b>不声明</b>上面那四种能力
+     *       （它们靠 ME 网络供料，{@code PartAbility} 里没有它们的名字）⇒ 只能按 id 放。
+     *       清单见那个常量，逐条写了"为什么它在里面"。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>为什么不放开到"任意 {@code IMultiPart}"</b>：{@code TraceabilityPredicate} 的判据是
+     * 「(方块) 或 (声明了某个 {@code PartAbility})」，<b>没有</b>"这个方块是不是某个机器的 part"这种谓词；
+     * 真要做只能自建 {@code BlockPredicate} 并在成形时对每个格子做机器实例查询 —— 那会在
+     * <b>每次结构检查</b>（每次拆装/覆盖层变更都会跑）里加 1000+ 次方块实体查询，
+     * 而且失败时的表现是"结构不成型、没有任何提示"。⇒ 本次按<b>能力 + 显式白名单</b>放行，
+     * 白名单缺哪个就报一行日志并补一个 id（见 {@link #EXTRA_PART_BLOCK_IDS} 的解析日志），不静默。
+     *
+     * <p>⚠️ 白名单 id 解析是<b>宽松</b>的（缺了跳过 + 打一行 WARN），与 {@link #requireBlock} 的
+     * "缺了就炸"不同：这里缺一个 id 的后果是"那种仓放不上去"（局部功能缺失），
+     * 而这里炸掉的后果是<b>整台机器加载失败</b>；用日志把前者变成可见的即可。
      */
     public static TraceabilityPredicate ringBandPredicate() {
-        return Predicates.blocks(requireBlock(RING_BAND_BLOCK))
+        TraceabilityPredicate predicate = Predicates.blocks(requireBlock(RING_BAND_BLOCK))
                 .or(Predicates.abilities(PartAbility.INPUT_ENERGY).setPreviewCount(1))
-                .or(Predicates.abilities(PartAbility.OUTPUT_ENERGY).setPreviewCount(1));
+                .or(Predicates.abilities(PartAbility.OUTPUT_ENERGY).setPreviewCount(1))
+                // 🆕 2026-10-25：与基类主机同一条"任意输入输出仓"清单（物入 / 物出 / 流入 / 流出）
+                .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
+                .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
+                .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
+                .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1));
+        // 🆕 2026-10-25：样板总成白名单（不声明上面那四种能力 ⇒ 只能按 id 放）
+        // 🔴 这一行是 T2 的**实机判死点**：每条 id 逐个报"在不在方块注册表里"，
+        //    一条 `=缺失` 就说明那种仓放不上去（只影响它自己，不影响成型/其它仓）。
+        final StringBuilder detail = new StringBuilder();
+        int hitCount = 0;
+        int missCount = 0;
+        for (String id : EXTRA_PART_BLOCK_IDS) {
+            final Block block = blockOrNull(id);
+            detail.append(id).append('=').append(block != null ? "存在" : "缺失").append("; ");
+            if (block == null) {
+                missCount++;
+                continue;
+            }
+            predicate = predicate.or(Predicates.blocks(block));
+            hitCount++;
+        }
+        com.shanhai.ShanhaiMod.LOGGER.info("[SHANHAI-HOST] 外环带放行清单：能力=能源仓/动力仓/物入/物出/流入/流出；"
+                        + "白名单 {}/{} 存在（缺失 {} 条）；逐条 id→注册表：{}",
+                hitCount, EXTRA_PART_BLOCK_IDS.length, missCount, detail.toString().trim());
+        return predicate;
+    }
+
+    /**
+     * 除"按能力"之外的<b>样板总成方块白名单</b>（2026-10-25 T2 用户点单）。
+     *
+     * <pre>
+     *   gtceu:me_pattern_buffer                 GT 的 ME 样板总成（机器名 me_pattern_buffer）
+     *   gtladditions:me_super_pattern_buffer    gtladditions 的超级样板总成
+     *   gtceu:me_wildcard_pattern_buffer        通配符样板总成 —— 🔴 名字空间是 <b>gtceu</b>
+     *   shanhai:stellar_sample_assembler        本工程的星律样板总成（ShanhaiStellarMachines 注册）
+     * </pre>
+     *
+     * <p>🔴 <b>2026-10-25 收尾订正（第三条）</b>：原写 {@code gtlcore:me_wildcard_pattern_buffer}，
+     * <b>那是错的</b>。真值是 <b>{@code gtceu:me_wildcard_pattern_buffer}</b> —— 这台机器由 gtlcore
+     * 注册、但 <b>id 写在自己的（gtceu）命名空间下</b>；本仓
+     * {@code ShanhaiWildcardMachines} 的类注释记的就是这条（"宿主 {@code gtceu:me_wildcard_pattern_buffer}"），
+     * 既有部署态也是它。
+     *
+     * <p>怎么核的：另外三条按用户给的 id 原样落；第四条查了本包
+     * {@code ShanhaiStellarMachines#STELLAR_SAMPLE_ASSEMBLER_ID = "stellar_sample_assembler"}。
+     * 运行期每条都用 {@link #blockOrNull}（{@code ForgeRegistries.BLOCKS} 现查）过一遍，
+     * <b>逐个 id 打出"存在/缺失"</b>（见上面那行日志）—— 所以"某条 id 写错了"不会变成静默。
+     */
+    public static final String[] EXTRA_PART_BLOCK_IDS = {
+            "gtceu:me_pattern_buffer",
+            "gtladditions:me_super_pattern_buffer",
+            "gtceu:me_wildcard_pattern_buffer",
+            "shanhai:stellar_sample_assembler",
+    };
+
+    /** 按 id 取方块；<b>取不到返回 {@code null}</b>（宽松版，只给白名单用）。 */
+    private static Block blockOrNull(String id) {
+        final ResourceLocation rl = ResourceLocation.tryParse(id);
+        return rl == null ? null : ForgeRegistries.BLOCKS.getValue(rl);
     }
 
     /** 外观方块句柄（注册期惰性取）。 */
