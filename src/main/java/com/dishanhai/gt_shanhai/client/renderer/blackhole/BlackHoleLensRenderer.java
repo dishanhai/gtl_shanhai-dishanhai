@@ -12,6 +12,8 @@ import com.mojang.blaze3d.vertex.VertexSorting;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.config.GuixuClientConfig;
 import com.dishanhai.gt_shanhai.client.renderer.hostfx.HostFxGlassArDeferred;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
+import com.gregtechceu.gtceu.api.machine.MetaMachine;
 
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -21,6 +23,7 @@ import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
@@ -150,9 +153,10 @@ public final class BlackHoleLensRenderer {
      *   <li>旧的 {@code if (!(lensHalfPx >= MIN_LENS_RADIUS_PX)) return;}（屏幕半径 &lt; 8 px 不画）——
      *       改成<b>抬到下限继续画</b>（{@code lensHalfPx = max(lensHalfPx, MIN_LENS_RADIUS_PX)}）。</li>
      * </ul>
-     * ⇒ 现在<b>只有三种情况允许不画</b>：没有中心（{@code center_empty}）／总开关关闭
+     * ⇒ 基本停繪條件：没有中心（{@code center_empty}）／总开关关闭
      * （{@code enabled_off}）／shader 失败降级到三级（{@code dead_level3} / {@code quad_failed}）。
      * 另外"相机背后 / 视锥外 / 整块在画面外"这种<b>几何上无意义</b>的情况仍然不画（那不是"太远"）。
+     * 主機來源另須保持世界、區塊與成型有效，並位於目前的區塊渲染距離內；手動預覽不套用此限制。
      *
      * <p>为什么 8 是合理下限：{@code LENS_RANGE_RS = 11.5}，半边长 8 px ⇒ 整个透镜矩形 16×16 px，
      * 可见黑盘（{@code B_CRIT}）只有 {@code 8 / 11.5 × 2.598 ≈ 1.8} px 半径 ——
@@ -814,6 +818,7 @@ public final class BlackHoleLensRenderer {
         }
         final Minecraft mc = Minecraft.getInstance();
         if (mc == null || mc.level == null) {           // 闸门 G4（洞内保留）：没有世界
+            BlackHoleTuning.clearHostCenter();
             BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_LEVEL);
             return null;
         }
@@ -822,6 +827,25 @@ public final class BlackHoleLensRenderer {
         if (camera == null || poseStack == null) {      // 闸门 G5（洞内保留）：洞内也要 poseStack 求盘法线
             BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_LEVEL);
             return null;
+        }
+        // 山海：獨立透鏡事件仍會在 BER 停止後執行，必須自己驗證主機來源而非等待 BER 清理。
+        if (BlackHoleTuning.hasHostCenter()) {
+            Vec3 cameraPos = camera.getPosition();
+            BlockPos controller = BlockPos.of(BlackHoleTuning.hostCenterControllerPos());
+            BlockPos centerPos = BlockPos.containing(center[0], center[1], center[2]);
+            boolean available = GuixuClientConfig.hostFxEnabled()
+                    && BlackHoleTuning.hostCenterInRange(mc.level, cameraPos.x, cameraPos.z,
+                            mc.options.getEffectiveRenderDistance())
+                    && mc.level.hasChunkAt(controller) && mc.level.hasChunkAt(centerPos);
+            if (available) {
+                available = MetaMachine.getMachine(mc.level, controller) instanceof GuixuVisionCoreMachine host
+                        && (host.isFormed() || host.isHostFormedSync());
+            }
+            if (!available) {
+                BlackHoleTuning.clearHostCenter();
+                BlackHoleFrameStats.noteSkip(BlackHoleFrameStats.SKIP_NO_CENTER);
+                return null;
+            }
         }
         final RenderTarget main = mc.getMainRenderTarget();
         if (main == null || main.width <= 0 || main.height <= 0) {   // 闸门 G6（洞内保留）：屏幕尺寸

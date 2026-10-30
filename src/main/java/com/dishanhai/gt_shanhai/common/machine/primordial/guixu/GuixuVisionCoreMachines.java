@@ -46,18 +46,18 @@ public final class GuixuVisionCoreMachines {
             }
         }
         GTDishanhaiMod.LOGGER.info("[SHANHAI-HOST] 已注册 {}", ID);
-        registerContainment(casing, overlay);
+        registerContainment(overlay);
     }
 
     /** 歸墟彭羅斯黑洞遏制場：被動模組，掛 DUMMY 配方類型只為滿足多方塊註冊。 */
-    private static void registerContainment(ResourceLocation casing, ResourceLocation overlay) {
+    private static void registerContainment(ResourceLocation overlay) {
         containmentDefinition = GTDishanhaiRegistration.REGISTRATE
                 .multiblock(CONTAINMENT_ID, GuixuPenroseContainmentModule::new)
                 .rotationState(RotationState.ALL)
                 .recipeTypes(GTRecipeTypes.DUMMY_RECIPES)
                 .pattern(GuixuPenroseContainmentStructure::createPattern)
                 .appearanceBlock(GuixuPenroseContainmentStructure::appearanceBlock)
-                .workableCasingRenderer(casing, overlay)
+                .workableCasingRenderer(new ResourceLocation("kubejs", "block/hollow_casing"), overlay)
                 .register();
         containmentDefinition.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(Component.literal("§7需安装在归墟视界枢核的模组位"));

@@ -876,7 +876,7 @@ public class DShanhaiCommands {
         source.sendSuccess(msg("§7欠款本金: §c" + bank.debtPrincipal + " §7星火"), false);
         source.sendSuccess(msg("§7欠款利息: §c" + bank.debtInterest + " §7星火"), false);
         source.sendSuccess(msg("§7欠款合计: §c" + bank.debtTotal() + " §7星火"), false);
-        source.sendSuccess(msg("§7可借: §e" + bank.loanRoom + " §7/ " + bank.maxLoan), false);
+        source.sendSuccess(msg("§7当前阶段可借: §e" + bank.loanRoom + " §7/ " + bank.maxLoan), false);
         if (bank.debtTotal().signum() > 0) {
             source.sendSuccess(msg(bank.overdue
                     ? "§c状态: 已逾期，还清前不能再借"
@@ -933,7 +933,7 @@ public class DShanhaiCommands {
                 ? "§b[山海银行] §e已借出 §f" + got + " §e星火（持续计息，记得还款；已到欠款上限按上限封顶）"
                 : overdue
                         ? "§c欠款已逾期，还清前不能再借"
-                        : "§c已达欠款上限，无法再借"), false);
+                        : "§c未提交电压阶段或已达当前阶段贷款额度，无法再借"), false);
         return got.signum() > 0 ? 1 : 0;
     }
 

@@ -8,6 +8,7 @@ import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableFluidTank;
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
+import com.gregtechceu.gtceu.integration.ae2.slot.ExportOnlyAEItemList;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import com.mojang.logging.LogUtils;
 
@@ -145,8 +146,10 @@ public class GuixuPenroseContainmentModule extends PrimordialOmegaEngineModuleBa
                     // 先按物品 id 判斷這次投入會不會成立，不成立的物品原樣留著
                     if (isSeed ? field.status() != GuixuContainmentField.Status.CLOSED
                             : !isCollapser || !field.isOpen()) continue;
-                    // 走內部路徑真正扣除（直接寫回槽位對 ME 總線不會扣 AE 庫存）；扣成功才推進狀態機
-                    ItemStack taken = handler.extractItemInternal(i, 1, false);
+                    // AE 清單的槽位不在基類 storage 中，必須走覆寫的取出方法才能扣網路庫存。
+                    ItemStack taken = handler instanceof ExportOnlyAEItemList
+                            ? handler.extractItem(i, 1, false)
+                            : handler.extractItemInternal(i, 1, false);
                     if (taken.isEmpty()) continue;
                     GuixuContainmentField.Event event = isSeed
                             ? field.open(HYPER_SEED.equals(id)) : field.shutDown();

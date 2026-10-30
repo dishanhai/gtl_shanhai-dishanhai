@@ -349,9 +349,11 @@ public final class DShanhaiConfigScreen {
                 .setTooltip(tip("万分之 N，默认 15 ≈ 0.15%/小时，约 3.6%/天",
                         "高于存款利率。还款先冲利息再冲本金，不做强制追讨"))
                 .setSaveConsumer(cfg.shopBankLoanRateBpPerHour::set).build());
-        bank.addEntry(e.startLongField(Component.literal("最大欠款（星火）"), cfg.shopBankMaxLoanSpark.get())
+        bank.addEntry(e.startLongField(Component.literal("阶段贷款总上限（星火）"), cfg.shopBankMaxLoanSpark.get())
                 .setDefaultValue(100_000_000L).setMin(0L).setMax(Long.MAX_VALUE)
-                .setTooltip(tip("单玩家本金加利息达到上限后借不出新的，默认 1 亿"))
+                .setTooltip(tip("阶段额度与此值取较小值，默认总上限 1 亿",
+                        "未提交电压阶段不能借；ULV 1000 星火，此后每阶 ×4",
+                        "已欠本金加利息占用额度，旧欠款不会因额度降低而清除"))
                 .setSaveConsumer(cfg.shopBankMaxLoanSpark::set).build());
         bank.addEntry(e.startIntField(Component.literal("贷款期限（小时）"), cfg.shopBankLoanTermHours.get())
                 .setDefaultValue(24).setMin(1).setMax(8760)

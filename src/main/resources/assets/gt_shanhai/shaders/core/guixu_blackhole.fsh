@@ -84,9 +84,9 @@ const float DISK_OUTER  = 11.0;        // 吸积盘外缘 / Rs
 
 // ---- 数值（不许改太离谱；报告 §3 有推导）----
 const float RING_WIDTH  = 0.075;       // 光子环高斯宽度（单位 Rs）
-const float RING_GAIN   = 2.40;
+const float RING_GAIN   = 2.90;
 const float HALO_WIDTH  = 0.42;
-const float HALO_GAIN   = 0.35;
+const float HALO_GAIN   = 0.48;
 
 // 边缘淡出：dHole ∈ [EDGE_FADE_INNER, 1.0] 内把 warp / 盘 / 光子环 / 光晕一起衰减到 0。
 // 与 BlackHoleLensSpec.EDGE_FADE_INNER 同值。为什么要它：见 §④ 的 maskFade 注释。
@@ -103,6 +103,8 @@ float hash21(vec2 p) {
 }
 
 float vnoise(vec2 p) {
+    // 山海：先量測未折返座標的像素足跡；次像素雜訊收斂到均值，避免摩爾紋。
+    float footprint = max(length(dFdx(p)), length(dFdy(p)));
     vec2 i = floor(p);
     vec2 f = fract(p);
     vec2 u = f * f * (3.0 - 2.0 * f);
@@ -110,7 +112,8 @@ float vnoise(vec2 p) {
     float b = hash21(i + vec2(1.0, 0.0));
     float c = hash21(i + vec2(0.0, 1.0));
     float d = hash21(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    return mix(mix(mix(a, b, u.x), mix(c, d, u.x), u.y), 0.5,
+               smoothstep(0.35, 1.20, footprint));
 }
 
 float fbm(vec2 p) {
@@ -147,7 +150,7 @@ void main() {
     // ---------------------------------------------------------------------------------------
     vec3  bh  = uBhView;
     float tca = dot(bh, dir);
-    float b   = sqrt(max(dot(bh, bh) - tca * tca, 0.0));
+    float b   = length(cross(bh, dir)); // 避免洞心方向兩個近等大數相減失去精度。
     float rs  = max(uRs, 1e-4);
     float bn  = b / rs;
 
@@ -255,8 +258,17 @@ void main() {
     vec3  basisZ = cross(n, basisX);
 
     vec3  diskCol = vec3(0.0);
-    float diskLum = 0.0;
     float denom   = dot(dirBent, n);
+    // 導數必須在一致控制流程中求值，不放在盤面求交的分支內。
+    float safeDenom = abs(denom) < 1e-4 ? (denom < 0.0 ? -1e-4 : 1e-4) : denom;
+    float tDisk = dot(bh, n) / safeDenom;
+    vec3 diskRel = dirBent * tDisk - bh;
+    float diskRadius = length(diskRel) / rs;
+    float diskAngle = atan(dot(diskRel, basisZ), dot(diskRel, basisX));
+    float spin = uTime * 2.6 / pow(max(diskRadius, 1.0), 1.5);
+    // sin 方位座標消除 atan 在 -pi/pi 的雜訊接縫；徑向相位向內推進。
+    float turb = fbm(vec2(min(diskRadius, 64.0) * 1.35 + uTime * 0.45,
+                          sin(diskAngle + spin) * 2.6));
     if (abs(denom) > 1e-4) {
         float tHit = dot(bh, n) / denom;
         if (tHit > 0.0) {
@@ -269,10 +281,7 @@ void main() {
                            * (1.0 - smoothstep(DISK_OUTER * 0.72, DISK_OUTER, rn));
 
                 // 开普勒湍流：方位角 + 半径，按 ω ∝ r^-1.5 平移 ⇒ 内圈转得快（真吸积盘的样子）
-                float ang   = atan(dot(rel, basisZ), dot(rel, basisX));
-                float spin  = uTime * 2.6 / pow(max(rn, 1.0), 1.5);
-                float turb  = fbm(vec2(rn * 1.35, ang * 2.6 + spin));
-                float shade = band * (0.35 + 1.30 * turb);
+                float shade = band * (0.35 + 1.30 * turb) * 1.15;
 
                 // 多普勒集束：盘沿 +φ 方向转，速度朝相机的一侧更亮（1/(1-βcosθ)³）
                 vec3  velDir = normalize(cross(n, rel));
@@ -288,7 +297,6 @@ void main() {
                 dc        = mix(dc,   cLow, smoothstep(DISK_INNER * 3.0,  DISK_OUTER,      rn));
 
                 diskCol = dc * (shade * beam) * max(uDiskGain, 0.0);
-                diskLum = clamp(shade * 0.85, 0.0, 1.0);
             }
         }
     }
@@ -301,7 +309,8 @@ void main() {
     float aa         = max(fwidth(bn), 1e-4) * 1.25;
     float shadowMask = 1.0 - smoothstep(B_CRIT - aa, B_CRIT + aa, bn);
 
-    float ringCore = exp(-pow((bn - B_CRIT) / RING_WIDTH, 2.0));
+    float ringWidth = max(RING_WIDTH, aa);
+    float ringCore = exp(-pow((bn - B_CRIT) / ringWidth, 2.0)) * RING_WIDTH / ringWidth;
     float ringHalo = exp(-pow((bn - B_CRIT) / HALO_WIDTH, 2.0)) * HALO_GAIN;
     vec3  ringCol  = vec3(1.00, 0.88, 0.72) * ((ringCore * RING_GAIN + ringHalo) * max(uRingGain, 0.0));
 
@@ -310,8 +319,8 @@ void main() {
     // ---------------------------------------------------------------------------------------
     vec3 col = mix(bg, vec3(0.0), shadowMask);
     // 盘 / 环 / 光晕一起乘边缘淡出（改前是直接加 ⇒ 矩形边界处一条硬边）
-    col += diskCol * maskFade;
-    col += ringCol * maskFade;
+    col += diskCol * (1.0 - shadowMask) * maskFade;
+    col += ringCol * (1.0 - shadowMask) * maskFade;
 
     fragColor = vec4(col, 1.0);
 }

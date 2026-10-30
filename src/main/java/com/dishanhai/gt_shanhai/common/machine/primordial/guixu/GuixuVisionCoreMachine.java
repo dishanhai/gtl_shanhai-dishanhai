@@ -173,6 +173,14 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     @DescSynced
     private boolean hostArMaskEnabled = true;
 
+    @Persisted
+    @DescSynced
+    private boolean hostOuterStarsEnabled = true;
+
+    @Persisted
+    @DescSynced
+    private boolean hostNebulaEnabled = true;
+
     @DescSynced
     private long hostModuleMask = 0L;
 
@@ -387,6 +395,28 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
 
     public boolean isHostArMaskEnabled() {
         return hostArMaskEnabled;
+    }
+
+    public boolean isHostOuterStarsEnabled() {
+        return hostOuterStarsEnabled;
+    }
+
+    public void setHostOuterStarsEnabled(boolean value) {
+        if (hostOuterStarsEnabled == value) return;
+        hostOuterStarsEnabled = value;
+        markDirty();
+        pushHostFxSync();
+    }
+
+    public boolean isHostNebulaEnabled() {
+        return hostNebulaEnabled;
+    }
+
+    public void setHostNebulaEnabled(boolean value) {
+        if (hostNebulaEnabled == value) return;
+        hostNebulaEnabled = value;
+        markDirty();
+        pushHostFxSync();
     }
 
     public void setHostArMaskEnabled(boolean value) {
@@ -878,7 +908,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             r.progressPct = pr[0];                    // −1 = 未知；0..100 = 真读数
             r.remainSec = pr[1];
             final GTRecipe last = logic.getLastRecipe();
-            r.parallel = snapshotModuleParallel(last, working);
+            r.parallel = module.getAvailableRecipeParallel();
             r.threads = Ints.saturatedCast(module.getRecipeLogicThreadMultiplier());
             if (last != null) {
 
@@ -916,16 +946,6 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         }
         return r;
     }
-
-    static long snapshotModuleParallel(GTRecipe recipe, boolean working) {
-        if (!working) return 0L;
-        String key = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY;
-        if (recipe == null || !recipe.data.contains(key, net.minecraft.nbt.Tag.TAG_LONG)) return -1L;
-        long value = recipe.data.getLong(key);
-        return value > 0L ? value : -1L;
-    }
-
-
 
     private void ensureSnapshotTick() {
         if (isRemote() || snapTick != null || !(getLevel() instanceof net.minecraft.server.level.ServerLevel)) {
@@ -1062,7 +1082,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 + " 下舰=−" + hostShipDownDegPerSec + "°/s"
                 + " 洞半径=" + String.format(Locale.ROOT, "%.1f", getHostBlackHoleRadiusBlocks())
                 + "格(" + hostBlackHoleRadiusTenths + "×0.1)"
-                + " 透镜=" + (hostLensEnabled ? "开" : "关");
+                + " 透镜=" + (hostLensEnabled ? "开" : "关")
+                + " 外层星辰=" + (hostOuterStarsEnabled ? "开" : "关")
+                + " 外层星云=" + (hostNebulaEnabled ? "开" : "关");
     }
 
 
@@ -1370,6 +1392,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos", "engineLinkReady",
                 "containmentLockTicks", "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
+                "hostOuterStarsEnabled", "hostNebulaEnabled",
                 "hostModuleMask", "hostModMachineItems", "hostProductionMultiplier", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
                 "hostModRemainSec", "hostSnapSeq", "hostRecipeProgressPct", "hostRecipeRemainSec",
                 "hostRecipeParallel", "hostRecipeThreads", "hostEuPerTick", "hostTotalOutputCount",

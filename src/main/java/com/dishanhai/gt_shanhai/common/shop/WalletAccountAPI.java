@@ -152,6 +152,7 @@ public final class WalletAccountAPI {
         public final BigInteger loanRoom;
         public final int depositRateBp;
         public final int loanRateBp;
+        /** 目前已提交階段的總欠款額度，已套用伺服器總上限。 */
         public final long maxLoan;
         /** 到期后仍有欠款。为真时 {@link #loanRoom} 为 0，借款会被拒绝。 */
         public final boolean overdue;
@@ -193,7 +194,7 @@ public final class WalletAccountAPI {
     public static BankView bankView(MinecraftServer server, UUID uuid) {
         int depositRate = DShanhaiConfig.COMMON.shopBankDepositRateBpPerHour.get();
         int loanRate = DShanhaiConfig.COMMON.shopBankLoanRateBpPerHour.get();
-        long cap = DShanhaiConfig.COMMON.shopBankMaxLoanSpark.get();
+        long cap = loanCap(server, uuid);
         WalletAccountSavedData d = data(server);
         WalletAccount acc = d.get(uuid);
         if (acc == null) {
@@ -266,7 +267,7 @@ public final class WalletAccountAPI {
             return BigInteger.ZERO;
         }
         boolean hadDebt = settled.total().signum() > 0;
-        ShopBank.Move mv = ShopBank.borrow(settled, amount, loanCap(), now, rate);
+        ShopBank.Move mv = ShopBank.borrow(settled, amount, BigInteger.valueOf(loanCap(server, uuid)), now, rate);
         changed |= applyDebtBook(acc, mv.book);
         if (mv.amount.signum() <= 0) {
             if (changed) d.setDirty();
@@ -382,8 +383,12 @@ public final class WalletAccountAPI {
         return DShanhaiConfig.COMMON.shopBankLoanRateBpPerHour.get();
     }
 
-    private static BigInteger loanCap() {
-        return BigInteger.valueOf(DShanhaiConfig.COMMON.shopBankMaxLoanSpark.get());
+    private static long loanCap(MinecraftServer server, UUID uuid) {
+        ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+        if (player == null) return 0L;
+        return ShopBank.loanCap(DShanhaiConfig.COMMON.shopBankMaxLoanSpark.get(),
+                CurrencyStageConfig.stagePrefix(), ShopSubmissionSavedData.get(server).keys(player),
+                ShopStageConfig.paths());
     }
 
     private static long loanTermMs() {

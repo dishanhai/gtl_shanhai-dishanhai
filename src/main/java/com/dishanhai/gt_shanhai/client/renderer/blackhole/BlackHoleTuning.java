@@ -113,6 +113,8 @@ public final class BlackHoleTuning {
     // ---- 运行期值 ----
     private static volatile Boolean enabledOverride;   // null = 跟 toml
     private static volatile double[] centerOverride;   // null = 跟 toml（已含 +0.5 补正）
+    private static volatile java.lang.ref.WeakReference<Object> hostCenterWorld;
+    private static volatile long hostCenterControllerPos;
     private static volatile double scale = 1.0D;
     private static volatile double strength = 1.0D;
     private static volatile double disk = 1.0D;
@@ -339,6 +341,67 @@ public final class BlackHoleTuning {
     /** @param center 已经是"最终坐标"（调用方负责 {@code ~} 与 +0.5）；{@code null} = 清除覆盖 */
     public static void setCenter(double[] center) {
         centerOverride = (center == null) ? null : new double[]{center[0], center[1], center[2]};
+        // 命令預覽取得中心所有權，主機清理不可刪除它，即使座標恰好相同。
+        hostCenterWorld = null;
+        hostCenterControllerPos = 0L;
+    }
+
+    /** 山海：主機中心必須能追溯來源世界與控制器，不能在卸載後永久殘留。 */
+    public static void setHostCenter(Object world, long controllerPos, double[] center) {
+        if (world == null || center == null) {
+            clearHostCenter();
+            return;
+        }
+        double[] previous = centerOverride;
+        if (previous == null || previous[0] != center[0] || previous[1] != center[1] || previous[2] != center[2]) {
+            centerOverride = new double[]{center[0], center[1], center[2]};
+        }
+        var previousWorld = hostCenterWorld;
+        if (previousWorld == null || previousWorld.get() != world) {
+            hostCenterWorld = new java.lang.ref.WeakReference<>(world);
+        }
+        hostCenterControllerPos = controllerPos;
+    }
+
+    public static boolean hasHostCenter() {
+        return hostCenterWorld != null;
+    }
+
+    public static long hostCenterControllerPos() {
+        return hostCenterControllerPos;
+    }
+
+    public static boolean hostCenterInRange(Object world, double cameraX, double cameraZ, int renderChunks) {
+        var source = hostCenterWorld;
+        if (source == null) return true; // 手動預覽沿用原本規則。
+        double[] center = centerOverride;
+        return source.get() == world && center != null
+                && withinChunkRenderDistance(cameraX, cameraZ, center[0], center[2], renderChunks);
+    }
+
+    public static boolean withinChunkRenderDistance(double cameraX, double cameraZ,
+                                                     double centerX, double centerZ, int renderChunks) {
+        long cameraChunkX = (long) Math.floor(cameraX / 16.0), cameraChunkZ = (long) Math.floor(cameraZ / 16.0);
+        long centerChunkX = (long) Math.floor(centerX / 16.0), centerChunkZ = (long) Math.floor(centerZ / 16.0);
+        long distance = Math.max(0, renderChunks);
+        return Math.abs(cameraChunkX - centerChunkX) <= distance && Math.abs(cameraChunkZ - centerChunkZ) <= distance;
+    }
+
+    public static void clearHostCenter() {
+        if (hostCenterWorld == null) return;
+        hostCenterWorld = null;
+        hostCenterControllerPos = 0L;
+        centerOverride = null;
+        clearHostRadiusBlocks();
+        clearHostLensEnabled();
+    }
+
+    /** 山海：超距的另一台主機不可清掉仍在畫面內的中心。 */
+    public static boolean clearHostCenter(Object world, long controllerPos) {
+        var source = hostCenterWorld;
+        if (source == null || source.get() != world || hostCenterControllerPos != controllerPos) return false;
+        clearHostCenter();
+        return true;
     }
 
     /** @return 实际生效的倍率（已夹取） */

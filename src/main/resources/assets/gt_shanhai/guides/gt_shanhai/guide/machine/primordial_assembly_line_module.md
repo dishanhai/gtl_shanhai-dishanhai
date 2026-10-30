@@ -42,7 +42,7 @@ item_ids:
 
 * 起步档：空槽 `64`，<ItemLink id="dishanhai:wzrm" /> `128`，<ItemLink id="dishanhai:wzjc" /> `256`，<ItemLink id="dishanhai:wzcz1" /> `512`。
 * 中期档：<ItemLink id="dishanhai:wzsb" /> `2048`，<ItemLink id="dishanhai:wzcz2" /> `16384`，<ItemLink id="dishanhai:wzqs" /> `65536`。
-* 高阶档：<ItemLink id="dishanhai:wzgl" /> `524288`，<ItemLink id="dishanhai:wzsw" /> `2097152`，<ItemLink id="dishanhai:wzdf" /> `536870912`。
+* 高阶档：<ItemLink id="dishanhai:wzgl" /> `524288`，<ItemLink id="dishanhai:wzsw" /> `2097152`，<ItemLink id="dishanhai:wzdf" /> `402653184`。
 * 顶格档：<ItemLink id="dishanhai:wzcz3" /> `4611686018427387903`，<ItemLink id="dishanhai:reality_anchor_module" /> `6917529027641081855`，<ItemLink id="dishanhai:create_mk" /> 直接到无限。
 
 </Column>

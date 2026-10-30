@@ -670,7 +670,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     @Override
     public int getAdditionalThread() {
-        long boost = getThreadBoost();
+        long boost = hasInfiniteMatterThreads() ? Long.MAX_VALUE : getThreadBoost();
         return boost > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) boost;
     }
 
@@ -680,8 +680,32 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
     }
 
     public long getRecipeLogicThreadMultiplier() {
+        if (hasInfiniteMatterThreads()) return Long.MAX_VALUE;
         long boost = getThreadBoost();
         return boost > 0L ? boost : 1L;
+    }
+
+    /** 山海：現實錨點／創始物質模組供給配方名額，不依賴專用超限器。 */
+    private boolean hasInfiniteMatterThreads() {
+        return Math.max(getModuleLevel(), getParallelModuleLevel()) >= 16;
+    }
+
+    /** 子類既有獨立槽中只辨識物質模組；不把線程槽或額外挂載當並行物質來源。 */
+    protected int getParallelModuleLevel() {
+        int level = getHostMatterLevelOverride();
+        for (NotifiableItemStackHandler storage : getPersistedStorages()) {
+            if (storage == null || isBaseStorage(storage)) continue;
+            for (int slot = 0; slot < storage.storage.getSlots(); slot++) {
+                level = Math.max(level, getModuleLevelByStack(storage.storage.getStackInSlot(slot)));
+            }
+        }
+        return level;
+    }
+
+    /** AR 與機器 UI 共用真正配方分配的容量，包含線程及主機增益，與是否正在加工無關。 */
+    public long getAvailableRecipeParallel() {
+        return getRecipeLogic() instanceof PrimordialModuleRecipeLogic logic
+                ? logic.getParallelCapacity() : getRecipeLogicMaxParallel();
     }
 
 
@@ -1265,8 +1289,8 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     @Override
     protected void addParallelDisplay(List<Component> textList) {
-        long parallel = getCurrentParallel();
-        boolean isInfinite = parallel >= Long.MAX_VALUE / 2;
+        long parallel = getAvailableRecipeParallel();
+        boolean isInfinite = parallel > Integer.MAX_VALUE;
         var parallelText = isInfinite
             ? DShanhaiTextUtil.createUltimateRainbow("无限")
             : Component.literal(String.format("%,d", parallel)).withStyle(ChatFormatting.GOLD);
@@ -1276,16 +1300,14 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                 .append(parallelText)
                 .append(Component.literal("个配方")));
         long boost = getThreadBoost();
-        var threadText = boost > 0
-            ? DShanhaiTextUtil.createNeonText(String.format("%,d", boost))
-            : Component.literal("1").withStyle(ChatFormatting.GRAY);
+        var threadText = threadCountText(getRecipeLogicThreadMultiplier());
         textList.add(Component.literal("")
                 .append(Component.literal("跨配方线程: "))
                 .append(threadText));
         if (boost > 0) {
             textList.add(Component.literal("")
                     .append(DShanhaiTextUtil.createElectricText("线程倍率: "))
-                    .append(DShanhaiTextUtil.createAuroraText("×" + boost)));
+                    .append(Component.literal("×")).append(threadCountText(boost)));
         }
         if (hasParallelOverdriver()) {
             textList.add(Component.literal("")
@@ -1321,13 +1343,11 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         long boost = getThreadBoost();
         textList.add(Component.literal("")
                 .append(DShanhaiTextUtil.createElectricText("跨配方线程: "))
-                .append(boost > 0
-                        ? DShanhaiTextUtil.createNeonText(String.format("%,d", boost))
-                        : Component.literal("1").withStyle(ChatFormatting.GRAY)));
+                .append(threadCountText(getRecipeLogicThreadMultiplier())));
         if (boost > 0) {
             textList.add(Component.literal("")
                     .append(DShanhaiTextUtil.createElectricText("线程倍率: "))
-                    .append(DShanhaiTextUtil.createMagicText("×" + boost)));
+                    .append(Component.literal("×")).append(threadCountText(boost)));
         }
         if (hasParallelOverdriver()) {
             textList.add(Component.literal("")
@@ -1345,6 +1365,11 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         if (hasHyperstableBlackHoleSeedMounted()) {
             textList.add(Component.literal("§d◆ 超稳态黑洞种子 · 输出端可写时吞噬溢出产物"));
         }
+    }
+
+    private static Component threadCountText(long threads) {
+        return threads >= Integer.MAX_VALUE ? DShanhaiTextUtil.createUltimateRainbow("无限")
+                : DShanhaiTextUtil.createNeonText(String.format("%,d", Math.max(1L, threads)));
     }
 
     /** 添加物质模块搭载信息 */

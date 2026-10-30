@@ -3,6 +3,7 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.renderer.MultiBufferSource;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -13,51 +14,58 @@ public final class GuixuStarRenderer {
 
     /** 呼叫方已將 PoseStack 放到環心並套用機器朝向，相機也使用同一座標系。 */
     public static void render(PoseStack pose, float[] camera, double seconds, double surfaceRadius,
-                              float density, float brightness, float jets, boolean infallEnabled) {
+                              float density, float brightness, float jets, boolean infallEnabled, boolean ambientEnabled) {
+        if (!infallEnabled && !ambientEnabled) return;
         var layer = HostFxDraw.beamLayer();
         var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
         VertexConsumer vertices = buffers.getBuffer(layer);
         Matrix4f matrix = pose.last().pose();
+        Matrix4f clip = new Matrix4f(RenderSystem.getProjectionMatrix()).mul(matrix);
+        Vector3f head = new Vector3f(), tail = new Vector3f(), view = new Vector3f();
+        Vector3f right = new Vector3f(), up = new Vector3f(), width = new Vector3f();
         for (int i = 0; infallEnabled && i < GuixuStarField.PARTICLE_COUNT; i++) {
-            var star = GuixuStarField.sample(i, seconds, surfaceRadius);
             float visibility = Math.max(0.0F, Math.min(1.0F, (density * GuixuStarField.PARTICLE_COUNT - i) / 8.0F));
+            if (visibility <= 0) continue;
+            var star = GuixuStarField.sample(i, seconds, surfaceRadius);
             float alpha = star.alpha() * visibility * brightness;
-            if (alpha <= 0.001F) continue;
-            Vector3f head = new Vector3f((float) star.headX(), (float) star.headY(), (float) star.headZ());
-            Vector3f tail = new Vector3f((float) star.tailX(), (float) star.tailY(), (float) star.tailZ());
-            Vector3f view = new Vector3f(camera[0], camera[1], camera[2]).sub(head);
+            if (alpha <= 0.001F || !visible(clip, star)) continue;
+            head.set((float) star.headX(), (float) star.headY(), (float) star.headZ());
+            tail.set((float) star.tailX(), (float) star.tailY(), (float) star.tailZ());
+            view.set(camera[0], camera[1], camera[2]).sub(head);
             if (view.lengthSquared() < 1.0e-8F) view.set(0, 0, 1);
             view.normalize();
-            Vector3f right = view.cross(0, 1, 0, new Vector3f());
+            right.set(view).cross(0, 1, 0);
             if (right.lengthSquared() < 1.0e-8F) right.set(1, 0, 0);
             right.normalize();
-            Vector3f up = right.cross(view, new Vector3f()).normalize();
+            up.set(right).cross(view).normalize();
             float red = star.warm() ? 1.0F : 0.56F;
             float green = star.warm() ? 0.78F : 0.80F;
             float blue = star.warm() ? 0.48F : 1.0F;
 
-            Vector3f width = new Vector3f(tail).sub(head).cross(view);
+            width.set(tail).sub(head).cross(view);
             if (width.lengthSquared() < 1.0e-8F) width.set(right);
             width.normalize().mul(star.size() * 0.38F);
             // 尾端透明，星點所在的前端明亮；拖尾跟隨軌跡而非固定朝向。
-            vertex(vertices, matrix, new Vector3f(tail).add(width), red, green, blue, 0);
-            vertex(vertices, matrix, new Vector3f(head).add(width), red, green, blue, alpha * 0.65F);
-            vertex(vertices, matrix, new Vector3f(head).sub(width), red, green, blue, alpha * 0.65F);
-            vertex(vertices, matrix, new Vector3f(tail).sub(width), red, green, blue, 0);
-            glint(vertices, matrix, head, right, up, star.size() * 2.0F, star.size() * 0.22F,
+            ambientVertex(vertices, matrix, tail.x + width.x, tail.y + width.y, tail.z + width.z, red, green, blue, 0);
+            ambientVertex(vertices, matrix, head.x + width.x, head.y + width.y, head.z + width.z, red, green, blue, alpha * 0.65F);
+            ambientVertex(vertices, matrix, head.x - width.x, head.y - width.y, head.z - width.z, red, green, blue, alpha * 0.65F);
+            ambientVertex(vertices, matrix, tail.x - width.x, tail.y - width.y, tail.z - width.z, red, green, blue, 0);
+            ambientGlint(vertices, matrix, head, right, up, star.size() * 2.0F, star.size() * 0.22F,
                     red, green, blue, alpha * 0.65F);
-            glint(vertices, matrix, head, right, up, star.size() * 0.22F, star.size() * 2.0F,
+            ambientGlint(vertices, matrix, head, right, up, star.size() * 0.22F, star.size() * 2.0F,
                     red, green, blue, alpha * 0.65F);
-            glint(vertices, matrix, head, right, up, star.size() * 0.55F, star.size() * 0.55F,
+            ambientGlint(vertices, matrix, head, right, up, star.size() * 0.55F, star.size() * 0.55F,
                     1.0F, 0.96F, 0.90F, alpha);
         }
         if (infallEnabled && jets > 0.001F) drawJets(vertices, matrix, seconds, surfaceRadius, jets);
-        drawAmbient(vertices, matrix, camera, HostFxSwitch.spinSeconds(), density, brightness, HostFxSwitch.degraded());
+        if (ambientEnabled) {
+            drawAmbient(vertices, matrix, clip, camera, HostFxSwitch.spinSeconds(), density, brightness, HostFxSwitch.degraded());
+        }
         buffers.endBatch(layer);
     }
 
     /** 山海：共用一批頂點；背景、星塵與流星均有固定數量上限，不建立粒子實體。 */
-    private static void drawAmbient(VertexConsumer vertices, Matrix4f matrix, float[] camera,
+    private static void drawAmbient(VertexConsumer vertices, Matrix4f matrix, Matrix4f clip, float[] camera,
                                     double seconds, float density, float brightness, boolean degraded) {
         int[] counts = {GuixuStarField.skyCount(density, degraded),
                 degraded ? 0 : Math.round(GuixuStarField.ORBIT_COUNT * Math.max(0.25F, Math.min(1F, density))),
@@ -73,7 +81,7 @@ public final class GuixuStarRenderer {
                     default -> GuixuStarField.sampleMeteor(i, seconds);
                 };
                 float alpha = star.alpha() * light;
-                if (alpha <= 0.001F) continue;
+                if (alpha <= 0.001F || !visible(clip, star)) continue;
                 center.set((float) star.headX(), (float) star.headY(), (float) star.headZ());
                 view.set(camera[0], camera[1], camera[2]).sub(center);
                 if (view.lengthSquared() < 1.0e-8F) view.set(0, 0, 1);
@@ -129,6 +137,15 @@ public final class GuixuStarRenderer {
         vertices.vertex(matrix, x, y, z).color(red, green, blue, alpha).endVertex();
     }
 
+    private static boolean visible(Matrix4f clip, GuixuStarField.Sample star) {
+        float x = (float) ((star.headX() + star.tailX()) * 0.5);
+        float y = (float) ((star.headY() + star.tailY()) * 0.5);
+        float z = (float) ((star.headZ() + star.tailZ()) * 0.5);
+        float trail = (float) Math.max(Math.abs(star.headX() - star.tailX()),
+                Math.max(Math.abs(star.headY() - star.tailY()), Math.abs(star.headZ() - star.tailZ()))) * 0.5F;
+        return HostFxVisibility.isVisible(clip, x, y, z, trail + star.size() * 2.6F);
+    }
+
     /** 發電時的雙極噴流，使用同一批加性頂點，兩端淡出。 */
     private static void drawJets(VertexConsumer vertices, Matrix4f matrix, double seconds, double horizon, float strength) {
         for (int sign : new int[]{-1, 1}) {
@@ -160,17 +177,4 @@ public final class GuixuStarRenderer {
                 .color(0.35F, 0.8F, 1.0F, alpha).endVertex();
     }
 
-    private static void glint(VertexConsumer vertices, Matrix4f matrix, Vector3f center,
-                              Vector3f right, Vector3f up, float horizontal, float vertical,
-                              float red, float green, float blue, float alpha) {
-        vertex(vertices, matrix, new Vector3f(center).fma(horizontal, right), red, green, blue, alpha);
-        vertex(vertices, matrix, new Vector3f(center).fma(vertical, up), red, green, blue, alpha);
-        vertex(vertices, matrix, new Vector3f(center).fma(-horizontal, right), red, green, blue, alpha);
-        vertex(vertices, matrix, new Vector3f(center).fma(-vertical, up), red, green, blue, alpha);
-    }
-
-    private static void vertex(VertexConsumer vertices, Matrix4f matrix, Vector3f point,
-                               float red, float green, float blue, float alpha) {
-        vertices.vertex(matrix, point.x, point.y, point.z).color(red, green, blue, alpha).endVertex();
-    }
 }

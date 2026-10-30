@@ -94,15 +94,15 @@ public class PrimordialMatterCaster extends PrimordialOmegaEngineModuleBase {
         ITEM_PARALLEL_MAP.put(ITEM_WZGL, 524288L);
         ITEM_PARALLEL_MAP.put(ITEM_WZHY, 1048576L);
         ITEM_PARALLEL_MAP.put(ITEM_WZSW, 2097152L);
-        ITEM_PARALLEL_MAP.put(ITEM_WZCX, 268435456L);
-        ITEM_PARALLEL_MAP.put(ITEM_WZDF, 536870912L);
-        ITEM_PARALLEL_MAP.put(ITEM_WZYH, 2147483647L);
+        ITEM_PARALLEL_MAP.put(ITEM_WZCX, 201326592L);
+        ITEM_PARALLEL_MAP.put(ITEM_WZDF, 402653184L);
+        ITEM_PARALLEL_MAP.put(ITEM_WZYH, 1610612736L);
         ITEM_PARALLEL_MAP.put(ITEM_WZCZ3, 4611686018427387903L);
         ITEM_PARALLEL_MAP.put(ITEM_REALITY_ANCHOR, 6917529027641081855L);
         ITEM_PARALLEL_MAP.put(ITEM_CREATE_MK, Long.MAX_VALUE);
         ITEM_PARALLEL_MAP.put(ITEM_WZXC, 1024L);
         ITEM_PARALLEL_MAP.put(ITEM_WZHY, 1048576L);
-        ITEM_PARALLEL_MAP.put(ITEM_WZDF, 536870912L);
+        ITEM_PARALLEL_MAP.put(ITEM_WZDF, 402653184L);
 
     }
 
@@ -162,8 +162,8 @@ public class PrimordialMatterCaster extends PrimordialOmegaEngineModuleBase {
         var stack = machineStorage.storage.getStackInSlot(0);
         var itemName = moduleSlotItemName(stack);
         textList.add(Component.literal("").append(DShanhaiTextUtil.createElectricText("已安装: ")).append(itemName));
-        long p = getCurrentParallel();
-        boolean inf = p >= Long.MAX_VALUE / 2;
+        long p = getAvailableRecipeParallel();
+        boolean inf = p > Integer.MAX_VALUE;
         textList.add(Component.literal("").append(DShanhaiTextUtil.createElectricText("并行上限: "))
                 .append(inf ? DShanhaiTextUtil.createUltimateRainbow("∞ 无限") : DShanhaiTextUtil.createAuroraText(String.format("%,d", p))));
         addThreadBoostDisplay(textList);

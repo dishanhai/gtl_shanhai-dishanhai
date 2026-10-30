@@ -54,7 +54,7 @@ import java.util.function.LongPredicate;
 
 public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
 
-    /** 山海：附在最終批次上，AR 只讀成功處理的並行，不讀預分配或並行上限。 */
+    /** 山海：成功批次的實際並行診斷值；AR 的配置容量另讀 getParallelCapacity()。 */
     public static final String ACTUAL_PARALLEL_KEY = "sh_primordial_actual_parallel";
     private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;
     private long stellarLastAllocatedRecipes;
@@ -241,13 +241,12 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                 && module.isCrossTypeParallelActive() ? module.getRecipeLogicThreadMultiplier() : Long.MAX_VALUE;
         for (GTRecipe recipe : recipes) {
             if (recipeList.size() >= crossTypeThreads) break;
-            MatchableScaledRecipe matchable = findMaxMatchableScaledRecipe(recipe, totalParallel);
-            if (matchable == null) {
+            long parallel = getMaxParallel(recipe, totalParallel);
+            if (parallel <= 0L) {
                 continue;
             }
             recipeList.add(recipe);
-            parallels[index] = matchable.parallel;
-            matchableScaledRecipeCache.put(recipe, matchable);
+            parallels[index] = parallel;
             index++;
         }
         if (recipeList.isEmpty()) {
@@ -284,6 +283,11 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         return containmentBonus().scaleParallel(super.getTotalParallelLimit());
     }
 
+    /** 山海：給 UI／AR 的當前可用上限，與分配共用公式，不觸發配方搜尋或扣料。 */
+    public long getParallelCapacity() {
+        return getTotalParallelLimit();
+    }
+
     private void invalidateLookupSetCacheIfConfigured() {
         if (shouldInvalidateLookupCacheWhenNoRunnableRecipe()) {
             invalidateLookupSetCache();
@@ -293,6 +297,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     @Override
     public long getMaxParallel(GTRecipe recipe, long limit) {
         MatchableScaledRecipe matchable = findMaxMatchableScaledRecipe(recipe, limit);
+        if (matchable != null) matchableScaledRecipeCache.put(recipe, matchable);
         return matchable == null ? 0L : matchable.parallel;
     }
 

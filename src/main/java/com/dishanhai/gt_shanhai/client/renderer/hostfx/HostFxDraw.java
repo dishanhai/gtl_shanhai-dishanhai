@@ -15,6 +15,7 @@ import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.resources.ResourceLocation;
 
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL11;
@@ -120,6 +121,7 @@ public final class HostFxDraw {
 
     /** 懒建的批处理层（{@code RenderType.create} 一帧只跑一次）。 */
     private static RenderType beamLayer;
+    private static RenderType nebulaLayer;
 
     /** 上一帧提交的四边形数（日志/自检用；每帧应 = {@link HostFxGeometry#beamQuadCount()}）。 */
     private static int lastQuads;
@@ -227,6 +229,24 @@ public final class HostFxDraw {
                             .createCompositeState(false));
         }
         return beamLayer;
+    }
+
+    /** 山海：動態雲氣材質；資源載入失敗時使用原生貼圖 shader。 */
+    public static RenderType nebulaLayer() {
+        if (nebulaLayer == null) {
+            nebulaLayer = RenderType.create("shanhai_guixu_nebula", GuixuNebulaShader.FORMAT,
+                    VertexFormat.Mode.QUADS, 8192, false, false,
+                    RenderType.CompositeState.builder()
+                            .setShaderState(new RenderStateShard.ShaderStateShard(GuixuNebulaShader::shader))
+                            .setTextureState(new RenderStateShard.TextureStateShard(
+                                    new ResourceLocation("gt_shanhai", "textures/effect/guixu_nebula.png"), true, false))
+                            .setTransparencyState(ADDITIVE)
+                            .setDepthTestState(new RenderStateShard.DepthTestStateShard("lequal", GL11.GL_LEQUAL))
+                            .setWriteMaskState(new RenderStateShard.WriteMaskStateShard(true, false))
+                            .setCullState(new RenderStateShard.CullStateShard(false))
+                            .createCompositeState(false));
+        }
+        return nebulaLayer;
     }
 
     /**

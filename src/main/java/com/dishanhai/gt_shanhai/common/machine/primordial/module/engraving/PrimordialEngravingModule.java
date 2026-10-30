@@ -83,15 +83,15 @@ public class PrimordialEngravingModule extends PrimordialOmegaEngineModuleBase {
         ITEM_PARALLEL_MAP.put(ITEM_WZQS, 65536L);
         ITEM_PARALLEL_MAP.put(ITEM_WZGL, 524288L);
         ITEM_PARALLEL_MAP.put(ITEM_WZSW, 2097152L);
-        ITEM_PARALLEL_MAP.put(ITEM_WZCX, 268435456L);
-        ITEM_PARALLEL_MAP.put(ITEM_WZYH, 2147483647L);
+        ITEM_PARALLEL_MAP.put(ITEM_WZCX, 201326592L);
+        ITEM_PARALLEL_MAP.put(ITEM_WZYH, 1610612736L);
         ITEM_PARALLEL_MAP.put(ITEM_WZCZ3, 4611686018427387903L);
         ITEM_PARALLEL_MAP.put(ITEM_CREATE_MK, Long.MAX_VALUE);
         ITEM_PARALLEL_MAP.put(ITEM_REALITY_ANCHOR, 6917529027641081855L);
         ITEM_PARALLEL_MAP.put(ITEM_WZAX, 4096L);
         ITEM_PARALLEL_MAP.put(ITEM_WZXC, 1024L);
         ITEM_PARALLEL_MAP.put(ITEM_WZHY, 1048576L);
-        ITEM_PARALLEL_MAP.put(ITEM_WZDF, 536870912L);
+        ITEM_PARALLEL_MAP.put(ITEM_WZDF, 402653184L);
     }
 
     private void scanBoostItem() {
@@ -123,6 +123,11 @@ public class PrimordialEngravingModule extends PrimordialOmegaEngineModuleBase {
     }
 
     @Override
+    public long getCurrentParallel() {
+        return currentParallel;
+    }
+
+    @Override
     public PrimordialEngravingModuleLogic createRecipeLogic(Object... args) {
         return new PrimordialEngravingModuleLogic(this);
     }
@@ -140,6 +145,7 @@ public class PrimordialEngravingModule extends PrimordialOmegaEngineModuleBase {
 
     @Override
     protected void addParallelDisplay(List<Component> textList) {
+        long parallel = getAvailableRecipeParallel();
         var stack = machineStorage.storage.getStackInSlot(0);
         var itemName = moduleSlotItemName(stack);
 
@@ -150,14 +156,8 @@ public class PrimordialEngravingModule extends PrimordialOmegaEngineModuleBase {
         textList.add(Component.literal("")
                 .append(Component.literal("并行上限: "))
                 .append(DShanhaiTextUtil.createNeonText(
-                        currentParallel >= Long.MAX_VALUE ? "无限" : String.format("%,d", currentParallel))));
-
-        long boost = getThreadBoost();
-        if (boost > 0) {
-            textList.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createElectricText("跨配方线程: "))
-                    .append(DShanhaiTextUtil.createNeonText(String.format("%,d", boost))));
-        }
+                        parallel > Integer.MAX_VALUE ? "无限" : String.format("%,d", parallel))));
+        addThreadBoostDisplay(textList);
     }
 
     @Override

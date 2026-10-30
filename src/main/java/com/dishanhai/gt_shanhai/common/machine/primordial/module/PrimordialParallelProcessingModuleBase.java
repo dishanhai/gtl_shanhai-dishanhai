@@ -56,8 +56,8 @@ public abstract class PrimordialParallelProcessingModuleBase extends PrimordialO
         String[] ids = { "wzrm", "wzjc", "wzcz1", "wzsb", "wzcz2", "wzqs", "wzgl", "wzsw",
                 "wzcx", "wzyh", "wzcz3", "create_mk", "reality_anchor_module", "wzax", "wzxc", "wzhy", "wzdf" };
         long[] parallels = { 128L, 256L, 512L, 2048L, 16384L, 65536L, 524288L, 2097152L,
-                268435456L, 2147483647L, 4611686018427387903L, Long.MAX_VALUE, 6917529027641081855L,
-                4096L, 1024L, 1048576L, 536870912L };
+                201326592L, 1610612736L, 4611686018427387903L, Long.MAX_VALUE, 6917529027641081855L,
+                4096L, 1024L, 1048576L, 402653184L };
         for (int i = 0; i < ids.length; i++) {
             Item item = ForgeRegistries.ITEMS.getValue(new ResourceLocation("dishanhai", ids[i]));
             if (item != null) ITEM_PARALLEL_MAP.put(item, parallels[i]);
@@ -129,9 +129,10 @@ public abstract class PrimordialParallelProcessingModuleBase extends PrimordialO
         var stack = machineStorage.storage.getStackInSlot(0);
         var itemName = moduleSlotItemName(stack);
         textList.add(Component.literal("").append(DShanhaiTextUtil.createElectricText("已安装: ")).append(itemName));
-        boolean infinite = currentParallel >= Long.MAX_VALUE / 2;
+        long parallel = getAvailableRecipeParallel();
+        boolean infinite = parallel > Integer.MAX_VALUE;
         var parallelText = infinite ? DShanhaiTextUtil.createUltimateRainbow("∞ 无限")
-                : DShanhaiTextUtil.createAuroraText(String.format("%,d", currentParallel));
+                : DShanhaiTextUtil.createAuroraText(String.format("%,d", parallel));
         textList.add(Component.literal("").append(DShanhaiTextUtil.createElectricText("并行上限: ")).append(parallelText));
         addThreadBoostDisplay(textList);
     }

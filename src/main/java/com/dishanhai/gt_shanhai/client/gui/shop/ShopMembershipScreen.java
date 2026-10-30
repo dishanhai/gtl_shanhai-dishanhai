@@ -225,6 +225,7 @@ public class ShopMembershipScreen extends ScaledScreen {
         drawButton(g, cx + allW + 4, bankAllY(), allW, 14, "§6全部取出", mx, my);
         drawButton(g, cx + (allW + 4) * 2, bankAllY(), allW, 14, "§b还清", mx, my);
         g.drawString(this.font, rateHint(bank), cx, bankRateHintY(), GRAY, true);
+        g.drawString(this.font, "§7提交商店电压阶段提升贷款额度：ULV 1,000 起，每阶 ×4。", cx, bankRateHintY() + 12, GRAY, true);
     }
 
     private void drawCard(GuiGraphics g, int x, int y, int w, int h, String title,

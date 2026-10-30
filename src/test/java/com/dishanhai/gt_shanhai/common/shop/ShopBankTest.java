@@ -4,6 +4,7 @@ import net.minecraft.nbt.CompoundTag;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -12,6 +13,75 @@ class ShopBankTest {
     private static final long HOUR = ShopBank.MS_PER_HOUR;
     private static final long T0 = 1_700_000_000_000L;
     private static final BigInteger PRINCIPAL = BigInteger.valueOf(1_000_000L);
+
+    @Test
+    void loansRequireAnActualVoltageStageSubmission() {
+        assertEquals(0L, ShopBank.loanCap(100_000_000L, "杂货/正常", Set.of(), Set.of()));
+        assertEquals(0L, ShopBank.loanCap(100_000_000L, "杂货/正常",
+                Set.of("stage:其他/hv", "entry:杂货/正常/max", "stage:杂货/正常"), Set.of()));
+    }
+
+    @Test
+    void highestSubmittedVoltageRaisesCreditByFourPerTier() {
+        String[] tiers = {"ulv", "lv", "mv", "hv", "ev", "iv", "luv", "zpm", "uv", "uhv",
+                "uev", "uiv", "uxv", "opv", "max"};
+        long expected = 1000L;
+        for (String tier : tiers) {
+            assertEquals(expected, ShopBank.loanCap(Long.MAX_VALUE, "自定义/电压",
+                    Set.of("stage:自定义/电压/" + tier), Set.of()));
+            expected *= 4L;
+        }
+        assertEquals(64_000L, ShopBank.loanCap(100_000_000L, "杂货/正常",
+                Set.of("stage:杂货/正常/ulv", "stage:杂货/正常/hv"), Set.of()));
+    }
+
+    @Test
+    void submittedChildDoesNotBypassConfiguredParentRequirements() {
+        Set<String> requirements = Set.of("杂货", "杂货/正常", "杂货/正常/hv", "其他/max");
+        assertEquals(0L, ShopBank.loanCap(100_000_000L, "杂货/正常",
+                Set.of("stage:杂货/正常/hv"), requirements));
+        assertEquals(1000L, ShopBank.loanCap(100_000_000L, "杂货/正常",
+                Set.of("stage:杂货", "stage:杂货/正常", "stage:杂货/正常/ulv"), requirements));
+        assertEquals(64_000L, ShopBank.loanCap(100_000_000L, "杂货/正常",
+                Set.of("stage:杂货", "stage:杂货/正常", "stage:杂货/正常/hv"), requirements));
+    }
+
+    @Test
+    void stageCreditAlsoHonorsTheServerCeiling() {
+        Set<String> unlocked = Set.of("stage:杂货/正常/max");
+        assertEquals(100_000_000L, ShopBank.loanCap(100_000_000L, "杂货/正常", unlocked, Set.of()));
+        assertEquals(500L, ShopBank.loanCap(500L, "杂货/正常", unlocked, Set.of()));
+        assertEquals(0L, ShopBank.loanCap(0L, "杂货/正常", unlocked, Set.of()));
+        assertEquals(0L, ShopBank.loanCap(-1L, "杂货/正常", unlocked, Set.of()));
+    }
+
+    @Test
+    void repeatedBorrowingCannotExceedStageCreditAndExistingDebtIsPreserved() {
+        BigInteger cap = BigInteger.valueOf(ShopBank.loanCap(100_000_000L, "杂货/正常",
+                Set.of("stage:杂货/正常/ulv"), Set.of()));
+        ShopBank.Move first = ShopBank.borrow(null, BigInteger.valueOf(100_000_000L), cap, T0, 15L);
+        assertEquals(BigInteger.valueOf(1000L), first.amount);
+        ShopBank.Move repeated = ShopBank.borrow(first.book, BigInteger.valueOf(100_000_000L), cap, T0, 15L);
+        assertEquals(BigInteger.ZERO, repeated.amount);
+
+        ShopBank.Book oldDebt = new ShopBank.Book(PRINCIPAL, BigInteger.valueOf(15L), T0);
+        assertEquals(BigInteger.ZERO, ShopBank.room(oldDebt, cap));
+        ShopBank.Move blocked = ShopBank.borrow(oldDebt, BigInteger.ONE, cap, T0, 15L);
+        assertEquals(BigInteger.ZERO, blocked.amount);
+        assertEquals(oldDebt.total(), blocked.book.total());
+        assertEquals(oldDebt.total(), ShopBank.repay(oldDebt, oldDebt.total(), oldDebt.total(), T0, 15L).amount);
+    }
+
+    @Test
+    void stageUpgradeAddsOnlyTheRemainingRoomAfterPrincipalAndInterest() {
+        ShopBank.Book debt = new ShopBank.Book(BigInteger.valueOf(1000L), BigInteger.ZERO, T0);
+        BigInteger cap = BigInteger.valueOf(ShopBank.loanCap(100_000_000L, "杂货/正常",
+                Set.of("stage:杂货/正常/ulv", "stage:杂货/正常/lv"), Set.of()));
+        ShopBank.Move upgraded = ShopBank.borrow(debt, BigInteger.valueOf(100_000_000L), cap, T0 + HOUR, 15L);
+        assertEquals(BigInteger.valueOf(2999L), upgraded.amount);
+        assertEquals(BigInteger.ONE, upgraded.book.interest);
+        assertEquals(BigInteger.valueOf(4000L), upgraded.book.total());
+    }
 
     @Test
     void partialHourDoesNotAccrueAndNinetyMinutesKeepsRemainder() {

@@ -184,7 +184,7 @@ public final class DShanhaiConfig {
         public ForgeConfigSpec.IntValue shopBankDepositRateBpPerHour;
         /** 山海商店银行 — 贷款每小时计息基点（万分之N） */
         public ForgeConfigSpec.IntValue shopBankLoanRateBpPerHour;
-        /** 山海商店银行 — 单玩家最大欠款上限（星火） */
+        /** 山海商店银行 — 阶段贷款额度的总上限（星火） */
         public ForgeConfigSpec.LongValue shopBankMaxLoanSpark;
         /** 山海商店银行 — 贷款期限（小时），到期仍欠款则拒绝再借 */
         public ForgeConfigSpec.IntValue shopBankLoanTermHours;
@@ -499,7 +499,10 @@ public final class DShanhaiConfig {
                              "刻意高于存款利率吃利差。还款先冲利息再冲本金。不做强制追讨或抵押没收")
                     .defineInRange("loanRateBpPerHour", 15, 0, 10_000);
             shopBankMaxLoanSpark = builder
-                    .comment("山海商店银行：单玩家最大欠款上限（星火），本金加利息达到上限后借不出新的（默认 1亿）")
+                    .comment("山海商店银行：阶段贷款额度的总上限（星火，默认 1亿）",
+                             "未提交电压阶段不能借款；ULV 1000 星火，此后每阶 ×4，取阶段额度与本配置的较小值。",
+                             "阶段沿用 currency_stages.json 的 stagePrefix；已配置的父阶段也必须提交。",
+                             "已欠本金加利息占用额度；旧欠款超过当前阶段额度时保留欠款，停止追加放款。")
                     .defineInRange("maxLoanSpark", 100_000_000L, 0L, Long.MAX_VALUE);
             shopBankLoanTermHours = builder
                     .comment("山海商店银行：贷款期限（小时，默认 24）",

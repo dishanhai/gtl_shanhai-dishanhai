@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.common.shop;
 
 import java.math.BigInteger;
+import java.util.Set;
 
 /**
  * 星火存款 / 贷款利息（山海署名，纯函数）。线性单利：利息只按本金计，不加回本金。
@@ -13,6 +14,37 @@ public final class ShopBank {
     private ShopBank() {}
 
     public static final long MS_PER_HOUR = 3_600_000L;
+    private static final String[] LOAN_TIERS = {
+            "ulv", "lv", "mv", "hv", "ev", "iv", "luv", "zpm", "uv", "uhv",
+            "uev", "uiv", "uxv", "opv", "max"
+    };
+
+    /**
+     * 山海銀行：ULV 額度 1000 星火，此後每階 ×4，並受伺服器總上限限制。
+     * 只認實際提交的電壓階段；缺少配置要求不代表已提交，已配置的父階段也必須完成。
+     */
+    public static long loanCap(long ceiling, String stagePrefix, Set<String> submittedKeys, Set<String> requiredPaths) {
+        if (ceiling <= 0L || submittedKeys.isEmpty()) return 0L;
+        String prefix = stagePrefix == null || stagePrefix.isBlank() ? "" : stagePrefix.trim() + "/";
+        long cap = 0L;
+        long tierCap = 1000L;
+        for (String tier : LOAN_TIERS) {
+            String path = prefix + tier;
+            boolean unlocked = submittedKeys.contains("stage:" + path);
+            if (unlocked) {
+                for (String required : requiredPaths) {
+                    if ((path.equals(required) || path.startsWith(required + "/"))
+                            && !submittedKeys.contains("stage:" + required)) {
+                        unlocked = false;
+                        break;
+                    }
+                }
+            }
+            if (unlocked) cap = Math.min(ceiling, tierCap);
+            tierCap *= 4L;
+        }
+        return cap;
+    }
 
     /** 一笔存款或一笔贷款：本金、尚未入账到本金的利息、上次计息起点。 */
     public static final class Book {

@@ -31,13 +31,14 @@ import java.util.Locale;
  *   ⑤「角速度」（上一轮由「中子星渲染/大小与颜色」改来）  ⇒ 内环 / 上舰 / 下舰 三个 IntInputWidget
  *   ⑥「特效渲染」（上一轮由「始终渲染为工作状态」改来）    ⇒ 一个 IFancyConfiguratorButton.Toggle（无面板）
  * </pre>
- * ⇒ 现在只有<b>一个</b> tab「渲染参数」，点开一次就同时给出这 6 项 + 新增的第 7 项（AR 遮罩）。
+ * ⇒ 一个 tab「渲染参数」容納原有控制、AR 遮罩及外層星辰／星雲獨立開關。
  *
  * <h2>🔴 字段与语义一个字都没改（只是换了 UI 摆在哪）</h2>
  * <pre>
  *   hostRingDegPerSec / hostShipUpDegPerSec / hostShipDownDegPerSec   (°/s，整数，setter 里钳位)
  *   hostBlackHoleRadiusTenths                                          (×0.1 格，10..120)
  *   hostLensEnabled / hostFxEnabled / hostArMaskEnabled                (三个开关)
+ *   hostOuterStarsEnabled / hostNebulaEnabled                         (外層獨立開關)
  * </pre>
  * 全部仍是 {@code @Persisted @DescSynced} 机器字段，读写仍是原来那对 getter/setter。
  *
@@ -47,7 +48,7 @@ import java.util.Locale;
  *   view.setSize(new Size(widget.getWidth() + border * 2,                     // 宽 = 面板宽 + 8
  *                         widget.getHeight() + button.getHeight() + border)); // 高 = 面板高 + 24 + 4
  * </pre>
- * ⇒ 本面板 {@code 150 × 146} ⇒ 弹出面板 <b>158 × 170</b>（比它替换掉的「角速度」面板 158×144 高 26px）。
+ * ⇒ 本面板 {@code 150 × 166}，新增外層開關列並保留底部 5 px。
  * 每一行都是逐像素排的（控件越过 {@code PANEL_H} 时 LDLib <b>不报错、只被父容器裁掉</b> ⇒ 静默消失）：
  * <pre>
  *   y=3    标题「渲染参数（°/s · 洞径 ×0.1 格）」               底 11
@@ -58,7 +59,8 @@ import java.util.Locale;
  *   y=105  引力透镜 Button(4,105,72,16)+Label(10,109)           底 121
  *          AR遮罩   Button(74,105,72,16)+Label(80,109)
  *   y=125  特效渲染 Button(4,125,72,16)+Label(10,129)           底 141
- *   → 141 + 5 = 146（{@link #PANEL_H}）
+ *   y=145  外層星辰／外層星雲兩個獨立按鈕，底 161
+ *   → 161 + 5 = 166（{@link #PANEL_H}）
  * </pre>
  * 输入框内部布局由 {@code NumberInputWidget.buildUI} 算：{@code buttonWidth = clamp(w/5,15,40)}
  * ⇒ 82 宽 ⇒ 两个 ± 各 16、文本框 <b>50 px</b>（三位数「120」= 18 px，够）。
@@ -80,12 +82,11 @@ public final class HostFxConfigurators {
     private static final int PANEL_W = 150;
 
     /**
-     * 面板高 = <b>146</b>（弹出面板 158×170）。
+     * 面板高 = <b>166</b>，外層開關列底邊 161，保留 5 px。
      *
-     * <p>逐行算的，见类注释那张表：最后一个控件（特效渲染按钮）底边 {@code y=141}，留 5 px。
      * <b>再加一行就需要同步加高</b>，否则那一行会被静默裁掉。
      */
-    private static final int PANEL_H = 146;
+    private static final int PANEL_H = 166;
 
     /** 输入框的 x/宽（与标签列 4..60 不重叠）。 */
     private static final int INPUT_X = 64;
@@ -144,6 +145,8 @@ public final class HostFxConfigurators {
                                     + "§7（×0.1 格，§f52§7 = §f5.2§7 格）")
                             .withStyle(ChatFormatting.GRAY),
                     Component.literal("§7三个开关：引力透镜 / AR 遮罩 / 特效渲染")
+                            .withStyle(ChatFormatting.GRAY),
+                    Component.literal("§7外层开关：外层星辰 / 外层星云")
                             .withStyle(ChatFormatting.GRAY),
                     Component.literal("改的是机器状态，").withStyle(ChatFormatting.GRAY)
                             .append(Component.literal("所有人都会看到").withStyle(ChatFormatting.GOLD))
@@ -249,6 +252,22 @@ public final class HostFxConfigurators {
                             Component.literal("§8只管渲染特效：机壳/贴图的工作态外观不受它影响")));
             group.addWidget(new LabelWidget(10, 129, this::fxLabelText));
 
+            // 山海：外層效果可完全停繪，與原本只降級動畫的特效按鈕分開。
+            group.addWidget(new ButtonWidget(4, 145, 68, 16, GuiTextures.BUTTON,
+                    clickData -> host.setHostOuterStarsEnabled(!host.isHostOuterStarsEnabled()))
+                    .setHoverTooltips(
+                            Component.literal("§b外层星辰"),
+                            Component.literal("§7控制背景星空、环绕星尘与流星；关后完全停止绘制"),
+                            Component.literal("§8不影响黑洞内侧的吸入星辰；随主机存档并同步给所有玩家")));
+            group.addWidget(new LabelWidget(8, 149, this::outerStarsLabelText));
+            group.addWidget(new ButtonWidget(74, 145, 72, 16, GuiTextures.BUTTON,
+                    clickData -> host.setHostNebulaEnabled(!host.isHostNebulaEnabled()))
+                    .setHoverTooltips(
+                            Component.literal("§b外层星云"),
+                            Component.literal("§7控制结构周围的紫蓝云雾；关后完全停止绘制"),
+                            Component.literal("§8与外层星辰独立；随主机存档并同步给所有玩家")));
+            group.addWidget(new LabelWidget(78, 149, this::nebulaLabelText));
+
             return group;
         }
 
@@ -268,11 +287,19 @@ public final class HostFxConfigurators {
         private String fxLabelText() {
             return host.isHostFxEnabled() ? "§a特效渲染：开" : "§8特效渲染：关";
         }
+
+        private String outerStarsLabelText() {
+            return host.isHostOuterStarsEnabled() ? "§a外层星辰：开" : "§8外层星辰：关";
+        }
+
+        private String nebulaLabelText() {
+            return host.isHostNebulaEnabled() ? "§a外层星云：开" : "§8外层星云：关";
+        }
     }
 
-    /** 供外部（报告/自检）读的尺寸，避免"文档里写 150×146、代码里改了常量却没人知道"。 */
+    /** 供外部報告／自檢讀取實際尺寸。 */
     public static List<String> layoutTable() {
-        final List<String> rows = new ArrayList<>(8);
+        final List<String> rows = new ArrayList<>(9);
         rows.add("面板 " + PANEL_W + "×" + PANEL_H + "（弹出面板 " + (PANEL_W + 8) + "×" + (PANEL_H + 24) + "）");
         rows.add("标题 Label(4,3)");
         rows.add("内环 Label(4,20) + IntInput(" + INPUT_X + ",17," + INPUT_W + "," + INPUT_H + ")");
@@ -281,6 +308,7 @@ public final class HostFxConfigurators {
         rows.add("洞径 Label(4,86) + IntInput(" + INPUT_X + ",83," + INPUT_W + "," + INPUT_H + ")");
         rows.add("引力透镜 Button(4,105,72,16)+Label(10,109) ／ AR遮罩 Button(74,105,72,16)+Label(80,109)");
         rows.add("特效渲染 Button(4,125,72,16)+Label(10,129)");
+        rows.add("外层星辰 Button(4,145,68,16)+Label(8,149) ／ 外层星云 Button(74,145,72,16)+Label(78,149)");
         return rows;
     }
 }

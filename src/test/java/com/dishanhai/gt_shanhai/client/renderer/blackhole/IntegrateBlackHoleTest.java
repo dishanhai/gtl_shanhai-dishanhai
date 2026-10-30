@@ -9,6 +9,15 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.*;
 
 class IntegrateBlackHoleTest {
+    @Test
+    void horizonCannotExposeDiskLightAndSubpixelNoiseIsFiltered() throws Exception {
+        String shader = Files.readString(Path.of("src/main/resources/assets/gt_shanhai/shaders/core/guixu_blackhole.fsh"));
+        assertTrue(shader.contains("length(cross(bh, dir))"), "Avoid cancellation when looking toward the core");
+        assertTrue(shader.contains("diskCol * (1.0 - shadowMask)"), "Captured rays must not show small duplicate disks");
+        assertTrue(shader.contains("dFdx(p)") && shader.contains("dFdy(p)"), "Filter noise at the actual pixel footprint");
+        assertTrue(shader.contains("max(RING_WIDTH, aa)"), "Keep the photon ring resolved at distance");
+    }
+
     private static Class<?> helper(String name) throws Exception {
         return Class.forName("com.dishanhai.gt_shanhai.client.renderer.blackhole." + name);
     }
@@ -74,6 +83,63 @@ class IntegrateBlackHoleTest {
         }
         assertEquals(false, type.getMethod("hasHostRadiusBlocks").invoke(null));
         assertEquals(false, type.getMethod("hasHostLensEnabled").invoke(null));
+    }
+
+    @Test
+    void hostCentersStopAtChunkRangeAndWorldChangesWithoutAControllerRenderCallback() throws Exception {
+        Class<?> type = helper("BlackHoleTuning");
+        Object world = new Object(), otherWorld = new Object();
+        var bind = type.getMethod("setHostCenter", Object.class, long.class, double[].class);
+        var allowed = type.getMethod("hostCenterInRange", Object.class, double.class, double.class, int.class);
+        try {
+            bind.invoke(null, world, 123L, new double[]{143.5, 80, 0.5});
+            assertEquals(true, type.getMethod("hasHostCenter").invoke(null));
+            assertEquals(123L, type.getMethod("hostCenterControllerPos").invoke(null));
+            assertEquals(true, allowed.invoke(null, world, 0D, 0D, 8));
+            assertEquals(false, allowed.invoke(null, world, -16D, 0D, 8));
+            assertEquals(false, allowed.invoke(null, otherWorld, 0D, 0D, 8));
+            type.getMethod("clearHostCenter").invoke(null);
+            assertEquals(false, type.getMethod("hasCenterOverride").invoke(null));
+        } finally {
+            type.getMethod("setCenter", double[].class).invoke(null, (Object) null);
+        }
+    }
+
+    @Test
+    void manualCentersAreNotRemovedByHostCleanupAndNegativeChunkCoordinatesAreFloored() throws Exception {
+        Class<?> type = helper("BlackHoleTuning");
+        var within = type.getMethod("withinChunkRenderDistance", double.class, double.class,
+                double.class, double.class, int.class);
+        assertEquals(true, within.invoke(null, -0.1D, 0D, 127.5D, 0.5D, 8));
+        assertEquals(false, within.invoke(null, -0.1D, 0D, 128.5D, 0.5D, 8));
+        try {
+            type.getMethod("setHostCenter", Object.class, long.class, double[].class)
+                    .invoke(null, new Object(), 0L, new double[]{10.5, 80, 10.5});
+            type.getMethod("setCenter", double[].class).invoke(null, (Object) new double[]{10.5, 80, 10.5});
+            type.getMethod("clearHostCenter").invoke(null);
+            assertEquals(false, type.getMethod("hasHostCenter").invoke(null));
+            assertArrayEquals(new double[]{10.5, 80, 10.5}, (double[]) type.getMethod("centerOverride").invoke(null));
+        } finally {
+            type.getMethod("setCenter", double[].class).invoke(null, (Object) null);
+        }
+    }
+
+    @Test
+    void outOfRangeControllersCannotClearAnotherHostsCenter() throws Exception {
+        Class<?> type = helper("BlackHoleTuning");
+        Object world = new Object();
+        var clear = type.getMethod("clearHostCenter", Object.class, long.class);
+        try {
+            type.getMethod("setHostCenter", Object.class, long.class, double[].class)
+                    .invoke(null, world, 123L, new double[]{10.5, 80, 10.5});
+            assertEquals(false, clear.invoke(null, world, 456L));
+            assertEquals(false, clear.invoke(null, new Object(), 123L));
+            assertEquals(true, type.getMethod("hasHostCenter").invoke(null));
+            assertEquals(true, clear.invoke(null, world, 123L));
+            assertEquals(false, type.getMethod("hasHostCenter").invoke(null));
+        } finally {
+            type.getMethod("setCenter", double[].class).invoke(null, (Object) null);
+        }
     }
 
     @Test

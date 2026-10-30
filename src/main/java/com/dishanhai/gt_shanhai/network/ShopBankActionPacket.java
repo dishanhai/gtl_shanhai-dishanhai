@@ -72,7 +72,9 @@ public class ShopBankActionPacket {
                         result.bitLength() < 63 ? result.longValue() : Long.MAX_VALUE) + " §a星火")
                 : Component.literal(overdueBorrow
                         ? "§c[山海银行] 借款失败（欠款已逾期，还清前不能再借）"
-                        : "§c[山海银行] " + label + "失败（余额/欠款不足，或已达欠款上限）"));
+                        : pkt.op == Op.BORROW
+                                ? "§c[山海银行] 借款失败（未提交电压阶段，或已达当前阶段贷款额度）"
+                                : "§c[山海银行] " + label + "失败（余额/欠款不足）"));
         WalletAccountAPI.sync(player); // 星火数字余额变动
         ShopBankQueryPacket.sendTo(player); // 定期存款/欠款变动
     }

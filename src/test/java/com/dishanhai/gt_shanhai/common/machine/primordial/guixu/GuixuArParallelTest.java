@@ -17,33 +17,6 @@ class GuixuArParallelTest {
                 Map.of(), Map.of(), Map.of(), Map.of(), List.of(), List.of(), new CompoundTag(), 20, false);
     }
 
-    private long parallel(GTRecipe recipe, boolean working) throws Exception {
-        var method = GuixuVisionCoreMachine.class.getDeclaredMethod("snapshotModuleParallel", GTRecipe.class, boolean.class);
-        method.setAccessible(true);
-        return (long) method.invoke(null, recipe, working);
-    }
-
-    @Test void idleIsZeroAndUnrecordedRunningBatchesRemainUnknown() throws Exception {
-        assertEquals(0L, parallel(null, false));
-        assertEquals(0L, parallel(recipe(), false));
-        assertEquals(-1L, parallel(null, true));
-        assertEquals(-1L, parallel(recipe(), true));
-    }
-
-    @Test void actualBatchParallelSurvivesLargeCountsAndRecipeCopy() throws Exception {
-        var recipe = recipe();
-        recipe.data.putLong("sh_primordial_actual_parallel", 9_000_000_000L);
-        assertEquals(9_000_000_000L, parallel(recipe.copy(), true));
-        recipe.data.putLong("sh_primordial_actual_parallel", Long.MAX_VALUE);
-        assertEquals(Long.MAX_VALUE, parallel(recipe, true));
-    }
-
-    @Test void malformedCountsAreUnknown() throws Exception {
-        var recipe = recipe();
-        recipe.data.putLong("sh_primordial_actual_parallel", -3L);
-        assertEquals(-1L, parallel(recipe, true));
-    }
-
     @Test void remoteSlotsHaveSpaceForParallelAndOutputSnapshots() {
         assertEquals(40, GuixuVisionCoreMachine.SNAP_SLOTS);
         int size = GuixuVisionCoreMachine.SNAP_SLOTS;
@@ -76,7 +49,7 @@ class GuixuArParallelTest {
         assertFalse(client.contains("STATE.productionMultiplier = safeInt(host::productionMultiplier);"));
     }
 
-    @Test void readingAModuleKeepsTheActualBatchParallel() throws Exception {
+    @Test void readingAModuleUsesAvailableCapacityEvenWhenIdleOrAnOldBatchIsPresent() throws Exception {
         var unsafeField = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
         unsafeField.setAccessible(true);
         var unsafe = (sun.misc.Unsafe) unsafeField.get(null);
@@ -84,24 +57,35 @@ class GuixuArParallelTest {
         module.logic = (SnapshotLogic) unsafe.allocateInstance(SnapshotLogic.class);
         module.logic.recipe = recipe();
         module.logic.recipe.data.putLong("sh_primordial_actual_parallel", 9_000_000_000L);
+        module.capacity = 64L;
+        var idle = GuixuVisionCoreMachine.readModule(module);
+        assertEquals(64L, idle.parallel, "閒置仍須顯示預設並行");
+        assertEquals(0, idle.progressPct);
+        module.logic.working = true;
+        module.capacity = 128L;
         var reading = GuixuVisionCoreMachine.readModule(module);
-        assertEquals(9_000_000_000L, reading.parallel);
+        assertEquals(128L, reading.parallel, "主機加成更新後不可沿用舊批次並行");
         assertEquals(50, reading.progressPct);
         assertEquals(1, reading.threads);
+        module.capacity = Long.MAX_VALUE;
+        assertEquals(Long.MAX_VALUE, GuixuVisionCoreMachine.readModule(module).parallel);
     }
 
     private static class SnapshotModule extends com.dishanhai.gt_shanhai.common.machine.primordial.module.matter.PrimordialSupercriticalMatterGenerationCore {
         SnapshotLogic logic;
+        long capacity;
         SnapshotModule() { super(null); }
         @Override public SnapshotLogic getRecipeLogic() { return logic; }
         @Override public long getRecipeLogicThreadMultiplier() { return 1L; }
+        public long getAvailableRecipeParallel() { return capacity; }
     }
 
     private static class SnapshotLogic extends com.dishanhai.gt_shanhai.common.machine.primordial.module.matter.PrimordialSupercriticalMatterGenerationCoreLogic {
         GTRecipe recipe;
+        boolean working;
         SnapshotLogic() { super(null); }
-        @Override public boolean isWorking() { return true; }
-        @Override public int getProgress() { return 10; }
+        @Override public boolean isWorking() { return working; }
+        @Override public int getProgress() { return working ? 10 : 0; }
         @Override public int getMaxProgress() { return 20; }
         @Override public GTRecipe getLastRecipe() { return recipe; }
     }

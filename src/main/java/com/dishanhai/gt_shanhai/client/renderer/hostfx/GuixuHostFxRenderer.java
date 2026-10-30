@@ -535,8 +535,6 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             //      值的来源统一走 HostFxState（已在上面钳过），不直接读 host 的原始字段 ——
             //      这样"渲染侧看到的半径"与"日志里打印的半径"永远是同一个数。
             HostFxSwitch.apply();
-            feedBlackHoleRadius(HostFxState.holeRadiusBlocks());
-            feedBlackHoleLens(HostFxState.lensEnabled());
 
             // ④.7 自转时钟 = <b>动画时钟</b>（HostFxState.animSeconds）：环 / 8 舰 / 4 座解压机 /
             //      12 条细紫光束的自转角全部从它算。
@@ -573,12 +571,23 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             //    4 条解压机主喷口光柱 + 中央上下 2 根主光柱 → 伪神之锻炉那套（同一份 shader + space_layer 贴图）。
             //    几何在 HostFxGeometry.buildBeamQuads，状态与提交在 HostFxDraw / HostFxPillarBeam。
             final Vec3 cam = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
+            final boolean blackHoleVisible = clientLevel.hasChunkAt(controllerPos) && clientLevel.hasChunkAt(center)
+                    && BlackHoleTuning.withinChunkRenderDistance(cam.x, cam.z,
+                            center.getX() + HostFxGeometry.CELL_CENTER, center.getZ() + HostFxGeometry.CELL_CENTER,
+                            Minecraft.getInstance().options.getEffectiveRenderDistance());
+            if (blackHoleVisible) {
+                feedBlackHoleRadius(HostFxState.holeRadiusBlocks());
+                feedBlackHoleLens(HostFxState.lensEnabled());
+            } else if (BlackHoleTuning.clearHostCenter(clientLevel, controllerPos.asLong())) {
+                lastCenter = null;
+                clearBlackHoleOverridesIfOurs();
+            }
             // 黑洞表面半径：优先用 blackhole 包这一帧真正用的视界半径（× B_CRIT）
-            final float holeR = HostFxBlackHole.surfaceRadius();
+            final float holeR = blackHoleVisible ? HostFxBlackHole.surfaceRadius() : HostFxState.holeRadiusBlocks();
 
             // ⑥.5 黑洞<b>安全兜底</b>：纯顶点 billboard（黑盘 + 光子环 + 光晕 + 吸积盘）。
             //     只在"真路径这一帧没画"时顶上（HostFxBlackHole.active() 逐条判据见类注释）。
-            if (HostFxBlackHole.active()) {
+            if (blackHoleVisible && HostFxBlackHole.active()) {
                 final float[] camLocal =
                         HostFxBlackHole.cameraLocal(facing, cam.x, cam.y, cam.z, controllerPos);
                 poseStack.pushPose();
@@ -609,7 +618,11 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
                 HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
                 // 外圍星空隨結構顯示；吸入星辰與噴流仍由黑洞開關控制。
                 GuixuStarRenderer.render(poseStack, starCamera, effectSeconds, starHorizon,
-                        profile.density(), profile.brightness(), profile.jets(), BlackHoleTuning.enabled());
+                        profile.density(), profile.brightness(), profile.jets(), BlackHoleTuning.enabled() && blackHoleVisible,
+                        host.isHostOuterStarsEnabled());
+                GuixuNebulaRenderer.render(poseStack, starCamera, spinSeconds, profile.brightness(),
+                        host.isHostNebulaEnabled(), HostFxSwitch.degraded(),
+                        BlackHoleTuning.enabled() && blackHoleVisible, starHorizon);
             } finally {
                 poseStack.popPose();
             }
@@ -631,7 +644,7 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
                             + HostFxHide.hostCount() + " 台主机");
 
             // ⑧ 黑洞：把中心喂给既有渲染器（它自己负责吸积盘/光子环/透镜/兜底）
-            feedBlackHole(center);
+            if (blackHoleVisible) feedBlackHole(clientLevel, controllerPos, center);
         } catch (Throwable t) {
             // 判据③：任何一步失败 ⇒ 降级 + 一行可 grep 的日志，绝不把异常抛到渲染线程
             HostFxFallback.degrade(HostFxFallback.LEVEL_OFF,
@@ -670,12 +683,12 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
      * "环心那一格的<b>中心</b>"，不是"格最小角"。黑洞本体必须坐在同一条轴上，否则环一转黑洞就偏心
      * （上下 2 条极轴光束从本地 (0,±y,0) 射出，0.5 格的偏心肉眼能看出"光束没插进洞里"）。
      */
-    private static void feedBlackHole(BlockPos center) {
+    private static void feedBlackHole(ClientLevel level, BlockPos controllerPos, BlockPos center) {
         final double[] c = {center.getX() + HostFxGeometry.CELL_CENTER,
                 center.getY() + HostFxGeometry.CELL_CENTER,
                 center.getZ() + HostFxGeometry.CELL_CENTER};
         lastCenter = c;
-        BlackHoleTuning.setCenter(c);
+        BlackHoleTuning.setHostCenter(level, controllerPos.asLong(), c);
     }
 
     /** 停止画时清掉我们设的中心（只清"还是我们设的那个"，绝不覆盖玩家/命令设的值）。 */
@@ -685,10 +698,10 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             return;
         }
         final double[] now = BlackHoleTuning.centerOverride();
-        if (now != null && Math.abs(now[0] - ours[0]) < 1.0e-6D
+        if (BlackHoleTuning.hasHostCenter() && now != null && Math.abs(now[0] - ours[0]) < 1.0e-6D
                 && Math.abs(now[1] - ours[1]) < 1.0e-6D
                 && Math.abs(now[2] - ours[2]) < 1.0e-6D) {
-            BlackHoleTuning.setCenter(null);
+            BlackHoleTuning.clearHostCenter();
         }
         lastCenter = null;
     }

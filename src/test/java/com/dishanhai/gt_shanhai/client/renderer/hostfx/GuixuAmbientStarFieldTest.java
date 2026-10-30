@@ -80,7 +80,7 @@ class GuixuAmbientStarFieldTest {
         int full = (int) count.invoke(null, 1F, false);
         int idle = (int) count.invoke(null, 0.25F, false);
         int degraded = (int) count.invoke(null, 1F, true);
-        assertTrue(full <= 1024 && full > idle && idle >= 384);
+        assertTrue(full <= 512 && full > idle && idle >= 256);
         assertTrue(degraded >= 96 && degraded < idle);
         assertEquals(full, count.invoke(null, 2F, false));
     }

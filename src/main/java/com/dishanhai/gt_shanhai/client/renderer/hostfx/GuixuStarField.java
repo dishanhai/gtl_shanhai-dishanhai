@@ -3,10 +3,13 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 /** 山海：以世界時間取樣的星辰吸入軌跡，無粒子實體或跨世界狀態。 */
 public final class GuixuStarField {
     public static final int PARTICLE_COUNT = 192;
-    public static final int SKY_COUNT = 640;
-    public static final int ORBIT_COUNT = 96;
-    public static final int METEOR_COUNT = 12;
+    public static final int SKY_COUNT = 512;
+    public static final int ORBIT_COUNT = 64;
+    public static final int METEOR_COUNT = 8;
     private static final double TAU = Math.PI * 2.0;
+    // 山海：只快取不變的種子，不保留動畫、世界或主機狀態。
+    private static final double[][] SEEDS = buildSeeds();
+    private static final Sample INACTIVE = new Sample(0, 0, 0, 0, 0, 0, 0, 0, false);
 
     private GuixuStarField() {}
 
@@ -66,7 +69,7 @@ public final class GuixuStarField {
     public static Sample sampleMeteor(int index, double seconds) {
         double cycle = seconds / (10.0 + seed(index, 31) * 10.0) + seed(index, 32);
         double phase = cycle - Math.floor(cycle);
-        return sampleMeteorAtPhase(index, Math.min(1.0, phase / 0.16));
+        return phase >= 0.16 ? INACTIVE : sampleMeteorAtPhase(index, phase / 0.16);
     }
 
     public static Sample sampleMeteorAtPhase(int index, double phase) {
@@ -81,8 +84,8 @@ public final class GuixuStarField {
     }
 
     public static int skyCount(float density, boolean degraded) {
-        if (degraded) return 160;
-        return 384 + (int) (Math.max(0.0F, Math.min(1.0F, density)) * (SKY_COUNT - 384));
+        if (degraded) return 96;
+        return 256 + (int) (Math.max(0.0F, Math.min(1.0F, density)) * (SKY_COUNT - 256));
     }
 
     private static Sample ambient(Point head, Point tail, float size, float alpha, boolean warm) {
@@ -102,6 +105,19 @@ public final class GuixuStarField {
     }
 
     private static double seed(int index, int salt) {
+        return index >= 0 && index < SEEDS.length && salt >= 0 && salt < SEEDS[index].length
+                ? SEEDS[index][salt] : computeSeed(index, salt);
+    }
+
+    private static double[][] buildSeeds() {
+        double[][] values = new double[SKY_COUNT][37];
+        for (int i = 0; i < values.length; i++) for (int salt = 0; salt < values[i].length; salt++) {
+            values[i][salt] = computeSeed(i, salt);
+        }
+        return values;
+    }
+
+    private static double computeSeed(int index, int salt) {
         long value = (index + 1L) * 0x9E3779B97F4A7C15L + salt * 0x632BE59BD9B4E019L;
         value = (value ^ (value >>> 30)) * 0xBF58476D1CE4E5B9L;
         value = (value ^ (value >>> 27)) * 0x94D049BB133111EBL;

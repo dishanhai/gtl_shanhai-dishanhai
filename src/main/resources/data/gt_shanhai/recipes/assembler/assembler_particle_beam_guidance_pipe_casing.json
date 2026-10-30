@@ -1,12 +1,12 @@
 {
   "data": {
-    "euTier": 14
+    "euTier": 12
   },
   "duration": 40,
   "tickInputs": {
     "eu": [
       {
-        "content": 2147483647
+        "content": 134217728
       }
     ]
   },
@@ -59,7 +59,7 @@
   "conditions": [
     {
       "type": "gt_shanhai:recipe_enabled",
-      "recipeId": "dishanhai:assembler/assembler_particle_beam_guidance_pipe_casing",
+      "recipeId": "gt_shanhai:assembler/assembler_particle_beam_guidance_pipe_casing",
       "defaultEnabled": true
     }
   ]
