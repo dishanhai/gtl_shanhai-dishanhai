@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.ChatFormatting;
 import net.minecraft.resources.ResourceLocation;
 
@@ -45,12 +46,34 @@ public final class StellarPatternStuckReport {
         }
     }
 
+    /** 診斷在來源就分欄，顯示時不能再從分號串起來的摘要猜測欄位。 */
+    public record Diagnosis(String hostStatus, String minting, String parallel) {
+        public static final Diagnosis EMPTY = new Diagnosis("", "", "");
+        public Diagnosis {
+            hostStatus = hostStatus == null ? "" : hostStatus;
+            minting = minting == null ? "" : minting;
+            parallel = parallel == null ? "" : parallel;
+        }
+    }
+
     public record Entry(int slot, String slotLabel, String reason, String inputs, String outputs,
-                        List<String> hostRecipeTypes, String patternRecipeTypeId, String patternRecipeId, Cause cause) {
+                        List<String> hostRecipeTypes, String patternRecipeTypeId, String patternRecipeId, Cause cause,
+                        Diagnosis diagnosis, StellarPatternOrderInfo order) {
+        public Entry(int slot, String slotLabel, String reason, String inputs, String outputs,
+                     List<String> hostRecipeTypes, String patternRecipeTypeId, String patternRecipeId, Cause cause, Diagnosis diagnosis) {
+            this(slot, slotLabel, reason, inputs, outputs, hostRecipeTypes, patternRecipeTypeId, patternRecipeId, cause,
+                    diagnosis, StellarPatternOrderInfo.UNKNOWN);
+        }
         public Entry(int slot, String slotLabel, String reason, String inputs, String outputs,
                      List<String> hostRecipeTypes, String patternRecipeTypeId, String patternRecipeId) {
             this(slot, slotLabel, reason, inputs, outputs, hostRecipeTypes, patternRecipeTypeId, patternRecipeId,
-                    Cause.UNCONSUMED);
+                    Cause.UNCONSUMED, Diagnosis.EMPTY);
+        }
+
+        public Entry(int slot, String slotLabel, String reason, String inputs, String outputs,
+                     List<String> hostRecipeTypes, String patternRecipeTypeId, String patternRecipeId, Cause cause) {
+            this(slot, slotLabel, reason, inputs, outputs, hostRecipeTypes, patternRecipeTypeId, patternRecipeId,
+                    cause, Diagnosis.EMPTY);
         }
 
         public Entry {
@@ -62,34 +85,112 @@ public final class StellarPatternStuckReport {
             patternRecipeTypeId = value(patternRecipeTypeId);
             patternRecipeId = value(patternRecipeId);
             cause = cause == null ? Cause.UNCONSUMED : cause;
+            diagnosis = diagnosis == null ? Diagnosis.EMPTY : diagnosis;
+            order = order == null ? StellarPatternOrderInfo.UNKNOWN : order;
         }
 
         public String displaySlot() {
             return slotLabel.isBlank() ? Integer.toString(slot + 1) : slotLabel;
         }
+
+        public Entry withOrder(StellarPatternOrderInfo order) {
+            return new Entry(slot, slotLabel, reason, inputs, outputs, hostRecipeTypes, patternRecipeTypeId, patternRecipeId, cause, diagnosis, order);
+        }
+
+        public net.minecraft.nbt.CompoundTag save() {
+            var tag = new net.minecraft.nbt.CompoundTag();
+            tag.putInt("slot", slot); StellarPatternHistoryText.put(tag, "label", slotLabel);
+            StellarPatternHistoryText.put(tag, "reason", reason); StellarPatternHistoryText.put(tag, "inputs", inputs);
+            StellarPatternHistoryText.put(tag, "outputs", outputs); StellarPatternHistoryText.put(tag, "type", patternRecipeTypeId);
+            StellarPatternHistoryText.put(tag, "recipe", patternRecipeId); tag.putString("cause", cause.name());
+            var types = new net.minecraft.nbt.ListTag();
+            hostRecipeTypes.forEach(type -> types.add(net.minecraft.nbt.StringTag.valueOf(type))); tag.put("hosts", types);
+            StellarPatternHistoryText.put(tag, "status", diagnosis.hostStatus()); StellarPatternHistoryText.put(tag, "mint", diagnosis.minting());
+            StellarPatternHistoryText.put(tag, "parallel", diagnosis.parallel());
+            tag.put("order", order.save()); return tag;
+        }
+
+        public static Entry load(net.minecraft.nbt.CompoundTag tag) {
+            Cause cause;
+            try { cause = Cause.valueOf(tag.getString("cause")); } catch (IllegalArgumentException ignored) { cause = Cause.UNCONSUMED; }
+            var types = tag.getList("hosts", net.minecraft.nbt.Tag.TAG_STRING);
+            var hosts = new java.util.ArrayList<String>();
+            for (int i = 0; i < types.size(); i++) hosts.add(types.getString(i));
+            return new Entry(tag.getInt("slot"), StellarPatternHistoryText.get(tag, "label"), StellarPatternHistoryText.get(tag, "reason"),
+                    StellarPatternHistoryText.get(tag, "inputs"), StellarPatternHistoryText.get(tag, "outputs"), hosts,
+                    StellarPatternHistoryText.get(tag, "type"), StellarPatternHistoryText.get(tag, "recipe"), cause,
+                    new Diagnosis(StellarPatternHistoryText.get(tag, "status"), StellarPatternHistoryText.get(tag, "mint"), StellarPatternHistoryText.get(tag, "parallel")),
+                    StellarPatternOrderInfo.load(tag.getCompound("order")));
+        }
     }
 
     public static ShanhaiTerminalReport build(ResourceLocation dimension, BlockPos pos, Collection<Entry> entries) {
+        return build(ShanhaiTerminalReport.nextId(), dimension, pos, entries);
+    }
+
+    public static ShanhaiTerminalReport build(long id, ResourceLocation dimension, BlockPos pos, Collection<Entry> entries) {
+        int[] counts = new int[5]; counts[0] = entries.size();
+        for (Entry entry : entries) counts[1 + entry.order().state().ordinal()]++;
         ShanhaiTerminalReport.Builder report = new ShanhaiTerminalReport.Builder(
-                ShanhaiTerminalReport.Type.STELLAR_STUCK, pos, entries.size());
+                id, ShanhaiTerminalReport.Type.STELLAR_STUCK, pos, counts);
         String target = dimension + " " + pos.getX() + " " + pos.getY() + " " + pos.getZ();
         Component coordinates = action(Component.literal(pos.getX() + ", " + pos.getY() + ", " + pos.getZ()),
                 "/shanhai stellar_tp " + target, "teleport_hint");
         report.summary(action(Component.translatable(PREFIX + "target_dimension", dimension.toString(), coordinates),
                 "/shanhai stellar_tp " + target, "teleport_hint"));
-        for (Entry entry : entries.stream().sorted(Comparator.comparingInt((Entry e) -> e.cause().ordinal())
+        for (Entry entry : entries.stream().sorted(Comparator.comparingInt((Entry e) -> e.order().state().ordinal())
+                .thenComparingInt(e -> e.cause().ordinal())
                 .thenComparingInt(Entry::slot)).toList()) {
             Component name = Component.translatable(PREFIX + "slot_summary", entry.displaySlot(),
                     entry.cause().summary());
             name = action(name, "/shanhai stellar_slot " + target + " " + entry.slot(), "slot_open_hint");
-            Component details = Component.translatable(PREFIX + "detail_stellar",
-                    entry.displaySlot(), dimension.toString(), coordinates, entry.reason(),
-                    entry.patternRecipeId(), recipeTypeName(entry.patternRecipeTypeId()), entry.inputs(), entry.outputs(),
-                    recipeTypeNames(entry.hostRecipeTypes()));
-            report.add(pos, "stellar_" + entry.cause().name(), entry.cause().label(), entry.cause().color(),
+            name = name.copy().append("\n").append(action(Component.translatable(PREFIX + "open_main"),
+                    "/shanhai stellar_slot " + target + " " + entry.slot() + " main", "main_open_hint"))
+                    .append("  ").append(action(Component.translatable(PREFIX + "open_slot_settings"),
+                            "/shanhai stellar_slot " + target + " " + entry.slot(), "slot_open_hint"));
+            if (!entry.order().id().isBlank()) name = name.copy().append("\n").append(
+                    Component.translatable(PREFIX + "order_id_short", entry.order().id()).withStyle(style -> style.withUnderlined(false)));
+            MutableComponent details = Component.empty();
+            section(details, "location", Component.translatable(PREFIX + "detail_location",
+                    entry.displaySlot(), dimension.toString(), coordinates), 0x78C8F0);
+            section(details, "reason", Component.literal(entry.reason()), entry.cause().color());
+            section(details, "order", orderDetails(entry.order()), orderColor(entry));
+            if (!entry.diagnosis().hostStatus().isBlank())
+                section(details, "host", Component.literal(entry.diagnosis().hostStatus()), 0x78C8F0);
+            if (!entry.diagnosis().minting().isBlank())
+                section(details, "mint", Component.literal(entry.diagnosis().minting()), 0xF0C878);
+            if (!entry.diagnosis().parallel().isBlank())
+                section(details, "parallel", Component.literal(entry.diagnosis().parallel()), 0x78C8F0);
+            section(details, "recipe", Component.translatable(PREFIX + "detail_recipe",
+                    entry.patternRecipeId(), recipeTypeName(entry.patternRecipeTypeId()), recipeTypeNames(entry.hostRecipeTypes())), 0x78C8F0);
+            section(details, "materials", Component.translatable(PREFIX + "detail_materials", entry.inputs(), entry.outputs()), 0x78C8F0);
+            Component category = Component.translatable(PREFIX + "order_state_" + entry.order().state().name().toLowerCase(java.util.Locale.ROOT))
+                    .append(" · ").append(entry.cause().label());
+            report.add(pos, "stellar_" + entry.order().state().name() + "_" + entry.cause().name(), category, orderColor(entry),
                     name, List.of(), details);
         }
         return report.build();
+    }
+
+    private static int orderColor(Entry entry) {
+        return switch (entry.order().state()) {
+            case COMPLETED -> 0x78E8A0;
+            case CANCELLED -> 0xF0C878;
+            case RUNNING, UNTRACKED -> entry.cause().color();
+        };
+    }
+
+    private static Component orderDetails(StellarPatternOrderInfo order) {
+        if (order.state() == StellarPatternOrderInfo.State.UNTRACKED) return Component.translatable(PREFIX + "order_untracked");
+        return Component.translatable(PREFIX + "detail_order", order.id(),
+                Component.translatable(PREFIX + "order_state_" + order.state().name().toLowerCase(java.util.Locale.ROOT)),
+                order.requester(), order.cpu(), order.output(), order.outputId(), order.requested(), order.remaining());
+    }
+
+    private static void section(MutableComponent details, String key, Component content, int color) {
+        if (!details.getSiblings().isEmpty()) details.append("\n\n");
+        details.append(Component.translatable(PREFIX + "section_" + key).withStyle(style -> style.withBold(true).withColor(color)))
+                .append("\n").append(content);
     }
 
     private static Component action(Component text, String command, String hint) {

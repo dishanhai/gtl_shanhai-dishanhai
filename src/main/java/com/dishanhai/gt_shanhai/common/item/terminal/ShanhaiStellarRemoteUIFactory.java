@@ -51,11 +51,21 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
         return openMode(player, machine, terminalHost, ShanhaiStellarRemoteUIHolder.Mode.FULL_PATTERN, -1);
     }
 
+    public boolean openFocusedPattern(ServerPlayer player, RecipeTypePatternBufferPartMachine machine,
+            ShanhaiPatternManagementMenuHost terminalHost, int slot) {
+        if (machine.isValidRemotePatternSlot(slot)) {
+            return openMode(player, machine, terminalHost, ShanhaiStellarRemoteUIHolder.Mode.FULL_PATTERN, slot);
+        }
+        int mother = machine.gtShanhai$findStuckMotherSlot(slot);
+        return mother >= 0 && openMode(player, machine, terminalHost,
+                ShanhaiStellarRemoteUIHolder.Mode.FOCUSED_WILDCARD, mother);
+    }
+
     public boolean openMode(ServerPlayer player, RecipeTypePatternBufferPartMachine machine,
             ShanhaiPatternManagementMenuHost terminalHost, ShanhaiStellarRemoteUIHolder.Mode mode, int slot) {
         List<String> typeIds = new ArrayList<>();
         List<String> typeNames = new ArrayList<>();
-        if (mode == ShanhaiStellarRemoteUIHolder.Mode.WILDCARD) {
+        if (mode == ShanhaiStellarRemoteUIHolder.Mode.WILDCARD || mode == ShanhaiStellarRemoteUIHolder.Mode.FOCUSED_WILDCARD) {
             machine.snapshotWildcardHostTypes(typeIds, typeNames);
         }
         boolean opened = openUI(new ShanhaiStellarRemoteUIHolder(
@@ -81,7 +91,7 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
         int slot = buffer.readVarInt();
         List<String> typeIds = List.of();
         List<String> typeNames = List.of();
-        if (mode == ShanhaiStellarRemoteUIHolder.Mode.WILDCARD) {
+        if (mode == ShanhaiStellarRemoteUIHolder.Mode.WILDCARD || mode == ShanhaiStellarRemoteUIHolder.Mode.FOCUSED_WILDCARD) {
             int count = Math.min(64, buffer.readVarInt());
             List<String> ids = new ArrayList<>(count);
             List<String> names = new ArrayList<>(count);
@@ -105,7 +115,8 @@ public final class ShanhaiStellarRemoteUIFactory extends UIFactory<ShanhaiStella
         buffer.writeBlockPos(holder.targetPos().pos());
         buffer.writeEnum(holder.mode());
         buffer.writeVarInt(holder.slot());
-        if (holder.mode() != ShanhaiStellarRemoteUIHolder.Mode.WILDCARD) return;
+        if (holder.mode() != ShanhaiStellarRemoteUIHolder.Mode.WILDCARD
+                && holder.mode() != ShanhaiStellarRemoteUIHolder.Mode.FOCUSED_WILDCARD) return;
         int count = Math.min(64, Math.min(holder.wildcardTypeIds().size(), holder.wildcardTypeNames().size()));
         buffer.writeVarInt(count);
         for (int index = 0; index < count; index++) {

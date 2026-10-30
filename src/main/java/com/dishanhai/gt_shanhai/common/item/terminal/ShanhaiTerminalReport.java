@@ -61,7 +61,7 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
 
     /** 伺服器端組裝器：同類別／同名稱自動去重。 */
     public static final class Builder {
-        private final long id = nextId();
+        private final long id;
         private final Type type;
         private final BlockPos target;
         private final int[] counts;
@@ -76,6 +76,12 @@ public record ShanhaiTerminalReport(long id, Type type, BlockPos target, int[] c
         private int omitted;
 
         public Builder(Type type, BlockPos target, int... counts) {
+            this(nextId(), type, target, counts);
+        }
+
+        /** 可更新的機器報告沿用既有 ID，客戶端快取只保留該機器的最新完整版本。 */
+        public Builder(long id, Type type, BlockPos target, int... counts) {
+            this.id = id;
             this.type = type;
             this.target = target;
             this.counts = counts;

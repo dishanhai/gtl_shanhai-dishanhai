@@ -159,7 +159,7 @@ class StellarPatternStuckWarningSourceTest {
         String mixinConfig = MixinConfigs.readAll();
         String quantum = Files.readString(QUANTUM_CPU);
 
-        assertTrue(context.contains("ThreadLocal<Integer>"));
+        assertTrue(context.contains("ThreadLocal<java.util.Deque<Frame>>"), "巢狀下發需要恢復外層訂單上下文");
         assertTrue(context.contains("currentAePlayerId()"));
         assertTrue(mixin.contains("ExecutingCraftingJob"));
         assertTrue(mixin.contains("@Mixin(value = CraftingCpuLogic.class, priority = 1500, remap = false)"));
@@ -167,7 +167,11 @@ class StellarPatternStuckWarningSourceTest {
         assertTrue(mixin.contains("StellarPatternCraftingContext.push"));
         assertTrue(mixin.contains("StellarPatternCraftingContext.pop"));
         assertTrue(mixinConfig.contains("\"CraftingCpuLogicStellarContextMixin\""));
-        assertTrue(quantum.contains("StellarPatternCraftingContext.push(job == null ? null : job.playerId)"));
+        assertTrue(quantum.contains("StellarPatternCraftingContext.pushOrder("));
+        assertTrue(quantum.contains("stellarJob.link, stellarJob.finalOutput"));
+        assertTrue(mixin.contains("method = \"finishJob\""));
+        assertTrue(mixin.contains("StellarPatternWarningHistory.observeTerminal("));
+        assertTrue(quantum.contains("StellarPatternWarningHistory.observeTerminal("));
         assertTrue(quantum.contains("finally"));
         assertTrue(quantum.contains("StellarPatternCraftingContext.pop()"));
     }

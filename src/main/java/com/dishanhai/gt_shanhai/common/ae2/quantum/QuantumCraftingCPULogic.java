@@ -274,7 +274,10 @@ public class QuantumCraftingCPULogic {
                     }
                     break;
                 }
-                StellarPatternCraftingContext.push(job == null ? null : job.playerId);
+                QuantumExecutingCraftingJob stellarJob = job;
+                StellarPatternCraftingContext.pushOrder(stellarJob == null ? null : new StellarPatternCraftingContext.Order(
+                        stellarJob.link, stellarJob.finalOutput, () -> stellarJob.remainingAmount, stellarJob.playerId,
+                        cpu.getName() == null ? "Quantum CPU" : cpu.getName().getString()));
                 boolean accepted;
                 try {
                     accepted = provider.pushPattern(details, craftingContainer);
@@ -930,6 +933,10 @@ public class QuantumCraftingCPULogic {
             // （对齐原生 AE2 CraftingCpuLogic.finishJob），否则会和 gtlcore 建材供应侧的
             // 交付认领重复记账，被刷取消/自动填样板可无限复制材料。
             job.link.cancel();
+        }
+        if (cpu.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
+            com.dishanhai.gt_shanhai.common.machine.part.StellarPatternWarningHistory.observeTerminal(
+                    level.getServer(), job.link, job.remainingAmount);
         }
         job.waitingFor.clear();
         for (Map.Entry<IPatternDetails, QuantumExecutingCraftingJob.TaskProgress> entry : job.tasks.entrySet()) {

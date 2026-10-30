@@ -78,7 +78,7 @@ public class PrimordialCoinForgeLogic extends PrimordialModuleRecipeLogic {
         if (required > 0 && required <= modules.size()) {
             String moduleId = modules.get(required - 1);
             var module = ForgeRegistries.ITEMS.getValue(new ResourceLocation(moduleId));
-            reason += "；所需模块: " + (module == null || module == net.minecraft.world.item.Items.AIR
+            reason += "\n所需模块: " + (module == null || module == net.minecraft.world.item.Items.AIR
                     ? moduleId : module.getDescription().getString())
                     + " (" + moduleId + ")";
         }

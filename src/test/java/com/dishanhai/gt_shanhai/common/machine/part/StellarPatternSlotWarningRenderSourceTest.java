@@ -9,6 +9,34 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StellarPatternSlotWarningRenderSourceTest {
+    @Test
+    void focusedMainUiKeepsSelectionLocalToItsOwnPaginationAndDrawsOverTheWarning() throws IOException {
+        String machine = Files.readString(MACHINE);
+        String pagination = Files.readString(PAGINATION);
+        String widget = Files.readString(SLOT_WIDGET);
+        String holder = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/item/terminal/ShanhaiStellarRemoteUIHolder.java"));
+        assertTrue(holder.contains("createRemotePatternUI(player, this, slot)"));
+        assertTrue(machine.contains("createFocusedUIWidget(remote.slot())"));
+        assertTrue(pagination.contains("copyForFocus(int slot)"));
+        assertTrue(pagination.contains("slot / (patternsPerRow * rowsPerPage)"));
+        assertTrue(pagination.contains("slot.setFocused(finalSlot == focusedSlot)"));
+        assertTrue(widget.contains("gtShanhai$drawFocusBorder(graphics"));
+        assertTrue(widget.lastIndexOf("gtShanhai$drawFocusBorder(graphics") > widget.indexOf("drawOverlay(graphics"));
+        assertTrue(widget.contains("reduceMotion()"));
+    }
+
+    @Test
+    void expandedPatternsFocusTheirMotherInTheFullMachineShellInsteadOfAnUnrelatedOrdinarySlot() throws IOException {
+        String machine = Files.readString(MACHINE);
+        String factory = Files.readString(Path.of("src/main/java/com/dishanhai/gt_shanhai/common/item/terminal/ShanhaiStellarRemoteUIFactory.java"));
+        assertTrue(factory.contains("machine.gtShanhai$findStuckMotherSlot(slot)"));
+        assertTrue(factory.contains("Mode.FOCUSED_WILDCARD"));
+        assertTrue(machine.contains("remote.mode() == ShanhaiStellarRemoteUIHolder.Mode.FOCUSED_WILDCARD"));
+        assertTrue(machine.contains("createRemoteWildcardContent("));
+        assertTrue(machine.contains("CachedPatternSlotWidget.gtShanhai$drawFocusBorder("));
+        assertTrue(machine.contains("int[] selection"), "遠端通配焦點也需各介面隔離");
+    }
+
 
     private static final Path ROOT = Path.of("src", "main", "java", "com", "dishanhai", "gt_shanhai",
             "common", "machine", "part");

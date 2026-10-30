@@ -190,6 +190,32 @@ public class RgbTextFlowTest {
     }
 
     @Test
+    void shanhaiPalettesHaveAliasesAndJoinBothMetaPalettePools() {
+        String[][] names = {
+                {"shanhai_dawn", "山海朝霞"}, {"shanhai_mist", "山海青岚"},
+                {"shanhai_galaxy", "山海星河"}, {"shanhai_prism", "山海琉彩"}
+        };
+        java.util.Set<int[]> identities = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        int[][] presets = DShanhaiTextUtil.flowPresets();
+        for (String[] name : names) {
+            var definition = DShanhaiStyleRegistry.get(name[0]);
+            assertTrue(definition != null, "必須真正註冊新色板：" + name[0]);
+            assertSame(definition.rgb(), DShanhaiStyleRegistry.getRGB(name[1]));
+            assertTrue(identities.add(definition.rgb()), "各新色板須有獨立顏色");
+            assertTrue(java.util.Arrays.stream(presets).anyMatch(preset -> preset == definition.rgb()),
+                    "新色板須加入全／隨機共用池");
+            var parsed = TextFormatParser.parseFormatting("&$" + name[1] + "-測試");
+            assertEquals("測試", parsed.cleanText);
+            assertSame(definition.rgb(), parsed.flags.palette);
+            DShanhaiTextUtil.lockTimeAt(0);
+            int first = DShanhaiTextUtil.getDynamicColor(definition.rgb(), 0, 4, false);
+            DShanhaiTextUtil.lockTimeAt(40);
+            int later = DShanhaiTextUtil.getDynamicColor(definition.rgb(), 0, 4, false);
+            assertNotEquals(first, later, "新色板須隨時間流動：" + name[0]);
+        }
+    }
+
+    @Test
     void randomAloneReceivesAutomaticCharacterEffects() {
         for (int index = 0; index < DShanhaiTextUtil.AllTextEffect.values().length; index++) {
             long start = presetBoundary(0, index, DShanhaiTextUtil.RANDOM_WINDOW_MS);

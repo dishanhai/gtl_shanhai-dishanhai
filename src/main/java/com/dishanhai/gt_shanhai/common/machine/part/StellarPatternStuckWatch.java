@@ -71,7 +71,7 @@ public final class StellarPatternStuckWatch {
                 List.copyOf(hostRecipeTypeIds),
                 patternRecipeTypeId == null || patternRecipeTypeId.isBlank() ? "<none>" : patternRecipeTypeId,
                 patternRecipeId == null || patternRecipeId.isBlank() ? "<none>" : patternRecipeId,
-                patternDetails, aePlayerId);
+                patternDetails, aePlayerId, StellarPatternCraftingContext.currentOrder());
         long now = level.getServer().getTickCount();
         // 只讀便宜的進度基線，不在推樣板路徑掃描候選配方或格式化詳情。
         for (IMultiController controller : machine.getControllers()) {
@@ -85,7 +85,7 @@ public final class StellarPatternStuckWatch {
         }
 
         synchronized (PENDING) {
-            PENDING.put(new SlotKey(watch.dimension.location(), watch.pos.asLong(), slot), watch);
+            PENDING.put(watch.key(), watch);
         }
     }
 
@@ -145,15 +145,16 @@ public final class StellarPatternStuckWatch {
         if (waiting || now < watch.warningTick) {
             watch.dueTick = now + Math.min(TICKS_PER_SECOND, watch.timeout);
             synchronized (PENDING) {
-                PENDING.putIfAbsent(new SlotKey(watch.dimension.location(), watch.pos.asLong(), watch.slot), watch);
+                PENDING.putIfAbsent(watch.key(), watch);
             }
             return;
         }
 
         machine.gtShanhai$setPatternSlotStuckWarning(watch.slot, snapshot.items, snapshot.fluids);
         machine.gtShanhai$logStuckDiagnosis(watch.slot);
-        String reason = collectStuckReason(machine, watch.slot) + "；并行评估: " + watch.parallelAssessment;
-        if (!watch.mintRestrictions.isEmpty()) reason += "；铸币限制: " + String.join(" | ", watch.mintRestrictions.values());
+        String reason = collectStuckReason(machine, watch.slot);
+        var diagnosis = new StellarPatternStuckReport.Diagnosis(String.join("\n", collectHostStatuses(machine)),
+                collectMintDetails(watch, assessment), watch.parallelAssessment);
         int slot = watch.slot;
         String slotLabel = machine.gtShanhai$describeStuckSlot(slot);
         String stuckInputs = StellarPatternStuckNotifier.describeStuckInputs(snapshot.items, snapshot.fluids);
@@ -163,7 +164,8 @@ public final class StellarPatternStuckWatch {
                 watch.hostRecipeTypeIds, watch.patternRecipeTypeId, watch.patternRecipeId));
         StellarPatternStuckNotifier.notifyStuck(level, watch.pos, watch.slot, slotLabel, watch.aePlayerId,
                 reason, stuckInputs, stuckOutputs, watch.hostRecipeTypeIds,
-                watch.patternRecipeTypeId, watch.patternRecipeId, classifyCause(machine, watch, assessment));
+                watch.patternRecipeTypeId, watch.patternRecipeId, classifyCause(machine, watch, assessment), diagnosis,
+                watch.order == null ? StellarPatternOrderInfo.UNKNOWN : watch.order.snapshot(server));
     }
 
     private static StellarPatternStuckReport.Cause classifyCause(RecipeTypePatternBufferPartMachine machine,
@@ -274,21 +276,40 @@ public final class StellarPatternStuckWatch {
                 }
                 String restriction = forge.getRecipeLogic().describeMintRestriction(mintRecipe, watch.patternDetails);
                 mintFailure = !restriction.isEmpty();
-                if (mintFailure) watch.mintRestrictions.put(host.machine, host.machine.getPos().toShortString() + " " + restriction);
+                if (mintFailure) watch.mintRestrictions.put(host.machine, restriction);
             }
             var policy = watch.hostProgress.computeIfAbsent(host.machine, ignored -> new StellarPatternWaitPolicy());
             boolean deferred = policy.observe(now, watch.timeout, host.capacity, host.allocated, host.queued,
                     host.working, host.failed || strongFailure || mintFailure, host.progress, host.successfulTicks, host.duration, host.batch);
             waiting |= deferred;
             if (deferred) watch.warningTick = Math.max(watch.warningTick, policy.progressDeadline(watch.timeout));
-            details.add(host.machine.getPos().toShortString() + " " + host.capacityLabel + "="
-                    + (host.capacity > 0L ? host.capacity : "未知") + " 线程倍率=" + host.threads
-                    + " 本轮分配=" + (host.allocated >= 0L ? host.allocated : "未知") + " 等待槽=" + host.queued
-                    + " 进度=" + host.progress + "/" + host.duration
-                    + (deferred ? " 等待并行" : "未满足并行等待条件"));
+            details.add("主机: [" + host.machine.getPos().toShortString() + "]\n" + host.capacityLabel + ": "
+                    + (host.capacity == Long.MAX_VALUE ? "不限" : host.capacity > 0L ? host.capacity : "未知")
+                    + "\n线程倍率: " + host.threads
+                    + "\n本轮分配: " + (host.allocated >= 0L ? host.allocated : "未知")
+                    + "\n等待槽位: " + host.queued
+                    + "\n运行进度: " + host.progress + " / " + host.duration
+                    + "\n评估结果: " + (mintFailure ? "铸币权限拒绝，不能按并行等待处理"
+                            : deferred ? "正在等待可用并行" : "未满足并行等待条件"));
         }
-        watch.parallelAssessment = details.isEmpty() ? "无可用的对应配方主机" : String.join(" | ", details);
+        watch.parallelAssessment = details.isEmpty() ? "无可用的对应配方主机" : String.join("\n\n", details);
         return waiting;
+    }
+
+    private static String collectMintDetails(Watch watch, MachineAssessment assessment) {
+        List<String> details = new ArrayList<>();
+        for (HostAssessment host : assessment.hosts) {
+            if (!(host.machine instanceof PrimordialCoinForgeModule forge)
+                    || !supportsType(host.types, watch.patternRecipeTypeId, assessment.onlyHost)) continue;
+            String restriction = watch.mintRestrictions.get(host.machine);
+            details.add("主机: [" + host.machine.getPos().toShortString() + "]\n"
+                    + (restriction != null ? restriction : "当前物质模块: Lv." + forge.getModuleLevel()
+                            + "\n铸币权限: " + CoinForgeMintGate.permissionText(forge.getModuleLevel()))
+                    + "\n铸币基础并行（已折算）: " + forge.getCurrentParallel()
+                    + "\n每配方有效上限: " + forge.getRecipeLogic().getMintParallelLimit()
+                    + "\n并行规则: " + (forge.hasParallelOverdriver() ? "已搭载寰宇超限器，不受 1/4 限制" : "正常并行的 1/4"));
+        }
+        return String.join("\n\n", details);
     }
 
     private record MachineKey(ResourceKey<Level> dimension, BlockPos pos) {}
@@ -343,29 +364,19 @@ public final class StellarPatternStuckWatch {
                 + DShanhaiConfig.COMMON.recipeTypePatternStuckWarningSeconds.get()
                 + " 秒内未被主机取用";
         if (strong != null && !strong.isEmpty()) {
-            base = strong + "；" + base;
+            base = strong + "\n" + base;
         }
-        List<String> statuses = collectHostStatuses(machine);
-        if (statuses.isEmpty()) {
-            return base + "；未抓到主机 GTCEu/GTLCore 状态";
-        }
-        return base + "；主机状态: " + String.join(" | ", statuses);
+        return base;
     }
 
     private static List<String> collectHostStatuses(RecipeTypePatternBufferPartMachine machine) {
         List<String> result = new ArrayList<>();
         for (IMultiController controller : machine.getControllers()) {
             if (!(controller.self() instanceof IRecipeLogicMachine logicMachine)) continue;
+            result.add("主机: [" + controller.self().getPos().toShortString() + "]");
             appendRecipeLogicState(result, logicMachine);
             if (logicMachine instanceof PrimordialOmegaEngineModuleBase module) {
                 appendPlain(result, "挂载", module.getModuleConditionError());
-            }
-            if (logicMachine instanceof PrimordialCoinForgeModule forge) {
-                appendPlain(result, "铸币限制", "物质模块 Lv." + forge.getModuleLevel()
-                        + "；铸币权限: " + CoinForgeMintGate.permissionText(forge.getModuleLevel())
-                        + "；铸币基础并行（已折算）: " + forge.getCurrentParallel()
-                        + "；每配方有效上限: " + forge.getRecipeLogic().getMintParallelLimit()
-                        + (forge.hasParallelOverdriver() ? "（寰宇超限器不受 1/4 限制）" : "（正常并行的 1/4）"));
             }
             if (logicMachine.getRecipeLogic() instanceof IRecipeStatus status) {
                 appendStatus(result, "配方", status.getRecipeStatus());
@@ -380,6 +391,8 @@ public final class StellarPatternStuckWatch {
             result.add("工作=已暂停工作");
         } else if (!logicMachine.isActive()) {
             result.add("工作=未运行");
+        } else {
+            result.add("工作=正在运行");
         }
     }
 
@@ -390,7 +403,7 @@ public final class StellarPatternStuckWatch {
 
     private static void appendPlain(List<String> result, String label, @Nullable String text) {
         if (text == null || text.isBlank()) return;
-        result.add(label + "=" + text.replace('\n', ' '));
+        result.add(label + ": " + text);
     }
 
     private static final class Snapshot {
@@ -407,22 +420,28 @@ public final class StellarPatternStuckWatch {
         private final ResourceLocation dimension;
         private final long pos;
         private final int slot;
+        private final String order;
 
         SlotKey(ResourceLocation dimension, long pos, int slot) {
+            this(dimension, pos, slot, "");
+        }
+
+        SlotKey(ResourceLocation dimension, long pos, int slot, String order) {
             this.dimension = dimension;
             this.pos = pos;
             this.slot = slot;
+            this.order = order;
         }
 
         @Override
         public boolean equals(Object other) {
             return other instanceof SlotKey key && slot == key.slot && pos == key.pos
-                    && dimension.equals(key.dimension);
+                    && dimension.equals(key.dimension) && order.equals(key.order);
         }
 
         @Override
         public int hashCode() {
-            return 31 * (31 * dimension.hashCode() + Long.hashCode(pos)) + slot;
+            return 31 * (31 * (31 * dimension.hashCode() + Long.hashCode(pos)) + slot) + order.hashCode();
         }
     }
 
@@ -444,10 +463,16 @@ public final class StellarPatternStuckWatch {
         private final IPatternDetails patternDetails;
         @Nullable
         private final Integer aePlayerId;
+        private final StellarPatternCraftingContext.Order order;
+
+        private SlotKey key() {
+            return new SlotKey(dimension.location(), pos.asLong(), slot,
+                    order == null || order.link() == null ? "" : order.link().getCraftingID().toString());
+        }
 
         private Watch(ResourceKey<Level> dimension, BlockPos pos, int slot, long dueTick, Snapshot snapshot,
                 List<String> hostRecipeTypeIds, String patternRecipeTypeId, String patternRecipeId,
-                IPatternDetails patternDetails, @Nullable Integer aePlayerId) {
+                IPatternDetails patternDetails, @Nullable Integer aePlayerId, @Nullable StellarPatternCraftingContext.Order order) {
             this.dimension = dimension;
             this.pos = pos;
             this.slot = slot;
@@ -461,6 +486,7 @@ public final class StellarPatternStuckWatch {
             this.patternRecipeId = patternRecipeId;
             this.patternDetails = patternDetails;
             this.aePlayerId = aePlayerId;
+            this.order = order;
         }
     }
 }

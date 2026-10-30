@@ -17,6 +17,20 @@ class StellarPatternStuckReportSourceTest {
     }
 
     @Test
+    void takingInputsOnlyClearsRuntimeWarningsAndHistoryUsesIndependentAeOutcomes() throws IOException {
+        String machine = read("common/machine/part/RecipeTypePatternBufferPartMachine.java");
+        int start = machine.indexOf("private void gtShanhai$clearPatternSlotRuntimeSnapshot(");
+        String clear = machine.substring(start, machine.indexOf("private void gtShanhai$clearPatternSlotRuntimeSnapshots(", start));
+        assertFalse(clear.contains("StellarPatternWarningHistory"));
+        assertFalse(clear.contains("COMPLETED"));
+        String client = read("client/ShanhaiTerminalReportClient.java");
+        assertTrue(client.contains("screen.reportId() == report.id()"));
+        assertTrue(client.contains("screen.refreshed(report)"));
+        String notifier = read("common/machine/part/StellarPatternStuckNotifier.java");
+        assertTrue(notifier.contains("if (!announce) return;"), "訂單完成或取消只更新報告，不另洗一則卡死通知");
+    }
+
+    @Test
     void coinRestrictionsPreventBusyHostsFromDeferringDeniedRecipes() throws IOException {
         String watch = read("common/machine/part/StellarPatternStuckWatch.java");
         assertTrue(watch.contains("forge.getRecipeLogic().describeMintRestriction("));
@@ -66,7 +80,8 @@ class StellarPatternStuckReportSourceTest {
         assertTrue(source.contains("Component name = Component.translatable(PREFIX + \"slot_summary\""),
                 "收起列也要顯示槽號與簡短原因");
         assertTrue(source.contains("entry.cause().summary()"), "摘要必須顯示實際原因分類");
-        assertTrue(source.contains("coordinates, entry.reason()"), "完整原因仍須原樣放入展開詳情");
+        assertTrue(source.contains("section(details, \"reason\", Component.literal(entry.reason())"), "完整原因須獨立分區保留");
+        assertTrue(source.contains("entry.diagnosis().hostStatus()") && source.contains("entry.diagnosis().parallel()"));
         for (String language : new String[]{"zh_cn", "en_us"}) {
             String lang = Files.readString(Path.of("src/main/resources/assets/gt_shanhai/lang/" + language + ".json"));
             assertTrue(lang.contains("gui.gt_shanhai.ultimate_terminal.report.slot_summary"));
@@ -102,13 +117,21 @@ class StellarPatternStuckReportSourceTest {
     }
 
     @Test
-    void sameTickMachineAlertsShareOneReportAndRequesterUnion() throws IOException {
+    void machineAlertsAcrossTicksShareTheFullUnresolvedReportAndRequesterUnion() throws IOException {
         String notifier = read("common/machine/part/StellarPatternStuckNotifier.java");
         assertTrue(notifier.contains("record BatchKey(ResourceLocation dimension, long pos)"));
-        assertTrue(notifier.contains("batch.entries.put(slot, entry)"));
         assertTrue(notifier.contains("batch.aePlayerIds.add(aePlayerId)"));
         assertTrue(notifier.contains("@SubscribeEvent(priority = EventPriority.LOWEST)"));
-        assertTrue(notifier.contains("batch.dimension.location(), pos, batch.entries.values()"));
+        assertTrue(notifier.contains("BATCH_WINDOW_TICKS = 20"));
+        assertTrue(notifier.contains("batch.dueTick"));
+        assertTrue(notifier.contains("history.build(batch.dimension.location(), pos)"), "必須包含跨槽位紅框生命週期保存的歷史");
+        assertTrue(notifier.contains("history.requesters(batch.dimension.location(), pos)"));
+        String machine = read("common/machine/part/RecipeTypePatternBufferPartMachine.java");
+        assertTrue(machine.contains("StellarPatternWarningHistory.get(level.getServer()).build("));
+        String history = read("common/machine/part/StellarPatternWarningHistory.java");
+        assertTrue(history.contains("StellarPatternStuckReport.build(log.reportId,"), "歷史更新必須沿用同一報告 ID");
+        assertTrue(history.contains("extends SavedData"));
+        assertTrue(history.contains("entry.order().id() + \":slot:\" + entry.slot()"));
         assertTrue(notifier.contains("onServerStopped(ServerStoppedEvent event)"));
         assertTrue(notifier.contains("PENDING.clear()"));
     }

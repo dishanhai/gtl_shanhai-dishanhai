@@ -24,7 +24,8 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
         SHARED_INPUTS,
         PATTERN_BEHAVIOR,
         REFUND,
-        STRONG_PATTERN_MATCH
+        STRONG_PATTERN_MATCH,
+        FOCUSED_WILDCARD
     }
 
     private final GlobalPos targetPos;
@@ -82,8 +83,8 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
     public ModularUI createUI(Player player) {
         RecipeTypePatternBufferPartMachine machine = target;
         if (machine == null) return null;
-        if (mode == Mode.FULL_PATTERN) {
-            return machine.createRemotePatternUI(player, this);
+        if (mode == Mode.FULL_PATTERN || mode == Mode.FOCUSED_WILDCARD) {
+            return machine.createRemotePatternUI(player, this, slot);
         }
         if (mode == Mode.SLOT_CATALYST) {
             return machine.createRemoteSlotCatalystUI(player, slot, this);
@@ -110,6 +111,11 @@ public final class ShanhaiStellarRemoteUIHolder implements IUIHolder {
             return machine.createRemoteRefundUI(player, this);
         }
         return null;
+    }
+
+    public boolean openMainUI(net.minecraft.server.level.ServerPlayer player) {
+        return terminalHost != null && target != null && !isInvalid()
+                && ShanhaiStellarRemoteUIFactory.INSTANCE.openFocusedPattern(player, target, terminalHost, slot);
     }
 
     @Override

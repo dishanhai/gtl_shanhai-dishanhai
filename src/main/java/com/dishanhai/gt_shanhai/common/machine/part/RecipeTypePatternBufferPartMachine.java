@@ -35,6 +35,7 @@ import com.dishanhai.gt_shanhai.common.item.VirtualPatternEncodingHelper;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternBridge;
 import com.dishanhai.gt_shanhai.common.item.terminal.StellarTerminalDetail;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiTerminalReport;
+import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder;
 import com.dishanhai.gt_shanhai.common.item.WildcardPatternRecipeTypeBinding;
 import com.dishanhai.gt_shanhai.mixin.MEPatternBufferSlot2PatternAccessor;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
@@ -1707,13 +1708,18 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     public ShanhaiTerminalReport gtShanhai$buildStuckReport() {
         gtShanhai$clearResolvedRuntimeWarnings();
-        List<StellarPatternStuckReport.Entry> entries = new ArrayList<>(stuckRuntimeReports.values());
-        entries.sort(java.util.Comparator.comparingInt(StellarPatternStuckReport.Entry::slot));
-        return StellarPatternStuckReport.build(getLevel().dimension().location(), getPos(), entries);
+        if (getLevel() instanceof ServerLevel level) {
+            return StellarPatternWarningHistory.get(level.getServer()).build(level.dimension().location(), getPos());
+        }
+        return StellarPatternStuckReport.build(getLevel().dimension().location(), getPos(), List.of());
     }
 
     public @Nullable StellarPatternStuckReport.Entry gtShanhai$getStuckReportEntry(int slot) {
         gtShanhai$clearResolvedRuntimeWarnings();
+        if (getLevel() instanceof ServerLevel level) {
+            var entries = StellarPatternWarningHistory.get(level.getServer()).entries(level.dimension().location(), getPos());
+            for (int index = entries.size() - 1; index >= 0; index--) if (entries.get(index).slot() == slot) return entries.get(index);
+        }
         return stuckRuntimeReports.get(slot);
     }
 
@@ -1971,6 +1977,25 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
 
     @Override
     public @NotNull Widget createUIWidget() {
+        return createFocusedUIWidget(-1);
+    }
+
+    @Override
+    public Widget createMainPage(FancyMachineUIWidget widget) {
+        if (widget.getGui() != null && widget.getGui().holder instanceof ShanhaiStellarRemoteUIHolder remote) {
+            if (remote.mode() == ShanhaiStellarRemoteUIHolder.Mode.FOCUSED_WILDCARD) {
+                return createRemoteWildcardContent(remote.wildcardTypeIds(), remote.wildcardTypeNames(), remote.slot());
+            }
+            if (remote.mode() == ShanhaiStellarRemoteUIHolder.Mode.FULL_PATTERN && isValidRemotePatternSlot(remote.slot())) {
+                return createFocusedUIWidget(remote.slot());
+            }
+        }
+        return super.createMainPage(widget);
+    }
+
+    private Widget createFocusedUIWidget(int focusedSlot) {
+        CachedPatternPaginationUIManager pagination = focusedSlot >= 0
+                ? this.paginationUIManager.copyForFocus(focusedSlot) : this.paginationUIManager;
         int width = this.paginationUIManager.getUiWidth();
         int patternBottom = this.paginationUIManager.getUiHeight();
         WidgetGroup group = new WidgetGroup(0, 0, width, patternBottom);
@@ -1982,7 +2007,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         MEPatternCatalystUIManager catalystUIManager = new MEPatternCatalystUIManager(width + 4,
                 this.catalystItems, this.catalystFluids, this.cacheRecipeCount, this::removeSlotFromGTRecipeCache);
         group.waitToAdded(catalystUIManager);
-        group.addWidget(this.paginationUIManager.createPaginationUI(catalystUIManager::toggleFor));
+        group.addWidget(pagination.createPaginationUI(catalystUIManager::toggleFor));
         return group;
     }
 
@@ -2794,6 +2819,13 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
     }
 
     public ModularUI createRemotePatternUI(Player player, IUIHolder holder) {
+        return createRemotePatternUI(player, holder, -1);
+    }
+
+    public ModularUI createRemotePatternUI(Player player, IUIHolder holder, int slot) {
+        boolean wildcard = holder instanceof ShanhaiStellarRemoteUIHolder remote
+                && remote.mode() == ShanhaiStellarRemoteUIHolder.Mode.FOCUSED_WILDCARD;
+        if (wildcard ? slot < 0 || slot >= wildcardSlotCount : slot >= 0 && !isValidRemotePatternSlot(slot)) return null;
         return new ModularUI(176, 166, holder, player)
                 .widget(new FancyMachineUIWidget(this, 176, 166));
     }
@@ -2804,8 +2836,18 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         WidgetGroup root = new WidgetGroup(0, 0, 176, 180);
         root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
                 "gui.gt_shanhai.remote_pattern_catalyst", slot + 1).getString()));
-        root.addWidget(new SlotWidget(getPatternInventory(), slot, 150, 134, false, false)
-                .setBackground(GuiTextures.SLOT));
+        CachedPatternSlotWidget preview = new CachedPatternSlotWidget(getPatternInventory(), slot, 150, 134,
+                () -> gtShanhai$isPatternSlotWarning(slot), this::patternPreviewLevel);
+        preview.setCanTakeItems(false).setCanPutItems(false).setBackground(GuiTextures.SLOT);
+        preview.setFocused(true);
+        root.addWidget(preview);
+        root.addWidget(new ButtonWidget(8, 134, 136, 16, new TextTexture(
+                Component.translatable("gui.gt_shanhai.ultimate_terminal.report.open_main").getString()), click -> {
+                    if (player instanceof ServerPlayer serverPlayer && holder instanceof
+                            com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIHolder remote) {
+                        remote.openMainUI(serverPlayer);
+                    }
+                }));
         MEPatternCatalystUIManager manager = new MEPatternCatalystUIManager(
                 8, this.catalystItems, this.catalystFluids,
                 this.cacheRecipeCount, this::removeSlotFromGTRecipeCache);
@@ -2823,7 +2865,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
                     }
                     serverPlayer.closeContainer();
                     com.dishanhai.gt_shanhai.network.ShanhaiTerminalReportPacket.sendAndOpenTo(serverPlayer,
-                            StellarPatternStuckReport.build(getLevel().dimension().location(), getPos(), List.of(entry)));
+                            gtShanhai$buildStuckReport());
                 }));
         root.addWidget(new ButtonWidget(112, 158, 56, 16, new TextTexture(
                 Component.translatable("gui.gt_shanhai.remote_pattern_return").getString()), click -> {
@@ -2888,22 +2930,58 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         int inventoryY = 182;
         int height = inventoryY + REMOTE_PLAYER_INVENTORY_HEIGHT;
         WidgetGroup root = new WidgetGroup(0, 0, width, height);
+        root.addWidget(createRemoteWildcardContent(typeIds, typeNames, -1));
+        root.addWidget(remoteReturnButton(player, width - 64, 162));
+        root.addWidget(remotePlayerInventory(player, width, inventoryY));
+        return new ModularUI(width, height, holder, player).widget(root).background(GuiTextures.BACKGROUND);
+    }
+
+    /** 遠端通配頁以介面區域狀態保存選取，不改機器上其他檢視者的母槽與頁碼。 */
+    private WidgetGroup createRemoteWildcardContent(List<String> typeIds, List<String> typeNames, int focusedMother) {
+        int width = Math.max(176, wildcardPanelWidth());
+        int mother = focusedMother >= 0 ? focusedMother : Math.max(0, Math.min(selectedWildcardMotherSlot, wildcardSlotCount - 1));
+        int[] selection = {mother, mother / wildcardSlotsPerPage};
+        WidgetGroup root = new WidgetGroup(0, 0, width, 160);
         WidgetGroup slotHost = new WidgetGroup(0, 30, width, 30);
         Runnable[] rebuildSlots = new Runnable[1];
         rebuildSlots[0] = () -> {
             slotHost.clearAllWidgets();
-            addWildcardMotherSlots(slotHost, 8, 0, 18, () -> rebuildSlots[0].run());
+            int start = selection[1] * wildcardSlotsPerPage;
+            int end = Math.min(start + wildcardSlotsPerPage, wildcardSlotCount);
+            for (int index = start; index < end; index++) {
+                int selected = index;
+                int x = 8 + (index - start) * 18;
+                slotHost.addWidget(new SlotWidget(wildcardPatternInventory, index, x, 0) {
+                    @Override
+                    public void drawInBackground(net.minecraft.client.gui.GuiGraphics graphics, int mx, int my, float partialTicks) {
+                        super.drawInBackground(graphics, mx, my, partialTicks);
+                        if (selected == focusedMother) CachedPatternSlotWidget.gtShanhai$drawFocusBorder(
+                                graphics, getPositionX(), getPositionY(), getSizeWidth(), getSizeHeight());
+                    }
+                }.setBackground(GuiTextures.SLOT, GuiTextures.PATTERN_OVERLAY));
+                slotHost.addWidget(new ButtonWidget(x + 1, 18, 16, 10,
+                        new TextTexture((selection[0] == index ? "§a" : "§7") + (index + 1), -1), click -> {
+                            selection[0] = selected;
+                            rebuildSlots[0].run();
+                        }));
+            }
         };
         root.addWidget(new LabelWidget(8, 4, () -> Component.translatable(
                 "gui.gt_shanhai.wildcard_pattern_config").getString()));
-        addWildcardPageControls(root, 16, width, () -> rebuildSlots[0].run());
+        root.addWidget(new ButtonWidget(8, 16, 24, 12, new TextTexture("<<", -1), click -> {
+            if (selection[1] > 0) { selection[1]--; rebuildSlots[0].run(); }
+        }));
+        root.addWidget(new LabelWidget(width / 2 - 12, 18, () -> (selection[1] + 1) + " / " + wildcardMaxPages));
+        root.addWidget(new ButtonWidget(width - 32, 16, 24, 12, new TextTexture(">>", -1), click -> {
+            if (selection[1] < wildcardMaxPages - 1) { selection[1]++; rebuildSlots[0].run(); }
+        }));
         rebuildSlots[0].run();
         root.addWidget(slotHost);
         root.addWidget(new LabelWidget(8, 62, () -> Component.translatable(
                 "gui.gt_shanhai.wildcard_pattern_slot",
-                selectedWildcardMotherSlot + 1, remoteWildcardTypeText()).getString()));
+                selection[0] + 1, remoteWildcardTypeText(selection[0])).getString()));
         root.addWidget(new LabelWidget(8, 74, () -> Component.translatable(
-                "gui.gt_shanhai.wildcard_pattern_expanded", selectedWildcardPreviewPatterns().size()).getString()));
+                "gui.gt_shanhai.wildcard_pattern_expanded", wildcardPreviewByMother.get(selection[0]).size()).getString()));
 
         DraggableScrollableWidgetGroup typeList = new DraggableScrollableWidgetGroup(8, 86, width - 16, 72);
         typeList.setBackground(GuiTextures.DISPLAY);
@@ -2914,22 +2992,18 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         int y = 2;
         typeList.addWidget(new ButtonWidget(2, y, 148, 16,
                 new TextTexture(Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString(), -1),
-                click -> clearWildcardRecipeType(selectedWildcardMotherSlot)));
+                click -> clearWildcardRecipeType(selection[0])));
         y += 18;
         for (int index = 0; index < count; index++) {
             String typeId = typeIds.get(index);
             String typeName = typeNames.get(index);
             typeList.addWidget(new ButtonWidget(2, y, 148, 16,
                     new TextTexture(typeName, -1),
-                    click -> assignWildcardRecipeTypeId(selectedWildcardMotherSlot, typeId)));
+                    click -> assignWildcardRecipeTypeId(selection[0], typeId)));
             y += 18;
         }
         root.addWidget(typeList);
-        root.addWidget(remoteReturnButton(player, width - 64, 162));
-        root.addWidget(remotePlayerInventory(player, width, inventoryY));
-        return new ModularUI(width, height, holder, player)
-                .widget(root)
-                .background(GuiTextures.BACKGROUND);
+        return root;
     }
 
     private ModularUI createRemoteSidebarUI(Player player, IUIHolder holder, FancyConfiguratorSidebarPage page) {
@@ -2968,8 +3042,9 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         wildcardPatternInventory.setStackInSlot(slot, WildcardPatternRecipeTypeBinding.assign(stack, typeId));
     }
 
-    private String remoteWildcardTypeText() {
-        String typeId = currentWildcardRecipeTypeId();
+    private String remoteWildcardTypeText(int mother) {
+        String typeId = mother < 0 || mother >= wildcardSlotCount ? "" : PatternRecipeTypeHelper.readRecipeTypeId(
+                wildcardPatternInventory.getStackInSlot(mother));
         if (typeId.isEmpty()) {
             return Component.translatable("gui.gt_shanhai.wildcard_pattern_auto").getString();
         }
@@ -3183,6 +3258,18 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         return text.toString();
     }
 
+    public int gtShanhai$findStuckMotherSlot(int slot) {
+        int local = slot - maxPatternCount;
+        if (wildcardPatterns == null || local < 0 || local >= wildcardPatterns.size()) return -1;
+        IPatternDetails pattern = wildcardPatterns.get(local);
+        if (pattern == null) return -1;
+        for (int mother = 0; mother < wildcardPreviewByMother.size(); mother++) {
+            List<IPatternDetails> preview = wildcardPreviewByMother.get(mother);
+            if (preview != null && preview.contains(pattern)) return mother;
+        }
+        return -1;
+    }
+
     /** 普通樣板槽與通配展開槽都要能登記卡死。展開槽從 {@code maxPatternCount} 起編。 */
     private boolean gtShanhai$isRuntimeTrackableSlot(int slot) {
         return slot >= 0 && slot < getInternalSlotCount();
@@ -3198,6 +3285,7 @@ public class RecipeTypePatternBufferPartMachine extends StellarSuperPatternBuffe
         }
     }
 
+    /** 僅決定取料紅框是否解除；AE 訂單歷史由真實連結另外判定，不在此標為已解決。 */
     private boolean gtShanhai$isRuntimeWarningResolved(int slot) {
         if (!gtShanhai$isRuntimeTrackableSlot(slot)) return true;
         Object2LongMap<AEItemKey> itemSnapshot = stuckRuntimeItemSnapshots.get(slot);

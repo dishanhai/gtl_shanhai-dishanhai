@@ -45,6 +45,7 @@ public final class CachedPatternSlotWidget extends AEPatternViewExtendSlotWidget
     private AEKey cachedPatternOutputKey;
     private final BooleanSupplier warningSupplier;
     private final Supplier<Level> levelSupplier;
+    private boolean focused;
 
     public CachedPatternSlotWidget(IItemTransfer inventory, int slotIndex, int xPosition, int yPosition) {
         this(inventory, slotIndex, xPosition, yPosition, () -> false, () -> null);
@@ -74,6 +75,8 @@ public final class CachedPatternSlotWidget extends AEPatternViewExtendSlotWidget
         cachedPatternOutputText = "";
         cachedPatternOutputKey = null;
     }
+
+    public void setFocused(boolean focused) { this.focused = focused; }
 
     @Override
     public ItemStack getRealStack(ItemStack stack) {
@@ -145,6 +148,22 @@ public final class CachedPatternSlotWidget extends AEPatternViewExtendSlotWidget
         }
         if (cachedPatternOutputKey != null && ClientPatternHighlightStore.hasHighlight(cachedPatternOutputKey)) {
             GuiUtil.drawSlotRainbowHighlight(graphics, pos.x + 1, pos.y + 1);
+        }
+        if (focused) gtShanhai$drawFocusBorder(graphics, pos.x, pos.y, getSize().width, getSize().height);
+    }
+
+    /** 彩虹沿邊框流動；減少動態效果時保留靜態彩虹，焦點不依賴輸出 key。 */
+    public static void gtShanhai$drawFocusBorder(GuiGraphics graphics, int x, int y, int width, int height) {
+        float phase = com.dishanhai.gt_shanhai.client.shop.ClientShopUiSettings.reduceMotion()
+                ? 0f : (System.currentTimeMillis() % 3600L) / 3600f;
+        int perimeter = 2 * (width + height);
+        for (int p = 0; p < perimeter; p++) {
+            int color = 0xFF000000 | net.minecraft.util.Mth.hsvToRgb((phase + (float) p / perimeter) % 1f, 0.85f, 1f);
+            if (p < width) graphics.fill(x + p, y, x + p + 1, y + 1, color);
+            else if (p < width + height) graphics.fill(x + width - 1, y + p - width, x + width, y + p - width + 1, color);
+            else if (p < 2 * width + height) graphics.fill(x + 2 * width + height - p - 1, y + height - 1,
+                    x + 2 * width + height - p, y + height, color);
+            else graphics.fill(x, y + perimeter - p - 1, x + 1, y + perimeter - p, color);
         }
     }
 

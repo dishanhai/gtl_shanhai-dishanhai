@@ -49,8 +49,9 @@ public final class CoinForgeMintGate {
     /** 告警與真正的鑄幣權限使用同一等級判斷；未分階段的產物不誤報。 */
     public static String restrictionText(int moduleLevel, int required) {
         if (allowsRequiredLevel(moduleLevel, required)) return "";
-        return "铸币权限未解锁：当前物质模块 Lv." + Math.max(0, moduleLevel)
-                + "（" + permissionText(moduleLevel) + "）；本配方产出需 Lv." + required + " 或以上物质模块";
+        return "铸币权限未解锁\n当前物质模块: Lv." + Math.max(0, moduleLevel)
+                + "\n当前铸币范围: " + permissionText(moduleLevel)
+                + "\n本配方最低需求: Lv." + required + " 或以上物质模块";
     }
 
     /** 正常并行的 1/4，向下取整；正数并行至少保留 1。 */

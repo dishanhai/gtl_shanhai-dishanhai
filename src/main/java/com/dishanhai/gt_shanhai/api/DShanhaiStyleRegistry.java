@@ -60,6 +60,10 @@ public final class DShanhaiStyleRegistry {
         reg("plasma",        DShanhaiTextUtil.PLASMA_RGB, false, CYCLE, "等离子辉光");
         reg("starlight",     DShanhaiTextUtil.STARLIGHT_RGB, false, CYCLE, "星辉白金");
         reg("abyss",         DShanhaiTextUtil.ABYSS_RGB, false, CYCLE, "深渊蓝光");
+        reg("shanhai_dawn",   DShanhaiTextUtil.SHANHAI_DAWN_RGB, false, CYCLE, "山海朝霞");
+        reg("shanhai_mist",   DShanhaiTextUtil.SHANHAI_MIST_RGB, false, CYCLE, "山海青岚");
+        reg("shanhai_galaxy", DShanhaiTextUtil.SHANHAI_GALAXY_RGB, false, CYCLE, "山海星河");
+        reg("shanhai_prism",  DShanhaiTextUtil.SHANHAI_PRISM_RGB, false, CYCLE, "山海琉彩");
 
         // ===== 元色板：全依序遍歷、隨機每輪洗牌不重複；兩者輪長隨機；完全隨機逐字亮色 =====
         reg("all",           DShanhaiTextUtil.PALETTE_ALL, false, CYCLE, "全元素：依序遍历全部流动色板");
@@ -149,6 +153,11 @@ public final class DShanhaiStyleRegistry {
         alias("等离子", "plasma");
         alias("星辉", "starlight");
         alias("深渊", "abyss");
+        alias("山海朝霞", "shanhai_dawn");
+        alias("山海青岚", "shanhai_mist");
+        alias("山海青嵐", "shanhai_mist");
+        alias("山海星河", "shanhai_galaxy");
+        alias("山海琉彩", "shanhai_prism");
 
         alias("正文金", "body_golden");
         alias("正文金色", "body_golden");

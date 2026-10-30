@@ -22,6 +22,11 @@ public final class ShanhaiTerminalReportClient {
         REPORTS.remove(report.id());
         REPORTS.put(report.id(), report);
         while (REPORTS.size() > KEEP) REPORTS.remove(REPORTS.keySet().iterator().next());
+        var minecraft = Minecraft.getInstance();
+        if (report.type() == ShanhaiTerminalReport.Type.STELLAR_STUCK
+                && minecraft.screen instanceof TerminalReportScreen screen && screen.reportId() == report.id()) {
+            minecraft.setScreen(screen.refreshed(report));
+        }
     }
 
     /** @return 該指令屬於本功能（無論成功與否都應攔截）。 */

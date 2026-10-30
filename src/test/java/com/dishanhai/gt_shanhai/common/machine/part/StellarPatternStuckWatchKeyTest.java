@@ -12,6 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** 山海星律：同槽排程覆蓋，跨維度／座標／槽位互不影響。 */
 class StellarPatternStuckWatchKeyTest {
+    @Test
+    void differentAeOrdersAtTheSameSlotCannotReplaceEachOthersWatch() {
+        var dim = new ResourceLocation("minecraft", "overworld");
+        var first = new StellarPatternStuckWatch.SlotKey(dim, 123L, 3, "job-a");
+        var second = new StellarPatternStuckWatch.SlotKey(dim, 123L, 3, "job-b");
+        assertEquals(2, java.util.Set.of(first, second).size());
+        assertEquals(first, new StellarPatternStuckWatch.SlotKey(dim, 123L, 3, "job-a"));
+    }
 
     @Test
     void repeatedPushReplacesOnlyTheSameDimensionPositionAndSlot() {

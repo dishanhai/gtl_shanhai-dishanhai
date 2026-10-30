@@ -38,6 +38,7 @@ public final class CachedPatternPaginationUIManager {
     // 注意：本类不是机器的 managed field holder，LDLib 不会扫描这里的同步注解——
     // 页码只在各端本地维护，槽位内容本身由 patternInventory 的同步机制保证一致。
     private int currentPageIndex;
+    private int focusedSlot = -1;
 
     private WidgetGroup paginationUI;
 
@@ -78,6 +79,19 @@ public final class CachedPatternPaginationUIManager {
         return uiHeight;
     }
 
+    /** 每次遠端開啟各持一份頁碼與焦點，不能移動其他玩家正在看的頁面。 */
+    public CachedPatternPaginationUIManager copyForFocus(int slot) {
+        if (slot < 0 || slot >= maxPatternCount) throw new IllegalArgumentException("Invalid focused pattern slot: " + slot);
+        var copy = new CachedPatternPaginationUIManager(patternsPerRow, rowsPerPage, maxPages, uiWidth, uiHeight,
+                onPatternChange, isCached, isWarning, patternInventory, levelSupplier);
+        copy.slotTooltip = slotTooltip;
+        copy.focusedSlot = slot;
+        copy.currentPageIndex = slot / (patternsPerRow * rowsPerPage);
+        return copy;
+    }
+
+    public int getCurrentPageIndex() { return currentPageIndex; }
+
     public WidgetGroup createPaginationUI(@Nullable IntConsumer onMiddleClicked) {
         this.onMiddleClicked = onMiddleClicked;
         WidgetGroup basePage = new WidgetGroup(0, 0, uiWidth, uiHeight);
@@ -111,6 +125,7 @@ public final class CachedPatternPaginationUIManager {
                     patternInventory, slotIndex, x, y,
                     () -> Boolean.TRUE.equals(isWarning.apply(finalSlot)),
                     levelSupplier);
+            slot.setFocused(finalSlot == focusedSlot);
             slot.setOnPatternSlotChanged(() -> {
                 slot.invalidatePatternCache();
                 onPatternChange.accept(finalSlot);

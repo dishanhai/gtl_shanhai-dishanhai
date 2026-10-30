@@ -44,7 +44,6 @@ import com.dishanhai.gt_shanhai.api.DShanhaiMaterialCounter;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeEngine;
 import com.dishanhai.gt_shanhai.api.DShanhaiRecipeModifierAPI;
 import com.dishanhai.gt_shanhai.common.machine.part.RecipeTypePatternBufferPartMachine;
-import com.dishanhai.gt_shanhai.common.machine.part.StellarPatternStuckReport;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternManagementMenu;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiPatternTerminalOpenHelper;
 import com.dishanhai.gt_shanhai.common.item.terminal.ShanhaiStellarRemoteUIFactory;
@@ -1152,11 +1151,22 @@ public class DShanhaiCommands {
                                                                 new BlockPos(IntegerArgumentType.getInteger(ctx, "x"),
                                                                         IntegerArgumentType.getInteger(ctx, "y"),
                                                                         IntegerArgumentType.getInteger(ctx, "z")),
-                                                                IntegerArgumentType.getInteger(ctx, "slot"))))))));
+                                                                IntegerArgumentType.getInteger(ctx, "slot")))
+                                                        .then(Commands.literal("main").executes(ctx -> execStellarSlot(
+                                                                ctx.getSource(), ResourceLocationArgument.getId(ctx, "dimension"),
+                                                                new BlockPos(IntegerArgumentType.getInteger(ctx, "x"),
+                                                                        IntegerArgumentType.getInteger(ctx, "y"),
+                                                                        IntegerArgumentType.getInteger(ctx, "z")),
+                                                                IntegerArgumentType.getInteger(ctx, "slot"), true))))))));
     }
 
     private static int execStellarSlot(CommandSourceStack source, ResourceLocation dimension,
                                       BlockPos pos, int slot) throws CommandSyntaxException {
+        return execStellarSlot(source, dimension, pos, slot, false);
+    }
+
+    private static int execStellarSlot(CommandSourceStack source, ResourceLocation dimension,
+                                      BlockPos pos, int slot, boolean mainUI) throws CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
         ServerLevel level = source.getServer().getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
         if (level == null || !level.hasChunkAt(pos)) {
@@ -1176,6 +1186,11 @@ public class DShanhaiCommands {
             source.sendFailure(Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_unavailable"));
             return 0;
         }
+        if (mainUI) {
+            if (ShanhaiStellarRemoteUIFactory.INSTANCE.openFocusedPattern(player, stellar, menu.getWirelessHost(), slot)) return 1;
+            source.sendFailure(Component.translatable("gui.gt_shanhai.ultimate_terminal.report.slot_unavailable"));
+            return 0;
+        }
         if (stellar.isValidRemotePatternSlot(slot)) {
             return ShanhaiStellarRemoteUIFactory.INSTANCE.openSlot(player, stellar, menu.getWirelessHost(), slot) ? 1 : 0;
         }
@@ -1187,7 +1202,7 @@ public class DShanhaiCommands {
         }
         player.closeContainer();
         ShanhaiTerminalReportPacket.sendAndOpenTo(player,
-                StellarPatternStuckReport.build(dimension, pos, List.of(entry)));
+                stellar.gtShanhai$buildStuckReport());
         return 1;
     }
 

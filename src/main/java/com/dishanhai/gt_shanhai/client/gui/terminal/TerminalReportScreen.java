@@ -14,6 +14,8 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.contents.TranslatableContents;
+import com.dishanhai.gt_shanhai.common.machine.part.StellarPatternOrderInfo;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import java.util.ArrayList;
@@ -79,6 +81,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     private boolean warmed, draggingBar, loading;
     private Component notice = Component.empty();
     private long noticeUntil;
+    private int restoreScroll = -1;
 
     public TerminalReportScreen(ShanhaiTerminalReport report) {
         super(Component.translatable(PREFIX + switch (report.type()) {
@@ -111,6 +114,20 @@ public final class TerminalReportScreen extends ScaledScreen {
     private boolean isStellarStuck() { return report.type() == ShanhaiTerminalReport.Type.STELLAR_STUCK; }
     private boolean isTextReport() { return isCraft() || isStellarStuck(); }
     private boolean hasWorldCoordinates() { return !isTextReport(); }
+    public long reportId() { return report.id(); }
+
+    /** 同一星律訂單狀態更新時，保留使用者已展開的紀錄與閱讀位置。 */
+    public TerminalReportScreen refreshed(ShanhaiTerminalReport updated) {
+        Set<String> openNames = new HashSet<>();
+        for (Group group : groups) if (expanded.contains(group.key())) openNames.add(report.names().get(group.name()).getString());
+        var next = new TerminalReportScreen(updated);
+        for (Group group : next.groups) if (openNames.contains(updated.names().get(group.name()).getString())) next.expanded.add(group.key());
+        next.filter = filter;
+        if (filter <= -2 && next.stateCount(-filter - 2) == 0) next.filter = -1;
+        next.restoreScroll = scrollTarget;
+        next.opening.snap(1);
+        return next;
+    }
     private static Component tr(String key, Object... args) { return Component.translatable(PREFIX + key, args); }
     private int listX() { return left + 12; }
     private int listY() { return top + headerBottom; }
@@ -129,6 +146,7 @@ public final class TerminalReportScreen extends ScaledScreen {
     }
     private Component counts() {
         int[] c = report.counts();
+        if (isStellarStuck() && c.length >= 5) return tr("counts_history", c[0], c[1], c[4], c[3], c[2]);
         if (isStellarStuck()) return tr("counts_stellar_stuck", c.length > 0 ? c[0] : 0);
         if (report.type() == ShanhaiTerminalReport.Type.MODULES) return tr("counts_modules", c.length > 0 ? c[0] : 0);
         if (report.type() == ShanhaiTerminalReport.Type.BUILD) return tr("counts_build", c[0], c[1], c[2]);
@@ -143,10 +161,14 @@ public final class TerminalReportScreen extends ScaledScreen {
         y += GAP;
         chips.clear();
         int x = 0, rowH = 0;
-        for (int i = -1; i < report.categories().size(); i++) {
-            if (i >= 0 && categoryCounts[i] == 0) continue;
+        int chipCount = isStellarStuck() ? StellarPatternOrderInfo.State.values().length : report.categories().size();
+        for (int i = -1; i < chipCount; i++) {
+            int count = i < 0 ? distinctPositions : isStellarStuck() ? stateCount(i) : categoryCounts[i];
+            if (i >= 0 && count == 0) continue;
             Component text;
             if (i < 0) text = tr("filter_all", distinctPositions);
+            else if (isStellarStuck()) text = tr("order_state_" + StellarPatternOrderInfo.State.values()[i].name().toLowerCase(java.util.Locale.ROOT))
+                    .copy().append(" (" + count + ")");
             else {
                 int color = report.categories().get(i).color();
                 text = report.categories().get(i).label().copy()
@@ -156,13 +178,34 @@ public final class TerminalReportScreen extends ScaledScreen {
             int w = Math.min(CONTENT_W, font.width(text) + 16);
             int h = Math.max(1, font.split(text, Math.max(1, w - 12)).size()) * font.lineHeight + 10;
             if (x > 0 && x + w > CONTENT_W) { y += rowH + 4; x = 0; rowH = 0; }
-            chips.add(new Chip("chip." + i, text, i, x, y, w, h));
+            int category = isStellarStuck() && i >= 0 ? -i - 2 : i;
+            chips.add(new Chip("chip." + category, text, category, x, y, w, h));
             x += w + 4; rowH = Math.max(rowH, h);
         }
         y += rowH + GAP;
         // 表頭佔一行高度，列表緊接其後。
         headerBottom = y + font.lineHeight + 6;
         listHeight = PANEL_H - FOOTER_H - headerBottom;
+    }
+
+    private int categoryState(int category) {
+        if (report.categories().get(category).label().getContents() instanceof TranslatableContents contents) {
+            for (var state : StellarPatternOrderInfo.State.values()) {
+                if (contents.getKey().equals(PREFIX + "order_state_" + state.name().toLowerCase(java.util.Locale.ROOT))) return state.ordinal();
+            }
+        }
+        return StellarPatternOrderInfo.State.UNTRACKED.ordinal();
+    }
+
+    private int stateCount(int state) {
+        int count = 0;
+        for (int category = 0; category < categoryCounts.length; category++) if (categoryState(category) == state) count += categoryCounts[category];
+        return count;
+    }
+
+    private boolean matchesFilter(Group group) {
+        return isStellarStuck() && filter <= -2 ? categoryState(group.category()) == -filter - 2
+                : filter < 0 || group.category() == filter;
     }
     /** 把一組方塊排成兩欄卡片網格（相對名稱欄原點），回傳網格總高；文字換行、卡片隨之長高。 */
     private int layoutCells(List<net.minecraft.world.item.Item> items, List<Cell> out) {
@@ -192,7 +235,7 @@ public final class TerminalReportScreen extends ScaledScreen {
         rows.clear();
         layoutY = 0; layoutCursor = 0; contentHeight = 0;
         List<Group> shown = new ArrayList<>();
-        for (Group group : groups) if (filter < 0 || group.category() == filter) shown.add(group);
+        for (Group group : groups) if (matchesFilter(group)) shown.add(group);
         layoutGroups = shown;
         loading = !shown.isEmpty();
         scrollTarget = 0; scroll.snap(0);
@@ -207,7 +250,13 @@ public final class TerminalReportScreen extends ScaledScreen {
             layoutY += row.h() + 2;
         } while (System.nanoTime() - start < budgetNs);
         contentHeight = layoutY;
-        if (layoutCursor >= layoutGroups.size()) loading = false;
+        if (layoutCursor >= layoutGroups.size()) {
+            loading = false;
+            if (restoreScroll >= 0) {
+                scrollTarget = Math.min(restoreScroll, Math.max(0, contentHeight - listHeight));
+                scroll.snap(scrollTarget); restoreScroll = -1;
+            }
+        }
     }
     private Row buildRow(Group group, int y) {
         var category = report.categories().get(group.category());

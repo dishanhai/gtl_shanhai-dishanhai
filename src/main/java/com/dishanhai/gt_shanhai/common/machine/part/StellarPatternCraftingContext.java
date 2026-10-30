@@ -10,24 +10,52 @@ import org.jetbrains.annotations.Nullable;
  */
 public final class StellarPatternCraftingContext {
 
-    private static final ThreadLocal<Integer> AE_PLAYER_ID = new ThreadLocal<>();
+    private record Frame(Integer player, Order order) {}
+    private static final ThreadLocal<java.util.Deque<Frame>> CONTEXT = ThreadLocal.withInitial(java.util.ArrayDeque::new);
+
+    public record Order(appeng.api.networking.crafting.ICraftingLink link, appeng.api.stacks.GenericStack output,
+                        java.util.function.LongSupplier remaining, Integer playerId, String cpu) {
+        public StellarPatternOrderInfo snapshot(net.minecraft.server.MinecraftServer server) {
+            if (link == null) return StellarPatternOrderInfo.UNKNOWN;
+            String requester = "自动任务";
+            if (playerId != null) {
+                var player = appeng.api.features.IPlayerRegistry.getConnected(server, playerId);
+                var uuid = appeng.api.features.IPlayerRegistry.getMapping(server).getProfileId(playerId);
+                requester = (player == null ? "离线玩家" : player.getGameProfile().getName())
+                        + " (AE #" + playerId + (uuid == null ? "" : ", " + uuid) + ")";
+            }
+            return new StellarPatternOrderInfo(link.getCraftingID().toString(), requester, cpu,
+                    output == null ? "<unknown>" : output.what().getDisplayName().getString(),
+                    output == null ? "<unknown>" : output.what().getId().toString(),
+                    output == null ? 0 : output.amount(), remaining == null ? 0 : remaining.getAsLong(),
+                    StellarPatternOrderInfo.stateOf(link));
+        }
+    }
 
     private StellarPatternCraftingContext() {}
 
     public static void push(@Nullable Integer aePlayerId) {
-        if (aePlayerId == null) {
-            AE_PLAYER_ID.remove();
-        } else {
-            AE_PLAYER_ID.set(aePlayerId);
-        }
+        CONTEXT.get().push(new Frame(aePlayerId, null));
+    }
+
+    public static void pushOrder(@Nullable Order order) {
+        CONTEXT.get().push(new Frame(order == null ? null : order.playerId(), order));
     }
 
     public static void pop() {
-        AE_PLAYER_ID.remove();
+        var stack = CONTEXT.get();
+        if (!stack.isEmpty()) stack.pop();
+        if (stack.isEmpty()) CONTEXT.remove();
     }
 
     @Nullable
     public static Integer currentAePlayerId() {
-        return AE_PLAYER_ID.get();
+        Frame frame = CONTEXT.get().peek();
+        return frame == null ? null : frame.player();
+    }
+
+    public static @Nullable Order currentOrder() {
+        Frame frame = CONTEXT.get().peek();
+        return frame == null ? null : frame.order();
     }
 }
