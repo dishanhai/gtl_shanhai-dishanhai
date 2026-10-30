@@ -13,12 +13,12 @@ public final class GuixuStarRenderer {
 
     /** 呼叫方已將 PoseStack 放到環心並套用機器朝向，相機也使用同一座標系。 */
     public static void render(PoseStack pose, float[] camera, double seconds, double surfaceRadius,
-                              float density, float brightness, float jets) {
+                              float density, float brightness, float jets, boolean infallEnabled) {
         var layer = HostFxDraw.beamLayer();
         var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
         VertexConsumer vertices = buffers.getBuffer(layer);
         Matrix4f matrix = pose.last().pose();
-        for (int i = 0; i < GuixuStarField.PARTICLE_COUNT; i++) {
+        for (int i = 0; infallEnabled && i < GuixuStarField.PARTICLE_COUNT; i++) {
             var star = GuixuStarField.sample(i, seconds, surfaceRadius);
             float visibility = Math.max(0.0F, Math.min(1.0F, (density * GuixuStarField.PARTICLE_COUNT - i) / 8.0F));
             float alpha = star.alpha() * visibility * brightness;
@@ -51,8 +51,82 @@ public final class GuixuStarRenderer {
             glint(vertices, matrix, head, right, up, star.size() * 0.55F, star.size() * 0.55F,
                     1.0F, 0.96F, 0.90F, alpha);
         }
-        if (jets > 0.001F) drawJets(vertices, matrix, seconds, surfaceRadius, jets);
+        if (infallEnabled && jets > 0.001F) drawJets(vertices, matrix, seconds, surfaceRadius, jets);
+        drawAmbient(vertices, matrix, camera, HostFxSwitch.spinSeconds(), density, brightness, HostFxSwitch.degraded());
         buffers.endBatch(layer);
+    }
+
+    /** 山海：共用一批頂點；背景、星塵與流星均有固定數量上限，不建立粒子實體。 */
+    private static void drawAmbient(VertexConsumer vertices, Matrix4f matrix, float[] camera,
+                                    double seconds, float density, float brightness, boolean degraded) {
+        int[] counts = {GuixuStarField.skyCount(density, degraded),
+                degraded ? 0 : Math.round(GuixuStarField.ORBIT_COUNT * Math.max(0.25F, Math.min(1F, density))),
+                degraded ? 0 : GuixuStarField.METEOR_COUNT};
+        float light = (0.55F + 0.45F * brightness) * (degraded ? 0.55F : 1.0F);
+        Vector3f center = new Vector3f(), view = new Vector3f(), right = new Vector3f();
+        Vector3f up = new Vector3f(), width = new Vector3f();
+        for (int kind = 0; kind < counts.length; kind++) {
+            for (int i = 0; i < counts[kind]; i++) {
+                var star = switch (kind) {
+                    case 0 -> GuixuStarField.sampleSky(i, seconds);
+                    case 1 -> GuixuStarField.sampleOrbit(i, seconds);
+                    default -> GuixuStarField.sampleMeteor(i, seconds);
+                };
+                float alpha = star.alpha() * light;
+                if (alpha <= 0.001F) continue;
+                center.set((float) star.headX(), (float) star.headY(), (float) star.headZ());
+                view.set(camera[0], camera[1], camera[2]).sub(center);
+                if (view.lengthSquared() < 1.0e-8F) view.set(0, 0, 1);
+                view.normalize();
+                right.set(-view.z, 0, view.x);
+                if (right.lengthSquared() < 1.0e-8F) right.set(1, 0, 0);
+                right.normalize();
+                up.set(right).cross(view).normalize();
+                float red = star.warm() ? 1F : 0.55F;
+                float green = star.warm() ? 0.82F : 0.80F;
+                float blue = star.warm() ? 0.58F : 1F;
+                if (kind > 0) {
+                    width.set((float) star.tailX(), (float) star.tailY(), (float) star.tailZ()).sub(center).cross(view);
+                    if (width.lengthSquared() < 1.0e-8F) width.set(right);
+                    width.normalize().mul(star.size() * 0.5F);
+                    ambientVertex(vertices, matrix, (float) star.tailX() + width.x, (float) star.tailY() + width.y,
+                            (float) star.tailZ() + width.z, red, green, blue, 0);
+                    ambientVertex(vertices, matrix, center.x + width.x, center.y + width.y, center.z + width.z,
+                            red, green, blue, alpha * 0.8F);
+                    ambientVertex(vertices, matrix, center.x - width.x, center.y - width.y, center.z - width.z,
+                            red, green, blue, alpha * 0.8F);
+                    ambientVertex(vertices, matrix, (float) star.tailX() - width.x, (float) star.tailY() - width.y,
+                            (float) star.tailZ() - width.z, red, green, blue, 0);
+                }
+                if (kind > 0 || i % 17 == 0) {
+                    ambientGlint(vertices, matrix, center, right, up, star.size() * 2.6F, star.size() * 0.16F,
+                            red, green, blue, alpha * 0.7F);
+                    ambientGlint(vertices, matrix, center, right, up, star.size() * 0.16F, star.size() * 2.6F,
+                            red, green, blue, alpha * 0.7F);
+                }
+                ambientGlint(vertices, matrix, center, right, up, star.size() * 0.7F, star.size() * 0.7F,
+                        0.95F, 0.97F, 1F, alpha);
+            }
+        }
+    }
+
+    /** 重用迴圈中的向量，避免每個星芒頂點再分配 Vector3f。 */
+    private static void ambientGlint(VertexConsumer vertices, Matrix4f matrix, Vector3f center,
+                                     Vector3f right, Vector3f up, float horizontal, float vertical,
+                                     float red, float green, float blue, float alpha) {
+        ambientVertex(vertices, matrix, center.x + right.x * horizontal, center.y + right.y * horizontal,
+                center.z + right.z * horizontal, red, green, blue, alpha);
+        ambientVertex(vertices, matrix, center.x + up.x * vertical, center.y + up.y * vertical,
+                center.z + up.z * vertical, red, green, blue, alpha);
+        ambientVertex(vertices, matrix, center.x - right.x * horizontal, center.y - right.y * horizontal,
+                center.z - right.z * horizontal, red, green, blue, alpha);
+        ambientVertex(vertices, matrix, center.x - up.x * vertical, center.y - up.y * vertical,
+                center.z - up.z * vertical, red, green, blue, alpha);
+    }
+
+    private static void ambientVertex(VertexConsumer vertices, Matrix4f matrix, float x, float y, float z,
+                                      float red, float green, float blue, float alpha) {
+        vertices.vertex(matrix, x, y, z).color(red, green, blue, alpha).endVertex();
     }
 
     /** 發電時的雙極噴流，使用同一批加性頂點，兩端淡出。 */

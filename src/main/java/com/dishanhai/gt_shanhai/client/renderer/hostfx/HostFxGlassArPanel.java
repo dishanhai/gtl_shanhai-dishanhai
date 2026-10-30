@@ -368,6 +368,8 @@ public final class HostFxGlassArPanel {
     // ── ⑦ 模块列表：表头 + 24 行（放不下就截断） ───────────────────────────────────
     /** 表头之后的模块行数上限（24 个模块里最多画几行；由块高算死，别溢出）。 */
     public static final int MODLIST_ROWS = 7;
+    /** 山海：模組列表每頁停留 10 秒。 */
+    public static final long MODLIST_PAGE_MILLIS = 10_000L;
     /** 表头行的 v 偏移 / 数据行的首行 v 偏移（相对本块上沿，格）。 */
     public static final float MODLIST_HEAD_V0 = 0.10F;
     public static final float MODLIST_ROW_V0 = 0.28F;
@@ -429,6 +431,11 @@ public final class HostFxGlassArPanel {
     /** 文字平面的本地 x。 */
     public static float textPlaneX() {
         return FACE_LOCAL_X - TEXT_OFFSET;
+    }
+
+    /** 兩側各自偏離玻璃面，避免正反文字重疊造成深度閃爍。 */
+    public static float textPlaneX(int face) {
+        return textPlaneX() + Math.max(0, Math.min(1, face)) * TEXT_OFFSET;
     }
 
     /** 几何平面的本地 x（比文字再让 {@link #GEOM_OFFSET}）。 */

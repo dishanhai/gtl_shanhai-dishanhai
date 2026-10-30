@@ -176,6 +176,14 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     @DescSynced
     private long hostModuleMask = 0L;
 
+    /** 山海：服務端模組物品 registry ID，遠端模組也能在客戶端本地化名稱。 */
+    @DescSynced
+    private int[] hostModMachineItems = sentinelInts(SNAP_SLOTS);
+
+    /** 山海：包含萬象核心與遏制場的服務端總增產，客戶端不自行掃描重算。 */
+    @DescSynced
+    private int hostProductionMultiplier = -1;
+
     @DescSynced
     private byte[] hostModProgressPct = sentinelBytes(SNAP_SLOTS);
 
@@ -183,7 +191,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     private long[] hostModEuPerTick = sentinelLongs(SNAP_SLOTS);
 
     @DescSynced
-    private int[] hostModParallel = sentinelInts(SNAP_SLOTS);
+    private long[] hostModParallel = sentinelLongs(SNAP_SLOTS);
 
     @DescSynced
     private int[] hostModThreads = sentinelInts(SNAP_SLOTS);
@@ -275,7 +283,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
 
     private int powerRingFill = 0;
 
-    public static final int SNAP_SLOTS = 24;
+    /** 原始終焉引擎的模組位數；AR 遠端槽固定排在本機 24 槽之後。 */
+    private static final int LINKED_ENGINE_MODULE_SLOTS = 16;
+    public static final int SNAP_SLOTS = GuixuHostGeometry.SLOT_COUNT + LINKED_ENGINE_MODULE_SLOTS;
 
     public static final int OUT_PER_MODULE = 2;
 
@@ -391,6 +401,14 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         return hostModuleMask;
     }
 
+    public int[] hostModMachineItems() {
+        return hostModMachineItems;
+    }
+
+    public int hostProductionMultiplier() {
+        return hostProductionMultiplier;
+    }
+
     public int hostModuleCountAuthoritative() {
         return isRemote() ? hostInstalledModules : getFormedModuleCount();
     }
@@ -401,22 +419,22 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         }
 
         ensureSnapshotTick();
-        final Level level = getLevel();
+        refreshModuleMask(snapshotModules());
+    }
+
+    private void refreshModuleMask(PrimordialOmegaEngineModuleBase[] modules) {
         long mask = 0L;
-        if (level != null && isFormed()) {
-            final BlockPos[] positions = getModuleScanPositions();
-            for (int i = 0; i < positions.length && i < Long.SIZE; i++) {
-                final MetaMachine machine = snapshotModuleAt(level, positions[i]);
-                if (machine instanceof IModularMachineModule<?, ?> module
-                        && module.isFormed() && module.getHost() == this) {
-                    mask |= 1L << i;
-                }
-            }
+        int[] items = sentinelInts(SNAP_SLOTS);
+        for (int i = 0; i < modules.length; i++) {
+            if (modules[i] == null) continue;
+            mask |= 1L << i;
+            items[i] = net.minecraft.world.item.Item.getId(modules[i].getDefinition().getItem());
         }
-        if (mask == hostModuleMask) {
+        if (mask == hostModuleMask && java.util.Arrays.equals(items, hostModMachineItems)) {
             return;
         }
         hostModuleMask = mask;
+        hostModMachineItems = items;
         notifyBlockUpdate();
     }
 
@@ -446,7 +464,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         return hostModEuPerTick;
     }
 
-    public int[] hostModParallel() {
+    public long[] hostModParallel() {
         return hostModParallel;
     }
 
@@ -573,13 +591,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     }
 
     private void refreshHostRuntimeSnapshot$body() {
-        refreshModuleMask();
-        final Level level = getLevel();
-        final BlockPos[] positions = level == null ? new BlockPos[0] : getModuleScanPositions();
+        final PrimordialOmegaEngineModuleBase[] modules = snapshotModules();
+        refreshModuleMask(modules);
 
         final byte[] pct = sentinelBytes(SNAP_SLOTS);
         final long[] eu = sentinelLongs(SNAP_SLOTS);
-        final int[] par = sentinelInts(SNAP_SLOTS);
+        final long[] par = sentinelLongs(SNAP_SLOTS);
         final int[] thr = sentinelInts(SNAP_SLOTS);
         final int[] rem = sentinelInts(SNAP_SLOTS);
         final int[] outCount = sentinelInts(SNAP_SLOTS);
@@ -590,18 +607,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         final java.util.LinkedHashMap<Integer, Integer> hostOut = new java.util.LinkedHashMap<>();
         final java.util.HashSet<Integer> kinds = new java.util.HashSet<>();
 
-        if (level != null) {
-            for (int i = 0; i < SNAP_SLOTS && i < positions.length; i++) {
-                final MetaMachine machine = snapshotModuleAt(level, positions[i]);
-                if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
-                    continue;                                  // 空槽 / 不是模块 ⇒ 整行留 -1
-                }
-                if (!module.isFormed() || module.getHost() != this) {
-                    continue;                                  // 没连上本机 ⇒ 也留 -1
-                }
-                final ModuleReading reading = readModule(module);
-                applyReading(i, reading, pct, eu, par, thr, rem, outCount, outItem, outAmount);
-            }
+        for (int i = 0; i < modules.length; i++) {
+            if (modules[i] == null) continue;
+            final ModuleReading reading = readModule(modules[i]);
+            applyReading(i, reading, pct, eu, par, thr, rem, outCount, outItem, outAmount);
         }
 
         // 山海：摘要包含主機與跨維度接管模組；兩條可見輸出不應截斷總數。
@@ -676,8 +685,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
 
         final int installedNow = hostModuleCountAuthoritative();
         final int kindsNow = kinds.size();
+        final int production = getRecipeOutputMultiplier();
         final boolean changed =
                 installedNow != hostInstalledModules
+                        || production != hostProductionMultiplier
                         || hostParallel != hostRecipeParallel
                         || hostPct != hostRecipeProgressPct
                         || hostRemain != hostRecipeRemainSec
@@ -704,6 +715,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         }
 
         hostInstalledModules = installedNow;
+        hostProductionMultiplier = production;
         hostRecipeProgressPct = hostPct;
         hostRecipeRemainSec = hostRemain;
         hostEuPerTick = hostEu;
@@ -804,7 +816,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         int progressPct = -1;
         long euPerTick = -1L;
         long genPerTick = -1L;
-        int parallel = -1;
+        long parallel = -1L;
         int threads = -1;
         int remainSec = -1;
         final int[] outItem = sentinelInts(OUT_PER_MODULE);
@@ -820,7 +832,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     }
 
     static void applyReading(int slot, ModuleReading r,
-                             byte[] pct, long[] eu, int[] par, int[] thr, int[] rem,
+                             byte[] pct, long[] eu, long[] par, int[] thr, int[] rem,
                              int[] outCount, int[] outItem, int[] outAmount) {
         if (slot < 0 || slot >= SNAP_SLOTS) {
             return;
@@ -866,6 +878,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             r.progressPct = pr[0];                    // −1 = 未知；0..100 = 真读数
             r.remainSec = pr[1];
             final GTRecipe last = logic.getLastRecipe();
+            r.parallel = snapshotModuleParallel(last, working);
+            r.threads = Ints.saturatedCast(module.getRecipeLogicThreadMultiplier());
             if (last != null) {
 
                 r.euPerTick = working ? snapshotLong(snapshotSignedEuPerTick(last).max(BigInteger.ZERO)) : 0L;
@@ -896,12 +910,19 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 r.euPerTick = working ? -1L : 0L;
                 r.genPerTick = working ? -1L : 0L;
             }
-            r.parallel = -1; // 上限不能冒充本批實際並行。
-            r.threads = Ints.saturatedCast(module.getRecipeLogicThreadMultiplier());
         } catch (Throwable ignored) {
-            return new ModuleReading();                        // 全 -1
+            // 山海：輸出摘要不可讀時，保留已讀到的並行、進度和耗能。
+            return r;
         }
         return r;
+    }
+
+    static long snapshotModuleParallel(GTRecipe recipe, boolean working) {
+        if (!working) return 0L;
+        String key = com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialModuleRecipeLogic.ACTUAL_PARALLEL_KEY;
+        if (recipe == null || !recipe.data.contains(key, net.minecraft.nbt.Tag.TAG_LONG)) return -1L;
+        long value = recipe.data.getLong(key);
+        return value > 0L ? value : -1L;
     }
 
 
@@ -1053,6 +1074,26 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 && module.isFormed() && module.getHost() == this && getModuleSet().contains(module) ? module : null;
     }
 
+    /** 山海：0..23 固定本機槽位，24..39 固定鏈接引擎槽位；只讀已載入區塊。 */
+    private PrimordialOmegaEngineModuleBase[] snapshotModules() {
+        var modules = new PrimordialOmegaEngineModuleBase[SNAP_SLOTS];
+        Level level = getLevel();
+        if (isRemote() || !isFormed() || level == null) return modules;
+        BlockPos[] own = getModuleScanPositions();
+        for (int i = 0; i < Math.min(own.length, GuixuHostGeometry.SLOT_COUNT); i++) {
+            modules[i] = snapshotModuleAt(level, own[i]);
+        }
+        if (!engineLinkReady || !hasEngineLink()) return modules;
+        var resolved = GuixuEngineLink.resolve(level.getServer(), linkedEngineDim, linkedEnginePos);
+        if (resolved.state() != GuixuEngineLink.State.READY) return modules;
+        var engine = resolved.engine();
+        BlockPos[] remote = engine.getModuleScanPositions();
+        for (int i = 0; i < Math.min(remote.length, LINKED_ENGINE_MODULE_SLOTS); i++) {
+            modules[GuixuHostGeometry.SLOT_COUNT + i] = snapshotModuleAt(engine.getLevel(), remote[i]);
+        }
+        return modules;
+    }
+
     /** 顯示約定：正耗能、負發電；無線封裝的原生符號恰好相反。 */
     static BigInteger snapshotSignedEuPerTick(com.gregtechceu.gtceu.api.recipe.GTRecipe recipe) {
         if (recipe instanceof IWirelessGTRecipe wireless) {
@@ -1106,9 +1147,6 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     @DescSynced
     private boolean engineLinkReady;
     private TickableSubscription engineLinkSubs;
-
-    /** 原始終焉引擎的模組位數（基類 {@code getMaxModuleCount()} 的 16）；鏈接生效時加進本機上限。 */
-    private static final int LINKED_ENGINE_MODULE_SLOTS = 16;
 
     /** 遏制場坍縮後的鎖定時長：60 秒。 */
     public static final int CONTAINMENT_LOCK_TICKS = 1200;
@@ -1332,7 +1370,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos", "engineLinkReady",
                 "containmentLockTicks", "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
-                "hostModuleMask", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
+                "hostModuleMask", "hostModMachineItems", "hostProductionMultiplier", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
                 "hostModRemainSec", "hostSnapSeq", "hostRecipeProgressPct", "hostRecipeRemainSec",
                 "hostRecipeParallel", "hostRecipeThreads", "hostEuPerTick", "hostTotalOutputCount",
                 "hostTotalOutputKinds", "hostTotalEuUsedPerTick", "hostTotalEuGenPerTick", "hostModuleEuPerTick", "hostInstalledModules",

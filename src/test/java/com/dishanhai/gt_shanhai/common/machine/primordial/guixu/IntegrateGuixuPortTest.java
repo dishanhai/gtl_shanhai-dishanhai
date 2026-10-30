@@ -54,6 +54,9 @@ class IntegrateGuixuPortTest {
         assertTrue(config.contains("ShanhaiMachineModeNameMixin"));
         String module = Files.readString(JAVA.resolve("common/machine/primordial/PrimordialOmegaEngineModuleBase.java"));
         assertTrue(module.contains("isCrossTypeParallelActive()"));
-        assertTrue(module.contains("getAllSelectableRecipeTypes()"));
+        assertFalse(module.contains("public GTRecipeType[] getSelectedRecipeTypes()"));
+        assertFalse(module.contains("public boolean hasSelectedRecipeTypes()"));
+        assertFalse(module.contains("public boolean isRecipeTypeSelected(GTRecipeType type)"));
+        assertFalse(module.contains("public boolean shouldShowRecipeTypeSetTab()"));
     }
 }

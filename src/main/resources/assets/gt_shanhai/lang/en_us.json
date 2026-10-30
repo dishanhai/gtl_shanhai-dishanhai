@@ -1,5 +1,7 @@
 {
   "gt_shanhai.machine.primordial_omega_engine.requires_guixu_host": "Error: This module requires a formed Guixu Vision Core. Mount it directly or link its engine using a Guixu Hyperdimensional Link Module.",
+  "gt_shanhai.machine.primordial_omega_engine.guixu_host_tooltip.1": "This module can only operate on a Guixu Vision Core,",
+  "gt_shanhai.machine.primordial_omega_engine.guixu_host_tooltip.2": "or on an engine linked by a Guixu Hyperdimensional Link Module.",
   "block.gt_shanhai.steam_generator": "Steam Generator",
   "item.gt_shanhai.ae_steam_cover": "AE Steam Cover",
   "item.gt_shanhai.ae_steam_binder": "AE Steam Binder (Item)",

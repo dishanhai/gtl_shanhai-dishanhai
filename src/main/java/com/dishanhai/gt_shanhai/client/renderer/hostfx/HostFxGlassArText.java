@@ -63,7 +63,7 @@ import java.util.Set;
  *       里 {@link IEnergyContainer#getEnergyCapacity()} 求和（与 {@code GuixuVisionCoreMachine#energyTotals}
  *       同一读法）</td><td>{@code --}</td></tr>
  *   <tr><td>物质模块等级 / 等级复写 / 材料增产</td><td>{@code moduleSlotBonus()} /
- *       {@code getHostMatterLevelOverride()} / {@code productionMultiplier()}</td><td>{@code --}</td></tr>
+ *       {@code getHostMatterLevelOverride()} / 服務端總倍率 {@code hostProductionMultiplier()}</td><td>{@code --}</td></tr>
  *   <tr><td>内环 / 上舰 / 下舰 / 黑洞半径 / 引力透镜 / 特效渲染</td><td>{@link HostFxState}（机器字段的客户端副本）</td>
  *       <td>—（{@code HostFxState} 自己钳到合法区间）</td></tr>
  * </table>
@@ -95,11 +95,6 @@ public final class HostFxGlassArText {
      * ⇒ 白读 40 次/秒（见 {@link #tickSkips}）。
      */
     public static final int REBUILD_EVERY_TICKS = 1;
-
-    /** 荧光晕的 4 个像素偏移（(dx,dy) 对）。 */
-    private static final float[][] HALO_OFFSETS = {{-1.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, -1.0F}, {0.0F, 1.0F}};
-    /** 荧光晕的 alpha 系数。 */
-    private static final float HALO_ALPHA = 0.18F;
 
     /** 机器读数缓存（<b>每 tick</b> 刷新；{@link HostFxState} 那 6 个值每帧现读）。 */
     private static final HostFxReadingCache READINGS = new HostFxReadingCache();
@@ -251,6 +246,7 @@ public final class HostFxGlassArText {
         STATE.thinBeamCount = HostFxSwitch.thinBeamCount();
         // ③ 🔴 唯一的时钟：关特效时它自己冻结（不是传 0）
         STATE.animSeconds = HostFxSwitch.spinSeconds();
+        STATE.modulePageTimeMillis = System.nanoTime() / 1_000_000L;
 
         final HostFxGlassArModel.Model model = HostFxGlassArModel.build(STATE);
         lastModel = model;
@@ -301,7 +297,7 @@ public final class HostFxGlassArText {
         poseStack.pushPose();
         try {
             HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
-            poseStack.translate(HostFxGlassArPanel.textPlaneX(),
+            poseStack.translate(HostFxGlassArPanel.textPlaneX(0),
                     HostFxGlassArPanel.WALL_Y1, HostFxGlassArPanel.WALL_Z1);
             poseStack.mulPose(Axis.YP.rotationDegrees(90.0F));
             final float s = HostFxGlassArPanel.PIXEL;
@@ -312,6 +308,8 @@ public final class HostFxGlassArText {
                     poseStack.pushPose();
                     try {
                         // face 0 = 正面朝 +X（房间）；face 1 = 正面朝 −X（环那侧 = 镜像）
+                        poseStack.translate(HostFxGlassArPanel.textPlaneX(face)
+                                - HostFxGlassArPanel.textPlaneX(0), 0.0F, 0.0F);
                         poseStack.scale(s, -s, face == 0 ? -s : s);
                         final Matrix4f m = poseStack.last().pose();
                         for (HostFxGlassArModel.Txt txt : model.texts) {
@@ -321,13 +319,7 @@ public final class HostFxGlassArText {
                             final float wave = 0.10F * (float) Math.sin(t * 2.2D - txt.slot * 0.7D);
                             final float pulse = clamp01(0.92F + wave + breath);
                             final int color = withAlphaMul(txt.argb, pulse);
-                            // ① 荧光晕（4 个方向的低 alpha 副本，垫在底下）
-                            for (float[] off : HALO_OFFSETS) {
-                                font.drawInBatch(txt.text, txt.x + off[0], txt.y + off[1],
-                                        withAlphaMul(color, HALO_ALPHA), false, m, buffers,
-                                        Font.DisplayMode.NORMAL, 0, LIGHT_FULL);
-                            }
-                            // ② 主字
+                            // 只提交清晰字形，避免多份偏移副本把筆畫糊開。
                             font.drawInBatch(txt.text, txt.x, txt.y, color, false, m, buffers,
                                     Font.DisplayMode.NORMAL, 0, LIGHT_FULL);
                             if (face == 0) {
@@ -503,7 +495,7 @@ public final class HostFxGlassArText {
         readRuntimeSnapshot(host);
         STATE.matterLevel = safeInt(host::moduleSlotBonus);
         STATE.levelOverride = safeInt(host::getHostMatterLevelOverride);
-        STATE.productionMultiplier = safeInt(host::productionMultiplier);
+        STATE.productionMultiplier = safeInt(host::hostProductionMultiplier);
         // 🔴 2026-10-25 第二十六改：先探供能口径（决定"总耗能功率"写数字还是写 ∞）
         detectEnergyInKind(host);
         final long[] in = energyTotals(host, IO.IN);
@@ -728,10 +720,8 @@ public final class HostFxGlassArText {
      *   客户端：对每个置位的槽位 i，去【自己这一侧的世界】取第 i 个扫描位上的机器，
      *          用它的 getDefinition().getItem() 名字填进 State.moduleNames
      * </pre>
-     * <b>为什么名字不在服务端一起同步过去</b>：LDLib 的 syncdata 只登记基本类型与基本类型数组
-     * （{@code com/lowdragmc/lowdraglib/syncdata/managed/} 全表 javap 过，<b>没有 String</b>）⇒
-     * 同步 String 是"编译过、运行期不生效"的高危写法。名字来自两侧<b>同一个注册表</b>，
-     * 按权威槽位号查不构成"猜"；查不到（区块没加载 / 机器不是模块）就写 {@code 槽#i}，
+     * 山海：服務端同步模組物品 registry ID，名稱在客戶端本地化，無須載入遠端世界。
+     * 本機尚未收到物品 ID 時才回退按座標查詢；查不到就寫 {@code 槽#i}，
      * <b>绝不编一个名字</b>。
      *
      * <p>位图还是 0（刚读档、服务端还没扫）时整体标 {@code moduleNamesUnavailable}，
@@ -750,8 +740,8 @@ public final class HostFxGlassArText {
         }
         if (mask == 0L) {
             STATE.moduleNames = new String[0];
-            STATE.moduleSlots = null;
-            STATE.moduleNamesUnavailable = true;
+            STATE.moduleSlots = new int[0];
+            STATE.moduleNamesUnavailable = false;
             STATE.moduleNamesHidden = 0;
             READINGS.lastNameMask = 0L;
             READINGS.namesResolved = false;          // 0 位 = 还没同步好 ⇒ 下一帧继续问
@@ -760,27 +750,35 @@ public final class HostFxGlassArText {
         // 🔴 2026-10-25 第二十六改（每帧重建的成本控制）：位图没变 ⇒ **名字不用重查世界**。
         // 这一步是整个重建里最贵的一段（每个已装模块一次 `MetaMachine.getMachine` + 物品名），
         // 每 tick 一次时无所谓（20 次/秒），但按帧做就是每帧 5~24 次世界查询。位图是"装了哪些模块"的唯一权威信号。
-        if (mask == READINGS.lastNameMask && READINGS.namesResolved) {
+        final int[] machineItems = host.hostModMachineItems();
+        if (mask == READINGS.lastNameMask && READINGS.namesResolved
+                && java.util.Arrays.equals(machineItems, READINGS.lastModMachineItems)) {
             return;
         }
         final BlockPos[] positions = host.getModuleScanPositions();
         final Level level = host.getLevel();
         final List<String> names = new ArrayList<>(Long.bitCount(mask));
         final List<Integer> slots = new ArrayList<>(Long.bitCount(mask));
-        for (int i = 0; i < positions.length && i < Long.SIZE; i++) {
+        for (int i = 0; i < GuixuVisionCoreMachine.SNAP_SLOTS; i++) {
             if ((mask & (1L << i)) == 0L) {
                 continue;
             }
-            names.add(moduleNameAt(level, positions[i], i));
+            int itemId = machineItems != null && i < machineItems.length ? machineItems[i] : -1;
+            if (itemId > 0) {
+                names.add(new ItemStack(net.minecraft.world.item.Item.byId(itemId)).getHoverName().getString());
+            } else {
+                names.add(i < positions.length ? moduleNameAt(level, positions[i], i) : "槽#" + i);
+            }
             slots.add(i);
         }
         // 2026-10-25 第二十二改：不再截到 6 个 —— ⑦ 模块列表要能画到 HostFxGlassArPanel.MODLIST_ROWS 行，
-        // 名字与槽位【一一对应】地全给（模型侧自己按行数截断并补「…还有 N 个」）。
+        // 名字與槽位一一對應地全給，模型側按每頁 7 列輪播。
         STATE.moduleNames = names.toArray(new String[0]);
         STATE.moduleSlots = slots.stream().mapToInt(Integer::intValue).toArray();
         STATE.moduleNamesHidden = 0;
         STATE.moduleNamesUnavailable = false;
         READINGS.lastNameMask = mask;
+        READINGS.lastModMachineItems = machineItems == null ? null : machineItems.clone();
         READINGS.namesResolved = true;
     }
 

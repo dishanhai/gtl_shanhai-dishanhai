@@ -248,7 +248,7 @@ public final class HostFxGlassArModel {
         public int matterLevel = -1;
         /** 模块等级复写（{@code getHostMatterLevelOverride()}，−1 = 读不到）。 */
         public int levelOverride = -1;
-        /** 材料增产倍率（{@code productionMultiplier()}，−1 = 读不到）。 */
+        /** 服務端總增產倍率（含萬象核心及遏制場），−1 = 尚未同步。 */
         public int productionMultiplier = -1;
         /** 能源仓容量（{@code IEnergyContainer.getEnergyCapacity()} 之和，−1 = 读不到）。 */
         public long energyInCapacity = -1;
@@ -272,8 +272,7 @@ public final class HostFxGlassArModel {
          */
         public boolean arMask = true;
         /**
-         * 已装模块的<b>名字</b>（按槽位号升序，已经由喂料侧裁到
-         * {@link HostFxGlassArPanel#MOD_MAX_NAMES} 个）。
+         * 已裝模組名稱，按槽位號升序，包含本機與遠端槽位；模型側分頁。
          *
          * <p>空数组 = 真的一个都没装（不是"读不到"）；读不到时本字段单独有一条
          * {@link #moduleNamesUnavailable} 标记，免得把"未知"画成"0 个"。
@@ -305,7 +304,9 @@ public final class HostFxGlassArModel {
         /** 服務端全體已載入回連模組的耗能合計，包含遠端模組；-1 表示未知。 */
         public long moduleEuTotal = -1L;
         /** 每个扫描位"同时处理几个配方"（{@code < 0} = 读不到）。 */
-        public int[] modParallel;
+        public long[] modParallel;
+        /** 山海：獨立單調時鐘（毫秒），不隨特效動畫暫停。 */
+        public long modulePageTimeMillis;
         /** 每个扫描位"拥有几个跨配方线程"（{@code < 0} = 读不到）。 */
         public int[] modThreads;
         /** 每个扫描位"还有几秒做完"（{@code < 0} = 读不到）。 */
@@ -972,7 +973,7 @@ public final class HostFxGlassArModel {
                 "主机 · 配方执行",
                 "进度 " + pct + " 剩 " + remain,
                 "耗能 " + euText(st.hostEuPerTick) + " EU/t 并行 " + countOrDash(st.hostParallel)
-                        + " 线程 " + countOrDash(st.hostThreads),
+                        + " 线程 " + threadCountOrDash(st.hostThreads),
                 hostOutputLine(st, 0),
                 hostOutputLine(st, 1),
                 hostOutputLine(st, 2),
@@ -1054,7 +1055,7 @@ public final class HostFxGlassArModel {
      *   表头  槽  模块      进度        耗能EU/t  并行  线程  输出
      *   数据  12  反物质压缩机  ▮▮▮▮▯▯ 62%  1.2M    8     4    反物质×64 氢×32
      *   …
-     *   …（还有 17 个）        ← 24 个装不下时（{@link HostFxGlassArPanel#MODLIST_ROWS} 由块高算死）
+     *   超過 7 個時每 10 秒循環換頁，最後一頁只畫剩餘模組。
      * </pre>
      *
      * <h2>数据从哪来（🔴 每条都写清来源；读不到一律 {@code --}）</h2>
@@ -1077,9 +1078,18 @@ public final class HostFxGlassArModel {
         final int z = Z_MODLIST;
         final HostFxGlassArPanel.Zone zo = HostFxGlassArPanel.ZONE_MODLIST;
         final int installed = st.installedModules >= 0 ? st.installedModules : st.moduleCount;
+        final int[] slots = st.moduleSlots;
+        final int total = slots == null ? 0 : slots.length;
+        final int pages = Math.max(1, (total + HostFxGlassArPanel.MODLIST_ROWS - 1) / HostFxGlassArPanel.MODLIST_ROWS);
+        final int page = (int) Math.floorMod(Math.floorDiv(st.modulePageTimeMillis,
+                HostFxGlassArPanel.MODLIST_PAGE_MILLIS), (long) pages);
+        final long remainingMillis = HostFxGlassArPanel.MODLIST_PAGE_MILLIS
+                - Math.floorMod(st.modulePageTimeMillis, HostFxGlassArPanel.MODLIST_PAGE_MILLIS);
+        final long remainingSeconds = (remainingMillis + 999L) / 1_000L;
         // ── 表头（一列一个 Txt，和数据行同一套 u 偏移） ─────────────────────────────
         final float yh = px(zo.v + HostFxGlassArPanel.MODLIST_HEAD_V0);
-        final String[] head = {"槽", "模块", "进度", "耗能EU/t", "并行", "线程", "物品"};
+        final String[] head = {"槽", "模块", "进度", "耗能EU/t", "并行", "线程",
+                pages > 1 ? "物品 · " + (page + 1) + "/" + pages + "页 · " + remainingSeconds + "s换页" : "物品"};
         final float[] hu = {
                 HostFxGlassArPanel.MOD_SLOT_U, HostFxGlassArPanel.MOD_NAME_U,
                 HostFxGlassArPanel.MOD_BAR_U, HostFxGlassArPanel.MOD_EU_U,
@@ -1095,25 +1105,24 @@ public final class HostFxGlassArModel {
         texts.add(new Txt(z, 103, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), px(3.80F),
                 "以配方／输出仓为准", C_DIM));
         // ── 数据行 ─────────────────────────────────────────────────────────────────
-        final int[] slots = st.moduleSlots;
         if (slots == null || slots.length == 0) {
             texts.add(new Txt(z, 100, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U),
                     px(zo.v + HostFxGlassArPanel.MODLIST_ROW_V0),
-                    installed < 0 ? "模块列表 --（等伺服同步）" : "模块列表 --（槽位位图未到）", C_DIM));
+                    installed == 0 ? "未安装模块" : installed < 0 ? "模块列表 --（等伺服同步）"
+                            : "模块列表 --（槽位位图未到）", C_DIM));
             return;
         }
-        final int total = slots.length;
-        final boolean overflow = total > HostFxGlassArPanel.MODLIST_ROWS;
-        final int rows = overflow ? HostFxGlassArPanel.MODLIST_ROWS - 1 : total;
+        final int start = page * HostFxGlassArPanel.MODLIST_ROWS;
+        final int rows = Math.min(HostFxGlassArPanel.MODLIST_ROWS, total - start);
         for (int r = 0; r < rows; r++) {
-            final int slot = slots[r];
+            final int slot = slots[start + r];
             final float y = px(zo.v + HostFxGlassArPanel.MODLIST_ROW_V0
                     + r * HostFxGlassArPanel.MODLIST_ROW_DV);
             // 槽位号
             texts.add(new Txt(z, 200 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), y,
                     String.valueOf(slot), C_DIM));
             // 名字（截到 MOD_NAME_CHARS；取不到 ⇒ 槽#N）
-            final String name = moduleNameAt(st, r, slot);
+            final String name = moduleNameAt(st, start + r, slot);
             texts.add(new Txt(z, 201 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_NAME_U), y,
                     clip(name, HostFxGlassArPanel.MOD_NAME_CHARS), C_MAIN));
             // 进度条（几何）+ 百分比
@@ -1130,22 +1139,16 @@ public final class HostFxGlassArModel {
                     euText(eu), eu < 0L ? C_DIM : C_MAIN));
             // 并行 / 线程（🔴 2026-10-25 第二十六改：用户「并行，线程，输出」要紧凑量级
             //   —— GT 的并行份数能到百万，原始 int 会把这一列顶成一片数字墙）
-            final int par = perModuleInt(st.modParallel, slot);
+            final long par = perModuleLong(st.modParallel, slot);
             final int thr = perModuleInt(st.modThreads, slot);
             texts.add(new Txt(z, 204 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_PAR_U), y,
                     countOrDash(par), par < 0 ? C_DIM : C_MAIN));
             texts.add(new Txt(z, 205 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_THR_U), y,
-                    countOrDash(thr), thr < 0 ? C_DIM : C_MAIN));
+                    threadCountOrDash(thr), thr < 0 ? C_DIM : C_MAIN));
             // 输出（最多 2 项）
             final String[] outs = perModuleOutputs(st.modOutputs, slot);
             texts.add(new Txt(z, 206 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_OUT_U), y,
                     outputsText(outs, HostFxGlassArPanel.MOD_ROW_OUTPUTS), outs == null ? C_DIM : C_MAIN));
-        }
-        if (overflow) {
-            texts.add(new Txt(z, 101, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U),
-                    px(zo.v + HostFxGlassArPanel.MODLIST_ROW_V0
-                            + rows * HostFxGlassArPanel.MODLIST_ROW_DV),
-                    "…（还有 " + (total - rows) + " 个）", C_DIM));
         }
     }
 
@@ -1508,11 +1511,15 @@ public final class HostFxGlassArModel {
     /**
      * <b>计数</b>（并行份数 / 跨配方线程数 / 条目数）→ 紧凑量级；{@code < 0} = 读不到 ⇒ {@code --}。
      *
-     * <p>为什么和 {@link #countText} 分开：这里收 {@code int}（同步字段本来就是 int 数组），
-     * 省一次装箱/拓宽，且语义上明确"这是可并行到百万的计数，不是 EU"。
+     * <p>並行沿用 long，同步與格式化都不截到 Integer.MAX_VALUE。
      */
-    static String countOrDash(int v) {
-        return v < 0 ? "--" : compactMagnitude(v);
+    static String countOrDash(long v) {
+        return v < 0 ? "--" : v > Integer.MAX_VALUE ? "无限" : compactMagnitude(v);
+    }
+
+    /** 山海：執行緒的 int 上限本身即為無限哨兵，與並行的嚴格大於門檻不同。 */
+    static String threadCountOrDash(long v) {
+        return v >= Integer.MAX_VALUE ? "无限" : countOrDash(v);
     }
 
     /**

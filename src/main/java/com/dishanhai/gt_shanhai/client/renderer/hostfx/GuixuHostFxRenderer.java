@@ -603,16 +603,15 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
 
             // 山海：保留 master 的狀態密度、亮度、噴流及向黑洞收束的星辰效果。
             final double starHorizon = BlackHoleLensRenderer.rsBlocks() * BlackHoleLensMath.B_CRIT;
-            if (BlackHoleTuning.enabled()) {
-                final float[] camLocal = HostFxBlackHole.cameraLocal(facing, cam.x, cam.y, cam.z, controllerPos);
-                poseStack.pushPose();
-                try {
-                    HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
-                    GuixuStarRenderer.render(poseStack, camLocal,
-                            effectSeconds, starHorizon, profile.density(), profile.brightness(), profile.jets());
-                } finally {
-                    poseStack.popPose();
-                }
+            final float[] starCamera = HostFxBlackHole.cameraLocal(facing, cam.x, cam.y, cam.z, controllerPos);
+            poseStack.pushPose();
+            try {
+                HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
+                // 外圍星空隨結構顯示；吸入星辰與噴流仍由黑洞開關控制。
+                GuixuStarRenderer.render(poseStack, starCamera, effectSeconds, starHorizon,
+                        profile.density(), profile.brightness(), profile.jets(), BlackHoleTuning.enabled());
+            } finally {
+                poseStack.popPose();
             }
 
             // ⑦.5 玻璃墙上的绿色 AR 文字（用户要求 ②）：

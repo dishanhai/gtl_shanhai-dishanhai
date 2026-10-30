@@ -87,6 +87,21 @@ class IntegrateHostFxTest {
         assertEquals(java.util.List.of("物品按ID汇总；流体与NBT明细", "以配方／输出仓为准"), notes);
     }
 
+    @Test
+    void arTextFacesUseSeparatePlanesAndDoNotRenderBlurHalos() throws Exception {
+        Class<?> panel = Class.forName(PACKAGE + "HostFxGlassArPanel");
+        var textPlane = panel.getMethod("textPlaneX", int.class);
+        float front = (Float) textPlane.invoke(null, 0);
+        float back = (Float) textPlane.invoke(null, 1);
+        float offset = panel.getField("TEXT_OFFSET").getFloat(null);
+        assertEquals(offset, back - front, 1.0e-6F);
+
+        String source = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "src/main/java/com/dishanhai/gt_shanhai/client/renderer/hostfx/HostFxGlassArText.java"));
+        assertFalse(source.contains("HALO_OFFSETS"));
+        assertTrue(source.contains("HostFxGlassArPanel.textPlaneX(face)"));
+    }
+
     private static Object field(Object object, String name) throws Exception {
         var field = object.getClass().getDeclaredField(name);
         field.setAccessible(true);

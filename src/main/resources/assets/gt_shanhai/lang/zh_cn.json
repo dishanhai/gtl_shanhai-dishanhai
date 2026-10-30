@@ -271,6 +271,8 @@
   "gtceu.primordial_singularity_inversion": "原初奇点反演",
   "gt_shanhai.machine.primordial_omega_engine.no_host": "§c未连接原始引擎，模块待机中",
   "gt_shanhai.machine.primordial_omega_engine.requires_guixu_host": "错误：此模块需要接入归墟视界枢核；可直接安装，或由归墟超维度链接模块接管所在引擎",
+  "gt_shanhai.machine.primordial_omega_engine.guixu_host_tooltip.1": "此模块仅能安装至归墟视界枢核运行，",
+  "gt_shanhai.machine.primordial_omega_engine.guixu_host_tooltip.2": "或由归墟超维度链接模块链接的原始引擎主机运行",
   "gt_shanhai.jade.cross_recipe_parallel": "§a跨配方并行",
   "block.gt_shanhai.maintenance_hatch": "终焉聚合枢纽",
   "block.gt_shanhai.cosmic_clean_gravity_maintenance_hatch": "寰宇洁净重力维护仓",

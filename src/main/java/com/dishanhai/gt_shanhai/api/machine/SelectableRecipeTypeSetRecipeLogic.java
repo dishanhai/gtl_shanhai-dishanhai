@@ -299,7 +299,8 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
     @Override
     protected Set<GTRecipe> lookupRecipeIterator() {
         SelectableRecipeTypeSetMachine machine = getMachine();
-        if (!machine.hasSelectedRecipeTypes()) {
+        GTRecipeType[] lookupTypes = getLookupRecipeTypes(machine);
+        if (lookupTypes == null || lookupTypes.length == 0) {
             return Collections.emptySet();
         }
         if (isLock()) {
@@ -317,7 +318,7 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
                 && tick - cachedLookupTick >= 0 && tick - cachedLookupTick < cacheTicks) {
             return mergeMarkedPatternRecipesCached(machine, cachedLookupRecipes);
         }
-        Set<GTRecipe> recipes = searchSelectedRecipeTypes(machine);
+        Set<GTRecipe> recipes = searchRecipeTypes(machine, lookupTypes);
         Set<GTRecipe> merged = mergeMarkedPatternRecipesCached(machine, recipes);
         if (merged.isEmpty()) {
             // 空结果不写缓存：机器空转/缺料时永远实时搜索，料一到立刻开工，杜绝"缓存空集守死不启动"。
@@ -390,10 +391,14 @@ public class SelectableRecipeTypeSetRecipeLogic extends GTLAddMultipleWirelessRe
         return cachedMarkedRecipes;
     }
 
-    private Set<GTRecipe> searchSelectedRecipeTypes(SelectableRecipeTypeSetMachine machine) {
+    protected GTRecipeType[] getLookupRecipeTypes(SelectableRecipeTypeSetMachine machine) {
+        return machine.getRecipeTypes();
+    }
+
+    private Set<GTRecipe> searchRecipeTypes(SelectableRecipeTypeSetMachine machine, GTRecipeType[] types) {
         long tick = machine.getOffsetTimer();
         Set<GTRecipe> recipes = new ObjectOpenHashSet<>();
-        for (GTRecipeType type : machine.getRecipeTypes()) {
+        for (GTRecipeType type : types) {
             if (type == null) {
                 continue;
             }

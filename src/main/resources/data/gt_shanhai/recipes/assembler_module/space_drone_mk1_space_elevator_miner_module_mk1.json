@@ -1,8 +1,16 @@
 {
   "data": {
+    "euTier": 9,
     "SEPMTier": 1
   },
   "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 2097152
+      }
+    ]
+  },
   "type": "gtceu:assembler_module",
   "inputs": {
     "fluid": [

@@ -13,6 +13,7 @@ public final class HostFxReadingCache {
     int[] lastModOutAmts;
     String[][] lastModOutTexts;
     long lastNameMask;
+    int[] lastModMachineItems;
     boolean namesResolved;
 
     public HostFxReadingCache() {
@@ -38,6 +39,7 @@ public final class HostFxReadingCache {
         lastModOutAmts = null;
         lastModOutTexts = null;
         lastNameMask = Long.MIN_VALUE;
+        lastModMachineItems = null;
         namesResolved = false;
     }
 }

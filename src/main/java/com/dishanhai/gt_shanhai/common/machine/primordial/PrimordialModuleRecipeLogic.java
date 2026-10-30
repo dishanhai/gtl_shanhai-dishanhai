@@ -54,6 +54,8 @@ import java.util.function.LongPredicate;
 
 public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSetRecipeLogic {
 
+    /** 山海：附在最終批次上，AR 只讀成功處理的並行，不讀預分配或並行上限。 */
+    public static final String ACTUAL_PARALLEL_KEY = "sh_primordial_actual_parallel";
     private static final long ACTIVE_LOOKUP_CACHE_TICKS = 200L;
     private long stellarLastAllocatedRecipes;
 
@@ -98,6 +100,14 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             return mod.getRecipeLogicThreadMultiplier();
         }
         return super.getLogicThreadMultiplier();
+    }
+
+    @Override
+    protected GTRecipeType[] getLookupRecipeTypes(SelectableRecipeTypeSetMachine machine) {
+        if (machine instanceof PrimordialOmegaEngineModuleBase module && module.isCrossTypeParallelActive()) {
+            return module.getAllSelectableRecipeTypes();
+        }
+        return super.getLookupRecipeTypes(machine);
     }
 
     @Override
@@ -320,6 +330,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             ObjectArrayList<Content> fluidOutputs = new ObjectArrayList<>(size);
             BigInteger accumulatedEu = BigInteger.ZERO;
             boolean processedRecipe = false;
+            long actualParallel = 0L;
 
             for (int i = 0; i < size; i++) {
                 GTRecipe recipe = parallelData.getOriginRecipeList().get(i);
@@ -348,6 +359,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                             && handleRecipeInputHandlePartCache(processed)) {
                         accumulatedEu = nextEu;
                         processedRecipe = true;
+                        actualParallel = parallel > Long.MAX_VALUE - actualParallel
+                                ? Long.MAX_VALUE : actualParallel + parallel;
                         RecipeCalculationHelper.INSTANCE.collectOutputs(processed,
                                 (List<Content>) itemOutputs,
                                 (List<Content>) fluidOutputs);
@@ -356,6 +369,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                     BigInteger nextEu = accumulatedEu.add(calculateRecipeEu(recipe, parallel, euMultiplier));
                     accumulatedEu = nextEu;
                     processedRecipe = true;
+                    actualParallel = parallel > Long.MAX_VALUE - actualParallel
+                            ? Long.MAX_VALUE : actualParallel + parallel;
                     GTRecipe amplifiedOutputRecipe = amplifyForMountedCore(recipe);
                     GTRecipe scaledOutputRecipe = scaleRecipePrecisely(amplifiedOutputRecipe, parallel);
                     RecipeCalculationHelper.INSTANCE.collectOutputs(scaledOutputRecipe,
@@ -378,7 +393,9 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                 }
                 return null;
             }
-            return buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
+            WirelessGTRecipe result = buildWirelessRecipe(itemOutputs, fluidOutputs, totalEu);
+            if (result != null) result.data.putLong(ACTUAL_PARALLEL_KEY, actualParallel);
+            return result;
         } finally {
             matchableScaledRecipeCache.clear();
         }
@@ -1040,6 +1057,9 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     private boolean isSelectedRecipeType(GTRecipeType type) {
         MetaMachine machine = getMachine();
+        if (machine instanceof PrimordialOmegaEngineModuleBase mod && mod.isCrossTypeParallelActive()) {
+            return true;
+        }
         if (machine instanceof PrimordialOmegaEngineModuleBase mod) {
             // 星律共享搜索集：与任一选中类型同组的配方类型视为选中（精确判断先行，共享集兜底）
             return mod.isRecipeTypeSelected(type)

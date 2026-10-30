@@ -1,0 +1,180 @@
+{
+  "data": {
+    "SEPMTier": 5,
+    "euTier": 11
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 33554432
+      }
+    ]
+  },
+  "type": "gtceu:assembler_module",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 31232,
+          "value": [
+            {
+              "fluid": "gtceu:cinobite"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 43243,
+          "value": [
+            {
+              "fluid": "gtceu:tairitsu"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 64565,
+          "value": [
+            {
+              "fluid": "gtceu:mutated_living_solder"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 31243,
+          "ingredient": {
+            "item": "sophisticatedcore:ender_linker"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 440,
+          "ingredient": {
+            "item": "gtladditions:chaos_soc"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "gt_shanhai:guixu_vision_core"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:space_probe_surface_reception"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 8,
+          "ingredient": {
+            "item": "gtceu:dimensionally_transcendent_mixer"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 32,
+          "ingredient": {
+            "item": "gtceu:cosmicneutronium_nanoswarm"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 32,
+          "ingredient": {
+            "item": "gtceu:draconium_nanoswarm"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtlcore:transcendent_max_battery"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtlcore:extremely_max_battery"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 128,
+          "ingredient": {
+            "item": "gtlcore:compressed_fusion_coil_mk2"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "gtlcore:sps_casing"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "gtceu:suprachronal_assembly_line"
+          },
+          "actualAmount": 16
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 1,
+          "ingredient": {
+            "item": "gt_shanhai:guixu_hyperdimensional_link_module"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:assembler_module/ender_linker_guixu_hyperdimensional_link_module",
+      "defaultEnabled": true
+    }
+  ]
+}

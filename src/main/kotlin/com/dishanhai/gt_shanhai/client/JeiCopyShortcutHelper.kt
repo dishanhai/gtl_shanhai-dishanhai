@@ -21,7 +21,7 @@ import java.util.Optional
 import java.util.stream.Stream
 
 /**
- * JEI 交互辅助（山海）。
+ * JEI 交互辅助。
  *
  * 1. Ctrl+Shift+左键 → 生成 EAE 无限盘（expatternprovider:infinity_cell），
  *    NBT 形如 `{record:{"#c":"ae2:f",id:"minecraft:water"}}`。

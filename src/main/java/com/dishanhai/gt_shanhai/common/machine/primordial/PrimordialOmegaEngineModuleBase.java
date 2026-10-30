@@ -101,29 +101,6 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
                 PrimordialOmegaEngineMachine.CROSS_TYPE_MODE_NAME_MODULE);
     }
 
-    @Override
-    public GTRecipeType[] getSelectedRecipeTypes() {
-        return isCrossTypeParallelActive() ? getAllSelectableRecipeTypes() : super.getSelectedRecipeTypes();
-    }
-
-    @Override
-    public boolean hasSelectedRecipeTypes() {
-        return isCrossTypeParallelActive() ? getAllSelectableRecipeTypes().length > 0 : super.hasSelectedRecipeTypes();
-    }
-
-    @Override
-    public boolean isRecipeTypeSelected(GTRecipeType type) {
-        if (isCrossTypeParallelActive()) {
-            for (var available : getAllSelectableRecipeTypes()) if (available == type) return true;
-            return false;
-        }
-        return super.isRecipeTypeSelected(type);
-    }
-
-    @Override
-    public boolean shouldShowRecipeTypeSetTab() {
-        return !isCrossTypeParallelActive() && super.shouldShowRecipeTypeSetTab();
-    }
     private TickableSubscription hostScanSubs;
     private final PrimordialStructureCheck structureCheck = new PrimordialStructureCheck();
     private String lastModuleConditionError;
