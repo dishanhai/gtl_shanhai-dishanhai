@@ -1,4 +1,8 @@
 ﻿{
+  "block.gt_shanhai.nyarlathoteps_tentacle_preview": "奈亚拉托提普之触（结构预览）",
+  "gt_shanhai.multiblock.nyarlathoteps_tentacle_preview.tooltip.0": "§c仅供结构预览，不运行配方，不自动成形。",
+  "gt_shanhai.multiblock.nyarlathoteps_tentacle_preview.tooltip.1": "§7165 × 48 × 49；29,045 个结构方块。来源：GTO。",
+  "gt_shanhai.multiblock.nyarlathoteps_tentacle_preview.tooltip.2": "§7部分方块采用 GTL 预览替代；缺失方块以洋红混凝土显示。",
   "gt_shanhai.multiblock.guixu_vision_core.tooltip.0": "§7§o万流归墟之境，时间沉滞渊底，光芒在星环上凝结",
   "gt_shanhai.multiblock.guixu_vision_core.tooltip.1": "§7§o二十四口深井洞穿万界，各自打捞着异宇的天光",
   "gt_shanhai.multiblock.guixu_vision_core.tooltip.2": "§7§o枢核静默凝视——凡在视界之内，万物皆有定数",
