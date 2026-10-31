@@ -159,6 +159,32 @@ public final class GuixuVisionCoreMachines {
                 //    没有 BER ⇒ 我们的 `render(BlockEntity, …)` 一次都不会被调用（连 gate 日志都打不出来）。
                 //    老主机（原始终焉引擎）是有的：`ShanhaiMachines:212` 那一行 `.hasTESR(true)`，上一轮我漏了它。
                 .hasTESR(true)
+                // 🆕 2026-10-25（缺陷 C）：机器描述 —— 用户原话「你帮我个主机补个描述，可以模仿
+                //    gtladd 种伪神之锻炉和终焉曲折量子波动矩阵的写法」。
+                //  范式（逐字取自 gtladditions-3.2.8 的 assets/gtladditions/lang/zh_cn.json）：
+                //    gtladditions.multiblock.forge_of_the_antichrist.tooltip.{0..8}
+                //      = 3 行 §7§o 的意境句 → `§7=====` 分隔 → 机制句（§6§lN倍§r 那种写法）
+                //    gtladditions.multiblock.apocalyptic_torsion_quantum_matrix.tooltip.{0..5}
+                //      = 3 行 §7§o / §9§o 意境句 → 机制句（100%、1024 线程）
+                //  ⇒ 本次照同一套：意境 3 行 + 分隔 + 机制 4 行（**只写已经实现了的效果**，
+                //    每条都在报告里对应到一个类/方法；没实现的（例如"跨类型轮转"）一个字都没写）。
+                .tooltips(
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.0"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.1"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.2"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.3"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.4"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.5"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.6"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.7"))
                 .appearanceBlock(GuixuVisionCoreStructure::appearanceBlock)
                 .register();
 

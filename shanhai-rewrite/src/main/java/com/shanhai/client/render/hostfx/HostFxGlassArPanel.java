@@ -382,17 +382,62 @@ public final class HostFxGlassArPanel {
     public static final float MOD_PAR_U = 4.78F;
     public static final float MOD_THR_U = 5.54F;
     public static final float MOD_OUT_U = 6.20F;
+    /** ⑦ 内容区的右内沿（本块局部格）= w − ZONE_PAD = 10.20 − 0.10 = <b>10.10</b>。 */
+    public static final float MOD_ROW_RIGHT = 10.10F;
     /** 模块名最多几个<b>汉字当量</b>（1.70 格 = 85 px ÷ 9 px/汉字 ≈ 9，取 8 给 ASCII 名留余量）。 */
     public static final int MOD_NAME_CHARS = 8;
     /** 每行输出最多几项（用户口径：模块行最多 2 项）。 */
     public static final int MOD_ROW_OUTPUTS = 2;
     /** 模块行里每一项输出的最大"汉字当量"（输出列 3.90 格 = 195 px，两项各 8 字 ≈ 148 px，留余量）。 */
-    public static final int MOD_OUT_CHARS = 8;
+    public static final int MOD_OUT_CHARS = 7;
     /** 主机节的"配方输出"最多几条（用户口径：最多 3 条，超出显示 {@code +N}）。 */
     public static final int HOST_OUTPUTS = 3;
     /** 模块行进度条的几何（相对本块左边，格；高度与主机条同档）。 */
     public static final float MOD_BAR_W = 0.86F;
     public static final float MOD_BAR_H = 0.12F;
+    /**
+     * 🔴 <b>行末「原因标签」那一列的 u 偏移</b>（相对本块左边，格；2026-10-25 第三十三改）。
+     *
+     * <p>取值 8.30：输出列从 {@link #MOD_OUT_U} = 6.20 起，给它 2.10 格 = <b>105 px</b>
+     * （有标签时输出只画 1 项，最多 72 px ⇒ 留 33 px 余量）；标签列从 8.30 到右内沿 10.10
+     * ⇒ <b>1.80 格 = 90 px</b>，装得下最长的「输出满」3 个汉字（27 px），还剩 63 px 富余。
+     *
+     * <p>为什么不把标签并进输出那段文字：一个 {@code Txt} 只有一个颜色，而用户要求
+     * <b>缺电=红 / 输出满=橙 / 被拦=黄</b>，输出本身是绿的 ⇒ 必须另起一个 {@code Txt}。
+     */
+    public static final int MOD_LABEL_CHARS = 2;
+    /** 标签列右侧的安全余量（像素）—— 汉字宽 9 px 的取整误差 + 抗锯齿，给 2 px。 */
+    public static final int MOD_LABEL_PAD_PX = 2;
+    /**
+     * 🔴 <b>标签列的起点（推导量，不是拍的位置）</b>：右内沿往回让出
+     * {@code MOD_LABEL_CHARS × 9 px + MOD_LABEL_PAD_PX}。
+     *
+     * <p>这样"标签列宽"只有一个旋钮（{@link #MOD_LABEL_CHARS}），改它，输出列的宽度**自动**跟着变：
+     * 输出列 = {@code [MOD_OUT_U, MOD_LABEL_U)}，<b>输出优先</b>。
+     * <p>当前值 = 10.10 − (2×8+2)/50 = <b>9.74 格</b> ⇒ 输出列宽 = 9.74 − 6.20 = <b>3.54 格 = 177 px</b>。
+     */
+    public static final float MOD_LABEL_U = MOD_ROW_RIGHT
+            - (MOD_LABEL_CHARS * INK_PX + MOD_LABEL_PAD_PX) * PIXEL;
+    /** 输出列的可用宽（格）= {@code MOD_LABEL_U − MOD_OUT_U}（**输出优先**：标签只能往后让）。 */
+    public static final float MOD_OUT_W = MOD_LABEL_U - MOD_OUT_U;
+    /** 输出列的可用宽（像素），日志/自检/探针共用的那个数。 */
+    public static final int MOD_OUT_W_PX = Math.round(px(MOD_OUT_W));
+    /**
+     * 输出整行的<b>最大"汉字当量"</b> = {@code MOD_OUT_W_PX / 9 − 1}。
+     *
+     * <p>为什么 −1：{@code HostFxGlassArModel#clip} 截断时会补一个 {@code …}（本身占 1 个当量），
+     * 所以"长度上限 N"的真实最坏宽度是 {@code (N+1) × 9 px}。当前 = 177/9−1 = <b>18 当量 ≈ 171 px</b>。
+     */
+    public static final int MOD_OUT_LINE_CHARS = MOD_OUT_W_PX / 9 - 1;
+    /**
+     * 标签 {@code Txt} 的槽位号基数（{@code >= 300}）。
+     *
+     * <p>🔴 为什么避开 200..299：{@code HostFxGlassArText#measure} 把 {@code slot >= 200} 的 ⑦ 文字
+     * 全部算进"数据行最宽"，而那条判据用的是<b>输出列的 x</b>（{@code MOD_OUT_U + 宽度}）；
+     * 标签的 x 是 {@link #MOD_LABEL_U}，两套 x 混进同一条判据会得出错误的越界结论
+     * ⇒ 标签单独一个号段，宽度由 {@link #MOD_LABEL_CHARS} 那条判据管。
+     */
+    public static final int MOD_LABEL_SLOT0 = 300;
     /**
      * 模块行进度条的分段数（一段 1 px 宽带 1 px 缝；视觉上"一条一条在长"）。
      *
@@ -551,6 +596,26 @@ public final class HostFxGlassArPanel {
         if (figBoxH < 0.80F - EPS) {
             return "②③④ 绘图框只有 " + f2(figBoxH) + " 格高（≥ 0.80 才看得清）";
         }
+        // ⑥b ⑦ 输出列 / 原因标签列（2026-10-25 第三十四改：**输出优先**）
+        //     判据三条，任一条红都说明"输出会被挤掉/被标签盖住"：
+        //       ① 标签自己装得进右内沿；
+        //       ② 输出列宽 &gt; 0（否则输出无处可画）；
+        //       ③ 输出列宽装得下【两项输出 + 一个空格】—— 这是"绝不把输出挤没"的量化判据。
+        {
+            final float labelNeed = MOD_LABEL_U + MOD_LABEL_CHARS * INK_PX * PIXEL;
+            if (labelNeed > ZONE_MODLIST.w - ZONE_PAD + EPS) {
+                return ZONE_MODLIST.name + " 原因标签列到 " + f2(labelNeed) + " 格 &gt; 分到的 "
+                        + f2(ZONE_MODLIST.w - ZONE_PAD) + " 格（最长 " + MOD_LABEL_CHARS + " 字）";
+            }
+            if (MOD_OUT_W <= 0.0F) {
+                return ZONE_MODLIST.name + " 输出列宽 " + f2(MOD_OUT_W) + " 格 ≤ 0（输出无处可画）";
+            }
+            final int needChars = 2 * MOD_OUT_CHARS + 1;      // 两项输出 + 中间一个空格（当量）
+            if (MOD_OUT_LINE_CHARS < needChars) {
+                return ZONE_MODLIST.name + " 输出预算 " + MOD_OUT_LINE_CHARS + " 当量 &lt; 两项所需的 "
+                        + needChars + "（标签列吃掉太多宽度）";
+            }
+        }
         if (!widths.measured()) {
             return null;
         }
@@ -592,6 +657,18 @@ public final class HostFxGlassArPanel {
     //  读数（日志 / 报告 / 预览共用）
     // ═══════════════════════════════════════════════════════════════════════════════════
 
+    /**
+     * ⑦ 三列的宽度读数（<b>日志判死用</b>）：
+     * {@code 输出列=177px 标签列=18px 输出预算=18当量}。
+     *
+     * <p>为什么放进每 5 秒一行的那条 {@code 玻璃AR} 日志：用户下一次进游戏只看这一串就能判
+     * "输出列还剩多少地方"——三者之一被改坏（例如标签列被调宽到吞掉输出），这里立刻能看出来。
+     */
+    public static String modRowColumns() {
+        final int labelPx = Math.round(px(MOD_ROW_RIGHT - MOD_LABEL_U));
+        return "输出列=" + MOD_OUT_W_PX + "px 标签列=" + labelPx + "px 输出预算="
+                + MOD_OUT_LINE_CHARS + "当量";
+    }
     /** 分区表（一格一行，日志与报告逐字相同）。 */
     public static String zoneTable() {
         final StringBuilder sb = new StringBuilder();

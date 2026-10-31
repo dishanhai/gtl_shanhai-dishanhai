@@ -749,6 +749,66 @@ public final class ShanhaiRecipeTypes {
         return type;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    //  🆕 2026-10-25（缺陷 E）：「已注册但 0 条配方」的类型也要能在配方编辑器里列出来
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+
+    /** 全部已注册成功、由本类自动登记的山海配方类型（**只读**；顺序 = 注册顺序）。 */
+    public static List<GTRecipeType> registeredTypes() {
+        return List.copyOf(REGISTERED_TYPES);
+    }
+
+    /**
+     * 把 {@link #REGISTERED_TYPES} 预置进配方编辑器的「类型花名册」（{@code ShanhaiRecipeTypeRoster}）。
+     *
+     * <h2>要解的死结（用户原话 + 现场读数）</h2>
+     * <blockquote>「我右键主机没有在 jei 里面看的视界能流抽取和原初范式简化这两种配方类型，
+     * 配方编辑器里面也没看见」</blockquote>
+     * <pre>
+     *   [SHANHAI-HOSTRECIPE] type=gtceu:vision_energy_extraction            registered=true recipes=0
+     *   [SHANHAI-HOSTRECIPE] type=gtceu:primordial_paradigm_simplification  registered=true recipes=0
+     * </pre>
+     * ⇒ 编辑器的类型列表 = 「活配方表里出现过的类型 ∪ 开机快照」（{@code buildTypeRows}），
+     *   而开机快照当初只记"真的有过配方"的类型 ⇒ <b>0 条配方的类型连 `(0 条)` 那一行都不出现</b>，
+     *   用户就没法"给这两类写第一条配方"。
+     *
+     * <h2>🔴 为什么是"预置花名册"而不是"改编辑器"</h2>
+     * {@code ShanhaiRecipeTypeRoster.union(...)} 的另一半就是那张<b>只增不减</b>的开机快照
+     * （{@code observe(...)}）。在<b>类型注册期</b>把这些类型 observe 进去 ⇒ 它们此后一定出现在
+     * 编辑器列表里，而<b>条数仍由活配方表现算</b>（0 条的显示 <code>(0 条)</code>）——
+     * 既解开死结，又<b>没有伪造任何条数</b>、也<b>没碰编辑器任何一行代码</b>（编辑器不在本轮写入范围）。
+     *
+     * <h2>🔴 取舍：只放开"我们自己的 49 条"</h2>
+     * GT/gtlcore 注册了 200+ 种类型，其中绝大多数在本整合包里永远 0 条
+     * （{@code ShanhaiRecipeTypeRoster} 类注释 :39-42 已经把这条口径写死：全列出来会长得没法看）。
+     * 用户真正要给"写第一条配方"的是<b>我们自己的类型</b>（归墟那三类就在里面）
+     * ⇒ 本方法<b>只</b>预置 {@link #REGISTERED_TYPES}，别人的类型一个都不加。
+     *
+     * <p>幂等（{@code observe} 内部就是 {@code Map.put}）；任何异常只打 WARN ——
+     * 花名册坏掉<b>绝不能</b>影响配方类型注册（那是启动期，抛了就整包起不来）。
+     */
+    private static void seedEditorRosterWithRegisteredTypes() {
+        try {
+            final List<com.shanhai.common.recipe.editor.ShanhaiRecipeEditorWorkspace.TypeRow> rows =
+                    new ArrayList<>(REGISTERED_TYPES.size());
+            for (GTRecipeType type : REGISTERED_TYPES) {
+                if (type == null || type.registryName == null) {
+                    continue;
+                }
+                // count = 0 只是占位：union() 对"活表里有的类型"一律用活表那个真值，不会用这里的 0。
+                rows.add(new com.shanhai.common.recipe.editor.ShanhaiRecipeEditorWorkspace.TypeRow(
+                        type.registryName, type.registryName.getPath(), "registry-seed", 0));
+            }
+            final int observed = com.shanhai.common.recipe.editor.ShanhaiRecipeTypeRoster.observe(rows);
+            ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] 编辑器类型花名册已预置 {} 个山海类型"
+                            + "（含 0 条配方的；条数仍由活配方表现算，0 条显示 (0 条)）；observe 返回 {}",
+                    rows.size(), observed);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("[SHANHAI-SPEC] 预置编辑器类型花名册失败（不影响类型注册/配方加载）: {}",
+                    t.toString());
+        }
+    }
+
     /**
      * 全部 76 条的注册。<b>只允许</b>从 {@code GTCEuAPI.RegisterEvent<ResourceLocation, GTRecipeType>}
      * 的监听器里调（见类注释的窗口证据）；重复调用安全。
@@ -1517,6 +1577,23 @@ public final class ShanhaiRecipeTypes {
         // 为什么放在这里：它必须在**全部注册之后**、且在 installModuleCatalystSlotUi() 之前，
         // 因为后者要拿 REGISTERED_TYPES 当"全部山海配方类型"的真源。
         assertTypeListsConsistent();
+
+        // ───────── 🆕 2026-10-25（缺陷 E）：把"我们自己注册的类型"预置进编辑器的类型花名册 ─────────
+        // 用户原话（逐字）：「我右键主机没有在 jei 里面看的视界能流抽取和原初范式简化这两种配方类型，
+        // 配方编辑器里面也没看见」＋ 现场读数：
+        //   [SHANHAI-HOSTRECIPE] type=gtceu:vision_matter_decompression        registered=true recipes=1
+        //   [SHANHAI-HOSTRECIPE] type=gtceu:vision_energy_extraction           registered=true recipes=0
+        //   [SHANHAI-HOSTRECIPE] type=gtceu:primordial_paradigm_simplification registered=true recipes=0
+        // ⇒ **死结在这里**：编辑器的类型列表 = 「活配方表里出现过的类型 ∪ 开机快照」
+        //   （`ShanhaiRecipeEditorWorkspace#buildTypeRows`），而开机快照当初只记"真的有过配方"的类型
+        //   ⇒ 0 条配方的类型<b>连 `(0 条)` 那一行都不会出现</b>，用户就没法"给这两类写第一条配方"。
+        //   解法（本方法）：把<b>注册表里的我们自己的类型</b>（{@code REGISTERED_TYPES}，49 条）
+        //   预置进那个开机快照 ⇒ 它们一定在列表里，<b>条数仍由活配方表现算</b>
+        //   （有配方的显示真实条数，没有的显示 <b>(0 条)</b>）—— 不伪造任何条数。
+        //   🔴 取舍（任务书要求说明）：<b>只放开"我们自己注册的 49 条"</b>，不是 GT/gtlcore 那 200+ 条 ——
+        //      后者在整合包里绝大多数永远 0 条，全塞进去会把列表撑成没法看（`ShanhaiRecipeTypeRoster`
+        //      的类注释 :39-42 就是这条口径），而用户真正要给写配方的是**我们自己的类型**。
+        seedEditorRosterWithRegisteredTypes();
 
         ShanhaiMod.LOGGER.info("[SHANHAI-SPEC] 配方类型已注册：真类型 {} / {}"
                         // 🔴 2026-09-26 订正：这句原写「2026-09-23 裁剪后仅保留被 24 台模块引用的类型」——

@@ -106,7 +106,15 @@ import java.util.concurrent.ConcurrentHashMap;
  *       {@code .or(abilities(INPUT_ENERGY))} {@code .or(abilities(OUTPUT_ENERGY))}），
  *       <b>收不了样板仓</b> ⇒ 它永远进不了 {@code controllers} 列表。
  *       ⚠️ 若将来给主机加物品仓，这一条必须改成 {@code false}，否则就是"主机声称 3 个类型、
- *       自己只跑 1 个"的新形态同一个 bug（见报告"待确认"一节的取舍）。</td></tr>
+ *       自己只跑 1 个"的新形态同一个 bug（见报告"待确认"一节的取舍）。
+ *       <br>🔴 <b>【2026-10-25 收尾 · 上面那句"将来"到了，已改判】</b>：T2 已把物品/流体仓
+ *       与 4 个样板总成放进环带（"收不了样板仓"不再是事实）⇒ 归墟主机本体<b>现在真的会进
+ *       {@code controllers}</b>。⇒ 已在 {@code shanhai$crossTypeReason} 里<b>判死</b>
+ *       （{@code instanceof GuixuVisionCoreMachine ⇒ null}，排在 host 分支之前），
+ *       并在这张表下面那一行日志里带 {@code skipped_reason=guixu_host}。
+ *       <b>改前</b>：这条分支展开 3 个类型（reason={@code our_host}）；<b>改后</b>：不展开，
+ *       只记 {@code [SHANHAI-QUICKUP] multi_type_expand_skipped … skipped_reason=guixu_host …}。
+ *       上面那段「不可达 / 将来必须改」的原文按本工程惯例<b>保留不改</b>。</td></tr>
  *   <tr><td>伪神之锻炉 {@code gtladditions:forge_of_the_antichrist}</td><td>3</td>
  *       <td><b>3</b>（{@code GTLAddMultipleTypeRecipesLogic#lookupRecipeIterator} 把候选来源换成
  *       {@code machine.getRecipeTypes()} 的 {@code flatMap}）</td>
@@ -199,9 +207,15 @@ public abstract class ShanhaiQuickUploadMultiTypeMixin {
                     // 🔴 真正的门控：只有"真在跨配方种类并行"才给 reason
                     final String reason = shanhai$crossTypeReason(machine, declared);
                     if (reason == null) {
-                        // 拒开也要留证据：无头专服里"老主机没被展开"的唯一可判据
+                        // 拒开也要留证据：无头专服里"老主机没被展开"的唯一可判据。
+                        // 🆕 2026-10-25 收尾：归墟主机本体额外带一个 grep 用的标记
+                        //    （`skipped_reason=guixu_host`）—— 它是"归墟进了 controllers 之后仍没被展开"
+                        //    的唯一证据行；只是日志文本，**不参与任何判断**。
                         skipped.putIfAbsent(machine.getClass(),
-                                "declared=" + declared.length + " active=" + shanhai$activeTypeId(machine));
+                                (machine instanceof com.shanhai.machine.host.GuixuVisionCoreMachine
+                                        ? "skipped_reason=guixu_host " : "")
+                                        + "declared=" + declared.length
+                                        + " active=" + shanhai$activeTypeId(machine));
                         continue;
                     }
                     boolean contributed = false;
@@ -283,6 +297,24 @@ public abstract class ShanhaiQuickUploadMultiTypeMixin {
         //        两条 instanceof 互斥，但顺序写清楚更防将来有人给模块换基类。
         if (machine instanceof PrimordialModuleMachine module) {
             return (module.crossTypeModeDisplayName() != null) ? "our_module" : null;
+        }
+        // 🔴🔴 2026-10-25（收尾）：**归墟主机本体判死** —— 就是本类 §4 那张表格里预告过的那一刀。
+        //
+        //  <p>表格原文（写于 T2 之前）：「⚠️ 本门控按"它自己上报的模式"判（grantsCrossTypeParallel() 恒 true）
+        //  ⇒ 会展开。**但这条分支今天不可达**：归墟结构的环带只放能源仓 / 动力仓 … 收不了样板仓
+        //  ⇒ 它永远进不了 controllers 列表。⚠️ **若将来给主机加物品仓，这一条必须改成 false**。」
+        //
+        //  <p>2026-10-25 的 T2 正好把物品/流体仓与四个样板总成放进了环带
+        //  （{@code GuixuVisionCoreStructure#ringBandPredicate}）⇒ "<b>将来</b>"到了 ⇒ 在这里改判：
+        //  归墟主机本体<b>自己只跑 1 个类型</b>（{@code GuixuVisionCoreRecipeLogic extends
+        //  PrimordialEngineRecipeLogic}，没有跨类型；模式选择页也已移除），
+        //  而它的 {@code crossTypeModeDisplayName()} 因 {@code grantsCrossTypeParallel()} 恒 true 而<b>非 null</b>
+        //  ⇒ 不判死就会"主机声称 3 个类型、自己只跑 1 个"（与用户 2026-10-25 报的那个 bug 同形）。
+        //
+        //  <p>🔴 <b>归墟必须排在 {@code PrimordialOmegaEngineMachine} 那条之前</b>（它是那个类的子类，
+        //  顺序反了就永远走不到这里）。**只加这一处判断，下面每一行都一个字节没动。**
+        if (machine instanceof com.shanhai.machine.host.GuixuVisionCoreMachine) {
+            return null;                    // = 不展开；调用方会记一行 skipped_reason=guixu_host
         }
         if (machine instanceof PrimordialOmegaEngineMachine host) {
             return (host.crossTypeModeDisplayName() != null) ? "our_host" : null;

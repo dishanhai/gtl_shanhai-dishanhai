@@ -103,6 +103,19 @@ public final class HostFxGlassArText {
 
     /** 机器读数缓存（<b>每 tick</b> 刷新；{@link HostFxState} 那 6 个值每帧现读）。 */
     private static final HostFxGlassArModel.State STATE = new HostFxGlassArModel.State();
+
+    /**
+     * ⑦ 模块列表的<b>时间戳记账簿</b>（2026-10-25 第三十二改）。
+     *
+     * <p>用户原话：「<b>优先显示正在工作的机器</b>，就是把机器<b>按照最近一次运行时间从上往下排</b>」。
+     * 它<b>只在 {@link #rebuildReadingsIfStale} 的尾巴喂一拍</b>（= 面板可见 + 每 tick 一次，
+     * 60 fps 下同一 tick 的其余渲染帧被 tick 闸门挡掉），排序规则与判据全在
+     * {@link HostFxGlassArSort}（零 MC 依赖，可脱机跑探针）。
+     *
+     * <p>🔴 <b>它一次都不遍历机器</b>：只读本类刚从机器上读来的两个同步数组
+     * （{@link HostFxGlassArModel.State#modProgressPct} / {@code modRemainSeconds}）。
+     */
+    private static final HostFxGlassArSort.Tracker AR_SORT = new HostFxGlassArSort.Tracker();
     /** "从未建过 / 读不到 tick"的哨兵。<b>绝不可参与减法</b>（见 {@link #rebuildReadingsIfStale} 的注释）。 */
     private static final long NEVER = Long.MIN_VALUE;
     /**
@@ -165,6 +178,10 @@ public final class HostFxGlassArText {
     private static int[] lastHostOutIds;
     private static int[] lastHostOutAmts;
     private static String[] lastHostOutTexts = new String[0];
+    // 🔴 2026-10-25 第三十四改：主机输出链路的两个诊断计数（只给日志用，不参与显示）
+    //    判据：seen=0 ⇒ 服务端没推 id（断在同步/服务端取数）；seen>0 而 parsed=0 ⇒ 客户端反查失败。
+    private static int hostOutSeen;
+    private static int hostOutParsed;
     /** 上一帧已解析的模块输出文本。 */
     private static int[] lastModOutIds;
     private static int[] lastModOutAmts;
@@ -206,6 +223,10 @@ public final class HostFxGlassArText {
         namesResolved = false;
         // 2026-10-25 第二十六改：供能口径也要重新探（换维度后是另一台机器/另一套仓）
         STATE.energyInKind = HostFxGlassArModel.ENERGY_KIND_UNKNOWN;
+        // 🔴 2026-10-25 第三十二改：⑦ 的排序记账簿一起复位（换维度后是另一台主机、另一批模块，
+        //    "最近一次运行时间"必须是这个世界里的 tick）⇒ 顺序也退回槽号升序，等下一拍重算。
+        AR_SORT.reset();
+        STATE.moduleOrder = null;
         // 2026-10-25 第二十二改：待提交的读数也一起丢掉（不留跨维度/跨存档的残渣）
         HostFxGlassArDeferred.reset();
     }
@@ -239,7 +260,41 @@ public final class HostFxGlassArText {
                 + " | 自检=" + (selfCheckFail == null ? "ok" : selfCheckFail)
                 // 🔴 2026-10-25 第二十七改：长期判据（每 5 秒一行，比 5 行的探针更长久）——
                 //    60 fps 下 重建:跳过 ≈ 1:2；重建数应与"服务端 progress# 的增量"同量级。
-                + " | 读数重建=" + rebuildCalls + "次（每tick一次） 同tick跳过=" + tickSkips + "帧";
+                + " | 读数重建=" + rebuildCalls + "次（每tick一次） 同tick跳过=" + tickSkips + "帧"
+                // 🔴 2026-10-25 第三十二改：⑦ 的排序判据（"在跑"的槽号 / 喂了几拍 / 有没有整拍跳过）
+                + " | " + AR_SORT.stats()
+                // 🔴 2026-10-25 第三十三改：四种「不工作」形态的现场计数（用户点名的四个数）
+                + " " + HostFxGlassArModel.reasonCounts(STATE)
+                // 🔴 2026-10-25 第三十四改：主机块六个量的现场读数 + ⑦ 三列宽度 + 输出解析计数
+                + " " + HostFxGlassArModel.hostBlockCounts(STATE)
+                + " 输出解析=" + hostOutSeen + "/" + hostOutParsed
+                + " " + HostFxGlassArPanel.modRowColumns()
+                + " 显示顺序=" + orderText();
+    }
+
+    /**
+     * ⑦ 这一拍的显示顺序（槽号按显示行顺序列出，<b>在跑的槽号后面跟一个 {@code *}</b>）。
+     *
+     * <p>为什么值得单独打一行：它是"排序真的按正在工作/最近运行在排"的<b>唯一可对账证据</b>——
+     * 判据两条：① 所有带 {@code *} 的槽号必须都在最前面；② 顺序必须与服务端
+     * {@code [SHANHAI-HOSTSNAP]} 里正在跑的那几个模块对得上。
+     */
+    private static String orderText() {
+        final int[] ord = HostFxGlassArModel.displayOrder(STATE);
+        if (ord == null || ord.length == 0) {
+            return "无";
+        }
+        final StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ord.length; i++) {
+            if (i > 0) {
+                sb.append('>');
+            }
+            sb.append(ord[i]);
+            if (AR_SORT.working(ord[i])) {
+                sb.append('*');
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -544,6 +599,49 @@ public final class HostFxGlassArText {
         }
         if (STATE.energyOutCapacity < 0L) {
             STATE.energyOutCapacity = ou == null ? -1L : ou[1];
+        }
+        // 🔴 2026-10-25 第三十二改：⑦ 的【显示顺序】在这里算（= "数据推送的那一拍"）。
+        //    放在整段重建的【最后】：此刻上面那几行刚把 moduleSlots / modProgressPct /
+        //    modRemainSeconds 刷到最新，喂进去的才是这一拍的真读数。
+        updateModuleOrder(host);
+    }
+
+    /**
+     * 🔴 2026-10-25 第三十二改（用户：「<b>优先显示正在工作的机器</b>，按最近一次运行时间从上往下排」）：
+     * <b>喂一拍时间戳并重算显示顺序</b>。
+     *
+     * <h2>为什么只在这里调（用户两条硬要求逐条对上）</h2>
+     * <ol>
+     *   <li><b>不许每帧遍历所有机器</b> ⇒ 本方法<b>一次都不遍历机器</b>：它只读
+     *       {@link HostFxGlassArModel.State} 里<b>已经由服务端推过来</b>的两个同步数组
+     *       （{@code modProgressPct} / {@code modRemainSeconds}，服务端每 tick 刷新一次，
+     *       见 {@code GuixuVisionCoreMachine#refreshProgressTick}）⇒ 成本 = 64 次数组读 + 一次
+     *       ≤24 元素的插入排序（{@link HostFxGlassArSort#order}），**零世界查询**；</li>
+     *   <li><b>"数据推送的那一拍"更新</b> ⇒ 本方法的唯一调用点是
+     *       {@link #rebuildReadingsIfStale} 的尾巴，那条路径本身就是"每 tick 一次"的数据重建；</li>
+     *   <li><b>面板可见时按 20 tick 节流</b> ⇒ 它由 TESR 的 {@link #render} 进来，
+     *       面板不在视野里时<b>根本不会被调用</b>；而已经存在的
+     *       {@link #REBUILD_EVERY_TICKS}（= 1 tick）闸门让同一 tick 内的其余渲染帧直接跳过
+     *       （60 fps 下只有 20 次/秒真正走到这里，见 {@link #tickSkips}）。</li>
+     * </ol>
+     *
+     * <p>🔴 <b>失败也不许影响画面</b>：排序器自己炸了 ⇒ 顺序置 {@code null}（面板退回
+     * {@code moduleSlots} 原序，即旧行为），面板照常画，绝不因此整块消失。
+     *
+     * <p>⚠️ {@code gameTick(host)} 读不到时返回 {@link #NEVER}（{@code Long.MIN_VALUE}）——
+     * <b>它是负数</b>，所以 {@code Tracker.observe} 第一行就整拍跳过（判据是 {@code tick < 0}，
+     * <b>不是减法</b>）。这里刻意<b>不</b>出现任何"哨兵参与算术"的写法（第二十五改那个 long 溢出事故）。
+     */
+    private static void updateModuleOrder(GuixuVisionCoreMachine host) {
+        final int[] slots = STATE.moduleSlots;
+        try {
+            AR_SORT.observe(gameTick(host), slots, STATE.modProgressPct, STATE.modRemainSeconds);
+            STATE.moduleOrder = AR_SORT.order(slots);
+        } catch (Throwable t) {
+            STATE.moduleOrder = null;
+            logOnce("arsort_throw", "[SHANHAI-HOSTSNAP] client AR排序 skip(branch=throw) {}: {}"
+                            + " ⇒ ⑦ 退回 moduleSlots 原序（面板照常画）",
+                    t.getClass().getName(), String.valueOf(t.getMessage()));
         }
     }
 
@@ -866,6 +964,8 @@ public final class HostFxGlassArText {
             STATE.modParallel = host.hostModParallel();
             STATE.modThreads = host.hostModThreads();
             STATE.modRemainSeconds = host.hostModRemainSec();
+            // 2026-10-25 第三十三改：⑦ 行末「为什么没在跑」原因码（服务端算好、byte[] 同步过来）
+            STATE.modReason = host.hostModReason();
             STATE.hostProgressPct = host.hostRecipeProgressPct();
             STATE.hostRemainSeconds = host.hostRecipeRemainSec();
             STATE.hostParallel = host.hostRecipeParallel();
@@ -933,18 +1033,36 @@ public final class HostFxGlassArText {
         readModuleNames(host);
     }
 
-    /** 主机级输出：注册表 id × 量 → {@code 名字×数量}；一个都解析不出来 ⇒ 空数组（面板画 {@code --}）。 */
+    /**
+     * 主机级输出：注册表 id × 量 → {@code 名字×数量}。
+     *
+     * <h2>🔴 三种返回值必须分开（2026-10-25 第三十四改）</h2>
+     * <pre>
+     *   数组本身没到（{@code ids == null}）      ⇒ <b>{@code null}</b> ⇒ 面板写「读不到」
+     *   数组到了但一条都解析不出（id/数量坏了）  ⇒ <b>空数组</b> ⇒ 面板写「无」
+     *   解析出 N 条                              ⇒ 那 N 条
+     * </pre>
+     * 上一版把前两种都折成"空数组"⇒ 面板只会写 {@code --}，
+     * 用户无法区分"没数据"和"真没有"（他这次就是被这一点困住的）。
+     */
     private static String[] resolveHostOutputs(int[] ids, int[] amounts) {
         if (ids == null || amounts == null) {
-            return new String[0];
+            return null;                                  // 通道没到 ⇒ 读不到
         }
         final List<String> out = new ArrayList<>(ids.length);
+        int seen = 0;
         for (int i = 0; i < ids.length && i < amounts.length; i++) {
+            if (ids[i] >= 0) {
+                seen++;
+            }
             final String s = outputEntry(ids[i], amounts[i]);
             if (s != null) {
                 out.add(s);
             }
         }
+        // 诊断计数（进 玻璃AR 日志的 主机=[…] 段）：收到几个 id / 解析出几条
+        hostOutSeen = seen;
+        hostOutParsed = out.size();
         return out.toArray(new String[0]);
     }
 
@@ -1001,6 +1119,7 @@ public final class HostFxGlassArText {
         STATE.modParallel = null;
         STATE.modThreads = null;
         STATE.modRemainSeconds = null;
+        STATE.modReason = null;
         STATE.modOutputs = null;
         STATE.hostProgressPct = -1;
         STATE.hostRemainSeconds = -1;
