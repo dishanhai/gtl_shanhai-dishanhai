@@ -762,6 +762,80 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
      */
     @Override
     protected @NotNull Set<GTRecipe> lookupRecipeSet() {
+        // 🔴 2026-11-01 第六步决策前置：**只读计时**（见 ShanhaiLookupProbe 类注释）。
+        //    关掉开关 ⇒ 走「完全不计时」的早退分支 ⇒ 一行都不打（负对照）。
+        //    打开时：返回的仍是内层那个**原对象**（不改返回值 / 不改顺序 / 不加缓存）。
+        if (ShanhaiLookupProbe.disabled()) {
+            return this.shanhai$lookupRecipeSetInner();
+        }
+        final long shanhai$t0 = System.nanoTime();
+        final Set<GTRecipe> shanhai$result = this.shanhai$lookupRecipeSetInner();
+        final long shanhai$cost = System.nanoTime() - shanhai$t0;
+        try {
+            final ShanhaiLookupProbe.Window w = this.shanhai$lookupProbe.record(
+                    shanhai$cost,
+                    shanhai$result == null ? -1 : shanhai$result.size(),
+                    this.shanhai$lookupProbeTypes(),
+                    this.shanhai$lookupProbeTick());
+            if (w != null) {
+                // 🔴 前缀必须是 [SHANHAI-LOOKUP]（grep 判据就靠它）；所以**不走** ShanhaiStellarLog
+                //    （那个类会自动加 [SHANHAI-STELLAR] 前缀，会变成两层前缀、grep 对不上）。
+                com.shanhai.ShanhaiMod.LOGGER.info("[SHANHAI-LOOKUP] {}", w.format(this.shanhai$lookupProbePos()));
+            }
+        } catch (Throwable ignored) {
+            // 计时器永远不许把候选集带崩
+        }
+        return shanhai$result;
+    }
+
+    /** 计时器的每机实例（窗口状态按机器各自独立，不串台）。 */
+    private final ShanhaiLookupProbe shanhai$lookupProbe = new ShanhaiLookupProbe();
+
+    /** 这一次实际遍历了几个类型（与内层同一条判据，**现读不缓存**；只在探针打开时才调）。 */
+    private int shanhai$lookupProbeTypes() {
+        try {
+            if (shanhai$isCrossTypeEnabled() && !isLock()) {
+                final GTRecipeType[] types = getMachine().getRecipeTypes();
+                return types == null ? 0 : types.length;
+            }
+            return 1;
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /** 世界时间 tick（读不到 ⇒ {@code Long.MIN_VALUE}，窗口就退回按调用次数关门，不瞎估）。 */
+    private long shanhai$lookupProbeTick() {
+        try {
+            final PrimordialModuleMachine machine = getMachine();
+            if (machine != null && machine.getLevel() != null) {
+                return machine.getLevel().getGameTime();
+            }
+        } catch (Throwable ignored) {
+            // 掉到下面的 MIN_VALUE
+        }
+        return Long.MIN_VALUE;
+    }
+
+    /** 日志里的 {@code machine=<pos>}（读不到 ⇒ {@code ?}）。 */
+    private @Nullable String shanhai$lookupProbePos() {
+        try {
+            final PrimordialModuleMachine machine = getMachine();
+            if (machine != null && machine.getPos() != null) {
+                return machine.getPos().getX() + "," + machine.getPos().getY() + "," + machine.getPos().getZ();
+            }
+        } catch (Throwable ignored) {
+            // 掉到 ?
+        }
+        return "?";
+    }
+
+    /**
+     * <b>内层 = 本方法改动之前的原体，逐字未改</b>（只改了方法名）。
+     *
+     * @see PrimordialModuleRecipeLogic#lookupRecipeSet()
+     */
+    protected @NotNull Set<GTRecipe> shanhai$lookupRecipeSetInner() {
         final int threads = Math.max(1, getMultipleThreads());
         // 🔴🔴 2026-10-27 二修（用户口径）：**上一批的「全局收窄候选类型集」已整体拆除**。
         //    用户原话：「样板声明 ∩ 机器可执行，是对于那单独一个槽（池）的，这就是为什么我说要先分池，

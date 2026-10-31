@@ -187,6 +187,9 @@ public abstract class ShanhaiSlotTypeGateMixin {
             return;
         }
         if (slot < ShanhaiWildcardLayout.PATTERN_SLOTS) {
+            // 🔴 2026-11-01 第七刀：**普通槽也走这条**（不像 RETURN 判据行那样只打通配符段）。
+            //    见下方 shanhai$slotMapNoteClaim 的三条前置条件。
+            this.shanhai$slotMapNoteClaim(recipe, slot, cir);
             return;
         }
         try {
@@ -201,8 +204,46 @@ public abstract class ShanhaiSlotTypeGateMixin {
             final boolean ret = cir.getReturnValueZ();
             final String why = ret ? "" : stellar.shanhaiDiagnoseSlotGate(slot, recipe, simulate, itemSide);
             ShanhaiSlotGateLog.noteReturn(tick, pos, slot, recipeType, simulate, itemSide, ret, why);
+            this.shanhai$slotMapNoteClaim(recipe, slot, cir);
         } catch (Throwable ignored) {
             // 判据行永远不许影响配方路径
+        }
+    }
+
+    /**
+     * 🔴 <b>2026-11-01 第七刀：「配方 → 槽号」提示的登记点</b>（详细语义见
+     * {@code com.shanhai.machine.stellar.ShanhaiRecipeSlotMap} 与
+     * {@code StellarSampleAssemblerPartMachine#shanhaiSlotMapNoteClaim}）。
+     *
+     * <h2>三条前置条件（有一条不满足就整段不做，行为与没有本方法逐字节相同）</h2>
+     * <ol>
+     *   <li>{@code ret == true} —— 这个槽<b>接下了</b>这条配方（本注入点就是"引擎问槽"的唯一入口）；</li>
+     *   <li>{@code slot >= 0}，且本实例是<b>物品</b>侧 handler（流体侧被问到时物品已经扣过了，
+     *       拿它当"接下"的证据会多记一次，且没有任何好处）；</li>
+     *   <li>机器是星律（{@link StellarSampleAssemblerPartMachine}）。</li>
+     * </ol>
+     * <p>⚠️ {@code simulate} <b>不</b>参与判定：模拟遍与真扣遍都记 —— 模拟遍本来就是上游自己
+     * 登记槽的时机（{@code RecipeRunner.java:176} {@code if (simulated && strategy.cacheToHandlePartMap)}）。
+     * <p>整段包在 {@code try/catch} 里，<b>永不抛</b>，<b>绝不改返回值</b>。
+     */
+    private void shanhai$slotMapNoteClaim(GTRecipe recipe, int slot, CallbackInfoReturnable<Boolean> cir) {
+        try {
+            if (recipe == null || slot < 0) {
+                return;
+            }
+            if (!cir.getReturnValueZ()) {
+                return;
+            }
+            final MEPatternBufferPartMachineBase machine = this.getMachine();
+            if (!(machine instanceof StellarSampleAssemblerPartMachine stellar)) {
+                return;
+            }
+            if (!this.shanhai$isItemHandler(machine)) {
+                return;
+            }
+            stellar.shanhaiSlotMapNoteClaim(recipe, slot);
+        } catch (Throwable ignored) {
+            // 提示表永远不许改行为
         }
     }
 
