@@ -140,14 +140,30 @@ public final class GuixuVisionCoreStructure {
      * <p>山海：專屬模式另接受物品／流體進出料倉，沿用原生 capability 聚合及 ME 倉能力。
      */
     public static TraceabilityPredicate ringBandPredicate() {
-        return Predicates.blocks(appearanceBlock())
+        TraceabilityPredicate predicate = Predicates.blocks(appearanceBlock())
                 .or(Predicates.abilities(PartAbility.INPUT_ENERGY).setPreviewCount(1))
                 .or(Predicates.abilities(PartAbility.OUTPUT_ENERGY).setPreviewCount(1))
                 .or(Predicates.abilities(PartAbility.IMPORT_ITEMS).setPreviewCount(1))
                 .or(Predicates.abilities(PartAbility.EXPORT_ITEMS).setPreviewCount(1))
                 .or(Predicates.abilities(PartAbility.IMPORT_FLUIDS).setPreviewCount(1))
                 .or(Predicates.abilities(PartAbility.EXPORT_FLUIDS).setPreviewCount(1));
+        // 山海：部分樣板總成沒有宣告 IO 能力，依來源清單額外接受已註冊方塊。
+        for (String id : EXTRA_PART_BLOCK_IDS) {
+            ResourceLocation key = ResourceLocation.tryParse(id);
+            if (key != null && ForgeRegistries.BLOCKS.containsKey(key)) {
+                predicate = predicate.or(Predicates.blocks(ForgeRegistries.BLOCKS.getValue(key)));
+            }
+        }
+        return predicate;
     }
+
+    public static final String[] EXTRA_PART_BLOCK_IDS = {
+            "gtceu:me_pattern_buffer",
+            "gtladditions:me_super_pattern_buffer",
+            "gtceu:me_wildcard_pattern_buffer",
+            // master 中星律樣板總成的實際 ID，並非來源的 stellar_sample_assembler。
+            "gt_shanhai:recipe_type_pattern_buffer"
+    };
 
     /** 外观方块句柄（注册期惰性取）。 */
     public static Block appearanceBlock() {

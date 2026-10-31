@@ -289,6 +289,15 @@ public final class HostFxGlassArModel {
          * <b>不按 0,1,2… 编一批槽位号出来</b>（那会把"未知"画成"有这么几个槽"）。
          */
         public int[] moduleSlots;
+        /** 已驗證置換；不改動 moduleSlots 與名稱對應。 */
+        public int[] moduleOrder;
+        public byte[] modReason;
+        public String[] moduleReasonLabels = {"", "运行", "缺电", "输出满", "被拦"};
+        /** 提交層按當前語言的 Font.width 實測；純模型測試可直接提供。 */
+        public int[] moduleReasonWidths;
+        public java.util.function.ToIntFunction<String> textWidth;
+        public String unreadText = "读不到";
+        public String noneText = "无";
 
         // ── 2026-10-25 第二十二改新增：主机 / 每模块的运行快照（AR 右侧信息栏） ─────────
         /**
@@ -1078,7 +1087,8 @@ public final class HostFxGlassArModel {
         final int z = Z_MODLIST;
         final HostFxGlassArPanel.Zone zo = HostFxGlassArPanel.ZONE_MODLIST;
         final int installed = st.installedModules >= 0 ? st.installedModules : st.moduleCount;
-        final int[] slots = st.moduleSlots;
+        final int[] slots = HostFxGlassArSort.sameSet(st.moduleSlots, st.moduleOrder)
+                ? st.moduleOrder : st.moduleSlots;
         final int total = slots == null ? 0 : slots.length;
         final int pages = Math.max(1, (total + HostFxGlassArPanel.MODLIST_ROWS - 1) / HostFxGlassArPanel.MODLIST_ROWS);
         final int page = (int) Math.floorMod(Math.floorDiv(st.modulePageTimeMillis,
@@ -1122,7 +1132,7 @@ public final class HostFxGlassArModel {
             texts.add(new Txt(z, 200 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), y,
                     String.valueOf(slot), C_DIM));
             // 名字（截到 MOD_NAME_CHARS；取不到 ⇒ 槽#N）
-            final String name = moduleNameAt(st, start + r, slot);
+            final String name = moduleNameAt(st, slot);
             texts.add(new Txt(z, 201 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_NAME_U), y,
                     clip(name, HostFxGlassArPanel.MOD_NAME_CHARS), C_MAIN));
             // 进度条（几何）+ 百分比
@@ -1147,18 +1157,66 @@ public final class HostFxGlassArModel {
                     threadCountOrDash(thr), thr < 0 ? C_DIM : C_MAIN));
             // 输出（最多 2 项）
             final String[] outs = perModuleOutputs(st.modOutputs, slot);
+            int reason = perModuleByte(st.modReason, slot);
+            String label = reason >= REASON_NO_POWER && st.moduleReasonLabels != null
+                    && reason < st.moduleReasonLabels.length ? st.moduleReasonLabels[reason] : "";
+            int labelWidth = label.isEmpty() ? 0 : reasonWidth(st, reason, label);
+            float right = px(zo.u + zo.w - HostFxGlassArPanel.ZONE_PAD);
+            float outputWidth = right - px(zo.u + HostFxGlassArPanel.MOD_OUT_U)
+                    - (labelWidth == 0 ? 0 : labelWidth + HostFxGlassArPanel.MOD_LABEL_GAP_PX);
+            String output = outputsText(outs, HostFxGlassArPanel.MOD_ROW_OUTPUTS);
             texts.add(new Txt(z, 206 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_OUT_U), y,
-                    outputsText(outs, HostFxGlassArPanel.MOD_ROW_OUTPUTS), outs == null ? C_DIM : C_MAIN));
+                    fitText(st, clip(output, Math.max(1, (int) (outputWidth / 9F))), outputWidth),
+                    outs == null ? C_DIM : C_MAIN));
+            if (!label.isEmpty()) {
+                texts.add(new Txt(z, 207 + r * 10, right - labelWidth, y, label, reasonColor(reason)));
+            }
         }
     }
 
-    /** 第 {@code r} 个已装模块的名字；读不到 ⇒ {@code 槽#slot}（不编名字）。 */
-    private static String moduleNameAt(State st, int r, int slot) {
-        if (st.moduleNamesUnavailable || st.moduleNames == null || r >= st.moduleNames.length) {
+    /** 排序只改顯示順序；名字仍從原始槽號對應的索引取出。 */
+    private static String moduleNameAt(State st, int slot) {
+        int r = -1;
+        if (st.moduleSlots != null) {
+            for (int i = 0; i < st.moduleSlots.length; i++) {
+                if (st.moduleSlots[i] == slot) { r = i; break; }
+            }
+        }
+        if (st.moduleNamesUnavailable || st.moduleNames == null || r < 0 || r >= st.moduleNames.length) {
             return "槽#" + slot;
         }
         final String n = st.moduleNames[r];
         return n == null || n.isEmpty() ? "槽#" + slot : n;
+    }
+
+    // 與伺服端同步碼一致；模型維持零 Minecraft 依賴。
+    public static final byte REASON_NONE = 0;
+    public static final byte REASON_WORKING = 1;
+    public static final byte REASON_NO_POWER = 2;
+    public static final byte REASON_OUTPUT_FULL = 3;
+    public static final byte REASON_BLOCKED = 4;
+
+    private static int reasonWidth(State st, int reason, String label) {
+        if (st.moduleReasonWidths != null && reason < st.moduleReasonWidths.length
+                && st.moduleReasonWidths[reason] > 0) return st.moduleReasonWidths[reason];
+        return st.textWidth != null ? st.textWidth.applyAsInt(label) : label.length() * 9;
+    }
+
+    private static int reasonColor(int reason) {
+        return switch (reason) {
+            case REASON_NO_POWER -> 0xFFFF6666;
+            case REASON_OUTPUT_FULL -> 0xFFFFAA44;
+            case REASON_BLOCKED -> 0xFFFFDD55;
+            default -> C_MAIN;
+        };
+    }
+
+    private static String fitText(State st, String text, float width) {
+        if (st.textWidth == null || st.textWidth.applyAsInt(text) <= width) return text;
+        String suffix = "…";
+        int end = text.length();
+        while (end > 0 && st.textWidth.applyAsInt(text.substring(0, end) + suffix) > width) end--;
+        return end == 0 && st.textWidth.applyAsInt(suffix) > width ? "" : text.substring(0, end) + suffix;
     }
 
     /** 按扫描位下标取一个 int（数组短了 / 缺了 ⇒ −1）。 */
@@ -1207,8 +1265,11 @@ public final class HostFxGlassArModel {
     private static String hostOutputLine(State st, int i) {
         final String[] outs = st.hostOutputs;
         final String tag = "物品" + (char) ('①' + i);
-        if (outs == null || outs.length == 0) {
-            return tag + " --";
+        if (outs == null || (outs.length == 0 && st.hostOutputTotal != 0)) {
+            return tag + " " + st.unreadText;
+        }
+        if (outs.length == 0) {
+            return tag + " " + st.noneText;
         }
         if (i >= outs.length || outs[i] == null || outs[i].isEmpty()) {
             return tag + " --";

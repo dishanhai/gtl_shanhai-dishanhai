@@ -36,6 +36,15 @@ public final class GuixuVisionCoreMachines {
                 .workableCasingRenderer(casing, overlay)
                 .renderer(() -> new com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuHostFxRenderer(casing, overlay))
                 .hasTESR(true)
+                .tooltips(
+                        Component.translatable("gt_shanhai.multiblock.guixu_vision_core.tooltip.0"),
+                        Component.translatable("gt_shanhai.multiblock.guixu_vision_core.tooltip.1"),
+                        Component.translatable("gt_shanhai.multiblock.guixu_vision_core.tooltip.2"),
+                        Component.translatable("gt_shanhai.multiblock.guixu_vision_core.tooltip.3"),
+                        Component.translatable("gt_shanhai.multiblock.guixu_vision_core.tooltip.4"),
+                        Component.translatable("gt_shanhai.multiblock.guixu_vision_core.tooltip.5"),
+                        Component.translatable("gt_shanhai.multiblock.guixu_vision_core.tooltip.6"),
+                        Component.translatable("gt_shanhai.multiblock.guixu_vision_core.tooltip.7"))
                 .appearanceBlock(GuixuVisionCoreStructure::appearanceBlock)
                 .register();
         if (FMLEnvironment.dist.isClient()) {

@@ -4,6 +4,8 @@ import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.SelectableRecipeTypeSetRecipeLogic;
 import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
 import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiExtraMountGate;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHostMountSource;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuContainmentBonus;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
@@ -15,17 +17,12 @@ import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
 import com.gtladd.gtladditions.common.data.ParallelData;
 import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
-import com.gregtechceu.gtceu.api.machine.multiblock.CleanroomType;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.RecipeCondition;
 import com.gregtechceu.gtceu.api.recipe.condition.RecipeConditionType;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.common.data.GTRecipeTypes;
-import com.gregtechceu.gtceu.common.recipe.condition.CleanroomCondition;
-import com.gregtechceu.gtceu.common.recipe.condition.DimensionCondition;
-import com.gregtechceu.gtceu.common.recipe.condition.ResearchCondition;
-import org.gtlcore.gtlcore.common.recipe.condition.GravityCondition;
 import org.gtlcore.gtlcore.api.recipe.IParallelLogic;
 import org.gtlcore.gtlcore.api.recipe.IAdvancedContentModifier;
 import org.gtlcore.gtlcore.api.recipe.IGTRecipe;
@@ -38,7 +35,6 @@ import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 
 import org.jetbrains.annotations.Nullable;
@@ -72,6 +68,11 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
     private Set<GTRecipe> cachedModuleConditionRecipes;
     private String cachedModuleConditionError;
     private List<ShanhaiHeatGate.SlotContent> cachedGateMountContents;
+    private ShanhaiHostMountSource gateHostSource;
+    private List<ShanhaiHeatGate.SlotContent> gateLocalContents;
+    private List<ShanhaiHeatGate.SlotContent> gateHostContents;
+    private List<ShanhaiHeatGate.SlotContent> gateCombinedContents;
+    private boolean gateUnrestricted;
     private String cachedModuleItemId;
     private int cachedModuleCount = Integer.MIN_VALUE;
     private int cachedEffectiveModuleLevel = Integer.MIN_VALUE;
@@ -694,30 +695,15 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         }
 
         boolean unrestrictedMode = DShanhaiConfig.COMMON.primordialModuleUnrestrictedMode.get();
-        List<ShanhaiHeatGate.Requirement> needs = new ArrayList<>();
-        if (recipe.conditions != null) {
-            for (RecipeCondition condition : recipe.conditions) {
-                if (condition == null || condition.isReverse()) {
-                    continue;
-                }
-                ShanhaiHeatGate.Requirement requirement = shanhai$requirementOf(condition);
-                if (requirement == null) {
-                    continue;
-                }
-                if (!ShanhaiHeatGate.isRequirementEnforced(requirement.kind, unrestrictedMode)) {
-                    continue;
-                }
-                if (!condition.test(recipe, this)) {
-                    needs.add(requirement);
-                }
-            }
-        }
+        List<ShanhaiHeatGate.SlotContent> contents = currentGateMountContents();
+        List<ShanhaiHeatGate.Requirement> needs = ShanhaiExtraMountGate.conditionRequirements(
+                recipe, this, contents, true, unrestrictedMode);
 
         GTRecipeType type = recipe.recipeType;
         boolean heatReachable = type != null
                 && type.registryName != null
                 && ShanhaiHeatGate.isGated(type.registryName.toString())
-                && module.canUseExtraMountAsHeatSource();
+                && (module.canUseExtraMountAsHeatSource() || gateHostSource != null);
         if (!unrestrictedMode && heatReachable && recipe.data != null) {
             int requiredTemperature = readRecipeInt(recipe.data, ShanhaiHeatGate.KEY_EBF_TEMP);
             int requiredContainment = readRecipeInt(recipe.data, ShanhaiHeatGate.KEY_SC_TIER);
@@ -730,7 +716,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         }
 
         ShanhaiHeatGate.Outcome outcome =
-                ShanhaiHeatGate.evaluate(needs, module.getExtraMountContents());
+                ShanhaiHeatGate.evaluate(needs, contents);
         shanhai$gateOutcome = outcome;
         if (outcome.allowed) {
             return true;
@@ -753,7 +739,8 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             boolean passed = (!condition.isReverse() && shanhai$conditionIgnored(requirement))
                     || condition.test(recipe, this) != condition.isReverse();
             if (!passed) {
-                passed = outcome != null && requirement != null && outcome.satisfied.contains(requirement);
+                passed = !condition.isReverse() && outcome != null && requirement != null
+                        && outcome.satisfied.contains(requirement);
             }
             if (condition.isOr()) {
                 orGroupAllFail.merge(condition.getType(), !passed, (left, right) -> left && right);
@@ -791,23 +778,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
 
     @Nullable
     private ShanhaiHeatGate.Requirement shanhai$requirementOf(RecipeCondition condition) {
-        if (condition instanceof CleanroomCondition cleanroom) {
-            CleanroomType type = cleanroom.getCleanroom();
-            int tier = ShanhaiHeatGate.cleanroomTierOfName(type == null ? null : type.getName());
-            return tier == ShanhaiHeatGate.CLEANROOM_NONE
-                    ? null : ShanhaiHeatGate.Requirement.cleanroom(tier);
-        }
-        if (condition instanceof DimensionCondition dimension) {
-            ResourceLocation id = dimension.getDimension();
-            return id == null ? null : ShanhaiHeatGate.Requirement.dimension(id.toString());
-        }
-        if (condition instanceof ResearchCondition) {
-            return ShanhaiHeatGate.Requirement.research();
-        }
-        if (condition instanceof GravityCondition) {
-            return ShanhaiHeatGate.Requirement.gravity();
-        }
-        return null;
+        return ShanhaiExtraMountGate.requirementOf(condition);
     }
 
     private List<ShanhaiHeatGate.SlotContent> currentGateMountContents() {
@@ -815,7 +786,21 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         if (!(machine instanceof PrimordialOmegaEngineModuleBase module)) {
             return null;
         }
-        return module.getExtraMountContents();
+        ShanhaiHostMountSource source = ShanhaiHostMountSource.resolve(module.getHost());
+        List<ShanhaiHeatGate.SlotContent> local = module.getExtraMountContents();
+        List<ShanhaiHeatGate.SlotContent> supplied = source == null ? List.of() : source.hostExtraMountContents();
+        boolean unrestricted = DShanhaiConfig.COMMON.primordialModuleUnrestrictedMode.get();
+        if (gateCombinedContents == null || gateHostSource != source || gateLocalContents != local
+                || gateHostContents != supplied || gateUnrestricted != unrestricted) {
+            gateHostSource = source;
+            gateLocalContents = local;
+            gateHostContents = supplied;
+            gateUnrestricted = unrestricted;
+            // 即使兩個主機都為空槽，切換身分也必須使候選快取失效。
+            gateCombinedContents = java.util.Collections.unmodifiableList(
+                    new ArrayList<>(ShanhaiExtraMountGate.merge(local, supplied)));
+        }
+        return gateCombinedContents;
     }
 
     /**
@@ -841,7 +826,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
         }
         String needed = requirement.describe();
         return switch (outcome.deny) {
-            case SLOT_EMPTY -> "这个配方需要【" + needed + "】，但" + ShanhaiHeatGate.SLOT_COUNT + "个额外挂载槽全是空的";
+            case SLOT_EMPTY -> "这个配方需要【" + needed + "】，但" + outcome.slots.size() + "个额外挂载槽全是空的";
             case WRONG_ITEM -> "这个配方需要【" + needed + "】，但额外挂载槽里放的是【"
                     + shanhai$extraActualNames(module) + "】";
             case NOT_FULL -> "这个配方需要放满 " + ShanhaiHeatGate.REQUIRED_COUNT + " 个【"
@@ -867,6 +852,13 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                 result.append("、");
             }
             result.append(stack.getHoverName().getString());
+        }
+        if (gateHostSource != null) {
+            for (var content : gateHostSource.hostExtraMountContents()) {
+                if (content.count <= 0) continue;
+                if (result.length() > 0) result.append("、");
+                result.append("主机：").append(content.describe());
+            }
         }
         return result.length() == 0 ? "其它物品" : result.toString();
     }

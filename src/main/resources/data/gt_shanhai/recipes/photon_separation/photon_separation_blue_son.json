@@ -1,0 +1,85 @@
+{
+  "data": {
+    "euTier": 13
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "module_id": "dishanhai:wzdf",
+      "level": 32,
+      "type": "module_level"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 536870912
+      }
+    ]
+  },
+  "type": "gtceu:photon_separation",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 4096000,
+          "value": [
+            {
+              "fluid": "dishanhai:light"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_eternal"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "dishanhai:star_spark"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "dishanhai:worldline_genesis_embryo"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 4,
+          "ingredient": {
+            "item": "dishanhai:blue_son"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:photon_separation/photon_separation_blue_son",
+      "defaultEnabled": true
+    }
+  ]
+}

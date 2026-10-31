@@ -1,0 +1,98 @@
+{
+  "data": {
+    "euTier": 10
+  },
+  "duration": 40,
+  "recipeConditions": [
+    {
+      "module_id": "dishanhai:wzhy",
+      "level": 32,
+      "type": "module_level"
+    },
+    {
+      "type": "recipe_note",
+      "text": "此配方有一个jei无法显示的物品槽，你需要使用开始编码"
+    }
+  ],
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 8388608
+      }
+    ]
+  },
+  "type": "gtceu:photon_separation",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 2048000,
+          "value": [
+            {
+              "fluid": "dishanhai:light"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 64000,
+          "value": [
+            {
+              "fluid": "dishanhai:matter_fluid_ascension"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 64,
+          "ingredient": {
+            "item": "dishanhai:light_voyage"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "dishanhai:genesis_shard"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 256,
+          "ingredient": {
+            "item": "dishanhai:navigate_prism"
+          }
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "actualAmount": 16,
+          "ingredient": {
+            "item": "dishanhai:star_spark"
+          }
+        }
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "dishanhai:photon_separation/photon_separation_star_spark",
+      "defaultEnabled": true
+    }
+  ]
+}

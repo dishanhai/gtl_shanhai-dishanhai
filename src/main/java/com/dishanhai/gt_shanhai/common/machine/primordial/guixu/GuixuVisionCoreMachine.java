@@ -1,6 +1,15 @@
 package com.dishanhai.gt_shanhai.common.machine.primordial.guixu;
 
 import com.google.common.primitives.Ints;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatSources;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHostMountSource;
+import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
+import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
+import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
+import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
+import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.gregtechceu.gtceu.api.capability.IEnergyContainer;
 import com.gregtechceu.gtceu.api.capability.recipe.EURecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
@@ -38,6 +47,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
@@ -58,7 +68,7 @@ import java.util.IdentityHashMap;
  * 常駐增產額外 +5、同款能源減免，以及獨立的動態環帶和黑洞渲染。
  * 原始實作：shanhai-rewrite/com/shanhai/machine/host。
  */
-public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
+public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine implements ShanhaiHostMountSource {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -100,6 +110,23 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
      */
     @Persisted
     private final NotifiableItemStackHandler levelOverrideSlot;
+
+    /** 山海：來源歸墟新增三槽；不縮減 master 模組已存在的六槽。 */
+    public static final int EXTRA_MOUNT_SLOT_COUNT = 3;
+    @Persisted
+    private final NotifiableItemStackHandler extraMountSlots;
+    private ItemStack[] cachedExtraMountStacks;
+    private List<ShanhaiHeatGate.SlotContent> cachedExtraMountContents = List.of();
+
+    public static final byte REASON_NONE = 0;
+    public static final byte REASON_WORKING = 1;
+    public static final byte REASON_NO_POWER = 2;
+    public static final byte REASON_OUTPUT_FULL = 3;
+    public static final byte REASON_BLOCKED = 4;
+    @DescSynced
+    private byte[] hostModReason = sentinelBytes(SNAP_SLOTS);
+
+    public byte[] hostModReason() { return hostModReason; }
 
     /**
      * {@link #matterLevelOverride()} 的<b>客户端镜像</b>（渲染/抬头在客户端，槽里的物品到不了那边）。
@@ -626,6 +653,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         refreshModuleMask(modules);
 
         final byte[] pct = sentinelBytes(SNAP_SLOTS);
+        final byte[] reason = sentinelBytes(SNAP_SLOTS);
         final long[] eu = sentinelLongs(SNAP_SLOTS);
         final long[] par = sentinelLongs(SNAP_SLOTS);
         final int[] thr = sentinelInts(SNAP_SLOTS);
@@ -642,6 +670,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             if (modules[i] == null) continue;
             final ModuleReading reading = readModule(modules[i]);
             applyReading(i, reading, pct, eu, par, thr, rem, outCount, outItem, outAmount);
+            reason[i] = reasonOf(modules[i]);
         }
 
         // 山海：摘要包含主機與跨維度接管模組；兩條可見輸出不應截斷總數。
@@ -732,6 +761,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                         || snapshotLong(in[0]) != hostEnergyInStored || snapshotLong(in[1]) != hostEnergyInCapacity
                         || snapshotLong(out[0]) != hostEnergyOutStored || snapshotLong(out[1]) != hostEnergyOutCapacity
                         || !java.util.Arrays.equals(pct, hostModProgressPct)
+                        || !java.util.Arrays.equals(reason, hostModReason)
                         || !java.util.Arrays.equals(eu, hostModEuPerTick)
                         || !java.util.Arrays.equals(par, hostModParallel)
                         || !java.util.Arrays.equals(thr, hostModThreads)
@@ -764,6 +794,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         hostEnergyOutStored = snapshotLong(out[0]);
         hostEnergyOutCapacity = snapshotLong(out[1]);
         hostModProgressPct = pct;
+        hostModReason = reason;
         hostModEuPerTick = eu;
         hostModParallel = par;
         hostModThreads = thr;
@@ -1238,6 +1269,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     protected void attachCleanSideTabs(TabsWidget tabs) {
         super.attachCleanSideTabs(tabs);
         tabs.attachSubTab(GuixuControlPanels.modules(this));
+        tabs.attachSubTab(new ExtraMountPageProvider());
     }
 
     /** 只觀察有效回連且區塊已載入的模組，始終渲染開關不參與工作判定。 */
@@ -1335,6 +1367,93 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
                 }
             }
         }.setFilter(PrimordialOmegaEngineModuleBase::isMatterModuleStack);
+        this.extraMountSlots = new NotifiableItemStackHandler(this, EXTRA_MOUNT_SLOT_COUNT, IO.NONE, IO.NONE);
+    }
+
+    public ItemStack getExtraMountStack(int index) {
+        return extraMountSlots == null || index < 0 || index >= EXTRA_MOUNT_SLOT_COUNT
+                ? ItemStack.EMPTY : extraMountSlots.storage.getStackInSlot(index);
+    }
+
+    public List<ShanhaiHeatGate.SlotContent> getExtraMountContents() {
+        boolean hit = cachedExtraMountStacks != null
+                && cachedExtraMountStacks.length == EXTRA_MOUNT_SLOT_COUNT;
+        for (int i = 0; hit && i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            ItemStack current = getExtraMountStack(i);
+            ItemStack old = cachedExtraMountStacks[i];
+            hit = ItemStack.isSameItemSameTags(current, old) && current.getCount() == old.getCount();
+        }
+        if (hit) return cachedExtraMountContents;
+        ItemStack[] snapshot = new ItemStack[EXTRA_MOUNT_SLOT_COUNT];
+        List<ShanhaiHeatGate.SlotContent> contents = new ArrayList<>(EXTRA_MOUNT_SLOT_COUNT);
+        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            ItemStack current = getExtraMountStack(i);
+            snapshot[i] = current.copy();
+            contents.add(ShanhaiHeatSources.slotContentOf(current));
+        }
+        cachedExtraMountStacks = snapshot;
+        cachedExtraMountContents = List.copyOf(contents);
+        return cachedExtraMountContents;
+    }
+
+    @Override
+    public List<ShanhaiHeatGate.SlotContent> hostExtraMountContents() { return getExtraMountContents(); }
+
+    @Override
+    public boolean canProvideHostMounts() {
+        Level world = getLevel();
+        return isFormed() && !isInValid() && world != null && world.hasChunkAt(getPos());
+    }
+
+    private final class ExtraMountPageProvider implements IFancyUIProvider {
+        @Override public Component getTitle() { return Component.literal("额外挂载"); }
+        @Override public IGuiTexture getTabIcon() { return new ItemStackTexture(Items.HOPPER); }
+        @Override public Widget createMainPage(FancyMachineUIWidget widget) {
+            WidgetGroup page = new WidgetGroup(0, 0, 176, 104);
+            page.setBackground(GuiTextures.BACKGROUND_INVERSE);
+            page.addWidget(new LabelWidget(8, 8, "主机额外挂载槽"));
+            for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+                SlotWidget slot = new SlotWidget(extraMountSlots.storage, i, 8 + i * 34, 30, true, true);
+                slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
+                slot.setHoverTooltips(Component.literal("主机额外挂载槽 " + (i + 1)),
+                        Component.literal("供本机和全部已连接模块共用；可与模块自身挂载互补"),
+                        Component.literal("维护仓／维度碎片放一个生效；线圈／恒星容器需放满64个"));
+                page.addWidget(slot);
+            }
+            page.addWidget(new LabelWidget(8, 58, "条件源与模组自身挂载合并判定"));
+            page.addWidget(new LabelWidget(8, 72, "热力源需单格放满64个，不跨格合计"));
+            return page;
+        }
+    }
+
+    /** 待機及暫停不沿用上一批次原因；運行以真實狀態為準。 */
+    static byte classifyReason(boolean working, boolean waiting, String key) {
+        if (working) return REASON_WORKING;
+        if (!waiting) return REASON_NONE;
+        if ("gtceu.recipe.fail.no.enough.eu.in".equals(key)) return REASON_NO_POWER;
+        if ("gtceu.recipe.fail.Output".equals(key)) return REASON_OUTPUT_FULL;
+        return REASON_BLOCKED;
+    }
+
+    static byte reasonOf(PrimordialOmegaEngineModuleBase module) {
+        try {
+            RecipeLogic logic = module.getRecipeLogic();
+            if (logic == null || !logic.isWorkingEnabled()) return REASON_NONE;
+            String key = null;
+            if (logic.isWaiting() && logic instanceof IRecipeStatus statuses) {
+                RecipeResult failure = statuses.getWorkingStatus();
+                if (failure == null || failure.isSuccess()) failure = statuses.getRecipeStatus();
+                if (failure != null && !failure.isSuccess() && failure.reason() != null
+                        && failure.reason().getContents()
+                        instanceof net.minecraft.network.chat.contents.TranslatableContents text) key = text.getKey();
+            }
+            byte reason = classifyReason(logic.isWorking(), logic.isWaiting(), key);
+            if (reason == REASON_NONE && module.getModuleConditionError() != null
+                    && !module.getModuleConditionError().isBlank()) return REASON_BLOCKED;
+            return reason;
+        } catch (RuntimeException ignored) {
+            return REASON_NONE;
+        }
     }
 
     // ------------------------------------------------------------------ 模块等级复写（门控 + 出口）
@@ -1378,6 +1497,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         final java.util.Set<String> names = new java.util.HashSet<>();
         boolean overrideSlotPersisted = false;
         boolean overrideLevelSynced = false;
+        boolean extraMountPersisted = false;
+        boolean moduleReasonSynced = false;
         for (final ManagedKey key : MANAGED_FIELD_HOLDER.getFields()) {
             names.add(key.getName());
             if ("levelOverrideSlot".equals(key.getName())) {
@@ -1386,9 +1507,11 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             if ("hostMatterLevelOverride".equals(key.getName())) {
                 overrideLevelSynced = key.isDestSync();
             }
+            if ("extraMountSlots".equals(key.getName())) extraMountPersisted = key.isPersist();
+            if ("hostModReason".equals(key.getName())) moduleReasonSynced = key.isDestSync();
         }
         final java.util.List<String> problems = new java.util.ArrayList<>();
-        for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride",
+        for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride", "extraMountSlots", "hostModReason",
                 "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel",
                 "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos", "engineLinkReady",
                 "containmentLockTicks", "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
@@ -1410,6 +1533,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         if (!overrideLevelSynced) {
             problems.add("hostMatterLevelOverride 没有同步（@DescSynced 未登记）");
         }
+        if (!extraMountPersisted) problems.add("extraMountSlots 没有落盘");
+        if (!moduleReasonSynced) problems.add("hostModReason 没有同步");
         if (!problems.isEmpty()) {
             throw new IllegalStateException("[SHANHAI-HOST] 字段 holder 自检失败：" + problems
                     + " —— 这会导致「编译通过、游戏不报错、字段永不落盘也永不同步」。"
@@ -1476,6 +1601,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
     public void onMachineRemoved() {
         super.onMachineRemoved();
         clearInventory(levelOverrideSlot.storage);
+        clearInventory(extraMountSlots.storage);
     }
 
     @Override

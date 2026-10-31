@@ -137,7 +137,7 @@ public final class HostFxDraw {
     private static int lastFallbackPillarQuads;
     /** 上一帧 <b>4 条解压机主柱</b>回落的四边形数（管壳 + 粒子；0 = 走的是伪神 shader，正常就该是 0）。 */
     private static int lastFallbackMdBeamQuads;
-    /** 上一帧<b>光柱环</b>提交的遍数（正常 = 2：soft + intense；0 = 着色器没起来）。 */
+    /** 上一幀外緣吸積流提交遍數（正常 1，shader 未就緒 0）。 */
     private static int lastRingPasses;
     /** 上一帧光柱环回落的自绘四边形数（正常 = 0）。 */
     private static int lastFallbackRingQuads;
@@ -175,8 +175,8 @@ public final class HostFxDraw {
                 + "/8（4 座解压机）回落自绘=" + lastFallbackPillarQuads
                 + "+" + lastFallbackMdBeamQuads
                 // 🔴 第八改：内外环之间的那圈粗光柱环（用户要求 ①）
-                + " | 光柱环 " + HostFxBeamRing.stats()
-                + " 本帧 passes=" + lastRingPasses + "/2（回落自绘 " + lastFallbackRingQuads + " 四边形）"
+                + " | 外緣吸積流 " + HostFxBeamRing.stats()
+                + " 本帧 passes=" + lastRingPasses + "/1（回落自绘 " + lastFallbackRingQuads + " 四边形）"
                 + " | " + HostFxGeometry.THIN_BEAM_COUNT + " 细紫（<b>每座 3 条</b>，绕<b>本座</b>喷口轴 r="
                 + HostFxGeometry.THIN_BEAM_RING_R + " 均布、互成 120°、与本座主柱夹角 0°，峰值半径 "
                 + HostFxGeometry.THIN_BEAM_PEAK_RADIUS
@@ -403,20 +403,8 @@ public final class HostFxDraw {
             HostFxPillarBeam.markMdBeamsSkipped();
         }
 
-        // ═══════════════════════════════════════════════════════════════════════════════════
-        //  🔴 2026-10-25 第八改：<b>内外环之间那圈粗光柱环</b>（用户要求 ①）
-        // ═══════════════════════════════════════════════════════════════════════════════════
-        //  用户原话：「我希望可以把伪神的那个光柱变粗，然后围绕在外环和内环中间，
-        //             就是在外环和内环中间用伪神的光柱画一个环，要很粗，直径得有 5-7 格」
-        //  几何/尺寸/为什么是 r=54@管径6 见 HostFxBeamRingGeom；着色器移植理由见 HostFxBeamRing。
-        //  ⚠️ 它【套 pivot + spin】：4 座解压机跟着内环带一起 12°/s 自转，光柱的 4 个"暗窗"
-        //     必须钉在机器上 ⇒ 环与机器同一个自转角；相机也必须用自转后的 camSpin。
-        //  着色器建不起来 ⇒ 回落到同一条加性层（CPU 算 rim），环不会整圈消失。
-        //
-        //  🔴 2026-10-25 第二十改：【降级态整圈不提交】—— 任务书补注逐字：
-        //     「粗光柱环（HostFxBeamRing）算"主光束" ⇒ 降级态一起消失」。
-        //     颜色也一起接好了（HostFxSwitch.beamRingGlowRgb() 在降级态返回红色）：
-        //     若以后要改成"变红而不是消失"，把 HostFxSwitch.beamRingOn() 翻成 true 即可，这里不用动。
+        // 山海：原藍色光柱管環已重製為單遍暖白吸積流；共用既有 pivot、自轉與凍結時鐘。
+        // shader 失敗時使用同輪廓與材質公式回落，保留降級態不提交外環的既有契約。
         if (HostFxSwitch.beamRingOn()) {
             poseStack.pushPose();
             try {
@@ -436,7 +424,7 @@ public final class HostFxDraw {
                 poseStack.popPose();
             }
         } else {
-            // 降级态：粗光柱环（shader 两遍 + CPU rim 回落）一遍都不提交；计数归零，日志不撒谎。
+            // 降級態不提交外緣吸積流，清除上一幀計數。
             HostFxBeamRing.markSkipped();
         }
     }

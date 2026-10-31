@@ -1,0 +1,48 @@
+{
+  "data": {
+    "euTier": 8
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 524288
+      }
+    ]
+  },
+  "type": "gtceu:matter_forging",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "kubejs:scrap_box"
+          },
+          "actualAmount": 16
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:long",
+          "ingredient": {
+            "item": "ae2:matter_ball"
+          },
+          "actualAmount": 16384
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:matter_forging/scrap_box_matter_ball",
+      "defaultEnabled": true
+    }
+  ]
+}

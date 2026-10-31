@@ -384,6 +384,8 @@ public final class HostFxGlassArPanel {
     public static final float MOD_PAR_U = 4.78F;
     public static final float MOD_THR_U = 5.54F;
     public static final float MOD_OUT_U = 6.20F;
+    /** 山海：輸出與狀態標籤保留 6 px 間距，標籤以實際字型寬度靠右。 */
+    public static final int MOD_LABEL_GAP_PX = 6;
     /** 模块名最多几个<b>汉字当量</b>（1.70 格 = 85 px ÷ 9 px/汉字 ≈ 9，取 8 给 ASCII 名留余量）。 */
     public static final int MOD_NAME_CHARS = 8;
     /** 每行输出最多几项（用户口径：模块行最多 2 项）。 */

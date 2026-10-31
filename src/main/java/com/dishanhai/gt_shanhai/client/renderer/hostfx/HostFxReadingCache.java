@@ -4,6 +4,7 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 /** 山海：AR 讀數依主機 identity 作廢；不持有繪圖佇列或 Minecraft 物件型別。 */
 public final class HostFxReadingCache {
     private Object host;
+    final HostFxGlassArSort.Tracker moduleSort = new HostFxGlassArSort.Tracker();
     HostFxGlassArModel.State state;
     long lastBuildTick;
     int[] lastHostOutIds;
@@ -30,6 +31,7 @@ public final class HostFxReadingCache {
 
     public void clear() {
         host = null;
+        moduleSort.clear();
         state = new HostFxGlassArModel.State();
         lastBuildTick = Long.MIN_VALUE;
         lastHostOutIds = null;

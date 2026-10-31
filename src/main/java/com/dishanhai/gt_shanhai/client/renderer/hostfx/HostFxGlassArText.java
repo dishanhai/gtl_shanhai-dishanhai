@@ -16,6 +16,7 @@ import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreM
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
+import net.minecraft.client.resources.language.I18n;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -507,6 +508,19 @@ public final class HostFxGlassArText {
         if (STATE.energyOutCapacity < 0L) {
             STATE.energyOutCapacity = ou == null ? -1L : ou[1];
         }
+        READINGS.moduleSort.observe(tick, STATE.moduleSlots, STATE.modProgressPct,
+                STATE.modRemainSeconds, STATE.modReason);
+        STATE.moduleOrder = READINGS.moduleSort.order(STATE.moduleSlots);
+        final Font font = Minecraft.getInstance().font;
+        STATE.textWidth = font::width;
+        STATE.moduleReasonLabels = new String[]{"",
+                I18n.get("gt_shanhai.ar.module.reason.working"),
+                I18n.get("gt_shanhai.ar.module.reason.no_power"),
+                I18n.get("gt_shanhai.ar.module.reason.output_full"),
+                I18n.get("gt_shanhai.ar.module.reason.blocked")};
+        STATE.moduleReasonWidths = java.util.Arrays.stream(STATE.moduleReasonLabels).mapToInt(font::width).toArray();
+        STATE.unreadText = I18n.get("gt_shanhai.ar.unknown");
+        STATE.noneText = I18n.get("gt_shanhai.ar.none");
     }
 
     private interface IntSupplier {
@@ -835,6 +849,7 @@ public final class HostFxGlassArText {
             STATE.modParallel = host.hostModParallel();
             STATE.modThreads = host.hostModThreads();
             STATE.modRemainSeconds = host.hostModRemainSec();
+            STATE.modReason = host.hostModReason();
             STATE.hostProgressPct = host.hostRecipeProgressPct();
             STATE.hostRemainSeconds = host.hostRecipeRemainSec();
             STATE.hostParallel = host.hostRecipeParallel();
@@ -902,39 +917,43 @@ public final class HostFxGlassArText {
         readModuleNames(host);
     }
 
-    /** 主机级输出：注册表 id × 量 → {@code 名字×数量}；一个都解析不出来 ⇒ 空数组（面板画 {@code --}）。 */
+    /** 主機輸出：空陣列代表確定沒有，通道缺失或有資料卻解碼失敗代表未知。 */
     private static String[] resolveHostOutputs(int[] ids, int[] amounts) {
-        if (ids == null || amounts == null) {
-            return new String[0];
+        if (ids == null || amounts == null || ids.length != amounts.length) {
+            return null;
         }
         final List<String> out = new ArrayList<>(ids.length);
-        for (int i = 0; i < ids.length && i < amounts.length; i++) {
+        boolean hasData = false;
+        for (int i = 0; i < ids.length; i++) {
+            hasData |= ids[i] >= 0 && amounts[i] > 0;
             final String s = outputEntry(ids[i], amounts[i]);
             if (s != null) {
                 out.add(s);
             }
         }
-        return out.toArray(new String[0]);
+        return out.isEmpty() && hasData ? null : out.toArray(new String[0]);
     }
 
     /** 每模块输出：扁平数组（下标 = 槽位 × {@code OUT_PER_MODULE} + 第几条，-1 = 没有）。 */
     private static String[][] resolveModuleOutputs(int[] ids, int[] amounts) {
         final int slots = GuixuVisionCoreMachine.SNAP_SLOTS;
         final int per = GuixuVisionCoreMachine.OUT_PER_MODULE;
-        if (ids == null || amounts == null || ids.length < slots * per) {
+        if (ids == null || amounts == null || ids.length < slots * per || amounts.length < slots * per) {
             return null;                                       // ⇒ 面板画 --
         }
         final String[][] out = new String[slots][];
         for (int s = 0; s < slots; s++) {
             final List<String> one = new ArrayList<>(per);
+            boolean hasData = false;
             for (int k = 0; k < per; k++) {
                 final int idx = s * per + k;
+                hasData |= ids[idx] >= 0 && amounts[idx] > 0;
                 final String e = outputEntry(ids[idx], amounts[idx]);
                 if (e != null) {
                     one.add(e);
                 }
             }
-            out[s] = one.toArray(new String[0]);
+            out[s] = one.isEmpty() && hasData ? null : one.toArray(new String[0]);
         }
         return out;
     }
@@ -971,13 +990,15 @@ public final class HostFxGlassArText {
         STATE.modParallel = null;
         STATE.modThreads = null;
         STATE.modRemainSeconds = null;
+        STATE.modReason = null;
+        STATE.moduleOrder = null;
         STATE.modOutputs = null;
         STATE.hostProgressPct = -1;
         STATE.hostRemainSeconds = -1;
         STATE.hostParallel = -1;
         STATE.hostThreads = -1;
         STATE.hostEuPerTick = -1L;
-        STATE.hostOutputs = new String[0];
+        STATE.hostOutputs = null;
         STATE.hostOutputTotal = -1;
         STATE.totalOutputCount = -1L;
         STATE.totalOutputKinds = -1;

@@ -1,6 +1,10 @@
 package com.dishanhai.gt_shanhai.common.machine.primordial.guixu;
 
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineRecipeLogic;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiHeatGate;
+import com.dishanhai.gt_shanhai.common.heat.ShanhaiExtraMountGate;
+import com.dishanhai.gt_shanhai.common.item.RecipeTypeSharedSearchSets;
+import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.RecipeHelper;
 import com.dishanhai.gt_shanhai.api.recipe.DShanhaiRecipeTypes;
@@ -30,10 +34,39 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialOmegaEngineRecipeLogic
     private long plannedParallels;
     private boolean plannedConsumer = true;
     private boolean preferGeneration;
+    private java.util.List<ShanhaiHeatGate.SlotContent> lastMountContents;
 
     public GuixuVisionCoreRecipeLogic(GuixuVisionCoreMachine host) {
         super(host);
         this.host = host;
+    }
+
+    /** 保留本地功率規劃，只替換原生條件判定中可由掛載供應的部分。 */
+    @Override
+    protected boolean checkRecipe(GTRecipe recipe) {
+        if (recipe == null || recipe.recipeType == null
+                || (!host.isRecipeTypeSelected(recipe.recipeType)
+                && !RecipeTypeSharedSearchSets.isSharedWithAny(recipe.recipeType, host.getSelectedRecipeTypes()))) return false;
+        var contents = host.getExtraMountContents();
+        var needs = ShanhaiExtraMountGate.conditionRequirements(recipe, this, contents, false, false);
+        if (needs.isEmpty()) return super.checkRecipe(recipe);
+        var outcome = ShanhaiHeatGate.evaluate(needs, contents);
+        return outcome.allowed && RecipeRunnerHelper.matchRecipe(host, recipe)
+                && (getRecipeCheck() == null || getRecipeCheck().test(recipe, host))
+                && ShanhaiExtraMountGate.conditionsPass(recipe, this, outcome, false, false);
+    }
+
+    @Override
+    protected java.util.Set<GTRecipe> lookupRecipeIterator() {
+        var contents = host.getExtraMountContents();
+        if (contents != lastMountContents) {
+            lastMountContents = contents;
+            invalidateLookupSetCache();
+        }
+        // 樣板總成候選可能繞過 checkRecipe，也必須經過同一掛載/輸入/輸出判定。
+        var result = new java.util.LinkedHashSet<GTRecipe>();
+        for (GTRecipe recipe : super.lookupRecipeIterator()) if (checkRecipe(recipe)) result.add(recipe);
+        return result;
     }
 
     /** 遏制場坍縮鎖定期間不開新批次。 */

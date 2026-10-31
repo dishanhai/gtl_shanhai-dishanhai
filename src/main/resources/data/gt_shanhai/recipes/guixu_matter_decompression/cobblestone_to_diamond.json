@@ -1,0 +1,13 @@
+{
+  "type": "gtceu:guixu_matter_decompression",
+  "data": {"euTier": 0},
+  "inputs": {"item": [{"content": {"item": "minecraft:cobblestone"}}]},
+  "outputs": {"item": [{"content": {"item": "minecraft:diamond"}}]},
+  "tickInputs": {"eu": [{"content": 8}]},
+  "duration": 20,
+  "conditions": [{
+    "type": "gt_shanhai:recipe_enabled",
+    "recipeId": "gt_shanhai:guixu_matter_decompression/cobblestone_to_diamond",
+    "defaultEnabled": true
+  }]
+}
