@@ -163,7 +163,7 @@ class PrimordialParallelSupplyTest {
         @Override public long getThreadBoost() { return boost; }
         @Override public int getModuleLevel() { return hostLevel; }
         @Override public int getHostMatterLevelOverride() { return hostLevel; }
-        protected int getParallelModuleLevel() { return parallelLevel; }
+        @Override protected int getParallelModuleLevel() { return parallelLevel; }
         @Override public boolean hasParallelOverdriver() { return false; }
         @Override public boolean hasDarkEnergyMultiplierMounted() { return false; }
         @Override public boolean hasAnnihilationCoreMounted() { return false; }

@@ -10,6 +10,53 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class IntegrateBlackHoleTest {
     @Test
+    void unresolvedSurfaceWavesFadeOutInsteadOfDrawingDenseWhiteRings() {
+        var p = new BlackHoleShaderProbe.Params(new float[16], new float[]{0, 0, -240},
+                new float[]{0, .82F, .57F}, 768, 768, 0, 0, 768, 768, 376,
+                384, 384, .4, Math.tan(Math.toRadians(48) / 2), .42, 0, 0, 3);
+        for (double x = 381; x <= 387; x += .25) {
+            assertArrayEquals(new double[3], BlackHoleShaderProbe.shade(p,
+                    (px, py) -> new double[3], x, 384), 1e-9);
+        }
+    }
+
+    @Test
+    void surfaceWavesHaveAnimatedWhiteEdgesAndKeepTheirBlackInterior() {
+        double energy = 0, movement = 0;
+        for (double time : new double[]{0, 3}) {
+            var p = new BlackHoleShaderProbe.Params(new float[16], new float[]{0, 0, -24},
+                    new float[]{0, .82F, .57F}, 768, 768, 0, 0, 768, 768, 376,
+                    384, 384, 2, Math.tan(Math.toRadians(48) / 2), .42, 0, 0, time);
+            double radius = 384 / p.tanHalfFov() * 2 * BlackHoleShaderProbe.B_CRIT / 24;
+            for (int offset = (int) (radius * .66); offset < radius * .90; offset++) {
+                double[] color = BlackHoleShaderProbe.shade(p, (x, y) -> new double[3], 384 + offset, 384);
+                assertEquals(color[0], color[1], 1e-9);
+                assertEquals(color[0], color[2], 1e-9);
+                assertTrue(color[0] >= 0 && color[0] <= .8, "White edges must retain the black surface");
+                energy += color[0];
+                movement += color[0] * offset * (time == 0 ? -1 : 1);
+            }
+        }
+        assertTrue(energy > .5, "The surface needs visible white wave crests");
+        assertTrue(Math.abs(movement) > .1, "The wave crests must move over time");
+    }
+
+    @Test
+    void offlineProbeKeepsCapturedRaysBlackAcrossTimeAndDistance() {
+        for (float distance : new float[]{24, 80, 240}) for (double time : new double[]{0, 3, 20}) {
+            var params = new BlackHoleShaderProbe.Params(new float[16], new float[]{0, 0, -distance},
+                    new float[]{0, .82F, .57F}, 768, 768, 0, 0, 768, 768, 376,
+                    384, 384, 2, Math.tan(Math.toRadians(48) / 2), .42, .62, 1, time);
+            for (double offset : new double[]{0, .2, .5}) {
+                double radius = 384 / params.tanHalfFov() * 2 * BlackHoleShaderProbe.B_CRIT / distance;
+                double[] color = BlackHoleShaderProbe.shade(params, (x, y) -> new double[]{1, 1, 1},
+                        384 + radius * offset, 384);
+                assertArrayEquals(new double[3], color, 1e-9);
+            }
+        }
+    }
+
+    @Test
     void horizonCannotExposeDiskLightAndSubpixelNoiseIsFiltered() throws Exception {
         String shader = Files.readString(Path.of("src/main/resources/assets/gt_shanhai/shaders/core/guixu_blackhole.fsh"));
         assertTrue(shader.contains("length(cross(bh, dir))"), "Avoid cancellation when looking toward the core");

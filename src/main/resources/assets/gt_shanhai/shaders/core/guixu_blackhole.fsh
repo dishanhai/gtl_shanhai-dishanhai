@@ -102,9 +102,12 @@ float hash21(vec2 p) {
     return fract(p.x * p.y);
 }
 
-float vnoise(vec2 p) {
+float noiseFootprint(vec2 p) {
     // 山海：先量測未折返座標的像素足跡；次像素雜訊收斂到均值，避免摩爾紋。
-    float footprint = max(length(dFdx(p)), length(dFdy(p)));
+    return max(length(dFdx(p)), length(dFdy(p)));
+}
+
+float vnoise(vec2 p, float footprint) {
     vec2 i = floor(p);
     vec2 f = fract(p);
     vec2 u = f * f * (3.0 - 2.0 * f);
@@ -116,10 +119,10 @@ float vnoise(vec2 p) {
                smoothstep(0.35, 1.20, footprint));
 }
 
-float fbm(vec2 p) {
-    return 0.55 * vnoise(p)
-         + 0.30 * vnoise(p * 2.03 + 11.3)
-         + 0.15 * vnoise(p * 4.07 + 27.1);
+float fbm(vec2 p, float footprint) {
+    return 0.55 * vnoise(p, footprint)
+         + 0.30 * vnoise(p * 2.03 + 11.3, footprint * 2.03)
+         + 0.15 * vnoise(p * 4.07 + 27.1, footprint * 4.07);
 }
 
 // ============================================================================================
@@ -132,6 +135,17 @@ float fbm(vec2 p) {
 float deflectAngle(float bn) {
     float t = 1.0 / max(bn, 0.35);
     return 2.0 * t + 2.2 * t * t + 1.6 * t * t * t;
+}
+
+// 山海：低頻黑色表面起伏，白邊只描繪波峰；不重取樣背景、不新增 uniform。
+float surfaceRadius(float angle, float detail) {
+    return B_CRIT * (1.0 + detail * (0.012 * sin(angle * 3.0 + uTime * 0.5)
+                                  + 0.006 * sin(angle * 5.0 - uTime * 0.37)));
+}
+
+float surfacePhase(float radius, float angle) {
+    return (radius - 0.62) * 39.2699082 + 1.50 * sin(angle * 3.0 - uTime * 0.3)
+         + 0.65 * sin(angle * 5.0 + uTime * 0.2) - uTime * 0.85;
 }
 
 void main() {
@@ -267,8 +281,8 @@ void main() {
     float diskAngle = atan(dot(diskRel, basisZ), dot(diskRel, basisX));
     float spin = uTime * 2.6 / pow(max(diskRadius, 1.0), 1.5);
     // sin 方位座標消除 atan 在 -pi/pi 的雜訊接縫；徑向相位向內推進。
-    float turb = fbm(vec2(min(diskRadius, 64.0) * 1.35 + uTime * 0.45,
-                          sin(diskAngle + spin) * 2.6));
+    vec2 noiseCoord = vec2(min(diskRadius, 64.0) * 1.35 + uTime * 0.45, sin(diskAngle + spin) * 2.6);
+    float footprint = noiseFootprint(noiseCoord);
     if (abs(denom) > 1e-4) {
         float tHit = dot(bh, n) / denom;
         if (tHit > 0.0) {
@@ -281,6 +295,7 @@ void main() {
                            * (1.0 - smoothstep(DISK_OUTER * 0.72, DISK_OUTER, rn));
 
                 // 开普勒湍流：方位角 + 半径，按 ω ∝ r^-1.5 平移 ⇒ 内圈转得快（真吸积盘的样子）
+                float turb = fbm(noiseCoord, footprint);
                 float shade = band * (0.35 + 1.30 * turb) * 1.15;
 
                 // 多普勒集束：盘沿 +φ 方向转，速度朝相机的一侧更亮（1/(1-βcosθ)³）
@@ -307,12 +322,24 @@ void main() {
     //    b ≈ b_crit 的一薄层是"绕光子球转了几圈、最后擦边逃出来"的光 ⇒ 强亮环（解析高斯）。
     // ---------------------------------------------------------------------------------------
     float aa         = max(fwidth(bn), 1e-4) * 1.25;
-    float shadowMask = 1.0 - smoothstep(B_CRIT - aa, B_CRIT + aa, bn);
+    float surfaceDetail = 1.0 - smoothstep(0.014, 0.055, fwidth(bn) / B_CRIT);
+    vec2 surfaceOffset = px - uHolePx;
+    float surfaceAngle = atan(surfaceOffset.y, surfaceOffset.x + 1e-6);
+    float waveRadius = surfaceRadius(surfaceAngle, surfaceDetail);
+    float shadowMask = 1.0 - smoothstep(waveRadius - aa, waveRadius + aa, bn);
+
+    float surfaceRho = bn / waveRadius;
+    float wavePhase = surfacePhase(surfaceRho, surfaceAngle);
+    float waveWidth = max(0.075, fwidth(wavePhase) * 0.55);
+    float waveCrest = exp(-pow(sin(wavePhase * 0.5) / waveWidth, 2.0));
+    float surfaceRipple = 0.80 * waveCrest * surfaceDetail * shadowMask
+                        * smoothstep(0.60, 0.67, surfaceRho)
+                        * (1.0 - smoothstep(0.92, 0.98, surfaceRho));
 
     float ringWidth = max(RING_WIDTH, aa);
-    float ringCore = exp(-pow((bn - B_CRIT) / ringWidth, 2.0)) * RING_WIDTH / ringWidth;
-    float ringHalo = exp(-pow((bn - B_CRIT) / HALO_WIDTH, 2.0)) * HALO_GAIN;
-    vec3  ringCol  = vec3(1.00, 0.88, 0.72) * ((ringCore * RING_GAIN + ringHalo) * max(uRingGain, 0.0));
+    float ringCore = exp(-pow((bn - waveRadius) / ringWidth, 2.0)) * RING_WIDTH / ringWidth;
+    float ringHalo = exp(-pow((bn - waveRadius) / HALO_WIDTH, 2.0)) * HALO_GAIN;
+    vec3  ringCol  = vec3((ringCore * RING_GAIN + ringHalo) * max(uRingGain, 0.0));
 
     // ---------------------------------------------------------------------------------------
     // ⑦ 合成：背景 → 被黑影吃掉 → 盘与环叠在上面（盘/环在黑洞前面，应该压在黑影上）
@@ -321,6 +348,7 @@ void main() {
     // 盘 / 环 / 光晕一起乘边缘淡出（改前是直接加 ⇒ 矩形边界处一条硬边）
     col += diskCol * (1.0 - shadowMask) * maskFade;
     col += ringCol * (1.0 - shadowMask) * maskFade;
+    col += vec3(surfaceRipple) * maskFade;
 
     fragColor = vec4(col, 1.0);
 }

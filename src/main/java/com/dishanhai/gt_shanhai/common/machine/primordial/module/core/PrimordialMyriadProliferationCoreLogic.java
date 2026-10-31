@@ -9,6 +9,7 @@ import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
 import com.gtladd.gtladditions.common.data.ParallelData;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
@@ -22,6 +23,27 @@ public class PrimordialMyriadProliferationCoreLogic extends PrimordialModuleReci
     public PrimordialMyriadProliferationCoreLogic(
             GTLAddWirelessWorkableElectricMultipleRecipesMachine machine) {
         super(machine);
+    }
+
+    private boolean pauseForMyriadConflict() {
+        if (!(getMachine() instanceof PrimordialMyriadProliferationCore core)) return false;
+        Component warning = core.getMyriadConflictWarning();
+        if (warning == null) return false;
+        setWaiting(warning);
+        return true;
+    }
+
+    @Override
+    public GTRecipe getGTRecipe() {
+        if (pauseForMyriadConflict()) return null;
+        return super.getGTRecipe();
+    }
+
+    /** 在 GTCEu 呼叫 machine.onWorking／interruptRecipe 之前暫停，不丟已扣料批次。 */
+    @Override
+    public void handleRecipeWorking() {
+        if (pauseForMyriadConflict()) return;
+        super.handleRecipeWorking();
     }
 
     @Override
@@ -87,7 +109,7 @@ public class PrimordialMyriadProliferationCoreLogic extends PrimordialModuleReci
     }
 
     boolean isOutputMultiplierActive() {
-        return buildingFinalWirelessRecipe || isWorking();
+        return buildingFinalWirelessRecipe || isWorking() || activeRecipeTypeId != null && isWaiting();
     }
 
     @Nullable

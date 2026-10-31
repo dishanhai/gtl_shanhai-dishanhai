@@ -409,7 +409,8 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
         if (currentHost == null || !currentHost.isFormed()) {
             return 1;
         }
-        if (currentHost instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine) {
+        if (currentHost instanceof com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine
+                || currentHost.getLinkedGuixuHost() != null) {
             // 山海：萬象與遏制場由主機彙總，所有掛載模組共用同一最終倍率。
             return currentHost.getRecipeOutputMultiplier();
         }
@@ -687,7 +688,7 @@ public abstract class PrimordialOmegaEngineModuleBase extends CleanSelectableRec
 
     /** 山海：現實錨點／創始物質模組供給配方名額，不依賴專用超限器。 */
     private boolean hasInfiniteMatterThreads() {
-        return Math.max(getModuleLevel(), getParallelModuleLevel()) >= 16;
+        return getModuleLevel() >= 16 || getParallelModuleLevel() >= 16;
     }
 
     /** 子類既有獨立槽中只辨識物質模組；不把線程槽或額外挂載當並行物質來源。 */

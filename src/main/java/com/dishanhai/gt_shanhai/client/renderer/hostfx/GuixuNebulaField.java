@@ -54,7 +54,8 @@ public final class GuixuNebulaField {
         double t = base.t;
         double inner = Math.max(0.8, Math.min(12, horizon)) * 1.16;
         double radius = inner + (76 - inner) * t;
-        double angle = base.arm * Math.PI + 0.35 + t * 5.8 + seconds * 0.025;
+        double angle = base.arm * Math.PI + 0.35 + (76.0 - 58.0) / 70.0 * 3.7
+                + (t - 1) * 5.8 + seconds * 0.0012;
         double cosine = Math.cos(angle), sine = Math.sin(angle);
         double dr = 76 - inner;
         double dx = dr * cosine - radius * sine * 5.8;

@@ -20,6 +20,7 @@ import com.lowdragmc.lowdraglib.syncdata.field.ManagedKey;
 import com.mojang.logging.LogUtils;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineMachine;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
+import com.dishanhai.gt_shanhai.common.machine.primordial.module.core.PrimordialMyriadProliferationCore;
 import com.gtladd.gtladditions.api.machine.gui.LimitedDurationConfigurator;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
 import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
@@ -1538,6 +1539,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
      * 不另存「誰佔了引擎」：直接看引擎模組位上的模組現在掛在誰名下，並確認那台歸墟的鏈接確實指向這台引擎。
      */
     public boolean isEngineClaimedByOther(PrimordialOmegaEngineMachine engine) {
+        var owner = engine.getLinkedGuixuHost();
+        if (owner != null && owner != this) return true;
         Level engineLevel = engine.getLevel();
         if (engineLevel == null) return false;
         String dim = GuixuEngineLink.dimensionOf(engineLevel);
@@ -1572,6 +1575,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
         Level level = getLevel();
         GuixuEngineLink.Resolved resolved = level == null ? null
                 : GuixuEngineLink.resolve(level.getServer(), linkedEngineDim, linkedEnginePos);
+        if (resolved != null && resolved.engine() != null && resolved.engine().getLinkedGuixuHost() == this) {
+            resolved.engine().setLinkedGuixuHost(null);
+        }
         linkedEngineDim = "";
         linkedEnginePos = 0L;
         engineLinkReady = false;
@@ -1621,6 +1627,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
             engineLinkReady = false;
             return;
         }
+        engine.setLinkedGuixuHost(this);
         for (BlockPos pos : engine.getModuleScanPositions()) {
             if (!engineLevel.hasChunkAt(pos)) continue;
             if (MetaMachine.getMachine(engineLevel, pos) instanceof PrimordialOmegaEngineModuleBase module
@@ -1646,8 +1653,46 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
 
     /** 任意主機的遏制場增益：不是歸墟或未成型 ⇒ {@link GuixuContainmentBonus#NONE}。 */
     public static GuixuContainmentBonus containmentBonusOf(PrimordialOmegaEngineMachine host) {
-        return host instanceof GuixuVisionCoreMachine guixu && guixu.isFormed()
-                ? guixu.getContainmentBonus() : GuixuContainmentBonus.NONE;
+        GuixuVisionCoreMachine guixu = host instanceof GuixuVisionCoreMachine current ? current
+                : host == null ? null : host.getLinkedGuixuHost();
+        return guixu != null && guixu.isFormed() ? guixu.getContainmentBonus() : GuixuContainmentBonus.NONE;
+    }
+
+    public record MyriadSelection(PrimordialMyriadProliferationCore source, int multiplier, int candidates) {}
+
+    /** 山海：只比較未經停用歸零的候選值，不經有效倍率出口，避免遞迴及選舉反饋。 */
+    public MyriadSelection getMyriadSelection() {
+        if (!isFormed() || !isEngineLinkReady()) return new MyriadSelection(null, 1, 0);
+        var ownPositions = new java.util.HashSet<>(java.util.Arrays.asList(getModuleScanPositions()));
+        PrimordialMyriadProliferationCore winner = null;
+        int highest = 1;
+        int candidates = 0;
+        boolean winnerLocal = false;
+        String winnerKey = "";
+        for (var module : getModuleSet()) {
+            if (!(module instanceof PrimordialMyriadProliferationCore core)
+                    || core.getHost() != this || !core.isMyriadSelectionCandidate()) continue;
+            candidates++;
+            int multiplier = Math.max(1, Math.min(1000, core.getCandidateOutputMultiplier()));
+            boolean local = core.getLevel() == getLevel() && ownPositions.contains(core.getPos());
+            String key = (core.getLevel() == null ? "" : core.getLevel().dimension().location().toString())
+                    + ":" + core.getPos().asLong();
+            if (winner == null || multiplier > highest || multiplier == highest
+                    && (local && !winnerLocal || local == winnerLocal && key.compareTo(winnerKey) < 0)) {
+                winner = core;
+                highest = multiplier;
+                winnerLocal = local;
+                winnerKey = key;
+            }
+        }
+        return new MyriadSelection(winner, highest, candidates);
+    }
+
+    public Component getMyriadConflictWarning() {
+        var selection = getMyriadSelection();
+        return selection.candidates() > 1 ? Component.translatable(
+                "gt_shanhai.machine.primordial_myriad_proliferation_core.conflict_host",
+                selection.candidates(), selection.multiplier(), selection.candidates() - 1).withStyle(ChatFormatting.RED) : null;
     }
 
     public boolean isContainmentLocked() {
@@ -1988,6 +2033,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine {
      */
     @Override
     public void addDisplayText(List<Component> textList) {
+        addMyriadConflictDisplay(textList);
         if (!isFormed()) {
             textList.add(Component.literal("[归墟视界枢核] ").withStyle(ChatFormatting.GOLD)
                     .append(Component.literal("结构未成型").withStyle(ChatFormatting.RED)));

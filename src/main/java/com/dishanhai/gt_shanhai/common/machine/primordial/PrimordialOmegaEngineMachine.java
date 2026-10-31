@@ -21,6 +21,7 @@ import com.dishanhai.gt_shanhai.api.DShanhaiTextUtil;
 import com.dishanhai.gt_shanhai.api.machine.CleanSelectableRecipeTypeSetMachine;
 import com.dishanhai.gt_shanhai.api.machine.output.IOutputMultiplierSource;
 import com.dishanhai.gt_shanhai.api.machine.primordial.IPrimordialOutputMultiplierModule;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
 import com.dishanhai.gt_shanhai.config.DShanhaiConfig;
 import com.dishanhai.gt_shanhai.network.SHideRingPacket;
 import com.dishanhai.gt_shanhai.network.ShanhaiNetwork;
@@ -82,7 +83,31 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     }
 
     public int getHostMatterLevelOverride() {
-        return 0;
+        var upstream = getLinkedGuixuHost();
+        return upstream == null ? 0 : upstream.getHostMatterLevelOverride();
+    }
+
+    // 山海：只存已調和的執行期關聯；重載後由歸墟原有鏈接訂閱重建，不另存一份綁定。
+    private java.lang.ref.WeakReference<GuixuVisionCoreMachine> linkedGuixuHost;
+
+    public GuixuVisionCoreMachine getLinkedGuixuHost() {
+        var upstream = linkedGuixuHost == null ? null : linkedGuixuHost.get();
+        if (upstream == null || this instanceof GuixuVisionCoreMachine) return null;
+        var ownLevel = getLevel();
+        var upstreamLevel = upstream.getLevel();
+        if (ownLevel == null || upstreamLevel == null || ownLevel.getServer() == null
+                || ownLevel.getServer() != upstreamLevel.getServer()
+                || !ownLevel.hasChunkAt(getPos()) || !upstreamLevel.hasChunkAt(upstream.getPos())
+                || isInValid() || upstream.isInValid() || !isFormed() || !upstream.isFormed()
+                || !upstream.isEngineLinkReady()
+                || !upstream.isLinkedTo(ownLevel.dimension().location().toString(), getPos())) return null;
+        return upstream;
+    }
+
+    public void setLinkedGuixuHost(GuixuVisionCoreMachine upstream) {
+        if (this instanceof GuixuVisionCoreMachine) return;
+        linkedGuixuHost = upstream == null ? null : new java.lang.ref.WeakReference<>(upstream);
+        invalidateMountedOutputMultiplier();
     }
 
     public int getMaxModuleCount() {
@@ -214,6 +239,7 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
 
     @Override
     public void onUnload() {
+        linkedGuixuHost = null;
         structureCheck.cancel();
         super.onUnload();
     }
@@ -238,6 +264,8 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
      * 等级聚合每 tick 最多重建一次，替代「每模块 × 每候选配方」各自遍历全部模块的旧路径。
      */
     public long getEquivalentModuleCountForLevel(int requiredLv) {
+        var upstream = getLinkedGuixuHost();
+        if (upstream != null) return upstream.getEquivalentModuleCountForLevel(requiredLv);
         if (requiredLv <= 0) return Long.MAX_VALUE;
         long[] counts = moduleLevelCountsSnapshot();
         long total = 0L;
@@ -393,29 +421,36 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     }
 
     public int getMountedOutputMultiplier() {
+        var upstream = getLinkedGuixuHost();
+        if (upstream != null) return upstream.getMountedOutputMultiplier();
         // 传不可变快照：缓存未命中时可在锁外安全遍历，get() 不再需要锁内复制一份集合。
         return outputMultiplierCache.get(getOffsetTimer(), moduleSnapshot);
     }
 
     /** 子主機可追加自己的增產；模組提供的倍率出口保持原語義。 */
     public int getRecipeOutputMultiplier() {
-        return getMountedOutputMultiplier();
+        var upstream = getLinkedGuixuHost();
+        return upstream == null ? getMountedOutputMultiplier() : upstream.getRecipeOutputMultiplier();
     }
 
     public void invalidateMountedOutputMultiplier() {
         synchronized (outputMultiplierCache) {
             outputMultiplierCache.invalidate();
         }
+        var upstream = getLinkedGuixuHost();
+        if (upstream != null) upstream.invalidateMountedOutputMultiplier();
     }
 
     @Override
     public Object getOutputMultiplierSourceKey() {
-        return getPos();
+        var upstream = getLinkedGuixuHost();
+        return upstream == null ? getPos() : upstream.getOutputMultiplierSourceKey();
     }
 
     @Override
     public long getOutputMultiplierContribution() {
-        return getMountedOutputMultiplier();
+        var upstream = getLinkedGuixuHost();
+        return upstream == null ? getMountedOutputMultiplier() : upstream.getOutputMultiplierContribution();
     }
 
     static final class OutputMultiplierCache {
@@ -749,6 +784,11 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
     @Override
     public void addDisplayText(List<Component> textList) {
         if (isFormed()) {
+            addMyriadConflictDisplay(textList);
+            if (getLinkedGuixuHost() != null) {
+                textList.add(Component.translatable("gt_shanhai.machine.primordial_omega_engine.guixu_bonus",
+                        getRecipeOutputMultiplier()).withStyle(ChatFormatting.LIGHT_PURPLE));
+            }
             addEnergyDisplay(textList);
             addMachineModeDisplay(textList);
             addParallelDisplay(textList);
@@ -770,5 +810,12 @@ public class PrimordialOmegaEngineMachine extends CleanSelectableRecipeTypeSetMa
         }
         textList.add(Component.translatable("gt_shanhai.machine.primordial_omega_engine.name")
                 .withStyle(ChatFormatting.GOLD));
+    }
+
+    protected void addMyriadConflictDisplay(List<Component> textList) {
+        var upstream = this instanceof GuixuVisionCoreMachine guixu ? guixu : getLinkedGuixuHost();
+        if (upstream == null) return;
+        Component warning = upstream.getMyriadConflictWarning();
+        if (warning != null) textList.add(warning);
     }
 }

@@ -112,9 +112,11 @@ class PrimordialMyriadProliferationCoreTest {
     }
 
     @Test
-    void publicMultiplierEntryPointDelegatesToTheLazyRuntimeStateResolver() throws Exception {
+    void candidateMultiplierDelegatesToTheLazyRuntimeStateResolverAndEffectiveValueChecksSuppression() throws Exception {
         String method = extractBlock(Files.readString(CORE_SOURCE),
-                "public int getCurrentOutputMultiplier() {");
+                "public int getCandidateOutputMultiplier() {");
+        String effective = extractBlock(Files.readString(CORE_SOURCE), "public int getCurrentOutputMultiplier() {");
+        assertTrue(effective.contains("isMyriadSuppressed() ? 1 : getCandidateOutputMultiplier()"));
 
         assertEquals(1, countRegex(method, "\\breturn\\s+resolveOutputMultiplier\\s*\\("));
         assertEquals(1, countRegex(method, "\\bgetRecipeLogic\\s*\\("));

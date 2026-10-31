@@ -3,6 +3,8 @@ package com.dishanhai.gt_shanhai.common.machine.primordial.module.core;
 import com.dishanhai.gt_shanhai.api.machine.primordial.IPrimordialOutputMultiplierModule;
 import com.dishanhai.gt_shanhai.api.recipe.PrimordialMyriadRecipeTypes;
 import com.dishanhai.gt_shanhai.common.machine.primordial.PrimordialOmegaEngineModuleBase;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
+import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 
 import net.minecraft.ChatFormatting;
@@ -40,12 +42,50 @@ public class PrimordialMyriadProliferationCore extends PrimordialOmegaEngineModu
 
     @Override
     public int getCurrentOutputMultiplier() {
+        return isMyriadSuppressed() ? 1 : getCandidateOutputMultiplier();
+    }
+
+    /** 選舉讀取尚未停用歸零的階段值；不能呼叫 getCurrentOutputMultiplier()。 */
+    public int getCandidateOutputMultiplier() {
         PrimordialMyriadProliferationCoreLogic logic = getRecipeLogic();
         return resolveOutputMultiplier(
                 isFormed(),
                 this::isHostConnected,
                 logic::isOutputMultiplierActive,
                 logic::getActiveRecipeTypeId);
+    }
+
+    public boolean isMyriadSelectionCandidate() {
+        return isFormed() && !isInValid() && getLevel() != null && getLevel().hasChunkAt(getPos()) && isHostConnected();
+    }
+
+    private GuixuVisionCoreMachine.MyriadSelection linkedSelection() {
+        var host = getHost();
+        var guixu = host instanceof GuixuVisionCoreMachine current ? current
+                : host == null ? null : host.getLinkedGuixuHost();
+        return guixu == null ? null : guixu.getMyriadSelection();
+    }
+
+    public boolean isMyriadSuppressed() {
+        var selection = linkedSelection();
+        return selection != null && selection.source() != null && selection.source() != this;
+    }
+
+    public Component getMyriadConflictWarning() {
+        var selection = linkedSelection();
+        return selection != null && selection.source() != null && selection.source() != this
+                ? Component.translatable("gt_shanhai.machine.primordial_myriad_proliferation_core.conflict_disabled",
+                        selection.multiplier()).withStyle(ChatFormatting.RED) : null;
+    }
+
+    @Override
+    protected boolean canModuleWork() {
+        return !isMyriadSuppressed() && super.canModuleWork();
+    }
+
+    @Override
+    public boolean beforeWorking(GTRecipe recipe) {
+        return !isMyriadSuppressed() && super.beforeWorking(recipe);
     }
 
     static int resolveOutputMultiplier(boolean formed,
@@ -108,6 +148,14 @@ public class PrimordialMyriadProliferationCore extends PrimordialOmegaEngineModu
 
     @Override
     public void addDisplayText(List<Component> textList) {
+        Component warning = getMyriadConflictWarning();
+        if (warning != null) {
+            addHostStatusDisplay(textList);
+            textList.add(warning);
+            textList.add(Component.translatable("gt_shanhai.machine.primordial_myriad_proliferation_core.name")
+                    .withStyle(ChatFormatting.GOLD));
+            return;
+        }
         if (isFormed()) {
             int multiplier = getCurrentOutputMultiplier();
             addHostStatusDisplay(textList);

@@ -77,7 +77,7 @@ class GuixuArParallelTest {
         SnapshotModule() { super(null); }
         @Override public SnapshotLogic getRecipeLogic() { return logic; }
         @Override public long getRecipeLogicThreadMultiplier() { return 1L; }
-        public long getAvailableRecipeParallel() { return capacity; }
+        @Override public long getAvailableRecipeParallel() { return capacity; }
     }
 
     private static class SnapshotLogic extends com.dishanhai.gt_shanhai.common.machine.primordial.module.matter.PrimordialSupercriticalMatterGenerationCoreLogic {

@@ -194,6 +194,9 @@ class GuixuNebulaFieldTest {
         Class<?> nebula = Class.forName("com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuNebulaRenderer");
         nebula.getMethod("render", pose, float[].class, double.class, float.class, boolean.class, boolean.class)
                 .invoke(null, null, null, 0D, 1F, false, false);
+        nebula.getMethod("render", pose, float[].class, double.class, float.class, boolean.class, boolean.class,
+                        boolean.class, double.class)
+                .invoke(null, null, null, 0D, 1F, false, false, true, 5D);
         Class<?> stars = Class.forName("com.dishanhai.gt_shanhai.client.renderer.hostfx.GuixuStarRenderer");
         stars.getMethod("render", pose, float[].class, double.class, double.class,
                         float.class, float.class, float.class, boolean.class, boolean.class)

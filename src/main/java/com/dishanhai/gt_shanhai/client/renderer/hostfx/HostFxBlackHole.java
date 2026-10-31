@@ -13,6 +13,7 @@ import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleFrameStats;
 import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleLensMath;
 import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleLensRenderer;
 import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleTuning;
+import com.dishanhai.gt_shanhai.client.renderer.blackhole.BlackHoleSurfaceWaves;
 
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -212,15 +213,23 @@ public final class HostFxBlackHole {
             return 0;
         }
         final float r = Math.max(0.8F, surfaceR);
-        // ① 黑盘（不透明、写深度）
-        int quads = submit(poseStack, opaqueLayer(),
-                HostFxGeometry.holeDiscQuads(camLocalX, camLocalY, camLocalZ, r));
-        // ② 光子环 + 光晕 + ③ 吸积盘（加性、不写深度）
+        final double distance = Math.sqrt((double) camLocalX * camLocalX + (double) camLocalY * camLocalY
+                + (double) camLocalZ * camLocalZ);
+        final float projectedRadius = (float) (Math.abs(RenderSystem.getProjectionMatrix().m11())
+                * net.minecraft.client.Minecraft.getInstance().getWindow().getHeight() * 0.5 * r / Math.max(distance, r));
+        final float detail = (float) BlackHoleSurfaceWaves.detail(1.4 / Math.max(projectedRadius, 1));
+        // ① 先畫吸積盤；黑盤隨後遮住盤面的中心投影，與主 shader 的視界遮罩一致。
         final RenderType add = additiveLayer();
-        quads += submit(poseStack, add, HostFxGeometry.holeHaloQuads(camLocalX, camLocalY, camLocalZ, r));
-        quads += submit(poseStack, add, HostFxGeometry.holeDiskQuads(r, seconds));
+        int quads = submit(poseStack, add, HostFxGeometry.holeDiskQuads(r, seconds));
+        // ② 黑盤（不透明、寫深度）
+        quads += submit(poseStack, opaqueLayer(),
+                HostFxGeometry.holeDiscQuads(camLocalX, camLocalY, camLocalZ, r, seconds, detail));
+        // ③ 白色光子環、光暈與表面波峰（加性、不寫深度，共用一批）
+        final List<HostFxGeometry.Quad> halo = HostFxGeometry.holeHaloQuads(camLocalX, camLocalY, camLocalZ, r, seconds, detail);
+        halo.addAll(HostFxGeometry.holeSurfaceWaveQuads(camLocalX, camLocalY, camLocalZ, r, seconds, projectedRadius));
+        quads += submit(poseStack, add, halo);
         lastQuads = quads;
-        lastState = "on(RS=" + String.format(Locale.ROOT, "%.2f", r) + " 黑盘+光子环+光晕+吸积盘 "
+        lastState = "on(RS=" + String.format(Locale.ROOT, "%.2f", r) + " 黑盘+白边波浪+光子环+光晕+吸积盘 "
                 + quads + " quads)";
         return quads;
     }

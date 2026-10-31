@@ -188,15 +188,29 @@ public final class BlackHoleShaderProbe {
         // ⑥ 黑影 + 光子环 + 光晕
         //   fwidth 在 Java 侧取不到 ⇒ 用"1 像素对应的 bn 变化量"近似（报告 §7 已标注）
         final double aa = Math.max(pxDeltaBn(p, bh, rs, px, py), 1.0e-4D) * 1.25D;
-        final double shadowMask = 1.0D - smoothstep(B_CRIT - aa, B_CRIT + aa, bn);
+        final double surfaceDetail = BlackHoleSurfaceWaves.detail(aa / 1.25 / B_CRIT);
+        final double surfaceAngle = Math.atan2(py - p.holePxY(), px - p.holePxX() + 1e-6);
+        final double waveRadius = surfaceRadius(surfaceAngle, p.time(), surfaceDetail);
+        final double shadowMask = 1.0D - smoothstep(waveRadius - aa, waveRadius + aa, bn);
+        final double surfaceRho = bn / waveRadius;
+        final double phase = surfacePhase(surfaceRho, surfaceAngle, p.time());
+        final double angleX = Math.atan2(py - p.holePxY(), px + 1 - p.holePxX() + 1e-6);
+        final double angleY = Math.atan2(py + 1 - p.holePxY(), px - p.holePxX() + 1e-6);
+        final double phaseX = surfacePhase(bnAtPixel(p, px + 1, py)
+                / surfaceRadius(angleX, p.time(), surfaceDetail), angleX, p.time());
+        final double phaseY = surfacePhase(bnAtPixel(p, px, py + 1)
+                / surfaceRadius(angleY, p.time(), surfaceDetail), angleY, p.time());
+        final double width = Math.max(0.075, (Math.abs(phaseX - phase) + Math.abs(phaseY - phase)) * 0.55);
+        final double ripple = 0.80 * Math.exp(-sq(Math.sin(phase * 0.5) / width))
+                * surfaceDetail * shadowMask * BlackHoleSurfaceWaves.envelope(surfaceRho) * maskFade;
         final double ringWidth = Math.max(RING_WIDTH, aa);
-        final double ringCore = Math.exp(-sq((bn - B_CRIT) / ringWidth)) * RING_WIDTH / ringWidth;
-        final double ringHalo = Math.exp(-sq((bn - B_CRIT) / HALO_WIDTH)) * HALO_GAIN;
+        final double ringCore = Math.exp(-sq((bn - waveRadius) / ringWidth)) * RING_WIDTH / ringWidth;
+        final double ringHalo = Math.exp(-sq((bn - waveRadius) / HALO_WIDTH)) * HALO_GAIN;
         final double ring = (ringCore * RING_GAIN + ringHalo) * Math.max(p.ringGain(), 0.0D)
                 * maskFade * (1.0D - shadowMask);
-        r = r * (1.0D - shadowMask) + ring * 1.00D;
-        g = g * (1.0D - shadowMask) + ring * 0.88D;
-        bl = bl * (1.0D - shadowMask) + ring * 0.72D;
+        r = r * (1.0D - shadowMask) + ring + ripple;
+        g = g * (1.0D - shadowMask) + ring + ripple;
+        bl = bl * (1.0D - shadowMask) + ring + ripple;
 
         return new double[]{r, g, bl};
     }
@@ -275,7 +289,7 @@ public final class BlackHoleShaderProbe {
         final double[] dir = normalize(ndcX * p.tanHalfFov() * aspect, ndcY * p.tanHalfFov(), -1.0D);
         final double[] bh = {p.bhView()[0], p.bhView()[1], p.bhView()[2]};
         final double tca = dot(bh, dir);
-        final double b = Math.sqrt(Math.max(dot(bh, bh) - tca * tca, 0.0D));
+        final double b = impact(bh, dir);
         final double bn = b / Math.max(p.rs(), 1.0e-4D);
         final double alpha = deflectAngle(bn) * Math.max(p.strength(), 0.0D);
         final double[] perp = {bh[0] - dir[0] * tca, bh[1] - dir[1] * tca, bh[2] - dir[2] * tca};
@@ -391,7 +405,7 @@ public final class BlackHoleShaderProbe {
     private static boolean diskHits(Params p, double[] dir, double[] bh, double rs, double tca) {
         final double[] n = normalize(p.diskNormal()[0], p.diskNormal()[1], p.diskNormal()[2]);
         // 与 shade 里一样先弯折
-        final double bn = Math.sqrt(Math.max(dot(bh, bh) - tca * tca, 0.0D)) / rs;
+        final double bn = impact(bh, dir) / rs;
         final double alpha = deflectAngle(bn) * Math.max(p.strength(), 0.0D);
         final double[] perp = {bh[0] - dir[0] * tca, bh[1] - dir[1] * tca, bh[2] - dir[2] * tca};
         final double perpLen = len(perp);
@@ -503,6 +517,14 @@ public final class BlackHoleShaderProbe {
     private static double impact(double[] bh, double[] dir) {
         return Math.hypot(Math.hypot(bh[1] * dir[2] - bh[2] * dir[1],
                 bh[2] * dir[0] - bh[0] * dir[2]), bh[0] * dir[1] - bh[1] * dir[0]);
+    }
+
+    private static double surfaceRadius(double angle, double time, double detail) {
+        return B_CRIT * BlackHoleSurfaceWaves.radiusScale(angle, time, detail);
+    }
+
+    private static double surfacePhase(double radius, double angle, double time) {
+        return BlackHoleSurfaceWaves.phase(radius, angle, time);
     }
 
     private static double[] bentRay(Params p, double[] bh, double rs, double px, double py) {
