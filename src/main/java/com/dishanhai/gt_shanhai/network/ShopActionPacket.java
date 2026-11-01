@@ -162,7 +162,6 @@ public class ShopActionPacket {
             return;
         }
 
-        long remainingUsesBefore = entry.getRemainingUses();
         switch (pkt.action) {
             case BUY -> doBuy(player, entry, pkt);
             case SELL -> doSell(player, entry, pkt);
@@ -182,13 +181,6 @@ public class ShopActionPacket {
                         : Component.literal("§c[山海商店] 删除失败"));
             }
             default -> {}
-        }
-        if ((pkt.action == Action.BUY || pkt.action == Action.SELL) && remainingUsesBefore >= 0L) {
-            long remainingUses = entry.getRemainingUses();
-            if (remainingUses >= 0L && remainingUses < remainingUsesBefore) {
-                ShopCatalogStatePacket.broadcast(
-                        ShopConfig.snapshot().revision(), ShopConfig.keyOf(entry), remainingUses);
-            }
         }
     }
 
@@ -281,14 +273,15 @@ public class ShopActionPacket {
             sendResult(player, pkt, 0L, "含流体商品，需开启 AE 模式");
             return;
         }
-        if (!cheat && entry.isLimited() && entry.getRemainingUses() <= 0L) {
+        if (!cheat && entry.isLimited() && com.dishanhai.gt_shanhai.common.shop.ShopLimitSavedData.remaining(player, entry) <= 0L) {
+            WalletAccountAPI.sync(player);
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品限购次数已用完"));
             sendResult(player, pkt, 0L, "限购次数已用完");
             return;
         }
         // 交易前的剩余限购次数：若本次成交后限购归零且未买够 times，说明是"次数用尽"而非"余额不足"，
         // 消息要用这个数区分，见下方 limitExhausted 分支。
-        long remainingBeforeUses = entry.isLimited() ? entry.getRemainingUses() : -1L;
+        long remainingBeforeUses = com.dishanhai.gt_shanhai.common.shop.ShopLimitSavedData.remaining(player, entry);
         // 周期限购（每玩家独立计数，见 ShopPeriodLimiter）：与上面的永久总量是两套独立机制，同样先拦一次再记交易前剩余额度
         String periodKey = WalletAccountAPI.purchaseKey(entry.getGoodsId(), entry.getCategory());
         long remainingPeriodBefore = entry.isPeriodLimited()
@@ -376,7 +369,8 @@ public class ShopActionPacket {
         boolean rollCapped = entry.getRewardMode() != ShopEntry.RewardMode.NONE
                 && r.done() >= ShopPurchase.rewardRollCap() && times > r.done();
         // 本次成交把限购额度用完了（而不是余额不够），提示要说"次数用完"而不是"余额不足"，免得误导玩家去充值。
-        boolean limitExhausted = !cheat && entry.isLimited() && entry.getRemainingUses() <= 0L;
+        boolean limitExhausted = !cheat && entry.isLimited()
+                && com.dishanhai.gt_shanhai.common.shop.ShopLimitSavedData.remaining(player, entry) <= 0L;
         // 本次成交把周期限购额度用完了（不是永久总量、也不是余额不够），提示要单独区分，见 remainingPeriodBefore。
         boolean periodExhausted = !cheat && !limitExhausted && entry.isPeriodLimited()
                 && com.dishanhai.gt_shanhai.common.shop.ShopPeriodLimiter.remaining(player, entry, periodKey) <= 0L;
@@ -451,7 +445,8 @@ public class ShopActionPacket {
             sendResult(player, pkt, 0L, "该商品仅允许购买");
             return;
         }
-        if (entry.isLimited() && entry.getRemainingUses() <= 0L) {
+        if (entry.isLimited() && com.dishanhai.gt_shanhai.common.shop.ShopLimitSavedData.remaining(player, entry) <= 0L) {
+            WalletAccountAPI.sync(player);
             player.sendSystemMessage(Component.literal("§c[山海商店] 该商品限购次数已用完"));
             sendResult(player, pkt, 0L, "限购次数已用完");
             return;

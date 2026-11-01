@@ -742,18 +742,18 @@ public final class ShopConfig {
     }
 
     /**
-     * 限购总量剩余次数按存档隔离（见 {@link ShopLimitSavedData}）：从当前存档回填/初始化每个限购
-     * 商品的剩余次数——存档里已经记过账（这个存档消费过）就用存档的值覆盖 shop.json 解析出的值；
-     * 存档里没有记录（全新存档，或这个存档第一次见到这个 stableId）就拿 shop.json 里的配置值当
-     * 起始配额，顺带把它写进存档，后续这个存档就一直认自己的记录。须在 {@link #reload()} 之后、
+     * 從當前存檔回填／初始化每個商品的個人預設額度（見 {@link ShopLimitSavedData}），
+     * 個人交易只寫該玩家的餘額，不改此目錄預設值。須在 {@link #reload()} 之後、
      * 且世界已可用時呼叫（{@code ServerStartingEvent} / {@code /商店 reload}）。
      */
     public static synchronized void syncLimitsFromSave(net.minecraft.server.MinecraftServer server) {
         if (server == null) return;
         ShopLimitSavedData data = ShopLimitSavedData.get(server);
-        for (ShopEntry entry : snapshot().entries()) {
+        List<ShopEntry> entries = new ArrayList<>(snapshot().entries());
+        for (ShopEntry entry : entries) {
             data.applyTo(entry);
         }
+        publish(entries); // 回填後重建 payload，讓客戶端讀到此存檔的個人預設額度
     }
 
     /** 僅重置當前存檔，重新發布目錄版本讓客戶端清除已耗盡的快取；不寫 shop.json。 */
@@ -762,6 +762,7 @@ public final class ShopConfig {
         List<ShopEntry> entries = new ArrayList<>(getEntries());
         for (ShopEntry entry : entries) data.reset(entry);
         publish(entries);
+        for (var player : server.getPlayerList().getPlayers()) WalletAccountAPI.sync(player);
         return entries.size();
     }
 

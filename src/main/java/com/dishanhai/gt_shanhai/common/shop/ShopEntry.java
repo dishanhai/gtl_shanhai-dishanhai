@@ -583,7 +583,7 @@ public class ShopEntry {
         return description;
     }
 
-    /** 當前存檔剩餘可交易次數；-1 = 不限。 */
+    /** 當前存檔每位玩家的預設可交易次數；個人剩餘量由 ShopLimitSavedData 保存，-1 = 不限。 */
     public long getRemainingUses() {
         return remainingUses;
     }
@@ -603,7 +603,7 @@ public class ShopEntry {
         return remainingUses >= 0L;
     }
 
-    /** 把请求的交易次数夹到不超过剩余次数（不限商品原样返回）。 */
+    /** 目錄餘額快取的相容工具；實際結算須使用 ShopLimitSavedData.clamp(player, entry, times)。 */
     public long clampByUses(long times) {
         return remainingUses < 0L ? times : Math.min(times, remainingUses);
     }

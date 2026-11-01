@@ -7,6 +7,7 @@ import com.dishanhai.gt_shanhai.common.shop.ShopCost;
 import com.dishanhai.gt_shanhai.common.shop.ShopEditPermission;
 import com.dishanhai.gt_shanhai.common.shop.ShopEntry;
 import com.dishanhai.gt_shanhai.common.shop.ShopLimitSavedData;
+import com.dishanhai.gt_shanhai.common.shop.WalletAccountAPI;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -417,7 +418,14 @@ public class ShopEditPacket {
             com.dishanhai.gt_shanhai.common.shop.ShopSubmissionSavedData.get(player.getServer())
                     .clearKey("entry:" + entry.getStableId());
         }
-        if (ok) ShopLimitSavedData.get(player.getServer()).set(entry.getStableId(), entry.getRemainingUses());
+        if (ok) {
+            ShopLimitSavedData limits = ShopLimitSavedData.get(player.getServer());
+            limits.set(entry.getStableId(), entry.getRemainingUses());
+            if (pkt.saveUses != null) {
+                limits.resetPlayers(entry.getStableId());
+                for (var online : player.getServer().getPlayerList().getPlayers()) WalletAccountAPI.sync(online);
+            }
+        }
         player.sendSystemMessage(ok
                 ? Component.literal("§b[山海商店] §a已更新 §f" + entry.goodsDisplayName() + limitTip)
                 : Component.literal("§c[山海商店] 更新失败"));

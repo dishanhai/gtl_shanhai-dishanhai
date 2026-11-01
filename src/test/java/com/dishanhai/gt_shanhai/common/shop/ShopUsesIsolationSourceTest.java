@@ -30,6 +30,9 @@ class ShopUsesIsolationSourceTest {
         assertTrue(packet.contains("pkt.saveUses != null ? pkt.saveUses"));
         assertTrue(packet.contains("old != null ? old.getRemainingUses() : entry.getServerUses()"));
         assertFalse(packet.contains("if (ok && entry.isLimited())"));
+        assertTrue(packet.contains("if (pkt.saveUses != null)"));
+        assertTrue(packet.contains("limits.resetPlayers(entry.getStableId())"));
+        assertTrue(packet.contains("WalletAccountAPI.sync(online)"));
     }
 
     @Test
@@ -37,6 +40,17 @@ class ShopUsesIsolationSourceTest {
         String packet = source("network/ShopToggleHiddenPacket.java");
         assertTrue(packet.contains("old.getServerUses(), old.getDisplayIcons()"));
         assertTrue(packet.contains("updated.overrideRemainingUses(old.getRemainingUses())"));
+    }
+
+    @Test
+    void restoredSaveDefaultsArePublishedForTheClientFallback() throws Exception {
+        String config = source("common/shop/ShopConfig.java");
+        int sync = config.indexOf("public static synchronized void syncLimitsFromSave");
+        String body = config.substring(sync, config.indexOf("public static synchronized int resetSaveUses", sync));
+        int restore = body.indexOf("data.applyTo(entry)");
+        assertTrue(restore >= 0);
+        assertTrue(body.indexOf("publish(entries)") > restore,
+                "回填存檔個人預設額度後必須重建序列化目錄，避免客戶端沿用服務端基準");
     }
 
     @Test
@@ -53,6 +67,7 @@ class ShopUsesIsolationSourceTest {
         String body = config.substring(reset, config.indexOf("public static synchronized void reload()", reset));
         assertTrue(body.contains("data.reset(entry)"));
         assertTrue(body.contains("publish(entries)"));
+        assertTrue(body.contains("WalletAccountAPI.sync(player)"));
         assertFalse(body.contains("save();"));
     }
 }

@@ -598,7 +598,7 @@ public final class ShopPurchase {
             aff = aff.min(BigInteger.valueOf(available / in.count));
         }
         long affordable = aff.signum() <= 0 ? 0L : (aff.bitLength() < 63 ? aff.longValue() : Long.MAX_VALUE);
-        affordable = entry.clampByUses(affordable); // 限购商品：再夹到不超过剩余次数
+        affordable = ShopLimitSavedData.clamp(player, entry, affordable); // 永久額度按玩家隔離
         String periodKey = WalletAccountAPI.purchaseKey(entry.getGoodsId(), entry.getCategory());
         affordable = ShopPeriodLimiter.clamp(player, entry, periodKey, affordable); // 周期限购：再夹到不超过当前周期窗口剩余额度（每玩家独立）
         if (affordable <= 0L) return 0L;
@@ -646,11 +646,7 @@ public final class ShopPurchase {
             }
         }
 
-        if (entry.isLimited()) {
-            entry.consumeUses(affordable);
-            // 限购总量按存档隔离，见 ShopLimitSavedData——不再写回 shop.json（全局配置目录，会跨存档"继承"消耗）
-            ShopLimitSavedData.get(server).set(entry.getStableId(), entry.getRemainingUses());
-        }
+        ShopLimitSavedData.consume(player, entry, affordable);
         ShopPeriodLimiter.consume(player, entry, periodKey, affordable); // 周期限购：记账当前窗口已用量
         return affordable;
     }
@@ -978,7 +974,7 @@ public final class ShopPurchase {
         else if (key != null) ae = ShopAeNetwork.availableForPlayer(player, key);
         long held = (invPlusBackpack > Long.MAX_VALUE - ae) ? Long.MAX_VALUE : invPlusBackpack + ae;
         long sell = Math.min(times, held / per);
-        sell = entry.clampByUses(sell); // 限购商品：出售与购买共享同一剩余次数
+        sell = ShopLimitSavedData.clamp(player, entry, sell); // 買賣共用該玩家的永久額度
         String periodKey = WalletAccountAPI.purchaseKey(entry.getGoodsId(), entry.getCategory());
         sell = ShopPeriodLimiter.clamp(player, entry, periodKey, sell); // 周期限购：出售与购买共享同一周期窗口额度（每玩家独立）
         if (sell <= 0L) return 0L;
@@ -1008,11 +1004,7 @@ public final class ShopPurchase {
         for (java.util.Map.Entry<ResourceLocation, BigInteger> c : sellCost.coins.entrySet()) {
             WalletAccountAPI.addCurrency(server, uuid, c.getKey(), c.getValue().multiply(sellBig));
         }
-        if (entry.isLimited()) {
-            entry.consumeUses(sell);
-            // 限购总量按存档隔离，见 ShopLimitSavedData——不再写回 shop.json（全局配置目录，会跨存档"继承"消耗）
-            ShopLimitSavedData.get(server).set(entry.getStableId(), entry.getRemainingUses());
-        }
+        ShopLimitSavedData.consume(player, entry, sell);
         ShopPeriodLimiter.consume(player, entry, periodKey, sell); // 周期限购：记账当前窗口已用量
         return sell;
     }

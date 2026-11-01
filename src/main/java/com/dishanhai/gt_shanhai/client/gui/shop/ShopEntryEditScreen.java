@@ -854,6 +854,8 @@ public class ShopEntryEditScreen extends ScaledScreen {
         saveUsesBox.setBordered(true);
         saveUsesBox.setTextColor(0xFFFFFF);
         saveUsesBox.setHint(Component.literal("§8不限"));
+        saveUsesBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                "此存档每位玩家的永久额度，买卖共用；修改后重置该商品所有玩家的个人额度。留空为不限。")));
         saveUsesBox.setFilter(s -> s.isEmpty() || s.matches("\\d+"));
         saveUsesBox.setResponder(s -> saveUses = parseLimit(s));
         periodSecondsBox = new AnimatableEditBox(this.font, periodSecondsBoxX(), periodY(), PERIOD_SECONDS_W, 12, Component.literal("周期秒数"));

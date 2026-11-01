@@ -7,6 +7,8 @@ import com.dishanhai.gt_shanhai.client.gui.scaled.RepeatCurve;
 import com.dishanhai.gt_shanhai.client.gui.scaled.ScaledScreen;
 import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
 import com.dishanhai.gt_shanhai.client.gui.scaled.SpringTable;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
+import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
 import com.dishanhai.gt_shanhai.client.shop.ClientCostPreview;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopActionResults;
 import com.dishanhai.gt_shanhai.client.shop.ClientShopCart;
@@ -35,6 +37,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
@@ -290,22 +293,26 @@ public class ShopScreen extends ScaledScreen {
      * （不是瞬间消失，也走同一套滑出动画再摘除，见 tickFlash）；自然到期同样先滑出再摘除。
      */
     private static final class FlashMsg {
-        String text;
-        long expireAtMs;          // 队列里正常展示的到期时刻（leaving 阶段不再看这个，看 leaveDeadlineMs）
-        long leaveDeadlineMs;     // 滑出动画播完、可以彻底摘除的时刻，仅 leaving 阶段有意义
-        float fromSlot;           // 当前视觉槽位。改目标时从这里接着走，不跳回旧目标
-        int toSlot;               // 目标槽位：0=最新（贴底），数值越大越靠上
-        long slotChangedAtMs;
+        Component text;
+        long expireAtMs;
+        ShopNoticeMotion motion;
+        List<FormattedCharSequence> lines = List.of();
+        int measuredWidth;
+        int measuredHeight;
+        long pageStartedAtMs;
+        long leftAtMs;
+        int width;
+        int height = 22;
     }
 
     private static final java.util.List<FlashMsg> flashActive = new java.util.ArrayList<>();  // 当前占着槽位的（≤FLASH_MAX_VISIBLE 条）
     private static final java.util.List<FlashMsg> flashLeaving = new java.util.ArrayList<>();  // 正在滑出动画中的，播完即摘除
     private static final int FLASH_MAX_VISIBLE = 3;
     private static final long FLASH_DISPLAY_MS = 5000L;
-    private static final long FLASH_SLIDE_MS = GuiRenderUtil.MOTION_MS;
-    private static final int FLASH_ROW_H = 17;          // 每行高度（含 1px 行间隙）
-    /** 进场起点槽位。约 20px，第一帧就有约 4px 露在面板底缘内。 */
-    private static final float FLASH_ENTER_FROM = -1.18f;
+    private static final int FLASH_ROW_H = 26;
+    private static final float FLASH_ENTER_FROM = -0.55f;
+    private final ShopBalanceMotion balanceMotion = new ShopBalanceMotion();
+    private int balanceNoticeReserve = 96;
     /**
      * 按键按下：液态玻璃波从点击点向外扩。
      * 光靠高斯糊不动纯色面板，所以这条动效由三层叠成：
@@ -330,33 +337,28 @@ public class ShopScreen extends ScaledScreen {
             beginLeave(flashActive.remove(flashActive.size() - 1), now); // 挤开槽位最靠上（最旧）的一条
         }
         FlashMsg m = new FlashMsg();
-        m.text = msg.getString();
+        m.text = msg.copy();
         m.expireAtMs = now + FLASH_DISPLAY_MS;
-        m.fromSlot = FLASH_ENTER_FROM; // 从面板底缘升起，不从已经露出来的位置硬切
-        m.toSlot = 0;
-        m.slotChangedAtMs = now;
+        m.motion = new ShopNoticeMotion(FLASH_ENTER_FROM * FLASH_ROW_H, now);
         flashActive.add(0, m);
         resyncFlashSlots(now);
     }
 
     /** 消息离开 active 队列（自然到期或被挤）：改往上滑出可见区域，进 leaving 表播完动画再摘除。 */
     private static void beginLeave(FlashMsg m, long now) {
-        m.fromSlot = flashVisualSlot(m, now);
-        m.toSlot = FLASH_MAX_VISIBLE;
-        m.slotChangedAtMs = now;
-        m.leaveDeadlineMs = now + FLASH_SLIDE_MS;
+        m.leftAtMs = now;
+        m.motion.leave(now);
+        if (flashLeaving.size() >= FLASH_MAX_VISIBLE) flashLeaving.remove(0);
         flashLeaving.add(m);
     }
 
     /** 改目标槽位时留下当前视觉位置，不把半路的消息拉回旧终点。 */
     private static void resyncFlashSlots(long now) {
+        float offset = 0f;
         for (int i = 0; i < flashActive.size(); i++) {
             FlashMsg m = flashActive.get(i);
-            if (m.toSlot != i) {
-                m.fromSlot = flashVisualSlot(m, now);
-                m.toSlot = i;
-                m.slotChangedAtMs = now;
-            }
+            m.motion.moveTo(offset, now);
+            offset += m.height + 4;
         }
     }
 
@@ -373,12 +375,7 @@ public class ShopScreen extends ScaledScreen {
             }
         }
         if (changed) resyncFlashSlots(now);
-        flashLeaving.removeIf(m -> now > m.leaveDeadlineMs);
-    }
-
-    private static float flashVisualSlot(FlashMsg m, long now) {
-        float t = FLASH_SLIDE_MS <= 0 ? 1f : Math.min(1f, (now - m.slotChangedAtMs) / (float) FLASH_SLIDE_MS);
-        return m.fromSlot + (m.toSlot - m.fromSlot) * GuiRenderUtil.easeOut(t);
+        flashLeaving.removeIf(m -> m.motion.finished(now));
     }
 
     // 删除误触防护：需在窗口期内对同一条目再点一次「删除此商品」才真正执行；实例级=只跟当前这次打开的界面走
@@ -639,6 +636,7 @@ public class ShopScreen extends ScaledScreen {
 
     public ShopScreen(boolean canEdit, boolean catalogEditUnlocked) {
         super(Component.literal("山海商店"));
+        ClientWalletAccount.drainBalanceChanges(System.currentTimeMillis());
         this.canEdit = canEdit;
         this.catalogEditUnlocked = catalogEditUnlocked;
         this.targetWidth = TARGET_W;
@@ -1945,33 +1943,176 @@ public class ShopScreen extends ScaledScreen {
         return GuiMotion.panelScale(openMotion.value());
     }
 
-    /** 提示从面板底缘升起。裁在面板内，动画中用小数 Y，落位后回到整数。 */
+    private record NoticeRow(float x, float y, int width, int height, float alpha, int accent,
+                             List<FormattedCharSequence> lines) {}
+
+    /** 山海：按換行後的真實高度重排，文字在所有背景模糊完成後才畫。 */
     private void drawFlashStack(GuiGraphics g, long now) {
+        List<NoticeRow> rows = balanceNoticeRows(now);
+        int maxWidth = Math.max(40, panelWidth - 40);
+        int maxHeight = ShopNoticeLayout.rowBudget(panelHeight, FLASH_MAX_VISIBLE, balanceNoticeReserve);
+        for (FlashMsg m : flashActive) measureFlash(m, maxWidth, maxHeight, now);
+        for (FlashMsg m : flashLeaving) measureFlash(m, maxWidth, maxHeight, now);
+        resyncFlashSlots(now);
+        int bottom = top + panelHeight - 10;
+        for (FlashMsg m : flashLeaving) rows.add(drawFlashRow(m, now, bottom));
+        for (FlashMsg m : flashActive) rows.add(drawFlashRow(m, now, bottom));
+        if (rows.isEmpty()) return;
         enableGridScissor(g, left + 2, top + 2, left + panelWidth - 2, top + panelHeight);
         try {
-            int baseY = top + panelHeight - 24;
-            for (FlashMsg m : flashLeaving) drawFlashRow(g, m, now, baseY);
-            for (FlashMsg m : flashActive) drawFlashRow(g, m, now, baseY);
+            drawNoticeRows(g, rows);
         } finally {
             g.disableScissor();
         }
     }
 
-    /** 画一条消息横幅：按其动画槽位算出当前 Y，宽度随文字自适应，样式跟原先的单槽横幅一致。 */
-    private void drawFlashRow(GuiGraphics g, FlashMsg m, long now, int baseY) {
-        float yf = baseY - flashVisualSlot(m, now) * FLASH_ROW_H;
-        float drawY = Math.abs(yf - Math.round(yf)) < 0.05f ? Math.round(yf) : yf;
-        int w = this.font.width(m.text);
-        int bannerW = Math.min(panelWidth - 12, w + 16);
-        int bannerX = left + (panelWidth - bannerW) / 2;
-        g.pose().pushPose();
-        try {
-            g.pose().translate(bannerX, drawY, 0);
-            g.fill(0, 0, bannerW, 16, 0xE0101010);   // 半透明黑底
-            g.fill(0, 0, bannerW, 1, 0xFF00C0C0);    // 顶部青线
-            g.drawCenteredString(this.font, m.text, bannerW / 2, 4, 0xFFFFFF);
-        } finally {
-            g.pose().popPose();
+    private void measureFlash(FlashMsg m, int maxWidth, int maxHeight, long now) {
+        if (m.measuredWidth == maxWidth && m.measuredHeight == maxHeight) return;
+        m.measuredWidth = maxWidth;
+        m.measuredHeight = maxHeight;
+        m.pageStartedAtMs = now;
+        m.lines = this.font.split(m.text, maxWidth - 16);
+        m.width = Math.min(maxWidth, Math.max(32, widestNoticeLine(m.lines) + 16));
+        var page = ShopNoticeLayout.page(m.lines.size(), maxHeight, this.font.lineHeight, 0L);
+        if (page.count() > 1) {
+            m.width = Math.min(maxWidth, Math.max(m.width, this.font.width(page.count() + " / " + page.count()) + 16));
+        }
+        m.height = page.height();
+        m.expireAtMs = Math.max(m.expireAtMs, now + page.durationMs());
+    }
+
+    private int widestNoticeLine(List<FormattedCharSequence> lines) {
+        int width = 0;
+        for (FormattedCharSequence line : lines) width = Math.max(width, this.font.width(line));
+        return width;
+    }
+
+    private NoticeRow drawFlashRow(FlashMsg m, long now, int bottom) {
+        boolean reduced = ClientShopUiSettings.reduceMotion();
+        var page = ShopNoticeLayout.page(m.lines.size(), m.measuredHeight, this.font.lineHeight,
+                (m.leftAtMs > 0L ? m.leftAtMs : now) - m.pageStartedAtMs);
+        List<FormattedCharSequence> lines = new ArrayList<>(m.lines.subList(page.from(), page.to()));
+        if (page.count() > 1) {
+            lines.add(Component.literal((page.index() + 1) + " / " + page.count())
+                    .withStyle(s -> s.withColor(0x91ADB8)).getVisualOrderText());
+        }
+        return new NoticeRow(left + (panelWidth - m.width) / 2f,
+                bottom - m.height - m.motion.offset(now, reduced), m.width, m.height,
+                m.motion.opacity(now, reduced), 0x79E2E3, lines);
+    }
+
+    /** 每個槽位依幣種定位；排序改變、餘額歸零或欄位放不下時仍顯示完整幣名。 */
+    private List<NoticeRow> balanceNoticeRows(long now) {
+        balanceMotion.addAll(ClientWalletAccount.drainBalanceChanges(now), now);
+        var views = balanceMotion.visible(now, ClientShopUiSettings.reduceMotion());
+        if (views.isEmpty()) {
+            balanceNoticeReserve = 96;
+            return new ArrayList<>();
+        }
+        int maxWidth = Math.min(260, panelWidth - 32);
+        List<List<FormattedCharSequence>> wrapped = new ArrayList<>();
+        int laneHeight = 22;
+        for (var view : views) {
+            String label = WalletAccountAPI.isSpark(view.currency()) ? "★ 星火" : currencyStack(view.currency()).getHoverName().getString();
+            int accent = view.amount().signum() > 0 ? 0x79EDB6 : 0xFFA69B;
+            Component text = Component.literal(label + " ").withStyle(s -> s.withColor(0xBDD1DB))
+                    .append(Component.literal(view.text()).withStyle(s -> s.withColor(accent)));
+            var lines = this.font.split(text, maxWidth - 16);
+            wrapped.add(lines);
+            laneHeight = Math.max(laneHeight, lines.size() * this.font.lineHeight + 12);
+        }
+        // 同一輪保留最大需求，飄字上浮或先後退場不會讓底部提示每幀重排。
+        balanceNoticeReserve = Math.max(balanceNoticeReserve,
+                balanceY() - top + balanceHeight() + 4 + 3 * (laneHeight + 4) + 12);
+        List<NoticeRow> rows = new ArrayList<>();
+        var currencies = currencyBarList();
+        int barX = left + 20;
+        int cellStart = barX + this.font.width("余额:") + 8;
+        int maxCells = Math.max(1, (panelWidth - 40 - (cellStart - barX)) / 66);
+        for (int i = 0; i < views.size(); i++) {
+            var view = views.get(i);
+            var lines = wrapped.get(i);
+            int width = Math.min(maxWidth, Math.max(32, widestNoticeLine(lines) + 16));
+            int anchorX = cellStart;
+            for (int j = 0; j < currencies.size() && j < maxCells; j++) {
+                if (currencies.get(j).getKey().equals(view.currency())) {
+                    anchorX = cellStart + j * 66;
+                    break;
+                }
+            }
+            float x = Math.max(left + 12, Math.min(anchorX - 4, left + panelWidth - width - 12));
+            float y = balanceY() + balanceHeight() + 4
+                    + balanceMotion.laneOffset(view.lane(), laneHeight, now, ClientShopUiSettings.reduceMotion()) - view.rise();
+            rows.add(new NoticeRow(x, y, width, lines.size() * this.font.lineHeight + 12,
+                    view.opacity(), view.amount().signum() > 0 ? 0x79EDB6 : 0xFFA69B, lines));
+        }
+        return rows;
+    }
+
+    /** 分兩遍：後一張玻璃不會把前一張提示的文字吸入模糊。 */
+    private void drawNoticeRows(GuiGraphics g, List<NoticeRow> rows) {
+        for (NoticeRow row : rows) {
+            if (row.alpha() <= 0.02f) continue;
+            g.pose().pushPose();
+            try {
+                noticePose(g, row);
+                if (!ClientShopUiSettings.reduceMotion()) {
+                    GlassBlur.backdrop(g, new GuiRect(3, 3, row.width() - 6, row.height() - 6),
+                            row.alpha() * 0.85f, ShopGlassStyle.BACKDROP, 7f);
+                }
+                fillNoticeRound(g, -2, 2, row.width() + 4, row.height() + 3, noticeColor(0x16000000, row.alpha()));
+                fillNoticeRound(g, -1, 1, row.width() + 2, row.height() + 1, noticeColor(0x2C000000, row.alpha()));
+                fillNoticeRound(g, 0, 0, row.width(), row.height(), noticeColor(0x80000000 | row.accent(), row.alpha()));
+                fillNoticeRound(g, 1, 1, row.width() - 2, row.height() - 2, noticeColor(0xC010202D, row.alpha()));
+                g.fillGradient(5, 1, row.width() - 5, row.height() / 2,
+                        noticeColor(0x208EE9F0, row.alpha()), noticeColor(0x008EE9F0, row.alpha()));
+                g.fill(5, 1, row.width() - 5, 2, noticeColor(0x65000000 | row.accent(), row.alpha()));
+                g.flush();
+            } finally {
+                g.pose().popPose();
+            }
+        }
+        for (NoticeRow row : rows) {
+            if (row.alpha() <= 0.02f) continue;
+            g.pose().pushPose();
+            try {
+                noticePose(g, row);
+                // 背景的 fill 與 Font 使用不同批次；文字抬一層，並在還原 pose 前提交。
+                g.pose().translate(0f, 0f, 1f);
+                int y = 6;
+                for (FormattedCharSequence line : row.lines()) {
+                    g.drawString(this.font, line, (row.width() - this.font.width(line)) / 2,
+                            y, noticeColor(0xFFFFFFFF, row.alpha()), true);
+                    y += this.font.lineHeight;
+                }
+                g.flush();
+            } finally {
+                g.pose().popPose();
+            }
+        }
+    }
+
+    private void noticePose(GuiGraphics g, NoticeRow row) {
+        g.pose().translate(row.x(), row.y(), 0f);
+        float scale = ClientShopUiSettings.reduceMotion() ? 1f : 0.985f + 0.015f * row.alpha();
+        g.pose().translate(row.width() / 2f, row.height() / 2f, 0f);
+        g.pose().scale(scale, scale, 1f);
+        g.pose().translate(-row.width() / 2f, -row.height() / 2f, 0f);
+    }
+
+    private static int noticeColor(int argb, float alpha) {
+        return (Math.round((argb >>> 24) * GuiMotion.clamp01(alpha)) << 24) | (argb & 0xFFFFFF);
+    }
+
+    /** 五像素圓角；不新增材質、著色器或全螢幕渲染目標。 */
+    private static void fillNoticeRound(GuiGraphics g, int x, int y, int w, int h, int color) {
+        int radius = Math.min(5, Math.min(w, h) / 2);
+        g.fill(x, y + radius, x + w, y + h - radius, color);
+        for (int row = 0; row < radius; row++) {
+            float dy = radius - row - 0.5f;
+            int inset = (int) Math.ceil(radius - Math.sqrt(radius * radius - dy * dy));
+            g.fill(x + inset, y + row, x + w - inset, y + row + 1, color);
+            g.fill(x + inset, y + h - row - 1, x + w - inset, y + h - row, color);
         }
     }
 
@@ -2005,19 +2146,15 @@ public class ShopScreen extends ScaledScreen {
     private void drawScaledTopLayer(GuiGraphics g, int smx, int smy) {
         long now = System.currentTimeMillis();
         tickFlash(now);
-        boolean banners = !flashActive.isEmpty() || !flashLeaving.isEmpty();
         ItemStack dragIcon = dragCardEntryKey != -1L && dragCardMoving && dragCardEntry != null
                 ? dragCardEntry.displayGoodsStack() : ItemStack.EMPTY;
         g.pose().pushPose();
         try {
             g.pose().translate(this.offsetX, this.offsetY, TOP_LAYER_Z);
             g.pose().scale(this.guiScale, this.guiScale, 1.0f);
-            if (banners) {
-                // 物品图标走缓冲渲染层，和 fill()/drawString() 不在同一批次；先 flush，免得图标晚提交盖住横幅文字
-                // （同 ShopEntryEditScreen 描述展开编写大图层的穿模成因，见其 renderScaledBackground 注释）。
-                g.flush();
-                drawFlashStack(g, now);
-            }
+            // 餘額與底部提示共用兩遍繪製，先完成所有玻璃，再畫所有文字。
+            g.flush();
+            drawFlashStack(g, now);
             if (!modalLayerOpen()) drawUndoButtons(g, smx, smy);
             // 跟随鼠标的浮动图标画在 scissor 外，避免拖出网格边界被裁掉；放在上层，不会被加载格的模糊糊掉。
             if (!dragIcon.isEmpty()) g.renderItem(dragIcon, (int) dragCardMx - 8, (int) dragCardMy - 8);
@@ -3759,7 +3896,8 @@ public class ShopScreen extends ScaledScreen {
                 ? "§7组合商品 §f" + selected.getGoodsList().size() + " §7种"
                 : "§7每份 §f" + selected.getGoodsCount() + (selected.isPrimaryGoodsFluid() ? " §7mB" : " §7个");
         if (selected.isLimited()) {
-            countLine += " §7剩§d" + formatBig(java.math.BigInteger.valueOf(selected.getRemainingUses())) + "§7次";
+            countLine += !ClientWalletAccount.isSynced() ? " §7个人额度同步中…"
+                    : " §7个人剩§d" + formatBig(java.math.BigInteger.valueOf(ClientWalletAccount.getRemainingUses(selected))) + "§7次";
         }
         g.drawString(this.font, GuiRenderUtil.trimText(this.font, countLine, dx + dw - 6 - textX), textX, dy + 24, GRAY, true);
 
@@ -4502,6 +4640,8 @@ public class ShopScreen extends ScaledScreen {
     @Override
     public void removed() {
         tooltipMotion.reset();
+        balanceMotion.clear();
+        balanceNoticeReserve = 96;
         cancelPendingGuide();
         if (ClientShopUiSettings.rememberShopView()) {
             ClientShopUiSettings.setShopView(currentSearch(), currentStableId());
@@ -5387,7 +5527,9 @@ public class ShopScreen extends ScaledScreen {
      * 撤销删除/撤销排序两个悬浮按钮都锚定在这块预留区域的正上方。
      */
     private int flashStackTopY() {
-        return top + panelHeight - 24 - FLASH_ROW_H * FLASH_MAX_VISIBLE;
+        int height = 0;
+        for (FlashMsg m : flashActive) height += m.height + 4;
+        return top + panelHeight - 10 - Math.max(FLASH_ROW_H * FLASH_MAX_VISIBLE, height);
     }
 
     /** 撤销删除按钮的世界坐标（缩放后坐标系）：渲染和点击各调一次，保证坐标算法唯一，不重复算两遍。 */
@@ -7240,7 +7382,8 @@ public class ShopScreen extends ScaledScreen {
             } else {
                 lines.add(Component.literal("§7出售回收: §e" + costInline(e.getEffectiveCost(ShopMembership.discountPercentForTier(ClientWalletAccount.getMemberTier())).scaledTo(ShopPurchase.sellRatioPercent()))));
             }
-            if (e.isLimited()) lines.add(Component.literal("§7限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(e.getRemainingUses())) + " §7次"));
+            if (e.isLimited()) lines.add(Component.literal(!ClientWalletAccount.isSynced() ? "§7个人额度同步中…"
+                    : "§7个人限购剩余 §d" + formatBig(java.math.BigInteger.valueOf(ClientWalletAccount.getRemainingUses(e))) + " §7次"));
             if (e.isPeriodLimited()) {
                 lines.add(Component.literal("§7周期限购: 每 " + formatDuration(e.getPeriodTicks() / 20L)
                         + " 秒最多 " + formatBig(java.math.BigInteger.valueOf(e.getPeriodLimit())) + " 次"));

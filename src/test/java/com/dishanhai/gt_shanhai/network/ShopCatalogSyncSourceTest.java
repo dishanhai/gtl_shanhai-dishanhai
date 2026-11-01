@@ -24,7 +24,7 @@ class ShopCatalogSyncSourceTest {
                 () -> assertTrue(state > manifest),
                 () -> assertTrue(registration(network, manifest).contains("NetworkDirection.PLAY_TO_CLIENT")),
                 () -> assertTrue(registration(network, state).contains("NetworkDirection.PLAY_TO_CLIENT")),
-                () -> assertTrue(network.contains("PROTOCOL_VERSION = \"5\"")));
+                () -> assertTrue(network.contains("PROTOCOL_VERSION = \"13\"")));
     }
 
     @Test
@@ -46,7 +46,7 @@ class ShopCatalogSyncSourceTest {
         int editReply = edit.indexOf("ShopCatalogManifestPacket.sendLatestIfAllowed(", editStale);
         int editReturn = edit.indexOf("return;", editReply);
         int editAdd = edit.indexOf("ShopConfig.addEntry(entry)");
-        int editReplace = edit.indexOf("ShopConfig.replaceEntry(old, entry)");
+        int editReplace = edit.indexOf("ShopConfig.replaceEntry(old, entry, pkt.pushToMaster)");
 
         assertAll(
                 () -> assertTrue(manifest.contains("new WeakHashMap<")),
@@ -94,7 +94,7 @@ class ShopCatalogSyncSourceTest {
     }
 
     @Test
-    void permanentStateBroadcastIsSeparateFromStructuralAndPeriodicRefresh() throws Exception {
+    void personalPermanentBalanceUsesWalletSyncInsteadOfCatalogBroadcast() throws Exception {
         String action = source("network/ShopActionPacket.java");
         String edit = source("network/ShopEditPacket.java");
         String refresh = source("network/ShopRefreshPacket.java");
@@ -102,18 +102,18 @@ class ShopCatalogSyncSourceTest {
         String client = source("client/shop/ClientShopCatalog.java");
 
         assertAll(
-                () -> assertTrue(action.contains("long remainingUsesBefore = entry.getRemainingUses()")),
-                () -> assertTrue(action.contains("ShopCatalogStatePacket.broadcast(")),
-                () -> assertTrue(action.contains("ShopConfig.keyOf(entry)")),
+                () -> assertTrue(action.contains("ShopLimitSavedData.remaining(player, entry)")),
+                () -> assertFalse(action.contains("ShopCatalogStatePacket.broadcast(")),
+                () -> assertTrue(action.contains("WalletAccountAPI.sync(player)")),
                 () -> assertFalse(action.contains("ShopRefreshPacket.sendTo")),
                 () -> assertFalse(edit.contains("ShopRefreshPacket.sendTo")),
                 () -> assertTrue(refresh.contains("instanceof com.dishanhai.gt_shanhai.client.gui.shop.ExchangeScreen")),
                 () -> assertFalse(refresh.contains("instanceof com.dishanhai.gt_shanhai.client.gui.shop.ShopScreen")),
                 () -> assertTrue(wallet.contains("purchaseCounts")),
                 () -> assertTrue(wallet.contains("periodAnchors")),
-                () -> assertFalse(wallet.contains("remainingUses")),
+                () -> assertTrue(wallet.contains("personalRemainingUses")),
                 () -> assertTrue(client.contains("STATE.applyRemainingUses")),
-                () -> assertTrue(client.contains("entry.consumeUses(current - target)")),
+                () -> assertTrue(client.contains("entry.overrideRemainingUses(target)")),
                 () -> assertTrue(client.contains("STATE.remainingUses(payload.entryKey())")));
     }
 
