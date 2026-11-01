@@ -35,6 +35,8 @@ import com.lowdragmc.lowdraglib.syncdata.annotation.LazyManaged;
 import com.lowdragmc.lowdraglib.syncdata.annotation.Persisted;
 import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 import com.mojang.logging.LogUtils;
+import com.shanhai.common.locate.ShanhaiLocateCore;
+import com.shanhai.common.locate.ShanhaiLocateRegistry;
 import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.ints.Int2ReferenceMap;
 import it.unimi.dsi.fastutil.ints.Int2ReferenceOpenHashMap;
@@ -476,6 +478,13 @@ public class SuperWildcardPatternBufferPartMachine extends MEPatternBufferPartMa
     @Override
     public void onLoad() {
         super.onLoad();
+        // 🆕（合成状态 Shift+右键定位）把自己报名进「我们自己的样板 part」弱表。
+        //    ⚠️ 只在 onLoad/onUnload 维护 —— GT 的 MetaMachineBlockEntity 把
+        //    BlockEntity#clearRemoved / #setRemoved 直连到 MetaMachine.onLoad/onUnload
+        //    （javap：m_6339_ / m_7651_ 偏移 8 各一条 invokevirtual），
+        //    而区块卸载走 LevelChunk#clearAllBlockEntities → setRemoved ⇒ 放置/挖掉/卸载全覆盖。
+        //    客户端那份由注册表自己剔掉（register 里判 isRemote），这里不做分支。
+        ShanhaiLocateRegistry.register(this, ShanhaiLocateCore.KIND_SUPER_WILDCARD);
         if (this.getLevel() instanceof ServerLevel serverLevel) {
             serverLevel.getServer().execute(() -> {
                 this.refreshPatterns(true);
@@ -486,6 +495,20 @@ public class SuperWildcardPatternBufferPartMachine extends MEPatternBufferPartMa
             //    这是上游 MEPatternBufferPartMachine#onLoad 的同款接线，见本方法注释。
             this.shanhaiWireCatalystCallbacks();
         }
+    }
+
+    /**
+     * 卸载时把自己从「我们的样板 part」弱表里注销（定位用；见 {@link ShanhaiLocateRegistry} 类注释 §2）。
+     *
+     * <p>🆕（合成状态 Shift+右键定位）三条触发路径全覆盖：挖掉 / 区块卸载 / 换机器
+     * —— 前两条由 GT 的 {@code MetaMachineBlockEntity#m_7651_()}（= {@code setRemoved}）直连到
+     * {@code MetaMachine.onUnload()}，第三条就算漏了，读表时 {@code isLive()} 那条
+     * "位置上的 BE 还是不是这一台"也会把它剔掉。
+     */
+    @Override
+    public void onUnload() {
+        ShanhaiLocateRegistry.unregister(this);
+        super.onUnload();
     }
 
     /**

@@ -2,7 +2,6 @@ package com.shanhai.common.reality;
 
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
-import com.lowdragmc.lowdraglib.gui.widget.TextFieldWidget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 import com.shanhai.item.RealityShellItem;
 
@@ -29,6 +28,17 @@ import java.util.List;
  * <h2>🔴 与文本框相关的既有教训（2026-10-17 实锤两次）</h2>
  * LDLib 文本框的 {@code textResponder} <b>不一定在客户端这份上被调</b> ⇒ 这里<b>一律在用的那一刻</b>
  * 从各控件 {@code getCurrentString()} 现取，不依赖回调。
+ *
+ * <h2>🆕 2026-11-01：颜色/样式选择器（用户原话：「我想办法让它可以打 §f…你加一个特效选择器，
+ * 像 ftb 任务一样，可以快捷选择输入」）</h2>
+ * 这里原来只有 10 个行框 —— <b>§ 根本打不进去</b>（原版 {@code SharedConstants} 把它当非法聊天字符，
+ * 手敲和粘贴两条路都被拦）。现在补两条：
+ * <ul>
+ *   <li>行框换成 {@link ShanhaiTokenField}：能把 token <b>插到光标处</b>（走 {@code setValue}，§ 存活）；</li>
+ *   <li>下方两排共 39 个按钮（{@link ShanhaiTokenPicker}）：16 色 ＋ 6 格式 ＋ 16 山海样式 ＋ {@code &r}。</li>
+ * </ul>
+ * 版面：10 个行框（y=36..214，宽 250）<b>一个像素没动</b>；按钮带 y=240..274；「接受/取消」从 y=268 下移到
+ * y=278（278..296）；原来 y=244 的「共 N 行」并进第 1 行说明。
  */
 public final class ShanhaiCreativeLoreEditor extends WidgetGroup {
 
@@ -55,19 +65,41 @@ public final class ShanhaiCreativeLoreEditor extends WidgetGroup {
     }
 
     private final Target target;
-    private final TextFieldWidget[] fields = new TextFieldWidget[PAGE];
+    private final ShanhaiTokenField[] fields = new ShanhaiTokenField[PAGE];
     private final LabelWidget[] labels = new LabelWidget[PAGE];
     private final ShanhaiCreativeWidgets.TextButton[] channelButtons =
             new ShanhaiCreativeWidgets.TextButton[PAGE];
+
+    /**
+     * 🔴 插入目标 = <b>当前有焦点的那个行框</b>；没焦点时 = <b>最后点过的那个框</b>（用户 2026-11-01 的要求）。
+     *
+     * <p>为什么必须有这个字段：点一下右侧的选择器按钮时，LDLib 可能已经把焦点从行框上拿走
+     * （{@code Widget#setFocus} 的执行路径见 {@code ModularUIGuiContainer.lastFocus}）
+     * ⇒ 那时"哪个框有焦点"是问不出答案的，只能记住"最后点过哪个"。
+     * 写入面：{@link ShanhaiTokenField} 在 {@code mouseClicked}/{@code onFocusChanged} 里回调回来。
+     */
+    private ShanhaiTokenField lastFocused;
 
     /** 真正的数据：每行的文本与频道（行数不限）。 */
     private final List<String> lines = new ArrayList<>();
     private final List<Integer> channel = new ArrayList<>();
     private int page = 0;
 
-    /** 页码与"共 N 行" —— 必须每次动作后 setText 现写（supplier 懒取不刷新）。 */
+    /**
+     * 第 1 行的说明 —— 🔴 <b>动态</b>（行数/带条件的行数都随模型变），必须每次 {@code loadPage} 现写。
+     *
+     * <p>2026-11-01：原来 y=244 那个「共 N 行」标签被<b>并进这一行</b>（它的位置让给了选择器的
+     * 「原版格式」组标题）。为什么没并进页数标签：页数标签在 x=286，右边只剩 48px，
+     * 塞不下「共 N 行 · 带条件 M」。
+     */
+    private LabelWidget titleLabel;
+
+    /** 页码 —— 必须每次动作后 setText 现写（supplier 懒取不刷新）。 */
     private LabelWidget pageLabel;
-    private LabelWidget countLabel;
+
+    /** 2026-11-01：下方的颜色/样式选择器（39 个按钮 ＋ 两行小字，坐标见 {@code ShanhaiTokenLibrary.CHIPS}）。 */
+    private ShanhaiTokenPicker tokenPicker;
+
 
     /**
      * 既有入口（「新增」页）：<b>行为与 2026-10-17 之前完全一致</b> —— 读 {@code panel.editLore}、
@@ -93,17 +125,22 @@ public final class ShanhaiCreativeLoreEditor extends WidgetGroup {
         this.target = target;
         this.setBackground(GuiTextures.BACKGROUND);
 
-        this.addWidget(new LabelWidget(6, 6, "§f编辑提示 §7（每行一格；行数不限，翻页看更多）"));
-        this.addWidget(new LabelWidget(6, 18, "§8右边按钮切「普 / Shift / Ctrl」；总长上限 "
-                + ShanhaiRealityItemTable.MAX_LORE_CHARS + " 字"));
+        // 🔴 第 1 行是【动态】的（行数/带条件行数/每行上限都在这里）——LDLib 的 LabelWidget
+        //    默认只在构造时取一次文本，所以一律在 loadPage() 里 setText 现写。
+        this.titleLabel = new LabelWidget(6, 6, "§f编辑提示 §7· 共 0 行 · 每行 ≤ "
+                + ShanhaiRealityItemTable.MAX_LORE_CHARS + " 字");
+        this.addWidget(this.titleLabel);
+        // ⚠️ y=18 / y=27 两行小字由选择器自己铺（「同一行只能选一套」＋ 状态行），见 ShanhaiTokenPicker。
 
         for (int i = 0; i < PAGE; i++) {
             final int row = i;
             this.labels[i] = new LabelWidget(6, 38 + i * 18, "§7行 1");
             this.addWidget(this.labels[i]);
-            this.fields[i] = new TextFieldWidget(40, 36 + i * 18, 250, 16, () -> "", value -> {
+            // 🔴 2026-11-01：从 TextFieldWidget 换成 ShanhaiTokenField（多了"插到光标处"的能力）。
+            //    宽度 250 一个像素没动（这是任务书硬约束：选择器不许挤压行框）。
+            this.fields[i] = new ShanhaiTokenField(40, 36 + i * 18, 250, 16, () -> "", value -> {
                 // 回调照留（有些环境会走），真值以用的时候现取为准
-            });
+            }, field -> this.lastFocused = field);
             this.fields[i].setMaxStringLength(ShanhaiRealityItemTable.MAX_LORE_CHARS);
             this.addWidget(this.fields[i]);
             this.channelButtons[i] = new ShanhaiCreativeWidgets.TextButton(292, 36 + i * 18, 42, 16,
@@ -118,14 +155,28 @@ public final class ShanhaiCreativeLoreEditor extends WidgetGroup {
                 () -> turnPage(-1)));
         this.addWidget(new ShanhaiCreativeWidgets.TextButton(222, 222, 58, 16, () -> "§f下一页 ▶",
                 () -> turnPage(1)));
-        // 🔴 这两个数字【不能用 supplier 懒取】—— LDLib 的 LabelWidget 默认只在构造时取一次文本，
+        // 🔴 页数【不能用 supplier 懒取】—— LDLib 的 LabelWidget 默认只在构造时取一次文本，
         //    所以改成在 loadPage() 里 setText 现写（用户报过"页数从来不变"）。
         this.pageLabel = new LabelWidget(286, 226, "§8 1/1");
         this.addWidget(this.pageLabel);
-        this.countLabel = new LabelWidget(6, 244, "§8共 0 行");
-        this.addWidget(this.countLabel);
-        this.addWidget(new ShanhaiCreativeWidgets.TextButton(176, 268, 74, 18, () -> "§a接受", this::accept));
-        this.addWidget(new ShanhaiCreativeWidgets.TextButton(254, 268, 74, 18, () -> "§c取消", this::cancel));
+
+        // 🆕 2026-11-01：颜色/样式选择器（y=240..274 两排按钮 ＋ y=18/27 两行小字）。
+        //    🔴 它<b>不碰</b> 10 个行框（一个像素都没动），只占用原「共 N 行」标签与
+        //    「接受/取消」之间的空间；「接受/取消」按任务书从 y=268 下移到 y=278（278..296）。
+        this.tokenPicker = new ShanhaiTokenPicker(this, new ShanhaiTokenPicker.FieldSource() {
+            @Override
+            public ShanhaiTokenField target() {
+                return targetField();
+            }
+
+            @Override
+            public int rowOf(ShanhaiTokenField field) {
+                return rowNumberOf(field);
+            }
+        }, ShanhaiRealityItemTable.MAX_LORE_CHARS);
+
+        this.addWidget(new ShanhaiCreativeWidgets.TextButton(176, 278, 74, 18, () -> "§a接受", this::accept));
+        this.addWidget(new ShanhaiCreativeWidgets.TextButton(254, 278, 74, 18, () -> "§c取消", this::cancel));
 
         this.setVisible(false);
         this.setActive(false);
@@ -195,15 +246,54 @@ public final class ShanhaiCreativeLoreEditor extends WidgetGroup {
         if (this.pageLabel != null) {
             this.pageLabel.setText("§8" + (this.page + 1) + "/" + pageCount());
         }
-        if (this.countLabel != null) {
+        // 2026-11-01：「共 N 行 §8· 带条件 M」原来是 y=244 的独立标签，它的位置让给了
+        // 选择器的「原版格式」组标题 ⇒ 并进第 1 行说明（页数标签右边只有 48px，塞不下）。
+        if (this.titleLabel != null) {
             int gated = 0;
             for (int ch : this.channel) {
                 if (ch != CH_PLAIN) {
                     gated++;
                 }
             }
-            this.countLabel.setText("§8共 " + this.lines.size() + " 行 §8· 带条件 " + gated);
+            this.titleLabel.setText("§f编辑提示 §7· 共 " + this.lines.size() + " 行"
+                    + " · 带条件 " + gated
+                    + " · 每行 ≤ " + ShanhaiRealityItemTable.MAX_LORE_CHARS + " 字");
         }
+    }
+
+    // ------------------------------------------------------------------ 选择器：插到哪个框
+
+    /**
+     * 选择器点下去时"往哪个框插"—— 判据顺序<b>就是用户原话的顺序</b>：
+     * <ol>
+     *   <li>有焦点的那个行框（{@code isFocus()}，且必须<b>可见</b>，不然会插进另一页的框）；</li>
+     *   <li>没有焦点 ⇒ {@link #lastFocused}（最后点过的那个；同样必须可见）；</li>
+     *   <li>都没有 ⇒ {@code null}（选择器会明说「先点一下要编辑的那一行」，不静默丢弃）。</li>
+     * </ol>
+     */
+    private ShanhaiTokenField targetField() {
+        for (ShanhaiTokenField field : this.fields) {
+            if (field != null && field.isVisible() && field.isFocus()) {
+                return field;
+            }
+        }
+        if (this.lastFocused != null && this.lastFocused.isVisible()) {
+            return this.lastFocused;
+        }
+        return null;
+    }
+
+    /** 这个框是屏幕上第几行（1 基；只给状态行文案用，认不出来给 0）。 */
+    private int rowNumberOf(ShanhaiTokenField field) {
+        if (field == null) {
+            return 0;
+        }
+        for (int i = 0; i < PAGE; i++) {
+            if (this.fields[i] == field) {
+                return this.page * PAGE + i + 1;
+            }
+        }
+        return 0;
     }
 
     // ------------------------------------------------------------------ 按钮
@@ -267,7 +357,13 @@ public final class ShanhaiCreativeLoreEditor extends WidgetGroup {
             this.channel.add(CH_PLAIN);
         }
         this.page = Math.max(0, (this.lines.size() - 1) / PAGE);
+        // 🔴 每次打开都清掉"最后点过的那个框"：这个编辑器实例是复用的，
+        //    否则上一次留在别的页上的框会被当成插入目标（虽然 targetField() 还会查 isVisible()）。
+        this.lastFocused = null;
         loadPage();
+        if (this.tokenPicker != null) {
+            this.tokenPicker.resetStatus();
+        }
         this.setVisible(true);
         this.setActive(true);
         com.shanhai.ShanhaiMod.LOGGER.info("{} lore_editor_open lines={} pages={}",
@@ -275,6 +371,7 @@ public final class ShanhaiCreativeLoreEditor extends WidgetGroup {
     }
 
     void close() {
+        this.lastFocused = null;
         this.setVisible(false);
         this.setActive(false);
     }

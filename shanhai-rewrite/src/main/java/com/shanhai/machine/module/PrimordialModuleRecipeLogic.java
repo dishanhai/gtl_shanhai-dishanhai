@@ -1,5 +1,8 @@
 package com.shanhai.machine.module;
 
+import appeng.api.crafting.IPatternDetails;
+import appeng.api.networking.crafting.ICraftingProvider;
+
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gregtechceu.gtceu.api.machine.feature.multiblock.IMultiPart;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
@@ -26,6 +29,8 @@ import com.shanhai.common.machine.ParallelOverrideMachine;
 import com.shanhai.common.machine.ParallelPowerBudget;
 import com.shanhai.common.machine.PrimordialOmegaEngineMachine;
 import com.shanhai.common.recipe.PrimordialRecipeEffects;
+import com.shanhai.common.recipe.ShanhaiInfiniteEnergy;
+import com.shanhai.common.recipe.ShanhaiWirelessWrap;
 import com.shanhai.api.machine.ShanhaiPatternTypeBlockSource;
 import com.shanhai.common.thread.ShanhaiParallelBudget;
 import com.shanhai.machine.stellar.ShanhaiWildcardRecipeBinding;
@@ -46,6 +51,7 @@ import org.gtlcore.gtlcore.common.recipe.condition.GravityCondition;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -144,14 +150,26 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
         shanhai$pendingFailReason = null;
         shanhai$pendingFailIsModuleLevel = false;
         shanhai$pendingFailIsExtraMount = false;
+        // 🆕 2026-11-01：「匹配不到」那条原因也是<b>每轮重算</b>的（本轮样板数缓存一并失效），
+        //     否则上一轮的读数会被当成这一轮的（那就是常驻假数据）。
+        shanhai$pendingFailIsMatch = false;
+        shanhai$roundPatternCount = -1;
+        shanhai$roundPatternContainers = -1;
         super.findAndHandleRecipe();
         // 🔴 2026-10-27 追加二（用户口径）：如果这一轮一条都没跑起来，而"没跑起来"的原因是【类型】
         //    而不是用料，就必须把类型那条原因写进 RecipeResult（Jade / 机器 GUI 读的就是它）——
         //    改前这里会留着引擎自己那句「配方失败原因：输入材料不足」，用户已明确判定那是错的提示。
-        if (shanhai$pendingFailReason == null) {
+        // 🆕 2026-11-01：`pendingFailIsMatch` 也放行 —— 「类型」那条比「样板/材料对不上」更具体，
+        //    优先级与既有的三条一致（越具体越优先），否则新加的这条会把类型原因吞掉（那是退步）。
+        if (shanhai$pendingFailReason == null || shanhai$pendingFailIsMatch) {
             shanhai$recordPatternTypeBlock();
         }
         shanhai$publishFailReason();
+        // 🆕 2026-11-01（用户原话：「主要是它现在 jade 都没有写出机器不工作的原因」）：
+        //    第二条、也是【我们自己的】通道 —— 写机器上的 shanhaiIdleReason，Jade 那行读它。
+        //    ⚠️ 必须【每轮都调】（包括这一轮压根没算出原因的情况）：
+        //       "清空"就是靠这次调用兑现的（见 ShanhaiIdleReason#next 的 running 分支）。
+        shanhai$publishIdleReason();
     }
 
     /**
@@ -1132,6 +1150,10 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
     @Override
     protected boolean checkRecipe(@NotNull GTRecipe recipe) {
         if (!RecipeRunnerHelper.matchRecipe((IRecipeCapabilityHolder) getMachine(), recipe)) {
+            // 🆕 2026-11-01（用户追加点单）：这一路以前【一条原因都不写】。
+            //     🔴 只"记一条真实原因"，判据一个字不动 —— 返回值仍然是 false，闸门顺序也没变。
+            //     判不出来的情形（摸不到样板总成 / 读失败）一个键都不写，见 ShanhaiMatchFailReason。
+            shanhai$recordMatchBlock();
             return false;
         }
         // 🔴 2026-10-03 改造：「额外挂载槽 ×3」闸门（四类配方条件 + 热力；判定核 ShanhaiHeatGate，可离线取证）。
@@ -1167,6 +1189,29 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
     /** 🆕 2026-10-03：上面那条是不是「额外挂载槽」类的原因（同样比"电压等级"更具体）。 */
     private boolean shanhai$pendingFailIsExtraMount;
 
+    // ═══════════ 🆕 2026-11-01（用户追加点单）「匹配不到」也要有原因 ═══════════
+    //
+    //  用户原话（逐字）：「『匹配不到』这条路现在一条原因都不写」＋
+    //  「它卡在 checkRecipe 第一行 RecipeRunnerHelper.matchRecipe（PrimordialModuleRecipeLogic.java:1142）」。
+    //  ⇒ 那一路原来只有 return false，什么都不记 ⇒ 两条显示通道（我们自己的 Jade 行 / gtlcore 的
+    //    RecipeResult）都没有东西可写 ⇒ 玩家看到"机器不动 + 抬头上一个字都没有"。
+    //  判据的唯一一份在 ShanhaiMatchFailReason（纯 JDK，可离线断言）。
+
+    /** 当前那条原因是不是"matchRecipe 没匹配上"这一类（<b>最低优先级</b>，任何更具体的原因都可以覆盖它）。 */
+    private boolean shanhai$pendingFailIsMatch;
+
+    /**
+     * 本轮"样板总数"缓存（{@code -1} = 还没算）。
+     *
+     * <p>为什么按轮缓存：{@code checkRecipe} 是<b>逐条候选配方</b>调的，一台机器一轮可能失败几十次；
+     * 每次都去问仓室 {@code getAvailablePatterns().size()} 是白烧。每轮只算一次，
+     * 在 {@link #findAndHandleRecipe()} 开头失效。
+     */
+    private int shanhai$roundPatternCount = -1;
+
+    /** 本轮"样板仓室个数"缓存（{@code -1} = 还没算）；{@code 0} = 摸不到任何 {@code ICraftingProvider} 仓室。 */
+    private int shanhai$roundPatternContainers = -1;
+
     /** 电压等级不足：记 gtlcore 现成的 {@code FAIL_VOLTAGE_TIER}。 */
     private void shanhai$recordVoltageTierBlock(int recipeEuTier, int machineTier) {
         shanhai$logVoltageTierBlock(recipeEuTier, machineTier);
@@ -1174,6 +1219,97 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
             return;     // 物质模块等级 / 额外挂载槽那两条更具体、且是本工程的自有条件 ⇒ 不覆盖它们
         }
         shanhai$pendingFailReason = RecipeResult.FAIL_VOLTAGE_TIER.reason();
+    }
+
+    // ═══════════ 🆕「匹配不到」这条原因（2026-11-01 用户追加点单） ═══════════
+    //
+    //  判据的唯一一份 = ShanhaiMatchFailReason（纯 JDK、可离线断言）；本方法只负责
+    //  "取两个数 → 问该说哪句话 → 记进本轮的暂存位 → 留一行可 grep 的证据"。
+    //
+    //  🔴 优先级：这条是【最低】的。原因是 checkRecipe 的闸门顺序是
+    //      matchRecipe → 额外挂载槽 → 电压等级 → 配方条件，
+    //     而"这一轮真正拦住机器"的往往是后面那几条更具体的 ⇒ 后面任一条都必须能覆盖它。
+    //     实现上只需保证「本方法不覆盖更具体的原因」+「其它 record* 不因这条而提前 return」：
+    //       · 本方法：pending 非空且不是自己这一类 ⇒ 直接让位（下面第一句）；
+    //       · 电压那条的守卫只判 moduleLevel / extraMount ⇒ 会覆盖本类（正确）；
+    //       · 条件 / 额外挂载 / 类型 那三条都是无条件写 ⇒ 同样会覆盖（正确）。
+
+    /**
+     * 记一条「样板/材料对不上」的原因（<b>只写原因，不参与判定</b>）。
+     *
+     * <p>两个数都来自仓室的<b>公开只读 API</b>：
+     * {@code getParts()} 里 {@code instanceof ICraftingProvider} 的仓室个数 ＋
+     * 它们 {@code getAvailablePatterns().size()} 之和。按轮缓存（见 {@code shanhai$roundPatternCount}）。
+     */
+    private void shanhai$recordMatchBlock() {
+        if (shanhai$pendingFailReason != null && !shanhai$pendingFailIsMatch) {
+            return;     // 已经有更具体的原因（额外挂载槽 / 电压 / 条件 / 类型）⇒ 本类让位
+        }
+        if (shanhai$roundPatternCount < 0) {
+            shanhai$samplePatternCounts();
+        }
+        final String langKey = ShanhaiMatchFailReason.langKey(
+                shanhai$roundPatternContainers, shanhai$roundPatternCount);
+        if (langKey == null) {
+            // 判不出（摸不到样板总成 / 读失败）⇒ 一个字都不写。
+            // 这与改动前的行为逐字一致 —— 不许用"未知原因"占位（本工程红线：宁可缺，不可假）。
+            return;
+        }
+        shanhai$pendingFailReason = Component.translatable(langKey);
+        shanhai$pendingFailIsMatch = true;
+        shanhai$logMatchBlock(langKey, shanhai$roundPatternContainers, shanhai$roundPatternCount);
+    }
+
+    /**
+     * 数一遍样例板仓室与样板数（<b>只读</b>）；失败时把两个数都置成 {@code -1}（= 判不出）。
+     *
+     * <p>⚠️ 不许对<b>非</b> {@code ICraftingProvider} 的仓室调任何方法：被动枚举会把输入仓、
+     * 电池仓都送进来，那上面根本没有 {@code getAvailablePatterns()}。
+     */
+    private void shanhai$samplePatternCounts() {
+        int containers = 0;
+        int total = 0;
+        try {
+            for (IMultiPart part : getMachine().getParts()) {
+                if (!(part instanceof ICraftingProvider provider)) {
+                    continue;
+                }
+                containers++;
+                final List<IPatternDetails> patterns = provider.getAvailablePatterns();
+                if (patterns != null) {
+                    total += patterns.size();
+                }
+            }
+        } catch (Throwable t) {
+            // 读不出来 ⇒ 判不出 ⇒ 不写原因（绝不许把异常变成一条假原因）。
+            shanhai$roundPatternContainers = -1;
+            shanhai$roundPatternCount = -1;
+            return;
+        }
+        shanhai$roundPatternContainers = containers;
+        shanhai$roundPatternCount = total;
+    }
+
+    /** 已报过的「匹配不到」读数形态（每种只报一次，避免刷屏）。 */
+    private static final Set<String> shanhai$matchLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * 一条可 grep 的证据行：{@code [SHANHAI-MATCHGATE] machine=… pos=… containers=… patterns=… ⇒ jade=…}。
+     *
+     * <p>为什么必须留：这条原因现在是<b>最常见</b>的一条（用户那台 -88,130,83 长时间就是这个状态），
+     * 一旦哪天不写了，若没有这样一行，"没写"与"写了但没显示"就分不开（本工程 2026-11-01 付过的账）。
+     */
+    private void shanhai$logMatchBlock(String langKey, int containers, int patterns) {
+        final String shape = (ShanhaiMatchFailReason.LANG_NO_PATTERN.equals(langKey) ? "no_pattern" : "no_match")
+                + "|c" + containers;
+        if (shanhai$matchLogged.size() > 256 || !shanhai$matchLogged.add(shape)) {
+            return;
+        }
+        final PrimordialModuleMachine machine = getMachine();
+        ShanhaiMod.LOGGER.info("[SHANHAI-MATCHGATE] machine={} pos={} containers={} patterns={} "
+                        + "⇒ jade={}（matchRecipe 这一路以前一条原因都不写；判不出就不写，绝不写未知原因）",
+                machine.getDefinition() == null ? "?" : machine.getDefinition().getId(),
+                machine.getPos(), containers, patterns, langKey);
     }
 
     // ═══════════ 🆕「额外挂载槽 ×3」闸门（2026-10-03 用户点单）—— 判定核在 ShanhaiHeatGate（可离线取证） ═══════════
@@ -1494,10 +1630,45 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
             return;
         }
         RecipeResult.of(getMachine(), RecipeResult.fail(reason));
-        shanhai$logFailReasonPublished(reason);
+        // 🔴 2026-11-01：这行日志的定位信息（machine= / pos=）交给机器侧统一给 ——
+        //    旧实现按【原因原文】去重（static Set），后果是**两台机器报同一句原因时只留一行**，
+        //    于是那行被错归给了另一台（用户实测被误导过一次）⇒ 现在每台机器一个闸门实例、逐台一行。
+        getMachine().shanhaiLogFailReason(reason);
     }
 
-    // ── 两条一次性可 grep 证据行（"悄悄不发生"与"出故障"必须能分开） ──
+    /**
+     * 🆕 <b>把我们自己的「为什么没跑」发布到机器上</b>（Jade 那行读它）—— 用户原话
+     * 「主要是它现在 jade 都没有写出机器不工作的原因」。
+     *
+     * <h2>与 {@link #shanhai$publishFailReason()} 的分工（两条通道，一条都不许静默）</h2>
+     * <pre>
+     *   shanhai$publishFailReason  → gtlcore 的 RecipeResult → IRecipeStatus
+     *                                → 上游 Jade 的 reason 行 / 机器 GUI 的红字行
+     *                                （三道门：原因 null / WORKING|WAITING / lastRecipe != null）
+     *   本方法                      → 机器字段 shanhaiIdleReason → 我们自己的 Jade 行
+     *                                （只在"真有原因且机器没在跑"时显示，见 ShanhaiIdleReason）
+     * </pre>
+     * 两条通道<b>互不依赖</b>：上游那条是"每轮重算、随时被 gtlcore 置 null"的临时值，
+     * 我们这条是"服务端扫描时写、客户端读"，机器跑起来的那一拍就被清空。
+     *
+     * <h2>🔴 {@code running} 的判据（与 {@link #shanhai$publishFailReason()} 的三道门同源）</h2>
+     * {@code WORKING}（在跑）/ {@code WAITING}（有配方但在等电或等输出）/
+     * {@code getLastRecipe() != null}（手上已有配方）<b>任一成立 ⇒ 这台机器不是"没跑"</b>
+     * ⇒ 立刻清空，绝不留一个"曾经的"原因（本工程红线：活的界面上不许放假数据）。
+     *
+     * <p>⚠️ {@code WAITING} 的"为什么在等"由上游的 {@code work_reason} 那一行负责
+     * （gtlcore 的 {@code addTooltip} 在 working 分支读 {@code work_reason}）——
+     * 本方法<b>刻意不重复</b>它，否则同一条信息会在抬头上出现两次。
+     */
+    private void shanhai$publishIdleReason() {
+        final RecipeLogic.Status status = getStatus();
+        final boolean running = status == RecipeLogic.Status.WORKING
+                || status == RecipeLogic.Status.WAITING
+                || getLastRecipe() != null;
+        getMachine().shanhaiPublishIdleReason(shanhai$pendingFailReason, running);
+    }
+
+    // ── 一条一次性可 grep 证据行（"悄悄不发生"与"出故障"必须能分开） ──
 
     /** 已报过的 (machineTier, recipeEuTier) 组合（每个组合只报一次，避免刷屏）。 */
     private static final Set<String> shanhai$voltageGateLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -1514,19 +1685,16 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
                 machineTier, recipeEuTier);
     }
 
-    /** 已报过的原因文本（每个不同的原因只报一次）。 */
-    private static final Set<String> shanhai$failReasonLogged = java.util.concurrent.ConcurrentHashMap.newKeySet();
-
-    private static void shanhai$logFailReasonPublished(@NotNull Component reason) {
-        final String key = reason.getString();
-        if (shanhai$failReasonLogged.size() > 64 || !shanhai$failReasonLogged.add(key)) {
-            return;
-        }
-        ShanhaiMod.LOGGER.info("[SHANHAI-FAIL-REASON] 已写入配方失败原因（链 = RecipeResult.of → IRecipeStatus "
-                        + "→ Jade 的 reason / 机器 GUI 的红字行）：原文=《{}》"
-                        + "（专用服务端不加载客户端 lang，这里打出的是键名/参数，客户端才会渲成中文）",
-                key);
-    }
+    // ⛔ 【2026-11-01 删除 · 原文逐字留档】这里原本是旧的那行日志：
+    //     /** 已报过的原因文本（每个不同的原因只报一次）。 */
+    //     private static final Set<String> shanhai$failReasonLogged = …newKeySet();
+    //     private static void shanhai$logFailReasonPublished(@NotNull Component reason) { … }
+    //   ⛔ 删除原因（用户当场点出来）：去重键只有【原因原文】、而且 Set 是 static
+    //     ⇒ ① 两台机器报同一句原因时【只留一行】；② 行里【没有坐标也没有机器 id】
+    //     ⇒ 我把那一行错归给了用户说的那台机器（用户回「我确实都放了无菌维护仓」）。
+    //   ✅ 现在：行格式 = [SHANHAI-FAIL-REASON] machine=… pos=<维度>@x,y,z 原文=《…》，
+    //     每台机器一个闸门实例（PrimordialModuleMachine#shanhaiIdleReason 里的 failGate），
+    //     同 tick 多台被拦 ⇒ 多行、逐台可分辨。格式的唯一一份在 ShanhaiIdleReason#failLogLine。
 
     /**
      * 🔴 <b>差异 1 的门控：把"引擎先扣料、后 {@code beforeWorking} 拒绝"这条吞料路径挡住。</b>
@@ -1695,7 +1863,165 @@ public class PrimordialModuleRecipeLogic extends MutableRecipesLogic<PrimordialM
         //    ⚠️ batchCycles 必须一起传：批处理只把 duration 乘了 N，EU/t 不变
         //      ⇒ "耗时倍率"要 ×N 才是真的，"耗能倍率"必须仍按 EU/t 的口径算。
         shanhai$captureModuleReduction(originDuration, gateBonus, batchApplied, shanhai$batchCyclesOf(batchApplied));
-        return batchApplied;
+        // ── ⑦ 🔴 电的溢出路由（本轮新增 · 只加分支，不改 ≤long 的任何数值）──
+        //   装得下 ⇒ 【原样返回同一个实例】（老路径逐位不变，能源仓照旧扣电）；
+        //   装不下 + 无线 handler 在线 ⇒ 包成上游现成的 WirelessGTRecipe
+        //     ⇒ 父类 handleMultipleRecipeWorking 会据此改走 handleWirelessTickInput
+        //     ⇒ 能源仓【一次都不扣】（结构性：那两支是 if/else，不是"先扣再判"）。
+        return shanhai$routeInfiniteEnergy(parallelData, batchApplied, gateBonus);
+    }
+
+    // ═══════════════ 🔴 电的 BigInteger 路由（「每份耗电 × 并行 × 线程」超过 Long.MAX 时） ═══════════════
+
+    /** 上一次 BigInt 路由的判定（供每 tick 的证据行复用；{@code null} = 本机当前没走这条路）。 */
+    private @Nullable ShanhaiInfiniteEnergy.Decision shanhai$lastBigintRouting;
+
+    /**
+     * 🔴 <b>把「装不下的电」接到上游的无线通道上</b>（本方法只做判定与包装，不做任何算术发明）。
+     *
+     * <h2>判定量（与任务书口径的关系，逐字对齐）</h2>
+     * <pre>
+     *   任务书口径：每份耗电 × 并行 × 跨配方线程
+     *   本机实际：  Σ_i [ getRecipeEut(origin_i) × parallels[i] ]   （T &gt; 1 时各 origin 的每份耗电/份数可以不等
+     *                                                              ⇒ 三因子拆不开，直接给精确总量；T = 1 时两者逐位相等）
+     *   再乘 N5：    × reductionFactor(gateBonus)      ← 与真链第 ⑤ 步同一个纯函数、同一个实参
+     * </pre>
+     * 全程 {@link BigInteger}，<b>零 double 参与判定</b>（只有 N5 那个系数本身是 double，与 long 路同一份）。
+     *
+     * <h2>三分支（与任务书一一对应）</h2>
+     * <ol>
+     *   <li><b>装得下</b> ⇒ 返回入参本身（{@code ==} 同一个对象，零分配、零改动）；</li>
+     *   <li><b>装不下 + handler 在线</b> ⇒ {@code WirelessGTRecipe}，每 tick 走
+     *       {@code consumeEnergy(BigInteger)}；<b>能源仓 0 次</b>；扣失败 ⇒ 父类原样落
+     *       {@code FAIL_NO_ENOUGH_EU_IN} + {@code doDamping()}（<b>缺电语义一个字节都没新造</b>）；</li>
+     *   <li><b>装不下 + 没有 handler</b> ⇒ 返回入参本身，并打<b>一行 WARN</b>
+     *       （并行已在 {@code ParallelOverrideMachine#applyEnergyCap} 里被夹到
+     *       {@code Long.MAX ÷ (每份耗电 × T)}；这里只负责把"为什么"落在日志里）。</li>
+     * </ol>
+     *
+     * @param gateBonus 与 N5 同源的那个门控等级（本方法入口读一次，不重读）
+     */
+    private @NotNull GTRecipe shanhai$routeInfiniteEnergy(@NotNull ParallelData parallelData,
+                                                          @NotNull GTRecipe finalRecipe,
+                                                          int gateBonus) {
+        try {
+            final List<GTRecipe> origins = parallelData.getOriginRecipeList();
+            final long[] parallels = parallelData.getParallels();
+            final int n = Math.min(origins.size(), parallels.length);
+            BigInteger perCopySum = BigInteger.ZERO;
+            BigInteger demand = BigInteger.ZERO;
+            long totalP = 0L;
+            for (int i = 0; i < n; i++) {
+                final long eu = Math.max(0L, getRecipeEut(origins.get(i)));
+                final long p = Math.max(0L, parallels[i]);
+                final BigInteger euBig = BigInteger.valueOf(eu);
+                perCopySum = perCopySum.add(euBig);
+                demand = demand.add(euBig.multiply(BigInteger.valueOf(p)));
+                totalP = com.shanhai.machine.module.PrimordialModuleMachine.saturatedAdd(totalP, p);
+            }
+            // N5 耗能减免：与真链第 ⑤ 步同一个纯函数、同一个 gateBonus。
+            final BigInteger exact = ShanhaiInfiniteEnergy.applyFactor(
+                    demand, PrimordialRecipeEffects.reductionFactor(gateBonus));
+            if (ShanhaiInfiniteEnergy.fitsLong(exact)) {
+                shanhai$lastBigintRouting = null;
+                // 回到 long 档 ⇒ 显示层必须读老值（清掉 bigint 显示值，防止面板上留着上一轮的数）。
+                getMachine().shanhai$setDisplayEut(null);
+                return finalRecipe; // ← 老路径：同一个对象原样返回
+            }
+            final int threads = Math.max(1, getMultipleThreads());
+            final PrimordialModuleMachine module = getMachine();
+            final com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler handler =
+                    module.shanhaiWirelessEnergyHandler();
+            final boolean handlerOnline = handler != null && handler.isOnline();
+            final ShanhaiInfiniteEnergy.Decision decision = ShanhaiInfiniteEnergy.decideExact(
+                    exact, perCopySum, totalP, threads, handlerOnline);
+            if (decision.mode() != ShanhaiInfiniteEnergy.Mode.BIGINT) {
+                // 没有 handler ⇒ 并行已在 ParallelOverrideMachine#applyEnergyCap 里被夹到
+                // Long.MAX ÷ (每份耗电 × T)，那一处会打 energy=long-only 那行 WARN
+                // ⇒ 这里不重复打第二行（同一件事两行日志 = 读日志的人要自己判重）。
+                shanhai$lastBigintRouting = null;
+                getMachine().shanhai$setDisplayEut(null);
+                return finalRecipe;
+            }
+            shanhai$lastBigintRouting = decision;
+            // 显示层：bigint 档下「每 tick 耗电」读这个值（不是 longs 饱和出来的怪值）。
+            getMachine().shanhai$setDisplayEut(exact);
+            shanhai$logEnergyRoute(ShanhaiInfiniteEnergy.bigintLine(decision, true, null));
+            return ShanhaiWirelessWrap.wrap(finalRecipe, exact);
+        } catch (Throwable t) {
+            // 路由失败绝不许把配方打死：退回老路径（会有 long 饱和，但机器仍然跑得动）。
+            shanhai$lastBigintRouting = null;
+            getMachine().shanhai$setDisplayEut(null);
+            ShanhaiMod.LOGGER.error("[SHANHAI-INFPAR] 电的 BigInteger 路由失败（已退回 long 路径，"
+                    + "该档会出现 long 饱和）：{}", t.toString());
+            return finalRecipe;
+        }
+    }
+
+    /** 同一条证据行的限流闸门（静态：模块 24 台共用一张表；同一形态 5 秒 1 行）。 */
+    private static final ShanhaiLogThrottle.Gate shanhai$energyRouteGate = new ShanhaiLogThrottle.Gate();
+
+    /** 证据行落盘（<b>同一形态每 5 秒最多 1 行</b>，WARN 级 —— 它描述的是"老路装不下"这个异常态）。 */
+    private static void shanhai$logEnergyRoute(@NotNull String line) {
+        if (ShanhaiInfiniteEnergy.shouldLog(shanhai$energyRouteGate, line, System.currentTimeMillis())) {
+            ShanhaiMod.LOGGER.warn(line);
+        }
+    }
+
+    /**
+     * 🔴 <b>每 tick 扣电（无线支）</b> —— 覆写父类 {@code IWirelessRecipeLogic} 的 default 方法，
+     * 让扣电只走本机缓存的那个 handler。
+     *
+     * <h2>为什么必须覆写（而不是用 key 父类的 default）</h2>
+     * 父类的 default 实现读的是
+     * {@code getWirelessMachine().getWirelessNetworkEnergyHandler()}，
+     * 而本工程<b>刻意让那个方法返回 null</b>（理由见 {@code PrimordialModuleMachine#shanhai$wirelessEnergyHandler}
+     * 的 javadoc：一旦它非 null，父类 {@code getRecipe()} 会整体改走 Wireless 支 ⇒ 效果链一行都不执行）。
+     * ⇒ 这里改读本工程那个<b>名字不同</b>的接缝 {@code shanhaiWirelessEnergyHandler()}。
+     *
+     * <h2>🔴 不会双扣（结构性）</h2>
+     * 父类 {@code handleMultipleRecipeWorking} 的分流（字节码实读）：
+     * <pre>
+     *   lastRecipe instanceof IWirelessGTRecipe ? handleWirelessTickInput(w) : handleTickRecipe(lastRecipe).isSuccess()
+     * </pre>
+     * ⇒ 走到本方法时 {@code handleTickRecipe}【一次都没被调】⇒ 能源仓一次都不扣。
+     */
+    @Override
+    public boolean handleWirelessTickInput(com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe recipe) {
+        final com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler handler =
+                getMachine().shanhaiWirelessEnergyHandler();
+        final boolean ok = ShanhaiWirelessWrap.consume(recipe, handler);
+        shanhai$logWirelessTick(recipe, handler != null && handler.isOnline(), ok);
+        return ok;
+    }
+
+    /** 每 tick 那行的限流闸门（与路由行分开；同一形态 5 秒 1 行）。 */
+    private static final ShanhaiLogThrottle.Gate shanhai$wirelessTickGate = new ShanhaiLogThrottle.Gate();
+
+    private void shanhai$logWirelessTick(@NotNull com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe recipe,
+                                         boolean handlerOnline, boolean ok) {
+        try {
+            final ShanhaiInfiniteEnergy.Decision cached = shanhai$lastBigintRouting;
+            final String line;
+            if (cached != null) {
+                line = ShanhaiInfiniteEnergy.bigintLine(cached, handlerOnline, ok);
+            } else {
+                // 读档 / 重连之后暂存丢了：用配方自己带的 BigInteger 现拼一行（字段顺序不变）。
+                final BigInteger eu = recipe.getWirelessEuTickInputs();
+                final BigInteger perTick = eu == null ? BigInteger.ZERO : eu.abs();
+                line = ShanhaiInfiniteEnergy.bigintLine(perTick, -1L, 1, perTick, handlerOnline, ok);
+            }
+            if (ShanhaiInfiniteEnergy.shouldLog(shanhai$wirelessTickGate, line, System.currentTimeMillis())) {
+                if (ok) {
+                    ShanhaiMod.LOGGER.warn(line);
+                } else {
+                    ShanhaiMod.LOGGER.warn(line + "（池子不够 ⇒ 走既有的缺电语义：FAIL_NO_ENOUGH_EU_IN + doDamping）");
+                }
+            }
+        } catch (Throwable t) {
+            // 纯证据行：异常绝不许影响 tick。
+            ShanhaiMod.LOGGER.debug("[SHANHAI-INFPAR] 打无线扣电行时异常（已忽略）：{}", t.toString());
+        }
     }
 
     /** 本轮"引擎装配用的那张原配方"（= 额外投料与批处理倍率的口径基准；取第一条，与上游同写法）。 */

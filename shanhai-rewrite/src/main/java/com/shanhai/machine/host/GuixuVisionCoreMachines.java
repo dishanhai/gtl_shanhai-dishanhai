@@ -184,7 +184,31 @@ public final class GuixuVisionCoreMachines {
                         net.minecraft.network.chat.Component.translatable(
                                 "shanhai.multiblock.guixu_vision_core.tooltip.6"),
                         net.minecraft.network.chat.Component.translatable(
-                                "shanhai.multiblock.guixu_vision_core.tooltip.7"))
+                                "shanhai.multiblock.guixu_vision_core.tooltip.7"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.8"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.9"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.10"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.11"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.12"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.13"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.14"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.15"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.16"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.17"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.18"),
+                        net.minecraft.network.chat.Component.translatable(
+                                "shanhai.multiblock.guixu_vision_core.tooltip.19"))
                 .appearanceBlock(GuixuVisionCoreStructure::appearanceBlock)
                 .register();
 

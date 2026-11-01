@@ -16,7 +16,10 @@ import net.minecraft.core.Direction;
  * <ul>
  *   <li>结构/几何四个：{@code com.gtladd.gtladditions.common.machine.multiblock.structure.StructureResourceLoader}
  *       与 {@code com.gtladd.gtladditions.utils.antichrist.AntichristPosHelper}；</li>
- *   <li>配方类型十三个（2026-09-22 新增）：{@code com.gtladd.gtladditions.common.recipe.GTLAddRecipesTypes}。</li>
+ *   <li>配方类型十三个（2026-09-22 新增）：{@code com.gtladd.gtladditions.common.recipe.GTLAddRecipesTypes}。
+ *       <br>⚠️ 本行数字是历史留档：2026-10-03 再 +1（{@link #evolutionOfPrimordial()} 太素衍化）、
+ *       2026-11-01 再 +2（{@link #chaosWeave()} 混沌编织、{@link #starCoreStripper()} 星核剥离）
+ *       ⇒ <b>现共 16 个</b>。</li>
  * </ul>
  *
  * <h2>为什么存在这个类</h2>
@@ -228,5 +231,53 @@ public final class GtlAddCompat {
      */
     public static GTRecipeType evolutionOfPrimordial() {
         return GTLAddRecipesTypes.EVOLUTION_OF_PRIMORDIAL;
+    }
+
+    /**
+     * 转发自 {@code …common.recipe.GTLAddRecipesTypes.CHAOS_WEAVE}
+     * （🆕 2026-11-01；<b>public 静态字段</b>，不是 Kotlin object 的 getter —— 与
+     * {@link #molecularDeconstruction()} / {@link #evolutionOfPrimordial()} 同一种形态。
+     * 实证：{@code javap -p …GTLAddRecipesTypes} 的第一行字段就是
+     * {@code public static final com.gregtechceu.gtceu.api.recipe.GTRecipeType CHAOS_WEAVE;}）。
+     *
+     * <p><b>中文名 = 混沌编织</b>（用户原话里的"混沌编制"是笔误，2026-11-01 已拍板按官方真名走）；
+     * <b>注册 id = {@code gtceu:chaos_weave}</b>。依据：{@code assets/gtceu/lang/zh_cn.json} 里
+     * {@code "gtceu.chaos_weave":"混沌编织"}（@ gtladditions jar），且
+     * {@code gtceu.machine.taixuturbidarray.tooltip.10} 写着"可用配方类型：混沌编织"
+     * ⇒ 它确实是一个配方类型的显示名；export 里该 {@code "type"} 有 7 条配方。
+     *
+     * <p>⚠️ 为什么必须走这里而不是在 {@code ModuleRegistry} 里直接引用
+     * {@code com.gtladd.gtladditions.common.recipe.GTLAddRecipesTypes}：
+     * 本工程有一条明写的隔离墙 ——「{@code common} 侧<b>唯一</b>引用 gtladditions 非 API 的类是
+     * {@link GtlAddCompat}」（见本类类注释）。{@code common.recipe} 属于<b>非 api</b> 包，
+     * 直接引用会开第二个非 API 触点，那是不可逆的架构让步。
+     * <p>用途：新 #2「原初混沌质能熔炉」（{@code shanhai:primordial_mass_energy_furnace}）的
+     * 4 条类型里的第 3 条。
+     */
+    public static GTRecipeType chaosWeave() {
+        return GTLAddRecipesTypes.CHAOS_WEAVE;
+    }
+
+    /**
+     * 转发自 {@code …common.recipe.GTLAddRecipesTypes#getSTAR_CORE_STRIPPER()}
+     * （🆕 2026-11-01；<b>Kotlin object 的 getter</b>，不是静态字段 —— 与
+     * {@link #voidfluxReaction()} 等 12 个同一种形态）。
+     *
+     * <p>实证（{@code javap -p …GTLAddRecipesTypes}，本轮实跑）：
+     * <pre>
+     *   private static final com.gregtechceu.gtceu.api.recipe.GTRecipeType STAR_CORE_STRIPPER;
+     *   public final com.gregtechceu.gtceu.api.recipe.GTRecipeType getSTAR_CORE_STRIPPER();
+     *   public static final …GTLAddRecipesTypes INSTANCE;
+     * </pre>
+     * ⇒ 字段是 <b>private</b>，只能走 {@code INSTANCE.getSTAR_CORE_STRIPPER()}（写静态字段直接编译不过）。
+     *
+     * <p><b>中文名 = 星核剥离</b>；<b>注册 id = {@code gtceu:star_core_stripper}</b>。
+     * 依据：{@code temp/type-coverage/缺口.md} 第 76 行「{@code gtceu:star_core_stripper} ｜ 星核剥离 ｜
+     * {@code gtceu.star_core_stripper} @ gtladditions」（该类型 148 条配方，属"未覆盖大缺口"一档）。
+     * <p>用途：第 29 台「原初深空汲取核心」（{@code shanhai:primordial_deep_space_extraction_core}）
+     * 类型数组的第 9 条（2026-11-01 用户点单，追加在末尾）。
+     */
+    public static GTRecipeType starCoreStripper() {
+        return GTLAddRecipesTypes.INSTANCE.getSTAR_CORE_STRIPPER();
     }
 }

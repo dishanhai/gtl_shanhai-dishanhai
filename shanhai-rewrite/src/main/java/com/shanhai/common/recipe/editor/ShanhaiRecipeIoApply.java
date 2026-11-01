@@ -104,7 +104,20 @@ public final class ShanhaiRecipeIoApply {
     private static JsonElement encode(RecipeCapability cap, Content c) {
         try {
             final Codec<Content> codec = Content.codec(cap);
-            return codec.encodeStart(JsonOps.INSTANCE, c).result().orElse(null);
+            final JsonElement el = codec.encodeStart(JsonOps.INSTANCE, c).result().orElse(null);
+            if (el == null) {
+                return null;
+            }
+            // 🔴 2026-11-01（用户实例 recipe_overrides.json 实锤）：物品原料的 codec 会把
+            //    gtlcore 的 LongIngredient 原样写成 {"type":"gtceu:long","actualAmount":N,…}
+            //    —— 全库 67,724 条配方里，long 出现在【输入侧】的只有他这一条（其余 949 次全在产出）。
+            //    ENCODE 这一层就是那条 bad data 的源头（活配方的 Content 里那条 long 是 gtlcore
+            //    在装载/复制时包上的），所以出口必须收回标准形态：见 ShanhaiIngredientShape。
+            //    ⚠️ 只动物品（fluid 的 content 是 {"amount":…,"value":[…]}，另一种形状）。
+            if (cap == ItemRecipeCapability.CAP) {
+                return ShanhaiIngredientShape.standardize(el);
+            }
+            return el;
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} io_encode_failed cap={} err={}", PREFIX, cap, t.toString());
             return null;
@@ -159,16 +172,33 @@ public final class ShanhaiRecipeIoApply {
         //       台账重建（ShanhaiRecipeBase.applyIoTo）、新建配方、自检全都经过它。
         //       规范化逻辑只有一份，见 ShanhaiCircuitCatalyst（那里同时管住落盘漏斗 upsert）。
         //    ⚠️ 只对 "inputs" 生效 —— 输出侧的 chance==0 是「0% 产出」，不是"不消耗"。
-        ShanhaiCircuitCatalyst.forceInTable(String.valueOf(recipe.id), which, json);
+        // 🆕 2026-11-01（用户实例实锤）：旧数据里的 {"type":"gtceu:long",…}（还可能是 long 套 long）
+        //    在**进 GT codec 之前**剥成标准形态。两件事一步做完：
+        //      ① 读兼容 —— 旧 long 数据不崩、值不丢（数量取链上最大值：1→4 给 4、1→1 给 1）；
+        //      ② 顺带规范化 —— 落进活配方的原料里从此不会再有 gtlcore 的 LongIngredient
+        //         （它的 getItems() 只认最外层 actualAmount，会把内层那个 4 静默盖成 1）。
+        //    ⚠️ 传进来的 json 不改（normalizeTableCopy 返回副本；没有 long 时才原样返回同一个对象）
+        //        —— 台账里那份是别人持有的对象。
+        final ShanhaiIngredientShape.Report shapeRep = new ShanhaiIngredientShape.Report();
+        final JsonObject normalized = ShanhaiIngredientShape.normalizeTableCopy(
+                String.valueOf(recipe.id), which, json, shapeRep);
+        for (String line : shapeRep.lines()) {
+            ShanhaiMod.LOGGER.info("{} {} {}", PREFIX, ShanhaiIngredientShape.LOG_MARK, line);
+        }
+        // 🔴 顺序有意（与 ShanhaiRecipeOverrideStore.upsert 里同一段注释同源）：**先**剥 long、
+        //    **后**跑电路那条规则。isCircuitEntry 只看 content.ingredient 一层 ⇒ 单层
+        //    long(1){circuit} 它认得（别写错），但双层 long(long(circuit)) 它认不出、
+        //    也就不会强制 chance=0；先剥则任何深度都变成裸 circuit。离线自证 A9 三读数在案。
+        ShanhaiCircuitCatalyst.forceInTable(String.valueOf(recipe.id), which, normalized);
         int written = 0;
         // 🔴 顺序固定：先清空整张表，再按 JSON 里出现的键放回去。
         //    「先清空」是必须的 —— 不这么做的话，用户把某个 capability 的条目删光时，
         //    旧条目会原地留着（"删不掉"），而两种状态在日志上长得一样。
         table.clear();
-        written += put(table, ItemRecipeCapability.CAP, json, K_ITEM);
-        written += put(table, FluidRecipeCapability.CAP, json, K_FLUID);
+        written += put(table, ItemRecipeCapability.CAP, normalized, K_ITEM);
+        written += put(table, FluidRecipeCapability.CAP, normalized, K_FLUID);
         if ("tickInputs".equals(which) || "tickOutputs".equals(which)) {
-            written += put(table, EURecipeCapability.CAP, json, K_EU);
+            written += put(table, EURecipeCapability.CAP, normalized, K_EU);
         }
         return written;
     }

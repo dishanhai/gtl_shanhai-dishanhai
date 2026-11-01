@@ -313,6 +313,21 @@ public final class ShanhaiRecipeOverrideStore {
         //       所以 setIo / applyEdits / 面板保存 / 新建（op=add）/ 新建后再保存 /
         //       原版配方 这些路径全都被这一句覆盖，不需要在七八个调用点各打一个补丁。
         //       实现只有一份：ShanhaiCircuitCatalyst。
+        // 🆕 2026-11-01（用户实例实锤：盘上那条 new_recipe_4 的 inputs 是
+        //    {"type":"gtceu:long","actualAmount":1,"ingredient":{"type":"gtceu:long",…}}）：
+        //    这里是【落盘】那一侧唯一的漏斗 ⇒ 在写盘之前把物品原料收回 GT 标准形态
+        //    （sized／circuit），旧 long 数据也在这一步被顺带规范化。实现只有一份：
+        //    ShanhaiIngredientShape（它是纯核，日志在本类打）。
+        // 🔴 顺序有意：**先**规范化、**后**跑电路那一条规则。
+        //    判据（源码 ＋ 离线自证 A9 三读数）：isCircuitEntry 只看 {@code content.ingredient}
+        //    **一层** + 裸 content 本身 ⇒ 单层 long(1){circuit} 它<b>认得</b>
+        //    （所以现状那条 chance:0 没有被漏掉，这一点别写错）；
+        //    但 long(1){long(1){circuit}} 这种双层包装它<b>认不出</b> ⇒ 不会强制 chance=0。
+        //    先剥 long ⇒ 任何深度的电路都变成裸 gtceu:circuit ⇒ 那条规则 100% 管得着。
+        final ShanhaiIngredientShape.Report shapeRep = ShanhaiIngredientShape.normalizeEntry(entry);
+        for (String line : shapeRep.lines()) {
+            ShanhaiMod.LOGGER.info("{} {} {}", PREFIX, ShanhaiIngredientShape.LOG_MARK, line);
+        }
         ShanhaiCircuitCatalyst.forceInEntry(entry);
         final JsonObject root = loadRoot();
         final int foreign = dropForeignIfUnowned(root);

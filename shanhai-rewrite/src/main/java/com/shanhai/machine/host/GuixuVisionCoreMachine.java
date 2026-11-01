@@ -338,17 +338,48 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     //  ⇒ 收窄会让"放错了"这个负对照做不出来，而且中途加过滤器会让老存档里的物品变成取不出来的死格）。
     // ═══════════════════════════════════════════════════════════════════════════════════
 
-    /** 额外挂载槽的格数 —— <b>唯一真源</b>是 {@code ShanhaiHeatGate.SLOT_COUNT}（模块侧同源）。 */
-    public static final int EXTRA_MOUNT_SLOT_COUNT = com.shanhai.common.heat.ShanhaiHeatGate.SLOT_COUNT;
-
-    /** 额外挂载槽 ×3（玩家从 GUI 左侧「额外挂载」页放置）。 */
+    /**
+     * ⛔ <b>2026-10-25 T4：本类不再拥有那 3 格</b> —— 它们已<b>上移到基类</b>
+     * {@code PrimordialOmegaEngineMachine#hostExtraMountSlots}（阈值钩子同批上移，
+     * 本类只覆写 {@link #extraMountRequiredCount()} 返回 64）。
+     *
+     * <h2>🔴 为什么必须删掉本类那份（本轮唯一的首要冲突点）</h2>
+     * 若基类再加一份而本类保留旧字段：Java 允许同名字段隐藏（编译不报错），
+     * 但两个 {@code @Persisted} 都会进 LDLib 的字段 holder（按【类】反射登记）
+     * ⇒ 本机实例上会有<b>两个各 3 格</b>的容器：基类方法读基类那份（永远空）、本类方法读本类那份
+     * ⇒ 界面 6 格，其中 3 格放了<b>永远无效且不报错</b>（本工程最忌讳的形态）。
+     *
+     * <h2>⚠️ 但旧字段【保留】了 —— 只为老存档迁移读一次（见下）</h2>
+     * <pre>
+     *   旧键 "extraMountSlots"（本类旧字段名 = 落盘键名）
+     *        ↓ LDLib 照原样读回这个 handler
+     *   一次性迁移（ShanhaiExtraMountMigration）
+     *        ↓ 搬进基类的 "hostExtraMountSlots"，搬完清空本字段并置 extraMountLegacyMigrated
+     * </pre>
+     * 🔴 <b>为什么字段名故意与基类不同</b>：LDLib 的 {@code @Persisted} 键名 = 字段名，没有"改名"注解。
+     * 两边的键名必须<b>不同</b>，迁移才有"旧键 ≠ 新键"这件事可做（也才能离线单测）；
+     * 若沿用同名，就变成"要么根本不用迁移、要么永远读不到旧数据"的二选一，两边都是静默的。
+     *
+     * <p>🔴 <b>IO 参数必须是 {@code NONE / NONE}</b>（旧字段原来是 {@code NONE / BOTH}）：
+     * 迁移之后这个 handler <b>不再有任何用处</b>，若它还对管道暴露物品能力，
+     * 自动化就会把物品塞进一个"玩家看不见、也不参与任何判定"的黑洞里 —— 那是新的静默丢物品路径。
+     *
+     * <p>⚠️ 不设过滤器（与旧版一致）：迁移要能原样搬出玩家当年放的任何东西。
+     */
+    @Deprecated
     @Persisted
     private final NotifiableItemStackHandler extraMountSlots;
 
-    /** {@link #getExtraMountContents()} 的逐格缓存（避免每 tick 查注册表）。 */
-    private List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> extraMountCache = List.of();
-    /** 缓存对应的三格快照（逐格 {@code ItemStack} 相等才算命中）。 */
-    private ItemStack[] extraMountCacheKeys = new ItemStack[0];
+    /**
+     * <b>老存档迁移标记</b>（一次性）。
+     *
+     * <p>🔴 纪律（任务书点名，本工程踩过）：<b>该分支成功搬完才置</b> —— 搬不动时置上，
+     * 那 3 件东西就<b>永远搬不过来</b>了。判据落在策略核
+     * {@link com.shanhai.common.heat.ShanhaiExtraMountMigration#run} 里（有离线单测）。
+     * <p>不 {@code @DescSynced}：纯服务端逻辑，客户端不需要知道。
+     */
+    @Persisted
+    private boolean extraMountLegacyMigrated;
 
     // ═══════════════════════════════════════════════════════════════════════════════════
     //  AR 右侧信息栏：主机 / 每模块的运行快照（2026-10-25 第二十二改新增）
@@ -1624,6 +1655,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     @Override
     public void onLoad() {
         super.onLoad();
+        // 🔴 读档回调：NBT 已经读完（旧键那 3 格已经由 LDLib 读回本类旧字段）
+        // ⇒ 在这里做一次性迁移。懒入口还有 getExtraMountContents()（双保险，两者都幂等）。
+        shanhai$ensureLegacyExtraMountsMigrated();
         ensureSnapshotTick();
         logRecipeCounts();
     }
@@ -1930,10 +1964,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
             }
         }.setFilter(PrimordialModuleMachine::isMatterModuleStack);
 
-        // 「额外挂载槽 ×3」（2026-10-25 T3）：与模块侧**同构造**（3 格、IO.NONE/IO.BOTH、不设过滤器）。
-        // ⚠️ 构造器里只给形状，不读任何别的字段（基类的 createRecipeLogic 在更早的 super(holder) 里就跑过了，
-        //    那边只 new 逻辑、不碰这三个槽 ⇒ 顺序安全；这条坑见 PrimordialOmegaEngineMachine#createRecipeLogic）。
-        this.extraMountSlots = new NotifiableItemStackHandler(this, EXTRA_MOUNT_SLOT_COUNT, IO.NONE, IO.BOTH);
+        // 「额外挂载槽 ×3」：2026-10-25 T4 起【基类】那份才是活的
+        // （PrimordialOmegaEngineMachine#hostExtraMountSlots，构造已在 super(holder) 里做完）。
+        // 这里这一份是【旧键】的容器：只为老存档迁移读一次（见字段 javadoc 与
+        // ShanhaiExtraMountMigration）。IO 必须 NONE/NONE —— 迁移后它不该再能被塞进任何东西。
+        this.extraMountSlots = new NotifiableItemStackHandler(this,
+                com.shanhai.common.heat.ShanhaiHeatGate.SLOT_COUNT, IO.NONE, IO.NONE);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════
@@ -1956,67 +1992,101 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════
-    //  「额外挂载槽 ×3」—— 读口（GUI / tooltip / 判定核三方共用，不许各算一份）
+    //  🔴 老存档一次性迁移（2026-10-25 T4：3 格从本类上移到基类，键名变了）
+    //
+    //  为什么必须做：旧档里那 3 件东西（线圈 / 维护仓 / 维度碎片）存在【本类旧字段】的键
+    //  "extraMountSlots" 里；新字段叫 "hostExtraMountSlots" ⇒ 不做迁移，玩家读档后看到的是
+    //  3 个空格，物品既不在身上也不在槽里，而且【日志一个字都没有】（本工程最忌讳的静默失败）。
+    //
+    //  策略核（可离线单测）：{@link com.shanhai.common.heat.ShanhaiExtraMountMigration#run}
+    //  三条纪律（都在那段代码里，不在这里重写）：已迁过不搬 / 新槽非空不覆盖且不置标记 /
+    //  搬不动（写入没落地）不置标记且不清旧槽。
     // ═══════════════════════════════════════════════════════════════════════════════════
 
-    /** 某一格的物品（越界返回空栈）。 */
-    @NotNull
-    public ItemStack getExtraMountStack(int index) {
-        if (extraMountSlots == null || index < 0 || index >= EXTRA_MOUNT_SLOT_COUNT) {
-            return ItemStack.EMPTY;
+    /** 迁移防重入（迁移过程中会读写两个 handler，它们的回调可能再走进读口）。 */
+    private boolean extraMountMigrating;
+
+    /** 迁移那一行日志只打一次（"新槽非空"这条会一直重试，不挡住就会刷屏）。不落盘。 */
+    private boolean extraMountMigrateLogged;
+
+    /**
+     * 迁移的<b>唯一入口</b>（幂等）：标记已置 / 客户端 / 字段还没初始化 ⇒ 直接返回。
+     */
+    private void shanhai$ensureLegacyExtraMountsMigrated() {
+        if (extraMountLegacyMigrated || extraMountMigrating || isRemote()
+                || extraMountSlots == null || hostExtraMountSlots == null) {
+            return;
         }
-        final ItemStack s = extraMountSlots.storage.getStackInSlot(index);
-        return s == null ? ItemStack.EMPTY : s;
+        extraMountMigrating = true;
+        try {
+            final com.shanhai.common.heat.ShanhaiExtraMountMigration.Report report =
+                    com.shanhai.common.heat.ShanhaiExtraMountMigration.run(
+                            com.shanhai.common.heat.ShanhaiHeatGate.SLOT_COUNT,
+                            extraMountSlots::getStackInSlot,
+                            hostExtraMountSlots::getStackInSlot,
+                            extraMountLegacyMigrated,
+                            stack -> stack != null && !stack.isEmpty(),
+                            (i, stack) -> hostExtraMountSlots.setStackInSlot(i, stack.copy()),
+                            i -> extraMountSlots.setStackInSlot(i, ItemStack.EMPTY));
+            if (report.flagSet() && !extraMountLegacyMigrated) {
+                extraMountLegacyMigrated = true;
+            }
+            if (!extraMountMigrateLogged) {
+                extraMountMigrateLogged = true;
+                LOGGER.info("[SHANHAI-HOST] 归墟额外挂载槽老存档迁移：{} 旧槽={} 新槽={}",
+                        report.describe(), describeStacks(extraMountSlots), describeStacks(hostExtraMountSlots));
+            }
+        } catch (Throwable t) {
+            // 迁移失败【不许】影响读档：机器照常起来，标记不置 ⇒ 下次读档再试一次
+            LOGGER.warn("[SHANHAI-HOST] 归墟额外挂载槽老存档迁移异常（标记未置，下次读档重试）", t);
+        } finally {
+            extraMountMigrating = false;
+        }
     }
 
-    /** 某一格的数量（越界 0）。 */
-    public int getExtraMountCount(int index) {
-        return getExtraMountStack(index).getCount();
+    /** 一个 handler 的 3 格读数（迁移日志专用；空槽打 {@code -}）。 */
+    private static String describeStacks(NotifiableItemStackHandler handler) {
+        final StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < com.shanhai.common.heat.ShanhaiHeatGate.SLOT_COUNT; i++) {
+            final ItemStack s = handler.getStackInSlot(i);
+            sb.append(i == 0 ? "" : ",").append(s == null || s.isEmpty() ? "-" : s.getCount() + "x" + s.getHoverName().getString());
+        }
+        return sb.append(']').toString();
     }
 
-    /** 三格现读物品（顺序 = 槽序号）—— 只给"槽里实际放的是什么"那句文案用。 */
-    @NotNull
-    public List<ItemStack> getExtraMountStacks() {
-        final List<ItemStack> out = new java.util.ArrayList<>(EXTRA_MOUNT_SLOT_COUNT);
-        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
-            out.add(getExtraMountStack(i));
-        }
-        return out;
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  「额外挂载槽 ×3」—— 读口
+    //
+    //  🔴 2026-10-25 T4：三个读口（getExtraMountStack / getExtraMountCount /
+    //     getExtraMountStacks / getExtraMountContents）与逐格缓存已【整体上移到基类】
+    //     PrimordialOmegaEngineMachine —— 本类改成继承，<b>不再保留第二份实现</b>
+    //     （两份实现必然漂移：改了一边、另一边静默不动，是本工程最忌讳的形态）。
+    //     本类只保留三样"归墟自己的"东西：
+    //       ① extraMountRequiredCount() 覆写 = 64（已验收，不动）；
+    //       ② canUseExtraMountAsHeatSource() 覆写 = 维持旧语义（见下）；
+    //       ③ 供源给模块的 ShanhaiHostMountSource 三件套 + 本机 tooltip。
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 本机的阈值 = <b>64</b>（覆写基类的钩子；基类那份是主机自己的 1）。
+     *
+     * <p>归墟那 3 格是 2026-10-25 已验收的行为（「同一个槽放满 64 个」）⇒ 一个数都不改，
+     * 只是从"写死在判据里"变成"从这里读"。
+     */
+    @Override
+    protected int extraMountRequiredCount() {
+        return com.shanhai.common.heat.ShanhaiHeatGate.REQUIRED_COUNT;
     }
 
     /**
-     * 三格现读内容（{@link com.shanhai.common.heat.ShanhaiHeatGate.SlotContent}），<b>逐格缓存</b>。
-     *
-     * <p>🔴 为什么必须缓存：{@code ShanhaiHeatSources#slotContentOf} 要查注册表，
-     * 而 {@code checkRecipe} 是<b>每次找配方都调</b>的（每 tick 每线程）⇒ 不缓存就是每 tick 几十次注册表查询。
-     * 缓存键 = 三格 {@code ItemStack} 的"物品 + 数量"，命中就复用上一份。
-     *
-     * <p>与模块侧 {@code PrimordialModuleMachine#getExtraMountContents} 同一套写法（同一语义、同一退化路径），
-     * 但<b>判定</b>不在本方法里 —— 判定只经 {@code ShanhaiExtraMountGate}。
+     * 三格现读内容 —— <b>覆写只为加一道迁移保险</b>：任何读口（本机自己的闸门 / tooltip / 模块供源）
+     * 都必须先确保旧档已经搬完，然后<b>原样</b>调 {@code super}（<b>不</b>在这里写第二份实现）。
      */
+    @Override
     @NotNull
     public List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> getExtraMountContents() {
-        final ItemStack[] now = new ItemStack[EXTRA_MOUNT_SLOT_COUNT];
-        boolean hit = extraMountCache.size() == EXTRA_MOUNT_SLOT_COUNT
-                && extraMountCacheKeys.length == EXTRA_MOUNT_SLOT_COUNT;
-        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
-            now[i] = getExtraMountStack(i);
-            if (hit) {
-                final ItemStack old = extraMountCacheKeys[i];
-                hit = old != null && ItemStack.matches(old, now[i]);
-            }
-        }
-        if (hit) {
-            return extraMountCache;
-        }
-        final List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> computed =
-                new java.util.ArrayList<>(EXTRA_MOUNT_SLOT_COUNT);
-        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
-            computed.add(com.shanhai.common.heat.ShanhaiHeatSources.slotContentOf(now[i]));
-        }
-        extraMountCache = computed;
-        extraMountCacheKeys = now;
-        return computed;
+        shanhai$ensureLegacyExtraMountsMigrated();
+        return super.getExtraMountContents();
     }
 
     /**
@@ -2027,7 +2097,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
      * 归墟的机器 id 不在那份白名单里 ⇒ 恒 {@code false} ⇒ <b>热力门槛不加到本机上</b>
      * （用户点单的是"配方条件（cleanroom/gravity/dimension/research）复写"，不是给主机加炉温门槛）。
      * <p>要放开只需把本机 id 加进 {@code ShanhaiHeatGate#HEAT_SLOT_MACHINE_IDS}（一处，闸门自动跟着走）。
+     * <p>🔴 2026-10-25 T4：基类新增了同名方法（主机自己恒 {@code true}）⇒ 本类这行变成<b>覆写</b>，
+     * 语义与返回值<b>逐位不变</b>（归墟仍然不接热力门槛）。
      */
+    @Override
     public boolean canUseExtraMountAsHeatSource() {
         final var def = getDefinition();
         if (def == null || def.getId() == null) {
@@ -2069,40 +2142,49 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
         return "归墟视界枢核";
     }
 
-    /** 一行可 grep 的三格读数（日志与 tooltip 共用）。 */
-    @NotNull
-    public String describeExtraMounts() {
-        final List<com.shanhai.common.heat.ShanhaiHeatGate.SlotContent> contents = getExtraMountContents();
-        final StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < contents.size(); i++) {
-            sb.append('[').append(i + 1).append(']').append(contents.get(i).describe()).append(' ');
-        }
-        return sb.toString().trim();
-    }
-
     /**
      * 三格各自 tooltip —— <b>与模块侧逐句同源</b>（{@code ShanhaiHeatSources#slotContentOf} 现读，
      * 不写死任何"放什么有用"的文案；放错了就照实说"不是任何一种挂载物"）。
+     *
+     * <p>🔴 本方法<b>覆写</b>基类那份（基类按主机口径写"放 1 个即生效"）。归墟是 64，
+     * 所以这里保留自己的文案 —— 两台机器阈值本来就不同，"那句不同"是<b>正确</b>的。
+     *
+     * <p>🔴 <b>2026-11-01 修正：数字与判据同源，且只盖在热力头上</b>。旧文案对<b>任何</b>非空物品
+     * 都写「只有 N 个（热力源需 64 个）」—— 放 1 个无菌维护仓时读起来就像"维护仓要 64 个"，
+     * 与用户口径（「放入对应的 1 个维护仓就满足」「我没有给模块设置 64 个的门槛」）相反。
+     * 现在按 {@code ShanhaiHeatGate#requiredFor} 逐 kind 现算：
+     * <pre>
+     *   线圈 / 恒星热力容器 ⇒ 本机阈值（64）
+     *   维护仓 / 世界碎片 / 创造模式数据访问仓 ⇒ 恒 1
+     * </pre>
      */
+    @Override
     @NotNull
     public Component[] extraMountTooltips(int index) {
         final ItemStack stack = getExtraMountStack(index);
         final com.shanhai.common.heat.ShanhaiHeatGate.SlotContent c =
                 com.shanhai.common.heat.ShanhaiHeatSources.slotContentOf(stack);
+        final int heatNeed = com.shanhai.common.heat.ShanhaiHeatGate.requiredFor(
+                com.shanhai.common.heat.ShanhaiHeatGate.Kind.HEAT_TEMP, extraMountRequiredCount());
+        final int singleNeed = com.shanhai.common.heat.ShanhaiHeatGate.requiredFor(
+                com.shanhai.common.heat.ShanhaiHeatGate.Kind.GRAVITY, extraMountRequiredCount());
         if (c.isBlank()) {
             return new Component[]{
                     Component.literal("§e额外挂载槽 " + (index + 1) + " / " + EXTRA_MOUNT_SLOT_COUNT),
                     Component.literal("§7可放：维护仓（超净间/重力）· 维度碎片 · 创造模式数据访问仓 · 线圈 / 恒星热力容器"),
-                    Component.literal("§7一个条件占一格；热力源要 §f放满 "
-                            + com.shanhai.common.heat.ShanhaiHeatGate.REQUIRED_COUNT + " 个§7 才生效")};
+                    Component.literal("§7一个条件占一格；维护仓 / 碎片 / 数据仓放 §f" + singleNeed + " 个§7 即可，"
+                            + "线圈 / 恒星热力容器要 §f放满 " + heatNeed + " 个§7 才生效")};
         }
+        // 这条物品属于哪一半？只有"线圈 / 恒星热力容器"才吃 64 那个数。
+        final boolean isHeatItem = c.coilTemperature > 0 || c.containmentTier > 0;
+        final int need = isHeatItem ? heatNeed : singleNeed;
         return new Component[]{
                 Component.literal("§e额外挂载槽 " + (index + 1) + " / " + EXTRA_MOUNT_SLOT_COUNT),
                 Component.literal("§7现读：" + c.describe()),
-                Component.literal(c.count >= com.shanhai.common.heat.ShanhaiHeatGate.REQUIRED_COUNT
+                Component.literal(c.count >= need
                         ? "§a已放满，可以满足对应条件"
-                        : "§c只有 " + c.count + " 个（热力源需 §f"
-                        + com.shanhai.common.heat.ShanhaiHeatGate.REQUIRED_COUNT + "§c 个）")};
+                        : "§c只有 " + c.count + " 个§c，需 §f" + need + "§c 个"
+                                + (isHeatItem ? "§c（热力源）" : "§c（放 1 个即生效）"))};
     }
 
     // ------------------------------------------------------------------ 模块等级复写（门控 + 出口）
@@ -2178,7 +2260,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
                 "hostEnergyOutStored", "hostEnergyOutCapacity",
                 // 🔴 2026-10-25 第二十八改（T3）：额外挂载槽 ×3 —— 不落盘的表现是"放满 64 个、
                 //    关掉 GUI 再打开就回到空"，且完全静默 ⇒ 必须逐个登记。
-                "extraMountSlots"}) {
+                // 🔴 2026-10-25 T4：字段上移到基类（键名 hostExtraMountSlots）＋ 旧键 extraMountSlots
+                //    仍然登记（它是老存档迁移的读口，丢了就等于丢老挡的 3 件东西）＋ 迁移标记。
+                "extraMountSlots", "hostExtraMountSlots", "extraMountLegacyMigrated"}) {
             if (!names.contains(required)) {
                 problems.add("缺字段 " + required);
             }
@@ -2412,7 +2496,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine
             group.setBackground(GuiTextures.BACKGROUND_INVERSE);
             group.addWidget(new LabelWidget(8, 8, () -> "额外挂载槽"));
             for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
-                SlotWidget slot = new SlotWidget(extraMountSlots.storage, i,
+                // 🔴 画的是【基类那份】hostExtraMountSlots（活的那一份）。
+                //    本类的旧字段 extraMountSlots 只为老存档迁移存在，界面上一个字都不露
+                //    （否则玩家会看到 6 格，其中 3 格放了永远无效）。
+                SlotWidget slot = new SlotWidget(hostExtraMountSlots.storage, i,
                         8 + i * 34, 30, true, true);
                 slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
                 slot.setHoverTooltips(extraMountTooltips(i));

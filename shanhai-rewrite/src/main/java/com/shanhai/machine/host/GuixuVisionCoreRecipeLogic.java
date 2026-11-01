@@ -161,6 +161,10 @@ public class GuixuVisionCoreRecipeLogic extends PrimordialEngineRecipeLogic {
     private void shanhai$logDeny(@NotNull ShanhaiHeatGate.Outcome o) {
         final List<ItemStack> stacks = guixu().getExtraMountStacks();
         final Component reason = ShanhaiExtraMountGate.denyReason(o, stacks);
+        // 🆕 2026-11-01：主机基类那条「我们自己的 Jade 通道」（PrimordialEngineRecipeLogic#shanhai$recordIdleReason）
+        //    在这里收口 —— 归墟覆写了 checkRecipe、不走父类的拦截路径，所以必须显式交一次，
+        //    否则归墟的抬头上永远不会有"为什么没跑"（用户要的正是这一行）。
+        shanhai$recordIdleReason(reason);
         final String key = "deny|" + o.deny + "|" + o.describe();
         if (LOGGED.size() > 128 || !LOGGED.add(key)) {
             return;

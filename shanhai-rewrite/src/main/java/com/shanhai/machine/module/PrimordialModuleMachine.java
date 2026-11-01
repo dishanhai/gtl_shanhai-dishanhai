@@ -20,12 +20,15 @@ import com.gregtechceu.gtceu.api.machine.multiblock.WorkableElectricMultiblockMa
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.RecipeHelper;
 import com.gregtechceu.gtceu.utils.GTUtil;
 import com.gtladd.gtladditions.api.machine.IThreadModifierMachine;
 import com.gtladd.gtladditions.api.machine.IWirelessElectricMultiblockMachine;
+import com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler;
 import com.gtladd.gtladditions.common.machine.multiblock.part.WirelessEnergyNetworkTerminalPartMachineBase;
 import com.hepdd.gtmthings.api.misc.WirelessEnergyManager;
+import com.hepdd.gtmthings.utils.TeamUtil;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
 import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
@@ -44,6 +47,10 @@ import com.shanhai.common.machine.ParallelOverrideConfigurator;
 import com.shanhai.common.machine.ParallelOverrideMachine;
 import com.shanhai.common.machine.ParallelPowerBudget;
 import com.shanhai.common.machine.PrimordialOmegaEngineMachine;
+import com.shanhai.common.machine.RecipeTypeIndexGuard;
+import com.shanhai.common.machine.ShanhaiIdleReason;
+import com.shanhai.common.machine.ShanhaiIdleReasonSource;
+import com.shanhai.common.machine.ShanhaiParallelDisplay;
 import com.shanhai.common.recipe.PrimordialRecipeEffects;
 import com.shanhai.common.thread.ShanhaiBatchPlan;
 import com.shanhai.common.thread.ShanhaiConcurrencyTables;
@@ -124,7 +131,7 @@ import java.util.UUID;
 public abstract class PrimordialModuleMachine extends WorkableElectricMultiblockMachine
         implements IModularMachineModule<PrimordialOmegaEngineMachine, PrimordialModuleMachine>, IMachineLife,
                    IWirelessElectricMultiblockMachine, IThreadModifierMachine, ParallelMachine,
-                   ParallelOverrideMachine {
+                   ParallelOverrideMachine, ShanhaiIdleReasonSource {
 
     // ───────────────────────── 几何常量（与 AntichristPosHelper 同源，仅用于兜底候选） ─────────────────────────
     /** 层 0 的基准距离（A 级：AntichristPosHelper 编译期常量）。 */
@@ -282,6 +289,117 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     /** 并行槽重扫订阅。 */
     @Nullable
     private TickableSubscription matterSlotScanSubs;
+
+    // ═════════════════════ 「为什么没跑」（Jade 那一行，2026-11-01 新增） ═════════════════════
+    //
+    //  用户原话（逐字）：「主要是它现在 jade 都没有写出机器不工作的原因」
+    //
+    //  🔴 为什么不能只靠上游那条链（RecipeResult.of → IRecipeStatus → gtlcore 的 Jade 提供器）：
+    //    ① gtlcore 的 RecipeLogicMixin#findAndHandleRecipe 在【方法开头】就把 recipeStatus 置 null
+    //       （字节码 putfield recipeStatus = null）⇒ 它是"每轮重算"的临时值；
+    //    ② gtlcore 的 RecipeLogicProviderMixin#addTooltip 只在 getBoolean("Working") == false 的
+    //       else 分支里读 reason（真分支读的是 work_reason）⇒ 与"在跑/在等"互斥；
+    //    ③ 而我们自己的写入有三道门（原因 null / WORKING|WAITING / lastRecipe != null）
+    //       ⇒ 很多拍根本不写，字段保持 null ⇒ 抬头上就什么都没有。
+    //  ⇒ 本类另开一条【我们自己的】通道：服务端扫描时写这个字段，Jade 用本工程既有的
+    //     IServerDataProvider（服务端写 per-block NBT → 客户端画行）送到客户端。
+    //     判定 / 清空 / 日志格式的唯一一份在 ShanhaiIdleReason（纯 JDK、可离线跑 selfTest）。
+
+    /**
+     * 本机「为什么没跑」的服务端权威状态（值 + 两个日志闸门）。<b>每台机器一份</b>。
+     *
+     * <h2>🔴 为什么它【不是】{@code @DescSynced}</h2>
+     * 读它的是 Jade 的<b>服务端</b>数据提供器（{@code ShanhaiStellarJadePlugin.ReasonProvider}，
+     * {@code IServerDataProvider#appendServerData} 在服务端跑，值随 per-block NBT 一起发给客户端）
+     * ⇒ 不需要再走一条方块实体同步，也就<b>不会</b>出现「客户端留着一份过期文本」这种假数据
+     * （这正是本工程红线「活的界面上不许放假数据」要防的形态）。
+     *
+     * <h2>🔴 为什么它【不】标 {@code @Persisted}</h2>
+     * 它是运行时状态：存档 / 拆装 / 区块卸载之后<b>必须从"不知道"重新算</b>。
+     * 落盘只会让玩家读到一个早已不成立的旧原因。同理，结构破坏时由
+     * {@link #onStructureInvalid()} 显式清空（见那里）。
+     *
+     * <p>⚠️ 未加注解的字段不会进 LDLib 的 {@code ManagedFieldHolder} ⇒ 不参与任何同步/落盘，
+     * 这与本工程既有的「纯服务端运行时状态不加注解」写法一致。
+     */
+    private final ShanhaiIdleReason.Store shanhaiIdleReason = new ShanhaiIdleReason.Store();
+
+    /** 服务端权威读数：{@code ""} ＝ 没有原因 ⇒ Jade 那一行<b>完全不出现</b>。 */
+    @Override
+    public String shanhaiIdleReasonJson() {
+        return shanhaiIdleReason.stored();
+    }
+
+    /**
+     * 发布一次「为什么没跑」—— <b>配方逻辑每轮扫描都调它</b>（{@code PrimordialModuleRecipeLogic#findAndHandleRecipe}）。
+     *
+     * <p>所以「清空」是<b>每一拍都会执行</b>的，不是靠某个事件：
+     * 机器这一轮真的开起来（{@code WORKING} / {@code WAITING} / 手上已有配方）⇒ {@code running = true}
+     * ⇒ {@link ShanhaiIdleReason#next(String, boolean)} 直接返回空串 ⇒ 字段当场清空 ⇒ Jade 下一拍就没有这一行。
+     *
+     * @param reason  这一轮算出来的原因（{@code null} ＝ 这一轮没有原因）
+     * @param running 机器这一轮是否「在跑 / 在等 / 手上已有配方」（真值由配方逻辑给）
+     */
+    public void shanhaiPublishIdleReason(@Nullable Component reason, boolean running) {
+        try {
+            // 机器在跑 ⇒ 结果必是"清空"，连 JSON 都不必序列化（每轮扫描都会调到这里）。
+            final String json = (running || reason == null) ? null : Component.Serializer.toJson(reason);
+            final ShanhaiIdleReason.Store.Verdict verdict = shanhaiIdleReason.publish(
+                    json,
+                    reason == null ? null : reason.getString(),
+                    running,
+                    shanhaiMachineId(),
+                    shanhaiReasonPos(),
+                    System.currentTimeMillis());
+            if (verdict.jadeLog != null) {
+                ShanhaiMod.LOGGER.info(verdict.jadeLog);
+            }
+        } catch (Throwable t) {
+            // 这一行只是"说明"，绝不允许它把机器弄停：异常 ⇒ 当作没有原因（宁可不显示，也不显示错的）。
+            shanhaiIdleReason.clear();
+            ShanhaiMod.LOGGER.warn("[SHANHAI-JADE-REASON] machine={} pos={} 发布失败（本次不显示）：{}",
+                    shanhaiMachineId(), shanhaiReasonPos(), String.valueOf(t));
+        }
+    }
+
+    /**
+     * 原因<b>确实</b>写进了 gtlcore 的 {@code RecipeResult}（上游那条链真的走过一次）时留一行。
+     *
+     * <p>与 {@link #shanhaiPublishIdleReason} 分开：那是「我们自己的那条通道」，
+     * 这是「上游那条通道」。两行对照，就能判出是<b>算出来了但没显示</b>，还是<b>根本没算出来</b>。
+     */
+    public void shanhaiLogFailReason(@Nullable Component reason) {
+        try {
+            final String line = shanhaiIdleReason.failPublished(
+                    shanhaiMachineId(), shanhaiReasonPos(),
+                    reason == null ? null : reason.getString(), System.currentTimeMillis());
+            if (line != null) {
+                ShanhaiMod.LOGGER.info(line);
+            }
+        } catch (Throwable ignored) {
+            // 同上：日志出问题不许影响机器。
+        }
+    }
+
+    /** 注册路径（{@code shanhai:worldline_cracking_hub}）；取不到 ⇒ {@code ?}（不许瞎编一个名字）。 */
+    private String shanhaiMachineId() {
+        try {
+            return getDefinition() == null ? "?" : String.valueOf(getDefinition().getId());
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /** {@code <维度>@x,y,z} —— 日志里<b>定位到具体哪一台</b>用的（旧日志没有坐标，已误归过一次）。 */
+    private String shanhaiReasonPos() {
+        try {
+            return ShanhaiIdleReason.describePos(
+                    getLevel() == null ? null : String.valueOf(getLevel().dimension().location()),
+                    getPos().getX(), getPos().getY(), getPos().getZ());
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
 
     // ═════════════════════════ 玩家可调的并行数（2026-09-27 新增） ═════════════════════════
 
@@ -710,6 +828,15 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         //    挂在这里的理由：本方法已经由 ModuleRegistry#init() 在【注册期】调用（那行不改），
         //    所以这是"加载期必跑 + 日志可 grep"的既有入口，不需要新增任何加载钩子。
         PrimordialGeneratorProduction.selfTest();
+        // 🔴 2026-11-02 追加：池审计「按入池重载分档」的加载期自检 —— 用**用户实机那三个数**当输入，
+        //    证明「long 重载模型复现不出观测差额（差 3.04e7 倍）」与「去掉夹 ⇒ 差额必须为 0」（负对照）。
+        //    判定本体在纯 JDK 的 PrimordialPoolBand（离线可单独编译跑 main）。
+        PrimordialPoolBand.selfTest();
+        ShanhaiMod.LOGGER.info("{} 池审计分档自检通过：{}（详见 PrimordialPoolBand#main 的离线复算）",
+                PrimordialGeneratorProduction.TAG,
+                PrimordialPoolBand.overloadLine(PrimordialPoolBand.DEPOSIT_OVERLOAD));
+        // 明细读取器的可用性（读不到就如实说读不到 —— 本工程纪律：宁可缺，不可假）。
+        ShanhaiMod.LOGGER.info("{} {}", PrimordialGeneratorProduction.TAG, PrimordialPoolWitness.selfCheck());
     }
 
     /**
@@ -1187,8 +1314,14 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
      * {@code MetaMachine / MultiblockControllerMachine / WorkableMultiblockMachine} 各有自己的
      * {@code MANAGED_FIELD_HOLDER}，而 {@code WorkableElectricMultiblockMachine} <b>没有</b>
      * ⇒ 它解析到 {@code WorkableMultiblockMachine} 那一个，正是链上最近者。
+     *
+     * <p>🔴 <b>2026 订正（可见性 private → protected，纯放宽、不改任何行为）</b>：
+     * 第 30 台模块 {@code PrimordialCreationCompilationMatrix} 有自己的 {@code @Persisted} 字段，
+     * 必须 {@code new ManagedFieldHolder(子类.class, <b>链上最近的父 holder</b>)}；
+     * 而它拿不到 private 的这一个，只能偷偷反射（那是本工程禁止的写法）⇒ 放宽到 {@code protected}。
+     * 读到本行的读者请确认：这只是让子类能引用它，<b>持有者、登记内容、语义一个字都没变</b>。
      */
-    private static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
+    protected static final ManagedFieldHolder MANAGED_FIELD_HOLDER = new ManagedFieldHolder(
             PrimordialModuleMachine.class, WorkableElectricMultiblockMachine.MANAGED_FIELD_HOLDER);
 
     @Override
@@ -1331,15 +1464,23 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
                     + " ⇒ §a提供：" + c.describe();
         }
 
+        // 🔴 数字一律从判据那一个函数取（ShanhaiHeatGate#requiredFor），不在这里写死 64 / 1：
+        //    热力两条 = 本机阈值（64）；维护仓 / 碎片 / 数据仓 = 恒 1。
+        //    用户 2026-11-01 原话：「我没有给模块设置 64 个的门槛」⇒ 提示里"64"只能出现在
+        //    线圈 / 恒星热力容器那一行，绝不能盖到维护仓头上。
+        final int heatNeed = ShanhaiHeatGate.requiredFor(
+                ShanhaiHeatGate.Kind.HEAT_TEMP, extraMountRequiredCount());
+        final int singleNeed = ShanhaiHeatGate.requiredFor(
+                ShanhaiHeatGate.Kind.GRAVITY, extraMountRequiredCount());
         return new Component[] {
                 Component.literal("§b§l额外挂载槽 " + (index + 1)),
                 Component.literal("§7这里放的东西用来满足配方的【额外要求】"),
                 Component.literal("§7（超净间 / 无重力·强重力 / 维度 / 研究 / 线圈炉温 / 恒星热力容器等级）"),
-                Component.literal("§8  · 维护仓 ⇒ 超净间（3 档）与重力，放 1 个即可"),
-                Component.literal("§8  · 世界碎片 ⇒ 对应维度的要求，放 1 个即可"),
-                Component.literal("§8  · 创造模式数据访问仓 ⇒ 全部研究要求，放 1 个即可"),
+                Component.literal("§8  · 维护仓 ⇒ 超净间（3 档）与重力，放 " + singleNeed + " 个即可"),
+                Component.literal("§8  · 世界碎片 ⇒ 对应维度的要求，放 " + singleNeed + " 个即可"),
+                Component.literal("§8  · 创造模式数据访问仓 ⇒ 全部研究要求，放 " + singleNeed + " 个即可"),
                 Component.literal("§8  · 线圈 / 恒星热力容器 ⇒ 炉温 / 容器等级，"
-                        + "§f必须放满 " + ShanhaiHeatGate.REQUIRED_COUNT + " 个"),
+                        + "§f必须放满 " + heatNeed + " 个"),
                 Component.literal("§8三格各自独立计算，一条需求一格；放错东西不算数"),
                 Component.literal(stateLine),
         };
@@ -1640,14 +1781,153 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         this.host = host;
     }
 
+    // ═══════════ 1b. 配方类型下标夹紧（2026-10-31 崩服修复 · 24 台模块共用这一处） ═══════════
+
+    /**
+     * <b>覆写 {@code getRecipeType()}：取数组之前先把下标夹到界内。</b>
+     *
+     * <h2>修的是什么（2026-10-31 20:55 实机崩服，原文）</h2>
+     * <pre>
+     * java.lang.ArrayIndexOutOfBoundsException: Index 8 out of bounds for length 6
+     *   at …WorkableMultiblockMachine.getRecipeType(WorkableMultiblockMachine.java:288)
+     *   at …MutableRecipesLogic.lookupRecipeSet(MutableRecipesLogic.kt:287)
+     *   at com.shanhai.machine.module.PrimordialModuleRecipeLogic.shanhai$lookupRecipeSetInner(:860)
+     *   at …lookupRecipeSet(:772) → shanhai$calculateParallelsInRound(:508) → calculateParallels(:474)
+     *   at …MutableRecipesLogic.getRecipe(:161) → findAndHandleMultipleRecipe(:105) → RecipeLogic.serverTick
+     * </pre>
+     * <b>根因</b>：{@code WorkableMultiblockMachine} 的两个字段口径不一致
+     * （{@code javap -v} 逐字，详见 {@link RecipeTypeIndexGuard} 类注释）：
+     * <ul>
+     *   <li>{@code private final GTRecipeType[] recipeTypes} —— <b>不落盘</b>，长度只由注册表决定；
+     *       本批改动把它从 <b>9 缩到 6</b>；</li>
+     *   <li>{@code private int activeRecipeType} —— 带 {@code @Persisted}，<b>写在存档里</b>，
+     *       本存档里还是旧值 <b>8</b>。</li>
+     * </ul>
+     * ⇒ {@code recipeTypes[8]} 在长度 6 的数组上越界。上游 {@code getRecipeType()} 是
+     * {@code getfield / getfield / aaload} 三连，<b>没有上界判断</b>；{@code setActiveRecipeType(int)}
+     * 是裸 {@code putfield}，同样不校验 ⇒ <b>夹紧只能在我们自己的类里兜</b>
+     * （任务书红线：不改上游 jar 的行为）。
+     *
+     * <h2>为什么覆写在【基类】</h2>
+     * 全部 <b>24</b> 台模块都继承本类（{@code ModuleRegistry.SPECS} 24 条 =
+     * {@code PrimordialMatterRecombinatorCore::new} ×1 + {@code StandardPrimordialModule::new} ×23，
+     * 后者 {@code extends PrimordialModuleMachine}）⇒ <b>改这一处，24 台全部兜住</b>。
+     * 本批类型数变小的 5 台（混沌蜉蝣 9→6、世线穿刺 5→4、生物核心 6→5、分子裂隙 3→2、
+     * 多维聚爆 3→2）都在其中；以后任何一台再改短，也自动被这里兜住。
+     *
+     * <h2>为什么边界取 {@code super.getRecipeTypes()}</h2>
+     * 要防的是"用 {@code activeRecipeType} 去索引 {@code WorkableMultiblockMachine} 里那个
+     * <b>private final recipeTypes 字段</b>"这件事 ⇒ 边界必须取<b>同一个数组的长度</b>
+     * （{@code super.getRecipeTypes()} 返回的就是那个字段的值），而不是某个可能被覆写的视图。
+     *
+     * @return 当前激活的配方类型，<b>保证落在 {@code getRecipeTypes()} 范围内</b>
+     * @throws IllegalStateException 类型数组为空时（注册表层面的错配；此时上游那行也必然 AIOOBE，
+     *                               换成<b>带说明</b>的异常，不再出现裸越界）
+     */
+    @Override
+    public GTRecipeType getRecipeType() {
+        final GTRecipeType[] types = super.getRecipeTypes();
+        if (types == null || types.length == 0) {
+            throw new IllegalStateException("[SHANHAI-RTYPE] " + getClass().getName() + " 的配方类型数组为空"
+                    + "（WorkableMultiblockMachine.recipeTypes 由 MultiblockMachineDefinition 在构造期给出）"
+                    + " ⇒ 没有可返回的配方类型。请检查该机器在注册表里的 recipeTypes 配置。pos=" + getPos());
+        }
+        return types[RecipeTypeIndexGuard.clampIndex(super.getActiveRecipeType(), types.length)];
+    }
+
+    /**
+     * 覆写 {@code getActiveRecipeType()}：<b>读出即夹紧</b>（纯读，不写字段）。
+     *
+     * <h2>为什么连 getter 也要夹</h2>
+     * 上游凡是"拿 {@code activeRecipeType} 当下标去取 {@code getRecipeTypes()[…]}"的写法，
+     * 走的都是这个 getter；把它夹住 = 那些地方<b>不会再有越界下标</b>。
+     * 本工程自己也有同样口径的调用点（{@code PrimordialModuleRecipeLogic} 里
+     * "类型数组下标序与 {@code activeRecipeType} 同一口径"那条注释；以及 GT 的
+     * {@code MachineModeFancyConfigurator} 按下标高亮模式页）。
+     *
+     * <p>⚠️ 这个覆写<b>刻意不写字段</b>（写字段只在 {@link #shanhai$clampActiveRecipeTypeToRange(String)}
+     * 里做）：getter 会被客户端渲染/同步路径调用，那里<b>不允许有副作用</b>。
+     *
+     * @return 界内下标；数组为空时返回 {@link RecipeTypeIndexGuard#NO_VALID_INDEX}
+     */
+    @Override
+    public int getActiveRecipeType() {
+        final GTRecipeType[] types = super.getRecipeTypes();
+        return RecipeTypeIndexGuard.clampIndex(super.getActiveRecipeType(), types == null ? 0 : types.length);
+    }
+
+    /**
+     * <b>把持久化的 {@code activeRecipeType} 主动夹到界内并写回。</b>
+     *
+     * <p>与 {@link #getRecipeType()} 的分工：那个只保证"这一次读不出界"，字段里可能<b>一直是 8</b>；
+     * 本方法负责把字段本身改对，并 {@code markDirty()} 让 NBT 重写。
+     * 调用点（都在服务端成立的时机）：
+     * <ul>
+     *   <li>{@link #onLoad()} —— 区块重载、机器被反序列化那一拍（{@code @Persisted} 字段此时已是存档值）；</li>
+     *   <li>{@link #onStructureFormed()} —— 结构成型（配方逻辑开跑之前必然经过这里）。</li>
+     * </ul>
+     * 两处都调是刻意的：单靠 onLoad 会漏掉"成型这一拍才把字段同步进来"的边界，
+     * 单靠成型会漏掉"机器还没成型时也在读 {@code getRecipeType()}"的情形（UI / 工具提示）。
+     *
+     * @param when 触发时机（只用于日志，方便实机核对是哪一拍写的回）
+     */
+    protected final void shanhai$clampActiveRecipeTypeToRange(@NotNull String when) {
+        try {
+            final GTRecipeType[] types = super.getRecipeTypes();
+            final int length = types == null ? 0 : types.length;
+            if (length <= 0) {
+                return;
+            }
+            final int raw = super.getActiveRecipeType();
+            if (!RecipeTypeIndexGuard.isOutOfRange(raw, length)) {
+                return;
+            }
+            final int clamped = RecipeTypeIndexGuard.clampIndex(raw, length);
+            setActiveRecipeType(clamped);
+            markDirty();
+            if (!isRemote()) {
+                ShanhaiMod.LOGGER.warn("[SHANHAI-RTYPE] {} 的持久化 activeRecipeType 越界 ⇒ 已写回界内（{}）："
+                                + "before={} after={} 本机现有配方类型={} 个 ⇒ 夹到第 {} 个={}",
+                        getPos(), when, raw, clamped, length, clamped, types[clamped]);
+            }
+        } catch (Throwable t) {
+            // 夹紧本身是兜底措施，失败也绝不能从加载链上抛出去（宁可这次不夹，getRecipeType 仍会夹）。
+            ShanhaiMod.LOGGER.error("[SHANHAI-RTYPE] 夹紧 activeRecipeType 失败（不影响运行）：{}", t.toString());
+        }
+    }
+
+    /**
+     * 载入兜底：{@code @Persisted} 的 {@code activeRecipeType} 从存档恢复出来之后，
+     * 立刻夹一次并写回 —— <b>这正是本次崩服那个 {@code 8} 被清掉的时刻</b>。
+     *
+     * <p>为什么 {@code onLoad()} 一定在反序列化之后：同工程主机侧
+     * {@code PrimordialOmegaEngineMachine#onLoad()} 早就靠这条前提吃饭（那里的注释原话：
+     * 「本方法 = 区块重载（用户退出后重进存档）时机器被反序列化那一拍必被调用」），
+     * 那条兜底自 2026-09-26 起在实机验证过。
+     */
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        shanhai$clampActiveRecipeTypeToRange("读档");
+    }
+
     // ═════════════════════════════ 2. 生命周期 ═════════════════════════════
 
     @Override
     public void onStructureFormed() {
         super.onStructureFormed();
+        // 🔴 2026-10-31：成型这一拍也写回一次（读档那一拍在 onLoad）。两处都调是故意的，
+        //    理由见 shanhai$clampActiveRecipeTypeToRange 的 javadoc。
+        shanhai$clampActiveRecipeTypeToRange("结构成型");
         // 🔴 2026-09-25（路线 ①）：并行槽的扫描【挂在基类】而不是 onModuleFormed 钩子里 ——
         //    子类覆写钩子时不可能把它漏掉（当年就是"只有核心那一台自己订阅了"）。
         startMatterSlotScan();
+        // 🔴 本轮：无线电网能量通道**不在这里扫**（父代理订正：真实通道是终端部件
+        //    在 addedToController 里的「推」，落在 setWirelessNetworkEnergyHandler 上）。
+        //    成型过程中"推"与 onStructureFormed 的先后顺序上游没承诺 ⇒ 这里【绝不清、也不扫】，
+        //    只把当前状态打一行，方便实机判"推到底有没有来"。
+        ShanhaiMod.LOGGER.debug("[SHANHAI-INFPAR] handler={} side=module phase=结构成型 pos={}",
+                shanhai$wirelessEnergyHandler == null ? "none" : "present", getPos());
         if (!findAndConnectToHost()) {
             // 🔴 刻意不用 removeFromHost()：它会 setHostPosition(null)，把落盘坐标抹掉。
             // 这里只断引用，保留 hostPosition，让「本次没找到」不等于「以后都不试」。
@@ -1668,6 +1948,10 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     @Override
     public void onStructureInvalid() {
         super.onStructureInvalid();
+        // 🔴 「为什么没跑」那条也要清：结构都没了，还挂着一个"因为超净间不满足"的旧原因，
+        //    就是本工程明令禁止的常驻假数据（拆掉方块后玩家还能在别的方块上读到它）。
+        shanhaiIdleReason.clear();
+        shanhai$clearWirelessEnergyHandler("结构破坏");
         stopMatterSlotScan();
         stopReconnectTicker();
         disconnectFromHost();
@@ -1677,6 +1961,10 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     @Override
     public void onPartUnload() {
         super.onPartUnload();
+        // 部件卸载（区块走了）⇒ 同理：这一帧之后没有任何人会刷新那个字段 ⇒ 必须清空。
+        shanhaiIdleReason.clear();
+        // 部件卸载（区块走了）⇒ 不能再相信那个 handler。
+        shanhai$clearWirelessEnergyHandler("部件卸载");
         stopMatterSlotScan();
         stopReconnectTicker();
         disconnectFromHost();
@@ -2038,6 +2326,145 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         return null;
     }
 
+    // ═════════════════════ 🔴 无线电网能量通道（BigInteger 扣电） ═════════════════════
+
+    /**
+     * <b>成型后缓存一次的无线电网能量 handler</b>（{@code null} = 本机没有无线电网输入终端）。
+     *
+     * <h2>怎么拿到的（不是每 tick 扫，也不扫 parts）</h2>
+     * <b>唯一的真实通道是上游的「推」</b>：终端部件
+     * {@code WirelessEnergyNetworkTerminalPartMachine#addedToController(controller)} 的字节码是
+     * <pre>
+     *   super.addedToController(controller);
+     *   if (controller instanceof IWirelessElectricMultiblockMachine wm)
+     *       wm.setWirelessNetworkEnergyHandler(this.wirelessNetworkEnergyHandler);
+     * </pre>
+     * ⇒ 本类覆写 {@link #setWirelessNetworkEnergyHandler} 把它存进这个字段。
+     * <b>成型那一刻推一次</b>，此后不再扫（任务书的性能要求）。
+     *
+     * <h2>⚠️ 为什么"扫 parts"这条路根本走不通（本轮已把那段代码删掉）</h2>
+     * 终端机器本身<b>不</b>实现 {@code IWirelessNetworkEnergyHandler}（{@code javap}：
+     * {@code WirelessEnergyNetworkTerminalPartMachine} 的 {@code implements} 列表里没有它）；
+     * 实现它的是它的内部 trait（{@code WirelessNetworkEnergyHandler}），而那个 trait
+     * 是通过 {@code protected final getWirelessNetworkEnergyHandler()} 暴露的 ——
+     * <b>包外不可见</b>，且它没有被 {@code attachTrait} 挂进 trait holder
+     * ⇒「按接口扫部件」这条路对上游这个终端<b>结构性无效</b>。
+     * 所以 {@code shanhai$refreshWirelessEnergyHandler} 的扫描是<b>兜底</b>（给别的模组/别的部件形态），
+     * 真正的来源是上面那个「推」。
+     *
+     * <h2>🔴 为什么不直接覆写 {@code getWirelessNetworkEnergyHandler()}</h2>
+     * 覆写它会让父类 {@code MutableRecipesLogic#getRecipe()} 整体改走 {@code buildFinalWirelessRecipe}
+     * （字节码 {@code wirelessTrait != null ? buildFinalWirelessRecipe : buildFinalNormalRecipe}），
+     * 而本工程把 <b>N3/N5/N6 + 批处理 + 影子对账全挂在 Normal 支</b>
+     * ⇒ 一走 Wireless 支就<b>一行都不执行</b>（静默失效，比崩溃更难查）。
+     * ⇒ 本类<b>不覆写</b>它（保持 {@code null}），另开一个名字不同的接缝
+     * {@link #shanhaiWirelessEnergyHandler()} 只给"路由电"的地方读。
+     */
+    @Nullable
+    private IWirelessNetworkEnergyHandler shanhai$wirelessEnergyHandler;
+
+    /** {@code null} 也允许：结构破坏时我们主动清、成型时由终端部件推入。 */
+    @Override
+    public void setWirelessNetworkEnergyHandler(@Nullable IWirelessNetworkEnergyHandler trait) {
+        // 🔴 这就是终端部件 {@code addedToController} 推过来的那一个（**上游唯一真实通道**）。
+        //    它推的是【接口方法】⇒ 本类只要 implements 了 IWirelessElectricMultiblockMachine
+        //    就一定会被调到（本类类头显式声明了它）。
+        this.shanhai$wirelessEnergyHandler = trait;
+        ShanhaiMod.LOGGER.info("[SHANHAI-INFPAR] handler=set side=module pos={} type={}",
+                getPos(), trait == null ? "null" : trait.getClass().getSimpleName());
+    }
+
+    /** 只读出口（给 {@code ParallelOverrideMachine#applyEnergyCap} 的池子余额夹子与配方逻辑用）。 */
+    @Override
+    public @Nullable IWirelessNetworkEnergyHandler shanhaiWirelessEnergyHandler() {
+        return shanhai$wirelessEnergyHandler;
+    }
+
+    /**
+     * ⛔ <b>刻意【不】覆写 {@code IWirelessElectricMultiblockMachine#getWirelessNetworkEnergyHandler()}。</b>
+     *
+     * <p>它现在返回接口默认值 {@code null}，这不是"没接上"，而是<b>必须</b>：
+     * 我们两个配方逻辑的直接父类
+     * {@code com.gtladd.gtladditions.api.machine.logic.MutableRecipesLogic}（<b>gtladditions</b>，不是 gtlcore）
+     * 的 {@code getRecipe()} 里<b>自己</b>就有这个分流（{@code javap -p -c} 原文）：
+     * <pre>
+     *   21: invokevirtual getMachine()
+     *   25: checkcast     IWirelessElectricMultiblockMachine
+     *   28: invokeinterface getWirelessNetworkEnergyHandler()      ← 读的就是这个接口方法
+     *   34: aload_2 / 35: ifnull 50
+     *   38–41: invokevirtual buildFinalWirelessRecipe(ParallelData, handler)   ← 非 null 走这支
+     *   50–52: invokevirtual buildFinalNormalRecipe(ParallelData)              ← null 走这支
+     * </pre>
+     * 而本工程把 <b>N3/N5/N6 + 批处理 + 影子对账全挂在 {@code buildFinalNormalRecipe} 上</b>
+     * ⇒ 一旦这个接口方法返回非 null，父类就<b>永远不再调</b> {@code buildFinalNormalRecipe}
+     * ⇒ 效果链<b>一行都不执行</b>（静默失效，比崩溃更难查）。
+     * <p>⚠️ 想"两边都要"也不行：{@code buildFinalWirelessRecipe} 的返回类型是
+     * {@code WirelessGTRecipe}（Kotlin 非空），装不下普通 {@code GTRecipe}；返回 null 则
+     * {@code getRecipe()} 返回 null ⇒ 机器空转。<b>⇒ 这条接口方法只能用接口默认值 null。</b>
+     * <p>⇒ 真正的通道另开一个名字：{@link #shanhaiWirelessEnergyHandler()}；
+     * 终端照样能把 handler 推进来（它推的是 {@link #setWirelessNetworkEnergyHandler}，不是 getter）。
+     */
+
+    /**
+     * 结构破坏 / 部件卸载 ⇒ 丢掉缓存，避免"终端已不在结构里、却还在从池子扣电"。
+     * <p>⚠️ 只在 {@code onStructureInvalid} / {@code onPartUnload} 里清 ——
+     * <b>绝不在 {@code onStructureFormed} 里清</b>：成型过程中部件推入的先后顺序不受我们控制，
+     * 先清后推会把推来的那个抹掉（表现就是"装好了终端却永远 handler=none"）。
+     */
+    private void shanhai$clearWirelessEnergyHandler(@NotNull String phase) {
+        if (shanhai$wirelessEnergyHandler == null) {
+            return;
+        }
+        shanhai$wirelessEnergyHandler = null;
+        shanhai$setDisplayEut(null);
+        ShanhaiMod.LOGGER.info("[SHANHAI-INFPAR] handler=cleared side=module pos={} phase={}",
+                getPos(), phase);
+    }
+
+    // ═════════════════ 🔴 显示：bigint 档的「每 tick 耗电」（只加读取，不改老值） ═════════════════
+
+    /**
+     * <b>bigint 档下「每 tick 耗电」的显示值</b>（{@code null} = 本机没走 BigInteger 通道 ⇒ 显示层一切照旧）。
+     *
+     * <p>为什么需要它：走 BigInteger 通道时，配方 tickInputs 里那个 {@code long} EU 是<b>饱和过</b>的
+     * （或干脆是引擎算出来的近似值），拿它显示就是<b>假数据</b>。这个字段由配方逻辑在
+     * {@code shanhai$routeInfiniteEnergy} 里写、回到 long 档时清成 {@code null}，与真实扣电量同源同值。
+     * <p>⚠️ 它<b>只用于显示</b>：不参与扣电（扣电走 {@code WirelessGTRecipe.wirelessEuTickInputs}），
+     * 也不参与任何判定。
+     */
+    @Nullable
+    private BigInteger shanhai$displayEut;
+
+    /** 只读：{@code null} = 走 long 老路（显示层读原值即可）。 */
+    @Override
+    public @Nullable BigInteger getDisplayEut() {
+        return shanhai$displayEut;
+    }
+
+    /** 唯一写者：配方逻辑的溢出路由（{@code null} = 回到 long 档）。 */
+    public void shanhai$setDisplayEut(@Nullable BigInteger eut) {
+        this.shanhai$displayEut = eut;
+    }
+
+    /**
+     * 把 bigint 档的「每 tick 耗电」追加成一行（<b>只在非 null 时</b>）⇒ long 档显示逐字不变。
+     *
+     * <p>判据（用户要的"不许出现负数或饱和怪值"）：
+     * <ul>
+     *   <li>{@code null} ⇒ 一个字符都不加（老路径）；</li>
+     *   <li>非 null ⇒ 直接打 {@code BigInteger.toString()}（十进制原文，位数再多也不会被压平）；</li>
+     *   <li>断言过 {@code signum() > 0} 才显示，负数一律不显示（宁可缺，不可假）。</li>
+     * </ul>
+     */
+    private void shanhai$addDisplayEutLine(@NotNull List<Component> textList) {
+        final BigInteger eut = shanhai$displayEut;
+        if (eut == null || eut.signum() <= 0) {
+            return;
+        }
+        textList.add(Component.literal("每 tick 耗电: §e" + eut + " EU/t§r §7（BigInteger 通道："
+                + "超过 long 上限，由无线电网终端扣电；能源仓不参与）"));
+    }
+
     /**
      * 放置即绑定（照 gtladditions 同形）。<b>只有发电那台会记</b>，其余 23 台这一行都不会执行
      * ⇒ 它们不写新字段、不加任何运行期行为。
@@ -2176,7 +2603,25 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
             final boolean accepted = WirelessEnergyManager.addEUToGlobalEnergyMap(uuid, production, this);
             final BigInteger after = WirelessEnergyManager.getUserEU(uuid);
             shanhai$auditMine = shanhai$auditMine.add(production);
+            // 🔴 2026-11-02 追加（用户点单「查是不是被别的机器用掉了」）：
+            //    再累计一份「若走 long 重载，池子实际会收到多少」= Σ min(xᵢ, Long.MAX)。
+            //    有了它，「long 档的预期差额」是【逐位精确】算出来的（不是拿平均值估），
+            //    见 PrimordialPoolBand#longOverloadExpectedDiff —— 这就是"把公式算进已知带"的落地。
+            shanhai$auditMineLongClamped = shanhai$auditMineLongClamped.add(
+                    PrimordialPoolBand.longClamped(production));
             shanhai$auditDeposits++;
+            if (!shanhai$depositOverloadLogged) {
+                shanhai$depositOverloadLogged = true;
+                // 只报一次：把「我们到底走哪条重载」变成一行可 grep 的日志证据（反射实读，不靠"我记得"）。
+                ShanhaiMod.LOGGER.info("{} 入池重载（本次运行只报一次）—— {}；实际绑定的那条 = {}；"
+                                + "反射实读的全部重载 = {}。"
+                                + "（判定详情见 PrimordialPoolBand.DEPOSIT_OVERLOAD 的 javadoc："
+                                + "实参是 BigInteger ⇒ 只有 bigint 那条适用；long/int 两条只是 valueOf 后转调）",
+                        PrimordialGeneratorProduction.TAG,
+                        PrimordialPoolBand.overloadLine(PrimordialPoolBand.DEPOSIT_OVERLOAD),
+                        PrimordialPoolBand.DEPOSIT_OVERLOAD.token,
+                        PrimordialPoolWitness.overloadSignatures());
+            }
             shanhai$logGeneration(uuid, baseEut, parallel, gateBonus, production, before, after, accepted,
                     realParallels, batchSize);
             shanhai$auditPool(uuid, after);
@@ -2189,18 +2634,39 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
 
     /** 池审计的累计量（每 20 tick 结算一次）与上一次的池值。 */
     private BigInteger shanhai$auditMine = BigInteger.ZERO;
+    /**
+     * 🔴 2026-11-02 追加：本窗口内 <b>Σ min(每次写入, Long.MAX)</b>。
+     *
+     * <p>用途：<b>逐位精确</b>地算出「若我们走的是 long 重载，池子会涨多少」
+     * ⇒ {@code long 档预期差额 = 本值 − }{@link #shanhai$auditMine}。不这么记，就只能拿平均值估，
+     * 而"估"在用户这条日志上正是最容易被质疑的一环（见 {@link PrimordialPoolBand#selfTest()}）。
+     */
+    private BigInteger shanhai$auditMineLongClamped = BigInteger.ZERO;
     private int shanhai$auditDeposits;
+    /** 「入池重载」那一行只报一次（每台机器一次，别每 tick 刷屏）。 */
+    private boolean shanhai$depositOverloadLogged;
     @Nullable
     private BigInteger shanhai$auditLastPool;
 
     /**
-     * 🔴 <b>池审计那一行的闸门（2026-10-01 用户点单「日志的问题」）。</b>
+     * 🔴 <b>池审计那一行的闸门（2026-10-01 用户点单「日志的问题」；2026-11-02 判据改按入池重载分档 + 两级）。</b>
      *
      * <p>实测本行打了 <b>631 次</b>，而差额<b>恒为负</b>（631/631），绝对值只有两种量级
      * （{@code -|1e18} 与 {@code -|1e17}）。
      * <p>🔴 <b>2026-10-01 用户拍板</b>：这一档（差额 &lt; 0 且 |差额| ≤ 1e19）= <b>已知带</b>
      * ⇒ <b>静默（一行都不打）</b>；差额 ≥ 0，或 |差额| &gt; 1e19 ⇒ <b>当场 WARN</b>。
-     * 判定本体在 {@link ShanhaiLogThrottle#decidePoolAudit}（纯 JDK；离线可单跑自检）。
+     * <p>🔴 <b>2026-11-02 改了什么（用户当天二次拍板）</b>：判据改成
+     * <b>按入池重载分档</b>（{@link PrimordialPoolBand#bandOf}）＋ <b>两级</b>
+     * （{@link PrimordialPoolBand#levelOf}）：
+     * <pre>
+     *   重载 = bigint（我们）⇒ |差额| ≤ 1e19 ⇒ **INFO**（一行，含 明细=Top3）；> 1e19 ⇒ **WARN**
+     *   重载 = long        ⇒ 差额 == Σ(min(xᵢ, Long.MAX) − xᵢ) ⇒ 静默；否则 WARN
+     * </pre>
+     * ⚠️ 不能把 bigint 档再收紧成"只有差额 0 才正常"：用户原话<b>「日志不能每 5 秒一条 WARN，
+     * 那样真异常会被淹掉」</b> —— 这就是先前的 1e15 被否掉的原因。
+     * <p>🔴 <b>节流</b>：{@code INFO} 走 {@code changed(形态, urgent=false)}（<b>同一形态只打一次</b>，
+     * 否则每 20 tick 一条 INFO 比 WARN 更吵）；{@code WARN} 走 {@code changed(形态, urgent=true, now, 5000ms)}
+     * （首次 + 同形每 5 秒最多复述一次）。<b>WARN 的级别一个都没降</b>。
      */
     private final ShanhaiLogThrottle.Gate shanhai$poolAuditGate = new ShanhaiLogThrottle.Gate();
 
@@ -2223,9 +2689,35 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
      * ⚠️ 参考读数（用户实测 631 行全量）：差额<b>恒为负</b>（631/631，{@code Δ总 < 我这台 Σ}），
      * 绝对值落在 {@code [6.27e17, 1.66e18]} ⇒ 按新口径**改后落盘 0 行**（作者原先的实现是 2 行）。
      * 1e19 比实测上限 1.66e18 宽约一档；并且用户口径把 <b>0 也划进异常档</b>。
-     * <p>🔴 <b>哪一侧才是真异常，仍待用户确认</b>：老注释写的是「差额 = 别的写者」（= 别的写者在<b>加</b>），
-     * 而实测方向是<b>反的</b> —— {@code Δ总} 比本机投递的<b>少</b>。
-     * 本事后注释只陈述实测，不再替用户断言"别的写者是谁"。
+     *
+     * <h2>🔴 2026-11-02：「差额到底是谁造成的」已有答（用户点单「查它是不是被别的机器用掉了」）</h2>
+     * <ol>
+     *   <li><b>不是"每次被 Long.MAX 夹"</b>。我们走的是 <b>BigInteger 重载</b>
+     *       （{@link PrimordialPoolBand#DEPOSIT_OVERLOAD}，三条独立证据见那个常量的 javadoc），
+     *       而 {@code WirelessEnergyManager} 的那条方法被 gtladditions <b>{@code @Overwrite}</b> 成
+     *       <b>精确 {@code BigInteger.add}、没有任何单次上限</b>。
+     *       ⇒ 离线复算（{@link PrimordialPoolBand#main}）：long 模型会把差额做成 −2.377e27，
+     *       比实机的 −7.83e19 大 <b>3.04e7 倍</b> ⇒ <b>夹模型复现不出来</b>。
+     *   <li><b>是别的写者的净额</b>。bigint 档下我们的写入是精确的 ⇒
+     *       {@code Δ池 − Σ} 逐位等于"同队伍里别人加了/取了多少"。实机 −7.83e19 即
+     *       <b>这 20 tick 里被别的机器取走约 3.9e18 EU/t</b>（≈ 8.49 × Long.MAX）。
+     *       {@code WirelessEnergyReceiveCover}（gtlcore mixin 字节码里就调
+     *       {@code addEUToGlobalEnergyMap(uuid, −amount, machine)}）与无线网终端的 handler
+     *       都是这条路上的取电方 —— 而本结构自己的<b>非发电模块</b>与主机引擎也走同一个池子。
+     *   <li><b>明细读得到</b>：gtladditions 的 {@code BIG_MACHINE_DATA}（按机器记账，弱键 + 5 秒过期）
+     *       能列出"每台机器的最后一次单笔"⇒ 本行现在会把 Top3 机器/终端连坐标一起打出来
+     *       （读不到就写 {@code unreadable(原因)}，绝不猜）。见 {@link PrimordialPoolWitness}。
+     * </ol>
+     * <p>⚠️ 诚实边界：{@code BIG_MACHINE_DATA} 只有"最后一次单笔"，<b>不是窗口累计</b>
+     * ⇒ 它能把"谁在取电"点出来，<b>不能</b>把 −7.83e19 逐位分摊到各台机器头上。
+     *
+     * <h2>🔴 2026-11-02 用户二次拍板：两级（看得见 + 异常不被淹）</h2>
+     * <pre>
+     *   |差额| ≤ 1e19 ⇒ INFO 一行（含 其它收支= 明细=Top3 入池重载= 单次上限=）；同一形态只打一次
+     *   |差额| &gt; 1e19 ⇒ WARN（首次 + 同形每 5 秒复述一次）
+     *   WARN 且 明细=unreadable ⇒ 追加 witness=unreadable
+     *        （让人知道"是我们读不到，不一定真是别人用了"，不把"读不到"当成"没人用"）
+     * </pre>
      */
     private void shanhai$auditPool(@NotNull UUID uuid, @NotNull BigInteger poolNow) {
         if (getOffsetTimer() % 20L != 0L) {
@@ -2233,32 +2725,81 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         }
         if (shanhai$auditLastPool != null) {
             final BigInteger deltaTotal = poolNow.subtract(shanhai$auditLastPool);
-            final BigInteger others = deltaTotal.subtract(shanhai$auditMine);
-            final ShanhaiLogThrottle.Verdict v = ShanhaiLogThrottle.decidePoolAudit(
-                    shanhai$poolAuditGate, others, System.currentTimeMillis());
-            if (v.level != ShanhaiLogThrottle.Level.NONE) {
-                // 🔴 用户 2026-10-01 拍板后，已知带 = 静默 ⇒ 走到这里只可能是「不在已知带内」。
-                //    （下面那个 INFO 分支特意留着：口径若翻回「形态首次打一次」，它立刻就会被走到。）
-                final String tail = "【本行已改为「同一形态只打一次」：自上次落盘以来同形重复 " + v.suppressed + " 次已静默】"
-                        + "⚠️ 差额符号的方向判据【仍待用户确认】（见 ShanhaiLogThrottle.POOL_DIFF_KNOWN_LIMIT 的注释）；"
-                        + "pos=" + getPos();
-                if (v.abnormal) {
-                    // 🔴 不在已知带内 ⇒ 当场 WARN（不许被去重吃掉）
-                    ShanhaiMod.LOGGER.warn("{} 🔴 池审计差额【超出已知带】{}：Δ总={} ／ 我这台 Σ={}（{} 次入池）"
-                                    + "／ 差额={}；已知带 = 差额 < 0 且 |差额| ≤ {}"
-                                    + "（实测 631/631 恒为负、量级 1e17~1e18；按用户口径差额 ≥ 0 也算异常）。{}",
-                            PrimordialGeneratorProduction.TAG, v.shape, deltaTotal, shanhai$auditMine,
-                            shanhai$auditDeposits, others, ShanhaiLogThrottle.POOL_DIFF_KNOWN_LIMIT, tail);
-                } else {
-                    ShanhaiMod.LOGGER.info("{} 池审计（最近 20 tick）：Δ总={} ／ 我这台 Σ={}（{} 次入池）／ 差额={}{}",
-                            PrimordialGeneratorProduction.TAG, deltaTotal, shanhai$auditMine,
-                            shanhai$auditDeposits, others, tail);
+            // 「其它收支」= Δ池 − 我们Σ（逐位；bigint 档下我们那一半是精确的）
+            final BigInteger others = PrimordialPoolBand.otherWritersNet(deltaTotal, shanhai$auditMine);
+            final PrimordialPoolBand.DepositOverload overload = PrimordialPoolBand.DEPOSIT_OVERLOAD;
+            final PrimordialPoolBand.Band band = PrimordialPoolBand.bandOf(
+                    overload, others, shanhai$auditMine, shanhai$auditMineLongClamped);
+            final ShanhaiLogThrottle.Level level = PrimordialPoolBand.levelOf(band);
+            if (level == ShanhaiLogThrottle.Level.NONE) {
+                // 今天只有 long 档的「差额 == 闭式预报」会走到这里（long 档在生产上是跑不到的分支）。
+                // 静默次数不丢：下一条真正落盘的行会把 takeSuppressed() 一起打出来。
+                shanhai$poolAuditGate.noteSuppressed();
+            } else {
+                final boolean abnormal = level == ShanhaiLogThrottle.Level.WARN;
+                final String shape = "池审计|" + overload.token + "|" + band.token + "|"
+                        + ShanhaiLogThrottle.shapeOf(others);
+                // 🔴 2026-11-02 用户拍板：INFO 走「同一形态只打一次」，WARN 走「首次 + 同形每 5 秒复述一次」。
+                //    （INFO 若也每 20 tick 一条，比 WARN 更吵 —— 那正是用户要避免的"真异常被淹掉"。）
+                if (shanhai$poolAuditGate.changed(shape, abnormal, System.currentTimeMillis(),
+                        ShanhaiLogThrottle.DEFAULT_MIN_INTERVAL_MILLIS)) {
+                    final long suppressed = shanhai$poolAuditGate.takeSuppressed();
+                    final PrimordialPoolWitness.Reading w = shanhai$poolWitness(uuid);
+                    // 那四个字段只有一处构造（PrimordialPoolBand#fieldsLine）⇒ INFO 行与 WARN 行不会漂移。
+                    final String fields = PrimordialPoolBand.fieldsLine(overload, others, w.detailText())
+                            + PrimordialPoolBand.witnessSuffix(band, w.readable);
+                    final String body = "Δ总=" + deltaTotal + " ／ 我这台 Σ=" + shanhai$auditMine
+                            + "（" + shanhai$auditDeposits + " 次入池）／ 差额=" + others + "；"
+                            + fields + "；"
+                            + "已知带 = " + PrimordialPoolBand.bandText(
+                                    overload, shanhai$auditMine, shanhai$auditMineLongClamped) + "；"
+                            + "long 重载的预期差额（逐位）= "
+                            + PrimordialPoolBand.longOverloadExpectedDiff(
+                                    shanhai$auditMine, shanhai$auditMineLongClamped)
+                            + "（本次 Σ(min(xᵢ,Long.MAX))=" + shanhai$auditMineLongClamped + "）；"
+                            + "本队伍取电机器「最后一次单笔」之和 = " + w.negativeSumText()
+                            + "（负 = 取电；⚠️不是窗口累计）。"
+                            + "【限流：INFO=同一形态只打一次、WARN=同形每 "
+                            + (ShanhaiLogThrottle.DEFAULT_MIN_INTERVAL_MILLIS / 1000L)
+                            + " 秒最多复述一次；自上次落盘以来同形重复 " + suppressed + " 次已静默】pos=" + getPos();
+                    if (abnormal) {
+                        // |差额| > 1e19 ⇒ 真异常（级别与改动前一致，没降级）
+                        ShanhaiMod.LOGGER.warn("{} 🔴 池审计差额【{}】{}：{}",
+                                PrimordialGeneratorProduction.TAG, band.token, shape, body);
+                    } else {
+                        // |差额| ≤ 1e19 ⇒ 看得见，但不是异常（一行 INFO，含 明细=Top3）
+                        ShanhaiMod.LOGGER.info("{} 池审计（{}）{}：{}",
+                                PrimordialGeneratorProduction.TAG, band.token, shape, body);
+                    }
                 }
             }
         }
         shanhai$auditLastPool = poolNow;
         shanhai$auditMine = BigInteger.ZERO;
+        shanhai$auditMineLongClamped = BigInteger.ZERO;
         shanhai$auditDeposits = 0;
+    }
+
+    /**
+     * 取一次「池子里别的机器在做什么」的只读明细（Top3）。
+     *
+     * <p>只在<b>要落盘那一行</b>才读（每 20 tick 至多一次，且还被 5 秒复述间隔挡着）
+     * ⇒ 不在热路径上做反射。任何异常都退化成 {@code unreadable}，<b>不许影响配方</b>
+     * （与 {@code shanhai$depositGenerationToWirelessPool} 的探针同纪律）。
+     */
+    @NotNull
+    private PrimordialPoolWitness.Reading shanhai$poolWitness(@NotNull UUID poolKey) {
+        try {
+            // 池子的键是 TeamUtil.getTeamUUID(uuid)（team 共享）⇒ 明细也只统计同队伍的那几台，
+            // 免得把别人队伍的电算进来（那本是两本账）。
+            return PrimordialPoolWitness.read(this, TeamUtil.getTeamUUID(poolKey), TeamUtil::getTeamUUID, 3);
+        } catch (Throwable t) {
+            try {
+                return PrimordialPoolWitness.read(this, null, null, 3);
+            } catch (Throwable t2) {
+                return PrimordialPoolWitness.unreadable("读取器异常: " + t + " ／ " + t2);
+            }
+        }
     }
 
     /**
@@ -2860,6 +3401,11 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
         // 🔴 2026-09-26（用户交办）：紧挨着 GTCEu 那行「最大功率」画出【本机能源仓的实际电压等级】。
         //    那行是"能力上限"，这一行才是"电压闸门真正用的那个值" —— 见 addEnergyTierDisplayText 的 javadoc。
         addEnergyTierDisplayText(textList);
+        // 🔴 本轮（原任务书 ④ · 显示）：bigint 档下「每 tick 耗电」必须显示 BigInteger。
+        //    为什么不能沿用 GTCEu 那行：走 BigInteger 通道时配方 tickInputs 里那个 long EU 是【饱和过】的
+        //    ⇒ 直接显示就是 9223372036854775807 这种怪值（假数据）。
+        //    ⚠️ 只在非 null 时追加一行 ⇒ long 档的显示【一个字都不变】（逐字不变）。
+        shanhai$addDisplayEutLine(textList);
         PrimordialOmegaEngineMachine h = getHost();
         if (h != null && h.isFormed()) {
             BlockPos p = h.getPos();
@@ -3275,7 +3821,14 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
      * 不许各自再写一遍 {@code Long.MAX_VALUE / 2}。
      */
     public static boolean isInfiniteParallel(long parallel) {
-        return parallel >= Long.MAX_VALUE / 2;
+        // 🔴 2026-11（任务 A）：**实现搬进纯核** {@link ShanhaiParallelDisplay#isInfiniteParallel(long)}
+        //    —— 取值与判据逐字不变（仍是 `>= Long.MAX_VALUE / 2`），搬家的唯一理由是
+        //    「同一个阈值现在有第四个读者」：主机侧 {@code PrimordialOmegaEngineMachine#getMaxParallel()}
+        //    也要用它决定 Jade 写「无限」哨兵还是写整数。
+        //    ⇒ 那个读者在主机类里，而主机类不能 import 模块类（依赖方向反了），
+        //      两处各写一遍 `Long.MAX_VALUE / 2` 必然漂移 ⇒ 判据下沉到一个只 import java.* 的纯核，
+        //      模块 / 主机 / 离线判据三方共用同一份字节码。
+        return ShanhaiParallelDisplay.isInfiniteParallel(parallel);
     }
 
     /**
@@ -3287,7 +3840,8 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
      * <b>取值与行为逐字不变</b>。
      */
     public static String formatParallel(long parallel) {
-        return isInfiniteParallel(parallel) ? "无限" : String.format(java.util.Locale.ROOT, "%,d", parallel);
+        // 2026-11：委托纯核（{@code 无限} / {@code %,d} 两种形态逐字不变）。
+        return ShanhaiParallelDisplay.format(parallel);
     }
 
     /**
@@ -4061,6 +4615,28 @@ public abstract class PrimordialModuleMachine extends WorkableElectricMultiblock
     /** 当前这台机器能不能用额外挂载槽充当<b>热力源</b>（白名单 = 用户点名的三台）。 */
     public boolean canUseExtraMountAsHeatSource() {
         return ShanhaiHeatGate.hasHeatSlot(shanhai$machineId());
+    }
+
+    /**
+     * <b>本模块额外挂载槽的【热力】阈值 = 64</b>（2026-10-25 阈值参数化的钩子；
+     * 与主机基类 {@code PrimordialOmegaEngineMachine#extraMountRequiredCount()} 同名同义）。
+     *
+     * <p>🔴 <b>为什么本类没有 {@code @Override}</b>：模块不继承主机基类（它 extends
+     * {@code WorkableElectricMultiblockMachine}）—— 这是"同名钩子、各写一份实现"的<b>唯一</b>一处，
+     * 理由是两个类根本不在同一条继承链上。<b>数值仍是同一个常量</b>
+     * （{@link ShanhaiHeatGate#REQUIRED_COUNT}），所以不存在"两个 64 会漂移"的问题。
+     *
+     * <p>🔴🔴 <b>2026-11-01：这个数只管热力两条</b>（{@code ebf_temp} / {@code SCTier}）。
+     * 它<b>不再</b>是"整格的统一门槛" —— 超净间 / 无重力 / 维度 / 研究四类条件恒为 1 个
+     * （唯一判据：{@link ShanhaiHeatGate#requiredFor}，用户原话「放入对应的 1 个维护仓就满足」
+     * 「我没有给模块设置 64 个的门槛」）。
+     * <p>模块侧判定仍走 {@code ShanhaiExtraMountGate.evaluate(...)} 的 6 参重载
+     * （= 把 {@code REQUIRED_COUNT} 当<b>热力</b>阈值传下去；那一行<b>本轮一个字都没改</b>，
+     * 逐 kind 的分档在判定核里现算）。
+     * 本方法供<b>文案</b>读（经 {@code ShanhaiHeatGate#requiredFor}），保证"界面上写的数"与"判据用的数"同源。
+     */
+    public int extraMountRequiredCount() {
+        return ShanhaiHeatGate.REQUIRED_COUNT;
     }
 
     /**

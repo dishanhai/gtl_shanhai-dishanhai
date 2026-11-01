@@ -10,9 +10,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -52,6 +54,22 @@ import java.util.Set;
  * <h2>四、异常与缺键</h2>
  * 样板没 NBT / 键不存在 / 值形状不认识 / gtlcore 工具抛异常 ⇒ 该来源按<b>空</b>处理，全部包在
  * {@code try/catch (Throwable)} 里；本类<b>永不抛异常</b>（它会在 UI 与服务端 tick 路径上被调用）。
+ *
+ * <h2>五、🆕 2026-11 容错：四个来源读到的字符串<b>也认显示名</b></h2>
+ * 实机证据：玩家界面写着「原初因果编织」，而本类读出 {@code NONE}。老归一化只认
+ * {@code ns:path} 英文 id ⇒ 中文名必然 {@code tryParse} 失败。
+ * 现在 {@link ShanhaiRecipeTypeIds#canonical(String)} 多了第 ③ 步「显示名反查」
+ * （表 = 宿主注册表 × lang 现建，见 {@link ShanhaiRecipeTypeNameIndex}），
+ * 所以<b>中文名 / 英文显示名</b>也能归一成真 id；反查不到仍返回 {@code ""}（<b>不猜</b>）。
+ *
+ * <h2>六、🆕 2026-11 取证：解析结果 NONE 时把<b>原始 NBT</b> 打出来（只读、限流）</h2>
+ * 见 {@link #describeRawNbt(int, ItemStack)} / {@link #rawDeclaration(ItemStack)} 与
+ * {@link ShanhaiStellarLog#logXrecipeNbtIfUnresolved(int, ItemStack)}：
+ * <pre>
+ *   [SHANHAI-STELLAR] XRECIPE_NBT slot=3 keys=[a, b, c] raw=[gt_shanhai_recipe_type='原初因果编织']
+ * </pre>
+ * 目的：一眼看出类型到底存在<b>哪个键</b>、值是中文还是 id。这一步<b>只读字符串</b>，
+ * 不写 NBT、不参与任何判定。
  */
 public final class ShanhaiPatternTypeReader {
 
@@ -332,6 +350,133 @@ public final class ShanhaiPatternTypeReader {
                     || tag.contains(ShanhaiRecipeTypeIds.KEY_AUTHORITATIVE, Tag.TAG_LONG);
         } catch (Throwable t) {
             return false;
+        }
+    }
+
+    // ============================================================ 五、NBT 原文取证（只读；判定为 NONE 时用）
+
+    /**
+     * 一个键算不算「跟配方类型有关」—— 只用于<b>排序</b>（把可疑的键排在 {@code raw=[…]} 最前面），
+     * <b>不参与任何判定</b>。
+     *
+     * <p>为什么用「名字里带 type」而不是白名单：本轮实机就是这个场景 ——
+     * 我们认识的四个键全读空，而样板里<b>另有别的键</b>存着那五个字
+     * （{@code 原初因果编织}）。白名单只会再漏一次，名字特征不会。
+     */
+    public static boolean isTypeRelatedKey(@Nullable String key) {
+        if (key == null || key.isEmpty()) {
+            return false;
+        }
+        final String lower = key.toLowerCase(Locale.ROOT);
+        return lower.contains("type") || lower.contains("recipe_type") || lower.contains("recipetype");
+    }
+
+    /**
+     * 样板 NBT 的<b>全部</b>键名（排序后的新表；没有 NBT ⇒ 空表；永不为 null、永不抛）。
+     *
+     * <p>排序只为日志可复现（同一次读两次打出来必须逐字节相同，否则断言没法写）。
+     */
+    public static @NotNull List<String> allKeys(@Nullable CompoundTag tag) {
+        try {
+            if (tag == null || tag.isEmpty()) {
+                return List.of();
+            }
+            final List<String> keys = new ArrayList<>(tag.getAllKeys());
+            Collections.sort(keys);
+            return Collections.unmodifiableList(keys);
+        } catch (Throwable t) {
+            return List.of();
+        }
+    }
+
+    /**
+     * 每个键的<b>原始</b>值（{@code String} 取原文；其它类型取 SNBT 原文），最多 {@code maxPairs} 个键。
+     *
+     * <p>排序：<b>先</b>「名字里带 type」的键（{@link #isTypeRelatedKey}），<b>再</b>其余键，各自按名字序。
+     * —— 目的是「一眼看出它到底存在哪个键」：可疑的键必须排在 {@code raw=[…]} 的第一个。
+     *
+     * @param maxPairs 最多取几个键（≤0 ⇒ 空表）
+     */
+    public static @NotNull List<ShanhaiPatternRawNbt.Pair> rawPairs(@Nullable CompoundTag tag, int maxPairs) {
+        if (maxPairs <= 0) {
+            return List.of();
+        }
+        try {
+            final List<String> keys = allKeys(tag);
+            if (keys.isEmpty()) {
+                return List.of();
+            }
+            final List<String> preferred = new ArrayList<>(keys.size());
+            final List<String> rest = new ArrayList<>(keys.size());
+            for (String key : keys) {
+                (isTypeRelatedKey(key) ? preferred : rest).add(key);
+            }
+            final List<ShanhaiPatternRawNbt.Pair> out = new ArrayList<>(Math.min(maxPairs, keys.size()));
+            for (List<String> bucket : List.of(preferred, rest)) {
+                for (String key : bucket) {
+                    if (out.size() >= maxPairs) {
+                        return List.copyOf(out);
+                    }
+                    out.add(new ShanhaiPatternRawNbt.Pair(key, rawValueOf(tag, key)));
+                }
+            }
+            return List.copyOf(out);
+        } catch (Throwable t) {
+            return List.of();
+        }
+    }
+
+    /** 一个键的原始值：{@code TAG_STRING} ⇒ 原文（不带引号）；其它 ⇒ SNBT 原文。读不到 ⇒ {@code ""}。 */
+    private static @NotNull String rawValueOf(@Nullable CompoundTag tag, @NotNull String key) {
+        try {
+            final Tag value = tag == null ? null : tag.get(key);
+            if (value == null) {
+                return "";
+            }
+            if (value.getId() == Tag.TAG_STRING) {
+                return tag.getString(key);
+            }
+            return value.toString();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * {@code /shanhai why} ③ 要用的「原始声明字符串」，形如
+     * {@code [gt_shanhai_recipe_type='原初因果编织']}（最多 {@link ShanhaiPatternRawNbt#WHY_RAW_MAX} 个键）。
+     *
+     * <p>🔴 这里给的是<b>原始值</b>，不是 {@link #resolve} 归一化后的结果 —— 两者的差正是本轮要查的东西。
+     * <p>样板没有 NBT ⇒ {@code ""}（调用方就不追加这一段，老输出逐字节不变）。
+     */
+    public static @NotNull String rawDeclaration(@Nullable ItemStack stack) {
+        try {
+            if (stack == null || stack.isEmpty()) {
+                return "";
+            }
+            final List<ShanhaiPatternRawNbt.Pair> pairs =
+                    rawPairs(stack.getTag(), ShanhaiPatternRawNbt.WHY_RAW_MAX);
+            return pairs.isEmpty() ? "" : ShanhaiPatternRawNbt.rawText(pairs, ShanhaiPatternRawNbt.WHY_RAW_MAX);
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    /**
+     * {@code XRECIPE_NBT} 那一行的正文（不含 {@code [SHANHAI-STELLAR]} 前缀）：
+     * <pre>
+     *   XRECIPE_NBT slot=3 keys=[gt_shanhai_recipe_type, in, out] raw=[gt_shanhai_recipe_type='原初因果编织']
+     * </pre>
+     *
+     * <p>给「这条样板的类型<b>解析结果是 NONE</b>」时用（调用方判 NONE，本方法只取原文）。
+     */
+    public static @NotNull String describeRawNbt(int slot, @Nullable ItemStack stack) {
+        try {
+            final CompoundTag tag = stack == null || stack.isEmpty() ? null : stack.getTag();
+            return ShanhaiPatternRawNbt.body(slot, allKeys(tag),
+                    rawPairs(tag, ShanhaiPatternRawNbt.XRECIPE_RAW_MAX));
+        } catch (Throwable t) {
+            return "XRECIPE_NBT slot=" + slot + " keys=[] raw=[]";
         }
     }
 

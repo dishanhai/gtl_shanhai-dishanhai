@@ -1,7 +1,9 @@
 package com.shanhai.common.recipe;
 
 import com.gregtechceu.gtceu.api.capability.recipe.EURecipeCapability;
+import com.gregtechceu.gtceu.api.capability.recipe.FluidRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
+import com.gregtechceu.gtceu.api.capability.recipe.ItemRecipeCapability;
 import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
@@ -10,6 +12,8 @@ import com.gregtechceu.gtceu.api.recipe.RecipeHelper;
 import com.gregtechceu.gtceu.api.recipe.chance.logic.ChanceLogic;
 import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gregtechceu.gtceu.api.recipe.content.ContentModifier;
+import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
+import com.gregtechceu.gtceu.api.recipe.ingredient.SizedIngredient;
 import com.gregtechceu.gtceu.api.recipe.modifier.ParallelLogic;
 
 import com.gtladd.gtladditions.common.data.ParallelData;
@@ -18,6 +22,7 @@ import com.gtladd.gtladditions.utils.RecipeCalculationHelper;
 import com.mojang.logging.LogUtils;
 
 import com.shanhai.common.log.ShanhaiLogThrottle;
+import com.shanhai.common.machine.ShanhaiParallelDisplay;
 import com.shanhai.common.thread.ShanhaiBatchPlan;
 import com.shanhai.common.thread.ShanhaiDurationFloor;
 import com.shanhai.common.thread.ShanhaiFairAllocation;
@@ -31,8 +36,14 @@ import org.gtlcore.gtlcore.api.recipe.BatchProcessing;
 import org.gtlcore.gtlcore.api.recipe.IAdvancedContentModifier;
 import org.gtlcore.gtlcore.api.recipe.IGTRecipe;
 import org.gtlcore.gtlcore.api.recipe.IParallelLogic;
+import org.gtlcore.gtlcore.api.recipe.RecipeExtensionCopier;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.Ingredient;
+
 import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
+import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
 import org.gtlcore.gtlcore.config.ConfigHolder;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 
 import java.util.Collection;
@@ -1351,23 +1362,562 @@ public final class PrimordialRecipeEffects {
         }
         // ① 输入量上限（long）
         final long byInput = IParallelLogic.getMaxParallel(rlm, recipe, limit);
+        // 🔴 2026-11：三分诊断（in / out / budget）—— 见下面 shanhai$logPick。
+        //    ⚠️ 输入量为 0/1 时【不算】输出空间那一步（上游同形：byInput <= 1 直接返回），
+        //       所以这里给 -1（= 没算），让诊断如实打 out=?，不拿 byInput 冒充。
+        final long byOutput;
+        if (byInput <= 1L) {
+            byOutput = -1L;
+        } else {
+            // ② 输出空间上限（long）
+            byOutput = IParallelLogic.getMinParallel(rlm, recipe, byInput);
+        }
+        shanhai$logPick(rlm, machine, recipe, byInput, byOutput, limit);
         if (byInput <= 1L) {
             return recipe;
-        }
-        // ② 输出空间上限（long）
-        final long byOutput = IParallelLogic.getMinParallel(rlm, recipe, byInput);
-        if (byOutput <= 1L) {
+        }        if (byOutput <= 1L) {
             // 与上游同形：limitByOutput <= 1 时返回【原配方】，不做任何放大。
             return recipe;
         }
         // ③ 放大（long，含 setRealParallels）
-        GTRecipe multi = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, byOutput);
+        GTRecipe multi = multiplyByParallel(recipe, byOutput);
         // ④ 概率掷骰（与上游同款闸门）
         if (!BatchProcessing.isEnabled(machine)) {
             multi = IParallelLogic.getRecipeOutputChance(rlm, multi);
         }
         shanhai$probeGeneratorEnergyWall(machine, recipe, multi, byOutput);
         return multi;
+    }
+
+    /**
+     * 🔴 <b>并行三分诊断（{@code [SHANHAI-INFPAR] pmax …}）—— 这一行决定"为什么没到最大并行"。</b>
+     *
+     * <h2>行的形状（任务书给死，一个字段都不许少）</h2>
+     * <pre>
+     *   [SHANHAI-INFPAR] pmax machine=&lt;id&gt; in=&lt;byInput&gt; out=&lt;byOutput&gt; budget=&lt;limit&gt; pick=&lt;min&gt; why=&lt;in|out|budget&gt; inItem=&lt;…&gt; inFluid=&lt;…&gt;
+     * </pre>
+     * <ul>
+     *   <li>{@code why} = 三者里最小的那一项 ⇒ <b>一眼看出瓶颈</b>；</li>
+     *   <li>{@code inItem / inFluid} = {@code IParallelLogic.getInputItemParallel} 与
+     *       {@code getInputFluidParallel} <b>各自</b>的值 —— 用户 AE 里可能有 &gt;9.2e 的料，
+     *       而 {@code getContents()} 报出来的未必是这个量，<b>这一格就是用来照出真相的</b>。</li>
+     * </ul>
+     *
+     * <h2>什么时候打（防刷屏）</h2>
+     * <pre>
+     *   ① 只在 {@code pick 明显小于 budget}（≤ 一半）时才打 —— 见 ShanhaiParallelDiag#obviousBelowBudget；
+     *      ⇒ {@code pick == budget}（预算就是瓶颈、机器正吃满额度）**一行都不打**；
+     *   ② 同一形态只打一次 —— 形态 = 机器 × 瓶颈(why) × 三个读数的 **2 的幂次桶**
+     *      （{@link ShanhaiParallelDiag#pickShape}）。主机一轮几百条候选配方只会产生几个形态，
+     *      所以**既不会刷屏、也不会把真凶吞掉**；真正落盘的那一行里仍是精确数字。
+     *      ⚠️ 这比任务书写的「同形态 5 秒 1 行」**更严**（是"只打一次"），理由是本工程反复吃过
+     *      "正常行刷屏"的亏；要放宽成每 5 秒复述一次，把 {@code changed(..., false, ...)}
+     *      的 {@code urgent} 改成 {@code true} 即可（一个实参）。
+     * </pre>
+     * <p>⚠️ 判定与行文本全在纯核 {@link ShanhaiParallelDiag}（离线判据驱动同一份字节码）；
+     * 本方法只负责"取输入侧的两个读数 + 落盘"，且<b>只在真的要落盘时</b>才多算那两次
+     * （那两次要走 {@code RecipeHandlePart} 统计，不该每张配方都白算）。
+     *
+     * <p>🔴 <b>两个调用点</b>（同一条诊断、同一份实现）：
+     * ① 原生修饰链的 long 分支 = 本方法；② 主机多配方引擎的每次并行分配 =
+     * {@code PrimordialEngineRecipeLogic#shanhai$calculateParallelDirect}。
+     * 后者正是"归墟主机为什么没到最大并行"的落点（它那一路的 {@code out} 是 int 形状的输出空间钳制）。
+     */
+    public static void shanhai$logPick(@Nullable IRecipeLogicMachine rlm, @Nullable MetaMachine machine,
+                                       @Nullable GTRecipe recipe, long byInput, long byOutput, long limit) {
+        try {
+            if (rlm == null || machine == null || recipe == null) {
+                return;
+            }
+            final ShanhaiParallelDiag.Pick p = ShanhaiParallelDiag.pick(byInput, byOutput, limit);
+            if (!ShanhaiParallelDiag.obviousBelowBudget(p)) {
+                return;
+            }
+            final String machineId = machine.getDefinition() == null
+                    ? "?" : String.valueOf(machine.getDefinition().getId());
+            final long now = System.currentTimeMillis();
+            // 🔴 urgent = false：同一形态【只打一次】（≤"每 5 秒 1 行"这条上限，更严不更松）。
+            //    形态里的数值已被压成 2 的幂次桶 ⇒ 几百条候选配方只会产生几个形态，
+            //    不会因为"每条候选的精确数字不同"而刷屏（见 ShanhaiParallelDiag#pickShape）。
+            if (!shanhai$PICK_GATE.changed(ShanhaiParallelDiag.pickShape(machineId, p), false, now,
+                    ShanhaiParallelDiag.PICK_MIN_INTERVAL_MILLIS)) {
+                return;
+            }
+            final long suppressed = shanhai$PICK_GATE.takeSuppressed();
+            long inItem = -1L;
+            long inFluid = -1L;
+            try {
+                inItem = IParallelLogic.getInputItemParallel(rlm, recipe, limit);
+            } catch (Throwable ignored) {
+                inItem = -1L;
+            }
+            try {
+                inFluid = IParallelLogic.getInputFluidParallel(rlm, recipe, limit);
+            } catch (Throwable ignored) {
+                inFluid = -1L;
+            }
+            if (LOGGER.isInfoEnabled()) {
+                LOGGER.info("{}（同形态每 {} 秒最多 1 行；自上次落盘以来同形重复 {} 次已静默；次数=每次真实应用）",
+                        ShanhaiParallelDiag.pickLine(machineId, p, inItem, inFluid),
+                        ShanhaiParallelDiag.PICK_MIN_INTERVAL_MILLIS / 1000L, suppressed);
+            }
+        } catch (Throwable ignored) {
+            // 纯诊断：任何异常都不允许影响并行本身。
+        }
+    }
+
+    /** 三分诊断那一行的闸门（与 {@code [SHANHAI-INFPAR]} 的档位行分开，各自限流）。 */
+    private static final ShanhaiLogThrottle.Gate shanhai$PICK_GATE = new ShanhaiLogThrottle.Gate();
+
+    // ═══════════ 🔴 2026-11（任务 B）：{@code pmax-dummy} —— 星律 dummy / 无线假配方那条路的诊断 ═══════════
+
+    /**
+     * <b>{@code pmax-dummy} 那一行的闸门</b>（与 {@code pmax} 行**分开**：两条行的读者与频率都不同，
+     * 共用一个闸门会让其中一条把另一条挤掉）。
+     *
+     * <p>频率 = <b>同形态只打一次</b>（形态 = 机器 × {@code pick} 的量级桶 × {@code budget} 的量级桶，
+     * 见 {@link ShanhaiParallelDisplay#bucket(long)}）——
+     * 这比任务书要的「同形态 5 秒 1 行」<b>更严</b>（≤ 那条上限），与既有的 {@code pmax} 行同一纪律：
+     * 本工程反复吃过"正常行刷屏"的亏。要放宽成"每 5 秒复述一次"，把 {@code changed(...)} 的
+     * {@code urgent} 实参改成 {@code true} 即可（一个实参）。
+     * <p>为什么压桶：一轮几百条候选配方，精确数字各不相同，不压桶就必然刷屏。
+     */
+    private static final ShanhaiLogThrottle.Gate shanhai$DUMMY_PICK_GATE = new ShanhaiLogThrottle.Gate();
+
+    /** {@code pmax-dummy} 复述间隔（毫秒）—— <b>只在 urgent=true 时才生效</b>；当前走"只打一次"。 */
+    private static final long shanhai$DUMMY_PICK_MIN_INTERVAL_MS = 5_000L;
+
+    /**
+     * 🔴 <b>{@code [SHANHAI-INFPAR] pmax-dummy} —— 「这台机器为什么只跑到 702,470 份」的那一行。</b>
+     *
+     * <h2>它补的是哪个洞</h2>
+     * 原先唯一的三分诊断 {@code pmax} 挂在 {@link #applyParallel} 的
+     * {@code limitByParallel} 里 —— 那是<b>原生配方修饰链</b>的落点。
+     * 而模块（含「原初混沌蜉蝣解构结晶炉」）走的是另一条路：
+     * <pre>
+     *   PrimordialModuleRecipeLogic#calculateParallels()
+     *     → PrimordialRecipeEffects#greedyAllocateWithLongLimit / fairAllocateWithLongLimit
+     *       → 回呼 calculateParallel(machine, match, remain)
+     *         → [上游] MutableRecipesLogic#calculateParallel
+     *           → IParallelLogic#getMaxParallel(holder, match, remain)      ← ★ 份数在这一步定下来
+     * </pre>
+     * 这条路上<b>一行诊断都没有</b> ⇒ 实机只看到「并行上限 9223372036854775807」（预算/电侧），
+     * 却看不到真正把份数压到 70 万的那一步。本方法就挂在那个回呼的**调用点**上（两个分配函数各一处），
+     * 拿到的 {@code pick} 就是真正进 {@code ParallelData.parallels} 的那个数。
+     *
+     * <h2>{@code perItem / perFluid} 是新增的（任务书要求）</h2>
+     * {@code pick} 几乎总是 {@code floor(可用量 ÷ 每份需求)}：
+     * {@code IParallelLogic#getMaxParallel} 的字节码只遍历 {@code recipe.inputs}，
+     * 对物品 / 流体各取 {@code Math.min(剩余上限, 可用量 ÷ 单份量)}，<b>不看 EU、也不看输出</b>
+     * （[javap] {@code IParallelLogic#getMaxParallel} 偏移 38–94）。
+     * ⇒ 把分母（每份吃多少）一起打出来，读日志的人才能一眼分辨
+     * 「料只有这么多」与「预算/电力不够」——这两件事的修法完全相反。
+     *
+     * <h2>成本</h2>
+     * 只做三件便宜事：{@code obviousBelowBudget}（两次比较）、量级桶（一次位运算）、过闸。
+     * 真正贵的那两次（{@code getMaxParallel} / {@code getMinParallel} 要遍历
+     * {@code RecipeHandlePart}）+ 每份需求的解码，<b>只在确定要落盘时才做</b>
+     * （与 {@code pmax} 行同一纪律）。
+     *
+     * @param budget 传给回呼的<b>剩余预算</b>（贪心：{@code remain}；公平：总预算）
+     * @param pick   回呼真正给出的份数（已成功扣料的那一份）
+     */
+    private static void shanhai$logDummyPick(@Nullable IRecipeLogicMachine machine, @Nullable GTRecipe match,
+                                             long budget, long pick) {
+        try {
+            if (machine == null || match == null) {
+                return;
+            }
+            // ① 预算就是瓶颈（pick 没明显低于预算）⇒ 一行都不打（与 pmax 行同一阈值）。
+            if (!ShanhaiParallelDisplay.obviousBelowBudget(pick, budget)) {
+                return;
+            }
+            final String machineId = machine instanceof MetaMachine mm && mm.getDefinition() != null
+                    ? String.valueOf(mm.getDefinition().getId()) : "?";
+            final long now = System.currentTimeMillis();
+            final String shape = machineId + '|' + ShanhaiParallelDisplay.bucket(pick)
+                    + '|' + ShanhaiParallelDisplay.bucket(budget);
+            if (!shanhai$DUMMY_PICK_GATE.changed(shape, false, now, shanhai$DUMMY_PICK_MIN_INTERVAL_MS)) {
+                return;
+            }
+            final long suppressed = shanhai$DUMMY_PICK_GATE.takeSuppressed();
+            // ② 输入侧上限（= 上游 calculateParallel 的那一份；物品与流体各自的 min）
+            long in = ShanhaiParallelDisplay.UNKNOWN;
+            try {
+                in = IParallelLogic.getMaxParallel(machine, match, budget);
+            } catch (Throwable ignored) {
+                in = ShanhaiParallelDisplay.UNKNOWN;
+            }
+            // ③ 输出空间上限（<b>只在 in > 1 时才算</b>：上游同形，in ≤ 1 时那一步根本不跑 ⇒
+            //    这里给 -1，绝不拿 in 冒充 out）
+            long out = ShanhaiParallelDisplay.UNKNOWN;
+            if (in > 1L) {
+                try {
+                    out = IParallelLogic.getMinParallel(machine, match, pick);
+                } catch (Throwable ignored) {
+                    out = ShanhaiParallelDisplay.UNKNOWN;
+                }
+            }
+            final long[] per = shanhai$perCopyDemand(match);
+            if (LOGGER.isInfoEnabled()) {
+                LOGGER.info("{}（同形态只打一次；自上次落盘以来同形重复 {} 次已静默；"
+                                + "in/out 走的是同一份 IParallelLogic；perItem/perFluid = 每份配方的输入需求）",
+                        ShanhaiParallelDisplay.dummyPickLine(machineId, in, out, budget, pick, per[0], per[1]),
+                        suppressed);
+            }
+        } catch (Throwable ignored) {
+            // 纯诊断：任何异常都不允许影响并行本身。
+        }
+    }
+
+    /**
+     * <b>每份配方在「物品 / 流体」上各要吃多少</b>（{@code -1} = 该配方没有这一类输入，或读不到）。
+     *
+     * <p>口径：把该能力下<b>所有输入条目</b>的单份数量<b>相加</b>（= 每跑一份要消耗的总量），
+     * 而不是取某一条 —— 因为日志要回答的是「料够跑几份」，那是总量口径。
+     * <p>⚠️ 与 {@code IParallelLogic} 的内部口径（<b>逐条目分别除、再取 min</b>）不完全等价：
+     * 除非所有输入共用同一份库存，{@code pick} 会略大于 {@code 可用量 ÷ 本值}。
+     * ⇒ <b>它是解释项，不是运算量</b>；权威值永远是同一行里的 {@code in=}/{@code out=}/{@code pick=}。
+     *
+     * @return {@code [perItem, perFluid]}，两项各自 {@code -1} 表示"没有/读不到"
+     */
+    private static long[] shanhai$perCopyDemand(@Nullable GTRecipe recipe) {
+        if (recipe == null) {
+            return new long[]{ShanhaiParallelDisplay.UNKNOWN, ShanhaiParallelDisplay.UNKNOWN};
+        }
+        long item = 0L;
+        try {
+            final List<Content> contents = recipe.getInputContents(ItemRecipeCapability.CAP);
+            if (contents != null) {
+                for (Content c : contents) {
+                    if (c.content instanceof SizedIngredient sized) {
+                        item += Math.max(1, sized.getAmount());
+                    } else if (c.content instanceof Ingredient ing) {
+                        int best = 0;
+                        for (ItemStack st : ing.getItems()) {
+                            if (st != null && !st.isEmpty()) {
+                                best = Math.max(best, st.getCount());
+                            }
+                        }
+                        item += Math.max(1, best);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            item = 0L;
+        }
+        long fluid = 0L;
+        try {
+            final List<Content> contents = recipe.getInputContents(FluidRecipeCapability.CAP);
+            if (contents != null) {
+                for (Content c : contents) {
+                    if (c.content instanceof FluidIngredient fi) {
+                        fluid += Math.max(1L, fi.getAmount());
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            fluid = 0L;
+        }
+        return new long[]{item > 0L ? item : ShanhaiParallelDisplay.UNKNOWN,
+                fluid > 0L ? fluid : ShanhaiParallelDisplay.UNKNOWN};
+    }
+
+    // ═══════════ 🔴 输出空间钳制的 long 版（gtceu int API 的孪生；2026-11 新增） ═══════════
+
+    /**
+     * 🔴 <b>「输出空间上限」的 long 版 —— gtlcore {@code ParallelLogicMixin#limitByOutputMerging} 的逐句孪生
+     * （<u>只</u>在调用方 {@code inputLimited > Integer.MAX_VALUE} 时使用）。</b>
+     *
+     * <h2>它治的病（一句话）</h2>
+     * 上游那道闸的<b>形参和返回值都是 {@code int}</b>：
+     * <pre>
+     *   [javap] com.gregtechceu.gtceu.api.recipe.modifier.ParallelLogic#limitByOutputMerging(
+     *               GTRecipe, IRecipeCapabilityHolder, <b>int</b>, Predicate&lt;RecipeCapability&lt;?&gt;&gt;) : <b>int</b>
+     *   [javap] org.gtlcore.gtlcore.mixin.gtm.api.recipe.ParallelLogicMixin#limitByOutputMerging （@Overwrite，同签名）
+     *       0: iload_2 / 1: istore 4                       ← result = limit（int）
+     *       3: i2l / 6..9: iload_2 / i2l                   ← 把 int 实参抬成 long 传给下面
+     *      10: invokestatic IParallelLogic.getMinParallel(holder, recipe, J)J
+     *      13: Math.min(JJ)J / 16: Ints.saturatedCast(J)I  ← ★ 返回值压回 int
+     *      21..124: 遍历 recipe.tickOutputs，逐个 cap.limitParallel(recipe, holder, <b>iload_2</b>)I 取 min
+     * </pre>
+     * ⇒ 只要走它，并行<b>结构上不可能超过 2147483647</b>（实机日志里的 {@code p=2147483647} 就是它）。
+     *
+     * <h2>本方法逐句对齐了哪几句（一个都不能少）</h2>
+     * <pre>
+     *   ① outputs 那一半：Math.min(limit, IParallelLogic.getMinParallel(holder, recipe, limit))
+     *      —— getMinParallel 自己就带了 {@code !machine.canVoidRecipeOutputs(item/fluid)} 判据
+     *         （字节码 offset 64-74 / 133-143），所以这一半<b>本来就有 long 版</b>，直接用；
+     *   ② tickOutputs 那一半：逐 cap 复刻 mixin 的 4 道闸
+     *      （predicate.test(cap) ⇒ 跳过；!cap.doMatchInRecipe() ⇒ 跳过；tickOutput 内容为空 ⇒ 跳过；
+     *        cap.limitParallel(recipe, holder, <b>原 int 实参</b>) ⇒ 0 直接返回 0，否则取 min）
+     *      —— 这一半的 API 只有 int 版（{@code RecipeCapability#limitParallel(...,int):int}，
+     *         且 {@code RecipeCapability} 的默认实现是 {@code return Integer.MAX_VALUE}）
+     *         ⇒ <b>这一半仍是 int 口径</b>。诚实边界：<b>带 tickOutputs 的配方，输出空间上限仍 ≤ 2^31−1</b>；
+     *         没有 tickOutputs 的配方（绝大多数加工配方）不再被压平。
+     * </pre>
+     *
+     * <h2>🔴 为什么"老路径逐位不变"仍然成立</h2>
+     * 调用方只在 {@code inputLimited > Integer.MAX_VALUE} 时调本方法；≤ int 时仍调上游原方法
+     * （同一处 invoke、同一份字节码）。而本方法在 {@code limit ≤ int} 时与上游<b>逐值相同</b>：
+     * ① 相同的两个实参调 {@code getMinParallel}、同一个 {@code Math.min}；② tickOutputs 那一半传的
+     * int 实参就是 {@code Ints.saturatedCast(limit)}（= 上游那一句 {@code iload_2}）。
+     *
+     * @param recipe         被并行的配方
+     * @param holder         能力持有者（主机/模块 = {@code IRecipeLogicMachine}）
+     * @param limit          并行上限（<b>long</b>；正常 &gt; {@code Integer.MAX_VALUE} 才会走到这里）
+     * @param canVoidOutputs 上游那个谓词（{@code machine::canVoidRecipeOutputs}；只用于 tickOutputs 那一半）
+     * @return 输出空间上限（long）；{@code 0} = 输出装不下
+     */
+    public static long limitByOutputMergingLong(GTRecipe recipe, IRecipeCapabilityHolder holder, long limit,
+                                                @Nullable java.util.function.Predicate<RecipeCapability<?>> canVoidOutputs) {
+        if (recipe == null || holder == null) {
+            return limit;
+        }
+        // ① outputs 那一半（long 原生；getMinParallel 内部已含 canVoidRecipeOutputs 判据）
+        long result = Math.min(limit, IParallelLogic.getMinParallel(holder, recipe, limit));
+        // ② tickOutputs 那一半（逐句照 gtlcore ParallelLogicMixin#limitByOutputMerging 的 21..124）
+        final int intLimit = com.google.common.primitives.Ints.saturatedCast(limit);
+        for (RecipeCapability<?> cap : recipe.tickOutputs.keySet()) {
+            if (canVoidOutputs != null && canVoidOutputs.test(cap)) {
+                continue;
+            }
+            if (!cap.doMatchInRecipe()) {
+                continue;
+            }
+            final List<Content> contents = recipe.getTickOutputContents(cap);
+            if (contents.isEmpty()) {
+                continue;
+            }
+            final int perCap = cap.limitParallel(recipe, holder, intLimit);
+            if (perCap == 0) {
+                return 0L;
+            }
+            result = Math.min(result, (long) perCap);
+        }
+        return result;
+    }
+
+    // ═════════════ 把并行份数乘到内容数量上：三档分档（2026-10-24 · 用户拍板 B） ═════════════
+
+    /**
+     * 🔴 <b>「并行份数 × 每份数量」这一乘的唯一入口 —— 三档分档（用户 2026-10-24 拍板 B）。</b>
+     *
+     * <h2>它替换掉的是什么</h2>
+     * 本类原先（以及 gtladditions 上游 {@code RecipeCalculationHelper#multipleRecipe(GTRecipe, long)}）
+     * 一律走 {@code multipleRecipe(recipe, p)}：它内部是
+     * <pre>
+     *   [字节码] multipleRecipe(GTRecipe, long)
+     *       24 aload 6 / 26 lload_2 / 27 l2d              ← ★ 唯一的精度截断点
+     *       28 ContentModifier.multiplier(D)
+     *       32 GTRecipe.copy(ContentModifier, Z = false)   ← useFraction = false
+     *       50 RecipeExtensionCopier.copy(src, dst)
+     *       67 IGTRecipe.of(result) / 70 lload_2 / 71 setRealParallels(J)
+     * </pre>
+     * ⇒ gtlcore {@code ContentModifierMixin#apply(Number)} 偏移 {@code 32/45} 返回 <b>{@code Double}</b>
+     * ⇒ {@code p ≥ 2^53} 起数量被量化到 2 的倍数、超界饱和到 {@code Long.MAX}。
+     * <b>而份数（{@code setRealParallels}）一路是精确的</b> —— 精度只在"内容数量"这一格丢掉。
+     *
+     * <h2>分档（判据在 {@link ShanhaiLongParallelMultiply#tierOf(long)}，本方法只照它执行）</h2>
+     * <pre>
+     *   p ≤ Integer.MAX_VALUE (2^31−1)     ⇒ <b>老路径原样</b>：{@code RecipeCalculationHelper.multipleRecipe(recipe, p)}
+     *                                         —— 与改动前【同一处 invoke、同一份字节码、同一个返回值】
+     *   p ≤ 2^53 (9,007,199,254,740,992)   ⇒ 同上（维持现状：long 份数 + double 乘；(double) p 在 2^53 内精确）
+     *   p &gt; 2^53                          ⇒ 换 {@code IAdvancedContentModifier.preciseMultiplier(long)}
+     *                                         复刻 multipleRecipe 的其余三句：copy → RecipeExtensionCopier → setRealParallels
+     *                                         若精确通道不可用 ⇒ 退回 double 乘，并打一行 WARN（{@code why=no-precise}）
+     * </pre>
+     *
+     * <h2>🔴 为什么"≤ 2^53 两支"能算「逐位不变」（结构性证明）</h2>
+     * 前两支的<b>执行体是同一行源码</b>（同一个 {@code RecipeCalculationHelper.INSTANCE.multipleRecipe} 调用，
+     * 没有分支、没有类型转换、没有钳位）⇒ <b>乘算结果不是"我重写了一遍等价实现"，就是上游那一份返回值本身</b>。
+     * 新增的只有一个 {@code long} 比较（{@code parallel <= TWO_POW_53}）与一次日志<b>判据</b>；
+     * 后者在 {@code p ≤ Integer.MAX_VALUE} 时<b>连判据都不进</b>（见 {@link #shanhai$maybeLogParallelTier} 的第一行），
+     * 因此 ≤ int 的路上<b>不会新增任何一行日志</b>。
+     *
+     * <h2>⚠️ 为什么<b>不</b>自己构造 {@code LongIngredient}</h2>
+     * 数量这一路早就在 gtlcore 里升格成 long 了：
+     * {@code [字节码] ItemRecipeCapabilityMixin#copyWithModifier} 偏移 {@code 55 SizedIngredient.getAmount:I →
+     * 59 Long.valueOf → 62 ContentModifier.apply → 65 Number.longValue:J → 68 LongIngredient.create(Ingredient, long)}
+     * ⇒ <b>上游已经把 int 数量升格成 {@code LongIngredient}</b>。
+     * 只要我们走 {@code recipe.copy(写好的 ContentModifier, false)}（= capability 的 copyWithModifier），
+     * 这条升格就自动生效；<b>自己 {@code new Content(...)} 或直接 {@code SizedIngredient.create(...)}
+     * 反而会绕过它、把数量重新压回 int</b>。所以本方法只负责"给哪个 modifier"，不碰 Ingredient 的构造。
+     *
+     * @param recipe   被乘的配方（可以是配方定义原实例，也可以是引擎成品）
+     * @param parallel 并行份数（调用方已由 {@code IParallelLogic.getMaxParallel/getMinParallel} 钳过）
+     * @return 乘过的<b>新实例</b>；{@code recipe == null} ⇒ {@code null}；
+     *         {@code parallel ≤ 1} ⇒ <b>原样返回入参实例</b>（与上游 multipleRecipe 同形，零分配）
+     */
+    public static @Nullable GTRecipe multiplyByParallel(@Nullable GTRecipe recipe, long parallel) {
+        if (recipe == null) {
+            return null;
+        }
+        final ShanhaiLongParallelMultiply.Tier tier = ShanhaiLongParallelMultiply.tierOf(parallel);
+        if (tier != ShanhaiLongParallelMultiply.Tier.PRECISE) {
+            // ── 档 1 / 档 2：交回上游原方法（同一处 invoke、同一份字节码）──
+            final GTRecipe plain = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel);
+            shanhai$maybeLogParallelTier(recipe, parallel, tier, false, null);
+            return plain;
+        }
+        // ── 档 3：精确长整数乘（p > 2^53）──
+        final ShanhaiLongParallelMultiply.Summary summary = shanhai$summarizeContentAmounts(recipe, parallel);
+        ContentModifier precise = null;
+        boolean preciseUnavailable = false;
+        try {
+            // 上游现成通道（`javap` 确认：gtlcore-1.2.3.2-fix3.jar
+            // org.gtlcore.gtlcore.api.recipe.IAdvancedContentModifier
+            // public static ContentModifier preciseMultiplier(long)）
+            // 实现体：new ContentModifier((double) n, 0.0) + setDivision(n, 1L) ⇒ useFraction = true
+            // ⇒ ContentModifierMixin#apply 走 gtlcore$saturatedFraction（BigInteger 精确乘 + 饱和到 Long.MAX/MIN）
+            precise = IAdvancedContentModifier.preciseMultiplier(parallel);
+        } catch (Throwable t) {
+            preciseUnavailable = true;
+            LOGGER.warn("[SHANHAI-INFPAR] IAdvancedContentModifier.preciseMultiplier({}) 调用失败 ⇒ "
+                    + "本轮退回 double 乘（数量会被量化/饱和）：{}", parallel, t.toString());
+        }
+        final GTRecipe result;
+        if (precise != null) {
+            // 逐句复刻 multipleRecipe 在 p > 1 时的那三步（否则会丢 __gtl 扩展字段 / 丢 realParallels）
+            result = recipe.copy(precise, false);
+            RecipeExtensionCopier.copy(recipe, result);
+            if (result instanceof IGTRecipe igt) {
+                igt.setRealParallels(parallel);
+            }
+        } else {
+            result = RecipeCalculationHelper.INSTANCE.multipleRecipe(recipe, parallel);
+        }
+        shanhai$maybeLogParallelTier(recipe, parallel, tier, preciseUnavailable, summary);
+        return result;
+    }
+
+    /** {@code [SHANHAI-INFPAR]} 那行的闸门（同一形态 5 秒最多 1 行 —— 格式与频率都是本任务的验收判据）。 */
+    private static final ShanhaiLogThrottle.Gate shanhai$INFPAR_GATE = new ShanhaiLogThrottle.Gate();
+
+    /** {@code [SHANHAI-INFPAR]} 的限流窗（毫秒）：同一形态最多这么久复述一次。 */
+    private static final long shanhai$INFPAR_MIN_INTERVAL_MS = 5_000L;
+
+    /**
+     * <b>打 {@code [SHANHAI-INFPAR]} 证据行（含限流）。</b>
+     *
+     * <h2>什么时候一行都不打</h2>
+     * <ul>
+     *   <li>{@code p ≤ Integer.MAX_VALUE} ⇒ <b>连判据都不进</b>。这是「≤ int 原路径逐位不变」的一部分：
+     *       老路径上不会多出任何一行日志（不是"打了再吞掉"，是<b>根本没走到</b>）。</li>
+     *   <li>同一形态（{@code tier=…|why=…}）已经落过盘，且不是异常档 ⇒ 静默（只累计静默数）。</li>
+     * </ul>
+     * <h2>什么时候一定看得见</h2>
+     * <ul>
+     *   <li>{@code why=saturate}（有条目被压到 {@code Long.MAX/MIN}）⇒ 每 5 秒最多复述 1 行，<b>不许静默</b>；</li>
+     *   <li>{@code why=no-precise}（精确通道不可用、已退回 double）⇒ 同上，且是 <b>WARN</b>。</li>
+     * </ul>
+     * <p>⚠️ 统计{@code per/out/sat} 只在<b>真的要落盘时</b>才算（{@code p ≤ 2^53} 档先用
+     * {@link ShanhaiLogThrottle.Gate#sawShapePrefix} 探一次，避免每建一张配方都去走一遍内容表）。
+     */
+    private static void shanhai$maybeLogParallelTier(GTRecipe recipe, long parallel,
+                                                     ShanhaiLongParallelMultiply.Tier tier,
+                                                     boolean preciseUnavailable,
+                                                     ShanhaiLongParallelMultiply.Summary known) {
+        if (parallel <= ShanhaiLongParallelMultiply.INT_CEILING) {
+            // 🔴 p ≤ int：老路径的同一份字节码。这里【一行都不打】，连判据都不进。
+            return;
+        }
+        final boolean longTier = tier != ShanhaiLongParallelMultiply.Tier.PRECISE;
+        if (longTier && shanhai$INFPAR_GATE.sawShapePrefix(
+                "tier=" + tier.token() + "|why=" + ShanhaiLongParallelMultiply.WHY_NONE)) {
+            // 这一档【正常形态】已经告知过（它不是本任务新开的路，只是"维持现状"）
+            // ⇒ 不再每张配方算一遍样例。⚠️ 只探 why=none：若之前落的是 why=saturate（异常档），
+            //    这里仍然放行 ⇒ 饱和档继续按 5 秒窗复述，不会被正常形态的静默"顶掉"。
+            return;
+        }
+        final ShanhaiLongParallelMultiply.Summary summary = known != null
+                ? known : shanhai$summarizeContentAmounts(recipe, parallel);
+        // 🔴 判定（该不该打 / 打哪一行 / 什么级别 / 静默了多少）**全部**在纯核里 ——
+        //    离线自证跑的是同一份判定字节码，不是照抄的一份。
+        final ShanhaiLongParallelMultiply.Emit emit = ShanhaiLongParallelMultiply.decide(
+                shanhai$INFPAR_GATE, parallel, tier, preciseUnavailable, summary,
+                System.currentTimeMillis(), shanhai$INFPAR_MIN_INTERVAL_MS);
+        if (emit == null) {
+            return;
+        }
+        if (emit.urgent) {
+            LOGGER.warn(emit.line + " —— {}, 自上次落盘以来同形重复 {} 次已静默。",
+                    ShanhaiLongParallelMultiply.WHY_NO_PRECISE.equals(emit.why)
+                            ? "精确长整数通道不可用，本轮<退回 double 乘>：p 起的数量会被量化到 2 的倍数、"
+                                    + "超界饱和到 Long.MAX（份数本身仍精确）⇒ 本行请交回验收"
+                            : ("有 " + summary.saturated + " 个内容条目的数量被<b>饱和</b>到 Long.MAX/MIN"
+                                    + "（= 该条目按 " + parallel + " 倍已超出 long 可表示范围；份数本身仍精确）"),
+                    emit.suppressed);
+        } else {
+            LOGGER.info(emit.line + " —— 并行份数 > 2^53，内容数量走精确长整数乘"
+                            + "（{@code IAdvancedContentModifier.preciseMultiplier(long)}，上游通道；"
+                            + "份数 {} 由 setRealParallels 精确写入）；自上次落盘以来同形重复 {} 次已静默。",
+                    parallel, emit.suppressed);
+        }
+    }
+
+    /**
+     * 把一张配方的四张内容表（{@code inputs / outputs / tickInputs / tickOutputs}）里
+     * <b>能读出 long 的条目</b>逐个取出来，交给 {@link ShanhaiLongParallelMultiply#summarize} 统计。
+     *
+     * <p>只读，不改任何东西；读不出来的条目记 {@link ShanhaiLongParallelMultiply#NO_SAMPLE}（= 不参与统计）。
+     */
+    private static ShanhaiLongParallelMultiply.Summary shanhai$summarizeContentAmounts(GTRecipe recipe,
+                                                                                      long parallel) {
+        if (recipe == null) {
+            return new ShanhaiLongParallelMultiply.Summary(0, 0,
+                    ShanhaiLongParallelMultiply.NO_SAMPLE, ShanhaiLongParallelMultiply.NO_SAMPLE);
+        }
+        final it.unimi.dsi.fastutil.longs.LongArrayList amounts =
+                new it.unimi.dsi.fastutil.longs.LongArrayList();
+        shanhai$collectAmounts(recipe.inputs, amounts);
+        shanhai$collectAmounts(recipe.outputs, amounts);
+        shanhai$collectAmounts(recipe.tickInputs, amounts);
+        shanhai$collectAmounts(recipe.tickOutputs, amounts);
+        return ShanhaiLongParallelMultiply.summarize(amounts.toLongArray(), parallel);
+    }
+
+    /** {@link #shanhai$summarizeContentAmounts} 的一张表（{@code capability → List<Content>}）。 */
+    private static void shanhai$collectAmounts(
+            @Nullable Map<RecipeCapability<?>, List<Content>> table,
+            it.unimi.dsi.fastutil.longs.LongArrayList out) {
+        if (table == null || table.isEmpty()) {
+            return;
+        }
+        for (List<Content> contents : table.values()) {
+            if (contents == null) {
+                continue;
+            }
+            for (Content content : contents) {
+                out.add(content == null ? ShanhaiLongParallelMultiply.NO_SAMPLE
+                        : shanhai$amountOf(content.content));
+            }
+        }
+    }
+
+    /**
+     * 一个 {@code Content.content} 的数值（long）；<b>读不出来 ⇒ {@link ShanhaiLongParallelMultiply#NO_SAMPLE}</b>。
+     *
+     * <p>顺序有意义：{@link LongIngredient} <b>继承</b> {@link SizedIngredient}，
+     * 所以必须先判 {@code LongIngredient}（否则 long 数量会被 {@code getAmount():int} 压掉）。
+     */
+    private static long shanhai$amountOf(@Nullable Object contentValue) {
+        if (contentValue instanceof LongIngredient longIngredient) {
+            return longIngredient.getActualAmount();
+        }
+        if (contentValue instanceof SizedIngredient sized) {
+            return sized.getAmount();
+        }
+        if (contentValue instanceof Long value) {
+            return value;
+        }
+        if (contentValue instanceof Integer value) {
+            return (long) value;
+        }
+        if (contentValue instanceof Number value) {
+            return value.longValue();
+        }
+        return ShanhaiLongParallelMultiply.NO_SAMPLE;
     }
 
     // ═══════════ 批处理（BatchProcessing）在【多配方引擎路径】上的唯一落点 ═══════════
@@ -1544,7 +2094,7 @@ public final class PrimordialRecipeEffects {
         }
         final GTRecipe extraRecipe;
         try {
-            extraRecipe = RecipeCalculationHelper.INSTANCE.multipleRecipe(originRecipe, extraMultiple);
+            extraRecipe = multiplyByParallel(originRecipe, extraMultiple);
         } catch (Throwable t) {
             LOGGER.warn("[SHANHAI-BATCH] 构造额外投料配方失败，放弃本次批处理：{}", t.toString());
             return finalRecipe;
@@ -1750,7 +2300,7 @@ public final class PrimordialRecipeEffects {
     /** 造第 {@code i} 条的额外投料配方；失败返回 {@code null}（⇒ 核心会整单放弃）。 */
     private static Object shanhai$batchBuildExtraInput(GTRecipe origin, long extra) {
         try {
-            return RecipeCalculationHelper.INSTANCE.multipleRecipe(origin, extra);
+            return multiplyByParallel(origin, extra);
         } catch (Throwable t) {
             LOGGER.warn("[SHANHAI-BATCH] 多配方档：构造额外投料配方失败（origin={}，extra={}）：{}",
                     origin, extra, t.toString());
@@ -1940,10 +2490,18 @@ public final class PrimordialRecipeEffects {
      *       {@code IParallelLogic.getMaxParallel(…, remain)} 产出 ⇒ {@code secondLong() <= remain}
      *       （{@code calculateParallel} 的默认实现整段就是 {@code LongLongPair.of(p, p)}，
      *       而 {@code p = min(remain, 输入量上限)}）⇒ {@code remain} 单调不增、<b>不可能回绕</b>。</li>
-     *   <li>{@code multipleRecipe(match, p)} 内部是 {@code ContentModifier.multiplier(p)}：
-     *       数值走 {@code double}，由 {@code EURecipeCapability.copyWithModifier} 的
-     *       {@code longValue()} 窄化<b>饱和</b>到 {@code Long.MAX_VALUE}（不抛异常、不回绕）
-     *       —— 同一现象本类 {@code shanhai$probeGeneratorEnergyWall} 的注释里已逐条记录过。</li>
+     *   <li>{@code multipleRecipe(match, p)} 的溢出形状<b>按档不同</b>（2026-10-24 改，见
+     *       {@link #multiplyByParallel(GTRecipe, long)}）：
+     *       <ul>
+     *         <li>{@code p ≤ 2^53}（含 ≤ int 的原路）：内部是 {@code ContentModifier.multiplier((double) p)}，
+     *             数值走 {@code double}，由 {@code EURecipeCapability.copyWithModifier} /
+     *             {@code ItemRecipeCapabilityMixin#copyWithModifier} 的 {@code longValue()} 窄化
+     *             <b>饱和</b>到 {@code Long.MAX_VALUE}（不抛异常、不回绕）——
+     *             同一现象本类 {@code shanhai$probeGeneratorEnergyWall} 的注释里已逐条记录过；</li>
+     *         <li>{@code p > 2^53}：换 {@code IAdvancedContentModifier.preciseMultiplier(long)}
+     *             （{@code BigInteger} 精确乘 + 饱和到 {@code Long.MAX/MIN}），同样不回绕；
+     *             是否饱和会打在 {@code [SHANHAI-INFPAR]} 那行的 {@code sat=} 里。</li>
+     *       </ul></li>
      * </ul>
      *
      * @param totalParallel 并行预算（调用方已经用饱和乘法算好；本方法<b>不再</b>做钳制）
@@ -1964,6 +2522,12 @@ public final class PrimordialRecipeEffects {
             if (remain <= 0L) {
                 break;
             }
+            // 🔴 2026-11（任务 B）：这里【就是】份数被定下来的那一步 ——
+            //    回呼 = 上游 `MutableRecipesLogic#calculateParallel`，它内部只有一句
+            //    `IParallelLogic.getMaxParallel(holder, match, remain)`（[javap] 偏移 19–28）。
+            //    ⇒ 传给它的 `remain` 是【预算】（可能已经是 Long.MAX），而真正的结果由
+            //      「输入仓里有多少料 ÷ 每份要吃多少」决定。诊断挂在返回值上，不改变任何行为。
+            final long budgetForLog = remain;
             final LongLongPair pair = getter.parallelOf(match, remain);
             if (pair == null) {
                 continue;
@@ -1973,12 +2537,14 @@ public final class PrimordialRecipeEffects {
                 continue;
             }
             final GTRecipe paralleledRecipe = IParallelLogic.getRecipeOutputChance(
-                    machine, RecipeCalculationHelper.INSTANCE.multipleRecipe(match, p));
+                    machine, multiplyByParallel(match, p));
             if (RecipeRunnerHelper.handleRecipeInput(machine, paralleledRecipe)) {
                 remain -= pair.secondLong();
                 recipeList.add(match);
                 processedRecipeList.add(paralleledRecipe);
                 parallelsList.add(p);
+                // 只在【真的被扣料成功】之后打 —— 那才是进 ParallelData 的那个份数（诊断不许比事实乐观）。
+                shanhai$logDummyPick(machine, match, budgetForLog, p);
             }
         }
         if (recipeList.isEmpty()) {
@@ -2092,13 +2658,16 @@ public final class PrimordialRecipeEffects {
             }
             final GTRecipe match = ordered[k];
             final GTRecipe paralleledRecipe = IParallelLogic.getRecipeOutputChance(
-                    machine, RecipeCalculationHelper.INSTANCE.multipleRecipe(match, p));
+                    machine, multiplyByParallel(match, p));
             if (!RecipeRunnerHelper.handleRecipeInput(machine, paralleledRecipe)) {
                 continue;
             }
             recipeList.add(match);
             processedRecipeList.add(paralleledRecipe);
             parallelsList.add(p);
+            // 🔴 2026-11（任务 B）：与贪心那条同一条诊断、同一份实现。
+            //    公平分配的预算是【总预算】（不是剩余量）—— 相 1 传的就是 totalParallel。
+            shanhai$logDummyPick(machine, match, totalParallel, p);
         }
         if (recipeList.isEmpty()) {
             return null;
@@ -2153,7 +2722,11 @@ public final class PrimordialRecipeEffects {
      * 取值<b>完全相同</b>（{@code p=9223372036854775 乘前=2147483648 乘后=Long.MAX 撞顶=true}）。
      * 而且「long 档下撞顶」是<b>用户自己拍过板的预期内行为</b>
      * （「破一次红线让 25 台抬到 10」）⇒ 它不该每 tick 报。
-     * ⇒ 改成「<b>同一形态只打一次</b>」；只有「<b>没进 long 档却撞了墙</b>」才是异常，当场 WARN。
+     * ⇒ 改成「<b>同一形态只打一次</b>」；只有「<b>乘积装得进 long 却撞了墙</b>」才是异常，当场 WARN。
+     * <p>🔴 2026-11（边界 bug）：上面那句原来写的是「没进 long 档却撞了墙」，判据按
+     * <b>p 的数值档位</b>；现在按 <b>p × 乘前 是否溢出 long</b> 判（见
+     * {@link ShanhaiParallelDiag#wallTier(long, long)}）。{@code p == Integer.MAX_VALUE} 这一档
+     * 只要乘积溢出就属于<b>预期内</b>，不再假报警。
      */
     private static final ShanhaiLogThrottle.Gate shanhai$GEN_WALL_GATE = new ShanhaiLogThrottle.Gate();
 
@@ -2168,25 +2741,39 @@ public final class PrimordialRecipeEffects {
             }
             final long beforeEu = shanhai$firstTickOutputEu(before);
             final long afterEu = shanhai$firstTickOutputEu(after);
-            // 🔴 2026-10-01：判定本体在 ShanhaiLogThrottle（纯 JDK；离线可单跑自检）。
-            //    正常档（long 档内撞顶 = 预期）⇒ 同一形态只打一次 INFO；
-            //    异常档（未进 long 档却撞顶）⇒ 当场 WARN，不受「正常行条数上限」约束。
-            final ShanhaiLogThrottle.Verdict v = ShanhaiLogThrottle.decideEnergyWall(
-                    shanhai$GEN_WALL_GATE, parallel, beforeEu, afterEu, System.currentTimeMillis());
-            if (v.level == ShanhaiLogThrottle.Level.NONE) {
+            // 🔴🔴 2026-11（用户实机日志点名的边界 bug）：判档从「按 p 的数值档位」
+            //    改成「**按乘积是否溢出 long**」—— 唯一实现在纯核
+            //    {@link ShanhaiParallelDiag#wallTier(long, long)}（离线判据驱动同一份字节码）。
+            //    旧判据 `longScale = parallel > Integer.MAX_VALUE` 会把
+            //    `p = 2147483647`（恰好等于 int 天花板）判成"未进 long 档"，
+            //    而它的乘积早就越过 long（实机：p=2147483647 × 乘前 2.7e12 ≈ 5.9e21）⇒ 撞顶完全正常 ⇒ 假 WARN。
+            final ShanhaiParallelDiag.WallTier tier = ShanhaiParallelDiag.wallTier(parallel, beforeEu);
+            final boolean unexpected = ShanhaiParallelDiag.wallIsUnexpected(afterEu, tier);
+            final String shape = (afterEu == Long.MAX_VALUE ? "撞顶" : "未撞顶")
+                    + "|档=" + tier.token + "|p=" + parallel + "|乘前=" + beforeEu;
+            if (!shanhai$GEN_WALL_GATE.changed(shape, unexpected,
+                    System.currentTimeMillis(), ShanhaiLogThrottle.DEFAULT_MIN_INTERVAL_MILLIS)) {
                 return;
             }
-            if (v.abnormal) {
-                LOGGER.warn("[SHANHAI-GEN-LIMIT] 🔴 出乎预期的撞顶：p={} 未进 long 档（≤ {}）"
-                                + "却仍读到 tickOutputs.eu={}（乘前 {}）⇒ 请把这一行原文交回。"
+            final long suppressed = shanhai$GEN_WALL_GATE.takeSuppressed();
+            if (unexpected) {
+                // 走到这里 = 乘积装得进 long 却仍然撞顶 ⇒ 真的预期外（请把原文交回）。
+                LOGGER.warn("[SHANHAI-GEN-LIMIT] 🔴 出乎预期的撞顶：p={} 档={}（p × 乘前 {} = {}，未溢出 long）"
+                                + "却仍读到 tickOutputs.eu={} ⇒ 请把这一行原文交回。"
                                 + "自上次落盘以来同形重复 {} 次已静默。",
-                        parallel, ShanhaiLogThrottle.INT_CEILING, afterEu, beforeEu, v.suppressed);
+                        parallel, tier.token, beforeEu, ShanhaiParallelDiag.wallProduct(parallel, beforeEu),
+                        afterEu, suppressed);
             } else {
-                LOGGER.info("[SHANHAI-GEN-LIMIT] p={} 乘前 tickOutputs.eu={} ⇒ 乘后={}；撞 Long.MAX_VALUE 顶={}"
+                LOGGER.info("[SHANHAI-GEN-LIMIT] p={} 乘前 tickOutputs.eu={} ⇒ 乘后={}；撞 Long.MAX_VALUE 顶={}；"
+                                + "档={}（判据 = p × 乘前 是否溢出 long：{}）"
                                 + "（墙 = EURecipeCapability.copyWithModifier 的 Double.longValue() 窄化；"
                                 + "上游走 BigDecimal/BigInteger 分支绕开它）"
+                                + "⚠️ 本行的「档」只说【配方 EUt 那一次 long 乘法的量级】，"
+                                + "与「往无线网池子里写电走哪条重载」无关 —— 入池走的是 BigInteger 重载"
+                                + "（池子侧没有任何 Long.MAX 夹），见同一前缀的「入池重载=…」行"
                                 + "【本行已改为「同一形态只打一次」：自上次落盘以来同形重复 {} 次已静默】",
-                        parallel, beforeEu, afterEu, afterEu == Long.MAX_VALUE, v.suppressed);
+                        parallel, beforeEu, afterEu, afterEu == Long.MAX_VALUE, tier.token,
+                        ShanhaiParallelDiag.wallProduct(parallel, beforeEu), suppressed);
             }
         } catch (Throwable t) {
             LOGGER.warn("[SHANHAI-GEN-LIMIT] 探针异常（已忽略，配方不受影响）：{}", t.toString());

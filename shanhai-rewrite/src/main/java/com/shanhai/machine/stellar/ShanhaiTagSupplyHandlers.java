@@ -10,10 +10,14 @@ import com.gregtechceu.gtceu.api.capability.recipe.RecipeCapability;
 import com.gregtechceu.gtceu.api.machine.trait.IRecipeHandlerTrait;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
+import com.gregtechceu.gtceu.utils.ItemStackHashStrategy;
 import com.lowdragmc.lowdraglib.side.fluid.FluidStack;
 import com.lowdragmc.lowdraglib.syncdata.ISubscription;
+import it.unimi.dsi.fastutil.objects.Object2LongMap;
+import it.unimi.dsi.fastutil.objects.Object2LongOpenCustomHashMap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
+import org.gtlcore.gtlcore.api.machine.trait.MEStock.IOptimizedMEList;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -135,8 +139,65 @@ public final class ShanhaiTagSupplyHandlers {
 
     // ================================================================ 物品
 
-    /** 标签命中集合的<b>物品</b>供料 handler：能供就 {@code null} / 摘掉那一条，并且<b>真扣 ME</b>。 */
-    public static final class Item implements IRecipeHandlerTrait<Ingredient> {
+    /**
+     * 标签命中集合的<b>物品</b>供料 handler：能供就 {@code null} / 摘掉那一条，并且<b>真扣 ME</b>。
+     *
+     * <h2>🔴 2026-10-27：本类同时实现 {@code IOptimizedMEList} —— 物品量的 long 通道</h2>
+     *
+     * <h3>一、为什么必须实现它（实机证据）</h3>
+     * 用户日志（原文，同一行）：
+     * <pre>
+     *   [SHANHAI-INFPAR] pmax-dummy machine=…crystallization_furnace
+     *       in=238609294 budget=9223372036854775807 pick=238609294 why=in perItem=9 perFluid=-1
+     *   [SHANHAI-INFPAR] pmax-dummy machine=…void_induction_armature
+     *       pick=9223372036854775 why=in perFluid=1000
+     * </pre>
+     * 反推：物品可用量 = {@code 238609294 × 9 = 2147483646} ⇒ 被压在 <b>2^31−1</b>；
+     * 流体可用量 = {@code 9223372036854775 × 1000 = 9.223e18} ⇒ <b>一点没压</b>。
+     *
+     * <h3>二、病根（两条，缺一不可）</h3>
+     * <ol>
+     *   <li><b>我们这一层</b>：{@code shanhaiBuildItemContents} 里
+     *       {@code key.toStack((int) Math.min(amount, Integer.MAX_VALUE))} ——
+     *       同文件的流体侧那一行（{@code FluidStack.create(..., amount, ...)}）<b>没有</b>这个钳制
+     *       ⇒ 「物品卡 2^31−1、流体到 Long.MAX」的读数形态正是它；</li>
+     *   <li><b>上游结构</b>：{@code gtlcore RecipeHandlePart#createItemMap} 对
+     *       <b>没有</b> {@link IOptimizedMEList} 的 handler 走 {@code getContents()}
+     *       ⇒ {@code ItemStack#getCount()}（<b>int</b>，字节码 {@code m_41613_():()I; i2l}）
+     *       ⇒ <b>只要走 {@code getContents()}，单项上限天然 2^31−1，钳不钳那一行都一样</b>。
+     *       同一方法偏移 <b>70–96</b>：
+     *       {@code instanceof IOptimizedMEList → getMEItemMap()（Object2LongMap）}
+     *       ⇒ 这就是上游留的 long 通道（gtlcore 自己的 ME 库存 list 走的就是它）。</li>
+     * </ol>
+     * ⇒ 修法 = <b>把物品量改从 long 通道报出去</b>（{@link #getMEItemMap()}），
+     * <b>而不是</b>把 int 钳制挪个地方（挪了也还是 int）。
+     *
+     * <h3>三、边界（一个字都没放开的地方）</h3>
+     * <ul>
+     *   <li>{@link #getContents()} <b>逐字不变</b>：仍是 {@code ItemStack}（count 是 int，容器结构如此），
+     *       只是那一格由 {@link ShanhaiLongItemAmount#stackCountForVanilla(long)} 统一算
+     *       ⇒ 任何仍走 {@code getContents()} 的读者看到的数与改动前<b>逐位相同</b>；</li>
+     *   <li>🟢 <b>流体侧零改动</b>：{@code Fluid} 那份 handler <b>没有</b>实现本接口
+     *       （上游 {@code createFluidMap} 对 {@code IOptimizedMEList} 走的是
+     *       {@code getMEFluidList()}，它默认返回空表 ⇒ 给流体那份加接口会<b>让流体供料消失</b>）；
+     *       {@link #getMEFluidList()} 在这里显式<b>镜像流体那份的内容</b>，
+     *       只是为了"万一被当流体 handler 问到时逐位同值"，正常路径上永远不会被调用
+     *       （本 handler 只注册在 {@code ItemRecipeCapability.CAP} 下）；</li>
+     *   <li>{@code perItem}（每份需求）不变：{@link #handleRecipeInner} 用的仍是
+     *       {@code samples[0].getCount()}，扣料量也仍是 {@code required}；
+     *       变的只有"有多少料可用"这一格的<b>类型宽度</b>；</li>
+     *   <li>可用量 ≤ 2^31−1 时两条通道给出<b>同一个数</b>
+     *       ⇒ 「p ≤ Integer.MAX_VALUE 的机器行为逐位不变」由
+     *       {@link ShanhaiLongItemAmount#selfTest()} ④ 段断言。</li>
+     * </ul>
+     *
+     * <h3>四、{@code isStocking()} 为什么报 true</h3>
+     * 上游 {@code createItemMap} 的分支是
+     * {@code if (confirmStock && list.isStocking()) ⇒ 用 seen-set 去重后累加}，否则直接累加。
+     * 本 handler 的 long 表<b>本来就一键一条</b>（不是格子视图），语义正是"ME 库存视图、按键去重"
+     * —— 与 gtlcore 自己那些 {@code IOptimizedMEList} 库存 list 同口径。
+     */
+    public static final class Item implements IRecipeHandlerTrait<Ingredient>, IOptimizedMEList {
 
         private final String label;
         private final Source source;
@@ -145,6 +206,16 @@ public final class ShanhaiTagSupplyHandlers {
         private long cachedVersion = Long.MIN_VALUE;
         private List<Object> cachedContents = List.of();
         private double cachedTotal = 0.0D;
+
+        /**
+         * 🔴 long 通道的缓存（{@link #getMEItemMap()} 用）。
+         *
+         * <p>⚠️ 与 {@link #cachedVersion} <b>分开</b>：{@code getContents()} 每次 tick 被问几十万次
+         * （本工程实测），而 long 表只在 {@code IParallelLogic} 那几次并行计算里被问
+         * ⇒ 两条各自的版本号，谁被问谁重建，不会互相拖累。
+         */
+        private long cachedMeItemMapVersion = Long.MIN_VALUE;
+        private Object2LongMap<ItemStack> cachedMeItemMap = null;
 
         public Item(String label, Source source) {
             this.label = label;
@@ -208,6 +279,74 @@ public final class ShanhaiTagSupplyHandlers {
                 this.cachedTotal = shanhaiTotalOf(this.cachedContents);
             }
             return this.cachedTotal;
+        }
+
+        // ---------------------------------------------------------------- 🔴 物品量的 long 通道
+
+        /**
+         * 🔴 <b>物品可用量的 long 表 —— 上游 {@code IParallelLogic} 真正读的那一格。</b>
+         *
+         * <p>出处（字节码，{@code temp/infinity2/work2/RecipeHandlePart.utf8.txt}）：
+         * {@code gtlcore RecipeHandlePart#createItemMap} 偏移 <b>70–96</b>：
+         * <pre>
+         *   70: instanceof  IOptimizedMEList
+         *   78: checkcast   IOptimizedMEList
+         *   85: invokeinterface getMEItemMap:()Lit/unimi/dsi/fastutil/objects/Object2LongMap;
+         *   92: ifnull → 跳过本 handler（不回退 getContents）
+         * </pre>
+         * 否则（偏移 251–315）才走 {@code getContents()} ⇒ {@code ItemStack#getCount()}（int）。
+         *
+         * <h3>口径（三条）</h3>
+         * <ol>
+         *   <li>值 = {@link ShanhaiLongItemAmount#availableFromMe(long)}（<b>原样 long</b>，上限 9.22e18，
+         *       <b>不再是 2^31−1</b>）；</li>
+         *   <li>键 = {@code key.toStack()}（count 1）+ {@code ItemStackHashStrategy.comparingAllButCount()}
+         *       —— 与上游 {@code createItemMap} 建目标表时用的<b>同一个判等策略</b>
+         *       ⇒ 同一个物品不会因为 count 不同而分裂成两条；</li>
+         *   <li>本 handler 这一轮没有可报的（标签关 / 名单空 / 命中集合空 / 全都没货）⇒ 返回 <b>{@code null}</b>
+         *       —— 与 gtlcore 自己那份 {@code getMEItemMap()} 的约定一致（{@code null} = 这一份不存在）。</li>
+         * </ol>
+         * <p>⚠️ 这里<b>不做</b>任何抽取：{@code SIMULATE/MODULATE} 的唯一落点仍是
+         * {@link #handleRecipeInner} → {@link Source#shanhaiTagSupplyExtract}。
+         */
+        @Override
+        public Object2LongMap<ItemStack> getMEItemMap() {
+            final long version = this.source.shanhaiTagSupplyVersion();
+            if (version != this.cachedMeItemMapVersion) {
+                this.cachedMeItemMapVersion = version;
+                this.cachedMeItemMap = shanhaiBuildItemMap(this.source);
+            }
+            return this.cachedMeItemMap;
+        }
+
+        /** 见类 javadoc「四」：本表一键一条 ⇒ 语义就是"按键去重的 ME 库存视图"。 */
+        @Override
+        public boolean isStocking() {
+            return true;
+        }
+
+        /**
+         * <b>防御性镜像</b>：万一本 handler 被当成流体 handler 问到（正常路径上不可能 ——
+         * 它只注册在 {@code ItemRecipeCapability.CAP} 下），给出的流体量与
+         * {@link Fluid} 那份<b>逐位相同</b>。
+         *
+         * <p>为什么不能留默认实现：接口默认返回 {@code List.of()}（空表），
+         * 而上游 {@code createFluidMap} 对 {@code IOptimizedMEList} <b>只</b>读这个表
+         * ⇒ 默认值会让流体供料整个消失。这里显式给真值，把那条隐患堵死。
+         */
+        @Override
+        public List<FluidStack> getMEFluidList() {
+            final List<Object> objects = shanhaiBuildFluidContents(this.source);
+            if (objects.isEmpty()) {
+                return List.of();
+            }
+            final List<FluidStack> out = new ArrayList<>(objects.size());
+            for (int i = 0; i < objects.size(); i++) {
+                if (objects.get(i) instanceof FluidStack fluid) {
+                    out.add(fluid);
+                }
+            }
+            return out;
         }
 
         /**
@@ -448,9 +587,43 @@ public final class ShanhaiTagSupplyHandlers {
             if (amount <= 0L) {
                 continue;
             }
-            out.add(key.toStack((int) Math.min(amount, Integer.MAX_VALUE)));
+            // ⚠️ 这一格**只能**是 int（ItemStack.count 的结构上限）⇒ 统一走纯核的
+            //    ShanhaiLongItemAmount#stackCountForVanilla（2026-10-27 前这里是裸的
+            //    `(int) Math.min(amount, Integer.MAX_VALUE)`，它与流体侧那行的不对称
+            //    正是「物品卡 2^31−1、流体到 Long.MAX」实机读数的来源）。
+            //    🔴 可用量的权威值**不在**这张表里 —— 在 Item#getMEItemMap() 那条 long 通道。
+            out.add(key.toStack(ShanhaiLongItemAmount.stackCountForVanilla(amount)));
         }
         return List.copyOf(out);
+    }
+
+    /**
+     * 🔴 <b>物品可用量的 long 表</b>（{@code Item#getMEItemMap()} 的唯一实现）——
+     * 与 {@link #shanhaiBuildItemContents} 逐条对应，唯一差别是<b>值不经过 int</b>。
+     *
+     * @return 空表 ⇒ {@code null}（上游约定：{@code null} = 这一份 handler 本轮没有可报的内容）
+     */
+    private static Object2LongMap<ItemStack> shanhaiBuildItemMap(Source source) {
+        final List<AEItemKey> keys = source.shanhaiTagSupplyItems();
+        if (keys.isEmpty()) {
+            return null;
+        }
+        // 与上游 createItemMap 建目标表时同一个判等策略（物品 + NBT 相同即同一键，count 不参与）
+        final Object2LongOpenCustomHashMap<ItemStack> out =
+                new Object2LongOpenCustomHashMap<>(ItemStackHashStrategy.comparingAllButCount());
+        for (int i = 0; i < keys.size(); i++) {
+            final AEItemKey key = keys.get(i);
+            if (key == null) {
+                continue;
+            }
+            final long amount = ShanhaiLongItemAmount.availableFromMe(source.shanhaiTagSupplyAmount(key));
+            if (amount <= 0L) {
+                continue;
+            }
+            // 🔴 long 累加（不是 ItemStack.count）—— 9.22e18 原样报得出去
+            out.addTo(key.toStack(), amount);
+        }
+        return out.isEmpty() ? null : out;
     }
 
     /** 同上，流体侧（LDLib {@code FluidStack}，与 gtceu 的 {@code createFluidMap} 同一类型）。 */

@@ -37,15 +37,19 @@ import java.util.Set;
  * （扫描口径见交付报告 §2），其中 2 个条件的 GT 配方只有 4 条、全是「超净间 + 强重力」
  * ⇒ 按上面的口径<b>一格就够</b>，3 格有富余。
  *
- * <h2>3. 数量门槛（🔴 分工必须点明）</h2>
+ * <h2>3. 数量门槛（🔴 分工必须点明，唯一判据 = {@link #requiredFor(Kind, int)}）</h2>
  * <ul>
  *   <li><b>线圈 / 恒星热力容器</b> ⇒ 该格 {@code count >= }{@value #REQUIRED_COUNT}（沿用 2026-09-30 恒星热力槽的旧口径）；</li>
- *   <li><b>维护仓 / 维度碎片 / 创造模式数据访问仓</b> ⇒ 该格 {@code count >= 1}
+ *   <li><b>维护仓 / 维度碎片 / 创造模式数据访问仓</b> ⇒ 该格 {@code count >= }{@value #SINGLE_REQUIRED_COUNT}
  *       —— 用户原话是「放入<b>一个</b>维护仓」「放入<b>一个</b>对应维度的碎片」「放<b>一个</b>创造模式数据访问仓」。
  *       对这些物品强求 64 个是做不到的（它们是机器方块/单件物品），所以不套 64。</li>
  * </ul>
  * ⚠️ 规格 ③「一格放满 64 个才算一个满足源」在本类里的落点 = <b>热力源必须放满 64</b>；
  * 其余三类按上面第 2 条（用户逐字写的「一个」）执行。<b>这是本实现对任务书的一处解释</b>，已写进交付报告。
+ * <p>🔴 <b>2026-11-01 定死</b>：这个分档<b>只在 {@link #requiredFor(Kind, int)} 里写一次</b>。
+ * 判据（{@link #slotSatisfies}）、拒绝原因（{@link #denyFor}）、文案与 GUI 提示都从它取数 ——
+ * 任何一处再出现"64"或"1"的字面量都算第二套判据。背景：这个数曾被当成"整格统一门槛"
+ * 套到所有条件上（用户当场纠正：「我<b>没有给模块设置 64 个的门槛</b>」）。
  *
  * <h2>4. 生效判据表（每一项都有实证出处，逐条写在 {@link ShanhaiHeatSources} 的注释里）</h2>
  * <pre>
@@ -103,8 +107,44 @@ public final class ShanhaiHeatGate {
 
     // ═══════════════════════════ 1. 数量与档位常量 ═══════════════════════════
 
-    /** 热力源（线圈 / 恒星热力容器）生效所需数量。见类注释 §3 的取舍说明。 */
+    /**
+     * <b>热力源</b>（线圈 / 恒星热力容器）在一格里生效所需数量 = 64，见类注释 §3 的取舍说明。
+     *
+     * <p>⚠️ 它<b>只</b>管 {@link Kind#HEAT_TEMP} / {@link Kind#SC_TIER} 两条（模块 / 归墟）。
+     * 超净间 / 无重力 / 维度 / 研究四类<b>恒 {@value #SINGLE_REQUIRED_COUNT} 个</b> ——
+     * 分档的唯一真源是 {@link #requiredFor(Kind, int)}，不许把本常量直接用在其它条件上。
+     */
     public static final int REQUIRED_COUNT = 64;
+
+    /**
+     * <b>主机（原始终焉引擎 / 归墟以外的那台"主机自己"）生效所需数量 = 1</b>。
+     *
+     * <h2>用户原话（2026-10-25，本轮需求）</h2>
+     * <blockquote>「给原始终焉引擎也加上 3 个额外挂件槽，<b>只不过它只是给主机自己用的，只需要放 1 个</b>」</blockquote>
+     *
+     * <h2>为什么是一个常量，而不是散在代码里的字面量 1</h2>
+     * 阈值现在有<b>两个</b>取值（主机 1 / 模块与归墟 64），而判据只有<b>一份</b>
+     * （{@link #slotSatisfies(Requirement, SlotContent, int)}）⇒
+     * <pre>
+     *   64 → {@link #REQUIRED_COUNT}（模块 / 归墟，已验收，一个数都不许动）
+     *    1 → <b>本常量</b>（主机；唯一的读点是 PrimordialOmegaEngineMachine#extraMountRequiredCount）
+     *   判据形态 → 一律 "s.count &gt;= requiredCount"，不写死任何一边
+     * </pre>
+     * ⇒ 将来若要再改（例如主机也升到 4），<b>只改这一行</b>，判据与文案自动跟着走。
+     * <p>⚠️ 本类只 import {@code java.*}，这份可离线 {@code javac} 的性质必须保住
+     * （离线自证 driver 直接读这个常量做<b>负对照</b>：把它改成 64 ⇒ 判据必须变红）。
+     */
+    public static final int HOST_REQUIRED_COUNT = 1;
+
+    /**
+     * <b>非热力四类条件（超净间 / 无重力 / 维度 / 研究）在一格里要放几个 = 1</b>。
+     *
+     * <p>依据是用户的<b>原话</b>（2026-10-03 规格，逐字）：
+     * 「超重/无重力 + 超净间（3 档）⇒ 都由【维护仓】提供，放入对应的 <b>1 个</b>维护仓就满足」
+     * 「维度要求 ⇒ 放入<b>一个</b>对应维度的碎片」「研究要求 ⇒ 放<b>一个</b>创造模式数据访问仓」。
+     * <p>⇒ 这四类<b>永远</b>只要 1 个，与"热力源要放满 64"是两件事（见 {@link #requiredFor}）。
+     */
+    public static final int SINGLE_REQUIRED_COUNT = 1;
 
     /** 额外挂载槽的格数（{@code PrimordialModuleMachine.extraMountSlots} 构造时传的 3）。 */
     public static final int SLOT_COUNT = 3;
@@ -159,7 +199,11 @@ public final class ShanhaiHeatGate {
      */
     public static final Set<String> HEAT_SLOT_MACHINE_IDS = Set.of(
             "shanhai:taixu_smelting_furnace",
-            "shanhai:primordial_eternal_smelting_furnace",
+            // 🆕 2026-11-01：原「原初永恒熔炼炉」的旧 id（…_eternal_smelting_furnace）随那台机器删除，
+            //    用户拍板【换掉、不是删掉】⇒ 指向本轮新建的第 6 台「原初永恒熔炼炉」
+            //    （shanhai:primordial_eternal_melting_core；中文名继承旧机、注册 id 新建）。
+            //    白名单仍是 3 项；verifyMachineIds 只做成员检查，不写死条数。
+            "shanhai:primordial_eternal_melting_core",
             "shanhai:primordial_molecular_rift_core");
 
     /** 这台机器能不能用额外挂载槽充当热力源。 */
@@ -424,7 +468,7 @@ public final class ShanhaiHeatGate {
         SLOT_EMPTY,
         /** 有东西，但没有任何一格能提供这条需求要的物项。 */
         WRONG_ITEM,
-        /** 物项对了，但热力源没放满 64 个。 */
+        /** 物项对了，但热力源没放满本机阈值个（模块 / 归墟 64、主机 1；只有热力两条会返回它）。 */
         NOT_FULL,
         /** 超净间档位低于配方要求。 */
         CLEANROOM_TIER,
@@ -483,12 +527,28 @@ public final class ShanhaiHeatGate {
      * @param slots 三格现读的内容（顺序 = 槽序号；少于 3 个也允许）
      */
     public static Outcome evaluate(List<Requirement> needs, List<SlotContent> slots) {
+        return evaluate(needs, slots, REQUIRED_COUNT);
+    }
+
+    /**
+     * 判定（<b>可指定生效数量</b>）—— 2026-10-25 阈值参数化的落点，2026-11-01 改为<b>逐 kind 现算</b>。
+     *
+     * <p>唯一的差别就是"热力两条"要放几个：模块 / 归墟传 {@link #REQUIRED_COUNT}（64，一个数都不变），
+     * 主机传 {@link #HOST_REQUIRED_COUNT}（1）。<b>其余四类条件不受影响</b>
+     * —— 这一条现在由 {@link #requiredFor(Kind, int)} <b>结构上保证</b>：
+     * 本方法把 {@code requiredCount} 原样往下传，只有热力两支会取用它，
+     * 另外四类一律拿 {@link #SINGLE_REQUIRED_COUNT}（= 1）。
+     *
+     * @param requiredCount <b>热力源</b>在一格里要放满几个才算生效（&lt;1 按 1 处理）。
+     *                      它<b>不再</b>像早先那样被当成"整格统一门槛"套给所有条件。
+     */
+    public static Outcome evaluate(List<Requirement> needs, List<SlotContent> slots, int requiredCount) {
         final List<SlotContent> safeSlots = slots == null ? List.of() : slots;
         final List<Requirement> uniq = dedup(needs);
         final List<Requirement> satisfied = new ArrayList<>();
         Requirement blocked = null;
         for (Requirement r : uniq) {
-            if (bestSlotFor(r, safeSlots) >= 0) {
+            if (bestSlotFor(r, safeSlots, requiredCount) >= 0) {
                 satisfied.add(r);
             } else if (blocked == null) {
                 blocked = r;
@@ -497,7 +557,7 @@ public final class ShanhaiHeatGate {
         if (blocked == null) {
             return new Outcome(true, Deny.NONE, null, 0, safeSlots, satisfied, uniq);
         }
-        return new Outcome(false, denyFor(blocked, safeSlots), blocked,
+        return new Outcome(false, denyFor(blocked, safeSlots, requiredCount), blocked,
                 haveFor(blocked, safeSlots), safeSlots, satisfied, uniq);
     }
 
@@ -517,27 +577,90 @@ public final class ShanhaiHeatGate {
 
     // ── 单条需求的满足判据（**唯一的判据真源**） ──
 
-    /** 这一格能不能满足这条需求。 */
+    /**
+     * <b>🔴 【唯一判据】一条需求在「一格」里要放几个才算生效</b> —— 阈值分档的真源，
+     * 判据 / 文案 / GUI 提示<b>全部只读这一个函数</b>（不许任何一处再写死 64 或 1）。
+     *
+     * <h2>为什么要单独一个函数（2026-11-01 用户原话，逐字）</h2>
+     * <blockquote>「还是不能跑，而且<b>我没有给模块设置 64 个的门槛</b>」</blockquote>
+     * 64 这个数的出处只有一句（2026-09-30）：<b>线圈 / 恒星热力容器要放满一格才有效</b>。
+     * 后来把「恒星热力槽 ×1」并进「额外挂载槽 ×3」时，这个数被当成"整格的统一门槛"套到了
+     * <b>所有</b>条件上 —— 那是<b>实现层的过度泛化</b>：用户对另外四类条件的原话全是「<b>一个</b>」。
+     *
+     * <h2>分档表（判据与文案共用这一张）</h2>
+     * <pre>
+     *   种类                      一格要几个                        出处
+     *   ────────────────────────  ────────────────────────────────  ─────────────────────────────────
+     *   HEAT_TEMP （ebf_temp）    heatRequiredCount（模块/归墟 64、主机 1）  2026-09-30「同一个槽放满 64 个」
+     *   SC_TIER   （SCTier）      heatRequiredCount（同上）                  同上
+     *   CLEANROOM                 {@link #SINGLE_REQUIRED_COUNT} = 1        「放入对应的 1 个维护仓」
+     *   GRAVITY                   {@link #SINGLE_REQUIRED_COUNT} = 1        「放入对应的 1 个维护仓」
+     *   DIMENSION                 {@link #SINGLE_REQUIRED_COUNT} = 1        「放入一个对应维度的碎片」
+     *   RESEARCH                  {@link #SINGLE_REQUIRED_COUNT} = 1        「放一个创造模式数据访问仓」
+     * </pre>
+     * 🔴 「主机阈值 = 1」是<b>热力的 1 个</b>，不是"四类条件也变成 1"——四类<b>本来就是 1</b>。
+     * 两个数只是<b>恰好相等</b>，不许合并成一个常量（否则改主机热力阈值会顺手改掉维护仓的门槛）。
+     *
+     * @param kind              需求种类；{@code null} ⇒ 返回 {@link #SINGLE_REQUIRED_COUNT}
+     *                          （<b>绝不凭空要求 64</b>：认不出来时宁可宽松，也不许编一个门槛出来）
+     * @param heatRequiredCount 本机的<b>热力</b>阈值（模块 / 归墟 = {@link #REQUIRED_COUNT} 64；
+     *                          主机 = {@link #HOST_REQUIRED_COUNT} 1）；&lt;1 一律按 1 处理
+     * @return 一格里"放几个才算生效"的那个数（恒 ≥1）
+     */
+    public static int requiredFor(Kind kind, int heatRequiredCount) {
+        if (kind == null) {
+            return SINGLE_REQUIRED_COUNT;
+        }
+        final int heat = Math.max(1, heatRequiredCount);
+        return switch (kind) {
+            // 热力两条：按本机阈值（模块 / 归墟 64、主机 1）。
+            case HEAT_TEMP, SC_TIER -> heat;
+            // 另外四类：恒 1 —— 与本机的热力阈值无关（维护仓/碎片/数据仓都是"放一个就够"）。
+            case CLEANROOM, GRAVITY, DIMENSION, RESEARCH -> SINGLE_REQUIRED_COUNT;
+        };
+    }
+
+    /** {@link #requiredFor(Kind, int)} 的 {@link Requirement} 版（文案层拿一条需求直接问"要几个"）。 */
+    public static int requiredFor(Requirement r, int heatRequiredCount) {
+        return requiredFor(r == null ? null : r.kind, heatRequiredCount);
+    }
+
+    /** 这一格能不能满足这条需求（<b>模块 / 归墟口径</b>：热力源要放满 {@link #REQUIRED_COUNT} 个）。 */
     public static boolean slotSatisfies(Requirement r, SlotContent s) {
+        return slotSatisfies(r, s, REQUIRED_COUNT);
+    }
+
+    /**
+     * 这一格能不能满足这条需求（<b>可指定热力源的生效数量</b>）。
+     *
+     * <p>🔴 <b>数量门槛逐 kind 现算</b>，唯一真源 = {@link #requiredFor(Kind, int)}：
+     * 热力两条用调用方给的 {@code requiredCount}（模块 / 归墟 64、主机 1），
+     * 另外四类恒 {@link #SINGLE_REQUIRED_COUNT}（= 1）。
+     * ⇒ 「传了 64 就把维护仓也要求 64」这件事<b>结构上不可能再发生</b>：
+     * 传进来的数只流向 {@link Kind#HEAT_TEMP} / {@link Kind#SC_TIER} 两支。
+     */
+    public static boolean slotSatisfies(Requirement r, SlotContent s, int requiredCount) {
         if (r == null || s == null) {
             return false;
         }
+        final int need = requiredFor(r.kind, requiredCount);
         return switch (r.kind) {
             // 超净间：档位大的天然满足档位小的（ICleaningRoom 三级集合逐级包含，类注释 §4）。
-            case CLEANROOM -> s.count >= 1 && s.cleanroomTier >= r.number;
-            case GRAVITY -> s.count >= 1 && s.gravity;
-            case DIMENSION -> s.count >= 1 && s.dimensions.contains(r.text);
-            case RESEARCH -> s.count >= 1 && s.research;
-            // 热力两条：必须放满 64（用户原话「和以前一样，同一个槽放满 64 个」）。
-            case HEAT_TEMP -> s.count >= REQUIRED_COUNT && s.coilTemperature >= r.number;
-            case SC_TIER -> s.count >= REQUIRED_COUNT && s.containmentTier >= r.number;
+            case CLEANROOM -> s.count >= need && s.cleanroomTier >= r.number;
+            case GRAVITY -> s.count >= need && s.gravity;
+            case DIMENSION -> s.count >= need && s.dimensions.contains(r.text);
+            case RESEARCH -> s.count >= need && s.research;
+            // 热力两条：模块 / 归墟 = 放满 64（用户原话「和以前一样，同一个槽放满 64 个」）；
+            //           主机 = 放 1 个即生效（用户 2026-10-25「只需要放 1 个」）。
+            case HEAT_TEMP -> s.count >= need && s.coilTemperature >= r.number;
+            case SC_TIER -> s.count >= need && s.containmentTier >= r.number;
         };
     }
 
     /** 返回第一格能满足这条需求的槽序号；都不满足返回 −1。 */
-    private static int bestSlotFor(Requirement r, List<SlotContent> slots) {
+    private static int bestSlotFor(Requirement r, List<SlotContent> slots, int requiredCount) {
         for (int i = 0; i < slots.size(); i++) {
-            if (slotSatisfies(r, slots.get(i))) {
+            if (slotSatisfies(r, slots.get(i), requiredCount)) {
                 return i;
             }
         }
@@ -569,8 +692,9 @@ public final class ShanhaiHeatGate {
         return true;
     }
 
-    /** 给失败的这条需求挑一个**最具体**的原因。 */
-    private static Deny denyFor(Requirement r, List<SlotContent> slots) {
+    /** 给失败的这条需求挑一个**最具体**的原因（<b>数量门槛逐 kind 现算</b>，见 {@link #requiredFor}）。 */
+    private static Deny denyFor(Requirement r, List<SlotContent> slots, int requiredCount) {
+        final int need = requiredFor(r.kind, requiredCount);
         if (allEmpty(slots)) {
             return Deny.SLOT_EMPTY;
         }
@@ -580,7 +704,7 @@ public final class ShanhaiHeatGate {
             }
             case HEAT_TEMP -> {
                 for (SlotContent s : slots) {
-                    if (s.coilTemperature > 0 && s.count < REQUIRED_COUNT) {
+                    if (s.coilTemperature > 0 && s.count < need) {
                         return Deny.NOT_FULL;
                     }
                 }
@@ -588,7 +712,7 @@ public final class ShanhaiHeatGate {
             }
             case SC_TIER -> {
                 for (SlotContent s : slots) {
-                    if (s.containmentTier > 0 && s.count < REQUIRED_COUNT) {
+                    if (s.containmentTier > 0 && s.count < need) {
                         return Deny.NOT_FULL;
                     }
                 }

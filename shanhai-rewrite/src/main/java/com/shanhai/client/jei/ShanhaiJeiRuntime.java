@@ -4,7 +4,6 @@ import com.shanhai.ShanhaiMod;
 
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
-import mezz.jei.api.recipe.IRecipeLookup;
 import mezz.jei.api.recipe.IRecipeManager;
 import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.runtime.IJeiRuntime;
@@ -72,9 +71,12 @@ public final class ShanhaiJeiRuntime implements IModPlugin {
     /**
      * 🔴🔴 <b>把"我们指定的一批实例"藏掉</b>（用户："新建之后再改同一条 ⇒ JEI 里两份"的修法）。
      *
-     * <p>与 {@link #hideOwnCopies} 的区别：那个是"按 id 去 JEI 里找当前那份"（要猜），
-     * 这个是"**按我们自己记下来的实例**精确撤掉" —— 改同一条时 JEI 里那份**正是我们上次加进去的**，
+     * <p>与"按 id 去 JEI 里找当前那份"（要猜）的区别：这个是
+     * <b>按我们自己记下来的实例</b>精确撤掉 —— 改同一条时 JEI 里那份正是我们上次加进去的，
      * 按实例表撤更稳、也绝不误伤别人 ✓
+     * <p>⚠️ JEI 的 {@code hiddenRecipes} 是 {@code IdentityHashMap} 支撑的集合
+     * （{@code RecipeTypeData} 构造器字节码实测）⇒ <b>传错实例 = 静默无效</b>，
+     * 所以调用方只许传 {@code createRecipeLookup(...).includeHidden()} 或我们台账里拿到的**同一份实例**。
      */
     @SuppressWarnings("unchecked")
     public static boolean hideGiven(String categoryUid, java.util.List<Object> instances) {
@@ -115,23 +117,36 @@ public final class ShanhaiJeiRuntime implements IModPlugin {
     /** 登记进 JEI 自己结构过几次（读数）。 */
     private static int registeredInJei;
 
+    /** 被 JEI 静默拒收（复核没进去）过几次（读数：>0 就是"addRecipes 白调了"的证据）。 */
+    private static int registerRejected;
+
     /**
-     * 🔴🔴 <b>把这一条【登记进 JEI 自己的结构里】</b>（2026-10-06 用户给出的最小现象逼出来的）。
+     * 🔴🔴 <b>把这一条【登记进 JEI 自己的表】</b>（2026-11-01：本条路升级成"会更新物品索引"的那条）。
      *
-     * <h4>现象（用户逐条实测）</h4>
+     * <h4>2026-11-01 的字节码取证（{@code jei-1.20.1-forge-15.49.0.188.jar}，{@code javap -p -c}）</h4>
      * <pre>
-     * ❌ 用【产物】去找那条新配方 ⇒ 找不到
-     * ❌ 用【原料】右键"能做什么" ⇒ 找不到
-     * ✅ 左键原料 ⇒ 能找到新增的那条         ← 说明它确实在 JEI 里（我们在列表里补过）
+     *   IRecipeManager#addRecipes(RecipeType&lt;T&gt;, List&lt;T&gt;)                       ← 公开运行时 API（唯一一条能加的）
+     *     → RecipeManagerInternal#addRecipes（偏移 12–122）
+     *         → 逐条 addRecipe(category, recipe, hiddenRecipes)（偏移 0–170）
+     *             偏移 8–15    hiddenRecipes.contains(recipe) ⇒ 拒收（debug: "Recipe not added because it is hidden"）
+     *             偏移 55–62   !category.isHandled(recipe)    ⇒ 拒收
+     *             偏移 102–119 造不出 ingredient supplier      ⇒ 拒收
+     *             偏移 120–166 <b>for (RecipeMap m : recipeMaps.values()) m.addRecipe(type, recipe, supplier)</b>
+     *                          ↑↑ 这一步就是【物品索引】—— 输入键、输出键、催化剂各一张表，全部更新
+     *         → RecipeTypeData#addRecipes = recipes.addAll(...)（普通 ArrayList，**不去重**）
+     *   ⇒ 「addRecipes 会不会更新物品索引」= <b>会</b>（这是本轮"点物品也能查到改过的那条"的地基）
      * </pre>
-     * ⇒ **缺的是"输出 → 配方"那条键**：我们此前只在 {@code PluginManager.getRecipes} 的**返回值**上
-     * 追加了一条，**没有把它登记进 JEI 自己的结构**（{@code IRecipeManager#addRecipes} 做的正是这件事）
-     * ⇒ 按【产物】查找（走的正是 JEI 内部那条索引）就找不到 ✗
-     * <p>⚠️ 以前不敢调 addRecipes：怕和我们的追加**变成两份**。现在不会了 ——
-     * 我们的追加条件是 <b>{@code p.matched == 0}</b>（JEI 自己没给这条才补）；一旦登记进 JEI 自己的结构，
-     * 下一次 {@code getRecipes} 的 {@code matched} 就 ≥1 ⇒ **我们自动不再补** ✓ 天然防重 ✓
      *
-     * @return true = 登记进去了
+     * <h4>🔴 但它的返回类型是 {@code void} ⇒ 会【静默拒收】</h4>
+     * 被拒时既没有异常、也没有返回值，只有一个 {@code debug} 级日志（正式日志里看不见）
+     * ⇒ 如果照着"调用成功"就往下走，就会出现最糟的组合：<b>我们把原稿 hide 了、而这一份压根没进去</b>
+     * ⇒ 点物品恒 0 条（正是本轮要修的那个现象，换一层又回来）。
+     * <p>⇒ 本方法<b>必须复核</b>：加完之后再用 {@code createRecipeLookup(cat).includeHidden()} 查一遍，
+     * <b>按实例同一性</b>确认这一份真的躺进 JEI 的表里了，才返回 {@code true}。
+     * （{@code includeHidden} 是刻意的：它证明的是"进了表"，不是"此刻可见"；
+     *   我们这一份刚加进去、没被 hide，两个口径等价，但"进表"才是 addRecipes 的语义。）
+     *
+     * @return true = <b>复核通过</b>（这一份现在确实在 JEI 的表里）；false = 被拒 / 没就绪 / 分类不存在
      */
     @SuppressWarnings("unchecked")
     public static boolean registerInJei(String categoryUid, String recipeId, Object recipe) {
@@ -156,16 +171,89 @@ public final class ShanhaiJeiRuntime implements IModPlugin {
             }
             final RecipeType<Object> cat = (RecipeType<Object>) catOpt.get();
             rm.addRecipes(cat, List.of(recipe));
-            registeredInJei++;
-            ShanhaiMod.LOGGER.info("{} jei_runtime_registered uid={} id={} total={} "
-                            + "（★把这条登记进 JEI 自己的结构 ⇒ 「按产物查找」那条路也认得它；"
-                            + "我们那层的追加条件是 matched==0，所以不会再补一份 ⇒ 不会两份）",
-                    PREFIX, categoryUid, recipeId, registeredInJei);
-            return true;
+            // ★★ 复核（见方法注释的"静默拒收"那一段）：按实例同一性确认它真的进了 JEI 的表。
+            boolean present = false;
+            try {
+                for (Object v : rm.createRecipeLookup(cat).includeHidden().get().toList()) {
+                    if (v == recipe) {
+                        present = true;
+                        break;
+                    }
+                }
+            } catch (Throwable t) {
+                // 复核本身挂了 ⇒ 当作"没进去"（宁可这一次不 hide 原稿，也不要"藏了又没加"）
+                ShanhaiMod.LOGGER.warn("{} jei_runtime_register_verify_failed uid={} id={} err={}",
+                        PREFIX, categoryUid, recipeId, t.toString());
+                present = false;
+            }
+            if (present) {
+                registeredInJei++;
+            } else {
+                registerRejected++;
+            }
+            ShanhaiMod.LOGGER.info("{} jei_runtime_registered id={} category={} ok={} total={} rejected={} "
+                            + "（★addRecipes 会更新 JEI 的物品索引 ⇒ 「按产物/按原料点物品」那条路也认得这条；"
+                            + "ok 是**复核出来的**，不是「调用没抛异常」⇒ ok=false 时调用方【绝不 hide 原稿】）",
+                    PREFIX, recipeId, categoryUid, present, registeredInJei, registerRejected);
+            return present;
         } catch (Throwable t) {
+            registerRejected++;
             ShanhaiMod.LOGGER.warn("{} jei_runtime_register_failed uid={} id={} err={}",
                     PREFIX, categoryUid, recipeId, t.toString());
             return false;
+        } finally {
+            IN_OFFICIAL_CALL.set(Boolean.FALSE);
+        }
+    }
+
+    /**
+     * 🆕 2026-11-01：<b>这个分类里、这个完整 recipe id、此刻【可见】的全部实例</b>
+     * （{@code createRecipeLookup(type).get()}，<b>不带</b> {@code includeHidden}）。
+     *
+     * <h4>为什么"不带 includeHidden"就是"只要可见的"（字节码）</h4>
+     * <pre>
+     *   RecipeLookup#get() 偏移 0–19：RecipeManagerInternal#getRecipesStream(type, focusGroup, <b>this.includeHidden</b>)
+     *                                     （字段默认 false ⇒ IncludeHidden() 才置 true）
+     *   PluginManager#getRecipes 偏移 36–74：if (!includeHidden) stream = stream.filter(hidden::contains).negate()
+     *   ⇒ includeHidden=false ⇒ 只给"没被 hide 的" ✓
+     * </pre>
+     * <p>用途：{@code ShanhaiJeiReplaceOrder.applyChanged} 第 ③ 步要 hide 的是
+     * <b>"JEI 自己那份原稿、且此刻还在显示"</b>；已经藏过的就不必再藏（这一步让"改一条"的
+     * <b>hide 原稿次数恒为 1</b>，而不是每保存一次就多藏一次）。
+     *
+     * @return 可见实例（拿不到 / 没就绪 ⇒ 空表，绝不抛）
+     */
+    @SuppressWarnings("unchecked")
+    public static List<Object> visibleInstancesOf(String categoryUid, String recipeId) {
+        final IJeiRuntime rt = runtime;
+        if (rt == null || categoryUid == null || recipeId == null) {
+            return List.of();
+        }
+        if (inOfficialCall()) {
+            noteReentryBlocked();
+            return List.of();
+        }
+        IN_OFFICIAL_CALL.set(Boolean.TRUE);
+        try {
+            final ResourceLocation uid = ResourceLocation.tryParse(categoryUid);
+            if (uid == null) {
+                return List.of();
+            }
+            final IRecipeManager rm = rt.getRecipeManager();
+            final java.util.Optional<RecipeType<?>> catOpt = rm.getRecipeType(uid);
+            if (catOpt.isEmpty()) {
+                return List.of();
+            }
+            final RecipeType<Object> cat = (RecipeType<Object>) catOpt.get();
+            final List<Object> out = new ArrayList<>();
+            rm.createRecipeLookup(cat).get()
+                    .filter(v -> recipeId.equals(ShanhaiJeiRecipePatches.idOf(v)))
+                    .forEach(out::add);
+            return out;
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} jei_runtime_visible_failed uid={} id={} err={}",
+                    PREFIX, categoryUid, recipeId, t.toString());
+            return List.of();
         } finally {
             IN_OFFICIAL_CALL.set(Boolean.FALSE);
         }
@@ -231,79 +319,7 @@ public final class ShanhaiJeiRuntime implements IModPlugin {
     }
 
     /**
-     * 🔴 <b>只做一件事：把 JEI 自己那份里同 id 的旧条目 hide 掉</b>（用 JEI 官方 API）。
-     *
-     * <h4>为什么【只 hide、绝不 add】（这是本轮改过一轮之后的结论）</h4>
-     * 用户实测的三条规律：<b>改能刷、插不刷、删不刷</b> ——「把列表里那条换成新的」能做，
-     * 「插一条 / 拿掉一条」做不到。而我们的"查询出口"那条通道（
-     * {@code ShanhaiJeiRecipeOrderMixin} 注在 {@code PluginManager.getRecipes} 的 RETURN）
-     * 对这三件事的日志<b>全是 PASS</b>（{@code matched/hidden/added} 记账正确）。
-     * <p>⇒ 一旦我们<b>又</b>用官方 API 去 {@code addRecipes}，同一个 id 就会在 JEI 里存在两份
-     * （JEI 的 {@code distinct()} 只按 {@code equals} 去重，而配方对象没重写 equals ⇒ 两个新实例
-     * 都留下）—— 那是本工程点名过的坑。
-     * <p>⇒ 所以分工定死：
-     * <ul>
-     *   <li><b>加 / 换</b> ⇒ 只由我们那条查询出口通道做（唯一真源，已验证 PASS）；</li>
-     *   <li><b>删 / 换掉旧的</b> ⇒ 这里调一次 {@code hideRecipes}（用 <b>JEI 自己给的那份实例</b>，
-     *       不自己造 —— 传错实例会静默无效，见类注释里那条 IdentityHashMap 的取证），
-     *       顺便让 JEI 重算一次它自己的配方表与界面。</li>
-     * </ul>
-     *
-     * @param categoryUid JEI 分类 uid（GT = 配方类型 id；原版 = {@code minecraft:crafting} 这种）
-     * @param recipeId    完整 recipe id（去重口径）
-     * @return true = 真的藏掉了（至少一份）；false = 没找到/没藏成（调用方无需做别的，我们那层会兜住）
-     */
-    @SuppressWarnings("unchecked")
-    public static boolean hideOwnCopies(String categoryUid, String recipeId) {
-        final IJeiRuntime rt = runtime;
-        if (rt == null || categoryUid == null || recipeId == null) {
-            return false;
-        }
-        // 🔴🔴 防重入：已经在官方调用里了 ⇒ 绝不再进来（否则就是那个无限递归闭环）。
-        if (inOfficialCall()) {
-            noteReentryBlocked();
-            return false;
-        }
-        IN_OFFICIAL_CALL.set(Boolean.TRUE);
-        try {
-            final ResourceLocation uid = ResourceLocation.tryParse(categoryUid);
-            if (uid == null) {
-                return false;
-            }
-            final IRecipeManager rm = rt.getRecipeManager();
-            final java.util.Optional<RecipeType<?>> catOpt = rm.getRecipeType(uid);
-            if (catOpt.isEmpty()) {
-                ShanhaiMod.LOGGER.warn("{} jei_runtime_no_category uid={} id={}（我们那层照样会处理它）",
-                        PREFIX, categoryUid, recipeId);
-                return false;
-            }
-            final RecipeType<Object> cat = (RecipeType<Object>) catOpt.get();
-            final List<Object> old = new ArrayList<>();
-            final IRecipeLookup<Object> lookup = rm.createRecipeLookup(cat);
-            lookup.includeHidden().get()
-                    .filter(v -> recipeId.equals(ShanhaiJeiRecipePatches.idOf(v)))
-                    .forEach(old::add);
-            if (old.isEmpty()) {
-                return false;                 // 本来就不在 ⇒ 没什么可藏（不是失败）
-            }
-            rm.hideRecipes(cat, old);
-            appliedViaRuntime++;
-            ShanhaiMod.LOGGER.info("{} jei_runtime_hidden uid={} id={} hidden={} total={} "
-                            + "（用 JEI 自己给的那份实例 hide —— 传错实例会静默无效，那条坑有取证）",
-                    PREFIX, categoryUid, recipeId, old.size(), appliedViaRuntime);
-            return true;
-        } catch (Throwable t) {
-            ShanhaiMod.LOGGER.error("{} jei_runtime_hide_failed uid={} id={} err={}（我们那层照样会处理它）",
-                    PREFIX, categoryUid, recipeId, t.toString(), t);
-            return false;
-        } finally {
-            // 🔴 无论成败都必须落闸（否则一次异常就把出口永久关掉 = 补丁层整层失效）
-            IN_OFFICIAL_CALL.set(Boolean.FALSE);
-        }
-    }
-
-    /**
-     * 🔴🔴 <b>把 {@link #hideOwnCopies} 藏掉的那一份【还回去】</b>（2026-10-06 现场读数逼出来的）。
+     * 🔴🔴 <b>把之前被藏掉的那一份【还回去】</b>（2026-10-06 现场读数逼出来的）。
      *
      * <h4>为什么必须有这一半（用户看到的"整个类型在 JEI 里没了"）</h4>
      * 现场：服务端那一局把补丁判成"没套用"（{@code jei_patch_dropped … reason=not_in_force}、
@@ -313,6 +329,9 @@ public final class ShanhaiJeiRuntime implements IModPlugin {
      * 那一条，<b>不会因为补丁被丢掉而自动回来</b> ✗ ⇒ 表现出来就是"那条配方再也看不见"。
      * <p>⇒ 丢补丁时必须把藏过的还回去（{@code IRecipeManager#unhideRecipes}，
      * 与 hide 同一套实例来源：<b>必须用 JEI 自己给的那份</b>）。
+     * <p>🔴 2026-11-01：原稿现在是由 {@link ShanhaiJeiReplaceOrder#applyChanged} 第 ③ 步藏掉的
+     * （老的 {@code hideOwnCopies} 已删，因为它那条"只 hide、不 add"就是本轮缺陷本身）。
+     * 还回去这一半照旧 —— 判据仍是"补丁被丢掉 ⇒ 用户还能看见原来的那条"。
      *
      * @return true = 真的还回去了（至少一份）
      */
