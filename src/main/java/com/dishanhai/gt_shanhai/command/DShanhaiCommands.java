@@ -729,7 +729,7 @@ public class DShanhaiCommands {
                             int count = com.dishanhai.gt_shanhai.common.shop.ShopConfig
                                     .resetSaveUses(ctx.getSource().getServer());
                             ctx.getSource().sendSuccess(msg("§b[山海商店] §a已将本存档的 §f" + count
-                                    + " §a个商品次数重置为服务端设定值，服务端次数未变更"), true);
+                                    + " §a个商品的所有玩家个人额度重置为服务端设定值，服务端次数未变更"), true);
                             return 1;
                         }))
                 .then(Commands.literal("授权")

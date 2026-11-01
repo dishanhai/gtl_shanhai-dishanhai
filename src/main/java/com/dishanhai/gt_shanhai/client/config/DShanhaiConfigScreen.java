@@ -40,6 +40,29 @@ public final class DShanhaiConfigScreen {
                 .setTitle(Component.literal("山海私货 配置"));
         ConfigEntryBuilder e = builder.entryBuilder();
 
+        // 山海雙階段載入：獨立 client 設定，在啟動 reload 前即可讀取。
+        ConfigCategory loading = builder.getOrCreateCategory(Component.literal("山海载入动画"));
+        loading.addEntry(e.startBooleanToggle(Component.literal("载入 CPU 与配置量抽样"),
+                com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences.sampling())
+                .setDefaultValue(true).setSaveConsumer(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences::setSampling)
+                .setTooltip(tip("使用 JDK 内建 JFR，20ms CPU 抽样，补充其他模组自有线程的热点", "只在两段载入期间记录，滚动上限 32MiB；配置量抽样是估计值", "可单独关闭，保留直接计时与 CPU/配置统计")).build());
+        loading.addEntry(e.startBooleanToggle(Component.literal("载入性能分析器"),
+                com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences.profiling())
+                .setDefaultValue(true).setSaveConsumer(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences::setProfiling)
+                .setTooltip(tip("记录资源加载、资料包与配方慢项、CPU 时间和分配量", "主菜单「载入分析」或 /shloading 查看，报告自动写入 client/loading_reports", "单笔配方仅量耗时以控制分析开销")).build());
+        loading.addEntry(e.startBooleanToggle(Component.literal("启动初始化动画"),
+                com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences.startup())
+                .setDefaultValue(true).setSaveConsumer(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences::setStartup)
+                .setTooltip(tip("显示 Forge 初始化工作与实际资源加载进度", "不接管模组加载前的 Forge 独立早期窗口")).build());
+        loading.addEntry(e.startBooleanToggle(Component.literal("进入世界动画"),
+                com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences.world())
+                .setDefaultValue(true).setSaveConsumer(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences::setWorld)
+                .setTooltip(tip("显示资料包、配方解析与同步、出生区块准备", "加载细节过长时自动分页，也可用鼠标滚轮翻页")).build());
+        loading.addEntry(e.startBooleanToggle(Component.literal("载入时减少动态效果"),
+                com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences.reduceMotion())
+                .setDefaultValue(false).setSaveConsumer(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences::setReduceMotion)
+                .setTooltip(tip("停止星点闪烁、环流与进度游标运动，保留工作详情与真实数字")).build());
+
         // ===== 特大号标签过滤总线 =====
         ConfigCategory tagBus = builder.getOrCreateCategory(Component.literal("标签过滤总线"));
         tagBus.addEntry(e.startIntField(Component.literal("每页槽位数"), cfg.tagBusSlotsPerPage.get())

@@ -522,6 +522,7 @@ public final class WalletAccountAPI {
                 new WalletAccountSyncPacket(getAllCurrencies(server, uuid), getDigital(server, uuid),
                         getAllPurchaseCounts(server, uuid), getAllPeriodAnchors(server, uuid),
                         ShopWirelessEu.getBalance(player), ShopAeNetwork.hasBoundNetwork(player),
-                        getMemberTier(server, uuid), getAllPeriodUsed(server, uuid)));
+                        getMemberTier(server, uuid), getAllPeriodUsed(server, uuid),
+                        ShopLimitSavedData.get(server).getPlayerRemaining(uuid)));
     }
 }

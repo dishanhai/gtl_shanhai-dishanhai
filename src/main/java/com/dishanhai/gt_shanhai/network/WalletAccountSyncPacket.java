@@ -25,6 +25,7 @@ public class WalletAccountSyncPacket {
     private final Map<String, Long> purchaseCounts;
     private final Map<String, Long> periodAnchors; // 周期限购各 key 的开窗锚点 gameTime，客户端算"剩余刷新倒计时"用
     private final Map<String, Long> periodUsed; // 周期限购各 key 在当前窗口内的已用次数，客户端显示"本周期已购 X/Y 次"用
+    private final Map<String, Long> personalRemainingUses; // 此玩家的永久額度，按商品 stableId
     private final BigInteger wirelessEu; // 玩家绑定的无线电网 EU 余额（gtladditions/gtmthings，见 ShopWirelessEu）
     private final boolean hasBoundAeNetwork; // 玩家当前是否有绑定的在线 AE 网络（商店终端/FTBQ提交器，见 ShopAeNetwork），供「AE模式」开关校验用
     private final int memberTier; // 付费会员档位（-1=未购买，0/1/2=青铜/白银/黄金），永久买断，见 ShopMembership/WalletAccountAPI#buyMemberTier
@@ -64,6 +65,16 @@ public class WalletAccountSyncPacket {
     public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
                                     Map<String, Long> purchaseCounts, Map<String, Long> periodAnchors, BigInteger wirelessEu,
                                     boolean hasBoundAeNetwork, int memberTier, Map<String, Long> periodUsed) {
+        this(currencies, digital, purchaseCounts, periodAnchors, wirelessEu, hasBoundAeNetwork,
+                memberTier, periodUsed, null);
+    }
+
+    public WalletAccountSyncPacket(Map<ResourceLocation, BigInteger> currencies, BigInteger digital,
+                                    Map<String, Long> purchaseCounts, Map<String, Long> periodAnchors, BigInteger wirelessEu,
+                                    boolean hasBoundAeNetwork, int memberTier, Map<String, Long> periodUsed,
+                                    Map<String, Long> personalRemainingUses) {
+        this.personalRemainingUses = personalRemainingUses != null
+                ? new LinkedHashMap<>(personalRemainingUses) : new LinkedHashMap<>();
         this.periodUsed = periodUsed != null ? periodUsed : new LinkedHashMap<>();
         this.currencies = currencies != null ? currencies : new LinkedHashMap<>();
         this.digital = digital != null ? digital : BigInteger.ZERO;
@@ -113,6 +124,10 @@ public class WalletAccountSyncPacket {
             used.put(key, v);
         }
         this.periodUsed = used;
+        int rn = buf.readVarInt();
+        Map<String, Long> personal = new LinkedHashMap<>();
+        for (int i = 0; i < rn; i++) personal.put(buf.readUtf(), buf.readVarLong());
+        this.personalRemainingUses = personal;
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -140,6 +155,11 @@ public class WalletAccountSyncPacket {
             buf.writeUtf(e.getKey());
             buf.writeVarLong(e.getValue() == null ? 0L : e.getValue());
         }
+        buf.writeVarInt(personalRemainingUses.size());
+        for (Map.Entry<String, Long> e : personalRemainingUses.entrySet()) {
+            buf.writeUtf(e.getKey());
+            buf.writeVarLong(e.getValue());
+        }
     }
 
     public static void handle(WalletAccountSyncPacket pkt, Supplier<NetworkEvent.Context> ctx) {
@@ -154,6 +174,6 @@ public class WalletAccountSyncPacket {
     private static void applyClient(WalletAccountSyncPacket pkt) {
         com.dishanhai.gt_shanhai.client.shop.ClientWalletAccount.apply(
                 pkt.currencies, pkt.digital, pkt.purchaseCounts, pkt.periodAnchors, pkt.wirelessEu, pkt.hasBoundAeNetwork,
-                pkt.memberTier, pkt.periodUsed);
+                pkt.memberTier, pkt.periodUsed, pkt.personalRemainingUses);
     }
 }

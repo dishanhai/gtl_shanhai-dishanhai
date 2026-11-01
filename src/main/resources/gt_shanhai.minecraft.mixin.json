@@ -9,6 +9,13 @@
     "ReverseEntropyRecipeMixin"
   ],
   "client": [
+    "ShanhaiLoadingOverlayMixin",
+    "ShanhaiLoadingReloadProfilerMixin",
+    "ShanhaiLoadingWorldMixin",
+    "ShanhaiLoadingWaitMixin",
+    "ShanhaiLoadingRecipeMixin",
+    "ShanhaiLoadingSyncMixin",
+    "ShanhaiLoadingConnectMixin",
     "ShanhaiBlackHoleGameRendererMixin",
     "RecipeEditorPickerHoldMixin",
     "WobbleFontMixin",
