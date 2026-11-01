@@ -55,12 +55,15 @@ class ShanhaiInstabilityGeometryTest {
         assertEquals(geometry.frame(1.25, 42L, i -> true), geometry.frame(1.25, 42L, i -> true));
         assertNotEquals(geometry.frame(1.25, 42L, i -> true), geometry.frame(1.75, 42L, i -> true));
         boolean sawArcs = false;
+        int peakArcs = 0, peakQuads = 0;
         for (int step = 0; step < 80; step++) {
             var frame = geometry.frame(step * 0.125, 42L, i -> true);
             assertFalse(frame.quads().isEmpty());
             assertTrue(frame.quads().size() <= ShanhaiInstabilityGeometry.MAX_QUADS);
             assertTrue(frame.arcs() <= ShanhaiInstabilityGeometry.MAX_ARCS);
             sawArcs |= frame.arcs() > 0;
+            peakArcs = Math.max(peakArcs, frame.arcs());
+            peakQuads = Math.max(peakQuads, frame.quads().size());
             for (var q : frame.quads()) {
                 assertTrue(q.alpha() > 0 && q.alpha() <= 0.65f);
                 assertTrue(q.red() >= 0 && q.red() <= 1);
@@ -73,6 +76,8 @@ class ShanhaiInstabilityGeometryTest {
             }
         }
         assertTrue(sawArcs);
+        assertTrue(peakArcs > 16, "Stronger instability exceeds the previous 16-arc ceiling");
+        assertTrue(peakQuads > 1800, "Larger surface fragments cover the whole structure");
     }
 
     @Test

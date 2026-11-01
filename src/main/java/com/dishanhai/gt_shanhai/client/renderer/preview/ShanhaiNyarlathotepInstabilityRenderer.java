@@ -9,24 +9,45 @@ import com.gregtechceu.gtceu.api.pattern.util.RelativeDirection;
 import com.gregtechceu.gtceu.client.renderer.machine.WorkableCasingMachineRenderer;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.RenderStateShard;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.Level;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.RenderLevelStageEvent;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
 import org.joml.Matrix4f;
+import org.lwjgl.opengl.GL11;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
-/** 山海：整座觸腕結構的脈衝、斷裂光片與偶發電弧；只讀客戶端世界。 */
+/** 山海：整座觸腕的黑日、向心流、衝擊環與不穩定電弧；只讀客戶端世界。 */
+@Mod.EventBusSubscriber(modid = GTDishanhaiMod.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class ShanhaiNyarlathotepInstabilityRenderer extends WorkableCasingMachineRenderer {
     private static ShanhaiInstabilityGeometry geometry;
     private static boolean loadAttempted;
+    private static RenderType blackCoreLayer;
+    private record GlowBatch(Level world, Matrix4f pose, Matrix4f modelView,
+                             ShanhaiInstabilityGeometry.Frame surface, ShanhaiBlackSunGeometry.Frame sun,
+                             Direction x, Direction y, Direction z) {}
+    private static final List<GlowBatch> WORLD_GLOW = new ArrayList<>();
 
     public ShanhaiNyarlathotepInstabilityRenderer(ResourceLocation casing, ResourceLocation overlay) {
         super(casing, overlay);
@@ -68,15 +89,77 @@ public final class ShanhaiNyarlathotepInstabilityRenderer extends WorkableCasing
         // JEI 的假世界時間可能停在 0；沿用目前客戶端的時鐘，世界內與預覽都能播放。
         var clientWorld = Minecraft.getInstance().level;
         double seconds = ((clientWorld == null ? world.getGameTime() : clientWorld.getGameTime()) + partialTick) / 20.0;
-        var frame = mesh.frame(seconds, blockEntity.getBlockPos().asLong(), i -> present[i]);
-        var consumer = buffers.getBuffer(HostFxDraw.beamLayer());
+        long seed = blockEntity.getBlockPos().asLong();
+        var frame = mesh.frame(seconds, seed, i -> present[i]);
+        var sun = ShanhaiBlackSunGeometry.frame(seconds, seed, mesh.nodes(), i -> present[i]);
         Matrix4f matrix = poses.last().pose();
-        for (var quad : frame.quads()) {
+        // 世界內先完成所有黑核；光暈延後到 AFTER_BLOCK_ENTITIES，避免遠處黑核擦掉前景光暈。
+        if (!sun.opaque().isEmpty()) draw(buffers.getBuffer(blackCoreLayer()),matrix,sun.opaque(),x,y,z);
+        if (world == clientWorld) {
+            WORLD_GLOW.add(new GlowBatch(world,new Matrix4f(matrix),new Matrix4f(RenderSystem.getModelViewMatrix()),
+                    frame,sun,x,y,z));
+            return;
+        }
+        // JEI 假世界每個 MB 僅有一個預覽控制器，沒有世界階段事件；由場景結束批次。
+        var consumer = buffers.getBuffer(HostFxDraw.beamLayer());
+        draw(consumer,matrix,frame.quads(),x,y,z);
+        draw(consumer,matrix,sun.glow(),x,y,z);
+    }
+
+    @SubscribeEvent
+    public static void beginFrame(TickEvent.RenderTickEvent event) {
+        if (event.phase == TickEvent.Phase.START) WORLD_GLOW.clear();
+    }
+
+    @SubscribeEvent
+    public static void finishBlackCores(RenderLevelStageEvent event) {
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_BLOCK_ENTITIES || WORLD_GLOW.isEmpty()) return;
+        var client = Minecraft.getInstance();
+        var buffers = client.renderBuffers().bufferSource();
+        var modelView = RenderSystem.getModelViewStack();
+        modelView.pushPose();
+        try {
+            // 尾端黑核仍可能位於共用非固定 buffer，先明確完成它。
+            buffers.endBatch(blackCoreLayer());
+            for (var batch : WORLD_GLOW) {
+                if (batch.world() != client.level) continue;
+                modelView.last().pose().set(batch.modelView());
+                RenderSystem.applyModelViewMatrix();
+                var consumer = buffers.getBuffer(HostFxDraw.beamLayer());
+                draw(consumer,batch.pose(),batch.surface().quads(),batch.x(),batch.y(),batch.z());
+                draw(consumer,batch.pose(),batch.sun().glow(),batch.x(),batch.y(),batch.z());
+                buffers.endBatch(HostFxDraw.beamLayer());
+            }
+        } finally {
+            WORLD_GLOW.clear();
+            modelView.popPose();
+            RenderSystem.applyModelViewMatrix();
+        }
+    }
+
+    private static void draw(VertexConsumer consumer, Matrix4f matrix, List<ShanhaiInstabilityGeometry.Quad> quads,
+                             Direction x, Direction y, Direction z) {
+        for (var quad : quads) {
             vertex(consumer, matrix, quad.a(), quad, x, y, z);
             vertex(consumer, matrix, quad.b(), quad, x, y, z);
             vertex(consumer, matrix, quad.c(), quad, x, y, z);
             vertex(consumer, matrix, quad.d(), quad, x, y, z);
         }
+    }
+
+    private static RenderType blackCoreLayer() {
+        if (blackCoreLayer == null) {
+            blackCoreLayer = RenderType.create("shanhai_nyarlathotep_black_sun_core",
+                    DefaultVertexFormat.POSITION_COLOR,VertexFormat.Mode.QUADS,32768,false,false,
+                    RenderType.CompositeState.builder()
+                            .setShaderState(new RenderStateShard.ShaderStateShard(GameRenderer::getPositionColorShader))
+                            .setTransparencyState(new RenderStateShard.TransparencyStateShard("shanhai_black_sun_opaque",
+                                    RenderSystem::disableBlend,RenderSystem::disableBlend))
+                            .setDepthTestState(new RenderStateShard.DepthTestStateShard("lequal",GL11.GL_LEQUAL))
+                            .setWriteMaskState(new RenderStateShard.WriteMaskStateShard(true,true))
+                            .setCullState(new RenderStateShard.CullStateShard(false)).createCompositeState(false));
+        }
+        return blackCoreLayer;
     }
 
     private static void vertex(VertexConsumer consumer, Matrix4f pose, ShanhaiInstabilityGeometry.Point point,

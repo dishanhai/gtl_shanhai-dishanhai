@@ -9,8 +9,8 @@ import java.util.function.IntPredicate;
 /** 山海：由 MB 表面取樣的不穩定特效幾何，無遊戲／OpenGL 依賴。 */
 public final class ShanhaiInstabilityGeometry {
     public static final int MAX_NODES = 256;
-    public static final int MAX_ARCS = 16;
-    public static final int MAX_QUADS = 2048;
+    public static final int MAX_ARCS = 32;
+    public static final int MAX_QUADS = 4096;
     public record Point(double x, double y, double z) {
         Point add(Point p) { return new Point(x + p.x, y + p.y, z + p.z); }
         Point scale(double k) { return new Point(x * k, y * k, z * k); }
@@ -112,26 +112,26 @@ public final class ShanhaiInstabilityGeometry {
             if (!present.test(index)) continue;
             Node node = nodes.get(index);
             double phase = phase(node.seed) * Math.PI * 2;
-            double pulse = 0.5 + 0.5 * Math.sin(clock * 2.1 - node.x * 0.065 + node.z * 0.11 + phase);
-            double jitter = 0.065 * Math.sin(clock * 13 + phase) * pulse;
+            double pulse = 0.5 + 0.5 * Math.sin(clock * 3.2 - node.x * 0.065 + node.z * 0.11 + phase);
+            double jitter = 0.16 * Math.sin(clock * 13 + phase) * pulse;
             Point normal = new Point(node.nx, node.ny, node.nz);
             Point u = normal.cross(Math.abs(node.ny) == 1 ? new Point(1,0,0) : new Point(0,1,0));
             Point v = normal.cross(u);
             Point center = center(node).add(u.scale(jitter));
-            double radius = 0.48 + pulse * 0.32;
-            float alpha = (float) (0.09 + 0.25 * pulse);
-            for (int segment = 0; segment < 4; segment++) {
-                double angle = phase + clock * (0.35 + phase * 0.05) + segment * Math.PI/2;
+            double radius = 0.65 + pulse * 0.7;
+            float alpha = (float) (0.18 + 0.44 * pulse);
+            for (int segment = 0; segment < 6; segment++) {
+                double angle = phase + clock * (0.6 + phase * 0.05) + segment * Math.PI/3;
                 Point a = circle(center, u, v, radius, angle);
                 Point b = circle(center, u, v, radius, angle + 0.7);
-                strip(quads, a, b, normal.cross(b.add(a.scale(-1))).unit().scale(0.025 + 0.025*pulse),
+                strip(quads, a, b, normal.cross(b.add(a.scale(-1))).unit().scale(0.045 + 0.055*pulse),
                         (float) (0.38 + 0.34*pulse), (float) (0.32 + 0.5*(1-pulse)), 1, alpha);
             }
             // 局部殘影斷片；不抖動真方塊或整個視角。
-            if (pulse > 0.82) {
-                Point shifted = center.add(u.scale(0.12*Math.sin(clock*9+phase))).add(normal.scale(0.08));
-                strip(quads, shifted.add(u.scale(-0.65)), shifted.add(u.scale(0.65)), v.scale(0.035),
-                        0.65f, 0.4f, 1, (float) ((pulse-0.82)*1.4));
+            if (pulse > 0.6) {
+                Point shifted = center.add(u.scale(0.3*Math.sin(clock*9+phase))).add(normal.scale(0.15));
+                strip(quads, shifted.add(u.scale(-1.2)), shifted.add(u.scale(1.2)), v.scale(0.075),
+                        0.65f, 0.4f, 1, (float) ((pulse-0.6)*1.5));
             }
         }
         int arcs = 0;
@@ -139,10 +139,10 @@ public final class ShanhaiInstabilityGeometry {
             if (arcs >= MAX_ARCS) break;
             if (!present.test(link.from) || !present.test(link.to)) continue;
             Node a = nodes.get(link.from), b = nodes.get(link.to);
-            double cycle = clock / 2.8 + phase(a.seed ^ b.seed);
+            double cycle = clock / 1.9 + phase(a.seed ^ b.seed);
             double life = cycle - Math.floor(cycle);
-            if (life >= 0.16) continue;
-            float envelope = (float) Math.sin(life / 0.16 * Math.PI);
+            if (life >= 0.3) continue;
+            float envelope = (float) Math.sin(life / 0.3 * Math.PI);
             if (envelope < 0.02) continue;
             Point start = center(a), end = center(b), delta = end.add(start.scale(-1));
             Point axis = delta.unit();
@@ -151,14 +151,14 @@ public final class ShanhaiInstabilityGeometry {
             Point previous = start;
             for (int step = 1; step <= 8; step++) {
                 double t = step / 8.0;
-                double bend = Math.sin(Math.PI*t) * 0.36;
+                double bend = Math.sin(Math.PI*t) * 0.8;
                 Point next = start.add(delta.scale(t))
                         .add(u.scale(Math.sin(step*13.7 + clock*19 + a.seed)*bend))
                         .add(v.scale(Math.cos(step*8.1 + clock*17 + b.seed)*bend));
-                strip(quads, previous, next, u.scale(0.055), 0.5f, 0.25f, 1, envelope*0.32f);
-                strip(quads, previous, next, v.scale(0.055), 0.5f, 0.25f, 1, envelope*0.32f);
-                strip(quads, previous, next, u.scale(0.014), 0.75f, 0.92f, 1, envelope*0.65f);
-                strip(quads, previous, next, v.scale(0.014), 0.75f, 0.92f, 1, envelope*0.65f);
+                strip(quads, previous, next, u.scale(0.12), 0.5f, 0.25f, 1, envelope*0.5f);
+                strip(quads, previous, next, v.scale(0.12), 0.5f, 0.25f, 1, envelope*0.5f);
+                strip(quads, previous, next, u.scale(0.035), 0.75f, 0.92f, 1, envelope*0.65f);
+                strip(quads, previous, next, v.scale(0.035), 0.75f, 0.92f, 1, envelope*0.65f);
                 previous = next;
             }
             arcs++;
@@ -175,7 +175,7 @@ public final class ShanhaiInstabilityGeometry {
         return center.add(u.scale(radius*Math.cos(angle))).add(v.scale(radius*Math.sin(angle)));
     }
 
-    private static void strip(List<Quad> out, Point a, Point b, Point halfWidth, float r, float g, float blue, float alpha) {
+    static void strip(List<Quad> out, Point a, Point b, Point halfWidth, float r, float g, float blue, float alpha) {
         out.add(new Quad(a.add(halfWidth), b.add(halfWidth), b.add(halfWidth.scale(-1)), a.add(halfWidth.scale(-1)),
                 r, g, blue, alpha));
     }
