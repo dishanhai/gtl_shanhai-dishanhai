@@ -20,8 +20,8 @@ import java.util.Optional;
  * <p>
  * 效果分发：
  * <ul>
- *   <li><b>加速</b>：由 {@link com.dishanhai.gt_shanhai.mixin.BroadcastEffectMixin} 在目标机器
- *       {@code setupRecipe} 时通过 {@link #getPowerLevel} 查询加速比率</li>
+ *   <li><b>回响加速</b>：由 {@link com.dishanhai.gt_shanhai.mixin.BroadcastEffectBuildRecipeMixin} 在目标机器
+ *       {@code setupRecipe} 时通过 {@link #getEchoPowerLevel} 查询加速比率</li>
  *   <li><b>产出倍率</b>：同样统一在 {@code BroadcastEffectMixin.setupRecipe} 处理，
  *       通过 {@link #getFixedOutputMultiplier} 查询倍率</li>
  *   <li><b>怪物阻止</b>：由 {@link GravitationalWaveSpawnHandler} 在生物生成时查询 {@link #isInRange}</li>
@@ -42,17 +42,24 @@ public class GravitationalWaveBroadcastManager {
         public final int powerLevel;
         public final int lensCount;
         public final int fixedOutputMultiplier;
+        public final boolean echo;
 
         public BroadcastSource(BlockPos pos, int radius, int powerLevel, int lensCount) {
             this(pos, radius, powerLevel, lensCount, 0);
         }
 
         public BroadcastSource(BlockPos pos, int radius, int powerLevel, int lensCount, int fixedOutputMultiplier) {
+            this(pos, radius, powerLevel, lensCount, fixedOutputMultiplier, false);
+        }
+
+        public BroadcastSource(BlockPos pos, int radius, int powerLevel, int lensCount, int fixedOutputMultiplier,
+                               boolean echo) {
             this.pos = pos;
             this.radius = radius;
             this.powerLevel = powerLevel;
             this.lensCount = lensCount;
             this.fixedOutputMultiplier = fixedOutputMultiplier;
+            this.echo = echo;
         }
     }
 
@@ -71,11 +78,21 @@ public class GravitationalWaveBroadcastManager {
                 level.dimension().location(), pos, radius, powerLevel, lensCount, fixedOutputMultiplier);
     }
 
+    /** 山海：回响单独登记，避免新增超频改变原天线行为。广播只覆盖所在维度。 */
+    public void addEchoSource(ServerLevel level, BlockPos pos, int radius, int powerLevel, int lensCount,
+                              int outputMultiplier) {
+        sources.computeIfAbsent(level.dimension(), key -> new HashMap<>()).put(pos.immutable(),
+                new BroadcastSource(pos.immutable(), Math.max(1, Math.min(1200, radius)),
+                        Math.max(0, Math.min(100, powerLevel)), Math.max(0, Math.min(64, lensCount)),
+                        Math.max(2, Math.min(5, outputMultiplier)), true));
+    }
+
     public int getLensCount(ServerLevel level, BlockPos pos) {
         var dimMap = sources.get(level.dimension());
         if (dimMap == null || dimMap.isEmpty()) return 0;
         int maxLenses = 0;
         for (var source : dimMap.values()) {
+            if (source.echo && pos.equals(source.pos)) continue;
             long radiusSqr = (long) source.radius * source.radius;
             if (pos.distSqr(source.pos) <= radiusSqr && source.lensCount > maxLenses) {
                 maxLenses = source.lensCount;
@@ -121,8 +138,12 @@ public class GravitationalWaveBroadcastManager {
     public int getFixedOutputMultiplier(ServerLevel level, BlockPos pos) {
         var dimMap = sources.get(level.dimension());
         if (dimMap == null || dimMap.isEmpty()) return 0;
+        return fixedMultiplierAt(dimMap.values(), pos);
+    }
+
+    static int fixedMultiplierAt(Iterable<BroadcastSource> candidates, BlockPos pos) {
         int maxMultiplier = 0;
-        for (var source : dimMap.values()) {
+        for (var source : candidates) {
             if (source.fixedOutputMultiplier <= 1) continue;
             if (pos.equals(source.pos)) continue;
             if (pos.distSqr(source.pos) <= (long) source.radius * source.radius) {
@@ -130,6 +151,25 @@ public class GravitationalWaveBroadcastManager {
             }
         }
         return maxMultiplier;
+    }
+
+    /** 同范围重叠取最强超频，不叠乘；源自身不作为接收端。 */
+    public int getEchoPowerLevel(ServerLevel level, BlockPos pos) {
+        var dimMap = sources.get(level.dimension());
+        return dimMap == null ? 0 : echoPowerAt(dimMap.values(), pos);
+    }
+
+    static int echoPowerAt(Iterable<BroadcastSource> candidates, BlockPos pos) {
+        int maximum = 0;
+        for (var source : candidates) {
+            if (!source.echo || source.radius <= 0 || pos.equals(source.pos)) continue;
+            double distance = Math.sqrt(pos.distSqr(source.pos));
+            if (distance <= source.radius) {
+                int power = (int) (source.powerLevel * (1.0 - distance / source.radius));
+                maximum = Math.max(maximum, Math.max(0, Math.min(100, power)));
+            }
+        }
+        return maximum;
     }
 
     public Optional<BroadcastSource> getNearestSource(ServerLevel level, BlockPos pos) {

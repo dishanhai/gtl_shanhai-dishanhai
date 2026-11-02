@@ -1,0 +1,48 @@
+{
+  "data": {
+    "euTier": 8
+  },
+  "duration": 1000,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 524288
+      }
+    ]
+  },
+  "type": "gtceu:voice_of_the_faceless",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "dishanhai:wzyh"
+          }
+        },
+        "chance": 0
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 10,
+          "value": [
+            {
+              "fluid": "gtceu:cosmic_element"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:voice_of_the_faceless/quantized_reality_item",
+      "defaultEnabled": true
+    }
+  ]
+}

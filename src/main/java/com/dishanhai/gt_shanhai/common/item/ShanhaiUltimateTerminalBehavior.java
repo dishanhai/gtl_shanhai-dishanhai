@@ -444,13 +444,64 @@ public final class ShanhaiUltimateTerminalBehavior implements IInteractionItem, 
     @Override
     public void appendHoverText(ItemStack itemStack, @Nullable Level level,
                                 List<Component> list, TooltipFlag tooltipFlag) {
-        GlobalPos bound = ShanhaiUltimateTerminalConfig.getBoundAe(itemStack);
-        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.0"));
-        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.1"));
-        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.2"));
+        // 讀取用副本：Config.get 會補寫 Version / UUID，不能在懸停時污染無標籤的原始物品。
+        ItemStack copy = itemStack.copy();
+        int repeat = ShanhaiUltimateTerminalConfig.getRepeatCount(copy);
+        boolean aeMode = ShanhaiUltimateTerminalConfig.isAeMode(copy);
+        boolean orderMode = ShanhaiUltimateTerminalConfig.isOrderMode(copy);
+        boolean noChamber = ShanhaiUltimateTerminalConfig.isNoChamberMode(copy);
+        GlobalPos bound = ShanhaiUltimateTerminalConfig.getBoundAe(copy);
+
+        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.status",
+                repeat, stateComponent(aeMode), stateComponent(orderMode), stateComponent(noChamber)));
+        appendActiveModesLine(copy, list);
         list.add(bound == null
                 ? Component.translatable("tooltip.gt_shanhai.ultimate_terminal.unbound")
                 : Component.translatable("tooltip.gt_shanhai.ultimate_terminal.bound",
                         bound.dimension().location(), bound.pos().toShortString()));
+        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.open"));
+        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.0"));
+        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.1"));
+        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.2"));
+        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.3"));
+    }
+
+    private static Component stateComponent(boolean enabled) {
+        return Component.translatable(enabled
+                ? "tooltip.gt_shanhai.ultimate_terminal.state_on"
+                : "tooltip.gt_shanhai.ultimate_terminal.state_off");
+    }
+
+    private static void appendActiveModesLine(ItemStack copy, List<Component> list) {
+        List<Component> active = new ArrayList<>(5);
+        if (ShanhaiUltimateTerminalConfig.isDismantleMode(copy)) {
+            active.add(Component.translatable("gui.gt_shanhai.ultimate_terminal.dismantle")
+                    .withStyle(ChatFormatting.RED));
+        }
+        if (ShanhaiUltimateTerminalConfig.isModuleCheckMode(copy)) {
+            active.add(Component.translatable("gui.gt_shanhai.ultimate_terminal.module_check")
+                    .withStyle(ChatFormatting.AQUA));
+        }
+        if (ShanhaiUltimateTerminalConfig.isMirrored(copy)) {
+            active.add(Component.translatable("gui.gt_shanhai.ultimate_terminal.mirror")
+                    .withStyle(ChatFormatting.YELLOW));
+        }
+        if (ShanhaiUltimateTerminalConfig.isReplaceMode(copy)) {
+            active.add(Component.translatable("gui.gt_shanhai.ultimate_terminal.replace")
+                    .withStyle(ChatFormatting.GOLD));
+        }
+        if (ShanhaiUltimateTerminalConfig.isAbsoluteReplaceMode(copy)) {
+            active.add(Component.translatable("gui.gt_shanhai.ultimate_terminal.absolute_replace")
+                    .withStyle(ChatFormatting.LIGHT_PURPLE));
+        }
+        if (active.isEmpty()) return;
+        MutableComponent joined = Component.empty();
+        for (int i = 0; i < active.size(); i++) {
+            if (i > 0) {
+                joined.append(Component.literal(" §8| "));
+            }
+            joined.append(active.get(i));
+        }
+        list.add(Component.translatable("tooltip.gt_shanhai.ultimate_terminal.modes", joined));
     }
 }

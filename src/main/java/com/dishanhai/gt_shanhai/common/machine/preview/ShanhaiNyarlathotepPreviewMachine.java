@@ -31,7 +31,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraftforge.registries.ForgeRegistries;
 import java.util.List;
 
 /** 山海：保留舊預覽 ID 的正式奈亞；獨立倉口供能供料，可接歸墟共享增益。 */
@@ -43,21 +42,19 @@ public final class ShanhaiNyarlathotepPreviewMachine extends PrimordialCoinForge
     @Persisted @DescSynced private String linkedGuixuDim = "";
     @Persisted @DescSynced private long linkedGuixuPos;
     @DescSynced private boolean nyarlathotepLinkReady;
-    @DescSynced private boolean broadcastActive;
     @DescSynced private long storedLocalEnergy;
     @DescSynced private int effectiveOutputMultiplier = 1;
     @DescSynced private long effectiveParallel;
     private boolean linkLoaded;
     private TickableSubscription linkSubscription;
     private IWirelessNetworkEnergyHandler localEnergy;
-    private final NotifiableItemStackHandler lenses;
-    private int registeredLensCount = -1;
+    // 保留舊版附加倉儲的索引，升級既有存檔後可取出透鏡轉入回響。
+    private final NotifiableItemStackHandler legacyLenses;
 
     public ShanhaiNyarlathotepPreviewMachine(IMachineBlockEntity holder) {
         super(holder);
-        lenses = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.BOTH);
-        lenses.setFilter(stack -> stack.isEmpty() || new ResourceLocation("dishanhai", "gravitational_lens")
-                .equals(ForgeRegistries.ITEMS.getKey(stack.getItem())));
+        legacyLenses = new NotifiableItemStackHandler(this, 1, IO.NONE, IO.OUT);
+        legacyLenses.setFilter(stack -> stack.isEmpty());
     }
 
     @Override public ManagedFieldHolder getFieldHolder() { return FIELDS; }
@@ -127,6 +124,9 @@ public final class ShanhaiNyarlathotepPreviewMachine extends PrimordialCoinForge
     @Override public void onLoad() {
         linkLoaded = true;
         super.onLoad();
+        // 撤回舊版在本主機位置登記的廣播；新廣播只由回響的實際配方維持。
+        if (getLevel() instanceof ServerLevel level)
+            GravitationalWaveBroadcastManager.INSTANCE.removeSource(level, getPos());
         if (!isRemote()) linkSubscription = subscribeServerTick(linkSubscription, () -> {
             if (getOffsetTimer() % 20 == 0) {
                 reconcileHost();
@@ -140,7 +140,6 @@ public final class ShanhaiNyarlathotepPreviewMachine extends PrimordialCoinForge
                     notifyBlockUpdate();
                 }
             }
-            updateBroadcast();
         });
     }
     @Override public void onStructureFormed() {
@@ -148,66 +147,35 @@ public final class ShanhaiNyarlathotepPreviewMachine extends PrimordialCoinForge
         reconcileHost();
     }
     @Override public void onStructureInvalid() {
-        stopBroadcast();
         super.onStructureInvalid();
         nyarlathotepLinkReady = false;
     }
     @Override public void onUnload() {
         linkLoaded = false;
-        stopBroadcast();
         reconcileHost();
         if (linkSubscription != null) { linkSubscription.unsubscribe(); linkSubscription = null; }
         super.onUnload();
-    }
-    @Override public boolean onWorking() {
-        boolean worked = super.onWorking();
-        if (!worked) stopBroadcast();
-        return worked;
     }
     @Override public boolean beforeWorking(GTRecipe recipe) {
         reconcileHost();
         return super.beforeWorking(recipe);
     }
 
-    private int lensCount() { return Math.min(16, lenses.storage.getStackInSlot(0).getCount()); }
-    public boolean isBroadcastActive() { return broadcastActive; }
-    public void updateBroadcast() {
-        if (!(getLevel() instanceof ServerLevel level)) return;
-        boolean active = isFormed() && isWorkingEnabled() && getRecipeLogic().isWorking()
-                && getRecipeLogic().isBroadcastBatch();
-        int count = lensCount();
-        if (!active) { stopBroadcast(); return; }
-        if (!broadcastActive || registeredLensCount != count) {
-            int tier = Math.max(1, getTier());
-            GravitationalWaveBroadcastManager.INSTANCE.addSource(level, getPos(),
-                    Math.min(320, 16 + tier * 16 + count * 10), Math.min(100, tier * 10 + 10), count,
-                    count > 0 ? 3 : 2);
-            registeredLensCount = count;
-            broadcastActive = true;
-            markDirty();
-        }
-    }
-    private void stopBroadcast() {
-        if (getLevel() instanceof ServerLevel level)
-            GravitationalWaveBroadcastManager.INSTANCE.removeSource(level, getPos());
-        if (broadcastActive) { broadcastActive = false; markDirty(); }
-        registeredLensCount = -1;
-    }
-
     @Override protected NotifiableItemStackHandler[] getPersistedStorages() {
         var parent = super.getPersistedStorages();
         var result = java.util.Arrays.copyOf(parent, parent.length + 1);
-        result[parent.length] = lenses;
+        result[parent.length] = legacyLenses;
         return result;
     }
     @Override public Widget createUIWidget() {
         Widget widget = super.createUIWidget();
         if (widget instanceof WidgetGroup group) {
-            group.addWidget(new SlotWidget(lenses.storage, 0, 160, 32, true, true)
+            group.addWidget(new SlotWidget(legacyLenses.storage, 0, 160, 32, true, false)
                     .setBackground(GuiTextures.SLOT)
-                    .setHoverTooltips(Component.literal("§d引力透镜"),
-                            Component.literal("§7最多16片；提升广播范围及产出效果")));
-            group.addWidget(new LabelWidget(136, 36, "透镜"));
+                    .setHoverTooltips(Component.literal("§d旧版透镜取回"),
+                            Component.literal("§7广播已迁移至奈亚拉托提普之回响"),
+                            Component.literal("§7此槽只允许取出，请将透镜放入回响")));
+            group.addWidget(new LabelWidget(136, 36, "取回"));
         }
         return widget;
     }
@@ -231,7 +199,7 @@ public final class ShanhaiNyarlathotepPreviewMachine extends PrimordialCoinForge
         text.add(Component.literal("§b并行 " + getAvailableRecipeParallel() + "　产出 ×" + getHostOutputMultiplier()));
         addThreadBoostDisplay(text);
         addWorkingStatus(text);
-        if (broadcastActive) text.add(Component.literal("§d引力波广域广播运行中"));
+        text.add(Component.literal("§d广播：请使用远程链接的奈亚拉托提普之回响"));
     }
 
     public static MultiblockMachineDefinition register() {
@@ -239,8 +207,7 @@ public final class ShanhaiNyarlathotepPreviewMachine extends PrimordialCoinForge
                 .multiblock(ID, ShanhaiNyarlathotepPreviewMachine::new)
                 .rotationState(RotationState.ALL)
                 .tier(GTValues.UEV)
-                .recipeTypes(DShanhaiRecipeTypes.SPACETIME_DISTORTION,
-                        DShanhaiRecipeTypes.GRAVITATIONAL_WAVE_CONSUMPTION, DShanhaiRecipeTypes.COIN_FORGE)
+                .recipeTypes(DShanhaiRecipeTypes.SPACETIME_DISTORTION, DShanhaiRecipeTypes.COIN_FORGE)
                 .pattern(ShanhaiNyarlathotepPreviewStructure::createPattern)
                 .appearanceBlock(ShanhaiNyarlathotepPreviewStructure::appearanceBlock)
                 .workableCasingRenderer(new ResourceLocation("gtlcore", "block/molecular_casing"),

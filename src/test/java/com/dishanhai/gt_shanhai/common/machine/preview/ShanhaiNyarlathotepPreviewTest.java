@@ -68,16 +68,18 @@ class ShanhaiNyarlathotepPreviewTest {
     }
 
     @Test
-    void originalControllerIdNowRunsTheThreeProductionTypes() throws Exception {
+    void originalControllerKeepsProductionAndDelegatesBroadcastToEcho() throws Exception {
         Path file = SOURCE.resolve("ShanhaiNyarlathotepPreviewMachine.java");
         assertTrue(Files.exists(file), "Missing preview controller");
         String source = Files.readString(file);
         assertTrue(source.contains("extends PrimordialCoinForgeModule"), "Reuse existing module bonuses and mint restrictions");
         assertTrue(source.contains("SPACETIME_DISTORTION"));
-        assertTrue(source.contains("GRAVITATIONAL_WAVE_CONSUMPTION"));
+        assertFalse(source.contains("GRAVITATIONAL_WAVE_CONSUMPTION"), "Broadcast belongs to the dedicated Echo machine");
+        assertFalse(source.contains("addSource("), "The main controller must never broadcast");
         assertTrue(source.contains("COIN_FORGE"));
         assertTrue(source.contains("canWorkWithoutHost()"));
         assertTrue(source.contains("getWirelessNetworkEnergyHandler()"), "Must replace inherited free energy with local hatches");
+        assertTrue(source.contains("legacyLenses"), "Keep old lens inventory available for extraction during migration");
         assertFalse(source.contains("GTRecipeTypes.DUMMY_RECIPES"));
         String registration = Files.readString(SOURCE.getParent().resolve("DShanhaiMachines.java"));
         assertTrue(registration.contains("ShanhaiNyarlathotepPreviewMachine.register()"));

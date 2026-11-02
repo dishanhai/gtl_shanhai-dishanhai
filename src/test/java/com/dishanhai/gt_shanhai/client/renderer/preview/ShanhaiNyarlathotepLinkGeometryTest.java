@@ -32,6 +32,20 @@ class ShanhaiNyarlathotepLinkGeometryTest {
     private double distance(ShanhaiInstabilityGeometry.Point a, ShanhaiInstabilityGeometry.Point b) {
         return Math.sqrt(Math.pow(a.x()-b.x(), 2)+Math.pow(a.y()-b.y(), 2)+Math.pow(a.z()-b.z(), 2));
     }
+    @Test void portalsHaveDoubleSizeAndGuixuPortalsStayFartherOutsideTheHorizon() throws Exception {
+        for (boolean guixu : new boolean[]{false, true}) {
+            var portal = point("portalCenter", guixu, 0, 0);
+            var disk = quads(frame(2, guixu, true, false), "opaque");
+            assertEquals(5.1, distance(portal, disk.getFirst().b()), 1e-9,
+                    "Portal short radius must double from 2.55 to 5.1 blocks");
+            double longest = disk.subList(0, 32).stream()
+                    .mapToDouble(q -> distance(portal, q.b())).max().orElseThrow();
+            assertEquals(8.6, longest, 1e-9);
+            if (guixu) assertEquals(51, distance(portal,
+                    new ShanhaiInstabilityGeometry.Point(0, 0, 0)), 1e-9,
+                    "At a nine-block horizon the new portal center is 3R+24, previously 2R+12");
+        }
+    }
     @Test void materialLeavesBlackSunAndEntersTheNyarlathotepPortals() throws Exception {
         for (int channel=0; channel<3; channel++) {
             var portal = point("portalCenter", false, channel, 0);

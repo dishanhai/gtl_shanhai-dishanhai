@@ -205,4 +205,35 @@ class ShanhaiUltimateTerminalSourceTest {
         assertTrue(recipe.contains("gt_shanhai:ultimate_terminal"));
         assertFalse(recipe.contains("copy_nbt"));
     }
+
+    @Test
+    void tooltipReadsConfigCopyAndIncludesDetailedUsageAndStatusLines() throws Exception {
+        String behavior = Files.readString(BEHAVIOR);
+        String zhCn = Files.readString(Path.of("src", "main", "resources", "assets",
+                "gt_shanhai", "lang", "zh_cn.json"));
+        String enUs = Files.readString(Path.of("src", "main", "resources", "assets",
+                "gt_shanhai", "lang", "en_us.json"));
+
+        int hover = behavior.indexOf("public void appendHoverText");
+        assertTrue(hover >= 0);
+        String hoverSection = behavior.substring(hover);
+        assertTrue(hoverSection.contains("ItemStack copy = itemStack.copy();"));
+        for (String key : new String[]{
+                "tooltip.gt_shanhai.ultimate_terminal.status",
+                "tooltip.gt_shanhai.ultimate_terminal.modes",
+                "tooltip.gt_shanhai.ultimate_terminal.state_on",
+                "tooltip.gt_shanhai.ultimate_terminal.state_off",
+                "tooltip.gt_shanhai.ultimate_terminal.open",
+                "tooltip.gt_shanhai.ultimate_terminal.0",
+                "tooltip.gt_shanhai.ultimate_terminal.1",
+                "tooltip.gt_shanhai.ultimate_terminal.2",
+                "tooltip.gt_shanhai.ultimate_terminal.3",
+                "tooltip.gt_shanhai.ultimate_terminal.unbound",
+                "tooltip.gt_shanhai.ultimate_terminal.bound"
+        }) {
+            assertTrue(hoverSection.contains(key), key);
+            assertTrue(zhCn.contains("\"" + key + "\":"), "zh_cn missing " + key);
+            assertTrue(enUs.contains("\"" + key + "\":"), "en_us missing " + key);
+        }
+    }
 }

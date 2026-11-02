@@ -97,6 +97,7 @@ public class DShanhaiMachines {
     public static MultiblockMachineDefinition STEAM_GENERATOR;
     public static MachineDefinition AE_STEAM_BINDER_BLOCK;
     public static MultiblockMachineDefinition NYARLATHOTEPS_TENTACLE_PREVIEW;
+    public static MultiblockMachineDefinition NYARLATHOTEPS_ECHO;
 
     // GTNL 移植机器
     public static MultiblockMachineDefinition ADVANCED_MASS_FABRICATOR;
@@ -226,6 +227,7 @@ public class DShanhaiMachines {
         STEAM_GENERATOR = com.dishanhai.gt_shanhai.common.machine.steam.ShanhaiSteamGeneratorMachine.register();
         AE_STEAM_BINDER_BLOCK = com.dishanhai.gt_shanhai.common.machine.steam.ShanhaiAeSteamBinderMachine.register();
         NYARLATHOTEPS_TENTACLE_PREVIEW = com.dishanhai.gt_shanhai.common.machine.preview.ShanhaiNyarlathotepPreviewMachine.register();
+        NYARLATHOTEPS_ECHO = com.dishanhai.gt_shanhai.common.machine.preview.ShanhaiNyarlathotepEchoMachine.register();
         // ========== GTNL 移植机器 ==========
         
         // 进阶质量发生器

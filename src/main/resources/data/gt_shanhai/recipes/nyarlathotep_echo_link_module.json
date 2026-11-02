@@ -1,0 +1,5 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [{"item": "gt_shanhai:guixu_nyarlathotep_link_module"}, {"item": "minecraft:echo_shard"}],
+  "result": {"item": "gt_shanhai:nyarlathotep_echo_link_module", "count": 1}
+}

@@ -33,6 +33,7 @@ public class DShanhaiRecipeTypes {
     public static GTRecipeType PRIMORDIAL_SINGULARITY_INVERSION;
     public static GTRecipeType GRAVITATIONAL_WAVE_PRODUCTION;
     public static GTRecipeType GRAVITATIONAL_WAVE_CONSUMPTION;
+    public static GTRecipeType VOICE_OF_THE_FACELESS;
     public static GTRecipeType SEVENTY_TWO_CHANGES;
     public static GTRecipeType CHAOS_CRAFTING;
     public static GTRecipeType NEBULA_SIPHONING;
@@ -254,6 +255,13 @@ public class DShanhaiRecipeTypes {
                 .setMaxIOSize(1, 0, 1, 0)
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
+                .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
+                .setSlotOverlay(false, false, true, GuiTextures.FLUID_SLOT)
+                .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)
+                .setSound(GTLAddSoundEntries.INSTANCE.getFORGE_OF_THE_ANTICHRIST());
+
+        VOICE_OF_THE_FACELESS = register("voice_of_the_faceless", "multiblock")
+                .setMaxIOSize(1, 0, 1, 0).setEUIO(IO.IN).setMaxTooltips(6)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT)
                 .setSlotOverlay(false, false, true, GuiTextures.FLUID_SLOT)
                 .setSlotOverlay(false, false, false, GuiTextures.DUST_OVERLAY)

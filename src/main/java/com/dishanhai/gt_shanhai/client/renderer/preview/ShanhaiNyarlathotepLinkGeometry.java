@@ -8,6 +8,7 @@ import static com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilit
 public final class ShanhaiNyarlathotepLinkGeometry {
     public static final int CHANNELS = 3;
     public static final int MAX_QUADS = 2048;
+    private static final double PORTAL_SCALE = 2;
     public record Frame(List<Quad> opaque, List<Quad> glow) {}
     private static final Frame EMPTY = new Frame(List.of(), List.of());
 
@@ -32,7 +33,7 @@ public final class ShanhaiNyarlathotepLinkGeometry {
     public static Point portalCenter(boolean guixu,int channel,double horizon) {
         validate(0,horizon);
         double r=radius(guixu,horizon);
-        return center(guixu).add(direction(channel).scale(guixu?r*2+12:r+14));
+        return center(guixu).add(direction(channel).scale(guixu?r*3+24:r+14));
     }
 
     /** 進度永遠沿實際物質流向遞增：黑日→通道，或通道→黑洞視界內。 */
@@ -118,7 +119,8 @@ public final class ShanhaiNyarlathotepLinkGeometry {
                 .add(u.scale(Math.cos(phase)*width)).add(v.scale(Math.sin(phase)*width));
     }
     private static Point ellipse(Point center,Point u,Point v,double ru,double rv,double angle) {
-        return center.add(u.scale(Math.cos(angle)*ru)).add(v.scale(Math.sin(angle)*rv));
+        return center.add(u.scale(Math.cos(angle)*ru*PORTAL_SCALE))
+                .add(v.scale(Math.sin(angle)*rv*PORTAL_SCALE));
     }
     private static double fract(double n) { return n-Math.floor(n); }
     private static void fragment(List<Quad> out,Point p,Point u,Point v,Point n,double size,float alpha) {

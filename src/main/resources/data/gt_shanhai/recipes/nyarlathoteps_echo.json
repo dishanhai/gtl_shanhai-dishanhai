@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["FHF", "CEC", "FHF"],
+  "key": {
+    "F": {"item": "gtceu:fusion_coil"},
+    "H": {"item": "gtceu:high_power_casing"},
+    "C": {"item": "gtceu:fusion_glass"},
+    "E": {"item": "gtlcore:hyper_core"}
+  },
+  "result": {"item": "gt_shanhai:nyarlathoteps_echo", "count": 1}
+}

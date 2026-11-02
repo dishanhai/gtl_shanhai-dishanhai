@@ -8,8 +8,8 @@ import com.gregtechceu.gtceu.api.recipe.content.Content;
 import com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler;
 import com.gtladd.gtladditions.api.recipe.WirelessGTRecipe;
 import com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe;
-import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuPowerBudget;
 import com.gtladd.gtladditions.common.data.ParallelData;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuPowerBudget;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -17,10 +17,8 @@ import java.math.RoundingMode;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/** 山海：沿用原初／鑄幣門檻，以自身倉口限制並行，廣播必須實際扣料成功。 */
+/** 山海：沿用原初／鑄幣門檻，以自身倉口限制並行；廣播已移至回響。 */
 public final class ShanhaiNyarlathotepRecipeLogic extends PrimordialCoinForgeLogic {
-    private static final String BROADCAST_KEY = "sh_nyarlathotep_broadcast";
-    private boolean buildingBroadcast;
 
     public ShanhaiNyarlathotepRecipeLogic(ShanhaiNyarlathotepPreviewMachine machine) { super(machine); }
 
@@ -63,14 +61,7 @@ public final class ShanhaiNyarlathotepRecipeLogic extends PrimordialCoinForgeLog
         return super.getMaxParallel(recipe, limit);
     }
 
-    @Override protected void onBatchRecipeProcessed(GTRecipe recipe, long parallel) {
-        if (parallel > 0 && recipe.recipeType == DShanhaiRecipeTypes.GRAVITATIONAL_WAVE_CONSUMPTION)
-            buildingBroadcast = true;
-    }
-    @Override protected boolean allowsEmptyRecipeOutputs() { return buildingBroadcast; }
-
     @Override protected WirelessGTRecipe buildFinalWirelessRecipe(ParallelData data, IWirelessNetworkEnergyHandler local) {
-        buildingBroadcast = false;
         // 既有演算法比較整批 EU，但實際由 handler 每 tick 扣本機能源。預算與批次 tick 同量綱。
         IWirelessNetworkEnergyHandler budget = new IWirelessNetworkEnergyHandler() {
             @Override public boolean isOnline() { return local.isOnline(); }
@@ -79,27 +70,13 @@ public final class ShanhaiNyarlathotepRecipeLogic extends PrimordialCoinForgeLog
             @Override public boolean consumeEnergy(long eu) { return local.consumeEnergy(eu); }
             @Override public boolean consumeEnergy(BigInteger eu) { return local.consumeEnergy(eu); }
         };
-        try {
-            WirelessGTRecipe result = super.buildFinalWirelessRecipe(data, budget);
-            if (result != null) result.data.putBoolean(BROADCAST_KEY, buildingBroadcast);
-            return result;
-        } finally { buildingBroadcast = false; }
+        return super.buildFinalWirelessRecipe(data, budget);
     }
     @Override protected WirelessGTRecipe buildWirelessRecipe(ObjectArrayList<Content> items,
                                                             ObjectArrayList<Content> fluids, BigInteger totalEu) {
         // 既有 helper 以整數除法分攤，低耗能配方不可被截成每 tick 0 EU。
         return super.buildWirelessRecipe(items, fluids, GuixuPowerBudget.roundForTicks(totalEu, batchTicks()));
     }
-    public boolean isBroadcastBatch() {
-        GTRecipe recipe = getLastRecipe();
-        return recipe != null && recipe.data.getBoolean(BROADCAST_KEY);
-    }
-
-    @Override public void handleRecipeWorking() {
-        super.handleRecipeWorking();
-        ((ShanhaiNyarlathotepPreviewMachine) getMachine()).updateBroadcast();
-    }
-
     @Override public boolean handleWirelessTickInput(IWirelessGTRecipe recipe) {
         return ((ShanhaiLocalEnergyHandler) getMachine().getWirelessNetworkEnergyHandler()).consumeRecipeTick(recipe);
     }
