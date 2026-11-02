@@ -6,6 +6,8 @@ public final class GuixuStarField {
     public static final int SKY_COUNT = 512;
     public static final int ORBIT_COUNT = 64;
     public static final int METEOR_COUNT = 8;
+    public static final int VOLUME_COUNT = 384;
+    public static final int DUST_COUNT = 96;
     private static final double TAU = Math.PI * 2.0;
     // 山海：只快取不變的種子，不保留動畫、世界或主機狀態。
     private static final double[][] SEEDS = buildSeeds();
@@ -88,6 +90,58 @@ public final class GuixuStarField {
         return 256 + (int) (Math.max(0.0F, Math.min(1.0F, density)) * (SKY_COUNT - 256));
     }
 
+    /** 新增環境限於視界近旁；最大 30.4 格，小於半徑 48 格的機器內環。 */
+    public static double environmentRadius(double horizon) {
+        return 4 + 2.2 * Math.max(.8, Math.min(12, horizon));
+    }
+
+    /** 山海：只在黑洞近旁填入三維星空，均勻分層緯度避免又變成一條薄環。 */
+    public static Sample sampleVolume(int index, double seconds, double horizon) {
+        double extent = environmentRadius(horizon);
+        double inner = Math.max(.8, Math.min(12, horizon)) * 1.5 + 1;
+        double radius = inner + (extent * .82 - inner) * Math.pow(seed(index, 41), .75);
+        double vertical = 1 - 2 * (Math.floorMod(index * 149, VOLUME_COUNT) + .5) / VOLUME_COUNT;
+        double angle = seed(index, 42) * TAU + seconds * .003;
+        double radial = radius * Math.sqrt(Math.max(0, 1 - vertical * vertical));
+        Point p = new Point(Math.cos(angle) * radial, radius * vertical, Math.sin(angle) * radial);
+        double twinkle = .5 + .5 * Math.sin(seconds * (.35 + seed(index, 43) * .65) + seed(index, 44) * TAU);
+        float size = (float)(((index % 31 == 0 ? .25 : .11) + seed(index, 45) * .12) * extent / 68);
+        return ambient(p, p, size, (float)(.30 + .48 * twinkle), index % 9 == 0);
+    }
+
+    /** 少量半透明星塵口袋，沒有實心霧面，也不向視界內填光。 */
+    public static Sample sampleDust(int index, double seconds, double horizon) {
+        double extent = environmentRadius(horizon);
+        double inner = Math.max(.8, Math.min(12, horizon)) * 1.5 + 1;
+        double radius = inner + (extent * .74 - inner) * seed(index, 51);
+        double angle = seed(index, 52) * TAU + seconds * .006;
+        double vertical = (seed(index, 53) * 2 - 1) * .75;
+        double radial = radius * Math.sqrt(1 - vertical * vertical);
+        Point p = new Point(Math.cos(angle) * radial, radius * vertical, Math.sin(angle) * radial);
+        double pulse = .5 + .5 * Math.sin(seconds * .17 + seed(index, 54) * TAU);
+        return ambient(p, p, (float)((.45 + seed(index, 55) * .75) * extent / 30.4), (float)(.025 + .035 * pulse), false);
+    }
+
+    public static int volumeCount(float density, boolean degraded) {
+        return degraded ? 64 : 192 + Math.round(Math.max(0, Math.min(1, density)) * (VOLUME_COUNT - 192));
+    }
+    public static int dustCount(float density, boolean degraded) {
+        return degraded ? 0 : 48 + Math.round(Math.max(0, Math.min(1, density)) * (DUST_COUNT - 48));
+    }
+
+    /** 環境星點與星塵不能把黑洞的投影陰影填亮；停用黑洞時不留人造缺口。 */
+    public static boolean hiddenByShadow(float[] camera, Sample star, double horizon) {
+        if (!(horizon > 0)) return false;
+        double distanceSquared = camera[0]*camera[0] + camera[1]*camera[1] + camera[2]*camera[2];
+        if (distanceSquared <= horizon*horizon) return true;
+        double dx = star.headX-camera[0], dy = star.headY-camera[1], dz = star.headZ-camera[2];
+        double toward = -(dx*camera[0]+dy*camera[1]+dz*camera[2]);
+        if (toward <= 0) return false;
+        double rayLengthSquared = dx*dx+dy*dy+dz*dz;
+        double shadow = horizon + star.size*2.6;
+        return distanceSquared - toward*toward/Math.max(1e-10,rayLengthSquared) < shadow*shadow;
+    }
+
     private static Sample ambient(Point head, Point tail, float size, float alpha, boolean warm) {
         return new Sample(head.x, head.y, head.z, tail.x, tail.y, tail.z, size, alpha, warm);
     }
@@ -110,7 +164,7 @@ public final class GuixuStarField {
     }
 
     private static double[][] buildSeeds() {
-        double[][] values = new double[SKY_COUNT][37];
+        double[][] values = new double[SKY_COUNT][56];
         for (int i = 0; i < values.length; i++) for (int salt = 0; salt < values[i].length; salt++) {
             values[i][salt] = computeSeed(i, salt);
         }

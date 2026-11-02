@@ -51,15 +51,44 @@ class GuixuAccretionRingTest {
         }
     }
 
-    @Test void streamCrestsAlwaysAdvectInwardsRatherThanOutwards() {
+    @Test void gasOrbitsFasterInsideAndDriftsInwardsInItsRotatingFrame() throws Exception {
+        var speed = GuixuAccretionFlow.class.getMethod("angularSpeed", double.class);
+        double inner = (double) speed.invoke(null, 0D), outer = (double) speed.invoke(null, 1D);
+        assertTrue(inner > outer && outer > 0, "Prograde Keplerian differential rotation");
+        assertEquals(Math.pow(57D / 51, 1.5), inner / outer, .00001);
         for (double s = .05; s < 1; s += .1)
             for (double angle = -Math.PI; angle < Math.PI; angle += .2)
                 for (double time : new double[]{0, 3, 15}) {
                     double phase = GuixuAccretionFlow.phase(s, angle, time);
                     double radialDerivative = (GuixuAccretionFlow.phase(s + .001, angle, time) - phase) / .001;
                     double timeDerivative = (GuixuAccretionFlow.phase(s, angle, time + .001) - phase) / .001;
-                    assertTrue(-timeDerivative / radialDerivative < 0, "Constant-phase gas must move inwards");
+                    double angularDerivative = (GuixuAccretionFlow.phase(s, angle + .001, time) - phase) / .001;
+                    double drift = -(timeDerivative + (double) speed.invoke(null, s) * angularDerivative) / radialDerivative;
+                    assertTrue(drift < 0 && drift > -.03, "Orbital motion dominates slow inward drift");
                 }
+    }
+
+    @Test void approachingGasIsBrighterAndHotterThanRecedingGas() {
+        float[] approaching = new float[4], receding = new float[4];
+        for (int i = 0; i < 30; i++) {
+            GuixuAccretionFlow.shade(53, 0, i * .1F, 0, 53, 20, 120, approaching);
+            GuixuAccretionFlow.shade(53, 0, i * .1F, 0, 53, 20, -120, receding);
+            assertTrue(approaching[3] > receding[3] * 2, "Doppler beaming follows the camera");
+            assertTrue(approaching[2] > receding[2], "Approaching emission has a higher color temperature");
+        }
+    }
+
+    @Test void oldWorldsKeepMovingFilamentsAndTurbulenceRenewalHasNoJump() throws Exception {
+        for (float time : new float[]{10_000, 1_000_000}) {
+            float movement = 0;
+            for (int i = 0; i < 80; i++) {
+                float angle = (float) (i * Math.PI * 2 / 80);
+                movement += Math.abs(shade(53, angle, time, .01F)[3] - shade(53, angle, time + 1, .01F)[3]);
+            }
+            assertTrue(movement > .6F, "Differential shear must not erase all detail in old worlds");
+        }
+        for (float time : new float[]{12, 24, 36, 48})
+            assertArrayEquals(shade(53, 1, time - .0001F, .01F), shade(53, 1, time + .0001F, .01F), .001F);
     }
 
     @Test void apparentSubpixelWidthRemovesFineRadialVariation() throws Exception {

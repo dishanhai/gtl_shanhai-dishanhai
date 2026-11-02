@@ -84,4 +84,64 @@ class GuixuAmbientStarFieldTest {
         assertTrue(degraded >= 96 && degraded < idle);
         assertEquals(full, count.invoke(null, 2F, false));
     }
+
+    @Test void interiorStarVolumeFillsEveryDirectionWithoutEnteringTheHorizon() throws Exception {
+        int count = type().getField("VOLUME_COUNT").getInt(null);
+        assertTrue(count >= 256 && count <= 512);
+        var sample = type().getMethod("sampleVolume", int.class, double.class, double.class);
+        for (double horizon : new double[]{.8, 3, 12}) {
+            int[] octants = new int[8];
+            int interior = 0;
+            for (int i = 0; i < count; i++) {
+                Object star = sample.invoke(null, i, 12.5, horizon);
+                assertTrue(radius(star) > horizon * 1.4 && radius(star) + value(star, "size") * 2.6 < 4 + 2.2 * horizon,
+                        "New stars must remain inside the local black-hole environment");
+                if (radius(star) < 45) interior++;
+                int octant = (value(star, "headX") > 0 ? 1 : 0) | (value(star, "headY") > 0 ? 2 : 0)
+                        | (value(star, "headZ") > 0 ? 4 : 0);
+                octants[octant]++;
+                assertTrue(value(star, "alpha") >= .2 && value(star, "alpha") <= .85);
+                assertEquals(star, sample.invoke(null, i, 12.5, horizon));
+            }
+            for (int visible : octants) assertTrue(visible >= 20, "Fill the interior, not just another thin ring");
+            if (horizon <= 12) assertTrue(interior >= 64, "A useful population must fill the central gap");
+        }
+    }
+
+    @Test void interiorDustRemainsFaintBoundedAndStableAtLongTimes() throws Exception {
+        int count = type().getField("DUST_COUNT").getInt(null);
+        assertTrue(count > 0 && count <= 128);
+        var sample = type().getMethod("sampleDust", int.class, double.class, double.class);
+        for (int i = 0; i < count; i++) for (double time : new double[]{0, 20, 1_000_000_000.25}) {
+            Object dust = sample.invoke(null, i, time, 12D);
+            assertTrue(radius(dust) > 17 && radius(dust) + value(dust, "size") < 30.4);
+            assertTrue(value(dust, "alpha") > 0 && value(dust, "alpha") <= .065, "No opaque or overexposed fog");
+            assertEquals(dust, sample.invoke(null, i, time, 12D));
+            for (String axis : new String[]{"headX", "headY", "headZ"}) assertTrue(Double.isFinite(value(dust, axis)));
+        }
+    }
+
+    @Test void interiorPopulationsHaveExplicitReducedBudgets() throws Exception {
+        for (String method : new String[]{"volumeCount", "dustCount"}) {
+            var count = type().getMethod(method, float.class, boolean.class);
+            int full = (int) count.invoke(null, 1F, false), idle = (int) count.invoke(null, .25F, false);
+            int degraded = (int) count.invoke(null, 1F, true);
+            assertTrue(full > idle && idle > degraded);
+            assertEquals(full, count.invoke(null, 2F, false));
+        }
+        assertEquals(0, type().getMethod("dustCount", float.class, boolean.class).invoke(null, 1F, true));
+    }
+
+    @Test void ambientLightNeverPaintsOverTheProjectedBlackHoleShadow() throws Exception {
+        var method = type().getMethod("hiddenByShadow", float[].class, GuixuStarField.Sample.class, double.class);
+        var aligned = new GuixuStarField.Sample(0,0,30,0,0,30,.1F,1,false);
+        var beside = new GuixuStarField.Sample(24,0,30,24,0,30,.1F,1,false);
+        var behindCamera = new GuixuStarField.Sample(0,0,80,0,0,80,.1F,1,false);
+        float[] camera = {0,0,60};
+        assertEquals(true, method.invoke(null,camera,aligned,10D));
+        assertEquals(false, method.invoke(null,camera,beside,10D));
+        assertEquals(false, method.invoke(null,camera,behindCamera,10D));
+        assertEquals(false, method.invoke(null,camera,aligned,0D));
+        assertEquals(true, method.invoke(null,new float[]{0,0,5},beside,10D));
+    }
 }

@@ -170,6 +170,28 @@ public final class GuixuVisionCoreStructure {
         return requireBlock(APPEARANCE_BLOCK);
     }
 
+    /** 山海：閃電採樣沿用結構候選，包含外環合法 IO 倉，避免把附近任意實心方塊當作錨點。 */
+    public static java.util.Set<Block> previewBlocks(char symbol) {
+        TraceabilityPredicate predicate = null;
+        if (symbol == RING_BAND) predicate = ringBandPredicate();
+        else if (symbol == CONTROLLER) {
+            var definition = GuixuVisionCoreMachines.guixuVisionCore();
+            if (definition != null) return java.util.Set.of(definition.getBlock());
+        } else for (String[] entry : SYMBOL_BLOCKS) {
+            if (entry[0].charAt(0) == symbol) {
+                predicate = Predicates.blocks(requireBlock(entry[1]));
+                break;
+            }
+        }
+        if (predicate == null) return java.util.Set.of();
+        var result = new java.util.HashSet<Block>();
+        for (var candidate : predicate.common) {
+            if (candidate.candidates == null) continue;
+            for (var info : candidate.candidates.get()) result.add(info.getBlockState().getBlock());
+        }
+        return result;
+    }
+
     /**
      * 模块槽谓词 = <b>空气 ∪ 全部模块控制器方块</b>。
      *

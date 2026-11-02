@@ -16,6 +16,7 @@ public final class GuixuStarRenderer {
     public static void render(PoseStack pose, float[] camera, double seconds, double surfaceRadius,
                               float density, float brightness, float jets, boolean infallEnabled, boolean ambientEnabled) {
         if (!infallEnabled && !ambientEnabled) return;
+        if (ambientEnabled && infallEnabled) GuixuDeepSpaceBackdrop.render(pose, camera, surfaceRadius);
         var layer = HostFxDraw.beamLayer();
         var buffers = MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
         VertexConsumer vertices = buffers.getBuffer(layer);
@@ -59,17 +60,20 @@ public final class GuixuStarRenderer {
         }
         if (infallEnabled && jets > 0.001F) drawJets(vertices, matrix, seconds, surfaceRadius, jets);
         if (ambientEnabled) {
-            drawAmbient(vertices, matrix, clip, camera, HostFxSwitch.spinSeconds(), density, brightness, HostFxSwitch.degraded());
+            drawAmbient(vertices, matrix, clip, camera, HostFxSwitch.spinSeconds(), infallEnabled ? surfaceRadius : 0,
+                    density, brightness, HostFxSwitch.degraded());
         }
         buffers.endBatch(layer);
     }
 
     /** 山海：共用一批頂點；背景、星塵與流星均有固定數量上限，不建立粒子實體。 */
     private static void drawAmbient(VertexConsumer vertices, Matrix4f matrix, Matrix4f clip, float[] camera,
-                                    double seconds, float density, float brightness, boolean degraded) {
+                                    double seconds, double horizon, float density, float brightness, boolean degraded) {
         int[] counts = {GuixuStarField.skyCount(density, degraded),
                 degraded ? 0 : Math.round(GuixuStarField.ORBIT_COUNT * Math.max(0.25F, Math.min(1F, density))),
-                degraded ? 0 : GuixuStarField.METEOR_COUNT};
+                degraded ? 0 : GuixuStarField.METEOR_COUNT,
+                horizon > 0 ? GuixuStarField.volumeCount(density, degraded) : 0,
+                horizon > 0 ? GuixuStarField.dustCount(density, degraded) : 0};
         float light = (0.55F + 0.45F * brightness) * (degraded ? 0.55F : 1.0F);
         Vector3f center = new Vector3f(), view = new Vector3f(), right = new Vector3f();
         Vector3f up = new Vector3f(), width = new Vector3f();
@@ -78,22 +82,34 @@ public final class GuixuStarRenderer {
                 var star = switch (kind) {
                     case 0 -> GuixuStarField.sampleSky(i, seconds);
                     case 1 -> GuixuStarField.sampleOrbit(i, seconds);
-                    default -> GuixuStarField.sampleMeteor(i, seconds);
+                    case 2 -> GuixuStarField.sampleMeteor(i, seconds);
+                    case 3 -> GuixuStarField.sampleVolume(i, seconds, horizon);
+                    default -> GuixuStarField.sampleDust(i, seconds, horizon);
                 };
                 float alpha = star.alpha() * light;
-                if (alpha <= 0.001F || !visible(clip, star)) continue;
+                if (alpha <= 0.001F || !visible(clip, star) || GuixuStarField.hiddenByShadow(camera, star, horizon)) continue;
                 center.set((float) star.headX(), (float) star.headY(), (float) star.headZ());
                 view.set(camera[0], camera[1], camera[2]).sub(center);
+                if (kind >= 3) alpha *= Math.max(0, Math.min(1, (view.length() - 1.5F) / 4F));
                 if (view.lengthSquared() < 1.0e-8F) view.set(0, 0, 1);
                 view.normalize();
                 right.set(-view.z, 0, view.x);
                 if (right.lengthSquared() < 1.0e-8F) right.set(1, 0, 0);
                 right.normalize();
                 up.set(right).cross(view).normalize();
+                if (kind == 4) {
+                    // 四層漸淡菱形形成柔和星塵，不使用覆蓋整個視野的大型發光面。
+                    for (int shell = 0; shell < 4; shell++) {
+                        float size = star.size() * (1 - shell * .23F);
+                        ambientGlint(vertices, matrix, center, right, up, size, size,
+                                .46F, .40F, .82F, alpha * (.08F + shell * .06F));
+                    }
+                    continue;
+                }
                 float red = star.warm() ? 1F : 0.55F;
                 float green = star.warm() ? 0.82F : 0.80F;
                 float blue = star.warm() ? 0.58F : 1F;
-                if (kind > 0) {
+                if (kind == 1 || kind == 2) {
                     width.set((float) star.tailX(), (float) star.tailY(), (float) star.tailZ()).sub(center).cross(view);
                     if (width.lengthSquared() < 1.0e-8F) width.set(right);
                     width.normalize().mul(star.size() * 0.5F);
@@ -106,7 +122,7 @@ public final class GuixuStarRenderer {
                     ambientVertex(vertices, matrix, (float) star.tailX() - width.x, (float) star.tailY() - width.y,
                             (float) star.tailZ() - width.z, red, green, blue, 0);
                 }
-                if (kind > 0 || i % 17 == 0) {
+                if (kind == 1 || kind == 2 || (kind == 3 ? i % 31 == 0 : i % 17 == 0)) {
                     ambientGlint(vertices, matrix, center, right, up, star.size() * 2.6F, star.size() * 0.16F,
                             red, green, blue, alpha * 0.7F);
                     ambientGlint(vertices, matrix, center, right, up, star.size() * 0.16F, star.size() * 2.6F,

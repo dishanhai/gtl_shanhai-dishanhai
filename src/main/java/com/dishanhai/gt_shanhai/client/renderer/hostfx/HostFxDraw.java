@@ -271,11 +271,11 @@ public final class HostFxDraw {
     public static void drawBeams(PoseStack poseStack, float cx, float cy, float cz, Direction facing,
                                  BlockPos controllerPos,
                                  double camWorldX, double camWorldY, double camWorldZ,
-                                 float holeSurfaceR, float spinDeg, float seconds, float brightness) {
+                                 float holeSurfaceR, float spinDeg, float seconds, float brightness, float spinSeconds) {
         beamBrightness = clamp(brightness);
         try {
             drawBeamsInternal(poseStack, cx, cy, cz, facing, controllerPos,
-                    camWorldX, camWorldY, camWorldZ, holeSurfaceR, spinDeg, seconds);
+                    camWorldX, camWorldY, camWorldZ, holeSurfaceR, spinDeg, seconds, spinSeconds);
         } finally {
             beamBrightness = 1.0F;
         }
@@ -284,7 +284,7 @@ public final class HostFxDraw {
     private static void drawBeamsInternal(PoseStack poseStack, float cx, float cy, float cz, Direction facing,
                                  BlockPos controllerPos,
                                  double camWorldX, double camWorldY, double camWorldZ,
-                                 float holeSurfaceR, float spinDeg, float seconds) {
+                                 float holeSurfaceR, float spinDeg, float seconds, float spinSeconds) {
         lastQuads = 0;
         lastBatches = 0;
         lastParticles = 0;
@@ -410,14 +410,24 @@ public final class HostFxDraw {
             try {
                 HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
                 HostFxRingTransforms.spin(poseStack, spinDeg);
+                final float[] ringGlow = HostFxSwitch.beamRingGlowRgb(HostFxBeamRingGeom.GLOW_RGB);
                 lastRingPasses = HostFxBeamRing.draw(poseStack, seconds, spinDeg,
                         camSpin[0], camSpin[1], camSpin[2],
-                        HostFxSwitch.beamRingGlowRgb(HostFxBeamRingGeom.GLOW_RGB));
+                        ringGlow);
                 if (lastRingPasses == 0) {
                     lastFallbackRingQuads = HostFxBeamRing.drawFallback(poseStack, seconds, spinDeg,
                             camSpin[0], camSpin[1], camSpin[2],
-                            HostFxSwitch.beamRingGlowRgb(HostFxBeamRingGeom.GLOW_RGB));
+                            ringGlow);
                     lastQuads += lastFallbackRingQuads;
+                    lastBatches++;
+                }
+                // 山海：結構錨點已各自套用環／飛船的旋轉，靜態外殼不能跟著整圈轉。
+                HostFxRingTransforms.spin(poseStack, -spinDeg);
+                final var lightning = GuixuStructureLightning.frame(net.minecraft.client.Minecraft.getInstance().level,
+                        controllerPos, facing, seconds, spinSeconds);
+                final int lightningQuads = HostFxBeamRing.drawLightning(poseStack, lightning, ringGlow);
+                if (lightningQuads > 0) {
+                    lastQuads += lightningQuads;
                     lastBatches++;
                 }
             } finally {

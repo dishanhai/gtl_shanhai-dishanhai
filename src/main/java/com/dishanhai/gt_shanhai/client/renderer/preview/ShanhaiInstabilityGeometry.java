@@ -60,6 +60,11 @@ public final class ShanhaiInstabilityGeometry {
             }
         }
         var nodes = new ArrayList<>(buckets.values());
+        return fromNodes(nodes);
+    }
+
+    /** 山海：不同格式的結構表面取樣共用奈亞的近鄰連線規則。 */
+    public static ShanhaiInstabilityGeometry fromNodes(List<Node> nodes) {
         if (nodes.size() > MAX_NODES) throw new IllegalArgumentException("MB exceeds FX node budget");
         var links = new ArrayList<Link>();
         var seen = new HashSet<Long>();
@@ -144,27 +149,34 @@ public final class ShanhaiInstabilityGeometry {
             if (life >= 0.3) continue;
             float envelope = (float) Math.sin(life / 0.3 * Math.PI);
             if (envelope < 0.02) continue;
-            Point start = center(a), end = center(b), delta = end.add(start.scale(-1));
-            Point axis = delta.unit();
-            Point u = axis.cross(Math.abs(axis.y) < 0.9 ? new Point(0,1,0) : new Point(1,0,0)).unit();
-            Point v = axis.cross(u);
-            Point previous = start;
-            for (int step = 1; step <= 8; step++) {
-                double t = step / 8.0;
-                double bend = Math.sin(Math.PI*t) * 0.8;
-                Point next = start.add(delta.scale(t))
-                        .add(u.scale(Math.sin(step*13.7 + clock*19 + a.seed)*bend))
-                        .add(v.scale(Math.cos(step*8.1 + clock*17 + b.seed)*bend));
-                strip(quads, previous, next, u.scale(0.12), 0.5f, 0.25f, 1, envelope*0.5f);
-                strip(quads, previous, next, v.scale(0.12), 0.5f, 0.25f, 1, envelope*0.5f);
-                strip(quads, previous, next, u.scale(0.035), 0.75f, 0.92f, 1, envelope*0.65f);
-                strip(quads, previous, next, v.scale(0.035), 0.75f, 0.92f, 1, envelope*0.65f);
-                previous = next;
-            }
+            appendArc(quads, center(a), center(b), clock, a.seed, b.seed, envelope);
             arcs++;
         }
         if (quads.size() > MAX_QUADS) throw new IllegalStateException("FX quad budget exceeded");
         return new Frame(List.copyOf(quads), arcs);
+    }
+
+    /** 山海：奈亞預覽與歸墟共用的八段折線電弧，紫色外暈＋藍白亮芯，雙交叉帶避免側看消失。 */
+    public static void appendArc(List<Quad> quads, Point start, Point end, double clock,
+                                 int seedA, int seedB, float envelope) {
+        Point delta = end.add(start.scale(-1));
+        if (delta.x*delta.x + delta.y*delta.y + delta.z*delta.z < 1e-10) return;
+        Point axis = delta.unit();
+        Point u = axis.cross(Math.abs(axis.y) < 0.9 ? new Point(0,1,0) : new Point(1,0,0)).unit();
+        Point v = axis.cross(u);
+        Point previous = start;
+        for (int step = 1; step <= 8; step++) {
+            double t = step / 8.0;
+            double bend = Math.sin(Math.PI*t) * 0.8;
+            Point next = start.add(delta.scale(t))
+                    .add(u.scale(Math.sin(step*13.7 + clock*19 + seedA)*bend))
+                    .add(v.scale(Math.cos(step*8.1 + clock*17 + seedB)*bend));
+            strip(quads, previous, next, u.scale(0.12), 0.5f, 0.25f, 1, envelope*0.5f);
+            strip(quads, previous, next, v.scale(0.12), 0.5f, 0.25f, 1, envelope*0.5f);
+            strip(quads, previous, next, u.scale(0.035), 0.75f, 0.92f, 1, envelope*0.65f);
+            strip(quads, previous, next, v.scale(0.035), 0.75f, 0.92f, 1, envelope*0.65f);
+            previous = next;
+        }
     }
 
     private static Point center(Node node) {

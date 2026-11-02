@@ -42,6 +42,7 @@ public final class HostFxBeamRing {
         return HostFxBeamRingGeom.stats() + " passes=" + lastPasses + "/1 fallbackQuads=" + lastFallbackQuads;
     }
     public static boolean onResourceReload() {
+        GuixuStructureLightning.reset();
         ShaderInstance old = HANDLE.invalidate();
         if (old != null) {
             pendingClose = old;
@@ -50,6 +51,7 @@ public final class HostFxBeamRing {
         return old != null;
     }
     public static void reset() {
+        GuixuStructureLightning.reset();
         if (buffer != null) { buffer.close(); buffer = null; }
         ShaderInstance old = HANDLE.invalidate();
         if (old != null) old.close();
@@ -135,6 +137,32 @@ public final class HostFxBeamRing {
         buffers.endBatch(layer);
         lastFallbackQuads = sink.vertices / 3;
         return lastFallbackQuads;
+    }
+
+    /** 同一加性層一次提交全部電弧；不依賴吸積盤自訂 shader，回落時仍可顯示。 */
+    public static int drawLightning(PoseStack poseStack,
+            com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Frame frame, float[] glowRgb) {
+        if (frame.quads().isEmpty()) return 0;
+        var layer = HostFxDraw.beamLayer();
+        var buffers = net.minecraft.client.renderer.MultiBufferSource.immediate(Tesselator.getInstance().getBuilder());
+        VertexConsumer consumer = buffers.getBuffer(layer);
+        Matrix4f matrix = poseStack.last().pose();
+        for (var q : frame.quads()) {
+            lightningVertex(consumer, matrix, q.a(), q, glowRgb);
+            lightningVertex(consumer, matrix, q.b(), q, glowRgb);
+            lightningVertex(consumer, matrix, q.c(), q, glowRgb);
+            lightningVertex(consumer, matrix, q.d(), q, glowRgb);
+        }
+        buffers.endBatch(layer);
+        return frame.quads().size();
+    }
+
+    private static void lightningVertex(VertexConsumer consumer, Matrix4f matrix,
+            com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Point p,
+            com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiInstabilityGeometry.Quad q, float[] glow) {
+        consumer.vertex(matrix, (float) p.x(), (float) p.y(), (float) p.z())
+                .color(q.red() * glow[0], q.green() * glow[1], q.blue() * glow[2],
+                        q.alpha() * HostFxDraw.beamBrightness()).endVertex();
     }
     /** 位置色層採 QUADS；每個三角形重複最後一點，第二個退化三角形不產生像素。 */
     private static final class FlowSink implements HostFxBeamRingGeom.Sink {

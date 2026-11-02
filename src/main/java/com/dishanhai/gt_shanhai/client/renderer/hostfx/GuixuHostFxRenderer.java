@@ -608,7 +608,7 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
             final double effectSeconds = (clientLevel.getGameTime() + (double) partialTick) / 20.0;
             final var profile = host.getVisualProfile(effectSeconds);
             HostFxDraw.drawBeams(poseStack, cx, cy, cz, facing, controllerPos, cam.x, cam.y, cam.z,
-                    holeR, HostFxGeometry.ringDeg(spinSeconds), seconds, profile.brightness());
+                    holeR, HostFxGeometry.ringDeg(spinSeconds), seconds, profile.brightness(), spinSeconds);
 
             // 山海：保留 master 的狀態密度、亮度、噴流及向黑洞收束的星辰效果。
             final double starHorizon = BlackHoleLensRenderer.rsBlocks() * BlackHoleLensMath.B_CRIT;
