@@ -2057,16 +2057,17 @@ public class ShopScreen extends ScaledScreen {
             try {
                 noticePose(g, row);
                 if (!ClientShopUiSettings.reduceMotion()) {
-                    GlassBlur.backdrop(g, new GuiRect(3, 3, row.width() - 6, row.height() - 6),
-                            row.alpha() * 0.85f, ShopGlassStyle.BACKDROP, 7f);
+                    GlassBlur.backdrop(g, new GuiRect(0, 0, row.width(), row.height()),
+                            row.alpha() * 0.65f, ShopGlassStyle.NONE, 5f);
                 }
-                fillNoticeRound(g, -2, 2, row.width() + 4, row.height() + 3, noticeColor(0x16000000, row.alpha()));
-                fillNoticeRound(g, -1, 1, row.width() + 2, row.height() + 1, noticeColor(0x2C000000, row.alpha()));
-                fillNoticeRound(g, 0, 0, row.width(), row.height(), noticeColor(0x80000000 | row.accent(), row.alpha()));
-                fillNoticeRound(g, 1, 1, row.width() - 2, row.height() - 2, noticeColor(0xC010202D, row.alpha()));
-                g.fillGradient(5, 1, row.width() - 5, row.height() / 2,
-                        noticeColor(0x208EE9F0, row.alpha()), noticeColor(0x008EE9F0, row.alpha()));
-                g.fill(5, 1, row.width() - 5, 2, noticeColor(0x65000000 | row.accent(), row.alpha()));
+                // 山海：方框磨砂材質，單像素灰邊與窄色標，避免多層圓角形成厚重外圈。
+                g.fill(1, 2, row.width() + 1, row.height() + 2, noticeColor(0x30000000, row.alpha()));
+                g.fillGradient(0, 0, row.width(), row.height(),
+                        noticeColor(0xA04C6472, row.alpha()), noticeColor(0xA02C414E, row.alpha()));
+                g.fillGradient(1, 1, row.width() - 1, row.height() - 1,
+                        noticeColor(0xD015242E, row.alpha()), noticeColor(0xE00C171F, row.alpha()));
+                g.fill(1, 1, row.width() - 1, 2, noticeColor(0x244F7788, row.alpha()));
+                g.fill(0, 2, 1, row.height() - 2, noticeColor(0xA0000000 | row.accent(), row.alpha()));
                 g.flush();
             } finally {
                 g.pose().popPose();
@@ -2093,27 +2094,12 @@ public class ShopScreen extends ScaledScreen {
     }
 
     private void noticePose(GuiGraphics g, NoticeRow row) {
-        g.pose().translate(row.x(), row.y(), 0f);
-        float scale = ClientShopUiSettings.reduceMotion() ? 1f : 0.985f + 0.015f * row.alpha();
-        g.pose().translate(row.width() / 2f, row.height() / 2f, 0f);
-        g.pose().scale(scale, scale, 1f);
-        g.pose().translate(-row.width() / 2f, -row.height() / 2f, 0f);
+        // 方框只做位移與透明度過渡，保持框線厚度及文字比例穩定。
+        g.pose().translate(Math.round(row.x()), row.y(), 0f);
     }
 
     private static int noticeColor(int argb, float alpha) {
         return (Math.round((argb >>> 24) * GuiMotion.clamp01(alpha)) << 24) | (argb & 0xFFFFFF);
-    }
-
-    /** 五像素圓角；不新增材質、著色器或全螢幕渲染目標。 */
-    private static void fillNoticeRound(GuiGraphics g, int x, int y, int w, int h, int color) {
-        int radius = Math.min(5, Math.min(w, h) / 2);
-        g.fill(x, y + radius, x + w, y + h - radius, color);
-        for (int row = 0; row < radius; row++) {
-            float dy = radius - row - 0.5f;
-            int inset = (int) Math.ceil(radius - Math.sqrt(radius * radius - dy * dy));
-            g.fill(x + inset, y + row, x + w - inset, y + row + 1, color);
-            g.fill(x + inset, y + h - row - 1, x + w - inset, y + h - row, color);
-        }
     }
 
     /**
