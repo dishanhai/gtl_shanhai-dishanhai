@@ -1,5 +1,4 @@
 {
   "parent": "minecraft:item/generated",
-  "textures": {"layer0": "gt_shanhai:item/guixu_hyperdimensional_link_module"},
-  "display": {"gui": {"rotation": [0, 0, 180]}}
+  "textures": {"layer0": "gt_shanhai:item/nyarlathotep_echo_link_module"}
 }
