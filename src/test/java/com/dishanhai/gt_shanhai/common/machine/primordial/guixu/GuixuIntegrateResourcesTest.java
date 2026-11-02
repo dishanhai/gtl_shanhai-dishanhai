@@ -46,4 +46,22 @@ class GuixuIntegrateResourcesTest {
                 .get(0).getAsJsonObject().getAsJsonObject("content").get("item").getAsString());
         assertTrue(Files.isRegularFile(Path.of("src/main/resources/data/gt_shanhai/recipes/assembler_module/guixu_vision_core.json")));
     }
+
+    @Test void guixuGuidePagesExistAndAreLinkedFromIndexes() throws Exception {
+        Path guideRoot = Path.of("src/main/resources/assets/gt_shanhai/guides/gt_shanhai/guide");
+        Path machineDir = guideRoot.resolve("machine");
+        for (String page : List.of("guixu_index.md", "guixu_vision_core.md",
+                "guixu_penrose_containment_field.md", "guixu_hyperdimensional_link.md")) {
+            Path file = machineDir.resolve(page);
+            assertTrue(Files.isRegularFile(file), "缺少归墟 GuideME 页面: " + page);
+            String content = Files.readString(file);
+            assertFalse(content.contains("“") || content.contains("”"), page + " 不得包含中文双引号");
+        }
+        String machineIndex = Files.readString(machineDir.resolve("machine_index.md"));
+        assertTrue(machineIndex.contains("(guixu_index.md)"), "machine_index.md 应链接至 guixu_index.md");
+        String guixuIndex = Files.readString(machineDir.resolve("guixu_index.md"));
+        assertTrue(guixuIndex.contains("gt_shanhai:guixu_vision_core"));
+        assertTrue(guixuIndex.contains("gt_shanhai:guixu_penrose_containment_field"));
+        assertTrue(guixuIndex.contains("gt_shanhai:guixu_hyperdimensional_link_module"));
+    }
 }

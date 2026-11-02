@@ -80,6 +80,30 @@ categories:
 
 <Column gap="2" fullWidth={true}>
 
+### primordial_series
+
+> `disabled` - 默认 `false`\
+> 是否禁用仅使用外部配方类型（gtceu / gtlcore / gtladditions）的原初系列模块。启用后，只从 GT 机器表移除全外部配方的原初模块（如原初临界加工模块），保留方块与物品注册以免损坏存档；带有 `gt_shanhai` 自建配方类型的模块、被动模块（原初质能核心、<ItemLink id="gt_shanhai:guixu_penrose_containment_field" />）与主机本体（<ItemLink id="gt_shanhai:primordial_omega_engine" />、<ItemLink id="gt_shanhai:guixu_vision_core" />）始终保留。修改后需重启生效。
+
+ </Column>
+
+<Column gap="2" fullWidth={true}>
+
+### primordial_omega_engine
+
+> `allowAnyPrimordialModule` - 默认 `false`\
+> 是否允许 <ItemLink id="gt_shanhai:primordial_omega_engine" /> 无条件运行任意原初模块。`false` 时，黑名单内的模块必须直接安装在已成型的 <ItemLink id="gt_shanhai:guixu_vision_core" /> 上，或由 <ItemLink id="gt_shanhai:guixu_hyperdimensional_link_module" /> 接管所在引擎后才能运行；`true` 时忽略黑名单。\
+> `blockedModuleItemIds` - 默认包含 10 种高阶原初模块\
+> 原始终焉引擎不能直接运行的原初模块完整物品 ID 列表。可自行增删，空列表表示不限制；修改后最迟下一工作 tick 生效。\
+> `sphereStyle` - 默认 `FOLLOW_MACHINE`\
+> 原始终焉引擎中心球体的客户端渲染风格覆盖（`FOLLOW_MACHINE` / `UNIVERSE` / `NEUTRON_STAR`）。\
+> `unrestrictedMode` - 默认 `false`\
+> 原初模块是否启用旧式无限制模式。`false` 时正常检查超净间、重力、维度、线圈温度与恒星热力容器等级；`true` 时除重力条件外跳过其余环境与热力检查。
+
+ </Column>
+
+<Column gap="2" fullWidth={true}>
+
 ### recursive_reverse_array
 
 > `bypassModuleRestrictions` - 默认 `false`\

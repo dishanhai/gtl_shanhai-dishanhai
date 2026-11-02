@@ -69,6 +69,8 @@ public final class GuixuVisionCoreMachines {
                 .workableCasingRenderer(new ResourceLocation("kubejs", "block/hollow_casing"), overlay)
                 .register();
         containmentDefinition.setTooltipBuilder((stack, tooltips) -> {
+            tooltips.add(Component.literal("§b引力阱在力场中低鸣，旋转黑洞的能量于视界边缘汇聚"));
+            tooltips.add(Component.literal("§b稳定与失控仅隔一线，遏制场将奇点的力量系于归墟"));
             tooltips.add(Component.literal("§7需安装在归墟视界枢核的模组位"));
             tooltips.add(Component.literal("§7投入黑洞种子开启；每秒消耗时空流体维持稳定"));
             tooltips.add(Component.literal("§d遏制中：整台归墟并行 ×4、耗时 ×0.5、增产 +5、耗电 ×0.5、物质模块数量 ×2"));

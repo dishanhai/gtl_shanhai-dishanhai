@@ -318,11 +318,11 @@ public class DShanhaiMachines {
 
         PRIMORDIAL_VOID_INDUCTION_ARMATURE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createUltimateRainbow("从真空量子涨落中提取零点能"));
-            tooltips.add(Component.literal("§b卡西米尔力在纳米间隙中呼吸，每一对虚粒子对的湮灭都是能量的脉搏"));
+            tooltips.add(Component.literal("§b卡西米尔力在纳米间隙中呼吸，每一对虚粒子的湮灭都是能量的脉搏"));
             tooltips.add(Component.literal("§b将这微弱的量子泡沫能量汇聚成足以扭曲时空的洪流"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("§7配方类型：原初发电协议"));
-            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("并行与线程随电路幕级增长"));
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("并行与线程随电路板等级增长"));
         });
 
         PRIMORDIAL_MASS_ENERGY_CORE = GTDishanhaiRegistration.REGISTRATE
@@ -371,10 +371,10 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§b孕育于原初汤海的第一个自我复制的闭环，亿万年演化浓缩为一握"));
             tooltips.add(DShanhaiTextUtil.createUltimateRainbow("跨越碳基与硅基的界限，将生命本身视为一种可设计的算法"));
             tooltips.add(Component.literal("§c五合一配方大类：原初生物演化协议"));
-            tooltips.add(Component.literal("§7配方类型：原初生物演化协议/生物模拟/温室/培养缸/浮游选矿"));
+            tooltips.add(Component.literal("§7配方类型：原初生物演化协议 / 生物模拟 / 温室 / 培养缸 / 浮游选矿"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
-                    .append(Component.literal("§f并行，直接从电网取电")));
+                    .append(Component.literal("§f，直接从电网取电")));
         });
 
         PRIMORDIAL_CHAOTIC_EPHEMERAL_DECONSTRUCTION_CRYSTALLIZATION_FURNACE = GTDishanhaiRegistration.REGISTRATE
@@ -403,10 +403,11 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createUltimateRainbow("蜉蝣朝生暮死，矿物亿万年沉淀，皆在此炉中解构与重生"));
             tooltips.add(Component.literal("§b来自混沌的蜉蝣在晶格中凝固，每一粒原子都刻写着宇宙的矿脉图谱"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
-            tooltips.add(Component.literal("§7配方类型：蜉蝣选矿，湿法研磨，天基矿石处理，集成矿石处理，虚空采矿，虚空矿脉洗矿，太空采矿，原初物质解构"));
+            tooltips.add(Component.literal("§7配方类型：浮游选矿 / 湿法研磨 / 天基矿石处理 / 集成矿石处理"));
+            tooltips.add(Component.literal("§7虚空采矿 / 虚空矿脉洗矿 / 太空采矿 / 原初物质解构"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
-                    .append(Component.literal("§f并行，直接从电网取电")));
+                    .append(Component.literal("§f，直接从电网取电")));
         });
 
         PRIMORDIAL_FLAME_CRACKING_KILN = GTDishanhaiRegistration.REGISTRATE
@@ -433,7 +434,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7配方类型：热解炉 / 裂化炉 / 土高炉 / 熔岩炉 / 焦炉"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
-                    .append(Component.literal("§f并行，直接从电网取电")));
+                    .append(Component.literal("§f，直接从电网取电")));
         });
 
         PRIMORDIAL_ABYSSAL_REFINERY = GTDishanhaiRegistration.REGISTRATE
@@ -464,7 +465,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7配方类型：虚空流体钻机 / 石化工厂 / 木材干馏 / 渔场 / 溶解 / 煮解 / 脱硫 / 太素衍化"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
-                    .append(Component.literal("§f并行，直接从电网取电")));
+                    .append(Component.literal("§f，直接从电网取电")));
         });
 
         PRIMORDIAL_COSMIC_ORIGIN_CORE = GTDishanhaiRegistration.REGISTRATE
@@ -492,7 +493,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7配方类型：原子能激发 / 星核剥离 / 混沌编织 / 世界信息扫描 / 宇宙探测 / 稀土离心"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
-                    .append(Component.literal("§f并行，直接从电网取电")));
+                    .append(Component.literal("§f，直接从电网取电")));
         });
 
         PRIMORDIAL_SIXFOLD_RESOURCE_CORE = GTDishanhaiRegistration.REGISTRATE
@@ -508,7 +509,8 @@ public class DShanhaiMachines {
                 .register();
 
         PRIMORDIAL_SIXFOLD_RESOURCE_CORE.setTooltipBuilder((stack, tooltips) -> {
-        tooltips.add(DShanhaiTextUtil.createUltimateRainbow("统御六源，汇聚元素、星海与虚空资源"));
+            tooltips.add(DShanhaiTextUtil.createUltimateRainbow("统御六源，汇聚元素、星海与虚空资源"));
+            tooltips.add(Component.literal("§b从元素的初生到星海深处的回响，六道源流在此汇合"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.1"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.2"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_sixfold_resource_core.tooltip.3"));
@@ -530,6 +532,7 @@ public class DShanhaiMachines {
 
         PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createUltimateRainbow("汲取深空，汇集气、流与世界碎片的产出"));
+            tooltips.add(Component.literal("§b追索虚空中的微弱流光，将遥远世界的余韵引入矩阵"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_deep_space_extraction_core.tooltip.1"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_deep_space_extraction_core.tooltip.2"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_deep_space_extraction_core.tooltip.3"));
@@ -576,6 +579,7 @@ public class DShanhaiMachines {
         PRIMORDIAL_UNIVERSE_SIMULATION_CORE.setTooltipBuilder((stack, tooltips) -> {
             appendGuixuHostTooltip(PRIMORDIAL_UNIVERSE_SIMULATION_CORE, tooltips);
             tooltips.add(DShanhaiTextUtil.createUltimateRainbow("推演寰宇，把宇宙模拟收进原初引擎"));
+            tooltips.add(Component.literal("§b群星的兴衰化为演算中的轨迹，无垠寰宇于方寸间展开"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_universe_simulation_core.tooltip.1"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_universe_simulation_core.tooltip.2"));
             tooltips.add(Component.translatable("gt_shanhai.multiblock.primordial_universe_simulation_core.tooltip.3"));
@@ -715,7 +719,7 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createWaterText("并行等级提升时，核心可同时冻结多条世线中的同一批物质"));
             tooltips.add(DShanhaiTextUtil.createNatureText("它们的温度是负开尔文，但逻辑上依然存在"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
-            tooltips.add(Component.literal("§7配方类型：反熵冷凝/真空冷冻/等离子冷凝"));
+            tooltips.add(Component.literal("§7配方类型：反熵冷凝 / 真空冷冻 / 等离子冷凝"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
@@ -743,7 +747,7 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createAuroraText("星际物质在核心中凝聚，锻造出通往分歧之路的物质基石"));
             tooltips.add(DShanhaiTextUtil.createWaterText("分歧不是混乱，而是未被探索的秩序。"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
-            tooltips.add(Component.literal("§7配方类型：世线震荡收集/星际物质吸取/原初能量吸取"));
+            tooltips.add(Component.literal("§7配方类型：世线震荡收集 / 星际物质吸取 / 原初能量吸取"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
@@ -772,7 +776,7 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createMagicText("物质模块铸造——将精炼的物质注入模具，铸成实体"));
             tooltips.add(DShanhaiTextUtil.createNatureText("铸造即创造，分离即理解。"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
-            tooltips.add(Component.literal("§7配方类型：光子分离/物质模块铸造/物质流凝结/物质锻造"));
+            tooltips.add(Component.literal("§7配方类型：光子分离 / 物质模块铸造 / 物质流凝结 / 物质锻造"));
             tooltips.add(Component.literal("")
                     .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
@@ -798,12 +802,13 @@ public class DShanhaiMachines {
                 .register();
 
         PRIMORDIAL_ASSEMBLY_LINE_MODULE.setTooltipBuilder((stack, tooltips) -> {
-            tooltips.add(DShanhaiTextUtil.createElectricText("将装配线纳入原初引擎的并行体系——批量生产不再是梦"));
-            tooltips.add(DShanhaiTextUtil.createAuroraText("从普通装配到电路装配到部件装配——万物皆可流水线"));
+            tooltips.add(DShanhaiTextUtil.createElectricText("将精密流水线纳入原初引擎的并行洪流，复杂巨构于瞬息间装配成形"));
+            tooltips.add(DShanhaiTextUtil.createAuroraText("从机械部件到世线晶圆，多道工序在同步脉冲中无缝咬合"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("§7配方类型：装配线 / 电路装配线 / 部件装配线"));
+            tooltips.add(Component.literal("§7世线板电路组装 / 世线板晶圆蚀刻"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -860,6 +865,7 @@ public class DShanhaiMachines {
 
         PRIMORDIAL_CRITICAL_PROCESSING_MODULE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createFireText("临界整合——将四级卫星工厂的基础加工能力压缩为一台原初模块"));
+            tooltips.add(Component.literal("§b从车削冲压到蒸馏电解，冗长的产线在原初力场中汇聚"));
             tooltips.add(Component.literal("§7MK-1：车床 / 卷板 / 压缩 / 锻造锤 / 切割 / 压模 / 搅拌 / 线材轧制 / 冲压 / 极化"));
             tooltips.add(Component.literal("§7MK-2：碎岩 / 洗矿 / 离心 / 电解 / 筛选 / 研磨 / 脱水 / 热力离心 / 电磁选矿"));
             tooltips.add(Component.literal("§7MK-3：蒸发 / 高压釜 / 提取 / 酿造 / 发酵 / 蒸馏室 / 蒸馏塔 / 流体加热 / 流体固化 / 化学浸洗"));
@@ -867,7 +873,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7MK-5：打包机"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -896,7 +902,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7三个配方类型相互独立，普通聚爆用于补全最大兼容性"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -913,10 +919,11 @@ public class DShanhaiMachines {
         PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE.setTooltipBuilder((stack, tooltips) -> {
             appendGuixuHostTooltip(PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE, tooltips);
             tooltips.add(DShanhaiTextUtil.createAuroraText("统合超临界合成、物质生成与质量发生"));
+            tooltips.add(Component.literal("§b在临界能流中重塑物质的根基，让质量从光与能量之间诞生"));
             tooltips.add(Component.literal("§7配方类型：超临界合成 / 物质生成机 / 质量发生器"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -932,10 +939,11 @@ public class DShanhaiMachines {
                 .register();
         PRIMORDIAL_COSMIC_REACTOR.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createFireText("在粒子对撞与核聚变之上点燃原初恒星反应"));
+            tooltips.add(Component.literal("§b粒子交汇如群星碰撞，聚变之火在约束场中延续恒星的脉动"));
             tooltips.add(Component.literal("§7配方类型：粒子对撞 / 核聚变反应堆 / 原初恒星反应"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -951,10 +959,11 @@ public class DShanhaiMachines {
                 .register();
         PRIMORDIAL_MOLECULAR_RIFT_CORE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createMagicText("撕开分子裂隙，统一深度扭曲与大型化学处理"));
+            tooltips.add(Component.literal("§b分子键于裂隙中解离重组，微观结构随反应的节律改变"));
             tooltips.add(Component.literal("§7配方类型：深度化学扭曲 / 大型化学反应釜 / 化学浸洗机"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -971,10 +980,11 @@ public class DShanhaiMachines {
         PRIMORDIAL_TIANQIONG_ASSEMBLY_CORE.setTooltipBuilder((stack, tooltips) -> {
             appendGuixuHostTooltip(PRIMORDIAL_TIANQIONG_ASSEMBLY_CORE, tooltips);
             tooltips.add(DShanhaiTextUtil.createAuroraText("跨越太空组装与超时空装配的原初组装核心"));
+            tooltips.add(Component.literal("§b跨越星海的构件在同一节律中汇聚，庞大造物由此成形"));
             tooltips.add(Component.literal("§7配方类型：太空组装 / 超时空装配线"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -998,11 +1008,12 @@ public class DShanhaiMachines {
         PRIMORDIAL_ETERNAL_SMELTING_FURNACE.setTooltipBuilder((stack, tooltips) -> {
             appendGuixuHostTooltip(PRIMORDIAL_ETERNAL_SMELTING_FURNACE, tooltips);
             tooltips.add(DShanhaiTextUtil.createFireText("以永恒炉火统合超维熔炼、物质锻造与混沌炼金"));
+            tooltips.add(Component.literal("§b炉火映照星辰的余烬，熔炼与重铸在永恒的循环中交替"));
             tooltips.add(Component.literal("§7配方类型：超维度熔炼 / 恒星热能熔炼 / 终极物质锻造"));
             tooltips.add(Component.literal("§7分子解构 / 混沌炼金 / 星焰跃迁 / 原初逆熵构成"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -1022,11 +1033,12 @@ public class DShanhaiMachines {
                 .register();
         PRIMORDIAL_WORLDLINE_TRAVERSAL_MATRIX.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createMagicText("穿行世线，统合魔力、探测、衰变与深层采掘"));
+            tooltips.add(Component.literal("§b穿过无数可能性的交界，循着微光探寻深埋的资源"));
             tooltips.add(Component.literal("§7配方类型：魔力生成 / 天基宇宙探测 / 衰变加速"));
             tooltips.add(Component.literal("§7中子活化 / 基岩钻机"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -1048,11 +1060,12 @@ public class DShanhaiMachines {
         PRIMORDIAL_QUANTUM_DISTORTION_MATRIX.setTooltipBuilder((stack, tooltips) -> {
             appendGuixuHostTooltip(PRIMORDIAL_QUANTUM_DISTORTION_MATRIX, tooltips);
             tooltips.add(DShanhaiTextUtil.createElectricText("扭曲量子尺度，统一奇点、纳米与精密材料加工"));
+            tooltips.add(Component.literal("§b在微观波动中校准每一道轨迹，让精密结构从纷乱中浮现"));
             tooltips.add(Component.literal("§7配方类型：量子操纵 / 奇点压缩 / 超维度搅拌"));
             tooltips.add(Component.literal("§7纳米蜂群工厂 / PCB工厂 / 燃料精炼"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -1071,10 +1084,11 @@ public class DShanhaiMachines {
         PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE.setTooltipBuilder((stack, tooltips) -> {
             appendGuixuHostTooltip(PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE, tooltips);
             tooltips.add(DShanhaiTextUtil.createAuroraText("汇聚韶光，统合聚合、龙脉结晶与创造聚合"));
+            tooltips.add(Component.literal("§b流转的光与深藏的脉络交织，凝成崭新的结晶"));
             tooltips.add(Component.literal("§7配方类型：聚合核心 / 龙脉结晶 / 创造聚合"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -1095,11 +1109,12 @@ public class DShanhaiMachines {
         PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE.setTooltipBuilder((stack, tooltips) -> {
             appendGuixuHostTooltip(PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE, tooltips);
             tooltips.add(DShanhaiTextUtil.createMagicText("重构未央物质，驾驭梦魇、电磁共振与虚空聚流"));
+            tooltips.add(Component.literal("§b虚空的回响与共振交错，为未央之物勾勒新的形态"));
             tooltips.add(Component.literal("§7配方类型：物质异化 / 梦魇合成 / 电磁共振转化场"));
             tooltips.add(Component.literal("§7地脉断层发生器 / 虚空聚流反应"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -1130,7 +1145,7 @@ public class DShanhaiMachines {
             tooltips.add(Component.literal("§7配方类型：激光蚀刻 / 精密蚀刻 / 维度聚焦蚀刻 / 光子矩阵蚀刻 / 世线板晶圆蚀刻"));
             tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -1151,6 +1166,7 @@ public class DShanhaiMachines {
         PRIMORDIAL_MOLECULAR_ASSEMBLER_MODULE.setTooltipBuilder((stack, tooltips) -> {
             tooltips.add(DShanhaiTextUtil.createElectricText("将分子操纵者的 AE 样板订单接入原初终焉引擎"));
             tooltips.add(DShanhaiTextUtil.createAuroraText("支持普通合成、锻造台与切石机样板"));
+            tooltips.add(Component.literal("§b制造指令汇入矩阵，在原初脉冲中交织成形"));
             tooltips.add(Component.literal("§7需安装在引擎模块位，并搭载分子操纵者 IO 与样板矩阵"));
             tooltips.add(Component.literal("§7产出倍率、无限并行、无限线程"));
         });
@@ -1173,15 +1189,13 @@ public class DShanhaiMachines {
                     .register();
 
             PRIMORDIAL_COIN_FORGE.setTooltipBuilder((stack, tooltips) -> {
-                tooltips.add(DShanhaiTextUtil.createUltimateRainbow("原初铸币工厂"));
-                tooltips.add(Component.literal(""));
-                tooltips.add(DShanhaiTextUtil.createElectricText("从原初物质中铸造GT币的专用工厂"));
+                tooltips.add(DShanhaiTextUtil.createUltimateRainbow("熔铸原初物质，锚定跨越世线的信用尺度"));
+                tooltips.add(DShanhaiTextUtil.createElectricText("将物质的稀缺当量压印为格雷货币"));
                 tooltips.add(DShanhaiTextUtil.createAuroraText("物质模块控制并行上限，线程增强槽扩展跨配方线程"));
-                tooltips.add(Component.literal("§7需安装在原初奥米伽引擎模块位"));
                 tooltips.add(Component.literal("§7配方类型：铸币工厂（coin_forge）"));
                 tooltips.add(Component.literal("§7需安装在引擎模块位"));
                 tooltips.add(Component.literal("")
-                        .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                        .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                         .append(Component.literal("§f，直接从电网取电")));
             });
         }
@@ -1865,16 +1879,16 @@ public class DShanhaiMachines {
             tooltips.add(DShanhaiTextUtil.createNeonText("原初太虚宇宙锻炉"));
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§7以太初为名，以虚空为薪。"));
-            tooltips.add(DShanhaiTextUtil.createNeonText("必须安装在原初引擎上才能工作"));
+            tooltips.add(Component.literal("§7需安装在引擎模块位"));
             tooltips.add(Component.literal(""));
             tooltips.add(Component.literal("§7太虚只是起点，不是终点。"));
             tooltips.add(Component.literal("§7它处理物质，而非可能性。"));
             tooltips.add(Component.literal("§7当你想触碰太虚之上——"));
             tooltips.add(Component.literal("§e空想重构器 §7在那里等你。"));
             tooltips.add(Component.literal(""));
-            tooltips.add(Component.literal("§a配方类型: 太虚熔炼/电炉/合金冶炼/电力高炉/合金冶炼炉"));
+            tooltips.add(Component.literal("§a配方类型：太虚熔炼 / 电炉 / 合金冶炼 / 电力高炉 / 合金冶炼炉"));
             tooltips.add(Component.literal("")
-                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级并行提供"))
+                    .append(DShanhaiTextUtil.createUltimateRainbow("按模块等级提供并行处理能力"))
                     .append(Component.literal("§f，直接从电网取电")));
         });
 
@@ -2305,11 +2319,11 @@ public class DShanhaiMachines {
 
     private static void buildTooltipPrimordial(ItemStack stack, List<Component> tooltips) {
         tooltips.add(DShanhaiTextUtil.createGoldenText("原初的力量在此苏醒，蒸汽与齿轮的低语交织成亘古的轰鸣"));
-        tooltips.add(DShanhaiTextUtil.createElectricText("以最原始的机械诠释最极致的伟力。"));
+        tooltips.add(DShanhaiTextUtil.createElectricText("以最原始的机械形制，驾驭超越纪元的终焉之力"));
         tooltips.add(Component.literal("§7青铜砌骨，蒸汽为脉，烈火锻魂；"));
         tooltips.add(Component.literal("§7焦炉砖上烙印着最初文明的印记。"));
         tooltips.add(Component.literal(""));
-        tooltips.add(Component.literal("§7配方类型：电炉/组装机/合金炉/锻造锤/打粉机"));
+        tooltips.add(Component.literal("§7配方类型：电炉 / 组装机 / 合金炉 / 锻造锤 / 打粉机"));
         tooltips.add(Component.literal("§f拥有")
                 .append(DShanhaiTextUtil.createUltimateRainbow("无限"))
                 .append(Component.literal("§f并行与"))
