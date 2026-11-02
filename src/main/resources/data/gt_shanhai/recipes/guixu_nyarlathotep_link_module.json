@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "gt_shanhai:guixu_hyperdimensional_link_module" },
+    { "item": "minecraft:ender_eye" }
+  ],
+  "result": {
+    "item": "gt_shanhai:guixu_nyarlathotep_link_module",
+    "count": 1
+  }
+}

@@ -321,7 +321,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
 
     /** 原始終焉引擎的模組位數；AR 遠端槽固定排在本機 24 槽之後。 */
     private static final int LINKED_ENGINE_MODULE_SLOTS = 16;
-    public static final int SNAP_SLOTS = GuixuHostGeometry.SLOT_COUNT + LINKED_ENGINE_MODULE_SLOTS;
+    public static final int SNAP_SLOTS = GuixuHostGeometry.SLOT_COUNT + LINKED_ENGINE_MODULE_SLOTS + 1;
 
     public static final int OUT_PER_MODULE = 2;
 
@@ -1128,7 +1128,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
                 && module.isFormed() && module.getHost() == this && getModuleSet().contains(module) ? module : null;
     }
 
-    /** 山海：0..23 固定本機槽位，24..39 固定鏈接引擎槽位；只讀已載入區塊。 */
+    /** 山海：0..23 本機，24..39 鏈接引擎，40 奈亞；只讀已載入區塊。 */
     private PrimordialOmegaEngineModuleBase[] snapshotModules() {
         var modules = new PrimordialOmegaEngineModuleBase[SNAP_SLOTS];
         Level level = getLevel();
@@ -1137,6 +1137,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         for (int i = 0; i < Math.min(own.length, GuixuHostGeometry.SLOT_COUNT); i++) {
             modules[i] = snapshotModuleAt(level, own[i]);
         }
+        var tentacle = GuixuNyarlathotepLink.resolveTarget(this);
+        if (tentacle != null && getModuleSet().contains(tentacle)) modules[SNAP_SLOTS - 1] = tentacle;
         if (!engineLinkReady || !hasEngineLink()) return modules;
         var resolved = GuixuEngineLink.resolve(level.getServer(), linkedEngineDim, linkedEnginePos);
         if (resolved.state() != GuixuEngineLink.State.READY) return modules;
@@ -1202,6 +1204,16 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     private boolean engineLinkReady;
     private TickableSubscription engineLinkSubs;
 
+    /** 山海：奈亞專用一對一連結，與原始終焉引擎連結各自獨立。 */
+    @Persisted @DescSynced
+    private String linkedNyarlathotepDim = "";
+    @Persisted @DescSynced
+    private long linkedNyarlathotepPos;
+    @DescSynced
+    private boolean nyarlathotepLinkReady;
+    private boolean nyarlathotepLinkLoaded;
+    private TickableSubscription nyarlathotepLinkSubs;
+
     /** 遏制場坍縮後的鎖定時長：60 秒。 */
     public static final int CONTAINMENT_LOCK_TICKS = 1200;
 
@@ -1256,6 +1268,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     @Override
     public void onLoad() {
         super.onLoad();
+        nyarlathotepLinkLoaded = true;
+        subscribeNyarlathotepLink();
         ensureSnapshotTick();
     }
 
@@ -1514,6 +1528,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride", "extraMountSlots", "hostModReason",
                 "hostFormedSync", "matterBonusSlot", "limitedDuration", "matterBonusLevel",
                 "operationStateId", "activeModuleCount", "linkedEngineDim", "linkedEnginePos", "engineLinkReady",
+                "linkedNyarlathotepDim", "linkedNyarlathotepPos", "nyarlathotepLinkReady",
                 "containmentLockTicks", "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
                 "hostOuterStarsEnabled", "hostNebulaEnabled",
@@ -1635,7 +1650,55 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     /** 本机 24 个模块位（基类常量 {@code MAX_MODULE_COUNT = 16} 是原始终焉引擎的）；超维度鏈接生效時再加引擎的 16 位。 */
     @Override
     public int getMaxModuleCount() {
-        return GuixuHostGeometry.SLOT_COUNT + (engineLinkReady ? LINKED_ENGINE_MODULE_SLOTS : 0);
+        return GuixuHostGeometry.SLOT_COUNT + (engineLinkReady ? LINKED_ENGINE_MODULE_SLOTS : 0)
+                + (nyarlathotepLinkReady ? 1 : 0);
+    }
+
+    public boolean hasNyarlathotepLink() { return !linkedNyarlathotepDim.isEmpty(); }
+    public String getLinkedNyarlathotepDim() { return linkedNyarlathotepDim; }
+    public BlockPos getLinkedNyarlathotepPos() { return BlockPos.of(linkedNyarlathotepPos); }
+    public boolean isNyarlathotepLinkReady() { return nyarlathotepLinkReady; }
+    public boolean isNyarlathotepLinkLoaded() { return nyarlathotepLinkLoaded; }
+
+    public boolean isLinkedToNyarlathotep(String dimension, BlockPos pos) {
+        return hasNyarlathotepLink() && linkedNyarlathotepDim.equals(dimension)
+                && linkedNyarlathotepPos == pos.asLong();
+    }
+
+    public void setNyarlathotepLink(String dimension, BlockPos pos) {
+        if (isRemote()) return;
+        linkedNyarlathotepDim = dimension;
+        linkedNyarlathotepPos = pos.asLong();
+        markDirty();
+        subscribeNyarlathotepLink();
+    }
+
+    public void clearNyarlathotepLink() {
+        if (isRemote()) return;
+        cancelNyarlathotepLink();
+        linkedNyarlathotepDim = "";
+        linkedNyarlathotepPos = 0L;
+        setNyarlathotepLinkReady(false);
+        markDirty();
+    }
+
+    public void setNyarlathotepLinkReady(boolean ready) {
+        if (isRemote() || nyarlathotepLinkReady == ready) return;
+        nyarlathotepLinkReady = ready;
+        markDirty();
+    }
+
+    private void subscribeNyarlathotepLink() {
+        if (isRemote() || !hasNyarlathotepLink()) return;
+        nyarlathotepLinkSubs = subscribeServerTick(nyarlathotepLinkSubs, () -> {
+            if (getOffsetTimer() % 20 == 0) GuixuNyarlathotepLink.reconcileHost(this);
+        });
+    }
+
+    private void cancelNyarlathotepLink() {
+        if (nyarlathotepLinkSubs == null) return;
+        nyarlathotepLinkSubs.unsubscribe();
+        nyarlathotepLinkSubs = null;
     }
 
     // ------------------------------------------------------------------ 歸墟超維度鏈接（接管原始終焉引擎的模組）
@@ -1769,6 +1832,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         for (var candidate : new ArrayList<>(getModuleSet())) {
             // 別的維度可能有同座標的模組：維度不同一律算外來
             if (candidate instanceof PrimordialOmegaEngineModuleBase module
+                    && !(module instanceof com.dishanhai.gt_shanhai.common.machine.preview.ShanhaiNyarlathotepPreviewMachine)
                     && (module.getLevel() != getLevel() || !own.contains(module.getPos()))) {
                 module.removeFromHost(this);
             }
@@ -1937,6 +2001,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         if (!isRemote()) {
             refreshMatterLevelOverride();
             if (hasEngineLink()) subscribeEngineLink();
+            subscribeNyarlathotepLink();
+            GuixuNyarlathotepLink.reconcileHost(this);
             subscribeContainment();
             ensureSnapshotTick();
             refreshModuleMask();
@@ -1947,6 +2013,9 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
 
     @Override
     public void onUnload() {
+        nyarlathotepLinkLoaded = false;
+        cancelNyarlathotepLink();
+        GuixuNyarlathotepLink.pauseHost(this);
         if (snapTick != null) {
             snapTick.unsubscribe();
             snapTick = null;
@@ -1962,6 +2031,8 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     /** 结构失效：把成型位翻回 false 并推同步（渲染器据此停特效并恢复真方块）。 */
     @Override
     public void onStructureInvalid() {
+        cancelNyarlathotepLink();
+        GuixuNyarlathotepLink.pauseHost(this);
         cancelEngineLink();
         cancelContainment();
         if (!isRemote()) {
@@ -2185,6 +2256,13 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         textList.add(Component.literal(GuixuContainmentText.hostSummary(
                         containment == null ? null : containment.field(), getContainmentLockSeconds()))
                 .withStyle(ChatFormatting.LIGHT_PURPLE));
+        if (hasNyarlathotepLink()) {
+            textList.add(Component.translatable("gt_shanhai.machine.guixu_vision_core.nyarlathotep_link",
+                    linkedNyarlathotepDim, getLinkedNyarlathotepPos().toShortString(),
+                    Component.translatable("gt_shanhai.machine.nyarlathoteps_tentacle_preview."
+                            + (nyarlathotepLinkReady ? "ready" : "waiting")))
+                    .withStyle(nyarlathotepLinkReady ? ChatFormatting.LIGHT_PURPLE : ChatFormatting.GRAY));
+        }
         if (hasEngineLink()) {
             BlockPos engine = getLinkedEnginePos();
             textList.add(Component.literal("超维度链接：" + linkedEngineDim + " [" + engine.getX() + ", "

@@ -26,7 +26,7 @@ import java.util.List;
  *
  * <h2>坐标口径</h2>
  * <pre>
- *   生成器坐标（结构模板坐标）：环心格 (0, RING_Y=10, 0)，控制器格 (72, 21, 0)，机器正位朝西
+ *   生成器坐標（結構模板座標）：環心格 (0, RING_Y=10, 0)，控制器格 (72, 21, 0)，主機正位朝東
  *   环心本地坐标：生成器坐标 − 环心格 − CELL_CENTER(0.5)
  *                 ⇒ 环心那一格的<b>中心</b> = (0,0,0)，每格占 [n−0.5, n+0.5]³，环面（格中心）= y 0
  *   控制器相对坐标：rotate(朝向, 生成器坐标 − 控制器坐标)
@@ -741,23 +741,23 @@ public final class HostFxGeometry {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════
-    //  朝向（与我们自己的旋转旋向一致；正位 = 朝西 = 0°）
+    //  朝向（與結構方向一致；正位 = 朝東 = 0°，主機後殼朝環心）
     // ═══════════════════════════════════════════════════════════════════════════════════════
 
     /**
-     * 把"生成器正位（朝西）"转到机器真实朝向所需的 <b>绕 Y 轴角度</b>。
+     * 把「生成器正位（朝東）」轉到主機實際朝向所需的 <b>繞 Y 軸角度</b>。
      *
      * <p>判据：{@code Axis.YP.rotationDegrees(yaw)} 作用在 (x,z) 上，必须与
      * {@link GuixuHostGeometry#rotate(Direction, BlockPos)} 逐项相等 ——
      * 离线探针 {@code RingProbe} §3 会把四个朝向的整数点逐点比对，不是"看着像"。
-     * 旋向实测：{@code NORTH} 把 (1,0) 转到 (0,1) ⇒ yaw = 270°。
+     * {@code NORTH} 把 (1,0) 轉到 (0,-1) ⇒ yaw = 90°。
      */
     public static float yawDegrees(Direction facing) {
         return switch (facing) {
-            case NORTH -> 270.0F;
-            case SOUTH -> 90.0F;
-            case EAST -> 180.0F;
-            default -> 0.0F;                 // WEST（正位）/ UP / DOWN
+            case NORTH -> 90.0F;
+            case SOUTH -> 270.0F;
+            case WEST -> 180.0F;
+            default -> 0.0F;                 // EAST（正位）/ UP / DOWN
         };
     }
 
@@ -766,9 +766,9 @@ public final class HostFxGeometry {
         final int fx = facing.getStepX();
         final int fz = facing.getStepZ();
         return new float[]{
-                -fx * offX - fz * offZ,
+                fx * offX + fz * offZ,
                 offY,
-                fz * offX - fx * offZ,
+                -fz * offX + fx * offZ,
         };
     }
 
@@ -776,14 +776,10 @@ public final class HostFxGeometry {
     public static float[] rotateCorner(Direction facing, float offX, float offY, float offZ) {
         final int fx = facing.getStepX();
         final int fz = facing.getStepZ();
-        final int backX = -fx;
-        final int backZ = -fz;
-        final int sideX = fz;
-        final int sideZ = -fx;
         return new float[]{
-                backX * offX + sideX * offZ,
+                fx * offX - fz * offZ,
                 offY,
-                backZ * offX + sideZ * offZ,
+                fz * offX + fx * offZ,
         };
     }
 
@@ -826,8 +822,8 @@ public final class HostFxGeometry {
         final int fx = facing.getStepX();
         final int fz = facing.getStepZ();
         // 反旋转（M^T；det=1 时等于逆矩阵）⇒ 得到"生成器坐标 − 控制器坐标"
-        final int gx = -fx * dx - fz * dz;
-        final int gz = fz * dx - fx * dz;
+        final int gx = fx * dx + fz * dz;
+        final int gz = -fz * dx + fx * dz;
         return new float[]{
                 CONTROLLER_X + gx - CELL_CENTER,            // 环心格中心 x = 0
                 CONTROLLER_Y + dy - RING_Y - CELL_CENTER,   // 环面（格中心）y = 0
@@ -859,12 +855,10 @@ public final class HostFxGeometry {
      * @param relX 相机世界坐标 − 控制器世界坐标（三轴同理）
      */
     public static float[] cameraInRingLocal(Direction facing, double relX, double relY, double relZ) {
-        final float[] u = unrotateCorner(facing, (float) relX, (float) relY, (float) relZ);
-        return new float[]{
-                u[0] - RING_CENTER_CTRL_X - CELL_CENTER,
-                u[1] - RING_CENTER_CTRL_Y - CELL_CENTER,
-                u[2] - RING_CENTER_CTRL_Z - CELL_CENTER,
-        };
+        final float[] center = ringCenterInControllerFrame(facing);
+        // 先減世界格中心，再反旋轉；半格平移不能跟著旋轉，否則非正位會偏一格。
+        return unrotateCorner(facing, (float)(relX - center[0] - CELL_CENTER),
+                (float)(relY - center[1] - CELL_CENTER), (float)(relZ - center[2] - CELL_CENTER));
     }
 
     /** 环心格在"控制器相对、已旋转"坐标里的位置（整数格偏移；<b>旋转轴</b>在它 +{@link #CELL_CENTER} 处）。 */

@@ -16,11 +16,9 @@ import net.minecraft.core.Direction;
  * 两处必须不一样：
  * <ol>
  *   <li><b>轴</b>：伪神的三个环是正交球壳环 ⇒ 绕 <b>X</b> 轴；我们的内环是水平圆环 ⇒ 绕 <b>Y</b> 轴；</li>
- *   <li><b>正位</b>：伪神的 {@code BASE_DIRECTION} 经字节码核实是 <b>EAST</b>
- *       （{@code AntichristRenderProfile.<clinit>} 偏移 11/14：{@code getstatic Direction.EAST → putstatic BASE_DIRECTION}），
- *       我们的是 <b>WEST</b>（{@code GuixuHostGeometry.CONTROLLER_FACING}）⇒
- *       这里只用 {@link HostFxGeometry#yawDegrees} 给的那一套（WEST 0 / NORTH 270 / SOUTH 90 / EAST 180），
- *       <b>不要</b>照抄伪神那边可能存在的 EAST 常量。</li>
+ *   <li><b>正位</b>：歸墟主機後殼朝環心，正面朝 <b>EAST</b>
+ *       （{@code GuixuHostGeometry.CONTROLLER_FACING}）；使用
+ *       {@link HostFxGeometry#yawDegrees}（EAST 0 / NORTH 90 / SOUTH 270 / WEST 180）。</li>
  * </ol>
  *
  * <h2>为什么朝向能在这里转、不必逐顶点转</h2>

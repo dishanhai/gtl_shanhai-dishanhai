@@ -24,8 +24,8 @@ import java.util.Set;
  *       控制器 (72, 21, 0)（在控制室里、地板上），整座结构 x[-65..82] y[-57..77] z[-65..65]。</li>
  *   <li><b>模板空间</b>：减掉最小角 (-65,-57,-65) 之后的 0-based 坐标 = 结构资源 {@code .bin} 的
  *       网格坐标（见 {@link #templateSize()}）。</li>
- *   <li><b>控制器相对</b>：{@link Slot#offset()} —— 相对控制器、<b>按"机器朝西（-X）"这一种摆法给出</b>
- *       （造型就是按这个摆法定稿的：站体在 +X，控制室的玻璃面朝 -X 看黑洞）。
+ *   <li><b>控制器相对</b>：{@link Slot#offset()} —— 相對控制器，正位為<b>主機朝東（+X）</b>；
+ *       站體在 +X，主機後殼與控制室玻璃朝 -X 看黑洞，overlay 朝外。
  *       玩家把机器转成别的朝向后用 {@link #slotPositions} 旋转即可。</li>
  * </ol>
  *
@@ -39,13 +39,13 @@ import java.util.Set;
  * </pre>
  *
  * <h2>旋转约定（为什么要这么转）</h2>
- * 造型的"正位"是<b>机器朝西</b>。GTCEu 的 {@code RotationState.NON_Y_AXIS} 只允许 4 个水平朝向，
+ * 造型的"正位"是<b>主機朝東</b>。GTCEu 的 {@code RotationState.NON_Y_AXIS} 只允许 4 个水平朝向，
  * 换朝向 = 整座结构绕 Y 轴转。本类用与 GTCEu 图案匹配器<b>同一套轴约定</b>做换算
- * （{@code FactoryBlockPattern.start(LEFT, DOWN, BACK)} 实测：aisle 轴 = 机器朝向的反方向、
- * row 轴 = -Y、col 轴 = {@code UP × 朝向}）：
+ * （{@code FactoryBlockPattern.start(RIGHT, DOWN, FRONT)}：aisle 軸 = 主機正面方向、
+ * row 軸 = -Y、col 軸 = {@code 朝向 × UP}）：
  * <pre>
- *   worldOffset = (-F) * dx  +  (0,1,0) * dy  +  (UP × F) * dz
- *   （dx,dy,dz = {@link Slot#offset()}；F = 机器朝向；UP × F 的 xz 分量 = (F.z, -F.x)）
+ *   worldOffset = F * dx  +  (0,1,0) * dy  +  (F × UP) * dz
+ *   （dx,dy,dz = {@link Slot#offset()}；F = 主機正面；F × UP 的 xz 分量 = (-F.z, F.x)）
  * </pre>
  * 该公式对 4 个朝向做过自检（{@link #verify()}）。
  */
@@ -73,13 +73,13 @@ public final class GuixuHostGeometry {
     public static final int CONTROLLER_Z = 0;
 
     /**
-     * 控制器朝向 = <b>西（-X，朝圆心）</b>。
+     * 控制器正面 = <b>東（+X，背向圓心）</b>。
      *
      * <p>这是"造型正位"：站体在 +X 一侧，控制室的整面玻璃朝 -X 看向黑洞
-     * （用户 2026-10-23 定："朝圆心"）。玩家实际摆放时可以是 4 个水平朝向中的任意一个，
+     * 主機後殼朝圓心、overlay 朝外。玩家实际摆放时可以是 4 个水平朝向中的任意一个，
      * {@link #slotPositions} 会把槽位一起转过去。
      */
-    public static final Direction CONTROLLER_FACING = Direction.WEST;
+    public static final Direction CONTROLLER_FACING = Direction.EAST;
 
     /** 外环：圆角方的直边半跨（gen5 的 {@code P.half}）。 */
     public static final int RING_HALF = 60;
@@ -144,7 +144,7 @@ public final class GuixuHostGeometry {
      * @param kind   外环 / 上柱 / 下柱
      * @param side   在结构的哪一侧（水平朝向，人读日志用）
      * @param index  同侧内序号（外环 = 侧向位置下标；立柱恒 0）
-     * @param offset 相对控制器、按"机器朝西"给出的体素空间偏移
+     * @param offset 相對控制器、按「主機朝東」給出的體素空間偏移
      */
     public record Slot(Kind kind, Direction side, int index, BlockPos offset) {}
 
@@ -172,7 +172,7 @@ public final class GuixuHostGeometry {
         return (int) Math.round(-((MODULES_PER_SIDE - 1) / 2.0D) * MODULE_PITCH + i * (double) MODULE_PITCH);
     }
 
-    /** 全部 {@link #SLOT_COUNT} 个槽位（控制器相对、机器朝西）。顺序固定、可重现。 */
+    /** 全部 {@link #SLOT_COUNT} 個槽位（控制器相對、主機朝東）。順序固定、可重現。 */
     public static List<Slot> slots() {
         return CANONICAL_SLOTS;
     }
@@ -191,17 +191,13 @@ public final class GuixuHostGeometry {
     /**
      * 把 {@link Slot#offset()} 旋转到机器真实朝向 {@code facing} 上。
      *
-     * <p>公式与 GTCEu 图案匹配器同源（见类注释）：{@code (-F)*dx + UP*dy + (UP×F)*dz}。
+     * <p>公式與 GTCEu 圖案匹配器同源（見類註解）：{@code F*dx + UP*dy + (F×UP)*dz}。
      */
     public static BlockPos rotate(Direction facing, BlockPos offset) {
         final int fx = facing.getStepX();
         final int fz = facing.getStepZ();
-        final int backX = -fx;      // -F
-        final int backZ = -fz;
-        final int sideX = fz;       // UP × F，UP=(0,1,0) ⇒ (F.z, 0, -F.x)
-        final int sideZ = -fx;
-        final int x = backX * offset.getX() + sideX * offset.getZ();
-        final int z = backZ * offset.getX() + sideZ * offset.getZ();
+        final int x = fx * offset.getX() - fz * offset.getZ();
+        final int z = fz * offset.getX() + fx * offset.getZ();
         return new BlockPos(x, offset.getY(), z);
     }
 
@@ -344,10 +340,10 @@ public final class GuixuHostGeometry {
                 throw new IllegalStateException("[SHANHAI-HOST] 朝向 " + facing + " 下槽位重复了（" + rotated.size() + " 个）");
             }
         }
-        // ⑤ 正位（朝西）时旋转必须是恒等
+        // ⑤ 正位（朝東）時旋轉必須是恆等
         for (Slot s : slots) {
             if (!rotate(CONTROLLER_FACING, s.offset()).equals(s.offset())) {
-                throw new IllegalStateException("[SHANHAI-HOST] 朝西（正位）时偏移被旋转了：" + s);
+                throw new IllegalStateException("[SHANHAI-HOST] 朝東（正位）時偏移被旋轉了：" + s);
             }
         }
         // ⑥ 转 4 次回到原位

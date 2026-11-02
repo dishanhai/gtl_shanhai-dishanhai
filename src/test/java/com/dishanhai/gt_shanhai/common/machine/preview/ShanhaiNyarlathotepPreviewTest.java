@@ -68,16 +68,17 @@ class ShanhaiNyarlathotepPreviewTest {
     }
 
     @Test
-    void previewHasNoProductionLogicOrPeriodicStructureScan() throws Exception {
+    void originalControllerIdNowRunsTheThreeProductionTypes() throws Exception {
         Path file = SOURCE.resolve("ShanhaiNyarlathotepPreviewMachine.java");
         assertTrue(Files.exists(file), "Missing preview controller");
         String source = Files.readString(file);
-        assertTrue(source.contains("extends MultiblockControllerMachine"));
-        assertTrue(source.contains("void asyncCheckPattern(long periodID)"));
-        assertFalse(source.contains("super.asyncCheckPattern("));
-        assertFalse(source.contains("RecipeLogic"));
-        assertFalse(source.contains("WorkableElectric"));
-        assertTrue(source.contains("GTRecipeTypes.DUMMY_RECIPES"));
+        assertTrue(source.contains("extends PrimordialCoinForgeModule"), "Reuse existing module bonuses and mint restrictions");
+        assertTrue(source.contains("SPACETIME_DISTORTION"));
+        assertTrue(source.contains("GRAVITATIONAL_WAVE_CONSUMPTION"));
+        assertTrue(source.contains("COIN_FORGE"));
+        assertTrue(source.contains("canWorkWithoutHost()"));
+        assertTrue(source.contains("getWirelessNetworkEnergyHandler()"), "Must replace inherited free energy with local hatches");
+        assertFalse(source.contains("GTRecipeTypes.DUMMY_RECIPES"));
         String registration = Files.readString(SOURCE.getParent().resolve("DShanhaiMachines.java"));
         assertTrue(registration.contains("ShanhaiNyarlathotepPreviewMachine.register()"));
     }
@@ -94,6 +95,8 @@ class ShanhaiNyarlathotepPreviewTest {
         assertTrue(source.contains("case '~': return lazy(\"kubejs:restraint_device\")"));
         assertTrue(source.contains("case 'Q': return Predicates.heatingCoils()"));
         assertTrue(source.contains("containsKey(id)"), "Unknown ids must not silently become registry air");
+        assertTrue(source.contains("isRegistered(id)"), "Magenta preview placeholders must never form a real machine");
+        assertTrue(source.contains("autoAbilities"), "Real machine needs local input/output and power hatches");
         assertFalse(source.contains("static final Block "), "Avoid caching late registries during class initialization");
         assertFalse(source.contains("Predicates.any()"), "Missing solid blocks must remain visible in preview");
     }

@@ -16,9 +16,11 @@ import net.minecraftforge.registries.ForgeRegistries;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 /**
- * 山海：GTO 奈亞拉托提普之觸的唯讀預覽映射。
+ * 山海：原結構不變，僅主機旁20格分子機械方塊開放本機倉口。
  * MB 每行為一個 Z 切片，逗號分隔由下至上的 Y 列；三軸原序保留。
  * C/S/U/] 使用 GTL 現有方塊替代來源包自造件，詳見 docs/nyarlathoteps-tentacle-preview.md。
  */
@@ -28,9 +30,16 @@ public final class ShanhaiNyarlathotepPreviewStructure {
     private ShanhaiNyarlathotepPreviewStructure() {}
 
     public static BlockPattern createPattern(MultiblockMachineDefinition definition) {
-        return DShanhaiMBParser.parse(new ResourceLocation(GTDishanhaiMod.MOD_ID, "nyarlathoteps_tentacle"),
-                symbol -> predicateFor(symbol, definition),
-                RelativeDirection.LEFT, RelativeDirection.UP, RelativeDirection.FRONT);
+        try (var input = ShanhaiNyarlathotepPreviewStructure.class.getResourceAsStream(
+                "/assets/gt_shanhai/multiblock/nyarlathoteps_tentacle.mb")) {
+            if (input == null) throw new IllegalStateException("Missing Nyarlathotep MB");
+            String mapped = ShanhaiNyarlathotepHatchLayout.withLocalHatches(
+                    new String(input.readAllBytes(), StandardCharsets.UTF_8));
+            return DShanhaiMBParser.parseRaw(mapped, symbol -> predicateFor(symbol, definition),
+                    RelativeDirection.LEFT, RelativeDirection.UP, RelativeDirection.FRONT);
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot read Nyarlathotep MB", error);
+        }
     }
 
     /** 與結構謂詞共用候選方塊；供客戶端判斷錨點，包含加熱線圈及缺件佔位。 */
@@ -48,6 +57,8 @@ public final class ShanhaiNyarlathotepPreviewStructure {
 
     private static TraceabilityPredicate predicateFor(char symbol, MultiblockMachineDefinition definition) {
         switch (symbol) {
+            case 'b': return lazy("gtlcore:molecular_casing")
+                    .or(Predicates.autoAbilities(definition.getRecipeTypes()));
             case 'A': return lazy("gtlcore:molecular_casing");
             case 'B': return lazy("gtlcore:advanced_fusion_coil");
             case 'C': return lazy("gtceu:laser_safe_engraving_casing");
@@ -88,8 +99,13 @@ public final class ShanhaiNyarlathotepPreviewStructure {
     private static TraceabilityPredicate lazy(String blockId) {
         ResourceLocation id = new ResourceLocation(blockId);
         return new TraceabilityPredicate(
-                state -> state.getBlockState().is(resolve(id)),
+                state -> isRegistered(id) && state.getBlockState().is(resolve(id)),
                 () -> new BlockInfo[]{new BlockInfo(resolve(id).defaultBlockState())});
+    }
+
+    private static boolean isRegistered(ResourceLocation id) {
+        return ForgeRegistries.BLOCKS.containsKey(id)
+                && ForgeRegistries.BLOCKS.getValue(id) != Blocks.AIR;
     }
 
     /** 不快取註冊前的空結果，保留 KubeJS 晚註冊相容性。缺件以洋紅方塊清楚顯示。 */

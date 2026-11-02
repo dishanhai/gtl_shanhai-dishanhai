@@ -139,10 +139,17 @@ public class GuixuHyperdimensionalLinkModuleItem extends Item {
 
     @Override
     public void appendHoverText(ItemStack stack, Level level, List<Component> tooltip, TooltipFlag flag) {
-        tooltip.add(Component.literal("右键已成型归墟视界枢核记录绑定源").withStyle(ChatFormatting.GRAY));
-        tooltip.add(Component.literal("再右键原始终焉引擎，由归墟接管其全部模组").withStyle(ChatFormatting.GRAY));
-        tooltip.add(Component.literal("允许跨维度、不限距离（双方区块需已加载）").withStyle(ChatFormatting.GRAY));
-        tooltip.add(Component.literal("潜行右键归墟主机解除绑定，潜行右键其他方块清除记录").withStyle(ChatFormatting.DARK_GRAY));
+        tooltip.add(Component.literal("纵使诸天相隔，万象仍归于一墟").withStyle(ChatFormatting.DARK_PURPLE, ChatFormatting.ITALIC));
+        tooltip.add(Component.literal("跨维度接管原始终焉引擎及其全部 16 个模块位").withStyle(ChatFormatting.LIGHT_PURPLE));
+        tooltip.add(Component.literal("归墟本机 24 槽 + 远端引擎 16 槽，共统合 40 个模块位").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("共享归墟增产、等级复写、额外挂载与遏制场增益").withStyle(ChatFormatting.AQUA));
+        tooltip.add(Component.literal("接管后，远端引擎上的受限高阶模块可接入归墟运行").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("跨维度、不限距离；双方须已成型且区块已加载").withStyle(ChatFormatting.YELLOW));
+        tooltip.add(Component.literal("一对一链接：每台归墟最多接管一台引擎，引擎不可重复绑定").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("右键归墟视界枢核记录，再右键原始终焉引擎完成绑定").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("绑定成功：生存模式消耗 1 个；创造模式仅清除记录").withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.literal("潜行右键已绑定的归墟：解除链接，模组归还原引擎").withStyle(ChatFormatting.DARK_GRAY));
+        tooltip.add(Component.literal("解绑不返还链接模块；潜行右键其他方块清除记录").withStyle(ChatFormatting.DARK_GRAY));
         CompoundTag binding = getBinding(stack);
         if (binding != null) {
             tooltip.add(Component.literal("已记录: " + binding.getString(KEY_DIMENSION) + " ["

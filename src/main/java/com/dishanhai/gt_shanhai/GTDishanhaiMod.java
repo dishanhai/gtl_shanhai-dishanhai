@@ -21,6 +21,7 @@ import net.minecraftforge.registries.RegistryObject;
 
 import com.dishanhai.gt_shanhai.common.item.EternalGregTechWorkshopDataModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GuixuHyperdimensionalLinkModuleItem;
+import com.dishanhai.gt_shanhai.common.item.GuixuNyarlathotepLinkModuleItem;
 import com.dishanhai.gt_shanhai.common.item.GravitonShardItem;
 import com.dishanhai.gt_shanhai.common.item.GuideBookItem;
 import com.dishanhai.gt_shanhai.common.item.SuperDiskArrayItem;
@@ -92,6 +93,12 @@ public class GTDishanhaiMod {
         "graviton_shard",
         () -> new GravitonShardItem(new Item.Properties()
             .stacksTo(64)
+            .rarity(Rarity.EPIC)));
+
+    public static final RegistryObject<Item> GUIXU_NYARLATHOTEP_LINK_MODULE = ITEMS.register(
+        "guixu_nyarlathotep_link_module",
+        () -> new GuixuNyarlathotepLinkModuleItem(new Item.Properties()
+            .stacksTo(1)
             .rarity(Rarity.EPIC)));
 
     public static final RegistryObject<Item> SUPER_DISK_ARRAY = ITEMS.register(
@@ -264,6 +271,8 @@ public class GTDishanhaiMod {
                     if (event.getItemStack().getItem() instanceof EternalGregTechWorkshopDataModuleItem item) {
                         result = item.handleBlockUse(event.getLevel(), event.getEntity(), event.getItemStack(), event.getPos());
                     } else if (event.getItemStack().getItem() instanceof GuixuHyperdimensionalLinkModuleItem item) {
+                        result = item.handleBlockUse(event.getLevel(), event.getEntity(), event.getItemStack(), event.getPos());
+                    } else if (event.getItemStack().getItem() instanceof GuixuNyarlathotepLinkModuleItem item) {
                         result = item.handleBlockUse(event.getLevel(), event.getEntity(), event.getItemStack(), event.getPos());
                     } else {
                         return;

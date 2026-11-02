@@ -365,6 +365,7 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
                             && handleRecipeInputHandlePartCache(processed)) {
                         accumulatedEu = nextEu;
                         processedRecipe = true;
+                        onBatchRecipeProcessed(recipe, parallel);
                         actualParallel = parallel > Long.MAX_VALUE - actualParallel
                                 ? Long.MAX_VALUE : actualParallel + parallel;
                         RecipeCalculationHelper.INSTANCE.collectOutputs(processed,
@@ -406,6 +407,9 @@ public abstract class PrimordialModuleRecipeLogic extends SelectableRecipeTypeSe
             matchableScaledRecipeCache.clear();
         }
     }
+
+    /** 山海：僅在真實扣料成功後通知批次副作用；候選查找不得啟動廣播。 */
+    protected void onBatchRecipeProcessed(GTRecipe recipe, long parallel) {}
 
     /**
      * 歸墟遏制場：縮短批次最終耗時（下限 1 tick）並按機率吞掉產出。

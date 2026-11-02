@@ -18,14 +18,14 @@ class GuixuArParallelTest {
     }
 
     @Test void remoteSlotsHaveSpaceForParallelAndOutputSnapshots() {
-        assertEquals(40, GuixuVisionCoreMachine.SNAP_SLOTS);
+        assertEquals(41, GuixuVisionCoreMachine.SNAP_SLOTS);
         int size = GuixuVisionCoreMachine.SNAP_SLOTS;
         var reading = new GuixuVisionCoreMachine.ModuleReading();
         reading.parallel = 9_000_000_000L;
         long[] parallel = new long[size];
-        GuixuVisionCoreMachine.applyReading(39, reading, new byte[size], new long[size], parallel,
+        GuixuVisionCoreMachine.applyReading(40, reading, new byte[size], new long[size], parallel,
                 new int[size], new int[size], new int[size], new int[size * 2], new int[size * 2]);
-        assertEquals(9_000_000_000L, parallel[39]);
+        assertEquals(9_000_000_000L, parallel[40]);
     }
 
     @Test void remoteModuleIdentityIsSyncedWithoutClientWorldLookups() throws Exception {

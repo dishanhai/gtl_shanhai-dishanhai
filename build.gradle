@@ -133,6 +133,49 @@ tasks.register('writeKotlinForForgeMetadata') {
     }
 }
 
+// 山海：防止共用classes目錄被其他編譯清理後，jar只封入部分類別仍顯示成功。
+def verifyShanhaiJarClasses = { File artifact ->
+    def required = new LinkedHashSet<String>()
+    sourceSets.main.allJava.files.each { source ->
+        if (source.name == 'package-info.java' || source.name == 'module-info.java') return
+        def packageName = source.getText('UTF-8') =~ /(?m)^\s*package\s+([\w.]+)\s*;/
+        if (packageName.find()) {
+            required.add(packageName.group(1).replace('.', '/') + '/' + source.name.replaceFirst(/\.java$/, '.class'))
+        }
+    }
+    def zip = new java.util.zip.ZipFile(artifact)
+    try {
+        def configs = zip.entries().findAll { it.name.endsWith('.mixin.json') }
+        configs.each { entry ->
+            def config
+            zip.getInputStream(entry).withCloseable { input -> config = new groovy.json.JsonSlurper().parse(input, 'UTF-8') }
+            if (config.plugin) required.add(config.plugin.replace('.', '/') + '.class')
+            ['mixins', 'client', 'server'].each { side ->
+                (config[side] ?: []).each { mixin ->
+                    required.add((config.package + '.' + mixin).replace('.', '/') + '.class')
+                }
+            }
+        }
+        def missing = required.findAll { zip.getEntry(it) == null }
+        if (!missing.isEmpty()) {
+            throw new GradleException('山海jar缺少必要主程式／Mixin類別（' + missing.size()
+                    + '項），禁止發布不完整封包。請使用隔離build目錄完整重建。例如: ' + missing.take(12))
+        }
+        logger.lifecycle('山海jar完整性通過：{}個必要主程式／Mixin類別，{}個Mixin設定', required.size(), configs.size())
+    } finally {
+        zip.close()
+    }
+}
+
+tasks.register('verifyModJar') {
+    group = 'verification'
+    description = '山海：檢查現有jar的主程式、Mixin與插件類別是否完整。'
+    doLast {
+        def requested = project.findProperty('shanhaiVerifyJar')
+        verifyShanhaiJarClasses(requested ? project.file(requested) : tasks.named('jar').get().archiveFile.get().asFile)
+    }
+}
+
 jar {
     dependsOn 'writeKotlinForForgeMetadata'
     from(kotlinForForgeJar) {
@@ -154,6 +197,7 @@ jar {
     }
     doLast {
         def jarFile = archiveFile.get().asFile
+        verifyShanhaiJarClasses(jarFile)
         def zip = new java.util.zip.ZipFile(jarFile)
         try {
             def bad = []

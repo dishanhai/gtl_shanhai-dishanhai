@@ -101,7 +101,7 @@ public final class GuixuVisionCoreStructure {
      */
     public static BlockPattern createPattern(MultiblockMachineDefinition definition) {
         final FactoryBlockPattern pattern = StructureResourceLoader.INSTANCE.loadFactoryPattern(RESOURCE_PATH, RESOURCE_ID,
-                RelativeDirection.LEFT, RelativeDirection.DOWN, RelativeDirection.BACK);
+                patternDirections());
         for (String[] entry : SYMBOL_BLOCKS) {
             final char symbol = entry[0].charAt(0);
             if (symbol == MODULE_SLOT_FILLED || symbol == MODULE_CAVITY_FILLED
@@ -123,6 +123,11 @@ public final class GuixuVisionCoreStructure {
                 Predicates.blocks(requireBlock("gtceu:industrial_steam_casing")).or(Predicates.any()));
         pattern.where(CONTROLLER, Predicates.controller(Predicates.blocks(definition.getBlock())));
         return pattern.build();
+    }
+
+    /** 山海：水平雙軸一起轉向，主機後殼朝環心，保持原結構手性及高度。 */
+    static RelativeDirection[] patternDirections() {
+        return new RelativeDirection[]{RelativeDirection.RIGHT, RelativeDirection.DOWN, RelativeDirection.FRONT};
     }
 
     /**

@@ -177,175 +177,8 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
         super(baseCasing, workableModel);
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════════════
-    //  「正面贴图放反了」的修法（2026-10-25 第二十二改）
-    // ═══════════════════════════════════════════════════════════════════════════════════
-
-    /**
-     * 把工作面 overlay 的<b>正面</b>在渲染时转到 {@code facing} 的另一侧。
-     *
-     * <h2>为什么是这个开关、以及它到底改了什么</h2>
-     * 「正面贴图在哪一面」在 GTCEu 里<b>只有一个输入</b>，链条逐段有字节码实证（报告 §①）：
-     * <pre>
-     *   MachineRenderer#renderModel 偏移 25-31
-     *       MetaMachineBlock#getFrontFacing(BlockState)        ← 只拿 BlockState
-     *   偏移 27-28  ↳ state.getValue(getRotationState().property)  ← 就是方块状态的 facing
-     *   偏移 100-117 把该值当 renderMachine 的第 4 参往下传
-     *   WorkableCasingMachineRenderer#renderMachine 偏移 65-85
-     *       WorkableOverlayModel#bakeQuads(side, frontFacing, upwardsFacing, …)
-     *   WorkableOverlayModel$OverlayFace#bySide  tableswitch
-     *       3(NORTH)→FRONT / 4(SOUTH)→BACK / 5(WEST)→SIDE / 6(EAST)→SIDE
-     *   bakeQuads 偏移 58-107  rotationAxis(π − toRadians(frontFacing.toYRot()), 0,1,0)
-     *       ⇒ 模型空间 NORTH 转到 frontFacing 那一面
-     * </pre>
-     * ⇒ 模型空间的 FRONT 面 = NORTH，而那段旋转保证它落到 {@code frontFacing} 上。
-     *
-     * <h2>🔴 那为什么还要翻 180°</h2>
-     * 用户的现场事实（他 F3 逐字读的）：方块在 {@code (1754,101,212)}、{@code facing: east}，
-     * 他站在机器<b>西侧</b>，看到<b>朝西那一面</b>带着"正面/屏幕"那种贴图。
-     * 而这张 overlay 目录（{@code gtceu:block/multiblock/fusion_reactor}）**只有 front 系列贴图**
-     * （{@code overlay_front.png} / {@code _active} / {@code _emissive} 共 9 个文件，<b>没有</b>
-     * {@code overlay_back} / {@code overlay_side} / {@code overlay_top}）——
-     * ⇒ 他看到的"屏幕"只可能是 <b>FRONT 面片</b>，即 FRONT 实际落在了 facing 的<b>反面</b>。
-     * <p>「代码说在 facing 一侧、现场看在反面」两者只能以<b>现场</b>为准（本工程的判据纪律：
-     * 运行行为 > 静态推导）。所以这里把传给 overlay 的 frontFacing 取反，
-     * 让 FRONT 面片落到 facing 所指的那一侧。
-     *
-     * <h2>⚠️ 只影响"贴图贴在哪一面"，不动任何几何/图案</h2>
-     * 本覆写<b>只</b>改 renderer 里 {@code bakeQuads} 的输入方向：
-     * <ul>
-     *   <li>方块状态的 {@code facing} 一个字节都不动 ⇒ 结构图案（{@code .bin} 那套
-     *       {@code LEFT/DOWN/BACK}）判定不变 ⇒ <b>老存档已搭好的机器照样成型</b>；</li>
-     *   <li>机壳本身（{@code gtceu:block/cube/all}，六面同图）由 {@code renderModel} 用<b>原</b>
-     *       facing 烘焙，本覆写碰不到它 ⇒ 外壳贴图不会跟着转；</li>
-     *   <li>本机自己的特效（环 / 飞船 / 黑洞 / 光束 / 玻璃 AR）走 {@code render(BlockEntity,…)}
-     *       里各自的 {@code facing}，与这里无关 ⇒ 特效位置不变。</li>
-     * </ul>
-     * <h2>怎么回滚</h2>
-     * 把这一个常量改成 {@code false} 就回到 GTCEu 原样（一行、只影响渲染），
-     * <b>不需要</b>改结构图案、不需要改 {@code .bin}、不需要玩家重搭。
-     * <p>⚠️ 但注意：改成 {@code false} 会<b>连世界里一起</b>回到旧行为（正面又跑到 facing 的反面），
-     * 它已经不是"只回滚图标"的开关了 —— 图标那条另见 {@link #isItemIconPath}。
-     */
-    public static final boolean FLIP_OVERLAY_FRONT = true;
-
-    // ═══════════════════════════════════════════════════════════════════════════════════
-    //  「物品图标要把有动态效果的那一面朝外」（2026-10-25 第二十三改）
-    // ═══════════════════════════════════════════════════════════════════════════════════
-
-    /**
-     * 「这一趟 {@code renderMachine(...)} 是不是<b>物品图标</b>那条路」。
-     *
-     * <h2>为什么必须分开：翻转把图标也一起翻了</h2>
-     * 用户原话：「物品图标像我给你发的两张样图一样，把有动态效果的那一面在外面」。
-     * 第二十二改的 180° 翻转对<b>两条入口同时生效</b>（它们调的都是 {@code renderMachine}）⇒
-     * 世界里对了、图标里反了。
-     *
-     * <h2>物品图标到底走哪条路（字节码实证，jar = {@code libs/gtceu-1.20.1-1.4.4.jar}）</h2>
-     * <pre>
-     * ① 入口：LDLib {@code core.mixins.ItemRendererMixin#injectRenderItem}
-     *       （对 {@code ItemRenderer#render} 的 HEAD @Inject、cancellable、末尾 cancel）
-     *    偏移 1-7   item instanceof IItemRendererProvider
-     *    偏移 10-22 IItemRendererProvider.disabled.get() 为 true 就跳过（防重入）
-     *    偏移 25-38 item.getRenderer(stack)            → 我们的 GuixuHostFxRenderer
-     *    偏移 90-105 renderer.renderItem(...)          → IRenderer#renderItem
-     *
-     * ② MachineRenderer#renderItem 偏移 0-71（全文就这 70 多条指令）
-     *    偏移  8-11 item instanceof MetaMachineItem
-     *    偏移 21-28 IItemRendererProvider.disabled.set(TRUE)      ← GT 自己也是用 ThreadLocal 防重入
-     *    偏移 31-58 Minecraft.getItemRenderer().render(stack, ctx, leftHand, ps, buf, light, overlay,
-     *                                                  new MachineRenderer$1(this, machineItem))
-     *    偏移 61-68 disabled.set(FALSE)
-     *    ⇒ 它不是"自己画"，而是<b>拿一个包装过的 BakedModel 再走一遍原版 ItemRenderer</b>。
-     *
-     * ③ MachineRenderer$1#getQuads(BlockState, Direction side, RandomSource) 全文：
-     *    new LinkedList();
-     *    renderMachine(quads,
-     *                  machineItem.getDefinition(),
-     *                  null,                      ← 第 3 参 machine 【恒为 null】
-     *                  Direction.NORTH,           ← 第 4 参 frontFacing 【写死 NORTH】
-     *                  side,                      ← 第 5 参 side
-     *                  rand,
-     *                  side,                      ← 第 7 参 upwardsFacing = side 本身
-     *                  BlockModelRotation.X0_Y0); ← 第 8 参 modelState 【恒等】
-     *
-     * ④ 对照：方块那条路 MachineRenderer#renderModel(BlockAndTintGetter, BlockPos, BlockState, Direction, RandomSource)
-     *    偏移 33-52 machine = (getter==null || pos==null) ? null : MetaMachineBlock.getMachine(getter,pos)
-     *    偏移 54-56 <b>if (machine == null) return Collections.emptyList();</b>   ← 🔴 关键
-     *    偏移 66-71 modelState = ModelFactory.getRotation(frontFacing)
-     *    偏移 73-89 upwardsFacing = ModelFactory.modelFacing(side, frontFacing)
-     *    偏移 100-117 renderMachine(quads, def, machine, frontFacing, side, rand, upwardsFacing, modelState)
-     * </pre>
-     *
-     * <h2>🔴 为什么判据取 {@code machine == null}，而不是别的</h2>
-     * <ul>
-     *   <li><b>它是充要的</b>：方块路径在偏移 54-56 就把 {@code machine == null} 的帧<b>整条
-     *       {@code emptyList()} 掉</b>，根本走不到 {@code renderMachine}（javap 偏移 416 就是那句
-     *       {@code Collections.emptyList()}）⇒ <b>只要 {@code renderMachine} 收到 null，就只可能是图标路径</b>；</li>
-     *   <li><b>它不是 static 开关、不靠调用顺序</b>：判据直接来自<b>入参</b>，同一帧里方块与图标
-     *       交替渲染、多线程 chunk bake 同时跑都不会串（这一点是任务书点名禁止的脆弱方案）；</li>
-     *   <li><b>{@code modelState == X0_Y0} 不能当判据</b>：{@code ModelFactory.getRotation(Direction)}
-     *       的 tableswitch 里有一支<b>就是返回 {@code BlockModelRotation.X0_Y0}</b>（偏移 68）
-     *       ⇒ 那个朝向的<b>世界里</b>的方块会被误判成图标；</li>
-     *   <li><b>{@code upwardsFacing == side} 不能当判据</b>：{@code ModelFactory.modelFacing(side, frontFacing)}
-     *       在 {@code side == frontFacing} 时返回 NORTH、在 {@code frontFacing == NORTH} 时<b>原样返回 side</b>
-     *       ⇒ 世界里的方块也会出现 {@code upwardsFacing == side}；</li>
-     *   <li><b>{@code frontFacing == NORTH} 不能当判据</b>：朝北摆的机器世界里就是 NORTH。</li>
-     * </ul>
-     *
-     * <h2>为什么不翻 = 用户要的效果（图标"动态面朝外"）</h2>
-     * 图标这条路的模型变换不是我们的，是 GT 给的
-     * {@code ItemBakedModel#getTransforms()} → {@code ModelFactory.MODEL_TRANSFORM_BLOCK}，
-     * 其 GUI 项 = {@code ModelFactory.TRANSFORM_BLOCK_GUI}（javap 静态块偏移 10-32：
-     * 旋转 {@code (30, 225, 0)}、平移 {@code (0,0,0)}、缩放 {@code 0.625}）—— 就是原版
-     * {@code block/block} 的 gui 变换。
-     * 把 {@code (0,0,-1)}（模型空间的 NORTH 法线）过一遍 Rx(30°)·Ry(225°)：
-     * {@code Ry(225°)→(0.7071, 0, 0.7071)}，{@code Rx(30°)→(0.7071, −0.3536, +0.6124)}，
-     * z 分量 <b>+0.612 > 0</b> ⇒ 模型空间 <b>NORTH 面正对玩家</b>。
-     * <p>而 GT 默认（不翻）就是 {@code frontFacing = NORTH} ⇒ {@code bakeQuads} 的旋转
-     * {@code π − toRadians(180°) = 0} ⇒ 正面面片落在模型 NORTH ⇒ <b>正对玩家</b> ✔
-     * <br>我们翻了 180° ⇒ 正面落到 SOUTH（背对玩家），玩家看到的 NORTH 面变成
-     * {@code OverlayFace.bySide(NORTH) = FRONT} 那张贴图被反转到背面之后留下的
-     * {@code BACK} —— 而本机用的 overlay 目录 {@code gtceu:block/multiblock/fusion_reactor}
-     * <b>没有 overlay_back</b> ⇒ 那一面是空的 ⇒ 图标看不到动态面。✘
-     *
-     * @return {@code true} = 这一趟是物品图标，<b>不要</b>翻转
-     */
-    public static boolean isItemIconPath(MetaMachine machine) {
-        return machine == null;
-    }
-
-    /**
-     * 覆写它 = 只为了把 {@code frontFacing} 取反后交给父类（理由与回滚见
-     * {@link #FLIP_OVERLAY_FRONT}）。
-     *
-     * <p>父类的这条方法<b>只</b>用第 4 参（frontFacing）与第 5 参（side）去调
-     * {@code overlayModel.bakeQuads(...)}（javap：{@code WorkableCasingMachineRenderer#renderMachine}
-     * 偏移 17-119 只读 local4/local5/local9 + IWorkable），
-     * 第 2 参（definition）、第 7 参（modelFacing）、第 8 参（modelState）它<b>一个都没读</b>
-     * ⇒ 这里原样传下去不会有副作用。{@code upwardsFacing} 保持不动（它只管贴图在面内的朝向）。
-     *
-     * <h2>🔴 第二十三改：翻转只作用于【方块渲染上下文】，物品图标一律不翻</h2>
-     * 两条入口进的是同一个方法，靠入参区分（判据与字节码见 {@link #isItemIconPath}）：
-     * <ul>
-     *   <li>{@code machine != null} ⇒ 方块（世界里的机器）⇒ <b>照第二十二改翻</b>（现状不动）；</li>
-     *   <li>{@code machine == null} ⇒ 物品图标 ⇒ <b>原样</b>（= GTCEu 默认 = 与别的 GT 机器图标一致）。</li>
-     * </ul>
-     */
-    @Override
-    public void renderMachine(java.util.List<net.minecraft.client.renderer.block.model.BakedQuad> quads,
-                              com.gregtechceu.gtceu.api.machine.MachineDefinition definition,
-                              com.gregtechceu.gtceu.api.machine.MetaMachine machine,
-                              Direction frontFacing, Direction side,
-                              net.minecraft.util.RandomSource random,
-                              Direction upwardsFacing,
-                              net.minecraft.client.resources.model.ModelState modelState) {
-        final boolean itemIcon = isItemIconPath(machine);
-        final Direction overlayFront = (FLIP_OVERLAY_FRONT && !itemIcon && frontFacing != null)
-                ? frontFacing.getOpposite()
-                : frontFacing;
-        super.renderMachine(quads, definition, machine, overlayFront, side, random, upwardsFacing, modelState);
-    }
+    // 山海：控制器 overlay 沿用 GTCEu 父類，以方塊 frontFacing 為正面。
+    // 不另做 180° 翻轉；結構、特效與物品模型繼續沿用原有朝向。
 
     @Override
     public boolean hasTESR(BlockEntity blockEntity) {
@@ -623,6 +456,15 @@ public class GuixuHostFxRenderer extends WorkableCasingMachineRenderer {
                 GuixuNebulaRenderer.render(poseStack, starCamera, spinSeconds, profile.brightness(),
                         host.isHostNebulaEnabled(), HostFxSwitch.degraded(),
                         BlackHoleTuning.enabled() && blackHoleVisible, starHorizon);
+                // 山海：另一端從黑日掠奪的物質由局部通道吐出，收束至本機黑洞。
+                // 環心與四向轉換沿用上方 pivot，不查跨維度客戶端世界。
+                var linkedMatter = com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiNyarlathotepLinkGeometry.frame(
+                        effectSeconds, controllerPos.asLong() ^ host.getLinkedNyarlathotepPos().asLong(), true,
+                        host.isNyarlathotepLinkReady() && BlackHoleTuning.enabled() && blackHoleVisible
+                                && host.isHostOuterStarsEnabled(),
+                        HostFxSwitch.degraded() || HostFxFallback.level() >= HostFxFallback.LEVEL_SIMPLE, holeR);
+                com.dishanhai.gt_shanhai.client.renderer.preview.ShanhaiNyarlathotepInstabilityRenderer
+                        .renderLinkAtPivot(clientLevel, poseStack, buffer, linkedMatter);
             } finally {
                 poseStack.popPose();
             }
