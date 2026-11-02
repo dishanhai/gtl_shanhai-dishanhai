@@ -39,6 +39,7 @@ public final class ShanhaiLoadingClient {
     private static long startupStarted = -1;
     private static long lastWaitingFrame;
     private static boolean rendering;
+    private static boolean pumping;
     private static boolean renderFailed;
     private static boolean sawTerrain;
 
@@ -94,6 +95,29 @@ public final class ShanhaiLoadingClient {
         if (WORLD.active()) WORLD.update("data", "資料包與登錄表", "正在準備世界 ...", 0, -1);
     }
 
+    public static boolean asyncWorldData() { return WORLD.active() && ShanhaiLoadingPreferences.asyncWorldData(); }
+
+    /** JEI Optimizer 保留 PARALLEL_FULL；等待背景索引時持續服務視窗與主執行緒回呼。 */
+    public static Object awaitJei(java.util.concurrent.ForkJoinTask<?> task)
+            throws java.util.concurrent.ExecutionException, InterruptedException {
+        Minecraft mc = Minecraft.getInstance();
+        if (!mc.isSameThread() || !WORLD.active() || mc.screen == null || !isLoadingScreen(mc.screen)) return task.get();
+        return ShanhaiLoadingAsync.await(task, () -> {
+            checkpoint("JEI 背景索引 ...");
+            mc.pollTask();
+        });
+    }
+
+    /** JEI 等必須留在主執行緒的工作，在可中斷邊界限速補幀，不執行遊戲 tick。 */
+    public static void checkpoint(String detail) {
+        Minecraft mc = Minecraft.getInstance();
+        if (!WORLD.active() || !mc.isSameThread() || mc.screen == null || !isLoadingScreen(mc.screen)) return;
+        long now = Util.getMillis();
+        if (now - lastWaitingFrame < 50) return;
+        WORLD.update("client", "客戶端索引與預覽", detail, 0, -1);
+        renderWhileWaiting(mc);
+    }
+
     private static void startSession() {
         WORLD.begin(Util.getMillis());
         sawTerrain = false;
@@ -132,6 +156,7 @@ public final class ShanhaiLoadingClient {
         if (work.current == 1 || work.current % 128 == 0) {
             WORLD.update(work.session, "recipes", "解析配方", id.toString(), work.current, work.total);
             // 某些整合包會在主執行緒連續解析配方，這時 managedBlock 本身不會再進入等待。
+            // 非同步工作者只提交不可變資料；GL 一律留給等待中的主執行緒。
             renderWhileWaiting(Minecraft.getInstance());
         }
     }
@@ -165,6 +190,7 @@ public final class ShanhaiLoadingClient {
         } else if (next != null && !isLoadingScreen(next)) {
             // 錯誤畫面、取消返回、重新選服：立即放行原畫面，清除舊會話。
             WORLD.reset();
+            ShanhaiLoadingRenderer.releaseBackdrop();
             ShanhaiLoadingProfiler.finishWorld("cancelled");
         }
     }
@@ -206,17 +232,19 @@ public final class ShanhaiLoadingClient {
         if (mc.screen != null || mc.getOverlay() != null || !ShanhaiLoadingPreferences.world()) return;
         var frame = WORLD.snapshot(Util.getMillis(), ShanhaiLoadingPreferences.reduceMotion());
         if (!frame.active() && frame.opacity() > .02f) render(event.getGuiGraphics(), false, frame, frame.opacity(), false);
+        else if (!frame.active()) ShanhaiLoadingRenderer.releaseBackdrop();
     }
 
     /** Vanilla managedBlock 不播放 UI；僅在讀取單人資料包時限速更新畫面，不 tick 遊戲。 */
     public static void renderWhileWaiting(Object eventLoop) {
         Minecraft mc = Minecraft.getInstance();
-        if (eventLoop != mc || !WORLD.active() || rendering || renderFailed || !mc.isSameThread()
-                || !(mc.screen instanceof GenericDirtMessageScreen) || mc.getOverlay() != null
+        if (eventLoop != mc || !mc.isSameThread() || !WORLD.active() || rendering || pumping || renderFailed
+                || mc.screen == null || !isLoadingScreen(mc.screen) || mc.getOverlay() != null
                 || !ShanhaiLoadingPreferences.world()) return;
         long now = Util.getMillis();
         if (now - lastWaitingFrame < 50) return;
         lastWaitingFrame = now;
+        pumping = true;
         int drawFramebuffer = glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
         int readFramebuffer = glGetInteger(GL_READ_FRAMEBUFFER_BINDING);
         int[] viewport = new int[4];
@@ -243,6 +271,7 @@ public final class ShanhaiLoadingClient {
             RenderSystem.depthMask(depthMask);
             if (depth) RenderSystem.enableDepthTest(); else RenderSystem.disableDepthTest();
             if (blend) RenderSystem.enableBlend(); else RenderSystem.disableBlend();
+            pumping = false;
         }
     }
 

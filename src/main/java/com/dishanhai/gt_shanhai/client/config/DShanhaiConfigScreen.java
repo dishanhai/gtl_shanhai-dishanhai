@@ -42,6 +42,10 @@ public final class DShanhaiConfigScreen {
 
         // 山海雙階段載入：獨立 client 設定，在啟動 reload 前即可讀取。
         ConfigCategory loading = builder.getOrCreateCategory(Component.literal("山海载入动画"));
+        loading.addEntry(e.startBooleanToggle(Component.literal("世界資料非同步載入"),
+                com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences.asyncWorldData())
+                .setDefaultValue(true).setSaveConsumer(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences::setAsyncWorldData)
+                .setTooltip(tip("玩家選擇世界後，資料包、登錄表及配方在專用工作者依序載入", "主執行緒繼續更新視窗；JEI 與 OpenGL 保持原執行緒", "若第三方模組要求世界資料在主執行緒套用，可關閉此項相容回退")).build());
         loading.addEntry(e.startBooleanToggle(Component.literal("载入 CPU 与配置量抽样"),
                 com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences.sampling())
                 .setDefaultValue(true).setSaveConsumer(com.dishanhai.gt_shanhai.client.loading.ShanhaiLoadingPreferences::setSampling)

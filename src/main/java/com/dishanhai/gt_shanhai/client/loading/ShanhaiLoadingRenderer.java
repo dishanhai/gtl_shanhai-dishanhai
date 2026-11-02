@@ -1,5 +1,10 @@
 package com.dishanhai.gt_shanhai.client.loading;
 
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassBlur;
+import com.dishanhai.gt_shanhai.client.gui.glass.GuiRect;
+import com.dishanhai.gt_shanhai.client.gui.shop.ShopGaussBlur;
+import com.dishanhai.gt_shanhai.client.gui.shop.ShopTheme;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.BufferUploader;
@@ -11,21 +16,18 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
-
 import java.util.ArrayList;
 import java.util.List;
 
-/** 山海：固定幾何預算的雙階段星空／山脈／星環，啟動不依賴遊戲字型。 */
+/** 山海：商店透明玻璃主題；全程使用原生 GUI 座標，文字不跟隨整頁縮放。 */
 public final class ShanhaiLoadingRenderer {
-    private static final int CYAN = 0xff80dfda;
-    private static final int GOLD = 0xffd6b878;
-    private static final int TEXT = 0xffdbe8ed;
     private static int pageOffset;
+    private static boolean startupBlurAttempted, worldBlurAttempted;
 
     private ShanhaiLoadingRenderer() {}
-
     public static void scroll(int direction) { pageOffset += direction; }
-    public static void resetPage() { pageOffset = 0; }
+    public static void resetPage() { pageOffset = 0; releaseBackdrop(); }
+    public static void releaseBackdrop() { ShanhaiLoadingBackdrop.release(); }
 
     public static void render(GuiGraphics graphics, boolean startup, ShanhaiLoadingState.Frame frame,
                               float opacity, boolean reduceMotion, boolean redrawMenu) {
@@ -36,134 +38,187 @@ public final class ShanhaiLoadingRenderer {
         var modelView = RenderSystem.getModelViewStack();
         boolean depth = org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_DEPTH_TEST);
         boolean blend = org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_BLEND);
+        float[] previousColor = RenderSystem.getShaderColor().clone();
         modelView.pushPose();
         modelView.setIdentity();
+        modelView.translate(0, 0, -11000);
         RenderSystem.applyModelViewMatrix();
-        RenderSystem.disableDepthTest();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.setShaderColor(1, 1, 1, 1);
         try {
-            int guiWidth = mc.getWindow().getGuiScaledWidth(), guiHeight = mc.getWindow().getGuiScaledHeight();
-            if (guiWidth < 1 || guiHeight < 1) return;
+            int width = mc.getWindow().getGuiScaledWidth(), height = mc.getWindow().getGuiScaledHeight();
+            if (width < 1 || height < 1) return;
+            RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0, width, height, 0, 1000, 21000), VertexSorting.ORTHOGRAPHIC_Z);
+            RenderSystem.disableDepthTest();
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            RenderSystem.setShaderColor(1, 1, 1, 1);
             if (redrawMenu && mc.screen != null) {
-                RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0, guiWidth, guiHeight, 0, 1000, 21000), VertexSorting.ORTHOGRAPHIC_Z);
-                modelView.translate(0, 0, -11000);
-                RenderSystem.applyModelViewMatrix();
                 mc.screen.renderWithTooltip(graphics, 0, 0, 0);
                 graphics.flush();
-                modelView.setIdentity();
-                RenderSystem.applyModelViewMatrix();
-                RenderSystem.disableDepthTest();
-                RenderSystem.enableBlend();
-                RenderSystem.defaultBlendFunc();
             }
-            float scale = Math.min(guiWidth / 640f, guiHeight / 360f);
-            float width = guiWidth / scale, height = guiHeight / scale;
-            RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0, width, height, 0, -1000, 1000), VertexSorting.ORTHOGRAPHIC_Z);
-            float time = reduceMotion ? 0 : frame.elapsedMs() / 1000f;
-            float centerX = width / 2, centerY = height * .29f;
-            var atlas = ShanhaiLoadingFont.get();
-            BufferBuilder buffer = Tesselator.getInstance().getBuilder();
-            buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-            RenderSystem.setShader(GameRenderer::getPositionColorShader);
-            for (var quad : ShanhaiLoadingScene.frame(width, height, frame.elapsedMs(), opacity, reduceMotion)) {
-                buffer.vertex(quad.x1(), quad.y1(), 0).color(quad.bottomColor()).endVertex();
-                buffer.vertex(quad.x2(), quad.y2(), 0).color(quad.bottomColor()).endVertex();
-                buffer.vertex(quad.x3(), quad.y3(), 0).color(quad.topColor()).endVertex();
-                buffer.vertex(quad.x4(), quad.y4(), 0).color(quad.topColor()).endVertex();
+            var panel = ShanhaiLoadingLayout.glassPanel(width, height);
+            if (!ShanhaiLoadingBackdrop.draw(width, height, startup, opacity)) {
+                drawBackground(width, height, 0, opacity, true);
+                warmGlass(startup);
+                RenderSystem.setShaderColor(1, 1, 1, opacity);
+                glassRoot(graphics, panel, opacity);
+                graphics.flush();
+                // 淡出首幀不快取；只保存無文字的完整底圖，進度與分頁每幀另畫。
+                if (opacity >= .999f) ShanhaiLoadingBackdrop.capture(width, height, startup);
             }
-            float panelWidth = Math.min(530, width - 64), left = (width - panelWidth) / 2;
-            float panelTop = height * .54f, panelBottom = height - 48;
-            List<TextRun> labels = new ArrayList<>();
-            center(labels, atlas, "山 海", centerX, centerY - 23, 27, alpha(TEXT, opacity));
-            center(labels, atlas, "GT  SHANHAI", centerX, centerY + 16, 9, alpha(GOLD, opacity));
-            center(labels, atlas, startup ? "01  /  模組初始化" : "02  /  進入世界", centerX, 20, 11, alpha(CYAN, opacity));
-            center(labels, atlas, startup ? "INITIALIZING THE HORIZON" : "BUILDING YOUR WORLD", centerX, centerY + 75, 9, alpha(GOLD, opacity * .8f));
-
-            List<DetailLine> details = detailLines(frame.tasks(), (int) panelWidth - 32, startup, atlas);
-            int capacity = Math.max(1, (int) ((panelBottom - panelTop - 30) / 17));
-            int pages = Math.max(1, (details.size() + capacity - 1) / capacity);
-            int page = Math.floorMod(pageOffset + (int) (frame.elapsedMs() / 6000), pages);
-            int first = page * capacity;
-            for (int i = first; i < Math.min(details.size(), first + capacity); i++) {
-                var detail = details.get(i);
-                labels.add(new TextRun(detail.text(), left + 16, panelTop + 12 + (i - first) * 17,
-                        11, alpha(detail.heading() ? TEXT : 0xff829aaa, opacity), !startup));
-            }
-            float barY = panelBottom + 9;
-            rect(buffer, left, barY, left + panelWidth, barY + 2, alpha(0xff233b49, opacity));
-            float fraction = frame.tasks().isEmpty() ? -1 : frame.tasks().get(frame.tasks().size() - 1).fraction();
-            if (fraction >= 0) rect(buffer, left, barY, left + panelWidth * fraction, barY + 2, alpha(CYAN, opacity));
-            else {
-                float start = reduceMotion ? 0 : (float) ((Math.sin(time * 1.3) + 1) * .5) * (panelWidth - 70);
-                rect(buffer, left + start, barY, left + start + 70, barY + 2, alpha(CYAN, opacity * .7f));
-            }
-            labels.add(new TextRun(String.format(java.util.Locale.ROOT, "%.1f s", frame.elapsedMs() / 1000d),
-                    left, panelBottom + 20, 9, alpha(GOLD, opacity), false));
-            String footer = pages > 1 ? "DETAILS " + (page + 1) + " / " + pages + "   AUTO / SCROLL" : "山海恒長在";
-            labels.add(new TextRun(footer, left + panelWidth - atlas.width(footer, 9), panelBottom + 20,
-                    9, alpha(0xff829aaa, opacity), false));
-            BufferUploader.drawWithShader(buffer.end());
-
-            RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
-            RenderSystem.setShaderTexture(0, atlas.texture);
-            buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
-            for (var label : labels) if (!label.nativeFont()) atlas.append(buffer, label.text(), label.x(), label.y(), label.size(), label.color());
-            BufferUploader.drawWithShader(buffer.end());
-            for (var label : labels) {
-                if (!label.nativeFont()) continue;
-                graphics.pose().pushPose();
-                graphics.pose().translate(label.x(), label.y(), 0);
-                float fontScale = label.size() / 9;
-                graphics.pose().scale(fontScale, fontScale, 1);
-                graphics.drawString(mc.font, label.text(), 0, 0, label.color(), false);
-                graphics.pose().popPose();
+            RenderSystem.setShaderColor(1, 1, 1, opacity);
+            if (panel.railWidth() > 0) {
+                int railX = panel.x() + panel.padding();
+                ShopTheme.GLASS.box(graphics, railX, panel.contentTop() - 5, panel.railWidth(), 50,
+                        startup ? GlassPalette.ACCENT : GlassPalette.BUTTON_EDGE,
+                        startup ? ShopTheme.GLASS.selectBg : ShopTheme.GLASS.panelInner);
+                ShopTheme.GLASS.box(graphics, railX, panel.contentTop() + 53, panel.railWidth(), 50,
+                        startup ? GlassPalette.BUTTON_EDGE : GlassPalette.ACCENT,
+                        startup ? ShopTheme.GLASS.panelInner : ShopTheme.GLASS.selectBg);
             }
             graphics.flush();
+            RenderSystem.setShaderColor(1, 1, 1, 1);
+            ShanhaiLoadingFont atlas = startup ? ShanhaiLoadingFont.get() : null;
+            List<TextRun> text = new ArrayList<>();
+            add(text, "山海 · 載入", panel.x() + panel.padding(), panel.y() + 8, 18, GlassPalette.TEXT);
+            add(text, "GT SHANHAI  /  " + (startup ? "INITIALIZATION" : "WORLD LOADING"),
+                    panel.x() + panel.padding(), panel.y() + 31, 9, GlassPalette.TEXT_MUTED);
+            String badge = startup ? "01 / 啟動初始化" : "02 / 進入世界";
+            add(text, badge, panel.x() + panel.width() - panel.padding() - width(badge, 9, atlas),
+                    panel.y() + 15, 9, GlassPalette.ACCENT);
+            if (panel.railWidth() > 0) {
+                int railX = panel.x() + panel.padding() + 10;
+                add(text, "01  啟動初始化", railX, panel.contentTop() + 5, 9, GlassPalette.TEXT);
+                add(text, startup ? "正在載入" : "已完成", railX, panel.contentTop() + 23, 9,
+                        startup ? GlassPalette.ACCENT : GlassPalette.OK);
+                add(text, "02  進入世界", railX, panel.contentTop() + 63, 9, GlassPalette.TEXT);
+                add(text, startup ? "等待選擇存檔" : "正在載入", railX, panel.contentTop() + 81, 9,
+                        startup ? GlassPalette.TEXT_MUTED : GlassPalette.ACCENT);
+            }
+            List<DetailLine> details = detailLines(frame.tasks(), panel.contentWidth() - 16, atlas);
+            int pages = Math.max(1, (details.size() + panel.rowCapacity() - 1) / panel.rowCapacity());
+            int page = Math.floorMod(pageOffset + (int) (frame.elapsedMs() / 6000), pages);
+            add(text, startup ? "初始化工作" : "世界載入詳情", panel.contentX() + 4, panel.contentTop() + 2, 9, GlassPalette.TEXT_HEAD);
+            String pageLabel = (page + 1) + " / " + pages;
+            add(text, pageLabel, panel.contentX() + panel.contentWidth() - width(pageLabel, 9, atlas) - 4,
+                    panel.contentTop() + 2, 9, GlassPalette.TEXT_MUTED);
+            int first = page * panel.rowCapacity();
+            for (int i = first; i < Math.min(details.size(), first + panel.rowCapacity()); i++) {
+                DetailLine line = details.get(i);
+                add(text, line.text(), panel.contentX() + 4,
+                        panel.contentTop() + 20 + (i - first) * panel.lineHeight(), 9,
+                        line.heading() ? GlassPalette.TEXT : GlassPalette.TEXT_MUTED);
+            }
+            int barLeft = panel.x() + panel.padding(), barRight = panel.x() + panel.width() - panel.padding();
+            int barY = panel.footerY() - 7;
+            graphics.fill(barLeft, barY, barRight, barY + 2, alpha(ShopTheme.GLASS.barBg, opacity));
+            float fraction = frame.tasks().isEmpty() ? -1 : frame.tasks().get(frame.tasks().size() - 1).fraction();
+            if (fraction >= 0) graphics.fill(barLeft, barY, barLeft + Math.round((barRight - barLeft) * fraction),
+                    barY + 2, alpha(GlassPalette.ACCENT, opacity));
+            else {
+                int span = Math.min(64, barRight - barLeft);
+                int start = reduceMotion ? 0 : Math.round((float) ((Math.sin(frame.elapsedMs() / 1100d) + 1) * .5) * (barRight - barLeft - span));
+                graphics.fill(barLeft + start, barY, barLeft + start + span, barY + 2, alpha(GlassPalette.ACCENT, opacity));
+            }
+            add(text, String.format(java.util.Locale.ROOT, "%.1f s", frame.elapsedMs() / 1000d), barLeft, panel.footerY(), 9, GlassPalette.TEXT_HEAD);
+            String footer = pages > 1 ? "自動分頁 · 滾輪查看" : "山海恒長在";
+            add(text, footer, barRight - width(footer, 9, atlas), panel.footerY(), 9, GlassPalette.TEXT_MUTED);
+            graphics.flush();
+            drawText(graphics, text, atlas, opacity);
         } finally {
             modelView.popPose();
             RenderSystem.applyModelViewMatrix();
             RenderSystem.setProjectionMatrix(previousProjection, previousSorting);
-            RenderSystem.setShaderColor(1, 1, 1, 1);
+            RenderSystem.setShaderColor(previousColor[0], previousColor[1], previousColor[2], previousColor[3]);
             if (depth) RenderSystem.enableDepthTest(); else RenderSystem.disableDepthTest();
             if (blend) RenderSystem.enableBlend(); else RenderSystem.disableBlend();
         }
     }
 
-    private static List<DetailLine> detailLines(List<ShanhaiLoadingState.Task> tasks, int maxWidth,
-                                               boolean startup, ShanhaiLoadingFont atlas) {
+    private static void glassRoot(GuiGraphics graphics, ShanhaiLoadingLayout.GlassPanel panel, float opacity) {
+        int ix = panel.contentX() - 6, iy = panel.contentTop() - 5;
+        int iw = panel.contentWidth() + 12, ih = panel.contentBottom() - panel.contentTop() + 8;
+        if (opacity >= .999f) {
+            ShopTheme.GLASS.rootPanel(graphics, panel.x(), panel.y(), panel.width(), panel.height(), ix, iy, iw, ih);
+            return;
+        }
+        // 後處理不吃 shaderColor，模糊強度也須同步淡出，避免結尾突然清晰。
+        ShopTheme.GLASS.rootShadow(graphics, panel.x(), panel.y(), panel.width(), panel.height());
+        GlassBlur.backdrop(graphics, new GuiRect(panel.x(), panel.y(), panel.width(), panel.height()), opacity);
+        ShopTheme.GLASS.box(graphics, panel.x(), panel.y(), panel.width(), panel.height(), GlassPalette.ROOT_EDGE, ShopTheme.GLASS.panelBg);
+        ShopTheme.GLASS.box(graphics, ix, iy, iw, ih, GlassPalette.DISPLAY_EDGE, ShopTheme.GLASS.panelInner);
+    }
+
+    /** 報告畫面亦使用同一正式背景。 */
+    static void drawBackground(int width, int height, long elapsed, float opacity, boolean reduceMotion) {
+        RenderSystem.disableDepthTest();
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.setShaderColor(1, 1, 1, 1);
+        BufferBuilder buffer = Tesselator.getInstance().getBuilder();
+        buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        for (var quad : ShanhaiLoadingScene.frame(width, height, elapsed, opacity, reduceMotion)) {
+            buffer.vertex(quad.x1(), quad.y1(), 0).color(quad.bottomColor()).endVertex();
+            buffer.vertex(quad.x2(), quad.y2(), 0).color(quad.bottomColor()).endVertex();
+            buffer.vertex(quad.x3(), quad.y3(), 0).color(quad.topColor()).endVertex();
+            buffer.vertex(quad.x4(), quad.y4(), 0).color(quad.topColor()).endVertex();
+        }
+        BufferUploader.drawWithShader(buffer.end());
+    }
+
+    static void warmGlass(boolean startup) {
+        if (ShopGaussBlur.isReady()) return;
+        if (startup ? startupBlurAttempted : worldBlurAttempted) return;
+        if (startup) startupBlurAttempted = true; else worldBlurAttempted = true;
+        ShopGaussBlur.warmUp();
+    }
+
+    private static void drawText(GuiGraphics graphics, List<TextRun> text, ShanhaiLoadingFont atlas, float opacity) {
+        if (atlas != null) {
+            RenderSystem.disableDepthTest();
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
+            RenderSystem.setShaderTexture(0, atlas.texture);
+            BufferBuilder buffer = Tesselator.getInstance().getBuilder();
+            buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
+            for (var run : text) atlas.append(buffer, run.text(), run.x(), run.y(), run.size(), alpha(run.color(), opacity));
+            BufferUploader.drawWithShader(buffer.end());
+            return;
+        }
+        for (var run : text) {
+            graphics.pose().pushPose();
+            graphics.pose().translate(run.x(), run.y(), 0);
+            int scale = run.size() >= 18 ? 2 : 1;
+            graphics.pose().scale(scale, scale, 1);
+            graphics.drawString(Minecraft.getInstance().font, run.text(), 0, 0, alpha(run.color(), opacity), false);
+            graphics.pose().popPose();
+        }
+        graphics.flush();
+    }
+
+    private static List<DetailLine> detailLines(List<ShanhaiLoadingState.Task> tasks, int maxWidth, ShanhaiLoadingFont atlas) {
         List<DetailLine> result = new ArrayList<>();
         for (var task : tasks) {
-            String counts = task.done() ? "  [DONE]" + (task.total() >= 0 ? " " + task.current() : "") : task.total() > 0
+            String counts = task.done() ? "  完成" + (task.total() >= 0 ? " " + task.current() : "") : task.total() > 0
                     ? "  " + task.current() + " / " + task.total() + "  " + (int) (task.fraction() * 100) + "%" : "  ...";
-            appendLines(result, task.label() + counts, maxWidth, true, startup, atlas);
-            if (!task.detail().isBlank()) appendLines(result, task.detail(), maxWidth, false, startup, atlas);
+            appendLines(result, task.label() + counts, maxWidth, true, atlas);
+            if (!task.detail().isBlank()) appendLines(result, task.detail(), maxWidth, false, atlas);
         }
         if (result.isEmpty()) result.add(new DetailLine("正在準備 ...", true));
         return result;
     }
 
-    private static void appendLines(List<DetailLine> result, String text, int maxWidth, boolean heading,
-                                    boolean startup, ShanhaiLoadingFont atlas) {
-        for (String line : ShanhaiLoadingLayout.wrap(text, maxWidth, s -> (int) Math.ceil(startup
-                ? atlas.width(s, 11) : Minecraft.getInstance().font.width(s) * 11 / 9f))) {
+    private static void appendLines(List<DetailLine> result, String value, int maxWidth, boolean heading, ShanhaiLoadingFont atlas) {
+        for (String line : ShanhaiLoadingLayout.wrap(ShopTheme.GLASS.label(value), maxWidth, s -> width(s, 9, atlas)))
             result.add(new DetailLine(line, heading));
-        }
     }
 
-    private static void center(List<TextRun> text, ShanhaiLoadingFont atlas, String value, float x, float y, float size, int color) {
-        text.add(new TextRun(value, x - atlas.width(value, size) / 2, y, size, color, false));
+    private static int width(String value, int size, ShanhaiLoadingFont atlas) {
+        return atlas == null ? Minecraft.getInstance().font.width(value) * (size >= 18 ? 2 : 1) : (int) Math.ceil(atlas.width(value, size));
     }
-
+    private static void add(List<TextRun> text, String value, int x, int y, int size, int color) { text.add(new TextRun(value, x, y, size, color)); }
     private static int alpha(int color, float opacity) { return ((int) ((color >>> 24) * Math.max(0, Math.min(1, opacity))) << 24) | (color & 0xffffff); }
-    private static void rect(BufferBuilder buffer, float x1, float y1, float x2, float y2, int color) { quad(buffer, x1, y1, x2, y2, color, color); }
-    private static void quad(BufferBuilder buffer, float x1, float y1, float x2, float y2, int top, int bottom) {
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        buffer.vertex(x1, y2, 0).color(bottom).endVertex(); buffer.vertex(x2, y2, 0).color(bottom).endVertex();
-        buffer.vertex(x2, y1, 0).color(top).endVertex(); buffer.vertex(x1, y1, 0).color(top).endVertex();
-    }
-
-    private record TextRun(String text, float x, float y, float size, int color, boolean nativeFont) {}
+    private record TextRun(String text, int x, int y, int size, int color) {}
     private record DetailLine(String text, boolean heading) {}
 }

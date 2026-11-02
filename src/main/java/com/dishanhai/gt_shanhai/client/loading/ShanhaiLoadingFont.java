@@ -19,7 +19,7 @@ final class ShanhaiLoadingFont {
     final ResourceLocation texture;
     private final String characters;
     private final float[] advances;
-    private final int cell, columns, width, height;
+    private final int cell, columns, width, height, fontSize;
 
     private ShanhaiLoadingFont() throws IOException {
         try (InputStream metadata = resource(".json");
@@ -31,10 +31,12 @@ final class ShanhaiLoadingFont {
             columns = json.get("columns").getAsInt();
             width = json.get("width").getAsInt();
             height = json.get("height").getAsInt();
+            fontSize = json.get("fontSize").getAsInt();
             advances = new float[characters.length()];
             for (int i = 0; i < advances.length; i++) advances[i] = json.getAsJsonArray("advances").get(i).getAsFloat();
-            texture = Minecraft.getInstance().getTextureManager().register("shanhai_loading_font",
-                    new DynamicTexture(NativeImage.read(pixels)));
+            DynamicTexture glyphs = new DynamicTexture(NativeImage.read(pixels));
+            glyphs.setFilter(true, false);
+            texture = Minecraft.getInstance().getTextureManager().register("shanhai_loading_font", glyphs);
         }
     }
 
@@ -57,14 +59,14 @@ final class ShanhaiLoadingFont {
         for (int offset = 0; offset < text.length();) {
             int codepoint = text.codePointAt(offset);
             int index = index(codepoint);
-            result += advances[index] * size / 24f;
+            result += advances[index] * size / fontSize;
             offset += Character.charCount(codepoint);
         }
         return result;
     }
 
     void append(BufferBuilder buffer, String text, float x, float y, float size, int color) {
-        float scale = size / 24f;
+        float scale = size / fontSize;
         for (int offset = 0; offset < text.length();) {
             int codepoint = text.codePointAt(offset);
             int index = index(codepoint);

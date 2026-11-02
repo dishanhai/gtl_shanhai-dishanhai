@@ -16,6 +16,7 @@ public final class ShanhaiLoadingMetrics {
     private final long started;
     private final long initialHeap;
     private final LinkedHashMap<String, MutableEntry> entries = new LinkedHashMap<>();
+    private final LinkedHashMap<String, MutableEntry> recipeNamespaces = new LinkedHashMap<>();
     private final PriorityQueue<Entry> slowRecipes = new PriorityQueue<>(Comparator.comparingLong(Entry::elapsedNanos));
     private long peakHeap;
     private long pausedAt = -1;
@@ -44,12 +45,34 @@ public final class ShanhaiLoadingMetrics {
         peakHeap = Math.max(peakHeap, heap);
     }
 
-    public synchronized void slowRecipe(String id, long elapsed, long cpu, long allocated, long heap, boolean failed) {
+    public synchronized void slowRecipe(Object id, long elapsed, long cpu, long allocated, long heap, boolean failed) {
         if (completed != null || slowRecipes.size() == 32 && elapsed <= slowRecipes.peek().elapsedNanos()) return;
         if (slowRecipes.size() == 32) slowRecipes.poll();
-        slowRecipes.add(new Entry(id, "recipe", 1, Math.max(0, elapsed), Math.max(0, cpu), cpu >= 0 ? 1 : 0,
+        slowRecipes.add(new Entry(id.toString(), "recipe", 1, Math.max(0, elapsed), Math.max(0, cpu), cpu >= 0 ? 1 : 0,
                 Math.max(0, allocated), allocated >= 0 ? 1 : 0, failed ? 1 : 0));
         peakHeap = Math.max(peakHeap, heap);
+    }
+
+    /** 逐筆配方一次提交命名空間與慢項，省掉每筆配置 kind/name 組合鍵。 */
+    public synchronized void recipe(String namespace, Object id, long elapsed, boolean failed) {
+        if (completed != null) return;
+        MutableEntry entry = recipeNamespaces.get(namespace);
+        if (entry == null) {
+            record(namespace, "recipe namespace", elapsed, -1, -1, 0, failed);
+            // 只快取有界統計中實際收納的項目；超限命名空間仍走既有 aggregate。
+            entry = entries.get("recipe namespace\n" + namespace);
+            if (entry != null) recipeNamespaces.put(namespace, entry);
+        } else {
+            entry.calls++; entry.elapsed += Math.max(0, elapsed);
+            if (failed) entry.failures++;
+        }
+        slowRecipe(id, elapsed, -1, -1, 0, failed);
+    }
+
+    public static List<Entry> executionFirst(List<Entry> rows, Comparator<Entry> value) {
+        return rows.stream().sorted(Comparator.<Entry>comparingInt(entry ->
+                entry.kind().equals("listener elapsed (includes waits)") || entry.kind().equals("Forge observed") ? 1 : 0)
+                .thenComparing(value.reversed())).toList();
     }
 
     public synchronized void pause() { if (completed == null && pausedAt < 0) pausedAt = clock.getAsLong(); }

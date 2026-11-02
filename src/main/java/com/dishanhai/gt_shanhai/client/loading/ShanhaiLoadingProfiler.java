@@ -1,6 +1,7 @@
 package com.dishanhai.gt_shanhai.client.loading;
 
 import com.dishanhai.gt_shanhai.config.ShanhaiConfigPaths;
+import com.dishanhai.gt_shanhai.mixin.ShanhaiLoadingListenerAccessor;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.minecraft.resources.ResourceLocation;
@@ -79,7 +80,13 @@ public final class ShanhaiLoadingProfiler {
             BiFunction<Executor, Executor, CompletableFuture<S>> original) {
         Session owner = session();
         if (owner == null) return original.apply(prepare, apply);
-        String name = listener.getClass().getName();
+        PreparableReloadListener unwrapped = listener;
+        for (int i = 0; i < 8 && unwrapped instanceof ShanhaiLoadingListenerAccessor wrapper; i++) {
+            PreparableReloadListener next = wrapper.shanhai$wrapped();
+            if (next == null || next == unwrapped) break;
+            unwrapped = next;
+        }
+        String name = unwrapped.getClass().getName();
         long started = System.nanoTime();
         try {
             var future = original.apply(executor(owner, name, "prepare", prepare), executor(owner, name, "apply", apply));
@@ -110,8 +117,7 @@ public final class ShanhaiLoadingProfiler {
     public static void recipe(Session owner, ResourceLocation id, long started, boolean failed) {
         if (owner == null || owner.closed) return;
         long elapsed = System.nanoTime() - started;
-        owner.metrics.record(id.getNamespace(), "recipe namespace", elapsed, -1, -1, 0, failed);
-        owner.metrics.slowRecipe(id.toString(), elapsed, -1, -1, 0, failed);
+        owner.metrics.recipe(id.getNamespace(), id, elapsed, failed);
     }
 
     public static ProfileReport report(boolean startupPhase) {
@@ -164,7 +170,9 @@ public final class ShanhaiLoadingProfiler {
                 .append("並行／巢狀工作不可相加當作總耗時；CPU／配置量僅在 JVM 支援時提供。\n")
                 .append("堆變化包含其他執行緒與 GC，峰值僅取樣，不是單一模組的精確記憶體歸因。\n")
                 .append("配方逐筆只量耗時，CPU／配置量歸外層工作；已包含分析器自身少量開銷。\n\n耗時排序\n");
-        for (var entry : metrics.entries()) text.append(row(entry)).append('\n');
+        text.append("直接執行工作優先；含等待與觀測項列於後方，不表示可節省的時間。\n");
+        for (var entry : ShanhaiLoadingMetrics.executionFirst(metrics.entries(),
+                java.util.Comparator.comparingLong(ShanhaiLoadingMetrics.Entry::elapsedNanos))) text.append(row(entry)).append('\n');
         text.append("\n最慢配方（最多 32 筆）\n");
         for (var entry : metrics.slowRecipes()) text.append(row(entry)).append('\n');
         if (report.sampling() != null) {

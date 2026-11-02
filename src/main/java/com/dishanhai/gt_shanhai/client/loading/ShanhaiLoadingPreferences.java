@@ -19,6 +19,7 @@ public final class ShanhaiLoadingPreferences {
     private static boolean reduceMotion;
     private static boolean profiling = true;
     private static boolean sampling = true;
+    private static boolean asyncWorldData = true;
 
     private ShanhaiLoadingPreferences() {}
 
@@ -27,11 +28,13 @@ public final class ShanhaiLoadingPreferences {
     public static synchronized boolean reduceMotion() { load(); return reduceMotion; }
     public static synchronized boolean profiling() { load(); return profiling; }
     public static synchronized boolean sampling() { load(); return sampling; }
+    public static synchronized boolean asyncWorldData() { load(); return asyncWorldData; }
     public static synchronized void setStartup(boolean value) { load(); startup = value; save(); }
     public static synchronized void setWorld(boolean value) { load(); world = value; save(); }
     public static synchronized void setReduceMotion(boolean value) { load(); reduceMotion = value; save(); }
     public static synchronized void setProfiling(boolean value) { load(); profiling = value; save(); }
     public static synchronized void setSampling(boolean value) { load(); sampling = value; save(); }
+    public static synchronized void setAsyncWorldData(boolean value) { load(); asyncWorldData = value; save(); }
 
     private static Path path() { return ShanhaiConfigPaths.clientDir().resolve("loading_animation.json"); }
 
@@ -47,12 +50,14 @@ public final class ShanhaiLoadingPreferences {
             reduceMotion = json.has("reduceMotion") && json.get("reduceMotion").getAsBoolean();
             profiling = !json.has("profiling") || json.get("profiling").getAsBoolean();
             sampling = !json.has("sampling") || json.get("sampling").getAsBoolean();
+            asyncWorldData = !json.has("asyncWorldData") || json.get("asyncWorldData").getAsBoolean();
         } catch (IOException | RuntimeException error) {
             LogManager.getLogger("gt_shanhai:loading").warn("山海載入動畫設定讀取失敗，使用預設值", error);
             startup = world = true;
             reduceMotion = false;
             profiling = true;
             sampling = true;
+            asyncWorldData = true;
         }
     }
 
@@ -63,6 +68,7 @@ public final class ShanhaiLoadingPreferences {
         json.addProperty("reduceMotion", reduceMotion);
         json.addProperty("profiling", profiling);
         json.addProperty("sampling", sampling);
+        json.addProperty("asyncWorldData", asyncWorldData);
         try {
             Path file = path();
             Files.createDirectories(file.getParent());

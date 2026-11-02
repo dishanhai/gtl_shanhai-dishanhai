@@ -11,6 +11,7 @@
   "client": [
     "ShanhaiLoadingOverlayMixin",
     "ShanhaiLoadingReloadProfilerMixin",
+    "ShanhaiLoadingListenerAccessor",
     "ShanhaiLoadingWorldMixin",
     "ShanhaiLoadingWaitMixin",
     "ShanhaiLoadingRecipeMixin",

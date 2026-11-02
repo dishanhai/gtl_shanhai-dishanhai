@@ -5,6 +5,11 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import com.dishanhai.gt_shanhai.client.gui.glass.GlassPalette;
+import com.dishanhai.gt_shanhai.client.gui.shop.ShopTheme;
+import com.dishanhai.gt_shanhai.client.gui.scaled.Spring;
+import com.dishanhai.gt_shanhai.client.gui.scaled.GuiMotion;
+import java.util.function.BooleanSupplier;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -25,21 +30,25 @@ public final class ShanhaiLoadingReportScreen extends Screen {
 
     @Override protected void init() {
         int half = Math.max(50, (width - 44) / 2);
-        addRenderableWidget(Button.builder(Component.literal("啟動初始化"), button -> select(true)).bounds(20, 27, half, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("進入世界"), button -> select(false)).bounds(width / 2 + 2, 27, half, 20).build());
+        glassButton("啟動初始化", button -> select(true), 20, 27, half, 20, () -> startup);
+        glassButton("進入世界", button -> select(false), width / 2 + 2, 27, half, 20, () -> !startup);
         String[] modes = {"耗時", "CPU", "配置", "慢配方", "熱點", "配置估計"};
         int itemWidth = Math.max(30, (width - 60) / 6);
         for (int i = 0; i < modes.length; i++) {
             final int selected = i;
-            addRenderableWidget(Button.builder(Component.literal(modes[i]), button -> { mode = selected; scroll = 0; rebuild(); })
-                    .bounds(20 + i * (itemWidth + 4), 51, itemWidth, 20).build());
+            glassButton(modes[i], button -> { mode = selected; scroll = 0; rebuild(); },
+                    20 + i * (itemWidth + 4), 51, itemWidth, 20, () -> mode == selected);
         }
-        addRenderableWidget(Button.builder(Component.literal("返回"), button -> onClose()).bounds(width / 2 + 49, height - 27, 90, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("重新整理"), button -> rebuild()).bounds(width / 2 - 45, height - 27, 90, 20).build());
-        var folder = addRenderableWidget(Button.builder(Component.literal("開啟報告目錄"), button -> Util.getPlatform().openFile(ShanhaiLoadingProfiler.directory().toFile()))
-                .bounds(width / 2 - 139, height - 27, 90, 20).build());
+        glassButton("返回", button -> onClose(), width / 2 + 49, height - 27, 90, 20, () -> false);
+        glassButton("重新整理", button -> rebuild(), width / 2 - 45, height - 27, 90, 20, () -> false);
+        var folder = glassButton("開啟報告目錄", button -> Util.getPlatform().openFile(ShanhaiLoadingProfiler.directory().toFile()),
+                width / 2 - 139, height - 27, 90, 20, () -> false);
         folder.active = Files.isDirectory(ShanhaiLoadingProfiler.directory());
         rebuild();
+    }
+
+    private Button glassButton(String text, Button.OnPress action, int x, int y, int w, int h, BooleanSupplier selected) {
+        return addRenderableWidget(new GlassButton(text, action, x, y, w, h, selected));
     }
 
     private void select(boolean value) { startup = value; scroll = 0; rebuild(); }
@@ -64,7 +73,8 @@ public final class ShanhaiLoadingReportScreen extends Screen {
             Comparator<ShanhaiLoadingMetrics.Entry> order = mode == 1 ? Comparator.comparingLong(ShanhaiLoadingMetrics.Entry::cpuNanos)
                     : mode == 2 ? Comparator.comparingLong(ShanhaiLoadingMetrics.Entry::allocatedBytes)
                     : Comparator.comparingLong(ShanhaiLoadingMetrics.Entry::elapsedNanos);
-            entries.sort(order.reversed());
+            entries = new ArrayList<>(ShanhaiLoadingMetrics.executionFirst(entries, order));
+            if (mode == 0) append("直接執行工作優先；含等待及觀測項列於後方。", 0xff80dfda);
             int rank = 0;
             for (var entry : entries) {
                 append("", 0);
@@ -102,7 +112,14 @@ public final class ShanhaiLoadingReportScreen extends Screen {
 
     @Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float tick) {
         if (report != null && report != ShanhaiLoadingProfiler.report(startup)) rebuild();
-        graphics.fill(0, 0, width, height, 0xff09131f);
+        graphics.flush();
+        if (!ShanhaiLoadingBackdrop.draw(width, height, this, 1)) {
+            ShanhaiLoadingRenderer.drawBackground(width, height, 0, 1, true);
+            ShanhaiLoadingRenderer.warmGlass(false);
+            ShopTheme.GLASS.rootPanel(graphics, 10, 3, width - 20, height - 6, 20, 101, width - 40, Math.max(1, height - 139));
+            graphics.flush();
+            ShanhaiLoadingBackdrop.capture(width, height, this);
+        }
         graphics.drawCenteredString(font, title, width / 2, 9, 0xff80dfda);
         String summary = startup ? "啟動初始化" : "進入世界";
         if (report != null) {
@@ -131,6 +148,7 @@ public final class ShanhaiLoadingReportScreen extends Screen {
         return true;
     }
     @Override public void onClose() { minecraft.setScreen(parent); }
+    @Override public void removed() { ShanhaiLoadingRenderer.releaseBackdrop(); super.removed(); }
     private static String ms(long nanos) { return String.format(Locale.ROOT, "%.2f", nanos / 1_000_000d); }
     private static String mib(long bytes) { return String.format(Locale.ROOT, "%.2f MiB", bytes / 1048576d); }
     private static String kind(String value) {
@@ -141,4 +159,25 @@ public final class ShanhaiLoadingReportScreen extends Screen {
         };
     }
     private record Line(String text, int color) {}
+
+    private final class GlassButton extends Button {
+        private final BooleanSupplier selected;
+        private final Spring hover = new Spring(Spring.HOVER);
+        private GlassButton(String text, OnPress action, int x, int y, int w, int h, BooleanSupplier selected) {
+            super(x, y, w, h, Component.literal(text), action, DEFAULT_NARRATION);
+            this.selected = selected;
+        }
+        @Override protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float tick) {
+            long now = System.currentTimeMillis();
+            float target = active && isHoveredOrFocused() ? 1 : 0;
+            if (ShanhaiLoadingPreferences.reduceMotion()) hover.snap(target);
+            else { hover.setTarget(target, now); hover.update(now); }
+            boolean on = selected.getAsBoolean();
+            int edge = on ? GlassPalette.ACCENT : GuiMotion.lerpColor(ShopTheme.GLASS.frameDark, GlassPalette.ACCENT, hover.value());
+            int fill = on ? ShopTheme.GLASS.selectBg : GuiMotion.lerpColor(ShopTheme.GLASS.buttonBg, ShopTheme.GLASS.buttonHover, hover.value());
+            ShopTheme.GLASS.box(graphics, getX(), getY(), getWidth(), getHeight(), edge, fill);
+            graphics.drawString(font, getMessage(), getX() + (getWidth() - font.width(getMessage())) / 2,
+                    getY() + (getHeight() - font.lineHeight) / 2, active ? GlassPalette.TEXT : GlassPalette.TEXT_OFF, false);
+        }
+    }
 }
