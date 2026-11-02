@@ -119,7 +119,8 @@ public class QuantumCraftingBlockEntity extends AENetworkBlockEntity
     }
 
     public void updateSubType(boolean updateFormed) {
-        if (level == null || notLoaded() || isRemoved()) return;
+        // 山海：卸載時區塊仍可能可見，但 AE 節點已銷毀；此時不能再更新連接面。
+        if (level == null || notLoaded() || isRemoved() || !getMainNode().isReady()) return;
         long start = QuantumDiagnostics.start();
 
         boolean formed = isFormed();
