@@ -15,7 +15,9 @@
     "ShanhaiItemDescriptionMixin",
     "ShanhaiUniversalSupplyMixin",
     "ShanhaiQuickUploadMultiTypeMixin",
-    "ShanhaiSlotTypeGateMixin"
+    "ShanhaiSlotTypeGateMixin",
+    "ShanhaiPatternEncodingTermMenuAccessor",
+    "ShanhaiCreationUploadChainBMixin"
   ],
   "client": [
     "ShanhaiFontStyleMixin",

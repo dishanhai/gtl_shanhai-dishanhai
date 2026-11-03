@@ -1,6 +1,16 @@
 package com.shanhai.common.machine;
 
+import com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler;
+
+import com.shanhai.ShanhaiMod;
+import com.shanhai.common.log.ShanhaiLogThrottle;
+import com.shanhai.common.recipe.ShanhaiInfiniteEnergy;
+import com.shanhai.common.recipe.ShanhaiParallelDiag;
 import com.shanhai.common.thread.ShanhaiParallelBudget;
+
+import org.jetbrains.annotations.Nullable;
+
+import java.math.BigInteger;
 
 /**
  * <b>「玩家可调的并行数」契约 —— 原初主机与 24 台原初模块共用的一条。</b>
@@ -525,16 +535,167 @@ public interface ParallelOverrideMachine {
         //    必须【与"电力自动关着"逐位同值】= 本机上限，<b>不许再被 ÷T</b>。
         //    理由与本轮实测数字（2048 ÷ 9 = 227 vs 2048）逐条写在 isEnergyCapInfinite() 的 javadoc 里。
         if (isEnergyCapInfinite()) {
-            return base;
+            // 🔴🔴 2026-11-01（本轮追加）：∞ 档【不再直接 return base】—— 两道新夹子落在这里，
+            //    因为本方法仍是全工程【唯一】一处"把电上限施加到并行上"的地方（没有第二条路）。
+            //    ① ∞ 电源的安全夹：base 现在是模块并行表值（4.6e18 / 6.9e18 / Long.MAX），
+            //       走 long 电路时 base × 每份耗电 × T 会【回绕成负数】⇒ 必须夹到 Long.MAX ÷ (k × T)。
+            //    ② 无线电网终端按【池子余额】算并行：终端不是无限，只是"有多少能拉多少"。
+            //    创造能源仓不参与 ②（它的余额根本不进这条），只吃 ① 的安全夹 —— 用户定的：
+            //       「创造仓就是无限，不许限制」。
+            return shanhai$energyInfiniteGuard(base, threads);
         }
         if (!isPowerAutoParallel()) {
-            return base;
+            return shanhai$energyOverflowGuard(base, threads);
         }
         final long cap = getEnergyParallel();
         if (cap <= ENERGY_CAP_NONE) {
+            return shanhai$energyOverflowGuard(base, threads);
+        }
+        return shanhai$energyOverflowGuard(
+                ShanhaiParallelBudget.perThreadParallelFor(base, cap, threads), threads);
+    }
+
+    /**
+     * ③ <b>「装不下 + 没有 handler」的降级夹</b>（<b>所有</b>分支共用，不只是 ∞ 档）。
+     *
+     * <pre>
+     *   无线 handler 在线（BigInteger 路）⇒ 不夹，base 原样用
+     *   否则                          ⇒ min(base, Long.MAX ÷ (每份耗电 × T))，并打一行 WARN
+     * </pre>
+     * 判据与 {@link #shanhai$energyInfiniteGuard} 的 ① 是<b>同一个纯函数</b>
+     * （{@link ShanhaiInfiniteEnergy#guardInfiniteCap}）；这里只是换了"为什么"的措辞
+     * （{@code energy=long-only ... why=no-wireless handler=none}，任务书原文）。
+     * <p>⚠️ 只有真的溢出时才动手 ⇒ ≤long 的老路径<b>逐位不变</b>。
+     */
+    private long shanhai$energyOverflowGuard(long base, int threads) {
+        if (base <= 0L) {
             return base;
         }
-        return ShanhaiParallelBudget.perThreadParallelFor(base, cap, threads);
+        final IWirelessNetworkEnergyHandler handler = shanhaiWirelessEnergyHandler();
+        if (handler != null && handler.isOnline()) {
+            return base; // BigInteger 路：这道夹子不管它
+        }
+        final BigInteger euPerCopy = ShanhaiInfiniteEnergy.perCopyFromMilli(getPerParallelMilliCost());
+        if (euPerCopy == null || euPerCopy.signum() <= 0) {
+            return base;
+        }
+        final long guarded = ShanhaiInfiniteEnergy.guardInfiniteCap(base, euPerCopy, threads);
+        if (guarded == base) {
+            return base;
+        }
+        shanhai$logEnergyGuard(ShanhaiInfiniteEnergy.clampLine(ShanhaiInfiniteEnergy.decideExact(
+                ShanhaiInfiniteEnergy.total(euPerCopy, base, threads), euPerCopy, base, threads, false)));
+        return guarded;
+    }
+
+    /**
+     * 🔴 <b>本轮追加的两道夹子（只作用于「电上限 = ∞」这一支）</b>。
+     *
+     * <h2>① ∞ 电源的安全夹（防 long 回绕成负数）</h2>
+     * <pre>
+     *   走 long 电路（没有可用的无线 handler）时：p = min(base, Long.MAX ÷ (每份耗电 × T))
+     *   走 BigInteger 路（无线 handler 在线）时：不夹，base 原样用（那条路的容量就是 BigInteger）
+     * </pre>
+     * 证据行：{@code [SHANHAI-INFPAR] energy=infinite p_clamped=<夹后> base=<原> why=overflow-guard}
+     *
+     * <h2>② 无线电网终端按「池子余额」算并行（它不是无限，只是"有多少能拉多少"）</h2>
+     * <pre>
+     *   p_pool = floor( getMaxAvailableEnergy() ÷ (每份耗电 × T) )      // 全程 BigInteger 除法
+     *   p      = min(base, p_pool)
+     * </pre>
+     * 证据行：{@code [SHANHAI-INFPAR] energy=pool p_pool=<BigInteger 商> avail=<余额> k=<每份耗电×T>}
+     * <p>⚠️ <b>创造能源仓不参与 ②</b>：它没有「无线电网池子」这个东西
+     * （{@link #shanhaiWirelessEnergyHandler()} 为 {@code null}）⇒ 只吃 ① 的安全夹。
+     *
+     * <h2>口径</h2>
+     * {@code 每份耗电} 取 {@link #getPerParallelMilliCost()}（<b>毫</b> EU/t，最贵那条候选、
+     * 已含引擎耗能乘数与 N5 减免）<b>向上取整</b>到整数 EU/t ⇒ 只会更保守，不会多派份数。
+     * <p>{@code ≤ 0}（没算出 / 没候选 / 开关关着）⇒ 两道夹子都不参与 ⇒ 与改动前<b>逐位相同</b>。
+     */
+    private long shanhai$energyInfiniteGuard(long base, int threads) {
+        final BigInteger euPerCopy = ShanhaiInfiniteEnergy.perCopyFromMilli(getPerParallelMilliCost());
+        if (euPerCopy == null || euPerCopy.signum() <= 0 || base <= 0L) {
+            // 拿不到"每份耗电" ⇒ 不夹（保持 ∞ 档的既有语义，绝不猜一个数去夹）。
+            return base;
+        }
+        long capped = base;
+        final IWirelessNetworkEnergyHandler handler = shanhaiWirelessEnergyHandler();
+        final boolean handlerUsable = handler != null && handler.isOnline();
+
+        // ── ② 池子余额 ──
+        if (handlerUsable) {
+            final BigInteger available = handler.getMaxAvailableEnergy();
+            final BigInteger pPool = ShanhaiInfiniteEnergy.poolParallel(available, euPerCopy, threads);
+            if (pPool != null && pPool.signum() >= 0) {
+                // 下限 1：池子空时让"缺电"那条既有语义去说话（doDamping / FAIL_NO_ENOUGH_EU_IN），
+                // 而不是把并行压成 0 让机器静默不动（两种都是不动，但只有前者会说原因）。
+                final BigInteger floorOne = pPool.max(BigInteger.ONE);
+                final long poolLong = floorOne.compareTo(ShanhaiInfiniteEnergy.LONG_MAX) >= 0
+                        ? Long.MAX_VALUE : floorOne.longValue();
+                if (poolLong < capped) {
+                    capped = poolLong;
+                    shanhai$logEnergyGuard(ShanhaiInfiniteEnergy.poolLine(pPool, available, euPerCopy, threads)
+                            + "（生效并行 " + capped + " ← 原 " + base + "）");
+                }
+            }
+        }
+
+        // ── ① ∞ 电源的安全夹（只在走 long 电路时）──
+        if (!handlerUsable) {
+            final long guarded = ShanhaiInfiniteEnergy.guardInfiniteCap(capped, euPerCopy, threads);
+            if (guarded != capped) {
+                final long before = capped;
+                capped = guarded;
+                shanhai$logEnergyGuard(ShanhaiInfiniteEnergy.infiniteGuardLine(capped, base)
+                        + (before != base ? "（本行之前已被池子余额夹到 " + before + "）" : ""));
+            }
+        }
+        return capped;
+    }
+
+    /** 证据行落盘（<b>同一形态每 5 秒最多 1 行</b>；复用现有 {@link ShanhaiLogThrottle.Gate}）。 */
+    private void shanhai$logEnergyGuard(String line) {
+        if (ShanhaiInfiniteEnergy.shouldLog(EnergyGuardLogGate.HOLDER, line, System.currentTimeMillis())) {
+            ShanhaiMod.LOGGER.warn(line);
+        }
+    }
+
+    /**
+     * 🔴 <b>无线电网能量 handler 的接缝</b>（默认 {@code null} = 本机没有无线网通道）。
+     *
+     * <p>⚠️ 它<b>不是</b> {@code IWirelessElectricMultiblockMachine#getWirelessNetworkEnergyHandler()}：
+     * 那一个<b>必须保持返回 null</b>，否则 gtladditions 的
+     * {@code MutableRecipesLogic#getRecipe()} 会整体改走 {@code buildFinalWirelessRecipe}
+     * （字节码：{@code wirelessTrait != null ? buildFinalWirelessRecipe(...) : buildFinalNormalRecipe(...)}）
+     * ⇒ 我们把效果全挂在 Normal 支上，一走 Wireless 支就<b>一行都不执行</b>（静默失效）。
+     * <p>⇒ 本工程用<b>这个名字不同</b>的接缝：只有"要给电做 BigInteger 路由"的地方读它。
+     */
+    @Nullable
+    default IWirelessNetworkEnergyHandler shanhaiWirelessEnergyHandler() {
+        return null;
+    }
+
+    /**
+     * <b>bigint 档下「每 tick 耗电」的显示值</b>；{@code null} = 本机没走 BigInteger 通道。
+     *
+     * <p>为什么显示层需要一个单独的出口：走 BigInteger 通道时配方 {@code tickInputs} 里那个
+     * {@code long} EU 是<b>饱和过</b>的，直接拿它显示就是假数据（会看到
+     * {@code 9223372036854775807} 这种怪值）。这个值由配方逻辑在溢出路由里写、回到 long 档时清成
+     * {@code null} ⇒ 显示层只要"null 就读老值、非 null 就读它"，<b>不会出现负数或饱和怪值</b>。
+     * <p>⚠️ 默认实现返回 {@code null} = 不参与 ⇒ 没有实现这个接缝的机器显示行为<b>逐字不变</b>。
+     */
+    @Nullable
+    default BigInteger getDisplayEut() {
+        return null;
+    }
+
+    /** 证据行的限流闸门（接口里只能放 public static 嵌套类）。 */
+    final class EnergyGuardLogGate {
+
+        static final ShanhaiLogThrottle.Gate HOLDER = new ShanhaiLogThrottle.Gate();
+
+        private EnergyGuardLogGate() {
+        }
     }
 
     /**
@@ -607,6 +768,61 @@ public interface ParallelOverrideMachine {
      */
     default long energyCapForBudget() {
         return isEnergyCapInfinite() ? ENERGY_CAP_NONE : getEnergyParallel();
+    }
+
+    /**
+     * 🔴🔴 <b>每配方并行预算（"照伪神"口径）—— 主机多配方引擎路径（{@code PrimordialEngineRecipeLogic}）读的那一个。</b>
+     *
+     * <h2>用户 2026-11 的原话（逐字，这就是规格）</h2>
+     * <blockquote>
+     * 「<b>归墟主机这条路上，每配方预算直接给 {@code Long.MAX_VALUE}，不再乘跨配方线程</b>」
+     * <br>「如果我们的机器通过并行*线程超过了 long，那总预算就写成 long」
+     * </blockquote>
+     *
+     * <h2>伪神（FOTC）原文 —— 本方法照抄的是"形状"，不是代码</h2>
+     * <pre>
+     *   ForgeOfTheAntichrist$Companion$ForgeOfTheAntichristLogic#calculateParallels
+     *     170: ldc2_w #162   // long 9223372036854775807l
+     *     194: invokestatic access$getMaxParallel(this, recipe, Long.MAX_VALUE)
+     * </pre>
+     * ⇒ 伪神<b>绕开了</b> {@code (long) getMaxParallel() * getMultipleThreads()} 这条乘法，
+     * 所以它那边<b>根本没有"并行 × 线程"溢出这件事</b>。本方法照这个形状：
+     * <b>基座 = {@code Long.MAX_VALUE}，T 不进基座</b>。
+     *
+     * <h2>算式（唯一一份在 {@link ShanhaiParallelDiag#perRecipeBudget(long, long, int, long, java.math.BigInteger, boolean)}）</h2>
+     * <pre>
+     *   ① 基座      = Long.MAX_VALUE                       ← 伪神 F2；不乘 T
+     *   ② 玩家覆盖值 ⇒ saturatedMultiply(min(覆盖值, 自动值), T)
+     *                   —— 只对【有限的玩家值】乘，且饱和（超 long ⇒ 夹 Long.MAX，绝不回绕成负数）；
+     *                      {@code Long.MAX} 本身一次都不进这条乘法（硬约束）
+     *   ③ 电上限（总口径） ⇒ min(…, 电上限)                  ← 「电力自动」的落点，去掉会缺电停机
+     *   ④ long 溢出安全夹（无 BigInteger 通道时）⇒ min(…, Long.MAX ÷ 每份耗电)（T = 1 口径）
+     * </pre>
+     *
+     * <h2>⚠️ 与上一版的差别（必须让验收方知情）</h2>
+     * <pre>
+     *   ⛔ 上一版（{@code ShanhaiParallelBudget#parallelBudget(本机上限, 电上限, T)}）：
+     *        预算 = min(本机上限, 电上限 ÷ T) × T   —— 自动档下 Long.MAX × T 靠饱和才不出事
+     *   ✅ 现行：自动档直接 Long.MAX（【没有】这条乘法）；电上限那档用【总】口径原样夹
+     * </pre>
+     * <b>数值影响面</b>：自动档 + ∞ 电源（用户的档）⇒ 与上一版<b>逐位相同</b>（都是 {@code Long.MAX}）；
+     * 有限电上限档 ⇒ 与上一版最多差 {@code T−1}（上一版向下取整到 T 的倍数）；
+     * <b>「地板」档（电上限 &lt; T）</b>⇒ 上一版 = {@code T}（128）、现行 = 电上限本身（例如 48）——
+     * 现行<b>更保守</b>，不会出现"预算比电上限还大"。
+     *
+     * <p>⚠️ 本方法<b>只读机器上的四个读数</b>（自动值 / 覆盖值 / 线程数 / 电上限 + 每份耗电），
+     * 算术全在纯核里 ⇒ 离线判据驱动的是同一份字节码。
+     */
+    default long perRecipeParallelBudget() {
+        final IWirelessNetworkEnergyHandler handler = shanhaiWirelessEnergyHandler();
+        final boolean bigintUsable = handler != null && handler.isOnline();
+        return ShanhaiParallelDiag.perRecipeBudget(
+                getAutoParallel(),
+                getEffectiveOverride(),
+                getEnergyCapThreads(),
+                energyCapForBudget(),
+                ShanhaiInfiniteEnergy.perCopyFromMilli(getPerParallelMilliCost()),
+                bigintUsable);
     }
 
     // ═════════ 🔴 2026-10-02 第二轮：「为什么没有上限」必须在界面上说出来 ═════════

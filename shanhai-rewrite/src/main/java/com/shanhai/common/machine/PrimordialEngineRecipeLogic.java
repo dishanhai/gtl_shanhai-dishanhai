@@ -3,26 +3,39 @@ package com.shanhai.common.machine;
 import com.google.common.primitives.Ints;
 import com.gregtechceu.gtceu.api.capability.recipe.IRecipeCapabilityHolder;
 import com.gregtechceu.gtceu.api.machine.feature.IRecipeLogicMachine;
+import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.RecipeHelper;
 import com.gregtechceu.gtceu.api.recipe.modifier.ParallelLogic;
 import com.gtladd.gtladditions.api.machine.logic.MutableRecipesLogic;
 import com.gtladd.gtladditions.common.data.ParallelData;
 import com.shanhai.ShanhaiMod;
+import com.shanhai.common.heat.ShanhaiExtraMountGate;
+import com.shanhai.common.heat.ShanhaiHeatGate;
+import com.shanhai.common.log.ShanhaiLogThrottle;
 import com.shanhai.common.machine.ParallelOverrideMachine;
 import com.shanhai.common.machine.ParallelPowerBudget;
 import com.shanhai.common.thread.ShanhaiParallelBudget;
 import com.shanhai.common.recipe.PrimordialRecipeEffects;
+import com.shanhai.common.recipe.ShanhaiInfiniteEnergy;
+import com.shanhai.common.recipe.ShanhaiParallelDiag;
+import com.shanhai.common.recipe.ShanhaiWirelessWrap;
 import com.shanhai.machine.module.PrimordialModuleMachine;
 
 import it.unimi.dsi.fastutil.longs.LongLongPair;
 
+import net.minecraft.network.chat.Component;
+
+import org.gtlcore.gtlcore.api.recipe.IGTRecipe;
 import org.gtlcore.gtlcore.api.recipe.IParallelLogic;
 import org.gtlcore.gtlcore.api.recipe.RecipeMultiplierTracker;
+import org.gtlcore.gtlcore.api.recipe.RecipeRunnerHelper;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -167,6 +180,170 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
         setUseMultipleRecipes(true);
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  (2026-10-25 T4) 「额外挂载槽 ×3」条件闸门 —— 主机侧【此前完全没有】的那一道
+    //
+    //  用户原话（逐字）：「给原始终焉引擎也加上 3 个额外挂件槽，只不过它只是给主机自己用的，
+    //  只需要放 1 个」
+    //
+    //  🔴 为什么要覆写 checkRecipe（而不是别的地方）
+    //    javap -p 实证（jar: libs\gtladditions-3.2.8Custom-fix2.jar，
+    //    MutableRecipesLogic.class 的常量池原文）：
+    //        protected boolean checkRecipe(com.gregtechceu.gtceu.api.recipe.GTRecipe);
+    //    —— protected、非 final、非 static ⇒ 官方接缝。它内部的判据顺序（javap -c 逐条）：
+    //        matchRecipe(machine, recipe) → IGTRecipe.getEuTier() > machine.getTier()
+    //        → recipe.checkConditions(this) → recipeCheck 谓词
+    //    ⇒ 它是"这条配方能不能开工"的【唯一收口】；插在这里，三种结果（放行 / 被槽拦下 /
+    //      由槽满足了条件）都能定，而且不需要动 gtladditions 的 MutableRecipesLogic（那是别人的类）。
+    //
+    //  🔴 形状【逐字照抄】GuixuVisionCoreRecipeLogic#checkRecipe（:91-127，已验收）
+    //    ① 没有任何需求被槽满足 ⇒ 原样 super（绝大多数配方走这条，行为一个字节都不变）；
+    //    ② allowed == false ⇒ return false；
+    //    ③ 需求全被别的条件满足（satisfied 为空）⇒ 原样 super；
+    //    ④ 否则自己复刻父类那三条，只把最后一条换成"槽也算数"的那一版。
+    //    ⚠️ 第 ④ 步里那两条（matchRecipe / 电压）是【照抄】而不是"省略"：
+    //       少一条 = 比上游更松 = 静默放水（归墟那支的注释已记过同一句话）。
+    //
+    //  🔴 与模块侧的关系：**模块那条线一行都不改**（PrimordialModuleRecipeLogic 未触碰）——
+    //    模块的闸门在它自己的 checkRecipe 里，判定核同一个（ShanhaiExtraMountGate），
+    //    阈值由 6 参重载把 ShanhaiHeatGate.REQUIRED_COUNT（64）当【热力】阈值传进去；
+    //    🔴 2026-11-01：那个 64 只对热力两条（ebf_temp / SCTier）有效，其余四类恒 1
+    //    （唯一判据 ShanhaiHeatGate#requiredFor；用户原话「我没有给模块设置 64 个的门槛」）。
+    //
+    //  ⚠️ 主机基类没实现 IRecipeStatus（与归墟同一处境）⇒ 被槽拦下时【只能】落一行可 grep 的日志，
+    //    Jade / GUI 上看不到这一行。宁可缺，不可假：这里不假装它显示了。
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /** 主机侧闸门的日志前缀（与归墟那支的 {@code [SHANHAI-HOSTGATE]} 分开，两台机器的日志一眼分清）。 */
+    public static final String EXTRA_MOUNT_PREFIX = "[SHANHAI-HOSTMOUNT]";
+
+    /** 已报过的读数（只报一次，避免每次找配方刷屏；与模块/归墟同一条纪律）。 */
+    private static final Set<String> EXTRA_MOUNT_LOGGED = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * <b>能不能开工</b> —— 父类那三条之间插入本机的「额外挂载槽 ×3」闸门（见上面那节注释）。
+     *
+     * <p>本机（原始终焉引擎）的阈值走 {@link PrimordialOmegaEngineMachine#extraMountRequiredCount()}：
+     * 主机 = {@code ShanhaiHeatGate.HOST_REQUIRED_COUNT}（1），归墟覆写成 64。
+     */
+    @Override
+    protected boolean checkRecipe(@NotNull GTRecipe recipe) {
+        final PrimordialOmegaEngineMachine machine = getMachine();
+        final GTRecipeType type = recipe.recipeType != null ? recipe.recipeType : machine.getRecipeType();
+        final boolean heatReachable = type != null
+                && ShanhaiHeatGate.isGated(type.registryName.toString())
+                && machine.canUseExtraMountAsHeatSource();
+        // 判定核：ShanhaiExtraMountGate → ShanhaiHeatGate#evaluate（与模块 / 归墟同一份实现）
+        // 第 6 参 null = 【没有第二个供源】：主机这 3 格只给主机自己用（用户 2026-10-25 原话
+        // 「它只是给主机自己用的」）⇒ 不走"模块 ∪ 主机"那条并集路，也【不实现】
+        // ShanhaiHostMountSource（模块永远拿不到本机这 3 格，模块侧一行都不用改）。
+        final ShanhaiHeatGate.Outcome outcome = ShanhaiExtraMountGate.evaluate(
+                recipe, type, heatReachable, this, machine.getExtraMountContents(), null,
+                machine.extraMountRequiredCount()).outcome();
+
+        if (outcome.needs.isEmpty() && outcome.satisfied.isEmpty()) {
+            // 这条配方对"额外条件"一个字都不要求 ⇒ 与今天逐字相同（连日志都不打）
+            return super.checkRecipe(recipe);
+        }
+        shanhai$logExtraMountGate(type, outcome, heatReachable);
+
+        if (!outcome.allowed) {
+            shanhai$logExtraMountDeny(outcome);
+            return false;
+        }
+        if (outcome.satisfied.isEmpty()) {
+            return super.checkRecipe(recipe);
+        }
+
+        // ── 有需求被槽满足 ⇒ 复刻父类那三条（只把最后一条换成"槽也算数"的那一版） ──
+        if (!RecipeRunnerHelper.matchRecipe((IRecipeCapabilityHolder) machine, recipe)) {
+            return false;
+        }
+        if (IGTRecipe.of(recipe).getEuTier() > machine.getTier()) {
+            // 与父类同一条判据（本机 getMaxVoltage 是 Long.MAX_VALUE，实际不会命中；
+            // 留着是为了"复刻"而不是"少一条"——缺一条就是比上游更松，属于静默放水）。
+            return false;
+        }
+        return ShanhaiExtraMountGate.conditionsPass(recipe, this, outcome);
+    }
+
+    /** 闸门的读数行（哪台机器 / 配方类型 / 热力可达 / 需求 / 判定）。没有需求 ⇒ 一个字都不打。 */
+    private void shanhai$logExtraMountGate(@Nullable GTRecipeType type,
+                                           @NotNull ShanhaiHeatGate.Outcome o,
+                                           boolean heatReachable) {
+        final String key = "gate|" + o.deny + "|" + o.describe();
+        if (EXTRA_MOUNT_LOGGED.size() > 128 || !EXTRA_MOUNT_LOGGED.add(key)) {
+            return;
+        }
+        final PrimordialOmegaEngineMachine machine = getMachine();
+        ShanhaiMod.LOGGER.info("{} 机器={}（{}） 配方类型={} 热力可达={} 三格={} 阈值={} {}",
+                EXTRA_MOUNT_PREFIX,
+                machine.getBlockState().getBlock(),
+                machine.getPos(),
+                type == null ? "-" : type.registryName,
+                heatReachable,
+                machine.describeExtraMounts(),
+                machine.extraMountRequiredCount(),
+                o.describe());
+    }
+
+    /** 被槽拦下：一行可 grep 的日志 ＋ 一行<b>只给日志</b>的原因（见上面那节注释的"宁可缺，不可假"）。 */
+    private void shanhai$logExtraMountDeny(@NotNull ShanhaiHeatGate.Outcome o) {
+        final PrimordialOmegaEngineMachine machine = getMachine();
+        final Component reason = ShanhaiExtraMountGate.denyReason(
+                o, machine.getExtraMountStacks(), machine.extraMountRequiredCount());
+        // 🆕 2026-11-01：同一条原因也交给【我们自己的】Jade 通道（用户在抬头上要看到它）。
+        shanhai$recordIdleReason(reason);
+        final String key = "deny|" + o.deny + "|" + o.describe();
+        if (EXTRA_MOUNT_LOGGED.size() > 128 || !EXTRA_MOUNT_LOGGED.add(key)) {
+            return;
+        }
+        ShanhaiMod.LOGGER.info("{} 配方被额外挂载槽拦下 机器={} 阈值={} 原因={} {}",
+                EXTRA_MOUNT_PREFIX, machine.getPos(), machine.extraMountRequiredCount(),
+                reason == null ? "(无文案)" : reason.getString(),
+                o.describe());
+    }
+
+    // ═══════════════ 🆕「为什么没跑」——【我们自己的】Jade 通道（2026-11-01） ═══════════════
+    //
+    //  用户原话（逐字）：「主要是它现在 jade 都没有写出机器不工作的原因」
+    //
+    //  🔴 主机这一脉的处境与模块不同：主机基类【没实现】gtlcore 的 IRecipeStatus
+    //     ⇒ 上游那条 reason 行对主机根本不存在（见本文件上面那节注释）。
+    //     所以这里不是"再补一条"，而是主机侧【唯一】能在 Jade 上看到原因的通道。
+    //
+    //  数据落点 = PrimordialOmegaEngineMachine#shanhaiIdleReason（服务端权威），
+    //  显示端 = ShanhaiStellarJadePlugin#ReasonProvider（本工程既有 IServerDataProvider 通道）。
+    //  判定/清空/日志格式的唯一一份 = ShanhaiIdleReason（纯 JDK、可离线跑 selfTest）。
+
+    /** 本轮扫描里「为什么没跑」（{@code null} ＝ 这一轮没有原因）。 */
+    @Nullable
+    private Component shanhai$pendingIdleReason;
+
+    /** 记下这一轮的原因（{@code null} ＝ 明确置空；子类拦截路径也可以调它）。 */
+    protected void shanhai$recordIdleReason(@Nullable Component reason) {
+        if (reason != null) {
+            shanhai$pendingIdleReason = reason;
+        }
+    }
+
+    /**
+     * 🔴 <b>每轮扫描发布一次</b>（包含"这一轮没算出原因"的情况）——
+     * 「清空」就是靠这次调用兑现的，不是靠某个事件。
+     */
+    @Override
+    public void findAndHandleRecipe() {
+        shanhai$pendingIdleReason = null;
+        super.findAndHandleRecipe();
+        final RecipeLogic.Status status = getStatus();
+        // WAITING（有配方但在等电 / 等输出）不算"没跑"：那种情况的"为什么在等"由上游
+        // work_reason 那一行负责，本通道【刻意不重复】它（否则抬头上同一条信息出现两次）。
+        final boolean running = status == RecipeLogic.Status.WORKING
+                || status == RecipeLogic.Status.WAITING
+                || getLastRecipe() != null;
+        getMachine().shanhaiPublishIdleReason(shanhai$pendingIdleReason, running);
+    }
+
     /**
      * 跨配方线程数（N4 的倍数项）。
      *
@@ -278,20 +455,31 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
      *
      * <h2>修法（与模块侧同一条纪律，逐条对齐）</h2>
      * <pre>
-     *   ① 预算 = saturatedMultiply(getMachine().getRecipeLogicMaxParallel(), getMultipleThreads())
-     *      —— {@code Long.MAX × 128 ⇒ Long.MAX}（饱和，不回绕）；
+     *   ⛔ 2026-09-26 那版（作废，原文留档）：
+     *      ① 预算 = saturatedMultiply(getMachine().getRecipeLogicMaxParallel(), getMultipleThreads())
+     *         —— {@code Long.MAX × 128 ⇒ Long.MAX}（饱和，不回绕）；
+     *   ✅ 现行（2026-11 · 照伪神 · 用户拍板）：
+     *      ① 预算 = host.perRecipeParallelBudget() —— 自动档直接 {@code Long.MAX_VALUE}，
+     *         <b>不乘跨配方线程</b>（唯一算式在 {@code ShanhaiParallelDiag#perRecipeBudget}）；
      *   ② 分配算法复用上游那一份的 long 版（{@link PrimordialRecipeEffects#greedyAllocateWithLongLimit}）；
      *   ③ 🔴 <b>预算 ≤ Integer.MAX_VALUE 时原样走父类</b>（那条路上的字节码逐字不变）。
      * </pre>
      *
-     * <h2>⚠️ 诚实边界：预算变大【不】等于"实际并行变大"</h2>
-     * 主机的 {@link #calculateParallel} 覆写里还压着一条 <b>int 形状的输出空间钳制</b>
-     * （{@code ParallelLogic.limitByOutputMerging} 是 gtceu 的 int API，gtlcore 的
-     * {@code ParallelLogicMixin} 只 {@code @Overwrite} 了实现、没改签名）
-     * ⇒ 主机<b>实际分配出去的并行仍然 ≤ 2147483647</b>，与改动前一致。
-     * 本改动让"引擎看到的并行上限"变成 {@code Long.MAX_VALUE}（用户的字面要求），
-     * <b>没有</b>让主机实际跑出 &gt; 21 亿 的并行 —— 那是另一件事（要改
-     * {@code calculateParallel} 的输出钳制，见交付报告的"没做到"一节）。
+     * <h2>⛔ 2026-11 订正：本节「诚实边界」已被本轮拆掉（原文留档）</h2>
+     * <pre>
+     *   ⛔ 旧原文（作废）：
+     *      主机的 calculateParallel 覆写里还压着一条 int 形状的输出空间钳制
+     *      （ParallelLogic.limitByOutputMerging 是 gtceu 的 int API，gtlcore 的 ParallelLogicMixin
+     *       只 @Overwrite 了实现、没改签名）⇒ 主机实际分配出去的并行仍然 ≤ 2147483647。
+     * </pre>
+     * ✅ <b>现行</b>：{@code calculateParallel} 里按 {@code inputLimited} 分两支 ——
+     * {@code ≤ Integer.MAX_VALUE} 时仍调用上游 int 版（<b>老路径逐位不变</b>），
+     * {@code > Integer.MAX_VALUE} 时改走
+     * {@link PrimordialRecipeEffects#limitByOutputMergingLong}（gtlcore 实现的 long 孪生）
+     * ⇒ <b>实际并行可以超过 21 亿</b>（用户口径「可以到 9.22e 的那种」）。
+     * <p>⚠️ 仍存在的 int 天花板（只这两处，都写在报告 §8 里）：
+     * ① <b>带 {@code tickOutputs} 的配方</b> —— 那一段只有 {@code RecipeCapability#limitParallel(...,int):int}；
+     * ② {@code GTRecipe.parallels}（int 镜像字段，由 {@code setRealParallels} 饱和写入，只影响显示/概率）。
      */
     @Override
     protected @Nullable ParallelData calculateParallels() {
@@ -334,8 +522,24 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
         // 🔴 2026-10-02 第十一轮（用户实机 bug）：入参从 getEnergyParallel() 改成 energyCapForBudget()
         //    —— 与模块侧逐字同源：能源仓那头无限（创造模式能源仓 / 无线电网输入终端）时返回
         //    ENERGY_CAP_NONE（= 不限制）⇒ 本方法退回「本机上限 × T」，与「电力自动关着」逐位同值。
-        final long limit = ShanhaiParallelBudget.parallelBudget(
-                host.getRecipeLogicMaxParallel(), host.energyCapForBudget(), getMultipleThreads());
+        //
+        // 🔴🔴 2026-11（本轮 · 用户拍板「照伪神」）：本行从 parallelBudget(本机上限, 电上限, T) 改成
+        //    **每配方预算 = Long.MAX_VALUE，且不再乘跨配方线程 T**。理由是伪神的写法：
+        //    [字节码] ForgeOfTheAntichrist$…Logic#calculateParallels
+        //        170: ldc2_w #162  // long 9223372036854775807l
+        //        194: invokestatic access$getMaxParallel(this, recipe, Long.MAX_VALUE)
+        //    ⇒ 它绕开了 `(long) getMaxParallel() * getMultipleThreads()` 这条乘法，
+        //      所以"并行 × 线程"根本不存在 ⇒ 也就没有溢出这件事。
+        //    ⚠️ T 仍然保持 128（getMultipleThreads() 一个字没改），它只用于别处
+        //      （÷T 的电上限口径、Jade / 面板显示），**不进这条预算乘法**。
+        //    ⚠️ 电上限 / 玩家覆盖值 / long 溢出安全夹仍照旧生效 —— 算术全在纯核
+        //      ShanhaiParallelDiag#perRecipeBudget（离线判据驱动同一份字节码）。
+        //    ⚠️ <b>诚实边界</b>：预算 ≤ Integer.MAX_VALUE 时本方法仍【原样走父类】
+        //      （硬约束：≤ int 的老路径逐位不变）⇒ 那一档父类自己算的
+        //      `(long) getMaxParallel() × T` 才是真值，本行算出的 limit 只用来"选分支"。
+        //      自动档（本机上限 = Long.MAX）在 【∞ 电源】与【有限电上限】两种情形下
+        //      都 > int（∞ ⇒ Long.MAX；有限 ⇒ min(…, 电上限)，而电上限要 > 2.1e9 才有意义）⇒ 走 long 分支。
+        final long limit = host.perRecipeParallelBudget();
         if (limit <= (long) Integer.MAX_VALUE) {
             return super.calculateParallels();
         }
@@ -560,6 +764,14 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
      * ⇒ 一次调用<b>同时得到</b>：① <b>输出空间钳制</b> ② <b>饱和</b>（{@code Ints.saturatedCast}，
      * 正是 {@code 2^60} 那个裸乘法缺的正解形态）。
      *
+     * <p>⛔ <b>2026-11 订正：上面这句只对 {@code inputLimited ≤ Integer.MAX_VALUE} 成立。</b>
+     * 那个方法的<b>形参和返回值都是 {@code int}</b>（gtlcore 只 @Overwrite 了实现、没改签名）
+     * ⇒ 只要经过它，并行<b>结构上不可能超过 2147483647</b>（这正是实机日志里 {@code p=2147483647} 的来源）。
+     * ⇒ 现行：{@code > int} 时改走 {@link PrimordialRecipeEffects#limitByOutputMergingLong}
+     * （逐句照 {@code ParallelLogicMixin} 的实现抬成 long；带 tickOutputs 的那一半仍是 int API，
+     * 这一处的诚实边界写在那个方法的 javadoc 里）。
+     * <p>{@code ≤ int} 时仍调用上游原方法（同一处 invoke、同一份字节码）⇒ <b>老路径逐位不变</b>。
+     *
      * <h2>为什么只改这一处</h2>
      * 父类 {@code calculateParallel} 是 {@code protected}、非 final（L389-397）⇒ <b>是官方留的接缝</b>。
      * 上游 {@code applyParallel} 的接线点在 {@code doParallelRecipes} 里 —— 我们复刻的正是<b>同一层</b>。
@@ -587,13 +799,36 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
             if (inputLimited <= 0L) {
                 return base; // 输入量本来就是 0 ⇒ 原样返回，不做任何加工
             }
-            // 🔴 谓词照抄上游：machine::canVoidRecipeOutputs
-            final int outputLimited = ParallelLogic.limitByOutputMerging(
-                    match,
-                    (IRecipeCapabilityHolder) machine,
-                    Ints.saturatedCast(inputLimited), // ← 饱和：2^60 量级在这里被压回 int 安全区
-                    machine::canVoidRecipeOutputs);
-            final long finalParallel = Math.max(0L, Math.min(inputLimited, (long) outputLimited));
+            // 🔴🔴 2026-11（本轮 · 用户口径「可以到 9.22e 的那种」）：输出空间钳制分两支。
+            //    · inputLimited ≤ 2^31−1 ⇒ 【原样调用上游 int 版】：同一处 invoke、同一份字节码
+            //      ⇒ 老路径【逐位不变】（硬约束）。注意上游那一句也是 `Ints.saturatedCast(inputLimited)`，
+            //      这里 `(int) inputLimited` 与它<b>逐位相同</b>（≤ int 时饱和是恒等）。
+            //    · inputLimited >  2^31−1 ⇒ 走 long 孪生（PrimordialRecipeEffects#limitByOutputMergingLong，
+            //      逐句照 gtlcore ParallelLogicMixin 的实现，见那个方法的 javadoc）。
+            //    ⛔ 病根：gtceu 的 `ParallelLogic#limitByOutputMerging(GTRecipe, IRecipeCapabilityHolder,
+            //       int, Predicate) : int` —— 形参和返回值都是 int，gtlcore 只 @Overwrite 了实现、
+            //       **没改签名** ⇒ 只要经过它，并行结构上不可能超过 2147483647
+            //       （实机日志里那个 `p=2147483647` 就是它）。
+            final long outputLimited;
+            if (ShanhaiParallelDiag.needsLongOutputClamp(inputLimited)) {
+                outputLimited = PrimordialRecipeEffects.limitByOutputMergingLong(
+                        match, (IRecipeCapabilityHolder) machine, inputLimited, machine::canVoidRecipeOutputs);
+            } else {
+                outputLimited = ParallelLogic.limitByOutputMerging(
+                        match,
+                        (IRecipeCapabilityHolder) machine,
+                        (int) inputLimited, // ≤ int：与上游那一句 Ints.saturatedCast 逐位相同
+                        machine::canVoidRecipeOutputs);
+            }
+            final long finalParallel = ShanhaiParallelDiag.combineInOut(inputLimited, outputLimited);
+            // 🔴 2026-11：并行三分诊断（与模块原生链 long 分支【同一份实现】）——
+            //    本行就是"归墟主机为什么没到最大并行"的答案所在：
+            //    · in  = 输入量上限（long 口径，可远超 2^31）
+            //    · out = 输出空间上限（> int 时走 long 孪生；带 tickOutputs 的配方仍受 int API 限制）
+            //    · budget = 本次 remain（照伪神后通常是 Long.MAX）
+            //    ⚠️ 它与"每配方预算"是两件事：预算是上限，真跑多少由 in/out 决定。
+            PrimordialRecipeEffects.shanhai$logPick(machine, getMachine(), match,
+                    inputLimited, outputLimited, remain);
             return LongLongPair.of(finalParallel, finalParallel);
         } catch (Throwable t) {
             // 钳制失败时退回"只按输入量"（= 上游新引擎的原行为），绝不让本方法把配方打死。
@@ -637,35 +872,46 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
         final GTRecipe matched = super.getRecipe();
         try {
             // 复算本引擎的并行预算（只用于诊断口径一致）。
-            // 🔴 2026-09-26：改成 long 通道的那一份算式 —— 与 calculateParallels() 同源同值，
+            // 🔴 2026-09-26：改成与 calculateParallels() 同源同值的那一份算式 ——
             //    否则这一行会在 long 档上打出【和真预算不一样的数】（诊断撒谎比没有诊断更糟）。
-            // 🔴 2026-10-02 第五轮：这两个数【现在必须逐位相等】——
-            //    `budget` = 每线程上限 × T；`parentBudget` = 父类的 (long) getMaxParallel() × getMultipleThreads()。
-            //    改动前两者差 T 倍（那正是"退回父类就不生效"的病根）。这一行现在是**实机的自校验**：
-            //    玩家贴出这一行，若两者不等就说明 T 的两个来源漂移了。
-            // 🔴 2026-10-02 第十一轮：本行是【诊断】，必须与生产路径读同一个口径 —— 入参与
-            //    shanhai$calculateParallelsInRound() 一样改成 energyCapForBudget()，
-            //    否则「本核预算 == 父类预算」这条自校验会在 ∞ 档上打出假红（诊断撒谎比没有诊断更糟）。
-            final long budget = ShanhaiParallelBudget.parallelBudget(
-                    getMachine().getRecipeLogicMaxParallel(), getMachine().energyCapForBudget(),
-                    getMultipleThreads());
-            final long parentBudget = (long) getMachine().getMaxParallel() * (long) getMultipleThreads();
+            // 🔴 2026-10-02 第五轮：那时这两个数必须逐位相等
+            //    （`budget` = 每线程上限 × T；`parentBudget` = 父类的 (long) getMaxParallel() × getMultipleThreads()）。
+            // ⛔ **2026-11 起「两者相等」这句话作废**（照伪神之后不再成立）：
+            //    现行预算 = `host.perRecipeParallelBudget()` = **Long.MAX_VALUE**（自动档），
+            //    而父类那条乘法 = `(long) getMaxParallel() × T`（≤ 2.75e11）——
+            //    两者【本来就不该相等】：伪神正是靠"不相等"绕开了那条乘法。
+            //    ⇒ 本行改报三件事（都能独立核对）：
+            //      `每配方预算(照伪神)` / `int 桥 getMaxParallel` / `跨配方线程 T` / `父类预算(int桥×T)` / `进 long 分支`。
+            final long budget = getMachine().perRecipeParallelBudget();
+            // 🔴 本行原先是一句【裸乘】：`(long) getMaxParallel() * (long) getMultipleThreads()`。
+            //    两个因子眼下都是 int（≤ 2^31−1、≤ 2^31−1）⇒ 最大 4.6e18 确实装得进 long，
+            //    但这条写法一旦将来把任一因子换成 long（例如换成 getRecipeLogicMaxParallel()），
+            //    就会【静默回绕成负数】。⇒ 走全工程唯一一份饱和乘法（不溢出时逐位相同）。
+            // 🔴 2026-11（任务 A）：这里【不能】再读 getMaxParallel() —— 它在无限档返回的是
+            //    显示哨兵 -114514（Jade 画「无限」用），乘完会被 saturatedMultiply 夹成 0，
+            //    那行诊断就会报"父类预算是 0"（假数据，比没有诊断更糟）。
+            //    ⇒ 读它的**数值孪生**：同一来源 getRecipeLogicMaxParallel() 经 int 饱和桥，
+            //      与 getMaxParallel() 的【有限档】逐位相同（哨兵那一档本来就不进父类）。
+            final long parentBudget = ShanhaiParallelBudget.saturatedMultiply(
+                    (long) Ints.saturatedCast(getMachine().getRecipeLogicMaxParallel()),
+                    (long) getMultipleThreads());
             // 状态码：0 = 有配方；1 = 无配方(match == null)
             final int code = matched == null ? 1 : 0;
             if (code != shanhai$lastGateCode) {
                 shanhai$lastGateCode = code;
                 ShanhaiMod.LOGGER.info("[SHANHAI-GATE] getRecipe() = {} ; 判定 = {} ; "
-                                + "每线程上限(int桥 getMaxParallel)={} ; 跨配方线程 T={} ⇒ "
-                                + "本核预算={} ; 父类预算=(long)getMaxParallel()×T={} ; 两者相等={} ; 已成型={}",
+                                + "每配方预算(照伪神·不乘T)={} ; int桥 getMaxParallel={} ; 跨配方线程 T={} ; "
+                                + "父类预算(int桥×T，饱和)={} ; 进 long 分支={} ; 已成型={}",
                         matched == null ? "null" : "非 null（" + matched.duration + " tick）",
                         matched == null
                                 ? "卡在闸①/闸②（checkBeforeWorking 或 calculateParallels）"
                                 : "闸①②已过 ⇒ 若机器仍不动，真凶是闸③ matchRecipeOutput（输出空间装不下）或其后",
-                        getMachine().getMaxParallel(),
-                        getMultipleThreads(),
                         budget,
+                        // 同上：报「int 饱和桥」的数值，不报显示哨兵（无限档 getMaxParallel() = -114514）
+                        Ints.saturatedCast(getMachine().getRecipeLogicMaxParallel()),
+                        getMultipleThreads(),
                         parentBudget,
-                        budget == parentBudget,
+                        budget > (long) Integer.MAX_VALUE,
                         getMachine().isFormed());
             }
         } catch (Throwable ignored) {
@@ -779,7 +1025,158 @@ public class PrimordialEngineRecipeLogic extends MutableRecipesLogic<PrimordialO
 
         logEngineEvidence(parallelData, gateBonus, targetDuration, engineDuration, modified,
                 host.getHostProductionBonusExtra());
-        return modified;
+        // ── ⑦ 🔴 电的溢出路由（本轮新增 · 只加分支，不改 ≤long 的任何数值）──
+        //   装得下 ⇒ 【原样返回同一个实例】（老路径逐位不变，能源仓照旧扣电）；
+        //   装不下 + 无线 handler 在线 ⇒ 包成上游现成的 WirelessGTRecipe
+        //     ⇒ 父类 handleMultipleRecipeWorking 改走 handleWirelessTickInput
+        //     ⇒ 能源仓【一次都不扣】（结构性：if/else 两支，不是"先扣再判"）。
+        return shanhai$routeInfiniteEnergy(parallelData, modified, targetDuration,
+                host.getHostEnergyReductionFactor(gateBonus));
+    }
+
+    // ═══════════════ 🔴 电的 BigInteger 路由（「每份耗电 × 并行 × 线程」超过 Long.MAX 时） ═══════════════
+
+    /** 上一次 BigInt 路由的判定（供每 tick 的证据行复用；{@code null} = 本机当前没走这条路）。 */
+    private @Nullable ShanhaiInfiniteEnergy.Decision shanhai$lastBigintRouting;
+
+    /**
+     * 🔴 <b>主机侧的溢出路由</b>（与模块侧 {@code PrimordialModuleRecipeLogic#shanhai$routeInfiniteEnergy}
+     * 同一条纪律、同一批纯函数）。
+     *
+     * <h2>判定量</h2>
+     * 主机侧的电不是"每份 × p"而是 {@code totalEu ÷ T}（A 口径：{@code T = max(1, dx, L)}）：
+     * <pre>
+     *   totalEu_big = Σ_i [ getRecipeEut(origin_i) × origin_i.duration × parallels[i] ] × euMultiplier
+     *   每 tick 电   = totalEu_big ÷ T
+     *   再乘 N5      = × f（f = 宿主给的耗能系数，与真链同一个数）
+     * </pre>
+     * ⚠️ 与模块侧一样：<b>判定全程 BigInteger，零 double</b>；{@code euMultiplier}/{@code f} 的精度
+     * 与 long 路是同一份（不假装消除）。
+     *
+     * @param targetDuration N6 之后的真实时长 T（≥1）
+     * @param f              宿主给的 N5 耗能系数（{@code getHostEnergyReductionFactor(gateBonus)}）
+     */
+    private @NotNull GTRecipe shanhai$routeInfiniteEnergy(@NotNull ParallelData parallelData,
+                                                         @NotNull GTRecipe finalRecipe,
+                                                         int targetDuration, double f) {
+        try {
+            final List<GTRecipe> origins = parallelData.getOriginRecipeList();
+            final long[] parallels = parallelData.getParallels();
+            final int n = Math.min(origins.size(), parallels.length);
+            BigInteger perCopySum = BigInteger.ZERO;
+            BigInteger totalEu = BigInteger.ZERO;
+            long totalP = 0L;
+            for (int i = 0; i < n; i++) {
+                final GTRecipe origin = origins.get(i);
+                final long eu = Math.max(0L, getRecipeEut(origin));
+                final long p = Math.max(0L, parallels[i]);
+                final BigInteger euBig = BigInteger.valueOf(eu);
+                perCopySum = perCopySum.add(euBig);
+                totalEu = totalEu.add(euBig
+                        .multiply(BigInteger.valueOf(Math.max(1, origin.duration)))
+                        .multiply(BigInteger.valueOf(p)));
+                totalP = PrimordialModuleMachine.saturatedAdd(totalP, p);
+            }
+            final double euMultiplier = getEuMultiplier();
+            final BigInteger totalEuScaled = ShanhaiInfiniteEnergy.applyFactor(totalEu, euMultiplier);
+            final BigInteger perTick = totalEuScaled.divide(BigInteger.valueOf(Math.max(1, targetDuration)));
+            final BigInteger exact = ShanhaiInfiniteEnergy.applyFactor(perTick, f);
+            if (ShanhaiInfiniteEnergy.fitsLong(exact)) {
+                shanhai$lastBigintRouting = null;
+                getMachine().shanhai$setDisplayEut(null);
+                return finalRecipe; // ← 老路径：同一个对象原样返回
+            }
+            final int threads = Math.max(1, getMultipleThreads());
+            final PrimordialOmegaEngineMachine host = getMachine();
+            final com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler handler =
+                    host.shanhaiWirelessEnergyHandler();
+            final boolean handlerOnline = handler != null && handler.isOnline();
+            final ShanhaiInfiniteEnergy.Decision decision = ShanhaiInfiniteEnergy.decideExact(
+                    exact, perCopySum, totalP, threads, handlerOnline);
+            if (decision.mode() != ShanhaiInfiniteEnergy.Mode.BIGINT) {
+                // 没有 handler ⇒ 并行已在 ParallelOverrideMachine#applyEnergyCap 里被夹过，
+                // 那一处打 energy=long-only 那行 WARN；这里不重复打第二行。
+                shanhai$lastBigintRouting = null;
+                getMachine().shanhai$setDisplayEut(null);
+                return finalRecipe;
+            }
+            shanhai$lastBigintRouting = decision;
+            getMachine().shanhai$setDisplayEut(exact);
+            shanhai$logEnergyRoute(ShanhaiInfiniteEnergy.bigintLine(decision, true, null));
+            return ShanhaiWirelessWrap.wrap(finalRecipe, exact);
+        } catch (Throwable t) {
+            shanhai$lastBigintRouting = null;
+            getMachine().shanhai$setDisplayEut(null);
+            ShanhaiMod.LOGGER.error("[SHANHAI-INFPAR] 主机侧电的 BigInteger 路由失败（已退回 long 路径，"
+                    + "该档会出现 long 饱和）：{}", t.toString());
+            return finalRecipe;
+        }
+    }
+
+    /** 同一条证据行的限流闸门（同一形态 5 秒 1 行）。 */
+    private static final ShanhaiLogThrottle.Gate shanhai$energyRouteGate = new ShanhaiLogThrottle.Gate();
+
+    private static void shanhai$logEnergyRoute(@NotNull String line) {
+        if (ShanhaiInfiniteEnergy.shouldLog(shanhai$energyRouteGate, line, System.currentTimeMillis())) {
+            ShanhaiMod.LOGGER.warn(line);
+        }
+    }
+
+    /**
+     * 🔴 <b>每 tick 扣电（无线支）</b> —— 覆写父类 {@code IWirelessRecipeLogic} 的 default；
+     * 理由与模块侧逐字同源（本工程<b>刻意</b>让 {@code getWirelessNetworkEnergyHandler()} 返回 null）。
+     * <p>父类 {@code handleMultipleRecipeWorking} 的两支是 if/else ⇒ 走到这里时
+     * {@code handleTickRecipe} 一次都没调 ⇒ <b>能源仓 0 次扣电，结构性不双扣</b>。
+     */
+    @Override
+    public boolean handleWirelessTickInput(com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe recipe) {
+        final com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler handler =
+                getMachine().shanhaiWirelessEnergyHandler();
+        final boolean ok = ShanhaiWirelessWrap.consume(recipe, handler);
+        shanhai$logWirelessTick(recipe, handler != null && handler.isOnline(), ok);
+        return ok;
+    }
+
+    /** 每 tick 那行的限流闸门（与路由行分开）。 */
+    private static final ShanhaiLogThrottle.Gate shanhai$wirelessTickGate = new ShanhaiLogThrottle.Gate();
+
+    private void shanhai$logWirelessTick(@NotNull com.gtladd.gtladditions.api.recipe.IWirelessGTRecipe recipe,
+                                         boolean handlerOnline, boolean ok) {
+        try {
+            final ShanhaiInfiniteEnergy.Decision cached = shanhai$lastBigintRouting;
+            final String line;
+            if (cached != null) {
+                line = ShanhaiInfiniteEnergy.bigintLine(cached, handlerOnline, ok);
+            } else {
+                // ⛔ 2026-11 修：这一支原先打的是 `p=-1 threads=1 total=每 tick 量` ——
+                //    p=-1 是**占位哨兵**，却被印成了读数；total 又与 euPerTick 是同一个数（假读口径）。
+                //    ⇒ 现在按【真实】值打：并行取配方自己的 realParallels、T 取真实线程数、
+                //      total 取这张配方真正要扣的每 tick 量；**取不到就打 `?`，绝不再出现 -1**。
+                //    （每份耗电这一格在这一支拆不出来 —— 它确实拿不到 ⇒ 打 `?`，不许拿 total 冒充。）
+                final BigInteger eu = recipe.getWirelessEuTickInputs();
+                final BigInteger perTick = eu == null ? BigInteger.ZERO : eu.abs();
+                long realParallel = -1L;
+                try {
+                    if (recipe instanceof GTRecipe gt) {
+                        realParallel = IGTRecipe.of(gt).getRealParallels();
+                    }
+                } catch (Throwable ignored) {
+                    realParallel = -1L; // 读不到 ⇒ 打 `?`（ShanhaiParallelDiag.text 的哨兵）
+                }
+                line = ShanhaiInfiniteEnergy.bigintLine(null, realParallel, getMultipleThreads(), perTick,
+                        handlerOnline, ok);
+            }
+            if (ShanhaiInfiniteEnergy.shouldLog(shanhai$wirelessTickGate, line, System.currentTimeMillis())) {
+                if (ok) {
+                    ShanhaiMod.LOGGER.warn(line);
+                } else {
+                    ShanhaiMod.LOGGER.warn(line
+                            + "（池子不够 ⇒ 走既有的缺电语义：FAIL_NO_ENOUGH_EU_IN + doDamping）");
+                }
+            }
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.debug("[SHANHAI-INFPAR] 打无线扣电行时异常（已忽略）：{}", t.toString());
+        }
     }
 
     // ═══════════════════════════ C-fix：抬头两行的显示因子 ═══════════════════════════

@@ -21,6 +21,8 @@ import com.shanhai.common.recipe.ShanhaiRecipeTypes;
 import com.shanhai.common.thread.ShanhaiParallelBudget;
 import com.shanhai.ShanhaiMod;
 import com.shanhai.machine.MachineTooltips;
+import com.shanhai.machine.creation.PrimordialCreationCompilationMatrix;
+import com.shanhai.machine.creation.PrimordialCreationCompilationMatrixStructure;
 import com.shanhai.registry.ShanhaiRegistration;
 
 import org.gtlcore.gtlcore.common.data.GTLRecipeTypes;
@@ -270,7 +272,7 @@ public final class ModuleRegistry {
             ShanhaiRecipeTypes.PRIMORDIAL_MATTER_RECOMBINATION,
     };
 
-    /** 原初临界加工模块 —— 上游 :736（36 条，全工程最长的一张）。 */
+    /** 原初临界加工模块 —— 上游 :736（37 条，全工程最长的一张；2026-10-31 订正：原写 36）。 */
     public static final GTRecipeType[] RECIPE_CRITICAL_PROCESSING = {
             GTRecipeTypes.LATHE_RECIPES,
             GTRecipeTypes.BENDER_RECIPES,
@@ -320,31 +322,30 @@ public final class ModuleRegistry {
             GTLRecipeTypes.SUPER_PARTICLE_COLLIDER_RECIPES,
             GTRecipeTypes.FUSION_RECIPES,
             ShanhaiRecipeTypes.PRIMORDIAL_STELLAR_REACTION,
+            // 🆕 2026-10-31（用户点单，第 ① 项）：＋「衰变加速」gtceu:decay_hastener。
+            //    它从「原初世线穿刺矩阵」移出（那台已于 2026-11-01 按用户授权整台删除，
+            //    见本文件那张 ⛔ 墓碑注释），两处是同一句话的两半（净移动）。
+            //    【只在末尾追加】：原有 3 条一个字节都没动、下标 0..2 全部不变
+            //    ⇒ 玩家已保存的 activeRecipeType 不位移（本工程的老口径，见 RECIPE_BIO 里同位注释）。
+            GTLRecipeTypes.DECAY_HASTENER_RECIPES,
     };
 
     /** 原初分子裂隙核心 —— 上游 :864。 */
     public static final GTRecipeType[] RECIPE_MOLECULAR_RIFT = {
-            GTLRecipeTypes.DISTORT_RECIPES,
+            // ⛔ 2026-10-31（用户点单，第 ⑤ 项）：－「深度化学扭曲仪」gtceu:distort（原下标 0）。
+            //    ⚠️ 没有挪到别处（用户只点名删），也没有别的机器挂它（调试模块那张 catch-all 表除外）。
+            //    ⚠️ 其后两条下标各前移 1：LARGE_CHEMICAL 原 1→现 0、CHEMICAL_BATH 原 2→现 1。
             GTRecipeTypes.LARGE_CHEMICAL_RECIPES,
             GTRecipeTypes.CHEMICAL_BATH_RECIPES,
     };
 
-    /** 原初超临界物质生成核心 —— 上游 :826。 */
-    public static final GTRecipeType[] RECIPE_SUPERCRITICAL_MATTER = {
-            GTLRecipeTypes.SPS_CRAFTING_RECIPES,
-            GTLRecipeTypes.MATTER_FABRICATOR_RECIPES,
-            GTLRecipeTypes.MASS_FABRICATOR_RECIPES,
-    };
+    // ⛔ 2026-11-01（用户授权删除「原初超临界物质生成核心」）：原 RECIPE_SUPERCRITICAL_MATTER 数组
+    //    随机器一并删除（它只有 1 处引用 = 该机的 SPECS 行，删机器后就是死代码）。
+    //    原 3 条类型 sps_crafting / matter_fabricator / mass_fabricator 分别落在新 #4 与新 #2 上。
 
-    /** 原初永恒熔炼炉 —— 上游 :902（3×GTL + 3×GTLAdd，GTLAdd 全部经 GtlAddCompat）。 */
-    public static final GTRecipeType[] RECIPE_ETERNAL_SMELTING = {
-            GTLRecipeTypes.DIMENSIONALLY_TRANSCENDENT_PLASMA_FORGE_RECIPES,
-            GTLRecipeTypes.STELLAR_FORGE_RECIPES,
-            GTLRecipeTypes.ULTIMATE_MATERIAL_FORGE_RECIPES,
-            GtlAddCompat.molecularDeconstruction(),
-            GtlAddCompat.chaoticAlchemy(),
-            GtlAddCompat.stellarIgnition(),
-    };
+    // ⛔ 2026-11-01（用户授权删除「原初永恒熔炼炉」）：原 RECIPE_ETERNAL_SMELTING 数组随机器一并删除。
+    //    ⚠️ 它的 6 条类型与**新 #6「原初永恒熔炼炉」**同名不同 id —— 那台的数组是新建的
+    //    RECIPE_ETERNAL_MELTING_CORE（顺序按本轮用户拍板重排，不是照抄这份旧数组）。
 
     /** 原始真空零点能发生器 —— 上游 :277（全 24 台里最短的一张，只有 1 条）。 */
     public static final GTRecipeType[] RECIPE_VOID_INDUCTION_ARMATURE = {
@@ -357,7 +358,9 @@ public final class ModuleRegistry {
             GtlAddCompat.biologicalSimulation(),
             GTLRecipeTypes.GREENHOUSE_RECIPES,
             GTLRecipeTypes.INCUBATOR_RECIPES,
-            GTLRecipeTypes.FLOTATING_BENEFICIATION_RECIPES,
+            // ⛔ 2026-10-31（用户点单，第 ④ 项）：－「浮游选矿」gtceu:flotating_beneficiation（原下标 4）。
+            //    ⚠️ 没有挪到别处（用户只点名删）；它在本族里仍由「原初混沌蜉蝣解构结晶炉」挂载（index 0）。
+            //    ⚠️ 下面「渔场」的下标随之由原 5 → 现 4（删项不可避免的位移）。
             // 🔴 2026-10-03 用户点单（逐字）：「然后给原初生物核心添加渔场的配方」。
             //    ⇒ 【只在末尾追加这一条】，原有 5 条一个字节都没动、下标不变
             //      （下标 = GUI 里 activeRecipeType 的口径，位移会让玩家已保存的机器换配方类型）。
@@ -375,19 +378,35 @@ public final class ModuleRegistry {
             GTLRecipeTypes.ISA_MILL_RECIPES,
             GtlAddCompat.spaceOreProcessor(),
             GTLRecipeTypes.INTEGRATED_ORE_PROCESSOR,
-            GTLRecipeTypes.LARGE_VOID_MINER_RECIPES,
-            GTLRecipeTypes.RANDOM_ORE_RECIPES,
+            // ⛔ 2026-10-31（用户点单，第 ③ 项）：－「精准矿石模式」gtceu:large_void_miner（原下标 4）
+            //    ⇒ 已挪到「原初深空汲取核心」末尾（见 buildDeepSpaceExtractionCoreRecipeTypes()）。
+            // ⛔ 2026-10-31（同一项）：－「随机矿石模式」gtceu:random_ore（原下标 5）
+            //    ⇒ 同样挪到「原初深空汲取核心」末尾（同一句话的两半）。
             GTRecipeTypes.ORE_WASHER_RECIPES,
-            GTLRecipeTypes.MINER_MODULE_RECIPES,
-            // 🔴 2026-09-26（用户点单「给原初混沌蜉蝣解构结晶炉添加一个新的配方种类，名字叫原初物质解构」）：
+            // ⛔ 2026-10-31（同一项）：－「太空采矿」gtceu:miner_module（原下标 7）。
+            //    ⚠️ 这一条**没有**挪到任何别处 —— 用户只点名删，没说搬到哪台，故不代为安放。
+            // ⚠️ 本轮删掉 3 条，其后下标全部前移（删项不可避免）：
+            //    ORE_WASHER 原 6→现 4、下面那条原 8→现 5。
+            //    上面那段"下标不变"的历史注释说的是 2026-09-26 那次【追加】，与本轮的【删项】不冲突。
+            // 🆕 2026-09-26（用户点单「给原初混沌蜉蝣解构结晶炉添加一个新的配方种类，名字叫原初物质解构」）：
             //    新增类型【追加在末尾】，原有 8 条一条未动、下标不变（activeRecipeType 口径不位移）
             //    —— 与上方 RECIPE_DIVERGENCE_GENERATOR 追加 PHOTON_SIPHON 那次同款做法。
+            //    （⛔ "下标不变"这句只对 2026-09-26 那次成立；2026-10-31 的第 ③ 项删了 3 条，下标已变。）
             //    类型 id 经【已部署 jar 的字节码】实证为 "primordial_matter_deconstruction"
             //    （ShanhaiRecipeTypes.init() 的 register 首参）；中文名 = lang 键
             //    gtceu.primordial_matter_deconstruction（"原初物质解构"）。
             //    该类型专属模板 assets/gtceu/ui/recipe_type/primordial_matter_deconstruction.rtui
             //    画的是 1 物品入 / 20 物品出 / 1 流体入 / 10 流体出。
             ShanhaiRecipeTypes.PRIMORDIAL_MATTER_DECONSTRUCTION,
+            // 🆕 2026-11-01（用户拍板，任务 A）：末尾追加两条，原有 6 条一个字节都没动、下标 0..5 不变
+            //    （本工程老口径：追加只在末尾，玩家已保存的 activeRecipeType 不位移）。
+            //    真空干燥   = gtceu:vacuum_drying          ← GTLRecipeTypes.VACUUM_DRYING_RECIPES
+            //                 （lang 键 gtceu.vacuum_drying = 真空干燥 @ gtlcore jar）；
+            //    稀土离心   = gtceu:rare_earth_centrifugal ← GTLRecipeTypes.RARE_EARTH_CENTRIFUGAL_RECIPES
+            //                 （lang 键 gtceu.rare_earth_centrifugal = 稀土离心 @ gtlcore jar）。
+            //    两条都不与本数组原有 6 条重复（去重后 8）。
+            GTLRecipeTypes.VACUUM_DRYING_RECIPES,
+            GTLRecipeTypes.RARE_EARTH_CENTRIFUGAL_RECIPES,
     };
 
     /** 原初因果编织矩阵 —— 上游 :539。 */
@@ -414,11 +433,16 @@ public final class ModuleRegistry {
 
     /** 原初分歧发生器 —— 上游 :650。 */
     public static final GTRecipeType[] RECIPE_DIVERGENCE_GENERATOR = {
-            ShanhaiRecipeTypes.WORLDLINE_OSCILLATION_COLLECTION,
+            // ⛔ 2026-10-31（用户点单，第 ⑨ 项）：－「世线震荡收集」gtceu:worldline_oscillation_collection
+            //    （它是原下标 0）。该类型已挪到「世线裂解枢纽」末尾（见 RECIPE_WORLDLINE_CRACKING_HUB）
+            //    —— 两处是同一句话的两半（净移动），不是"删掉不要了"。
+            //    ⚠️ 其后三条下标各前移 1：星际物质吸取 原 1→现 0、原初能量吸取 原 2→现 1、
+            //       光子虹吸 原 3→现 2（删项不可避免的位移）。
             ShanhaiRecipeTypes.INTERSTELLAR_MATTER_ABSORPTION,
             ShanhaiRecipeTypes.PRIMORDIAL_ENERGY_ABSORPTION,
             // 2026-09-25（用户点单「给原初分歧发生器加上光子虹吸的配方种类」）：
             // 光子虹吸【追加】在末尾，原有 3 条一条未动、下标不变（activeRecipeType 口径不位移）。
+            // （⛔ "下标不变"这句只对 2026-09-25 那次成立；2026-10-31 的第 ⑨ 项删了 1 条，下标已变。）
             // 类型 id 经 jar 字节码实证为 "photon_siphon"（ShanhaiRecipeTypes.init() 的 register 首参）；
             // 中文名 = lang 键 gtceu.photon_siphon（"光子虹吸"）。
             // 该类型此前只挂在 primordial_debug_module 上；挂到这里后，它的配方在这台也跑得了。
@@ -446,51 +470,33 @@ public final class ModuleRegistry {
     public static final GTRecipeType[] RECIPE_MULTIDIMENSIONAL_IMPLOSION = {
             GTLRecipeTypes.ELECTRIC_IMPLOSION_COMPRESSOR_RECIPES,
             GTRecipeTypes.IMPLOSION_RECIPES,
-            GTLRecipeTypes.GRAVITATION_SHOCKBURST_RECIPES,
+            // ⛔ 2026-10-31（用户点单，第 ⑦ 项）：－「强引力震爆」gtceu:gravitation_shockburst（原下标 2）。
+            //    ⚠️ 没有挪到别处（用户只点名删）；本族里它现在只由调试模块那张 catch-all 表引用。
+            //    ⚠️ 它原本是末位 ⇒ 前两条下标不变（0、1 仍是聚爆压缩那两条）。
     };
 
-    /** 原初天琼组装核心 —— 上游 :883。 */
-    public static final GTRecipeType[] RECIPE_TIANQIONG_ASSEMBLY = {
-            GTLRecipeTypes.ASSEMBLER_MODULE_RECIPES,
-            GTLRecipeTypes.SUPRACHRONAL_ASSEMBLY_LINE_RECIPES,
-    };
+    // ⛔ 2026-11-01（用户授权删除「原初天琼组装核心」）：原 RECIPE_TIANQIONG_ASSEMBLY 数组随机器一并删除。
+    //    两条类型 assembler_module / suprachronal_assembly_line 分别落在新 #1 与新 #4 上。
 
-    /** 原初世线穿刺矩阵 —— 上游 :927。 */
-    public static final GTRecipeType[] RECIPE_WORLDLINE_TRAVERSAL = {
-            GTLRecipeTypes.MAGIC_MANUFACTURER_RECIPES,
-            GTLRecipeTypes.SPACE_COSMIC_PROBE_RECEIVERS_RECIPES,
-            GTLRecipeTypes.DECAY_HASTENER_RECIPES,
-            GTLRecipeTypes.NEUTRON_ACTIVATOR_RECIPES,
-            GTLRecipeTypes.BEDROCK_DRILLING_RIG_RECIPES,
-    };
+    // ⛔ 2026-11-01（用户授权删除「原初世线穿刺矩阵」）：原 RECIPE_WORLDLINE_TRAVERSAL 数组随机器一并删除。
+    //    ⚠️ 该机此前被改过类型（2026-10-31 把「衰变加速」decay_hastener 移出到原初宇宙反应炉）——
+    //    删它前已核：这段"移出"只在注释与本数组里出现，别处无任何引用（本数组只有 1 处引用 = SPECS 行）。
+    //    余下 4 条类型里 3 条落在新 #3（magic_manufacturer / space_cosmic_probe_receivers /
+    //    bedrock_drilling_rig）；第 4 条 neutron_activator（中子活化器）**不在本轮 8 台的类型表里**
+    //    ⇒ 删机后**没有任何模块挂它**（见报告「待用户确认」）。
 
-    /** 原初量子扭曲矩阵 —— 上游 :951。 */
-    public static final GTRecipeType[] RECIPE_QUANTUM_DISTORTION = {
-            GTLRecipeTypes.QFT_RECIPES,
-            GTLRecipeTypes.NEUTRON_COMPRESSOR_RECIPES,
-            GTLRecipeTypes.DIMENSIONALLY_TRANSCENDENT_MIXER_RECIPES,
-            GTLRecipeTypes.NANO_FORGE_RECIPES,
-            GTLRecipeTypes.PCB_FACTORY_RECIPES,
-            GTLRecipeTypes.FUEL_REFINING_RECIPES,
-            // 🆕 2026-09-30 用户点单：模板 = 纳米蜂群工厂（同数组里那条 NANO_FORGE_RECIPES），透镜全换成电路
-            ShanhaiRecipeTypes.PRIMORDIAL_SWARM_CASTING,
-    };
+    // ⛔ 2026-11-01（用户授权删除「原初量子扭曲矩阵」）：原 RECIPE_QUANTUM_DISTORTION 数组随机器一并删除。
+    //    它的 7 条类型分别落在新 #5（nano_forge / primordial_swarm_casting / pcb_factory）、
+    //    新 #7（qft / neutron_compressor）、新 #4（fuel_refining）、新 #6（dt_mixer）上。
 
-    /** 原初韶光聚合核心 —— 上游 :976。 */
-    public static final GTRecipeType[] RECIPE_SHAOGUANG_AGGREGATION = {
-            GTLRecipeTypes.AGGREGATION_DEVICE_RECIPES,
-            GtlAddCompat.leylineCrystallize(),
-            GTLRecipeTypes.CREATE_AGGREGATION_RECIPES,
-    };
+    // ⛔ 2026-11-01（用户授权删除「原初韶光聚合核心」）：原 RECIPE_SHAOGUANG_AGGREGATION 数组随机器一并删除。
+    //    它的 3 条类型：aggregation_device 落在新 #4；leyline_crystallize / create_aggregation 落在新 #8。
 
-    /** 原初未央重构模块 —— 上游 :997（5 条全部是 GTLAdd，全部经 GtlAddCompat）。 */
-    public static final GTRecipeType[] RECIPE_WEIYANG_RECONSTRUCTION = {
-            GtlAddCompat.matterExotic(),
-            GtlAddCompat.nightmareCrafting(),
-            GtlAddCompat.emResonanceConversionField(),
-            GtlAddCompat.tectonicFaultGenerator(),
-            GtlAddCompat.voidfluxReaction(),
-    };
+    // ⛔ 2026-11-01（用户授权删除「原初未央重构模块」）：原 RECIPE_WEIYANG_RECONSTRUCTION 数组随机器一并删除。
+    //    它的 5 条类型（全部 GtlAddCompat 转发）里的 matter_exotic 落在新 #7；
+    //    nightmare_crafting 落在新 #8；tectonic_fault_generator 落在新 #3；
+    //    em_resonance_conversion_field / voidflux_reaction 两条**没有**落到本轮 8 台里
+    //    ⇒ 见报告「待用户确认」（删机后无模块挂它们；voidflux_reaction 仍挂在原初深空汲取核心上）。
 
     /** 原初世线蚀刻核心 —— 上游 :1023。 */
     public static final GTRecipeType[] RECIPE_ENGRAVING = {
@@ -510,7 +516,140 @@ public final class ModuleRegistry {
             GTRecipeTypes.BLAST_RECIPES,
             GCyMRecipeTypes.ALLOY_BLAST_RECIPES,
             ShanhaiRecipeTypes.TAIXU_SMELTING,
+            // 🆕 2026-11-01（用户拍板，任务 A）：末尾追加一条，原有 5 条一个字节都没动、下标 0..4 不变。
+            //    恒星热能熔炼 = gtceu:stellar_forge ← GTLRecipeTypes.STELLAR_FORGE_RECIPES
+            //    （lang 键 gtceu.stellar_forge = 恒星热能熔炼 @ gtlcore jar；不是 stellar_lgnition 那条
+            //      "星焰跃迁"）。去重后 6。
+            GTLRecipeTypes.STELLAR_FORGE_RECIPES,
     };
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 🆕 2026-11-01 新增 8 台的配方类型数组（用户拍板：新建 8 台模块 ＝ 删 7 台 + 新增 8 台 ⇒ 32−7+8 = 33 台）
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // 🔴 纪律（本文件 L"新增机器一律开自己的数组，一个既有数组都不碰"那段）：每台各开自己的数组，
+    //    一个既有数组都不碰；全部是【新建数组】，不涉及任何"从别的机器挪过来"的类型。
+    // 🔴 类型 id / 常量的取证口径：43 个中文类型名 → 真实 id 的逐条对照见
+    //    temp/module-retype2/取证.md §一（lang 键 gtceu.<id> 的值 == 中文名，逐条核过）。
+    //    gtceu / gtlcore / 本工程自有 类型都是**静态字段**；gtladditions 的 7 个一律经
+    //    GtlAddCompat 转发（本工程"common 侧唯一允许碰 gtladditions 非 API 的类"那条隔离墙），
+    //    本轮新增第 15、16 个 wrapper —— GtlAddCompat#chaosWeave()（chaos_weave）与
+    //    GtlAddCompat#starCoreStripper()（star_core_stripper，见第 29 台那张数组）。
+    // ⚠️ 每台的中文名 / 注册 id / 条数 / 类型顺序见 temp/module-retype2/实现报告.md 的对照表。
+    //    #1/#6/#7 的中文名继承自被删的三台旧机，**id 全部新建、一个字都没复用旧 id**。
+    //
+    // ############################################################################################
+    // #1 原初天琼组装核心（4 条）
+    // ############################################################################################
+    /** #1 <b>原初天琼组装核心</b>（{@code shanhai:primordial_space_module_core}）—— 4 条：太空四工序。 */
+    public static final GTRecipeType[] RECIPE_SPACE_MODULE_CORE = {
+            GTLRecipeTypes.SPACE_ELEVATOR_RECIPES,      // 太空电梯   gtceu:space_elevator
+            GTLRecipeTypes.MINER_MODULE_RECIPES,        // 太空采矿   gtceu:miner_module
+            GTLRecipeTypes.DRILLING_MODULE_RECIPES,     // 太空钻井   gtceu:drilling_module
+            GTLRecipeTypes.ASSEMBLER_MODULE_RECIPES,    // 太空组装   gtceu:assembler_module
+    };
+
+    // ############################################################################################
+    // #2 原初混沌质能熔炉（4 条）
+    // ############################################################################################
+    /**
+     * #2 <b>原初混沌质能熔炉</b>（{@code shanhai:primordial_mass_energy_furnace}）—— 4 条。
+     *
+     * <p>⚠️ 第 3 条 {@code GtlAddCompat.chaosWeave()} ＝ {@code gtceu:chaos_weave}（真名「混沌编织」），
+     * 它属于 gtladditions 的<b>非 api</b> 包 ⇒ 必须走 wrapper，不许在本文件直接 import
+     * {@code com.gtladd.gtladditions.*}（隔离墙，见 GtlAddCompat 类注释）。
+     */
+    public static final GTRecipeType[] RECIPE_MASS_ENERGY_FURNACE = {
+            GTLRecipeTypes.MASS_FABRICATOR_RECIPES,     // 质量发生器 gtceu:mass_fabricator
+            GTLRecipeTypes.MATTER_FABRICATOR_RECIPES,   // 物质生成机 gtceu:matter_fabricator（官方真名，用户拍板）
+            GtlAddCompat.chaosWeave(),                  // 混沌编织   gtceu:chaos_weave（官方真名，用户拍板）
+            GTLRecipeTypes.LARGE_RECYCLER_RECIPES,      // 材料回收   gtceu:large_recycler
+    };
+
+    // ############################################################################################
+    // #3 原初星基勘掘矩阵（5 条）
+    // ############################################################################################
+    /** #3 <b>原初星基勘掘矩阵</b>（{@code shanhai:primordial_star_prospecting_matrix}）—— 5 条。 */
+    public static final GTRecipeType[] RECIPE_STAR_PROSPECTING_MATRIX = {
+            GTLRecipeTypes.MAGIC_MANUFACTURER_RECIPES,              // 魔力生成       gtceu:magic_manufacturer
+            GTLRecipeTypes.BEDROCK_DRILLING_RIG_RECIPES,            // 基岩钻机       gtceu:bedrock_drilling_rig
+            GTLRecipeTypes.SPACE_PROBE_SURFACE_RECEPTION_RECIPES,   // 宇宙探测       gtceu:space_probe_surface_reception
+            GTLRecipeTypes.SPACE_COSMIC_PROBE_RECEIVERS_RECIPES,    // 天基宇宙探测   gtceu:space_cosmic_probe_receivers
+            GtlAddCompat.tectonicFaultGenerator(),                  // 地脉断层发生器 gtceu:tectonic_fault_generator
+    };
+
+    // ############################################################################################
+    // #4 原初超临界装配精炼核心（5 条）
+    // ############################################################################################
+    /** #4 <b>原初超临界装配精炼核心</b>（{@code shanhai:primordial_supercritical_assembly_refining_core}）—— 5 条。 */
+    public static final GTRecipeType[] RECIPE_SUPERCRITICAL_ASSEMBLY_REFINING_CORE = {
+            GTLRecipeTypes.SPS_CRAFTING_RECIPES,                    // 超临界合成     gtceu:sps_crafting
+            GTLRecipeTypes.ATOMIC_ENERGY_EXCITATION_RECIPES,        // 原子能激发     gtceu:atomic_energy_excitation
+            GTLRecipeTypes.FUEL_REFINING_RECIPES,                   // 燃料精炼       gtceu:fuel_refining
+            GTLRecipeTypes.AGGREGATION_DEVICE_RECIPES,              // 聚合装置       gtceu:aggregation_device
+            GTLRecipeTypes.SUPRACHRONAL_ASSEMBLY_LINE_RECIPES,      // 超时空装配线   gtceu:suprachronal_assembly_line
+    };
+
+    // ############################################################################################
+    // #5 原初微纳深化学核心（4 条）
+    // ############################################################################################
+    /** #5 <b>原初微纳深化学核心</b>（{@code shanhai:primordial_micro_nano_chemistry_core}）—— 4 条。 */
+    public static final GTRecipeType[] RECIPE_MICRO_NANO_CHEMISTRY_CORE = {
+            GTLRecipeTypes.NANO_FORGE_RECIPES,                      // 纳米蜂群工厂   gtceu:nano_forge
+            ShanhaiRecipeTypes.PRIMORDIAL_SWARM_CASTING,            // 原初蜂群铸造   gtceu:primordial_swarm_casting
+            GTLRecipeTypes.DISTORT_RECIPES,                         // 深度化学扭曲仪 gtceu:distort
+            GTLRecipeTypes.PCB_FACTORY_RECIPES,                     // PCB工厂        gtceu:pcb_factory
+    };
+
+    // ############################################################################################
+    // #6 原初永恒熔炼炉（6 条）
+    // ############################################################################################
+    /**
+     * #6 <b>原初永恒熔炼炉</b>（{@code shanhai:primordial_eternal_melting_core}）—— 6 条。
+     *
+     * <p>⚠️ 中文名继承自被删的旧机，<b>id 是新的</b>（旧 id {@code …_eternal_smelting_furnace} 已不存在）。
+     * <p>⚠️ 其中 3 条是 {@link GtlAddCompat} 转发（gtladditions 非 api）。
+     */
+    public static final GTRecipeType[] RECIPE_ETERNAL_MELTING_CORE = {
+            GTLRecipeTypes.DIMENSIONALLY_TRANSCENDENT_PLASMA_FORGE_RECIPES, // 超维度熔炼   gtceu:dimensionally_transcendent_plasma_forge
+            GTLRecipeTypes.DIMENSIONALLY_TRANSCENDENT_MIXER_RECIPES,        // 超维度搅拌   gtceu:dimensionally_transcendent_mixer
+            GTLRecipeTypes.ULTIMATE_MATERIAL_FORGE_RECIPES,                 // 终极物质锻造 gtceu:ultimate_material_forge
+            GtlAddCompat.molecularDeconstruction(),                         // 分子解构     gtceu:molecular_deconstruction
+            GtlAddCompat.stellarIgnition(),                                 // 星焰跃迁     gtceu:stellar_lgnition
+            GtlAddCompat.chaoticAlchemy(),                                  // 混沌炼金     gtceu:chaotic_alchemy
+    };
+
+    // ############################################################################################
+    // #7 原初量子扭曲矩阵（5 条）
+    // ############################################################################################
+    /** #7 <b>原初量子扭曲矩阵</b>（{@code shanhai:primordial_quantum_warp_matrix}）—— 5 条（中文名继承、id 新建）。 */
+    public static final GTRecipeType[] RECIPE_QUANTUM_WARP_MATRIX = {
+            GTLRecipeTypes.DRAGON_EGG_COPIER_RECIPES,               // 龙蛋复制   gtceu:dragon_egg_copier
+            GTLRecipeTypes.QFT_RECIPES,                              // 量子操纵者 gtceu:qft
+            GTLRecipeTypes.ELEMENT_COPYING_RECIPES,                  // 元素复制机 gtceu:element_copying
+            GTLRecipeTypes.NEUTRON_COMPRESSOR_RECIPES,               // 奇点压缩   gtceu:neutron_compressor
+            GtlAddCompat.matterExotic(),                             // 物质异化   gtceu:matter_exotic
+    };
+
+    // ############################################################################################
+    // #8 原初创世现实矩阵（7 条）
+    // ############################################################################################
+    /**
+     * #8 <b>原初创世现实矩阵</b>（{@code shanhai:primordial_genesis_reality_matrix}）—— 7 条。
+     *
+     * <p>⚠️ 第 7 条是<b>本工程自有</b>类型 {@code ShanhaiRecipeTypes.SPACETIME_DISTORTION}
+     * ＝ {@code gtceu:spacetime_distortion}（真名「量子化现实重构」，lang @ shanhai jar）。
+     */
+    public static final GTRecipeType[] RECIPE_GENESIS_REALITY_MATRIX = {
+            GTLRecipeTypes.COSMOS_SIMULATION_RECIPES,        // 宇宙模拟       gtceu:cosmos_simulation
+            GTLRecipeTypes.DOOR_OF_CREATE_RECIPES,           // 创造之门       gtceu:door_of_create
+            GTLRecipeTypes.GRAVITATION_SHOCKBURST_RECIPES,   // 强引力震爆     gtceu:gravitation_shockburst
+            GTLRecipeTypes.CREATE_AGGREGATION_RECIPES,       // 创造聚合       gtceu:create_aggregation
+            GtlAddCompat.leylineCrystallize(),               // 龙脉结晶       gtceu:leyline_crystallize
+            GtlAddCompat.nightmareCrafting(),                // 梦魇合成       gtceu:nightmare_crafting
+            ShanhaiRecipeTypes.SPACETIME_DISTORTION,         // 量子化现实重构 gtceu:spacetime_distortion
+    };
+
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // 2026-09-26 新增：原初山海调试模块（第 25 台模块）—— 本工程【唯一一台"只为看配方而存在"】的模块
@@ -626,6 +765,12 @@ public final class ModuleRegistry {
             ShanhaiRecipeTypes.WORLDLINE_SAMPLING,
             // 🟢 2026-09-29 追加（原初世线切割）
             ShanhaiRecipeTypes.WORLDLINE_CUTTING,
+            // 🆕 2026-10-31（用户点单，第 ⑧ 项）：＋「世线震荡收集」gtceu:worldline_oscillation_collection。
+            //    它从「原初分歧发生器」移出（见 RECIPE_DIVERGENCE_GENERATOR 的 ⛔ 那一行），
+            //    两处是同一句话的两半（净移动）⇒ 本台 2 条变 3 条，原有 0..1 下标不变。
+            //    ⚠️ 本台的<b>注册 id 与中文名</b>另有一处改动（显示名 →「原初世线汇编矩阵」，
+            //       id 一个字都不动，见 assets/shanhai/lang 的 block.shanhai.worldline_cracking_hub）。
+            ShanhaiRecipeTypes.WORLDLINE_OSCILLATION_COLLECTION,
     };
 
     /**
@@ -743,9 +888,24 @@ public final class ModuleRegistry {
      *   2    虚空聚流反应  GtlAddCompat.voidfluxReaction()                gtceu:voidflux_reaction
      *   3    虚空流体钻机  GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES gtceu:void_fluid_drilling_rig
      *   4 🆕 原初深空汲取  ShanhaiRecipeTypes.PRIMORDIAL_DEEP_SPACE_EXTRACTION  gtceu:primordial_deep_space_extraction
+     *   5 🆕 碎片世界采集  GTLRecipeTypes.FRAGMENT_WORLD_COLLECTION          gtceu:fragment_world_collection
+     *   6 🆕 精准矿石模式  GTLRecipeTypes.LARGE_VOID_MINER_RECIPES            gtceu:large_void_miner
+     *   7 🆕 随机矿石模式  GTLRecipeTypes.RANDOM_ORE_RECIPES                  gtceu:random_ore
+     *   8 🆕 星核剥离      GtlAddCompat.starCoreStripper()                      gtceu:star_core_stripper
      * </pre>
      * ⚠️ 上面这张表与数组体<b>必须同序</b>（下标一一对应）：数组给机器用、表给人看，
      * 错位就会变成"注释说是 A、机器挂的是 B"，那正是本工程最忌讳的一种假数据。
+     * <p>🆕 <b>2026-10-31 用户点单追加下标 5/6/7</b>（碎片世界采集 ＋ 精准矿石模式 ＋ 随机矿石模式）
+     * ⇒ 本条数组由 5 条变 <b>8 条</b>，<b>原有 0..4 的下标与顺序一字未动</b>（追加在末尾）。
+     * <p>🆕 <b>2026-11-01 用户点单追加下标 8</b>（<b>星核剥离</b> {@code gtceu:star_core_stripper}）
+     * ⇒ 本条数组由 <b>8 条变 9 条</b>，<b>原有 0..7 的下标与顺序一字未动</b>（同样追加在末尾）。
+     * 该类型的中文名 / id / 键出处取自 {@code temp/type-coverage/缺口.md} 第 76 行
+     * （「{@code gtceu:star_core_stripper} ｜ 星核剥离 ｜ {@code gtceu.star_core_stripper} @ gtladditions」，
+     * 该类型 148 条配方），**不是按中文名猜的**；它落在 gtladditions 的<b>非 api</b> 包 ⇒
+     * 一律经 {@link GtlAddCompat#starCoreStripper()} 转发（字段是 private，只有 INSTANCE 上的 getter）。
+     * 这三条 id 与中文名以上方 {@code 取证与提案.md} 第二节 2.0 表为准；
+     * 其中后两条是从「原初混沌蜉蝣解构结晶炉」（{@link #RECIPE_ORE_PROCESSING}）移出的，
+     * 前一条是新增挂载（原本只挂在「原初世界碎片采集器」{@link #RECIPE_WORLD_FRAGMENTS_COLLECTOR} 上）。
      * <p>🆕 <b>2026-10-04 用户点单追加下标 4</b>（原初深空汲取）：用户原话
      * 「<b>为原初深空汲取核心新增配方类型：原初深空汲取</b>」⇒ 本条数组由 4 条变 5 条，
      * <b>其余四条的字段与顺序一字未动</b>（也没有改任何别的机器）。
@@ -785,6 +945,9 @@ public final class ModuleRegistry {
      * </ul>
      *
      * <h3>🔴 语义：这四个类型【一个物品输出槽都没有】</h3>
+     * <p>⚠️ 2026-10-31：本节只描述<b>下标 0..3 这四个</b>宿主类型（它们是最初点名的四个）。
+     *   本轮追加的下标 5/6/7（碎片世界采集 / 精准矿石模式 / 随机矿石模式）<b>不在本节口径内</b>，
+     *   那三条的 IO 未在本轮取证 ⇒ 不在这里填数字，也不许把它们算进"只出流体"这句话。
      * 四条的 {@code GTRecipeType#setMaxIOSize(物品入, 物品出, 流体入, 流体出)} 逐条实读
      * （同一份 javap 的 {@code <clinit>}）：
      * <pre>
@@ -859,8 +1022,8 @@ public final class ModuleRegistry {
      * </pre>
      * ⇒ 本类的类加载<b>严格晚于</b> gtceu/gtlcore/gtladditions 三条注册链，
      * 三条来源此刻都已被赋值。既有旁证（同一时机、已在盘上跑了很久）：
-     * {@link #RECIPE_ETERNAL_SMELTING}（3 条 {@link GtlAddCompat}）、
      * {@link #RECIPE_BIO}（1 条）、{@link #RECIPE_CARBON_DECONSTRUCTION_CORE}（第 27 台，1 条）、
+     * {@link #RECIPE_ETERNAL_MELTING_CORE}（新 #6，3 条 {@code GtlAddCompat} 转发）、
      * 以及 {@link #RECIPE_CRITICAL_PROCESSING} 起的 30+ 处 {@code GTLRecipeTypes.X} 直接引用。
      * <p>⚠️ 但"本来就成立"与"静默拿到 null"在日志上<b>长得一模一样</b> ⇒ 本方法把它变成异常。
      *
@@ -882,24 +1045,182 @@ public final class ModuleRegistry {
                 //    由 ShanhaiRecipeTypes.init() 在 GTRecipeTypes.init() 的注册回调里赋值；
                 //    本类（ModuleRegistry）的类加载由 GTMachines.init() 触发 ⇒ 严格更晚 ⇒ 必已赋值）。
                 "ShanhaiRecipeTypes.PRIMORDIAL_DEEP_SPACE_EXTRACTION (gtceu:primordial_deep_space_extraction)",
+                // 🆕 2026-10-31（用户点单，第 ⑥ 项）：末尾追加 3 条，原有 5 条一条未动、下标 0..4 不变。
+                "GTLRecipeTypes.FRAGMENT_WORLD_COLLECTION (gtceu:fragment_world_collection)",
+                "GTLRecipeTypes.LARGE_VOID_MINER_RECIPES (gtceu:large_void_miner)",
+                "GTLRecipeTypes.RANDOM_ORE_RECIPES (gtceu:random_ore)",
+                // 🆕 2026-11-01（用户点单）：末尾追加第 9 条 —— 星核剥离 gtceu:star_core_stripper
+                //    （gtladditions 的**非 api** 包 ⇒ 一律经 GtlAddCompat.starCoreStripper() 转发）。
+                //    原有 8 条一条未动、下标 0..7 不变（追加在末尾）。
+                "GtlAddCompat.starCoreStripper() (gtceu:star_core_stripper)",
         };
         // 顺序 = 用户点名的先后（见上面那条数组注释里的下标表，两处必须一致）；
         // 🆕 第 5 条（原初深空汲取）追加在末尾。
+        // 🆕 2026-10-31（第 ⑥ 项）：再加 3 条 —— 碎片世界采集 / 精准矿石模式 / 随机矿石模式，
+        //    全部【追加在末尾】⇒ 原 0..4 的下标不变（5 条变 8 条）。
+        //    其中后两条是从「原初混沌蜉蝣解构结晶炉」移出的（见 RECIPE_ORE_PROCESSING 的 ⛔ 那三行），
+        //    碎片世界采集则是**新增挂载**（它原本只挂在「原初世界碎片采集器」上）。
+        // 🆕 2026-11-01（用户点单）：再加 1 条「星核剥离」gtceu:star_core_stripper，【追加在末尾】
+        //    ⇒ 8 条变 9 条、原 0..7 下标不变。它是 gtladditions 的**非 api** 包（字段 private，
+        //    只有 INSTANCE.getSTAR_CORE_STRIPPER()）⇒ 经 GtlAddCompat.starCoreStripper() 转发。
         GTRecipeType[] types = {
                 GTRecipeTypes.GAS_COLLECTOR_RECIPES,               // 集气室        gtceu:gas_collector
                 GTLRecipeTypes.LARGE_GAS_COLLECTOR_RECIPES,        // 大型集气室    gtceu:large_gas_collector
                 GtlAddCompat.voidfluxReaction(),                   // 虚空聚流反应  gtceu:voidflux_reaction
                 GTLRecipeTypes.VOID_FLUID_DRILLING_RIG_RECIPES,    // 虚空流体钻机  gtceu:void_fluid_drilling_rig
                 ShanhaiRecipeTypes.PRIMORDIAL_DEEP_SPACE_EXTRACTION, // 原初深空汲取  gtceu:primordial_deep_space_extraction
+                GTLRecipeTypes.FRAGMENT_WORLD_COLLECTION,         // 碎片世界采集  gtceu:fragment_world_collection
+                GTLRecipeTypes.LARGE_VOID_MINER_RECIPES,          // 精准矿石模式  gtceu:large_void_miner
+                GTLRecipeTypes.RANDOM_ORE_RECIPES,                // 随机矿石模式  gtceu:random_ore
+                GtlAddCompat.starCoreStripper(),                  // 星核剥离      gtceu:star_core_stripper
         };
         return requireNoNullRecipeTypes(path, names, types,
-                "这五个类型里，前三个来自 gtceu/gtlcore 的静态字段、第四个来自 gtladditions 的 "
+                "这九个类型里，前三个来自 gtceu/gtlcore 的静态字段、第四个来自 gtladditions 的 "
                         + "GTLAddRecipesTypes 这个 Kotlin object 的 getter、第五个（2026-10-04 追加）来自 "
-                        + "ShanhaiRecipeTypes 这个【本工程自有】的静态字段 ⇒ 说明有一条注册链没跑到本类类加载之前。"
+                        + "ShanhaiRecipeTypes 这个【本工程自有】的静态字段、第六~八条（2026-10-31 追加）"
+                        + "又回到 gtlcore 的静态字段、第九条（2026-11-01 追加）是 gtladditions 的另一个 "
+                        + "Kotlin object getter ⇒ 说明有一条注册链没跑到本类类加载之前。"
                         + "请先确认 CommonProxy#init() 里 GTRecipeTypes.init()(字节码偏移 94) 仍在 "
                         + "GTMachines.init()(偏移 97) 之前（本类的类加载由后者触发），"
                         + "且 gtlcore / gtladditions / 本工程的类型注册回调没有被挪到 freeze 之后。");
     }
+
+    /**
+     * 第 30 台模块「原初造物编译矩阵」挂在定义上的配方类型（<b>不是</b>它真正干活的路径）。
+     *
+     * <h2>为什么 P1 要给它一个<b>真类型</b>，而不是空数组</h2>
+     * <ol>
+     *   <li>{@code register(ModuleSpec)} 链上 {@code .recipeTypes(...)} 与
+     *       {@code MachineTooltips.forModule(...)} 都要读它；空数组会让 tooltip 里"可用配方类型"那一行消失。</li>
+     *   <li>⚠️ 上游那台「分子操纵者」用的是两层写法：定义里留一个真类型、{@code getRecipeTypes()} 返回空数组
+     *       （见 {@code temp/molmanip/深度取证.md} §4 组④）。本工程 P1 <b>还没</b>做那一层覆写 ——
+     *       而且<b>不许</b>现在做：那属于"接执行链"（P2），P1 的边界是"能造出来 / 能成型 / 能开界面"。</li>
+     * </ol>
+     * <p>⇒ P1 这台的行为与其余 29 台<b>完全一致</b>：放进去就能跑这条原版类型的配方（宿主自带配方，零数据成本）。
+     * P2 再把 AE 路径接上、并让 {@code getRecipeTypes()} 隐身。
+     */
+    public static final GTRecipeType[] RECIPE_CREATION_COMPILATION_MATRIX = {
+            GTRecipeTypes.ASSEMBLER_RECIPES, // 装配（gtceu:assembler）—— 语义最近：AE 合成样板也是"按图拼产物"
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 🟢 2026-10-31 用户点单新增第 31／32 台（两台都是"类型并集"型模块，**不做任何新机制**）
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    //
+    //  用户交办的原话口径（逐字要点）：「甲 = 原初维度工序集束枢纽」「乙 = 原初溯演核心」，
+    //  机器名由用户拍板，**不用再选**；类型 = 既有若干台的并集（见下两段）。
+    //  ⚠️ 这两台**不新增任何配方类型**：下面 46＋3 条全部是本工程/宿主已注册类型对象的引用
+    //  ⇒ {@code ShanhaiRecipeTypes.java} 与三个宿主 jar 本轮一个字节都没动。
+    //  ⚠️ 也**不新增结构 .bin**：结构复用 PrimordialMatterRecombinatorCoreStructure::createPattern
+    //  （与第 26~30 台同款"零资产"落地方式）。
+    //  ⚠️ 更**不写任何配方**（用户自己写）：这里只把类型挂上去。
+
+    /**
+     * 🟢 第 31 台：<b>原初维度工序集束枢纽</b>
+     * （{@code shanhai:primordial_dimensional_process_cluster_hub}）。
+     *
+     * <h3>这条数组是什么</h3>
+     * = <b>四台已有模块的类型并集（按 2026-10-31 第①~⑨ 项改完之后的状态）</b>，去重后 <b>46 条</b>：
+     * <pre>
+     *   来源（改完后）                       条数   本数组里的下标
+     *   ──────────────────────────────────  ────  ──────────────
+     *   {@link #RECIPE_CRITICAL_PROCESSING}   37   0 … 36
+     *   {@link #RECIPE_MULTIDIMENSIONAL_IMPLOSION}（改后 2 条）  2   37、38
+     *   {@link #RECIPE_MOLECULAR_RIFT}（改后 2 条，去重后只用 1 条）  1   39
+     *   {@link #RECIPE_ENGRAVING}                               6   40 … 45
+     *   ──────────────────────────────────  ────
+     *   成员合计 47 ⇒ <b>去重后 46</b>
+     * </pre>
+     * 🔴 <b>唯一的重复项 = {@code gtceu:chemical_bath}（化学浸洗机）</b>：
+     *   它在临界加工（{@code GTRecipeTypes.CHEMICAL_BATH_RECIPES}）与分子裂隙
+     *   （同一字段）各出现 1 次 ⇒ <b>只保留先出现的那一份</b>（下标 28，在临界加工段内），
+     *   分子裂隙段因此只贡献 1 条（{@code large_chemical_reactor}）。
+     *   ⚠️ 这台机器只认"类型对象"：同一个类型挂两次不会让它多跑一类配方，
+     *   只会让 GUI 的类型切换列表里出现两个一模一样的条目 ⇒ 去重是<b>正确</b>而不是"少给"。
+     *
+     * <p>⚠️ 顺序 = 上述四个来源的先后、来源内部顺序 = 源数组自己的顺序（逐条对齐，不重排）。
+     *   这样"它和哪台同源"在源码里一眼可查，也不必维护第二张 id 表。
+     *
+     * <p>⚠️ 与 {@link #RECIPE_RETROSPECTIVE_EVOLUTION_CORE} 的交集 = <b>0</b>
+     *   （甲全是宿主加工/聚爆/裂隙/蚀刻类，乙全是山海自有的三条原初类型）。
+     */
+    public static final GTRecipeType[] RECIPE_DIMENSIONAL_PROCESS_CLUSTER_HUB = {
+            // ───────── 临界加工 37 条（{@link #RECIPE_CRITICAL_PROCESSING} 原序，0…36） ─────────
+            GTRecipeTypes.LATHE_RECIPES,                       // 0  车床
+            GTRecipeTypes.BENDER_RECIPES,                      // 1  卷板机
+            GTRecipeTypes.COMPRESSOR_RECIPES,                  // 2  压缩机
+            GTRecipeTypes.FORGE_HAMMER_RECIPES,                // 3  锻造锤
+            GTRecipeTypes.CUTTER_RECIPES,                      // 4  切割机
+            GTRecipeTypes.EXTRUDER_RECIPES,                    // 5  压模器
+            GTRecipeTypes.MIXER_RECIPES,                       // 6  搅拌机
+            GTRecipeTypes.WIREMILL_RECIPES,                    // 7  线材轧机
+            GTRecipeTypes.FORMING_PRESS_RECIPES,               // 8  冲压机床
+            GTRecipeTypes.POLARIZER_RECIPES,                   // 9  两极磁化机
+            GTRecipeTypes.ROCK_BREAKER_RECIPES,                // 10 碎岩机
+            GTRecipeTypes.ORE_WASHER_RECIPES,                  // 11 洗矿厂
+            GTRecipeTypes.CENTRIFUGE_RECIPES,                  // 12 离心机
+            GTRecipeTypes.ELECTROLYZER_RECIPES,                // 13 电解机
+            GTRecipeTypes.SIFTER_RECIPES,                      // 14 筛选机
+            GTRecipeTypes.MACERATOR_RECIPES,                   // 15 研磨机
+            GTLRecipeTypes.DEHYDRATOR_RECIPES,                 // 16 脱水机
+            GTRecipeTypes.THERMAL_CENTRIFUGE_RECIPES,          // 17 热力离心机
+            GTRecipeTypes.ELECTROMAGNETIC_SEPARATOR_RECIPES,   // 18 电磁选矿机
+            GTRecipeTypes.EVAPORATION_RECIPES,                 // 19 蒸发
+            GTRecipeTypes.AUTOCLAVE_RECIPES,                   // 20 高压釜
+            GTRecipeTypes.EXTRACTOR_RECIPES,                   // 21 提取机
+            GTRecipeTypes.BREWING_RECIPES,                     // 22 酿造室
+            GTRecipeTypes.FERMENTING_RECIPES,                  // 23 发酵槽
+            GTRecipeTypes.DISTILLERY_RECIPES,                  // 24 蒸馏室
+            GTRecipeTypes.DISTILLATION_RECIPES,                // 25 蒸馏塔
+            GTRecipeTypes.FLUID_HEATER_RECIPES,                // 26 流体加热器
+            // ⚠️ GTCEu 拼写是 FLUID_SOLIDFICATION（少一个 I），jar 里没有 -TION 版本
+            GTRecipeTypes.FLUID_SOLIDFICATION_RECIPES,         // 27 流体固化器
+            GTRecipeTypes.CHEMICAL_BATH_RECIPES,               // 28 化学浸洗机（🔴 与分子裂隙重复的那一条，保留此处）
+            GTRecipeTypes.CANNER_RECIPES,                      // 29 装罐机
+            GTRecipeTypes.ARC_FURNACE_RECIPES,                 // 30 电弧炉
+            GTLRecipeTypes.LIGHTNING_PROCESSOR_RECIPES,        // 31 闪电处理
+            GTRecipeTypes.ASSEMBLER_RECIPES,                   // 32 组装机
+            GTLRecipeTypes.PRECISION_ASSEMBLER_RECIPES,        // 33 精密组装
+            GTRecipeTypes.CIRCUIT_ASSEMBLER_RECIPES,           // 34 电路组装机
+            GTRecipeTypes.PACKER_RECIPES,                      // 35 打包机
+            ShanhaiRecipeTypes.PRIMORDIAL_MATTER_FORMING,      // 36 原初物质定型
+            // ───────── 多维聚爆 2 条（{@link #RECIPE_MULTIDIMENSIONAL_IMPLOSION} 改后原序） ─────────
+            GTLRecipeTypes.ELECTRIC_IMPLOSION_COMPRESSOR_RECIPES, // 37 电力聚爆压缩机
+            GTRecipeTypes.IMPLOSION_RECIPES,                      // 38 聚爆压缩机
+            // ───────── 分子裂隙 2 条 → 去重后 1 条（{@link #RECIPE_MOLECULAR_RIFT} 改后原序） ─────────
+            // ⚠️ 源数组改后的第 2 条是 CHEMICAL_BATH_RECIPES —— 它已在下标 28 出现过，
+            //    此处【不再重复】（去重的唯一一处；见上面 🔴 那段）。
+            GTRecipeTypes.LARGE_CHEMICAL_RECIPES,                 // 39 大型化学反应釜
+            // ───────── 世线蚀刻 6 条（{@link #RECIPE_ENGRAVING} 原序） ─────────
+            GTRecipeTypes.LASER_ENGRAVER_RECIPES,                            // 40 激光蚀刻机
+            GTLRecipeTypes.PRECISION_LASER_ENGRAVER_RECIPES,                 // 41 精密激光蚀刻
+            GTLRecipeTypes.DIMENSIONAL_FOCUS_ENGRAVING_ARRAY_RECIPES,        // 42 维度聚焦激光蚀刻
+            GtlAddCompat.photonMatrixEtch(),                                 // 43 光子晶阵蚀刻
+            ShanhaiRecipeTypes.WL_BOARD_WAFER_ETCHING,                       // 44 世线晶圆蚀刻
+            ShanhaiRecipeTypes.PRIMORDIAL_LASER_ETCHING,                     // 45 原初激光蚀刻
+    };
+
+    /**
+     * 🟢 第 32 台：<b>原初溯演核心</b>（{@code shanhai:primordial_retrospective_evolution_core}）。
+     *
+     * <h3>这条数组是什么</h3>
+     * = <b>三台已有模块的类型并集</b>，<b>3 条、无重复</b>（三台各只挂 1 条）：
+     * <pre>
+     *   来源（各 1 条）                              本数组下标   注册 id
+     *   ──────────────────────────────────────────  ──────────  ──────────────────────────────────────
+     *   {@link #RECIPE_MATTER_RECOMBINATOR_CORE}          0       gtceu:primordial_matter_recombination
+     *   {@link #RECIPE_CAUSAL_WEAVING_MATRIX}             1       gtceu:primordial_causal_weaving
+     *   {@link #RECIPE_SINGULARITY_INVERSION}             2       gtceu:primordial_singularity_inversion
+     * </pre>
+     * ⚠️ 三条都是<b>山海自有</b>真类型（{@code ShanhaiRecipeTypes} 里 register 过）⇒
+     *   "有没有配方可跑"取决于配方数据侧（用户自己写），<b>本轮一个配方都不写</b>。
+     * <p>⚠️ 与 {@link #RECIPE_DIMENSIONAL_PROCESS_CLUSTER_HUB} 的交集 = <b>0</b>。
+     */
+    public static final GTRecipeType[] RECIPE_RETROSPECTIVE_EVOLUTION_CORE = {
+            ShanhaiRecipeTypes.PRIMORDIAL_MATTER_RECOMBINATION,   // 0 原初物质重组    gtceu:primordial_matter_recombination
+            ShanhaiRecipeTypes.PRIMORDIAL_CAUSAL_WEAVING,         // 1 原初因果编织    gtceu:primordial_causal_weaving
+            ShanhaiRecipeTypes.PRIMORDIAL_SINGULARITY_INVERSION,  // 2 原初奇点反演    gtceu:primordial_singularity_inversion
+    };
 
     /**
      * 🔴 <b>「配方类型数组里不许有 null」的唯一检查器</b>（全工程只此一处，不许在别处再写第二份）。
@@ -1140,10 +1461,8 @@ public final class ModuleRegistry {
     public static MultiblockMachineDefinition PRIMORDIAL_COSMIC_REACTOR;
     /** 原初分子裂隙核心。 */
     public static MultiblockMachineDefinition PRIMORDIAL_MOLECULAR_RIFT_CORE;
-    /** 原初超临界物质生成核心。 */
-    public static MultiblockMachineDefinition PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE;
-    /** 原初永恒熔炼炉。 */
-    public static MultiblockMachineDefinition PRIMORDIAL_ETERNAL_SMELTING_FURNACE;
+    // ⛔ 2026-11-01（用户授权删除）：原「原初超临界物质生成核心」「原初永恒熔炼炉」两个句柄常量已删
+    //    （连同 SPECS 行 / init() 的 require / lang / 创造栏那一行）。
 
     // ───── 2026-09 新增的 18 个模块句柄（补齐 guide 权威清单里除铸币厂以外的全部模块） ─────
     // 全部由 {@link #init()} 的 require(...) 保证返回时非 null（为 null 直接抛带 id 的异常）。
@@ -1169,16 +1488,9 @@ public final class ModuleRegistry {
     public static MultiblockMachineDefinition PRIMORDIAL_ASSEMBLY_LINE_MODULE;
     /** 原初多维聚爆核心。 */
     public static MultiblockMachineDefinition PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE;
-    /** 原初天琼组装核心。 */
-    public static MultiblockMachineDefinition PRIMORDIAL_TIANQIONG_ASSEMBLY_CORE;
-    /** 原初世线穿刺矩阵。 */
-    public static MultiblockMachineDefinition PRIMORDIAL_WORLDLINE_TRAVERSAL_MATRIX;
-    /** 原初量子扭曲矩阵。 */
-    public static MultiblockMachineDefinition PRIMORDIAL_QUANTUM_DISTORTION_MATRIX;
-    /** 原初韶光聚合核心。 */
-    public static MultiblockMachineDefinition PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE;
-    /** 原初未央重构模块。 */
-    public static MultiblockMachineDefinition PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE;
+    // ⛔ 2026-11-01（用户授权删除）：原「原初天琼组装核心」「原初世线穿刺矩阵」「原初量子扭曲矩阵」
+    //    「原初韶光聚合核心」「原初未央重构模块」五个句柄常量已删（连同 SPECS 行 / init() 的 require
+    //    / lang / 创造栏那一行）。
     /** 原初世线蚀刻核心（注册路径仍是上游的 {@code primordial_engraving_module}）。 */
     public static MultiblockMachineDefinition PRIMORDIAL_ENGRAVING_MODULE;
     /**
@@ -1249,6 +1561,66 @@ public final class ModuleRegistry {
      *   <b>没有</b>新增任何 {@code assets/} 下的模型/贴图文件（这也是本台能"零资产"落地的原因）。
      */
     public static MultiblockMachineDefinition PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE;
+
+    /**
+     * 第 30 台：<b>原初造物编译矩阵</b>（{@code shanhai:primordial_creation_compilation_matrix}）。
+     *
+     * <p>中文名是<b>用户亲定</b>（「原初造物编译矩阵」；明确要求<b>不要</b>复用上游「分子操纵者」那套命名）。
+     * 配方类型 = {@link #RECIPE_CREATION_COMPILATION_MATRIX}（P1 只有一条原版装配类型）。
+     * <p>机器类 = {@link PrimordialCreationCompilationMatrix}：它比其余 29 台多两样东西 ——
+     * 自带 <b>1000 格样板存储</b>（不是仓室）、自带「样板」+「神锻」两个子页签；
+     * 结构 = {@link PrimordialCreationCompilationMatrixStructure}（多留一个端口位）。
+     * <p>⚠️ P1 <b>不接单执行</b>：AE 端口的 {@code pushPattern} 只记账，产物改写 / EU 绕过都在 P2。
+     */
+    public static MultiblockMachineDefinition PRIMORDIAL_CREATION_COMPILATION_MATRIX;
+
+    /**
+     * 🟢 2026-10-31 新增<b>第 31 台</b>：<b>原初维度工序集束枢纽</b>
+     * （{@code shanhai:primordial_dimensional_process_cluster_hub}）。
+     *
+     * <p>机器名由<b>用户拍板</b>（甲）；配方类型 = {@link #RECIPE_DIMENSIONAL_PROCESS_CLUSTER_HUB}
+     * （临界加工 ∪ 多维聚爆 ∪ 分子裂隙 ∪ 世线蚀刻，去重后 <b>46 条</b>）。
+     * <p>⚠️ 机器类 = {@code StandardPrimordialModule}、结构 = {@code PrimordialMatterRecombinatorCoreStructure}、
+     *  并行表 = {@code STANDARD}、{@code generator = false} —— 与第 26~30 台<b>逐项相同</b>
+     *  （用户要求"结构/并行表/骨架照现有模块"）。<b>不做任何新机制</b>。
+     */
+    public static MultiblockMachineDefinition PRIMORDIAL_DIMENSIONAL_PROCESS_CLUSTER_HUB;
+
+    /**
+     * 🟢 2026-10-31 新增<b>第 32 台</b>：<b>原初溯演核心</b>
+     * （{@code shanhai:primordial_retrospective_evolution_core}）。
+     *
+     * <p>机器名由<b>用户拍板</b>（乙）；配方类型 = {@link #RECIPE_RETROSPECTIVE_EVOLUTION_CORE}
+     * （物质重组 ∪ 因果编织 ∪ 奇点反演，<b>3 条</b>、无重复）。
+     * <p>⚠️ 骨架四项同上台（StandardPrimordialModule + createPattern + STANDARD + false），
+     *  <b>不做任何新机制</b>。
+     */
+    public static MultiblockMachineDefinition PRIMORDIAL_RETROSPECTIVE_EVOLUTION_CORE;
+
+    // ═════════ 🆕 2026-11-01 新增 8 台的句柄（顺序 = SPECS 顺序，缺一个就在加载期带 id 炸掉） ═════════
+    //  骨架四项与第 26~32 台逐项相同（StandardPrimordialModule + createPattern + STANDARD + false）。
+    /** #1 原初天琼组装核心（{@code shanhai:primordial_space_module_core}）。 */
+    public static MultiblockMachineDefinition PRIMORDIAL_SPACE_MODULE_CORE;
+    /** #2 原初混沌质能熔炉（{@code shanhai:primordial_mass_energy_furnace}）。 */
+    public static MultiblockMachineDefinition PRIMORDIAL_MASS_ENERGY_FURNACE;
+    /** #3 原初星基勘掘矩阵（{@code shanhai:primordial_star_prospecting_matrix}）。 */
+    public static MultiblockMachineDefinition PRIMORDIAL_STAR_PROSPECTING_MATRIX;
+    /** #4 原初超临界装配精炼核心（{@code shanhai:primordial_supercritical_assembly_refining_core}）。 */
+    public static MultiblockMachineDefinition PRIMORDIAL_SUPERCRITICAL_ASSEMBLY_REFINING_CORE;
+    /** #5 原初微纳深化学核心（{@code shanhai:primordial_micro_nano_chemistry_core}）。 */
+    public static MultiblockMachineDefinition PRIMORDIAL_MICRO_NANO_CHEMISTRY_CORE;
+    /**
+     * #6 原初永恒熔炼炉（{@code shanhai:primordial_eternal_melting_core}）。
+     *
+     * <p>⚠️ 中文名继承自被删的旧机「原初永恒熔炼炉」，<b>注册 id 是新的</b>（旧 id 已随机器删除，
+     * 一个字符都没复用）。它同时是 {@code ShanhaiHeatGate.HEAT_SLOT_MACHINE_IDS} 里
+     * 顶替旧 id 的那一台（白名单语义 = 额外挂载槽可充当热力源）。
+     */
+    public static MultiblockMachineDefinition PRIMORDIAL_ETERNAL_MELTING_CORE;
+    /** #7 原初量子扭曲矩阵（{@code shanhai:primordial_quantum_warp_matrix}；中文名继承、id 新建）。 */
+    public static MultiblockMachineDefinition PRIMORDIAL_QUANTUM_WARP_MATRIX;
+    /** #8 原初创世现实矩阵（{@code shanhai:primordial_genesis_reality_matrix}）。 */
+    public static MultiblockMachineDefinition PRIMORDIAL_GENESIS_REALITY_MATRIX;
 
     // ═════════════════════════════ 模块规格表 ═════════════════════════════
 
@@ -1376,24 +1748,9 @@ public final class ModuleRegistry {
                     () -> RECIPE_MOLECULAR_RIFT,
                     PrimordialModuleMachine.ParallelTable.STANDARD,
                     false),
-            new ModuleSpec(
-                    "PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE",
-                    "primordial_supercritical_matter_generation_core",
-                    "Primordial Supercritical Matter Generation Core",
-                    StandardPrimordialModule::new,
-                    PrimordialMatterRecombinatorCoreStructure::createPattern,
-                    () -> RECIPE_SUPERCRITICAL_MATTER,
-                    PrimordialModuleMachine.ParallelTable.STANDARD,
-                    false),
-            new ModuleSpec(
-                    "PRIMORDIAL_ETERNAL_SMELTING_FURNACE",
-                    "primordial_eternal_smelting_furnace",
-                    "Primordial Eternal Smelting Furnace",
-                    StandardPrimordialModule::new,
-                    PrimordialMatterRecombinatorCoreStructure::createPattern,
-                    () -> RECIPE_ETERNAL_SMELTING,
-                    PrimordialModuleMachine.ParallelTable.STANDARD,
-                    false),
+            // ⛔ 2026-11-01（用户授权删除）：原「原初超临界物质生成核心」「原初永恒熔炼炉」两条
+            //    ModuleSpec 行已删（连同它们的句柄常量 / init() 的 require / lang / 创造栏那一行）。
+            //    承接它们类型的新机见本表末尾的 #2 与 #6。
             // ═════════ 2026-09 补齐的 18 个模块（guide 权威清单 25 个 − 铸币厂 − 已做 6 个 = 18） ═════════
             // 每条一行；机器类全部复用 StandardPrimordialModule（纯标准模块，类体只有构造器），
             // 结构图案全部复用 PrimordialMatterRecombinatorCoreStructure::createPattern
@@ -1510,51 +1867,10 @@ public final class ModuleRegistry {
                     () -> RECIPE_MULTIDIMENSIONAL_IMPLOSION,
                     PrimordialModuleMachine.ParallelTable.STANDARD,
                     false),
-            new ModuleSpec(
-                    "PRIMORDIAL_TIANQIONG_ASSEMBLY_CORE",
-                    "primordial_tianqiong_assembly_core",
-                    "Primordial Tianqiong Assembly Core",
-                    StandardPrimordialModule::new,
-                    PrimordialMatterRecombinatorCoreStructure::createPattern,
-                    () -> RECIPE_TIANQIONG_ASSEMBLY,
-                    PrimordialModuleMachine.ParallelTable.STANDARD,
-                    false),
-            new ModuleSpec(
-                    "PRIMORDIAL_WORLDLINE_TRAVERSAL_MATRIX",
-                    "primordial_worldline_traversal_matrix",
-                    "Primordial Worldline Traversal Matrix",
-                    StandardPrimordialModule::new,
-                    PrimordialMatterRecombinatorCoreStructure::createPattern,
-                    () -> RECIPE_WORLDLINE_TRAVERSAL,
-                    PrimordialModuleMachine.ParallelTable.STANDARD,
-                    false),
-            new ModuleSpec(
-                    "PRIMORDIAL_QUANTUM_DISTORTION_MATRIX",
-                    "primordial_quantum_distortion_matrix",
-                    "Primordial Quantum Distortion Matrix",
-                    StandardPrimordialModule::new,
-                    PrimordialMatterRecombinatorCoreStructure::createPattern,
-                    () -> RECIPE_QUANTUM_DISTORTION,
-                    PrimordialModuleMachine.ParallelTable.STANDARD,
-                    false),
-            new ModuleSpec(
-                    "PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE",
-                    "primordial_shaoguang_aggregation_core",
-                    "Primordial Shaoguang Aggregation Core",
-                    StandardPrimordialModule::new,
-                    PrimordialMatterRecombinatorCoreStructure::createPattern,
-                    () -> RECIPE_SHAOGUANG_AGGREGATION,
-                    PrimordialModuleMachine.ParallelTable.STANDARD,
-                    false),
-            new ModuleSpec(
-                    "PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE",
-                    "primordial_weiyang_reconstruction_module",
-                    "Primordial Weiyang Reconstruction Module",
-                    StandardPrimordialModule::new,
-                    PrimordialMatterRecombinatorCoreStructure::createPattern,
-                    () -> RECIPE_WEIYANG_RECONSTRUCTION,
-                    PrimordialModuleMachine.ParallelTable.STANDARD,
-                    false),
+            // ⛔ 2026-11-01（用户授权删除）：原「原初天琼组装核心」「原初世线穿刺矩阵」
+            //    「原初量子扭曲矩阵」「原初韶光聚合核心」「原初未央重构模块」五条 ModuleSpec 行已删
+            //    （连同句柄常量 / init() 的 require / lang / 创造栏那一行）。
+            //    承接它们类型的新机见本表末尾的 #1 / #3 / #4 / #5 / #7 / #8。
             new ModuleSpec(
                     "PRIMORDIAL_ENGRAVING_MODULE",
                     "primordial_engraving_module",
@@ -1654,6 +1970,133 @@ public final class ModuleRegistry {
                     StandardPrimordialModule::new,
                     PrimordialMatterRecombinatorCoreStructure::createPattern,
                     () -> RECIPE_DEEP_SPACE_EXTRACTION_CORE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            // ═════════ 🟢 第 30 台（2026）：原初造物编译矩阵（AE 合成样板路线的模块） ═════════
+            //  · 中文名 = 用户亲定「原初造物编译矩阵」（**不要**复用上游那套「分子操纵者」的命名）；
+            //  · 它**不**复用 PrimordialMatterRecombinatorCoreStructure：自己的结构类多留了一个"端口位"
+            //    （把 .bin 里只出现一次的 G 格放宽成「外壳 ∪ 造物样板端口」），见该类注释；
+            //  · 配方类型：P1 挂一条原版类型（行为与其余 29 台一致），AE 路径见 RECIPE_CREATION_COMPILATION_MATRIX；
+            //  · 并行表：STANDARD —— 与 29 台里 26 台同口径（那套"物质模块 → 并行"是主机的公共口径，
+            //    本台**没有**另开一张表；P2 的 k^等级 走的是它自己的 extraParallelFor(...)，两者不冲突）；
+            //  · P1 只做骨架（能造/能装/能成型/能开界面/能放样板/AE 看得见样板），**不接单执行**。
+            new ModuleSpec(
+                    "PRIMORDIAL_CREATION_COMPILATION_MATRIX",
+                    PrimordialCreationCompilationMatrix.MACHINE_PATH,
+                    "Primordial Creation Compilation Matrix",
+                    PrimordialCreationCompilationMatrix::new,
+                    PrimordialCreationCompilationMatrixStructure::createPattern,
+                    () -> RECIPE_CREATION_COMPILATION_MATRIX,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            // ═════════ 🟢 2026-10-31 新增第 31／32 台（用户点单；两台都是"类型并集"型） ═════════
+            //  机器类 / 结构图案 / 并行表 / generator 四项**全部照抄第 26~30 台**
+            //  （StandardPrimordialModule + PrimordialMatterRecombinatorCoreStructure::createPattern
+            //    + STANDARD + false）⇒ 用户要求"结构/并行表/骨架照现有模块"，且**不做任何新机制**。
+            //  唯一不同的是 recipeTypes 那一个数组。
+            new ModuleSpec(
+                    "PRIMORDIAL_DIMENSIONAL_PROCESS_CLUSTER_HUB",
+                    "primordial_dimensional_process_cluster_hub",
+                    "Primordial Dimensional Process Cluster Hub",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    // 46 条（临界加工 ∪ 多维聚爆 ∪ 分子裂隙 ∪ 世线蚀刻，去重后）
+                    () -> RECIPE_DIMENSIONAL_PROCESS_CLUSTER_HUB,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            new ModuleSpec(
+                    "PRIMORDIAL_RETROSPECTIVE_EVOLUTION_CORE",
+                    "primordial_retrospective_evolution_core",
+                    "Primordial Retrospective Evolution Core",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    // 3 条（物质重组 ∪ 因果编织 ∪ 奇点反演，各 1 条、无重复）
+                    () -> RECIPE_RETROSPECTIVE_EVOLUTION_CORE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            // ═════════ 🆕 2026-11-01 新增 8 台（用户拍板：删 7 台 + 新增 8 台 ⇒ 32−7+8 = 33 台） ═════════
+            //  骨架四项全部照抄第 26~32 台（用户要求"骨架照既有新增模块的做法"）：
+            //  StandardPrimordialModule::new ＋ PrimordialMatterRecombinatorCoreStructure::createPattern
+            //  ＋ ParallelTable.STANDARD ＋ false（非发电机）；**不做任何新机制**、**不新增 .bin**。
+            //  ⚠️ #1/#6/#7 的中文名继承自被删的那三台，**id 全部新建**（一个旧 id 都没复用）。
+            new ModuleSpec(
+                    // #1 原初天琼组装核心 —— 太空四工序（电梯 / 采矿 / 钻井 / 组装）
+                    "PRIMORDIAL_SPACE_MODULE_CORE",
+                    "primordial_space_module_core",
+                    "Primordial Space Module Core",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_SPACE_MODULE_CORE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            new ModuleSpec(
+                    // #2 原初混沌质能熔炉 —— 质量发生器 / 物质生成机 / 混沌编织 / 材料回收
+                    "PRIMORDIAL_MASS_ENERGY_FURNACE",
+                    "primordial_mass_energy_furnace",
+                    "Primordial Mass Energy Furnace",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_MASS_ENERGY_FURNACE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            new ModuleSpec(
+                    // #3 原初星基勘掘矩阵 —— 魔力生成 / 基岩钻机 / 宇宙探测 / 天基宇宙探测 / 地脉断层发生器
+                    "PRIMORDIAL_STAR_PROSPECTING_MATRIX",
+                    "primordial_star_prospecting_matrix",
+                    "Primordial Star Prospecting Matrix",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_STAR_PROSPECTING_MATRIX,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            new ModuleSpec(
+                    // #4 原初超临界装配精炼核心 —— 超临界合成 / 原子能激发 / 燃料精炼 / 聚合装置 / 超时空装配线
+                    "PRIMORDIAL_SUPERCRITICAL_ASSEMBLY_REFINING_CORE",
+                    "primordial_supercritical_assembly_refining_core",
+                    "Primordial Supercritical Assembly Refining Core",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_SUPERCRITICAL_ASSEMBLY_REFINING_CORE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            new ModuleSpec(
+                    // #5 原初微纳深化学核心 —— 纳米蜂群工厂 / 原初蜂群铸造 / 深度化学扭曲仪 / PCB工厂
+                    "PRIMORDIAL_MICRO_NANO_CHEMISTRY_CORE",
+                    "primordial_micro_nano_chemistry_core",
+                    "Primordial Micro Nano Chemistry Core",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_MICRO_NANO_CHEMISTRY_CORE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            new ModuleSpec(
+                    // #6 原初永恒熔炼炉（中文名继承旧机、id 新建）—— 6 条全在 RECIPE_ETERNAL_MELTING_CORE
+                    "PRIMORDIAL_ETERNAL_MELTING_CORE",
+                    "primordial_eternal_melting_core",
+                    "Primordial Eternal Melting Core",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_ETERNAL_MELTING_CORE,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            new ModuleSpec(
+                    // #7 原初量子扭曲矩阵（中文名继承旧机、id 新建）—— 龙蛋复制 / QFT / 元素复制 / 奇点压缩 / 物质异化
+                    "PRIMORDIAL_QUANTUM_WARP_MATRIX",
+                    "primordial_quantum_warp_matrix",
+                    "Primordial Quantum Warp Matrix",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_QUANTUM_WARP_MATRIX,
+                    PrimordialModuleMachine.ParallelTable.STANDARD,
+                    false),
+            new ModuleSpec(
+                    // #8 原初创世现实矩阵 —— 7 条（末条是本工程自有的 spacetime_distortion）
+                    "PRIMORDIAL_GENESIS_REALITY_MATRIX",
+                    "primordial_genesis_reality_matrix",
+                    "Primordial Genesis Reality Matrix",
+                    StandardPrimordialModule::new,
+                    PrimordialMatterRecombinatorCoreStructure::createPattern,
+                    () -> RECIPE_GENESIS_REALITY_MATRIX,
                     PrimordialModuleMachine.ParallelTable.STANDARD,
                     false)
             // 0 个待后续阶段：guide 权威清单的 25 个模块里，铸币厂（primordial_coin_forge）已被用户删除，
@@ -1809,9 +2252,8 @@ public final class ModuleRegistry {
         PRIMORDIAL_CRITICAL_PROCESSING_MODULE = require("PRIMORDIAL_CRITICAL_PROCESSING_MODULE");
         PRIMORDIAL_COSMIC_REACTOR = require("PRIMORDIAL_COSMIC_REACTOR");
         PRIMORDIAL_MOLECULAR_RIFT_CORE = require("PRIMORDIAL_MOLECULAR_RIFT_CORE");
-        PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE =
-                require("PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE");
-        PRIMORDIAL_ETERNAL_SMELTING_FURNACE = require("PRIMORDIAL_ETERNAL_SMELTING_FURNACE");
+        // ⛔ 2026-11-01（用户授权删除）：原「原初超临界物质生成核心」「原初永恒熔炼炉」两条 require
+        //    已随之删除（句柄字段同时删除）。
         // ───── 2026-09 补齐的 18 个模块句柄（顺序 = SPECS 顺序，缺一个就在加载期带 id 炸掉） ─────
         PRIMORDIAL_VOID_INDUCTION_ARMATURE = require("PRIMORDIAL_VOID_INDUCTION_ARMATURE");
         PRIMORDIAL_BIOLOGICAL_CORE = require("PRIMORDIAL_BIOLOGICAL_CORE");
@@ -1825,11 +2267,9 @@ public final class ModuleRegistry {
         PRIMORDIAL_MATTER_CASTER = require("PRIMORDIAL_MATTER_CASTER");
         PRIMORDIAL_ASSEMBLY_LINE_MODULE = require("PRIMORDIAL_ASSEMBLY_LINE_MODULE");
         PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE = require("PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE");
-        PRIMORDIAL_TIANQIONG_ASSEMBLY_CORE = require("PRIMORDIAL_TIANQIONG_ASSEMBLY_CORE");
-        PRIMORDIAL_WORLDLINE_TRAVERSAL_MATRIX = require("PRIMORDIAL_WORLDLINE_TRAVERSAL_MATRIX");
-        PRIMORDIAL_QUANTUM_DISTORTION_MATRIX = require("PRIMORDIAL_QUANTUM_DISTORTION_MATRIX");
-        PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE = require("PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE");
-        PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE = require("PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE");
+        // ⛔ 2026-11-01（用户授权删除）：原「原初天琼组装核心」「原初世线穿刺矩阵」
+        //    「原初量子扭曲矩阵」「原初韶光聚合核心」「原初未央重构模块」五条 require 已随之删除
+        //    （句柄字段同时删除）。
         PRIMORDIAL_ENGRAVING_MODULE = require("PRIMORDIAL_ENGRAVING_MODULE");
         TAIXU_SMELTING_FURNACE = require("TAIXU_SMELTING_FURNACE");
         // ───── 2026-09-26 新增第 25 台（原初山海调试模块） ─────
@@ -1844,6 +2284,24 @@ public final class ModuleRegistry {
         // ───── 🟢 2026-10-03 新增第 29 台（原初深空汲取核心）─────
         PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE =
                 require("PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE");
+        // ───── 🟢 第 30 台（原初造物编译矩阵）：AE 合成样板路线的模块 ─────
+        PRIMORDIAL_CREATION_COMPILATION_MATRIX =
+                require("PRIMORDIAL_CREATION_COMPILATION_MATRIX");
+        // ───── 🟢 2026-10-31 新增第 31／32 台（甲：原初维度工序集束枢纽；乙：原初溯演核心）─────
+        PRIMORDIAL_DIMENSIONAL_PROCESS_CLUSTER_HUB =
+                require("PRIMORDIAL_DIMENSIONAL_PROCESS_CLUSTER_HUB");
+        PRIMORDIAL_RETROSPECTIVE_EVOLUTION_CORE =
+                require("PRIMORDIAL_RETROSPECTIVE_EVOLUTION_CORE");
+        // ───── 🆕 2026-11-01 新增 8 台（顺序 = SPECS 顺序；缺一个就在这里带 id 抛异常） ─────
+        PRIMORDIAL_SPACE_MODULE_CORE = require("PRIMORDIAL_SPACE_MODULE_CORE");
+        PRIMORDIAL_MASS_ENERGY_FURNACE = require("PRIMORDIAL_MASS_ENERGY_FURNACE");
+        PRIMORDIAL_STAR_PROSPECTING_MATRIX = require("PRIMORDIAL_STAR_PROSPECTING_MATRIX");
+        PRIMORDIAL_SUPERCRITICAL_ASSEMBLY_REFINING_CORE =
+                require("PRIMORDIAL_SUPERCRITICAL_ASSEMBLY_REFINING_CORE");
+        PRIMORDIAL_MICRO_NANO_CHEMISTRY_CORE = require("PRIMORDIAL_MICRO_NANO_CHEMISTRY_CORE");
+        PRIMORDIAL_ETERNAL_MELTING_CORE = require("PRIMORDIAL_ETERNAL_MELTING_CORE");
+        PRIMORDIAL_QUANTUM_WARP_MATRIX = require("PRIMORDIAL_QUANTUM_WARP_MATRIX");
+        PRIMORDIAL_GENESIS_REALITY_MATRIX = require("PRIMORDIAL_GENESIS_REALITY_MATRIX");
     }
 
     private static MultiblockMachineDefinition register(ModuleSpec spec) {
@@ -1914,9 +2372,15 @@ public final class ModuleRegistry {
                         spec.path(),
                         String.valueOf(PrimordialModuleMachine.DEFAULT_PARALLEL),
                         String.valueOf(PrimordialModuleMachine.CROSS_RECIPE_THREADS),
-                        recipeTypes))
-                .register();
-    }
+                        recipeTypes,
+                        // 🔴 2026-10-31（用户实机：「把这个组装机改了，改成工作台，不然有歧义」）：
+                        //    这一台**只改显示** —— 内部 {recipeTypes} 仍是 ASSEMBLER_RECIPES（一个字都不动，
+                        //    它是防 getRecipeTypes() 空数组越界的那个真类型，P1 结论）。显示那一行
+                        //    按翻译键 shanhai.tooltip.recipe_types **整行替换**成「工作台合成（AE 合成样板）」。
+                        PrimordialCreationCompilationMatrix.MACHINE_PATH.equals(spec.path())
+                                ? MachineTooltips.aeCraftingRecipeTypesLine()
+                                : null))
+                .register();    }
 
     // ═════════════════════════════ 模块侧的 recipeModifier 组合 ═════════════════════════════
 

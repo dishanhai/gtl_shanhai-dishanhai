@@ -1,9 +1,12 @@
 package com.shanhai.common.recipe.editor;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 山海重构 · <b>「我们自己 addRecipes 进 JEI 的那一份」的句柄台账</b>（纯 Java，不碰任何 MC / JEI 类）。
@@ -42,6 +45,18 @@ public final class ShanhaiJeiOwnCopies {
     /** 键 ⇒ 我们自己加进去的实例（保留插入顺序，便于读日志）。 */
     private static final Map<String, List<Object>> OWN = new LinkedHashMap<>();
 
+    /**
+     * 🆕 <b>同一张台账的"按实例同一性"视图</b>（O(1) 判"这一份是不是我们自己加进去的"）。
+     *
+     * <h4>为什么必须单独存一份身份集合，不能遍历 {@link #OWN} 去找</h4>
+     * 调用方是 {@code patched()} —— 它<b>每一拍查询都跑</b>（JEI 每算一次布局就跑好几拍），
+     * 在里面遍历整张台账（键数 × 每键份数）纯属给主线程加工作量；
+     * 而这件事只需要一个 {@code identityHashCode} 级别的判断。
+     * <p>语义与 JEI 那侧对齐：{@code RecipeTypeData.hiddenRecipes} 也是
+     * {@code Collections.newSetFromMap(new IdentityHashMap<>())}（字节码实测）⇒ <b>同一套身份口径</b>。
+     */
+    private static final Set<Object> OWN_IDENTITY = Collections.newSetFromMap(new IdentityHashMap<>());
+
     /** 台账的键（分类 uid ＋ 完整 recipe id）。 */
     public static String key(String typeId, String recipeId) {
         return (typeId == null ? "?" : typeId) + '\u0000' + (recipeId == null ? "?" : recipeId);
@@ -75,6 +90,9 @@ public final class ShanhaiJeiOwnCopies {
         if (!dropped) {
             return List.of();
         }
+        for (Object o : out) {
+            OWN_IDENTITY.remove(o);          // 取走了 ⇒ 不再算"我们的"（撤不掉时调用方会 recordAll 放回来）
+        }
         if (keep.isEmpty()) {
             OWN.remove(key);
         } else {
@@ -91,6 +109,36 @@ public final class ShanhaiJeiOwnCopies {
      */
     public static List<Object> drain(String key) {
         final List<Object> all = OWN.remove(key);
+        if (all == null) {
+            return List.of();
+        }
+        for (Object o : all) {
+            OWN_IDENTITY.remove(o);
+        }
+        return new ArrayList<>(all);
+    }
+
+    /**
+     * 🆕 <b>这一份是不是我们自己 {@code addRecipes} 进去的</b>（按实例同一性，O(1)）。
+     *
+     * <p>用途：{@code patched()} 那一层要知道"JEI 交给我的这一条，是我加的那一版，还是它原来那份"——
+     * <ul>
+     *   <li>是我们的 ⇒ <b>原样放行</b>（它就是"改过之后的那一条"，再 synth 一遍纯属重复劳动）；</li>
+     *   <li>不是我们的 ⇒ 走原来的"按 id 换成我们造的那一份"那条路（不变）。</li>
+     * </ul>
+     */
+    public static boolean isOurs(Object instance) {
+        return instance != null && OWN_IDENTITY.contains(instance);
+    }
+
+    /**
+     * 🆕 <b>这个键下我们自己登记过的全部句柄</b>（只读快照；改不到台账）。
+     *
+     * <p>用途：{@code applyChanged} 第 ③ 步"hide 原稿"时必须把<b>我们自己的</b>排掉
+     * —— 排除口径就用这份快照（而不是"这一版的新实例"），因为上一版可能撤不掉、还在可见里。
+     */
+    public static List<Object> snapshot(String key) {
+        final List<Object> all = OWN.get(key);
         return all == null ? List.of() : new ArrayList<>(all);
     }
 
@@ -106,6 +154,7 @@ public final class ShanhaiJeiOwnCopies {
             }
         }
         all.add(instance);
+        OWN_IDENTITY.add(instance);          // 身份视图跟着更新（{@link #isOurs} 的 O(1) 那条）
     }
 
     /** 把一批实例放回台账（撤不掉时用：句柄绝不静默丢失）。 */
@@ -166,6 +215,20 @@ public final class ShanhaiJeiOwnCopies {
                 + " expected=2 PASS=" + (ownCount(k2) == 2) + " (旧写法下句柄与实例 1:1 堆叠 ⇒ 就是"
                 + "「改一次多一份」的记账形态；本行绿 = 这条判据有判别力)");
         drain(k2);
+
+        // 🆕 2026-11-01：身份视图（isOurs / snapshot）—— 改配方那三步顺序靠它判"这一份是不是我们的"。
+        final String k3 = key("gtceu:demo", "shanhai:demo/new_recipe_3");
+        final Object ours = new Object();
+        final Object stranger = new Object();
+        record(k3, ours);
+        final List<Object> snap = snapshot(k3);
+        lines.add("JEI_OWN is_ours own=" + isOurs(ours) + " stranger=" + isOurs(stranger)
+                + " expected_own=true expected_stranger=false PASS=" + (isOurs(ours) && !isOurs(stranger))
+                + " snapshot=" + snap.size() + " snapshot_hit=" + (!snap.isEmpty() && snap.get(0) == ours)
+                + " PASS_snapshot=" + (snap.size() == 1));
+        drain(k3);
+        lines.add("JEI_OWN is_ours_after_drain own=" + isOurs(ours) + " expected=false PASS=" + !isOurs(ours)
+                + " (取走之后必须不再算我们的，否则『撤掉的那份』会被当成『我们这一版』而永不被 hide)");
         return lines.toArray(new String[0]);
     }
 

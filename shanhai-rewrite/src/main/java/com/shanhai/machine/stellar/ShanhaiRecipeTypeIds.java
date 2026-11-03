@@ -1,9 +1,13 @@
 package com.shanhai.machine.stellar;
 
 import com.gregtechceu.gtceu.api.registry.GTRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -23,10 +27,30 @@ import java.util.Map;
  * <h2>二、归一化的四步（顺序不能换）</h2>
  * <ol>
  *   <li>去空白、去掉可能残留的一对双引号；</li>
- *   <li><b>别名表</b>（本文件唯一的别名来源）—— {@code smelting}/{@code furnace} ⇒ {@code gtceu:electric_furnace}；</li>
- *   <li>没写命名空间 ⇒ 补 {@code gtceu:}（GT 的配方类型绝大多数在这个命名空间）；</li>
- *   <li>{@link ResourceLocation#tryParse} 兜底：解析不出 ⇒ 返回 {@code ""}（= 当没有），绝不返回半成品。</li>
+ *   <li><b>① 已是可用 id</b> —— 形如 {@code ns:path}、{@link ResourceLocation#tryParse} 能解析、
+ *       <b>并且</b>{@link #exists(String)} 为真 ⇒ <b>原样返回</b>（<b>不做任何二次转换</b>）；</li>
+ *   <li><b>② 别名表</b>（本文件唯一的别名来源）—— {@code smelting}/{@code furnace} ⇒ {@code gtceu:electric_furnace}；</li>
+ *   <li><b>③ 显示名反查</b>（2026-11 新增，见 §二½）—— 中文名 / 英文显示名 ⇒ 类型 id；</li>
+ *   <li><b>④ 老兜底</b> —— 没写命名空间 ⇒ 补 {@code gtceu:}；{@link ResourceLocation#tryParse} 兜底：
+ *       解析不出 ⇒ 返回 {@code ""}（= 当没有），绝不返回半成品。</li>
  * </ol>
+ *
+ * <h2>二½、🔴 为什么必须加「③ 显示名反查」（本轮实机证据）</h2>
+ * <pre>
+ *   17:35:26 [SHANHAI-STELLAR] XRECIPE slot=3 … slotType=none … verdict=NO_BIND
+ *   17:35:31 [SHANHAI-WHY] #6 产物=shanhai:light_voyage × 8 声明类型=unknown
+ * </pre>
+ * 而玩家界面上的类型胶囊明明写着「原初因果编织」。老的四步里<b>没有一步认中文</b>：
+ * {@code 原初因果编织} ⇒ 补成 {@code gtceu:原初因果编织} ⇒ {@code tryParse} 必失败
+ * （{@code ResourceLocation} 的 path 只允许 {@code [a-z0-9_.-]}）⇒ 返回 {@code ""} ⇒ NONE。
+ * 于是新增第 ③ 步：拿<b>宿主真实注册表 + 语言表</b>现建一张
+ * 「显示名 → id」反查表（{@link ShanhaiRecipeTypeNameIndex}），整串相等才命中，
+ * <b>查不到就继续走 ④ / 最终返回 NONE，绝不猜</b>。
+ * <p>⚠️ 这张表<b>一个中文都没有手写</b>：键来自 {@code GTRegistries.RECIPE_TYPES}，
+ * 值来自 {@link ShanhaiRecipeTypeLabels#displayName}（上游 5 级 lang 回退链）。
+ * <p>⚠️ 语言表没就绪（例如专用服务器）⇒ 表建出来是空的 ⇒ <b>不缓存</b>、按
+ * {@link #NAME_INDEX_RETRY_MS} 限频重试；此时行为与加这一步之前<b>完全一致</b>（反查这一路永远查不到）。
+ *
  * <p>🔴 「-」会被折成「_」：GT 的配方类型 id 全部是下划线（已用 {@code RecipeTypeCatalog} 的注册表枚举证过），
  * 而玩家手输 {@code electric-furnace} 的本意必然是 {@code electric_furnace}。
  * 代价：真有以「-」命名的第三方类型会被折错 —— 这种类型在本环境里<b>没有</b>，若将来出现，
@@ -81,6 +105,9 @@ public final class ShanhaiRecipeTypeIds {
     /**
      * 把「玩家/别的模组写下来的任意字符串」归一化成一个<b>可用的</b>配方类型 id。
      *
+     * <p>四步见类注释 §二：① 已是可用 id ⇒ 原样；② 别名表；③ 显示名反查（中文/英文）；
+     * ④ 老兜底（补命名空间 + {@code tryParse}）。
+     *
      * @return 归一化后的 id；{@code ""} = 这条值不可用（当它不存在，由调用方决定「没有」还是「歧义」）
      */
     public static String canonical(@Nullable String raw) {
@@ -95,10 +122,26 @@ public final class ShanhaiRecipeTypeIds {
         if (s.isEmpty()) {
             return "";
         }
+
+        // ---- ① 已经是「能解析 + 宿主真有」的类型 id ⇒ 原样返回（🔴 不做二次转换）
+        final String asId = usableIdForm(s);
+        if (!asId.isEmpty()) {
+            return asId;
+        }
+
+        // ---- ② 别名表（位置与语义都保持原样，老行为不能regress）
         String alias = ALIASES.get(aliasKey(s));
         if (alias != null) {
             return alias;
         }
+
+        // ---- ③ 显示名反查：中文名 / 英文显示名 ⇒ 类型 id（表 = 注册表 + lang 现建，不写死名字）
+        final String byName = ShanhaiRecipeTypeNameIndex.lookup(nameIndexOf(), s);
+        if (!byName.isEmpty()) {
+            return byName;
+        }
+
+        // ---- ④ 老兜底：小写 + 「-」折「_」 + 没命名空间补 gtceu: + tryParse
         String normalized = s.toLowerCase(Locale.ROOT).replace('-', '_');
         if (normalized.indexOf(':') < 0) {
             normalized = DEFAULT_NAMESPACE + ":" + normalized;
@@ -108,7 +151,139 @@ public final class ShanhaiRecipeTypeIds {
     }
 
     /**
-     * 从一条<b>配方 id</b> 里推出配方类型 id：取第一个 {@code '/'} 之前那一段。
+     * 第 ① 步：「形如 {@code ns:path}、能解析、且宿主真有这个类型」⇒ 返回它的规范写法（= 原样）；否则 {@code ""}。
+     *
+     * <p>⚠️ 必须带冒号：不带冒号的裸串（{@code assembler}）会按 {@code minecraft:} 命名空间解析，
+     * 那样直接采信就等于<b>把「组装机」当成 {@code minecraft:assembler}</b> —— 所以这里只认显式命名空间。
+     */
+    private static String usableIdForm(@Nullable String s) {
+        if (s == null || s.isEmpty() || s.indexOf(':') <= 0) {
+            return "";
+        }
+        try {
+            final ResourceLocation id = ResourceLocation.tryParse(s);
+            if (id == null) {
+                return "";
+            }
+            return exists(id.toString()) ? id.toString() : "";
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    // ============================================================ ③ 的支撑：显示名反查表
+
+    /** 反查表（{@code null} = 还没建过；建出来是空表时<b>不进这里</b>，见 {@link #nameIndexOf()}）。 */
+    private static volatile Map<String, String> nameIndex;
+
+    /** 上次尝试建表的毫秒时刻（空表不缓存 ⇒ 靠它限频，避免每 tick 枚举一遍注册表 + 语言表）。 */
+    private static volatile long nameIndexLastAttemptMs = Long.MIN_VALUE;
+
+    /** 「表是空的 / 建表失败」的告警只打一次。 */
+    private static volatile boolean nameIndexWarned;
+
+    /** 空表时的重试间隔（毫秒）；语言表可能晚于本类首次被调用而就绪。 */
+    static final long NAME_INDEX_RETRY_MS = 5000L;
+
+    /**
+     * 显示名反查表（懒建 + 缓存）。
+     *
+     * <h2>怎么来的（🔴 一行中文都不手写）</h2>
+     * <pre>
+     *   for (entry : GTRegistries.RECIPE_TYPES.entries())          // 宿主真实存在的类型
+     *       name = ShanhaiRecipeTypeLabels.displayName(ns, path, key -> Component.translatable(key).getString())
+     *       if (name 有译文 &amp;&amp; name ≠ path)  entries.add(id, name)
+     *   map = ShanhaiRecipeTypeNameIndex.build(entries)             // 重名 ⇒ 该名字整体作废（不猜）
+     * </pre>
+     *
+     * <h2>🔴 为什么「空表不缓存」</h2>
+     * 专用服务器上客户端语言表不存在 ⇒ 每一级 {@code Component.translatable(k).getString()} 都返回键本身
+     * ⇒ {@code displayName} 退化成 {@code path} ⇒ <b>表必然是空的</b>。若把空表缓存下来，
+     * 一旦首次调用发生在语言表就绪之前（整合服/资源重载），反查就<b>永久失效</b>。
+     * 所以：空 ⇒ 不缓存 + 按 {@link #NAME_INDEX_RETRY_MS} 限频重试（与 {@code RecipeTypeCatalog} 同一条纪律）。
+     * <p>任何异常（注册表未就绪 / gtlcore 缺席）⇒ 返回空表，<b>不抛</b>（本类会在 tick 与渲染路径上被调用）。
+     */
+    private static @NotNull Map<String, String> nameIndexOf() {
+        final Map<String, String> cached = nameIndex;
+        if (cached != null) {
+            return cached;
+        }
+        final long now = System.currentTimeMillis();
+        if (nameIndexLastAttemptMs != Long.MIN_VALUE && now - nameIndexLastAttemptMs < NAME_INDEX_RETRY_MS) {
+            return Map.of();
+        }
+        synchronized (ShanhaiRecipeTypeIds.class) {
+            if (nameIndex != null) {
+                return nameIndex;
+            }
+            nameIndexLastAttemptMs = System.currentTimeMillis();
+            try {
+                final List<ShanhaiRecipeTypeNameIndex.Entry> entries = new ArrayList<>();
+                for (Map.Entry<ResourceLocation, ?> entry : GTRegistries.RECIPE_TYPES.entries()) {
+                    final ResourceLocation id = entry == null ? null : entry.getKey();
+                    if (id == null) {
+                        continue;
+                    }
+                    final String name = ShanhaiRecipeTypeLabels.displayName(id.getNamespace(), id.getPath(),
+                            key -> Component.translatable(key).getString());
+                    if (name == null || name.isEmpty()
+                            || name.equals(id.getPath())
+                            || ShanhaiRecipeTypeLabels.UNKNOWN.equals(name)) {
+                        // 没有译文（服务器/键缺失）：这个 id 不进反查表 —— 它没有任何「名字」可言
+                        continue;
+                    }
+                    entries.add(new ShanhaiRecipeTypeNameIndex.Entry(id.toString(), name));
+                }
+                if (entries.isEmpty()) {
+                    if (!nameIndexWarned) {
+                        nameIndexWarned = true;
+                        ShanhaiStellarLog.warn("配方类型显示名反查表为空（语言表还没就绪？）⇒ 本轮不缓存，"
+                                + "{} ms 后重试；在此之前「中文名 ⇒ id」这条容错不生效（老路径不变）",
+                                Long.valueOf(NAME_INDEX_RETRY_MS));
+                    }
+                    return Map.of();
+                }
+                final Map<String, String> built = ShanhaiRecipeTypeNameIndex.build(entries);
+                nameIndex = built;
+                final Map<String, List<String>> clash = ShanhaiRecipeTypeNameIndex.ambiguousNames(entries);
+                ShanhaiStellarLog.info("配方类型显示名反查表已建 count={}（来源=GTRegistries.RECIPE_TYPES × lang；重名作废 {} 个）",
+                        Integer.valueOf(ShanhaiRecipeTypeNameIndex.size(built)), Integer.valueOf(clash.size()));
+                return built;
+            } catch (Throwable t) {
+                if (!nameIndexWarned) {
+                    nameIndexWarned = true;
+                    ShanhaiStellarLog.warn("配方类型显示名反查表建表失败（按空表处理，老路径不变）：{}",
+                            String.valueOf(t));
+                }
+                return Map.of();
+            }
+        }
+    }
+
+    /** 反查表当前有多少条（日志/诊断读数用；会触发一次懒建）。 */
+    public static int nameIndexSize() {
+        return ShanhaiRecipeTypeNameIndex.size(nameIndexOf());
+    }
+
+    /**
+     * <b>只给离线自证用</b>：直接指定反查表（{@code null} = 清掉、恢复按注册表 + 语言表现建）。
+     *
+     * <p>存在的理由：{@code GTRegistries.RECIPE_TYPES} 与语言表都要<b>运行期</b>才就绪，
+     * 而「中文名 ⇒ id」这条容错必须能在<b>裸 JVM</b> 里被实跑断言（含负对照）。
+     * 生产代码<b>不许</b>调它。
+     */
+    public static void probeSetNameIndex(@Nullable List<ShanhaiRecipeTypeNameIndex.Entry> entries) {
+        if (entries == null) {
+            nameIndex = null;
+            nameIndexLastAttemptMs = Long.MIN_VALUE;
+            nameIndexWarned = false;
+        } else {
+            nameIndex = ShanhaiRecipeTypeNameIndex.build(entries);
+            nameIndexLastAttemptMs = System.currentTimeMillis();
+        }
+    }
+
+    /** 从一条<b>配方 id</b> 里推出配方类型 id：取第一个 {@code '/'} 之前那一段。
      *
      * <p>依据：上游的 {@code PatternRecipeIdMatchPolicy.hasTypePrefix(typeId, recipeId)} 就是按这个
      * 「类型 id 是配方 id 的前缀」约定做匹配的（本工程 {@code temp/stellar-ground/upstream-*} 里可查）。

@@ -181,15 +181,11 @@ public final class ShanhaiCreativeModeTabs {
         acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_ASSEMBLY_LINE_MODULE);
         acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_CRITICAL_PROCESSING_MODULE);
         acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_MULTIDIMENSIONAL_IMPLOSION_CORE);
-        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_SUPERCRITICAL_MATTER_GENERATION_CORE);
+        // ⛔ 2026-11-01（用户授权删除）：原「原初超临界物质生成核心」那一行已删（字段同步删除）。
         acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_COSMIC_REACTOR);
         acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_MOLECULAR_RIFT_CORE);
-        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_TIANQIONG_ASSEMBLY_CORE);
-        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_ETERNAL_SMELTING_FURNACE);
-        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_WORLDLINE_TRAVERSAL_MATRIX);
-        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_QUANTUM_DISTORTION_MATRIX);
-        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_SHAOGUANG_AGGREGATION_CORE);
-        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_WEIYANG_RECONSTRUCTION_MODULE);
+        // ⛔ 2026-11-01（用户授权删除）：原「原初天琼组装核心」「原初永恒熔炼炉」「原初世线穿刺矩阵」
+        //    「原初量子扭曲矩阵」「原初韶光聚合核心」「原初未央重构模块」六行已删（字段同步删除）。
         acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_ENGRAVING_MODULE);
         acceptIfPresent(output, ModuleRegistry.TAIXU_SMELTING_FURNACE);
         acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_DEBUG_MODULE);
@@ -203,6 +199,30 @@ public final class ShanhaiCreativeModeTabs {
         //    "主机 + 全部原初模块"冻结段，位置口径与创建栏既有的"新模块追加在末尾"一致
         //    （不是 SPECS 顺序，是本段历史顺序）。
         acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_DEEP_SPACE_EXTRACTION_CORE);
+        // 🟢 第 30 台（2026）：原初造物编译矩阵（AE 合成样板路线的模块）。
+        //    同样追加在本段末尾 —— 本段是"主机 + 全部原初模块"的归属段，
+        //    而这栏的 displayItems 同时是 JEI 的物品表来源（见本类注释里那段取证）⇒
+        //    不放进来 = 游戏里搜不到这台模块。
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_CREATION_COMPILATION_MATRIX);
+        // 🟢 2026-10-31 新增（用户点单）：甲「原初维度工序集束枢纽」（第 31 台模块）。
+        //    归属与第 26~30 台相同 = 本段（"主机 + 全部原初模块"）。
+        //    放进来的理由与上一台逐字相同：本栏 displayItems 同时是 JEI 的物品表来源 ⇒
+        //    不放进来 = 游戏里搜不到这台模块。
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_DIMENSIONAL_PROCESS_CLUSTER_HUB);
+        // 🟢 2026-10-31 新增（用户点单）：乙「原初溯演核心」（第 32 台模块）。归属同上。
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_RETROSPECTIVE_EVOLUTION_CORE);
+        // 🆕 2026-11-01 新增 8 台（用户拍板：删 7 台 + 新增 8 台 ⇒ 33 台）。
+        //    归属与第 26~32 台相同 = 本段（"主机 + 全部原初模块"），追加在本段末尾。
+        //    放进来的理由与上面几台逐字相同：本栏 displayItems 同时是 JEI 的物品表来源 ⇒
+        //    不放进来 = 游戏里搜不到这台模块。顺序 = SPECS 顺序（#1..#8）。
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_SPACE_MODULE_CORE);
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_MASS_ENERGY_FURNACE);
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_STAR_PROSPECTING_MATRIX);
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_SUPERCRITICAL_ASSEMBLY_REFINING_CORE);
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_MICRO_NANO_CHEMISTRY_CORE);
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_ETERNAL_MELTING_CORE);
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_QUANTUM_WARP_MATRIX);
+        acceptIfPresent(output, ModuleRegistry.PRIMORDIAL_GENESIS_REALITY_MATRIX);
         output.accept(ShanhaiItems.WORLDLINE_CRACKING_HUB.asStack());
         output.accept(ShanhaiItems.SPACETIME_WAVE_MATRIX.asStack());
         output.accept(ShanhaiItems.WORLD_LINE_STRIPPING_OSCILLATION_GENERATOR.asStack());
@@ -226,6 +246,9 @@ public final class ShanhaiCreativeModeTabs {
         if (stellarSampleAssembler != null) {
             output.accept(stellarSampleAssembler.asStack());
         }
+        // 🔴 P3：造物样板端口（shanhai:creation_pattern_port）已整块删除 ——
+        //    用户拍板「改成控制器自己挂 AE」，AE 线缆直接贴「原初造物编译矩阵」控制器；
+        //    创造栏/JEI 里因此少一格（那台端口方块不再存在）。
 
         // ==================================================================
         // 段 2 · 17 个物质模块（等级 1..17）

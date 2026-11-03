@@ -245,7 +245,25 @@ jar {
                 //    指向另一个 jar 里的类」；它们的 mixin 类已随时钟搬进 com.shanhai.add.mixin.*。
                 //    保留的三份都是本体自己的：主配置（required:true）、gtladditions 两台机器的
                 //    自动倍率（required:false）、[SHANHAI-RLPROBE] 只读探针（required:false）。
-                'MixinConfigs'          : 'shanhai.mixin.json,shanhai.gtladditions.mixin.json,shanhai.probe.mixin.json',
+                // 🔴 2026-10-31 追加：第四份 `shanhai.meinfinitycell.mixin.json`
+                //    只装「把 ME 无限元件的单键容量 2.1G 抬到 9.22E」的 ShanhaiInfiniteCellCapMixin，
+                //    目标 = 第三方 mod 的 net.yxiao233.meinfinitycell.Meinfinitycell#getMax（可选依赖）。
+                //    照抄跨 mod 先例 `shanhai.gtladditions.mixin.json` 那一套
+                //    （`"required": false` + `"injectors": {"defaultRequire": 0}`，注入点写死 require = 0）：
+                //      ① 目标 mod 缺装 ⇒ Mixin 是按【目标类加载】应用的，那类永不加载 ⇒ 连失败都不会发生；
+                //      ② 目标类在、但 getMax 改名 ⇒ @Inject require = 0 ⇒ 跳过注入、只影响功能本身，
+                //         不打崩启动（MixinProcessor 实证 config.isRequired() ? ERROR : WARN）；
+                //      ③ 不许塞进 shanhai.mixin.json —— 那份 required:true，
+                //         混进去就等于「一个可选 mod 改签名 ⇒ 整个 shanhai 起不来」。
+                // 🔴 2026-11-01 追加：第五份 `shanhai.extendedaeplus.mixin.json`
+                //    只装「链 A 接管」那一个 mixin（ShanhaiCreationUploadChainAMixin），
+                //    目标 = 第三方 mod 的 com.extendedae_plus.util.uploadPattern.MatrixUploadUtil
+                //    #uploadFromEncodingMenuToMatrix（可选依赖：extendedae_plus 缺装时那类永不加载 ⇒ 连失败都不会发生）。
+                //    照抄上面 meinfinitycell / gtladditions 那一套（`"required": false` + `defaultRequire: 0`），
+                //    但注入点**显式**写死 require = 1：缺装 ⇒ 安静（类不加载）；
+                //    装了但方法签名漂了 ⇒ 一行 ERROR 级 WARN 把「接管失效」说出来，而不是悄悄不生效。
+                //    ③ 同样不许塞进 shanhai.mixin.json（那份 required:true，跨 mod 目标改签名会把启动打崩）。
+                'MixinConfigs'          : 'shanhai.mixin.json,shanhai.gtladditions.mixin.json,shanhai.probe.mixin.json,shanhai.meinfinitycell.mixin.json,shanhai.extendedaeplus.mixin.json',
         ])
     }
     // The refmap must sit at the JAR ROOT: shanhai.mixin.json references it by

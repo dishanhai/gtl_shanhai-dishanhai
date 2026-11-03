@@ -1130,6 +1130,11 @@ public final class ShanhaiRecipeEditorWorkspace {
                 ShanhaiRecipeDuration.bootOriginal(live.id) == null
                         ? "(absent)" : ShanhaiRecipeDuration.bootOriginal(live.id),
                 live.duration, conditions.size(), ShanhaiRecipeConditions.summary(conditions));
+        // 🆕 2026-11（用户拍板）：显示源裁决挪到【打开配方那一刻】—— 只加这一行接线，
+        //    上面读进缓冲的逻辑一个字没改（面板本来读的就是活配方 ⇒ 显示的就是 live）。
+        //    一致时它【一行日志都不打】；覆盖层 fields 与活配方对不上时才打
+        //    editor_show_source=live id=… why=overlay_mismatch diff=MISMATCH[…]，用户一打开就能看见。
+        ShanhaiRecipeEditorOps.displaySourceFor(server, live.id, live);
     }
 
     /**

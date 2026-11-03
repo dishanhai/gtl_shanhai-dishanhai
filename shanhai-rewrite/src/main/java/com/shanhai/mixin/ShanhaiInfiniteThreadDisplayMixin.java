@@ -6,6 +6,7 @@ import com.shanhai.ShanhaiMod;
 import com.shanhai.common.machine.PrimordialOmegaEngineMachine;
 import com.shanhai.common.recipe.PrimordialRecipeEffects;
 import com.shanhai.common.thread.ShanhaiParallelBudget;
+import com.shanhai.machine.creation.PrimordialCreationCompilationMatrix;
 import com.shanhai.machine.module.PrimordialModuleMachine;
 
 import net.minecraft.nbt.CompoundTag;
@@ -154,6 +155,12 @@ public class ShanhaiInfiniteThreadDisplayMixin {
                 return;
             }
             if (!(accessor.getBlockEntity() instanceof MetaMachineBlockEntity mbe)) {
+                return;
+            }
+            // 🔴 P5：第 30 台「原初造物编译矩阵」走**它自己的三行**，并把 GT 那两行**整段删掉**。
+            //    理由与做法见 shanhai$creationMatrixServerData 的注释（不许两套并存）。
+            if (mbe.getMetaMachine() instanceof PrimordialCreationCompilationMatrix matrix) {
+                shanhai$creationMatrixServerData(data, matrix);
                 return;
             }
             // 🔴 2026-09-25（任务 A）：模块那一支**先**走。这是**纯新增的两行** ——
@@ -323,6 +330,100 @@ public class ShanhaiInfiniteThreadDisplayMixin {
     /** 只打一次，避免 Jade 每次刷新都刷屏（与主机那条同一个理由）。 */
     @Unique
     private static boolean shanhai$moduleAnnounced = false;
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    //  P5：第 30 台「原初造物编译矩阵」—— 把 GT 那两行（64 并行 / 1 线程）整段替换成我们的三行
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+
+    /**
+     * 三行真值落在 Jade 服务端 NBT 的这三个键上（{@code shanhai_creation_line_1..3}）。
+     *
+     * <p>🔴 <b>必须是自己的键</b>：绝不复用 GT/gtladditions 的 {@code parallel} / {@code threads} —— 那两个键
+     * 一旦存在，gtladditions 的 {@code ParallelProviderMixin.appendTooltip} 就会画它自己的文案
+     * （「同时处理至多 N 个配方」/「拥有 N 个跨配方线程」），于是就会出现本工程明令禁止的
+     * <b>两套显示并存、互相矛盾</b>。
+     */
+    @Unique
+    private static final String SHANHAI$CREATION_LINE_KEY = "shanhai_creation_line_";
+
+    /** 三行的条数（写/读两侧共用；改条数只需改这一处）。 */
+    @Unique
+    private static final int SHANHAI$CREATION_LINE_COUNT = 3;
+
+    /** 只打一次（Jade 每次刷新都会走这里）。 */
+    @Unique
+    private static boolean shanhai$creationAnnounced = false;
+
+    /**
+     * <b>服务端</b>：给「原初造物编译矩阵」写三行真值 + <b>删掉 GT 那两个键</b>。
+     *
+     * <h2>为什么这样做（而不是"再叠三行"）</h2>
+     * 本类继承 {@link PrimordialModuleMachine} ⇒ 下面那段 {@code shanhai$moduleDisplay} 会按"模块"给它写
+     * {@code parallel = 模块并行槽值}（空槽 64）与 {@code threads = 1}。这两个数<b>与本机口径无关</b>
+     * （本机接 AE 合成单，不接 GT 配方，也没有跨配方线程）⇒ 用户实机看到的就是
+     * 「同时处理至多 64 个配方 / 拥有 1 个跨配方线程」这两行<b>假数据</b>。
+     * <p>做法：① 按<b>键名</b>删除 {@code parallel} / {@code threads}（gtladditions 的判据是
+     * {@code data.contains(...)} + 值 &gt; 0 ⇒ 键不存在时它<b>一行都不画</b>）；
+     * ② 写入我们自己的三个键，由 {@code shanhai$creationMatrixTooltip} 在客户端逐行画出。
+     * <p>⚠️ 只在<b>成型</b>时写（与 gtladditions「未成型不写」的行为对齐）。
+     */
+    private static void shanhai$creationMatrixServerData(CompoundTag data,
+                                                        PrimordialCreationCompilationMatrix matrix) {
+        // ① 先删上游/gtladditions 的两个键（按 **键名**，不按下标）
+        data.remove("parallel");
+        data.remove("threads");
+        if (!matrix.isFormed()) {
+            return;
+        }
+        // ② 三行真值（数字全部是本机活读：等级/并行/队列/进度）
+        final java.util.List<String> lines = matrix.creationDisplayLines();
+        for (int i = 0; i < SHANHAI$CREATION_LINE_COUNT && i < lines.size(); i++) {
+            data.putString(SHANHAI$CREATION_LINE_KEY + (i + 1), lines.get(i));
+        }
+        if (!shanhai$creationAnnounced) {
+            shanhai$creationAnnounced = true;
+            ShanhaiMod.LOGGER.info("[SHANHAI-DISPLAY] 原初造物编译矩阵抬头已换成三行真值（并删掉 GT 的 parallel/threads 两个键）：{}",
+                    lines);
+        }
+    }
+
+    /**
+     * <b>客户端</b>：把服务端那三行画到抬头上。
+     *
+     * <p>只认我们自己的键 ⇒ 其它 29 台模块与主机<b>一个像素都不受影响</b>（它们的 {@code parallel}/{'threads'}
+     * 照旧由 {@code shanhai$moduleDisplay} / 主机分支写、由 gtladditions 画）。
+     * <p>{@code require = 0}：纯显示增强，目标方法找不到时只该"少三行"，绝不许崩客户端。
+     */
+    @Inject(
+            method = "appendTooltip(Lsnownee/jade/api/ITooltip;Lsnownee/jade/api/BlockAccessor;Lsnownee/jade/api/config/IPluginConfig;)V",
+            at = @At("TAIL"),
+            remap = false,
+            require = 0)
+    private void shanhai$creationMatrixTooltip(ITooltip tooltip, BlockAccessor accessor, IPluginConfig config,
+                                               CallbackInfo ci) {
+        try {
+            if (tooltip == null || accessor == null) {
+                return;
+            }
+            final CompoundTag data = accessor.getServerData();
+            if (data == null || !data.contains(SHANHAI$CREATION_LINE_KEY + 1)) {
+                return; // 不是本机 ⇒ 一个字都不动（29 台模块 / 主机走原来那条路）
+            }
+            for (int i = 1; i <= SHANHAI$CREATION_LINE_COUNT; i++) {
+                final String key = SHANHAI$CREATION_LINE_KEY + i;
+                if (!data.contains(key)) {
+                    continue;
+                }
+                final String text = data.getString(key);
+                if (text == null || text.isEmpty()) {
+                    continue;
+                }
+                tooltip.add(Component.literal(text));
+            }
+        } catch (Throwable ignored) {
+            // 纯显示路径：任何异常都不允许影响游戏
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════
     //  2026-09-30（同日第二轮）：抬头加一行「已达最小配方时长 10 tick」提示

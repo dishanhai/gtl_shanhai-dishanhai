@@ -256,6 +256,10 @@ public final class ShanhaiRegistry {
      * <p>由 {@code ShanhaiMod} 构造器注册到 mod 事件总线（<b>不要</b>改成直接调用）。
      */
     public static void onMachineRegister(GTCEuAPI.RegisterEvent<ResourceLocation, MachineDefinition> event) {
+        // ② P3 起「原初造物编译矩阵」的 AE 身份在控制器自己身上（IInWorldGridNodeHost），
+        //    那个造物样板端口仓室方块已经删除 ⇒ 这里【不再】有"必须先注册端口"这一步。
+        //    ⚠️ 模块结构里原来给端口留的那一格（.bin 里的 'G'）已放宽成 Predicates.any()，
+        //       所以结构的求值不再依赖任何"先注册某个方块"的顺序。
         // ③ 主机（青铜神锻 / 原始终焉引擎）
         ShanhaiMachines.init();
         // ④ 由 ShanhaiMachines.init() 内部调用 ModuleRegistry.init()，
@@ -292,5 +296,8 @@ public final class ShanhaiRegistry {
                     + " 没有被注册：调用链应为 ShanhaiMod 构造器 → modEventBus.addGenericListener("
                     + "MachineDefinition.class, ShanhaiRegistry::onMachineRegister) → ShanhaiWildcardMachines.init()。");
         }
+        // 造物样板端口：🔴 P3 已整块删除（用户拍板「改成控制器自己挂 AE」），
+        // 所以这里不再有那条"端口没注册上就当场炸"的硬失败 —— 也就没有对应的静默退化形态了：
+        // 控制器的 AE 节点是它自己的字段，与注册顺序无关（见 PrimordialCreationCompilationMatrix）。
     }
 }

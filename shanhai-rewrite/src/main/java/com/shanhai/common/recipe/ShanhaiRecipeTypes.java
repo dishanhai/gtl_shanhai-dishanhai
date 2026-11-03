@@ -528,6 +528,20 @@ public final class ShanhaiRecipeTypes {
     //   2026-10-25 他点单「可以去实现了」⇒ 本轮落地，**英文 id 由本代理按中文名直译定**
     //   （三个 id 都是"中文名逐词直译"，他写配方时照 {@code gtceu:<id>} 用即可）。
     //
+    // 🔴 **现值（2026-10-31 用户点单后逐字如下，三个类型不再共用同一套 IO）**：
+    //      · 视界物质解压 {@code vision_matter_decompression} ⇒ {@code setMaxIOSize(6, 144, 3, 32)}（不动）；
+    //      · 视界能流抽取 {@code vision_energy_extraction}  ⇒ {@code setMaxIOSize(4, 4, 4, 4)}；
+    //      · 原初范式简化 {@code primordial_paradigm_simplification} ⇒ {@code setMaxIOSize(20, 20, 20, 20)}。
+    //    用户原话（2026-10-31）：「把原初范式简化这一个类型改成 20 物品输入，20 流体输入，20 物品输出，
+    //      20 流体输出；视界能流抽取改成 4 物品输入，4 流体输入，4 物品输出，4 流体输出，
+    //      这个就干脆不要那么大占一页了」。
+    //    ⚠️ GT 四元组顺序 = **（物品入, 物品出, 流体入, 流体出）**，不是"先入后出"的
+    //      （物品入, 流体入, 物品出, 流体出）—— 证据 = 本仓 {@code libs/gtceu-1.20.1-1.4.4.jar}
+    //      里 {@code GTRecipeType#setMaxIOSize(int,int,int,int)} 的 {@code javap -c}：
+    //      {@code iload_1}→IO.IN/Item、{@code iload_2}→IO.OUT/Item、{@code iload_3}→IO.IN/Fluid、
+    //      {@code iload_4}→IO.OUT/Fluid。两处需求四个数都相同 ⇒ 顺序不会把结果带偏。
+    //
+    // 📜 以下是 2026-10-25 拍板时的原文（**仅对视界物质解压仍然成立**；另两个已按上面那刀改掉）：
     // 🔴 IO 四元组 = {@code setMaxIOSize(6, 144, 3, 32)}【主代理拍的，不是从配方现算的 ——
     //    这三个类型到本轮为止**一条配方都没有**，数不出实际用量】。拍板理由（原文）：
     //      · 三个都是"黑洞里往外掏东西"的玩法 ⇒ 产出会很多 ⇒ 物品出取 <b>144</b>；
@@ -543,7 +557,18 @@ public final class ShanhaiRecipeTypes {
     //    详见 {@link #PRIMORDIAL_BIOLOGICAL_CORE} 那段「第二轮」注释）：
     //    {@code assets/gtceu/ui/recipe_type/} 下三份**独立**文件（文件名 = 类型 path）——
     //    {@code vision_matter_decompression.rtui} / {@code vision_energy_extraction.rtui} /
-    //    {@code primordial_paradigm_simplification.rtui}，三份同一套几何、root 都是 <b>298×240</b>：
+    //    {@code primordial_paradigm_simplification.rtui}。
+    //    🔴 2026-10-31 起**只有第一份**还是 2026-10-25 那套几何（<b>298×240</b>），另两份各自一套：
+    //      · {@code vision_energy_extraction.rtui} = <b>181×78</b>（用户："不要那么大占一页了"）：
+    //        物品入 4 (5,23,41,59 @y=1) → 流体入 4 (77,95,113,131 @y=1) → 进度条 (156,1)
+    //        → 物品出 4 (5..59 @y=37) → 流体出 4 (5..59 @y=55)；
+    //      · {@code primordial_paradigm_simplification.rtui} = <b>217×150</b>（每类 20 格）：
+    //        物品入 10 列×2 行 (x=5..167, y=1/19) → 流体入 10 列×2 行 (x=5..167, y=37/55)
+    //        → 进度条 (192,37) → 物品出 10 列×2 行 (y=73/91) → 流体出 10 列×2 行 (y=109/127)；
+    //        排布口径 = 用户拍过的"扩容量优先加列不要加行"（10 列 × 2 行）。
+    //      ⚠️ 两份都是 {@code temp/rtui-probe/gen_rtui.mjs} 生成的（该脚本 2026-10-31 起支持
+    //        输入分多列/多行 `itemInCols/fluidInCols/stackFluidIn`），**别手改二进制 NBT**。
+    //    📜 2026-10-25 那套几何（现仅 {@code vision_matter_decompression.rtui} 仍如此）：
     //      物品入 6 格 (5,1)…(95,1) → 流体入 3 格 (113,1)(131,1)(149,1) → 进度条 (174,1)
     //      物品出 144 = 16 列 × 9 行（x=5..275，y=37..181）→ 流体出 32 = 16 列 × 2 行（y=199 / 217）
     //    ⚠️ **不能省**：读不到 .rtui 时它会回落到"固定 3 列、行数 = Σ⌈上限/3⌉"
@@ -564,10 +589,10 @@ public final class ShanhaiRecipeTypes {
     /** 🆕 视界物质解压 —— 挂「归墟视界枢核」；IO 上限 (6, 144, 3, 32)「我拍的」，尚无配方。 */
     public static GTRecipeType VISION_MATTER_DECOMPRESSION;
 
-    /** 🆕 视界能流抽取 —— 挂「归墟视界枢核」；IO 上限 (6, 144, 3, 32)「我拍的」，尚无配方。 */
+    /** 🆕 视界能流抽取 —— 挂「归墟视界枢核」；IO 上限 **(4, 4, 4, 4)**（2026-10-31 用户点单缩小；原 (6,144,3,32)）。 */
     public static GTRecipeType VISION_ENERGY_EXTRACTION;
 
-    /** 🆕 原初范式简化 —— 挂「归墟视界枢核」；IO 上限 (6, 144, 3, 32)「我拍的」，尚无配方。 */
+    /** 🆕 原初范式简化 —— 挂「归墟视界枢核」；IO 上限 **(20, 20, 20, 20)**（2026-10-31 用户点单放大；原 (6,144,3,32)）。 */
     public static GTRecipeType PRIMORDIAL_PARADIGM_SIMPLIFICATION;
 
     /**
@@ -1540,9 +1565,13 @@ public final class ShanhaiRecipeTypes {
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
 
         // ═════════════ 2026-10-25 新增第 47／48／49 条（归墟视界枢核的三个自有类型）═════════════
-        // 🔴 本条【无上游原型】⇒ IO 四元组 (6, 144, 3, 32) 是【主代理拍的】，不是从配方现算的
+        // 🔴 本条【无上游原型】⇒ IO 四元组当初 (6, 144, 3, 32) 是【主代理拍的】，不是从配方现算的
         //    （这三个类型到本轮为止一条配方都没有）。拍板理由与 .rtui 几何见字段区那段长注释。
-        //    三个都各自有一份 .rtui（root 均 298×240），文件名 = 类型 path。
+        // 🔴 2026-10-31 用户点单改两个（原话见字段区）：视界能流抽取 (6,144,3,32) ⇒ **(4, 4, 4, 4)**、
+        //    原初范式简化 (6,144,3,32) ⇒ **(20, 20, 20, 20)**；视界物质解压不动。
+        //    ⇒ 两个 .rtui 同步重生成（181×78 / 217×150），槽位仍与这里的四元组**逐项相等**：
+        //      改完的判据 = `temp/rtui-probe/verify_rtui.mjs`（typed）＋ `verify_nbtlib.py`（第三方）
+        //      都必须 exit 0，且两者里写死的期望槽数与本行同步。
         //    链尾照同批新类型（第 42..46 条）的惯例：setEUIO(IN) ＋ setMaxTooltips(4) ＋
         //    PROGRESS_BAR_ARROW/LEFT_TO_RIGHT，**不挂 setSound**（用户 2026-09-22 裁决省略）。
         VISION_MATTER_DECOMPRESSION = register("vision_matter_decompression", "multiblock")
@@ -1552,13 +1581,13 @@ public final class ShanhaiRecipeTypes {
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
 
         VISION_ENERGY_EXTRACTION = register("vision_energy_extraction", "multiblock")
-                .setMaxIOSize(6, 144, 3, 32)
+                .setMaxIOSize(4, 4, 4, 4)      // (物品入, 物品出, 流体入, 流体出) —— 2026-10-31 用户点单
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);
 
         PRIMORDIAL_PARADIGM_SIMPLIFICATION = register("primordial_paradigm_simplification", "multiblock")
-                .setMaxIOSize(6, 144, 3, 32)
+                .setMaxIOSize(20, 20, 20, 20)  // (物品入, 物品出, 流体入, 流体出) —— 2026-10-31 用户点单
                 .setEUIO(IO.IN)
                 .setMaxTooltips(4)
                 .setProgressBar(GuiTextures.PROGRESS_BAR_ARROW, ProgressTexture.FillDirection.LEFT_TO_RIGHT);

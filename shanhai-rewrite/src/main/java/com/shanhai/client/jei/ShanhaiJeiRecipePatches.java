@@ -7,6 +7,8 @@ import com.gregtechceu.gtceu.integration.jei.recipe.GTRecipeWrapper;
 import com.shanhai.ShanhaiMod;
 import com.shanhai.common.recipe.editor.ShanhaiJeiBridge;
 import com.shanhai.common.recipe.editor.ShanhaiJeiOwnCopies;
+import com.shanhai.common.recipe.editor.ShanhaiJeiReplaceOrder;
+import com.shanhai.common.recipe.editor.ShanhaiJeiReplayBodyPlan;
 import com.shanhai.common.recipe.editor.ShanhaiJeiSyncPlan;
 import com.shanhai.common.recipe.editor.ShanhaiRecipeConditions;
 import com.shanhai.common.recipe.editor.ShanhaiRecipeIoApply;
@@ -62,6 +64,10 @@ public final class ShanhaiJeiRecipePatches {
     public static final String PREFIX = "[SHANHAI-JEIPATCH]";
 
     private static final Map<String, Patch> PATCHES = new ConcurrentHashMap<>();
+
+    /** "这一条的重发被判定为逐字相同"的日志闸（每个 id 只打一行，避免三拍各刷一遍）。 */
+    private static final java.util.Set<String> UNCHANGED_LOGGED =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private ShanhaiJeiRecipePatches() {}
 
@@ -162,6 +168,14 @@ public final class ShanhaiJeiRecipePatches {
         int hidden;
         int added;
 
+        /**
+         * 🆕 2026-11-01：这一拍里"JEI 交给我们的就是<b>我们自己 addRecipes 进去的那一份</b>"的次数。
+         *
+         * <p>它<b>不进</b> {@code matched − hidden + added} 那条公式（那一份既不 hidden 也不 added，
+         * 原样放行）⇒ 加了它不会改变任何既有判据的读数，只多一个"这次真的是从索引里出来的"的证据。
+         */
+        int fromOwn;
+
         /** 造不出替代品 ⇒ 老老实实显示原件（这一格<b>不算 hidden</b>，否则读数会自己骗自己）。 */
         int keptOriginal;
 
@@ -200,6 +214,21 @@ public final class ShanhaiJeiRecipePatches {
             this.vanillaJson = vanillaJson;
             this.recipeBytes = recipeBytes;
         }
+
+        /**
+         * 🔴 2026-11-01（本轮）：这一条补丁的<b>内容指纹</b>（逐字段，含正文每一个字节）。
+         *
+         * <p>用途只有一个：{@link #accept} 收到"与手里那份逐字相同"的重发时<b>不换代、不重贴</b> ——
+         * 重放补丁在开机 / 登录 / 对账三拍各会重发一次，每换代一次都会走
+         * {@code tryRuntimeHide} 的"撤上一版 → 加新版 → 藏原稿"，而 JEI 没有公开的 remove
+         * ⇒ 会给它的 recipes 列表留下一串永远看不见的死条目。
+         * <p>判据在纯核 {@code ShanhaiJeiReplayBodyPlan.signature}（离线可跑：相同 ⇒ 相同，差一个字节 ⇒ 不同）。
+         */
+        String signature() {
+            return com.shanhai.common.recipe.editor.ShanhaiJeiReplayBodyPlan.signature(
+                    recipeId, typeId, removed, inputsJson, outputsJson, conditionsJson,
+                    hasDuration, duration, hasEut, eut, vanillaJson, recipeBytes);
+        }
     }
 
     // ------------------------------------------------------------------ 收包
@@ -222,6 +251,25 @@ public final class ShanhaiJeiRecipePatches {
             if (prev != null) {
                 stored.hadOriginal = prev.hadOriginal;
                 stored.registered = prev.registered;
+                // 🔴 2026-11-01（本轮）：**已经贴成功、且这次内容逐字相同 ⇒ 不换代、不重贴。**
+                //    重放那条补丁在"开机 / 登录 / 对账"三拍各会重发一次（见 ShanhaiJeiBridge 那一节）。
+                //    每换代一次就会走 tryRuntimeHide 的"撤我们上一版 → addRecipes → 藏原稿"，
+                //    而 JEI 那侧**没有公开的 remove** ⇒ 每拍都会给它的 recipes 列表留一条隐藏的死条目。
+                //    内容没变就没必要付这份代价。
+                //    🔴 判据里带 `prev.runtimeApplied` 是**刻意的**：没贴成功/放弃重试的那条**不许挡** ——
+                //       重复收包在旧行为里等于"又给了一次机会"（收包那一刻 JEI 可能还没就绪），
+                //       挡掉它就把重试的入口关死了。
+                //    ⚠️ 内容判据是**逐字段相等**（含正文每一个字节）⇒ "真改了"照旧换代并立刻刷新 ✓
+                if (prev.runtimeApplied && prev.signature().equals(stored.signature())) {
+                    if (UNCHANGED_LOGGED.add(msg.recipeId)) {
+                        ShanhaiMod.LOGGER.info("{} jei_patch_unchanged id={} type={} patches={} "
+                                        + "（这一次收到的补丁与手里那份逐字段相同 ⇒ 不换代、不重贴："
+                                        + "重贴只会在 JEI 的表里多一条永远看不见的死条目）",
+                                PREFIX, msg.recipeId, msg.typeId, PATCHES.size());
+                    }
+                    ShanhaiJeiGuiRefresh.notifyPatched();
+                    return;
+                }
             }
             PATCHES.put(msg.recipeId, stored);
             ShanhaiMod.LOGGER.info("{} jei_patch_stored id={} type={} action={} patches={} cond_n={} kind={} "
@@ -230,12 +278,13 @@ public final class ShanhaiJeiRecipePatches {
                     PREFIX, msg.recipeId, msg.typeId, removed ? "removed" : "changed", PATCHES.size(),
                     condCount(msg.conditionsJson), msg.vanillaJson == null ? "gt" : "vanilla",
                     msg.recipeBytes == null ? 0 : msg.recipeBytes.length);
-            // 🔴🔴 2026-10-05 第二轮（用户实测三条规律：**改能刷、插不刷、删不刷**）：
-            //    分工定死 ——
-            //      · **加 / 换** 只由我们这条查询出口通道做（{@code patched}，日志里三条全 PASS）；
-            //      · 官方 API **只 hide、绝不 add**（hide 掉 JEI 自己那份旧条目 + 让 JEI 重算一次表），
-            //        绝不 add：add 会让同一个 id 在 JEI 里存在两份（distinct 只按 equals 去重，
-            //        而配方对象没重写 equals ⇒ 两个新实例都留下），那是本工程点名过的坑。
+            // 🔴🔴 2026-11-01（本轮改了口径，**老结论作废**）：
+            //    2026-10-05 那轮定的是「加/换只由查询出口做，官方 API 只 hide、绝不 add」。
+            //    它带来的直接后果就是本轮现场那个「分类页看得见、点物品点不动」——
+            //    因为 JEI 的**物品索引**里只剩被 hide 掉的原稿（hideRecipes 不动 recipeMaps，字节码为证）。
+            //    现在改成：官方 API 那条路**既撤旧的、又加新的**（顺序见 ShanhaiJeiReplaceOrder），
+            //    而且只撤"我们自己加过的那一份"（句柄在 ShanhaiJeiOwnCopies 里）
+            //    ⇒ 不会两份；同时物品索引被更新 ⇒ 点物品也能查到改过之后的那条 ✓
             tryRuntimeHide(stored);
             // 🔴🔴 2026-10-05（用户："插不刷、删不刷"）：**让开着的 JEI 界面重算一次**。
             //    为什么必须单独做这一步：javap 实测 JEI 的 hideRecipes/addRecipes 里
@@ -248,7 +297,7 @@ public final class ShanhaiJeiRecipePatches {
     }
 
     /**
-     * 🔴 <b>试一次"把 JEI 自己那份旧条目 hide 掉"；没成就记成待办，下一次查询再试。</b>
+     * 🔴 <b>把这一条补丁【落进 JEI 自己的表】（改/新建 = 三步，删 = 两步）；没成就记成待办，下一次查询再试。</b>
      *
      * <h4>为什么必须能重试（不是只试一次）</h4>
      * 收包那一刻 JEI 可能<b>还没就绪</b>（{@code onRuntimeAvailable} 还没被调 ⇒ runtime==null），
@@ -256,7 +305,14 @@ public final class ShanhaiJeiRecipePatches {
      * —— 表现出来就是用户说的"有时候刷、有时候不刷"。
      * <p>而 {@code PluginManager#getRecipes}（我们挂的那个查询出口）<b>每次查询都会跑</b>
      * ⇒ 在那里补做一次，代价只是几个判断，而且一旦成功就不再重试。
-     * <p>⚠️ 这里<b>只 hide、不 add</b>（见 {@code accept} 里的分工说明）。
+     *
+     * <h4>🔴 2026-11-01：这里<b>不再</b>是"只 hide、不 add"</h4>
+     * 顺序与理由全在 {@link ShanhaiJeiReplaceOrder}（含 JEI 15.49.0.188 的字节码依据）：
+     * <b>改/新建</b> = 撤我们上一版 → {@code addRecipes} 进 JEI（会更新物品索引，且<b>复核</b>过）→ 再 hide 原稿；
+     * <b>删</b> = 撤我们那一版 → hide 原稿。
+     * <p>⚠️ 老注释里那句"只 hide、绝不 add"是**上一轮的结论**，它成立的前提是"没有全局句柄台账"
+     * （怕同一个 id 两份）。现在台账在 {@link ShanhaiJeiOwnCopies} 里、每次都先撤上一份 ⇒ 前提没了；
+     * 而"只 hide 不 add"会直接造成<b>点物品恒 0 条</b> ⇒ 那条结论本轮作废（现场日志为证）。
      */
     private static void tryRuntimeHide(Patch p) {
         if (p == null || p.runtimeApplied) {
@@ -267,74 +323,83 @@ public final class ShanhaiJeiRecipePatches {
         }
         p.runtimeTried = true;
         try {
-            // 🔴 安全闸（很关键）：**只有"我们这层能把这条再交出去"时才去藏**。
+            // ══════════════════════════════════════════════════════════════════════════════
+            // 🔴🔴 2026-11-01（本轮：修「分类页看得见、点物品点不动」）
+            //
+            // 现场取证（temp\zhuguang-bug\jei与候选.md §0/A-2/A-3，日志逐字）：
+            //   jei_runtime_hidden uid=gtceu:primordial_causal_weaving id=…/new_recipe_4 hidden=1   ← 原稿被藏
+            //   jei_sync APPENDED … channel=category                                                ← 替换份只走分类页
+            //   全日志 0 条 jei_runtime_registered ⇒ 替换份**从未**进过 JEI 自己的表
+            // ⇒ 点物品（有焦点）时 JEI 按**物品索引**查到的是被藏掉的那份原稿 ⇒ 全被 !hidden 滤掉 ⇒ 0 条。
+            //
+            // 修法的**顺序**在 ShanhaiJeiReplaceOrder 里（那里有完整字节码依据与三个方法的契约）：
+            //   改/新建：① 先撤我们上一版 → ② addRecipes 进 JEI（**会更新物品索引**，且已复核）→ ③ 再 hide 原稿
+            //   删      ：① 撤我们那一版 → ② hide 原稿
+            // ⚠️ ② 失败 ⇒ ③ **绝不做**（原稿被藏、我们那份又没进索引 = 又回到"点不动"）。
+            // ══════════════════════════════════════════════════════════════════════════════
+            if (p.removed) {
+                final ShanhaiJeiReplaceOrder.Outcome o =
+                        ShanhaiJeiReplaceOrder.applyRemoved(JEI_OPS, p.typeId, p.recipeId);
+                p.runtimeApplied = o.ok();
+                p.runtimePending = !o.ok();
+                logRuntimeEvent(p, o);
+                if (!o.ok() && p.runtimeRetries >= MAX_RUNTIME_RETRIES) {
+                    p.runtimePending = false;
+                    ShanhaiMod.LOGGER.info("{} jei_runtime_hide_gave_up id={} retries={} reason=removed_{} "
+                                    + "（试够了就不再试；查询出口那层照样会给客户端正确结果）",
+                            PREFIX, p.recipeId, p.runtimeRetries, o.ignored());
+                }
+                return;
+            }
+            // 🔴 安全闸（很关键，原样保留）：**只有"我们这层能把这条再交出去"时才动 JEI**。
             //    为什么：藏掉 JEI 自己那份之后，`patched` 那层就看不到原件了（matched=0），
             //    于是完全靠"从字节重建"把新那份补进输出。**重建不出来还去藏 ⇒ 这条配方直接消失** ✗
-            //    ⇒ 两条判据：① 删除类不需要重建（本来就不该在）；② 其余必须先证明能重建。
-            if (!p.removed && runtimeAddable(p) == null) {
+            final Rebuild rb = runtimeAddable(p);
+            if (rb == null || rb.made == null) {
                 p.runtimePending = false;             // 不再重试：藏了会更糟，交给查询出口那条路
-                ShanhaiMod.LOGGER.info("{} jei_runtime_hide_skipped id={} reason=cannot_rebuild"
-                                + "（重建不出新那份 ⇒ 不敢藏：藏了就真没了；查询出口那层会按 id 替换它）",
-                        PREFIX, p.recipeId);
+                // 🔴 2026-11-01（本轮）：**原因必须带出来**，否则"为什么重建不出"只能靠猜。
+                //    词表见 ShanhaiJeiReplayBodyPlan.whyFor：
+                //      no_bytes                = 服务端那条包只带了条件（输入/输出在 JEI 上是旧的）
+                //      unknown_type            = 有正文，但不知道它属于哪个 JEI 分类
+                //      serialize_failed:<类>   = 有正文，重建那一步抛了
+                ShanhaiMod.LOGGER.info("{} jei_runtime_hide_skipped id={} type={} reason=cannot_rebuild why={} "
+                                + "（重建不出新那份 ⇒ 不敢藏也不敢加：藏了就真没了；查询出口那层会按 id 替换它。"
+                                + "why=no_bytes 时 JEI 上的输入/产物仍是旧的 —— 修法是让服务端那条补丁带正文）",
+                        PREFIX, p.recipeId, p.typeId, rb == null ? "no_bytes" : rb.why);
                 return;
             }
-            // 🔴🔴🔴 2026-10-06 用户抓到的【自己藏自己】（现场读数：
-            //    `jei_runtime_registered total=1` 紧接着 `jei_runtime_hidden hidden=1`）：
-            //    **新建的配方没有"旧的那份"可藏** —— 藏下去藏掉的正是我们刚登记进去的那一份
-            //    ⇒ add 与 hide 互相抵消 ⇒ 用户完全看不到 ✗✗
-            //    ⇒ 判据：`hadOriginal`（JEI 里本来就有这条 id 吗）为 false ⇒ **只 add、绝不 hide** ✓
-            //
-            // 🔴🔴 2026-10-11（对账抓到的"越叠越多"）：**登记只许有一次，而且必须先撤上一份。**
-            //    修复前这里是【两个分支各登记一次**同一个实例**】：
-            //      · 上面那个 `if (!p.registered)` 先 registerInJei(reg)
-            //      · 下面这个分支又 registerInJei(reg)（addedInstances 还是空的 ⇒ 不觉得"已经是我的"）
-            //    而 JEI 那侧的语义由字节码定死（见 ShanhaiJeiOwnCopies 类注释的取证）：
-            //      RecipeManagerInternal#addRecipes → RecipeTypeData#addRecipes = recipes.addAll(...)
-            //      而 recipes 是【普通 ArrayList、没有去重】⇒ **同一份实例登记两次 = 列表里两条** ✗
-            //    ⇒ 两处合成一处：① 先从全局台账取走"上一次我们自己加进去的那一份"并 hide 掉；
-            //                     ② 再登记新的一份（只这一次），并把句柄记回台账 ✓
-            //    （句柄为什么必须放全局台账、不能挂 Patch：见 Patch 的字段注释与 reconcile() 里那段。）
-            if (!p.removed && !p.hadOriginal) {
-                final String ownKey = ShanhaiJeiOwnCopies.key(p.typeId, p.recipeId);
-                final Object reg = runtimeAddable(p);
-                if (reg != null) {
-                    final java.util.List<Object> mine = ShanhaiJeiOwnCopies.takePrevious(ownKey, reg);
-                    if (!mine.isEmpty() && !ShanhaiJeiRuntime.hideGiven(p.typeId, mine)) {
-                        // 撤不掉（JEI 还没就绪 / 传错实例静默无效）⇒ **句柄放回台账**，下一次同一条还能再撤；
-                        // 绝不静默丢句柄 —— 句柄一丢就是"那份永远撤不掉"⇒ 越叠越多 ✗
-                        ShanhaiJeiOwnCopies.recordAll(ownKey, mine);
-                        ShanhaiMod.LOGGER.warn("{} jei_own_copy_hide_failed id={} count={} "
-                                        + "（撤不掉我们上一份 ⇒ 句柄留在台账里、下一次再撤；"
-                                        + "JEI 那侧 addRecipes 不去重，句柄丢了就会越叠越多）",
-                                PREFIX, p.recipeId, mine.size());
-                    }
-                    if (ShanhaiJeiRuntime.registerInJei(p.typeId, p.recipeId, reg)) {
-                        ShanhaiJeiOwnCopies.record(ownKey, reg);
-                        p.registered = true;
-                    }
-                }
-                p.runtimeApplied = false;           // 不走"藏 JEI 自己那份"这条路
-                p.runtimePending = false;           // 也不再重试
-                ShanhaiMod.LOGGER.info("{} jei_runtime_hide_skipped id={} reason=new_recipe_no_old_copy "
-                                + "mine_now={}（★新建的配方在 JEI 里本来就没有旧的 ⇒ 只登记我们自己的那一份，"
-                                + "而且只登记一次；改同一条时先把上一份精确撤掉 ⇒ 同 id 只会有一份）",
-                        PREFIX, p.recipeId, ShanhaiJeiOwnCopies.ownCount(ownKey));
-                return;
+            final Object rebuilt = rb.made;
+            final ShanhaiJeiReplaceOrder.Outcome o =
+                    ShanhaiJeiReplaceOrder.applyChanged(JEI_OPS, p.typeId, p.recipeId, rebuilt);
+            if (o.added()) {
+                // 复核通过 = 这一份现在真的在 JEI 自己的表里（并且已进物品索引）⇒ 才敢说"登记过了"
+                p.registered = true;
+            } else {
+                // 🔴 加不进去时我们**没有** hide 原稿（applyChanged 里那条硬判据）。
+                //    这一路会退回"分类页能看见、点物品看不见"的老形态（但绝不更糟：原稿还在，看得见旧内容）。
+                ShanhaiMod.LOGGER.warn("{} jei_runtime_add_rejected id={} category={} prev_hidden={} "
+                                + "reason={} ⇒ 本次【没有 hide 原稿】（否则藏了又没加进去 = 点物品 0 条）；"
+                                + "这一条在 JEI 里会继续显示原稿",
+                        PREFIX, p.recipeId, p.typeId, o.prevHidden(), o.ignored());
             }
-            final boolean ok = ShanhaiJeiRuntime.hideOwnCopies(p.typeId, p.recipeId);
-            p.runtimeApplied = ok;
-            p.runtimePending = !ok;
-            // 🔴 重试次数上限（P0 同一族）：藏不成（例如"本来就不在"）时不许每帧无限重试 ——
-            //    每次重试都会去查一次 JEI 的表，虽然已由防重入闸挡住递归，但白查也是白烧。
-            if (!ok && p.runtimeRetries >= MAX_RUNTIME_RETRIES) {
+            if (o.prevHideFailed() > 0) {
+                ShanhaiMod.LOGGER.warn("{} jei_own_copy_hide_failed id={} count={} "
+                                + "（撤不掉我们上一份 ⇒ 句柄留在台账里、下一次再撤；"
+                                + "JEI 那侧 addRecipes 不去重，句柄丢了就会越叠越多）",
+                        PREFIX, p.recipeId, o.prevHideFailed());
+            }
+            p.runtimeApplied = o.ok();
+            p.runtimePending = !o.ok();
+            logRuntimeEvent(p, o);
+            if (!o.ok() && p.runtimeRetries >= MAX_RUNTIME_RETRIES) {
                 p.runtimePending = false;
-                ShanhaiMod.LOGGER.info("{} jei_runtime_hide_gave_up id={} retries={} "
+                ShanhaiMod.LOGGER.info("{} jei_runtime_hide_gave_up id={} retries={} reason={} "
                                 + "（试够了就不再试；查询出口那层照样会给客户端正确结果）",
-                        PREFIX, p.recipeId, p.runtimeRetries);
+                        PREFIX, p.recipeId, p.runtimeRetries, o.ignored());
             }
-            if (ok && p.runtimeRetries > 0) {
-                ShanhaiMod.LOGGER.info("{} jei_runtime_hidden_after_retry id={} retries={} "
-                                + "（收包那一刻 JEI 还没就绪，这次补上了）",
+            if (o.ok() && p.runtimeRetries > 0) {
+                ShanhaiMod.LOGGER.info("{} jei_runtime_registered_after_retry id={} retries={} "
+                                + "（收包那一刻 JEI 还没就绪/分类还没注册，这次补上了）",
                         PREFIX, p.recipeId, p.runtimeRetries);
             }
         } catch (Throwable t) {
@@ -344,25 +409,128 @@ public final class ShanhaiJeiRecipePatches {
         }
     }
 
+    // ---------------------------------------------------------------- 官方 API 适配层（唯一的 JEI 触点）
+
+    /**
+     * {@link ShanhaiJeiReplaceOrder} 与 JEI 之间<b>唯一</b>的适配层 —— 三个原语各转给
+     * {@link ShanhaiJeiRuntime} 里那三个方法。
+     *
+     * <p>为什么要把顺序那半边放进 common（纯 Java）：JEI 那侧的东西本机<b>开不了客户端就验不了</b>，
+     * 而"撤旧的 → 加新的 → 再藏原稿"这个<b>顺序</b>是本轮的核心逻辑
+     * ⇒ 把它抽成不 import 任何 MC/JEI 类的纯核，就能用一张假表离线跑断言
+     * （见 {@code ShanhaiJeiIndexCheck}：正对照 ＋ 负对照）。
+     * <p>这个适配层只做"转调"，一行判断都没有 —— 它的正确性等于
+     * "三个方法的语义都对着 JEI 字节码"，那三条写在 {@code ShanhaiJeiRuntime} 各自的注释里。
+     */
+    private static final ShanhaiJeiReplaceOrder.Ops JEI_OPS = new ShanhaiJeiReplaceOrder.Ops() {
+        @Override
+        public java.util.List<Object> visible(String typeId, String recipeId) {
+            return ShanhaiJeiRuntime.visibleInstancesOf(typeId, recipeId);
+        }
+
+        @Override
+        public boolean hide(String typeId, java.util.List<Object> instances) {
+            return ShanhaiJeiRuntime.hideGiven(typeId, instances);
+        }
+
+        @Override
+        public boolean add(String typeId, String recipeId, Object rebuilt) {
+            return ShanhaiJeiRuntime.registerInJei(typeId, recipeId, rebuilt);
+        }
+    };
+
+    /** 两条新读数行的限流闸门：<b>1 秒 1 行</b>（首行立刻打 —— 限流只管"抖动重复"，绝不推迟第一次）。 */
+    private static final com.shanhai.common.log.ShanhaiLogThrottle.Gate REG_GATE =
+            new com.shanhai.common.log.ShanhaiLogThrottle.Gate();
+    private static final com.shanhai.common.log.ShanhaiLogThrottle.Gate REPL_GATE =
+            new com.shanhai.common.log.ShanhaiLogThrottle.Gate();
+    private static final long RUNTIME_LOG_MIN_GAP_MS = 1000L;
+
+    /**
+     * 打这一次"落进 JEI"的两条读数（各 1 秒 1 行，且<b>报出被折叠的次数</b>——
+     * "只限流不报数 = 静默"是本工程的既有血账）。
+     *
+     * <ul>
+     *   <li>{@code jei_runtime_registered id=… category=… ok=…} —— 这一条到底进没进 JEI 的表；
+     *       {@code ok} 是 {@link ShanhaiJeiRuntime#registerInJei} <b>复核出来的</b>，不是"调用没抛异常"；</li>
+     *   <li>{@code jei_runtime_replaced old=… new=…} —— 把上一次加的那一份换成了这一次的（不叠加的证据）。</li>
+     * </ul>
+     */
+    private static void logRuntimeEvent(Patch p, ShanhaiJeiReplaceOrder.Outcome o) {
+        final long now = System.currentTimeMillis();
+        if (REG_GATE.changed("runtime_registered", true, now, RUNTIME_LOG_MIN_GAP_MS)) {
+            final long folded = REG_GATE.takeSuppressed();
+            ShanhaiMod.LOGGER.info("{} jei_runtime_registered id={} category={} ok={} added={} "
+                            + "prev_hidden={} hidden_original={} had_original={} pending={} folded={} "
+                            + "（★ok 是**复核过的**：JEI 的 addRecipes 返回 void、会静默拒收 ⇒ 只有复核通过才算真进去；"
+                            + "进去的同时也进了 JEI 的物品索引 ⇒ 「点物品」那条路认得它）",
+                    PREFIX, p.recipeId, p.typeId, o.ok(), o.added(), o.prevHidden(), o.foreignHidden(),
+                    p.hadOriginal, p.runtimePending, folded);
+        }
+        if (o.added() && o.prevHidden() > 0
+                && REPL_GATE.changed("runtime_replaced", true, now, RUNTIME_LOG_MIN_GAP_MS)) {
+            final long folded = REPL_GATE.takeSuppressed();
+            ShanhaiMod.LOGGER.info("{} jei_runtime_replaced old=own_copy#{} new=own_copy#{} id={} category={} "
+                            + "count={} folded={} "
+                            + "（★把**上一次我们自己加进去的那一份**撤掉、换成这一次重建的那一份 —— "
+                            + "两边都是 own_copy，`#` 后面是实例同一性哈希 ⇒ 同一条 id 只留一份）",
+                    PREFIX, o.prevHash(), o.newHash(), p.recipeId, p.typeId, o.prevHidden(), folded);
+        }
+    }
+
+    /**
+     * <b>重建结果</b>：要么拿到对象，要么带一个<b>能进日志的</b> {@code why}。
+     *
+     * <p>为什么把它做成一个类型（而不是继续返回 {@code Object}/null）：{@code reason=cannot_rebuild}
+     * 那一行原来只有原因名、没有"为什么"，用户和排查的人都看不出是"包没带字节"还是"分类不认识"还是
+     * "解的时候抛了"。词表在 {@link ShanhaiJeiReplayBodyPlan#whyFor}。
+     */
+    static final class Rebuild {
+
+        final Object made;
+        final String why;
+
+        private Rebuild(Object made, String why) {
+            this.made = made;
+            this.why = why;
+        }
+
+        static Rebuild ok(Object made) {
+            return new Rebuild(made, "");
+        }
+
+        static Rebuild fail(String why) {
+            return new Rebuild(null, why == null || why.isEmpty() ? "unknown_type" : why);
+        }
+    }
+
     /** "我们这层能不能把这条重建出来补进输出"（能 ⇒ 返回那一份对象，顺便缓存）。 */
-    private static Object runtimeAddable(Patch p) {
+    private static Rebuild runtimeAddable(Patch p) {
         if (p == null) {
-            return null;
+            return Rebuild.fail("unknown_type");
         }
         if (p.synthAppended != null) {
-            return p.synthAppended;
+            return Rebuild.ok(p.synthAppended);
         }
-        final Object made = buildRuntimeObject(p);
-        if (made != null) {
-            p.synthAppended = made;
+        final Rebuild rb = buildRuntimeObject(p);
+        if (rb.made != null) {
+            p.synthAppended = rb.made;
         }
-        return made;
+        return rb;
     }
 
     /** 给 JEI 官方 API 用的那一份对象（非 GT ⇒ 原版 Recipe 本身；GT ⇒ GTRecipeWrapper）。 */
-    private static Object buildRuntimeObject(Patch p) {
+    private static Rebuild buildRuntimeObject(Patch p) {
+        if (p == null) {
+            return Rebuild.fail("unknown_type");
+        }
         if (p.recipeBytes == null || p.recipeBytes.length == 0) {
-            return null;                      // 没字节 ⇒ 交给查询出口那条路（它知道怎么按 id 换）
+            // 没字节 ⇒ 交给查询出口那条路（它知道怎么按 id 换）
+            return Rebuild.fail(ShanhaiJeiReplayBodyPlan.whyFor(false, p.typeId, null));
+        }
+        if (p.typeId == null || p.typeId.isEmpty() || "unknown".equals(p.typeId)) {
+            // 有字节也放不进 JEI：registerInJei / hide 都要一个**真的**分类 uid
+            return Rebuild.fail(ShanhaiJeiReplayBodyPlan.whyFor(true, p.typeId, null));
         }
         return isVanillaBranch(p) ? decodeVanilla(p) : buildAppended(p);
     }
@@ -436,6 +604,7 @@ public final class ShanhaiJeiRecipePatches {
             q.hidden = 0;
             q.added = 0;
             q.keptOriginal = 0;
+            q.fromOwn = 0;
         }
         try {
             final List<T> out = new ArrayList<>(recipes.size() + 2);
@@ -454,7 +623,10 @@ public final class ShanhaiJeiRecipePatches {
                 //    上一轮我在这里加了 `if (p.runtimeApplied) { out.add(r); continue; }`
                 //    ⇒ 结果是：官方 API 一旦返回成功，我们这层就撒手，而 hide 传错实例会静默无效
                 //    ⇒ 用户看到的现象正是「改还能看、插和删不生效」（他自己总结的那条规律）。
-                //    ⇒ 现在改成：**我们这层是唯一真源**（加/换/删都在这里做定），官方 API 只额外藏一份。
+                //    ⇒ 现在改成：**我们这层是唯一真源**（加/换/删都在这里做定）。
+                //    🔴 2026-11-01：官方 API 那条路现在**既 hide 也 add**（见 tryRuntimeHide）。
+                //       这一层仍然是"唯一真源"，但它的输入变了：JEI 交给我们的可能是**我们自己加进去的那一份**
+                //       ⇒ 那一份原样放行（下面 isOurs 那一支），不再 synth。
                 if (p == null) {
                     out.add(r);
                     continue;
@@ -473,6 +645,18 @@ public final class ShanhaiJeiRecipePatches {
                 }
                 if (p.removed) {
                     p.hidden++;
+                    continue;
+                }
+                // 🔴🔴 2026-11-01（本轮）：**JEI 交给我们的这一条，就是"我们刚刚 addRecipes 进去的那一版"** ⇒
+                //    原样放行，不再 synth 一遍。两条理由：
+                //      ① 语义正确：它就是"改过之后的那一条"（从服务端字节重建出来的那份），再贴一次只是重复劳动；
+                //      ② **判据清晰**：`from_own` 这个读数 >0 就证明"这一拍的数据确实是从 JEI 自己的表
+                //         （含物品索引）里出来的"，而不是我们凭空补的 —— 那正是"点物品点不动"要判的东西。
+                //    ⚠️ 收藏夹那条通道（patchedForBookmark）拿到的仍是 JEI 原来那份收藏对象
+                //       ⇒ 不走这一支、继续走下面的 synth（行为与改动前逐字一致）。
+                if (ShanhaiJeiOwnCopies.isOurs(r)) {
+                    out.add(r);
+                    p.fromOwn++;
                     continue;
                 }
                 Object synth = p.synth;
@@ -499,6 +683,13 @@ public final class ShanhaiJeiRecipePatches {
             //
             // ⚠️ 只对【分类页】做（recipeTypeUid != null）。收藏夹那条通道进来的列表是
             //    "收藏的那一条"，往里补一条别的等于篡改用户的收藏 ⇒ 那里坚决不补。
+            //
+            // 🔴 2026-11-01（本轮）：有了"进 JEI 自己的表 + 物品索引"之后，这一支已经退化成**兜底**：
+            //    正常情况下我们的那一份已经在 JEI 的表里 ⇒ 上面那个循环 matched≥1 ⇒ 这里不会补。
+            //    只有"addRecipes 被拒/JEI 还没就绪"时才会走到这里（那时至少分类页还看得见，不至于更糟）。
+            //    ⚠️ 下面第 410 行的「空列表直接原样返回」**故意没动**：放开它会让"点物品"这类**有焦点**的
+            //       查询也往里补，而焦点语义是"这个物品参与的配方"，硬补一条可能补错（不是这个物品参与的）。
+            //       本轮修的是**索引**（正确的那条路），不是把这层放宽。
             if (recipeTypeUid != null) {
                 for (Patch p : PATCHES.values()) {
                     if (p.matched != 0 || p.removed) {
@@ -509,7 +700,7 @@ public final class ShanhaiJeiRecipePatches {
                     }
                     Object made = p.synthAppended;
                     if (made == null) {
-                        made = buildAppended(p);
+                        made = buildAppended(p).made;
                         p.synthAppended = made;
                     }
                     if (made == null) {
@@ -563,10 +754,12 @@ public final class ShanhaiJeiRecipePatches {
             p.logged = true;
             final ShanhaiJeiSyncPlan.Plan plan = ShanhaiJeiSyncPlan.of(p.matched, p.hidden, p.added);
             final boolean ok = p.removed ? plan.gone() : plan.unique();
-            ShanhaiMod.LOGGER.info("{} jei_sync matched={} hidden={} added={} kept_original={} id={} type={} "
-                            + "dedupe=ok_by_full_recipe_id visible_expected={} expected={} PASS={} channel=category "
-                            + "(三个计数器各自独立：matched − hidden + added 才是可见条数)",
-                    PREFIX, p.matched, p.hidden, p.added, p.keptOriginal, p.recipeId, p.typeId,
+            ShanhaiMod.LOGGER.info("{} jei_sync matched={} hidden={} added={} kept_original={} from_own={} id={} "
+                            + "type={} dedupe=ok_by_full_recipe_id visible_expected={} expected={} PASS={} "
+                            + "channel=category "
+                            + "(三个计数器各自独立：matched − hidden + added 才是可见条数；"
+                            + "from_own>0 = 这一拍那条**就是从 JEI 自己的表/物品索引里出来的**，不再计入 hidden/added)",
+                    PREFIX, p.matched, p.hidden, p.added, p.keptOriginal, p.fromOwn, p.recipeId, p.typeId,
                     plan.visibleAfter(), p.removed ? 0 : 1, ok);
             if (!ok) {
                 ShanhaiMod.LOGGER.error("{} jei_sync_ACCOUNTING_MISMATCH id={} matched={} hidden={} added={} "
@@ -655,20 +848,21 @@ public final class ShanhaiJeiRecipePatches {
      * （本来就是这样 —— 同一个 mod 包），否则反序列化会抛；抛了就<b>不补</b>并打 ERROR，
      * 绝不留一条半截的配方在 JEI 里。
      */
-    private static Object buildAppended(Patch p) {
+    private static Rebuild buildAppended(Patch p) {
         if (p.recipeBytes == null || p.recipeBytes.length == 0) {
             ShanhaiMod.LOGGER.warn("{} jei_append_skipped id={} reason=no_recipe_bytes "
                             + "(服务端没能把这条配方编成字节 ⇒ JEI 里这一条要等重载才会出现，"
                             + "但日志上已经有 net_encode_recipe_failed 交代原因)",
                     PREFIX, p.recipeId);
-            return null;
+            return Rebuild.fail("no_bytes");
         }
         // 🆕 本轮：非 GT（原版）那一支 —— 解出来就是 JEI 原版分类要的那个 Recipe 对象本身。
         if (isVanillaBranch(p)) {
-            final Object made = decodeVanilla(p);
-            if (made != null) {
+            final Rebuild made = decodeVanilla(p);
+            if (made.made != null) {
                 ShanhaiMod.LOGGER.info("{} jei_append_built kind=vanilla id={} type={} bytes={} class={}",
-                        PREFIX, p.recipeId, p.typeId, p.recipeBytes.length, made.getClass().getSimpleName());
+                        PREFIX, p.recipeId, p.typeId, p.recipeBytes.length,
+                        made.made.getClass().getSimpleName());
             }
             return made;
         }
@@ -677,7 +871,7 @@ public final class ShanhaiJeiRecipePatches {
                     net.minecraft.resources.ResourceLocation.tryParse(p.recipeId);
             if (id == null) {
                 ShanhaiMod.LOGGER.error("{} jei_append_bad_id id={}", PREFIX, p.recipeId);
-                return null;
+                return Rebuild.fail("unknown_type");
             }
             final io.netty.buffer.ByteBuf bb = io.netty.buffer.Unpooled.wrappedBuffer(p.recipeBytes);
             final net.minecraft.network.FriendlyByteBuf in = new net.minecraft.network.FriendlyByteBuf(bb);
@@ -685,17 +879,17 @@ public final class ShanhaiJeiRecipePatches {
                     .fromNetwork(id, in);
             if (r == null) {
                 ShanhaiMod.LOGGER.error("{} jei_append_decode_null id={}", PREFIX, p.recipeId);
-                return null;
+                return Rebuild.fail("unknown_type");
             }
             if (r.id == null) {
                 r.id = id;
             }
             ShanhaiMod.LOGGER.info("{} jei_append_built id={} type={} bytes={} class={}",
                     PREFIX, p.recipeId, p.typeId, p.recipeBytes.length, r.getClass().getSimpleName());
-            return new GTRecipeWrapper(r);
+            return Rebuild.ok(new GTRecipeWrapper(r));
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} jei_append_build_failed id={} err={}", PREFIX, p.recipeId, t.toString(), t);
-            return null;
+            return Rebuild.fail(ShanhaiJeiReplayBodyPlan.whyFor(true, p.typeId, t.getClass().getSimpleName()));
         }
     }
 
@@ -716,7 +910,7 @@ public final class ShanhaiJeiRecipePatches {
      * 就是这个 {@code Recipe} 对象本身（{@code idOf} 里有字节码取证），所以我们直接把它
      * 交给 JEI 的注入点就够了。
      */
-    private static Object decodeVanilla(Patch p) {
+    private static Rebuild decodeVanilla(Patch p) {
         try {
             final io.netty.buffer.ByteBuf bb = io.netty.buffer.Unpooled.wrappedBuffer(p.recipeBytes);
             final net.minecraft.network.FriendlyByteBuf in = new net.minecraft.network.FriendlyByteBuf(bb);
@@ -724,13 +918,13 @@ public final class ShanhaiJeiRecipePatches {
                     net.minecraft.network.protocol.game.ClientboundUpdateRecipesPacket.fromNetwork(in);
             if (r == null) {
                 ShanhaiMod.LOGGER.error("{} jei_vanilla_decode_null id={}", PREFIX, p.recipeId);
-                return null;
+                return Rebuild.fail("unknown_type");
             }
-            return r;
+            return Rebuild.ok(r);
         } catch (Throwable t) {
             ShanhaiMod.LOGGER.error("{} jei_vanilla_decode_failed id={} bytes={} err={}",
                     PREFIX, p.recipeId, p.recipeBytes == null ? 0 : p.recipeBytes.length, t.toString(), t);
-            return null;
+            return Rebuild.fail(ShanhaiJeiReplayBodyPlan.whyFor(true, p.typeId, t.getClass().getSimpleName()));
         }
     }
 
@@ -917,15 +1111,15 @@ public final class ShanhaiJeiRecipePatches {
             //    "只改了输入"的那次编辑在 JEI 上仍然显示老材料（用户那句「JEI 不显示」的另一种形态）。
             //    字节那一份是**服务端刚保存的那条配方本身** ⇒ 输入/产物/数量一个不差。
             if (p.recipeBytes != null && p.recipeBytes.length > 0) {
-                final Object made = decodeVanilla(p);
-                if (made != null) {
+                final Rebuild made = decodeVanilla(p);
+                if (made.made != null) {
                     ShanhaiMod.LOGGER.info("{} jei_vanilla_synth_from_bytes id={} jei_uid={} class={} "
                                     + "（客户端这一份就是 JEI 上要显示的那一条；输入也一起换了）",
-                            PREFIX, p.recipeId, p.typeId, made.getClass().getSimpleName());
-                    return made;
+                            PREFIX, p.recipeId, p.typeId, made.made.getClass().getSimpleName());
+                    return made.made;
                 }
-                ShanhaiMod.LOGGER.warn("{} jei_vanilla_bytes_undecodable id={} -> 退回按字段重建",
-                        PREFIX, p.recipeId);
+                ShanhaiMod.LOGGER.warn("{} jei_vanilla_bytes_undecodable id={} why={} -> 退回按字段重建",
+                        PREFIX, p.recipeId, made.why);
             }
             return synthesizeVanilla(original, p);
         }

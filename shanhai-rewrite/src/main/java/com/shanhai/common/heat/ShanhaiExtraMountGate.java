@@ -44,13 +44,20 @@ import java.util.Map;
  *   cleanroom / gravity / dimension ：【原版判定没过】才生成需求
  *       ⇒ 机器真的建在正确维度 / 结构里真塞了洁净维护仓时，原版自己能过，槽不参与（宽松叠加，绝不比原版更严）
  *   research                        ：【一律】生成需求（原版 {@code ResearchCondition.test} 恒 true）
- *   ebf_temp / SCTier               ：>0 各生成一条（热力，必须放满 {@link ShanhaiHeatGate#REQUIRED_COUNT} 个）
+ *   ebf_temp / SCTier               ：>0 各生成一条（热力，**一格要放满本机阈值个**：模块/归墟 64、主机 1）
  *   反向条件（isReverse）           ：一律交回原版（槽是"提供"语义，给"不提供 X"当不了依据）
  * </pre>
  *
  * <h2>🔴 三格的判定口径（由 {@link ShanhaiHeatGate#evaluate} 承担，本类不重算）</h2>
- * 每格各自算、每格放满 {@link ShanhaiHeatGate#REQUIRED_COUNT} 个才生效、一个条件占一格 ——
- * 这三句的实现在 {@code ShanhaiHeatGate} 里，本类只负责"要什么"与"怎么把结果变成人话"。
+ * 每格各自算、一个条件占一格 —— 这些话的实现在 {@code ShanhaiHeatGate} 里，本类只负责"要什么"与"怎么把结果变成人话"。
+ * <p>🔴 <b>「一格要放几个」按条件种类分档，唯一真源 = {@link ShanhaiHeatGate#requiredFor(ShanhaiHeatGate.Kind, int)}</b>：
+ * <pre>
+ *   热力两条（ebf_temp / SCTier）      ⇒ 64（模块 / 归墟）· 1（主机）
+ *   其余四条（超净间/重力/维度/研究）  ⇒ 恒 1 —— 维护仓、世界碎片、创造模式数据访问仓都是"放一个就够"
+ * </pre>
+ * ⚠️ 2026-11-01 之前这里被理解成"每格都要放满 64"，于是用户只放 1 个重力控制仓 + 1 个无菌维护仓时
+ * 看起来像门槛不够。用户当场纠正：「我<b>没有给模块设置 64 个的门槛</b>」⇒ 现在按种类分档，
+ * 且<b>本类与 {@link ShanhaiHeatGate} 共用同一个函数</b>（不写第二套）。
  */
 public final class ShanhaiExtraMountGate {
 
@@ -75,7 +82,8 @@ public final class ShanhaiExtraMountGate {
                                                    boolean heatReachable,
                                                    @NotNull RecipeLogic machine,
                                                    @NotNull List<ShanhaiHeatGate.SlotContent> slots) {
-        return evaluate(recipe, candidateType, heatReachable, machine, slots, null).outcome;
+        return evaluate(recipe, candidateType, heatReachable, machine, slots, null,
+                ShanhaiHeatGate.REQUIRED_COUNT).outcome;
     }
 
     /**
@@ -108,24 +116,53 @@ public final class ShanhaiExtraMountGate {
                                   @NotNull RecipeLogic machine,
                                   @NotNull List<ShanhaiHeatGate.SlotContent> moduleSlots,
                                   @Nullable List<ShanhaiHeatGate.SlotContent> hostSlots) {
+        return evaluate(recipe, candidateType, heatReachable, machine, moduleSlots, hostSlots,
+                ShanhaiHeatGate.REQUIRED_COUNT);
+    }
+
+    /**
+     * <b>一次判定（两个来源 ＋ 可指定热力源的生效数量）</b> —— 2026-10-25 阈值参数化的落点，
+     * 2026-11-01 起改为<b>逐 kind 现算</b>（不再是"整格统一门槛"）。
+     *
+     * <p>与上一个重载<b>逐字同语义</b>，唯一差别是热力两条（{@code ebf_temp} / {@code SCTier}）
+     * 要在一格里放满几个：
+     * <pre>
+     *   模块 / 归墟 → {@link ShanhaiHeatGate#REQUIRED_COUNT}（64，走上面那个重载，一个数都不变）
+     *   主机自身     → {@link ShanhaiHeatGate#HOST_REQUIRED_COUNT}（1，由 PrimordialEngineRecipeLogic 传进来）
+     *   其余四类条件 → 恒 1（不吃这个参数，由 {@link ShanhaiHeatGate#requiredFor} 保证）
+     * </pre>
+     *
+     * @param requiredCount <b>热力源</b>在一格里要放满几个才算生效（判据仍只有一份：
+     *                      {@link ShanhaiHeatGate#slotSatisfies(ShanhaiHeatGate.Requirement,
+     *                      ShanhaiHeatGate.SlotContent, int)}；分档只有一份：
+     *                      {@link ShanhaiHeatGate#requiredFor(ShanhaiHeatGate.Kind, int)}）
+     */
+    @NotNull
+    public static Result evaluate(@NotNull GTRecipe recipe,
+                                  @Nullable GTRecipeType candidateType,
+                                  boolean heatReachable,
+                                  @NotNull RecipeLogic machine,
+                                  @NotNull List<ShanhaiHeatGate.SlotContent> moduleSlots,
+                                  @Nullable List<ShanhaiHeatGate.SlotContent> hostSlots,
+                                  int requiredCount) {
         final List<ShanhaiHeatGate.Requirement> needs =
                 requirementsOf(recipe, candidateType, heatReachable, machine);
         if (hostSlots == null || hostSlots.isEmpty()) {
             // 没有主机供源 ⇒ 与旧实现逐位相同（连"哪条是主机补的"都不用算）
-            return new Result(ShanhaiHeatGate.evaluate(needs, moduleSlots), List.of(), 0);
+            return new Result(ShanhaiHeatGate.evaluate(needs, moduleSlots, requiredCount), List.of(), 0);
         }
         final List<ShanhaiHeatGate.SlotContent> union =
                 new ArrayList<>(moduleSlots.size() + hostSlots.size());
         union.addAll(moduleSlots);
         union.addAll(hostSlots);
-        final ShanhaiHeatGate.Outcome merged = ShanhaiHeatGate.evaluate(needs, union);
+        final ShanhaiHeatGate.Outcome merged = ShanhaiHeatGate.evaluate(needs, union, requiredCount);
         // "是主机补上的" = 这条需求【模块自己的 3 格单独满足不了】、但并集里满足了。
         // 复用同一个逐格判据 slotSatisfies（不重写任何"够不够"的算术）。
         final List<ShanhaiHeatGate.Requirement> hostProvided = new ArrayList<>();
         for (ShanhaiHeatGate.Requirement r : merged.satisfied) {
             boolean moduleAlone = false;
             for (ShanhaiHeatGate.SlotContent s : moduleSlots) {
-                if (ShanhaiHeatGate.slotSatisfies(r, s)) {
+                if (ShanhaiHeatGate.slotSatisfies(r, s, requiredCount)) {
                     moduleAlone = true;
                     break;
                 }
@@ -323,17 +360,39 @@ public final class ShanhaiExtraMountGate {
      */
     @Nullable
     public static Component denyReason(@NotNull ShanhaiHeatGate.Outcome o, @Nullable List<ItemStack> slotStacks) {
+        return denyReason(o, slotStacks, ShanhaiHeatGate.REQUIRED_COUNT);
+    }
+
+    /**
+     * 把拒绝结果渲成<b>具体</b>文案（<b>可指定热力源生效数量</b>）。
+     *
+     * <p>与上一个重载的唯一差别：{@code NOT_FULL}（"放满 N 个才生效"）与热力那两条需求标签里的
+     * <b>N</b> 由调用方给 —— 模块 / 归墟是 64，主机是 1。文案本身仍走 lang 键（不硬编码中文）。
+     *
+     * <p>🔴 <b>2026-11-01：那个 N 不再原样往文案里塞</b>，而是先过
+     * {@link ShanhaiHeatGate#requiredFor(ShanhaiHeatGate.Kind, int)}（唯一判据）——
+     * 于是"这句文案里的数"与"判据用的数"<b>同源</b>：
+     * <pre>
+     *   ebf_temp / SCTier  ⇒ 64（模块 / 归墟）或 1（主机）
+     *   超净间/重力/维度/研究 ⇒ 恒 1（哪怕调用方传进来 64）
+     * </pre>
+     * ⇒ 用户看到的那句「这个配方需要放满 %s 个…」里，<b>只有热力条件才可能是 64</b>。
+     */
+    @Nullable
+    public static Component denyReason(@NotNull ShanhaiHeatGate.Outcome o, @Nullable List<ItemStack> slotStacks,
+                                       int requiredCount) {
         final ShanhaiHeatGate.Requirement need = o.blocked;
         if (need == null) {
             return null;
         }
-        final Component what = requirementLabel(need);
+        final int needCount = ShanhaiHeatGate.requiredFor(need, requiredCount);
+        final Component what = requirementLabel(need, requiredCount);
         return switch (o.deny) {
             case SLOT_EMPTY -> Component.translatable("shanhai.recipe.fail.extra_slot_empty", what);
             case WRONG_ITEM -> Component.translatable("shanhai.recipe.fail.extra_slot_wrong", what,
                     actualNames(slotStacks));
             case NOT_FULL -> Component.translatable("shanhai.recipe.fail.extra_slot_not_full",
-                    ShanhaiHeatGate.REQUIRED_COUNT, what, countOfKind(need.kind, o));
+                    needCount, what, countOfKind(need.kind, o));
             case CLEANROOM_TIER -> Component.translatable("shanhai.recipe.fail.extra_cleanroom_tier",
                     what, cleanroomLabel(o.have));
             case HEAT_TEMP -> Component.translatable("shanhai.recipe.fail.heat_coil_temp", need.number, o.have);
@@ -349,13 +408,33 @@ public final class ShanhaiExtraMountGate {
      */
     @NotNull
     public static Component requirementLabel(@NotNull ShanhaiHeatGate.Requirement r) {
+        return requirementLabel(r, ShanhaiHeatGate.REQUIRED_COUNT);
+    }
+
+    /**
+     * 一条需求的中文标签（<b>走 lang 键</b>；热力那两条把"要放几个"作为第二个参数交给 lang）。
+     *
+     * <p>🔴 阈值参数化（2026-10-25）之后，"放满 64 个"这句<b>不能</b>再写死在语言文件里
+     * （主机是 1 个）⇒ 数字一律由调用方给，lang 文案里是两个 {@code %s}：
+     * {@code "线圈炉温 %sK（线圈要放满 %s 个）"}。模块 / 归墟仍传
+     * {@link ShanhaiHeatGate#REQUIRED_COUNT}（64）⇒ 玩家看到的那句话与改动前<b>逐字相同</b>。
+     *
+     * <p>🔴 <b>2026-11-01：传进来的数只对热力两条有效</b> —— 实际渲染前先过
+     * {@link ShanhaiHeatGate#requiredFor(ShanhaiHeatGate.Kind, int)}：另外四类（超净间 / 重力 /
+     * 维度 / 研究）的标签<b>本来就不带数字</b>，绝不可能出现"维护仓要放满 64 个"这种话。
+     */
+    @NotNull
+    public static Component requirementLabel(@NotNull ShanhaiHeatGate.Requirement r, int requiredCount) {
+        final int needCount = ShanhaiHeatGate.requiredFor(r, requiredCount);
         return switch (r.kind) {
             case CLEANROOM -> cleanroomLabel(r.number);
             case GRAVITY -> Component.translatable("shanhai.recipe.fail.extra_need_gravity");
             case DIMENSION -> Component.translatable("shanhai.recipe.fail.extra_need_dimension", r.text);
             case RESEARCH -> Component.translatable("shanhai.recipe.fail.extra_need_research");
-            case HEAT_TEMP -> Component.translatable("shanhai.recipe.fail.extra_need_coil_temp", r.number);
-            case SC_TIER -> Component.translatable("shanhai.recipe.fail.extra_need_sc_tier", r.number);
+            case HEAT_TEMP -> Component.translatable("shanhai.recipe.fail.extra_need_coil_temp",
+                    r.number, needCount);
+            case SC_TIER -> Component.translatable("shanhai.recipe.fail.extra_need_sc_tier",
+                    r.number, needCount);
         };
     }
 

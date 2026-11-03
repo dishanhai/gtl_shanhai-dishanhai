@@ -327,7 +327,9 @@ public final class ShanhaiConcurrencyTables {
     public static String shardDescription(int index) {
         final int exponent = shardExponentAt(index);
         final int threads = shardThreadsAt(index);
-        return "&$golden-提供额外跨配方并行（线程）：" + threads
+        // 🔴 2026-10-31：样式段只到 `threads` 为止 ⇒ 紧跟一个 `&r` 收口（`&$` 的染色范围本来是"到串尾"，
+        //    不收口的话后面那三行 `§7`/`§8` 也会被算进正文 ⇒ 既多染色、又命中"§ 与 &$ 混用"）
+        return "&$golden-提供额外跨配方并行（线程）：" + threads + "&r"
                 + "\n§7放入模块的【跨配方并行（线程）槽】生效"
                 + "\n§7最终跨配方并行（线程） = 1 + " + threads + " × 该格数量"
                 + "\n§8（2^" + exponent + "；一格最多堆 64 个，放满 ⇒ 额外 "

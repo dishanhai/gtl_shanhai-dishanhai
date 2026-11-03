@@ -493,12 +493,24 @@ public final class ShanhaiJeiBridge {
     //   差别就在本类：编辑器当场改走的是 `broadcastRecipeChanged`（载荷带 conditionsJson），
     //   而 `ShanhaiRecipeConditionReplay` 只写了服务端 json、**一个字节都没往客户端送**。
     //
-    // 【修法】复用本类现成的消息类型（ACTION_CHANGED），**不新造协议**：
+    // 【修法·2026-10-07 那一版】复用本类现成的消息类型（ACTION_CHANGED），**不新造协议**：
     //   只带 conditionsJson，inputs/outputs/recipeBytes 留 null ⇒ 客户端 `synthesize()` 拿
-    //   **JEI 手里那条原件**只换 conditions 那一格 —— 正是要的最小改动。
-    //   ⚠️ 字节留空是【刻意的】且有一条安全依据：`ShanhaiJeiRecipePatches.buildRuntimeObject`
-    //      见 recipeBytes==null 就返回 null ⇒ `tryRuntimeHide` 走 "cannot_rebuild ⇒ 不藏" 那条分支
-    //      （藏了会更糟），替换完全由查询出口那层做（那条路本来就通）。
+    //   **JEI 手里那条原件**只换 conditions 那一格。
+    //
+    // 【修法·2026-11-01 本轮（用户：「为什么 jei 显示会和实际配方不一样」）】上一条只对"只改条件"成立：
+    //   覆盖层改过<b>输入/输出</b>的那些条目，客户端拿"原件 + 只换条件"贴出来的仍是<b>改之前那一份</b>。
+    //   现场逐字：
+    //     16:43:39.903 jei_runtime_hide_skipped id=…/primordial_causal_weaving/new_recipe_4 reason=cannot_rebuild
+    //     16:43:39.904 jei_runtime_hide_skipped id=…/matter_flow_condensation/new_recipe_4     reason=cannot_rebuild
+    //   后果：JEI 上的输入是旧的 ⇒ 用户照 JEI 抄样板 ⇒ 机器按新配方要料 ⇒ 永远匹配不到。
+    //   ⇒ 现在【按需带完整正文】（判据在纯核 {@link ShanhaiJeiReplayBodyPlan}，只对
+    //     "op=set 且改过 inputs/outputs/tickInputs/data" 与 "op=add" 两类带；其余仍只送条件）：
+    //     活配方 → {@code RecipeSyncMessage.changed(...)} → {@code encodeRecipe}（与编辑器保存
+    //     <b>同一个序列化函数</b>）＋ {@code tableJson(inputs/outputs)}（与编辑器保存同一套 codec）。
+    //   ⚠️ 客户端有了字节就能 {@code buildAppended} ⇒ `tryRuntimeHide` 走"撤上一版 → add → 藏原稿"
+    //      那条路（顺序见 {@code ShanhaiJeiReplaceOrder}）⇒ JEI 显示的就是解回来的 live 那一条。
+    //   ⚠️ 服务端这一侧编不出正文（活表里没有/序列化抛）⇒ <b>保持原来"只送条件"的保守行为</b>
+    //      （客户端 `cannot_rebuild`：不藏不加），并打 `replayed_body_skipped … why=<原因>`。
     //
     // 【时机】重放发生在**配方加载期**（KubeJS 事件里）—— 那一刻没有 server、没有玩家 ⇒
     //   这里【只登记不发送】，三个时点补发：
@@ -625,17 +637,53 @@ public final class ShanhaiJeiBridge {
             return 0;
         }
         int sent = 0;
+        int bodies = 0;
+        int bodyFailed = 0;
+        long buildNanos = 0L;
+        // 🔴 2026-11-01（本轮：JEI 显示旧版）：账本<b>只读一次</b>，用来判"这一条要不要带完整正文"。
+        //    判据不在本类里，在纯核 ShanhaiJeiReplayBodyPlan（可离线跑 A/B/C + 负对照）。
+        final java.util.Map<String, ShanhaiJeiReplayBodyPlan.Overlay> overlay = overlayView();
         for (ReplayedEntry e : new java.util.ArrayList<>(REPLAYED.values())) {
             try {
-                final RecipeSyncMessage msg = new RecipeSyncMessage(e.typeId, e.recipeId, ACTION_CHANGED,
-                        null, null, e.conditionsJson, false, 0, false, 0L, null);
+                final ShanhaiJeiReplayBodyPlan.Plan plan =
+                        ShanhaiJeiReplayBodyPlan.of(e.recipeId, overlay.get(e.recipeId));
+                RecipeSyncMessage msg = null;
+                if (plan.needsBody()) {
+                    final long t0 = System.nanoTime();
+                    try {
+                        msg = replayedBodyMessage(server, e, plan);
+                    } finally {
+                        buildNanos += System.nanoTime() - t0;
+                    }
+                    if (msg == null) {
+                        // 🔴 服务端这一侧编不出正文 ⇒ 保持"只送条件"的保守行为（客户端 cannot_rebuild：不藏不加）+
+                        //    一行明确原因（why= / 具体见 replayedBodyMessage 里那条）。
+                        bodyFailed++;
+                    }
+                }
+                if (msg == null) {
+                    // 老路（原样保留）：只送 conditions ⇒ 客户端"拿 JEI 手里那条原件只换条件那一格"。
+                    // ⚠️ 这一支对"只改条件"是正确的；对"改过输入/输出"就是本轮那个 bug 的形态。
+                    msg = new RecipeSyncMessage(e.typeId, e.recipeId, ACTION_CHANGED,
+                            null, null, e.conditionsJson, false, 0, false, 0L, null);
+                } else {
+                    bodies++;
+                }
                 channel.send(only == null ? PacketDistributor.ALL.noArg()
                         : PacketDistributor.PLAYER.with(() -> only), msg);
                 sent++;
                 noteBackInForce(e.recipeId);        // 这条又（在客户端）生效了 ⇒ 不再替它保住"已删"
-                ShanhaiMod.LOGGER.info("{} net_sent action=replayed_conditions id={} type={} cond_bytes={} to={} "
-                                + "（★重放装的条件补推给客户端 ⇒ JEI 配方页才会挂上那行催化剂槽）",
-                        PREFIX, e.recipeId, e.typeId, e.conditionsJson.length(),
+                ShanhaiMod.LOGGER.info("{} net_sent action=replayed_conditions id={} type={} why={} body={} "
+                                + "recipe_bytes={} in_bytes={} out_bytes={} cond_bytes={} to={} "
+                                + "（★重放装的这一条补推给客户端：body=true ⇒ 客户端能按正文重建，"
+                                + "JEI 显示 = 服务端 live；body=false ⇒ 只换条件那一格（输入/输出不动，"
+                                + "客户端会打 cannot_rebuild 的保守路））",
+                        PREFIX, e.recipeId, msg.typeId, plan.reason(),
+                        msg.recipeBytes != null && msg.recipeBytes.length > 0,
+                        msg.recipeBytes == null ? 0 : msg.recipeBytes.length,
+                        msg.inputsJson == null ? 0 : msg.inputsJson.length(),
+                        msg.outputsJson == null ? 0 : msg.outputsJson.length(),
+                        e.conditionsJson == null ? 0 : e.conditionsJson.length(),
                         only == null ? "all" : only.getName().getString());
             } catch (Throwable t) {
                 ShanhaiMod.LOGGER.error("{} replayed_conditions_send_failed id={} type={} err={} "
@@ -646,11 +694,118 @@ public final class ShanhaiJeiBridge {
         if (sent > 0) {
             REPLAYED_SENT.addAndGet(sent);
             REPLAYED_FLUSHES.incrementAndGet();
-            ShanhaiMod.LOGGER.info("{} replayed_conditions_flushed sent={} pending={} to={} flushes={}",
-                    PREFIX, sent, REPLAYED.size(), only == null ? "all" : only.getName().getString(),
-                    REPLAYED_FLUSHES.get());
+            ShanhaiMod.LOGGER.info("{} replayed_conditions_flushed sent={} bodies={} body_failed={} pending={} "
+                            + "to={} flushes={} build_ms={} overlay_entries={} "
+                            + "（bodies = 带完整正文的条数（JEI 会显示 = 服务端 live）；"
+                            + "body_failed = 服务端编不出正文而退回'只送条件'的条数（那些条 JEI 仍是旧版，"
+                            + "原因见同一 id 的 replayed_body_skipped 行））",
+                    PREFIX, sent, bodies, bodyFailed, REPLAYED.size(),
+                    only == null ? "all" : only.getName().getString(),
+                    REPLAYED_FLUSHES.get(), buildNanos / 1_000_000L, overlay.size());
         }
         return sent;
+    }
+
+    /**
+     * <b>覆盖层账本 ⇒ 每条 id "改过什么"</b>（一次读盘，供 {@link ShanhaiJeiReplayBodyPlan} 判据用）。
+     *
+     * <p>读不到账本时返回空表 ⇒ 判据退化成 {@code no_overlay_entry} ⇒ 全部走"只送条件"的老路
+     * （<b>宁可少刷新一次，也不凭猜去发正文</b>）。这里只读，一个字节都不写。
+     */
+    private static java.util.Map<String, ShanhaiJeiReplayBodyPlan.Overlay> overlayView() {
+        final java.util.Map<String, ShanhaiJeiReplayBodyPlan.Overlay> out = new java.util.HashMap<>();
+        try {
+            final com.google.gson.JsonObject root = ShanhaiRecipeOverrideStore.loadRoot();
+            if (root == null || !root.has("entries") || !root.get("entries").isJsonArray()) {
+                return out;
+            }
+            for (com.google.gson.JsonElement el : root.getAsJsonArray("entries")) {
+                if (!el.isJsonObject()) {
+                    continue;
+                }
+                final com.google.gson.JsonObject o = el.getAsJsonObject();
+                if (!o.has("id") || !o.get("id").isJsonPrimitive()) {
+                    continue;
+                }
+                final String op = o.has("op") && o.get("op").isJsonPrimitive() ? o.get("op").getAsString() : null;
+                final java.util.Set<String> keys = new java.util.HashSet<>();
+                if (o.has("fields") && o.get("fields").isJsonObject()) {
+                    keys.addAll(o.getAsJsonObject("fields").keySet());
+                }
+                out.put(o.get("id").getAsString(), new ShanhaiJeiReplayBodyPlan.Overlay(op, keys));
+            }
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} replayed_overlay_read_failed err={} "
+                            + "（读不出账本 ⇒ 本轮全部走'只送条件'的保守路；不影响配方本身）",
+                    PREFIX, t.toString());
+        }
+        return out;
+    }
+
+    /**
+     * 🔴 <b>把"活着的那一条配方"整编成一条带正文的 ACTION_CHANGED</b>（重放路唯一的新增出口）。
+     *
+     * <p>序列化点只有一处：{@link RecipeSyncMessage#changed(String, GTRecipe, String, String, String)}
+     * → {@code encodeRecipe}（{@code GTRecipeSerializer.SERIALIZER.toNetwork}）—— <b>与编辑器保存时同一个函数</b>，
+     * 不新造格式。inputs / outputs 也一样走 {@code ShanhaiRecipeIoApply.tableJson}（{@code Content.codec(cap)}）。
+     *
+     * @return 装好的消息；<b>任何一步拿不出来就返回 {@code null} 并打一行 why=…</b>
+     *         （调用方退回"只送条件"，也就是保住旧行为）
+     */
+    private static RecipeSyncMessage replayedBodyMessage(MinecraftServer server, ReplayedEntry e,
+                                                         ShanhaiJeiReplayBodyPlan.Plan plan) {
+        final net.minecraft.resources.ResourceLocation id =
+                net.minecraft.resources.ResourceLocation.tryParse(e.recipeId);
+        if (id == null) {
+            ShanhaiMod.LOGGER.warn("{} replayed_body_skipped id={} why=bad_recipe_id "
+                            + "（这个 id 解不成 ResourceLocation ⇒ 编不出正文；客户端会走 cannot_rebuild 的保守路）",
+                    PREFIX, e.recipeId);
+            return null;
+        }
+        final GTRecipe live;
+        try {
+            live = ShanhaiRecipeReverseIndex.byId(server, id);
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} replayed_body_skipped id={} why=no_live_recipe err={} "
+                            + "（按 id 查活表时抛了 ⇒ 编不出正文）", PREFIX, e.recipeId, t.toString());
+            return null;
+        }
+        if (live == null || live.id == null) {
+            ShanhaiMod.LOGGER.warn("{} replayed_body_skipped id={} why=no_live_recipe "
+                            + "（服务端活表里按 id 找不到这条 ⇒ 编不出正文 ⇒ 客户端只能沿用旧的显示；"
+                            + "这种情况通常是这条配方在服务端也没生效）", PREFIX, e.recipeId);
+            return null;
+        }
+        try {
+            // 条件：优先用【活配方自己那份】（= 服务端真值，重放装上的条件就在里面）；
+            // 活配方一条条件都没有而登记时有时，才退回登记时那份（否则会把刚装上的槽弄丢）。
+            final com.google.gson.JsonArray conds = ShanhaiRecipeConditions.encodeOf(live);
+            final String condJson = conds != null && conds.size() > 0 ? conds.toString() : e.conditionsJson;
+            final String inJson = ShanhaiRecipeIoApply.tableJson(live, "inputs").toString();
+            final String outJson = ShanhaiRecipeIoApply.tableJson(live, "outputs").toString();
+            final RecipeSyncMessage msg = RecipeSyncMessage.changed(e.typeId, live, inJson, outJson, condJson);
+            if (msg.recipeBytes == null || msg.recipeBytes.length == 0) {
+                // encodeRecipe 自己已经打过 net_encode_recipe_failed（带异常类）。
+                ShanhaiMod.LOGGER.warn("{} replayed_body_skipped id={} type={} why=serialize_failed "
+                                + "（有活配方但编不出字节 ⇒ 退回'只送条件'：客户端不藏不加，JEI 仍显示旧内容；"
+                                + "异常类见上一条 net_encode_recipe_failed）",
+                        PREFIX, e.recipeId, msg.typeId);
+                return null;
+            }
+            ShanhaiMod.LOGGER.info("{} replayed_body_built id={} type={} why={} recipe_bytes={} "
+                            + "in_bytes={} out_bytes={} cond_n={} dur={} eu={} "
+                            + "（★这条重放补丁带上了【完整正文】：客户端解回来就是服务端这一条 ⇒ "
+                            + "JEI 上的输入/产物/电压与 live 逐项一致）",
+                    PREFIX, e.recipeId, msg.typeId, plan.reason(), msg.recipeBytes.length,
+                    inJson.length(), outJson.length(), conds == null ? -1 : conds.size(),
+                    msg.duration, msg.eut);
+            return msg;
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} replayed_body_skipped id={} type={} why=serialize_failed:{} err={} "
+                            + "（编正文那一步抛了 ⇒ 退回'只送条件'，客户端不藏不加）",
+                    PREFIX, e.recipeId, e.typeId, t.getClass().getSimpleName(), t.toString());
+            return null;
+        }
     }
 
     /** 登录钩子挂过没有（幂等闸）。 */
@@ -903,12 +1058,35 @@ public final class ShanhaiJeiBridge {
 
         public static RecipeSyncMessage changed(GTRecipe recipe, String inputsJson,
                                                 String outputsJson, String conditionsJson) {
+            return changed(typeIdOf(recipe), recipe, inputsJson, outputsJson, conditionsJson);
+        }
+
+        /**
+         * 🆕 2026-11-01（重放路）：同上，但<b>类型 id 由调用方给</b>。
+         *
+         * <p>为什么要有这一版：重放那一拍拿到的 {@code type} 是 {@code "unknown"}
+         * （KubeJS 加的配方在事件相位 json 只有 {@code {"type":"unknown"}}，实机日志
+         * {@code replayed_conditions_queued id=… type=unknown}）。而客户端要用
+         * <b>JEI 分类 uid</b> 才能把这一条放回它该在的那一页（{@code registerInJei} 是要分类的）
+         * ⇒ 补发时按<b>活着那条配方自己的类型</b>盖过去；拿不到才退回登记时那个值。
+         * <p>序列化仍然走 {@link #encodeRecipe}（与编辑器保存那条路<b>同一个函数</b>）。
+         */
+        public static RecipeSyncMessage changed(String fallbackTypeId, GTRecipe recipe, String inputsJson,
+                                                String outputsJson, String conditionsJson) {
+            final String own = typeIdOf(recipe);
             return new RecipeSyncMessage(
-                    recipe.getType() == null || recipe.getType().registryName == null
-                            ? null : recipe.getType().registryName.toString(),
+                    own == null || own.isEmpty() ? fallbackTypeId : own,
                     recipe.id.toString(), ACTION_CHANGED, inputsJson, outputsJson, conditionsJson,
                     true, recipe.duration, true, ShanhaiRecipeIoApply.euOf(recipe), null, null,
                     encodeRecipe(recipe));
+        }
+
+        /** 一条 GT 配方的类型 id（{@code gtceu:assembler}）；拿不到 = {@code null}（<b>不编</b>）。 */
+        public static String typeIdOf(GTRecipe recipe) {
+            if (recipe == null || recipe.getType() == null || recipe.getType().registryName == null) {
+                return null;
+            }
+            return recipe.getType().registryName.toString();
         }
 
         /**

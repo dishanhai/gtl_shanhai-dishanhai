@@ -4,7 +4,10 @@ import com.google.common.primitives.Ints;
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
+import com.gregtechceu.gtceu.api.gui.fancy.FancyMachineUIWidget;
 import com.gregtechceu.gtceu.api.gui.fancy.IFancyConfiguratorButton;
+import com.gregtechceu.gtceu.api.gui.fancy.IFancyUIProvider;
+import com.gregtechceu.gtceu.api.gui.fancy.TabsWidget;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
@@ -13,11 +16,15 @@ import com.gregtechceu.gtceu.api.machine.multiblock.WorkableElectricMultiblockMa
 import com.gregtechceu.gtceu.api.machine.trait.NotifiableItemStackHandler;
 import com.gregtechceu.gtceu.api.machine.trait.RecipeLogic;
 import com.gregtechceu.gtceu.api.recipe.GTRecipe;
+import com.gregtechceu.gtceu.api.recipe.GTRecipeType;
 import com.gregtechceu.gtceu.api.recipe.logic.OCParams;
 import com.gregtechceu.gtceu.api.recipe.logic.OCResult;
 import com.gtladd.gtladditions.api.machine.IGTLAddMultiRecipeMachine;
 import com.gtladd.gtladditions.api.machine.gui.LimitedDurationConfigurator;
+import com.gtladd.gtladditions.api.machine.trait.IWirelessNetworkEnergyHandler;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
+import com.lowdragmc.lowdraglib.gui.texture.ItemStackTexture;
+import com.lowdragmc.lowdraglib.gui.widget.LabelWidget;
 import com.lowdragmc.lowdraglib.gui.widget.SlotWidget;
 import com.lowdragmc.lowdraglib.gui.widget.Widget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
@@ -27,6 +34,8 @@ import com.lowdragmc.lowdraglib.syncdata.field.ManagedFieldHolder;
 import com.shanhai.ShanhaiMod;
 import com.shanhai.client.compat.ConfiguratorTabGridCompat;
 import com.shanhai.common.compat.GtlAddCompat;
+import com.shanhai.common.heat.ShanhaiHeatGate;
+import com.shanhai.common.heat.ShanhaiHeatSources;
 import com.shanhai.common.recipe.PrimordialRecipeEffects;
 import com.shanhai.common.thread.ShanhaiParallelBudget;
 import com.shanhai.config.ShanhaiConfig;
@@ -40,14 +49,17 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineHost;
 import org.gtlcore.gtlcore.api.machine.multiblock.IModularMachineModule;
 import org.gtlcore.gtlcore.api.machine.trait.IBatchMachine;
 import org.gtlcore.gtlcore.api.recipe.RecipeMultiplierTracker;
 
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -102,7 +114,7 @@ import java.util.Set;
 public class PrimordialOmegaEngineMachine
         extends WorkableElectricMultiblockMachine
         implements IModularMachineHost<PrimordialOmegaEngineMachine>, IMachineLife, IGTLAddMultiRecipeMachine, IBatchMachine,
-                   ParallelOverrideMachine {
+                   ParallelOverrideMachine, ShanhaiIdleReasonSource {
 
     /** 规格 §3.2 ⑥：16 个模块位。不覆写 {@code getMaxModuleCount()} 就永远不是 16。 */
     public static final int MAX_MODULE_COUNT = 16;
@@ -226,6 +238,20 @@ public class PrimordialOmegaEngineMachine
     //    —— 机器实例在注册期拿不到，而 tooltip 是注册期就写死的 Component，
     //    所以必须有"不需要实例就能取到"的常量。行为零变化：方法体仍然只是返回这个 int 常量
     //    （编译期常量，javac 会内联，不新增任何类加载）。
+    // 🔴 2026-11（任务 A：「Jade 显示改成无限」）：上面那套「本方法不返回负数」的说法
+    //    **只在【预算有限】时全对**；预算进无限档时，本方法现在<b>真的会返回</b>
+    //    {@link #DISPLAY_INFINITE_PARALLEL}（-114514）。两条同时成立的条件写死在一处纯核：
+    //    {@code ShanhaiParallelDisplay#jadeParallel(long)}。
+    //    <pre>
+    //      预算 <  Long.MAX/2  ⇒ Ints.saturatedCast(预算)   ← 与 2026-09 之后那一版逐位相同
+    //      预算 >= Long.MAX/2  ⇒ -114514（Jade 画彩虹「无限」）
+    //    </pre>
+    //    🔴 为什么不再有「静默停机」那条雷：雷的成因是父类把本方法的负数
+    //    <b>乘进预算</b>（`(long) getMaxParallel() * getMultipleThreads()`）；
+    //    现在预算走 {@code ParallelOverrideMachine#perRecipeParallelBudget()}（照伪神、不乘 T），
+    //    且 {@code PrimordialEngineRecipeLogic#calculateParallels()} 只在
+    //    {@code limit <= Integer.MAX_VALUE} 时才退回父类 —— 那一档本方法必然返回正数
+    //    ⇒ **负数与"父类那条乘法"在结构上永远碰不到一起**（不是靠"大概不会"，是靠分支条件）。
     @Override
     public int getMaxParallel() {
         // 🔴 2026-09-26：与老山海逐字同形的【int 饱和桥】
@@ -234,12 +260,49 @@ public class PrimordialOmegaEngineMachine
         //   数值与改动前【逐位相同】（改前 = MAX_PARALLEL_DISPLAY = Integer.MAX_VALUE = 2147483647），
         //   变化的是"这个 2147483647 从哪来"：以前是一个自定的 int 常量，
         //   现在是 Long.MAX_VALUE 经过饱和桥之后的必然结果。
-        // 🔴 2026-09-27：改成经 getRecipeLogicMaxParallel() 取 —— 玩家在「并行数」面板里填的覆盖值
-        //    必须同时作用到这条 int 桥（Jade 的 ParallelProvider、gtlcore 的 ParallelMachine 读点、
-        //    BatchProcessing.isCustomSubTickParallelized 都读它），否则会出现"引擎改了、显示没改"。
-        //    ⚠️ 未覆盖时逐值不变：getRecipeLogicMaxParallel() 此时返回 MAX_PARALLEL ⇒ 饱和后仍是
-        //       MAX_PARALLEL_INT = 2147483647（改动前那个数，一个 bit 都没动）。
-        return Ints.saturatedCast(getRecipeLogicMaxParallel());
+        // 🔴 2026-11（任务 A：Jade 那行改成「无限」）：
+        //    Jade 的取值链是 ShanhaiInfiniteThreadDisplayMixin#appendServerData →
+        //    `final int parallel = machine.getMaxParallel();` → `data.putLong("parallel", parallel)`。
+        //    ⇒ **本方法就是那条链的取值点**（mixin 里一个字节都不用改，它只是原样搬运本方法的返回值）。
+        //    而本方法的返回类型是 int（gtlcore ParallelMachine 的抽象签名）⇒ 装不下 9223372036854775807，
+        //    把 long 预算塞进 int 通道只剩两条路：饱和成 2147483647（= 用户截图里那个数）
+        //    或者写 gtladditions 自己的「无限」哨兵 -114514。
+        //    ⇒ 取后者，判据与映射**只在纯核一处**：ShanhaiParallelDisplay#jadeParallel(long)。
+        //      · 预算 <  Long.MAX/2 ⇒ Ints.saturatedCast(预算) —— 与改动前【逐位相同】
+        //      · 预算 >= Long.MAX/2 ⇒ -114514 ⇒ gtladditions 画彩虹「无限」
+        //    🔴 为什么现在返回负数【是安全的】（历史上这么做踩过雷，那条雷已经不存在了）：
+        //      · 那次雷 = 父类 `(long) getMaxParallel() * getMultipleThreads()` 把负数乘进并行，
+        //        贪心分配 `if (remain <= 0L) break;` ⇒ 静默停摆。
+        //      · 现在预算由 ParallelOverrideMachine#perRecipeParallelBudget() 给出（照伪神，不乘 T），
+        //        而 PrimordialEngineRecipeLogic#calculateParallels() **只在 limit ≤ Integer.MAX_VALUE 时**
+        //        才 `return super.calculateParallels()` —— 而此时 getMaxParallel() 一定走的是正数那一支
+        //        ⇒ 「无限档读 getMaxParallel()×T」这条路结构上不存在。
+        //      · 另两个上游读者各有护栏：BatchProcessing.isCustomSubTickParallelized 是
+        //        `realParallels > Math.max(1L, getMaxParallel())`（javap 偏移 37–58）⇒ 负数被夹成 1；
+        //        gtlcore MultipleRecipesLogic 是另一个 RecipeLogic 实现，不是本主机的配方逻辑。
+        //      · 批处理在本机是【关死】的（canConfigureBatchProcessing/supportsBatchProcessing/
+        //        isBatchEnabled 三个都 false，见本类 D 项），⇒ BatchProcessing.apply 不会落到本机。
+        return ShanhaiParallelDisplay.jadeParallel(getRecipeLogicMaxParallel());
+    }
+
+    /**
+     * 🔴 <b>主机并行数的 long 显示通道（2026-11 新增，任务 A）。</b>
+     *
+     * <p>与模块侧 {@code PrimordialModuleMachine#getJadeParallel()} <b>同名同形状</b>：
+     * 返回<b>原始 long 预算</b>（{@code Long.MAX_VALUE} 档原样返回，不压成 21 亿），
+     * 由 {@link ShanhaiParallelDisplay#format(long)} 负责把超大值画成「无限」。
+     *
+     * <p>⚠️ 为什么它【不是】Jade 的取值点：Jade 那条链（{@code ShanhaiInfiniteThreadDisplayMixin}）
+     * 读的是 {@link #getMaxParallel()}（int 桥），本轮按纪律<b>不改 mixin</b> ⇒ 无限档由 int 桥
+     * 返回「无限」哨兵来达成（见 {@link #getMaxParallel()} 的注释）。
+     * 本方法给的是<b>不丢精度</b>的那一份，供机器面板 / tooltip / 将来的读者使用。
+     *
+     * <p>逐值对照：未覆盖且无电上限时 = {@link #MAX_PARALLEL} = {@code 9223372036854775807}；
+     * 玩家填了覆盖值 = 覆盖值；电力自动算出电上限时 = 「每线程上限」（已含 ÷T）。
+     * 三个数与 {@link #getMaxParallel()} 的有限档在 int 域内<b>逐位相同</b>（同一来源）。
+     */
+    public long getJadeParallel() {
+        return getRecipeLogicMaxParallel();
     }
 
     /**
@@ -263,11 +326,23 @@ public class PrimordialOmegaEngineMachine
      * 老山海主机在这条 long 通道上拿到的其实还是 2147483647（它唯一的 override 在模块侧），
      * 所以「主机并行 = Long.MAX」用户在老山海里<b>也看不到</b>；本工程按用户的字面要求做到了 long。
      *
-     * <h2>溢出</h2>
-     * 与 {@code getMultipleThreads()}（128）相乘的饱和由
-     * {@code PrimordialEngineRecipeLogic#calculateParallels()} 用
-     * {@link PrimordialModuleMachine#saturatedMultiply(long, long)} 完成
-     * （{@code Long.MAX × 128 ⇒ Long.MAX}，不回绕）。
+     * <h2>溢出 / 预算（⛔ 2026-11 起本节改口，旧文照留）</h2>
+     * ⛔ <b>旧原文（作废，逐字留档）</b>：
+     * <pre>
+     *   与 {@code getMultipleThreads()}（128）相乘的饱和由
+     *   {@code PrimordialEngineRecipeLogic#calculateParallels()} 用
+     *   {@code PrimordialModuleMachine#saturatedMultiply(long, long)} 完成
+     *   （{@code Long.MAX × 128 ⇒ Long.MAX}，不回绕）。
+     * </pre>
+     * 🔴 <b>现行（照伪神，用户 2026-11 拍板）</b>：主机多配方引擎<b>不再做这条乘法</b> ——
+     * 每配方预算由 {@link ParallelOverrideMachine#perRecipeParallelBudget()} 给出，
+     * 自动档下就是 <b>{@code Long.MAX_VALUE}</b>（伪神 {@code calculateParallels} 的
+     * {@code ldc2_w 9223372036854775807L} 同一口径），<b>跨配方线程 T 不进这条预算</b>。
+     * <p>⇒ 本方法返回的 {@code Long.MAX_VALUE} 仍然是"并行上限"的真值来源
+     * （面板 / tooltip / 原生修饰链 {@code Ints.saturatedCast(…)} 都读它），
+     * 只是它不再被乘以 T 之后才变成预算；"并行 × 线程超 long 就夹成 long"这条口径
+     * 由 {@code ShanhaiParallelBudget#saturatedMultiply} 承担唯一一份实现（只在
+     * "玩家手填覆盖值"那一路使用）。
      */
     public long getRecipeLogicMaxParallel() {
         // 🔴 2026-09-27：「并行数」面板里玩家填的覆盖值在这里生效（{@code 0} = 自动 ⇒ 返回 MAX_PARALLEL）。
@@ -533,7 +608,12 @@ public class PrimordialOmegaEngineMachine
      * 🔴 <b>并行/线程显示「无限」的哨兵值 {@code -114514}
      * —— 2026-09-21 二次改判后，它是【纯显示层】常量，不参与任何运算。</b>
      *
-     * <h2>🔴 它已经<b>不再</b>是 {@code getMaxParallel()} 的返回值</h2>
+     * <h2>🔴 它<b>又</b>是 {@code getMaxParallel()} 的返回值了（2026-11 任务 A 改判，原文照留）</h2>
+     * ⛔ <b>下面这一节在 2026-11 之后只对「预算有限」那一档成立</b>；预算进无限档时本常量
+     * <b>确实</b>由 {@link #getMaxParallel()} 返回 —— 因为 Jade 那行的取值点就在那里，
+     * 而 mixin 是不许改的（完整理由见 {@link #getMaxParallel()} 的 2026-11 注释）。
+     * 判定与映射的唯一实现 = {@code ShanhaiParallelDisplay#jadeParallel(long)}。
+     * <p><b>旧原文（只对有限档成立的推导，逐字留档）：</b>
      * 原先「E 项」的做法是让 {@link #getMaxParallel()} 返回这个负数，再靠 gtladditions 的
      * Jade {@code ParallelProviderMixin}（它原文对 {@code ForgeOfTheAntichrist} 就是硬编码
      * {@code putLong("parallel", -114514L)}）把抬头画成彩虹「无限」。
@@ -572,7 +652,7 @@ public class PrimordialOmegaEngineMachine
      * 「链尾 {@code duration × batchSize} 绕开绊线」与「{@code realParallels × batchSize} 的裸乘法」
      * 两条，<b>与显示哨兵无关</b>。
      */
-    public static final int DISPLAY_INFINITE_PARALLEL = -114514;
+    public static final int DISPLAY_INFINITE_PARALLEL = ShanhaiParallelDisplay.INFINITE_SENTINEL;
 
     /**
      * 跨配方线程数（N4 的倍数项）。取值 {@link #MAX_PARALLEL}（= 2^30），
@@ -1384,6 +1464,252 @@ public class PrimordialOmegaEngineMachine
                 }
             }
         }.setFilter(PrimordialModuleMachine::isMatterModuleStack);
+
+        // (2026-10-25 T4) 主机自己的「额外挂载槽 ×3」：与模块 / 归墟那 3 格【同构造】——
+        // 3 格、IO.NONE/IO.BOTH、不设过滤器。构造器里只给形状，不读任何别的字段
+        // （读口全部容忍 null：createRecipeLogic 在更早的 super(holder) 里就跑过了）。
+        this.hostExtraMountSlots = new NotifiableItemStackHandler(this, EXTRA_MOUNT_SLOT_COUNT, IO.NONE, IO.BOTH);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════
+    //  (2026-10-25 T4) 「额外挂载槽 ×3」—— 从归墟子类【上移到本类】，三边共用一份实现
+    //
+    //  用户原话（逐字）：「给原始终焉引擎也加上 3 个额外挂件槽，只不过它只是给主机自己用的，
+    //  只需要放 1 个」
+    //
+    //  🔴 为什么必须上移而不是"在基类再加一份"（这是本轮唯一的首要冲突点）
+    //    归墟那 3 格此前声明在【子类】（GuixuVisionCoreMachine:346）。若基类再加一个同名字段：
+    //    Java 允许同名字段隐藏（编译不报错），但两个 @Persisted 都会进 LDLib 的字段 holder
+    //    （按【类】反射登记）⇒ 归墟实例上会有【两个各 3 格】的容器：基类方法读基类那份（永远空）、
+    //    子类方法读子类那份 ⇒ 界面 6 格，其中 3 格放了【永远无效且不报错】。
+    //    ⇒ 所以本轮把归墟那 3 格【删掉改成继承本类】（迁移见 ShanhaiExtraMountMigration）。
+    //
+    //  🔴 字段名 = 落盘键名（LDLib @Persisted 没有"改名"注解）
+    //    本字段刻意叫 hostExtraMountSlots（不是复用归墟旧名 extraMountSlots）——
+    //    归墟那边把旧字段【保留成 @Deprecated 只为迁移读一次】，两条键名互不覆盖，
+    //    迁移策略核才有"旧键 ≠ 新键"这件事可测（见 ShanhaiExtraMountMigration 的类注释）。
+    //
+    //  🔴 阈值：主机 1 / 模块与归墟 64，判据只有一份
+    //    extraMountRequiredCount() 是本轮新增的唯一钩子：
+    //      本类（主机）      → ShanhaiHeatGate.HOST_REQUIRED_COUNT（1）
+    //      模块 / 归墟       → ShanhaiHeatGate.REQUIRED_COUNT（64，覆写，行为逐位不变）
+    //    判据本身仍是 ShanhaiHeatGate#slotSatisfies(..., int) —— 不写死两份数字。
+    //
+    //  ⚠️ 构造时序：本字段在 super(holder)【之后】才赋值，而 createRecipeLogic 在
+    //     WorkableMultiblockMachine 的构造器里（= super 链内部）就跑过了 ⇒ 所有读口都必须容忍 null。
+    // ═══════════════════════════════════════════════════════════════════════════════════
+
+    /** 额外挂载槽的格数（唯一真源 {@code ShanhaiHeatGate.SLOT_COUNT} = 3；模块侧同源）。 */
+    public static final int EXTRA_MOUNT_SLOT_COUNT = ShanhaiHeatGate.SLOT_COUNT;
+
+    /**
+     * 主机自身的额外挂载槽 ×3（玩家从侧页签「额外挂载」放置）。
+     *
+     * <p>{@code IO.NONE, IO.BOTH} 与模块 / 归墟那 3 格逐字同参（handlerIO=NONE 不参与配方输入输出，
+     * capabilityIO=BOTH 露出物品能力）；<b>不设过滤器</b> —— 放错了必须仍然失败（负对照要做得出），
+     * 而且中途加过滤器会让老存档里的物品变成取不出来的死格。
+     */
+    @Persisted
+    protected final NotifiableItemStackHandler hostExtraMountSlots;
+
+    /** {@link #getExtraMountContents()} 的逐格缓存（避免每次找配方都查注册表）。 */
+    private List<ShanhaiHeatGate.SlotContent> hostExtraMountCache = List.of();
+    /** 缓存对应的三格快照（逐格 {@code ItemStack} 相等才算命中）。 */
+    private ItemStack[] hostExtraMountCacheKeys = new ItemStack[0];
+
+    /**
+     * <b>本机额外挂载槽的阈值钩子</b>（本轮唯一的阈值真源；判据仍是 {@code ShanhaiHeatGate} 那一份）。
+     *
+     * <pre>
+     *   本类（原始终焉引擎 / 主机自己） → ShanhaiHeatGate.HOST_REQUIRED_COUNT = 1   ← 用户口径「只需要放 1 个」
+     *   PrimordialModuleMachine        → ShanhaiHeatGate.REQUIRED_COUNT     = 64  （覆写，已验收，不动）
+     *   GuixuVisionCoreMachine         → ShanhaiHeatGate.REQUIRED_COUNT     = 64  （覆写，已验收，不动）
+     * </pre>
+     * <p>⚠️ 只有<b>热力那两条</b>（{@code ebf_temp} / {@code SCTier}）吃这个数；另外四类条件
+     * （超净间 / 重力 / 维度 / 研究）的判据本来就是"放了 1 个就算"，与它无关。
+     */
+    protected int extraMountRequiredCount() {
+        return ShanhaiHeatGate.HOST_REQUIRED_COUNT;
+    }
+
+    /** 某一格的物品（越界 / 未初始化返回空栈）。 */
+    @NotNull
+    public ItemStack getExtraMountStack(int index) {
+        if (hostExtraMountSlots == null || index < 0 || index >= EXTRA_MOUNT_SLOT_COUNT) {
+            return ItemStack.EMPTY;
+        }
+        final ItemStack s = hostExtraMountSlots.storage.getStackInSlot(index);
+        return s == null ? ItemStack.EMPTY : s;
+    }
+
+    /** 某一格的数量（越界 0）。 */
+    public int getExtraMountCount(int index) {
+        return getExtraMountStack(index).getCount();
+    }
+
+    /** 三格现读物品（顺序 = 槽序号）—— 只给"槽里实际放的是什么"那句文案用。 */
+    @NotNull
+    public List<ItemStack> getExtraMountStacks() {
+        final List<ItemStack> out = new ArrayList<>(EXTRA_MOUNT_SLOT_COUNT);
+        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            out.add(getExtraMountStack(i));
+        }
+        return out;
+    }
+
+    /**
+     * 三格现读内容（{@link ShanhaiHeatGate.SlotContent}），<b>逐格缓存</b>。
+     *
+     * <p>🔴 为什么必须缓存：{@code ShanhaiHeatSources#slotContentOf} 要查注册表，而
+     * {@code checkRecipe} 是<b>每次找配方都调</b>的（每 tick 每线程）⇒ 不缓存就是每 tick 几十次注册表查询。
+     * <p>与模块侧 {@code PrimordialModuleMachine#getExtraMountContents} 同一套写法（同一语义、同一退化路径），
+     * 但<b>判定</b>不在本方法里 —— 判定只经 {@code ShanhaiExtraMountGate}。
+     */
+    @NotNull
+    public List<ShanhaiHeatGate.SlotContent> getExtraMountContents() {
+        final ItemStack[] now = new ItemStack[EXTRA_MOUNT_SLOT_COUNT];
+        boolean hit = hostExtraMountCache.size() == EXTRA_MOUNT_SLOT_COUNT
+                && hostExtraMountCacheKeys.length == EXTRA_MOUNT_SLOT_COUNT;
+        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            now[i] = getExtraMountStack(i);
+            if (hit) {
+                final ItemStack old = hostExtraMountCacheKeys[i];
+                hit = old != null && ItemStack.matches(old, now[i]);
+            }
+        }
+        if (hit) {
+            return hostExtraMountCache;
+        }
+        final List<ShanhaiHeatGate.SlotContent> computed = new ArrayList<>(EXTRA_MOUNT_SLOT_COUNT);
+        for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+            computed.add(ShanhaiHeatSources.slotContentOf(now[i]));
+        }
+        hostExtraMountCache = computed;
+        hostExtraMountCacheKeys = now;
+        return computed;
+    }
+
+    /**
+     * 本机的 3 格<b>允不允许当热力源</b>（{@code ebf_temp} / {@code SCTier} 那两条门槛）。
+     *
+     * <p>主机自身<b>允许</b>（用户 2026-10-25：「主机也接热力源，语义照 ShanhaiHeatGate，只是阈值 1」）
+     * ⇒ 恒 {@code true}。
+     * <p>🔴 为什么不走 {@code ShanhaiHeatGate#hasHeatSlot(机器 id)} 那条白名单：
+     * 那份白名单是<b>模块 id</b> 的清单，并且有注册期硬自检
+     * （{@code ShanhaiHeatGate#verifyMachineIds} 要求"白名单里每个 id 都必须是一台已注册模块"）
+     * ⇒ 把主机 id（{@code shanhai:primordial_omega_engine} 一族）塞进去会让那条自检<b>当场失败</b>
+     * （主机不是模块）。判据改成"本类 = 主机自己"，白名单一个字不动。
+     * <p>⚠️ 归墟<b>覆写</b>本方法并保持原语义（{@code hasHeatSlot(...)}，其 id 不在白名单 ⇒ false）——
+     * 归墟的热力行为一个数都不变。
+     */
+    public boolean canUseExtraMountAsHeatSource() {
+        return true;
+    }
+
+    /** 一行可 grep 的三格读数（日志与 tooltip 共用）。 */
+    @NotNull
+    public String describeExtraMounts() {
+        final List<ShanhaiHeatGate.SlotContent> contents = getExtraMountContents();
+        final StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < contents.size(); i++) {
+            sb.append('[').append(i + 1).append(']').append(contents.get(i).describe()).append(' ');
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * 三格各自 tooltip（<b>主机口径</b>：阈值 1 个即生效）。
+     *
+     * <p>归墟<b>覆写</b>本方法保留它那套"热力源要放满 64 个"的文案（已验收，不动）——
+     * 两台机器上"阈值"那句不同是<b>正确</b>的：它们本来就是两个数。
+     *
+     * <p>🔴 <b>2026-11-01：数字与判据同源</b>（{@link ShanhaiHeatGate#requiredFor}）。
+     * 主机上热力的 1 与四类条件的 1 <b>恰好相等但语义不同</b>：
+     * <pre>
+     *   线圈 / 恒星热力容器     ⇒ 本机热力阈值（主机 1；归墟覆写成 64）
+     *   维护仓 / 碎片 / 数据仓  ⇒ 恒 1（与热力阈值无关）
+     * </pre>
+     */
+    @NotNull
+    public Component[] extraMountTooltips(int index) {
+        final ItemStack stack = getExtraMountStack(index);
+        final ShanhaiHeatGate.SlotContent c = ShanhaiHeatSources.slotContentOf(stack);
+        final int heatNeed = ShanhaiHeatGate.requiredFor(
+                ShanhaiHeatGate.Kind.HEAT_TEMP, extraMountRequiredCount());
+        final int singleNeed = ShanhaiHeatGate.requiredFor(
+                ShanhaiHeatGate.Kind.GRAVITY, extraMountRequiredCount());
+        if (c.isBlank()) {
+            return new Component[]{
+                    Component.literal("§e额外挂载槽 " + (index + 1) + " / " + EXTRA_MOUNT_SLOT_COUNT),
+                    Component.literal("§7§l主机自身的配方条件用：维护仓 / 碎片 / 数据仓放 " + singleNeed + " 个即生效"),
+                    Component.literal("§7可放：维护仓（超净间/重力）· 维度碎片 · 创造模式数据访问仓 · 线圈 / 恒星热力容器"),
+                    Component.literal("§7一个条件占一格；线圈 / 恒星热力容器要放满 " + heatNeed + " 个"),
+                    Component.literal("§7本机不是模块，这 3 格不供给任何模块")};
+        }
+        final boolean isHeatItem = c.coilTemperature > 0 || c.containmentTier > 0;
+        final int need = isHeatItem ? heatNeed : singleNeed;
+        return new Component[]{
+                Component.literal("§e额外挂载槽 " + (index + 1) + " / " + EXTRA_MOUNT_SLOT_COUNT),
+                Component.literal("§7§l主机自身的配方条件用，需 " + need + " 个"
+                        + (isHeatItem ? "§7（热力源）" : "§7（放 1 个即生效）")),
+                Component.literal("§7现读：" + c.describe()),
+                Component.literal(c.count >= need
+                        ? "§a已够数，可以满足对应条件"
+                        : "§c只有 " + c.count + " 个（本机需 §f" + need + "§c 个）")};
+    }
+
+    /**
+     * 「额外挂载」侧页签 —— <b>与模块 / 归墟同一个控件、同一套坐标</b>。
+     *
+     * <p>🔴 用户口径（本轮）：界面放进<b>侧页签</b>，<b>不动主机主页面</b>
+     * （{@code createUIWidget} 里那一个物质模块专属槽保持不变）。
+     * <p>⚠️ 沿用上游 default 实现（{@code super.attachSideTabs(tabs)}：主 tab ＋ 机器模式 ＋ 朝向页），
+     * 只<b>追加</b>一个子页 ⇒ 主机其余侧页签行为一个字节都不变。
+     * <p>⚠️ 归墟<b>覆写</b>本方法且<b>不</b>调 super（它要摘掉「机器模式」页，见
+     * {@code GuixuVisionCoreMachine#attachSideTabs} 的 javap 依据）⇒ 归墟走它自己那个
+     * 逐像素同款的子页，<b>不会</b>与本页重复（一份实现、不可能出现 6 格）。
+     */
+    @Override
+    public void attachSideTabs(TabsWidget tabs) {
+        super.attachSideTabs(tabs);
+        if (tabs == null) {
+            return;
+        }
+        tabs.attachSubTab(new ExtraMountPageProvider());
+    }
+
+    /**
+     * 「额外挂载」子页（主机版）：3 个槽，布局<b>逐字照抄模块侧</b>
+     * {@code PrimordialModuleMachine.ExtraMountPageProvider} ——
+     * 尺寸 126×78 / {@code BACKGROUND_INVERSE} 底 / 标题 (8,8) / 三个 {@code SlotWidget} 在 y=30、
+     * x = 8 + i×34 / 底注 (8,58)，六个数字一个不差（用户 2026-10-25：「接口 gui 就和模块的一样」）。
+     */
+    private final class ExtraMountPageProvider implements IFancyUIProvider {
+        @Override
+        public Component getTitle() {
+            return Component.literal("§b额外挂载");
+        }
+
+        @Override
+        public IGuiTexture getTabIcon() {
+            return new ItemStackTexture(Items.HOPPER);
+        }
+
+        @Override
+        public Widget createMainPage(FancyMachineUIWidget widget) {
+            WidgetGroup group = new WidgetGroup(0, 0, 126, 78);
+            group.setBackground(GuiTextures.BACKGROUND_INVERSE);
+            group.addWidget(new LabelWidget(8, 8, () -> "额外挂载槽"));
+            for (int i = 0; i < EXTRA_MOUNT_SLOT_COUNT; i++) {
+                SlotWidget slot = new SlotWidget(hostExtraMountSlots.storage, i,
+                        8 + i * 34, 30, true, true);
+                slot.setBackground(SlotWidget.ITEM_SLOT_TEXTURE);
+                slot.setHoverTooltips(extraMountTooltips(i));
+                group.addWidget(slot);
+            }
+            group.addWidget(new LabelWidget(8, 58, () -> "满足本机配方的额外要求（放 1 个即生效）"));
+            return group;
+        }
     }
 
     // ═════════════════════════ 多配方引擎（T1：换引擎的入口） ═════════════════════════
@@ -2211,9 +2537,95 @@ public class PrimordialOmegaEngineMachine
         return false;
     }
 
+    // ═══════════ 配方类型下标夹紧（2026-10-31 崩服修复 · 主机侧同一条路径） ═══════════
+
+    /**
+     * <b>覆写 {@code getRecipeType()}：取数组之前先把下标夹到界内（主机侧）。</b>
+     *
+     * <h2>为什么主机侧也要兜</h2>
+     * 本机与模块走的是<b>同一段上游代码</b>：{@code WorkableElectricMultiblockMachine
+     * → WorkableMultiblockMachine#getRecipeType()} 是 {@code recipeTypes[activeRecipeType]} 的
+     * 裸取值（{@code javap -c} 偏移 0/1/4/5/8：{@code getfield / getfield / aaload}），而
+     * {@code activeRecipeType} 带 {@code @Persisted}（{@code javap -v} 的
+     * {@code RuntimeVisibleAnnotations}）⇒ <b>只要主机的配方类型数组也在某次改动里变短，
+     * 老存档同样会把下标顶到界外</b>，崩点一模一样的
+     * {@code WorkableMultiblockMachine.java:288}。本批主机类型数没变，但"下次不会变"没有保证，
+     * 所以在这里一并兜住（任务书要求：主机侧若走同一路径就一起处理）。
+     *
+     * <p>本工程自己也确实"按 {@code activeRecipeType} 同一口径"取过东西：
+     * 模块侧候选集的来源就写着「未授予跨类型 ⇒ {@code getRecipeTypes()[activeRecipeType]}
+     * <b>一个</b>类型」（见下方 2026-10-23 跨配方种类并行的留档）。
+     *
+     * @return 当前激活的配方类型，<b>保证落在 {@code getRecipeTypes()} 范围内</b>
+     * @throws IllegalStateException 类型数组为空时（带说明，不再出现裸 AIOOBE）
+     */
+    @Override
+    public GTRecipeType getRecipeType() {
+        final GTRecipeType[] types = super.getRecipeTypes();
+        if (types == null || types.length == 0) {
+            throw new IllegalStateException("[SHANHAI-RTYPE] " + getClass().getName() + " 的配方类型数组为空"
+                    + "（WorkableMultiblockMachine.recipeTypes 由 MultiblockMachineDefinition 在构造期给出）"
+                    + " ⇒ 没有可返回的配方类型。请检查该机器在注册表里的 recipeTypes 配置。pos=" + getPos());
+        }
+        return types[RecipeTypeIndexGuard.clampIndex(super.getActiveRecipeType(), types.length)];
+    }
+
+    /**
+     * 覆写 {@code getActiveRecipeType()}：<b>读出即夹紧</b>（纯读，不写字段；getter 不许有副作用）。
+     *
+     * @return 界内下标；数组为空时返回 {@link RecipeTypeIndexGuard#NO_VALID_INDEX}
+     * @see PrimordialModuleMachine#getActiveRecipeType()
+     */
+    @Override
+    public int getActiveRecipeType() {
+        final GTRecipeType[] types = super.getRecipeTypes();
+        return RecipeTypeIndexGuard.clampIndex(super.getActiveRecipeType(), types == null ? 0 : types.length);
+    }
+
+    /**
+     * <b>把持久化的 {@code activeRecipeType} 主动夹到界内并写回存档（主机侧）。</b>
+     *
+     * <p>与模块侧 {@code PrimordialModuleMachine#shanhai$clampActiveRecipeTypeToRange(String)}
+     * 同一实现、同一调用时机（{@code onLoad} + {@code onStructureFormed}）；分开写是因为
+     * 两个类不在同一条继承链上（模块与主机都 extends {@code WorkableElectricMultiblockMachine}，
+     * 相互之间没有共同的自有基类）。
+     *
+     * @param when 触发时机（只用于日志）
+     */
+    protected final void shanhai$clampActiveRecipeTypeToRange(@NotNull String when) {
+        try {
+            final GTRecipeType[] types = super.getRecipeTypes();
+            final int length = types == null ? 0 : types.length;
+            if (length <= 0) {
+                return;
+            }
+            final int raw = super.getActiveRecipeType();
+            if (!RecipeTypeIndexGuard.isOutOfRange(raw, length)) {
+                return;
+            }
+            final int clamped = RecipeTypeIndexGuard.clampIndex(raw, length);
+            setActiveRecipeType(clamped);
+            markDirty();
+            if (!isRemote()) {
+                ShanhaiMod.LOGGER.warn("[SHANHAI-RTYPE] {} 的持久化 activeRecipeType 越界 ⇒ 已写回界内（{}）："
+                                + "before={} after={} 本机现有配方类型={} 个 ⇒ 夹到第 {} 个={}",
+                        getPos(), when, raw, clamped, length, clamped, types[clamped]);
+            }
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.error("[SHANHAI-RTYPE] 夹紧 activeRecipeType 失败（不影响运行）：{}", t.toString());
+        }
+    }
+
     @Override
     public void onStructureFormed() {
         super.onStructureFormed();
+        // 🔴 2026-10-31：成型这一拍也写回一次（读档那一拍在 onLoad）。
+        shanhai$clampActiveRecipeTypeToRange("结构成型");
+        // 🔴 本轮：无线电网能量通道**不在这里扫**（真实通道是终端部件在 addedToController 里的「推」，
+        //    落在 setWirelessNetworkEnergyHandler 上）。成型过程中"推"与成型的先后顺序上游没承诺
+        //    ⇒ 这里【绝不清、也不扫】，只打一行当前状态，方便实机判"推到底有没有来"。
+        ShanhaiMod.LOGGER.debug("[SHANHAI-INFPAR] handler={} side=host phase=结构成型 pos={}",
+                shanhai$wirelessEnergyHandler == null ? "none" : "present", getPos());
         reformCount++;
         // 方案 A（队长批准）：调和式重扫，代替原来的 safeClearModules() + scanAndConnectModules()。
         reconcileModules();
@@ -2236,6 +2648,8 @@ public class PrimordialOmegaEngineMachine
     @Override
     public void onLoad() {
         super.onLoad();
+        // 🔴 2026-10-31：读档（区块重载 / 机器被反序列化）这一拍把越界的 activeRecipeType 写回界内。
+        shanhai$clampActiveRecipeTypeToRange("读档");
         if (!isRemote()) {
             refreshMatterBonusLevel();
             // 🔴 取证探针 [SHANHAI-SETBLOCK]（2026-09-26）：把本主机坐标 + 16 个模块位坐标登记进探针的
@@ -2248,12 +2662,158 @@ public class PrimordialOmegaEngineMachine
         }
     }
 
+    // ═════════════════════ 「为什么没跑」（Jade 那一行，2026-11-01 新增） ═════════════════════
+    //
+    //  用户原话（逐字）：「主要是它现在 jade 都没有写出机器不工作的原因」
+    //
+    //  主机这一脉（原始终焉引擎 + 归墟视界枢核 extends 本类）原本【完全没有】这条信息：
+    //  主机基类没实现 gtlcore 的 IRecipeStatus ⇒ 被闸拦下时只落一行日志
+    //  （见 PrimordialEngineRecipeLogic 那段「宁可缺，不可假」的注释）。
+    //  ⇒ 本类持有我们自己的那一份，Jade 用本工程既有的 IServerDataProvider 通道送到客户端。
+    //    判定 / 清空 / 日志格式的唯一一份在 ShanhaiIdleReason（纯 JDK、可离线跑 selfTest）。
+
+    /** 本机「为什么没跑」的服务端权威状态（值 + 两个日志闸门）。<b>每台机器一份</b>。 */
+    private final ShanhaiIdleReason.Store shanhaiIdleReason = new ShanhaiIdleReason.Store();
+
+    /** 服务端权威读数：{@code ""} ＝ 没有原因 ⇒ Jade 那一行<b>完全不出现</b>。 */
+    @Override
+    public String shanhaiIdleReasonJson() {
+        return shanhaiIdleReason.stored();
+    }
+
+    /**
+     * 发布一次「为什么没跑」—— 由 {@link PrimordialEngineRecipeLogic#findAndHandleRecipe()} <b>每轮扫描</b>调用。
+     *
+     * @param reason  这一轮算出来的原因（{@code null} ＝ 这一轮没有原因）
+     * @param running 机器这一轮是否「在跑 / 在等 / 手上已有配方」；真 ⇒ 字段当场清空
+     */
+    public void shanhaiPublishIdleReason(@Nullable Component reason, boolean running) {
+        try {
+            // 机器在跑 ⇒ 结果必是"清空"，连 JSON 都不必序列化（每轮扫描都会调到这里）。
+            final String json = (running || reason == null) ? null : Component.Serializer.toJson(reason);
+            final ShanhaiIdleReason.Store.Verdict verdict = shanhaiIdleReason.publish(
+                    json,
+                    reason == null ? null : reason.getString(),
+                    running,
+                    shanhaiMachineId(),
+                    shanhaiReasonPos(),
+                    System.currentTimeMillis());
+            if (verdict.jadeLog != null) {
+                ShanhaiMod.LOGGER.info(verdict.jadeLog);
+            }
+        } catch (Throwable t) {
+            // 这一行只是"说明"，绝不允许它把机器弄停：异常 ⇒ 当作没有原因（宁可不显示，也不显示错的）。
+            shanhaiIdleReason.clear();
+            ShanhaiMod.LOGGER.warn("[SHANHAI-JADE-REASON] machine={} pos={} 发布失败（本次不显示）：{}",
+                    shanhaiMachineId(), shanhaiReasonPos(), String.valueOf(t));
+        }
+    }
+
+    /** 注册路径；取不到 ⇒ {@code ?}（不许瞎编一个名字）。 */
+    private String shanhaiMachineId() {
+        try {
+            return getDefinition() == null ? "?" : String.valueOf(getDefinition().getId());
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    /** {@code <维度>@x,y,z} —— 日志里定位到具体哪一台用的。 */
+    private String shanhaiReasonPos() {
+        try {
+            return ShanhaiIdleReason.describePos(
+                    getLevel() == null ? null : String.valueOf(getLevel().dimension().location()),
+                    getPos().getX(), getPos().getY(), getPos().getZ());
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
     @Override
     public void onStructureInvalid() {
         super.onStructureInvalid();
+        // 「为什么没跑」随结构一起清：结构没了还挂着一个旧原因就是常驻假数据。
+        shanhaiIdleReason.clear();
         // ⛔ 【2026-09-22 删除】此处原为 stopRunningSecsTicker()（随 runningSecs 一并删除）。
         // 🔴 规格 §3.2 的语义保留在这里，一个字都不许动（验收 A6 走这条）。
         safeClearModules();
+        // 🔴 本轮：结构破坏 ⇒ 丢掉无线电网能量通道缓存，避免"终端已不在结构里、却还在从池子扣电"。
+        shanhai$clearWirelessEnergyHandler("结构破坏");
+    }
+
+    // ═════════════════════ 🔴 无线电网能量通道（BigInteger 扣电） ═════════════════════
+
+    /**
+     * <b>成型后缓存一次的无线电网能量 handler</b>（{@code null} = 本机没有无线电网输入终端）。
+     *
+     * <p>与模块侧 {@code PrimordialModuleMachine#shanhai$wirelessEnergyHandler} <b>逐条同源</b>：
+     * 来源是终端部件 {@code addedToController} 里的「推」（覆写 {@link #setWirelessNetworkEnergyHandler}
+     * 存下来），扫描只是兜底（对上游那个终端<b>结构性扫不到</b>，理由见模块侧那段 javadoc）。
+     *
+     * <p>🔴 <b>不覆写 {@code getWirelessNetworkEnergyHandler()}</b>：那会让
+     * {@code MutableRecipesLogic#getRecipe()} 整体改走 {@code buildFinalWirelessRecipe}，
+     * 而本工程的效果全挂在 Normal 支 ⇒ 一行都不执行（静默失效）。
+     */
+    @Nullable
+    private IWirelessNetworkEnergyHandler shanhai$wirelessEnergyHandler;
+
+    @Override
+    public void setWirelessNetworkEnergyHandler(@Nullable IWirelessNetworkEnergyHandler trait) {
+        // 🔴 这就是终端部件 {@code addedToController} 推过来的那一个（**上游唯一真实通道**）。
+        //    它推的是【接口方法】⇒ 本类实现了 IGTLAddMultiRecipeMachine →
+        //    IWirelessThreadModifierParallelMachine → IWirelessElectricMultiblockMachine，一定被调到。
+        this.shanhai$wirelessEnergyHandler = trait;
+        ShanhaiMod.LOGGER.info("[SHANHAI-INFPAR] handler=set side=host pos={} type={}",
+                getPos(), trait == null ? "null" : trait.getClass().getSimpleName());
+    }
+
+    @Override
+    public @Nullable IWirelessNetworkEnergyHandler shanhaiWirelessEnergyHandler() {
+        return shanhai$wirelessEnergyHandler;
+    }
+
+    /**
+     * 结构破坏 / 部件卸载 ⇒ 丢掉缓存（<b>不在 onStructureFormed 里清</b>：成型时"推"与成型的先后
+     * 顺序上游没承诺，先清后推会把推来的抹掉）。
+     */
+    private void shanhai$clearWirelessEnergyHandler(@NotNull String phase) {
+        if (shanhai$wirelessEnergyHandler == null) {
+            return;
+        }
+        shanhai$wirelessEnergyHandler = null;
+        shanhai$setDisplayEut(null);
+        ShanhaiMod.LOGGER.info("[SHANHAI-INFPAR] handler=cleared side=host pos={} phase={}",
+                getPos(), phase);
+    }
+
+    // ═════════════════ 🔴 显示：bigint 档的「每 tick 耗电」（只加读取，不改老值） ═════════════════
+
+    /** 见 {@code ParallelOverrideMachine#getDisplayEut()} 的 javadoc（模块侧同一份口径）。 */
+    @Nullable
+    private BigInteger shanhai$displayEut;
+
+    @Override
+    public @Nullable BigInteger getDisplayEut() {
+        return shanhai$displayEut;
+    }
+
+    /** 唯一写者：配方逻辑的溢出路由（{@code null} = 回到 long 档）。 */
+    public void shanhai$setDisplayEut(@Nullable BigInteger eut) {
+        this.shanhai$displayEut = eut;
+    }
+
+    /**
+     * 把 bigint 档的「每 tick 耗电」追加成一行（<b>只在非 null 时</b>）⇒ long 档显示逐字不变。
+     * <p>与模块侧 {@code shanhai$addDisplayEutLine} <b>逐条同源</b>：{@code null}/负数一律不显示，
+     * 非 null 直接打十进制原文（位数再多也不会被压平）。
+     */
+    private void shanhai$addDisplayEutLine(@NotNull List<Component> textList) {
+        final BigInteger eut = shanhai$displayEut;
+        if (eut == null || eut.signum() <= 0) {
+            return;
+        }
+        textList.add(Component.literal("每 tick 耗电: §e" + eut + " EU/t§r §7（BigInteger 通道："
+                + "超过 long 上限，由无线电网终端扣电；能源仓不参与）"));
     }
 
     /**
@@ -2412,6 +2972,9 @@ public class PrimordialOmegaEngineMachine
                 .append(Component.literal("结构已成型").withStyle(ChatFormatting.GREEN)));
         textList.add(Component.literal("已连接模块：" + getFormedModuleCount() + " / " + MAX_MODULE_COUNT)
                 .withStyle(ChatFormatting.GRAY));
+        // 🔴 本轮（原任务书 ④ · 显示）：bigint 档下「每 tick 耗电」显示 BigInteger。
+        //    ⚠️ 只在非 null 时追加一行 ⇒ long 档的显示【一个字都不变】。
+        shanhai$addDisplayEutLine(textList);
         textList.add(Component.literal("主机工作状态：" + (recipeLogic.isWorking() ? "运行中" : "待机"))
                 .withStyle(ChatFormatting.GRAY));
 

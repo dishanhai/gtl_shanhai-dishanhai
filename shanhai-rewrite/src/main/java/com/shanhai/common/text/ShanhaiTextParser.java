@@ -2,8 +2,10 @@ package com.shanhai.common.text;
 
 import com.shanhai.ShanhaiMod;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -23,18 +25,63 @@ import java.util.concurrent.atomic.AtomicLong;
  * </pre>
  * 一律<b>逐行照抄</b>，只删掉我们用不到的分支（见 §3）。
  *
- * <h2>1. 语法（照抄 {@code parseFormatting}）</h2>
+ * <h2>1. 语法（{@code parseFormatting} 照抄 ＋ 2026-10-31 自加 {@code &r} 还原符）</h2>
  * <pre>
- *   [前缀] &lt;效果字符…&gt; $ &lt;样式名&gt; - &lt;正文&gt;
+ *   [前缀] &lt;效果字符…&gt; $ &lt;样式名&gt; - &lt;正文&gt; [&amp;r 后缀]
  *   ↑ prefix          ↑ 效果字符可以写在 $ 之前，也可以写在 $ 之后（两种都支持）
+ *                                          ↑ 还原符（2026-10-31，<b>上游没有</b>）
  * </pre>
- * 规则逐条（对应上游 63–88 行）：
+ * 规则逐条（对应上游 63–88 行；第 4 条里的 {@code &r} 是我们新加的）：
  * <ol>
  *   <li>从<b>第一个</b> {@code &} 开始；{@code &} 之前的文本是 {@code prefix}（原样保留、原样绘制）；</li>
  *   <li>{@code &} 之后到<b>第一个 {@code -}</b> 之间的整段 = {@code codePart}；</li>
  *   <li>{@code codePart} 里 {@code $} <b>之后</b>、剥掉紧邻的效果字符，剩下的就是<b>样式名</b>；</li>
- *   <li>{@code -} 之后 = 正文；{@code cleanText = prefix + 正文}（<b>宽度按它算</b>）。</li>
+ *   <li><b>正文区</b>（{@code -} 之后）<b>到 {@code &r}（或串尾）= 正文 {@code body}</b>；
+ *       若正文区里出现 {@code &r}，则 <b>{@code &r} 之后 = 后缀 {@code suffix}</b>
+ *       （{@code &r} 这两个字符本身<b>不画</b>）。{@code cleanText = prefix + body + suffix}
+ *       （<b>宽度按它算</b>）。</li>
  * </ol>
+ *
+ * <h3>1.1 {@code &r} 还原符（2026-10-31 新增，用户选的 C 案）</h3>
+ * <b>为什么要有它</b>：只有"开始染色"时，染色范围<b>一直到本次 {@code drawInBatch} 收到的整个字符串结尾</b>
+ * ⇒ 调用方把"彩色名 + 后面的普通字"拼成一个串时，<b>后面那段普通字也会被染色</b>
+ * （用户 2026-10-31 实机报的"特效溢出到外面"，机制见 {@code ShanhaiFontStyleRenderer} 类注释 §4.6）。
+ * {@code &r} 让一句里能做到：<b>前置白字 ＋ 中间一段彩虹 ＋ 后面继续白字</b>。
+ * <pre>
+ *   [prefix] &amp;$[效果字符]&lt;样式名&gt;-[正文]&amp;r[后缀]
+ *   例：      前置白字&amp;$neon-跨配方种类并行&amp;r后续白字
+ *             ⇒ prefix="前置白字" body="跨配方种类并行" suffix="后续白字"
+ *                cleanText="前置白字跨配方种类并行后续白字" style=neon
+ * </pre>
+ * 判定规则（<b>逐条定死</b>，{@link #parseUncached} 照它实现）：
+ * <ol>
+ *   <li>只在<b>{@code -} 之后的正文区</b>里找，找的是<b>第一个</b> {@code &r}
+ *       （{@code -} 之前的 {@code codePart} 里出现 {@code &r} 不算）；</li>
+ *   <li>找到 ⇒ {@code body = &r 之前}、{@code suffix = &r 之后}（{@code &r} 本身丢掉）；</li>
+ *   <li>找不到 ⇒ {@code suffix = ""}，{@code body = 正文区全部} ——
+ *       <b>此时本类的每一个输出都与 {@code &r} 出现之前逐位相同</b>（回归主线，别改成"顺手也切一刀"）；</li>
+ *   <li>{@code &r} 紧跟 {@code -} ⇒ {@code body = ""}、{@code suffix = 其后全部}（合法，不是退化）；</li>
+ *   <li>连续两个 {@code &r} ⇒ <b>以第一个为准</b>：{@code body = 第一个之前}、
+ *       {@code suffix = 从第一个之后开始的那一串}（于是 suffix 里会<b>原样带上</b>第二个 {@code &r} 的三个字节）。
+ *       这与"只找第一个"是同一条规则，<b>不是</b>特例（见 §5 第 7 条）；</li>
+ *   <li><b>加粗 {@code #} 与染色一样只作用于 {@code body}</b>；{@code suffix} <b>既不加粗也不染色</b>；</li>
+ *   <li>🔴 <b>{@link #parse} 上的 {@code §} 铁律一个字没改</b>：<b>单段入口</b>里同一行出现 {@code §}
+ *       ⇒ 整条判「不是我们的码」交回原版。
+ *       {@code &r} 只是<b>把"这一行"的判定面从 {@code prefix+body} 扩到 {@code prefix+body+suffix}</b>
+ *       （= 整行），并没有放宽那条铁律（suffix 为空时判定面不变 ⇒ 输出不变）。
+ *       <p>⚠️ <b>2026-11-01 补充（A 案）</b>：混排行<b>不再</b>由 {@code parse} 负责，而是走新的
+ *       <b>分段入口</b> {@link #parseSegments}（见 <b>§7</b>）⇒ {@code parse} 的这条铁律<b>保持不变</b>，
+ *       只要调用方拿到的 {@code ours=true}，它就仍然是"不含 §"的那条老路。</li>
+ * </ol>
+ * ⚠️ <b>边界（刻意写死，不是 bug）</b>：
+ * <ul>
+ *   <li><b>{@code prefix} 里出现的 {@code &r} 不当作还原符</b> —— prefix 本来就原样绘制。
+ *       实践中更常见的结果是<b>整条判非我们的码</b>：本类从<b>第一个</b> {@code &} 开始解析，
+ *       一条 {@code 白&r字&$neon-正文} 的第一个 {@code &} 就是那个 {@code &r} 的 {@code &}
+ *       ⇒ {@code codePart} 里没有 {@code $} ⇒ {@code ours=false}（这条行为与改前<b>完全一致</b>）；</li>
+ *   <li><b>{@code &r} 不可转义</b>：正文里再也写不出字面量 {@code &r}（写了就会被当还原符吃掉）。
+ *       我们现有 96 条文本<b>一处 {@code &r} 都没有</b>（取证见 §6），所以现在没有代价。</li>
+ * </ul>
  *
  * <h2>2. 🔴 效果字符全表（11 个 + {@code $} 分隔符）—— 逐个交代「做没做」</h2>
  * <table border="1">
@@ -112,8 +159,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *   </tr>
  *   <tr>
  *     <td><b>{@code §} 与 {@code &$} 混在同一行</b>（§5.3）</td>
- *     <td>整条判<b>「不是我们的码」</b>（{@code ours=false}），原样交回原版渲染 —— <b>码会显示在名字里</b>，
- *         但这是刻意的：交回原版至少能正确显示 {@code §} 语义，自己硬吃反而更难预测</td>
+ *     <td><b>单段入口 {@link #parse}：</b>整条判<b>「不是我们的码」</b>（{@code ours=false}），原样交回原版 ——
+ *         <b>码会显示在名字里</b>，但这是刻意的：交回原版至少能正确显示 {@code §} 语义，自己硬吃反而更难预测。<br>
+ *         <b>分段入口 {@link #parseSegments}（A 案，2026-11-01）：</b>切成「原版段 / 我们段」逐段推进，
+ *         {@code §} 段交给原版、{@code &$} 段交给我们；<b>段内</b>误写 {@code §} ⇒ 该段退化（丢样式码、按原版段画）</td>
  *   </tr>
  * </table>
  * ⚠️ <b>加粗与颜色共进退</b>：{@code #} 是 codePart 的一部分，样式名不认识时整段码被剥掉
@@ -141,13 +190,16 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li><b>不实现上游的 {@code parseCompactFormatting}</b>（没有 {@code -} 的那种写法 {@code &$ultimate旋转彩虹}）。
  *       我们的文本<b>一律带 {@code -}</b>；没有 {@code -} 时本类直接判「不是我们的码」⇒ 交回原版渲染，
  *       <b>不会</b>误伤普通文本里的 {@code &}。</li>
- *   <li><b>没有 § 混合支持</b>：上游能在同一行里同时处理 {@code §a} 与 {@code &$…-}
- *       （{@code WobbleFontMixin.java:263-297}）。我们<b>不做这一层</b>：
- *       若正文里同时出现 {@code §} 与 {@code &$}，本类判「不是我们的码」，交回原版渲染。
- *       理由：我们的 34+6 行文本<b>不存在这种混合</b>（横幅里带 § 的哪几行本来也没有 {@code &$}），
- *       而那一层的下标换算（去 § 后重建 per-char style 数组）是我<b>无法在本机验证</b>的复杂度 —— 不写没把握的热路径代码。</li>
+ *   <li><b>单段入口不做 § 混合</b>（<b>分段入口做了</b>，见 §7）：上游能在同一行里同时处理 {@code §a} 与 {@code &$…-}
+ *       （{@code WobbleFontMixin.java:263-297}）。{@link #parse} <b>仍然不做这一层</b>：
+ *       若正文里同时出现 {@code §} 与 {@code &$}，{@code parse} 判「不是我们的码」，交回原版渲染。
+ *       理由：<b>单段模型里没有"段"这个概念</b> —— 它把 {@code prefix+body+suffix} 当成<b>一段</b>连续的字，
+ *       而 {@code §} 是<b>零宽控制码</b>，我们的渲染器是<b>逐字自己算宽、自己取色</b>的
+ *       ⇒ 同一段里混着 {@code §} 会让下标换算（去 § 后重建 per-char 色槽数组）失效。
+ *       2026-11-01（A 案）<b>不改这条路</b>，而是另开一条"逐段推进"的路 {@link #parseSegments}（§7）。</li>
  *   <li><b>{@code -} 后是空串</b>时（{@code &$ultimate-}）判「不是我们的码」。
- *       与上游不同（上游会把整条原文当正文绘制 ⇒ <b>反而会把码画出来</b>），我们选更保守的那个。</li>
+ *       与上游不同（上游会把整条原文当正文绘制 ⇒ <b>反而会把码画出来</b>），我们选更保守的那个。
+ *       分段入口对"没有正文的 {@code &$…-}"用<b>同一条</b>判据（见 §7.3）。</li>
  *   <li><b>{@code #} 写在样式名【后面】不算加粗</b>（{@code &$golden#-名}）。
  *       与 {@code ?} / {@code *} 同一条规矩：剥离只发生在样式名开头 ⇒ {@code theme} 变成
  *       {@code "golden#"}，查表查不到 ⇒ <b>退化 A（白字、不加粗）</b>。
@@ -155,7 +207,80 @@ import java.util.concurrent.atomic.AtomicLong;
  *       上一轮就被实测为「退化 A」，见 {@code handoff\outbound\物品名美化-落地.md} §3.4）。</li>
  *   <li><b>加粗只作用于正文</b>，{@code prefix}（{@code &} 之前那一段）照旧用调用方给的颜色、不加粗。
  *       我们的 96 条物品名与 6 行横幅<b>没有一条带 prefix</b>，所以这条边界目前不生效。</li>
+ *   <li><b>（2026-10-31）{@code suffix} 不加粗、不染色</b>：加粗的作用域与染色一致，**到 body 为止**。
+ *       连续两个 {@code &r} ⇒ <b>以第一个为准</b>，{@code suffix} 里会原样带上第二个 {@code &r} 的两个字符
+ *       （因为规则只有"找第一个"这一条，没有为连续写法开特例）。</li>
+ *   <li><b>（2026-10-31）{@code &r} 不可转义</b>：正文里写不出字面量 {@code &r}；
+ *       且 {@code prefix} 里的 {@code &r} 不当作还原符（这两条见 §1.1 的"边界"）。</li>
  * </ol>
+ *
+ * <h2>6. 语料读数（2026-11-01 复测，1052 条 lang 值）</h2>
+ * <pre>
+ *   assets/shanhai/lang/zh_cn.json  &amp;$ = 253   &amp;r = 253   § = 124
+ *   assets/shanhai/lang/en_us.json  &amp;$ =   3   &amp;r =   3   § =  92
+ *   逐值分类（zh+en，共 1052 条 string）：
+ *     732 条 无 §、无 &amp;$          ⇒ 完全走原版（本类 parse 判 NOT_OURS，一个字都不改）
+ *     256 条 无 §、有 &amp;$（&amp;r 全在串尾）⇒ 完全走我们（parse ours=true；&amp;r 之后无正文 ⇒ suffix=""）
+ *      64 条 有 §、无 &amp;$          ⇒ 完全走原版（分段入口也只会给出 1 个原版段 ⇒ 行为不变）
+ *       0 条 有 §、也有 &amp;$        ⇒ 🔴 <b>真实语料里一个混排行都没有</b>
+ * </pre>
+ * ⇒ 结论（这条决定验收口径）：<b>混排的 A 案在现有语料上"零触发"</b>，它的自证只能靠<b>合成样例</b>
+ * （+ 运行期把 {@code §b模块要求：1× &$electric-…§7（等级 ≥ 17）} 拼出来的那种真实场景）。
+ * ⚠️ 早先（2026-10-31）这里记的是「{@code &r} 计数 = 0」，那是<b>lang 尚未加上 {@code &r} 之前</b>的状态；
+ * 本轮落地后语料已经是 256 条 {@code &$…&r}，<b>本条已按实测改正</b>（读数见
+ * {@code temp\segtext\分段兼容.md} 的「回归三类计数」）。
+ *
+ * <h2>7. 🔴 分段兼容（A 案，2026-11-01 用户拍板）</h2>
+ * <b>要解决的问题</b>：单段模型下「同一行里 {@code §} 段 ＋ {@code &$} 段」只能整行交回原版
+ * （§5 第 3 条的"码会显示在名字里"），而用户要的是<b>两段各由各自的渲染器画</b>。
+ *
+ * <h3>7.1 语法与切分规则（定死）</h3>
+ * <pre>
+ *   [原版段：可含 § 码]  &amp;$&lt;效果字符&gt;&lt;样式名&gt;-&lt;正文&gt;&amp;r  [原版段：可含 § 码]
+ * </pre>
+ * <ol>
+ *   <li>一行里可以有 <b>0..N 个 {@code &$} 段</b>（顺序扫 {@code &$}，只认这两个字符连写）；</li>
+ *   <li>每段 <b>正文</b>到 <b>{@code &r}</b>、<b>下一个 {@code &$}</b>、或<b>串尾</b>为止（三者取最早）；
+ *       {@code &r} 作为<b>终止符被吃掉</b>（不进任何段的 text）；</li>
+ *   <li>{@code &$} 之前 / 段与段之间的字 = <b>原版段</b>；<b>空的原版段不产出</b>（不画也没宽）；</li>
+ *   <li>{@code &$} 段内部<b>不允许</b>出现 {@code §}：出现 ⇒ <b>该段退化</b>（丢掉样式码、正文按原版段画）
+ *       ＋ 一行限流 WARN（{@code kind=seg_section_sign}）；</li>
+ *   <li>没有 {@code &$} 的行 ⇒ {@link #parseSegments} 只给 1 个原版段；
+ *       没有 {@code §} 的行 ⇒ 渲染层<b>根本不走分段</b>（{@link #mixedSegments} 直接返回 null）
+ *       ⇒ 与改前<b>逐位一致</b>（这是回归底线，见 §7.4）。</li>
+ * </ol>
+ *
+ * <h3>7.2 两个入口，职责不同</h3>
+ * <table border="1">
+ *   <tr><th>方法</th><th>对外的语义</th><th>谁用</th></tr>
+ *   <tr><td>{@link #parse(String)}</td><td><b>单段</b>：整行一次判定（含 § ⇒ NOT_OURS）</td>
+ *       <td>{@code ShanhaiFontStyleRenderer} 的<b>老路</b>（256+ 条现存文本全靠它）</td></tr>
+ *   <tr><td>{@link #parseSegments(String)}</td><td><b>纯语法</b>：任何输入都切成段（含 0 个 {@code &$} 的行）</td>
+ *       <td>自证 / 诊断 / {@link #mixedSegments} 的内部实现</td></tr>
+ *   <tr><td>{@link #mixedSegments(String)}</td><td><b>混排专用</b>：不是混排行、或切成段后没有我们段 ⇒ 返回 {@code null}</td>
+ *       <td>渲染层的<b>分段入口</b>（只有它为真才走分段绘制）</td></tr>
+ * </table>
+ *
+ * <h3>7.3 退化规则（分段路径，与 §3 一一对应）</h3>
+ * <table border="1">
+ *   <tr><th>遇到什么</th><th>怎么切</th></tr>
+ *   <tr><td>样式名不在色板里（退化 A）</td><td>仍是<b>我们段</b>，但 {@code style=null}、{@code bold=false}
+ *       ⇒ 渲染层剥码后按普通文字画（与单段路径的退化 A 同一句判据）</td></tr>
+ *   <tr><td>没实现的效果字符（退化 B）</td><td>字符在 <b>codePart</b> 里、本来就不会被画 ⇒ 切完只剩正文；
+ *       {@code style} 照留 ⇒ <b>保留颜色、丢掉那个效果</b>，并限流 WARN</td></tr>
+ *   <tr><td><b>段内出现 {@code §}</b></td><td><b>该段退化</b>：丢掉样式码、正文＝原版段（{@code ours=false}），
+ *       限流 WARN。<b>不</b>把 {@code §} 交给我们的逐字路径（那是零宽控制码，逐字算宽会算错）</td></tr>
+ *   <tr><td>形状不对（没有 {@code -} / 没有样式名 / 正文为空）</td>
+ *       <td>那串 {@code &$…} <b>按普通文字留在原版段里</b>（码可见）—— 与单段路径 §5.2 / §5.4 的
+ *       "交回原版"同一个结局，<b>不会</b>让字消失</td></tr>
+ * </table>
+ *
+ * <h3>7.4 🔴 回归底线（为什么必须"没有 § 就不走分段"）</h3>
+ * 分段会把一行拆成多次 {@code drawInBatch}，而每次调用都各自 {@code Mth.ceil} / 各自 {@code (int)} 截断
+ * ⇒ <b>即便字形、颜色、顺序完全一样，x 推进量也可能差 1 px</b>。
+ * 不混排的行<b>不需要</b>这个代价 ⇒ 渲染层用 {@link #mixedSegments} 当闸门：
+ * <b>没有 § 或没有 {@code &$} 或切完没有我们段 ⇒ 返回 null ⇒ 调用方走改前那条一模一样的路</b>。
+ * 这一条<b>不是优化，是正确性</b>：256 条现存 {@code &$…&r} 文本的 x 推进量必须<b>逐位不变</b>。
  */
 public final class ShanhaiTextParser {
 
@@ -171,6 +296,34 @@ public final class ShanhaiTextParser {
      * 所以样式名开头的剥离循环<b>一个字都不用改</b>就能把 {@code &$#golden-} 里的 {@code #} 剥掉。
      */
     public static final char BOLD_SYMBOL = '#';
+
+    /**
+     * <b>还原符</b> —— 2026-10-31 新增（见类注释 §1.1）。
+     *
+     * <p>语法：{@code …-[正文]&r[后缀]}。{@code &r} 之后的部分用<b>调用方原色</b>绘制、不加粗、不染色，
+     * 于是"前置白字 ＋ 中间一段彩虹 ＋ 后面继续白字"可以在<b>一个串</b>里写完。
+     *
+     * <p>🔴 <b>写成常量是为了让"找它"这一步只有一个可指认的位置</b>
+     * （{@link #restoreIndex(String)}）：离线自证的负对照就是把那一行临时改成 {@code return -1}，
+     * 其余代码一个字都不用动。
+     */
+    public static final String RESTORE_MARKER = "&r";
+
+    /**
+     * <b>原版的样式码字符</b>（U+00A7）—— 分段路径里<b>唯一</b>让我们"必须交出控制权"的字符。
+     *
+     * <p>写成常量而不是裸 {@code '\u00A7'} 的理由与 {@link #RESTORE_MARKER} 相同：
+     * 让"哪个字符是原版控制码"只有一个可指认的位置（离线自证的负对照就盯着它）。
+     */
+    public static final char SECTION_SIGN = '\u00A7';
+
+    /**
+     * <b>我们那一段的起始标记</b>（{@code &$}）—— 分段扫描<b>只认这两个字符连写</b>。
+     *
+     * <p>⚠️ 与 {@link #containsCode} 的区别：那边只要一个 {@code &} 就返回 true（那是"要不要去解析"的探针），
+     * 这边是"这一行里到底有没有我们的一段"的判据。一条只有 {@code §} 码的行<b>不该</b>进分段路径。
+     */
+    public static final String SEGMENT_MARK = "&$";
 
     /** glitch 掺色用的两个目标色（照抄上游 {@code applyGlitchColor}）。 */
     private static final int GLITCH_CYAN = 0x55FFFF;
@@ -193,15 +346,19 @@ public final class ShanhaiTextParser {
      * 一条 {@code &$…-} 文本的解析结果。<b>不可变</b>（会被放进缓存、被多个线程读）。
      *
      * @param ours       {@code false} = 这条文本<b>不是我们的码</b>，调用方<b>必须原样交回原版渲染</b>
-     * @param cleanText  {@code prefix + body}，即「该画出来的字」；<b>宽度修正也用它</b>
+     * @param cleanText  {@code prefix + body + suffix}，即「该画出来的字」；<b>宽度修正也用它</b>
+     *                   （suffix 为空时它逐位等于 {@code prefix + body} ⇒ 与 {@code &r} 出现之前相同）
      * @param prefix     {@code &} 之前的原文（原样保留，原样绘制，用的还是调用方传进来的 color）
-     * @param body       {@code -} 之后的正文（色板染色只作用于这一段）
+     * @param body       {@code -} 之后、{@code &r}（或串尾）之前的正文（色板染色<b>与加粗</b>只作用于这一段）
+     * @param suffix     {@code &r} 之后的部分（2026-10-31 新增）：<b>用调用方原色绘制、不加粗、不染色</b>；
+     *                   没有 {@code &r} 时恒为 {@code ""}（此时本 record 的其余每个字段都与改动前逐位相同）
      * @param palette    色板；{@code null} = <b>退化模式</b>（没移植的样式名）⇒ 无颜色
      * @param isBody     {@code true} = 正文慢速样式（200 ms/格）
      * @param glitch     是否带 {@code ?}
      * @param floatX     是否带 {@code *}
      * @param bold       是否带 {@code #}（<b>加粗</b>，2026-09-30 新增）。⚠️ 只在
-     *                   {@code palette != null} 时可能为 true（退化 A 不带加粗，见类注释 §3）
+     *                   {@code palette != null} 时可能为 true（退化 A 不带加粗，见类注释 §3）；
+     *                   ⚠️ 作用域<b>只有 body</b>（suffix 不加粗）
      * @param styleName  解析出的样式名（诊断用；可能是没移植的名字）
      * @param unsupported 解析时遇到但<b>没实现</b>的效果字符（诊断用，可为空串）
      */
@@ -210,6 +367,7 @@ public final class ShanhaiTextParser {
             String cleanText,
             String prefix,
             String body,
+            String suffix,
             int[] palette,
             boolean isBody,
             boolean glitch,
@@ -234,7 +392,65 @@ public final class ShanhaiTextParser {
 
     /** 「不是我们的码」的单一实例（缓存里的否定结果也用它，省对象）。 */
     private static final Parsed NOT_OURS = new Parsed(
-            false, "", "", "", null, false, false, false, false, "", "");
+            false, "", "", "", "", null, false, false, false, false, "", "");
+
+    // ================================================================== 分段（A 案，2026-11-01）
+
+    /**
+     * <b>一行里的一个绘制段</b>（分段兼容 A 案的产物，见类注释 §7）。
+     *
+     * <h2>它只描述"这段由谁画、画什么"，不含坐标</h2>
+     * x 推进量由渲染层按段累积（{@code ShanhaiFontStyleRenderer#drawSegments}）——
+     * <b>量宽的口径必须和画字的口径一致</b>（{@code Font.drawInBatch} 的返回值 vs {@code Font.width}），
+     * 那是渲染层的职责，解析层不掺和。
+     *
+     * @param ours   {@code true} = <b>我们的一段</b>（{@code &$…-} 切出来、样式码已剥离）；
+     *               {@code false} = <b>原版的一段</b>（原样子串，<b>含 {@code §} 码</b>，必须整段交给
+     *               {@code Font.drawInBatch(String,…)} 那个会解析 {@code §} 的重载）
+     * @param text   {@code ours=true}：<b>去掉样式码后的正文</b>（= {@code parse} 里那个 {@code body}）；
+     *               {@code ours=false}：<b>原始子串</b>（逐字节取自入参，一个字符都不改）
+     * @param style  色板（{@code ours=false} 或<b>退化 A</b> 时为 {@code null}）
+     * @param bold   是否带 {@code #}（<b>只作用于 {@code text}</b>；退化 A 恒为 false，与单段路径同一条判据）
+     * @param effect <b>诊断用</b>：本段实际生效的效果字符（按 {@code EFFECT_SYMBOLS} 顺序拼，如 {@code "#?"}）；
+     *               原版段 / 退化 A 恒为 {@code ""}。⚠️ <b>不参与绘制判断</b>
+     * @param glitch 是否带 {@code ?}（位移 + 掺色 ⇒ 渲染层走逐字路径）
+     * @param floatX 是否带 {@code *}（水平波浪 ⇒ 渲染层走逐字路径）
+     */
+    public record Segment(
+            boolean ours,
+            String text,
+            ShanhaiTextPalette.Style style,
+            boolean bold,
+            String effect,
+            boolean glitch,
+            boolean floatX) {
+
+        /** 有位移效果吗（与 {@link Parsed#hasMotion()} 同一条判据：{@code bold} 不算 motion）。 */
+        public boolean hasMotion() {
+            return glitch || floatX;
+        }
+
+        /** 原版段的单一构造（省得每处都写 7 个参数）。<b>私有</b>：段只由本类产出。 */
+        private static Segment vanilla(String text) {
+            return new Segment(false, text, null, false, "", false, false);
+        }
+    }
+
+    /** 「空行」的单一实例：一个空的<b>原版段</b> ⇒ 渲染层看到没有我们段就交回原版。 */
+    private static final List<Segment> SEG_EMPTY =
+            List.of(Segment.vanilla(""));
+
+    /**
+     * 分段结果缓存。上限<b>沿用</b> {@link #CACHE_MAX}（刻意不新造一个数字：两张表都是"输入串 → 不可变结果"，
+     * 没有任何理由让它们不同）。值与 {@link #CACHE} 一样是<b>不可变</b>的（{@code List.of} / {@code List.copyOf}）。
+     */
+    private static final Map<String, List<Segment>> SEG_CACHE = Collections.synchronizedMap(
+            new LinkedHashMap<>(32, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, List<Segment>> eldest) {
+                    return size() > CACHE_MAX;
+                }
+            });
 
     // ================================================================== 前缀码剥离
 
@@ -272,6 +488,9 @@ public final class ShanhaiTextParser {
      * <h2>行为</h2>
      * <ul>
      *   <li>以 {@code &$} 开头且后面有 {@code -} ⇒ 返回 {@code -} 之后的部分（含效果字符一起丢）；</li>
+     *   <li>（2026-10-31）正文区里有 {@code &r} 时，<b>连 {@code &r} 一起丢掉</b>、前后段拼回去
+     *       —— 本方法剥的是"码"，{@code &r} 也是码；不丢的话它会在 String 路径上原样显示。
+     *       <b>没有 {@code &r} 时返回值与改动前逐位相同</b>（这条是回归主线）；</li>
      *   <li>其它一切情况（没有 {@code &$} / 没有 {@code -} / {@code -} 后为空 / {@code null}）
      *       ⇒ <b>原样返回</b>，绝不返回 {@code null}、绝不返回空串（除非本来就是空串）。</li>
      *   <li>{@code §} 一个都不动（那是原版的合法色码，剥了反而丢颜色）。</li>
@@ -288,7 +507,12 @@ public final class ShanhaiTextParser {
         if (dash < 0 || dash + 1 >= raw.length()) {
             return raw;   // 形状不是 `&$…-正文` ⇒ 不动它（交给原版，与 parse 的判据一致）
         }
-        return raw.substring(dash + 1);
+        final String rest = raw.substring(dash + 1);
+        final int restoreIdx = restoreIndex(rest);
+        if (restoreIdx < 0) {
+            return rest;   // 🔴 没有 &r ⇒ 与 &r 出现之前的返回值逐位相同
+        }
+        return rest.substring(0, restoreIdx) + rest.substring(restoreIdx + RESTORE_MARKER.length());
     }
 
     // ================================================================== 探针
@@ -349,7 +573,96 @@ public final class ShanhaiTextParser {
             return NOT_OURS;
         }
 
-        // ---- 效果字符（照抄 parseFlags:148-159：在 codePart 的全段里找，$ 前后都认） ----
+        // ---- 效果字符 + 样式名：与分段入口共用 parseCode（2026-11-01 抽出，行为逐位不变） ----
+        // 效果字符照抄 parseFlags:148-159：在 codePart 的全段里找，`$` 前后都认。
+        // 加粗与 ? / * 同一套判据（扫整个 codePart ⇒ `$` 前后都认），见类注释 §2.2。
+        Code code = parseCode(codePart, dollarIdx);
+        boolean glitch = code.glitch();
+        boolean floatX = code.floatX();
+        boolean bold = code.bold();
+        String unsupported = code.unsupported();
+        // 样式名照抄 parseFlags:161-174：`$` 之后，剥掉紧邻的效果字符。
+        String theme = code.theme();
+        if (theme.isEmpty()) {
+            return NOT_OURS;
+        }
+
+        // ---- 正文区：`-` 之后全都算（含可能出现的 &r） ----
+        String rest = raw.substring(dashIdx + 1);
+        if (rest.isEmpty()) {
+            // 见类注释 §5.4：上游会把整条原文当正文（= 把码画出来），我们判「不是我们的码」。
+            // ⚠️ 判据在 `rest` 上、不在拆完的 body 上：`&$neon-&r后缀` 是合法的（body 为空、后缀非空），
+            //    而 `&$neon-` 仍然是"没有正文"⇒ 非我们的码（与改前逐位一致：没有 &r 时 rest == body）。
+            return NOT_OURS;
+        }
+
+        // ---- 还原符 &r（2026-10-31，见类注释 §1.1）----
+        //   只在正文区里找、只找【第一个】；找不到 ⇒ body = 正文区全部、suffix = ""（= 改前的行为，逐位相同）。
+        final int restoreIdx = restoreIndex(rest);
+        final String body;
+        final String suffix;
+        if (restoreIdx < 0) {
+            body = rest;
+            suffix = "";
+        } else {
+            body = rest.substring(0, restoreIdx);
+            suffix = rest.substring(restoreIdx + RESTORE_MARKER.length());
+        }
+
+        String prefix = raw.substring(0, ampIdx);
+        String cleanText = prefix + body + suffix;
+
+        if (prefix.indexOf('\u00A7') >= 0 || body.indexOf('\u00A7') >= 0 || suffix.indexOf('\u00A7') >= 0) {
+            // 见类注释 §5.3：§ 与 &$ 混在同一行时不做，交回原版（避免我无法验证的下标换算）。
+            // 🔴 &r 不改变这条铁律，只把判定面从 prefix+body 扩到 prefix+body+suffix（= 整行）；
+            //    suffix 为空时判定面与改前完全相同 ⇒ 输出逐位不变。
+            warnUnsupported("mixed_section_sign", theme);
+            return NOT_OURS;
+        }
+
+        ShanhaiTextPalette.Style style = ShanhaiTextPalette.get(theme);
+        if (style == null) {
+            // ---- 退化 A：没移植的样式名 ⇒ 剥码 + 不染色（用户裁决 ③） ----
+            // 🔴 这里 bold 恒传 false：样式名不认识 ⇒ 整段码（含 `#`）一起被剥掉，见类注释 §3 的加粗说明。
+            warnUnsupported("style", theme);
+            return new Parsed(true, cleanText, prefix, body, suffix, null, false,
+                    false, false, false, theme, unsupported);
+        }
+
+        if (!unsupported.isEmpty()) {
+            // ---- 退化 B：没实现的效果字符 ⇒ 丢掉那个效果，保留颜色（用户裁决 ③ 的第二条） ----
+            warnUnsupported("effect", unsupported);
+        }
+
+        return new Parsed(true, cleanText, prefix, body, suffix, style.rgb(), style.isBody(),
+                glitch, floatX, bold, theme, unsupported);
+    }
+
+    // ================================================================== codePart 解析（单段 / 分段共用）
+
+    /**
+     * {@code codePart} 里剥出来的东西 —— <b>{@code &} 之后、{@code -} 之前那一整段</b>的解读结果。
+     *
+     * <p>🔴 <b>为什么抽出来</b>（2026-11-01，A 案）：单段入口 {@link #parse} 与分段入口
+     * {@link #parseSegments} 必须对"哪些是效果字符、哪个是样式名、哪些没实现"给出<b>完全一样</b>的答案。
+     * 写两份 = 迟早有一天两边不一致（而那种不一致只会表现成"同一段文字在某些路径上颜色不对"，
+     * 极难定位）。抽成一个方法之后，<b>它们不可能不一致</b>。
+     *
+     * <p>⚠️ <b>抽出后单段入口的行为逐位不变</b>：方法体就是原来 {@code parseUncached} 里那几行的<b>原样搬运</b>
+     * （同样的 {@code EFFECT_SYMBOLS} 扫描顺序、同样的跳过集合、同样的"只剥样式名开头的效果字符"）。
+     * 判据 = 对拍：1052 条 lang 值 + 一族边界样例，改前实现 vs 改后实现的 {@code cleanText/body/suffix/palette/
+     * bold/glitch/floatX/ours} 全字段逐位相同（读数见 {@code temp\segtext\分段兼容.md}）。
+     */
+    private record Code(boolean glitch, boolean floatX, boolean bold, String unsupported, String theme) {}
+
+    /**
+     * 解析 {@code codePart}（含 {@code $}）。
+     *
+     * @param codePart {@code &} 之后、{@code -} 之前那一整段（<b>含 {@code $} 自己</b>）
+     * @param dollarIdx {@code $} 在 {@code codePart} 里的下标（调用方已经找好，这里不再扫）
+     */
+    private static Code parseCode(String codePart, int dollarIdx) {
+        // 效果字符（照抄 parseFlags:148-159：在 codePart 的全段里找，$ 前后都认）
         boolean glitch = codePart.indexOf('?') >= 0;
         boolean floatX = codePart.indexOf('*') >= 0;
         // 加粗：与上面两个同一套判据（扫整个 codePart ⇒ `$` 前后都认），见类注释 §2.2。
@@ -365,47 +678,226 @@ public final class ShanhaiTextParser {
             }
         }
 
-        // ---- 样式名（照抄 parseFlags:161-174：$ 之后，剥掉紧邻的效果字符） ----
+        // 样式名（照抄 parseFlags:161-174：$ 之后，剥掉紧邻的效果字符）
         String theme = codePart.substring(dollarIdx + 1);
         int strip = 0;
         while (strip < theme.length() && EFFECT_SYMBOLS.indexOf(theme.charAt(strip)) >= 0) {
             strip++;
         }
-        theme = theme.substring(strip);
-        if (theme.isEmpty()) {
-            return NOT_OURS;
-        }
+        return new Code(glitch, floatX, bold, unsupported.toString(), theme.substring(strip));
+    }
 
-        String body = raw.substring(dashIdx + 1);
-        if (body.isEmpty()) {
-            // 见类注释 §5.4：上游会把整条原文当正文（= 把码画出来），我们判「不是我们的码」。
-            return NOT_OURS;
+    /**
+     * 把 {@link Code} 里<b>我们真做了</b>的那几个效果字符拼成一个诊断串（顺序照 {@link #EFFECT_SYMBOLS}）。
+     *
+     * <p>只进 {@link Segment#effect()}，<b>不参与任何绘制判断</b>（渲染只看 {@code glitch/floatX/bold} 三个 boolean）。
+     */
+    private static String effectOf(Code code) {
+        StringBuilder sb = new StringBuilder(3);
+        for (int i = 0; i < EFFECT_SYMBOLS.length(); i++) {
+            char sym = EFFECT_SYMBOLS.charAt(i);
+            boolean on = sym == BOLD_SYMBOL ? code.bold()
+                    : sym == '?' ? code.glitch()
+                    : sym == '*' && code.floatX();
+            if (on) {
+                sb.append(sym);
+            }
         }
-        String prefix = raw.substring(0, ampIdx);
-        String cleanText = prefix + body;
+        return sb.toString();
+    }
 
-        if (prefix.indexOf('\u00A7') >= 0 || body.indexOf('\u00A7') >= 0) {
-            // 见类注释 §5.3：§ 与 &$ 混在同一行时不做，交回原版（避免我无法验证的下标换算）。
-            warnUnsupported("mixed_section_sign", theme);
-            return NOT_OURS;
+    /**
+     * 在<b>正文区</b>（{@code -} 之后那一段）里找<b>第一个</b>还原符 {@code &r}。
+     *
+     * @return {@code &r} 的下标；没找到返回 {@code -1}
+     *
+     * <p>🔴 <b>为什么单独抽成一个方法</b>：本任务的负对照要求"把找 {@code &r} 这一步临时关掉
+     * ⇒ 新语法与边界两组必须报红"。抽出来后，负对照 = 把本方法方法体换成 {@code return -1;}，
+     * <b>其余代码一个字节都不动</b> ⇒ 报红只能归因于这一步，不能归因于我顺手改了别处。
+     *
+     * <p>⚠️ 它<b>只</b>被 {@code parseUncached} 用、<b>只</b>看正文区：{@code prefix} 段与
+     * {@code codePart} 段里的 {@code &r} 都不会进来（类注释 §1.1 的边界第 1 条）。
+     */
+    private static int restoreIndex(String rest) {
+        return rest.indexOf(RESTORE_MARKER);
+    }
+
+    // ================================================================== 分段解析（A 案）
+
+    /**
+     * <b>把一行切成绘制段</b>（纯语法，<b>任何输入都给结果</b>；规则见类注释 §7.1）。
+     *
+     * <p>⚠️ <b>它不是"要不要接管"的判据</b> —— 渲染层用的闸门是 {@link #mixedSegments}。
+     * 本方法只回答"按语法这一行该切成哪几段"，所以<b>对没有 {@code &$} 的行也会返回一个原版段</b>
+     * （而不是 {@code null}/{@code 空表}）：这样自证可以直接把它的输出与 {@code parse} 对拍。
+     *
+     * @param raw {@code null}/空串 ⇒ 单个空的原版段（不返回 {@code null}，调用方不用判空）
+     * @return <b>不可变</b>列表；<b>不产出空的段</b>（空原版段 / 空正文段都不会出现，除非整串为空）
+     */
+    public static List<Segment> parseSegments(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return SEG_EMPTY;
         }
-
-        ShanhaiTextPalette.Style style = ShanhaiTextPalette.get(theme);
-        if (style == null) {
-            // ---- 退化 A：没移植的样式名 ⇒ 剥码 + 不染色（用户裁决 ③） ----
-            // 🔴 这里 bold 恒传 false：样式名不认识 ⇒ 整段码（含 `#`）一起被剥掉，见类注释 §3 的加粗说明。
-            warnUnsupported("style", theme);
-            return new Parsed(true, cleanText, prefix, body, null, false,
-                    false, false, false, theme, unsupported.toString());
+        List<Segment> cached = SEG_CACHE.get(raw);
+        if (cached != null) {
+            return cached;
         }
+        List<Segment> fresh = List.copyOf(segmentUncached(raw));
+        SEG_CACHE.put(raw, fresh);
+        return fresh;
+    }
 
-        if (unsupported.length() > 0) {
-            // ---- 退化 B：没实现的效果字符 ⇒ 丢掉那个效果，保留颜色（用户裁决 ③ 的第二条） ----
-            warnUnsupported("effect", unsupported.toString());
+    /**
+     * <b>混排行闸门</b>：这一行该不该走分段绘制？该 ⇒ 返回段列表；不该 ⇒ 返回 {@code null}。
+     *
+     * <p>🔴 <b>三个"不该"</b>（每一条都对应类注释 §7.4 的一个理由）：
+     * <ol>
+     *   <li><b>没有 {@code §}</b> ⇒ {@code null}：整行可以一次画完，分段只会白白引入
+     *       "每段各自 ceil / 各自截断"的 x 误差 ⇒ <b>回归底线</b>；</li>
+     *   <li><b>没有 {@code &$}</b> ⇒ {@code null}：全是原版段 ⇒ 交回原版整行画（与改前完全一样）；</li>
+     *   <li><b>切完一段我们的都没有</b>（{@code &$} 全是畸形写法 / 全退化成原版段）⇒ {@code null}：
+     *       我们没有要画的东西 ⇒ 干脆让原版整行画，<b>不碰</b> x 推进量。</li>
+     * </ol>
+     */
+    public static List<Segment> mixedSegments(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
         }
+        if (raw.indexOf(SECTION_SIGN) < 0) {
+            return null;   // 没有 § ⇒ 完全走我们（旧路径）
+        }
+        if (raw.indexOf(SEGMENT_MARK) < 0) {
+            return null;   // 没有 &$ ⇒ 完全走原版（旧路径）
+        }
+        List<Segment> segs = parseSegments(raw);
+        for (int i = 0; i < segs.size(); i++) {
+            if (segs.get(i).ours()) {
+                return segs;
+            }
+        }
+        return null;
+    }
 
-        return new Parsed(true, cleanText, prefix, body, style.rgb(), style.isBody(),
-                glitch, floatX, bold, theme, unsupported.toString());
+    /**
+     * 分段解析本体（<b>不进缓存</b>；规则逐条对应类注释 §7.1 / §7.3）。
+     *
+     * <p>扫描是<b>一遍过</b>的：{@code p = raw.indexOf("&$", i)} 找段起点，段与段之间的字<b>原样子串</b>
+     * 收成原版段（{@code vanillaFrom} 记住"还没交付的原版区间起点"）。
+     */
+    private static List<Segment> segmentUncached(String raw) {
+        final int n = raw.length();
+        final List<Segment> out = new ArrayList<>(4);
+        int vanillaFrom = 0;
+        int i = 0;
+        while (i < n) {
+            final int p = raw.indexOf(SEGMENT_MARK, i);
+            if (p < 0) {
+                break;
+            }
+            // ---- 1) 找 `-`，但**不许越过下一个 `&$`**（否则会把下一段的 `-` 抢过来） ----
+            final int nextSeg = raw.indexOf(SEGMENT_MARK, p + SEGMENT_MARK.length());
+            final int limit = nextSeg < 0 ? n : nextSeg;
+            final int dash = raw.indexOf('-', p + SEGMENT_MARK.length());
+            if (dash < 0 || dash >= limit) {
+                // 形状不对（这一段没有 `-`）⇒ 这串 `&$` 当普通文字，留在原版段里（与 parse 的 §5.2 同一条）
+                i = p + SEGMENT_MARK.length();
+                continue;
+            }
+            // ---- 2) codePart：与 parseUncached 完全同一个形状（`&` 之后到 `-` 之前，含 `$`）----
+            final String codePart = raw.substring(p + 1, dash);
+            final int dollarIdx = codePart.indexOf('$');   // 恒为 0：`&$` 的 `$` 就在 p+1
+            final Code code = parseCode(codePart, dollarIdx);
+            if (code.theme().isEmpty()) {
+                // 没有样式名（`&$-正文` / `&$?-正文`）⇒ 形状不对 ⇒ 当普通文字
+                i = p + SEGMENT_MARK.length();
+                continue;
+            }
+            // ---- 3) 正文：到 `&r` / 下一个 `&$` / 串尾，三者取最早 ----
+            final int bodyFrom = dash + 1;
+            final int endR = raw.indexOf(RESTORE_MARKER, bodyFrom);
+            final int endS = raw.indexOf(SEGMENT_MARK, bodyFrom);
+            final int stop;      // 正文结束下标
+            final boolean eatsR; // 结束符是不是 `&r`（是 ⇒ 它被吃掉，不进任何段）
+            if (endR < 0 && endS < 0) {
+                stop = n;
+                eatsR = false;
+            } else if (endR >= 0 && (endS < 0 || endR <= endS)) {
+                stop = endR;
+                eatsR = true;
+            } else {
+                stop = endS;
+                eatsR = false;
+            }
+            final String body = raw.substring(bodyFrom, stop);
+            if (body.isEmpty()) {
+                // 见类注释 §5.4 的同一条判据：`&$neon-` 没有正文 ⇒ 不是一段 ⇒ 当普通文字（码可见，字不消失）。
+                // ⚠️ 与单段路径的差别只在"判定面"：那边判整条，这边判这一段。
+                i = p + SEGMENT_MARK.length();
+                continue;
+            }
+            // ---- 4) 段内 § ⇒ 该段退化（丢样式码、正文交原版）----
+            final int sectAt = raw.indexOf(SECTION_SIGN, p);
+            if (sectAt >= 0 && sectAt < stop) {
+                warnUnsupported("seg_section_sign", code.theme());
+                flushVanilla(out, raw, vanillaFrom, p);
+                addVanilla(out, body);
+                i = eatsR ? stop + RESTORE_MARKER.length() : stop;
+                vanillaFrom = i;
+                continue;
+            }
+            // ---- 5) 切出来 ----
+            flushVanilla(out, raw, vanillaFrom, p);
+            final ShanhaiTextPalette.Style style = ShanhaiTextPalette.get(code.theme());
+            if (style == null) {
+                // 退化 A：样式名不认识 ⇒ 仍是我们的段，但无颜色、不加粗（与单段路径逐条一致）
+                warnUnsupported("style", code.theme());
+                out.add(new Segment(true, body, null, false, "", false, false));
+            } else {
+                if (!code.unsupported().isEmpty()) {
+                    // 退化 B：没实现的效果字符本来就在 codePart 里（不会被画）⇒ 保留颜色、丢掉那个效果
+                    warnUnsupported("effect", code.unsupported());
+                }
+                out.add(new Segment(true, body, style, code.bold(), effectOf(code),
+                        code.glitch(), code.floatX()));
+            }
+            i = eatsR ? stop + RESTORE_MARKER.length() : stop;
+            vanillaFrom = i;
+        }
+        // ---- 6) 尾巴上的原版段 ----
+        flushVanilla(out, raw, vanillaFrom, n);
+        if (out.isEmpty()) {
+            return List.of(Segment.vanilla(raw));
+        }
+        return out;
+    }
+
+    /** 把 {@code raw[from,to)} 作为<b>原版段</b>收进去；空区间<b>不产出</b>段（见类注释 §7.1 第 3 条）。 */
+    private static void flushVanilla(List<Segment> out, String raw, int from, int to) {
+        if (to > from) {
+            addVanilla(out, raw.substring(from, to));
+        }
+    }
+
+    /**
+     * 收一个原版段，并<b>与紧邻的前一个原版段合并</b>。
+     *
+     * <p>为什么要合并：退化段（段内出现 {@code §}）的两侧在原文里<b>不连续</b>（中间那串样式码被丢掉了）
+     * ⇒ 会切出「原版段 / 退化段 / 原版段」这种<b>三个连着的原版段</b>。
+     * 三个都交给原版画，结果虽然等价，但白白多两次 {@code drawInBatch}、也多两次 x 取整
+     * ⇒ 合并成一段。
+     * <p>⚠️ 合并只改变"调用几次"，<b>不改变字节</b>：拼接顺序就是原文顺序，
+     * 且两段都已经是"不含我们的样式码"的原样子串。
+     */
+    private static void addVanilla(List<Segment> out, String text) {
+        if (text.isEmpty()) {
+            return;
+        }
+        final int last = out.size() - 1;
+        if (last >= 0 && !out.get(last).ours()) {
+            out.set(last, Segment.vanilla(out.get(last).text() + text));
+            return;
+        }
+        out.add(Segment.vanilla(text));
     }
 
     // ================================================================== 限流 WARN

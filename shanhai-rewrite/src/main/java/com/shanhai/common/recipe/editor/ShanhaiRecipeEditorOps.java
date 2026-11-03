@@ -1510,10 +1510,29 @@ public final class ShanhaiRecipeEditorOps {
                         return want;
                     }
                 } else {
-                    ShanhaiMod.LOGGER.info("{} fp_source=cache id={} reason=not_applied "
-                                    + "(is_set={} fields_match_live={}) -> 用缓存里那份",
-                            PREFIX, id, isSet,
-                            fields != null && fields.has("duration") && fields.get("duration").getAsInt() == liveDuration);
+                    // 🔴🔴 2026-11（用户报「JEI 显示会和实际配方不一样」「配方编辑器里看到的和 JEI 里是一样的」）
+                    //    这一行原来写的是：
+                    //      fields_match_live = fields != null && fields.has("duration")
+                    //                          && fields.get("duration").getAsInt() == liveDuration
+                    //    —— 名字说"逐字段"，实际【只比了 duration 一个字段】：
+                    //    **输入/输出/条件完全不同也照报 true**。实机现场（用户实例日志逐字）：
+                    //      fp_source=cache id=shanhai:primordial_causal_weaving/new_recipe_4
+                    //      reason=not_applied (is_set=true fields_match_live=true) -> 用缓存里那份
+                    //    而同一份 fields 里 inputs 是【新版】（电路 7 / 导航棱镜 4 / 力场发生器 256 …）。
+                    //    ⇒ 看日志的人（包括排查这条的我）据此认定"覆盖层与活配方一致"，方向整体跑偏。
+                    //
+                    //    现在：判据只走 ShanhaiRecipeFieldDiff.compare（纯核、逐字段），三种结局
+                    //    MATCH / MISMATCH[a,b] / UNCOMPARABLE(原因) 都【如实】打出来 ——
+                    //    "比不了"绝不再冒充"一致"。
+                    //    ⚠️ 同时把两套判据的不同源讲清楚：applied 比的是【底本(pristine)】，
+                    //    fields_match_live 比的是【活配方】。两者可以合法地一个 true 一个 false。
+                    final ShowSource show = displaySourceFor(server, id, liveOf(server, id, type));
+                    final boolean pristinePresent = ShanhaiRecipeBase.pristine(id) != null;
+                    ShanhaiMod.LOGGER.info("{} fp_source=cache id={} reason={} fields_match_live={} detail={}",
+                            PREFIX, id, applied ? "base_fp_empty" : "not_applied", show.label(),
+                            show.detail() + "；is_set=" + isSet + "；底本(pristine)="
+                                    + (pristinePresent ? "present" : "absent")
+                                    + "；applied 判据比的是【底本】、fields_match_live 比的是【活配方】（不同源，可合法相左）");
                 }
             } else {
                 ShanhaiMod.LOGGER.info("{} fp_source=cache id={} reason=no_prior_entry", PREFIX, id);
@@ -1605,39 +1624,134 @@ public final class ShanhaiRecipeEditorOps {
         return true;
     }
 
+    // ================================================================= 显示源（B）：以【活配方】为准
+
+    /**
+     * 「编辑器给界面的那份数据」与「覆盖层写下的 fields」是什么关系。
+     *
+     * @param source 恒为 {@code "live"} —— 面板显示的数据只能来自<b>活配方</b>
+     * @param why    {@code match} / {@code overlay_mismatch} / {@code no_live} / {@code no_overlay}
+     * @param label  纯核判据的三态标签（{@code MATCH} / {@code MISMATCH[…] } / {@code UNCOMPARABLE(原因)}）
+     * @param detail 人类可读的一句话
+     */
+    public record ShowSource(String source, String why, String label, String detail) {}
+
+    /**
+     * 🔴 <b>显示源裁决（唯一判据入口）</b>：编辑器把一条配方显示到界面上时，那份数据必须来自活配方。
+     *
+     * <h4>为什么要有这一拍</h4>
+     * 用户 2026-11 的原话是「JEI 显示会和实际配方不一样」「而且不止是 jei 的问题，我在配方编辑器里面看到的
+     * 和 jei 里面是一样的」。两个界面看到同一份东西 ⇒ 它们读的是同一个源，而那个源<b>不是活配方</b>。
+     * 这一拍把"面板那一份到底是不是活配方"变成<b>可判读数</b>：覆盖层 fields 与活配方逐字段比对，
+     * 不一致就明说 {@code why=overlay_mismatch} 并把差在哪几个字段打出来。
+     *
+     * <h4>三条纪律</h4>
+     * <ol>
+     *   <li><b>一致时一行日志都不打</b> —— 这条路的可观测行为与改动之前<b>逐字相同</b>；</li>
+     *   <li><b>指纹缓存不许当显示数据源</b>：{@code ShanhaiRecipeFingerprint.forRecipeId} 返回的是
+     *       一个<b>字符串</b>（缓存的类型就是 {@code Map<ResourceLocation,String>}），它只能当
+     *       {@code base_fp} 基线用，"用缓存里那份"指的也只会是<b>指纹</b>，不是配方数据。显示数据
+     *       只能来自 {@code GTRecipe}；</li>
+     *   <li>拿不到活配方 ⇒ {@code UNCOMPARABLE(no_live)} ＋ WARN，<b>显示源保持现状</b>，
+     *       绝不因此崩、也绝不说"一致"。</li>
+     * </ol>
+     */
+    public static ShowSource displaySourceFor(MinecraftServer server, ResourceLocation id, GTRecipe live) {
+        final JsonObject fields;
+        final JsonObject snapshot;
+        final ShanhaiRecipeFieldDiff.DurationCmp cmp;
+        try {
+            fields = entryFields(id);
+            // 🔴 只在"覆盖层这一条确实有 fields"时才拍活配方快照（= 编码四张 IO 表）。
+            //    没被编辑过的配方（绝大多数）⇒ 不拍、直接走 no_overlay —— 这一条是为了不给
+            //    "打开配方"加一份白干的 IO 编码开销（19k 输出的配方打开一次本来就不便宜）。
+            snapshot = (fields == null || live == null) ? null : liveSnapshot(live);
+            cmp = durationCmpFor(live == null ? null : live.getType());
+        } catch (Throwable t) {
+            ShanhaiMod.LOGGER.warn("{} editor_show_source=live id={} why=probe_threw err={} "
+                    + "(读覆盖文件 / 拍活配方快照失败 ⇒ 这一拍不下结论，显示源保持现状)", PREFIX, id, t.toString());
+            return new ShowSource("live", "probe_threw", "UNCOMPARABLE(probe_threw)", t.toString());
+        }
+        // 🔴 判据、"要不要打日志"、以及那一行的全文，都由纯核那张表决定（displaySource / warnLine）——
+        //    这里只负责把字交给 logger。一致时 warnLine 返回 null ⇒ 一行日志都不打。
+        final ShanhaiRecipeFieldDiff.Display d = ShanhaiRecipeFieldDiff.displaySource(fields, snapshot, cmp);
+        final String line = ShanhaiRecipeFieldDiff.warnLine(id == null ? "(null)" : id.toString(), d);
+        if (line != null) {
+            ShanhaiMod.LOGGER.warn("{} {}", PREFIX, line);
+        }
+        return new ShowSource(d.source(), d.why(), d.label(), d.detail());
+    }
+
+    /** 覆盖层里这条 id 的 {@code fields}（没有 / 形状不对 ⇒ {@code null}）。 */
+    private static JsonObject entryFields(ResourceLocation id) {
+        final JsonObject e = ShanhaiRecipeOverrideStore.findEntry(id);
+        if (e == null || !e.has("fields") || !e.get("fields").isJsonObject()) {
+            return null;
+        }
+        return e.getAsJsonObject("fields");
+    }
+
+    /** 这条 id 此刻的<b>活配方</b>对象（配方表优先，取不到再走原版表那条路；都没有 ⇒ null）。 */
+    private static GTRecipe liveOf(MinecraftServer server, ResourceLocation id, GTRecipeType type) {
+        GTRecipe live = null;
+        try {
+            live = ShanhaiRecipeReverseIndex.byId(server, id);
+        } catch (Throwable ignored) {
+            // 反查索引那一路失败 ⇒ 落到下面"原版表"那一路，不是错误
+        }
+        if (live == null) {
+            try {
+                live = readFromVanilla(server, type, id);
+            } catch (Throwable ignored) {
+                // 两路都取不到 ⇒ 调用方按 UNCOMPARABLE(no_live) 处理
+            }
+        }
+        return live;
+    }
+
+    /**
+     * 把活配方拍成 {@link ShanhaiRecipeFieldDiff} 认识的 JSON 快照。
+     *
+     * <p>🔴 这是<b>本类里唯一</b>把 GT 对象翻成判据输入的地方 —— 判据本体（纯核）在
+     * {@link ShanhaiRecipeFieldDiff} 里，脱机可跑。四个表都走 {@code ShanhaiRecipeIoApply.tableJson}
+     * （与落盘 {@code fields} 同一份 codec 形状），条件走 {@code ShanhaiRecipeConditions.encodeOf}，
+     * 电压档走 {@code data.euTier}。{@code duration} 传的是<b>实际值</b>，换算交给
+     * {@link #durationCmpFor}。
+     */
+    private static JsonObject liveSnapshot(GTRecipe live) {
+        final JsonObject o = new JsonObject();
+        o.add(ShanhaiRecipeFieldDiff.F_INPUTS, ShanhaiRecipeIoApply.tableJson(live, "inputs"));
+        o.add(ShanhaiRecipeFieldDiff.F_OUTPUTS, ShanhaiRecipeIoApply.tableJson(live, "outputs"));
+        o.add(ShanhaiRecipeFieldDiff.F_TICK_INPUTS, ShanhaiRecipeIoApply.tableJson(live, "tickInputs"));
+        o.add(ShanhaiRecipeFieldDiff.F_TICK_OUTPUTS, ShanhaiRecipeIoApply.tableJson(live, "tickOutputs"));
+        o.addProperty(ShanhaiRecipeFieldDiff.F_DURATION, live.duration);
+        final JsonObject data = new JsonObject();
+        data.addProperty("euTier", live.data == null ? 0 : live.data.getInt("euTier"));
+        o.add(ShanhaiRecipeFieldDiff.F_DATA, data);
+        o.add(ShanhaiRecipeFieldDiff.F_CONDITIONS, ShanhaiRecipeConditions.encodeOf(live));
+        return o;
+    }
+
+    /**
+     * {@code duration} 的相等判据：文件里那份是<b>原始值</b>，活配方上那个是<b>实际值</b>
+     * （gtlcore 会按 {@code duration_scale} 乘一遍）⇒ 必须换算之后再比。
+     * 口径与 {@link #fieldsAppliedTo} 那一条<b>逐字相同</b>（同一处历史修复：#1518 那条 STALE）。
+     */
+    private static ShanhaiRecipeFieldDiff.DurationCmp durationCmpFor(GTRecipeType type) {
+        return (fieldsDuration, liveDuration) -> {
+            try {
+                return fieldsDuration != null && fieldsDuration.isJsonPrimitive()
+                        && ShanhaiRecipeDuration.toLive(type, fieldsDuration.getAsInt()) == liveDuration;
+            } catch (Throwable t) {
+                // 文件里那个值不是数字 ⇒ 判"不相等"（不是"比不了"：这一项我们确实拿到了两份）
+                return false;
+            }
+        };
+    }
+
     /** 递归按字典序排对象键后再序列化（数组保持原序）—— 两边同口径才能比。 */
-    private static String normalize(com.google.gson.JsonElement el) {
-        if (el == null || el.isJsonNull()) {
-            return "null";
-        }
-        if (el.isJsonArray()) {
-            final StringBuilder sb = new StringBuilder("[");
-            boolean first = true;
-            for (com.google.gson.JsonElement e : el.getAsJsonArray()) {
-                if (!first) {
-                    sb.append(',');
-                }
-                sb.append(normalize(e));
-                first = false;
-            }
-            return sb.append(']').toString();
-        }
-        if (el.isJsonObject()) {
-            final java.util.TreeMap<String, com.google.gson.JsonElement> sorted = new java.util.TreeMap<>();
-            for (var en : el.getAsJsonObject().entrySet()) {
-                sorted.put(en.getKey(), en.getValue());
-            }
-            final StringBuilder sb = new StringBuilder("{");
-            boolean first = true;
-            for (var en : sorted.entrySet()) {
-                if (!first) {
-                    sb.append(',');
-                }
-                sb.append('"').append(en.getKey()).append("\":").append(normalize(en.getValue()));
-                first = false;
-            }
-            return sb.append('}').toString();
-        }
-        return el.toString();
+    private static String normalize(JsonElement el) {
+        // 判据实现只有一份（纯核那类里的），这里只是转发 —— 免得同一个规范化算法在仓库里有第三份拷贝。
+        return ShanhaiRecipeFieldDiff.canonical(el);
     }
 }

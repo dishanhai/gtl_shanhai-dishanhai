@@ -12,12 +12,15 @@ import org.slf4j.Logger;
  * <h2>一、为什么要单独一个类</h2>
  * 判据要求「日志里能<b>断言</b>」：注册自证一行、类型读取一行。
  * 如果这些行散落在机器类里各写各的，就没法用一条 grep 判定「到底有没有生效」。
- * 本类把三件事收在一处：
+ * 本类把四件事收在一处：
  * <ol>
  *   <li><b>前缀</b>：{@value #PREFIX}（与阶段一的注册自证同一前缀，日志里 {@code grep '[SHANHAI-STELLAR]'} 一行看全）；</li>
  *   <li><b>类型读取的开关</b>：默认<b>关</b>（{@link #isTypeLogEnabled()} = false），
  *       打开方式见 §二；关着时一条都不打（1080 槽逐槽打会把日志刷爆）；</li>
- *   <li><b>稳定的单行格式</b>：见 {@link #logSlotType(String, int, ItemStack, ShanhaiPatternTypeReader.Resolution)}。</li>
+ *   <li><b>稳定的单行格式</b>：见 {@link #logSlotType(String, int, ItemStack, ShanhaiPatternTypeReader.Resolution)}；</li>
+ *   <li><b>类型读不出来时的原始 NBT</b>：{@link #logXrecipeNbtIfUnresolved(int, ItemStack)}
+ *       —— {@code XRECIPE_NBT slot=… keys=[…] raw=[…]}，<b>不受</b>上面那个开关控制（只受限流控制），
+ *       因为它正是「出问题时的现场证据」。</li>
  * </ol>
  *
  * <h2>二、开关怎么打开（两种，都不需要改代码）</h2>
@@ -124,5 +127,70 @@ public final class ShanhaiStellarLog {
         }
         LOGGER.info("{} TYPE SUMMARY where={} total={} unique={} ambiguous={} none={}",
                 PREFIX, where, total, unique, ambiguous, none);
+    }
+
+    // ============================================================ XRECIPE_NBT（解析不出类型时的原始 NBT）
+
+    /** 同一指纹（同一行内容）在这个间隔内只打一行 —— 「限流」的唯一实现。 */
+    public static final long XRECIPE_NBT_THROTTLE_MS = 2000L;
+
+    /** 上一次真的打出去的那一行（限流指纹）。 */
+    private static volatile String xrecipeNbtLastLine = "";
+
+    /** 上一次真的打出去的时刻（毫秒）。 */
+    private static volatile long xrecipeNbtLastMs = Long.MIN_VALUE;
+
+    /**
+     * <b>只读</b>：把这块样板的<b>全部键名 + 最多 3 个键的原始值</b>打一行
+     * （格式见 {@link ShanhaiPatternRawNbt}）。
+     *
+     * <pre>
+     *   [SHANHAI-STELLAR] XRECIPE_NBT slot=3 keys=[gt_shanhai_recipe_type, in, out] raw=[gt_shanhai_recipe_type='原初因果编织']
+     * </pre>
+     *
+     * <h2>🔴 为什么这一行<b>不受</b> {@code shanhai.stellar.typeLog} 开关控制</h2>
+     * 它是「类型读不出来」的<b>唯一现场证据</b>（本轮实机就卡在这里：只知道 {@code none}，
+     * 不知道 NBT 里到底有什么）。一条只在开关打开时才出现的证据，等于在出问题时<b>不存在</b>。
+     * 代价用<b>限流</b>控住：同内容 {@link #XRECIPE_NBT_THROTTLE_MS} 内只打一行，
+     * 且调用点本身也在 {@code XRECIPE} 那套 20 tick 节流之后。
+     * <p>只读：不写 NBT、不改机器状态、不参与任何判定；任何异常都吞掉（日志不许带崩 tick）。
+     */
+    public static void logXrecipeNbt(int slot, @Nullable ItemStack stack) {
+        try {
+            final String body = ShanhaiPatternTypeReader.describeRawNbt(slot, stack);
+            final String line = PREFIX + " " + body;
+            final long now = System.currentTimeMillis();
+            if (line.equals(xrecipeNbtLastLine) && xrecipeNbtLastMs != Long.MIN_VALUE
+                    && now - xrecipeNbtLastMs < XRECIPE_NBT_THROTTLE_MS) {
+                return;
+            }
+            xrecipeNbtLastLine = line;
+            xrecipeNbtLastMs = now;
+            LOGGER.info(line);
+        } catch (Throwable ignored) {
+            // 诊断行永远不许成为新的故障点
+        }
+    }
+
+    /**
+     * 与 {@link #logXrecipeNbt(int, ItemStack)} 相同，但<b>只在解析结果为 NONE 时</b>才打
+     * —— 「失败时必须打出原始 NBT」这条要求的落点。
+     *
+     * <p>NONE = 四个来源一个可用类型都没给 ⇒ 调用方（{@code XRECIPE} 判据 / 槽位读取）正好在问
+     * 「这块样板到底是什么类型」。
+     */
+    public static void logXrecipeNbtIfUnresolved(int slot, @Nullable ItemStack stack) {
+        try {
+            if (stack == null || stack.isEmpty()) {
+                return;
+            }
+            final ShanhaiPatternTypeReader.Resolution resolution = ShanhaiPatternTypeReader.resolve(stack);
+            if (resolution == null || resolution.verdict() != ShanhaiPatternTypeReader.Verdict.NONE) {
+                return;
+            }
+            logXrecipeNbt(slot, stack);
+        } catch (Throwable ignored) {
+            // 同上：诊断不许抛
+        }
     }
 }
