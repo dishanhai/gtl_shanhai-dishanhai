@@ -1,4 +1,7 @@
 ﻿{
+  "item.gt_shanhai.miracle_matter": "奇迹物质",
+  "fluid.gt_shanhai.miracle_flow": "奇迹之流",
+  "item.gt_shanhai.miracle_flow_bucket": "奇迹之流桶",
   "block.gt_shanhai.nyarlathoteps_echo": "奈亚拉托提普之回响",
   "gtceu.recipe_type.voice_of_the_faceless": "无貌者之音",
   "gtceu.voice_of_the_faceless": "无貌者之音",
@@ -10,7 +13,7 @@
   "gt_shanhai.nyarlathotep.echo.tooltip.2": "§7槽内可保存64片引力透镜；独立或归墟离线时仅16片生效，其余透镜保留",
   "gt_shanhai.nyarlathotep.echo.tooltip.3": "§b奈亚与归墟有效链接时开放64片：最高产出×5，覆盖半径1200格，机器无损超频最高加速50%",
   "gt_shanhai.nyarlathotep.echo.tooltip.4": "§e仅回响自身：消耗品与每tick耗电最高×5，耗时÷5；广播持续时间采用缩短后的实际配方耗时",
-  "gt_shanhai.nyarlathotep.echo.tooltip.5": "§7受增幅机器不增加输入消耗；断电、缺料、停机或结构失效立即停止广播。13×11×15双瓣共鸣结构，前端机舱仅四层；主机位于5×3接口中央，周围14格分子机械方块可替换为本机能源与物料仓口",
+  "gt_shanhai.nyarlathotep.echo.tooltip.5": "§7受增幅机器不增加输入消耗；断电、缺料、停机或结构失效立即停止广播。13×12×15双瓣共鸣结构，前端机舱五层、主机居中；全部34格分子机械方块（含外框）均可替换为本机支持的仓室，空腔必须留空",
   "gt_shanhai.nyarlathotep.echo.link.guixu": "§d远程链路：回响 → 奈亚 → 归墟，64透镜模式",
   "gt_shanhai.nyarlathotep.echo.link.nyarlathotep": "§e奈亚在线，归墟离线：16透镜模式",
   "gt_shanhai.nyarlathotep.echo.link.waiting": "§e等待奈亚成形并加载：16透镜模式",

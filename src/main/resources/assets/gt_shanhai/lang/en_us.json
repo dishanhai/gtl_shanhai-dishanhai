@@ -1,4 +1,7 @@
 {
+  "item.gt_shanhai.miracle_matter": "Miracle Matter",
+  "fluid.gt_shanhai.miracle_flow": "Miracle Flow",
+  "item.gt_shanhai.miracle_flow_bucket": "Miracle Flow Bucket",
   "block.gt_shanhai.nyarlathoteps_echo": "Nyarlathotep's Echo",
   "gtceu.recipe_type.voice_of_the_faceless": "Voice of the Faceless",
   "gtceu.voice_of_the_faceless": "Voice of the Faceless",
@@ -10,7 +13,7 @@
   "gt_shanhai.nyarlathotep.echo.tooltip.2": "§7Stores 64 lenses; at most 16 are effective without an online Guixu. All stored lenses are retained",
   "gt_shanhai.nyarlathotep.echo.tooltip.3": "§bAn active Nyarlathotep–Guixu link unlocks 64 lenses: up to ×5 output, 1200-block radius and 50% lossless speed boost",
   "gt_shanhai.nyarlathotep.echo.tooltip.4": "§eEcho only: consumables and EU/t scale up to ×5, duration divides by 5; broadcast lasts the actual shortened recipe duration",
-  "gt_shanhai.nyarlathotep.echo.tooltip.5": "§7Receiver inputs stay unchanged. Stops on resource loss, disable or invalid structure; 13×11×15 split resonator with a four-row front cab. The controller is centered in a 5×3 panel; its 14 molecular casings accept local power and material hatches",
+  "gt_shanhai.nyarlathotep.echo.tooltip.5": "§7Receiver inputs stay unchanged. Stops on resource loss, disable or invalid structure; 13×12×15 split resonator with a five-row front cab and centered controller. All 34 molecular casings, including the frame, accept supported hatches. Cavities must remain air",
   "gt_shanhai.nyarlathotep.echo.link.guixu": "§dEcho → Nyarlathotep → Guixu online: 64-lens mode",
   "gt_shanhai.nyarlathotep.echo.link.nyarlathotep": "§eNyarlathotep online, Guixu offline: 16-lens mode",
   "gt_shanhai.nyarlathotep.echo.link.waiting": "§eWaiting for a loaded, formed Nyarlathotep: 16-lens mode",

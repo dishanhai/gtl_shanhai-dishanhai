@@ -1,0 +1,97 @@
+{
+  "data": {
+    "euTier": 13
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 536870912
+      }
+    ]
+  },
+  "type": "gtceu:matter_forging",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 32,
+          "ingredient": {
+            "item": "dishanhai:worldline_genesis_embryo"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 128,
+          "ingredient": {
+            "item": "dishanhai:blue_son"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 512,
+          "ingredient": {
+            "item": "dishanhai:star_spark"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 2560,
+          "ingredient": {
+            "item": "gtlcore:miracle_crystal"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000000,
+          "value": [
+            {
+              "fluid": "gtceu:miracle"
+            }
+          ]
+        }
+      },
+      {
+        "content": {
+          "amount": 1000000,
+          "value": [
+            {
+              "fluid": "gtceu:miracle_gas"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gt_shanhai:miracle_matter"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:matter_forging/worldline_genesis_embryo_miracle_matter",
+      "defaultEnabled": true
+    }
+  ]
+}

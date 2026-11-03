@@ -9,6 +9,7 @@ import com.gregtechceu.gtceu.api.registry.GTRegistries;
 import com.gregtechceu.gtceu.api.registry.registrate.GTRegistrate;
 
 import com.dishanhai.gt_shanhai.common.DShanhaiCreativeModeTabs;
+import com.dishanhai.gt_shanhai.common.fluid.DShanhaiFluids;
 import com.dishanhai.gt_shanhai.common.item.DShanhaiItems;
 import com.dishanhai.gt_shanhai.common.machine.DShanhaiMachines;
 import com.dishanhai.gt_shanhai.common.recipe.DShanhaiJavaRecipeLibrary;
@@ -36,6 +37,7 @@ public class GTDishanhaiGTAddon implements IGTAddon {
         DShanhaiCreativeModeTabs.init();
         getRegistrate().creativeModeTab(DShanhaiCreativeModeTabs.TAB_DISHANHAI);
         DShanhaiItems.init();
+        DShanhaiFluids.init();
 
         // 注册配方模块等级条件 .ml("moduleId", level)
         GTRegistries.RECIPE_CONDITIONS.unfreeze();

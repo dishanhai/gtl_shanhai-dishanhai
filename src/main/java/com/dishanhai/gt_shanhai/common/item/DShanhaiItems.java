@@ -19,10 +19,14 @@ public final class DShanhaiItems {
     public static ItemEntry<ComponentItem> ADVANCED_PATTERN_BOX;
     public static ItemEntry<ComponentItem> PATTERN_BUFFER_TOOLKIT;
     public static ItemEntry<ComponentItem> PATTERN_GENERATOR;
+    public static ItemEntry<ComponentItem> MIRACLE_MATTER;
     public static ItemEntry<SelectedRecipePatternItem> SELECTED_RECIPE_PATTERN;
     public static ItemEntry<ShanhaiWirelessPatternManagementTerminalItem> WIRELESS_PATTERN_MANAGEMENT_TERMINAL;
 
     public static void init() {
+        MIRACLE_MATTER = REGISTRATE.item("miracle_matter", ComponentItem::create)
+                .model(NonNullBiConsumer.noop())
+                .register();
         var steamCover = com.dishanhai.gt_shanhai.common.cover.ShanhaiAeSteamCover.register();
         AE_STEAM_COVER = REGISTRATE.item("ae_steam_cover", ComponentItem::create)
                 .onRegister(GTItems.attach(new com.gregtechceu.gtceu.common.item.CoverPlaceBehavior(steamCover),
