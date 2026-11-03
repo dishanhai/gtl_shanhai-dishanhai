@@ -55,13 +55,13 @@ class ShanhaiNyarlathotepEchoTest {
             assertTrue(recipe.getAsJsonObject("tickInputs").has("eu"));
         }
     }
-    @Test void structureMatchesApprovedThirteenByElevenByFifteenMapping() throws Exception {
+    @Test void structureMatchesExpandedThirteenByTwelveByFifteenMapping() throws Exception {
         Class<?> layout = Class.forName("com.dishanhai.gt_shanhai.common.machine.preview.ShanhaiNyarlathotepEchoLayout");
         String[][] aisles = (String[][]) layout.getMethod("aisles").invoke(null);
         assertEquals(15, aisles.length);
         int controllers = 0, solids = 0, hatches = 0;
         for (String[] rows : aisles) {
-            assertEquals(11, rows.length);
+            assertEquals(12, rows.length);
             for (String row : rows) {
                 assertEquals(13, row.length());
                 for (char c : row.toCharArray()) {
@@ -72,24 +72,30 @@ class ShanhaiNyarlathotepEchoTest {
             }
         }
         assertEquals(1, controllers);
-        assertEquals(338, solids);
+        assertEquals(402, solids);
         assertEquals(14, hatches);
-        for (int y = 3; y <= 5; y++) for (int x = 4; x <= 8; x++)
-            assertEquals(x == 6 && y == 4 ? 'S' : 'C', aisles[0][10 - y].charAt(x));
+        for (int y = 4; y <= 6; y++) for (int x = 4; x <= 8; x++)
+            assertEquals(x == 6 && y == 5 ? 'S' : 'C', aisles[0][11 - y].charAt(x));
         assertEquals('H', aisles[8][5].charAt(6));
         assertEquals(' ', aisles[14][5].charAt(6), "Broadcast mouth remains open");
     }
-    @Test void interfaceCabHasOnlyFourRowsAndNoSeaLanterns() throws Exception {
+    @Test void interfaceCabHasFiveRowsWithCenteredControllerAndNoSeaLanterns() throws Exception {
         String[][] aisles = ShanhaiNyarlathotepEchoLayout.aisles();
         for (int z = 0; z <= 3; z++) for (int y = 0; y <= 2; y++)
-            for (int x = 0; x < 13; x++) assertEquals(' ', aisles[z][10 - y].charAt(x), "Red-box lower cab must be empty");
-        for (int y = 3; y <= 6; y++) for (int x = 3; x <= 9; x++)
-            assertNotEquals(' ', aisles[0][10 - y].charAt(x), "Four-row front panel remains continuous");
+            for (int x = 0; x < 13; x++) assertEquals(' ', aisles[z][11 - y].charAt(x), "Red-box lower cab must be empty");
+        for (int y = 3; y <= 7; y++) for (int x = 3; x <= 9; x++)
+            assertNotEquals(' ', aisles[0][11 - y].charAt(x), "Five-row front panel remains continuous");
+        for (int x = 3; x <= 9; x++) {
+            assertEquals('M', aisles[0][4].charAt(x), "Top frame remains solid casing");
+            assertEquals('M', aisles[0][8].charAt(x), "Bottom frame matches the top frame");
+        }
+        for (int row = 4; row <= 8; row++)
+            assertEquals(aisles[0][row], aisles[0][12 - row], "Front panel is vertically centered on the controller row");
         for (String[] rows : aisles) for (String row : rows) for (char symbol : row.toCharArray()) {
             assertNotEquals('L', symbol);
             if (symbol != ' ' && symbol != 'S') assertNotEquals("minecraft:sea_lantern", ShanhaiNyarlathotepEchoLayout.blockId(symbol));
         }
-        assertEquals('S', aisles[0][6].charAt(6), "Controller moves up to the center of the remaining 5x3 interface");
+        assertEquals('S', aisles[0][6].charAt(6), "Controller sits at the center of both the five-row cab and the 5x3 interface");
         // 左右鏡像包含同一材料。
         for (String[] rows : aisles) for (String row : rows) for (int x = 0; x < 13; x++)
             assertEquals(row.charAt(x), row.charAt(12 - x));
@@ -102,10 +108,21 @@ class ShanhaiNyarlathotepEchoTest {
             for (String[] rows : ShanhaiNyarlathotepEchoLayout.aisles())
                 actual.append(String.join(",", rows)).append('\n');
             assertEquals(mb, actual.toString());
-            assertEquals("e7db07658bcb6cb2bda84ea078619eb288f202f7fc6871b03025f666b621df54", HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(mb.getBytes(StandardCharsets.UTF_8))));
+            assertEquals("c7d198909a635cfeb2ef1c4a5c3f9ab0ef7017ef662d08579e2117ced7939194", HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(mb.getBytes(StandardCharsets.UTF_8))));
         }
     }
-    @Test void allSelectedBlocksAreMappedAndOnlyInterfaceAcceptsLocalHatches() throws Exception {
+    @Test void allMolecularCasingsAcceptLocalHatchesAndOtherMaterialsDoNot() throws Exception {
+        var hatchPolicy = ShanhaiNyarlathotepEchoLayout.class.getMethod("allowsHatch", char.class);
+        int hatchPositions = 0;
+        for (String[] rows : ShanhaiNyarlathotepEchoLayout.aisles()) for (String row : rows)
+            for (char symbol : row.toCharArray()) {
+                boolean molecularCasing = symbol != ' ' && symbol != 'S'
+                        && ShanhaiNyarlathotepEchoLayout.blockId(symbol).equals("gtlcore:molecular_casing");
+                boolean allowsHatch = (boolean) hatchPolicy.invoke(null, symbol);
+                assertEquals(molecularCasing, allowsHatch, "Hatch replacement must follow the actual casing material");
+                if (allowsHatch) hatchPositions++;
+            }
+        assertEquals(34, hatchPositions, "Both the fourteen interface casings and twenty frame casings accept hatches");
         var method = ShanhaiNyarlathotepEchoLayout.class.getMethod("blockId", char.class);
         var expected = Map.ofEntries(
                 Map.entry('C', "gtlcore:molecular_casing"), Map.entry('M', "gtlcore:molecular_casing"),
@@ -116,7 +133,7 @@ class ShanhaiNyarlathotepEchoTest {
                 Map.entry('G', "gtceu:fusion_glass"));
         for (var entry : expected.entrySet()) assertEquals(entry.getValue(), method.invoke(null, entry.getKey()));
         String structure = Files.readString(MAIN.resolve("common/machine/preview/ShanhaiNyarlathotepEchoStructure.java"));
-        assertTrue(structure.contains("symbol == 'C'"));
+        assertTrue(structure.contains("ShanhaiNyarlathotepEchoLayout.allowsHatch(symbol)"));
         assertEquals(1, structure.split("Predicates.autoAbilities", -1).length - 1);
         assertTrue(structure.contains("state ->"), "KubeJS blocks are resolved lazily at match time");
         assertTrue(structure.contains("ForgeRegistries.BLOCKS.containsKey(id)"), "Missing blocks must not form the machine");

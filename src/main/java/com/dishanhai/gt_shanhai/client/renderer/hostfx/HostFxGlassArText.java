@@ -13,6 +13,7 @@ import com.gregtechceu.gtceu.api.machine.MetaMachine;
 import com.dishanhai.gt_shanhai.GTDishanhaiMod;
 import com.dishanhai.gt_shanhai.common.machine.ParallelPowerBudget;
 import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuVisionCoreMachine;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuArStatus;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -238,6 +239,8 @@ public final class HostFxGlassArText {
         STATE.lensOn = HostFxState.lensEnabled();
         // 🔴 2026-10-25 第二十一改：AR 遮罩开关（机器字段 hostArMaskEnabled 的客户端副本）
         STATE.arMask = HostFxState.arMaskEnabled();
+        STATE.starsOn = host.isHostOuterStarsEnabled();
+        STATE.nebulaOn = host.isHostNebulaEnabled();
         STATE.ringDegPerSec = HostFxState.ringDegPerSec();
         STATE.shipUpDegPerSec = HostFxState.shipUpDegPerSec();
         STATE.shipDownDegPerSec = HostFxState.shipDownDegPerSec();
@@ -248,6 +251,9 @@ public final class HostFxGlassArText {
         // ③ 🔴 唯一的时钟：关特效时它自己冻结（不是传 0）
         STATE.animSeconds = HostFxSwitch.spinSeconds();
         STATE.modulePageTimeMillis = System.nanoTime() / 1_000_000L;
+        final var camera = mc.gameRenderer.getMainCamera().getPosition();
+        STATE.textFace = HostFxGlassArPanel.visibleTextFace(HostFxBlackHole.cameraLocal(
+                facing, camera.x, camera.y, camera.z, host.getPos())[0]);
 
         final HostFxGlassArModel.Model model = HostFxGlassArModel.build(STATE);
         lastModel = model;
@@ -291,45 +297,27 @@ public final class HostFxGlassArText {
      */
     static int drawTexts(PoseStack poseStack, Font font, HostFxGlassArModel.Model model,
                                  float cx, float cy, float cz, Direction facing) {
-        final float t = STATE.animSeconds;
-        // 扫描线呼吸：逐行错相位（±10%），再乘整块的慢呼吸（±4%）—— 相位同样来自动画时钟（关特效时冻结）
-        final float breath = 0.04F * (float) Math.sin(t * 0.9D);
+        // 山海：掃描只在全息邊框移動，文字保持固定亮度與清晰筆畫。
         int drawn = 0;
+        final int face = model.textFace;
         poseStack.pushPose();
         try {
             HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
-            poseStack.translate(HostFxGlassArPanel.textPlaneX(0),
-                    HostFxGlassArPanel.WALL_Y1, HostFxGlassArPanel.WALL_Z1);
-            poseStack.mulPose(Axis.YP.rotationDegrees(90.0F));
+            poseStack.translate(HostFxGlassArPanel.textPlaneX(face),
+                    HostFxGlassArPanel.WALL_Y1, HostFxGlassArPanel.faceOriginZ(face));
+            poseStack.mulPose(Axis.YP.rotationDegrees(HostFxGlassArPanel.faceYaw(face)));
             final float s = HostFxGlassArPanel.PIXEL;
+            poseStack.scale(s, -s, -s);
+            final Matrix4f m = poseStack.last().pose();
             final MultiBufferSource.BufferSource buffers =
                     MultiBufferSource.immediate(Tesselinator());
             try {
-                for (int face = 0; face < 2; face++) {
-                    poseStack.pushPose();
-                    try {
-                        // face 0 = 正面朝 +X（房间）；face 1 = 正面朝 −X（环那侧 = 镜像）
-                        poseStack.translate(HostFxGlassArPanel.textPlaneX(face)
-                                - HostFxGlassArPanel.textPlaneX(0), 0.0F, 0.0F);
-                        poseStack.scale(s, -s, face == 0 ? -s : s);
-                        final Matrix4f m = poseStack.last().pose();
-                        for (HostFxGlassArModel.Txt txt : model.texts) {
-                            if (txt.text == null || txt.text.isEmpty()) {
-                                continue;
-                            }
-                            final float wave = 0.10F * (float) Math.sin(t * 2.2D - txt.slot * 0.7D);
-                            final float pulse = clamp01(0.92F + wave + breath);
-                            final int color = withAlphaMul(txt.argb, pulse);
-                            // 只提交清晰字形，避免多份偏移副本把筆畫糊開。
-                            font.drawInBatch(txt.text, txt.x, txt.y, color, false, m, buffers,
-                                    Font.DisplayMode.NORMAL, 0, LIGHT_FULL);
-                            if (face == 0) {
-                                drawn++;
-                            }
-                        }
-                    } finally {
-                        poseStack.popPose();
-                    }
+                for (HostFxGlassArModel.Txt txt : model.texts) {
+                    if (txt.text == null || txt.text.isEmpty()) continue;
+                    // 只提交相機可見面的單份字形，反面不再疊加在同一筆畫上。
+                    font.drawInBatch(txt.text, txt.x, txt.y, txt.argb, false, m, buffers,
+                            Font.DisplayMode.NORMAL, 0, LIGHT_FULL);
+                    drawn++;
                 }
             } finally {
                 // 当场提交：不依赖调用方的 flush 时机（"字到底出现没有"的唯一判据）
@@ -345,17 +333,6 @@ public final class HostFxGlassArText {
     /** {@code Tesselator.getInstance().getBuilder()}（单独抽出来只是为了让 {@link #drawTexts} 读着不吵）。 */
     private static com.mojang.blaze3d.vertex.BufferBuilder Tesselinator() {
         return Tesselator.getInstance().getBuilder();
-    }
-
-    private static float clamp01(float v) {
-        return v < 0.0F ? 0.0F : (v > 1.0F ? 1.0F : v);
-    }
-
-    /** 把 0..1 的系数乘进 ARGB 的 alpha。 */
-    private static int withAlphaMul(int argb, float mul) {
-        final float a0 = ((argb >>> 24) & 0xFF) / 255.0F;
-        final int a = Math.max(0, Math.min(255, Math.round(a0 * mul * 255.0F)));
-        return (a << 24) | (argb & 0x00FFFFFF);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════
@@ -478,7 +455,7 @@ public final class HostFxGlassArText {
         //     · 一次重建 = 1 次 `getFormedModuleCount` + 1 次 `hostModuleCountAuthoritative`
         //       + 读 7 个快照数组引用（**不算内容**）+ 2 次 `energyTotals`（各走一遍能力代理）
         //       + 1 次能源仓型探测（只在 UNKNOWN 时走，认出一次就锁存，见 detectEnergyInKind）。
-        //       **不遍历 24 个模块槽**：槽位→行的映射在 `HostFxGlassArModel.buildHost/buildModuleList`
+        //       **不遍历 24 个模块槽**：槽位→行的映射由 HostFxGlassArModules 建構
         //       里按 `moduleSlots` 走，那是"画每一帧本来就要做的事"，与重建无关。
         //     · 真正的字符串拼接全在 `HostFxGlassArModel.build()`（本来就每帧都建），
         //       所以删/加这道闸门不会改变拼接次数。
@@ -861,6 +838,7 @@ public final class HostFxGlassArText {
             STATE.totalEuUsedPerTick = host.hostTotalEuUsedPerTick();
             STATE.totalEuGenPerTick = host.hostTotalEuGenPerTick();
             STATE.installedModules = host.hostInstalledModules();
+            STATE.status = GuixuArStatus.fromWire(host.hostArStatus());
             // 2026-10-25 第二十三改：能源仓 / 动力仓（与 addDisplayText 那两行同一来源）
             STATE.energyInStored = host.hostEnergyInStored();
             STATE.energyInCapacity = host.hostEnergyInCapacity();
@@ -984,6 +962,7 @@ public final class HostFxGlassArText {
 
     /** 把快照相关的 State 字段全部置成"未知"（面板画 {@code --}）。 */
     private static void unknownSnapshot() {
+        STATE.status = GuixuArStatus.UNKNOWN;
         STATE.modProgressPct = null;
         STATE.modEuPerTick = null;
         STATE.moduleEuTotal = -1L;

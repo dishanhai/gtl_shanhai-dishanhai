@@ -1,0 +1,81 @@
+{
+  "data": {
+    "euTier": 8
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 524288
+      }
+    ]
+  },
+  "type": "gtceu:spacetime_distortion",
+  "inputs": {
+    "fluid": [
+      {
+        "content": {
+          "amount": 1000,
+          "value": [
+            {
+              "fluid": "gtceu:uu_matter"
+            }
+          ]
+        }
+      }
+    ],
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "gtceu:chaos_foil"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "kubejs:hyper_stable_self_healing_adhesive"
+          }
+        },
+        "chance": 0
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "kubejs:cosmic_fabric"
+          }
+        },
+        "chance": 0
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 1,
+          "ingredient": {
+            "item": "kubejs:two_way_foil"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:spacetime_distortion/chaos_foil_two_way_foil",
+      "defaultEnabled": true
+    }
+  ]
+}

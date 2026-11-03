@@ -150,9 +150,9 @@ public final class HostFxGlassArDraw {
         try {
             HostFxRingTransforms.pivot(poseStack, cx, cy, cz, facing);
             // 墙面帧原点 = 房间里的左上角 ⇒ 本地 (y = WALL_Y1, z = WALL_Z1)
-            poseStack.translate(HostFxGlassArPanel.geomPlaneX(),
-                    HostFxGlassArPanel.WALL_Y1, HostFxGlassArPanel.WALL_Z1);
-            poseStack.mulPose(Axis.YP.rotationDegrees(90.0F));
+            poseStack.translate(HostFxGlassArPanel.geomPlaneX(model.textFace),
+                    HostFxGlassArPanel.WALL_Y1, HostFxGlassArPanel.faceOriginZ(model.textFace));
+            poseStack.mulPose(Axis.YP.rotationDegrees(HostFxGlassArPanel.faceYaw(model.textFace)));
             final float s = HostFxGlassArPanel.PIXEL;
             poseStack.scale(s, -s, -s);
             final Matrix4f m = poseStack.last().pose();

@@ -1,0 +1,141 @@
+{
+  "data": {
+    "euTier": 13
+  },
+  "duration": 100,
+  "tickInputs": {
+    "eu": [
+      {
+        "content": 536870912
+      }
+    ]
+  },
+  "type": "gtceu:spacetime_distortion",
+  "inputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 128,
+          "ingredient": {
+            "item": "dishanhai:hxsp"
+          }
+        }
+      }
+    ],
+    "fluid": [
+      {
+        "content": {
+          "amount": 100,
+          "value": [
+            {
+              "fluid": "gt_shanhai:miracle_flow"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "outputs": {
+    "item": [
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:void_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:temporal_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:kinetic_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:omni_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:essentia_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:corporeal_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:proto_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:amorphous_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:dark_matter"
+          }
+        }
+      },
+      {
+        "content": {
+          "type": "gtceu:sized",
+          "count": 10,
+          "ingredient": {
+            "item": "kubejs:pellet_antimatter"
+          }
+        }
+      }
+    ]
+  },
+  "recipeConditions": [],
+  "conditions": [
+    {
+      "type": "gt_shanhai:recipe_enabled",
+      "recipeId": "gt_shanhai:spacetime_distortion/hxsp",
+      "defaultEnabled": true
+    }
+  ]
+}

@@ -370,6 +370,9 @@ public final class HostFxGlassArPanel {
     public static final int MODLIST_ROWS = 7;
     /** 山海：模組列表每頁停留 10 秒。 */
     public static final long MODLIST_PAGE_MILLIS = 10_000L;
+    /** 山海：兩段摘要說明並排，字形下沿不超出 0.40 格安全邊界。 */
+    public static final float MOD_NOTE_V = WALL_H - MARGIN - INK_PX * PIXEL;
+    public static final float MOD_NOTE_SECOND_U = 5.80F;
     /** 表头行的 v 偏移 / 数据行的首行 v 偏移（相对本块上沿，格）。 */
     public static final float MODLIST_HEAD_V0 = 0.10F;
     public static final float MODLIST_ROW_V0 = 0.28F;
@@ -437,7 +440,19 @@ public final class HostFxGlassArPanel {
 
     /** 兩側各自偏離玻璃面，避免正反文字重疊造成深度閃爍。 */
     public static float textPlaneX(int face) {
-        return textPlaneX() + Math.max(0, Math.min(1, face)) * TEXT_OFFSET;
+        return FACE_LOCAL_X + (face == 0 ? -TEXT_OFFSET : TEXT_OFFSET);
+    }
+
+    public static int visibleTextFace(float cameraLocalX) {
+        return cameraLocalX >= FACE_LOCAL_X ? 0 : 1;
+    }
+
+    public static float faceOriginZ(int face) { return face == 0 ? WALL_Z1 : WALL_Z0; }
+
+    public static float faceYaw(int face) { return face == 0 ? 90.0F : -90.0F; }
+
+    public static float geomPlaneX(int face) {
+        return textPlaneX(face) + (face == 0 ? -GEOM_OFFSET : GEOM_OFFSET);
     }
 
     /** 几何平面的本地 x（比文字再让 {@link #GEOM_OFFSET}）。 */

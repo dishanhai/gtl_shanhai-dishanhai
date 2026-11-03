@@ -120,10 +120,10 @@ public final class ShanhaiStructurePlanner {
         boolean hasBuildTarget = !desired.isEmpty()
                 || desiredState.getBlock() instanceof LiquidBlock;
         Block currentBlock = currentState.getBlock();
-        boolean currentAllowed = allCandidates.stream()
+        boolean currentAllowed = matchesCurrentBlock(predicate.hasAir(), currentState.isAir(), allCandidates.stream()
                 .map(candidate -> candidate.state().getBlock())
                 .anyMatch(block -> block == currentBlock)
-                && (!(currentBlock instanceof LiquidBlock) || currentState.getFluidState().isSource());
+                && (!(currentBlock instanceof LiquidBlock) || currentState.getFluidState().isSource()));
         boolean currentMatchesStructure = currentAllowed
                 || (replacementApplies && contains(replacementFamily, currentBlock));
         boolean fillingFlow = currentBlock instanceof LiquidBlock
@@ -144,6 +144,11 @@ public final class ShanhaiStructurePlanner {
         }
         return new ShanhaiStructurePlan.Entry(pos, kind, desired, desiredState,
                 current, currentState, candidateItems, chamberCapable, currentMatchesStructure);
+    }
+
+    /** 空氣謂詞沒有可放置候選，仍須直接判定已留空的位置為符合結構。 */
+    static boolean matchesCurrentBlock(boolean allowsAir, boolean currentIsAir, boolean candidateMatches) {
+        return (allowsAir && currentIsAir) || candidateMatches;
     }
 
     private static List<Candidate> collectCandidates(TraceabilityPredicate predicate, CandidateCache candidateCache) {

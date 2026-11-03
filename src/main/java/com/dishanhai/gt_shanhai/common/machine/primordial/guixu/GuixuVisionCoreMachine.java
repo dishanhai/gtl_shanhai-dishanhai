@@ -220,6 +220,12 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
     @DescSynced
     private int hostProductionMultiplier = -1;
 
+    /** 山海：AR 狀態與模組讀數在同一次快照發布，不在客戶端反查遏制模組。 */
+    @DescSynced
+    private long[] hostArStatus = new long[0];
+
+    public long[] hostArStatus() { return hostArStatus; }
+
     @DescSynced
     private byte[] hostModProgressPct = sentinelBytes(SNAP_SLOTS);
 
@@ -746,8 +752,10 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         final int installedNow = hostModuleCountAuthoritative();
         final int kindsNow = kinds.size();
         final int production = getRecipeOutputMultiplier();
+        final long[] arStatus = captureArStatus(modules).toWire();
         final boolean changed =
                 installedNow != hostInstalledModules
+                        || !java.util.Arrays.equals(arStatus, hostArStatus)
                         || production != hostProductionMultiplier
                         || hostParallel != hostRecipeParallel
                         || hostPct != hostRecipeProgressPct
@@ -776,6 +784,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         }
 
         hostInstalledModules = installedNow;
+        hostArStatus = arStatus;
         hostProductionMultiplier = production;
         hostRecipeProgressPct = hostPct;
         hostRecipeRemainSec = hostRemain;
@@ -805,6 +814,21 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         hostOutItem = hostOutIds;
         hostOutAmount = hostOutAmounts;
         hostSnapSeq++;
+    }
+
+    private GuixuArStatus captureArStatus(PrimordialOmegaEngineModuleBase[] modules) {
+        int local = 0, remote = 0, echo = 0;
+        for (int slot = 0; slot < modules.length; slot++) {
+            if (modules[slot] == null) continue;
+            if (slot < GuixuHostGeometry.SLOT_COUNT) local++;
+            else if (slot < GuixuHostGeometry.SLOT_COUNT + LINKED_ENGINE_MODULE_SLOTS) remote++;
+            else echo++;
+        }
+        GuixuPenroseContainmentModule field = getEffectiveContainment();
+        return GuixuArStatus.capture(operationStateId, activeModuleCount, getRecipeLogic().isWorkingEnabled(),
+                getContainmentLockSeconds(), field == null ? null : field.field(),
+                hasEngineLink() ? (engineLinkReady ? 2 : 1) : 0,
+                hasNyarlathotepLink() ? (nyarlathotepLinkReady ? 2 : 1) : 0, local, remote, echo);
     }
 
     private BigInteger sumEnergyRatePer20(IO io, boolean input) {
@@ -1513,6 +1537,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         boolean overrideLevelSynced = false;
         boolean extraMountPersisted = false;
         boolean moduleReasonSynced = false;
+        boolean arStatusSynced = false;
         for (final ManagedKey key : MANAGED_FIELD_HOLDER.getFields()) {
             names.add(key.getName());
             if ("levelOverrideSlot".equals(key.getName())) {
@@ -1523,6 +1548,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
             }
             if ("extraMountSlots".equals(key.getName())) extraMountPersisted = key.isPersist();
             if ("hostModReason".equals(key.getName())) moduleReasonSynced = key.isDestSync();
+            if ("hostArStatus".equals(key.getName())) arStatusSynced = key.isDestSync();
         }
         final java.util.List<String> problems = new java.util.ArrayList<>();
         for (final String required : new String[]{"levelOverrideSlot", "hostMatterLevelOverride", "extraMountSlots", "hostModReason",
@@ -1532,7 +1558,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
                 "containmentLockTicks", "hostFxEnabled", "hostRingDegPerSec", "hostShipUpDegPerSec",
                 "hostShipDownDegPerSec", "hostBlackHoleRadiusTenths", "hostLensEnabled", "hostArMaskEnabled",
                 "hostOuterStarsEnabled", "hostNebulaEnabled",
-                "hostModuleMask", "hostModMachineItems", "hostProductionMultiplier", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
+                "hostModuleMask", "hostModMachineItems", "hostProductionMultiplier", "hostArStatus", "hostModProgressPct", "hostModEuPerTick", "hostModParallel", "hostModThreads",
                 "hostModRemainSec", "hostSnapSeq", "hostRecipeProgressPct", "hostRecipeRemainSec",
                 "hostRecipeParallel", "hostRecipeThreads", "hostEuPerTick", "hostTotalOutputCount",
                 "hostTotalOutputKinds", "hostTotalEuUsedPerTick", "hostTotalEuGenPerTick", "hostModuleEuPerTick", "hostInstalledModules",
@@ -1550,6 +1576,7 @@ public class GuixuVisionCoreMachine extends PrimordialOmegaEngineMachine impleme
         }
         if (!extraMountPersisted) problems.add("extraMountSlots 没有落盘");
         if (!moduleReasonSynced) problems.add("hostModReason 没有同步");
+        if (!arStatusSynced) problems.add("hostArStatus 没有同步");
         if (!problems.isEmpty()) {
             throw new IllegalStateException("[SHANHAI-HOST] 字段 holder 自检失败：" + problems
                     + " —— 这会导致「编译通过、游戏不报错、字段永不落盘也永不同步」。"

@@ -3,10 +3,15 @@ package com.dishanhai.gt_shanhai.common.machine.preview;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
-/** 山海：13×11×15雙瓣共鳴口；前艙僅四層、主機居中，14格倉口且不含海晶燈。 */
+/** 山海：13×12×15雙瓣共鳴口；五層前艙主機居中，全部34格分子機械方塊接受倉口。 */
 public final class ShanhaiNyarlathotepEchoLayout {
     private static final String RESOURCE = "/assets/gt_shanhai/multiblock/nyarlathoteps_echo.mb";
     private ShanhaiNyarlathotepEchoLayout() {}
+
+    /** 介面與外框皆為分子機械方塊，均可替換為本機支援的倉室。 */
+    public static boolean allowsHatch(char symbol) {
+        return symbol == 'C' || symbol == 'M';
+    }
 
     /** FactoryBlockPattern 的每個切片由上至下排列，空白皆要求空氣。 */
     public static String[][] aisles() {

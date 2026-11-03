@@ -13,7 +13,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraftforge.registries.ForgeRegistries;
 import java.util.HashSet;
 
-/** 山海：正式回響成型；KubeJS晚註冊方塊延遲查詢，僅前方5×3介面接受本機倉口。 */
+/** 山海：正式回響成型；KubeJS晚註冊方塊延遲查詢，全部分子機械方塊接受本機倉口。 */
 public final class ShanhaiNyarlathotepEchoStructure {
     private ShanhaiNyarlathotepEchoStructure() {}
 
@@ -27,7 +27,8 @@ public final class ShanhaiNyarlathotepEchoStructure {
         for (char symbol : symbols) {
             if (symbol == ' ' || symbol == 'S') continue;
             var predicate = lazy(ShanhaiNyarlathotepEchoLayout.blockId(symbol));
-            if (symbol == 'C') predicate = predicate.or(Predicates.autoAbilities(definition.getRecipeTypes()));
+            if (ShanhaiNyarlathotepEchoLayout.allowsHatch(symbol))
+                predicate = predicate.or(Predicates.autoAbilities(definition.getRecipeTypes()));
             pattern.where(symbol, predicate);
         }
         return pattern.where('S', Predicates.controller(Predicates.blocks(definition.getBlock())))

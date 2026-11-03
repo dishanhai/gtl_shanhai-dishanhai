@@ -3,48 +3,16 @@ package com.dishanhai.gt_shanhai.client.renderer.hostfx;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import com.dishanhai.gt_shanhai.common.machine.primordial.guixu.GuixuArStatus;
 
 /**
- * 归墟视界枢核 · <b>玻璃 AR 面板的"内容模型"</b>（版式 C · 左侧图列 + 右侧运行信息栏）——
- * <b>零 Minecraft 依赖</b>：只 import {@code java.util}。
+ * 山海歸墟 AR 的純 Java 內容模型：輸入快照，輸出文字與平面圖元。
+ * 結構示意與物理量取自同一動畫時鐘和黑洞半徑；未知數值保留 --。
+ * 全息材質交由 {@link HostFxGlassArHologram}，模組分頁與欄位交由
+ * {@link HostFxGlassArModules}；本類不讀世界，不提交 GPU。
+ * {@code animSeconds} 由 HostFxState 提供，關閉特效時凍結而不歸零。
  *
- * <h2>这个类为什么存在（它是"能离线判红判绿"的那一层）</h2>
- * 玻璃上那七块东西里，<b>真正有语义的</b>是两样：
- * <ol>
- *   <li><b>文字</b>（读数 16 行 / 物理量 6 行 / 主机节 12 行 / 模块列表 7 行 × 7 列）—— 从机器与
- *       {@link HostFxState} 取真值，取不到就是 {@code --}（<b>绝不放假数</b>）；</li>
- *   <li><b>几何</b>（内环带 / 8 舰 / 12 条细紫束 / 4 座解压机 / 中央两柱 / 黑洞 / 两条进度条）——
- *       全部是<b>平面四边形</b>（{@link Prim}），坐标单位是 <b>MC 像素</b>（1 px = 0.02 格 = 一格的 1/50）。</li>
- * </ol>
- * 两样都在本类里算完，{@link HostFxGlassArText} / {@link HostFxGlassArDraw} 只负责"把它们变成顶点"。
- * 于是这个文件可以被 {@code javac} 脱机编译 + 直接跑（不需要 MC、不需要开游戏），
- * 判据（关特效时主柱条数 = 0 / 中央两束取色 = 红 / 环角冻结 / 六项物理量与半径的比值 /
- * 读不到的数一律 {@code --}）一律打在<b>产品代码自己的输出</b>上，而不是打在预览器上
- * （{@code temp/ar-panel/}）。
- *
- * <h2>坐标系与两条硬口径</h2>
- * <ul>
- *   <li><b>墙面帧</b>：{@link HostFxGlassArPanel} 的 (u 向右, v 向下)，单位 px（22 格 = 1100 px、4 格 = 200 px）；</li>
- *   <li><b>同一个时钟</b>：所有转动/相位只用 {@link State#animSeconds}（渲染侧由
- *       {@link HostFxSwitch#spinSeconds()} = {@link HostFxState#animSeconds()} 填）——
- *       <b>关特效时它被 HostFxState 自己冻结</b>，所以这里<b>什么都不用做</b>就"冻结但仍画"；</li>
- *   <li><b>不许传 0</b>：本类从不把时钟归零，也不在降级态把角速度改成 0 —— 位置不动是"时钟不走了"的
- *       结果，不是"把角度乘 0"。这正好也对上了判据里的"两帧逐位相同"。</li>
- * </ul>
- *
- * <h2>降级态（{@code fx=false}）的语义：逐条对应 {@link HostFxSwitch}</h2>
- * <table border="1">
- *   <tr><th>项</th><th>正常</th><th>降级</th><th>在本类哪里</th></tr>
- *   <tr><td>内环 / 8 舰 / 4 解压机</td><td>按 animSeconds 转</td><td><b>冻结在同一姿态</b>（时钟不走了）</td>
- *       <td>{@link #ringAngleDeg} / {@link #shipUpAngleDeg} / {@link #shipDownAngleDeg}</td></tr>
- *   <tr><td>中央上下两束</td><td>青白</td><td><b>红</b>（{@link State#degradedRgb}）</td>
- *       <td>{@code side.jet_outer} / {@code side.jet_core}</td></tr>
- *   <tr><td>4 条解压机主柱</td><td>4 条</td><td><b>0 条</b>（整段不画，不是改透明）</td>
- *       <td>{@code top.md_pillar} / {@code side.md_pillar}（条数 = {@link State#mdPillarCount}）</td></tr>
- *   <tr><td>12 条细紫小束</td><td>12 条</td><td><b>仍是 12 条</b></td><td>{@code top.thin} / {@code side.thin}</td></tr>
- *   <tr><td>状态绿字（特效 / 透镜 / 环舰 / 主柱 / 小束）</td><td>开 / 转</td><td>降级 / 冻结</td>
- *       <td>并进 {@link #buildHost} 右列 r4/r5（上一版 ⑤ 徽标块与它的勾叉已按用户「这个可以删除」删掉）</td></tr>
- * </table>
+ * @author dishanhai
  */
 public final class HostFxGlassArModel {
 
@@ -138,13 +106,11 @@ public final class HostFxGlassArModel {
     public static final int BLEND_ADD = 1;
 
     /** 文字色：标题/主字/次要/告警（与 {@link HostFxGlassArText} 的常量同值）。 */
-    public static final int C_HEAD = 0xFF00FFC8;
-    public static final int C_MAIN = 0xFF00E676;
-    public static final int C_DIM = 0xCC2FB57F;
-    public static final int C_WARN = 0xFFFFB300;
+    public static final int C_HEAD = HostFxGlassArHologram.HEAD;
+    public static final int C_MAIN = HostFxGlassArHologram.MAIN;
+    public static final int C_DIM = HostFxGlassArHologram.DIM;
+    public static final int C_WARN = HostFxGlassArHologram.WARN;
 
-    /** 分区角标（很淡，只是让五块"有边"）。 */
-    private static final int C_FRAME = 0x3300E676;
     /** 内环带 / 环带截面。 */
     private static final int C_RING = 0xCC4A78AA;
     private static final int C_RING_EDGE = 0xCC96EBFF;
@@ -166,10 +132,10 @@ public final class HostFxGlassArModel {
     private static final int C_DISK = 0xCCFF9A40;
     private static final int C_HOLE_GLOW = 0x66FFB060;
 
-    /** 进度条的槽底（暗绿灰，alpha 层：要"压暗"而不是"提亮"）；已执行段用 {@link #C_MAIN}。 */
-    private static final int C_BAR_BACK = 0x66102018;
-    /** 进度条边框（很淡的一条绿，让"条在哪里"这件事一眼看到，哪怕读数是 {@code --}）。 */
-    private static final int C_BAR_EDGE = 0x9900E676;
+    /** 進度條深藍槽底，實際執行段使用全息青色。 */
+    static final int C_BAR_BACK = 0x50102333;
+    /** 進度條低亮邊框；未知進度仍可辨識空槽。 */
+    private static final int C_BAR_EDGE = 0x7049ABC7;
 
     /** 分区下标（与 {@link HostFxGlassArPanel#ZONES} 同一个顺序）。 */
     public static final int Z_READ = 0;
@@ -188,21 +154,8 @@ public final class HostFxGlassArModel {
     /** <b>不是分区</b>：AR 遮罩底（一整块，跨全墙；只用于标记，分区计数里不会出现它）。 */
     public static final int Z_MASK = -1;
 
-    /**
-     * <b>AR 遮罩的颜色</b>：中性灰 {@code RGB(110,112,118)} + 不透明度 <b>0.65</b>（{@code A=0xA6=166}）。
-     *
-     * <h2>为什么是这个数（用户口径：灰色半透明、0.55~0.70、接近中性灰）</h2>
-     * <ul>
-     *   <li><b>不是纯黑</b>：用户说的是"灰色"，而且这面玻璃后面就是黑洞与环，纯黑会把玻璃后面
-     *       完全吃掉（他要的是"字更清楚"，不是"把后面挡住"）；</li>
-     *   <li><b>0.65</b>：落在建议区间 0.55~0.70 的中段。低于 ~0.5 时玻璃上的高光/星空仍会穿透，
-     *       {@code C_DIM}(0xCC2FB57F) 那档次要字就压不住了；高于 ~0.75 又会把吸积盘的橙色收掉；</li>
-     *   <li><b>RGB 三通道差 8</b>（110/112/118，略偏冷）：纯等值灰在绿色文字周围会显得发脏，
-     *       偏一点点冷与这套绿字同色系 ⇒ 观感更"屏幕"。</li>
-     * </ul>
-     * 关掉开关时这一整块<b>一个四边形都不产出</b>（不是画成全透明）⇒ 观感与改动前逐位相同。
-     */
-    public static final int C_AR_MASK = 0xA66E7076;
+    /** 全息分區背景色；遮罩關閉時不產生背景圖元。 */
+    public static final int C_AR_MASK = HostFxGlassArHologram.BACKING;
 
     // ═══════════════════════════════════════════════════════════════════════════════════
     //  输入状态
@@ -213,6 +166,12 @@ public final class HostFxGlassArModel {
      * {@code GuixuVisionCoreMachine} 填一份；离线探针也填这个（⇒ 产品代码与判据用同一个入口）。
      */
     public static final class State {
+        /** 山海：缺失狀態必須保持 UNKNOWN，不以客戶端預設值代替。 */
+        public GuixuArStatus status = GuixuArStatus.UNKNOWN;
+        /** 本幀依相機觀察側選定的唯一繪製面。 */
+        public int textFace;
+        public boolean starsOn = true;
+        public boolean nebulaOn = true;
         // ── 特效开关（HostFxState） ──
         /** 特效总开关（机器 {@code hostFxEnabled}）。 */
         public boolean fxOn = true;
@@ -267,7 +226,7 @@ public final class HostFxGlassArModel {
 
         // ── 2026-10-25 第二十一改新增：AR 遮罩 + 已装模块 ──
         /**
-         * <b>AR 屏背后是否铺灰色半透明底</b>（机器 {@code hostArMaskEnabled} 的副本，经
+         * <b>AR 各分區是否鋪低透明深藍底</b>（机器 {@code hostArMaskEnabled} 的副本，经
          * {@code HostFxState.arMaskEnabled()} 到这里）。{@code false} ⇒ 一个四边形都不产出。
          */
         public boolean arMask = true;
@@ -452,6 +411,7 @@ public final class HostFxGlassArModel {
 
     /** 一帧的成品：图元 + 文字 + 这一帧用的角度 + 六项物理量。 */
     public static final class Model {
+        public final int textFace;
         public final List<Prim> prims;
         public final List<Txt> texts;
         /** 内环这一帧的自转角（度，= animSeconds × ringDegPerSec）。 */
@@ -467,7 +427,8 @@ public final class HostFxGlassArModel {
 
         Model(List<Prim> prims, List<Txt> texts, float ringAngleDeg, float shipUpAngleDeg,
               float shipDownAngleDeg, float holeRadiusBlocks, double[] physBlocks,
-              double escapeAtRsC, boolean fxOn) {
+              double escapeAtRsC, boolean fxOn, int textFace) {
+            this.textFace = Math.max(0, Math.min(1, textFace));
             this.prims = prims;
             this.texts = texts;
             this.ringAngleDeg = ringAngleDeg;
@@ -530,48 +491,18 @@ public final class HostFxGlassArModel {
     public static Model build(State st) {
         final List<Prim> prims = new ArrayList<>(600);
         final List<Txt> texts = new ArrayList<>(48);
-        // ⓪ 🔴 2026-10-25：AR 遮罩底 —— 必须是【第一个】图元：它在 alpha 层里先提交，
-        //    后面所有几何/文字都压在它上面（alpha 混合是与顺序相关的）。
-        //    关掉时【一个四边形都不产出】，观感与改动前逐位相同。
-        if (st.arMask) {
-            arMaskBackdrop(prims);
-        }
-        // 分区角标（六块都画，很淡）
-        for (int i = 0; i < HostFxGlassArPanel.ZONES.length; i++) {
-            frame(prims, i, HostFxGlassArPanel.ZONES[i]);
-        }
+        HostFxGlassArHologram.build(st, prims);
         final float ring = st.animSeconds * st.ringDegPerSec;
         final float shipUp = st.animSeconds * st.shipUpDegPerSec;
         final float shipDown = -st.animSeconds * st.shipDownDegPerSec;
         buildReads(st, texts);
-        buildTop(st, ring, shipUp, shipDown, prims, texts);
-        buildSide(st, ring, shipUp, shipDown, prims, texts);
-        buildHole(st, prims);
-        buildPhys(st, texts);
+        HostFxGlassArViews.build(st, ring, shipUp, shipDown, prims, texts);
+        HostFxGlassArTelemetry.buildDetails(st, texts);
         buildHost(st, prims, texts);
-        buildModuleList(st, prims, texts);
+        HostFxGlassArModules.build(st, prims, texts);
         final double[] phys = buildPhysics(st.holeRadiusBlocks);
         return new Model(prims, texts, ring % 360.0F, shipUp % 360.0F, shipDown % 360.0F,
-                st.holeRadiusBlocks, phys, ESC_AT_RS_C, st.fxOn);
-    }
-
-    /**
-     * AR 遮罩底：整面 AR 区域一块<b>中性灰半透明</b>矩形（{@link #C_AR_MASK}）。
-     *
-     * <p>覆盖范围 = 所有分区的最小外接矩形，再收回 {@link HostFxGlassArPanel#MARGIN}：
-     * {@code u ∈ [0.40, 21.60]}、{@code v ∈ [0.40, 3.60]}（= 墙面帧去掉四边 0.40 格边距）。
-     * 这与"六块分区"的实际占位逐位对齐（左 0.40 / 右 22−21.60 / 上 0.40 / 下 4−3.60 都是 0.40）。
-     *
-     * <p>⚠️ 用<b>alpha 层</b>（{@link #BLEND_ALPHA}）：加性层里"灰"会变成"提亮"，
-     * 而这里要的是"压暗一点背景让绿字跳出来"。
-     */
-    private static void arMaskBackdrop(List<Prim> prims) {
-        final float u0 = HostFxGlassArPanel.MARGIN;
-        final float v0 = HostFxGlassArPanel.MARGIN;
-        final float u1 = HostFxGlassArPanel.WALL_W - HostFxGlassArPanel.MARGIN;
-        final float v1 = HostFxGlassArPanel.WALL_H - HostFxGlassArPanel.MARGIN;
-        rect(prims, Z_MASK, "mask.backdrop", BLEND_ALPHA, C_AR_MASK,
-                px(u0), px(v0), px(u1), px(v1));
+                st.holeRadiusBlocks, phys, ESC_AT_RS_C, st.fxOn, st.textFace);
     }
 
     /**
@@ -624,60 +555,21 @@ public final class HostFxGlassArModel {
      * <p>🔴 每一行都是 {@code --} 而不是编数：{@link State} 里 {@code <0} 就表示"读不到"。
      */
     private static void buildReads(State st, List<Txt> texts) {
-        final HostFxGlassArPanel.Zone z = HostFxGlassArPanel.ZONE_READ;
-        final String[] text = new String[HostFxGlassArPanel.READ_COLS * HostFxGlassArPanel.READ_ROWS];
-        final int[] col = new int[text.length];
-        for (int i = 0; i < text.length; i++) {
-            col[i] = C_MAIN;
-        }
-        // 栏 1：身份 / 结构 / 模块 / 能源仓
-        text[0] = "归墟视界枢核";
-        col[0] = C_HEAD;
-        text[1] = st.formed ? "结构已成型" : "结构未成型";
-        col[1] = st.formed ? C_MAIN : C_WARN;
-        text[2] = "已连接模块 " + intOrDash(st.moduleCount) + " / " + intOrDash(st.maxModules);
-        text[3] = "能源仓 " + storedOverCapacity(st.energyInStored, st.energyInCapacity);
-        if (st.energyInCapacity < 0) {
-            col[3] = C_DIM;
-        }
-        // 栏 2：动力仓 / 等级 / 复写 / 增产
-        text[4] = "动力仓 " + storedOverCapacity(st.energyOutStored, st.energyOutCapacity);
-        if (st.energyOutCapacity < 0) {
-            col[4] = C_DIM;
-        }
-        text[5] = "物质模块等级 " + levelText(st.matterLevel);
-        text[6] = "模块等级复写 " + overrideText(st.levelOverride);
-        text[7] = "材料增产 " + (st.productionMultiplier < 0 ? "--" : "x" + st.productionMultiplier);
-        if (st.productionMultiplier < 0) {
-            col[7] = C_DIM;
-        }
-        // 栏 3：三组角速度 + 动画时钟
-        text[8] = "内环 " + one1(st.ringDegPerSec) + UNIT_DEG;
-        text[9] = "上舰 +" + one1(st.shipUpDegPerSec) + UNIT_DEG;
-        text[10] = "下舰 -" + one1(st.shipDownDegPerSec) + UNIT_DEG;
-        text[11] = "动画 " + one1(st.animSeconds) + " s";
-        if (!st.fxOn) {
-            col[11] = C_DIM;                       // 冻结时这一行不再跳，颜色也压暗（"它停了"）
-        }
-        // 栏 4：黑洞半径 / 透镜 / 特效 / 条数
-        text[12] = "黑洞半径 " + one1(st.holeRadiusBlocks) + " 格";
-        text[13] = "引力透镜 " + (st.lensOn ? "开" : "关");
-        text[14] = "特效渲染 " + (st.fxOn ? "开" : "降级");
-        if (!st.fxOn) {
-            col[14] = C_WARN;
-        }
-        text[15] = "主柱 " + st.mdPillarCount + " 条 小束 " + st.thinBeamCount + " 条";
-        if (st.mdPillarCount <= 0) {
-            col[15] = C_WARN;
-        }
-
+        final var zone = HostFxGlassArPanel.ZONE_READ;
+        final String[] readings = HostFxGlassArTelemetry.reads(st);
         for (int c = 0; c < HostFxGlassArPanel.READ_COLS; c++) {
+            float limit = c + 1 < HostFxGlassArPanel.READ_COLS
+                    ? HostFxGlassArPanel.READ_COL_U[c + 1] : zone.w - HostFxGlassArPanel.ZONE_PAD;
+            float width = px(limit - HostFxGlassArPanel.READ_COL_U[c]) - 4;
             for (int r = 0; r < HostFxGlassArPanel.READ_ROWS; r++) {
-                final int i = c * HostFxGlassArPanel.READ_ROWS + r;
-                final float x = px(z.u + HostFxGlassArPanel.READ_COL_U[c]);
-                final float y = px(z.v + HostFxGlassArPanel.READ_ROW_V0
-                        + r * HostFxGlassArPanel.READ_ROW_DV);
-                texts.add(new Txt(Z_READ, i, x, y, text[i], col[i]));
+                int i = c * HostFxGlassArPanel.READ_ROWS + r;
+                int color = i == 0 || i == 8 ? C_HEAD : C_MAIN;
+                if (!st.status.known() && (i == 1 || i == 2 || i >= 8)) color = C_DIM;
+                if (st.status.lockSeconds() > 0 && (i == 0 || i == 15)
+                        || st.status.containment() == 2 && i >= 8 && i <= 12) color = C_WARN;
+                texts.add(new Txt(Z_READ, i, px(zone.u + HostFxGlassArPanel.READ_COL_U[c]),
+                        px(zone.v + HostFxGlassArPanel.READ_ROW_V0 + r * HostFxGlassArPanel.READ_ROW_DV),
+                        HostFxGlassArModules.fitText(st, readings[i], width), color));
             }
         }
     }
@@ -697,7 +589,7 @@ public final class HostFxGlassArModel {
     //  ② 俯视示意图（内环带 / 8 舰 / 12 细紫束 / 4 解压机 / 环心黑洞）
     // ═══════════════════════════════════════════════════════════════════════════════════
 
-    private static void buildTop(State st, float ringDeg, float shipUpDeg, float shipDownDeg,
+    static void buildTop(State st, float ringDeg, float shipUpDeg, float shipDownDeg,
                                  List<Prim> prims, List<Txt> texts) {
         final int z = Z_TOP;
         final HostFxGlassArPanel.Zone zo = HostFxGlassArPanel.ZONE_FIG_TOP;
@@ -709,7 +601,7 @@ public final class HostFxGlassArModel {
         final float cy = by + bh * 0.5F;
         final float R = Math.max(6.0F, Math.min(bw, bh) * 0.5F - 0.5F);
         final float k = R / (float) VIEW_R;
-        // 视场底：一块很淡的暗面（让绿字在上面读得出来）
+        // 視場底：低亮暗面，保留結構示意對比。
         disc(prims, z, "top.backdrop", BLEND_ALPHA, 0x33060E1A, cx, cy, R, 40);
         // 内环带（r 46.9..49.1）
         annulus(prims, z, "top.ring", BLEND_ALPHA, C_RING, cx, cy,
@@ -796,7 +688,7 @@ public final class HostFxGlassArModel {
     //  ③ 侧视示意图（中央两柱 18 格锥度 / 4 解压机主柱 / 环带截面 / 环心黑洞）
     // ═══════════════════════════════════════════════════════════════════════════════════
 
-    private static void buildSide(State st, float ringDeg, float shipUpDeg, float shipDownDeg,
+    static void buildSide(State st, float ringDeg, float shipUpDeg, float shipDownDeg,
                                   List<Prim> prims, List<Txt> texts) {
         final int z = Z_SIDE;
         final HostFxGlassArPanel.Zone zo = HostFxGlassArPanel.ZONE_FIG_SIDE;
@@ -897,7 +789,7 @@ public final class HostFxGlassArModel {
      *
      * <p>6 条物理量<b>不在这一块里</b>了（用户只让挪"图"），它们搬进 {@link #buildPhys}。
      */
-    private static void buildHole(State st, List<Prim> prims) {
+    static void buildHole(State st, List<Prim> prims) {
         final int z = Z_HOLE;
         final HostFxGlassArPanel.Zone zo = HostFxGlassArPanel.ZONE_FIG_HOLE;
         final float icx = px(zo.u + zo.w * 0.5F);
@@ -913,30 +805,6 @@ public final class HostFxGlassArModel {
         // 光子环（阴影外沿 1 px 亮环）
         annulus(prims, z, "hole.photon_ring", BLEND_ADD, C_PHOTON, icx, icy,
                 R * 0.34F, R * 0.34F + 1.3F, 24);
-    }
-
-    /**
-     * ⑤ 六条物理量（版式 C 从 ④ 里拆出来的独立块）：全部由 {@code holeRadiusBlocks} 现算
-     * （{@code Rs = holeRadius / B_CRIT}，见 {@link #PHYS_RATIO_RS}）。
-     */
-    private static void buildPhys(State st, List<Txt> texts) {
-        final int z = Z_PHYS;
-        final HostFxGlassArPanel.Zone zo = HostFxGlassArPanel.ZONE_PHYS;
-        final double[] p = buildPhysics(st.holeRadiusBlocks);
-        final String[] lines = {
-                // 第 0 项就是机器字段"黑洞半径"原值 —— 它其实是【黑盘（阴影）半径】，这行必须标明
-                "黑洞半径 " + two2((float) p[0]) + " 格（黑盘）",
-                "Rs " + two2((float) p[1]) + " 格",
-                "光子球 " + two2((float) p[2]) + " 格（1.50 Rs）",
-                "ISCO " + two2((float) p[3]) + " 格（3.00 Rs）",
-                "盘外缘 " + one1((float) p[4]) + " 格（11.0 Rs）",
-                "Rs 处逃逸速度 1.000c",
-        };
-        for (int i = 0; i < HostFxGlassArPanel.PHYS_ROWS; i++) {
-            texts.add(new Txt(z, i, px(zo.u + HostFxGlassArPanel.PHYS_TEXT_U),
-                    px(zo.v + HostFxGlassArPanel.PHYS_ROW_V0 + i * HostFxGlassArPanel.READ_ROW_DV),
-                    lines[i], i == 0 ? C_HEAD : C_MAIN));
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════
@@ -1050,143 +918,7 @@ public final class HostFxGlassArModel {
                 + 0.01F);
         bar(prims, z, "host.bar_back", "host.bar_fill", barX, barY,
                 px(HostFxGlassArPanel.HOST_BAR_W), px(HostFxGlassArPanel.HOST_BAR_H),
-                st.hostProgressPct, HostFxGlassArPanel.HOST_BAR_SEG, C_BAR_BACK, C_MAIN);
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════════════
-    //  ⑦ 模块列表（版式 C：右侧信息栏下半；上一版 ⑥ 那三行模块名升级成 24 行表格）
-    // ═══════════════════════════════════════════════════════════════════════════════════
-
-    /**
-     * ⑦ <b>模块列表</b>：一行表头 + 每个已装模块一行。
-     *
-     * <pre>
-     *   表头  槽  模块      进度        耗能EU/t  并行  线程  输出
-     *   数据  12  反物质压缩机  ▮▮▮▮▯▯ 62%  1.2M    8     4    反物质×64 氢×32
-     *   …
-     *   超過 7 個時每 10 秒循環換頁，最後一頁只畫剩餘模組。
-     * </pre>
-     *
-     * <h2>数据从哪来（🔴 每条都写清来源；读不到一律 {@code --}）</h2>
-     * <table border="1">
-     *   <tr><th>列</th><th>来源</th><th>读不到</th></tr>
-     *   <tr><td>槽位号</td><td>{@link State#moduleSlots}（喂料侧从
-     *       {@code GuixuVisionCoreMachine#hostModuleMask()} 的置位逐个数出来）</td><td>不画该行</td></tr>
-     *   <tr><td>模块名</td><td>{@link State#moduleNames}（客户端按权威槽位去世界里取
-     *       {@code getDefinition().getItem()} 的名字，同一个注册表数据）</td><td>{@code 槽#N}</td></tr>
-     *   <tr><td>进度 / 耗能 / 并行 / 线程 / 输出</td><td>{@link State#modProgressPct} /
-     *       {@link State#modEuPerTick} / {@link State#modParallel} / {@link State#modThreads} /
-     *       {@link State#modOutputs}（<b>服务端 → 客户端快照</b>，见 {@code GuixuVisionCoreMachine}
-     *       的 {@code hostMod*} 同步字段）</td><td>{@code --}</td></tr>
-     * </table>
-     *
-     * <p>🔴 <b>数组是"按扫描位下标"的</b>（{@code [24]}），不是"按已装顺序"的：
-     * 已装顺序由 {@link State#moduleSlots} 给出，两者用槽位号对齐 —— 这样服务端不用知道客户端画第几行。
-     */
-    private static void buildModuleList(State st, List<Prim> prims, List<Txt> texts) {
-        final int z = Z_MODLIST;
-        final HostFxGlassArPanel.Zone zo = HostFxGlassArPanel.ZONE_MODLIST;
-        final int installed = st.installedModules >= 0 ? st.installedModules : st.moduleCount;
-        final int[] slots = HostFxGlassArSort.sameSet(st.moduleSlots, st.moduleOrder)
-                ? st.moduleOrder : st.moduleSlots;
-        final int total = slots == null ? 0 : slots.length;
-        final int pages = Math.max(1, (total + HostFxGlassArPanel.MODLIST_ROWS - 1) / HostFxGlassArPanel.MODLIST_ROWS);
-        final int page = (int) Math.floorMod(Math.floorDiv(st.modulePageTimeMillis,
-                HostFxGlassArPanel.MODLIST_PAGE_MILLIS), (long) pages);
-        final long remainingMillis = HostFxGlassArPanel.MODLIST_PAGE_MILLIS
-                - Math.floorMod(st.modulePageTimeMillis, HostFxGlassArPanel.MODLIST_PAGE_MILLIS);
-        final long remainingSeconds = (remainingMillis + 999L) / 1_000L;
-        // ── 表头（一列一个 Txt，和数据行同一套 u 偏移） ─────────────────────────────
-        final float yh = px(zo.v + HostFxGlassArPanel.MODLIST_HEAD_V0);
-        final String[] head = {"槽", "模块", "进度", "耗能EU/t", "并行", "线程",
-                pages > 1 ? "物品 · " + (page + 1) + "/" + pages + "页 · " + remainingSeconds + "s换页" : "物品"};
-        final float[] hu = {
-                HostFxGlassArPanel.MOD_SLOT_U, HostFxGlassArPanel.MOD_NAME_U,
-                HostFxGlassArPanel.MOD_BAR_U, HostFxGlassArPanel.MOD_EU_U,
-                HostFxGlassArPanel.MOD_PAR_U, HostFxGlassArPanel.MOD_THR_U,
-                HostFxGlassArPanel.MOD_OUT_U,
-        };
-        for (int c = 0; c < head.length; c++) {
-            texts.add(new Txt(z, c, px(zo.u + hu[c]), yh, head[c], C_HEAD));
-        }
-        // 山海：摘要只有 registry ID 與數量，兩行完整說明放在表格下方的牆面留白。
-        texts.add(new Txt(z, 102, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), px(3.62F),
-                "物品按ID汇总；流体与NBT明细", C_DIM));
-        texts.add(new Txt(z, 103, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), px(3.80F),
-                "以配方／输出仓为准", C_DIM));
-        // ── 数据行 ─────────────────────────────────────────────────────────────────
-        if (slots == null || slots.length == 0) {
-            texts.add(new Txt(z, 100, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U),
-                    px(zo.v + HostFxGlassArPanel.MODLIST_ROW_V0),
-                    installed == 0 ? "未安装模块" : installed < 0 ? "模块列表 --（等伺服同步）"
-                            : "模块列表 --（槽位位图未到）", C_DIM));
-            return;
-        }
-        final int start = page * HostFxGlassArPanel.MODLIST_ROWS;
-        final int rows = Math.min(HostFxGlassArPanel.MODLIST_ROWS, total - start);
-        for (int r = 0; r < rows; r++) {
-            final int slot = slots[start + r];
-            final float y = px(zo.v + HostFxGlassArPanel.MODLIST_ROW_V0
-                    + r * HostFxGlassArPanel.MODLIST_ROW_DV);
-            // 槽位号
-            texts.add(new Txt(z, 200 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_SLOT_U), y,
-                    String.valueOf(slot), C_DIM));
-            // 名字（截到 MOD_NAME_CHARS；取不到 ⇒ 槽#N）
-            final String name = moduleNameAt(st, slot);
-            texts.add(new Txt(z, 201 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_NAME_U), y,
-                    clip(name, HostFxGlassArPanel.MOD_NAME_CHARS), C_MAIN));
-            // 进度条（几何）+ 百分比
-            final int pct = perModuleByte(st.modProgressPct, slot);
-            bar(prims, z, "mod.bar_back", "mod.bar_fill",
-                    px(zo.u + HostFxGlassArPanel.MOD_BAR_U), y + px(0.03F),
-                    px(HostFxGlassArPanel.MOD_BAR_W), px(HostFxGlassArPanel.MOD_BAR_H),
-                    pct, HostFxGlassArPanel.MOD_BAR_SEG, C_BAR_BACK, C_MAIN);
-            texts.add(new Txt(z, 202 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_PCT_U), y,
-                    pctText(pct), pct < 0 ? C_DIM : C_MAIN));
-            // 耗能
-            final long eu = perModuleLong(st.modEuPerTick, slot);
-            texts.add(new Txt(z, 203 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_EU_U), y,
-                    euText(eu), eu < 0L ? C_DIM : C_MAIN));
-            // 并行 / 线程（🔴 2026-10-25 第二十六改：用户「并行，线程，输出」要紧凑量级
-            //   —— GT 的并行份数能到百万，原始 int 会把这一列顶成一片数字墙）
-            final long par = perModuleLong(st.modParallel, slot);
-            final int thr = perModuleInt(st.modThreads, slot);
-            texts.add(new Txt(z, 204 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_PAR_U), y,
-                    countOrDash(par), par < 0 ? C_DIM : C_MAIN));
-            texts.add(new Txt(z, 205 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_THR_U), y,
-                    threadCountOrDash(thr), thr < 0 ? C_DIM : C_MAIN));
-            // 输出（最多 2 项）
-            final String[] outs = perModuleOutputs(st.modOutputs, slot);
-            int reason = perModuleByte(st.modReason, slot);
-            String label = reason >= REASON_NO_POWER && st.moduleReasonLabels != null
-                    && reason < st.moduleReasonLabels.length ? st.moduleReasonLabels[reason] : "";
-            int labelWidth = label.isEmpty() ? 0 : reasonWidth(st, reason, label);
-            float right = px(zo.u + zo.w - HostFxGlassArPanel.ZONE_PAD);
-            float outputWidth = right - px(zo.u + HostFxGlassArPanel.MOD_OUT_U)
-                    - (labelWidth == 0 ? 0 : labelWidth + HostFxGlassArPanel.MOD_LABEL_GAP_PX);
-            String output = outputsText(outs, HostFxGlassArPanel.MOD_ROW_OUTPUTS);
-            texts.add(new Txt(z, 206 + r * 10, px(zo.u + HostFxGlassArPanel.MOD_OUT_U), y,
-                    fitText(st, clip(output, Math.max(1, (int) (outputWidth / 9F))), outputWidth),
-                    outs == null ? C_DIM : C_MAIN));
-            if (!label.isEmpty()) {
-                texts.add(new Txt(z, 207 + r * 10, right - labelWidth, y, label, reasonColor(reason)));
-            }
-        }
-    }
-
-    /** 排序只改顯示順序；名字仍從原始槽號對應的索引取出。 */
-    private static String moduleNameAt(State st, int slot) {
-        int r = -1;
-        if (st.moduleSlots != null) {
-            for (int i = 0; i < st.moduleSlots.length; i++) {
-                if (st.moduleSlots[i] == slot) { r = i; break; }
-            }
-        }
-        if (st.moduleNamesUnavailable || st.moduleNames == null || r < 0 || r >= st.moduleNames.length) {
-            return "槽#" + slot;
-        }
-        final String n = st.moduleNames[r];
-        return n == null || n.isEmpty() ? "槽#" + slot : n;
+                st.hostProgressPct, HostFxGlassArPanel.HOST_BAR_SEG, C_BAR_BACK, HostFxGlassArHologram.ACCENT);
     }
 
     // 與伺服端同步碼一致；模型維持零 Minecraft 依賴。
@@ -1195,71 +927,6 @@ public final class HostFxGlassArModel {
     public static final byte REASON_NO_POWER = 2;
     public static final byte REASON_OUTPUT_FULL = 3;
     public static final byte REASON_BLOCKED = 4;
-
-    private static int reasonWidth(State st, int reason, String label) {
-        if (st.moduleReasonWidths != null && reason < st.moduleReasonWidths.length
-                && st.moduleReasonWidths[reason] > 0) return st.moduleReasonWidths[reason];
-        return st.textWidth != null ? st.textWidth.applyAsInt(label) : label.length() * 9;
-    }
-
-    private static int reasonColor(int reason) {
-        return switch (reason) {
-            case REASON_NO_POWER -> 0xFFFF6666;
-            case REASON_OUTPUT_FULL -> 0xFFFFAA44;
-            case REASON_BLOCKED -> 0xFFFFDD55;
-            default -> C_MAIN;
-        };
-    }
-
-    private static String fitText(State st, String text, float width) {
-        if (st.textWidth == null || st.textWidth.applyAsInt(text) <= width) return text;
-        String suffix = "…";
-        int end = text.length();
-        while (end > 0 && st.textWidth.applyAsInt(text.substring(0, end) + suffix) > width) end--;
-        return end == 0 && st.textWidth.applyAsInt(suffix) > width ? "" : text.substring(0, end) + suffix;
-    }
-
-    /** 按扫描位下标取一个 int（数组短了 / 缺了 ⇒ −1）。 */
-    private static int perModuleInt(int[] arr, int slot) {
-        return (arr == null || slot < 0 || slot >= arr.length) ? -1 : arr[slot];
-    }
-
-    /** 按扫描位下标取一个 long（数组短了 / 缺了 ⇒ −1）。 */
-    private static long perModuleLong(long[] arr, int slot) {
-        return (arr == null || slot < 0 || slot >= arr.length) ? -1L : arr[slot];
-    }
-
-    /** 按扫描位下标取一个 byte（数组短了 / 缺了 ⇒ −1）。 */
-    private static int perModuleByte(byte[] arr, int slot) {
-        return (arr == null || slot < 0 || slot >= arr.length) ? -1 : arr[slot];
-    }
-
-    /** 按扫描位下标取输出数组（缺了 ⇒ {@code null} = 读不到）。 */
-    private static String[] perModuleOutputs(String[][] arr, int slot) {
-        return (arr == null || slot < 0 || slot >= arr.length) ? null : arr[slot];
-    }
-
-    /** 输出列表 → 一行文字（最多 {@code max} 项；多了补 {@code +N}；读不到 ⇒ {@code --}）。 */
-    private static String outputsText(String[] outs, int max) {
-        if (outs == null || outs.length == 0) {
-            return "--";
-        }
-        final StringBuilder sb = new StringBuilder();
-        final int n = Math.min(max, outs.length);
-        for (int i = 0; i < n; i++) {
-            if (outs[i] == null || outs[i].isEmpty()) {
-                continue;
-            }
-            if (sb.length() > 0) {
-                sb.append(" ");
-            }
-            sb.append(clip(outs[i], HostFxGlassArPanel.MOD_OUT_CHARS));
-        }
-        if (outs.length > n) {
-            sb.append(" +").append(outs.length - n);
-        }
-        return sb.length() == 0 ? "--" : sb.toString();
-    }
 
     /** 主机节第 {@code i} 条输出（i ≥ 上限或读不到 ⇒ {@code --}）。 */
     private static String hostOutputLine(State st, int i) {
@@ -1312,20 +979,8 @@ public final class HostFxGlassArModel {
                 : C_JET_NORMAL;
     }
 
-    private static float px(float blocks) {
+    static float px(float blocks) {
         return HostFxGlassArPanel.px(blocks);
-    }
-
-    /** 一条半径 1 px 的矩形环（分区角标）。 */
-    private static void frame(List<Prim> out, int zone, HostFxGlassArPanel.Zone z) {
-        final float x0 = px(z.u);
-        final float y0 = px(z.v);
-        final float x1 = px(z.u1());
-        final float y1 = px(z.v1());
-        line(out, zone, "frame", BLEND_ALPHA, C_FRAME, x0, y0, x1, y0, 1.0F);
-        line(out, zone, "frame", BLEND_ALPHA, C_FRAME, x1, y0, x1, y1, 1.0F);
-        line(out, zone, "frame", BLEND_ALPHA, C_FRAME, x1, y1, x0, y1, 1.0F);
-        line(out, zone, "frame", BLEND_ALPHA, C_FRAME, x0, y1, x0, y0, 1.0F);
     }
 
     /**
@@ -1333,7 +988,7 @@ public final class HostFxGlassArModel {
      *
      * <p>宽度下限 {@link HostFxGlassArPanel#MIN_LINE_PX} = 1 px = 0.02 格（再细会随亚像素抖动）。
      */
-    private static void line(List<Prim> out, int zone, String tag, int blend, int argb,
+    static void line(List<Prim> out, int zone, String tag, int blend, int argb,
                              float x0, float y0, float x1, float y1, float w) {
         final float dx = x1 - x0;
         final float dy = y1 - y0;
@@ -1352,7 +1007,7 @@ public final class HostFxGlassArModel {
     }
 
     /** 轴对齐矩形。 */
-    private static void rect(List<Prim> out, int zone, String tag, int blend, int argb,
+    static void rect(List<Prim> out, int zone, String tag, int blend, int argb,
                              float x0, float y0, float x1, float y1) {
         quad(out, zone, tag, blend, argb, x0, y0, x1, y0, x1, y1, x0, y1);
     }
@@ -1366,7 +1021,7 @@ public final class HostFxGlassArModel {
     }
 
     /** 填充圆（扇形，每个扇片都是"退化四边形"）。 */
-    private static void disc(List<Prim> out, int zone, String tag, int blend, int argb,
+    static void disc(List<Prim> out, int zone, String tag, int blend, int argb,
                              float cx, float cy, float r, int seg) {
         final int n = Math.max(6, seg);
         for (int i = 0; i < n; i++) {
@@ -1381,7 +1036,7 @@ public final class HostFxGlassArModel {
     }
 
     /** 圆环（r0..r1）。 */
-    private static void annulus(List<Prim> out, int zone, String tag, int blend, int argb,
+    static void annulus(List<Prim> out, int zone, String tag, int blend, int argb,
                                 float cx, float cy, float r0, float r1, int seg) {
         final int n = Math.max(8, seg);
         for (int i = 0; i < n; i++) {
@@ -1497,7 +1152,7 @@ public final class HostFxGlassArModel {
      *
      * @param segs 分段数（每段之间留 1 px 缝，视觉上是"一格一格在长"）
      */
-    private static void bar(List<Prim> out, int zone, String backTag, String fillTag,
+    static void bar(List<Prim> out, int zone, String backTag, String fillTag,
                             float x, float y, float w, float h, int pct, int segs,
                             int backArgb, int fillArgb) {
         rect(out, zone, backTag, BLEND_ALPHA, backArgb, x, y, x + w, y + h);
@@ -1790,7 +1445,7 @@ public final class HostFxGlassArModel {
     }
 
     /** 物质模块等级：{@code <0} ⇒ --、{@code 0} ⇒ 未生效、{@code >0} ⇒ Lv.n / 17。 */
-    private static String levelText(int v) {
+    static String levelText(int v) {
         if (v < 0) {
             return "--";
         }
@@ -1798,7 +1453,7 @@ public final class HostFxGlassArModel {
     }
 
     /** 等级复写：{@code <0} ⇒ --、{@code 0} ⇒ 未生效。 */
-    private static String overrideText(int v) {
+    static String overrideText(int v) {
         if (v < 0) {
             return "--";
         }
@@ -1836,13 +1491,4 @@ public final class HostFxGlassArModel {
         return (stored < 0L ? "已存 --" : energyText(stored)) + " / " + energyText(capacity);
     }
 
-    /** 一位小数（用于角速度 / 半径 / 秒）。 */
-    private static String one1(float v) {
-        return String.format(Locale.ROOT, "%.1f", v);
-    }
-
-    /** 两位小数（物理量的格数）。 */
-    private static String two2(float v) {
-        return String.format(Locale.ROOT, "%.2f", v);
-    }
 }

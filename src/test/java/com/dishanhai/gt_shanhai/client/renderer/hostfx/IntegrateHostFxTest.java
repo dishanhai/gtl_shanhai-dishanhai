@@ -94,7 +94,7 @@ class IntegrateHostFxTest {
         float front = (Float) textPlane.invoke(null, 0);
         float back = (Float) textPlane.invoke(null, 1);
         float offset = panel.getField("TEXT_OFFSET").getFloat(null);
-        assertEquals(offset, back - front, 1.0e-6F);
+        assertEquals(2 * offset, back - front, 1.0e-6F);
 
         String source = java.nio.file.Files.readString(java.nio.file.Path.of(
                 "src/main/java/com/dishanhai/gt_shanhai/client/renderer/hostfx/HostFxGlassArText.java"));
