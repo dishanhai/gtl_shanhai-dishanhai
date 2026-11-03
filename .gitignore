@@ -12,7 +12,6 @@ NUL
 /.manual-check/
 # 库和源码参考
 /lib/
-/libs/
 /lib_source/
 /.idea/
 /tmp/
